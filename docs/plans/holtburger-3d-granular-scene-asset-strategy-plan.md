@@ -1,6 +1,14 @@
 # Holtburger 3D Granular Scene Asset Strategy Plan
 
-Status: in progress; Phase 2.2 building-shell coverage is implemented.
+Status: in progress; Phase 3 is implemented, and Phase 3.1 is the immediate
+pivot before frontend route switching.
+
+Note: phases before Phase 3.1 document the migration path and several
+superseded intermediate route boundaries. The current target route names are
+`landblock/{id}/outdoor`, `landblock/{id}/topology`, `env-cell/{id}`,
+`setup-model/{did}`, `gfx-obj/{did}`, `terrain-material/{regionNumber}`,
+`material/{did}`, `render-texture/{did}`, `render-surface/{did}`, and
+`palette/{did}`.
 
 ## Context
 
@@ -103,9 +111,8 @@ Use granular, REST-like asset IDs:
 
 | Route                             | Purpose                                                                                                                                                                                        | Dependencies                                                                                         |
 | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `landblock/{id}/terrain`          | Outdoor coverage render geometry: terrain, source terrain corner codes, computed terrain pcodes, and terrain-only BVH.                                                                         | One region terrain material table derived from `regionNumber`.                                       |
-| `landblock/{id}/building-shells`  | Outdoor coverage render geometry for placed building/setup shells, without focused scene membership, portals, or interior env-cell data.                                                        | Derived from typed shell fields: `sourceAssetId` for each placed setup/gfx source.                   |
-| `landblock/{id}/scene`            | Focused scene membership: typed statics/buildings with placements, env-cell membership, portal/link graph, an env-cell residency BVH, and outdoor render BVH when outdoor-space members exist. | Derived from typed member fields: static/building `sourceAssetId` and env-cell `assetId`.            |
+| `landblock/{id}/outdoor`          | Outdoor landblock render contribution: terrain, terrain pcodes/material inputs, explicit outdoor objects, buildings, generated scenery, and outdoor render BVHs.                                | One region terrain material table from `regionNumber`, plus typed outdoor member `sourceAssetId`s.   |
+| `landblock/{id}/topology`         | Focused env-cell/topology membership: env-cell membership, portal/link graph, and an env-cell residency BVH.                                                                                    | Derived from typed env-cell member `assetId` values.                                                 |
 | `env-cell/{id}`                   | One structured interior cell with topology, portals, BSP witnesses, render geometry, and material slots.                                                                                       | `material/{did}` for every referenced `CSurface`.                                                    |
 | `gfx-obj/{did}`                   | One GfxObj render/physics projection.                                                                                                                                                          | `material/{did}` for every referenced `CSurface`.                                                    |
 | `setup-model/{did}`               | Setup parts, placements, lights, and default part composition.                                                                                                                                 | `gfx-obj/{did}` for each part.                                                                       |
@@ -117,20 +124,20 @@ Use granular, REST-like asset IDs:
 
 ### Route Notes
 
-- `landblock/{id}/terrain` should answer "what outdoor terrain can this
-  landblock contribute?" It carries terrain render geometry, terrain pcodes, and
-  a terrain-only BVH. It should not carry focused statics, building shell render
-  geometry, env-cell membership, portals, material dependency tables, or interior
-  graph data.
-- `landblock/{id}/building-shells` should answer "what low-detail placed
-  building/setup shell geometry should outdoor coverage draw for this landblock?"
-  It is a coverage route like terrain, but with a different source family and
-  dependency graph. It should not carry terrain, env-cell membership, portal/link
-  topology, interior geometry, or focused interaction metadata.
-- `landblock/{id}/scene` should answer "what focused scene members exist here,
-  where are they placed, and which first-class source assets back each member?"
-  It should not carry a parallel top-level `renderableAssetIds` shortcut or every
-  transitive material/texture dependency.
+- `landblock/{id}/outdoor` should answer "what outdoor render contribution can
+  this landblock provide?" It carries terrain render geometry, terrain pcodes,
+  explicit outdoor objects, buildings, generated scenery, and outdoor render
+  BVHs. This route is intentionally broader than the earlier
+  `landblock/{id}/terrain` route because generated scenery depends on terrain
+  codes, region scene tables, object/building occupancy, slope/road checks, and
+  source-object bounds. Keeping those pieces together avoids duplicating
+  generated-scenery derivation across narrow routes.
+- `landblock/{id}/topology` should answer "which interior/env-cell topology is
+  resident in this landblock, and how do those cells link?" It carries env-cell
+  membership, portal/link graph facts, and an env-cell residency BVH. It should
+  not carry terrain, explicit outdoor render objects, generated scenery,
+  building shell render data, material dependency tables, or interior render
+  geometry. This route replaces the misleading `landblock/{id}/scene` naming.
 - `env-cell/{id}` should be the owner of structured interior render geometry and
   its direct material dependencies.
 - `gfx-obj/{did}` should remain the owner of object render geometry and its
@@ -1813,7 +1820,14 @@ Refinements to future steps:
   abstractions only after the granular planner has replaced the legacy pack
   planning paths.
 
-### Phase 3: Move Dependency Ownership to First-Class Assets and Route Helpers
+### Phase 3: Finish Dependency Ownership and Remove Scene Pack Coupling
+
+The current `landblock/{id}/scene` wire payload already exposes first-class
+scene members through typed static, building, env-cell, portal-link, and BVH
+records. Phase 3 is not about reintroducing a scene manifest or broad dependency
+list. It is about making dependency ownership explicit everywhere and replacing
+the remaining internal `LandblockPack` assembly path for `landblock/{id}/scene`
+with a route-specific scene asset assembler.
 
 - Make terrain material route helpers derive `terrain-material/{regionNumber}`
   requests from `terrain.regionNumber`.
@@ -1827,9 +1841,20 @@ Refinements to future steps:
   graph resolution only for a future explicit ObjDesc override route.
 - Ensure material graph route entry points return immediate dependencies only,
   not landblock-level transitive closures.
-- Make `landblock/{id}/scene` expose first-class scene members through typed
-  placement/source records, not through a parallel renderable dependency list and
-  not through material/render-texture/render-surface/palette transitive closure.
+- Keep `landblock/{id}/scene` dependency extraction based on typed member fields:
+  `statics[].sourceAssetId`, `buildings[].sourceAssetId`, and
+  `envCells[].assetId`. It must not depend on a parallel
+  `dependencies.renderableAssetIds` shortcut and must not emit
+  material/render-texture/render-surface/palette transitive closures.
+- Introduce a route-specific `LandblockSceneAsset`/assembler in
+  `holtburger-content` so `ContentAssetRequest::LandblockScene` no longer builds
+  a full `LandblockPack`. The assembler should load only the source records
+  needed for scene membership, portal links, env-cell residency, and outdoor
+  scene BVHs.
+- Preserve the existing typed scene DTO contract while moving assembly out of
+  the pack path. Fill `sourceBounds`/`instanceBounds` from the route-specific
+  scene assembly where available instead of leaving scene static/building bounds
+  as permanent `null` placeholders.
 - Remove any planner logic that discovers materials by scanning
   `landblock-pack.prepared.interiorCells`.
 - Add frontend dependency extraction tests for both raw host responses and
@@ -1847,6 +1872,9 @@ Validation:
   - scene -> env-cell -> material -> render-texture/render-surface/palette;
   - scene -> setup-model -> gfx-obj -> material;
   - no material route is requested directly from `landblock/{id}/scene`.
+- Content-level tests prove `landblock/{id}/scene` assembly does not read
+  terrain roots, build terrain meshes, prepare full env-cell render geometry, or
+  go through `LandblockPackAssembler`.
 - Planner tests prove:
   - outdoor coverage requests `landblock/{id}/terrain` without also requiring
     `landblock/{id}/scene`;
@@ -1858,16 +1886,219 @@ Validation:
     than embedded landblock render geometry;
   - prepared or pending route IDs are not requeued.
 
+Progress as of 2026-05-24:
+
+- Implemented a route-specific `LandblockSceneAsset` and
+  `LandblockSceneAssetAssembler` in `holtburger-content`.
+- `ContentAssetRequest::LandblockScene` now uses `LandblockSceneAssetAssembler`
+  instead of `LandblockPackAssembler`.
+- The Tauri `landblock/{id}/scene` serializer now consumes
+  `LandblockSceneAsset` directly and preserves the existing typed scene DTO:
+  static members, building members, env-cell members, portal links,
+  env-cell-residency BVH, outdoor BVH, diagnostics, and provenance.
+- Scene static/building members now carry `sourceBounds` and `instanceBounds`
+  when setup/gfx bounds can be resolved. Missing setup/gfx records still produce
+  diagnostics and leave the member in the scene.
+- Added a content-level regression test proving scene assembly reads
+  `LandblockInfo` and env-cell records without reading the terrain root,
+  environment/cell-structure geometry records, or using full pack assembly.
+- Updated frontend dependency extraction so `setup-model/{did}` depends only on
+  its typed part `gfx-obj/*` assets. Default setup material hydration is no
+  longer routed through `setup-appearance/{did}`.
+- Updated planner material discovery so env-cell material dependencies come from
+  prepared `env-cell/{id}.surfaces[].materialAssetId`, not from
+  `landblock-pack.prepared.interiorCells[].surfaceIds`.
+
+Decisions and course corrections:
+
+- `landblock/{id}/scene` no longer includes generated outdoor scenery in Phase
+  3. Generated scenery depends on terrain codes, `RegionDesc`, scene records,
+  and object-bound checks. Pulling it into scene assembly would reintroduce a
+  terrain/region dependency into the focused scene route. Treat generated
+  scenery as a future ownership decision: either terrain-owned decorative
+  render data, a dedicated route, or an explicitly documented scene exception.
+- Scene classification is now derived from `LandblockInfo` only for this route.
+  Without reading the terrain root, dungeon classification uses the structural
+  signal `num_env_cells > 0 && object_count == 0 && building_count == 0`. Keep
+  this conservative and revisit if ACE/ACViewer show outdoor edge cases that
+  violate it.
+- The env-cell residency BVH now uses env-cell placement points rather than
+  env-cell render-geometry bounds. That keeps scene assembly out of
+  environment/cell-structure geometry while still giving the frontend a
+  residency index. Exact env-cell render bounds belong to `env-cell/{id}`.
+- `setup-appearance/{did}` remains implemented as an explicit route for future
+  ObjDesc override work, but it is no longer an automatic default dependency of
+  `setup-model/{did}`.
+
+Cleanup targets:
+
+- Rename `LandblockPackSourceDiagnostics` to a route-neutral diagnostics type
+  after the remaining pack-era routes are cleaned up.
+- Split the scene DTO serialization helpers out of the large Tauri adapter once
+  Phase 4 settles the frontend route usage.
+- Replace remaining pack-era frontend helpers such as
+  `derivePackInteriorEnvCellIdsForLandblocks` during the Phase 4 route switch.
+- Revisit whether generated scenery belongs under terrain, scene, or a separate
+  generated-scenery route; do not silently add terrain reads back to scene.
+
+Refinements to future steps:
+
+- Phase 4 should switch focused loading to `landblock/{id}/scene` plus explicit
+  `env-cell/{id}` follow-up roots, so active interior material hydration can
+  rely entirely on env-cell surface slots.
+- Phase 4 should request setup/gfx/material chains through the asset graph
+  instead of planner-side material scans where possible.
+- Phase 6 cleanup should remove `landblock-pack` dependency shortcuts and pack
+  prepared interior-cell render geometry from frontend planning paths after the
+  new route graph is fully in use.
+
+### Phase 3.1: Pivot Outdoor and Topology Route Boundaries
+
+Phase 3 exposed a design gap: generated outdoor scenery is not pure terrain and
+is not focused topology. It depends on terrain codes, `RegionDesc` terrain/scene
+tables, `scene/*` records, explicit object/building occupancy, road/slope checks,
+and setup/gfx bounds checks. A terrain-only route plus a scene/topology route
+would either drop generated scenery or duplicate the same derivation work across
+routes.
+
+Immediate pivot:
+
+- Replace the target `landblock/{id}/terrain` route with
+  `landblock/{id}/outdoor`.
+- Fold `landblock/{id}/building-shells` into `landblock/{id}/outdoor`; outdoor
+  building render membership belongs with the rest of outdoor render coverage.
+- Rename/reframe `landblock/{id}/scene` as `landblock/{id}/topology`. It should
+  own env-cell membership, portal/link graph facts, and the env-cell residency
+  BVH only.
+- Preserve the Phase 3 `LandblockSceneAsset` implementation as a temporary
+  migration artifact, but rename or replace it with a topology asset before
+  Phase 4 switches frontend planning.
+
+Target `landblock/{id}/outdoor` shape:
+
+```ts
+interface PreparedLandblockOutdoorPayload {
+  kind: "landblock-outdoor";
+  residencyKind: "landblock";
+  sourceAssetKind: "landblock-outdoor";
+  landblockId: LandblockId;
+  regionId: DataId;
+  regionNumber: number;
+  classification: "outdoor";
+  terrain: LandblockOutdoorTerrain;
+  statics: LandblockOutdoorStaticMember[];
+  outdoorBvh: PreparedOutdoorBvh | null;
+  diagnostics: PreparedLandblockDiagnostics;
+  provenance: AssetProvenance;
+}
+
+type LandblockOutdoorStaticKind =
+  | "explicit-object"
+  | "building"
+  | "generated-scenery";
+
+interface LandblockOutdoorStaticMember {
+  kind: LandblockOutdoorStaticKind;
+  instanceId: string;
+  sourceDid: DataId;
+  sourceAssetId: AssetId; // setup-model/{did} or gfx-obj/{did}
+  sourceIndex: number;
+  localPlacement: PlacementTransformDto;
+  sourceScale: Vec3Dto;
+  sourceBounds: PreparedBounds | null;
+  instanceBounds: PreparedBounds | null;
+  building: LandblockOutdoorBuildingFacts | null;
+  generated: LandblockGeneratedSceneryFacts | null;
+}
+
+interface LandblockOutdoorBuildingFacts {
+  numLeaves: number;
+  portals: LandblockSceneBuildingPortal[];
+}
+
+interface LandblockGeneratedSceneryFacts {
+  terrainIndex: number;
+  sceneId: DataId;
+  sceneTemplateIndex: number;
+}
+```
+
+`LandblockOutdoorTerrain` should reuse the current `landblock/{id}/terrain`
+terrain member shapes: vertices, triangles, quads, source terrain corner codes,
+computed pcodes, terrain bounds, and terrain BVH.
+
+Target `landblock/{id}/topology` shape:
+
+```ts
+interface PreparedLandblockTopologyPayload {
+  kind: "landblock-topology";
+  residencyKind: "landblock";
+  sourceAssetKind: "landblock-topology";
+  landblockId: LandblockId;
+  landblockInfoId: DataId;
+  classification: "outdoor" | "dungeon";
+  envCells: LandblockTopologyEnvCellMember[];
+  portalLinks: LandblockTopologyPortalLink[];
+  envCellResidencyBvh: PreparedEnvCellResidencyBvh;
+  diagnostics: PreparedLandblockDiagnostics;
+  provenance: AssetProvenance;
+}
+```
+
+Dependency ownership after the pivot:
+
+- `landblock/{id}/outdoor` enqueues `terrain-material/{regionNumber}`.
+- `landblock/{id}/outdoor` enqueues each
+  `statics[].sourceAssetId`.
+- `landblock/{id}/topology` enqueues each `envCells[].assetId`.
+- `env-cell/{id}` remains the owner of interior render geometry and material
+  slots.
+- `setup-model/{did}`, `gfx-obj/{did}`, `material/{did}`,
+  `render-texture/{did}`, `render-surface/{did}`, and `palette/{did}` keep the
+  Phase 3 immediate-dependency ownership rules.
+
+Implementation work:
+
+- Add route helpers and schemas for `landblock/{id}/outdoor` and
+  `landblock/{id}/topology`; mark `landblock/{id}/terrain`,
+  `landblock/{id}/building-shells`, and `landblock/{id}/scene` as migration-only
+  names.
+- Replace `LandblockTerrainAsset`, `LandblockBuildingShellsAsset`, and
+  `LandblockSceneAsset` with route-specific `LandblockOutdoorAsset` and
+  `LandblockTopologyAsset`, or keep temporary aliases only inside the migration
+  phase.
+- Move generated outdoor scenery derivation into the outdoor assembler and reuse
+  the existing `StaticOutdoorSceneAssembler` logic instead of duplicating it.
+- Ensure outdoor assembly performs one coherent pass over terrain,
+  LandblockInfo, generated scenery, setup/gfx bounds, and outdoor BVH creation.
+- Update dependency extraction tests so outdoor dependencies include both
+  `terrain-material/{regionNumber}` and typed outdoor static source assets.
+- Update planner tests so outdoor coverage/focus requests `landblock/{id}/outdoor`
+  and topology/interior traversal requests `landblock/{id}/topology`.
+
+Validation:
+
+- Content-level tests prove `landblock/{id}/outdoor` emits terrain, explicit
+  objects/buildings, and generated scenery for a fixture landblock known to have
+  generated scenery.
+- Content-level tests prove `landblock/{id}/topology` does not read terrain,
+  region scene tables, generated scenery scene records, or setup/gfx render
+  bounds.
+- Dependency tests prove no material route is requested directly from outdoor
+  or topology; materials still come from `gfx-obj/*` and env-cell surfaces.
+- Planner tests prove outdoor coverage can load generated scenery without also
+  loading topology, and topology can load env-cell membership without also
+  loading outdoor render data.
+
 ### Phase 4: Switch Frontend Planning to New Routes
 
-- Replace terrain/summary coverage requests with `landblock/{id}/terrain`.
-- Replace far building coverage requests with
-  `landblock/{id}/building-shells`.
-- Replace focused pack requests with `landblock/{id}/scene`.
+- Replace terrain/summary/building coverage requests with
+  `landblock/{id}/outdoor`.
+- Replace focused topology/pack requests with `landblock/{id}/topology`.
 - Request `env-cell/{id}` as direct hydrated roots when scene membership
   identifies visible/traversable cells.
-- Split planner root selection into terrain coverage roots, building-shell
-  coverage roots, focused scene roots, and active interior roots.
+- Split planner root selection into outdoor render roots, focused topology
+  roots, and active interior roots.
 - Update dependency extraction to use route-specific typed extractors instead of
   pack-shape scans.
 - Add a convergence loop or explicit replan trigger after direct root hydration

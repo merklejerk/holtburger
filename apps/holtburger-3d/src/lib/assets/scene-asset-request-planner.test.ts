@@ -5,17 +5,15 @@ import {
 	parseBrowserLocationInput,
 } from "../../app/browser-mode";
 import { createPreparedTerrainAsset } from "../../app/test-fixtures";
-import { formatLandblockPackAssetId } from "../landblocks";
+import {
+	formatEnvCellAssetId,
+	formatLandblockPackAssetId,
+} from "../landblocks";
 import {
 	createSceneCoverageRequests,
 	deriveSceneCoverageAssetIds,
 } from "./scene-asset-request-planner";
-import type {
-	PreparedAssetRecord,
-	PreparedLandblockInteriorCell,
-	PreparedLandblockStaticMesh,
-	PreparedPolygonSetBspNode,
-} from "./types";
+import type { PreparedAssetRecord, PreparedLandblockStaticMesh } from "./types";
 
 describe("scene asset request planner", () => {
 	it("derives outdoor browser coverage from destination and radii", () => {
@@ -215,15 +213,17 @@ describe("scene asset request planner", () => {
 			0x016c0155,
 			"gfx-obj/02000001",
 		);
-		preparedPack.payload.prepared.interiorCells = [
-			createPreparedInteriorCell(0x016c0155, [0x0800006c, 0x0800007e]),
-		];
+		const preparedEnvCell = createPreparedEnvCell(0x016c0155, [
+			"material/0800006c",
+			"material/0800007e",
+		]);
 		const requests = createSceneCoverageRequests(
 			{
 				requestRevision: 7,
 				browserDestination: destination,
 				preparedByAssetId: {
 					[preparedPack.request.assetId]: preparedPack,
+					[preparedEnvCell.request.assetId]: preparedEnvCell,
 				},
 				pendingAssetIds: [],
 			},
@@ -287,23 +287,38 @@ function createPreparedIndoorStaticMesh(
 	};
 }
 
-function createPreparedInteriorCell(
+function createPreparedEnvCell(
 	envCellId: number,
-	surfaceIds: number[],
-): PreparedLandblockInteriorCell {
-	return {
+	materialAssetIds: string[],
+): PreparedAssetRecord {
+	const assetId = formatEnvCellAssetId(envCellId);
+	const request = {
+		requestId: `fixture-${assetId}`,
+		assetId,
+		priority: "streaming" as const,
+	};
+	const payload = {
+		kind: "env-cell" as const,
+		sourceAssetKind: "env-cell" as const,
+		residencyKind: "interior-cell" as const,
+		provenance: {
+			source: "repo-local-hba" as const,
+			sourceAssetKind: "env-cell",
+			errorCode: null,
+			detail: null,
+		},
 		envCellId,
 		environmentId: 0x0d000001,
 		cellStructureId: 1,
-		localPlacement: {
-			origin: { x: 0, y: 0, z: 0 },
-			orientation: { w: 1, x: 0, y: 0, z: 0 },
-		},
-		surfaceIds,
+		surfaces: materialAssetIds.map((materialAssetId, index) => ({
+			slotId: index + 1,
+			surfaceId: Number.parseInt(materialAssetId.slice("material/".length), 16),
+			materialAssetId,
+		})),
 		portals: [],
+		visibleEnvCellIds: [],
 		portalApertures: [],
-		staticObjectCount: 0,
-		cellBsp: createLeafBspNode(),
+		statics: [],
 		renderGeometry: {
 			sourceId: 1,
 			vertexCount: 0,
@@ -312,21 +327,34 @@ function createPreparedInteriorCell(
 			normals: [],
 			uvs: [],
 			triangles: [],
-			surfaceIds,
+			surfaceIds: [],
 			invalidPolygons: [],
 			skippedPolygonCount: 0,
 			bounds: null,
 		},
+		cellBsp: {
+			kind: "leaf" as const,
+			index: 0,
+			solid: 0,
+			sphere: null,
+			polyIds: [],
+		},
+		localBvh: {
+			coordinateSpace: "env-cell-local" as const,
+			nodes: [],
+			items: [],
+		},
 	};
-}
-
-function createLeafBspNode(): PreparedPolygonSetBspNode {
 	return {
-		kind: "leaf",
-		index: 0,
-		solid: 0,
-		sphere: null,
-		polyIds: [],
+		request,
+		response: {
+			requestId: request.requestId,
+			assetId,
+			payloadKind: "json",
+			payload,
+		},
+		payload,
+		preparedAt: "2026-05-23T00:00:00.000Z",
 	};
 }
 

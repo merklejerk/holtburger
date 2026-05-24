@@ -70,6 +70,17 @@ pub struct LandblockBuildingShellsAsset {
 }
 
 #[derive(Debug, Clone)]
+pub struct LandblockSceneAsset {
+    pub landblock_id: u32,
+    pub landblock_info_id: u32,
+    pub classification: LandblockClassification,
+    pub statics: Vec<LandblockSceneStaticMember>,
+    pub buildings: Vec<LandblockSceneBuildingMember>,
+    pub env_cells: Vec<EnvCellFact>,
+    pub diagnostics: LandblockPackSourceDiagnostics,
+}
+
+#[derive(Debug, Clone)]
 pub struct LandblockBuildingShell {
     pub shell_id: String,
     pub building_index: usize,
@@ -79,6 +90,22 @@ pub struct LandblockBuildingShell {
     pub source_scale: PreparedVec3,
     pub source_bounds: Option<PreparedAabb>,
     pub instance_bounds: Option<PreparedAabb>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LandblockSceneStaticMember {
+    pub instance: PreparedStaticInstance,
+    pub source_bounds: Option<PreparedAabb>,
+    pub instance_bounds: Option<PreparedAabb>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LandblockSceneBuildingMember {
+    pub instance: PreparedStaticInstance,
+    pub source_bounds: Option<PreparedAabb>,
+    pub instance_bounds: Option<PreparedAabb>,
+    pub num_leaves: u32,
+    pub portals: Vec<LandblockSummaryBuildingPortal>,
 }
 
 #[derive(Debug, Clone)]
@@ -458,6 +485,9 @@ pub struct LandblockTerrainAssetAssembler;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct LandblockBuildingShellsAssetAssembler;
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct LandblockSceneAssetAssembler;
 
 struct LandblockPackAssemblyContext<'a> {
     source: ContentSourceReader<'a>,
@@ -1007,6 +1037,71 @@ impl LandblockBuildingShellsAssetAssembler {
     }
 }
 
+impl LandblockSceneAssetAssembler {
+    pub fn new() -> Self {
+        Self
+    }
+
+    pub fn assemble_landblock(
+        &self,
+        content: &ContentRepository,
+        raw_landblock_id: u32,
+    ) -> LandblockSceneAsset {
+        self.assemble_landblock_with_context(
+            LandblockPackAssemblyContext::new(content),
+            raw_landblock_id,
+        )
+    }
+
+    pub fn assemble_landblock_with_cache(
+        &self,
+        content: &ContentRepository,
+        decode_cache: &ContentDecodeCache,
+        raw_landblock_id: u32,
+    ) -> LandblockSceneAsset {
+        self.assemble_landblock_with_context(
+            LandblockPackAssemblyContext::with_decode_cache(content, decode_cache),
+            raw_landblock_id,
+        )
+    }
+
+    fn assemble_landblock_with_context(
+        &self,
+        mut context: LandblockPackAssemblyContext<'_>,
+        raw_landblock_id: u32,
+    ) -> LandblockSceneAsset {
+        let landblock_id = normalize_landblock_id(raw_landblock_id);
+        let landblock_info_id = derive_landblock_info_id(landblock_id);
+        let landblock_info_source = context.load_landblock_info(landblock_id);
+        let landblock_info = landblock_info_source
+            .as_ref()
+            .map(|info| LandblockInfoFact::from_info(info, landblock_id));
+        let classification = classify_scene_landblock(landblock_info.as_ref());
+        let env_cells = landblock_info
+            .as_ref()
+            .map(|info| load_env_cell_facts(&mut context, landblock_id, info))
+            .unwrap_or_default();
+        let (static_instances, building_specs) = landblock_info_source
+            .as_ref()
+            .map(|info| build_landblock_scene_instances(landblock_id, info))
+            .unwrap_or_default();
+        let static_meshes = build_prepared_static_meshes(&mut context, static_instances.iter());
+        let (statics, buildings) =
+            build_landblock_scene_members(static_instances, building_specs, &static_meshes);
+        let diagnostics = context.into_diagnostics();
+
+        LandblockSceneAsset {
+            landblock_id,
+            landblock_info_id,
+            classification,
+            statics,
+            buildings,
+            env_cells,
+            diagnostics,
+        }
+    }
+}
+
 pub fn derive_landblock_info_id(raw_landblock_id: u32) -> u32 {
     normalize_landblock_id(raw_landblock_id) & 0xffff_fffe
 }
@@ -1040,13 +1135,7 @@ fn load_interior_facts(
     landblock_id: u32,
     landblock_info: &LandblockInfoFact,
 ) -> LandblockInteriorFacts {
-    let mut env_cells = Vec::new();
-    for index in 0..landblock_info.num_env_cells {
-        let env_cell_id = derive_landblock_env_cell_id(landblock_id, index);
-        if let Some(env_cell) = context.load_env_cell(env_cell_id) {
-            env_cells.push(EnvCellFact::from_env_cell(env_cell_id, &env_cell));
-        }
-    }
+    let env_cells = load_env_cell_facts(context, landblock_id, landblock_info);
 
     let mut selected_cell_structures = env_cells
         .iter()
@@ -1079,6 +1168,21 @@ fn load_interior_facts(
         env_cells,
         environments,
     }
+}
+
+fn load_env_cell_facts(
+    context: &mut LandblockPackAssemblyContext<'_>,
+    landblock_id: u32,
+    landblock_info: &LandblockInfoFact,
+) -> Vec<EnvCellFact> {
+    let mut env_cells = Vec::new();
+    for index in 0..landblock_info.num_env_cells {
+        let env_cell_id = derive_landblock_env_cell_id(landblock_id, index);
+        if let Some(env_cell) = context.load_env_cell(env_cell_id) {
+            env_cells.push(EnvCellFact::from_env_cell(env_cell_id, &env_cell));
+        }
+    }
+    env_cells
 }
 
 fn load_environment_fact(
@@ -1340,6 +1444,134 @@ fn build_landblock_building_shell_instances(
             })
         })
         .collect()
+}
+
+#[derive(Debug, Clone)]
+struct LandblockSceneBuildingSpec {
+    instance_id: String,
+    num_leaves: u32,
+    portals: Vec<LandblockSummaryBuildingPortal>,
+}
+
+fn build_landblock_scene_instances(
+    landblock_id: u32,
+    info: &LandblockInfo,
+) -> (Vec<PreparedStaticInstance>, Vec<LandblockSceneBuildingSpec>) {
+    let mut instances = Vec::new();
+    let mut buildings = Vec::new();
+
+    instances.extend(
+        info.objects
+            .iter()
+            .enumerate()
+            .filter_map(|(source_index, object)| {
+                build_prepared_static_instance(PreparedStaticInstanceSpec {
+                    kind: PreparedStaticInstanceKind::Scenery,
+                    instance_id: format!(
+                        "landblock-static/{landblock_id:08x}/object/{source_index:04x}/{:08x}",
+                        object.id
+                    ),
+                    owning_landblock_id: landblock_id,
+                    owning_env_cell_id: None,
+                    source_did: object.id,
+                    source_index,
+                    local_placement: Frame {
+                        origin: object.frame.origin,
+                        orientation: object.frame.orientation,
+                    },
+                    source_scale: unit_prepared_vec3(),
+                })
+            }),
+    );
+
+    for (source_index, building) in info.buildings.iter().enumerate() {
+        let instance_id = format!(
+            "landblock-static/{landblock_id:08x}/building/{source_index:04x}/{:08x}",
+            building.model_id
+        );
+        let Some(instance) = build_prepared_static_instance(PreparedStaticInstanceSpec {
+            kind: PreparedStaticInstanceKind::Building,
+            instance_id: instance_id.clone(),
+            owning_landblock_id: landblock_id,
+            owning_env_cell_id: None,
+            source_did: building.model_id,
+            source_index,
+            local_placement: Frame {
+                origin: building.frame.origin,
+                orientation: building.frame.orientation,
+            },
+            source_scale: unit_prepared_vec3(),
+        }) else {
+            continue;
+        };
+
+        let portals = building
+            .portals
+            .iter()
+            .enumerate()
+            .map(|(portal_index, portal)| LandblockSummaryBuildingPortal {
+                portal_id: format!(
+                    "landblock-scene/{landblock_id:08x}/building/{source_index:04x}/portal/{portal_index:04x}"
+                ),
+                source_index: portal_index,
+                flags: portal.flags,
+                other_cell_id: portal.other_cell_id,
+                other_portal_id: portal.other_portal_id,
+                stab_list: portal.stab_list.clone(),
+                linked_env_cell_ids: portal
+                    .stab_list
+                    .iter()
+                    .copied()
+                    .map(|stab| crate::normalize_landblock_env_cell_id(landblock_id, stab))
+                    .collect(),
+            })
+            .collect();
+        buildings.push(LandblockSceneBuildingSpec {
+            instance_id: instance_id.clone(),
+            num_leaves: building.num_leaves,
+            portals,
+        });
+        instances.push(instance);
+    }
+
+    (instances, buildings)
+}
+
+fn build_landblock_scene_members(
+    instances: Vec<PreparedStaticInstance>,
+    building_specs: Vec<LandblockSceneBuildingSpec>,
+    static_meshes: &[PreparedStaticMesh],
+) -> (
+    Vec<LandblockSceneStaticMember>,
+    Vec<LandblockSceneBuildingMember>,
+) {
+    let mut statics = Vec::new();
+    let mut buildings = Vec::new();
+
+    for instance in instances {
+        let (source_bounds, instance_bounds) =
+            prepared_static_instance_bounds(&instance, static_meshes);
+        if instance.kind == PreparedStaticInstanceKind::Building {
+            let spec = building_specs
+                .iter()
+                .find(|spec| spec.instance_id == instance.instance_id);
+            buildings.push(LandblockSceneBuildingMember {
+                instance,
+                source_bounds,
+                instance_bounds,
+                num_leaves: spec.map(|spec| spec.num_leaves).unwrap_or_default(),
+                portals: spec.map(|spec| spec.portals.clone()).unwrap_or_default(),
+            });
+        } else {
+            statics.push(LandblockSceneStaticMember {
+                instance,
+                source_bounds,
+                instance_bounds,
+            });
+        }
+    }
+
+    (statics, buildings)
 }
 
 fn prepare_landblock_facts(
@@ -2537,6 +2769,17 @@ fn classify_landblock(
     }
 }
 
+fn classify_scene_landblock(landblock_info: Option<&LandblockInfoFact>) -> LandblockClassification {
+    match landblock_info {
+        Some(info)
+            if info.num_env_cells > 0 && info.object_count == 0 && info.building_count == 0 =>
+        {
+            LandblockClassification::Dungeon
+        }
+        _ => LandblockClassification::Outdoor,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2758,6 +3001,54 @@ mod tests {
         }
     }
 
+    #[test]
+    fn scene_asset_assembly_does_not_read_terrain_or_environment_geometry() {
+        let source_path = repo_assets_hba_path();
+        if !source_path.is_file() {
+            eprintln!(
+                "skipping scene asset assembly test; missing repo-local {}",
+                source_path.display()
+            );
+            return;
+        }
+
+        let archive = HbaReader::open(&source_path).expect("repo assets.hba should open");
+        let Some((landblock_id, landblock_info_id, landblock_info_bytes, env_cell_files)) =
+            find_landblock_scene_fixture(&archive)
+        else {
+            panic!("repo assets.hba should contain a LandblockInfo with env cells");
+        };
+        let mut files = HashMap::from([(
+            (EOR_CELL_NAMESPACE.to_string(), landblock_info_id),
+            landblock_info_bytes,
+        )]);
+        files.extend(
+            env_cell_files
+                .into_iter()
+                .map(|(env_cell_id, bytes)| ((EOR_CELL_NAMESPACE.to_string(), env_cell_id), bytes)),
+        );
+        let source = Arc::new(CountingSource::new(files));
+        let repository = ContentRepository::from_mounts(vec![source.clone()]);
+
+        let asset =
+            LandblockSceneAssetAssembler::new().assemble_landblock(&repository, landblock_id);
+
+        assert_eq!(asset.landblock_id, landblock_id);
+        assert!(!asset.env_cells.is_empty());
+        assert_eq!(source.read_count(EOR_CELL_NAMESPACE, landblock_info_id), 1);
+        assert_eq!(source.read_count(EOR_CELL_NAMESPACE, landblock_id), 0);
+        assert_eq!(source.read_count(EOR_PORTAL_NAMESPACE, 0x0d000000), 0);
+        assert!(
+            source
+                .reads
+                .lock()
+                .expect("counting source reads should not be poisoned")
+                .keys()
+                .all(|(namespace, file_id)| namespace != EOR_PORTAL_NAMESPACE
+                    || (*file_id >> 24 != 0x0d && *file_id >> 24 != 0x0e))
+        );
+    }
+
     fn find_env_cell_asset_fixture(archive: &HbaReader) -> Option<(u32, Vec<u8>, u32, Vec<u8>)> {
         for entry in archive
             .entries()
@@ -2794,6 +3085,50 @@ mod tests {
                 env_cell_bytes,
                 environment_id,
                 environment_bytes,
+            ));
+        }
+        None
+    }
+
+    fn find_landblock_scene_fixture(
+        archive: &HbaReader,
+    ) -> Option<(u32, u32, Vec<u8>, Vec<(u32, Vec<u8>)>)> {
+        for entry in archive
+            .entries()
+            .collect::<holtburger_dat::Result<Vec<_>>>()
+            .ok()?
+        {
+            if entry.namespace_id().ok()?.as_str() != EOR_CELL_NAMESPACE {
+                continue;
+            }
+            if DatFileType::from_id(entry.file_id) != DatFileType::LandblockInfo {
+                continue;
+            }
+            let landblock_info_bytes = archive
+                .get_file_in_namespace(EOR_CELL_NAMESPACE, entry.file_id)
+                .ok()?;
+            let landblock_info = LandblockInfo::unpack(&landblock_info_bytes).ok()?;
+            if landblock_info.num_cells == 0 {
+                continue;
+            }
+            let landblock_id = entry.file_id | 1;
+            let env_cell_files = (0..landblock_info.num_cells)
+                .filter_map(|index| {
+                    let env_cell_id = derive_landblock_env_cell_id(landblock_id, index);
+                    archive
+                        .get_file_in_namespace(EOR_CELL_NAMESPACE, env_cell_id)
+                        .ok()
+                        .map(|bytes| (env_cell_id, bytes))
+                })
+                .collect::<Vec<_>>();
+            if env_cell_files.is_empty() {
+                continue;
+            }
+            return Some((
+                landblock_id,
+                entry.file_id,
+                landblock_info_bytes,
+                env_cell_files,
             ));
         }
         None

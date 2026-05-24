@@ -5,7 +5,8 @@ use holtburger_common::math::{Quaternion, Vector3};
 use holtburger_content::{
     ContentDecodeCache, ContentRepository, EnvCellAsset, LandblockBuildingShell,
     LandblockBuildingShellsAsset, LandblockClassification, LandblockPack,
-    LandblockPackSourceDiagnostics, LandblockSummary, LandblockSummaryBuilding,
+    LandblockPackSourceDiagnostics, LandblockSceneAsset, LandblockSceneBuildingMember,
+    LandblockSceneStaticMember, LandblockSummary, LandblockSummaryBuilding,
     LandblockSummaryBuildingPortal, LandblockTerrainAsset, PreparedAabb, PreparedBvh,
     PreparedBvhNode, PreparedInteriorCell, PreparedPolygonSetInvalidPolygon,
     PreparedPolygonSetRenderGeometry, PreparedPolygonSetRenderTriangle, PreparedPortalAperture,
@@ -576,13 +577,13 @@ impl HostBoundaryAdapter {
     fn build_landblock_scene_lookup_response(
         &self,
         request: AssetLookupRequestDto,
-        pack: LandblockPack,
+        scene: LandblockSceneAsset,
     ) -> AssetLookupResponseDto {
         AssetLookupResponseDto {
             request_id: request.request_id,
             asset_id: request.asset_id,
             payload_kind: AssetPayloadKindDto::Json,
-            payload: serialize_landblock_scene_payload(&pack),
+            payload: serialize_landblock_scene_payload(&scene),
         }
     }
 
@@ -2660,37 +2661,34 @@ fn build_flat_bvh_nodes_from_bounds(items: Vec<(PreparedAabb, u32)>) -> Vec<serd
     })]
 }
 
-fn serialize_landblock_scene_payload(pack: &LandblockPack) -> serde_json::Value {
+fn serialize_landblock_scene_payload(scene: &LandblockSceneAsset) -> serde_json::Value {
     serde_json::json!({
         "kind": "landblock-scene",
         "residencyKind": "landblock",
         "sourceAssetKind": "landblock-scene",
-        "landblockId": pack.landblock_id,
-        "landblockInfoId": pack.landblock_info_id,
-        "classification": serialize_landblock_classification(pack.classification),
-        "statics": pack.prepared.outdoor_static_instances.iter().filter(|instance| {
-            matches!(instance.kind, PreparedStaticInstanceKind::Scenery | PreparedStaticInstanceKind::GeneratedScenery)
-        }).map(serialize_landblock_scene_static_member).collect::<Vec<_>>(),
-        "buildings": pack.prepared.outdoor_static_instances.iter().filter(|instance| {
-            instance.kind == PreparedStaticInstanceKind::Building
-        }).map(|instance| serialize_landblock_scene_building_member(instance, pack)).collect::<Vec<_>>(),
-        "envCells": pack.interiors.env_cells.iter().map(serialize_landblock_scene_env_cell_member).collect::<Vec<_>>(),
-        "portalLinks": serialize_landblock_scene_portal_links(pack),
-        "envCellResidencyBvh": serialize_landblock_scene_env_cell_residency_bvh(pack),
-        "outdoorBvh": serialize_landblock_scene_outdoor_bvh(pack),
-        "diagnostics": serialize_landblock_pack_diagnostics(&pack.diagnostics),
+        "landblockId": scene.landblock_id,
+        "landblockInfoId": scene.landblock_info_id,
+        "classification": serialize_landblock_classification(scene.classification),
+        "statics": scene.statics.iter().map(serialize_landblock_scene_static_member).collect::<Vec<_>>(),
+        "buildings": scene.buildings.iter().map(serialize_landblock_scene_building_member).collect::<Vec<_>>(),
+        "envCells": scene.env_cells.iter().map(serialize_landblock_scene_env_cell_member).collect::<Vec<_>>(),
+        "portalLinks": serialize_landblock_scene_portal_links(scene),
+        "envCellResidencyBvh": serialize_landblock_scene_env_cell_residency_bvh(scene),
+        "outdoorBvh": serialize_landblock_scene_outdoor_bvh(scene),
+        "diagnostics": serialize_landblock_pack_diagnostics(&scene.diagnostics),
         "provenance": {
             "source": "repo-local-hba",
             "sourceAssetKind": "landblock-scene",
-            "errorCode": pack.diagnostics.errors.first().map(|error| error.error_code),
-            "detail": pack.diagnostics.errors.first().map(|error| error.detail.clone())
+            "errorCode": scene.diagnostics.errors.first().map(|error| error.error_code),
+            "detail": scene.diagnostics.errors.first().map(|error| error.detail.clone())
         }
     })
 }
 
-fn serialize_landblock_scene_env_cell_residency_bvh(pack: &LandblockPack) -> serde_json::Value {
-    let items = pack
-        .interiors
+fn serialize_landblock_scene_env_cell_residency_bvh(
+    scene: &LandblockSceneAsset,
+) -> serde_json::Value {
+    let items = scene
         .env_cells
         .iter()
         .map(|cell| {
@@ -2702,13 +2700,26 @@ fn serialize_landblock_scene_env_cell_residency_bvh(pack: &LandblockPack) -> ser
             })
         })
         .collect::<Vec<_>>();
-    let node_inputs = pack
-        .prepared
-        .interior_cells
+    let node_inputs = scene
+        .env_cells
         .iter()
-        .filter_map(|cell| {
-            let bounds = cell.render_geometry.bounds?;
-            Some((bounds, 1_u32))
+        .map(|cell| {
+            let point = PreparedVec3 {
+                x: cell.local_placement.origin.x,
+                y: cell.local_placement.origin.z,
+                z: if cell.local_placement.origin.y == 0.0 {
+                    0.0
+                } else {
+                    -cell.local_placement.origin.y
+                },
+            };
+            (
+                PreparedAabb {
+                    min: point,
+                    max: point,
+                },
+                1_u32,
+            )
         })
         .collect::<Vec<_>>();
     serde_json::json!({
@@ -2718,7 +2729,10 @@ fn serialize_landblock_scene_env_cell_residency_bvh(pack: &LandblockPack) -> ser
     })
 }
 
-fn serialize_landblock_scene_static_member(instance: &PreparedStaticInstance) -> serde_json::Value {
+fn serialize_landblock_scene_static_member(
+    member: &LandblockSceneStaticMember,
+) -> serde_json::Value {
+    let instance = &member.instance;
     serde_json::json!({
         "kind": serialize_landblock_scene_static_kind(instance.kind),
         "instanceId": instance.instance_id,
@@ -2728,8 +2742,8 @@ fn serialize_landblock_scene_static_member(instance: &PreparedStaticInstance) ->
         "sourceIndex": instance.source_index,
         "localPlacement": serialize_frame(&instance.local_placement),
         "sourceScale": serialize_prepared_vec3(&instance.source_scale),
-        "sourceBounds": null,
-        "instanceBounds": null,
+        "sourceBounds": member.source_bounds.map(serialize_bounds),
+        "instanceBounds": member.instance_bounds.map(serialize_bounds),
     })
 }
 
@@ -2741,33 +2755,24 @@ fn serialize_landblock_scene_static_kind(kind: PreparedStaticInstanceKind) -> &'
 }
 
 fn serialize_landblock_scene_building_member(
-    instance: &PreparedStaticInstance,
-    pack: &LandblockPack,
+    member: &LandblockSceneBuildingMember,
 ) -> serde_json::Value {
-    let portals = pack
-        .outdoor_scene
-        .as_ref()
-        .into_iter()
-        .flat_map(|scene| scene.buildings.iter())
-        .find(|building| building.instance.identity.stable_id() == instance.instance_id)
-        .map(|building| {
-            building
-                .portals
-                .iter()
-                .map(|portal| {
-                    serde_json::json!({
-                        "portalId": format!("{}/portal/{:04x}", instance.instance_id, portal.source_index),
-                        "sourceIndex": portal.source_index,
-                        "flags": portal.flags,
-                        "otherCellId": portal.other_cell_id,
-                        "otherPortalId": portal.other_portal_id,
-                        "stabLocalCellIds": portal.stab_list,
-                        "linkedEnvCellIds": portal.linked_env_cell_ids,
-                    })
-                })
-                .collect::<Vec<_>>()
+    let instance = &member.instance;
+    let portals = member
+        .portals
+        .iter()
+        .map(|portal| {
+            serde_json::json!({
+                "portalId": portal.portal_id,
+                "sourceIndex": portal.source_index,
+                "flags": portal.flags,
+                "otherCellId": portal.other_cell_id,
+                "otherPortalId": portal.other_portal_id,
+                "stabLocalCellIds": portal.stab_list,
+                "linkedEnvCellIds": portal.linked_env_cell_ids,
+            })
         })
-        .unwrap_or_default();
+        .collect::<Vec<_>>();
     serde_json::json!({
         "kind": "building",
         "instanceId": instance.instance_id,
@@ -2777,11 +2782,9 @@ fn serialize_landblock_scene_building_member(
         "sourceIndex": instance.source_index,
         "localPlacement": serialize_frame(&instance.local_placement),
         "sourceScale": serialize_prepared_vec3(&instance.source_scale),
-        "sourceBounds": null,
-        "instanceBounds": null,
-        "numLeaves": pack.outdoor_scene.as_ref().into_iter().flat_map(|scene| scene.buildings.iter()).find(|building| {
-            building.instance.identity.stable_id() == instance.instance_id
-        }).map(|building| building.num_leaves).unwrap_or(0),
+        "sourceBounds": member.source_bounds.map(serialize_bounds),
+        "instanceBounds": member.instance_bounds.map(serialize_bounds),
+        "numLeaves": member.num_leaves,
         "portals": portals,
     })
 }
@@ -2800,8 +2803,8 @@ fn serialize_landblock_scene_env_cell_member(
     })
 }
 
-fn serialize_landblock_scene_portal_links(pack: &LandblockPack) -> Vec<serde_json::Value> {
-    pack.interiors
+fn serialize_landblock_scene_portal_links(scene: &LandblockSceneAsset) -> Vec<serde_json::Value> {
+    scene
         .env_cells
         .iter()
         .flat_map(|cell| {
@@ -2822,7 +2825,7 @@ fn serialize_landblock_scene_portal_links(pack: &LandblockPack) -> Vec<serde_jso
                     }).unwrap_or_else(|| {
                         serde_json::json!({
                             "kind": "outside",
-                            "landblockId": pack.landblock_id,
+                            "landblockId": scene.landblock_id,
                         })
                     }),
                     "flags": portal.flags,
@@ -2836,33 +2839,28 @@ fn serialize_landblock_scene_portal_links(pack: &LandblockPack) -> Vec<serde_jso
         .collect()
 }
 
-fn serialize_landblock_scene_outdoor_bvh(pack: &LandblockPack) -> serde_json::Value {
-    let items = pack
-        .prepared
-        .outdoor_static_instances
+fn serialize_landblock_scene_outdoor_bvh(scene: &LandblockSceneAsset) -> serde_json::Value {
+    let items = scene
+        .statics
         .iter()
-        .filter_map(|instance| match instance.kind {
-            PreparedStaticInstanceKind::Scenery | PreparedStaticInstanceKind::GeneratedScenery => {
-                Some(serde_json::json!({ "kind": "static", "instanceId": instance.instance_id }))
-            }
-            PreparedStaticInstanceKind::Building => {
-                Some(serde_json::json!({ "kind": "building", "instanceId": instance.instance_id }))
-            }
-            PreparedStaticInstanceKind::IndoorStatic => None,
-        })
+        .map(|member| serde_json::json!({ "kind": "static", "instanceId": member.instance.instance_id }))
+        .chain(scene.buildings.iter().map(|member| {
+            serde_json::json!({ "kind": "building", "instanceId": member.instance.instance_id })
+        }))
         .collect::<Vec<_>>();
     if items.is_empty() {
         serde_json::Value::Null
     } else {
-        let node_inputs = pack
-            .prepared
-            .static_meshes
+        let node_inputs = scene
+            .statics
             .iter()
-            .filter(|mesh| mesh.owning_env_cell_id.is_none())
-            .filter_map(|mesh| {
-                let bounds = mesh.instance_bounds?;
-                Some((bounds, 2_u32))
-            })
+            .filter_map(|member| Some((member.instance_bounds?, 2_u32)))
+            .chain(
+                scene
+                    .buildings
+                    .iter()
+                    .filter_map(|member| Some((member.instance_bounds?, 4_u32))),
+            )
             .collect::<Vec<_>>();
         serde_json::json!({
             "coordinateSpace": "landblock-render-local",
@@ -3352,6 +3350,10 @@ fn serialize_prepared_aabb(bounds: &PreparedAabb) -> serde_json::Value {
         "min": serialize_prepared_vec3(&bounds.min),
         "max": serialize_prepared_vec3(&bounds.max),
     })
+}
+
+fn serialize_bounds(bounds: PreparedAabb) -> serde_json::Value {
+    serialize_prepared_aabb(&bounds)
 }
 
 fn serialize_prepared_vec3(vector: &PreparedVec3) -> serde_json::Value {

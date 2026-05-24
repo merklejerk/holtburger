@@ -651,12 +651,13 @@ function collectPreparedEnvCellMaterialAssetIds(
 ): string[] {
 	return uniqueSortedAssetIds(
 		Object.values(preparedByAssetId).flatMap((asset) => {
-			if (asset.payload.kind !== "landblock-pack") {
+			if (
+				asset.payload.kind !== "env-cell" ||
+				!envCellIds.has(asset.payload.envCellId)
+			) {
 				return [];
 			}
-			return asset.payload.prepared.interiorCells
-				.filter((cell) => envCellIds.has(cell.envCellId))
-				.flatMap((cell) => cell.surfaceIds.map(formatMaterialAssetId));
+			return asset.payload.surfaces.map((surface) => surface.materialAssetId);
 		}),
 	);
 }

@@ -57,7 +57,7 @@ describe("asset response dependencies", () => {
 		]);
 	});
 
-	it("documents migration-target setup-model setup-appearance extraction", () => {
+	it("extracts setup-model part gfx dependencies without default setup appearance", () => {
 		const response = createJsonResponse("setup-model/02000010", {
 			kind: "setup-model",
 			residencyKind: "unknown",
@@ -102,7 +102,6 @@ describe("asset response dependencies", () => {
 		expect(getAssetResponseDependencies(response)).toEqual([
 			{ assetId: "gfx-obj/01000010" },
 			{ assetId: "gfx-obj/01000011" },
-			{ assetId: "setup-appearance/02000010" },
 		]);
 	});
 
@@ -248,9 +247,7 @@ describe("asset response dependencies", () => {
 					createLandblockTerrainPayload(),
 				),
 			),
-		).toEqual([
-			{ assetId: "terrain-material/1" },
-		]);
+		).toEqual([{ assetId: "terrain-material/1" }]);
 
 		expect(
 			getPreparedAssetDependencies(

@@ -1034,10 +1034,7 @@ export function getPreparedAssetDependencies(
 				asset.payload.parts.map((part) => part.gfxObjAssetId),
 			);
 		}
-		return uniqueSortedAssetIds([
-			...dependencies.gfxObjAssetIds,
-			dependencies.setupAppearanceAssetId,
-		]);
+		return uniqueSortedAssetIds(dependencies.gfxObjAssetIds);
 	}
 
 	if (asset.payload.kind === "gfx-obj") {

@@ -4,7 +4,7 @@ export function createPreparedTerrainAsset(
 	requestId: string,
 	assetId: string,
 ): PreparedAssetRecord {
-	const landblockId = parseLandblockPackAssetId(assetId) ?? 0x0102ffff;
+	const landblockId = parseLandblockOutdoorAssetId(assetId) ?? 0x0102ffff;
 
 	return {
 		request: {
@@ -16,47 +16,42 @@ export function createPreparedTerrainAsset(
 			requestId,
 			assetId,
 			payloadKind: "json",
-			payload: { kind: "landblock-pack", landblockId },
+			payload: { kind: "landblock-outdoor", landblockId },
 		},
 		payload: {
-			kind: "landblock-pack",
-			sourceAssetKind: "landblock-pack",
-			residencyKind: "landblock",
+			kind: "landblock-outdoor",
+			sourceAssetKind: "landblock-outdoor",
+			residencyKind: "outdoor-landblock",
 			provenance: {
 				source: "unknown",
-				sourceAssetKind: "landblock-pack",
+				sourceAssetKind: "landblock-outdoor",
 				errorCode: null,
 				detail: null,
 			},
 			landblockId,
-			landblockInfoId: landblockId & 0xffff_fffe,
+			regionId: 0x13000000,
+			regionNumber: 1,
 			classification: "outdoor",
-			sourceFacts: {
-				buildings: [],
-			},
-			prepared: {
-				terrainMesh: {
-					landblockId,
-					gridSize: 9,
-					tileSize: 24,
-					vertices: [],
-					triangles: [],
-					minHeight: 0,
-					maxHeight: 24,
+			terrain: {
+				gridSize: 9,
+				tileSize: 24,
+				vertices: [],
+				triangles: [],
+				quads: [],
+				terrainBvh: {
+					coordinateSpace: "landblock-outdoor-terrain-local",
+					nodes: [],
+					items: [],
 				},
-				outdoorStaticInstances: [],
-				interiorCells: [],
-				staticMeshes: [],
-				spatialItems: [],
-				staticLandblockBvh: null,
+				minHeight: 0,
+				maxHeight: 24,
+				bounds: null,
 			},
-			dependencies: {
-				cellDatIds: [],
-				portalDatIds: [],
-				renderableAssetIds: [],
-			},
+			statics: [],
+			outdoorBvh: null,
 			diagnostics: {
 				sourceRecords: [],
+				omissions: [],
 				errors: [],
 			},
 		},
@@ -64,8 +59,8 @@ export function createPreparedTerrainAsset(
 	};
 }
 
-function parseLandblockPackAssetId(assetId: string): number | null {
-	const match = /^landblock-pack\/([0-9a-fA-F]{8})$/.exec(assetId);
+function parseLandblockOutdoorAssetId(assetId: string): number | null {
+	const match = /^landblock\/([0-9a-fA-F]{8})\/outdoor$/.exec(assetId);
 	if (!match) {
 		return null;
 	}

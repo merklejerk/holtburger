@@ -893,25 +893,6 @@
 				],
 			};
 		}
-		if (metadata.kind === "landblock-pack-spatial") {
-			return {
-				title: formatHex32(metadata.landblockId),
-				kicker: "Landblock spatial item",
-				rows: [
-					{ label: "Kind", value: metadata.spatialKind },
-					{ label: "Item", value: metadata.itemId },
-					{
-						label: "Owner",
-						value:
-							metadata.ownerId === null
-								? "None"
-								: formatHex32(metadata.ownerId),
-					},
-					{ label: "Source asset", value: metadata.sourceAssetId ?? "None" },
-					...commonRows,
-				],
-			};
-		}
 		return {
 			title: formatHex32(metadata.landblockId),
 			kicker: "Terrain",

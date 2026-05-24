@@ -22,7 +22,7 @@ describe("world render working model", () => {
 		const interiorStaticMesh = createInstancedMesh("interior-static");
 		const interiorShellMesh = createMesh("interior-shell");
 		const input = createWorkingModelInput({
-			terrainMeshes: new Map([["landblock-pack/1", terrainMesh]]),
+			terrainMeshes: new Map([["landblock/0102ffff/outdoor", terrainMesh]]),
 			staticRenderableGroupMeshes: new Map([
 				["exterior-static|chunk/a|gfx-obj/1", exteriorStaticMesh],
 				["interior-static|chunk/a|gfx-obj/1", interiorStaticMesh],

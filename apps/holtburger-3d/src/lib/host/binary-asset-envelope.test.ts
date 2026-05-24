@@ -3,29 +3,27 @@ import { describe, expect, it } from "vitest";
 import { decodeBinaryAssetEnvelope } from "./binary-asset-envelope";
 
 describe("decodeBinaryAssetEnvelope", () => {
-	it("hydrates binary landblock-pack arrays into the normalized response payload", () => {
+	it("hydrates binary landblock terrain arrays into the normalized response payload", () => {
 		const payload = {
-			prepared: {
-				terrainMesh: {
-					vertices: [],
-					triangles: [],
-				},
+			terrain: {
+				vertices: [],
+				triangles: [],
 			},
 		};
 		const vertices = new Float32Array([1, 2, 3, 4, 5, 6]);
-		const triangles = new Float32Array([0, 1, 2, 7, 4.5]);
+		const triangles = new Float32Array([4, 1, 0, 1, 2, 4.5]);
 		const response = decodeBinaryAssetEnvelope(
 			buildEnvelope({
 				response: {
 					requestId: "request-1",
-					assetId: "landblock-pack/0102ffff",
+					assetId: "landblock/0102ffff/outdoor",
 					payloadKind: "json",
 					payload,
 				},
 				sections: [
 					{
-						role: "prepared.terrainMesh.vertices",
-						path: "responses.0.payload.prepared.terrainMesh.vertices",
+						role: "landblockTerrain.vertices",
+						path: "responses.0.payload.terrain.vertices",
 						scalarType: "f32",
 						componentCount: 3,
 						elementCount: 2,
@@ -33,10 +31,10 @@ describe("decodeBinaryAssetEnvelope", () => {
 						byteLength: vertices.byteLength,
 					},
 					{
-						role: "prepared.terrainMesh.triangles",
-						path: "responses.0.payload.prepared.terrainMesh.triangles",
+						role: "landblockTerrain.triangles",
+						path: "responses.0.payload.terrain.triangles",
 						scalarType: "f32",
-						componentCount: 5,
+						componentCount: 6,
 						elementCount: 1,
 						byteOffset: vertices.byteLength,
 						byteLength: triangles.byteLength,
@@ -47,22 +45,19 @@ describe("decodeBinaryAssetEnvelope", () => {
 		);
 
 		expect(response.payload).toMatchObject({
-			prepared: {
-				terrainMesh: {
-					vertices: [
-						{ x: 1, y: 2, z: 3 },
-						{ x: 4, y: 5, z: 6 },
-					],
-					triangles: [
-						{
-							a: 0,
-							b: 1,
-							c: 2,
-							terrainType: 7,
-							averageHeight: 4.5,
-						},
-					],
-				},
+			terrain: {
+				vertices: [
+					{ x: 1, y: 2, z: 3 },
+					{ x: 4, y: 5, z: 6 },
+				],
+				triangles: [
+					{
+						quadIndex: 4,
+						triangleInQuad: 1,
+						vertexIndices: [0, 1, 2],
+						averageHeight: 4.5,
+					},
+				],
 			},
 		});
 	});

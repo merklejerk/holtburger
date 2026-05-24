@@ -50,7 +50,6 @@ describe("asset response dependencies", () => {
 					"gfx-obj/01000011",
 					"gfx-obj/01000010",
 				],
-				setupAppearanceAssetId: "setup-appearance/02000010",
 			},
 			provenance,
 		});
@@ -391,11 +390,8 @@ function createSetupPart(partIndex: number, gfxObjAssetId: string) {
 	};
 }
 
-function createLandblockTerrainPayload() {
+function createLandblockOutdoorTerrainPayload() {
 	return {
-		kind: "landblock-terrain" as const,
-		residencyKind: "outdoor-landblock" as const,
-		sourceAssetKind: "landblock-terrain" as const,
 		landblockId: 0xda55ffff,
 		regionId: 0x13000000,
 		regionNumber: 1,
@@ -410,7 +406,7 @@ function createLandblockTerrainPayload() {
 				createTerrainQuad(1, 0, 2, 5678),
 			],
 			terrainBvh: {
-				coordinateSpace: "landblock-terrain-local" as const,
+				coordinateSpace: "landblock-outdoor-terrain-local" as const,
 				nodes: [],
 				items: [],
 			},
@@ -418,37 +414,13 @@ function createLandblockTerrainPayload() {
 			maxHeight: 0,
 			bounds: null,
 		},
-		diagnostics: emptyLandblockDiagnostics(),
-		provenance,
-	};
-}
-
-function createLandblockBuildingShellsPayload(
-	shells: ReturnType<typeof createBuildingShellMember>[] = [],
-) {
-	return {
-		kind: "landblock-building-shells" as const,
-		residencyKind: "outdoor-landblock" as const,
-		sourceAssetKind: "landblock-building-shells" as const,
-		landblockId: 0xda55ffff,
-		shells,
-		shellBvh: {
-			coordinateSpace: "landblock-local" as const,
-			nodes: [],
-			items: shells.map((shell) => ({
-				kind: "building-shell" as const,
-				shellId: shell.shellId,
-			})),
-		},
-		diagnostics: emptyLandblockDiagnostics(),
-		provenance,
 	};
 }
 
 function createLandblockOutdoorPayload(
 	statics: ReturnType<typeof createOutdoorStaticMember>[] = [],
 ) {
-	const terrainPayload = createLandblockTerrainPayload();
+	const terrainPayload = createLandblockOutdoorTerrainPayload();
 	return {
 		kind: "landblock-outdoor" as const,
 		residencyKind: "outdoor-landblock" as const,
@@ -494,25 +466,12 @@ function createLandblockTopologyPayload(
 		envCells,
 		portalLinks: [],
 		envCellResidencyBvh: {
-			coordinateSpace: "landblock-scene-residency" as const,
+			coordinateSpace: "landblock-topology-residency" as const,
 			nodes: [],
 			items: [],
 		},
 		diagnostics: emptyLandblockDiagnostics(),
 		provenance,
-	};
-}
-
-function createBuildingShellMember(shellId: string, sourceAssetId: string) {
-	return {
-		shellId,
-		buildingIndex: 0,
-		sourceDid: Number.parseInt(sourceAssetId.slice(-8), 16),
-		sourceAssetId,
-		localPlacement: identityPlacement(),
-		sourceScale: { x: 1, y: 1, z: 1 },
-		sourceBounds: null,
-		instanceBounds: null,
 	};
 }
 
@@ -535,62 +494,6 @@ function createTerrainQuad(
 		pcode,
 		averageHeight: 0,
 		bounds: emptyBounds(),
-	};
-}
-
-function createLandblockScenePayload() {
-	return {
-		kind: "landblock-scene" as const,
-		residencyKind: "landblock" as const,
-		sourceAssetKind: "landblock-scene" as const,
-		landblockId: 0xda55ffff,
-		landblockInfoId: 0xda55fffe,
-		classification: "outdoor" as const,
-		statics: [],
-		buildings: [],
-		envCells: [],
-		portalLinks: [],
-		envCellResidencyBvh: {
-			coordinateSpace: "landblock-scene-residency" as const,
-			nodes: [],
-			items: [],
-		},
-		outdoorBvh: null,
-		diagnostics: emptyLandblockDiagnostics(),
-		provenance,
-	};
-}
-
-function createSceneStaticMember(instanceId: string, sourceAssetId: string) {
-	return {
-		...createScenePlacedSourceMember(instanceId, sourceAssetId),
-		kind: "scenery" as const,
-	};
-}
-
-function createSceneBuildingMember(instanceId: string, sourceAssetId: string) {
-	return {
-		...createScenePlacedSourceMember(instanceId, sourceAssetId),
-		kind: "building" as const,
-		numLeaves: 0,
-		portals: [],
-	};
-}
-
-function createScenePlacedSourceMember(
-	instanceId: string,
-	sourceAssetId: string,
-) {
-	return {
-		instanceId,
-		memberId: `member-${instanceId}`,
-		sourceDid: Number.parseInt(sourceAssetId.slice(-8), 16),
-		sourceAssetId,
-		sourceIndex: 0,
-		localPlacement: identityPlacement(),
-		sourceScale: { x: 1, y: 1, z: 1 },
-		sourceBounds: null,
-		instanceBounds: null,
 	};
 }
 

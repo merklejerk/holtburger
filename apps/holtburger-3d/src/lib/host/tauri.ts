@@ -66,7 +66,7 @@ export async function lookupAsset(
 	return response;
 }
 
-export async function lookupAssets(
+async function lookupAssets(
 	requests: readonly AssetLookupRequestDto[],
 ): Promise<AssetLookupResponseDto[]> {
 	requireTauriRuntime();

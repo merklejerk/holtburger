@@ -3,22 +3,16 @@ use std::sync::{Arc, Mutex};
 
 use holtburger_common::math::{Quaternion, Vector3};
 use holtburger_content::{
-    ContentDecodeCache, ContentRepository, EnvCellAsset, LandblockBuildingShell,
-    LandblockBuildingShellsAsset, LandblockClassification, LandblockOutdoorAsset,
-    LandblockOutdoorStaticMember, LandblockPack, LandblockPackSourceDiagnostics,
-    LandblockSceneAsset, LandblockSceneBuildingMember, LandblockSceneStaticMember,
-    LandblockSummary, LandblockSummaryBuilding, LandblockSummaryBuildingPortal,
-    LandblockTerrainAsset, LandblockTopologyAsset, PreparedAabb, PreparedBvh, PreparedBvhNode,
-    PreparedInteriorCell, PreparedPolygonSetInvalidPolygon, PreparedPolygonSetRenderGeometry,
+    ContentDecodeCache, ContentRepository, EnvCellAsset, LandblockClassification,
+    LandblockOutdoorAsset, LandblockOutdoorStaticMember, LandblockTopologyAsset, PreparedAabb,
+    PreparedBvhNode, PreparedContentSourceDiagnostics, PreparedInteriorCell,
+    PreparedPolygonSetInvalidPolygon, PreparedPolygonSetRenderGeometry,
     PreparedPolygonSetRenderTriangle, PreparedPortalAperture, PreparedPortalAperturePlane,
-    PreparedPortalAperturePlaneSource, PreparedSpatialItem, PreparedSpatialItemKind,
-    PreparedSpatialItemMetadata, PreparedStaticInstance, PreparedStaticInstanceKind,
-    PreparedStaticMesh, PreparedTerrainMesh, PreparedTerrainTriangle, PreparedVec3,
-    ResolvedMaterialRecipe, ResolvedMaterialSlot, ResolvedMaterialSource, ResolvedSetupAppearance,
-    ResolvedTerrainMaterialTable, SoulEmoteCatalog, SourceLoadError, SourceOmissionDiagnostic,
-    SourceRecordDiagnostic, SourceRecordStatus, StaticOutdoorFrame, StaticOutdoorInstance,
-    StaticOutdoorScene, StaticRenderableSourceFamily, build_gfx_obj_render_geometry,
-    normalize_landblock_id,
+    PreparedPortalAperturePlaneSource, PreparedStaticInstanceKind, PreparedStaticMesh,
+    PreparedTerrainMesh, PreparedVec3, ResolvedMaterialRecipe, ResolvedMaterialSlot,
+    ResolvedMaterialSource, ResolvedSetupAppearance, ResolvedTerrainMaterialTable,
+    SoulEmoteCatalog, SourceLoadError, SourceOmissionDiagnostic, SourceRecordDiagnostic,
+    SourceRecordStatus, build_gfx_obj_render_geometry, normalize_landblock_id,
 };
 use holtburger_core::{
     ContentAsset, ContentAssetRequest, ContentAssetRuntime, ContentAssetService,
@@ -31,9 +25,11 @@ use holtburger_dat::graphics::{CVertexArray, Polygon};
 use holtburger_dat::physics::BspNode;
 use holtburger_world::WorldBootstrap;
 
+#[cfg(test)]
+use crate::contracts::Vec3Dto;
 use crate::contracts::{
     AssetLookupRequestDto, AssetLookupResponseDto, AssetPayloadKindDto, CameraHintAckDto,
-    CameraHintDto, DebugConfigDto, PlacementTransformDto, QuaternionDto, Vec3Dto,
+    CameraHintDto, DebugConfigDto,
 };
 
 const ASSET_BINARY_MAGIC: &[u8; 4] = b"HBAB";
@@ -199,74 +195,6 @@ impl HostBoundaryAdapter {
         asset: anyhow::Result<ContentAsset>,
     ) -> AssetLookupResponseDto {
         match content_request {
-            ContentAssetRequest::LandblockPack(landblock_id) => match asset {
-                Ok(ContentAsset::LandblockPack(pack)) => {
-                    self.build_landblock_pack_lookup_response(request, *pack)
-                }
-                Ok(_) => unreachable!("content asset runtime returned mismatched landblock pack"),
-                Err(error) => self.build_failed_landblock_pack_lookup_response(
-                    request,
-                    normalize_landblock_id(landblock_id),
-                    error,
-                ),
-            },
-            ContentAssetRequest::LandblockSummary(landblock_id) => match asset {
-                Ok(ContentAsset::LandblockSummary(summary)) => {
-                    self.build_landblock_summary_lookup_response(request, *summary)
-                }
-                Ok(_) => {
-                    unreachable!("content asset runtime returned mismatched landblock summary")
-                }
-                Err(error) => self.build_failed_landblock_summary_lookup_response(
-                    request,
-                    normalize_landblock_id(landblock_id),
-                    error,
-                ),
-            },
-            ContentAssetRequest::LandblockTerrain(landblock_id) => match asset {
-                Ok(ContentAsset::LandblockTerrain {
-                    terrain,
-                    region_id,
-                    region_number,
-                }) => self.build_landblock_terrain_lookup_response(
-                    request,
-                    *terrain,
-                    region_id,
-                    region_number,
-                ),
-                Ok(_) => {
-                    unreachable!("content asset runtime returned mismatched landblock terrain")
-                }
-                Err(error) => self.build_failed_landblock_terrain_lookup_response(
-                    request,
-                    normalize_landblock_id(landblock_id),
-                    error,
-                ),
-            },
-            ContentAssetRequest::LandblockBuildingShells(landblock_id) => match asset {
-                Ok(ContentAsset::LandblockBuildingShells(building_shells)) => {
-                    self.build_landblock_building_shells_lookup_response(request, *building_shells)
-                }
-                Ok(_) => unreachable!(
-                    "content asset runtime returned mismatched landblock building shells"
-                ),
-                Err(error) => self.build_failed_landblock_building_shells_lookup_response(
-                    request,
-                    normalize_landblock_id(landblock_id),
-                    error,
-                ),
-            },
-            ContentAssetRequest::LandblockScene(landblock_id) => match asset {
-                Ok(ContentAsset::LandblockScene(pack)) => {
-                    self.build_landblock_scene_lookup_response(request, *pack)
-                }
-                Ok(_) => unreachable!("content asset runtime returned mismatched landblock scene"),
-                Err(error) => self.build_failed_landblock_scene_lookup_response(
-                    request,
-                    normalize_landblock_id(landblock_id),
-                    error,
-                ),
-            },
             ContentAssetRequest::LandblockOutdoor(landblock_id) => match asset {
                 Ok(ContentAsset::LandblockOutdoor {
                     outdoor,
@@ -422,219 +350,6 @@ impl HostBoundaryAdapter {
 }
 
 impl HostBoundaryAdapter {
-    fn build_landblock_pack_lookup_response(
-        &self,
-        request: AssetLookupRequestDto,
-        pack: LandblockPack,
-    ) -> AssetLookupResponseDto {
-        let payload = serialize_landblock_pack(&pack);
-
-        AssetLookupResponseDto {
-            request_id: request.request_id,
-            asset_id: request.asset_id,
-            payload_kind: AssetPayloadKindDto::Json,
-            payload,
-        }
-    }
-
-    fn build_failed_landblock_pack_lookup_response(
-        &self,
-        request: AssetLookupRequestDto,
-        landblock_id: u32,
-        error: anyhow::Error,
-    ) -> AssetLookupResponseDto {
-        AssetLookupResponseDto {
-            request_id: request.request_id,
-            asset_id: request.asset_id,
-            payload_kind: AssetPayloadKindDto::Json,
-            payload: serde_json::json!({
-                "kind": "landblock-pack",
-                "residencyKind": "landblock",
-                "sourceAssetKind": "landblock-pack",
-                "landblockId": landblock_id,
-                "landblockInfoId": landblock_id & 0xffff_fffe,
-                "classification": "outdoor",
-                "sourceFacts": {
-                    "buildings": []
-                },
-                "prepared": {
-                    "terrainMesh": null,
-                    "outdoorStaticInstances": [],
-                    "interiorCells": [],
-                    "staticMeshes": [],
-                    "spatialItems": [],
-                    "staticLandblockBvh": null
-                },
-                "dependencies": {
-                    "cellDatIds": [landblock_id, landblock_id & 0xffff_fffe],
-                    "portalDatIds": [],
-                    "renderableAssetIds": [],
-                    "missing": [],
-                    "unsupported": []
-                },
-                "diagnostics": {
-                    "sourceRecords": [],
-                    "errors": [{
-                        "namespace": EOR_CELL_NAMESPACE,
-                        "fileId": landblock_id,
-                        "role": "landblock-pack",
-                        "errorCode": asset_cache_error_code(&error),
-                        "detail": format!("{error:#}")
-                    }]
-                },
-                "provenance": {
-                    "source": "app-local-stub",
-                    "sourceAssetKind": "landblock-pack",
-                    "errorCode": asset_cache_error_code(&error),
-                    "detail": format!("{error:#}")
-                }
-            }),
-        }
-    }
-
-    fn build_landblock_summary_lookup_response(
-        &self,
-        request: AssetLookupRequestDto,
-        summary: LandblockSummary,
-    ) -> AssetLookupResponseDto {
-        AssetLookupResponseDto {
-            request_id: request.request_id,
-            asset_id: request.asset_id,
-            payload_kind: AssetPayloadKindDto::Json,
-            payload: serialize_landblock_summary(&summary),
-        }
-    }
-
-    fn build_failed_landblock_summary_lookup_response(
-        &self,
-        request: AssetLookupRequestDto,
-        landblock_id: u32,
-        error: anyhow::Error,
-    ) -> AssetLookupResponseDto {
-        AssetLookupResponseDto {
-            request_id: request.request_id,
-            asset_id: request.asset_id,
-            payload_kind: AssetPayloadKindDto::Json,
-            payload: serde_json::json!({
-                "kind": "landblock-summary",
-                "residencyKind": "landblock",
-                "sourceAssetKind": "landblock-summary",
-                "landblockId": landblock_id,
-                "landblockInfoId": landblock_id & 0xffff_fffe,
-                "classification": "outdoor",
-                "sourceFacts": {
-                    "buildings": []
-                },
-                "prepared": {
-                    "terrainMesh": null
-                },
-                "dependencies": {
-                    "cellDatIds": [landblock_id, landblock_id & 0xffff_fffe],
-                    "renderableAssetIds": []
-                },
-                "diagnostics": {
-                    "sourceRecords": [],
-                    "errors": [{
-                        "namespace": EOR_CELL_NAMESPACE,
-                        "fileId": landblock_id,
-                        "role": "landblock-summary",
-                        "errorCode": asset_cache_error_code(&error),
-                        "detail": format!("{error:#}")
-                    }]
-                },
-                "provenance": {
-                    "source": "app-local-stub",
-                    "sourceAssetKind": "landblock-summary",
-                    "errorCode": asset_cache_error_code(&error),
-                    "detail": format!("{error:#}")
-                }
-            }),
-        }
-    }
-
-    fn build_landblock_terrain_lookup_response(
-        &self,
-        request: AssetLookupRequestDto,
-        terrain: LandblockTerrainAsset,
-        region_id: u32,
-        region_number: u32,
-    ) -> AssetLookupResponseDto {
-        AssetLookupResponseDto {
-            request_id: request.request_id,
-            asset_id: request.asset_id,
-            payload_kind: AssetPayloadKindDto::Json,
-            payload: serialize_landblock_terrain_payload(&terrain, region_id, region_number),
-        }
-    }
-
-    fn build_failed_landblock_terrain_lookup_response(
-        &self,
-        request: AssetLookupRequestDto,
-        landblock_id: u32,
-        error: anyhow::Error,
-    ) -> AssetLookupResponseDto {
-        AssetLookupResponseDto {
-            request_id: request.request_id,
-            asset_id: request.asset_id,
-            payload_kind: AssetPayloadKindDto::Json,
-            payload: failed_landblock_terrain_payload(landblock_id, error),
-        }
-    }
-
-    fn build_landblock_building_shells_lookup_response(
-        &self,
-        request: AssetLookupRequestDto,
-        building_shells: LandblockBuildingShellsAsset,
-    ) -> AssetLookupResponseDto {
-        AssetLookupResponseDto {
-            request_id: request.request_id,
-            asset_id: request.asset_id,
-            payload_kind: AssetPayloadKindDto::Json,
-            payload: serialize_landblock_building_shells_payload(&building_shells),
-        }
-    }
-
-    fn build_failed_landblock_building_shells_lookup_response(
-        &self,
-        request: AssetLookupRequestDto,
-        landblock_id: u32,
-        error: anyhow::Error,
-    ) -> AssetLookupResponseDto {
-        AssetLookupResponseDto {
-            request_id: request.request_id,
-            asset_id: request.asset_id,
-            payload_kind: AssetPayloadKindDto::Json,
-            payload: failed_landblock_building_shells_payload(landblock_id, error),
-        }
-    }
-
-    fn build_landblock_scene_lookup_response(
-        &self,
-        request: AssetLookupRequestDto,
-        scene: LandblockSceneAsset,
-    ) -> AssetLookupResponseDto {
-        AssetLookupResponseDto {
-            request_id: request.request_id,
-            asset_id: request.asset_id,
-            payload_kind: AssetPayloadKindDto::Json,
-            payload: serialize_landblock_scene_payload(&scene),
-        }
-    }
-
-    fn build_failed_landblock_scene_lookup_response(
-        &self,
-        request: AssetLookupRequestDto,
-        landblock_id: u32,
-        error: anyhow::Error,
-    ) -> AssetLookupResponseDto {
-        AssetLookupResponseDto {
-            request_id: request.request_id,
-            asset_id: request.asset_id,
-            payload_kind: AssetPayloadKindDto::Json,
-            payload: failed_landblock_scene_payload(landblock_id, error),
-        }
-    }
-
     fn build_landblock_outdoor_lookup_response(
         &self,
         request: AssetLookupRequestDto,
@@ -843,8 +558,7 @@ impl HostBoundaryAdapter {
                 "defaultSoundTable": null,
                 "defaultScriptTable": null,
                 "dependencies": {
-                    "gfxObjAssetIds": [],
-                    "setupAppearanceAssetId": format_setup_appearance_asset_id(setup_model_id)
+                    "gfxObjAssetIds": []
                 },
                 "provenance": {
                     "source": "app-local-stub",
@@ -1051,22 +765,6 @@ fn parse_prefixed_data_id(asset_id: &str, prefix: &str, expected_type: u32) -> O
         .filter(|id| (id >> 24) == expected_type)
 }
 
-fn parse_landblock_pack_asset_id(asset_id: &str) -> Option<u32> {
-    asset_id
-        .strip_prefix("landblock-pack/")
-        .filter(|hex| hex.len() == 8 && hex.chars().all(|ch| ch.is_ascii_hexdigit()))
-        .and_then(|hex| u32::from_str_radix(hex, 16).ok())
-        .map(normalize_landblock_id)
-}
-
-fn parse_landblock_summary_asset_id(asset_id: &str) -> Option<u32> {
-    asset_id
-        .strip_prefix("landblock-summary/")
-        .filter(|hex| hex.len() == 8 && hex.chars().all(|ch| ch.is_ascii_hexdigit()))
-        .and_then(|hex| u32::from_str_radix(hex, 16).ok())
-        .map(normalize_landblock_id)
-}
-
 fn parse_landblock_child_asset_id(asset_id: &str, suffix: &str) -> Option<u32> {
     let rest = asset_id.strip_prefix("landblock/")?;
     let raw_hex = rest.strip_suffix(suffix)?;
@@ -1074,18 +772,6 @@ fn parse_landblock_child_asset_id(asset_id: &str, suffix: &str) -> Option<u32> {
         .then(|| u32::from_str_radix(raw_hex, 16).ok())
         .flatten()
         .map(normalize_landblock_id)
-}
-
-fn parse_landblock_terrain_asset_id(asset_id: &str) -> Option<u32> {
-    parse_landblock_child_asset_id(asset_id, "/terrain")
-}
-
-fn parse_landblock_building_shells_asset_id(asset_id: &str) -> Option<u32> {
-    parse_landblock_child_asset_id(asset_id, "/building-shells")
-}
-
-fn parse_landblock_scene_asset_id(asset_id: &str) -> Option<u32> {
-    parse_landblock_child_asset_id(asset_id, "/scene")
 }
 
 fn parse_landblock_outdoor_asset_id(asset_id: &str) -> Option<u32> {
@@ -1112,24 +798,8 @@ fn parse_terrain_material_asset_id(asset_id: &str) -> Option<u32> {
 }
 
 fn content_asset_request_from_asset_id(asset_id: &str) -> Option<ContentAssetRequest> {
-    parse_landblock_pack_asset_id(asset_id)
-        .map(ContentAssetRequest::LandblockPack)
-        .or_else(|| {
-            parse_landblock_summary_asset_id(asset_id).map(ContentAssetRequest::LandblockSummary)
-        })
-        .or_else(|| {
-            parse_landblock_terrain_asset_id(asset_id).map(ContentAssetRequest::LandblockTerrain)
-        })
-        .or_else(|| {
-            parse_landblock_building_shells_asset_id(asset_id)
-                .map(ContentAssetRequest::LandblockBuildingShells)
-        })
-        .or_else(|| {
-            parse_landblock_scene_asset_id(asset_id).map(ContentAssetRequest::LandblockScene)
-        })
-        .or_else(|| {
-            parse_landblock_outdoor_asset_id(asset_id).map(ContentAssetRequest::LandblockOutdoor)
-        })
+    parse_landblock_outdoor_asset_id(asset_id)
+        .map(ContentAssetRequest::LandblockOutdoor)
         .or_else(|| {
             parse_landblock_topology_asset_id(asset_id).map(ContentAssetRequest::LandblockTopology)
         })
@@ -1208,7 +878,6 @@ fn serialize_setup_model_payload(setup_model: &SetupModel) -> serde_json::Value 
         "defaultScriptTable": setup_model.default_script_table,
         "dependencies": {
             "gfxObjAssetIds": setup_model.parts.iter().map(|gfx_obj_id| format_gfx_obj_asset_id(*gfx_obj_id)).collect::<Vec<_>>(),
-            "setupAppearanceAssetId": format_setup_appearance_asset_id(setup_model.id),
         },
         "provenance": {
             "source": "repo-local-hba",
@@ -1425,69 +1094,6 @@ fn failed_dependency_payload(kind: &str, file_id: u32, error: anyhow::Error) -> 
     })
 }
 
-fn failed_landblock_terrain_payload(landblock_id: u32, error: anyhow::Error) -> serde_json::Value {
-    let detail = format!("{error:#}");
-    let error_code = asset_cache_error_code(&error);
-    serde_json::json!({
-        "kind": "landblock-terrain",
-        "residencyKind": "outdoor-landblock",
-        "sourceAssetKind": "landblock-terrain",
-        "landblockId": landblock_id,
-        "regionId": REGION_DESC_FILE_ID,
-        "regionNumber": 0,
-        "terrain": empty_landblock_terrain(),
-        "diagnostics": failed_landblock_diagnostics(EOR_CELL_NAMESPACE, landblock_id, "landblock-terrain", error_code, &detail),
-        "provenance": failed_provenance("landblock-terrain", error_code, &detail),
-    })
-}
-
-fn failed_landblock_building_shells_payload(
-    landblock_id: u32,
-    error: anyhow::Error,
-) -> serde_json::Value {
-    let detail = format!("{error:#}");
-    let error_code = asset_cache_error_code(&error);
-    serde_json::json!({
-        "kind": "landblock-building-shells",
-        "residencyKind": "outdoor-landblock",
-        "sourceAssetKind": "landblock-building-shells",
-        "landblockId": landblock_id,
-        "shells": [],
-        "shellBvh": {
-            "coordinateSpace": "landblock-local",
-            "nodes": [],
-            "items": [],
-        },
-        "diagnostics": failed_landblock_diagnostics(EOR_CELL_NAMESPACE, landblock_id, "landblock-building-shells", error_code, &detail),
-        "provenance": failed_provenance("landblock-building-shells", error_code, &detail),
-    })
-}
-
-fn failed_landblock_scene_payload(landblock_id: u32, error: anyhow::Error) -> serde_json::Value {
-    let detail = format!("{error:#}");
-    let error_code = asset_cache_error_code(&error);
-    serde_json::json!({
-        "kind": "landblock-scene",
-        "residencyKind": "landblock",
-        "sourceAssetKind": "landblock-scene",
-        "landblockId": landblock_id,
-        "landblockInfoId": landblock_id & 0xffff_fffe,
-        "classification": "outdoor",
-        "statics": [],
-        "buildings": [],
-        "envCells": [],
-        "portalLinks": [],
-        "envCellResidencyBvh": {
-            "coordinateSpace": "landblock-scene-residency",
-            "nodes": [],
-            "items": [],
-        },
-        "outdoorBvh": null,
-        "diagnostics": failed_landblock_diagnostics(EOR_CELL_NAMESPACE, landblock_id, "landblock-scene", error_code, &detail),
-        "provenance": failed_provenance("landblock-scene", error_code, &detail),
-    })
-}
-
 fn failed_landblock_outdoor_payload(landblock_id: u32, error: anyhow::Error) -> serde_json::Value {
     let detail = format!("{error:#}");
     let error_code = asset_cache_error_code(&error);
@@ -1520,7 +1126,7 @@ fn failed_landblock_topology_payload(landblock_id: u32, error: anyhow::Error) ->
         "envCells": [],
         "portalLinks": [],
         "envCellResidencyBvh": {
-            "coordinateSpace": "landblock-scene-residency",
+            "coordinateSpace": "landblock-topology-residency",
             "nodes": [],
             "items": [],
         },
@@ -1760,88 +1366,6 @@ fn serialize_content_asset_binary_response(
     writer: &mut BinaryAssetSectionWriter,
 ) -> anyhow::Result<AssetLookupResponseDto> {
     Ok(match content_request {
-        ContentAssetRequest::LandblockPack(landblock_id) => match asset {
-            Ok(ContentAsset::LandblockPack(pack)) => AssetLookupResponseDto {
-                request_id: request.request_id,
-                asset_id: request.asset_id,
-                payload_kind: AssetPayloadKindDto::Json,
-                payload: serialize_landblock_pack_binary_payload(&pack, path_prefix, writer),
-            },
-            Ok(_) => unreachable!("content asset runtime returned mismatched landblock pack"),
-            Err(error) => adapter.build_failed_landblock_pack_lookup_response(
-                request,
-                normalize_landblock_id(landblock_id),
-                error,
-            ),
-        },
-        ContentAssetRequest::LandblockSummary(landblock_id) => match asset {
-            Ok(ContentAsset::LandblockSummary(summary)) => AssetLookupResponseDto {
-                request_id: request.request_id,
-                asset_id: request.asset_id,
-                payload_kind: AssetPayloadKindDto::Json,
-                payload: serialize_landblock_summary_binary_payload(&summary, path_prefix, writer),
-            },
-            Ok(_) => unreachable!("content asset runtime returned mismatched landblock summary"),
-            Err(error) => adapter.build_failed_landblock_summary_lookup_response(
-                request,
-                normalize_landblock_id(landblock_id),
-                error,
-            ),
-        },
-        ContentAssetRequest::LandblockTerrain(landblock_id) => match asset {
-            Ok(ContentAsset::LandblockTerrain {
-                terrain,
-                region_id,
-                region_number,
-            }) => AssetLookupResponseDto {
-                request_id: request.request_id,
-                asset_id: request.asset_id,
-                payload_kind: AssetPayloadKindDto::Json,
-                payload: serialize_landblock_terrain_binary_payload(
-                    &terrain,
-                    region_id,
-                    region_number,
-                    path_prefix,
-                    writer,
-                ),
-            },
-            Ok(_) => unreachable!("content asset runtime returned mismatched landblock terrain"),
-            Err(error) => adapter.build_failed_landblock_terrain_lookup_response(
-                request,
-                normalize_landblock_id(landblock_id),
-                error,
-            ),
-        },
-        ContentAssetRequest::LandblockBuildingShells(landblock_id) => match asset {
-            Ok(ContentAsset::LandblockBuildingShells(building_shells)) => AssetLookupResponseDto {
-                request_id: request.request_id,
-                asset_id: request.asset_id,
-                payload_kind: AssetPayloadKindDto::Json,
-                payload: serialize_landblock_building_shells_payload(&building_shells),
-            },
-            Ok(_) => {
-                unreachable!("content asset runtime returned mismatched landblock building shells")
-            }
-            Err(error) => adapter.build_failed_landblock_building_shells_lookup_response(
-                request,
-                normalize_landblock_id(landblock_id),
-                error,
-            ),
-        },
-        ContentAssetRequest::LandblockScene(landblock_id) => match asset {
-            Ok(ContentAsset::LandblockScene(pack)) => AssetLookupResponseDto {
-                request_id: request.request_id,
-                asset_id: request.asset_id,
-                payload_kind: AssetPayloadKindDto::Json,
-                payload: serialize_landblock_scene_payload(&pack),
-            },
-            Ok(_) => unreachable!("content asset runtime returned mismatched landblock scene"),
-            Err(error) => adapter.build_failed_landblock_scene_lookup_response(
-                request,
-                normalize_landblock_id(landblock_id),
-                error,
-            ),
-        },
         ContentAssetRequest::LandblockOutdoor(landblock_id) => match asset {
             Ok(ContentAsset::LandblockOutdoor {
                 outdoor,
@@ -1851,7 +1375,13 @@ fn serialize_content_asset_binary_response(
                 request_id: request.request_id,
                 asset_id: request.asset_id,
                 payload_kind: AssetPayloadKindDto::Json,
-                payload: serialize_landblock_outdoor_payload(&outdoor, region_id, region_number),
+                payload: serialize_landblock_outdoor_binary_payload(
+                    &outdoor,
+                    region_id,
+                    region_number,
+                    path_prefix,
+                    writer,
+                ),
             },
             Ok(_) => unreachable!("content asset runtime returned mismatched landblock outdoor"),
             Err(error) => adapter.build_failed_landblock_outdoor_lookup_response(
@@ -1964,40 +1494,6 @@ fn serialize_asset_binary_batch_response(
     Ok(bytes)
 }
 
-fn serialize_landblock_summary_binary_payload(
-    summary: &LandblockSummary,
-    path_prefix: &str,
-    writer: &mut BinaryAssetSectionWriter,
-) -> serde_json::Value {
-    serde_json::json!({
-        "kind": "landblock-summary",
-        "residencyKind": "landblock",
-        "sourceAssetKind": "landblock-summary",
-        "landblockId": summary.landblock_id,
-        "landblockInfoId": summary.landblock_info_id,
-        "classification": serialize_landblock_classification(summary.classification),
-        "sourceFacts": {
-            "buildings": summary.buildings.iter().map(serialize_landblock_summary_building).collect::<Vec<_>>(),
-        },
-        "prepared": {
-            "terrainMesh": summary.terrain_mesh.as_ref().map(|mesh| {
-                serialize_prepared_terrain_mesh_binary(mesh, path_prefix, writer)
-            }),
-        },
-        "dependencies": {
-            "cellDatIds": derive_landblock_summary_cell_dat_ids(summary),
-            "renderableAssetIds": derive_landblock_summary_renderable_asset_ids(summary),
-        },
-        "diagnostics": serialize_landblock_pack_diagnostics(&summary.diagnostics),
-        "provenance": {
-            "source": "repo-local-hba",
-            "sourceAssetKind": "landblock-summary",
-            "errorCode": summary.diagnostics.errors.first().map(|error| error.error_code),
-            "detail": summary.diagnostics.errors.first().map(|error| error.detail.clone())
-        }
-    })
-}
-
 fn serialize_gfx_obj_binary_payload(
     gfx_obj: &GfxObj,
     path_prefix: &str,
@@ -2038,156 +1534,6 @@ fn serialize_gfx_obj_binary_payload(
             "errorCode": null,
             "detail": null
         }
-    })
-}
-
-fn serialize_landblock_pack_binary_payload(
-    pack: &LandblockPack,
-    path_prefix: &str,
-    writer: &mut BinaryAssetSectionWriter,
-) -> serde_json::Value {
-    serde_json::json!({
-        "kind": "landblock-pack",
-        "residencyKind": "landblock",
-        "sourceAssetKind": "landblock-pack",
-        "landblockId": pack.landblock_id,
-        "landblockInfoId": pack.landblock_info_id,
-        "classification": serialize_landblock_classification(pack.classification),
-        "sourceFacts": {
-            "buildings": serialize_landblock_pack_building_facts(pack.outdoor_scene.as_ref())
-        },
-        "prepared": {
-            "terrainMesh": pack.prepared.terrain_mesh.as_ref().map(|mesh| {
-                serialize_prepared_terrain_mesh_binary(mesh, path_prefix, writer)
-            }),
-            "outdoorStaticInstances": pack.prepared.outdoor_static_instances.iter().map(serialize_prepared_static_instance).collect::<Vec<_>>(),
-            "interiorCells": pack.prepared.interior_cells.iter().enumerate().map(|(index, cell)| {
-                serialize_prepared_interior_cell_binary(cell, index, path_prefix, writer)
-            }).collect::<Vec<_>>(),
-            "staticMeshes": pack.prepared.static_meshes.iter().map(serialize_prepared_static_mesh).collect::<Vec<_>>(),
-            "spatialItems": pack.prepared.spatial_items.iter().enumerate().map(|(index, item)| {
-                serialize_prepared_spatial_item_binary(item, index, path_prefix, writer)
-            }).collect::<Vec<_>>(),
-            "staticLandblockBvh": pack.prepared.static_landblock_bvh.as_ref().map(|bvh| {
-                serialize_prepared_bvh_binary(bvh, path_prefix, writer)
-            })
-        },
-        "dependencies": {
-            "cellDatIds": derive_landblock_pack_cell_dat_ids(pack),
-            "portalDatIds": derive_landblock_pack_portal_dat_ids(pack),
-            "renderableAssetIds": derive_landblock_pack_renderable_asset_ids(pack),
-            "missing": [],
-            "unsupported": []
-        },
-        "diagnostics": serialize_landblock_pack_diagnostics(&pack.diagnostics),
-        "provenance": {
-            "source": "repo-local-hba",
-            "sourceAssetKind": "landblock-pack",
-            "errorCode": pack.diagnostics.errors.first().map(|error| error.error_code),
-            "detail": pack.diagnostics.errors.first().map(|error| error.detail.clone())
-        }
-    })
-}
-
-fn serialize_prepared_terrain_mesh_binary(
-    mesh: &PreparedTerrainMesh,
-    path_prefix: &str,
-    writer: &mut BinaryAssetSectionWriter,
-) -> serde_json::Value {
-    writer.push_f32_section(
-        "prepared.terrainMesh.vertices",
-        format!("{path_prefix}.prepared.terrainMesh.vertices"),
-        3,
-        mesh.vertices
-            .iter()
-            .flat_map(|vertex| [vertex.x, vertex.y, vertex.z]),
-    );
-    writer.push_f32_section(
-        "prepared.terrainMesh.triangles",
-        format!("{path_prefix}.prepared.terrainMesh.triangles"),
-        5,
-        mesh.triangles.iter().flat_map(|triangle| {
-            [
-                triangle.a as f32,
-                triangle.b as f32,
-                triangle.c as f32,
-                triangle.terrain_type as f32,
-                triangle.average_height,
-            ]
-        }),
-    );
-    serde_json::json!({
-        "landblockId": mesh.landblock_id,
-        "gridSize": mesh.grid_size,
-        "tileSize": mesh.tile_size,
-        "vertices": [],
-        "triangles": [],
-        "minHeight": mesh.min_height,
-        "maxHeight": mesh.max_height,
-    })
-}
-
-fn serialize_prepared_interior_cell_binary(
-    cell: &PreparedInteriorCell,
-    cell_index: usize,
-    path_prefix: &str,
-    writer: &mut BinaryAssetSectionWriter,
-) -> serde_json::Value {
-    serde_json::json!({
-        "envCellId": cell.env_cell_id,
-        "environmentId": cell.environment_id,
-        "cellStructureId": cell.cell_structure_id,
-        "localPlacement": serialize_frame(&cell.local_placement),
-        "surfaceIds": cell.surface_ids,
-        "portals": cell.portals.iter().map(|portal| {
-            serde_json::json!({
-                "portalId": portal.portal_id,
-                "sourceIndex": portal.source_index,
-                "flags": portal.flags,
-                "polygonId": portal.polygon_id,
-                "otherCellId": portal.other_cell_id,
-                "otherPortalId": portal.other_portal_id,
-                "targetEnvCellId": portal.target_env_cell_id,
-                "isOutsideTransition": portal.is_outside_transition,
-            })
-        }).collect::<Vec<_>>(),
-        "portalApertures": cell.portal_apertures.iter().enumerate().map(|(aperture_index, aperture)| {
-            serialize_prepared_portal_aperture_binary(aperture, cell_index, aperture_index, path_prefix, writer)
-        }).collect::<Vec<_>>(),
-        "staticObjectCount": cell.static_object_count,
-        "cellBsp": serialize_bsp_node(&cell.cell_bsp),
-        "renderGeometry": serialize_prepared_polygon_set_render_geometry_binary(
-            &cell.render_geometry,
-            format!("{path_prefix}.prepared.interiorCells.{cell_index}.renderGeometry"),
-            writer,
-        ),
-    })
-}
-
-fn serialize_prepared_portal_aperture_binary(
-    aperture: &PreparedPortalAperture,
-    cell_index: usize,
-    aperture_index: usize,
-    path_prefix: &str,
-    writer: &mut BinaryAssetSectionWriter,
-) -> serde_json::Value {
-    writer.push_f32_section(
-        "prepared.interiorCells.portalApertures.points",
-        format!(
-            "{path_prefix}.prepared.interiorCells.{cell_index}.portalApertures.{aperture_index}.points"
-        ),
-        3,
-        aperture
-            .points
-            .iter()
-            .flat_map(|point| [point.x, point.y, point.z]),
-    );
-    serde_json::json!({
-        "portalId": aperture.portal_id,
-        "sourceIndex": aperture.source_index,
-        "polygonId": aperture.polygon_id,
-        "points": [],
-        "plane": aperture.plane.as_ref().map(serialize_prepared_portal_aperture_plane),
     })
 }
 
@@ -2241,196 +1587,8 @@ fn serialize_prepared_polygon_set_render_geometry_binary(
     })
 }
 
-fn serialize_prepared_spatial_item_binary(
-    item: &PreparedSpatialItem,
-    item_index: usize,
-    path_prefix: &str,
-    writer: &mut BinaryAssetSectionWriter,
-) -> serde_json::Value {
-    writer.push_f32_section(
-        "prepared.spatialItems.bounds",
-        format!("{path_prefix}.prepared.spatialItems.{item_index}.bounds"),
-        6,
-        [
-            item.bounds.min.x,
-            item.bounds.min.y,
-            item.bounds.min.z,
-            item.bounds.max.x,
-            item.bounds.max.y,
-            item.bounds.max.z,
-        ],
-    );
-    serde_json::json!({
-        "id": item.id,
-        "kind": serialize_prepared_spatial_item_kind(item.kind),
-        "ownerId": item.owner_id,
-        "sourceAssetId": item.source_asset_id,
-        "bounds": { "min": { "x": 0, "y": 0, "z": 0 }, "max": { "x": 0, "y": 0, "z": 0 } },
-        "metadata": serialize_prepared_spatial_item_metadata(&item.metadata),
-    })
-}
-
-fn serialize_prepared_bvh_binary(
-    bvh: &PreparedBvh,
-    path_prefix: &str,
-    writer: &mut BinaryAssetSectionWriter,
-) -> serde_json::Value {
-    serde_json::json!({
-        "coordinateSpace": bvh.coordinate_space,
-        "landblockId": bvh.landblock_id,
-        "scope": bvh.scope,
-        "nodes": bvh.nodes.iter().enumerate().map(|(index, node)| {
-            serialize_prepared_bvh_node_binary(node, index, path_prefix, writer)
-        }).collect::<Vec<_>>(),
-    })
-}
-
-fn serialize_prepared_bvh_node_binary(
-    node: &PreparedBvhNode,
-    node_index: usize,
-    path_prefix: &str,
-    writer: &mut BinaryAssetSectionWriter,
-) -> serde_json::Value {
-    writer.push_f32_section(
-        "prepared.staticLandblockBvh.nodes.bounds",
-        format!("{path_prefix}.prepared.staticLandblockBvh.nodes.{node_index}.bounds"),
-        6,
-        [
-            node.bounds.min.x,
-            node.bounds.min.y,
-            node.bounds.min.z,
-            node.bounds.max.x,
-            node.bounds.max.y,
-            node.bounds.max.z,
-        ],
-    );
-    serde_json::json!({
-        "bounds": { "min": { "x": 0, "y": 0, "z": 0 }, "max": { "x": 0, "y": 0, "z": 0 } },
-        "left": node.left,
-        "right": node.right,
-        "itemIndices": node.item_indices,
-        "kindMask": node.kind_mask,
-    })
-}
-
-fn serialize_landblock_pack(pack: &LandblockPack) -> serde_json::Value {
-    serde_json::json!({
-        "kind": "landblock-pack",
-        "residencyKind": "landblock",
-        "sourceAssetKind": "landblock-pack",
-        "landblockId": pack.landblock_id,
-        "landblockInfoId": pack.landblock_info_id,
-        "classification": serialize_landblock_classification(pack.classification),
-        "sourceFacts": {
-            "buildings": serialize_landblock_pack_building_facts(pack.outdoor_scene.as_ref())
-        },
-        "prepared": {
-            "terrainMesh": pack.prepared.terrain_mesh.as_ref().map(serialize_prepared_terrain_mesh),
-            "outdoorStaticInstances": pack.prepared.outdoor_static_instances.iter().map(serialize_prepared_static_instance).collect::<Vec<_>>(),
-            "interiorCells": pack.prepared.interior_cells.iter().map(serialize_prepared_interior_cell).collect::<Vec<_>>(),
-            "staticMeshes": pack.prepared.static_meshes.iter().map(serialize_prepared_static_mesh).collect::<Vec<_>>(),
-            "spatialItems": pack.prepared.spatial_items.iter().map(serialize_prepared_spatial_item).collect::<Vec<_>>(),
-            "staticLandblockBvh": pack.prepared.static_landblock_bvh.as_ref().map(serialize_prepared_bvh)
-        },
-        "dependencies": {
-            "cellDatIds": derive_landblock_pack_cell_dat_ids(pack),
-            "portalDatIds": derive_landblock_pack_portal_dat_ids(pack),
-            "renderableAssetIds": derive_landblock_pack_renderable_asset_ids(pack),
-            "missing": [],
-            "unsupported": []
-        },
-        "diagnostics": serialize_landblock_pack_diagnostics(&pack.diagnostics),
-        "provenance": {
-            "source": "repo-local-hba",
-            "sourceAssetKind": "landblock-pack",
-            "errorCode": pack.diagnostics.errors.first().map(|error| error.error_code),
-            "detail": pack.diagnostics.errors.first().map(|error| error.detail.clone())
-        }
-    })
-}
-
-fn serialize_landblock_summary(summary: &LandblockSummary) -> serde_json::Value {
-    serde_json::json!({
-        "kind": "landblock-summary",
-        "residencyKind": "landblock",
-        "sourceAssetKind": "landblock-summary",
-        "landblockId": summary.landblock_id,
-        "landblockInfoId": summary.landblock_info_id,
-        "classification": serialize_landblock_classification(summary.classification),
-        "sourceFacts": {
-            "buildings": summary.buildings.iter().map(serialize_landblock_summary_building).collect::<Vec<_>>(),
-        },
-        "prepared": {
-            "terrainMesh": summary.terrain_mesh.as_ref().map(serialize_prepared_terrain_mesh),
-        },
-        "dependencies": {
-            "cellDatIds": derive_landblock_summary_cell_dat_ids(summary),
-            "renderableAssetIds": derive_landblock_summary_renderable_asset_ids(summary),
-        },
-        "diagnostics": serialize_landblock_pack_diagnostics(&summary.diagnostics),
-        "provenance": {
-            "source": "repo-local-hba",
-            "sourceAssetKind": "landblock-summary",
-            "errorCode": summary.diagnostics.errors.first().map(|error| error.error_code),
-            "detail": summary.diagnostics.errors.first().map(|error| error.detail.clone())
-        }
-    })
-}
-
-fn serialize_landblock_terrain_payload(
-    terrain_asset: &LandblockTerrainAsset,
-    region_id: u32,
-    region_number: u32,
-) -> serde_json::Value {
-    serialize_landblock_terrain_payload_with_terrain(
-        terrain_asset,
-        region_id,
-        region_number,
-        serialize_landblock_terrain(terrain_asset),
-    )
-}
-
-fn serialize_landblock_terrain_binary_payload(
-    terrain_asset: &LandblockTerrainAsset,
-    region_id: u32,
-    region_number: u32,
-    path_prefix: &str,
-    writer: &mut BinaryAssetSectionWriter,
-) -> serde_json::Value {
-    serialize_landblock_terrain_payload_with_terrain(
-        terrain_asset,
-        region_id,
-        region_number,
-        serialize_landblock_terrain_binary(terrain_asset, path_prefix, writer),
-    )
-}
-
-fn serialize_landblock_terrain_payload_with_terrain(
-    terrain_asset: &LandblockTerrainAsset,
-    region_id: u32,
-    region_number: u32,
-    terrain: serde_json::Value,
-) -> serde_json::Value {
-    serde_json::json!({
-        "kind": "landblock-terrain",
-        "residencyKind": "outdoor-landblock",
-        "sourceAssetKind": "landblock-terrain",
-        "landblockId": terrain_asset.landblock_id,
-        "regionId": region_id,
-        "regionNumber": region_number,
-        "terrain": terrain,
-        "diagnostics": serialize_landblock_pack_diagnostics(&terrain_asset.diagnostics),
-        "provenance": {
-            "source": "repo-local-hba",
-            "sourceAssetKind": "landblock-terrain",
-            "errorCode": terrain_asset.diagnostics.errors.first().map(|error| error.error_code),
-            "detail": terrain_asset.diagnostics.errors.first().map(|error| error.detail.clone())
-        }
-    })
-}
-
 fn serialize_landblock_terrain_binary(
-    terrain_asset: &LandblockTerrainAsset,
+    terrain_asset: &SerializedOutdoorTerrainSource,
     path_prefix: &str,
     writer: &mut BinaryAssetSectionWriter,
 ) -> serde_json::Value {
@@ -2468,7 +1626,9 @@ fn serialize_landblock_terrain_binary(
     terrain
 }
 
-fn serialize_landblock_terrain(terrain_asset: &LandblockTerrainAsset) -> serde_json::Value {
+fn serialize_landblock_terrain(
+    terrain_asset: &SerializedOutdoorTerrainSource,
+) -> serde_json::Value {
     let Some(mesh) = terrain_asset.terrain_mesh.as_ref() else {
         return empty_landblock_terrain();
     };
@@ -2497,7 +1657,7 @@ fn serialize_landblock_terrain(terrain_asset: &LandblockTerrainAsset) -> serde_j
         "triangles": build_landblock_terrain_triangles(mesh).iter().map(serialize_landblock_terrain_triangle).collect::<Vec<_>>(),
         "quads": quads.iter().map(serialize_landblock_terrain_quad).collect::<Vec<_>>(),
         "terrainBvh": {
-            "coordinateSpace": "landblock-terrain-local",
+            "coordinateSpace": "landblock-outdoor-terrain-local",
             "nodes": terrain_bvh_nodes,
             "items": terrain_bvh_items,
         },
@@ -2515,71 +1675,13 @@ fn empty_landblock_terrain() -> serde_json::Value {
         "triangles": [],
         "quads": [],
         "terrainBvh": {
-            "coordinateSpace": "landblock-terrain-local",
+            "coordinateSpace": "landblock-outdoor-terrain-local",
             "nodes": [],
             "items": [],
         },
         "minHeight": 0.0,
         "maxHeight": 0.0,
         "bounds": null,
-    })
-}
-
-fn serialize_landblock_building_shells_payload(
-    building_shells: &LandblockBuildingShellsAsset,
-) -> serde_json::Value {
-    serde_json::json!({
-        "kind": "landblock-building-shells",
-        "residencyKind": "outdoor-landblock",
-        "sourceAssetKind": "landblock-building-shells",
-        "landblockId": building_shells.landblock_id,
-        "landblockInfoId": building_shells.landblock_info_id,
-        "shells": building_shells.shells.iter().map(serialize_landblock_building_shell_member).collect::<Vec<_>>(),
-        "shellBvh": serialize_landblock_building_shell_bvh(building_shells),
-        "diagnostics": serialize_landblock_pack_diagnostics(&building_shells.diagnostics),
-        "provenance": {
-            "source": "repo-local-hba",
-            "sourceAssetKind": "landblock-building-shells",
-            "errorCode": building_shells.diagnostics.errors.first().map(|error| error.error_code),
-            "detail": building_shells.diagnostics.errors.first().map(|error| error.detail.clone())
-        }
-    })
-}
-
-fn serialize_landblock_building_shell_member(shell: &LandblockBuildingShell) -> serde_json::Value {
-    serde_json::json!({
-        "shellId": shell.shell_id,
-        "buildingIndex": shell.building_index,
-        "sourceDid": shell.source_did,
-        "sourceAssetId": shell.source_asset_id,
-        "localPlacement": serialize_frame(&shell.local_placement),
-        "sourceScale": serialize_prepared_vec3(&shell.source_scale),
-        "sourceBounds": shell.source_bounds.as_ref().map(serialize_prepared_aabb),
-        "instanceBounds": shell.instance_bounds.as_ref().map(serialize_prepared_aabb),
-    })
-}
-
-fn serialize_landblock_building_shell_bvh(
-    building_shells: &LandblockBuildingShellsAsset,
-) -> serde_json::Value {
-    let mut items = Vec::new();
-    let mut node_inputs = Vec::new();
-
-    for shell in &building_shells.shells {
-        let Some(bounds) = shell.instance_bounds else {
-            continue;
-        };
-        items.push(serde_json::json!({
-            "kind": "building-shell",
-            "shellId": shell.shell_id,
-        }));
-        node_inputs.push((bounds, 1_u32));
-    }
-
-    serde_json::json!({
-        "coordinateSpace": "landblock-local",
-        "nodes": build_flat_bvh_nodes_from_bounds(node_inputs),
-        "items": items,
     })
 }
 
@@ -2654,7 +1756,7 @@ fn build_landblock_terrain_quads(
             };
             quads.push(SerializedTerrainQuad {
                 terrain_quad_id: format!(
-                    "landblock/{:08x}/terrain/quad/{row:02x}/{col:02x}",
+                    "landblock/{:08x}/outdoor/terrain/quad/{row:02x}/{col:02x}",
                     mesh.landblock_id
                 ),
                 row,
@@ -2686,7 +1788,7 @@ fn build_landblock_terrain_triangles(mesh: &PreparedTerrainMesh) -> Vec<Serializ
             let bounds = terrain_vertex_bounds_json(mesh, [triangle.a, triangle.b, triangle.c])?;
             Some(SerializedTerrainTriangle {
                 terrain_triangle_id: format!(
-                    "landblock/{:08x}/terrain/triangle/{triangle_index:04x}",
+                    "landblock/{:08x}/outdoor/terrain/triangle/{triangle_index:04x}",
                     mesh.landblock_id
                 ),
                 quad_index: triangle_index / 2,
@@ -2838,34 +1940,40 @@ fn build_flat_bvh_nodes_from_bounds(items: Vec<(PreparedAabb, u32)>) -> Vec<serd
     })]
 }
 
-fn serialize_landblock_scene_payload(scene: &LandblockSceneAsset) -> serde_json::Value {
-    serde_json::json!({
-        "kind": "landblock-scene",
-        "residencyKind": "landblock",
-        "sourceAssetKind": "landblock-scene",
-        "landblockId": scene.landblock_id,
-        "landblockInfoId": scene.landblock_info_id,
-        "classification": serialize_landblock_classification(scene.classification),
-        "statics": scene.statics.iter().map(serialize_landblock_scene_static_member).collect::<Vec<_>>(),
-        "buildings": scene.buildings.iter().map(serialize_landblock_scene_building_member).collect::<Vec<_>>(),
-        "envCells": scene.env_cells.iter().map(serialize_landblock_scene_env_cell_member).collect::<Vec<_>>(),
-        "portalLinks": serialize_landblock_scene_portal_links(scene),
-        "envCellResidencyBvh": serialize_landblock_scene_env_cell_residency_bvh(scene),
-        "outdoorBvh": serialize_landblock_scene_outdoor_bvh(scene),
-        "diagnostics": serialize_landblock_pack_diagnostics(&scene.diagnostics),
-        "provenance": {
-            "source": "repo-local-hba",
-            "sourceAssetKind": "landblock-scene",
-            "errorCode": scene.diagnostics.errors.first().map(|error| error.error_code),
-            "detail": scene.diagnostics.errors.first().map(|error| error.detail.clone())
-        }
-    })
-}
-
 fn serialize_landblock_outdoor_payload(
     outdoor: &LandblockOutdoorAsset,
     region_id: u32,
     region_number: u32,
+) -> serde_json::Value {
+    serialize_landblock_outdoor_payload_with_terrain(
+        outdoor,
+        region_id,
+        region_number,
+        serialize_landblock_outdoor_terrain(outdoor),
+    )
+}
+
+fn serialize_landblock_outdoor_binary_payload(
+    outdoor: &LandblockOutdoorAsset,
+    region_id: u32,
+    region_number: u32,
+    path_prefix: &str,
+    writer: &mut BinaryAssetSectionWriter,
+) -> serde_json::Value {
+    let terrain_asset = landblock_outdoor_terrain_asset(outdoor);
+    serialize_landblock_outdoor_payload_with_terrain(
+        outdoor,
+        region_id,
+        region_number,
+        serialize_landblock_terrain_binary(&terrain_asset, path_prefix, writer),
+    )
+}
+
+fn serialize_landblock_outdoor_payload_with_terrain(
+    outdoor: &LandblockOutdoorAsset,
+    region_id: u32,
+    region_number: u32,
+    terrain: serde_json::Value,
 ) -> serde_json::Value {
     serde_json::json!({
         "kind": "landblock-outdoor",
@@ -2875,7 +1983,7 @@ fn serialize_landblock_outdoor_payload(
         "regionId": region_id,
         "regionNumber": region_number,
         "classification": "outdoor",
-        "terrain": serialize_landblock_outdoor_terrain(outdoor),
+        "terrain": terrain,
         "statics": outdoor.statics.iter().map(serialize_landblock_outdoor_static_member).collect::<Vec<_>>(),
         "outdoorBvh": serialize_landblock_outdoor_bvh(outdoor),
         "diagnostics": serialize_landblock_pack_diagnostics(&outdoor.diagnostics),
@@ -2910,13 +2018,22 @@ fn serialize_landblock_topology_payload(topology: &LandblockTopologyAsset) -> se
 }
 
 fn serialize_landblock_outdoor_terrain(outdoor: &LandblockOutdoorAsset) -> serde_json::Value {
-    let terrain_asset = LandblockTerrainAsset {
-        landblock_id: outdoor.landblock_id,
+    let terrain_asset = landblock_outdoor_terrain_asset(outdoor);
+    serialize_landblock_terrain(&terrain_asset)
+}
+
+fn landblock_outdoor_terrain_asset(
+    outdoor: &LandblockOutdoorAsset,
+) -> SerializedOutdoorTerrainSource {
+    SerializedOutdoorTerrainSource {
         cell_landblock: outdoor.cell_landblock.clone(),
         terrain_mesh: outdoor.terrain_mesh.clone(),
-        diagnostics: outdoor.diagnostics.clone(),
-    };
-    serialize_landblock_terrain(&terrain_asset)
+    }
+}
+
+struct SerializedOutdoorTerrainSource {
+    cell_landblock: Option<holtburger_content::CellLandblockFact>,
+    terrain_mesh: Option<PreparedTerrainMesh>,
 }
 
 fn serialize_landblock_outdoor_static_member(
@@ -2985,37 +2102,7 @@ fn serialize_landblock_outdoor_bvh_item_kind(kind: PreparedStaticInstanceKind) -
 fn serialize_landblock_topology_env_cell_residency_bvh(
     topology: &LandblockTopologyAsset,
 ) -> serde_json::Value {
-    let scene = LandblockSceneAsset {
-        landblock_id: topology.landblock_id,
-        landblock_info_id: topology.landblock_info_id,
-        classification: topology.classification,
-        statics: Vec::new(),
-        buildings: Vec::new(),
-        env_cells: topology.env_cells.clone(),
-        diagnostics: topology.diagnostics.clone(),
-    };
-    serialize_landblock_scene_env_cell_residency_bvh(&scene)
-}
-
-fn serialize_landblock_topology_portal_links(
-    topology: &LandblockTopologyAsset,
-) -> Vec<serde_json::Value> {
-    let scene = LandblockSceneAsset {
-        landblock_id: topology.landblock_id,
-        landblock_info_id: topology.landblock_info_id,
-        classification: topology.classification,
-        statics: Vec::new(),
-        buildings: Vec::new(),
-        env_cells: topology.env_cells.clone(),
-        diagnostics: topology.diagnostics.clone(),
-    };
-    serialize_landblock_scene_portal_links(&scene)
-}
-
-fn serialize_landblock_scene_env_cell_residency_bvh(
-    scene: &LandblockSceneAsset,
-) -> serde_json::Value {
-    let items = scene
+    let items = topology
         .env_cells
         .iter()
         .map(|cell| {
@@ -3027,7 +2114,7 @@ fn serialize_landblock_scene_env_cell_residency_bvh(
             })
         })
         .collect::<Vec<_>>();
-    let node_inputs = scene
+    let node_inputs = topology
         .env_cells
         .iter()
         .map(|cell| {
@@ -3050,88 +2137,16 @@ fn serialize_landblock_scene_env_cell_residency_bvh(
         })
         .collect::<Vec<_>>();
     serde_json::json!({
-        "coordinateSpace": "landblock-scene-residency",
+        "coordinateSpace": "landblock-topology-residency",
         "nodes": build_flat_bvh_nodes_from_bounds(node_inputs),
         "items": items,
     })
 }
 
-fn serialize_landblock_scene_static_member(
-    member: &LandblockSceneStaticMember,
-) -> serde_json::Value {
-    let instance = &member.instance;
-    serde_json::json!({
-        "kind": serialize_landblock_scene_static_kind(instance.kind),
-        "instanceId": instance.instance_id,
-        "memberId": format!("landblock-scene/static/{}", instance.instance_id),
-        "sourceDid": instance.source_did,
-        "sourceAssetId": instance.source_asset_id,
-        "sourceIndex": instance.source_index,
-        "localPlacement": serialize_frame(&instance.local_placement),
-        "sourceScale": serialize_prepared_vec3(&instance.source_scale),
-        "sourceBounds": member.source_bounds.map(serialize_bounds),
-        "instanceBounds": member.instance_bounds.map(serialize_bounds),
-    })
-}
-
-fn serialize_landblock_scene_static_kind(kind: PreparedStaticInstanceKind) -> &'static str {
-    match kind {
-        PreparedStaticInstanceKind::GeneratedScenery => "generated-scenery",
-        _ => "scenery",
-    }
-}
-
-fn serialize_landblock_scene_building_member(
-    member: &LandblockSceneBuildingMember,
-) -> serde_json::Value {
-    let instance = &member.instance;
-    let portals = member
-        .portals
-        .iter()
-        .map(|portal| {
-            serde_json::json!({
-                "portalId": portal.portal_id,
-                "sourceIndex": portal.source_index,
-                "flags": portal.flags,
-                "otherCellId": portal.other_cell_id,
-                "otherPortalId": portal.other_portal_id,
-                "stabLocalCellIds": portal.stab_list,
-                "linkedEnvCellIds": portal.linked_env_cell_ids,
-            })
-        })
-        .collect::<Vec<_>>();
-    serde_json::json!({
-        "kind": "building",
-        "instanceId": instance.instance_id,
-        "memberId": format!("landblock-scene/building/{}", instance.instance_id),
-        "sourceDid": instance.source_did,
-        "sourceAssetId": instance.source_asset_id,
-        "sourceIndex": instance.source_index,
-        "localPlacement": serialize_frame(&instance.local_placement),
-        "sourceScale": serialize_prepared_vec3(&instance.source_scale),
-        "sourceBounds": member.source_bounds.map(serialize_bounds),
-        "instanceBounds": member.instance_bounds.map(serialize_bounds),
-        "numLeaves": member.num_leaves,
-        "portals": portals,
-    })
-}
-
-fn serialize_landblock_scene_env_cell_member(
-    cell: &holtburger_content::EnvCellFact,
-) -> serde_json::Value {
-    serde_json::json!({
-        "memberId": format!("env-cell/{:08x}", cell.env_cell_id),
-        "envCellId": cell.env_cell_id,
-        "assetId": format_env_cell_asset_id(cell.env_cell_id),
-        "localPlacement": serialize_frame(&cell.local_placement),
-        "visibleEnvCellIds": cell.visible_cell_ids,
-        "restrictionObjectId": cell.restriction_object_id,
-        "seenOutside": cell.seen_outside,
-    })
-}
-
-fn serialize_landblock_scene_portal_links(scene: &LandblockSceneAsset) -> Vec<serde_json::Value> {
-    scene
+fn serialize_landblock_topology_portal_links(
+    topology: &LandblockTopologyAsset,
+) -> Vec<serde_json::Value> {
+    topology
         .env_cells
         .iter()
         .flat_map(|cell| {
@@ -3152,7 +2167,7 @@ fn serialize_landblock_scene_portal_links(scene: &LandblockSceneAsset) -> Vec<se
                     }).unwrap_or_else(|| {
                         serde_json::json!({
                             "kind": "outside",
-                            "landblockId": scene.landblock_id,
+                            "landblockId": topology.landblock_id,
                         })
                     }),
                     "flags": portal.flags,
@@ -3166,42 +2181,25 @@ fn serialize_landblock_scene_portal_links(scene: &LandblockSceneAsset) -> Vec<se
         .collect()
 }
 
-fn serialize_landblock_scene_outdoor_bvh(scene: &LandblockSceneAsset) -> serde_json::Value {
-    let items = scene
-        .statics
-        .iter()
-        .map(|member| serde_json::json!({ "kind": "static", "instanceId": member.instance.instance_id }))
-        .chain(scene.buildings.iter().map(|member| {
-            serde_json::json!({ "kind": "building", "instanceId": member.instance.instance_id })
-        }))
-        .collect::<Vec<_>>();
-    if items.is_empty() {
-        serde_json::Value::Null
-    } else {
-        let node_inputs = scene
-            .statics
-            .iter()
-            .filter_map(|member| Some((member.instance_bounds?, 2_u32)))
-            .chain(
-                scene
-                    .buildings
-                    .iter()
-                    .filter_map(|member| Some((member.instance_bounds?, 4_u32))),
-            )
-            .collect::<Vec<_>>();
-        serde_json::json!({
-            "coordinateSpace": "landblock-render-local",
-            "nodes": build_flat_bvh_nodes_from_bounds(node_inputs),
-            "items": items,
-        })
-    }
+fn serialize_landblock_scene_env_cell_member(
+    cell: &holtburger_content::EnvCellFact,
+) -> serde_json::Value {
+    serde_json::json!({
+        "memberId": format!("env-cell/{:08x}", cell.env_cell_id),
+        "envCellId": cell.env_cell_id,
+        "assetId": format_env_cell_asset_id(cell.env_cell_id),
+        "localPlacement": serialize_frame(&cell.local_placement),
+        "visibleEnvCellIds": cell.visible_cell_ids,
+        "restrictionObjectId": cell.restriction_object_id,
+        "seenOutside": cell.seen_outside,
+    })
 }
 
 fn serialize_env_cell_payload(asset: &EnvCellAsset) -> serde_json::Value {
     serialize_env_cell_payload_with_geometry(
         asset,
         serialize_prepared_polygon_set_render_geometry(&asset.prepared_cell.render_geometry),
-        |aperture| serialize_prepared_portal_aperture(aperture),
+        serialize_prepared_portal_aperture,
     )
 }
 
@@ -3430,81 +2428,6 @@ fn serialize_terrain_material_payload(table: &ResolvedTerrainMaterialTable) -> s
     })
 }
 
-fn serialize_landblock_summary_building(building: &LandblockSummaryBuilding) -> serde_json::Value {
-    serde_json::json!({
-        "instanceId": building.instance_id,
-        "owningLandblockId": building.owning_landblock_id,
-        "sourceDid": building.source_did,
-        "sourceAssetId": building.source_asset_id,
-        "sourceIndex": building.source_index,
-        "localPlacement": serialize_frame(&building.local_placement),
-        "numLeaves": building.num_leaves,
-        "portals": building.portals.iter().map(serialize_landblock_summary_building_portal).collect::<Vec<_>>(),
-    })
-}
-
-fn serialize_landblock_summary_building_portal(
-    portal: &LandblockSummaryBuildingPortal,
-) -> serde_json::Value {
-    serde_json::json!({
-        "portalId": portal.portal_id,
-        "sourceIndex": portal.source_index,
-        "flags": portal.flags,
-        "otherCellId": portal.other_cell_id,
-        "otherPortalId": portal.other_portal_id,
-        "stabList": portal.stab_list,
-        "linkedEnvCellIds": portal.linked_env_cell_ids,
-    })
-}
-
-fn serialize_prepared_terrain_mesh(mesh: &PreparedTerrainMesh) -> serde_json::Value {
-    serde_json::json!({
-        "landblockId": mesh.landblock_id,
-        "gridSize": mesh.grid_size,
-        "tileSize": mesh.tile_size,
-        "vertices": mesh.vertices.iter().map(serialize_prepared_vec3).collect::<Vec<_>>(),
-        "triangles": mesh.triangles.iter().map(serialize_prepared_terrain_triangle).collect::<Vec<_>>(),
-        "minHeight": mesh.min_height,
-        "maxHeight": mesh.max_height,
-    })
-}
-
-fn serialize_prepared_terrain_triangle(triangle: &PreparedTerrainTriangle) -> serde_json::Value {
-    serde_json::json!({
-        "a": triangle.a,
-        "b": triangle.b,
-        "c": triangle.c,
-        "terrainType": triangle.terrain_type,
-        "averageHeight": triangle.average_height,
-    })
-}
-
-fn serialize_prepared_interior_cell(cell: &PreparedInteriorCell) -> serde_json::Value {
-    serde_json::json!({
-        "envCellId": cell.env_cell_id,
-        "environmentId": cell.environment_id,
-        "cellStructureId": cell.cell_structure_id,
-        "localPlacement": serialize_frame(&cell.local_placement),
-        "surfaceIds": cell.surface_ids,
-        "portals": cell.portals.iter().map(|portal| {
-            serde_json::json!({
-                "portalId": portal.portal_id,
-                "sourceIndex": portal.source_index,
-                "flags": portal.flags,
-                "polygonId": portal.polygon_id,
-                "otherCellId": portal.other_cell_id,
-                "otherPortalId": portal.other_portal_id,
-                "targetEnvCellId": portal.target_env_cell_id,
-                "isOutsideTransition": portal.is_outside_transition,
-            })
-        }).collect::<Vec<_>>(),
-        "portalApertures": cell.portal_apertures.iter().map(serialize_prepared_portal_aperture).collect::<Vec<_>>(),
-        "staticObjectCount": cell.static_object_count,
-        "cellBsp": serialize_bsp_node(&cell.cell_bsp),
-        "renderGeometry": serialize_prepared_polygon_set_render_geometry(&cell.render_geometry),
-    })
-}
-
 fn serialize_prepared_portal_aperture(aperture: &PreparedPortalAperture) -> serde_json::Value {
     serde_json::json!({
         "portalId": aperture.portal_id,
@@ -3532,96 +2455,6 @@ fn serialize_prepared_portal_aperture_plane_source(
         PreparedPortalAperturePlaneSource::DrawingBspPortal => "drawing-bsp-portal",
         PreparedPortalAperturePlaneSource::DerivedFromRenderPoints => "derived-from-render-points",
     }
-}
-
-fn serialize_prepared_static_instance(instance: &PreparedStaticInstance) -> serde_json::Value {
-    serde_json::json!({
-        "instanceId": instance.instance_id,
-        "kind": serialize_prepared_static_instance_kind(instance.kind),
-        "owningLandblockId": instance.owning_landblock_id,
-        "owningEnvCellId": instance.owning_env_cell_id,
-        "sourceDid": instance.source_did,
-        "sourceAssetId": instance.source_asset_id,
-        "sourceIndex": instance.source_index,
-        "localPlacement": serialize_frame(&instance.local_placement),
-        "sourceScale": serialize_prepared_vec3(&instance.source_scale),
-    })
-}
-
-fn serialize_prepared_static_mesh(mesh: &PreparedStaticMesh) -> serde_json::Value {
-    serde_json::json!({
-        "instanceId": mesh.instance_id,
-        "kind": serialize_prepared_static_instance_kind(mesh.kind),
-        "owningLandblockId": mesh.owning_landblock_id,
-        "owningEnvCellId": mesh.owning_env_cell_id,
-        "sourceDid": mesh.source_did,
-        "sourceAssetId": mesh.source_asset_id,
-        "sourceIndex": mesh.source_index,
-        "localPlacement": serialize_frame(&mesh.local_placement),
-        "sourceScale": serialize_prepared_vec3(&mesh.source_scale),
-        "partIndex": mesh.part_index,
-        "gfxObjId": mesh.gfx_obj_id,
-        "gfxObjAssetId": mesh.gfx_obj_asset_id,
-        "partPlacements": mesh.part_placements.iter().map(serialize_frame).collect::<Vec<_>>(),
-        "partScale": serialize_prepared_vec3(&mesh.part_scale),
-        "sourceBounds": mesh.source_bounds.as_ref().map(serialize_prepared_aabb),
-        "instanceBounds": mesh.instance_bounds.as_ref().map(serialize_prepared_aabb),
-    })
-}
-
-fn serialize_prepared_static_instance_kind(kind: PreparedStaticInstanceKind) -> &'static str {
-    match kind {
-        PreparedStaticInstanceKind::Scenery => "scenery",
-        PreparedStaticInstanceKind::Building => "building",
-        PreparedStaticInstanceKind::GeneratedScenery => "generated-scenery",
-        PreparedStaticInstanceKind::IndoorStatic => "indoor-static",
-    }
-}
-
-fn serialize_prepared_spatial_item(item: &PreparedSpatialItem) -> serde_json::Value {
-    serde_json::json!({
-        "id": item.id,
-        "kind": serialize_prepared_spatial_item_kind(item.kind),
-        "ownerId": item.owner_id,
-        "sourceAssetId": item.source_asset_id,
-        "bounds": serialize_prepared_aabb(&item.bounds),
-        "metadata": serialize_prepared_spatial_item_metadata(&item.metadata),
-    })
-}
-
-fn serialize_prepared_spatial_item_metadata(
-    metadata: &PreparedSpatialItemMetadata,
-) -> serde_json::Value {
-    match metadata {
-        PreparedSpatialItemMetadata::None => serde_json::json!({ "kind": "none" }),
-        PreparedSpatialItemMetadata::TerrainQuad(terrain) => serde_json::json!({
-            "kind": "terrain-quad",
-            "row": terrain.row,
-            "col": terrain.col,
-            "quadIndex": terrain.quad_index,
-            "triangleIndices": terrain.triangle_indices,
-        }),
-    }
-}
-
-fn serialize_prepared_spatial_item_kind(kind: PreparedSpatialItemKind) -> &'static str {
-    match kind {
-        PreparedSpatialItemKind::Terrain => "terrain",
-        PreparedSpatialItemKind::OutdoorStatic => "outdoor-static",
-        PreparedSpatialItemKind::Building => "building",
-        PreparedSpatialItemKind::EnvCell => "env-cell",
-        PreparedSpatialItemKind::IndoorStatic => "indoor-static",
-        PreparedSpatialItemKind::Portal => "portal",
-    }
-}
-
-fn serialize_prepared_bvh(bvh: &PreparedBvh) -> serde_json::Value {
-    serde_json::json!({
-        "coordinateSpace": bvh.coordinate_space,
-        "landblockId": bvh.landblock_id,
-        "scope": bvh.scope,
-        "nodes": bvh.nodes.iter().map(serialize_prepared_bvh_node).collect::<Vec<_>>(),
-    })
 }
 
 fn serialize_prepared_bvh_node(node: &PreparedBvhNode) -> serde_json::Value {
@@ -3691,55 +2524,6 @@ fn serialize_prepared_vec3(vector: &PreparedVec3) -> serde_json::Value {
     })
 }
 
-fn derive_landblock_pack_cell_dat_ids(pack: &LandblockPack) -> Vec<u32> {
-    let mut ids = vec![pack.landblock_id, pack.landblock_info_id];
-    ids.extend(
-        pack.interiors
-            .env_cells
-            .iter()
-            .map(|env_cell| env_cell.env_cell_id),
-    );
-    ids.sort_unstable();
-    ids.dedup();
-    ids
-}
-
-fn derive_landblock_pack_portal_dat_ids(pack: &LandblockPack) -> Vec<u32> {
-    let mut ids = pack
-        .interiors
-        .environments
-        .iter()
-        .map(|environment| environment.id)
-        .collect::<Vec<_>>();
-    ids.sort_unstable();
-    ids.dedup();
-    ids
-}
-
-fn derive_landblock_summary_cell_dat_ids(summary: &LandblockSummary) -> Vec<u32> {
-    let mut ids = vec![summary.landblock_id, summary.landblock_info_id];
-    ids.sort_unstable();
-    ids.dedup();
-    ids
-}
-
-fn derive_landblock_summary_renderable_asset_ids(summary: &LandblockSummary) -> Vec<String> {
-    let mut ids = summary
-        .objects
-        .iter()
-        .filter_map(|object| object.source_asset_id.clone())
-        .chain(
-            summary
-                .buildings
-                .iter()
-                .filter_map(|building| building.source_asset_id.clone()),
-        )
-        .collect::<Vec<_>>();
-    ids.sort();
-    ids.dedup();
-    ids
-}
-
 fn serialize_landblock_classification(classification: LandblockClassification) -> &'static str {
     match classification {
         LandblockClassification::Outdoor => "outdoor",
@@ -3747,84 +2531,8 @@ fn serialize_landblock_classification(classification: LandblockClassification) -
     }
 }
 
-fn serialize_landblock_pack_building_facts(
-    scene: Option<&StaticOutdoorScene>,
-) -> Vec<serde_json::Value> {
-    scene
-        .map(|scene| {
-            scene.buildings
-                .iter()
-                .filter_map(|building| {
-                    serialize_static_outdoor_instance(&building.instance).map(|mut value| {
-                        value["numLeaves"] = serde_json::json!(building.num_leaves);
-                        value["portals"] = serde_json::json!(
-                            building
-                                .portals
-                                .iter()
-                                .map(|portal| {
-                                    serde_json::json!({
-                                        "portalId": format!("{}/portal/{:04x}", building.instance.identity.stable_id(), portal.source_index),
-                                        "sourceIndex": portal.source_index,
-                                        "flags": portal.flags,
-                                        "otherCellId": portal.other_cell_id,
-                                        "otherPortalId": portal.other_portal_id,
-                                        "stabList": portal.stab_list,
-                                        "linkedEnvCellIds": portal.linked_env_cell_ids,
-                                    })
-                                })
-                                .collect::<Vec<_>>()
-                        );
-                        value
-                    })
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default()
-}
-
-fn derive_landblock_pack_renderable_asset_ids(pack: &LandblockPack) -> Vec<String> {
-    let mut asset_ids = pack
-        .outdoor_scene
-        .as_ref()
-        .into_iter()
-        .flat_map(|scene| {
-            scene
-                .explicit_objects
-                .iter()
-                .chain(scene.buildings.iter().map(|building| &building.instance))
-                .chain(
-                    scene
-                        .generated_scenery
-                        .iter()
-                        .map(|generated| &generated.instance),
-                )
-        })
-        .filter_map(|instance| {
-            format_renderable_source_asset_id(instance.source.family, instance.source.did)
-        })
-        .chain(pack.interiors.env_cells.iter().flat_map(|env_cell| {
-            env_cell
-                .static_objects
-                .iter()
-                .map(|static_object| static_object.source_asset_id.clone())
-        }))
-        .filter(|asset_id| is_static_renderable_asset_id(asset_id))
-        .collect::<Vec<_>>();
-    asset_ids.sort();
-    asset_ids.dedup();
-    asset_ids
-}
-
-fn is_static_renderable_asset_id(asset_id: &str) -> bool {
-    asset_id.starts_with("gfx-obj/") || asset_id.starts_with("setup-model/")
-}
-
 fn format_gfx_obj_asset_id(gfx_obj_id: u32) -> String {
     format!("gfx-obj/{gfx_obj_id:08x}")
-}
-
-fn format_setup_appearance_asset_id(setup_model_id: u32) -> String {
-    format!("setup-appearance/{setup_model_id:08x}")
 }
 
 fn format_env_cell_asset_id(env_cell_id: u32) -> String {
@@ -3860,7 +2568,7 @@ fn recipe_palette_asset_ids(texture: &holtburger_content::ResolvedTextureMateria
 }
 
 fn serialize_landblock_pack_diagnostics(
-    diagnostics: &LandblockPackSourceDiagnostics,
+    diagnostics: &PreparedContentSourceDiagnostics,
 ) -> serde_json::Value {
     serde_json::json!({
         "sourceRecords": diagnostics.source_records.iter().map(serialize_source_record_diagnostic).collect::<Vec<_>>(),
@@ -3906,56 +2614,6 @@ fn serialize_source_load_error(error: &SourceLoadError) -> serde_json::Value {
         "errorCode": error.error_code,
         "detail": error.detail,
     })
-}
-
-fn serialize_static_outdoor_instance(
-    instance: &StaticOutdoorInstance,
-) -> Option<serde_json::Value> {
-    let source_asset_id =
-        format_renderable_source_asset_id(instance.source.family, instance.source.did)?;
-    Some(serde_json::json!({
-        "instanceId": instance.identity.stable_id(),
-        "owningLandblockId": instance.owning_landblock_id,
-        "sourceDid": instance.source.did,
-        "sourceAssetId": source_asset_id,
-        "sourceIndex": instance.source_index,
-        "localPlacement": serialize_static_outdoor_placement_dto(&instance.frame),
-    }))
-}
-
-fn format_renderable_source_asset_id(
-    family: StaticRenderableSourceFamily,
-    did: u32,
-) -> Option<String> {
-    match family {
-        StaticRenderableSourceFamily::GfxObj => Some(format!("gfx-obj/{did:08x}")),
-        StaticRenderableSourceFamily::SetupModel => Some(format!("setup-model/{did:08x}")),
-        StaticRenderableSourceFamily::Unsupported => None,
-    }
-}
-
-fn serialize_static_outdoor_placement_dto(frame: &StaticOutdoorFrame) -> PlacementTransformDto {
-    PlacementTransformDto {
-        origin: serialize_vec3_dto(&frame.origin),
-        orientation: serialize_quaternion_dto(&frame.orientation),
-    }
-}
-
-fn serialize_vec3_dto(vector: &Vector3) -> Vec3Dto {
-    Vec3Dto {
-        x: vector.x,
-        y: vector.y,
-        z: vector.z,
-    }
-}
-
-fn serialize_quaternion_dto(quaternion: &Quaternion) -> QuaternionDto {
-    QuaternionDto {
-        w: quaternion.w,
-        x: quaternion.x,
-        y: quaternion.y,
-        z: quaternion.z,
-    }
 }
 
 fn serialize_vector3(vector: &Vector3) -> serde_json::Value {
@@ -4210,93 +2868,48 @@ mod tests {
         let runtime = HostRuntimeService::new(false);
         let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
             request_id: "test-request".to_string(),
-            asset_id: "landblock-pack/0102ffff".to_string(),
+            asset_id: "landblock/0102ffff/outdoor".to_string(),
             priority: crate::contracts::AssetPriorityDto::Bootstrap,
         });
 
         assert_eq!(asset.request_id, "test-request");
-        assert_eq!(asset.asset_id, "landblock-pack/0102ffff");
+        assert_eq!(asset.asset_id, "landblock/0102ffff/outdoor");
         assert!(matches!(asset.payload_kind, AssetPayloadKindDto::Json));
-        assert_eq!(asset.payload["kind"], "landblock-pack");
-        assert_eq!(asset.payload["residencyKind"], "landblock");
+        assert_eq!(asset.payload["kind"], "landblock-outdoor");
+        assert_eq!(asset.payload["residencyKind"], "outdoor-landblock");
         assert_eq!(asset.payload["landblockId"], 0x0102ffff);
     }
 
     #[test]
-    fn landblock_pack_lookup_returns_prepared_landblock_payload() {
+    fn landblock_outdoor_lookup_returns_prepared_render_payload() {
         let runtime = HostRuntimeService::new(false);
         let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
-            request_id: "test-landblock-pack".to_string(),
-            asset_id: "landblock-pack/da55012e".to_string(),
+            request_id: "test-landblock-outdoor".to_string(),
+            asset_id: "landblock/da55012e/outdoor".to_string(),
             priority: crate::contracts::AssetPriorityDto::Bootstrap,
         });
 
-        assert_eq!(asset.request_id, "test-landblock-pack");
-        assert_eq!(asset.asset_id, "landblock-pack/da55012e");
-        assert_eq!(asset.payload["kind"], "landblock-pack");
-        assert_eq!(asset.payload["residencyKind"], "landblock");
+        assert_eq!(asset.request_id, "test-landblock-outdoor");
+        assert_eq!(asset.asset_id, "landblock/da55012e/outdoor");
+        assert_eq!(asset.payload["kind"], "landblock-outdoor");
+        assert_eq!(asset.payload["residencyKind"], "outdoor-landblock");
         assert_eq!(asset.payload["landblockId"], 0xda55ffffu32);
-        assert_eq!(asset.payload["landblockInfoId"], 0xda55fffeu32);
-        assert!(matches!(
-            asset.payload["classification"].as_str(),
-            Some("outdoor" | "dungeon")
-        ));
+        assert_eq!(asset.payload["classification"], "outdoor");
         assert!(
-            asset.payload["sourceFacts"]["buildings"]
+            !asset.payload["terrain"]["triangles"]
                 .as_array()
-                .is_some()
-        );
-        assert!(
-            !asset.payload["prepared"]["terrainMesh"]["triangles"]
-                .as_array()
-                .expect("pack should expose Rust-prepared terrain triangles")
+                .expect("outdoor route should expose Rust-prepared terrain triangles")
                 .is_empty()
         );
         assert!(
-            asset.payload["prepared"]["interiorCells"]
+            asset.payload["statics"]
                 .as_array()
-                .expect("pack should expose Rust-prepared interior cells")
+                .expect("outdoor route should expose static members")
                 .iter()
-                .all(|cell| cell["renderGeometry"]["vertexCount"]
-                    .as_u64()
-                    .is_some_and(|vertex_count| vertex_count > 0))
-        );
-        assert!(
-            asset.payload["prepared"]["spatialItems"]
-                .as_array()
-                .expect("pack should expose Rust-prepared spatial items")
-                .iter()
-                .any(|item| item["kind"] == "terrain")
-        );
-        assert_eq!(
-            asset.payload["prepared"]["staticLandblockBvh"]["scope"],
-            "static-landblock"
-        );
-        assert!(
-            asset.payload["prepared"]["staticLandblockBvh"]["nodes"]
-                .as_array()
-                .expect("pack should expose Rust-built BVH nodes")
-                .iter()
-                .any(|node| node["kindMask"].as_u64().is_some_and(|mask| mask != 0))
-        );
-        assert!(
-            asset.payload["dependencies"]["cellDatIds"]
-                .as_array()
-                .expect("pack should expose cell DAT dependencies")
-                .iter()
-                .any(|id| id == 0xda550100u32)
-        );
-        assert!(
-            asset.payload["dependencies"]["portalDatIds"]
-                .as_array()
-                .expect("pack should expose portal DAT dependencies")
-                .iter()
-                .any(|id| id.as_u64().is_some_and(|id| (id >> 24) == 0x0d))
-        );
-        assert!(
-            asset.payload["dependencies"]["renderableAssetIds"]
-                .as_array()
-                .is_some()
+                .all(|member| member["sourceAssetId"]
+                    .as_str()
+                    .is_some_and(|asset_id| asset_id.starts_with("setup-model/")
+                        || asset_id.starts_with("gfx-obj/")))
         );
         assert!(
             asset.payload["diagnostics"]["sourceRecords"]
@@ -4304,98 +2917,6 @@ mod tests {
                 .expect("source records should be exposed")
                 .iter()
                 .any(|record| record["status"] == "loaded")
-        );
-    }
-
-    #[test]
-    fn granular_landblock_terrain_lookup_returns_route_payload() {
-        let runtime = HostRuntimeService::new(false);
-        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
-            request_id: "test-landblock-terrain".to_string(),
-            asset_id: "landblock/da55ffff/terrain".to_string(),
-            priority: crate::contracts::AssetPriorityDto::Bootstrap,
-        });
-
-        assert_eq!(asset.asset_id, "landblock/da55ffff/terrain");
-        assert_eq!(asset.payload["kind"], "landblock-terrain");
-        assert_eq!(asset.payload["landblockId"], 0xda55ffffu32);
-        assert_eq!(asset.payload["regionId"], REGION_DESC_FILE_ID);
-        assert!(
-            asset.payload["regionNumber"]
-                .as_u64()
-                .expect("terrain route should expose a region number")
-                > 0
-        );
-        let quads = asset.payload["terrain"]["quads"]
-            .as_array()
-            .expect("terrain route should expose quads");
-        assert!(!quads.is_empty());
-        assert!(quads[0]["pcode"].as_u64().is_some_and(|pcode| pcode != 0));
-        assert_eq!(
-            quads[0]["cornerTerrainCodes"]
-                .as_array()
-                .expect("terrain quads should expose pcode terrain inputs")
-                .len(),
-            4
-        );
-        assert_eq!(
-            asset.payload["terrain"]["terrainBvh"]["coordinateSpace"],
-            "landblock-terrain-local"
-        );
-        assert!(asset.payload.get("buildingShells").is_none());
-    }
-
-    #[test]
-    fn granular_landblock_building_shells_lookup_returns_coverage_payload() {
-        let runtime = HostRuntimeService::new(false);
-        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
-            request_id: "test-landblock-building-shells".to_string(),
-            asset_id: "landblock/da55ffff/building-shells".to_string(),
-            priority: crate::contracts::AssetPriorityDto::Bootstrap,
-        });
-
-        assert_eq!(asset.asset_id, "landblock/da55ffff/building-shells");
-        assert_eq!(asset.payload["kind"], "landblock-building-shells");
-        assert_eq!(asset.payload["landblockId"], 0xda55ffffu32);
-        assert!(asset.payload.get("terrain").is_none());
-        assert!(asset.payload.get("envCells").is_none());
-        assert!(
-            asset.payload["shells"]
-                .as_array()
-                .expect("building-shell route should expose shell members")
-                .iter()
-                .all(|shell| shell["sourceAssetId"]
-                    .as_str()
-                    .is_some_and(|asset_id| asset_id.starts_with("setup-model/")
-                        || asset_id.starts_with("gfx-obj/")))
-        );
-        assert_eq!(
-            asset.payload["shellBvh"]["coordinateSpace"],
-            "landblock-local"
-        );
-    }
-
-    #[test]
-    fn granular_landblock_scene_lookup_returns_membership_payload() {
-        let runtime = HostRuntimeService::new(false);
-        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
-            request_id: "test-landblock-scene".to_string(),
-            asset_id: "landblock/da55ffff/scene".to_string(),
-            priority: crate::contracts::AssetPriorityDto::Bootstrap,
-        });
-
-        assert_eq!(asset.payload["kind"], "landblock-scene");
-        assert_eq!(asset.payload["landblockId"], 0xda55ffffu32);
-        assert!(
-            asset.payload["envCells"]
-                .as_array()
-                .expect("scene route should expose env cell members")
-                .iter()
-                .any(|cell| cell["assetId"] == "env-cell/da550100")
-        );
-        assert_eq!(
-            asset.payload["envCellResidencyBvh"]["coordinateSpace"],
-            "landblock-scene-residency"
         );
     }
 
@@ -4494,8 +3015,8 @@ mod tests {
         let adapter = HostBoundaryAdapter::new(false);
         let bytes = tauri::async_runtime::block_on(adapter.asset_lookup_binary_batch(vec![
             AssetLookupRequestDto {
-                request_id: "test-landblock-terrain-binary".to_string(),
-                asset_id: "landblock/da55ffff/terrain".to_string(),
+                request_id: "test-landblock-outdoor-binary".to_string(),
+                asset_id: "landblock/da55ffff/outdoor".to_string(),
                 priority: crate::contracts::AssetPriorityDto::Bootstrap,
             },
             AssetLookupRequestDto {
@@ -4541,7 +3062,7 @@ mod tests {
         let runtime = HostRuntimeService::new(false);
         let terrain = runtime.asset_lookup_blocking(AssetLookupRequestDto {
             request_id: "test-landblock-terrain-region".to_string(),
-            asset_id: "landblock/da55ffff/terrain".to_string(),
+            asset_id: "landblock/da55ffff/outdoor".to_string(),
             priority: crate::contracts::AssetPriorityDto::Bootstrap,
         });
         let region_number = terrain.payload["regionNumber"]
@@ -4571,22 +3092,22 @@ mod tests {
     }
 
     #[test]
-    fn landblock_pack_binary_lookup_moves_bulk_arrays_into_sections() {
+    fn landblock_outdoor_binary_lookup_moves_bulk_arrays_into_sections() {
         let adapter = HostBoundaryAdapter::new(false);
         let bytes = tauri::async_runtime::block_on(adapter.asset_lookup_binary_batch(vec![
             AssetLookupRequestDto {
-                request_id: "test-landblock-pack-binary".to_string(),
-                asset_id: "landblock-pack/da55012e".to_string(),
+                request_id: "test-landblock-outdoor-binary".to_string(),
+                asset_id: "landblock/da55012e/outdoor".to_string(),
                 priority: crate::contracts::AssetPriorityDto::Bootstrap,
             },
         ]))
-        .expect("binary landblock-pack lookup should succeed");
+        .expect("binary landblock outdoor lookup should succeed");
 
         let (manifest, manifest_len) = decode_binary_manifest(&bytes);
 
         assert_eq!(manifest["transport"], "holtburger-asset-binary");
         assert_eq!(
-            manifest["responses"][0]["payload"]["prepared"]["terrainMesh"]["vertices"]
+            manifest["responses"][0]["payload"]["terrain"]["vertices"]
                 .as_array()
                 .expect("bulk terrain vertices should be manifest placeholders")
                 .len(),
@@ -4598,56 +3119,11 @@ mod tests {
         assert!(
             sections
                 .iter()
-                .any(|section| section["path"]
-                    == "responses.0.payload.prepared.terrainMesh.vertices")
+                .any(|section| section["path"] == "responses.0.payload.terrain.vertices")
         );
-        assert!(sections.iter().any(|section| {
-            section["path"]
-                .as_str()
-                .is_some_and(|path| path.ends_with(".renderGeometry.positions"))
-        }));
         assert!(
             bytes.len() > ASSET_BINARY_HEADER_LEN + manifest_len,
             "binary envelope should contain section data"
-        );
-    }
-
-    #[test]
-    fn landblock_summary_binary_lookup_moves_terrain_arrays_into_sections() {
-        let adapter = HostBoundaryAdapter::new(false);
-        let bytes = tauri::async_runtime::block_on(adapter.asset_lookup_binary_batch(vec![
-            AssetLookupRequestDto {
-                request_id: "test-landblock-summary-binary".to_string(),
-                asset_id: "landblock-summary/da55ffff".to_string(),
-                priority: crate::contracts::AssetPriorityDto::Streaming,
-            },
-        ]))
-        .expect("binary landblock-summary lookup should succeed");
-
-        let (manifest, manifest_len) = decode_binary_manifest(&bytes);
-        assert_eq!(
-            manifest["responses"][0]["payload"]["kind"],
-            "landblock-summary"
-        );
-        assert_eq!(
-            manifest["responses"][0]["payload"]["prepared"]["terrainMesh"]["triangles"]
-                .as_array()
-                .expect("summary terrain triangles should be manifest placeholders")
-                .len(),
-            0
-        );
-        let sections = manifest["sections"]
-            .as_array()
-            .expect("binary manifest should expose sections");
-        assert!(
-            sections
-                .iter()
-                .any(|section| section["path"]
-                    == "responses.0.payload.prepared.terrainMesh.vertices")
-        );
-        assert!(
-            bytes.len() > ASSET_BINARY_HEADER_LEN + manifest_len,
-            "binary envelope should contain summary section data"
         );
     }
 
@@ -4758,41 +3234,6 @@ mod tests {
         )
         .expect("binary manifest should be JSON");
         (manifest, manifest_len)
-    }
-
-    #[test]
-    fn landblock_summary_lookup_returns_light_payload_without_full_pack_work() {
-        let runtime = HostRuntimeService::new(false);
-        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
-            request_id: "test-landblock-summary".to_string(),
-            asset_id: "landblock-summary/da55ffff".to_string(),
-            priority: crate::contracts::AssetPriorityDto::Streaming,
-        });
-
-        assert_eq!(asset.request_id, "test-landblock-summary");
-        assert_eq!(asset.asset_id, "landblock-summary/da55ffff");
-        assert_eq!(asset.payload["kind"], "landblock-summary");
-        assert_eq!(asset.payload["residencyKind"], "landblock");
-        assert_eq!(asset.payload["landblockId"], 0xda55ffffu32);
-        assert_eq!(asset.payload["landblockInfoId"], 0xda55fffeu32);
-        assert!(
-            !asset.payload["prepared"]["terrainMesh"]["triangles"]
-                .as_array()
-                .expect("summary should expose Rust-prepared terrain triangles")
-                .is_empty()
-        );
-        assert!(asset.payload["prepared"]["staticMeshes"].is_null());
-        assert!(
-            asset.payload["sourceFacts"]["buildings"]
-                .as_array()
-                .expect("summary should expose authored building references")
-                .iter()
-                .any(|building| building["portals"].as_array().is_some())
-        );
-        assert!(
-            asset.payload["dependencies"]["portalDatIds"].is_null(),
-            "summary should not enumerate interior dependencies"
-        );
     }
 
     #[test]

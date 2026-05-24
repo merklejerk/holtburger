@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseBrowserLocationInput } from "../../app/browser-mode";
-import { createPreparedTerrainAsset } from "../../app/test-fixtures";
 import type { AssetLookupRequestDto } from "../host/contracts";
-import { formatLandblockPackAssetId } from "../landblocks";
 import type {
 	PreparedAssetCacheMetadata,
 	PreparedAssetRecord,
@@ -55,24 +53,17 @@ describe("scene asset streaming controller", () => {
 		const preparedByAssetId: Record<string, PreparedAssetRecord> = {};
 		const cacheMetadataByAssetId: Record<string, PreparedAssetCacheMetadata> = {};
 		const requestedAssetIds: string[] = [];
-		let controller: SceneAssetStreamingController;
-
-		const syncLatestInput = (): void => {
-			controller.syncSceneInterest({
-				browserDestination: destination,
-				terrainLodRadius: 1,
-				buildingLodRadius: 1,
-				detailLodRadius: 1,
-				envCellLodRadius: 1,
-				preparedByAssetId: { ...preparedByAssetId },
-			});
-		};
-
-		controller = new SceneAssetStreamingController({
+		const controller = new SceneAssetStreamingController({
 			assetChannel: {
 				async prepareAsset(request) {
-					if (request.assetId === "landblock-pack/016cffff") {
-						return createDungeonPackWithStaticGfx("gfx-obj/02000001");
+					if (request.assetId === "landblock/016cffff/topology") {
+						return createPreparedTopology(request);
+					}
+					if (request.assetId === "env-cell/016c0155") {
+						return createPreparedEnvCellWithStaticGfx(
+							request,
+							"gfx-obj/02000001",
+						);
 					}
 					if (request.assetId === "gfx-obj/02000001") {
 						return createPreparedGfxObj("gfx-obj/02000001", [
@@ -121,51 +112,130 @@ describe("scene asset streaming controller", () => {
 			warmRetainMs: 120_000,
 		});
 
+		const syncLatestInput = (): void => {
+			controller.syncSceneInterest({
+				browserDestination: destination,
+				terrainLodRadius: 1,
+				buildingLodRadius: 1,
+				detailLodRadius: 1,
+				envCellLodRadius: 1,
+				preparedByAssetId: { ...preparedByAssetId },
+			});
+		};
+
 		syncLatestInput();
 		await waitFor(() => preparedByAssetId["material/0800006c"] !== undefined);
 		controller.dispose();
 
-		expect(requestedAssetIds).toContain("landblock-pack/016cffff");
+		expect(requestedAssetIds).toContain("landblock/016cffff/topology");
+		expect(requestedAssetIds).toContain("env-cell/016c0155");
 		expect(requestedAssetIds).toContain("gfx-obj/02000001");
 		expect(requestedAssetIds).toContain("material/0800006c");
 	});
 });
 
-function createDungeonPackWithStaticGfx(gfxObjAssetId: string): PreparedAssetRecord {
-	const asset = createPreparedTerrainAsset(
-		"fixture-dungeon-pack",
-		formatLandblockPackAssetId(0x016cffff),
-	);
-	if (asset.payload.kind !== "landblock-pack") {
-		throw new Error("Expected test fixture to create a landblock pack.");
-	}
-
-	asset.payload.classification = "dungeon";
-	asset.payload.prepared.staticMeshes = [
-		{
-			instanceId: "fixture-indoor-static",
-			kind: "indoor-static",
-			owningLandblockId: 0x016cffff,
-			owningEnvCellId: 0x016c0155,
-			sourceDid: 0x02000001,
-			sourceAssetId: "gfx-obj/02000001",
-			sourceIndex: 0,
-			localPlacement: {
-				origin: { x: 0, y: 0, z: 0 },
-				orientation: { w: 1, x: 0, y: 0, z: 0 },
-			},
-			sourceScale: { x: 1, y: 1, z: 1 },
-			partIndex: 0,
-			gfxObjId: 0x02000001,
-			gfxObjAssetId,
-			partPlacements: [],
-			partScale: { x: 1, y: 1, z: 1 },
-			sourceBounds: null,
-			instanceBounds: null,
+function createPreparedTopology(request: AssetLookupRequestDto): PreparedAssetRecord {
+	return createPreparedRecord(request, {
+		kind: "landblock-topology",
+		sourceAssetKind: "landblock-topology",
+		residencyKind: "landblock",
+		provenance: {
+			source: "repo-local-hba",
+			sourceAssetKind: "landblock-topology",
+			errorCode: null,
+			detail: null,
 		},
-	];
-	asset.payload.dependencies.renderableAssetIds = [gfxObjAssetId];
-	return asset;
+		landblockId: 0x016cffff,
+		landblockInfoId: 0x016cfffe,
+		classification: "dungeon",
+		envCells: [
+			{
+				memberId: "env-cell-016c0155",
+				envCellId: 0x016c0155,
+				assetId: "env-cell/016c0155",
+				localPlacement: {
+					origin: { x: 0, y: 0, z: 0 },
+					orientation: { w: 1, x: 0, y: 0, z: 0 },
+				},
+				visibleEnvCellIds: [],
+				restrictionObjectId: null,
+				seenOutside: null,
+			},
+		],
+		portalLinks: [],
+		envCellResidencyBvh: {
+			coordinateSpace: "landblock-topology-residency",
+			nodes: [],
+			items: [],
+		},
+		diagnostics: {
+			sourceRecords: [],
+			omissions: [],
+			errors: [],
+		},
+	});
+}
+
+function createPreparedEnvCellWithStaticGfx(
+	request: AssetLookupRequestDto,
+	gfxObjAssetId: string,
+): PreparedAssetRecord {
+	return createPreparedRecord(request, {
+		kind: "env-cell",
+		sourceAssetKind: "env-cell",
+		residencyKind: "interior-cell",
+		provenance: {
+			source: "repo-local-hba",
+			sourceAssetKind: "env-cell",
+			errorCode: null,
+			detail: null,
+		},
+		envCellId: 0x016c0155,
+		environmentId: 0x0d000001,
+		cellStructureId: 0x0d000002,
+		surfaces: [],
+		portals: [],
+		visibleEnvCellIds: [],
+		portalApertures: [],
+		statics: [
+			{
+				instanceId: "fixture-indoor-static",
+				sourceDid: 0x02000001,
+				sourceAssetId: gfxObjAssetId,
+				sourceIndex: 0,
+				localPlacement: {
+					origin: { x: 0, y: 0, z: 0 },
+					orientation: { w: 1, x: 0, y: 0, z: 0 },
+				},
+				sourceScale: { x: 1, y: 1, z: 1 },
+				sourceBounds: null,
+				instanceBounds: null,
+			},
+		],
+		renderGeometry: {
+			sourceId: 0x0d000002,
+			vertexCount: 0,
+			triangleCount: 0,
+			positions: [],
+			normals: [],
+			uvs: [],
+			triangles: [],
+			surfaceIds: [],
+			bounds: null,
+		},
+		cellBsp: {
+			kind: "leaf",
+			index: 0,
+			solid: 0,
+			sphere: null,
+			polyIds: [],
+		},
+		localBvh: {
+			coordinateSpace: "env-cell-local",
+			nodes: [],
+			items: [],
+		},
+	});
 }
 
 function createPreparedGfxObj(

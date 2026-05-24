@@ -29,7 +29,7 @@ pub struct LandblockPack {
     pub outdoor_scene: Option<StaticOutdoorScene>,
     pub interiors: LandblockInteriorFacts,
     pub prepared: LandblockPreparedFacts,
-    pub diagnostics: LandblockPackSourceDiagnostics,
+    pub diagnostics: PreparedContentSourceDiagnostics,
 }
 
 #[derive(Debug, Clone)]
@@ -42,7 +42,7 @@ pub struct LandblockSummary {
     pub terrain_mesh: Option<PreparedTerrainMesh>,
     pub objects: Vec<LandblockSummaryObject>,
     pub buildings: Vec<LandblockSummaryBuilding>,
-    pub diagnostics: LandblockPackSourceDiagnostics,
+    pub diagnostics: PreparedContentSourceDiagnostics,
 }
 
 #[derive(Debug, Clone)]
@@ -50,7 +50,7 @@ pub struct EnvCellAsset {
     pub env_cell: EnvCellFact,
     pub prepared_cell: PreparedInteriorCell,
     pub static_meshes: Vec<PreparedStaticMesh>,
-    pub diagnostics: LandblockPackSourceDiagnostics,
+    pub diagnostics: PreparedContentSourceDiagnostics,
 }
 
 #[derive(Debug, Clone)]
@@ -58,7 +58,7 @@ pub struct LandblockTerrainAsset {
     pub landblock_id: u32,
     pub cell_landblock: Option<CellLandblockFact>,
     pub terrain_mesh: Option<PreparedTerrainMesh>,
-    pub diagnostics: LandblockPackSourceDiagnostics,
+    pub diagnostics: PreparedContentSourceDiagnostics,
 }
 
 #[derive(Debug, Clone)]
@@ -68,7 +68,7 @@ pub struct LandblockOutdoorAsset {
     pub terrain_mesh: Option<PreparedTerrainMesh>,
     pub statics: Vec<LandblockOutdoorStaticMember>,
     pub outdoor_bvh: Option<PreparedBvh>,
-    pub diagnostics: LandblockPackSourceDiagnostics,
+    pub diagnostics: PreparedContentSourceDiagnostics,
 }
 
 #[derive(Debug, Clone)]
@@ -76,7 +76,7 @@ pub struct LandblockBuildingShellsAsset {
     pub landblock_id: u32,
     pub landblock_info_id: u32,
     pub shells: Vec<LandblockBuildingShell>,
-    pub diagnostics: LandblockPackSourceDiagnostics,
+    pub diagnostics: PreparedContentSourceDiagnostics,
 }
 
 #[derive(Debug, Clone)]
@@ -87,7 +87,7 @@ pub struct LandblockSceneAsset {
     pub statics: Vec<LandblockSceneStaticMember>,
     pub buildings: Vec<LandblockSceneBuildingMember>,
     pub env_cells: Vec<EnvCellFact>,
-    pub diagnostics: LandblockPackSourceDiagnostics,
+    pub diagnostics: PreparedContentSourceDiagnostics,
 }
 
 #[derive(Debug, Clone)]
@@ -96,7 +96,7 @@ pub struct LandblockTopologyAsset {
     pub landblock_info_id: u32,
     pub classification: LandblockClassification,
     pub env_cells: Vec<EnvCellFact>,
-    pub diagnostics: LandblockPackSourceDiagnostics,
+    pub diagnostics: PreparedContentSourceDiagnostics,
 }
 
 #[derive(Debug, Clone)]
@@ -124,7 +124,7 @@ pub struct LandblockSceneBuildingMember {
     pub source_bounds: Option<PreparedAabb>,
     pub instance_bounds: Option<PreparedAabb>,
     pub num_leaves: u32,
-    pub portals: Vec<LandblockSummaryBuildingPortal>,
+    pub portals: Vec<LandblockBuildingPortal>,
 }
 
 #[derive(Debug, Clone)]
@@ -139,7 +139,7 @@ pub struct LandblockOutdoorStaticMember {
 #[derive(Debug, Clone)]
 pub struct LandblockOutdoorBuildingFacts {
     pub num_leaves: u32,
-    pub portals: Vec<LandblockSummaryBuildingPortal>,
+    pub portals: Vec<LandblockBuildingPortal>,
 }
 
 #[derive(Debug, Clone)]
@@ -168,11 +168,11 @@ pub struct LandblockSummaryBuilding {
     pub source_index: usize,
     pub local_placement: Frame,
     pub num_leaves: u32,
-    pub portals: Vec<LandblockSummaryBuildingPortal>,
+    pub portals: Vec<LandblockBuildingPortal>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LandblockSummaryBuildingPortal {
+pub struct LandblockBuildingPortal {
     pub portal_id: String,
     pub source_index: usize,
     pub flags: u16,
@@ -473,7 +473,7 @@ pub struct PreparedAabb {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct LandblockPackSourceDiagnostics {
+pub struct PreparedContentSourceDiagnostics {
     pub source_records: Vec<SourceRecordDiagnostic>,
     pub omissions: Vec<SourceOmissionDiagnostic>,
     pub errors: Vec<SourceLoadError>,
@@ -538,14 +538,14 @@ pub struct LandblockTopologyAssetAssembler;
 
 struct LandblockPackAssemblyContext<'a> {
     source: ContentSourceReader<'a>,
-    diagnostics: LandblockPackSourceDiagnostics,
+    diagnostics: PreparedContentSourceDiagnostics,
 }
 
 impl<'a> LandblockPackAssemblyContext<'a> {
     fn new(content: &'a ContentRepository) -> Self {
         Self {
             source: ContentSourceReader::new(content),
-            diagnostics: LandblockPackSourceDiagnostics::default(),
+            diagnostics: PreparedContentSourceDiagnostics::default(),
         }
     }
 
@@ -555,7 +555,7 @@ impl<'a> LandblockPackAssemblyContext<'a> {
     ) -> Self {
         Self {
             source: ContentSourceReader::with_decode_cache(content, decode_cache),
-            diagnostics: LandblockPackSourceDiagnostics::default(),
+            diagnostics: PreparedContentSourceDiagnostics::default(),
         }
     }
 
@@ -731,7 +731,7 @@ impl<'a> LandblockPackAssemblyContext<'a> {
         });
     }
 
-    fn into_diagnostics(self) -> LandblockPackSourceDiagnostics {
+    fn into_diagnostics(self) -> PreparedContentSourceDiagnostics {
         self.diagnostics
     }
 }
@@ -1520,7 +1520,7 @@ impl EnvironmentFact {
     fn from_environment(
         environment: &Environment,
         selected_cell_structure_ids: &[u32],
-        diagnostics: &mut LandblockPackSourceDiagnostics,
+        diagnostics: &mut PreparedContentSourceDiagnostics,
     ) -> Self {
         let mut cell_structure_ids = selected_cell_structure_ids.to_vec();
         cell_structure_ids.sort_unstable();
@@ -1600,7 +1600,7 @@ fn build_landblock_summary_buildings(
                 .portals
                 .iter()
                 .enumerate()
-                .map(|(portal_index, portal)| LandblockSummaryBuildingPortal {
+                .map(|(portal_index, portal)| LandblockBuildingPortal {
                     portal_id: format!(
                         "landblock-summary/{landblock_id:08x}/building/{source_index:04x}/portal/{portal_index:04x}"
                     ),
@@ -1653,7 +1653,7 @@ fn build_landblock_building_shell_instances(
 struct LandblockSceneBuildingSpec {
     instance_id: String,
     num_leaves: u32,
-    portals: Vec<LandblockSummaryBuildingPortal>,
+    portals: Vec<LandblockBuildingPortal>,
 }
 
 fn build_landblock_scene_instances(
@@ -1712,7 +1712,7 @@ fn build_landblock_scene_instances(
             .portals
             .iter()
             .enumerate()
-            .map(|(portal_index, portal)| LandblockSummaryBuildingPortal {
+            .map(|(portal_index, portal)| LandblockBuildingPortal {
                 portal_id: format!(
                     "landblock-scene/{landblock_id:08x}/building/{source_index:04x}/portal/{portal_index:04x}"
                 ),
@@ -1793,7 +1793,7 @@ fn build_landblock_outdoor_static_members(
                     portals: building
                         .portals
                         .iter()
-                        .map(|portal| LandblockSummaryBuildingPortal {
+                        .map(|portal| LandblockBuildingPortal {
                             portal_id: format!(
                                 "{}/portal/{:04x}",
                                 building.instance.identity.stable_id(),
@@ -2437,7 +2437,7 @@ fn load_gfx_obj_render_bounds(
 }
 
 fn report_renderable_load_error(
-    diagnostics: &mut LandblockPackSourceDiagnostics,
+    diagnostics: &mut PreparedContentSourceDiagnostics,
     reported_missing: &mut HashSet<u32>,
     file_id: u32,
     role: &'static str,

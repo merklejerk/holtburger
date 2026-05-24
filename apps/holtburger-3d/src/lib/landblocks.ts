@@ -73,28 +73,6 @@ export function formatLandblockLabel(landblockId: number): string {
 	return `0x${formatHex32(landblockId)}`;
 }
 
-export function formatLandblockPackAssetId(landblockId: number): string {
-	return `landblock-pack/${formatHex32(normalizeOutdoorLandblockId(landblockId))}`;
-}
-
-export function formatLandblockSummaryAssetId(landblockId: number): string {
-	return `landblock-summary/${formatHex32(normalizeOutdoorLandblockId(landblockId))}`;
-}
-
-export function formatLandblockTerrainAssetId(landblockId: number): string {
-	return `landblock/${formatHex32(normalizeOutdoorLandblockId(landblockId))}/terrain`;
-}
-
-export function formatLandblockBuildingShellsAssetId(
-	landblockId: number,
-): string {
-	return `landblock/${formatHex32(normalizeOutdoorLandblockId(landblockId))}/building-shells`;
-}
-
-export function formatLandblockSceneAssetId(landblockId: number): string {
-	return `landblock/${formatHex32(normalizeOutdoorLandblockId(landblockId))}/scene`;
-}
-
 export function formatLandblockOutdoorAssetId(landblockId: number): string {
 	return `landblock/${formatHex32(normalizeOutdoorLandblockId(landblockId))}/outdoor`;
 }
@@ -109,23 +87,6 @@ export function formatEnvCellAssetId(envCellId: number): string {
 
 export function formatTerrainMaterialAssetId(regionNumber: number): string {
 	return `terrain-material/${formatUnsignedRouteNumber(regionNumber)}`;
-}
-
-export function parseLandblockTerrainAssetId(assetId: string): number | null {
-	const match = /^landblock\/([0-9a-fA-F]{8})\/terrain$/.exec(assetId);
-	return match ? Number.parseInt(match[1], 16) >>> 0 : null;
-}
-
-export function parseLandblockBuildingShellsAssetId(
-	assetId: string,
-): number | null {
-	const match = /^landblock\/([0-9a-fA-F]{8})\/building-shells$/.exec(assetId);
-	return match ? Number.parseInt(match[1], 16) >>> 0 : null;
-}
-
-export function parseLandblockSceneAssetId(assetId: string): number | null {
-	const match = /^landblock\/([0-9a-fA-F]{8})\/scene$/.exec(assetId);
-	return match ? Number.parseInt(match[1], 16) >>> 0 : null;
 }
 
 export function parseLandblockOutdoorAssetId(assetId: string): number | null {

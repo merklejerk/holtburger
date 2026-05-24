@@ -95,7 +95,7 @@ function createPreparedLandblockTopologyAsset(
 			})),
 			portalLinks: [],
 			envCellResidencyBvh: {
-				coordinateSpace: "landblock-scene-residency",
+				coordinateSpace: "landblock-topology-residency",
 				nodes: [],
 				items: [],
 			},

@@ -3,7 +3,8 @@ use std::io::Cursor;
 use anyhow::{Context, Result, anyhow};
 use holtburger_dat::file_type::{
     AnimationPartChange, CSurface, CSurfaceSource, EnvCell, GfxObj, ObjDesc, Palette,
-    RenderSurface, RenderTexture, SetupModel, SubPalette, SurfaceType, TextureMapChange,
+    REGION_DESC_FILE_ID, RegionDesc, RenderSurface, RenderTexture, SetupModel, SubPalette,
+    SurfaceType, TextureMapChange,
 };
 use holtburger_dat::{EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, ResourceKey};
 
@@ -77,6 +78,46 @@ pub struct ResolvedAnimationPartChange {
     pub part_id: u32,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResolvedTerrainMaterialTable {
+    pub region_id: u32,
+    pub region_number: u32,
+    pub terrain_types: Vec<ResolvedTerrainMaterialType>,
+    pub terrain_alpha_maps: Vec<ResolvedTerrainAlphaMap>,
+    pub road_alpha_maps: Vec<ResolvedTerrainRoadAlphaMap>,
+    pub render_texture_ids: Vec<u32>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResolvedTerrainMaterialType {
+    pub terrain_type: u32,
+    pub texture_id: u32,
+    pub tiling: u32,
+    pub detail_texture_id: u32,
+    pub detail_tiling: u32,
+    pub min_vert_bright: u32,
+    pub max_vert_bright: u32,
+    pub min_vert_saturate: u32,
+    pub max_vert_saturate: u32,
+    pub min_vert_hue: u32,
+    pub max_vert_hue: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedTerrainAlphaMap {
+    pub alpha_index: usize,
+    pub selector: u32,
+    pub texture_id: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedTerrainRoadAlphaMap {
+    pub road_index: usize,
+    pub selector: u32,
+    pub road_texture_id: u32,
+    pub alpha_texture_id: u32,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ParsedRenderSurfaceDependency {
     pub render_surface: RenderSurface,
@@ -135,6 +176,86 @@ impl ContentRepository {
         let dependency = parse_material_dependency(self, surface_id)
             .with_context(|| format!("failed to resolve material 0x{surface_id:08X}"))?;
         material_recipe_from_dependency(self, dependency, None)
+    }
+
+    pub fn resolve_terrain_material_table(
+        &self,
+        region_number: u32,
+    ) -> Result<ResolvedTerrainMaterialTable> {
+        let resource = self
+            .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, REGION_DESC_FILE_ID))
+            .with_context(|| format!("failed to read RegionDesc 0x{REGION_DESC_FILE_ID:08X}"))?;
+        let region = RegionDesc::unpack(&resource.bytes)
+            .with_context(|| format!("failed to parse RegionDesc 0x{REGION_DESC_FILE_ID:08X}"))?;
+        if region.region_number != region_number {
+            anyhow::bail!(
+                "active RegionDesc 0x{REGION_DESC_FILE_ID:08X} has region number {}, not requested region {region_number}",
+                region.region_number
+            );
+        }
+
+        let tex_merge = &region.terrain_info.land_surfaces.tex_merge;
+        let terrain_types = tex_merge
+            .terrain_desc
+            .iter()
+            .map(|desc| ResolvedTerrainMaterialType {
+                terrain_type: desc.terrain_type,
+                texture_id: desc.terrain_tex.tex_gid,
+                tiling: desc.terrain_tex.tex_tiling,
+                detail_texture_id: desc.terrain_tex.detail_tex_gid,
+                detail_tiling: desc.terrain_tex.detail_tex_tiling,
+                min_vert_bright: desc.terrain_tex.min_vert_bright,
+                max_vert_bright: desc.terrain_tex.max_vert_bright,
+                min_vert_saturate: desc.terrain_tex.min_vert_saturate,
+                max_vert_saturate: desc.terrain_tex.max_vert_saturate,
+                min_vert_hue: desc.terrain_tex.min_vert_hue,
+                max_vert_hue: desc.terrain_tex.max_vert_hue,
+            })
+            .collect::<Vec<_>>();
+        let terrain_alpha_maps = tex_merge
+            .corner_terrain_maps
+            .iter()
+            .chain(tex_merge.side_terrain_maps.iter())
+            .enumerate()
+            .map(|(alpha_index, map)| ResolvedTerrainAlphaMap {
+                alpha_index,
+                selector: map.terrain_code,
+                texture_id: map.tex_gid,
+            })
+            .collect::<Vec<_>>();
+        let road_alpha_maps = tex_merge
+            .road_maps
+            .iter()
+            .enumerate()
+            .map(|(road_index, map)| ResolvedTerrainRoadAlphaMap {
+                road_index,
+                selector: map.road_code,
+                road_texture_id: road_terrain_texture_id(&terrain_types),
+                alpha_texture_id: map.road_tex_gid,
+            })
+            .collect::<Vec<_>>();
+        let mut render_texture_ids = terrain_types
+            .iter()
+            .flat_map(|terrain| [terrain.texture_id, terrain.detail_texture_id])
+            .chain(terrain_alpha_maps.iter().map(|map| map.texture_id))
+            .chain(
+                road_alpha_maps
+                    .iter()
+                    .flat_map(|map| [map.road_texture_id, map.alpha_texture_id]),
+            )
+            .filter(|texture_id| *texture_id != 0)
+            .collect::<Vec<_>>();
+        render_texture_ids.sort_unstable();
+        render_texture_ids.dedup();
+
+        Ok(ResolvedTerrainMaterialTable {
+            region_id: region.id,
+            region_number: region.region_number,
+            terrain_types,
+            terrain_alpha_maps,
+            road_alpha_maps,
+            render_texture_ids,
+        })
     }
 
     pub fn resolve_setup_appearance(
@@ -264,6 +385,15 @@ impl ContentRepository {
             })
             .collect()
     }
+}
+
+fn road_terrain_texture_id(terrain_types: &[ResolvedTerrainMaterialType]) -> u32 {
+    terrain_types
+        .iter()
+        .find(|terrain| terrain.terrain_type == 0x20)
+        .or_else(|| terrain_types.first())
+        .map(|terrain| terrain.texture_id)
+        .unwrap_or(0)
 }
 
 pub(crate) fn parse_material_dependency(

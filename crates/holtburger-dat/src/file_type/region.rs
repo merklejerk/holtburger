@@ -66,6 +66,7 @@ pub struct SceneType {
 #[derive(Debug, Clone, Default)]
 pub struct TerrainDesc {
     pub terrain_types: Vec<TerrainType>,
+    pub land_surfaces: LandSurf,
 }
 
 #[derive(Debug, Clone)]
@@ -73,6 +74,52 @@ pub struct TerrainType {
     pub name: String,
     pub color: u32,
     pub scene_types: Vec<u32>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct LandSurf {
+    pub tex_merge: TexMerge,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TexMerge {
+    pub base_tex_size: u32,
+    pub corner_terrain_maps: Vec<TerrainAlphaMap>,
+    pub side_terrain_maps: Vec<TerrainAlphaMap>,
+    pub road_maps: Vec<RoadAlphaMap>,
+    pub terrain_desc: Vec<TMTerrainDesc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TerrainAlphaMap {
+    pub terrain_code: u32,
+    pub tex_gid: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct RoadAlphaMap {
+    pub road_code: u32,
+    pub road_tex_gid: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct TMTerrainDesc {
+    pub terrain_type: u32,
+    pub terrain_tex: TerrainTex,
+}
+
+#[derive(Debug, Clone)]
+pub struct TerrainTex {
+    pub tex_gid: u32,
+    pub tex_tiling: u32,
+    pub max_vert_bright: u32,
+    pub min_vert_bright: u32,
+    pub max_vert_saturate: u32,
+    pub min_vert_saturate: u32,
+    pub max_vert_hue: u32,
+    pub min_vert_hue: u32,
+    pub detail_tex_tiling: u32,
+    pub detail_tex_gid: u32,
 }
 
 fn read_scene_desc<R: Read + Seek>(reader: &mut R) -> binrw::BinResult<SceneDesc> {
@@ -99,8 +146,11 @@ fn read_terrain_desc<R: Read + Seek>(reader: &mut R) -> binrw::BinResult<Terrain
         });
     }
 
-    skip_land_surf(reader)?;
-    Ok(TerrainDesc { terrain_types })
+    let land_surfaces = read_land_surf(reader)?;
+    Ok(TerrainDesc {
+        terrain_types,
+        land_surfaces,
+    })
 }
 
 fn read_u32_list<R: Read + Seek>(reader: &mut R) -> binrw::BinResult<Vec<u32>> {
@@ -191,7 +241,7 @@ fn skip_sound_desc<R: Read + Seek>(reader: &mut R) -> binrw::BinResult<()> {
     })
 }
 
-fn skip_land_surf<R: Read + Seek>(reader: &mut R) -> binrw::BinResult<()> {
+fn read_land_surf<R: Read + Seek>(reader: &mut R) -> binrw::BinResult<LandSurf> {
     let land_surf_type = u32::read_le(reader)?;
     if land_surf_type == 1 {
         return Err(binrw::Error::AssertFail {
@@ -200,21 +250,68 @@ fn skip_land_surf<R: Read + Seek>(reader: &mut R) -> binrw::BinResult<()> {
         });
     }
 
-    let _base_tex_size = u32::read_le(reader)?;
-    skip_fixed_u32_pair_list(reader)?;
-    skip_fixed_u32_pair_list(reader)?;
-    skip_fixed_u32_pair_list(reader)?;
-
-    let terrain_desc_count = u32::read_le(reader)?;
-    for _ in 0..terrain_desc_count {
-        skip_bytes(reader, 4 + 10 * 4)?;
-    }
-    Ok(())
+    Ok(LandSurf {
+        tex_merge: TexMerge {
+            base_tex_size: u32::read_le(reader)?,
+            corner_terrain_maps: read_terrain_alpha_maps(reader)?,
+            side_terrain_maps: read_terrain_alpha_maps(reader)?,
+            road_maps: read_road_alpha_maps(reader)?,
+            terrain_desc: read_tm_terrain_descs(reader)?,
+        },
+    })
 }
 
-fn skip_fixed_u32_pair_list<R: Read + Seek>(reader: &mut R) -> binrw::BinResult<()> {
-    let count = u32::read_le(reader)?;
-    skip_bytes(reader, u64::from(count) * 8)
+fn read_terrain_alpha_maps<R: Read + Seek>(
+    reader: &mut R,
+) -> binrw::BinResult<Vec<TerrainAlphaMap>> {
+    let count = u32::read_le(reader)? as usize;
+    let mut maps = Vec::with_capacity(count);
+    for _ in 0..count {
+        maps.push(TerrainAlphaMap {
+            terrain_code: u32::read_le(reader)?,
+            tex_gid: u32::read_le(reader)?,
+        });
+    }
+    Ok(maps)
+}
+
+fn read_road_alpha_maps<R: Read + Seek>(reader: &mut R) -> binrw::BinResult<Vec<RoadAlphaMap>> {
+    let count = u32::read_le(reader)? as usize;
+    let mut maps = Vec::with_capacity(count);
+    for _ in 0..count {
+        maps.push(RoadAlphaMap {
+            road_code: u32::read_le(reader)?,
+            road_tex_gid: u32::read_le(reader)?,
+        });
+    }
+    Ok(maps)
+}
+
+fn read_tm_terrain_descs<R: Read + Seek>(reader: &mut R) -> binrw::BinResult<Vec<TMTerrainDesc>> {
+    let count = u32::read_le(reader)? as usize;
+    let mut descs = Vec::with_capacity(count);
+    for _ in 0..count {
+        descs.push(TMTerrainDesc {
+            terrain_type: u32::read_le(reader)?,
+            terrain_tex: read_terrain_tex(reader)?,
+        });
+    }
+    Ok(descs)
+}
+
+fn read_terrain_tex<R: Read + Seek>(reader: &mut R) -> binrw::BinResult<TerrainTex> {
+    Ok(TerrainTex {
+        tex_gid: u32::read_le(reader)?,
+        tex_tiling: u32::read_le(reader)?,
+        max_vert_bright: u32::read_le(reader)?,
+        min_vert_bright: u32::read_le(reader)?,
+        max_vert_saturate: u32::read_le(reader)?,
+        min_vert_saturate: u32::read_le(reader)?,
+        max_vert_hue: u32::read_le(reader)?,
+        min_vert_hue: u32::read_le(reader)?,
+        detail_tex_tiling: u32::read_le(reader)?,
+        detail_tex_gid: u32::read_le(reader)?,
+    })
 }
 
 fn skip_unpackable_list<R, F>(reader: &mut R, mut skip_item: F) -> binrw::BinResult<()>

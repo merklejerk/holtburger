@@ -1,6 +1,6 @@
 # Holtburger 3D Granular Scene Asset Strategy Plan
 
-Status: proposed implementation plan.
+Status: in progress; Phase 2 host route scaffolding is implemented.
 
 ## Context
 
@@ -1071,7 +1071,7 @@ Recommended frontend order:
    `landblock/{id}/scene`, `env-cell/{id}`, and
    `terrain-material/{regionNumber}` while leaving old helpers in place.
 2. Add Zod schemas in `host/contracts.ts` and prepared payload types in
-   `assets/types.ts` for the new routes. Keep old schemas until Phase 6.
+   `assets/types.ts` for the new routes. Keep old schemas until Phase 5.
 3. Centralize route-specific dependency extraction in one frontend module, then
    have both `getAssetResponseDependencies` and `getPreparedAssetDependencies`
    call it. Avoid maintaining two divergent switch statements for the same route
@@ -1114,10 +1114,10 @@ to understand both old and new route families. Add narrow selectors such as:
 - static/building source members from prepared assets: old pack/summary facts
   during migration, new `landblock/{id}/scene` members after switch.
 
-Delete those migration adapters during Phase 5 cleanup if the renderer has fully
-cut over; otherwise delete them in Phase 6 with the old route semantics. Do not
-leave compatibility reexports or broad union types in renderer hot paths after
-the cutover.
+Delete those migration adapters during Phase 6 cleanup after the renderer has
+fully cut over and Phase 5 has retired old route semantics. Do not leave
+compatibility reexports or broad union types in renderer hot paths after the
+cutover.
 
 Terrain rendering should migrate in two steps. First, switch terrain scene
 selection from old pack/summary `terrainMesh` payloads to
@@ -1363,7 +1363,7 @@ Phase 1.1 decisions and refinements:
   Rust `RegionDesc`, `TerrainTex`, terrain alpha, road alpha, and ACViewer
   renderer paths.
 - The dependency extractor still duplicates route logic between raw response and
-  prepared-record paths. Phase 5 cleanup should centralize this, but Phase 2 can
+  prepared-record paths. Phase 6 cleanup should centralize this, but Phase 2 can
   proceed with the corrected route shape.
 
 ### Phase 2: Add Rust Host Routes
@@ -1401,6 +1401,120 @@ Validation:
 - `npm run check:rust`
 - Host contract tests for each new route.
 
+Progress as of 2026-05-23:
+
+- Added Rust content asset request variants and Tauri route parsers for:
+  `landblock/{id}/terrain`, `landblock/{id}/scene`, `env-cell/{id}`, and
+  `terrain-material/{regionNumber}`.
+- Added host response builders for the new route families. Recognized route IDs
+  now produce structured route payloads or structured failed payloads instead of
+  falling through to app-local stubs.
+- Extended `RegionDesc` parsing to keep the LandSurf/TexMerge data that was
+  previously skipped: terrain texture descriptors, corner/side terrain alpha
+  maps, and road alpha maps. The field layout was checked against ACE
+  `LandSurf`, `TexMerge`, `TerrainTex`, `TerrainAlphaMap`, `RoadAlphaMap`, and
+  `TMTerrainDesc`.
+- Added a `resolve_terrain_material_table(regionNumber)` content entry point.
+  It reads the active `RegionDesc`, verifies the requested `regionNumber`, and
+  returns one table with terrain texture entries, terrain alpha entries, road
+  alpha entries, and render texture dependencies.
+- Implemented `landblock/{id}/terrain` projection from existing pack terrain
+  data. It now includes active `regionId`/`regionNumber`, vertices, triangles,
+  quads, per-quad source terrain indices, corner terrain codes, computed pcodes,
+  and a terrain-only flat BVH.
+- Implemented `landblock/{id}/scene` projection from current pack membership
+  facts: outdoor static/building members, env-cell members, env-cell asset IDs,
+  and env-cell portal links.
+- Implemented `env-cell/{id}` projection by loading the owning landblock pack and
+  selecting the prepared interior cell. It exposes topology, portals, render
+  geometry, typed surface slots with `material/{did}` route IDs, visible env
+  cells, indoor static members, BSP, and a local flat BVH.
+- Added host contract tests for each new route family in the Tauri adapter.
+- Ran: `cargo check`.
+- Ran: `cargo fmt`.
+- Ran: `npm run check:rust` from `apps/holtburger-3d`.
+- Ran:
+  `cargo test --manifest-path src-tauri/Cargo.toml adapter::tests -- --nocapture`.
+- Ran: `npm run check` from `apps/holtburger-3d`.
+- Ran: `cargo test -p holtburger-dat`.
+
+Phase 2 decisions and course corrections:
+
+- `terrain-material/{regionNumber}` currently exposes direct render texture
+  dependencies. It does not pre-expand those textures into render-surface or
+  palette dependencies; that remains the existing `render-texture/*` dependency
+  edge. Phase 3 should keep the graph test expectation aligned with that route
+  boundary unless we deliberately decide terrain material tables should inline
+  transitive render-surface/palette references.
+- `landblock/{id}/terrain.buildingShells` is still empty. The current pack has
+  building/static source membership and per-part mesh expansion, but it does not
+  have a clean landblock-terrain-owned building shell render product. Phase 3 or
+  Phase 4 should decide whether building shell render geometry belongs in
+  `landblock/{id}/terrain` or should stay as focused scene/static members.
+- Route-specific BVHs are currently conservative flat BVHs where the existing
+  pack does not already provide a correctly scoped tree. This avoids reusing the
+  old mixed static-landblock BVH for the wrong route scope, but Phase 4 should
+  add real route-owned BVH builders before renderer cutover.
+- Binary batch lookup recognizes the new landblock/env-cell route families, but
+  the new route shapes still serialize bulk arrays in JSON placeholders only
+  where reused old serializers already do so. Before enabling these routes as
+  high-volume direct roots, add route-specific binary sections for
+  `landblock/{id}/terrain`, `landblock/{id}/scene` BVH arrays if populated, and
+  `env-cell/{id}` render/aperture geometry.
+- `env-cell/{id}` is currently served by loading the owning landblock pack and
+  selecting the prepared cell. That is acceptable for proving the route contract,
+  but it preserves pack assembly coupling. Phase 4 should either introduce a
+  first-class env-cell assembler or explicitly schedule this as cleanup debt
+  before retiring old pack semantics.
+
+### Phase 2.1: Close Host Route Structural Gaps
+
+Phase 2 made the route contracts real, but several target shapes are still
+backed by old pack assembly or conservative placeholders. Close those gaps before
+Phase 3 dependency-ownership work becomes the basis for planner and renderer
+cutover.
+
+Required work:
+
+- Add a first-class `env-cell/{id}` assembler in Rust. It should load the
+  requested `EnvCell`, its `Environment`/cell-structure data, portals, aperture
+  witnesses, indoor static membership, render geometry, BSP, visible-cell links,
+  and surface slots directly from source records. It should not assemble the
+  owning `landblock-pack` and select one prepared cell.
+- Decide and encode building ownership for outdoor coverage. Either:
+  - keep `landblock/{id}/terrain` pure terrain and remove or deprecate
+    `buildingShells` from the target DTO before planner cutover; or
+  - build a real terrain-owned building shell render product with material
+    surface IDs, clear source ownership, and binary geometry sections.
+- Replace flat placeholder BVHs with route-owned BVH builders:
+  - terrain BVH over terrain quads only;
+  - env-cell residency BVH over env-cell members for `landblock/{id}/scene`;
+  - outdoor scene BVH over outdoor statics/buildings/portal anchors only;
+  - local env-cell BVH over render geometry, portals, and indoor static members.
+- Add route-specific binary serializers for the new large route payloads:
+  `landblock/{id}/terrain` vertices/triangles/quad metadata/BVH bounds,
+  `landblock/{id}/scene` BVH bounds when populated, and `env-cell/{id}`
+  render-geometry and portal-aperture arrays.
+- Tighten failed response shapes for the new routes. Failed responses must remain
+  schema-valid, loud, and provenance-rich, but should not present placeholder
+  successful geometry as if it were loaded source data.
+- Add focused host tests proving the new assemblers and serializers do not
+  transitively depend on `ContentAssetRequest::LandblockPack`.
+
+Validation:
+
+- Host tests prove `env-cell/{id}` can load a representative interior cell
+  without requesting or assembling `landblock-pack`.
+- Host tests prove each populated BVH has route-correct item kinds and no mixed
+  terrain/static/interior ownership.
+- Binary batch tests prove the new terrain and env-cell routes move large arrays
+  into binary sections instead of JSON.
+- If `buildingShells` stays, tests prove the terrain route exposes building shell
+  render geometry plus direct material surface IDs. If it does not stay, delete
+  it from the DTO/types before Phase 3.
+- `npm run check:rust`
+- `npm run check`
+
 ### Phase 3: Move Dependency Ownership to First-Class Assets and Route Helpers
 
 - Make terrain material route helpers derive `terrain-material/{regionNumber}`
@@ -1426,8 +1540,11 @@ Validation:
 Validation:
 
 - Asset graph tests prove:
-  - terrain -> terrain material table -> render-texture/render-surface/palette;
-  - terrain -> building shell material -> render-texture/render-surface/palette;
+  - terrain -> terrain material table -> render-texture;
+  - render-texture -> render-surface -> palette for terrain textures that use
+    indexed/default-palette surfaces;
+  - terrain -> building shell material -> render-texture/render-surface/palette,
+    if building shell geometry remains owned by `landblock/{id}/terrain`;
   - scene -> typed static/building member -> setup-model or gfx-obj;
   - scene -> typed env-cell member -> env-cell;
   - scene -> env-cell -> material -> render-texture/render-surface/palette;
@@ -1470,11 +1587,26 @@ Validation:
   env-cell, gfx, setup, material, texture, surface, and palette assets as
   separate prepared records.
 
-### Phase 5: Cleanup Migration Debt
+### Phase 5: Retire Old Pack Semantics
 
-After the new route families are serving the renderer and before deleting the
-old pack routes, remove temporary scaffolding and weakened abstractions created
-during the migration:
+- Stop using `landblock-pack/*` and `landblock-summary/*` in planner code.
+- Remove old route helpers, schemas, and tests once no production code depends on
+  them.
+- If a temporary old-route adapter is still needed for a diagnostic harness, keep
+  it isolated and mark it for deletion with a specific follow-up.
+
+Validation:
+
+- `rg "landblock-pack|landblock-summary" apps/holtburger-3d/src` should find
+  only migration notes, deleted-route tests, or explicit diagnostic fixtures.
+- `npm run check`
+- `npm run check:rust`
+
+### Phase 6: Cleanup Migration Debt
+
+After the new route families are serving the renderer and old pack route
+semantics have been retired, remove temporary scaffolding and weakened
+abstractions created during the migration:
 
 - Centralize route-specific dependency extraction so raw host responses and
   prepared records use one shared implementation. Delete duplicate switch
@@ -1510,21 +1642,6 @@ Validation:
 - `rg "setup-appearance" apps/holtburger-3d/src/lib/assets apps/holtburger-3d/src/lib/world-display`
   finds only explicit future override handling or deleted-route fixtures.
 - `npm run lint`
-- `npm run check`
-- `npm run check:rust`
-
-### Phase 6: Retire Old Pack Semantics
-
-- Stop using `landblock-pack/*` and `landblock-summary/*` in planner code.
-- Remove old route helpers, schemas, and tests once no production code depends on
-  them.
-- If a temporary old-route adapter is still needed for a diagnostic harness, keep
-  it isolated and mark it for deletion with a specific follow-up.
-
-Validation:
-
-- `rg "landblock-pack|landblock-summary" apps/holtburger-3d/src` should find
-  only migration notes, deleted-route tests, or explicit diagnostic fixtures.
 - `npm run check`
 - `npm run check:rust`
 

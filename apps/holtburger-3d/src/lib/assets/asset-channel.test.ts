@@ -101,6 +101,47 @@ describe("asset worker payload preparation", () => {
 			/landblock-outdoor route.*payload failed the landblock-outdoor contract/,
 		);
 	});
+
+	it("fails hard when a gfx object payload omits host-prepared render geometry", () => {
+		const request = createRequest("request-gfx", "gfx-obj/01000001");
+		const response: AssetLookupResponseDto = {
+			requestId: request.requestId,
+			assetId: request.assetId,
+			payloadKind: "json",
+			payload: {
+				kind: "gfx-obj",
+				residencyKind: "unknown",
+				sourceAssetKind: "gfx-obj",
+				gfxObjId: 0x01000001,
+				flags: null,
+				surfaceIds: [],
+				vertexArray: {
+					vertexType: 0,
+					vertexCount: 0,
+					vertices: [],
+				},
+				drawingPolygons: [],
+				drawingBsp: null,
+				dependencies: { materialAssetIds: [] },
+				physicsWitness: {
+					polygonCount: 0,
+					hasBsp: false,
+				},
+				sortCenter: null,
+				didDegrade: null,
+				provenance: {
+					source: "repo-local-hba",
+					sourceAssetKind: "gfx-obj",
+					errorCode: null,
+					detail: null,
+				},
+			},
+		};
+
+		expect(() => prepareAssetPayload(request, response)).toThrow(
+			/gfx-obj route.*payload failed the gfx-obj contract.*renderGeometry/,
+		);
+	});
 });
 
 class FakeAssetWorker implements AssetWorkerLike {

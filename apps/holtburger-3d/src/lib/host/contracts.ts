@@ -633,7 +633,7 @@ export const gfxObjPayloadDtoSchema = z.object({
 	drawingBsp: polygonSetBspNodeDtoSchema.nullable(),
 	dependencies: materialAssetDependenciesDtoSchema,
 	physicsWitness: gfxObjPhysicsWitnessDtoSchema,
-	renderGeometry: preparedPolygonSetRenderGeometryDtoSchema.optional(),
+	renderGeometry: preparedPolygonSetRenderGeometryDtoSchema,
 	sortCenter: vec3DtoSchema.nullable(),
 	didDegrade: z.number().int().nonnegative().nullable(),
 	provenance: assetProvenanceDtoSchema,

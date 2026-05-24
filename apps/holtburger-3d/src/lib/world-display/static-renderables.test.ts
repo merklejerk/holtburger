@@ -8,7 +8,6 @@ import {
 	type PreparedAssetProvenance,
 	type PreparedAssetRecord,
 	type PreparedEnvCellPayload,
-	type PreparedGfxObjPayload,
 	type PreparedLandblockOutdoorPayload,
 	type PreparedPolygonSetRenderGeometry,
 	type PreparedSetupModelPayload,

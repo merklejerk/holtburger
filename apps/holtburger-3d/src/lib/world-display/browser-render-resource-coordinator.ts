@@ -8,8 +8,9 @@ import { deriveStructuredInteriorCoverage } from "../assets/structured-interior-
 import {
 	createInitialAssetChannelState,
 	type AssetChannelState,
+	type PreparedAssetRecord,
 } from "../assets/types";
-import { formatHex32 } from "../landblocks";
+import { formatHex32, formatLandblockOutdoorAssetId } from "../landblocks";
 import type { CameraHintAckDto } from "../host/contracts";
 import {
 	deriveBrowserWorldDisplayModel,
@@ -57,6 +58,8 @@ import {
 import { deriveTransitionPortalCandidates } from "./transition-portal-work-items";
 import { WORLD_RENDER_DOMAIN } from "./render-domains";
 import type { SceneCameraFrame } from "./camera";
+
+let lastOutdoorRenderStarvationSignature: string | null = null;
 
 export interface BrowserRenderResourceCoordinatorInput {
 	assetState: AssetChannelState;
@@ -264,8 +267,16 @@ export class BrowserRenderResourceCoordinator {
 		);
 		const renderSceneContext = deriveWorldRenderSceneContext({
 			activeRenderAnchor: input.activeRenderAnchor,
+			browserDestination: input.browserDestination,
+		});
+		reportOutdoorRenderStarvation({
+			input,
+			outdoorSceneInterest,
 			terrainScene,
+			staticRenderableScene,
 			structuredInteriorScene,
+			activeRenderChunkTransforms,
+			renderSceneContext,
 		});
 
 		this.renderSpatialIndex.replaceChunkTransforms(activeRenderChunkTransforms);
@@ -593,6 +604,103 @@ function collectActiveRenderChunkPlacements(
 
 	return [...chunksByKey.values()].sort((left, right) =>
 		left.chunkKey.localeCompare(right.chunkKey),
+	);
+}
+
+function reportOutdoorRenderStarvation({
+	input,
+	outdoorSceneInterest,
+	terrainScene,
+	staticRenderableScene,
+	structuredInteriorScene,
+	activeRenderChunkTransforms,
+	renderSceneContext,
+}: {
+	input: BrowserRenderResourceCoordinatorInput;
+	outdoorSceneInterest: ReturnType<typeof deriveOutdoorSceneInterest> | null;
+	terrainScene: TerrainSceneModel;
+	staticRenderableScene: StaticRenderableSceneModel;
+	structuredInteriorScene: StructuredInteriorSceneModel;
+	activeRenderChunkTransforms: readonly RenderChunkTransform[];
+	renderSceneContext: ReturnType<typeof deriveWorldRenderSceneContext>;
+}): void {
+	if (
+		input.browserDestination?.kind !== "outdoor-location" ||
+		outdoorSceneInterest === null ||
+		input.assetState.history.length === 0 ||
+		terrainScene.tiles.length > 0 ||
+		staticRenderableScene.parts.length > 0
+	) {
+		lastOutdoorRenderStarvationSignature = null;
+		return;
+	}
+
+	const expectedOutdoorAssetIds = outdoorSceneInterest.terrainLandblockIds.map(
+		formatLandblockOutdoorAssetId,
+	);
+	const preparedOutdoorAssetIds = expectedOutdoorAssetIds.filter(
+		(assetId) => input.assetState.preparedByAssetId[assetId],
+	);
+	const recentRelevantActivity = input.assetState.history.filter((entry) =>
+		expectedOutdoorAssetIds.includes(entry.assetId),
+	);
+	const signature = JSON.stringify({
+		destination: input.browserDestination.label,
+		expectedOutdoorAssetIds,
+		preparedOutdoorAssetIds,
+		recentRelevantActivity,
+		activeRequestAssetId: input.assetState.activeRequest?.assetId ?? null,
+		errorMessage: input.assetState.errorMessage,
+	});
+
+	if (signature === lastOutdoorRenderStarvationSignature) {
+		return;
+	}
+	lastOutdoorRenderStarvationSignature = signature;
+
+	console.error("[holtburger-3d][render-starved][outdoor]", {
+		message:
+			"Outdoor browser destination has expected outdoor coverage but no terrain tiles or static renderable parts reached the renderer.",
+		destination: input.browserDestination,
+		sceneContext: renderSceneContext,
+		expectedOutdoorAssetIds,
+		preparedOutdoorAssetIds,
+		missingOutdoorAssetIds: expectedOutdoorAssetIds.filter(
+			(assetId) => !input.assetState.preparedByAssetId[assetId],
+		),
+		preparedAssetCounts: countPreparedAssetsByKind(
+			input.assetState.preparedByAssetId,
+		),
+		recentRelevantActivity,
+		recentAssetActivity: input.assetState.history,
+		activeRequest: input.assetState.activeRequest,
+		assetStatus: input.assetState.status,
+		assetErrorMessage: input.assetState.errorMessage,
+		cacheDiagnostics: input.assetState.cacheDiagnostics,
+		renderInputCounts: {
+			terrainTiles: terrainScene.tiles.length,
+			staticSourceInstances: staticRenderableScene.sourceInstances.length,
+			staticParts: staticRenderableScene.parts.length,
+			missingStaticSourceAssetIds:
+				staticRenderableScene.missingSourceAssetIds.length,
+			missingStaticGfxAssetIds: staticRenderableScene.missingGfxAssetIds.length,
+			structuredInteriorCells: structuredInteriorScene.cells.length,
+			activeRenderChunks: activeRenderChunkTransforms.length,
+		},
+	});
+}
+
+function countPreparedAssetsByKind(
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+): Record<string, number> {
+	const counts: Record<string, number> = {};
+	for (const asset of Object.values(preparedByAssetId)) {
+		counts[asset.payload.kind] = (counts[asset.payload.kind] ?? 0) + 1;
+	}
+	return Object.fromEntries(
+		Object.entries(counts).sort(([left], [right]) =>
+			left.localeCompare(right),
+		),
 	);
 }
 

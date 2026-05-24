@@ -10,7 +10,10 @@ import {
 	cameraHintAckDtoSchema,
 	debugConfigDtoSchema,
 } from "./contracts";
-import { decodeBinaryAssetBatchEnvelope } from "./binary-asset-envelope";
+import {
+	decodeBinaryAssetBatchEnvelope,
+	encodeJsonAssetBatchEnvelope,
+} from "./binary-asset-envelope";
 import type { ZodType } from "zod";
 
 const MAX_BINARY_LOOKUP_BATCH_SIZE = 4;
@@ -133,14 +136,24 @@ export async function lookupBinaryAssetEnvelopes(
 		return [];
 	}
 
-	const envelopes = await Promise.all(
-		planBinaryLookupBatches(requests).map(async (batch) => ({
+	const plan = planAssetLookupEnvelopeRequests(requests);
+	const binaryEnvelopes = await Promise.all(
+		plan.binaryBatches.map(async (batch) => ({
 			payload: normalizeBinaryPayloadToArrayBuffer(
 				await invokeRawBinaryLookupBatch(batch),
 			),
 		})),
 	);
-	return envelopes;
+	const jsonResponses = await Promise.all(
+		plan.jsonRequests.map((request) =>
+			invokeCommand("lookup_asset", assetLookupResponseDtoSchema, { request }),
+		),
+	);
+	const jsonEnvelopes =
+		jsonResponses.length === 0
+			? []
+			: [{ payload: encodeJsonAssetBatchEnvelope(jsonResponses) }];
+	return [...binaryEnvelopes, ...jsonEnvelopes];
 }
 
 async function invokeRawBinaryLookupBatch(
@@ -201,6 +214,25 @@ export function planBinaryLookupBatches(
 
 	flushCurrentBatch();
 	return batches;
+}
+
+export interface AssetLookupEnvelopePlan {
+	binaryBatches: AssetLookupRequestDto[][];
+	jsonRequests: AssetLookupRequestDto[];
+}
+
+export function planAssetLookupEnvelopeRequests(
+	requests: readonly AssetLookupRequestDto[],
+): AssetLookupEnvelopePlan {
+	const binaryRequests = requests.filter((request) =>
+		usesBinaryAssetLookup(request.assetId),
+	);
+	return {
+		binaryBatches: planBinaryLookupBatches(binaryRequests),
+		jsonRequests: requests.filter(
+			(request) => !usesBinaryAssetLookup(request.assetId),
+		),
+	};
 }
 
 function usesBinaryAssetLookup(assetId: string): boolean {

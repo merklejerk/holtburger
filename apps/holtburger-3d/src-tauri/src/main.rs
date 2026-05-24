@@ -13,7 +13,10 @@ async fn lookup_asset(
     request: AssetLookupRequestDto,
 ) -> Result<AssetLookupResponseDto, String> {
     let runtime = runtime.inner().clone();
-    Ok(runtime.asset_lookup(request).await)
+    runtime
+        .asset_lookup(request)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

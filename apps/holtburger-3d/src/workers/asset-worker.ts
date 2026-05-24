@@ -14,6 +14,7 @@ import type {
 	RenderTexturePayloadDto,
 	SetupAppearancePayloadDto,
 	SetupModelPayloadDto,
+	TerrainMaterialPayloadDto,
 } from "../lib/host/contracts";
 import {
 	appearanceManifestPayloadDtoSchema,
@@ -30,6 +31,7 @@ import {
 	renderTexturePayloadDtoSchema,
 	setupAppearancePayloadDtoSchema,
 	setupModelPayloadDtoSchema,
+	terrainMaterialPayloadDtoSchema,
 } from "../lib/host/contracts";
 import { decodeBinaryAssetBatchEnvelope } from "../lib/host/binary-asset-envelope";
 import type {
@@ -40,6 +42,7 @@ import type {
 	PreparedPolygonSetBspNode,
 	PreparedPolygonSetRenderGeometry,
 } from "../lib/assets/types";
+import type { ZodIssue } from "zod";
 
 export interface AssetWorkerPrepareBatchRequest {
 	type: "prepare-assets";
@@ -104,6 +107,11 @@ export function prepareAssetPayload(
 	request: AssetLookupRequestDto,
 	response: AssetLookupResponseDto,
 ): PreparedAssetRecord {
+	const routeMatchedAsset = prepareRouteMatchedAssetPayload(request, response);
+	if (routeMatchedAsset) {
+		return routeMatchedAsset;
+	}
+
 	const landblockOutdoorPayload = landblockOutdoorPayloadDtoSchema.safeParse(
 		response.payload,
 	);
@@ -243,6 +251,159 @@ export function prepareAssetPayload(
 	};
 }
 
+function prepareRouteMatchedAssetPayload(
+	request: AssetLookupRequestDto,
+	response: AssetLookupResponseDto,
+): PreparedAssetRecord | null {
+	if (/^landblock\/[0-9a-fA-F]{8}\/outdoor$/.test(request.assetId)) {
+		const payload = parseExpectedRoutePayload(
+			request.assetId,
+			"landblock-outdoor",
+			landblockOutdoorPayloadDtoSchema,
+			response.payload,
+		);
+		return prepareTypedContentAsset(request, response, payload);
+	}
+
+	if (/^landblock\/[0-9a-fA-F]{8}\/topology$/.test(request.assetId)) {
+		const payload = parseExpectedRoutePayload(
+			request.assetId,
+			"landblock-topology",
+			landblockTopologyPayloadDtoSchema,
+			response.payload,
+		);
+		return prepareTypedContentAsset(request, response, payload);
+	}
+
+	if (/^env-cell\/[0-9a-fA-F]{8}$/.test(request.assetId)) {
+		const payload = parseExpectedRoutePayload(
+			request.assetId,
+			"env-cell",
+			envCellPayloadDtoSchema,
+			response.payload,
+		);
+		return prepareTypedContentAsset(request, response, payload);
+	}
+
+	if (/^gfx-obj\/[0-9a-fA-F]{8}$/.test(request.assetId)) {
+		const payload = parseExpectedRoutePayload(
+			request.assetId,
+			"gfx-obj",
+			gfxObjPayloadDtoSchema,
+			response.payload,
+		);
+		return prepareGfxObj(request, response, payload);
+	}
+
+	if (/^setup-model\/[0-9a-fA-F]{8}$/.test(request.assetId)) {
+		const payload = parseExpectedRoutePayload(
+			request.assetId,
+			"setup-model",
+			setupModelPayloadDtoSchema,
+			response.payload,
+		);
+		return prepareSetupModel(request, response, payload);
+	}
+
+	if (/^setup-appearance\/[0-9a-fA-F]{8}$/.test(request.assetId)) {
+		const payload = parseExpectedRoutePayload(
+			request.assetId,
+			"setup-appearance",
+			setupAppearancePayloadDtoSchema,
+			response.payload,
+		);
+		return preparePassthroughAsset(request, response, payload);
+	}
+
+	if (/^material\/[0-9a-fA-F]{8}$/.test(request.assetId)) {
+		const payload = parseExpectedRoutePayload(
+			request.assetId,
+			"material-recipe",
+			materialRecipePayloadDtoSchema,
+			response.payload,
+		);
+		return preparePassthroughAsset(request, response, payload);
+	}
+
+	if (/^terrain-material\/[0-9]+$/.test(request.assetId)) {
+		const payload = parseExpectedRoutePayload(
+			request.assetId,
+			"terrain-material",
+			terrainMaterialPayloadDtoSchema,
+			response.payload,
+		);
+		return preparePassthroughAsset(request, response, payload);
+	}
+
+	if (/^render-texture\/[0-9a-fA-F]{8}$/.test(request.assetId)) {
+		const payload = parseExpectedRoutePayload(
+			request.assetId,
+			"render-texture",
+			renderTexturePayloadDtoSchema,
+			response.payload,
+		);
+		return preparePassthroughAsset(request, response, payload);
+	}
+
+	if (/^render-surface\/[0-9a-fA-F]{8}$/.test(request.assetId)) {
+		const payload = parseExpectedRoutePayload(
+			request.assetId,
+			"render-surface",
+			renderSurfacePayloadDtoSchema,
+			response.payload,
+		);
+		return preparePassthroughAsset(request, response, payload);
+	}
+
+	if (/^palette\/[0-9a-fA-F]{8}$/.test(request.assetId)) {
+		const payload = parseExpectedRoutePayload(
+			request.assetId,
+			"palette",
+			palettePayloadDtoSchema,
+			response.payload,
+		);
+		return preparePassthroughAsset(request, response, payload);
+	}
+
+	return null;
+}
+
+function parseExpectedRoutePayload<T>(
+	assetId: string,
+	expectedKind: string,
+	schema: { safeParse(value: unknown): { success: true; data: T } | { success: false; error: { issues: readonly ZodIssue[] } } },
+	payload: unknown,
+): T {
+	const parsedPayload = schema.safeParse(payload);
+	if (!parsedPayload.success) {
+		throw new Error(
+			formatTypedPayloadParseError(
+				assetId,
+				expectedKind,
+				parsedPayload.error.issues,
+			),
+		);
+	}
+	return parsedPayload.data;
+}
+
+function formatTypedPayloadParseError(
+	assetId: string,
+	expectedKind: string,
+	issues: readonly ZodIssue[],
+): string {
+	const issueText = issues
+		.slice(0, 12)
+		.map((issue) => {
+			const path = issue.path.length === 0 ? "<root>" : issue.path.join(".");
+			return `${path}: ${issue.message}`;
+		})
+		.join("; ");
+	const suffix =
+		issues.length > 12 ? `; ${issues.length - 12} more issue(s)` : "";
+	return `Asset ${assetId} matched the ${expectedKind} route but its payload failed the ${expectedKind} contract: ${issueText}${suffix}`;
+}
+
 function prepareGfxObj(
 	request: AssetLookupRequestDto,
 	response: AssetLookupResponseDto,
@@ -332,7 +493,8 @@ function preparePassthroughAsset(
 		| MaterialRecipePayloadDto
 		| RenderTexturePayloadDto
 		| RenderSurfacePayloadDto
-		| PalettePayloadDto,
+		| PalettePayloadDto
+		| TerrainMaterialPayloadDto,
 ): PreparedAssetRecord {
 	return {
 		request,

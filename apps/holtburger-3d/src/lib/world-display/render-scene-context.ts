@@ -1,6 +1,5 @@
+import type { BrowserLocationSelection } from "../../app/browser-mode";
 import type { RenderLandblockAnchor } from "./render-chunks";
-import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
-import type { TerrainSceneModel } from "./terrain-scene";
 
 type WorldRenderSceneContextKind = "outdoor" | "dungeon";
 
@@ -11,13 +10,11 @@ export interface WorldRenderSceneContext {
 
 export function deriveWorldRenderSceneContext(options: {
 	activeRenderAnchor: RenderLandblockAnchor | null;
-	terrainScene: TerrainSceneModel;
-	structuredInteriorScene: StructuredInteriorSceneModel;
+	browserDestination: BrowserLocationSelection | null;
 }): WorldRenderSceneContext {
 	return {
 		kind:
-			options.terrainScene.tiles.length === 0 &&
-			options.structuredInteriorScene.cells.length > 0
+			options.browserDestination?.kind === "interior-cell"
 				? "dungeon"
 				: "outdoor",
 		anchorLandblockId: options.activeRenderAnchor?.landblockId ?? null,

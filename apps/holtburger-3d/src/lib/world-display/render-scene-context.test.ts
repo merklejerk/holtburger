@@ -1,16 +1,14 @@
 import { describe, expect, it } from "vitest";
 
+import type { BrowserLocationSelection } from "../../app/browser-mode";
 import { deriveWorldRenderSceneContext } from "./render-scene-context";
-import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
-import type { TerrainSceneModel } from "./terrain-scene";
 
 describe("render scene context", () => {
-	it("treats terrain-backed scenes as outdoor even when interiors are loaded", () => {
+	it("treats outdoor browser destinations as outdoor scene contexts", () => {
 		expect(
 			deriveWorldRenderSceneContext({
 				activeRenderAnchor: { landblockId: 0xda55ffff },
-				terrainScene: createTerrainScene(1),
-				structuredInteriorScene: createStructuredInteriorScene(3),
+				browserDestination: createOutdoorDestination(0xda55ffff),
 			}),
 		).toEqual({
 			kind: "outdoor",
@@ -18,12 +16,23 @@ describe("render scene context", () => {
 		});
 	});
 
-	it("treats interior-only scenes as dungeon render contexts", () => {
+	it("does not infer dungeon context from linked interiors without terrain", () => {
+		expect(
+			deriveWorldRenderSceneContext({
+				activeRenderAnchor: { landblockId: 0xda55ffff },
+				browserDestination: createOutdoorDestination(0xda55ffff),
+			}),
+		).toEqual({
+			kind: "outdoor",
+			anchorLandblockId: 0xda55ffff,
+		});
+	});
+
+	it("treats interior browser destinations as dungeon render contexts", () => {
 		expect(
 			deriveWorldRenderSceneContext({
 				activeRenderAnchor: { landblockId: 0x8a04ffff },
-				terrainScene: createTerrainScene(0),
-				structuredInteriorScene: createStructuredInteriorScene(4),
+				browserDestination: createInteriorDestination(0x8a040155),
 			}),
 		).toEqual({
 			kind: "dungeon",
@@ -32,31 +41,26 @@ describe("render scene context", () => {
 	});
 });
 
-function createTerrainScene(tileCount: number): TerrainSceneModel {
+function createOutdoorDestination(landblockId: number): BrowserLocationSelection {
 	return {
-		focusLandblockId: null,
-		statusText: "test",
-		cacheText: "test",
-		dataSourceText: "test",
-		tiles: Array.from({ length: tileCount }, () => ({
-			assetId: `landblock/0102ffff/outdoor`,
-		})) as TerrainSceneModel["tiles"],
+		kind: "outdoor-location",
+		label: "Test outdoor destination",
+		northSouth: 33.5,
+		northSouthHemisphere: "S",
+		eastWest: 72.8,
+		eastWestHemisphere: "E",
+		elevation: 0,
+		source: "manual",
+		landblockId,
 	};
 }
 
-function createStructuredInteriorScene(
-	cellCount: number,
-): StructuredInteriorSceneModel {
+function createInteriorDestination(envCellId: number): BrowserLocationSelection {
 	return {
-		focusEnvCellId: null,
-		activeEnvCellIds: [],
-		cells: [...Array(cellCount).keys()].map((index) => ({
-			renderKey: `cell/${index}`,
-		})) as StructuredInteriorSceneModel["cells"],
-		missingEnvCellAssetIds: [],
-		missingInteriorGeometryAssetIds: [],
-		missingCellStructureKeys: [],
-		statusText: "test",
-		cacheText: "test",
+		kind: "interior-cell",
+		label: "Test interior destination",
+		source: "manual",
+		envCellId,
+		landblockId: (envCellId & 0xffff0000) | 0xffff,
 	};
 }

@@ -90,6 +90,36 @@ export function decodeBinaryAssetBatchEnvelope(
 	return hydrated.responses;
 }
 
+export function encodeJsonAssetBatchEnvelope(
+	responses: readonly AssetLookupResponseDto[],
+): ArrayBuffer {
+	const manifestBytes = Array.from(
+		new TextEncoder().encode(
+			JSON.stringify({
+				transport: "holtburger-asset-binary",
+				version: VERSION,
+				byteOrder: "little-endian",
+				sectionByteOffsetBase: "section-data",
+				responses,
+				sections: [],
+			}),
+		),
+	);
+	while ((HEADER_LENGTH + manifestBytes.length) % 4 !== 0) {
+		manifestBytes.push(0x20);
+	}
+
+	const totalLength = HEADER_LENGTH + manifestBytes.length;
+	const bytes = new Uint8Array(totalLength);
+	bytes.set([...MAGIC].map((character) => character.charCodeAt(0)), 0);
+	const view = new DataView(bytes.buffer);
+	view.setUint32(4, VERSION, true);
+	view.setUint32(8, manifestBytes.length, true);
+	view.setUint32(12, totalLength, true);
+	bytes.set(manifestBytes, HEADER_LENGTH);
+	return bytes.buffer;
+}
+
 function normalizeBinaryResponse(value: unknown): Uint8Array {
 	if (value instanceof ArrayBuffer) {
 		return new Uint8Array(value);
@@ -187,7 +217,7 @@ function decodeBinarySection(
 			}),
 		);
 	}
-	if (section.role === "prepared.interiorCells.portalApertures.points") {
+	if (section.role.endsWith(".portalApertures.points")) {
 		return chunk(Array.from(readFloat32Section(bytes)), 3).map(([x, y, z]) => ({
 			x,
 			y,

@@ -416,6 +416,10 @@ function createPreparedEnvCell(
 			nodes: [],
 			items: [],
 		},
+		dependencies: {
+			renderableSourceAssetIds: sourceAssetIds,
+			materialAssetIds,
+		},
 	};
 	return {
 		request,
@@ -476,7 +480,9 @@ function createPreparedSetupModel(
 		defaultMotionTable: null,
 		defaultSoundTable: null,
 		defaultScriptTable: null,
-		dependencies: undefined,
+		dependencies: {
+			gfxObjAssetIds: [gfxObjAssetId],
+		},
 	};
 	return {
 		request,

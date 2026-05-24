@@ -432,6 +432,10 @@ function createLandblockOutdoorPayload(
 		terrain: terrainPayload.terrain,
 		statics,
 		outdoorBvh: null,
+		dependencies: {
+			renderableSourceAssetIds: statics.map((member) => member.sourceAssetId),
+			materialAssetIds: [],
+		},
 		diagnostics: emptyLandblockDiagnostics(),
 		provenance,
 	};
@@ -517,6 +521,7 @@ function createEnvCellPayload() {
 		envCellId: 0xda550100,
 		environmentId: 0x0d000001,
 		cellStructureId: 0x0d000002,
+		localPlacement: identityPlacement(),
 		surfaces: [
 			{
 				slotId: 1,
@@ -551,6 +556,10 @@ function createEnvCellPayload() {
 			coordinateSpace: "env-cell-local" as const,
 			nodes: [],
 			items: [],
+		},
+		dependencies: {
+			renderableSourceAssetIds: ["setup-model/02000020"],
+			materialAssetIds: ["material/08000020"],
 		},
 		provenance,
 	};

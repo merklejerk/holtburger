@@ -338,6 +338,11 @@ const landblockOutdoorStaticMemberDtoSchema = z.object({
 	generated: landblockGeneratedSceneryFactsDtoSchema.nullable(),
 });
 
+const staticRenderableDependenciesDtoSchema = z.object({
+	renderableSourceAssetIds: z.array(z.string().min(1)),
+	materialAssetIds: z.array(z.string().min(1)),
+});
+
 export const landblockOutdoorPayloadDtoSchema = z.object({
 	kind: z.literal("landblock-outdoor"),
 	residencyKind: z.literal("outdoor-landblock"),
@@ -349,6 +354,7 @@ export const landblockOutdoorPayloadDtoSchema = z.object({
 	terrain: landblockTerrainDtoSchema,
 	statics: z.array(landblockOutdoorStaticMemberDtoSchema),
 	outdoorBvh: preparedOutdoorBvhDtoSchema.nullable(),
+	dependencies: staticRenderableDependenciesDtoSchema,
 	diagnostics: landblockPackDiagnosticsDtoSchema,
 	provenance: assetProvenanceDtoSchema,
 });
@@ -436,6 +442,7 @@ export const envCellPayloadDtoSchema = z.object({
 	renderGeometry: preparedPolygonSetRenderGeometryDtoSchema,
 	cellBsp: z.lazy(() => polygonSetBspNodeDtoSchema),
 	localBvh: preparedEnvCellBvhDtoSchema,
+	dependencies: staticRenderableDependenciesDtoSchema,
 	provenance: assetProvenanceDtoSchema,
 });
 export type EnvCellPayloadDto = z.infer<typeof envCellPayloadDtoSchema>;

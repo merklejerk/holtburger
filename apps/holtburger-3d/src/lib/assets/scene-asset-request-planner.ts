@@ -23,6 +23,15 @@ import {
 	type OutdoorSceneInterest,
 } from "../world-display/outdoor-scene-interest";
 
+type PreparedAssetDependencyKey =
+	| "renderableSourceAssetIds"
+	| "gfxObjAssetIds"
+	| "materialAssetIds";
+
+type PreparedAssetDependencyMap = Partial<
+	Record<PreparedAssetDependencyKey, readonly string[]>
+>;
+
 export interface OutdoorSceneRequestOptions {
 	terrainRadius: number;
 	buildingRadius: number;
@@ -325,19 +334,22 @@ function createStaticRenderableAssetRequests(
 			detailLandblockIds,
 		},
 	);
-	const setupModelPartGfxAssetIds = collectPreparedSetupModelPartGfxAssetIds(
+	const setupModelPartGfxAssetIds = collectPreparedDependencyAssetIds(
 		preparedByAssetId,
 		outdoorSourceAssetIds,
+		"gfxObjAssetIds",
 	);
 	const envCellStaticSourceAssetIds =
-		collectPreparedEnvCellStaticSourceAssetIds(
+		collectPreparedDependencyAssetIds(
 			preparedByAssetId,
-			new Set(linkedInteriorCoverage.envCellIds),
+			linkedInteriorCoverage.envCellIds.map(formatEnvCellAssetId),
+			"renderableSourceAssetIds",
 		);
 	const envCellSetupModelPartGfxAssetIds =
-		collectPreparedSetupModelPartGfxAssetIds(
+		collectPreparedDependencyAssetIds(
 			preparedByAssetId,
 			envCellStaticSourceAssetIds,
+			"gfxObjAssetIds",
 		);
 	const materialAssetIds = collectStaticRenderableMaterialAssetIds(
 		preparedByAssetId,
@@ -443,13 +455,15 @@ function createIndoorStaticRenderableAssetRequests(
 		pendingAssetIds,
 	);
 	const envCellStaticSourceAssetIds =
-		collectPreparedEnvCellStaticSourceAssetIds(
+		collectPreparedDependencyAssetIds(
 			preparedByAssetId,
-			new Set(activeEnvCellIds),
+			activeEnvCellIds.map(formatEnvCellAssetId),
+			"renderableSourceAssetIds",
 		);
-	const setupModelPartGfxAssetIds = collectPreparedSetupModelPartGfxAssetIds(
+	const setupModelPartGfxAssetIds = collectPreparedDependencyAssetIds(
 		preparedByAssetId,
 		envCellStaticSourceAssetIds,
+		"gfxObjAssetIds",
 	);
 	const materialAssetIds = collectStaticRenderableMaterialAssetIds(
 		preparedByAssetId,
@@ -503,13 +517,15 @@ function collectIndoorVisibleMaterialAssetIds(
 		preparedByAssetId,
 	).envCellIds;
 	const envCellStaticSourceAssetIds =
-		collectPreparedEnvCellStaticSourceAssetIds(
+		collectPreparedDependencyAssetIds(
 			preparedByAssetId,
-			new Set(activeEnvCellIds),
+			activeEnvCellIds.map(formatEnvCellAssetId),
+			"renderableSourceAssetIds",
 		);
-	const setupModelPartGfxAssetIds = collectPreparedSetupModelPartGfxAssetIds(
+	const setupModelPartGfxAssetIds = collectPreparedDependencyAssetIds(
 		preparedByAssetId,
 		envCellStaticSourceAssetIds,
+		"gfxObjAssetIds",
 	);
 	return collectStaticRenderableMaterialAssetIds(
 		preparedByAssetId,
@@ -548,19 +564,22 @@ function collectOutdoorVisibleMaterialAssetIds(
 			detailLandblockIds,
 		},
 	);
-	const setupModelPartGfxAssetIds = collectPreparedSetupModelPartGfxAssetIds(
+	const setupModelPartGfxAssetIds = collectPreparedDependencyAssetIds(
 		preparedByAssetId,
 		outdoorSourceAssetIds,
+		"gfxObjAssetIds",
 	);
 	const envCellStaticSourceAssetIds =
-		collectPreparedEnvCellStaticSourceAssetIds(
+		collectPreparedDependencyAssetIds(
 			preparedByAssetId,
-			new Set(linkedInteriorCoverage.envCellIds),
+			linkedInteriorCoverage.envCellIds.map(formatEnvCellAssetId),
+			"renderableSourceAssetIds",
 		);
 	const envCellSetupModelPartGfxAssetIds =
-		collectPreparedSetupModelPartGfxAssetIds(
+		collectPreparedDependencyAssetIds(
 			preparedByAssetId,
 			envCellStaticSourceAssetIds,
+			"gfxObjAssetIds",
 		);
 	return collectStaticRenderableMaterialAssetIds(
 		preparedByAssetId,
@@ -580,8 +599,16 @@ function collectStaticRenderableMaterialAssetIds(
 	envCellIds: ReadonlySet<number>,
 ): string[] {
 	return uniqueSortedAssetIds([
-		...collectPreparedGfxObjMaterialAssetIds(preparedByAssetId, gfxAssetIds),
-		...collectPreparedEnvCellMaterialAssetIds(preparedByAssetId, envCellIds),
+		...collectPreparedDependencyAssetIds(
+			preparedByAssetId,
+			gfxAssetIds,
+			"materialAssetIds",
+		),
+		...collectPreparedDependencyAssetIds(
+			preparedByAssetId,
+			[...envCellIds].map(formatEnvCellAssetId),
+			"materialAssetIds",
+		),
 	]);
 }
 
@@ -611,81 +638,33 @@ function collectSelectedOutdoorSourceAssetIds(
 	);
 }
 
-function collectPreparedEnvCellStaticSourceAssetIds(
+function collectPreparedDependencyAssetIds(
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
-	envCellIds: ReadonlySet<number>,
+	assetIds: readonly string[],
+	dependencyKey: PreparedAssetDependencyKey,
 ): string[] {
 	return uniqueSortedAssetIds(
-		Object.values(preparedByAssetId).flatMap((asset) => {
-			if (
-				asset.payload.kind !== "env-cell" ||
-				!envCellIds.has(asset.payload.envCellId)
-			) {
+		assetIds.flatMap((assetId) => {
+			const dependencies = getPreparedAssetDependencies(
+				preparedByAssetId[assetId],
+			);
+			if (!dependencies || !(dependencyKey in dependencies)) {
 				return [];
 			}
-			return asset.payload.statics.map((member) => member.sourceAssetId);
+			const dependencyAssetIds = dependencies[dependencyKey];
+			return Array.isArray(dependencyAssetIds) ? dependencyAssetIds : [];
 		}),
 	);
 }
 
-function collectPreparedSetupModelPartGfxAssetIds(
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
-	sourceAssetIds: readonly string[],
-): string[] {
-	const gfxAssetIds: string[] = [];
-	for (const sourceAssetId of sourceAssetIds) {
-		const sourceAsset = preparedByAssetId[sourceAssetId];
-		if (sourceAsset?.payload.kind !== "setup-model") {
-			continue;
-		}
-
-		for (const part of sourceAsset.payload.parts) {
-			gfxAssetIds.push(part.gfxObjAssetId);
-		}
+function getPreparedAssetDependencies(
+	asset: PreparedAssetRecord | undefined,
+): PreparedAssetDependencyMap | null {
+	const payload = asset?.payload;
+	if (!payload || !("dependencies" in payload)) {
+		return null;
 	}
-	return gfxAssetIds;
-}
-
-function collectPreparedGfxObjMaterialAssetIds(
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
-	gfxAssetIds: readonly string[],
-): string[] {
-	return [
-		...new Set(
-			gfxAssetIds.flatMap((gfxAssetId) => {
-				const asset = preparedByAssetId[gfxAssetId];
-				if (asset?.payload.kind !== "gfx-obj") {
-					return [];
-				}
-				const dependencyAssetIds = asset.payload.dependencies?.materialAssetIds;
-				if (dependencyAssetIds && dependencyAssetIds.length > 0) {
-					return dependencyAssetIds;
-				}
-				return asset.payload.surfaceIds.map(formatMaterialAssetId);
-			}),
-		),
-	].sort();
-}
-
-function collectPreparedEnvCellMaterialAssetIds(
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
-	envCellIds: ReadonlySet<number>,
-): string[] {
-	return uniqueSortedAssetIds(
-		Object.values(preparedByAssetId).flatMap((asset) => {
-			if (
-				asset.payload.kind !== "env-cell" ||
-				!envCellIds.has(asset.payload.envCellId)
-			) {
-				return [];
-			}
-			return asset.payload.surfaces.map((surface) => surface.materialAssetId);
-		}),
-	);
-}
-
-function formatMaterialAssetId(surfaceId: number): string {
-	return `material/${surfaceId.toString(16).padStart(8, "0")}`;
+	return payload.dependencies as PreparedAssetDependencyMap;
 }
 
 function uniqueSortedAssetIds(assetIds: readonly string[]): string[] {

@@ -6,6 +6,7 @@ import {
 	deriveLandblockEnvCellId,
 	deriveLandblockEnvCellIds,
 	formatEnvCellAssetId,
+	formatLandblockBuildingShellsAssetId,
 	formatLandblockPackAssetId,
 	formatLandblockSceneAssetId,
 	formatLandblockSummaryAssetId,
@@ -16,6 +17,7 @@ import {
 	makeOutdoorLandblockId,
 	normalizeOutdoorLandblockId,
 	parseEnvCellAssetId,
+	parseLandblockBuildingShellsAssetId,
 	parseLandblockSceneAssetId,
 	parseLandblockTerrainAssetId,
 	parseTerrainMaterialAssetId,
@@ -36,6 +38,9 @@ describe("outdoor landblock helpers", () => {
 		);
 		expect(formatLandblockTerrainAssetId(landblockId)).toBe(
 			"landblock/da55ffff/terrain",
+		);
+		expect(formatLandblockBuildingShellsAssetId(landblockId)).toBe(
+			"landblock/da55ffff/building-shells",
 		);
 		expect(formatLandblockSceneAssetId(landblockId)).toBe(
 			"landblock/da55ffff/scene",
@@ -75,6 +80,11 @@ describe("outdoor landblock helpers", () => {
 		expect(parseLandblockSceneAssetId("landblock/da550123/scene")).toBe(
 			0xda550123,
 		);
+		expect(
+			parseLandblockBuildingShellsAssetId(
+				"landblock/da550123/building-shells",
+			),
+		).toBe(0xda550123);
 		expect(formatEnvCellAssetId(0xda550123)).toBe("env-cell/da550123");
 		expect(parseEnvCellAssetId("env-cell/da550123")).toBe(0xda550123);
 		expect(formatTerrainMaterialAssetId(1)).toBe("terrain-material/1");
@@ -82,6 +92,9 @@ describe("outdoor landblock helpers", () => {
 			regionNumber: 1,
 		});
 		expect(parseLandblockTerrainAssetId("landblock/da55ffff/scene")).toBeNull();
+		expect(
+			parseLandblockBuildingShellsAssetId("landblock/da55ffff/terrain"),
+		).toBeNull();
 		expect(parseTerrainMaterialAssetId("terrain-material/1/123456")).toBeNull();
 		expect(
 			parseTerrainMaterialAssetId("terrain-material/1/not-a-number"),

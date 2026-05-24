@@ -11,11 +11,13 @@ pub mod static_outdoor_scene;
 pub use character_gen::CharacterGenCatalog;
 pub use decode_cache::ContentDecodeCache;
 pub use landblock_pack::{
-    CellLandblockFact, EnvCellFact, EnvCellPortalFact, EnvironmentFact, IndoorStaticObjectFact,
-    LandblockClassification, LandblockInfoFact, LandblockInteriorFacts, LandblockPack,
-    LandblockPackAssembler, LandblockPackSourceDiagnostics, LandblockPreparedFacts,
-    LandblockRestriction, LandblockSummary, LandblockSummaryAssembler, LandblockSummaryBuilding,
-    LandblockSummaryBuildingPortal, LandblockSummaryObject, PreparedAabb, PreparedBvh,
+    CellLandblockFact, EnvCellAsset, EnvCellAssetAssembler, EnvCellFact, EnvCellPortalFact,
+    EnvironmentFact, IndoorStaticObjectFact, LandblockBuildingShell, LandblockBuildingShellsAsset,
+    LandblockBuildingShellsAssetAssembler, LandblockClassification, LandblockInfoFact,
+    LandblockInteriorFacts, LandblockPack, LandblockPackAssembler, LandblockPackSourceDiagnostics,
+    LandblockPreparedFacts, LandblockRestriction, LandblockSummary, LandblockSummaryAssembler,
+    LandblockSummaryBuilding, LandblockSummaryBuildingPortal, LandblockSummaryObject,
+    LandblockTerrainAsset, LandblockTerrainAssetAssembler, PreparedAabb, PreparedBvh,
     PreparedBvhNode, PreparedInteriorCell, PreparedPolygonSetInvalidPolygon,
     PreparedPolygonSetRenderGeometry, PreparedPolygonSetRenderTriangle, PreparedPortalAperture,
     PreparedPortalAperturePlane, PreparedPortalAperturePlaneSource, PreparedSpatialItem,

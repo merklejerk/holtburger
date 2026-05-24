@@ -1,6 +1,6 @@
 # Holtburger 3D Granular Scene Asset Strategy Plan
 
-Status: in progress; Phase 2 host route scaffolding is implemented.
+Status: in progress; Phase 2.2 building-shell coverage is implemented.
 
 ## Context
 
@@ -101,27 +101,32 @@ dependencies instead of hiding them under `landblock-pack.prepared`.
 
 Use granular, REST-like asset IDs:
 
-| Route                             | Purpose                                                                                                                                                                                        | Dependencies                                                                                               |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `landblock/{id}/terrain`          | Outdoor coverage render geometry: terrain, source terrain corner codes, computed terrain pcodes, terrain-only BVH, and building shell render geometry.                                         | One region terrain material table derived from `regionNumber`, plus building render material dependencies. |
-| `landblock/{id}/scene`            | Focused scene membership: typed statics/buildings with placements, env-cell membership, portal/link graph, an env-cell residency BVH, and outdoor render BVH when outdoor-space members exist. | Derived from typed member fields: static/building `sourceAssetId` and env-cell `assetId`.                  |
-| `env-cell/{id}`                   | One structured interior cell with topology, portals, BSP witnesses, render geometry, and material slots.                                                                                       | `material/{did}` for every referenced `CSurface`.                                                          |
-| `gfx-obj/{did}`                   | One GfxObj render/physics projection.                                                                                                                                                          | `material/{did}` for every referenced `CSurface`.                                                          |
-| `setup-model/{did}`               | Setup parts, placements, lights, and default part composition.                                                                                                                                 | `gfx-obj/{did}` for each part.                                                                             |
-| `terrain-material/{regionNumber}` | Region-scoped LandSurf/TexMerge terrain material lookup tables used to interpret any terrain pcode in that region.                                                                             | Terrain base, overlay, alpha, road, and detail texture dependencies referenced by the region tables.       |
-| `material/{did}`                  | One `CSurface` material recipe.                                                                                                                                                                | `render-texture/{did}`, `render-surface/{did}`, and `palette/{did}` as required.                           |
-| `render-texture/{did}`            | One `RenderTexture` mip chain descriptor.                                                                                                                                                      | `render-surface/{did}`.                                                                                    |
-| `render-surface/{did}`            | One image payload.                                                                                                                                                                             | `palette/{did}` for indexed/default-palette surfaces.                                                      |
-| `palette/{did}`                   | One palette payload.                                                                                                                                                                           | None.                                                                                                      |
+| Route                             | Purpose                                                                                                                                                                                        | Dependencies                                                                                         |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `landblock/{id}/terrain`          | Outdoor coverage render geometry: terrain, source terrain corner codes, computed terrain pcodes, and terrain-only BVH.                                                                         | One region terrain material table derived from `regionNumber`.                                       |
+| `landblock/{id}/building-shells`  | Outdoor coverage render geometry for placed building/setup shells, without focused scene membership, portals, or interior env-cell data.                                                        | Derived from typed shell fields: `sourceAssetId` for each placed setup/gfx source.                   |
+| `landblock/{id}/scene`            | Focused scene membership: typed statics/buildings with placements, env-cell membership, portal/link graph, an env-cell residency BVH, and outdoor render BVH when outdoor-space members exist. | Derived from typed member fields: static/building `sourceAssetId` and env-cell `assetId`.            |
+| `env-cell/{id}`                   | One structured interior cell with topology, portals, BSP witnesses, render geometry, and material slots.                                                                                       | `material/{did}` for every referenced `CSurface`.                                                    |
+| `gfx-obj/{did}`                   | One GfxObj render/physics projection.                                                                                                                                                          | `material/{did}` for every referenced `CSurface`.                                                    |
+| `setup-model/{did}`               | Setup parts, placements, lights, and default part composition.                                                                                                                                 | `gfx-obj/{did}` for each part.                                                                       |
+| `terrain-material/{regionNumber}` | Region-scoped LandSurf/TexMerge terrain material lookup tables used to interpret any terrain pcode in that region.                                                                             | Terrain base, overlay, alpha, road, and detail texture dependencies referenced by the region tables. |
+| `material/{did}`                  | One `CSurface` material recipe.                                                                                                                                                                | `render-texture/{did}`, `render-surface/{did}`, and `palette/{did}` as required.                     |
+| `render-texture/{did}`            | One `RenderTexture` mip chain descriptor.                                                                                                                                                      | `render-surface/{did}`.                                                                              |
+| `render-surface/{did}`            | One image payload.                                                                                                                                                                             | `palette/{did}` for indexed/default-palette surfaces.                                                |
+| `palette/{did}`                   | One palette payload.                                                                                                                                                                           | None.                                                                                                |
 
 ### Route Notes
 
 - `landblock/{id}/terrain` should answer "what outdoor terrain can this
-  landblock contribute, and which building shells should be drawn with that
-  outdoor coverage?" It carries terrain render geometry, terrain pcodes, a
-  terrain-only BVH, and building shell render geometry. It should not carry
-  focused statics, env-cell membership, portals, material dependency tables, or
-  interior graph data.
+  landblock contribute?" It carries terrain render geometry, terrain pcodes, and
+  a terrain-only BVH. It should not carry focused statics, building shell render
+  geometry, env-cell membership, portals, material dependency tables, or interior
+  graph data.
+- `landblock/{id}/building-shells` should answer "what low-detail placed
+  building/setup shell geometry should outdoor coverage draw for this landblock?"
+  It is a coverage route like terrain, but with a different source family and
+  dependency graph. It should not carry terrain, env-cell membership, portal/link
+  topology, interior geometry, or focused interaction metadata.
 - `landblock/{id}/scene` should answer "what focused scene members exist here,
   where are they placed, and which first-class source assets back each member?"
   It should not carry a parallel top-level `renderableAssetIds` shortcut or every
@@ -216,8 +221,7 @@ The current host already has this precedent:
 The new route families should preserve that approach:
 
 - `landblock/{id}/terrain` should use binary sections for terrain vertices,
-  terrain triangle/index data, terrain BVH bounds/items when large, and building
-  shell `renderGeometry` arrays.
+  terrain triangle/index data, and terrain BVH bounds/items when large.
 - `landblock/{id}/scene` should keep member/source facts in JSON, but encode BVH
   bounds/items as binary sections if they become large.
 - `env-cell/{id}` should use binary sections for `renderGeometry`,
@@ -236,9 +240,10 @@ consumer lifetime, invalidation policy, or cache-retention policy.
 ## Landblock Terrain Shape
 
 `landblock/{id}/terrain` should be the outdoor coverage render asset for one
-landblock. It should carry terrain plus building shell render geometry. It
-should not carry focused outdoor statics, indoor env-cell membership, portal
-graphs, restriction records, or general static-object placements.
+landblock. It should carry terrain render geometry only. It should not carry
+building shell render geometry, focused outdoor statics, indoor env-cell
+membership, portal graphs, restriction records, or general static-object
+placements.
 
 Focused landblock loading must still request `landblock/{id}/scene` for outdoor
 statics, env cells, portals, interiors, scene BVHs, and exact scene membership.
@@ -253,7 +258,6 @@ interface PreparedLandblockTerrainPayload {
   regionId: DataId; // RegionDesc file ID, currently 0x13000000.
   regionNumber: number;
   terrain: LandblockTerrain;
-  buildingShells: LandblockTerrainBuildingShell[];
   diagnostics: PreparedLandblockDiagnostics;
 }
 
@@ -281,29 +285,82 @@ interface PreparedTerrainBvhItem {
   quadIndex: number;
   triangleIndices: [number, number];
 }
-
-interface LandblockTerrainBuildingShell {
-  instanceId: string;
-  sourceDid: DataId;
-  sourceIndex: number;
-  localPlacement: PlacementTransformDto;
-  renderGeometry: PreparedPolygonSetRenderGeometry;
-  materialSurfaceIds: DataId[];
-}
 ```
 
 `landblock/{id}/terrain` is the authoritative terrain payload for the landblock,
-including source terrain corner codes, computed terrain pcodes, the terrain-only
-BVH, and building shell render geometry. Building shells in this route are
-render-only coverage data: no
-portals, no env-cell links, no building traversal metadata, and no focused scene
-membership semantics.
+including source terrain corner codes, computed terrain pcodes, and the
+terrain-only BVH. Buildings are not terrain members. Far building coverage should
+be solved through `landblock/{id}/building-shells` so the renderer can request
+terrain and outdoor shell coverage independently while keeping both payloads
+source-shaped.
 
 The source term `Stab` is overloaded in the references. `LandblockInfo.objects`
 and `EnvCell.static_objects` contain `Stab` records that are static object
 placements: source DID plus frame. `CBldPortal.StabList` contains 16-bit local
 cell numbers used by building portals; those are normalized into full
 `linkedEnvCellIds`.
+
+## Landblock Building Shell Shape
+
+`landblock/{id}/building-shells` should be the outdoor coverage companion to
+`landblock/{id}/terrain`. It exists because far outdoor rendering still needs
+placed building/setup shells, but those shells are not terrain and should not
+force the planner to hydrate the full focused `landblock/{id}/scene` route.
+
+This route should carry only render coverage membership for outdoor placed
+building/setup shells:
+
+- source `LandblockInfo.buildings[]` placement facts needed to draw the shell;
+- one `sourceAssetId` per placed shell, usually `setup-model/{did}` and
+  occasionally `gfx-obj/{did}` if the source shape proves that is valid;
+- landblock-local placement, source scale, and optional source/instance bounds;
+- a building-shell BVH over placed shell bounds.
+
+It should not carry:
+
+- terrain vertices, terrain quads, terrain pcodes, or terrain material routes;
+- env-cell membership, interior cell render geometry, BSPs, or portal traversal
+  topology;
+- focused interaction metadata that belongs to `landblock/{id}/scene`;
+- transitive material, render-texture, render-surface, or palette dependencies.
+
+Recommended shape:
+
+```ts
+interface PreparedLandblockBuildingShellsPayload {
+  kind: "landblock-building-shells";
+  landblockId: LandblockId;
+  shells: LandblockBuildingShellMember[];
+  shellBvh: PreparedLandblockBuildingShellBvh;
+  diagnostics: PreparedLandblockDiagnostics;
+}
+
+interface LandblockBuildingShellMember {
+  shellId: string;
+  buildingIndex: number;
+  sourceDid: DataId;
+  sourceAssetId: AssetId; // setup-model/{did} or gfx-obj/{did}
+  placement: PlacementTransformDto;
+  sourceScale: Vec3Dto;
+  sourceBounds: PreparedBounds | null;
+  instanceBounds: PreparedBounds | null;
+}
+
+interface PreparedLandblockBuildingShellBvh {
+  coordinateSpace: "landblock-local";
+  nodes: PreparedBvhNode[];
+  items: PreparedLandblockBuildingShellBvhItem[];
+}
+
+interface PreparedLandblockBuildingShellBvhItem {
+  kind: "building-shell";
+  shellId: string;
+}
+```
+
+Dependency extraction for `landblock/{id}/building-shells` should walk
+`shells[].sourceAssetId`. Follow-up material dependencies still belong to the
+resulting `setup-model/*` and `gfx-obj/*` graph edges.
 
 ## Outdoor BVH Decision
 
@@ -345,7 +402,7 @@ It should exclude:
 
 - terrain geometry, terrain source codes, and terrain culling structures, which
   belong to `landblock/{id}/terrain`;
-- building shell render geometry, which belongs to `landblock/{id}/terrain`;
+- building shell render geometry;
 - full env-cell render-geometry bounds;
 - env-cell BSP bounds;
 - indoor static objects placed inside env cells;
@@ -600,10 +657,10 @@ cell render geometry, cell BSP, or material slots. Those belong to `env-cell/*`.
 
 `landblock/{id}/terrain.terrain` should own outdoor ground render geometry,
 terrain quad metadata, and the terrain-only BVH for one outdoor landblock. The
-route also carries `buildingShells[]`, but those shells are not included in
-`terrain.terrainBvh`. Do not model terrain as a `landblock/{id}/scene` member.
-There is no dungeon terrain. The planner should request this route only for
-outdoor landblocks; dungeon rendering uses env-cell assets instead.
+route does not carry building shell geometry. Do not model terrain as a
+`landblock/{id}/scene` member. There is no dungeon terrain. The planner should
+request this route only for outdoor landblocks; dungeon rendering uses env-cell
+assets instead.
 
 Shared terrain member shapes:
 
@@ -957,7 +1014,8 @@ fashion.
 
 The frontend planner should own request decisions:
 
-- request `landblock/{id}/terrain` only for outdoor terrain and building-shell
+- request `landblock/{id}/terrain` only for outdoor terrain coverage;
+- request `landblock/{id}/building-shells` only for outdoor building/setup shell
   coverage;
 - request `landblock/{id}/scene` for focused landblocks;
 - request `env-cell/{id}` for visible or traversable interior cells;
@@ -970,8 +1028,6 @@ The planner should not need to scan nested landblock-pack render geometry to fin
 material IDs, and it should not consume a parallel `renderableAssetIds` shortcut
 for scene statics. Scene follow-up requests should come from typed member fields.
 Material requests should fall out of `env-cell/*` and `gfx-obj/*` metadata.
-Building shell material requests in `landblock/{id}/terrain` come from
-`buildingShells[].materialSurfaceIds`.
 Terrain material requests are the exception: the frontend derives one
 `terrain-material/{regionNumber}` route from
 `landblock/{id}/terrain.regionNumber`. Terrain pcodes remain quad-local lookup
@@ -985,6 +1041,7 @@ readiness. The new unit is a route-family graph whose roots are selected by
 rendering need:
 
 - outdoor coverage roots: `landblock/{id}/terrain`;
+- outdoor building coverage roots: `landblock/{id}/building-shells`;
 - focused landblock roots: `landblock/{id}/scene`;
 - active interior roots: `env-cell/{id}`;
 - render leaf roots discovered from typed route fields: `setup-model/*`,
@@ -996,6 +1053,9 @@ The planner should use separate selection policies for the root route families:
 - Request `landblock/{id}/terrain` for outdoor coverage rings and focused
   outdoor landblocks. This route replaces old terrain/summary coverage and is
   valid only for outdoor landblocks.
+- Request `landblock/{id}/building-shells` for outdoor coverage rings when the
+  renderer wants far building/setup shell silhouettes without full focused scene
+  membership.
 - Request `landblock/{id}/scene` for focused landblocks where exact scene
   membership, statics, buildings, portals, or env-cell residency are needed.
 - Request `env-cell/{id}` from scene membership only when the env cell is
@@ -1006,9 +1066,9 @@ The planner should use separate selection policies for the root route families:
 
 Follow-up dependency extraction should be route-specific and typed:
 
-- `landblock/{id}/terrain` enqueues one `terrain-material/{regionNumber}` route
-  and building shell `material/{did}` requests from
-  `buildingShells[].materialSurfaceIds`.
+- `landblock/{id}/terrain` enqueues one `terrain-material/{regionNumber}` route.
+- `landblock/{id}/building-shells` enqueues `shells[].sourceAssetId`. It never
+  enqueues material, render-texture, render-surface, or palette routes directly.
 - `landblock/{id}/scene` enqueues `statics[].sourceAssetId`,
   `buildings[].sourceAssetId`, and selected `envCells[].assetId`. It never
   enqueues material, render-texture, render-surface, or palette routes directly.
@@ -1024,20 +1084,25 @@ The broad streaming loop should be:
 
 1. compute outdoor coverage landblocks from camera/focus;
 2. enqueue terrain roots for outdoor coverage landblocks;
-3. compute focused landblocks from camera/focus/navigation state;
-4. enqueue scene roots for focused landblocks;
-5. expand prepared terrain and scene responses through typed dependency
-   extractors;
-6. enqueue env-cell roots selected by scene membership, portal traversal, and
+3. enqueue building-shell roots for outdoor coverage landblocks when far shell
+   rendering is enabled;
+4. compute focused landblocks from camera/focus/navigation state;
+5. enqueue scene roots for focused landblocks;
+6. expand prepared terrain, building-shell, and scene responses through typed
+   dependency extractors;
+7. enqueue env-cell roots selected by scene membership, portal traversal, and
    env-cell residency BVH policy;
-7. expand setup/gfx/material/texture/surface/palette leaves through the normal
+8. expand setup/gfx/material/texture/surface/palette leaves through the normal
    asset graph scheduler;
-8. keep already prepared or pending routes out of the queue unless invalidated.
+9. keep already prepared or pending routes out of the queue unless invalidated.
 
 Cache and pruning policy should match route lifetime:
 
 - `landblock/{id}/terrain` can be retained for the outdoor coverage cache and
   pruned by outdoor coverage distance.
+- `landblock/{id}/building-shells` can be retained for the outdoor coverage
+  cache and pruned by outdoor shell coverage distance. It should not pin focused
+  scene or env-cell routes by itself.
 - `landblock/{id}/scene` should be retained only for focused scene membership
   and nearby transition context.
 - `env-cell/{id}` should be retained by active interior visibility, traversal
@@ -1068,8 +1133,9 @@ extractors during the transition, and then switch root selection.
 Recommended frontend order:
 
 1. Add route helpers in `landblocks.ts` for `landblock/{id}/terrain`,
-   `landblock/{id}/scene`, `env-cell/{id}`, and
-   `terrain-material/{regionNumber}` while leaving old helpers in place.
+   `landblock/{id}/building-shells`, `landblock/{id}/scene`,
+   `env-cell/{id}`, and `terrain-material/{regionNumber}` while leaving old
+   helpers in place.
 2. Add Zod schemas in `host/contracts.ts` and prepared payload types in
    `assets/types.ts` for the new routes. Keep old schemas until Phase 5.
 3. Centralize route-specific dependency extraction in one frontend module, then
@@ -1077,12 +1143,13 @@ Recommended frontend order:
    call it. Avoid maintaining two divergent switch statements for the same route
    families.
 4. Extend `asset-hydration-policy.ts` before switching planner roots:
-   `landblock/{id}/terrain`, `landblock/{id}/scene`, `env-cell/{id}`,
-   `gfx-obj/{did}`, and `setup-model/{did}` should remain direct hydration
-   roots. Material/texture/surface/palette leaves can continue to use graph
-   hydration.
+   `landblock/{id}/terrain`, `landblock/{id}/building-shells`,
+   `landblock/{id}/scene`, `env-cell/{id}`, `gfx-obj/{did}`, and
+   `setup-model/{did}` should remain direct hydration roots.
+   Material/texture/surface/palette leaves can continue to use graph hydration.
 5. Update the worker binary path before enabling new large roots:
    `isLargeWorkerPrepareAsset` must include `landblock/{id}/terrain`,
+   `landblock/{id}/building-shells` if BVH arrays are binary,
    `landblock/{id}/scene` if BVH arrays are binary, `env-cell/{id}`, and
    `gfx-obj/{did}` when render geometry uses the binary envelope.
 6. Only after the new extractors, schemas, hydration policy, and worker binary
@@ -1098,11 +1165,11 @@ therefore must either:
 - move dependency expansion for prepared direct roots into the same sync pass.
 
 The first option is lower risk with the existing controller. After applying
-direct `landblock/{id}/terrain`, `landblock/{id}/scene`, or `env-cell/{id}`
-responses, the controller should re-run planning for the same scene-interest key
-until no new unprepared route IDs are emitted. Keep the existing
-prepared/pending de-duplication so this convergence loop cannot request the same
-asset repeatedly.
+direct `landblock/{id}/terrain`, `landblock/{id}/building-shells`,
+`landblock/{id}/scene`, or `env-cell/{id}` responses, the controller should
+re-run planning for the same scene-interest key until no new unprepared route IDs
+are emitted. Keep the existing prepared/pending de-duplication so this
+convergence loop cannot request the same asset repeatedly.
 
 Renderer migration should use adapters instead of forcing every renderer module
 to understand both old and new route families. Add narrow selectors such as:
@@ -1111,7 +1178,9 @@ to understand both old and new route families. Add narrow selectors such as:
   terrain during migration, new `landblock/{id}/terrain` after switch;
 - structured interior cells from prepared assets: old pack interior cells during
   migration, new `env-cell/{id}` plus scene membership after switch;
-- static/building source members from prepared assets: old pack/summary facts
+- far building shell coverage from prepared assets: old summary/pack building
+  facts during migration, new `landblock/{id}/building-shells` after switch;
+- focused static/building source members from prepared assets: old pack facts
   during migration, new `landblock/{id}/scene` members after switch.
 
 Delete those migration adapters during Phase 6 cleanup after the renderer has
@@ -1144,9 +1213,6 @@ Problems should scream:
   asset contract error.
 - If `gfx-obj/*` includes render geometry with material/surface IDs but omits
   the matching typed material references, treat it as an asset contract error.
-- If `landblock/{id}/terrain` includes building shell render geometry with
-  surface IDs but omits `buildingShells[].materialSurfaceIds`, treat it as an
-  asset contract error.
 - When terrain material rendering is enabled, if visible terrain reaches
   `WorldDisplay` before its `terrain-material/{regionNumber}` table is prepared
   or pending, emit a high-severity structured diagnostic with the owning terrain
@@ -1193,7 +1259,7 @@ Validation:
 - No new tests should require `landblock-pack` or `landblock-summary` to remain
   dependency owners.
 
-Progress as of 2026-05-23:
+Progress as of 2026-05-24:
 
 - Renamed the existing `landblock-pack` dependency extraction test as a
   migration-target baseline rather than a desired future contract.
@@ -1376,8 +1442,7 @@ Phase 1.1 decisions and refinements:
 - Add a narrow terrain-prep step for data the current pack terrain mesh does not
   carry: per-quad source corner terrain codes and computed pcodes.
 - `landblock/{id}/terrain` should project outdoor terrain, source terrain corner
-  codes, computed pcodes, `regionId`/`regionNumber`, building shell render
-  geometry, and a terrain-only BVH.
+  codes, computed pcodes, `regionId`/`regionNumber`, and a terrain-only BVH.
 - `landblock/{id}/scene` should project typed scene membership, source
   placements, static/building source asset IDs, env-cell asset IDs, portal/link
   graph, and an outdoor static BVH when outdoor-space members exist.
@@ -1446,26 +1511,22 @@ Phase 2 decisions and course corrections:
   edge. Phase 3 should keep the graph test expectation aligned with that route
   boundary unless we deliberately decide terrain material tables should inline
   transitive render-surface/palette references.
-- `landblock/{id}/terrain.buildingShells` is still empty. The current pack has
-  building/static source membership and per-part mesh expansion, but it does not
-  have a clean landblock-terrain-owned building shell render product. Phase 3 or
-  Phase 4 should decide whether building shell render geometry belongs in
-  `landblock/{id}/terrain` or should stay as focused scene/static members.
-- Route-specific BVHs are currently conservative flat BVHs where the existing
-  pack does not already provide a correctly scoped tree. This avoids reusing the
-  old mixed static-landblock BVH for the wrong route scope, but Phase 4 should
-  add real route-owned BVH builders before renderer cutover.
-- Binary batch lookup recognizes the new landblock/env-cell route families, but
-  the new route shapes still serialize bulk arrays in JSON placeholders only
-  where reused old serializers already do so. Before enabling these routes as
-  high-volume direct roots, add route-specific binary sections for
-  `landblock/{id}/terrain`, `landblock/{id}/scene` BVH arrays if populated, and
-  `env-cell/{id}` render/aperture geometry.
-- `env-cell/{id}` is currently served by loading the owning landblock pack and
-  selecting the prepared cell. That is acceptable for proving the route contract,
-  but it preserves pack assembly coupling. Phase 4 should either introduce a
-  first-class env-cell assembler or explicitly schedule this as cleanup debt
-  before retiring old pack semantics.
+- Phase 2 initially left `landblock/{id}/terrain.buildingShells` empty because
+  the current pack has building/static source membership and per-part mesh
+  expansion, but no clean landblock-terrain-owned building shell render product.
+  Phase 2.1 resolved this by making `landblock/{id}/terrain` pure terrain and
+  deleting `buildingShells` from the target DTO.
+- Phase 2 initially used conservative flat BVHs where the existing pack did not
+  already provide a correctly scoped tree. Phase 2.1 added route-owned flat BVH
+  construction for the new route scopes; Phase 4 can still improve tree quality
+  if renderer profiling needs it.
+- Phase 2 initially recognized the new landblock/env-cell route families in
+  binary batch lookup without complete route-specific binary sections. Phase 2.1
+  added binary sections for the high-volume terrain and env-cell arrays that are
+  already populated.
+- Phase 2 initially served `env-cell/{id}` by loading the owning landblock pack
+  and selecting the prepared cell. Phase 2.1 replaced that with a first-class
+  env-cell assembler.
 
 ### Phase 2.1: Close Host Route Structural Gaps
 
@@ -1481,11 +1542,9 @@ Required work:
   witnesses, indoor static membership, render geometry, BSP, visible-cell links,
   and surface slots directly from source records. It should not assemble the
   owning `landblock-pack` and select one prepared cell.
-- Decide and encode building ownership for outdoor coverage. Either:
-  - keep `landblock/{id}/terrain` pure terrain and remove or deprecate
-    `buildingShells` from the target DTO before planner cutover; or
-  - build a real terrain-owned building shell render product with material
-    surface IDs, clear source ownership, and binary geometry sections.
+- Decide and encode building ownership for outdoor coverage. The Phase 2.1
+  decision is that `landblock/{id}/terrain` stays pure terrain; Phase 2.2 adds a
+  separate `landblock/{id}/building-shells` route for far outdoor shell coverage.
 - Replace flat placeholder BVHs with route-owned BVH builders:
   - terrain BVH over terrain quads only;
   - env-cell residency BVH over env-cell members for `landblock/{id}/scene`;
@@ -1501,6 +1560,44 @@ Required work:
 - Add focused host tests proving the new assemblers and serializers do not
   transitively depend on `ContentAssetRequest::LandblockPack`.
 
+Progress as of 2026-05-23:
+
+- Added `EnvCellAssetAssembler` in Rust. It loads one `EnvCell`, its selected
+  `Environment`/cell-structure, portals, aperture witnesses, indoor statics,
+  render geometry, BSP, visible-cell links, and material surface slots without
+  assembling the owning `landblock-pack`.
+- Changed `ContentAssetRequest::EnvCell` to return the new first-class
+  `EnvCellAsset` instead of a selected cell from `LandblockPack`.
+- Decided outdoor building render products do not belong to
+  `landblock/{id}/terrain`. Deleted `buildingShells` and
+  `materialSurfaceIds` from the host DTO, prepared types, dependency extraction,
+  and host payloads. Terrain now schedules only `terrain-material/{regionNumber}`.
+- Added route-owned flat BVH construction for terrain quads, landblock scene
+  env-cell residency, outdoor scene members, and local env-cell render/portal/static
+  membership. These are scope-correct even though they are still flat trees.
+- Added binary serializers for `landblock/{id}/terrain` terrain vertices and
+  triangles, and for `env-cell/{id}` render geometry plus portal aperture points.
+- Added focused tests proving env-cell assembly does not read landblock root
+  records and binary terrain/env-cell routes move large arrays into binary
+  sections.
+- Ran:
+  `cargo test -p holtburger-content env_cell_asset_assembly_does_not_read_landblock_pack_roots -- --nocapture`.
+- Ran:
+  `cargo test --manifest-path src-tauri/Cargo.toml adapter::tests::granular -- --nocapture`.
+- Ran: `npm run test:ts -- src/lib/assets/dependencies.test.ts`.
+
+Phase 2.1 decisions and refinements:
+
+- `landblock/{id}/terrain` is pure terrain. Building shell rendering needs its
+  own outdoor coverage route instead of being folded into terrain or requiring
+  full focused scene hydration.
+- The new BVHs are route-owned and scope-correct, but still flat. If culling
+  performance needs a real hierarchy, improve the builder without changing the
+  route ownership model.
+- Failed new-route payloads remain schema-valid with provenance. A future shared
+  failed-asset schema would be cleaner, but it is no longer required to avoid
+  successful payloads with missing required fields.
+
 Validation:
 
 - Host tests prove `env-cell/{id}` can load a representative interior cell
@@ -1509,11 +1606,212 @@ Validation:
   terrain/static/interior ownership.
 - Binary batch tests prove the new terrain and env-cell routes move large arrays
   into binary sections instead of JSON.
-- If `buildingShells` stays, tests prove the terrain route exposes building shell
-  render geometry plus direct material surface IDs. If it does not stay, delete
-  it from the DTO/types before Phase 3.
+- Tests prove `landblock/{id}/terrain` no longer exposes `buildingShells`, and
+  dependency extraction no longer schedules building materials from terrain.
 - `npm run check:rust`
 - `npm run check`
+
+### Phase 2.2: Add Outdoor Building Shell Coverage Route
+
+Phase 2.1 made `landblock/{id}/terrain` pure terrain. That is the right
+ownership boundary, but outdoor coverage still needs a way to draw far placed
+building/setup shells without hydrating full focused scene membership. Add
+`landblock/{id}/building-shells` as the explicit coverage route for that
+renderer need.
+
+Required work:
+
+- Add frontend route helpers, host schemas, prepared payload types, hydration
+  classification, and dependency extraction for
+  `landblock/{id}/building-shells`.
+- Add a Rust host route and `ContentAssetRequest` variant for
+  `landblock/{id}/building-shells`.
+- Project shell members from source-backed landblock building placement facts.
+  The route should expose `sourceAssetId`, placement, scale, source bounds,
+  instance bounds, and a route-owned shell BVH.
+- Keep the route graph shallow: `building-shells` enqueues only
+  `shells[].sourceAssetId`; setup/gfx/material dependencies remain owned by
+  `setup-model/*`, `gfx-obj/*`, and `material/*`.
+- Add binary section support for shell BVH bounds/items if the arrays become
+  large enough to matter. Do not split shell geometry into a separate route
+  unless it gets a distinct consumer lifetime.
+- Add tests proving:
+  - `landblock/{id}/terrain` remains free of shell/building fields;
+  - `landblock/{id}/building-shells` schedules setup/gfx source assets but not
+    material or texture leaves directly;
+  - focused `landblock/{id}/scene` still owns semantic building membership,
+    portal/link facts, and interaction metadata;
+  - outdoor coverage can request terrain and building-shell roots independently.
+
+Validation:
+
+- `npm run test:ts -- src/lib/assets/dependencies.test.ts`
+- `npm run check`
+- `npm run check:rust`
+- Host adapter tests for `landblock/{id}/building-shells`.
+
+Progress as of 2026-05-23:
+
+- Added frontend route helpers and parser coverage for
+  `landblock/{id}/building-shells`.
+- Added host DTO schemas, prepared payload types, direct hydration
+  classification, and dependency extraction for
+  `landblock/{id}/building-shells`.
+- Added Rust `ContentAssetRequest::LandblockBuildingShells` and
+  `ContentAsset::LandblockBuildingShells`.
+- Added Tauri route parsing and JSON payload builders for
+  `landblock/{id}/building-shells`, including schema-valid failed responses.
+- Projected shell members from current Rust prepared building instances. Each
+  member exposes shell ID, source DID, `sourceAssetId`, landblock-local
+  placement, source scale, optional source bounds, and optional instance bounds.
+- Added a route-owned flat shell BVH over placed building shell bounds.
+- Added host and frontend tests proving:
+  - `landblock/{id}/terrain` remains free of building-shell fields;
+  - `landblock/{id}/building-shells` schedules setup/gfx source assets only;
+  - the building-shell route does not expose terrain or env-cell membership.
+- Ran:
+  `npm run test:ts -- src/lib/assets/dependencies.test.ts src/lib/landblocks.test.ts`.
+- Ran: `npm run check`.
+- Ran:
+  `cargo test --manifest-path src-tauri/Cargo.toml adapter::tests::granular -- --nocapture`.
+- Ran:
+  `cargo test --manifest-path src-tauri/Cargo.toml adapter::tests -- --nocapture`.
+- Ran: `npm run check:rust`.
+
+Phase 2.2 decisions and course corrections:
+
+- The route currently projects from `LandblockPack` prepared building/static mesh
+  expansion rather than a first-class building-shell assembler. That proves the
+  route contract, but it is not an acceptable long-term implementation boundary.
+  Phase 2.3 must remove this coupling before Phase 3 planner/dependency work
+  builds on the new routes.
+- `landblock/{id}/terrain` also still projects from `LandblockPack`. That is the
+  same structural bug in a more obvious place: a terrain route should not load
+  interiors, outdoor static scene data, setup/gfx meshes, or pack BVHs just to
+  return `CellLandblock` terrain geometry.
+- Shell BVH item entries are emitted only for shells with resolved instance
+  bounds. Shell member entries are still emitted even when bounds are missing, so
+  missing setup/gfx source data remains visible through diagnostics instead of
+  silently dropping the shell route member.
+- Binary sidecars were not added for `building-shells` in Phase 2.2 because the
+  route currently carries small JSON member records and a flat BVH. Add binary
+  sections later only if measured payload size or BVH hierarchy work makes those
+  arrays large.
+- Phase 3 dependency tests should include `building-shells -> setup/gfx` as a
+  first-class route edge and continue proving that material/texture leaves are
+  reached through setup/gfx/material routes, not directly from building-shells.
+
+### Phase 2.3: Remove Pack Coupling From Coverage Routes
+
+Phase 2.2 created clean route contracts, but `landblock/{id}/terrain` and
+`landblock/{id}/building-shells` still use `LandblockPackAssembler` behind the
+host boundary. That makes the new route split look cleaner than it really is.
+Fix this before Phase 3, so dependency ownership and planner strategy are built
+on real source-shaped assemblers rather than pack projections.
+
+Required work:
+
+- Add a first-class landblock terrain assembler in `holtburger-content`.
+  It should load only the normalized `CellLandblock`, active `RegionDesc`
+  metadata needed by the route, and diagnostics. It must not load
+  `LandblockInfo`, env cells, environments, static outdoor scenes, setup models,
+  gfx objects, or any pack BVH.
+- Move terrain mesh, terrain quad metadata, pcode computation inputs, terrain
+  bounds, and terrain BVH construction onto the terrain route path. Shared
+  helper functions are fine; the assembler output must not be a `LandblockPack`.
+- Add a first-class landblock building-shell assembler in `holtburger-content`.
+  It should load `LandblockInfo.buildings[]` and only enough setup/gfx source
+  data to compute optional source and instance bounds for shell culling. It must
+  not load terrain, env cells, environments, interior render geometry, portal
+  traversal graphs beyond shell source facts, or pack BVHs.
+- Change `ContentAssetRequest::LandblockTerrain` and
+  `ContentAssetRequest::LandblockBuildingShells` to return the new route-specific
+  asset structs, not boxed `LandblockPack`.
+- Update Tauri serializers to consume the new route-specific structs directly.
+- Add host/content tests proving:
+  - terrain assembly does not read landblock-info roots, env-cell roots,
+    environment roots, setup models, or gfx objects;
+  - building-shell assembly does not read `CellLandblock`, env-cell roots, or
+    environment roots;
+  - `landblock/{id}/terrain` remains terrain-only;
+  - `landblock/{id}/building-shells` remains shell-only and schedules setup/gfx
+    source assets without material/texture leaves.
+
+Validation:
+
+- `cargo test -p holtburger-content`
+- `cargo test --manifest-path src-tauri/Cargo.toml adapter::tests::granular -- --nocapture`
+- `npm run check:rust`
+- `npm run check`
+
+Progress as of 2026-05-24:
+
+- Added `LandblockTerrainAsset` and `LandblockTerrainAssetAssembler` in
+  `holtburger-content`. The terrain route now assembles from the normalized
+  `CellLandblock` directly and no longer builds or returns a `LandblockPack`.
+- Added `LandblockBuildingShellsAsset`,
+  `LandblockBuildingShellsAssetAssembler`, and `LandblockBuildingShell` in
+  `holtburger-content`. The building-shell route now assembles from
+  `LandblockInfo.buildings[]` directly and only uses setup/gfx source reads for
+  optional shell bounds.
+- Changed `ContentAsset::LandblockTerrain` to carry
+  `LandblockTerrainAsset`, and changed `ContentAsset::LandblockBuildingShells`
+  to carry `LandblockBuildingShellsAsset`.
+- Updated the Tauri adapter so `landblock/{id}/terrain` and
+  `landblock/{id}/building-shells` serialize route-specific structs instead of
+  projecting out of a pack.
+- Added content-level read-count regression tests proving:
+  - terrain asset assembly reads the `CellLandblock` root but not the
+    `LandblockInfo` root;
+  - building-shell asset assembly reads the `LandblockInfo` root but not the
+    `CellLandblock` root or env-cell roots.
+- Existing adapter coverage now validates that `landblock/{id}/terrain` remains
+  terrain-only and `landblock/{id}/building-shells` remains shell-only.
+
+Decisions and course corrections:
+
+- `RegionDesc` remains loaded in `holtburger-core` for
+  `ContentAssetRequest::LandblockTerrain`, not inside the content assembler. It
+  is route metadata, not part of `CellLandblock` terrain assembly, and keeping it
+  in core avoids pulling global region policy into the source-shaped terrain
+  assembler.
+- Terrain quad metadata, pcode inputs, terrain bounds, and the flat terrain BVH
+  are still serialized in the Tauri adapter. That is acceptable for Phase 2.3
+  because the important correction was removing pack assembly from the route.
+  Phase 3 can decide whether those route DTO helpers should move closer to the
+  content asset type or stay app-local serialization logic.
+- Building-shell source/instance bounds are optional by design. Missing setup/gfx
+  source data produces diagnostics while preserving the shell member, so missing
+  bounds do not hide the source `LandblockInfo.buildings[]` facts.
+- Building-shells intentionally do not load terrain, env cells, environments,
+  interior geometry, portal traversal graphs, or pack BVHs. Portal/link
+  semantics remain a scene/env-cell concern.
+
+Cleanup targets:
+
+- The Tauri adapter still contains several route DTO builders for terrain quads,
+  terrain BVH, building-shell BVH, scene payloads, and env-cell payloads. Once
+  Phase 3 stabilizes dependency ownership, consider splitting these serializers
+  into smaller app-local modules so `adapter.rs` stays a narrow host boundary.
+- `LandblockPackSourceDiagnostics` is now reused by focused route assets. The
+  name is legacy. Rename it to a route-neutral diagnostics type during the
+  cleanup phase after Phase 6, when churn across pack/scene/env-cell routes is
+  lower.
+- `LandblockSummary` still predates the granular route split and may overlap
+  with newer terrain/building-shell route concepts. Revisit it during cleanup
+  after the planner stops depending on legacy summary shapes.
+
+Refinements to future steps:
+
+- Phase 3 dependency work should treat `landblock/{id}/terrain` as the owner of
+  terrain material-table dependency discovery via `terrain.regionNumber`, not as
+  a pack-derived dependency source.
+- Phase 3 should treat `landblock/{id}/building-shells` as depending on only the
+  shell `sourceAssetId` values (`setup-model/*` or `gfx-obj/*`). Material and
+  texture dependencies must remain owned by setup/gfx/material routes.
+- Phase 6 cleanup should explicitly remove or rename remaining pack-era
+  abstractions only after the granular planner has replaced the legacy pack
+  planning paths.
 
 ### Phase 3: Move Dependency Ownership to First-Class Assets and Route Helpers
 
@@ -1543,8 +1841,7 @@ Validation:
   - terrain -> terrain material table -> render-texture;
   - render-texture -> render-surface -> palette for terrain textures that use
     indexed/default-palette surfaces;
-  - terrain -> building shell material -> render-texture/render-surface/palette,
-    if building shell geometry remains owned by `landblock/{id}/terrain`;
+  - building-shells -> typed shell member -> setup-model or gfx-obj;
   - scene -> typed static/building member -> setup-model or gfx-obj;
   - scene -> typed env-cell member -> env-cell;
   - scene -> env-cell -> material -> render-texture/render-surface/palette;
@@ -1553,6 +1850,8 @@ Validation:
 - Planner tests prove:
   - outdoor coverage requests `landblock/{id}/terrain` without also requiring
     `landblock/{id}/scene`;
+  - outdoor building coverage requests `landblock/{id}/building-shells` without
+    also requiring `landblock/{id}/scene`;
   - focused outdoor landblocks request both terrain and scene roots;
   - focused dungeon landblocks request scene and env-cell roots, not terrain;
   - env-cell requests are selected from scene membership/residency policy rather
@@ -1562,11 +1861,13 @@ Validation:
 ### Phase 4: Switch Frontend Planning to New Routes
 
 - Replace terrain/summary coverage requests with `landblock/{id}/terrain`.
+- Replace far building coverage requests with
+  `landblock/{id}/building-shells`.
 - Replace focused pack requests with `landblock/{id}/scene`.
 - Request `env-cell/{id}` as direct hydrated roots when scene membership
   identifies visible/traversable cells.
-- Split planner root selection into outdoor coverage roots, focused scene roots,
-  and active interior roots.
+- Split planner root selection into terrain coverage roots, building-shell
+  coverage roots, focused scene roots, and active interior roots.
 - Update dependency extraction to use route-specific typed extractors instead of
   pack-shape scans.
 - Add a convergence loop or explicit replan trigger after direct root hydration
@@ -1678,9 +1979,10 @@ concrete consumer before introducing a new route split.
   direct dependencies or, for terrain only, because the frontend derives
   one `terrain-material/{regionNumber}` table route from `regionNumber` and uses
   terrain pcodes as per-quad lookup inputs.
-- `landblock/{id}/terrain` owns terrain and building shell render geometry;
-  `landblock/{id}/scene` owns focused semantic membership, portals, env cells,
-  and scene BVHs.
+- `landblock/{id}/terrain` owns terrain render geometry; `landblock/{id}/scene`
+  owns focused semantic membership, portals, env cells, and scene BVHs.
+- `landblock/{id}/building-shells` owns far outdoor building/setup shell
+  coverage and can be fetched without hydrating focused scene membership.
 - The frontend can fetch both terrain and scene for a focused landblock without
   duplicating heavy render geometry.
 - `landblock/{id}/scene` carries statics/buildings/env-cell membership and

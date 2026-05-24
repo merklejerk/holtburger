@@ -10,7 +10,9 @@ export function isSceneCoverageAssetId(assetId: string): boolean {
 	return (
 		assetId.startsWith("landblock-pack/") ||
 		assetId.startsWith("landblock-summary/") ||
-		/^landblock\/[0-9a-fA-F]{8}\/(?:terrain|scene)$/.test(assetId) ||
+		/^landblock\/[0-9a-fA-F]{8}\/(?:terrain|building-shells|scene)$/.test(
+			assetId,
+		) ||
 		/^env-cell\/[0-9a-fA-F]{8}$/.test(assetId)
 	);
 }

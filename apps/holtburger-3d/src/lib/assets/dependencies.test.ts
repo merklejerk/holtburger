@@ -151,8 +151,23 @@ describe("asset response dependencies", () => {
 		);
 
 		expect(getAssetResponseDependencies(response)).toEqual([
-			{ assetId: "material/08000010" },
 			{ assetId: "terrain-material/1" },
+		]);
+	});
+
+	it("extracts building shell dependencies without material leaves", () => {
+		const response = createJsonResponse(
+			"landblock/da55ffff/building-shells",
+			createLandblockBuildingShellsPayload([
+				createBuildingShellMember("shell-0", "setup-model/02000010"),
+				createBuildingShellMember("shell-1", "gfx-obj/01000010"),
+				createBuildingShellMember("shell-2", "setup-model/02000010"),
+			]),
+		);
+
+		expect(getAssetResponseDependencies(response)).toEqual([
+			{ assetId: "gfx-obj/01000010" },
+			{ assetId: "setup-model/02000010" },
 		]);
 	});
 
@@ -234,9 +249,19 @@ describe("asset response dependencies", () => {
 				),
 			),
 		).toEqual([
-			{ assetId: "material/08000010" },
 			{ assetId: "terrain-material/1" },
 		]);
+
+		expect(
+			getPreparedAssetDependencies(
+				createPreparedAssetRecord(
+					"landblock/da55ffff/building-shells",
+					createLandblockBuildingShellsPayload([
+						createBuildingShellMember("shell-0", "setup-model/02000010"),
+					]),
+				),
+			),
+		).toEqual([{ assetId: "setup-model/02000010" }]);
 	});
 
 	it("extracts material dependencies from gfx and setup appearance payloads", () => {
@@ -450,18 +475,43 @@ function createLandblockTerrainPayload() {
 			maxHeight: 0,
 			bounds: null,
 		},
-		buildingShells: [
-			{
-				instanceId: "building-shell-0",
-				sourceDid: 0x02000010,
-				sourceIndex: 0,
-				localPlacement: identityPlacement(),
-				renderGeometry: emptyRenderGeometry(0x02000010),
-				materialSurfaceIds: [0x08000010],
-			},
-		],
 		diagnostics: emptyLandblockDiagnostics(),
 		provenance,
+	};
+}
+
+function createLandblockBuildingShellsPayload(
+	shells: ReturnType<typeof createBuildingShellMember>[] = [],
+) {
+	return {
+		kind: "landblock-building-shells" as const,
+		residencyKind: "outdoor-landblock" as const,
+		sourceAssetKind: "landblock-building-shells" as const,
+		landblockId: 0xda55ffff,
+		shells,
+		shellBvh: {
+			coordinateSpace: "landblock-local" as const,
+			nodes: [],
+			items: shells.map((shell) => ({
+				kind: "building-shell" as const,
+				shellId: shell.shellId,
+			})),
+		},
+		diagnostics: emptyLandblockDiagnostics(),
+		provenance,
+	};
+}
+
+function createBuildingShellMember(shellId: string, sourceAssetId: string) {
+	return {
+		shellId,
+		buildingIndex: 0,
+		sourceDid: Number.parseInt(sourceAssetId.slice(-8), 16),
+		sourceAssetId,
+		localPlacement: identityPlacement(),
+		sourceScale: { x: 1, y: 1, z: 1 },
+		sourceBounds: null,
+		instanceBounds: null,
 	};
 }
 

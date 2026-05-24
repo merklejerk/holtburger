@@ -3,6 +3,7 @@ import {
 	dependencyManifestPayloadDtoSchema,
 	envCellPayloadDtoSchema,
 	gfxObjPayloadDtoSchema,
+	landblockBuildingShellsPayloadDtoSchema,
 	landblockPackPayloadDtoSchema,
 	landblockScenePayloadDtoSchema,
 	landblockSummaryPayloadDtoSchema,
@@ -46,10 +47,15 @@ export function getAssetResponseDependencies(
 			formatTerrainMaterialDependencyAssetId(
 				landblockTerrain.data.regionNumber,
 			),
-			...landblockTerrain.data.buildingShells.flatMap((buildingShell) =>
-				buildingShell.materialSurfaceIds.map(formatMaterialDependencyAssetId),
-			),
 		]);
+	}
+
+	const landblockBuildingShells =
+		landblockBuildingShellsPayloadDtoSchema.safeParse(response.payload);
+	if (landblockBuildingShells.success) {
+		return uniqueSortedAssetIds(
+			landblockBuildingShells.data.shells.map((shell) => shell.sourceAssetId),
+		);
 	}
 
 	const landblockScene = landblockScenePayloadDtoSchema.safeParse(
@@ -148,14 +154,6 @@ function uniqueSortedAssetIds(assetIds: string[]): AssetDependencyRef[] {
 	return [...new Set(assetIds)].sort().map((assetId) => ({ assetId }));
 }
 
-function formatMaterialDependencyAssetId(surfaceId: number): string {
-	return `material/${formatHex32(surfaceId)}`;
-}
-
 function formatTerrainMaterialDependencyAssetId(regionNumber: number): string {
 	return `terrain-material/${Math.trunc(regionNumber)}`;
-}
-
-function formatHex32(value: number): string {
-	return (value >>> 0).toString(16).padStart(8, "0");
 }

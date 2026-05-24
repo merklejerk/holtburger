@@ -3,19 +3,20 @@ use std::sync::{Arc, Mutex};
 
 use holtburger_common::math::{Quaternion, Vector3};
 use holtburger_content::{
-    ContentDecodeCache, ContentRepository, LandblockClassification, LandblockPack,
+    ContentDecodeCache, ContentRepository, EnvCellAsset, LandblockBuildingShell,
+    LandblockBuildingShellsAsset, LandblockClassification, LandblockPack,
     LandblockPackSourceDiagnostics, LandblockSummary, LandblockSummaryBuilding,
-    LandblockSummaryBuildingPortal, PreparedAabb, PreparedBvh, PreparedBvhNode,
-    PreparedInteriorCell, PreparedPolygonSetInvalidPolygon, PreparedPolygonSetRenderGeometry,
-    PreparedPolygonSetRenderTriangle, PreparedPortalAperture, PreparedPortalAperturePlane,
-    PreparedPortalAperturePlaneSource, PreparedSpatialItem, PreparedSpatialItemKind,
-    PreparedSpatialItemMetadata, PreparedStaticInstance, PreparedStaticInstanceKind,
-    PreparedStaticMesh, PreparedTerrainMesh, PreparedTerrainTriangle, PreparedVec3,
-    ResolvedMaterialRecipe, ResolvedMaterialSlot, ResolvedMaterialSource, ResolvedSetupAppearance,
-    ResolvedTerrainMaterialTable, SoulEmoteCatalog, SourceLoadError, SourceOmissionDiagnostic,
-    SourceRecordDiagnostic, SourceRecordStatus, StaticOutdoorFrame, StaticOutdoorInstance,
-    StaticOutdoorScene, StaticRenderableSourceFamily, build_gfx_obj_render_geometry,
-    normalize_landblock_id,
+    LandblockSummaryBuildingPortal, LandblockTerrainAsset, PreparedAabb, PreparedBvh,
+    PreparedBvhNode, PreparedInteriorCell, PreparedPolygonSetInvalidPolygon,
+    PreparedPolygonSetRenderGeometry, PreparedPolygonSetRenderTriangle, PreparedPortalAperture,
+    PreparedPortalAperturePlane, PreparedPortalAperturePlaneSource, PreparedSpatialItem,
+    PreparedSpatialItemKind, PreparedSpatialItemMetadata, PreparedStaticInstance,
+    PreparedStaticInstanceKind, PreparedStaticMesh, PreparedTerrainMesh, PreparedTerrainTriangle,
+    PreparedVec3, ResolvedMaterialRecipe, ResolvedMaterialSlot, ResolvedMaterialSource,
+    ResolvedSetupAppearance, ResolvedTerrainMaterialTable, SoulEmoteCatalog, SourceLoadError,
+    SourceOmissionDiagnostic, SourceRecordDiagnostic, SourceRecordStatus, StaticOutdoorFrame,
+    StaticOutdoorInstance, StaticOutdoorScene, StaticRenderableSourceFamily,
+    build_gfx_obj_render_geometry, normalize_landblock_id,
 };
 use holtburger_core::{
     ContentAsset, ContentAssetRequest, ContentAssetRuntime, ContentAssetService,
@@ -222,12 +223,12 @@ impl HostBoundaryAdapter {
             },
             ContentAssetRequest::LandblockTerrain(landblock_id) => match asset {
                 Ok(ContentAsset::LandblockTerrain {
-                    pack,
+                    terrain,
                     region_id,
                     region_number,
                 }) => self.build_landblock_terrain_lookup_response(
                     request,
-                    *pack,
+                    *terrain,
                     region_id,
                     region_number,
                 ),
@@ -235,6 +236,19 @@ impl HostBoundaryAdapter {
                     unreachable!("content asset runtime returned mismatched landblock terrain")
                 }
                 Err(error) => self.build_failed_landblock_terrain_lookup_response(
+                    request,
+                    normalize_landblock_id(landblock_id),
+                    error,
+                ),
+            },
+            ContentAssetRequest::LandblockBuildingShells(landblock_id) => match asset {
+                Ok(ContentAsset::LandblockBuildingShells(building_shells)) => {
+                    self.build_landblock_building_shells_lookup_response(request, *building_shells)
+                }
+                Ok(_) => unreachable!(
+                    "content asset runtime returned mismatched landblock building shells"
+                ),
+                Err(error) => self.build_failed_landblock_building_shells_lookup_response(
                     request,
                     normalize_landblock_id(landblock_id),
                     error,
@@ -252,8 +266,8 @@ impl HostBoundaryAdapter {
                 ),
             },
             ContentAssetRequest::EnvCell(env_cell_id) => match asset {
-                Ok(ContentAsset::EnvCell(pack)) => {
-                    self.build_env_cell_lookup_response(request, env_cell_id, *pack)
+                Ok(ContentAsset::EnvCell(env_cell)) => {
+                    self.build_env_cell_lookup_response(request, env_cell_id, *env_cell)
                 }
                 Ok(_) => unreachable!("content asset runtime returned mismatched env-cell"),
                 Err(error) => {
@@ -506,7 +520,7 @@ impl HostBoundaryAdapter {
     fn build_landblock_terrain_lookup_response(
         &self,
         request: AssetLookupRequestDto,
-        pack: LandblockPack,
+        terrain: LandblockTerrainAsset,
         region_id: u32,
         region_number: u32,
     ) -> AssetLookupResponseDto {
@@ -514,7 +528,7 @@ impl HostBoundaryAdapter {
             request_id: request.request_id,
             asset_id: request.asset_id,
             payload_kind: AssetPayloadKindDto::Json,
-            payload: serialize_landblock_terrain_payload(&pack, region_id, region_number),
+            payload: serialize_landblock_terrain_payload(&terrain, region_id, region_number),
         }
     }
 
@@ -529,6 +543,33 @@ impl HostBoundaryAdapter {
             asset_id: request.asset_id,
             payload_kind: AssetPayloadKindDto::Json,
             payload: failed_landblock_terrain_payload(landblock_id, error),
+        }
+    }
+
+    fn build_landblock_building_shells_lookup_response(
+        &self,
+        request: AssetLookupRequestDto,
+        building_shells: LandblockBuildingShellsAsset,
+    ) -> AssetLookupResponseDto {
+        AssetLookupResponseDto {
+            request_id: request.request_id,
+            asset_id: request.asset_id,
+            payload_kind: AssetPayloadKindDto::Json,
+            payload: serialize_landblock_building_shells_payload(&building_shells),
+        }
+    }
+
+    fn build_failed_landblock_building_shells_lookup_response(
+        &self,
+        request: AssetLookupRequestDto,
+        landblock_id: u32,
+        error: anyhow::Error,
+    ) -> AssetLookupResponseDto {
+        AssetLookupResponseDto {
+            request_id: request.request_id,
+            asset_id: request.asset_id,
+            payload_kind: AssetPayloadKindDto::Json,
+            payload: failed_landblock_building_shells_payload(landblock_id, error),
         }
     }
 
@@ -563,22 +604,19 @@ impl HostBoundaryAdapter {
         &self,
         request: AssetLookupRequestDto,
         env_cell_id: u32,
-        pack: LandblockPack,
+        env_cell: EnvCellAsset,
     ) -> AssetLookupResponseDto {
-        let payload = pack
-            .prepared
-            .interior_cells
-            .iter()
-            .find(|cell| cell.env_cell_id == env_cell_id)
-            .map(|cell| serialize_env_cell_payload(cell, &pack))
-            .unwrap_or_else(|| {
-                failed_env_cell_payload(
-                    env_cell_id,
-                    anyhow::anyhow!(
-                        "EnvCell 0x{env_cell_id:08X} was not prepared in its owning landblock"
-                    ),
-                )
-            });
+        let payload = if env_cell.prepared_cell.env_cell_id == env_cell_id {
+            serialize_env_cell_payload(&env_cell)
+        } else {
+            failed_env_cell_payload(
+                env_cell_id,
+                anyhow::anyhow!(
+                    "EnvCell assembler returned 0x{:08X} for request 0x{env_cell_id:08X}",
+                    env_cell.prepared_cell.env_cell_id
+                ),
+            )
+        };
         AssetLookupResponseDto {
             request_id: request.request_id,
             asset_id: request.asset_id,
@@ -951,6 +989,10 @@ fn parse_landblock_terrain_asset_id(asset_id: &str) -> Option<u32> {
     parse_landblock_child_asset_id(asset_id, "/terrain")
 }
 
+fn parse_landblock_building_shells_asset_id(asset_id: &str) -> Option<u32> {
+    parse_landblock_child_asset_id(asset_id, "/building-shells")
+}
+
 fn parse_landblock_scene_asset_id(asset_id: &str) -> Option<u32> {
     parse_landblock_child_asset_id(asset_id, "/scene")
 }
@@ -978,6 +1020,10 @@ fn content_asset_request_from_asset_id(asset_id: &str) -> Option<ContentAssetReq
         })
         .or_else(|| {
             parse_landblock_terrain_asset_id(asset_id).map(ContentAssetRequest::LandblockTerrain)
+        })
+        .or_else(|| {
+            parse_landblock_building_shells_asset_id(asset_id)
+                .map(ContentAssetRequest::LandblockBuildingShells)
         })
         .or_else(|| {
             parse_landblock_scene_asset_id(asset_id).map(ContentAssetRequest::LandblockScene)
@@ -1285,9 +1331,30 @@ fn failed_landblock_terrain_payload(landblock_id: u32, error: anyhow::Error) -> 
         "regionId": REGION_DESC_FILE_ID,
         "regionNumber": 0,
         "terrain": empty_landblock_terrain(),
-        "buildingShells": [],
         "diagnostics": failed_landblock_diagnostics(EOR_CELL_NAMESPACE, landblock_id, "landblock-terrain", error_code, &detail),
         "provenance": failed_provenance("landblock-terrain", error_code, &detail),
+    })
+}
+
+fn failed_landblock_building_shells_payload(
+    landblock_id: u32,
+    error: anyhow::Error,
+) -> serde_json::Value {
+    let detail = format!("{error:#}");
+    let error_code = asset_cache_error_code(&error);
+    serde_json::json!({
+        "kind": "landblock-building-shells",
+        "residencyKind": "outdoor-landblock",
+        "sourceAssetKind": "landblock-building-shells",
+        "landblockId": landblock_id,
+        "shells": [],
+        "shellBvh": {
+            "coordinateSpace": "landblock-local",
+            "nodes": [],
+            "items": [],
+        },
+        "diagnostics": failed_landblock_diagnostics(EOR_CELL_NAMESPACE, landblock_id, "landblock-building-shells", error_code, &detail),
+        "provenance": failed_provenance("landblock-building-shells", error_code, &detail),
     })
 }
 
@@ -1577,17 +1644,39 @@ fn serialize_content_asset_binary_response(
         },
         ContentAssetRequest::LandblockTerrain(landblock_id) => match asset {
             Ok(ContentAsset::LandblockTerrain {
-                pack,
+                terrain,
                 region_id,
                 region_number,
             }) => AssetLookupResponseDto {
                 request_id: request.request_id,
                 asset_id: request.asset_id,
                 payload_kind: AssetPayloadKindDto::Json,
-                payload: serialize_landblock_terrain_payload(&pack, region_id, region_number),
+                payload: serialize_landblock_terrain_binary_payload(
+                    &terrain,
+                    region_id,
+                    region_number,
+                    path_prefix,
+                    writer,
+                ),
             },
             Ok(_) => unreachable!("content asset runtime returned mismatched landblock terrain"),
             Err(error) => adapter.build_failed_landblock_terrain_lookup_response(
+                request,
+                normalize_landblock_id(landblock_id),
+                error,
+            ),
+        },
+        ContentAssetRequest::LandblockBuildingShells(landblock_id) => match asset {
+            Ok(ContentAsset::LandblockBuildingShells(building_shells)) => AssetLookupResponseDto {
+                request_id: request.request_id,
+                asset_id: request.asset_id,
+                payload_kind: AssetPayloadKindDto::Json,
+                payload: serialize_landblock_building_shells_payload(&building_shells),
+            },
+            Ok(_) => {
+                unreachable!("content asset runtime returned mismatched landblock building shells")
+            }
+            Err(error) => adapter.build_failed_landblock_building_shells_lookup_response(
                 request,
                 normalize_landblock_id(landblock_id),
                 error,
@@ -1608,27 +1697,26 @@ fn serialize_content_asset_binary_response(
             ),
         },
         ContentAssetRequest::EnvCell(env_cell_id) => match asset {
-            Ok(ContentAsset::EnvCell(pack)) => AssetLookupResponseDto {
+            Ok(ContentAsset::EnvCell(env_cell)) => AssetLookupResponseDto {
                 request_id: request.request_id,
                 asset_id: request.asset_id,
                 payload_kind: AssetPayloadKindDto::Json,
-                payload: pack
-                    .prepared
-                    .interior_cells
-                    .iter()
-                    .find(|cell| cell.env_cell_id == env_cell_id)
-                    .map(|cell| serialize_env_cell_payload(cell, &pack))
-                    .unwrap_or_else(|| {
-                        failed_env_cell_payload(
-                            env_cell_id,
-                            anyhow::anyhow!(
-                                "EnvCell 0x{env_cell_id:08X} was not prepared in its owning landblock"
-                            ),
-                        )
-                    }),
+                payload: if env_cell.prepared_cell.env_cell_id == env_cell_id {
+                    serialize_env_cell_binary_payload(&env_cell, path_prefix, writer)
+                } else {
+                    failed_env_cell_payload(
+                        env_cell_id,
+                        anyhow::anyhow!(
+                            "EnvCell assembler returned 0x{:08X} for request 0x{env_cell_id:08X}",
+                            env_cell.prepared_cell.env_cell_id
+                        ),
+                    )
+                },
             },
             Ok(_) => unreachable!("content asset runtime returned mismatched env-cell"),
-            Err(error) => adapter.build_failed_env_cell_lookup_response(request, env_cell_id, error),
+            Err(error) => {
+                adapter.build_failed_env_cell_lookup_response(request, env_cell_id, error)
+            }
         },
         ContentAssetRequest::GfxObj(gfx_obj_id) => match asset {
             Ok(ContentAsset::GfxObj(gfx_obj)) => AssetLookupResponseDto {
@@ -2112,34 +2200,101 @@ fn serialize_landblock_summary(summary: &LandblockSummary) -> serde_json::Value 
 }
 
 fn serialize_landblock_terrain_payload(
-    pack: &LandblockPack,
+    terrain_asset: &LandblockTerrainAsset,
     region_id: u32,
     region_number: u32,
+) -> serde_json::Value {
+    serialize_landblock_terrain_payload_with_terrain(
+        terrain_asset,
+        region_id,
+        region_number,
+        serialize_landblock_terrain(terrain_asset),
+    )
+}
+
+fn serialize_landblock_terrain_binary_payload(
+    terrain_asset: &LandblockTerrainAsset,
+    region_id: u32,
+    region_number: u32,
+    path_prefix: &str,
+    writer: &mut BinaryAssetSectionWriter,
+) -> serde_json::Value {
+    serialize_landblock_terrain_payload_with_terrain(
+        terrain_asset,
+        region_id,
+        region_number,
+        serialize_landblock_terrain_binary(terrain_asset, path_prefix, writer),
+    )
+}
+
+fn serialize_landblock_terrain_payload_with_terrain(
+    terrain_asset: &LandblockTerrainAsset,
+    region_id: u32,
+    region_number: u32,
+    terrain: serde_json::Value,
 ) -> serde_json::Value {
     serde_json::json!({
         "kind": "landblock-terrain",
         "residencyKind": "outdoor-landblock",
         "sourceAssetKind": "landblock-terrain",
-        "landblockId": pack.landblock_id,
+        "landblockId": terrain_asset.landblock_id,
         "regionId": region_id,
         "regionNumber": region_number,
-        "terrain": serialize_landblock_terrain(pack),
-        "buildingShells": [],
-        "diagnostics": serialize_landblock_pack_diagnostics(&pack.diagnostics),
+        "terrain": terrain,
+        "diagnostics": serialize_landblock_pack_diagnostics(&terrain_asset.diagnostics),
         "provenance": {
             "source": "repo-local-hba",
             "sourceAssetKind": "landblock-terrain",
-            "errorCode": pack.diagnostics.errors.first().map(|error| error.error_code),
-            "detail": pack.diagnostics.errors.first().map(|error| error.detail.clone())
+            "errorCode": terrain_asset.diagnostics.errors.first().map(|error| error.error_code),
+            "detail": terrain_asset.diagnostics.errors.first().map(|error| error.detail.clone())
         }
     })
 }
 
-fn serialize_landblock_terrain(pack: &LandblockPack) -> serde_json::Value {
-    let Some(mesh) = pack.prepared.terrain_mesh.as_ref() else {
+fn serialize_landblock_terrain_binary(
+    terrain_asset: &LandblockTerrainAsset,
+    path_prefix: &str,
+    writer: &mut BinaryAssetSectionWriter,
+) -> serde_json::Value {
+    let Some(mesh) = terrain_asset.terrain_mesh.as_ref() else {
         return empty_landblock_terrain();
     };
-    let quads = pack
+    let mut terrain = serialize_landblock_terrain(terrain_asset);
+    writer.push_f32_section(
+        "landblockTerrain.vertices",
+        format!("{path_prefix}.terrain.vertices"),
+        3,
+        mesh.vertices
+            .iter()
+            .flat_map(|vertex| [vertex.x, vertex.y, vertex.z]),
+    );
+    writer.push_f32_section(
+        "landblockTerrain.triangles",
+        format!("{path_prefix}.terrain.triangles"),
+        6,
+        build_landblock_terrain_triangles(mesh)
+            .iter()
+            .flat_map(|triangle| {
+                [
+                    triangle.quad_index as f32,
+                    triangle.triangle_in_quad as f32,
+                    triangle.vertex_indices[0] as f32,
+                    triangle.vertex_indices[1] as f32,
+                    triangle.vertex_indices[2] as f32,
+                    triangle.average_height,
+                ]
+            }),
+    );
+    terrain["vertices"] = serde_json::json!([]);
+    terrain["triangles"] = serde_json::json!([]);
+    terrain
+}
+
+fn serialize_landblock_terrain(terrain_asset: &LandblockTerrainAsset) -> serde_json::Value {
+    let Some(mesh) = terrain_asset.terrain_mesh.as_ref() else {
+        return empty_landblock_terrain();
+    };
+    let quads = terrain_asset
         .cell_landblock
         .as_ref()
         .map(|cell| build_landblock_terrain_quads(mesh, cell))
@@ -2189,6 +2344,64 @@ fn empty_landblock_terrain() -> serde_json::Value {
         "minHeight": 0.0,
         "maxHeight": 0.0,
         "bounds": null,
+    })
+}
+
+fn serialize_landblock_building_shells_payload(
+    building_shells: &LandblockBuildingShellsAsset,
+) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "landblock-building-shells",
+        "residencyKind": "outdoor-landblock",
+        "sourceAssetKind": "landblock-building-shells",
+        "landblockId": building_shells.landblock_id,
+        "landblockInfoId": building_shells.landblock_info_id,
+        "shells": building_shells.shells.iter().map(serialize_landblock_building_shell_member).collect::<Vec<_>>(),
+        "shellBvh": serialize_landblock_building_shell_bvh(building_shells),
+        "diagnostics": serialize_landblock_pack_diagnostics(&building_shells.diagnostics),
+        "provenance": {
+            "source": "repo-local-hba",
+            "sourceAssetKind": "landblock-building-shells",
+            "errorCode": building_shells.diagnostics.errors.first().map(|error| error.error_code),
+            "detail": building_shells.diagnostics.errors.first().map(|error| error.detail.clone())
+        }
+    })
+}
+
+fn serialize_landblock_building_shell_member(shell: &LandblockBuildingShell) -> serde_json::Value {
+    serde_json::json!({
+        "shellId": shell.shell_id,
+        "buildingIndex": shell.building_index,
+        "sourceDid": shell.source_did,
+        "sourceAssetId": shell.source_asset_id,
+        "localPlacement": serialize_frame(&shell.local_placement),
+        "sourceScale": serialize_prepared_vec3(&shell.source_scale),
+        "sourceBounds": shell.source_bounds.as_ref().map(serialize_prepared_aabb),
+        "instanceBounds": shell.instance_bounds.as_ref().map(serialize_prepared_aabb),
+    })
+}
+
+fn serialize_landblock_building_shell_bvh(
+    building_shells: &LandblockBuildingShellsAsset,
+) -> serde_json::Value {
+    let mut items = Vec::new();
+    let mut node_inputs = Vec::new();
+
+    for shell in &building_shells.shells {
+        let Some(bounds) = shell.instance_bounds else {
+            continue;
+        };
+        items.push(serde_json::json!({
+            "kind": "building-shell",
+            "shellId": shell.shell_id,
+        }));
+        node_inputs.push((bounds, 1_u32));
+    }
+
+    serde_json::json!({
+        "coordinateSpace": "landblock-local",
+        "nodes": build_flat_bvh_nodes_from_bounds(node_inputs),
+        "items": items,
     })
 }
 
@@ -2463,18 +2676,7 @@ fn serialize_landblock_scene_payload(pack: &LandblockPack) -> serde_json::Value 
         }).map(|instance| serialize_landblock_scene_building_member(instance, pack)).collect::<Vec<_>>(),
         "envCells": pack.interiors.env_cells.iter().map(serialize_landblock_scene_env_cell_member).collect::<Vec<_>>(),
         "portalLinks": serialize_landblock_scene_portal_links(pack),
-        "envCellResidencyBvh": {
-            "coordinateSpace": "landblock-scene-residency",
-            "nodes": [],
-            "items": pack.interiors.env_cells.iter().map(|cell| {
-                serde_json::json!({
-                    "envCellId": cell.env_cell_id,
-                    "memberId": format!("env-cell/{:08x}", cell.env_cell_id),
-                    "assetId": format_env_cell_asset_id(cell.env_cell_id),
-                    "source": "env-cell-placement",
-                })
-            }).collect::<Vec<_>>(),
-        },
+        "envCellResidencyBvh": serialize_landblock_scene_env_cell_residency_bvh(pack),
         "outdoorBvh": serialize_landblock_scene_outdoor_bvh(pack),
         "diagnostics": serialize_landblock_pack_diagnostics(&pack.diagnostics),
         "provenance": {
@@ -2483,6 +2685,36 @@ fn serialize_landblock_scene_payload(pack: &LandblockPack) -> serde_json::Value 
             "errorCode": pack.diagnostics.errors.first().map(|error| error.error_code),
             "detail": pack.diagnostics.errors.first().map(|error| error.detail.clone())
         }
+    })
+}
+
+fn serialize_landblock_scene_env_cell_residency_bvh(pack: &LandblockPack) -> serde_json::Value {
+    let items = pack
+        .interiors
+        .env_cells
+        .iter()
+        .map(|cell| {
+            serde_json::json!({
+                "envCellId": cell.env_cell_id,
+                "memberId": format!("env-cell/{:08x}", cell.env_cell_id),
+                "assetId": format_env_cell_asset_id(cell.env_cell_id),
+                "source": "env-cell-placement",
+            })
+        })
+        .collect::<Vec<_>>();
+    let node_inputs = pack
+        .prepared
+        .interior_cells
+        .iter()
+        .filter_map(|cell| {
+            let bounds = cell.render_geometry.bounds?;
+            Some((bounds, 1_u32))
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "coordinateSpace": "landblock-scene-residency",
+        "nodes": build_flat_bvh_nodes_from_bounds(node_inputs),
+        "items": items,
     })
 }
 
@@ -2622,24 +2854,60 @@ fn serialize_landblock_scene_outdoor_bvh(pack: &LandblockPack) -> serde_json::Va
     if items.is_empty() {
         serde_json::Value::Null
     } else {
+        let node_inputs = pack
+            .prepared
+            .static_meshes
+            .iter()
+            .filter(|mesh| mesh.owning_env_cell_id.is_none())
+            .filter_map(|mesh| {
+                let bounds = mesh.instance_bounds?;
+                Some((bounds, 2_u32))
+            })
+            .collect::<Vec<_>>();
         serde_json::json!({
             "coordinateSpace": "landblock-render-local",
-            "nodes": [],
+            "nodes": build_flat_bvh_nodes_from_bounds(node_inputs),
             "items": items,
         })
     }
 }
 
-fn serialize_env_cell_payload(
-    cell: &PreparedInteriorCell,
-    pack: &LandblockPack,
+fn serialize_env_cell_payload(asset: &EnvCellAsset) -> serde_json::Value {
+    serialize_env_cell_payload_with_geometry(
+        asset,
+        serialize_prepared_polygon_set_render_geometry(&asset.prepared_cell.render_geometry),
+        |aperture| serialize_prepared_portal_aperture(aperture),
+    )
+}
+
+fn serialize_env_cell_binary_payload(
+    asset: &EnvCellAsset,
+    path_prefix: &str,
+    writer: &mut BinaryAssetSectionWriter,
 ) -> serde_json::Value {
-    let static_meshes = pack
-        .prepared
-        .static_meshes
-        .iter()
-        .filter(|mesh| mesh.owning_env_cell_id == Some(cell.env_cell_id))
-        .collect::<Vec<_>>();
+    serialize_env_cell_payload_with_geometry(
+        asset,
+        serialize_prepared_polygon_set_render_geometry_binary(
+            &asset.prepared_cell.render_geometry,
+            format!("{path_prefix}.renderGeometry"),
+            writer,
+        ),
+        |aperture| {
+            serialize_prepared_portal_aperture_standalone_binary(aperture, path_prefix, writer)
+        },
+    )
+}
+
+fn serialize_env_cell_payload_with_geometry<F>(
+    asset: &EnvCellAsset,
+    render_geometry: serde_json::Value,
+    mut serialize_aperture: F,
+) -> serde_json::Value
+where
+    F: FnMut(&PreparedPortalAperture) -> serde_json::Value,
+{
+    let cell = &asset.prepared_cell;
+    let static_meshes = asset.static_meshes.iter().collect::<Vec<_>>();
     serde_json::json!({
         "kind": "env-cell",
         "residencyKind": "interior-cell",
@@ -2666,8 +2934,8 @@ fn serialize_env_cell_payload(
                 "isOutsideTransition": portal.is_outside_transition,
             })
         }).collect::<Vec<_>>(),
-        "visibleEnvCellIds": pack.interiors.env_cells.iter().find(|fact| fact.env_cell_id == cell.env_cell_id).map(|fact| fact.visible_cell_ids.clone()).unwrap_or_default(),
-        "portalApertures": cell.portal_apertures.iter().map(serialize_prepared_portal_aperture).collect::<Vec<_>>(),
+        "visibleEnvCellIds": asset.env_cell.visible_cell_ids,
+        "portalApertures": cell.portal_apertures.iter().map(&mut serialize_aperture).collect::<Vec<_>>(),
         "statics": static_meshes.iter().map(|mesh| {
             serde_json::json!({
                 "instanceId": mesh.instance_id,
@@ -2680,15 +2948,41 @@ fn serialize_env_cell_payload(
                 "instanceBounds": mesh.instance_bounds.as_ref().map(serialize_prepared_aabb),
             })
         }).collect::<Vec<_>>(),
-        "renderGeometry": serialize_prepared_polygon_set_render_geometry(&cell.render_geometry),
+        "renderGeometry": render_geometry,
         "cellBsp": serialize_bsp_node(&cell.cell_bsp),
         "localBvh": serialize_env_cell_local_bvh(cell, &static_meshes),
         "provenance": {
             "source": "repo-local-hba",
             "sourceAssetKind": "env-cell",
-            "errorCode": null,
-            "detail": null
+            "errorCode": asset.diagnostics.errors.first().map(|error| error.error_code),
+            "detail": asset.diagnostics.errors.first().map(|error| error.detail.clone())
         }
+    })
+}
+
+fn serialize_prepared_portal_aperture_standalone_binary(
+    aperture: &PreparedPortalAperture,
+    path_prefix: &str,
+    writer: &mut BinaryAssetSectionWriter,
+) -> serde_json::Value {
+    writer.push_f32_section(
+        "envCell.portalApertures.points",
+        format!(
+            "{path_prefix}.portalApertures.{}.points",
+            aperture.source_index
+        ),
+        3,
+        aperture
+            .points
+            .iter()
+            .flat_map(|point| [point.x, point.y, point.z]),
+    );
+    serde_json::json!({
+        "portalId": aperture.portal_id,
+        "sourceIndex": aperture.source_index,
+        "polygonId": aperture.polygon_id,
+        "points": [],
+        "plane": aperture.plane.as_ref().map(serialize_prepared_portal_aperture_plane),
     })
 }
 
@@ -2714,16 +3008,33 @@ fn serialize_env_cell_local_bvh(
             .iter()
             .map(|portal| serde_json::json!({ "kind": "portal", "portalId": portal.portal_id })),
     );
-    let node_inputs = cell
-        .render_geometry
-        .bounds
-        .map(|bounds| vec![(bounds, 1_u32)])
-        .unwrap_or_default();
+    let mut node_inputs = Vec::new();
+    if let Some(bounds) = cell.render_geometry.bounds {
+        node_inputs.push((bounds, 1_u32));
+    }
+    node_inputs.extend(
+        static_meshes
+            .iter()
+            .filter_map(|mesh| mesh.instance_bounds.map(|bounds| (bounds, 2_u32))),
+    );
+    node_inputs.extend(
+        cell.portal_apertures
+            .iter()
+            .filter_map(|aperture| portal_aperture_bounds(aperture).map(|bounds| (bounds, 4_u32))),
+    );
     serde_json::json!({
         "coordinateSpace": "env-cell-local",
         "nodes": build_flat_bvh_nodes_from_bounds(node_inputs),
         "items": items,
     })
+}
+
+fn portal_aperture_bounds(aperture: &PreparedPortalAperture) -> Option<PreparedAabb> {
+    aperture
+        .points
+        .iter()
+        .copied()
+        .fold(None, |bounds, point| Some(expand_bounds(bounds, point)))
 }
 
 fn serialize_terrain_material_payload(table: &ResolvedTerrainMaterialTable) -> serde_json::Value {
@@ -3702,6 +4013,37 @@ mod tests {
             asset.payload["terrain"]["terrainBvh"]["coordinateSpace"],
             "landblock-terrain-local"
         );
+        assert!(asset.payload.get("buildingShells").is_none());
+    }
+
+    #[test]
+    fn granular_landblock_building_shells_lookup_returns_coverage_payload() {
+        let runtime = HostRuntimeService::new(false);
+        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
+            request_id: "test-landblock-building-shells".to_string(),
+            asset_id: "landblock/da55ffff/building-shells".to_string(),
+            priority: crate::contracts::AssetPriorityDto::Bootstrap,
+        });
+
+        assert_eq!(asset.asset_id, "landblock/da55ffff/building-shells");
+        assert_eq!(asset.payload["kind"], "landblock-building-shells");
+        assert_eq!(asset.payload["landblockId"], 0xda55ffffu32);
+        assert!(asset.payload.get("terrain").is_none());
+        assert!(asset.payload.get("envCells").is_none());
+        assert!(
+            asset.payload["shells"]
+                .as_array()
+                .expect("building-shell route should expose shell members")
+                .iter()
+                .all(|shell| shell["sourceAssetId"]
+                    .as_str()
+                    .is_some_and(|asset_id| asset_id.starts_with("setup-model/")
+                        || asset_id.starts_with("gfx-obj/")))
+        );
+        assert_eq!(
+            asset.payload["shellBvh"]["coordinateSpace"],
+            "landblock-local"
+        );
     }
 
     #[test]
@@ -3751,6 +4093,59 @@ mod tests {
         assert_eq!(
             asset.payload["localBvh"]["coordinateSpace"],
             "env-cell-local"
+        );
+        assert!(
+            !asset.payload["localBvh"]["nodes"]
+                .as_array()
+                .expect("env-cell local BVH should expose scoped nodes")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn granular_terrain_and_env_cell_binary_lookup_moves_bulk_arrays_into_sections() {
+        let adapter = HostBoundaryAdapter::new(false);
+        let bytes = tauri::async_runtime::block_on(adapter.asset_lookup_binary_batch(vec![
+            AssetLookupRequestDto {
+                request_id: "test-landblock-terrain-binary".to_string(),
+                asset_id: "landblock/da55ffff/terrain".to_string(),
+                priority: crate::contracts::AssetPriorityDto::Bootstrap,
+            },
+            AssetLookupRequestDto {
+                request_id: "test-env-cell-binary".to_string(),
+                asset_id: "env-cell/da550100".to_string(),
+                priority: crate::contracts::AssetPriorityDto::Bootstrap,
+            },
+        ]))
+        .expect("binary granular route lookup should succeed");
+        let (manifest, _) = decode_binary_manifest(&bytes);
+        let sections = manifest["sections"]
+            .as_array()
+            .expect("binary manifest should expose sections");
+
+        assert!(
+            sections
+                .iter()
+                .any(|section| section["path"] == "responses.0.payload.terrain.vertices")
+        );
+        assert!(
+            sections
+                .iter()
+                .any(|section| section["path"] == "responses.1.payload.renderGeometry.positions")
+        );
+        assert_eq!(
+            manifest["responses"][0]["payload"]["terrain"]["vertices"]
+                .as_array()
+                .expect("terrain binary payload should leave JSON vertex placeholder")
+                .len(),
+            0
+        );
+        assert_eq!(
+            manifest["responses"][1]["payload"]["renderGeometry"]["positions"]
+                .as_array()
+                .expect("env-cell binary payload should leave JSON render positions placeholder")
+                .len(),
+            0
         );
     }
 

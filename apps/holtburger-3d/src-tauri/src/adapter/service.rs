@@ -5,9 +5,8 @@ use crate::adapter::binary::*;
 use crate::adapter::ids::*;
 use crate::adapter::json::*;
 use holtburger_content::{
-    ContentDecodeCache, ContentRepository, EnvCellAsset,
-    LandblockOutdoorAsset, LandblockTopologyAsset, SoulEmoteCatalog,
-    normalize_landblock_id,
+    ContentDecodeCache, ContentRepository, EnvCellAsset, LandblockOutdoorAsset,
+    LandblockTopologyAsset, SoulEmoteCatalog, normalize_landblock_id,
 };
 use holtburger_core::{
     ContentAsset, ContentAssetRequest, ContentAssetRuntime, ContentAssetService,
@@ -645,7 +644,7 @@ impl HostBoundaryAdapter {
         })
     }
 
-    fn build_palette_lookup_response(
+    pub fn build_palette_lookup_response(
         &self,
         request: AssetLookupRequestDto,
         palette_id: u32,
@@ -708,7 +707,7 @@ fn vec3_length(vector: &Vec3Dto) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use holtburger_dat::file_type::PixelFormatId;
+    use holtburger_dat::file_type::{Palette, PixelFormatId, RenderSurface};
 
     #[test]
     fn asset_lookup_remains_available_without_browser_runtime_residency() {
@@ -1154,6 +1153,48 @@ mod tests {
         assert!(
             bytes.len() > ASSET_BINARY_HEADER_LEN + manifest_len,
             "binary envelope should contain render-surface source bytes"
+        );
+    }
+
+    #[test]
+    fn palette_binary_payload_moves_colors_into_u32_section() {
+        let palette = Palette {
+            id: 0x0400_0001,
+            colors_argb: vec![0xff11_2233, 0x8044_5566],
+        };
+        let mut writer = BinaryAssetSectionWriter::default();
+        let payload =
+            serialize_palette_binary_payload(&palette, "responses.0.payload", &mut writer);
+        let bytes = serialize_asset_binary_batch_response(
+            vec![AssetLookupResponseDto {
+                request_id: "test-palette-binary".to_string(),
+                asset_id: "palette/04000001".to_string(),
+                payload_kind: AssetPayloadKindDto::Json,
+                payload,
+            }],
+            writer,
+        )
+        .expect("binary palette payload should serialize");
+
+        let (manifest, manifest_len) = decode_binary_manifest(&bytes);
+        assert_eq!(
+            manifest["responses"][0]["payload"]["colorsArgb"]
+                .as_array()
+                .expect("palette colors should be a manifest placeholder")
+                .len(),
+            0
+        );
+        let sections = manifest["sections"]
+            .as_array()
+            .expect("binary manifest should expose sections");
+        assert!(sections.iter().any(|section| {
+            section["path"] == "responses.0.payload.colorsArgb"
+                && section["scalarType"] == "u32"
+                && section["byteLength"] == 8
+        }));
+        assert!(
+            bytes.len() > ASSET_BINARY_HEADER_LEN + manifest_len,
+            "binary envelope should contain palette color data"
         );
     }
 

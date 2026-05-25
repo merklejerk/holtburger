@@ -24,12 +24,14 @@ The current browser renderer supports a partial legacy material path:
 - Direct-color `RenderSurface` formats are expanded to RGBA `DataTexture`.
 - DXT1/DXT3/DXT5 render surfaces can upload through Three `CompressedTexture`
   when S3TC is available.
+- Palette assets are lossless in the browser contract. Tauri binary lookup
+  carries palette tables as `u32` envelope sections and hydrates them as
+  `Uint32Array`.
 - Material diagnostics report missing recipes, missing dependencies, unsupported
   formats, and texture upload fallback.
 
 The current browser renderer does not yet support real indexed materials:
 
-- Palette DTOs expose `paletteId` and `colorCount`, but not palette colors.
 - `PFID_P8` and `PFID_INDEX16` render surfaces are reported as unsupported.
 - `setup-appearance` payloads preserve `paletteId`, `subPalettes`,
   `textureChanges`, and `animPartChanges`, but the static renderable scene path
@@ -45,24 +47,20 @@ The current browser renderer does not yet support real indexed materials:
 This plan was checked against the current code paths before implementation. The
 following gaps should be addressed in this order.
 
-1. `palette/` assets currently go through the JSON lookup path.
+1. Complete: `palette/` assets now go through the binary lookup path.
    `usesBinaryAssetLookup()` in `apps/holtburger-3d/src/lib/host/tauri.ts`
-   includes `render-surface/` but not `palette/`. Lossless palette colors should
-   not be sent through JSON, so phase 1 must add `palette/` to binary lookup
-   routing.
-2. The binary envelope only supports `f32`, `i32`, and `u8`.
-   `BinaryAssetSectionWriter` and
-   `apps/holtburger-3d/src/lib/host/binary-asset-envelope.ts` need `u32`
-   section support before `colorsArgb: Uint32Array` can be hydrated cleanly.
-3. The Rust binary manifest currently repeats the `responses` key in
-   `serialize_asset_binary_batch_response()`. Clean this up while touching the
-   binary envelope so transport tests cover a single canonical manifest shape.
-4. Worker transferables currently normalize geometry buffers only.
+   routes `palette/` alongside `render-surface/`.
+2. Complete: the binary envelope supports `u32`.
+   `BinaryAssetSectionWriter` can write `u32` sections and
+   `apps/holtburger-3d/src/lib/host/binary-asset-envelope.ts` hydrates them as
+   copied `Uint32Array` values.
+3. Course correction: the Rust binary manifest did not currently repeat the
+   `responses` key. That dry-run note was stale; no cleanup was needed.
+4. Complete: worker transferables now include render-surface and palette buffers.
    `collectPreparedAssetTransferables()` in
-   `apps/holtburger-3d/src/workers/asset-worker.ts` should transfer
-   `render-surface.sourceBytes` and `palette.colorsArgb` buffers too. Otherwise
-   the host-to-worker path is binary, but worker-to-main still clones the hot
-   texture data.
+   `apps/holtburger-3d/src/workers/asset-worker.ts` transfers
+   `render-surface.sourceBytes` and `palette.colorsArgb` when they occupy a
+   transferable full buffer.
 5. Asset dependency discovery already has the right shape for palettes.
    `material-recipe`, `setup-appearance`, `terrain-material`, and
    `render-surface` dependencies all surface `paletteAssetIds`. Once palette
@@ -128,6 +126,8 @@ separate so runtime appearance changes remain cheap and correct.
 
 ## Phase 1: Lossless Palette Assets
 
+Status: complete as of 2026-05-25.
+
 Extend palette payloads to carry the actual palette table.
 
 Render-surface pixel/index bytes already use the binary asset envelope. Tauri
@@ -184,10 +184,52 @@ Validation rules:
 This phase should not change rendered output yet. It only makes the data
 available.
 
+Implemented changes:
+
+- `PreparedPalettePayload` and `PalettePayloadDto` now include
+  `colorsArgb: Uint32Array`.
+- JSON fixture/direct lookup payloads may provide `colorsArgb` as a plain
+  unsigned integer array; frontend contract parsing normalizes it to
+  `Uint32Array` and validates `colorsArgb.length === colorCount`.
+- Tauri's JSON serializer exposes `colorsArgb` for direct JSON lookups, but the
+  app host routes `palette/` through binary lookup so normal app traffic does
+  not send palette tables as large JSON arrays.
+- The binary envelope supports `u32` sections. Palette binary payloads leave
+  `colorsArgb: []` in the manifest and append palette ARGB values as a
+  little-endian `u32` section.
+- Worker postmessage transfer handling now covers `render-surface.sourceBytes`
+  and `palette.colorsArgb` in addition to prepared geometry buffers.
+
+Validation added:
+
+- Frontend binary envelope test for `palette.colorsArgb` hydration as
+  `Uint32Array`.
+- Tauri routing test proving `palette/` uses binary lookup.
+- Asset preparation test proving JSON palette arrays normalize to
+  `Uint32Array`.
+- Rust binary payload test proving palette colors move into a `u32` binary
+  section.
+
+Course corrections:
+
+- The earlier duplicate-`responses` manifest cleanup item was not present in the
+  current code, so Phase 1 did not change the manifest shape beyond adding `u32`
+  sections.
+- Direct JSON palette lookup remains lossless for diagnostics and tests. The
+  browser app still avoids that path for palette assets through binary routing.
+
+Cleanup targets:
+
+- Add a direct test for worker transfer-list behavior if
+  `prepareAssetForPostMessage()` or the transfer collector becomes exported or
+  gets a pure helper. Current coverage validates typed payload preparation and
+  binary hydration, but not the internal transfer-list mutation directly.
+- Consider sharing the typed-array transferable helper with future render
+  resource loaders if more binary asset families are added.
+
 ## Phase 2: Palette Resource Cache
 
-Add palette normalization helpers and a renderer-local palette GPU resource
-cache.
+Add palette GPU conversion helpers and a renderer-local palette resource cache.
 
 Likely home:
 
@@ -197,8 +239,8 @@ Likely home:
 
 Responsibilities:
 
-- Normalize `number[] | Uint32Array` test/fixture input into `Uint32Array` at
-  preparation boundaries.
+- Consume already-normalized `Uint32Array` palette payloads from the asset
+  preparation layer.
 - Convert `colorsArgb` to GPU color data.
 - Preserve alpha from ARGB.
 - Upload a palette texture with stable dimensions derived from palette length.
@@ -217,6 +259,17 @@ Open decision:
 
 - Whether to expose renderer max texture size to the palette cache directly or
   keep the first version constrained to palette sizes known from AC content.
+
+Refinement after Phase 1:
+
+- Use an explicit `argbToRgbaBytes()` helper with tests before touching Three
+  resources. This prevents accidental ABGR/RGBA channel swaps when uploading the
+  palette lookup texture.
+- Cache keys should include palette asset ID and prepared provenance/timestamp.
+  They do not need subpalette identity yet; that belongs to the later material
+  parity push.
+- Treat zero-length palettes as invalid renderer resources even though the
+  transport contract allows `colorCount = 0` for provenance payloads.
 
 ## Phase 3: Indexed Surface Resource Cache
 
@@ -366,17 +419,14 @@ Manual visual validation:
 
 ## Suggested Implementation Order
 
-1. Binary envelope `u32` support, `palette/` binary routing, and worker
-   transferables for render-surface/palette buffers.
-2. Palette payloads with `colorsArgb: Uint32Array`.
-3. Palette normalization, validation helpers, and palette resource cache.
-4. Indexed surface classification, palette selection diagnostics, and
+1. Palette GPU byte conversion helpers and palette resource cache.
+2. Indexed surface classification, palette selection diagnostics, and
    unsupported-format diagnostic replacement.
-5. Split material resource helpers so direct-color, compressed, indexed, and
+3. Split material resource helpers so direct-color, compressed, indexed, and
    palette resources are independently testable.
-6. `P8` shader path.
-7. `Index16` byte-packed shader path.
-8. Debug panel indexed-material summary.
+4. `P8` shader path.
+5. `Index16` byte-packed shader path.
+6. Debug panel indexed-material summary.
 
 This order keeps the contract changes reviewable before shader work, and it
 lets us verify data availability before changing broader render grouping or

@@ -257,6 +257,7 @@ pub fn serialize_palette_payload(palette: &Palette) -> serde_json::Value {
         "sourceAssetKind": "palette",
         "paletteId": palette.id,
         "colorCount": palette.colors_argb.len(),
+        "colorsArgb": &palette.colors_argb,
         "provenance": {
             "source": "repo-local-hba",
             "sourceAssetKind": "palette",

@@ -717,6 +717,7 @@ export interface PreparedPalettePayload extends PreparedAssetPayloadBase {
 	sourceAssetKind: "palette";
 	paletteId: number;
 	colorCount: number;
+	colorsArgb: Uint32Array;
 }
 
 interface PreparedVisualAssetStubPayload extends PreparedAssetPayloadBase {

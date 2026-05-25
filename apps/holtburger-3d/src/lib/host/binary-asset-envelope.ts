@@ -9,7 +9,7 @@ const HEADER_LENGTH = 16;
 const MAGIC = "HBAB";
 const VERSION = 1;
 
-const binarySectionScalarTypeSchema = z.enum(["f32", "i32", "u8"]);
+const binarySectionScalarTypeSchema = z.enum(["f32", "i32", "u8", "u32"]);
 
 const binarySectionSchema = z.object({
 	role: z.string().min(1),
@@ -111,7 +111,10 @@ export function encodeJsonAssetBatchEnvelope(
 
 	const totalLength = HEADER_LENGTH + manifestBytes.length;
 	const bytes = new Uint8Array(totalLength);
-	bytes.set([...MAGIC].map((character) => character.charCodeAt(0)), 0);
+	bytes.set(
+		[...MAGIC].map((character) => character.charCodeAt(0)),
+		0,
+	);
 	const view = new DataView(bytes.buffer);
 	view.setUint32(4, VERSION, true);
 	view.setUint32(8, manifestBytes.length, true);
@@ -266,6 +269,9 @@ function decodeBinarySection(
 		copy.set(bytes);
 		return copy;
 	}
+	if (section.scalarType === "u32") {
+		return copyUint32Section(bytes);
+	}
 	throw new Error(
 		`Unsupported binary section scalar type ${section.scalarType}.`,
 	);
@@ -310,6 +316,13 @@ function readFloat32Section(bytes: Uint8Array): Float32Array {
 function readInt32Section(bytes: Uint8Array): Int32Array {
 	assertAligned(bytes, Int32Array.BYTES_PER_ELEMENT, "Int32Array");
 	return new Int32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4);
+}
+
+function copyUint32Section(bytes: Uint8Array): Uint32Array {
+	assertAligned(bytes, Uint32Array.BYTES_PER_ELEMENT, "Uint32Array");
+	return new Uint32Array(
+		bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+	);
 }
 
 function assertAligned(

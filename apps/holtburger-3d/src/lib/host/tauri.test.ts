@@ -39,6 +39,7 @@ describe("Tauri host commands", () => {
 			createRequest("d", "render-surface/06000001"),
 			createRequest("e", "landblock/0103ffff/topology"),
 			createRequest("f", "env-cell/01030100"),
+			createRequest("g", "palette/04000001"),
 		]);
 
 		expect(
@@ -51,21 +52,27 @@ describe("Tauri host commands", () => {
 				"render-surface/06000001",
 				"landblock/0103ffff/topology",
 				"env-cell/01030100",
+				"palette/04000001",
 			],
 		]);
 	});
 
-	it("plans material recipes through JSON envelopes instead of binary lookup", () => {
+	it("plans material recipes through JSON envelopes and palettes through binary lookup", () => {
 		const plan = planAssetLookupEnvelopeRequests([
 			createRequest("a", "env-cell/01030100"),
 			createRequest("b", "material/0800006c"),
 			createRequest("c", "render-surface/06000001"),
 			createRequest("d", "render-texture/05000001"),
+			createRequest("e", "palette/04000001"),
 		]);
 
 		expect(
-			plan.binaryBatches.map((batch) => batch.map((request) => request.assetId)),
-		).toEqual([["env-cell/01030100", "render-surface/06000001"]]);
+			plan.binaryBatches.map((batch) =>
+				batch.map((request) => request.assetId),
+			),
+		).toEqual([
+			["env-cell/01030100", "render-surface/06000001", "palette/04000001"],
+		]);
 		expect(plan.jsonRequests.map((request) => request.assetId)).toEqual([
 			"material/0800006c",
 			"render-texture/05000001",

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type { AssetLookupRequestDto, AssetLookupResponseDto } from "../host/contracts";
+import type {
+	AssetLookupRequestDto,
+	AssetLookupResponseDto,
+} from "../host/contracts";
 import type { BinaryAssetLookupEnvelopeDto } from "../host/tauri";
 import type { AssetWorkerLike } from "./asset-channel";
 import { AssetChannelController } from "./asset-channel";
@@ -37,10 +40,9 @@ describe("asset channel", () => {
 			worker.emitPreparedBatch(message);
 		}
 
-		await expect(Promise.all([firstPrepared, secondPrepared])).resolves.toEqual([
-			createPreparedAsset(first),
-			createPreparedAsset(second),
-		]);
+		await expect(Promise.all([firstPrepared, secondPrepared])).resolves.toEqual(
+			[createPreparedAsset(first), createPreparedAsset(second)],
+		);
 	});
 
 	it("bridges worker binary lookup requests and transfers raw envelopes back", async () => {
@@ -142,11 +144,46 @@ describe("asset worker payload preparation", () => {
 			/gfx-obj route.*payload failed the gfx-obj contract.*renderGeometry/,
 		);
 	});
+
+	it("normalizes JSON palette color arrays into Uint32Array payloads", () => {
+		const request = createRequest("request-palette", "palette/04000001");
+		const response: AssetLookupResponseDto = {
+			requestId: request.requestId,
+			assetId: request.assetId,
+			payloadKind: "json",
+			payload: {
+				kind: "palette",
+				residencyKind: "unknown",
+				sourceAssetKind: "palette",
+				paletteId: 0x04000001,
+				colorCount: 2,
+				colorsArgb: [0xff112233, 0x80445566],
+				provenance: {
+					source: "repo-local-hba",
+					sourceAssetKind: "palette",
+					errorCode: null,
+					detail: null,
+				},
+			},
+		};
+
+		const prepared = prepareAssetPayload(request, response);
+
+		expect(prepared.payload.kind).toBe("palette");
+		if (prepared.payload.kind !== "palette") {
+			throw new Error("expected palette payload");
+		}
+		expect(prepared.payload.colorsArgb).toBeInstanceOf(Uint32Array);
+		expect(Array.from(prepared.payload.colorsArgb)).toEqual([
+			0xff112233, 0x80445566,
+		]);
+	});
 });
 
 class FakeAssetWorker implements AssetWorkerLike {
-	onmessage: ((event: MessageEvent<AssetWorkerResponseMessage>) => void) | null =
-		null;
+	onmessage:
+		| ((event: MessageEvent<AssetWorkerResponseMessage>) => void)
+		| null = null;
 	onerror: ((event: Event | ErrorEvent) => void) | null = null;
 	readonly messages: AssetWorkerRequestMessage[] = [];
 	readonly transferLists: Transferable[][] = [];
@@ -205,7 +242,9 @@ function createRequest(
 	};
 }
 
-function createPreparedAsset(request: AssetLookupRequestDto): PreparedAssetRecord {
+function createPreparedAsset(
+	request: AssetLookupRequestDto,
+): PreparedAssetRecord {
 	return {
 		request,
 		response: {

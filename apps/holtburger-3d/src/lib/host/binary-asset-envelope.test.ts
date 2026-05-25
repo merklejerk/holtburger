@@ -178,6 +178,42 @@ describe("decodeBinaryAssetEnvelope", () => {
 		]);
 	});
 
+	it("hydrates palette colors as a Uint32Array", () => {
+		const colorsArgb = new Uint32Array([0xff112233, 0x80445566]);
+		const response = decodeBinaryAssetEnvelope(
+			buildEnvelope({
+				response: {
+					requestId: "request-palette",
+					assetId: "palette/04000001",
+					payloadKind: "json",
+					payload: {
+						kind: "palette",
+						colorCount: 2,
+						colorsArgb: [],
+					},
+				},
+				sections: [
+					{
+						role: "palette.colorsArgb",
+						path: "responses.0.payload.colorsArgb",
+						scalarType: "u32",
+						componentCount: 1,
+						elementCount: colorsArgb.length,
+						byteOffset: 0,
+						byteLength: colorsArgb.byteLength,
+					},
+				],
+				sectionData: [colorsArgb],
+			}),
+		);
+
+		const payload = response.payload as { colorsArgb: unknown };
+		expect(payload.colorsArgb).toBeInstanceOf(Uint32Array);
+		expect(Array.from(payload.colorsArgb as Uint32Array)).toEqual([
+			0xff112233, 0x80445566,
+		]);
+	});
+
 	it("hydrates env-cell portal aperture points as vec3 objects", () => {
 		const points = new Float32Array([1, 2, 3, 4, 5, 6]);
 		const response = decodeBinaryAssetEnvelope(

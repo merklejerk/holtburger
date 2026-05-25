@@ -1513,10 +1513,12 @@ Verification:
 - `cargo clippy --manifest-path crates/holtburger-content/Cargo.toml
   --all-targets -- -D warnings` passes.
 
-### Phase 7: Legacy Texture Velocity Animation
+### Phase 7: Classic Texture Velocity Animation
 
-Goal: add the legacy UV-scrolling path without pulling in the modern material
-DAT system.
+Status: **implemented**.
+
+Goal: add the classic hook-driven UV-scrolling path without pulling in the
+newer waveform/layer material animation system.
 
 - Parse `TextureVelocity` and `TextureVelocityPart` hook payloads into typed
   data instead of preserving them opaquely.
@@ -1530,6 +1532,151 @@ DAT system.
 
 Expected effect: legacy scrolling textures can animate while static material
 identity, batching, and shared geometry remain correct.
+
+Progress:
+
+- Replaced opaque DAT preservation for hook types `23` and `24` with typed
+  `TextureVelocity` and `TextureVelocityPart` payloads in the setup-model hook
+  parser. Other hook payloads remain raw unless they already need typed runtime
+  behavior.
+- Exposed resolved setup-placement texture velocity hooks in the setup-model
+  frontend payload as `textureVelocities`, with either `all-parts` or
+  part-specific scope.
+- Threaded setup placement texture velocity into static renderable part state.
+  Part-specific hooks override prior all-part hooks for that part, matching the
+  retail call path where a later hook updates the affected part/GfxObj velocity.
+- Added texture-velocity signatures to static renderable render-group keys.
+  Zero velocity normalizes to `uv:none` so inert hooks do not fragment batches.
+- Added renderer-local UV scrolling by cloning the affected render-group
+  materials, patching the map UV in shader state, and updating a per-material
+  offset uniform each frame. Shared `GfxObj` geometry and shared material-cache
+  materials are not mutated.
+- Added DAT hook parsing tests and frontend render-group/signature tests.
+
+Decisions:
+
+- Texture velocity remains a classic setup/animation hook path that is actively
+  supported content behavior. It is not part of newer material DAT handling and
+  does not alter `TextureSamplingPolicy`, material recipe identity, palette
+  state, or geometry UV buffers.
+- The browser renderer treats velocity as render-group state rather than
+  per-source asset state. This keeps normal material cache keys stable while
+  still allowing animated and non-animated instances of the same material to
+  coexist.
+- Animated groups use cloned Three materials and are disposed with the mesh.
+  Non-animated groups continue to use resource-cache-owned materials.
+- The first implemented frontend source is setup placement hooks because that is
+  where browser-mode static renderables currently resolve setup placements.
+  Future runtime animation playback should feed the same part-level velocity
+  state rather than creating a second material-animation system.
+
+Course corrections:
+
+- Retail and ACE references show `TextureVelocityHook` as `(u_speed, v_speed)`
+  and `TextureVelocityPartHook` as `(part_index, u_speed, v_speed)`. Retail
+  applies them through `CPhysicsObj::SetTextureVelocity` /
+  `SetPartTextureVelocity`, which ultimately records velocity against the
+  affected part `GfxObj` DID. That confirms this belongs in render instance
+  state, not in immutable material or geometry assets.
+- The old `hookCount` field was only diagnostic. It remains present, but the
+  renderer now consumes typed `textureVelocities`.
+
+Cleanup targets:
+
+- If more hook payloads become active, split setup-model hook payload parsing
+  into a dedicated hook module instead of continuing to grow
+  `setup_model.rs`.
+- Runtime entity rendering should converge on the same `partIndex + GfxObj +
+  material appearance + texture velocity` render-state shape used by static
+  renderables. Do not let preview/static/client entities grow separate UV
+  animation paths.
+- Once real animation playback lands, add a small conflict-resolution helper for
+  hook-applied texture velocity so placement defaults, animation frame hooks,
+  and network/runtime updates have one ordering rule.
+
+Legacy shims:
+
+- None introduced. The only retained compatibility field is existing
+  diagnostic `hookCount`; active behavior uses typed hook data.
+
+Refinements to future steps:
+
+- Phase 8 should continue to focus on scalar/clip behavior. It should not absorb
+  texture velocity or modern `Waveform`/`LayerModifier` animation.
+- Later client-mode entity work should route server/runtime animation hooks into
+  the same renderer part state and avoid mutating cached material resources.
+- If animated groups become numerous enough to hurt batching, add metrics for
+  UV-velocity group counts before changing the architecture.
+
+Verification:
+
+- `cargo test --manifest-path crates/holtburger-dat/Cargo.toml setup_model`
+  passes.
+- `npm run test:ts -- src/lib/world-display/static-renderables.test.ts`
+  passes.
+- `npm run check` passes.
+- `cargo clippy --manifest-path crates/holtburger-dat/Cargo.toml --all-targets
+  -- -D warnings` passes.
+- `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml` passes.
+- `cargo clippy --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml
+  --all-targets -- -D warnings` passes.
+- `npm run lint:ts` passes.
+
+### Phase 7.1: Texture Velocity Renderer Subsystem
+
+Goal: promote hook-driven texture velocity from static-renderable plumbing to a
+first-class renderer concept shared by static renderables, previews, and future
+client-mode runtime entities.
+
+- Move UV velocity material patching, shader cache-key extension, uniform
+  ownership, and per-frame offset updates out of `world-display-renderer.ts`
+  into a dedicated renderer-local module.
+- Introduce a small shared render-state type for texture velocity, including a
+  stable signature helper and zero-velocity normalization. Static renderables
+  should consume this type instead of owning ad hoc `textureVelocity` and
+  `textureVelocitySignature` formatting logic.
+- Keep texture velocity as active classic content support, not a compatibility
+  shim. The name should avoid implying the path is unused or obsolete merely
+  because newer EOR waveform/layer material animation exists.
+- Keep the subsystem separate from material DAT waveform/layer animation.
+  Future modern material animation may share renderer scheduling utilities, but
+  should not share identity or source-data types with hook-driven velocity.
+- Ensure the same subsystem can accept velocity from setup placement hooks,
+  future animation frame hooks, server/runtime entity state, and preview
+  entities.
+- Preserve the Phase 7 invariant that shared `GfxObj` geometry and
+  resource-cache-owned base materials are not mutated.
+- Add renderer debug metrics and Debug panel surfacing for texture velocity as
+  animation/render state, not as material asset resources:
+  - nonzero texture-velocity part count;
+  - texture-velocity render-group count;
+  - UV-animated cloned material count;
+  - unique texture-velocity signature count and bounded signature samples.
+- Keep cache-owned material stats and UV-animated material stats distinct. The
+  cloned animated materials are created outside `WorldMaterialResourceCache`,
+  so relying only on material-cache stats under-reports the actual program and
+  material shape.
+- Add focused tests for signature generation, zero-velocity normalization,
+  material ownership/disposal behavior, group-key stability, and renderer
+  metric derivation. Do not write tests for debug-oriented logging.
+
+Expected effect: texture velocity becomes a reusable renderer capability rather
+than a static-renderable-only implementation detail, reducing the chance that
+client-mode entities or previews grow parallel UV animation paths.
+
+Debt to collapse before Phase 8:
+
+- Phase 7 currently has correct behavior but embeds the material clone/patch and
+  offset update loop inside `world-display-renderer.ts`. Address that before
+  adding more scalar/material behavior so Phase 8 does not build on a renderer
+  file that is already carrying too many material concerns.
+- Static renderable group identity currently formats texture velocity inline.
+  Move that into the shared texture-velocity render-state helper so later
+  runtime entity render models can use the same key semantics.
+- The Debug UI currently surfaces material cache counts and program-key samples
+  but does not expose texture velocity presence/counts. Add that visibility in
+  Phase 7.1 so animated UV content is inspectable before Phase 8 adds more
+  material behavior.
 
 ### Phase 8: Clipmap And Scalar Material Behavior
 
@@ -1661,12 +1808,13 @@ target.
 6. Phase 4 derived palette views.
 7. Phase 5 runtime appearance parity.
 8. Phase 6 ClothingTable appearance generation.
-9. Phase 7 legacy texture velocity animation.
-10. Phase 8 clipmap/scalar behavior.
-11. Phase 9 terrain material pipeline prep.
-12. Phase 10 terrain TexMerge GPU path.
-13. Phase 10.5 legacy detail texture overlay.
-14. Phase 11 optional high-res JPEG replacement.
+9. Phase 7 classic texture velocity animation.
+10. Phase 7.1 texture velocity renderer subsystem.
+11. Phase 8 clipmap/scalar behavior.
+12. Phase 9 terrain material pipeline prep.
+13. Phase 10 terrain TexMerge GPU path.
+14. Phase 10.5 legacy detail texture overlay.
+15. Phase 11 optional high-res JPEG replacement.
 
 This order should improve the currently observed failures fastest:
 

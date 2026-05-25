@@ -195,6 +195,77 @@ describe("static renderables", () => {
 		]);
 	});
 
+	it("carries setup texture velocity as part render state and group identity", () => {
+		const envCellId = 0x00070100;
+		const setupDid = 0x02000001;
+		const firstGfxObjId = 0x01000001;
+		const secondGfxObjId = 0x01000002;
+		const assetState = createAssetState([
+			createEnvCellRecord({
+				envCellId,
+				localPlacement: createPlacement({ x: 0, y: 0, z: 0 }),
+				staticPlacement: createPlacement({ x: 0, y: 0, z: 0 }),
+				sourceDid: setupDid,
+			}),
+			createSetupModelRecord({
+				setupModelId: setupDid,
+				gfxObjId: firstGfxObjId,
+				partPlacement: createPlacement({ x: 0, y: 0, z: 0 }),
+				additionalParts: [{ partIndex: 1, gfxObjId: secondGfxObjId }],
+				textureVelocities: [
+					{ kind: "all-parts", uSpeed: 0.125, vSpeed: 0 },
+					{ kind: "part", partIndex: 1, uSpeed: 0, vSpeed: -0.25 },
+				],
+			}),
+			createGfxObjRecord(firstGfxObjId),
+			createGfxObjRecord(secondGfxObjId),
+		]);
+		const scene = deriveStaticRenderableSceneModel(
+			assetState,
+			createInteriorDestination(envCellId),
+		);
+
+		expect(scene.parts.map((part) => part.textureVelocity)).toEqual([
+			{ uSpeed: 0.125, vSpeed: 0 },
+			{ uSpeed: 0, vSpeed: -0.25 },
+		]);
+		expect(scene.partsByRenderGroupKey.size).toBe(2);
+		expect([...scene.partsByRenderGroupKey.keys()]).toEqual(
+			expect.arrayContaining([
+				expect.stringContaining("uv:0.125,0"),
+				expect.stringContaining("uv:0,-0.25"),
+			]),
+		);
+	});
+
+	it("does not fragment static renderable groups for zero texture velocity hooks", () => {
+		const envCellId = 0x00070100;
+		const setupDid = 0x02000001;
+		const gfxObjId = 0x01000001;
+		const assetState = createAssetState([
+			createEnvCellRecord({
+				envCellId,
+				localPlacement: createPlacement({ x: 0, y: 0, z: 0 }),
+				staticPlacement: createPlacement({ x: 0, y: 0, z: 0 }),
+				sourceDid: setupDid,
+			}),
+			createSetupModelRecord({
+				setupModelId: setupDid,
+				gfxObjId,
+				partPlacement: createPlacement({ x: 0, y: 0, z: 0 }),
+				textureVelocities: [{ kind: "all-parts", uSpeed: 0, vSpeed: 0 }],
+			}),
+			createGfxObjRecord(gfxObjId),
+		]);
+		const scene = deriveStaticRenderableSceneModel(
+			assetState,
+			createInteriorDestination(envCellId),
+		);
+
+		expect(scene.parts[0]?.textureVelocity).toBeNull();
+		expect([...scene.partsByRenderGroupKey.keys()][0]).toContain("uv:none");
+	});
+
 	it("normalizes outdoor static placements that cross landblock edges", () => {
 		const landblockId = 0x0203ffff;
 		const sourceDid = 0x01000001;
@@ -478,6 +549,11 @@ function createSetupModelRecord(options: {
 	setupModelId: number;
 	gfxObjId: number;
 	partPlacement: PreparedSetupModelPayload["placementSets"][number]["localPlacements"][number];
+	additionalParts?: {
+		partIndex: number;
+		gfxObjId: number;
+	}[];
+	textureVelocities?: PreparedSetupModelPayload["placementSets"][number]["textureVelocities"];
 }): PreparedAssetRecord {
 	const assetId = formatSetupModelAssetId(options.setupModelId);
 	return {
@@ -504,14 +580,25 @@ function createSetupModelRecord(options: {
 					parentIndex: null,
 					scale: null,
 				},
+				...(options.additionalParts ?? []).map((part) => ({
+					partIndex: part.partIndex,
+					gfxObjId: part.gfxObjId,
+					gfxObjAssetId: formatGfxObjAssetId(part.gfxObjId),
+					parentIndex: null,
+					scale: null,
+				})),
 			],
 			holdingLocations: [],
 			connectionPoints: [],
 			placementSets: [
 				{
 					key: 0x65,
-					localPlacements: [options.partPlacement],
-					hookCount: 0,
+					localPlacements: [
+						options.partPlacement,
+						...(options.additionalParts ?? []).map(() => options.partPlacement),
+					],
+					hookCount: options.textureVelocities?.length ?? 0,
+					textureVelocities: options.textureVelocities ?? [],
 				},
 			],
 			collisionWitness: {
@@ -531,7 +618,12 @@ function createSetupModelRecord(options: {
 			defaultSoundTable: null,
 			defaultScriptTable: null,
 			dependencies: {
-				gfxObjAssetIds: [formatGfxObjAssetId(options.gfxObjId)],
+				gfxObjAssetIds: [
+					formatGfxObjAssetId(options.gfxObjId),
+					...(options.additionalParts ?? []).map((part) =>
+						formatGfxObjAssetId(part.gfxObjId),
+					),
+				],
 			},
 		},
 	};

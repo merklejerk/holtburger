@@ -59,6 +59,7 @@ import type { RenderChunkKey } from "./render-chunks";
 import {
 	type StaticRenderablePart,
 	type StaticRenderableSceneModel,
+	type StaticRenderableTextureVelocity,
 	isPreparedGfxObjAsset,
 } from "./static-renderables";
 import {
@@ -206,6 +207,16 @@ export interface WorldDisplayRenderer {
 interface RenderStyleMaterialUserData {
 	originalRenderStyleMaterial?: Material | Material[];
 	renderStyleDebugColorKey?: string;
+	holtburgerUvVelocity?: {
+		uSpeed: number;
+		vSpeed: number;
+		uniform: { value: Vector2 };
+	};
+}
+
+interface UvVelocityShader {
+	uniforms: Record<string, { value: unknown }>;
+	vertexShader: string;
 }
 
 const PERFORMANCE_REPORT_INTERVAL_MS = 500;
@@ -665,6 +676,7 @@ export function createWorldDisplayRenderer(
 
 		const frameStartedAt = frameAt;
 		const renderStartedAt = window.performance.now();
+		updateUvVelocityMaterials(frameStartedAt / 1000);
 		renderWorldPasses();
 		const renderMs = window.performance.now() - renderStartedAt;
 		lastRenderedAt = frameStartedAt;
@@ -1620,11 +1632,16 @@ export function createWorldDisplayRenderer(
 			const chunkRoot = getRenderChunkRoot(firstPart.renderChunk.chunkKey);
 			let mesh = staticRenderableGroupMeshes.get(groupKey);
 			if (!mesh) {
+				const groupMaterials = createStaticRenderableGroupMaterials(
+					materialPlan.materials,
+					firstPart.textureVelocity,
+				);
 				mesh = createStaticRenderableInstancedMesh(
 					groupKey,
 					gfxAssetId,
 					geometry,
-					materialPlan.materials,
+					groupMaterials.materials,
+					groupMaterials.ownedByResourceCache,
 					parts.length,
 				);
 				chunkRoot.add(mesh);
@@ -1828,9 +1845,7 @@ export function createWorldDisplayRenderer(
 			cell.renderGeometry,
 			materialPlan.geometrySlots,
 			{
-				compactMaterialGroups: canCompactMaterialGroups(
-					materialPlan.materials,
-				),
+				compactMaterialGroups: canCompactMaterialGroups(materialPlan.materials),
 			},
 		);
 		const mesh = new Mesh(geometry, materialPlan.materials);
@@ -2410,6 +2425,7 @@ export function createWorldDisplayRenderer(
 		gfxAssetId: string,
 		geometry: BufferGeometry,
 		materials: Material[],
+		materialOwnedByResourceCache: boolean,
 		count: number,
 	): InstancedMesh {
 		const mesh = new InstancedMesh(
@@ -2420,9 +2436,55 @@ export function createWorldDisplayRenderer(
 		mesh.count = count;
 		mesh.name = `static-renderable/${groupKey}`;
 		mesh.userData.gfxAssetId = gfxAssetId;
-		mesh.userData.materialOwnedByResourceCache = true;
+		mesh.userData.materialOwnedByResourceCache = materialOwnedByResourceCache;
 		mesh.userData.renderStyleDebugColorKey = groupKey;
 		return mesh;
+	}
+
+	function createStaticRenderableGroupMaterials(
+		materials: readonly Material[],
+		textureVelocity: StaticRenderableTextureVelocity | null,
+	): { materials: Material[]; ownedByResourceCache: boolean } {
+		return textureVelocity
+			? {
+					materials: materials.map((material) =>
+						createUvVelocityMaterial(material, textureVelocity),
+					),
+					ownedByResourceCache: false,
+				}
+			: { materials: [...materials], ownedByResourceCache: true };
+	}
+
+	function createUvVelocityMaterial(
+		material: Material,
+		textureVelocity: StaticRenderableTextureVelocity,
+	): Material {
+		const clone = material.clone();
+		const uniform = { value: new Vector2(0, 0) };
+		const previousOnBeforeCompile = clone.onBeforeCompile.bind(clone);
+		const previousCustomProgramCacheKey =
+			clone.customProgramCacheKey.bind(clone);
+		clone.onBeforeCompile = (...args) => {
+			previousOnBeforeCompile(...args);
+			const shader = args[0] as UvVelocityShader;
+			shader.uniforms.holtburgerUvOffset = uniform;
+			shader.vertexShader = shader.vertexShader.replace(
+				"#include <uv_vertex>",
+				`${uvVelocityUniformDeclaration()}\n#include <uv_vertex>\n#ifdef USE_MAP\n\tvMapUv += holtburgerUvOffset;\n#endif`,
+			);
+		};
+		clone.customProgramCacheKey = () =>
+			`${previousCustomProgramCacheKey()}|holtburger-uv-velocity`;
+		(clone.userData as RenderStyleMaterialUserData).holtburgerUvVelocity = {
+			uSpeed: textureVelocity.uSpeed,
+			vSpeed: textureVelocity.vSpeed,
+			uniform,
+		};
+		return clone;
+	}
+
+	function uvVelocityUniformDeclaration(): string {
+		return "uniform vec2 holtburgerUvOffset;";
 	}
 
 	function updateStaticRenderableInstancedMesh(
@@ -2459,6 +2521,29 @@ export function createWorldDisplayRenderer(
 		} else {
 			materialOrMaterials.needsUpdate = true;
 		}
+	}
+
+	function updateUvVelocityMaterials(elapsedSeconds: number): void {
+		for (const mesh of staticRenderableGroupMeshes.values()) {
+			const materials = Array.isArray(mesh.material)
+				? mesh.material
+				: [mesh.material];
+			for (const material of materials) {
+				const velocity = (material.userData as RenderStyleMaterialUserData)
+					.holtburgerUvVelocity;
+				if (!velocity) {
+					continue;
+				}
+				velocity.uniform.value.set(
+					wrapUvOffset(velocity.uSpeed * elapsedSeconds),
+					wrapUvOffset(velocity.vSpeed * elapsedSeconds),
+				);
+			}
+		}
+	}
+
+	function wrapUvOffset(value: number): number {
+		return value - Math.trunc(value);
 	}
 
 	function staticRenderableInstanceColorMode(): StaticRenderableInstanceColorMode {

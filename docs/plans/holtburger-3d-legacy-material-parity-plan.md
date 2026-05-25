@@ -46,18 +46,17 @@ or new reference evidence proves it stale.
   variants from retail `CPolygon.stippling` bits, and the 3D renderer uses
   those variants to split material slots/groups and choose clamp or repeat
   texture wrapping.
+- Indexed material rendering can now consume renderer-local derived palette
+  views from `MaterialAppearanceContext`: an appearance `paletteId` overrides
+  the material/render-surface selected base palette, and appearance subpalettes
+  are composed into a per-view palette texture before shader binding.
 
 ### Known Gaps
 
-- Runtime/server `ObjDesc` variants are not yet routed into prepared
-  setup-appearance inputs. Static setup-model rendering uses the base prepared
-  `setup-appearance/{setup_did}` snapshot when available.
-- Static `GfxObj` and setup rendering have no derived palette view identity.
-  `materialSignature` reflects material slots, not per-instance subpalette
-  replacement.
-- The renderer selects only base material/default render-surface palettes for
-  indexed textures. It does not compose `ObjDesc.paletteId` and `subPalettes`
-  into a per-appearance palette texture.
+- Runtime/server `ObjDesc` variants are still not scheduled as distinct
+  `setup-appearance` inputs, so most current static setup appearances use the
+  base DAT snapshot and therefore have no runtime palette or texture overrides
+  to apply.
 - `ClothingTable`-driven appearance generation is not implemented. The lower
   level `ObjDesc + Setup` path should come first; clothing tables should later
   produce `ObjDesc` inputs in `holtburger-content`, not renderer-local clothing
@@ -907,17 +906,106 @@ or clamped before deeper material work.
 
 Goal: compose per-appearance palette textures for indexed materials.
 
-- Introduce a renderer-local `PaletteView`/`DerivedPaletteResource` signature:
-  base palette asset ID, base prepared signature, appearance palette ID,
-  subpalette list, subpalette prepared signatures.
-- Apply `ObjDesc.paletteId` as the base palette override when present.
-- Apply each `SubPalette` by replacing the destination range with colors from
-  the referenced subpalette.
-- Include palette view identity in material signatures and material cache keys.
-- Keep derived palette upload in `apps/holtburger-3d`; do not promote
-  Three.js resource policy into shared crates.
-- Add diagnostics for missing base palettes, missing subpalettes, invalid
-  ranges, and palette index out-of-range after derivation.
+Progress: implemented.
+
+Implemented changes:
+
+- Extended renderer-local `MaterialAppearanceContext` with a typed
+  `paletteView` carrying the resolved appearance `paletteId` override and
+  sorted `subPalettes`.
+- `createSetupAppearanceMaterialAppearanceContext()` now fills
+  `paletteViewSignature` and `paletteView` from prepared
+  `setup-appearance/{setup_did}` payloads. Base appearances still normalize to
+  `palette=base`.
+- Added `derived-palette-resources.ts` for renderer-local palette composition.
+  It copies the selected base palette, applies each subpalette replacement
+  range, uploads the composed palette through the existing palette texture
+  helper, and caches by base palette prepared state plus subpalette prepared
+  state.
+- Indexed material construction now applies an appearance `paletteId` as the
+  effective base palette override before falling back to the `CSurface`
+  palette or render-surface default palette.
+- Indexed materials with subpalette replacements now bind the derived palette
+  resource rather than the base palette resource.
+- Subpalette composition follows ACViewer and retail `Palette::Modify`
+  behavior: the destination range is replaced with the same offset range from
+  the referenced palette, not colors starting at index zero.
+- Material cache keys now include appearance palette asset prepared state, so a
+  refreshed appearance override or subpalette invalidates the final Three
+  material instead of reusing a stale shader uniform.
+- Added diagnostics for unprepared subpalettes, invalid subpalette ranges,
+  derived/base palette kind mismatches, and post-derivation indexed palette
+  range failures.
+- Added tests for subpalette composition, appearance palette override
+  selection, and final material refresh when appearance palette assets change.
+
+Verification:
+
+- `npm run test:ts` passes with 45 test files and 238 tests.
+- `npm run check` passes with no Svelte or TypeScript diagnostics.
+- `npm run lint:ts` passes.
+- `npm run lint:dead` passes.
+- Touched TypeScript files pass targeted Prettier checks.
+
+Decisions and course corrections:
+
+- The Phase 4 plan said the palette-view signature should include the base
+  palette asset ID. That base palette is not known when the source-agnostic
+  appearance context is created; it depends on the indexed material recipe and
+  render surface selected later. The implemented split is:
+  `MaterialAppearanceContext.paletteViewSignature` records only resolved
+  appearance facts, while `DerivedPaletteResource` keys include the
+  material-selected base palette asset ID and prepared state.
+- Palette-view identity remains in `MaterialAppearanceContext`, not
+  `materialVariantSignature`. Sampler policy is per-slot immutable render
+  behavior; palette view is per-appearance indexed color state.
+- Direct appearance palette overrides without subpalettes reuse the ordinary
+  base palette resource. A derived palette resource is only created when at
+  least one subpalette replacement is present.
+- Missing or invalid derived palette inputs produce diagnostics and fall back to
+  placeholder material behavior. They do not silently bind the wrong base
+  palette.
+
+Cleanup targets from Phase 4:
+
+- `material-construction.ts` now has repeated "effective palette ID/source"
+  ternaries. If Phase 5 expands indexed material selection further, extract an
+  `IndexedPaletteViewSelection` helper rather than growing the function body.
+- `material-signatures.ts` duplicates a small `formatPaletteAssetId()` helper.
+  Consolidate formatting helpers once the remaining material-signature shim
+  cleanup happens; avoid moving renderer-only derived palette policy into shared
+  host contracts.
+- `WorldMaterialResourceCache.getDerivedPaletteResource()` is public mostly for
+  focused tests. If no production-adjacent diagnostics need direct access after
+  Phase 5, hide it behind material construction again or move tests down to the
+  derived-palette module.
+- Add dedicated derived-palette tests for missing subpalette and invalid range
+  diagnostics if Phase 5 starts feeding runtime data from less controlled
+  sources.
+
+Legacy shims:
+
+- Base setup appearances still usually carry no `paletteId` or subpalettes
+  because runtime/server `ObjDesc` variants are not yet routed into prepared
+  setup appearances. Phase 4 makes the renderer path correct when those facts
+  exist; Phase 5 must make the asset/request path produce them for live
+  objects.
+- Existing non-indexed material paths ignore `paletteView`, as expected. Direct
+  color and compressed textures remain unaffected until texture-map changes
+  start selecting different render textures.
+
+Refinements to future steps:
+
+- Phase 5 should prioritize the bridge from runtime/server `ObjDesc` data into
+  distinct prepared setup-appearance requests. Without that, derived palette
+  support is mostly latent for base static snapshots.
+- Phase 5 texture swap identity should follow the same two-layer pattern:
+  appearance-level texture swap facts in `MaterialAppearanceContext`, with
+  material-selected render-surface/resource prepared state in cache keys.
+- No immediate interim phase is required before Phase 5. The palette-view
+  renderer path is in place, but Phase 5 should include a small cleanup task to
+  extract effective indexed palette selection if texture-swap handling touches
+  `resolveIndexedMaterialResources()`.
 
 Expected effect: indexed clothing, skin, hair, and dyed/static appearance paths
 can use the same indexed render surfaces with different palette views.

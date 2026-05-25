@@ -14,6 +14,10 @@ import type {
 } from "../assets/types";
 import { formatHex32 } from "../landblocks";
 import {
+	formatPaletteAssetId,
+	type DerivedPaletteDiagnosticHandler,
+} from "./derived-palette-resources";
+import {
 	createIndexedMeshStandardMaterial,
 	type IndexedMaterialResources,
 } from "./indexed-materials";
@@ -22,6 +26,7 @@ import {
 	selectIndexedPalette,
 	type IndexedTextureResource,
 } from "./indexed-texture-resources";
+import type { MaterialAppearanceContext } from "./material-appearance";
 import type { MaterialResourceDiagnostic } from "./material-resources";
 import { parseLegacySamplerMaterialVariantSignature } from "./material-variants";
 import type { PaletteTextureResource } from "./palette-resources";
@@ -62,8 +67,16 @@ export function createMaterial(options: {
 		paletteAssetId: string,
 		paletteAsset: PreparedAssetRecord,
 	) => PaletteTextureResource | null;
+	resolveDerivedPaletteResource: (options: {
+		basePaletteAssetId: string;
+		basePaletteAsset: PreparedAssetRecord;
+		appearance: MaterialAppearanceContext;
+		preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>;
+		reportDiagnostic: DerivedPaletteDiagnosticHandler;
+	}) => PaletteTextureResource | null;
 	reportDiagnostic: MaterialResourceDiagnosticHandler;
 	textureSamplingPolicy: MaterialTextureSamplingPolicy;
+	appearance: MaterialAppearanceContext;
 }): Material {
 	const recipeAsset = options.preparedByAssetId[options.materialAssetId];
 	if (recipeAsset?.payload.kind !== "material-recipe") {
@@ -160,7 +173,9 @@ export function createMaterial(options: {
 				),
 			),
 			resolvePaletteResource: options.resolvePaletteResource,
+			resolveDerivedPaletteResource: options.resolveDerivedPaletteResource,
 			reportDiagnostic: options.reportDiagnostic,
+			appearance: options.appearance,
 		});
 		if (indexedResources) {
 			return createIndexedMeshStandardMaterial({
@@ -351,7 +366,15 @@ function resolveIndexedMaterialResources(options: {
 		paletteAssetId: string,
 		paletteAsset: PreparedAssetRecord,
 	) => PaletteTextureResource | null;
+	resolveDerivedPaletteResource: (options: {
+		basePaletteAssetId: string;
+		basePaletteAsset: PreparedAssetRecord;
+		appearance: MaterialAppearanceContext;
+		preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>;
+		reportDiagnostic: DerivedPaletteDiagnosticHandler;
+	}) => PaletteTextureResource | null;
 	reportDiagnostic: MaterialResourceDiagnosticHandler;
+	appearance: MaterialAppearanceContext;
 }): IndexedMaterialResources | null {
 	const renderSurfaceAssetId = formatRenderSurfaceAssetId(
 		options.renderSurface.renderSurfaceId,
@@ -392,7 +415,15 @@ function resolveIndexedMaterialResources(options: {
 		});
 		return null;
 	}
-	const { paletteAssetId } = paletteSelection;
+	const paletteView = options.appearance.paletteView;
+	const paletteAssetId =
+		paletteView?.paletteId === null || paletteView?.paletteId === undefined
+			? paletteSelection.paletteAssetId
+			: formatPaletteAssetId(paletteView.paletteId);
+	const paletteSource =
+		paletteView?.paletteId === null || paletteView?.paletteId === undefined
+			? paletteSelection.source
+			: "appearance-override";
 
 	const paletteAsset = options.preparedByAssetId[paletteAssetId];
 	if (paletteAsset?.payload.kind !== "palette") {
@@ -403,8 +434,12 @@ function resolveIndexedMaterialResources(options: {
 				materialAssetId: options.materialAssetId,
 				renderSurfaceAssetId,
 				paletteAssetId,
-				paletteId: paletteSelection.paletteId,
-				paletteSource: paletteSelection.source,
+				paletteId:
+					paletteView?.paletteId === null ||
+					paletteView?.paletteId === undefined
+						? paletteSelection.paletteId
+						: paletteView.paletteId,
+				paletteSource,
 				preparedKind: paletteAsset?.payload.kind ?? null,
 			},
 		});
@@ -419,18 +454,27 @@ function resolveIndexedMaterialResources(options: {
 				materialAssetId: options.materialAssetId,
 				renderSurfaceAssetId,
 				paletteAssetId,
-				paletteId: paletteSelection.paletteId,
-				paletteSource: paletteSelection.source,
+				paletteId:
+					paletteView?.paletteId === null ||
+					paletteView?.paletteId === undefined
+						? paletteSelection.paletteId
+						: paletteView.paletteId,
+				paletteSource,
 				colorCount: paletteAsset.payload.colorCount,
 			},
 		});
 		return null;
 	}
 
-	const paletteResource = options.resolvePaletteResource(
-		paletteAssetId,
-		paletteAsset,
-	);
+	const paletteResource = paletteView?.subPalettes.length
+		? options.resolveDerivedPaletteResource({
+				basePaletteAssetId: paletteAssetId,
+				basePaletteAsset: paletteAsset,
+				appearance: options.appearance,
+				preparedByAssetId: options.preparedByAssetId,
+				reportDiagnostic: options.reportDiagnostic,
+			})
+		: options.resolvePaletteResource(paletteAssetId, paletteAsset);
 	if (!paletteResource) {
 		options.reportDiagnostic({
 			key: `indexed-texture-palette-resource-failed:${options.materialAssetId}:${renderSurfaceAssetId}:${paletteAssetId}`,
@@ -439,8 +483,12 @@ function resolveIndexedMaterialResources(options: {
 				materialAssetId: options.materialAssetId,
 				renderSurfaceAssetId,
 				paletteAssetId,
-				paletteId: paletteSelection.paletteId,
-				paletteSource: paletteSelection.source,
+				paletteId:
+					paletteView?.paletteId === null ||
+					paletteView?.paletteId === undefined
+						? paletteSelection.paletteId
+						: paletteView.paletteId,
+				paletteSource,
 			},
 		});
 		return null;
@@ -454,8 +502,12 @@ function resolveIndexedMaterialResources(options: {
 				materialAssetId: options.materialAssetId,
 				renderSurfaceAssetId,
 				paletteAssetId,
-				paletteId: paletteSelection.paletteId,
-				paletteSource: paletteSelection.source,
+				paletteId:
+					paletteView?.paletteId === null ||
+					paletteView?.paletteId === undefined
+						? paletteSelection.paletteId
+						: paletteView.paletteId,
+				paletteSource,
 				maxIndex: options.indexedTexture.maxIndex,
 				colorCount: paletteResource.colorCount,
 			},

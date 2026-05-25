@@ -156,8 +156,9 @@ whole plan as-is.
 Ready without broad refactor:
 
 - Phase 2 can fit in `static-renderables.ts` because setup/static expansion
-  already carries `materialAppearanceKey`, material slots, and
-  `materialSignature`.
+  now carries a typed `materialAppearanceContext`, material slots, and
+  `materialSignature`. `materialAppearanceKey` remains temporarily as a display
+  and compatibility field.
 - Phase 3 can fit as diagnostics plus focused sampler/texture-resource changes.
   The polygon render geometry path already emits UVs and material surface IDs,
   and the renderer already centralizes direct/indexed texture upload helpers.
@@ -223,11 +224,12 @@ following gaps should be addressed in order.
    UVs, but adding a small prepared geometry summary would make diagnostics and
    material planning cleaner. Prefer `uvBounds` plus `hasWrappingUvs` over
    re-scanning large arrays in several renderer paths.
-5. `material-resources.ts` currently accepts only `appearanceKey: string`.
-   Derived palette views need more context: base palette override,
-   subpalette replacements, texture swap identity, and stable prepared-source
-   signatures. Phase 0 should introduce this typed context before Phase 4 adds
-   palette derivation.
+5. `material-resources.ts` previously accepted only `appearanceKey: string`.
+   Phase 0 replaced this with a typed `MaterialAppearanceContext` carrying the
+   current key plus nullable selected-part, texture-swap, and palette-view
+   signatures. Derived palette views still need the real palette composition
+   data in Phase 4, but the renderer API no longer needs to change shape for
+   that work.
 6. Terrain data is currently flattened too early for material parity.
    `terrain-scene.ts` converts outdoor terrain into `PreparedTerrainMesh` and
    stores the quad pcode in a triangle field named `terrainType`. That is enough
@@ -261,6 +263,69 @@ Cleanup targets created by this dry run:
 
 Goal: create the seams needed for material parity work before adding more
 behavior.
+
+Progress: implemented.
+
+Implemented changes:
+
+- Added `material-appearance.ts` with renderer-local
+  `MaterialAppearanceContext` and source-agnostic appearance signatures.
+- Added `material-signatures.ts` for material asset IDs, prepared-state
+  signatures, palette resource keys, and material cache keys.
+- Added `material-plan.ts` for slot deduping, material-plan signatures,
+  geometry slot mapping, fallback slot insertion, and material array assembly.
+- Added `material-construction.ts` for material recipe interpretation,
+  direct/compressed/indexed texture selection, fallback diagnostics, and
+  placeholder material construction.
+- Reduced `material-resources.ts` to GPU resource lifetime ownership,
+  texture/palette/indexed texture caches, diagnostic de-duplication, and
+  orchestration through the focused helpers.
+- Threaded `MaterialAppearanceContext` through static renderables and
+  `WorldMaterialResourceCache.resolveMaterialPlan()`.
+- Added signature tests proving equivalent resolved appearance facts share cache
+  keys regardless of whether the future source is direct `ObjDesc` data or
+  clothing-table-generated `ObjDesc` data.
+
+Decisions and course corrections:
+
+- `MaterialAppearanceContext` describes resolved appearance facts only. It does
+  not include source labels such as "server", "direct ObjDesc", or
+  "ClothingTable".
+- `materialAppearanceKey` remains on `StaticRenderablePart` as a temporary
+  compatibility/display field while existing scene grouping and diagnostics are
+  migrated. The material resource path now consumes `materialAppearanceContext`.
+- The re-exports from `material-resources.ts` are a temporary import shim for
+  existing callers. New code should import material signatures and appearance
+  helpers from their focused modules.
+- Fallback material selection lives with material construction for now because
+  it depends on recipe/provenance/dependency diagnostics. If scalar parity
+  starts expanding this module too much, split fallback diagnostics and
+  placeholder material creation into a separate helper.
+
+Cleanup targets from Phase 0:
+
+- Remove the `material-resources.ts` re-export shim once nearby callers import
+  from `material-signatures.ts`, `material-plan.ts`, and
+  `material-appearance.ts` directly.
+- Collapse or remove `materialAppearanceKey` after Phase 2 proves setup
+  appearance routing can use `MaterialAppearanceContext` everywhere that needs
+  identity.
+- Add a small `MaterialAppearanceContext` builder for setup-appearance payloads
+  in Phase 2 instead of hand-authoring signatures at each call site.
+- Keep watching `material-construction.ts`; it is intentionally a split from
+  cache ownership, not a license to accumulate terrain or derived-palette logic.
+
+Refinements to future steps:
+
+- Phase 1 should add sampling policy as another typed input to plan/material
+  construction rather than adding optional bags to `resolveMaterialPlan()`.
+- Phase 2 should fill `selectedPartsSignature` from the resolved setup
+  appearance payload and use direct setup-appearance material slots before
+  touching palette derivation.
+- Phase 4 should fill `paletteViewSignature` and add a separate derived palette
+  resource/cache module. Base palette upload remains in `palette-resources.ts`.
+- Phase 5 should fill `textureSwapSignature` from resolved `ObjDesc` texture
+  changes and should reuse the same context builder that Phase 2 introduces.
 
 - Split material plan construction from material resource creation:
   - material plan input/output types;

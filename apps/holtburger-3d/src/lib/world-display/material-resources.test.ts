@@ -12,6 +12,7 @@ import {
 	WorldMaterialResourceCache,
 	formatMaterialAssetId,
 } from "./material-resources";
+import { createBaseMaterialAppearanceContext } from "./material-appearance";
 
 describe("world material resource cache", () => {
 	it("builds material plans from resolved surface slots", () => {
@@ -19,7 +20,7 @@ describe("world material resource cache", () => {
 		const materialAssetId = formatMaterialAssetId(0x08000001);
 		const plan = cache.resolveMaterialPlan({
 			slots: [{ slotIndex: 0, surfaceId: 0x08000001, materialAssetId }],
-			appearanceKey: "base",
+			appearance: createBaseMaterialAppearanceContext("base"),
 			preparedByAssetId: {
 				[materialAssetId]: createPreparedAsset(
 					materialAssetId,
@@ -29,7 +30,9 @@ describe("world material resource cache", () => {
 			fallbackColorKey: "part",
 		});
 
-		expect(plan.signature).toBe(`base|0:134217729:${materialAssetId}`);
+		expect(plan.signature).toBe(
+			`base|parts=base|textures=base|palette=base|0:134217729:${materialAssetId}`,
+		);
 		expect(plan.geometrySlots).toEqual([{ surfaceId: 1, materialIndex: 0 }]);
 		expect(plan.materials).toHaveLength(1);
 		expect(plan.materials[0]).toBeInstanceOf(MeshStandardMaterial);
@@ -42,7 +45,7 @@ describe("world material resource cache", () => {
 		const renderSurfaceAssetId = "render-surface/06000002";
 		const plan = cache.resolveMaterialPlan({
 			slots: [{ slotIndex: 0, surfaceId: 0x08000002, materialAssetId }],
-			appearanceKey: "base",
+			appearance: createBaseMaterialAppearanceContext("base"),
 			preparedByAssetId: {
 				[materialAssetId]: createPreparedAsset(
 					materialAssetId,
@@ -71,7 +74,7 @@ describe("world material resource cache", () => {
 		const renderSurfaceAssetId = "render-surface/06000005";
 		const plan = cache.resolveMaterialPlan({
 			slots: [{ slotIndex: 0, surfaceId: 0x08000005, materialAssetId }],
-			appearanceKey: "base",
+			appearance: createBaseMaterialAppearanceContext("base"),
 			preparedByAssetId: {
 				[materialAssetId]: createPreparedAsset(
 					materialAssetId,
@@ -100,7 +103,7 @@ describe("world material resource cache", () => {
 		);
 		const fallbackPlan = cache.resolveMaterialPlan({
 			slots: [{ slotIndex: 0, surfaceId: 0x08000002, materialAssetId }],
-			appearanceKey: "base",
+			appearance: createBaseMaterialAppearanceContext("base"),
 			preparedByAssetId: {
 				[materialAssetId]: recipe,
 			},
@@ -108,7 +111,7 @@ describe("world material resource cache", () => {
 		});
 		const texturedPlan = cache.resolveMaterialPlan({
 			slots: [{ slotIndex: 0, surfaceId: 0x08000002, materialAssetId }],
-			appearanceKey: "base",
+			appearance: createBaseMaterialAppearanceContext("base"),
 			preparedByAssetId: {
 				[materialAssetId]: recipe,
 				[renderSurfaceAssetId]: createPreparedAsset(
@@ -141,7 +144,7 @@ describe("world material resource cache", () => {
 
 		const plan = cache.resolveMaterialPlan({
 			slots: [{ slotIndex: 0, surfaceId: 0x08000006, materialAssetId }],
-			appearanceKey: "visible-cell",
+			appearance: createBaseMaterialAppearanceContext("visible-cell"),
 			preparedByAssetId: {
 				[materialAssetId]: createPreparedAsset(
 					materialAssetId,
@@ -181,7 +184,7 @@ describe("world material resource cache", () => {
 					materialAssetId: "material/08000003",
 				},
 			],
-			appearanceKey: "visible-cell",
+			appearance: createBaseMaterialAppearanceContext("visible-cell"),
 			preparedByAssetId: {},
 			fallbackColorKey: "visible-cell",
 		});
@@ -205,7 +208,7 @@ describe("world material resource cache", () => {
 
 		cache.resolveMaterialPlan({
 			slots: [{ slotIndex: 0, surfaceId: 0x08000004, materialAssetId }],
-			appearanceKey: "visible-cell",
+			appearance: createBaseMaterialAppearanceContext("visible-cell"),
 			preparedByAssetId: {
 				[materialAssetId]: createPreparedAsset(
 					materialAssetId,
@@ -288,7 +291,7 @@ describe("world material resource cache", () => {
 
 		const plan = cache.resolveMaterialPlan({
 			slots: [{ slotIndex: 0, surfaceId: 0x08000007, materialAssetId }],
-			appearanceKey: "visible-cell",
+			appearance: createBaseMaterialAppearanceContext("visible-cell"),
 			preparedByAssetId: {
 				[materialAssetId]: createPreparedAsset(
 					materialAssetId,
@@ -345,7 +348,7 @@ describe("world material resource cache", () => {
 
 		cache.resolveMaterialPlan({
 			slots: [{ slotIndex: 0, surfaceId: 0x08000008, materialAssetId }],
-			appearanceKey: "visible-cell",
+			appearance: createBaseMaterialAppearanceContext("visible-cell"),
 			preparedByAssetId: {
 				[materialAssetId]: createPreparedAsset(
 					materialAssetId,
@@ -393,7 +396,7 @@ describe("world material resource cache", () => {
 
 		cache.resolveMaterialPlan({
 			slots: [{ slotIndex: 0, surfaceId: 0x08000009, materialAssetId }],
-			appearanceKey: "visible-cell",
+			appearance: createBaseMaterialAppearanceContext("visible-cell"),
 			preparedByAssetId: {
 				[materialAssetId]: createPreparedAsset(
 					materialAssetId,

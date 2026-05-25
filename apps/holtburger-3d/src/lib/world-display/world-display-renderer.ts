@@ -66,6 +66,7 @@ import {
 	WorldMaterialResourceCache,
 	formatMaterialAssetId,
 } from "./material-resources";
+import { createBaseMaterialAppearanceContext } from "./material-appearance";
 import type { MaterialTextureCapabilities } from "./render-surface-texture-resources";
 import {
 	buildAcPlacementMatrix,
@@ -1567,7 +1568,7 @@ export function createWorldDisplayRenderer(
 			const gfxAssetId = firstPart.gfxObjAssetId;
 			const materialPlan = materialResourceCache.resolveMaterialPlan({
 				slots: firstPart.materialSlots,
-				appearanceKey: firstPart.materialAppearanceKey,
+				appearance: firstPart.materialAppearanceContext,
 				preparedByAssetId: assetState.preparedByAssetId,
 				fallbackColorKey: firstPart.debugColorKey,
 			});
@@ -1783,7 +1784,7 @@ export function createWorldDisplayRenderer(
 				surfaceId,
 				materialAssetId: formatMaterialAssetId(surfaceId),
 			})),
-			appearanceKey: "structured-interior",
+			appearance: createBaseMaterialAppearanceContext("structured-interior"),
 			preparedByAssetId: assetState.preparedByAssetId,
 			fallbackColorKey: cell.debugColorKey,
 		});

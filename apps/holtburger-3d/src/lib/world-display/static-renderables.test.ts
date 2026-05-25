@@ -151,13 +151,13 @@ describe("static renderables", () => {
 				[
 					{
 						polygonId: 10,
-						surfaceId: 1,
+						surfaceId: 0,
 						materialVariantSignature: "sampler=repeat",
 						firstVertex: 0,
 					},
 					{
 						polygonId: 11,
-						surfaceId: 1,
+						surfaceId: 0,
 						materialVariantSignature: "sampler=clamp",
 						firstVertex: 3,
 					},

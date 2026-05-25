@@ -23,6 +23,10 @@ import type {
 	PreparedRenderTexturePayload,
 } from "../assets/types";
 import { formatHex32 } from "../landblocks";
+import {
+	createPaletteTextureResource,
+	type PaletteTextureResource,
+} from "./palette-resources";
 import type { MaterialGeometrySlot } from "./static-renderable-geometry";
 
 export interface ResolvedMaterialSlot {
@@ -60,6 +64,10 @@ interface TextureResourceRecord {
 	texture: Texture;
 }
 
+interface PaletteResourceRecord {
+	resource: PaletteTextureResource;
+}
+
 const FALLBACK_MATERIAL_ASSET_ID = "material/fallback";
 const PIXEL_FORMAT_R8G8B8 = 0x14;
 const PIXEL_FORMAT_A8R8G8B8 = 0x15;
@@ -89,6 +97,7 @@ const LEGACY_OPACITY_BYTE_SCALE = 255;
 export class WorldMaterialResourceCache {
 	private readonly materialRecords = new Map<string, MaterialResourceRecord>();
 	private readonly textureRecords = new Map<string, TextureResourceRecord>();
+	private readonly paletteRecords = new Map<string, PaletteResourceRecord>();
 	private readonly reportedDiagnosticKeys = new Set<string>();
 
 	constructor(
@@ -148,6 +157,10 @@ export class WorldMaterialResourceCache {
 			record.texture.dispose();
 		}
 		this.textureRecords.clear();
+		for (const record of this.paletteRecords.values()) {
+			record.resource.texture.dispose();
+		}
+		this.paletteRecords.clear();
 	}
 
 	private getMaterial(options: {
@@ -198,6 +211,36 @@ export class WorldMaterialResourceCache {
 		return texture;
 	}
 
+	getPaletteResource(options: {
+		paletteAssetId: string;
+		paletteAsset: PreparedAssetRecord;
+	}): PaletteTextureResource | null {
+		if (options.paletteAsset.payload.kind !== "palette") {
+			this.reportOnce({
+				key: `palette-resource-kind-mismatch:${options.paletteAssetId}`,
+				message: `Cannot create palette resource because ${options.paletteAssetId} is not prepared as a palette.`,
+				detail: {
+					paletteAssetId: options.paletteAssetId,
+					preparedKind: options.paletteAsset.payload.kind,
+				},
+			});
+			return null;
+		}
+
+		const paletteKey = describePaletteResourceKey(
+			options.paletteAssetId,
+			options.paletteAsset,
+		);
+		const cached = this.paletteRecords.get(paletteKey);
+		if (cached) {
+			return cached.resource;
+		}
+
+		const resource = createPaletteTextureResource(options.paletteAsset.payload);
+		this.paletteRecords.set(paletteKey, { resource });
+		return resource;
+	}
+
 	private reportOnce(diagnostic: MaterialResourceDiagnostic): void {
 		if (
 			!this.reportDiagnostic ||
@@ -243,6 +286,20 @@ function describePreparedAssetSignature(
 	}
 
 	return `${assetId}:${asset.payload.kind}:${asset.preparedAt}:${asset.payload.provenance.errorCode ?? "ok"}`;
+}
+
+function describePaletteResourceKey(
+	assetId: string,
+	asset: PreparedAssetRecord,
+): string {
+	if (asset.payload.kind !== "palette") {
+		return describePreparedAssetSignature(assetId, asset);
+	}
+	return [
+		describePreparedAssetSignature(assetId, asset),
+		asset.payload.paletteId,
+		asset.payload.colorCount,
+	].join(":");
 }
 
 export function formatMaterialAssetId(surfaceId: number): string {

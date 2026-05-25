@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type {
 	PreparedAssetRecord,
 	PreparedMaterialRecipePayload,
+	PreparedPalettePayload,
 	PreparedRenderSurfacePayload,
 } from "../assets/types";
 import type { AssetErrorCode, AssetLookupRequestDto } from "../host/contracts";
@@ -223,6 +224,43 @@ describe("world material resource cache", () => {
 		]);
 		cache.dispose();
 	});
+
+	it("caches palette resources by asset id and prepared state", () => {
+		const cache = new WorldMaterialResourceCache();
+		const paletteAssetId = "palette/04000001";
+		const firstPalette = createPreparedAsset(
+			paletteAssetId,
+			createPalettePayload(0x04000001, [0xff112233, 0x80445566]),
+			"2026-05-23T00:00:00.000Z",
+		);
+		const secondPalette = createPreparedAsset(
+			paletteAssetId,
+			createPalettePayload(0x04000001, [0xff112233, 0x80778899]),
+			"2026-05-23T00:00:01.000Z",
+		);
+
+		const firstResource = cache.getPaletteResource({
+			paletteAssetId,
+			paletteAsset: firstPalette,
+		});
+		const cachedResource = cache.getPaletteResource({
+			paletteAssetId,
+			paletteAsset: firstPalette,
+		});
+		const refreshedResource = cache.getPaletteResource({
+			paletteAssetId,
+			paletteAsset: secondPalette,
+		});
+
+		expect(firstResource).not.toBeNull();
+		expect(cachedResource).toBe(firstResource);
+		expect(refreshedResource).not.toBe(firstResource);
+		expect(firstResource?.texture.image).toMatchObject({
+			width: 2,
+			height: 1,
+		});
+		cache.dispose();
+	});
 });
 
 function createSolidMaterialRecipe(
@@ -333,7 +371,11 @@ function createDxtRenderSurfacePayload(
 
 function createPreparedAsset(
 	assetId: string,
-	payload: PreparedMaterialRecipePayload | PreparedRenderSurfacePayload,
+	payload:
+		| PreparedMaterialRecipePayload
+		| PreparedRenderSurfacePayload
+		| PreparedPalettePayload,
+	preparedAt = "2026-05-23T00:00:00.000Z",
 ): PreparedAssetRecord {
 	const request: AssetLookupRequestDto = {
 		requestId: assetId,
@@ -349,6 +391,26 @@ function createPreparedAsset(
 			payload,
 		},
 		payload,
-		preparedAt: "2026-05-23T00:00:00.000Z",
+		preparedAt,
+	};
+}
+
+function createPalettePayload(
+	paletteId: number,
+	colorsArgb: number[],
+): PreparedPalettePayload {
+	return {
+		kind: "palette",
+		sourceAssetKind: "palette",
+		residencyKind: "unknown",
+		provenance: {
+			source: "repo-local-hba",
+			sourceAssetKind: "palette",
+			errorCode: null,
+			detail: null,
+		},
+		paletteId,
+		colorCount: colorsArgb.length,
+		colorsArgb: Uint32Array.from(colorsArgb),
 	};
 }

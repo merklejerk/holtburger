@@ -1063,6 +1063,18 @@ Implemented changes:
   helper struct. This was needed to keep `cargo clippy -D warnings` green after
   the toolchain flagged the existing helper as too argument-heavy.
 
+Post-implementation course correction:
+
+- Treat the `setup-appearance/{setupDid}/obj-desc/...` route as rejected debt,
+  not a bridge to keep. `ObjDesc` is override state, not a true source asset.
+  Encoding every override as a normal app asset route risks unbounded prepared
+  asset cardinality once live runtime objects start producing unique
+  appearances.
+- Keep the proven content resolver contract (`Setup + MaterialAppearanceInput
+  -> ResolvedSetupAppearance`) and the renderer appearance signatures. Replace
+  the app-local obj-desc asset route with a layered derived appearance cache in
+  Phase 5.5 before Phase 6 grows more producers.
+
 Verification:
 
 - `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml` passes
@@ -1080,32 +1092,31 @@ Verification:
 
 Decisions and course corrections:
 
-- The canonical appearance identity is now the setup-appearance asset ID, not a
-  renderer-only side channel. Runtime/server objects should request the
-  deterministic variant ID once they can serialize their `ObjDesc`.
-- The variant ID intentionally preserves legacy DID classes and raw change
-  facts rather than hashing or base64-encoding the `ObjDesc`. That keeps debug
-  traces inspectable while still being deterministic enough for cache keys.
+- The canonical content identity is `Setup + normalized ObjDesc`, not a string
+  asset ID. Phase 5 proved the resolver can carry those facts, but Phase 5.5
+  must remove the asset-route representation for override variants.
+- The variant ID parser intentionally preserved legacy DID classes and raw
+  change facts, which made the proof debuggable. That benefit does not justify
+  keeping ObjDesc variants in the ordinary prepared-asset namespace.
 - Texture swap identity belongs in `MaterialAppearanceContext`, alongside
   selected part and palette-view identity. It does not belong in
   `materialVariantSignature`, which remains reserved for immutable per-slot
   render behavior such as sampler policy.
-- The current route is a data bridge, not a clothing-system implementation.
-  `ClothingTable` should later produce the same `ObjDesc` input and reuse this
-  path.
-- No immediate interim phase is required before Phase 6. The remaining gap is
-  a producer for live runtime `ObjDesc` values, not a renderer/content bridge.
+- The current route is a proof artifact, not a clothing-system implementation.
+  `ClothingTable` should later produce the same `ObjDesc` input and feed a
+  layered appearance resolver/cache, not asset-route strings.
+- Add an immediate Phase 5.5 before Phase 6. Without it, Phase 6 would risk
+  baking the wrong cache ownership model into clothing-generated appearances.
 
 Cleanup targets from Phase 5:
 
-- Add a small shared setup-appearance asset ID formatter when the first runtime
-  object producer lands. Today only the parser is needed; duplicating string
-  assembly in future runtime code would create drift risk.
-- Consider tightening the variant grammar if runtime `ObjDesc` values can
-  contain duplicate texture-change records for the same part/old texture. The
-  resolver currently preserves order and content; the asset ID remains valid
-  but duplicate semantics should be proven against the client before relying on
-  them.
+- Remove app/host support for `setup-appearance/{setupDid}/obj-desc/...` in
+  Phase 5.5. Do not add a formatter for that route.
+- Preserve tests that prove `Setup + ObjDesc` resolution, but move app tests
+  away from route-shaped ObjDesc variants.
+- Prove and document normalized ObjDesc key semantics, especially duplicate
+  texture-change records for the same part/old texture, before using the key in
+  a layered cache.
 - Consolidate material/palette asset ID formatting helpers once Phase 6 starts
   emitting clothing-generated appearance requests.
 - Keep the clippy cleanup in `landblock_scene_assets.rs` as a small quality
@@ -1121,17 +1132,18 @@ Legacy shims:
 - Browser DTOs still accept older setup-appearance payloads with empty
   `textureChanges`, `paletteId`, or `subPalettes`; empty facts normalize to
   `textures=base` and `palette=base`.
-- App-local setup-appearance variant IDs are currently parser-only on the Rust
-  side. A future runtime producer should use a single formatter rather than
-  hand-building IDs.
+- App-local setup-appearance variant IDs are temporary debt and should not gain
+  new producers.
 
 Refinements to future steps:
 
+- Phase 5.5 must replace ObjDesc variant asset routes with a layered derived
+  appearance cache before Phase 6 starts producing clothing-generated
+  appearances.
 - Phase 6 should focus on `ClothingTable -> ObjDesc` generation in
-  `holtburger-content`, then feed the Phase 5 setup-appearance variant route.
-  Do not introduce renderer-local clothing state.
-- Phase 6 should also add the shared variant formatter mentioned above if it
-  becomes the first code path to author non-base setup-appearance requests.
+  `holtburger-content`, then feed the Phase 5.5 derived appearance resolver.
+  Do not introduce renderer-local clothing state or route-shaped ObjDesc
+  assets.
 - Texture animation remains distinct from texture swaps. A later animation
   phase should drive per-instance/per-part UV offsets and should not mutate
   setup-appearance asset identity unless the selected part or texture map facts
@@ -1141,6 +1153,66 @@ Refinements to future steps:
 
 Expected effect: appearance changes should select the right mesh parts,
 textures, and palettes without mutating base DAT material definitions.
+
+### Phase 5.5: Layered Runtime Appearance Cache
+
+Goal: remove `ObjDesc` variants from the ordinary app asset namespace and cache
+resolved appearance overlays as bounded derived state instead.
+
+Rationale:
+
+- `ObjDesc` is override/input state, not a true asset. Treating every unique
+  override as `setup-appearance/{setupDid}/obj-desc/...` makes runtime
+  appearance cardinality look like source asset cardinality, which is wrong for
+  live players, equipment, corpses, and other high-churn objects.
+- We do not need a full visible-object render model to fix the ownership
+  boundary. A layered derived cache with passive eviction mitigates unbounded
+  growth now and can later be connected to explicit object visibility/lifetime
+  ownership.
+
+Implementation targets:
+
+- Remove app/host parsing and worker/planner treatment for
+  `setup-appearance/{setupDid}/obj-desc/...`.
+- Keep `setup-appearance/{setupDid}` only as the base DAT/static setup
+  appearance asset route.
+- Remove production `dependency-manifest` support from the frontend asset
+  contracts, worker preparation path, prepared payload union, and dependency
+  extraction. It is a synthetic graph-test helper, not a meaningful runtime
+  asset. Rewrite tests to use real payload kinds or local fixture-only helpers;
+  test convenience should not preserve a fake production asset route.
+- Add a derived runtime appearance resolver/memo keyed structurally by
+  `(setupDid, normalized ObjDesc)`, not by string asset ID.
+- The memo value should be the small resolved appearance facts needed by the
+  renderer and dependency planner:
+  selected part `GfxObj` asset IDs, material asset IDs, palette asset IDs,
+  texture changes, anim-part changes, palette view facts, and appearance
+  signatures.
+- Keep true assets in the existing prepared asset cache: setup models, gfx
+  objs, material recipes, render textures, render surfaces, and palettes.
+- Use passive bounded eviction for the derived appearance memo: at minimum max
+  entries plus LRU; add max age if it simplifies diagnostics or testing.
+- Add diagnostics for derived appearance memo size, hits, misses, evictions,
+  and the number of distinct normalized ObjDesc keys.
+- Preserve Rust/content resolver tests for `Setup + ObjDesc`; update app tests
+  so ObjDesc overrides exercise the derived memo instead of route-shaped
+  prepared assets.
+
+Decisions:
+
+- Do not introduce reference counting in this phase. Passive LRU is enough
+  until a runtime-object render model exists.
+- Do not add a shared formatter for obj-desc setup-appearance asset IDs. That
+  route should disappear rather than become easier to produce.
+- Do not retain `dependency-manifest` for tests. Tests are low-priority
+  consumers and should adapt to production shapes.
+- Do not move clothing-specific concepts into the renderer. The derived memo
+  consumes normalized ObjDesc inputs regardless of whether they came from the
+  server, clothing tables, or tests.
+
+Expected effect: runtime and clothing-generated appearances can reuse resolved
+appearance facts without polluting the true asset cache or requiring immediate
+object-level lifetime ownership.
 
 ### Phase 6: ClothingTable Appearance Generation
 

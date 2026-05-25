@@ -277,7 +277,7 @@ describe("world material resource cache", () => {
 		cache.dispose();
 	});
 
-	it("reports indexed palette readiness instead of unsupported render surface", () => {
+	it("creates indexed materials instead of unsupported render surface placeholders", () => {
 		const diagnostics: string[] = [];
 		const materialAssetId = formatMaterialAssetId(0x08000007);
 		const renderSurfaceAssetId = "render-surface/06000007";
@@ -314,13 +314,16 @@ describe("world material resource cache", () => {
 			fallbackColorKey: "visible-cell",
 		});
 
-		expect(diagnostics).toEqual([
-			`indexed-texture-shader-pending:${materialAssetId}:${renderSurfaceAssetId}:${paletteAssetId}`,
-		]);
+		expect(diagnostics).toEqual([]);
 		expect(
 			diagnostics.some((key) => key.startsWith("unsupported-render-surface")),
 		).toBe(false);
-		expect((plan.materials[0] as MeshStandardMaterial).map).toBeNull();
+		const material = plan.materials[0] as MeshStandardMaterial;
+		expect(material.map).toBeInstanceOf(DataTexture);
+		expect(material.userData.holtburgerIndexedMaterial).toMatchObject({
+			format: "index16",
+			paletteColorCount: 3,
+		});
 		cache.dispose();
 	});
 

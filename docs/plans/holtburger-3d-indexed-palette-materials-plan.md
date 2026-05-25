@@ -428,9 +428,9 @@ Decisions:
   data.
 - CPU max-index scanning is part of resource creation diagnostics. It is bounded
   to already prepared source bytes and does not bake indexed textures into RGBA.
-- Phase 3 intentionally keeps rendering as a placeholder. The placeholder reason
-  is now explicit (`indexed-texture-shader-pending`) when index and palette
-  resources are valid.
+- Phase 3 intentionally kept rendering as a placeholder. Phase 4 replaces the
+  temporary `indexed-texture-shader-pending` state with real indexed material
+  creation when index and palette resources are valid.
 
 Course corrections:
 
@@ -438,23 +438,23 @@ Course corrections:
   listed in Phase 5 because indexed resource validation cannot produce useful
   diagnostics without knowing whether the base palette comes from the material
   recipe or render surface default.
-- `WorldMaterialResourceCache.getPaletteResource()` now has its first real
-  consumer in indexed diagnostics, but the shader path still needs to thread the
-  selected palette and index resource into material creation.
+- `WorldMaterialResourceCache.getPaletteResource()` has its first real consumer
+  in indexed diagnostics and material creation.
 
 Cleanup targets:
 
-- Before Phase 4, split direct-color and compressed texture creation out of
-  `material-resources.ts` if shader patching would make the file harder to
-  review. Indexed-specific code is already isolated.
-- Phase 4 should replace `indexed-texture-shader-pending` with real material
-  creation and keep the diagnostic only for unsupported shader capability
-  failures.
-- Phase 4 should add a material cache signature that includes the selected
-  indexed render surface, palette asset, indexed resource format, and prepared
-  resource state.
+- Direct-color and compressed texture creation should still be split out of
+  `material-resources.ts` before broad material parity work. Phase 4 isolated
+  shader code instead of doing that larger cleanup first.
+- `indexed-texture-shader-pending` has been removed for valid resources. Future
+  shader capability failures should use a different explicit diagnostic.
+- Material cache signatures now include render-surface and palette prepared
+  resource details such as format, dimensions, source byte length, default
+  palette, palette ID, and color count.
 
 ## Phase 4: Indexed Material Shader
+
+Status: complete as of 2026-05-25.
 
 Add a material path that samples an index texture and palette texture.
 
@@ -492,9 +492,69 @@ Implementation cleanup before this phase:
   separate helpers/modules. `material-resources.ts` should orchestrate resource
   selection, not own every pixel-format implementation.
 
+Implemented changes:
+
+- Added `apps/holtburger-3d/src/lib/world-display/indexed-materials.ts` to keep
+  indexed shader patching isolated from material resource selection.
+- Added a `MeshStandardMaterial` path for valid indexed resources. It uses the
+  indexed texture as the material map to get Three's standard UV plumbing, then
+  replaces the map fragment with palette lookup logic.
+- The fragment shader reconstructs P8 indices from the red channel and Index16
+  indices from little-endian byte-packed red/green channels.
+- The fragment shader samples the one-row palette texture using
+  `(paletteIndex + 0.5) / paletteColorCount`.
+- `SurfaceType.Base1ClipMap` (`0x4`) discards indices below 8 in the shader.
+- Indexed materials keep standard lighting, flat shading, roughness/metalness,
+  and legacy translucency opacity behavior from the existing material path.
+- Valid indexed materials no longer emit `indexed-texture-shader-pending` or
+  fall back to placeholder colors.
+
+Validation added:
+
+- Unit coverage proving indexed material creation wires a `MeshStandardMaterial`
+  with indexed texture map metadata.
+- Unit coverage proving the shader patch injects palette uniforms, Index16
+  reconstruction, palette texture sampling, and clip discard behavior.
+- Unit coverage for `Base1ClipMap` flag detection.
+- Material resource coverage proving valid indexed materials produce a real
+  mapped material and no generic unsupported-format diagnostic.
+
+Decisions:
+
+- Stayed with `MeshStandardMaterial.onBeforeCompile` instead of a custom
+  `ShaderMaterial`. This preserves Three's standard lighting path and keeps the
+  indexed behavior scoped to diffuse map sampling.
+- Indexed materials are marked transparent. Palette alpha and clipmap discard
+  can affect output, and this is the safer first visual parity choice. Sorting
+  cost can be revisited after visual validation.
+- The shader uses normalized unsigned-byte texture samples and rounds back to
+  bytes with `floor(channel * 255.0 + 0.5)`. This matches the Phase 3 byte-packed
+  resource representation without requiring integer samplers.
+- The shader patch uses a local minimal shader interface because the installed
+  Three package does not export a `Shader` type.
+
+Course corrections:
+
+- The direct-color/compressed texture split was deferred. Shader code landed in
+  a separate module, which kept the Phase 4 diff focused without moving stable
+  direct-color and DXT behavior.
+- Phase 5's base palette threading is effectively complete for the foundation
+  path because Phase 4 consumes the selected palette resource.
+
+Cleanup targets:
+
+- Run browser smoke validation on real `Index16` samples and compare against
+  ACViewer where possible. Unit tests verify shader wiring, not final visual
+  parity.
+- If transparent indexed materials cause avoidable sorting artifacts, refine
+  transparency flags using `SurfaceType` and palette alpha observations from
+  real content.
+- Consider extracting direct-color and compressed texture helpers before the
+  legacy material parity push.
+
 ## Phase 5: Base Palette Selection Semantics
 
-Status: mostly complete as part of Phase 3 for base indexed materials.
+Status: complete for foundation base indexed materials as of Phase 4.
 
 Resolve which palette an indexed material should use.
 
@@ -516,8 +576,6 @@ Do not collapse these into `unsupported-render-surface`.
 
 Remaining work:
 
-- Keep this foundation precedence when Phase 4 threads selected palette
-  resources into the shader material.
 - Extend beyond this base precedence only in the later legacy material parity
   push, where derived palette views and subpalette replacement are introduced.
 
@@ -566,11 +624,9 @@ Manual visual validation:
 
 ## Suggested Implementation Order
 
-1. Split material resource helpers so direct-color, compressed, indexed, and
-   palette resources are independently testable.
-2. `P8` shader path.
-3. `Index16` byte-packed shader path.
-4. Debug panel indexed-material summary.
+1. Debug panel indexed-material summary.
+2. Browser smoke validation against real P8/Index16 content.
+3. Split material resource helpers before broader material parity work.
 
 This order keeps the contract changes reviewable before shader work, and it
 lets us verify data availability before changing broader render grouping or

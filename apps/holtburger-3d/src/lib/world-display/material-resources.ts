@@ -24,6 +24,12 @@ import type {
 } from "../assets/types";
 import { formatHex32 } from "../landblocks";
 import {
+	createIndexedTextureResource,
+	isIndexedTextureFormat,
+	selectIndexedPaletteAssetId,
+	type IndexedTextureResource,
+} from "./indexed-texture-resources";
+import {
 	createPaletteTextureResource,
 	type PaletteTextureResource,
 } from "./palette-resources";
@@ -68,6 +74,10 @@ interface PaletteResourceRecord {
 	resource: PaletteTextureResource;
 }
 
+interface IndexedTextureResourceRecord {
+	resource: IndexedTextureResource;
+}
+
 const FALLBACK_MATERIAL_ASSET_ID = "material/fallback";
 const PIXEL_FORMAT_R8G8B8 = 0x14;
 const PIXEL_FORMAT_A8R8G8B8 = 0x15;
@@ -98,6 +108,10 @@ export class WorldMaterialResourceCache {
 	private readonly materialRecords = new Map<string, MaterialResourceRecord>();
 	private readonly textureRecords = new Map<string, TextureResourceRecord>();
 	private readonly paletteRecords = new Map<string, PaletteResourceRecord>();
+	private readonly indexedTextureRecords = new Map<
+		string,
+		IndexedTextureResourceRecord
+	>();
 	private readonly reportedDiagnosticKeys = new Set<string>();
 
 	constructor(
@@ -161,6 +175,10 @@ export class WorldMaterialResourceCache {
 			record.resource.texture.dispose();
 		}
 		this.paletteRecords.clear();
+		for (const record of this.indexedTextureRecords.values()) {
+			record.resource.texture.dispose();
+		}
+		this.indexedTextureRecords.clear();
 	}
 
 	private getMaterial(options: {
@@ -185,6 +203,10 @@ export class WorldMaterialResourceCache {
 		const material = createMaterial({
 			...options,
 			resolveTexture: (renderSurface) => this.getTexture({ renderSurface }),
+			resolveIndexedTexture: (renderSurface) =>
+				this.getIndexedTextureResource({ renderSurface }),
+			resolvePaletteResource: (paletteAssetId, paletteAsset) =>
+				this.getPaletteResource({ paletteAssetId, paletteAsset }),
 			reportDiagnostic: (diagnostic) => this.reportOnce(diagnostic),
 		});
 		this.materialRecords.set(materialKey, { material });
@@ -238,6 +260,23 @@ export class WorldMaterialResourceCache {
 
 		const resource = createPaletteTextureResource(options.paletteAsset.payload);
 		this.paletteRecords.set(paletteKey, { resource });
+		return resource;
+	}
+
+	getIndexedTextureResource(options: {
+		renderSurface: PreparedRenderSurfacePayload;
+	}): IndexedTextureResource | null {
+		const textureKey = describeRenderSurfaceDecodeKey(options.renderSurface);
+		const cached = this.indexedTextureRecords.get(textureKey);
+		if (cached) {
+			return cached.resource;
+		}
+
+		if (!isIndexedTextureFormat(options.renderSurface.formatRaw)) {
+			return null;
+		}
+		const resource = createIndexedTextureResource(options.renderSurface);
+		this.indexedTextureRecords.set(textureKey, { resource });
 		return resource;
 	}
 
@@ -325,6 +364,13 @@ function createMaterial(options: {
 	resolveTexture: (
 		renderSurface: PreparedRenderSurfacePayload,
 	) => Texture | null;
+	resolveIndexedTexture: (
+		renderSurface: PreparedRenderSurfacePayload,
+	) => IndexedTextureResource | null;
+	resolvePaletteResource: (
+		paletteAssetId: string,
+		paletteAsset: PreparedAssetRecord,
+	) => PaletteTextureResource | null;
 	reportDiagnostic: MaterialResourceDiagnosticHandler;
 }): Material {
 	const recipeAsset = options.preparedByAssetId[options.materialAssetId];
@@ -380,6 +426,10 @@ function createMaterial(options: {
 		recipe,
 		options.preparedByAssetId,
 	);
+	const indexedRenderSurface = firstPreparedIndexedRenderSurface(
+		recipe,
+		options.preparedByAssetId,
+	);
 	const palette = firstPreparedPalette(recipe, options.preparedByAssetId);
 	const texture = renderSurface ? options.resolveTexture(renderSurface) : null;
 	if (texture && renderSurface) {
@@ -392,6 +442,17 @@ function createMaterial(options: {
 			roughness: 0.88,
 			transparent: opacity < 1 || hasSourceAlpha(renderSurface.formatRaw),
 			opacity,
+		});
+	}
+	if (indexedRenderSurface) {
+		reportIndexedTextureFallbackDiagnostics({
+			recipe,
+			materialAssetId: options.materialAssetId,
+			preparedByAssetId: options.preparedByAssetId,
+			renderSurface: indexedRenderSurface,
+			indexedTexture: options.resolveIndexedTexture(indexedRenderSurface),
+			resolvePaletteResource: options.resolvePaletteResource,
+			reportDiagnostic: options.reportDiagnostic,
 		});
 	}
 
@@ -467,6 +528,9 @@ function reportTextureFallbackDiagnostics(options: {
 			if (isSupportedCompressedFormat(asset.payload.formatRaw)) {
 				continue;
 			}
+			if (isIndexedTextureFormat(asset.payload.formatRaw)) {
+				continue;
+			}
 			options.reportDiagnostic({
 				key: `unsupported-render-surface:${options.materialAssetId}:${assetId}:${asset.payload.formatRaw}`,
 				message: `Using placeholder material because ${assetId} uses unsupported format ${asset.payload.format}.`,
@@ -528,6 +592,133 @@ function reportTextureFallbackDiagnostics(options: {
 	}
 }
 
+function reportIndexedTextureFallbackDiagnostics(options: {
+	recipe: PreparedMaterialRecipePayload;
+	materialAssetId: string;
+	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>;
+	renderSurface: PreparedRenderSurfacePayload;
+	indexedTexture: IndexedTextureResource | null;
+	resolvePaletteResource: (
+		paletteAssetId: string,
+		paletteAsset: PreparedAssetRecord,
+	) => PaletteTextureResource | null;
+	reportDiagnostic: MaterialResourceDiagnosticHandler;
+}): void {
+	const renderSurfaceAssetId = formatRenderSurfaceAssetId(
+		options.renderSurface.renderSurfaceId,
+	);
+	if (!options.indexedTexture) {
+		options.reportDiagnostic({
+			key: `indexed-texture-upload-failed:${options.materialAssetId}:${renderSurfaceAssetId}`,
+			message: `Using placeholder material because ${renderSurfaceAssetId} could not be prepared as an indexed texture.`,
+			detail: {
+				materialAssetId: options.materialAssetId,
+				renderSurfaceAssetId,
+				format: options.renderSurface.format,
+				formatRaw: options.renderSurface.formatRaw,
+			},
+		});
+		return;
+	}
+
+	const paletteAssetId = selectIndexedPaletteAssetId(
+		options.recipe,
+		options.renderSurface,
+	);
+	if (!paletteAssetId) {
+		options.reportDiagnostic({
+			key: `indexed-texture-palette-missing:${options.materialAssetId}:${renderSurfaceAssetId}`,
+			message: `Using placeholder material because ${renderSurfaceAssetId} is indexed but no palette ID could be resolved.`,
+			detail: {
+				materialAssetId: options.materialAssetId,
+				renderSurfaceAssetId,
+				format: options.renderSurface.format,
+				formatRaw: options.renderSurface.formatRaw,
+				defaultPaletteId: options.renderSurface.defaultPaletteId,
+				recipePaletteId:
+					options.recipe.source.kind === "texture"
+						? options.recipe.source.paletteId
+						: null,
+			},
+		});
+		return;
+	}
+
+	const paletteAsset = options.preparedByAssetId[paletteAssetId];
+	if (paletteAsset?.payload.kind !== "palette") {
+		options.reportDiagnostic({
+			key: `indexed-texture-palette-unprepared:${options.materialAssetId}:${renderSurfaceAssetId}:${paletteAssetId}`,
+			message: `Using placeholder material because ${renderSurfaceAssetId} requires palette ${paletteAssetId}, but it is not prepared.`,
+			detail: {
+				materialAssetId: options.materialAssetId,
+				renderSurfaceAssetId,
+				paletteAssetId,
+				preparedKind: paletteAsset?.payload.kind ?? null,
+			},
+		});
+		return;
+	}
+
+	if (paletteAsset.payload.colorCount === 0) {
+		options.reportDiagnostic({
+			key: `indexed-texture-palette-empty:${options.materialAssetId}:${renderSurfaceAssetId}:${paletteAssetId}`,
+			message: `Using placeholder material because ${renderSurfaceAssetId} requires empty palette ${paletteAssetId}.`,
+			detail: {
+				materialAssetId: options.materialAssetId,
+				renderSurfaceAssetId,
+				paletteAssetId,
+				colorCount: paletteAsset.payload.colorCount,
+			},
+		});
+		return;
+	}
+
+	const paletteResource = options.resolvePaletteResource(
+		paletteAssetId,
+		paletteAsset,
+	);
+	if (!paletteResource) {
+		options.reportDiagnostic({
+			key: `indexed-texture-palette-resource-failed:${options.materialAssetId}:${renderSurfaceAssetId}:${paletteAssetId}`,
+			message: `Using placeholder material because palette ${paletteAssetId} could not be prepared for ${renderSurfaceAssetId}.`,
+			detail: {
+				materialAssetId: options.materialAssetId,
+				renderSurfaceAssetId,
+				paletteAssetId,
+			},
+		});
+		return;
+	}
+
+	if (options.indexedTexture.maxIndex >= paletteResource.colorCount) {
+		options.reportDiagnostic({
+			key: `indexed-texture-index-out-of-range:${options.materialAssetId}:${renderSurfaceAssetId}:${paletteAssetId}`,
+			message: `Using placeholder material because ${renderSurfaceAssetId} references palette index ${options.indexedTexture.maxIndex}, but ${paletteAssetId} has ${paletteResource.colorCount} colors.`,
+			detail: {
+				materialAssetId: options.materialAssetId,
+				renderSurfaceAssetId,
+				paletteAssetId,
+				maxIndex: options.indexedTexture.maxIndex,
+				colorCount: paletteResource.colorCount,
+			},
+		});
+		return;
+	}
+
+	options.reportDiagnostic({
+		key: `indexed-texture-shader-pending:${options.materialAssetId}:${renderSurfaceAssetId}:${paletteAssetId}`,
+		message: `Using placeholder material because ${renderSurfaceAssetId} has valid indexed texture resources, but indexed shader sampling is not implemented yet.`,
+		detail: {
+			materialAssetId: options.materialAssetId,
+			renderSurfaceAssetId,
+			paletteAssetId,
+			format: options.indexedTexture.format,
+			maxIndex: options.indexedTexture.maxIndex,
+			colorCount: paletteResource.colorCount,
+		},
+	});
+}
+
 function countPreparedAssetsByKind(
 	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>,
 ): Record<string, number> {
@@ -579,6 +770,23 @@ function firstTextureUploadCandidateRenderSurface(
 			asset?.payload.kind === "render-surface" &&
 			(isSupportedDirectColorFormat(asset.payload.formatRaw) ||
 				isSupportedCompressedFormat(asset.payload.formatRaw))
+		) {
+			return asset.payload;
+		}
+	}
+	return null;
+}
+
+function firstPreparedIndexedRenderSurface(
+	recipe: PreparedMaterialRecipePayload,
+	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>,
+): PreparedRenderSurfacePayload | null {
+	const assetIds = textureCandidateRenderSurfaceAssetIds(recipe);
+	for (const assetId of assetIds) {
+		const asset = preparedByAssetId[assetId];
+		if (
+			asset?.payload.kind === "render-surface" &&
+			isIndexedTextureFormat(asset.payload.formatRaw)
 		) {
 			return asset.payload;
 		}

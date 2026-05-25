@@ -327,6 +327,8 @@ Cleanup targets:
 
 ## Phase 3: Indexed Surface Resource Cache
 
+Status: complete as of 2026-05-25.
+
 Add indexed surface classification, validation, and index texture creation for
 indexed `RenderSurface` formats.
 
@@ -381,6 +383,77 @@ Refinement after Phase 2:
 - If max-index scanning is added, keep it CPU-side and bounded to prepared
   source bytes. This is diagnostic validation, not RGBA baking.
 
+Implemented changes:
+
+- Added `apps/holtburger-3d/src/lib/world-display/indexed-texture-resources.ts`
+  for indexed pixel-format classification, source validation, palette selection,
+  max-index scanning, and index texture resource creation.
+- Added `WorldMaterialResourceCache.getIndexedTextureResource()` so indexed
+  texture resources are cached and disposed with other renderer material
+  resources.
+- Routed indexed material fallback diagnostics through the indexed resource and
+  palette resource caches. Valid indexed data now reports the temporary
+  `indexed-texture-shader-pending` state instead of generic
+  `unsupported-render-surface`.
+- Replaced generic unsupported-format diagnostics for `PFID_P8` and
+  `PFID_INDEX16` with indexed-specific diagnostics:
+  `indexed-texture-palette-missing`,
+  `indexed-texture-palette-unprepared`, `indexed-texture-palette-empty`,
+  `indexed-texture-index-out-of-range`,
+  `indexed-texture-palette-resource-failed`,
+  `indexed-texture-upload-failed`, and `indexed-texture-shader-pending`.
+
+Validation added:
+
+- Unit coverage for `PFID_P8` and `PFID_INDEX16` classification.
+- Unit coverage for P8 upload as single-channel `RedFormat`,
+  `UnsignedByteType`, `NoColorSpace`, nearest-filtered `DataTexture`.
+- Unit coverage for Index16 upload as little-endian byte-packed `RGFormat`,
+  `UnsignedByteType`, `NoColorSpace`, nearest-filtered `DataTexture`.
+- Unit coverage for indexed source byte-length validation.
+- Unit coverage for palette selection precedence:
+  `CSurface.orig_palette_id` before `RenderSurface.defaultPaletteId`.
+- Unit coverage for CPU max-index scans.
+- Material cache coverage proving indexed resources are cached and indexed
+  materials no longer report generic unsupported render-surface diagnostics.
+- Material cache coverage for palette index range diagnostics.
+
+Decisions:
+
+- P8 uses a one-channel unsigned-byte texture (`RedFormat`). Index16 uses
+  two-channel byte packing (`RGFormat`) with low and high source bytes preserved
+  in little-endian order. This avoids depending on integer texture sampler
+  support before shader work.
+- Indexed textures use `NoColorSpace` because they are index data, not color
+  data.
+- CPU max-index scanning is part of resource creation diagnostics. It is bounded
+  to already prepared source bytes and does not bake indexed textures into RGBA.
+- Phase 3 intentionally keeps rendering as a placeholder. The placeholder reason
+  is now explicit (`indexed-texture-shader-pending`) when index and palette
+  resources are valid.
+
+Course corrections:
+
+- Phase 3 partially implements the palette-selection semantics originally
+  listed in Phase 5 because indexed resource validation cannot produce useful
+  diagnostics without knowing whether the base palette comes from the material
+  recipe or render surface default.
+- `WorldMaterialResourceCache.getPaletteResource()` now has its first real
+  consumer in indexed diagnostics, but the shader path still needs to thread the
+  selected palette and index resource into material creation.
+
+Cleanup targets:
+
+- Before Phase 4, split direct-color and compressed texture creation out of
+  `material-resources.ts` if shader patching would make the file harder to
+  review. Indexed-specific code is already isolated.
+- Phase 4 should replace `indexed-texture-shader-pending` with real material
+  creation and keep the diagnostic only for unsupported shader capability
+  failures.
+- Phase 4 should add a material cache signature that includes the selected
+  indexed render surface, palette asset, indexed resource format, and prepared
+  resource state.
+
 ## Phase 4: Indexed Material Shader
 
 Add a material path that samples an index texture and palette texture.
@@ -421,6 +494,8 @@ Implementation cleanup before this phase:
 
 ## Phase 5: Base Palette Selection Semantics
 
+Status: mostly complete as part of Phase 3 for base indexed materials.
+
 Resolve which palette an indexed material should use.
 
 Foundation precedence:
@@ -438,6 +513,13 @@ Diagnostics:
 - `indexed-texture-index-out-of-range`: source indices exceed palette length.
 
 Do not collapse these into `unsupported-render-surface`.
+
+Remaining work:
+
+- Keep this foundation precedence when Phase 4 threads selected palette
+  resources into the shader material.
+- Extend beyond this base precedence only in the later legacy material parity
+  push, where derived palette views and subpalette replacement are introduced.
 
 ## Phase 6: Diagnostics And Debug UI
 
@@ -484,14 +566,11 @@ Manual visual validation:
 
 ## Suggested Implementation Order
 
-1. Palette GPU byte conversion helpers and palette resource cache.
-2. Indexed surface classification, palette selection diagnostics, and
-   unsupported-format diagnostic replacement.
-3. Split material resource helpers so direct-color, compressed, indexed, and
+1. Split material resource helpers so direct-color, compressed, indexed, and
    palette resources are independently testable.
-4. `P8` shader path.
-5. `Index16` byte-packed shader path.
-6. Debug panel indexed-material summary.
+2. `P8` shader path.
+3. `Index16` byte-packed shader path.
+4. Debug panel indexed-material summary.
 
 This order keeps the contract changes reviewable before shader work, and it
 lets us verify data availability before changing broader render grouping or

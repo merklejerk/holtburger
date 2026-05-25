@@ -229,6 +229,8 @@ Cleanup targets:
 
 ## Phase 2: Palette Resource Cache
 
+Status: complete as of 2026-05-25.
+
 Add palette GPU conversion helpers and a renderer-local palette resource cache.
 
 Likely home:
@@ -270,6 +272,58 @@ Refinement after Phase 1:
   parity push.
 - Treat zero-length palettes as invalid renderer resources even though the
   transport contract allows `colorCount = 0` for provenance payloads.
+
+Implemented changes:
+
+- Added `apps/holtburger-3d/src/lib/world-display/palette-resources.ts` for
+  palette-specific renderer resource work.
+- Added `argbToRgbaBytes()` and tests proving ARGB values upload as RGBA bytes
+  with alpha preserved.
+- Added `createPaletteTextureResource()` to create a one-row `DataTexture`
+  where `width = colorCount` and `height = 1`.
+- Palette textures use `RGBAFormat`, `UnsignedByteType`, nearest min/mag
+  filtering, no mipmaps, and `SRGBColorSpace`.
+- `WorldMaterialResourceCache` now owns a palette resource cache and disposes
+  palette textures with other material resources.
+- Palette resource cache keys include asset ID, prepared timestamp/provenance,
+  `paletteId`, and `colorCount`. Subpalette identity is intentionally not part
+  of this foundation cache yet.
+
+Validation added:
+
+- Unit coverage for ARGB-to-RGBA byte ordering.
+- Unit coverage for rejecting zero-length palettes as invalid renderer
+  resources.
+- Unit coverage for palette texture dimensions, format, filters, mipmap
+  behavior, color space, and upload bytes.
+- Unit coverage proving `WorldMaterialResourceCache` reuses palette resources
+  for the same prepared asset and refreshes after prepared state changes.
+
+Decisions:
+
+- The first renderer representation is a one-row 2D `DataTexture`, not a fixed
+  256-wide texture and not a max-texture-size-aware atlas. AC palette sizes are
+  expected to be far below WebGL texture width limits; add tiling only if real
+  content proves this assumption wrong.
+- Palette textures are marked `SRGBColorSpace` because the palette table
+  represents albedo color values, matching the direct-color texture path. Phase
+  4 shader work should keep this color-space decision explicit when sampling the
+  palette texture.
+- Zero-length palettes fail during resource creation instead of becoming a
+  transparent or black placeholder. Missing/empty palette diagnostics should be
+  added at the indexed-material classification layer in Phase 3.
+
+Cleanup targets:
+
+- `material-resources.ts` still owns too many resource families. Phase 3 should
+  avoid adding more pixel-format logic directly to that file and should move
+  indexed texture classification into `indexed-texture-resources.ts`.
+- Palette resource creation is currently public through
+  `WorldMaterialResourceCache.getPaletteResource()` for upcoming phases, but no
+  material consumes it yet. Phase 3 should become the first real consumer.
+- Direct-color and compressed texture resource creation should be split into
+  smaller modules before Phase 4 shader patching if the next phase makes the
+  file harder to reason about.
 
 ## Phase 3: Indexed Surface Resource Cache
 
@@ -315,6 +369,17 @@ Scheduling note:
   report `indexed-texture-palette-unprepared` instead of
   `unsupported-render-surface` as soon as the asset data is available, even
   before indexed rendering is complete.
+
+Refinement after Phase 2:
+
+- Phase 3 should resolve palette assets to
+  `WorldMaterialResourceCache.getPaletteResource()` instead of creating a second
+  palette cache.
+- Add pure helpers first: indexed pixel-format classification, source length
+  validation, palette ID selection, and optional max-index scanning. This gives
+  diagnostics something stable to test before shader work.
+- If max-index scanning is added, keep it CPU-side and bounded to prepared
+  source bytes. This is diagnostic validation, not RGBA baking.
 
 ## Phase 4: Indexed Material Shader
 

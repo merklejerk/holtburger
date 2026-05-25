@@ -314,7 +314,7 @@ function reportMaterialGraphRequests(options: {
 		return;
 	}
 
-	console.error("[holtburger-3d][asset-graph][material-requested]", {
+	console.info("[holtburger-3d][asset-graph][material-requested]", {
 		priority: options.priority,
 		requestRevision: options.requestRevision,
 		requestCount: materialRequests.length,

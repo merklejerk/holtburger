@@ -1258,6 +1258,8 @@ Legacy shims:
 
 Refinements to future steps:
 
+- Phase 5.75 should wire the derived runtime appearance cache into a local
+  browser appearance preview before clothing generation adds more producers.
 - Phase 6 should feed clothing-generated ObjDesc values into the derived
   runtime appearance cache API, not the prepared asset graph.
 - Phase 6 should add fixture coverage proving clothing-generated ObjDesc
@@ -1269,6 +1271,54 @@ Refinements to future steps:
 Expected effect: runtime and clothing-generated appearances can reuse resolved
 appearance facts without polluting the true asset cache or requiring immediate
 object-level lifetime ownership.
+
+### Phase 5.75: Browser Appearance Preview Harness
+
+Goal: give browser mode a local visual verification path for `Setup + ObjDesc`
+appearance overrides before clothing-table generation expands the input space.
+
+Rationale:
+
+- Tests and payload diagnostics can prove texture swaps and palette facts, but
+  they do not prove the rendered result is visually correct. Phase 4/5 palette
+  and texture-swap work needs a fast, local visual loop.
+- A full entity spawner would imply server/world object lifecycle, collision,
+  replication, and authoritative placement. That is out of scope here. This
+  phase should create a local preview object only.
+
+Implementation targets:
+
+- Add a browser-mode debug panel for an appearance preview with:
+  - required `setupDid`;
+  - optional base palette ID;
+  - editable subpalette rows;
+  - editable texture-swap rows;
+  - editable animation-part swap rows.
+- Derive the preview appearance through `RuntimeAppearanceCache`, then hydrate
+  any referenced true DAT assets through the existing asset loading path. Do not
+  encode ObjDesc overrides as `setup-appearance/.../obj-desc/...` asset IDs.
+- Render the preview as an app-local object 1 meter in front of the active
+  browser camera. Do not mutate world state or send server spawn requests.
+- Request true asset dependencies through the existing asset hydration path so
+  assets can be loaded from DAT when they are not already resident: selected
+  `GfxObj`, material recipes, render textures, render surfaces, and palettes.
+  The prepared asset cache should be the resident reuse layer after hydration,
+  not a requirement that the asset was already loaded before preview.
+- Show compact diagnostics for the resolved appearance: selected part IDs,
+  material asset IDs, palette asset IDs, texture-swap signature, palette-view
+  signature, cache hit/miss/eviction counts, and missing dependencies.
+- Do not add WCID/weenie lookup. WCIDs require an ACE/world-content projection
+  layer, while this phase should stay limited to DAT render inputs.
+
+Decisions:
+
+- This is an appearance preview, not an entity spawner.
+- The canonical preview input is `setupDid + ObjDesc facts`.
+- Do not introduce route-shaped ObjDesc assets for preview convenience.
+
+Expected effect: palette overrides, subpalette ranges, texture swaps, and
+animation-part swaps can be visually inspected before clothing-generated
+appearances depend on the same path.
 
 ### Phase 6: ClothingTable Appearance Generation
 

@@ -834,14 +834,32 @@ export type RenderSurfacePayloadDto = z.infer<
 	typeof renderSurfacePayloadDtoSchema
 >;
 
-export const palettePayloadDtoSchema = z.object({
-	kind: z.literal("palette"),
-	residencyKind: z.literal("unknown"),
-	sourceAssetKind: z.literal("palette"),
-	paletteId: z.number().int().nonnegative(),
-	colorCount: z.number().int().nonnegative(),
-	provenance: assetProvenanceDtoSchema,
-});
+const uint32ArrayDtoSchema = z
+	.union([
+		z.instanceof(Uint32Array),
+		z
+			.array(z.number().int().nonnegative().max(0xffffffff))
+			.transform((values) => Uint32Array.from(values)),
+	])
+	.refine(
+		(values) => values.every((value) => Number.isInteger(value)),
+		"uint32 array values must be integers",
+	);
+
+export const palettePayloadDtoSchema = z
+	.object({
+		kind: z.literal("palette"),
+		residencyKind: z.literal("unknown"),
+		sourceAssetKind: z.literal("palette"),
+		paletteId: z.number().int().nonnegative(),
+		colorCount: z.number().int().nonnegative(),
+		colorsArgb: uint32ArrayDtoSchema,
+		provenance: assetProvenanceDtoSchema,
+	})
+	.refine((payload) => payload.colorsArgb.length === payload.colorCount, {
+		message: "palette color count must match colorsArgb length",
+		path: ["colorsArgb"],
+	});
 export type PalettePayloadDto = z.infer<typeof palettePayloadDtoSchema>;
 
 export const appearanceManifestPayloadDtoSchema = z.object({

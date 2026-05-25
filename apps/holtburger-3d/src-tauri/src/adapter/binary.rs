@@ -5,7 +5,7 @@ use crate::adapter::service::{ASSET_BINARY_HEADER_LEN, ASSET_BINARY_MAGIC, ASSET
 use crate::contracts::*;
 use holtburger_content::*;
 use holtburger_core::{ContentAsset, ContentAssetRequest};
-use holtburger_dat::file_type::GfxObj;
+use holtburger_dat::file_type::{GfxObj, Palette};
 
 pub struct BinaryAssetSection {
     role: String,
@@ -66,6 +66,22 @@ impl BinaryAssetSectionWriter {
         let offset = self.data.len();
         self.data.extend(values);
         self.push_section(role, path, "u8", component_count, offset, values.len());
+    }
+
+    pub fn push_u32_section(
+        &mut self,
+        role: impl Into<String>,
+        path: impl Into<String>,
+        component_count: u32,
+        values: impl IntoIterator<Item = u32>,
+    ) {
+        let offset = self.data.len();
+        let mut scalar_count = 0usize;
+        for value in values {
+            self.data.extend(value.to_le_bytes());
+            scalar_count += 1;
+        }
+        self.push_section(role, path, "u32", component_count, offset, scalar_count);
     }
 
     pub fn push_section(
@@ -211,11 +227,37 @@ pub fn serialize_content_asset_binary_response(
                 Err(error),
             )?,
         },
+        ContentAssetRequest::Palette(palette_id) => match asset {
+            Ok(ContentAsset::Palette(palette)) => AssetLookupResponseDto {
+                request_id: request.request_id,
+                asset_id: request.asset_id,
+                payload_kind: AssetPayloadKindDto::Json,
+                payload: serialize_palette_binary_payload(&palette, path_prefix, writer),
+            },
+            Ok(_) => unreachable!("content asset runtime returned mismatched palette"),
+            Err(error) => adapter.build_palette_lookup_response(request, palette_id, Err(error)),
+        },
         unsupported => anyhow::bail!(
             "binary asset lookup does not support {unsupported:?} for {}",
             request.asset_id
         ),
     })
+}
+
+pub fn serialize_palette_binary_payload(
+    palette: &Palette,
+    path_prefix: &str,
+    writer: &mut BinaryAssetSectionWriter,
+) -> serde_json::Value {
+    let mut payload = serialize_palette_payload(palette);
+    payload["colorsArgb"] = serde_json::json!([]);
+    writer.push_u32_section(
+        "palette.colorsArgb",
+        format!("{path_prefix}.colorsArgb"),
+        1,
+        palette.colors_argb.iter().copied(),
+    );
+    payload
 }
 
 pub fn serialize_asset_binary_batch_response(

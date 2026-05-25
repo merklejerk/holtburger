@@ -19,7 +19,28 @@ describe("material signatures", () => {
 				preparedByAssetId: {},
 			}),
 		).toBe(
-			"base|parts=base|textures=base|palette=base|material/08000001|material/08000001:missing",
+			"base|parts=base|textures=base|palette=base|material/08000001|variant=base|material/08000001:missing",
+		);
+	});
+
+	it("separates final material cache keys by immutable material variant", () => {
+		const appearance = createBaseMaterialAppearanceContext("base");
+		const materialAssetId = formatMaterialAssetId(0x08000001);
+
+		expect(
+			describeMaterialCacheKey({
+				appearance,
+				materialAssetId,
+				materialVariantSignature: "sampler=repeat",
+				preparedByAssetId: {},
+			}),
+		).not.toBe(
+			describeMaterialCacheKey({
+				appearance,
+				materialAssetId,
+				materialVariantSignature: "sampler=clamp",
+				preparedByAssetId: {},
+			}),
 		);
 	});
 

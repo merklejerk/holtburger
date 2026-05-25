@@ -12,6 +12,7 @@ import type {
 	PreparedPolygonSetRenderGeometry,
 } from "../assets/types";
 import type { PlacementTransformDto, Vec3Dto } from "../host/contracts";
+import { normalizeMaterialVariantSignature } from "./material-variants";
 import type { StaticRenderablePart } from "./static-renderables";
 
 export function buildStaticRenderablePartMatrix(
@@ -82,6 +83,7 @@ export function buildGfxObjGeometry(
 
 export interface MaterialGeometrySlot {
 	surfaceId: number;
+	materialVariantSignature?: string | null;
 	materialIndex: number;
 }
 
@@ -94,8 +96,14 @@ function applyMaterialGroups(
 		return;
 	}
 
-	const materialIndexBySurfaceId = new Map(
-		materialSlots.map((slot) => [slot.surfaceId, slot.materialIndex]),
+	const materialIndexBySlotKey = new Map(
+		materialSlots.map((slot) => [
+			describeGeometryMaterialSlotKey(
+				slot.surfaceId,
+				slot.materialVariantSignature,
+			),
+			slot.materialIndex,
+		]),
 	);
 	let activeMaterialIndex: number | null = null;
 	let activeStartVertex = 0;
@@ -105,7 +113,12 @@ function applyMaterialGroups(
 		const nextMaterialIndex =
 			triangle.surfaceId === null
 				? 0
-				: (materialIndexBySurfaceId.get(triangle.surfaceId) ?? 0);
+				: (materialIndexBySlotKey.get(
+						describeGeometryMaterialSlotKey(
+							triangle.surfaceId,
+							triangle.materialVariantSignature,
+						),
+					) ?? 0);
 		if (activeMaterialIndex === null) {
 			activeMaterialIndex = nextMaterialIndex;
 			activeStartVertex = triangle.firstVertex;
@@ -134,6 +147,15 @@ function applyMaterialGroups(
 			activeMaterialIndex,
 		);
 	}
+}
+
+function describeGeometryMaterialSlotKey(
+	surfaceId: number,
+	materialVariantSignature: string | null | undefined,
+): string {
+	return `${surfaceId}|${normalizeMaterialVariantSignature(
+		materialVariantSignature,
+	)}`;
 }
 
 function toFloat32Array(values: PreparedFloat32Array): Float32Array {

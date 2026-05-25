@@ -4,6 +4,7 @@ import {
 	describeMaterialAppearanceSignature,
 	type MaterialAppearanceContext,
 } from "./material-appearance";
+import { describeMaterialVariantSignature } from "./material-variants";
 
 export function formatMaterialAssetId(surfaceId: number): string {
 	return `material/${formatHex32(surfaceId)}`;
@@ -12,11 +13,13 @@ export function formatMaterialAssetId(surfaceId: number): string {
 export function describeMaterialCacheKey(options: {
 	appearance: MaterialAppearanceContext;
 	materialAssetId: string;
+	materialVariantSignature?: string | null;
 	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>;
 }): string {
 	return [
 		describeMaterialAppearanceSignature(options.appearance),
 		options.materialAssetId,
+		describeMaterialVariantSignature(options.materialVariantSignature),
 		describeMaterialPreparedStateSignature(
 			options.materialAssetId,
 			options.preparedByAssetId,

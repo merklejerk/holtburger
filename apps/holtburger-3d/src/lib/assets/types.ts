@@ -378,6 +378,7 @@ export interface PreparedInteriorCellStructure {
 interface PreparedPolygonSetRenderTriangle {
 	polygonId: number;
 	surfaceId: number | null;
+	materialVariantSignature?: string | null;
 	firstVertex: number;
 }
 

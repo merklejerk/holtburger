@@ -51,6 +51,7 @@ import {
 	formatMaterialAssetId,
 	type ResolvedMaterialSlot,
 } from "./material-resources";
+import { describeMaterialVariantSignature } from "./material-variants";
 
 type StaticRenderableInstanceKind =
 	| "indoor-static"
@@ -800,8 +801,13 @@ function describeMaterialSignature(
 	return [
 		describeMaterialAppearanceSignature(appearance),
 		...slots
-			.map(
-				(slot) => `${slot.slotIndex}:${slot.surfaceId}:${slot.materialAssetId}`,
+			.map((slot) =>
+				[
+					slot.slotIndex,
+					slot.surfaceId,
+					slot.materialAssetId,
+					describeMaterialVariantSignature(slot.materialVariantSignature),
+				].join(":"),
 			)
 			.sort(),
 	].join(",");

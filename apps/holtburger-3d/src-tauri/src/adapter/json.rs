@@ -1206,6 +1206,7 @@ pub fn serialize_prepared_polygon_set_render_triangle(
     serde_json::json!({
         "polygonId": triangle.polygon_id,
         "surfaceId": triangle.surface_id,
+        "materialVariantSignature": triangle.material_variant_signature,
         "firstVertex": triangle.first_vertex,
     })
 }

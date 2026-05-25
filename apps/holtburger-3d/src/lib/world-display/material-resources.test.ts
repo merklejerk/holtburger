@@ -175,6 +175,60 @@ describe("world material resource cache", () => {
 		cache.dispose();
 	});
 
+	it("uses sampler material variants to select texture wrap policy", () => {
+		const cache = new WorldMaterialResourceCache();
+		const materialAssetId = formatMaterialAssetId(0x08000012);
+		const renderSurfaceAssetId = "render-surface/06000012";
+		const preparedByAssetId = {
+			[materialAssetId]: createPreparedAsset(
+				materialAssetId,
+				createTextureMaterialRecipe(0x08000012, 0x06000012),
+			),
+			[renderSurfaceAssetId]: createPreparedAsset(
+				renderSurfaceAssetId,
+				createRenderSurfacePayload(0x06000012),
+			),
+		};
+
+		const clampPlan = cache.resolveMaterialPlan({
+			slots: [
+				{
+					slotIndex: 0,
+					surfaceId: 0x08000012,
+					materialAssetId,
+					materialVariantSignature: "sampler=clamp",
+				},
+			],
+			appearance: createBaseMaterialAppearanceContext("base"),
+			preparedByAssetId,
+			fallbackColorKey: "part",
+		});
+		const repeatPlan = cache.resolveMaterialPlan({
+			slots: [
+				{
+					slotIndex: 0,
+					surfaceId: 0x08000012,
+					materialAssetId,
+					materialVariantSignature: "sampler=repeat",
+				},
+			],
+			appearance: createBaseMaterialAppearanceContext("base"),
+			preparedByAssetId,
+			fallbackColorKey: "part",
+		});
+
+		expect(
+			(clampPlan.materials[0] as MeshStandardMaterial).map?.wrapS,
+		).not.toBe(RepeatWrapping);
+		expect((repeatPlan.materials[0] as MeshStandardMaterial).map?.wrapS).toBe(
+			RepeatWrapping,
+		);
+		expect((repeatPlan.materials[0] as MeshStandardMaterial).map?.wrapT).toBe(
+			RepeatWrapping,
+		);
+		cache.dispose();
+	});
+
 	it("uses compressed DXT render-surface bytes when S3TC upload is available", () => {
 		const cache = new WorldMaterialResourceCache(undefined, {
 			supportsS3tc: true,

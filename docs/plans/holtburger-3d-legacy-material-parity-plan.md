@@ -1,0 +1,511 @@
+# Holtburger 3D Legacy Material Parity Plan
+
+## Purpose
+
+Close the gap between the current `apps/holtburger-3d` renderer and the legacy
+Asheron's Call material path used by retail and ACViewer.
+
+This is the follow-up to
+[`holtburger-3d-indexed-palette-materials-plan.md`](./holtburger-3d-indexed-palette-materials-plan.md).
+The indexed palette foundation is in place: palette payloads are lossless,
+`PFID_P8` and `PFID_INDEX16` can upload as index textures, and the renderer can
+sample palettes in a patched `MeshStandardMaterial`.
+
+The strategy authority remains
+[`holtburger-3d-materials-texturing-strategy.md`](./holtburger-3d-materials-texturing-strategy.md).
+When this plan and that strategy diverge, the strategy document wins unless code
+or new reference evidence proves it stale.
+
+## Current State
+
+### Implemented
+
+- `CSurface` material recipes resolve through `holtburger-content` and expose
+  texture, palette, translucency, luminosity, and diffuse facts.
+- Direct-color render surfaces can upload as ordinary Three.js textures.
+- DXT render surfaces can upload when browser S3TC support is available.
+- `PFID_P8` and `PFID_INDEX16` render through GPU palette lookup instead of
+  load-time RGBA baking.
+- Structured interior cell geometry uses env-cell surface IDs to build
+  material groups.
+- Static `GfxObj` and setup-model render groups include material signatures, so
+  batching is no longer keyed only by geometry.
+- Terrain material tables and their downstream render texture/surface/palette
+  dependencies are schedulable assets.
+- Prepared `setup-appearance/{setup_did}` payloads exist and preserve base
+  setup part material slots, texture changes, animation part changes,
+  `paletteId`, and `subPalettes`.
+
+### Known Gaps
+
+- Static setup-model rendering still expands parts from the raw
+  `setup-model`/`GfxObj` path and uses `"setup-base"` slots. It does not prefer
+  the prepared `setup-appearance` payload, so texture swaps and base appearance
+  material slots can be ignored.
+- Static `GfxObj` and setup rendering have no derived palette view identity.
+  `materialSignature` reflects material slots, not per-instance subpalette
+  replacement.
+- The renderer selects only base material/default render-surface palettes for
+  indexed textures. It does not compose `ObjDesc.paletteId` and `subPalettes`
+  into a per-appearance palette texture.
+- Outdoor terrain is still diagnostic vertex color only. It does not consume
+  `terrain-material/{regionNumber}`, terrain pcodes, overlay alpha maps, road
+  maps, detail textures, or texture tiling.
+- Interior cell geometry has material groups, but UV and sampler behavior has
+  not been validated against ACViewer. The likely missing parity pieces are
+  wrap/clamp selection from wrapping UVs, V-axis/orientation checks, and
+  texture repeat settings for out-of-range UVs.
+- Optional high-res JPEG replacement is not implemented. The retail client has
+  engine support for `client_highres.dat` and `PFID_CUSTOM_RAW_JPEG`, but this
+  should be treated as optional mounted-pack support rather than baseline retail
+  visual parity unless we prove the target retail install actually shipped and
+  activated those assets.
+- `CSurface.diffuse` and `CSurface.luminosity` are preserved in payloads but
+  mostly not reflected in Three material parameters.
+- Clipmap handling exists for indexed materials, but broader clipmap/direct
+  texture parity still needs validation.
+
+## Reference Behavior
+
+Keep these open while implementing:
+
+- Retail material strategy:
+  [`holtburger-3d-materials-texturing-strategy.md`](./holtburger-3d-materials-texturing-strategy.md)
+- ACViewer indexed/subpalette expansion:
+  `ACViewer/ACViewer/Render/TextureCache.cs`
+- ACViewer setup appearance flow:
+  `ACViewer/ACViewer/Model/Setup.cs`
+- ACViewer static object batching:
+  `ACViewer/ACViewer/Render/GfxObjInstance_Shared.cs`
+- ACViewer env-cell batching and wrap/clamp decision:
+  `ACViewer/ACViewer/Render/InstanceBatch.cs`
+- ACViewer UV lookup:
+  `ACViewer/ACViewer/Extensions/VertexArrayExtensions.cs` and
+  `ACViewer/ACViewer/Model/Polygon.cs`
+- ACViewer terrain blend direction:
+  `ACViewer/ACViewer/Content/texture_clamp.fx`
+- Holtburger content material graph:
+  `crates/holtburger-content/src/material_graph.rs`
+- Holtburger polygon render geometry:
+  `crates/holtburger-content/src/landblock_scene_assets.rs`
+- Holtburger renderer material cache:
+  `apps/holtburger-3d/src/lib/world-display/material-resources.ts`
+- Holtburger static renderable expansion:
+  `apps/holtburger-3d/src/lib/world-display/static-renderables.ts`
+- Holtburger terrain geometry:
+  `apps/holtburger-3d/src/lib/world-display/terrain-geometry.ts`
+
+## Parity Target
+
+The target is near visual parity with the retail EOR client, using the
+decompile, ACE DAT parsing, and real content as proof sources. We should not
+sacrifice modern renderer architecture to clone every fixed-function or
+pre-baked retail implementation detail, but visible output should trend toward
+retail unless a documented tradeoff says otherwise.
+
+ACViewer is a practical comparator and reference implementation for legacy DAT
+interpretation, not a renderer architecture target. Use it to understand asset
+semantics and to get rough visual comparisons, but choose renderer-native
+techniques that fit Holtburger cleanly when they preserve the same visible
+behavior. It is not the final source of truth when it conflicts with retail
+evidence.
+
+- setup/static/interior meshes should use the same texture IDs, palette IDs,
+  texture swaps, and subpalette ranges as the resolved content graph;
+- indexed materials should keep palette lookup on the GPU;
+- texture sampling should respect AC wrapping/clamping behavior;
+- terrain should visually approach retail while using a renderer-native material
+  path rather than diagnostic colors or a premature CPU `TexMerge` clone;
+- material diagnostics should distinguish missing data, unsupported formats,
+  invalid palette views, and shader/resource capability gaps.
+
+Exact CPU `TexMerge::FillTempTexBuffer` parity is deferred unless we later need
+retail-identical terrain texels.
+
+## Implementation Plan
+
+### Pipeline Readiness
+
+The current renderer is prepared for the first parity steps, but not for the
+whole plan as-is.
+
+Ready without broad refactor:
+
+- Phase 2 can fit in `static-renderables.ts` because setup/static expansion
+  already carries `materialAppearanceKey`, material slots, and
+  `materialSignature`.
+- Phase 3 can fit as diagnostics plus focused sampler/texture-resource changes.
+  The polygon render geometry path already emits UVs and material surface IDs,
+  and the renderer already centralizes direct/indexed texture upload helpers.
+
+Needs deliberate boundary work before implementation:
+
+- Do not keep growing `material-resources.ts` as a god module. It currently owns
+  material plan orchestration, cache keys, fallback diagnostics, direct texture
+  selection, indexed resource selection, palette resource lookup, and material
+  construction. Derived palette views, scalar parity, and clipmap parity should
+  be split into focused helpers before they land.
+- Introduce an explicit renderer-local appearance context before Phase 4. It
+  should carry the setup appearance key, selected part/material slots, base
+  palette override, subpalette replacements, texture swap identity, and a stable
+  palette-view signature. Passing only `appearanceKey: string` will become too
+  lossy once derived palette resources exist.
+- Add a derived palette resource/cache module rather than folding subpalette
+  replacement into `palette-resources.ts` or `indexed-materials.ts`.
+  `palette-resources.ts` should remain base palette upload logic.
+- Add terrain-specific material/resource modules before Phase 7. Terrain uses
+  pcodes, layer blends, alpha maps, roads, and detail textures; it should not be
+  forced through the env-cell/static `CSurface` material slot model or the
+  current debug-color `terrain-geometry.ts` path.
+- Keep validation tooling separate from renderer production paths. Phase 3's
+  comparison report should live in a harness/tool or pure diagnostic module, not
+  as ad hoc debug branches inside `world-display-renderer.ts`.
+
+Without these seams, later phases are likely to become patchwork. Treat the prep
+phases below as part of the implementation plan, not optional cleanup.
+
+### Dry-Run Findings
+
+This plan was checked against the current code paths before implementation. The
+following gaps should be addressed in order.
+
+1. `setup-appearance` assets are supported but not naturally scheduled for
+   setup models.
+   - `setup-appearance/{setup_did}` is recognized by the Tauri adapter, worker,
+     contracts, prepared asset types, and dependency walker.
+   - `setup-model` dependencies currently expose only `gfxObjAssetIds`, and the
+     dependency test explicitly says "without default setup appearance".
+   - Phase 2 cannot simply "look for" a setup appearance payload and expect one
+     to exist. The scheduler/contract must request the base setup appearance for
+     visible setup models.
+2. Setup appearance payloads carry selected parts and material slots but not
+   placement frames or scale. That is fine for base setup routing: combine
+   appearance-selected part/gfx/material data with placement/scale from the
+   matching `setup-model` part index. Do not duplicate placement data into
+   `setup-appearance` unless runtime evidence proves part replacement changes
+   placement semantics.
+3. Sampler state cannot be cached only by render-surface decode identity.
+   Three.js stores wrap mode, filters, color space, and `flipY` on the texture
+   object. ACViewer also keys texture batches by `HasWrappingUVs`. If the same
+   render surface is used by both clamped and repeated geometry, Holtburger must
+   produce distinct texture resources or texture clones keyed by sampling
+   policy. Phase 1 must handle this before Phase 3 changes wrap/clamp behavior.
+4. The current prepared render geometry emits UVs but does not carry an explicit
+   UV bounds or `hasWrappingUvs` summary. Phase 3 can compute that from emitted
+   UVs, but adding a small prepared geometry summary would make diagnostics and
+   material planning cleaner. Prefer `uvBounds` plus `hasWrappingUvs` over
+   re-scanning large arrays in several renderer paths.
+5. `material-resources.ts` currently accepts only `appearanceKey: string`.
+   Derived palette views need more context: base palette override,
+   subpalette replacements, texture swap identity, and stable prepared-source
+   signatures. Phase 0 should introduce this typed context before Phase 4 adds
+   palette derivation.
+6. Terrain data is currently flattened too early for material parity.
+   `terrain-scene.ts` converts outdoor terrain into `PreparedTerrainMesh` and
+   stores the quad pcode in a triangle field named `terrainType`. That is enough
+   for debug colors but not enough for terrain material blending. Phase 7 should
+   preserve quads, pcodes, region number, and material table identity in a
+   material-ready terrain model.
+7. Terrain scheduling is mostly ready. `landblock-outdoor` dependency extraction
+   requests `terrain-material/{regionNumber}`, and terrain material payloads
+   expose downstream render-texture, render-surface, and palette dependencies.
+   The missing part is renderer consumption, not asset graph reachability.
+8. Phase 3 validation can be mostly automated, but fixture selection still
+   matters. Pick at least one problematic env cell and one static object/building
+   sample before implementation. The comparison harness can generate the proof;
+   screenshots should only confirm rendered output after the data report passes.
+
+Cleanup targets created by this dry run:
+
+- Rename or replace tests and comments that describe setup-model dependencies as
+  intentionally excluding default setup appearances once Phase 2 scheduling is
+  implemented.
+- Add sampler-policy identity to texture resource cache keys before changing
+  wrap/clamp or `flipY`.
+- Keep base palette upload, derived palette composition, and indexed material
+  shader patching in separate modules.
+- Keep terrain material resources separate from static/interior `CSurface`
+  material slots.
+- Do not add debug-only branches to `world-display-renderer.ts`; use pure
+  diagnostics or a harness/tool for Phase 3 comparison output.
+
+### Phase 0: Material Pipeline Refactor Prep
+
+Goal: create the seams needed for material parity work before adding more
+behavior.
+
+- Split material plan construction from material resource creation:
+  - material plan input/output types;
+  - geometry slot mapping;
+  - material array construction;
+  - fallback material selection.
+- Move cache-key and signature construction into focused helpers with tests.
+- Introduce a typed renderer-local material appearance context. Initially it can
+  wrap today's `appearanceKey`, but it should be able to grow into palette-view
+  identity and texture-swap identity without changing every call site.
+- Thread enough material-source context through `resolveMaterialPlan()` for
+  future per-slot sampling policy and palette-view identity. Avoid widening the
+  API with loosely typed optional bags.
+- Keep `WorldMaterialResourceCache` as the owner of GPU resource lifetimes, but
+  move format-specific decisions into smaller modules.
+- Add tests that prove the refactor preserves current direct-color, compressed,
+  indexed, fallback, and material grouping behavior.
+
+Completion criteria:
+
+- `material-resources.ts` is mostly orchestration and lifetime ownership.
+- Direct texture, indexed texture, base palette, material construction, and
+  signature helpers live behind focused APIs.
+- No visual behavior changes are intended in this phase.
+
+### Phase 1: Texture Sampling Policy Prep
+
+Goal: isolate texture sampler decisions before changing UV behavior.
+
+- Add `texture-sampling-policy` helpers for wrap/clamp, `flipY`, color-space,
+  mipmap, and filter decisions.
+- Thread the policy through direct-color, compressed, indexed, and future
+  terrain texture resources.
+- Include sampling policy identity in texture resource cache keys. Reusing a
+  single Three.js `Texture` for both clamped and repeated geometry is incorrect
+  because sampler state lives on the texture object.
+- Decide where geometry-derived UV policy lives. Prefer a small
+  `uvBounds`/`hasWrappingUvs` summary on prepared render geometry, with a
+  fallback helper that computes it from emitted UV arrays for older fixtures.
+- Preserve current behavior by default until Phase 3 proves the AC-specific
+  policy changes.
+- Add tests for policy defaults and resource application.
+
+Completion criteria:
+
+- Sampler state is not scattered through resource constructors.
+- Texture cache reuse is safe across different wrap/filter/`flipY` policies.
+- Phase 3 can change wrap/clamp or `flipY` behavior by changing policy logic,
+  not individual texture upload call sites.
+
+### Phase 2: Setup Appearance Routing
+
+Goal: make setup-model statics consume prepared `setup-appearance` payloads.
+
+- In `static-renderables.ts`, when a static source asset is a setup model, look
+  for `setup-appearance/{setupModelId}` and use its parts/material slots when
+  available.
+- First update setup-model scheduling so the base `setup-appearance/{setupDid}`
+  asset is requested for visible setup models. Either add explicit
+  `setupAppearanceAssetIds` to setup-model dependencies or teach the scene
+  request planner to derive the base setup appearance route from visible setup
+  model IDs.
+- Preserve the current raw setup fallback for missing or failed appearance
+  assets, with explicit diagnostics.
+- Use the setup appearance key in `materialAppearanceKey`.
+- Ensure `materialSignature` changes when setup appearance material slots differ
+  from raw `GfxObj` slots.
+- Continue using setup-model placement frames and per-part scale by part index;
+  do not move placement data into setup appearance payloads in this phase.
+- Add tests proving setup appearance texture-swapped material slots flow into
+  static renderable parts.
+
+Expected effect: building/setup/static objects should stop rendering as
+untextured placeholders when the material graph already has the correct resolved
+slots.
+
+### Phase 3: UV And Sampler Parity Validation
+
+Goal: prove whether interior texture orientation/tiling bugs come from decoded
+UVs, sampler state, or material upload. The primary validation path should be
+programmatic; manual visual inspection is only a final smoke check after the
+data and renderer-state comparisons are explainable.
+
+- Add a small diagnostic/export harness that emits per-polygon vertex IDs,
+  UV indices, UV values, surface slot, and material/render-surface IDs for a
+  known problematic env cell.
+- Compare Holtburger output against ACViewer's `BuildUVLookup()` and
+  `Polygon.BuildIndices()` behavior.
+- Produce a deterministic comparison report for each fixture env cell covering:
+  - polygon IDs;
+  - triangle fan order;
+  - surface slot and resolved `CSurface` ID;
+  - UV index selection;
+  - emitted UV values;
+  - render texture/render surface IDs;
+  - wrap/clamp policy;
+  - texture `flipY` or V-axis transform policy.
+- Add renderer texture wrapping policy:
+  - if any vertex UV on the source vertex array is outside `[0, 1]`, use repeat
+    wrapping;
+  - otherwise use clamp wrapping;
+  - mirror ACViewer's `HasWrappingUVs` behavior first, then refine only with
+    reference evidence.
+- Validate whether Three's default V-axis handling needs `flipY = false` or UV
+  V inversion for DAT textures.
+- Add targeted tests around UV emission and texture wrap selection.
+- Use manual Holtburger-vs-reference screenshots only after the comparison
+  report passes, to catch renderer-state issues that are hard to infer from
+  data alone.
+
+Expected effect: interior textures should become visible and consistently tiled
+or clamped before deeper material work.
+
+### Phase 4: Derived Palette Views
+
+Goal: compose per-appearance palette textures for indexed materials.
+
+- Introduce a renderer-local `PaletteView`/`DerivedPaletteResource` signature:
+  base palette asset ID, base prepared signature, appearance palette ID,
+  subpalette list, subpalette prepared signatures.
+- Apply `ObjDesc.paletteId` as the base palette override when present.
+- Apply each `SubPalette` by replacing the destination range with colors from
+  the referenced subpalette.
+- Include palette view identity in material signatures and material cache keys.
+- Keep derived palette upload in `apps/holtburger-3d`; do not promote
+  Three.js resource policy into shared crates.
+- Add diagnostics for missing base palettes, missing subpalettes, invalid
+  ranges, and palette index out-of-range after derivation.
+
+Expected effect: indexed clothing, skin, hair, and dyed/static appearance paths
+can use the same indexed render surfaces with different palette views.
+
+### Phase 5: Texture Swap And Appearance Parity
+
+Goal: ensure `ObjDesc.texture_changes` and `anim_part_changes` affect static and
+runtime renderables consistently.
+
+- Extend asset IDs or renderer inputs so runtime objects can request
+  setup appearances with real `ObjDesc` data, not only base
+  `setup-appearance/{setup_did}`.
+- Keep content resolution in `holtburger-content`; keep renderer material
+  policy in `apps/holtburger-3d`.
+- Make material cache signatures include selected part IDs, texture swap
+  identity, and palette view identity.
+- Add integration tests using the existing
+  `resolve_setup_appearance_with_texture_and_part_overrides` coverage as the
+  Rust-side truth.
+
+Expected effect: appearance changes should select the right mesh parts,
+textures, and palettes without mutating base DAT material definitions.
+
+### Phase 6: Clipmap And Scalar Material Behavior
+
+Goal: tighten the non-topological material properties.
+
+- Validate `SurfaceType.Base1ClipMap` for indexed and direct/DXT texture paths.
+- Map `CSurface.translucency`, `diffuse`, and `luminosity` into Three material
+  behavior with reference screenshots or ACViewer comparisons.
+- Avoid inventing formulas for fields with no proven active retail path.
+- Add diagnostics for unsupported scalar behavior if exact parity is deferred.
+
+Expected effect: alpha-cut, translucent, luminous, and diffuse-tinted surfaces
+should be closer to retail without weakening the material data model.
+
+### Phase 7: Terrain Material Pipeline Prep
+
+Goal: introduce terrain-specific renderer boundaries before implementing terrain
+blending.
+
+- Add terrain material/resource types that consume landblock terrain quads,
+  pcodes, and `terrain-material/{regionNumber}` tables without pretending they
+  are `CSurface` slots.
+- Split debug terrain geometry from material-ready terrain geometry so the
+  renderer can carry quad/pcode/layer attributes without losing the current
+  fallback path.
+- Add terrain material cache/signature helpers scoped to terrain resources.
+- Add diagnostics for missing terrain material table, missing texture resources,
+  unsupported terrain render-surface formats, and absent alpha/road maps.
+- Keep this app-local under `apps/holtburger-3d`.
+
+Completion criteria:
+
+- Terrain has a material-ready data path and diagnostics while still rendering
+  the existing debug-color fallback.
+- `terrain-scene.ts` no longer has to collapse quad pcodes into a triangle
+  `terrainType` field for material-ready rendering.
+- Phase 8 can add blending shaders/resources without refactoring terrain scene
+  selection or geometry ownership.
+
+### Phase 8: Terrain TexMerge GPU Path
+
+Goal: replace diagnostic terrain colors with renderer-native terrain materials
+that preserve retail terrain semantics.
+
+- Build a terrain material resource path that consumes:
+  - `landblock-outdoor.terrain.quads[].pcode`;
+  - `terrain-material/{regionNumber}`;
+  - terrain base/detail textures and tiling;
+  - terrain overlay alpha maps;
+  - road textures and road alpha maps.
+- Emit terrain geometry attributes with quad/pcode-driven layer indices and UVs.
+- Use GPU texture arrays or grouped materials to blend base, overlays, roads,
+  and alpha maps.
+- Keep detail texture sampling as a separate overlay with distance fade, per the
+  strategy doc.
+- Preserve color-variation fields in data and diagnostics, but do not implement
+  an invented HSB variation path.
+
+Expected effect: outdoor terrain stops being debug-colored and begins using
+terrain material data in a way that can be compared against retail visuals.
+
+### Phase 9: Optional High-Res JPEG Replacement
+
+Goal: support `PFID_CUSTOM_RAW_JPEG` render-surface replacement when an optional
+high-res DAT pack is mounted.
+
+- Detect `client_highres.dat` replacement records when mounted and enabled.
+- Decode JPEG render surfaces through browser/Rust-safe image decoding.
+- Preserve the reference channel swap behavior from ACViewer.
+- Keep fallback diagnostics explicit when high-res content is absent, disabled,
+  or not part of the mounted retail dataset.
+
+Expected effect: optional high-res texture packs can improve fidelity without
+changing the legacy material graph or redefining the baseline retail parity
+target.
+
+## Suggested Order
+
+1. Phase 0 material pipeline refactor prep.
+2. Phase 1 texture sampling policy prep.
+3. Phase 2 setup appearance routing.
+4. Phase 3 UV and sampler validation.
+5. Phase 4 derived palette views.
+6. Phase 5 runtime appearance parity.
+7. Phase 6 clipmap/scalar behavior.
+8. Phase 7 terrain material pipeline prep.
+9. Phase 8 terrain TexMerge GPU path.
+10. Phase 9 optional high-res JPEG replacement.
+
+This order should improve the currently observed failures fastest:
+
+- untextured outdoor buildings/static setup objects are likely blocked by setup
+  appearance routing and material-slot use;
+- wrong or invisible interior textures are likely blocked by UV/sampler parity;
+- outdoor terrain is intentionally debug-colored until the terrain shader path
+  exists.
+
+## Validation Checklist
+
+- Pick one outdoor landblock with visible buildings, generated scenery, static
+  objects, and terrain.
+- Pick one interior env cell with currently wrong orientation/tiling.
+- For each reference sample, record:
+  - visible material asset IDs;
+  - render-surface formats;
+  - palette selection source;
+  - wrapping/clamp policy;
+  - Phase 3 UV/sampler comparison report output;
+  - material diagnostics;
+  - screenshots from Holtburger and ACViewer.
+- Run unit tests for content material resolution, renderer material cache, UV
+  emission, palette derivation, and terrain layer selection.
+- Run browser smoke validation after each phase.
+
+## Risks
+
+- Palette-view identity can fragment instancing. Correctness wins first; batch
+  optimization should follow once visual parity is stable.
+- Three shader patches can break on Three upgrades. Keep indexed and terrain
+  shader code isolated.
+- Texture wrap and V-axis changes can improve interiors while regressing object
+  meshes. Validate both with fixture IDs before making global changes.
+- Terrain texture arrays may require fallback grouping if browser texture-array
+  limits are lower than expected.
+- ACViewer sometimes uses pragmatic renderer shortcuts. Use retail references
+  when ACViewer behavior conflicts with decoded data or the strategy document.

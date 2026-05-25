@@ -1115,24 +1115,52 @@ Completion criteria:
 ### Phase 10: Terrain TexMerge GPU Path
 
 Goal: replace diagnostic terrain colors with renderer-native terrain materials
-that preserve retail terrain semantics.
+for the main pcode-driven terrain merge.
 
 - Build a terrain material resource path that consumes:
   - `landblock-outdoor.terrain.quads[].pcode`;
   - `terrain-material/{regionNumber}`;
-  - terrain base/detail textures and tiling;
+  - terrain base textures and tiling;
   - terrain overlay alpha maps;
   - road textures and road alpha maps.
 - Emit terrain geometry attributes with quad/pcode-driven layer indices and UVs.
 - Use GPU texture arrays or grouped materials to blend base, overlays, roads,
   and alpha maps.
-- Keep detail texture sampling as a separate overlay with distance fade, per the
-  strategy doc.
+- Do not fold detail textures into this blend. Retail applies terrain detail as
+  a separate detail-surface path after the base terrain material is selected.
 - Preserve color-variation fields in data and diagnostics, but do not implement
   an invented HSB variation path.
 
 Expected effect: outdoor terrain stops being debug-colored and begins using
 terrain material data in a way that can be compared against retail visuals.
+
+### Phase 10.5: Legacy Detail Texture Overlay
+
+Goal: implement the proven retail detail-surface path without baking detail
+textures into base terrain, building, object, or environment materials.
+
+- Select role-specific `DetailTexGID` and `DetailTexTiling` through
+  `LandSurf`/`TexMerge.terrain_desc`. Retail indexes the same table by role:
+  landscape `0`, building `1`, environment `2`, and object `3`.
+- Treat detail textures as overlay resources, not as part of the TexMerge GPU
+  base/overlay/road blend and not as ordinary `CSurface` material variants.
+- Add a shared renderer-local detail-overlay policy/resource path that can be
+  applied by render domain: landscape terrain first, then building statics,
+  environment/interior cell geometry, and object/static renderables as the
+  corresponding render paths can carry a detail role.
+- Use wrapped linear sampling and detail UVs derived from base UVs multiplied by
+  the selected role's detail tiling.
+- Fade the detail overlay by camera depth using the retail thresholds documented
+  in the strategy reference: fully visible before `zw = 10`, linearly fading
+  from `zw = 10..50`, and absent after `zw = 50`.
+- Add diagnostics for missing detail texture resources, unsupported detail
+  formats, zero/invalid detail tiling, disabled detail-overlay capability, and
+  render domains that have not yet been wired to a retail detail role.
+
+Expected effect: terrain, buildings, environment/interior geometry, and static
+objects can gain the high-frequency detail layer visible in the retail client
+without fragmenting base material caches or pretending detail textures are part
+of pcode terrain materials.
 
 ### Phase 11: Optional High-Res JPEG Replacement
 
@@ -1165,7 +1193,8 @@ target.
 10. Phase 8 clipmap/scalar behavior.
 11. Phase 9 terrain material pipeline prep.
 12. Phase 10 terrain TexMerge GPU path.
-13. Phase 11 optional high-res JPEG replacement.
+13. Phase 10.5 legacy detail texture overlay.
+14. Phase 11 optional high-res JPEG replacement.
 
 This order should improve the currently observed failures fastest:
 
@@ -1203,5 +1232,9 @@ This order should improve the currently observed failures fastest:
   meshes. Validate both with fixture IDs before making global changes.
 - Terrain texture arrays may require fallback grouping if browser texture-array
   limits are lower than expected.
+- Detail textures are visually important but architecturally distinct from base
+  material selection. Baking them into terrain/static/interior materials would
+  fight the retail role-specific detail-surface/fade behavior and over-fragment
+  base material resources.
 - ACViewer sometimes uses pragmatic renderer shortcuts. Use retail references
   when ACViewer behavior conflicts with decoded data or the strategy document.

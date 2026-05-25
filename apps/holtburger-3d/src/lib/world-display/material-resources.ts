@@ -1,7 +1,13 @@
 import {
 	Color,
+	CompressedTexture,
 	DataTexture,
+	LinearFilter,
 	MeshStandardMaterial,
+	NoColorSpace,
+	RGBA_S3TC_DXT1_Format,
+	RGBA_S3TC_DXT3_Format,
+	RGBA_S3TC_DXT5_Format,
 	RGBAFormat,
 	SRGBColorSpace,
 	UnsignedByteType,
@@ -41,6 +47,11 @@ type MaterialResourceDiagnosticHandler = (
 	diagnostic: MaterialResourceDiagnostic,
 ) => void;
 
+export interface MaterialTextureCapabilities {
+	supportsS3tc: boolean;
+	supportsS3tcSrgb: boolean;
+}
+
 interface MaterialResourceRecord {
 	material: Material;
 }
@@ -57,6 +68,9 @@ const PIXEL_FORMAT_R5G6B5 = 0x17;
 const PIXEL_FORMAT_A4R4G4B4 = 0x1a;
 const PIXEL_FORMAT_A8 = 0x1c;
 const PIXEL_FORMAT_CUSTOM_LANDSCAPE_R8G8B8 = 0xf3;
+const PIXEL_FORMAT_DXT1 = 0x3154_5844;
+const PIXEL_FORMAT_DXT3 = 0x3354_5844;
+const PIXEL_FORMAT_DXT5 = 0x3554_5844;
 const FULL_ALPHA = 255;
 const BYTE_MAX = 255;
 const R5G6B5_RED_SHIFT = 11;
@@ -79,6 +93,10 @@ export class WorldMaterialResourceCache {
 
 	constructor(
 		private readonly reportDiagnostic?: MaterialResourceDiagnosticHandler,
+		private readonly textureCapabilities: MaterialTextureCapabilities = {
+			supportsS3tc: false,
+			supportsS3tcSrgb: false,
+		},
 	) {}
 
 	resolveMaterialPlan(options: {
@@ -169,7 +187,10 @@ export class WorldMaterialResourceCache {
 			return cached.texture;
 		}
 
-		const texture = createTexture(options.renderSurface);
+		const texture = createTexture(
+			options.renderSurface,
+			this.textureCapabilities,
+		);
 		if (!texture) {
 			return null;
 		}
@@ -298,7 +319,7 @@ function createMaterial(options: {
 		recipe,
 		options.preparedByAssetId,
 	);
-	const renderSurface = firstSupportedPreparedRenderSurface(
+	const renderSurface = firstTextureUploadCandidateRenderSurface(
 		recipe,
 		options.preparedByAssetId,
 	);
@@ -386,6 +407,9 @@ function reportTextureFallbackDiagnostics(options: {
 			continue;
 		}
 		if (!isSupportedDirectColorFormat(asset.payload.formatRaw)) {
+			if (isSupportedCompressedFormat(asset.payload.formatRaw)) {
+				continue;
+			}
 			options.reportDiagnostic({
 				key: `unsupported-render-surface:${options.materialAssetId}:${assetId}:${asset.payload.formatRaw}`,
 				message: `Using placeholder material because ${assetId} uses unsupported format ${asset.payload.format}.`,
@@ -415,6 +439,22 @@ function reportTextureFallbackDiagnostics(options: {
 	}
 
 	if (options.renderSurface && !options.texture) {
+		if (isSupportedCompressedFormat(options.renderSurface.formatRaw)) {
+			options.reportDiagnostic({
+				key: `compressed-texture-extension-missing:${options.materialAssetId}:${options.renderSurface.renderSurfaceId}`,
+				message: `Using placeholder material because ${formatRenderSurfaceAssetId(options.renderSurface.renderSurfaceId)} is ${options.renderSurface.format}, but S3TC compressed texture upload is unavailable.`,
+				detail: {
+					materialAssetId: options.materialAssetId,
+					renderSurfaceId: formatHex32(options.renderSurface.renderSurfaceId),
+					format: options.renderSurface.format,
+					formatRaw: options.renderSurface.formatRaw,
+					width: options.renderSurface.width,
+					height: options.renderSurface.height,
+					sourceByteLength: options.renderSurface.sourceByteLength,
+				},
+			});
+			return;
+		}
 		options.reportDiagnostic({
 			key: `texture-upload-failed:${options.materialAssetId}:${options.renderSurface.renderSurfaceId}`,
 			message: `Using placeholder material because ${formatRenderSurfaceAssetId(options.renderSurface.renderSurfaceId)} could not be uploaded as a texture.`,
@@ -471,7 +511,7 @@ function firstPreparedRenderTexture(
 	return null;
 }
 
-function firstSupportedPreparedRenderSurface(
+function firstTextureUploadCandidateRenderSurface(
 	recipe: PreparedMaterialRecipePayload,
 	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>,
 ): PreparedRenderSurfacePayload | null {
@@ -480,7 +520,8 @@ function firstSupportedPreparedRenderSurface(
 		const asset = preparedByAssetId[assetId];
 		if (
 			asset?.payload.kind === "render-surface" &&
-			isSupportedDirectColorFormat(asset.payload.formatRaw)
+			(isSupportedDirectColorFormat(asset.payload.formatRaw) ||
+				isSupportedCompressedFormat(asset.payload.formatRaw))
 		) {
 			return asset.payload;
 		}
@@ -502,7 +543,14 @@ function formatRenderSurfaceAssetId(renderSurfaceId: number): string {
 
 function createTexture(
 	renderSurface: PreparedRenderSurfacePayload,
+	capabilities: MaterialTextureCapabilities = {
+		supportsS3tc: false,
+		supportsS3tcSrgb: false,
+	},
 ): Texture | null {
+	if (isSupportedCompressedFormat(renderSurface.formatRaw)) {
+		return createCompressedTexture(renderSurface, capabilities);
+	}
 	if (!isSupportedDirectColorFormat(renderSurface.formatRaw)) {
 		return null;
 	}
@@ -515,6 +563,53 @@ function createTexture(
 		UnsignedByteType,
 	);
 	texture.colorSpace = SRGBColorSpace;
+	texture.needsUpdate = true;
+	return texture;
+}
+
+function createCompressedTexture(
+	renderSurface: PreparedRenderSurfacePayload,
+	capabilities: MaterialTextureCapabilities,
+): Texture | null {
+	if (!capabilities.supportsS3tc) {
+		return null;
+	}
+	const format = compressedTextureFormat(renderSurface.formatRaw);
+	if (format === null) {
+		return null;
+	}
+	const expectedByteLength = expectedCompressedSourceByteLength(renderSurface);
+	if (renderSurface.sourceBytes.byteLength !== expectedByteLength) {
+		throw new Error(
+			`RenderSurface ${formatHex32(renderSurface.renderSurfaceId)} ${renderSurface.format} expected ${expectedByteLength} compressed source bytes, got ${renderSurface.sourceBytes.byteLength}.`,
+		);
+	}
+	if (renderSurface.sourceByteLength !== renderSurface.sourceBytes.byteLength) {
+		throw new Error(
+			`RenderSurface ${formatHex32(renderSurface.renderSurfaceId)} declared ${renderSurface.sourceByteLength} source bytes but binary payload carried ${renderSurface.sourceBytes.byteLength}.`,
+		);
+	}
+
+	const texture = new CompressedTexture(
+		[
+			{
+				data: renderSurface.sourceBytes,
+				width: renderSurface.width,
+				height: renderSurface.height,
+			},
+		],
+		renderSurface.width,
+		renderSurface.height,
+		format,
+		UnsignedByteType,
+		undefined,
+		undefined,
+		undefined,
+		LinearFilter,
+		LinearFilter,
+		undefined,
+		capabilities.supportsS3tcSrgb ? SRGBColorSpace : NoColorSpace,
+	);
 	texture.needsUpdate = true;
 	return texture;
 }
@@ -675,8 +770,63 @@ function isSupportedDirectColorFormat(formatRaw: number): boolean {
 
 function hasSourceAlpha(formatRaw: number): boolean {
 	return (
-		formatRaw === PIXEL_FORMAT_A8R8G8B8 || formatRaw === PIXEL_FORMAT_A4R4G4B4
+		formatRaw === PIXEL_FORMAT_A8R8G8B8 ||
+		formatRaw === PIXEL_FORMAT_A4R4G4B4 ||
+		formatRaw === PIXEL_FORMAT_DXT3 ||
+		formatRaw === PIXEL_FORMAT_DXT5
 	);
+}
+
+function isSupportedCompressedFormat(formatRaw: number): boolean {
+	return compressedTextureFormat(formatRaw) !== null;
+}
+
+function compressedTextureFormat(
+	formatRaw: number,
+):
+	| typeof RGBA_S3TC_DXT1_Format
+	| typeof RGBA_S3TC_DXT3_Format
+	| typeof RGBA_S3TC_DXT5_Format
+	| null {
+	switch (formatRaw) {
+		case PIXEL_FORMAT_DXT1:
+			return RGBA_S3TC_DXT1_Format;
+		case PIXEL_FORMAT_DXT3:
+			return RGBA_S3TC_DXT3_Format;
+		case PIXEL_FORMAT_DXT5:
+			return RGBA_S3TC_DXT5_Format;
+		default:
+			return null;
+	}
+}
+
+function expectedCompressedSourceByteLength(
+	renderSurface: PreparedRenderSurfacePayload,
+): number {
+	assertValidSurfaceDimensions(renderSurface);
+	const bytesPerBlock = compressedBytesPerBlock(renderSurface.formatRaw);
+	if (bytesPerBlock === null) {
+		throw new Error(
+			`RenderSurface ${formatHex32(renderSurface.renderSurfaceId)} format ${renderSurface.format} is not a compressed upload format.`,
+		);
+	}
+	return (
+		Math.floor((renderSurface.width + 3) / 4) *
+		Math.floor((renderSurface.height + 3) / 4) *
+		bytesPerBlock
+	);
+}
+
+function compressedBytesPerBlock(formatRaw: number): number | null {
+	switch (formatRaw) {
+		case PIXEL_FORMAT_DXT1:
+			return 8;
+		case PIXEL_FORMAT_DXT3:
+		case PIXEL_FORMAT_DXT5:
+			return 16;
+		default:
+			return null;
+	}
 }
 
 function scaleBitsToByte(value: number, bitCount: number): number {

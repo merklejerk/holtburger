@@ -62,6 +62,7 @@ import {
 	isPreparedGfxObjAsset,
 } from "./static-renderables";
 import {
+	type MaterialTextureCapabilities,
 	type MaterialResourceDiagnostic,
 	WorldMaterialResourceCache,
 	formatMaterialAssetId,
@@ -237,6 +238,17 @@ interface PortalDepthResetCapability {
 	reason: string | null;
 }
 
+function detectMaterialTextureCapabilities(
+	renderer: WebGLRenderer,
+): MaterialTextureCapabilities {
+	return {
+		supportsS3tc: renderer.extensions.has("WEBGL_compressed_texture_s3tc"),
+		supportsS3tcSrgb: renderer.extensions.has(
+			"WEBGL_compressed_texture_s3tc_srgb",
+		),
+	};
+}
+
 function createCoalescedMaterialDiagnosticReporter(): (
 	diagnostic: MaterialResourceDiagnostic,
 ) => void {
@@ -282,8 +294,7 @@ function createCoalescedMaterialDiagnosticReporter(): (
 					preparedKinds: Object.fromEntries(bucket.preparedKinds),
 					preparedAssetCounts: bucket.preparedAssetCounts,
 					preparedMaterialRecipeCount: bucket.preparedMaterialRecipeCount,
-					preparedMaterialAssetIdSamples:
-						bucket.preparedMaterialAssetIdSamples,
+					preparedMaterialAssetIdSamples: bucket.preparedMaterialAssetIdSamples,
 					samples: bucket.samples.map((sample) => sample.detail),
 				},
 			);
@@ -442,6 +453,7 @@ export function createWorldDisplayRenderer(
 	const reportMaterialDiagnostic = createCoalescedMaterialDiagnosticReporter();
 	const materialResourceCache = new WorldMaterialResourceCache(
 		reportMaterialDiagnostic,
+		detectMaterialTextureCapabilities(renderer),
 	);
 
 	const camera = new PerspectiveCamera(52, 1, 0.1, 5000);

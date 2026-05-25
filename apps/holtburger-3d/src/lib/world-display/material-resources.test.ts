@@ -1,4 +1,4 @@
-import { MeshStandardMaterial } from "three";
+import { CompressedTexture, MeshStandardMaterial } from "three";
 import { describe, expect, it } from "vitest";
 
 import type {
@@ -61,6 +61,34 @@ describe("world material resource cache", () => {
 		cache.dispose();
 	});
 
+	it("uses compressed DXT render-surface bytes when S3TC upload is available", () => {
+		const cache = new WorldMaterialResourceCache(undefined, {
+			supportsS3tc: true,
+			supportsS3tcSrgb: true,
+		});
+		const materialAssetId = formatMaterialAssetId(0x08000005);
+		const renderSurfaceAssetId = "render-surface/06000005";
+		const plan = cache.resolveMaterialPlan({
+			slots: [{ slotIndex: 0, surfaceId: 0x08000005, materialAssetId }],
+			appearanceKey: "base",
+			preparedByAssetId: {
+				[materialAssetId]: createPreparedAsset(
+					materialAssetId,
+					createTextureMaterialRecipe(0x08000005, 0x06000005),
+				),
+				[renderSurfaceAssetId]: createPreparedAsset(
+					renderSurfaceAssetId,
+					createDxtRenderSurfacePayload(0x06000005),
+				),
+			},
+			fallbackColorKey: "part",
+		});
+
+		const material = plan.materials[0] as MeshStandardMaterial;
+		expect(material.map).toBeInstanceOf(CompressedTexture);
+		cache.dispose();
+	});
+
 	it("refreshes fallback materials after texture dependencies become prepared", () => {
 		const cache = new WorldMaterialResourceCache();
 		const materialAssetId = formatMaterialAssetId(0x08000002);
@@ -91,8 +119,45 @@ describe("world material resource cache", () => {
 		});
 
 		expect((fallbackPlan.materials[0] as MeshStandardMaterial).map).toBeNull();
-		expect((texturedPlan.materials[0] as MeshStandardMaterial).map).not.toBeNull();
+		expect(
+			(texturedPlan.materials[0] as MeshStandardMaterial).map,
+		).not.toBeNull();
 		expect(texturedPlan.materials[0]).not.toBe(fallbackPlan.materials[0]);
+		cache.dispose();
+	});
+
+	it("reports compressed texture capability misses before drawing a fallback", () => {
+		const diagnostics: string[] = [];
+		const materialAssetId = formatMaterialAssetId(0x08000006);
+		const cache = new WorldMaterialResourceCache((diagnostic) => {
+			diagnostics.push(diagnostic.key);
+			expect(diagnostic.detail).toMatchObject({
+				materialAssetId,
+				format: "Dxt1",
+				formatRaw: 0x3154_5844,
+			});
+		});
+
+		const plan = cache.resolveMaterialPlan({
+			slots: [{ slotIndex: 0, surfaceId: 0x08000006, materialAssetId }],
+			appearanceKey: "visible-cell",
+			preparedByAssetId: {
+				[materialAssetId]: createPreparedAsset(
+					materialAssetId,
+					createTextureMaterialRecipe(0x08000006, 0x06000006),
+				),
+				"render-surface/06000006": createPreparedAsset(
+					"render-surface/06000006",
+					createDxtRenderSurfacePayload(0x06000006),
+				),
+			},
+			fallbackColorKey: "visible-cell",
+		});
+
+		expect(diagnostics).toEqual([
+			"compressed-texture-extension-missing:material/08000006:100663302",
+		]);
+		expect((plan.materials[0] as MeshStandardMaterial).map).toBeNull();
 		cache.dispose();
 	});
 
@@ -192,6 +257,7 @@ function createTextureMaterialRecipe(
 	surfaceId: number,
 	renderSurfaceId: number,
 ): PreparedMaterialRecipePayload {
+	const renderSurfaceAssetId = `render-surface/${renderSurfaceId.toString(16).padStart(8, "0")}`;
 	return {
 		...createSolidMaterialRecipe(surfaceId, 0xffffffff),
 		source: {
@@ -203,7 +269,7 @@ function createTextureMaterialRecipe(
 		},
 		dependencies: {
 			renderTextureAssetIds: [],
-			renderSurfaceAssetIds: ["render-surface/06000002"],
+			renderSurfaceAssetIds: [renderSurfaceAssetId],
 			paletteAssetIds: [],
 		},
 	};
@@ -248,6 +314,20 @@ function createRenderSurfacePayload(
 		sourceBytes: new Uint8Array([0x33, 0x22, 0x11, 0xff]),
 		defaultPaletteId: null,
 		dependencies: { paletteAssetIds: [] },
+	};
+}
+
+function createDxtRenderSurfacePayload(
+	renderSurfaceId: number,
+): PreparedRenderSurfacePayload {
+	return {
+		...createRenderSurfacePayload(renderSurfaceId),
+		width: 4,
+		height: 4,
+		formatRaw: 0x3154_5844,
+		format: "Dxt1",
+		sourceByteLength: 8,
+		sourceBytes: new Uint8Array(8),
 	};
 }
 

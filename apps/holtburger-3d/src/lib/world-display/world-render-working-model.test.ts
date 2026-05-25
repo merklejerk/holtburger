@@ -111,6 +111,7 @@ function createStaticRenderableSceneModel(
 		),
 		missingSourceAssetIds: [],
 		missingGfxAssetIds: [],
+		missingSetupAppearanceAssetIds: [],
 	};
 }
 

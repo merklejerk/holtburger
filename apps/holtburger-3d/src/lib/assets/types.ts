@@ -579,7 +579,7 @@ export interface PreparedMaterialRecipePayload extends PreparedAssetPayloadBase 
 	};
 }
 
-interface PreparedSetupAppearancePayload extends PreparedAssetPayloadBase {
+export interface PreparedSetupAppearancePayload extends PreparedAssetPayloadBase {
 	kind: "setup-appearance";
 	sourceAssetKind: "setup-appearance";
 	setupModelId: number;

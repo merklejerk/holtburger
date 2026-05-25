@@ -12,7 +12,10 @@ import {
 	type PreparedPolygonSetRenderGeometry,
 	type PreparedSetupModelPayload,
 } from "../assets/types";
-import { formatEnvCellAssetId, formatLandblockOutdoorAssetId } from "../landblocks";
+import {
+	formatEnvCellAssetId,
+	formatLandblockOutdoorAssetId,
+} from "../landblocks";
 import { buildStaticRenderablePartMatrix } from "./static-renderable-geometry";
 import { deriveStaticRenderableSceneModel } from "./static-renderables";
 
@@ -67,6 +70,9 @@ describe("static renderables", () => {
 		);
 		const part = scene.parts[0];
 
+		expect(scene.missingSetupAppearanceAssetIds).toEqual([
+			"setup-appearance/02000001",
+		]);
 		expect(part?.partPlacements).toEqual([
 			createPlacement({ x: 3, y: 4, z: 5 }),
 		]);
@@ -75,6 +81,57 @@ describe("static renderables", () => {
 			buildStaticRenderablePartMatrix(part!),
 		);
 		expect(position).toEqual(new Vector3(13, 7, -24));
+	});
+
+	it("prefers setup appearance selected parts and material slots", () => {
+		const envCellId = 0x00070100;
+		const setupDid = 0x02000001;
+		const baseGfxObjId = 0x01000001;
+		const appearanceGfxObjId = 0x01000002;
+		const assetState = createAssetState([
+			createEnvCellRecord({
+				envCellId,
+				localPlacement: createPlacement({ x: 0, y: 0, z: 0 }),
+				staticPlacement: createPlacement({ x: 10, y: 20, z: 2 }),
+				sourceDid: setupDid,
+			}),
+			createSetupModelRecord({
+				setupModelId: setupDid,
+				gfxObjId: baseGfxObjId,
+				partPlacement: createPlacement({ x: 3, y: 4, z: 5 }),
+			}),
+			createSetupAppearanceRecord({
+				setupModelId: setupDid,
+				gfxObjId: appearanceGfxObjId,
+				materialAssetId: "material/080000aa",
+				surfaceId: 0x080000aa,
+			}),
+			createGfxObjRecord(baseGfxObjId, [0x08000001]),
+			createGfxObjRecord(appearanceGfxObjId, [0x08000002]),
+		]);
+		const scene = deriveStaticRenderableSceneModel(
+			assetState,
+			createInteriorDestination(envCellId),
+		);
+		const part = scene.parts[0];
+
+		expect(scene.missingSetupAppearanceAssetIds).toEqual([]);
+		expect(part?.gfxObjId).toBe(appearanceGfxObjId);
+		expect(part?.materialAppearanceKey).toBe("setup-appearance/02000001");
+		expect(part?.materialAppearanceContext.selectedPartsSignature).toContain(
+			"gfx-obj/01000002",
+		);
+		expect(part?.materialSlots).toEqual([
+			{
+				slotIndex: 0,
+				surfaceId: 0x080000aa,
+				materialAssetId: "material/080000aa",
+			},
+		]);
+		expect(part?.materialSignature).toContain("material/080000aa");
+		expect(part?.partPlacements).toEqual([
+			createPlacement({ x: 3, y: 4, z: 5 }),
+		]);
 	});
 
 	it("normalizes outdoor static placements that cross landblock edges", () => {
@@ -124,7 +181,9 @@ function createAssetState(records: PreparedAssetRecord[]): AssetChannelState {
 	return state;
 }
 
-function createInteriorDestination(envCellId: number): BrowserLocationSelection {
+function createInteriorDestination(
+	envCellId: number,
+): BrowserLocationSelection {
 	return {
 		kind: "interior-cell",
 		label: `0x${envCellId.toString(16).padStart(8, "0")}`,
@@ -134,7 +193,9 @@ function createInteriorDestination(envCellId: number): BrowserLocationSelection 
 	};
 }
 
-function createOutdoorDestination(landblockId: number): BrowserLocationSelection {
+function createOutdoorDestination(
+	landblockId: number,
+): BrowserLocationSelection {
 	return {
 		kind: "outdoor-location",
 		label: "24.00N, 36.00E, 0.0Z",
@@ -178,7 +239,11 @@ function createLandblockOutdoorRecord(options: {
 				vertices: [],
 				triangles: [],
 				quads: [],
-				terrainBvh: { coordinateSpace: "landblock-render-local", nodes: [], items: [] },
+				terrainBvh: {
+					coordinateSpace: "landblock-render-local",
+					nodes: [],
+					items: [],
+				},
 				minHeight: 0,
 				maxHeight: 0,
 				bounds: null,
@@ -260,7 +325,10 @@ function createEnvCellRecord(options: {
 	};
 }
 
-function createGfxObjRecord(gfxObjId: number): PreparedAssetRecord {
+function createGfxObjRecord(
+	gfxObjId: number,
+	surfaceIds: number[] = [],
+): PreparedAssetRecord {
 	const assetId = formatGfxObjAssetId(gfxObjId);
 	return {
 		request: { requestId: assetId, assetId, priority: "bootstrap" },
@@ -278,7 +346,7 @@ function createGfxObjRecord(gfxObjId: number): PreparedAssetRecord {
 			provenance: PROVENANCE,
 			gfxObjId,
 			flags: null,
-			surfaceIds: [],
+			surfaceIds,
 			vertexArray: { vertexType: null, vertexCount: 0, vertices: [] },
 			drawingPolygons: [],
 			drawingBsp: null,
@@ -286,6 +354,55 @@ function createGfxObjRecord(gfxObjId: number): PreparedAssetRecord {
 			renderGeometry: createEmptyRenderGeometry(),
 			sortCenter: null,
 			didDegrade: null,
+		},
+	};
+}
+
+function createSetupAppearanceRecord(options: {
+	setupModelId: number;
+	gfxObjId: number;
+	surfaceId: number;
+	materialAssetId: string;
+}): PreparedAssetRecord {
+	const assetId = formatSetupAppearanceAssetId(options.setupModelId);
+	return {
+		request: { requestId: assetId, assetId, priority: "bootstrap" },
+		response: {
+			requestId: assetId,
+			assetId,
+			payloadKind: "json",
+			payload: null,
+		},
+		preparedAt: "test",
+		payload: {
+			kind: "setup-appearance",
+			sourceAssetKind: "setup-appearance",
+			residencyKind: "unknown",
+			provenance: PROVENANCE,
+			setupModelId: options.setupModelId,
+			appearanceKey: formatSetupAppearanceAssetId(options.setupModelId),
+			parts: [
+				{
+					partIndex: 0,
+					gfxObjId: options.gfxObjId,
+					gfxObjAssetId: formatGfxObjAssetId(options.gfxObjId),
+					materialSlots: [
+						{
+							slotIndex: 0,
+							surfaceId: options.surfaceId,
+							materialAssetId: options.materialAssetId,
+						},
+					],
+				},
+			],
+			textureChanges: [],
+			animPartChanges: [],
+			paletteId: null,
+			subPalettes: [],
+			dependencies: {
+				materialAssetIds: [options.materialAssetId],
+				paletteAssetIds: [],
+			},
 		},
 	};
 }
@@ -375,6 +492,10 @@ function formatGfxObjAssetId(gfxObjId: number): string {
 
 function formatSetupModelAssetId(setupModelId: number): string {
 	return `setup-model/${setupModelId.toString(16).padStart(8, "0")}`;
+}
+
+function formatSetupAppearanceAssetId(setupModelId: number): string {
+	return `setup-appearance/${setupModelId.toString(16).padStart(8, "0")}`;
 }
 
 function formatStaticSourceAssetId(sourceDid: number): string {

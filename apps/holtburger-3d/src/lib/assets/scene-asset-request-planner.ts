@@ -32,6 +32,11 @@ type PreparedAssetDependencyMap = Partial<
 	Record<PreparedAssetDependencyKey, readonly string[]>
 >;
 
+interface StaticRenderableDependencyAssetIds {
+	geometryAssetIds: string[];
+	materialInputAssetIds: string[];
+}
+
 export interface OutdoorSceneRequestOptions {
 	terrainRadius: number;
 	buildingRadius: number;
@@ -343,38 +348,32 @@ function createStaticRenderableAssetRequests(
 			detailLandblockIds,
 		},
 	);
-	const setupModelPartGfxAssetIds = collectPreparedDependencyAssetIds(
+	const outdoorStaticDependencies = collectStaticRenderableDependencyAssetIds(
 		preparedByAssetId,
 		outdoorSourceAssetIds,
-		"gfxObjAssetIds",
 	);
 	const envCellStaticSourceAssetIds = collectPreparedDependencyAssetIds(
 		preparedByAssetId,
 		linkedInteriorCoverage.envCellIds.map(formatEnvCellAssetId),
 		"renderableSourceAssetIds",
 	);
-	const envCellSetupModelPartGfxAssetIds = collectPreparedDependencyAssetIds(
+	const envCellStaticDependencies = collectStaticRenderableDependencyAssetIds(
 		preparedByAssetId,
 		envCellStaticSourceAssetIds,
-		"gfxObjAssetIds",
 	);
 	const materialAssetIds = collectStaticRenderableMaterialAssetIds(
 		preparedByAssetId,
 		[
-			...outdoorSourceAssetIds,
-			...setupModelPartGfxAssetIds,
-			...envCellStaticSourceAssetIds,
-			...envCellSetupModelPartGfxAssetIds,
+			...outdoorStaticDependencies.materialInputAssetIds,
+			...envCellStaticDependencies.materialInputAssetIds,
 		],
 		new Set(linkedInteriorCoverage.envCellIds),
 	);
 
 	const geometryAssetIds = [
 		...new Set([
-			...outdoorSourceAssetIds,
-			...setupModelPartGfxAssetIds,
-			...envCellStaticSourceAssetIds,
-			...envCellSetupModelPartGfxAssetIds,
+			...outdoorStaticDependencies.geometryAssetIds,
+			...envCellStaticDependencies.geometryAssetIds,
 		]),
 	].sort();
 	const materialRequests = createUnpreparedRequests(
@@ -391,7 +390,7 @@ function createStaticRenderableAssetRequests(
 		...geometryAssetIds
 			.filter(
 				(assetId) =>
-					isStaticRenderableAssetId(assetId) &&
+					isStaticRenderableOrSetupAppearanceAssetId(assetId) &&
 					!preparedByAssetId[assetId] &&
 					!pendingAssetIdSet.has(assetId),
 			)
@@ -466,20 +465,17 @@ function createIndoorStaticRenderableAssetRequests(
 		activeEnvCellIds.map(formatEnvCellAssetId),
 		"renderableSourceAssetIds",
 	);
-	const setupModelPartGfxAssetIds = collectPreparedDependencyAssetIds(
+	const staticDependencies = collectStaticRenderableDependencyAssetIds(
 		preparedByAssetId,
 		envCellStaticSourceAssetIds,
-		"gfxObjAssetIds",
 	);
 	const materialAssetIds = collectStaticRenderableMaterialAssetIds(
 		preparedByAssetId,
-		[...envCellStaticSourceAssetIds, ...setupModelPartGfxAssetIds],
+		staticDependencies.materialInputAssetIds,
 		new Set(activeEnvCellIds),
 	);
 
-	const geometryAssetIds = [
-		...new Set([...envCellStaticSourceAssetIds, ...setupModelPartGfxAssetIds]),
-	].sort();
+	const geometryAssetIds = staticDependencies.geometryAssetIds;
 	const materialRequests = createUnpreparedRequests(
 		materialAssetIds,
 		requestRevision,
@@ -494,7 +490,7 @@ function createIndoorStaticRenderableAssetRequests(
 		...geometryAssetIds
 			.filter(
 				(assetId) =>
-					isStaticRenderableAssetId(assetId) &&
+					isStaticRenderableOrSetupAppearanceAssetId(assetId) &&
 					!preparedByAssetId[assetId] &&
 					!pendingAssetIdSet.has(assetId),
 			)
@@ -527,14 +523,13 @@ function collectIndoorVisibleMaterialAssetIds(
 		activeEnvCellIds.map(formatEnvCellAssetId),
 		"renderableSourceAssetIds",
 	);
-	const setupModelPartGfxAssetIds = collectPreparedDependencyAssetIds(
+	const staticDependencies = collectStaticRenderableDependencyAssetIds(
 		preparedByAssetId,
 		envCellStaticSourceAssetIds,
-		"gfxObjAssetIds",
 	);
 	return collectStaticRenderableMaterialAssetIds(
 		preparedByAssetId,
-		[...envCellStaticSourceAssetIds, ...setupModelPartGfxAssetIds],
+		staticDependencies.materialInputAssetIds,
 		new Set(activeEnvCellIds),
 	);
 }
@@ -569,42 +564,63 @@ function collectOutdoorVisibleMaterialAssetIds(
 			detailLandblockIds,
 		},
 	);
-	const setupModelPartGfxAssetIds = collectPreparedDependencyAssetIds(
+	const outdoorStaticDependencies = collectStaticRenderableDependencyAssetIds(
 		preparedByAssetId,
 		outdoorSourceAssetIds,
-		"gfxObjAssetIds",
 	);
 	const envCellStaticSourceAssetIds = collectPreparedDependencyAssetIds(
 		preparedByAssetId,
 		linkedInteriorCoverage.envCellIds.map(formatEnvCellAssetId),
 		"renderableSourceAssetIds",
 	);
-	const envCellSetupModelPartGfxAssetIds = collectPreparedDependencyAssetIds(
+	const envCellStaticDependencies = collectStaticRenderableDependencyAssetIds(
 		preparedByAssetId,
 		envCellStaticSourceAssetIds,
-		"gfxObjAssetIds",
 	);
 	return collectStaticRenderableMaterialAssetIds(
 		preparedByAssetId,
 		[
-			...outdoorSourceAssetIds,
-			...setupModelPartGfxAssetIds,
-			...envCellStaticSourceAssetIds,
-			...envCellSetupModelPartGfxAssetIds,
+			...outdoorStaticDependencies.materialInputAssetIds,
+			...envCellStaticDependencies.materialInputAssetIds,
 		],
 		new Set(linkedInteriorCoverage.envCellIds),
 	);
 }
 
+function collectStaticRenderableDependencyAssetIds(
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	sourceAssetIds: readonly string[],
+): StaticRenderableDependencyAssetIds {
+	const setupModelFallbackPartGfxAssetIds =
+		collectSetupModelFallbackPartGfxAssetIds(preparedByAssetId, sourceAssetIds);
+	const setupAppearanceAssetIds =
+		collectSetupAppearanceAssetIds(sourceAssetIds);
+	const setupAppearancePartGfxAssetIds = collectSetupAppearancePartGfxAssetIds(
+		preparedByAssetId,
+		setupAppearanceAssetIds,
+	);
+	const geometryAssetIds = uniqueSortedAssetIds([
+		...sourceAssetIds,
+		...setupAppearanceAssetIds,
+		...setupModelFallbackPartGfxAssetIds,
+		...setupAppearancePartGfxAssetIds,
+	]);
+
+	return {
+		geometryAssetIds,
+		materialInputAssetIds: geometryAssetIds,
+	};
+}
+
 function collectStaticRenderableMaterialAssetIds(
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
-	gfxAssetIds: readonly string[],
+	assetIds: readonly string[],
 	envCellIds: ReadonlySet<number>,
 ): string[] {
 	return uniqueSortedAssetIds([
 		...collectPreparedDependencyAssetIds(
 			preparedByAssetId,
-			gfxAssetIds,
+			assetIds,
 			"materialAssetIds",
 		),
 		...collectPreparedDependencyAssetIds(
@@ -613,6 +629,57 @@ function collectStaticRenderableMaterialAssetIds(
 			"materialAssetIds",
 		),
 	]);
+}
+
+function collectSetupAppearanceAssetIds(assetIds: readonly string[]): string[] {
+	return uniqueSortedAssetIds(
+		assetIds.flatMap((assetId) => {
+			const match = /^setup-model\/([0-9a-fA-F]{8})$/.exec(assetId);
+			return match?.[1] ? [`setup-appearance/${match[1].toLowerCase()}`] : [];
+		}),
+	);
+}
+
+function collectSetupAppearancePartGfxAssetIds(
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	setupAppearanceAssetIds: readonly string[],
+): string[] {
+	return uniqueSortedAssetIds(
+		setupAppearanceAssetIds.flatMap((assetId) => {
+			const payload = preparedByAssetId[assetId]?.payload;
+			return payload?.kind === "setup-appearance"
+				? payload.parts.map((part) => part.gfxObjAssetId)
+				: [];
+		}),
+	);
+}
+
+function collectSetupModelFallbackPartGfxAssetIds(
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	sourceAssetIds: readonly string[],
+): string[] {
+	return uniqueSortedAssetIds(
+		sourceAssetIds.flatMap((assetId) => {
+			if (!/^setup-model\/[0-9a-fA-F]{8}$/.test(assetId)) {
+				return [];
+			}
+			const setupAppearanceAssetId = collectSetupAppearanceAssetIds([
+				assetId,
+			])[0];
+			if (
+				setupAppearanceAssetId &&
+				preparedByAssetId[setupAppearanceAssetId]?.payload.kind ===
+					"setup-appearance"
+			) {
+				return [];
+			}
+			const dependencies = getPreparedAssetDependencies(
+				preparedByAssetId[assetId],
+			);
+			const dependencyAssetIds = dependencies?.gfxObjAssetIds;
+			return Array.isArray(dependencyAssetIds) ? dependencyAssetIds : [];
+		}),
+	);
 }
 
 function collectSelectedOutdoorSourceAssetIds(
@@ -733,5 +800,12 @@ function isStaticRenderableAssetId(assetId: string): boolean {
 	return (
 		/^gfx-obj\/[0-9a-fA-F]{8}$/.test(assetId) ||
 		/^setup-model\/[0-9a-fA-F]{8}$/.test(assetId)
+	);
+}
+
+function isStaticRenderableOrSetupAppearanceAssetId(assetId: string): boolean {
+	return (
+		isStaticRenderableAssetId(assetId) ||
+		/^setup-appearance\/[0-9a-fA-F]{8}$/.test(assetId)
 	);
 }

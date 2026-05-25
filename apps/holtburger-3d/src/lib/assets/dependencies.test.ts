@@ -13,7 +13,7 @@ const provenance = {
 };
 
 describe("asset response dependencies", () => {
-	it("extracts setup-model part gfx dependencies without default setup appearance", () => {
+	it("extracts setup-model part gfx dependencies for graph walking", () => {
 		const response = createJsonResponse("setup-model/02000010", {
 			kind: "setup-model",
 			residencyKind: "unknown",

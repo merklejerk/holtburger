@@ -140,7 +140,7 @@ describe("scene asset request planner", () => {
 		]);
 	});
 
-	it("requests prepared setup-model part gfx dependencies without graph hydration", () => {
+	it("requests prepared setup-model part gfx dependencies and base setup appearance without graph hydration", () => {
 		const destination = parseBrowserLocationInput("016c0155");
 		expect(destination).not.toBeNull();
 
@@ -170,6 +170,47 @@ describe("scene asset request planner", () => {
 
 		expect(requests.map((request) => request.assetId)).toEqual([
 			"gfx-obj/01000002",
+			"setup-appearance/02000001",
+		]);
+	});
+
+	it("requests setup appearance selected part gfx and material dependencies when prepared", () => {
+		const destination = parseBrowserLocationInput("016c0155");
+		expect(destination).not.toBeNull();
+
+		const preparedTopology = createPreparedTopology(0x016cffff, [0x016c0155]);
+		const preparedEnvCell = createPreparedEnvCell(
+			0x016c0155,
+			[],
+			["setup-model/02000001"],
+		);
+		const setupModel = createPreparedSetupModel(
+			"setup-model/02000001",
+			"gfx-obj/01000002",
+		);
+		const setupAppearance = createPreparedSetupAppearance(
+			"setup-appearance/02000001",
+			"gfx-obj/01000003",
+			["material/08000099"],
+		);
+		const requests = createSceneCoverageRequests(
+			{
+				requestRevision: 6,
+				browserDestination: destination,
+				preparedByAssetId: {
+					[preparedTopology.request.assetId]: preparedTopology,
+					[preparedEnvCell.request.assetId]: preparedEnvCell,
+					[setupModel.request.assetId]: setupModel,
+					[setupAppearance.request.assetId]: setupAppearance,
+				},
+				pendingAssetIds: [],
+			},
+			"streaming",
+		);
+
+		expect(requests.map((request) => request.assetId)).toEqual([
+			"gfx-obj/01000003",
+			"material/08000099",
 		]);
 	});
 
@@ -493,6 +534,65 @@ function createPreparedSetupModel(
 		defaultScriptTable: null,
 		dependencies: {
 			gfxObjAssetIds: [gfxObjAssetId],
+		},
+	};
+	return {
+		request,
+		response: {
+			requestId: request.requestId,
+			assetId,
+			payloadKind: "json",
+			payload,
+		},
+		payload,
+		preparedAt: "2026-05-23T00:00:00.000Z",
+	};
+}
+
+function createPreparedSetupAppearance(
+	assetId: string,
+	gfxObjAssetId: string,
+	materialAssetIds: string[],
+): PreparedAssetRecord {
+	const request = {
+		requestId: `fixture-${assetId}`,
+		assetId,
+		priority: "streaming" as const,
+	};
+	const payload = {
+		kind: "setup-appearance" as const,
+		sourceAssetKind: "setup-appearance" as const,
+		residencyKind: "unknown" as const,
+		provenance: {
+			source: "repo-local-hba" as const,
+			sourceAssetKind: "setup-appearance",
+			errorCode: null,
+			detail: null,
+		},
+		setupModelId: 0x02000001,
+		appearanceKey: "setup-appearance/02000001",
+		parts: [
+			{
+				partIndex: 0,
+				gfxObjId: 0x01000003,
+				gfxObjAssetId,
+				materialSlots: materialAssetIds.map((materialAssetId, slotIndex) => ({
+					slotIndex,
+					surfaceId: Number.parseInt(
+						materialAssetId.slice("material/".length),
+						16,
+					),
+					materialAssetId,
+				})),
+			},
+		],
+		textureChanges: [],
+		animPartChanges: [],
+		paletteId: null,
+		subPalettes: [],
+		dependencies: {
+			materialAssetIds,
+			paletteAssetIds: [],
 		},
 	};
 	return {

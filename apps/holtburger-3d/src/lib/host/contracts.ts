@@ -659,6 +659,21 @@ const setupModelPlacementSetDtoSchema = z.object({
 	key: z.number().int(),
 	localPlacements: z.array(placementTransformDtoSchema),
 	hookCount: z.number().int().nonnegative(),
+	textureVelocities: z.array(
+		z.discriminatedUnion("kind", [
+			z.object({
+				kind: z.literal("all-parts"),
+				uSpeed: z.number().finite(),
+				vSpeed: z.number().finite(),
+			}),
+			z.object({
+				kind: z.literal("part"),
+				partIndex: z.number().int().nonnegative(),
+				uSpeed: z.number().finite(),
+				vSpeed: z.number().finite(),
+			}),
+		]),
+	),
 });
 
 const setupModelCollisionWitnessDtoSchema = z.object({

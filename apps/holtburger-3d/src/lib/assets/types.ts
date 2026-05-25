@@ -515,7 +515,21 @@ interface PreparedSetupModelPlacementSet {
 	key: number;
 	localPlacements: PlacementTransformDto[];
 	hookCount: number;
+	textureVelocities: PreparedTextureVelocity[];
 }
+
+export type PreparedTextureVelocity =
+	| {
+			kind: "all-parts";
+			uSpeed: number;
+			vSpeed: number;
+	  }
+	| {
+			kind: "part";
+			partIndex: number;
+			uSpeed: number;
+			vSpeed: number;
+	  };
 
 interface PreparedSetupModelLight {
 	key: number;

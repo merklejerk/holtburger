@@ -2,6 +2,7 @@ use crate::adapter::binary::{BinaryAssetSectionWriter, serialize_landblock_terra
 use crate::adapter::service::asset_cache_error_code;
 use holtburger_common::math::{Quaternion, Vector3};
 use holtburger_content::*;
+use holtburger_dat::file_type::setup_model::AnimationHookPayload;
 use holtburger_dat::file_type::{Palette, RenderSurface, SetupModel};
 use holtburger_dat::physics::BspNode;
 
@@ -1325,7 +1326,30 @@ pub fn serialize_placement_sets(setup_model: &SetupModel) -> Vec<serde_json::Val
                     .map(serialize_frame)
                     .collect::<Vec<_>>(),
                 "hookCount": placement.anim_frame.hooks.len(),
+                "textureVelocities": serialize_texture_velocity_hooks(&placement.anim_frame.hooks),
             })
+        })
+        .collect()
+}
+
+fn serialize_texture_velocity_hooks(
+    hooks: &[holtburger_dat::file_type::setup_model::AnimationHook],
+) -> Vec<serde_json::Value> {
+    hooks
+        .iter()
+        .filter_map(|hook| match hook.payload {
+            AnimationHookPayload::TextureVelocity(payload) => Some(serde_json::json!({
+                "kind": "all-parts",
+                "uSpeed": payload.u_speed,
+                "vSpeed": payload.v_speed,
+            })),
+            AnimationHookPayload::TextureVelocityPart(payload) => Some(serde_json::json!({
+                "kind": "part",
+                "partIndex": payload.part_index,
+                "uSpeed": payload.u_speed,
+                "vSpeed": payload.v_speed,
+            })),
+            _ => None,
         })
         .collect()
 }

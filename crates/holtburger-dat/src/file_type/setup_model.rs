@@ -38,7 +38,29 @@ pub struct LightInfo {
 pub struct AnimationHook {
     pub hook_type: u32,
     pub direction: i32,
-    pub data: Vec<u8>,
+    pub payload: AnimationHookPayload,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AnimationHookPayload {
+    NoPayload,
+    Raw(Vec<u8>),
+    ReplaceObject(Vec<u8>),
+    TextureVelocity(TextureVelocityHookPayload),
+    TextureVelocityPart(TextureVelocityPartHookPayload),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextureVelocityHookPayload {
+    pub u_speed: f32,
+    pub v_speed: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextureVelocityPartHookPayload {
+    pub part_index: u32,
+    pub u_speed: f32,
+    pub v_speed: f32,
 }
 
 impl AnimationHook {
@@ -46,34 +68,41 @@ impl AnimationHook {
         let hook_type = u32::read_le(reader)?;
         let direction = i32::read_le(reader)?;
 
-        let data = match hook_type {
-            0 => Vec::new(),                      // NoOp
-            1 => read_exact_payload(reader, 4)?,  // Sound (Id)
-            2 => read_exact_payload(reader, 4)?,  // SoundTable (SoundType)
-            3 => read_exact_payload(reader, 28)?, // Attack (AttackCone)
-            4 => Vec::new(),                      // AnimationDone
-            5 => read_replace_object_payload(reader)?,
-            6 => read_exact_payload(reader, 4)?, // Ethereal (Ethereal: i32)
-            7 => read_exact_payload(reader, 16)?, // TransparentPart
-            8 => read_exact_payload(reader, 12)?, // Luminous
-            9 => read_exact_payload(reader, 16)?, // LuminousPart
-            10 => read_exact_payload(reader, 12)?, // Diffuse
-            11 => read_exact_payload(reader, 16)?, // DiffusePart
-            12 => read_exact_payload(reader, 8)?, // Scale
-            13 => read_exact_payload(reader, 40)?, // CreateParticle
-            14 => read_exact_payload(reader, 4)?, // DestroyParticle
-            15 => read_exact_payload(reader, 4)?, // StopParticle
-            16 => read_exact_payload(reader, 4)?, // NoDraw
-            17 => Vec::new(),                    // DefaultScript
-            18 => read_exact_payload(reader, 4)?, // DefaultScriptPart
-            19 => read_exact_payload(reader, 8)?, // CallPES
-            20 => read_exact_payload(reader, 12)?, // Transparent
-            21 => read_exact_payload(reader, 16)?, // SoundTweaked
-            22 => read_exact_payload(reader, 12)?, // SetOmega
-            23 => read_exact_payload(reader, 8)?, // TextureVelocity
-            24 => read_exact_payload(reader, 12)?, // TextureVelocityPart
-            25 => read_exact_payload(reader, 4)?, // SetLight
-            26 => read_exact_payload(reader, 40)?, // CreateBlockingParticle
+        let payload = match hook_type {
+            0 => AnimationHookPayload::NoPayload, // NoOp
+            1 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // Sound (Id)
+            2 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // SoundTable (SoundType)
+            3 => AnimationHookPayload::Raw(read_exact_payload(reader, 28)?), // Attack (AttackCone)
+            4 => AnimationHookPayload::NoPayload,                           // AnimationDone
+            5 => AnimationHookPayload::ReplaceObject(read_replace_object_payload(reader)?),
+            6 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // Ethereal (Ethereal: i32)
+            7 => AnimationHookPayload::Raw(read_exact_payload(reader, 16)?), // TransparentPart
+            8 => AnimationHookPayload::Raw(read_exact_payload(reader, 12)?), // Luminous
+            9 => AnimationHookPayload::Raw(read_exact_payload(reader, 16)?), // LuminousPart
+            10 => AnimationHookPayload::Raw(read_exact_payload(reader, 12)?), // Diffuse
+            11 => AnimationHookPayload::Raw(read_exact_payload(reader, 16)?), // DiffusePart
+            12 => AnimationHookPayload::Raw(read_exact_payload(reader, 8)?), // Scale
+            13 => AnimationHookPayload::Raw(read_exact_payload(reader, 40)?), // CreateParticle
+            14 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // DestroyParticle
+            15 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // StopParticle
+            16 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // NoDraw
+            17 => AnimationHookPayload::NoPayload,                          // DefaultScript
+            18 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // DefaultScriptPart
+            19 => AnimationHookPayload::Raw(read_exact_payload(reader, 8)?), // CallPES
+            20 => AnimationHookPayload::Raw(read_exact_payload(reader, 12)?), // Transparent
+            21 => AnimationHookPayload::Raw(read_exact_payload(reader, 16)?), // SoundTweaked
+            22 => AnimationHookPayload::Raw(read_exact_payload(reader, 12)?), // SetOmega
+            23 => AnimationHookPayload::TextureVelocity(TextureVelocityHookPayload {
+                u_speed: f32::read_le(reader)?,
+                v_speed: f32::read_le(reader)?,
+            }),
+            24 => AnimationHookPayload::TextureVelocityPart(TextureVelocityPartHookPayload {
+                part_index: u32::read_le(reader)?,
+                u_speed: f32::read_le(reader)?,
+                v_speed: f32::read_le(reader)?,
+            }),
+            25 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // SetLight
+            26 => AnimationHookPayload::Raw(read_exact_payload(reader, 40)?), // CreateBlockingParticle
             _ => {
                 return Err(binrw::Error::Custom {
                     pos: reader.stream_position()?,
@@ -88,15 +117,36 @@ impl AnimationHook {
         Ok(Self {
             hook_type,
             direction,
-            data,
+            payload,
         })
     }
 
     pub fn write<W: Write + Seek>(&self, writer: &mut W) -> BinResult<()> {
         self.hook_type.write_le(writer)?;
         self.direction.write_le(writer)?;
-        writer.write_all(&self.data)?;
+        self.payload.write(writer)?;
         Ok(())
+    }
+}
+
+impl AnimationHookPayload {
+    fn write<W: Write + Seek>(&self, writer: &mut W) -> BinResult<()> {
+        match self {
+            Self::NoPayload => Ok(()),
+            Self::Raw(data) | Self::ReplaceObject(data) => {
+                writer.write_all(data)?;
+                Ok(())
+            }
+            Self::TextureVelocity(payload) => {
+                payload.u_speed.write_le(writer)?;
+                payload.v_speed.write_le(writer)
+            }
+            Self::TextureVelocityPart(payload) => {
+                payload.part_index.write_le(writer)?;
+                payload.u_speed.write_le(writer)?;
+                payload.v_speed.write_le(writer)
+            }
+        }
     }
 }
 
@@ -546,7 +596,10 @@ mod tests {
 
         assert_eq!(hook.hook_type, 5);
         assert_eq!(hook.direction, 0);
-        assert_eq!(hook.data, vec![0x07, 0x00, 0x34, 0x12]);
+        assert_eq!(
+            hook.payload,
+            AnimationHookPayload::ReplaceObject(vec![0x07, 0x00, 0x34, 0x12])
+        );
     }
 
     #[test]
@@ -563,6 +616,53 @@ mod tests {
 
         assert_eq!(hook.hook_type, 5);
         assert_eq!(hook.direction, 1);
-        assert_eq!(hook.data, vec![0x09, 0x00, 0x01, 0x80, 0x45, 0x23]);
+        assert_eq!(
+            hook.payload,
+            AnimationHookPayload::ReplaceObject(vec![0x09, 0x00, 0x01, 0x80, 0x45, 0x23])
+        );
+    }
+
+    #[test]
+    fn animation_hook_texture_velocity_reads_typed_payload() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&23u32.to_le_bytes());
+        bytes.extend_from_slice(&0i32.to_le_bytes());
+        bytes.extend_from_slice(&1.25f32.to_le_bytes());
+        bytes.extend_from_slice(&(-0.5f32).to_le_bytes());
+
+        let hook =
+            AnimationHook::read(&mut Cursor::new(bytes)).expect("texture velocity should parse");
+
+        assert_eq!(hook.hook_type, 23);
+        assert_eq!(
+            hook.payload,
+            AnimationHookPayload::TextureVelocity(TextureVelocityHookPayload {
+                u_speed: 1.25,
+                v_speed: -0.5
+            })
+        );
+    }
+
+    #[test]
+    fn animation_hook_texture_velocity_part_reads_typed_payload() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&24u32.to_le_bytes());
+        bytes.extend_from_slice(&0i32.to_le_bytes());
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        bytes.extend_from_slice(&0.125f32.to_le_bytes());
+        bytes.extend_from_slice(&0.25f32.to_le_bytes());
+
+        let hook = AnimationHook::read(&mut Cursor::new(bytes))
+            .expect("texture velocity part should parse");
+
+        assert_eq!(hook.hook_type, 24);
+        assert_eq!(
+            hook.payload,
+            AnimationHookPayload::TextureVelocityPart(TextureVelocityPartHookPayload {
+                part_index: 2,
+                u_speed: 0.125,
+                v_speed: 0.25
+            })
+        );
     }
 }

@@ -1,8 +1,5 @@
 import type { AssetLookupRequestDto, AssetPriority } from "../host/contracts";
-import {
-	isSetupAppearanceAssetId,
-	isStaticRenderableAssetId,
-} from "./asset-hydration-policy";
+import { isStaticRenderableAssetId } from "./asset-hydration-policy";
 import {
 	browserLocationToLandblockId,
 	describeBrowserDestinationIdentity,
@@ -599,7 +596,6 @@ function collectStaticRenderableDependencyAssetIds(
 		collectSetupModelFallbackPartGfxAssetIds(preparedByAssetId, sourceAssetIds);
 	const setupAppearanceAssetIds = uniqueSortedAssetIds([
 		...collectSetupAppearanceAssetIds(sourceAssetIds),
-		...sourceAssetIds.filter(isSetupAppearanceAssetId),
 	]);
 	const setupAppearancePartGfxAssetIds = collectSetupAppearancePartGfxAssetIds(
 		preparedByAssetId,

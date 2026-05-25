@@ -22,7 +22,5 @@ export function isStaticRenderableAssetId(assetId: string): boolean {
 }
 
 export function isSetupAppearanceAssetId(assetId: string): boolean {
-	return /^setup-appearance\/[0-9a-fA-F]{8}(?:\/obj-desc(?:\/(?:pal-[0-9a-fA-F]{8}|sub-[0-9a-fA-F]{8}-[0-9a-fA-F]{1,8}-[0-9a-fA-F]{1,8}|tex-[0-9a-fA-F]{1,2}-[0-9a-fA-F]{8}-[0-9a-fA-F]{8}|anim-[0-9a-fA-F]{1,2}-[0-9a-fA-F]{8}))*)?$/.test(
-		assetId,
-	);
+	return /^setup-appearance\/[0-9a-fA-F]{8}$/.test(assetId);
 }

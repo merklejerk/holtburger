@@ -1,6 +1,5 @@
 import type { AssetLookupResponseDto } from "../host/contracts";
 import {
-	dependencyManifestPayloadDtoSchema,
 	envCellPayloadDtoSchema,
 	gfxObjPayloadDtoSchema,
 	landblockOutdoorPayloadDtoSchema,
@@ -108,13 +107,6 @@ export function getAssetResponseDependencies(
 		return uniqueSortedAssetIds(
 			renderSurface.data.dependencies.paletteAssetIds,
 		);
-	}
-
-	const dependencyManifest = dependencyManifestPayloadDtoSchema.safeParse(
-		response.payload,
-	);
-	if (dependencyManifest.success) {
-		return uniqueSortedAssetIds(dependencyManifest.data.dependencyAssetIds);
 	}
 
 	return [];

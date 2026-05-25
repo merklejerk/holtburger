@@ -2,7 +2,6 @@ import type {
 	AssetErrorCode,
 	AssetLookupRequestDto,
 	AssetLookupResponseDto,
-	DependencyManifestPayloadDto,
 	EnvCellPayloadDto,
 	GfxObjPayloadDto,
 	LandblockOutdoorPayloadDto,
@@ -17,7 +16,6 @@ import type {
 } from "../lib/host/contracts";
 import {
 	assetProvenanceDtoSchema,
-	dependencyManifestPayloadDtoSchema,
 	envCellPayloadDtoSchema,
 	genericAssetPayloadDtoSchema,
 	gfxObjPayloadDtoSchema,
@@ -196,16 +194,6 @@ export function prepareAssetPayload(
 	const palettePayload = palettePayloadDtoSchema.safeParse(response.payload);
 	if (palettePayload.success) {
 		return preparePassthroughAsset(request, response, palettePayload.data);
-	}
-
-	const dependencyManifestPayload =
-		dependencyManifestPayloadDtoSchema.safeParse(response.payload);
-	if (dependencyManifestPayload.success) {
-		return prepareDependencyManifest(
-			request,
-			response,
-			dependencyManifestPayload.data,
-		);
 	}
 
 	const payload = genericAssetPayloadDtoSchema.parse(response.payload);
@@ -530,25 +518,6 @@ function prepareTypedContentAsset(
 	};
 }
 
-function prepareDependencyManifest(
-	request: AssetLookupRequestDto,
-	response: AssetLookupResponseDto,
-	payload: DependencyManifestPayloadDto,
-): PreparedAssetRecord {
-	return {
-		request,
-		response,
-		payload: {
-			kind: "dependency-manifest",
-			sourceAssetKind: "dependency-manifest",
-			residencyKind: parseResidencyKind(payload.residencyKind),
-			provenance: parseProvenance(payload.provenance),
-			dependencyAssetIds: parseDependencies(payload.dependencyAssetIds),
-		},
-		preparedAt: new Date().toISOString(),
-	};
-}
-
 function createUnknownAssetPayload({
 	rawKind,
 	sourceAssetKind,
@@ -594,21 +563,6 @@ function parseProvenance(value: unknown): PreparedAssetProvenance {
 		errorCode: parseErrorCode(provenance.data.errorCode),
 		detail: provenance.data.detail,
 	};
-}
-
-function parseDependencies(value: unknown): string[] {
-	if (!Array.isArray(value)) {
-		return [];
-	}
-
-	return [
-		...new Set(
-			value.filter(
-				(assetId): assetId is string =>
-					typeof assetId === "string" && assetId.length > 0,
-			),
-		),
-	].sort();
 }
 
 function parseResidencyKind(value: unknown): AssetResidencyKind {

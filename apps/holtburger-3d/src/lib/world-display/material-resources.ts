@@ -30,7 +30,7 @@ import {
 import {
 	createIndexedTextureResource,
 	isIndexedTextureFormat,
-	selectIndexedPaletteAssetId,
+	selectIndexedPalette,
 	type IndexedTextureResource,
 } from "./indexed-texture-resources";
 import {
@@ -669,11 +669,11 @@ function resolveIndexedMaterialResources(options: {
 		return null;
 	}
 
-	const paletteAssetId = selectIndexedPaletteAssetId(
+	const paletteSelection = selectIndexedPalette(
 		options.recipe,
 		options.renderSurface,
 	);
-	if (!paletteAssetId) {
+	if (!paletteSelection) {
 		options.reportDiagnostic({
 			key: `indexed-texture-palette-missing:${options.materialAssetId}:${renderSurfaceAssetId}`,
 			message: `Using placeholder material because ${renderSurfaceAssetId} is indexed but no palette ID could be resolved.`,
@@ -691,6 +691,7 @@ function resolveIndexedMaterialResources(options: {
 		});
 		return null;
 	}
+	const { paletteAssetId } = paletteSelection;
 
 	const paletteAsset = options.preparedByAssetId[paletteAssetId];
 	if (paletteAsset?.payload.kind !== "palette") {
@@ -701,6 +702,8 @@ function resolveIndexedMaterialResources(options: {
 				materialAssetId: options.materialAssetId,
 				renderSurfaceAssetId,
 				paletteAssetId,
+				paletteId: paletteSelection.paletteId,
+				paletteSource: paletteSelection.source,
 				preparedKind: paletteAsset?.payload.kind ?? null,
 			},
 		});
@@ -715,6 +718,8 @@ function resolveIndexedMaterialResources(options: {
 				materialAssetId: options.materialAssetId,
 				renderSurfaceAssetId,
 				paletteAssetId,
+				paletteId: paletteSelection.paletteId,
+				paletteSource: paletteSelection.source,
 				colorCount: paletteAsset.payload.colorCount,
 			},
 		});
@@ -733,6 +738,8 @@ function resolveIndexedMaterialResources(options: {
 				materialAssetId: options.materialAssetId,
 				renderSurfaceAssetId,
 				paletteAssetId,
+				paletteId: paletteSelection.paletteId,
+				paletteSource: paletteSelection.source,
 			},
 		});
 		return null;
@@ -746,6 +753,8 @@ function resolveIndexedMaterialResources(options: {
 				materialAssetId: options.materialAssetId,
 				renderSurfaceAssetId,
 				paletteAssetId,
+				paletteId: paletteSelection.paletteId,
+				paletteSource: paletteSelection.source,
 				maxIndex: options.indexedTexture.maxIndex,
 				colorCount: paletteResource.colorCount,
 			},

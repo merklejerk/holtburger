@@ -24,6 +24,16 @@ export interface IndexedTextureResource {
 	maxIndex: number;
 }
 
+export type IndexedPaletteSelectionSource =
+	| "material-recipe"
+	| "render-surface-default";
+
+export interface IndexedPaletteSelection {
+	paletteAssetId: string;
+	paletteId: number;
+	source: IndexedPaletteSelectionSource;
+}
+
 export function indexedTextureFormat(
 	formatRaw: number,
 ): IndexedTextureFormat | null {
@@ -79,11 +89,26 @@ export function selectIndexedPaletteAssetId(
 	recipe: PreparedMaterialRecipePayload,
 	renderSurface: PreparedRenderSurfacePayload,
 ): string | null {
+	return selectIndexedPalette(recipe, renderSurface)?.paletteAssetId ?? null;
+}
+
+export function selectIndexedPalette(
+	recipe: PreparedMaterialRecipePayload,
+	renderSurface: PreparedRenderSurfacePayload,
+): IndexedPaletteSelection | null {
 	if (recipe.source.kind === "texture" && recipe.source.paletteId !== null) {
-		return formatPaletteAssetId(recipe.source.paletteId);
+		return {
+			paletteAssetId: formatPaletteAssetId(recipe.source.paletteId),
+			paletteId: recipe.source.paletteId,
+			source: "material-recipe",
+		};
 	}
 	if (renderSurface.defaultPaletteId !== null) {
-		return formatPaletteAssetId(renderSurface.defaultPaletteId);
+		return {
+			paletteAssetId: formatPaletteAssetId(renderSurface.defaultPaletteId),
+			paletteId: renderSurface.defaultPaletteId,
+			source: "render-surface-default",
+		};
 	}
 	return null;
 }

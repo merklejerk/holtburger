@@ -17,6 +17,7 @@ import {
 	createIndexedTextureResource,
 	indexedTextureFormat,
 	scanMaxPaletteIndex,
+	selectIndexedPalette,
 	selectIndexedPaletteAssetId,
 } from "./indexed-texture-resources";
 
@@ -102,6 +103,11 @@ describe("indexed texture resources", () => {
 		expect(selectIndexedPaletteAssetId(recipe, renderSurface)).toBe(
 			"palette/04000001",
 		);
+		expect(selectIndexedPalette(recipe, renderSurface)).toEqual({
+			paletteAssetId: "palette/04000001",
+			paletteId: 0x04000001,
+			source: "material-recipe",
+		});
 	});
 
 	it("falls back to render surface default palette", () => {
@@ -119,6 +125,26 @@ describe("indexed texture resources", () => {
 		expect(selectIndexedPaletteAssetId(recipe, renderSurface)).toBe(
 			"palette/04000002",
 		);
+		expect(selectIndexedPalette(recipe, renderSurface)).toEqual({
+			paletteAssetId: "palette/04000002",
+			paletteId: 0x04000002,
+			source: "render-surface-default",
+		});
+	});
+
+	it("returns no palette selection when neither source provides a palette", () => {
+		const recipe = createTextureMaterialRecipe({
+			paletteId: null,
+			renderSurfaceDefaultPaletteIds: [],
+		});
+		const renderSurface = createRenderSurfacePayload({
+			formatRaw: PIXEL_FORMAT_P8,
+			format: "P8",
+			defaultPaletteId: null,
+			sourceBytes: new Uint8Array([0]),
+		});
+
+		expect(selectIndexedPalette(recipe, renderSurface)).toBeNull();
 	});
 
 	it("scans max palette index for both indexed encodings", () => {

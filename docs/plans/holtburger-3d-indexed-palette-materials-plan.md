@@ -554,7 +554,7 @@ Cleanup targets:
 
 ## Phase 5: Base Palette Selection Semantics
 
-Status: complete for foundation base indexed materials as of Phase 4.
+Status: complete for foundation base indexed materials as of 2026-05-25.
 
 Resolve which palette an indexed material should use.
 
@@ -573,6 +573,52 @@ Diagnostics:
 - `indexed-texture-index-out-of-range`: source indices exceed palette length.
 
 Do not collapse these into `unsupported-render-surface`.
+
+Implemented changes:
+
+- `selectIndexedPalette()` now returns the selected palette asset ID, raw
+  palette ID, and selection source.
+- `selectIndexedPaletteAssetId()` remains as a convenience wrapper for callers
+  that only need the asset ID.
+- Selection source is either `material-recipe` for `CSurface.orig_palette_id` or
+  `render-surface-default` for `RenderSurface.defaultPaletteId`.
+- Indexed material diagnostics now include `paletteId` and `paletteSource` when
+  a palette ID was selected but the palette is unprepared, empty, resource
+  creation failed, or source indices exceed palette length.
+- Missing palette selection remains a separate diagnostic with recipe/default
+  palette fields so "no palette ID exists" is not confused with "palette asset
+  is not prepared."
+
+Validation added:
+
+- Unit coverage for material recipe palette precedence with selection source.
+- Unit coverage for render surface default palette fallback with selection
+  source.
+- Unit coverage for no-selection fallback.
+- Material resource coverage for `indexed-texture-palette-missing`.
+- Material resource coverage that range diagnostics carry `paletteSource`.
+
+Decisions:
+
+- Keep the foundation precedence narrow: base `CSurface.orig_palette_id`, then
+  `RenderSurface.defaultPaletteId`. ObjDesc palette changes and subpalettes
+  remain explicitly out of scope for this foundation pass.
+- Use selection-source strings now because the later legacy material parity push
+  will need to distinguish base palette choices from derived palette views.
+
+Course corrections:
+
+- Phase 5 had behavior from earlier phases, but the selection result did not
+  carry enough provenance. This phase made the behavior explicit and testable
+  instead of only returning a string asset ID.
+
+Cleanup targets:
+
+- When derived palette views are introduced, replace `paletteAssetId`-only
+  material signatures with a palette-view signature that includes base palette,
+  subpalette replacements, and prepared source state.
+- Phase 6 diagnostics should summarize selection source counts so the Debug
+  panel can distinguish recipe palettes from render-surface default palettes.
 
 Remaining work:
 

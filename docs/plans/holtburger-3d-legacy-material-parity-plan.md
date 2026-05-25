@@ -1624,6 +1624,8 @@ Verification:
 
 ### Phase 7.1: Texture Velocity Renderer Subsystem
 
+Status: **implemented**.
+
 Goal: promote hook-driven texture velocity from static-renderable plumbing to a
 first-class renderer concept shared by static renderables, previews, and future
 client-mode runtime entities.
@@ -1677,6 +1679,82 @@ Debt to collapse before Phase 8:
   but does not expose texture velocity presence/counts. Add that visibility in
   Phase 7.1 so animated UV content is inspectable before Phase 8 adds more
   material behavior.
+
+Progress:
+
+- Added a renderer-local `texture-velocity.ts` subsystem that owns:
+  - `TextureVelocityRenderState`;
+  - zero-velocity normalization;
+  - stable velocity signatures;
+  - UV-animated material cloning and shader patching;
+  - per-frame UV offset uniform updates;
+  - texture velocity metric derivation.
+- Moved static renderable texture-velocity signature formatting to the shared
+  subsystem. Static renderable parts now consume the shared render-state type
+  instead of owning renderer-specific formatting helpers.
+- Replaced the inline `world-display-renderer.ts` material clone/patch/update
+  helpers with calls into the subsystem.
+- Added renderer debug metrics for nonzero texture-velocity parts,
+  texture-velocity render groups, UV-animated cloned materials, unique
+  signatures, and bounded signature samples.
+- Surfaced those metrics in the Debug panel renderer diagnostic text.
+- Added focused tests for signature generation, zero normalization, cache-owned
+  versus cloned material ownership, shader patching, uniform updates, and metric
+  derivation.
+
+Decisions:
+
+- Texture velocity is now modeled as renderer animation state, not as a material
+  asset resource. Metrics intentionally distinguish cache-owned material counts
+  from UV-animated cloned material counts.
+- Shader patching remains material-instance based. The subsystem still clones
+  materials for animated groups so shared `WorldMaterialResourceCache` materials
+  and shared geometry remain immutable.
+- The subsystem stays app-local under `apps/holtburger-3d` because it is a
+  Three.js renderer implementation concern, even though the source data comes
+  from shared DAT parsing.
+
+Course corrections:
+
+- Phase 7's behavior was correct, but `world-display-renderer.ts` owned too many
+  texture-velocity details. Moving clone/patch/update/metrics into
+  `texture-velocity.ts` makes the concept reusable for previews and future
+  client-mode entities.
+- Three.js material cloning does not preserve the source material's custom
+  program-cache behavior in the way this path needs. The subsystem now captures
+  the source material's `onBeforeCompile` and `customProgramCacheKey` before
+  cloning so indexed/material-specific shader patches are preserved.
+
+Cleanup targets:
+
+- When preview and client-mode runtime entity render paths mature, route their
+  part/entity render state through `TextureVelocityRenderState` instead of
+  inventing another UV animation representation.
+- If the Debug panel grows structured renderer detail rows, move texture
+  velocity metrics out of the long renderer diagnostics sentence into a
+  dedicated row. The current text is visible but dense.
+
+Legacy shims:
+
+- None introduced. `texture-velocity.ts` is the active renderer subsystem for
+  classic hook-driven texture velocity, not a compatibility wrapper.
+
+Refinements to future steps:
+
+- Phase 8 can now focus on clip/scalar material behavior without expanding the
+  renderer file's material-animation responsibilities.
+- Modern waveform/layer material animation should remain a separate subsystem.
+  It may reuse generic scheduling/metric ideas later, but should not share
+  source-data or identity types with hook-driven texture velocity.
+- No immediate interim phase is needed before Phase 8.
+
+Verification:
+
+- `npm run test:ts -- src/lib/world-display/texture-velocity.test.ts
+  src/lib/world-display/static-renderables.test.ts` passes.
+- `npm run test:ts` passes 250 frontend tests across 47 files.
+- `npm run check` passes.
+- `npm run lint:ts` passes.
 
 ### Phase 8: Clipmap And Scalar Material Behavior
 
@@ -1791,6 +1869,14 @@ target.
   scene, but local previews and server-spawned entities should be mostly
   isomorphic at the render layer: different authority/lifetime sources, same
   render-facing entity shape.
+- Add real animation frame-hook execution before relying on texture velocity for
+  moving/client-mode entities. Current texture velocity support is renderer-ready
+  and setup-placement-fed: browser static renderables harvest hooks from the
+  selected setup placement frame and treat the resulting velocity as active
+  render state. Retail triggers `TextureVelocity` and `TextureVelocityPart`
+  through animation/physics sequence frame hooks, so future animation playback
+  must feed `TextureVelocityRenderState` from actual frame-key execution rather
+  than only from static setup placement facts.
 - Add a focused renderer performance phase before increasing runtime entity
   density. Recent profiling showed low material program-key count but high
   draw-call/static-geometry-group count, many instanced groups, and multi-pass

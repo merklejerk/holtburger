@@ -18,7 +18,6 @@ import {
 	indexedTextureFormat,
 	scanMaxPaletteIndex,
 	selectIndexedPalette,
-	selectIndexedPaletteAssetId,
 } from "./indexed-texture-resources";
 
 describe("indexed texture resources", () => {
@@ -100,9 +99,6 @@ describe("indexed texture resources", () => {
 			sourceBytes: new Uint8Array([0]),
 		});
 
-		expect(selectIndexedPaletteAssetId(recipe, renderSurface)).toBe(
-			"palette/04000001",
-		);
 		expect(selectIndexedPalette(recipe, renderSurface)).toEqual({
 			paletteAssetId: "palette/04000001",
 			paletteId: 0x04000001,
@@ -122,9 +118,6 @@ describe("indexed texture resources", () => {
 			sourceBytes: new Uint8Array([0]),
 		});
 
-		expect(selectIndexedPaletteAssetId(recipe, renderSurface)).toBe(
-			"palette/04000002",
-		);
 		expect(selectIndexedPalette(recipe, renderSurface)).toEqual({
 			paletteAssetId: "palette/04000002",
 			paletteId: 0x04000002,

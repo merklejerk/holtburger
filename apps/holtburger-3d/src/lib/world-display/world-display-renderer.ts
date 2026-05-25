@@ -62,11 +62,11 @@ import {
 	isPreparedGfxObjAsset,
 } from "./static-renderables";
 import {
-	type MaterialTextureCapabilities,
 	type MaterialResourceDiagnostic,
 	WorldMaterialResourceCache,
 	formatMaterialAssetId,
 } from "./material-resources";
+import type { MaterialTextureCapabilities } from "./render-surface-texture-resources";
 import {
 	buildAcPlacementMatrix,
 	buildGfxObjGeometry,
@@ -1484,7 +1484,7 @@ export function createWorldDisplayRenderer(
 				terrainTriangleCount: terrainTriangleCount(),
 				staticRenderablePartCount: staticRenderableScene.parts.length,
 				staticRenderableInstancedGroupCount:
-					staticRenderableScene.partsByRenderDomainChunkAndGfxAssetId.size,
+					staticRenderableScene.partsByRenderGroupKey.size,
 				structuredInteriorCellCount: structuredInteriorScene.cells.length,
 				structuredInteriorVertexCount: structuredInteriorScene.cells.reduce(
 					(total, cell) => total + cell.renderGeometry.vertexCount,
@@ -1541,7 +1541,7 @@ export function createWorldDisplayRenderer(
 	): void {
 		syncRenderChunkRoots(renderChunkTransforms);
 
-		const partsByGroupKey = sceneModel.partsByRenderDomainChunkAndGfxAssetId;
+		const partsByGroupKey = sceneModel.partsByRenderGroupKey;
 		const activeStaticGeometryKeys = new Set<string>();
 
 		for (const [groupKey, mesh] of staticRenderableGroupMeshes.entries()) {

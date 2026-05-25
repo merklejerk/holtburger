@@ -24,7 +24,7 @@ export interface IndexedTextureResource {
 	maxIndex: number;
 }
 
-export type IndexedPaletteSelectionSource =
+type IndexedPaletteSelectionSource =
 	| "material-recipe"
 	| "render-surface-default";
 
@@ -85,13 +85,6 @@ export function createIndexedTextureResource(
 	};
 }
 
-export function selectIndexedPaletteAssetId(
-	recipe: PreparedMaterialRecipePayload,
-	renderSurface: PreparedRenderSurfacePayload,
-): string | null {
-	return selectIndexedPalette(recipe, renderSurface)?.paletteAssetId ?? null;
-}
-
 export function selectIndexedPalette(
 	recipe: PreparedMaterialRecipePayload,
 	renderSurface: PreparedRenderSurfacePayload,
@@ -113,7 +106,7 @@ export function selectIndexedPalette(
 	return null;
 }
 
-export function assertIndexedSourceLength(
+function assertIndexedSourceLength(
 	renderSurface: PreparedRenderSurfacePayload,
 	format: IndexedTextureFormat = indexedTextureFormat(
 		renderSurface.formatRaw,

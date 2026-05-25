@@ -95,7 +95,7 @@ export interface StaticRenderableSceneModel {
 	activeLandblockIds: number[];
 	sourceInstances: StaticRenderableSourceInstance[];
 	parts: StaticRenderablePart[];
-	partsByRenderDomainChunkAndGfxAssetId: Map<string, StaticRenderablePart[]>;
+	partsByRenderGroupKey: Map<string, StaticRenderablePart[]>;
 	missingSourceAssetIds: string[];
 	missingGfxAssetIds: string[];
 }
@@ -199,8 +199,7 @@ export function deriveStaticRenderableSceneModel(
 		activeLandblockIds,
 		sourceInstances,
 		parts,
-		partsByRenderDomainChunkAndGfxAssetId:
-			groupStaticRenderablePartsByRenderDomainChunkAndGfxAssetId(parts),
+		partsByRenderGroupKey: groupStaticRenderablePartsByRenderGroupKey(parts),
 		missingSourceAssetIds: [...missingSourceAssetIds].sort(),
 		missingGfxAssetIds: [...missingGfxAssetIds].sort(),
 	};
@@ -234,8 +233,7 @@ function deriveIndoorStaticRenderableSceneModel(
 		activeLandblockIds: [],
 		sourceInstances,
 		parts,
-		partsByRenderDomainChunkAndGfxAssetId:
-			groupStaticRenderablePartsByRenderDomainChunkAndGfxAssetId(parts),
+		partsByRenderGroupKey: groupStaticRenderablePartsByRenderGroupKey(parts),
 		missingSourceAssetIds: [...missingSourceAssetIds].sort(),
 		missingGfxAssetIds: [...missingGfxAssetIds].sort(),
 	};
@@ -250,13 +248,10 @@ function formatStaticRenderableRenderGroupKey(
 	return `${renderDomain}|${chunkKey}|${gfxObjAssetId}|${materialSignature}`;
 }
 
-function groupStaticRenderablePartsByRenderDomainChunkAndGfxAssetId(
+function groupStaticRenderablePartsByRenderGroupKey(
 	parts: StaticRenderablePart[],
 ): Map<string, StaticRenderablePart[]> {
-	const partsByDomainChunkAndGfxAssetId = new Map<
-		string,
-		StaticRenderablePart[]
-	>();
+	const partsByGroupKey = new Map<string, StaticRenderablePart[]>();
 	for (const part of parts) {
 		const groupKey = formatStaticRenderableRenderGroupKey(
 			part.renderDomain,
@@ -264,15 +259,15 @@ function groupStaticRenderablePartsByRenderDomainChunkAndGfxAssetId(
 			part.gfxObjAssetId,
 			part.materialSignature,
 		);
-		const groupedParts = partsByDomainChunkAndGfxAssetId.get(groupKey);
+		const groupedParts = partsByGroupKey.get(groupKey);
 		if (groupedParts) {
 			groupedParts.push(part);
 		} else {
-			partsByDomainChunkAndGfxAssetId.set(groupKey, [part]);
+			partsByGroupKey.set(groupKey, [part]);
 		}
 	}
 
-	return partsByDomainChunkAndGfxAssetId;
+	return partsByGroupKey;
 }
 
 export function isPreparedGfxObjAsset(
@@ -305,7 +300,7 @@ export function createEmptyStaticRenderableSceneModel(): StaticRenderableSceneMo
 		activeLandblockIds: [],
 		sourceInstances: [],
 		parts: [],
-		partsByRenderDomainChunkAndGfxAssetId: new Map(),
+		partsByRenderGroupKey: new Map(),
 		missingSourceAssetIds: [],
 		missingGfxAssetIds: [],
 	};
@@ -407,12 +402,8 @@ function normalizeOutdoorStaticPlacement(
 		localPlacement: {
 			origin: {
 				...localPlacement.origin,
-				x:
-					localPlacement.origin.x -
-					blockDeltaX * OUTDOOR_LANDBLOCK_WORLD_SIZE,
-				y:
-					localPlacement.origin.y -
-					blockDeltaY * OUTDOOR_LANDBLOCK_WORLD_SIZE,
+				x: localPlacement.origin.x - blockDeltaX * OUTDOOR_LANDBLOCK_WORLD_SIZE,
+				y: localPlacement.origin.y - blockDeltaY * OUTDOOR_LANDBLOCK_WORLD_SIZE,
 			},
 			orientation: localPlacement.orientation,
 		},
@@ -658,7 +649,9 @@ function selectDefaultSetupPlacementSet(
 	setupModel: PreparedSetupModelPayload,
 ): PreparedSetupModelPayload["placementSets"][number] | null {
 	return (
-		setupModel.placementSets.find((placementSet) => placementSet.key === 0x65) ??
+		setupModel.placementSets.find(
+			(placementSet) => placementSet.key === 0x65,
+		) ??
 		setupModel.placementSets.find((placementSet) => placementSet.key === 0) ??
 		setupModel.placementSets.reduce<
 			PreparedSetupModelPayload["placementSets"][number] | null

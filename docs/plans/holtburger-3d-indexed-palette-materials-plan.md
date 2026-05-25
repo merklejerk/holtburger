@@ -65,20 +65,21 @@ following gaps should be addressed in this order.
    `material-recipe`, `setup-appearance`, `terrain-material`, and
    `render-surface` dependencies all surface `paletteAssetIds`. Once palette
    payloads are lossless, the scheduler should automatically prepare them.
-6. Static renderable grouping already accepts material signature as part of the
-   group key. The required cleanup is to rename the misleading
-   `partsByRenderDomainChunkAndGfxAssetId` / helper names and ensure
-   `materialSignature` can include palette-view identity during the later
-   material parity push.
+6. Complete: static renderable grouping accepts material signature as part of
+   the group key, and the misleading grouping names were collapsed to
+   `partsByRenderGroupKey` and `groupStaticRenderablePartsByRenderGroupKey`.
+   Later material parity work only needs to expand `materialSignature` with
+   palette-view identity.
 7. `setup-appearance` payloads are prepared by the asset graph, but
    `static-renderables.ts` does not currently prefer them for setup model parts.
    Dyed/clothing appearance correctness is blocked until static part expansion
    consumes those payloads. This is intentionally outside this foundation push.
-8. `material-resources.ts` is already doing too much: recipe resolution, texture
-   creation, diagnostics, and cache ownership. Before shader work, split out
-   small pure helpers for pixel format classification, palette selection,
-   indexed texture validation, and palette-view derivation. This keeps shader
-   patching from landing in a god file.
+8. Complete for the indexed foundation: pixel format classification and
+   direct-color/compressed texture creation now live in
+   `render-surface-texture-resources.ts`; palette texture upload, indexed
+   texture upload, and shader patching also live in focused modules.
+   `material-resources.ts` still owns recipe resolution, cache coordination, and
+   material diagnostics.
 
 ## Goals
 
@@ -321,9 +322,8 @@ Cleanup targets:
 - Palette resource creation is currently public through
   `WorldMaterialResourceCache.getPaletteResource()` for upcoming phases, but no
   material consumes it yet. Phase 3 should become the first real consumer.
-- Direct-color and compressed texture resource creation should be split into
-  smaller modules before Phase 4 shader patching if the next phase makes the
-  file harder to reason about.
+- Direct-color and compressed texture resource creation was later split into
+  `render-surface-texture-resources.ts` during the cleanup pass after Phase 6.
 
 ## Phase 3: Indexed Surface Resource Cache
 
@@ -391,17 +391,16 @@ Implemented changes:
 - Added `WorldMaterialResourceCache.getIndexedTextureResource()` so indexed
   texture resources are cached and disposed with other renderer material
   resources.
-- Routed indexed material fallback diagnostics through the indexed resource and
-  palette resource caches. Valid indexed data now reports the temporary
-  `indexed-texture-shader-pending` state instead of generic
-  `unsupported-render-surface`.
+- Routed indexed material diagnostics through the indexed resource and palette
+  resource caches. Invalid indexed data reports indexed-specific diagnostics
+  instead of generic `unsupported-render-surface`.
 - Replaced generic unsupported-format diagnostics for `PFID_P8` and
   `PFID_INDEX16` with indexed-specific diagnostics:
   `indexed-texture-palette-missing`,
   `indexed-texture-palette-unprepared`, `indexed-texture-palette-empty`,
   `indexed-texture-index-out-of-range`,
-  `indexed-texture-palette-resource-failed`,
-  `indexed-texture-upload-failed`, and `indexed-texture-shader-pending`.
+  `indexed-texture-palette-resource-failed` and
+  `indexed-texture-upload-failed`.
 
 Validation added:
 
@@ -443,9 +442,9 @@ Course corrections:
 
 Cleanup targets:
 
-- Direct-color and compressed texture creation should still be split out of
-  `material-resources.ts` before broad material parity work. Phase 4 isolated
-  shader code instead of doing that larger cleanup first.
+- Direct-color and compressed texture creation was split out of
+  `material-resources.ts` after Phase 6. Phase 4 isolated shader code first,
+  then the cleanup pass moved the stable upload path behind a focused module.
 - `indexed-texture-shader-pending` has been removed for valid resources. Future
   shader capability failures should use a different explicit diagnostic.
 - Material cache signatures now include render-surface and palette prepared
@@ -549,8 +548,8 @@ Cleanup targets:
 - If transparent indexed materials cause avoidable sorting artifacts, refine
   transparency flags using `SurfaceType` and palette alpha observations from
   real content.
-- Consider extracting direct-color and compressed texture helpers before the
-  legacy material parity push.
+- Direct-color and compressed texture resource creation now lives in
+  `render-surface-texture-resources.ts`.
 
 ## Phase 5: Base Palette Selection Semantics
 
@@ -578,8 +577,6 @@ Implemented changes:
 
 - `selectIndexedPalette()` now returns the selected palette asset ID, raw
   palette ID, and selection source.
-- `selectIndexedPaletteAssetId()` remains as a convenience wrapper for callers
-  that only need the asset ID.
 - Selection source is either `material-recipe` for `CSurface.orig_palette_id` or
   `render-surface-default` for `RenderSurface.defaultPaletteId`.
 - Indexed material diagnostics now include `paletteId` and `paletteSource` when
@@ -611,6 +608,9 @@ Course corrections:
 - Phase 5 had behavior from earlier phases, but the selection result did not
   carry enough provenance. This phase made the behavior explicit and testable
   instead of only returning a string asset ID.
+- The asset-ID-only `selectIndexedPaletteAssetId()` wrapper was removed during
+  cleanup because it became a hollow convenience shim once all callers needed
+  source provenance.
 
 Cleanup targets:
 
@@ -646,8 +646,8 @@ Implemented changes:
 
 - Extended `describeMaterialAssetDiagnostics()` with indexed-material summary
   data in the existing Debug panel Materials row.
-- Added indexed recipe counts derived from prepared material recipes with
-  prepared indexed render surfaces.
+- Added visible indexed recipe counts when a browser destination is active, with
+  prepared indexed recipe counts as the destination-less diagnostic fallback.
 - Added prepared indexed surface counts split by `P8` and `Index16`.
 - Added palette-selection counts split by material recipe palette,
   render-surface default palette, and missing palette selection.
@@ -673,24 +673,17 @@ Decisions:
 - Keep console warning behavior unchanged. Coalesced material console warnings
   already come from material resource diagnostics; Phase 6 only summarizes
   prepared asset state for the panel.
-- Count "indexed recipes" from prepared recipes that have prepared indexed
-  render-surface candidates. This makes the panel describe what the renderer can
-  currently classify, not theoretical dependencies that have not loaded yet.
+- Count "indexed recipes" from the full visible material set when a browser
+  destination is active. Without a destination, count prepared indexed recipes as
+  a diagnostics fallback.
 
 Course corrections:
 
-- The plan originally said "visible indexed recipes." The current implementation
-  reports prepared indexed recipes because the existing visible-material helper
-  only returns missing visible recipes, not the full visible material set. A
-  true visible-indexed count should be added later if the scene planner exposes
-  full visible material IDs.
+- `scene-asset-request-planner.ts` now exposes full visible material asset IDs,
+  so the Debug row no longer has to infer visibility from prepared assets only.
 
 Cleanup targets:
 
-- Consider exposing full visible material asset IDs from
-  `scene-asset-request-planner.ts` if Phase 7 browser validation shows the Debug
-  row needs to distinguish visible indexed materials from prepared-but-not-drawn
-  indexed materials.
 - Phase 7 should confirm the panel reports zero generic
   `unsupported-render-surface` indexed failures when real indexed materials have
   valid palettes.
@@ -747,9 +740,6 @@ Scope for the follow-up:
   signatures.
 - Implement derived palette views for per-appearance subpalette replacement.
 - Update `materialSignature` to include palette-view identity.
-- Rename `partsByRenderDomainChunkAndGfxAssetId` and
-  `groupStaticRenderablePartsByRenderDomainChunkAndGfxAssetId` because they
-  include material signatures.
 - Implement `PaletteSet`/clothing/skin/hair/dye selection once runtime object
   appearance data requires it.
 - Tighten `SurfaceType.Base1ClipMap` parity beyond the minimum needed by indexed
@@ -759,7 +749,7 @@ Scope for the follow-up:
 
 Suggested parity order:
 
-1. Setup appearance routing and grouping-name cleanup.
+1. Setup appearance routing.
 2. Derived palette views for subpalette replacement.
 3. Texture swap parity across setup appearances.
 4. Clipmap parity and material scalar behavior.

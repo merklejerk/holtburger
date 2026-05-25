@@ -51,9 +51,7 @@ export function deriveWorldRenderWorkingModel(
 	const interiorStaticRenderableMeshes: InstancedMesh[] = [];
 	for (const [groupKey, mesh] of input.staticRenderableGroupMeshes.entries()) {
 		const parts =
-			input.staticRenderableScene.partsByRenderDomainChunkAndGfxAssetId.get(
-				groupKey,
-			);
+			input.staticRenderableScene.partsByRenderGroupKey.get(groupKey);
 		const renderDomain = parts?.[0]?.renderDomain;
 		if (renderDomain === WORLD_RENDER_DOMAIN.exteriorStatic) {
 			exteriorStaticRenderableMeshes.push(mesh);

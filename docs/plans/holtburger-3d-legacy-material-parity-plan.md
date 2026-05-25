@@ -1259,7 +1259,7 @@ Legacy shims:
 Refinements to future steps:
 
 - Phase 5.75 should wire the derived runtime appearance cache into a local
-  browser appearance preview before clothing generation adds more producers.
+  browser runtime appearance before clothing generation adds more producers.
 - Phase 6 should feed clothing-generated ObjDesc values into the derived
   runtime appearance cache API, not the prepared asset graph.
 - Phase 6 should add fixture coverage proving clothing-generated ObjDesc
@@ -1288,7 +1288,7 @@ Rationale:
 
 Implementation targets:
 
-- Add a browser-mode debug panel for an appearance preview with:
+- Add a browser-mode debug panel for a runtime appearance with:
   - required `setupDid`;
   - optional base palette ID;
   - editable subpalette rows;
@@ -1310,15 +1310,91 @@ Implementation targets:
 - Do not add WCID/weenie lookup. WCIDs require an ACE/world-content projection
   layer, while this phase should stay limited to DAT render inputs.
 
-Decisions:
+Implementation decisions:
 
-- This is an appearance preview, not an entity spawner.
+- This is a runtime appearance, not an entity spawner.
 - The canonical preview input is `setupDid + ObjDesc facts`.
 - Do not introduce route-shaped ObjDesc assets for preview convenience.
 
 Expected effect: palette overrides, subpalette ranges, texture swaps, and
 animation-part swaps can be visually inspected before clothing-generated
 appearances depend on the same path.
+
+Progress: implemented.
+
+Implementation notes:
+
+- Added a Tauri `resolve_runtime_appearance` command that accepts
+  `setupModelId + ObjDesc` facts and resolves them through the content runtime.
+  This is intentionally not an asset lookup route and does not create
+  `setup-appearance/.../obj-desc/...` asset IDs.
+- Browser debug mode now includes a runtime appearance form with setup DID,
+  optional base palette, subpalette rows, texture-swap rows, and animation-part
+  rows.
+- The frontend derives runtime appearance payloads through
+  `RuntimeAppearanceCache`, then
+  reports the resulting true dependency asset IDs to the scene asset streamer.
+  The streamer hydrates missing setup-model, selected gfx, material, and palette
+  assets through the normal asset loading path.
+- The world display merges the resolved preview into the static-renderable
+  scene as an app-local object placed 1 meter in front of the active browser
+  camera. The preview does not mutate world state and does not send server spawn
+  requests.
+- Preview diagnostics currently show cache counts, appearance key, selected
+  part count, requested material/palette counts, texture-swap signature, and
+  palette-view signature.
+
+Implementation decisions:
+
+- Keep the runtime appearance resolver as a typed command boundary instead of
+  overloading the asset ID namespace. The command returns a setup-appearance
+  payload, while true DAT assets still flow through the existing asset
+  streamer/cache.
+- Keep WCID/weenie lookup out of the preview. The preview input remains
+  `setupDid + ObjDesc` facts.
+- Reuse the static-renderable renderer path instead of adding a one-off Three.js
+  preview scene. This exercises the same material, palette, geometry, and render
+  style code that visible world objects use.
+
+Course corrections:
+
+- The preview depends on the content runtime to apply texture swaps and
+  animation-part changes. The frontend does not try to duplicate
+  `ResolvedSetupAppearance` generation logic.
+- The active preview is retained through scene-streamer interest rather than by
+  pinning prepared assets manually. This keeps the resident cache as a reuse
+  layer after hydration.
+
+Cleanup targets:
+
+- The debug panel now has enough dense controls that it should eventually split
+  appearance-preview editing into a focused child component.
+- Preview dependency diagnostics should distinguish "requested", "prepared",
+  and "missing/error" asset states instead of only showing requested counts.
+
+Legacy shims:
+
+- None introduced. The rejected ObjDesc asset-route path remains absent.
+
+Refinements to future steps:
+
+- Phase 6 can reuse the runtime appearance command/cache flow for visual
+  verification of clothing-generated ObjDesc values before wiring clothing into
+  live object rendering.
+- If preview UX grows beyond manual `setupDid + ObjDesc` entry, add direct
+  DAT/content selectors only; do not add ACE SQL/WCID lookup inside this plan.
+
+Verification:
+
+- `npm run check` passes.
+- `npm run test:ts` passes: 46 files, 242 tests.
+- `npm run lint:ts` passes.
+- `npm run lint:dead` passes.
+- `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml` passes:
+  14 tests.
+- `cargo clippy --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml
+  --all-targets -- -D warnings` passes.
+- `git diff --check` passes.
 
 ### Phase 6: ClothingTable Appearance Generation
 

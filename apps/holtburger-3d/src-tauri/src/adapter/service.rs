@@ -4,18 +4,24 @@ use std::sync::{Arc, Mutex};
 use crate::adapter::binary::*;
 use crate::adapter::ids::*;
 use crate::adapter::json::*;
-use holtburger_content::{ContentDecodeCache, ContentRepository, SoulEmoteCatalog};
+use holtburger_content::{
+    ContentDecodeCache, ContentRepository, MaterialAppearanceInput, SoulEmoteCatalog,
+};
 use holtburger_core::{
     ContentAsset, ContentAssetRequest, ContentAssetRuntime, ContentAssetService,
+    SetupAppearanceRequest,
 };
-use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
+use holtburger_dat::file_type::{
+    AnimationPartChange, MotionKinematics, ObjDesc, SkillTable, SpellTable, SubPalette,
+    TextureMapChange, XpTable,
+};
 use holtburger_world::WorldBootstrap;
 
 #[cfg(test)]
 use crate::contracts::Vec3Dto;
 use crate::contracts::{
     AssetLookupRequestDto, AssetLookupResponseDto, AssetPayloadKindDto, CameraHintAckDto,
-    CameraHintDto, DebugConfigDto,
+    CameraHintDto, DebugConfigDto, RuntimeAppearanceObjDescDto, RuntimeAppearanceRequestDto,
 };
 
 pub const ASSET_BINARY_MAGIC: &[u8; 4] = b"HBAB";
@@ -65,6 +71,13 @@ impl HostRuntimeService {
         self.adapter.asset_lookup_binary_batch(requests).await
     }
 
+    pub async fn resolve_runtime_appearance(
+        &self,
+        request: RuntimeAppearanceRequestDto,
+    ) -> anyhow::Result<serde_json::Value> {
+        self.adapter.resolve_runtime_appearance(request).await
+    }
+
     #[cfg(test)]
     fn asset_lookup_blocking(&self, request: AssetLookupRequestDto) -> AssetLookupResponseDto {
         self.adapter
@@ -96,6 +109,38 @@ impl HostRuntimeState {
         Self {
             camera_hint_sequence: 0,
         }
+    }
+}
+
+fn convert_runtime_appearance_obj_desc(dto: RuntimeAppearanceObjDescDto) -> ObjDesc {
+    ObjDesc {
+        palette_id: dto.palette_id,
+        sub_palettes: dto
+            .sub_palettes
+            .into_iter()
+            .map(|sub_palette| SubPalette {
+                sub_id: sub_palette.sub_id,
+                offset: sub_palette.offset,
+                num_colors: sub_palette.num_colors,
+            })
+            .collect(),
+        texture_changes: dto
+            .texture_changes
+            .into_iter()
+            .map(|change| TextureMapChange {
+                part_index: change.part_index,
+                old_texture: change.old_texture,
+                new_texture: change.new_texture,
+            })
+            .collect(),
+        anim_part_changes: dto
+            .anim_part_changes
+            .into_iter()
+            .map(|change| AnimationPartChange {
+                part_index: change.part_index,
+                part_id: change.part_id,
+            })
+            .collect(),
     }
 }
 
@@ -174,6 +219,26 @@ impl HostBoundaryAdapter {
             )?);
         }
         serialize_asset_binary_batch_response(responses, writer)
+    }
+
+    pub async fn resolve_runtime_appearance(
+        &self,
+        request: RuntimeAppearanceRequestDto,
+    ) -> anyhow::Result<serde_json::Value> {
+        let setup_request = SetupAppearanceRequest {
+            setup_model_id: request.setup_model_id,
+            appearance: MaterialAppearanceInput {
+                obj_desc: request.obj_desc.map(convert_runtime_appearance_obj_desc),
+            },
+        };
+        let asset = self
+            .content_asset_runtime
+            .load(ContentAssetRequest::SetupAppearance(setup_request))
+            .await?;
+        let ContentAsset::SetupAppearance(appearance) = asset else {
+            unreachable!("content asset runtime returned mismatched setup appearance");
+        };
+        Ok(serialize_setup_appearance_payload(&appearance))
     }
 
     #[cfg(test)]
@@ -944,6 +1009,34 @@ mod tests {
                 .is_some()
         );
         assert!(asset.payload["placementSets"].as_array().is_some());
+    }
+
+    #[tokio::test]
+    async fn runtime_appearance_resolves_obj_desc_without_asset_route() {
+        let runtime = HostRuntimeService::new(false);
+        let payload = runtime
+            .resolve_runtime_appearance(RuntimeAppearanceRequestDto {
+                setup_model_id: 0x0200_0001,
+                obj_desc: Some(RuntimeAppearanceObjDescDto {
+                    palette_id: Some(0x0400_0001),
+                    sub_palettes: vec![],
+                    texture_changes: vec![],
+                    anim_part_changes: vec![],
+                }),
+            })
+            .await
+            .expect("runtime appearance should resolve through content runtime");
+
+        assert_eq!(payload["kind"], "setup-appearance");
+        assert_eq!(payload["sourceAssetKind"], "setup-appearance");
+        assert_eq!(payload["setupModelId"], 0x0200_0001);
+        assert_eq!(payload["paletteId"], 0x0400_0001);
+        assert!(
+            payload["appearanceKey"]
+                .as_str()
+                .expect("appearance key should be present")
+                .contains("setup:")
+        );
     }
 
     #[test]

@@ -9,6 +9,7 @@ import {
 	createInitialAssetChannelState,
 	type AssetChannelState,
 	type PreparedAssetRecord,
+	type PreparedSetupAppearancePayload,
 } from "../assets/types";
 import { formatHex32, formatLandblockOutdoorAssetId } from "../landblocks";
 import type { CameraHintAckDto } from "../host/contracts";
@@ -44,7 +45,9 @@ import {
 } from "./render-spatial-scene";
 import { deriveWorldRenderSceneContext } from "./render-scene-context";
 import {
+	deriveAppearancePreviewStaticRenderableSceneModel,
 	deriveStaticRenderableSceneModel,
+	mergeStaticRenderableSceneModels,
 	type StaticRenderableSceneModel,
 } from "./static-renderables";
 import {
@@ -77,6 +80,7 @@ export interface BrowserRenderResourceCoordinatorInput {
 	diagnosticSelection: RenderSpatialMetadata | null;
 	activeRenderAnchor: RenderLandblockAnchor | null;
 	browserCameraFrame: SceneCameraFrame | null;
+	runtimeAppearanceSetupAppearance: PreparedSetupAppearancePayload | null;
 	cameraAck: CameraHintAckDto | null;
 	pendingCameraHint: boolean;
 }
@@ -210,7 +214,7 @@ export class BrowserRenderResourceCoordinator {
 			input,
 			linkedOutdoorEnvCellIds,
 		);
-		const staticRenderableScene = deriveStaticRenderableSceneModel(
+		const baseStaticRenderableScene = deriveStaticRenderableSceneModel(
 			input.assetState,
 			input.browserDestination,
 			input.detailLodRadius,
@@ -222,6 +226,19 @@ export class BrowserRenderResourceCoordinator {
 						detailLandblockIds: outdoorSceneInterest.detailLandblockIds,
 						envCellLandblockIds: outdoorSceneInterest.envCellLandblockIds,
 					},
+		);
+		const appearancePreviewScene =
+			deriveAppearancePreviewStaticRenderableSceneModel({
+				assetState: input.assetState,
+				setupAppearance: input.runtimeAppearanceSetupAppearance,
+				cameraFrame: input.browserCameraFrame,
+				anchorLandblockId: input.activeRenderAnchor?.landblockId ?? null,
+				renderAsInterior:
+					browserDestinationToInteriorCellId(input.browserDestination) !== null,
+			});
+		const staticRenderableScene = mergeStaticRenderableSceneModels(
+			baseStaticRenderableScene,
+			appearancePreviewScene,
 		);
 		const structuredInteriorScene = deriveStructuredInteriorSceneModel(
 			input.assetState,

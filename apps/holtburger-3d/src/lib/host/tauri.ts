@@ -1,14 +1,17 @@
 import type {
+	RuntimeAppearanceRequestDto,
 	AssetLookupRequestDto,
 	AssetLookupResponseDto,
 	CameraHintAckDto,
 	CameraHintDto,
 	DebugConfigDto,
+	SetupAppearancePayloadDto,
 } from "./contracts";
 import {
 	assetLookupResponseDtoSchema,
 	cameraHintAckDtoSchema,
 	debugConfigDtoSchema,
+	setupAppearancePayloadDtoSchema,
 } from "./contracts";
 import {
 	decodeBinaryAssetBatchEnvelope,
@@ -224,4 +227,16 @@ export async function submitCameraHint(
 	requireTauriRuntime();
 
 	return invokeCommand("submit_camera_hint", cameraHintAckDtoSchema, { hint });
+}
+
+export async function resolveRuntimeAppearance(
+	request: RuntimeAppearanceRequestDto,
+): Promise<SetupAppearancePayloadDto> {
+	requireTauriRuntime();
+
+	return invokeCommand(
+		"resolve_runtime_appearance",
+		setupAppearancePayloadDtoSchema,
+		{ request },
+	);
 }

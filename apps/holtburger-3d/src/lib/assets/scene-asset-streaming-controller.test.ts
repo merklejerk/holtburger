@@ -78,6 +78,7 @@ describe("scene asset streaming controller", () => {
 				buildingLodRadius: 1,
 				detailLodRadius: 1,
 				envCellLodRadius: 1,
+				appearancePreviewAssetIds: [],
 				preparedByAssetId: { ...preparedByAssetId },
 			});
 		};

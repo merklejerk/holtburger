@@ -36,6 +36,7 @@ export interface SceneAssetStreamingInput {
 	buildingLodRadius: number;
 	detailLodRadius: number;
 	envCellLodRadius: number;
+	appearancePreviewAssetIds: readonly string[];
 	preparedByAssetId: Record<string, PreparedAssetRecord>;
 }
 
@@ -147,6 +148,14 @@ export class SceneAssetStreamingController {
 				},
 			},
 			priority,
+		).concat(
+			createAppearancePreviewRequests({
+				requestRevision: this.requestRevision,
+				assetIds: input.appearancePreviewAssetIds,
+				preparedByAssetId,
+				pendingAssetIds: [...this.inFlightAssetIds],
+				priority,
+			}),
 		);
 
 		this.deps.debugLog("scene-coverage", {
@@ -231,7 +240,7 @@ export class SceneAssetStreamingController {
 					detailRadius: input.detailLodRadius,
 					envCellRadius: input.envCellLodRadius,
 				},
-			),
+			).concat(input.appearancePreviewAssetIds),
 			inFlightAssetIds: [...this.inFlightAssetIds],
 			nowMs: this.deps.nowMs?.() ?? Date.now(),
 			warmRetainMs:
@@ -298,6 +307,27 @@ function chunkDiagnosticString(value: string, chunkSize = 120): string[] {
 		chunks.push(value.slice(index, index + chunkSize));
 	}
 	return chunks;
+}
+
+function createAppearancePreviewRequests(options: {
+	requestRevision: number;
+	assetIds: readonly string[];
+	preparedByAssetId: Record<string, PreparedAssetRecord>;
+	pendingAssetIds: readonly string[];
+	priority: AssetPriority;
+}): AssetLookupRequestDto[] {
+	const pendingAssetIdSet = new Set(options.pendingAssetIds);
+	return [...new Set(options.assetIds)]
+		.filter(
+			(assetId) =>
+				!options.preparedByAssetId[assetId] && !pendingAssetIdSet.has(assetId),
+		)
+		.sort()
+		.map((assetId) => ({
+			requestId: `${options.priority}-${options.requestRevision}-appearance-preview-${assetId}`,
+			assetId,
+			priority: options.priority,
+		}));
 }
 
 function reportMaterialGraphRequests(options: {
@@ -381,6 +411,7 @@ function createSceneInterestSyncKey(input: SceneAssetStreamingInput): string {
 		`buildings-${input.buildingLodRadius}`,
 		`detail-${input.detailLodRadius}`,
 		`env-cells-${input.envCellLodRadius}`,
+		`appearance-preview-${[...input.appearancePreviewAssetIds].sort().join(",")}`,
 		`prepared-${preparedPlanningAssetKey}`,
 	].join(":");
 

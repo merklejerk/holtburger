@@ -336,6 +336,7 @@ describe("world material resource cache", () => {
 			diagnostics.push(diagnostic.key);
 			if (diagnostic.key.startsWith("indexed-texture-index-out-of-range")) {
 				expect(diagnostic.detail).toMatchObject({
+					paletteSource: "material-recipe",
 					maxIndex: 4,
 					colorCount: 2,
 				});
@@ -372,6 +373,49 @@ describe("world material resource cache", () => {
 
 		expect(diagnostics).toContain(
 			`indexed-texture-index-out-of-range:${materialAssetId}:${renderSurfaceAssetId}:${paletteAssetId}`,
+		);
+		cache.dispose();
+	});
+
+	it("reports missing palette selection when indexed material has no base or default palette", () => {
+		const diagnostics: string[] = [];
+		const materialAssetId = formatMaterialAssetId(0x08000009);
+		const renderSurfaceAssetId = "render-surface/06000009";
+		const cache = new WorldMaterialResourceCache((diagnostic) => {
+			diagnostics.push(diagnostic.key);
+			if (diagnostic.key.startsWith("indexed-texture-palette-missing")) {
+				expect(diagnostic.detail).toMatchObject({
+					defaultPaletteId: null,
+					recipePaletteId: null,
+				});
+			}
+		});
+
+		cache.resolveMaterialPlan({
+			slots: [{ slotIndex: 0, surfaceId: 0x08000009, materialAssetId }],
+			appearanceKey: "visible-cell",
+			preparedByAssetId: {
+				[materialAssetId]: createPreparedAsset(
+					materialAssetId,
+					createTextureMaterialRecipe(0x08000009, 0x06000009),
+				),
+				[renderSurfaceAssetId]: createPreparedAsset(
+					renderSurfaceAssetId,
+					createIndexedRenderSurfacePayload(0x06000009, {
+						formatRaw: 0x29,
+						format: "P8",
+						sourceBytes: new Uint8Array([0]),
+						width: 1,
+						height: 1,
+						defaultPaletteId: null,
+					}),
+				),
+			},
+			fallbackColorKey: "visible-cell",
+		});
+
+		expect(diagnostics).toContain(
+			`indexed-texture-palette-missing:${materialAssetId}:${renderSurfaceAssetId}`,
 		);
 		cache.dispose();
 	});

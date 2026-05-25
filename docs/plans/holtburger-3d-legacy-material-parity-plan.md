@@ -48,6 +48,13 @@ or new reference evidence proves it stale.
 - The renderer selects only base material/default render-surface palettes for
   indexed textures. It does not compose `ObjDesc.paletteId` and `subPalettes`
   into a per-appearance palette texture.
+- `ClothingTable`-driven appearance generation is not implemented. The lower
+  level `ObjDesc + Setup` path should come first; clothing tables should later
+  produce `ObjDesc` inputs in `holtburger-content`, not renderer-local clothing
+  state.
+- Legacy texture animation hooks are preserved opaquely but not applied.
+  `TextureVelocity` and `TextureVelocityPart` should eventually drive
+  per-instance UV offsets without mutating shared `GfxObj` geometry.
 - Outdoor terrain is still diagnostic vertex color only. It does not consume
   `terrain-material/{regionNumber}`, terrain pcodes, overlay alpha maps, road
   maps, detail textures, or texture tiling.
@@ -122,6 +129,23 @@ evidence.
 Exact CPU `TexMerge::FillTempTexBuffer` parity is deferred unless we later need
 retail-identical terrain texels.
 
+### Explicit Deferrals
+
+The legacy parity target is a textured static snapshot plus the appearance
+overrides required to render real outfits and static/setup objects correctly.
+The following work is intentionally outside the first parity pass:
+
+- Modern `RenderMaterial`, `MaterialModifier`, and `MaterialInstance` DATs:
+  recognize/report them enough to avoid blocking asset loading, but defer full
+  parsing and rendering until visible content requires the programmable material
+  path.
+- Legacy texture velocity animation: parse and preserve
+  `TextureVelocity`/`TextureVelocityPart` as typed setup/animation/runtime data
+  later, then expose renderer UV offsets keyed by object or part instance.
+- `ClothingTable::BuildObjDesc`: implement after direct `ObjDesc` setup
+  appearance parity works. Clothing tables are an appearance recipe source, not
+  a separate renderer material model.
+
 ## Implementation Plan
 
 ### Pipeline Readiness
@@ -150,6 +174,10 @@ Needs deliberate boundary work before implementation:
   palette override, subpalette replacements, texture swap identity, and a stable
   palette-view signature. Passing only `appearanceKey: string` will become too
   lossy once derived palette resources exist.
+- Keep the appearance context source-agnostic. It should represent resolved
+  appearance facts from base setups, direct/server `ObjDesc` data, and future
+  `ClothingTable -> ObjDesc` generation without exposing clothing-table concepts
+  to Three.js.
 - Add a derived palette resource/cache module rather than folding subpalette
   replacement into `palette-resources.ts` or `indexed-materials.ts`.
   `palette-resources.ts` should remain base palette upload logic.
@@ -243,6 +271,10 @@ behavior.
 - Introduce a typed renderer-local material appearance context. Initially it can
   wrap today's `appearanceKey`, but it should be able to grow into palette-view
   identity and texture-swap identity without changing every call site.
+- Make material appearance signatures describe resolved appearance facts, not
+  the source that produced them. Equivalent direct `ObjDesc` and future
+  clothing-generated appearances should be able to share material and palette
+  resources.
 - Thread enough material-source context through `resolveMaterialPlan()` for
   future per-slot sampling policy and palette-view identity. Avoid widening the
   API with loosely typed optional bags.
@@ -272,6 +304,10 @@ Goal: isolate texture sampler decisions before changing UV behavior.
 - Decide where geometry-derived UV policy lives. Prefer a small
   `uvBounds`/`hasWrappingUvs` summary on prepared render geometry, with a
   fallback helper that computes it from emitted UV arrays for older fixtures.
+- Keep sampling policy separate from future texture-velocity animation. Wrap,
+  filter, color-space, mipmap, and `flipY` decisions belong to texture resource
+  policy; per-object or per-part UV offsets should later be instance state, not
+  shared texture identity.
 - Preserve current behavior by default until Phase 3 proves the AC-specific
   policy changes.
 - Add tests for policy defaults and resource application.
@@ -377,6 +413,10 @@ runtime renderables consistently.
   policy in `apps/holtburger-3d`.
 - Make material cache signatures include selected part IDs, texture swap
   identity, and palette view identity.
+- Treat this as the canonical path for resolved appearances:
+  `ObjDesc + Setup -> setup-appearance payload`. Clothing tables should later
+  feed this path by producing an `ObjDesc`, not by adding renderer-specific
+  clothing state.
 - Add integration tests using the existing
   `resolve_setup_appearance_with_texture_and_part_overrides` coverage as the
   Rust-side truth.
@@ -384,7 +424,48 @@ runtime renderables consistently.
 Expected effect: appearance changes should select the right mesh parts,
 textures, and palettes without mutating base DAT material definitions.
 
-### Phase 6: Clipmap And Scalar Material Behavior
+### Phase 6: ClothingTable Appearance Generation
+
+Goal: make retail clothing/outfit recipes produce the same appearance inputs as
+server-supplied `ObjDesc` data.
+
+- Implement `ClothingTable::BuildObjDesc` in `holtburger-content` after direct
+  `ObjDesc + Setup` resolution is proven in Phase 5.
+- Keep `ClothingTable` parsing and recipe resolution out of the renderer. The
+  renderer should continue consuming setup-appearance payloads, palette views,
+  texture swaps, and material signatures.
+- Use client naming and semantics from the strategy doc:
+  `ClothingBase`, `CloObjectEffect`, `CloTextureEffect`,
+  `CloPaletteTemplate`, and `CloSubpalEffect`.
+- Preserve the retail palette shade selection formula, including the
+  `(count - 0.000001) * hue` epsilon.
+- Add tests proving clothing-generated `ObjDesc` values produce the same
+  selected parts, texture swaps, subpalette dependencies, and appearance keys as
+  equivalent direct `ObjDesc` inputs.
+
+Expected effect: character and equipment appearances can flow through the same
+renderer path whether they originate from server `ObjDesc` data or retail
+clothing table recipes.
+
+### Phase 7: Legacy Texture Velocity Animation
+
+Goal: add the legacy UV-scrolling path without pulling in the modern material
+DAT system.
+
+- Parse `TextureVelocity` and `TextureVelocityPart` hook payloads into typed
+  data instead of preserving them opaquely.
+- Preserve texture velocity data in setup, animation, or runtime appearance
+  payloads at the layer where the hook is actually resolved.
+- Apply UV offsets as renderer instance state keyed by object or part instance.
+  Do not mutate shared `GfxObj` geometry or shared material definitions.
+- Keep this separate from modern `Waveform`/`LayerModifier` material animation.
+- Add tests for hook parsing and renderer key/signature behavior. Do not write
+  tests for debug-oriented logging.
+
+Expected effect: legacy scrolling textures can animate while static material
+identity, batching, and shared geometry remain correct.
+
+### Phase 8: Clipmap And Scalar Material Behavior
 
 Goal: tighten the non-topological material properties.
 
@@ -397,7 +478,7 @@ Goal: tighten the non-topological material properties.
 Expected effect: alpha-cut, translucent, luminous, and diffuse-tinted surfaces
 should be closer to retail without weakening the material data model.
 
-### Phase 7: Terrain Material Pipeline Prep
+### Phase 9: Terrain Material Pipeline Prep
 
 Goal: introduce terrain-specific renderer boundaries before implementing terrain
 blending.
@@ -419,10 +500,10 @@ Completion criteria:
   the existing debug-color fallback.
 - `terrain-scene.ts` no longer has to collapse quad pcodes into a triangle
   `terrainType` field for material-ready rendering.
-- Phase 8 can add blending shaders/resources without refactoring terrain scene
+- Phase 10 can add blending shaders/resources without refactoring terrain scene
   selection or geometry ownership.
 
-### Phase 8: Terrain TexMerge GPU Path
+### Phase 10: Terrain TexMerge GPU Path
 
 Goal: replace diagnostic terrain colors with renderer-native terrain materials
 that preserve retail terrain semantics.
@@ -444,12 +525,14 @@ that preserve retail terrain semantics.
 Expected effect: outdoor terrain stops being debug-colored and begins using
 terrain material data in a way that can be compared against retail visuals.
 
-### Phase 9: Optional High-Res JPEG Replacement
+### Phase 11: Optional High-Res JPEG Replacement
 
 Goal: support `PFID_CUSTOM_RAW_JPEG` render-surface replacement when an optional
 high-res DAT pack is mounted.
 
 - Detect `client_highres.dat` replacement records when mounted and enabled.
+- Treat high-res substitutions as `RenderSurface` DataID replacements and honor
+  mounted archive priority order when resolving render-surface records.
 - Decode JPEG render surfaces through browser/Rust-safe image decoding.
 - Preserve the reference channel swap behavior from ACViewer.
 - Keep fallback diagnostics explicit when high-res content is absent, disabled,
@@ -467,10 +550,12 @@ target.
 4. Phase 3 UV and sampler validation.
 5. Phase 4 derived palette views.
 6. Phase 5 runtime appearance parity.
-7. Phase 6 clipmap/scalar behavior.
-8. Phase 7 terrain material pipeline prep.
-9. Phase 8 terrain TexMerge GPU path.
-10. Phase 9 optional high-res JPEG replacement.
+7. Phase 6 ClothingTable appearance generation.
+8. Phase 7 legacy texture velocity animation.
+9. Phase 8 clipmap/scalar behavior.
+10. Phase 9 terrain material pipeline prep.
+11. Phase 10 terrain TexMerge GPU path.
+12. Phase 11 optional high-res JPEG replacement.
 
 This order should improve the currently observed failures fastest:
 

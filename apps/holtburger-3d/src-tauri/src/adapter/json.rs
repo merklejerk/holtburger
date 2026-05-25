@@ -3,37 +3,7 @@ use crate::adapter::service::asset_cache_error_code;
 use holtburger_common::math::{Quaternion, Vector3};
 use holtburger_content::*;
 use holtburger_dat::file_type::{Palette, RenderSurface, SetupModel};
-use holtburger_dat::graphics::{CVertexArray, Polygon};
 use holtburger_dat::physics::BspNode;
-
-pub fn serialize_gfx_obj_payload(gfx_obj: &holtburger_dat::file_type::GfxObj) -> serde_json::Value {
-    serde_json::json!({
-        "kind": "gfx-obj",
-        "residencyKind": "unknown",
-        "sourceAssetKind": "gfx-obj",
-        "gfxObjId": gfx_obj.id,
-        "flags": gfx_obj.flags.bits(),
-        "surfaceIds": gfx_obj.surfaces,
-        "vertexArray": serialize_vertex_array(&gfx_obj.vertex_array),
-        "drawingPolygons": serialize_polygons(&gfx_obj.polygons),
-        "drawingBsp": gfx_obj.drawing_bsp.as_ref().map(serialize_bsp_node),
-        "dependencies": {
-            "materialAssetIds": gfx_obj.surfaces.iter().map(|surface_id| format_material_asset_id(*surface_id)).collect::<Vec<_>>(),
-        },
-        "physicsWitness": {
-            "polygonCount": gfx_obj.physics_polygons.len(),
-            "hasBsp": gfx_obj.physics_bsp.is_some()
-        },
-        "sortCenter": serialize_vector3(&gfx_obj.sort_center),
-        "didDegrade": gfx_obj.did_degrade,
-        "provenance": {
-            "source": "repo-local-hba",
-            "sourceAssetKind": "gfx-obj",
-            "errorCode": null,
-            "detail": null
-        }
-    })
-}
 
 pub fn serialize_setup_model_payload(setup_model: &SetupModel) -> serde_json::Value {
     serde_json::json!({
@@ -650,19 +620,6 @@ pub fn build_flat_bvh_nodes_from_bounds(items: Vec<(PreparedAabb, u32)>) -> Vec<
     })]
 }
 
-pub fn serialize_landblock_outdoor_payload(
-    outdoor: &LandblockOutdoorAsset,
-    region_id: u32,
-    region_number: u32,
-) -> serde_json::Value {
-    serialize_landblock_outdoor_payload_with_terrain(
-        outdoor,
-        region_id,
-        region_number,
-        serialize_landblock_outdoor_terrain(outdoor),
-    )
-}
-
 pub fn serialize_landblock_outdoor_binary_payload(
     outdoor: &LandblockOutdoorAsset,
     region_id: u32,
@@ -745,11 +702,6 @@ pub fn serialize_landblock_topology_payload(
             "detail": topology.diagnostics.errors.first().map(|error| error.detail.clone())
         }
     })
-}
-
-pub fn serialize_landblock_outdoor_terrain(outdoor: &LandblockOutdoorAsset) -> serde_json::Value {
-    let terrain_asset = landblock_outdoor_terrain_asset(outdoor);
-    serialize_landblock_terrain(&terrain_asset)
 }
 
 pub fn landblock_outdoor_terrain_asset(
@@ -923,14 +875,6 @@ pub fn serialize_landblock_scene_env_cell_member(
         "restrictionObjectId": cell.restriction_object_id,
         "seenOutside": cell.seen_outside,
     })
-}
-
-pub fn serialize_env_cell_payload(asset: &EnvCellAsset) -> serde_json::Value {
-    serialize_env_cell_payload_with_geometry(
-        asset,
-        serialize_prepared_polygon_set_render_geometry(&asset.prepared_cell.render_geometry),
-        |_aperture_index, aperture| serialize_prepared_portal_aperture(aperture),
-    )
 }
 
 pub fn serialize_env_cell_payload_with_geometry<F>(
@@ -1143,13 +1087,13 @@ pub fn serialize_terrain_material_payload(
     })
 }
 
-pub fn serialize_prepared_portal_aperture(aperture: &PreparedPortalAperture) -> serde_json::Value {
+pub fn serialize_prepared_bvh_node(node: &PreparedBvhNode) -> serde_json::Value {
     serde_json::json!({
-        "portalId": aperture.portal_id,
-        "sourceIndex": aperture.source_index,
-        "polygonId": aperture.polygon_id,
-        "points": aperture.points.iter().map(serialize_prepared_vec3).collect::<Vec<_>>(),
-        "plane": aperture.plane.as_ref().map(serialize_prepared_portal_aperture_plane),
+        "bounds": serialize_prepared_aabb(&node.bounds),
+        "left": node.left,
+        "right": node.right,
+        "itemIndices": node.item_indices,
+        "kindMask": node.kind_mask,
     })
 }
 
@@ -1170,45 +1114,6 @@ pub fn serialize_prepared_portal_aperture_plane_source(
         PreparedPortalAperturePlaneSource::DrawingBspPortal => "drawing-bsp-portal",
         PreparedPortalAperturePlaneSource::DerivedFromRenderPoints => "derived-from-render-points",
     }
-}
-
-pub fn serialize_prepared_bvh_node(node: &PreparedBvhNode) -> serde_json::Value {
-    serde_json::json!({
-        "bounds": serialize_prepared_aabb(&node.bounds),
-        "left": node.left,
-        "right": node.right,
-        "itemIndices": node.item_indices,
-        "kindMask": node.kind_mask,
-    })
-}
-
-pub fn serialize_prepared_polygon_set_render_geometry(
-    geometry: &PreparedPolygonSetRenderGeometry,
-) -> serde_json::Value {
-    serde_json::json!({
-        "sourceId": geometry.source_id,
-        "vertexCount": geometry.vertex_count,
-        "triangleCount": geometry.triangle_count,
-        "positions": geometry.positions,
-        "normals": geometry.normals,
-        "uvs": geometry.uvs,
-        "triangles": geometry.triangles.iter().map(serialize_prepared_polygon_set_render_triangle).collect::<Vec<_>>(),
-        "surfaceIds": geometry.surface_ids,
-        "invalidPolygons": geometry.invalid_polygons.iter().map(serialize_prepared_polygon_set_invalid_polygon).collect::<Vec<_>>(),
-        "skippedPolygonCount": geometry.skipped_polygon_count,
-        "bounds": geometry.bounds.as_ref().map(serialize_prepared_aabb),
-    })
-}
-
-pub fn serialize_prepared_polygon_set_render_triangle(
-    triangle: &PreparedPolygonSetRenderTriangle,
-) -> serde_json::Value {
-    serde_json::json!({
-        "polygonId": triangle.polygon_id,
-        "surfaceId": triangle.surface_id,
-        "materialVariantSignature": triangle.material_variant_signature,
-        "firstVertex": triangle.first_vertex,
-    })
 }
 
 pub fn serialize_prepared_polygon_set_invalid_polygon(
@@ -1440,56 +1345,6 @@ pub fn serialize_lights(
                 "intensity": light.intensity,
                 "falloff": light.falloff,
                 "coneAngle": light.cone_angle,
-            })
-        })
-        .collect()
-}
-
-pub fn serialize_vertex_array(vertex_array: &CVertexArray) -> serde_json::Value {
-    let mut vertices = vertex_array.vertices.iter().collect::<Vec<_>>();
-    vertices.sort_by_key(|(id, _)| **id);
-
-    serde_json::json!({
-        "vertexType": vertex_array.vertex_type,
-        "vertexCount": vertex_array.vertices.len(),
-        "vertices": vertices
-            .into_iter()
-            .map(|(id, vertex)| {
-                serde_json::json!({
-                    "id": id,
-                    "origin": serialize_vector3(&vertex.origin),
-                    "normal": serialize_vector3(&vertex.normal),
-                    "uvs": vertex.uvs.iter().map(|uv| {
-                        serde_json::json!({
-                            "u": uv.u,
-                            "v": uv.v,
-                        })
-                    }).collect::<Vec<_>>(),
-                })
-            })
-            .collect::<Vec<_>>(),
-    })
-}
-
-pub fn serialize_polygons(
-    polygons: &std::collections::HashMap<u16, Polygon>,
-) -> Vec<serde_json::Value> {
-    let mut entries = polygons.iter().collect::<Vec<_>>();
-    entries.sort_by_key(|(id, _)| **id);
-
-    entries
-        .into_iter()
-        .map(|(id, polygon)| {
-            serde_json::json!({
-                "id": id,
-                "numPts": polygon.num_pts,
-                "stippling": polygon.stippling,
-                "sidesType": polygon.sides_type,
-                "posSurface": polygon.pos_surface,
-                "negSurface": polygon.neg_surface,
-                "vertexIds": polygon.vertex_ids,
-                "posUvIndices": polygon.pos_uv_indices,
-                "negUvIndices": polygon.neg_uv_indices,
             })
         })
         .collect()

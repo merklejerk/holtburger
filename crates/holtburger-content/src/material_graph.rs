@@ -2,9 +2,9 @@ use std::io::Cursor;
 
 use anyhow::{Context, Result, anyhow};
 use holtburger_dat::file_type::{
-    AnimationPartChange, CSurface, CSurfaceSource, EnvCell, GfxObj, ObjDesc, Palette,
-    REGION_DESC_FILE_ID, RegionDesc, RenderSurface, RenderTexture, SetupModel, SubPalette,
-    SurfaceType, TextureMapChange,
+    AnimationPartChange, CSurface, CSurfaceSource, ClothingBuildObjDescError, ClothingTable,
+    EnvCell, GfxObj, ObjDesc, Palette, PaletteSet, REGION_DESC_FILE_ID, RegionDesc, RenderSurface,
+    RenderTexture, SetupModel, SubPalette, SurfaceType, TextureMapChange,
 };
 use holtburger_dat::{EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, ResourceKey};
 
@@ -147,6 +147,36 @@ pub(crate) struct ParsedMaterialDependency {
 }
 
 impl ContentRepository {
+    pub fn build_clothing_obj_desc(
+        &self,
+        clothing_table_id: u32,
+        setup_model_id: u32,
+        palette_template_key: u32,
+        shade: f64,
+    ) -> Result<ObjDesc> {
+        let clothing_table = read_clothing_table(self, clothing_table_id)?;
+        clothing_table
+            .build_obj_desc(
+                setup_model_id,
+                palette_template_key,
+                shade,
+                |palette_set_id, shade| {
+                    let palette_set = read_palette_set_for_clothing(self, palette_set_id)?;
+                    palette_set.palette_id_for_shade(shade).ok_or(
+                        ClothingBuildObjDescError::InvalidPaletteShade {
+                            palette_set_id,
+                            shade,
+                        },
+                    )
+                },
+            )
+            .with_context(|| {
+                format!(
+                    "failed to build ObjDesc from ClothingTable 0x{clothing_table_id:08X}, setup 0x{setup_model_id:08X}, palette template {palette_template_key}"
+                )
+            })
+    }
+
     pub fn resolve_render_texture(&self, render_texture_id: u32) -> Result<ResolvedRenderTexture> {
         let dependency = read_render_texture_dependency(self, render_texture_id)?;
         Ok(ResolvedRenderTexture {
@@ -407,6 +437,29 @@ impl ContentRepository {
             })
             .collect()
     }
+}
+
+fn read_clothing_table(
+    content: &ContentRepository,
+    clothing_table_id: u32,
+) -> Result<ClothingTable> {
+    let resource = read_available_resource(content, EOR_PORTAL_NAMESPACE, clothing_table_id)?;
+    ClothingTable::unpack(&mut Cursor::new(resource.bytes))
+        .with_context(|| format!("failed to parse ClothingTable 0x{clothing_table_id:08X}"))
+}
+
+fn read_palette_set_for_clothing(
+    content: &ContentRepository,
+    palette_set_id: u32,
+) -> Result<PaletteSet, ClothingBuildObjDescError> {
+    let resource = read_available_resource(content, EOR_PORTAL_NAMESPACE, palette_set_id)
+        .map_err(|_| ClothingBuildObjDescError::MissingPaletteSet { palette_set_id })?;
+    PaletteSet::unpack(&mut Cursor::new(resource.bytes)).map_err(|error| {
+        ClothingBuildObjDescError::InvalidPaletteSet {
+            palette_set_id,
+            message: error.to_string(),
+        }
+    })
 }
 
 fn road_terrain_texture_id(terrain_types: &[ResolvedTerrainMaterialType]) -> u32 {

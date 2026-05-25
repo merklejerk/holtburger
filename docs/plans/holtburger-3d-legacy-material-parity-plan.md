@@ -1424,6 +1424,95 @@ Expected effect: character and equipment appearances can flow through the same
 renderer path whether they originate from server `ObjDesc` data or retail
 clothing table recipes.
 
+Status: **implemented**.
+
+Progress:
+
+- Added typed `holtburger-dat` parsers for `PaletteSet`, `ClothingTable`,
+  `ClothingBase`, `CloObjectEffect`, `CloTextureEffect`,
+  `CloPaletteTemplate`, `CloSubpalEffect`, and `CloSubpaletteRange`.
+- Added `ClothingTable::build_obj_desc`, which emits normal `ObjDesc` state:
+  animation-part changes, texture changes, and subpalette changes. It uses the
+  existing retail replacement/cap behavior for texture and animation changes
+  and adds the retail subpalette replace/supercede behavior for constructed
+  clothing output.
+- Added `PaletteSet::palette_id_for_shade` with the retail
+  `(count - 0.000001) * shade` selection formula.
+- Added `ContentRepository::build_clothing_obj_desc(...)`, which reads the
+  clothing table and required palette sets from mounted content and returns the
+  derived `ObjDesc` without creating a route-shaped asset ID.
+- Added `DatFileType::PaletteSet` and included palette-set availability in the
+  material capability report because clothing table subpalette effects depend
+  on palette-set records, not only raw palette records.
+- Added tests proving:
+  - palette-set shade selection keeps the retail epsilon;
+  - clothing table parsing/building emits part, texture, and palette effects;
+  - a clothing-generated `ObjDesc` resolves to the same setup appearance,
+    texture swaps, subpalette dependencies, and appearance key as the equivalent
+    direct `ObjDesc` input.
+
+Decisions:
+
+- Clothing remains a content/DAT concern. The renderer still only consumes the
+  existing setup appearance payloads, palette dependencies, texture swaps, and
+  material signatures.
+- The new content API returns derived override state, not a cached true asset.
+  This keeps Phase 5.5's layered runtime appearance cache decision intact.
+- The implementation supports the retail constructor shape where one shade is
+  replicated across the four-slot `ShadePackage`. A future caller that proves
+  distinct per-slot shades are needed should extend the API explicitly rather
+  than smuggling a renderer-side clothing concept into the path.
+- Retail setup fallback mappings from `ClothingTable::BuildObjDesc` are encoded
+  for the known Umbraen, Penumbraen, Undead, and Anakshay setup aliases found in
+  the client decompile. Missing clothing bases fail loudly after applying that
+  mapping.
+
+Course corrections:
+
+- `PaletteSet` had not been modeled as its own DAT type even though clothing
+  palette effects require it. This pass added the type instead of treating
+  palette-set IDs as ordinary palette IDs.
+- Capability diagnostics previously considered clothing tables and palettes but
+  not palette sets. That would have made clothing capability reporting too
+  optimistic for archives with clothing tables but pruned `0x0F` palette sets.
+
+Cleanup targets:
+
+- Consider exposing a small content-facing clothing preview DTO only when the
+  browser UX needs direct clothing-table selection. Do not add WCID/ACE SQL
+  lookup to this plan.
+- If character creation or live equipment layering starts combining multiple
+  `ObjDesc` producers in Rust, add an explicit `ObjDesc` merge helper with the
+  same retail `ObjDesc::operator+=` semantics instead of open-coding repeated
+  add/dedup loops.
+
+Legacy shims:
+
+- None introduced. Clothing output feeds the normal `Setup + ObjDesc` resolver
+  and does not revive `setup-appearance/.../obj-desc/...` asset IDs.
+
+Refinements to future steps:
+
+- Phase 7 texture velocity should remain independent of clothing generation.
+  Clothing can produce texture/part overrides; texture velocity is runtime UV
+  state and should not be folded into the clothing table model.
+- The future runtime entity projection followup should use
+  `ContentRepository::build_clothing_obj_desc(...)` as one producer of entity
+  appearance override state, alongside server-supplied `ObjDesc` values.
+
+Verification:
+
+- `cargo test --manifest-path crates/holtburger-dat/Cargo.toml material`
+  passes: 12 tests.
+- `cargo test --manifest-path crates/holtburger-content/Cargo.toml
+  clothing_generated_obj_desc_matches_direct_setup_appearance_input` passes.
+- `cargo test --manifest-path crates/holtburger-content/Cargo.toml` passes:
+  40 tests.
+- `cargo clippy --manifest-path crates/holtburger-dat/Cargo.toml
+  --all-targets -- -D warnings` passes.
+- `cargo clippy --manifest-path crates/holtburger-content/Cargo.toml
+  --all-targets -- -D warnings` passes.
+
 ### Phase 7: Legacy Texture Velocity Animation
 
 Goal: add the legacy UV-scrolling path without pulling in the modern material

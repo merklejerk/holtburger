@@ -794,6 +794,7 @@ mod tests {
             0x0400_0032,
             0x0400_0040,
             0x0400_0041,
+            0x0400_0042,
         ] {
             writer
                 .add(
@@ -804,6 +805,22 @@ mod tests {
                 )
                 .expect("palette should be added");
         }
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0F00_0040,
+                DatFileType::from_id(0x0F00_0040) as u32,
+                palette_set_bytes(0x0F00_0040, &[0x0400_0041, 0x0400_0042]),
+            )
+            .expect("palette set should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x1000_0040,
+                DatFileType::Clothing as u32,
+                clothing_table_bytes(),
+            )
+            .expect("clothing table should be added");
 
         writer.write(path).expect("test HBA should be written");
     }
@@ -919,6 +936,43 @@ mod tests {
         bytes.extend_from_slice(&0xFF00_0000u32.to_le_bytes());
         bytes.extend_from_slice(&0xFFFF_FFFFu32.to_le_bytes());
         bytes
+    }
+
+    fn palette_set_bytes(id: u32, palette_ids: &[u32]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&id.to_le_bytes());
+        bytes.extend_from_slice(&(palette_ids.len() as i32).to_le_bytes());
+        for palette_id in palette_ids {
+            bytes.extend_from_slice(&palette_id.to_le_bytes());
+        }
+        bytes
+    }
+
+    fn clothing_table_bytes() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0x1000_0040u32.to_le_bytes());
+        push_packed_hash_header(&mut bytes, 1);
+        bytes.extend_from_slice(&0x0200_0030u32.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&0x0100_0032u32.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&0x0500_0032u32.to_le_bytes());
+        bytes.extend_from_slice(&0x0500_0040u32.to_le_bytes());
+        push_packed_hash_header(&mut bytes, 1);
+        bytes.extend_from_slice(&7u32.to_le_bytes());
+        bytes.extend_from_slice(&0x0600_1000u32.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&24u32.to_le_bytes());
+        bytes.extend_from_slice(&0x0F00_0040u32.to_le_bytes());
+        bytes
+    }
+
+    fn push_packed_hash_header(bytes: &mut Vec<u8>, count: u16) {
+        bytes.extend_from_slice(&count.to_le_bytes());
+        bytes.extend_from_slice(&count.to_le_bytes());
     }
 
     #[test]
@@ -1331,6 +1385,74 @@ mod tests {
         assert_eq!(
             overridden.palette_dependencies,
             vec![0x0400_0030, 0x0400_0032, 0x0400_0040, 0x0400_0041]
+        );
+    }
+
+    #[test]
+    fn clothing_generated_obj_desc_matches_direct_setup_appearance_input() {
+        use crate::MaterialAppearanceInput;
+
+        let dir = tempdir().expect("tempdir should be created");
+        write_setup_appearance_hba(&dir.path().join("materials.hba"));
+
+        let repository =
+            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
+        let clothing_obj_desc = repository
+            .build_clothing_obj_desc(0x1000_0040, 0x0200_0030, 7, 1.0)
+            .expect("clothing table should produce ObjDesc");
+        let direct_obj_desc = ObjDesc {
+            palette_id: None,
+            sub_palettes: vec![SubPalette {
+                sub_id: 0x0400_0042,
+                offset: 16,
+                num_colors: 24,
+            }],
+            texture_changes: vec![TextureMapChange {
+                part_index: 1,
+                old_texture: 0x0500_0032,
+                new_texture: 0x0500_0040,
+            }],
+            anim_part_changes: vec![AnimationPartChange {
+                part_index: 1,
+                part_id: 0x0100_0032,
+            }],
+        };
+
+        assert_eq!(clothing_obj_desc, direct_obj_desc);
+
+        let clothing_appearance = repository
+            .resolve_setup_appearance(
+                0x0200_0030,
+                MaterialAppearanceInput {
+                    obj_desc: Some(clothing_obj_desc),
+                },
+            )
+            .expect("clothing-generated appearance should resolve");
+        let direct_appearance = repository
+            .resolve_setup_appearance(
+                0x0200_0030,
+                MaterialAppearanceInput {
+                    obj_desc: Some(direct_obj_desc),
+                },
+            )
+            .expect("direct ObjDesc appearance should resolve");
+
+        assert_eq!(
+            clothing_appearance.appearance_key,
+            direct_appearance.appearance_key
+        );
+        assert_eq!(clothing_appearance.parts, direct_appearance.parts);
+        assert_eq!(
+            clothing_appearance.palette_dependencies,
+            direct_appearance.palette_dependencies
+        );
+        assert_eq!(
+            clothing_appearance.texture_changes,
+            direct_appearance.texture_changes
+        );
+        assert_eq!(
+            clothing_appearance.anim_part_changes,
+            direct_appearance.anim_part_changes
         );
     }
 

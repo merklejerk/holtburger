@@ -32,6 +32,7 @@ pub struct MaterialRecordCounts {
     pub render_texture: MaterialRecordAvailability,
     pub render_surface: MaterialRecordAvailability,
     pub palette: MaterialRecordAvailability,
+    pub palette_set: MaterialRecordAvailability,
     pub clothing_table: MaterialRecordAvailability,
 }
 
@@ -90,12 +91,14 @@ impl MaterialArchiveCapabilityReport {
             && record_counts.render_texture.total > 0
             && record_counts.render_surface.total > 0
             && record_counts.palette.total > 0
+            && record_counts.palette_set.total > 0
             && record_counts.clothing_table.total > 0;
         let material_complete = has_legacy_material_stack
             && record_counts.c_surface.pruned == 0
             && record_counts.render_texture.pruned == 0
             && record_counts.render_surface.pruned == 0
             && record_counts.palette.pruned == 0
+            && record_counts.palette_set.pruned == 0
             && record_counts.clothing_table.pruned == 0
             && visual_source_records.pruned == 0
             && material_references.missing_csurfaces.is_empty()
@@ -126,6 +129,7 @@ fn count_material_records(index_entries: &[RepositoryResourceIndexEntry]) -> Mat
             DatFileType::SurfaceTexture => Some(&mut counts.render_texture),
             DatFileType::Texture => Some(&mut counts.render_surface),
             DatFileType::Palette => Some(&mut counts.palette),
+            DatFileType::PaletteSet => Some(&mut counts.palette_set),
             DatFileType::Clothing => Some(&mut counts.clothing_table),
             _ => None,
         };

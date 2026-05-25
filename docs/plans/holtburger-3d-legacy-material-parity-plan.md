@@ -59,9 +59,12 @@ or new reference evidence proves it stale.
   `terrain-material/{regionNumber}`, terrain pcodes, overlay alpha maps, road
   maps, detail textures, or texture tiling.
 - Interior cell geometry has material groups, but UV and sampler behavior has
-  not been validated against ACViewer. The likely missing parity pieces are
-  wrap/clamp selection from wrapping UVs, V-axis/orientation checks, and
-  texture repeat settings for out-of-range UVs.
+  not been validated against ACViewer or the retail decompile. Retail legacy
+  `CSurface` rendering appears to choose wrap/clamp from polygon-side
+  `stippling` bits, not by scanning emitted UV ranges. The likely missing parity
+  pieces are preserving those side-local sampler bits, validating UV
+  orientation, and ensuring repeated/clamped texture resources are cached
+  separately.
 - Optional high-res JPEG replacement is not implemented. The retail client has
   engine support for `client_highres.dat` and `PFID_CUSTOM_RAW_JPEG`, but this
   should be treated as optional mounted-pack support rather than baseline retail
@@ -89,6 +92,11 @@ Keep these open while implementing:
 - ACViewer UV lookup:
   `ACViewer/ACViewer/Extensions/VertexArrayExtensions.cs` and
   `ACViewer/ACViewer/Model/Polygon.cs`
+- Retail legacy sampler path:
+  `acclient-eor-source/acclient.c` `D3DPolyRender::SetSurface(...)`
+- Retail polygon packing/stippling flags:
+  `acclient-eor-source/acclient.c` `CPolygon::Pack/UnPack` and
+  `acclient-eor-source/acclient.h` `CPolygon`
 - ACViewer terrain blend direction:
   `ACViewer/ACViewer/Content/texture_clamp.fx`
 - Holtburger content material graph:
@@ -117,6 +125,17 @@ techniques that fit Holtburger cleanly when they preserve the same visible
 behavior. It is not the final source of truth when it conflicts with retail
 evidence.
 
+Retail decompile course correction: legacy polygon rendering does not appear to
+infer repeat/clamp by checking whether UV coordinates fall outside `[0, 1]`.
+`D3DPolyRender::SetSurface(CPolygon*, ...)` passes a side-local `stippled`
+boolean derived from `CPolygon.stippling` bit `0x1` for the positive side and
+bit `0x2` for the negative side. `D3DPolyRender::SetSurface(CSurface*, bool,
+...)` then sets `TEXADDRESS_WRAP` when that boolean is true and
+`TEXADDRESS_CLAMP` when false. Bits `0x4` and `0x8` are the no-positive-UV and
+no-negative-UV serialization flags. ACViewer's `HasWrappingUVs` should therefore
+be treated as a comparator/heuristic, not the primary source of truth for
+Holtburger's legacy sampler policy.
+
 - setup/static/interior meshes should use the same texture IDs, palette IDs,
   texture swaps, and subpalette ranges as the resolved content graph;
 - indexed materials should keep palette lookup on the GPU;
@@ -138,7 +157,9 @@ The following work is intentionally outside the first parity pass:
 - Modern `RenderMaterial`, `MaterialModifier`, and `MaterialInstance` DATs:
   recognize/report them enough to avoid blocking asset loading, but defer full
   parsing and rendering until visible content requires the programmable material
-  path.
+  path. The retail binary has live `RenderMaterial` users, including UI and the
+  newer `RenderMesh` path, but legacy `GfxObj`/`CPolygon`/`CSurface` rendering
+  does not use that material stack.
 - Legacy texture velocity animation: parse and preserve
   `TextureVelocity`/`TextureVelocityPart` as typed setup/animation/runtime data
   later, then expose renderer UV offsets keyed by object or part instance.
@@ -159,9 +180,15 @@ Ready without broad refactor:
   now carries a typed `materialAppearanceContext`, material slots, and
   `materialSignature`. `materialAppearanceKey` remains temporarily as a display
   and compatibility field.
-- Phase 3 can fit as diagnostics plus focused sampler/texture-resource changes.
-  The polygon render geometry path already emits UVs and material surface IDs,
-  and the renderer already centralizes direct/indexed texture upload helpers.
+- Phase 2.5 should prepare material identity and geometry grouping for sampler
+  variation before Phase 3 changes visible behavior. The texture resource cache
+  can already distinguish sampling policies, but material plans and geometry
+  groups still need a stable variant identity.
+- Phase 3 can then fit as diagnostics plus focused prepared-geometry, sampler,
+  and texture-resource behavior changes. The polygon render geometry path
+  already emits UVs and material surface IDs, and the renderer already
+  centralizes direct/indexed texture upload helpers, but the prepared path still
+  needs to carry the legacy side-local sampler flag.
 
 Needs deliberate boundary work before implementation:
 
@@ -170,6 +197,14 @@ Needs deliberate boundary work before implementation:
   selection, indexed resource selection, palette resource lookup, and material
   construction. Derived palette views, scalar parity, and clipmap parity should
   be split into focused helpers before they land.
+- Avoid collapsing all material variation into one mega-cache. Keep immutable
+  GPU resource caches layered by responsibility: texture resources by render
+  surface plus sampler/upload policy, palette resources by base or derived
+  palette view, indexed helpers by index texture plus palette view plus sampler
+  policy, and final Three materials by the resolved material recipe/signature.
+  Per-instance or time-varying state, such as texture velocity offsets, should
+  stay outside shared cache keys unless a renderer-native alternative is proven
+  impossible.
 - Introduce an explicit renderer-local appearance context before Phase 4. It
   should carry the setup appearance key, selected part/material slots, base
   palette override, subpalette replacements, texture swap identity, and a stable
@@ -182,7 +217,7 @@ Needs deliberate boundary work before implementation:
 - Add a derived palette resource/cache module rather than folding subpalette
   replacement into `palette-resources.ts` or `indexed-materials.ts`.
   `palette-resources.ts` should remain base palette upload logic.
-- Add terrain-specific material/resource modules before Phase 7. Terrain uses
+- Add terrain-specific material/resource modules before Phase 9. Terrain uses
   pcodes, layer blends, alpha maps, roads, and detail textures; it should not be
   forced through the env-cell/static `CSurface` material slot model or the
   current debug-color `terrain-geometry.ts` path.
@@ -215,15 +250,19 @@ following gaps should be addressed in order.
    placement semantics.
 3. Sampler state cannot be cached only by render-surface decode identity.
    Three.js stores wrap mode, filters, color space, and `flipY` on the texture
-   object. ACViewer also keys texture batches by `HasWrappingUVs`. If the same
-   render surface is used by both clamped and repeated geometry, Holtburger must
-   produce distinct texture resources or texture clones keyed by sampling
-   policy. Phase 1 must handle this before Phase 3 changes wrap/clamp behavior.
-4. The current prepared render geometry emits UVs but does not carry an explicit
-   UV bounds or `hasWrappingUvs` summary. Phase 3 can compute that from emitted
-   UVs, but adding a small prepared geometry summary would make diagnostics and
-   material planning cleaner. Prefer `uvBounds` plus `hasWrappingUvs` over
-   re-scanning large arrays in several renderer paths.
+   object. Retail legacy polygons can use the same render surface through both
+   clamped and repeated sampler modes, so Holtburger must produce distinct
+   texture resources or texture clones keyed by sampling policy. Phase 1 handled
+   the texture-resource cache side. Phase 2.5 should handle material-plan and
+   geometry-group identity before Phase 3 changes wrap/clamp behavior;
+   texture-cache identity alone is not enough if one geometry group would
+   otherwise contain both clamped and repeated polygons for the same `CSurface`.
+4. The current prepared render geometry emits UVs but does not carry the
+   polygon-side legacy sampler bit that retail uses. Phase 3 should preserve the
+   positive/negative-side wrap flag from `CPolygon.stippling` through prepared
+   geometry or material group metadata. A `uvBounds`/`hasWrappingUvs` summary is
+   still useful for diagnostics and ACViewer comparison, but it should not be
+   the primary source of sampler truth when stippling data is available.
 5. `material-resources.ts` previously accepted only `appearanceKey: string`.
    Phase 0 replaced this with a typed `MaterialAppearanceContext` carrying the
    current key plus nullable selected-part, texture-swap, and palette-view
@@ -233,14 +272,15 @@ following gaps should be addressed in order.
 6. Terrain data is currently flattened too early for material parity.
    `terrain-scene.ts` converts outdoor terrain into `PreparedTerrainMesh` and
    stores the quad pcode in a triangle field named `terrainType`. That is enough
-   for debug colors but not enough for terrain material blending. Phase 7 should
+   for debug colors but not enough for terrain material blending. Phase 9 should
    preserve quads, pcodes, region number, and material table identity in a
    material-ready terrain model.
 7. Terrain scheduling is mostly ready. `landblock-outdoor` dependency extraction
    requests `terrain-material/{regionNumber}`, and terrain material payloads
    expose downstream render-texture, render-surface, and palette dependencies.
    The missing part is renderer consumption, not asset graph reachability.
-8. Phase 3 validation can be mostly automated, but fixture selection still
+8. Phase 3 validation can be mostly automated after Phase 2.5 material identity
+   prep lands, but fixture selection still
    matters. Pick at least one problematic env cell and one static object/building
    sample before implementation. The comparison harness can generate the proof;
    screenshots should only confirm rendered output after the data report passes.
@@ -252,6 +292,10 @@ Cleanup targets created by this dry run:
   implemented.
 - Add sampler-policy identity to texture resource cache keys before changing
   wrap/clamp or `flipY`.
+- Split material groups by sampler policy when preserving one group would mix
+  clamped and repeated legacy polygons.
+- Preserve legacy polygon-side sampler flags from `CPolygon.stippling`; do not
+  replace them with UV-range inference.
 - Keep base palette upload, derived palette composition, and indexed material
   shader patching in separate modules.
 - Keep terrain material resources separate from static/interior `CSurface`
@@ -322,6 +366,8 @@ Refinements to future steps:
 - Phase 2 should fill `selectedPartsSignature` from the resolved setup
   appearance payload and use direct setup-appearance material slots before
   touching palette derivation.
+- Phase 2.5 should add material variant identity and group splitting before
+  Phase 3 consumes stippling-derived sampler policy.
 - Phase 4 should fill `paletteViewSignature` and add a separate derived palette
   resource/cache module. Base palette upload remains in `palette-resources.ts`.
 - Phase 5 should fill `textureSwapSignature` from resolved `ObjDesc` texture
@@ -378,6 +424,10 @@ Implemented changes:
 - Kept material construction on a single `MaterialTextureSamplingPolicy`
   context instead of adding loose optional parameters to individual texture
   call sites.
+- Confirmed that sampler policy is one layer of material identity, not the only
+  layer. Phase 1 made texture caches safe for different sampler states; later
+  phases still need material-plan and geometry-group inputs to avoid mixing
+  incompatible policies in one rendered group.
 - Added tests for default policy values, policy application, policy identity,
   indexed texture policy use, and cache separation by sampling policy.
 
@@ -392,8 +442,8 @@ Decisions and course corrections:
 - `MaterialTextureSamplingPolicy` is bucketed by render-surface kind instead of
   using one global policy, because Three.js `DataTexture`, `CompressedTexture`,
   and indexed palette lookup textures had different existing sampler defaults.
-- Geometry-derived wrap selection is not implemented in Phase 1. The seam is in
-  place; Phase 3 should compute or consume `uvBounds`/`hasWrappingUvs` and
+- Legacy wrap selection is not implemented in Phase 1. The seam is in place;
+  Phase 3 should consume the side-local wrap bit from polygon `stippling` and
   choose between clamp/repeat by supplying a different policy.
 - Texture velocity remains separate from sampling policy. Future UV scrolling
   should update instance or material UV transform state, not the texture
@@ -403,7 +453,7 @@ Cleanup targets from Phase 1:
 
 - Keep policy converter helpers private unless another module truly needs Three
   constants directly.
-- Once Phase 3 introduces geometry-derived policy selection, remove any
+- Once Phase 3 introduces polygon/geometry-derived policy selection, remove any
   temporary call-site assumptions that all static/interior materials use the
   cache default policy.
 - Add terrain policy buckets or terrain-specific policy helpers in Phase 9
@@ -413,11 +463,21 @@ Refinements to future steps:
 
 - Phase 2 can ignore sampler selection unless setup appearance routing exposes
   geometry or material slots that need a non-default policy.
-- Phase 3 should become the phase that adds `uvBounds`/`hasWrappingUvs` to
-  prepared render geometry or a single fallback computation helper. Do not
-  re-scan UV arrays independently in renderer, diagnostics, and cache logic.
-- Phase 3 should select wrap/clamp by producing a per-material or per-geometry
+- Phase 2.5 should add the material identity seam Phase 3 needs: variant-aware
+  material slots, material cache signatures, and geometry group mapping that can
+  distinguish one `CSurface` rendered with different sampler policies.
+- Phase 3 should become the phase that carries polygon-side wrap/clamp metadata
+  from decoded geometry into prepared render geometry/material groups and uses
+  Phase 2.5's variant identity to choose sampler policy. Add
+  `uvBounds`/`hasWrappingUvs` only as diagnostic/comparison metadata or as a
+  fallback helper for fixtures that lack source polygon flags. Do not re-scan UV
+  arrays independently in renderer, diagnostics, and cache logic.
+- Phase 3 should select wrap/clamp from the preserved stippling-derived side
+  flag by producing a per-material or per-geometry
   `MaterialTextureSamplingPolicy` before calling `resolveMaterialPlan()`.
+- Phase 3 should split prepared geometry/material groups when material slot,
+  palette view, texture swap, or sampler policy differs. Correctness wins over
+  batch reuse until the material identity axes are proven stable.
 - Phase 7 texture velocity should not modify `TextureSamplingPolicy`; it needs a
   separate instance/part UV-offset model.
 
@@ -428,9 +488,14 @@ Refinements to future steps:
 - Include sampling policy identity in texture resource cache keys. Reusing a
   single Three.js `Texture` for both clamped and repeated geometry is incorrect
   because sampler state lives on the texture object.
-- Decide where geometry-derived UV policy lives. Prefer a small
-  `uvBounds`/`hasWrappingUvs` summary on prepared render geometry, with a
-  fallback helper that computes it from emitted UV arrays for older fixtures.
+- Do not solve the material-variation problem with a single broad cache key.
+  Keep texture, palette, indexed-resource, final material, and instance-state
+  identities layered so future palette views, texture swaps, clipmaps, scalar
+  behavior, and texture velocity do not all fragment the same cache.
+- Decide where legacy sampler policy lives. Prefer explicit side-local
+  wrap/clamp metadata on prepared render geometry or material groups, derived
+  from `CPolygon.stippling`. Keep a small `uvBounds`/`hasWrappingUvs` summary as
+  diagnostic evidence and an ACViewer comparison aid.
 - Keep sampling policy separate from future texture-velocity animation. Wrap,
   filter, color-space, mipmap, and `flipY` decisions belong to texture resource
   policy; per-object or per-part UV offsets should later be instance state, not
@@ -472,6 +537,35 @@ Expected effect: building/setup/static objects should stop rendering as
 untextured placeholders when the material graph already has the correct resolved
 slots.
 
+### Phase 2.5: Material Variant And Grouping Prep
+
+Goal: prepare material identity and geometry grouping for sampler-policy
+variation before Phase 3 changes UV/sampler behavior.
+
+- Extend material slot identity with a stable variant signature. The first
+  variant axis should be sampler policy; future axes include palette view,
+  texture swap, clipmap/scalar behavior, and other immutable material recipe
+  choices.
+- Include the effective material variant signature in material-plan signatures
+  and final Three material cache keys. Do not fold per-instance or time-varying
+  state, such as texture velocity offsets, into shared material cache keys.
+- Teach geometry group mapping to distinguish material variants, not only
+  `surfaceId`. One `CSurface` must be able to produce separate material indices
+  when polygons require different sampler policies.
+- Keep layered caches intact: texture resources remain keyed by render surface
+  plus sampler/upload policy, palette resources by palette view, indexed helpers
+  by index texture plus palette view plus sampler policy, and final materials by
+  resolved material recipe plus variant signature.
+- Add focused tests proving:
+  - material-plan signatures differ when sampler variants differ;
+  - geometry group mapping can split one `CSurface` into clamp and repeat
+    material slots;
+  - texture velocity or other future instance-state placeholders do not affect
+    shared material cache keys.
+
+Expected effect: Phase 3 can add stippling-derived sampler metadata and
+wrap/clamp policy without also redesigning cache and geometry-group identity.
+
 ### Phase 3: UV And Sampler Parity Validation
 
 Goal: prove whether interior texture orientation/tiling bugs come from decoded
@@ -480,28 +574,39 @@ programmatic; manual visual inspection is only a final smoke check after the
 data and renderer-state comparisons are explainable.
 
 - Add a small diagnostic/export harness that emits per-polygon vertex IDs,
-  UV indices, UV values, surface slot, and material/render-surface IDs for a
-  known problematic env cell.
+  side, raw `stippling`, derived side wrap flag, UV indices, UV values, surface
+  slot, and material/render-surface IDs for a known problematic env cell.
 - Compare Holtburger output against ACViewer's `BuildUVLookup()` and
-  `Polygon.BuildIndices()` behavior.
+  `Polygon.BuildIndices()` behavior. Treat ACViewer's `HasWrappingUVs` as a
+  comparison signal only; retail legacy sampler state is driven by polygon
+  `stippling` bits.
 - Produce a deterministic comparison report for each fixture env cell covering:
   - polygon IDs;
+  - polygon side and raw `stippling` value;
   - triangle fan order;
   - surface slot and resolved `CSurface` ID;
   - UV index selection;
   - emitted UV values;
   - render texture/render surface IDs;
-  - wrap/clamp policy;
+  - retail-derived wrap/clamp policy from the side-local stippling bit;
+  - ACViewer-style `HasWrappingUVs` result, with mismatches called out for
+    investigation;
   - texture `flipY` or V-axis transform policy.
-- Add renderer texture wrapping policy:
-  - if any vertex UV on the source vertex array is outside `[0, 1]`, use repeat
-    wrapping;
+- Add renderer texture wrapping policy from preserved legacy polygon metadata:
+  - positive-side polygons repeat when `CPolygon.stippling & 0x1` is set;
+  - negative-side polygons repeat when `CPolygon.stippling & 0x2` is set;
   - otherwise use clamp wrapping;
-  - mirror ACViewer's `HasWrappingUVs` behavior first, then refine only with
-    reference evidence.
+  - keep UV-range checks as diagnostics or fallback only when source-side
+    stippling metadata is unavailable.
+- Split geometry/material groups when the side-derived sampler policy differs,
+  even if the polygons resolve to the same `CSurface`, render texture, and
+  palette. The material plan must not place clamp and repeat polygons into one
+  Three material slot.
 - Validate whether Three's default V-axis handling needs `flipY = false` or UV
   V inversion for DAT textures.
-- Add targeted tests around UV emission and texture wrap selection.
+- Add targeted tests around UV emission, stippling-derived sampler metadata, and
+  texture wrap selection, including a fixture where one `CSurface` is used with
+  both clamp and repeat policies.
 - Use manual Holtburger-vs-reference screenshots only after the comparison
   report passes, to catch renderer-state issues that are hard to infer from
   data alone.
@@ -674,15 +779,16 @@ target.
 1. Phase 0 material pipeline refactor prep.
 2. Phase 1 texture sampling policy prep.
 3. Phase 2 setup appearance routing.
-4. Phase 3 UV and sampler validation.
-5. Phase 4 derived palette views.
-6. Phase 5 runtime appearance parity.
-7. Phase 6 ClothingTable appearance generation.
-8. Phase 7 legacy texture velocity animation.
-9. Phase 8 clipmap/scalar behavior.
-10. Phase 9 terrain material pipeline prep.
-11. Phase 10 terrain TexMerge GPU path.
-12. Phase 11 optional high-res JPEG replacement.
+4. Phase 2.5 material variant and grouping prep.
+5. Phase 3 UV and sampler validation.
+6. Phase 4 derived palette views.
+7. Phase 5 runtime appearance parity.
+8. Phase 6 ClothingTable appearance generation.
+9. Phase 7 legacy texture velocity animation.
+10. Phase 8 clipmap/scalar behavior.
+11. Phase 9 terrain material pipeline prep.
+12. Phase 10 terrain TexMerge GPU path.
+13. Phase 11 optional high-res JPEG replacement.
 
 This order should improve the currently observed failures fastest:
 
@@ -702,6 +808,7 @@ This order should improve the currently observed failures fastest:
   - render-surface formats;
   - palette selection source;
   - wrapping/clamp policy;
+  - material variant signature and geometry group split behavior;
   - Phase 3 UV/sampler comparison report output;
   - material diagnostics;
   - screenshots from Holtburger and ACViewer.

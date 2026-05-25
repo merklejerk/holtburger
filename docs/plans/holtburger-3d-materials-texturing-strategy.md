@@ -616,6 +616,7 @@ appearance overlay:
   palette/subpalette changes
 
 render behavior:
+  sampler policy / polygon-side wrap-clamp state
   clipmap flag
   translucency/luminosity/diffuse
 ```
@@ -685,6 +686,40 @@ Texture address mapping:
 | `TEXADDRESS_WRAP` | `1` | `RepeatWrapping` |
 | `TEXADDRESS_MIRROR` | `2` | `MirroredRepeatWrapping` |
 | `TEXADDRESS_CLAMP` | `3` | `ClampToEdgeWrapping` |
+
+### Legacy `CSurface` sampler selection
+
+Retail legacy polygon rendering does not appear to infer texture wrapping by
+scanning emitted UV ranges. The active `CSurface` path gets wrap/clamp from
+side-local `CPolygon.stippling` bits:
+
+- `D3DPolyRender::SetSurface(CPolygon*, side, ...)`
+  ([`acclient.c:434861`](../../acclient-eor-source/acclient.c)) selects the
+  positive side surface/UV indices and sets `stippled = (stippling & 0x1) != 0`
+  for the positive side.
+- The same function selects the negative side surface/UV indices and sets
+  `stippled = (stippling & 0x2) != 0` for the negative side.
+- `D3DPolyRender::SetSurface(CSurface*, bool, ...)`
+  ([`acclient.c:434025`](../../acclient-eor-source/acclient.c)) maps
+  `stippled == true` to `TEXADDRESS_WRAP` and `stippled == false` to
+  `TEXADDRESS_CLAMP` on stage 0.
+- `CPolygon::Pack` / `CPolygon::UnPack`
+  ([`acclient.c:344865`](../../acclient-eor-source/acclient.c)) use
+  `stippling & 0x4` as the no-positive-UV serialization flag and
+  `stippling & 0x8` as the no-negative-UV serialization flag. Those bits are
+  separate from the positive/negative wrap bits.
+
+ACViewer uses `HasWrappingUVs()` on the vertex array and carries that boolean
+through `TextureFormat.HasWrappingUVs` to choose the wrapping or clamping effect.
+That is useful as a comparator and fallback diagnostic, but it is not the
+primary retail rule when raw polygon-side `stippling` data is available.
+
+Holtburger should preserve the side-local wrap bit during content preparation
+and include the effective sampler policy in material/geometry grouping. One
+`CSurface` can be rendered with both clamp and repeat policies, so renderer
+texture resources and final material identities must distinguish sampler state.
+UV-range summaries such as `uvBounds` or `hasWrappingUvs` should be diagnostic
+metadata unless a source path lacks polygon `stippling`.
 
 Texture filter mapping:
 

@@ -431,6 +431,17 @@ Implemented changes:
 - Added tests for default policy values, policy application, policy identity,
   indexed texture policy use, and cache separation by sampling policy.
 
+Verification refresh:
+
+- `npm run test:ts` passes with 44 test files and 225 tests.
+- `npm run check` passes with no Svelte or TypeScript diagnostics.
+- `npm run lint:ts` passes.
+- `npm run lint:dead` passes.
+- No bridge phase is needed between Phase 1 and Phase 2. The sampler-policy
+  resource seam is complete enough for setup appearance routing, and Phase 2
+  should avoid expanding sampler behavior unless setup appearance routing
+  reveals material-slot identity bugs.
+
 Decisions and course corrections:
 
 - Current behavior is preserved by default. Direct-color `DataTexture` uploads
@@ -448,6 +459,10 @@ Decisions and course corrections:
 - Texture velocity remains separate from sampling policy. Future UV scrolling
   should update instance or material UV transform state, not the texture
   resource cache key.
+- After validating the retail decompile, ACViewer's `HasWrappingUVs` path is
+  explicitly not the source of truth for legacy `CSurface` sampler state.
+  Phase 3 should preserve the polygon-side `CPolygon.stippling` wrap bits and
+  use UV-range checks only as diagnostics or fallback metadata.
 
 Cleanup targets from Phase 1:
 
@@ -458,6 +473,21 @@ Cleanup targets from Phase 1:
   cache default policy.
 - Add terrain policy buckets or terrain-specific policy helpers in Phase 9
   instead of forcing terrain sampling through static/interior defaults.
+- Keep the `WorldMaterialResourceCache.getDefaultTextureSamplingPolicy()` helper
+  as a temporary bridge for tests and current default call sites. Future
+  sampler-aware geometry/material grouping should pass the effective policy
+  explicitly from prepared material/group metadata.
+
+Legacy shims:
+
+- Phase 1 intentionally preserves the legacy renderer's current all-clamped
+  default policy. This is a compatibility shim, not a parity claim. The retail
+  sampler rule is side-local and must be carried by Phase 3 before visible
+  wrap/repeat behavior changes.
+- The cache-level `MaterialTextureSamplingPolicy` override is useful for tests
+  and early integration, but final static/interior material selection should
+  derive policy from prepared geometry/material facts rather than broad cache
+  construction options.
 
 Refinements to future steps:
 
@@ -480,6 +510,10 @@ Refinements to future steps:
   batch reuse until the material identity axes are proven stable.
 - Phase 7 texture velocity should not modify `TextureSamplingPolicy`; it needs a
   separate instance/part UV-offset model.
+- Add no new intermediate phase before Phase 2. If Phase 2 discovers that setup
+  appearance material slots cannot be represented without sampler variants,
+  fold only the identity plumbing into Phase 2.5 rather than pulling Phase 3
+  behavior forward.
 
 - Add `texture-sampling-policy` helpers for wrap/clamp, `flipY`, color-space,
   mipmap, and filter decisions.

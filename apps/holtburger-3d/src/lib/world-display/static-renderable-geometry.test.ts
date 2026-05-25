@@ -6,6 +6,8 @@ import { WORLD_RENDER_DOMAIN } from "./render-domains";
 import { createBaseMaterialAppearanceContext } from "./material-appearance";
 import {
 	buildGfxObjGeometry,
+	buildStaticRenderableColor,
+	buildStaticRenderableInstanceColor,
 	buildStaticRenderablePartMatrix,
 } from "./static-renderable-geometry";
 
@@ -64,6 +66,16 @@ describe("static renderable geometry", () => {
 		expect(geometry.getAttribute("position").array).toBe(positions);
 		expect(geometry.getAttribute("normal").array).toBe(normals);
 		expect(geometry.getAttribute("uv").array).toBe(uvs);
+	});
+
+	it("uses neutral instance colors while real materials are active", () => {
+		const debugColor = buildStaticRenderableColor("part");
+		const materialColor = buildStaticRenderableInstanceColor("part", "material");
+		const noMaterialColor = buildStaticRenderableInstanceColor("part", "debug");
+
+		expect(materialColor.getHex()).toBe(0xffffff);
+		expect(noMaterialColor.getHex()).toBe(debugColor.getHex());
+		expect(noMaterialColor.getHex()).not.toBe(materialColor.getHex());
 	});
 
 	it("creates contiguous material groups from triangle surface ids", () => {

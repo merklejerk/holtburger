@@ -171,6 +171,17 @@ export function buildStaticRenderableColor(debugColorKey: string): Color {
 	return new Color().setHSL((hash % 360) / 360, 0.54, 0.48);
 }
 
+export type StaticRenderableInstanceColorMode = "material" | "debug";
+
+export function buildStaticRenderableInstanceColor(
+	debugColorKey: string,
+	mode: StaticRenderableInstanceColorMode,
+): Color {
+	return mode === "material"
+		? new Color("#ffffff")
+		: buildStaticRenderableColor(debugColorKey);
+}
+
 export function buildAcPlacementMatrix(
 	placement: PlacementTransformDto,
 	worldOffset: Vec3Dto,

@@ -1,4 +1,3 @@
-use super::service::HostBoundaryAdapter;
 use crate::adapter::json::SerializedOutdoorTerrainSource;
 use crate::adapter::json::*;
 use crate::adapter::service::{ASSET_BINARY_HEADER_LEN, ASSET_BINARY_MAGIC, ASSET_BINARY_VERSION};
@@ -132,7 +131,6 @@ impl BinaryAssetSectionWriter {
     }
 }
 pub fn serialize_content_asset_binary_response(
-    adapter: &HostBoundaryAdapter,
     request: AssetLookupRequestDto,
     content_request: ContentAssetRequest,
     asset: anyhow::Result<ContentAsset>,
@@ -207,7 +205,10 @@ pub fn serialize_content_asset_binary_response(
                 payload: serialize_gfx_obj_binary_payload(&gfx_obj, path_prefix, writer),
             },
             Ok(_) => unreachable!("content asset runtime returned mismatched gfx obj"),
-            Err(error) => adapter.build_gfx_obj_lookup_response(request, gfx_obj_id, Err(error)),
+            Err(error) => anyhow::bail!(
+                "failed to load gfx-obj 0x{gfx_obj_id:08X} for {}: {error:#}",
+                request.asset_id
+            ),
         },
         ContentAssetRequest::RenderSurface(render_surface_id) => match asset {
             Ok(ContentAsset::RenderSurface(render_surface)) => AssetLookupResponseDto {
@@ -221,11 +222,10 @@ pub fn serialize_content_asset_binary_response(
                 ),
             },
             Ok(_) => unreachable!("content asset runtime returned mismatched render surface"),
-            Err(error) => adapter.build_render_surface_lookup_response(
-                request,
-                render_surface_id,
-                Err(error),
-            )?,
+            Err(error) => anyhow::bail!(
+                "failed to load render surface 0x{render_surface_id:08X} for {}: {error:#}",
+                request.asset_id
+            ),
         },
         ContentAssetRequest::Palette(palette_id) => match asset {
             Ok(ContentAsset::Palette(palette)) => AssetLookupResponseDto {
@@ -235,7 +235,10 @@ pub fn serialize_content_asset_binary_response(
                 payload: serialize_palette_binary_payload(&palette, path_prefix, writer),
             },
             Ok(_) => unreachable!("content asset runtime returned mismatched palette"),
-            Err(error) => adapter.build_palette_lookup_response(request, palette_id, Err(error)),
+            Err(error) => anyhow::bail!(
+                "failed to load palette 0x{palette_id:08X} for {}: {error:#}",
+                request.asset_id
+            ),
         },
         unsupported => anyhow::bail!(
             "binary asset lookup does not support {unsupported:?} for {}",
@@ -307,7 +310,7 @@ pub fn serialize_gfx_obj_binary_payload(
         "sourceAssetKind": "gfx-obj",
         "gfxObjId": gfx_obj.id,
         "flags": gfx_obj.flags.bits(),
-        "surfaceIds": render_geometry.surface_ids,
+        "surfaceIds": gfx_obj.surfaces,
         "vertexArray": {
             "vertexType": gfx_obj.vertex_array.vertex_type,
             "vertexCount": gfx_obj.vertex_array.vertices.len(),

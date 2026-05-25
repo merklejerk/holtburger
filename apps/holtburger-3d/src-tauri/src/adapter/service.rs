@@ -4,15 +4,10 @@ use std::sync::{Arc, Mutex};
 use crate::adapter::binary::*;
 use crate::adapter::ids::*;
 use crate::adapter::json::*;
-use holtburger_content::{
-    ContentDecodeCache, ContentRepository, EnvCellAsset, LandblockOutdoorAsset,
-    LandblockTopologyAsset, SoulEmoteCatalog, normalize_landblock_id,
-};
+use holtburger_content::{ContentDecodeCache, ContentRepository, SoulEmoteCatalog};
 use holtburger_core::{
     ContentAsset, ContentAssetRequest, ContentAssetRuntime, ContentAssetService,
 };
-#[cfg(test)]
-use holtburger_dat::file_type::REGION_DESC_FILE_ID;
 use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
 use holtburger_world::WorldBootstrap;
 
@@ -125,6 +120,11 @@ impl HostBoundaryAdapter {
         request: AssetLookupRequestDto,
     ) -> anyhow::Result<AssetLookupResponseDto> {
         if let Some(content_request) = content_asset_request_from_asset_id(&request.asset_id) {
+            if let Some(message) =
+                binary_asset_lookup_required_message(&request.asset_id, &content_request)
+            {
+                anyhow::bail!(message);
+            }
             let asset = self
                 .content_asset_runtime
                 .load(content_request.clone())
@@ -132,7 +132,10 @@ impl HostBoundaryAdapter {
             return self.build_content_asset_lookup_response(request, content_request, asset);
         }
 
-        Ok(self.build_app_local_asset_lookup_response(request))
+        anyhow::bail!(
+            "unsupported app-local asset id {}; no debug manifest fallback is registered",
+            request.asset_id
+        )
     }
 
     pub async fn asset_lookup_binary_batch(
@@ -163,7 +166,6 @@ impl HostBoundaryAdapter {
             let response_index = responses.len();
             let path_prefix = format!("responses.{response_index}.payload");
             responses.push(serialize_content_asset_binary_response(
-                self,
                 request,
                 content_request,
                 asset,
@@ -187,13 +189,21 @@ impl HostBoundaryAdapter {
         }
 
         if let Some(content_request) = content_asset_request_from_asset_id(&request.asset_id) {
+            if let Some(message) =
+                binary_asset_lookup_required_message(&request.asset_id, &content_request)
+            {
+                anyhow::bail!(message);
+            }
             let asset = self
                 .content_asset_runtime
                 .load_blocking(content_request.clone());
             return self.build_content_asset_lookup_response(request, content_request, asset);
         }
 
-        Ok(self.build_app_local_asset_lookup_response(request))
+        anyhow::bail!(
+            "unsupported app-local asset id {}; no debug manifest fallback is registered",
+            request.asset_id
+        )
     }
 
     fn build_content_asset_lookup_response(
@@ -202,55 +212,15 @@ impl HostBoundaryAdapter {
         content_request: ContentAssetRequest,
         asset: anyhow::Result<ContentAsset>,
     ) -> anyhow::Result<AssetLookupResponseDto> {
+        if let Some(message) =
+            binary_asset_lookup_required_message(&request.asset_id, &content_request)
+        {
+            anyhow::bail!(message);
+        }
+
         Ok(match content_request {
-            ContentAssetRequest::LandblockOutdoor(landblock_id) => match asset {
-                Ok(ContentAsset::LandblockOutdoor {
-                    outdoor,
-                    region_id,
-                    region_number,
-                }) => self.build_landblock_outdoor_lookup_response(
-                    request,
-                    *outdoor,
-                    region_id,
-                    region_number,
-                ),
-                Ok(_) => {
-                    unreachable!("content asset runtime returned mismatched landblock outdoor")
-                }
-                Err(error) => anyhow::bail!(
-                    "failed to load landblock outdoor 0x{:08X} for {}: {error:#}",
-                    normalize_landblock_id(landblock_id),
-                    request.asset_id
-                ),
-            },
-            ContentAssetRequest::LandblockTopology(landblock_id) => match asset {
-                Ok(ContentAsset::LandblockTopology(topology)) => {
-                    self.build_landblock_topology_lookup_response(request, *topology)
-                }
-                Ok(_) => {
-                    unreachable!("content asset runtime returned mismatched landblock topology")
-                }
-                Err(error) => anyhow::bail!(
-                    "failed to load landblock topology 0x{:08X} for {}: {error:#}",
-                    normalize_landblock_id(landblock_id),
-                    request.asset_id
-                ),
-            },
-            ContentAssetRequest::EnvCell(env_cell_id) => match asset {
-                Ok(ContentAsset::EnvCell(env_cell)) => {
-                    self.build_env_cell_lookup_response(request, env_cell_id, *env_cell)?
-                }
-                Ok(_) => unreachable!("content asset runtime returned mismatched env-cell"),
-                Err(error) => anyhow::bail!(
-                    "failed to load env-cell 0x{env_cell_id:08X} for {}: {error:#}",
-                    request.asset_id
-                ),
-            },
             ContentAssetRequest::TerrainMaterial(region_number) => {
                 self.build_terrain_material_lookup_response(request, region_number, asset)
-            }
-            ContentAssetRequest::GfxObj(gfx_obj_id) => {
-                self.build_gfx_obj_lookup_response(request, gfx_obj_id, asset)
             }
             ContentAssetRequest::SetupModel(setup_model_id) => {
                 self.build_setup_model_lookup_response(request, setup_model_id, asset)
@@ -264,83 +234,15 @@ impl HostBoundaryAdapter {
             ContentAssetRequest::RenderTexture(render_texture_id) => {
                 self.build_render_texture_lookup_response(request, render_texture_id, asset)?
             }
-            ContentAssetRequest::RenderSurface(render_surface_id) => {
-                self.build_render_surface_lookup_response(request, render_surface_id, asset)?
-            }
-            ContentAssetRequest::Palette(palette_id) => {
-                self.build_palette_lookup_response(request, palette_id, asset)
+            ContentAssetRequest::LandblockOutdoor(_)
+            | ContentAssetRequest::LandblockTopology(_)
+            | ContentAssetRequest::EnvCell(_)
+            | ContentAssetRequest::GfxObj(_)
+            | ContentAssetRequest::RenderSurface(_)
+            | ContentAssetRequest::Palette(_) => {
+                unreachable!("binary-routed content request passed direct JSON rejection")
             }
         })
-    }
-
-    fn build_app_local_asset_lookup_response(
-        &self,
-        request: AssetLookupRequestDto,
-    ) -> AssetLookupResponseDto {
-        let (residency_kind, debug_primitive, palette_key, provenance) = match request
-            .asset_id
-            .as_str()
-        {
-            "gfx/02000001" => (
-                "outdoor-landblock",
-                "survey-billboard",
-                "bronze-scout",
-                serde_json::json!({
-                    "source": "app-local-stub",
-                    "sourceAssetKind": "appearance-manifest",
-                    "errorCode": null,
-                    "detail": "App-local debug manifest for the Browser Scout appearance."
-                }),
-            ),
-            "gfx/02000002" => (
-                "outdoor-landblock",
-                "drudge-proxy-mesh",
-                "rust-drudge",
-                serde_json::json!({
-                    "source": "app-local-stub",
-                    "sourceAssetKind": "appearance-manifest",
-                    "errorCode": null,
-                    "detail": "App-local debug manifest for the Survey Drudge appearance."
-                }),
-            ),
-            "gfx/02000003" => (
-                "interior-cell",
-                "sentinel-proxy-volume",
-                "dungeon-sentinel",
-                serde_json::json!({
-                    "source": "app-local-stub",
-                    "sourceAssetKind": "appearance-manifest",
-                    "errorCode": null,
-                    "detail": "App-local debug manifest for the Dungeon Sentinel appearance."
-                }),
-            ),
-            _ => (
-                "unknown",
-                "debug-placeholder",
-                "unknown-asset",
-                serde_json::json!({
-                    "source": "app-local-stub",
-                    "sourceAssetKind": "appearance-manifest",
-                    "errorCode": "asset-id-unknown",
-                    "detail": format!("No app-local debug manifest is registered for {}.", request.asset_id)
-                }),
-            ),
-        };
-
-        AssetLookupResponseDto {
-            request_id: request.request_id,
-            asset_id: request.asset_id.clone(),
-            payload_kind: AssetPayloadKindDto::Json,
-            payload: serde_json::json!({
-                "kind": "appearance-manifest",
-                "assetId": request.asset_id,
-                "priority": request.priority,
-                "residencyKind": residency_kind,
-                "debugPrimitive": debug_primitive,
-                "paletteKey": palette_key,
-                "provenance": provenance
-            }),
-        }
     }
 
     fn accept_camera_hint(
@@ -359,54 +261,6 @@ impl HostBoundaryAdapter {
 }
 
 impl HostBoundaryAdapter {
-    fn build_landblock_outdoor_lookup_response(
-        &self,
-        request: AssetLookupRequestDto,
-        outdoor: LandblockOutdoorAsset,
-        region_id: u32,
-        region_number: u32,
-    ) -> AssetLookupResponseDto {
-        AssetLookupResponseDto {
-            request_id: request.request_id,
-            asset_id: request.asset_id,
-            payload_kind: AssetPayloadKindDto::Json,
-            payload: serialize_landblock_outdoor_payload(&outdoor, region_id, region_number),
-        }
-    }
-
-    fn build_landblock_topology_lookup_response(
-        &self,
-        request: AssetLookupRequestDto,
-        topology: LandblockTopologyAsset,
-    ) -> AssetLookupResponseDto {
-        AssetLookupResponseDto {
-            request_id: request.request_id,
-            asset_id: request.asset_id,
-            payload_kind: AssetPayloadKindDto::Json,
-            payload: serialize_landblock_topology_payload(&topology),
-        }
-    }
-
-    fn build_env_cell_lookup_response(
-        &self,
-        request: AssetLookupRequestDto,
-        env_cell_id: u32,
-        env_cell: EnvCellAsset,
-    ) -> anyhow::Result<AssetLookupResponseDto> {
-        if env_cell.prepared_cell.env_cell_id != env_cell_id {
-            anyhow::bail!(
-                "EnvCell assembler returned 0x{:08X} for request 0x{env_cell_id:08X}",
-                env_cell.prepared_cell.env_cell_id
-            );
-        }
-        Ok(AssetLookupResponseDto {
-            request_id: request.request_id,
-            asset_id: request.asset_id,
-            payload_kind: AssetPayloadKindDto::Json,
-            payload: serialize_env_cell_payload(&env_cell),
-        })
-    }
-
     fn build_terrain_material_lookup_response(
         &self,
         request: AssetLookupRequestDto,
@@ -418,59 +272,6 @@ impl HostBoundaryAdapter {
             Ok(_) => unreachable!("content asset runtime returned mismatched terrain material"),
             Err(error) => failed_terrain_material_payload(region_number, error),
         };
-        AssetLookupResponseDto {
-            request_id: request.request_id,
-            asset_id: request.asset_id,
-            payload_kind: AssetPayloadKindDto::Json,
-            payload,
-        }
-    }
-
-    pub fn build_gfx_obj_lookup_response(
-        &self,
-        request: AssetLookupRequestDto,
-        gfx_obj_id: u32,
-        asset: anyhow::Result<ContentAsset>,
-    ) -> AssetLookupResponseDto {
-        let payload = match asset {
-            Ok(ContentAsset::GfxObj(gfx_obj)) => serialize_gfx_obj_payload(&gfx_obj),
-            Ok(_) => unreachable!("content asset runtime returned mismatched gfx obj"),
-            Err(error) => {
-                let detail = format!("{error:#}");
-                let error_code = asset_cache_error_code(&error);
-                serde_json::json!({
-                    "kind": "gfx-obj",
-                    "residencyKind": "unknown",
-                    "sourceAssetKind": "gfx-obj",
-                    "gfxObjId": gfx_obj_id,
-                    "flags": null,
-                    "surfaceIds": [],
-                    "vertexArray": {
-                        "vertexType": null,
-                        "vertexCount": 0,
-                        "vertices": []
-                    },
-                    "drawingPolygons": [],
-                    "drawingBsp": null,
-                    "dependencies": {
-                        "materialAssetIds": []
-                    },
-                    "physicsWitness": {
-                        "polygonCount": 0,
-                        "hasBsp": false
-                    },
-                    "sortCenter": null,
-                    "didDegrade": null,
-                    "provenance": {
-                        "source": "app-local-stub",
-                        "sourceAssetKind": "gfx-obj",
-                        "errorCode": error_code,
-                        "detail": detail
-                    }
-                })
-            }
-        };
-
         AssetLookupResponseDto {
             request_id: request.request_id,
             asset_id: request.asset_id,
@@ -615,56 +416,38 @@ impl HostBoundaryAdapter {
             payload,
         })
     }
+}
 
-    pub fn build_render_surface_lookup_response(
-        &self,
-        request: AssetLookupRequestDto,
-        render_surface_id: u32,
-        asset: anyhow::Result<ContentAsset>,
-    ) -> anyhow::Result<AssetLookupResponseDto> {
-        let payload = match asset {
-            Ok(ContentAsset::RenderSurface(render_surface)) => {
-                serialize_render_surface_payload(&render_surface)
-            }
-            Ok(_) => unreachable!("content asset runtime returned mismatched render surface"),
-            Err(error) => {
-                log_material_graph_failure("render-surface", render_surface_id, &error);
-                anyhow::bail!(
-                    "failed to load render surface 0x{render_surface_id:08X} for {}: {error:#}",
-                    request.asset_id
-                );
-            }
-        };
-
-        Ok(AssetLookupResponseDto {
-            request_id: request.request_id,
-            asset_id: request.asset_id,
-            payload_kind: AssetPayloadKindDto::Json,
-            payload,
-        })
-    }
-
-    pub fn build_palette_lookup_response(
-        &self,
-        request: AssetLookupRequestDto,
-        palette_id: u32,
-        asset: anyhow::Result<ContentAsset>,
-    ) -> AssetLookupResponseDto {
-        let payload = match asset {
-            Ok(ContentAsset::Palette(palette)) => serialize_palette_payload(&palette),
-            Ok(_) => unreachable!("content asset runtime returned mismatched palette"),
-            Err(error) => {
-                log_material_graph_failure("palette", palette_id, &error);
-                failed_dependency_payload("palette", palette_id, error)
-            }
-        };
-
-        AssetLookupResponseDto {
-            request_id: request.request_id,
-            asset_id: request.asset_id,
-            payload_kind: AssetPayloadKindDto::Json,
-            payload,
-        }
+fn binary_asset_lookup_required_message(
+    asset_id: &str,
+    content_request: &ContentAssetRequest,
+) -> Option<String> {
+    match content_request {
+        ContentAssetRequest::LandblockOutdoor(landblock_id) => Some(format!(
+            "landblock outdoor 0x{:08X} for {asset_id} requires binary asset lookup",
+            holtburger_content::normalize_landblock_id(*landblock_id)
+        )),
+        ContentAssetRequest::LandblockTopology(landblock_id) => Some(format!(
+            "landblock topology 0x{:08X} for {asset_id} requires binary asset lookup",
+            holtburger_content::normalize_landblock_id(*landblock_id)
+        )),
+        ContentAssetRequest::EnvCell(env_cell_id) => Some(format!(
+            "env-cell 0x{env_cell_id:08X} for {asset_id} requires binary asset lookup"
+        )),
+        ContentAssetRequest::GfxObj(gfx_obj_id) => Some(format!(
+            "gfx-obj 0x{gfx_obj_id:08X} for {asset_id} requires binary asset lookup"
+        )),
+        ContentAssetRequest::RenderSurface(render_surface_id) => Some(format!(
+            "render-surface 0x{render_surface_id:08X} for {asset_id} requires binary asset lookup"
+        )),
+        ContentAssetRequest::Palette(palette_id) => Some(format!(
+            "palette 0x{palette_id:08X} for {asset_id} requires binary asset lookup"
+        )),
+        ContentAssetRequest::TerrainMaterial(_)
+        | ContentAssetRequest::SetupModel(_)
+        | ContentAssetRequest::MaterialRecipe(_)
+        | ContentAssetRequest::SetupAppearance(_)
+        | ContentAssetRequest::RenderTexture(_) => None,
     }
 }
 
@@ -710,150 +493,52 @@ mod tests {
     use holtburger_dat::file_type::{Palette, PixelFormatId, RenderSurface};
 
     #[test]
-    fn asset_lookup_remains_available_without_browser_runtime_residency() {
+    fn direct_json_lookup_rejects_binary_routed_assets() {
         let runtime = HostRuntimeService::new(false);
-        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
-            request_id: "test-request".to_string(),
-            asset_id: "landblock/0102ffff/outdoor".to_string(),
-            priority: crate::contracts::AssetPriorityDto::Bootstrap,
-        });
+        let cases = [
+            ("landblock/da55ffff/outdoor", "landblock outdoor"),
+            ("landblock/da55ffff/topology", "landblock topology"),
+            ("env-cell/da550100", "env-cell"),
+            ("gfx-obj/01000001", "gfx-obj"),
+            ("render-surface/060041c0", "render-surface"),
+            ("palette/04000001", "palette"),
+        ];
 
-        assert_eq!(asset.request_id, "test-request");
-        assert_eq!(asset.asset_id, "landblock/0102ffff/outdoor");
-        assert!(matches!(asset.payload_kind, AssetPayloadKindDto::Json));
-        assert_eq!(asset.payload["kind"], "landblock-outdoor");
-        assert_eq!(asset.payload["residencyKind"], "outdoor-landblock");
-        assert_eq!(asset.payload["landblockId"], 0x0102ffff);
+        for (asset_id, expected_label) in cases {
+            let error = runtime
+                .adapter
+                .asset_lookup_blocking(AssetLookupRequestDto {
+                    request_id: format!("test-direct-json-{asset_id}"),
+                    asset_id: asset_id.to_string(),
+                    priority: crate::contracts::AssetPriorityDto::Bootstrap,
+                })
+                .expect_err("binary-routed assets should reject direct JSON lookup");
+
+            let message = error.to_string();
+            assert!(
+                message.contains(expected_label),
+                "{asset_id} should mention {expected_label}: {message}"
+            );
+            assert!(
+                message.contains("requires binary asset lookup"),
+                "{asset_id} should explain the required transport: {message}"
+            );
+        }
     }
 
     #[test]
-    fn landblock_outdoor_lookup_returns_prepared_render_payload() {
+    fn unknown_app_local_asset_lookup_rejects_debug_manifest_fallback() {
         let runtime = HostRuntimeService::new(false);
-        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
-            request_id: "test-landblock-outdoor".to_string(),
-            asset_id: "landblock/da55012e/outdoor".to_string(),
-            priority: crate::contracts::AssetPriorityDto::Bootstrap,
-        });
+        let error = runtime
+            .adapter
+            .asset_lookup_blocking(AssetLookupRequestDto {
+                request_id: "test-unknown-app-local".to_string(),
+                asset_id: "gfx/02000001".to_string(),
+                priority: crate::contracts::AssetPriorityDto::Bootstrap,
+            })
+            .expect_err("app-local debug manifest fallback should be removed");
 
-        assert_eq!(asset.request_id, "test-landblock-outdoor");
-        assert_eq!(asset.asset_id, "landblock/da55012e/outdoor");
-        assert_eq!(asset.payload["kind"], "landblock-outdoor");
-        assert_eq!(asset.payload["residencyKind"], "outdoor-landblock");
-        assert_eq!(asset.payload["landblockId"], 0xda55ffffu32);
-        assert_eq!(asset.payload["classification"], "outdoor");
-        assert!(
-            !asset.payload["terrain"]["triangles"]
-                .as_array()
-                .expect("outdoor route should expose Rust-prepared terrain triangles")
-                .is_empty()
-        );
-        assert!(
-            asset.payload["statics"]
-                .as_array()
-                .expect("outdoor route should expose static members")
-                .iter()
-                .all(|member| member["sourceAssetId"]
-                    .as_str()
-                    .is_some_and(|asset_id| asset_id.starts_with("setup-model/")
-                        || asset_id.starts_with("gfx-obj/")))
-        );
-        assert!(
-            asset.payload["diagnostics"]["sourceRecords"]
-                .as_array()
-                .expect("source records should be exposed")
-                .iter()
-                .any(|record| record["status"] == "loaded")
-        );
-    }
-
-    #[test]
-    fn landblock_outdoor_lookup_returns_render_payload() {
-        let runtime = HostRuntimeService::new(false);
-        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
-            request_id: "test-landblock-outdoor".to_string(),
-            asset_id: "landblock/da55ffff/outdoor".to_string(),
-            priority: crate::contracts::AssetPriorityDto::Bootstrap,
-        });
-
-        assert_eq!(asset.asset_id, "landblock/da55ffff/outdoor");
-        assert_eq!(asset.payload["kind"], "landblock-outdoor");
-        assert_eq!(asset.payload["sourceAssetKind"], "landblock-outdoor");
-        assert_eq!(asset.payload["landblockId"], 0xda55ffffu32);
-        assert_eq!(asset.payload["regionId"], REGION_DESC_FILE_ID);
-        assert!(
-            asset.payload["terrain"]["quads"]
-                .as_array()
-                .expect("outdoor route should expose terrain quads")
-                .iter()
-                .any(|quad| quad["pcode"].as_u64().is_some_and(|pcode| pcode != 0))
-        );
-        assert!(
-            asset.payload["statics"]
-                .as_array()
-                .expect("outdoor route should expose render statics")
-                .iter()
-                .all(|member| member["sourceAssetId"]
-                    .as_str()
-                    .is_some_and(|asset_id| asset_id.starts_with("setup-model/")
-                        || asset_id.starts_with("gfx-obj/")))
-        );
-        assert!(asset.payload.get("envCells").is_none());
-    }
-
-    #[test]
-    fn landblock_topology_lookup_returns_env_cell_membership_only() {
-        let runtime = HostRuntimeService::new(false);
-        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
-            request_id: "test-landblock-topology".to_string(),
-            asset_id: "landblock/da55ffff/topology".to_string(),
-            priority: crate::contracts::AssetPriorityDto::Bootstrap,
-        });
-
-        assert_eq!(asset.asset_id, "landblock/da55ffff/topology");
-        assert_eq!(asset.payload["kind"], "landblock-topology");
-        assert_eq!(asset.payload["sourceAssetKind"], "landblock-topology");
-        assert_eq!(asset.payload["landblockId"], 0xda55ffffu32);
-        assert!(
-            asset.payload["envCells"]
-                .as_array()
-                .expect("topology route should expose env cell members")
-                .iter()
-                .any(|cell| cell["assetId"] == "env-cell/da550100")
-        );
-        assert!(asset.payload.get("terrain").is_none());
-        assert!(asset.payload.get("statics").is_none());
-    }
-
-    #[test]
-    fn granular_env_cell_lookup_returns_material_slot_payload() {
-        let runtime = HostRuntimeService::new(false);
-        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
-            request_id: "test-env-cell".to_string(),
-            asset_id: "env-cell/da550100".to_string(),
-            priority: crate::contracts::AssetPriorityDto::Bootstrap,
-        });
-
-        assert_eq!(asset.payload["kind"], "env-cell");
-        assert_eq!(asset.payload["envCellId"], 0xda550100u32);
-        assert!(
-            asset.payload["surfaces"]
-                .as_array()
-                .expect("env-cell route should expose surface slots")
-                .iter()
-                .all(|surface| surface["materialAssetId"]
-                    .as_str()
-                    .is_some_and(|asset_id| asset_id.starts_with("material/08")))
-        );
-        assert_eq!(
-            asset.payload["localBvh"]["coordinateSpace"],
-            "env-cell-local"
-        );
-        assert!(
-            !asset.payload["localBvh"]["nodes"]
-                .as_array()
-                .expect("env-cell local BVH should expose scoped nodes")
-                .is_empty()
-        );
+        assert!(error.to_string().contains("no debug manifest fallback"));
     }
 
     #[test]
@@ -918,12 +603,17 @@ mod tests {
     #[test]
     fn terrain_material_lookup_returns_region_table_payload() {
         let runtime = HostRuntimeService::new(false);
-        let terrain = runtime.asset_lookup_blocking(AssetLookupRequestDto {
-            request_id: "test-landblock-terrain-region".to_string(),
-            asset_id: "landblock/da55ffff/outdoor".to_string(),
-            priority: crate::contracts::AssetPriorityDto::Bootstrap,
-        });
-        let region_number = terrain.payload["regionNumber"]
+        let outdoor_bytes =
+            tauri::async_runtime::block_on(runtime.asset_lookup_binary_batch(vec![
+                AssetLookupRequestDto {
+                    request_id: "test-landblock-terrain-region".to_string(),
+                    asset_id: "landblock/da55ffff/outdoor".to_string(),
+                    priority: crate::contracts::AssetPriorityDto::Bootstrap,
+                },
+            ]))
+            .expect("binary outdoor lookup should expose region number");
+        let (outdoor_manifest, _) = decode_binary_manifest(&outdoor_bytes);
+        let region_number = outdoor_manifest["responses"][0]["payload"]["regionNumber"]
             .as_u64()
             .expect("terrain route should expose region number");
         let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
@@ -975,35 +665,6 @@ mod tests {
     }
 
     #[test]
-    fn env_cell_lookup_allows_real_renderless_cell_structures() {
-        let runtime = HostRuntimeService::new(false);
-        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
-            request_id: "test-renderless-env-cell".to_string(),
-            asset_id: "env-cell/da560109".to_string(),
-            priority: crate::contracts::AssetPriorityDto::Streaming,
-        });
-
-        assert_eq!(asset.payload["kind"], "env-cell");
-        assert_eq!(asset.payload["envCellId"], 0xda560109u32);
-        assert_eq!(asset.payload["renderGeometry"]["vertexCount"], 0);
-        assert_eq!(asset.payload["renderGeometry"]["triangleCount"], 0);
-    }
-
-    #[test]
-    fn landblock_outdoor_lookup_reports_cd57_contract_shape() {
-        let runtime = HostRuntimeService::new(false);
-        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
-            request_id: "test-cd57-outdoor".to_string(),
-            asset_id: "landblock/cd57ffff/outdoor".to_string(),
-            priority: crate::contracts::AssetPriorityDto::Streaming,
-        });
-
-        assert_eq!(asset.payload["kind"], "landblock-outdoor");
-        assert_eq!(asset.payload["landblockId"], 0xcd57ffffu32);
-        assert!(asset.payload["terrain"].is_object());
-    }
-
-    #[test]
     fn landblock_outdoor_binary_lookup_reports_cd57_contract_shape() {
         let adapter = HostBoundaryAdapter::new(false);
         let bytes = tauri::async_runtime::block_on(adapter.asset_lookup_binary_batch(vec![
@@ -1025,6 +686,26 @@ mod tests {
             0xcd57ffffu32
         );
         assert!(manifest["responses"][0]["payload"]["terrain"].is_object());
+    }
+
+    #[test]
+    fn env_cell_binary_lookup_allows_real_renderless_cell_structures() {
+        let adapter = HostBoundaryAdapter::new(false);
+        let bytes = tauri::async_runtime::block_on(adapter.asset_lookup_binary_batch(vec![
+            AssetLookupRequestDto {
+                request_id: "test-renderless-env-cell-binary".to_string(),
+                asset_id: "env-cell/da560109".to_string(),
+                priority: crate::contracts::AssetPriorityDto::Streaming,
+            },
+        ]))
+        .expect("binary renderless env-cell lookup should succeed");
+
+        let (manifest, _) = decode_binary_manifest(&bytes);
+        let payload = &manifest["responses"][0]["payload"];
+        assert_eq!(payload["kind"], "env-cell");
+        assert_eq!(payload["envCellId"], 0xda560109u32);
+        assert_eq!(payload["renderGeometry"]["vertexCount"], 0);
+        assert_eq!(payload["renderGeometry"]["triangleCount"], 0);
     }
 
     #[test]
@@ -1069,7 +750,7 @@ mod tests {
         let bytes = tauri::async_runtime::block_on(adapter.asset_lookup_binary_batch(vec![
             AssetLookupRequestDto {
                 request_id: "test-gfx-obj-binary".to_string(),
-                asset_id: "gfx-obj/01000001".to_string(),
+                asset_id: "gfx-obj/01000d67".to_string(),
                 priority: crate::contracts::AssetPriorityDto::Streaming,
             },
         ]))
@@ -1077,6 +758,23 @@ mod tests {
 
         let (manifest, manifest_len) = decode_binary_manifest(&bytes);
         assert_eq!(manifest["responses"][0]["payload"]["kind"], "gfx-obj");
+        assert_eq!(
+            manifest["responses"][0]["payload"]["gfxObjId"],
+            0x01000d67u32
+        );
+        assert_eq!(
+            manifest["responses"][0]["payload"]["surfaceIds"]
+                .as_array()
+                .expect("binary gfx-obj should carry source material ids"),
+            &[
+                serde_json::json!(0x08000bb6u32),
+                serde_json::json!(0x080001c7u32),
+                serde_json::json!(0x080001c5u32),
+                serde_json::json!(0x08000762u32),
+                serde_json::json!(0x08000941u32),
+                serde_json::json!(0x08000944u32),
+            ]
+        );
         assert_eq!(
             manifest["responses"][0]["payload"]["vertexArray"]["vertices"]
                 .as_array()
@@ -1212,65 +910,6 @@ mod tests {
         )
         .expect("binary manifest should be JSON");
         (manifest, manifest_len)
-    }
-
-    #[test]
-    fn gfx_obj_lookup_returns_first_class_payload() {
-        let runtime = HostRuntimeService::new(false);
-        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
-            request_id: "test-gfx-obj".to_string(),
-            asset_id: "gfx-obj/01000001".to_string(),
-            priority: crate::contracts::AssetPriorityDto::Streaming,
-        });
-
-        assert_eq!(asset.request_id, "test-gfx-obj");
-        assert_eq!(asset.asset_id, "gfx-obj/01000001");
-        assert!(matches!(asset.payload_kind, AssetPayloadKindDto::Json));
-        assert_eq!(asset.payload["kind"], "gfx-obj");
-        assert_eq!(asset.payload["sourceAssetKind"], "gfx-obj");
-        assert_eq!(asset.payload["gfxObjId"], 0x01000001);
-        assert_eq!(asset.payload["residencyKind"], "unknown");
-        assert_eq!(asset.payload["provenance"]["source"], "repo-local-hba");
-        assert!(
-            asset.payload["vertexArray"]["vertexCount"]
-                .as_u64()
-                .is_some()
-        );
-        assert!(asset.payload["drawingPolygons"].is_array());
-        assert!(
-            asset.payload["physicsWitness"]["polygonCount"]
-                .as_u64()
-                .is_some()
-        );
-        assert!(asset.payload["physicsWitness"]["hasBsp"].is_boolean());
-    }
-
-    #[test]
-    fn gfx_obj_lookup_decodes_retail_polygon_stippling_without_vertex_sentinel() {
-        let runtime = HostRuntimeService::new(false);
-        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
-            request_id: "test-gfx-obj-stippling".to_string(),
-            asset_id: "gfx-obj/01000f69".to_string(),
-            priority: crate::contracts::AssetPriorityDto::Streaming,
-        });
-
-        assert_eq!(asset.request_id, "test-gfx-obj-stippling");
-        assert_eq!(asset.asset_id, "gfx-obj/01000f69");
-        assert_eq!(asset.payload["kind"], "gfx-obj");
-
-        let drawing_polygons = asset.payload["drawingPolygons"]
-            .as_array()
-            .expect("drawing polygons should be an array");
-        let has_vertex_sentinel = drawing_polygons.iter().any(|polygon| {
-            polygon["vertexIds"]
-                .as_array()
-                .is_some_and(|vertex_ids| vertex_ids.iter().any(|vertex_id| vertex_id == 0xffff))
-        });
-
-        assert!(
-            !has_vertex_sentinel,
-            "decoded gfx-obj/01000f69 should not contain 0xffff vertex ids"
-        );
     }
 
     #[test]

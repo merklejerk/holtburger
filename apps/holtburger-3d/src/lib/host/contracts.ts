@@ -1,7 +1,6 @@
 import { z } from "zod";
 
-const assetPriorityValueSchema = z.enum(["bootstrap", "streaming", "prefetch"]);
-export type AssetPriority = z.infer<typeof assetPriorityValueSchema>;
+export type AssetPriority = "bootstrap" | "streaming" | "prefetch";
 
 const assetPayloadKindValueSchema = z.literal("json");
 
@@ -862,19 +861,6 @@ export const palettePayloadDtoSchema = z
 		path: ["colorsArgb"],
 	});
 export type PalettePayloadDto = z.infer<typeof palettePayloadDtoSchema>;
-
-export const appearanceManifestPayloadDtoSchema = z.object({
-	kind: z.literal("appearance-manifest"),
-	assetId: z.string().min(1),
-	priority: assetPriorityValueSchema,
-	residencyKind: z.string(),
-	debugPrimitive: z.string().min(1),
-	paletteKey: z.string().min(1),
-	provenance: assetProvenanceDtoSchema,
-});
-export type AppearanceManifestPayloadDto = z.infer<
-	typeof appearanceManifestPayloadDtoSchema
->;
 
 export const dependencyManifestPayloadDtoSchema = z.object({
 	kind: z.literal("dependency-manifest"),

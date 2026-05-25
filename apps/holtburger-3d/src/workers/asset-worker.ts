@@ -1,5 +1,4 @@
 import type {
-	AppearanceManifestPayloadDto,
 	AssetErrorCode,
 	AssetLookupRequestDto,
 	AssetLookupResponseDto,
@@ -17,7 +16,6 @@ import type {
 	TerrainMaterialPayloadDto,
 } from "../lib/host/contracts";
 import {
-	appearanceManifestPayloadDtoSchema,
 	assetProvenanceDtoSchema,
 	dependencyManifestPayloadDtoSchema,
 	envCellPayloadDtoSchema,
@@ -197,13 +195,6 @@ export function prepareAssetPayload(
 	const palettePayload = palettePayloadDtoSchema.safeParse(response.payload);
 	if (palettePayload.success) {
 		return preparePassthroughAsset(request, response, palettePayload.data);
-	}
-
-	const appearancePayload = appearanceManifestPayloadDtoSchema.safeParse(
-		response.payload,
-	);
-	if (appearancePayload.success) {
-		return prepareAppearanceManifest(request, response, appearancePayload.data);
 	}
 
 	const dependencyManifestPayload =
@@ -534,26 +525,6 @@ function prepareTypedContentAsset(
 			...payload,
 			provenance: parseProvenance(payload.provenance),
 		} as PreparedAssetPayload,
-		preparedAt: new Date().toISOString(),
-	};
-}
-
-function prepareAppearanceManifest(
-	request: AssetLookupRequestDto,
-	response: AssetLookupResponseDto,
-	payload: AppearanceManifestPayloadDto,
-): PreparedAssetRecord {
-	return {
-		request,
-		response,
-		payload: createUnknownAssetPayload({
-			rawKind: payload.kind,
-			sourceAssetKind: payload.provenance.sourceAssetKind,
-			residencyKind: parseResidencyKind(payload.residencyKind),
-			debugPrimitive: payload.debugPrimitive,
-			paletteKey: payload.paletteKey,
-			provenance: parseProvenance(payload.provenance),
-		}),
 		preparedAt: new Date().toISOString(),
 	};
 }

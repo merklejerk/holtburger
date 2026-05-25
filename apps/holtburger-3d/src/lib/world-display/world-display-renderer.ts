@@ -73,8 +73,10 @@ import {
 	buildAcPlacementMatrix,
 	buildGfxObjGeometry,
 	buildStaticRenderableColor,
+	buildStaticRenderableInstanceColor,
 	buildStaticRenderablePartMatrix,
 	type MaterialGeometrySlot,
+	type StaticRenderableInstanceColorMode,
 } from "./static-renderable-geometry";
 import type {
 	StructuredInteriorCell,
@@ -2387,9 +2389,22 @@ export function createWorldDisplayRenderer(
 		mesh.count = parts.length;
 		parts.forEach((part, index) => {
 			mesh.setMatrixAt(index, buildStaticRenderablePartMatrix(part));
-			mesh.setColorAt(index, buildStaticRenderableColor(part.debugColorKey));
 		});
+		syncStaticRenderableInstanceColors(mesh, parts);
 		mesh.instanceMatrix.needsUpdate = true;
+	}
+
+	function syncStaticRenderableInstanceColors(
+		mesh: InstancedMesh,
+		parts: readonly StaticRenderablePart[],
+	): void {
+		const colorMode = staticRenderableInstanceColorMode();
+		parts.forEach((part, index) => {
+			mesh.setColorAt(
+				index,
+				buildStaticRenderableInstanceColor(part.debugColorKey, colorMode),
+			);
+		});
 		if (mesh.instanceColor) {
 			mesh.instanceColor.needsUpdate = true;
 		}
@@ -2401,6 +2416,10 @@ export function createWorldDisplayRenderer(
 		} else {
 			materialOrMaterials.needsUpdate = true;
 		}
+	}
+
+	function staticRenderableInstanceColorMode(): StaticRenderableInstanceColorMode {
+		return renderStyle === "solid" ? "material" : "debug";
 	}
 
 	function staticRenderableMeshCapacity(mesh: InstancedMesh): number {
@@ -2456,7 +2475,11 @@ export function createWorldDisplayRenderer(
 		for (const mesh of terrainMeshes.values()) {
 			applyRenderStyleToObject(mesh);
 		}
-		for (const mesh of staticRenderableGroupMeshes.values()) {
+		for (const [groupKey, mesh] of staticRenderableGroupMeshes.entries()) {
+			const parts = staticRenderableScene.partsByRenderGroupKey.get(groupKey);
+			if (parts) {
+				syncStaticRenderableInstanceColors(mesh, parts);
+			}
 			applyRenderStyleToObject(mesh);
 		}
 		for (const mesh of structuredInteriorMeshes.values()) {

@@ -29,6 +29,11 @@ import {
 	isSupportedCompressedFormat,
 	isSupportedDirectColorFormat,
 } from "./render-surface-texture-resources";
+import {
+	selectRenderSurfaceTextureSamplingPolicy,
+	type MaterialTextureSamplingPolicy,
+	type TextureSamplingPolicy,
+} from "./texture-sampling-policy";
 
 type MaterialResourceDiagnosticHandler = (
 	diagnostic: MaterialResourceDiagnostic,
@@ -45,15 +50,18 @@ export function createMaterial(options: {
 	fallbackColorKey: string;
 	resolveTexture: (
 		renderSurface: PreparedRenderSurfacePayload,
+		samplingPolicy: TextureSamplingPolicy,
 	) => Texture | null;
 	resolveIndexedTexture: (
 		renderSurface: PreparedRenderSurfacePayload,
+		samplingPolicy: TextureSamplingPolicy,
 	) => IndexedTextureResource | null;
 	resolvePaletteResource: (
 		paletteAssetId: string,
 		paletteAsset: PreparedAssetRecord,
 	) => PaletteTextureResource | null;
 	reportDiagnostic: MaterialResourceDiagnosticHandler;
+	textureSamplingPolicy: MaterialTextureSamplingPolicy;
 }): Material {
 	const recipeAsset = options.preparedByAssetId[options.materialAssetId];
 	if (recipeAsset?.payload.kind !== "material-recipe") {
@@ -113,7 +121,15 @@ export function createMaterial(options: {
 		options.preparedByAssetId,
 	);
 	const palette = firstPreparedPalette(recipe, options.preparedByAssetId);
-	const texture = renderSurface ? options.resolveTexture(renderSurface) : null;
+	const texture = renderSurface
+		? options.resolveTexture(
+				renderSurface,
+				selectRenderSurfaceTextureSamplingPolicy(
+					renderSurface,
+					options.textureSamplingPolicy,
+				),
+			)
+		: null;
 	if (texture && renderSurface) {
 		const opacity = normalizeLegacyOpacity(recipe.translucency);
 		return new MeshStandardMaterial({
@@ -132,7 +148,13 @@ export function createMaterial(options: {
 			materialAssetId: options.materialAssetId,
 			preparedByAssetId: options.preparedByAssetId,
 			renderSurface: indexedRenderSurface,
-			indexedTexture: options.resolveIndexedTexture(indexedRenderSurface),
+			indexedTexture: options.resolveIndexedTexture(
+				indexedRenderSurface,
+				selectRenderSurfaceTextureSamplingPolicy(
+					indexedRenderSurface,
+					options.textureSamplingPolicy,
+				),
+			),
 			resolvePaletteResource: options.resolvePaletteResource,
 			reportDiagnostic: options.reportDiagnostic,
 		});

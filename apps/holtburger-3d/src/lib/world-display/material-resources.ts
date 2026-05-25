@@ -29,6 +29,13 @@ import {
 	describeRenderSurfaceDecodeKey,
 	type MaterialTextureCapabilities,
 } from "./render-surface-texture-resources";
+import {
+	createDefaultMaterialTextureSamplingPolicy,
+	describeTextureSamplingPolicy,
+	selectRenderSurfaceTextureSamplingPolicy,
+	type MaterialTextureSamplingPolicy,
+	type TextureSamplingPolicy,
+} from "./texture-sampling-policy";
 
 export { formatMaterialAssetId } from "./material-signatures";
 export type { MaterialAppearanceContext } from "./material-appearance";
@@ -72,14 +79,22 @@ export class WorldMaterialResourceCache {
 		IndexedTextureResourceRecord
 	>();
 	private readonly reportedDiagnosticKeys = new Set<string>();
+	private readonly textureCapabilities: MaterialTextureCapabilities;
+	private readonly textureSamplingPolicy: MaterialTextureSamplingPolicy;
 
 	constructor(
 		private readonly reportDiagnostic?: MaterialResourceDiagnosticHandler,
-		private readonly textureCapabilities: MaterialTextureCapabilities = {
+		textureCapabilities: MaterialTextureCapabilities = {
 			supportsS3tc: false,
 			supportsS3tcSrgb: false,
 		},
-	) {}
+		textureSamplingPolicy: MaterialTextureSamplingPolicy = createDefaultMaterialTextureSamplingPolicy(
+			textureCapabilities,
+		),
+	) {
+		this.textureCapabilities = textureCapabilities;
+		this.textureSamplingPolicy = textureSamplingPolicy;
+	}
 
 	resolveMaterialPlan(options: {
 		slots: readonly ResolvedMaterialSlot[];
@@ -134,12 +149,14 @@ export class WorldMaterialResourceCache {
 
 		const material = createMaterial({
 			...options,
-			resolveTexture: (renderSurface) => this.getTexture({ renderSurface }),
-			resolveIndexedTexture: (renderSurface) =>
-				this.getIndexedTextureResource({ renderSurface }),
+			resolveTexture: (renderSurface, samplingPolicy) =>
+				this.getTexture({ renderSurface, samplingPolicy }),
+			resolveIndexedTexture: (renderSurface, samplingPolicy) =>
+				this.getIndexedTextureResource({ renderSurface, samplingPolicy }),
 			resolvePaletteResource: (paletteAssetId, paletteAsset) =>
 				this.getPaletteResource({ paletteAssetId, paletteAsset }),
 			reportDiagnostic: (diagnostic) => this.reportOnce(diagnostic),
+			textureSamplingPolicy: this.textureSamplingPolicy,
 		});
 		this.materialRecords.set(materialKey, { material });
 		return material;
@@ -147,8 +164,12 @@ export class WorldMaterialResourceCache {
 
 	getTexture(options: {
 		renderSurface: PreparedRenderSurfacePayload;
+		samplingPolicy: TextureSamplingPolicy;
 	}): Texture | null {
-		const textureKey = describeRenderSurfaceDecodeKey(options.renderSurface);
+		const textureKey = describeRenderSurfaceTextureResourceKey(
+			options.renderSurface,
+			options.samplingPolicy,
+		);
 		const cached = this.textureRecords.get(textureKey);
 		if (cached) {
 			return cached.texture;
@@ -156,6 +177,7 @@ export class WorldMaterialResourceCache {
 
 		const texture = createRenderSurfaceTexture(
 			options.renderSurface,
+			options.samplingPolicy,
 			this.textureCapabilities,
 		);
 		if (!texture) {
@@ -197,8 +219,12 @@ export class WorldMaterialResourceCache {
 
 	getIndexedTextureResource(options: {
 		renderSurface: PreparedRenderSurfacePayload;
+		samplingPolicy: TextureSamplingPolicy;
 	}): IndexedTextureResource | null {
-		const textureKey = describeRenderSurfaceDecodeKey(options.renderSurface);
+		const textureKey = describeRenderSurfaceTextureResourceKey(
+			options.renderSurface,
+			options.samplingPolicy,
+		);
 		const cached = this.indexedTextureRecords.get(textureKey);
 		if (cached) {
 			return cached.resource;
@@ -207,9 +233,21 @@ export class WorldMaterialResourceCache {
 		if (!isIndexedTextureFormat(options.renderSurface.formatRaw)) {
 			return null;
 		}
-		const resource = createIndexedTextureResource(options.renderSurface);
+		const resource = createIndexedTextureResource(
+			options.renderSurface,
+			options.samplingPolicy,
+		);
 		this.indexedTextureRecords.set(textureKey, { resource });
 		return resource;
+	}
+
+	getDefaultTextureSamplingPolicy(
+		renderSurface: PreparedRenderSurfacePayload,
+	): TextureSamplingPolicy {
+		return selectRenderSurfaceTextureSamplingPolicy(
+			renderSurface,
+			this.textureSamplingPolicy,
+		);
 	}
 
 	private reportOnce(diagnostic: MaterialResourceDiagnostic): void {
@@ -222,4 +260,14 @@ export class WorldMaterialResourceCache {
 		this.reportedDiagnosticKeys.add(diagnostic.key);
 		this.reportDiagnostic(diagnostic);
 	}
+}
+
+function describeRenderSurfaceTextureResourceKey(
+	renderSurface: PreparedRenderSurfacePayload,
+	samplingPolicy: TextureSamplingPolicy,
+): string {
+	return [
+		describeRenderSurfaceDecodeKey(renderSurface),
+		describeTextureSamplingPolicy(samplingPolicy),
+	].join("|");
 }

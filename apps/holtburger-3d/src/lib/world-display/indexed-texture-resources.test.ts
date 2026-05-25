@@ -19,6 +19,7 @@ import {
 	scanMaxPaletteIndex,
 	selectIndexedPalette,
 } from "./indexed-texture-resources";
+import { createDefaultMaterialTextureSamplingPolicy } from "./texture-sampling-policy";
 
 describe("indexed texture resources", () => {
 	it("classifies AC indexed render surface formats", () => {
@@ -36,6 +37,7 @@ describe("indexed texture resources", () => {
 				height: 2,
 				sourceBytes: new Uint8Array([1, 2, 7, 4]),
 			}),
+			createDefaultMaterialTextureSamplingPolicy().indexed,
 		);
 
 		expect(resource.format).toBe("p8");
@@ -61,6 +63,7 @@ describe("indexed texture resources", () => {
 				height: 1,
 				sourceBytes: new Uint8Array([0x34, 0x12, 0xff, 0x00]),
 			}),
+			createDefaultMaterialTextureSamplingPolicy().indexed,
 		);
 
 		expect(resource.format).toBe("index16");
@@ -83,6 +86,7 @@ describe("indexed texture resources", () => {
 					height: 1,
 					sourceBytes: new Uint8Array([0x01, 0x00]),
 				}),
+				createDefaultMaterialTextureSamplingPolicy().indexed,
 			),
 		).toThrow(/expected 4 indexed source bytes/);
 	});

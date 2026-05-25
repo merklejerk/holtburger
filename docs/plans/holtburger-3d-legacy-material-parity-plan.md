@@ -359,6 +359,68 @@ Completion criteria:
 
 Goal: isolate texture sampler decisions before changing UV behavior.
 
+Progress: implemented.
+
+Implemented changes:
+
+- Added `texture-sampling-policy.ts` with typed wrap, filter, color-space,
+  mipmap, and `flipY` policy data.
+- Added format-aware default material texture sampling policy buckets for
+  direct-color render surfaces, compressed render surfaces, and indexed render
+  surfaces.
+- Threaded explicit `TextureSamplingPolicy` values through
+  `createRenderSurfaceTexture()`, `createIndexedTextureResource()`,
+  `WorldMaterialResourceCache.getTexture()`, and
+  `WorldMaterialResourceCache.getIndexedTextureResource()`.
+- Added sampling policy identity to direct/compressed/indexed texture resource
+  cache keys so the same render surface can be cached separately for clamped and
+  repeated sampling.
+- Kept material construction on a single `MaterialTextureSamplingPolicy`
+  context instead of adding loose optional parameters to individual texture
+  call sites.
+- Added tests for default policy values, policy application, policy identity,
+  indexed texture policy use, and cache separation by sampling policy.
+
+Decisions and course corrections:
+
+- Current behavior is preserved by default. Direct-color `DataTexture` uploads
+  keep clamp wrapping, nearest filtering, sRGB color space, no mipmaps, and
+  `flipY = false`. Compressed textures keep clamp wrapping, linear filtering, no
+  mipmaps, and `flipY = false`, with sRGB only when S3TC sRGB upload is
+  supported. Indexed textures keep clamp wrapping, nearest filtering,
+  non-color data, no mipmaps, and `flipY = false`.
+- `MaterialTextureSamplingPolicy` is bucketed by render-surface kind instead of
+  using one global policy, because Three.js `DataTexture`, `CompressedTexture`,
+  and indexed palette lookup textures had different existing sampler defaults.
+- Geometry-derived wrap selection is not implemented in Phase 1. The seam is in
+  place; Phase 3 should compute or consume `uvBounds`/`hasWrappingUvs` and
+  choose between clamp/repeat by supplying a different policy.
+- Texture velocity remains separate from sampling policy. Future UV scrolling
+  should update instance or material UV transform state, not the texture
+  resource cache key.
+
+Cleanup targets from Phase 1:
+
+- Keep policy converter helpers private unless another module truly needs Three
+  constants directly.
+- Once Phase 3 introduces geometry-derived policy selection, remove any
+  temporary call-site assumptions that all static/interior materials use the
+  cache default policy.
+- Add terrain policy buckets or terrain-specific policy helpers in Phase 9
+  instead of forcing terrain sampling through static/interior defaults.
+
+Refinements to future steps:
+
+- Phase 2 can ignore sampler selection unless setup appearance routing exposes
+  geometry or material slots that need a non-default policy.
+- Phase 3 should become the phase that adds `uvBounds`/`hasWrappingUvs` to
+  prepared render geometry or a single fallback computation helper. Do not
+  re-scan UV arrays independently in renderer, diagnostics, and cache logic.
+- Phase 3 should select wrap/clamp by producing a per-material or per-geometry
+  `MaterialTextureSamplingPolicy` before calling `resolveMaterialPlan()`.
+- Phase 7 texture velocity should not modify `TextureSamplingPolicy`; it needs a
+  separate instance/part UV-offset model.
+
 - Add `texture-sampling-policy` helpers for wrap/clamp, `flipY`, color-space,
   mipmap, and filter decisions.
 - Thread the policy through direct-color, compressed, indexed, and future

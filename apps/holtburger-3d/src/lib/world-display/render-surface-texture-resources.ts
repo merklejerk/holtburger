@@ -7,13 +7,16 @@ import {
 	RGBA_S3TC_DXT3_Format,
 	RGBA_S3TC_DXT5_Format,
 	RGBAFormat,
-	SRGBColorSpace,
 	UnsignedByteType,
 	type Texture,
 } from "three";
 
 import type { PreparedRenderSurfacePayload } from "../assets/types";
 import { formatHex32 } from "../landblocks";
+import {
+	applyTextureSamplingPolicy,
+	type TextureSamplingPolicy,
+} from "./texture-sampling-policy";
 
 export interface MaterialTextureCapabilities {
 	supportsS3tc: boolean;
@@ -43,13 +46,14 @@ const A4R4G4B4_CHANNEL_MASK = 0x0f;
 
 export function createRenderSurfaceTexture(
 	renderSurface: PreparedRenderSurfacePayload,
+	samplingPolicy: TextureSamplingPolicy,
 	capabilities: MaterialTextureCapabilities = {
 		supportsS3tc: false,
 		supportsS3tcSrgb: false,
 	},
 ): Texture | null {
 	if (isSupportedCompressedFormat(renderSurface.formatRaw)) {
-		return createCompressedTexture(renderSurface, capabilities);
+		return createCompressedTexture(renderSurface, capabilities, samplingPolicy);
 	}
 	if (!isSupportedDirectColorFormat(renderSurface.formatRaw)) {
 		return null;
@@ -62,7 +66,7 @@ export function createRenderSurfaceTexture(
 		RGBAFormat,
 		UnsignedByteType,
 	);
-	texture.colorSpace = SRGBColorSpace;
+	applyTextureSamplingPolicy(texture, samplingPolicy);
 	texture.needsUpdate = true;
 	return texture;
 }
@@ -99,6 +103,7 @@ export function describeRenderSurfaceDecodeKey(
 function createCompressedTexture(
 	renderSurface: PreparedRenderSurfacePayload,
 	capabilities: MaterialTextureCapabilities,
+	samplingPolicy: TextureSamplingPolicy,
 ): Texture | null {
 	if (!capabilities.supportsS3tc) {
 		return null;
@@ -133,8 +138,9 @@ function createCompressedTexture(
 		LinearFilter,
 		LinearFilter,
 		undefined,
-		capabilities.supportsS3tcSrgb ? SRGBColorSpace : NoColorSpace,
+		NoColorSpace,
 	);
+	applyTextureSamplingPolicy(texture, samplingPolicy);
 	texture.needsUpdate = true;
 	return texture;
 }

@@ -507,10 +507,8 @@
 				</button>
 				<button
 					type="button"
-					class:active={$frontendState.browserMode.renderStyle ===
-						"wireframe"}
-					aria-pressed={$frontendState.browserMode.renderStyle ===
-						"wireframe"}
+					class:active={$frontendState.browserMode.renderStyle === "wireframe"}
+					aria-pressed={$frontendState.browserMode.renderStyle === "wireframe"}
 					onclick={() => handleRenderStyleChange("wireframe")}
 				>
 					Wireframe

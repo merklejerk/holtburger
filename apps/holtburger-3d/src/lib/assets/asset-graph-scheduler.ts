@@ -15,10 +15,7 @@ export interface AssetGraphPreparationResult {
 }
 
 export class AssetGraphScheduler {
-	constructor(
-		private readonly gateway: AssetPreparationGateway,
-	) {
-	}
+	constructor(private readonly gateway: AssetPreparationGateway) {}
 
 	async prepareAssetGraph(
 		rootRequest: AssetLookupRequestDto,

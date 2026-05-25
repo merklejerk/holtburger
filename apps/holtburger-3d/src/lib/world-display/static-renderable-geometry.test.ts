@@ -70,7 +70,10 @@ describe("static renderable geometry", () => {
 
 	it("uses neutral instance colors while real materials are active", () => {
 		const debugColor = buildStaticRenderableColor("part");
-		const materialColor = buildStaticRenderableInstanceColor("part", "material");
+		const materialColor = buildStaticRenderableInstanceColor(
+			"part",
+			"material",
+		);
 		const noMaterialColor = buildStaticRenderableInstanceColor("part", "debug");
 
 		expect(materialColor.getHex()).toBe(0xffffff);

@@ -259,9 +259,9 @@ function describeStructuredInteriorStatus(
 }
 
 function describePreparedIndoorCache(assetState: AssetChannelState): string {
-	const preparedEnvCellCount = Object.values(assetState.preparedByAssetId).filter(
-		(asset) => asset.payload.kind === "env-cell",
-	).length;
+	const preparedEnvCellCount = Object.values(
+		assetState.preparedByAssetId,
+	).filter((asset) => asset.payload.kind === "env-cell").length;
 
 	return `Structured interior cache contains ${preparedEnvCellCount} prepared env-cell asset${preparedEnvCellCount === 1 ? "" : "s"}.`;
 }

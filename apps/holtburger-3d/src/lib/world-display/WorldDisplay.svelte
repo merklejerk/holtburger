@@ -140,7 +140,9 @@
 		rendererController?.setTransitionPortalModel(transitionPortalModel);
 	}
 
-	export function setDebugOverlayScene(nextScene: WorldDebugOverlayModel): void {
+	export function setDebugOverlayScene(
+		nextScene: WorldDebugOverlayModel,
+	): void {
 		debugOverlayScene = nextScene;
 		rendererController?.setDebugOverlayScene(debugOverlayScene);
 	}
@@ -202,7 +204,6 @@
 			null
 		);
 	}
-
 </script>
 
 <div class="world-display">

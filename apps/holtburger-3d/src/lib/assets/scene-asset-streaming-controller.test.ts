@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseBrowserLocationInput } from "../../app/browser-mode";
 import type { AssetLookupRequestDto } from "../host/contracts";
-import type {
-	PreparedAssetCacheMetadata,
-	PreparedAssetRecord,
-} from "./types";
+import type { PreparedAssetCacheMetadata, PreparedAssetRecord } from "./types";
 import { SceneAssetStreamingController } from "./scene-asset-streaming-controller";
 
 describe("scene asset streaming controller", () => {
@@ -13,7 +10,8 @@ describe("scene asset streaming controller", () => {
 		expect(destination).not.toBeNull();
 
 		const preparedByAssetId: Record<string, PreparedAssetRecord> = {};
-		const cacheMetadataByAssetId: Record<string, PreparedAssetCacheMetadata> = {};
+		const cacheMetadataByAssetId: Record<string, PreparedAssetCacheMetadata> =
+			{};
 		const requestedAssetIds: string[] = [];
 		const controller = new SceneAssetStreamingController({
 			assetChannel: {
@@ -95,7 +93,9 @@ describe("scene asset streaming controller", () => {
 	});
 });
 
-function createPreparedTopology(request: AssetLookupRequestDto): PreparedAssetRecord {
+function createPreparedTopology(
+	request: AssetLookupRequestDto,
+): PreparedAssetRecord {
 	return createPreparedRecord(request, {
 		kind: "landblock-topology",
 		sourceAssetKind: "landblock-topology",

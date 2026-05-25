@@ -80,6 +80,11 @@ export interface WorldRenderDebugMetrics {
 	materialCount: number;
 	materialProgramKeyCount: number;
 	transparentMaterialCount: number;
+	textureVelocityPartCount: number;
+	textureVelocityRenderGroupCount: number;
+	textureVelocityMaterialCount: number;
+	textureVelocitySignatureCount: number;
+	textureVelocitySignatureSamples: string[];
 	textureResourceCount: number;
 	indexedTextureResourceCount: number;
 	paletteResourceCount: number;

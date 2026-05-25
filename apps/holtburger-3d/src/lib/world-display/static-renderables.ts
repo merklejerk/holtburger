@@ -55,6 +55,11 @@ import {
 	type ResolvedMaterialSlot,
 } from "./material-resources";
 import { describeMaterialVariantSignature } from "./material-variants";
+import {
+	describeTextureVelocitySignature,
+	normalizeTextureVelocity,
+	type TextureVelocityRenderState,
+} from "./texture-velocity";
 
 type StaticRenderableInstanceKind =
 	| "indoor-static"
@@ -100,13 +105,8 @@ export interface StaticRenderablePart {
 	partPlacements: PlacementTransformDto[];
 	scale: Vec3Dto;
 	debugColorKey: string;
-	textureVelocity: StaticRenderableTextureVelocity | null;
+	textureVelocity: TextureVelocityRenderState | null;
 	textureVelocitySignature: string;
-}
-
-export interface StaticRenderableTextureVelocity {
-	uSpeed: number;
-	vSpeed: number;
 }
 
 export interface StaticRenderableSceneModel {
@@ -600,7 +600,7 @@ function createStaticRenderablePart(
 		materialSlots: ResolvedMaterialSlot[];
 		partPlacements: PlacementTransformDto[];
 		scale: Vec3Dto;
-		textureVelocity?: StaticRenderableTextureVelocity | null;
+		textureVelocity?: TextureVelocityRenderState | null;
 	},
 ): StaticRenderablePart {
 	const debugColorKey = `${instance.sourceAssetId}:${formatHexId(part.gfxObjId)}:${part.partIndex}`;
@@ -659,29 +659,6 @@ function multiplyScale(left: Vec3Dto, right: Vec3Dto): Vec3Dto {
 		y: left.y * right.y,
 		z: left.z * right.z,
 	};
-}
-
-function normalizeTextureVelocity(
-	velocity: StaticRenderableTextureVelocity | null,
-): StaticRenderableTextureVelocity | null {
-	if (!velocity || (velocity.uSpeed === 0 && velocity.vSpeed === 0)) {
-		return null;
-	}
-	return velocity;
-}
-
-function describeTextureVelocitySignature(
-	velocity: StaticRenderableTextureVelocity | null,
-): string {
-	return velocity
-		? `uv:${formatVelocityComponent(velocity.uSpeed)},${formatVelocityComponent(
-				velocity.vSpeed,
-			)}`
-		: "uv:none";
-}
-
-function formatVelocityComponent(value: number): string {
-	return Object.is(value, -0) ? "0" : value.toString();
 }
 
 function deriveActiveInteriorCellIds(
@@ -900,7 +877,7 @@ function expandSetupAppearanceParts(options: {
 function deriveSetupPartTextureVelocity(
 	setupModel: PreparedSetupModelPayload,
 	partIndex: number,
-): StaticRenderableTextureVelocity | null {
+): TextureVelocityRenderState | null {
 	const placementSet = selectDefaultSetupPlacementSet(setupModel);
 	if (!placementSet) {
 		return null;

@@ -66,12 +66,12 @@
 		type RenderLandblockAnchor,
 	} from "../lib/world-display/render-chunks";
 	import {
-	BrowserRenderResourceCoordinator,
-	createEmptyBrowserRenderResourceSnapshot,
-	type BrowserRuntimeAppearancePreview,
-	type BrowserRenderResourceCoordinatorInput,
-	type BrowserRenderResourceSnapshot,
-} from "../lib/world-display/browser-render-resource-coordinator";
+		BrowserRenderResourceCoordinator,
+		createEmptyBrowserRenderResourceSnapshot,
+		type BrowserRuntimeAppearancePreview,
+		type BrowserRenderResourceCoordinatorInput,
+		type BrowserRenderResourceSnapshot,
+	} from "../lib/world-display/browser-render-resource-coordinator";
 	import type {
 		RuntimeAppearanceRequestDto,
 		SetupAppearancePayloadDto,
@@ -98,8 +98,7 @@
 		setupAppearance: SetupAppearancePayloadDto;
 	}
 
-	interface RuntimeAppearancePreviewInstance
-		extends BrowserRuntimeAppearancePreview {
+	interface RuntimeAppearancePreviewInstance extends BrowserRuntimeAppearancePreview {
 		resolved: ResolvedRuntimeAppearanceFacts;
 	}
 
@@ -252,7 +251,7 @@
 		if (!debug) {
 			return "Renderer diagnostics are waiting for the first rendered frame.";
 		}
-		return `Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}, transition depth ${debug.transitionPortalMaxDepth}; passes ${debug.renderPassCount}, calls ${debug.renderCalls}, tris ${debug.renderTriangles}; materials ${debug.materialCount}, program keys ${debug.materialProgramKeyCount}, transparent ${debug.transparentMaterialCount}, textures ${debug.textureResourceCount}/${debug.indexedTextureResourceCount} indexed, palettes ${debug.paletteResourceCount}; static groups ${debug.staticVisibleGeometryGroupCount}/${debug.staticGeometryGroupCount}; material types ${JSON.stringify(debug.materialTypeCounts)}; program samples ${debug.materialProgramKeySamples.join(" || ")}; portal work ${debug.portalRenderWorkItemCount}, masks ${debug.transitionApertureMaskPassCount}, depth resets ${debug.apertureDepthResetPassCount}, composites interior ${debug.interiorCompositePassCount}/exterior ${debug.exteriorCompositePassCount}; terrain ${debug.visibleTerrainMeshCount}/${debug.terrainMeshCount}, static ${debug.visibleStaticGroupMeshCount}/${debug.staticGroupMeshCount}, interiors ${debug.visibleStructuredInteriorMeshCount}/${debug.structuredInteriorMeshCount} with groups ${debug.structuredInteriorGeometryGroupCount}, overlays ${debug.visibleDebugOverlayObjectCount}/${debug.debugOverlayObjectCount}; portals ${debug.portalApertureMeshCount}/${debug.transitionPortalCandidateCount}; residency ${debug.cameraViewResidency} via ${debug.residencySource} (${debug.residencyCellCount} cells, ${debug.residencyLandblockCount} landblocks, ${debug.residencyAabbCandidateCount} AABB candidates, ${debug.residencyCellBspMatchCount} CellBSP matches, ${debug.residencyAabbFallbackCount} AABB fallbacks); canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
+		return `Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}, transition depth ${debug.transitionPortalMaxDepth}; passes ${debug.renderPassCount}, calls ${debug.renderCalls}, tris ${debug.renderTriangles}; materials ${debug.materialCount}, program keys ${debug.materialProgramKeyCount}, transparent ${debug.transparentMaterialCount}, textures ${debug.textureResourceCount}/${debug.indexedTextureResourceCount} indexed, palettes ${debug.paletteResourceCount}; texture velocity parts ${debug.textureVelocityPartCount}, groups ${debug.textureVelocityRenderGroupCount}, cloned materials ${debug.textureVelocityMaterialCount}, signatures ${debug.textureVelocitySignatureCount} (${debug.textureVelocitySignatureSamples.join(" || ")}); static groups ${debug.staticVisibleGeometryGroupCount}/${debug.staticGeometryGroupCount}; material types ${JSON.stringify(debug.materialTypeCounts)}; program samples ${debug.materialProgramKeySamples.join(" || ")}; portal work ${debug.portalRenderWorkItemCount}, masks ${debug.transitionApertureMaskPassCount}, depth resets ${debug.apertureDepthResetPassCount}, composites interior ${debug.interiorCompositePassCount}/exterior ${debug.exteriorCompositePassCount}; terrain ${debug.visibleTerrainMeshCount}/${debug.terrainMeshCount}, static ${debug.visibleStaticGroupMeshCount}/${debug.staticGroupMeshCount}, interiors ${debug.visibleStructuredInteriorMeshCount}/${debug.structuredInteriorMeshCount} with groups ${debug.structuredInteriorGeometryGroupCount}, overlays ${debug.visibleDebugOverlayObjectCount}/${debug.debugOverlayObjectCount}; portals ${debug.portalApertureMeshCount}/${debug.transitionPortalCandidateCount}; residency ${debug.cameraViewResidency} via ${debug.residencySource} (${debug.residencyCellCount} cells, ${debug.residencyLandblockCount} landblocks, ${debug.residencyAabbCandidateCount} AABB candidates, ${debug.residencyCellBspMatchCount} CellBSP matches, ${debug.residencyAabbFallbackCount} AABB fallbacks); canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
 	});
 	const sceneContextText = $derived(renderResourceSnapshot.sceneContextText);
 	const cameraResidencyText = $derived.by(() => {
@@ -671,9 +670,7 @@
 				runtimeAppearancePreviews = [...runtimeAppearancePreviews, preview];
 				runtimeAppearancePending = false;
 				onRuntimeAppearanceAssetIdsChange?.(
-					collectRuntimeAppearancePreviewAssetIds(
-						runtimeAppearancePreviews,
-					),
+					collectRuntimeAppearancePreviewAssetIds(runtimeAppearancePreviews),
 				);
 				scheduleCurrentSceneResourceUpdate();
 			})

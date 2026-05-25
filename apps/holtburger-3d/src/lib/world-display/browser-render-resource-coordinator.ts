@@ -455,6 +455,7 @@ function describeStaticRenderableSceneSignature(
 		`groups=${scene.partsByRenderGroupKey.size}`,
 		`missingSources=${scene.missingSourceAssetIds.join(",")}`,
 		`missingGfx=${scene.missingGfxAssetIds.join(",")}`,
+		`missingSetupAppearances=${scene.missingSetupAppearanceAssetIds.join(",")}`,
 	].join(";");
 }
 
@@ -698,6 +699,8 @@ function reportPreparedOutdoorAssetsNotRendered({
 					staticRenderableScene.missingSourceAssetIds.length,
 				missingStaticGfxAssetIds:
 					staticRenderableScene.missingGfxAssetIds.length,
+				missingStaticSetupAppearanceAssetIds:
+					staticRenderableScene.missingSetupAppearanceAssetIds.length,
 				structuredInteriorCells: structuredInteriorScene.cells.length,
 				activeRenderChunks: activeRenderChunkTransforms.length,
 			},

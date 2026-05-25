@@ -35,13 +35,15 @@ or new reference evidence proves it stale.
 - Prepared `setup-appearance/{setup_did}` payloads exist and preserve base
   setup part material slots, texture changes, animation part changes,
   `paletteId`, and `subPalettes`.
+- Static setup-model rendering requests and prefers prepared
+  `setup-appearance/{setup_did}` payloads when available, while retaining raw
+  setup-model part rendering as an explicit fallback.
 
 ### Known Gaps
 
-- Static setup-model rendering still expands parts from the raw
-  `setup-model`/`GfxObj` path and uses `"setup-base"` slots. It does not prefer
-  the prepared `setup-appearance` payload, so texture swaps and base appearance
-  material slots can be ignored.
+- Runtime/server `ObjDesc` variants are not yet routed into prepared
+  setup-appearance inputs. Static setup-model rendering uses the base prepared
+  `setup-appearance/{setup_did}` snapshot when available.
 - Static `GfxObj` and setup rendering have no derived palette view identity.
   `materialSignature` reflects material slots, not per-instance subpalette
   replacement.
@@ -233,15 +235,17 @@ phases below as part of the implementation plan, not optional cleanup.
 This plan was checked against the current code paths before implementation. The
 following gaps should be addressed in order.
 
-1. `setup-appearance` assets are supported but not naturally scheduled for
+1. `setup-appearance` assets are supported and are now scheduled for visible
    setup models.
    - `setup-appearance/{setup_did}` is recognized by the Tauri adapter, worker,
      contracts, prepared asset types, and dependency walker.
-   - `setup-model` dependencies currently expose only `gfxObjAssetIds`, and the
-     dependency test explicitly says "without default setup appearance".
-   - Phase 2 cannot simply "look for" a setup appearance payload and expect one
-     to exist. The scheduler/contract must request the base setup appearance for
-     visible setup models.
+   - `setup-model` dependencies still expose only `gfxObjAssetIds`; the scene
+     request planner derives the base `setup-appearance/{setupDid}` route for
+     visible setup-model source IDs instead of widening the setup-model
+     contract.
+   - Phase 2 added planner tests proving visible setup models request their base
+     setup appearance and follow appearance-selected part/material dependencies
+     once the appearance payload is prepared.
 2. Setup appearance payloads carry selected parts and material slots but not
    placement frames or scale. That is fine for base setup routing: combine
    appearance-selected part/gfx/material data with placement/scale from the
@@ -287,9 +291,10 @@ following gaps should be addressed in order.
 
 Cleanup targets created by this dry run:
 
-- Rename or replace tests and comments that describe setup-model dependencies as
-  intentionally excluding default setup appearances once Phase 2 scheduling is
-  implemented.
+- Continue removing any stale tests or comments that describe setup-model
+  dependencies as intentionally excluding base setup appearances. Phase 2
+  renamed the main planner test, but nearby planning comments may still need
+  cleanup as Phase 2.5/3 touch the same code.
 - Add sampler-policy identity to texture resource cache keys before changing
   wrap/clamp or `flipY`.
 - Split material groups by sampler policy when preserving one group would mix
@@ -549,23 +554,115 @@ Completion criteria:
 
 Goal: make setup-model statics consume prepared `setup-appearance` payloads.
 
-- In `static-renderables.ts`, when a static source asset is a setup model, look
-  for `setup-appearance/{setupModelId}` and use its parts/material slots when
-  available.
-- First update setup-model scheduling so the base `setup-appearance/{setupDid}`
-  asset is requested for visible setup models. Either add explicit
-  `setupAppearanceAssetIds` to setup-model dependencies or teach the scene
-  request planner to derive the base setup appearance route from visible setup
-  model IDs.
-- Preserve the current raw setup fallback for missing or failed appearance
-  assets, with explicit diagnostics.
-- Use the setup appearance key in `materialAppearanceKey`.
-- Ensure `materialSignature` changes when setup appearance material slots differ
-  from raw `GfxObj` slots.
-- Continue using setup-model placement frames and per-part scale by part index;
-  do not move placement data into setup appearance payloads in this phase.
-- Add tests proving setup appearance texture-swapped material slots flow into
-  static renderable parts.
+Progress: implemented.
+
+Implemented changes:
+
+- `scene-asset-request-planner.ts` now derives
+  `setup-appearance/{setupDid}` requests from visible `setup-model/{setupDid}`
+  static source IDs. This keeps the contract shape unchanged and avoids adding
+  a temporary `setupAppearanceAssetIds` dependency field to setup-model
+  payloads.
+- Scene request planning follows prepared setup-appearance parts when the
+  appearance asset is ready, requesting appearance-selected `GfxObj`
+  dependencies and material dependencies. While the appearance is missing,
+  failed, or still pending, the planner continues requesting raw setup-model
+  part `GfxObj` dependencies so fallback rendering remains available.
+- `static-renderables.ts` now prefers prepared setup-appearance parts and
+  material slots for setup-model statics. Raw setup-model part expansion remains
+  the fallback.
+- Added `createSetupAppearanceMaterialAppearanceContext()` in
+  `material-appearance.ts` and exported `PreparedSetupAppearancePayload` so
+  setup appearance identity is built in one place.
+- Setup appearance parts use the payload `appearanceKey` as
+  `materialAppearanceKey` and fill `selectedPartsSignature` from the resolved
+  selected parts and material slots. `textureSwapSignature` and
+  `paletteViewSignature` remain null until the later texture-swap and derived
+  palette phases.
+- Static setup appearance rendering continues to use setup-model placement
+  frames and scale by `partIndex`. Placement and scale are not duplicated into
+  setup-appearance payloads.
+- `StaticRenderableSceneModel` now carries
+  `missingSetupAppearanceAssetIds` so raw setup fallback is visible as an
+  explicit diagnostic instead of silently looking identical to the intended
+  path.
+- Added tests proving:
+  - visible setup models request their base setup-appearance assets;
+  - prepared setup appearances request selected part `GfxObj` and material
+    dependencies;
+  - static renderables prefer setup appearance selected parts/material slots;
+  - raw setup fallback records missing setup-appearance diagnostics.
+
+Verification:
+
+- `npm run test:ts` passes with 44 test files and 227 tests.
+- `npm run check` passes with no Svelte or TypeScript diagnostics.
+- `npm run lint:ts` passes.
+- `npm run lint:dead` passes.
+- Touched files pass Prettier checks. Repo-wide `npm run format:check` still
+  fails on pre-existing unrelated format drift in other app files.
+
+Decisions and course corrections:
+
+- The scene planner, not the setup-model DTO, owns the base
+  `setup-model/{setupDid}` to `setup-appearance/{setupDid}` bridge for now.
+  This keeps host/content contracts narrower and avoids claiming
+  setup-appearance is an intrinsic setup-model dependency before runtime
+  `ObjDesc` variants exist.
+- Once a setup-appearance payload is prepared, planner fallback stops requesting
+  raw setup-model part `GfxObj` dependencies for that source. This prevents the
+  old raw setup path from competing with the appearance-selected path after the
+  intended data is available.
+- Missing setup-appearance is diagnostic, not a hard render blocker. The
+  renderer keeps using raw setup-model parts so visible statics do not disappear
+  while appearance assets are loading or unavailable.
+- `selectedPartsSignature` includes selected `GfxObj` and material-slot facts.
+  `textureChanges`, `paletteId`, and `subPalettes` are preserved on the payload
+  but not yet converted into cache-visible texture-swap or palette-view
+  identity.
+- No bridge phase is needed before Phase 2.5. The remaining work is material
+  variant identity and grouping, not missing setup-appearance routing.
+
+Cleanup targets from Phase 2:
+
+- Completed pre-Phase 2.5 cleanup: extracted repeated static
+  source/setup-appearance dependency expansion in
+  `scene-asset-request-planner.ts` into a shared helper that returns geometry
+  request IDs and material dependency input IDs. Phase 2.5 should extend that
+  helper rather than reintroducing separate indoor/outdoor variant expansion.
+- Rename older tests/comments that describe setup-model dependencies as only
+  raw `gfxObjAssetIds`; visible setup models now also request derived base
+  setup-appearance assets.
+- Decide whether `missingSetupAppearanceAssetIds` should surface in user-facing
+  debug UI or remain a render-model diagnostic only.
+- Remove `materialAppearanceKey` after the remaining renderer grouping and
+  diagnostics consume `MaterialAppearanceContext` directly.
+
+Legacy shims:
+
+- Raw setup-model part rendering remains as a compatibility fallback for
+  missing, pending, failed, or mismatched setup-appearance assets.
+- The base `setup-appearance/{setupDid}` route is a static snapshot bridge.
+  Runtime/server `ObjDesc` variants and future `ClothingTable -> ObjDesc`
+  generation should still produce setup-appearance-style resolved facts before
+  reaching Three.js.
+- `textureSwapSignature` and `paletteViewSignature` remain deliberately empty
+  even when the setup-appearance payload preserves texture changes and
+  subpalettes. Filling those signatures belongs to Phase 5 and Phase 4.
+
+Refinements to future steps:
+
+- Phase 2.5 should account for setup-appearance-selected material slots when it
+  adds material variant signatures and geometry group mapping.
+- Phase 3 sampler work should attach sampler variants to the material slots or
+  geometry groups produced by either raw setup fallback or setup-appearance
+  routing.
+- Phase 4 derived palette views should reuse the setup appearance context
+  builder and fill `paletteViewSignature` from `paletteId` plus subpalette
+  replacement facts.
+- Phase 5 texture-map changes should fill `textureSwapSignature` from the same
+  setup-appearance payload instead of inventing another appearance identity
+  path.
 
 Expected effect: building/setup/static objects should stop rendering as
 untextured placeholders when the material graph already has the correct resolved

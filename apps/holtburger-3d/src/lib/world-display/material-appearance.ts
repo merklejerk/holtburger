@@ -1,3 +1,5 @@
+import type { PreparedSetupAppearancePayload } from "../assets/types";
+
 export interface MaterialAppearanceContext {
 	appearanceKey: string;
 	selectedPartsSignature: string | null;
@@ -16,6 +18,18 @@ export function createBaseMaterialAppearanceContext(
 	};
 }
 
+export function createSetupAppearanceMaterialAppearanceContext(
+	setupAppearance: PreparedSetupAppearancePayload,
+): MaterialAppearanceContext {
+	return {
+		appearanceKey: setupAppearance.appearanceKey,
+		selectedPartsSignature:
+			describeSetupAppearanceSelectedPartsSignature(setupAppearance),
+		textureSwapSignature: null,
+		paletteViewSignature: null,
+	};
+}
+
 export function describeMaterialAppearanceSignature(
 	appearance: MaterialAppearanceContext,
 ): string {
@@ -25,4 +39,26 @@ export function describeMaterialAppearanceSignature(
 		`textures=${appearance.textureSwapSignature ?? "base"}`,
 		`palette=${appearance.paletteViewSignature ?? "base"}`,
 	].join("|");
+}
+
+function describeSetupAppearanceSelectedPartsSignature(
+	setupAppearance: PreparedSetupAppearancePayload,
+): string {
+	return setupAppearance.parts
+		.map((part) =>
+			[
+				part.partIndex,
+				part.gfxObjId,
+				part.gfxObjAssetId,
+				part.materialSlots
+					.map(
+						(slot) =>
+							`${slot.slotIndex}:${slot.surfaceId}:${slot.materialAssetId}`,
+					)
+					.sort()
+					.join("+"),
+			].join(":"),
+		)
+		.sort()
+		.join(",");
 }

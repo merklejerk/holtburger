@@ -9,6 +9,7 @@ import type {
 	PreparedAssetRecord,
 	PreparedGfxObjPayload,
 	PreparedLandblockOutdoorPayload,
+	PreparedSetupAppearancePayload,
 	PreparedSetupModelPayload,
 } from "../assets/types";
 import {
@@ -42,6 +43,7 @@ import {
 } from "./render-domains";
 import {
 	createBaseMaterialAppearanceContext,
+	createSetupAppearanceMaterialAppearanceContext,
 	describeMaterialAppearanceSignature,
 	type MaterialAppearanceContext,
 } from "./material-appearance";
@@ -104,6 +106,7 @@ export interface StaticRenderableSceneModel {
 	partsByRenderGroupKey: Map<string, StaticRenderablePart[]>;
 	missingSourceAssetIds: string[];
 	missingGfxAssetIds: string[];
+	missingSetupAppearanceAssetIds: string[];
 }
 
 export interface OutdoorStaticRenderableSelection {
@@ -182,6 +185,7 @@ export function deriveStaticRenderableSceneModel(
 		.sort(compareSourceInstances);
 	const missingSourceAssetIds = new Set<string>();
 	const missingGfxAssetIds = new Set<string>();
+	const missingSetupAppearanceAssetIds = new Set<string>();
 	const parts: StaticRenderablePart[] = [
 		...collectOutdoorStaticRenderableParts(
 			assetState,
@@ -191,12 +195,14 @@ export function deriveStaticRenderableSceneModel(
 			},
 			missingSourceAssetIds,
 			missingGfxAssetIds,
+			missingSetupAppearanceAssetIds,
 		),
 		...collectEnvCellStaticRenderableParts(
 			assetState,
 			activeInteriorEnvCellIds,
 			missingSourceAssetIds,
 			missingGfxAssetIds,
+			missingSetupAppearanceAssetIds,
 		),
 	];
 
@@ -208,6 +214,7 @@ export function deriveStaticRenderableSceneModel(
 		partsByRenderGroupKey: groupStaticRenderablePartsByRenderGroupKey(parts),
 		missingSourceAssetIds: [...missingSourceAssetIds].sort(),
 		missingGfxAssetIds: [...missingGfxAssetIds].sort(),
+		missingSetupAppearanceAssetIds: [...missingSetupAppearanceAssetIds].sort(),
 	};
 }
 
@@ -227,11 +234,13 @@ function deriveIndoorStaticRenderableSceneModel(
 	).sort(compareSourceInstances);
 	const missingSourceAssetIds = new Set<string>();
 	const missingGfxAssetIds = new Set<string>();
+	const missingSetupAppearanceAssetIds = new Set<string>();
 	const parts: StaticRenderablePart[] = collectEnvCellStaticRenderableParts(
 		assetState,
 		activeEnvCellIds,
 		missingSourceAssetIds,
 		missingGfxAssetIds,
+		missingSetupAppearanceAssetIds,
 	);
 
 	return {
@@ -242,6 +251,7 @@ function deriveIndoorStaticRenderableSceneModel(
 		partsByRenderGroupKey: groupStaticRenderablePartsByRenderGroupKey(parts),
 		missingSourceAssetIds: [...missingSourceAssetIds].sort(),
 		missingGfxAssetIds: [...missingGfxAssetIds].sort(),
+		missingSetupAppearanceAssetIds: [...missingSetupAppearanceAssetIds].sort(),
 	};
 }
 
@@ -288,6 +298,12 @@ function isPreparedSetupModelAsset(
 	return asset?.payload.kind === "setup-model";
 }
 
+function isPreparedSetupAppearanceAsset(
+	asset: PreparedAssetRecord | undefined,
+): asset is PreparedAssetRecord & { payload: PreparedSetupAppearancePayload } {
+	return asset?.payload.kind === "setup-appearance";
+}
+
 function isPreparedLandblockOutdoorAsset(
 	asset: PreparedAssetRecord | undefined,
 ): asset is PreparedAssetRecord & { payload: PreparedLandblockOutdoorPayload } {
@@ -309,6 +325,7 @@ export function createEmptyStaticRenderableSceneModel(): StaticRenderableSceneMo
 		partsByRenderGroupKey: new Map(),
 		missingSourceAssetIds: [],
 		missingGfxAssetIds: [],
+		missingSetupAppearanceAssetIds: [],
 	};
 }
 
@@ -558,6 +575,7 @@ function collectOutdoorStaticRenderableParts(
 	},
 	missingSourceAssetIds: Set<string>,
 	missingGfxAssetIds: Set<string>,
+	missingSetupAppearanceAssetIds: Set<string>,
 ): StaticRenderablePart[] {
 	return collectOutdoorStaticRenderableSourceInstances(
 		assetState,
@@ -568,6 +586,7 @@ function collectOutdoorStaticRenderableParts(
 			assetState,
 			missingSourceAssetIds,
 			missingGfxAssetIds,
+			missingSetupAppearanceAssetIds,
 		),
 	);
 }
@@ -577,6 +596,7 @@ function collectEnvCellStaticRenderableParts(
 	activeEnvCellIds: ReadonlySet<number>,
 	missingSourceAssetIds: Set<string>,
 	missingGfxAssetIds: Set<string>,
+	missingSetupAppearanceAssetIds: Set<string>,
 ): StaticRenderablePart[] {
 	return collectEnvCellStaticRenderableSourceInstances(
 		assetState,
@@ -587,6 +607,7 @@ function collectEnvCellStaticRenderableParts(
 			assetState,
 			missingSourceAssetIds,
 			missingGfxAssetIds,
+			missingSetupAppearanceAssetIds,
 		),
 	);
 }
@@ -596,6 +617,7 @@ function expandStaticRenderableSourceInstanceParts(
 	assetState: AssetChannelState,
 	missingSourceAssetIds: Set<string>,
 	missingGfxAssetIds: Set<string>,
+	missingSetupAppearanceAssetIds: Set<string>,
 ): StaticRenderablePart[] {
 	const sourceAsset = assetState.preparedByAssetId[instance.sourceAssetId];
 	if (!sourceAsset) {
@@ -618,6 +640,22 @@ function expandStaticRenderableSourceInstanceParts(
 	}
 
 	if (isPreparedSetupModelAsset(sourceAsset)) {
+		const setupAppearance = findPreparedSetupAppearance(
+			assetState,
+			sourceAsset.payload,
+		);
+		if (setupAppearance) {
+			return expandSetupAppearanceParts({
+				instance,
+				assetState,
+				setupModel: sourceAsset.payload,
+				setupAppearance,
+				missingGfxAssetIds,
+			});
+		}
+		missingSetupAppearanceAssetIds.add(
+			formatSetupAppearanceAssetId(sourceAsset.payload.setupModelId),
+		);
 		return sourceAsset.payload.parts.flatMap((part) => {
 			if (
 				!isPreparedGfxObjAsset(assetState.preparedByAssetId[part.gfxObjAssetId])
@@ -645,6 +683,64 @@ function expandStaticRenderableSourceInstanceParts(
 
 	missingSourceAssetIds.add(instance.sourceAssetId);
 	return [];
+}
+
+function findPreparedSetupAppearance(
+	assetState: AssetChannelState,
+	setupModel: PreparedSetupModelPayload,
+): PreparedSetupAppearancePayload | null {
+	const asset =
+		assetState.preparedByAssetId[
+			formatSetupAppearanceAssetId(setupModel.setupModelId)
+		];
+	if (
+		!isPreparedSetupAppearanceAsset(asset) ||
+		asset.payload.setupModelId !== setupModel.setupModelId
+	) {
+		return null;
+	}
+	return asset.payload;
+}
+
+function expandSetupAppearanceParts(options: {
+	instance: StaticRenderableSourceInstance;
+	assetState: AssetChannelState;
+	setupModel: PreparedSetupModelPayload;
+	setupAppearance: PreparedSetupAppearancePayload;
+	missingGfxAssetIds: Set<string>;
+}): StaticRenderablePart[] {
+	const appearanceContext = createSetupAppearanceMaterialAppearanceContext(
+		options.setupAppearance,
+	);
+	return options.setupAppearance.parts.flatMap((part) => {
+		if (
+			!isPreparedGfxObjAsset(
+				options.assetState.preparedByAssetId[part.gfxObjAssetId],
+			)
+		) {
+			options.missingGfxAssetIds.add(part.gfxObjAssetId);
+			return [];
+		}
+
+		const setupModelPart = options.setupModel.parts.find(
+			(modelPart) => modelPart.partIndex === part.partIndex,
+		);
+		return [
+			createStaticRenderablePart(options.instance, {
+				partIndex: part.partIndex,
+				gfxObjId: part.gfxObjId,
+				gfxObjAssetId: part.gfxObjAssetId,
+				materialAppearanceKey: options.setupAppearance.appearanceKey,
+				materialAppearanceContext: appearanceContext,
+				materialSlots: part.materialSlots,
+				partPlacements: deriveSetupPartDefaultPlacements(
+					options.setupModel,
+					part.partIndex,
+				),
+				scale: setupModelPart?.scale ?? UNIT_SCALE,
+			}),
+		];
+	});
 }
 
 function deriveSetupPartDefaultPlacements(
@@ -713,4 +809,8 @@ function describeMaterialSignature(
 
 function formatHexId(value: number): string {
 	return `0x${formatHex32(value)}`;
+}
+
+function formatSetupAppearanceAssetId(setupModelId: number): string {
+	return `setup-appearance/${setupModelId.toString(16).padStart(8, "0")}`;
 }

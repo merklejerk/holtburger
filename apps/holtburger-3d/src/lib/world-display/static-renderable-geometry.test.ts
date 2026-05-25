@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type { StaticRenderablePart } from "./static-renderables";
 import { WORLD_RENDER_DOMAIN } from "./render-domains";
+import { createBaseMaterialAppearanceContext } from "./material-appearance";
 import {
 	buildGfxObjGeometry,
 	buildStaticRenderablePartMatrix,
@@ -27,6 +28,7 @@ describe("static renderable geometry", () => {
 			gfxObjId: 0x01000001,
 			gfxObjAssetId: "gfx-obj/01000001",
 			materialAppearanceKey: "base",
+			materialAppearanceContext: createBaseMaterialAppearanceContext("base"),
 			materialSlots: [],
 			materialSignature: "base",
 			parentPlacements: [],

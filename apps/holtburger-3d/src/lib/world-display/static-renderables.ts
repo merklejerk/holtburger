@@ -41,6 +41,11 @@ import {
 	type StaticRenderableRenderDomain,
 } from "./render-domains";
 import {
+	createBaseMaterialAppearanceContext,
+	describeMaterialAppearanceSignature,
+	type MaterialAppearanceContext,
+} from "./material-appearance";
+import {
 	formatMaterialAssetId,
 	type ResolvedMaterialSlot,
 } from "./material-resources";
@@ -81,6 +86,7 @@ export interface StaticRenderablePart {
 	gfxObjId: number;
 	gfxObjAssetId: string;
 	materialAppearanceKey: string;
+	materialAppearanceContext: MaterialAppearanceContext;
 	materialSlots: ResolvedMaterialSlot[];
 	materialSignature: string;
 	parentPlacements: PlacementTransformDto[];
@@ -461,6 +467,7 @@ function createStaticRenderablePart(
 		gfxObjId: number;
 		gfxObjAssetId: string;
 		materialAppearanceKey: string;
+		materialAppearanceContext?: MaterialAppearanceContext;
 		materialSlots: ResolvedMaterialSlot[];
 		partPlacements: PlacementTransformDto[];
 		scale: Vec3Dto;
@@ -470,6 +477,9 @@ function createStaticRenderablePart(
 	const renderChunk = deriveStaticRenderablePartRenderChunk(instance);
 	const renderDomain = staticRenderableRenderDomainForKind(instance.kind);
 	const localRenderKey = `${instance.instanceId}/part/${part.partIndex}/${part.gfxObjAssetId}`;
+	const materialAppearanceContext =
+		part.materialAppearanceContext ??
+		createBaseMaterialAppearanceContext(part.materialAppearanceKey);
 	return {
 		renderKey: formatRenderDomainKey(renderDomain, localRenderKey),
 		renderDomain,
@@ -484,9 +494,10 @@ function createStaticRenderablePart(
 		gfxObjId: part.gfxObjId,
 		gfxObjAssetId: part.gfxObjAssetId,
 		materialAppearanceKey: part.materialAppearanceKey,
+		materialAppearanceContext,
 		materialSlots: part.materialSlots,
 		materialSignature: describeMaterialSignature(
-			part.materialAppearanceKey,
+			materialAppearanceContext,
 			part.materialSlots,
 		),
 		parentPlacements: instance.parentPlacements,
@@ -687,11 +698,11 @@ function resolveSetupPartMaterialSlots(
 }
 
 function describeMaterialSignature(
-	appearanceKey: string,
+	appearance: MaterialAppearanceContext,
 	slots: readonly ResolvedMaterialSlot[],
 ): string {
 	return [
-		appearanceKey,
+		describeMaterialAppearanceSignature(appearance),
 		...slots
 			.map(
 				(slot) => `${slot.slotIndex}:${slot.surfaceId}:${slot.materialAssetId}`,

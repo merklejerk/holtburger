@@ -862,16 +862,6 @@ export const palettePayloadDtoSchema = z
 	});
 export type PalettePayloadDto = z.infer<typeof palettePayloadDtoSchema>;
 
-export const dependencyManifestPayloadDtoSchema = z.object({
-	kind: z.literal("dependency-manifest"),
-	residencyKind: z.string().optional(),
-	dependencyAssetIds: z.array(z.string().min(1)),
-	provenance: assetProvenanceDtoSchema.optional(),
-});
-export type DependencyManifestPayloadDto = z.infer<
-	typeof dependencyManifestPayloadDtoSchema
->;
-
 export const genericAssetPayloadDtoSchema = z
 	.object({
 		kind: z.string().min(1),

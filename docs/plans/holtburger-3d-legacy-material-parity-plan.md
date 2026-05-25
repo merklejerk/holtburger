@@ -35,9 +35,10 @@ or new reference evidence proves it stale.
 - Prepared `setup-appearance/{setup_did}` payloads exist and preserve base
   setup part material slots, texture changes, animation part changes,
   `paletteId`, and `subPalettes`.
-- Prepared setup appearances now support deterministic `ObjDesc` variant asset
-  IDs under `setup-appearance/{setup_did}/obj-desc/...`; the host routes those
-  variants through the same content resolver as base setup appearances.
+- Runtime `ObjDesc` overrides are no longer represented as app asset routes.
+  The rejected `setup-appearance/{setup_did}/obj-desc/...` route was removed;
+  override-shaped appearances now have a bounded derived appearance cache API
+  keyed by `Setup + normalized ObjDesc`.
 - Static setup-model rendering requests and prefers prepared
   `setup-appearance/{setup_did}` payloads when available, while retaining raw
   setup-model part rendering as an explicit fallback.
@@ -59,10 +60,10 @@ or new reference evidence proves it stale.
 
 ### Known Gaps
 
-- Live runtime object integration still needs a producer that serializes
-  server/client `ObjDesc` values into the canonical setup-appearance variant
-  asset ID. The content and renderer route exists, but the app still mostly
-  discovers base setup snapshots from static DAT scene sources.
+- Live runtime object integration still needs a producer that feeds
+  server/client `ObjDesc` values into the derived runtime appearance cache and
+  dependency planner. The content resolver and cache API exist, but the 3D app
+  still mostly discovers base setup snapshots from static DAT scene sources.
 - `ClothingTable`-driven appearance generation is not implemented. The lower
   level `ObjDesc + Setup` path should come first; clothing tables should later
   produce `ObjDesc` inputs in `holtburger-content`, not renderer-local clothing
@@ -1159,6 +1160,8 @@ textures, and palettes without mutating base DAT material definitions.
 Goal: remove `ObjDesc` variants from the ordinary app asset namespace and cache
 resolved appearance overlays as bounded derived state instead.
 
+Progress: implemented.
+
 Rationale:
 
 - `ObjDesc` is override/input state, not a true asset. Treating every unique
@@ -1172,31 +1175,56 @@ Rationale:
 
 Implementation targets:
 
-- Remove app/host parsing and worker/planner treatment for
+- Removed app/host parsing and worker/planner treatment for
   `setup-appearance/{setupDid}/obj-desc/...`.
-- Keep `setup-appearance/{setupDid}` only as the base DAT/static setup
+- Kept `setup-appearance/{setupDid}` only as the base DAT/static setup
   appearance asset route.
-- Remove production `dependency-manifest` support from the frontend asset
+- Removed production `dependency-manifest` support from the frontend asset
   contracts, worker preparation path, prepared payload union, and dependency
   extraction. It is a synthetic graph-test helper, not a meaningful runtime
-  asset. Rewrite tests to use real payload kinds or local fixture-only helpers;
-  test convenience should not preserve a fake production asset route.
-- Add a derived runtime appearance resolver/memo keyed structurally by
+  asset. Tests now use production-shaped setup-model payloads instead of a
+  production dependency-manifest type.
+- Added a derived runtime appearance resolver/memo keyed structurally by
   `(setupDid, normalized ObjDesc)`, not by string asset ID.
 - The memo value should be the small resolved appearance facts needed by the
   renderer and dependency planner:
   selected part `GfxObj` asset IDs, material asset IDs, palette asset IDs,
   texture changes, anim-part changes, palette view facts, and appearance
-  signatures.
-- Keep true assets in the existing prepared asset cache: setup models, gfx
+  signatures. The first implementation exposes this as
+  `RuntimeAppearanceResolvedFacts`.
+- Kept true assets in the existing prepared asset cache: setup models, gfx
   objs, material recipes, render textures, render surfaces, and palettes.
-- Use passive bounded eviction for the derived appearance memo: at minimum max
-  entries plus LRU; add max age if it simplifies diagnostics or testing.
-- Add diagnostics for derived appearance memo size, hits, misses, evictions,
-  and the number of distinct normalized ObjDesc keys.
-- Preserve Rust/content resolver tests for `Setup + ObjDesc`; update app tests
-  so ObjDesc overrides exercise the derived memo instead of route-shaped
-  prepared assets.
+- Implemented passive bounded eviction with max entries plus LRU. Max age is
+  deferred until real runtime-object usage proves it is needed.
+- Added diagnostics for derived appearance memo size, hits, misses, evictions,
+  in-flight requests, and distinct normalized ObjDesc keys.
+- Preserved Rust/content resolver support for `Setup + ObjDesc`; app tests now
+  exercise the derived memo instead of route-shaped prepared assets.
+
+Verification:
+
+- `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml` passes
+  with 13 tests.
+- `cargo clippy --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml
+  --all-targets -- -D warnings` passes.
+- `npm run test:ts` passes with 46 test files and 242 tests.
+- `npm run check` passes with no Svelte or TypeScript diagnostics.
+- `npm run lint:ts` passes.
+- `npm run lint:dead` passes.
+- `git diff --check` passes.
+
+Course corrections:
+
+- The derived cache is currently an API plus tests, not wired into live object
+  rendering. This is intentional: no runtime object render model exists yet,
+  and Phase 5.5 only needed to remove the fake asset ownership model before
+  Phase 6 introduces new ObjDesc producers.
+- The normalized ObjDesc key currently preserves array order, matching the
+  existing content appearance key behavior. Retail unpack deduplicates texture
+  and animation changes before they reach this layer; future non-DAT producers
+  should normalize to the same semantics before cache lookup.
+- In-flight dedupe is included in the derived cache so concurrent identical
+  runtime appearance requests do not stampede the resolver.
 
 Decisions:
 
@@ -1209,6 +1237,34 @@ Decisions:
 - Do not move clothing-specific concepts into the renderer. The derived memo
   consumes normalized ObjDesc inputs regardless of whether they came from the
   server, clothing tables, or tests.
+
+Cleanup targets from Phase 5.5:
+
+- Wire `RuntimeAppearanceCache` into the first real runtime-object or clothing
+  producer instead of creating another asset route.
+- Add max-age or memory-pressure eviction only after runtime diagnostics show
+  max-entry LRU is insufficient.
+- Consider moving the normalized ObjDesc key builder beside the Rust
+  `build_setup_appearance_key` logic if Phase 6 needs cross-language parity
+  tests for clothing-generated appearances.
+
+Legacy shims:
+
+- Base `setup-appearance/{setupDid}` remains as the static DAT setup snapshot
+  asset route.
+- Raw setup-model part rendering remains the fallback while base setup
+  appearance assets are unavailable.
+- No `dependency-manifest` production shim remains.
+
+Refinements to future steps:
+
+- Phase 6 should feed clothing-generated ObjDesc values into the derived
+  runtime appearance cache API, not the prepared asset graph.
+- Phase 6 should add fixture coverage proving clothing-generated ObjDesc
+  normalization matches direct/server ObjDesc normalization before cache lookup.
+- A later runtime object phase should decide how visible object state supplies
+  active appearance inputs; do not add reference counting before that ownership
+  boundary exists.
 
 Expected effect: runtime and clothing-generated appearances can reuse resolved
 appearance facts without polluting the true asset cache or requiring immediate

@@ -727,12 +727,6 @@ interface PreparedVisualAssetStubPayload extends PreparedAssetPayloadBase {
 	debugPresentation: PreparedDebugPresentation;
 }
 
-interface PreparedDependencyManifestPayload extends PreparedAssetPayloadBase {
-	kind: "dependency-manifest";
-	sourceAssetKind: "dependency-manifest";
-	dependencyAssetIds: string[];
-}
-
 interface PreparedUnknownAssetPayload extends PreparedAssetPayloadBase {
 	kind: "unknown";
 	sourceAssetKind: string | null;
@@ -753,7 +747,6 @@ export type PreparedAssetPayload =
 	| PreparedRenderSurfacePayload
 	| PreparedPalettePayload
 	| PreparedVisualAssetStubPayload
-	| PreparedDependencyManifestPayload
 	| PreparedUnknownAssetPayload;
 
 export type PreparedAssetKind = PreparedAssetPayload["kind"];
@@ -804,10 +797,6 @@ export function describePreparedAssetPayload(
 export function getPreparedAssetDependencies(
 	asset: PreparedAssetRecord,
 ): PreparedAssetDependency[] {
-	if (asset.payload.kind === "dependency-manifest") {
-		return asset.payload.dependencyAssetIds.map((assetId) => ({ assetId }));
-	}
-
 	if (asset.payload.kind === "landblock-outdoor") {
 		return uniqueSortedAssetIds([
 			formatTerrainMaterialDependencyAssetId(asset.payload.regionNumber),

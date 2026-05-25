@@ -143,7 +143,10 @@ class FakeGraphGateway implements AssetPreparationGateway {
 		}
 		return createPreparedAsset(
 			request,
-			createResponse(request, this.dependenciesByAssetId[request.assetId] ?? []),
+			createResponse(
+				request,
+				this.dependenciesByAssetId[request.assetId] ?? [],
+			),
 		);
 	}
 }
@@ -157,12 +160,34 @@ function createResponse(
 		assetId: request.assetId,
 		payloadKind: "json",
 		payload: {
-			kind: "dependency-manifest",
+			kind: "setup-model",
 			residencyKind: "unknown",
-			dependencyAssetIds,
+			sourceAssetKind: "setup-model",
+			setupModelId: 0x02000001,
+			flags: null,
+			parts: [],
+			holdingLocations: [],
+			connectionPoints: [],
+			placementSets: [],
+			collisionWitness: { cylSphereCount: 0, sphereCount: 0 },
+			height: null,
+			radius: null,
+			stepUp: null,
+			stepDown: null,
+			sortingSphere: null,
+			selectionSphere: null,
+			lights: [],
+			defaultAnimation: null,
+			defaultScript: null,
+			defaultMotionTable: null,
+			defaultSoundTable: null,
+			defaultScriptTable: null,
+			dependencies: {
+				gfxObjAssetIds: dependencyAssetIds,
+			},
 			provenance: {
 				source: "unknown",
-				sourceAssetKind: "dependency-manifest",
+				sourceAssetKind: "setup-model",
 				errorCode: null,
 				detail: "synthetic graph test",
 			},
@@ -177,9 +202,12 @@ function createPreparedAsset(
 	const dependencyAssetIds =
 		typeof response.payload === "object" &&
 		response.payload !== null &&
-		"dependencyAssetIds" in response.payload &&
-		Array.isArray(response.payload.dependencyAssetIds)
-			? response.payload.dependencyAssetIds.filter(
+		"dependencies" in response.payload &&
+		typeof response.payload.dependencies === "object" &&
+		response.payload.dependencies !== null &&
+		"gfxObjAssetIds" in response.payload.dependencies &&
+		Array.isArray(response.payload.dependencies.gfxObjAssetIds)
+			? response.payload.dependencies.gfxObjAssetIds.filter(
 					(assetId): assetId is string => typeof assetId === "string",
 				)
 			: [];
@@ -190,13 +218,34 @@ function createPreparedAsset(
 		response,
 		preparedAt: "2026-01-01T00:00:00.000Z",
 		payload: {
-			kind: "dependency-manifest",
+			kind: "setup-model",
 			residencyKind: "unknown",
-			sourceAssetKind: "dependency-manifest",
-			dependencyAssetIds: sortedDependencyAssetIds,
+			sourceAssetKind: "setup-model",
+			setupModelId: 0x02000001,
+			flags: null,
+			parts: [],
+			holdingLocations: [],
+			connectionPoints: [],
+			placementSets: [],
+			collisionWitness: { cylSphereCount: 0, sphereCount: 0 },
+			height: null,
+			radius: null,
+			stepUp: null,
+			stepDown: null,
+			sortingSphere: null,
+			selectionSphere: null,
+			lights: [],
+			defaultAnimation: null,
+			defaultScript: null,
+			defaultMotionTable: null,
+			defaultSoundTable: null,
+			defaultScriptTable: null,
+			dependencies: {
+				gfxObjAssetIds: sortedDependencyAssetIds,
+			},
 			provenance: {
 				source: "unknown",
-				sourceAssetKind: "dependency-manifest",
+				sourceAssetKind: "setup-model",
 				errorCode: null,
 				detail: "synthetic graph test",
 			},

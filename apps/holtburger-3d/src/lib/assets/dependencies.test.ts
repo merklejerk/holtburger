@@ -321,24 +321,6 @@ describe("asset response dependencies", () => {
 		).toEqual([{ assetId: "render-surface/06000010" }]);
 	});
 
-	it("extracts dependency manifest asset ids", () => {
-		const response = createJsonResponse("dependency-manifest/synthetic", {
-			kind: "dependency-manifest",
-			residencyKind: "unknown",
-			dependencyAssetIds: [
-				"gfx-obj/01000020",
-				"setup-model/02000020",
-				"gfx-obj/01000020",
-			],
-			provenance,
-		});
-
-		expect(getAssetResponseDependencies(response)).toEqual([
-			{ assetId: "gfx-obj/01000020" },
-			{ assetId: "setup-model/02000020" },
-		]);
-	});
-
 	it("returns no dependencies for unknown payloads", () => {
 		expect(
 			getAssetResponseDependencies(

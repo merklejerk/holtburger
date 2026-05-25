@@ -1,4 +1,9 @@
-import { CompressedTexture, DataTexture, MeshStandardMaterial } from "three";
+import {
+	CompressedTexture,
+	DataTexture,
+	MeshStandardMaterial,
+	RepeatWrapping,
+} from "three";
 import { describe, expect, it } from "vitest";
 
 import type {
@@ -13,6 +18,10 @@ import {
 	formatMaterialAssetId,
 } from "./material-resources";
 import { createBaseMaterialAppearanceContext } from "./material-appearance";
+import {
+	createDefaultMaterialTextureSamplingPolicy,
+	type TextureSamplingPolicy,
+} from "./texture-sampling-policy";
 
 describe("world material resource cache", () => {
 	it("builds material plans from resolved surface slots", () => {
@@ -270,13 +279,71 @@ describe("world material resource cache", () => {
 		const renderSurface = createIndexedRenderSurfacePayload(0x06000007, {
 			sourceBytes: new Uint8Array([0x01, 0x00, 0x02, 0x00]),
 		});
-		const firstResource = cache.getIndexedTextureResource({ renderSurface });
-		const cachedResource = cache.getIndexedTextureResource({ renderSurface });
+		const samplingPolicy = cache.getDefaultTextureSamplingPolicy(renderSurface);
+		const firstResource = cache.getIndexedTextureResource({
+			renderSurface,
+			samplingPolicy,
+		});
+		const cachedResource = cache.getIndexedTextureResource({
+			renderSurface,
+			samplingPolicy,
+		});
 
 		expect(firstResource).not.toBeNull();
 		expect(cachedResource).toBe(firstResource);
 		expect(firstResource?.texture).toBeInstanceOf(DataTexture);
 		expect(firstResource?.maxIndex).toBe(2);
+		cache.dispose();
+	});
+
+	it("separates texture resources by sampling policy", () => {
+		const cache = new WorldMaterialResourceCache();
+		const renderSurface = createRenderSurfacePayload(0x0600000a);
+		const clampedPolicy = cache.getDefaultTextureSamplingPolicy(renderSurface);
+		const repeatedPolicy: TextureSamplingPolicy = {
+			...clampedPolicy,
+			wrapS: "repeat",
+			wrapT: "repeat",
+		};
+
+		const clampedTexture = cache.getTexture({
+			renderSurface,
+			samplingPolicy: clampedPolicy,
+		});
+		const repeatedTexture = cache.getTexture({
+			renderSurface,
+			samplingPolicy: repeatedPolicy,
+		});
+		const cachedRepeatedTexture = cache.getTexture({
+			renderSurface,
+			samplingPolicy: repeatedPolicy,
+		});
+
+		expect(clampedTexture).not.toBeNull();
+		expect(repeatedTexture).not.toBeNull();
+		expect(repeatedTexture).not.toBe(clampedTexture);
+		expect(cachedRepeatedTexture).toBe(repeatedTexture);
+		cache.dispose();
+	});
+
+	it("allows cache-level texture sampling policy overrides", () => {
+		const policy = createDefaultMaterialTextureSamplingPolicy();
+		const cache = new WorldMaterialResourceCache(undefined, undefined, {
+			...policy,
+			directColor: {
+				...policy.directColor,
+				wrapS: "repeat",
+				wrapT: "repeat",
+			},
+		});
+		const renderSurface = createRenderSurfacePayload(0x0600000b);
+		const texture = cache.getTexture({
+			renderSurface,
+			samplingPolicy: cache.getDefaultTextureSamplingPolicy(renderSurface),
+		});
+
+		expect(texture?.wrapS).toBe(RepeatWrapping);
+		expect(texture?.wrapT).toBe(RepeatWrapping);
 		cache.dispose();
 	});
 

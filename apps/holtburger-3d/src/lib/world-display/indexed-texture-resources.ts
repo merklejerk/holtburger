@@ -1,17 +1,14 @@
-import {
-	DataTexture,
-	NearestFilter,
-	NoColorSpace,
-	RedFormat,
-	RGFormat,
-	UnsignedByteType,
-} from "three";
+import { DataTexture, RedFormat, RGFormat, UnsignedByteType } from "three";
 
 import type {
 	PreparedMaterialRecipePayload,
 	PreparedRenderSurfacePayload,
 } from "../assets/types";
 import { formatHex32 } from "../landblocks";
+import {
+	applyTextureSamplingPolicy,
+	type TextureSamplingPolicy,
+} from "./texture-sampling-policy";
 
 export const PIXEL_FORMAT_P8 = 0x29;
 export const PIXEL_FORMAT_INDEX16 = 0x65;
@@ -53,6 +50,7 @@ export function isIndexedTextureFormat(formatRaw: number): boolean {
 
 export function createIndexedTextureResource(
 	renderSurface: PreparedRenderSurfacePayload,
+	samplingPolicy: TextureSamplingPolicy,
 ): IndexedTextureResource {
 	const format = indexedTextureFormat(renderSurface.formatRaw);
 	if (!format) {
@@ -73,10 +71,7 @@ export function createIndexedTextureResource(
 		format === "p8" ? RedFormat : RGFormat,
 		UnsignedByteType,
 	);
-	texture.colorSpace = NoColorSpace;
-	texture.magFilter = NearestFilter;
-	texture.minFilter = NearestFilter;
-	texture.generateMipmaps = false;
+	applyTextureSamplingPolicy(texture, samplingPolicy);
 	texture.needsUpdate = true;
 	return {
 		texture,

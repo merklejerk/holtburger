@@ -24,6 +24,10 @@ import type {
 } from "../assets/types";
 import { formatHex32 } from "../landblocks";
 import {
+	createIndexedMeshStandardMaterial,
+	type IndexedMaterialResources,
+} from "./indexed-materials";
+import {
 	createIndexedTextureResource,
 	isIndexedTextureFormat,
 	selectIndexedPaletteAssetId,
@@ -324,7 +328,32 @@ function describePreparedAssetSignature(
 		return `${assetId}:missing`;
 	}
 
-	return `${assetId}:${asset.payload.kind}:${asset.preparedAt}:${asset.payload.provenance.errorCode ?? "ok"}`;
+	const baseSignature = `${assetId}:${asset.payload.kind}:${asset.preparedAt}:${asset.payload.provenance.errorCode ?? "ok"}`;
+	if (asset.payload.kind === "render-surface") {
+		return [
+			baseSignature,
+			asset.payload.formatRaw,
+			asset.payload.width,
+			asset.payload.height,
+			asset.payload.sourceByteLength,
+			asset.payload.defaultPaletteId ?? "no-palette",
+		].join(":");
+	}
+	if (asset.payload.kind === "palette") {
+		return [
+			baseSignature,
+			asset.payload.paletteId,
+			asset.payload.colorCount,
+		].join(":");
+	}
+	if (asset.payload.kind === "material-recipe") {
+		return [
+			baseSignature,
+			asset.payload.surfaceType,
+			asset.payload.source.kind,
+		].join(":");
+	}
+	return baseSignature;
 }
 
 function describePaletteResourceKey(
@@ -445,7 +474,7 @@ function createMaterial(options: {
 		});
 	}
 	if (indexedRenderSurface) {
-		reportIndexedTextureFallbackDiagnostics({
+		const indexedResources = resolveIndexedMaterialResources({
 			recipe,
 			materialAssetId: options.materialAssetId,
 			preparedByAssetId: options.preparedByAssetId,
@@ -453,6 +482,25 @@ function createMaterial(options: {
 			indexedTexture: options.resolveIndexedTexture(indexedRenderSurface),
 			resolvePaletteResource: options.resolvePaletteResource,
 			reportDiagnostic: options.reportDiagnostic,
+		});
+		if (indexedResources) {
+			return createIndexedMeshStandardMaterial({
+				recipe,
+				resources: indexedResources,
+			});
+		}
+		const color = buildTexturePlaceholderColor(recipe, {
+			renderTexture,
+			renderSurface: indexedRenderSurface,
+			palette,
+		});
+		return new MeshStandardMaterial({
+			color,
+			flatShading: true,
+			metalness: 0.02,
+			roughness: 0.88,
+			transparent: normalizeLegacyOpacity(recipe.translucency) < 1,
+			opacity: normalizeLegacyOpacity(recipe.translucency),
 		});
 	}
 
@@ -592,7 +640,7 @@ function reportTextureFallbackDiagnostics(options: {
 	}
 }
 
-function reportIndexedTextureFallbackDiagnostics(options: {
+function resolveIndexedMaterialResources(options: {
 	recipe: PreparedMaterialRecipePayload;
 	materialAssetId: string;
 	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>;
@@ -603,7 +651,7 @@ function reportIndexedTextureFallbackDiagnostics(options: {
 		paletteAsset: PreparedAssetRecord,
 	) => PaletteTextureResource | null;
 	reportDiagnostic: MaterialResourceDiagnosticHandler;
-}): void {
+}): IndexedMaterialResources | null {
 	const renderSurfaceAssetId = formatRenderSurfaceAssetId(
 		options.renderSurface.renderSurfaceId,
 	);
@@ -618,7 +666,7 @@ function reportIndexedTextureFallbackDiagnostics(options: {
 				formatRaw: options.renderSurface.formatRaw,
 			},
 		});
-		return;
+		return null;
 	}
 
 	const paletteAssetId = selectIndexedPaletteAssetId(
@@ -641,7 +689,7 @@ function reportIndexedTextureFallbackDiagnostics(options: {
 						: null,
 			},
 		});
-		return;
+		return null;
 	}
 
 	const paletteAsset = options.preparedByAssetId[paletteAssetId];
@@ -656,7 +704,7 @@ function reportIndexedTextureFallbackDiagnostics(options: {
 				preparedKind: paletteAsset?.payload.kind ?? null,
 			},
 		});
-		return;
+		return null;
 	}
 
 	if (paletteAsset.payload.colorCount === 0) {
@@ -670,7 +718,7 @@ function reportIndexedTextureFallbackDiagnostics(options: {
 				colorCount: paletteAsset.payload.colorCount,
 			},
 		});
-		return;
+		return null;
 	}
 
 	const paletteResource = options.resolvePaletteResource(
@@ -687,7 +735,7 @@ function reportIndexedTextureFallbackDiagnostics(options: {
 				paletteAssetId,
 			},
 		});
-		return;
+		return null;
 	}
 
 	if (options.indexedTexture.maxIndex >= paletteResource.colorCount) {
@@ -702,21 +750,13 @@ function reportIndexedTextureFallbackDiagnostics(options: {
 				colorCount: paletteResource.colorCount,
 			},
 		});
-		return;
+		return null;
 	}
 
-	options.reportDiagnostic({
-		key: `indexed-texture-shader-pending:${options.materialAssetId}:${renderSurfaceAssetId}:${paletteAssetId}`,
-		message: `Using placeholder material because ${renderSurfaceAssetId} has valid indexed texture resources, but indexed shader sampling is not implemented yet.`,
-		detail: {
-			materialAssetId: options.materialAssetId,
-			renderSurfaceAssetId,
-			paletteAssetId,
-			format: options.indexedTexture.format,
-			maxIndex: options.indexedTexture.maxIndex,
-			colorCount: paletteResource.colorCount,
-		},
-	});
+	return {
+		indexedTexture: options.indexedTexture,
+		palette: paletteResource,
+	};
 }
 
 function countPreparedAssetsByKind(

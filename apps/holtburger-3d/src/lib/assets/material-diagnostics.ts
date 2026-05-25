@@ -1,4 +1,10 @@
 import type { BrowserLocationSelection } from "../../app/browser-mode";
+import {
+	indexedTextureFormat,
+	scanMaxPaletteIndex,
+	selectIndexedPalette,
+	type IndexedTextureFormat,
+} from "../world-display/indexed-texture-resources";
 import type { PreparedMaterialRecipePayload } from "./types";
 import type { AssetChannelState, PreparedAssetRecord } from "./types";
 import {
@@ -16,6 +22,20 @@ interface MissingMaterialDependencySummary {
 	renderTextureAssetIds: string[];
 	renderSurfaceAssetIds: string[];
 	paletteAssetIds: string[];
+}
+
+interface IndexedMaterialDiagnosticSummary {
+	indexedRecipeCount: number;
+	indexedSurfaceFormatCounts: Record<IndexedTextureFormat, number>;
+	paletteSelectionCounts: {
+		materialRecipe: number;
+		renderSurfaceDefault: number;
+		missing: number;
+	};
+	preparedPaletteCount: number;
+	missingPaletteAssetIds: string[];
+	emptyPaletteAssetIds: string[];
+	indexRangeErrorAssetIds: string[];
 }
 
 const MATERIAL_PIPELINE_ASSET_PREFIXES = [
@@ -59,10 +79,15 @@ export function describeMaterialAssetDiagnostics({
 		materialRecipes,
 		assetState.preparedByAssetId,
 	);
+	const indexedSummary = summarizeIndexedMaterialDiagnostics(
+		materialRecipes,
+		assetState.preparedByAssetId,
+	);
 
 	return [
 		`recipes ${materialRecipes.length} (${textureRecipeCount} texture, ${solidRecipeCount} solid${failedRecipeCount === 0 ? "" : `, ${failedRecipeCount} failed`})`,
 		`render resources ${countPreparedKind(preparedAssets, "render-texture")} textures, ${countPreparedKind(preparedAssets, "render-surface")} surfaces, ${countPreparedKind(preparedAssets, "palette")} palettes`,
+		formatIndexedMaterialSummary(indexedSummary),
 		`terrain tables ${countPreparedKind(preparedAssets, "terrain-material")}`,
 		`missing visible recipes ${missingVisibleMaterialAssetIds.length}${formatSample(missingVisibleMaterialAssetIds)}`,
 		`missing deps tex ${missingDependencies.renderTextureAssetIds.length}${formatSample(missingDependencies.renderTextureAssetIds)}, surface ${missingDependencies.renderSurfaceAssetIds.length}${formatSample(missingDependencies.renderSurfaceAssetIds)}, palette ${missingDependencies.paletteAssetIds.length}${formatSample(missingDependencies.paletteAssetIds)}`,
@@ -101,6 +126,123 @@ function summarizeMissingMaterialDependencies(
 		renderSurfaceAssetIds: [...renderSurfaceAssetIds].sort(),
 		paletteAssetIds: [...paletteAssetIds].sort(),
 	};
+}
+
+function summarizeIndexedMaterialDiagnostics(
+	recipes: readonly PreparedMaterialRecipePayload[],
+	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>,
+): IndexedMaterialDiagnosticSummary {
+	const indexedMaterialAssetIds = new Set<string>();
+	const indexedSurfaceAssetIdsByFormat: Record<
+		IndexedTextureFormat,
+		Set<string>
+	> = {
+		p8: new Set<string>(),
+		index16: new Set<string>(),
+	};
+	const preparedPaletteAssetIds = new Set<string>();
+	const missingPaletteAssetIds = new Set<string>();
+	const emptyPaletteAssetIds = new Set<string>();
+	const indexRangeErrorAssetIds = new Set<string>();
+	const paletteSelectionCounts = {
+		materialRecipe: 0,
+		renderSurfaceDefault: 0,
+		missing: 0,
+	};
+
+	for (const recipe of recipes) {
+		for (const renderSurfaceAssetId of textureCandidateRenderSurfaceAssetIds(
+			recipe,
+		)) {
+			const renderSurfaceAsset = preparedByAssetId[renderSurfaceAssetId];
+			if (renderSurfaceAsset?.payload.kind !== "render-surface") {
+				continue;
+			}
+			const renderSurface = renderSurfaceAsset.payload;
+			const format = indexedTextureFormat(renderSurface.formatRaw);
+			if (!format) {
+				continue;
+			}
+
+			indexedMaterialAssetIds.add(formatMaterialAssetId(recipe.surfaceId));
+			indexedSurfaceAssetIdsByFormat[format].add(renderSurfaceAssetId);
+
+			const paletteSelection = selectIndexedPalette(recipe, renderSurface);
+			if (!paletteSelection) {
+				paletteSelectionCounts.missing += 1;
+				continue;
+			}
+			if (paletteSelection.source === "material-recipe") {
+				paletteSelectionCounts.materialRecipe += 1;
+			} else {
+				paletteSelectionCounts.renderSurfaceDefault += 1;
+			}
+
+			const paletteAsset = preparedByAssetId[paletteSelection.paletteAssetId];
+			if (paletteAsset?.payload.kind !== "palette") {
+				missingPaletteAssetIds.add(paletteSelection.paletteAssetId);
+				continue;
+			}
+			if (paletteAsset.payload.colorCount === 0) {
+				emptyPaletteAssetIds.add(paletteSelection.paletteAssetId);
+				continue;
+			}
+			preparedPaletteAssetIds.add(paletteSelection.paletteAssetId);
+
+			if (
+				scanMaxPaletteIndex(renderSurface.sourceBytes, format) >=
+				paletteAsset.payload.colorCount
+			) {
+				indexRangeErrorAssetIds.add(renderSurfaceAssetId);
+			}
+		}
+	}
+
+	return {
+		indexedRecipeCount: indexedMaterialAssetIds.size,
+		indexedSurfaceFormatCounts: {
+			p8: indexedSurfaceAssetIdsByFormat.p8.size,
+			index16: indexedSurfaceAssetIdsByFormat.index16.size,
+		},
+		paletteSelectionCounts,
+		preparedPaletteCount: preparedPaletteAssetIds.size,
+		missingPaletteAssetIds: [...missingPaletteAssetIds].sort(),
+		emptyPaletteAssetIds: [...emptyPaletteAssetIds].sort(),
+		indexRangeErrorAssetIds: [...indexRangeErrorAssetIds].sort(),
+	};
+}
+
+function formatIndexedMaterialSummary(
+	summary: IndexedMaterialDiagnosticSummary,
+): string {
+	return [
+		`indexed recipes ${summary.indexedRecipeCount}`,
+		`surfaces P8 ${summary.indexedSurfaceFormatCounts.p8}, Index16 ${summary.indexedSurfaceFormatCounts.index16}`,
+		`palettes prepared ${summary.preparedPaletteCount}, recipe ${summary.paletteSelectionCounts.materialRecipe}, default ${summary.paletteSelectionCounts.renderSurfaceDefault}, missing ${summary.paletteSelectionCounts.missing}${formatSample(summary.missingPaletteAssetIds)}`,
+		`empty ${summary.emptyPaletteAssetIds.length}${formatSample(summary.emptyPaletteAssetIds)}`,
+		`range errors ${summary.indexRangeErrorAssetIds.length}${formatSample(summary.indexRangeErrorAssetIds)}`,
+	].join("; ");
+}
+
+function textureCandidateRenderSurfaceAssetIds(
+	recipe: PreparedMaterialRecipePayload,
+): string[] {
+	if (recipe.source.kind === "texture") {
+		return recipe.source.renderSurfaceIds.map(formatRenderSurfaceAssetId);
+	}
+	return recipe.dependencies.renderSurfaceAssetIds;
+}
+
+function formatMaterialAssetId(surfaceId: number): string {
+	return `material/${formatHex32(surfaceId)}`;
+}
+
+function formatRenderSurfaceAssetId(renderSurfaceId: number): string {
+	return `render-surface/${formatHex32(renderSurfaceId)}`;
+}
+
+function formatHex32(value: number): string {
+	return value.toString(16).padStart(8, "0");
 }
 
 function derivePendingMaterialPipelineAssetIds(

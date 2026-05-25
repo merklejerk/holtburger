@@ -70,6 +70,10 @@ export function createIndexedMaterialShaderPatch(options: {
 			shader.uniforms.indexedFormat = { value: indexedFormatFlag };
 			shader.uniforms.indexedClipThreshold = { value: options.clipThreshold };
 			shader.fragmentShader = shader.fragmentShader.replace(
+				"void main() {",
+				`${indexedMaterialUniformDeclarations()}\nvoid main() {`,
+			);
+			shader.fragmentShader = shader.fragmentShader.replace(
 				"#include <map_fragment>",
 				indexedMapFragmentShaderChunk(),
 			);
@@ -88,6 +92,15 @@ export function isBase1ClipMapSurface(surfaceType: number): boolean {
 	return (
 		(surfaceType & SURFACE_TYPE_BASE1_CLIP_MAP) === SURFACE_TYPE_BASE1_CLIP_MAP
 	);
+}
+
+function indexedMaterialUniformDeclarations(): string {
+	return `
+uniform sampler2D indexedPaletteMap;
+uniform float indexedPaletteColorCount;
+uniform int indexedFormat;
+uniform int indexedClipThreshold;
+`;
 }
 
 function indexedMapFragmentShaderChunk(): string {

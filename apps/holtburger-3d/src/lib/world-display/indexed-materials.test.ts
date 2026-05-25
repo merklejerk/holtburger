@@ -56,6 +56,14 @@ describe("indexed materials", () => {
 			indexedFormat: { value: 1 },
 			indexedClipThreshold: { value: 8 },
 		});
+		expect(shader.fragmentShader).toContain(
+			"uniform sampler2D indexedPaletteMap",
+		);
+		expect(shader.fragmentShader).toContain(
+			"uniform float indexedPaletteColorCount",
+		);
+		expect(shader.fragmentShader).toContain("uniform int indexedFormat");
+		expect(shader.fragmentShader).toContain("uniform int indexedClipThreshold");
 		expect(shader.fragmentShader).toContain("sampledIndexTexel.g");
 		expect(shader.fragmentShader).toContain("texture2D( indexedPaletteMap");
 		expect(shader.fragmentShader).toContain("discard");

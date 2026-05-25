@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+use std::fmt;
 use std::io::{Read, Seek};
 
 use binrw::{BinRead, BinResult};
@@ -20,6 +22,30 @@ impl Palette {
         }
 
         Ok(Self { id, colors_argb })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaletteSet {
+    pub id: u32,
+    pub palette_ids: Vec<u32>,
+}
+
+impl PaletteSet {
+    pub fn unpack<R: Read + Seek>(reader: &mut R) -> BinResult<Self> {
+        let id = u32::read_le(reader)?;
+        let palette_ids = read_u32_list_i32_len(reader)?;
+
+        Ok(Self { id, palette_ids })
+    }
+
+    pub fn palette_id_for_shade(&self, shade: f64) -> Option<u32> {
+        if self.palette_ids.is_empty() || !(0.0..=1.0).contains(&shade) {
+            return None;
+        }
+
+        let index = (((self.palette_ids.len() as f64) - 0.000001) * shade) as usize;
+        self.palette_ids.get(index).copied()
     }
 }
 
@@ -264,6 +290,15 @@ pub struct ObjDesc {
 }
 
 impl ObjDesc {
+    pub fn empty() -> Self {
+        Self {
+            palette_id: None,
+            sub_palettes: Vec::new(),
+            texture_changes: Vec::new(),
+            anim_part_changes: Vec::new(),
+        }
+    }
+
     pub fn unpack<R: Read + Seek>(reader: &mut R) -> BinResult<Self> {
         align_boundary(reader, 4)?;
 
@@ -310,6 +345,248 @@ impl ObjDesc {
         })
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClothingTable {
+    pub id: u32,
+    pub clothing_bases: BTreeMap<u32, ClothingBase>,
+    pub palette_templates: BTreeMap<u32, CloPaletteTemplate>,
+}
+
+impl ClothingTable {
+    pub fn unpack<R: Read + Seek>(reader: &mut R) -> BinResult<Self> {
+        let id = u32::read_le(reader)?;
+        let clothing_bases = read_packed_hash_table(reader, ClothingBase::read)?;
+        let palette_templates = read_packed_hash_table(reader, CloPaletteTemplate::read)?;
+
+        Ok(Self {
+            id,
+            clothing_bases,
+            palette_templates,
+        })
+    }
+
+    pub fn build_obj_desc<F>(
+        &self,
+        setup_model_id: u32,
+        palette_template_key: u32,
+        shade: f64,
+        mut palette_set_resolver: F,
+    ) -> Result<ObjDesc, ClothingBuildObjDescError>
+    where
+        F: FnMut(u32, f64) -> Result<u32, ClothingBuildObjDescError>,
+    {
+        let mut obj_desc = ObjDesc::empty();
+        let clothing_base_id = resolve_clothing_base_setup_id(setup_model_id);
+        let clothing_base = self.clothing_bases.get(&clothing_base_id).ok_or(
+            ClothingBuildObjDescError::MissingClothingBase {
+                setup_model_id,
+                resolved_setup_model_id: clothing_base_id,
+            },
+        )?;
+
+        apply_part_and_texture_changes(clothing_base, &mut obj_desc)?;
+
+        if palette_template_key == 0 {
+            return Ok(obj_desc);
+        }
+
+        let palette_template = self.palette_templates.get(&palette_template_key).ok_or(
+            ClothingBuildObjDescError::MissingPaletteTemplate {
+                palette_template_key,
+            },
+        )?;
+
+        for subpal_effect in &palette_template.subpal_effects {
+            let selected_palette_id = palette_set_resolver(subpal_effect.palette_set_id, shade)?;
+            for range in &subpal_effect.ranges {
+                add_sub_palette_retail(
+                    &mut obj_desc.sub_palettes,
+                    SubPalette {
+                        sub_id: selected_palette_id,
+                        offset: range.offset,
+                        num_colors: range.num_colors,
+                    },
+                );
+            }
+        }
+
+        Ok(obj_desc)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClothingBase {
+    pub object_effects: Vec<CloObjectEffect>,
+}
+
+impl ClothingBase {
+    fn read<R: Read + Seek>(reader: &mut R) -> BinResult<Self> {
+        Ok(Self {
+            object_effects: read_packable_vec(reader, CloObjectEffect::read)?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CloObjectEffect {
+    pub part_num: u32,
+    pub object_id: u32,
+    pub texture_effects: Vec<CloTextureEffect>,
+}
+
+impl CloObjectEffect {
+    fn read<R: Read + Seek>(reader: &mut R) -> BinResult<Self> {
+        Ok(Self {
+            part_num: u32::read_le(reader)?,
+            object_id: u32::read_le(reader)?,
+            texture_effects: read_packable_vec(reader, CloTextureEffect::read)?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CloTextureEffect {
+    pub old_texture: u32,
+    pub new_texture: u32,
+}
+
+impl CloTextureEffect {
+    fn read<R: Read + Seek>(reader: &mut R) -> BinResult<Self> {
+        Ok(Self {
+            old_texture: u32::read_le(reader)?,
+            new_texture: u32::read_le(reader)?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CloPaletteTemplate {
+    pub icon_id: u32,
+    pub subpal_effects: Vec<CloSubpalEffect>,
+}
+
+impl CloPaletteTemplate {
+    fn read<R: Read + Seek>(reader: &mut R) -> BinResult<Self> {
+        Ok(Self {
+            icon_id: u32::read_le(reader)?,
+            subpal_effects: read_packable_vec(reader, CloSubpalEffect::read)?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CloSubpalEffect {
+    pub ranges: Vec<CloSubpaletteRange>,
+    pub palette_set_id: u32,
+}
+
+impl CloSubpalEffect {
+    fn read<R: Read + Seek>(reader: &mut R) -> BinResult<Self> {
+        Ok(Self {
+            ranges: read_packable_vec(reader, CloSubpaletteRange::read)?,
+            palette_set_id: u32::read_le(reader)?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CloSubpaletteRange {
+    pub offset: u32,
+    pub num_colors: u32,
+}
+
+impl CloSubpaletteRange {
+    fn read<R: Read + Seek>(reader: &mut R) -> BinResult<Self> {
+        Ok(Self {
+            offset: u32::read_le(reader)?,
+            num_colors: u32::read_le(reader)?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ClothingBuildObjDescError {
+    MissingClothingBase {
+        setup_model_id: u32,
+        resolved_setup_model_id: u32,
+    },
+    MissingPaletteTemplate {
+        palette_template_key: u32,
+    },
+    MissingPaletteSet {
+        palette_set_id: u32,
+    },
+    InvalidPaletteSet {
+        palette_set_id: u32,
+        message: String,
+    },
+    InvalidPaletteShade {
+        palette_set_id: u32,
+        shade: f64,
+    },
+    PartIndexOutOfRange {
+        part_num: u32,
+    },
+    InvalidTextureEffect {
+        part_num: u32,
+        old_texture: u32,
+        new_texture: u32,
+    },
+}
+
+impl fmt::Display for ClothingBuildObjDescError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingClothingBase {
+                setup_model_id,
+                resolved_setup_model_id,
+            } => write!(
+                formatter,
+                "missing ClothingBase for setup 0x{setup_model_id:08X} resolved to 0x{resolved_setup_model_id:08X}"
+            ),
+            Self::MissingPaletteTemplate {
+                palette_template_key,
+            } => write!(
+                formatter,
+                "missing clothing palette template {palette_template_key}"
+            ),
+            Self::MissingPaletteSet { palette_set_id } => {
+                write!(formatter, "missing PaletteSet 0x{palette_set_id:08X}")
+            }
+            Self::InvalidPaletteSet {
+                palette_set_id,
+                message,
+            } => write!(
+                formatter,
+                "invalid PaletteSet 0x{palette_set_id:08X}: {message}"
+            ),
+            Self::InvalidPaletteShade {
+                palette_set_id,
+                shade,
+            } => write!(
+                formatter,
+                "PaletteSet 0x{palette_set_id:08X} cannot select shade {shade}"
+            ),
+            Self::PartIndexOutOfRange { part_num } => {
+                write!(
+                    formatter,
+                    "clothing part index {part_num} exceeds ObjDesc byte range"
+                )
+            }
+            Self::InvalidTextureEffect {
+                part_num,
+                old_texture,
+                new_texture,
+            } => write!(
+                formatter,
+                "clothing part {part_num} has invalid texture effect 0x{old_texture:08X} -> 0x{new_texture:08X}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ClothingBuildObjDescError {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SubPalette {
@@ -395,6 +672,137 @@ fn add_anim_part_change_retail(
     }
 }
 
+fn add_sub_palette_retail(sub_palettes: &mut Vec<SubPalette>, new_sub_palette: SubPalette) {
+    if sub_palettes
+        .iter()
+        .any(|existing| sub_palette_supercedes(existing, &new_sub_palette))
+    {
+        return;
+    }
+
+    sub_palettes.retain(|existing| !sub_palette_replaces(&new_sub_palette, existing));
+
+    if sub_palettes.len() < 255 {
+        sub_palettes.push(new_sub_palette);
+    }
+}
+
+fn sub_palette_replaces(new_sub_palette: &SubPalette, existing: &SubPalette) -> bool {
+    (new_sub_palette.offset == existing.offset && new_sub_palette.num_colors == existing.num_colors)
+        || (new_sub_palette.offset == 0 && new_sub_palette.num_colors == 2048)
+}
+
+fn sub_palette_supercedes(existing: &SubPalette, new_sub_palette: &SubPalette) -> bool {
+    existing.offset == 0
+        && existing.num_colors == 2048
+        && (new_sub_palette.offset != 0 || new_sub_palette.num_colors != 2048)
+}
+
+fn apply_part_and_texture_changes(
+    clothing_base: &ClothingBase,
+    obj_desc: &mut ObjDesc,
+) -> Result<(), ClothingBuildObjDescError> {
+    for object_effect in &clothing_base.object_effects {
+        let part_index = u8::try_from(object_effect.part_num).map_err(|_| {
+            ClothingBuildObjDescError::PartIndexOutOfRange {
+                part_num: object_effect.part_num,
+            }
+        })?;
+        add_anim_part_change_retail(
+            &mut obj_desc.anim_part_changes,
+            AnimationPartChange {
+                part_index,
+                part_id: object_effect.object_id,
+            },
+        );
+        for texture_effect in &object_effect.texture_effects {
+            if texture_effect.old_texture == 0 || texture_effect.new_texture == 0 {
+                return Err(ClothingBuildObjDescError::InvalidTextureEffect {
+                    part_num: object_effect.part_num,
+                    old_texture: texture_effect.old_texture,
+                    new_texture: texture_effect.new_texture,
+                });
+            }
+            add_texture_change_retail(
+                &mut obj_desc.texture_changes,
+                TextureMapChange {
+                    part_index,
+                    old_texture: texture_effect.old_texture,
+                    new_texture: texture_effect.new_texture,
+                },
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn resolve_clothing_base_setup_id(setup_model_id: u32) -> u32 {
+    match setup_model_id {
+        0x0200_196F | 0x0200_1972 | 0x0200_1A5F | 0x0200_1A6F => 0x0200_196F,
+        0x0200_1970 | 0x0200_1A5E | 0x0200_1A6E => 0x0200_1970,
+        0x0200_196E | 0x0200_1971 | 0x0200_1A5D | 0x0200_1A70 => 0x0200_196E,
+        0x0200_196D | 0x0200_1A5C | 0x0200_1A71 => 0x0200_196D,
+        0x0200_1A0F | 0x0200_1A9C | 0x0200_1A9E | 0x0200_1A9D | 0x0200_1A96 => 0x0200_1A0E,
+        0x0200_1A0D | 0x0200_1AA0 | 0x0200_1A9F | 0x0200_1AA1 | 0x0200_1AA2 => 0x0200_1A0C,
+        0x0200_1AA3 => 0x0200_0001,
+        0x0200_1AA4 => 0x0200_004E,
+        _ => setup_model_id,
+    }
+}
+
+fn read_packed_hash_table<R, T, F>(reader: &mut R, mut read_value: F) -> BinResult<BTreeMap<u32, T>>
+where
+    R: Read + Seek,
+    F: FnMut(&mut R) -> BinResult<T>,
+{
+    let entry_count = u16::read_le(reader)? as usize;
+    let _bucket_count = u16::read_le(reader)?;
+    let mut entries = BTreeMap::new();
+
+    for _ in 0..entry_count {
+        let key = u32::read_le(reader)?;
+        let value = read_value(reader)?;
+        if entries.insert(key, value).is_some() {
+            return Err(binrw::Error::AssertFail {
+                pos: reader.stream_position().unwrap_or(0),
+                message: format!("packed hash table contains duplicate key 0x{key:08X}"),
+            });
+        }
+    }
+
+    Ok(entries)
+}
+
+fn read_packable_vec<R, T, F>(reader: &mut R, mut read_value: F) -> BinResult<Vec<T>>
+where
+    R: Read + Seek,
+    F: FnMut(&mut R) -> BinResult<T>,
+{
+    let entry_count = u32::read_le(reader)? as usize;
+    let mut values = Vec::with_capacity(entry_count);
+    for _ in 0..entry_count {
+        values.push(read_value(reader)?);
+    }
+    Ok(values)
+}
+
+fn read_u32_list_i32_len<R: Read + Seek>(reader: &mut R) -> BinResult<Vec<u32>> {
+    let entry_count = i32::read_le(reader)?;
+    if entry_count < 0 {
+        return Err(binrw::Error::AssertFail {
+            pos: reader.stream_position().unwrap_or(0).saturating_sub(4),
+            message: format!("list length must be non-negative, got {entry_count}"),
+        });
+    }
+
+    let mut values = Vec::with_capacity(entry_count as usize);
+    for _ in 0..entry_count {
+        values.push(u32::read_le(reader)?);
+    }
+    Ok(values)
+}
+
 fn read_known_type_data_id<R: Read + Seek>(reader: &mut R, known_type: u32) -> BinResult<u32> {
     let value = u16::read_le(reader)?;
     if (value & 0x8000) != 0 {
@@ -424,6 +832,91 @@ mod tests {
 
         assert_eq!(palette.id, 0x0400_0001);
         assert_eq!(palette.colors_argb, vec![0xFF11_2233, 0x8044_5566]);
+    }
+
+    #[test]
+    fn palette_set_selects_shade_with_retail_epsilon() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0x0F00_0001u32.to_le_bytes());
+        bytes.extend_from_slice(&3i32.to_le_bytes());
+        bytes.extend_from_slice(&0x0400_0001u32.to_le_bytes());
+        bytes.extend_from_slice(&0x0400_0002u32.to_le_bytes());
+        bytes.extend_from_slice(&0x0400_0003u32.to_le_bytes());
+
+        let palette_set =
+            PaletteSet::unpack(&mut Cursor::new(bytes)).expect("palette set should parse");
+
+        assert_eq!(palette_set.palette_id_for_shade(0.0), Some(0x0400_0001));
+        assert_eq!(palette_set.palette_id_for_shade(0.5), Some(0x0400_0002));
+        assert_eq!(palette_set.palette_id_for_shade(1.0), Some(0x0400_0003));
+        assert_eq!(palette_set.palette_id_for_shade(-0.1), None);
+    }
+
+    #[test]
+    fn clothing_table_builds_obj_desc_from_part_texture_and_palette_effects() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0x1000_0001u32.to_le_bytes());
+        push_packed_hash_header(&mut bytes, 1);
+        bytes.extend_from_slice(&0x0200_0030u32.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        bytes.extend_from_slice(&0x0100_0032u32.to_le_bytes());
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        bytes.extend_from_slice(&0x0500_0030u32.to_le_bytes());
+        bytes.extend_from_slice(&0x0500_0031u32.to_le_bytes());
+        bytes.extend_from_slice(&0x0500_0030u32.to_le_bytes());
+        bytes.extend_from_slice(&0x0500_0032u32.to_le_bytes());
+        push_packed_hash_header(&mut bytes, 1);
+        bytes.extend_from_slice(&7u32.to_le_bytes());
+        bytes.extend_from_slice(&0x0600_1000u32.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&0x0F00_0001u32.to_le_bytes());
+
+        let clothing_table =
+            ClothingTable::unpack(&mut Cursor::new(bytes)).expect("clothing table should parse");
+        let obj_desc = clothing_table
+            .build_obj_desc(0x0200_0030, 7, 0.5, |palette_set_id, shade| {
+                assert_eq!(palette_set_id, 0x0F00_0001);
+                assert_eq!(shade, 0.5);
+                Ok(0x0400_0002)
+            })
+            .expect("clothing table should build ObjDesc");
+
+        assert_eq!(
+            obj_desc.anim_part_changes,
+            vec![AnimationPartChange {
+                part_index: 2,
+                part_id: 0x0100_0032
+            }]
+        );
+        assert_eq!(
+            obj_desc.texture_changes,
+            vec![TextureMapChange {
+                part_index: 2,
+                old_texture: 0x0500_0030,
+                new_texture: 0x0500_0032
+            }]
+        );
+        assert_eq!(
+            obj_desc.sub_palettes,
+            vec![
+                SubPalette {
+                    sub_id: 0x0400_0002,
+                    offset: 0,
+                    num_colors: 16
+                },
+                SubPalette {
+                    sub_id: 0x0400_0002,
+                    offset: 16,
+                    num_colors: 16
+                }
+            ]
+        );
     }
 
     #[test]
@@ -591,6 +1084,11 @@ mod tests {
         bytes.extend_from_slice(&format.to_le_bytes());
         bytes.extend_from_slice(&source_len.to_le_bytes());
         bytes
+    }
+
+    fn push_packed_hash_header(bytes: &mut Vec<u8>, count: u16) {
+        bytes.extend_from_slice(&count.to_le_bytes());
+        bytes.extend_from_slice(&count.to_le_bytes());
     }
 
     fn parse_textured_csurface(orig_palette_id: u32) -> CSurface {

@@ -21,8 +21,10 @@ pub use env_cell::EnvCell;
 pub use environment::{CellStruct, Environment};
 pub use gfx_obj::GfxObj;
 pub use material::{
-    AnimationPartChange, CSurface, CSurfaceSource, ObjDesc, Palette, PixelFormatId, RenderSurface,
-    RenderTexture, SubPalette, SurfaceType, TextureMapChange,
+    AnimationPartChange, CSurface, CSurfaceSource, CloObjectEffect, CloPaletteTemplate,
+    CloSubpalEffect, CloSubpaletteRange, CloTextureEffect, ClothingBase, ClothingBuildObjDescError,
+    ClothingTable, ObjDesc, Palette, PaletteSet, PixelFormatId, RenderSurface, RenderTexture,
+    SubPalette, SurfaceType, TextureMapChange,
 };
 pub use motion_kinematics::{MotionKinematics, MotionKinematicsTable};
 pub use motion_table::{MotionCommandKinematics, MotionTable, MotionTableMovementProfile};
@@ -52,6 +54,7 @@ pub enum DatFileType {
     Audio = 0x0A,
     EnvCell = 0x0D,
     Table = 0x0E,
+    PaletteSet = 0x0F,
     Clothing = 0x10,
     Scene = 0x12,
     Region = 0x13,
@@ -120,6 +123,7 @@ impl DatFileType {
             0x0A => DatFileType::Audio,
             0x0D => DatFileType::EnvCell,
             0x0E => DatFileType::Table,
+            0x0F => DatFileType::PaletteSet,
             0x10 => DatFileType::Clothing,
             0x12 => DatFileType::Scene,
             0x13 => DatFileType::Region,
@@ -151,6 +155,7 @@ impl DatFileType {
             0x0A => DatFileType::Audio,
             0x0D => DatFileType::EnvCell,
             0x0E => DatFileType::Table,
+            0x0F => DatFileType::PaletteSet,
             0x10 => DatFileType::Clothing,
             0x12 => DatFileType::Scene,
             0x13 => DatFileType::Region,
@@ -184,6 +189,7 @@ impl fmt::Display for DatFileType {
             DatFileType::Audio => "Audio (WAV)",
             DatFileType::EnvCell => "EnvCell (ENV)",
             DatFileType::Table => "Table",
+            DatFileType::PaletteSet => "PaletteSet",
             DatFileType::Clothing => "Clothing (CLO)",
             DatFileType::Scene => "Scene (SCN)",
             DatFileType::Region => "Region (RGN)",

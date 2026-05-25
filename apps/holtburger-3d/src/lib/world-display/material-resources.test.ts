@@ -43,7 +43,7 @@ describe("world material resource cache", () => {
 			`base|parts=base|textures=base|palette=base|0:134217729:${materialAssetId}:variant=base`,
 		);
 		expect(plan.geometrySlots).toEqual([
-			{ surfaceId: 1, materialVariantSignature: null, materialIndex: 0 },
+			{ surfaceId: 0, materialVariantSignature: null, materialIndex: 0 },
 		]);
 		expect(plan.materials).toHaveLength(1);
 		expect(plan.materials[0]).toBeInstanceOf(MeshStandardMaterial);
@@ -89,14 +89,14 @@ describe("world material resource cache", () => {
 		expect(clampPlan.signature).not.toBe(repeatPlan.signature);
 		expect(clampPlan.geometrySlots).toEqual([
 			{
-				surfaceId: 1,
+				surfaceId: 0,
 				materialVariantSignature: "sampler=clamp",
 				materialIndex: 0,
 			},
 		]);
 		expect(repeatPlan.geometrySlots).toEqual([
 			{
-				surfaceId: 1,
+				surfaceId: 0,
 				materialVariantSignature: "sampler=repeat",
 				materialIndex: 0,
 			},
@@ -136,12 +136,12 @@ describe("world material resource cache", () => {
 		expect(plan.materials).toHaveLength(2);
 		expect(plan.geometrySlots).toEqual([
 			{
-				surfaceId: 1,
+				surfaceId: 0,
 				materialVariantSignature: "sampler=clamp",
 				materialIndex: 0,
 			},
 			{
-				surfaceId: 1,
+				surfaceId: 0,
 				materialVariantSignature: "sampler=repeat",
 				materialIndex: 1,
 			},

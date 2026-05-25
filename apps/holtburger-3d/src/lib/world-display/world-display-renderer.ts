@@ -66,6 +66,7 @@ import {
 	WorldMaterialResourceCache,
 	formatMaterialAssetId,
 } from "./material-resources";
+import { applyRenderGeometryMaterialVariants } from "./material-plan";
 import { createBaseMaterialAppearanceContext } from "./material-appearance";
 import type { MaterialTextureCapabilities } from "./render-surface-texture-resources";
 import {
@@ -1779,11 +1780,14 @@ export function createWorldDisplayRenderer(
 		cell: StructuredInteriorCell,
 	): Mesh {
 		const materialPlan = materialResourceCache.resolveMaterialPlan({
-			slots: cell.surfaceIds.map((surfaceId, slotIndex) => ({
-				slotIndex,
-				surfaceId,
-				materialAssetId: formatMaterialAssetId(surfaceId),
-			})),
+			slots: applyRenderGeometryMaterialVariants({
+				slots: cell.surfaceIds.map((surfaceId, slotIndex) => ({
+					slotIndex,
+					surfaceId,
+					materialAssetId: formatMaterialAssetId(surfaceId),
+				})),
+				renderGeometry: cell.renderGeometry,
+			}),
 			appearance: createBaseMaterialAppearanceContext("structured-interior"),
 			preparedByAssetId: assetState.preparedByAssetId,
 			fallbackColorKey: cell.debugColorKey,

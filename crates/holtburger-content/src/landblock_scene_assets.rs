@@ -2372,7 +2372,7 @@ fn scale_normal_component(value: f32, scale: f32) -> f32 {
 }
 
 fn normalize_surface_id(surface_id: i16) -> Option<i16> {
-    (surface_id > 0).then_some(surface_id)
+    (surface_id >= 0).then_some(surface_id)
 }
 
 fn expand_bounds(bounds: Option<PreparedAabb>, point: PreparedVec3) -> PreparedAabb {

@@ -54,7 +54,8 @@ fn main() -> Result<()> {
         for side in polygon_report_sides(polygon) {
             let material_id = side
                 .surface_slot
-                .map(|surface_slot| 0x0800_0000 | u32::from(surface_slot as u16));
+                .and_then(|surface_slot| raw_env_cell.surfaces.get(surface_slot as usize))
+                .map(|surface_id| 0x0800_0000 | u32::from(*surface_id));
             let render_surface_ids = material_id
                 .map(
                     |surface_id| match content.resolve_material_recipe(surface_id) {
@@ -214,7 +215,7 @@ fn has_wrapping_uvs(vertex_array: &CVertexArray, vertex_ids: &[u16], uv_indices:
 }
 
 fn normalize_surface_slot(surface_slot: i16) -> Option<i16> {
-    (surface_slot > 0).then_some(surface_slot)
+    (surface_slot >= 0).then_some(surface_slot)
 }
 
 fn legacy_sampler_variant(repeats: bool) -> &'static str {

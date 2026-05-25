@@ -39,7 +39,8 @@ export function createSetupAppearanceMaterialAppearanceContext(
 		appearanceKey: setupAppearance.appearanceKey,
 		selectedPartsSignature:
 			describeSetupAppearanceSelectedPartsSignature(setupAppearance),
-		textureSwapSignature: null,
+		textureSwapSignature:
+			describeSetupAppearanceTextureSwapSignature(setupAppearance),
 		paletteViewSignature:
 			describeSetupAppearancePaletteViewSignature(setupAppearance),
 		paletteView: createSetupAppearancePaletteView(setupAppearance),
@@ -74,6 +75,21 @@ function describeSetupAppearanceSelectedPartsSignature(
 					.sort()
 					.join("+"),
 			].join(":"),
+		)
+		.sort()
+		.join(",");
+}
+
+function describeSetupAppearanceTextureSwapSignature(
+	setupAppearance: PreparedSetupAppearancePayload,
+): string | null {
+	if (setupAppearance.textureChanges.length === 0) {
+		return null;
+	}
+	return setupAppearance.textureChanges
+		.map(
+			(change) =>
+				`${change.partIndex}:${formatHex32(change.oldTexture)}>${formatHex32(change.newTexture)}`,
 		)
 		.sort()
 		.join(",");

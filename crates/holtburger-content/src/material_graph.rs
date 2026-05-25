@@ -48,7 +48,7 @@ pub struct ResolvedRenderTexture {
     pub render_surface_ids: Vec<u32>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct MaterialAppearanceInput {
     pub obj_desc: Option<ObjDesc>,
 }

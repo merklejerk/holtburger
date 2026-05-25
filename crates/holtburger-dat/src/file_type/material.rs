@@ -255,7 +255,7 @@ impl CSurface {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ObjDesc {
     pub palette_id: Option<u32>,
     pub sub_palettes: Vec<SubPalette>,
@@ -311,7 +311,7 @@ impl ObjDesc {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SubPalette {
     pub sub_id: u32,
     pub offset: u32,
@@ -335,7 +335,7 @@ impl SubPalette {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TextureMapChange {
     pub part_index: u8,
     pub old_texture: u32,
@@ -352,7 +352,7 @@ impl TextureMapChange {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AnimationPartChange {
     pub part_index: u8,
     pub part_id: u32,

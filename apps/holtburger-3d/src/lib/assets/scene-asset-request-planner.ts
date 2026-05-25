@@ -1,5 +1,9 @@
 import type { AssetLookupRequestDto, AssetPriority } from "../host/contracts";
 import {
+	isSetupAppearanceAssetId,
+	isStaticRenderableAssetId,
+} from "./asset-hydration-policy";
+import {
 	browserLocationToLandblockId,
 	describeBrowserDestinationIdentity,
 	isIndoorBrowserDestination,
@@ -593,8 +597,10 @@ function collectStaticRenderableDependencyAssetIds(
 ): StaticRenderableDependencyAssetIds {
 	const setupModelFallbackPartGfxAssetIds =
 		collectSetupModelFallbackPartGfxAssetIds(preparedByAssetId, sourceAssetIds);
-	const setupAppearanceAssetIds =
-		collectSetupAppearanceAssetIds(sourceAssetIds);
+	const setupAppearanceAssetIds = uniqueSortedAssetIds([
+		...collectSetupAppearanceAssetIds(sourceAssetIds),
+		...sourceAssetIds.filter(isSetupAppearanceAssetId),
+	]);
 	const setupAppearancePartGfxAssetIds = collectSetupAppearancePartGfxAssetIds(
 		preparedByAssetId,
 		setupAppearanceAssetIds,
@@ -796,16 +802,6 @@ function describeRequiredBrowserDestinationIdentity(
 	return identity;
 }
 
-function isStaticRenderableAssetId(assetId: string): boolean {
-	return (
-		/^gfx-obj\/[0-9a-fA-F]{8}$/.test(assetId) ||
-		/^setup-model\/[0-9a-fA-F]{8}$/.test(assetId)
-	);
-}
-
 function isStaticRenderableOrSetupAppearanceAssetId(assetId: string): boolean {
-	return (
-		isStaticRenderableAssetId(assetId) ||
-		/^setup-appearance\/[0-9a-fA-F]{8}$/.test(assetId)
-	);
+	return isStaticRenderableAssetId(assetId);
 }

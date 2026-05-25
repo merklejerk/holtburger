@@ -2116,11 +2116,13 @@ fn build_polygon_set_render_geometry(
                 polygon,
                 vertex_array,
                 render_side,
-                &mut positions,
-                &mut normals,
-                &mut uvs,
-                &mut triangles,
-                &mut bounds,
+                &mut PolygonRenderGeometryBuffers {
+                    positions: &mut positions,
+                    normals: &mut normals,
+                    uvs: &mut uvs,
+                    triangles: &mut triangles,
+                    bounds: &mut bounds,
+                },
             );
         }
     }
@@ -2283,16 +2285,20 @@ fn legacy_sampler_material_variant(repeats: bool) -> &'static str {
     }
 }
 
+struct PolygonRenderGeometryBuffers<'a> {
+    positions: &'a mut Vec<f32>,
+    normals: &'a mut Vec<f32>,
+    uvs: &'a mut Vec<f32>,
+    triangles: &'a mut Vec<PreparedPolygonSetRenderTriangle>,
+    bounds: &'a mut Option<PreparedAabb>,
+}
+
 fn append_polygon_render_side_geometry(
     polygon_id: u16,
     polygon: &Polygon,
     vertex_array: &holtburger_dat::graphics::CVertexArray,
     render_side: PreparedPolygonRenderSide<'_>,
-    positions: &mut Vec<f32>,
-    normals: &mut Vec<f32>,
-    uvs: &mut Vec<f32>,
-    triangles: &mut Vec<PreparedPolygonSetRenderTriangle>,
-    bounds: &mut Option<PreparedAabb>,
+    buffers: &mut PolygonRenderGeometryBuffers<'_>,
 ) {
     let _side_kind = render_side.kind;
     for vertex_index in 1..(polygon.vertex_ids.len() - 1) {
@@ -2300,11 +2306,11 @@ fn append_polygon_render_side_geometry(
             PreparedPolygonWinding::Source => [0, vertex_index, vertex_index + 1],
             PreparedPolygonWinding::Reversed => [0, vertex_index + 1, vertex_index],
         };
-        triangles.push(PreparedPolygonSetRenderTriangle {
+        buffers.triangles.push(PreparedPolygonSetRenderTriangle {
             polygon_id,
             surface_id: render_side.surface_id,
             material_variant_signature: render_side.material_variant_signature.to_string(),
-            first_vertex: positions.len() / 3,
+            first_vertex: buffers.positions.len() / 3,
         });
 
         for polygon_vertex_offset in triangle_vertex_offsets {
@@ -2315,8 +2321,10 @@ fn append_polygon_render_side_geometry(
                 .expect("missing vertices were filtered before triangulation");
             let render_position = convert_ac_vector_to_render_space(vertex.origin);
             let render_normal = convert_ac_vector_to_render_space(vertex.normal);
-            positions.extend([render_position.x, render_position.y, render_position.z]);
-            normals.extend([
+            buffers
+                .positions
+                .extend([render_position.x, render_position.y, render_position.z]);
+            buffers.normals.extend([
                 scale_normal_component(render_normal.x, render_side.normal_scale),
                 scale_normal_component(render_normal.y, render_side.normal_scale),
                 scale_normal_component(render_normal.z, render_side.normal_scale),
@@ -2324,8 +2332,10 @@ fn append_polygon_render_side_geometry(
 
             let uv_index = render_side.uv_indices[polygon_vertex_offset] as usize;
             let uv = vertex.uvs.get(uv_index);
-            uvs.extend([uv.map_or(0.0, |uv| uv.u), uv.map_or(0.0, |uv| uv.v)]);
-            *bounds = Some(expand_bounds(*bounds, render_position));
+            buffers
+                .uvs
+                .extend([uv.map_or(0.0, |uv| uv.u), uv.map_or(0.0, |uv| uv.v)]);
+            *buffers.bounds = Some(expand_bounds(*buffers.bounds, render_position));
         }
     }
 }

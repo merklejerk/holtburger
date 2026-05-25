@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
 	classifyAssetHydration,
 	isDirectSceneRootAssetId,
+	isSetupAppearanceAssetId,
 	isStaticRenderableAssetId,
 } from "./asset-hydration-policy";
 
@@ -24,6 +25,15 @@ describe("asset hydration policy", () => {
 			expect(classifyAssetHydration(assetId)).toBe("direct");
 		},
 	);
+
+	it("classifies setup appearance variants as direct renderable hydration", () => {
+		const assetId =
+			"setup-appearance/020005a9/obj-desc/pal-04000001/sub-04000002-10-8/tex-00-05000001-05000002/anim-01-01000003";
+
+		expect(isSetupAppearanceAssetId(assetId)).toBe(true);
+		expect(isStaticRenderableAssetId(assetId)).toBe(true);
+		expect(classifyAssetHydration(assetId)).toBe("direct");
+	});
 
 	it.each([["dependency-manifest/synthetic"], ["terrain-material/1"]])(
 		"classifies %s as graph hydration",

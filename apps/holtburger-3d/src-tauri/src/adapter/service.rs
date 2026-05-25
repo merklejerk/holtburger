@@ -228,9 +228,12 @@ impl HostBoundaryAdapter {
             ContentAssetRequest::MaterialRecipe(surface_id) => {
                 self.build_material_recipe_lookup_response(request, surface_id, asset)?
             }
-            ContentAssetRequest::SetupAppearance(setup_model_id) => {
-                self.build_setup_appearance_lookup_response(request, setup_model_id, asset)
-            }
+            ContentAssetRequest::SetupAppearance(setup_appearance_request) => self
+                .build_setup_appearance_lookup_response(
+                    request,
+                    setup_appearance_request.setup_model_id,
+                    asset,
+                ),
             ContentAssetRequest::RenderTexture(render_texture_id) => {
                 self.build_render_texture_lookup_response(request, render_texture_id, asset)?
             }
@@ -941,6 +944,51 @@ mod tests {
                 .is_some()
         );
         assert!(asset.payload["placementSets"].as_array().is_some());
+    }
+
+    #[test]
+    fn setup_appearance_variant_lookup_routes_obj_desc_facts() {
+        let runtime = HostRuntimeService::new(false);
+        let asset_id = "setup-appearance/02000001/obj-desc/pal-0400ffff/sub-0400fffe-10-18/tex-00-0500fffd-0500fffc/anim-ff-0100fffb";
+        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
+            request_id: "test-setup-appearance-variant".to_string(),
+            asset_id: asset_id.to_string(),
+            priority: crate::contracts::AssetPriorityDto::Streaming,
+        });
+
+        assert_eq!(asset.asset_id, asset_id);
+        assert_eq!(asset.payload["kind"], "setup-appearance");
+        assert_eq!(asset.payload["setupModelId"], 0x02000001u32);
+        assert_eq!(asset.payload["paletteId"], 0x0400ffffu32);
+        assert_eq!(
+            asset.payload["subPalettes"].as_array().unwrap(),
+            &[serde_json::json!({
+                "subId": 0x0400fffeu32,
+                "offset": 0x10u32,
+                "numColors": 0x18u32,
+            })]
+        );
+        assert_eq!(
+            asset.payload["textureChanges"].as_array().unwrap(),
+            &[serde_json::json!({
+                "partIndex": 0u8,
+                "oldTexture": 0x0500fffdu32,
+                "newTexture": 0x0500fffcu32,
+            })]
+        );
+        assert_eq!(
+            asset.payload["animPartChanges"].as_array().unwrap(),
+            &[serde_json::json!({
+                "partIndex": 0xffu8,
+                "partId": 0x0100fffbu32,
+            })]
+        );
+        assert!(
+            asset.payload["appearanceKey"]
+                .as_str()
+                .unwrap()
+                .contains("tex=[0:0500FFFD->0500FFFC]")
+        );
     }
 
     #[test]

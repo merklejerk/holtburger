@@ -57,7 +57,16 @@ export function buildStaticRenderablePartMatrix(
 export function buildGfxObjGeometry(
 	renderGeometry: PreparedPolygonSetRenderGeometry,
 	materialSlots: readonly MaterialGeometrySlot[] = [],
+	options: { compactMaterialGroups?: boolean } = {},
 ): BufferGeometry {
+	const compactedGeometry =
+		options.compactMaterialGroups === false
+			? null
+			: buildMaterialCompactedGfxObjGeometry(renderGeometry, materialSlots);
+	if (compactedGeometry) {
+		return compactedGeometry;
+	}
+
 	const geometry = new BufferGeometry();
 	geometry.setAttribute(
 		"position",
@@ -139,6 +148,209 @@ function applyMaterialGroups(
 		activeStartVertex = triangle.firstVertex;
 		activeVertexCount = 3;
 	}
+
+	if (activeMaterialIndex !== null) {
+		geometry.addGroup(
+			activeStartVertex,
+			activeVertexCount,
+			activeMaterialIndex,
+		);
+	}
+}
+
+function buildMaterialCompactedGfxObjGeometry(
+	renderGeometry: PreparedPolygonSetRenderGeometry,
+	materialSlots: readonly MaterialGeometrySlot[],
+): BufferGeometry | null {
+	if (materialSlots.length <= 1 || renderGeometry.triangles.length <= 1) {
+		return null;
+	}
+
+	const materialIndexBySlotKey =
+		createMaterialIndexByGeometrySlotKey(materialSlots);
+	const triangleRuns = describeTriangleMaterialRuns(
+		renderGeometry,
+		materialIndexBySlotKey,
+	);
+	if (triangleRuns.runCount <= triangleRuns.uniqueMaterialCount) {
+		return null;
+	}
+
+	const positions = toFloat32Array(renderGeometry.positions);
+	const normals =
+		renderGeometry.normals.length === renderGeometry.positions.length
+			? toFloat32Array(renderGeometry.normals)
+			: null;
+	const uvs =
+		renderGeometry.uvs.length > 0 ? toFloat32Array(renderGeometry.uvs) : null;
+	const compactedPositions = new Float32Array(positions.length);
+	const compactedNormals = normals ? new Float32Array(normals.length) : null;
+	const compactedUvs = uvs ? new Float32Array(uvs.length) : null;
+	const sortedTriangles = [...triangleRuns.triangles].sort(
+		(left, right) =>
+			left.materialIndex - right.materialIndex ||
+			left.sourceOrder - right.sourceOrder,
+	);
+	let outputVertex = 0;
+	for (const triangle of sortedTriangles) {
+		copyVertexComponents(
+			positions,
+			compactedPositions,
+			triangle.firstVertex,
+			outputVertex,
+			3,
+			3,
+		);
+		if (normals && compactedNormals) {
+			copyVertexComponents(
+				normals,
+				compactedNormals,
+				triangle.firstVertex,
+				outputVertex,
+				3,
+				3,
+			);
+		}
+		if (uvs && compactedUvs) {
+			copyVertexComponents(
+				uvs,
+				compactedUvs,
+				triangle.firstVertex,
+				outputVertex,
+				3,
+				2,
+			);
+		}
+		outputVertex += 3;
+	}
+
+	const geometry = new BufferGeometry();
+	geometry.setAttribute("position", new BufferAttribute(compactedPositions, 3));
+	if (compactedNormals) {
+		geometry.setAttribute("normal", new BufferAttribute(compactedNormals, 3));
+	} else {
+		geometry.computeVertexNormals();
+	}
+	if (compactedUvs) {
+		geometry.setAttribute("uv", new BufferAttribute(compactedUvs, 2));
+	}
+	addCompactedMaterialGroups(geometry, sortedTriangles);
+	return geometry;
+}
+
+function createMaterialIndexByGeometrySlotKey(
+	materialSlots: readonly MaterialGeometrySlot[],
+): Map<string, number> {
+	return new Map(
+		materialSlots.map((slot) => [
+			describeGeometryMaterialSlotKey(
+				slot.surfaceId,
+				slot.materialVariantSignature,
+			),
+			slot.materialIndex,
+		]),
+	);
+}
+
+interface TriangleMaterialRun {
+	sourceOrder: number;
+	firstVertex: number;
+	materialIndex: number;
+}
+
+function describeTriangleMaterialRuns(
+	renderGeometry: PreparedPolygonSetRenderGeometry,
+	materialIndexBySlotKey: ReadonlyMap<string, number>,
+): {
+	triangles: TriangleMaterialRun[];
+	runCount: number;
+	uniqueMaterialCount: number;
+} {
+	let previousMaterialIndex: number | null = null;
+	let runCount = 0;
+	const uniqueMaterialIndices = new Set<number>();
+	const triangles = renderGeometry.triangles.map((triangle, sourceOrder) => {
+		const materialIndex = resolveTriangleMaterialIndex(
+			triangle.surfaceId,
+			triangle.materialVariantSignature,
+			materialIndexBySlotKey,
+		);
+		if (materialIndex !== previousMaterialIndex) {
+			runCount += 1;
+			previousMaterialIndex = materialIndex;
+		}
+		uniqueMaterialIndices.add(materialIndex);
+		return {
+			sourceOrder,
+			firstVertex: triangle.firstVertex,
+			materialIndex,
+		};
+	});
+	return {
+		triangles,
+		runCount,
+		uniqueMaterialCount: uniqueMaterialIndices.size,
+	};
+}
+
+function resolveTriangleMaterialIndex(
+	surfaceId: number | null,
+	materialVariantSignature: string | null | undefined,
+	materialIndexBySlotKey: ReadonlyMap<string, number>,
+): number {
+	return surfaceId === null
+		? 0
+		: (materialIndexBySlotKey.get(
+				describeGeometryMaterialSlotKey(surfaceId, materialVariantSignature),
+			) ?? 0);
+}
+
+function copyVertexComponents(
+	source: Float32Array,
+	target: Float32Array,
+	sourceVertex: number,
+	targetVertex: number,
+	vertexCount: number,
+	componentCount: number,
+): void {
+	const sourceStart = sourceVertex * componentCount;
+	const targetStart = targetVertex * componentCount;
+	const componentLength = vertexCount * componentCount;
+	target.set(
+		source.subarray(sourceStart, sourceStart + componentLength),
+		targetStart,
+	);
+}
+
+function addCompactedMaterialGroups(
+	geometry: BufferGeometry,
+	triangles: readonly TriangleMaterialRun[],
+): void {
+	let activeMaterialIndex: number | null = null;
+	let activeStartVertex = 0;
+	let activeVertexCount = 0;
+	triangles.forEach((triangle, triangleIndex) => {
+		const nextStartVertex = triangleIndex * 3;
+		if (activeMaterialIndex === null) {
+			activeMaterialIndex = triangle.materialIndex;
+			activeStartVertex = nextStartVertex;
+			activeVertexCount = 3;
+			return;
+		}
+		if (activeMaterialIndex === triangle.materialIndex) {
+			activeVertexCount += 3;
+			return;
+		}
+
+		geometry.addGroup(
+			activeStartVertex,
+			activeVertexCount,
+			activeMaterialIndex,
+		);
+		activeMaterialIndex = triangle.materialIndex;
+		activeStartVertex = nextStartVertex;
+		activeVertexCount = 3;
+	});
 
 	if (activeMaterialIndex !== null) {
 		geometry.addGroup(

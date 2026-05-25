@@ -45,6 +45,7 @@ import {
 } from "./render-spatial-scene";
 import { deriveWorldRenderSceneContext } from "./render-scene-context";
 import {
+	createEmptyStaticRenderableSceneModel,
 	deriveAppearancePreviewStaticRenderableSceneModel,
 	deriveStaticRenderableSceneModel,
 	mergeStaticRenderableSceneModels,
@@ -80,9 +81,15 @@ export interface BrowserRenderResourceCoordinatorInput {
 	diagnosticSelection: RenderSpatialMetadata | null;
 	activeRenderAnchor: RenderLandblockAnchor | null;
 	browserCameraFrame: SceneCameraFrame | null;
-	runtimeAppearanceSetupAppearance: PreparedSetupAppearancePayload | null;
+	runtimeAppearancePreviews: readonly BrowserRuntimeAppearancePreview[];
 	cameraAck: CameraHintAckDto | null;
 	pendingCameraHint: boolean;
+}
+
+export interface BrowserRuntimeAppearancePreview {
+	id: string;
+	spawnCameraFrame: SceneCameraFrame;
+	setupAppearance: PreparedSetupAppearancePayload;
 }
 
 export interface BrowserRenderResourceSnapshot {
@@ -227,15 +234,24 @@ export class BrowserRenderResourceCoordinator {
 						envCellLandblockIds: outdoorSceneInterest.envCellLandblockIds,
 					},
 		);
-		const appearancePreviewScene =
-			deriveAppearancePreviewStaticRenderableSceneModel({
-				assetState: input.assetState,
-				setupAppearance: input.runtimeAppearanceSetupAppearance,
-				cameraFrame: input.browserCameraFrame,
-				anchorLandblockId: input.activeRenderAnchor?.landblockId ?? null,
-				renderAsInterior:
-					browserDestinationToInteriorCellId(input.browserDestination) !== null,
-			});
+		const appearancePreviewScene = input.runtimeAppearancePreviews.reduce(
+			(scene, preview) =>
+				mergeStaticRenderableSceneModels(
+					scene,
+					deriveAppearancePreviewStaticRenderableSceneModel({
+						assetState: input.assetState,
+						previewInstanceId: preview.id,
+						setupAppearance: preview.setupAppearance,
+						spawnCameraFrame: preview.spawnCameraFrame,
+						anchorLandblockId:
+							input.activeRenderAnchor?.landblockId ?? null,
+						renderAsInterior:
+							browserDestinationToInteriorCellId(input.browserDestination) !==
+							null,
+					}),
+				),
+			createEmptyStaticRenderableSceneModel(),
+		);
 		const staticRenderableScene = mergeStaticRenderableSceneModels(
 			baseStaticRenderableScene,
 			appearancePreviewScene,

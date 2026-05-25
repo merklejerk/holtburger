@@ -531,6 +531,17 @@ export function createWorldDisplayRenderer(
 			visibleStructuredInteriorMeshCount: 0,
 			debugOverlayObjectCount: 0,
 			visibleDebugOverlayObjectCount: 0,
+			materialCount: 0,
+			materialProgramKeyCount: 0,
+			transparentMaterialCount: 0,
+			textureResourceCount: 0,
+			indexedTextureResourceCount: 0,
+			paletteResourceCount: 0,
+			staticGeometryGroupCount: 0,
+			staticVisibleGeometryGroupCount: 0,
+			structuredInteriorGeometryGroupCount: 0,
+			materialTypeCounts: {},
+			materialProgramKeySamples: [],
 		});
 	let frameId = 0;
 	let lastFrameAt: number | null = null;
@@ -775,6 +786,7 @@ export function createWorldDisplayRenderer(
 			policy: renderPolicy,
 			graph,
 		});
+		const materialStats = materialResourceCache.getStats();
 		latestRenderDebugMetrics = createRenderDebugMetrics(renderer, {
 			renderPassCount: graph.length,
 			renderGraphPolicy: graphSummary.policyLabel,
@@ -815,6 +827,23 @@ export function createWorldDisplayRenderer(
 			visibleDebugOverlayObjectCount: countVisibleObjects(
 				debugOverlayObjects.values(),
 			),
+			materialCount: materialStats.materialCount,
+			materialProgramKeyCount: materialStats.materialProgramKeyCount,
+			transparentMaterialCount: materialStats.transparentMaterialCount,
+			textureResourceCount: materialStats.textureCount,
+			indexedTextureResourceCount: materialStats.indexedTextureCount,
+			paletteResourceCount: materialStats.paletteCount,
+			staticGeometryGroupCount: countGeometryGroups(
+				staticRenderableGroupMeshes.values(),
+			),
+			staticVisibleGeometryGroupCount: countVisibleGeometryGroups(
+				staticRenderableGroupMeshes.values(),
+			),
+			structuredInteriorGeometryGroupCount: countGeometryGroups(
+				structuredInteriorMeshes.values(),
+			),
+			materialTypeCounts: materialStats.materialTypeCounts,
+			materialProgramKeySamples: materialStats.materialProgramKeySamples,
 		});
 	}
 
@@ -1579,6 +1608,7 @@ export function createWorldDisplayRenderer(
 				gfxAssetId,
 				materialPlan.signature,
 				materialPlan.geometrySlots,
+				materialPlan.materials,
 			);
 			if (!geometry) {
 				continue;
@@ -1797,6 +1827,11 @@ export function createWorldDisplayRenderer(
 		const geometry = buildGfxObjGeometry(
 			cell.renderGeometry,
 			materialPlan.geometrySlots,
+			{
+				compactMaterialGroups: canCompactMaterialGroups(
+					materialPlan.materials,
+				),
+			},
 		);
 		const mesh = new Mesh(geometry, materialPlan.materials);
 		mesh.name = `structured-interior/${cell.renderKey}`;
@@ -2329,6 +2364,7 @@ export function createWorldDisplayRenderer(
 		gfxAssetId: string,
 		materialSignature: string,
 		materialSlots: readonly MaterialGeometrySlot[],
+		materials: readonly Material[],
 	): BufferGeometry | null {
 		const geometryKey = formatStaticGeometryCacheKey(
 			gfxAssetId,
@@ -2350,9 +2386,16 @@ export function createWorldDisplayRenderer(
 		const geometry = buildGfxObjGeometry(
 			asset.payload.renderGeometry,
 			materialSlots,
+			{
+				compactMaterialGroups: canCompactMaterialGroups(materials),
+			},
 		);
 		staticGeometryCache.set(geometryKey, geometry);
 		return geometry;
+	}
+
+	function canCompactMaterialGroups(materials: readonly Material[]): boolean {
+		return materials.every((material) => !material.transparent);
 	}
 
 	function formatStaticGeometryCacheKey(
@@ -2747,6 +2790,24 @@ function countVisibleObjects(objects: Iterable<Object3D>): number {
 	return count;
 }
 
+function countGeometryGroups(meshes: Iterable<Mesh>): number {
+	let count = 0;
+	for (const mesh of meshes) {
+		count += Math.max(mesh.geometry.groups.length, 1);
+	}
+	return count;
+}
+
+function countVisibleGeometryGroups(meshes: Iterable<Mesh>): number {
+	let count = 0;
+	for (const mesh of meshes) {
+		if (mesh.visible) {
+			count += Math.max(mesh.geometry.groups.length, 1);
+		}
+	}
+	return count;
+}
+
 function describeBrowserCameraResidencyKey(
 	residency: BrowserCameraResidency,
 ): string {
@@ -2827,6 +2888,18 @@ function createRenderDebugMetrics(
 			options.visibleStructuredInteriorMeshCount,
 		debugOverlayObjectCount: options.debugOverlayObjectCount,
 		visibleDebugOverlayObjectCount: options.visibleDebugOverlayObjectCount,
+		materialCount: options.materialCount,
+		materialProgramKeyCount: options.materialProgramKeyCount,
+		transparentMaterialCount: options.transparentMaterialCount,
+		textureResourceCount: options.textureResourceCount,
+		indexedTextureResourceCount: options.indexedTextureResourceCount,
+		paletteResourceCount: options.paletteResourceCount,
+		staticGeometryGroupCount: options.staticGeometryGroupCount,
+		staticVisibleGeometryGroupCount: options.staticVisibleGeometryGroupCount,
+		structuredInteriorGeometryGroupCount:
+			options.structuredInteriorGeometryGroupCount,
+		materialTypeCounts: options.materialTypeCounts,
+		materialProgramKeySamples: options.materialProgramKeySamples,
 		renderCalls: renderer.info.render.calls,
 		renderTriangles: renderer.info.render.triangles,
 		renderLines: renderer.info.render.lines,

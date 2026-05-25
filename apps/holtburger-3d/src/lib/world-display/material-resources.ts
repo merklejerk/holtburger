@@ -75,6 +75,17 @@ interface IndexedTextureResourceRecord {
 	resource: IndexedTextureResource;
 }
 
+export interface MaterialResourceCacheStats {
+	materialCount: number;
+	textureCount: number;
+	paletteCount: number;
+	indexedTextureCount: number;
+	materialProgramKeyCount: number;
+	transparentMaterialCount: number;
+	materialTypeCounts: Record<string, number>;
+	materialProgramKeySamples: string[];
+}
+
 export class WorldMaterialResourceCache {
 	private readonly materialRecords = new Map<string, MaterialResourceRecord>();
 	private readonly textureRecords = new Map<string, TextureResourceRecord>();
@@ -320,6 +331,38 @@ export class WorldMaterialResourceCache {
 		);
 	}
 
+	getStats(): MaterialResourceCacheStats {
+		const programKeys = new Set<string>();
+		let transparentMaterialCount = 0;
+		const materialTypeCounts = new Map<string, number>();
+		for (const record of this.materialRecords.values()) {
+			const material = record.material;
+			programKeys.add(describeMaterialProgramKey(material));
+			if (material.transparent) {
+				transparentMaterialCount += 1;
+			}
+			materialTypeCounts.set(
+				material.type,
+				(materialTypeCounts.get(material.type) ?? 0) + 1,
+			);
+		}
+		const materialProgramKeySamples = [...programKeys].sort();
+		return {
+			materialCount: this.materialRecords.size,
+			textureCount: this.textureRecords.size,
+			paletteCount: this.paletteRecords.size,
+			indexedTextureCount: this.indexedTextureRecords.size,
+			materialProgramKeyCount: programKeys.size,
+			transparentMaterialCount,
+			materialTypeCounts: Object.fromEntries(
+				[...materialTypeCounts.entries()].sort(([left], [right]) =>
+					left.localeCompare(right),
+				),
+			),
+			materialProgramKeySamples: materialProgramKeySamples.slice(0, 16),
+		};
+	}
+
 	private reportOnce(diagnostic: MaterialResourceDiagnostic): void {
 		if (
 			!this.reportDiagnostic ||
@@ -330,6 +373,23 @@ export class WorldMaterialResourceCache {
 		this.reportedDiagnosticKeys.add(diagnostic.key);
 		this.reportDiagnostic(diagnostic);
 	}
+}
+
+function describeMaterialProgramKey(material: Material): string {
+	const customProgramCacheKey = material.customProgramCacheKey();
+	const materialFlags = material as Material & {
+		flatShading?: boolean;
+		wireframe?: boolean;
+	};
+	return [
+		material.type,
+		customProgramCacheKey || "default",
+		material.transparent ? "transparent" : "opaque",
+		material.vertexColors ? "vertex-colors" : "no-vertex-colors",
+		materialFlags.flatShading ? "flat" : "smooth",
+		materialFlags.wireframe ? "wireframe" : "solid",
+		material.side,
+	].join("|");
 }
 
 function describeRenderSurfaceTextureResourceKey(

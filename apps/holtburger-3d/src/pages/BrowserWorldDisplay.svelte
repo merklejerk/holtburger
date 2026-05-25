@@ -66,11 +66,12 @@
 		type RenderLandblockAnchor,
 	} from "../lib/world-display/render-chunks";
 	import {
-		BrowserRenderResourceCoordinator,
-		createEmptyBrowserRenderResourceSnapshot,
-		type BrowserRenderResourceCoordinatorInput,
-		type BrowserRenderResourceSnapshot,
-	} from "../lib/world-display/browser-render-resource-coordinator";
+	BrowserRenderResourceCoordinator,
+	createEmptyBrowserRenderResourceSnapshot,
+	type BrowserRuntimeAppearancePreview,
+	type BrowserRenderResourceCoordinatorInput,
+	type BrowserRenderResourceSnapshot,
+} from "../lib/world-display/browser-render-resource-coordinator";
 	import type {
 		RuntimeAppearanceRequestDto,
 		SetupAppearancePayloadDto,
@@ -95,6 +96,11 @@
 
 	interface ResolvedRuntimeAppearanceFacts extends BaseRuntimeAppearanceResolvedFacts {
 		setupAppearance: SetupAppearancePayloadDto;
+	}
+
+	interface RuntimeAppearancePreviewInstance
+		extends BrowserRuntimeAppearancePreview {
+		resolved: ResolvedRuntimeAppearanceFacts;
 	}
 
 	let {
@@ -189,12 +195,13 @@
 			maxEntries: 24,
 		});
 	let runtimeAppearanceInput = $state<RuntimeAppearanceInput | null>(null);
-	let runtimeAppearanceResolved = $state<ResolvedRuntimeAppearanceFacts | null>(
-		null,
+	let runtimeAppearancePreviews = $state<RuntimeAppearancePreviewInstance[]>(
+		[],
 	);
 	let runtimeAppearanceError = $state<string | null>(null);
 	let runtimeAppearancePending = $state(false);
 	let runtimeAppearanceRequestSequence = 0;
+	let runtimeAppearancePreviewSequence = 0;
 
 	const CAMERA_HINT_INTERVAL_MS = 250;
 	const DEBUG_SUMMARY_DEBOUNCE_MS = 500;
@@ -245,7 +252,7 @@
 		if (!debug) {
 			return "Renderer diagnostics are waiting for the first rendered frame.";
 		}
-		return `Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}, transition depth ${debug.transitionPortalMaxDepth}; passes ${debug.renderPassCount}, calls ${debug.renderCalls}, tris ${debug.renderTriangles}; portal work ${debug.portalRenderWorkItemCount}, masks ${debug.transitionApertureMaskPassCount}, depth resets ${debug.apertureDepthResetPassCount}, composites interior ${debug.interiorCompositePassCount}/exterior ${debug.exteriorCompositePassCount}; terrain ${debug.visibleTerrainMeshCount}/${debug.terrainMeshCount}, static ${debug.visibleStaticGroupMeshCount}/${debug.staticGroupMeshCount}, interiors ${debug.visibleStructuredInteriorMeshCount}/${debug.structuredInteriorMeshCount}, overlays ${debug.visibleDebugOverlayObjectCount}/${debug.debugOverlayObjectCount}; portals ${debug.portalApertureMeshCount}/${debug.transitionPortalCandidateCount}; residency ${debug.cameraViewResidency} via ${debug.residencySource} (${debug.residencyCellCount} cells, ${debug.residencyLandblockCount} landblocks, ${debug.residencyAabbCandidateCount} AABB candidates, ${debug.residencyCellBspMatchCount} CellBSP matches, ${debug.residencyAabbFallbackCount} AABB fallbacks); canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
+		return `Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}, transition depth ${debug.transitionPortalMaxDepth}; passes ${debug.renderPassCount}, calls ${debug.renderCalls}, tris ${debug.renderTriangles}; materials ${debug.materialCount}, program keys ${debug.materialProgramKeyCount}, transparent ${debug.transparentMaterialCount}, textures ${debug.textureResourceCount}/${debug.indexedTextureResourceCount} indexed, palettes ${debug.paletteResourceCount}; static groups ${debug.staticVisibleGeometryGroupCount}/${debug.staticGeometryGroupCount}; material types ${JSON.stringify(debug.materialTypeCounts)}; program samples ${debug.materialProgramKeySamples.join(" || ")}; portal work ${debug.portalRenderWorkItemCount}, masks ${debug.transitionApertureMaskPassCount}, depth resets ${debug.apertureDepthResetPassCount}, composites interior ${debug.interiorCompositePassCount}/exterior ${debug.exteriorCompositePassCount}; terrain ${debug.visibleTerrainMeshCount}/${debug.terrainMeshCount}, static ${debug.visibleStaticGroupMeshCount}/${debug.staticGroupMeshCount}, interiors ${debug.visibleStructuredInteriorMeshCount}/${debug.structuredInteriorMeshCount} with groups ${debug.structuredInteriorGeometryGroupCount}, overlays ${debug.visibleDebugOverlayObjectCount}/${debug.debugOverlayObjectCount}; portals ${debug.portalApertureMeshCount}/${debug.transitionPortalCandidateCount}; residency ${debug.cameraViewResidency} via ${debug.residencySource} (${debug.residencyCellCount} cells, ${debug.residencyLandblockCount} landblocks, ${debug.residencyAabbCandidateCount} AABB candidates, ${debug.residencyCellBspMatchCount} CellBSP matches, ${debug.residencyAabbFallbackCount} AABB fallbacks); canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
 	});
 	const sceneContextText = $derived(renderResourceSnapshot.sceneContextText);
 	const cameraResidencyText = $derived.by(() => {
@@ -298,41 +305,52 @@
 		if (runtimeAppearanceError) {
 			return runtimeAppearanceError;
 		}
-		if (runtimeAppearanceResolved) {
-			return "Preview object is placed 1 meter in front of the active camera.";
+		if (runtimeAppearancePreviews.length > 0) {
+			return `${runtimeAppearancePreviews.length} preview object${runtimeAppearancePreviews.length === 1 ? "" : "s"} spawned.`;
 		}
 		return "No runtime appearance is active.";
 	});
+	const latestRuntimeAppearancePreview = $derived(
+		runtimeAppearancePreviews.at(-1) ?? null,
+	);
 	const runtimeAppearanceRows = $derived<BrowserPanelRow[]>([
 		{
 			label: "Cache",
 			value: describeRuntimeAppearanceCacheDiagnostics(),
 		},
-		...(runtimeAppearanceResolved
+		{
+			label: "Spawned",
+			value: `${runtimeAppearancePreviews.length}`,
+		},
+		...(latestRuntimeAppearancePreview
 			? [
 					{
-						label: "Appearance",
-						value: runtimeAppearanceResolved.appearanceKey,
+						label: "Latest",
+						value: latestRuntimeAppearancePreview.resolved.appearanceKey,
 					},
 					{
 						label: "Parts",
-						value: `${runtimeAppearanceResolved.selectedGfxObjAssetIds.length} selected`,
+						value: `${latestRuntimeAppearancePreview.resolved.selectedGfxObjAssetIds.length} selected`,
 					},
 					{
 						label: "Materials",
-						value: `${runtimeAppearanceResolved.materialAssetIds.length} requested`,
+						value: `${latestRuntimeAppearancePreview.resolved.materialAssetIds.length} requested`,
 					},
 					{
 						label: "Palettes",
-						value: `${runtimeAppearanceResolved.paletteAssetIds.length} requested`,
+						value: `${latestRuntimeAppearancePreview.resolved.paletteAssetIds.length} requested`,
 					},
 					{
 						label: "Textures",
-						value: runtimeAppearanceResolved.textureSwapSignature ?? "base",
+						value:
+							latestRuntimeAppearancePreview.resolved.textureSwapSignature ??
+							"base",
 					},
 					{
 						label: "Palette view",
-						value: runtimeAppearanceResolved.paletteViewSignature ?? "base",
+						value:
+							latestRuntimeAppearancePreview.resolved.paletteViewSignature ??
+							"base",
 					},
 				]
 			: []),
@@ -611,8 +629,7 @@
 			diagnosticSelection,
 			activeRenderAnchor,
 			browserCameraFrame,
-			runtimeAppearanceSetupAppearance:
-				runtimeAppearanceResolved?.setupAppearance ?? null,
+			runtimeAppearancePreviews,
 			cameraAck,
 			pendingCameraHint,
 		});
@@ -641,10 +658,22 @@
 				if (runtimeAppearanceRequestSequence !== requestSequence) {
 					return;
 				}
-				runtimeAppearanceResolved = resolved;
+				const spawnCameraFrame = browserCameraFrame;
+				if (!spawnCameraFrame) {
+					throw new Error(
+						"Cannot spawn runtime appearance preview before the browser camera is ready.",
+					);
+				}
+				const preview = createRuntimeAppearancePreviewInstance(
+					resolved,
+					spawnCameraFrame,
+				);
+				runtimeAppearancePreviews = [...runtimeAppearancePreviews, preview];
 				runtimeAppearancePending = false;
 				onRuntimeAppearanceAssetIdsChange?.(
-					collectRuntimeAppearanceAssetIds(resolved),
+					collectRuntimeAppearancePreviewAssetIds(
+						runtimeAppearancePreviews,
+					),
 				);
 				scheduleCurrentSceneResourceUpdate();
 			})
@@ -652,23 +681,34 @@
 				if (runtimeAppearanceRequestSequence !== requestSequence) {
 					return;
 				}
-				runtimeAppearanceResolved = null;
 				runtimeAppearancePending = false;
 				runtimeAppearanceError =
 					error instanceof Error ? error.message : String(error);
-				onRuntimeAppearanceAssetIdsChange?.([]);
 				scheduleCurrentSceneResourceUpdate();
 			});
 	}
 
 	function clearRuntimeAppearance(): void {
 		runtimeAppearanceInput = null;
-		runtimeAppearanceResolved = null;
+		runtimeAppearancePreviews = [];
 		runtimeAppearancePending = false;
 		runtimeAppearanceError = null;
 		runtimeAppearanceRequestSequence += 1;
 		onRuntimeAppearanceAssetIdsChange?.([]);
 		scheduleCurrentSceneResourceUpdate();
+	}
+
+	function createRuntimeAppearancePreviewInstance(
+		resolved: ResolvedRuntimeAppearanceFacts,
+		spawnCameraFrame: SceneCameraFrame,
+	): RuntimeAppearancePreviewInstance {
+		runtimeAppearancePreviewSequence += 1;
+		return {
+			id: `${resolved.appearanceKey}/${runtimeAppearancePreviewSequence}`,
+			spawnCameraFrame,
+			setupAppearance: resolved.setupAppearance,
+			resolved,
+		};
 	}
 
 	function createRuntimeAppearanceResolvedFacts(
@@ -721,15 +761,20 @@
 		};
 	}
 
-	function collectRuntimeAppearanceAssetIds(
-		resolved: ResolvedRuntimeAppearanceFacts,
+	function collectRuntimeAppearancePreviewAssetIds(
+		previews: readonly RuntimeAppearancePreviewInstance[],
 	): string[] {
-		return uniqueSortedStrings([
-			`setup-model/${formatHex32(resolved.setupModelId).toLowerCase()}`,
-			...resolved.selectedGfxObjAssetIds,
-			...resolved.materialAssetIds,
-			...resolved.paletteAssetIds,
-		]);
+		return uniqueSortedStrings(
+			previews.flatMap((preview) => {
+				const { resolved } = preview;
+				return [
+					`setup-model/${formatHex32(resolved.setupModelId).toLowerCase()}`,
+					...resolved.selectedGfxObjAssetIds,
+					...resolved.materialAssetIds,
+					...resolved.paletteAssetIds,
+				];
+			}),
+		);
 	}
 
 	function describeRuntimeAppearanceCacheDiagnostics(): string {
@@ -1215,7 +1260,6 @@
 		browserCameraFrame = nextFrame;
 		cameraFrameApplyCount += 1;
 		syncControlledCameraFrame();
-		scheduleCurrentSceneResourceUpdate();
 		scheduleRenderedCameraHint(viewportPoint, immediate);
 	}
 

@@ -29,7 +29,7 @@ export function createIndexedMeshStandardMaterial(options: {
 		flatShading: true,
 		metalness: 0.02,
 		roughness: 0.88,
-		transparent: true,
+		transparent: opacity < 1,
 		opacity,
 	});
 	const shaderPatch = createIndexedMaterialShaderPatch({

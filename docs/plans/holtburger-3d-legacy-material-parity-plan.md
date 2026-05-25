@@ -1297,8 +1297,9 @@ Implementation targets:
 - Derive the preview appearance through `RuntimeAppearanceCache`, then hydrate
   any referenced true DAT assets through the existing asset loading path. Do not
   encode ObjDesc overrides as `setup-appearance/.../obj-desc/...` asset IDs.
-- Render the preview as an app-local object 1 meter in front of the active
-  browser camera. Do not mutate world state or send server spawn requests.
+- Render each preview as an app-local object spawned once 1 meter in front of
+  the active browser camera. Do not keep previews camera-sticky after spawn, do
+  not mutate world state, and do not send server spawn requests.
 - Request true asset dependencies through the existing asset hydration path so
   assets can be loaded from DAT when they are not already resident: selected
   `GfxObj`, material recipes, render textures, render surfaces, and palettes.
@@ -1336,10 +1337,11 @@ Implementation notes:
   reports the resulting true dependency asset IDs to the scene asset streamer.
   The streamer hydrates missing setup-model, selected gfx, material, and palette
   assets through the normal asset loading path.
-- The world display merges the resolved preview into the static-renderable
-  scene as an app-local object placed 1 meter in front of the active browser
-  camera. The preview does not mutate world state and does not send server spawn
-  requests.
+- The world display can merge multiple resolved previews into the
+  static-renderable scene as app-local objects. Each submit creates a distinct
+  preview instance with a captured spawn camera frame, so repeated submits of
+  the same `setupDid + ObjDesc` reuse the resolved appearance cache but still
+  create separate preview placements.
 - Preview diagnostics currently show cache counts, appearance key, selected
   part count, requested material/palette counts, texture-swap signature, and
   palette-view signature.
@@ -1361,9 +1363,12 @@ Course corrections:
 - The preview depends on the content runtime to apply texture swaps and
   animation-part changes. The frontend does not try to duplicate
   `ResolvedSetupAppearance` generation logic.
-- The active preview is retained through scene-streamer interest rather than by
+- Active previews are retained through scene-streamer interest rather than by
   pinning prepared assets manually. This keeps the resident cache as a reuse
   layer after hydration.
+- Camera movement should not re-run browser scene-resource derivation. Preview
+  placement captures the camera frame once at spawn time; subsequent movement
+  updates only the renderer camera and throttled camera hint path.
 
 Cleanup targets:
 
@@ -1541,6 +1546,21 @@ high-res DAT pack is mounted.
 Expected effect: optional high-res texture packs can improve fidelity without
 changing the legacy material graph or redefining the baseline retail parity
 target.
+
+## Cross-Cutting Followups
+
+- Define a shared render-facing runtime entity projection before client-mode
+  entity rendering lands. Browser preview objects currently flow through
+  browser-local preview state and are projected into the static-renderable
+  scene, but local previews and server-spawned entities should be mostly
+  isomorphic at the render layer: different authority/lifetime sources, same
+  render-facing entity shape.
+- Add a focused renderer performance phase before increasing runtime entity
+  density. Recent profiling showed low material program-key count but high
+  draw-call/static-geometry-group count, many instanced groups, and multi-pass
+  portal rendering. Future batching work should target geometry-group
+  reduction, visibility culling, and portal pass multiplication rather than
+  shader-program count.
 
 ## Suggested Order
 

@@ -344,12 +344,13 @@ function reportMaterialPlannerMismatch(options: {
 		return;
 	}
 
-	const visibleMaterialAssetIds = deriveVisibleMaterialAssetIdsForBrowserDestination({
-		browserDestination: options.browserDestination,
-		preparedByAssetId: options.preparedByAssetId,
-		pendingAssetIds: options.pendingAssetIds,
-		options: options.options,
-	});
+	const visibleMaterialAssetIds =
+		deriveVisibleMaterialAssetIdsForBrowserDestination({
+			browserDestination: options.browserDestination,
+			preparedByAssetId: options.preparedByAssetId,
+			pendingAssetIds: options.pendingAssetIds,
+			options: options.options,
+		});
 	if (visibleMaterialAssetIds.length === 0) {
 		return;
 	}

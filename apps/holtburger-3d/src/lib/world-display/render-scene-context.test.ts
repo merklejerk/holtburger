@@ -41,7 +41,9 @@ describe("render scene context", () => {
 	});
 });
 
-function createOutdoorDestination(landblockId: number): BrowserLocationSelection {
+function createOutdoorDestination(
+	landblockId: number,
+): BrowserLocationSelection {
 	return {
 		kind: "outdoor-location",
 		label: "Test outdoor destination",
@@ -55,7 +57,9 @@ function createOutdoorDestination(landblockId: number): BrowserLocationSelection
 	};
 }
 
-function createInteriorDestination(envCellId: number): BrowserLocationSelection {
+function createInteriorDestination(
+	envCellId: number,
+): BrowserLocationSelection {
 	return {
 		kind: "interior-cell",
 		label: "Test interior destination",

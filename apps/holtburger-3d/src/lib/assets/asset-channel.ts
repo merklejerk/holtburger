@@ -1,6 +1,4 @@
-import type {
-	AssetLookupRequestDto,
-} from "../host/contracts";
+import type { AssetLookupRequestDto } from "../host/contracts";
 import {
 	lookupBinaryAssetEnvelopes,
 	type BinaryAssetLookupEnvelopeDto,
@@ -246,7 +244,9 @@ export class AssetChannelController {
 		}
 	}
 
-	private postPrepareRequests(pendingRequests: readonly PendingAssetRequest[]): void {
+	private postPrepareRequests(
+		pendingRequests: readonly PendingAssetRequest[],
+	): void {
 		const message = {
 			type: "prepare-assets",
 			items: pendingRequests.map((pending) => ({

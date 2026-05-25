@@ -4,12 +4,14 @@ import {
 	describeMaterialAppearanceSignature,
 	type MaterialAppearanceContext,
 } from "./material-appearance";
+import { describeMaterialVariantSignature } from "./material-variants";
 import type { MaterialGeometrySlot } from "./static-renderable-geometry";
 
 export interface ResolvedMaterialSlot {
 	slotIndex: number;
 	surfaceId: number;
 	materialAssetId: string;
+	materialVariantSignature?: string | null;
 }
 
 export interface MaterialResourcePlan {
@@ -37,6 +39,7 @@ export function buildMaterialResourcePlan(options: {
 						slotIndex: 0,
 						surfaceId: 0,
 						materialAssetId: FALLBACK_MATERIAL_ASSET_ID,
+						materialVariantSignature: null,
 					},
 				];
 	const materials = slots.map((slot) =>
@@ -50,6 +53,7 @@ export function buildMaterialResourcePlan(options: {
 		materials,
 		geometrySlots: slots.map((slot, index) => ({
 			surfaceId: slot.slotIndex + 1,
+			materialVariantSignature: slot.materialVariantSignature ?? null,
 			materialIndex: index,
 		})),
 	};
@@ -61,8 +65,13 @@ function describeMaterialPlanSignature(
 ): string {
 	return [
 		describeMaterialAppearanceSignature(appearance),
-		...slots.map(
-			(slot) => `${slot.slotIndex}:${slot.surfaceId}:${slot.materialAssetId}`,
+		...slots.map((slot) =>
+			[
+				slot.slotIndex,
+				slot.surfaceId,
+				slot.materialAssetId,
+				describeMaterialVariantSignature(slot.materialVariantSignature),
+			].join(":"),
 		),
 	].join("|");
 }
@@ -70,11 +79,24 @@ function describeMaterialPlanSignature(
 function dedupeMaterialSlots(
 	slots: readonly ResolvedMaterialSlot[],
 ): ResolvedMaterialSlot[] {
-	const slotByIndex = new Map<number, ResolvedMaterialSlot>();
+	const slotByKey = new Map<string, ResolvedMaterialSlot>();
 	for (const slot of slots) {
-		slotByIndex.set(slot.slotIndex, slot);
+		slotByKey.set(describeMaterialSlotDedupeKey(slot), slot);
 	}
-	return [...slotByIndex.values()].sort(
-		(left, right) => left.slotIndex - right.slotIndex,
+	return [...slotByKey.values()].sort(
+		(left, right) =>
+			left.slotIndex - right.slotIndex ||
+			describeMaterialVariantSignature(
+				left.materialVariantSignature,
+			).localeCompare(
+				describeMaterialVariantSignature(right.materialVariantSignature),
+			),
 	);
+}
+
+function describeMaterialSlotDedupeKey(slot: ResolvedMaterialSlot): string {
+	return [
+		slot.slotIndex,
+		describeMaterialVariantSignature(slot.materialVariantSignature),
+	].join("|");
 }

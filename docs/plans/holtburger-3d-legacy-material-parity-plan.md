@@ -38,6 +38,9 @@ or new reference evidence proves it stale.
 - Static setup-model rendering requests and prefers prepared
   `setup-appearance/{setup_did}` payloads when available, while retaining raw
   setup-model part rendering as an explicit fallback.
+- Material plans, final material cache keys, and static renderable geometry
+  groups carry immutable material variant identity. Existing content normalizes
+  to the `base` variant until Phase 3 emits sampler-derived variants.
 
 ### Known Gaps
 
@@ -64,9 +67,9 @@ or new reference evidence proves it stale.
   not been validated against ACViewer or the retail decompile. Retail legacy
   `CSurface` rendering appears to choose wrap/clamp from polygon-side
   `stippling` bits, not by scanning emitted UV ranges. The likely missing parity
-  pieces are preserving those side-local sampler bits, validating UV
-  orientation, and ensuring repeated/clamped texture resources are cached
-  separately.
+  pieces are preserving those side-local sampler bits, emitting sampler-derived
+  material variants, validating UV orientation, and using the existing
+  repeated/clamped texture-resource and material-variant cache seams.
 - Optional high-res JPEG replacement is not implemented. The retail client has
   engine support for `client_highres.dat` and `PFID_CUSTOM_RAW_JPEG`, but this
   should be treated as optional mounted-pack support rather than baseline retail
@@ -257,10 +260,11 @@ following gaps should be addressed in order.
    object. Retail legacy polygons can use the same render surface through both
    clamped and repeated sampler modes, so Holtburger must produce distinct
    texture resources or texture clones keyed by sampling policy. Phase 1 handled
-   the texture-resource cache side. Phase 2.5 should handle material-plan and
-   geometry-group identity before Phase 3 changes wrap/clamp behavior;
-   texture-cache identity alone is not enough if one geometry group would
-   otherwise contain both clamped and repeated polygons for the same `CSurface`.
+   the texture-resource cache side. Phase 2.5 handled material-plan and
+   geometry-group identity. Phase 3 should now feed those seams with
+   stippling-derived sampler variants; texture-cache identity alone would not be
+   enough if one geometry group otherwise contained both clamped and repeated
+   polygons for the same `CSurface`.
 4. The current prepared render geometry emits UVs but does not carry the
    polygon-side legacy sampler bit that retail uses. Phase 3 should preserve the
    positive/negative-side wrap flag from `CPolygon.stippling` through prepared
@@ -673,26 +677,109 @@ slots.
 Goal: prepare material identity and geometry grouping for sampler-policy
 variation before Phase 3 changes UV/sampler behavior.
 
-- Extend material slot identity with a stable variant signature. The first
-  variant axis should be sampler policy; future axes include palette view,
-  texture swap, clipmap/scalar behavior, and other immutable material recipe
-  choices.
-- Include the effective material variant signature in material-plan signatures
-  and final Three material cache keys. Do not fold per-instance or time-varying
-  state, such as texture velocity offsets, into shared material cache keys.
-- Teach geometry group mapping to distinguish material variants, not only
-  `surfaceId`. One `CSurface` must be able to produce separate material indices
-  when polygons require different sampler policies.
-- Keep layered caches intact: texture resources remain keyed by render surface
-  plus sampler/upload policy, palette resources by palette view, indexed helpers
-  by index texture plus palette view plus sampler policy, and final materials by
-  resolved material recipe plus variant signature.
-- Add focused tests proving:
-  - material-plan signatures differ when sampler variants differ;
-  - geometry group mapping can split one `CSurface` into clamp and repeat
-    material slots;
-  - texture velocity or other future instance-state placeholders do not affect
-    shared material cache keys.
+Progress: implemented.
+
+Implemented changes:
+
+- Added `material-variants.ts` with a normalized immutable material variant
+  signature helper. Empty or missing variant signatures normalize to `base`.
+- Extended `ResolvedMaterialSlot` with optional `materialVariantSignature`.
+  Existing raw/static/setup appearance slots remain `base` by default.
+- Included material variant identity in material-plan signatures and final
+  Three material cache keys. Two slots that share the same material recipe and
+  appearance facts but differ by immutable variant signature now produce
+  separate cached materials.
+- Changed material slot deduping from `slotIndex` only to
+  `slotIndex + materialVariantSignature`, so one setup/GfxObj surface slot can
+  prepare separate clamp/repeat material entries.
+- Extended `MaterialGeometrySlot` and geometry group lookup with optional
+  `materialVariantSignature`. Grouping now resolves by
+  `surfaceId + materialVariantSignature`, not just `surfaceId`.
+- Added optional `materialVariantSignature` to prepared render triangle DTOs and
+  app-local prepared render geometry types. Rust/content does not emit it yet;
+  Phase 3 can populate it from polygon-side sampler metadata without another
+  browser-app contract reshuffle.
+- Kept the layered cache boundary intact: texture resources are still keyed by
+  render surface plus sampling policy, palette resources are unchanged, and
+  final materials are keyed by appearance plus material recipe plus variant
+  signature.
+- Added tests proving:
+  - material cache keys differ by immutable variant signature;
+  - material plans differ by variant signature;
+  - duplicate slot indices survive when variants differ;
+  - geometry grouping can split one `CSurface` into clamp/repeat material
+    groups when triangle variant metadata is present.
+
+Verification:
+
+- `npm run test:ts` passes with 44 test files and 231 tests.
+- `npm run check` passes with no Svelte or TypeScript diagnostics.
+- `npm run lint:ts` passes.
+- `npm run lint:dead` passes.
+- Touched files pass Prettier checks.
+
+Decisions and course corrections:
+
+- Variant signatures are intentionally plain stable strings for now. The first
+  concrete axis should be sampler policy in Phase 3, for example a signature
+  derived from the effective wrap/clamp policy. Future palette view, texture
+  swap, clipmap/scalar behavior, or other immutable material recipe choices can
+  join this identity without changing cache or geometry APIs again.
+- Phase 2.5 does not change visible sampler behavior. Existing geometry has no
+  `materialVariantSignature`, so current rendering remains on the normalized
+  `base` variant until Phase 3 emits real per-triangle/per-group sampler facts.
+- The optional triangle `materialVariantSignature` field is an app contract
+  shim for Phase 3. It is deliberately optional so existing content payloads
+  remain valid until `holtburger-content` starts emitting side-local sampler
+  metadata.
+- Per-instance and time-varying state remains outside shared material cache
+  keys. Texture velocity must still be represented as instance/part UV state,
+  not as a material variant.
+- No immediate interim phase is needed before Phase 3. The material identity
+  and geometry grouping seam exists; the next work is to feed it with
+  stippling-derived sampler metadata from content.
+
+Cleanup targets from Phase 2.5:
+
+- Phase 3 should replace the optional contract shim with real emitted
+  `materialVariantSignature` values from decoded polygon-side sampler metadata.
+- Consider replacing free-form variant strings with a tiny typed builder once
+  Phase 3 proves the exact sampler signature shape. Do not add broad variant
+  enums before the concrete axes settle.
+- Keep watch on `ResolvedMaterialSlot`: once palette view and texture swap
+  signatures are filled, this type may deserve a focused material-identity
+  helper rather than more inline string assembly in callers.
+- If Phase 3 needs both diagnostic `uvBounds` and production sampler variants,
+  keep the diagnostic UV summary out of final material cache keys unless it
+  affects immutable render behavior.
+
+Legacy shims:
+
+- `base` is the compatibility variant for all existing material slots and
+  triangles.
+- Prepared render triangle `materialVariantSignature` is optional until
+  `holtburger-content` emits it. Missing values must mean `base`, not
+  "unknown".
+- Current final materials are separated by variant identity even though variant
+  identity does not yet alter material construction. Phase 3 should supply
+  sampler-specific texture policies so separated materials can diverge in
+  actual GPU state.
+
+Refinements to future steps:
+
+- Phase 3 should derive a sampler variant signature from the retail
+  side-local `CPolygon.stippling` wrap bit and attach it to prepared render
+  triangles or material groups before `resolveMaterialPlan()`.
+- Phase 3 should use the Phase 1 `TextureSamplingPolicy` helpers to create the
+  actual clamp/repeat texture policy that corresponds to the material variant
+  signature. The signature and policy must stay in sync.
+- Phase 4 should add palette-view identity as another immutable material
+  variant or appearance signature axis only after derived palette resources are
+  implemented.
+- Phase 5 should decide whether texture swaps alter the appearance signature,
+  material variant signature, or both. The current expectation is that resolved
+  appearance texture-swap identity belongs in `MaterialAppearanceContext`, while
+  immutable per-slot render behavior stays in material variants.
 
 Expected effect: Phase 3 can add stippling-derived sampler metadata and
 wrap/clamp policy without also redesigning cache and geometry-group identity.

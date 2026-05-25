@@ -108,7 +108,7 @@ export class WorldMaterialResourceCache {
 			fallbackColorKey: options.fallbackColorKey,
 			createMaterial: ({ slot, fallbackColorKey }) =>
 				this.getMaterial({
-					materialAssetId: slot.materialAssetId,
+					slot,
 					appearance: options.appearance,
 					preparedByAssetId: options.preparedByAssetId,
 					fallbackColorKey,
@@ -136,19 +136,26 @@ export class WorldMaterialResourceCache {
 	}
 
 	private getMaterial(options: {
-		materialAssetId: string;
+		slot: ResolvedMaterialSlot;
 		appearance: MaterialAppearanceContext;
 		preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>;
 		fallbackColorKey: string;
 	}): Material {
-		const materialKey = describeMaterialCacheKey(options);
+		const materialKey = describeMaterialCacheKey({
+			appearance: options.appearance,
+			materialAssetId: options.slot.materialAssetId,
+			materialVariantSignature: options.slot.materialVariantSignature,
+			preparedByAssetId: options.preparedByAssetId,
+		});
 		const cached = this.materialRecords.get(materialKey);
 		if (cached) {
 			return cached.material;
 		}
 
 		const material = createMaterial({
-			...options,
+			materialAssetId: options.slot.materialAssetId,
+			preparedByAssetId: options.preparedByAssetId,
+			fallbackColorKey: options.fallbackColorKey,
 			resolveTexture: (renderSurface, samplingPolicy) =>
 				this.getTexture({ renderSurface, samplingPolicy }),
 			resolveIndexedTexture: (renderSurface, samplingPolicy) =>

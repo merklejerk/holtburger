@@ -80,6 +80,7 @@ const landblockClassificationValueSchema = z.enum(["outdoor", "dungeon"]);
 const preparedPolygonSetRenderTriangleDtoSchema = z.object({
 	polygonId: z.number().int().nonnegative(),
 	surfaceId: z.number().int().nullable(),
+	materialVariantSignature: z.string().min(1).nullable().optional(),
 	firstVertex: z.number().int().nonnegative(),
 });
 

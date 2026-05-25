@@ -40,11 +40,112 @@ describe("world material resource cache", () => {
 		});
 
 		expect(plan.signature).toBe(
-			`base|parts=base|textures=base|palette=base|0:134217729:${materialAssetId}`,
+			`base|parts=base|textures=base|palette=base|0:134217729:${materialAssetId}:variant=base`,
 		);
-		expect(plan.geometrySlots).toEqual([{ surfaceId: 1, materialIndex: 0 }]);
+		expect(plan.geometrySlots).toEqual([
+			{ surfaceId: 1, materialVariantSignature: null, materialIndex: 0 },
+		]);
 		expect(plan.materials).toHaveLength(1);
 		expect(plan.materials[0]).toBeInstanceOf(MeshStandardMaterial);
+		cache.dispose();
+	});
+
+	it("separates material plans and material cache entries by variant signature", () => {
+		const cache = new WorldMaterialResourceCache();
+		const materialAssetId = formatMaterialAssetId(0x08000001);
+		const preparedByAssetId = {
+			[materialAssetId]: createPreparedAsset(
+				materialAssetId,
+				createSolidMaterialRecipe(0x08000001, 0xff336699),
+			),
+		};
+		const clampPlan = cache.resolveMaterialPlan({
+			slots: [
+				{
+					slotIndex: 0,
+					surfaceId: 0x08000001,
+					materialAssetId,
+					materialVariantSignature: "sampler=clamp",
+				},
+			],
+			appearance: createBaseMaterialAppearanceContext("base"),
+			preparedByAssetId,
+			fallbackColorKey: "part",
+		});
+		const repeatPlan = cache.resolveMaterialPlan({
+			slots: [
+				{
+					slotIndex: 0,
+					surfaceId: 0x08000001,
+					materialAssetId,
+					materialVariantSignature: "sampler=repeat",
+				},
+			],
+			appearance: createBaseMaterialAppearanceContext("base"),
+			preparedByAssetId,
+			fallbackColorKey: "part",
+		});
+
+		expect(clampPlan.signature).not.toBe(repeatPlan.signature);
+		expect(clampPlan.geometrySlots).toEqual([
+			{
+				surfaceId: 1,
+				materialVariantSignature: "sampler=clamp",
+				materialIndex: 0,
+			},
+		]);
+		expect(repeatPlan.geometrySlots).toEqual([
+			{
+				surfaceId: 1,
+				materialVariantSignature: "sampler=repeat",
+				materialIndex: 0,
+			},
+		]);
+		expect(clampPlan.materials[0]).not.toBe(repeatPlan.materials[0]);
+		cache.dispose();
+	});
+
+	it("keeps duplicate slot indices when variants differ", () => {
+		const cache = new WorldMaterialResourceCache();
+		const materialAssetId = formatMaterialAssetId(0x08000001);
+		const plan = cache.resolveMaterialPlan({
+			slots: [
+				{
+					slotIndex: 0,
+					surfaceId: 0x08000001,
+					materialAssetId,
+					materialVariantSignature: "sampler=clamp",
+				},
+				{
+					slotIndex: 0,
+					surfaceId: 0x08000001,
+					materialAssetId,
+					materialVariantSignature: "sampler=repeat",
+				},
+			],
+			appearance: createBaseMaterialAppearanceContext("base"),
+			preparedByAssetId: {
+				[materialAssetId]: createPreparedAsset(
+					materialAssetId,
+					createSolidMaterialRecipe(0x08000001, 0xff336699),
+				),
+			},
+			fallbackColorKey: "part",
+		});
+
+		expect(plan.materials).toHaveLength(2);
+		expect(plan.geometrySlots).toEqual([
+			{
+				surfaceId: 1,
+				materialVariantSignature: "sampler=clamp",
+				materialIndex: 0,
+			},
+			{
+				surfaceId: 1,
+				materialVariantSignature: "sampler=repeat",
+				materialIndex: 1,
+			},
+		]);
 		cache.dispose();
 	});
 

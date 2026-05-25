@@ -96,6 +96,60 @@ describe("static renderable geometry", () => {
 			{ start: 6, count: 3, materialIndex: 1 },
 		]);
 	});
+
+	it("splits material groups by surface id and material variant", () => {
+		const geometry = buildGfxObjGeometry(
+			{
+				sourceId: 1,
+				vertexCount: 9,
+				triangleCount: 3,
+				positions: new Float32Array(27),
+				normals: new Float32Array(27),
+				uvs: new Float32Array(18),
+				triangles: [
+					{
+						polygonId: 0,
+						surfaceId: 0x08000001,
+						materialVariantSignature: "sampler=clamp",
+						firstVertex: 0,
+					},
+					{
+						polygonId: 1,
+						surfaceId: 0x08000001,
+						materialVariantSignature: "sampler=repeat",
+						firstVertex: 3,
+					},
+					{
+						polygonId: 2,
+						surfaceId: 0x08000001,
+						materialVariantSignature: "sampler=repeat",
+						firstVertex: 6,
+					},
+				],
+				surfaceIds: [0x08000001],
+				invalidPolygons: [],
+				skippedPolygonCount: 0,
+				bounds: null,
+			},
+			[
+				{
+					surfaceId: 0x08000001,
+					materialVariantSignature: "sampler=clamp",
+					materialIndex: 0,
+				},
+				{
+					surfaceId: 0x08000001,
+					materialVariantSignature: "sampler=repeat",
+					materialIndex: 1,
+				},
+			],
+		);
+
+		expect(geometry.groups).toEqual([
+			{ start: 0, count: 3, materialIndex: 0 },
+			{ start: 3, count: 6, materialIndex: 1 },
+		]);
+	});
 });
 
 function createPlacement(origin: { x: number; y: number; z: number }) {

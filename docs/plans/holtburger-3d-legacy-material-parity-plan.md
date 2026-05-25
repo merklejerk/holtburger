@@ -35,6 +35,9 @@ or new reference evidence proves it stale.
 - Prepared `setup-appearance/{setup_did}` payloads exist and preserve base
   setup part material slots, texture changes, animation part changes,
   `paletteId`, and `subPalettes`.
+- Prepared setup appearances now support deterministic `ObjDesc` variant asset
+  IDs under `setup-appearance/{setup_did}/obj-desc/...`; the host routes those
+  variants through the same content resolver as base setup appearances.
 - Static setup-model rendering requests and prefers prepared
   `setup-appearance/{setup_did}` payloads when available, while retaining raw
   setup-model part rendering as an explicit fallback.
@@ -50,13 +53,16 @@ or new reference evidence proves it stale.
   views from `MaterialAppearanceContext`: an appearance `paletteId` overrides
   the material/render-surface selected base palette, and appearance subpalettes
   are composed into a per-view palette texture before shader binding.
+- Setup appearance material contexts fill `textureSwapSignature` from resolved
+  `ObjDesc.texture_changes`, so material cache keys now distinguish texture
+  swap variants as well as selected parts and palette views.
 
 ### Known Gaps
 
-- Runtime/server `ObjDesc` variants are still not scheduled as distinct
-  `setup-appearance` inputs, so most current static setup appearances use the
-  base DAT snapshot and therefore have no runtime palette or texture overrides
-  to apply.
+- Live runtime object integration still needs a producer that serializes
+  server/client `ObjDesc` values into the canonical setup-appearance variant
+  asset ID. The content and renderer route exists, but the app still mostly
+  discovers base setup snapshots from static DAT scene sources.
 - `ClothingTable`-driven appearance generation is not implemented. The lower
   level `ObjDesc + Setup` path should come first; clothing tables should later
   produce `ObjDesc` inputs in `holtburger-content`, not renderer-local clothing
@@ -1015,20 +1021,123 @@ can use the same indexed render surfaces with different palette views.
 Goal: ensure `ObjDesc.texture_changes` and `anim_part_changes` affect static and
 runtime renderables consistently.
 
-- Extend asset IDs or renderer inputs so runtime objects can request
-  setup appearances with real `ObjDesc` data, not only base
-  `setup-appearance/{setup_did}`.
-- Keep content resolution in `holtburger-content`; keep renderer material
-  policy in `apps/holtburger-3d`.
-- Make material cache signatures include selected part IDs, texture swap
-  identity, and palette view identity.
-- Treat this as the canonical path for resolved appearances:
-  `ObjDesc + Setup -> setup-appearance payload`. Clothing tables should later
-  feed this path by producing an `ObjDesc`, not by adding renderer-specific
-  clothing state.
-- Add integration tests using the existing
-  `resolve_setup_appearance_with_texture_and_part_overrides` coverage as the
-  Rust-side truth.
+Progress: implemented.
+
+Implemented changes:
+
+- Changed `ContentAssetRequest::SetupAppearance` from a setup-model ID only to
+  a typed `SetupAppearanceRequest { setup_model_id, appearance }`. The
+  appearance input is the existing `MaterialAppearanceInput`, so content keeps
+  owning `ObjDesc + Setup -> ResolvedSetupAppearance`.
+- Added deterministic app/host asset IDs for runtime appearance variants:
+  `setup-appearance/{setupDid}/obj-desc/...`. Supported segments are:
+  - `pal-{paletteId8}`
+  - `sub-{subPaletteId8}-{offsetHex}-{numColorsHex}`
+  - `tex-{partIndexHex}-{oldTextureId8}-{newTextureId8}`
+  - `anim-{partIndexHex}-{partId8}`
+- Kept `setup-appearance/{setupDid}` as the base appearance route and mapped it
+  to `MaterialAppearanceInput::default()`.
+- The Tauri adapter parses variant IDs into `ObjDesc` and rejects wrong DID
+  classes: setup IDs must be `0x02`, palette IDs `0x04`, texture IDs `0x05`,
+  and animation part model IDs `0x01`.
+- The asset worker now recognizes setup-appearance variant IDs as ordinary
+  route-matched setup appearance payloads.
+- Scene request planning treats explicit setup-appearance variant source IDs as
+  renderable sources. Once the variant payload is prepared, the planner requests
+  its selected part `GfxObj` dependencies and material dependencies.
+- Hydration policy now classifies setup-appearance variants as direct static
+  renderable roots. This keeps the streaming sync key sensitive to prepared
+  variant payloads, so follow-up selected-part requests are not stranded behind
+  an unchanged scene-interest key.
+- `createSetupAppearanceMaterialAppearanceContext()` now fills
+  `textureSwapSignature` from prepared `textureChanges`; final material cache
+  keys already include that appearance signature.
+- Added `Hash` derives for `ObjDesc`, its component records, and
+  `MaterialAppearanceInput` so setup-appearance variant requests can safely
+  participate in the existing shared content asset runtime cache.
+- Added focused Rust and TypeScript tests for variant ID parsing, host lookup
+  routing, direct renderable hydration, scene dependency planning, and texture
+  swap signatures on static renderables.
+- Cleaned up an unrelated clippy failure in
+  `landblock_scene_assets.rs` by grouping polygon render output buffers into a
+  helper struct. This was needed to keep `cargo clippy -D warnings` green after
+  the toolchain flagged the existing helper as too argument-heavy.
+
+Verification:
+
+- `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml` passes
+  with 16 tests.
+- `cargo clippy --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml
+  --all-targets -- -D warnings` passes.
+- `npm run test:ts` passes with 45 test files and 240 tests.
+- `npm run check` passes with no Svelte or TypeScript diagnostics.
+- `npm run lint:ts` passes.
+- `npm run lint:dead` passes.
+- `git diff --check` passes.
+- `npm run format:check` still fails on pre-existing unrelated formatting
+  drift in ten app files. Touched TypeScript files were formatted with the app
+  Prettier install.
+
+Decisions and course corrections:
+
+- The canonical appearance identity is now the setup-appearance asset ID, not a
+  renderer-only side channel. Runtime/server objects should request the
+  deterministic variant ID once they can serialize their `ObjDesc`.
+- The variant ID intentionally preserves legacy DID classes and raw change
+  facts rather than hashing or base64-encoding the `ObjDesc`. That keeps debug
+  traces inspectable while still being deterministic enough for cache keys.
+- Texture swap identity belongs in `MaterialAppearanceContext`, alongside
+  selected part and palette-view identity. It does not belong in
+  `materialVariantSignature`, which remains reserved for immutable per-slot
+  render behavior such as sampler policy.
+- The current route is a data bridge, not a clothing-system implementation.
+  `ClothingTable` should later produce the same `ObjDesc` input and reuse this
+  path.
+- No immediate interim phase is required before Phase 6. The remaining gap is
+  a producer for live runtime `ObjDesc` values, not a renderer/content bridge.
+
+Cleanup targets from Phase 5:
+
+- Add a small shared setup-appearance asset ID formatter when the first runtime
+  object producer lands. Today only the parser is needed; duplicating string
+  assembly in future runtime code would create drift risk.
+- Consider tightening the variant grammar if runtime `ObjDesc` values can
+  contain duplicate texture-change records for the same part/old texture. The
+  resolver currently preserves order and content; the asset ID remains valid
+  but duplicate semantics should be proven against the client before relying on
+  them.
+- Consolidate material/palette asset ID formatting helpers once Phase 6 starts
+  emitting clothing-generated appearance requests.
+- Keep the clippy cleanup in `landblock_scene_assets.rs` as a small quality
+  correction; it introduced no legacy shim and should not affect Phase 6.
+
+Legacy shims:
+
+- Raw setup-model part rendering remains the fallback for base setup sources
+  while the corresponding setup-appearance payload is missing, pending, or
+  failed.
+- `setup-appearance/{setupDid}` remains a compatibility base route for DAT
+  static snapshots with no runtime `ObjDesc`.
+- Browser DTOs still accept older setup-appearance payloads with empty
+  `textureChanges`, `paletteId`, or `subPalettes`; empty facts normalize to
+  `textures=base` and `palette=base`.
+- App-local setup-appearance variant IDs are currently parser-only on the Rust
+  side. A future runtime producer should use a single formatter rather than
+  hand-building IDs.
+
+Refinements to future steps:
+
+- Phase 6 should focus on `ClothingTable -> ObjDesc` generation in
+  `holtburger-content`, then feed the Phase 5 setup-appearance variant route.
+  Do not introduce renderer-local clothing state.
+- Phase 6 should also add the shared variant formatter mentioned above if it
+  becomes the first code path to author non-base setup-appearance requests.
+- Texture animation remains distinct from texture swaps. A later animation
+  phase should drive per-instance/per-part UV offsets and should not mutate
+  setup-appearance asset identity unless the selected part or texture map facts
+  actually change.
+- Modern material DATs remain explicitly deferred; this phase only completed
+  legacy setup appearance parity.
 
 Expected effect: appearance changes should select the right mesh parts,
 textures, and palettes without mutating base DAT material definitions.

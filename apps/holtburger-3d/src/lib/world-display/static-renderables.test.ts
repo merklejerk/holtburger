@@ -105,6 +105,13 @@ describe("static renderables", () => {
 				gfxObjId: appearanceGfxObjId,
 				materialAssetId: "material/080000aa",
 				surfaceId: 0x080000aa,
+				textureChanges: [
+					{
+						partIndex: 0,
+						oldTexture: 0x05000001,
+						newTexture: 0x05000002,
+					},
+				],
 			}),
 			createGfxObjRecord(baseGfxObjId, [0x08000001]),
 			createGfxObjRecord(appearanceGfxObjId, [0x08000002]),
@@ -120,6 +127,9 @@ describe("static renderables", () => {
 		expect(part?.materialAppearanceKey).toBe("setup-appearance/02000001");
 		expect(part?.materialAppearanceContext.selectedPartsSignature).toContain(
 			"gfx-obj/01000002",
+		);
+		expect(part?.materialAppearanceContext.textureSwapSignature).toBe(
+			"0:05000001>05000002",
 		);
 		expect(part?.materialSlots).toEqual([
 			{
@@ -419,6 +429,7 @@ function createSetupAppearanceRecord(options: {
 	gfxObjId: number;
 	surfaceId: number;
 	materialAssetId: string;
+	textureChanges?: PreparedSetupAppearancePayload["textureChanges"];
 }): PreparedAssetRecord {
 	const assetId = formatSetupAppearanceAssetId(options.setupModelId);
 	return {
@@ -451,7 +462,7 @@ function createSetupAppearanceRecord(options: {
 					],
 				},
 			],
-			textureChanges: [],
+			textureChanges: options.textureChanges ?? [],
 			animPartChanges: [],
 			paletteId: null,
 			subPalettes: [],

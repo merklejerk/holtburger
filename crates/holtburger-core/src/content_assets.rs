@@ -26,10 +26,25 @@ pub enum ContentAssetRequest {
     GfxObj(u32),
     SetupModel(u32),
     MaterialRecipe(u32),
-    SetupAppearance(u32),
+    SetupAppearance(SetupAppearanceRequest),
     RenderTexture(u32),
     RenderSurface(u32),
     Palette(u32),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SetupAppearanceRequest {
+    pub setup_model_id: u32,
+    pub appearance: MaterialAppearanceInput,
+}
+
+impl SetupAppearanceRequest {
+    pub fn base(setup_model_id: u32) -> Self {
+        Self {
+            setup_model_id,
+            appearance: MaterialAppearanceInput::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -131,13 +146,15 @@ impl ContentAssetService {
                     || format!("Could not resolve material recipe 0x{surface_id:08X}"),
                 )?),
             )),
-            ContentAssetRequest::SetupAppearance(setup_model_id) => {
+            ContentAssetRequest::SetupAppearance(request) => {
+                let setup_model_id = request.setup_model_id;
                 Ok(ContentAsset::SetupAppearance(Box::new(
                     self.content
-                        .resolve_setup_appearance(setup_model_id, MaterialAppearanceInput::default())
+                        .resolve_setup_appearance(setup_model_id, request.appearance)
                         .with_context(|| {
                             format!(
-                                "Could not resolve setup appearance for SetupModel 0x{setup_model_id:08X}"
+                                "Could not resolve setup appearance for SetupModel 0x{:08X}",
+                                setup_model_id
                             )
                         })?,
                 )))

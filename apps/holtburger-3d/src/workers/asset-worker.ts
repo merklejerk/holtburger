@@ -31,6 +31,7 @@ import {
 	setupModelPayloadDtoSchema,
 	terrainMaterialPayloadDtoSchema,
 } from "../lib/host/contracts";
+import { isSetupAppearanceAssetId } from "../lib/assets/asset-hydration-policy";
 import { decodeBinaryAssetBatchEnvelope } from "../lib/host/binary-asset-envelope";
 import type {
 	AssetResidencyKind,
@@ -295,7 +296,7 @@ function prepareRouteMatchedAssetPayload(
 		return prepareSetupModel(request, response, payload);
 	}
 
-	if (/^setup-appearance\/[0-9a-fA-F]{8}$/.test(request.assetId)) {
+	if (isSetupAppearanceAssetId(request.assetId)) {
 		const payload = parseExpectedRoutePayload(
 			request.assetId,
 			"setup-appearance",

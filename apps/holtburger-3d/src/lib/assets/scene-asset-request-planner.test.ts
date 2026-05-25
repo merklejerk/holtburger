@@ -214,6 +214,43 @@ describe("scene asset request planner", () => {
 		]);
 	});
 
+	it("requests setup appearance variant source dependencies when prepared", () => {
+		const destination = parseBrowserLocationInput("016c0155");
+		expect(destination).not.toBeNull();
+
+		const setupAppearanceAssetId =
+			"setup-appearance/02000001/obj-desc/tex-00-05000001-05000002";
+		const preparedTopology = createPreparedTopology(0x016cffff, [0x016c0155]);
+		const preparedEnvCell = createPreparedEnvCell(
+			0x016c0155,
+			[],
+			[setupAppearanceAssetId],
+		);
+		const setupAppearance = createPreparedSetupAppearance(
+			setupAppearanceAssetId,
+			"gfx-obj/01000003",
+			["material/08000099"],
+		);
+		const requests = createSceneCoverageRequests(
+			{
+				requestRevision: 6,
+				browserDestination: destination,
+				preparedByAssetId: {
+					[preparedTopology.request.assetId]: preparedTopology,
+					[preparedEnvCell.request.assetId]: preparedEnvCell,
+					[setupAppearance.request.assetId]: setupAppearance,
+				},
+				pendingAssetIds: [],
+			},
+			"streaming",
+		);
+
+		expect(requests.map((request) => request.assetId)).toEqual([
+			"gfx-obj/01000003",
+			"material/08000099",
+		]);
+	});
+
 	it("requests outdoor-linked env-cell static dependencies", () => {
 		const destination = parseBrowserLocationInput("da55", "manual", "outdoor");
 		expect(destination).not.toBeNull();

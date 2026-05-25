@@ -103,7 +103,7 @@ function createStaticRenderableSceneModel(
 		activeLandblockIds: [],
 		sourceInstances: [],
 		parts: [],
-		partsByRenderDomainChunkAndGfxAssetId: new Map(
+		partsByRenderGroupKey: new Map(
 			groups.map(([groupKey, renderDomain]) => [
 				groupKey,
 				[createStaticRenderablePart(renderDomain)],

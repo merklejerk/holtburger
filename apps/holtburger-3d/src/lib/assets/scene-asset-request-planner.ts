@@ -152,17 +152,30 @@ export function deriveVisibleMaterialAssetIdsForBrowserDestination(input: {
 	pendingAssetIds?: string[];
 	options?: OutdoorSceneRequestOptions;
 }): string[] {
+	const { preparedByAssetId, pendingAssetIds = [] } = input;
+	const materialAssetIds =
+		deriveAllVisibleMaterialAssetIdsForBrowserDestination(input);
+	const pendingAssetIdSet = new Set(pendingAssetIds);
+	return materialAssetIds.filter(
+		(assetId) => !preparedByAssetId[assetId] && !pendingAssetIdSet.has(assetId),
+	);
+}
+
+export function deriveAllVisibleMaterialAssetIdsForBrowserDestination(input: {
+	browserDestination: BrowserLocationSelection | null;
+	preparedByAssetId: Record<string, PreparedAssetRecord>;
+	options?: OutdoorSceneRequestOptions;
+}): string[] {
 	const {
 		browserDestination,
 		preparedByAssetId,
-		pendingAssetIds = [],
 		options = DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS,
 	} = input;
 	if (!browserDestination) {
 		return [];
 	}
 
-	const materialAssetIds = isIndoorBrowserDestination(browserDestination)
+	return isIndoorBrowserDestination(browserDestination)
 		? collectIndoorVisibleMaterialAssetIds(
 				browserDestination,
 				preparedByAssetId,
@@ -172,10 +185,6 @@ export function deriveVisibleMaterialAssetIdsForBrowserDestination(input: {
 				preparedByAssetId,
 				options,
 			);
-	const pendingAssetIdSet = new Set(pendingAssetIds);
-	return materialAssetIds.filter(
-		(assetId) => !preparedByAssetId[assetId] && !pendingAssetIdSet.has(assetId),
-	);
 }
 
 function createOutdoorCoverageRequestsForInterest(
@@ -339,18 +348,16 @@ function createStaticRenderableAssetRequests(
 		outdoorSourceAssetIds,
 		"gfxObjAssetIds",
 	);
-	const envCellStaticSourceAssetIds =
-		collectPreparedDependencyAssetIds(
-			preparedByAssetId,
-			linkedInteriorCoverage.envCellIds.map(formatEnvCellAssetId),
-			"renderableSourceAssetIds",
-		);
-	const envCellSetupModelPartGfxAssetIds =
-		collectPreparedDependencyAssetIds(
-			preparedByAssetId,
-			envCellStaticSourceAssetIds,
-			"gfxObjAssetIds",
-		);
+	const envCellStaticSourceAssetIds = collectPreparedDependencyAssetIds(
+		preparedByAssetId,
+		linkedInteriorCoverage.envCellIds.map(formatEnvCellAssetId),
+		"renderableSourceAssetIds",
+	);
+	const envCellSetupModelPartGfxAssetIds = collectPreparedDependencyAssetIds(
+		preparedByAssetId,
+		envCellStaticSourceAssetIds,
+		"gfxObjAssetIds",
+	);
 	const materialAssetIds = collectStaticRenderableMaterialAssetIds(
 		preparedByAssetId,
 		[
@@ -454,12 +461,11 @@ function createIndoorStaticRenderableAssetRequests(
 		preparedByAssetId,
 		pendingAssetIds,
 	);
-	const envCellStaticSourceAssetIds =
-		collectPreparedDependencyAssetIds(
-			preparedByAssetId,
-			activeEnvCellIds.map(formatEnvCellAssetId),
-			"renderableSourceAssetIds",
-		);
+	const envCellStaticSourceAssetIds = collectPreparedDependencyAssetIds(
+		preparedByAssetId,
+		activeEnvCellIds.map(formatEnvCellAssetId),
+		"renderableSourceAssetIds",
+	);
 	const setupModelPartGfxAssetIds = collectPreparedDependencyAssetIds(
 		preparedByAssetId,
 		envCellStaticSourceAssetIds,
@@ -516,12 +522,11 @@ function collectIndoorVisibleMaterialAssetIds(
 		),
 		preparedByAssetId,
 	).envCellIds;
-	const envCellStaticSourceAssetIds =
-		collectPreparedDependencyAssetIds(
-			preparedByAssetId,
-			activeEnvCellIds.map(formatEnvCellAssetId),
-			"renderableSourceAssetIds",
-		);
+	const envCellStaticSourceAssetIds = collectPreparedDependencyAssetIds(
+		preparedByAssetId,
+		activeEnvCellIds.map(formatEnvCellAssetId),
+		"renderableSourceAssetIds",
+	);
 	const setupModelPartGfxAssetIds = collectPreparedDependencyAssetIds(
 		preparedByAssetId,
 		envCellStaticSourceAssetIds,
@@ -569,18 +574,16 @@ function collectOutdoorVisibleMaterialAssetIds(
 		outdoorSourceAssetIds,
 		"gfxObjAssetIds",
 	);
-	const envCellStaticSourceAssetIds =
-		collectPreparedDependencyAssetIds(
-			preparedByAssetId,
-			linkedInteriorCoverage.envCellIds.map(formatEnvCellAssetId),
-			"renderableSourceAssetIds",
-		);
-	const envCellSetupModelPartGfxAssetIds =
-		collectPreparedDependencyAssetIds(
-			preparedByAssetId,
-			envCellStaticSourceAssetIds,
-			"gfxObjAssetIds",
-		);
+	const envCellStaticSourceAssetIds = collectPreparedDependencyAssetIds(
+		preparedByAssetId,
+		linkedInteriorCoverage.envCellIds.map(formatEnvCellAssetId),
+		"renderableSourceAssetIds",
+	);
+	const envCellSetupModelPartGfxAssetIds = collectPreparedDependencyAssetIds(
+		preparedByAssetId,
+		envCellStaticSourceAssetIds,
+		"gfxObjAssetIds",
+	);
 	return collectStaticRenderableMaterialAssetIds(
 		preparedByAssetId,
 		[

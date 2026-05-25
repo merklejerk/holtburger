@@ -8,6 +8,7 @@ import {
 import type { PreparedMaterialRecipePayload } from "./types";
 import type { AssetChannelState, PreparedAssetRecord } from "./types";
 import {
+	deriveAllVisibleMaterialAssetIdsForBrowserDestination,
 	deriveVisibleMaterialAssetIdsForBrowserDestination,
 	type OutdoorSceneRequestOptions,
 } from "./scene-asset-request-planner";
@@ -53,6 +54,12 @@ export function describeMaterialAssetDiagnostics({
 	options,
 }: MaterialDiagnosticInput): string {
 	const pendingAssetIds = derivePendingMaterialPipelineAssetIds(assetState);
+	const visibleMaterialAssetIds =
+		deriveAllVisibleMaterialAssetIdsForBrowserDestination({
+			browserDestination,
+			preparedByAssetId: assetState.preparedByAssetId,
+			options,
+		});
 	const missingVisibleMaterialAssetIds =
 		deriveVisibleMaterialAssetIdsForBrowserDestination({
 			browserDestination,
@@ -82,6 +89,7 @@ export function describeMaterialAssetDiagnostics({
 	const indexedSummary = summarizeIndexedMaterialDiagnostics(
 		materialRecipes,
 		assetState.preparedByAssetId,
+		browserDestination === null ? null : visibleMaterialAssetIds,
 	);
 
 	return [
@@ -131,7 +139,10 @@ function summarizeMissingMaterialDependencies(
 function summarizeIndexedMaterialDiagnostics(
 	recipes: readonly PreparedMaterialRecipePayload[],
 	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>,
+	visibleMaterialAssetIds: readonly string[] | null,
 ): IndexedMaterialDiagnosticSummary {
+	const visibleMaterialAssetIdSet =
+		visibleMaterialAssetIds === null ? null : new Set(visibleMaterialAssetIds);
 	const indexedMaterialAssetIds = new Set<string>();
 	const indexedSurfaceAssetIdsByFormat: Record<
 		IndexedTextureFormat,
@@ -151,6 +162,13 @@ function summarizeIndexedMaterialDiagnostics(
 	};
 
 	for (const recipe of recipes) {
+		const materialAssetId = formatMaterialAssetId(recipe.surfaceId);
+		if (
+			visibleMaterialAssetIdSet !== null &&
+			!visibleMaterialAssetIdSet.has(materialAssetId)
+		) {
+			continue;
+		}
 		for (const renderSurfaceAssetId of textureCandidateRenderSurfaceAssetIds(
 			recipe,
 		)) {
@@ -164,7 +182,7 @@ function summarizeIndexedMaterialDiagnostics(
 				continue;
 			}
 
-			indexedMaterialAssetIds.add(formatMaterialAssetId(recipe.surfaceId));
+			indexedMaterialAssetIds.add(materialAssetId);
 			indexedSurfaceAssetIdsByFormat[format].add(renderSurfaceAssetId);
 
 			const paletteSelection = selectIndexedPalette(recipe, renderSurface);

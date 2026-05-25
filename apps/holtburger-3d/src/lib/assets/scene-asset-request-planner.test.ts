@@ -10,6 +10,7 @@ import {
 } from "../landblocks";
 import {
 	createSceneCoverageRequests,
+	deriveAllVisibleMaterialAssetIdsForBrowserDestination,
 	deriveSceneCoverageAssetIds,
 } from "./scene-asset-request-planner";
 import type { PreparedAssetRecord } from "./types";
@@ -253,6 +254,16 @@ describe("scene asset request planner", () => {
 				priority: "streaming",
 			},
 		]);
+		expect(
+			deriveAllVisibleMaterialAssetIdsForBrowserDestination({
+				browserDestination: destination,
+				preparedByAssetId: {
+					[preparedTopology.request.assetId]: preparedTopology,
+					[preparedEnvCell.request.assetId]: preparedEnvCell,
+					[gfxObj.request.assetId]: gfxObj,
+				},
+			}),
+		).toEqual(["material/0800006c", "material/0800007e"]);
 	});
 
 	it("requests material graphs for active structured interior cell surfaces", () => {

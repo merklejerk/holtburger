@@ -452,7 +452,7 @@ function describeStaticRenderableSceneSignature(
 		`landblocks=${scene.activeLandblockIds.join(",")}`,
 		`sources=${scene.sourceInstances.length}`,
 		`parts=${scene.parts.length}`,
-		`groups=${scene.partsByRenderDomainChunkAndGfxAssetId.size}`,
+		`groups=${scene.partsByRenderGroupKey.size}`,
 		`missingSources=${scene.missingSourceAssetIds.join(",")}`,
 		`missingGfx=${scene.missingGfxAssetIds.join(",")}`,
 	].join(";");
@@ -669,36 +669,40 @@ function reportPreparedOutdoorAssetsNotRendered({
 	}
 	lastPreparedOutdoorAssetsNotRenderedSignature = signature;
 
-	console.error("[holtburger-3d][render-starved][prepared-outdoor-not-rendered]", {
-		message:
-			"Outdoor browser destination has prepared outdoor coverage but no terrain tiles or static renderable parts reached the renderer.",
-		destination: input.browserDestination,
-		sceneContext: renderSceneContext,
-		expectedOutdoorAssetIds,
-		preparedOutdoorAssetIds,
-		missingOutdoorAssetIds: expectedOutdoorAssetIds.filter(
-			(assetId) => !input.assetState.preparedByAssetId[assetId],
-		),
-		preparedAssetCounts: countPreparedAssetsByKind(
-			input.assetState.preparedByAssetId,
-		),
-		recentRelevantActivity,
-		recentAssetActivity: input.assetState.history,
-		activeRequest: input.assetState.activeRequest,
-		assetStatus: input.assetState.status,
-		assetErrorMessage: input.assetState.errorMessage,
-		cacheDiagnostics: input.assetState.cacheDiagnostics,
-		renderInputCounts: {
-			terrainTiles: terrainScene.tiles.length,
-			staticSourceInstances: staticRenderableScene.sourceInstances.length,
-			staticParts: staticRenderableScene.parts.length,
-			missingStaticSourceAssetIds:
-				staticRenderableScene.missingSourceAssetIds.length,
-			missingStaticGfxAssetIds: staticRenderableScene.missingGfxAssetIds.length,
-			structuredInteriorCells: structuredInteriorScene.cells.length,
-			activeRenderChunks: activeRenderChunkTransforms.length,
+	console.error(
+		"[holtburger-3d][render-starved][prepared-outdoor-not-rendered]",
+		{
+			message:
+				"Outdoor browser destination has prepared outdoor coverage but no terrain tiles or static renderable parts reached the renderer.",
+			destination: input.browserDestination,
+			sceneContext: renderSceneContext,
+			expectedOutdoorAssetIds,
+			preparedOutdoorAssetIds,
+			missingOutdoorAssetIds: expectedOutdoorAssetIds.filter(
+				(assetId) => !input.assetState.preparedByAssetId[assetId],
+			),
+			preparedAssetCounts: countPreparedAssetsByKind(
+				input.assetState.preparedByAssetId,
+			),
+			recentRelevantActivity,
+			recentAssetActivity: input.assetState.history,
+			activeRequest: input.assetState.activeRequest,
+			assetStatus: input.assetState.status,
+			assetErrorMessage: input.assetState.errorMessage,
+			cacheDiagnostics: input.assetState.cacheDiagnostics,
+			renderInputCounts: {
+				terrainTiles: terrainScene.tiles.length,
+				staticSourceInstances: staticRenderableScene.sourceInstances.length,
+				staticParts: staticRenderableScene.parts.length,
+				missingStaticSourceAssetIds:
+					staticRenderableScene.missingSourceAssetIds.length,
+				missingStaticGfxAssetIds:
+					staticRenderableScene.missingGfxAssetIds.length,
+				structuredInteriorCells: structuredInteriorScene.cells.length,
+				activeRenderChunks: activeRenderChunkTransforms.length,
+			},
 		},
-	});
+	);
 }
 
 function countPreparedAssetsByKind(
@@ -709,9 +713,7 @@ function countPreparedAssetsByKind(
 		counts[asset.payload.kind] = (counts[asset.payload.kind] ?? 0) + 1;
 	}
 	return Object.fromEntries(
-		Object.entries(counts).sort(([left], [right]) =>
-			left.localeCompare(right),
-		),
+		Object.entries(counts).sort(([left], [right]) => left.localeCompare(right)),
 	);
 }
 
@@ -797,7 +799,7 @@ function deriveSnapshot({
 						staticRenderableScene,
 						input.browserDestination,
 					)
-				: `${staticRenderableScene.parts.length} static renderable part${staticRenderableScene.parts.length === 1 ? "" : "s"} across ${staticRenderableScene.partsByRenderDomainChunkAndGfxAssetId.size} domain-safe chunked instanced group${staticRenderableScene.partsByRenderDomainChunkAndGfxAssetId.size === 1 ? "" : "s"}.`,
+				: `${staticRenderableScene.parts.length} static renderable part${staticRenderableScene.parts.length === 1 ? "" : "s"} across ${staticRenderableScene.partsByRenderGroupKey.size} domain-safe chunked instanced group${staticRenderableScene.partsByRenderGroupKey.size === 1 ? "" : "s"}.`,
 		staticRenderableLayerText: describeStaticRenderableLayerState(
 			staticRenderableScene,
 		),
@@ -884,12 +886,12 @@ function describeStaticRenderableLayerState(
 		(instance) => instance.kind === "indoor-static",
 	).length;
 	const exteriorGroupCount = [
-		...staticRenderableScene.partsByRenderDomainChunkAndGfxAssetId.values(),
+		...staticRenderableScene.partsByRenderGroupKey.values(),
 	].filter(
 		(parts) => parts[0]?.renderDomain === WORLD_RENDER_DOMAIN.exteriorStatic,
 	).length;
 	const interiorGroupCount = [
-		...staticRenderableScene.partsByRenderDomainChunkAndGfxAssetId.values(),
+		...staticRenderableScene.partsByRenderGroupKey.values(),
 	].filter(
 		(parts) => parts[0]?.renderDomain === WORLD_RENDER_DOMAIN.interiorStatic,
 	).length;

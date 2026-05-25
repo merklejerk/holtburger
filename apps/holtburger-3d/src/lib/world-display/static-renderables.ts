@@ -733,7 +733,10 @@ function expandSetupAppearanceParts(options: {
 				gfxObjAssetId: part.gfxObjAssetId,
 				materialAppearanceKey: options.setupAppearance.appearanceKey,
 				materialAppearanceContext: appearanceContext,
-				materialSlots: part.materialSlots,
+				materialSlots: resolveSetupAppearancePartMaterialSlots(
+					options.assetState,
+					part,
+				),
 				partPlacements: deriveSetupPartDefaultPlacements(
 					options.setupModel,
 					part.partIndex,
@@ -742,6 +745,19 @@ function expandSetupAppearanceParts(options: {
 			}),
 		];
 	});
+}
+
+function resolveSetupAppearancePartMaterialSlots(
+	assetState: AssetChannelState,
+	part: PreparedSetupAppearancePayload["parts"][number],
+): ResolvedMaterialSlot[] {
+	const gfxObjAsset = assetState.preparedByAssetId[part.gfxObjAssetId];
+	return isPreparedGfxObjAsset(gfxObjAsset)
+		? applyRenderGeometryMaterialVariants(
+				part.materialSlots,
+				gfxObjAsset.payload,
+			)
+		: part.materialSlots;
 }
 
 function deriveSetupPartDefaultPlacements(
@@ -777,11 +793,14 @@ function selectDefaultSetupPlacementSet(
 function resolveGfxObjMaterialSlots(
 	gfxObj: PreparedGfxObjPayload,
 ): ResolvedMaterialSlot[] {
-	return gfxObj.surfaceIds.map((surfaceId, slotIndex) => ({
-		slotIndex,
-		surfaceId,
-		materialAssetId: formatMaterialAssetId(surfaceId),
-	}));
+	return applyRenderGeometryMaterialVariants(
+		gfxObj.surfaceIds.map((surfaceId, slotIndex) => ({
+			slotIndex,
+			surfaceId,
+			materialAssetId: formatMaterialAssetId(surfaceId),
+		})),
+		gfxObj,
+	);
 }
 
 function resolveSetupPartMaterialSlots(
@@ -792,6 +811,55 @@ function resolveSetupPartMaterialSlots(
 	return isPreparedGfxObjAsset(gfxObjAsset)
 		? resolveGfxObjMaterialSlots(gfxObjAsset.payload)
 		: [];
+}
+
+function applyRenderGeometryMaterialVariants(
+	slots: readonly ResolvedMaterialSlot[],
+	gfxObj: PreparedGfxObjPayload,
+): ResolvedMaterialSlot[] {
+	const variantsBySlotIndex = collectMaterialVariantsBySlotIndex(gfxObj);
+	return slots.flatMap((slot): ResolvedMaterialSlot[] => {
+		const variants = variantsBySlotIndex.get(slot.slotIndex);
+		if (!variants || variants.size === 0) {
+			return [{ ...slot, materialVariantSignature: null }];
+		}
+		return [...variants]
+			.sort(compareMaterialVariantSignatures)
+			.map((materialVariantSignature) => ({
+				...slot,
+				materialVariantSignature,
+			}));
+	});
+}
+
+function compareMaterialVariantSignatures(
+	left: string | null,
+	right: string | null,
+): number {
+	return (left ?? "").localeCompare(right ?? "");
+}
+
+function collectMaterialVariantsBySlotIndex(
+	gfxObj: PreparedGfxObjPayload,
+): Map<number, Set<string | null>> {
+	const variantsBySlotIndex = new Map<number, Set<string | null>>();
+	for (const triangle of gfxObj.renderGeometry.triangles) {
+		if (triangle.surfaceId === null) {
+			continue;
+		}
+		const slotIndex = triangle.surfaceId - 1;
+		if (slotIndex < 0 || slotIndex >= gfxObj.surfaceIds.length) {
+			continue;
+		}
+		let variants: Set<string | null> | undefined =
+			variantsBySlotIndex.get(slotIndex);
+		if (!variants) {
+			variants = new Set<string | null>();
+			variantsBySlotIndex.set(slotIndex, variants);
+		}
+		variants.add(triangle.materialVariantSignature ?? null);
+	}
+	return variantsBySlotIndex;
 }
 
 function describeMaterialSignature(

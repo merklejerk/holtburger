@@ -79,6 +79,7 @@ describe("decodeBinaryAssetEnvelope", () => {
 		const positions = new Float32Array([1, 2, 3, 4, 5, 6]);
 		const normals = new Float32Array([0, 1, 0, 0, 1, 0]);
 		const uvs = new Float32Array([0, 0, 1, 1]);
+		const triangles = new Int32Array([10, 4, 1, 0, 11, 4, 2, 3]);
 		const response = decodeBinaryAssetEnvelope(
 			buildEnvelope({
 				response: {
@@ -90,6 +91,7 @@ describe("decodeBinaryAssetEnvelope", () => {
 							positions: [],
 							normals: [],
 							uvs: [],
+							triangles: [],
 						},
 					},
 				},
@@ -121,8 +123,18 @@ describe("decodeBinaryAssetEnvelope", () => {
 						byteOffset: positions.byteLength + normals.byteLength,
 						byteLength: uvs.byteLength,
 					},
+					{
+						role: "prepared.gfxObj.renderGeometry.triangles",
+						path: "responses.0.payload.renderGeometry.triangles",
+						scalarType: "i32",
+						componentCount: 4,
+						elementCount: 2,
+						byteOffset:
+							positions.byteLength + normals.byteLength + uvs.byteLength,
+						byteLength: triangles.byteLength,
+					},
 				],
-				sectionData: [positions, normals, uvs],
+				sectionData: [positions, normals, uvs, triangles],
 			}),
 		);
 
@@ -132,6 +144,7 @@ describe("decodeBinaryAssetEnvelope", () => {
 					positions: unknown;
 					normals: unknown;
 					uvs: unknown;
+					triangles: unknown;
 				};
 			}
 		).renderGeometry;
@@ -140,6 +153,20 @@ describe("decodeBinaryAssetEnvelope", () => {
 		expect(renderGeometry.uvs).toBeInstanceOf(Float32Array);
 		expect(Array.from(renderGeometry.positions as Float32Array)).toEqual([
 			1, 2, 3, 4, 5, 6,
+		]);
+		expect(renderGeometry.triangles).toEqual([
+			{
+				polygonId: 10,
+				surfaceId: 4,
+				materialVariantSignature: "sampler=clamp",
+				firstVertex: 0,
+			},
+			{
+				polygonId: 11,
+				surfaceId: 4,
+				materialVariantSignature: "sampler=repeat",
+				firstVertex: 3,
+			},
 		]);
 	});
 

@@ -154,6 +154,7 @@ export class WorldMaterialResourceCache {
 
 		const material = createMaterial({
 			materialAssetId: options.slot.materialAssetId,
+			materialVariantSignature: options.slot.materialVariantSignature,
 			preparedByAssetId: options.preparedByAssetId,
 			fallbackColorKey: options.fallbackColorKey,
 			resolveTexture: (renderSurface, samplingPolicy) =>

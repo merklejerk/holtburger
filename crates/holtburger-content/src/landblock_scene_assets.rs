@@ -323,6 +323,7 @@ pub struct PreparedPolygonSetRenderGeometry {
 pub struct PreparedPolygonSetRenderTriangle {
     pub polygon_id: u16,
     pub surface_id: Option<i16>,
+    pub material_variant_signature: String,
     pub first_vertex: usize,
 }
 
@@ -2160,13 +2161,18 @@ enum PreparedPolygonWinding {
 struct PreparedPolygonRenderSide<'a> {
     kind: PreparedPolygonRenderSideKind,
     surface_id: Option<i16>,
+    material_variant_signature: &'static str,
     uv_indices: &'a [u8],
     winding: PreparedPolygonWinding,
     normal_scale: f32,
 }
 
+const STIPPLING_REPEAT_POS: u8 = 0x01;
+const STIPPLING_REPEAT_NEG: u8 = 0x02;
 const STIPPLING_NO_POS: u8 = 0x04;
 const STIPPLING_NO_NEG: u8 = 0x08;
+const MATERIAL_VARIANT_SAMPLER_CLAMP: &str = "sampler=clamp";
+const MATERIAL_VARIANT_SAMPLER_REPEAT: &str = "sampler=repeat";
 const CULL_MODE_NONE: i32 = 1;
 const CULL_MODE_CLOCKWISE: i32 = 2;
 const CULL_MODE_COUNTER_CLOCKWISE: i32 = 3;
@@ -2212,6 +2218,7 @@ fn derive_polygon_render_sides(polygon: &Polygon) -> Vec<PreparedPolygonRenderSi
         sides.push(PreparedPolygonRenderSide {
             kind: PreparedPolygonRenderSideKind::Positive,
             surface_id: normalize_surface_id(polygon.pos_surface),
+            material_variant_signature: positive_polygon_side_material_variant(polygon),
             uv_indices: &polygon.pos_uv_indices,
             winding: PreparedPolygonWinding::Source,
             normal_scale: 1.0,
@@ -2223,6 +2230,7 @@ fn derive_polygon_render_sides(polygon: &Polygon) -> Vec<PreparedPolygonRenderSi
             sides.push(PreparedPolygonRenderSide {
                 kind: PreparedPolygonRenderSideKind::PositiveReversed,
                 surface_id: normalize_surface_id(polygon.pos_surface),
+                material_variant_signature: positive_polygon_side_material_variant(polygon),
                 uv_indices: &polygon.pos_uv_indices,
                 winding: PreparedPolygonWinding::Reversed,
                 normal_scale: -1.0,
@@ -2232,6 +2240,7 @@ fn derive_polygon_render_sides(polygon: &Polygon) -> Vec<PreparedPolygonRenderSi
             sides.push(PreparedPolygonRenderSide {
                 kind: PreparedPolygonRenderSideKind::Negative,
                 surface_id: normalize_surface_id(polygon.neg_surface),
+                material_variant_signature: negative_polygon_side_material_variant(polygon),
                 uv_indices: &polygon.neg_uv_indices,
                 winding: PreparedPolygonWinding::Reversed,
                 normal_scale: -1.0,
@@ -2258,6 +2267,22 @@ fn negative_polygon_side_is_renderable(polygon: &Polygon) -> bool {
         && polygon.neg_uv_indices.len() == polygon.vertex_ids.len()
 }
 
+fn positive_polygon_side_material_variant(polygon: &Polygon) -> &'static str {
+    legacy_sampler_material_variant((polygon.stippling & STIPPLING_REPEAT_POS) != 0)
+}
+
+fn negative_polygon_side_material_variant(polygon: &Polygon) -> &'static str {
+    legacy_sampler_material_variant((polygon.stippling & STIPPLING_REPEAT_NEG) != 0)
+}
+
+fn legacy_sampler_material_variant(repeats: bool) -> &'static str {
+    if repeats {
+        MATERIAL_VARIANT_SAMPLER_REPEAT
+    } else {
+        MATERIAL_VARIANT_SAMPLER_CLAMP
+    }
+}
+
 fn append_polygon_render_side_geometry(
     polygon_id: u16,
     polygon: &Polygon,
@@ -2278,6 +2303,7 @@ fn append_polygon_render_side_geometry(
         triangles.push(PreparedPolygonSetRenderTriangle {
             polygon_id,
             surface_id: render_side.surface_id,
+            material_variant_signature: render_side.material_variant_signature.to_string(),
             first_vertex: positions.len() / 3,
         });
 
@@ -2574,6 +2600,10 @@ mod tests {
         assert_eq!(sides.len(), 2);
         assert_eq!(sides[0].kind, PreparedPolygonRenderSideKind::Positive);
         assert_eq!(sides[0].surface_id, Some(4));
+        assert_eq!(
+            sides[0].material_variant_signature,
+            MATERIAL_VARIANT_SAMPLER_CLAMP
+        );
         assert_eq!(sides[0].winding, PreparedPolygonWinding::Source);
         assert_eq!(sides[0].normal_scale, 1.0);
         assert_eq!(
@@ -2581,6 +2611,10 @@ mod tests {
             PreparedPolygonRenderSideKind::PositiveReversed
         );
         assert_eq!(sides[1].surface_id, Some(4));
+        assert_eq!(
+            sides[1].material_variant_signature,
+            MATERIAL_VARIANT_SAMPLER_CLAMP
+        );
         assert_eq!(sides[1].uv_indices, polygon.pos_uv_indices);
         assert_eq!(sides[1].winding, PreparedPolygonWinding::Reversed);
         assert_eq!(sides[1].normal_scale, -1.0);
@@ -2599,10 +2633,18 @@ mod tests {
         assert_eq!(sides.len(), 2);
         assert_eq!(sides[0].kind, PreparedPolygonRenderSideKind::Positive);
         assert_eq!(sides[0].surface_id, Some(4));
+        assert_eq!(
+            sides[0].material_variant_signature,
+            MATERIAL_VARIANT_SAMPLER_CLAMP
+        );
         assert_eq!(sides[0].uv_indices, polygon.pos_uv_indices);
         assert_eq!(sides[0].winding, PreparedPolygonWinding::Source);
         assert_eq!(sides[1].kind, PreparedPolygonRenderSideKind::Negative);
         assert_eq!(sides[1].surface_id, Some(7));
+        assert_eq!(
+            sides[1].material_variant_signature,
+            MATERIAL_VARIANT_SAMPLER_CLAMP
+        );
         assert_eq!(sides[1].uv_indices, polygon.neg_uv_indices);
         assert_eq!(sides[1].winding, PreparedPolygonWinding::Reversed);
         assert_eq!(sides[1].normal_scale, -1.0);
@@ -2655,10 +2697,14 @@ mod tests {
                 .map(|triangle| (
                     triangle.polygon_id,
                     triangle.surface_id,
+                    triangle.material_variant_signature.as_str(),
                     triangle.first_vertex
                 ))
                 .collect::<Vec<_>>(),
-            vec![(11, Some(4), 0), (11, Some(7), 3)]
+            vec![
+                (11, Some(4), MATERIAL_VARIANT_SAMPLER_CLAMP, 0),
+                (11, Some(7), MATERIAL_VARIANT_SAMPLER_CLAMP, 3)
+            ]
         );
         assert_eq!(
             geometry.positions,
@@ -2672,6 +2718,36 @@ mod tests {
             vec![
                 0.0, 1.0, -0.0, 0.0, 1.0, -0.0, 0.0, 1.0, -0.0, -0.0, -1.0, 0.0, -0.0, -1.0, 0.0,
                 -0.0, -1.0, 0.0,
+            ]
+        );
+    }
+
+    #[test]
+    fn polygon_render_geometry_derives_sampler_variants_from_stippling_side_bits() {
+        let vertex_array = test_vertex_array();
+        let mut polygon = test_triangle_polygon([0, 1, 2]);
+        polygon.sides_type = CULL_MODE_CLOCKWISE;
+        polygon.stippling = STIPPLING_REPEAT_POS;
+        polygon.pos_surface = 4;
+        polygon.neg_surface = 4;
+        polygon.neg_uv_indices = vec![1, 1, 1];
+        let polygons = HashMap::from([(14, polygon)]);
+
+        let geometry =
+            build_polygon_set_render_geometry(0x0200_0001, &vertex_array, &polygons, None);
+
+        assert_eq!(
+            geometry
+                .triangles
+                .iter()
+                .map(|triangle| (
+                    triangle.surface_id,
+                    triangle.material_variant_signature.as_str()
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (Some(4), MATERIAL_VARIANT_SAMPLER_REPEAT),
+                (Some(4), MATERIAL_VARIANT_SAMPLER_CLAMP)
             ]
         );
     }

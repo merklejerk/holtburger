@@ -126,11 +126,62 @@ describe("static renderables", () => {
 				slotIndex: 0,
 				surfaceId: 0x080000aa,
 				materialAssetId: "material/080000aa",
+				materialVariantSignature: null,
 			},
 		]);
 		expect(part?.materialSignature).toContain("material/080000aa");
 		expect(part?.partPlacements).toEqual([
 			createPlacement({ x: 3, y: 4, z: 5 }),
+		]);
+	});
+
+	it("duplicates material slots for sampler variants emitted by render geometry", () => {
+		const envCellId = 0x00070100;
+		const sourceDid = 0x01000001;
+		const assetState = createAssetState([
+			createEnvCellRecord({
+				envCellId,
+				localPlacement: createPlacement({ x: 0, y: 0, z: 0 }),
+				staticPlacement: createPlacement({ x: 0, y: 0, z: 0 }),
+				sourceDid,
+			}),
+			createGfxObjRecord(
+				sourceDid,
+				[0x08000004],
+				[
+					{
+						polygonId: 10,
+						surfaceId: 1,
+						materialVariantSignature: "sampler=repeat",
+						firstVertex: 0,
+					},
+					{
+						polygonId: 11,
+						surfaceId: 1,
+						materialVariantSignature: "sampler=clamp",
+						firstVertex: 3,
+					},
+				],
+			),
+		]);
+		const scene = deriveStaticRenderableSceneModel(
+			assetState,
+			createInteriorDestination(envCellId),
+		);
+
+		expect(scene.parts[0]?.materialSlots).toEqual([
+			{
+				slotIndex: 0,
+				surfaceId: 0x08000004,
+				materialAssetId: "material/08000004",
+				materialVariantSignature: "sampler=clamp",
+			},
+			{
+				slotIndex: 0,
+				surfaceId: 0x08000004,
+				materialAssetId: "material/08000004",
+				materialVariantSignature: "sampler=repeat",
+			},
 		]);
 	});
 
@@ -328,6 +379,7 @@ function createEnvCellRecord(options: {
 function createGfxObjRecord(
 	gfxObjId: number,
 	surfaceIds: number[] = [],
+	triangles: PreparedPolygonSetRenderGeometry["triangles"] = [],
 ): PreparedAssetRecord {
 	const assetId = formatGfxObjAssetId(gfxObjId);
 	return {
@@ -351,7 +403,11 @@ function createGfxObjRecord(
 			drawingPolygons: [],
 			drawingBsp: null,
 			physicsWitness: { polygonCount: 0, hasBsp: false },
-			renderGeometry: createEmptyRenderGeometry(),
+			renderGeometry: {
+				...createEmptyRenderGeometry(),
+				triangles,
+				triangleCount: triangles.length,
+			},
 			sortCenter: null,
 			didDegrade: null,
 		},

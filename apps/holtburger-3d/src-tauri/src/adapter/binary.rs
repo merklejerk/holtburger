@@ -364,11 +364,12 @@ pub fn serialize_prepared_polygon_set_render_geometry_binary(
     writer.push_i32_section(
         format!("{path}.triangles"),
         format!("{path}.triangles"),
-        3,
+        4,
         geometry.triangles.iter().flat_map(|triangle| {
             [
                 i32::from(triangle.polygon_id),
                 triangle.surface_id.map(i32::from).unwrap_or(-1),
+                encode_material_variant_signature(&triangle.material_variant_signature),
                 i32::try_from(triangle.first_vertex).expect("first vertex fits i32"),
             ]
         }),
@@ -386,6 +387,14 @@ pub fn serialize_prepared_polygon_set_render_geometry_binary(
         "skippedPolygonCount": geometry.skipped_polygon_count,
         "bounds": geometry.bounds.as_ref().map(serialize_prepared_aabb),
     })
+}
+
+fn encode_material_variant_signature(signature: &str) -> i32 {
+    match signature {
+        "sampler=clamp" => 1,
+        "sampler=repeat" => 2,
+        _ => 0,
+    }
 }
 pub fn serialize_landblock_terrain_binary(
     terrain_asset: &SerializedOutdoorTerrainSource,

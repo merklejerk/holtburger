@@ -231,10 +231,12 @@ function decodeBinarySection(
 		);
 	}
 	if (section.role.endsWith(".renderGeometry.triangles")) {
-		return chunk(Array.from(readInt32Section(bytes)), 3).map(
-			([polygonId, surfaceId, firstVertex]) => ({
+		return chunk(Array.from(readInt32Section(bytes)), 4).map(
+			([polygonId, surfaceId, materialVariantCode, firstVertex]) => ({
 				polygonId,
 				surfaceId: surfaceId < 0 ? null : surfaceId,
+				materialVariantSignature:
+					decodeMaterialVariantSignature(materialVariantCode),
 				firstVertex,
 			}),
 		);
@@ -275,6 +277,16 @@ function decodeBinarySection(
 	throw new Error(
 		`Unsupported binary section scalar type ${section.scalarType}.`,
 	);
+}
+
+function decodeMaterialVariantSignature(code: number): string | null {
+	if (code === 1) {
+		return "sampler=clamp";
+	}
+	if (code === 2) {
+		return "sampler=repeat";
+	}
+	return null;
 }
 
 function landblockIdForTerrainTriangleSection(

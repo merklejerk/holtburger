@@ -39,8 +39,13 @@ or new reference evidence proves it stale.
   `setup-appearance/{setup_did}` payloads when available, while retaining raw
   setup-model part rendering as an explicit fallback.
 - Material plans, final material cache keys, and static renderable geometry
-  groups carry immutable material variant identity. Existing content normalizes
-  to the `base` variant until Phase 3 emits sampler-derived variants.
+  groups carry immutable material variant identity. Prepared polygon content
+  now emits sampler-derived `sampler=clamp`/`sampler=repeat` variants; older or
+  missing variant data still normalizes to `base`.
+- Prepared polygon render geometry now emits side-local sampler material
+  variants from retail `CPolygon.stippling` bits, and the 3D renderer uses
+  those variants to split material slots/groups and choose clamp or repeat
+  texture wrapping.
 
 ### Known Gaps
 
@@ -63,13 +68,9 @@ or new reference evidence proves it stale.
 - Outdoor terrain is still diagnostic vertex color only. It does not consume
   `terrain-material/{regionNumber}`, terrain pcodes, overlay alpha maps, road
   maps, detail textures, or texture tiling.
-- Interior cell geometry has material groups, but UV and sampler behavior has
-  not been validated against ACViewer or the retail decompile. Retail legacy
-  `CSurface` rendering appears to choose wrap/clamp from polygon-side
-  `stippling` bits, not by scanning emitted UV ranges. The likely missing parity
-  pieces are preserving those side-local sampler bits, emitting sampler-derived
-  material variants, validating UV orientation, and using the existing
-  repeated/clamped texture-resource and material-variant cache seams.
+- Interior cell geometry preserves the retail side-local sampler rule and has a
+  deterministic sampler/UV report harness, but broader ACViewer side-by-side
+  fixture comparison and final V-axis screenshot validation are still pending.
 - Optional high-res JPEG replacement is not implemented. The retail client has
   engine support for `client_highres.dat` and `PFID_CUSTOM_RAW_JPEG`, but this
   should be treated as optional mounted-pack support rather than baseline retail
@@ -696,9 +697,9 @@ Implemented changes:
   `materialVariantSignature`. Grouping now resolves by
   `surfaceId + materialVariantSignature`, not just `surfaceId`.
 - Added optional `materialVariantSignature` to prepared render triangle DTOs and
-  app-local prepared render geometry types. Rust/content does not emit it yet;
-  Phase 3 can populate it from polygon-side sampler metadata without another
-  browser-app contract reshuffle.
+  app-local prepared render geometry types. Phase 3 later populated this field
+  from polygon-side sampler metadata without another browser-app contract
+  reshuffle.
 - Kept the layered cache boundary intact: texture resources are still keyed by
   render surface plus sampling policy, palette resources are unchanged, and
   final materials are keyed by appearance plus material recipe plus variant
@@ -725,27 +726,26 @@ Decisions and course corrections:
   derived from the effective wrap/clamp policy. Future palette view, texture
   swap, clipmap/scalar behavior, or other immutable material recipe choices can
   join this identity without changing cache or geometry APIs again.
-- Phase 2.5 does not change visible sampler behavior. Existing geometry has no
-  `materialVariantSignature`, so current rendering remains on the normalized
-  `base` variant until Phase 3 emits real per-triangle/per-group sampler facts.
-- The optional triangle `materialVariantSignature` field is an app contract
-  shim for Phase 3. It is deliberately optional so existing content payloads
-  remain valid until `holtburger-content` starts emitting side-local sampler
-  metadata.
+- Phase 2.5 did not change visible sampler behavior on its own. Phase 3 now
+  emits real sampler variants from content and uses this identity seam for
+  clamp/repeat texture policy selection.
+- The optional browser triangle `materialVariantSignature` field remains an app
+  compatibility shim. Rust/content now emits explicit side-local sampler
+  metadata, while missing browser values still mean `base`.
 - Per-instance and time-varying state remains outside shared material cache
   keys. Texture velocity must still be represented as instance/part UV state,
   not as a material variant.
-- No immediate interim phase is needed before Phase 3. The material identity
-  and geometry grouping seam exists; the next work is to feed it with
-  stippling-derived sampler metadata from content.
+- No immediate interim phase was needed before Phase 3. The material identity
+  and geometry grouping seam was sufficient for stippling-derived sampler
+  metadata from content.
 
 Cleanup targets from Phase 2.5:
 
-- Phase 3 should replace the optional contract shim with real emitted
+- Phase 3 replaced the contract shim in new Rust payloads with real emitted
   `materialVariantSignature` values from decoded polygon-side sampler metadata.
-- Consider replacing free-form variant strings with a tiny typed builder once
-  Phase 3 proves the exact sampler signature shape. Do not add broad variant
-  enums before the concrete axes settle.
+- Consider replacing free-form variant strings with a tiny typed builder if
+  more Rust/TS producers need to share them. Do not add broad variant enums
+  before another concrete axis settles.
 - Keep watch on `ResolvedMaterialSlot`: once palette view and texture swap
   signatures are filled, this type may deserve a focused material-identity
   helper rather than more inline string assembly in callers.
@@ -757,22 +757,20 @@ Legacy shims:
 
 - `base` is the compatibility variant for all existing material slots and
   triangles.
-- Prepared render triangle `materialVariantSignature` is optional until
-  `holtburger-content` emits it. Missing values must mean `base`, not
+- Prepared render triangle `materialVariantSignature` remains optional in the
+  browser DTO for older/degraded payloads. Missing values must mean `base`, not
   "unknown".
-- Current final materials are separated by variant identity even though variant
-  identity does not yet alter material construction. Phase 3 should supply
-  sampler-specific texture policies so separated materials can diverge in
-  actual GPU state.
+- Final materials are now separated by variant identity and `sampler=repeat`
+  changes actual texture wrap state.
 
 Refinements to future steps:
 
-- Phase 3 should derive a sampler variant signature from the retail
-  side-local `CPolygon.stippling` wrap bit and attach it to prepared render
-  triangles or material groups before `resolveMaterialPlan()`.
-- Phase 3 should use the Phase 1 `TextureSamplingPolicy` helpers to create the
-  actual clamp/repeat texture policy that corresponds to the material variant
-  signature. The signature and policy must stay in sync.
+- Phase 3 derived sampler variant signatures from the retail side-local
+  `CPolygon.stippling` wrap bit and attached them to prepared render triangles
+  before `resolveMaterialPlan()`.
+- Phase 3 uses the Phase 1 `TextureSamplingPolicy` path to create the actual
+  clamp/repeat texture policy that corresponds to the material variant
+  signature. Keep the signature and policy in sync if this axis expands.
 - Phase 4 should add palette-view identity as another immutable material
   variant or appearance signature axis only after derived palette resources are
   implemented.
@@ -791,43 +789,116 @@ UVs, sampler state, or material upload. The primary validation path should be
 programmatic; manual visual inspection is only a final smoke check after the
 data and renderer-state comparisons are explainable.
 
-- Add a small diagnostic/export harness that emits per-polygon vertex IDs,
-  side, raw `stippling`, derived side wrap flag, UV indices, UV values, surface
-  slot, and material/render-surface IDs for a known problematic env cell.
-- Compare Holtburger output against ACViewer's `BuildUVLookup()` and
-  `Polygon.BuildIndices()` behavior. Treat ACViewer's `HasWrappingUVs` as a
-  comparison signal only; retail legacy sampler state is driven by polygon
-  `stippling` bits.
-- Produce a deterministic comparison report for each fixture env cell covering:
-  - polygon IDs;
-  - polygon side and raw `stippling` value;
-  - triangle fan order;
-  - surface slot and resolved `CSurface` ID;
-  - UV index selection;
-  - emitted UV values;
-  - render texture/render surface IDs;
-  - retail-derived wrap/clamp policy from the side-local stippling bit;
-  - ACViewer-style `HasWrappingUVs` result, with mismatches called out for
-    investigation;
-  - texture `flipY` or V-axis transform policy.
-- Add renderer texture wrapping policy from preserved legacy polygon metadata:
-  - positive-side polygons repeat when `CPolygon.stippling & 0x1` is set;
-  - negative-side polygons repeat when `CPolygon.stippling & 0x2` is set;
-  - otherwise use clamp wrapping;
-  - keep UV-range checks as diagnostics or fallback only when source-side
-    stippling metadata is unavailable.
-- Split geometry/material groups when the side-derived sampler policy differs,
-  even if the polygons resolve to the same `CSurface`, render texture, and
-  palette. The material plan must not place clamp and repeat polygons into one
-  Three material slot.
-- Validate whether Three's default V-axis handling needs `flipY = false` or UV
-  V inversion for DAT textures.
-- Add targeted tests around UV emission, stippling-derived sampler metadata, and
-  texture wrap selection, including a fixture where one `CSurface` is used with
-  both clamp and repeat policies.
-- Use manual Holtburger-vs-reference screenshots only after the comparison
-  report passes, to catch renderer-state issues that are hard to infer from
-  data alone.
+Progress: implemented.
+
+Implemented changes:
+
+- `holtburger-content` now derives a sampler material variant for each prepared
+  polygon render side from retail `CPolygon.stippling` bits:
+  - positive-side polygons use `sampler=repeat` when bit `0x1` is set;
+  - negative-side polygons use `sampler=repeat` when bit `0x2` is set;
+  - otherwise the emitted variant is `sampler=clamp`.
+- Prepared render triangles now carry a non-optional
+  `material_variant_signature` in Rust payloads. The browser DTO remains
+  optional for compatibility with older/degraded payloads, where missing still
+  means `base`.
+- JSON and binary Tauri adapters include the material variant in prepared
+  render geometry. The binary triangle section is now four `i32` components:
+  `polygonId`, `surfaceId`, encoded material variant, and `firstVertex`.
+- `static-renderables.ts` derives duplicate material slots from
+  `GfxObj.renderGeometry.triangles` when a single surface slot appears with
+  multiple sampler variants. This applies to raw `GfxObj`, raw setup fallback,
+  and setup-appearance-selected parts.
+- `material-construction.ts` parses `sampler=clamp` and `sampler=repeat`
+  material variants and applies the corresponding wrap mode to direct-color,
+  compressed, and indexed texture policy selection. Texture resources remain
+  cached by render-surface decode identity plus effective sampling policy.
+- Added `report_polygon_sampler_parity` in `holtburger-debug-harness`. It emits
+  deterministic per-env-cell rows covering polygon ID, side, raw `stippling`,
+  derived repeat flag, surface slot/material ID, render surface IDs, vertex
+  IDs, UV indices/values, ACViewer-style UV range wrapping signal, emitted
+  material variant, and prepared triangle first-vertex offsets.
+- Added tests for:
+  - Rust stippling-derived sampler variants, including one `CSurface` used as
+    both repeat and clamp;
+  - binary triangle hydration with material variant codes;
+  - renderer material slots duplicated by emitted sampler variants;
+  - final texture wrap policy selection from `sampler=repeat`.
+
+Validation:
+
+- `cargo run -p holtburger-debug-harness --bin report_polygon_sampler_parity
+  -- --env-cell da55010b` produced a deterministic report from repo-local
+  `dats/assets.hba`. The sample shows `stippling=0x01` polygons emitted as
+  `sampler=repeat` with ACViewer-style wrapping UVs, and `stippling=0x00`
+  polygons emitted as `sampler=clamp`.
+- `cargo test -p holtburger-content
+  landblock_scene_assets::tests::polygon_render_geometry` passes.
+- `cargo check -p holtburger-content -p holtburger-debug-harness` passes.
+- `npm run test:ts` passes with 44 test files and 233 tests.
+- `npm run check` passes with no Svelte or TypeScript diagnostics.
+- `npm run lint:ts` passes.
+- `npm run lint:dead` passes.
+- Touched TypeScript files were formatted. Repo-wide `npm run format:check`
+  still fails only on pre-existing unrelated format drift in nine app files.
+
+Decisions and course corrections:
+
+- The production sampler source of truth is the preserved retail side-local
+  `stippling` bit, not UV range scanning. The harness reports an
+  ACViewer-style UV wrapping signal only as comparison evidence.
+- `sampler=clamp` and `sampler=repeat` are the concrete Phase 3 material
+  variant strings. They are intentionally kept narrow and parsed in one
+  renderer helper rather than generalized into a broad material-variant enum.
+- The binary prepared-geometry triangle section changed shape from three to
+  four `i32` components. This is an internal app/host envelope format, and the
+  JSON/DTO shape remains self-describing.
+- Missing or unknown material variant signatures still normalize to `base` for
+  old payload compatibility. New Rust-prepared polygon geometry emits explicit
+  sampler variants for renderable sides.
+- The Phase 3 harness proves Holtburger's emitted data and derived sampler
+  state. It is not a full ACViewer automated diff yet because ACViewer does
+  not expose a ready machine-readable report in this repo. Use the harness rows
+  as the stable Holtburger side before adding any ACViewer instrumentation.
+
+Cleanup targets from Phase 3:
+
+- Consider moving the shared sampler variant strings into a tiny cross-boundary
+  contract helper if more Rust/TS producers need to emit or consume them. Do
+  not widen this until a second concrete variant axis exists.
+- If binary envelope compatibility becomes important across app versions, add a
+  manifest/schema version before changing any other binary section component
+  layout.
+- Keep `WorldMaterialResourceCache.getDefaultTextureSamplingPolicy()` as a test
+  bridge only. Production sampler-aware paths now pass through material
+  variants and should not reintroduce broad all-clamped assumptions.
+- Add optional ACViewer-side diagnostic output only if the current harness
+  uncovers mismatches that cannot be explained from retail/decompile evidence.
+
+Legacy shims:
+
+- Browser prepared triangle DTOs still accept missing
+  `materialVariantSignature`; missing means `base`.
+- Unknown binary material variant codes decode to `null`, preserving the same
+  base fallback instead of failing old cached/enveloped payloads.
+- Raw setup-model fallback remains, but it now receives sampler variants from
+  the selected part `GfxObj` geometry just like setup-appearance parts.
+
+Refinements to future steps:
+
+- Phase 4 derived palette views can proceed without an interim bridge phase.
+  The sampler/material variant path is now complete enough and does not block
+  palette-view identity.
+- Phase 4 should avoid placing palette-view identity in
+  `materialVariantSignature` unless the palette view is truly per-slot immutable
+  behavior. The current expectation remains: palette view belongs in
+  `MaterialAppearanceContext.paletteViewSignature`, while sampler behavior
+  remains a material variant.
+- Phase 5 texture swaps should follow the same pattern: resolved appearance
+  identity in `MaterialAppearanceContext`, with material variants reserved for
+  immutable per-slot render behavior.
+- Manual screenshots should now focus on V-axis/`flipY` confirmation and
+  visible clamp/repeat seams, not on proving the sampler rule from scratch.
 
 Expected effect: interior textures should become visible and consistently tiled
 or clamped before deeper material work.

@@ -23,6 +23,7 @@ import {
 	type IndexedTextureResource,
 } from "./indexed-texture-resources";
 import type { MaterialResourceDiagnostic } from "./material-resources";
+import { parseLegacySamplerMaterialVariantSignature } from "./material-variants";
 import type { PaletteTextureResource } from "./palette-resources";
 import {
 	hasSourceAlpha,
@@ -46,6 +47,7 @@ const LEGACY_OPACITY_BYTE_SCALE = 255;
 
 export function createMaterial(options: {
 	materialAssetId: string;
+	materialVariantSignature?: string | null;
 	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>;
 	fallbackColorKey: string;
 	resolveTexture: (
@@ -124,9 +126,10 @@ export function createMaterial(options: {
 	const texture = renderSurface
 		? options.resolveTexture(
 				renderSurface,
-				selectRenderSurfaceTextureSamplingPolicy(
+				selectVariantTextureSamplingPolicy(
 					renderSurface,
 					options.textureSamplingPolicy,
+					options.materialVariantSignature,
 				),
 			)
 		: null;
@@ -150,9 +153,10 @@ export function createMaterial(options: {
 			renderSurface: indexedRenderSurface,
 			indexedTexture: options.resolveIndexedTexture(
 				indexedRenderSurface,
-				selectRenderSurfaceTextureSamplingPolicy(
+				selectVariantTextureSamplingPolicy(
 					indexedRenderSurface,
 					options.textureSamplingPolicy,
+					options.materialVariantSignature,
 				),
 			),
 			resolvePaletteResource: options.resolvePaletteResource,
@@ -203,6 +207,28 @@ export function createMaterial(options: {
 		transparent: normalizeLegacyOpacity(recipe.translucency) < 1,
 		opacity: normalizeLegacyOpacity(recipe.translucency),
 	});
+}
+
+function selectVariantTextureSamplingPolicy(
+	renderSurface: PreparedRenderSurfacePayload,
+	policy: MaterialTextureSamplingPolicy,
+	materialVariantSignature: string | null | undefined,
+): TextureSamplingPolicy {
+	const basePolicy = selectRenderSurfaceTextureSamplingPolicy(
+		renderSurface,
+		policy,
+	);
+	const legacySamplerVariant = parseLegacySamplerMaterialVariantSignature(
+		materialVariantSignature,
+	);
+	if (legacySamplerVariant === null) {
+		return basePolicy;
+	}
+	return {
+		...basePolicy,
+		wrapS: legacySamplerVariant,
+		wrapT: legacySamplerVariant,
+	};
 }
 
 function reportTextureFallbackDiagnostics(options: {

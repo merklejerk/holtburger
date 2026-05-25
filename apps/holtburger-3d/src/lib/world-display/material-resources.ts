@@ -5,6 +5,11 @@ import type {
 	PreparedRenderSurfacePayload,
 } from "../assets/types";
 import {
+	createDerivedPaletteTextureResource,
+	describeDerivedPaletteResourceKey,
+	type DerivedPaletteDiagnosticHandler,
+} from "./derived-palette-resources";
+import {
 	createIndexedTextureResource,
 	isIndexedTextureFormat,
 	type IndexedTextureResource,
@@ -163,8 +168,11 @@ export class WorldMaterialResourceCache {
 				this.getIndexedTextureResource({ renderSurface, samplingPolicy }),
 			resolvePaletteResource: (paletteAssetId, paletteAsset) =>
 				this.getPaletteResource({ paletteAssetId, paletteAsset }),
+			resolveDerivedPaletteResource: (paletteOptions) =>
+				this.getDerivedPaletteResource(paletteOptions),
 			reportDiagnostic: (diagnostic) => this.reportOnce(diagnostic),
 			textureSamplingPolicy: this.textureSamplingPolicy,
+			appearance: options.appearance,
 		});
 		this.materialRecords.set(materialKey, { material });
 		return material;
@@ -221,6 +229,60 @@ export class WorldMaterialResourceCache {
 		}
 
 		const resource = createPaletteTextureResource(options.paletteAsset.payload);
+		this.paletteRecords.set(paletteKey, { resource });
+		return resource;
+	}
+
+	getDerivedPaletteResource(options: {
+		basePaletteAssetId: string;
+		basePaletteAsset: PreparedAssetRecord;
+		appearance: MaterialAppearanceContext;
+		preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>;
+		reportDiagnostic?: DerivedPaletteDiagnosticHandler;
+	}): PaletteTextureResource | null {
+		const paletteView = options.appearance.paletteView;
+		if (!paletteView) {
+			return this.getPaletteResource({
+				paletteAssetId: options.basePaletteAssetId,
+				paletteAsset: options.basePaletteAsset,
+			});
+		}
+		if (options.basePaletteAsset.payload.kind !== "palette") {
+			this.reportOnce({
+				key: `derived-palette-base-kind-mismatch:${options.basePaletteAssetId}`,
+				message: `Cannot create derived palette because ${options.basePaletteAssetId} is not prepared as a palette.`,
+				detail: {
+					paletteAssetId: options.basePaletteAssetId,
+					preparedKind: options.basePaletteAsset.payload.kind,
+				},
+			});
+			return null;
+		}
+
+		const paletteKey = describeDerivedPaletteResourceKey({
+			basePaletteAssetId: options.basePaletteAssetId,
+			basePaletteAsset: options.basePaletteAsset,
+			paletteView,
+			preparedByAssetId: options.preparedByAssetId,
+		});
+		const cached = this.paletteRecords.get(paletteKey);
+		if (cached) {
+			return cached.resource;
+		}
+
+		const resource = createDerivedPaletteTextureResource({
+			basePaletteAssetId: options.basePaletteAssetId,
+			basePalette: options.basePaletteAsset.payload,
+			paletteView,
+			preparedByAssetId: options.preparedByAssetId,
+			reportDiagnostic: (diagnostic) => {
+				this.reportOnce(diagnostic);
+				options.reportDiagnostic?.(diagnostic);
+			},
+		});
+		if (!resource) {
+			return null;
+		}
 		this.paletteRecords.set(paletteKey, { resource });
 		return resource;
 	}

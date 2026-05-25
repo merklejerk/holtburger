@@ -24,6 +24,10 @@ export function describeMaterialCacheKey(options: {
 			options.materialAssetId,
 			options.preparedByAssetId,
 		),
+		describeAppearancePalettePreparedStateSignature(
+			options.appearance,
+			options.preparedByAssetId,
+		),
 	].join("|");
 }
 
@@ -99,4 +103,34 @@ export function describePaletteResourceKey(
 		asset.payload.paletteId,
 		asset.payload.colorCount,
 	].join(":");
+}
+
+function describeAppearancePalettePreparedStateSignature(
+	appearance: MaterialAppearanceContext,
+	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>,
+): string {
+	const paletteView = appearance.paletteView;
+	if (!paletteView) {
+		return "appearance-palettes=base";
+	}
+	const paletteAssetIds = [
+		...(paletteView.paletteId === null
+			? []
+			: [formatPaletteAssetId(paletteView.paletteId)]),
+		...paletteView.subPalettes.map((subPalette) =>
+			formatPaletteAssetId(subPalette.subId),
+		),
+	]
+		.sort()
+		.filter((assetId, index, all) => index === 0 || all[index - 1] !== assetId);
+	return [
+		"appearance-palettes",
+		...paletteAssetIds.map((assetId) =>
+			describePreparedAssetSignature(assetId, preparedByAssetId[assetId]),
+		),
+	].join(";");
+}
+
+function formatPaletteAssetId(paletteId: number): string {
+	return `palette/${formatHex32(paletteId)}`;
 }

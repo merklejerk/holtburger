@@ -19,7 +19,7 @@ describe("material signatures", () => {
 				preparedByAssetId: {},
 			}),
 		).toBe(
-			"base|parts=base|textures=base|palette=base|material/08000001|variant=base|material/08000001:missing",
+			"base|parts=base|textures=base|palette=base|material/08000001|variant=base|material/08000001:missing|appearance-palettes=base",
 		);
 	});
 
@@ -50,6 +50,10 @@ describe("material signatures", () => {
 			selectedPartsSignature: "0=01000001",
 			textureSwapSignature: "2:05000001>05000002",
 			paletteViewSignature: "base=04000001;sub=04000002@12+8",
+			paletteView: {
+				paletteId: 0x04000001,
+				subPalettes: [{ subId: 0x04000002, offset: 12, numColors: 8 }],
+			},
 		};
 		const clothingGeneratedAppearance = { ...directObjDescAppearance };
 

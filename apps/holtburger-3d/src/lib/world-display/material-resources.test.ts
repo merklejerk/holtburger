@@ -17,7 +17,10 @@ import {
 	WorldMaterialResourceCache,
 	formatMaterialAssetId,
 } from "./material-resources";
-import { createBaseMaterialAppearanceContext } from "./material-appearance";
+import {
+	createBaseMaterialAppearanceContext,
+	type MaterialAppearanceContext,
+} from "./material-appearance";
 import {
 	createDefaultMaterialTextureSamplingPolicy,
 	type TextureSamplingPolicy,
@@ -429,6 +432,172 @@ describe("world material resource cache", () => {
 		cache.dispose();
 	});
 
+	it("creates derived palette resources from appearance subpalettes", () => {
+		const cache = new WorldMaterialResourceCache();
+		const basePaletteAssetId = "palette/04000001";
+		const subPaletteAssetId = "palette/04000002";
+		const preparedByAssetId = {
+			[basePaletteAssetId]: createPreparedAsset(
+				basePaletteAssetId,
+				createPalettePayload(
+					0x04000001,
+					[0xff000000, 0xff111111, 0xff222222, 0xff333333],
+				),
+			),
+			[subPaletteAssetId]: createPreparedAsset(
+				subPaletteAssetId,
+				createPalettePayload(
+					0x04000002,
+					[0xff990000, 0xffaa0000, 0xff00bb00, 0xff0000cc],
+				),
+			),
+		};
+
+		const resource = cache.getDerivedPaletteResource({
+			basePaletteAssetId,
+			basePaletteAsset: preparedByAssetId[basePaletteAssetId],
+			appearance: createPaletteAppearanceContext({
+				subPalettes: [{ subId: 0x04000002, offset: 1, numColors: 2 }],
+			}),
+			preparedByAssetId,
+		});
+
+		const data = resource?.texture.image.data as Uint8Array | undefined;
+		expect(resource?.colorCount).toBe(4);
+		expect(data?.slice(4, 12)).toEqual(
+			Uint8Array.from([0xaa, 0x00, 0x00, 0xff, 0x00, 0xbb, 0x00, 0xff]),
+		);
+		cache.dispose();
+	});
+
+	it("uses appearance palette override for indexed materials", () => {
+		const diagnostics: string[] = [];
+		const cache = new WorldMaterialResourceCache((diagnostic) => {
+			diagnostics.push(diagnostic.key);
+		});
+		const materialAssetId = formatMaterialAssetId(0x08000020);
+		const renderSurfaceAssetId = "render-surface/06000020";
+		const recipePaletteAssetId = "palette/04000001";
+		const appearancePaletteAssetId = "palette/04000003";
+
+		const plan = cache.resolveMaterialPlan({
+			slots: [{ slotIndex: 0, surfaceId: 0x08000020, materialAssetId }],
+			appearance: createPaletteAppearanceContext({ paletteId: 0x04000003 }),
+			preparedByAssetId: {
+				[materialAssetId]: createPreparedAsset(
+					materialAssetId,
+					createTextureMaterialRecipe(0x08000020, 0x06000020, {
+						paletteId: 0x04000001,
+					}),
+				),
+				[renderSurfaceAssetId]: createPreparedAsset(
+					renderSurfaceAssetId,
+					createIndexedRenderSurfacePayload(0x06000020, {
+						formatRaw: 0x29,
+						format: "P8",
+						sourceBytes: new Uint8Array([0, 3]),
+						width: 2,
+						height: 1,
+					}),
+				),
+				[recipePaletteAssetId]: createPreparedAsset(
+					recipePaletteAssetId,
+					createPalettePayload(0x04000001, [0xff000000, 0xffffffff]),
+				),
+				[appearancePaletteAssetId]: createPreparedAsset(
+					appearancePaletteAssetId,
+					createPalettePayload(
+						0x04000003,
+						[0xff000000, 0xff111111, 0xff222222, 0xff333333],
+					),
+				),
+			},
+			fallbackColorKey: "visible-cell",
+		});
+
+		expect(diagnostics).toEqual([]);
+		expect(
+			(plan.materials[0] as MeshStandardMaterial).userData
+				.holtburgerIndexedMaterial,
+		).toMatchObject({
+			paletteColorCount: 4,
+		});
+		cache.dispose();
+	});
+
+	it("refreshes indexed materials when appearance palette assets change", () => {
+		const cache = new WorldMaterialResourceCache();
+		const materialAssetId = formatMaterialAssetId(0x08000021);
+		const renderSurfaceAssetId = "render-surface/06000021";
+		const appearance = createPaletteAppearanceContext({
+			paletteId: 0x04000003,
+		});
+		const sharedPreparedByAssetId = {
+			[materialAssetId]: createPreparedAsset(
+				materialAssetId,
+				createTextureMaterialRecipe(0x08000021, 0x06000021, {
+					paletteId: 0x04000001,
+				}),
+			),
+			[renderSurfaceAssetId]: createPreparedAsset(
+				renderSurfaceAssetId,
+				createIndexedRenderSurfacePayload(0x06000021, {
+					formatRaw: 0x29,
+					format: "P8",
+					sourceBytes: new Uint8Array([0, 3]),
+					width: 2,
+					height: 1,
+				}),
+			),
+			"palette/04000001": createPreparedAsset(
+				"palette/04000001",
+				createPalettePayload(0x04000001, [0xff000000, 0xffffffff]),
+			),
+		};
+
+		const firstPlan = cache.resolveMaterialPlan({
+			slots: [{ slotIndex: 0, surfaceId: 0x08000021, materialAssetId }],
+			appearance,
+			preparedByAssetId: {
+				...sharedPreparedByAssetId,
+				"palette/04000003": createPreparedAsset(
+					"palette/04000003",
+					createPalettePayload(
+						0x04000003,
+						[0xff000000, 0xff111111, 0xff222222, 0xff333333],
+					),
+					"2026-05-23T00:00:00.000Z",
+				),
+			},
+			fallbackColorKey: "visible-cell",
+		});
+		const refreshedPlan = cache.resolveMaterialPlan({
+			slots: [{ slotIndex: 0, surfaceId: 0x08000021, materialAssetId }],
+			appearance,
+			preparedByAssetId: {
+				...sharedPreparedByAssetId,
+				"palette/04000003": createPreparedAsset(
+					"palette/04000003",
+					createPalettePayload(
+						0x04000003,
+						[0xff000000, 0xff111111, 0xff222222, 0xff333333, 0xff444444],
+					),
+					"2026-05-23T00:00:01.000Z",
+				),
+			},
+			fallbackColorKey: "visible-cell",
+		});
+
+		expect(refreshedPlan.materials[0]).not.toBe(firstPlan.materials[0]);
+		expect(
+			(refreshedPlan.materials[0] as MeshStandardMaterial).userData
+				.holtburgerIndexedMaterial,
+		).toMatchObject({
+			paletteColorCount: 5,
+		});
+		cache.dispose();
+	});
+
 	it("caches indexed texture resources by render surface decode key", () => {
 		const cache = new WorldMaterialResourceCache();
 		const renderSurface = createIndexedRenderSurfacePayload(0x06000007, {
@@ -645,6 +814,34 @@ describe("world material resource cache", () => {
 		cache.dispose();
 	});
 });
+
+function createPaletteAppearanceContext(options: {
+	paletteId?: number | null;
+	subPalettes?: {
+		subId: number;
+		offset: number;
+		numColors: number;
+	}[];
+}): MaterialAppearanceContext {
+	const paletteId = options.paletteId ?? null;
+	const subPalettes = options.subPalettes ?? [];
+	return {
+		...createBaseMaterialAppearanceContext("visible-cell"),
+		paletteViewSignature: [
+			`base=${paletteId === null ? "material" : paletteId.toString(16)}`,
+			`sub=${subPalettes
+				.map(
+					(subPalette) =>
+						`${subPalette.subId.toString(16)}@${subPalette.offset}+${subPalette.numColors}`,
+				)
+				.join(",")}`,
+		].join("|"),
+		paletteView: {
+			paletteId,
+			subPalettes,
+		},
+	};
+}
 
 function createSolidMaterialRecipe(
 	surfaceId: number,

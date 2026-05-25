@@ -28,7 +28,7 @@ describe("indexed materials", () => {
 		expect(material).toBeInstanceOf(MeshStandardMaterial);
 		const standardMaterial = material as MeshStandardMaterial;
 		expect(standardMaterial.map).toBeInstanceOf(DataTexture);
-		expect(standardMaterial.transparent).toBe(true);
+		expect(standardMaterial.transparent).toBe(false);
 		expect(standardMaterial.userData.holtburgerIndexedMaterial).toMatchObject({
 			format: "p8",
 			paletteColorCount: 2,

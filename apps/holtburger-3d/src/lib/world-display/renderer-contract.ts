@@ -77,6 +77,17 @@ export interface WorldRenderDebugMetrics {
 	visibleStructuredInteriorMeshCount: number;
 	debugOverlayObjectCount: number;
 	visibleDebugOverlayObjectCount: number;
+	materialCount: number;
+	materialProgramKeyCount: number;
+	transparentMaterialCount: number;
+	textureResourceCount: number;
+	indexedTextureResourceCount: number;
+	paletteResourceCount: number;
+	staticGeometryGroupCount: number;
+	staticVisibleGeometryGroupCount: number;
+	structuredInteriorGeometryGroupCount: number;
+	materialTypeCounts: Record<string, number>;
+	materialProgramKeySamples: string[];
 	renderCalls: number;
 	renderTriangles: number;
 	renderLines: number;

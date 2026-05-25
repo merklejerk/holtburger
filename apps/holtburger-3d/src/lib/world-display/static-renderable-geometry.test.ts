@@ -112,6 +112,86 @@ describe("static renderable geometry", () => {
 		]);
 	});
 
+	it("compacts interleaved triangle material groups", () => {
+		const positions = new Float32Array([
+			0, 0, 0, 1, 0, 0, 0, 1, 0,
+			10, 0, 0, 11, 0, 0, 10, 1, 0,
+			20, 0, 0, 21, 0, 0, 20, 1, 0,
+		]);
+		const geometry = buildGfxObjGeometry(
+			{
+				sourceId: 1,
+				vertexCount: 9,
+				triangleCount: 3,
+				positions,
+				normals: new Float32Array(27),
+				uvs: new Float32Array(18),
+				triangles: [
+					{ polygonId: 0, surfaceId: 0x08000001, firstVertex: 0 },
+					{ polygonId: 1, surfaceId: 0x08000002, firstVertex: 3 },
+					{ polygonId: 2, surfaceId: 0x08000001, firstVertex: 6 },
+				],
+				surfaceIds: [0x08000001, 0x08000002],
+				invalidPolygons: [],
+				skippedPolygonCount: 0,
+				bounds: null,
+			},
+			[
+				{ surfaceId: 0x08000001, materialIndex: 0 },
+				{ surfaceId: 0x08000002, materialIndex: 1 },
+			],
+		);
+
+		expect(geometry.groups).toEqual([
+			{ start: 0, count: 6, materialIndex: 0 },
+			{ start: 6, count: 3, materialIndex: 1 },
+		]);
+		expect(Array.from(geometry.getAttribute("position").array)).toEqual([
+			0, 0, 0, 1, 0, 0, 0, 1, 0,
+			20, 0, 0, 21, 0, 0, 20, 1, 0,
+			10, 0, 0, 11, 0, 0, 10, 1, 0,
+		]);
+	});
+
+	it("preserves triangle order when material group compaction is disabled", () => {
+		const positions = new Float32Array([
+			0, 0, 0, 1, 0, 0, 0, 1, 0,
+			10, 0, 0, 11, 0, 0, 10, 1, 0,
+			20, 0, 0, 21, 0, 0, 20, 1, 0,
+		]);
+		const geometry = buildGfxObjGeometry(
+			{
+				sourceId: 1,
+				vertexCount: 9,
+				triangleCount: 3,
+				positions,
+				normals: new Float32Array(27),
+				uvs: new Float32Array(18),
+				triangles: [
+					{ polygonId: 0, surfaceId: 0x08000001, firstVertex: 0 },
+					{ polygonId: 1, surfaceId: 0x08000002, firstVertex: 3 },
+					{ polygonId: 2, surfaceId: 0x08000001, firstVertex: 6 },
+				],
+				surfaceIds: [0x08000001, 0x08000002],
+				invalidPolygons: [],
+				skippedPolygonCount: 0,
+				bounds: null,
+			},
+			[
+				{ surfaceId: 0x08000001, materialIndex: 0 },
+				{ surfaceId: 0x08000002, materialIndex: 1 },
+			],
+			{ compactMaterialGroups: false },
+		);
+
+		expect(geometry.groups).toEqual([
+			{ start: 0, count: 3, materialIndex: 0 },
+			{ start: 3, count: 3, materialIndex: 1 },
+			{ start: 6, count: 3, materialIndex: 0 },
+		]);
+		expect(geometry.getAttribute("position").array).toBe(positions);
+	});
+
 	it("splits material groups by surface id and material variant", () => {
 		const geometry = buildGfxObjGeometry(
 			{

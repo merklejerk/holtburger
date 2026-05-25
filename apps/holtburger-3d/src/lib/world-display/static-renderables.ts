@@ -363,14 +363,15 @@ export function mergeStaticRenderableSceneModels(
 
 export function deriveAppearancePreviewStaticRenderableSceneModel(options: {
 	assetState: AssetChannelState;
+	previewInstanceId: string;
 	setupAppearance: PreparedSetupAppearancePayload | null;
-	cameraFrame: SceneCameraFrame | null;
+	spawnCameraFrame: SceneCameraFrame | null;
 	anchorLandblockId: number | null;
 	renderAsInterior: boolean;
 }): StaticRenderableSceneModel {
 	if (
 		!options.setupAppearance ||
-		!options.cameraFrame ||
+		!options.spawnCameraFrame ||
 		!options.anchorLandblockId
 	) {
 		return createEmptyStaticRenderableSceneModel();
@@ -392,7 +393,7 @@ export function deriveAppearancePreviewStaticRenderableSceneModel(options: {
 	const missingGfxAssetIds = new Set<string>();
 	const instance: StaticRenderableSourceInstance = {
 		kind: options.renderAsInterior ? "indoor-static" : "scenery",
-		instanceId: `appearance-preview/${options.setupAppearance.appearanceKey}`,
+		instanceId: `appearance-preview/${options.previewInstanceId}`,
 		owningLandblockId: options.anchorLandblockId,
 		owningEnvCellId: null,
 		sourceDid: options.setupAppearance.setupModelId,
@@ -403,7 +404,7 @@ export function deriveAppearancePreviewStaticRenderableSceneModel(options: {
 		parentPlacements: [],
 		chunkLocalInstancePlacement: {
 			origin: rendererLocalPointToAcPlacementOrigin(
-				pointInFrontOfCamera(options.cameraFrame, 1),
+				pointInFrontOfSpawnCamera(options.spawnCameraFrame, 1),
 			),
 			orientation: { w: 1, x: 0, y: 0, z: 0 },
 		},
@@ -944,7 +945,7 @@ function formatSetupAppearanceAssetId(setupModelId: number): string {
 	return `setup-appearance/${setupModelId.toString(16).padStart(8, "0")}`;
 }
 
-function pointInFrontOfCamera(
+function pointInFrontOfSpawnCamera(
 	cameraFrame: SceneCameraFrame,
 	distance: number,
 ): Vec3Dto {

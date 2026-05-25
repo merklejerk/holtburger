@@ -4,7 +4,7 @@ mod contracts;
 use adapter::HostRuntimeService;
 use contracts::{
     AssetLookupBatchRequestDto, AssetLookupRequestDto, AssetLookupResponseDto, CameraHintAckDto,
-    CameraHintDto, DebugConfigDto,
+    CameraHintDto, DebugConfigDto, RuntimeAppearanceRequestDto,
 };
 
 #[tauri::command]
@@ -45,6 +45,18 @@ fn submit_camera_hint(
     runtime.submit_camera_hint(hint)
 }
 
+#[tauri::command]
+async fn resolve_runtime_appearance(
+    runtime: tauri::State<'_, HostRuntimeService>,
+    request: RuntimeAppearanceRequestDto,
+) -> Result<serde_json::Value, String> {
+    let runtime = runtime.inner().clone();
+    runtime
+        .resolve_runtime_appearance(request)
+        .await
+        .map_err(|error| error.to_string())
+}
+
 fn main() {
     let verbose = verbose_logging_enabled();
     if verbose {
@@ -60,6 +72,7 @@ fn main() {
             lookup_assets_binary,
             get_debug_config,
             submit_camera_hint,
+            resolve_runtime_appearance,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Holtburger 3D host");

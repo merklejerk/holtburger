@@ -13,6 +13,9 @@
 	const isBrowserRoute = currentRoute === "/" || currentRoute === "/browser";
 	let startupError = $state<string | null>(null);
 	let verboseDiagnostics = false;
+	let currentSceneStreamer: SceneAssetStreamingController | null = null;
+	let latestFrontendState = $state(get(frontendState));
+	let appearancePreviewAssetIds: readonly string[] = [];
 
 	onMount(() => {
 		let dispose = () => {};
@@ -32,16 +35,11 @@
 				frontendState.applyAssetError(request, message),
 			debugLog,
 		});
+		currentSceneStreamer = sceneStreamer;
 
 		const unsubscribeFrontendState = frontendState.subscribe((state) => {
-			sceneStreamer.syncSceneInterest({
-				browserDestination: state.browserMode.destination,
-				terrainLodRadius: state.browserMode.terrainLodRadius,
-				buildingLodRadius: state.browserMode.buildingLodRadius,
-				detailLodRadius: state.browserMode.detailLodRadius,
-				envCellLodRadius: state.browserMode.envCellLodRadius,
-				preparedByAssetId: state.asset.preparedByAssetId,
-			});
+			latestFrontendState = state;
+			syncSceneStreamer(sceneStreamer);
 		});
 
 		void (async () => {
@@ -59,9 +57,33 @@
 			unsubscribeFrontendState();
 			dispose();
 			sceneStreamer.dispose();
+			currentSceneStreamer = null;
 			assetChannel.dispose();
 		};
 	});
+
+	function handleAppearancePreviewAssetIdsChange(
+		assetIds: readonly string[],
+	): void {
+		appearancePreviewAssetIds = assetIds;
+		if (currentSceneStreamer) {
+			syncSceneStreamer(currentSceneStreamer);
+		}
+	}
+
+	function syncSceneStreamer(
+		sceneStreamer: SceneAssetStreamingController,
+	): void {
+		sceneStreamer.syncSceneInterest({
+			browserDestination: latestFrontendState.browserMode.destination,
+			terrainLodRadius: latestFrontendState.browserMode.terrainLodRadius,
+			buildingLodRadius: latestFrontendState.browserMode.buildingLodRadius,
+			detailLodRadius: latestFrontendState.browserMode.detailLodRadius,
+			envCellLodRadius: latestFrontendState.browserMode.envCellLodRadius,
+			appearancePreviewAssetIds,
+			preparedByAssetId: latestFrontendState.asset.preparedByAssetId,
+		});
+	}
 
 	function debugLog(label: string, detail: unknown): void {
 		if (!verboseDiagnostics) {
@@ -98,6 +120,8 @@
 			<pre>{tauriLaunchCommand}</pre>
 		</section>
 	{:else}
-		<BrowserWorldDisplay />
+		<BrowserWorldDisplay
+			onRuntimeAppearanceAssetIdsChange={handleAppearancePreviewAssetIdsChange}
+		/>
 	{/if}
 </main>

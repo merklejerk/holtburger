@@ -68,3 +68,42 @@ pub struct CameraHintAckDto {
     pub accepted: bool,
     pub sequence: u64,
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeAppearanceSubPaletteDto {
+    pub sub_id: u32,
+    pub offset: u32,
+    pub num_colors: u32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeAppearanceTextureChangeDto {
+    pub part_index: u8,
+    pub old_texture: u32,
+    pub new_texture: u32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeAppearanceAnimPartChangeDto {
+    pub part_index: u8,
+    pub part_id: u32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeAppearanceObjDescDto {
+    pub palette_id: Option<u32>,
+    pub sub_palettes: Vec<RuntimeAppearanceSubPaletteDto>,
+    pub texture_changes: Vec<RuntimeAppearanceTextureChangeDto>,
+    pub anim_part_changes: Vec<RuntimeAppearanceAnimPartChangeDto>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeAppearanceRequestDto {
+    pub setup_model_id: u32,
+    pub obj_desc: Option<RuntimeAppearanceObjDescDto>,
+}

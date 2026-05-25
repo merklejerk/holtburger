@@ -9,7 +9,10 @@
 	} from "../app/browser-mode";
 	import type { AssetChannelState } from "../lib/assets/types";
 	import type { CameraHintAckDto, CameraHintDto } from "../lib/host/contracts";
-	import { submitCameraHint } from "../lib/host/tauri";
+	import {
+		resolveRuntimeAppearance,
+		submitCameraHint,
+	} from "../lib/host/tauri";
 	import {
 		buildCameraHintFromSceneCameraFrame,
 		buildBrowserFreeCameraFrame,
@@ -46,6 +49,11 @@
 		formatPreparedAssetKindCounts,
 	} from "../lib/assets/asset-cache-diagnostics";
 	import { describeMaterialAssetDiagnostics } from "../lib/assets/material-diagnostics";
+	import {
+		RuntimeAppearanceCache,
+		type RuntimeAppearanceInput,
+		type RuntimeAppearanceResolvedFacts as BaseRuntimeAppearanceResolvedFacts,
+	} from "../lib/assets/runtime-appearance-cache";
 	import type { RenderSpatialMetadata } from "../lib/world-display/render-spatial-index";
 	import {
 		commitRenderAnchorCandidate,
@@ -63,6 +71,10 @@
 		type BrowserRenderResourceCoordinatorInput,
 		type BrowserRenderResourceSnapshot,
 	} from "../lib/world-display/browser-render-resource-coordinator";
+	import type {
+		RuntimeAppearanceRequestDto,
+		SetupAppearancePayloadDto,
+	} from "../lib/host/contracts";
 	import BrowserModePanel from "./BrowserModePanel.svelte";
 
 	interface BrowserPanelRow {
@@ -80,6 +92,16 @@
 		kicker: string;
 		rows: BrowserPanelRow[];
 	}
+
+	interface ResolvedRuntimeAppearanceFacts extends BaseRuntimeAppearanceResolvedFacts {
+		setupAppearance: SetupAppearancePayloadDto;
+	}
+
+	let {
+		onRuntimeAppearanceAssetIdsChange,
+	}: {
+		onRuntimeAppearanceAssetIdsChange?: (assetIds: readonly string[]) => void;
+	} = $props();
 
 	const initialFrontendState = get(frontendState);
 	let assetState: AssetChannelState = initialFrontendState.asset;
@@ -162,6 +184,17 @@
 	let assetPipelineDebugText = $state("Waiting for asset activity.");
 	let assetCacheDebugText = $state("Waiting for asset cache activity.");
 	let assetMaterialDebugText = $state("Waiting for material asset activity.");
+	const runtimeAppearanceCache =
+		new RuntimeAppearanceCache<ResolvedRuntimeAppearanceFacts>({
+			maxEntries: 24,
+		});
+	let runtimeAppearanceInput = $state<RuntimeAppearanceInput | null>(null);
+	let runtimeAppearanceResolved = $state<ResolvedRuntimeAppearanceFacts | null>(
+		null,
+	);
+	let runtimeAppearanceError = $state<string | null>(null);
+	let runtimeAppearancePending = $state(false);
+	let runtimeAppearanceRequestSequence = 0;
 
 	const CAMERA_HINT_INTERVAL_MS = 250;
 	const DEBUG_SUMMARY_DEBOUNCE_MS = 500;
@@ -258,6 +291,52 @@
 		}
 		return `${debug.renderPassCount} pass${debug.renderPassCount === 1 ? "" : "es"}, ${debug.renderCalls} call${debug.renderCalls === 1 ? "" : "s"}, ${debug.renderTriangles} tris.`;
 	});
+	const runtimeAppearanceStatusText = $derived.by(() => {
+		if (runtimeAppearancePending) {
+			return "Resolving runtime appearance.";
+		}
+		if (runtimeAppearanceError) {
+			return runtimeAppearanceError;
+		}
+		if (runtimeAppearanceResolved) {
+			return "Preview object is placed 1 meter in front of the active camera.";
+		}
+		return "No runtime appearance is active.";
+	});
+	const runtimeAppearanceRows = $derived<BrowserPanelRow[]>([
+		{
+			label: "Cache",
+			value: describeRuntimeAppearanceCacheDiagnostics(),
+		},
+		...(runtimeAppearanceResolved
+			? [
+					{
+						label: "Appearance",
+						value: runtimeAppearanceResolved.appearanceKey,
+					},
+					{
+						label: "Parts",
+						value: `${runtimeAppearanceResolved.selectedGfxObjAssetIds.length} selected`,
+					},
+					{
+						label: "Materials",
+						value: `${runtimeAppearanceResolved.materialAssetIds.length} requested`,
+					},
+					{
+						label: "Palettes",
+						value: `${runtimeAppearanceResolved.paletteAssetIds.length} requested`,
+					},
+					{
+						label: "Textures",
+						value: runtimeAppearanceResolved.textureSwapSignature ?? "base",
+					},
+					{
+						label: "Palette view",
+						value: runtimeAppearanceResolved.paletteViewSignature ?? "base",
+					},
+				]
+			: []),
+	]);
 	const cameraFrameText = $derived(
 		browserCameraFrame
 			? `${describeSceneCameraFrame(browserCameraFrame)} ${describeBrowserCameraControlMode()}`
@@ -532,9 +611,134 @@
 			diagnosticSelection,
 			activeRenderAnchor,
 			browserCameraFrame,
+			runtimeAppearanceSetupAppearance:
+				runtimeAppearanceResolved?.setupAppearance ?? null,
 			cameraAck,
 			pendingCameraHint,
 		});
+	}
+
+	function handleRuntimeAppearanceSubmit(
+		request: RuntimeAppearanceRequestDto,
+	): void {
+		const input: RuntimeAppearanceInput = {
+			setupModelId: request.setupModelId,
+			objDesc: request.objDesc,
+		};
+		runtimeAppearanceInput = input;
+		runtimeAppearancePending = true;
+		runtimeAppearanceError = null;
+		runtimeAppearanceRequestSequence += 1;
+		const requestSequence = runtimeAppearanceRequestSequence;
+
+		void runtimeAppearanceCache
+			.getOrResolve(input, async () =>
+				createRuntimeAppearanceResolvedFacts(
+					await resolveRuntimeAppearance(request),
+				),
+			)
+			.then((resolved) => {
+				if (runtimeAppearanceRequestSequence !== requestSequence) {
+					return;
+				}
+				runtimeAppearanceResolved = resolved;
+				runtimeAppearancePending = false;
+				onRuntimeAppearanceAssetIdsChange?.(
+					collectRuntimeAppearanceAssetIds(resolved),
+				);
+				scheduleCurrentSceneResourceUpdate();
+			})
+			.catch((error) => {
+				if (runtimeAppearanceRequestSequence !== requestSequence) {
+					return;
+				}
+				runtimeAppearanceResolved = null;
+				runtimeAppearancePending = false;
+				runtimeAppearanceError =
+					error instanceof Error ? error.message : String(error);
+				onRuntimeAppearanceAssetIdsChange?.([]);
+				scheduleCurrentSceneResourceUpdate();
+			});
+	}
+
+	function clearRuntimeAppearance(): void {
+		runtimeAppearanceInput = null;
+		runtimeAppearanceResolved = null;
+		runtimeAppearancePending = false;
+		runtimeAppearanceError = null;
+		runtimeAppearanceRequestSequence += 1;
+		onRuntimeAppearanceAssetIdsChange?.([]);
+		scheduleCurrentSceneResourceUpdate();
+	}
+
+	function createRuntimeAppearanceResolvedFacts(
+		setupAppearance: SetupAppearancePayloadDto,
+	): ResolvedRuntimeAppearanceFacts {
+		const selectedGfxObjAssetIds = uniqueSortedStrings(
+			setupAppearance.parts.map((part) => part.gfxObjAssetId),
+		);
+		return {
+			setupModelId: setupAppearance.setupModelId,
+			appearanceKey: setupAppearance.appearanceKey,
+			selectedGfxObjAssetIds,
+			materialAssetIds: uniqueSortedStrings(
+				setupAppearance.dependencies.materialAssetIds,
+			),
+			paletteAssetIds: uniqueSortedStrings(
+				setupAppearance.dependencies.paletteAssetIds,
+			),
+			textureChanges: setupAppearance.textureChanges,
+			animPartChanges: setupAppearance.animPartChanges,
+			paletteId: setupAppearance.paletteId,
+			subPalettes: setupAppearance.subPalettes,
+			selectedPartsSignature:
+				selectedGfxObjAssetIds.length === 0
+					? null
+					: selectedGfxObjAssetIds.join(","),
+			textureSwapSignature:
+				setupAppearance.textureChanges.length === 0
+					? null
+					: setupAppearance.textureChanges
+							.map(
+								(change) =>
+									`${change.partIndex}:${formatHex32(change.oldTexture)}>${formatHex32(change.newTexture)}`,
+							)
+							.join(","),
+			paletteViewSignature:
+				setupAppearance.paletteId === null &&
+				setupAppearance.subPalettes.length === 0
+					? null
+					: [
+							`base=${setupAppearance.paletteId === null ? "material" : formatHex32(setupAppearance.paletteId)}`,
+							`sub=${setupAppearance.subPalettes
+								.map(
+									(subPalette) =>
+										`${formatHex32(subPalette.subId)}@${subPalette.offset}+${subPalette.numColors}`,
+								)
+								.join(",")}`,
+						].join("|"),
+			setupAppearance,
+		};
+	}
+
+	function collectRuntimeAppearanceAssetIds(
+		resolved: ResolvedRuntimeAppearanceFacts,
+	): string[] {
+		return uniqueSortedStrings([
+			`setup-model/${formatHex32(resolved.setupModelId).toLowerCase()}`,
+			...resolved.selectedGfxObjAssetIds,
+			...resolved.materialAssetIds,
+			...resolved.paletteAssetIds,
+		]);
+	}
+
+	function describeRuntimeAppearanceCacheDiagnostics(): string {
+		const diagnostics = runtimeAppearanceCache.diagnostics();
+		return `${diagnostics.size}/${diagnostics.maxEntries} entries; ${diagnostics.hits} hits, ${diagnostics.misses} misses, ${diagnostics.evictions} evictions.`;
+	}
+
+	function uniqueSortedStrings(values: readonly string[]): string[] {
+		return [...new Set(values)].sort();
 	}
 
 	function syncControlledCameraFrame(): void {
@@ -1011,6 +1215,7 @@
 		browserCameraFrame = nextFrame;
 		cameraFrameApplyCount += 1;
 		syncControlledCameraFrame();
+		scheduleCurrentSceneResourceUpdate();
 		scheduleRenderedCameraHint(viewportPoint, immediate);
 	}
 
@@ -1420,8 +1625,12 @@
 			sceneDetailSections={browserPanelSceneDetailSections}
 			debugSummaryRows={browserPanelDebugRows}
 			debugDetailSections={browserPanelDebugDetailSections}
+			{runtimeAppearanceStatusText}
+			{runtimeAppearanceRows}
 			canResetCamera={Boolean(renderMetrics?.bounds)}
 			onResetCamera={resetBrowserCamera}
+			onRuntimeAppearanceSubmit={handleRuntimeAppearanceSubmit}
+			onRuntimeAppearanceClear={clearRuntimeAppearance}
 		/>
 	</div>
 

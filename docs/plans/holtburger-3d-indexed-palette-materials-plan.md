@@ -627,6 +627,8 @@ Remaining work:
 
 ## Phase 6: Diagnostics And Debug UI
 
+Status: complete as of 2026-05-25.
+
 Extend current material diagnostics so the Debug panel can answer:
 
 - Number of indexed recipes visible.
@@ -639,6 +641,59 @@ Console warnings should be coalesced like current material diagnostics.
 
 Do not write tests for debug-only logging. Test the pure diagnostic summary
 helpers and material classification behavior instead.
+
+Implemented changes:
+
+- Extended `describeMaterialAssetDiagnostics()` with indexed-material summary
+  data in the existing Debug panel Materials row.
+- Added indexed recipe counts derived from prepared material recipes with
+  prepared indexed render surfaces.
+- Added prepared indexed surface counts split by `P8` and `Index16`.
+- Added palette-selection counts split by material recipe palette,
+  render-surface default palette, and missing palette selection.
+- Added prepared indexed palette count plus samples for missing palette assets,
+  empty palettes, and index range errors.
+- Reused the Phase 5 palette selection helper so diagnostics report the same
+  base/default semantics the renderer uses.
+
+Validation added:
+
+- Unit coverage for indexed recipe counts.
+- Unit coverage for P8 and Index16 surface counts.
+- Unit coverage for material-recipe and render-surface-default palette source
+  counts.
+- Unit coverage for empty palette samples.
+- Unit coverage for index range error samples.
+
+Decisions:
+
+- Keep Phase 6 in the existing Materials row instead of adding a new Debug panel
+  section. The indexed summary is still part of material pipeline health, and
+  this avoids extra UI surface before visual smoke testing.
+- Keep console warning behavior unchanged. Coalesced material console warnings
+  already come from material resource diagnostics; Phase 6 only summarizes
+  prepared asset state for the panel.
+- Count "indexed recipes" from prepared recipes that have prepared indexed
+  render-surface candidates. This makes the panel describe what the renderer can
+  currently classify, not theoretical dependencies that have not loaded yet.
+
+Course corrections:
+
+- The plan originally said "visible indexed recipes." The current implementation
+  reports prepared indexed recipes because the existing visible-material helper
+  only returns missing visible recipes, not the full visible material set. A
+  true visible-indexed count should be added later if the scene planner exposes
+  full visible material IDs.
+
+Cleanup targets:
+
+- Consider exposing full visible material asset IDs from
+  `scene-asset-request-planner.ts` if Phase 7 browser validation shows the Debug
+  row needs to distinguish visible indexed materials from prepared-but-not-drawn
+  indexed materials.
+- Phase 7 should confirm the panel reports zero generic
+  `unsupported-render-surface` indexed failures when real indexed materials have
+  valid palettes.
 
 ## Phase 7: Validation Fixtures
 

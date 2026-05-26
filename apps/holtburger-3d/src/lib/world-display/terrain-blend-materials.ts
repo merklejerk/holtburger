@@ -598,7 +598,7 @@ vec2 rotateLegacyAlphaUv(vec2 uv, int rotation) {
 vec4 blendOverlay(vec4 baseColor, sampler2D overlayTexture, sampler2D alphaTexture, float tiling, int rotation) {
 	vec4 overlayColor = texture2D(overlayTexture, vUv * tiling);
 	float alpha = texture2D(alphaTexture, rotateLegacyAlphaUv(legacyAlphaUv(vUv), rotation)).r;
-	return mix(baseColor, overlayColor, clamp(alpha, 0.0, 1.0));
+	return mix(baseColor, overlayColor, clamp(1.0 - alpha, 0.0, 1.0));
 }
 
 void main() {

@@ -161,6 +161,10 @@ import {
 	deriveTextureVelocityMetrics,
 	updateTextureVelocityMaterials,
 } from "./texture-velocity";
+import {
+	applyRegionDetailOverlayToMaterials,
+	resolveRegionDetailOverlay,
+} from "./region-detail-overlays";
 import { createDefaultMaterialTextureSamplingPolicy } from "./texture-sampling-policy";
 import { withLegacyMeshStandardSurfaceDefaults } from "./material-behavior";
 
@@ -178,6 +182,7 @@ export interface WorldDisplayRendererOptions {
 	transitionPortalMaxDepth?: number;
 	renderStyle?: WorldDisplayRenderStyle;
 	textureFilteringMode?: WorldDisplayTextureFilteringMode;
+	detailTexturesEnabled?: boolean;
 	onCameraFrameChange?: WorldRenderCameraFrameChangeHandler;
 	onRenderMetricsChange?: WorldRenderMetricsChangeHandler;
 	onCameraResidencyChange?: BrowserCameraResidencyChangeHandler;
@@ -197,6 +202,7 @@ export interface WorldDisplayRenderer {
 	setTransitionPortalMaxDepth(maxDepth: number): void;
 	setRenderStyle(renderStyle: WorldDisplayRenderStyle): void;
 	setTextureFilteringMode(mode: WorldDisplayTextureFilteringMode): void;
+	setDetailTexturesEnabled(enabled: boolean): void;
 	setCameraFrameChangeHandler(
 		handler: WorldRenderCameraFrameChangeHandler | undefined,
 	): void;
@@ -447,6 +453,7 @@ export function createWorldDisplayRenderer(
 	let renderStyle: WorldDisplayRenderStyle = options.renderStyle ?? "solid";
 	let textureFilteringMode: WorldDisplayTextureFilteringMode =
 		options.textureFilteringMode ?? "anisotropic-4x";
+	let detailTexturesEnabled = options.detailTexturesEnabled ?? true;
 	const noMaterialOverrideMaterials = new Map<string, MeshStandardMaterial>();
 	const wireframeOverrideMaterials = new Map<string, MeshBasicMaterial>();
 	let onCameraFrameChange = options.onCameraFrameChange;
@@ -474,6 +481,13 @@ export function createWorldDisplayRenderer(
 
 	const scene = new Scene();
 	const reportMaterialDiagnostic = createCoalescedMaterialDiagnosticReporter();
+	const reportRegionDetailDiagnostic = (message: string): void => {
+		reportMaterialDiagnostic({
+			key: `region-detail:${message}`,
+			message,
+			detail: { materialAssetId: "region-detail-overlay" },
+		});
+	};
 	const materialTextureCapabilities =
 		detectMaterialTextureCapabilities(renderer);
 	let materialResourceCache = createMaterialResourceCache(textureFilteringMode);
@@ -566,6 +580,7 @@ export function createWorldDisplayRenderer(
 			materialProgramKeyCount: 0,
 			transparentMaterialCount: 0,
 			textureFilteringMode,
+			detailTexturesEnabled,
 			textureSamplingPolicyCounts: {},
 			textureSamplingPolicySamples: [],
 			textureVelocityPartCount: 0,
@@ -610,6 +625,7 @@ export function createWorldDisplayRenderer(
 			assetState = nextAssetState;
 			clearMaterializedSceneMeshes();
 			materialResourceCache.dispose();
+			syncTerrainMeshes(terrainScene);
 			syncStaticRenderableMeshes(staticRenderableScene);
 			syncStructuredInteriorMeshes(structuredInteriorScene);
 		},
@@ -664,8 +680,16 @@ export function createWorldDisplayRenderer(
 			clearMaterializedSceneMeshes();
 			materialResourceCache.dispose();
 			materialResourceCache = createMaterialResourceCache(textureFilteringMode);
+			syncTerrainMeshes(terrainScene);
 			syncStaticRenderableMeshes(staticRenderableScene);
 			syncStructuredInteriorMeshes(structuredInteriorScene);
+		},
+		setDetailTexturesEnabled(enabled) {
+			if (detailTexturesEnabled === enabled) {
+				return;
+			}
+			detailTexturesEnabled = enabled;
+			rebuildDetailTextureMaterializedMeshes();
 		},
 		setCameraFrameChangeHandler(handler) {
 			onCameraFrameChange = handler;
@@ -892,6 +916,7 @@ export function createWorldDisplayRenderer(
 			materialProgramKeyCount: materialStats.materialProgramKeyCount,
 			transparentMaterialCount: materialStats.transparentMaterialCount,
 			textureFilteringMode,
+			detailTexturesEnabled,
 			textureSamplingPolicyCounts: materialStats.textureSamplingPolicyCounts,
 			textureSamplingPolicySamples: materialStats.textureSamplingPolicySamples,
 			textureVelocityPartCount: textureVelocityMetrics.textureVelocityPartCount,
@@ -1702,16 +1727,31 @@ export function createWorldDisplayRenderer(
 			const chunkRoot = getRenderChunkRoot(firstPart.renderChunk.chunkKey);
 			let mesh = staticRenderableGroupMeshes.get(groupKey);
 			if (!mesh) {
+				const detailMaterials = applyRegionDetailOverlayToMaterials({
+					materials: materialPlan.materials,
+					overlay: detailTexturesEnabled
+						? resolveRegionDetailOverlay({
+								assetState,
+								regionNumber: firstPart.regionNumber,
+								roleKind: firstPart.detailRoleKind,
+								materialResourceCache,
+								reportDiagnostic: reportRegionDetailDiagnostic,
+							})
+						: null,
+				});
 				const groupMaterials = createTextureVelocityMaterialSet(
-					materialPlan.materials,
+					detailMaterials.materials,
 					firstPart.textureVelocity,
 				);
+				const materialOwnedByResourceCache =
+					detailMaterials.ownedByResourceCache &&
+					groupMaterials.ownedByResourceCache;
 				mesh = createStaticRenderableInstancedMesh(
 					groupKey,
 					gfxAssetId,
 					geometry,
 					groupMaterials.materials,
-					groupMaterials.ownedByResourceCache,
+					materialOwnedByResourceCache,
 					parts.length,
 				);
 				chunkRoot.add(mesh);
@@ -1807,6 +1847,15 @@ export function createWorldDisplayRenderer(
 		for (const cell of sceneModel.cells) {
 			const chunkRoot = getRenderChunkRoot(cell.renderChunk.chunkKey);
 			let mesh = structuredInteriorMeshes.get(cell.renderKey);
+			if (
+				mesh &&
+				mesh.userData.regionDetailSignature !== cell.detailSignature
+			) {
+				mesh.removeFromParent();
+				disposeMesh(mesh);
+				structuredInteriorMeshes.delete(cell.renderKey);
+				mesh = undefined;
+			}
 			if (!mesh) {
 				mesh = createStructuredInteriorCellMesh(cell);
 				chunkRoot.add(mesh);
@@ -1825,6 +1874,7 @@ export function createWorldDisplayRenderer(
 	}
 
 	function clearMaterializedSceneMeshes(): void {
+		clearTerrainMeshes();
 		for (const mesh of staticRenderableGroupMeshes.values()) {
 			mesh.removeFromParent();
 			disposeMeshMaterial(mesh);
@@ -1840,6 +1890,32 @@ export function createWorldDisplayRenderer(
 			disposeMesh(mesh);
 		}
 		structuredInteriorMeshes.clear();
+	}
+
+	function rebuildDetailTextureMaterializedMeshes(): void {
+		clearTerrainMeshes();
+		for (const mesh of staticRenderableGroupMeshes.values()) {
+			mesh.removeFromParent();
+			disposeMeshMaterial(mesh);
+		}
+		staticRenderableGroupMeshes.clear();
+		staticRenderableGroupPartSignatures.clear();
+		for (const mesh of structuredInteriorMeshes.values()) {
+			mesh.removeFromParent();
+			disposeMesh(mesh);
+		}
+		structuredInteriorMeshes.clear();
+		syncTerrainMeshes(terrainScene);
+		syncStaticRenderableMeshes(staticRenderableScene);
+		syncStructuredInteriorMeshes(structuredInteriorScene);
+	}
+
+	function clearTerrainMeshes(): void {
+		for (const mesh of terrainMeshes.values()) {
+			mesh.removeFromParent();
+			disposeMesh(mesh);
+		}
+		terrainMeshes.clear();
 	}
 
 	function syncPortalMaskMeshes(model: TransitionPortalCandidateModel): void {
@@ -1911,16 +1987,30 @@ export function createWorldDisplayRenderer(
 			preparedByAssetId: assetState.preparedByAssetId,
 			fallbackColorKey: cell.debugColorKey,
 		});
+		const detailMaterials = applyRegionDetailOverlayToMaterials({
+			materials: materialPlan.materials,
+			overlay: detailTexturesEnabled
+				? resolveRegionDetailOverlay({
+						assetState,
+						regionNumber: cell.regionNumber,
+						roleKind: "environment",
+						materialResourceCache,
+						reportDiagnostic: reportRegionDetailDiagnostic,
+					})
+				: null,
+		});
 		const geometry = buildGfxObjGeometry(
 			cell.renderGeometry,
 			materialPlan.geometrySlots,
 			{
-				compactMaterialGroups: canCompactMaterialGroups(materialPlan.materials),
+				compactMaterialGroups: canCompactMaterialGroups(detailMaterials.materials),
 			},
 		);
-		const mesh = new Mesh(geometry, materialPlan.materials);
+		const mesh = new Mesh(geometry, detailMaterials.materials);
 		mesh.name = `structured-interior/${cell.renderKey}`;
-		mesh.userData.materialOwnedByResourceCache = true;
+		mesh.userData.materialOwnedByResourceCache =
+			detailMaterials.ownedByResourceCache;
+		mesh.userData.regionDetailSignature = cell.detailSignature;
 		mesh.matrixAutoUpdate = false;
 		mesh.layers.set(WORLD_RENDER_LAYER.diagnosticInterior);
 		mesh.layers.enable(WORLD_RENDER_LAYER.portalInterior);
@@ -2589,11 +2679,12 @@ export function createWorldDisplayRenderer(
 		const materialSet =
 			tile.materialResources.status === "ready"
 				? buildTerrainBlendMaterialSet({
-						assetState,
-						regionNumber: tile.materialResources.regionNumber,
-						pcodes: tile.mesh.quads.map((quad) => quad.pcode),
-						materialResourceCache,
-					})
+					assetState,
+					regionNumber: tile.materialResources.regionNumber,
+					pcodes: tile.mesh.quads.map((quad) => quad.pcode),
+					materialResourceCache,
+					detailTexturesEnabled,
+				})
 				: null;
 		const geometry = materialSet
 			? buildTerrainMaterialGeometry(
@@ -2999,6 +3090,7 @@ function createRenderDebugMetrics(
 		materialProgramKeyCount: options.materialProgramKeyCount,
 		transparentMaterialCount: options.transparentMaterialCount,
 		textureFilteringMode: options.textureFilteringMode,
+		detailTexturesEnabled: options.detailTexturesEnabled,
 		textureSamplingPolicyCounts: options.textureSamplingPolicyCounts,
 		textureSamplingPolicySamples: options.textureSamplingPolicySamples,
 		textureVelocityPartCount: options.textureVelocityPartCount,

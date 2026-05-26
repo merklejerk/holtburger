@@ -6,11 +6,16 @@ import {
 	landblockTopologyPayloadDtoSchema,
 	materialRecipePayloadDtoSchema,
 	renderSurfacePayloadDtoSchema,
+	regionRenderProfilePayloadDtoSchema,
 	surfaceTexturePayloadDtoSchema,
 	setupModelPayloadDtoSchema,
 	setupAppearancePayloadDtoSchema,
 	terrainMaterialPayloadDtoSchema,
 } from "../host/contracts";
+import {
+	formatRegionRenderProfileAssetId,
+	formatTerrainMaterialAssetId,
+} from "../landblocks";
 
 export interface AssetDependencyRef {
 	assetId: string;
@@ -24,9 +29,8 @@ export function getAssetResponseDependencies(
 	);
 	if (landblockOutdoor.success) {
 		return uniqueSortedAssetIds([
-			formatTerrainMaterialDependencyAssetId(
-				landblockOutdoor.data.regionNumber,
-			),
+			formatTerrainMaterialAssetId(landblockOutdoor.data.regionNumber),
+			formatRegionRenderProfileAssetId(landblockOutdoor.data.regionNumber),
 			...landblockOutdoor.data.dependencies.renderableSourceAssetIds,
 			...landblockOutdoor.data.dependencies.materialAssetIds,
 		]);
@@ -44,6 +48,7 @@ export function getAssetResponseDependencies(
 	const envCell = envCellPayloadDtoSchema.safeParse(response.payload);
 	if (envCell.success) {
 		return uniqueSortedAssetIds([
+			formatRegionRenderProfileAssetId(envCell.data.regionNumber),
 			...envCell.data.dependencies.materialAssetIds,
 			...envCell.data.dependencies.renderableSourceAssetIds,
 		]);
@@ -91,6 +96,17 @@ export function getAssetResponseDependencies(
 		]);
 	}
 
+	const regionRenderProfile = regionRenderProfilePayloadDtoSchema.safeParse(
+		response.payload,
+	);
+	if (regionRenderProfile.success) {
+		return uniqueSortedAssetIds([
+			...regionRenderProfile.data.dependencies.surfaceTextureAssetIds,
+			...regionRenderProfile.data.dependencies.renderSurfaceAssetIds,
+			...regionRenderProfile.data.dependencies.paletteAssetIds,
+		]);
+	}
+
 	const surfaceTexture = surfaceTexturePayloadDtoSchema.safeParse(
 		response.payload,
 	);
@@ -114,8 +130,4 @@ export function getAssetResponseDependencies(
 
 function uniqueSortedAssetIds(assetIds: string[]): AssetDependencyRef[] {
 	return [...new Set(assetIds)].sort().map((assetId) => ({ assetId }));
-}
-
-function formatTerrainMaterialDependencyAssetId(regionNumber: number): string {
-	return `terrain-material/${Math.trunc(regionNumber)}`;
 }

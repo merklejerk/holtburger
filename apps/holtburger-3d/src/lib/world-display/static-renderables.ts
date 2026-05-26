@@ -56,6 +56,10 @@ import {
 } from "./material-resources";
 import { describeMaterialVariantSignature } from "./material-variants";
 import {
+	describeRegionDetailRoleSignature,
+	type RegionDetailRoleKind,
+} from "./region-detail-overlays";
+import {
 	describeTextureVelocitySignature,
 	normalizeTextureVelocity,
 	type TextureVelocityRenderState,
@@ -73,6 +77,7 @@ interface StaticRenderableSourceInstance {
 	kind: StaticRenderableInstanceKind;
 	instanceId: string;
 	owningLandblockId: number;
+	regionNumber: number;
 	owningEnvCellId: number | null;
 	sourceDid: number;
 	sourceAssetId: string;
@@ -90,6 +95,7 @@ export interface StaticRenderablePart {
 	sourceAssetId: string;
 	sourceDid: number;
 	owningLandblockId: number;
+	regionNumber: number;
 	owningEnvCellId: number | null;
 	renderChunk: RenderChunkPlacement;
 	kind: StaticRenderableInstanceKind;
@@ -107,6 +113,8 @@ export interface StaticRenderablePart {
 	debugColorKey: string;
 	textureVelocity: TextureVelocityRenderState | null;
 	textureVelocitySignature: string;
+	detailRoleKind: RegionDetailRoleKind;
+	detailSignature: string;
 }
 
 export interface StaticRenderableSceneModel {
@@ -272,8 +280,9 @@ function formatStaticRenderableRenderGroupKey(
 	gfxObjAssetId: string,
 	materialSignature: string,
 	textureVelocitySignature: string,
+	detailSignature: string,
 ): string {
-	return `${renderDomain}|${chunkKey}|${gfxObjAssetId}|${materialSignature}|${textureVelocitySignature}`;
+	return `${renderDomain}|${chunkKey}|${gfxObjAssetId}|${materialSignature}|${textureVelocitySignature}|${detailSignature}`;
 }
 
 function groupStaticRenderablePartsByRenderGroupKey(
@@ -287,6 +296,7 @@ function groupStaticRenderablePartsByRenderGroupKey(
 			part.gfxObjAssetId,
 			part.materialSignature,
 			part.textureVelocitySignature,
+			part.detailSignature,
 		);
 		const groupedParts = partsByGroupKey.get(groupKey);
 		if (groupedParts) {
@@ -405,6 +415,10 @@ export function deriveAppearancePreviewStaticRenderableSceneModel(options: {
 		kind: options.renderAsInterior ? "indoor-static" : "scenery",
 		instanceId: `appearance-preview/${options.previewInstanceId}`,
 		owningLandblockId: options.anchorLandblockId,
+		regionNumber: deriveRegionNumberForLandblock(
+			options.assetState,
+			options.anchorLandblockId,
+		),
 		owningEnvCellId: null,
 		sourceDid: options.setupAppearance.setupModelId,
 		sourceAssetId: formatSetupModelAssetId(
@@ -500,6 +514,7 @@ function normalizeOutdoorStaticSourceInstance(
 					: "building",
 		instanceId: member.instanceId,
 		owningLandblockId: normalizedPlacement.landblockId,
+		regionNumber: payload.regionNumber,
 		owningEnvCellId: null,
 		sourceDid: member.sourceDid,
 		sourceAssetId: member.sourceAssetId,
@@ -553,6 +568,7 @@ function normalizeEnvCellStaticSourceInstance(
 		kind: "indoor-static",
 		instanceId: member.instanceId,
 		owningLandblockId: normalizeOutdoorLandblockId(payload.envCellId),
+		regionNumber: payload.regionNumber,
 		owningEnvCellId: payload.envCellId,
 		sourceDid: member.sourceDid,
 		sourceAssetId: member.sourceAssetId,
@@ -601,6 +617,7 @@ function createStaticRenderablePart(
 		partPlacements: PlacementTransformDto[];
 		scale: Vec3Dto;
 		textureVelocity?: TextureVelocityRenderState | null;
+		assetState: AssetChannelState;
 	},
 ): StaticRenderablePart {
 	const debugColorKey = `${instance.sourceAssetId}:${formatHexId(part.gfxObjId)}:${part.partIndex}`;
@@ -615,6 +632,12 @@ function createStaticRenderablePart(
 	);
 	const textureVelocitySignature =
 		describeTextureVelocitySignature(textureVelocity);
+	const detailRoleKind = staticRenderableDetailRoleKindForKind(instance.kind);
+	const detailSignature = describeRegionDetailRoleSignature({
+		assetState: part.assetState,
+		regionNumber: instance.regionNumber,
+		roleKind: detailRoleKind,
+	});
 	return {
 		renderKey: formatRenderDomainKey(renderDomain, localRenderKey),
 		renderDomain,
@@ -622,6 +645,7 @@ function createStaticRenderablePart(
 		sourceAssetId: instance.sourceAssetId,
 		sourceDid: instance.sourceDid,
 		owningLandblockId: instance.owningLandblockId,
+		regionNumber: instance.regionNumber,
 		owningEnvCellId: instance.owningEnvCellId,
 		renderChunk,
 		kind: instance.kind,
@@ -642,6 +666,8 @@ function createStaticRenderablePart(
 		debugColorKey,
 		textureVelocity,
 		textureVelocitySignature,
+		detailRoleKind,
+		detailSignature,
 	};
 }
 
@@ -651,6 +677,23 @@ function staticRenderableRenderDomainForKind(
 	return kind === "indoor-static"
 		? WORLD_RENDER_DOMAIN.interiorStatic
 		: WORLD_RENDER_DOMAIN.exteriorStatic;
+}
+
+function staticRenderableDetailRoleKindForKind(
+	kind: StaticRenderableInstanceKind,
+): RegionDetailRoleKind {
+	return kind === "building" ? "building" : "object";
+}
+
+function deriveRegionNumberForLandblock(
+	assetState: AssetChannelState,
+	landblockId: number,
+): number {
+	const asset =
+		assetState.preparedByAssetId[formatLandblockOutdoorAssetId(landblockId)];
+	return asset?.payload.kind === "landblock-outdoor"
+		? asset.payload.regionNumber
+		: 0;
 }
 
 function multiplyScale(left: Vec3Dto, right: Vec3Dto): Vec3Dto {
@@ -755,6 +798,7 @@ function expandStaticRenderableSourceInstanceParts(
 				materialSlots: resolveGfxObjMaterialSlots(sourceAsset.payload),
 				partPlacements: [],
 				scale: UNIT_SCALE,
+				assetState,
 			}),
 		];
 	}
@@ -800,6 +844,7 @@ function expandStaticRenderableSourceInstanceParts(
 						sourceAsset.payload,
 						part.partIndex,
 					),
+					assetState,
 				}),
 			];
 		});
@@ -869,6 +914,7 @@ function expandSetupAppearanceParts(options: {
 					options.setupModel,
 					part.partIndex,
 				),
+				assetState: options.assetState,
 			}),
 		];
 	});

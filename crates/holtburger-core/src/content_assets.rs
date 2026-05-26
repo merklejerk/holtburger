@@ -56,7 +56,11 @@ pub enum ContentAsset {
         region_number: u32,
     },
     LandblockTopology(Box<LandblockTopologyAsset>),
-    EnvCell(Box<EnvCellAsset>),
+    EnvCell {
+        cell: Box<EnvCellAsset>,
+        region_id: u32,
+        region_number: u32,
+    },
     TerrainMaterial(Box<ResolvedTerrainMaterialTable>),
     RegionRenderProfile(Box<ResolvedRegionRenderProfile>),
     GfxObj(Box<GfxObj>),
@@ -116,7 +120,12 @@ impl ContentAssetService {
                         env_cell_id,
                     )
                     .with_context(|| format!("Could not assemble EnvCell 0x{env_cell_id:08X}"))?;
-                Ok(ContentAsset::EnvCell(Box::new(asset)))
+                let region = self.decode_cache.region_desc(&self.content)?;
+                Ok(ContentAsset::EnvCell {
+                    cell: Box::new(asset),
+                    region_id: region.id,
+                    region_number: region.region_number,
+                })
             }
             ContentAssetRequest::TerrainMaterial(region_number) => Ok(
                 ContentAsset::TerrainMaterial(Box::new(

@@ -2,7 +2,6 @@ import { DoubleSide, ShaderMaterial, type Material, type Texture } from "three";
 
 import type {
 	AssetChannelState,
-	PreparedRegionDetailRole,
 	PreparedRenderSurfacePayload,
 	PreparedSurfaceTexturePayload,
 	PreparedTerrainMaterialTablePayload,
@@ -11,6 +10,7 @@ import type {
 } from "../assets/types";
 import { formatHex32 } from "../landblocks";
 import type { WorldMaterialResourceCache } from "./material-resources";
+import { resolveRegionDetailOverlay } from "./region-detail-overlays";
 import type { TextureSamplingPolicy } from "./texture-sampling-policy";
 
 export interface TerrainBlendMaterialSet {
@@ -25,6 +25,7 @@ interface BuildTerrainBlendMaterialSetOptions {
 	regionNumber: number;
 	pcodes: readonly number[];
 	materialResourceCache: WorldMaterialResourceCache;
+	detailTexturesEnabled?: boolean;
 }
 
 interface TerrainBlendPlan {
@@ -53,7 +54,11 @@ interface PreparedTerrainAlphaSelection {
 }
 
 interface TerrainDetailOverlay {
-	detail: PreparedRegionDetailRole;
+	texture: Texture;
+	textureAssetId: string;
+	tiling: number;
+	fadeNear: number;
+	fadeFar: number;
 }
 
 const TERRAIN_CODE_MASK = 0x1f;
@@ -66,7 +71,6 @@ export function buildTerrainBlendMaterialSet(
 	options: BuildTerrainBlendMaterialSetOptions,
 ): TerrainBlendMaterialSet | null {
 	const tableAssetId = `terrain-material/${Math.trunc(options.regionNumber)}`;
-	const profileAssetId = `region-render-profile/${Math.trunc(options.regionNumber)}`;
 	const tableRecord = options.assetState.preparedByAssetId[tableAssetId];
 	if (tableRecord?.payload.kind !== "terrain-material") {
 		return null;
@@ -80,7 +84,10 @@ export function buildTerrainBlendMaterialSet(
 	const materials: Material[] = [];
 	const materialIndexByPcode = new Map<number, number>();
 	const diagnostics: string[] = [];
-	const landscapeDetail = selectLandscapeDetail(options, diagnostics);
+	const landscapeDetail =
+		options.detailTexturesEnabled === false
+			? null
+			: selectLandscapeDetail(options, diagnostics);
 
 	for (const pcode of pcodes) {
 		const plan = buildTerrainBlendPlan({
@@ -115,8 +122,7 @@ export function buildTerrainBlendMaterialSet(
 		diagnostics,
 		signature: [
 			tableAssetId,
-			profileAssetId,
-			`detail:${landscapeDetail?.detail.textureAssetId ?? "none"}`,
+			`detail:${landscapeDetail?.textureAssetId ?? "none"}`,
 			`pcodes:${pcodes.join(",")}`,
 			`materials:${materials.length}`,
 			`diag:${diagnostics.length}`,
@@ -245,19 +251,10 @@ function createTerrainBlendMaterial(options: {
 		});
 		return alphaTexture ? [{ road, alphaTexture }] : [];
 	});
-	const detailTexture = options.plan.detail
-		? resolveTerrainDetailTexture({
-				detail: options.plan.detail.detail,
-				assetState: options.assetState,
-				materialResourceCache: options.materialResourceCache,
-				diagnostics: options.diagnostics,
-			})
-		: null;
-	const detailFadeNear = normalizeDetailFadeNear(
-		options.plan.detail?.detail.fadeNear,
-	);
+	const detailTexture = options.plan.detail?.texture ?? null;
+	const detailFadeNear = normalizeDetailFadeNear(options.plan.detail?.fadeNear);
 	const detailFadeFar = normalizeDetailFadeFar(
-		options.plan.detail?.detail.fadeFar,
+		options.plan.detail?.fadeFar,
 		detailFadeNear,
 	);
 
@@ -306,7 +303,7 @@ function createTerrainBlendMaterial(options: {
 			roadCount: { value: resolvedRoads.length },
 			detailTexture: { value: detailTexture ?? base },
 			detailTiling: {
-				value: normalizeDetailTiling(options.plan.detail?.detail.tiling),
+				value: normalizeDetailTiling(options.plan.detail?.tiling),
 			},
 			detailFadeNear: { value: detailFadeNear },
 			detailFadeFar: { value: detailFadeFar },
@@ -322,7 +319,7 @@ function createTerrainBlendMaterial(options: {
 		allRoad: options.plan.allRoad,
 		terrainOverlayCount: options.plan.overlays.length,
 		roadOverlayCount: options.plan.roads.length,
-		detailTextureAssetId: options.plan.detail?.detail.textureAssetId ?? null,
+		detailTextureAssetId: options.plan.detail?.textureAssetId ?? null,
 		detailEnabled: detailTexture !== null,
 	};
 	return material;
@@ -332,53 +329,22 @@ function selectLandscapeDetail(
 	options: BuildTerrainBlendMaterialSetOptions,
 	diagnostics: string[],
 ): TerrainDetailOverlay | null {
-	const profileAssetId = `region-render-profile/${Math.trunc(options.regionNumber)}`;
-	const profileRecord = options.assetState.preparedByAssetId[profileAssetId];
-	const profile =
-		profileRecord?.payload.kind === "region-render-profile"
-			? profileRecord.payload
-			: null;
-	if (!profile) {
-		diagnostics.push(
-			`Missing region render profile ${profileAssetId}; terrain detail disabled.`,
-		);
-		return null;
-	}
-	if (profile.regionNumber !== Math.trunc(options.regionNumber)) {
-		diagnostics.push(
-			`Region render profile ${profileAssetId} reports region ${profile.regionNumber}; terrain detail disabled.`,
-		);
-		return null;
-	}
-	const detail = profile?.detailRoles.landscape ?? null;
-	if (!detail) {
-		diagnostics.push(
-			`Region render profile ${profileAssetId} has no landscape detail role.`,
-		);
-	}
-	return detail ? { detail } : null;
-}
-
-function resolveTerrainDetailTexture(options: {
-	detail: PreparedRegionDetailRole;
-	assetState: AssetChannelState;
-	materialResourceCache: WorldMaterialResourceCache;
-	diagnostics: string[];
-}): Texture | null {
-	if (options.detail.tiling <= 0) {
-		options.diagnostics.push(
-			`Invalid landscape detail tiling ${options.detail.tiling} for ${options.detail.textureAssetId}.`,
-		);
-		return null;
-	}
-	return resolveTerrainTexture({
-		textureAssetId: options.detail.textureAssetId,
-		wrap: "repeat",
-		role: "color",
+	const overlay = resolveRegionDetailOverlay({
 		assetState: options.assetState,
+		regionNumber: options.regionNumber,
+		roleKind: "landscape",
 		materialResourceCache: options.materialResourceCache,
-		diagnostics: options.diagnostics,
+		reportDiagnostic: (message) => diagnostics.push(message),
 	});
+	return overlay
+		? {
+				texture: overlay.texture,
+				textureAssetId: overlay.role.textureAssetId,
+				tiling: overlay.role.tiling,
+				fadeNear: overlay.role.fadeNear,
+				fadeFar: overlay.role.fadeFar,
+			}
+		: null;
 }
 
 function resolveTerrainTexture(options: {

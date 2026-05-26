@@ -2782,10 +2782,10 @@ Decisions and course corrections:
 
 Cleanup/debt discovered:
 
-- The broad `npm run check` still fails on the pre-existing
+- The broad `npm run check` initially failed on the pre-existing
   `render-surface-texture-resources.ts` `PixelFormatGPU | null` typing issue.
-  This is unrelated to detail overlays, but it should be fixed before treating
-  frontend validation as a reliable gate again.
+  Phase 10.7 corrected the local decoded texture return type to
+  `PixelFormatGPU | null`, restoring the app TypeScript gate.
 - Static/interior/object material paths still report or ignore `Detail` surface
   behavior. They need a shared detail-overlay wrapper/resource policy instead
   of ad hoc shader edits in each render domain.
@@ -2870,10 +2870,8 @@ Cleanup/debt discovered:
   should be treated as stale.
 - We still need a retail/client screenshot pass for the migrated landscape
   detail path before broadening the same policy to buildings and statics.
-- Broad app validation is still blocked by the existing
-  `render-surface-texture-resources.ts` `PixelFormatGPU | null` type error.
-  Targeted TS lint, node typecheck, Rust tests, clippy, and terrain vitest
-  coverage are clean.
+- Broad app validation was restored in Phase 10.7 by typing render-surface
+  decoded `internalFormat` values as `PixelFormatGPU | null`.
 
 ### Phase 10.6.5: Profile Migration Validation and Validation Gate Cleanup
 
@@ -2884,8 +2882,8 @@ families.
 - Capture a terrain-focused screenshot against retail after the profile
   migration and verify the landscape detail layer still matches the Phase 10.5
   behavior.
-- Fix the pre-existing `render-surface-texture-resources.ts` `PixelFormatGPU |
-  null` type error so `npm run check` becomes a useful gate again.
+- Keep the app TypeScript gate green after the render-surface internal-format
+  typing fix.
 - Audit debug diagnostics for profile missing/mismatched/missing-role cases from
   a real outdoor landblock load and tune wording only if it is too noisy.
 - Decide whether the current terrain detail helper is sufficient to factor in
@@ -2895,6 +2893,15 @@ families.
 Expected effect: Phase 10.7 starts from a validated region-profile terrain path
 and a green app validation gate rather than carrying profile migration uncertainty
 into the broader material-wrapper work.
+
+Progress:
+
+- Course correction: Phase 10.7 needed the shared profile-detail resolver before
+  the remaining 10.6.5 visual validation work was finished, so the resolver moved
+  forward into 10.7.
+- The app TypeScript gate was restored in Phase 10.7 by tightening decoded
+  render-surface `internalFormat` typing from `string | null` to
+  `PixelFormatGPU | null`.
 
 ### Phase 10.7: Broad Detail Overlay Application
 
@@ -2931,6 +2938,96 @@ Expected effect: the same region-level detail texture policy becomes visible
 across all render domains that retail marks for detail texturing, while base
 materials stay reusable and object DTOs remain free of duplicated region-global
 detail references.
+
+Progress:
+
+- Added a shared renderer-local region detail overlay helper in
+  `region-detail-overlays.ts`. It resolves `region-render-profile/{region}` role
+  data, validates missing/mismatched profiles, missing roles, invalid tiling/fade
+  ranges, missing surface/render resources, and wraps detail textures with repeat
+  sampling.
+- Refactored terrain blending to consume the shared detail resolver while keeping
+  terrain's custom blend shader and pcode-specific material set.
+- Added a `MeshStandardMaterial`/indexed-material wrapper path for broad detail
+  overlays. The wrapper clones already-resolved materials outside the base
+  material cache, augments `onBeforeCompile`, and adds a custom program key only
+  for rendered instances that actually have a region role overlay.
+- Preserved role ownership in renderer model data: terrain uses `landscape`,
+  outdoor building statics use `building`, interior cell shell geometry uses
+  `environment`, and static renderables use `object`.
+- Surfaced `regionId`/`regionNumber` on `env-cell` payloads and added env-cell
+  dependencies on `region-render-profile/{region}` so interior shells and
+  interior statics do not rely on an unrelated outdoor landblock having already
+  scheduled the profile.
+- Extended dependency extraction so both host JSON responses and prepared assets
+  walk region render profile render resources.
+
+Decisions:
+
+- Detail overlays stay out of material recipe DTOs and base material cache keys.
+  Static render group keys and structured-interior mesh rebuild signatures include
+  the resolved role signature so profile arrival can replace un-detailed meshes
+  without duplicating region-global facts on every object DTO.
+- The broad material wrapper uses the same alpha-weighted color mix as the
+  terrain detail pass for now. This matches the current observed subtlety, but it
+  still needs screenshot validation against retail fixed-function behavior before
+  Phase 11.
+- Solid-color/no-map material families are currently harmless no-ops inside the
+  shader patch because the detail chunk is guarded by `USE_MAP`. This avoids
+  inventing UV behavior for material families where retail parity is not yet
+  proven.
+
+Cleanup targets and follow-up debt:
+
+- Visual validation is still missing for an outdoor building/static case and an
+  environment/interior case.
+- `npm exec tsc -- -p tsconfig.app.json` now passes after tightening
+  render-surface decoded `internalFormat` typing.
+- The region detail wrapper should get a screenshot-driven tuning pass for fade
+  range, color-space expectations, and indexed-material parity before high-res
+  texture replacement work.
+
+### Phase 10.7.5: Broad Detail Visual Validation
+
+Goal: close the remaining validation debt from the broad detail overlay rollout
+before Phase 11 changes render-surface replacement behavior.
+
+- Capture before/after screenshots against retail for one outdoor building or
+  static object and one environment/interior cell.
+- Compare broad material-wrapper detail mixing against the terrain shader and
+  retail. If indexed materials, color textures, or alpha/fade behavior differ
+  visibly, tune the wrapper before moving to high-res JPEG replacement.
+- Audit region-detail diagnostics in a real outdoor and direct interior load to
+  make sure missing-profile and unsupported/no-op cases are actionable without
+  spamming the material diagnostic coalescer.
+
+Expected effect: Phase 11 starts with detail overlays visually checked across
+render domains and app validation still green.
+
+Progress:
+
+- Added a browser settings toggle for detail textures so broad overlay
+  application can be compared in-place without changing code.
+- Real-app validation showed no visual difference and material diagnostics
+  reported missing `region-render-profile/1` assets for object, building, and
+  environment roles.
+- Course correction: prepared outdoor landblocks and env-cells carried region
+  profile dependencies, but the browser scene streaming planner treats those
+  scene roots as direct hydration and manually schedules follow-up render
+  resources. The planner now explicitly requests active outdoor and env-cell
+  `region-render-profile/{region}` assets, then lets graph hydration pull the
+  profile's surface/render/palette dependencies.
+- Centralized the frontend route formatter for `region-render-profile/{region}`
+  next to terrain-material formatting to avoid future string-template drift.
+
+Cleanup targets and follow-up debt:
+
+- Re-test the toggle in a real scene after the planner fix. The old diagnostics
+  should disappear or shift to more specific missing surface/render-resource
+  diagnostics.
+- If the toggle still has no visible effect with profiles loaded, add a
+  temporary visual debug mode that exaggerates detail contribution or renders
+  detail texture alpha directly. That should happen before Phase 11.
 
 ### Phase 11: Optional High-Res JPEG Replacement
 
@@ -3032,7 +3129,8 @@ Remaining planned parity phases:
 3. Phase 10.6 region render profile and detail role propagation.
 4. Phase 10.6.5 profile migration validation and validation gate cleanup.
 5. Phase 10.7 broad detail overlay application.
-6. Phase 11 optional high-res JPEG replacement.
+6. Phase 10.7.5 broad detail visual validation.
+7. Phase 11 optional high-res JPEG replacement.
 
 Recommended follow-up phases after the terrain/detail pass:
 

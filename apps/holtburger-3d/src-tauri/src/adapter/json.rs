@@ -947,6 +947,8 @@ pub fn serialize_landblock_scene_env_cell_member(
 
 pub fn serialize_env_cell_payload_with_geometry<F>(
     asset: &EnvCellAsset,
+    region_id: u32,
+    region_number: u32,
     render_geometry: serde_json::Value,
     mut serialize_aperture: F,
 ) -> serde_json::Value
@@ -960,6 +962,8 @@ where
         "residencyKind": "interior-cell",
         "sourceAssetKind": "env-cell",
         "envCellId": cell.env_cell_id,
+        "regionId": region_id,
+        "regionNumber": region_number,
         "environmentId": cell.environment_id,
         "cellStructureId": cell.cell_structure_id,
         "localPlacement": serialize_frame(&cell.local_placement),

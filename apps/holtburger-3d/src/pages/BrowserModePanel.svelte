@@ -183,6 +183,11 @@
 		);
 	}
 
+	function handleDetailTexturesToggle(event: Event): void {
+		const input = event.currentTarget as HTMLInputElement;
+		frontendState.updateBrowserDetailTexturesEnabled(input.checked);
+	}
+
 	function submitRuntimeAppearance(event?: SubmitEvent): void {
 		event?.preventDefault();
 		try {
@@ -572,9 +577,9 @@
 			</fieldset>
 
 			<fieldset class="browser-form__fieldset">
-				<legend>Texture filtering</legend>
+				<legend>Textures</legend>
 				<label class="browser-form__field" for="texture-filtering-mode">
-					<span>Maximum mode</span>
+					<span>Filtering</span>
 					<select
 						id="texture-filtering-mode"
 						value={$frontendState.browserMode.textureFilteringMode}
@@ -584,6 +589,17 @@
 						<option value="linear">Linear</option>
 						<option value="anisotropic-4x">Anisotropic 4x</option>
 					</select>
+				</label>
+				<label class="browser-form__field browser-form__field--checkbox">
+					<span>
+						<strong>Detail textures</strong>
+						<small>Apply region detail overlays.</small>
+					</span>
+					<input
+						type="checkbox"
+						checked={$frontendState.browserMode.detailTexturesEnabled}
+						onchange={handleDetailTexturesToggle}
+					/>
 				</label>
 			</fieldset>
 

@@ -84,6 +84,7 @@ export interface BrowserRenderResourceCoordinatorInput {
 	transitionPortalMaxDepth: number;
 	renderStyle: WorldDisplayRenderStyle;
 	textureFilteringMode: BrowserTextureFilteringMode;
+	detailTexturesEnabled: boolean;
 	showPortalPolygons: boolean;
 	showCellIndicators: boolean;
 	highlightPortalTargets: boolean;
@@ -138,6 +139,7 @@ export interface BrowserRenderResourceSurface {
 	setTransitionPortalMaxDepth(maxDepth: number): void;
 	setRenderStyle(renderStyle: WorldDisplayRenderStyle): void;
 	setTextureFilteringMode(mode: BrowserTextureFilteringMode): void;
+	setDetailTexturesEnabled(enabled: boolean): void;
 }
 
 export function createEmptyBrowserRenderResourceSnapshot(): BrowserRenderResourceSnapshot {
@@ -410,6 +412,11 @@ export class BrowserRenderResourceCoordinator {
 				input.textureFilteringMode,
 				() => surface.setTextureFilteringMode(input.textureFilteringMode),
 			);
+			this.applySurfaceResource(
+				"detail-textures-enabled",
+				String(input.detailTexturesEnabled),
+				() => surface.setDetailTexturesEnabled(input.detailTexturesEnabled),
+			);
 		}
 
 		this.snapshot = deriveSnapshot({
@@ -455,7 +462,8 @@ type BrowserRenderResourceSurfaceKey =
 	| "controlled-camera-frame"
 	| "transition-portal-depth"
 	| "render-style"
-	| "texture-filtering-mode";
+	| "texture-filtering-mode"
+	| "detail-textures-enabled";
 
 function describeAssetStateSignature(state: AssetChannelState): string {
 	return [

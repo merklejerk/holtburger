@@ -1848,8 +1848,9 @@ Refinements to future steps:
 - Future animation-system work should feed runtime diffuse/luminous/translucent
   frame hooks into material instance state. Phase 8 handles static recipe
   defaults only.
-- A later additive/inverse-alpha pass should use retail/ACViewer evidence and
-  explicit tests before changing blend modes.
+- Phase 8.1 now owns additive/inverse-alpha blend mapping. Future alpha work
+  should focus on animation-driven state changes and any remaining retail
+  edge-cases, not on basic fixed-function blend factors.
 
 Verification:
 
@@ -1861,6 +1862,8 @@ Verification:
 - No immediate interim phase is needed before Phase 9.
 
 ### Phase 8.1: Legacy Alpha Blend And Sampler Modes
+
+Status: Implemented.
 
 Goal: implement the fixed-function alpha blend modes and sampler behavior that
 retail applies around `D3DPolyRender::SetSurface`.
@@ -1954,6 +1957,248 @@ Completion criteria:
   proves filtered palette lookup is retail-correct.
 - Retail stage-style detail composition is planned as a single shader/material
   path, not as a second scene/render pass.
+
+Progress:
+
+- Extended `material-behavior.ts` with a typed `LegacyMaterialBlendBehavior`
+  derived from the parsed `CSurface` flags.
+- Mapped the retail blend matrix onto Three material state:
+  - opaque surfaces keep blending disabled and depth writes enabled;
+  - `Alpha` uses `SRCALPHA, INVSRCALPHA`;
+  - `Alpha | Additive` uses `SRCALPHA, ONE`;
+  - `InvAlpha` uses `INVSRCALPHA, SRCALPHA`;
+  - `InvAlpha | Additive` uses `INVSRCALPHA, ONE`;
+  - `Additive` uses `ONE, ONE`;
+  - `Base1ClipMap` keeps the Phase 8 alpha-test thresholds and uses
+    `ONE, INVSRCALPHA` blending with depth writes enabled;
+  - `Translucent` and scalar opacity below 1 use normal alpha blending with
+    depth writes disabled.
+- Applied the blend behavior consistently to solid, direct-texture, indexed,
+  and placeholder material paths.
+- Added material `userData` metadata for opacity, alpha-test, blend mode,
+  blend enablement, depth-write behavior, and remaining unsupported flags.
+- Removed `InvAlpha` and `Additive` from unsupported-surface diagnostics now
+  that they have explicit renderer behavior. `Detail` remains diagnostic-only.
+- Extended `TextureSamplingPolicy` to carry `magFilter`, `minFilter`,
+  `mipFilter`, `anisotropy`, `generateMipmaps`, wrap, color-space, and `flipY`
+  as separate policy fields.
+- Changed direct-color surface defaults to linear mag/min/mip filtering,
+  generated mipmaps, sRGB color space, and anisotropy capped at 4x by renderer
+  capability.
+- Kept compressed surface defaults linear but no generated mips because the
+  current upload path only proves a base compressed mip payload.
+- Kept indexed source textures nearest/no-mip with anisotropy 1 for palette
+  correctness.
+- Threaded renderer `getMaxAnisotropy()` into the material texture capability
+  detection path and included effective sampler policy in texture cache keys.
+- Added a browser Settings dropdown for maximum texture filtering mode:
+  `nearest`, `linear`, and `anisotropic-4x`. Changing the mode rebuilds the
+  material resource cache and materialized static/interior meshes so old texture
+  resources are not reused under a new sampler policy.
+- Surfaced the active filtering mode and effective sampler policy counts/samples
+  in renderer debug diagnostics.
+
+Decisions:
+
+- Clipmap materials are now `transparent=true` because retail enables alpha
+  blending for `Base1ClipMap`; the important Phase 8 behavior is that their
+  alpha-test refs stay at 100/255 for indexed and 200/255 for direct alpha
+  sources.
+- Anisotropy is treated as renderer capability/preference, not asset data. The
+  default request is 4x and the effective value is clamped down to the renderer
+  maximum, falling back to 1 when unsupported.
+- Compressed textures do not synthesize missing mip chains yet. Adding generated
+  or decoded compressed mip levels needs payload evidence or a deliberate
+  renderer-local fallback phase.
+- Texture velocity animation remains independent from sampler policy; sampler
+  changes are cache-keyed static texture-resource state.
+- Browser texture filtering is a maximum color-texture policy. Indexed/palette
+  textures remain nearest/no-mip in every mode for palette correctness.
+
+Course corrections:
+
+- Earlier Phase 8 wording expected clipmaps to avoid transparent sorting. The
+  retail evidence for `Base1ClipMap` says alpha-test and alpha-blend are both
+  active, so tests now assert transparent clipmap materials with depth writes
+  preserved instead of opaque alpha-test-only materials.
+- Retail also shows `Base1ClipMap | Translucent` clears the single-pass clipmap
+  alpha-test path and uses normal alpha blending. The helper now disables
+  clipmap alpha-test for translucent surfaces instead of treating alpha-test and
+  translucent blending as fully independent.
+- The first validation command was accidentally run from the repository root,
+  which has no `package.json`. All app validation for this phase was rerun from
+  `apps/holtburger-3d`.
+
+Cleanup targets:
+
+- `material-construction.ts` now has repeated `MeshStandardMaterial`
+  construction blocks with identical behavior metadata attachment. A small
+  local factory would reduce duplication before additional detail/terrain
+  material paths add more variants.
+- `LegacyMaterialBlendBehavior` currently uses the static recipe default state.
+  A later real animation system still needs to drive runtime diffuse,
+  luminosity, translucency, and texture velocity frame changes without
+  rebuilding whole scene material plans.
+- Debug panels can surface the new blend/sampler metadata more directly; for
+  now it is present in material `userData` and cache/program diagnostics.
+
+Legacy shims:
+
+- The cache-level `MaterialTextureSamplingPolicy` override remains as a test and
+  diagnostic seam. It should not become a second runtime policy system.
+- Compressed texture filtering currently keeps `mipFilter: "none"` even though
+  retail stage 0 asks for linear mip filtering, because the current uploaded
+  resource contains only the proven base level. Phase 8.2 exists to replace this
+  shim after proving the correct `SurfaceTexture`/`ImgTex` source-level
+  semantics.
+
+Refinements to future steps:
+
+- Phase 8.2 should land before Phase 9 so terrain work does not inherit the
+  current base-level-only compressed texture path.
+- Phase 9 should continue treating terrain as a separate material pipeline.
+  Terrain can reuse sampler capability helpers, but terrain blending, roads,
+  detail textures, and terrain alpha maps should not be forced through the
+  `CSurface` recipe path.
+- The later detail-texture phase should implement fixed-function stage 1 as an
+  additional shader sampler/uniform path on a material variant, not as a second
+  scene pass.
+- Before adding richer material diagnostics UI, consider consolidating material
+  construction so every material path has one obvious place to attach behavior
+  and sampler metadata.
+- No immediate interim phase is needed before Phase 9.
+
+Verification:
+
+- `npm run test:ts -- material-behavior texture-sampling-policy
+  material-resources indexed-materials indexed-texture-resources
+  render-surface-texture-resources` passes from `apps/holtburger-3d`.
+- `npm run check` passes from `apps/holtburger-3d`.
+- `npm run lint:ts` passes from `apps/holtburger-3d`.
+- `npm run test:ts` passes from `apps/holtburger-3d` with 48 files and 260
+  tests.
+- Follow-up validation after the filtering selector and translucent clipmap
+  correction:
+  - `npm run test:ts -- material-behavior texture-sampling-policy
+    material-resources` passes.
+  - `npm run check` passes.
+  - `npm run lint:ts` passes.
+  - `npm run test:ts` passes with 48 files and 262 tests.
+
+### Phase 8.2: SurfaceTexture/ImgTex Source-Level And Mipmap Parity
+
+Goal: pivot legacy material texture handling from the mistaken `RenderTexture`
+chain model to the retail `CSurface -> SurfaceTexture -> ImgTex -> RenderSurface`
+path, then implement mip filtering and texture-filtering preference modes on
+the selected source image before terrain materials consume the same texture
+resource path.
+
+Why this exists:
+
+- Phase 8.1 made sampler state explicit, but compressed textures still upload
+  only one `RenderSurface` level and therefore need an evidence-backed mip
+  policy.
+- The DAT `0x05` format has been named `RenderTexture` in our current code, but
+  retail material rendering proves this is the legacy `SurfaceTexture`/`ImgTex`
+  source-level path. `CSurface::RestoreLostSurface` loads `orig_texture_id` as
+  DB type `11`, `ImgTex::GetSurfaceDID` selects one source level, and
+  `ImgTex::CreateD3DTexture` generates GPU mipmaps from that selected
+  `RenderSurface`.
+- Retail `RenderTexture` is a separate `0x15`/DB type `30` resource family with
+  explicit `m_nNumLevels` and D3D level resources. It should not drive the
+  legacy `CSurface` material implementation.
+- Direct-color textures currently generate mipmaps in WebGL. That now appears
+  directionally correct for selected legacy material source images, but the
+  source-level selection and naming are wrong.
+- The browser filtering selector currently exposes `Nearest`, `Linear`, and
+  `Anisotropic 4x`. Retail exposes `Bilinear`, `Trilinear`, `Sharp`, and
+  `Anisotropic`; the debug selector should either mirror those names or clearly
+  remain a non-retail diagnostic control.
+
+Evidence summary:
+
+- Retail `CSurface` stores `orig_texture_id`, `indexed_texture_id`, and
+  `ImgTex *base1map` (`acclient.h:13427`).
+- `CSurface::RestoreLostSurface` requests `orig_texture_id` as DB type `11`
+  (`SurfaceTexture`), not DB type `30` (`RenderTexture`) (`acclient.c:343480`).
+- `ImgTex::GetSurfaceDID` accepts one or two source IDs. With two IDs it selects
+  the first normally, or the second when `Render::ShouldDropHighDetail()` is
+  true (`acclient.c:350884`).
+- `ImgTex::CreateD3DTexture` uploads the selected `RenderSurface` and calls
+  `D3DXFilterTexture`, so material GPU mips are generated from the selected
+  source image (`acclient.c:350735`).
+- Retail `RenderTextureD3D::CreateD3DTexture` does allocate a multi-level D3D
+  texture from `m_nNumLevels`, but that belongs to the `0x15`/DB type `30`
+  `RenderTexture` family (`acclient.c:652645`).
+
+Implementation scope:
+
+- Rename code, payloads, diagnostics, and plan language that expose legacy
+  `0x05` material assets as `RenderTexture`. Use `SurfaceTexture` for the DAT
+  source-level record and `ImgTex` for the selected runtime image concept.
+- Keep compatibility with existing asset IDs only as a short-lived migration
+  target if needed; do not add new `render-texture/` material call sites.
+  Prefer a clean `surface-texture/{did}` asset ID once the pivot lands.
+- Add source-level selection equivalent to `ImgTex::GetSurfaceDID`: choose the
+  first source level by default, choose the second source level when high-detail
+  dropping is active, and report unsupported source-count shapes in diagnostics.
+- Treat the chosen `RenderSurface` as the texture upload source. For
+  direct-color textures, generate GPU mipmaps from that source. For compressed
+  textures, investigate whether WebGL can generate or upload compatible mips
+  from the selected compressed source; if not, degrade mip filtering explicitly
+  and surface the reason.
+- Add validation/diagnostics for missing selected source surfaces, unsupported
+  compressed mip behavior, high-detail drop decisions, and source-level counts
+  outside the retail-proven one-or-two level material path.
+- Update `TextureSamplingPolicy` and the browser selector to represent retail
+  preference modes:
+  - `Bilinear`: linear mag/min with point mip selection;
+  - `Trilinear`: linear mag/min/mip;
+  - `Sharp`: trilinear-style filtering plus the retail mip LOD bias if WebGL
+    support can be mapped cleanly;
+  - `Anisotropic`: trilinear plus anisotropic mag/min where renderer capability
+    allows.
+- Keep indexed/palette textures nearest/no-mip unless a separate evidence pass
+  proves retail filters indexed source samples before palette lookup.
+- Ensure texture velocity animation remains a UV transform on the selected
+  material/texture resource and does not force per-frame texture resource
+  rebuilding.
+
+Expected effect: legacy material texture naming should match retail, source
+level selection should follow the `ImgTex` path, and mip/filter behavior should
+be applied to the selected source image instead of pretending every `0x05`
+surface list is an authored mip chain.
+
+Completion criteria:
+
+- The plan/reference notes cite the decompile or ACViewer/ACE evidence used to
+  classify `0x05` `SurfaceTexture` lists as `ImgTex` source levels and `0x15`
+  `RenderTexture` as the separate runtime texture family.
+- Legacy material APIs, prepared payloads, debug UI, and tests use
+  `SurfaceTexture`/`ImgTex` terminology for `0x05` assets.
+- Material texture upload chooses a source `RenderSurface` through the retail
+  source-level rule, then applies mip/filter policy to that selected image.
+- Compressed texture upload has an explicit parity decision for selected
+  compressed source images: supported generated/uploaded mips, or a documented
+  fallback to non-mip sampling when WebGL/browser constraints require it.
+- Direct-color texture upload generates mips from the selected source image
+  when the active filtering mode requests mips.
+- Browser filtering modes are renamed or remapped to retail concepts, and debug
+  diagnostics surface both requested mode and effective sampler policy.
+- Cache keys include the selected source `RenderSurface`, effective
+  high-detail-drop/source-level decision, and effective sampler policy.
+- Tests cover source-level selection, direct-color generated mip behavior,
+  compressed-source fallback behavior, cache-key separation, and browser
+  filtering mode mapping.
+
+Course-correction targets from Phase 8.1:
+
+- Remove the compressed `mipFilter: "none"` shim once compatible chains upload
+  with real mip levels.
+- Replace the debug-only `Nearest` mode or label it clearly if it remains useful
+  for diagnostics but does not match a retail preference.
+- Keep Phase 9 blocked on this phase if terrain material work would otherwise
+  duplicate or depend on the current one-level texture upload path.
 
 ### Phase 9: Terrain Material Pipeline Prep
 

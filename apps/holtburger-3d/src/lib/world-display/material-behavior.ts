@@ -1,4 +1,14 @@
-import { Color, type MeshStandardMaterialParameters } from "three";
+import {
+	AddEquation,
+	Color,
+	CustomBlending,
+	OneFactor,
+	OneMinusSrcAlphaFactor,
+	SrcAlphaFactor,
+	type BlendingDstFactor,
+	type BlendingSrcFactor,
+	type MeshStandardMaterialParameters,
+} from "three";
 
 import type { PreparedMaterialRecipePayload } from "../assets/types";
 
@@ -26,8 +36,27 @@ export interface LegacyMaterialBehavior {
 	opacity: number;
 	transparent: boolean;
 	alphaTest: number;
+	blend: LegacyMaterialBlendBehavior;
 	unsupportedSurfaceFlags: string[];
 }
+
+export interface LegacyMaterialBlendBehavior {
+	mode: LegacyMaterialBlendMode;
+	enabled: boolean;
+	srcFactor: BlendingSrcFactor | null;
+	dstFactor: BlendingDstFactor | null;
+	depthWrite: boolean;
+}
+
+export type LegacyMaterialBlendMode =
+	| "opaque"
+	| "alpha"
+	| "alpha-additive"
+	| "inverse-alpha"
+	| "inverse-alpha-additive"
+	| "additive"
+	| "clipmap"
+	| "translucent";
 
 export function deriveLegacyMaterialBehavior(options: {
 	recipe: PreparedMaterialRecipePayload;
@@ -43,23 +72,29 @@ export function deriveLegacyMaterialBehavior(options: {
 		? clampNonNegative(recipe.luminosity)
 		: 0;
 	const isClipMap = isBase1ClipMapSurface(recipe.surfaceType);
+	const isTranslucent = hasSurfaceFlag(
+		recipe.surfaceType,
+		SURFACE_TYPE_TRANSLUCENT,
+	);
 	const alphaTest = clipMapAlphaTest({
 		isClipMap,
+		isTranslucent,
 		hasSourceAlpha: !!options.hasSourceAlpha,
 		usesIndexedClipDiscard: !!options.usesIndexedClipDiscard,
+	});
+	const blend = deriveLegacyBlendBehavior({
+		surfaceType: recipe.surfaceType,
+		opacity,
+		isClipMap,
 	});
 	return {
 		color: new Color(diffuse, diffuse, diffuse),
 		emissive: new Color(1, 1, 1),
 		emissiveIntensity: luminosity,
 		opacity,
-		transparent:
-			opacity < 1 ||
-			hasSurfaceFlag(recipe.surfaceType, SURFACE_TYPE_TRANSLUCENT) ||
-			hasSurfaceFlag(recipe.surfaceType, SURFACE_TYPE_ALPHA) ||
-			(hasSurfaceFlag(recipe.surfaceType, SURFACE_TYPE_ADDITIVE) &&
-				opacity < 1),
+		transparent: blend.enabled,
 		alphaTest,
+		blend,
 		unsupportedSurfaceFlags: unsupportedSurfaceFlags(recipe.surfaceType),
 	};
 }
@@ -76,6 +111,16 @@ export function applyLegacyMaterialBehavior(
 		transparent: behavior.transparent,
 		opacity: behavior.opacity,
 		alphaTest: behavior.alphaTest,
+		depthWrite: behavior.blend.depthWrite,
+		...(behavior.blend.enabled
+			? {
+					blending: CustomBlending,
+					blendEquation: AddEquation,
+					blendSrc: behavior.blend.srcFactor ?? SrcAlphaFactor,
+					blendDst:
+						behavior.blend.dstFactor ?? OneMinusSrcAlphaFactor,
+				}
+			: {}),
 	};
 }
 
@@ -85,24 +130,103 @@ export function isBase1ClipMapSurface(surfaceType: number): boolean {
 
 function unsupportedSurfaceFlags(surfaceType: number): string[] {
 	const unsupported: string[] = [];
-	if (hasSurfaceFlag(surfaceType, SURFACE_TYPE_INV_ALPHA)) {
-		unsupported.push("InvAlpha");
-	}
-	if (hasSurfaceFlag(surfaceType, SURFACE_TYPE_ADDITIVE)) {
-		unsupported.push("Additive");
-	}
 	if (hasSurfaceFlag(surfaceType, SURFACE_TYPE_DETAIL)) {
 		unsupported.push("Detail");
 	}
 	return unsupported;
 }
 
+function deriveLegacyBlendBehavior(options: {
+	surfaceType: number;
+	opacity: number;
+	isClipMap: boolean;
+}): LegacyMaterialBlendBehavior {
+	if (hasSurfaceFlag(options.surfaceType, SURFACE_TYPE_TRANSLUCENT)) {
+		return {
+			mode: "translucent",
+			enabled: true,
+			srcFactor: SrcAlphaFactor,
+			dstFactor: OneMinusSrcAlphaFactor,
+			depthWrite: false,
+		};
+	}
+	if (hasSurfaceFlag(options.surfaceType, SURFACE_TYPE_ALPHA)) {
+		return hasSurfaceFlag(options.surfaceType, SURFACE_TYPE_ADDITIVE)
+			? {
+					mode: "alpha-additive",
+					enabled: true,
+					srcFactor: SrcAlphaFactor,
+					dstFactor: OneFactor,
+					depthWrite: false,
+				}
+			: {
+					mode: "alpha",
+					enabled: true,
+					srcFactor: SrcAlphaFactor,
+					dstFactor: OneMinusSrcAlphaFactor,
+					depthWrite: false,
+				};
+	}
+	if (hasSurfaceFlag(options.surfaceType, SURFACE_TYPE_INV_ALPHA)) {
+		return hasSurfaceFlag(options.surfaceType, SURFACE_TYPE_ADDITIVE)
+			? {
+					mode: "inverse-alpha-additive",
+					enabled: true,
+					srcFactor: OneMinusSrcAlphaFactor,
+					dstFactor: OneFactor,
+					depthWrite: false,
+				}
+			: {
+					mode: "inverse-alpha",
+					enabled: true,
+					srcFactor: OneMinusSrcAlphaFactor,
+					dstFactor: SrcAlphaFactor,
+					depthWrite: false,
+				};
+	}
+	if (hasSurfaceFlag(options.surfaceType, SURFACE_TYPE_ADDITIVE)) {
+		return {
+			mode: "additive",
+			enabled: true,
+			srcFactor: OneFactor,
+			dstFactor: OneFactor,
+			depthWrite: false,
+		};
+	}
+	if (options.isClipMap) {
+		return {
+			mode: "clipmap",
+			enabled: true,
+			srcFactor: OneFactor,
+			dstFactor: OneMinusSrcAlphaFactor,
+			depthWrite: true,
+		};
+	}
+	if (options.opacity < 1) {
+		return {
+			mode: "translucent",
+			enabled: true,
+			srcFactor: SrcAlphaFactor,
+			dstFactor: OneMinusSrcAlphaFactor,
+			depthWrite: false,
+		};
+	}
+	return {
+		mode: "opaque",
+		enabled: false,
+		srcFactor: null,
+		dstFactor: null,
+		depthWrite: true,
+	};
+}
+
 function clipMapAlphaTest(options: {
 	isClipMap: boolean;
+	isTranslucent: boolean;
 	hasSourceAlpha: boolean;
 	usesIndexedClipDiscard: boolean;
 }): number {
-	if (!options.isClipMap) {
+	if (!options.isClipMap || options.isTranslucent) {
 		return 0;
 	}
 	if (options.usesIndexedClipDiscard) {

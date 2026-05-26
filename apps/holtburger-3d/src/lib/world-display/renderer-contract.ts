@@ -1,6 +1,10 @@
 import type { SceneCameraFrame, SceneBoundsFrame } from "./camera";
 
 export type WorldDisplayRenderStyle = "solid" | "wireframe" | "no-material";
+export type WorldDisplayTextureFilteringMode =
+	| "nearest"
+	| "linear"
+	| "anisotropic-4x";
 
 export interface WorldRenderMetrics {
 	bounds: SceneBoundsFrame | null;
@@ -80,6 +84,9 @@ export interface WorldRenderDebugMetrics {
 	materialCount: number;
 	materialProgramKeyCount: number;
 	transparentMaterialCount: number;
+	textureFilteringMode: WorldDisplayTextureFilteringMode;
+	textureSamplingPolicyCounts: Record<string, number>;
+	textureSamplingPolicySamples: string[];
 	textureVelocityPartCount: number;
 	textureVelocityRenderGroupCount: number;
 	textureVelocityMaterialCount: number;

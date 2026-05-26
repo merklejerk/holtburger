@@ -9,6 +9,7 @@
 		MIN_TRANSITION_PORTAL_MAX_DEPTH,
 		type BrowserRenderStyle,
 		type BrowserNavigationFocusMode,
+		type BrowserTextureFilteringMode,
 	} from "../app/browser-mode";
 	import { formatHex32, normalizeOutdoorLandblockId } from "../lib/landblocks";
 	import { countOutdoorSceneLodTiles } from "../lib/world-display/outdoor-scene-interest";
@@ -173,6 +174,13 @@
 
 	function handleRenderStyleChange(renderStyle: BrowserRenderStyle): void {
 		frontendState.updateBrowserRenderStyle(renderStyle);
+	}
+
+	function handleTextureFilteringModeChange(event: Event): void {
+		const select = event.currentTarget as HTMLSelectElement;
+		frontendState.updateBrowserTextureFilteringMode(
+			select.value as BrowserTextureFilteringMode,
+		);
 	}
 
 	function submitRuntimeAppearance(event?: SubmitEvent): void {
@@ -561,6 +569,22 @@
 						/>
 					</label>
 				</div>
+			</fieldset>
+
+			<fieldset class="browser-form__fieldset">
+				<legend>Texture filtering</legend>
+				<label class="browser-form__field" for="texture-filtering-mode">
+					<span>Maximum mode</span>
+					<select
+						id="texture-filtering-mode"
+						value={$frontendState.browserMode.textureFilteringMode}
+						onchange={handleTextureFilteringModeChange}
+					>
+						<option value="nearest">Nearest</option>
+						<option value="linear">Linear</option>
+						<option value="anisotropic-4x">Anisotropic 4x</option>
+					</select>
+				</label>
 			</fieldset>
 
 			<fieldset class="browser-form__fieldset">

@@ -15,6 +15,7 @@
 	import type { SceneCameraFrame } from "./camera";
 	import type {
 		BrowserCameraResidencyChangeHandler,
+		WorldDisplayTextureFilteringMode,
 		WorldDisplayRenderStyle,
 		WorldRenderCameraFrameChangeHandler,
 		WorldRenderMetricsChangeHandler,
@@ -73,6 +74,7 @@
 	let controlledCameraFrame: SceneCameraFrame | null = null;
 	let transitionPortalMaxDepth = 1;
 	let renderStyle: WorldDisplayRenderStyle = "solid";
+	let textureFilteringMode: WorldDisplayTextureFilteringMode = "anisotropic-4x";
 
 	onMount(() => {
 		let disposed = false;
@@ -98,6 +100,7 @@
 				onRenderMetricsChange,
 				onCameraResidencyChange,
 				renderStyle,
+				textureFilteringMode,
 			});
 			rendererController = controller;
 		});
@@ -183,6 +186,13 @@
 	export function setRenderStyle(nextStyle: WorldDisplayRenderStyle): void {
 		renderStyle = nextStyle;
 		rendererController?.setRenderStyle(renderStyle);
+	}
+
+	export function setTextureFilteringMode(
+		nextMode: WorldDisplayTextureFilteringMode,
+	): void {
+		textureFilteringMode = nextMode;
+		rendererController?.setTextureFilteringMode(textureFilteringMode);
 	}
 
 	export function pickTerrainLandblockAtViewportPoint(

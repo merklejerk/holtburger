@@ -92,6 +92,7 @@ import type {
 	BrowserCameraResidency,
 	BrowserCameraResidencyChangeHandler,
 	WorldDisplayRenderStyle,
+	WorldDisplayTextureFilteringMode,
 	WorldRenderCameraFrameChangeHandler,
 	WorldRenderDebugMetrics,
 	WorldRenderMetrics,
@@ -156,6 +157,7 @@ import {
 	deriveTextureVelocityMetrics,
 	updateTextureVelocityMaterials,
 } from "./texture-velocity";
+import { createDefaultMaterialTextureSamplingPolicy } from "./texture-sampling-policy";
 
 export interface WorldDisplayRendererOptions {
 	assetState: AssetChannelState;
@@ -170,6 +172,7 @@ export interface WorldDisplayRendererOptions {
 	controlledCameraFrame: SceneCameraFrame | null;
 	transitionPortalMaxDepth?: number;
 	renderStyle?: WorldDisplayRenderStyle;
+	textureFilteringMode?: WorldDisplayTextureFilteringMode;
 	onCameraFrameChange?: WorldRenderCameraFrameChangeHandler;
 	onRenderMetricsChange?: WorldRenderMetricsChangeHandler;
 	onCameraResidencyChange?: BrowserCameraResidencyChangeHandler;
@@ -188,6 +191,7 @@ export interface WorldDisplayRenderer {
 	setControlledCameraFrame(frame: SceneCameraFrame | null): void;
 	setTransitionPortalMaxDepth(maxDepth: number): void;
 	setRenderStyle(renderStyle: WorldDisplayRenderStyle): void;
+	setTextureFilteringMode(mode: WorldDisplayTextureFilteringMode): void;
 	setCameraFrameChangeHandler(
 		handler: WorldRenderCameraFrameChangeHandler | undefined,
 	): void;
@@ -255,6 +259,7 @@ function detectMaterialTextureCapabilities(
 		supportsS3tcSrgb: renderer.extensions.has(
 			"WEBGL_compressed_texture_s3tc_srgb",
 		),
+		maxAnisotropy: renderer.capabilities.getMaxAnisotropy(),
 	};
 }
 
@@ -433,6 +438,8 @@ export function createWorldDisplayRenderer(
 		options.transitionPortalMaxDepth ?? DEFAULT_TRANSITION_PORTAL_MAX_DEPTH,
 	);
 	let renderStyle: WorldDisplayRenderStyle = options.renderStyle ?? "solid";
+	let textureFilteringMode: WorldDisplayTextureFilteringMode =
+		options.textureFilteringMode ?? "anisotropic-4x";
 	const noMaterialOverrideMaterials = new Map<string, MeshStandardMaterial>();
 	const wireframeOverrideMaterials = new Map<string, MeshBasicMaterial>();
 	let onCameraFrameChange = options.onCameraFrameChange;
@@ -460,10 +467,21 @@ export function createWorldDisplayRenderer(
 
 	const scene = new Scene();
 	const reportMaterialDiagnostic = createCoalescedMaterialDiagnosticReporter();
-	const materialResourceCache = new WorldMaterialResourceCache(
-		reportMaterialDiagnostic,
-		detectMaterialTextureCapabilities(renderer),
-	);
+	const materialTextureCapabilities = detectMaterialTextureCapabilities(renderer);
+	let materialResourceCache = createMaterialResourceCache(textureFilteringMode);
+
+	function createMaterialResourceCache(
+		filteringMode: WorldDisplayTextureFilteringMode,
+	): WorldMaterialResourceCache {
+		return new WorldMaterialResourceCache(
+			reportMaterialDiagnostic,
+			materialTextureCapabilities,
+			createDefaultMaterialTextureSamplingPolicy(
+				materialTextureCapabilities,
+				filteringMode,
+			),
+		);
+	}
 
 	const camera = new PerspectiveCamera(52, 1, 0.1, 5000);
 
@@ -539,6 +557,9 @@ export function createWorldDisplayRenderer(
 			materialCount: 0,
 			materialProgramKeyCount: 0,
 			transparentMaterialCount: 0,
+			textureFilteringMode,
+			textureSamplingPolicyCounts: {},
+			textureSamplingPolicySamples: [],
 			textureVelocityPartCount: 0,
 			textureVelocityRenderGroupCount: 0,
 			textureVelocityMaterialCount: 0,
@@ -626,6 +647,17 @@ export function createWorldDisplayRenderer(
 		setRenderStyle(nextRenderStyle) {
 			renderStyle = nextRenderStyle;
 			syncRenderStyle();
+		},
+		setTextureFilteringMode(nextMode) {
+			if (textureFilteringMode === nextMode) {
+				return;
+			}
+			textureFilteringMode = nextMode;
+			clearMaterializedSceneMeshes();
+			materialResourceCache.dispose();
+			materialResourceCache = createMaterialResourceCache(textureFilteringMode);
+			syncStaticRenderableMeshes(staticRenderableScene);
+			syncStructuredInteriorMeshes(structuredInteriorScene);
 		},
 		setCameraFrameChangeHandler(handler) {
 			onCameraFrameChange = handler;
@@ -851,6 +883,9 @@ export function createWorldDisplayRenderer(
 			materialCount: materialStats.materialCount,
 			materialProgramKeyCount: materialStats.materialProgramKeyCount,
 			transparentMaterialCount: materialStats.transparentMaterialCount,
+			textureFilteringMode,
+			textureSamplingPolicyCounts: materialStats.textureSamplingPolicyCounts,
+			textureSamplingPolicySamples: materialStats.textureSamplingPolicySamples,
 			textureVelocityPartCount: textureVelocityMetrics.textureVelocityPartCount,
 			textureVelocityRenderGroupCount:
 				textureVelocityMetrics.textureVelocityRenderGroupCount,
@@ -2925,6 +2960,9 @@ function createRenderDebugMetrics(
 		materialCount: options.materialCount,
 		materialProgramKeyCount: options.materialProgramKeyCount,
 		transparentMaterialCount: options.transparentMaterialCount,
+		textureFilteringMode: options.textureFilteringMode,
+		textureSamplingPolicyCounts: options.textureSamplingPolicyCounts,
+		textureSamplingPolicySamples: options.textureSamplingPolicySamples,
 		textureVelocityPartCount: options.textureVelocityPartCount,
 		textureVelocityRenderGroupCount: options.textureVelocityRenderGroupCount,
 		textureVelocityMaterialCount: options.textureVelocityMaterialCount,

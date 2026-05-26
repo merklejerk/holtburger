@@ -235,7 +235,7 @@ describe("world material resource cache", () => {
 		});
 
 		const material = plan.materials[0] as MeshStandardMaterial;
-		expect(material.transparent).toBe(false);
+		expect(material.transparent).toBe(true);
 		expect(material.alphaTest).toBe(DIRECT_CLIP_MAP_ALPHA_TEST);
 		cache.dispose();
 	});
@@ -245,11 +245,7 @@ describe("world material resource cache", () => {
 		const materialAssetId = formatMaterialAssetId(0x08000024);
 		const cache = new WorldMaterialResourceCache((diagnostic) => {
 			diagnostics.push(diagnostic.key);
-			expect(diagnostic.detail.unsupportedSurfaceFlags).toEqual([
-				"InvAlpha",
-				"Additive",
-				"Detail",
-			]);
+			expect(diagnostic.detail.unsupportedSurfaceFlags).toEqual(["Detail"]);
 		});
 
 		cache.resolveMaterialPlan({
@@ -266,9 +262,9 @@ describe("world material resource cache", () => {
 			fallbackColorKey: "part",
 		});
 
-		expect(diagnostics).toEqual([
-			"unsupported-surface-flags:material/08000024:197121:InvAlpha,Additive,Detail",
-		]);
+	expect(diagnostics).toEqual([
+		"unsupported-surface-flags:material/08000024:197121:Detail",
+	]);
 		cache.dispose();
 	});
 

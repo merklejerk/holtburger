@@ -42,9 +42,9 @@ The client's texture/material system is layered. From bottom to top:
 | Layer | DAT type | Client struct | ACE class | Purpose |
 |---|---|---|---|---|
 | Pixel grid | `0x06` | `RenderSurface` ([`acclient.h:10938`](../../acclient-eor-source/acclient.h)) | `Texture` | A single 2D image: width/height, pixel format, palette ID (optional), raw bytes. |
-| Mipmap chain | `0x05` | `RenderTexture` ([`acclient.h:11702`](../../acclient-eor-source/acclient.h)) | `SurfaceTexture` | An array of `RenderSurface` DataIDs (one per mip level) plus type/format/level-count metadata. |
-| UI texture | `0x15` | `RenderTexture` (same struct) | `RenderTexture` | UI-targeted mip chain; same shape as 0x05. |
-| Material | `0x08` | `CSurface` ([`acclient.h:13427`](../../acclient-eor-source/acclient.h)) | `Surface` | The "material": either a textured surface (links a `RenderTexture` + base palette) or a solid color. Carries translucency, luminosity, diffuse. |
+| Material source texture | `0x05` | `ImgTex` source levels ([`acclient.h:13640`](../../acclient-eor-source/acclient.h)) | `SurfaceTexture` | A list of `RenderSurface` DataIDs used as source-detail alternatives. The material path chooses one source level, then builds GPU mipmaps from that selected image. |
+| Runtime/UI texture | `0x15` | `RenderTexture` ([`acclient.h:11702`](../../acclient-eor-source/acclient.h)) | `RenderTexture` | A D3D texture resource with explicit `m_nNumLevels`/`m_SourceLevels`. This is not the `CSurface` material texture path. |
+| Material | `0x08` | `CSurface` ([`acclient.h:13427`](../../acclient-eor-source/acclient.h)) | `Surface` | The "material": either a textured surface (links a `SurfaceTexture`/`ImgTex` + base palette) or a solid color. Carries translucency, luminosity, diffuse. |
 | Palette | `0x04` | `Palette` | `Palette` | 8-bit color tables. Up to 2048 colors, addressed in groups of 8. |
 | Palette set | `0x0F` | `PalSet` ([`acclient.h:50694`](../../acclient-eor-source/acclient.h)) | `PaletteSet` | Multiple palettes selectable by hue (used for shading / dye). |
 | Mesh material binding | n/a | `Polygon` slots indexing `m_rgSurfaces` on `GfxObj` | `Polygon.PosSurface/NegSurface` | Each polygon picks two materials (front/back) by index into the mesh's surface list. |
@@ -127,7 +127,7 @@ The packed wire format ([`CSurface::Serialize` at acclient.c:343379](../../accli
 ```
 type             : u32   // SurfaceType flag mask
 if (type & 0x6) {        // Base1Image | Base1ClipMap
-    orig_texture_id : u32   // -> RenderTexture (0x05)
+    orig_texture_id : u32   // -> SurfaceTexture / ImgTex source levels (0x05)
     orig_palette_id : u32   // -> Palette (0x04), or 0
 } else {
     color_value  : u32   // packed ARGB solid color
@@ -468,9 +468,11 @@ modes, depth/cull state, programmable shaders, animated material parameters
 via `Waveform`, and per-stage UV modifiers.
 
 `LayerStage` ([`acclient.h:11869`](../../acclient-eor-source/acclient.h)) is one
-texture binding within the layer: sampler name, texture DID (→ `RenderTexture`
-0x05), address modes, filter modes, and fixed-function color/alpha combiner
-ops.
+texture binding within the modern render-material layer: sampler name, texture
+DID, address modes, filter modes, and fixed-function color/alpha combiner ops.
+Those modern material records use the `0x15`/`RenderTexture` resource family;
+legacy `CSurface` material textures resolve through `0x05` `SurfaceTexture` and
+`ImgTex`.
 
 ### `Waveform` — the animation primitive
 
@@ -752,12 +754,12 @@ This pass reviewed the current Rust content path, the Tauri host adapter, and
 the Three.js renderer. The important shape is:
 
 - `holtburger-dat` already recognizes the relevant DAT file type IDs:
-  `Palette` (`0x04`), `SurfaceTexture`/`RenderTexture` (`0x05`),
+  `Palette` (`0x04`), `SurfaceTexture` (`0x05`),
   `Texture`/`RenderSurface` (`0x06`/`0x07`), `Surface`/`CSurface` (`0x08`),
   and `Clothing` (`0x10`). It does not yet parse those records into typed
   Rust structures.
 - The "essential" DAT profile excludes the material stack today. `Palette`,
-  `RenderTexture`, `RenderSurface`, `CSurface`, and `ClothingTable` are not
+  `SurfaceTexture`, `RenderSurface`, `CSurface`, and `ClothingTable` are not
   part of `StripperManifest::logic_only()` or the micro profile.
 - `holtburger-content` currently reads and caches landblocks, env cells,
   scenes, setups, and `GfxObj`s, but it has no surface/material/texture
@@ -883,7 +885,8 @@ changes needed by the near-term renderer**.
 Added typed parsers in `holtburger-dat` for:
 
 - `Palette` (`0x04`);
-- `RenderTexture` (`0x05`, currently named `SurfaceTexture` in ACE);
+- `SurfaceTexture` (`0x05`, the `ImgTex` source-level list currently named
+  `SurfaceTexture` in ACE);
 - `RenderSurface` (`0x06`/`0x07`, currently named `Texture` in ACE);
 - `CSurface` (`0x08`);
 - `ObjDesc` texture and palette changes, matching retail dedup behavior.
@@ -894,7 +897,7 @@ Parser coverage and tests now include:
 - `RenderSurface` headers, source bytes, indexed default palettes, and
   `PixelFormatId` metadata for `A8R8G8B8`, `R8G8B8`, `R5G6B5`, `A4R4G4B4`,
   `P8`, `INDEX16`, `A8`, `DXT1`, `DXT3`, `DXT5`, and raw JPEG;
-- `RenderTexture` mip/source surface ID chains;
+- `SurfaceTexture` source-level `RenderSurface` ID lists;
 - `CSurface` solid color, textured-without-palette, and textured-with-palette
   cases. `CSurface` records do not carry their own DataID in the body; callers
   must pair the parsed body with the archive entry ID;
@@ -913,12 +916,19 @@ retail `0x11` marker check and duplicate-change behavior. It now matches the
 new material `ObjDesc` parser, avoiding two subtly different parsers for the
 same appearance structure.
 
-Open follow-up: `RenderTexture` preserves the ACE-observed persisted shape
-(`id`, unknown `i32`, texture type byte, `RenderSurface` ID list). The retail
-runtime `RenderTexture` contains richer per-level resource state, but the DAT
-file loader path currently proven in ACE/ACViewer does not expose meaningful
-names for the unknown field. Keep it named `unknown` until a retail trace or
-fixture proves its semantic role.
+Course correction: early work named `0x05` records `RenderTexture`, following
+our initial interpretation of the retail struct names. Retail material
+rendering proves the `CSurface` path loads `0x05` records as `ImgTex` source
+levels, not as the runtime `RenderTexture` D3D resource. `ImgTex::GetSurfaceDID`
+selects one source level, and `ImgTex::CreateD3DTexture` builds GPU mipmaps
+from that selected `RenderSurface`. The `0x15` records are the better match for
+retail `RenderTexture`.
+
+Open follow-up: rename code and asset IDs that expose `0x05` as
+`RenderTexture` to `SurfaceTexture`/`ImgTex` terminology. Preserve the current
+parsed persisted shape (`id`, unknown `i32`, texture type byte, `RenderSurface`
+ID list), but treat the list as source-detail alternatives unless a fixture
+proves a different non-material path.
 
 ### Phase 2: material graph in `holtburger-content`
 
@@ -933,22 +943,24 @@ geometry references into explicit material recipes:
 
 `ResolvedMaterialRecipe` preserves the immutable legacy material facts the
 renderer needs for initial scheduling: `surface_id`, `SurfaceType`, solid color
-or texture source, `RenderTexture` ID, mip/render-surface IDs, explicit palette
-ID, render-surface default palette IDs, translucency, luminosity, and diffuse.
+or texture source, `SurfaceTexture` ID, source-level render-surface IDs,
+explicit palette ID, render-surface default palette IDs, translucency,
+luminosity, and diffuse.
 It intentionally does **not** carry decoded pixel bytes; that remains a phase 3
 / phase 4 host and renderer-resource-cache concern.
 
 The phase 0 capability report now validates the full legacy dependency chain:
 
 - visual source records still provide the root `CSurface` references;
-- available `CSurface` records are parsed to find `RenderTexture` and explicit
+- available `CSurface` records are parsed to find `SurfaceTexture` and explicit
   palette IDs;
-- available `RenderTexture` records are parsed to find render-surface/mip IDs;
+- available `SurfaceTexture` records are parsed to find source-level
+  render-surface IDs;
 - available indexed `RenderSurface` records are parsed to find default palette
   IDs;
-- referenced `RenderTexture`, `RenderSurface`, and `Palette` records are
+- referenced `SurfaceTexture`, `RenderSurface`, and `Palette` records are
   reported as available, pruned, or missing;
-- parser failures for `CSurface`, `RenderTexture`, `RenderSurface`, and
+- parser failures for `CSurface`, `SurfaceTexture`, `RenderSurface`, and
   `Palette` records block `material_complete`.
 
 Decision: this phase keeps parsed DAT records immutable and exposes stable
@@ -963,7 +975,7 @@ phase 2 implementation. The new APIs cover material slots for static meshes and
 interior cells, but setup part selection, texture-map changes, animation part
 changes, and clothing/subpalette edits still need an appearance-aware resolver.
 That resolver should reuse the phase 1 `ObjDesc` parser and return a material
-appearance key rather than mutating the base `CSurface`/`RenderTexture`
+appearance key rather than mutating the base `CSurface`/`SurfaceTexture`
 records.
 
 Refinement for the next steps: host scheduling should consume these material
@@ -986,9 +998,9 @@ returns:
 - required material recipe IDs;
 - required explicit/default/subpalette palette IDs.
 
-The resolver applies `ObjDesc.texture_changes` as `RenderTexture`
+The resolver applies `ObjDesc.texture_changes` as `SurfaceTexture`
 substitutions for the matching part and old-texture pair. It does not mutate
-the base `CSurface`, `RenderTexture`, or `RenderSurface` records.
+the base `CSurface`, `SurfaceTexture`, or `RenderSurface` records.
 
 The host/content asset contract now recognizes these asset IDs:
 
@@ -996,7 +1008,9 @@ The host/content asset contract now recognizes these asset IDs:
   resolver ready for future `ObjDesc` inputs;
 - `material/{surface_did}`: immutable `CSurface` recipe plus render-texture,
   render-surface, and palette dependency asset IDs;
-- `render-texture/{texture_did}`: mip/render-surface dependency manifest;
+- `render-texture/{texture_did}`: legacy `0x05` source-level/render-surface
+  dependency manifest; rename to `surface-texture/{texture_did}` in the
+  `ImgTex` pivot phase;
 - `render-surface/{surface_did}`: format metadata, source byte length, and
   default-palette dependency IDs;
 - `palette/{palette_did}`: palette metadata.
@@ -1118,8 +1132,9 @@ Host and worker responsibilities:
 - render-surface binary responses keep the JSON metadata payload and hydrate a
   `sourceBytes: Uint8Array` field from a `renderSurface.sourceBytes` binary
   section;
-- `render-texture/{texture_did}` remains a manifest that points at
-  render-surface payloads; mip bytes are not duplicated there;
+- `render-texture/{texture_did}` currently remains a legacy `0x05` manifest
+  that points at render-surface payloads; rename it to
+  `surface-texture/{texture_did}` in the `ImgTex` pivot phase;
 - `formatRaw`, normalized format label, dimensions, default palette ID, source
   byte length, and palette dependencies remain in JSON metadata;
 - malformed binary envelope section shapes still fail in the envelope decoder.
@@ -1250,10 +1265,11 @@ core behavior; retail clothing appearance is driven by `BuildObjDesc`,
 | Topic | Client (truth) | ACE / ACViewer | Recommendation |
 |---|---|---|---|
 | DAT `0x06` name | `RenderSurface` (pixel grid) | `Texture` | Rename to `RenderSurface`. |
-| DAT `0x05` name | `RenderTexture` (mip chain) | `SurfaceTexture` (described as "list of Texture IDs") | Rename to `RenderTexture`, model as proper mip chain. |
+| DAT `0x05` name | `SurfaceTexture` loaded as `ImgTex` source levels in the legacy `CSurface` path | `SurfaceTexture` (described as "list of Texture IDs") | Keep/rename to `SurfaceTexture`; do not call this `RenderTexture` in material APIs. |
+| DAT `0x15` name | `RenderTexture` D3D resource family with explicit runtime levels | `RenderTexture` | Reserve `RenderTexture` terminology for this family and modern material resources. |
 | DAT `0x16` / `0x17` / `0x18` | `RenderMaterial` / `MaterialModifier` / `MaterialInstance` — full programmable material system with shaders, layers, animated `Waveform` properties | DAT type IDs known but **no parser** — these files are silently unhandled | Recognize the IDs so DAT loading doesn't panic. Defer full parsing (retail ships 1 file of each). |
 | Animated material properties | `Waveform` (sine/perlin/etc.) drives UV translate/rotate/scale, alpha threshold, specular power, arbitrary `GRVDataType_Waveform` properties | Not modeled | Implement on demand; not blocking. Standalone 11-float struct. |
-| DAT `0x05` semantics | Real mip chain with type/format/level-count metadata | Flat list of "Texture" DataIDs | Carry mip dims + format explicitly; do not regenerate mips. |
+| DAT `0x05` semantics | Source-detail alternatives. `ImgTex::GetSurfaceDID` selects the first level normally or the second when high detail is dropped; `ImgTex::CreateD3DTexture` generates GPU mips from the selected image. | Flat list of "Texture" DataIDs; ACViewer docs call them mipmaps. | Model source-level selection explicitly. Generate/upload GPU mips from the chosen `RenderSurface`; do not upload the whole list as authored mips for legacy materials. |
 | `CSurface` runtime fields | `handler`, `solid_index`, `indexed_texture_id`, cached `ImgTex*`/`Palette*`, `orig_*` mirror of mutable fields | Read-only `Surface`, originals only | Split into `MaterialDef` (immutable parsed) + `MaterialInstance` (mutable runtime). |
 | `SurfaceHandlerEnum` | Dispatch tag selecting renderer path | Missing | Mirror as `MaterialKind { Database, CustomDB, PalShift, TexMerge }`. |
 | `ObjDesc` magic byte | `0x11` checked; reject otherwise | Checked | Match. |
@@ -1268,11 +1284,13 @@ core behavior; retail clothing appearance is driven by `BuildObjDesc`,
 
 ## Recommendations for our crates
 
-1. **`holtburger-dat`**: name DAT types after the client (`RenderSurface`,
-   `RenderTexture`, `CSurface`/`Material`, `Palette`, `PaletteSet`,
+1. **`holtburger-dat`**: name DAT types after the client/material path
+   (`RenderSurface`, `SurfaceTexture`, `CSurface`/`Material`, `Palette`,
+   `PaletteSet`,
    `ClothingTable` + `ClothingBase` / `CloPaletteTemplate` / `CloSubpalEffect`).
-   Model `RenderTexture` as an explicit mip chain (level dims + pixel format),
-   not a list of IDs.
+   Model `SurfaceTexture` as an `ImgTex` source-level list for legacy
+   materials, not as an explicit authored mip chain. Reserve `RenderTexture`
+   naming for the `0x15` resource family.
 
 2. **Split material def vs instance**: parsed-from-DAT `MaterialDef` is
    immutable; per-rendered-object `MaterialInstance` carries the mutable state

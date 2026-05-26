@@ -1,7 +1,8 @@
 import {
 	ClampToEdgeWrapping,
 	DataTexture,
-	NearestFilter,
+	LinearFilter,
+	LinearMipMapLinearFilter,
 	RedFormat,
 	RepeatWrapping,
 	SRGBColorSpace,
@@ -22,30 +23,100 @@ describe("texture sampling policy", () => {
 		const policy = createDefaultMaterialTextureSamplingPolicy({
 			supportsS3tc: true,
 			supportsS3tcSrgb: true,
+			maxAnisotropy: 8,
 		});
 
 		expect(policy.directColor).toMatchObject({
 			wrapS: "clamp",
 			wrapT: "clamp",
-			magFilter: "nearest",
-			minFilter: "nearest",
+			magFilter: "linear",
+			minFilter: "linear",
+			mipFilter: "linear",
 			colorSpace: "srgb",
-			generateMipmaps: false,
+			anisotropy: 4,
+			generateMipmaps: true,
 			flipY: false,
 		});
 		expect(policy.compressed).toMatchObject({
 			magFilter: "linear",
 			minFilter: "linear",
+			mipFilter: "none",
 			colorSpace: "srgb",
+			anisotropy: 4,
 			generateMipmaps: false,
 			flipY: false,
 		});
 		expect(policy.indexed).toMatchObject({
 			magFilter: "nearest",
 			minFilter: "nearest",
+			mipFilter: "none",
 			colorSpace: "none",
+			anisotropy: 1,
 			generateMipmaps: false,
 			flipY: false,
+		});
+	});
+
+	it("degrades anisotropy to renderer capability", () => {
+		expect(
+			createDefaultMaterialTextureSamplingPolicy({
+				supportsS3tc: false,
+				supportsS3tcSrgb: false,
+				maxAnisotropy: 2,
+			}).directColor.anisotropy,
+		).toBe(2);
+		expect(
+			createDefaultMaterialTextureSamplingPolicy({
+				supportsS3tc: false,
+				supportsS3tcSrgb: false,
+				maxAnisotropy: 0,
+			}).directColor.anisotropy,
+		).toBe(1);
+	});
+
+	it("caps color texture filtering by browser mode", () => {
+		const nearest = createDefaultMaterialTextureSamplingPolicy(
+			{
+				supportsS3tc: true,
+				supportsS3tcSrgb: true,
+				maxAnisotropy: 8,
+			},
+			"nearest",
+		);
+		const linear = createDefaultMaterialTextureSamplingPolicy(
+			{
+				supportsS3tc: true,
+				supportsS3tcSrgb: true,
+				maxAnisotropy: 8,
+			},
+			"linear",
+		);
+
+		expect(nearest.directColor).toMatchObject({
+			magFilter: "nearest",
+			minFilter: "nearest",
+			mipFilter: "none",
+			anisotropy: 1,
+			generateMipmaps: false,
+		});
+		expect(linear.directColor).toMatchObject({
+			magFilter: "linear",
+			minFilter: "linear",
+			mipFilter: "linear",
+			anisotropy: 1,
+			generateMipmaps: true,
+		});
+		expect(linear.compressed).toMatchObject({
+			magFilter: "linear",
+			minFilter: "linear",
+			mipFilter: "none",
+			anisotropy: 1,
+		});
+		expect(nearest.indexed).toMatchObject({
+			magFilter: "nearest",
+			minFilter: "nearest",
+			mipFilter: "none",
+			anisotropy: 1,
 		});
 	});
 
@@ -54,6 +125,7 @@ describe("texture sampling policy", () => {
 			createDefaultMaterialTextureSamplingPolicy({
 				supportsS3tc: true,
 				supportsS3tcSrgb: false,
+				maxAnisotropy: 1,
 			}).compressed.colorSpace,
 		).toBe("none");
 	});
@@ -93,18 +165,21 @@ describe("texture sampling policy", () => {
 		applyTextureSamplingPolicy(texture, {
 			wrapS: "repeat",
 			wrapT: "clamp",
-			magFilter: "nearest",
-			minFilter: "nearest",
+			magFilter: "linear",
+			minFilter: "linear",
+			mipFilter: "linear",
 			colorSpace: "srgb",
+			anisotropy: 4,
 			generateMipmaps: true,
 			flipY: true,
 		});
 
 		expect(texture.wrapS).toBe(RepeatWrapping);
 		expect(texture.wrapT).toBe(ClampToEdgeWrapping);
-		expect(texture.magFilter).toBe(NearestFilter);
-		expect(texture.minFilter).toBe(NearestFilter);
+		expect(texture.magFilter).toBe(LinearFilter);
+		expect(texture.minFilter).toBe(LinearMipMapLinearFilter);
 		expect(texture.colorSpace).toBe(SRGBColorSpace);
+		expect(texture.anisotropy).toBe(4);
 		expect(texture.generateMipmaps).toBe(true);
 		expect(texture.flipY).toBe(true);
 	});
@@ -116,12 +191,14 @@ describe("texture sampling policy", () => {
 				wrapT: "repeat",
 				magFilter: "linear",
 				minFilter: "nearest",
+				mipFilter: "none",
 				colorSpace: "none",
+				anisotropy: 1,
 				generateMipmaps: false,
 				flipY: false,
 			}),
 		).toBe(
-			"wrap=clamp/repeat;filter=linear/nearest;color=none;mips=off;flipY=off",
+			"wrap=clamp/repeat;filter=linear/nearest/none;color=none;aniso=1;mips=off;flipY=off",
 		);
 	});
 });

@@ -3100,9 +3100,11 @@ work changes the render-surface source pipeline.
   by `apps/holtburger-3d`.
 - Split render-surface metadata from upload-ready texture data. Keep
   `render-surface/{id}` as the DAT `RenderSurface` metadata/source-facts route,
-  and introduce a separate render-prepared texture asset route for byte-heavy
-  upload payloads.
-- Define a prepared texture request identity that includes at least
+  and introduce a named `prepared-texture/{profileKey}` binary asset route for
+  byte-heavy upload payloads. The `profileKey` should be a deterministic,
+  parseable encoding of the render surface ID plus the renderer-requested
+  preparation profile.
+- Define the `prepared-texture/{profileKey}` request identity to include at least
   `renderSurfaceId`, the renderer-requested output format, usage, mip policy,
   color-space/data mode, alpha policy if needed, and selected source
   version/hash. This keeps generated mip chains, raw diagnostics, and future
@@ -3118,6 +3120,22 @@ work changes the render-surface source pipeline.
   data for masks, or raw-source diagnostics. If an `auto` profile is ever
   added, the resolved output profile must be returned in the response and be
   part of the cache identity.
+- Example route keys should be documented in tests and kept parseable rather
+  than opaque hashes. Use query-style profile parameters and canonicalize
+  parameter ordering before cache lookup, for example:
+  - `prepared-texture/06001234?usage=color&out=dxt1&mips=retail4&cs=srgb`;
+  - `prepared-texture/06001234?usage=detail&out=dxt5&mips=retail4&cs=data`;
+  - `prepared-texture/06001234?usage=color&out=rgba8&mips=generated&cs=srgb`;
+  - `prepared-texture/06001234?usage=mask&out=r8&mips=none&cs=data`;
+  - `prepared-texture/06001234?usage=raw&out=source&mips=none&cs=source`;
+  - `prepared-texture/06001234?usage=color&out=rgba8&mips=generated&cs=srgb&palette=04005678&pview=base`.
+- Reserve the same `prepared-texture/{profileKey}` route for future premapped
+  indexed textures. Indexed prepared-texture profiles should include the
+  `renderSurfaceId`, palette or derived palette-view identity, usage, requested
+  output format, color-space/data mode, mip policy, and source/palette version
+  hashes. Rust should resolve `P8`/`Index16` indices through the requested
+  palette view and return an upload-ready color texture, while raw indexed
+  source textures remain available for diagnostics or exact-index paths.
 - Preserve the retail ordering: first select the `SurfaceTexture` source level
   using the `ImgTex::GetSurfaceDID` policy, then generate GPU-style mips from
   that selected render surface.
@@ -3151,8 +3169,8 @@ work changes the render-surface source pipeline.
 - Preserve the existing direct-color generated-mip path and indexed/palette
   nearest/no-mip paths unless their callers opt into the prepared-texture route.
   This phase is primarily about compressed visual textures, but the request
-  contract should be general enough to move direct-color conversions out of the
-  frontend later.
+  contract should be general enough to move direct-color conversions and
+  premapped indexed-color textures out of the frontend later.
 - Add diagnostics and debug counters for compressed mip generation: source
   format, source dimensions, generated level count, estimated byte size, and
   fallback reason.
@@ -3190,6 +3208,9 @@ Cleanup targets and follow-up debt:
   only after the prepared texture route proves stable. The migration should move
   AC pixel decoding and upload-byte packing to Rust while leaving Three.js
   texture object creation and sampler state in the frontend.
+- Use the later indexed-color filtering phase to decide when normal material
+  rendering should request premapped indexed prepared textures instead of raw
+  index textures plus shader palette lookup.
 - Revisit the Phase 8.2 compressed `mipFilter: "none"` browser fallback once
   prepared compressed mip-chain assets are available in real app payloads.
 - Decide whether the current raw `sourceBytes` section remains on

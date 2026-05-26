@@ -11,8 +11,11 @@ import type { IndexedTextureResource } from "./indexed-texture-resources";
 import {
 	createIndexedMaterialShaderPatch,
 	createIndexedMeshStandardMaterial,
-	isBase1ClipMapSurface,
 } from "./indexed-materials";
+import {
+	INDEXED_CLIP_MAP_ALPHA_TEST,
+	isBase1ClipMapSurface,
+} from "./material-behavior";
 import type { PaletteTextureResource } from "./palette-resources";
 
 describe("indexed materials", () => {
@@ -29,11 +32,30 @@ describe("indexed materials", () => {
 		const standardMaterial = material as MeshStandardMaterial;
 		expect(standardMaterial.map).toBeInstanceOf(DataTexture);
 		expect(standardMaterial.transparent).toBe(false);
+		expect(standardMaterial.alphaTest).toBe(INDEXED_CLIP_MAP_ALPHA_TEST);
 		expect(standardMaterial.userData.holtburgerIndexedMaterial).toMatchObject({
 			format: "p8",
 			paletteColorCount: 2,
 			clipThreshold: 8,
+			alphaTest: INDEXED_CLIP_MAP_ALPHA_TEST,
 		});
+	});
+
+	it("uses normalized client translucency for indexed material opacity", () => {
+		const material = createIndexedMeshStandardMaterial({
+			recipe: createTextureMaterialRecipe({
+				surfaceType: 0x2,
+				translucency: 0.25,
+			}),
+			resources: {
+				indexedTexture: createIndexedTextureResource("p8"),
+				palette: createPaletteResource(),
+			},
+		});
+
+		const standardMaterial = material as MeshStandardMaterial;
+		expect(standardMaterial.transparent).toBe(true);
+		expect(standardMaterial.opacity).toBe(0.75);
 	});
 
 	it("patches map sampling with palette lookup and Index16 reconstruction", () => {
@@ -98,6 +120,7 @@ function createPaletteResource(): PaletteTextureResource {
 
 function createTextureMaterialRecipe(options: {
 	surfaceType: number;
+	translucency?: number;
 }): PreparedMaterialRecipePayload {
 	return {
 		kind: "material-recipe",
@@ -118,7 +141,7 @@ function createTextureMaterialRecipe(options: {
 			paletteId: 0x04000001,
 			renderSurfaceDefaultPaletteIds: [],
 		},
-		translucency: 0,
+		translucency: options.translucency ?? 0,
 		luminosity: 0,
 		diffuse: 1,
 		dependencies: {

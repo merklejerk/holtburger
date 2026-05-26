@@ -1758,6 +1758,8 @@ Verification:
 
 ### Phase 8: Clipmap And Scalar Material Behavior
 
+Status: **implemented**.
+
 Goal: tighten the non-topological material properties.
 
 - Validate `SurfaceType.Base1ClipMap` for indexed and direct/DXT texture paths.
@@ -1768,6 +1770,190 @@ Goal: tighten the non-topological material properties.
 
 Expected effect: alpha-cut, translucent, luminous, and diffuse-tinted surfaces
 should be closer to retail without weakening the material data model.
+
+Progress:
+
+- Added renderer-local legacy material behavior derivation in
+  `material-behavior.ts`.
+- Centralized `CSurface.translucency`, `diffuse`, and `luminosity` handling for
+  solid-color, direct texture, indexed texture, and placeholder material paths.
+- Fixed indexed material opacity to use the same normalized client
+  translucency interpretation as the direct material path.
+- Preserved indexed `SurfaceType.Base1ClipMap` behavior as shader discard for
+  palette indices below 8, matching ACViewer's indexed clipmap conversion.
+- Added direct texture clipmap handling through material alpha-test when the
+  source surface carries alpha, instead of making every alpha-bearing direct
+  texture transparent by default.
+- Corrected clipmap alpha-test thresholds from the retail decompile:
+  paletted/indexed clipmaps use `100 / 255`, and direct/DDS-style clipmaps use
+  `200 / 255`.
+- Added diagnostics for parsed but not fully rendered `InvAlpha`, `Additive`,
+  and `Detail` surface flags.
+
+Decisions:
+
+- `CSurface.translucency` maps to opacity as `1.0 - translucency`, following
+  the retail client's `CMaterial::SetTranslucencySimple`.
+- `CSurface.diffuse` maps to a grayscale material diffuse multiplier only when
+  the `SurfaceType.Diffuse` flag is present, following the retail client's
+  `CMaterial::SetDiffuseSimple` channel assignment.
+- `CSurface.luminosity` maps to grayscale emissive intensity only when the
+  `SurfaceType.Luminous` flag is present, following the retail client's
+  `CMaterial::SetLuminositySimple` channel assignment.
+- Direct clipmaps use Three `alphaTest` at the retail DDS threshold. Indexed
+  clipmaps keep the palette-index discard shader for indices below 8 and also
+  use the retail 256-color alpha-test threshold after palette lookup.
+- `Additive`, `InvAlpha`, and `Detail` are reported but not approximated yet.
+  They need reference-backed blend/detail behavior rather than a guessed Three
+  material setting.
+
+Course corrections:
+
+- The previous indexed material opacity path treated translucency as byte-scale
+  only. That was inconsistent with parsed `CSurface` data and the direct
+  material path, so Phase 8 collapsed the opacity math into one shared helper.
+- Direct alpha textures are no longer treated as transparent solely because the
+  upload format has alpha. Clipmaps with source alpha now use alpha-test unless
+  an explicit translucent/alpha scalar requires transparency.
+- Follow-up investigation against the retail decompile showed ACViewer's
+  indexed `index < 8` clipmap conversion is correct but incomplete for retail
+  parity. Retail `D3DPolyRender::SetSurface` also enables `GREATEREQUAL`
+  alpha-test with refs 100 for paletted/256-color textures and 200 for DDS-style
+  textures, so the initial `1 / 255` direct alpha-test was too permissive.
+
+Cleanup targets:
+
+- `material-construction.ts` still owns both fallback diagnostics and material
+  recipe construction. If Phase 9 adds terrain material diagnostics, keep those
+  terrain-specific diagnostics out of this module.
+- Unsupported surface-flag diagnostics are currently emitted during material
+  construction. If the debug UI starts exposing material issue categories, move
+  these into a structured material-diagnostics view rather than growing the
+  renderer summary text.
+- The scalar behavior helper is renderer-local and Three-specific. Do not move
+  it into shared crates unless another frontend renderer needs the same policy.
+
+Legacy shims:
+
+- No compatibility shims were introduced.
+- Existing callers were moved to the shared behavior helper instead of keeping a
+  re-export on `indexed-materials.ts`.
+
+Refinements to future steps:
+
+- Phase 9 should keep terrain material behavior separate. Terrain may reuse
+  scalar helpers only for true `CSurface`-style material recipes; terrain
+  `TexMerge` blending, roads, alpha maps, and detail surfaces need terrain
+  resource types.
+- Future animation-system work should feed runtime diffuse/luminous/translucent
+  frame hooks into material instance state. Phase 8 handles static recipe
+  defaults only.
+- A later additive/inverse-alpha pass should use retail/ACViewer evidence and
+  explicit tests before changing blend modes.
+
+Verification:
+
+- `npm run test:ts -- src/lib/world-display/material-behavior.test.ts
+  src/lib/world-display/indexed-materials.test.ts
+  src/lib/world-display/material-resources.test.ts` passes.
+- `npm run check` passes.
+- `npm run lint:ts` passes.
+- No immediate interim phase is needed before Phase 9.
+
+### Phase 8.1: Legacy Alpha Blend And Sampler Modes
+
+Goal: implement the fixed-function alpha blend modes and sampler behavior that
+retail applies around `D3DPolyRender::SetSurface`.
+
+Why this exists:
+
+- Phase 8 implemented scalar opacity and clipmap alpha-test behavior, but
+  retail treats alpha-test and alpha-blend as separate render states.
+- `SurfaceType.Alpha`, `InvAlpha`, `Additive`, `Translucent`, and
+  `Base1ClipMap` choose distinct blend factors and depth-write behavior.
+- Retail applies sampler state independently from texture upload. The main
+  `CSurface` path sets sampler stage 0 to clamp or wrap based on stippling and
+  then uses linear mag/min/mip filtering. Single-pass detail uses sampler stage
+  1 with wrap plus linear mag/min/mip filtering.
+- Render-material layers carry separate min, mag, and mip filter modes, and the
+  device layer can downgrade mip filtering to point when texture filtering is
+  disabled or promote linear min/mag filtering to anisotropic when preferences
+  and D3D caps allow it.
+
+Implementation scope:
+
+- Extend `material-behavior.ts` or a sibling renderer-local helper with a typed
+  legacy blend description:
+  - normal opaque: no alpha blend, depth write enabled;
+  - `Alpha`: `SRCALPHA, INVSRCALPHA`;
+  - `Alpha | Additive`: `SRCALPHA, ONE`;
+  - `InvAlpha`: `INVSRCALPHA, SRCALPHA`;
+  - `InvAlpha | Additive`: `INVSRCALPHA, ONE`;
+  - `Additive`: `ONE, ONE`;
+  - `Base1ClipMap`: alpha-test plus blend enabled; if no prior blend mode was
+    selected, use `ONE, INVSRCALPHA`;
+  - `Translucent`: use `CSurface.translucency` and force normal alpha blending
+    when retail does.
+- Map those blend descriptions onto Three material state:
+  - `transparent`;
+  - `blending`;
+  - `blendSrc`, `blendDst`, `blendEquation`;
+  - `depthWrite`;
+  - `alphaTest`.
+- Keep unsupported or ambiguous cases diagnostic-backed rather than guessed.
+- Add tests for the retail blend matrix, including combined flags.
+- Add debug metadata for selected blend mode and alpha-test ref so render oddness
+  can be inspected from material diagnostics.
+- Implement the static/interior `CSurface` sampler parity pass:
+  - extend `TextureSamplingPolicy` to represent mag, min, and mip filter intent
+    separately instead of collapsing minification and mip behavior into one
+    `minFilter` field;
+  - map retail linear/linear/linear to Three minification filters that actually
+    use mip levels when mipmaps are available;
+  - prefer linear filtering by default for direct and compressed color textures
+    when the renderer can support it, because that matches the retail `CSurface`
+    path better than the current nearest-heavy defaults;
+  - enable mipmap generation for uncompressed direct-color texture resources
+    where WebGL can generate mips;
+  - preserve compressed texture uploaded mip behavior according to payload
+    evidence; do not invent missing mip chains for compressed surfaces without
+    proving the DAT payload contains them or generating a renderer-local fallback;
+  - keep indexed source textures and palette lookup textures nearest/no-mip for
+    palette correctness unless retail evidence proves filtered indexed sampling;
+  - retain sampler wrap selection from Phase 3, but express the effective policy
+    as `{ wrapS, wrapT, magFilter, minFilter, mipFilter, anisotropy }`;
+  - add anisotropy as a renderer capability/preference applied only when the
+    requested min/mag filters are linear and the renderer reports a supported max
+    anisotropy; default the preference to anisotropic 4x, clamp it to the
+    renderer maximum, and degrade through lower supported values before falling
+    back to plain linear filtering;
+  - include effective sampler policy in material/texture resource cache keys and
+    debug diagnostics so policy changes cannot reuse stale GPU textures.
+- Treat retail fixed-function stages as shader/material inputs in Holtburger:
+  stage 0 maps to the base texture sampler and stage 1/detail maps to additional
+  shader samplers/uniforms on the same material variant. Do not introduce extra
+  draw passes for detail composition unless a later evidence-backed limitation
+  makes that unavoidable.
+
+Expected effect: alpha-blended, additive, inverse-alpha, translucent, and
+clipmap surfaces should behave closer to retail, and material diagnostics should
+explain the chosen blend/filter policy instead of hiding it inside Three
+defaults.
+
+Completion criteria:
+
+- Legacy blend state is represented as typed behavior, tested independently, and
+  applied consistently to solid, direct, indexed, and placeholder material
+  paths.
+- `InvAlpha` and `Additive` are no longer reported as unsupported merely because
+  the renderer lacks blend-factor mapping.
+- Clipmap alpha-test thresholds from Phase 8 remain unchanged.
+- Static/interior `CSurface` texture resources use a tested sampler policy that
+  distinguishes mag/min/mip filters, mip generation, and optional anisotropy.
+- Indexed palette textures remain nearest/no-mip unless a separate evidence pass
+  proves filtered palette lookup is retail-correct.
+- Retail stage-style detail composition is planned as a single shader/material
+  path, not as a second scene/render pass.
 
 ### Phase 9: Terrain Material Pipeline Prep
 

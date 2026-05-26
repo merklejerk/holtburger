@@ -25,6 +25,7 @@ import {
 	createDefaultMaterialTextureSamplingPolicy,
 	type TextureSamplingPolicy,
 } from "./texture-sampling-policy";
+import { DIRECT_CLIP_MAP_ALPHA_TEST } from "./material-behavior";
 
 describe("world material resource cache", () => {
 	it("builds material plans from resolved surface slots", () => {
@@ -175,6 +176,99 @@ describe("world material resource cache", () => {
 		const material = plan.materials[0];
 		expect(material).toBeInstanceOf(MeshStandardMaterial);
 		expect((material as MeshStandardMaterial).map).not.toBeNull();
+		cache.dispose();
+	});
+
+	it("applies scalar material behavior to texture-backed materials", () => {
+		const cache = new WorldMaterialResourceCache();
+		const materialAssetId = formatMaterialAssetId(0x08000022);
+		const renderSurfaceAssetId = "render-surface/06000022";
+		const plan = cache.resolveMaterialPlan({
+			slots: [{ slotIndex: 0, surfaceId: 0x08000022, materialAssetId }],
+			appearance: createBaseMaterialAppearanceContext("base"),
+			preparedByAssetId: {
+				[materialAssetId]: createPreparedAsset(
+					materialAssetId,
+					createTextureMaterialRecipe(0x08000022, 0x06000022, {
+						surfaceType: 0x2 | 0x20 | 0x40,
+						translucency: 0.25,
+						diffuse: 0.5,
+						luminosity: 0.75,
+					}),
+				),
+				[renderSurfaceAssetId]: createPreparedAsset(
+					renderSurfaceAssetId,
+					createRenderSurfacePayload(0x06000022),
+				),
+			},
+			fallbackColorKey: "part",
+		});
+
+		const material = plan.materials[0] as MeshStandardMaterial;
+		expect(material.color.r).toBe(0.5);
+		expect(material.opacity).toBe(0.75);
+		expect(material.transparent).toBe(true);
+		expect(material.emissiveIntensity).toBe(0.75);
+		cache.dispose();
+	});
+
+	it("uses alpha test for direct Base1ClipMap materials", () => {
+		const cache = new WorldMaterialResourceCache();
+		const materialAssetId = formatMaterialAssetId(0x08000023);
+		const renderSurfaceAssetId = "render-surface/06000023";
+		const plan = cache.resolveMaterialPlan({
+			slots: [{ slotIndex: 0, surfaceId: 0x08000023, materialAssetId }],
+			appearance: createBaseMaterialAppearanceContext("base"),
+			preparedByAssetId: {
+				[materialAssetId]: createPreparedAsset(
+					materialAssetId,
+					createTextureMaterialRecipe(0x08000023, 0x06000023, {
+						surfaceType: 0x4,
+					}),
+				),
+				[renderSurfaceAssetId]: createPreparedAsset(
+					renderSurfaceAssetId,
+					createRenderSurfacePayload(0x06000023),
+				),
+			},
+			fallbackColorKey: "part",
+		});
+
+		const material = plan.materials[0] as MeshStandardMaterial;
+		expect(material.transparent).toBe(false);
+		expect(material.alphaTest).toBe(DIRECT_CLIP_MAP_ALPHA_TEST);
+		cache.dispose();
+	});
+
+	it("reports unsupported parsed surface flags", () => {
+		const diagnostics: string[] = [];
+		const materialAssetId = formatMaterialAssetId(0x08000024);
+		const cache = new WorldMaterialResourceCache((diagnostic) => {
+			diagnostics.push(diagnostic.key);
+			expect(diagnostic.detail.unsupportedSurfaceFlags).toEqual([
+				"InvAlpha",
+				"Additive",
+				"Detail",
+			]);
+		});
+
+		cache.resolveMaterialPlan({
+			slots: [{ slotIndex: 0, surfaceId: 0x08000024, materialAssetId }],
+			appearance: createBaseMaterialAppearanceContext("base"),
+			preparedByAssetId: {
+				[materialAssetId]: createPreparedAsset(
+					materialAssetId,
+					createSolidMaterialRecipe(0x08000024, 0xffffffff, {
+						surfaceType: 0x1 | 0x200 | 0x10000 | 0x20000,
+					}),
+				),
+			},
+			fallbackColorKey: "part",
+		});
+
+		expect(diagnostics).toEqual([
+			"unsupported-surface-flags:material/08000024:197121:InvAlpha,Additive,Detail",
+		]);
 		cache.dispose();
 	});
 
@@ -846,6 +940,12 @@ function createPaletteAppearanceContext(options: {
 function createSolidMaterialRecipe(
 	surfaceId: number,
 	argb: number,
+	options: Partial<
+		Pick<
+			PreparedMaterialRecipePayload,
+			"surfaceType" | "translucency" | "luminosity" | "diffuse"
+		>
+	> = {},
 ): PreparedMaterialRecipePayload {
 	return {
 		kind: "material-recipe",
@@ -858,11 +958,11 @@ function createSolidMaterialRecipe(
 			detail: null,
 		},
 		surfaceId,
-		surfaceType: 1,
+		surfaceType: options.surfaceType ?? 1,
 		source: { kind: "solid-color", argb },
-		translucency: 0,
-		luminosity: 0,
-		diffuse: 1,
+		translucency: options.translucency ?? 0,
+		luminosity: options.luminosity ?? 0,
+		diffuse: options.diffuse ?? 1,
 		dependencies: {
 			renderTextureAssetIds: [],
 			renderSurfaceAssetIds: [],
@@ -877,6 +977,10 @@ function createTextureMaterialRecipe(
 	options: {
 		paletteId?: number | null;
 		renderSurfaceDefaultPaletteIds?: number[];
+		surfaceType?: number;
+		translucency?: number;
+		luminosity?: number;
+		diffuse?: number;
 	} = {},
 ): PreparedMaterialRecipePayload {
 	const renderSurfaceAssetId = `render-surface/${renderSurfaceId.toString(16).padStart(8, "0")}`;
@@ -884,7 +988,7 @@ function createTextureMaterialRecipe(
 	const renderSurfaceDefaultPaletteIds =
 		options.renderSurfaceDefaultPaletteIds ?? [];
 	return {
-		...createSolidMaterialRecipe(surfaceId, 0xffffffff),
+		...createSolidMaterialRecipe(surfaceId, 0xffffffff, options),
 		source: {
 			kind: "texture",
 			renderTextureId: 0x05000002,

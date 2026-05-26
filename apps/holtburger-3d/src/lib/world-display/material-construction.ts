@@ -26,6 +26,11 @@ import {
 	selectIndexedPalette,
 	type IndexedTextureResource,
 } from "./indexed-texture-resources";
+import {
+	applyLegacyMaterialBehavior,
+	deriveLegacyMaterialBehavior,
+	type LegacyMaterialBehavior,
+} from "./material-behavior";
 import type { MaterialAppearanceContext } from "./material-appearance";
 import type { MaterialResourceDiagnostic } from "./material-resources";
 import { parseLegacySamplerMaterialVariantSignature } from "./material-variants";
@@ -48,7 +53,6 @@ type MaterialResourceDiagnosticHandler = (
 const BYTE_MAX = 255;
 const COLOR_HASH_MULTIPLIER = 31;
 const HUE_DEGREES = 360;
-const LEGACY_OPACITY_BYTE_SCALE = 255;
 
 export function createMaterial(options: {
 	materialAssetId: string;
@@ -113,14 +117,24 @@ export function createMaterial(options: {
 		});
 	}
 	if (recipe.source.kind === "solid-color") {
-		return new MeshStandardMaterial({
-			color: colorFromArgb(recipe.source.argb),
-			flatShading: true,
-			metalness: 0.02,
-			roughness: 0.88,
-			transparent: normalizeLegacyOpacity(recipe.translucency) < 1,
-			opacity: normalizeLegacyOpacity(recipe.translucency),
+		const behavior = deriveLegacyMaterialBehavior({ recipe });
+		reportUnsupportedSurfaceFlags({
+			materialAssetId: options.materialAssetId,
+			recipe,
+			behavior,
+			reportDiagnostic: options.reportDiagnostic,
 		});
+		return new MeshStandardMaterial(
+			applyLegacyMaterialBehavior(
+				{
+					color: colorFromArgb(recipe.source.argb).multiply(behavior.color),
+					flatShading: true,
+					metalness: 0.02,
+					roughness: 0.88,
+				},
+				behavior,
+			),
+		);
 	}
 
 	const renderTexture = firstPreparedRenderTexture(
@@ -147,16 +161,28 @@ export function createMaterial(options: {
 			)
 		: null;
 	if (texture && renderSurface) {
-		const opacity = normalizeLegacyOpacity(recipe.translucency);
-		return new MeshStandardMaterial({
-			color: "#ffffff",
-			map: texture,
-			flatShading: true,
-			metalness: 0.02,
-			roughness: 0.88,
-			transparent: opacity < 1 || hasSourceAlpha(renderSurface.formatRaw),
-			opacity,
+		const behavior = deriveLegacyMaterialBehavior({
+			recipe,
+			hasSourceAlpha: hasSourceAlpha(renderSurface.formatRaw),
 		});
+		reportUnsupportedSurfaceFlags({
+			materialAssetId: options.materialAssetId,
+			recipe,
+			behavior,
+			reportDiagnostic: options.reportDiagnostic,
+		});
+		return new MeshStandardMaterial(
+			applyLegacyMaterialBehavior(
+				{
+					color: behavior.color,
+					map: texture,
+					flatShading: true,
+					metalness: 0.02,
+					roughness: 0.88,
+				},
+				behavior,
+			),
+		);
 	}
 	if (indexedRenderSurface) {
 		const indexedResources = resolveIndexedMaterialResources({
@@ -178,6 +204,16 @@ export function createMaterial(options: {
 			appearance: options.appearance,
 		});
 		if (indexedResources) {
+			const behavior = deriveLegacyMaterialBehavior({
+				recipe,
+				usesIndexedClipDiscard: true,
+			});
+			reportUnsupportedSurfaceFlags({
+				materialAssetId: options.materialAssetId,
+				recipe,
+				behavior,
+				reportDiagnostic: options.reportDiagnostic,
+			});
 			return createIndexedMeshStandardMaterial({
 				recipe,
 				resources: indexedResources,
@@ -188,14 +224,24 @@ export function createMaterial(options: {
 			renderSurface: indexedRenderSurface,
 			palette,
 		});
-		return new MeshStandardMaterial({
-			color,
-			flatShading: true,
-			metalness: 0.02,
-			roughness: 0.88,
-			transparent: normalizeLegacyOpacity(recipe.translucency) < 1,
-			opacity: normalizeLegacyOpacity(recipe.translucency),
+		const behavior = deriveLegacyMaterialBehavior({ recipe });
+		reportUnsupportedSurfaceFlags({
+			materialAssetId: options.materialAssetId,
+			recipe,
+			behavior,
+			reportDiagnostic: options.reportDiagnostic,
 		});
+		return new MeshStandardMaterial(
+			applyLegacyMaterialBehavior(
+				{
+					color: color.multiply(behavior.color),
+					flatShading: true,
+					metalness: 0.02,
+					roughness: 0.88,
+				},
+				behavior,
+			),
+		);
 	}
 
 	reportTextureFallbackDiagnostics({
@@ -214,13 +260,44 @@ export function createMaterial(options: {
 		renderSurface,
 		palette,
 	});
-	return new MeshStandardMaterial({
-		color,
-		flatShading: true,
-		metalness: 0.02,
-		roughness: 0.88,
-		transparent: normalizeLegacyOpacity(recipe.translucency) < 1,
-		opacity: normalizeLegacyOpacity(recipe.translucency),
+	const behavior = deriveLegacyMaterialBehavior({ recipe });
+	reportUnsupportedSurfaceFlags({
+		materialAssetId: options.materialAssetId,
+		recipe,
+		behavior,
+		reportDiagnostic: options.reportDiagnostic,
+	});
+	return new MeshStandardMaterial(
+		applyLegacyMaterialBehavior(
+			{
+				color: color.multiply(behavior.color),
+				flatShading: true,
+				metalness: 0.02,
+				roughness: 0.88,
+			},
+			behavior,
+		),
+	);
+}
+
+function reportUnsupportedSurfaceFlags(options: {
+	materialAssetId: string;
+	recipe: PreparedMaterialRecipePayload;
+	behavior: LegacyMaterialBehavior;
+	reportDiagnostic: MaterialResourceDiagnosticHandler;
+}): void {
+	if (options.behavior.unsupportedSurfaceFlags.length === 0) {
+		return;
+	}
+	options.reportDiagnostic({
+		key: `unsupported-surface-flags:${options.materialAssetId}:${options.recipe.surfaceType}:${options.behavior.unsupportedSurfaceFlags.join(",")}`,
+		message: `Material ${options.materialAssetId} uses surface flags that are parsed but not fully rendered.`,
+		detail: {
+			materialAssetId: options.materialAssetId,
+			surfaceId: formatHex32(options.recipe.surfaceId),
+			surfaceType: options.recipe.surfaceType,
+			unsupportedSurfaceFlags: options.behavior.unsupportedSurfaceFlags,
+		},
 	});
 }
 
@@ -652,14 +729,6 @@ function colorFromArgb(argb: number): Color {
 	const green = (argb >>> 8) & 0xff;
 	const blue = argb & 0xff;
 	return new Color(red / BYTE_MAX, green / BYTE_MAX, blue / BYTE_MAX);
-}
-
-function normalizeLegacyOpacity(translucency: number): number {
-	const normalized =
-		translucency > 1
-			? 1 - Math.min(translucency, LEGACY_OPACITY_BYTE_SCALE) / BYTE_MAX
-			: 1 - translucency;
-	return Math.max(0, Math.min(1, normalized));
 }
 
 function colorFromString(

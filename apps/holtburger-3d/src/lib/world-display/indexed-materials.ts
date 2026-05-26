@@ -2,9 +2,13 @@ import { MeshStandardMaterial, type Material, type Texture } from "three";
 
 import type { PreparedMaterialRecipePayload } from "../assets/types";
 import type { IndexedTextureResource } from "./indexed-texture-resources";
+import {
+	applyLegacyMaterialBehavior,
+	deriveLegacyMaterialBehavior,
+	isBase1ClipMapSurface,
+} from "./material-behavior";
 import type { PaletteTextureResource } from "./palette-resources";
 
-const SURFACE_TYPE_BASE1_CLIP_MAP = 0x4;
 const CLIP_MAP_TRANSPARENT_INDEX_THRESHOLD = 8;
 
 interface IndexedMaterialShader {
@@ -21,17 +25,23 @@ export function createIndexedMeshStandardMaterial(options: {
 	recipe: PreparedMaterialRecipePayload;
 	resources: IndexedMaterialResources;
 }): Material {
-	const opacity = normalizeLegacyOpacity(options.recipe.translucency);
 	const isClipMap = isBase1ClipMapSurface(options.recipe.surfaceType);
-	const material = new MeshStandardMaterial({
-		color: "#ffffff",
-		map: options.resources.indexedTexture.texture,
-		flatShading: true,
-		metalness: 0.02,
-		roughness: 0.88,
-		transparent: opacity < 1,
-		opacity,
+	const behavior = deriveLegacyMaterialBehavior({
+		recipe: options.recipe,
+		usesIndexedClipDiscard: isClipMap,
 	});
+	const material = new MeshStandardMaterial(
+		applyLegacyMaterialBehavior(
+			{
+				color: behavior.color,
+				map: options.resources.indexedTexture.texture,
+				flatShading: true,
+				metalness: 0.02,
+				roughness: 0.88,
+			},
+			behavior,
+		),
+	);
 	const shaderPatch = createIndexedMaterialShaderPatch({
 		indexedTexture: options.resources.indexedTexture,
 		paletteTexture: options.resources.palette.texture,
@@ -46,6 +56,8 @@ export function createIndexedMeshStandardMaterial(options: {
 			format: options.resources.indexedTexture.format,
 			paletteColorCount: options.resources.palette.colorCount,
 			clipThreshold: isClipMap ? CLIP_MAP_TRANSPARENT_INDEX_THRESHOLD : -1,
+			alphaTest: behavior.alphaTest,
+			unsupportedSurfaceFlags: behavior.unsupportedSurfaceFlags,
 		},
 	};
 	return material;
@@ -88,12 +100,6 @@ export function createIndexedMaterialShaderPatch(options: {
 	};
 }
 
-export function isBase1ClipMapSurface(surfaceType: number): boolean {
-	return (
-		(surfaceType & SURFACE_TYPE_BASE1_CLIP_MAP) === SURFACE_TYPE_BASE1_CLIP_MAP
-	);
-}
-
 function indexedMaterialUniformDeclarations(): string {
 	return `
 uniform sampler2D indexedPaletteMap;
@@ -119,11 +125,4 @@ function indexedMapFragmentShaderChunk(): string {
 	diffuseColor *= sampledPaletteColor;
 #endif
 `;
-}
-
-function normalizeLegacyOpacity(translucency: number): number {
-	if (translucency <= 0) {
-		return 1;
-	}
-	return Math.max(0, Math.min(1, 1 - translucency / 255));
 }

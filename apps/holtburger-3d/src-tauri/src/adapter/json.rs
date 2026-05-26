@@ -180,9 +180,12 @@ pub fn serialize_surface_texture_payload(
         &surface_texture.render_surface_ids,
         &render_surface_available,
     );
-    let render_surface_asset_ids = selected_render_surface_id
+    let render_surface_asset_ids = surface_texture
+        .render_surface_ids
+        .iter()
+        .copied()
+        .filter(|render_surface_id| render_surface_available(*render_surface_id))
         .map(format_render_surface_asset_id)
-        .into_iter()
         .collect::<Vec<_>>();
     serde_json::json!({
         "kind": "surface-texture",
@@ -192,6 +195,7 @@ pub fn serialize_surface_texture_payload(
         "textureType": surface_texture.texture_type,
         "unknown": surface_texture.unknown,
         "selectedRenderSurfaceId": selected_render_surface_id,
+        "renderSurfaceIds": surface_texture.render_surface_ids,
         "dependencies": {
             "renderSurfaceAssetIds": render_surface_asset_ids,
         },

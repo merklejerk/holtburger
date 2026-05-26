@@ -732,6 +732,7 @@ export interface PreparedSurfaceTexturePayload extends PreparedAssetPayloadBase 
 	textureType: number;
 	unknown: number;
 	selectedRenderSurfaceId: number | null;
+	renderSurfaceIds: number[];
 	dependencies: {
 		renderSurfaceAssetIds: string[];
 	};

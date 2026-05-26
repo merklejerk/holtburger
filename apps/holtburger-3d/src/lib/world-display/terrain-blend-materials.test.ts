@@ -1,4 +1,4 @@
-import { ShaderMaterial } from "three";
+import { DataTexture, ShaderMaterial } from "three";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -116,11 +116,19 @@ describe("buildTerrainBlendMaterialSet", () => {
 			),
 			createRecord(
 				"surface-texture/05001786",
-				createSurfaceTexturePayload(0x06001786),
+				createSurfaceTexturePayload(0x06001786, [0x06001786, 0x06001787]),
 			),
 			createRecord(
 				"render-surface/06001786",
-				createRenderSurfacePayload(0x06001786, 0x15),
+				createRenderSurfacePayload(0x06001786, 0x15, {
+					sourceBytes: new Uint8Array([0xff, 0x00, 0x00, 0x40]),
+				}),
+			),
+			createRecord(
+				"render-surface/06001787",
+				createRenderSurfacePayload(0x06001787, 0x15, {
+					sourceBytes: new Uint8Array([0x00, 0xff, 0x00, 0x80]),
+				}),
 			),
 		]);
 		const cache = new WorldMaterialResourceCache();
@@ -137,15 +145,22 @@ describe("buildTerrainBlendMaterialSet", () => {
 		expect(material.uniforms.detailTiling.value).toBe(12);
 		expect(material.uniforms.detailFadeNear.value).toBe(10);
 		expect(material.uniforms.detailFadeFar.value).toBe(50);
+		const detailTexture = material.uniforms.detailTexture.value as DataTexture;
+		expect([...detailTexture.image.data.slice(0, 4)]).toEqual([
+			0x00, 0xff, 0x00, 0x80,
+		]);
 		expect(material.fragmentShader).toContain(
-			"return mix(baseColor, detailColor.rgb, clamp(detailColor.a * detailDepthFade(), 0.0, 1.0));",
+			"float sourceAlpha = clamp(detailColor.a * detailDepthFade(), 0.0, 1.0);",
+		);
+		expect(material.fragmentShader).toContain(
+			"return mix(baseColor, detailColor.rgb, sourceAlpha);",
 		);
 		expect(material.userData.holtburgerMaterial).toMatchObject({
 			detailTextureAssetId: "surface-texture/05001786",
 			detailEnabled: true,
 		});
 		expect(cache.getStats().textureSamplingPolicySamples).toContain(
-			"wrap=repeat/repeat;filter=linear/linear/linear;color=srgb;aniso=1;mips=on;flipY=off",
+			"wrap=repeat/repeat;filter=linear/linear/linear;color=none;aniso=1;mips=on;flipY=off",
 		);
 		cache.dispose();
 	});
@@ -310,6 +325,7 @@ function createRegionRenderProfilePayload(): PreparedAssetPayload {
 
 function createSurfaceTexturePayload(
 	selectedRenderSurfaceId: number,
+	renderSurfaceIds: readonly number[] = [selectedRenderSurfaceId],
 ): PreparedAssetPayload {
 	return {
 		kind: "surface-texture",
@@ -320,10 +336,12 @@ function createSurfaceTexturePayload(
 		textureType: 0,
 		unknown: 0,
 		selectedRenderSurfaceId,
+		renderSurfaceIds: [...renderSurfaceIds],
 		dependencies: {
-			renderSurfaceAssetIds: [
-				`render-surface/${selectedRenderSurfaceId.toString(16).padStart(8, "0")}`,
-			],
+			renderSurfaceAssetIds: renderSurfaceIds.map(
+				(renderSurfaceId) =>
+					`render-surface/${renderSurfaceId.toString(16).padStart(8, "0")}`,
+			),
 		},
 	};
 }
@@ -331,8 +349,9 @@ function createSurfaceTexturePayload(
 function createRenderSurfacePayload(
 	renderSurfaceId: number,
 	formatRaw = 0x14,
+	options: { sourceBytes?: Uint8Array } = {},
 ): PreparedAssetPayload {
-	const sourceBytes = createRenderSurfaceBytes(formatRaw);
+	const sourceBytes = options.sourceBytes ?? createRenderSurfaceBytes(formatRaw);
 	return {
 		kind: "render-surface",
 		sourceAssetKind: "render-surface",

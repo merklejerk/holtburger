@@ -315,6 +315,7 @@ describe("asset response dependencies", () => {
 					textureType: 1,
 					unknown: 0,
 					selectedRenderSurfaceId: 0x06000010,
+					renderSurfaceIds: [0x06000010],
 					dependencies: {
 						renderSurfaceAssetIds: ["render-surface/06000010"],
 					},

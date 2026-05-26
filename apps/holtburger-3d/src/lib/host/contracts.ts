@@ -871,6 +871,7 @@ export const surfaceTexturePayloadDtoSchema = z.object({
 	textureType: z.number().int().nonnegative(),
 	unknown: z.number().int(),
 	selectedRenderSurfaceId: z.number().int().nonnegative().nullable(),
+	renderSurfaceIds: z.array(z.number().int().nonnegative()),
 	dependencies: z.object({
 		renderSurfaceAssetIds: z.array(z.string().min(1)),
 	}),

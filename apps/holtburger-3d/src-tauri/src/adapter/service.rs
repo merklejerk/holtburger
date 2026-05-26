@@ -795,6 +795,15 @@ mod tests {
             u64::from(0x060041c0u32)
         );
         assert_eq!(
+            asset.payload["renderSurfaceIds"]
+                .as_array()
+                .expect("surface texture route should expose source-level ids"),
+            &[
+                serde_json::json!(0x060041bfu32),
+                serde_json::json!(0x060041c0u32)
+            ]
+        );
+        assert_eq!(
             asset.payload["dependencies"]["renderSurfaceAssetIds"]
                 .as_array()
                 .expect("surface texture route should expose dependency ids"),

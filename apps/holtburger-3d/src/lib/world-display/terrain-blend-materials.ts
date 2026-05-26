@@ -350,7 +350,7 @@ function selectLandscapeDetail(
 function resolveTerrainTexture(options: {
 	textureAssetId: string;
 	wrap: TextureSamplingPolicy["wrapS"];
-	role: "color" | "mask";
+	role: "color" | "mask" | "detail";
 	assetState: AssetChannelState;
 	materialResourceCache: WorldMaterialResourceCache;
 	diagnostics: string[];
@@ -368,6 +368,7 @@ function resolveTerrainTexture(options: {
 	const renderSurface = getSelectedRenderSurface(
 		options.assetState,
 		surfaceTexture,
+		options.role,
 	);
 	if (!renderSurface) {
 		options.diagnostics.push(
@@ -385,7 +386,10 @@ function resolveTerrainTexture(options: {
 			...samplingPolicy,
 			wrapS: options.wrap,
 			wrapT: options.wrap,
-			colorSpace: options.role === "mask" ? "none" : samplingPolicy.colorSpace,
+			colorSpace:
+				options.role === "mask" || options.role === "detail"
+					? "none"
+					: samplingPolicy.colorSpace,
 		},
 	});
 }
@@ -401,13 +405,46 @@ function getSurfaceTexture(
 function getSelectedRenderSurface(
 	assetState: AssetChannelState,
 	surfaceTexture: PreparedSurfaceTexturePayload,
+	role: "color" | "mask" | "detail",
 ): PreparedRenderSurfacePayload | null {
-	if (surfaceTexture.selectedRenderSurfaceId === null) {
-		return null;
+	const renderSurfaceIds =
+		role === "detail"
+			? preferredDetailRenderSurfaceIds(surfaceTexture)
+			: preferredRenderSurfaceIds(surfaceTexture);
+	for (const renderSurfaceId of renderSurfaceIds) {
+		const assetId = `render-surface/${formatHex32(renderSurfaceId)}`;
+		const record = assetState.preparedByAssetId[assetId];
+		if (record?.payload.kind === "render-surface") {
+			return record.payload;
+		}
 	}
-	const assetId = `render-surface/${formatHex32(surfaceTexture.selectedRenderSurfaceId)}`;
-	const record = assetState.preparedByAssetId[assetId];
-	return record?.payload.kind === "render-surface" ? record.payload : null;
+	return null;
+}
+
+function preferredDetailRenderSurfaceIds(
+	surfaceTexture: PreparedSurfaceTexturePayload,
+): number[] {
+	const sourceIds = surfaceTexture.renderSurfaceIds;
+	const fallbackIds =
+		surfaceTexture.selectedRenderSurfaceId === null
+			? []
+			: [surfaceTexture.selectedRenderSurfaceId];
+	if (sourceIds.length <= 1) {
+		return [...sourceIds, ...fallbackIds];
+	}
+	const highDetailDroppedIds = [sourceIds[1], ...sourceIds.slice(2), sourceIds[0]]
+		.filter((renderSurfaceId): renderSurfaceId is number => renderSurfaceId !== undefined);
+	return [...highDetailDroppedIds, ...fallbackIds];
+}
+
+function preferredRenderSurfaceIds(
+	surfaceTexture: PreparedSurfaceTexturePayload,
+): number[] {
+	const fallbackIds =
+		surfaceTexture.selectedRenderSurfaceId === null
+			? []
+			: [surfaceTexture.selectedRenderSurfaceId];
+	return [...fallbackIds, ...surfaceTexture.renderSurfaceIds];
 }
 
 function decodeTerrainCodes(pcode: number): [number, number, number, number] {
@@ -697,7 +734,8 @@ float detailDepthFade() {
 
 vec3 applyDetailOverlay(vec3 baseColor) {
 	vec4 detailColor = texture2D(detailTexture, vUv * detailTiling);
-	return mix(baseColor, detailColor.rgb, clamp(detailColor.a * detailDepthFade(), 0.0, 1.0));
+	float sourceAlpha = clamp(detailColor.a * detailDepthFade(), 0.0, 1.0);
+	return mix(baseColor, detailColor.rgb, sourceAlpha);
 }
 
 void main() {

@@ -34,6 +34,7 @@ describe("asset cache policy", () => {
 		expect(plan.retainedAssetIds).toEqual([
 			"gfx-obj/01000001",
 			"landblock/0102ffff/outdoor",
+			"region-render-profile/1",
 			"setup-model/02000001",
 			"terrain-material/1",
 		]);
@@ -68,6 +69,7 @@ describe("asset cache policy", () => {
 			"gfx-obj/01000001",
 			"landblock/0102ffff/outdoor",
 			"landblock/016cffff/outdoor",
+			"region-render-profile/1",
 			"setup-model/02000001",
 			"terrain-material/1",
 		]);

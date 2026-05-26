@@ -238,6 +238,7 @@ function createSurfaceTexturePayload(
 		textureType: 0,
 		unknown: 0,
 		selectedRenderSurfaceId,
+		renderSurfaceIds: selectedRenderSurfaceId === null ? [] : [selectedRenderSurfaceId],
 		dependencies: {
 			renderSurfaceAssetIds:
 				selectedRenderSurfaceId === null

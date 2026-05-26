@@ -15,10 +15,15 @@ export type RegionDetailRoleKind =
 	| "environment"
 	| "object";
 
+export type RegionDetailBlendMode = "src-alpha" | "dst-color";
+type RegionDetailFadeMode = "distance" | "constant";
+
 export interface ResolvedRegionDetailOverlay {
 	regionNumber: number;
 	profileAssetId: string;
 	role: PreparedRegionDetailRole;
+	blendMode: RegionDetailBlendMode;
+	fadeMode: RegionDetailFadeMode;
 	texture: Texture;
 	signature: string;
 }
@@ -38,6 +43,11 @@ export function resolveRegionDetailOverlay(options: {
 	reportDiagnostic: (message: string) => void;
 }): ResolvedRegionDetailOverlay | null {
 	const normalizedRegionNumber = Math.trunc(options.regionNumber);
+	const blendMode = regionDetailBlendModeForRole(options.roleKind);
+	if (!blendMode) {
+		return null;
+	}
+	const fadeMode = regionDetailFadeModeForRole(options.roleKind);
 	const profileAssetId = `region-render-profile/${normalizedRegionNumber}`;
 	const profileRecord = options.assetState.preparedByAssetId[profileAssetId];
 	const profile =
@@ -89,6 +99,8 @@ export function resolveRegionDetailOverlay(options: {
 				regionNumber: normalizedRegionNumber,
 				profileAssetId,
 				role,
+				blendMode,
+				fadeMode,
 				texture,
 				signature: describeRegionDetailOverlaySignature(
 					normalizedRegionNumber,
@@ -115,7 +127,8 @@ export function describeRegionDetailRoleSignature(options: {
 		profile?.regionNumber === normalizedRegionNumber
 			? profile.detailRoles[options.roleKind]
 			: null;
-	return role
+	const blendMode = regionDetailBlendModeForRole(options.roleKind);
+	return role && blendMode
 		? describeRegionDetailOverlaySignature(
 				normalizedRegionNumber,
 				options.roleKind,
@@ -161,6 +174,12 @@ function createRegionDetailOverlayMaterial(
 		shader.uniforms.holtburgerRegionDetailFadeFar = {
 			value: overlay.role.fadeFar,
 		};
+		shader.uniforms.holtburgerRegionDetailBlendMode = {
+			value: overlay.blendMode === "dst-color" ? 1 : 0,
+		};
+		shader.uniforms.holtburgerRegionDetailFadeMode = {
+			value: overlay.fadeMode === "distance" ? 1 : 0,
+		};
 		shader.fragmentShader = shader.fragmentShader.replace(
 			"void main() {",
 			`${regionDetailUniformDeclarations()}\nvoid main() {`,
@@ -182,6 +201,8 @@ function createRegionDetailOverlayMaterial(
 			tiling: overlay.role.tiling,
 			fadeNear: overlay.role.fadeNear,
 			fadeFar: overlay.role.fadeFar,
+			blendMode: overlay.blendMode,
+			fadeMode: overlay.fadeMode,
 		},
 	};
 	return clone;
@@ -224,6 +245,7 @@ function resolveRegionDetailTexture(options: {
 			...samplingPolicy,
 			wrapS: "repeat",
 			wrapT: "repeat",
+			colorSpace: "none",
 		},
 	});
 	if (!texture) {
@@ -246,12 +268,31 @@ function getSelectedRenderSurface(
 	assetState: AssetChannelState,
 	surfaceTexture: PreparedSurfaceTexturePayload,
 ): PreparedRenderSurfacePayload | null {
-	if (surfaceTexture.selectedRenderSurfaceId === null) {
-		return null;
+	const renderSurfaceIds = preferredDetailRenderSurfaceIds(surfaceTexture);
+	for (const renderSurfaceId of renderSurfaceIds) {
+		const assetId = `render-surface/${formatHex32(renderSurfaceId)}`;
+		const record = assetState.preparedByAssetId[assetId];
+		if (record?.payload.kind === "render-surface") {
+			return record.payload;
+		}
 	}
-	const assetId = `render-surface/${formatHex32(surfaceTexture.selectedRenderSurfaceId)}`;
-	const record = assetState.preparedByAssetId[assetId];
-	return record?.payload.kind === "render-surface" ? record.payload : null;
+	return null;
+}
+
+function preferredDetailRenderSurfaceIds(
+	surfaceTexture: PreparedSurfaceTexturePayload,
+): number[] {
+	const sourceIds = surfaceTexture.renderSurfaceIds;
+	const fallbackIds =
+		surfaceTexture.selectedRenderSurfaceId === null
+			? []
+			: [surfaceTexture.selectedRenderSurfaceId];
+	if (sourceIds.length <= 1) {
+		return [...sourceIds, ...fallbackIds];
+	}
+	const highDetailDroppedIds = [sourceIds[1], ...sourceIds.slice(2), sourceIds[0]]
+		.filter((renderSurfaceId): renderSurfaceId is number => renderSurfaceId !== undefined);
+	return [...highDetailDroppedIds, ...fallbackIds];
 }
 
 function describeRegionDetailOverlaySignature(
@@ -267,7 +308,27 @@ function describeRegionDetailOverlaySignature(
 		role.tiling,
 		role.fadeNear,
 		role.fadeFar,
+		regionDetailBlendModeForRole(roleKind) ?? "disabled",
+		regionDetailFadeModeForRole(roleKind),
 	].join(":");
+}
+
+function regionDetailBlendModeForRole(
+	roleKind: RegionDetailRoleKind,
+): RegionDetailBlendMode | null {
+	if (roleKind === "landscape") {
+		return "src-alpha";
+	}
+	if (roleKind === "building" || roleKind === "environment") {
+		return "dst-color";
+	}
+	return null;
+}
+
+function regionDetailFadeModeForRole(
+	roleKind: RegionDetailRoleKind,
+): RegionDetailFadeMode {
+	return roleKind === "landscape" ? "distance" : "constant";
 }
 
 function regionDetailUniformDeclarations(): string {
@@ -276,6 +337,8 @@ uniform sampler2D holtburgerRegionDetailMap;
 uniform float holtburgerRegionDetailTiling;
 uniform float holtburgerRegionDetailFadeNear;
 uniform float holtburgerRegionDetailFadeFar;
+uniform int holtburgerRegionDetailBlendMode;
+uniform int holtburgerRegionDetailFadeMode;
 `;
 }
 
@@ -289,15 +352,34 @@ function regionDetailFragmentChunk(): string {
 		0.0,
 		1.0
 	);
+	if (holtburgerRegionDetailFadeMode == 0) {
+		holtburgerRegionDetailFade = 1.0;
+	}
 	vec4 holtburgerRegionDetailColor = texture2D(
 		holtburgerRegionDetailMap,
 		vMapUv * holtburgerRegionDetailTiling
 	);
-	diffuseColor.rgb = mix(
-		diffuseColor.rgb,
-		holtburgerRegionDetailColor.rgb,
-		clamp(holtburgerRegionDetailColor.a * holtburgerRegionDetailFade, 0.0, 1.0)
-	);
+	float holtburgerRegionDetailWeight = holtburgerRegionDetailFade;
+	vec3 holtburgerRegionDetailTarget = holtburgerRegionDetailColor.rgb;
+	if (holtburgerRegionDetailBlendMode == 1) {
+		float holtburgerRegionDetailSourceAlpha = clamp(
+			holtburgerRegionDetailColor.a * holtburgerRegionDetailWeight,
+			0.0,
+			1.0
+		);
+		diffuseColor.rgb = clamp(
+			diffuseColor.rgb *
+				(holtburgerRegionDetailColor.rgb + (1.0 - holtburgerRegionDetailSourceAlpha)),
+			0.0,
+			1.0
+		);
+	} else {
+		diffuseColor.rgb = mix(
+			diffuseColor.rgb,
+			holtburgerRegionDetailTarget,
+			clamp(holtburgerRegionDetailWeight, 0.0, 1.0)
+		);
+	}
 #endif
 `;
 }

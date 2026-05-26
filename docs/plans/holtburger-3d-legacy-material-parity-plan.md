@@ -2253,16 +2253,19 @@ Decisions:
 - No backwards-compatible `render-texture/{did}` material route was kept. The
   old name encoded the wrong model, and retaining both routes would fragment the
   asset graph for no useful runtime behavior.
-- `SurfaceTexture` payload dependencies now include only the selected
-  render-surface ID. The preferred selection is the retail high-detail source;
-  availability fallback is app-local DTO policy because the repo-local HBA is
-  not a complete retail DAT.
-- The renderer does not scan source levels or know which source-level index is
-  high detail. It renders or falls back based on the single `RenderSurface`
-  provided by the DTO.
+- `SurfaceTexture` payload dependencies include available authored source-level
+  render-surface IDs. The preferred `selectedRenderSurfaceId` remains the
+  retail high-detail source for ordinary material paths; availability fallback
+  is app-local DTO policy because the repo-local HBA is not a complete retail
+  DAT.
+- Ordinary material paths still render or fall back based on
+  `selectedRenderSurfaceId`. Detail-overlay paths may inspect the preserved
+  source-level list because retail `ImgTex::GetSurfaceDID` chooses source 1
+  when high detail is dropped.
 - `selectedRenderSurfaceId: null` is the explicit DTO shape for an unresolved
-  or unavailable `SurfaceTexture` source. This keeps the one-selected-source
-  contract intact without fabricating an empty candidate list.
+  or unavailable `SurfaceTexture` source. This keeps the selected-source
+  contract intact while still preserving the authored source-level list for
+  diagnostics and detail-overlay source selection.
 - Direct-color selected surfaces continue to generate GPU mips when the active
   sampler policy requests mips, matching the retail `D3DXFilterTexture` shape.
 - Compressed selected surfaces keep the explicit Phase 8.1 non-mip fallback
@@ -2294,14 +2297,16 @@ Cleanup targets:
 - Some diagnostic strings still use the shorthand "tex" in compact debug output.
   They point at `surfaceTextureAssetIds` now, but the UI label can be polished
   when the debug panel gets another pass.
-- The current DTO exposes the highest available retail-preferred source level.
-  Add an explicit lower-detail browser/client setting only when we decide how to
-  expose retail `EnvironmentTextureDetail` or high-detail-drop behavior.
+- The current DTO exposes the highest available retail-preferred source level
+  plus the authored source-level list. Add an explicit lower-detail
+  browser/client setting only when we decide how to expose retail
+  `EnvironmentTextureDetail` or high-detail-drop behavior outside detail
+  overlays.
 - True `0x15` `RenderTexture` support remains deferred until modern material or
   UI texture work needs it.
-- The material-construction path now owns more source selection and fallback
-  logic. If Phase 9 adds terrain source selection, extract a small shared
-  source-selection helper rather than duplicating the rules.
+- Detail terrain and broad region overlays now duplicate the small
+  high-detail-drop source ordering rule. Extract a shared helper if another
+  render path needs the same rule.
 
 Legacy shims:
 
@@ -3019,15 +3024,177 @@ Progress:
   profile's surface/render/palette dependencies.
 - Centralized the frontend route formatter for `region-render-profile/{region}`
   next to terrain-material formatting to avoid future string-template drift.
+- Retail screenshot comparison showed the initial broad overlay shader was using
+  the wrong blend semantics: it treated detail texture alpha as a decal mask and
+  lerped toward the detail texture color, which washed building surfaces.
+- Decompile audit confirmed `BlendMode` values: landscape detail uses
+  `BLEND_SRCALPHA`/`BLEND_INVSRCALPHA`, while building and environment detail
+  use `BLEND_DSTCOLOR`/`BLEND_INVSRCALPHA` in the multipass path. Normal retail
+  `SmartBox::SetDetailTexturing` calls pass object detail disabled.
+- Course correction: broad detail overlays now use role-specific shader policy.
+  Landscape uses an alpha-style blend driven by the renderer fade value rather
+  than detail texture alpha; building and environment use a destination-color
+  modulation approximation; object detail is disabled pending evidence of a
+  normal retail path that enables it.
+- Follow-up correction: the first role-aware pass still applied the landscape
+  distance fade to building/environment overlays. Retail built-mesh detail uses
+  fixed-function detail UVs and current/source alpha rather than camera-distance
+  fade, so building/environment overlays now use constant contribution.
+- Follow-up correction: direct `base * detail.rgb` modulation made midpoint-gray
+  detail textures darken the whole surface. Building/environment modulation now
+  treats midpoint gray as neutral by applying a 2x detail factor before
+  multiplying the base color.
+- Follow-up correction: the browser was uploading region detail textures with
+  the default color-texture sampling policy, which can sRGB-decode midpoint gray
+  into a dark linear value. Detail textures are fixed-function modulation data,
+  so region detail sampling now uses no color-space conversion.
+- Follow-up correction: the 2x modulation approximation still did not match the
+  retail multipass blend. `ACRender::SetDetailSurfaceInternal(0)` sets the
+  detail texture as stage 0, then building/environment draws use
+  `BLEND_DSTCOLOR` plus `BLEND_INVSRCALPHA`, so the browser wrapper now applies
+  `base * (detail.rgb + (1 - detail.a))` for those roles. This preserves the
+  additive-looking contribution from low-alpha detail texels instead of forcing
+  the whole surface through a dark modulation target.
+- Follow-up correction: landscape terrain had the inverse problem after the
+  broad-overlay tuning. Retail landscape detail uses `BLEND_SRCALPHA` plus
+  `BLEND_INVSRCALPHA`, and the detail redraw's source alpha is the detail
+  texture alpha modulated by the 10-50m vertex fade. The terrain shader now
+  applies `mix(base, detail.rgb, detail.a * depthFade)` again instead of
+  replacing grass with the grayscale detail texture at full near-camera weight.
+- Rejected correction: forcing detail-texture anisotropy to 1 was not backed by
+  the decompile. `SetDetailSurfaceInternal` requests linear detail filtering,
+  but `RenderDeviceD3D::SetSamplerFilterMode` promotes linear min/mag filtering
+  to anisotropic when `Render.TextureFiltering == Anisotropic`. Keep the
+  fixed-function evidence scoped to wrap mode, color-space treatment, blend
+  state, source alpha, and the selected `SurfaceTexture` LoD source.
+- Follow-up correction: `SurfaceTexture.render_surface_ids` are authored source
+  levels, not GPU mip levels. `ImgTex::GetSurfaceDID` selects source 0 normally
+  and source 1 when `Render::ShouldDropHighDetail()` is true; that predicate is
+  true whenever the high-detail cache is unavailable or
+  `EnvironmentTextureDetail` is nonzero. Retail quality presets 4 and 5 set
+  `EnvironmentTextureDetail = 1`, so the browser now carries all surface source
+  IDs through the DTO and resolves detail overlays through the source-1 path
+  when present. This targets the distant grain mismatch without changing
+  sampler filtering away from retail's anisotropic-capable linear setup.
 
 Cleanup targets and follow-up debt:
 
-- Re-test the toggle in a real scene after the planner fix. The old diagnostics
-  should disappear or shift to more specific missing surface/render-resource
-  diagnostics.
-- If the toggle still has no visible effect with profiles loaded, add a
+- Re-test the roof and grass comparison scenes after the exact
+  destination-color blend, landscape source-alpha blend, fade-mode, and detail
+  color-space corrections. The expected improvement is preserved base stone and
+  grass color with stable gritty contrast rather than a pale, gray, dark, or
+  camera-ramped overlay.
+- Verify whether landscape should use distance fade in browser parity. The
+  decompile has `noFadeDetail = 1` for one dynamic polygon path, while landscape
+  draw helpers still compute 10-50 meter alpha in other paths.
+- If visible differences remain after the role-aware blend correction, add a
   temporary visual debug mode that exaggerates detail contribution or renders
-  detail texture alpha directly. That should happen before Phase 11.
+  detail texture channels directly before Phase 11.
+
+### Phase 10.8: Rust-Generated Compressed Texture Mip Chains
+
+Goal: match retail compressed texture mip behavior before high-res replacement
+work changes the render-surface source pipeline.
+
+- Add a Rust-side texture preparation path for DXT `RenderSurface` payloads used
+  by `apps/holtburger-3d`.
+- Split render-surface metadata from upload-ready texture data. Keep
+  `render-surface/{id}` as the DAT `RenderSurface` metadata/source-facts route,
+  and introduce a separate render-prepared texture asset route for byte-heavy
+  upload payloads.
+- Define a prepared texture request identity that includes at least
+  `renderSurfaceId`, the renderer-requested output format, usage, mip policy,
+  color-space/data mode, alpha policy if needed, and selected source
+  version/hash. This keeps generated mip chains, raw diagnostics, and future
+  high-res or indexed-color prepared textures from fragmenting the
+  `RenderSurface` metadata route.
+- Keep destination-format policy in the renderer/frontend. The frontend should
+  derive the prepared-texture output contract from WebGL capabilities, material
+  usage, and user texture-filtering settings; Rust should fulfill that explicit
+  contract or return a typed unsupported-preparation error. Do not let the Rust
+  backend silently choose renderer policy.
+- Allow explicit prepared-texture output profiles such as compressed-native
+  DXT with retail-capped mips, RGBA8 fallback with generated mips, R8/linear
+  data for masks, or raw-source diagnostics. If an `auto` profile is ever
+  added, the resolved output profile must be returned in the response and be
+  part of the cache identity.
+- Preserve the retail ordering: first select the `SurfaceTexture` source level
+  using the `ImgTex::GetSurfaceDID` policy, then generate GPU-style mips from
+  that selected render surface.
+- Generate mip levels for `PFID_DXT1`, `PFID_DXT3`, and `PFID_DXT5` in Rust,
+  matching retail's `ImgTex::CreateD3DTexture` shape: create a capped mip chain
+  from the selected image and filter lower levels rather than treating
+  `SurfaceTexture.render_surface_ids` as mips.
+- Choose an explicit DXT encode/downsample implementation with deterministic
+  tests. Do not invent new package versions manually; use the Rust package tool
+  to resolve dependency versions if a crate is added.
+- Add a Tauri binary prepared-texture payload contract that carries compressed
+  mip levels as separate binary sections, with per-level width, height, format,
+  and byte-length metadata. The existing `render-surface/{id}` route should not
+  grow derived mip-chain sections.
+- Generate and serve compressed mip chains only for concrete prepared-texture
+  assets requested by the frontend. Do not generate mips while parsing
+  `SurfaceTexture`, while serving metadata-only `render-surface/{id}`, or for
+  every authored source-level ID merely because the source list exists.
+- Tighten graph hydration so `SurfaceTexture` dependency walking requests the
+  render surface chosen by the active source-selection policy. The authored
+  `renderSurfaceIds` list should remain available for diagnostics and fallback
+  ordering, but it should not force all source LoD textures to be loaded or
+  mip-compressed.
+- Update material/terrain/detail texture resolution so it depends on the
+  prepared texture asset for upload data, while still using `render-surface`
+  metadata for palette defaults, dimensions, format classification, and
+  diagnostics.
+- Update the Three.js upload path to pass all supplied compressed mip levels to
+  `CompressedTexture`. Keep the current single-level compressed fallback only
+  for unsupported formats, generation failures, or diagnostics mode.
+- Preserve the existing direct-color generated-mip path and indexed/palette
+  nearest/no-mip paths unless their callers opt into the prepared-texture route.
+  This phase is primarily about compressed visual textures, but the request
+  contract should be general enough to move direct-color conversions out of the
+  frontend later.
+- Add diagnostics and debug counters for compressed mip generation: source
+  format, source dimensions, generated level count, estimated byte size, and
+  fallback reason.
+- Validate against the current distant-grain retail comparison scenes, including
+  terrain/detail textures and distant building/environment surfaces.
+
+Decompile evidence:
+
+- Retail `ImgTex::CreateD3DTexture` computes a mip level count from the selected
+  image dimensions, caps it at four levels, creates a D3D texture with that
+  level count, loads level 0 via `D3DXLoadSurfaceFromSurface`, then calls
+  `D3DXFilterTexture(..., -1, 0x70005)`.
+- `PixelFormatDesc` includes DXT1/DXT3/DXT5 as D3D/FourCC formats, so this path
+  applies to compressed render surfaces as well as direct-color surfaces.
+- Three/WebGL cannot synthesize compressed mip levels from a single compressed
+  base image. Therefore parity requires either Rust-generated compressed mip
+  levels or a deliberate decode-to-RGBA fallback; this phase chooses the
+  compressed-chain route to preserve GPU memory behavior closer to retail.
+
+Expected effect: distant compressed textures stop aliasing/graining like
+single-level WebGL uploads and more closely match retail's D3DX-filtered mip
+chain, without conflating source LoD selection with GPU mip levels or turning
+`render-surface/{id}` into a catch-all derived texture transport.
+
+Cleanup targets and follow-up debt:
+
+- If compressed mip encoding quality is visibly worse than retail D3DX output,
+  compare the chosen encoder/downsample method against a decode-to-RGBA
+  generated-mip fallback before broadening the implementation.
+- If runtime generation cost is measurable during scene hydration, add a bounded
+  Rust-side prepared-texture cache keyed by render-surface ID, source byte hash,
+  requested output format, usage, mip policy, color-space/data mode, alpha
+  policy, dimensions, and source format.
+- Migrate frontend pixel-format conversion code into prepared-texture handlers
+  only after the prepared texture route proves stable. The migration should move
+  AC pixel decoding and upload-byte packing to Rust while leaving Three.js
+  texture object creation and sampler state in the frontend.
+- Revisit the Phase 8.2 compressed `mipFilter: "none"` browser fallback once
+  prepared compressed mip-chain assets are available in real app payloads.
+- Decide whether the current raw `sourceBytes` section remains on
+  `render-surface/{id}` for diagnostics, moves to a separate raw-source route,
+  or is retained only behind a debug/inspection request path.
 
 ### Phase 11: Optional High-Res JPEG Replacement
 
@@ -3130,7 +3297,8 @@ Remaining planned parity phases:
 4. Phase 10.6.5 profile migration validation and validation gate cleanup.
 5. Phase 10.7 broad detail overlay application.
 6. Phase 10.7.5 broad detail visual validation.
-7. Phase 11 optional high-res JPEG replacement.
+7. Phase 10.8 Rust-generated compressed texture mip chains.
+8. Phase 11 optional high-res JPEG replacement.
 
 Recommended follow-up phases after the terrain/detail pass:
 

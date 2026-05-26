@@ -325,6 +325,7 @@ function createSurfaceTextureRecord(assetId: string): PreparedAssetRecord {
 		textureType: 0,
 		unknown: 0,
 		selectedRenderSurfaceId: 0x06000001,
+		renderSurfaceIds: [0x06000001],
 		dependencies: {
 			renderSurfaceAssetIds: ["render-surface/06000001"],
 		},

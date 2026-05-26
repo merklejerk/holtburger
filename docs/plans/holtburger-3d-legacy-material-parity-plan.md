@@ -2744,6 +2744,81 @@ objects can gain the high-frequency detail layer visible in the retail client
 without fragmenting base material caches or pretending detail textures are part
 of pcode terrain materials.
 
+Progress:
+
+- Landed the landscape terrain slice of the detail path in
+  `terrain-blend-materials.ts`. The terrain shader now resolves the
+  role-indexed landscape detail layer from `terrain_desc[0]`, samples it with
+  wrapped linear texture policy, derives detail UVs from base terrain UVs times
+  `DetailTexTiling`, and applies it after base terrain, terrain overlays, and
+  roads are blended.
+- The detail overlay uses retail depth fade thresholds: fully available before
+  view-space z `10`, linearly fading through `10..50`, and absent after `50`.
+  The Tauri terrain material DTO now emits those constants instead of placeholder
+  zeroes.
+- Detail is intentionally not part of the pcode/material identity. It is a
+  role-selected overlay resource on the terrain material boundary, matching the
+  retail `LScape::GenerateDetailSurface(0)` / `Render::SetLandscapeDetailSurface`
+  path rather than the base terrain texture selection path.
+- Added focused shader tests covering post-blend detail application, detail
+  tiling/fade uniforms, landscape-role texture selection, and wrapped linear
+  sampling.
+
+Decisions and course corrections:
+
+- Do not select the detail texture from the pcode base terrain layer. Retail
+  selects detail surfaces by terrain role index: landscape `0`, building `1`,
+  environment `2`, and object `3`. Using the currently selected base texture
+  would look plausible in many outdoor cases but would be wrong for retail
+  parity.
+- Use `mix(finalColor, detail.rgb, detail.a * depthFade)` for the browser
+  shader approximation. Retail applies a detail surface as a fixed-function
+  blend pass; the landscape multi-pass path uses SRCALPHA over INVSRCALPHA, and
+  the retail detail texture alpha is low, so this preserves the subtle observed
+  effect without folding detail into terrain alpha blending.
+- Keep Phase 10.5 terrain-only for now. Building, environment/interior, and
+  object detail roles need render-domain role propagation and material wrapping
+  work before they can share the same overlay policy cleanly.
+
+Cleanup/debt discovered:
+
+- The broad `npm run check` still fails on the pre-existing
+  `render-surface-texture-resources.ts` `PixelFormatGPU | null` typing issue.
+  This is unrelated to detail overlays, but it should be fixed before treating
+  frontend validation as a reliable gate again.
+- Static/interior/object material paths still report or ignore `Detail` surface
+  behavior. They need a shared detail-overlay wrapper/resource policy instead
+  of ad hoc shader edits in each render domain.
+- The detail approximation needs screenshot comparison against retail and a
+  debug intensity/toggle only if the real alpha-weighted effect proves too hard
+  to inspect during parity validation.
+
+### Phase 10.6: Detail Overlay Role Propagation and Validation
+
+Goal: finish the non-landscape detail roles and validate the terrain detail
+approximation before optional high-res replacement work.
+
+- Add renderer-local detail role metadata for building statics, environment and
+  interior cell geometry, and object/static renderables. The role assignment
+  must stay render-domain local and should not become a `CSurface` material
+  variant or pcode key.
+- Factor the terrain detail resource/shader policy into a reusable overlay
+  helper that can wrap or extend legacy material render paths without
+  fragmenting base material caches.
+- Wire role-indexed detail selection for building `terrain_desc[1]`,
+  environment `terrain_desc[2]`, and object `terrain_desc[3]`, including
+  diagnostics for missing assets, invalid tiling, unsupported render-surface
+  formats, disabled detail capability, and render domains that still lack role
+  metadata.
+- Capture before/after screenshots against the retail client for at least one
+  outdoor terrain view and one static/interior/object case. If the retail
+  fixed-function blend differs visibly from the current alpha-weighted mix,
+  update the shader approximation before moving on.
+
+Expected effect: detail overlays become a shared renderer capability with clear
+role ownership across terrain and non-terrain render domains, leaving Phase 11
+free to focus on high-res texture replacement rather than material graph debt.
+
 ### Phase 11: Optional High-Res JPEG Replacement
 
 Goal: support `PFID_CUSTOM_RAW_JPEG` render-surface replacement when an optional
@@ -2841,7 +2916,8 @@ Remaining planned parity phases:
 
 1. Phase 10.25 terrain blend parity hardening.
 2. Phase 10.5 legacy detail texture overlay.
-3. Phase 11 optional high-res JPEG replacement.
+3. Phase 10.6 detail overlay role propagation and validation.
+4. Phase 11 optional high-res JPEG replacement.
 
 Recommended follow-up phases after the terrain/detail pass:
 

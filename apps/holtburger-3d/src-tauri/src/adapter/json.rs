@@ -7,6 +7,8 @@ use holtburger_dat::file_type::{Palette, RenderSurface, SetupModel};
 use holtburger_dat::physics::BspNode;
 
 const RETAIL_HIGH_DETAIL_SURFACE_TEXTURE_SOURCE_LEVEL_INDEX: usize = 0;
+const RETAIL_DETAIL_FADE_NEAR: f32 = 10.0;
+const RETAIL_DETAIL_FADE_FAR: f32 = 50.0;
 
 pub fn serialize_setup_model_payload(setup_model: &SetupModel) -> serde_json::Value {
     serde_json::json!({
@@ -1076,8 +1078,8 @@ pub fn serialize_terrain_material_payload(
                     "textureAssetId": format_surface_texture_asset_id(terrain.detail_texture_id),
                     "textureDid": terrain.detail_texture_id,
                     "tiling": terrain.detail_tiling,
-                    "fadeNear": 0.0,
-                    "fadeFar": 0.0,
+                    "fadeNear": RETAIL_DETAIL_FADE_NEAR,
+                    "fadeFar": RETAIL_DETAIL_FADE_FAR,
                 })),
                 "colorVariation": serde_json::json!({
                     "minVertBright": terrain.min_vert_bright,

@@ -16,6 +16,10 @@ import {
 	deriveTerrainTileRenderChunk,
 	type RenderChunkPlacement,
 } from "./render-chunks";
+import {
+	buildTerrainMaterialResourcePlan,
+	type TerrainMaterialResourcePlan,
+} from "./terrain-materials";
 
 export interface TerrainSceneTile {
 	assetId: string;
@@ -25,6 +29,7 @@ export interface TerrainSceneTile {
 	isFocus: boolean;
 	chunkLocalOffset: { x: number; y: number; z: number };
 	mesh: PreparedTerrainMesh;
+	materialResources: TerrainMaterialResourcePlan;
 	dataSource: "repo-local-cell-landblock" | "generated-fallback" | "unknown";
 }
 
@@ -84,9 +89,11 @@ export function deriveTerrainSceneModel(
 	const tiles = Object.values(assetState.preparedByAssetId)
 		.flatMap((asset) => {
 			const terrainMesh = getTerrainMeshFromPreparedAsset(asset);
-			return terrainMesh ? [{ asset, terrainMesh }] : [];
+			return terrainMesh && asset.payload.kind === "landblock-outdoor"
+				? [{ asset, payload: asset.payload, terrainMesh }]
+				: [];
 		})
-		.map(({ asset, terrainMesh }) => {
+		.map(({ asset, payload, terrainMesh }) => {
 			const landblockId = terrainMesh.landblockId;
 			const renderChunk = deriveTerrainTileRenderChunk(landblockId);
 
@@ -98,6 +105,11 @@ export function deriveTerrainSceneModel(
 				isFocus: landblockId === focusLandblockId,
 				chunkLocalOffset: { x: 0, y: 0, z: 0 },
 				mesh: terrainMesh,
+				materialResources: buildTerrainMaterialResourcePlan({
+					assetState,
+					regionNumber: payload.regionNumber,
+					quads: terrainMesh.quads,
+				}),
 				dataSource: inferTerrainDataSource(asset),
 			};
 		})
@@ -117,13 +129,16 @@ export function deriveTerrainSceneModel(
 	const dataSourceText = describeTerrainDataSources(
 		tiles.map((tile) => tile.dataSource),
 	);
+	const materialText = describeTerrainMaterialResources(
+		tiles.map((tile) => tile.materialResources),
+	);
 
 	return {
 		focusLandblockId,
 		statusText: focusTile
 			? `Three.js is rendering ${tiles.length} cached outdoor landblock${tiles.length === 1 ? "" : "s"} around focus ${focusTile.label}.`
 			: `Three.js is waiting for the focus landblock ${formatLandblockLabel(focusLandblockId)} while ${tiles.length} neighbor tile${tiles.length === 1 ? " is" : "s are"} cached.`,
-		cacheText: `Terrain cache contains ${countPreparedTerrainAssets(assetState.preparedByAssetId)} prepared landblock payload${countPreparedTerrainAssets(assetState.preparedByAssetId) === 1 ? "" : "s"}.`,
+		cacheText: `Terrain cache contains ${countPreparedTerrainAssets(assetState.preparedByAssetId)} prepared landblock payload${countPreparedTerrainAssets(assetState.preparedByAssetId) === 1 ? "" : "s"}; ${materialText}`,
 		dataSourceText,
 		tiles,
 	};
@@ -151,12 +166,15 @@ function convertPreparedOutdoorTerrainPayload(
 			a: triangle.vertexIndices[0],
 			b: triangle.vertexIndices[1],
 			c: triangle.vertexIndices[2],
+			quadIndex: triangle.quadIndex,
+			triangleInQuad: triangle.triangleInQuad,
 			terrainType:
 				payload.terrain.quads.find(
 					(quad) => quad.quadIndex === triangle.quadIndex,
 				)?.pcode ?? 0,
 			averageHeight: triangle.averageHeight,
 		})),
+		quads: payload.terrain.quads,
 		minHeight: payload.terrain.minHeight,
 		maxHeight: payload.terrain.maxHeight,
 	};
@@ -197,6 +215,35 @@ function describeTerrainDataSources(
 	}
 
 	return "No terrain provenance is available yet.";
+}
+
+function describeTerrainMaterialResources(
+	materialResources: readonly TerrainMaterialResourcePlan[],
+): string {
+	if (materialResources.length === 0) {
+		return "no terrain material resources selected";
+	}
+	const statusCounts = materialResources.reduce<Record<string, number>>(
+		(counts, resources) => {
+			counts[resources.status] = (counts[resources.status] ?? 0) + 1;
+			return counts;
+		},
+		{},
+	);
+	const missingSurfaceTextures = materialResources.reduce(
+		(total, resources) => total + resources.missingSurfaceTextureAssetIds.length,
+		0,
+	);
+	const missingRenderSurfaces = materialResources.reduce(
+		(total, resources) => total + resources.missingRenderSurfaceAssetIds.length,
+		0,
+	);
+	const unsupportedRenderSurfaces = materialResources.reduce(
+		(total, resources) =>
+			total + resources.unsupportedRenderSurfaceAssetIds.length,
+		0,
+	);
+	return `terrain material prep ${JSON.stringify(statusCounts)}, missing surface textures ${missingSurfaceTextures}, missing render surfaces ${missingRenderSurfaces}, unsupported surfaces ${unsupportedRenderSurfaces}`;
 }
 
 function inferTerrainDataSource(

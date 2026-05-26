@@ -483,7 +483,7 @@ function describeTerrainSceneSignature(scene: TerrainSceneModel): string {
 		`focus=${scene.focusLandblockId ?? "none"}`,
 		...scene.tiles.map(
 			(tile) =>
-				`${tile.assetId}:${tile.landblockId}:${tile.renderChunk.chunkKey}:${tile.dataSource}`,
+				`${tile.assetId}:${tile.landblockId}:${tile.renderChunk.chunkKey}:${tile.dataSource}:${tile.materialResources.signature}`,
 		),
 	].join("|");
 }

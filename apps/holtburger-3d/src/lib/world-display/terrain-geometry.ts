@@ -5,14 +5,27 @@ import type { PreparedTerrainMesh } from "../assets/types";
 export function buildTerrainGeometry(
 	terrainMesh: PreparedTerrainMesh,
 ): BufferGeometry {
+	return buildDebugTerrainGeometry(terrainMesh);
+}
+
+export function buildDebugTerrainGeometry(
+	terrainMesh: PreparedTerrainMesh,
+): BufferGeometry {
 	const geometry = new BufferGeometry();
 	const positions: number[] = [];
 	const colors: number[] = [];
+	const terrainPcodes: number[] = [];
+	const terrainQuadIndices: number[] = [];
+	const terrainCornerCodes: number[] = [];
+	const quadsByIndex = new Map(
+		terrainMesh.quads.map((quad) => [quad.quadIndex, quad]),
+	);
 
 	for (const triangle of terrainMesh.triangles) {
 		const vertices = [triangle.a, triangle.b, triangle.c].map(
 			(index) => terrainMesh.vertices[index],
 		);
+		const quad = quadsByIndex.get(triangle.quadIndex) ?? null;
 		const color = buildTerrainColor(
 			terrainMesh,
 			triangle.terrainType,
@@ -22,6 +35,9 @@ export function buildTerrainGeometry(
 		for (const vertex of vertices) {
 			positions.push(vertex.x, vertex.z, -vertex.y);
 			colors.push(color.r, color.g, color.b);
+			terrainPcodes.push(quad?.pcode ?? triangle.terrainType);
+			terrainQuadIndices.push(triangle.quadIndex);
+			terrainCornerCodes.push(...(quad?.cornerTerrainCodes ?? [0, 0, 0, 0]));
 		}
 	}
 
@@ -32,6 +48,18 @@ export function buildTerrainGeometry(
 	geometry.setAttribute(
 		"color",
 		new BufferAttribute(new Float32Array(colors), 3),
+	);
+	geometry.setAttribute(
+		"terrainPcode",
+		new BufferAttribute(new Float32Array(terrainPcodes), 1),
+	);
+	geometry.setAttribute(
+		"terrainQuadIndex",
+		new BufferAttribute(new Float32Array(terrainQuadIndices), 1),
+	);
+	geometry.setAttribute(
+		"terrainCornerCodes",
+		new BufferAttribute(new Float32Array(terrainCornerCodes), 4),
 	);
 	geometry.computeVertexNormals();
 	return geometry;

@@ -2405,6 +2405,8 @@ Verification:
 
 ### Phase 9: Terrain Material Pipeline Prep
 
+Status: Implemented.
+
 Goal: introduce terrain-specific renderer boundaries before implementing terrain
 blending.
 
@@ -2427,6 +2429,98 @@ Completion criteria:
   `terrainType` field for material-ready rendering.
 - Phase 10 can add blending shaders/resources without refactoring terrain scene
   selection or geometry ownership.
+
+Progress:
+
+- Added an app-local terrain material resource planning module. It consumes the
+  prepared `terrain-material/{regionNumber}` table plus visible landblock quads,
+  summarizes referenced pcodes/terrain codes, and reports missing terrain
+  tables, missing `SurfaceTexture` dependencies, missing selected
+  `RenderSurface` dependencies, unsupported render-surface formats, absent
+  terrain alpha maps, and absent road alpha maps.
+- Extended the browser terrain scene model so each visible terrain tile carries
+  a `TerrainMaterialResourcePlan` alongside the existing debug mesh. This keeps
+  terrain material readiness scoped to the terrain renderer path instead of
+  leaking terrain concepts into normal `CSurface` material slots.
+- Preserved prepared terrain quads in the frontend `PreparedTerrainMesh` shape.
+  Triangle debug rendering still has a `terrainType` fallback field, but the
+  material-ready path now reads the original quad pcode/corner terrain codes
+  instead of deriving material identity from per-triangle debug color state.
+- Added terrain geometry attributes for `terrainPcode`, `terrainQuadIndex`, and
+  `terrainCornerCodes`. The current material still renders diagnostic vertex
+  colors, but Phase 10 can bind terrain shaders without rebuilding the scene
+  selection or geometry ownership path.
+- Included terrain material prep status in the terrain cache text and scene
+  signature so material readiness changes invalidate the rendered terrain scene
+  deterministically.
+
+Decisions:
+
+- Keep Phase 9 entirely app-local under `apps/holtburger-3d`. The host/content
+  side already exposes landblock quads and terrain material tables; this phase
+  only preserves and organizes those facts for Three.js.
+- Treat direct-color, compressed, and indexed render surfaces as terrain-capable
+  resource inputs for now. Phase 10 owns the actual shader/upload strategy and
+  can narrow or split those buckets if terrain blending needs specialized
+  handling.
+- Keep the old debug-color terrain material active until Phase 10 lands. Phase
+  9 is a boundary/readiness phase, not the visual terrain-material replacement.
+- Report absent alpha-map and road-map tables as diagnostics, not blockers.
+  Some regions or repo-local fixture profiles may be incomplete, and Phase 10
+  should decide which absences are fatal for a specific blend path.
+
+Course corrections:
+
+- The frontend was collapsing quad pcodes into triangle `terrainType` values in
+  `terrain-scene.ts`. That was sufficient for debug colors but too lossy for
+  terrain material parity. The quad records now survive into the render scene.
+- Terrain material readiness should not reuse `material-resources.ts` or
+  `MaterialAppearanceContext`. Terrain consumes pcodes, alpha maps, roads, and
+  detail roles rather than `GfxObj`/env-cell `CSurface` slots.
+
+Cleanup targets:
+
+- `PreparedTerrainTriangle.terrainType` remains as debug-color compatibility
+  state. Remove or rename it after Phase 10 stops using per-triangle debug hue
+  selection for normal terrain rendering.
+- Terrain diagnostics currently surface through compact terrain cache text and
+  the resource plan object. If the Debug panel gets structured renderer rows,
+  expose terrain material prep counts there instead of relying on a long status
+  string.
+- The old binary `prepared.terrainMesh.triangles` fallback path still fabricates
+  quad metadata from the debug terrain type because it predates structured
+  landblock terrain quads. Prefer the structured `landblockTerrain.*` payload
+  path for material work.
+
+Legacy shims:
+
+- Debug vertex-color terrain remains the visible renderer path. This is an
+  intentional fallback until Phase 10 replaces terrain color materials with a
+  GPU terrain blend.
+- Missing selected source surfaces still reflect the repo-local HBA/source-level
+  availability shim from Phase 8.2. Full retail DAT mounts should reduce those
+  diagnostics.
+
+Refinements to future steps:
+
+- Phase 10 can now focus on terrain shader/resource construction: pcode layer
+  decoding, texture/alpha/road resource binding, and fallback grouping when
+  browser texture-array limits are too low.
+- Phase 10 should consume `TerrainMaterialResourcePlan` rather than scanning
+  arbitrary prepared assets inside the renderer hot path.
+- Phase 10.5 should attach detail-overlay role selection to this terrain
+  material boundary rather than treating detail textures as extra
+  `CSurface`/material variants.
+- No immediate interim phase is needed before Phase 10. The known remaining
+  debt is contained: debug `terrainType` naming and compact diagnostics can be
+  cleaned while implementing the blend path.
+
+Verification:
+
+- `npm run test:ts -- terrain-materials terrain-geometry` passes from
+  `apps/holtburger-3d`.
+- `npm run check` passes from `apps/holtburger-3d`.
+- `npm run lint:ts` passes from `apps/holtburger-3d`.
 
 ### Phase 10: Terrain GPU Blend Path
 

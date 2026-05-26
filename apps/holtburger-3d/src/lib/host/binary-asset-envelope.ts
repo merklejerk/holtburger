@@ -225,6 +225,8 @@ function decodeBinarySection(
 				a,
 				b,
 				c,
+				quadIndex: terrainType,
+				triangleInQuad: 0,
 				terrainType,
 				averageHeight,
 			}),

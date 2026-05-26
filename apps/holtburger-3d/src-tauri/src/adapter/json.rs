@@ -330,6 +330,32 @@ pub fn failed_terrain_material_payload(
     })
 }
 
+pub fn failed_region_render_profile_payload(
+    region_number: u32,
+    error: anyhow::Error,
+) -> serde_json::Value {
+    let detail = format!("{error:#}");
+    let error_code = asset_cache_error_code(&error);
+    serde_json::json!({
+        "kind": "region-render-profile",
+        "residencyKind": "unknown",
+        "sourceAssetKind": "region-render-profile",
+        "regionNumber": region_number,
+        "detailRoles": {
+            "landscape": null,
+            "building": null,
+            "environment": null,
+            "object": null,
+        },
+        "dependencies": {
+            "surfaceTextureAssetIds": [],
+            "renderSurfaceAssetIds": [],
+            "paletteAssetIds": [],
+        },
+        "provenance": failed_provenance("region-render-profile", error_code, &detail),
+    })
+}
+
 pub fn failed_provenance(kind: &str, error_code: &str, detail: &str) -> serde_json::Value {
     serde_json::json!({
         "source": "app-local-stub",
@@ -1074,13 +1100,6 @@ pub fn serialize_terrain_material_payload(
                 "textureAssetId": format_surface_texture_asset_id(terrain.texture_id),
                 "textureDid": terrain.texture_id,
                 "tiling": terrain.tiling,
-                "detail": (terrain.detail_texture_id != 0).then(|| serde_json::json!({
-                    "textureAssetId": format_surface_texture_asset_id(terrain.detail_texture_id),
-                    "textureDid": terrain.detail_texture_id,
-                    "tiling": terrain.detail_tiling,
-                    "fadeNear": RETAIL_DETAIL_FADE_NEAR,
-                    "fadeFar": RETAIL_DETAIL_FADE_FAR,
-                })),
                 "colorVariation": serde_json::json!({
                     "minVertBright": terrain.min_vert_bright,
                     "maxVertBright": terrain.max_vert_bright,
@@ -1127,6 +1146,68 @@ pub fn serialize_terrain_material_payload(
             "detail": null
         }
     })
+}
+
+pub fn serialize_region_render_profile_payload(
+    profile: &ResolvedRegionRenderProfile,
+) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "region-render-profile",
+        "residencyKind": "unknown",
+        "sourceAssetKind": "region-render-profile",
+        "regionId": profile.region_id,
+        "regionNumber": profile.region_number,
+        "detailRoles": {
+            "landscape": serialize_detail_role(profile, ResolvedRegionDetailRoleKind::Landscape),
+            "building": serialize_detail_role(profile, ResolvedRegionDetailRoleKind::Building),
+            "environment": serialize_detail_role(profile, ResolvedRegionDetailRoleKind::Environment),
+            "object": serialize_detail_role(profile, ResolvedRegionDetailRoleKind::Object),
+        },
+        "dependencies": {
+            "surfaceTextureAssetIds": profile.surface_texture_ids.iter().map(|id| format_surface_texture_asset_id(*id)).collect::<Vec<_>>(),
+            "renderSurfaceAssetIds": [],
+            "paletteAssetIds": [],
+        },
+        "provenance": {
+            "source": "repo-local-hba",
+            "sourceAssetKind": "region-render-profile",
+            "errorCode": null,
+            "detail": null
+        }
+    })
+}
+
+fn serialize_detail_role(
+    profile: &ResolvedRegionRenderProfile,
+    role: ResolvedRegionDetailRoleKind,
+) -> serde_json::Value {
+    profile
+        .detail_roles
+        .iter()
+        .find(|entry| entry.role == role)
+        .and_then(|entry| {
+            (entry.detail_texture_id != 0).then(|| {
+                serde_json::json!({
+                    "role": region_detail_role_name(entry.role),
+                    "sourceTerrainDescIndex": entry.source_terrain_desc_index,
+                    "textureAssetId": format_surface_texture_asset_id(entry.detail_texture_id),
+                    "textureDid": entry.detail_texture_id,
+                    "tiling": entry.detail_tiling,
+                    "fadeNear": RETAIL_DETAIL_FADE_NEAR,
+                    "fadeFar": RETAIL_DETAIL_FADE_FAR,
+                })
+            })
+        })
+        .unwrap_or(serde_json::Value::Null)
+}
+
+fn region_detail_role_name(role: ResolvedRegionDetailRoleKind) -> &'static str {
+    match role {
+        ResolvedRegionDetailRoleKind::Landscape => "landscape",
+        ResolvedRegionDetailRoleKind::Building => "building",
+        ResolvedRegionDetailRoleKind::Environment => "environment",
+        ResolvedRegionDetailRoleKind::Object => "object",
+    }
 }
 
 pub fn serialize_prepared_bvh_node(node: &PreparedBvhNode) -> serde_json::Value {

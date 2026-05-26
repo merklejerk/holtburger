@@ -88,15 +88,11 @@ describe("buildTerrainMaterialResourcePlan", () => {
 		]);
 	});
 
-	it("does not block base terrain readiness on deferred detail texture resources", () => {
+	it("does not include region-profile detail textures in base terrain readiness", () => {
 		const state = createInitialAssetChannelState();
 		state.preparedByAssetId = indexByAssetId([
-			createRecord(
-				"terrain-material/1",
-				createTerrainMaterialPayload({
-					detailTextureAssetId: "surface-texture/05000020",
-				}),
-			),
+			createRecord("terrain-material/1", createTerrainMaterialPayload()),
+			createRecord("region-render-profile/1", createRegionRenderProfilePayload()),
 			createRecord(
 				"surface-texture/05000010",
 				createSurfaceTexturePayload(0x06000010),
@@ -153,9 +149,7 @@ function createRecord(
 	};
 }
 
-function createTerrainMaterialPayload(
-	options: { detailTextureAssetId?: string } = {},
-): PreparedAssetPayload {
+function createTerrainMaterialPayload(): PreparedAssetPayload {
 	return {
 		kind: "terrain-material",
 		sourceAssetKind: "terrain-material",
@@ -169,15 +163,6 @@ function createTerrainMaterialPayload(
 				textureAssetId: "surface-texture/05000010",
 				textureDid: 0x05000010,
 				tiling: 4,
-				detail: options.detailTextureAssetId
-					? {
-							textureAssetId: options.detailTextureAssetId,
-							textureDid: 0x05000020,
-							tiling: 8,
-							fadeNear: 10,
-							fadeFar: 50,
-						}
-					: null,
 				colorVariation: null,
 			},
 		],
@@ -205,10 +190,36 @@ function createTerrainMaterialPayload(
 			sizeBitMask: 1 << 28,
 		},
 		dependencies: {
-			surfaceTextureAssetIds: [
-				"surface-texture/05000010",
-				...(options.detailTextureAssetId ? [options.detailTextureAssetId] : []),
-			],
+			surfaceTextureAssetIds: ["surface-texture/05000010"],
+			renderSurfaceAssetIds: [],
+			paletteAssetIds: [],
+		},
+	};
+}
+
+function createRegionRenderProfilePayload(): PreparedAssetPayload {
+	return {
+		kind: "region-render-profile",
+		sourceAssetKind: "region-render-profile",
+		residencyKind: "unknown",
+		provenance: createProvenance("region-render-profile"),
+		regionNumber: 1,
+		detailRoles: {
+			landscape: {
+				role: "landscape",
+				sourceTerrainDescIndex: 0,
+				textureAssetId: "surface-texture/05000020",
+				textureDid: 0x05000020,
+				tiling: 8,
+				fadeNear: 10,
+				fadeFar: 50,
+			},
+			building: null,
+			environment: null,
+			object: null,
+		},
+		dependencies: {
+			surfaceTextureAssetIds: ["surface-texture/05000020"],
 			renderSurfaceAssetIds: [],
 			paletteAssetIds: [],
 		},

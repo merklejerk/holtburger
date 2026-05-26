@@ -31,7 +31,8 @@ pub use material_capabilities::{
 };
 pub use material_graph::{
     MaterialAppearanceInput, ResolvedAnimationPartChange, ResolvedMaterialRecipe,
-    ResolvedMaterialSlot, ResolvedMaterialSource, ResolvedSetupAppearance,
+    ResolvedMaterialSlot, ResolvedMaterialSource, ResolvedRegionDetailRole,
+    ResolvedRegionDetailRoleKind, ResolvedRegionRenderProfile, ResolvedSetupAppearance,
     ResolvedSetupAppearancePart, ResolvedSurfaceTexture, ResolvedTerrainAlphaMap,
     ResolvedTerrainMaterialTable, ResolvedTerrainMaterialType, ResolvedTerrainRoadAlphaMap,
     ResolvedTextureChange, ResolvedTextureMaterial,

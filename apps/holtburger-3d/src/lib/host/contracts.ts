@@ -448,7 +448,9 @@ export const envCellPayloadDtoSchema = z.object({
 });
 export type EnvCellPayloadDto = z.infer<typeof envCellPayloadDtoSchema>;
 
-const terrainDetailLayerDtoSchema = z.object({
+const regionRenderProfileDetailRoleDtoSchema = z.object({
+	role: z.enum(["landscape", "building", "environment", "object"]),
+	sourceTerrainDescIndex: z.number().int().nonnegative(),
 	textureAssetId: z.string().min(1),
 	textureDid: z.number().int().nonnegative(),
 	tiling: z.number().finite(),
@@ -471,7 +473,6 @@ const terrainMaterialTypeEntryDtoSchema = z.object({
 	textureAssetId: z.string().min(1),
 	textureDid: z.number().int().nonnegative(),
 	tiling: z.number().finite(),
-	detail: terrainDetailLayerDtoSchema.nullable(),
 	colorVariation: terrainColorVariationDtoSchema.nullable(),
 });
 
@@ -497,7 +498,7 @@ const terrainPcodeEncodingDtoSchema = z.object({
 	sizeBitMask: z.number().int().nonnegative(),
 });
 
-const terrainMaterialDependenciesDtoSchema = z.object({
+const renderResourceDependenciesDtoSchema = z.object({
 	surfaceTextureAssetIds: z.array(z.string().min(1)),
 	renderSurfaceAssetIds: z.array(z.string().min(1)),
 	paletteAssetIds: z.array(z.string().min(1)),
@@ -513,11 +514,32 @@ export const terrainMaterialPayloadDtoSchema = z.object({
 	terrainAlphaMaps: z.array(terrainAlphaMapEntryDtoSchema),
 	roadAlphaMaps: z.array(terrainRoadAlphaMapEntryDtoSchema),
 	pcodeEncoding: terrainPcodeEncodingDtoSchema,
-	dependencies: terrainMaterialDependenciesDtoSchema,
+	dependencies: renderResourceDependenciesDtoSchema,
 	provenance: assetProvenanceDtoSchema,
 });
 export type TerrainMaterialPayloadDto = z.infer<
 	typeof terrainMaterialPayloadDtoSchema
+>;
+
+const regionDetailRolesDtoSchema = z.object({
+	landscape: regionRenderProfileDetailRoleDtoSchema.nullable(),
+	building: regionRenderProfileDetailRoleDtoSchema.nullable(),
+	environment: regionRenderProfileDetailRoleDtoSchema.nullable(),
+	object: regionRenderProfileDetailRoleDtoSchema.nullable(),
+});
+
+export const regionRenderProfilePayloadDtoSchema = z.object({
+	kind: z.literal("region-render-profile"),
+	residencyKind: z.literal("unknown"),
+	sourceAssetKind: z.literal("region-render-profile"),
+	regionId: z.number().int().nonnegative().optional(),
+	regionNumber: z.number().int().nonnegative(),
+	detailRoles: regionDetailRolesDtoSchema,
+	dependencies: renderResourceDependenciesDtoSchema,
+	provenance: assetProvenanceDtoSchema,
+});
+export type RegionRenderProfilePayloadDto = z.infer<
+	typeof regionRenderProfilePayloadDtoSchema
 >;
 const gfxObjVertexDtoSchema = z.object({
 	id: z.number().int().nonnegative(),

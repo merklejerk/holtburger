@@ -8,8 +8,8 @@ use holtburger_content::{
     ContentDecodeCache, ContentRepository, EnvCellAsset, EnvCellAssetAssembler,
     LandblockOutdoorAsset, LandblockOutdoorAssetAssembler, LandblockTopologyAsset,
     LandblockTopologyAssetAssembler, MaterialAppearanceInput, ResolvedMaterialRecipe,
-    ResolvedSetupAppearance, ResolvedSurfaceTexture, ResolvedTerrainMaterialTable,
-    normalize_landblock_id,
+    ResolvedRegionRenderProfile, ResolvedSetupAppearance, ResolvedSurfaceTexture,
+    ResolvedTerrainMaterialTable, normalize_landblock_id,
 };
 use holtburger_dat::file_type::{GfxObj, Palette, RenderSurface, SetupModel};
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
@@ -23,6 +23,7 @@ pub enum ContentAssetRequest {
     LandblockTopology(u32),
     EnvCell(u32),
     TerrainMaterial(u32),
+    RegionRenderProfile(u32),
     GfxObj(u32),
     SetupModel(u32),
     MaterialRecipe(u32),
@@ -57,6 +58,7 @@ pub enum ContentAsset {
     LandblockTopology(Box<LandblockTopologyAsset>),
     EnvCell(Box<EnvCellAsset>),
     TerrainMaterial(Box<ResolvedTerrainMaterialTable>),
+    RegionRenderProfile(Box<ResolvedRegionRenderProfile>),
     GfxObj(Box<GfxObj>),
     SetupModel(Box<SetupModel>),
     MaterialRecipe(Box<ResolvedMaterialRecipe>),
@@ -123,6 +125,17 @@ impl ContentAssetService {
                         .with_context(|| {
                             format!(
                                 "Could not resolve terrain material table for region {region_number}"
+                            )
+                        })?,
+                )),
+            ),
+            ContentAssetRequest::RegionRenderProfile(region_number) => Ok(
+                ContentAsset::RegionRenderProfile(Box::new(
+                    self.content
+                        .resolve_region_render_profile(region_number)
+                        .with_context(|| {
+                            format!(
+                                "Could not resolve region render profile for region {region_number}"
                             )
                         })?,
                 )),

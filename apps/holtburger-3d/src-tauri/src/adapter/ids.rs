@@ -89,6 +89,13 @@ pub fn parse_terrain_material_asset_id(asset_id: &str) -> Option<u32> {
         .and_then(|raw| raw.parse::<u32>().ok())
 }
 
+pub fn parse_region_render_profile_asset_id(asset_id: &str) -> Option<u32> {
+    asset_id
+        .strip_prefix("region-render-profile/")
+        .filter(|raw| !raw.is_empty() && raw.chars().all(|ch| ch.is_ascii_digit()))
+        .and_then(|raw| raw.parse::<u32>().ok())
+}
+
 pub fn content_asset_request_from_asset_id(asset_id: &str) -> Option<ContentAssetRequest> {
     parse_landblock_outdoor_asset_id(asset_id)
         .map(ContentAssetRequest::LandblockOutdoor)
@@ -98,6 +105,10 @@ pub fn content_asset_request_from_asset_id(asset_id: &str) -> Option<ContentAsse
         .or_else(|| parse_env_cell_asset_id(asset_id).map(ContentAssetRequest::EnvCell))
         .or_else(|| {
             parse_terrain_material_asset_id(asset_id).map(ContentAssetRequest::TerrainMaterial)
+        })
+        .or_else(|| {
+            parse_region_render_profile_asset_id(asset_id)
+                .map(ContentAssetRequest::RegionRenderProfile)
         })
         .or_else(|| parse_gfx_obj_asset_id(asset_id).map(ContentAssetRequest::GfxObj))
         .or_else(|| parse_setup_model_asset_id(asset_id).map(ContentAssetRequest::SetupModel))

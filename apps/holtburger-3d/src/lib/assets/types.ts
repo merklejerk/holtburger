@@ -633,7 +633,9 @@ export interface PreparedSetupAppearancePayload extends PreparedAssetPayloadBase
 	};
 }
 
-interface PreparedTerrainDetailLayer {
+export interface PreparedRegionDetailRole {
+	role: "landscape" | "building" | "environment" | "object";
+	sourceTerrainDescIndex: number;
 	textureAssetId: string;
 	textureDid: number;
 	tiling: number;
@@ -656,7 +658,6 @@ export interface PreparedTerrainMaterialTypeEntry {
 	textureAssetId: string;
 	textureDid: number;
 	tiling: number;
-	detail: PreparedTerrainDetailLayer | null;
 	colorVariation: PreparedTerrainColorVariation | null;
 }
 
@@ -682,7 +683,7 @@ interface PreparedTerrainPcodeEncoding {
 	sizeBitMask: number;
 }
 
-interface PreparedTerrainMaterialDependencies {
+interface PreparedRenderResourceDependencies {
 	surfaceTextureAssetIds: string[];
 	renderSurfaceAssetIds: string[];
 	paletteAssetIds: string[];
@@ -699,7 +700,23 @@ export interface PreparedTerrainMaterialTablePayload
 	terrainAlphaMaps: PreparedTerrainAlphaMapEntry[];
 	roadAlphaMaps: PreparedTerrainRoadAlphaMapEntry[];
 	pcodeEncoding: PreparedTerrainPcodeEncoding;
-	dependencies: PreparedTerrainMaterialDependencies;
+	dependencies: PreparedRenderResourceDependencies;
+}
+
+export interface PreparedRegionRenderProfilePayload
+	extends PreparedAssetPayloadBase {
+	kind: "region-render-profile";
+	sourceAssetKind: "region-render-profile";
+	residencyKind: "unknown";
+	regionId?: number;
+	regionNumber: number;
+	detailRoles: {
+		landscape: PreparedRegionDetailRole | null;
+		building: PreparedRegionDetailRole | null;
+		environment: PreparedRegionDetailRole | null;
+		object: PreparedRegionDetailRole | null;
+	};
+	dependencies: PreparedRenderResourceDependencies;
 }
 
 export interface PreparedSurfaceTexturePayload extends PreparedAssetPayloadBase {
@@ -761,6 +778,7 @@ export type PreparedAssetPayload =
 	| PreparedMaterialRecipePayload
 	| PreparedSetupAppearancePayload
 	| PreparedTerrainMaterialTablePayload
+	| PreparedRegionRenderProfilePayload
 	| PreparedSurfaceTexturePayload
 	| PreparedRenderSurfacePayload
 	| PreparedPalettePayload
@@ -818,6 +836,7 @@ export function getPreparedAssetDependencies(
 	if (asset.payload.kind === "landblock-outdoor") {
 		return uniqueSortedAssetIds([
 			formatTerrainMaterialDependencyAssetId(asset.payload.regionNumber),
+			formatRegionRenderProfileDependencyAssetId(asset.payload.regionNumber),
 			...asset.payload.statics.map((member) => member.sourceAssetId),
 		]);
 	}
@@ -874,6 +893,14 @@ export function getPreparedAssetDependencies(
 		]);
 	}
 
+	if (asset.payload.kind === "region-render-profile") {
+		return uniqueSortedAssetIds([
+			...asset.payload.dependencies.surfaceTextureAssetIds,
+			...asset.payload.dependencies.renderSurfaceAssetIds,
+			...asset.payload.dependencies.paletteAssetIds,
+		]);
+	}
+
 	if (asset.payload.kind === "surface-texture") {
 		return uniqueSortedAssetIds(
 			asset.payload.dependencies.renderSurfaceAssetIds,
@@ -895,6 +922,10 @@ function uniqueSortedAssetIds(
 
 function formatTerrainMaterialDependencyAssetId(regionNumber: number): string {
 	return `terrain-material/${Math.trunc(regionNumber)}`;
+}
+
+function formatRegionRenderProfileDependencyAssetId(regionNumber: number): string {
+	return `region-render-profile/${Math.trunc(regionNumber)}`;
 }
 
 export function derivePreparedAssetDependencyStatus(

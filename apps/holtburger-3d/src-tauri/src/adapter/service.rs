@@ -290,6 +290,9 @@ impl HostBoundaryAdapter {
             ContentAssetRequest::TerrainMaterial(region_number) => {
                 self.build_terrain_material_lookup_response(request, region_number, asset)
             }
+            ContentAssetRequest::RegionRenderProfile(region_number) => {
+                self.build_region_render_profile_lookup_response(request, region_number, asset)
+            }
             ContentAssetRequest::SetupModel(setup_model_id) => {
                 self.build_setup_model_lookup_response(request, setup_model_id, asset)
             }
@@ -342,6 +345,29 @@ impl HostBoundaryAdapter {
             Ok(ContentAsset::TerrainMaterial(table)) => serialize_terrain_material_payload(&table),
             Ok(_) => unreachable!("content asset runtime returned mismatched terrain material"),
             Err(error) => failed_terrain_material_payload(region_number, error),
+        };
+        AssetLookupResponseDto {
+            request_id: request.request_id,
+            asset_id: request.asset_id,
+            payload_kind: AssetPayloadKindDto::Json,
+            payload,
+        }
+    }
+
+    fn build_region_render_profile_lookup_response(
+        &self,
+        request: AssetLookupRequestDto,
+        region_number: u32,
+        asset: anyhow::Result<ContentAsset>,
+    ) -> AssetLookupResponseDto {
+        let payload = match asset {
+            Ok(ContentAsset::RegionRenderProfile(profile)) => {
+                serialize_region_render_profile_payload(&profile)
+            }
+            Ok(_) => {
+                unreachable!("content asset runtime returned mismatched region render profile")
+            }
+            Err(error) => failed_region_render_profile_payload(region_number, error),
         };
         AssetLookupResponseDto {
             request_id: request.request_id,
@@ -527,6 +553,7 @@ fn binary_asset_lookup_required_message(
             "palette 0x{palette_id:08X} for {asset_id} requires binary asset lookup"
         )),
         ContentAssetRequest::TerrainMaterial(_)
+        | ContentAssetRequest::RegionRenderProfile(_)
         | ContentAssetRequest::SetupModel(_)
         | ContentAssetRequest::MaterialRecipe(_)
         | ContentAssetRequest::SetupAppearance(_)
@@ -719,6 +746,34 @@ mod tests {
                 .as_array()
                 .expect("terrain material route should expose texture dependencies")
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn region_render_profile_lookup_returns_region_detail_roles() {
+        let runtime = HostRuntimeService::new(false);
+        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
+            request_id: "test-region-render-profile".to_string(),
+            asset_id: "region-render-profile/1".to_string(),
+            priority: crate::contracts::AssetPriorityDto::Bootstrap,
+        });
+
+        assert_eq!(asset.payload["kind"], "region-render-profile");
+        assert_eq!(asset.payload["regionNumber"], 1);
+        assert_eq!(
+            asset.payload["detailRoles"]["landscape"]["role"],
+            "landscape"
+        );
+        assert_eq!(
+            asset.payload["detailRoles"]["landscape"]["sourceTerrainDescIndex"],
+            0
+        );
+        assert!(
+            asset.payload["dependencies"]["surfaceTextureAssetIds"]
+                .as_array()
+                .expect("region render profile should expose detail texture dependencies")
+                .iter()
+                .any(|asset_id| asset_id == "surface-texture/05001786")
         );
     }
 

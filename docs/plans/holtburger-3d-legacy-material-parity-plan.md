@@ -2830,6 +2830,72 @@ objects consume the same profile through explicit render-domain role ownership.
 This avoids duplicating detail references on every object or overloading the
 terrain material table with non-terrain render policy.
 
+Progress:
+
+- Added a prepared `region-render-profile/{region}` asset route backed by
+  `RegionDesc`. The profile exposes role-keyed detail entries for landscape,
+  building, environment, and object using retail terrain-desc role indices
+  `0..3`.
+- Moved detail ownership out of `terrain-material/{region}`. The terrain
+  material DTO now emits only TexMerge terrain texture, alpha-map, road-map, and
+  pcode data; detail texture dependencies now live on the region render profile.
+- Updated outdoor landblock dependency discovery so a loaded landblock schedules
+  both `terrain-material/{region}` and `region-render-profile/{region}` once per
+  region.
+- Updated the terrain blend shader path to resolve landscape detail through
+  `region-render-profile/{region}.detailRoles.landscape`. Missing profiles,
+  mismatched profile regions, missing landscape roles, and invalid tiling now
+  produce renderer diagnostics instead of silently changing output.
+- Added host adapter and terrain tests for the profile route, profile
+  dependency surface texture, terrain-profile detail consumption, and terrain
+  material readiness staying independent from profile detail resources.
+
+Decisions and course corrections:
+
+- Do not expose raw `RegionDesc` to the frontend. The frontend gets a prepared
+  render profile with renderer-relevant facts only, which keeps DAT structure
+  churn out of render code.
+- Do not keep compatibility detail fields on terrain material types. The Rust
+  resolved terrain material entry and the frontend terrain material contract now
+  omit detail texture facts entirely, so there is one owner for region-global
+  detail data.
+- Keep role ownership declarative in the profile for now. Terrain consumes the
+  landscape role immediately; Phase 10.7 will attach building, environment, and
+  object roles where their material wrappers can actually use them.
+
+Cleanup/debt discovered:
+
+- No legacy shim was intentionally introduced for `terrainTypes[].detail`.
+  Any remaining test fixture or payload that still tries to emit that field
+  should be treated as stale.
+- We still need a retail/client screenshot pass for the migrated landscape
+  detail path before broadening the same policy to buildings and statics.
+- Broad app validation is still blocked by the existing
+  `render-surface-texture-resources.ts` `PixelFormatGPU | null` type error.
+  Targeted TS lint, node typecheck, Rust tests, clippy, and terrain vitest
+  coverage are clean.
+
+### Phase 10.6.5: Profile Migration Validation and Validation Gate Cleanup
+
+Goal: clear the small validation debts introduced or exposed by the 10.6
+ownership migration before broad detail overlays touch multiple material
+families.
+
+- Capture a terrain-focused screenshot against retail after the profile
+  migration and verify the landscape detail layer still matches the Phase 10.5
+  behavior.
+- Fix the pre-existing `render-surface-texture-resources.ts` `PixelFormatGPU |
+  null` type error so `npm run check` becomes a useful gate again.
+- Audit debug diagnostics for profile missing/mismatched/missing-role cases from
+  a real outdoor landblock load and tune wording only if it is too noisy.
+- Decide whether the current terrain detail helper is sufficient to factor in
+  Phase 10.7 or whether a tiny shared profile-detail resolver should be added
+  first.
+
+Expected effect: Phase 10.7 starts from a validated region-profile terrain path
+and a green app validation gate rather than carrying profile migration uncertainty
+into the broader material-wrapper work.
+
 ### Phase 10.7: Broad Detail Overlay Application
 
 Goal: apply region-profile detail roles across terrain, buildings,
@@ -2964,8 +3030,9 @@ Remaining planned parity phases:
 1. Phase 10.25 terrain blend parity hardening.
 2. Phase 10.5 legacy detail texture overlay.
 3. Phase 10.6 region render profile and detail role propagation.
-4. Phase 10.7 broad detail overlay application.
-5. Phase 11 optional high-res JPEG replacement.
+4. Phase 10.6.5 profile migration validation and validation gate cleanup.
+5. Phase 10.7 broad detail overlay application.
+6. Phase 11 optional high-res JPEG replacement.
 
 Recommended follow-up phases after the terrain/detail pass:
 

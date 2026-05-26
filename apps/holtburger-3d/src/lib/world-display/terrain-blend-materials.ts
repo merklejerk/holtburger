@@ -2,6 +2,7 @@ import { DoubleSide, ShaderMaterial, type Material, type Texture } from "three";
 
 import type {
 	AssetChannelState,
+	PreparedRegionDetailRole,
 	PreparedRenderSurfacePayload,
 	PreparedSurfaceTexturePayload,
 	PreparedTerrainMaterialTablePayload,
@@ -51,18 +52,13 @@ interface PreparedTerrainAlphaSelection {
 	rotation: number;
 }
 
-type PreparedTerrainDetailLayer = NonNullable<
-	PreparedTerrainMaterialTypeEntry["detail"]
->;
-
 interface TerrainDetailOverlay {
-	detail: PreparedTerrainDetailLayer;
+	detail: PreparedRegionDetailRole;
 }
 
 const TERRAIN_CODE_MASK = 0x1f;
 const ROAD_CORNER_MASKS = [0x0c00_0000, 0x0300_0000, 0x00c0_0000, 0x0030_0000];
 const ROAD_TYPE_TERRAIN_CODE = 3;
-const LANDSCAPE_DETAIL_ROLE_INDEX = 0;
 const RETAIL_DETAIL_FADE_NEAR = 10;
 const RETAIL_DETAIL_FADE_FAR = 50;
 
@@ -70,6 +66,7 @@ export function buildTerrainBlendMaterialSet(
 	options: BuildTerrainBlendMaterialSetOptions,
 ): TerrainBlendMaterialSet | null {
 	const tableAssetId = `terrain-material/${Math.trunc(options.regionNumber)}`;
+	const profileAssetId = `region-render-profile/${Math.trunc(options.regionNumber)}`;
 	const tableRecord = options.assetState.preparedByAssetId[tableAssetId];
 	if (tableRecord?.payload.kind !== "terrain-material") {
 		return null;
@@ -79,11 +76,11 @@ export function buildTerrainBlendMaterialSet(
 	const terrainByCode = new Map(
 		table.terrainTypes.map((terrain) => [terrain.terrainType, terrain]),
 	);
-	const landscapeDetail = selectLandscapeDetail(table);
 	const pcodes = [...new Set(options.pcodes)].sort(compareNumbers);
 	const materials: Material[] = [];
 	const materialIndexByPcode = new Map<number, number>();
 	const diagnostics: string[] = [];
+	const landscapeDetail = selectLandscapeDetail(options, diagnostics);
 
 	for (const pcode of pcodes) {
 		const plan = buildTerrainBlendPlan({
@@ -118,6 +115,8 @@ export function buildTerrainBlendMaterialSet(
 		diagnostics,
 		signature: [
 			tableAssetId,
+			profileAssetId,
+			`detail:${landscapeDetail?.detail.textureAssetId ?? "none"}`,
 			`pcodes:${pcodes.join(",")}`,
 			`materials:${materials.length}`,
 			`diag:${diagnostics.length}`,
@@ -330,14 +329,38 @@ function createTerrainBlendMaterial(options: {
 }
 
 function selectLandscapeDetail(
-	table: PreparedTerrainMaterialTablePayload,
+	options: BuildTerrainBlendMaterialSetOptions,
+	diagnostics: string[],
 ): TerrainDetailOverlay | null {
-	const detail = table.terrainTypes[LANDSCAPE_DETAIL_ROLE_INDEX]?.detail;
+	const profileAssetId = `region-render-profile/${Math.trunc(options.regionNumber)}`;
+	const profileRecord = options.assetState.preparedByAssetId[profileAssetId];
+	const profile =
+		profileRecord?.payload.kind === "region-render-profile"
+			? profileRecord.payload
+			: null;
+	if (!profile) {
+		diagnostics.push(
+			`Missing region render profile ${profileAssetId}; terrain detail disabled.`,
+		);
+		return null;
+	}
+	if (profile.regionNumber !== Math.trunc(options.regionNumber)) {
+		diagnostics.push(
+			`Region render profile ${profileAssetId} reports region ${profile.regionNumber}; terrain detail disabled.`,
+		);
+		return null;
+	}
+	const detail = profile?.detailRoles.landscape ?? null;
+	if (!detail) {
+		diagnostics.push(
+			`Region render profile ${profileAssetId} has no landscape detail role.`,
+		);
+	}
 	return detail ? { detail } : null;
 }
 
 function resolveTerrainDetailTexture(options: {
-	detail: PreparedTerrainDetailLayer;
+	detail: PreparedRegionDetailRole;
 	assetState: AssetChannelState;
 	materialResourceCache: WorldMaterialResourceCache;
 	diagnostics: string[];

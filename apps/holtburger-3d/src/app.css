@@ -623,7 +623,9 @@ ul {
 	font-size: 0.95rem;
 }
 
-.browser-form__field input {
+.browser-form__field input,
+.browser-form__field select {
+	color-scheme: dark;
 	width: 100%;
 	box-sizing: border-box;
 	padding: 0.8rem 0.9rem;
@@ -634,12 +636,22 @@ ul {
 	font: inherit;
 }
 
+.browser-form__field select {
+	background-color: #111a24;
+}
+
+.browser-form__field option {
+	background-color: #111a24;
+	color: #e8ecf3;
+}
+
 .browser-form__field input[type="range"] {
 	padding: 0;
 	accent-color: #a9d59f;
 }
 
-.browser-form__field input:focus {
+.browser-form__field input:focus,
+.browser-form__field select:focus {
 	outline: 2px solid rgba(169, 213, 159, 0.45);
 	outline-offset: 2px;
 }

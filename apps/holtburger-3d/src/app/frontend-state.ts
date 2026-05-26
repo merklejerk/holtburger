@@ -8,6 +8,7 @@ import {
 	updateBuildingLodRadius,
 	updateBrowserDraft,
 	updateBrowserRenderStyle,
+	updateBrowserTextureFilteringMode,
 	updateDetailLodRadius,
 	updateEnvCellLodRadius,
 	updateCellIndicatorVisibility,
@@ -22,6 +23,7 @@ import {
 	type BrowserModeState,
 	type BrowserNavigationFocusMode,
 	type BrowserRenderStyle,
+	type BrowserTextureFilteringMode,
 } from "./browser-mode";
 import {
 	applyAssetCachePrune as applyAssetCachePruneToState,
@@ -174,6 +176,17 @@ function createFrontendStateStore() {
 			update((state) => ({
 				...state,
 				browserMode: updateBrowserRenderStyle(state.browserMode, renderStyle),
+			}));
+		},
+		updateBrowserTextureFilteringMode(
+			textureFilteringMode: BrowserTextureFilteringMode,
+		): void {
+			update((state) => ({
+				...state,
+				browserMode: updateBrowserTextureFilteringMode(
+					state.browserMode,
+					textureFilteringMode,
+				),
 			}));
 		},
 		selectBrowserLandblockDestination(landblockId: number): void {

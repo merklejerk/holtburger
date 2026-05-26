@@ -124,16 +124,19 @@ export function createMaterial(options: {
 			behavior,
 			reportDiagnostic: options.reportDiagnostic,
 		});
-		return new MeshStandardMaterial(
-			applyLegacyMaterialBehavior(
-				{
-					color: colorFromArgb(recipe.source.argb).multiply(behavior.color),
-					flatShading: true,
-					metalness: 0.02,
-					roughness: 0.88,
-				},
-				behavior,
+		return withLegacyMaterialBehaviorMetadata(
+			new MeshStandardMaterial(
+				applyLegacyMaterialBehavior(
+					{
+						color: colorFromArgb(recipe.source.argb).multiply(behavior.color),
+						flatShading: true,
+						metalness: 0.02,
+						roughness: 0.88,
+					},
+					behavior,
+				),
 			),
+			behavior,
 		);
 	}
 
@@ -171,17 +174,20 @@ export function createMaterial(options: {
 			behavior,
 			reportDiagnostic: options.reportDiagnostic,
 		});
-		return new MeshStandardMaterial(
-			applyLegacyMaterialBehavior(
-				{
-					color: behavior.color,
-					map: texture,
-					flatShading: true,
-					metalness: 0.02,
-					roughness: 0.88,
-				},
-				behavior,
+		return withLegacyMaterialBehaviorMetadata(
+			new MeshStandardMaterial(
+				applyLegacyMaterialBehavior(
+					{
+						color: behavior.color,
+						map: texture,
+						flatShading: true,
+						metalness: 0.02,
+						roughness: 0.88,
+					},
+					behavior,
+				),
 			),
+			behavior,
 		);
 	}
 	if (indexedRenderSurface) {
@@ -231,16 +237,19 @@ export function createMaterial(options: {
 			behavior,
 			reportDiagnostic: options.reportDiagnostic,
 		});
-		return new MeshStandardMaterial(
-			applyLegacyMaterialBehavior(
-				{
-					color: color.multiply(behavior.color),
-					flatShading: true,
-					metalness: 0.02,
-					roughness: 0.88,
-				},
-				behavior,
+		return withLegacyMaterialBehaviorMetadata(
+			new MeshStandardMaterial(
+				applyLegacyMaterialBehavior(
+					{
+						color: color.multiply(behavior.color),
+						flatShading: true,
+						metalness: 0.02,
+						roughness: 0.88,
+					},
+					behavior,
+				),
 			),
+			behavior,
 		);
 	}
 
@@ -267,17 +276,45 @@ export function createMaterial(options: {
 		behavior,
 		reportDiagnostic: options.reportDiagnostic,
 	});
-	return new MeshStandardMaterial(
-		applyLegacyMaterialBehavior(
-			{
-				color: color.multiply(behavior.color),
-				flatShading: true,
-				metalness: 0.02,
-				roughness: 0.88,
-			},
-			behavior,
+	return withLegacyMaterialBehaviorMetadata(
+		new MeshStandardMaterial(
+			applyLegacyMaterialBehavior(
+				{
+					color: color.multiply(behavior.color),
+					flatShading: true,
+					metalness: 0.02,
+					roughness: 0.88,
+				},
+				behavior,
+			),
 		),
+		behavior,
 	);
+}
+
+function withLegacyMaterialBehaviorMetadata<TMaterial extends Material>(
+	material: TMaterial,
+	behavior: LegacyMaterialBehavior,
+): TMaterial {
+	material.userData = {
+		...material.userData,
+		holtburgerLegacyMaterialBehavior: describeLegacyMaterialBehavior(behavior),
+	};
+	return material;
+}
+
+function describeLegacyMaterialBehavior(
+	behavior: LegacyMaterialBehavior,
+): Record<string, unknown> {
+	return {
+		opacity: behavior.opacity,
+		transparent: behavior.transparent,
+		alphaTest: behavior.alphaTest,
+		blendMode: behavior.blend.mode,
+		blendEnabled: behavior.blend.enabled,
+		depthWrite: behavior.blend.depthWrite,
+		unsupportedSurfaceFlags: behavior.unsupportedSurfaceFlags,
+	};
 }
 
 function reportUnsupportedSurfaceFlags(options: {

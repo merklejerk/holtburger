@@ -21,6 +21,7 @@ import {
 export interface MaterialTextureCapabilities {
 	supportsS3tc: boolean;
 	supportsS3tcSrgb: boolean;
+	maxAnisotropy?: number;
 }
 
 const PIXEL_FORMAT_R8G8B8 = 0x14;
@@ -50,6 +51,7 @@ export function createRenderSurfaceTexture(
 	capabilities: MaterialTextureCapabilities = {
 		supportsS3tc: false,
 		supportsS3tcSrgb: false,
+		maxAnisotropy: 1,
 	},
 ): Texture | null {
 	if (isSupportedCompressedFormat(renderSurface.formatRaw)) {

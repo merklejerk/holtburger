@@ -65,6 +65,7 @@ interface MaterialResourceRecord {
 
 interface TextureResourceRecord {
 	texture: Texture;
+	samplingPolicy: string;
 }
 
 interface PaletteResourceRecord {
@@ -73,6 +74,7 @@ interface PaletteResourceRecord {
 
 interface IndexedTextureResourceRecord {
 	resource: IndexedTextureResource;
+	samplingPolicy: string;
 }
 
 export interface MaterialResourceCacheStats {
@@ -82,6 +84,8 @@ export interface MaterialResourceCacheStats {
 	indexedTextureCount: number;
 	materialProgramKeyCount: number;
 	transparentMaterialCount: number;
+	textureSamplingPolicyCounts: Record<string, number>;
+	textureSamplingPolicySamples: string[];
 	materialTypeCounts: Record<string, number>;
 	materialProgramKeySamples: string[];
 }
@@ -103,6 +107,7 @@ export class WorldMaterialResourceCache {
 		textureCapabilities: MaterialTextureCapabilities = {
 			supportsS3tc: false,
 			supportsS3tcSrgb: false,
+			maxAnisotropy: 1,
 		},
 		textureSamplingPolicy: MaterialTextureSamplingPolicy = createDefaultMaterialTextureSamplingPolicy(
 			textureCapabilities,
@@ -210,7 +215,10 @@ export class WorldMaterialResourceCache {
 		if (!texture) {
 			return null;
 		}
-		this.textureRecords.set(textureKey, { texture });
+		this.textureRecords.set(textureKey, {
+			texture,
+			samplingPolicy: describeTextureSamplingPolicy(options.samplingPolicy),
+		});
 		return texture;
 	}
 
@@ -318,7 +326,10 @@ export class WorldMaterialResourceCache {
 			options.renderSurface,
 			options.samplingPolicy,
 		);
-		this.indexedTextureRecords.set(textureKey, { resource });
+		this.indexedTextureRecords.set(textureKey, {
+			resource,
+			samplingPolicy: describeTextureSamplingPolicy(options.samplingPolicy),
+		});
 		return resource;
 	}
 
@@ -335,6 +346,7 @@ export class WorldMaterialResourceCache {
 		const programKeys = new Set<string>();
 		let transparentMaterialCount = 0;
 		const materialTypeCounts = new Map<string, number>();
+		const textureSamplingPolicyCounts = new Map<string, number>();
 		for (const record of this.materialRecords.values()) {
 			const material = record.material;
 			programKeys.add(describeMaterialProgramKey(material));
@@ -346,7 +358,22 @@ export class WorldMaterialResourceCache {
 				(materialTypeCounts.get(material.type) ?? 0) + 1,
 			);
 		}
+		for (const record of this.textureRecords.values()) {
+			textureSamplingPolicyCounts.set(
+				record.samplingPolicy,
+				(textureSamplingPolicyCounts.get(record.samplingPolicy) ?? 0) + 1,
+			);
+		}
+		for (const record of this.indexedTextureRecords.values()) {
+			textureSamplingPolicyCounts.set(
+				record.samplingPolicy,
+				(textureSamplingPolicyCounts.get(record.samplingPolicy) ?? 0) + 1,
+			);
+		}
 		const materialProgramKeySamples = [...programKeys].sort();
+		const textureSamplingPolicySamples = [
+			...textureSamplingPolicyCounts.keys(),
+		].sort();
 		return {
 			materialCount: this.materialRecords.size,
 			textureCount: this.textureRecords.size,
@@ -354,6 +381,12 @@ export class WorldMaterialResourceCache {
 			indexedTextureCount: this.indexedTextureRecords.size,
 			materialProgramKeyCount: programKeys.size,
 			transparentMaterialCount,
+			textureSamplingPolicyCounts: Object.fromEntries(
+				[...textureSamplingPolicyCounts.entries()].sort(([left], [right]) =>
+					left.localeCompare(right),
+				),
+			),
+			textureSamplingPolicySamples: textureSamplingPolicySamples.slice(0, 16),
 			materialTypeCounts: Object.fromEntries(
 				[...materialTypeCounts.entries()].sort(([left], [right]) =>
 					left.localeCompare(right),

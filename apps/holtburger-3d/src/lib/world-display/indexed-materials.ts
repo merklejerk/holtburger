@@ -57,6 +57,18 @@ export function createIndexedMeshStandardMaterial(options: {
 			paletteColorCount: options.resources.palette.colorCount,
 			clipThreshold: isClipMap ? CLIP_MAP_TRANSPARENT_INDEX_THRESHOLD : -1,
 			alphaTest: behavior.alphaTest,
+			blendMode: behavior.blend.mode,
+			blendEnabled: behavior.blend.enabled,
+			depthWrite: behavior.blend.depthWrite,
+			unsupportedSurfaceFlags: behavior.unsupportedSurfaceFlags,
+		},
+		holtburgerLegacyMaterialBehavior: {
+			opacity: behavior.opacity,
+			transparent: behavior.transparent,
+			alphaTest: behavior.alphaTest,
+			blendMode: behavior.blend.mode,
+			blendEnabled: behavior.blend.enabled,
+			depthWrite: behavior.blend.depthWrite,
 			unsupportedSurfaceFlags: behavior.unsupportedSurfaceFlags,
 		},
 	};

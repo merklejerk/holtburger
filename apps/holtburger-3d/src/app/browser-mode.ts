@@ -25,6 +25,10 @@ type BrowserPageId = "location-entry" | "destination-preview";
 
 export type BrowserNavigationFocusMode = "manual" | "follow-camera";
 export type BrowserRenderStyle = "solid" | "wireframe" | "no-material";
+export type BrowserTextureFilteringMode =
+	| "nearest"
+	| "linear"
+	| "anisotropic-4x";
 type BrowserDestinationSource = "manual" | "landblock-pick" | "follow-camera";
 export type BrowserLandblockInputMode = "outdoor" | "dungeon";
 type NorthSouthHemisphere = "N" | "S";
@@ -76,6 +80,7 @@ export interface BrowserModeState {
 	showCellIndicators: boolean;
 	highlightPortalTargets: boolean;
 	renderStyle: BrowserRenderStyle;
+	textureFilteringMode: BrowserTextureFilteringMode;
 	page: BrowserPageId;
 }
 
@@ -108,6 +113,7 @@ export function createBrowserModeState(): BrowserModeState {
 		showCellIndicators: false,
 		highlightPortalTargets: false,
 		renderStyle: "solid",
+		textureFilteringMode: "anisotropic-4x",
 		page: DEFAULT_BROWSER_DESTINATION
 			? "destination-preview"
 			: "location-entry",
@@ -322,6 +328,16 @@ export function updateBrowserRenderStyle(
 	};
 }
 
+export function updateBrowserTextureFilteringMode(
+	browserMode: BrowserModeState,
+	textureFilteringMode: BrowserTextureFilteringMode,
+): BrowserModeState {
+	return {
+		...browserMode,
+		textureFilteringMode,
+	};
+}
+
 export function previewBrowserLocation(
 	browserMode: BrowserModeState,
 ): BrowserModeState {
@@ -356,6 +372,7 @@ export function previewBrowserLocation(
 		showCellIndicators: browserMode.showCellIndicators,
 		highlightPortalTargets: browserMode.highlightPortalTargets,
 		renderStyle: browserMode.renderStyle,
+		textureFilteringMode: browserMode.textureFilteringMode,
 		page: "destination-preview",
 	};
 }
@@ -390,6 +407,7 @@ export function selectBrowserLandblockDestination(
 		showCellIndicators: browserMode.showCellIndicators,
 		highlightPortalTargets: browserMode.highlightPortalTargets,
 		renderStyle: browserMode.renderStyle,
+		textureFilteringMode: browserMode.textureFilteringMode,
 		page: "destination-preview",
 	};
 }

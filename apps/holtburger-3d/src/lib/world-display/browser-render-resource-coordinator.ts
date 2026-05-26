@@ -1,4 +1,7 @@
-import type { BrowserLocationSelection } from "../../app/browser-mode";
+import type {
+	BrowserLocationSelection,
+	BrowserTextureFilteringMode,
+} from "../../app/browser-mode";
 import { browserDestinationToInteriorCellId } from "../../app/browser-mode";
 import {
 	deriveTopologyEnvCellIdsForLandblocks,
@@ -75,6 +78,7 @@ export interface BrowserRenderResourceCoordinatorInput {
 	envCellLodRadius: number;
 	transitionPortalMaxDepth: number;
 	renderStyle: WorldDisplayRenderStyle;
+	textureFilteringMode: BrowserTextureFilteringMode;
 	showPortalPolygons: boolean;
 	showCellIndicators: boolean;
 	highlightPortalTargets: boolean;
@@ -128,6 +132,7 @@ export interface BrowserRenderResourceSurface {
 	setControlledCameraFrame(frame: SceneCameraFrame | null): void;
 	setTransitionPortalMaxDepth(maxDepth: number): void;
 	setRenderStyle(renderStyle: WorldDisplayRenderStyle): void;
+	setTextureFilteringMode(mode: BrowserTextureFilteringMode): void;
 }
 
 export function createEmptyBrowserRenderResourceSnapshot(): BrowserRenderResourceSnapshot {
@@ -395,6 +400,11 @@ export class BrowserRenderResourceCoordinator {
 			this.applySurfaceResource("render-style", input.renderStyle, () =>
 				surface.setRenderStyle(input.renderStyle),
 			);
+			this.applySurfaceResource(
+				"texture-filtering-mode",
+				input.textureFilteringMode,
+				() => surface.setTextureFilteringMode(input.textureFilteringMode),
+			);
 		}
 
 		this.snapshot = deriveSnapshot({
@@ -439,7 +449,8 @@ type BrowserRenderResourceSurfaceKey =
 	| "render-spatial-query"
 	| "controlled-camera-frame"
 	| "transition-portal-depth"
-	| "render-style";
+	| "render-style"
+	| "texture-filtering-mode";
 
 function describeAssetStateSignature(state: AssetChannelState): string {
 	return [

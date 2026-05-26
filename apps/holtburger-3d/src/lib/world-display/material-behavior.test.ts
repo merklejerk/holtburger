@@ -157,7 +157,7 @@ function createMaterialRecipe(
 		luminosity: options.luminosity ?? 0,
 		diffuse: options.diffuse ?? 1,
 		dependencies: {
-			renderTextureAssetIds: [],
+			surfaceTextureAssetIds: [],
 			renderSurfaceAssetIds: [],
 			paletteAssetIds: [],
 		},

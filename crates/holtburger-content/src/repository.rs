@@ -504,7 +504,7 @@ mod tests {
                 DatFileType::SurfaceTexture as u32,
                 vec![0x05],
             )
-            .expect("render texture should be added");
+            .expect("surface texture should be added");
         writer
             .add_pruned(
                 EOR_PORTAL_NAMESPACE,
@@ -590,9 +590,9 @@ mod tests {
                 EOR_PORTAL_NAMESPACE,
                 0x0500_0010,
                 DatFileType::SurfaceTexture as u32,
-                render_texture_bytes(0x0500_0010, &[0x0600_0010, 0x0600_0011, 0x0600_0012]),
+                surface_texture_bytes(0x0500_0010, &[0x0600_0010, 0x0600_0011, 0x0600_0012]),
             )
-            .expect("render texture should be added");
+            .expect("surface texture should be added");
         writer
             .add(
                 EOR_PORTAL_NAMESPACE,
@@ -683,9 +683,9 @@ mod tests {
                 EOR_PORTAL_NAMESPACE,
                 0x0500_0021,
                 DatFileType::SurfaceTexture as u32,
-                render_texture_bytes(0x0500_0021, &[0x0600_0021]),
+                surface_texture_bytes(0x0500_0021, &[0x0600_0021]),
             )
-            .expect("render texture should be added");
+            .expect("surface texture should be added");
         writer
             .add(
                 EOR_PORTAL_NAMESPACE,
@@ -746,7 +746,7 @@ mod tests {
                 .add(EOR_PORTAL_NAMESPACE, id, DatFileType::Model as u32, bytes)
                 .expect("gfx obj should be added");
         }
-        for (surface_id, render_texture_id, palette_id) in [
+        for (surface_id, surface_texture_id, palette_id) in [
             (0x0800_0030, 0x0500_0030, 0x0400_0030),
             (0x0800_0031, 0x0500_0031, 0x0400_0031),
             (0x0800_0032, 0x0500_0032, 0x0400_0032),
@@ -756,11 +756,11 @@ mod tests {
                     EOR_PORTAL_NAMESPACE,
                     surface_id,
                     DatFileType::Surface as u32,
-                    textured_csurface_bytes(render_texture_id, palette_id),
+                    textured_csurface_bytes(surface_texture_id, palette_id),
                 )
                 .expect("surface should be added");
         }
-        for (render_texture_id, render_surface_id) in [
+        for (surface_texture_id, render_surface_id) in [
             (0x0500_0030, 0x0600_0030),
             (0x0500_0031, 0x0600_0031),
             (0x0500_0032, 0x0600_0032),
@@ -769,11 +769,11 @@ mod tests {
             writer
                 .add(
                     EOR_PORTAL_NAMESPACE,
-                    render_texture_id,
+                    surface_texture_id,
                     DatFileType::SurfaceTexture as u32,
-                    render_texture_bytes(render_texture_id, &[render_surface_id]),
+                    surface_texture_bytes(surface_texture_id, &[render_surface_id]),
                 )
-                .expect("render texture should be added");
+                .expect("surface texture should be added");
             writer
                 .add(
                     EOR_PORTAL_NAMESPACE,
@@ -886,10 +886,10 @@ mod tests {
         bytes
     }
 
-    fn textured_csurface_bytes(render_texture_id: u32, palette_id: u32) -> Vec<u8> {
+    fn textured_csurface_bytes(surface_texture_id: u32, palette_id: u32) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&SurfaceType::BASE1_IMAGE.bits().to_le_bytes());
-        bytes.extend_from_slice(&render_texture_id.to_le_bytes());
+        bytes.extend_from_slice(&surface_texture_id.to_le_bytes());
         bytes.extend_from_slice(&palette_id.to_le_bytes());
         bytes.extend_from_slice(&1.0f32.to_le_bytes());
         bytes.extend_from_slice(&0.0f32.to_le_bytes());
@@ -897,7 +897,7 @@ mod tests {
         bytes
     }
 
-    fn render_texture_bytes(id: u32, render_surface_ids: &[u32]) -> Vec<u8> {
+    fn surface_texture_bytes(id: u32, render_surface_ids: &[u32]) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&id.to_le_bytes());
         bytes.extend_from_slice(&0i32.to_le_bytes());
@@ -1151,7 +1151,7 @@ mod tests {
         assert_eq!(report.record_counts.c_surface.total, 2);
         assert_eq!(report.record_counts.c_surface.available, 1);
         assert_eq!(report.record_counts.c_surface.pruned, 1);
-        assert_eq!(report.record_counts.render_texture.available, 1);
+        assert_eq!(report.record_counts.surface_texture.available, 1);
         assert_eq!(report.record_counts.render_surface.pruned, 1);
         assert_eq!(report.record_counts.palette.available, 1);
         assert_eq!(report.record_counts.clothing_table.available, 1);
@@ -1166,7 +1166,7 @@ mod tests {
             report.material_references.missing_csurfaces,
             vec![0x0800_0003]
         );
-        assert_eq!(report.material_references.referenced_render_textures, 0);
+        assert_eq!(report.material_references.referenced_surface_textures, 0);
         assert!(report.material_references.parse_failures.is_empty());
         assert!(!report.material_complete);
     }
@@ -1182,10 +1182,10 @@ mod tests {
 
         assert_eq!(report.material_references.referenced_csurfaces, 3);
         assert_eq!(report.material_references.available_csurfaces, 3);
-        assert_eq!(report.material_references.referenced_render_textures, 2);
-        assert_eq!(report.material_references.available_render_textures, 1);
+        assert_eq!(report.material_references.referenced_surface_textures, 2);
+        assert_eq!(report.material_references.available_surface_textures, 1);
         assert_eq!(
-            report.material_references.missing_render_textures,
+            report.material_references.missing_surface_textures,
             vec![0x0500_0011]
         );
         assert_eq!(report.material_references.referenced_render_surfaces, 3);
@@ -1233,7 +1233,7 @@ mod tests {
         assert_eq!(
             slots[1].material.source,
             ResolvedMaterialSource::Texture(ResolvedTextureMaterial {
-                render_texture_id: 0x0500_0021,
+                surface_texture_id: 0x0500_0021,
                 render_surface_ids: vec![0x0600_0021],
                 palette_id: Some(0x0400_0021),
                 render_surface_default_palette_ids: Vec::new(),
@@ -1242,7 +1242,7 @@ mod tests {
     }
 
     #[test]
-    fn resolves_textured_material_from_available_surface_texture_candidates() {
+    fn resolves_textured_material_preserving_surface_texture_source_levels() {
         use crate::{ResolvedMaterialSource, ResolvedTextureMaterial};
 
         let dir = tempdir().expect("tempdir should be created");
@@ -1262,9 +1262,9 @@ mod tests {
                 EOR_PORTAL_NAMESPACE,
                 0x0500_0040,
                 DatFileType::SurfaceTexture as u32,
-                render_texture_bytes(0x0500_0040, &[0x0600_4040, 0x0600_0040]),
+                surface_texture_bytes(0x0500_0040, &[0x0600_4040, 0x0600_0040]),
             )
-            .expect("render texture should be added");
+            .expect("surface texture should be added");
         writer
             .add(
                 EOR_PORTAL_NAMESPACE,
@@ -1279,25 +1279,28 @@ mod tests {
             ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
         let recipe = repository
             .resolve_material_recipe(0x0800_0040)
-            .expect("material should resolve from its available render-surface candidate");
-        let render_texture = repository
-            .resolve_render_texture(0x0500_0040)
-            .expect("render texture should expose its available render-surface candidates");
+            .expect("material should preserve its source-level render-surface IDs");
+        let surface_texture = repository
+            .resolve_surface_texture(0x0500_0040)
+            .expect("surface texture should expose its source-level render-surface IDs");
 
         assert_eq!(
             recipe.source,
             ResolvedMaterialSource::Texture(ResolvedTextureMaterial {
-                render_texture_id: 0x0500_0040,
-                render_surface_ids: vec![0x0600_0040],
+                surface_texture_id: 0x0500_0040,
+                render_surface_ids: vec![0x0600_4040, 0x0600_0040],
                 palette_id: None,
                 render_surface_default_palette_ids: Vec::new(),
             })
         );
-        assert_eq!(render_texture.render_surface_ids, vec![0x0600_0040]);
+        assert_eq!(
+            surface_texture.render_surface_ids,
+            vec![0x0600_4040, 0x0600_0040]
+        );
     }
 
     #[test]
-    fn repo_assets_resolve_surface_texture_candidates_with_missing_first_texture() {
+    fn repo_assets_preserve_surface_texture_source_levels_with_missing_first_texture() {
         use crate::{ResolvedMaterialSource, ResolvedTextureMaterial};
 
         let source_path = repo_assets_hba_path();
@@ -1313,21 +1316,24 @@ mod tests {
             .expect("repo assets.hba should load as content repository");
         let recipe = repository
             .resolve_material_recipe(0x0800_11FC)
-            .expect("repo material should resolve through its available texture candidate");
-        let render_texture = repository
-            .resolve_render_texture(0x0500_2862)
-            .expect("repo render texture should resolve through its available texture candidate");
+            .expect("repo material should preserve surface texture source levels");
+        let surface_texture = repository
+            .resolve_surface_texture(0x0500_2862)
+            .expect("repo surface texture should preserve source levels");
 
         assert_eq!(
             recipe.source,
             ResolvedMaterialSource::Texture(ResolvedTextureMaterial {
-                render_texture_id: 0x0500_2862,
-                render_surface_ids: vec![0x0600_41C0],
+                surface_texture_id: 0x0500_2862,
+                render_surface_ids: vec![0x0600_41BF, 0x0600_41C0],
                 palette_id: None,
                 render_surface_default_palette_ids: Vec::new(),
             })
         );
-        assert_eq!(render_texture.render_surface_ids, vec![0x0600_41C0]);
+        assert_eq!(
+            surface_texture.render_surface_ids,
+            vec![0x0600_41BF, 0x0600_41C0]
+        );
     }
 
     #[test]
@@ -1459,7 +1465,7 @@ mod tests {
     fn texture_id(source: &crate::ResolvedMaterialSource) -> Option<u32> {
         match source {
             crate::ResolvedMaterialSource::SolidColor(_) => None,
-            crate::ResolvedMaterialSource::Texture(texture) => Some(texture.render_texture_id),
+            crate::ResolvedMaterialSource::Texture(texture) => Some(texture.surface_texture_id),
         }
     }
 }

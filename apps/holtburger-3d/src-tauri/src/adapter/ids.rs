@@ -23,10 +23,10 @@ pub fn parse_material_recipe_asset_id(asset_id: &str) -> Option<u32> {
     parse_prefixed_data_id(asset_id, "material/", DatFileType::Surface as u32)
 }
 
-pub fn parse_render_texture_asset_id(asset_id: &str) -> Option<u32> {
+pub fn parse_surface_texture_asset_id(asset_id: &str) -> Option<u32> {
     parse_prefixed_data_id(
         asset_id,
-        "render-texture/",
+        "surface-texture/",
         DatFileType::SurfaceTexture as u32,
     )
 }
@@ -107,7 +107,9 @@ pub fn content_asset_request_from_asset_id(asset_id: &str) -> Option<ContentAsse
         .or_else(|| {
             parse_setup_appearance_asset_id(asset_id).map(ContentAssetRequest::SetupAppearance)
         })
-        .or_else(|| parse_render_texture_asset_id(asset_id).map(ContentAssetRequest::RenderTexture))
+        .or_else(|| {
+            parse_surface_texture_asset_id(asset_id).map(ContentAssetRequest::SurfaceTexture)
+        })
         .or_else(|| parse_render_surface_asset_id(asset_id).map(ContentAssetRequest::RenderSurface))
         .or_else(|| parse_palette_asset_id(asset_id).map(ContentAssetRequest::Palette))
 }

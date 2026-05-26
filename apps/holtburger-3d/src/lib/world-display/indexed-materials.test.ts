@@ -136,8 +136,8 @@ function createTextureMaterialRecipe(options: {
 		surfaceType: options.surfaceType,
 		source: {
 			kind: "texture",
-			renderTextureId: 0x05000001,
-			renderSurfaceIds: [0x06000001],
+			surfaceTextureId: 0x05000001,
+			selectedRenderSurfaceId: 0x06000001,
 			paletteId: 0x04000001,
 			renderSurfaceDefaultPaletteIds: [],
 		},
@@ -145,7 +145,7 @@ function createTextureMaterialRecipe(options: {
 		luminosity: 0,
 		diffuse: 1,
 		dependencies: {
-			renderTextureAssetIds: [],
+			surfaceTextureAssetIds: [],
 			renderSurfaceAssetIds: ["render-surface/06000001"],
 			paletteAssetIds: ["palette/04000001"],
 		},

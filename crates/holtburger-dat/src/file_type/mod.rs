@@ -23,8 +23,8 @@ pub use gfx_obj::GfxObj;
 pub use material::{
     AnimationPartChange, CSurface, CSurfaceSource, CloObjectEffect, CloPaletteTemplate,
     CloSubpalEffect, CloSubpaletteRange, CloTextureEffect, ClothingBase, ClothingBuildObjDescError,
-    ClothingTable, ObjDesc, Palette, PaletteSet, PixelFormatId, RenderSurface, RenderTexture,
-    SubPalette, SurfaceType, TextureMapChange,
+    ClothingTable, ObjDesc, Palette, PaletteSet, PixelFormatId, RenderSurface, SubPalette,
+    SurfaceTexture, SurfaceType, TextureMapChange,
 };
 pub use motion_kinematics::{MotionKinematics, MotionKinematicsTable};
 pub use motion_table::{MotionCommandKinematics, MotionTable, MotionTableMovementProfile};

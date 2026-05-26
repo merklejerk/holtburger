@@ -285,7 +285,7 @@ function createPreparedMaterialRecipe(
 		luminosity: 0,
 		diffuse: 1,
 		dependencies: {
-			renderTextureAssetIds: [],
+			surfaceTextureAssetIds: [],
 			renderSurfaceAssetIds: [],
 			paletteAssetIds: [],
 		},

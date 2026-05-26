@@ -4,7 +4,7 @@ use anyhow::{Context, Result, anyhow};
 use holtburger_dat::file_type::{
     AnimationPartChange, CSurface, CSurfaceSource, ClothingBuildObjDescError, ClothingTable,
     EnvCell, GfxObj, ObjDesc, Palette, PaletteSet, REGION_DESC_FILE_ID, RegionDesc, RenderSurface,
-    RenderTexture, SetupModel, SubPalette, SurfaceType, TextureMapChange,
+    SetupModel, SubPalette, SurfaceTexture, SurfaceType, TextureMapChange,
 };
 use holtburger_dat::{EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, ResourceKey};
 
@@ -34,15 +34,15 @@ pub enum ResolvedMaterialSource {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResolvedTextureMaterial {
-    pub render_texture_id: u32,
+    pub surface_texture_id: u32,
     pub render_surface_ids: Vec<u32>,
     pub palette_id: Option<u32>,
     pub render_surface_default_palette_ids: Vec<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ResolvedRenderTexture {
-    pub render_texture_id: u32,
+pub struct ResolvedSurfaceTexture {
+    pub surface_texture_id: u32,
     pub texture_type: u8,
     pub unknown: i32,
     pub render_surface_ids: Vec<u32>,
@@ -93,7 +93,7 @@ pub struct ResolvedTerrainMaterialTable {
     pub terrain_types: Vec<ResolvedTerrainMaterialType>,
     pub terrain_alpha_maps: Vec<ResolvedTerrainAlphaMap>,
     pub road_alpha_maps: Vec<ResolvedTerrainRoadAlphaMap>,
-    pub render_texture_ids: Vec<u32>,
+    pub surface_texture_ids: Vec<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -133,8 +133,8 @@ pub(crate) struct ParsedRenderSurfaceDependency {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ParsedRenderTextureDependency {
-    pub render_texture: RenderTexture,
+pub(crate) struct ParsedSurfaceTextureDependency {
+    pub surface_texture: SurfaceTexture,
     pub render_surfaces: Vec<ParsedRenderSurfaceDependency>,
 }
 
@@ -142,7 +142,7 @@ pub(crate) struct ParsedRenderTextureDependency {
 pub(crate) struct ParsedMaterialDependency {
     pub surface_id: u32,
     pub c_surface: CSurface,
-    pub render_texture: Option<ParsedRenderTextureDependency>,
+    pub surface_texture: Option<ParsedSurfaceTextureDependency>,
     pub palette: Option<Palette>,
 }
 
@@ -177,17 +177,16 @@ impl ContentRepository {
             })
     }
 
-    pub fn resolve_render_texture(&self, render_texture_id: u32) -> Result<ResolvedRenderTexture> {
-        let dependency = read_render_texture_dependency(self, render_texture_id)?;
-        Ok(ResolvedRenderTexture {
-            render_texture_id: dependency.render_texture.id,
-            texture_type: dependency.render_texture.texture_type,
-            unknown: dependency.render_texture.unknown,
-            render_surface_ids: dependency
-                .render_surfaces
-                .iter()
-                .map(|dependency| dependency.render_surface.id)
-                .collect(),
+    pub fn resolve_surface_texture(
+        &self,
+        surface_texture_id: u32,
+    ) -> Result<ResolvedSurfaceTexture> {
+        let dependency = read_surface_texture_dependency(self, surface_texture_id)?;
+        Ok(ResolvedSurfaceTexture {
+            surface_texture_id: dependency.surface_texture.id,
+            texture_type: dependency.surface_texture.texture_type,
+            unknown: dependency.surface_texture.unknown,
+            render_surface_ids: dependency.surface_texture.render_surface_ids,
         })
     }
 
@@ -286,7 +285,7 @@ impl ContentRepository {
                 alpha_texture_id: map.road_tex_gid,
             })
             .collect::<Vec<_>>();
-        let mut render_texture_ids = terrain_types
+        let mut surface_texture_ids = terrain_types
             .iter()
             .flat_map(|terrain| [terrain.texture_id, terrain.detail_texture_id])
             .chain(terrain_alpha_maps.iter().map(|map| map.texture_id))
@@ -297,8 +296,8 @@ impl ContentRepository {
             )
             .filter(|texture_id| *texture_id != 0)
             .collect::<Vec<_>>();
-        render_texture_ids.sort_unstable();
-        render_texture_ids.dedup();
+        surface_texture_ids.sort_unstable();
+        surface_texture_ids.dedup();
 
         Ok(ResolvedTerrainMaterialTable {
             region_id: region.id,
@@ -306,7 +305,7 @@ impl ContentRepository {
             terrain_types,
             terrain_alpha_maps,
             road_alpha_maps,
-            render_texture_ids,
+            surface_texture_ids,
         })
     }
 
@@ -476,26 +475,26 @@ pub(crate) fn parse_material_dependency(
     surface_id: u32,
 ) -> Result<ParsedMaterialDependency> {
     let c_surface = read_c_surface(content, surface_id)?;
-    let (render_texture, palette) = match &c_surface.source {
+    let (surface_texture, palette) = match &c_surface.source {
         CSurfaceSource::SolidColor(_) => (None, None),
         CSurfaceSource::Texture {
             orig_texture_id,
             orig_palette_id,
         } => {
-            let render_texture = read_render_texture_dependency(content, *orig_texture_id)?;
+            let surface_texture = read_surface_texture_dependency(content, *orig_texture_id)?;
             let palette = if *orig_palette_id == 0 {
                 None
             } else {
                 Some(read_palette(content, *orig_palette_id)?)
             };
-            (Some(render_texture), palette)
+            (Some(surface_texture), palette)
         }
     };
 
     Ok(ParsedMaterialDependency {
         surface_id,
         c_surface,
-        render_texture,
+        surface_texture,
         palette,
     })
 }
@@ -506,35 +505,25 @@ fn read_c_surface(content: &ContentRepository, surface_id: u32) -> Result<CSurfa
         .with_context(|| format!("failed to parse CSurface 0x{surface_id:08X}"))
 }
 
-fn read_render_texture_dependency(
+fn read_surface_texture_dependency(
     content: &ContentRepository,
-    render_texture_id: u32,
-) -> Result<ParsedRenderTextureDependency> {
-    let resource = read_available_resource(content, EOR_PORTAL_NAMESPACE, render_texture_id)?;
-    let render_texture = RenderTexture::unpack(&mut Cursor::new(resource.bytes))
-        .with_context(|| format!("failed to parse RenderTexture 0x{render_texture_id:08X}"))?;
+    surface_texture_id: u32,
+) -> Result<ParsedSurfaceTextureDependency> {
+    let resource = read_available_resource(content, EOR_PORTAL_NAMESPACE, surface_texture_id)?;
+    let surface_texture = SurfaceTexture::unpack(&mut Cursor::new(resource.bytes))
+        .with_context(|| format!("failed to parse SurfaceTexture 0x{surface_texture_id:08X}"))?;
 
-    let mut render_surfaces = Vec::with_capacity(render_texture.render_surface_ids.len());
-    let mut missing_render_surface_ids = Vec::new();
-    for render_surface_id in &render_texture.render_surface_ids {
+    let mut render_surfaces = Vec::with_capacity(surface_texture.render_surface_ids.len());
+    for render_surface_id in &surface_texture.render_surface_ids {
         match read_render_surface_dependency(content, *render_surface_id) {
             Ok(render_surface) => render_surfaces.push(render_surface),
-            Err(error) if is_missing_or_pruned_resource_error(&error) => {
-                missing_render_surface_ids.push(*render_surface_id);
-            }
+            Err(error) if is_missing_or_pruned_resource_error(&error) => {}
             Err(error) => return Err(error),
         }
     }
 
-    if render_surfaces.is_empty() {
-        anyhow::bail!(
-            "RenderTexture 0x{render_texture_id:08X} has no available render surfaces; missing/pruned candidates: {}",
-            format_data_id_list(&missing_render_surface_ids)
-        );
-    }
-
-    Ok(ParsedRenderTextureDependency {
-        render_texture,
+    Ok(ParsedSurfaceTextureDependency {
+        surface_texture,
         render_surfaces,
     })
 }
@@ -586,18 +575,6 @@ fn is_missing_or_pruned_resource_error(error: &anyhow::Error) -> bool {
     detail.contains("missing resource ") || detail.contains(" is pruned")
 }
 
-fn format_data_id_list(file_ids: &[u32]) -> String {
-    if file_ids.is_empty() {
-        return "none".to_string();
-    }
-
-    file_ids
-        .iter()
-        .map(|file_id| format!("0x{file_id:08X}"))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
 fn material_recipe_from_dependency(
     content: &ContentRepository,
     dependency: ParsedMaterialDependency,
@@ -609,27 +586,23 @@ fn material_recipe_from_dependency(
             orig_texture_id,
             orig_palette_id,
         } => {
-            let render_texture_id = texture_override.unwrap_or(orig_texture_id);
-            let render_texture = if render_texture_id == orig_texture_id {
+            let surface_texture_id = texture_override.unwrap_or(orig_texture_id);
+            let surface_texture = if surface_texture_id == orig_texture_id {
                 dependency
-                    .render_texture
-                    .expect("textured material dependency should contain a render texture")
+                    .surface_texture
+                    .expect("textured material dependency should contain a surface texture")
             } else {
-                read_render_texture_dependency(content, render_texture_id)?
+                read_surface_texture_dependency(content, surface_texture_id)?
             };
-            let render_surface_default_palette_ids = render_texture
+            let render_surface_default_palette_ids = surface_texture
                 .render_surfaces
                 .iter()
                 .filter_map(|dependency| dependency.render_surface.default_palette_id)
                 .collect();
 
             ResolvedMaterialSource::Texture(ResolvedTextureMaterial {
-                render_texture_id,
-                render_surface_ids: render_texture
-                    .render_surfaces
-                    .iter()
-                    .map(|dependency| dependency.render_surface.id)
-                    .collect(),
+                surface_texture_id,
+                render_surface_ids: surface_texture.surface_texture.render_surface_ids,
                 palette_id: (orig_palette_id != 0).then_some(orig_palette_id),
                 render_surface_default_palette_ids,
             })

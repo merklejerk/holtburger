@@ -20,7 +20,7 @@ interface MaterialDiagnosticInput {
 }
 
 interface MissingMaterialDependencySummary {
-	renderTextureAssetIds: string[];
+	surfaceTextureAssetIds: string[];
 	renderSurfaceAssetIds: string[];
 	paletteAssetIds: string[];
 }
@@ -41,7 +41,7 @@ interface IndexedMaterialDiagnosticSummary {
 
 const MATERIAL_PIPELINE_ASSET_PREFIXES = [
 	"material/",
-	"render-texture/",
+	"surface-texture/",
 	"render-surface/",
 	"palette/",
 	"terrain-material/",
@@ -94,11 +94,11 @@ export function describeMaterialAssetDiagnostics({
 
 	return [
 		`recipes ${materialRecipes.length} (${textureRecipeCount} texture, ${solidRecipeCount} solid${failedRecipeCount === 0 ? "" : `, ${failedRecipeCount} failed`})`,
-		`render resources ${countPreparedKind(preparedAssets, "render-texture")} textures, ${countPreparedKind(preparedAssets, "render-surface")} surfaces, ${countPreparedKind(preparedAssets, "palette")} palettes`,
+		`render resources ${countPreparedKind(preparedAssets, "surface-texture")} textures, ${countPreparedKind(preparedAssets, "render-surface")} surfaces, ${countPreparedKind(preparedAssets, "palette")} palettes`,
 		formatIndexedMaterialSummary(indexedSummary),
 		`terrain tables ${countPreparedKind(preparedAssets, "terrain-material")}`,
 		`missing visible recipes ${missingVisibleMaterialAssetIds.length}${formatSample(missingVisibleMaterialAssetIds)}`,
-		`missing deps tex ${missingDependencies.renderTextureAssetIds.length}${formatSample(missingDependencies.renderTextureAssetIds)}, surface ${missingDependencies.renderSurfaceAssetIds.length}${formatSample(missingDependencies.renderSurfaceAssetIds)}, palette ${missingDependencies.paletteAssetIds.length}${formatSample(missingDependencies.paletteAssetIds)}`,
+		`missing deps tex ${missingDependencies.surfaceTextureAssetIds.length}${formatSample(missingDependencies.surfaceTextureAssetIds)}, surface ${missingDependencies.renderSurfaceAssetIds.length}${formatSample(missingDependencies.renderSurfaceAssetIds)}, palette ${missingDependencies.paletteAssetIds.length}${formatSample(missingDependencies.paletteAssetIds)}`,
 		`pending ${pendingAssetIds.length}${formatSample(pendingAssetIds)}`,
 	].join("; ");
 }
@@ -107,14 +107,14 @@ function summarizeMissingMaterialDependencies(
 	recipes: readonly PreparedMaterialRecipePayload[],
 	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>,
 ): MissingMaterialDependencySummary {
-	const renderTextureAssetIds = new Set<string>();
+	const surfaceTextureAssetIds = new Set<string>();
 	const renderSurfaceAssetIds = new Set<string>();
 	const paletteAssetIds = new Set<string>();
 
 	for (const recipe of recipes) {
-		for (const assetId of recipe.dependencies.renderTextureAssetIds) {
-			if (preparedByAssetId[assetId]?.payload.kind !== "render-texture") {
-				renderTextureAssetIds.add(assetId);
+		for (const assetId of recipe.dependencies.surfaceTextureAssetIds) {
+			if (preparedByAssetId[assetId]?.payload.kind !== "surface-texture") {
+				surfaceTextureAssetIds.add(assetId);
 			}
 		}
 		for (const assetId of recipe.dependencies.renderSurfaceAssetIds) {
@@ -130,7 +130,7 @@ function summarizeMissingMaterialDependencies(
 	}
 
 	return {
-		renderTextureAssetIds: [...renderTextureAssetIds].sort(),
+		surfaceTextureAssetIds: [...surfaceTextureAssetIds].sort(),
 		renderSurfaceAssetIds: [...renderSurfaceAssetIds].sort(),
 		paletteAssetIds: [...paletteAssetIds].sort(),
 	};
@@ -246,7 +246,9 @@ function textureCandidateRenderSurfaceAssetIds(
 	recipe: PreparedMaterialRecipePayload,
 ): string[] {
 	if (recipe.source.kind === "texture") {
-		return recipe.source.renderSurfaceIds.map(formatRenderSurfaceAssetId);
+		return recipe.source.selectedRenderSurfaceId === null
+			? []
+			: [formatRenderSurfaceAssetId(recipe.source.selectedRenderSurfaceId)];
 	}
 	return recipe.dependencies.renderSurfaceAssetIds;
 }

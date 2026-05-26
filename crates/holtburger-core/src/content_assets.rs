@@ -8,7 +8,7 @@ use holtburger_content::{
     ContentDecodeCache, ContentRepository, EnvCellAsset, EnvCellAssetAssembler,
     LandblockOutdoorAsset, LandblockOutdoorAssetAssembler, LandblockTopologyAsset,
     LandblockTopologyAssetAssembler, MaterialAppearanceInput, ResolvedMaterialRecipe,
-    ResolvedRenderTexture, ResolvedSetupAppearance, ResolvedTerrainMaterialTable,
+    ResolvedSetupAppearance, ResolvedSurfaceTexture, ResolvedTerrainMaterialTable,
     normalize_landblock_id,
 };
 use holtburger_dat::file_type::{GfxObj, Palette, RenderSurface, SetupModel};
@@ -27,7 +27,7 @@ pub enum ContentAssetRequest {
     SetupModel(u32),
     MaterialRecipe(u32),
     SetupAppearance(SetupAppearanceRequest),
-    RenderTexture(u32),
+    SurfaceTexture(u32),
     RenderSurface(u32),
     Palette(u32),
 }
@@ -61,7 +61,7 @@ pub enum ContentAsset {
     SetupModel(Box<SetupModel>),
     MaterialRecipe(Box<ResolvedMaterialRecipe>),
     SetupAppearance(Box<ResolvedSetupAppearance>),
-    RenderTexture(Box<ResolvedRenderTexture>),
+    SurfaceTexture(Box<ResolvedSurfaceTexture>),
     RenderSurface(Box<RenderSurface>),
     Palette(Box<Palette>),
 }
@@ -159,12 +159,12 @@ impl ContentAssetService {
                         })?,
                 )))
             }
-            ContentAssetRequest::RenderTexture(render_texture_id) => {
-                Ok(ContentAsset::RenderTexture(Box::new(
+            ContentAssetRequest::SurfaceTexture(surface_texture_id) => {
+                Ok(ContentAsset::SurfaceTexture(Box::new(
                     self.content
-                        .resolve_render_texture(render_texture_id)
+                        .resolve_surface_texture(surface_texture_id)
                         .with_context(|| {
-                            format!("Could not resolve RenderTexture 0x{render_texture_id:08X}")
+                            format!("Could not resolve SurfaceTexture 0x{surface_texture_id:08X}")
                         })?,
                 )))
             }

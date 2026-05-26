@@ -10,7 +10,7 @@ import type {
 	PreparedMaterialRecipePayload,
 	PreparedPalettePayload,
 	PreparedRenderSurfacePayload,
-	PreparedRenderTexturePayload,
+	PreparedSurfaceTexturePayload,
 } from "../assets/types";
 import { formatHex32 } from "../landblocks";
 import {
@@ -140,7 +140,7 @@ export function createMaterial(options: {
 		);
 	}
 
-	const renderTexture = firstPreparedRenderTexture(
+	const surfaceTexture = firstPreparedSurfaceTexture(
 		recipe,
 		options.preparedByAssetId,
 	);
@@ -148,12 +148,11 @@ export function createMaterial(options: {
 		recipe,
 		options.preparedByAssetId,
 	);
-	const indexedRenderSurface = firstPreparedIndexedRenderSurface(
-		recipe,
-		options.preparedByAssetId,
-	);
 	const palette = firstPreparedPalette(recipe, options.preparedByAssetId);
-	const texture = renderSurface
+	const texture =
+		renderSurface &&
+		(isSupportedDirectColorFormat(renderSurface.formatRaw) ||
+			isSupportedCompressedFormat(renderSurface.formatRaw))
 		? options.resolveTexture(
 				renderSurface,
 				selectVariantTextureSamplingPolicy(
@@ -190,16 +189,16 @@ export function createMaterial(options: {
 			behavior,
 		);
 	}
-	if (indexedRenderSurface) {
+	if (renderSurface && isIndexedTextureFormat(renderSurface.formatRaw)) {
 		const indexedResources = resolveIndexedMaterialResources({
 			recipe,
 			materialAssetId: options.materialAssetId,
 			preparedByAssetId: options.preparedByAssetId,
-			renderSurface: indexedRenderSurface,
+			renderSurface,
 			indexedTexture: options.resolveIndexedTexture(
-				indexedRenderSurface,
+				renderSurface,
 				selectVariantTextureSamplingPolicy(
-					indexedRenderSurface,
+					renderSurface,
 					options.textureSamplingPolicy,
 					options.materialVariantSignature,
 				),
@@ -226,8 +225,8 @@ export function createMaterial(options: {
 			});
 		}
 		const color = buildTexturePlaceholderColor(recipe, {
-			renderTexture,
-			renderSurface: indexedRenderSurface,
+			surfaceTexture,
+			renderSurface,
 			palette,
 		});
 		const behavior = deriveLegacyMaterialBehavior({ recipe });
@@ -257,7 +256,7 @@ export function createMaterial(options: {
 		recipe,
 		materialAssetId: options.materialAssetId,
 		preparedByAssetId: options.preparedByAssetId,
-		renderTexture,
+		surfaceTexture,
 		renderSurface,
 		palette,
 		texture,
@@ -265,7 +264,7 @@ export function createMaterial(options: {
 	});
 
 	const color = buildTexturePlaceholderColor(recipe, {
-		renderTexture,
+		surfaceTexture,
 		renderSurface,
 		palette,
 	});
@@ -364,21 +363,21 @@ function reportTextureFallbackDiagnostics(options: {
 	recipe: PreparedMaterialRecipePayload;
 	materialAssetId: string;
 	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>;
-	renderTexture: PreparedRenderTexturePayload | null;
+	surfaceTexture: PreparedSurfaceTexturePayload | null;
 	renderSurface: PreparedRenderSurfacePayload | null;
 	palette: PreparedPalettePayload | null;
 	texture: Texture | null;
 	reportDiagnostic: MaterialResourceDiagnosticHandler;
 }): void {
-	for (const assetId of options.recipe.dependencies.renderTextureAssetIds) {
+	for (const assetId of options.recipe.dependencies.surfaceTextureAssetIds) {
 		const asset = options.preparedByAssetId[assetId];
-		if (asset?.payload.kind !== "render-texture") {
+		if (asset?.payload.kind !== "surface-texture") {
 			options.reportDiagnostic({
-				key: `missing-render-texture:${options.materialAssetId}:${assetId}`,
-				message: `Using placeholder material because ${options.materialAssetId} is missing render texture ${assetId}.`,
+				key: `missing-surface-texture:${options.materialAssetId}:${assetId}`,
+				message: `Using placeholder material because ${options.materialAssetId} is missing surface texture ${assetId}.`,
 				detail: {
 					materialAssetId: options.materialAssetId,
-					renderTextureAssetId: assetId,
+					surfaceTextureAssetId: assetId,
 					preparedKind: asset?.payload.kind ?? null,
 				},
 			});
@@ -662,13 +661,13 @@ function samplePreparedMaterialAssetIds(
 		.slice(0, 12);
 }
 
-function firstPreparedRenderTexture(
+function firstPreparedSurfaceTexture(
 	recipe: PreparedMaterialRecipePayload,
 	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>,
-): PreparedRenderTexturePayload | null {
-	for (const assetId of recipe.dependencies.renderTextureAssetIds) {
+): PreparedSurfaceTexturePayload | null {
+	for (const assetId of recipe.dependencies.surfaceTextureAssetIds) {
 		const asset = preparedByAssetId[assetId];
-		if (asset?.payload.kind === "render-texture") {
+		if (asset?.payload.kind === "surface-texture") {
 			return asset.payload;
 		}
 	}
@@ -680,42 +679,21 @@ function firstTextureUploadCandidateRenderSurface(
 	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>,
 ): PreparedRenderSurfacePayload | null {
 	const assetIds = textureCandidateRenderSurfaceAssetIds(recipe);
-	for (const assetId of assetIds) {
-		const asset = preparedByAssetId[assetId];
-		if (
-			asset?.payload.kind === "render-surface" &&
-			(isSupportedDirectColorFormat(asset.payload.formatRaw) ||
-				isSupportedCompressedFormat(asset.payload.formatRaw))
-		) {
-			return asset.payload;
-		}
-	}
-	return null;
-}
-
-function firstPreparedIndexedRenderSurface(
-	recipe: PreparedMaterialRecipePayload,
-	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>,
-): PreparedRenderSurfacePayload | null {
-	const assetIds = textureCandidateRenderSurfaceAssetIds(recipe);
-	for (const assetId of assetIds) {
-		const asset = preparedByAssetId[assetId];
-		if (
-			asset?.payload.kind === "render-surface" &&
-			isIndexedTextureFormat(asset.payload.formatRaw)
-		) {
-			return asset.payload;
-		}
-	}
-	return null;
+	const assetId = assetIds[0];
+	const asset = assetId === undefined ? null : preparedByAssetId[assetId];
+	return asset?.payload.kind === "render-surface" ? asset.payload : null;
 }
 
 function textureCandidateRenderSurfaceAssetIds(
 	recipe: PreparedMaterialRecipePayload,
 ): string[] {
 	return recipe.source.kind === "texture"
-		? recipe.source.renderSurfaceIds.map(formatRenderSurfaceAssetId)
+		? selectedRenderSurfaceAssetIds(recipe.source.selectedRenderSurfaceId)
 		: recipe.dependencies.renderSurfaceAssetIds;
+}
+
+function selectedRenderSurfaceAssetIds(renderSurfaceId: number | null): string[] {
+	return renderSurfaceId === null ? [] : [formatRenderSurfaceAssetId(renderSurfaceId)];
 }
 
 function formatRenderSurfaceAssetId(renderSurfaceId: number): string {
@@ -738,14 +716,14 @@ function firstPreparedPalette(
 function buildTexturePlaceholderColor(
 	recipe: PreparedMaterialRecipePayload,
 	dependencies: {
-		renderTexture: PreparedRenderTexturePayload | null;
+		surfaceTexture: PreparedSurfaceTexturePayload | null;
 		renderSurface: PreparedRenderSurfacePayload | null;
 		palette: PreparedPalettePayload | null;
 	},
 ): Color {
 	const seed = [
 		recipe.surfaceId,
-		dependencies.renderTexture?.renderTextureId ?? 0,
+		dependencies.surfaceTexture?.surfaceTextureId ?? 0,
 		dependencies.renderSurface?.renderSurfaceId ?? 0,
 		dependencies.palette?.paletteId ?? 0,
 	].join(":");

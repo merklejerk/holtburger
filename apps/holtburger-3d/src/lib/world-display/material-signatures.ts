@@ -41,7 +41,7 @@ export function describeMaterialPreparedStateSignature(
 	}
 
 	const dependencyAssetIds = [
-		...recipeAsset.payload.dependencies.renderTextureAssetIds,
+		...recipeAsset.payload.dependencies.surfaceTextureAssetIds,
 		...recipeAsset.payload.dependencies.renderSurfaceAssetIds,
 		...recipeAsset.payload.dependencies.paletteAssetIds,
 	];

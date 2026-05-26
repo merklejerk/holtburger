@@ -6,6 +6,8 @@ use holtburger_dat::file_type::setup_model::AnimationHookPayload;
 use holtburger_dat::file_type::{Palette, RenderSurface, SetupModel};
 use holtburger_dat::physics::BspNode;
 
+const RETAIL_HIGH_DETAIL_SURFACE_TEXTURE_SOURCE_LEVEL_INDEX: usize = 0;
+
 pub fn serialize_setup_model_payload(setup_model: &SetupModel) -> serde_json::Value {
     serde_json::json!({
         "kind": "setup-model",
@@ -45,7 +47,10 @@ pub fn serialize_setup_model_payload(setup_model: &SetupModel) -> serde_json::Va
     })
 }
 
-pub fn serialize_material_recipe_payload(recipe: &ResolvedMaterialRecipe) -> serde_json::Value {
+pub fn serialize_material_recipe_payload(
+    recipe: &ResolvedMaterialRecipe,
+    render_surface_available: impl Fn(u32) -> bool,
+) -> serde_json::Value {
     let (source, dependencies) = match &recipe.source {
         ResolvedMaterialSource::SolidColor(color) => (
             serde_json::json!({
@@ -53,25 +58,33 @@ pub fn serialize_material_recipe_payload(recipe: &ResolvedMaterialRecipe) -> ser
                 "argb": color,
             }),
             serde_json::json!({
-                "renderTextureAssetIds": [],
+                "surfaceTextureAssetIds": [],
                 "renderSurfaceAssetIds": [],
                 "paletteAssetIds": [],
             }),
         ),
-        ResolvedMaterialSource::Texture(texture) => (
-            serde_json::json!({
-                "kind": "texture",
-                "renderTextureId": texture.render_texture_id,
-                "renderSurfaceIds": texture.render_surface_ids,
-                "paletteId": texture.palette_id,
-                "renderSurfaceDefaultPaletteIds": texture.render_surface_default_palette_ids,
-            }),
-            serde_json::json!({
-                "renderTextureAssetIds": [format_render_texture_asset_id(texture.render_texture_id)],
-                "renderSurfaceAssetIds": texture.render_surface_ids.iter().map(|id| format_render_surface_asset_id(*id)).collect::<Vec<_>>(),
-                "paletteAssetIds": recipe_palette_asset_ids(texture),
-            }),
-        ),
+        ResolvedMaterialSource::Texture(texture) => {
+            let selected_render_surface_id =
+                dto_render_surface_id(&texture.render_surface_ids, &render_surface_available);
+            let render_surface_asset_ids = selected_render_surface_id
+                .map(format_render_surface_asset_id)
+                .into_iter()
+                .collect::<Vec<_>>();
+            (
+                serde_json::json!({
+                    "kind": "texture",
+                    "surfaceTextureId": texture.surface_texture_id,
+                    "selectedRenderSurfaceId": selected_render_surface_id,
+                    "paletteId": texture.palette_id,
+                    "renderSurfaceDefaultPaletteIds": texture.render_surface_default_palette_ids,
+                }),
+                serde_json::json!({
+                    "surfaceTextureAssetIds": [format_surface_texture_asset_id(texture.surface_texture_id)],
+                    "renderSurfaceAssetIds": render_surface_asset_ids,
+                    "paletteAssetIds": recipe_palette_asset_ids(texture),
+                }),
+            )
+        }
     };
 
     serde_json::json!({
@@ -157,27 +170,53 @@ pub fn serialize_material_slot(slot: &ResolvedMaterialSlot) -> serde_json::Value
     })
 }
 
-pub fn serialize_render_texture_payload(
-    render_texture: &ResolvedRenderTexture,
+pub fn serialize_surface_texture_payload(
+    surface_texture: &ResolvedSurfaceTexture,
+    render_surface_available: impl Fn(u32) -> bool,
 ) -> serde_json::Value {
+    let selected_render_surface_id = dto_render_surface_id(
+        &surface_texture.render_surface_ids,
+        &render_surface_available,
+    );
+    let render_surface_asset_ids = selected_render_surface_id
+        .map(format_render_surface_asset_id)
+        .into_iter()
+        .collect::<Vec<_>>();
     serde_json::json!({
-        "kind": "render-texture",
+        "kind": "surface-texture",
         "residencyKind": "unknown",
-        "sourceAssetKind": "render-texture",
-        "renderTextureId": render_texture.render_texture_id,
-        "textureType": render_texture.texture_type,
-        "unknown": render_texture.unknown,
-        "renderSurfaceIds": render_texture.render_surface_ids,
+        "sourceAssetKind": "surface-texture",
+        "surfaceTextureId": surface_texture.surface_texture_id,
+        "textureType": surface_texture.texture_type,
+        "unknown": surface_texture.unknown,
+        "selectedRenderSurfaceId": selected_render_surface_id,
         "dependencies": {
-            "renderSurfaceAssetIds": render_texture.render_surface_ids.iter().map(|id| format_render_surface_asset_id(*id)).collect::<Vec<_>>(),
+            "renderSurfaceAssetIds": render_surface_asset_ids,
         },
         "provenance": {
             "source": "repo-local-hba",
-            "sourceAssetKind": "render-texture",
+            "sourceAssetKind": "surface-texture",
             "errorCode": null,
             "detail": null
         }
     })
+}
+
+fn dto_render_surface_id(
+    render_surface_ids: &[u32],
+    render_surface_available: impl Fn(u32) -> bool,
+) -> Option<u32> {
+    if let Some(high_detail_render_surface_id) =
+        render_surface_ids.get(RETAIL_HIGH_DETAIL_SURFACE_TEXTURE_SOURCE_LEVEL_INDEX)
+        && render_surface_available(*high_detail_render_surface_id)
+    {
+        return Some(*high_detail_render_surface_id);
+    }
+
+    render_surface_ids
+        .iter()
+        .copied()
+        .find(|render_surface_id| render_surface_available(*render_surface_id))
 }
 
 pub fn serialize_render_surface_payload(render_surface: &RenderSurface) -> serde_json::Value {
@@ -281,7 +320,7 @@ pub fn failed_terrain_material_payload(
             "sizeBitMask": 1 << 28,
         },
         "dependencies": {
-            "renderTextureAssetIds": [],
+            "surfaceTextureAssetIds": [],
             "renderSurfaceAssetIds": [],
             "paletteAssetIds": [],
         },
@@ -1030,11 +1069,11 @@ pub fn serialize_terrain_material_payload(
         "terrainTypes": table.terrain_types.iter().map(|terrain| {
             serde_json::json!({
                 "terrainType": terrain.terrain_type,
-                "textureAssetId": format_render_texture_asset_id(terrain.texture_id),
+                "textureAssetId": format_surface_texture_asset_id(terrain.texture_id),
                 "textureDid": terrain.texture_id,
                 "tiling": terrain.tiling,
                 "detail": (terrain.detail_texture_id != 0).then(|| serde_json::json!({
-                    "textureAssetId": format_render_texture_asset_id(terrain.detail_texture_id),
+                    "textureAssetId": format_surface_texture_asset_id(terrain.detail_texture_id),
                     "textureDid": terrain.detail_texture_id,
                     "tiling": terrain.detail_tiling,
                     "fadeNear": 0.0,
@@ -1054,7 +1093,7 @@ pub fn serialize_terrain_material_payload(
         "terrainAlphaMaps": table.terrain_alpha_maps.iter().map(|map| {
             serde_json::json!({
                 "alphaIndex": map.alpha_index,
-                "alphaTextureAssetId": format_render_texture_asset_id(map.texture_id),
+                "alphaTextureAssetId": format_surface_texture_asset_id(map.texture_id),
                 "alphaTextureDid": map.texture_id,
                 "selector": map.selector,
             })
@@ -1062,9 +1101,9 @@ pub fn serialize_terrain_material_payload(
         "roadAlphaMaps": table.road_alpha_maps.iter().map(|map| {
             serde_json::json!({
                 "roadIndex": map.road_index,
-                "roadTextureAssetId": format_render_texture_asset_id(map.road_texture_id),
+                "roadTextureAssetId": format_surface_texture_asset_id(map.road_texture_id),
                 "roadTextureDid": map.road_texture_id,
-                "alphaTextureAssetId": format_render_texture_asset_id(map.alpha_texture_id),
+                "alphaTextureAssetId": format_surface_texture_asset_id(map.alpha_texture_id),
                 "alphaTextureDid": map.alpha_texture_id,
                 "selector": map.selector,
             })
@@ -1075,7 +1114,7 @@ pub fn serialize_terrain_material_payload(
             "sizeBitMask": 1 << 28,
         },
         "dependencies": {
-            "renderTextureAssetIds": table.render_texture_ids.iter().map(|id| format_render_texture_asset_id(*id)).collect::<Vec<_>>(),
+            "surfaceTextureAssetIds": table.surface_texture_ids.iter().map(|id| format_surface_texture_asset_id(*id)).collect::<Vec<_>>(),
             "renderSurfaceAssetIds": [],
             "paletteAssetIds": [],
         },
@@ -1166,8 +1205,8 @@ pub fn format_material_asset_id(surface_id: u32) -> String {
     format!("material/{surface_id:08x}")
 }
 
-pub fn format_render_texture_asset_id(render_texture_id: u32) -> String {
-    format!("render-texture/{render_texture_id:08x}")
+pub fn format_surface_texture_asset_id(surface_texture_id: u32) -> String {
+    format!("surface-texture/{surface_texture_id:08x}")
 }
 
 pub fn format_render_surface_asset_id(render_surface_id: u32) -> String {

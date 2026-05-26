@@ -62,7 +62,7 @@ describe("Tauri host commands", () => {
 			createRequest("a", "env-cell/01030100"),
 			createRequest("b", "material/0800006c"),
 			createRequest("c", "render-surface/06000001"),
-			createRequest("d", "render-texture/05000001"),
+			createRequest("d", "surface-texture/05000001"),
 			createRequest("e", "palette/04000001"),
 		]);
 
@@ -75,7 +75,7 @@ describe("Tauri host commands", () => {
 		]);
 		expect(plan.jsonRequests.map((request) => request.assetId)).toEqual([
 			"material/0800006c",
-			"render-texture/05000001",
+			"surface-texture/05000001",
 		]);
 	});
 });

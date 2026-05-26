@@ -179,14 +179,14 @@ impl RenderSurface {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RenderTexture {
+pub struct SurfaceTexture {
     pub id: u32,
     pub unknown: i32,
     pub texture_type: u8,
     pub render_surface_ids: Vec<u32>,
 }
 
-impl RenderTexture {
+impl SurfaceTexture {
     pub fn unpack<R: Read + Seek>(reader: &mut R) -> BinResult<Self> {
         let id = u32::read_le(reader)?;
         let unknown = i32::read_le(reader)?;
@@ -949,7 +949,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_render_texture_mip_chain() {
+    fn parses_surface_texture_source_level_list() {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&0x0500_0001u32.to_le_bytes());
         bytes.extend_from_slice(&123i32.to_le_bytes());
@@ -959,7 +959,7 @@ mod tests {
         bytes.extend_from_slice(&0x0600_0002u32.to_le_bytes());
 
         let texture =
-            RenderTexture::unpack(&mut Cursor::new(bytes)).expect("render texture should parse");
+            SurfaceTexture::unpack(&mut Cursor::new(bytes)).expect("surface texture should parse");
 
         assert_eq!(texture.id, 0x0500_0001);
         assert_eq!(texture.unknown, 123);

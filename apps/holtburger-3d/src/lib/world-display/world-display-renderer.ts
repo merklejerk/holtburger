@@ -405,8 +405,8 @@ function describeMaterialDiagnosticCategory(category: string): string {
 			return "materials were requested by geometry before a material recipe was prepared";
 		case "failed-recipe":
 			return "material recipes failed to resolve";
-		case "missing-render-texture":
-			return "materials are missing render texture dependencies";
+		case "missing-surface-texture":
+			return "materials are missing surface texture dependencies";
 		case "missing-render-surface":
 			return "materials are missing render surface dependencies";
 		case "unsupported-render-surface":

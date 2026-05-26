@@ -6,7 +6,7 @@ import {
 	landblockTopologyPayloadDtoSchema,
 	materialRecipePayloadDtoSchema,
 	renderSurfacePayloadDtoSchema,
-	renderTexturePayloadDtoSchema,
+	surfaceTexturePayloadDtoSchema,
 	setupModelPayloadDtoSchema,
 	setupAppearancePayloadDtoSchema,
 	terrainMaterialPayloadDtoSchema,
@@ -74,7 +74,7 @@ export function getAssetResponseDependencies(
 	);
 	if (materialRecipe.success) {
 		return uniqueSortedAssetIds([
-			...materialRecipe.data.dependencies.renderTextureAssetIds,
+			...materialRecipe.data.dependencies.surfaceTextureAssetIds,
 			...materialRecipe.data.dependencies.renderSurfaceAssetIds,
 			...materialRecipe.data.dependencies.paletteAssetIds,
 		]);
@@ -85,18 +85,18 @@ export function getAssetResponseDependencies(
 	);
 	if (terrainMaterial.success) {
 		return uniqueSortedAssetIds([
-			...terrainMaterial.data.dependencies.renderTextureAssetIds,
+			...terrainMaterial.data.dependencies.surfaceTextureAssetIds,
 			...terrainMaterial.data.dependencies.renderSurfaceAssetIds,
 			...terrainMaterial.data.dependencies.paletteAssetIds,
 		]);
 	}
 
-	const renderTexture = renderTexturePayloadDtoSchema.safeParse(
+	const surfaceTexture = surfaceTexturePayloadDtoSchema.safeParse(
 		response.payload,
 	);
-	if (renderTexture.success) {
+	if (surfaceTexture.success) {
 		return uniqueSortedAssetIds(
-			renderTexture.data.dependencies.renderSurfaceAssetIds,
+			surfaceTexture.data.dependencies.renderSurfaceAssetIds,
 		);
 	}
 

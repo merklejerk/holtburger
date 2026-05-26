@@ -10,6 +10,13 @@ use holtburger_dat::{EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, ResourceKey};
 
 use crate::ContentRepository;
 
+const REGION_DETAIL_ROLE_ORDER: [ResolvedRegionDetailRoleKind; 4] = [
+    ResolvedRegionDetailRoleKind::Landscape,
+    ResolvedRegionDetailRoleKind::Building,
+    ResolvedRegionDetailRoleKind::Environment,
+    ResolvedRegionDetailRoleKind::Object,
+];
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ResolvedMaterialSlot {
     pub slot_index: usize,
@@ -96,13 +103,35 @@ pub struct ResolvedTerrainMaterialTable {
     pub surface_texture_ids: Vec<u32>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResolvedRegionDetailRoleKind {
+    Landscape,
+    Building,
+    Environment,
+    Object,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedRegionDetailRole {
+    pub role: ResolvedRegionDetailRoleKind,
+    pub source_terrain_desc_index: usize,
+    pub detail_texture_id: u32,
+    pub detail_tiling: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedRegionRenderProfile {
+    pub region_id: u32,
+    pub region_number: u32,
+    pub detail_roles: Vec<ResolvedRegionDetailRole>,
+    pub surface_texture_ids: Vec<u32>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ResolvedTerrainMaterialType {
     pub terrain_type: u32,
     pub texture_id: u32,
     pub tiling: u32,
-    pub detail_texture_id: u32,
-    pub detail_tiling: u32,
     pub min_vert_bright: u32,
     pub max_vert_bright: u32,
     pub min_vert_saturate: u32,
@@ -233,17 +262,7 @@ impl ContentRepository {
         &self,
         region_number: u32,
     ) -> Result<ResolvedTerrainMaterialTable> {
-        let resource = self
-            .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, REGION_DESC_FILE_ID))
-            .with_context(|| format!("failed to read RegionDesc 0x{REGION_DESC_FILE_ID:08X}"))?;
-        let region = RegionDesc::unpack(&resource.bytes)
-            .with_context(|| format!("failed to parse RegionDesc 0x{REGION_DESC_FILE_ID:08X}"))?;
-        if region.region_number != region_number {
-            anyhow::bail!(
-                "active RegionDesc 0x{REGION_DESC_FILE_ID:08X} has region number {}, not requested region {region_number}",
-                region.region_number
-            );
-        }
+        let region = self.read_region_desc_for_region(region_number)?;
 
         let tex_merge = &region.terrain_info.land_surfaces.tex_merge;
         let terrain_types = tex_merge
@@ -253,8 +272,6 @@ impl ContentRepository {
                 terrain_type: desc.terrain_type,
                 texture_id: desc.terrain_tex.tex_gid,
                 tiling: desc.terrain_tex.tex_tiling,
-                detail_texture_id: desc.terrain_tex.detail_tex_gid,
-                detail_tiling: desc.terrain_tex.detail_tex_tiling,
                 min_vert_bright: desc.terrain_tex.min_vert_bright,
                 max_vert_bright: desc.terrain_tex.max_vert_bright,
                 min_vert_saturate: desc.terrain_tex.min_vert_saturate,
@@ -287,7 +304,7 @@ impl ContentRepository {
             .collect::<Vec<_>>();
         let mut surface_texture_ids = terrain_types
             .iter()
-            .flat_map(|terrain| [terrain.texture_id, terrain.detail_texture_id])
+            .map(|terrain| terrain.texture_id)
             .chain(terrain_alpha_maps.iter().map(|map| map.texture_id))
             .chain(
                 road_alpha_maps
@@ -307,6 +324,58 @@ impl ContentRepository {
             road_alpha_maps,
             surface_texture_ids,
         })
+    }
+
+    pub fn resolve_region_render_profile(
+        &self,
+        region_number: u32,
+    ) -> Result<ResolvedRegionRenderProfile> {
+        let region = self.read_region_desc_for_region(region_number)?;
+        let detail_roles = region
+            .terrain_info
+            .land_surfaces
+            .tex_merge
+            .terrain_desc
+            .iter()
+            .take(REGION_DETAIL_ROLE_ORDER.len())
+            .enumerate()
+            .map(|(index, desc)| ResolvedRegionDetailRole {
+                role: REGION_DETAIL_ROLE_ORDER[index],
+                source_terrain_desc_index: index,
+                detail_texture_id: desc.terrain_tex.detail_tex_gid,
+                detail_tiling: desc.terrain_tex.detail_tex_tiling,
+            })
+            .collect::<Vec<_>>();
+        let mut surface_texture_ids = detail_roles
+            .iter()
+            .map(|role| role.detail_texture_id)
+            .filter(|texture_id| *texture_id != 0)
+            .collect::<Vec<_>>();
+        surface_texture_ids.sort_unstable();
+        surface_texture_ids.dedup();
+
+        Ok(ResolvedRegionRenderProfile {
+            region_id: region.id,
+            region_number: region.region_number,
+            detail_roles,
+            surface_texture_ids,
+        })
+    }
+
+    fn read_region_desc_for_region(&self, region_number: u32) -> Result<RegionDesc> {
+        let resource = self
+            .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, REGION_DESC_FILE_ID))
+            .with_context(|| format!("failed to read RegionDesc 0x{REGION_DESC_FILE_ID:08X}"))?;
+        let region = RegionDesc::unpack(&resource.bytes)
+            .with_context(|| format!("failed to parse RegionDesc 0x{REGION_DESC_FILE_ID:08X}"))?;
+        if region.region_number != region_number {
+            anyhow::bail!(
+                "active RegionDesc 0x{REGION_DESC_FILE_ID:08X} has region number {}, not requested region {region_number}",
+                region.region_number
+            );
+        }
+
+        Ok(region)
     }
 
     pub fn resolve_setup_appearance(

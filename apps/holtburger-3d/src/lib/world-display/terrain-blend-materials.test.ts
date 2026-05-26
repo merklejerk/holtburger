@@ -103,8 +103,9 @@ describe("buildTerrainBlendMaterialSet", () => {
 		state.preparedByAssetId = indexByAssetId([
 			createRecord(
 				"terrain-material/1",
-				createTerrainMaterialPayload(false, true),
+				createTerrainMaterialPayload(),
 			),
+			createRecord("region-render-profile/1", createRegionRenderProfilePayload()),
 			createRecord(
 				"surface-texture/05000010",
 				createSurfaceTexturePayload(0x06000010),
@@ -177,7 +178,6 @@ function createRecord(
 
 function createTerrainMaterialPayload(
 	includeOverlay = false,
-	includeDetail = false,
 ): PreparedAssetPayload {
 	return {
 		kind: "terrain-material",
@@ -192,15 +192,6 @@ function createTerrainMaterialPayload(
 				textureAssetId: "surface-texture/05000010",
 				textureDid: 0x05000010,
 				tiling: 4,
-				detail: includeDetail
-					? {
-							textureAssetId: "surface-texture/05001786",
-							textureDid: 0x05001786,
-							tiling: 12,
-							fadeNear: 10,
-							fadeFar: 50,
-						}
-					: null,
 				colorVariation: null,
 			},
 			...(includeOverlay
@@ -210,7 +201,6 @@ function createTerrainMaterialPayload(
 							textureAssetId: "surface-texture/05000011",
 							textureDid: 0x05000011,
 							tiling: 4,
-							detail: null,
 							colorVariation: null,
 						},
 					]
@@ -238,12 +228,38 @@ function createTerrainMaterialPayload(
 						"surface-texture/05000010",
 						"surface-texture/05000011",
 						"surface-texture/05000012",
-						...(includeDetail ? ["surface-texture/05001786"] : []),
 					]
-				: [
-						"surface-texture/05000010",
-						...(includeDetail ? ["surface-texture/05001786"] : []),
-					],
+				: ["surface-texture/05000010"],
+			renderSurfaceAssetIds: [],
+			paletteAssetIds: [],
+		},
+	};
+}
+
+function createRegionRenderProfilePayload(): PreparedAssetPayload {
+	return {
+		kind: "region-render-profile",
+		sourceAssetKind: "region-render-profile",
+		residencyKind: "unknown",
+		provenance: createProvenance("region-render-profile"),
+		regionId: 0x13000000,
+		regionNumber: 1,
+		detailRoles: {
+			landscape: {
+				role: "landscape",
+				sourceTerrainDescIndex: 0,
+				textureAssetId: "surface-texture/05001786",
+				textureDid: 0x05001786,
+				tiling: 12,
+				fadeNear: 10,
+				fadeFar: 50,
+			},
+			building: null,
+			environment: null,
+			object: null,
+		},
+		dependencies: {
+			surfaceTextureAssetIds: ["surface-texture/05001786"],
 			renderSurfaceAssetIds: [],
 			paletteAssetIds: [],
 		},

@@ -8,6 +8,7 @@ import type {
 	LandblockTopologyPayloadDto,
 	MaterialRecipePayloadDto,
 	PalettePayloadDto,
+	RegionRenderProfilePayloadDto,
 	RenderSurfacePayloadDto,
 	SurfaceTexturePayloadDto,
 	SetupAppearancePayloadDto,
@@ -23,6 +24,7 @@ import {
 	landblockTopologyPayloadDtoSchema,
 	materialRecipePayloadDtoSchema,
 	palettePayloadDtoSchema,
+	regionRenderProfilePayloadDtoSchema,
 	renderSurfacePayloadDtoSchema,
 	surfaceTexturePayloadDtoSchema,
 	setupAppearancePayloadDtoSchema,
@@ -169,6 +171,17 @@ export function prepareAssetPayload(
 		);
 	}
 
+	const regionRenderProfilePayload = regionRenderProfilePayloadDtoSchema.safeParse(
+		response.payload,
+	);
+	if (regionRenderProfilePayload.success) {
+		return preparePassthroughAsset(
+			request,
+			response,
+			regionRenderProfilePayload.data,
+		);
+	}
+
 	const surfaceTexturePayload = surfaceTexturePayloadDtoSchema.safeParse(
 		response.payload,
 	);
@@ -309,6 +322,16 @@ function prepareRouteMatchedAssetPayload(
 			request.assetId,
 			"terrain-material",
 			terrainMaterialPayloadDtoSchema,
+			response.payload,
+		);
+		return preparePassthroughAsset(request, response, payload);
+	}
+
+	if (/^region-render-profile\/[0-9]+$/.test(request.assetId)) {
+		const payload = parseExpectedRoutePayload(
+			request.assetId,
+			"region-render-profile",
+			regionRenderProfilePayloadDtoSchema,
 			response.payload,
 		);
 		return preparePassthroughAsset(request, response, payload);
@@ -486,7 +509,8 @@ function preparePassthroughAsset(
 		| SurfaceTexturePayloadDto
 		| RenderSurfacePayloadDto
 		| PalettePayloadDto
-		| TerrainMaterialPayloadDto,
+		| TerrainMaterialPayloadDto
+		| RegionRenderProfilePayloadDto,
 ): PreparedAssetRecord {
 	return {
 		request,

@@ -170,6 +170,7 @@ function createTerrainBlendMaterial(options: {
 	const base = resolveTerrainTexture({
 		textureAssetId: options.plan.base.textureAssetId,
 		wrap: "repeat",
+		role: "color",
 		assetState: options.assetState,
 		materialResourceCache: options.materialResourceCache,
 		diagnostics: options.diagnostics,
@@ -182,6 +183,7 @@ function createTerrainBlendMaterial(options: {
 		const overlayTexture = resolveTerrainTexture({
 			textureAssetId: overlay.terrain.textureAssetId,
 			wrap: "repeat",
+			role: "color",
 			assetState: options.assetState,
 			materialResourceCache: options.materialResourceCache,
 			diagnostics: options.diagnostics,
@@ -189,6 +191,7 @@ function createTerrainBlendMaterial(options: {
 		const alphaTexture = resolveTerrainTexture({
 			textureAssetId: overlay.alpha.alphaTextureAssetId,
 			wrap: "clamp",
+			role: "mask",
 			assetState: options.assetState,
 			materialResourceCache: options.materialResourceCache,
 			diagnostics: options.diagnostics,
@@ -202,6 +205,7 @@ function createTerrainBlendMaterial(options: {
 			? resolveTerrainTexture({
 					textureAssetId: options.plan.roads[0]?.road.roadTextureAssetId ?? "",
 					wrap: "repeat",
+					role: "color",
 					assetState: options.assetState,
 					materialResourceCache: options.materialResourceCache,
 					diagnostics: options.diagnostics,
@@ -214,6 +218,7 @@ function createTerrainBlendMaterial(options: {
 		const alphaTexture = resolveTerrainTexture({
 			textureAssetId: road.road.alphaTextureAssetId,
 			wrap: "clamp",
+			role: "mask",
 			assetState: options.assetState,
 			materialResourceCache: options.materialResourceCache,
 			diagnostics: options.diagnostics,
@@ -282,6 +287,7 @@ function createTerrainBlendMaterial(options: {
 function resolveTerrainTexture(options: {
 	textureAssetId: string;
 	wrap: TextureSamplingPolicy["wrapS"];
+	role: "color" | "mask";
 	assetState: AssetChannelState;
 	materialResourceCache: WorldMaterialResourceCache;
 	diagnostics: string[];
@@ -316,6 +322,7 @@ function resolveTerrainTexture(options: {
 			...samplingPolicy,
 			wrapS: options.wrap,
 			wrapT: options.wrap,
+			colorSpace: options.role === "mask" ? "none" : samplingPolicy.colorSpace,
 		},
 	});
 }
@@ -586,7 +593,7 @@ vec2 rotateUv(vec2 uv, int rotation) {
 
 vec4 blendOverlay(vec4 baseColor, sampler2D overlayTexture, sampler2D alphaTexture, float tiling, int rotation) {
 	vec4 overlayColor = texture2D(overlayTexture, vUv * tiling);
-	float alpha = texture2D(alphaTexture, rotateUv(vUv, rotation)).a;
+	float alpha = texture2D(alphaTexture, rotateUv(vUv, rotation)).r;
 	return mix(baseColor, overlayColor, clamp(alpha, 0.0, 1.0));
 }
 
@@ -603,11 +610,11 @@ void main() {
 	}
 	if (roadCount > 0) {
 		vec4 roadColor = texture2D(roadTexture, vUv * roadTiling);
-		float roadAlpha = 1.0 - texture2D(roadAlpha0, rotateUv(vUv, roadRotation0)).a;
+		float roadAlpha = 1.0 - texture2D(roadAlpha0, rotateUv(vUv, roadRotation0)).r;
 		if (roadCount > 1) {
 			roadAlpha = 1.0 - (
-				texture2D(roadAlpha0, rotateUv(vUv, roadRotation0)).a *
-				texture2D(roadAlpha1, rotateUv(vUv, roadRotation1)).a
+				texture2D(roadAlpha0, rotateUv(vUv, roadRotation0)).r *
+				texture2D(roadAlpha1, rotateUv(vUv, roadRotation1)).r
 			);
 		}
 		color = mix(color, roadColor, clamp(roadAlpha, 0.0, 1.0));

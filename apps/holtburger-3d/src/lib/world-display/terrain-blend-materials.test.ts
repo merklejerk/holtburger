@@ -45,6 +45,55 @@ describe("buildTerrainBlendMaterialSet", () => {
 			"wrap=repeat/repeat;filter=linear/linear/linear;color=srgb;aniso=1;mips=on;flipY=off",
 		);
 	});
+
+	it("samples terrain alpha masks as linear grayscale data", () => {
+		const state = createInitialAssetChannelState();
+		state.preparedByAssetId = indexByAssetId([
+			createRecord("terrain-material/1", createTerrainMaterialPayload(true)),
+			createRecord(
+				"surface-texture/05000010",
+				createSurfaceTexturePayload(0x06000010),
+			),
+			createRecord(
+				"render-surface/06000010",
+				createRenderSurfacePayload(0x06000010),
+			),
+			createRecord(
+				"surface-texture/05000011",
+				createSurfaceTexturePayload(0x06000011),
+			),
+			createRecord(
+				"render-surface/06000011",
+				createRenderSurfacePayload(0x06000011),
+			),
+			createRecord(
+				"surface-texture/05000012",
+				createSurfaceTexturePayload(0x06000012),
+			),
+			createRecord(
+				"render-surface/06000012",
+				createRenderSurfacePayload(0x06000012, 0xf4),
+			),
+		]);
+		const cache = new WorldMaterialResourceCache();
+
+		const set = buildTerrainBlendMaterialSet({
+			assetState: state,
+			regionNumber: 1,
+			pcodes: [terrainPcode([0, 0, 0, 0], [1, 1, 1, 2])],
+			materialResourceCache: cache,
+		});
+
+		const material = set?.materials[0] as ShaderMaterial;
+		expect(material.uniforms.overlayCount.value).toBe(1);
+		expect(material.fragmentShader).toContain(
+			"texture2D(alphaTexture, rotateUv(vUv, rotation)).r",
+		);
+		expect(cache.getStats().textureSamplingPolicySamples).toContain(
+			"wrap=clamp/clamp;filter=linear/linear/linear;color=none;aniso=1;mips=on;flipY=off",
+		);
+		cache.dispose();
+	});
 });
 
 function indexByAssetId(
@@ -72,7 +121,9 @@ function createRecord(
 	};
 }
 
-function createTerrainMaterialPayload(): PreparedAssetPayload {
+function createTerrainMaterialPayload(
+	includeOverlay = false,
+): PreparedAssetPayload {
 	return {
 		kind: "terrain-material",
 		sourceAssetKind: "terrain-material",
@@ -89,8 +140,29 @@ function createTerrainMaterialPayload(): PreparedAssetPayload {
 				detail: null,
 				colorVariation: null,
 			},
+			...(includeOverlay
+				? [
+						{
+							terrainType: 2,
+							textureAssetId: "surface-texture/05000011",
+							textureDid: 0x05000011,
+							tiling: 4,
+							detail: null,
+							colorVariation: null,
+						},
+					]
+				: []),
 		],
-		terrainAlphaMaps: [],
+		terrainAlphaMaps: includeOverlay
+			? [
+					{
+						alphaIndex: 0,
+						selector: 8,
+						alphaTextureAssetId: "surface-texture/05000012",
+						alphaTextureDid: 0x05000012,
+					},
+				]
+			: [],
 		roadAlphaMaps: [],
 		pcodeEncoding: {
 			terrainCodeBits: 5,
@@ -98,7 +170,13 @@ function createTerrainMaterialPayload(): PreparedAssetPayload {
 			sizeBitMask: 1 << 28,
 		},
 		dependencies: {
-			surfaceTextureAssetIds: ["surface-texture/05000010"],
+			surfaceTextureAssetIds: includeOverlay
+				? [
+						"surface-texture/05000010",
+						"surface-texture/05000011",
+						"surface-texture/05000012",
+					]
+				: ["surface-texture/05000010"],
 			renderSurfaceAssetIds: [],
 			paletteAssetIds: [],
 		},
@@ -127,7 +205,12 @@ function createSurfaceTexturePayload(
 
 function createRenderSurfacePayload(
 	renderSurfaceId: number,
+	formatRaw = 0x14,
 ): PreparedAssetPayload {
+	const sourceBytes =
+		formatRaw === 0xf4
+			? new Uint8Array([255])
+			: new Uint8Array([255, 255, 255]);
 	return {
 		kind: "render-surface",
 		sourceAssetKind: "render-surface",
@@ -137,10 +220,10 @@ function createRenderSurfacePayload(
 		unknown: 0,
 		width: 1,
 		height: 1,
-		formatRaw: 0x14,
-		format: "R8G8B8",
-		sourceByteLength: 3,
-		sourceBytes: new Uint8Array([255, 255, 255]),
+		formatRaw,
+		format: formatRaw === 0xf4 ? "CustomLandscapeAlpha" : "R8G8B8",
+		sourceByteLength: sourceBytes.byteLength,
+		sourceBytes,
 		defaultPaletteId: null,
 		dependencies: {
 			paletteAssetIds: [],

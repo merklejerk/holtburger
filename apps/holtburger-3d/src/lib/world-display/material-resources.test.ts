@@ -4,6 +4,7 @@ import {
 	MeshStandardMaterial,
 	RGBAFormat,
 	RGBFormat,
+	RedFormat,
 	RepeatWrapping,
 	UnsignedByteType,
 	UnsignedShort4444Type,
@@ -786,6 +787,10 @@ describe("world material resource cache", () => {
 			supportsS3tcSrgb: false,
 			supportsPackedRgba4444: true,
 		});
+		const compactPolicy = {
+			...createDefaultMaterialTextureSamplingPolicy().directColor,
+			colorSpace: "none" as const,
+		};
 
 		const rgbTexture = cache.getTexture({
 			renderSurface: createRenderSurfacePayload(0x06000020, {
@@ -793,7 +798,7 @@ describe("world material resource cache", () => {
 				format: "R8G8B8",
 				sourceBytes: new Uint8Array([0x11, 0x22, 0x33]),
 			}),
-			samplingPolicy: createDefaultMaterialTextureSamplingPolicy().directColor,
+			samplingPolicy: compactPolicy,
 		}) as DataTexture;
 		const xrgbTexture = cache.getTexture({
 			renderSurface: createRenderSurfacePayload(0x06000021, {
@@ -801,7 +806,7 @@ describe("world material resource cache", () => {
 				format: "X8R8G8B8",
 				sourceBytes: new Uint8Array([0x11, 0x22, 0x33, 0x00]),
 			}),
-			samplingPolicy: createDefaultMaterialTextureSamplingPolicy().directColor,
+			samplingPolicy: compactPolicy,
 		}) as DataTexture;
 		const rgba4444Texture = cache.getTexture({
 			renderSurface: createRenderSurfacePayload(0x06000022, {
@@ -817,20 +822,41 @@ describe("world material resource cache", () => {
 				format: "CustomLandscapeAlpha",
 				sourceBytes: new Uint8Array([0x7f]),
 			}),
-			samplingPolicy: createDefaultMaterialTextureSamplingPolicy().directColor,
+			samplingPolicy: compactPolicy,
 		}) as DataTexture;
 
 		expect(rgbTexture.format).toBe(RGBFormat);
+		expect(rgbTexture.internalFormat).toBe("RGB8");
 		expect(rgbTexture.type).toBe(UnsignedByteType);
 		expect([...rgbTexture.image.data]).toEqual([0x11, 0x22, 0x33]);
 		expect(xrgbTexture.format).toBe(RGBFormat);
+		expect(xrgbTexture.internalFormat).toBe("RGB8");
 		expect([...xrgbTexture.image.data]).toEqual([0x33, 0x22, 0x11]);
 		expect(rgba4444Texture.format).toBe(RGBAFormat);
 		expect(rgba4444Texture.type).toBe(UnsignedShort4444Type);
 		expect([...rgba4444Texture.image.data]).toEqual([0x2341]);
-		expect(landscapeAlphaTexture.format).toBe(RGBFormat);
+		expect(landscapeAlphaTexture.format).toBe(RedFormat);
+		expect(landscapeAlphaTexture.internalFormat).toBe("R8");
 		expect(landscapeAlphaTexture.type).toBe(UnsignedByteType);
-		expect([...landscapeAlphaTexture.image.data]).toEqual([0x7f, 0x7f, 0x7f]);
+		expect([...landscapeAlphaTexture.image.data]).toEqual([0x7f]);
+		cache.dispose();
+	});
+
+	it("expands sRGB RGB uploads to RGBA for WebGL compatibility", () => {
+		const cache = new WorldMaterialResourceCache();
+		const texture = cache.getTexture({
+			renderSurface: createRenderSurfacePayload(0x06000025, {
+				formatRaw: 0xf3,
+				format: "CustomLandscapeR8G8B8",
+				sourceBytes: new Uint8Array([0x11, 0x22, 0x33]),
+			}),
+			samplingPolicy: createDefaultMaterialTextureSamplingPolicy().directColor,
+		}) as DataTexture;
+
+		expect(texture.format).toBe(RGBAFormat);
+		expect(texture.internalFormat).toBeNull();
+		expect(texture.type).toBe(UnsignedByteType);
+		expect([...texture.image.data]).toEqual([0x11, 0x22, 0x33, 0xff]);
 		cache.dispose();
 	});
 

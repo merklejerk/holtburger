@@ -23,10 +23,12 @@ export interface PreparedAssetProvenance {
 	detail: string | null;
 }
 
-interface PreparedTerrainTriangle {
+export interface PreparedTerrainTriangle {
 	a: number;
 	b: number;
 	c: number;
+	quadIndex: number;
+	triangleInQuad: 0 | 1;
 	terrainType: number;
 	averageHeight: number;
 }
@@ -37,6 +39,7 @@ export interface PreparedTerrainMesh {
 	tileSize: number;
 	vertices: Vec3Dto[];
 	triangles: PreparedTerrainTriangle[];
+	quads: PreparedTerrainQuad[];
 	minHeight: number;
 	maxHeight: number;
 }
@@ -104,7 +107,7 @@ interface PreparedTerrainBvh {
 	items: PreparedTerrainBvhItem[];
 }
 
-interface PreparedOutdoorTerrainTriangle {
+export interface PreparedOutdoorTerrainTriangle {
 	terrainTriangleId: string;
 	quadIndex: number;
 	triangleInQuad: 0 | 1;
@@ -113,7 +116,7 @@ interface PreparedOutdoorTerrainTriangle {
 	bounds: PreparedBounds;
 }
 
-interface PreparedTerrainQuad {
+export interface PreparedTerrainQuad {
 	terrainQuadId: string;
 	row: number;
 	col: number;
@@ -648,7 +651,7 @@ interface PreparedTerrainColorVariation {
 	activeRenderPath: false;
 }
 
-interface PreparedTerrainMaterialTypeEntry {
+export interface PreparedTerrainMaterialTypeEntry {
 	terrainType: number;
 	textureAssetId: string;
 	textureDid: number;
@@ -657,14 +660,14 @@ interface PreparedTerrainMaterialTypeEntry {
 	colorVariation: PreparedTerrainColorVariation | null;
 }
 
-interface PreparedTerrainAlphaMapEntry {
+export interface PreparedTerrainAlphaMapEntry {
 	alphaIndex: number;
 	alphaTextureAssetId: string;
 	alphaTextureDid: number;
 	selector: number;
 }
 
-interface PreparedTerrainRoadAlphaMapEntry {
+export interface PreparedTerrainRoadAlphaMapEntry {
 	roadIndex: number;
 	roadTextureAssetId: string;
 	roadTextureDid: number;
@@ -685,7 +688,8 @@ interface PreparedTerrainMaterialDependencies {
 	paletteAssetIds: string[];
 }
 
-interface PreparedTerrainMaterialTablePayload extends PreparedAssetPayloadBase {
+export interface PreparedTerrainMaterialTablePayload
+	extends PreparedAssetPayloadBase {
 	kind: "terrain-material";
 	sourceAssetKind: "terrain-material";
 	residencyKind: "unknown";

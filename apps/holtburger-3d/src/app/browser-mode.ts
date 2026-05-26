@@ -81,6 +81,7 @@ export interface BrowserModeState {
 	highlightPortalTargets: boolean;
 	renderStyle: BrowserRenderStyle;
 	textureFilteringMode: BrowserTextureFilteringMode;
+	detailTexturesEnabled: boolean;
 	page: BrowserPageId;
 }
 
@@ -114,6 +115,7 @@ export function createBrowserModeState(): BrowserModeState {
 		highlightPortalTargets: false,
 		renderStyle: "solid",
 		textureFilteringMode: "anisotropic-4x",
+		detailTexturesEnabled: true,
 		page: DEFAULT_BROWSER_DESTINATION
 			? "destination-preview"
 			: "location-entry",
@@ -338,6 +340,16 @@ export function updateBrowserTextureFilteringMode(
 	};
 }
 
+export function updateBrowserDetailTexturesEnabled(
+	browserMode: BrowserModeState,
+	detailTexturesEnabled: boolean,
+): BrowserModeState {
+	return {
+		...browserMode,
+		detailTexturesEnabled,
+	};
+}
+
 export function previewBrowserLocation(
 	browserMode: BrowserModeState,
 ): BrowserModeState {
@@ -373,6 +385,7 @@ export function previewBrowserLocation(
 		highlightPortalTargets: browserMode.highlightPortalTargets,
 		renderStyle: browserMode.renderStyle,
 		textureFilteringMode: browserMode.textureFilteringMode,
+		detailTexturesEnabled: browserMode.detailTexturesEnabled,
 		page: "destination-preview",
 	};
 }
@@ -408,6 +421,7 @@ export function selectBrowserLandblockDestination(
 		highlightPortalTargets: browserMode.highlightPortalTargets,
 		renderStyle: browserMode.renderStyle,
 		textureFilteringMode: browserMode.textureFilteringMode,
+		detailTexturesEnabled: browserMode.detailTexturesEnabled,
 		page: "destination-preview",
 	};
 }

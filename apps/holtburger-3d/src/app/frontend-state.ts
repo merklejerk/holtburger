@@ -7,6 +7,7 @@ import {
 	selectBrowserLandblockDestination,
 	updateBuildingLodRadius,
 	updateBrowserDraft,
+	updateBrowserDetailTexturesEnabled,
 	updateBrowserRenderStyle,
 	updateBrowserTextureFilteringMode,
 	updateDetailLodRadius,
@@ -186,6 +187,15 @@ function createFrontendStateStore() {
 				browserMode: updateBrowserTextureFilteringMode(
 					state.browserMode,
 					textureFilteringMode,
+				),
+			}));
+		},
+		updateBrowserDetailTexturesEnabled(detailTexturesEnabled: boolean): void {
+			update((state) => ({
+				...state,
+				browserMode: updateBrowserDetailTexturesEnabled(
+					state.browserMode,
+					detailTexturesEnabled,
 				),
 			}));
 		},

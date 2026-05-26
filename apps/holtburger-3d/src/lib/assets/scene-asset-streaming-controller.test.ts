@@ -153,6 +153,8 @@ function createPreparedEnvCellWithStaticGfx(
 			detail: null,
 		},
 		envCellId: 0x016c0155,
+		regionId: 0x13000000,
+		regionNumber: 1,
 		environmentId: 0x0d000001,
 		cellStructureId: 0x0d000002,
 		localPlacement: {

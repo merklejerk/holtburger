@@ -28,6 +28,7 @@ import {
 	type RenderChunkPlacement,
 } from "./render-chunks";
 import { WORLD_RENDER_DOMAIN, formatRenderDomainKey } from "./render-domains";
+import { describeRegionDetailRoleSignature } from "./region-detail-overlays";
 
 export interface LinkedOutdoorInteriorSelection {
 	envCellIds: number[];
@@ -36,6 +37,7 @@ export interface LinkedOutdoorInteriorSelection {
 export interface StructuredInteriorCell {
 	renderKey: string;
 	envCellId: number;
+	regionNumber: number;
 	renderChunk: RenderChunkPlacement;
 	environmentId: number;
 	cellStructureId: number;
@@ -50,6 +52,7 @@ export interface StructuredInteriorCell {
 	cellBsp: PreparedPolygonSetBspNode | null;
 	renderGeometry: PreparedPolygonSetRenderGeometry;
 	debugColorKey: string;
+	detailSignature: string;
 }
 
 export interface StructuredInteriorSceneModel {
@@ -151,6 +154,7 @@ function deriveStructuredInteriorSceneForEnvCells(
 					`env-cell/${formatHex32(envCellId)}`,
 				),
 				envCellId,
+				regionNumber: envCell.regionNumber,
 				renderChunk,
 				environmentId: envCell.environmentId,
 				cellStructureId: envCell.cellStructureId,
@@ -175,6 +179,11 @@ function deriveStructuredInteriorSceneForEnvCells(
 				cellBsp: envCell.cellBsp,
 				renderGeometry: envCell.renderGeometry,
 				debugColorKey: `env-cell:${envCellId}:${envCell.environmentId}:${formatHex32(envCell.cellStructureId)}`,
+				detailSignature: describeRegionDetailRoleSignature({
+					assetState,
+					regionNumber: envCell.regionNumber,
+					roleKind: "environment",
+				}),
 			});
 			continue;
 		}

@@ -134,6 +134,12 @@ describe("scene asset request planner", () => {
 		expect(requests).toEqual([
 			{
 				requestId:
+					"streaming-4-interior-cell-016c0155-landblock-016cffff-indoor-region-render-profile-region-render-profile/1",
+				assetId: "region-render-profile/1",
+				priority: "streaming",
+			},
+			{
+				requestId:
 					"streaming-4-interior-cell-016c0155-landblock-016cffff-indoor-static-renderable-gfx-obj/02000001",
 				assetId: "gfx-obj/02000001",
 				priority: "streaming",
@@ -170,6 +176,7 @@ describe("scene asset request planner", () => {
 		);
 
 		expect(requests.map((request) => request.assetId)).toEqual([
+			"region-render-profile/1",
 			"gfx-obj/01000002",
 			"setup-appearance/02000001",
 		]);
@@ -210,6 +217,7 @@ describe("scene asset request planner", () => {
 		);
 
 		expect(requests.map((request) => request.assetId)).toEqual([
+			"region-render-profile/1",
 			"gfx-obj/01000003",
 			"material/08000099",
 		]);
@@ -316,6 +324,12 @@ describe("scene asset request planner", () => {
 		expect(requests).toEqual([
 			{
 				requestId:
+					"streaming-6-interior-cell-016c0155-landblock-016cffff-indoor-region-render-profile-region-render-profile/1",
+				assetId: "region-render-profile/1",
+				priority: "streaming",
+			},
+			{
+				requestId:
 					"streaming-6-interior-cell-016c0155-landblock-016cffff-indoor-static-material-material/0800006c",
 				assetId: "material/0800006c",
 				priority: "streaming",
@@ -363,6 +377,7 @@ describe("scene asset request planner", () => {
 		);
 
 		expect(requests.map((request) => request.assetId)).toEqual([
+			"region-render-profile/1",
 			"gfx-obj/02000001",
 			"material/0800006c",
 			"material/0800007e",
@@ -508,6 +523,8 @@ function createPreparedEnvCell(
 			detail: null,
 		},
 		envCellId,
+		regionId: 0x13000000,
+		regionNumber: 1,
 		environmentId: 0x0d000001,
 		cellStructureId: 1,
 		localPlacement: {

@@ -141,6 +141,9 @@
 	let textureFilteringMode = $state(
 		initialFrontendState.browserMode.textureFilteringMode,
 	);
+	let detailTexturesEnabled = $state(
+		initialFrontendState.browserMode.detailTexturesEnabled,
+	);
 	let navigationFocusMode = $state(
 		initialFrontendState.browserMode.navigationFocusMode,
 	);
@@ -254,7 +257,7 @@
 		if (!debug) {
 			return "Renderer diagnostics are waiting for the first rendered frame.";
 		}
-		return `Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}, transition depth ${debug.transitionPortalMaxDepth}; passes ${debug.renderPassCount}, calls ${debug.renderCalls}, tris ${debug.renderTriangles}; materials ${debug.materialCount}, program keys ${debug.materialProgramKeyCount}, transparent ${debug.transparentMaterialCount}, textures ${debug.textureResourceCount}/${debug.indexedTextureResourceCount} indexed, palettes ${debug.paletteResourceCount}; filtering ${debug.textureFilteringMode}, samplers ${JSON.stringify(debug.textureSamplingPolicyCounts)} (${debug.textureSamplingPolicySamples.join(" || ")}); texture velocity parts ${debug.textureVelocityPartCount}, groups ${debug.textureVelocityRenderGroupCount}, cloned materials ${debug.textureVelocityMaterialCount}, signatures ${debug.textureVelocitySignatureCount} (${debug.textureVelocitySignatureSamples.join(" || ")}); static groups ${debug.staticVisibleGeometryGroupCount}/${debug.staticGeometryGroupCount}; material types ${JSON.stringify(debug.materialTypeCounts)}; program samples ${debug.materialProgramKeySamples.join(" || ")}; portal work ${debug.portalRenderWorkItemCount}, masks ${debug.transitionApertureMaskPassCount}, depth resets ${debug.apertureDepthResetPassCount}, composites interior ${debug.interiorCompositePassCount}/exterior ${debug.exteriorCompositePassCount}; terrain ${debug.visibleTerrainMeshCount}/${debug.terrainMeshCount}, static ${debug.visibleStaticGroupMeshCount}/${debug.staticGroupMeshCount}, interiors ${debug.visibleStructuredInteriorMeshCount}/${debug.structuredInteriorMeshCount} with groups ${debug.structuredInteriorGeometryGroupCount}, overlays ${debug.visibleDebugOverlayObjectCount}/${debug.debugOverlayObjectCount}; portals ${debug.portalApertureMeshCount}/${debug.transitionPortalCandidateCount}; residency ${debug.cameraViewResidency} via ${debug.residencySource} (${debug.residencyCellCount} cells, ${debug.residencyLandblockCount} landblocks, ${debug.residencyAabbCandidateCount} AABB candidates, ${debug.residencyCellBspMatchCount} CellBSP matches, ${debug.residencyAabbFallbackCount} AABB fallbacks); canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
+		return `Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}, transition depth ${debug.transitionPortalMaxDepth}; passes ${debug.renderPassCount}, calls ${debug.renderCalls}, tris ${debug.renderTriangles}; materials ${debug.materialCount}, program keys ${debug.materialProgramKeyCount}, transparent ${debug.transparentMaterialCount}, textures ${debug.textureResourceCount}/${debug.indexedTextureResourceCount} indexed, palettes ${debug.paletteResourceCount}; filtering ${debug.textureFilteringMode}, detail ${debug.detailTexturesEnabled ? "on" : "off"}, samplers ${JSON.stringify(debug.textureSamplingPolicyCounts)} (${debug.textureSamplingPolicySamples.join(" || ")}); texture velocity parts ${debug.textureVelocityPartCount}, groups ${debug.textureVelocityRenderGroupCount}, cloned materials ${debug.textureVelocityMaterialCount}, signatures ${debug.textureVelocitySignatureCount} (${debug.textureVelocitySignatureSamples.join(" || ")}); static groups ${debug.staticVisibleGeometryGroupCount}/${debug.staticGeometryGroupCount}; material types ${JSON.stringify(debug.materialTypeCounts)}; program samples ${debug.materialProgramKeySamples.join(" || ")}; portal work ${debug.portalRenderWorkItemCount}, masks ${debug.transitionApertureMaskPassCount}, depth resets ${debug.apertureDepthResetPassCount}, composites interior ${debug.interiorCompositePassCount}/exterior ${debug.exteriorCompositePassCount}; terrain ${debug.visibleTerrainMeshCount}/${debug.terrainMeshCount}, static ${debug.visibleStaticGroupMeshCount}/${debug.staticGroupMeshCount}, interiors ${debug.visibleStructuredInteriorMeshCount}/${debug.structuredInteriorMeshCount} with groups ${debug.structuredInteriorGeometryGroupCount}, overlays ${debug.visibleDebugOverlayObjectCount}/${debug.debugOverlayObjectCount}; portals ${debug.portalApertureMeshCount}/${debug.transitionPortalCandidateCount}; residency ${debug.cameraViewResidency} via ${debug.residencySource} (${debug.residencyCellCount} cells, ${debug.residencyLandblockCount} landblocks, ${debug.residencyAabbCandidateCount} AABB candidates, ${debug.residencyCellBspMatchCount} CellBSP matches, ${debug.residencyAabbFallbackCount} AABB fallbacks); canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
 	});
 	const sceneContextText = $derived(renderResourceSnapshot.sceneContextText);
 	const cameraResidencyText = $derived.by(() => {
@@ -530,6 +533,7 @@
 		highlightPortalTargets = state.browserMode.highlightPortalTargets;
 		renderStyle = state.browserMode.renderStyle;
 		textureFilteringMode = state.browserMode.textureFilteringMode;
+		detailTexturesEnabled = state.browserMode.detailTexturesEnabled;
 		navigationFocusMode = state.browserMode.navigationFocusMode;
 
 		const browserDestinationIdentity =
@@ -627,6 +631,7 @@
 			transitionPortalMaxDepth,
 			renderStyle,
 			textureFilteringMode,
+			detailTexturesEnabled,
 			showPortalPolygons,
 			showCellIndicators,
 			highlightPortalTargets,

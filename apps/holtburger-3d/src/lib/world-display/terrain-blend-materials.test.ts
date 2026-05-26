@@ -149,6 +149,48 @@ describe("buildTerrainBlendMaterialSet", () => {
 		);
 		cache.dispose();
 	});
+
+	it("can disable the landscape role detail texture while retaining base terrain", () => {
+		const state = createInitialAssetChannelState();
+		state.preparedByAssetId = indexByAssetId([
+			createRecord("terrain-material/1", createTerrainMaterialPayload()),
+			createRecord("region-render-profile/1", createRegionRenderProfilePayload()),
+			createRecord(
+				"surface-texture/05000010",
+				createSurfaceTexturePayload(0x06000010),
+			),
+			createRecord(
+				"render-surface/06000010",
+				createRenderSurfacePayload(0x06000010),
+			),
+			createRecord(
+				"surface-texture/05001786",
+				createSurfaceTexturePayload(0x06001786),
+			),
+			createRecord(
+				"render-surface/06001786",
+				createRenderSurfacePayload(0x06001786, 0x15),
+			),
+		]);
+		const cache = new WorldMaterialResourceCache();
+
+		const set = buildTerrainBlendMaterialSet({
+			assetState: state,
+			regionNumber: 1,
+			pcodes: [terrainPcode([0, 0, 0, 0], [1, 1, 1, 1])],
+			materialResourceCache: cache,
+			detailTexturesEnabled: false,
+		});
+
+		const material = set?.materials[0] as ShaderMaterial;
+		expect(material.uniforms.detailEnabled.value).toBe(0);
+		expect(material.userData.holtburgerMaterial).toMatchObject({
+			detailTextureAssetId: null,
+			detailEnabled: false,
+		});
+		expect(set?.diagnostics).toEqual([]);
+		cache.dispose();
+	});
 });
 
 function indexByAssetId(

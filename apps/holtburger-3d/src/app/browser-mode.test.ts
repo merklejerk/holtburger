@@ -14,6 +14,7 @@ import {
 	selectBrowserLandblockDestination,
 	updateBuildingLodRadius,
 	updateBrowserDraft,
+	updateBrowserDetailTexturesEnabled,
 	updateCellIndicatorVisibility,
 	updateDetailLodRadius,
 	updateEnvCellLodRadius,
@@ -46,6 +47,7 @@ describe("browser-mode location policy", () => {
 		expect(state.showPortalPolygons).toBe(false);
 		expect(state.showCellIndicators).toBe(false);
 		expect(state.highlightPortalTargets).toBe(false);
+		expect(state.detailTexturesEnabled).toBe(true);
 		expect(state.navigationFocusMode).toBe("manual");
 		expect(state.page).toBe("destination-preview");
 	});
@@ -62,6 +64,20 @@ describe("browser-mode location policy", () => {
 		expect(state.showPortalPolygons).toBe(true);
 		expect(state.showCellIndicators).toBe(false);
 		expect(state.highlightPortalTargets).toBe(false);
+	});
+
+	it("keeps detail texture visibility in browser-owned mode state", () => {
+		const state = updateBrowserDetailTexturesEnabled(
+			createBrowserModeState(),
+			false,
+		);
+
+		expect(state.detailTexturesEnabled).toBe(false);
+		expect(previewBrowserLocation(state).detailTexturesEnabled).toBe(false);
+		expect(
+			selectBrowserLandblockDestination(state, 0xda55ffff)
+				.detailTexturesEnabled,
+		).toBe(false);
 	});
 
 	it("clamps transition portal recursion depth in browser-owned mode state", () => {

@@ -85,6 +85,7 @@ export interface WorldRenderDebugMetrics {
 	materialProgramKeyCount: number;
 	transparentMaterialCount: number;
 	textureFilteringMode: WorldDisplayTextureFilteringMode;
+	detailTexturesEnabled: boolean;
 	textureSamplingPolicyCounts: Record<string, number>;
 	textureSamplingPolicySamples: string[];
 	textureVelocityPartCount: number;

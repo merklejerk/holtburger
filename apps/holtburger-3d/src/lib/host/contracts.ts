@@ -432,6 +432,8 @@ export const envCellPayloadDtoSchema = z.object({
 	residencyKind: z.literal("interior-cell"),
 	sourceAssetKind: z.literal("env-cell"),
 	envCellId: z.number().int().nonnegative(),
+	regionId: z.number().int().nonnegative(),
+	regionNumber: z.number().int().nonnegative(),
 	environmentId: z.number().int().nonnegative(),
 	cellStructureId: z.number().int().nonnegative(),
 	localPlacement: placementTransformDtoSchema,

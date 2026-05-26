@@ -111,6 +111,7 @@ describe("asset response dependencies", () => {
 			),
 		).toEqual([
 			{ assetId: "gfx-obj/01000010" },
+			{ assetId: "region-render-profile/1" },
 			{ assetId: "setup-model/02000010" },
 			{ assetId: "terrain-material/1" },
 		]);
@@ -134,6 +135,7 @@ describe("asset response dependencies", () => {
 			),
 		).toEqual([
 			{ assetId: "material/08000020" },
+			{ assetId: "region-render-profile/1" },
 			{ assetId: "setup-model/02000020" },
 		]);
 	});
@@ -191,6 +193,7 @@ describe("asset response dependencies", () => {
 			),
 		).toEqual([
 			{ assetId: "gfx-obj/01000010" },
+			{ assetId: "region-render-profile/1" },
 			{ assetId: "terrain-material/1" },
 		]);
 
@@ -501,6 +504,8 @@ function createEnvCellPayload() {
 		residencyKind: "interior-cell" as const,
 		sourceAssetKind: "env-cell" as const,
 		envCellId: 0xda550100,
+		regionId: 0x13000000,
+		regionNumber: 1,
 		environmentId: 0x0d000001,
 		cellStructureId: 0x0d000002,
 		localPlacement: identityPlacement(),

@@ -10,6 +10,7 @@ import {
 	formatEnvCellAssetId,
 	formatLandblockOutdoorAssetId,
 	formatLandblockTopologyAssetId,
+	formatRegionRenderProfileAssetId,
 	formatTerrainMaterialAssetId,
 	normalizeOutdoorLandblockId,
 } from "../landblocks";
@@ -227,6 +228,14 @@ function createOutdoorCoverageRequestsForInterest(
 			pendingAssetIds,
 			outdoorLandblockIds,
 		),
+		...createOutdoorRegionRenderProfileRequests(
+			requestRevision,
+			browserDestination,
+			priority,
+			preparedByAssetId,
+			pendingAssetIds,
+			outdoorLandblockIds,
+		),
 		...(priority === "bootstrap"
 			? []
 			: createLandblockTopologyCoverageRequests(
@@ -271,6 +280,27 @@ function createTerrainMaterialRequests(
 		requestRevision,
 		priority,
 		`${describeRequiredBrowserDestinationIdentity(browserDestination)}-terrain-material`,
+		preparedByAssetId,
+		pendingAssetIds,
+	);
+}
+
+function createOutdoorRegionRenderProfileRequests(
+	requestRevision: number,
+	browserDestination: BrowserLocationSelection,
+	priority: AssetPriority,
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	pendingAssetIds: string[],
+	landblockIds: readonly number[],
+): AssetLookupRequestDto[] {
+	return createUnpreparedRequests(
+		collectOutdoorRegionRenderProfileAssetIds(
+			preparedByAssetId,
+			landblockIds,
+		),
+		requestRevision,
+		priority,
+		`${describeRequiredBrowserDestinationIdentity(browserDestination)}-region-render-profile`,
 		preparedByAssetId,
 		pendingAssetIds,
 	);
@@ -369,6 +399,15 @@ function createStaticRenderableAssetRequests(
 		preparedByAssetId,
 		pendingAssetIds,
 	);
+	const envCellProfileRequests = createEnvCellRegionRenderProfileRequests(
+		requestRevision,
+		browserDestination,
+		priority,
+		preparedByAssetId,
+		pendingAssetIds,
+		linkedInteriorCoverage.envCellIds,
+		"env-cell-region-render-profile",
+	);
 	const outdoorSourceAssetIds = collectSelectedOutdoorSourceAssetIds(
 		preparedByAssetId,
 		{
@@ -415,6 +454,7 @@ function createStaticRenderableAssetRequests(
 
 	return [
 		...envCellAssetRequests,
+		...envCellProfileRequests,
 		...geometryAssetIds
 			.filter(
 				(assetId) =>
@@ -488,6 +528,15 @@ function createIndoorStaticRenderableAssetRequests(
 		preparedByAssetId,
 		pendingAssetIds,
 	);
+	const envCellProfileRequests = createEnvCellRegionRenderProfileRequests(
+		requestRevision,
+		browserDestination,
+		priority,
+		preparedByAssetId,
+		pendingAssetIds,
+		activeEnvCellIds,
+		"indoor-region-render-profile",
+	);
 	const envCellStaticSourceAssetIds = collectPreparedDependencyAssetIds(
 		preparedByAssetId,
 		activeEnvCellIds.map(formatEnvCellAssetId),
@@ -515,6 +564,7 @@ function createIndoorStaticRenderableAssetRequests(
 
 	return [
 		...envCellAssetRequests,
+		...envCellProfileRequests,
 		...geometryAssetIds
 			.filter(
 				(assetId) =>
@@ -757,6 +807,67 @@ function collectTerrainMaterialAssetIds(
 				return [];
 			}
 			return [formatTerrainMaterialAssetId(asset.payload.regionNumber)];
+		}),
+	);
+}
+
+function collectOutdoorRegionRenderProfileAssetIds(
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	landblockIds: readonly number[],
+): string[] {
+	const activeLandblockIds = new Set(
+		landblockIds.map(normalizeOutdoorLandblockId),
+	);
+	return uniqueSortedAssetIds(
+		Object.values(preparedByAssetId).flatMap((asset) => {
+			if (asset.payload.kind !== "landblock-outdoor") {
+				return [];
+			}
+			if (
+				!activeLandblockIds.has(
+					normalizeOutdoorLandblockId(asset.payload.landblockId),
+				)
+			) {
+				return [];
+			}
+			return [formatRegionRenderProfileAssetId(asset.payload.regionNumber)];
+		}),
+	);
+}
+
+function createEnvCellRegionRenderProfileRequests(
+	requestRevision: number,
+	browserDestination: BrowserLocationSelection,
+	priority: AssetPriority,
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	pendingAssetIds: string[],
+	envCellIds: readonly number[],
+	label: string,
+): AssetLookupRequestDto[] {
+	return createUnpreparedRequests(
+		collectEnvCellRegionRenderProfileAssetIds(preparedByAssetId, envCellIds),
+		requestRevision,
+		priority,
+		`${describeRequiredBrowserDestinationIdentity(browserDestination)}-${label}`,
+		preparedByAssetId,
+		pendingAssetIds,
+	);
+}
+
+function collectEnvCellRegionRenderProfileAssetIds(
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	envCellIds: readonly number[],
+): string[] {
+	const activeEnvCellIds = new Set(envCellIds);
+	return uniqueSortedAssetIds(
+		Object.values(preparedByAssetId).flatMap((asset) => {
+			if (asset.payload.kind !== "env-cell") {
+				return [];
+			}
+			if (!activeEnvCellIds.has(asset.payload.envCellId)) {
+				return [];
+			}
+			return [formatRegionRenderProfileAssetId(asset.payload.regionNumber)];
 		}),
 	);
 }

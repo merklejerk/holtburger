@@ -75,6 +75,7 @@
 	let transitionPortalMaxDepth = 1;
 	let renderStyle: WorldDisplayRenderStyle = "solid";
 	let textureFilteringMode: WorldDisplayTextureFilteringMode = "anisotropic-4x";
+	let detailTexturesEnabled = true;
 
 	onMount(() => {
 		let disposed = false;
@@ -101,6 +102,7 @@
 				onCameraResidencyChange,
 				renderStyle,
 				textureFilteringMode,
+				detailTexturesEnabled,
 			});
 			rendererController = controller;
 		});
@@ -193,6 +195,11 @@
 	): void {
 		textureFilteringMode = nextMode;
 		rendererController?.setTextureFilteringMode(textureFilteringMode);
+	}
+
+	export function setDetailTexturesEnabled(nextEnabled: boolean): void {
+		detailTexturesEnabled = nextEnabled;
+		rendererController?.setDetailTexturesEnabled(detailTexturesEnabled);
 	}
 
 	export function pickTerrainLandblockAtViewportPoint(

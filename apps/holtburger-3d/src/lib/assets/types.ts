@@ -7,6 +7,10 @@ import type {
 	SphereDto,
 	Vec3Dto,
 } from "../host/contracts";
+import {
+	formatRegionRenderProfileAssetId,
+	formatTerrainMaterialAssetId,
+} from "../landblocks";
 
 type AssetPreparationStatus = "idle" | "pending" | "ready" | "error";
 
@@ -468,6 +472,8 @@ export interface PreparedEnvCellPayload extends PreparedAssetPayloadBase {
 	sourceAssetKind: "env-cell";
 	residencyKind: "interior-cell";
 	envCellId: number;
+	regionId: number;
+	regionNumber: number;
 	environmentId: number;
 	cellStructureId: number;
 	localPlacement: PlacementTransformDto;
@@ -835,8 +841,8 @@ export function getPreparedAssetDependencies(
 ): PreparedAssetDependency[] {
 	if (asset.payload.kind === "landblock-outdoor") {
 		return uniqueSortedAssetIds([
-			formatTerrainMaterialDependencyAssetId(asset.payload.regionNumber),
-			formatRegionRenderProfileDependencyAssetId(asset.payload.regionNumber),
+			formatTerrainMaterialAssetId(asset.payload.regionNumber),
+			formatRegionRenderProfileAssetId(asset.payload.regionNumber),
 			...asset.payload.statics.map((member) => member.sourceAssetId),
 		]);
 	}
@@ -849,6 +855,7 @@ export function getPreparedAssetDependencies(
 
 	if (asset.payload.kind === "env-cell") {
 		return uniqueSortedAssetIds([
+			formatRegionRenderProfileAssetId(asset.payload.regionNumber),
 			...asset.payload.surfaces.map((surface) => surface.materialAssetId),
 			...asset.payload.statics.map((member) => member.sourceAssetId),
 		]);
@@ -918,14 +925,6 @@ function uniqueSortedAssetIds(
 	assetIds: readonly string[],
 ): PreparedAssetDependency[] {
 	return [...new Set(assetIds)].sort().map((assetId) => ({ assetId }));
-}
-
-function formatTerrainMaterialDependencyAssetId(regionNumber: number): string {
-	return `terrain-material/${Math.trunc(regionNumber)}`;
-}
-
-function formatRegionRenderProfileDependencyAssetId(regionNumber: number): string {
-	return `region-render-profile/${Math.trunc(regionNumber)}`;
 }
 
 export function derivePreparedAssetDependencyStatus(

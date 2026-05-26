@@ -12,6 +12,7 @@ import {
 	UnsignedByteType,
 	UnsignedShort4444Type,
 	type PixelFormat,
+	type PixelFormatGPU,
 	type Texture,
 	type TextureDataType,
 } from "three";
@@ -166,7 +167,7 @@ interface DecodedRenderSurfaceTextureData {
 	data: Uint8Array | Uint16Array;
 	format: PixelFormat;
 	type: TextureDataType;
-	internalFormat: string | null;
+	internalFormat: PixelFormatGPU | null;
 }
 
 function decodeDirectColorRenderSurface(

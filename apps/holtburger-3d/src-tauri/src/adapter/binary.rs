@@ -177,18 +177,28 @@ pub fn serialize_content_asset_binary_response(
             ),
         },
         ContentAssetRequest::EnvCell(env_cell_id) => match asset {
-            Ok(ContentAsset::EnvCell(env_cell)) => AssetLookupResponseDto {
+            Ok(ContentAsset::EnvCell {
+                cell,
+                region_id,
+                region_number,
+            }) => AssetLookupResponseDto {
                 request_id: request.request_id,
                 asset_id: request.asset_id,
                 payload_kind: AssetPayloadKindDto::Json,
                 payload: {
-                    if env_cell.prepared_cell.env_cell_id != env_cell_id {
+                    if cell.prepared_cell.env_cell_id != env_cell_id {
                         anyhow::bail!(
                             "EnvCell assembler returned 0x{:08X} for request 0x{env_cell_id:08X}",
-                            env_cell.prepared_cell.env_cell_id
+                            cell.prepared_cell.env_cell_id
                         );
                     }
-                    serialize_env_cell_binary_payload(&env_cell, path_prefix, writer)
+                    serialize_env_cell_binary_payload(
+                        &cell,
+                        region_id,
+                        region_number,
+                        path_prefix,
+                        writer,
+                    )
                 },
             },
             Ok(_) => unreachable!("content asset runtime returned mismatched env-cell"),
@@ -447,11 +457,15 @@ pub fn serialize_landblock_terrain_binary(
 }
 pub fn serialize_env_cell_binary_payload(
     asset: &EnvCellAsset,
+    region_id: u32,
+    region_number: u32,
     path_prefix: &str,
     writer: &mut BinaryAssetSectionWriter,
 ) -> serde_json::Value {
     serialize_env_cell_payload_with_geometry(
         asset,
+        region_id,
+        region_number,
         serialize_prepared_polygon_set_render_geometry_binary(
             &asset.prepared_cell.render_geometry,
             format!("{path_prefix}.renderGeometry"),

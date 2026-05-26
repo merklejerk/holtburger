@@ -87,7 +87,7 @@ describe("buildTerrainBlendMaterialSet", () => {
 		const material = set?.materials[0] as ShaderMaterial;
 		expect(material.uniforms.overlayCount.value).toBe(1);
 		expect(material.fragmentShader).toContain(
-			"texture2D(alphaTexture, rotateUv(vUv, rotation)).r",
+			"texture2D(alphaTexture, rotateLegacyAlphaUv(legacyAlphaUv(vUv), rotation)).r",
 		);
 		expect(cache.getStats().textureSamplingPolicySamples).toContain(
 			"wrap=clamp/clamp;filter=linear/linear/linear;color=none;aniso=1;mips=on;flipY=off",

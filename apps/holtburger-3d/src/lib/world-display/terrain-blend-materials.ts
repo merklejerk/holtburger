@@ -578,22 +578,26 @@ uniform int roadRotation1;
 uniform int roadCount;
 varying vec2 vUv;
 
-vec2 rotateUv(vec2 uv, int rotation) {
+vec2 legacyAlphaUv(vec2 uv) {
+	return vec2(uv.x, 1.0 - uv.y);
+}
+
+vec2 rotateLegacyAlphaUv(vec2 uv, int rotation) {
 	if (rotation == 1) {
-		return vec2(uv.y, 1.0 - uv.x);
+		return vec2(1.0 - uv.y, uv.x);
 	}
 	if (rotation == 2) {
 		return vec2(1.0 - uv.x, 1.0 - uv.y);
 	}
 	if (rotation == 3) {
-		return vec2(1.0 - uv.y, uv.x);
+		return vec2(uv.y, 1.0 - uv.x);
 	}
 	return uv;
 }
 
 vec4 blendOverlay(vec4 baseColor, sampler2D overlayTexture, sampler2D alphaTexture, float tiling, int rotation) {
 	vec4 overlayColor = texture2D(overlayTexture, vUv * tiling);
-	float alpha = texture2D(alphaTexture, rotateUv(vUv, rotation)).r;
+	float alpha = texture2D(alphaTexture, rotateLegacyAlphaUv(legacyAlphaUv(vUv), rotation)).r;
 	return mix(baseColor, overlayColor, clamp(alpha, 0.0, 1.0));
 }
 
@@ -610,11 +614,11 @@ void main() {
 	}
 	if (roadCount > 0) {
 		vec4 roadColor = texture2D(roadTexture, vUv * roadTiling);
-		float roadAlpha = 1.0 - texture2D(roadAlpha0, rotateUv(vUv, roadRotation0)).r;
+		float roadAlpha = 1.0 - texture2D(roadAlpha0, rotateLegacyAlphaUv(legacyAlphaUv(vUv), roadRotation0)).r;
 		if (roadCount > 1) {
 			roadAlpha = 1.0 - (
-				texture2D(roadAlpha0, rotateUv(vUv, roadRotation0)).r *
-				texture2D(roadAlpha1, rotateUv(vUv, roadRotation1)).r
+				texture2D(roadAlpha0, rotateLegacyAlphaUv(legacyAlphaUv(vUv), roadRotation0)).r *
+				texture2D(roadAlpha1, rotateLegacyAlphaUv(legacyAlphaUv(vUv), roadRotation1)).r
 			);
 		}
 		color = mix(color, roadColor, clamp(roadAlpha, 0.0, 1.0));

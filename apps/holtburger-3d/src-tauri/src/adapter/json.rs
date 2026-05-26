@@ -1468,3 +1468,100 @@ pub fn serialize_bsp_node(node: &BspNode) -> serde_json::Value {
         }),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use holtburger_content::{
+        CellLandblockFact, PreparedTerrainMesh, PreparedTerrainTriangle, PreparedVec3,
+    };
+
+    #[test]
+    fn terrain_pcode_packs_southwest_to_northwest_order_used_by_texmerge_pal_codes() {
+        let pcode = terrain_pcode([1, 2, 3, 0], [4, 5, 6, 7]);
+
+        assert_eq!((pcode >> 26) & 0x03, 1);
+        assert_eq!((pcode >> 24) & 0x03, 2);
+        assert_eq!((pcode >> 22) & 0x03, 3);
+        assert_eq!((pcode >> 20) & 0x03, 0);
+        assert_eq!((pcode >> 15) & 0x1f, 4);
+        assert_eq!((pcode >> 10) & 0x1f, 5);
+        assert_eq!((pcode >> 5) & 0x1f, 6);
+        assert_eq!(pcode & 0x1f, 7);
+    }
+
+    #[test]
+    fn landblock_quad_pcode_preserves_geometry_corner_order_for_texmerge() {
+        let mesh = PreparedTerrainMesh {
+            landblock_id: 0xda55ffff,
+            grid_size: 2,
+            tile_size: 24.0,
+            vertices: vec![
+                PreparedVec3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                PreparedVec3 {
+                    x: 24.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                PreparedVec3 {
+                    x: 0.0,
+                    y: 24.0,
+                    z: 0.0,
+                },
+                PreparedVec3 {
+                    x: 24.0,
+                    y: 24.0,
+                    z: 0.0,
+                },
+            ],
+            triangles: vec![
+                PreparedTerrainTriangle {
+                    a: 0,
+                    b: 1,
+                    c: 3,
+                    terrain_type: 0,
+                    average_height: 0.0,
+                },
+                PreparedTerrainTriangle {
+                    a: 0,
+                    b: 3,
+                    c: 2,
+                    terrain_type: 0,
+                    average_height: 0.0,
+                },
+            ],
+            min_height: 0.0,
+            max_height: 0.0,
+        };
+        let cell = CellLandblockFact {
+            id: 0xda55ffff,
+            has_objects: false,
+            grid_size: 2,
+            tile_size: 24.0,
+            terrain_types: vec![
+                cell_terrain(1, 1),
+                cell_terrain(4, 0),
+                cell_terrain(2, 2),
+                cell_terrain(3, 3),
+            ],
+            heights: vec![0.0; 4],
+            min_height: 0.0,
+            max_height: 0.0,
+            all_heights_zero: true,
+        };
+
+        let quads = build_landblock_terrain_quads(&mesh, &cell);
+
+        assert_eq!(quads.len(), 1);
+        assert_eq!(quads[0].corner_terrain_codes, [1, 2, 3, 4]);
+        assert_eq!(quads[0].pcode, terrain_pcode([1, 2, 3, 0], [1, 2, 3, 4]));
+    }
+
+    fn cell_terrain(terrain_code: u16, road_code: u16) -> u16 {
+        (terrain_code << 2) | road_code
+    }
+}

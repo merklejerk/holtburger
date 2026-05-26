@@ -57,20 +57,36 @@ or new reference evidence proves it stale.
 - Setup appearance material contexts fill `textureSwapSignature` from resolved
   `ObjDesc.texture_changes`, so material cache keys now distinguish texture
   swap variants as well as selected parts and palette views.
+- `ClothingTable` parsing and `ClothingTable::BuildObjDesc`-style generation
+  exist in `holtburger-content`; clothing recipes now produce normal `ObjDesc`
+  facts rather than renderer-specific material state.
+- Classic `TextureVelocity` and `TextureVelocityPart` hooks are parsed and
+  routed into renderer-local UV velocity state. The renderer subsystem owns
+  signatures, shader patching, uniforms, and debug metrics, while future
+  animation playback still needs to feed frame-hook execution at runtime.
+- Clipmap alpha-test, translucency, luminosity/diffuse scalar handling, legacy
+  blend-state mapping, texture filtering policy, anisotropy preference, and
+  direct-color compact texture upload are implemented for the legacy material
+  path.
+- Legacy `0x05` material texture records have been renamed and treated as
+  `SurfaceTexture`/`ImgTex` source-level lists. The renderer consumes one
+  DTO-selected `RenderSurface` source image instead of treating the list as an
+  authored mip chain.
+- Real legacy surface materials now use neutral Three.js PBR defaults
+  (`metalness = 0`, `roughness = 1`, `envMapIntensity = 0`) so accidental
+  specular/environment tint does not affect retail-parity material rendering.
 
 ### Known Gaps
 
-- Live runtime object integration still needs a producer that feeds
-  server/client `ObjDesc` values into the derived runtime appearance cache and
-  dependency planner. The content resolver and cache API exist, but the 3D app
-  still mostly discovers base setup snapshots from static DAT scene sources.
-- `ClothingTable`-driven appearance generation is not implemented. The lower
-  level `ObjDesc + Setup` path should come first; clothing tables should later
-  produce `ObjDesc` inputs in `holtburger-content`, not renderer-local clothing
-  state.
-- Legacy texture animation hooks are preserved opaquely but not applied.
-  `TextureVelocity` and `TextureVelocityPart` should eventually drive
-  per-instance UV offsets without mutating shared `GfxObj` geometry.
+- Live runtime object integration still needs a producer that feeds server or
+  client-mode `ObjDesc` values into the derived runtime appearance cache and
+  dependency planner. The content resolver, cache API, and browser preview
+  harness exist, but the 3D app still mostly discovers renderable entities from
+  static DAT scene sources.
+- Texture velocity is renderer-ready and static-placement-fed, but true runtime
+  animation frame-hook execution is still missing. Moving/client-mode entities
+  must eventually update texture velocity from the animation system rather than
+  relying only on setup placement defaults.
 - Outdoor terrain is still diagnostic vertex color only. It does not consume
   `terrain-material/{regionNumber}`, terrain pcodes, overlay alpha maps, road
   maps, detail textures, or texture tiling.
@@ -82,10 +98,16 @@ or new reference evidence proves it stale.
   should be treated as optional mounted-pack support rather than baseline retail
   visual parity unless we prove the target retail install actually shipped and
   activated those assets.
-- `CSurface.diffuse` and `CSurface.luminosity` are preserved in payloads but
-  mostly not reflected in Three material parameters.
-- Clipmap handling exists for indexed materials, but broader clipmap/direct
-  texture parity still needs validation.
+- Indexed-color textures are still sampled as raw index textures with nearest
+  filtering before palette lookup. Retail appears to resolve indexed surfaces
+  with the active palette into color textures before normal filtering, so some
+  palettized static objects can still look more pixelated than retail.
+- Renderer performance has known pressure from draw-call/static-geometry-group
+  count, many instanced groups, and portal pass multiplication. The shader
+  program count is no longer the leading suspect.
+- Lighting parity remains broader than material defaults. Legacy materials no
+  longer inject PBR specular/env defaults, but the browser scene still uses
+  Three.js light choices that only approximate retail fixed-function lighting.
 
 ## Reference Behavior
 
@@ -2325,6 +2347,62 @@ Course-correction targets from Phase 8.1:
 - Keep Phase 9 on the new `surface-texture` path so terrain work does not
   revive `render-texture/{did}` for legacy `0x05` assets.
 
+### Phase 8.3: Legacy Material Lighting Defaults
+
+Status: Implemented.
+
+Goal: remove accidental Three.js PBR material defaults from real legacy surface
+materials before terrain work compares broader scene lighting.
+
+Why this exists:
+
+- Retail `CSurface::SetSurface` configures fixed-function texture, blend,
+  alpha-test, diffuse, translucency, and luminosity state. It does not apply a
+  physically based metalness/roughness/specular model.
+- Holtburger's real legacy materials were built with `MeshStandardMaterial`
+  defaults plus small nonzero metalness/roughness choices. That could add
+  browser-authored specular/environment tint to textured statics, interiors, and
+  terrain even when the source material was otherwise correct.
+- Debug fallback and no-material modes can keep diagnostic styling, but normal
+  material mode should not tint valid textured surfaces for renderer-debug
+  reasons.
+
+Progress:
+
+- Added a shared material-construction helper that forces real legacy
+  `MeshStandardMaterial` instances to `metalness = 0`, `roughness = 1`,
+  `envMapIntensity = 0`, and `flatShading = true`.
+- Applied the helper to real solid, direct/compressed texture, indexed,
+  placeholder, and terrain tile materials.
+- Left explicit debug/no-material fallback materials free to keep diagnostic
+  styling because those modes intentionally do not represent retail material
+  output.
+
+Decisions:
+
+- Keep using `MeshStandardMaterial` for now so existing indexed shader patches,
+  alpha state, texture velocity patches, and material cache behavior remain
+  stable.
+- Treat remaining brightness/color mismatch as lighting parity work, not as a
+  reason to reintroduce specular or environment contribution on legacy surface
+  materials.
+
+Cleanup targets:
+
+- If lighting mismatch remains obvious after terrain materials land, audit the
+  browser scene's ambient/directional light model against retail fixed-function
+  lighting rather than adjusting per-material PBR knobs.
+- Reconsider `MeshLambertMaterial` or a dedicated fixed-function-style shader
+  only if evidence shows `MeshStandardMaterial` cannot be made visually close
+  without fragile parameter tuning.
+
+Verification:
+
+- `npm run test:ts -- material-behavior material-resources indexed-materials`
+  passes from `apps/holtburger-3d`.
+- `npm run check` passes from `apps/holtburger-3d`.
+- `npm run lint:ts` passes from `apps/holtburger-3d`.
+
 ### Phase 9: Terrain Material Pipeline Prep
 
 Goal: introduce terrain-specific renderer boundaries before implementing terrain
@@ -2350,10 +2428,10 @@ Completion criteria:
 - Phase 10 can add blending shaders/resources without refactoring terrain scene
   selection or geometry ownership.
 
-### Phase 10: Terrain TexMerge GPU Path
+### Phase 10: Terrain GPU Blend Path
 
 Goal: replace diagnostic terrain colors with renderer-native terrain materials
-for the main pcode-driven terrain merge.
+for the main pcode-driven terrain blend.
 
 - Build a terrain material resource path that consumes:
   - `landblock-outdoor.terrain.quads[].pcode`;
@@ -2368,6 +2446,10 @@ for the main pcode-driven terrain merge.
   a separate detail-surface path after the base terrain material is selected.
 - Preserve color-variation fields in data and diagnostics, but do not implement
   an invented HSB variation path.
+- Do not implement this as a CPU `TexMerge::FillTempTexBuffer` clone unless
+  exact retail texel output later becomes a hard requirement. The current
+  strategy prefers a renderer-native GPU path using the same pcode/material
+  inputs.
 
 Expected effect: outdoor terrain stops being debug-colored and begins using
 terrain material data in a way that can be compared against retail visuals.
@@ -2380,7 +2462,7 @@ textures into base terrain, building, object, or environment materials.
 - Select role-specific `DetailTexGID` and `DetailTexTiling` through
   `LandSurf`/`TexMerge.terrain_desc`. Retail indexes the same table by role:
   landscape `0`, building `1`, environment `2`, and object `3`.
-- Treat detail textures as overlay resources, not as part of the TexMerge GPU
+- Treat detail textures as overlay resources, not as part of the terrain GPU
   base/overlay/road blend and not as ordinary `CSurface` material variants.
 - Add a shared renderer-local detail-overlay policy/resource path that can be
   applied by render domain: landscape terrain first, then building statics,
@@ -2418,6 +2500,10 @@ changing the legacy material graph or redefining the baseline retail parity
 target.
 
 ## Cross-Cutting Followups
+
+These are not blockers for Phase 9 terrain work, but they should become named
+implementation phases before client-mode entity density or final material
+parity depends on them.
 
 - Define a shared render-facing runtime entity projection before client-mode
   entity rendering lands. Browser preview objects currently flow through
@@ -2468,6 +2554,8 @@ target.
 
 ## Suggested Order
 
+Completed or current material-parity phases:
+
 1. Phase 0 material pipeline refactor prep.
 2. Phase 1 texture sampling policy prep.
 3. Phase 2 setup appearance routing.
@@ -2475,22 +2563,48 @@ target.
 5. Phase 3 UV and sampler validation.
 6. Phase 4 derived palette views.
 7. Phase 5 runtime appearance parity.
-8. Phase 6 ClothingTable appearance generation.
-9. Phase 7 classic texture velocity animation.
-10. Phase 7.1 texture velocity renderer subsystem.
-11. Phase 8 clipmap/scalar behavior.
-12. Phase 9 terrain material pipeline prep.
-13. Phase 10 terrain TexMerge GPU path.
-14. Phase 10.5 legacy detail texture overlay.
-15. Phase 11 optional high-res JPEG replacement.
+8. Phase 5.5 layered runtime appearance cache.
+9. Phase 5.75 browser appearance preview harness.
+10. Phase 6 ClothingTable appearance generation.
+11. Phase 7 classic texture velocity animation.
+12. Phase 7.1 texture velocity renderer subsystem.
+13. Phase 8 clipmap/scalar behavior.
+14. Phase 8.1 legacy alpha blend and sampler modes.
+15. Phase 8.2 SurfaceTexture/ImgTex source-level and mipmap parity.
+16. Phase 8.3 legacy material lighting defaults.
 
-This order should improve the currently observed failures fastest:
+Remaining planned parity phases:
 
-- untextured outdoor buildings/static setup objects are likely blocked by setup
-  appearance routing and material-slot use;
-- wrong or invisible interior textures are likely blocked by UV/sampler parity;
-- outdoor terrain is intentionally debug-colored until the terrain shader path
-  exists.
+1. Phase 9 terrain material pipeline prep.
+2. Phase 10 terrain GPU blend path.
+3. Phase 10.5 legacy detail texture overlay.
+4. Phase 11 optional high-res JPEG replacement.
+
+Recommended follow-up phases after the terrain/detail pass:
+
+1. Indexed-color filtering evaluation and implementation. This should compare
+   lazy resolved color textures against shader-side color-space bilinear
+   filtering, then choose a bounded cache strategy.
+2. Renderer performance consolidation before dense runtime entity/client-mode
+   rendering. Focus on geometry-group count, draw-call count, instanced-group
+   fragmentation, visibility culling, and portal pass multiplication.
+3. Runtime entity render projection. Browser preview objects and server-spawned
+   entities should feed the same render-facing shape with different
+   authority/lifetime sources.
+4. Animation frame-hook execution for moving entities. Texture velocity already
+   has renderer state, but runtime animation playback needs to drive it from
+   frame-key execution.
+
+This order now targets the currently observed failures and risks:
+
+- outdoor terrain is intentionally debug-colored until the terrain material path
+  exists;
+- detail textures are visually important across landscape, building,
+  environment, and object roles, but should remain a separate overlay path;
+- indexed palettized statics can still look too pixelated because Holtburger
+  filters palette indices differently from retail's resolved-color path;
+- runtime entity scale will stress render projection, batching, visibility, and
+  animation hooks more than the current static browser scene does.
 
 ## Validation Checklist
 

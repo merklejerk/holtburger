@@ -10,6 +10,7 @@ import {
 	formatEnvCellAssetId,
 	formatLandblockOutdoorAssetId,
 	formatLandblockTopologyAssetId,
+	formatTerrainMaterialAssetId,
 	normalizeOutdoorLandblockId,
 } from "../landblocks";
 import type { PreparedAssetRecord } from "./types";
@@ -218,6 +219,14 @@ function createOutdoorCoverageRequestsForInterest(
 				outdoorLandblockIds,
 			),
 		),
+		...createTerrainMaterialRequests(
+			requestRevision,
+			browserDestination,
+			priority,
+			preparedByAssetId,
+			pendingAssetIds,
+			outdoorLandblockIds,
+		),
 		...(priority === "bootstrap"
 			? []
 			: createLandblockTopologyCoverageRequests(
@@ -244,6 +253,24 @@ function createLandblockOutdoorCoverageRequests(
 		requestRevision,
 		priority,
 		`${describeRequiredBrowserDestinationIdentity(browserDestination)}-outdoor`,
+		preparedByAssetId,
+		pendingAssetIds,
+	);
+}
+
+function createTerrainMaterialRequests(
+	requestRevision: number,
+	browserDestination: BrowserLocationSelection,
+	priority: AssetPriority,
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	pendingAssetIds: string[],
+	landblockIds: readonly number[],
+): AssetLookupRequestDto[] {
+	return createUnpreparedRequests(
+		collectTerrainMaterialAssetIds(preparedByAssetId, landblockIds),
+		requestRevision,
+		priority,
+		`${describeRequiredBrowserDestinationIdentity(browserDestination)}-terrain-material`,
 		preparedByAssetId,
 		pendingAssetIds,
 	);
@@ -706,6 +733,30 @@ function collectSelectedOutdoorSourceAssetIds(
 						: selection.detailLandblockIds.has(landblockId),
 				)
 				.map((member) => member.sourceAssetId);
+		}),
+	);
+}
+
+function collectTerrainMaterialAssetIds(
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	landblockIds: readonly number[],
+): string[] {
+	const activeLandblockIds = new Set(
+		landblockIds.map(normalizeOutdoorLandblockId),
+	);
+	return uniqueSortedAssetIds(
+		Object.values(preparedByAssetId).flatMap((asset) => {
+			if (asset.payload.kind !== "landblock-outdoor") {
+				return [];
+			}
+			if (
+				!activeLandblockIds.has(
+					normalizeOutdoorLandblockId(asset.payload.landblockId),
+				)
+			) {
+				return [];
+			}
+			return [formatTerrainMaterialAssetId(asset.payload.regionNumber)];
 		}),
 	);
 }

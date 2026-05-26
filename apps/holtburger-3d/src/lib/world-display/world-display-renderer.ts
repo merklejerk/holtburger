@@ -105,7 +105,11 @@ import type {
 	TransitionPortalWorkItem,
 } from "./transition-portal-work-items";
 import { createTransitionPortalWorkItem } from "./transition-portal-work-items";
-import { buildTerrainGeometry } from "./terrain-geometry";
+import { buildTerrainBlendMaterialSet } from "./terrain-blend-materials";
+import {
+	buildDebugTerrainGeometry,
+	buildTerrainMaterialGeometry,
+} from "./terrain-geometry";
 import type { TerrainSceneModel, TerrainSceneTile } from "./terrain-scene";
 import {
 	syncRenderChunkRootRecords,
@@ -470,7 +474,8 @@ export function createWorldDisplayRenderer(
 
 	const scene = new Scene();
 	const reportMaterialDiagnostic = createCoalescedMaterialDiagnosticReporter();
-	const materialTextureCapabilities = detectMaterialTextureCapabilities(renderer);
+	const materialTextureCapabilities =
+		detectMaterialTextureCapabilities(renderer);
 	let materialResourceCache = createMaterialResourceCache(textureFilteringMode);
 
 	function createMaterialResourceCache(
@@ -1344,13 +1349,22 @@ export function createWorldDisplayRenderer(
 			const chunkRoot = getRenderChunkRoot(tile.renderChunk.chunkKey);
 			const existing = terrainMeshes.get(tile.assetId);
 			if (existing) {
-				chunkRoot.attach(existing);
-				existing.position.set(
-					tile.chunkLocalOffset.x,
-					tile.chunkLocalOffset.y,
-					tile.chunkLocalOffset.z,
-				);
-				continue;
+				if (
+					existing.userData.terrainMaterialResourceSignature !==
+					tile.materialResources.signature
+				) {
+					existing.removeFromParent();
+					disposeMesh(existing);
+					terrainMeshes.delete(tile.assetId);
+				} else {
+					chunkRoot.attach(existing);
+					existing.position.set(
+						tile.chunkLocalOffset.x,
+						tile.chunkLocalOffset.y,
+						tile.chunkLocalOffset.z,
+					);
+					continue;
+				}
 			}
 
 			const mesh = createTerrainTileMesh(tile);
@@ -2572,17 +2586,39 @@ export function createWorldDisplayRenderer(
 	}
 
 	function createTerrainTileMesh(tile: TerrainSceneTile): Mesh {
-		const geometry = buildTerrainGeometry(tile.mesh);
-		const material = new MeshStandardMaterial(
+		const materialSet =
+			tile.materialResources.status === "ready"
+				? buildTerrainBlendMaterialSet({
+						assetState,
+						regionNumber: tile.materialResources.regionNumber,
+						pcodes: tile.mesh.quads.map((quad) => quad.pcode),
+						materialResourceCache,
+					})
+				: null;
+		const geometry = materialSet
+			? buildTerrainMaterialGeometry(
+					tile.mesh,
+					materialSet.materialIndexByPcode,
+				)
+			: buildDebugTerrainGeometry(tile.mesh);
+		const material = materialSet?.materials ?? createDebugTerrainMaterial();
+		const mesh = new Mesh(geometry, material);
+		mesh.name = tile.assetId;
+		mesh.userData.renderStyleDebugColorKey = tile.assetId;
+		mesh.userData.terrainMaterialSignature =
+			materialSet?.signature ?? "debug-terrain";
+		mesh.userData.terrainMaterialResourceSignature =
+			tile.materialResources.signature;
+		applyRenderStyleToObject(mesh);
+		return mesh;
+	}
+
+	function createDebugTerrainMaterial(): MeshStandardMaterial {
+		return new MeshStandardMaterial(
 			withLegacyMeshStandardSurfaceDefaults({
 				vertexColors: true,
 			}),
 		);
-		const mesh = new Mesh(geometry, material);
-		mesh.name = tile.assetId;
-		mesh.userData.renderStyleDebugColorKey = tile.assetId;
-		applyRenderStyleToObject(mesh);
-		return mesh;
 	}
 
 	function syncRenderStyle(): void {

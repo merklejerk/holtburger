@@ -37,6 +37,7 @@ const PIXEL_FORMAT_R5G6B5 = 0x17;
 const PIXEL_FORMAT_A4R4G4B4 = 0x1a;
 const PIXEL_FORMAT_A8 = 0x1c;
 const PIXEL_FORMAT_CUSTOM_LANDSCAPE_R8G8B8 = 0xf3;
+const PIXEL_FORMAT_CUSTOM_LANDSCAPE_ALPHA = 0xf4;
 const PIXEL_FORMAT_DXT1 = 0x3154_5844;
 const PIXEL_FORMAT_DXT3 = 0x3354_5844;
 const PIXEL_FORMAT_DXT5 = 0x3554_5844;
@@ -215,6 +216,7 @@ function decodeDirectColorRenderSurface(
 				type: UnsignedByteType,
 			};
 		case PIXEL_FORMAT_A8:
+		case PIXEL_FORMAT_CUSTOM_LANDSCAPE_ALPHA:
 			return {
 				data: decodeA8ToRgb(source, pixelCount),
 				format: RGBFormat,
@@ -324,10 +326,7 @@ function decodeA4R4G4B4ToRgba8888(
 			(value >> A4R4G4B4_GREEN_SHIFT) & A4R4G4B4_CHANNEL_MASK,
 			4,
 		);
-		rgba[targetOffset + 2] = scaleBitsToByte(
-			value & A4R4G4B4_CHANNEL_MASK,
-			4,
-		);
+		rgba[targetOffset + 2] = scaleBitsToByte(value & A4R4G4B4_CHANNEL_MASK, 4);
 		rgba[targetOffset + 3] = scaleBitsToByte(
 			(value >> A4R4G4B4_ALPHA_SHIFT) & A4R4G4B4_CHANNEL_MASK,
 			4,
@@ -372,6 +371,7 @@ function directColorBytesPerPixel(formatRaw: number): number | null {
 		case PIXEL_FORMAT_A4R4G4B4:
 			return 2;
 		case PIXEL_FORMAT_A8:
+		case PIXEL_FORMAT_CUSTOM_LANDSCAPE_ALPHA:
 			return 1;
 		default:
 			return null;

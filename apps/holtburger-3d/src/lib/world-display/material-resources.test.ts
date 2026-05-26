@@ -213,7 +213,9 @@ describe("world material resource cache", () => {
 
 		const material = plan.materials[0] as MeshStandardMaterial;
 		const texture = material.map as DataTexture;
-		expect([...texture.image.data.slice(0, 4)]).toEqual([0x30, 0x20, 0x10, 0xff]);
+		expect([...texture.image.data.slice(0, 4)]).toEqual([
+			0x30, 0x20, 0x10, 0xff,
+		]);
 		cache.dispose();
 	});
 
@@ -300,9 +302,9 @@ describe("world material resource cache", () => {
 			fallbackColorKey: "part",
 		});
 
-	expect(diagnostics).toEqual([
-		"unsupported-surface-flags:material/08000024:197121:Detail",
-	]);
+		expect(diagnostics).toEqual([
+			"unsupported-surface-flags:material/08000024:197121:Detail",
+		]);
 		cache.dispose();
 	});
 
@@ -809,6 +811,14 @@ describe("world material resource cache", () => {
 			}),
 			samplingPolicy: createDefaultMaterialTextureSamplingPolicy().directColor,
 		}) as DataTexture;
+		const landscapeAlphaTexture = cache.getTexture({
+			renderSurface: createRenderSurfacePayload(0x06000024, {
+				formatRaw: 0xf4,
+				format: "CustomLandscapeAlpha",
+				sourceBytes: new Uint8Array([0x7f]),
+			}),
+			samplingPolicy: createDefaultMaterialTextureSamplingPolicy().directColor,
+		}) as DataTexture;
 
 		expect(rgbTexture.format).toBe(RGBFormat);
 		expect(rgbTexture.type).toBe(UnsignedByteType);
@@ -818,6 +828,9 @@ describe("world material resource cache", () => {
 		expect(rgba4444Texture.format).toBe(RGBAFormat);
 		expect(rgba4444Texture.type).toBe(UnsignedShort4444Type);
 		expect([...rgba4444Texture.image.data]).toEqual([0x2341]);
+		expect(landscapeAlphaTexture.format).toBe(RGBFormat);
+		expect(landscapeAlphaTexture.type).toBe(UnsignedByteType);
+		expect([...landscapeAlphaTexture.image.data]).toEqual([0x7f, 0x7f, 0x7f]);
 		cache.dispose();
 	});
 
@@ -1145,7 +1158,8 @@ function createRenderSurfacePayload(
 		format?: string;
 	} = {},
 ): PreparedRenderSurfacePayload {
-	const sourceBytes = options.sourceBytes ?? new Uint8Array([0x33, 0x22, 0x11, 0xff]);
+	const sourceBytes =
+		options.sourceBytes ?? new Uint8Array([0x33, 0x22, 0x11, 0xff]);
 	return {
 		kind: "render-surface",
 		sourceAssetKind: "render-surface",

@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { PreparedTerrainMesh } from "../assets/types";
-import { buildDebugTerrainGeometry } from "./terrain-geometry";
+import {
+	buildDebugTerrainGeometry,
+	buildTerrainMaterialGeometry,
+} from "./terrain-geometry";
 
 describe("buildDebugTerrainGeometry", () => {
 	it("keeps pcode and quad attributes for the future terrain material path", () => {
@@ -10,12 +13,29 @@ describe("buildDebugTerrainGeometry", () => {
 		expect(Array.from(geometry.getAttribute("terrainPcode").array)).toEqual([
 			1234, 1234, 1234,
 		]);
-		expect(Array.from(geometry.getAttribute("terrainQuadIndex").array)).toEqual([
-			7, 7, 7,
-		]);
+		expect(Array.from(geometry.getAttribute("terrainQuadIndex").array)).toEqual(
+			[7, 7, 7],
+		);
 		expect(
 			Array.from(geometry.getAttribute("terrainCornerCodes").array),
 		).toEqual([1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4]);
+	});
+});
+
+describe("buildTerrainMaterialGeometry", () => {
+	it("groups triangles by resolved terrain material and emits terrain UVs", () => {
+		const geometry = buildTerrainMaterialGeometry(
+			createTerrainMesh(),
+			new Map([[1234, 2]]),
+		);
+
+		expect(geometry.groups).toEqual([{ start: 0, count: 3, materialIndex: 2 }]);
+		expect(Array.from(geometry.getAttribute("uv").array)).toEqual([
+			0, 0, 1, 0, 1, 1,
+		]);
+		expect(Array.from(geometry.getAttribute("terrainPcode").array)).toEqual([
+			1234, 1234, 1234,
+		]);
 	});
 });
 

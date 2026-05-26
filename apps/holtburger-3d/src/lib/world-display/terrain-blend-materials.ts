@@ -31,6 +31,7 @@ interface TerrainBlendPlan {
 	base: PreparedTerrainMaterialTypeEntry;
 	overlays: TerrainTextureOverlay[];
 	roads: TerrainRoadOverlay[];
+	detail: TerrainDetailOverlay | null;
 	allRoad: boolean;
 }
 
@@ -50,9 +51,20 @@ interface PreparedTerrainAlphaSelection {
 	rotation: number;
 }
 
+type PreparedTerrainDetailLayer = NonNullable<
+	PreparedTerrainMaterialTypeEntry["detail"]
+>;
+
+interface TerrainDetailOverlay {
+	detail: PreparedTerrainDetailLayer;
+}
+
 const TERRAIN_CODE_MASK = 0x1f;
 const ROAD_CORNER_MASKS = [0x0c00_0000, 0x0300_0000, 0x00c0_0000, 0x0030_0000];
 const ROAD_TYPE_TERRAIN_CODE = 3;
+const LANDSCAPE_DETAIL_ROLE_INDEX = 0;
+const RETAIL_DETAIL_FADE_NEAR = 10;
+const RETAIL_DETAIL_FADE_FAR = 50;
 
 export function buildTerrainBlendMaterialSet(
 	options: BuildTerrainBlendMaterialSetOptions,
@@ -67,13 +79,19 @@ export function buildTerrainBlendMaterialSet(
 	const terrainByCode = new Map(
 		table.terrainTypes.map((terrain) => [terrain.terrainType, terrain]),
 	);
+	const landscapeDetail = selectLandscapeDetail(table);
 	const pcodes = [...new Set(options.pcodes)].sort(compareNumbers);
 	const materials: Material[] = [];
 	const materialIndexByPcode = new Map<number, number>();
 	const diagnostics: string[] = [];
 
 	for (const pcode of pcodes) {
-		const plan = buildTerrainBlendPlan({ table, terrainByCode, pcode });
+		const plan = buildTerrainBlendPlan({
+			table,
+			terrainByCode,
+			pcode,
+			landscapeDetail,
+		});
 		if (!plan) {
 			diagnostics.push(`Could not resolve terrain pcode ${pcode}.`);
 			continue;
@@ -111,6 +129,7 @@ function buildTerrainBlendPlan(options: {
 	table: PreparedTerrainMaterialTablePayload;
 	terrainByCode: ReadonlyMap<number, PreparedTerrainMaterialTypeEntry>;
 	pcode: number;
+	landscapeDetail: TerrainDetailOverlay | null;
 }): TerrainBlendPlan | null {
 	const terrainCodes = decodeTerrainCodes(options.pcode);
 	const roadCodes = decodeRoadCodes(options.pcode);
@@ -121,6 +140,7 @@ function buildTerrainBlendPlan(options: {
 			base: roadTerrain,
 			overlays: [],
 			roads: [],
+			detail: options.landscapeDetail,
 			allRoad: true,
 		};
 	}
@@ -157,6 +177,7 @@ function buildTerrainBlendPlan(options: {
 		base,
 		overlays,
 		roads,
+		detail: options.landscapeDetail,
 		allRoad: false,
 	};
 }
@@ -225,6 +246,21 @@ function createTerrainBlendMaterial(options: {
 		});
 		return alphaTexture ? [{ road, alphaTexture }] : [];
 	});
+	const detailTexture = options.plan.detail
+		? resolveTerrainDetailTexture({
+				detail: options.plan.detail.detail,
+				assetState: options.assetState,
+				materialResourceCache: options.materialResourceCache,
+				diagnostics: options.diagnostics,
+			})
+		: null;
+	const detailFadeNear = normalizeDetailFadeNear(
+		options.plan.detail?.detail.fadeNear,
+	);
+	const detailFadeFar = normalizeDetailFadeFar(
+		options.plan.detail?.detail.fadeFar,
+		detailFadeNear,
+	);
 
 	const material = new ShaderMaterial({
 		name: `terrain-blend-${options.plan.pcode}`,
@@ -269,6 +305,13 @@ function createTerrainBlendMaterial(options: {
 			roadRotation0: { value: resolvedRoads[0]?.road.rotation ?? 0 },
 			roadRotation1: { value: resolvedRoads[1]?.road.rotation ?? 0 },
 			roadCount: { value: resolvedRoads.length },
+			detailTexture: { value: detailTexture ?? base },
+			detailTiling: {
+				value: normalizeDetailTiling(options.plan.detail?.detail.tiling),
+			},
+			detailFadeNear: { value: detailFadeNear },
+			detailFadeFar: { value: detailFadeFar },
+			detailEnabled: { value: detailTexture ? 1 : 0 },
 		},
 		vertexShader: TERRAIN_BLEND_VERTEX_SHADER,
 		fragmentShader: TERRAIN_BLEND_FRAGMENT_SHADER,
@@ -280,8 +323,39 @@ function createTerrainBlendMaterial(options: {
 		allRoad: options.plan.allRoad,
 		terrainOverlayCount: options.plan.overlays.length,
 		roadOverlayCount: options.plan.roads.length,
+		detailTextureAssetId: options.plan.detail?.detail.textureAssetId ?? null,
+		detailEnabled: detailTexture !== null,
 	};
 	return material;
+}
+
+function selectLandscapeDetail(
+	table: PreparedTerrainMaterialTablePayload,
+): TerrainDetailOverlay | null {
+	const detail = table.terrainTypes[LANDSCAPE_DETAIL_ROLE_INDEX]?.detail;
+	return detail ? { detail } : null;
+}
+
+function resolveTerrainDetailTexture(options: {
+	detail: PreparedTerrainDetailLayer;
+	assetState: AssetChannelState;
+	materialResourceCache: WorldMaterialResourceCache;
+	diagnostics: string[];
+}): Texture | null {
+	if (options.detail.tiling <= 0) {
+		options.diagnostics.push(
+			`Invalid landscape detail tiling ${options.detail.tiling} for ${options.detail.textureAssetId}.`,
+		);
+		return null;
+	}
+	return resolveTerrainTexture({
+		textureAssetId: options.detail.textureAssetId,
+		wrap: "repeat",
+		role: "color",
+		assetState: options.assetState,
+		materialResourceCache: options.materialResourceCache,
+		diagnostics: options.diagnostics,
+	});
 }
 
 function resolveTerrainTexture(options: {
@@ -540,16 +614,37 @@ function normalizeTiling(tiling: number): number {
 	return Math.max(tiling, 1);
 }
 
+function normalizeDetailTiling(tiling: number | undefined): number {
+	if (tiling === undefined) {
+		return 1;
+	}
+	return Math.max(tiling, 1);
+}
+
+function normalizeDetailFadeNear(fadeNear: number | undefined): number {
+	return fadeNear && fadeNear > 0 ? fadeNear : RETAIL_DETAIL_FADE_NEAR;
+}
+
+function normalizeDetailFadeFar(
+	fadeFar: number | undefined,
+	fadeNear: number,
+): number {
+	return fadeFar && fadeFar > fadeNear ? fadeFar : RETAIL_DETAIL_FADE_FAR;
+}
+
 function compareNumbers(left: number, right: number): number {
 	return left - right;
 }
 
 const TERRAIN_BLEND_VERTEX_SHADER = `
 varying vec2 vUv;
+varying float vViewDepth;
 
 void main() {
 	vUv = uv;
-	gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+	vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
+	vViewDepth = -viewPosition.z;
+	gl_Position = projectionMatrix * viewPosition;
 }
 `;
 
@@ -576,7 +671,13 @@ uniform sampler2D roadAlpha1;
 uniform int roadRotation0;
 uniform int roadRotation1;
 uniform int roadCount;
+uniform sampler2D detailTexture;
+uniform float detailTiling;
+uniform float detailFadeNear;
+uniform float detailFadeFar;
+uniform int detailEnabled;
 varying vec2 vUv;
+varying float vViewDepth;
 
 vec2 legacyAlphaUv(vec2 uv) {
 	return vec2(uv.x, 1.0 - uv.y);
@@ -601,6 +702,15 @@ vec4 blendOverlay(vec4 baseColor, sampler2D overlayTexture, sampler2D alphaTextu
 	return mix(baseColor, overlayColor, clamp(1.0 - alpha, 0.0, 1.0));
 }
 
+float detailDepthFade() {
+	return clamp((detailFadeFar - vViewDepth) / (detailFadeFar - detailFadeNear), 0.0, 1.0);
+}
+
+vec3 applyDetailOverlay(vec3 baseColor) {
+	vec4 detailColor = texture2D(detailTexture, vUv * detailTiling);
+	return mix(baseColor, detailColor.rgb, clamp(detailColor.a * detailDepthFade(), 0.0, 1.0));
+}
+
 void main() {
 	vec4 color = texture2D(baseTexture, vUv * baseTiling);
 	if (overlayCount > 0) {
@@ -622,6 +732,9 @@ void main() {
 			);
 		}
 		color = mix(color, roadColor, clamp(roadAlpha, 0.0, 1.0));
+	}
+	if (detailEnabled > 0) {
+		color.rgb = applyDetailOverlay(color.rgb);
 	}
 	gl_FragColor = vec4(color.rgb, 1.0);
 }

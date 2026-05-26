@@ -97,6 +97,57 @@ describe("buildTerrainBlendMaterialSet", () => {
 		);
 		cache.dispose();
 	});
+
+	it("applies the landscape role detail texture after terrain and road blending", () => {
+		const state = createInitialAssetChannelState();
+		state.preparedByAssetId = indexByAssetId([
+			createRecord(
+				"terrain-material/1",
+				createTerrainMaterialPayload(false, true),
+			),
+			createRecord(
+				"surface-texture/05000010",
+				createSurfaceTexturePayload(0x06000010),
+			),
+			createRecord(
+				"render-surface/06000010",
+				createRenderSurfacePayload(0x06000010),
+			),
+			createRecord(
+				"surface-texture/05001786",
+				createSurfaceTexturePayload(0x06001786),
+			),
+			createRecord(
+				"render-surface/06001786",
+				createRenderSurfacePayload(0x06001786, 0x15),
+			),
+		]);
+		const cache = new WorldMaterialResourceCache();
+
+		const set = buildTerrainBlendMaterialSet({
+			assetState: state,
+			regionNumber: 1,
+			pcodes: [terrainPcode([0, 0, 0, 0], [1, 1, 1, 1])],
+			materialResourceCache: cache,
+		});
+
+		const material = set?.materials[0] as ShaderMaterial;
+		expect(material.uniforms.detailEnabled.value).toBe(1);
+		expect(material.uniforms.detailTiling.value).toBe(12);
+		expect(material.uniforms.detailFadeNear.value).toBe(10);
+		expect(material.uniforms.detailFadeFar.value).toBe(50);
+		expect(material.fragmentShader).toContain(
+			"return mix(baseColor, detailColor.rgb, clamp(detailColor.a * detailDepthFade(), 0.0, 1.0));",
+		);
+		expect(material.userData.holtburgerMaterial).toMatchObject({
+			detailTextureAssetId: "surface-texture/05001786",
+			detailEnabled: true,
+		});
+		expect(cache.getStats().textureSamplingPolicySamples).toContain(
+			"wrap=repeat/repeat;filter=linear/linear/linear;color=srgb;aniso=1;mips=on;flipY=off",
+		);
+		cache.dispose();
+	});
 });
 
 function indexByAssetId(
@@ -126,6 +177,7 @@ function createRecord(
 
 function createTerrainMaterialPayload(
 	includeOverlay = false,
+	includeDetail = false,
 ): PreparedAssetPayload {
 	return {
 		kind: "terrain-material",
@@ -140,7 +192,15 @@ function createTerrainMaterialPayload(
 				textureAssetId: "surface-texture/05000010",
 				textureDid: 0x05000010,
 				tiling: 4,
-				detail: null,
+				detail: includeDetail
+					? {
+							textureAssetId: "surface-texture/05001786",
+							textureDid: 0x05001786,
+							tiling: 12,
+							fadeNear: 10,
+							fadeFar: 50,
+						}
+					: null,
 				colorVariation: null,
 			},
 			...(includeOverlay
@@ -178,8 +238,12 @@ function createTerrainMaterialPayload(
 						"surface-texture/05000010",
 						"surface-texture/05000011",
 						"surface-texture/05000012",
+						...(includeDetail ? ["surface-texture/05001786"] : []),
 					]
-				: ["surface-texture/05000010"],
+				: [
+						"surface-texture/05000010",
+						...(includeDetail ? ["surface-texture/05001786"] : []),
+					],
 			renderSurfaceAssetIds: [],
 			paletteAssetIds: [],
 		},
@@ -210,10 +274,7 @@ function createRenderSurfacePayload(
 	renderSurfaceId: number,
 	formatRaw = 0x14,
 ): PreparedAssetPayload {
-	const sourceBytes =
-		formatRaw === 0xf4
-			? new Uint8Array([255])
-			: new Uint8Array([255, 255, 255]);
+	const sourceBytes = createRenderSurfaceBytes(formatRaw);
 	return {
 		kind: "render-surface",
 		sourceAssetKind: "render-surface",
@@ -232,6 +293,16 @@ function createRenderSurfacePayload(
 			paletteAssetIds: [],
 		},
 	};
+}
+
+function createRenderSurfaceBytes(formatRaw: number): Uint8Array {
+	if (formatRaw === 0xf4) {
+		return new Uint8Array([255]);
+	}
+	if (formatRaw === 0x15) {
+		return new Uint8Array([0xff, 0xff, 0xff, 0x40]);
+	}
+	return new Uint8Array([255, 255, 255]);
 }
 
 function terrainPcode(

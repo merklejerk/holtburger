@@ -85,7 +85,7 @@ export function buildTerrainMaterialResourcePlan(
 	);
 	const surfaceTextureReadiness = summarizeSurfaceTextureReadiness(
 		options.assetState,
-		table.dependencies.surfaceTextureAssetIds,
+		collectTerrainBlendSurfaceTextureAssetIds(table),
 	);
 	const unsupportedRenderSurfaceAssetIds = findUnsupportedRenderSurfaceAssetIds(
 		options.assetState,
@@ -118,6 +118,11 @@ export function buildTerrainMaterialResourcePlan(
 			pcodeSummary,
 			status,
 			missingTerrainTypes,
+			missingSurfaceTextureAssetIds:
+				surfaceTextureReadiness.missingSurfaceTextureAssetIds,
+			missingRenderSurfaceAssetIds:
+				surfaceTextureReadiness.missingRenderSurfaceAssetIds,
+			unsupportedRenderSurfaceAssetIds,
 		}),
 		terrainTypeCount: table.terrainTypes.length,
 		terrainAlphaMapCount: table.terrainAlphaMaps.length,
@@ -134,6 +139,19 @@ export function buildTerrainMaterialResourcePlan(
 		hasRoadAlphaMaps: table.roadAlphaMaps.length > 0,
 		diagnostics,
 	};
+}
+
+function collectTerrainBlendSurfaceTextureAssetIds(
+	table: PreparedTerrainMaterialTablePayload,
+): string[] {
+	return uniqueSortedStrings([
+		...table.terrainTypes.map((terrain) => terrain.textureAssetId),
+		...table.terrainAlphaMaps.map((alpha) => alpha.alphaTextureAssetId),
+		...table.roadAlphaMaps.flatMap((road) => [
+			road.roadTextureAssetId,
+			road.alphaTextureAssetId,
+		]),
+	]);
 }
 
 interface TerrainPcodeSummary {
@@ -220,8 +238,7 @@ function summarizeSurfaceTextureReadiness(
 			missingSurfaceTextureAssetIds.sort(compareStrings),
 		missingRenderSurfaceAssetIds:
 			missingRenderSurfaceAssetIds.sort(compareStrings),
-		readyRenderSurfaceAssetIds:
-			readyRenderSurfaceAssetIds.sort(compareStrings),
+		readyRenderSurfaceAssetIds: readyRenderSurfaceAssetIds.sort(compareStrings),
 	};
 }
 
@@ -295,11 +312,10 @@ interface DeriveStatusOptions {
 	unsupportedRenderSurfaceAssetIds: readonly string[];
 }
 
-function deriveStatus(options: DeriveStatusOptions): TerrainMaterialResourceStatus {
-	if (
-		options.unsupportedRenderSurfaceAssetIds.length >
-		0
-	) {
+function deriveStatus(
+	options: DeriveStatusOptions,
+): TerrainMaterialResourceStatus {
+	if (options.unsupportedRenderSurfaceAssetIds.length > 0) {
 		return "unsupported-render-surface";
 	}
 	if (
@@ -316,6 +332,9 @@ interface BuildTerrainMaterialSignatureOptions {
 	pcodeSummary: TerrainPcodeSummary;
 	status: TerrainMaterialResourceStatus;
 	missingTerrainTypes: readonly number[];
+	missingSurfaceTextureAssetIds: readonly string[];
+	missingRenderSurfaceAssetIds: readonly string[];
+	unsupportedRenderSurfaceAssetIds: readonly string[];
 }
 
 function buildTerrainMaterialSignature(
@@ -329,6 +348,9 @@ function buildTerrainMaterialSignature(
 		`roads:${options.table.roadAlphaMaps.length}`,
 		`pcodes:${options.pcodeSummary.uniquePcodeCount}`,
 		`missingTypes:${options.missingTerrainTypes.join(",")}`,
+		`missingSurfaceTextures:${options.missingSurfaceTextureAssetIds.join(",")}`,
+		`missingRenderSurfaces:${options.missingRenderSurfaceAssetIds.join(",")}`,
+		`unsupportedRenderSurfaces:${options.unsupportedRenderSurfaceAssetIds.join(",")}`,
 	].join("|");
 }
 
@@ -342,4 +364,8 @@ function compareNumbers(left: number, right: number): number {
 
 function compareStrings(left: string, right: string): number {
 	return left.localeCompare(right);
+}
+
+function uniqueSortedStrings(values: readonly string[]): string[] {
+	return [...new Set(values)].sort(compareStrings);
 }

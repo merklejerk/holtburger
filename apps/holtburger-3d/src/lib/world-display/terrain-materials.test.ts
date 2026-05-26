@@ -14,7 +14,9 @@ describe("buildTerrainMaterialResourcePlan", () => {
 		const plan = buildTerrainMaterialResourcePlan({
 			assetState: createInitialAssetChannelState(),
 			regionNumber: 1,
-			quads: [createTerrainQuad({ pcode: 1234, cornerTerrainCodes: [1, 2, 3, 4] })],
+			quads: [
+				createTerrainQuad({ pcode: 1234, cornerTerrainCodes: [1, 2, 3, 4] }),
+			],
 		});
 
 		expect(plan.status).toBe("missing-table");
@@ -30,14 +32,22 @@ describe("buildTerrainMaterialResourcePlan", () => {
 		const state = createInitialAssetChannelState();
 		state.preparedByAssetId = indexByAssetId([
 			createRecord("terrain-material/1", createTerrainMaterialPayload()),
-			createRecord("surface-texture/05000010", createSurfaceTexturePayload(0x06000010)),
-			createRecord("render-surface/06000010", createRenderSurfacePayload(0x06000010, 0x14)),
+			createRecord(
+				"surface-texture/05000010",
+				createSurfaceTexturePayload(0x06000010),
+			),
+			createRecord(
+				"render-surface/06000010",
+				createRenderSurfacePayload(0x06000010, 0x14),
+			),
 		]);
 
 		const plan = buildTerrainMaterialResourcePlan({
 			assetState: state,
 			regionNumber: 1,
-			quads: [createTerrainQuad({ pcode: 55, cornerTerrainCodes: [1, 1, 1, 1] })],
+			quads: [
+				createTerrainQuad({ pcode: 55, cornerTerrainCodes: [1, 1, 1, 1] }),
+			],
 		});
 
 		expect(plan.status).toBe("ready");
@@ -53,14 +63,22 @@ describe("buildTerrainMaterialResourcePlan", () => {
 		const state = createInitialAssetChannelState();
 		state.preparedByAssetId = indexByAssetId([
 			createRecord("terrain-material/1", createTerrainMaterialPayload()),
-			createRecord("surface-texture/05000010", createSurfaceTexturePayload(0x06000010)),
-			createRecord("render-surface/06000010", createRenderSurfacePayload(0x06000010, 0xffff)),
+			createRecord(
+				"surface-texture/05000010",
+				createSurfaceTexturePayload(0x06000010),
+			),
+			createRecord(
+				"render-surface/06000010",
+				createRenderSurfacePayload(0x06000010, 0xffff),
+			),
 		]);
 
 		const plan = buildTerrainMaterialResourcePlan({
 			assetState: state,
 			regionNumber: 1,
-			quads: [createTerrainQuad({ pcode: 55, cornerTerrainCodes: [1, 2, 1, 2] })],
+			quads: [
+				createTerrainQuad({ pcode: 55, cornerTerrainCodes: [1, 2, 1, 2] }),
+			],
 		});
 
 		expect(plan.status).toBe("unsupported-render-surface");
@@ -68,6 +86,45 @@ describe("buildTerrainMaterialResourcePlan", () => {
 		expect(plan.unsupportedRenderSurfaceAssetIds).toEqual([
 			"render-surface/06000010",
 		]);
+	});
+
+	it("does not block base terrain readiness on deferred detail texture resources", () => {
+		const state = createInitialAssetChannelState();
+		state.preparedByAssetId = indexByAssetId([
+			createRecord(
+				"terrain-material/1",
+				createTerrainMaterialPayload({
+					detailTextureAssetId: "surface-texture/05000020",
+				}),
+			),
+			createRecord(
+				"surface-texture/05000010",
+				createSurfaceTexturePayload(0x06000010),
+			),
+			createRecord(
+				"render-surface/06000010",
+				createRenderSurfacePayload(0x06000010, 0x14),
+			),
+			createRecord(
+				"surface-texture/05000020",
+				createSurfaceTexturePayload(0x06000020),
+			),
+			createRecord(
+				"render-surface/06000020",
+				createRenderSurfacePayload(0x06000020, 0xffff),
+			),
+		]);
+
+		const plan = buildTerrainMaterialResourcePlan({
+			assetState: state,
+			regionNumber: 1,
+			quads: [
+				createTerrainQuad({ pcode: 55, cornerTerrainCodes: [1, 1, 1, 1] }),
+			],
+		});
+
+		expect(plan.status).toBe("ready");
+		expect(plan.unsupportedRenderSurfaceAssetIds).toEqual([]);
 	});
 });
 
@@ -96,7 +153,9 @@ function createRecord(
 	};
 }
 
-function createTerrainMaterialPayload(): PreparedAssetPayload {
+function createTerrainMaterialPayload(
+	options: { detailTextureAssetId?: string } = {},
+): PreparedAssetPayload {
 	return {
 		kind: "terrain-material",
 		sourceAssetKind: "terrain-material",
@@ -110,7 +169,15 @@ function createTerrainMaterialPayload(): PreparedAssetPayload {
 				textureAssetId: "surface-texture/05000010",
 				textureDid: 0x05000010,
 				tiling: 4,
-				detail: null,
+				detail: options.detailTextureAssetId
+					? {
+							textureAssetId: options.detailTextureAssetId,
+							textureDid: 0x05000020,
+							tiling: 8,
+							fadeNear: 10,
+							fadeFar: 50,
+						}
+					: null,
 				colorVariation: null,
 			},
 		],
@@ -138,7 +205,10 @@ function createTerrainMaterialPayload(): PreparedAssetPayload {
 			sizeBitMask: 1 << 28,
 		},
 		dependencies: {
-			surfaceTextureAssetIds: ["surface-texture/05000010"],
+			surfaceTextureAssetIds: [
+				"surface-texture/05000010",
+				...(options.detailTextureAssetId ? [options.detailTextureAssetId] : []),
+			],
 			renderSurfaceAssetIds: [],
 			paletteAssetIds: [],
 		},
@@ -161,7 +231,9 @@ function createSurfaceTexturePayload(
 			renderSurfaceAssetIds:
 				selectedRenderSurfaceId === null
 					? []
-					: [`render-surface/${selectedRenderSurfaceId.toString(16).padStart(8, "0")}`],
+					: [
+							`render-surface/${selectedRenderSurfaceId.toString(16).padStart(8, "0")}`,
+						],
 		},
 	};
 }

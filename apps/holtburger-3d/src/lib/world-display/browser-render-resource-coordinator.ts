@@ -60,6 +60,7 @@ import {
 } from "./structured-interior-scene";
 import {
 	deriveTerrainSceneModel,
+	type TerrainSceneTile,
 	type TerrainSceneModel,
 } from "./terrain-scene";
 import { deriveTransitionPortalCandidates } from "./transition-portal-work-items";
@@ -68,6 +69,10 @@ import type { SceneCameraFrame } from "./camera";
 import type { WorldDisplayRenderStyle } from "./renderer-contract";
 
 let lastPreparedOutdoorAssetsNotRenderedSignature: string | null = null;
+let lastReportedTerrainMaterialDiagnosticsSignature: string | null = null;
+const TERRAIN_MATERIAL_DIAGNOSTIC_LOG_PREFIX =
+	"[holtburger-3d][terrain-material]";
+const TERRAIN_MATERIAL_DIAGNOSTIC_SAMPLE_LIMIT = 12;
 
 export interface BrowserRenderResourceCoordinatorInput {
 	assetState: AssetChannelState;
@@ -248,8 +253,7 @@ export class BrowserRenderResourceCoordinator {
 						previewInstanceId: preview.id,
 						setupAppearance: preview.setupAppearance,
 						spawnCameraFrame: preview.spawnCameraFrame,
-						anchorLandblockId:
-							input.activeRenderAnchor?.landblockId ?? null,
+						anchorLandblockId: input.activeRenderAnchor?.landblockId ?? null,
 						renderAsInterior:
 							browserDestinationToInteriorCellId(input.browserDestination) !==
 							null,
@@ -335,6 +339,7 @@ export class BrowserRenderResourceCoordinator {
 		);
 		const surface = this.surface;
 		if (surface) {
+			reportTerrainMaterialDiagnostics(terrainScene);
 			this.applySurfaceResource(
 				"asset-state",
 				describeAssetStateSignature(input.assetState),
@@ -476,6 +481,162 @@ function describeRenderChunkTransformsSignature(
 				`${transform.chunkKey}:${transform.chunkLandblockId}:${formatVectorSignature(transform.offset)}`,
 		)
 		.join("|");
+}
+
+function reportTerrainMaterialDiagnostics(scene: TerrainSceneModel): void {
+	const nonReadyTiles = scene.tiles.filter(
+		(tile) => tile.materialResources.status !== "ready",
+	);
+	if (nonReadyTiles.length === 0) {
+		lastReportedTerrainMaterialDiagnosticsSignature = null;
+		return;
+	}
+	const statusCounts = new Map<string, number>();
+	const diagnostics = new Set<string>();
+	const missingSurfaceTextureAssetIds = new Set<string>();
+	const missingRenderSurfaceAssetIds = new Set<string>();
+	const unsupportedRenderSurfaceAssetIds = new Set<string>();
+	for (const tile of nonReadyTiles) {
+		const resources = tile.materialResources;
+		statusCounts.set(
+			resources.status,
+			(statusCounts.get(resources.status) ?? 0) + 1,
+		);
+		for (const diagnostic of resources.diagnostics) {
+			diagnostics.add(diagnostic);
+		}
+		for (const assetId of resources.missingSurfaceTextureAssetIds) {
+			missingSurfaceTextureAssetIds.add(assetId);
+		}
+		for (const assetId of resources.missingRenderSurfaceAssetIds) {
+			missingRenderSurfaceAssetIds.add(assetId);
+		}
+		for (const assetId of resources.unsupportedRenderSurfaceAssetIds) {
+			unsupportedRenderSurfaceAssetIds.add(assetId);
+		}
+	}
+	const statusCountSummary = describeStatusCounts(statusCounts);
+	const blockerSummary = describeTerrainMaterialBlockers({
+		diagnostics,
+		missingSurfaceTextureAssetIds,
+		missingRenderSurfaceAssetIds,
+		unsupportedRenderSurfaceAssetIds,
+	});
+	const signature = [
+		...scene.tiles.map(
+			(tile) => `${tile.assetId}:${tile.materialResources.signature}`,
+		),
+	].join("|");
+	if (signature === lastReportedTerrainMaterialDiagnosticsSignature) {
+		return;
+	}
+	lastReportedTerrainMaterialDiagnosticsSignature = signature;
+	console.warn(
+		TERRAIN_MATERIAL_DIAGNOSTIC_LOG_PREFIX,
+		`${nonReadyTiles.length}/${scene.tiles.length} terrain tile${scene.tiles.length === 1 ? "" : "s"} cannot use terrain blend materials: ${statusCountSummary}; ${blockerSummary}.`,
+		{
+			statusCounts: Object.fromEntries(statusCounts),
+			terrainMaterialAssetIds: uniqueSortedStrings(
+				nonReadyTiles.map(
+					(tile) => tile.materialResources.terrainMaterialAssetId,
+				),
+			),
+			diagnostics: [...diagnostics].slice(
+				0,
+				TERRAIN_MATERIAL_DIAGNOSTIC_SAMPLE_LIMIT,
+			),
+			missingSurfaceTextureAssetIds: [...missingSurfaceTextureAssetIds].slice(
+				0,
+				TERRAIN_MATERIAL_DIAGNOSTIC_SAMPLE_LIMIT,
+			),
+			missingRenderSurfaceAssetIds: [...missingRenderSurfaceAssetIds].slice(
+				0,
+				TERRAIN_MATERIAL_DIAGNOSTIC_SAMPLE_LIMIT,
+			),
+			unsupportedRenderSurfaceAssetIds: [
+				...unsupportedRenderSurfaceAssetIds,
+			].slice(0, TERRAIN_MATERIAL_DIAGNOSTIC_SAMPLE_LIMIT),
+			sampleTiles: nonReadyTiles.slice(0, 6).map(describeTerrainDiagnosticTile),
+		},
+	);
+}
+
+interface TerrainMaterialBlockerSets {
+	diagnostics: ReadonlySet<string>;
+	missingSurfaceTextureAssetIds: ReadonlySet<string>;
+	missingRenderSurfaceAssetIds: ReadonlySet<string>;
+	unsupportedRenderSurfaceAssetIds: ReadonlySet<string>;
+}
+
+function describeStatusCounts(
+	statusCounts: ReadonlyMap<string, number>,
+): string {
+	return [...statusCounts.entries()]
+		.sort(([left], [right]) => left.localeCompare(right))
+		.map(([status, count]) => `${status}=${count}`)
+		.join(", ");
+}
+
+function describeTerrainMaterialBlockers(
+	blockers: TerrainMaterialBlockerSets,
+): string {
+	const parts: string[] = [];
+	addBlockerSummary(
+		parts,
+		"missing surface textures",
+		blockers.missingSurfaceTextureAssetIds,
+	);
+	addBlockerSummary(
+		parts,
+		"missing render surfaces",
+		blockers.missingRenderSurfaceAssetIds,
+	);
+	addBlockerSummary(
+		parts,
+		"unsupported render surfaces",
+		blockers.unsupportedRenderSurfaceAssetIds,
+	);
+	if (parts.length > 0) {
+		return parts.join("; ");
+	}
+	const diagnosticSamples = [...blockers.diagnostics].slice(
+		0,
+		TERRAIN_MATERIAL_DIAGNOSTIC_SAMPLE_LIMIT,
+	);
+	return diagnosticSamples.length > 0
+		? diagnosticSamples.join("; ")
+		: "no blocker details were reported";
+}
+
+function addBlockerSummary(
+	parts: string[],
+	label: string,
+	values: ReadonlySet<string>,
+): void {
+	if (values.size === 0) {
+		return;
+	}
+	const samples = [...values]
+		.sort((left, right) => left.localeCompare(right))
+		.slice(0, TERRAIN_MATERIAL_DIAGNOSTIC_SAMPLE_LIMIT);
+	const remaining = values.size - samples.length;
+	parts.push(
+		`${label} ${values.size}: ${samples.join(", ")}${remaining > 0 ? `, +${remaining} more` : ""}`,
+	);
+}
+
+function describeTerrainDiagnosticTile(tile: TerrainSceneTile): object {
+	return {
+		assetId: tile.assetId,
+		landblockId: `0x${formatHex32(tile.landblockId)}`,
+		status: tile.materialResources.status,
+		terrainMaterialAssetId: tile.materialResources.terrainMaterialAssetId,
+		diagnostics: tile.materialResources.diagnostics,
+	};
+}
+
+function uniqueSortedStrings(values: readonly string[]): string[] {
+	return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 
 function describeTerrainSceneSignature(scene: TerrainSceneModel): string {

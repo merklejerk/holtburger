@@ -2524,6 +2524,8 @@ Verification:
 
 ### Phase 10: Terrain GPU Blend Path
 
+Status: Implemented.
+
 Goal: replace diagnostic terrain colors with renderer-native terrain materials
 for the main pcode-driven terrain blend.
 
@@ -2547,6 +2549,172 @@ for the main pcode-driven terrain blend.
 
 Expected effect: outdoor terrain stops being debug-colored and begins using
 terrain material data in a way that can be compared against retail visuals.
+
+Progress:
+
+- Added an app-local terrain blend material path that consumes visible terrain
+  pcodes, `terrain-material/{regionNumber}`, terrain texture entries, terrain
+  alpha maps, road maps, and prepared surface/render-surface resources.
+- Implemented the client/ACViewer pcode interpretation in the browser renderer:
+  four corner terrain codes are decoded from pcode, repeated terrain corners
+  select the base layer, non-base corner/side tcodes select terrain alpha maps,
+  and road corner bits select all-road or up to two road overlays.
+- The terrain alpha/road alpha selection PRNG uses explicit 32-bit integer
+  mixing so JavaScript number precision does not drift from the client/ACViewer
+  pcode selector formula.
+- Added grouped terrain material geometry. Terrain triangles are grouped by
+  pcode/material index, emit per-quad UVs, and preserve `terrainPcode`,
+  `terrainQuadIndex`, and `terrainCornerCodes` attributes for diagnostics and
+  future array-based batching.
+- Added a terrain shader material that samples the base terrain texture, blends
+  up to three terrain overlays through selected alpha maps, and applies up to
+  two road overlays. The shader uses the prepared texture resources and sampler
+  policy from the existing material resource cache instead of baking merged
+  `TexMerge` textures on the CPU.
+- Wired `world-display-renderer.ts` so ready terrain tiles use the new grouped
+  terrain material path and non-ready tiles keep the debug vertex-color
+  fallback. Terrain mesh recreation now keys off the terrain material resource
+  signature so newly prepared terrain material dependencies replace the
+  fallback deterministically.
+- Follow-up fix: browser scene coverage now requests the active
+  `terrain-material/{regionNumber}` graph once an outdoor landblock is prepared.
+  Without that request, landblock `0xda55ffff` and its neighbors could render
+  only debug terrain because all visible tiles reported `missing-table`.
+- Follow-up fix: terrain material readiness now checks only Phase 10 base blend
+  inputs: terrain base textures, terrain alpha maps, road textures, and road
+  alpha maps. The broader terrain table dependency list also contains deferred
+  detail textures, and those Phase 10.5 resources should not block the base
+  pcode blend path.
+- Added console surfacing for non-ready terrain material plans. The browser now
+  emits coalesced `[holtburger-3d][terrain-material]` warnings with status
+  counts, sample tiles, missing texture IDs, missing render-surface IDs, and
+  unsupported render-surface IDs instead of leaving the Scene panel as the only
+  signal.
+
+Decisions:
+
+- Use grouped per-pcode shader materials for the first GPU blend path instead
+  of texture arrays. This satisfies the Phase 10 renderer-native blend goal
+  without forcing WebGL texture-array capability, fixed array dimensions, or
+  atlas packing policy before visual parity is proven.
+- Keep the implementation app-local. The pcode decode and material binding are
+  frontend renderer concerns because shared crates already expose the lossless
+  terrain table/quads needed by any client.
+- Reuse `WorldMaterialResourceCache` for texture uploads and sampler policy.
+  Terrain does not use normal `CSurface` material slots, but it should not fork
+  render-surface decoding, filtering, compressed texture upload, or capability
+  handling.
+- Override terrain color-layer wrapping to repeat while keeping alpha-map
+  textures clamped. Normal material textures default to clamp, but the terrain
+  shader applies `TerrainTex.tiling` in UV space and needs repeated color
+  layers to avoid clamped edge streaks.
+- Do not consume `TerrainTex` color-variation fields yet. They remain preserved
+  data, matching the reference decision that no active retail call path has
+  been proven.
+- Keep detail textures out of the shader. Phase 10.5 remains the dedicated
+  detail-surface overlay phase.
+
+Course corrections:
+
+- The Phase 9 resource plan treated indexed terrain render surfaces as
+  terrain-capable inputs, but the first Phase 10 shader path only resolves
+  direct-color/compressed textures through `getTexture`. Indexed terrain
+  textures need either palette-aware shader sampling or a small decoded color
+  cache before they can participate in this blend path.
+- Texture arrays are not required to start comparing terrain visuals. Grouped
+  materials are a more conservative first step because they keep pcode layer
+  selection explicit and easier to diagnose.
+- The material-ready geometry needed actual UVs, not only pcode attributes.
+  Phase 10 now derives per-quad UVs from the preserved quad vertex order.
+- The renderer fallback was working correctly; the missing visual texture path
+  was a planner gap. Landblock payloads exposed `regionNumber`, but
+  browser-mode coverage did not schedule the region-scoped terrain material
+  graph after direct landblock hydration.
+- The first unsupported-surface wave after terrain material loading was caused
+  by treating the table-level dependency list as base terrain readiness. That
+  list intentionally includes detail textures for Phase 10.5, so readiness had
+  to be scoped to the resources the Phase 10 shader actually samples.
+
+Cleanup targets:
+
+- Validate terrain UV orientation and alpha-map rotation against retail/ACViewer
+  screenshots. The current UVs use the preserved quad corner order
+  `[southwest, southeast, northeast, northwest]`; if the rendered terrain is
+  rotated or mirrored, fix the UV/rotation mapping before layering detail
+  textures.
+- Add structured terrain blend diagnostics to the Debug panel. The material set
+  currently carries diagnostics, but the UI still primarily exposes terrain
+  readiness through compact cache text.
+- Keep the new console diagnostics coalesced. Terrain scenes can have many
+  landblocks with identical resource status, so per-tile logging would become
+  noisy quickly.
+- Decide the indexed terrain texture policy. Options are palette-aware shader
+  sampling, a decoded direct-color texture cache for rare indexed terrain
+  inputs, or marking indexed terrain unsupported until a real scene proves it is
+  required.
+- Consider texture-array batching after parity is clearer. Per-pcode grouped
+  materials are intentionally straightforward, but large outdoor views may
+  benefit from array/atlas batching once UV and alpha behavior are proven.
+- The shader is intentionally unlit for the first material pass. Retail terrain
+  also has landblock lighting behavior; fold lighting in only after the base
+  texture/alpha selection is visually correct.
+
+Legacy shims:
+
+- Debug vertex-color terrain remains the fallback for missing terrain material
+  tables, missing selected render surfaces, unsupported uploads, and no
+  resolvable pcode material. This is now a fallback path rather than the normal
+  ready-terrain path.
+- `PreparedTerrainTriangle.terrainType` still exists for debug fallback colors.
+  It should be removed or renamed after the material path no longer needs the
+  fallback as a first-class browser mode.
+
+Refinements to future steps:
+
+- Add an immediate Phase 10.25 before detail overlays to harden terrain blend
+  parity: UV orientation, alpha rotation, indexed-texture policy, diagnostics,
+  and initial performance observations. Detail overlays depend on the same base
+  UVs, so this should land before Phase 10.5.
+- Phase 10.5 should reuse the terrain UVs/material boundary but keep detail
+  overlay resources separate from the pcode blend shader.
+- If Phase 10.25 shows grouped materials causing measurable program churn, move
+  to texture arrays or atlases as a performance correction rather than changing
+  the terrain material data model again.
+
+Verification:
+
+- `npm run test:ts -- terrain-blend-materials terrain-geometry` passes from
+  `apps/holtburger-3d`.
+- `npm run test:ts -- scene-asset-request-planner` passes from
+  `apps/holtburger-3d`.
+- `npm run test:ts -- terrain-materials scene-asset-request-planner` passes from
+  `apps/holtburger-3d`.
+- `npm run test:ts` passes from `apps/holtburger-3d`.
+- `npm run check` passes from `apps/holtburger-3d`.
+- `npm run lint:ts` passes from `apps/holtburger-3d`.
+- `git diff --check` passes from the repo root.
+
+### Phase 10.25: Terrain Blend Parity Hardening
+
+Goal: stabilize the newly visible terrain blend path before layering detail
+textures on top of it.
+
+- Compare the Phase 10 grouped shader output against retail/ACViewer at known
+  outdoor locations and correct UV orientation, alpha-map rotation, and road
+  overlay orientation if needed.
+- Surface terrain blend diagnostics in the renderer Debug panel: ready grouped
+  material count, fallback pcode count, missing indexed-texture support,
+  unresolved terrain/road alpha selections, and per-tile material mode.
+- Decide and implement the indexed terrain texture policy if indexed terrain
+  resources appear in real terrain material tables.
+- Capture a small performance profile for grouped per-pcode materials in a
+  dense outdoor view. If program/material churn is material, pivot to
+  texture-array/atlas batching while keeping the same pcode decode outputs.
+- Keep this phase focused on the base pcode terrain blend. Do not add detail
+  overlays here.
+
+Expected effect: terrain base/overlay/road visuals are stable enough that
+Phase 10.5 can add detail textures without hiding unresolved base blend errors.
 
 ### Phase 10.5: Legacy Detail Texture Overlay
 
@@ -2666,13 +2834,14 @@ Completed or current material-parity phases:
 14. Phase 8.1 legacy alpha blend and sampler modes.
 15. Phase 8.2 SurfaceTexture/ImgTex source-level and mipmap parity.
 16. Phase 8.3 legacy material lighting defaults.
+17. Phase 9 terrain material pipeline prep.
+18. Phase 10 terrain GPU blend path.
 
 Remaining planned parity phases:
 
-1. Phase 9 terrain material pipeline prep.
-2. Phase 10 terrain GPU blend path.
-3. Phase 10.5 legacy detail texture overlay.
-4. Phase 11 optional high-res JPEG replacement.
+1. Phase 10.25 terrain blend parity hardening.
+2. Phase 10.5 legacy detail texture overlay.
+3. Phase 11 optional high-res JPEG replacement.
 
 Recommended follow-up phases after the terrain/detail pass:
 

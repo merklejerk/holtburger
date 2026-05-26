@@ -6,6 +6,7 @@ import {
 } from "../../app/browser-mode";
 import {
 	formatEnvCellAssetId,
+	formatLandblockOutdoorAssetId,
 	formatLandblockTopologyAssetId,
 } from "../landblocks";
 import {
@@ -253,6 +254,37 @@ describe("scene asset request planner", () => {
 		);
 	});
 
+	it("requests terrain material tables for prepared outdoor landblocks", () => {
+		const destination = parseBrowserLocationInput("da55", "manual", "outdoor");
+		expect(destination).not.toBeNull();
+
+		const preparedOutdoor = createPreparedOutdoorLandblock(0xda55ffff, 1);
+		const requests = createSceneCoverageRequests(
+			{
+				requestRevision: 9,
+				browserDestination: destination,
+				preparedByAssetId: {
+					[preparedOutdoor.request.assetId]: preparedOutdoor,
+				},
+				pendingAssetIds: [],
+				options: {
+					terrainRadius: 0,
+					buildingRadius: 0,
+					detailRadius: 0,
+					envCellRadius: 0,
+				},
+			},
+			"streaming",
+		);
+
+		expect(requests).toContainEqual({
+			requestId:
+				"streaming-9-outdoor-landblock-da55ffff-terrain-material-terrain-material/1",
+			assetId: "terrain-material/1",
+			priority: "streaming",
+		});
+	});
+
 	it("requests material graphs for prepared static gfx dependencies", () => {
 		const destination = parseBrowserLocationInput("016c0155");
 		expect(destination).not.toBeNull();
@@ -337,6 +369,66 @@ describe("scene asset request planner", () => {
 		]);
 	});
 });
+
+function createPreparedOutdoorLandblock(
+	landblockId: number,
+	regionNumber: number,
+): PreparedAssetRecord {
+	const assetId = formatLandblockOutdoorAssetId(landblockId);
+	const request = {
+		requestId: `fixture-${assetId}`,
+		assetId,
+		priority: "streaming" as const,
+	};
+	const payload = {
+		kind: "landblock-outdoor" as const,
+		sourceAssetKind: "landblock-outdoor" as const,
+		residencyKind: "outdoor-landblock" as const,
+		provenance: {
+			source: "repo-local-hba" as const,
+			sourceAssetKind: "landblock-outdoor",
+			errorCode: null,
+			detail: null,
+		},
+		landblockId,
+		regionId: 0x13000000,
+		regionNumber,
+		classification: "outdoor" as const,
+		terrain: {
+			gridSize: 0,
+			tileSize: 24,
+			vertices: [],
+			triangles: [],
+			quads: [],
+			terrainBvh: {
+				coordinateSpace: "landblock-outdoor-terrain-local" as const,
+				nodes: [],
+				items: [],
+			},
+			minHeight: 0,
+			maxHeight: 0,
+			bounds: null,
+		},
+		statics: [],
+		outdoorBvh: null,
+		dependencies: {
+			renderableSourceAssetIds: [],
+			materialAssetIds: [],
+		},
+		diagnostics: { sourceRecords: [], errors: [], omissions: [] },
+	};
+	return {
+		request,
+		response: {
+			requestId: request.requestId,
+			assetId,
+			payloadKind: "json",
+			payload,
+		},
+		payload,
+		preparedAt: "2026-05-23T00:00:00.000Z",
+	};
+}
 
 function createPreparedTopology(
 	landblockId: number,

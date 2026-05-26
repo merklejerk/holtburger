@@ -31,6 +31,9 @@ describe("indexed materials", () => {
 		expect(material).toBeInstanceOf(MeshStandardMaterial);
 		const standardMaterial = material as MeshStandardMaterial;
 		expect(standardMaterial.map).toBeInstanceOf(DataTexture);
+		expect(standardMaterial.metalness).toBe(0);
+		expect(standardMaterial.roughness).toBe(1);
+		expect(standardMaterial.envMapIntensity).toBe(0);
 		expect(standardMaterial.transparent).toBe(true);
 		expect(standardMaterial.alphaTest).toBe(INDEXED_CLIP_MAP_ALPHA_TEST);
 		expect(standardMaterial.userData.holtburgerIndexedMaterial).toMatchObject({

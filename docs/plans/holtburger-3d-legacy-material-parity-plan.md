@@ -2439,6 +2439,32 @@ target.
   portal rendering. Future batching work should target geometry-group
   reduction, visibility culling, and portal pass multiplication rather than
   shader-program count.
+- Add an indexed-color filtering evaluation phase before treating indexed
+  material filtering as complete. Retail `CSurface::SetTextureAndPalette`
+  resolves `P8`/`Index16` plus the selected palette into a color `ImgTex` first,
+  then the normal `CSurface` path applies linear/min/mip sampler state to that
+  color texture. Holtburger currently keeps raw indexed source textures on the
+  GPU and samples them with nearest filtering before a shader palette lookup,
+  which preserves exact indices but makes some palettized static objects visibly
+  more pixelated than retail. The follow-up should compare two implementation
+  options against real scene counts and frame timings:
+  - lazily resolve indexed render surfaces plus base/derived palette views into
+    renderer-local color textures for normal material rendering;
+  - or keep the raw indexed texture and implement shader-side bilinear filtering
+    in color space by sampling four neighboring indices, looking up four palette
+    colors, and interpolating the palette colors rather than the indices;
+  - retain raw nearest indexed textures only for diagnostics or exact-index
+    paths;
+  - choose compact upload formats for resolved indexed-color textures where
+    practical, following the direct-color path's compact uploads for RGB-like
+    sources and packed RGBA4444 where browser/Three capabilities allow;
+  - keep compressed render surfaces compressed when browser capabilities allow;
+  - bound derived resolved-texture cache growth by estimated GPU bytes with LRU
+    eviction, because palette views, clothing, and future runtime entity
+    variation can multiply `renderSurfaceId + palette view + clipmap/sampler`
+    cardinality;
+  - surface debug counters for resolved texture count, estimated bytes,
+    evictions, and the largest cardinality contributors.
 
 ## Suggested Order
 

@@ -2,7 +2,11 @@ import {
 	CompressedTexture,
 	DataTexture,
 	MeshStandardMaterial,
+	RGBAFormat,
+	RGBFormat,
 	RepeatWrapping,
+	UnsignedByteType,
+	UnsignedShort4444Type,
 } from "three";
 import { describe, expect, it } from "vitest";
 
@@ -175,7 +179,11 @@ describe("world material resource cache", () => {
 
 		const material = plan.materials[0];
 		expect(material).toBeInstanceOf(MeshStandardMaterial);
-		expect((material as MeshStandardMaterial).map).not.toBeNull();
+		const standardMaterial = material as MeshStandardMaterial;
+		expect(standardMaterial.map).not.toBeNull();
+		expect(standardMaterial.metalness).toBe(0);
+		expect(standardMaterial.roughness).toBe(1);
+		expect(standardMaterial.envMapIntensity).toBe(0);
 		cache.dispose();
 	});
 
@@ -770,6 +778,70 @@ describe("world material resource cache", () => {
 		cache.dispose();
 	});
 
+	it("uses compact direct-color texture upload formats when possible", () => {
+		const cache = new WorldMaterialResourceCache(undefined, {
+			supportsS3tc: false,
+			supportsS3tcSrgb: false,
+			supportsPackedRgba4444: true,
+		});
+
+		const rgbTexture = cache.getTexture({
+			renderSurface: createRenderSurfacePayload(0x06000020, {
+				formatRaw: 0x14,
+				format: "R8G8B8",
+				sourceBytes: new Uint8Array([0x11, 0x22, 0x33]),
+			}),
+			samplingPolicy: createDefaultMaterialTextureSamplingPolicy().directColor,
+		}) as DataTexture;
+		const xrgbTexture = cache.getTexture({
+			renderSurface: createRenderSurfacePayload(0x06000021, {
+				formatRaw: 0x16,
+				format: "X8R8G8B8",
+				sourceBytes: new Uint8Array([0x11, 0x22, 0x33, 0x00]),
+			}),
+			samplingPolicy: createDefaultMaterialTextureSamplingPolicy().directColor,
+		}) as DataTexture;
+		const rgba4444Texture = cache.getTexture({
+			renderSurface: createRenderSurfacePayload(0x06000022, {
+				formatRaw: 0x1a,
+				format: "A4R4G4B4",
+				sourceBytes: new Uint8Array([0x34, 0x12]),
+			}),
+			samplingPolicy: createDefaultMaterialTextureSamplingPolicy().directColor,
+		}) as DataTexture;
+
+		expect(rgbTexture.format).toBe(RGBFormat);
+		expect(rgbTexture.type).toBe(UnsignedByteType);
+		expect([...rgbTexture.image.data]).toEqual([0x11, 0x22, 0x33]);
+		expect(xrgbTexture.format).toBe(RGBFormat);
+		expect([...xrgbTexture.image.data]).toEqual([0x33, 0x22, 0x11]);
+		expect(rgba4444Texture.format).toBe(RGBAFormat);
+		expect(rgba4444Texture.type).toBe(UnsignedShort4444Type);
+		expect([...rgba4444Texture.image.data]).toEqual([0x2341]);
+		cache.dispose();
+	});
+
+	it("falls back to RGBA8888 when packed RGBA4444 upload is unavailable", () => {
+		const cache = new WorldMaterialResourceCache(undefined, {
+			supportsS3tc: false,
+			supportsS3tcSrgb: false,
+			supportsPackedRgba4444: false,
+		});
+		const texture = cache.getTexture({
+			renderSurface: createRenderSurfacePayload(0x06000023, {
+				formatRaw: 0x1a,
+				format: "A4R4G4B4",
+				sourceBytes: new Uint8Array([0x34, 0x12]),
+			}),
+			samplingPolicy: createDefaultMaterialTextureSamplingPolicy().directColor,
+		}) as DataTexture;
+
+		expect(texture.format).toBe(RGBAFormat);
+		expect(texture.type).toBe(UnsignedByteType);
+		expect([...texture.image.data]).toEqual([0x22, 0x33, 0x44, 0x11]);
+		cache.dispose();
+	});
+
 	it("allows cache-level texture sampling policy overrides", () => {
 		const policy = createDefaultMaterialTextureSamplingPolicy();
 		const cache = new WorldMaterialResourceCache(undefined, undefined, {
@@ -1069,6 +1141,8 @@ function createRenderSurfacePayload(
 	renderSurfaceId: number,
 	options: {
 		sourceBytes?: Uint8Array;
+		formatRaw?: number;
+		format?: string;
 	} = {},
 ): PreparedRenderSurfacePayload {
 	const sourceBytes = options.sourceBytes ?? new Uint8Array([0x33, 0x22, 0x11, 0xff]);
@@ -1086,8 +1160,8 @@ function createRenderSurfacePayload(
 		unknown: 0,
 		width: 1,
 		height: 1,
-		formatRaw: 0x15,
-		format: "A8R8G8B8",
+		formatRaw: options.formatRaw ?? 0x15,
+		format: options.format ?? "A8R8G8B8",
 		sourceByteLength: sourceBytes.byteLength,
 		sourceBytes,
 		defaultPaletteId: null,

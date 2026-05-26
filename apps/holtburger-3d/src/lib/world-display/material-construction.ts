@@ -29,6 +29,7 @@ import {
 import {
 	applyLegacyMaterialBehavior,
 	deriveLegacyMaterialBehavior,
+	withLegacyMeshStandardSurfaceDefaults,
 	type LegacyMaterialBehavior,
 } from "./material-behavior";
 import type { MaterialAppearanceContext } from "./material-appearance";
@@ -127,12 +128,9 @@ export function createMaterial(options: {
 		return withLegacyMaterialBehaviorMetadata(
 			new MeshStandardMaterial(
 				applyLegacyMaterialBehavior(
-					{
+					withLegacyMeshStandardSurfaceDefaults({
 						color: colorFromArgb(recipe.source.argb).multiply(behavior.color),
-						flatShading: true,
-						metalness: 0.02,
-						roughness: 0.88,
-					},
+					}),
 					behavior,
 				),
 			),
@@ -176,13 +174,10 @@ export function createMaterial(options: {
 		return withLegacyMaterialBehaviorMetadata(
 			new MeshStandardMaterial(
 				applyLegacyMaterialBehavior(
-					{
+					withLegacyMeshStandardSurfaceDefaults({
 						color: behavior.color,
 						map: texture,
-						flatShading: true,
-						metalness: 0.02,
-						roughness: 0.88,
-					},
+					}),
 					behavior,
 				),
 			),
@@ -239,12 +234,9 @@ export function createMaterial(options: {
 		return withLegacyMaterialBehaviorMetadata(
 			new MeshStandardMaterial(
 				applyLegacyMaterialBehavior(
-					{
+					withLegacyMeshStandardSurfaceDefaults({
 						color: color.multiply(behavior.color),
-						flatShading: true,
-						metalness: 0.02,
-						roughness: 0.88,
-					},
+					}),
 					behavior,
 				),
 			),
@@ -278,12 +270,9 @@ export function createMaterial(options: {
 	return withLegacyMaterialBehaviorMetadata(
 		new MeshStandardMaterial(
 			applyLegacyMaterialBehavior(
-				{
+				withLegacyMeshStandardSurfaceDefaults({
 					color: color.multiply(behavior.color),
-					flatShading: true,
-					metalness: 0.02,
-					roughness: 0.88,
-				},
+				}),
 				behavior,
 			),
 		),

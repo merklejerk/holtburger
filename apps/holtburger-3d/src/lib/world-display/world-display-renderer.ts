@@ -158,6 +158,7 @@ import {
 	updateTextureVelocityMaterials,
 } from "./texture-velocity";
 import { createDefaultMaterialTextureSamplingPolicy } from "./texture-sampling-policy";
+import { withLegacyMeshStandardSurfaceDefaults } from "./material-behavior";
 
 export interface WorldDisplayRendererOptions {
 	assetState: AssetChannelState;
@@ -259,6 +260,8 @@ function detectMaterialTextureCapabilities(
 		supportsS3tcSrgb: renderer.extensions.has(
 			"WEBGL_compressed_texture_s3tc_srgb",
 		),
+		supportsPackedRgb565: false,
+		supportsPackedRgba4444: true,
 		maxAnisotropy: renderer.capabilities.getMaxAnisotropy(),
 	};
 }
@@ -2570,12 +2573,11 @@ export function createWorldDisplayRenderer(
 
 	function createTerrainTileMesh(tile: TerrainSceneTile): Mesh {
 		const geometry = buildTerrainGeometry(tile.mesh);
-		const material = new MeshStandardMaterial({
-			vertexColors: true,
-			flatShading: true,
-			metalness: 0.05,
-			roughness: 0.94,
-		});
+		const material = new MeshStandardMaterial(
+			withLegacyMeshStandardSurfaceDefaults({
+				vertexColors: true,
+			}),
+		);
 		const mesh = new Mesh(geometry, material);
 		mesh.name = tile.assetId;
 		mesh.userData.renderStyleDebugColorKey = tile.assetId;

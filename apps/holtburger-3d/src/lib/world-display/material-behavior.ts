@@ -58,6 +58,18 @@ export type LegacyMaterialBlendMode =
 	| "clipmap"
 	| "translucent";
 
+export function withLegacyMeshStandardSurfaceDefaults(
+	parameters: MeshStandardMaterialParameters,
+): MeshStandardMaterialParameters {
+	return {
+		...parameters,
+		flatShading: true,
+		metalness: 0,
+		roughness: 1,
+		envMapIntensity: 0,
+	};
+}
+
 export function deriveLegacyMaterialBehavior(options: {
 	recipe: PreparedMaterialRecipePayload;
 	hasSourceAlpha?: boolean;

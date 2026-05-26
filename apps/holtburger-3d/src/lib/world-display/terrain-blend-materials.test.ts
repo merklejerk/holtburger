@@ -89,6 +89,9 @@ describe("buildTerrainBlendMaterialSet", () => {
 		expect(material.fragmentShader).toContain(
 			"texture2D(alphaTexture, rotateLegacyAlphaUv(legacyAlphaUv(vUv), rotation)).r",
 		);
+		expect(material.fragmentShader).toContain(
+			"return mix(baseColor, overlayColor, clamp(1.0 - alpha, 0.0, 1.0));",
+		);
 		expect(cache.getStats().textureSamplingPolicySamples).toContain(
 			"wrap=clamp/clamp;filter=linear/linear/linear;color=none;aniso=1;mips=on;flipY=off",
 		);

@@ -24,7 +24,7 @@ to stay close to client behavior.
 The near-term renderer target is the legacy AC material path, not the dormant
 EOR programmable material system:
 
-1. Decode and preserve `RenderSurface`, `RenderTexture`, `CSurface`, `Palette`,
+1. Decode and preserve `RenderSurface`, `SurfaceTexture`, `CSurface`, `Palette`,
    `PaletteSet`, `ObjDesc`, clothing, and terrain data accurately.
 2. Render static `GfxObj` and environment geometry with real solid, direct-color,
    indexed, and clipmapped materials.
@@ -733,7 +733,7 @@ Texture filter mapping:
 
 ### Implementation milestones
 
-1. Add DAT parsers and tests for `RenderSurface`, `RenderTexture`, `CSurface`,
+1. Add DAT parsers and tests for `RenderSurface`, `SurfaceTexture`, `CSurface`,
    `Palette`, and the common pixel formats needed by visible world objects.
 2. Extend prepared asset responses with material references and texture
    dependencies.
@@ -844,7 +844,7 @@ source-to-`CSurface` references**.
 The implemented phase 0 path lives in `holtburger-content` and is available as
 an explicit diagnostic:
 
-- count available `CSurface`, `RenderTexture`, `RenderSurface`, `Palette`, and
+- count available `CSurface`, `SurfaceTexture`, `RenderSurface`, `Palette`, and
   `ClothingTable` records;
 - report whether visual source records used by the 3D client are pruned;
 - parse available `GfxObj` and `EnvCell` visual source records only far enough
@@ -857,8 +857,8 @@ an explicit diagnostic:
   not material-complete.
 
 Decision: phase 0 does **not** validate deep material dependencies yet. Without
-typed `CSurface`, `RenderTexture`, `RenderSurface`, and `Palette` parsers, any
-claim that `CSurface -> RenderTexture -> RenderSurface -> Palette` edges are
+typed `CSurface`, `SurfaceTexture`, `RenderSurface`, and `Palette` parsers, any
+claim that `CSurface -> SurfaceTexture -> RenderSurface -> Palette` edges are
 complete would be guesswork. That validation moves into phases 1 and 2 after
 the DAT structs exist.
 
@@ -869,7 +869,7 @@ browser app, debug harnesses, and future client frontends.
 
 Course correction: the Tauri adapter must not run the material capability report
 on normal startup. Once phase 4.1 expanded the report to validate the deep
-`CSurface -> RenderTexture -> RenderSurface -> Palette` chain, the report became
+`CSurface -> SurfaceTexture -> RenderSurface -> Palette` chain, the report became
 a full archive/material dependency scan. It is still useful as an explicit
 diagnostic, but running it before the window appears makes app launch
 unacceptably slow.
@@ -966,7 +966,7 @@ The phase 0 capability report now validates the full legacy dependency chain:
 Decision: this phase keeps parsed DAT records immutable and exposes stable
 recipe IDs instead of renderer-owned objects. Runtime appearance state still
 belongs in later resolved descriptors keyed by the actual inputs: surface ID,
-render texture ID, palette ID, texture swaps, subpalette changes, translucency,
+surface texture ID, palette ID, texture swaps, subpalette changes, translucency,
 luminosity, and diffuse color. This prevents the renderer from caching all
 players or spawned objects by `GfxObjId` alone.
 
@@ -1006,16 +1006,15 @@ The host/content asset contract now recognizes these asset IDs:
 
 - `setup-appearance/{setup_did}`: base setup appearance today, with the content
   resolver ready for future `ObjDesc` inputs;
-- `material/{surface_did}`: immutable `CSurface` recipe plus render-texture,
+- `material/{surface_did}`: immutable `CSurface` recipe plus surface-texture,
   render-surface, and palette dependency asset IDs;
-- `render-texture/{texture_did}`: legacy `0x05` source-level/render-surface
-  dependency manifest; rename to `surface-texture/{texture_did}` in the
-  `ImgTex` pivot phase;
+- `surface-texture/{texture_did}`: legacy `0x05` source-level/render-surface
+  dependency manifest;
 - `render-surface/{surface_did}`: format metadata, source byte length, and
   default-palette dependency IDs;
 - `palette/{palette_did}`: palette metadata.
 
-Prepared `GfxObj`, `SetupModel`, setup-appearance, material, render-texture,
+Prepared `GfxObj`, `SetupModel`, setup-appearance, material, surface-texture,
 and render-surface payloads now expose dependency edges that the existing asset
 graph scheduler can walk. This intentionally keeps render-surface bytes out of
 JSON payloads; phase 4 will decide the compact binary texture payload shape.
@@ -1026,12 +1025,12 @@ Completed deliverables:
 - prepared `SetupModel` payloads list part `GfxObj` IDs and the base
   `setup-appearance` asset ID;
 - `setup-appearance` payloads list material and palette dependencies;
-- material asset payloads list their render-texture, render-surface, explicit
+- material asset payloads list their surface-texture, render-surface, explicit
   palette, and default render-surface palette dependencies;
 - render-surface payloads carry compact format metadata and source byte length,
   not JSON-expanded texels;
 - frontend dependency extraction and cache retention now understand material,
-  setup-appearance, render-texture, render-surface, and palette payloads.
+  setup-appearance, surface-texture, render-surface, and palette payloads.
 
 Decision: the host can return failed material/render dependency payloads as
 structured JSON with provenance/error details. The renderer should decide when
@@ -1058,7 +1057,7 @@ Status: **implemented for material identity, material-owned Three.js resources,
 and metadata-only texture placeholders.**
 
 This phase added an app-local `WorldMaterialResourceCache` under
-`apps/holtburger-3d`. It consumes prepared material, render-texture,
+`apps/holtburger-3d`. It consumes prepared material, surface-texture,
 render-surface, and palette payloads from the existing asset cache and returns
 Three.js material arrays plus geometry-group slots for the renderer. The cache
 is deliberately app-local: it owns browser/Three.js GPU-facing resources and
@@ -1080,7 +1079,7 @@ Implemented behavior:
 - solid-color `CSurface` recipes become `MeshStandardMaterial`s with the parsed
   ARGB color and translucency-derived opacity;
 - texture-backed recipes produce deterministic placeholder materials derived
-  from their render-texture/render-surface/palette metadata until source pixel
+  from their surface-texture/render-surface/palette metadata until source pixel
   bytes are available;
 - missing or malformed material dependencies still produce explicit fallback
   materials instead of blocking world rendering;
@@ -1132,9 +1131,8 @@ Host and worker responsibilities:
 - render-surface binary responses keep the JSON metadata payload and hydrate a
   `sourceBytes: Uint8Array` field from a `renderSurface.sourceBytes` binary
   section;
-- `render-texture/{texture_did}` currently remains a legacy `0x05` manifest
-  that points at render-surface payloads; rename it to
-  `surface-texture/{texture_did}` in the `ImgTex` pivot phase;
+- `surface-texture/{texture_did}` is the legacy `0x05` manifest that points at
+  source-level render-surface payloads;
 - `formatRaw`, normalized format label, dimensions, default palette ID, source
   byte length, and palette dependencies remain in JSON metadata;
 - malformed binary envelope section shapes still fail in the envelope decoder.
@@ -1180,7 +1178,7 @@ the binary lookup route for render surfaces.
 
 Course correction: static renderable geometry must not wait for the full
 material dependency graph. After direct-color texture upload landed, graph
-hydrating every `GfxObj` through material -> render-texture -> render-surface
+hydrating every `GfxObj` through material -> surface-texture -> render-surface
 made startup much slower and delayed visible static/building geometry. `GfxObj`
 and setup-model assets are now direct hydration assets; material/render-surface
 dependencies should be fetched by a separate material warmup path and fall back

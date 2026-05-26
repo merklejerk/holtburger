@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
 
 use holtburger_dat::file_type::{
-    CSurface, CSurfaceSource, DatFileType, EnvCell, GfxObj, Palette, RenderSurface, RenderTexture,
+    CSurface, CSurfaceSource, DatFileType, EnvCell, GfxObj, Palette, RenderSurface, SurfaceTexture,
 };
 use holtburger_dat::{EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, ResourceKey};
 
@@ -29,7 +29,7 @@ pub struct MaterialArchiveCapabilityReport {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MaterialRecordCounts {
     pub c_surface: MaterialRecordAvailability,
-    pub render_texture: MaterialRecordAvailability,
+    pub surface_texture: MaterialRecordAvailability,
     pub render_surface: MaterialRecordAvailability,
     pub palette: MaterialRecordAvailability,
     pub palette_set: MaterialRecordAvailability,
@@ -56,10 +56,10 @@ pub struct MaterialReferenceCoverage {
     pub available_csurfaces: usize,
     pub missing_csurfaces: Vec<u32>,
     pub pruned_csurfaces: Vec<u32>,
-    pub referenced_render_textures: usize,
-    pub available_render_textures: usize,
-    pub missing_render_textures: Vec<u32>,
-    pub pruned_render_textures: Vec<u32>,
+    pub referenced_surface_textures: usize,
+    pub available_surface_textures: usize,
+    pub missing_surface_textures: Vec<u32>,
+    pub pruned_surface_textures: Vec<u32>,
     pub referenced_render_surfaces: usize,
     pub available_render_surfaces: usize,
     pub missing_render_surfaces: Vec<u32>,
@@ -88,14 +88,14 @@ impl MaterialArchiveCapabilityReport {
         let visual_source_records = count_visual_source_records(index_entries);
         let material_references = inspect_material_references(content, index_entries);
         let has_legacy_material_stack = record_counts.c_surface.total > 0
-            && record_counts.render_texture.total > 0
+            && record_counts.surface_texture.total > 0
             && record_counts.render_surface.total > 0
             && record_counts.palette.total > 0
             && record_counts.palette_set.total > 0
             && record_counts.clothing_table.total > 0;
         let material_complete = has_legacy_material_stack
             && record_counts.c_surface.pruned == 0
-            && record_counts.render_texture.pruned == 0
+            && record_counts.surface_texture.pruned == 0
             && record_counts.render_surface.pruned == 0
             && record_counts.palette.pruned == 0
             && record_counts.palette_set.pruned == 0
@@ -103,8 +103,8 @@ impl MaterialArchiveCapabilityReport {
             && visual_source_records.pruned == 0
             && material_references.missing_csurfaces.is_empty()
             && material_references.pruned_csurfaces.is_empty()
-            && material_references.missing_render_textures.is_empty()
-            && material_references.pruned_render_textures.is_empty()
+            && material_references.missing_surface_textures.is_empty()
+            && material_references.pruned_surface_textures.is_empty()
             && material_references.missing_render_surfaces.is_empty()
             && material_references.pruned_render_surfaces.is_empty()
             && material_references.missing_palettes.is_empty()
@@ -126,7 +126,7 @@ fn count_material_records(index_entries: &[RepositoryResourceIndexEntry]) -> Mat
     for entry in index_entries {
         let availability = match DatFileType::from_id(entry.file_id) {
             DatFileType::Surface => Some(&mut counts.c_surface),
-            DatFileType::SurfaceTexture => Some(&mut counts.render_texture),
+            DatFileType::SurfaceTexture => Some(&mut counts.surface_texture),
             DatFileType::Texture => Some(&mut counts.render_surface),
             DatFileType::Palette => Some(&mut counts.palette),
             DatFileType::PaletteSet => Some(&mut counts.palette_set),
@@ -260,10 +260,10 @@ fn inspect_material_references(
         available_csurfaces,
         missing_csurfaces,
         pruned_csurfaces,
-        referenced_render_textures: dependency_coverage.render_textures.referenced(),
-        available_render_textures: dependency_coverage.render_textures.available,
-        missing_render_textures: dependency_coverage.render_textures.missing,
-        pruned_render_textures: dependency_coverage.render_textures.pruned,
+        referenced_surface_textures: dependency_coverage.surface_textures.referenced(),
+        available_surface_textures: dependency_coverage.surface_textures.available,
+        missing_surface_textures: dependency_coverage.surface_textures.missing,
+        pruned_surface_textures: dependency_coverage.surface_textures.pruned,
         referenced_render_surfaces: dependency_coverage.render_surfaces.referenced(),
         available_render_surfaces: dependency_coverage.render_surfaces.available,
         missing_render_surfaces: dependency_coverage.render_surfaces.missing,
@@ -282,7 +282,7 @@ fn inspect_material_references(
 
 #[derive(Debug, Default)]
 struct DeepMaterialDependencyCoverage {
-    render_textures: DependencyRecordCoverage,
+    surface_textures: DependencyRecordCoverage,
     render_surfaces: DependencyRecordCoverage,
     palettes: DependencyRecordCoverage,
     parse_failures: Vec<MaterialReferenceParseFailure>,
@@ -307,7 +307,7 @@ fn inspect_deep_material_dependencies(
     surface_ids: &[u32],
 ) -> DeepMaterialDependencyCoverage {
     let mut coverage = DeepMaterialDependencyCoverage::default();
-    let mut render_texture_ids = HashSet::new();
+    let mut surface_texture_ids = HashSet::new();
     let mut render_surface_ids = HashSet::new();
     let mut palette_ids = HashSet::new();
 
@@ -331,7 +331,7 @@ fn inspect_deep_material_dependencies(
                 orig_texture_id,
                 orig_palette_id,
             } => {
-                render_texture_ids.insert(orig_texture_id);
+                surface_texture_ids.insert(orig_texture_id);
                 if orig_palette_id != 0 {
                     palette_ids.insert(orig_palette_id);
                 }
@@ -340,13 +340,13 @@ fn inspect_deep_material_dependencies(
                     continue;
                 }
 
-                let render_texture = match read_and_parse_dependency(
+                let surface_texture = match read_and_parse_dependency(
                     content,
                     orig_texture_id,
-                    "RenderTexture",
-                    RenderTexture::unpack,
+                    "SurfaceTexture",
+                    SurfaceTexture::unpack,
                 ) {
-                    Ok(render_texture) => render_texture,
+                    Ok(surface_texture) => surface_texture,
                     Err(detail) => {
                         coverage.parse_failures.push(MaterialReferenceParseFailure {
                             namespace: EOR_PORTAL_NAMESPACE.to_string(),
@@ -357,7 +357,7 @@ fn inspect_deep_material_dependencies(
                     }
                 };
 
-                for render_surface_id in render_texture.render_surface_ids {
+                for render_surface_id in surface_texture.render_surface_ids {
                     render_surface_ids.insert(render_surface_id);
                     if !is_available_dependency(content, render_surface_id) {
                         continue;
@@ -387,11 +387,11 @@ fn inspect_deep_material_dependencies(
         }
     }
 
-    coverage.render_textures = classify_dependency_records(
+    coverage.surface_textures = classify_dependency_records(
         content,
-        render_texture_ids,
+        surface_texture_ids,
         DatFileType::SurfaceTexture,
-        "RenderTexture",
+        "SurfaceTexture",
     );
     coverage.render_surfaces = classify_dependency_records(
         content,

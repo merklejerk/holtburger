@@ -15,6 +15,7 @@ use holtburger_dat::file_type::{
     AnimationPartChange, MotionKinematics, ObjDesc, SkillTable, SpellTable, SubPalette,
     TextureMapChange, XpTable,
 };
+use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 use holtburger_world::WorldBootstrap;
 
 #[cfg(test)]
@@ -29,6 +30,7 @@ pub const ASSET_BINARY_VERSION: u32 = 1;
 pub const ASSET_BINARY_HEADER_LEN: usize = 16;
 
 pub struct HostBoundaryAdapter {
+    content: Arc<ContentRepository>,
     content_asset_runtime: ContentAssetRuntime,
     verbose: bool,
 }
@@ -155,6 +157,7 @@ impl HostBoundaryAdapter {
             Arc::clone(&decode_cache),
         ));
         Self {
+            content,
             content_asset_runtime,
             verbose,
         }
@@ -299,8 +302,8 @@ impl HostBoundaryAdapter {
                     setup_appearance_request.setup_model_id,
                     asset,
                 ),
-            ContentAssetRequest::RenderTexture(render_texture_id) => {
-                self.build_render_texture_lookup_response(request, render_texture_id, asset)?
+            ContentAssetRequest::SurfaceTexture(surface_texture_id) => {
+                self.build_surface_texture_lookup_response(request, surface_texture_id, asset)?
             }
             ContentAssetRequest::LandblockOutdoor(_)
             | ContentAssetRequest::LandblockTopology(_)
@@ -416,7 +419,11 @@ impl HostBoundaryAdapter {
         asset: anyhow::Result<ContentAsset>,
     ) -> anyhow::Result<AssetLookupResponseDto> {
         let payload = match asset {
-            Ok(ContentAsset::MaterialRecipe(recipe)) => serialize_material_recipe_payload(&recipe),
+            Ok(ContentAsset::MaterialRecipe(recipe)) => {
+                serialize_material_recipe_payload(&recipe, |render_surface_id| {
+                    self.render_surface_available(render_surface_id)
+                })
+            }
             Ok(_) => unreachable!("content asset runtime returned mismatched material recipe"),
             Err(error) => {
                 log_material_graph_failure("material-recipe", surface_id, &error);
@@ -457,21 +464,23 @@ impl HostBoundaryAdapter {
         }
     }
 
-    fn build_render_texture_lookup_response(
+    fn build_surface_texture_lookup_response(
         &self,
         request: AssetLookupRequestDto,
-        render_texture_id: u32,
+        surface_texture_id: u32,
         asset: anyhow::Result<ContentAsset>,
     ) -> anyhow::Result<AssetLookupResponseDto> {
         let payload = match asset {
-            Ok(ContentAsset::RenderTexture(render_texture)) => {
-                serialize_render_texture_payload(&render_texture)
+            Ok(ContentAsset::SurfaceTexture(surface_texture)) => {
+                serialize_surface_texture_payload(&surface_texture, |render_surface_id| {
+                    self.render_surface_available(render_surface_id)
+                })
             }
-            Ok(_) => unreachable!("content asset runtime returned mismatched render texture"),
+            Ok(_) => unreachable!("content asset runtime returned mismatched surface texture"),
             Err(error) => {
-                log_material_graph_failure("render-texture", render_texture_id, &error);
+                log_material_graph_failure("surface-texture", surface_texture_id, &error);
                 anyhow::bail!(
-                    "failed to load render texture 0x{render_texture_id:08X} for {}: {error:#}",
+                    "failed to load surface texture 0x{surface_texture_id:08X} for {}: {error:#}",
                     request.asset_id
                 );
             }
@@ -483,6 +492,12 @@ impl HostBoundaryAdapter {
             payload_kind: AssetPayloadKindDto::Json,
             payload,
         })
+    }
+
+    fn render_surface_available(&self, render_surface_id: u32) -> bool {
+        self.content
+            .resource_metadata(ResourceKey::new(EOR_PORTAL_NAMESPACE, render_surface_id))
+            .is_some()
     }
 }
 
@@ -515,7 +530,7 @@ fn binary_asset_lookup_required_message(
         | ContentAssetRequest::SetupModel(_)
         | ContentAssetRequest::MaterialRecipe(_)
         | ContentAssetRequest::SetupAppearance(_)
-        | ContentAssetRequest::RenderTexture(_) => None,
+        | ContentAssetRequest::SurfaceTexture(_) => None,
     }
 }
 
@@ -700,7 +715,7 @@ mod tests {
                 .is_empty()
         );
         assert!(
-            !asset.payload["dependencies"]["renderTextureAssetIds"]
+            !asset.payload["dependencies"]["surfaceTextureAssetIds"]
                 .as_array()
                 .expect("terrain material route should expose texture dependencies")
                 .is_empty()
@@ -708,27 +723,52 @@ mod tests {
     }
 
     #[test]
-    fn render_texture_lookup_exposes_only_available_surface_candidates() {
+    fn surface_texture_lookup_exposes_available_highest_detail_source_level() {
         let runtime = HostRuntimeService::new(false);
         let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
-            request_id: "test-render-texture-candidates".to_string(),
-            asset_id: "render-texture/05002862".to_string(),
+            request_id: "test-surface-texture-candidates".to_string(),
+            asset_id: "surface-texture/05002862".to_string(),
             priority: crate::contracts::AssetPriorityDto::Streaming,
         });
 
-        assert_eq!(asset.payload["kind"], "render-texture");
-        assert_eq!(asset.payload["renderTextureId"], 0x05002862u32);
+        assert_eq!(asset.payload["kind"], "surface-texture");
+        assert_eq!(asset.payload["surfaceTextureId"], 0x05002862u32);
         assert_eq!(
-            asset.payload["renderSurfaceIds"]
-                .as_array()
-                .expect("render texture route should expose render surface candidates"),
-            &[serde_json::json!(0x060041c0u32)]
+            asset.payload["selectedRenderSurfaceId"]
+                .as_u64()
+                .expect("surface texture route should expose available render surface"),
+            u64::from(0x060041c0u32)
         );
         assert_eq!(
             asset.payload["dependencies"]["renderSurfaceAssetIds"]
                 .as_array()
-                .expect("render texture route should expose dependency ids"),
+                .expect("surface texture route should expose dependency ids"),
             &[serde_json::json!("render-surface/060041c0")]
+        );
+    }
+
+    #[test]
+    fn material_recipe_lookup_does_not_emit_missing_high_detail_render_surface() {
+        let runtime = HostRuntimeService::new(false);
+        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
+            request_id: "test-material-available-source-level".to_string(),
+            asset_id: "material/0800128c".to_string(),
+            priority: crate::contracts::AssetPriorityDto::Streaming,
+        });
+
+        assert_eq!(asset.payload["kind"], "material-recipe");
+        assert_eq!(asset.payload["surfaceId"], 0x0800128cu32);
+        assert_ne!(
+            asset.payload["source"]["selectedRenderSurfaceId"]
+                .as_u64()
+                .expect("material route should expose selected render surface"),
+            u64::from(0x0600379cu32)
+        );
+        assert!(
+            !asset.payload["dependencies"]["renderSurfaceAssetIds"]
+                .as_array()
+                .expect("material route should expose render surface dependency")
+                .is_empty()
         );
     }
 

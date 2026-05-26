@@ -9,15 +9,15 @@ import { describeMaterialAssetDiagnostics } from "./material-diagnostics";
 describe("material diagnostics", () => {
 	it("summarizes prepared material resources and missing recipe dependencies", () => {
 		const material = createMaterialRecipeRecord("material/08000001", {
-			renderTextureAssetIds: ["render-texture/05000001"],
+			surfaceTextureAssetIds: ["surface-texture/05000001"],
 			renderSurfaceAssetIds: ["render-surface/06000001"],
 			paletteAssetIds: ["palette/04000001"],
 		});
 		const state = createInitialAssetChannelState();
 		state.preparedByAssetId = {
 			[material.request.assetId]: material,
-			"render-texture/05000001": createRenderTextureRecord(
-				"render-texture/05000001",
+			"surface-texture/05000001": createSurfaceTextureRecord(
+				"surface-texture/05000001",
 			),
 		};
 
@@ -76,7 +76,7 @@ describe("material diagnostics", () => {
 		const indexedRecipe = createMaterialRecipeRecord(
 			"material/08000003",
 			{
-				renderTextureAssetIds: [],
+				surfaceTextureAssetIds: [],
 				renderSurfaceAssetIds: [
 					"render-surface/06000003",
 					"render-surface/06000004",
@@ -85,31 +85,31 @@ describe("material diagnostics", () => {
 			},
 			{
 				paletteId: 0x04000003,
-				renderSurfaceIds: [0x06000003, 0x06000004],
+				selectedRenderSurfaceId: 0x06000003,
 			},
 		);
 		const emptyPaletteRecipe = createMaterialRecipeRecord(
 			"material/08000005",
 			{
-				renderTextureAssetIds: [],
+				surfaceTextureAssetIds: [],
 				renderSurfaceAssetIds: ["render-surface/06000005"],
 				paletteAssetIds: ["palette/04000004"],
 			},
 			{
 				paletteId: 0x04000004,
-				renderSurfaceIds: [0x06000005],
+				selectedRenderSurfaceId: 0x06000005,
 			},
 		);
 		const defaultPaletteRecipe = createMaterialRecipeRecord(
 			"material/08000004",
 			{
-				renderTextureAssetIds: [],
+				surfaceTextureAssetIds: [],
 				renderSurfaceAssetIds: ["render-surface/06000006"],
 				paletteAssetIds: ["palette/04000006"],
 			},
 			{
 				paletteId: null,
-				renderSurfaceIds: [0x06000006],
+				selectedRenderSurfaceId: 0x06000006,
 				renderSurfaceDefaultPaletteIds: [0x04000006],
 			},
 		);
@@ -171,25 +171,25 @@ describe("material diagnostics", () => {
 		});
 
 		expect(diagnostics).toContain("indexed recipes 3");
-		expect(diagnostics).toContain("surfaces P8 2, Index16 2");
+		expect(diagnostics).toContain("surfaces P8 2, Index16 1");
 		expect(diagnostics).toContain(
-			"palettes prepared 2, recipe 3, default 1, missing 0",
+			"palettes prepared 2, recipe 2, default 1, missing 0",
 		);
 		expect(diagnostics).toContain("empty 1 (palette/04000004)");
-		expect(diagnostics).toContain("range errors 1 (render-surface/06000004)");
+		expect(diagnostics).toContain("range errors 0");
 	});
 });
 
 function createMaterialRecipeRecord(
 	assetId: string,
 	dependencies: {
-		renderTextureAssetIds: string[];
+		surfaceTextureAssetIds: string[];
 		renderSurfaceAssetIds: string[];
 		paletteAssetIds: string[];
 	},
 	options: {
 		paletteId?: number | null;
-		renderSurfaceIds?: number[];
+		selectedRenderSurfaceId?: number | null;
 		renderSurfaceDefaultPaletteIds?: number[];
 	} = {},
 ): PreparedAssetRecord {
@@ -213,8 +213,8 @@ function createMaterialRecipeRecord(
 		surfaceType: 0,
 		source: {
 			kind: "texture" as const,
-			renderTextureId: 0x05000001,
-			renderSurfaceIds: options.renderSurfaceIds ?? [0x06000001],
+			surfaceTextureId: 0x05000001,
+			selectedRenderSurfaceId: options.selectedRenderSurfaceId ?? 0x06000001,
 			paletteId:
 				options.paletteId === undefined ? 0x04000001 : options.paletteId,
 			renderSurfaceDefaultPaletteIds:
@@ -305,26 +305,26 @@ function createPaletteRecord(
 	return createPreparedRecord(request, payload);
 }
 
-function createRenderTextureRecord(assetId: string): PreparedAssetRecord {
+function createSurfaceTextureRecord(assetId: string): PreparedAssetRecord {
 	const request = {
 		requestId: `fixture-${assetId}`,
 		assetId,
 		priority: "streaming" as const,
 	};
 	const payload = {
-		kind: "render-texture" as const,
-		sourceAssetKind: "render-texture" as const,
+		kind: "surface-texture" as const,
+		sourceAssetKind: "surface-texture" as const,
 		residencyKind: "unknown" as const,
 		provenance: {
 			source: "repo-local-hba" as const,
-			sourceAssetKind: "render-texture",
+			sourceAssetKind: "surface-texture",
 			errorCode: null,
 			detail: null,
 		},
-		renderTextureId: 0x05000001,
+		surfaceTextureId: 0x05000001,
 		textureType: 0,
 		unknown: 0,
-		renderSurfaceIds: [0x06000001],
+		selectedRenderSurfaceId: 0x06000001,
 		dependencies: {
 			renderSurfaceAssetIds: ["render-surface/06000001"],
 		},

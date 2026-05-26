@@ -31,10 +31,10 @@ pub use material_capabilities::{
 };
 pub use material_graph::{
     MaterialAppearanceInput, ResolvedAnimationPartChange, ResolvedMaterialRecipe,
-    ResolvedMaterialSlot, ResolvedMaterialSource, ResolvedRenderTexture, ResolvedSetupAppearance,
-    ResolvedSetupAppearancePart, ResolvedTerrainAlphaMap, ResolvedTerrainMaterialTable,
-    ResolvedTerrainMaterialType, ResolvedTerrainRoadAlphaMap, ResolvedTextureChange,
-    ResolvedTextureMaterial,
+    ResolvedMaterialSlot, ResolvedMaterialSource, ResolvedSetupAppearance,
+    ResolvedSetupAppearancePart, ResolvedSurfaceTexture, ResolvedTerrainAlphaMap,
+    ResolvedTerrainMaterialTable, ResolvedTerrainMaterialType, ResolvedTerrainRoadAlphaMap,
+    ResolvedTextureChange, ResolvedTextureMaterial,
 };
 pub use repository::ContentRepository;
 pub use soul_emote::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteResolution, SoulEmoteToken};

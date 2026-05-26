@@ -579,8 +579,8 @@ export interface PreparedMaterialRecipePayload extends PreparedAssetPayloadBase 
 		| { kind: "solid-color"; argb: number }
 		| {
 				kind: "texture";
-				renderTextureId: number;
-				renderSurfaceIds: number[];
+				surfaceTextureId: number;
+				selectedRenderSurfaceId: number | null;
 				paletteId: number | null;
 				renderSurfaceDefaultPaletteIds: number[];
 		  };
@@ -588,7 +588,7 @@ export interface PreparedMaterialRecipePayload extends PreparedAssetPayloadBase 
 	luminosity: number;
 	diffuse: number;
 	dependencies: {
-		renderTextureAssetIds: string[];
+		surfaceTextureAssetIds: string[];
 		renderSurfaceAssetIds: string[];
 		paletteAssetIds: string[];
 	};
@@ -680,7 +680,7 @@ interface PreparedTerrainPcodeEncoding {
 }
 
 interface PreparedTerrainMaterialDependencies {
-	renderTextureAssetIds: string[];
+	surfaceTextureAssetIds: string[];
 	renderSurfaceAssetIds: string[];
 	paletteAssetIds: string[];
 }
@@ -698,13 +698,13 @@ interface PreparedTerrainMaterialTablePayload extends PreparedAssetPayloadBase {
 	dependencies: PreparedTerrainMaterialDependencies;
 }
 
-export interface PreparedRenderTexturePayload extends PreparedAssetPayloadBase {
-	kind: "render-texture";
-	sourceAssetKind: "render-texture";
-	renderTextureId: number;
+export interface PreparedSurfaceTexturePayload extends PreparedAssetPayloadBase {
+	kind: "surface-texture";
+	sourceAssetKind: "surface-texture";
+	surfaceTextureId: number;
 	textureType: number;
 	unknown: number;
-	renderSurfaceIds: number[];
+	selectedRenderSurfaceId: number | null;
 	dependencies: {
 		renderSurfaceAssetIds: string[];
 	};
@@ -757,7 +757,7 @@ export type PreparedAssetPayload =
 	| PreparedMaterialRecipePayload
 	| PreparedSetupAppearancePayload
 	| PreparedTerrainMaterialTablePayload
-	| PreparedRenderTexturePayload
+	| PreparedSurfaceTexturePayload
 	| PreparedRenderSurfacePayload
 	| PreparedPalettePayload
 	| PreparedVisualAssetStubPayload
@@ -856,7 +856,7 @@ export function getPreparedAssetDependencies(
 
 	if (asset.payload.kind === "material-recipe") {
 		return uniqueSortedAssetIds([
-			...asset.payload.dependencies.renderTextureAssetIds,
+			...asset.payload.dependencies.surfaceTextureAssetIds,
 			...asset.payload.dependencies.renderSurfaceAssetIds,
 			...asset.payload.dependencies.paletteAssetIds,
 		]);
@@ -864,13 +864,13 @@ export function getPreparedAssetDependencies(
 
 	if (asset.payload.kind === "terrain-material") {
 		return uniqueSortedAssetIds([
-			...asset.payload.dependencies.renderTextureAssetIds,
+			...asset.payload.dependencies.surfaceTextureAssetIds,
 			...asset.payload.dependencies.renderSurfaceAssetIds,
 			...asset.payload.dependencies.paletteAssetIds,
 		]);
 	}
 
-	if (asset.payload.kind === "render-texture") {
+	if (asset.payload.kind === "surface-texture") {
 		return uniqueSortedAssetIds(
 			asset.payload.dependencies.renderSurfaceAssetIds,
 		);

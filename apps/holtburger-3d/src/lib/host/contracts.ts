@@ -498,7 +498,7 @@ const terrainPcodeEncodingDtoSchema = z.object({
 });
 
 const terrainMaterialDependenciesDtoSchema = z.object({
-	renderTextureAssetIds: z.array(z.string().min(1)),
+	surfaceTextureAssetIds: z.array(z.string().min(1)),
 	renderSurfaceAssetIds: z.array(z.string().min(1)),
 	paletteAssetIds: z.array(z.string().min(1)),
 });
@@ -723,7 +723,7 @@ export const setupModelPayloadDtoSchema = z.object({
 export type SetupModelPayloadDto = z.infer<typeof setupModelPayloadDtoSchema>;
 
 const materialRecipeDependenciesDtoSchema = z.object({
-	renderTextureAssetIds: z.array(z.string().min(1)),
+	surfaceTextureAssetIds: z.array(z.string().min(1)),
 	renderSurfaceAssetIds: z.array(z.string().min(1)),
 	paletteAssetIds: z.array(z.string().min(1)),
 });
@@ -735,8 +735,8 @@ const materialRecipeSourceDtoSchema = z.discriminatedUnion("kind", [
 	}),
 	z.object({
 		kind: z.literal("texture"),
-		renderTextureId: z.number().int().nonnegative(),
-		renderSurfaceIds: z.array(z.number().int().nonnegative()),
+		surfaceTextureId: z.number().int().nonnegative(),
+		selectedRenderSurfaceId: z.number().int().nonnegative().nullable(),
 		paletteId: z.number().int().nonnegative().nullable(),
 		renderSurfaceDefaultPaletteIds: z.array(z.number().int().nonnegative()),
 	}),
@@ -839,21 +839,21 @@ export interface RuntimeAppearanceRequestDto {
 	objDesc: RuntimeAppearanceObjDescDto | null;
 }
 
-export const renderTexturePayloadDtoSchema = z.object({
-	kind: z.literal("render-texture"),
+export const surfaceTexturePayloadDtoSchema = z.object({
+	kind: z.literal("surface-texture"),
 	residencyKind: z.literal("unknown"),
-	sourceAssetKind: z.literal("render-texture"),
-	renderTextureId: z.number().int().nonnegative(),
+	sourceAssetKind: z.literal("surface-texture"),
+	surfaceTextureId: z.number().int().nonnegative(),
 	textureType: z.number().int().nonnegative(),
 	unknown: z.number().int(),
-	renderSurfaceIds: z.array(z.number().int().nonnegative()),
+	selectedRenderSurfaceId: z.number().int().nonnegative().nullable(),
 	dependencies: z.object({
 		renderSurfaceAssetIds: z.array(z.string().min(1)),
 	}),
 	provenance: assetProvenanceDtoSchema,
 });
-export type RenderTexturePayloadDto = z.infer<
-	typeof renderTexturePayloadDtoSchema
+export type SurfaceTexturePayloadDto = z.infer<
+	typeof surfaceTexturePayloadDtoSchema
 >;
 
 export const renderSurfacePayloadDtoSchema = z.object({

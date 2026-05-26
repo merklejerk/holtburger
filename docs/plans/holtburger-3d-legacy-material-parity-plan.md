@@ -30,7 +30,7 @@ or new reference evidence proves it stale.
   material groups.
 - Static `GfxObj` and setup-model render groups include material signatures, so
   batching is no longer keyed only by geometry.
-- Terrain material tables and their downstream render texture/surface/palette
+- Terrain material tables and their downstream surface texture/surface/palette
   dependencies are schedulable assets.
 - Prepared `setup-appearance/{setup_did}` payloads exist and preserve base
   setup part material slots, texture changes, animation part changes,
@@ -292,7 +292,7 @@ following gaps should be addressed in order.
    material-ready terrain model.
 7. Terrain scheduling is mostly ready. `landblock-outdoor` dependency extraction
    requests `terrain-material/{regionNumber}`, and terrain material payloads
-   expose downstream render-texture, render-surface, and palette dependencies.
+   expose downstream surface-texture, render-surface, and palette dependencies.
    The missing part is renderer consumption, not asset graph reachability.
 8. Phase 3 validation can be mostly automated after Phase 2.5 material identity
    prep lands, but fixture selection still
@@ -1193,7 +1193,7 @@ Implementation targets:
   signatures. The first implementation exposes this as
   `RuntimeAppearanceResolvedFacts`.
 - Kept true assets in the existing prepared asset cache: setup models, gfx
-  objs, material recipes, render textures, render surfaces, and palettes.
+  objs, material recipes, surface textures, render surfaces, and palettes.
 - Implemented passive bounded eviction with max entries plus LRU. Max age is
   deferred until real runtime-object usage proves it is needed.
 - Added diagnostics for derived appearance memo size, hits, misses, evictions,
@@ -1302,7 +1302,7 @@ Implementation targets:
   not mutate world state, and do not send server spawn requests.
 - Request true asset dependencies through the existing asset hydration path so
   assets can be loaded from DAT when they are not already resident: selected
-  `GfxObj`, material recipes, render textures, render surfaces, and palettes.
+  `GfxObj`, material recipes, surface textures, render surfaces, and palettes.
   The prepared asset cache should be the resident reuse layer after hydration,
   not a requirement that the asset was already loaded before preview.
 - Show compact diagnostics for the resolved appearance: selected part IDs,
@@ -2087,6 +2087,8 @@ Verification:
 
 ### Phase 8.2: SurfaceTexture/ImgTex Source-Level And Mipmap Parity
 
+Status: Implemented.
+
 Goal: pivot legacy material texture handling from the mistaken `RenderTexture`
 chain model to the retail `CSurface -> SurfaceTexture -> ImgTex -> RenderSurface`
 path, then implement mip filtering and texture-filtering preference modes on
@@ -2185,20 +2187,143 @@ Completion criteria:
   when the active filtering mode requests mips.
 - Browser filtering modes are renamed or remapped to retail concepts, and debug
   diagnostics surface both requested mode and effective sampler policy.
-- Cache keys include the selected source `RenderSurface`, effective
-  high-detail-drop/source-level decision, and effective sampler policy.
-- Tests cover source-level selection, direct-color generated mip behavior,
+- Cache keys include the DTO-provided high-detail `RenderSurface` and effective
+  sampler policy.
+- Tests cover DTO-provided high-detail source use, direct-color generated mip behavior,
   compressed-source fallback behavior, cache-key separation, and browser
   filtering mode mapping.
+
+Progress:
+
+- Renamed the material-facing `0x05` path across Rust content/core, Tauri
+  adapter payloads, frontend prepared asset contracts, worker routing,
+  diagnostics, tests, and renderer code from `RenderTexture` /
+  `render-texture/{did}` to `SurfaceTexture` / `surface-texture/{did}`.
+- Renamed the DAT parser type for `0x05` to `SurfaceTexture` and updated parser
+  tests to describe the list as source levels, not a mip chain.
+- Preserved original `SurfaceTexture.render_surface_ids` order in
+  `holtburger-content` instead of filtering the list down to available render
+  surfaces. Missing or pruned source levels remain visible to the renderer and
+  asset graph.
+- Updated material recipe payloads and terrain material payload dependencies to
+  use `surfaceTextureAssetIds` and `surfaceTextureId`.
+- Updated Tauri JSON lookup and material recipe payloads to prefer the retail
+  high-detail `SurfaceTexture` source `RenderSurface`, then fall back to the
+  first available lower source level when the mounted repo-local HBA does not
+  contain that high-detail `RenderSurface`. `holtburger-content` and
+  `holtburger-dat` still preserve the full source-level list.
+- Renamed the renderer-facing selected source field from plural
+  `renderSurfaceIds` to nullable `selectedRenderSurfaceId`. Dependency fields
+  remain arrays, but the material and `surface-texture` DTOs now represent the
+  single chosen `ImgTex` source explicitly.
+- Reworked material construction to consume the DTO-provided `ImgTex` source
+  `RenderSurface` before deciding whether that selected surface is direct,
+  compressed, indexed, unsupported, or missing.
+- Added tests that prove the renderer uses the DTO-selected render surface and
+  that the Tauri DTO does not emit a missing high-detail render surface from the
+  repo-local fixture.
+- Updated the reference texturing strategy doc to reserve `RenderTexture`
+  terminology for the `0x15` resource family and use `SurfaceTexture`/`ImgTex`
+  for legacy material `0x05` records.
+
+Decisions:
+
+- No backwards-compatible `render-texture/{did}` material route was kept. The
+  old name encoded the wrong model, and retaining both routes would fragment the
+  asset graph for no useful runtime behavior.
+- `SurfaceTexture` payload dependencies now include only the selected
+  render-surface ID. The preferred selection is the retail high-detail source;
+  availability fallback is app-local DTO policy because the repo-local HBA is
+  not a complete retail DAT.
+- The renderer does not scan source levels or know which source-level index is
+  high detail. It renders or falls back based on the single `RenderSurface`
+  provided by the DTO.
+- `selectedRenderSurfaceId: null` is the explicit DTO shape for an unresolved
+  or unavailable `SurfaceTexture` source. This keeps the one-selected-source
+  contract intact without fabricating an empty candidate list.
+- Direct-color selected surfaces continue to generate GPU mips when the active
+  sampler policy requests mips, matching the retail `D3DXFilterTexture` shape.
+- Compressed selected surfaces keep the explicit Phase 8.1 non-mip fallback
+  (`mipFilter: "none"`, `generateMipmaps: false`) because WebGL cannot generate
+  compressed mipmaps from a single compressed base image, and retail evidence no
+  longer supports treating the `0x05` source-level list as authored compressed
+  mips.
+- Indexed selected surfaces remain nearest/no-mip for palette correctness.
+
+Course corrections:
+
+- The previous "available render-surface candidates" resolver behavior was
+  wrong for retail parity because it destroyed source-level index semantics.
+  Content now preserves source order, and the Tauri DTO boundary prefers the
+  retail high-detail source for the browser.
+- A blind high-detail-only DTO broke the browser scene with the current
+  repo-local `assets.hba` because many source-0 `RenderSurface` records are not
+  present. The DTO now validates render-surface availability before emitting a
+  dependency, preserving the retail preference without flooding the frontend
+  with impossible asset requests.
+- The true retail `RenderTexture` class is still relevant to `0x15` and modern
+  material resources, but it is no longer part of the legacy `CSurface` texture
+  path.
+- Phase 8.2 no longer attempts to build multi-level Three.js textures from all
+  `0x05` render-surface IDs. That would have been a false parity path.
+
+Cleanup targets:
+
+- Some diagnostic strings still use the shorthand "tex" in compact debug output.
+  They point at `surfaceTextureAssetIds` now, but the UI label can be polished
+  when the debug panel gets another pass.
+- The current DTO exposes the highest available retail-preferred source level.
+  Add an explicit lower-detail browser/client setting only when we decide how to
+  expose retail `EnvironmentTextureDetail` or high-detail-drop behavior.
+- True `0x15` `RenderTexture` support remains deferred until modern material or
+  UI texture work needs it.
+- The material-construction path now owns more source selection and fallback
+  logic. If Phase 9 adds terrain source selection, extract a small shared
+  source-selection helper rather than duplicating the rules.
+
+Legacy shims:
+
+- Compressed selected source surfaces still disable mip filtering under the
+  current browser upload path. This is an explicit WebGL/browser constraint, not
+  a `0x05` chain TODO.
+- Browser filtering modes still expose `Nearest`, `Linear`, and
+  `Anisotropic 4x` rather than retail names. This remains a debug-control naming
+  mismatch, not a blocker for Phase 9.
+- Source-level availability fallback is a repo-local HBA constraint shim. A full
+  retail DAT mount should normally satisfy the high-detail source level.
+
+Refinements to future steps:
+
+- Phase 9 can proceed without an interim bridge phase. Terrain should consume
+  `surface-texture/{did}` terminology and source-level semantics from the start.
+- Terrain material work should consume the DTO-selected source level unless and
+  until a real texture-detail setting is introduced.
+- If modern material phases later need true `0x15` `RenderTexture`, introduce it
+  as a separate asset family instead of reusing the legacy `SurfaceTexture`
+  payload.
+
+Verification:
+
+- `npm run check` passes from `apps/holtburger-3d`.
+- `npm run lint:ts` passes from `apps/holtburger-3d`.
+- `npm run test:ts` passes from `apps/holtburger-3d` with 48 files and 265
+  tests.
+- `cargo check -p holtburger-content -p holtburger-core -p holtburger-dat`
+  passes.
+- `cargo test -p holtburger-content` passes.
+- `cargo test -p holtburger-dat -p holtburger-core` passes.
+- `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml` passes.
 
 Course-correction targets from Phase 8.1:
 
 - Remove the compressed `mipFilter: "none"` shim once compatible chains upload
-  with real mip levels.
+  with real mip levels. Phase 8.2 narrows this to true `0x15` or another
+  explicit authored-mip source; it no longer applies to legacy `0x05`
+  `SurfaceTexture`.
 - Replace the debug-only `Nearest` mode or label it clearly if it remains useful
   for diagnostics but does not match a retail preference.
-- Keep Phase 9 blocked on this phase if terrain material work would otherwise
-  duplicate or depend on the current one-level texture upload path.
+- Keep Phase 9 on the new `surface-texture` path so terrain work does not
+  revive `render-texture/{did}` for legacy `0x05` assets.
 
 ### Phase 9: Terrain Material Pipeline Prep
 

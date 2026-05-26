@@ -179,6 +179,36 @@ describe("world material resource cache", () => {
 		cache.dispose();
 	});
 
+	it("uses the first render surface provided by the material DTO", () => {
+		const cache = new WorldMaterialResourceCache();
+		const materialAssetId = formatMaterialAssetId(0x08000012);
+		const highDetailSurfaceAssetId = "render-surface/06000012";
+		const plan = cache.resolveMaterialPlan({
+			slots: [{ slotIndex: 0, surfaceId: 0x08000012, materialAssetId }],
+			appearance: createBaseMaterialAppearanceContext("base"),
+			preparedByAssetId: {
+				[materialAssetId]: createPreparedAsset(
+					materialAssetId,
+					createTextureMaterialRecipe(0x08000012, 0x06000012, {
+						selectedRenderSurfaceId: 0x06000012,
+					}),
+				),
+				[highDetailSurfaceAssetId]: createPreparedAsset(
+					highDetailSurfaceAssetId,
+					createRenderSurfacePayload(0x06000012, {
+						sourceBytes: new Uint8Array([0x10, 0x20, 0x30, 0xff]),
+					}),
+				),
+			},
+			fallbackColorKey: "part",
+		});
+
+		const material = plan.materials[0] as MeshStandardMaterial;
+		const texture = material.map as DataTexture;
+		expect([...texture.image.data.slice(0, 4)]).toEqual([0x30, 0x20, 0x10, 0xff]);
+		cache.dispose();
+	});
+
 	it("applies scalar material behavior to texture-backed materials", () => {
 		const cache = new WorldMaterialResourceCache();
 		const materialAssetId = formatMaterialAssetId(0x08000022);
@@ -960,7 +990,7 @@ function createSolidMaterialRecipe(
 		luminosity: options.luminosity ?? 0,
 		diffuse: options.diffuse ?? 1,
 		dependencies: {
-			renderTextureAssetIds: [],
+			surfaceTextureAssetIds: [],
 			renderSurfaceAssetIds: [],
 			paletteAssetIds: [],
 		},
@@ -971,6 +1001,7 @@ function createTextureMaterialRecipe(
 	surfaceId: number,
 	renderSurfaceId: number,
 	options: {
+		selectedRenderSurfaceId?: number | null;
 		paletteId?: number | null;
 		renderSurfaceDefaultPaletteIds?: number[];
 		surfaceType?: number;
@@ -979,7 +1010,10 @@ function createTextureMaterialRecipe(
 		diffuse?: number;
 	} = {},
 ): PreparedMaterialRecipePayload {
-	const renderSurfaceAssetId = `render-surface/${renderSurfaceId.toString(16).padStart(8, "0")}`;
+	const selectedRenderSurfaceId =
+		options.selectedRenderSurfaceId === undefined
+			? renderSurfaceId
+			: options.selectedRenderSurfaceId;
 	const paletteId = options.paletteId ?? null;
 	const renderSurfaceDefaultPaletteIds =
 		options.renderSurfaceDefaultPaletteIds ?? [];
@@ -987,14 +1021,21 @@ function createTextureMaterialRecipe(
 		...createSolidMaterialRecipe(surfaceId, 0xffffffff, options),
 		source: {
 			kind: "texture",
-			renderTextureId: 0x05000002,
-			renderSurfaceIds: [renderSurfaceId],
+			surfaceTextureId: 0x05000002,
+			selectedRenderSurfaceId,
 			paletteId,
 			renderSurfaceDefaultPaletteIds,
 		},
 		dependencies: {
-			renderTextureAssetIds: [],
-			renderSurfaceAssetIds: [renderSurfaceAssetId],
+			surfaceTextureAssetIds: [],
+			renderSurfaceAssetIds:
+				selectedRenderSurfaceId === null
+					? []
+					: [
+							`render-surface/${selectedRenderSurfaceId
+								.toString(16)
+								.padStart(8, "0")}`,
+						],
 			paletteAssetIds: [
 				...(paletteId === null
 					? []
@@ -1026,7 +1067,11 @@ function createFailedMaterialRecipe(
 
 function createRenderSurfacePayload(
 	renderSurfaceId: number,
+	options: {
+		sourceBytes?: Uint8Array;
+	} = {},
 ): PreparedRenderSurfacePayload {
+	const sourceBytes = options.sourceBytes ?? new Uint8Array([0x33, 0x22, 0x11, 0xff]);
 	return {
 		kind: "render-surface",
 		sourceAssetKind: "render-surface",
@@ -1043,8 +1088,8 @@ function createRenderSurfacePayload(
 		height: 1,
 		formatRaw: 0x15,
 		format: "A8R8G8B8",
-		sourceByteLength: 4,
-		sourceBytes: new Uint8Array([0x33, 0x22, 0x11, 0xff]),
+		sourceByteLength: sourceBytes.byteLength,
+		sourceBytes,
 		defaultPaletteId: null,
 		dependencies: { paletteAssetIds: [] },
 	};

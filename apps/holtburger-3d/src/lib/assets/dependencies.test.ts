@@ -145,11 +145,11 @@ describe("asset response dependencies", () => {
 			sourceAssetKind: "terrain-material",
 			regionNumber: 1,
 			materialKind: "tex-merge-table",
-			terrainTypes: [createTerrainMaterialTypeEntry("render-texture/05000010")],
+			terrainTypes: [createTerrainMaterialTypeEntry("surface-texture/05000010")],
 			terrainAlphaMaps: [
 				{
 					alphaIndex: 0,
-					alphaTextureAssetId: "render-texture/05000011",
+					alphaTextureAssetId: "surface-texture/05000011",
 					alphaTextureDid: 0x05000011,
 					selector: 2,
 				},
@@ -161,9 +161,9 @@ describe("asset response dependencies", () => {
 				sizeBitMask: 0x10000000,
 			},
 			dependencies: {
-				renderTextureAssetIds: [
-					"render-texture/05000010",
-					"render-texture/05000011",
+				surfaceTextureAssetIds: [
+					"surface-texture/05000010",
+					"surface-texture/05000011",
 				],
 				renderSurfaceAssetIds: ["render-surface/06000010"],
 				paletteAssetIds: ["palette/04000010"],
@@ -174,8 +174,8 @@ describe("asset response dependencies", () => {
 		expect(getAssetResponseDependencies(response)).toEqual([
 			{ assetId: "palette/04000010" },
 			{ assetId: "render-surface/06000010" },
-			{ assetId: "render-texture/05000010" },
-			{ assetId: "render-texture/05000011" },
+			{ assetId: "surface-texture/05000010" },
+			{ assetId: "surface-texture/05000011" },
 		]);
 	});
 
@@ -280,8 +280,8 @@ describe("asset response dependencies", () => {
 					surfaceType: 2,
 					source: {
 						kind: "texture",
-						renderTextureId: 0x05000010,
-						renderSurfaceIds: [0x06000010],
+						surfaceTextureId: 0x05000010,
+						selectedRenderSurfaceId: 0x06000010,
 						paletteId: 0x04000010,
 						renderSurfaceDefaultPaletteIds: [],
 					},
@@ -289,7 +289,7 @@ describe("asset response dependencies", () => {
 					luminosity: 0,
 					diffuse: 1,
 					dependencies: {
-						renderTextureAssetIds: ["render-texture/05000010"],
+						surfaceTextureAssetIds: ["surface-texture/05000010"],
 						renderSurfaceAssetIds: ["render-surface/06000010"],
 						paletteAssetIds: ["palette/04000010"],
 					},
@@ -299,19 +299,19 @@ describe("asset response dependencies", () => {
 		).toEqual([
 			{ assetId: "palette/04000010" },
 			{ assetId: "render-surface/06000010" },
-			{ assetId: "render-texture/05000010" },
+			{ assetId: "surface-texture/05000010" },
 		]);
 
 		expect(
 			getAssetResponseDependencies(
-				createJsonResponse("render-texture/05000010", {
-					kind: "render-texture",
+				createJsonResponse("surface-texture/05000010", {
+					kind: "surface-texture",
 					residencyKind: "unknown",
-					sourceAssetKind: "render-texture",
-					renderTextureId: 0x05000010,
+					sourceAssetKind: "surface-texture",
+					surfaceTextureId: 0x05000010,
 					textureType: 1,
 					unknown: 0,
-					renderSurfaceIds: [0x06000010],
+					selectedRenderSurfaceId: 0x06000010,
 					dependencies: {
 						renderSurfaceAssetIds: ["render-surface/06000010"],
 					},

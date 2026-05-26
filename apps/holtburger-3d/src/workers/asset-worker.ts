@@ -9,7 +9,7 @@ import type {
 	MaterialRecipePayloadDto,
 	PalettePayloadDto,
 	RenderSurfacePayloadDto,
-	RenderTexturePayloadDto,
+	SurfaceTexturePayloadDto,
 	SetupAppearancePayloadDto,
 	SetupModelPayloadDto,
 	TerrainMaterialPayloadDto,
@@ -24,7 +24,7 @@ import {
 	materialRecipePayloadDtoSchema,
 	palettePayloadDtoSchema,
 	renderSurfacePayloadDtoSchema,
-	renderTexturePayloadDtoSchema,
+	surfaceTexturePayloadDtoSchema,
 	setupAppearancePayloadDtoSchema,
 	setupModelPayloadDtoSchema,
 	terrainMaterialPayloadDtoSchema,
@@ -169,14 +169,14 @@ export function prepareAssetPayload(
 		);
 	}
 
-	const renderTexturePayload = renderTexturePayloadDtoSchema.safeParse(
+	const surfaceTexturePayload = surfaceTexturePayloadDtoSchema.safeParse(
 		response.payload,
 	);
-	if (renderTexturePayload.success) {
+	if (surfaceTexturePayload.success) {
 		return preparePassthroughAsset(
 			request,
 			response,
-			renderTexturePayload.data,
+			surfaceTexturePayload.data,
 		);
 	}
 
@@ -314,11 +314,11 @@ function prepareRouteMatchedAssetPayload(
 		return preparePassthroughAsset(request, response, payload);
 	}
 
-	if (/^render-texture\/[0-9a-fA-F]{8}$/.test(request.assetId)) {
+	if (/^surface-texture\/[0-9a-fA-F]{8}$/.test(request.assetId)) {
 		const payload = parseExpectedRoutePayload(
 			request.assetId,
-			"render-texture",
-			renderTexturePayloadDtoSchema,
+			"surface-texture",
+			surfaceTexturePayloadDtoSchema,
 			response.payload,
 		);
 		return preparePassthroughAsset(request, response, payload);
@@ -483,7 +483,7 @@ function preparePassthroughAsset(
 	payload:
 		| SetupAppearancePayloadDto
 		| MaterialRecipePayloadDto
-		| RenderTexturePayloadDto
+		| SurfaceTexturePayloadDto
 		| RenderSurfacePayloadDto
 		| PalettePayloadDto
 		| TerrainMaterialPayloadDto,

@@ -7,8 +7,12 @@ import {
 	RGBA_S3TC_DXT3_Format,
 	RGBA_S3TC_DXT5_Format,
 	RGBAFormat,
+	RGBFormat,
 	UnsignedByteType,
+	UnsignedShort4444Type,
+	type PixelFormat,
 	type Texture,
+	type TextureDataType,
 } from "three";
 
 import type { PreparedRenderSurfacePayload } from "../assets/types";
@@ -21,6 +25,8 @@ import {
 export interface MaterialTextureCapabilities {
 	supportsS3tc: boolean;
 	supportsS3tcSrgb: boolean;
+	supportsPackedRgb565?: boolean;
+	supportsPackedRgba4444?: boolean;
 	maxAnisotropy?: number;
 }
 
@@ -51,6 +57,8 @@ export function createRenderSurfaceTexture(
 	capabilities: MaterialTextureCapabilities = {
 		supportsS3tc: false,
 		supportsS3tcSrgb: false,
+		supportsPackedRgb565: false,
+		supportsPackedRgba4444: true,
 		maxAnisotropy: 1,
 	},
 ): Texture | null {
@@ -60,13 +68,13 @@ export function createRenderSurfaceTexture(
 	if (!isSupportedDirectColorFormat(renderSurface.formatRaw)) {
 		return null;
 	}
-	const rgba = decodeDirectColorRenderSurface(renderSurface);
+	const decoded = decodeDirectColorRenderSurface(renderSurface, capabilities);
 	const texture = new DataTexture(
-		rgba,
+		decoded.data,
 		renderSurface.width,
 		renderSurface.height,
-		RGBAFormat,
-		UnsignedByteType,
+		decoded.format,
+		decoded.type,
 	);
 	applyTextureSamplingPolicy(texture, samplingPolicy);
 	texture.needsUpdate = true;
@@ -147,9 +155,16 @@ function createCompressedTexture(
 	return texture;
 }
 
+interface DecodedRenderSurfaceTextureData {
+	data: Uint8Array | Uint16Array;
+	format: PixelFormat;
+	type: TextureDataType;
+}
+
 function decodeDirectColorRenderSurface(
 	renderSurface: PreparedRenderSurfacePayload,
-): Uint8Array {
+	capabilities: MaterialTextureCapabilities,
+): DecodedRenderSurfaceTextureData {
 	const pixelCount = assertValidSurfaceDimensions(renderSurface);
 	const expectedByteLength = expectedDirectColorSourceByteLength(renderSurface);
 	if (renderSurface.sourceBytes.byteLength !== expectedByteLength) {
@@ -159,91 +174,178 @@ function decodeDirectColorRenderSurface(
 	}
 	assertDeclaredSourceByteLengthMatchesPayload(renderSurface);
 
-	const rgba = new Uint8Array(pixelCount * 4);
 	const source = renderSurface.sourceBytes;
 	switch (renderSurface.formatRaw) {
 		case PIXEL_FORMAT_R8G8B8:
 		case PIXEL_FORMAT_CUSTOM_LANDSCAPE_R8G8B8:
-			for (let pixel = 0; pixel < pixelCount; pixel += 1) {
-				const sourceOffset = pixel * 3;
-				const targetOffset = pixel * 4;
-				rgba[targetOffset] = source[sourceOffset] ?? 0;
-				rgba[targetOffset + 1] = source[sourceOffset + 1] ?? 0;
-				rgba[targetOffset + 2] = source[sourceOffset + 2] ?? 0;
-				rgba[targetOffset + 3] = FULL_ALPHA;
-			}
-			return rgba;
-		case PIXEL_FORMAT_A8R8G8B8:
+			return {
+				data: copyRgbBytes(source, pixelCount),
+				format: RGBFormat,
+				type: UnsignedByteType,
+			};
 		case PIXEL_FORMAT_X8R8G8B8:
-			for (let pixel = 0; pixel < pixelCount; pixel += 1) {
-				const sourceOffset = pixel * 4;
-				const targetOffset = pixel * 4;
-				rgba[targetOffset] = source[sourceOffset + 2] ?? 0;
-				rgba[targetOffset + 1] = source[sourceOffset + 1] ?? 0;
-				rgba[targetOffset + 2] = source[sourceOffset] ?? 0;
-				rgba[targetOffset + 3] =
-					renderSurface.formatRaw === PIXEL_FORMAT_A8R8G8B8
-						? (source[sourceOffset + 3] ?? FULL_ALPHA)
-						: FULL_ALPHA;
-			}
-			return rgba;
+			return {
+				data: decodeX8R8G8B8ToRgb(source, pixelCount),
+				format: RGBFormat,
+				type: UnsignedByteType,
+			};
+		case PIXEL_FORMAT_A8R8G8B8:
+			return {
+				data: decodeA8R8G8B8ToRgba(source, pixelCount),
+				format: RGBAFormat,
+				type: UnsignedByteType,
+			};
 		case PIXEL_FORMAT_R5G6B5:
-			for (let pixel = 0; pixel < pixelCount; pixel += 1) {
-				const sourceOffset = pixel * 2;
-				const targetOffset = pixel * 4;
-				const value =
-					(source[sourceOffset] ?? 0) | ((source[sourceOffset + 1] ?? 0) << 8);
-				rgba[targetOffset] = scaleBitsToByte(
-					(value >> R5G6B5_RED_SHIFT) & R5G6B5_RED_MASK,
-					5,
-				);
-				rgba[targetOffset + 1] = scaleBitsToByte(
-					(value >> R5G6B5_GREEN_SHIFT) & R5G6B5_GREEN_MASK,
-					6,
-				);
-				rgba[targetOffset + 2] = scaleBitsToByte(value & R5G6B5_BLUE_MASK, 5);
-				rgba[targetOffset + 3] = FULL_ALPHA;
-			}
-			return rgba;
+			return {
+				data: decodeR5G6B5ToRgb(source, pixelCount),
+				format: RGBFormat,
+				type: UnsignedByteType,
+			};
 		case PIXEL_FORMAT_A4R4G4B4:
-			for (let pixel = 0; pixel < pixelCount; pixel += 1) {
-				const sourceOffset = pixel * 2;
-				const targetOffset = pixel * 4;
-				const value =
-					(source[sourceOffset] ?? 0) | ((source[sourceOffset + 1] ?? 0) << 8);
-				rgba[targetOffset] = scaleBitsToByte(
-					(value >> A4R4G4B4_RED_SHIFT) & A4R4G4B4_CHANNEL_MASK,
-					4,
-				);
-				rgba[targetOffset + 1] = scaleBitsToByte(
-					(value >> A4R4G4B4_GREEN_SHIFT) & A4R4G4B4_CHANNEL_MASK,
-					4,
-				);
-				rgba[targetOffset + 2] = scaleBitsToByte(
-					value & A4R4G4B4_CHANNEL_MASK,
-					4,
-				);
-				rgba[targetOffset + 3] = scaleBitsToByte(
-					(value >> A4R4G4B4_ALPHA_SHIFT) & A4R4G4B4_CHANNEL_MASK,
-					4,
-				);
+			if (capabilities.supportsPackedRgba4444 !== false) {
+				return {
+					data: decodeA4R4G4B4ToRgba4444(source, pixelCount),
+					format: RGBAFormat,
+					type: UnsignedShort4444Type,
+				};
 			}
-			return rgba;
+			return {
+				data: decodeA4R4G4B4ToRgba8888(source, pixelCount),
+				format: RGBAFormat,
+				type: UnsignedByteType,
+			};
 		case PIXEL_FORMAT_A8:
-			for (let pixel = 0; pixel < pixelCount; pixel += 1) {
-				const targetOffset = pixel * 4;
-				const value = source[pixel] ?? 0;
-				rgba[targetOffset] = value;
-				rgba[targetOffset + 1] = value;
-				rgba[targetOffset + 2] = value;
-				rgba[targetOffset + 3] = FULL_ALPHA;
-			}
-			return rgba;
+			return {
+				data: decodeA8ToRgb(source, pixelCount),
+				format: RGBFormat,
+				type: UnsignedByteType,
+			};
 		default:
 			throw new Error(
 				`Unsupported direct-color RenderSurface format ${renderSurface.formatRaw}.`,
 			);
 	}
+}
+
+function copyRgbBytes(source: Uint8Array, pixelCount: number): Uint8Array {
+	const rgb = new Uint8Array(pixelCount * 3);
+	rgb.set(source);
+	return rgb;
+}
+
+function decodeX8R8G8B8ToRgb(
+	source: Uint8Array,
+	pixelCount: number,
+): Uint8Array {
+	const rgb = new Uint8Array(pixelCount * 3);
+	for (let pixel = 0; pixel < pixelCount; pixel += 1) {
+		const sourceOffset = pixel * 4;
+		const targetOffset = pixel * 3;
+		rgb[targetOffset] = source[sourceOffset + 2] ?? 0;
+		rgb[targetOffset + 1] = source[sourceOffset + 1] ?? 0;
+		rgb[targetOffset + 2] = source[sourceOffset] ?? 0;
+	}
+	return rgb;
+}
+
+function decodeA8R8G8B8ToRgba(
+	source: Uint8Array,
+	pixelCount: number,
+): Uint8Array {
+	const rgba = new Uint8Array(pixelCount * 4);
+	for (let pixel = 0; pixel < pixelCount; pixel += 1) {
+		const sourceOffset = pixel * 4;
+		const targetOffset = pixel * 4;
+		rgba[targetOffset] = source[sourceOffset + 2] ?? 0;
+		rgba[targetOffset + 1] = source[sourceOffset + 1] ?? 0;
+		rgba[targetOffset + 2] = source[sourceOffset] ?? 0;
+		rgba[targetOffset + 3] = source[sourceOffset + 3] ?? FULL_ALPHA;
+	}
+	return rgba;
+}
+
+function decodeR5G6B5ToRgb(source: Uint8Array, pixelCount: number): Uint8Array {
+	const rgb = new Uint8Array(pixelCount * 3);
+	for (let pixel = 0; pixel < pixelCount; pixel += 1) {
+		const sourceOffset = pixel * 2;
+		const targetOffset = pixel * 3;
+		const value =
+			(source[sourceOffset] ?? 0) | ((source[sourceOffset + 1] ?? 0) << 8);
+		rgb[targetOffset] = scaleBitsToByte(
+			(value >> R5G6B5_RED_SHIFT) & R5G6B5_RED_MASK,
+			5,
+		);
+		rgb[targetOffset + 1] = scaleBitsToByte(
+			(value >> R5G6B5_GREEN_SHIFT) & R5G6B5_GREEN_MASK,
+			6,
+		);
+		rgb[targetOffset + 2] = scaleBitsToByte(value & R5G6B5_BLUE_MASK, 5);
+	}
+	return rgb;
+}
+
+function decodeA4R4G4B4ToRgba4444(
+	source: Uint8Array,
+	pixelCount: number,
+): Uint16Array {
+	const rgba4444 = new Uint16Array(pixelCount);
+	for (let pixel = 0; pixel < pixelCount; pixel += 1) {
+		const sourceOffset = pixel * 2;
+		const value =
+			(source[sourceOffset] ?? 0) | ((source[sourceOffset + 1] ?? 0) << 8);
+		const alpha = (value >> A4R4G4B4_ALPHA_SHIFT) & A4R4G4B4_CHANNEL_MASK;
+		const red = (value >> A4R4G4B4_RED_SHIFT) & A4R4G4B4_CHANNEL_MASK;
+		const green = (value >> A4R4G4B4_GREEN_SHIFT) & A4R4G4B4_CHANNEL_MASK;
+		const blue = value & A4R4G4B4_CHANNEL_MASK;
+		rgba4444[pixel] =
+			(red << A4R4G4B4_ALPHA_SHIFT) |
+			(green << A4R4G4B4_RED_SHIFT) |
+			(blue << A4R4G4B4_GREEN_SHIFT) |
+			alpha;
+	}
+	return rgba4444;
+}
+
+function decodeA4R4G4B4ToRgba8888(
+	source: Uint8Array,
+	pixelCount: number,
+): Uint8Array {
+	const rgba = new Uint8Array(pixelCount * 4);
+	for (let pixel = 0; pixel < pixelCount; pixel += 1) {
+		const sourceOffset = pixel * 2;
+		const targetOffset = pixel * 4;
+		const value =
+			(source[sourceOffset] ?? 0) | ((source[sourceOffset + 1] ?? 0) << 8);
+		rgba[targetOffset] = scaleBitsToByte(
+			(value >> A4R4G4B4_RED_SHIFT) & A4R4G4B4_CHANNEL_MASK,
+			4,
+		);
+		rgba[targetOffset + 1] = scaleBitsToByte(
+			(value >> A4R4G4B4_GREEN_SHIFT) & A4R4G4B4_CHANNEL_MASK,
+			4,
+		);
+		rgba[targetOffset + 2] = scaleBitsToByte(
+			value & A4R4G4B4_CHANNEL_MASK,
+			4,
+		);
+		rgba[targetOffset + 3] = scaleBitsToByte(
+			(value >> A4R4G4B4_ALPHA_SHIFT) & A4R4G4B4_CHANNEL_MASK,
+			4,
+		);
+	}
+	return rgba;
+}
+
+function decodeA8ToRgb(source: Uint8Array, pixelCount: number): Uint8Array {
+	const rgb = new Uint8Array(pixelCount * 3);
+	for (let pixel = 0; pixel < pixelCount; pixel += 1) {
+		const targetOffset = pixel * 3;
+		const value = source[pixel] ?? 0;
+		rgb[targetOffset] = value;
+		rgb[targetOffset + 1] = value;
+		rgb[targetOffset + 2] = value;
+	}
+	return rgb;
 }
 
 function expectedDirectColorSourceByteLength(

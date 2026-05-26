@@ -11,9 +11,27 @@ import {
 	DIRECT_CLIP_MAP_ALPHA_TEST,
 	INDEXED_CLIP_MAP_ALPHA_TEST,
 	deriveLegacyMaterialBehavior,
+	withLegacyMeshStandardSurfaceDefaults,
 } from "./material-behavior";
 
 describe("legacy material behavior", () => {
+	it("uses explicit non-metallic diffuse-biased defaults for legacy surface materials", () => {
+		expect(
+			withLegacyMeshStandardSurfaceDefaults({
+				color: new Color(1, 1, 1),
+				metalness: 0.5,
+				roughness: 0.25,
+				envMapIntensity: 2,
+				flatShading: false,
+			}),
+		).toMatchObject({
+			flatShading: true,
+			metalness: 0,
+			roughness: 1,
+			envMapIntensity: 0,
+		});
+	});
+
 	it("maps client translucency, diffuse, and luminosity scalars", () => {
 		const behavior = deriveLegacyMaterialBehavior({
 			recipe: createMaterialRecipe({

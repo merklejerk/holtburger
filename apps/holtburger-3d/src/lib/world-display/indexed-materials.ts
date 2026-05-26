@@ -6,6 +6,7 @@ import {
 	applyLegacyMaterialBehavior,
 	deriveLegacyMaterialBehavior,
 	isBase1ClipMapSurface,
+	withLegacyMeshStandardSurfaceDefaults,
 } from "./material-behavior";
 import type { PaletteTextureResource } from "./palette-resources";
 
@@ -32,13 +33,10 @@ export function createIndexedMeshStandardMaterial(options: {
 	});
 	const material = new MeshStandardMaterial(
 		applyLegacyMaterialBehavior(
-			{
+			withLegacyMeshStandardSurfaceDefaults({
 				color: behavior.color,
 				map: options.resources.indexedTexture.texture,
-				flatShading: true,
-				metalness: 0.02,
-				roughness: 0.88,
-			},
+			}),
 			behavior,
 		),
 	);

@@ -65,6 +65,51 @@ describe("createLinearRenderSpatialIndex", () => {
 		expect(pick?.distance).toBe(2);
 	});
 
+	it("picks sphere shapes through the public spatial index", () => {
+		const index = createTestIndex();
+		index.replaceOwnerItems("owner", [
+			{
+				...createTerrainItem("sphere", "owner", 3, 7),
+				pickShape: {
+					kind: "sphere",
+					center: { x: 0, y: 0, z: 5 },
+					radius: 1,
+				},
+			},
+		]);
+
+		const pick = index.pickRay(createForwardRay(), new Set(["terrain"]));
+
+		expect(pick?.item.id).toBe("sphere");
+		expect(pick?.distance).toBe(4);
+		expect(pick?.point).toEqual({ x: 0, y: 0, z: 4 });
+	});
+
+	it("picks polygon shapes through the public spatial index", () => {
+		const index = createTestIndex();
+		index.replaceOwnerItems("owner", [
+			{
+				...createTerrainItem("polygon", "owner", 4, 6),
+				pickShape: {
+					kind: "polygon",
+					points: [
+						{ x: -1, y: -1, z: 5 },
+						{ x: 1, y: -1, z: 5 },
+						{ x: 1, y: 1, z: 5 },
+						{ x: -1, y: 1, z: 5 },
+					],
+					thickness: 0.01,
+				},
+			},
+		]);
+
+		const pick = index.pickRay(createForwardRay(), new Set(["terrain"]));
+
+		expect(pick?.item.id).toBe("polygon");
+		expect(pick?.distance).toBe(5);
+		expect(pick?.point).toEqual({ x: 0, y: 0, z: 5 });
+	});
+
 	it("returns conservative frustum matches by kind mask", () => {
 		const index = createTestIndex();
 		index.replaceOwnerItems("owner", [

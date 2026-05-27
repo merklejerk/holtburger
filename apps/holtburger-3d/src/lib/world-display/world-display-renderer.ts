@@ -144,6 +144,11 @@ import {
 	type PortalVisibilityResult,
 } from "./portal-visibility";
 import {
+	createEmptyPreparedBvhDebugMetrics,
+	derivePreparedBvhDebugMetrics,
+	type PreparedBvhDebugMetrics,
+} from "./prepared-bvh-metrics";
+import {
 	createEmptyWorldRenderWorkingModel,
 	deriveWorldRenderWorkingModel,
 	type WorldRenderWorkingModel,
@@ -557,6 +562,8 @@ export function createWorldDisplayRenderer(
 	let latestPortalMetrics: WorldRenderPortalMetrics = createPortalRenderMetrics(
 		transitionPortalModel,
 	);
+	let latestPreparedBvhMetrics: PreparedBvhDebugMetrics =
+		createEmptyPreparedBvhDebugMetrics();
 	let latestRenderDebugMetrics: WorldRenderDebugMetrics =
 		createRenderDebugMetrics(renderer, {
 			renderPassCount: 0,
@@ -584,6 +591,7 @@ export function createWorldDisplayRenderer(
 			visibleStaticGroupMeshCount: 0,
 			structuredInteriorMeshCount: 0,
 			visibleStructuredInteriorMeshCount: 0,
+			...latestPreparedBvhMetrics,
 			debugOverlayObjectCount: 0,
 			visibleDebugOverlayObjectCount: 0,
 			materialCount: 0,
@@ -904,6 +912,14 @@ export function createWorldDisplayRenderer(
 				.filter((part): part is StaticRenderablePart => Boolean(part)),
 			materialOwners: staticRenderableGroupMeshes.values(),
 		});
+		latestPreparedBvhMetrics = derivePreparedBvhDebugMetrics({
+			assetState,
+			terrainScene,
+			staticRenderableScene,
+			structuredInteriorScene,
+			renderChunkTransforms,
+			frustum: buildCameraRenderFrustum(),
+		});
 		latestRenderDebugMetrics = createRenderDebugMetrics(renderer, {
 			renderPassCount: graph.length,
 			renderGraphPolicy: graphSummary.policyLabel,
@@ -940,6 +956,7 @@ export function createWorldDisplayRenderer(
 			visibleStructuredInteriorMeshCount: countVisibleObjects(
 				structuredInteriorMeshes.values(),
 			),
+			...latestPreparedBvhMetrics,
 			debugOverlayObjectCount: debugOverlayObjects.size,
 			visibleDebugOverlayObjectCount: countVisibleObjects(
 				debugOverlayObjects.values(),
@@ -3124,6 +3141,18 @@ function createRenderDebugMetrics(
 		structuredInteriorMeshCount: options.structuredInteriorMeshCount,
 		visibleStructuredInteriorMeshCount:
 			options.visibleStructuredInteriorMeshCount,
+		terrainBvhVisibleItemCount: options.terrainBvhVisibleItemCount,
+		terrainBvhTotalItemCount: options.terrainBvhTotalItemCount,
+		outdoorStaticBvhVisibleItemCount: options.outdoorStaticBvhVisibleItemCount,
+		outdoorStaticBvhTotalItemCount: options.outdoorStaticBvhTotalItemCount,
+		envCellLocalBvhVisibleItemCount: options.envCellLocalBvhVisibleItemCount,
+		envCellLocalBvhTotalItemCount: options.envCellLocalBvhTotalItemCount,
+		visibleStaticInstanceKeyCount: options.visibleStaticInstanceKeyCount,
+		visiblePortalKeyCount: options.visiblePortalKeyCount,
+		envCellBvhConsideredCount: options.envCellBvhConsideredCount,
+		fallbackReasonCount: options.fallbackReasonCount,
+		fallbackReasonSamples: options.fallbackReasonSamples,
+		queryTimeMs: options.queryTimeMs,
 		debugOverlayObjectCount: options.debugOverlayObjectCount,
 		visibleDebugOverlayObjectCount: options.visibleDebugOverlayObjectCount,
 		materialCount: options.materialCount,

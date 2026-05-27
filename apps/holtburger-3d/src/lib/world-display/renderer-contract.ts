@@ -84,6 +84,18 @@ export interface WorldRenderDebugMetrics {
 	visibleStaticGroupMeshCount: number;
 	structuredInteriorMeshCount: number;
 	visibleStructuredInteriorMeshCount: number;
+	terrainBvhVisibleItemCount: number;
+	terrainBvhTotalItemCount: number;
+	outdoorStaticBvhVisibleItemCount: number;
+	outdoorStaticBvhTotalItemCount: number;
+	envCellLocalBvhVisibleItemCount: number;
+	envCellLocalBvhTotalItemCount: number;
+	visibleStaticInstanceKeyCount: number;
+	visiblePortalKeyCount: number;
+	envCellBvhConsideredCount: number;
+	fallbackReasonCount: number;
+	fallbackReasonSamples: string[];
+	queryTimeMs: number;
 	debugOverlayObjectCount: number;
 	visibleDebugOverlayObjectCount: number;
 	materialCount: number;

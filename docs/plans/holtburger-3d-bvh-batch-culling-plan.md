@@ -329,6 +329,8 @@ Introduced cleanup targets:
 
 ### Phase 2: Instrumentation-Only Metrics
 
+Status: completed.
+
 Run prepared BVH visibility queries every camera update, but do not change object visibility yet.
 
 Implementation prep from Phase 1:
@@ -340,18 +342,68 @@ Implementation prep from Phase 1:
   derivation for env-cell local BVH bounds.
 - Treat any Phase 1 fallback reason as "include for now" and surface the reason in counters.
 
-Expose metrics in `WorldRenderDebugMetrics`:
+Done:
 
-- terrain BVH visible/total item counts;
-- outdoor static BVH visible/total item counts;
-- env-cell local BVH visible/total item counts;
-- visible static instance key count;
-- visible portal key count;
-- env cells considered for local BVH recursion;
-- BVH query time if cheap to measure without noisy logging.
+- Added a renderer-local `prepared-bvh-metrics.ts` adapter that gathers active prepared payloads,
+  current render chunk transforms, and the camera frustum, then runs prepared-BVH visibility queries
+  without mutating meshes, object visibility, instance buffers, or render pass inputs.
+- Exposed metrics in `WorldRenderDebugMetrics`:
+  - terrain BVH visible/total item counts;
+  - outdoor static BVH visible/total item counts;
+  - env-cell local BVH visible/total item counts;
+  - visible static instance key count;
+  - visible portal key count;
+  - env cells considered for local BVH querying;
+  - fallback reason count and samples;
+  - BVH query time.
+- Added the BVH line to browser renderer diagnostics so camera/frustum plausibility can be observed
+  before culling affects rendering.
+- Added focused tests for visible counts, fallback reasons, and query timing plumbing.
 
-Show a compact line in the browser debug panel. This confirms that the camera frustum produces
-plausible visibility sets before those sets affect rendering.
+Decisions and course corrections:
+
+- Phase 2 uses already-active structured interior cells as the conservative env-cell set for local
+  BVH metrics. It does not yet use topology residency BVHs to discover additional env cells. This
+  keeps instrumentation aligned with what the renderer already has loaded and avoids accidentally
+  changing residency policy.
+- Missing prepared payloads, missing chunk transforms, unexpected coordinate spaces, and missing
+  local BVHs remain instrumentation fallbacks. They are reported as fallback reasons and do not
+  exclude anything.
+- Env-cell local BVH bounds are transformed with the same `buildAcPlacementMatrix` style used by
+  structured interior rendering before chunk offsets are applied.
+- Outdoor static BVH totals are scoped to active outdoor static source landblocks, not every cached
+  outdoor payload.
+
+Validation:
+
+```text
+npm run test:ts -- --run prepared-bvh-metrics prepared-bvh-visibility render-spatial-index render-picking-math static-renderables
+npm run check
+npm run lint:ts
+```
+
+Introduced cleanup targets:
+
+- The browser diagnostics string is now very dense. Before adding more renderer diagnostics, split
+  it into grouped display lines or a structured debug panel.
+- Topology residency BVH metrics are still not surfaced. Decide in Phase 2.5 whether to add them
+  before candidate selection or defer them until portal/streaming work.
+
+### Phase 2.5: Candidate Selection Readiness Check
+
+Status: immediate prep before Phase 3.
+
+Phase 3 starts building a generic batch candidate registry. Before that changes object/pass
+selection plumbing, do a short readiness pass:
+
+- Compare Phase 2 BVH metrics against current `Object3D.visible` counts in a few outdoor and indoor
+  scenes to catch obvious coordinate-space false negatives.
+- Decide whether topology residency BVH metrics should be added before registry work, or whether
+  active structured cells remain the conservative env-cell input until Phase 6 portal-clipped
+  culling.
+- Confirm all Phase 2 fallback reasons have either expected causes or obvious fixes. If fallback
+  counts are high in ordinary scenes, fix those before candidate exclusion.
+- Keep this as a verification/prep slice only; do not introduce candidate batch filtering here.
 
 ### Phase 3: Generic Batch Candidate Registry
 
@@ -553,7 +605,8 @@ Recommended answers for the first implementation:
 
 - Remove or replace `RenderSpatialIndex`'s private frustum/bounds math duplication by extracting
   shared renderer spatial math. Phase 1 moved the neutral vector/bounds/frustum/ray-box math; the
-  remaining private helpers are picking-specific.
+  picking-specific helpers were later split into `render-picking-math.ts` with direct and
+  black-box tests.
 - Centralize renderer spatial key construction. `render-spatial-ids.ts` can grow prepared-BVH item
   key helpers or a sibling module can own them; avoid scattered template strings. Phase 1 currently
   keeps prepared-BVH key helpers in `prepared-bvh-visibility.ts`.
@@ -565,5 +618,7 @@ Recommended answers for the first implementation:
 - Consider renaming the current `syncSpatialVisibility` once batch candidate selection exists,
   because it will otherwise sound like the only culling system even when prepared BVH batch culling
   is active.
+- Split the browser renderer diagnostics text into grouped debug lines or a structured panel before
+  adding more metrics; Phase 2 made the single diagnostics sentence harder to scan.
 - Keep stale DTO union members out of `assets/types.ts` and `host/contracts.ts`; the host contract
   should match exactly what the Rust serializer emits.

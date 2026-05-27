@@ -113,9 +113,8 @@ export function queryTerrainBvhVisibility(options: {
 		expectedCoordinateSpace: "landblock-outdoor-terrain-local",
 		frustum: options.frustum,
 		itemKey: (item) => terrainBvhItemKey(options.landblockId, item.quadIndex),
-		boundsToRendererBounds: translatePreparedBoundsByOffset(
-			options.chunkOffset,
-		),
+		boundsToRendererBounds: (bounds) =>
+			translateRenderBounds(terrainLocalBoundsToRenderBounds(bounds), options.chunkOffset),
 		missingBvhReason: "missing terrain BVH",
 	});
 }
@@ -324,6 +323,21 @@ function translatePreparedBoundsByOffset(
 	offset: RenderVec3,
 ): (bounds: PreparedBounds) => RenderBounds {
 	return (bounds) => translateRenderBounds(bounds, offset);
+}
+
+function terrainLocalBoundsToRenderBounds(bounds: PreparedBounds): RenderBounds {
+	return {
+		min: {
+			x: bounds.min.x,
+			y: bounds.min.z,
+			z: -bounds.max.y,
+		},
+		max: {
+			x: bounds.max.x,
+			y: bounds.max.z,
+			z: -bounds.min.y,
+		},
+	};
 }
 
 function createEmptyCounters(): PreparedBvhQueryCounters {

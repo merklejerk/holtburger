@@ -54,9 +54,9 @@ describe("prepared BVH visibility", () => {
 			terrainBvh: {
 				coordinateSpace: "landblock-outdoor-terrain-local",
 				nodes: [
-					node(bounds(-1, 1, -1, 1, 2, 22), 1, 2, []),
-					node(bounds(-1, 1, -1, 1, 2, 4), null, null, [0]),
-					node(bounds(-1, 1, -1, 1, 20, 22), null, null, [1]),
+					node(bounds(-1, 1, -22, -2, -1, 1), 1, 2, []),
+					node(bounds(-1, 1, -4, -2, -1, 1), null, null, [0]),
+					node(bounds(-1, 1, -22, -20, -1, 1), null, null, [1]),
 				],
 				items: [
 					{ row: 0, col: 0, quadIndex: 10, triangleIndices: [0, 1] },
@@ -74,6 +74,34 @@ describe("prepared BVH visibility", () => {
 		expect(result.counters.nodesVisited).toBe(3);
 		expect(result.counters.nodesIntersected).toBe(2);
 		expect(result.fallbackReasons).toEqual([]);
+	});
+
+	it("transforms terrain BVH bounds from AC terrain local coordinates into render coordinates", () => {
+		const result = queryTerrainBvhVisibility({
+			terrainBvh: {
+				coordinateSpace: "landblock-outdoor-terrain-local",
+				nodes: [
+					node(bounds(0, 24, 24, 48, 2, 4), null, null, [0]),
+				],
+				items: [
+					{ row: 1, col: 0, quadIndex: 8, triangleIndices: [16, 17] },
+				],
+			},
+			landblockId: 0x0203ffff,
+			frustum: renderFrustum({
+				minX: -10,
+				maxX: 30,
+				minY: 0,
+				maxY: 10,
+				minZ: -50,
+				maxZ: -20,
+			}),
+			chunkOffset: { x: 0, y: 0, z: 0 },
+		});
+
+		expect([...result.visibleItemKeys]).toEqual([
+			"terrain:landblock:0203ffff:quad:8",
+		]);
 	});
 
 	it("uses the containing outdoor payload landblock for overhanging static keys", () => {
@@ -226,12 +254,37 @@ function bounds(
 }
 
 function unitFrustumWithZRange(minZ: number, maxZ: number): RenderFrustum {
+	return renderFrustum({
+		minX: -10,
+		maxX: 10,
+		minY: -10,
+		maxY: 10,
+		minZ,
+		maxZ,
+	});
+}
+
+function renderFrustum({
+	minX,
+	maxX,
+	minY,
+	maxY,
+	minZ,
+	maxZ,
+}: {
+	minX: number;
+	maxX: number;
+	minY: number;
+	maxY: number;
+	minZ: number;
+	maxZ: number;
+}): RenderFrustum {
 	return {
 		planes: [
-			{ normal: { x: 1, y: 0, z: 0 }, constant: 10 },
-			{ normal: { x: -1, y: 0, z: 0 }, constant: 10 },
-			{ normal: { x: 0, y: 1, z: 0 }, constant: 10 },
-			{ normal: { x: 0, y: -1, z: 0 }, constant: 10 },
+			{ normal: { x: 1, y: 0, z: 0 }, constant: -minX },
+			{ normal: { x: -1, y: 0, z: 0 }, constant: maxX },
+			{ normal: { x: 0, y: 1, z: 0 }, constant: -minY },
+			{ normal: { x: 0, y: -1, z: 0 }, constant: maxY },
 			{ normal: { x: 0, y: 0, z: 1 }, constant: -minZ },
 			{ normal: { x: 0, y: 0, z: -1 }, constant: maxZ },
 		],

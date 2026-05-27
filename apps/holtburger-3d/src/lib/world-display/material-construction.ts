@@ -262,7 +262,7 @@ function createLegacyMeshStandardMaterial(options: {
 			applyLegacyMaterialBehavior(
 				withLegacyMeshStandardSurfaceDefaults({
 					color: options.color,
-					map: options.map,
+					...(options.map ? { map: options.map } : {}),
 				}),
 				options.behavior,
 			),

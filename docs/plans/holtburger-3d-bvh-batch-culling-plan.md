@@ -784,7 +784,7 @@ Introduced cleanup targets:
 
 ### Phase 6.5: Portal Candidate Lifetime and Shim Cleanup
 
-Status: pending.
+Status: implementation completed; manual validation pending.
 
 Before doing broader performance tuning, fix the remaining Phase 6 structural issues exposed by
 manual profiling, then validate that portal-clipped composite candidates remain conservative in real
@@ -804,26 +804,42 @@ Profiling evidence:
 
 Responsibilities:
 
-- Move portal composite render-space BVH source construction to a dirty cached model. Rebuild only
-  when `assetState`, terrain scene, static renderable scene, structured interior scene, or
-  `renderChunkTransforms` change.
-- Verify follow-mode camera movement that does not re-anchor does not rebuild render-space BVH
-  sources.
-- Verify actual re-anchor/rebase events do rebuild render-space BVH sources because chunk transforms
-  changed.
-- Replace or narrow the portal composite `Object3D.visible` migration shim so each composite pass
-  does not scan/toggle all registered static batches.
-- Inspect outdoor-looking-into-interior and indoor-looking-outdoor views at transition depths `1`
+- Done: moved portal composite render-space BVH source construction to a dirty cached model. Rebuild
+  now happens lazily only after `assetState`, terrain scene, static renderable scene, structured
+  interior scene, or `renderChunkTransforms` changes.
+- Done: camera-only movement no longer rebuilds portal composite render-space BVH sources by
+  construction; source rebuild is tied to explicit dirty marks from scene/asset/chunk-transform
+  setters.
+- Done: actual re-anchor/rebase still marks render-space BVH sources dirty because
+  `setRenderChunkTransforms` changes chunk transforms.
+- Deferred: replacing the portal composite `Object3D.visible` migration shim still needs a better
+  design. A candidate-only pass-local proxy scene was attempted, but profiling showed it increased
+  render calls and sampled render time in the tested outdoor portal view, so it was backed out.
+- Pending manual validation: inspect outdoor-looking-into-interior and indoor-looking-outdoor views at transition depths `1`
   through `4`.
-- Confirm portal composites do not lose terrain, outdoor statics, structured cell geometry, or
-  indoor statics that are visible through apertures.
-- Compare render calls/triangles before and after Phase 6 from similar camera positions.
-- Watch portal composite candidate counters for obvious fallback churn. Occasional fallback is fine
-  when assets are genuinely missing; steady fallback in normal loaded scenes means the query source
-  selection needs tightening.
-- If visual correctness is good but call counts stay high after source lifetime and shim cleanup,
+- Pending manual validation: confirm portal composites do not lose terrain, outdoor statics,
+  structured cell geometry, or indoor statics that are visible through apertures.
+- Pending manual validation: compare render calls/triangles before and after Phase 6 from similar
+  camera positions.
+- Pending manual validation: watch portal composite candidate counters for obvious fallback churn.
+  Occasional fallback is fine when assets are genuinely missing; steady fallback in normal loaded
+  scenes means the query source selection needs tightening.
+- Pending manual validation: if visual correctness is good but call counts stay high after source lifetime cleanup,
   profile whether the remaining cost is broad fallback inclusion, too-large aperture cones,
   material/program churn, or unavoidable transition depth.
+
+Decisions and course corrections:
+
+- Portal composite render-space BVH source lifetime is now decoupled from camera movement, but
+  portal composites still use the shared-scene visibility shim for candidate application.
+- Course correction: the candidate-only proxy scene reduced visibility toggling but increased actual
+  Three.js render calls and sampled render time, likely because it disrupted the existing scene
+  organization/render behavior. Do not reintroduce this approach without a deeper render-list design.
+
+Introduced cleanup targets:
+
+- The portal composite shared-scene visibility shim remains a known legacy shim. Replacing it should
+  wait for a deeper render-list or chunk-owned runtime design, not another proxy-scene workaround.
 
 ### Phase 7: Chunk-Owned Incremental Renderer State
 

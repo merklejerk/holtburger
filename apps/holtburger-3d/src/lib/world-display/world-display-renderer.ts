@@ -621,6 +621,7 @@ export function createWorldDisplayRenderer(
 	let latestPortalCompositeFallbackIncludedBatchCount = 0;
 	let latestPortalCompositeRenderBvhSources: PortalCompositeRenderBvhSources =
 		createEmptyPortalCompositeRenderBvhSources();
+	let portalCompositeRenderBvhSourcesDirty = true;
 	let latestRenderDebugMetrics: WorldRenderDebugMetrics =
 		createRenderDebugMetrics(renderer, {
 			renderPassCount: 0,
@@ -721,6 +722,7 @@ export function createWorldDisplayRenderer(
 	return {
 		setAssetState(nextAssetState) {
 			assetState = nextAssetState;
+			markPortalCompositeRenderBvhSourcesDirty();
 			clearMaterializedSceneMeshes();
 			materialResourceCache.dispose();
 			syncTerrainMeshes(terrainScene);
@@ -729,14 +731,17 @@ export function createWorldDisplayRenderer(
 		},
 		setTerrainScene(nextScene) {
 			terrainScene = nextScene;
+			markPortalCompositeRenderBvhSourcesDirty();
 			syncTerrainMeshes(nextScene);
 		},
 		setStaticRenderableScene(nextScene) {
 			staticRenderableScene = nextScene;
+			markPortalCompositeRenderBvhSourcesDirty();
 			syncStaticRenderableMeshes(nextScene);
 		},
 		setStructuredInteriorScene(nextScene) {
 			structuredInteriorScene = nextScene;
+			markPortalCompositeRenderBvhSourcesDirty();
 			syncStructuredInteriorMeshes(nextScene);
 		},
 		setTransitionPortalModel(nextModel) {
@@ -753,6 +758,7 @@ export function createWorldDisplayRenderer(
 		},
 		setRenderChunkTransforms(nextTransforms) {
 			renderChunkTransforms = nextTransforms;
+			markPortalCompositeRenderBvhSourcesDirty();
 			syncRenderChunkRoots(nextTransforms);
 			updateResidencyIndex();
 		},
@@ -1002,14 +1008,6 @@ export function createWorldDisplayRenderer(
 		latestPortalCompositeTerrainCandidateBatchCount = 0;
 		latestPortalCompositeInteriorCandidateBatchCount = 0;
 		latestPortalCompositeFallbackIncludedBatchCount = 0;
-		latestPortalCompositeRenderBvhSources =
-			buildPortalCompositeRenderBvhSources({
-				assetState,
-				terrainScene,
-				staticRenderableScene,
-				structuredInteriorScene,
-				renderChunkTransforms,
-			});
 		const renderPolicy = deriveActiveRenderPolicy();
 		const transitionWorkBatches =
 			collectVisibleTransitionPortalWorkBatches(renderPolicy);
@@ -1483,7 +1481,7 @@ export function createWorldDisplayRenderer(
 
 		for (const work of batch) {
 			const result = derivePortalClippedBvhVisibility({
-				renderSources: latestPortalCompositeRenderBvhSources,
+				renderSources: getPortalCompositeRenderBvhSources(),
 				cameraFrustum,
 				cameraPosition,
 				apertureWorldPoints: work.apertureWorldPoints,
@@ -1533,6 +1531,26 @@ export function createWorldDisplayRenderer(
 			structuredInteriorCandidateBatchIds:
 				structuredInteriorSelection.candidateBatchIds,
 		};
+	}
+
+	function getPortalCompositeRenderBvhSources(): PortalCompositeRenderBvhSources {
+		if (!portalCompositeRenderBvhSourcesDirty) {
+			return latestPortalCompositeRenderBvhSources;
+		}
+		latestPortalCompositeRenderBvhSources =
+			buildPortalCompositeRenderBvhSources({
+				assetState,
+				terrainScene,
+				staticRenderableScene,
+				structuredInteriorScene,
+				renderChunkTransforms,
+			});
+		portalCompositeRenderBvhSourcesDirty = false;
+		return latestPortalCompositeRenderBvhSources;
+	}
+
+	function markPortalCompositeRenderBvhSourcesDirty(): void {
+		portalCompositeRenderBvhSourcesDirty = true;
 	}
 
 	function getGraphNodeTransitionBatch(
@@ -2444,6 +2462,7 @@ export function createWorldDisplayRenderer(
 		}
 		structuredInteriorMeshes.clear();
 		structuredInteriorBatchCandidates.clear();
+		markPortalCompositeRenderBvhSourcesDirty();
 	}
 
 	function rebuildDetailTextureMaterializedMeshes(): void {

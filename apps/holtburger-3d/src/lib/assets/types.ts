@@ -99,14 +99,14 @@ interface PreparedContentSourceDiagnostics {
 	errors: PreparedSourceLoadErrorDiagnostic[];
 }
 
-interface PreparedTerrainBvhItem {
+export interface PreparedTerrainBvhItem {
 	row: number;
 	col: number;
 	quadIndex: number;
 	triangleIndices: [number, number];
 }
 
-interface PreparedTerrainBvh {
+export interface PreparedTerrainBvh {
 	coordinateSpace: "landblock-outdoor-terrain-local";
 	nodes: PreparedLandblockBvhNode[];
 	items: PreparedTerrainBvhItem[];
@@ -193,24 +193,24 @@ export interface PreparedLandblockOutdoorPayload extends PreparedAssetPayloadBas
 	diagnostics: PreparedContentSourceDiagnostics;
 }
 
-interface PreparedEnvCellResidencyBvhItem {
+export interface PreparedEnvCellResidencyBvhItem {
 	envCellId: number;
 	memberId: string;
 	assetId: string;
 	source: "building-portal-link" | "env-cell-placement" | "derived";
 }
 
-interface PreparedEnvCellResidencyBvh {
+export interface PreparedEnvCellResidencyBvh {
 	coordinateSpace: "landblock-topology-residency";
 	nodes: PreparedLandblockBvhNode[];
 	items: PreparedEnvCellResidencyBvhItem[];
 }
 
-type PreparedOutdoorBvhItem =
+export type PreparedOutdoorBvhItem =
 	| { kind: "static"; instanceId: string }
 	| { kind: "building"; instanceId: string };
 
-interface PreparedOutdoorBvh {
+export interface PreparedOutdoorBvh {
 	coordinateSpace: "landblock-render-local";
 	nodes: PreparedLandblockBvhNode[];
 	items: PreparedOutdoorBvhItem[];
@@ -252,7 +252,7 @@ interface PreparedLandblockTopologyPortalLink {
 	sourceIndex: number;
 }
 
-interface PreparedLandblockTopologyPayload extends PreparedAssetPayloadBase {
+export interface PreparedLandblockTopologyPayload extends PreparedAssetPayloadBase {
 	kind: "landblock-topology";
 	sourceAssetKind: "landblock-topology";
 	residencyKind: "landblock";
@@ -279,12 +279,12 @@ interface PreparedPortalAperturePlane {
 	source: "drawing-bsp-portal" | "derived-from-render-points";
 }
 
-interface PreparedBounds {
+export interface PreparedBounds {
 	min: Vec3Dto;
 	max: Vec3Dto;
 }
 
-interface PreparedLandblockBvhNode {
+export interface PreparedLandblockBvhNode {
 	bounds: PreparedBounds;
 	left: number | null;
 	right: number | null;
@@ -436,7 +436,7 @@ interface PreparedEnvCellPortal {
 	isOutsideTransition: boolean;
 }
 
-interface PreparedEnvCellStaticMember {
+export interface PreparedEnvCellStaticMember {
 	instanceId: string;
 	sourceDid: number;
 	sourceAssetId: string;
@@ -447,7 +447,7 @@ interface PreparedEnvCellStaticMember {
 	instanceBounds: PreparedBounds | null;
 }
 
-type PreparedEnvCellBvhItem =
+export type PreparedEnvCellBvhItem =
 	| {
 			kind: "render-geometry";
 			polygonId: number | null;
@@ -456,7 +456,7 @@ type PreparedEnvCellBvhItem =
 	| { kind: "static"; instanceId: string }
 	| { kind: "portal"; portalId: string };
 
-interface PreparedEnvCellBvh {
+export interface PreparedEnvCellBvh {
 	coordinateSpace: "env-cell-local";
 	nodes: PreparedLandblockBvhNode[];
 	items: PreparedEnvCellBvhItem[];

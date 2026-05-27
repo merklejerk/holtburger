@@ -270,40 +270,75 @@ Discovered cleanup targets:
 
 ### Phase 1: Identity Helpers and BVH Traversal
 
+Status: completed.
+
 Add a TypeScript module under `apps/holtburger-3d/src/lib/world-display/` for prepared BVH
 visibility helpers.
 
 Responsibilities:
 
-- Define `RenderBvhItemKey`.
-- Provide key helpers for terrain quads, outdoor static instances, env-cell static instances,
-  env-cell render geometry, env-cell portals, and residency cells.
-- Export narrow prepared-BVH DTO types from the existing asset contract layer or refactor shared
-  prepared-BVH shapes into focused exported components instead of copying DTO shapes into the
-  world-display module.
-- Extract shared frustum/bounds intersection helpers from `render-spatial-index.ts` or colocate
-  neutral helpers where both the linear spatial index and prepared-BVH traversal can use them.
-- Convert prepared `PreparedLandblockBvhNode` DTOs into frustum query results.
-- Traverse node arrays conservatively using existing `RenderFrustum`/bounds math or shared
-  equivalents.
-- Return visible item keys plus query counters.
-- For outdoor static item keys, derive the landblock scope from the containing outdoor payload's
-  `landblockId`, not from duplicated member data or render chunk inference.
-- Support a two-stage env-cell query shape: identify relevant loaded env cells, then recurse into
-  each cell's `localBvh` for cell-local item keys.
-- Validate coordinate spaces for outdoor static BVH bounds, env-cell local bounds, terrain quad
-  bounds, and render chunk transforms before any query result can exclude a batch.
-- Consume the source-owned outdoor static invariant established in Phase 0 and audited in Phase 0.5:
-  overhanging statics stay in the source landblock's payload, render chunk, and BVH using
-  source-landblock-local placement/bounds.
+- Done: added `RenderBvhItemKey` and scoped key helpers for terrain quads, outdoor static
+  instances, env-cell static instances, env-cell render geometry, env-cell portals, and residency
+  cells.
+- Done: exported narrow prepared-BVH DTO types from the existing asset payload type layer instead
+  of duplicating DTO shapes in renderer code.
+- Done: extracted neutral render-space vector, bounds, ray, and frustum math into
+  `render-spatial-math.ts`; `RenderSpatialIndex` now reuses that math and re-exports the existing
+  public types.
+- Done: added prepared-BVH query helpers for terrain, outdoor statics, env-cell residency,
+  env-cell local BVHs, and loaded env-cell two-stage recursion.
+- Done: traversal returns visible item keys, query counters, and fallback reasons.
+- Done: outdoor static item keys derive landblock scope from the containing outdoor payload's
+  `landblockId`; render chunk inference and duplicated member ownership are not used.
+- Done: query helpers validate expected coordinate spaces and return fallback reasons instead of
+  treating suspect BVH data as culling authority.
+- Done: source-owned outdoor overhang behavior from Phases 0 and 0.5 is consumed by the outdoor
+  static key helper and query tests.
 
-Initial traversal can be linear over node arrays because correctness and metrics matter first. If
-measurements show this is material, replace internals with a tighter traversal without changing the
-public query shape.
+Decisions and course corrections:
+
+- Prepared BVH roots are at node index `0`. The traversal starts there explicitly; tests cover a
+  root-with-children BVH so this does not regress to a last-node assumption.
+- Env-cell local BVH queries accept a caller-provided bounds-to-renderer transform. This keeps
+  Phase 1 independent of renderer scene construction while making Phase 2 responsible for supplying
+  the same env-cell placement transform used by structured interior rendering.
+- Missing BVHs, unexpected coordinate spaces, missing loaded env-cell payloads, and invalid
+  `itemIndices` are represented as fallback reasons. Later phases must count those as inclusion,
+  not as successful culling.
+- `RenderBvhItemKey` helpers live in `prepared-bvh-visibility.ts` for now. If more renderer spatial
+  identity helpers accumulate, move them into a dedicated key module rather than scattering template
+  strings.
+
+Validation:
+
+```text
+npm run test:ts -- --run prepared-bvh-visibility render-spatial-index
+npm run check
+```
+
+Introduced cleanup targets:
+
+- `RenderSpatialIndex` still owns picking-specific polygon/sphere helpers. Only neutral
+  vector/bounds/frustum/ray-box math moved in Phase 1; keep picking code local unless another
+  caller needs it.
+- Phase 2 needs a small adapter that gathers prepared outdoor/topology/env-cell payloads, resolves
+  current render chunk offsets, and applies env-cell `localPlacement` transforms before calling the
+  query helpers.
+- Phase 2 metrics should include fallback-reason counters from the helper results so missing or
+  suspect data is visible instead of quietly looking like effective culling.
 
 ### Phase 2: Instrumentation-Only Metrics
 
 Run prepared BVH visibility queries every camera update, but do not change object visibility yet.
+
+Implementation prep from Phase 1:
+
+- Build the instrumentation adapter near existing scene/render-resource coordination code so it can
+  access prepared payloads and current `RenderChunkTransform`s without making asset DTOs global
+  renderer state.
+- Reuse `buildAcPlacementMatrix` / bounds transform behavior from structured interior spatial item
+  derivation for env-cell local BVH bounds.
+- Treat any Phase 1 fallback reason as "include for now" and surface the reason in counters.
 
 Expose metrics in `WorldRenderDebugMetrics`:
 
@@ -504,7 +539,7 @@ Useful manual checks:
 Recommended answers for the first implementation:
 
 - Use a separate DTO-focused prepared-BVH query helper that returns item keys and counters, but share
-  the neutral frustum/bounds math with `RenderSpatialIndex`.
+  the neutral frustum/bounds math with `RenderSpatialIndex`. Phase 1 implements this shape.
 - Keep terrain whole-landblock at first. Terrain is currently cheap enough that quad-level draw
   granularity is not worth adding complexity.
 - Key portal composite batches by both aperture/pass and target env-cell set. Aperture identity alone
@@ -517,13 +552,16 @@ Recommended answers for the first implementation:
 ## Cleanup Targets
 
 - Remove or replace `RenderSpatialIndex`'s private frustum/bounds math duplication by extracting
-  shared renderer spatial math.
+  shared renderer spatial math. Phase 1 moved the neutral vector/bounds/frustum/ray-box math; the
+  remaining private helpers are picking-specific.
 - Centralize renderer spatial key construction. `render-spatial-ids.ts` can grow prepared-BVH item
-  key helpers or a sibling module can own them; avoid scattered template strings.
+  key helpers or a sibling module can own them; avoid scattered template strings. Phase 1 currently
+  keeps prepared-BVH key helpers in `prepared-bvh-visibility.ts`.
 - Remove stale comments, names, or docs that still imply outdoor statics normalize into neighboring
   chunks. The known Rust and TypeScript normalization helpers were removed in Phase 0.
 - Consider naming Phase 1 helpers around `sourceLandblockId` for outdoor static keys so the code
   does not reintroduce normalized-neighbor ownership by reading render chunk identity as ownership.
+  Phase 1 uses `sourceLandblockId` in the outdoor static key helper.
 - Consider renaming the current `syncSpatialVisibility` once batch candidate selection exists,
   because it will otherwise sound like the only culling system even when prepared BVH batch culling
   is active.

@@ -763,6 +763,11 @@ Decisions and course corrections:
   than hidden.
 - Shared env-cell local BVH bounds transformation now lives in `prepared-bvh-bounds.ts` so base-pass
   and portal-pass queries use the same placement math.
+- Course correction after profiling: the first Phase 6 implementation transformed prepared
+  env-cell bounds inside each portal composite render pass. That made `selectPortalCompositeBatchCandidates`
+  and `transformEnvCellLocalBounds` show up as render-frame hotspots. The corrected shape builds
+  render-space BVH sources once before the render graph executes, then portal composites only query
+  already-transformed render-space bounds.
 
 Introduced cleanup targets:
 
@@ -773,16 +778,41 @@ Introduced cleanup targets:
 - The scoped visibility helpers are still migration shims around Three.js scene traversal. A later
   renderer cleanup should replace them with explicit render-list plumbing once the candidate model is
   stable.
+- Base-pass prepared BVH queries still transform bounds during traversal. If profiling shows similar
+  cost outside portal composites, move base-pass candidate selection onto the same render-space BVH
+  source model.
 
-### Phase 6.5: Portal-Clipped Candidate Validation
+### Phase 6.5: Portal Candidate Lifetime and Shim Cleanup
 
 Status: pending.
 
-Before doing broader performance tuning, manually validate that portal-clipped composite candidates
-are conservative in real scenes.
+Before doing broader performance tuning, fix the remaining Phase 6 structural issues exposed by
+manual profiling, then validate that portal-clipped composite candidates remain conservative in real
+scenes.
+
+Profiling evidence:
+
+- Moving env-cell bounds transformation out of portal composite queries improved the sampled render
+  time from roughly `49.4 ms` to `33.3 ms` and reduced render calls from roughly `1890` to `1648` in
+  the tested outdoor portal view.
+- The new hot path is no longer `transformEnvCellLocalBounds`; it is the migration shim around portal
+  composite rendering, especially `renderWithStaticRenderableBatchCandidates`,
+  `applyStaticRenderableBatchVisibility`, and remaining Three.js scene traversal.
+- `latestPortalCompositeRenderBvhSources` is still rebuilt from scene/asset/chunk-transform state
+  inside `renderWorldPasses`, so camera-only motion and follow mode pay unnecessary source rebuild
+  cost. Rebuild is only required when asset state, scene models, or render chunk transforms change.
 
 Responsibilities:
 
+- Move portal composite render-space BVH source construction to a dirty cached model. Rebuild only
+  when `assetState`, terrain scene, static renderable scene, structured interior scene, or
+  `renderChunkTransforms` change.
+- Verify follow-mode camera movement that does not re-anchor does not rebuild render-space BVH
+  sources.
+- Verify actual re-anchor/rebase events do rebuild render-space BVH sources because chunk transforms
+  changed.
+- Replace or narrow the portal composite `Object3D.visible` migration shim so each composite pass
+  does not scan/toggle all registered static batches.
 - Inspect outdoor-looking-into-interior and indoor-looking-outdoor views at transition depths `1`
   through `4`.
 - Confirm portal composites do not lose terrain, outdoor statics, structured cell geometry, or
@@ -791,9 +821,51 @@ Responsibilities:
 - Watch portal composite candidate counters for obvious fallback churn. Occasional fallback is fine
   when assets are genuinely missing; steady fallback in normal loaded scenes means the query source
   selection needs tightening.
-- If visual correctness is good but call counts stay high, profile whether the remaining cost is
-  broad fallback inclusion, too-large aperture cones, material/program churn, or unavoidable
-  transition depth.
+- If visual correctness is good but call counts stay high after source lifetime and shim cleanup,
+  profile whether the remaining cost is broad fallback inclusion, too-large aperture cones,
+  material/program churn, or unavoidable transition depth.
+
+### Phase 7: Chunk-Owned Incremental Renderer State
+
+Status: deferred design follow-up.
+
+The current renderer still reconciles several whole-scene models when assets stream in, scene models
+change, or the render anchor rebases. Even when individual meshes are reused, the renderer often
+rescans broad terrain/static/interior collections, re-registers batch candidates, rebuilds residency
+indices, and refreshes derived render-space BVH sources. This is acceptable for proving BVH culling
+but is not the right long-term shape for follow-mode streaming.
+
+Problem statement:
+
+- Asset state changes can trigger broad scene materialization churn.
+- Static, terrain, structured-interior, debug, and portal-mask sync paths are diff-ish but still run
+  whole-model reconciliation.
+- Residency and render-space BVH source models are rebuilt from broad scene inputs instead of being
+  composed from chunk-local runtime state.
+- Re-anchoring should mostly move chunk roots and invalidate transform-derived data, not
+  re-materialize unchanged geometry or rebuild unrelated chunk indices.
+
+Candidate direction:
+
+- Introduce chunk-owned renderer runtime records keyed by render chunk.
+- Store terrain meshes, static batches, structured cell meshes, portal masks, render-space BVH
+  sources, and residency entries under the owning chunk record.
+- Feed renderer updates as chunk/cell/batch deltas instead of whole-scene replacement whenever the
+  upstream asset pipeline can provide that shape.
+- Rebuild only dirty chunk-local indices, then compose global query views from chunk-local records.
+- Treat render anchor/rebase as a transform invalidation for affected chunks, not as a reason to
+  rebuild geometry, materials, or unrelated candidate registrations.
+
+Open design questions:
+
+- Where should chunk delta derivation live: asset/resource coordinator, scene model derivation, or
+  renderer-local reconciliation?
+- How should chunk-local render-space BVH sources share code with prepared payload BVHs without
+  duplicating traversal and fallback policy?
+- Should residency use the same chunk-local source model as render culling, or stay separate because
+  camera residency has different query semantics?
+- What is the right invalidation key for material/resource changes versus transform-only rebase
+  changes?
 
 ## Testing Strategy
 

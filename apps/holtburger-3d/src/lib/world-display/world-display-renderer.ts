@@ -154,6 +154,10 @@ import {
 import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import { derivePortalClippedBvhVisibility } from "./portal-clipped-bvh-candidates";
 import {
+	buildPortalCompositeRenderBvhSources,
+	type PortalCompositeRenderBvhSources,
+} from "./prepared-bvh-render-sources";
+import {
 	createEmptyRenderBatchCandidateSelection,
 	createRenderBatchCandidateRegistry,
 	type RenderBatchCandidateRegistry,
@@ -615,6 +619,8 @@ export function createWorldDisplayRenderer(
 	let latestPortalCompositeTerrainCandidateBatchCount = 0;
 	let latestPortalCompositeInteriorCandidateBatchCount = 0;
 	let latestPortalCompositeFallbackIncludedBatchCount = 0;
+	let latestPortalCompositeRenderBvhSources: PortalCompositeRenderBvhSources =
+		createEmptyPortalCompositeRenderBvhSources();
 	let latestRenderDebugMetrics: WorldRenderDebugMetrics =
 		createRenderDebugMetrics(renderer, {
 			renderPassCount: 0,
@@ -996,6 +1002,14 @@ export function createWorldDisplayRenderer(
 		latestPortalCompositeTerrainCandidateBatchCount = 0;
 		latestPortalCompositeInteriorCandidateBatchCount = 0;
 		latestPortalCompositeFallbackIncludedBatchCount = 0;
+		latestPortalCompositeRenderBvhSources =
+			buildPortalCompositeRenderBvhSources({
+				assetState,
+				terrainScene,
+				staticRenderableScene,
+				structuredInteriorScene,
+				renderChunkTransforms,
+			});
 		const renderPolicy = deriveActiveRenderPolicy();
 		const transitionWorkBatches =
 			collectVisibleTransitionPortalWorkBatches(renderPolicy);
@@ -1469,11 +1483,7 @@ export function createWorldDisplayRenderer(
 
 		for (const work of batch) {
 			const result = derivePortalClippedBvhVisibility({
-				assetState,
-				terrainScene,
-				staticRenderableScene,
-				structuredInteriorScene,
-				renderChunkTransforms,
+				renderSources: latestPortalCompositeRenderBvhSources,
 				cameraFrustum,
 				cameraPosition,
 				apertureWorldPoints: work.apertureWorldPoints,
@@ -3620,6 +3630,15 @@ function createPortalRenderMetrics(
 		},
 		minVisibleScreenAreaPx: null,
 		maxVisibleScreenAreaPx: null,
+	};
+}
+
+function createEmptyPortalCompositeRenderBvhSources(): PortalCompositeRenderBvhSources {
+	return {
+		terrainSources: [],
+		outdoorStaticSources: [],
+		envCellSourcesById: new Map(),
+		fallbackReasons: [],
 	};
 }
 

@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { createInitialAssetChannelState } from "../assets/types";
 import {
 	buildPortalClippedRenderFrustum,
 	derivePortalClippedBvhVisibility,
 } from "./portal-clipped-bvh-candidates";
+import type { PortalCompositeRenderBvhSources } from "./prepared-bvh-render-sources";
+import { envRenderGeometryBvhItemKey } from "./prepared-bvh-visibility";
 import { renderBoundsIntersectsFrustum } from "./render-spatial-math";
 import type { RenderFrustum } from "./render-spatial-math";
 
@@ -17,6 +18,13 @@ const broadFrustum: RenderFrustum = {
 		{ normal: { x: 0, y: 0, z: 1 }, constant: 1000 },
 		{ normal: { x: 0, y: 0, z: -1 }, constant: 1000 },
 	],
+};
+
+const emptyRenderSources: PortalCompositeRenderBvhSources = {
+	terrainSources: [],
+	outdoorStaticSources: [],
+	envCellSourcesById: new Map(),
+	fallbackReasons: [],
 };
 
 describe("portal clipped BVH candidates", () => {
@@ -94,35 +102,7 @@ describe("portal clipped BVH candidates", () => {
 
 	it("falls back when portal aperture geometry is unavailable", () => {
 		const result = derivePortalClippedBvhVisibility({
-			assetState: createInitialAssetChannelState(),
-			terrainScene: {
-				focusLandblockId: null,
-				statusText: "",
-				cacheText: "",
-				dataSourceText: "",
-				tiles: [],
-			},
-			staticRenderableScene: {
-				focusLandblockId: null,
-				activeLandblockIds: [],
-				sourceInstances: [],
-				parts: [],
-				partsByRenderGroupKey: new Map(),
-				missingSourceAssetIds: [],
-				missingGfxAssetIds: [],
-				missingSetupAppearanceAssetIds: [],
-			},
-			structuredInteriorScene: {
-				focusEnvCellId: null,
-				activeEnvCellIds: [],
-				cells: [],
-				missingEnvCellAssetIds: [],
-				missingInteriorGeometryAssetIds: [],
-				missingCellStructureKeys: [],
-				statusText: "",
-				cacheText: "",
-			},
-			renderChunkTransforms: [],
+			renderSources: emptyRenderSources,
 			cameraFrustum: broadFrustum,
 			cameraPosition: { x: 0, y: 0, z: 0 },
 			apertureWorldPoints: [],
@@ -138,35 +118,7 @@ describe("portal clipped BVH candidates", () => {
 
 	it("falls back when a portal pass has no loaded scene payloads to query", () => {
 		const result = derivePortalClippedBvhVisibility({
-			assetState: createInitialAssetChannelState(),
-			terrainScene: {
-				focusLandblockId: null,
-				statusText: "",
-				cacheText: "",
-				dataSourceText: "",
-				tiles: [],
-			},
-			staticRenderableScene: {
-				focusLandblockId: null,
-				activeLandblockIds: [],
-				sourceInstances: [],
-				parts: [],
-				partsByRenderGroupKey: new Map(),
-				missingSourceAssetIds: [],
-				missingGfxAssetIds: [],
-				missingSetupAppearanceAssetIds: [],
-			},
-			structuredInteriorScene: {
-				focusEnvCellId: null,
-				activeEnvCellIds: [],
-				cells: [],
-				missingEnvCellAssetIds: [],
-				missingInteriorGeometryAssetIds: [],
-				missingCellStructureKeys: [],
-				statusText: "",
-				cacheText: "",
-			},
-			renderChunkTransforms: [],
+			renderSources: emptyRenderSources,
 			cameraFrustum: broadFrustum,
 			cameraPosition: { x: 0, y: 0, z: 0 },
 			apertureWorldPoints: [
@@ -183,5 +135,49 @@ describe("portal clipped BVH candidates", () => {
 		expect(result.fallbackReasons).toEqual([
 			"portal interior composite had no loaded structured cells to query",
 		]);
+	});
+
+	it("queries prebuilt render-space env-cell sources for portal composites", () => {
+		const itemKey = envRenderGeometryBvhItemKey(0x01010001);
+		const result = derivePortalClippedBvhVisibility({
+			renderSources: {
+				terrainSources: [],
+				outdoorStaticSources: [],
+				envCellSourcesById: new Map([
+					[
+						0x01010001,
+						{
+							sourceId: "env-cell:test",
+							nodes: [
+								{
+									bounds: {
+										min: { x: -0.25, y: -0.25, z: -8 },
+										max: { x: 0.25, y: 0.25, z: -7.5 },
+									},
+									left: null,
+									right: null,
+									itemIndices: [0],
+								},
+							],
+							itemKeys: [itemKey],
+						},
+					],
+				]),
+				fallbackReasons: [],
+			},
+			cameraFrustum: broadFrustum,
+			cameraPosition: { x: 0, y: 0, z: 0 },
+			apertureWorldPoints: [
+				{ x: -1, y: -1, z: -5 },
+				{ x: 1, y: -1, z: -5 },
+				{ x: 1, y: 1, z: -5 },
+				{ x: -1, y: 1, z: -5 },
+			],
+			compositeScene: "interior",
+			requestedInteriorEnvCellIds: [0x01010001],
+		});
+
+		expect(result.visibleItemKeys).toEqual(new Set([itemKey]));
+		expect(result.fallbackReasons).toEqual([]);
 	});
 });

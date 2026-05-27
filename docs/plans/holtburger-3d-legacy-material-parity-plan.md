@@ -3381,6 +3381,167 @@ Expected effect: optional high-res texture packs can improve fidelity without
 changing the legacy material graph or redefining the baseline retail parity
 target.
 
+### Phase 12: Legacy Material Cleanup And Debt Paydown
+
+Goal: consolidate the debt accumulated during the legacy material parity push
+before using this renderer path as the base for client-mode entities, modern
+materials, or broader high-density scenes.
+
+This phase is cleanup only. Do not pull in the cross-cutting followups here:
+live runtime entity projection, modern material DATs, optional high-res pack
+support, lighting parity, and indexed-color filtering remain separate work.
+
+#### Task List
+
+1. Remove material-resource import shims and temporary identity fields.
+   - Delete the `material-resources.ts` re-exports for
+     `formatMaterialAssetId` and `MaterialAppearanceContext` after nearby
+     callers import from `material-signatures.ts` and
+     `material-appearance.ts` directly.
+   - Collapse `StaticRenderablePart.materialAppearanceKey` into
+     `MaterialAppearanceContext` or a focused display-only diagnostic field.
+     The renderer path should not carry two appearance identities.
+   - Audit tests that still assert `materialAppearanceKey` directly and move
+     them to cache/signature/diagnostic behavior.
+
+2. Make material variant identity less stringly typed.
+   - Centralize the cross-boundary `sampler=clamp` and `sampler=repeat`
+     strings so Rust emitters, binary envelope hydration, debug harnesses, and
+     TypeScript parsers cannot drift.
+   - Keep the API narrow: use a tiny builder/parser for the current sampler
+     axis rather than a broad enum for hypothetical material variant families.
+   - Keep missing browser DTO variants normalized to `base` only at legacy
+     compatibility boundaries; new production payloads should emit explicit
+     sampler variants.
+
+3. Reduce `material-construction.ts` duplication before adding new material
+   paths.
+   - Extract a local legacy-material factory that applies the shared
+     non-metallic defaults, blend/scalar metadata, fallback diagnostics, and
+     common `MeshStandardMaterial` setup in one place.
+   - Split indexed palette source selection into a focused helper if texture
+     swap or prepared indexed-color work touches it again.
+   - Keep terrain diagnostics and terrain shader construction out of this
+     module; terrain has its own material/resource boundary now.
+
+4. Tighten sampler-policy ownership.
+   - Keep `WorldMaterialResourceCache.getDefaultTextureSamplingPolicy()` as a
+     test/helper bridge only, or hide it behind texture-resource construction
+     once production callers pass explicit effective policies.
+   - Remove broad all-clamped/static assumptions from any remaining call sites.
+   - Decide whether the browser `Nearest` filtering mode is a true diagnostic
+     mode or should be renamed/remapped to retail-style preference labels.
+
+5. Clean up `SurfaceTexture`/`ImgTex` migration leftovers.
+   - Polish compact debug labels that still say "tex" when they mean
+     `SurfaceTexture` or selected `ImgTex` source.
+   - Extract the duplicated high-detail-drop source-order helper now used by
+     terrain detail and broad region overlays if another path needs the same
+     rule.
+   - Keep true `0x15` `RenderTexture` terminology reserved for the deferred
+     modern resource family; do not revive `render-texture/{did}` for legacy
+     `0x05` material assets.
+
+6. Retire terrain debug compatibility naming where the material path has taken
+   over.
+   - Remove or rename `PreparedTerrainTriangle.terrainType` once normal terrain
+     rendering no longer uses per-triangle debug hue selection.
+   - Prefer structured `landblockTerrain.*` quads over the older binary
+     triangle fallback that fabricates quad metadata from debug terrain type.
+   - Move terrain material readiness counts from compact status strings into
+     structured debug rows if the Debug panel gets another renderer pass.
+
+7. Split oversized browser renderer/debug modules along established boundaries.
+   - Move any remaining material diagnostic aggregation, debug-overlay object
+     management, terrain mesh materialization, and portal/debug rendering
+     helpers out of `world-display-renderer.ts` when they can become focused
+     renderer-local modules with tests.
+   - Split the browser runtime appearance preview controls out of the dense
+     browser debug panel into a focused child component before adding selectors
+     or richer diagnostics.
+   - Keep production rendering and diagnostic visualization separate; do not
+     add ad hoc debug branches to renderer hot paths.
+
+8. Harden prepared-texture planning and diagnostics.
+   - Add debug counters for prepared-texture prepared asset count, generated
+     byte totals, and fallback-to-single-level compressed upload count.
+   - Refine frontend prepared-texture planning so raw inspection/debug routes do
+     not request mip chains that will never be uploaded.
+   - Decide whether raw `sourceBytes` should remain on `render-surface/{id}`,
+     move to a separate raw-source route, or become debug-only before persistent
+     prepared-texture caching is introduced.
+
+9. Clean up generated compressed mip implementation boundaries.
+   - If prepared-texture generation remains visible during scene loads, add a
+     bounded Rust-side prepared-texture cache keyed by byte-affecting source and
+     profile facts.
+   - Keep semantic usage and color-space labels out of generated-byte cache
+     keys unless they actually change generated bytes.
+   - Reintroduce codec profiling as a dedicated benchmark or harness only if
+     timing diagnostics show decode/encode remains a bottleneck.
+
+10. Document and validate known magic constants.
+    - Name and cite the terrain alpha/road pcode PRNG constants currently
+      implemented from client/ACViewer behavior.
+    - Name the retail alpha-test thresholds, palette clip index threshold,
+      texture-detail source-selection rule, and four-level mip cap in the
+      modules that apply them.
+    - Keep citations close to unusual constants so later cleanup does not
+      "simplify" proven retail behavior into incorrect generic math.
+
+11. Normalize diagnostics into typed categories.
+    - Replace long concatenated debug summary strings with typed renderer
+      diagnostic rows for material resources, terrain readiness, prepared
+      textures, sampler policies, and texture velocity.
+    - Preserve bounded samples, but keep counts and categories machine-readable
+      for future UI panels and regression harnesses.
+    - Do not write tests for debug-only presentation text; test the structured
+      diagnostic producers.
+
+12. Remove rejected route and synthetic-test leftovers.
+    - Ensure no production path recognizes
+      `setup-appearance/{setupDid}/obj-desc/...`.
+    - Remove or update tests that still use rejected route-shaped ObjDesc
+      variants except where they explicitly assert rejection.
+    - Keep `dependency-manifest` out of production asset unions; graph tests
+      should use production-shaped payloads.
+
+13. Re-check fallback paths for real compatibility value.
+    - Keep raw setup-model fallback only while base `setup-appearance/{setupDid}`
+      can be missing, pending, failed, or unavailable.
+    - Make fallback diagnostics explicit enough to distinguish loading delay
+      from unsupported content.
+    - Remove dead fallback paths that no longer execute after prepared
+      setup-appearance, terrain, and prepared-texture routes are stable.
+
+14. Consolidate formatting and asset-ID helpers.
+    - Unify repeated material, palette, surface-texture, render-surface, and
+      prepared-texture ID formatting helpers inside the app/host boundary that
+      owns those route strings.
+    - Do not move renderer-only policy, such as derived palette composition or
+      sampler decisions, into shared host contracts while doing this.
+
+15. Add cleanup verification gates.
+    - Run the app checks from `apps/holtburger-3d`: `npm run check`,
+      `npm run lint:ts`, `npm run lint:dead`, and targeted `npm run test:ts`
+      suites for touched modules.
+    - Run Rust checks for touched crates with clippy warnings denied.
+    - Use `git diff --check` for whitespace/format drift.
+    - For visual-risk cleanup, capture the existing comparison scenes before
+      and after the cleanup so refactors do not regress material parity.
+
+Completion criteria:
+
+- The legacy material renderer has no known temporary re-export shims, rejected
+  asset routes, duplicate appearance identity fields, or misleading
+  `RenderTexture` naming in the legacy `0x05` path.
+- Material, terrain, prepared-texture, texture-velocity, and debug/diagnostic
+  responsibilities are separated enough that future client-mode entity work can
+  reuse them without adding parallel paths.
+- Remaining compatibility fallbacks are intentional, documented, and covered by
+  diagnostics.
+- Cleanup refactors preserve the parity behavior validated by Phases 0-10.8.
+
 ## Cross-Cutting Followups
 
 These are not blockers for Phase 9 terrain work, but they should become named

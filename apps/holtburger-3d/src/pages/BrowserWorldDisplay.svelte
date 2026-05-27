@@ -306,6 +306,13 @@
 		}
 		return `${debug.renderPassCount} pass${debug.renderPassCount === 1 ? "" : "es"}, ${debug.renderCalls} call${debug.renderCalls === 1 ? "" : "s"}, ${debug.renderTriangles} tris.`;
 	});
+	const rendererBvhSummaryText = $derived.by(() => {
+		const debug = renderMetrics?.debug;
+		if (!debug) {
+			return "Waiting for BVH metrics.";
+		}
+		return `BVH terrain ${debug.terrainBvhVisibleItemCount}/${debug.terrainBvhTotalItemCount}, outdoor statics ${debug.outdoorStaticBvhVisibleItemCount}/${debug.outdoorStaticBvhTotalItemCount}, env local ${debug.envCellLocalBvhVisibleItemCount}/${debug.envCellLocalBvhTotalItemCount}, static keys ${debug.visibleStaticInstanceKeyCount}, portal keys ${debug.visiblePortalKeyCount}, env cells ${debug.envCellBvhConsideredCount}, fallbacks ${debug.fallbackReasonCount} (${debug.fallbackReasonSamples.join(" || ")}), query ${debug.queryTimeMs.toFixed(2)} ms.`;
+	});
 	const runtimeAppearanceStatusText = $derived.by(() => {
 		if (runtimeAppearancePending) {
 			return "Resolving runtime appearance.";
@@ -432,6 +439,7 @@
 	const browserPanelDebugRows = $derived<BrowserPanelRow[]>([
 		{ label: "Camera", value: cameraFrameText },
 		{ label: "Renderer", value: rendererSummaryText },
+		{ label: "BVH", value: rendererBvhSummaryText },
 		{ label: "Assets", value: assetSummaryText },
 	]);
 	const browserPanelDebugDetailSections = $derived<BrowserPanelSection[]>([
@@ -464,6 +472,7 @@
 			title: "Render Pipeline",
 			rows: [
 				{ label: "Renderer", value: rendererDiagnosticsText },
+				{ label: "BVH", value: rendererBvhSummaryText },
 				{ label: "Stencil", value: portalRenderText },
 			],
 		},

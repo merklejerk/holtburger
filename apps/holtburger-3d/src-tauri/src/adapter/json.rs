@@ -833,13 +833,27 @@ pub fn serialize_landblock_outdoor_bvh(outdoor: &LandblockOutdoorAsset) -> serde
     let Some(bvh) = outdoor.outdoor_bvh.as_ref() else {
         return serde_json::Value::Null;
     };
+    let mut sorted_statics = outdoor
+        .statics
+        .iter()
+        .filter(|m| m.instance_bounds.is_some())
+        .collect::<Vec<_>>();
+    sorted_statics
+        .sort_by(|left, right| left.instance.instance_id.cmp(&right.instance.instance_id));
+    let items = sorted_statics
+        .into_iter()
+        .map(|member| {
+            serde_json::json!({
+                "kind": serialize_landblock_outdoor_bvh_item_kind(member.instance.kind),
+                "instanceId": member.instance.instance_id,
+            })
+        })
+        .collect::<Vec<_>>();
+
     serde_json::json!({
         "coordinateSpace": "landblock-render-local",
         "nodes": bvh.nodes.iter().map(serialize_prepared_bvh_node).collect::<Vec<_>>(),
-        "items": outdoor.statics.iter().map(|member| serde_json::json!({
-            "kind": serialize_landblock_outdoor_bvh_item_kind(member.instance.kind),
-            "instanceId": member.instance.instance_id,
-        })).collect::<Vec<_>>(),
+        "items": items,
     })
 }
 
@@ -879,10 +893,10 @@ pub fn serialize_landblock_topology_env_cell_residency_bvh(
                 },
             };
             (
-                PreparedAabb {
+                holtburger_content::pad_bvh_bounds(PreparedAabb {
                     min: point,
                     max: point,
-                },
+                }),
                 1_u32,
             )
         })
@@ -1054,27 +1068,29 @@ pub fn serialize_env_cell_local_bvh(
     items.extend(
         static_meshes
             .iter()
+            .filter(|mesh| mesh.instance_bounds.is_some())
             .map(|mesh| serde_json::json!({ "kind": "static", "instanceId": mesh.instance_id })),
     );
     items.extend(
-        cell.portals
+        cell.portal_apertures
             .iter()
-            .map(|portal| serde_json::json!({ "kind": "portal", "portalId": portal.portal_id })),
+            .filter(|aperture| portal_aperture_bounds(aperture).is_some())
+            .map(
+                |aperture| serde_json::json!({ "kind": "portal", "portalId": aperture.portal_id }),
+            ),
     );
     let mut node_inputs = Vec::new();
     if let Some(bounds) = cell.render_geometry.bounds {
-        node_inputs.push((bounds, 1_u32));
+        node_inputs.push((holtburger_content::pad_bvh_bounds(bounds), 1_u32));
     }
-    node_inputs.extend(
-        static_meshes
-            .iter()
-            .filter_map(|mesh| mesh.instance_bounds.map(|bounds| (bounds, 2_u32))),
-    );
-    node_inputs.extend(
-        cell.portal_apertures
-            .iter()
-            .filter_map(|aperture| portal_aperture_bounds(aperture).map(|bounds| (bounds, 4_u32))),
-    );
+    node_inputs.extend(static_meshes.iter().filter_map(|mesh| {
+        mesh.instance_bounds
+            .map(|bounds| (holtburger_content::pad_bvh_bounds(bounds), 2_u32))
+    }));
+    node_inputs.extend(cell.portal_apertures.iter().filter_map(|aperture| {
+        portal_aperture_bounds(aperture)
+            .map(|bounds| (holtburger_content::pad_bvh_bounds(bounds), 4_u32))
+    }));
     serde_json::json!({
         "coordinateSpace": "env-cell-local",
         "nodes": build_flat_bvh_nodes_from_bounds(node_inputs),
@@ -1561,7 +1577,9 @@ pub fn serialize_bsp_node(node: &BspNode) -> serde_json::Value {
 mod tests {
     use super::*;
     use holtburger_content::{
-        CellLandblockFact, PreparedTerrainMesh, PreparedTerrainTriangle, PreparedVec3,
+        CellLandblockFact, LandblockOutdoorAsset, LandblockOutdoorStaticMember, PreparedAabb,
+        PreparedBvh, PreparedContentSourceDiagnostics, PreparedStaticInstance,
+        PreparedStaticInstanceKind, PreparedTerrainMesh, PreparedTerrainTriangle, PreparedVec3,
     };
 
     #[test]
@@ -1651,5 +1669,118 @@ mod tests {
 
     fn cell_terrain(terrain_code: u16, road_code: u16) -> u16 {
         (terrain_code << 2) | road_code
+    }
+
+    fn dummy_static_instance(id: &str, kind: PreparedStaticInstanceKind) -> PreparedStaticInstance {
+        PreparedStaticInstance {
+            instance_id: id.to_string(),
+            kind,
+            owning_landblock_id: 1,
+            owning_env_cell_id: None,
+            source_asset_id: "".to_string(),
+            source_did: 0,
+            source_index: 0,
+            local_placement: holtburger_dat::graphics::Frame {
+                origin: holtburger_common::math::Vector3 {
+                    x: 0.,
+                    y: 0.,
+                    z: 0.,
+                },
+                orientation: holtburger_common::math::Quaternion {
+                    w: 1.,
+                    x: 0.,
+                    y: 0.,
+                    z: 0.,
+                },
+            },
+            source_scale: PreparedVec3 {
+                x: 1.,
+                y: 1.,
+                z: 1.,
+            },
+        }
+    }
+
+    #[test]
+    fn test_serialize_landblock_outdoor_bvh_items_are_filtered_and_sorted() {
+        let dummy_bounds = PreparedAabb {
+            min: PreparedVec3 {
+                x: 0.,
+                y: 0.,
+                z: 0.,
+            },
+            max: PreparedVec3 {
+                x: 1.,
+                y: 1.,
+                z: 1.,
+            },
+        };
+        let statics = vec![
+            LandblockOutdoorStaticMember {
+                instance: dummy_static_instance("c", PreparedStaticInstanceKind::Scenery),
+                source_bounds: None,
+                instance_bounds: Some(dummy_bounds),
+                building: None,
+                generated: None,
+            },
+            LandblockOutdoorStaticMember {
+                instance: dummy_static_instance("a", PreparedStaticInstanceKind::Building),
+                source_bounds: None,
+                instance_bounds: None, // This one should be filtered out!
+                building: None,
+                generated: None,
+            },
+            LandblockOutdoorStaticMember {
+                instance: dummy_static_instance("b", PreparedStaticInstanceKind::Scenery),
+                source_bounds: None,
+                instance_bounds: Some(dummy_bounds),
+                building: None,
+                generated: None,
+            },
+        ];
+
+        let outdoor = LandblockOutdoorAsset {
+            landblock_id: 1,
+            cell_landblock: Some(CellLandblockFact {
+                id: 1,
+                has_objects: false,
+                grid_size: 1,
+                tile_size: 1.,
+                terrain_types: vec![],
+                heights: vec![],
+                min_height: 0.,
+                max_height: 0.,
+                all_heights_zero: true,
+            }),
+            terrain_mesh: Some(PreparedTerrainMesh {
+                landblock_id: 1,
+                grid_size: 1,
+                tile_size: 1.,
+                vertices: vec![],
+                triangles: vec![],
+                min_height: 0.,
+                max_height: 0.,
+            }),
+            statics,
+            outdoor_bvh: Some(PreparedBvh {
+                coordinate_space: "test",
+                landblock_id: 1,
+                scope: "test",
+                nodes: vec![],
+            }),
+            diagnostics: PreparedContentSourceDiagnostics::default(),
+        };
+
+        let result = serialize_landblock_outdoor_bvh(&outdoor);
+        let items = result
+            .get("items")
+            .expect("has items")
+            .as_array()
+            .expect("items is array");
+
+        // The array should be filtered (length 2) and sorted by instance_id (b then c).
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].get("instanceId").unwrap().as_str().unwrap(), "b");
+        assert_eq!(items[1].get("instanceId").unwrap().as_str().unwrap(), "c");
     }
 }

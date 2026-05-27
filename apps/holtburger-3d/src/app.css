@@ -447,6 +447,21 @@ ul {
 	padding: 0 0.75rem 0.75rem;
 }
 
+.browser-panel__details .data-list div {
+	align-items: flex-start;
+	justify-content: flex-start;
+}
+
+.browser-panel__details .data-list dt {
+	flex: 0 0 5rem;
+}
+
+.browser-panel__details .data-list dd {
+	min-width: 0;
+	overflow-wrap: anywhere;
+	white-space: normal;
+}
+
 .browser-form {
 	display: grid;
 	gap: 0.85rem;

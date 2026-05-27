@@ -391,19 +391,38 @@ Introduced cleanup targets:
 
 ### Phase 2.5: Candidate Selection Readiness Check
 
-Status: immediate prep before Phase 3.
+Status: completed.
 
 Phase 3 starts building a generic batch candidate registry. Before that changes object/pass
 selection plumbing, do a short readiness pass:
 
-- Compare Phase 2 BVH metrics against current `Object3D.visible` counts in a few outdoor and indoor
-  scenes to catch obvious coordinate-space false negatives.
-- Decide whether topology residency BVH metrics should be added before registry work, or whether
-  active structured cells remain the conservative env-cell input until Phase 6 portal-clipped
-  culling.
-- Confirm all Phase 2 fallback reasons have either expected causes or obvious fixes. If fallback
-  counts are high in ordinary scenes, fix those before candidate exclusion.
-- Keep this as a verification/prep slice only; do not introduce candidate batch filtering here.
+- Done: compared Phase 2 BVH metrics across an outdoor town-facing view, the same location turned
+  away from town, and an indoor/portal-visible view.
+- Done: confirmed visible BVH counts move plausibly with camera orientation:
+  - town-facing: terrain `576/1600`, outdoor statics `619/1013`, env local `1325/1725`, static keys
+    `1161`, portal keys `574`, env cells `299`, fallbacks `0`, query `2.00 ms`;
+  - turned away: terrain `256/1600`, outdoor statics `57/1013`, env local `0/1725`, static keys
+    `57`, portal keys `0`, env cells `299`, fallbacks `0`, query `2.00 ms`;
+  - indoor/portal-visible: terrain `704/1600`, outdoor statics `247/1013`, env local `593/1725`,
+    static keys `501`, portal keys `248`, env cells `299`, fallbacks `0`, query `1.00 ms`.
+- Done: confirmed fallback count stayed at `0` in ordinary outdoor and indoor/portal-visible
+  samples.
+- Done: kept this as verification/prep only; no candidate batch filtering was introduced.
+
+Decision:
+
+- Proceed to Phase 3 without adding topology residency BVH metrics first. Active structured cells
+  are a conservative enough env-cell input for the base-pass candidate registry. Topology residency
+  BVH discovery can wait until portal-clipped culling or streaming/residency work needs it.
+
+Refinements for Phase 3:
+
+- Treat Phase 2 fallback reasons as registry fallback-inclusion reasons. If a batch cannot be bound
+  or a query path reports suspect data, include the batch and count the reason.
+- Start with base-pass candidate bookkeeping and metrics. Do not wire candidate sets into portal
+  composite passes until Phase 6.
+- Preserve the Phase 2 metrics while Phase 3 rolls out so candidate-batch counts can be compared
+  against visible item-key counts.
 
 ### Phase 3: Generic Batch Candidate Registry
 

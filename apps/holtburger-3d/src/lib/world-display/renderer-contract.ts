@@ -87,6 +87,15 @@ export interface WorldRenderDebugMetrics {
 	staticBvhRepresentedInstanceKeyCount: number;
 	staticBvhVisibleInstanceKeyCount: number;
 	staticBvhFallbackIncludedBatchCount: number;
+	terrainRenderBatchCount: number;
+	terrainBvhCandidateBatchCount: number;
+	structuredInteriorRenderBatchCount: number;
+	structuredInteriorBvhCandidateBatchCount: number;
+	debugOverlayRenderBatchCount: number;
+	debugOverlayBvhCandidateBatchCount: number;
+	portalMaskRenderBatchCount: number;
+	portalMaskBvhCandidateBatchCount: number;
+	nonStaticBvhFallbackIncludedBatchCount: number;
 	structuredInteriorMeshCount: number;
 	visibleStructuredInteriorMeshCount: number;
 	terrainBvhVisibleItemCount: number;

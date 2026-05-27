@@ -585,19 +585,107 @@ Introduced cleanup targets:
 
 ### Phase 5: Non-Instanced Prepared BVH Bindings
 
+Status: completed.
+
 Move existing non-instanced culling toward the same batch registry.
 
 Candidates:
 
-- terrain landblock meshes: keep coarse whole-landblock behavior unless terrain metrics later prove
-  this matters;
-- structured env-cell meshes: candidate when the env-cell render-geometry key is visible;
-- portal debug overlays and portal mask objects: candidate when the portal key is visible;
-- future pass-local portal render batches: candidate when at least one referenced portal or target
-  cell key is visible for that pass.
+- Done: terrain landblock meshes now register as non-instanced render batches and participate in
+  exterior base-pass candidate selection. They keep whole-tile draw granularity by binding each tile
+  mesh to all of its terrain quad keys; the tile is a candidate when any bound quad is visible.
+- Done: structured env-cell shell meshes now register as non-instanced render batches keyed by the
+  env-cell render-geometry key.
+- Done: cell debug overlays now bind to the env-cell render-geometry key.
+- Done: portal debug overlays now bind to the env-cell portal key.
+- Done: transition portal mask objects now bind to the env-cell portal key and visible portal work
+  collection conservatively skips registered mask batches that are not BVH candidates.
+- Deferred: future pass-local portal render batches still need Phase 6 portal-clipped candidate
+  sets. Phase 5 does not apply the base camera candidate set to portal composites.
 
 Do this incrementally. The current `RenderSpatialIndex` path can coexist while the prepared-BVH
 batch registry is proven.
+
+Implementation notes:
+
+- Added `non-instanced-bvh-bindings.ts` so terrain, structured-cell, debug-overlay, and portal-mask
+  batch ids and item-key derivation live outside the renderer lifecycle code.
+- Added separate registries for terrain, structured interiors, debug overlays, and portal masks.
+  This keeps lifecycle clears scoped to the object class being rebuilt.
+- Non-instanced scoped render helpers preserve each object's prior `visible` state. This lets the
+  existing `RenderSpatialIndex` global culling coexist as a conservative backstop instead of being
+  overwritten by prepared-BVH scoped renders.
+- Base exterior rendering scopes terrain candidates plus static candidates.
+- Base interior and diagnostic-interior rendering scope structured-cell candidates plus static
+  candidates where relevant.
+- Debug-overlay rendering scopes debug overlay candidates.
+- Portal aperture mask/depth rendering still uses its pass-local aperture scene. Phase 5 only gates
+  visible portal work collection by the registered portal-mask candidate when available.
+
+Metrics added:
+
+- terrain render batches and BVH-candidate terrain batches;
+- structured interior render batches and BVH-candidate structured interior batches;
+- debug overlay render batches and BVH-candidate debug overlay batches;
+- portal mask render batches and BVH-candidate portal mask batches;
+- aggregate fallback-included non-static batches.
+
+Decisions and course corrections:
+
+- Terrain remains coarse by render tile. Binding all quad keys to the landblock mesh gives a
+  conservative "any visible quad renders the tile" policy without splitting terrain geometry.
+- Course correction: manual validation showed terrain disappearing by camera angle in outdoor
+  residency after the first Phase 5 implementation. The bug was proven from code evidence: the
+  Tauri serializer built terrain BVH bounds from `PreparedTerrainMesh.vertices` in AC
+  terrain-local coordinates, while the renderer uploads terrain positions as `(x, z, -y)`. Phase 5
+  now transforms terrain BVH bounds into render coordinates before frustum tests and includes a
+  regression test for that axis/sign conversion.
+- The old `RenderSpatialIndex` culling path remains active. Prepared-BVH candidate selection is an
+  additional scoped filter for registered non-instanced batches, not a deletion of the legacy path.
+- Do not apply non-instanced prepared-BVH candidates to portal composite scene rendering yet. The
+  composite pass still renders the shared scene by layer/stencil and needs Phase 6 pass-scoped
+  portal-clipped candidate sets to avoid base-frustum false negatives.
+- Portal mask candidate gating uses main-camera env-cell portal visibility plus the existing portal
+  aperture visibility check. Missing/unregistered mask bindings are included conservatively.
+
+Validation:
+
+```text
+npm run test:ts -- --run non-instanced-bvh-bindings static-renderable-bvh-bindings render-batch-candidates prepared-bvh-metrics prepared-bvh-visibility
+npm run check
+npm run lint:ts
+```
+
+Introduced cleanup targets:
+
+- The public debug contract now has several batch-counter fields. Before adding Phase 6 portal-pass
+  metrics, split browser debug rendering into grouped rows or a structured view so the BVH line does
+  not become unusable again.
+- `RenderSpatialIndex` and prepared-BVH registries now overlap for terrain, structured interiors,
+  and debug overlays. Keep both until manual validation confirms prepared-BVH candidate counts and
+  visuals are stable, then consider retiring duplicated object visibility toggles.
+- The scoped visibility helpers are still migration shims around Three.js scene rendering. Phase 6
+  should prefer explicit pass-scoped candidate plumbing for portal composites instead of expanding
+  global `Object3D.visible` state.
+
+### Phase 5.5: Scoped Candidate Validation
+
+Status: pending.
+
+Before implementing portal-clipped BVH queries, validate that the Phase 4/5 base-pass candidate
+path is not hiding required terrain, static, structured, debug, or portal-mask objects in ordinary
+camera movement.
+
+Responsibilities:
+
+- Compare debug metrics for outdoor town-facing, turned-away, indoor, and portal-visible views.
+- Verify candidate batch counts move with visible item-key counts and fallback-included batch counts
+  stay explainable.
+- Confirm screenshots do not show base-pass false negatives for terrain, outdoor statics, indoor
+  statics, structured interiors, debug overlays, or transition portal aperture masks.
+- Decide whether the legacy `RenderSpatialIndex` object-visible path should remain through Phase 6
+  or be narrowed after prepared-BVH validation.
+- If metrics are too hard to read, split the debug BVH display before adding portal-pass metrics.
 
 ### Phase 6: Portal-Clipped BVH Queries
 

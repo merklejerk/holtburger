@@ -153,8 +153,22 @@ import {
 import {
 	createEmptyRenderBatchCandidateSelection,
 	createRenderBatchCandidateRegistry,
+	type RenderBatchCandidateRegistry,
 	type RenderBatchCandidateSelection,
 } from "./render-batch-candidates";
+import {
+	deriveDebugCellOverlayBatchBvhBinding,
+	deriveDebugPortalOverlayBatchBvhBinding,
+	deriveStructuredInteriorCellBatchBvhBinding,
+	deriveTerrainTileBatchBvhBinding,
+	deriveTransitionPortalMaskBatchBvhBinding,
+	type NonInstancedBatchBvhBinding,
+	readNonInstancedBatchId,
+	registerNonInstancedBatchId,
+	structuredInteriorCellBatchId,
+	terrainTileBatchId,
+	transitionPortalMaskBatchId,
+} from "./non-instanced-bvh-bindings";
 import {
 	deriveStaticRenderableBatchBvhBinding,
 	staticRenderableBatchId,
@@ -550,6 +564,10 @@ export function createWorldDisplayRenderer(
 	const staticRenderableGroupMeshes = new Map<string, InstancedMesh>();
 	const staticRenderableGroupPartSignatures = new Map<string, string>();
 	const staticRenderableBatchCandidates = createRenderBatchCandidateRegistry();
+	const terrainBatchCandidates = createRenderBatchCandidateRegistry();
+	const structuredInteriorBatchCandidates = createRenderBatchCandidateRegistry();
+	const debugOverlayBatchCandidates = createRenderBatchCandidateRegistry();
+	const portalMaskBatchCandidates = createRenderBatchCandidateRegistry();
 	const structuredInteriorMeshes = new Map<string, Mesh>();
 	const portalMaskMeshes = new Map<string, Mesh>();
 	const portalMaskGeometrySignatures = new Map<string, string>();
@@ -579,6 +597,14 @@ export function createWorldDisplayRenderer(
 	let latestPreparedBvhVisibilitySnapshot: PreparedBvhVisibilitySnapshot =
 		createEmptyPreparedBvhVisibilitySnapshot();
 	let latestStaticRenderableBatchCandidateSelection: RenderBatchCandidateSelection =
+		createEmptyRenderBatchCandidateSelection();
+	let latestTerrainBatchCandidateSelection: RenderBatchCandidateSelection =
+		createEmptyRenderBatchCandidateSelection();
+	let latestStructuredInteriorBatchCandidateSelection: RenderBatchCandidateSelection =
+		createEmptyRenderBatchCandidateSelection();
+	let latestDebugOverlayBatchCandidateSelection: RenderBatchCandidateSelection =
+		createEmptyRenderBatchCandidateSelection();
+	let latestPortalMaskBatchCandidateSelection: RenderBatchCandidateSelection =
 		createEmptyRenderBatchCandidateSelection();
 	let latestRenderDebugMetrics: WorldRenderDebugMetrics =
 		createRenderDebugMetrics(renderer, {
@@ -610,6 +636,15 @@ export function createWorldDisplayRenderer(
 			staticBvhRepresentedInstanceKeyCount: 0,
 			staticBvhVisibleInstanceKeyCount: 0,
 			staticBvhFallbackIncludedBatchCount: 0,
+			terrainRenderBatchCount: 0,
+			terrainBvhCandidateBatchCount: 0,
+			structuredInteriorRenderBatchCount: 0,
+			structuredInteriorBvhCandidateBatchCount: 0,
+			debugOverlayRenderBatchCount: 0,
+			debugOverlayBvhCandidateBatchCount: 0,
+			portalMaskRenderBatchCount: 0,
+			portalMaskBvhCandidateBatchCount: 0,
+			nonStaticBvhFallbackIncludedBatchCount: 0,
 			structuredInteriorMeshCount: 0,
 			visibleStructuredInteriorMeshCount: 0,
 			...latestPreparedBvhMetrics,
@@ -918,6 +953,30 @@ export function createWorldDisplayRenderer(
 				queryFallbackReasons:
 					latestPreparedBvhVisibilitySnapshot.fallbackReasons,
 			});
+		latestTerrainBatchCandidateSelection =
+			terrainBatchCandidates.selectCandidates({
+				visibleItemKeys: latestPreparedBvhVisibilitySnapshot.visibleItemKeys,
+				queryFallbackReasons:
+					latestPreparedBvhVisibilitySnapshot.fallbackReasons,
+			});
+		latestStructuredInteriorBatchCandidateSelection =
+			structuredInteriorBatchCandidates.selectCandidates({
+				visibleItemKeys: latestPreparedBvhVisibilitySnapshot.visibleItemKeys,
+				queryFallbackReasons:
+					latestPreparedBvhVisibilitySnapshot.fallbackReasons,
+			});
+		latestDebugOverlayBatchCandidateSelection =
+			debugOverlayBatchCandidates.selectCandidates({
+				visibleItemKeys: latestPreparedBvhVisibilitySnapshot.visibleItemKeys,
+				queryFallbackReasons:
+					latestPreparedBvhVisibilitySnapshot.fallbackReasons,
+			});
+		latestPortalMaskBatchCandidateSelection =
+			portalMaskBatchCandidates.selectCandidates({
+				visibleItemKeys: latestPreparedBvhVisibilitySnapshot.visibleItemKeys,
+				queryFallbackReasons:
+					latestPreparedBvhVisibilitySnapshot.fallbackReasons,
+			});
 		const renderPolicy = deriveActiveRenderPolicy();
 		const transitionWorkBatches =
 			collectVisibleTransitionPortalWorkBatches(renderPolicy);
@@ -998,6 +1057,31 @@ export function createWorldDisplayRenderer(
 					.explicitFallbackBatchCount +
 				latestStaticRenderableBatchCandidateSelection.counters
 					.queryFallbackBatchCount,
+			terrainRenderBatchCount:
+				latestTerrainBatchCandidateSelection.counters.registeredBatchCount,
+			terrainBvhCandidateBatchCount:
+				latestTerrainBatchCandidateSelection.counters.candidateBatchCount,
+			structuredInteriorRenderBatchCount:
+				latestStructuredInteriorBatchCandidateSelection.counters
+					.registeredBatchCount,
+			structuredInteriorBvhCandidateBatchCount:
+				latestStructuredInteriorBatchCandidateSelection.counters
+					.candidateBatchCount,
+			debugOverlayRenderBatchCount:
+				latestDebugOverlayBatchCandidateSelection.counters.registeredBatchCount,
+			debugOverlayBvhCandidateBatchCount:
+				latestDebugOverlayBatchCandidateSelection.counters.candidateBatchCount,
+			portalMaskRenderBatchCount:
+				latestPortalMaskBatchCandidateSelection.counters.registeredBatchCount,
+			portalMaskBvhCandidateBatchCount:
+				latestPortalMaskBatchCandidateSelection.counters.candidateBatchCount,
+			nonStaticBvhFallbackIncludedBatchCount:
+				countFallbackIncludedBatches(latestTerrainBatchCandidateSelection) +
+				countFallbackIncludedBatches(
+					latestStructuredInteriorBatchCandidateSelection,
+				) +
+				countFallbackIncludedBatches(latestDebugOverlayBatchCandidateSelection) +
+				countFallbackIncludedBatches(latestPortalMaskBatchCandidateSelection),
 			structuredInteriorMeshCount: structuredInteriorMeshes.size,
 			visibleStructuredInteriorMeshCount: countVisibleObjects(
 				structuredInteriorMeshes.values(),
@@ -1069,10 +1153,28 @@ export function createWorldDisplayRenderer(
 				renderBaseGraphNode(node);
 				return;
 			case "diagnostic-interior":
+				setAllStaticRenderableMeshesVisible(true);
+				renderWithNonInstancedBatchCandidates(
+					structuredInteriorMeshes.values(),
+					structuredInteriorBatchCandidates,
+					latestStructuredInteriorBatchCandidateSelection.candidateBatchIds,
+					() => {
+						camera.layers.set(node.layer);
+						renderer.render(scene, camera);
+					},
+				);
+				return;
 			case "debug-overlay":
 				setAllStaticRenderableMeshesVisible(true);
-				camera.layers.set(node.layer);
-				renderer.render(scene, camera);
+				renderWithNonInstancedBatchCandidates(
+					debugOverlayObjects.values(),
+					debugOverlayBatchCandidates,
+					latestDebugOverlayBatchCandidateSelection.candidateBatchIds,
+					() => {
+						camera.layers.set(node.layer);
+						renderer.render(scene, camera);
+					},
+				);
 				return;
 		}
 	}
@@ -1080,10 +1182,26 @@ export function createWorldDisplayRenderer(
 	function renderBaseGraphNode(node: WorldRenderGraphNode): void {
 		const candidateBatchIds =
 			latestStaticRenderableBatchCandidateSelection.candidateBatchIds;
-		renderWithStaticRenderableBatchCandidates(candidateBatchIds, () => {
-			camera.layers.set(node.layer);
-			renderer.render(scene, camera);
-		});
+		const renderBaseScene = () =>
+			renderWithStaticRenderableBatchCandidates(candidateBatchIds, () => {
+				camera.layers.set(node.layer);
+				renderer.render(scene, camera);
+			});
+		if (node.kind === "exterior-base") {
+			renderWithNonInstancedBatchCandidates(
+				terrainMeshes.values(),
+				terrainBatchCandidates,
+				latestTerrainBatchCandidateSelection.candidateBatchIds,
+				renderBaseScene,
+			);
+			return;
+		}
+		renderWithNonInstancedBatchCandidates(
+			structuredInteriorMeshes.values(),
+			structuredInteriorBatchCandidates,
+			latestStructuredInteriorBatchCandidateSelection.candidateBatchIds,
+			renderBaseScene,
+		);
 	}
 
 	function applyGraphNodeClear(node: WorldRenderGraphNode): void {
@@ -1141,6 +1259,9 @@ export function createWorldDisplayRenderer(
 			if (!maskMesh) {
 				continue;
 			}
+			if (!isTransitionPortalMaskBatchCandidate(workItem.id, maskMesh)) {
+				continue;
+			}
 			const work: VisibleTransitionPortalWork = {
 				workItem,
 				direction: workItem.direction,
@@ -1176,6 +1297,19 @@ export function createWorldDisplayRenderer(
 		latestPortalMetrics.visiblePortalWorkItemCount = visibleWorkItemCount;
 		latestPortalMetrics.maskedInteriorCellCount = maskedInteriorCellIds.size;
 		return batches;
+	}
+
+	function isTransitionPortalMaskBatchCandidate(
+		candidateId: string,
+		maskMesh: Mesh,
+	): boolean {
+		const batchId =
+			readNonInstancedBatchId(maskMesh) ?? transitionPortalMaskBatchId(candidateId);
+		const registeredObject = portalMaskBatchCandidates.getObject(batchId);
+		return (
+			registeredObject !== maskMesh ||
+			latestPortalMaskBatchCandidateSelection.candidateBatchIds.has(batchId)
+		);
 	}
 
 	function renderTransitionApertureMaskNode(
@@ -1481,6 +1615,7 @@ export function createWorldDisplayRenderer(
 			mesh.removeFromParent();
 			disposeMesh(mesh);
 			terrainMeshes.delete(assetId);
+			terrainBatchCandidates.unregister(terrainTileBatchId(assetId));
 		}
 
 		for (const tile of sceneModel.tiles) {
@@ -1494,6 +1629,7 @@ export function createWorldDisplayRenderer(
 					existing.removeFromParent();
 					disposeMesh(existing);
 					terrainMeshes.delete(tile.assetId);
+					terrainBatchCandidates.unregister(terrainTileBatchId(tile.assetId));
 				} else {
 					chunkRoot.attach(existing);
 					existing.position.set(
@@ -1501,6 +1637,7 @@ export function createWorldDisplayRenderer(
 						tile.chunkLocalOffset.y,
 						tile.chunkLocalOffset.z,
 					);
+					registerTerrainBatchCandidate(tile, existing);
 					continue;
 				}
 			}
@@ -1516,10 +1653,25 @@ export function createWorldDisplayRenderer(
 			mesh.layers.set(WORLD_RENDER_LAYER.exterior);
 			chunkRoot.add(mesh);
 			terrainMeshes.set(tile.assetId, mesh);
+			registerTerrainBatchCandidate(tile, mesh);
 		}
 		syncRenderChunkRoots(renderChunkTransforms);
 		updateRenderWorkingModel();
 		updateCameraFrame();
+	}
+
+	function registerTerrainBatchCandidate(
+		tile: TerrainSceneTile,
+		mesh: Mesh,
+	): void {
+		const binding = deriveTerrainTileBatchBvhBinding(tile);
+		registerNonInstancedBatchId(mesh, binding.batchId);
+		terrainBatchCandidates.register({
+			batchId: binding.batchId,
+			object: mesh,
+			itemKeys: binding.itemKeys,
+			fallbackReason: binding.fallbackReason,
+		});
 	}
 
 	function updateRenderWorkingModel(): void {
@@ -1640,6 +1792,33 @@ export function createWorldDisplayRenderer(
 			render();
 		} finally {
 			setAllStaticRenderableMeshesVisible(true);
+		}
+	}
+
+	function renderWithNonInstancedBatchCandidates(
+		objects: Iterable<Object3D>,
+		registry: RenderBatchCandidateRegistry,
+		candidateBatchIds: ReadonlySet<string>,
+		render: () => void,
+	): void {
+		const priorVisibility: Array<{ object: Object3D; visible: boolean }> = [];
+		for (const object of objects) {
+			const batchId = readNonInstancedBatchId(object);
+			if (!batchId) {
+				continue;
+			}
+			priorVisibility.push({ object, visible: object.visible });
+			const registeredObject = registry.getObject(batchId);
+			object.visible =
+				object.visible &&
+				(registeredObject !== object || candidateBatchIds.has(batchId));
+		}
+		try {
+			render();
+		} finally {
+			for (const { object, visible } of priorVisibility) {
+				object.visible = visible;
+			}
 		}
 	}
 
@@ -1957,6 +2136,7 @@ export function createWorldDisplayRenderer(
 			disposeObjectTree(object);
 		}
 		debugOverlayObjects.clear();
+		debugOverlayBatchCandidates.clear();
 
 		if (sceneModel.showCellIndicators) {
 			for (const cell of sceneModel.cells) {
@@ -1964,6 +2144,10 @@ export function createWorldDisplayRenderer(
 				getRenderChunkRoot(cell.renderChunk.chunkKey).add(overlay);
 				debugOverlayObjects.set(
 					debugCellSpatialItemId(cell.renderKey),
+					overlay,
+				);
+				registerDebugOverlayBatchCandidate(
+					deriveDebugCellOverlayBatchBvhBinding(cell),
 					overlay,
 				);
 			}
@@ -1978,12 +2162,29 @@ export function createWorldDisplayRenderer(
 						portalSpatialItemId(portal.portalId),
 						overlay,
 					);
+					registerDebugOverlayBatchCandidate(
+						deriveDebugPortalOverlayBatchBvhBinding(portal),
+						overlay,
+					);
 				}
 			}
 		}
 
 		syncRenderChunkRoots(renderChunkTransforms);
 		updateCameraFrame();
+	}
+
+	function registerDebugOverlayBatchCandidate(
+		binding: NonInstancedBatchBvhBinding,
+		object: Object3D,
+	): void {
+		registerNonInstancedBatchId(object, binding.batchId);
+		debugOverlayBatchCandidates.register({
+			batchId: binding.batchId,
+			object,
+			itemKeys: binding.itemKeys,
+			fallbackReason: binding.fallbackReason,
+		});
 	}
 
 	function syncStructuredInteriorMeshes(
@@ -2002,6 +2203,9 @@ export function createWorldDisplayRenderer(
 			mesh.removeFromParent();
 			disposeMesh(mesh);
 			structuredInteriorMeshes.delete(renderKey);
+			structuredInteriorBatchCandidates.unregister(
+				structuredInteriorCellBatchId(renderKey),
+			);
 		}
 
 		for (const cell of sceneModel.cells) {
@@ -2014,6 +2218,9 @@ export function createWorldDisplayRenderer(
 				mesh.removeFromParent();
 				disposeMesh(mesh);
 				structuredInteriorMeshes.delete(cell.renderKey);
+				structuredInteriorBatchCandidates.unregister(
+					structuredInteriorCellBatchId(cell.renderKey),
+				);
 				mesh = undefined;
 			}
 			if (!mesh) {
@@ -2025,12 +2232,27 @@ export function createWorldDisplayRenderer(
 			}
 
 			updateStructuredInteriorCellMesh(mesh, cell);
+			registerStructuredInteriorBatchCandidate(cell, mesh);
 		}
 
 		syncRenderChunkRoots(renderChunkTransforms);
 		updateResidencyIndex();
 		updateRenderWorkingModel();
 		updateCameraFrame();
+	}
+
+	function registerStructuredInteriorBatchCandidate(
+		cell: StructuredInteriorCell,
+		mesh: Mesh,
+	): void {
+		const binding = deriveStructuredInteriorCellBatchBvhBinding(cell);
+		registerNonInstancedBatchId(mesh, binding.batchId);
+		structuredInteriorBatchCandidates.register({
+			batchId: binding.batchId,
+			object: mesh,
+			itemKeys: binding.itemKeys,
+			fallbackReason: binding.fallbackReason,
+		});
 	}
 
 	function clearMaterializedSceneMeshes(): void {
@@ -2051,6 +2273,7 @@ export function createWorldDisplayRenderer(
 			disposeMesh(mesh);
 		}
 		structuredInteriorMeshes.clear();
+		structuredInteriorBatchCandidates.clear();
 	}
 
 	function rebuildDetailTextureMaterializedMeshes(): void {
@@ -2067,6 +2290,7 @@ export function createWorldDisplayRenderer(
 			disposeMesh(mesh);
 		}
 		structuredInteriorMeshes.clear();
+		structuredInteriorBatchCandidates.clear();
 		syncTerrainMeshes(terrainScene);
 		syncStaticRenderableMeshes(staticRenderableScene);
 		syncStructuredInteriorMeshes(structuredInteriorScene);
@@ -2078,6 +2302,7 @@ export function createWorldDisplayRenderer(
 			disposeMesh(mesh);
 		}
 		terrainMeshes.clear();
+		terrainBatchCandidates.clear();
 	}
 
 	function syncPortalMaskMeshes(model: TransitionPortalCandidateModel): void {
@@ -2095,6 +2320,9 @@ export function createWorldDisplayRenderer(
 			disposeMesh(mesh);
 			portalMaskMeshes.delete(groupId);
 			portalMaskGeometrySignatures.delete(groupId);
+			portalMaskBatchCandidates.unregister(
+				transitionPortalMaskBatchId(groupId),
+			);
 			const passMesh = portalAperturePassMeshes.get(groupId);
 			if (passMesh) {
 				passMesh.removeFromParent();
@@ -2126,11 +2354,26 @@ export function createWorldDisplayRenderer(
 				}
 				updatePortalMaskMesh(mesh, candidate);
 			}
+			registerPortalMaskBatchCandidate(candidate, mesh);
 		}
 
 		setPortalMaskVisibility(null);
 		syncRenderChunkRoots(renderChunkTransforms);
 		updateCameraFrame();
+	}
+
+	function registerPortalMaskBatchCandidate(
+		candidate: TransitionPortalCandidate,
+		mesh: Mesh,
+	): void {
+		const binding = deriveTransitionPortalMaskBatchBvhBinding(candidate);
+		registerNonInstancedBatchId(mesh, binding.batchId);
+		portalMaskBatchCandidates.register({
+			batchId: binding.batchId,
+			object: mesh,
+			itemKeys: binding.itemKeys,
+			fallbackReason: binding.fallbackReason,
+		});
 	}
 
 	function createStructuredInteriorCellMesh(
@@ -3038,17 +3281,20 @@ export function createWorldDisplayRenderer(
 			disposeMesh(mesh);
 		}
 		structuredInteriorMeshes.clear();
+		structuredInteriorBatchCandidates.clear();
 		for (const mesh of portalMaskMeshes.values()) {
 			disposeMesh(mesh);
 		}
 		portalMaskMeshes.clear();
 		portalMaskGeometrySignatures.clear();
+		portalMaskBatchCandidates.clear();
 		portalAperturePassScene.clear();
 		portalAperturePassMeshes.clear();
 		for (const object of debugOverlayObjects.values()) {
 			disposeObjectTree(object);
 		}
 		debugOverlayObjects.clear();
+		debugOverlayBatchCandidates.clear();
 		materialResourceCache.dispose();
 		chunkRoots.clear();
 		chunkRootContainer.clear();
@@ -3153,6 +3399,16 @@ function countVisibleObjects(objects: Iterable<Object3D>): number {
 	return count;
 }
 
+function countFallbackIncludedBatches(
+	selection: RenderBatchCandidateSelection,
+): number {
+	return (
+		selection.counters.unboundFallbackBatchCount +
+		selection.counters.explicitFallbackBatchCount +
+		selection.counters.queryFallbackBatchCount
+	);
+}
+
 function countGeometryGroups(meshes: Iterable<Mesh>): number {
 	let count = 0;
 	for (const mesh of meshes) {
@@ -3253,6 +3509,19 @@ function createRenderDebugMetrics(
 		staticBvhVisibleInstanceKeyCount: options.staticBvhVisibleInstanceKeyCount,
 		staticBvhFallbackIncludedBatchCount:
 			options.staticBvhFallbackIncludedBatchCount,
+		terrainRenderBatchCount: options.terrainRenderBatchCount,
+		terrainBvhCandidateBatchCount: options.terrainBvhCandidateBatchCount,
+		structuredInteriorRenderBatchCount:
+			options.structuredInteriorRenderBatchCount,
+		structuredInteriorBvhCandidateBatchCount:
+			options.structuredInteriorBvhCandidateBatchCount,
+		debugOverlayRenderBatchCount: options.debugOverlayRenderBatchCount,
+		debugOverlayBvhCandidateBatchCount:
+			options.debugOverlayBvhCandidateBatchCount,
+		portalMaskRenderBatchCount: options.portalMaskRenderBatchCount,
+		portalMaskBvhCandidateBatchCount: options.portalMaskBvhCandidateBatchCount,
+		nonStaticBvhFallbackIncludedBatchCount:
+			options.nonStaticBvhFallbackIncludedBatchCount,
 		structuredInteriorMeshCount: options.structuredInteriorMeshCount,
 		visibleStructuredInteriorMeshCount:
 			options.visibleStructuredInteriorMeshCount,

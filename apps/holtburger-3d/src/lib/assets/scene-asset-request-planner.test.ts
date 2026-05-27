@@ -383,6 +383,88 @@ describe("scene asset request planner", () => {
 			"material/0800007e",
 		]);
 	});
+
+	it("requests prepared compressed textures only for visible loaded render surfaces", () => {
+		const destination = parseBrowserLocationInput("016c0155");
+		expect(destination).not.toBeNull();
+
+		const preparedTopology = createPreparedTopology(0x016cffff, [0x016c0155]);
+		const preparedEnvCell = createPreparedEnvCell(0x016c0155, [
+			"material/0800006c",
+		]);
+		const material = createPreparedMaterialRecipe(
+			"material/0800006c",
+			0x0800006c,
+			"render-surface/0600006c",
+		);
+		const visibleRenderSurface = createPreparedRenderSurface(
+			"render-surface/0600006c",
+			0x0600006c,
+			0x3154_5844,
+			"Dxt1",
+		);
+		const unrelatedRenderSurface = createPreparedRenderSurface(
+			"render-surface/0600007e",
+			0x0600007e,
+			0x3154_5844,
+			"Dxt1",
+		);
+
+		const requests = createSceneCoverageRequests(
+			{
+				requestRevision: 10,
+				browserDestination: destination,
+				preparedByAssetId: {
+					[preparedTopology.request.assetId]: preparedTopology,
+					[preparedEnvCell.request.assetId]: preparedEnvCell,
+					[material.request.assetId]: material,
+					[visibleRenderSurface.request.assetId]: visibleRenderSurface,
+					[unrelatedRenderSurface.request.assetId]: unrelatedRenderSurface,
+				},
+				pendingAssetIds: [],
+			},
+			"streaming",
+		);
+
+		expect(requests.map((request) => request.assetId)).toContain(
+			"prepared-texture/0600006c?usage=raw&out=dxt1&mips=retail4&cs=source",
+		);
+		expect(requests.map((request) => request.assetId)).not.toContain(
+			"prepared-texture/0600007e?usage=raw&out=dxt1&mips=retail4&cs=source",
+		);
+	});
+
+	it("retains visible prepared compressed textures as active coverage", () => {
+		const destination = parseBrowserLocationInput("016c0155");
+		expect(destination).not.toBeNull();
+
+		const preparedTopology = createPreparedTopology(0x016cffff, [0x016c0155]);
+		const preparedEnvCell = createPreparedEnvCell(0x016c0155, [
+			"material/0800006c",
+		]);
+		const material = createPreparedMaterialRecipe(
+			"material/0800006c",
+			0x0800006c,
+			"render-surface/0600006c",
+		);
+		const renderSurface = createPreparedRenderSurface(
+			"render-surface/0600006c",
+			0x0600006c,
+			0x3554_5844,
+			"Dxt5",
+		);
+
+		expect(
+			deriveSceneCoverageAssetIds(destination, {
+				[preparedTopology.request.assetId]: preparedTopology,
+				[preparedEnvCell.request.assetId]: preparedEnvCell,
+				[material.request.assetId]: material,
+				[renderSurface.request.assetId]: renderSurface,
+			}),
+		).toContain(
+			"prepared-texture/0600006c?usage=raw&out=dxt5&mips=retail4&cs=source",
+		);
+	});
 });
 
 function createPreparedOutdoorLandblock(
@@ -769,6 +851,108 @@ function createPreparedGfxObj(
 		},
 		sortCenter: null,
 		didDegrade: null,
+	};
+	return {
+		request,
+		response: {
+			requestId: request.requestId,
+			assetId,
+			payloadKind: "json",
+			payload,
+		},
+		payload,
+		preparedAt: "2026-05-23T00:00:00.000Z",
+	};
+}
+
+function createPreparedMaterialRecipe(
+	assetId: string,
+	surfaceId: number,
+	renderSurfaceAssetId: string,
+): PreparedAssetRecord {
+	const request = {
+		requestId: `fixture-${assetId}`,
+		assetId,
+		priority: "streaming" as const,
+	};
+	const renderSurfaceId = Number.parseInt(
+		renderSurfaceAssetId.slice("render-surface/".length),
+		16,
+	);
+	const payload = {
+		kind: "material-recipe" as const,
+		sourceAssetKind: "material-recipe" as const,
+		residencyKind: "unknown" as const,
+		provenance: {
+			source: "repo-local-hba" as const,
+			sourceAssetKind: "material-recipe",
+			errorCode: null,
+			detail: null,
+		},
+		surfaceId,
+		surfaceType: 2,
+		source: {
+			kind: "texture" as const,
+			surfaceTextureId: 0x05000001,
+			selectedRenderSurfaceId: renderSurfaceId,
+			paletteId: null,
+			renderSurfaceDefaultPaletteIds: [],
+		},
+		translucency: 1,
+		luminosity: 0,
+		diffuse: 1,
+		dependencies: {
+			surfaceTextureAssetIds: [],
+			renderSurfaceAssetIds: [renderSurfaceAssetId],
+			paletteAssetIds: [],
+		},
+	};
+	return {
+		request,
+		response: {
+			requestId: request.requestId,
+			assetId,
+			payloadKind: "json",
+			payload,
+		},
+		payload,
+		preparedAt: "2026-05-23T00:00:00.000Z",
+	};
+}
+
+function createPreparedRenderSurface(
+	assetId: string,
+	renderSurfaceId: number,
+	formatRaw: number,
+	format: string,
+): PreparedAssetRecord {
+	const request = {
+		requestId: `fixture-${assetId}`,
+		assetId,
+		priority: "streaming" as const,
+	};
+	const payload = {
+		kind: "render-surface" as const,
+		sourceAssetKind: "render-surface" as const,
+		residencyKind: "unknown" as const,
+		provenance: {
+			source: "repo-local-hba" as const,
+			sourceAssetKind: "render-surface",
+			errorCode: null,
+			detail: null,
+		},
+		renderSurfaceId,
+		unknown: 0,
+		width: 128,
+		height: 128,
+		formatRaw,
+		format,
+		sourceByteLength: 8192,
+		sourceBytes: new Uint8Array(8192),
+		defaultPaletteId: null,
+		dependencies: {
+			paletteAssetIds: [],
+		},
 	};
 	return {
 		request,

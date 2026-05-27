@@ -15,6 +15,7 @@
 	import type { SceneCameraFrame } from "./camera";
 	import type {
 		BrowserCameraResidencyChangeHandler,
+		WorldDisplayTextureColorSpaceMode,
 		WorldDisplayTextureFilteringMode,
 		WorldDisplayRenderStyle,
 		WorldRenderCameraFrameChangeHandler,
@@ -75,6 +76,7 @@
 	let transitionPortalMaxDepth = 1;
 	let renderStyle: WorldDisplayRenderStyle = "solid";
 	let textureFilteringMode: WorldDisplayTextureFilteringMode = "anisotropic-4x";
+	let textureColorSpaceMode: WorldDisplayTextureColorSpaceMode = "auto";
 	let detailTexturesEnabled = true;
 
 	onMount(() => {
@@ -102,6 +104,7 @@
 				onCameraResidencyChange,
 				renderStyle,
 				textureFilteringMode,
+				textureColorSpaceMode,
 				detailTexturesEnabled,
 			});
 			rendererController = controller;
@@ -195,6 +198,13 @@
 	): void {
 		textureFilteringMode = nextMode;
 		rendererController?.setTextureFilteringMode(textureFilteringMode);
+	}
+
+	export function setTextureColorSpaceMode(
+		nextMode: WorldDisplayTextureColorSpaceMode,
+	): void {
+		textureColorSpaceMode = nextMode;
+		rendererController?.setTextureColorSpaceMode(textureColorSpaceMode);
 	}
 
 	export function setDetailTexturesEnabled(nextEnabled: boolean): void {

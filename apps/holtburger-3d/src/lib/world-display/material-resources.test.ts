@@ -16,6 +16,7 @@ import type {
 	PreparedMaterialRecipePayload,
 	PreparedPalettePayload,
 	PreparedRenderSurfacePayload,
+	PreparedTexturePayload,
 } from "../assets/types";
 import type { AssetErrorCode, AssetLookupRequestDto } from "../host/contracts";
 import {
@@ -388,6 +389,42 @@ describe("world material resource cache", () => {
 
 		const material = plan.materials[0] as MeshStandardMaterial;
 		expect(material.map).toBeInstanceOf(CompressedTexture);
+		cache.dispose();
+	});
+
+	it("uses prepared compressed mip chains when available", () => {
+		const cache = new WorldMaterialResourceCache(undefined, {
+			supportsS3tc: true,
+			supportsS3tcSrgb: true,
+		});
+		const materialAssetId = formatMaterialAssetId(0x08000015);
+		const renderSurfaceAssetId = "render-surface/06000015";
+		const preparedTextureAssetId =
+			"prepared-texture/06000015?usage=raw&out=dxt1&mips=retail4&cs=source";
+		const plan = cache.resolveMaterialPlan({
+			slots: [{ slotIndex: 0, surfaceId: 0x08000015, materialAssetId }],
+			appearance: createBaseMaterialAppearanceContext("base"),
+			preparedByAssetId: {
+				[materialAssetId]: createPreparedAsset(
+					materialAssetId,
+					createTextureMaterialRecipe(0x08000015, 0x06000015),
+				),
+				[renderSurfaceAssetId]: createPreparedAsset(
+					renderSurfaceAssetId,
+					createDxtRenderSurfacePayload(0x06000015),
+				),
+				[preparedTextureAssetId]: createPreparedAsset(
+					preparedTextureAssetId,
+					createPreparedDxtTexturePayload(0x06000015),
+				),
+			},
+			fallbackColorKey: "part",
+		});
+
+		const texture = (plan.materials[0] as MeshStandardMaterial)
+			.map as CompressedTexture;
+		expect(texture.mipmaps).toHaveLength(2);
+		expect(texture.mipmaps[1]).toMatchObject({ width: 2, height: 2 });
 		cache.dispose();
 	});
 
@@ -1223,6 +1260,62 @@ function createDxtRenderSurfacePayload(
 	};
 }
 
+function createPreparedDxtTexturePayload(
+	renderSurfaceId: number,
+): PreparedTexturePayload {
+	return {
+		kind: "prepared-texture",
+		sourceAssetKind: "prepared-texture",
+		residencyKind: "unknown",
+		provenance: {
+			source: "repo-local-hba",
+			sourceAssetKind: "prepared-texture",
+			errorCode: null,
+			detail: null,
+		},
+		renderSurfaceId,
+		usage: "raw",
+		outputFormat: "dxt1",
+		mipPolicy: "retail4",
+		colorSpace: "source",
+		sourceFormatRaw: 0x3154_5844,
+		sourceFormat: "Dxt1",
+		sourceWidth: 4,
+		sourceHeight: 4,
+		sourceByteLength: 8,
+		sourceHash: "test-source",
+		levels: [
+			{
+				level: 0,
+				width: 4,
+				height: 4,
+				formatRaw: 0x3154_5844,
+				format: "Dxt1",
+				byteLength: 8,
+				bytes: new Uint8Array(8),
+			},
+			{
+				level: 1,
+				width: 2,
+				height: 2,
+				formatRaw: 0x3154_5844,
+				format: "Dxt1",
+				byteLength: 8,
+				bytes: new Uint8Array(8),
+			},
+		],
+		dependencies: { renderSurfaceAssetIds: [] },
+		diagnostics: {
+			generatedLevelCount: 2,
+			generatedByteLength: 16,
+			decodeMs: 0,
+			downsampleMs: 0,
+			encodeMs: 0,
+			totalMs: 0,
+		},
+	};
+}
+
 function createIndexedRenderSurfacePayload(
 	renderSurfaceId: number,
 	options: {
@@ -1260,6 +1353,7 @@ function createPreparedAsset(
 	payload:
 		| PreparedMaterialRecipePayload
 		| PreparedRenderSurfacePayload
+		| PreparedTexturePayload
 		| PreparedPalettePayload,
 	preparedAt = "2026-05-23T00:00:00.000Z",
 ): PreparedAssetRecord {

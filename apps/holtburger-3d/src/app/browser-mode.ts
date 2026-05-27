@@ -29,6 +29,11 @@ export type BrowserTextureFilteringMode =
 	| "nearest"
 	| "linear"
 	| "anisotropic-4x";
+export type BrowserTextureColorSpaceMode =
+	| "auto"
+	| "srgb"
+	| "linear"
+	| "compressed-linear";
 type BrowserDestinationSource = "manual" | "landblock-pick" | "follow-camera";
 export type BrowserLandblockInputMode = "outdoor" | "dungeon";
 type NorthSouthHemisphere = "N" | "S";
@@ -81,6 +86,7 @@ export interface BrowserModeState {
 	highlightPortalTargets: boolean;
 	renderStyle: BrowserRenderStyle;
 	textureFilteringMode: BrowserTextureFilteringMode;
+	textureColorSpaceMode: BrowserTextureColorSpaceMode;
 	detailTexturesEnabled: boolean;
 	page: BrowserPageId;
 }
@@ -115,6 +121,7 @@ export function createBrowserModeState(): BrowserModeState {
 		highlightPortalTargets: false,
 		renderStyle: "solid",
 		textureFilteringMode: "anisotropic-4x",
+		textureColorSpaceMode: "auto",
 		detailTexturesEnabled: true,
 		page: DEFAULT_BROWSER_DESTINATION
 			? "destination-preview"
@@ -340,6 +347,16 @@ export function updateBrowserTextureFilteringMode(
 	};
 }
 
+export function updateBrowserTextureColorSpaceMode(
+	browserMode: BrowserModeState,
+	textureColorSpaceMode: BrowserTextureColorSpaceMode,
+): BrowserModeState {
+	return {
+		...browserMode,
+		textureColorSpaceMode,
+	};
+}
+
 export function updateBrowserDetailTexturesEnabled(
 	browserMode: BrowserModeState,
 	detailTexturesEnabled: boolean,
@@ -385,6 +402,7 @@ export function previewBrowserLocation(
 		highlightPortalTargets: browserMode.highlightPortalTargets,
 		renderStyle: browserMode.renderStyle,
 		textureFilteringMode: browserMode.textureFilteringMode,
+		textureColorSpaceMode: browserMode.textureColorSpaceMode,
 		detailTexturesEnabled: browserMode.detailTexturesEnabled,
 		page: "destination-preview",
 	};
@@ -421,6 +439,7 @@ export function selectBrowserLandblockDestination(
 		highlightPortalTargets: browserMode.highlightPortalTargets,
 		renderStyle: browserMode.renderStyle,
 		textureFilteringMode: browserMode.textureFilteringMode,
+		textureColorSpaceMode: browserMode.textureColorSpaceMode,
 		detailTexturesEnabled: browserMode.detailTexturesEnabled,
 		page: "destination-preview",
 	};

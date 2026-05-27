@@ -1,5 +1,8 @@
 use crate::adapter::json::SerializedOutdoorTerrainSource;
 use crate::adapter::json::*;
+use crate::adapter::prepared_texture::{
+    PreparedTexturePayload, serialize_prepared_texture_payload,
+};
 use crate::adapter::service::{ASSET_BINARY_HEADER_LEN, ASSET_BINARY_MAGIC, ASSET_BINARY_VERSION};
 use crate::contracts::*;
 use holtburger_content::*;
@@ -254,6 +257,20 @@ pub fn serialize_content_asset_binary_response(
             "binary asset lookup does not support {unsupported:?} for {}",
             request.asset_id
         ),
+    })
+}
+
+pub fn serialize_prepared_texture_binary_response(
+    request: AssetLookupRequestDto,
+    prepared_texture: PreparedTexturePayload,
+    path_prefix: &str,
+    writer: &mut BinaryAssetSectionWriter,
+) -> anyhow::Result<AssetLookupResponseDto> {
+    Ok(AssetLookupResponseDto {
+        request_id: request.request_id,
+        asset_id: request.asset_id,
+        payload_kind: AssetPayloadKindDto::Json,
+        payload: serialize_prepared_texture_payload(&prepared_texture, path_prefix, writer),
     })
 }
 

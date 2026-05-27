@@ -325,6 +325,29 @@ describe("asset response dependencies", () => {
 		).toEqual([{ assetId: "render-surface/06000010" }]);
 	});
 
+	it("does not request derived prepared textures from generic render-surface graph dependencies", () => {
+		expect(
+			getPreparedAssetDependencies(
+				createPreparedAssetRecord("render-surface/06000010", {
+					kind: "render-surface",
+					residencyKind: "unknown",
+					sourceAssetKind: "render-surface",
+					renderSurfaceId: 0x06000010,
+					unknown: 0,
+					width: 128,
+					height: 128,
+					formatRaw: 0x3154_5844,
+					format: "Dxt1",
+					sourceByteLength: 8192,
+					sourceBytes: new Uint8Array(8192),
+					defaultPaletteId: null,
+					dependencies: { paletteAssetIds: [] },
+					provenance,
+				}),
+			),
+		).toEqual([]);
+	});
+
 	it("returns no dependencies for unknown payloads", () => {
 		expect(
 			getAssetResponseDependencies(

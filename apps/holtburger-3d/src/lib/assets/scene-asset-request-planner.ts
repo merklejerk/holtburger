@@ -14,7 +14,11 @@ import {
 	formatTerrainMaterialAssetId,
 	normalizeOutdoorLandblockId,
 } from "../landblocks";
-import type { PreparedAssetRecord } from "./types";
+import {
+	formatPreparedTextureAssetId,
+	preparedDxtOutputFormat,
+	type PreparedAssetRecord,
+} from "./types";
 import {
 	deriveBrowserFocusedStructuredInteriorMembershipPolicy,
 	deriveStructuredInteriorCoverage,
@@ -95,6 +99,14 @@ export function createSceneCoverageRequests(
 				pendingAssetIds,
 				options,
 			),
+			...createVisiblePreparedTextureRequests(
+				requestRevision,
+				browserDestination,
+				priority,
+				preparedByAssetId,
+				pendingAssetIds,
+				options,
+			),
 		];
 	}
 
@@ -121,12 +133,21 @@ export function createSceneCoverageRequests(
 			options,
 			interest,
 		),
+		...createVisiblePreparedTextureRequests(
+			requestRevision,
+			browserDestination,
+			priority,
+			preparedByAssetId,
+			pendingAssetIds,
+			options,
+			interest,
+		),
 	];
 }
 
 export function deriveSceneCoverageAssetIds(
 	browserDestination: BrowserLocationSelection | null,
-	_preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
 	options: OutdoorSceneRequestOptions = DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS,
 ): string[] {
 	if (!browserDestination) {
@@ -134,7 +155,17 @@ export function deriveSceneCoverageAssetIds(
 	}
 
 	if (isIndoorBrowserDestination(browserDestination)) {
-		return [formatLandblockTopologyAssetId(browserDestination.landblockId)];
+		return [
+			...new Set([
+				formatLandblockTopologyAssetId(browserDestination.landblockId),
+				...collectVisiblePreparedTextureAssetIds({
+					browserDestination,
+					preparedByAssetId,
+					options,
+					interest: null,
+				}),
+			]),
+		].sort();
 	}
 
 	const interest = deriveOutdoorInterestForBrowserDestination(
@@ -150,6 +181,12 @@ export function deriveSceneCoverageAssetIds(
 				formatLandblockOutdoorAssetId,
 			),
 			...interest.envCellLandblockIds.map(formatLandblockTopologyAssetId),
+			...collectVisiblePreparedTextureAssetIds({
+				browserDestination,
+				preparedByAssetId,
+				options,
+				interest,
+			}),
 		]),
 	].sort();
 }
@@ -319,6 +356,30 @@ function createLandblockTopologyCoverageRequests(
 		requestRevision,
 		priority,
 		`${describeRequiredBrowserDestinationIdentity(browserDestination)}-topology`,
+		preparedByAssetId,
+		pendingAssetIds,
+	);
+}
+
+function createVisiblePreparedTextureRequests(
+	requestRevision: number,
+	browserDestination: BrowserLocationSelection,
+	priority: AssetPriority,
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	pendingAssetIds: string[],
+	options: OutdoorSceneRequestOptions,
+	interest: NormalizedOutdoorSceneInterest | null = null,
+): AssetLookupRequestDto[] {
+	return createUnpreparedRequests(
+		collectVisiblePreparedTextureAssetIds({
+			browserDestination,
+			preparedByAssetId,
+			options,
+			interest,
+		}),
+		requestRevision,
+		priority,
+		`${describeRequiredBrowserDestinationIdentity(browserDestination)}-prepared-texture`,
 		preparedByAssetId,
 		pendingAssetIds,
 	);
@@ -662,6 +723,138 @@ function collectOutdoorVisibleMaterialAssetIds(
 			...envCellStaticDependencies.materialInputAssetIds,
 		],
 		new Set(linkedInteriorCoverage.envCellIds),
+	);
+}
+
+function collectVisiblePreparedTextureAssetIds(options: {
+	browserDestination: BrowserLocationSelection;
+	preparedByAssetId: Record<string, PreparedAssetRecord>;
+	options: OutdoorSceneRequestOptions;
+	interest: NormalizedOutdoorSceneInterest | null;
+}): string[] {
+	const renderSurfaceAssetIds = collectVisibleRenderSurfaceAssetIds(options);
+	return uniqueSortedAssetIds(
+		renderSurfaceAssetIds.flatMap((assetId) => {
+			const asset = options.preparedByAssetId[assetId];
+			if (asset?.payload.kind !== "render-surface") {
+				return [];
+			}
+			const outputFormat = preparedDxtOutputFormat(asset.payload.formatRaw);
+			if (!outputFormat) {
+				return [];
+			}
+			return [
+				formatPreparedTextureAssetId({
+					renderSurfaceId: asset.payload.renderSurfaceId,
+					usage: "raw",
+					outputFormat,
+					mipPolicy: "retail4",
+					colorSpace: "source",
+				}),
+			];
+		}),
+	);
+}
+
+function collectVisibleRenderSurfaceAssetIds(options: {
+	browserDestination: BrowserLocationSelection;
+	preparedByAssetId: Record<string, PreparedAssetRecord>;
+	options: OutdoorSceneRequestOptions;
+	interest: NormalizedOutdoorSceneInterest | null;
+}): string[] {
+	const materialAssetIds = isIndoorBrowserDestination(options.browserDestination)
+		? collectIndoorVisibleMaterialAssetIds(
+				options.browserDestination,
+				options.preparedByAssetId,
+			)
+		: collectOutdoorVisibleMaterialAssetIds(
+				options.browserDestination,
+				options.preparedByAssetId,
+				options.options,
+			);
+	const tableAssetIds = isIndoorBrowserDestination(options.browserDestination)
+		? collectIndoorVisibleRegionRenderProfileAssetIds(
+				options.browserDestination,
+				options.preparedByAssetId,
+			)
+		: collectOutdoorVisibleRenderResourceTableAssetIds(
+				options.browserDestination,
+				options.preparedByAssetId,
+				options.options,
+				options.interest,
+			);
+	return uniqueSortedAssetIds(
+		collectRenderSurfaceAssetIdsFromAssets(options.preparedByAssetId, [
+			...materialAssetIds,
+			...tableAssetIds,
+		]),
+	);
+}
+
+function collectIndoorVisibleRegionRenderProfileAssetIds(
+	browserDestination: BrowserLocationSelection,
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+): string[] {
+	if (!isIndoorBrowserDestination(browserDestination)) {
+		return [];
+	}
+	const activeEnvCellIds = deriveStructuredInteriorCoverage(
+		deriveBrowserFocusedStructuredInteriorMembershipPolicy(
+			browserDestination.envCellId,
+		),
+		preparedByAssetId,
+	).envCellIds;
+	return collectEnvCellRegionRenderProfileAssetIds(
+		preparedByAssetId,
+		activeEnvCellIds,
+	);
+}
+
+function collectOutdoorVisibleRenderResourceTableAssetIds(
+	browserDestination: BrowserLocationSelection,
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	options: OutdoorSceneRequestOptions,
+	interest: NormalizedOutdoorSceneInterest | null,
+): string[] {
+	const outdoorInterest =
+		interest ??
+		deriveOutdoorInterestForBrowserDestination(browserDestination, options);
+	const outdoorLandblockIds = unionOutdoorSceneLandblockIds(
+		deriveFocusedOutdoorCoverageLandblockIds(outdoorInterest),
+		deriveFarOutdoorCoverageLandblockIds(outdoorInterest),
+	);
+	const envCellIds = [
+		...deriveTopologyEnvCellIdsForLandblocks(
+			preparedByAssetId,
+			new Set(outdoorInterest.envCellLandblockIds),
+		),
+	];
+	return uniqueSortedAssetIds([
+		...collectTerrainMaterialAssetIds(preparedByAssetId, outdoorLandblockIds),
+		...collectOutdoorRegionRenderProfileAssetIds(
+			preparedByAssetId,
+			outdoorLandblockIds,
+		),
+		...collectEnvCellRegionRenderProfileAssetIds(preparedByAssetId, envCellIds),
+	]);
+}
+
+function collectRenderSurfaceAssetIdsFromAssets(
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	assetIds: readonly string[],
+): string[] {
+	return uniqueSortedAssetIds(
+		assetIds.flatMap((assetId) => {
+			const payload = preparedByAssetId[assetId]?.payload;
+			if (
+				payload?.kind !== "material-recipe" &&
+				payload?.kind !== "terrain-material" &&
+				payload?.kind !== "region-render-profile"
+			) {
+				return [];
+			}
+			return payload.dependencies.renderSurfaceAssetIds;
+		}),
 	);
 }
 

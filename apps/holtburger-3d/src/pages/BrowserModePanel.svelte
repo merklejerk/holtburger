@@ -7,6 +7,7 @@
 		MAX_TRANSITION_PORTAL_MAX_DEPTH,
 		MIN_BROWSER_LOD_RADIUS,
 		MIN_TRANSITION_PORTAL_MAX_DEPTH,
+		type BrowserTextureColorSpaceMode,
 		type BrowserRenderStyle,
 		type BrowserNavigationFocusMode,
 		type BrowserTextureFilteringMode,
@@ -180,6 +181,13 @@
 		const select = event.currentTarget as HTMLSelectElement;
 		frontendState.updateBrowserTextureFilteringMode(
 			select.value as BrowserTextureFilteringMode,
+		);
+	}
+
+	function handleTextureColorSpaceModeChange(event: Event): void {
+		const select = event.currentTarget as HTMLSelectElement;
+		frontendState.updateBrowserTextureColorSpaceMode(
+			select.value as BrowserTextureColorSpaceMode,
 		);
 	}
 
@@ -588,6 +596,19 @@
 						<option value="nearest">Nearest</option>
 						<option value="linear">Linear</option>
 						<option value="anisotropic-4x">Anisotropic 4x</option>
+					</select>
+				</label>
+				<label class="browser-form__field" for="texture-color-space-mode">
+					<span>Color space</span>
+					<select
+						id="texture-color-space-mode"
+						value={$frontendState.browserMode.textureColorSpaceMode}
+						onchange={handleTextureColorSpaceModeChange}
+					>
+						<option value="auto">Auto</option>
+						<option value="srgb">sRGB</option>
+						<option value="linear">Linear</option>
+						<option value="compressed-linear">Compressed linear</option>
 					</select>
 				</label>
 				<label class="browser-form__field browser-form__field--checkbox">

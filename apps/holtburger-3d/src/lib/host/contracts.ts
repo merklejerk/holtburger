@@ -903,6 +903,49 @@ export type RenderSurfacePayloadDto = z.infer<
 	typeof renderSurfacePayloadDtoSchema
 >;
 
+export const preparedTextureMipLevelDtoSchema = z.object({
+	level: z.number().int().nonnegative(),
+	width: z.number().int().positive(),
+	height: z.number().int().positive(),
+	formatRaw: z.number().int().nonnegative(),
+	format: z.string().min(1),
+	byteLength: z.number().int().nonnegative(),
+	bytes: z.instanceof(Uint8Array),
+});
+
+export const preparedTexturePayloadDtoSchema = z.object({
+	kind: z.literal("prepared-texture"),
+	residencyKind: z.literal("unknown"),
+	sourceAssetKind: z.literal("prepared-texture"),
+	renderSurfaceId: z.number().int().nonnegative(),
+	usage: z.enum(["color", "detail", "mask", "raw"]),
+	outputFormat: z.enum(["dxt1", "dxt3", "dxt5"]),
+	mipPolicy: z.literal("retail4"),
+	colorSpace: z.enum(["srgb", "data", "source"]),
+	sourceFormatRaw: z.number().int().nonnegative(),
+	sourceFormat: z.string().min(1),
+	sourceWidth: z.number().int().positive(),
+	sourceHeight: z.number().int().positive(),
+	sourceByteLength: z.number().int().nonnegative(),
+	sourceHash: z.string().min(1),
+	levels: z.array(preparedTextureMipLevelDtoSchema).min(1),
+	dependencies: z.object({
+		renderSurfaceAssetIds: z.array(z.string().min(1)),
+	}),
+	diagnostics: z.object({
+		generatedLevelCount: z.number().int().positive(),
+		generatedByteLength: z.number().int().nonnegative(),
+		decodeMs: z.number().nonnegative(),
+		downsampleMs: z.number().nonnegative(),
+		encodeMs: z.number().nonnegative(),
+		totalMs: z.number().nonnegative(),
+	}),
+	provenance: assetProvenanceDtoSchema,
+});
+export type PreparedTexturePayloadDto = z.infer<
+	typeof preparedTexturePayloadDtoSchema
+>;
+
 const uint32ArrayDtoSchema = z
 	.union([
 		z.instanceof(Uint32Array),

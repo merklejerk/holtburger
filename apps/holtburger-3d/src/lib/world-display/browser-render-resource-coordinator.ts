@@ -1,5 +1,6 @@
 import type {
 	BrowserLocationSelection,
+	BrowserTextureColorSpaceMode,
 	BrowserTextureFilteringMode,
 } from "../../app/browser-mode";
 import { browserDestinationToInteriorCellId } from "../../app/browser-mode";
@@ -84,6 +85,7 @@ export interface BrowserRenderResourceCoordinatorInput {
 	transitionPortalMaxDepth: number;
 	renderStyle: WorldDisplayRenderStyle;
 	textureFilteringMode: BrowserTextureFilteringMode;
+	textureColorSpaceMode: BrowserTextureColorSpaceMode;
 	detailTexturesEnabled: boolean;
 	showPortalPolygons: boolean;
 	showCellIndicators: boolean;
@@ -139,6 +141,7 @@ export interface BrowserRenderResourceSurface {
 	setTransitionPortalMaxDepth(maxDepth: number): void;
 	setRenderStyle(renderStyle: WorldDisplayRenderStyle): void;
 	setTextureFilteringMode(mode: BrowserTextureFilteringMode): void;
+	setTextureColorSpaceMode(mode: BrowserTextureColorSpaceMode): void;
 	setDetailTexturesEnabled(enabled: boolean): void;
 }
 
@@ -413,6 +416,11 @@ export class BrowserRenderResourceCoordinator {
 				() => surface.setTextureFilteringMode(input.textureFilteringMode),
 			);
 			this.applySurfaceResource(
+				"texture-color-space-mode",
+				input.textureColorSpaceMode,
+				() => surface.setTextureColorSpaceMode(input.textureColorSpaceMode),
+			);
+			this.applySurfaceResource(
 				"detail-textures-enabled",
 				String(input.detailTexturesEnabled),
 				() => surface.setDetailTexturesEnabled(input.detailTexturesEnabled),
@@ -463,6 +471,7 @@ type BrowserRenderResourceSurfaceKey =
 	| "transition-portal-depth"
 	| "render-style"
 	| "texture-filtering-mode"
+	| "texture-color-space-mode"
 	| "detail-textures-enabled";
 
 function describeAssetStateSignature(state: AssetChannelState): string {

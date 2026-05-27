@@ -216,6 +216,7 @@ function usesBinaryAssetLookup(assetId: string): boolean {
 		/^landblock\/[0-9a-fA-F]{8}\/(?:outdoor|topology)$/.test(assetId) ||
 		/^env-cell\/[0-9a-fA-F]{8}$/.test(assetId) ||
 		assetId.startsWith("gfx-obj/") ||
+		assetId.startsWith("prepared-texture/") ||
 		assetId.startsWith("render-surface/") ||
 		assetId.startsWith("palette/")
 	);

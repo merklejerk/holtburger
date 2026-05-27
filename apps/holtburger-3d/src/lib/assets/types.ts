@@ -208,8 +208,7 @@ interface PreparedEnvCellResidencyBvh {
 
 type PreparedOutdoorBvhItem =
 	| { kind: "static"; instanceId: string }
-	| { kind: "building"; instanceId: string }
-	| { kind: "building-portal-anchor"; portalId: string };
+	| { kind: "building"; instanceId: string };
 
 interface PreparedOutdoorBvh {
 	coordinateSpace: "landblock-render-local";

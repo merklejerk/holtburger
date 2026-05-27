@@ -274,10 +274,6 @@ const preparedEnvCellResidencyBvhDtoSchema = z.object({
 const preparedOutdoorBvhItemDtoSchema = z.discriminatedUnion("kind", [
 	z.object({ kind: z.literal("static"), instanceId: z.string().min(1) }),
 	z.object({ kind: z.literal("building"), instanceId: z.string().min(1) }),
-	z.object({
-		kind: z.literal("building-portal-anchor"),
-		portalId: z.string().min(1),
-	}),
 ]);
 
 const preparedOutdoorBvhDtoSchema = z.object({

@@ -500,31 +500,88 @@ Introduced cleanup targets:
 
 ### Phase 4: Static Instanced Batch Bindings
 
+Status: completed.
+
 Bind existing static `InstancedMesh` groups to prepared BVH item keys.
 
 For each `staticRenderableGroupMeshes` entry:
 
-- read the group parts from `staticRenderableScene.partsByRenderGroupKey`;
-- convert each part to a scoped item key:
+- Done: `syncStaticRenderableMeshes` now reads group parts from
+  `staticRenderableScene.partsByRenderGroupKey` and registers each live `InstancedMesh` in the
+  static render batch candidate registry.
+- Done: stale static render batches unregister when their mesh is removed, and the registry clears
+  when materialized static meshes are rebuilt or disposed.
+- Done: static group key derivation lives in `static-renderable-bvh-bindings.ts` instead of being
+  inlined into the renderer.
+- Done: each static part converts to a scoped item key:
   - outdoor scenery/building/generated scenery: source landblock id plus `instanceId`;
   - indoor static: `owningEnvCellId + instanceId`;
-- register the mesh as one batch with all unique item keys.
+- Done: each static group registers as one batch with all unique item keys.
+- Done: if any part cannot be converted to a scoped key, the whole group registers as
+  fallback-included with an explicit reason.
 
 On camera update:
 
-- include the mesh's batch id in the base-pass candidate set when any referenced item key is visible;
-- keep existing Three.js frustum culling enabled;
-- do not update `instanceMatrix`, `instanceColor`, or `mesh.count` due only to camera movement.
-- do not bind a group to item keys if any part lacks a scoped key; fallback-include that group and
+- Done: prepared-BVH visibility now returns a snapshot with both debug metrics and the visible item
+  key set, so Phase 4 reuses the same query results instead of running traversal twice.
+- Done: static batch candidate selection runs once per rendered frame from that visible item-key
+  set.
+- Done: base-pass rendering applies the candidate set to static `InstancedMesh.visible` only while
+  rendering the base node, then restores all static meshes visible before later graph nodes.
+- Done: Three.js object frustum culling remains enabled.
+- Done: camera movement does not update `instanceMatrix`, `instanceColor`, or `mesh.count`; it only
+  selects which existing batches are visible for the base pass.
+- Done: groups with unkeyed parts fallback-include and count as fallback-included batches.
+- Done: if a static mesh somehow lacks a matching registry binding, the base pass conservatively
+  keeps it visible instead of creating a false negative.
+
+Original requirements:
+
+- Include the mesh's batch id in the base-pass candidate set when any referenced item key is visible.
+- Keep existing Three.js frustum culling enabled.
+- Do not update `instanceMatrix`, `instanceColor`, or `mesh.count` due only to camera movement.
+- Do not bind a group to item keys if any part lacks a scoped key; fallback-include that group and
   count it as an unbound/fallback-included batch.
 
 Add metrics:
 
-- total static render batches;
-- BVH-candidate static render batches;
-- total static instance keys represented by batches;
-- BVH-visible static instance keys;
-- unbound/fallback-included static render batches.
+- Done: total static render batches.
+- Done: BVH-candidate static render batches.
+- Done: total static instance keys represented by batches.
+- Done: BVH-visible static instance keys.
+- Done: fallback-included static render batches.
+
+Decisions and course corrections:
+
+- The current renderer has shared scene rendering for base, diagnostic, debug, and portal composite
+  passes. Applying static culling as a permanent global `Object3D.visible` state would leak into
+  portal composites, so Phase 4 scopes the visibility shim to base-pass render calls and restores
+  visibility immediately after each base pass.
+- Keep the durable target as explicit pass candidate sets. The `Object3D.visible` shim is a
+  migration bridge for static base-pass rendering, not the final renderer architecture.
+- Query fallback reasons still include every static batch in the static registry. This is
+  conservative and correct, but broad; domain-scoped fallback reasons should be considered once
+  more batch classes share the registry.
+- `visibleStaticGroupMeshCount` remains an object-visibility diagnostic after visibility restoration.
+  Use `staticBvhCandidateBatchCount/staticRenderBatchCount` for the actual Phase 4 culling signal.
+
+Validation:
+
+```text
+npm run test:ts -- --run static-renderable-bvh-bindings render-batch-candidates prepared-bvh-metrics prepared-bvh-visibility
+npm run check
+npm run lint:ts
+```
+
+Introduced cleanup targets:
+
+- The renderer now has a base-pass visibility shim for statics. Phase 5 should avoid extending that
+  shim blindly to every object class; prefer pass-scoped candidate plumbing where practical.
+- The browser debug BVH row is carrying both item-key metrics and static batch metrics. Before
+  adding Phase 5/6 metrics, split the debug presentation into grouped rows.
+- Static batch fallback metrics count explicit, unbound, and query-fallback batches together in the
+  public debug contract. Keep the detailed counters inside the registry until the UI needs the
+  breakdown.
 
 ### Phase 5: Non-Instanced Prepared BVH Bindings
 

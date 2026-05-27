@@ -45,6 +45,12 @@ export interface PreparedBvhDebugMetrics {
 	queryTimeMs: number;
 }
 
+export interface PreparedBvhVisibilitySnapshot {
+	metrics: PreparedBvhDebugMetrics;
+	visibleItemKeys: ReadonlySet<RenderBvhItemKey>;
+	fallbackReasons: readonly string[];
+}
+
 export function createEmptyPreparedBvhDebugMetrics(): PreparedBvhDebugMetrics {
 	return {
 		terrainBvhVisibleItemCount: 0,
@@ -62,6 +68,14 @@ export function createEmptyPreparedBvhDebugMetrics(): PreparedBvhDebugMetrics {
 	};
 }
 
+export function createEmptyPreparedBvhVisibilitySnapshot(): PreparedBvhVisibilitySnapshot {
+	return {
+		metrics: createEmptyPreparedBvhDebugMetrics(),
+		visibleItemKeys: new Set(),
+		fallbackReasons: [],
+	};
+}
+
 export function derivePreparedBvhDebugMetrics(options: {
 	assetState: AssetChannelState;
 	terrainScene: TerrainSceneModel;
@@ -71,6 +85,18 @@ export function derivePreparedBvhDebugMetrics(options: {
 	frustum: RenderFrustum;
 	now?: () => number;
 }): PreparedBvhDebugMetrics {
+	return derivePreparedBvhVisibilitySnapshot(options).metrics;
+}
+
+export function derivePreparedBvhVisibilitySnapshot(options: {
+	assetState: AssetChannelState;
+	terrainScene: TerrainSceneModel;
+	staticRenderableScene: StaticRenderableSceneModel;
+	structuredInteriorScene: StructuredInteriorSceneModel;
+	renderChunkTransforms: readonly RenderChunkTransform[];
+	frustum: RenderFrustum;
+	now?: () => number;
+}): PreparedBvhVisibilitySnapshot {
 	const now = options.now ?? defaultNow;
 	const startedAt = now();
 	const metrics = createEmptyPreparedBvhDebugMetrics();
@@ -198,7 +224,11 @@ export function derivePreparedBvhDebugMetrics(options: {
 		.slice(0, FALLBACK_REASON_SAMPLE_LIMIT);
 	metrics.queryTimeMs = Math.max(0, now() - startedAt);
 
-	return metrics;
+	return {
+		metrics,
+		visibleItemKeys,
+		fallbackReasons,
+	};
 }
 
 function findActiveOutdoorPayloads(

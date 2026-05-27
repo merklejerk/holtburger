@@ -670,7 +670,7 @@ Introduced cleanup targets:
 
 ### Phase 5.5: Scoped Candidate Validation
 
-Status: pending.
+Status: completed.
 
 Before implementing portal-clipped BVH queries, validate that the Phase 4/5 base-pass candidate
 path is not hiding required terrain, static, structured, debug, or portal-mask objects in ordinary
@@ -678,14 +678,30 @@ camera movement.
 
 Responsibilities:
 
-- Compare debug metrics for outdoor town-facing, turned-away, indoor, and portal-visible views.
-- Verify candidate batch counts move with visible item-key counts and fallback-included batch counts
+- Done: compared debug metrics for outdoor town-facing, turned-away, indoor, and portal-visible
+  views.
+- Done: verified candidate batch counts move with visible item-key counts and fallback-included batch counts
   stay explainable.
-- Confirm screenshots do not show base-pass false negatives for terrain, outdoor statics, indoor
-  statics, structured interiors, debug overlays, or transition portal aperture masks.
-- Decide whether the legacy `RenderSpatialIndex` object-visible path should remain through Phase 6
-  or be narrowed after prepared-BVH validation.
-- If metrics are too hard to read, split the debug BVH display before adding portal-pass metrics.
+- Done: confirmed screenshots do not show base-pass false negatives for terrain, outdoor statics,
+  indoor statics, structured interiors, debug overlays, or transition portal aperture masks.
+- Done: query time remained in the low single-digit millisecond range in validated views.
+- Done: confirmed `renderPassCount` is graph-node count rather than portal recursion depth. At
+  transition depth `4`, outdoor rendering normally reports `14` graph passes: one base pass, four
+  aperture-mask passes, four aperture-depth-reset passes, four portal composite passes, and one debug
+  overlay pass.
+- Decision: keep the legacy `RenderSpatialIndex` object-visible path through Phase 6 as a
+  conservative backstop while portal composites move to pass-scoped prepared-BVH candidate sets.
+- Deferred: split the debug BVH/render display before or during Phase 6 metrics work if the added
+  portal-pass counters make the panel hard to scan.
+
+Decisions and course corrections:
+
+- Do not treat `14` passes at transition depth `4` as a Phase 5.5 performance failure. The important
+  Phase 5.5 validation signals are visual correctness, explainable candidate counts, zero ordinary
+  fallback churn, and low prepared-BVH query time.
+- Phase 6 should focus performance work on the four portal composite passes. The aperture mask and
+  depth-reset passes render small pass-local aperture scenes and are not the primary source of scene
+  traversal/draw cost.
 
 ### Phase 6: Portal-Clipped BVH Queries
 

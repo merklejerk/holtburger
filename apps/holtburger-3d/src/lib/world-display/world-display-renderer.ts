@@ -47,6 +47,7 @@ import type {
 	RenderSpatialIndexQuery,
 	RenderSpatialItemKind,
 	RenderSpatialPick,
+	RenderVec3,
 } from "./render-spatial-index";
 import {
 	debugCellSpatialItemId,
@@ -150,6 +151,8 @@ import {
 	type PreparedBvhDebugMetrics,
 	type PreparedBvhVisibilitySnapshot,
 } from "./prepared-bvh-metrics";
+import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
+import { derivePortalClippedBvhVisibility } from "./portal-clipped-bvh-candidates";
 import {
 	createEmptyRenderBatchCandidateSelection,
 	createRenderBatchCandidateRegistry,
@@ -286,6 +289,7 @@ interface VisibleTransitionPortalWork {
 	direction: TransitionPortalWorkItem["direction"];
 	entryEnvCellId: number;
 	requestedInteriorEnvCellIds: readonly number[];
+	apertureWorldPoints: readonly RenderVec3[];
 	screenAreaPx: number;
 	maskMesh: Mesh;
 }
@@ -606,6 +610,11 @@ export function createWorldDisplayRenderer(
 		createEmptyRenderBatchCandidateSelection();
 	let latestPortalMaskBatchCandidateSelection: RenderBatchCandidateSelection =
 		createEmptyRenderBatchCandidateSelection();
+	let latestPortalCompositeVisibleItemKeyCount = 0;
+	let latestPortalCompositeStaticCandidateBatchCount = 0;
+	let latestPortalCompositeTerrainCandidateBatchCount = 0;
+	let latestPortalCompositeInteriorCandidateBatchCount = 0;
+	let latestPortalCompositeFallbackIncludedBatchCount = 0;
 	let latestRenderDebugMetrics: WorldRenderDebugMetrics =
 		createRenderDebugMetrics(renderer, {
 			renderPassCount: 0,
@@ -645,6 +654,11 @@ export function createWorldDisplayRenderer(
 			portalMaskRenderBatchCount: 0,
 			portalMaskBvhCandidateBatchCount: 0,
 			nonStaticBvhFallbackIncludedBatchCount: 0,
+			portalCompositeVisibleItemKeyCount: 0,
+			portalCompositeStaticCandidateBatchCount: 0,
+			portalCompositeTerrainCandidateBatchCount: 0,
+			portalCompositeInteriorCandidateBatchCount: 0,
+			portalCompositeFallbackIncludedBatchCount: 0,
 			structuredInteriorMeshCount: 0,
 			visibleStructuredInteriorMeshCount: 0,
 			...latestPreparedBvhMetrics,
@@ -977,6 +991,11 @@ export function createWorldDisplayRenderer(
 				queryFallbackReasons:
 					latestPreparedBvhVisibilitySnapshot.fallbackReasons,
 			});
+		latestPortalCompositeVisibleItemKeyCount = 0;
+		latestPortalCompositeStaticCandidateBatchCount = 0;
+		latestPortalCompositeTerrainCandidateBatchCount = 0;
+		latestPortalCompositeInteriorCandidateBatchCount = 0;
+		latestPortalCompositeFallbackIncludedBatchCount = 0;
 		const renderPolicy = deriveActiveRenderPolicy();
 		const transitionWorkBatches =
 			collectVisibleTransitionPortalWorkBatches(renderPolicy);
@@ -1082,6 +1101,16 @@ export function createWorldDisplayRenderer(
 				) +
 				countFallbackIncludedBatches(latestDebugOverlayBatchCandidateSelection) +
 				countFallbackIncludedBatches(latestPortalMaskBatchCandidateSelection),
+			portalCompositeVisibleItemKeyCount:
+				latestPortalCompositeVisibleItemKeyCount,
+			portalCompositeStaticCandidateBatchCount:
+				latestPortalCompositeStaticCandidateBatchCount,
+			portalCompositeTerrainCandidateBatchCount:
+				latestPortalCompositeTerrainCandidateBatchCount,
+			portalCompositeInteriorCandidateBatchCount:
+				latestPortalCompositeInteriorCandidateBatchCount,
+			portalCompositeFallbackIncludedBatchCount:
+				latestPortalCompositeFallbackIncludedBatchCount,
 			structuredInteriorMeshCount: structuredInteriorMeshes.size,
 			visibleStructuredInteriorMeshCount: countVisibleObjects(
 				structuredInteriorMeshes.values(),
@@ -1267,6 +1296,7 @@ export function createWorldDisplayRenderer(
 				direction: workItem.direction,
 				entryEnvCellId: workItem.entryEnvCellId,
 				requestedInteriorEnvCellIds: workItem.requestedInteriorEnvCellIds,
+				apertureWorldPoints: visibility.apertureWorldPoints ?? [],
 				screenAreaPx: visibility.screenAreaPx,
 				maskMesh,
 			};
@@ -1360,7 +1390,8 @@ export function createWorldDisplayRenderer(
 		if (!node.transition) {
 			return;
 		}
-		if (!getGraphNodeTransitionBatch(node, transitionWorkBatches)) {
+		const batch = getGraphNodeTransitionBatch(node, transitionWorkBatches);
+		if (!batch) {
 			return;
 		}
 
@@ -1369,11 +1400,129 @@ export function createWorldDisplayRenderer(
 			node.transition.stencilRef,
 		);
 		try {
-			camera.layers.set(node.layer);
-			renderer.render(scene, camera);
+			renderPortalCompositeScene(node.transition.compositeScene, node.layer, batch);
 		} finally {
 			clearPortalCompositeStencil(node.transition.compositeScene);
 		}
+	}
+
+	function renderPortalCompositeScene(
+		compositeScene: TransitionPortalGraphScene,
+		layer: number,
+		batch: readonly VisibleTransitionPortalWork[],
+	): void {
+		const candidateSelection = selectPortalCompositeBatchCandidates(
+			compositeScene,
+			batch,
+		);
+		const render = (): void => {
+			camera.layers.set(layer);
+			renderer.render(scene, camera);
+		};
+
+		if (compositeScene === "interior") {
+			renderWithStaticRenderableBatchCandidates(
+				candidateSelection.staticCandidateBatchIds,
+				() => {
+					renderWithNonInstancedBatchCandidates(
+						structuredInteriorMeshes.values(),
+						structuredInteriorBatchCandidates,
+						candidateSelection.structuredInteriorCandidateBatchIds,
+						render,
+					);
+				},
+			);
+			return;
+		}
+
+		renderWithStaticRenderableBatchCandidates(
+			candidateSelection.staticCandidateBatchIds,
+			() => {
+				renderWithNonInstancedBatchCandidates(
+					terrainMeshes.values(),
+					terrainBatchCandidates,
+					candidateSelection.terrainCandidateBatchIds,
+					render,
+				);
+			},
+		);
+	}
+
+	function selectPortalCompositeBatchCandidates(
+		compositeScene: TransitionPortalGraphScene,
+		batch: readonly VisibleTransitionPortalWork[],
+	): {
+		staticCandidateBatchIds: ReadonlySet<string>;
+		terrainCandidateBatchIds: ReadonlySet<string>;
+		structuredInteriorCandidateBatchIds: ReadonlySet<string>;
+	} {
+		const visibleItemKeys = new Set<RenderBvhItemKey>();
+		const fallbackReasons: string[] = [];
+		const cameraWorldPosition = new Vector3();
+		camera.getWorldPosition(cameraWorldPosition);
+		const cameraPosition = {
+			x: cameraWorldPosition.x,
+			y: cameraWorldPosition.y,
+			z: cameraWorldPosition.z,
+		};
+		const cameraFrustum = buildCameraRenderFrustum();
+
+		for (const work of batch) {
+			const result = derivePortalClippedBvhVisibility({
+				assetState,
+				terrainScene,
+				staticRenderableScene,
+				structuredInteriorScene,
+				renderChunkTransforms,
+				cameraFrustum,
+				cameraPosition,
+				apertureWorldPoints: work.apertureWorldPoints,
+				compositeScene,
+				requestedInteriorEnvCellIds: work.requestedInteriorEnvCellIds,
+			});
+			for (const itemKey of result.visibleItemKeys) {
+				visibleItemKeys.add(itemKey);
+			}
+			fallbackReasons.push(...result.fallbackReasons);
+		}
+
+		const staticSelection = staticRenderableBatchCandidates.selectCandidates({
+			visibleItemKeys,
+			queryFallbackReasons: fallbackReasons,
+		});
+		const terrainSelection =
+			compositeScene === "exterior"
+				? terrainBatchCandidates.selectCandidates({
+						visibleItemKeys,
+						queryFallbackReasons: fallbackReasons,
+					})
+				: createEmptyRenderBatchCandidateSelection();
+		const structuredInteriorSelection =
+			compositeScene === "interior"
+				? structuredInteriorBatchCandidates.selectCandidates({
+						visibleItemKeys,
+						queryFallbackReasons: fallbackReasons,
+					})
+				: createEmptyRenderBatchCandidateSelection();
+
+		latestPortalCompositeVisibleItemKeyCount += visibleItemKeys.size;
+		latestPortalCompositeStaticCandidateBatchCount +=
+			staticSelection.counters.candidateBatchCount;
+		latestPortalCompositeTerrainCandidateBatchCount +=
+			terrainSelection.counters.candidateBatchCount;
+		latestPortalCompositeInteriorCandidateBatchCount +=
+			structuredInteriorSelection.counters.candidateBatchCount;
+		latestPortalCompositeFallbackIncludedBatchCount +=
+			countFallbackIncludedBatches(staticSelection) +
+			countFallbackIncludedBatches(terrainSelection) +
+			countFallbackIncludedBatches(structuredInteriorSelection);
+
+		return {
+			staticCandidateBatchIds: staticSelection.candidateBatchIds,
+			terrainCandidateBatchIds: terrainSelection.candidateBatchIds,
+			structuredInteriorCandidateBatchIds:
+				structuredInteriorSelection.candidateBatchIds,
+		};
 	}
 
 	function getGraphNodeTransitionBatch(
@@ -1461,7 +1610,10 @@ export function createWorldDisplayRenderer(
 	function evaluateTransitionPortalVisibility(
 		candidate: TransitionPortalCandidate,
 		context: PortalVisibilityContext,
-	): PortalVisibilityResult & { workItem?: TransitionPortalWorkItem } {
+	): PortalVisibilityResult & {
+		workItem?: TransitionPortalWorkItem;
+		apertureWorldPoints?: readonly RenderVec3[];
+	} {
 		const maskMesh = portalMaskMeshes.get(candidate.id);
 		if (!maskMesh) {
 			return { visible: false, reason: "missing-points", screenAreaPx: 0 };
@@ -1498,7 +1650,15 @@ export function createWorldDisplayRenderer(
 			visibleSide: workItem.visibleSide,
 			context,
 		});
-		return { ...visibility, workItem };
+		return {
+			...visibility,
+			workItem,
+			apertureWorldPoints: worldPoints.map((point) => ({
+				x: point.x,
+				y: point.y,
+				z: point.z,
+			})),
+		};
 	}
 
 	function transformAperturePlaneToWorld(
@@ -3522,6 +3682,16 @@ function createRenderDebugMetrics(
 		portalMaskBvhCandidateBatchCount: options.portalMaskBvhCandidateBatchCount,
 		nonStaticBvhFallbackIncludedBatchCount:
 			options.nonStaticBvhFallbackIncludedBatchCount,
+		portalCompositeVisibleItemKeyCount:
+			options.portalCompositeVisibleItemKeyCount,
+		portalCompositeStaticCandidateBatchCount:
+			options.portalCompositeStaticCandidateBatchCount,
+		portalCompositeTerrainCandidateBatchCount:
+			options.portalCompositeTerrainCandidateBatchCount,
+		portalCompositeInteriorCandidateBatchCount:
+			options.portalCompositeInteriorCandidateBatchCount,
+		portalCompositeFallbackIncludedBatchCount:
+			options.portalCompositeFallbackIncludedBatchCount,
 		structuredInteriorMeshCount: options.structuredInteriorMeshCount,
 		visibleStructuredInteriorMeshCount:
 			options.visibleStructuredInteriorMeshCount,

@@ -96,6 +96,11 @@ export interface WorldRenderDebugMetrics {
 	portalMaskRenderBatchCount: number;
 	portalMaskBvhCandidateBatchCount: number;
 	nonStaticBvhFallbackIncludedBatchCount: number;
+	portalCompositeVisibleItemKeyCount: number;
+	portalCompositeStaticCandidateBatchCount: number;
+	portalCompositeTerrainCandidateBatchCount: number;
+	portalCompositeInteriorCandidateBatchCount: number;
+	portalCompositeFallbackIncludedBatchCount: number;
 	structuredInteriorMeshCount: number;
 	visibleStructuredInteriorMeshCount: number;
 	terrainBvhVisibleItemCount: number;

@@ -705,6 +705,8 @@ Decisions and course corrections:
 
 ### Phase 6: Portal-Clipped BVH Queries
 
+Status: completed.
+
 Extend BVH visibility from direct camera-frustum culling to portal-pass culling.
 
 Portal rendering needs pass-scoped visibility. A batch may be hidden in the base camera pass but
@@ -724,23 +726,74 @@ main camera frustum
 
 Responsibilities:
 
-- derive a conservative portal-clipped visibility volume from the camera frustum and aperture
+- Done: derive a conservative portal-clipped visibility volume from the camera frustum and aperture
   polygon;
-- reuse the already-computed world aperture points, transformed portal plane, visible side, and
-  screen-area result from the transition portal visibility path;
-- query target env-cell `localBvh` payloads with that pass-specific volume;
-- produce visible item keys and candidate batch ids scoped to the portal pass, not the whole frame;
-- keep base-pass, portal-pass, and debug-pass candidate sets separate;
-- feed portal-pass candidate sets into the render graph/composite path, not global `Object3D.visible`
-  state for the whole frame;
-- fallback-include batches for the portal pass when aperture geometry, target cell data, or clipping
-  math is incomplete;
-- add metrics for portal candidates before/after aperture clipping and local-BVH recursion.
+  polygon.
+- Done: reuse the already-computed world aperture points from transition portal visibility.
+- Done: query target env-cell `localBvh` payloads with pass-specific aperture-clipped volumes for
+  interior portal composites.
+- Done: query loaded terrain and outdoor-static BVHs with pass-specific aperture-clipped volumes for
+  exterior portal composites.
+- Done: produce visible item keys and candidate batch ids scoped to the portal composite pass, not
+  the whole frame.
+- Done: keep base-pass, portal-pass, and debug-pass candidate sets separate.
+- Done: feed portal-pass candidate sets into the render graph/composite path through scoped
+  candidate helpers. The implementation still uses temporary `Object3D.visible` mutation only inside
+  the composite render call and restores it immediately after the pass.
+- Done: fallback-include batches for the portal pass when aperture geometry, target cell data,
+  loaded scene coverage, or clipping math is incomplete.
+- Done: add aggregate portal composite candidate metrics to the debug contract.
 
 This phase should integrate with the portal render graph rather than the static scene model. It is
 about reducing portal composite pass work, not changing static instance buffer construction. The
 aperture mask and depth-reset passes already render a small pass-local aperture scene and should not
 be the first target.
+
+Decisions and course corrections:
+
+- Portal clipping uses the main camera frustum plus a conservative aperture cone. The cone includes
+  edge planes through the camera and aperture edges, plus an aperture-forward plane so objects
+  between the camera and aperture do not keep a composite batch alive.
+- Portal composite queries are aggregated per render graph node. If multiple apertures feed the same
+  transition depth, their visible item keys are unioned before selecting render batches.
+- Interior composites query only requested/loaded structured env cells. Exterior composites query
+  loaded terrain tiles and active outdoor static payloads.
+- Query fallback remains intentionally broad. If a portal pass cannot build an aperture volume or
+  cannot find scene payloads/transforms to query, the affected registered batches are included rather
+  than hidden.
+- Shared env-cell local BVH bounds transformation now lives in `prepared-bvh-bounds.ts` so base-pass
+  and portal-pass queries use the same placement math.
+
+Introduced cleanup targets:
+
+- The debug render summary string is now too dense again. Split it into grouped/debug rows before
+  adding more renderer counters.
+- Portal composite metrics are aggregate per frame. If Phase 6.5 finds confusing behavior, add
+  per-depth or per-composite-scene samples instead of only totals.
+- The scoped visibility helpers are still migration shims around Three.js scene traversal. A later
+  renderer cleanup should replace them with explicit render-list plumbing once the candidate model is
+  stable.
+
+### Phase 6.5: Portal-Clipped Candidate Validation
+
+Status: pending.
+
+Before doing broader performance tuning, manually validate that portal-clipped composite candidates
+are conservative in real scenes.
+
+Responsibilities:
+
+- Inspect outdoor-looking-into-interior and indoor-looking-outdoor views at transition depths `1`
+  through `4`.
+- Confirm portal composites do not lose terrain, outdoor statics, structured cell geometry, or
+  indoor statics that are visible through apertures.
+- Compare render calls/triangles before and after Phase 6 from similar camera positions.
+- Watch portal composite candidate counters for obvious fallback churn. Occasional fallback is fine
+  when assets are genuinely missing; steady fallback in normal loaded scenes means the query source
+  selection needs tightening.
+- If visual correctness is good but call counts stay high, profile whether the remaining cost is
+  broad fallback inclusion, too-large aperture cones, material/program churn, or unavoidable
+  transition depth.
 
 ## Testing Strategy
 

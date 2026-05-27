@@ -426,12 +426,33 @@ Refinements for Phase 3:
 
 ### Phase 3: Generic Batch Candidate Registry
 
+Status: completed.
+
 Add a renderer-local batch candidate registry in `world-display-renderer.ts` or a focused helper
 module.
 
 Responsibilities:
 
-- Register/unregister render batches as Three.js objects are created and disposed.
+- Done: added `render-batch-candidates.ts` as a focused renderer helper for registering,
+  replacing, unregistering, and clearing render batch bindings.
+- Done: registry bindings store `batchId -> Object3D` and `batchId -> itemKeys`, with item keys
+  deduplicated at registration time.
+- Done: candidate selection returns candidate batch ids and candidate objects for a
+  `ReadonlySet<RenderBvhItemKey>`.
+- Done: batches fallback-include when they have no item keys, have an explicit binding fallback
+  reason, or when the prepared-BVH query path reports fallback/suspect data.
+- Done: selection counters track registered batches, keyed batches, represented item keys, visible
+  item keys, matched batches, unbound fallback batches, explicit fallback batches, query-fallback
+  batches, candidate batches, and fallback reason counts/samples.
+- Done: unit coverage verifies any-key matching, duplicate key deduplication, unbound fallback,
+  explicit fallback, query fallback, and replacement/unregister behavior.
+- Still Phase 4: register actual static `InstancedMesh` groups as Three.js objects are created and
+  disposed. Phase 3 intentionally shipped the registry without production render mutations.
+
+Original requirements:
+
+- Register/unregister render batches as Three.js objects are created and disposed. Phase 3 added the
+  registry API; Phase 4 wires static group creation/disposal into it.
 - Store `batchId -> Object3D`.
 - Store `batchId -> itemKeys`.
 - Produce candidate batch ids from a `ReadonlySet<RenderBvhItemKey>`.
@@ -446,6 +467,36 @@ Initial scheduling correction: implement this registry for base-pass candidate s
 Temporary `Object3D.visible` toggles are acceptable during migration, but the intended interface is
 explicit candidate sets per render pass. Do not use it for portal composite passes until Phase 6
 introduces pass-scoped candidate sets.
+
+Decisions and course corrections:
+
+- Keep the registry in a focused helper module instead of adding more state directly to
+  `world-display-renderer.ts`. The helper is still renderer-local because it stores Three.js
+  `Object3D` handles and imports renderer-only BVH item key types.
+- Do not bind real objects in Phase 3. The codebase has one clear binding point for static groups:
+  `syncStaticRenderableMeshes`. Binding before Phase 4 would either duplicate the upcoming static
+  key derivation or register empty batches that only inflate fallback counts.
+- Treat any prepared-BVH query fallback reason as conservative all-batch inclusion for the selected
+  registry. This is intentionally broad until bindings can scope fallback reasons by batch/domain.
+- Replacement by `batchId` is supported because render mesh material/capacity changes can recreate
+  a Three.js object while preserving the logical batch identity.
+
+Validation:
+
+```text
+npm run test:ts -- --run render-batch-candidates prepared-bvh-metrics prepared-bvh-visibility
+```
+
+Introduced cleanup targets:
+
+- Phase 4 should derive static group item keys in a small helper instead of inline in
+  `syncStaticRenderableMeshes`; that helper should be unit-tested separately from Three.js object
+  lifecycle.
+- Phase 4 should add candidate-batch metrics to `WorldRenderDebugMetrics`, but keep the existing
+  Phase 2 visible item-key metrics for comparison.
+- The current query-fallback behavior includes all batches in the registry. Once static, terrain,
+  and env-cell registries share the path, consider domain-scoped fallback reasons so a missing
+  outdoor BVH does not force-include unrelated indoor batches.
 
 ### Phase 4: Static Instanced Batch Bindings
 

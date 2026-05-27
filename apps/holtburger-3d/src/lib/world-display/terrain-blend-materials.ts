@@ -1,4 +1,4 @@
-import { DoubleSide, ShaderMaterial, type Material, type Texture } from "three";
+import { FrontSide, ShaderMaterial, type Material, type Texture } from "three";
 
 import type {
 	AssetChannelState,
@@ -311,7 +311,7 @@ function createTerrainBlendMaterial(options: {
 		},
 		vertexShader: TERRAIN_BLEND_VERTEX_SHADER,
 		fragmentShader: TERRAIN_BLEND_FRAGMENT_SHADER,
-		side: DoubleSide,
+		side: FrontSide,
 	});
 	material.userData.holtburgerMaterial = {
 		kind: "terrain-blend",

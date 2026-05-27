@@ -29,7 +29,6 @@ describe("static renderable geometry", () => {
 			partIndex: 0,
 			gfxObjId: 0x01000001,
 			gfxObjAssetId: "gfx-obj/01000001",
-			materialAppearanceKey: "base",
 			materialAppearanceContext: createBaseMaterialAppearanceContext("base"),
 			materialSlots: [],
 			materialSignature: "base",
@@ -114,9 +113,8 @@ describe("static renderable geometry", () => {
 
 	it("compacts interleaved triangle material groups", () => {
 		const positions = new Float32Array([
-			0, 0, 0, 1, 0, 0, 0, 1, 0,
-			10, 0, 0, 11, 0, 0, 10, 1, 0,
-			20, 0, 0, 21, 0, 0, 20, 1, 0,
+			0, 0, 0, 1, 0, 0, 0, 1, 0, 10, 0, 0, 11, 0, 0, 10, 1, 0, 20, 0, 0, 21, 0,
+			0, 20, 1, 0,
 		]);
 		const geometry = buildGfxObjGeometry(
 			{
@@ -147,17 +145,15 @@ describe("static renderable geometry", () => {
 			{ start: 6, count: 3, materialIndex: 1 },
 		]);
 		expect(Array.from(geometry.getAttribute("position").array)).toEqual([
-			0, 0, 0, 1, 0, 0, 0, 1, 0,
-			20, 0, 0, 21, 0, 0, 20, 1, 0,
-			10, 0, 0, 11, 0, 0, 10, 1, 0,
+			0, 0, 0, 1, 0, 0, 0, 1, 0, 20, 0, 0, 21, 0, 0, 20, 1, 0, 10, 0, 0, 11, 0,
+			0, 10, 1, 0,
 		]);
 	});
 
 	it("preserves triangle order when material group compaction is disabled", () => {
 		const positions = new Float32Array([
-			0, 0, 0, 1, 0, 0, 0, 1, 0,
-			10, 0, 0, 11, 0, 0, 10, 1, 0,
-			20, 0, 0, 21, 0, 0, 20, 1, 0,
+			0, 0, 0, 1, 0, 0, 0, 1, 0, 10, 0, 0, 11, 0, 0, 10, 1, 0, 20, 0, 0, 21, 0,
+			0, 20, 1, 0,
 		]);
 		const geometry = buildGfxObjGeometry(
 			{

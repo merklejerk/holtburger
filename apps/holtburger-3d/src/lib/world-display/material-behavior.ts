@@ -40,7 +40,7 @@ export interface LegacyMaterialBehavior {
 	unsupportedSurfaceFlags: string[];
 }
 
-export interface LegacyMaterialBlendBehavior {
+interface LegacyMaterialBlendBehavior {
 	mode: LegacyMaterialBlendMode;
 	enabled: boolean;
 	srcFactor: BlendingSrcFactor | null;
@@ -48,7 +48,7 @@ export interface LegacyMaterialBlendBehavior {
 	depthWrite: boolean;
 }
 
-export type LegacyMaterialBlendMode =
+type LegacyMaterialBlendMode =
 	| "opaque"
 	| "alpha"
 	| "alpha-additive"
@@ -129,8 +129,7 @@ export function applyLegacyMaterialBehavior(
 					blending: CustomBlending,
 					blendEquation: AddEquation,
 					blendSrc: behavior.blend.srcFactor ?? SrcAlphaFactor,
-					blendDst:
-						behavior.blend.dstFactor ?? OneMinusSrcAlphaFactor,
+					blendDst: behavior.blend.dstFactor ?? OneMinusSrcAlphaFactor,
 				}
 			: {}),
 	};

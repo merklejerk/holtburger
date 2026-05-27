@@ -94,11 +94,11 @@ export function describeMaterialAssetDiagnostics({
 
 	return [
 		`recipes ${materialRecipes.length} (${textureRecipeCount} texture, ${solidRecipeCount} solid${failedRecipeCount === 0 ? "" : `, ${failedRecipeCount} failed`})`,
-		`render resources ${countPreparedKind(preparedAssets, "surface-texture")} textures, ${countPreparedKind(preparedAssets, "render-surface")} surfaces, ${countPreparedKind(preparedAssets, "palette")} palettes`,
+		`render resources ${countPreparedKind(preparedAssets, "surface-texture")} surface textures, ${countPreparedKind(preparedAssets, "render-surface")} surfaces, ${countPreparedKind(preparedAssets, "palette")} palettes`,
 		formatIndexedMaterialSummary(indexedSummary),
 		`terrain tables ${countPreparedKind(preparedAssets, "terrain-material")}`,
 		`missing visible recipes ${missingVisibleMaterialAssetIds.length}${formatSample(missingVisibleMaterialAssetIds)}`,
-		`missing deps tex ${missingDependencies.surfaceTextureAssetIds.length}${formatSample(missingDependencies.surfaceTextureAssetIds)}, surface ${missingDependencies.renderSurfaceAssetIds.length}${formatSample(missingDependencies.renderSurfaceAssetIds)}, palette ${missingDependencies.paletteAssetIds.length}${formatSample(missingDependencies.paletteAssetIds)}`,
+		`missing deps surface texture ${missingDependencies.surfaceTextureAssetIds.length}${formatSample(missingDependencies.surfaceTextureAssetIds)}, surface ${missingDependencies.renderSurfaceAssetIds.length}${formatSample(missingDependencies.renderSurfaceAssetIds)}, palette ${missingDependencies.paletteAssetIds.length}${formatSample(missingDependencies.paletteAssetIds)}`,
 		`pending ${pendingAssetIds.length}${formatSample(pendingAssetIds)}`,
 	].join("; ");
 }

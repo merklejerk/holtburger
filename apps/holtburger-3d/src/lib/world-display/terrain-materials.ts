@@ -11,7 +11,7 @@ import {
 	isSupportedDirectColorFormat,
 } from "./render-surface-texture-resources";
 
-export type TerrainMaterialResourceStatus =
+type TerrainMaterialResourceStatus =
 	| "ready"
 	| "missing-table"
 	| "missing-texture-resources"

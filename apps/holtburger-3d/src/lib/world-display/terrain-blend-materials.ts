@@ -377,7 +377,7 @@ function resolveTerrainTexture(options: {
 		return null;
 	}
 	const samplingPolicy =
-		options.materialResourceCache.getDefaultTextureSamplingPolicy(
+		options.materialResourceCache.getRenderSurfaceTextureSamplingPolicy(
 			renderSurface,
 		);
 	return options.materialResourceCache.getTexture({
@@ -434,8 +434,14 @@ function preferredDetailRenderSurfaceIds(
 	if (sourceIds.length <= 1) {
 		return [...sourceIds, ...fallbackIds];
 	}
-	const highDetailDroppedIds = [sourceIds[1], ...sourceIds.slice(2), sourceIds[0]]
-		.filter((renderSurfaceId): renderSurfaceId is number => renderSurfaceId !== undefined);
+	const highDetailDroppedIds = [
+		sourceIds[1],
+		...sourceIds.slice(2),
+		sourceIds[0],
+	].filter(
+		(renderSurfaceId): renderSurfaceId is number =>
+			renderSurfaceId !== undefined,
+	);
 	return [...highDetailDroppedIds, ...fallbackIds];
 }
 

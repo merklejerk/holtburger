@@ -168,7 +168,7 @@ function convertPreparedOutdoorTerrainPayload(
 			c: triangle.vertexIndices[2],
 			quadIndex: triangle.quadIndex,
 			triangleInQuad: triangle.triangleInQuad,
-			terrainType:
+			debugTerrainPcode:
 				payload.terrain.quads.find(
 					(quad) => quad.quadIndex === triangle.quadIndex,
 				)?.pcode ?? 0,
@@ -231,7 +231,8 @@ function describeTerrainMaterialResources(
 		{},
 	);
 	const missingSurfaceTextures = materialResources.reduce(
-		(total, resources) => total + resources.missingSurfaceTextureAssetIds.length,
+		(total, resources) =>
+			total + resources.missingSurfaceTextureAssetIds.length,
 		0,
 	);
 	const missingRenderSurfaces = materialResources.reduce(

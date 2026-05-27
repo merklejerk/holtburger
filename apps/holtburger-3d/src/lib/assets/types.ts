@@ -28,13 +28,13 @@ export interface PreparedAssetProvenance {
 	detail: string | null;
 }
 
-export interface PreparedTerrainTriangle {
+interface PreparedTerrainTriangle {
 	a: number;
 	b: number;
 	c: number;
 	quadIndex: number;
 	triangleInQuad: 0 | 1;
-	terrainType: number;
+	debugTerrainPcode: number;
 	averageHeight: number;
 }
 
@@ -112,7 +112,7 @@ interface PreparedTerrainBvh {
 	items: PreparedTerrainBvhItem[];
 }
 
-export interface PreparedOutdoorTerrainTriangle {
+interface PreparedOutdoorTerrainTriangle {
 	terrainTriangleId: string;
 	quadIndex: number;
 	triangleInQuad: 0 | 1;
@@ -668,7 +668,7 @@ export interface PreparedTerrainMaterialTypeEntry {
 	colorVariation: PreparedTerrainColorVariation | null;
 }
 
-export interface PreparedTerrainAlphaMapEntry {
+interface PreparedTerrainAlphaMapEntry {
 	alphaIndex: number;
 	alphaTextureAssetId: string;
 	alphaTextureDid: number;
@@ -696,8 +696,7 @@ interface PreparedRenderResourceDependencies {
 	paletteAssetIds: string[];
 }
 
-export interface PreparedTerrainMaterialTablePayload
-	extends PreparedAssetPayloadBase {
+export interface PreparedTerrainMaterialTablePayload extends PreparedAssetPayloadBase {
 	kind: "terrain-material";
 	sourceAssetKind: "terrain-material";
 	residencyKind: "unknown";
@@ -710,8 +709,7 @@ export interface PreparedTerrainMaterialTablePayload
 	dependencies: PreparedRenderResourceDependencies;
 }
 
-export interface PreparedRegionRenderProfilePayload
-	extends PreparedAssetPayloadBase {
+interface PreparedRegionRenderProfilePayload extends PreparedAssetPayloadBase {
 	kind: "region-render-profile";
 	sourceAssetKind: "region-render-profile";
 	residencyKind: "unknown";
@@ -756,7 +754,7 @@ export interface PreparedRenderSurfacePayload extends PreparedAssetPayloadBase {
 	};
 }
 
-export interface PreparedTextureMipLevel {
+interface PreparedTextureMipLevel {
 	level: number;
 	width: number;
 	height: number;

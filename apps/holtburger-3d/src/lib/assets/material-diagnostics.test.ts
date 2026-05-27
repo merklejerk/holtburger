@@ -33,8 +33,10 @@ describe("material diagnostics", () => {
 		});
 
 		expect(diagnostics).toContain("recipes 1 (1 texture, 0 solid)");
-		expect(diagnostics).toContain("render resources 1 textures, 0 surfaces");
-		expect(diagnostics).toContain("missing deps tex 0");
+		expect(diagnostics).toContain(
+			"render resources 1 surface textures, 0 surfaces",
+		);
+		expect(diagnostics).toContain("missing deps surface texture 0");
 		expect(diagnostics).toContain(
 			"surface 1 (render-surface/06000001), palette 1 (palette/04000001)",
 		);

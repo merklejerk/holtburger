@@ -6,6 +6,7 @@ use holtburger_dat::landblock::{CellLandblock, LandblockInfo};
 use holtburger_dat::physics::BspNode;
 use holtburger_dat::{EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE};
 
+use crate::material_variants::legacy_sampler_material_variant_signature;
 use crate::source_reader::ContentSourceReader;
 use crate::static_outdoor_scene::{StaticOutdoorScene, StaticOutdoorSceneAssembler};
 use crate::{ContentDecodeCache, ContentRepository, normalize_landblock_id};
@@ -2173,8 +2174,6 @@ const STIPPLING_REPEAT_POS: u8 = 0x01;
 const STIPPLING_REPEAT_NEG: u8 = 0x02;
 const STIPPLING_NO_POS: u8 = 0x04;
 const STIPPLING_NO_NEG: u8 = 0x08;
-const MATERIAL_VARIANT_SAMPLER_CLAMP: &str = "sampler=clamp";
-const MATERIAL_VARIANT_SAMPLER_REPEAT: &str = "sampler=repeat";
 const CULL_MODE_NONE: i32 = 1;
 const CULL_MODE_CLOCKWISE: i32 = 2;
 const CULL_MODE_COUNTER_CLOCKWISE: i32 = 3;
@@ -2279,9 +2278,9 @@ fn negative_polygon_side_material_variant(polygon: &Polygon) -> &'static str {
 
 fn legacy_sampler_material_variant(repeats: bool) -> &'static str {
     if repeats {
-        MATERIAL_VARIANT_SAMPLER_REPEAT
+        legacy_sampler_material_variant_signature(true)
     } else {
-        MATERIAL_VARIANT_SAMPLER_CLAMP
+        legacy_sampler_material_variant_signature(false)
     }
 }
 
@@ -2612,7 +2611,7 @@ mod tests {
         assert_eq!(sides[0].surface_id, Some(4));
         assert_eq!(
             sides[0].material_variant_signature,
-            MATERIAL_VARIANT_SAMPLER_CLAMP
+            legacy_sampler_material_variant_signature(false)
         );
         assert_eq!(sides[0].winding, PreparedPolygonWinding::Source);
         assert_eq!(sides[0].normal_scale, 1.0);
@@ -2623,7 +2622,7 @@ mod tests {
         assert_eq!(sides[1].surface_id, Some(4));
         assert_eq!(
             sides[1].material_variant_signature,
-            MATERIAL_VARIANT_SAMPLER_CLAMP
+            legacy_sampler_material_variant_signature(false)
         );
         assert_eq!(sides[1].uv_indices, polygon.pos_uv_indices);
         assert_eq!(sides[1].winding, PreparedPolygonWinding::Reversed);
@@ -2645,7 +2644,7 @@ mod tests {
         assert_eq!(sides[0].surface_id, Some(4));
         assert_eq!(
             sides[0].material_variant_signature,
-            MATERIAL_VARIANT_SAMPLER_CLAMP
+            legacy_sampler_material_variant_signature(false)
         );
         assert_eq!(sides[0].uv_indices, polygon.pos_uv_indices);
         assert_eq!(sides[0].winding, PreparedPolygonWinding::Source);
@@ -2653,7 +2652,7 @@ mod tests {
         assert_eq!(sides[1].surface_id, Some(7));
         assert_eq!(
             sides[1].material_variant_signature,
-            MATERIAL_VARIANT_SAMPLER_CLAMP
+            legacy_sampler_material_variant_signature(false)
         );
         assert_eq!(sides[1].uv_indices, polygon.neg_uv_indices);
         assert_eq!(sides[1].winding, PreparedPolygonWinding::Reversed);
@@ -2712,8 +2711,18 @@ mod tests {
                 ))
                 .collect::<Vec<_>>(),
             vec![
-                (11, Some(4), MATERIAL_VARIANT_SAMPLER_CLAMP, 0),
-                (11, Some(7), MATERIAL_VARIANT_SAMPLER_CLAMP, 3)
+                (
+                    11,
+                    Some(4),
+                    legacy_sampler_material_variant_signature(false),
+                    0,
+                ),
+                (
+                    11,
+                    Some(7),
+                    legacy_sampler_material_variant_signature(false),
+                    3,
+                )
             ]
         );
         assert_eq!(
@@ -2756,8 +2765,8 @@ mod tests {
                 ))
                 .collect::<Vec<_>>(),
             vec![
-                (Some(4), MATERIAL_VARIANT_SAMPLER_REPEAT),
-                (Some(4), MATERIAL_VARIANT_SAMPLER_CLAMP)
+                (Some(4), legacy_sampler_material_variant_signature(true)),
+                (Some(4), legacy_sampler_material_variant_signature(false))
             ]
         );
     }

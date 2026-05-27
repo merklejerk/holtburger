@@ -18,6 +18,7 @@ import {
 } from "three";
 
 import type { PreparedRenderSurfacePayload } from "../assets/types";
+import type { PreparedTexturePayload } from "../assets/types";
 import { formatHex32 } from "../landblocks";
 import {
 	applyTextureSamplingPolicy,
@@ -64,9 +65,15 @@ export function createRenderSurfaceTexture(
 		supportsPackedRgba4444: true,
 		maxAnisotropy: 1,
 	},
+	preparedTexture: PreparedTexturePayload | null = null,
 ): Texture | null {
 	if (isSupportedCompressedFormat(renderSurface.formatRaw)) {
-		return createCompressedTexture(renderSurface, capabilities, samplingPolicy);
+		return createCompressedTexture(
+			renderSurface,
+			capabilities,
+			samplingPolicy,
+			preparedTexture,
+		);
 	}
 	if (!isSupportedDirectColorFormat(renderSurface.formatRaw)) {
 		return null;
@@ -122,6 +129,7 @@ function createCompressedTexture(
 	renderSurface: PreparedRenderSurfacePayload,
 	capabilities: MaterialTextureCapabilities,
 	samplingPolicy: TextureSamplingPolicy,
+	preparedTexture: PreparedTexturePayload | null,
 ): Texture | null {
 	if (!capabilities.supportsS3tc) {
 		return null;
@@ -130,22 +138,25 @@ function createCompressedTexture(
 	if (format === null) {
 		return null;
 	}
-	const expectedByteLength = expectedCompressedSourceByteLength(renderSurface);
-	if (renderSurface.sourceBytes.byteLength !== expectedByteLength) {
+	const mips = preparedCompressedMips(renderSurface, preparedTexture);
+	const baseMip = mips[0];
+	if (!baseMip) {
+		return null;
+	}
+	const expectedByteLength = expectedCompressedLevelByteLength({
+		width: baseMip.width,
+		height: baseMip.height,
+		formatRaw: renderSurface.formatRaw,
+	});
+	if (baseMip.data.byteLength !== expectedByteLength) {
 		throw new Error(
-			`RenderSurface ${formatHex32(renderSurface.renderSurfaceId)} ${renderSurface.format} expected ${expectedByteLength} compressed source bytes, got ${renderSurface.sourceBytes.byteLength}.`,
+			`RenderSurface ${formatHex32(renderSurface.renderSurfaceId)} ${renderSurface.format} expected ${expectedByteLength} compressed level-0 bytes, got ${baseMip.data.byteLength}.`,
 		);
 	}
 	assertDeclaredSourceByteLengthMatchesPayload(renderSurface);
 
 	const texture = new CompressedTexture(
-		[
-			{
-				data: renderSurface.sourceBytes,
-				width: renderSurface.width,
-				height: renderSurface.height,
-			},
-		],
+		mips,
 		renderSurface.width,
 		renderSurface.height,
 		format,
@@ -158,9 +169,56 @@ function createCompressedTexture(
 		undefined,
 		NoColorSpace,
 	);
-	applyTextureSamplingPolicy(texture, samplingPolicy);
+	applyTextureSamplingPolicy(
+		texture,
+		mips.length > 1 ? samplingPolicy : { ...samplingPolicy, mipFilter: "none" },
+	);
 	texture.needsUpdate = true;
 	return texture;
+}
+
+interface PreparedCompressedMip {
+	data: Uint8Array;
+	width: number;
+	height: number;
+}
+
+function preparedCompressedMips(
+	renderSurface: PreparedRenderSurfacePayload,
+	preparedTexture: PreparedTexturePayload | null,
+): PreparedCompressedMip[] {
+	if (
+		preparedTexture?.kind === "prepared-texture" &&
+		preparedTexture.renderSurfaceId === renderSurface.renderSurfaceId &&
+		preparedTexture.sourceFormatRaw === renderSurface.formatRaw &&
+		preparedTexture.levels.length > 0
+	) {
+		return preparedTexture.levels.map((level) => {
+			const expectedByteLength = expectedCompressedLevelByteLength({
+				width: level.width,
+				height: level.height,
+				formatRaw: level.formatRaw,
+			});
+			if (level.bytes.byteLength !== expectedByteLength) {
+				throw new Error(
+					`Prepared texture ${formatHex32(renderSurface.renderSurfaceId)} level ${level.level} expected ${expectedByteLength} bytes, got ${level.bytes.byteLength}.`,
+				);
+			}
+			return {
+				data: level.bytes,
+				width: level.width,
+				height: level.height,
+			};
+		});
+	}
+
+	return [
+		{
+			data: renderSurface.sourceBytes,
+			width: renderSurface.width,
+			height: renderSurface.height,
+		},
+	];
 }
 
 interface DecodedRenderSurfaceTextureData {
@@ -473,19 +531,20 @@ function compressedTextureFormat(
 	}
 }
 
-function expectedCompressedSourceByteLength(
-	renderSurface: PreparedRenderSurfacePayload,
-): number {
-	assertValidSurfaceDimensions(renderSurface);
-	const bytesPerBlock = compressedBytesPerBlock(renderSurface.formatRaw);
+function expectedCompressedLevelByteLength(options: {
+	width: number;
+	height: number;
+	formatRaw: number;
+}): number {
+	const bytesPerBlock = compressedBytesPerBlock(options.formatRaw);
 	if (bytesPerBlock === null) {
 		throw new Error(
-			`RenderSurface ${formatHex32(renderSurface.renderSurfaceId)} format ${renderSurface.format} is not a compressed upload format.`,
+			`Format ${options.formatRaw} is not a compressed upload format.`,
 		);
 	}
 	return (
-		Math.floor((renderSurface.width + 3) / 4) *
-		Math.floor((renderSurface.height + 3) / 4) *
+		Math.floor((options.width + 3) / 4) *
+		Math.floor((options.height + 3) / 4) *
 		bytesPerBlock
 	);
 }

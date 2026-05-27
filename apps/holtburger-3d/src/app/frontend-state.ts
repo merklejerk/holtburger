@@ -9,6 +9,7 @@ import {
 	updateBrowserDraft,
 	updateBrowserDetailTexturesEnabled,
 	updateBrowserRenderStyle,
+	updateBrowserTextureColorSpaceMode,
 	updateBrowserTextureFilteringMode,
 	updateDetailLodRadius,
 	updateEnvCellLodRadius,
@@ -24,6 +25,7 @@ import {
 	type BrowserModeState,
 	type BrowserNavigationFocusMode,
 	type BrowserRenderStyle,
+	type BrowserTextureColorSpaceMode,
 	type BrowserTextureFilteringMode,
 } from "./browser-mode";
 import {
@@ -187,6 +189,17 @@ function createFrontendStateStore() {
 				browserMode: updateBrowserTextureFilteringMode(
 					state.browserMode,
 					textureFilteringMode,
+				),
+			}));
+		},
+		updateBrowserTextureColorSpaceMode(
+			textureColorSpaceMode: BrowserTextureColorSpaceMode,
+		): void {
+			update((state) => ({
+				...state,
+				browserMode: updateBrowserTextureColorSpaceMode(
+					state.browserMode,
+					textureColorSpaceMode,
 				),
 			}));
 		},

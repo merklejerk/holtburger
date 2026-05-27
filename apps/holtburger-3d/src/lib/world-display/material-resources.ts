@@ -3,6 +3,11 @@ import type { Material, Texture } from "three";
 import type {
 	PreparedAssetRecord,
 	PreparedRenderSurfacePayload,
+	PreparedTexturePayload,
+} from "../assets/types";
+import {
+	formatPreparedTextureAssetId,
+	preparedDxtOutputFormat,
 } from "../assets/types";
 import {
 	createDerivedPaletteTextureResource,
@@ -179,7 +184,11 @@ export class WorldMaterialResourceCache {
 			preparedByAssetId: options.preparedByAssetId,
 			fallbackColorKey: options.fallbackColorKey,
 			resolveTexture: (renderSurface, samplingPolicy) =>
-				this.getTexture({ renderSurface, samplingPolicy }),
+				this.getTexture({
+					renderSurface,
+					samplingPolicy,
+					preparedByAssetId: options.preparedByAssetId,
+				}),
 			resolveIndexedTexture: (renderSurface, samplingPolicy) =>
 				this.getIndexedTextureResource({ renderSurface, samplingPolicy }),
 			resolvePaletteResource: (paletteAssetId, paletteAsset) =>
@@ -197,10 +206,13 @@ export class WorldMaterialResourceCache {
 	getTexture(options: {
 		renderSurface: PreparedRenderSurfacePayload;
 		samplingPolicy: TextureSamplingPolicy;
+		preparedByAssetId?: Readonly<Record<string, PreparedAssetRecord>>;
+		usage?: PreparedTexturePayload["usage"];
 	}): Texture | null {
 		const textureKey = describeRenderSurfaceTextureResourceKey(
 			options.renderSurface,
 			options.samplingPolicy,
+			resolvePreparedTexture(options)?.sourceHash ?? null,
 		);
 		const cached = this.textureRecords.get(textureKey);
 		if (cached) {
@@ -211,6 +223,7 @@ export class WorldMaterialResourceCache {
 			options.renderSurface,
 			options.samplingPolicy,
 			this.textureCapabilities,
+			resolvePreparedTexture(options),
 		);
 		if (!texture) {
 			return null;
@@ -428,9 +441,35 @@ function describeMaterialProgramKey(material: Material): string {
 function describeRenderSurfaceTextureResourceKey(
 	renderSurface: PreparedRenderSurfacePayload,
 	samplingPolicy: TextureSamplingPolicy,
+	preparedTextureSourceHash: string | null = null,
 ): string {
 	return [
 		describeRenderSurfaceDecodeKey(renderSurface),
 		describeTextureSamplingPolicy(samplingPolicy),
+		preparedTextureSourceHash ? `prepared=${preparedTextureSourceHash}` : null,
 	].join("|");
+}
+
+function resolvePreparedTexture(options: {
+	renderSurface: PreparedRenderSurfacePayload;
+	samplingPolicy: TextureSamplingPolicy;
+	preparedByAssetId?: Readonly<Record<string, PreparedAssetRecord>>;
+	usage?: PreparedTexturePayload["usage"];
+}): PreparedTexturePayload | null {
+	if (!options.preparedByAssetId) {
+		return null;
+	}
+	const outputFormat = preparedDxtOutputFormat(options.renderSurface.formatRaw);
+	if (!outputFormat) {
+		return null;
+	}
+	const assetId = formatPreparedTextureAssetId({
+		renderSurfaceId: options.renderSurface.renderSurfaceId,
+		usage: "raw",
+		outputFormat,
+		mipPolicy: "retail4",
+		colorSpace: "source",
+	});
+	const asset = options.preparedByAssetId[assetId];
+	return asset?.payload.kind === "prepared-texture" ? asset.payload : null;
 }

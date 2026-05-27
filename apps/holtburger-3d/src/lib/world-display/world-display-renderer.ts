@@ -92,6 +92,7 @@ import type {
 	BrowserCameraResidency,
 	BrowserCameraResidencyChangeHandler,
 	WorldDisplayRenderStyle,
+	WorldDisplayTextureColorSpaceMode,
 	WorldDisplayTextureFilteringMode,
 	WorldRenderCameraFrameChangeHandler,
 	WorldRenderDebugMetrics,
@@ -182,6 +183,7 @@ export interface WorldDisplayRendererOptions {
 	transitionPortalMaxDepth?: number;
 	renderStyle?: WorldDisplayRenderStyle;
 	textureFilteringMode?: WorldDisplayTextureFilteringMode;
+	textureColorSpaceMode?: WorldDisplayTextureColorSpaceMode;
 	detailTexturesEnabled?: boolean;
 	onCameraFrameChange?: WorldRenderCameraFrameChangeHandler;
 	onRenderMetricsChange?: WorldRenderMetricsChangeHandler;
@@ -202,6 +204,7 @@ export interface WorldDisplayRenderer {
 	setTransitionPortalMaxDepth(maxDepth: number): void;
 	setRenderStyle(renderStyle: WorldDisplayRenderStyle): void;
 	setTextureFilteringMode(mode: WorldDisplayTextureFilteringMode): void;
+	setTextureColorSpaceMode(mode: WorldDisplayTextureColorSpaceMode): void;
 	setDetailTexturesEnabled(enabled: boolean): void;
 	setCameraFrameChangeHandler(
 		handler: WorldRenderCameraFrameChangeHandler | undefined,
@@ -453,6 +456,8 @@ export function createWorldDisplayRenderer(
 	let renderStyle: WorldDisplayRenderStyle = options.renderStyle ?? "solid";
 	let textureFilteringMode: WorldDisplayTextureFilteringMode =
 		options.textureFilteringMode ?? "anisotropic-4x";
+	let textureColorSpaceMode: WorldDisplayTextureColorSpaceMode =
+		options.textureColorSpaceMode ?? "auto";
 	let detailTexturesEnabled = options.detailTexturesEnabled ?? true;
 	const noMaterialOverrideMaterials = new Map<string, MeshStandardMaterial>();
 	const wireframeOverrideMaterials = new Map<string, MeshBasicMaterial>();
@@ -490,10 +495,14 @@ export function createWorldDisplayRenderer(
 	};
 	const materialTextureCapabilities =
 		detectMaterialTextureCapabilities(renderer);
-	let materialResourceCache = createMaterialResourceCache(textureFilteringMode);
+	let materialResourceCache = createMaterialResourceCache(
+		textureFilteringMode,
+		textureColorSpaceMode,
+	);
 
 	function createMaterialResourceCache(
 		filteringMode: WorldDisplayTextureFilteringMode,
+		colorSpaceMode: WorldDisplayTextureColorSpaceMode,
 	): WorldMaterialResourceCache {
 		return new WorldMaterialResourceCache(
 			reportMaterialDiagnostic,
@@ -501,6 +510,7 @@ export function createWorldDisplayRenderer(
 			createDefaultMaterialTextureSamplingPolicy(
 				materialTextureCapabilities,
 				filteringMode,
+				colorSpaceMode,
 			),
 		);
 	}
@@ -580,6 +590,7 @@ export function createWorldDisplayRenderer(
 			materialProgramKeyCount: 0,
 			transparentMaterialCount: 0,
 			textureFilteringMode,
+			textureColorSpaceMode,
 			detailTexturesEnabled,
 			textureSamplingPolicyCounts: {},
 			textureSamplingPolicySamples: [],
@@ -679,7 +690,25 @@ export function createWorldDisplayRenderer(
 			textureFilteringMode = nextMode;
 			clearMaterializedSceneMeshes();
 			materialResourceCache.dispose();
-			materialResourceCache = createMaterialResourceCache(textureFilteringMode);
+			materialResourceCache = createMaterialResourceCache(
+				textureFilteringMode,
+				textureColorSpaceMode,
+			);
+			syncTerrainMeshes(terrainScene);
+			syncStaticRenderableMeshes(staticRenderableScene);
+			syncStructuredInteriorMeshes(structuredInteriorScene);
+		},
+		setTextureColorSpaceMode(nextMode) {
+			if (textureColorSpaceMode === nextMode) {
+				return;
+			}
+			textureColorSpaceMode = nextMode;
+			clearMaterializedSceneMeshes();
+			materialResourceCache.dispose();
+			materialResourceCache = createMaterialResourceCache(
+				textureFilteringMode,
+				textureColorSpaceMode,
+			);
 			syncTerrainMeshes(terrainScene);
 			syncStaticRenderableMeshes(staticRenderableScene);
 			syncStructuredInteriorMeshes(structuredInteriorScene);
@@ -916,6 +945,7 @@ export function createWorldDisplayRenderer(
 			materialProgramKeyCount: materialStats.materialProgramKeyCount,
 			transparentMaterialCount: materialStats.transparentMaterialCount,
 			textureFilteringMode,
+			textureColorSpaceMode,
 			detailTexturesEnabled,
 			textureSamplingPolicyCounts: materialStats.textureSamplingPolicyCounts,
 			textureSamplingPolicySamples: materialStats.textureSamplingPolicySamples,
@@ -3090,6 +3120,7 @@ function createRenderDebugMetrics(
 		materialProgramKeyCount: options.materialProgramKeyCount,
 		transparentMaterialCount: options.transparentMaterialCount,
 		textureFilteringMode: options.textureFilteringMode,
+		textureColorSpaceMode: options.textureColorSpaceMode,
 		detailTexturesEnabled: options.detailTexturesEnabled,
 		textureSamplingPolicyCounts: options.textureSamplingPolicyCounts,
 		textureSamplingPolicySamples: options.textureSamplingPolicySamples,

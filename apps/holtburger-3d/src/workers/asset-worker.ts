@@ -8,6 +8,7 @@ import type {
 	LandblockTopologyPayloadDto,
 	MaterialRecipePayloadDto,
 	PalettePayloadDto,
+	PreparedTexturePayloadDto,
 	RegionRenderProfilePayloadDto,
 	RenderSurfacePayloadDto,
 	SurfaceTexturePayloadDto,
@@ -24,6 +25,7 @@ import {
 	landblockTopologyPayloadDtoSchema,
 	materialRecipePayloadDtoSchema,
 	palettePayloadDtoSchema,
+	preparedTexturePayloadDtoSchema,
 	regionRenderProfilePayloadDtoSchema,
 	renderSurfacePayloadDtoSchema,
 	surfaceTexturePayloadDtoSchema,
@@ -357,6 +359,16 @@ function prepareRouteMatchedAssetPayload(
 		return preparePassthroughAsset(request, response, payload);
 	}
 
+	if (/^prepared-texture\/[0-9a-fA-F]{8}\?/.test(request.assetId)) {
+		const payload = parseExpectedRoutePayload(
+			request.assetId,
+			"prepared-texture",
+			preparedTexturePayloadDtoSchema,
+			response.payload,
+		);
+		return preparePassthroughAsset(request, response, payload);
+	}
+
 	if (/^palette\/[0-9a-fA-F]{8}$/.test(request.assetId)) {
 		const payload = parseExpectedRoutePayload(
 			request.assetId,
@@ -508,6 +520,7 @@ function preparePassthroughAsset(
 		| MaterialRecipePayloadDto
 		| SurfaceTexturePayloadDto
 		| RenderSurfacePayloadDto
+		| PreparedTexturePayloadDto
 		| PalettePayloadDto
 		| TerrainMaterialPayloadDto
 		| RegionRenderProfilePayloadDto,

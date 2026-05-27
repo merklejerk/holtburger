@@ -247,6 +247,8 @@ function resolveRegionDetailTexture(options: {
 			wrapT: "repeat",
 			colorSpace: "none",
 		},
+		preparedByAssetId: options.assetState.preparedByAssetId,
+		usage: "detail",
 	});
 	if (!texture) {
 		options.reportDiagnostic(

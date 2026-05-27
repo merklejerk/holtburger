@@ -8,6 +8,7 @@ import type {
 	Vec3Dto,
 } from "../host/contracts";
 import {
+	formatHex32,
 	formatRegionRenderProfileAssetId,
 	formatTerrainMaterialAssetId,
 } from "../landblocks";
@@ -755,6 +756,44 @@ export interface PreparedRenderSurfacePayload extends PreparedAssetPayloadBase {
 	};
 }
 
+export interface PreparedTextureMipLevel {
+	level: number;
+	width: number;
+	height: number;
+	formatRaw: number;
+	format: string;
+	byteLength: number;
+	bytes: Uint8Array;
+}
+
+export interface PreparedTexturePayload extends PreparedAssetPayloadBase {
+	kind: "prepared-texture";
+	sourceAssetKind: "prepared-texture";
+	renderSurfaceId: number;
+	usage: "color" | "detail" | "mask" | "raw";
+	outputFormat: "dxt1" | "dxt3" | "dxt5";
+	mipPolicy: "retail4";
+	colorSpace: "srgb" | "data" | "source";
+	sourceFormatRaw: number;
+	sourceFormat: string;
+	sourceWidth: number;
+	sourceHeight: number;
+	sourceByteLength: number;
+	sourceHash: string;
+	levels: PreparedTextureMipLevel[];
+	dependencies: {
+		renderSurfaceAssetIds: string[];
+	};
+	diagnostics: {
+		generatedLevelCount: number;
+		generatedByteLength: number;
+		decodeMs: number;
+		downsampleMs: number;
+		encodeMs: number;
+		totalMs: number;
+	};
+}
+
 export interface PreparedPalettePayload extends PreparedAssetPayloadBase {
 	kind: "palette";
 	sourceAssetKind: "palette";
@@ -788,6 +827,7 @@ export type PreparedAssetPayload =
 	| PreparedRegionRenderProfilePayload
 	| PreparedSurfaceTexturePayload
 	| PreparedRenderSurfacePayload
+	| PreparedTexturePayload
 	| PreparedPalettePayload
 	| PreparedVisualAssetStubPayload
 	| PreparedUnknownAssetPayload;
@@ -919,7 +959,36 @@ export function getPreparedAssetDependencies(
 		return uniqueSortedAssetIds(asset.payload.dependencies.paletteAssetIds);
 	}
 
+	if (asset.payload.kind === "prepared-texture") {
+		return [];
+	}
+
 	return [];
+}
+
+export function preparedDxtOutputFormat(
+	formatRaw: number,
+): PreparedTexturePayload["outputFormat"] | null {
+	switch (formatRaw) {
+		case 0x3154_5844:
+			return "dxt1";
+		case 0x3354_5844:
+			return "dxt3";
+		case 0x3554_5844:
+			return "dxt5";
+		default:
+			return null;
+	}
+}
+
+export function formatPreparedTextureAssetId(options: {
+	renderSurfaceId: number;
+	usage: PreparedTexturePayload["usage"];
+	outputFormat: PreparedTexturePayload["outputFormat"];
+	mipPolicy: PreparedTexturePayload["mipPolicy"];
+	colorSpace: PreparedTexturePayload["colorSpace"];
+}): string {
+	return `prepared-texture/${formatHex32(options.renderSurfaceId)}?usage=${options.usage}&out=${options.outputFormat}&mips=${options.mipPolicy}&cs=${options.colorSpace}`;
 }
 
 function uniqueSortedAssetIds(

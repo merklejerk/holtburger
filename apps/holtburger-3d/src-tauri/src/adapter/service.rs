@@ -4,6 +4,10 @@ use std::sync::{Arc, Mutex};
 use crate::adapter::binary::*;
 use crate::adapter::ids::*;
 use crate::adapter::json::*;
+use crate::adapter::prepared_texture::{
+    PreparedTexturePayload, PreparedTextureRequest, parse_prepared_texture_asset_id,
+    prepare_texture,
+};
 use holtburger_content::{
     ContentDecodeCache, ContentRepository, MaterialAppearanceInput, SoulEmoteCatalog,
 };
@@ -24,14 +28,17 @@ use crate::contracts::{
     AssetLookupRequestDto, AssetLookupResponseDto, AssetPayloadKindDto, CameraHintAckDto,
     CameraHintDto, DebugConfigDto, RuntimeAppearanceObjDescDto, RuntimeAppearanceRequestDto,
 };
+use tokio::sync::Semaphore;
 
 pub const ASSET_BINARY_MAGIC: &[u8; 4] = b"HBAB";
 pub const ASSET_BINARY_VERSION: u32 = 1;
 pub const ASSET_BINARY_HEADER_LEN: usize = 16;
+const DEFAULT_PREPARED_TEXTURE_WORKERS: usize = 3;
 
 pub struct HostBoundaryAdapter {
     content: Arc<ContentRepository>,
     content_asset_runtime: ContentAssetRuntime,
+    prepared_texture_worker_slots: Arc<Semaphore>,
     verbose: bool,
 }
 
@@ -159,6 +166,9 @@ impl HostBoundaryAdapter {
         Self {
             content,
             content_asset_runtime,
+            prepared_texture_worker_slots: Arc::new(Semaphore::new(
+                DEFAULT_PREPARED_TEXTURE_WORKERS,
+            )),
             verbose,
         }
     }
@@ -192,7 +202,36 @@ impl HostBoundaryAdapter {
     ) -> anyhow::Result<Vec<u8>> {
         let loaded_assets = futures::future::join_all(requests.into_iter().map(|request| {
             let content_asset_runtime = self.content_asset_runtime.clone();
+            let prepared_texture_worker_slots = Arc::clone(&self.prepared_texture_worker_slots);
             async move {
+                if let Some(prepared_texture_request) =
+                    parse_prepared_texture_asset_id(&request.asset_id)
+                {
+                    let render_surface_id = prepared_texture_request.render_surface_id;
+                    let asset_id = request.asset_id.clone();
+                    let asset = content_asset_runtime
+                        .load(ContentAssetRequest::RenderSurface(render_surface_id))
+                        .await;
+                    let prepared_texture = match asset {
+                        Ok(ContentAsset::RenderSurface(render_surface)) => {
+                            prepare_texture_blocking(
+                                prepared_texture_worker_slots,
+                                prepared_texture_request,
+                                *render_surface,
+                            )
+                            .await
+                        }
+                        Ok(_) => unreachable!("content asset runtime returned mismatched render surface"),
+                        Err(error) => anyhow::bail!(
+                            "failed to load render surface 0x{render_surface_id:08X} for {asset_id}: {error:#}"
+                        ),
+                    };
+                    return anyhow::Ok((
+                        request,
+                        LoadedBinaryAsset::PreparedTexture(prepared_texture),
+                    ));
+                }
+
                 let Some(content_request) = content_asset_request_from_asset_id(&request.asset_id)
                 else {
                     anyhow::bail!(
@@ -202,7 +241,7 @@ impl HostBoundaryAdapter {
                 };
 
                 let asset = content_asset_runtime.load(content_request.clone()).await;
-                anyhow::Ok((request, content_request, asset))
+                anyhow::Ok((request, LoadedBinaryAsset::Content(content_request, asset)))
             }
         }))
         .await;
@@ -210,16 +249,28 @@ impl HostBoundaryAdapter {
         let mut writer = BinaryAssetSectionWriter::default();
         let mut responses = Vec::with_capacity(loaded_assets.len());
         for loaded_asset in loaded_assets {
-            let (request, content_request, asset) = loaded_asset?;
+            let (request, asset) = loaded_asset?;
             let response_index = responses.len();
             let path_prefix = format!("responses.{response_index}.payload");
-            responses.push(serialize_content_asset_binary_response(
-                request,
-                content_request,
-                asset,
-                &path_prefix,
-                &mut writer,
-            )?);
+            responses.push(match asset {
+                LoadedBinaryAsset::Content(content_request, asset) => {
+                    serialize_content_asset_binary_response(
+                        request,
+                        content_request,
+                        asset,
+                        &path_prefix,
+                        &mut writer,
+                    )?
+                }
+                LoadedBinaryAsset::PreparedTexture(prepared_texture) => {
+                    serialize_prepared_texture_binary_response(
+                        request,
+                        prepared_texture?,
+                        &path_prefix,
+                        &mut writer,
+                    )?
+                }
+            });
         }
         serialize_asset_binary_batch_response(responses, writer)
     }
@@ -332,6 +383,25 @@ impl HostBoundaryAdapter {
             sequence,
         }
     }
+}
+
+enum LoadedBinaryAsset {
+    Content(ContentAssetRequest, anyhow::Result<ContentAsset>),
+    PreparedTexture(anyhow::Result<PreparedTexturePayload>),
+}
+
+async fn prepare_texture_blocking(
+    worker_slots: Arc<Semaphore>,
+    request: PreparedTextureRequest,
+    render_surface: holtburger_dat::file_type::RenderSurface,
+) -> anyhow::Result<PreparedTexturePayload> {
+    let _permit = worker_slots
+        .acquire_owned()
+        .await
+        .map_err(|error| anyhow::anyhow!("prepared texture worker semaphore closed: {error}"))?;
+    tokio::task::spawn_blocking(move || prepare_texture(request, &render_surface))
+        .await
+        .map_err(|error| anyhow::anyhow!("prepared texture worker failed to join: {error}"))?
 }
 
 impl HostBoundaryAdapter {

@@ -391,6 +391,8 @@ function resolveTerrainTexture(options: {
 					? "none"
 					: samplingPolicy.colorSpace,
 		},
+		preparedByAssetId: options.assetState.preparedByAssetId,
+		usage: options.role === "detail" ? "detail" : "color",
 	});
 }
 

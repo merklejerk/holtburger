@@ -5,6 +5,7 @@ import {
 	landblockOutdoorPayloadDtoSchema,
 	landblockTopologyPayloadDtoSchema,
 	materialRecipePayloadDtoSchema,
+	preparedTexturePayloadDtoSchema,
 	renderSurfacePayloadDtoSchema,
 	regionRenderProfilePayloadDtoSchema,
 	surfaceTexturePayloadDtoSchema,
@@ -123,6 +124,13 @@ export function getAssetResponseDependencies(
 		return uniqueSortedAssetIds(
 			renderSurface.data.dependencies.paletteAssetIds,
 		);
+	}
+
+	const preparedTexture = preparedTexturePayloadDtoSchema.safeParse(
+		response.payload,
+	);
+	if (preparedTexture.success) {
+		return [];
 	}
 
 	return [];

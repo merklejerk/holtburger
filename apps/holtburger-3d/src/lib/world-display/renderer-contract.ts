@@ -5,6 +5,11 @@ export type WorldDisplayTextureFilteringMode =
 	| "nearest"
 	| "linear"
 	| "anisotropic-4x";
+export type WorldDisplayTextureColorSpaceMode =
+	| "auto"
+	| "srgb"
+	| "linear"
+	| "compressed-linear";
 
 export interface WorldRenderMetrics {
 	bounds: SceneBoundsFrame | null;
@@ -85,6 +90,7 @@ export interface WorldRenderDebugMetrics {
 	materialProgramKeyCount: number;
 	transparentMaterialCount: number;
 	textureFilteringMode: WorldDisplayTextureFilteringMode;
+	textureColorSpaceMode: WorldDisplayTextureColorSpaceMode;
 	detailTexturesEnabled: boolean;
 	textureSamplingPolicyCounts: Record<string, number>;
 	textureSamplingPolicySamples: string[];

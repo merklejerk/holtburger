@@ -28,10 +28,7 @@ import {
 	formatEnvCellAssetId,
 	formatLandblockOutdoorAssetId,
 	formatHex32,
-	getOutdoorLandblockCoords,
-	makeOutdoorLandblockId,
 	normalizeOutdoorLandblockId,
-	OUTDOOR_LANDBLOCK_WORLD_SIZE,
 } from "../landblocks";
 import {
 	deriveStaticRenderablePartRenderChunk,
@@ -470,9 +467,7 @@ function collectOutdoorStaticRenderableSourceInstances(
 			return [];
 		}
 		return asset.payload.statics
-			.map((member) =>
-				normalizeOutdoorStaticSourceInstance(member, asset.payload),
-			)
+			.map((member) => deriveOutdoorStaticSourceInstance(member, asset.payload))
 			.filter((instance) =>
 				isOutdoorStaticInstanceSelected(instance, selection),
 			);
@@ -494,14 +489,10 @@ function collectEnvCellStaticRenderableSourceInstances(
 	});
 }
 
-function normalizeOutdoorStaticSourceInstance(
+function deriveOutdoorStaticSourceInstance(
 	member: PreparedLandblockOutdoorPayload["statics"][number],
 	payload: PreparedLandblockOutdoorPayload,
 ): StaticRenderableSourceInstance {
-	const normalizedPlacement = normalizeOutdoorStaticPlacement(
-		member.localPlacement,
-		payload.landblockId,
-	);
 	return {
 		kind:
 			member.kind === "explicit-object"
@@ -510,50 +501,16 @@ function normalizeOutdoorStaticSourceInstance(
 					? "generated-scenery"
 					: "building",
 		instanceId: member.instanceId,
-		owningLandblockId: normalizedPlacement.landblockId,
+		owningLandblockId: normalizeOutdoorLandblockId(payload.landblockId),
 		regionNumber: payload.regionNumber,
 		owningEnvCellId: null,
 		sourceDid: member.sourceDid,
 		sourceAssetId: member.sourceAssetId,
 		sourceIndex: member.sourceIndex,
 		parentPlacements: [],
-		chunkLocalInstancePlacement: normalizedPlacement.localPlacement,
+		chunkLocalInstancePlacement: member.localPlacement,
 		sourceScale: member.sourceScale,
 		numLeaves: member.building?.numLeaves ?? null,
-	};
-}
-
-function normalizeOutdoorStaticPlacement(
-	localPlacement: PlacementTransformDto,
-	landblockId: number,
-): { landblockId: number; localPlacement: PlacementTransformDto } {
-	const blockDeltaX = Math.floor(
-		localPlacement.origin.x / OUTDOOR_LANDBLOCK_WORLD_SIZE,
-	);
-	const blockDeltaY = Math.floor(
-		localPlacement.origin.y / OUTDOOR_LANDBLOCK_WORLD_SIZE,
-	);
-	if (blockDeltaX === 0 && blockDeltaY === 0) {
-		return {
-			landblockId: normalizeOutdoorLandblockId(landblockId),
-			localPlacement,
-		};
-	}
-
-	const coords = getOutdoorLandblockCoords(landblockId);
-	return {
-		landblockId: makeOutdoorLandblockId(
-			coords.x + blockDeltaX,
-			coords.y + blockDeltaY,
-		),
-		localPlacement: {
-			origin: {
-				...localPlacement.origin,
-				x: localPlacement.origin.x - blockDeltaX * OUTDOOR_LANDBLOCK_WORLD_SIZE,
-				y: localPlacement.origin.y - blockDeltaY * OUTDOOR_LANDBLOCK_WORLD_SIZE,
-			},
-			orientation: localPlacement.orientation,
-		},
 	};
 }
 

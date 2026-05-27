@@ -268,7 +268,7 @@ describe("static renderables", () => {
 		expect([...scene.partsByRenderGroupKey.keys()][0]).toContain("uv:none");
 	});
 
-	it("normalizes outdoor static placements that cross landblock edges", () => {
+	it("keeps overhanging outdoor statics source landblock owned", () => {
 		const landblockId = 0x0203ffff;
 		const sourceDid = 0x01000001;
 		const assetState = createAssetState([
@@ -286,17 +286,18 @@ describe("static renderables", () => {
 		);
 		const part = scene.parts[0];
 
-		expect(part?.owningLandblockId).toBe(0x0302ffff);
+		expect(part?.owningLandblockId).toBe(landblockId);
+		expect(part?.renderChunk.chunkLandblockId).toBe(landblockId);
 		expect(part?.chunkLocalInstancePlacement.origin).toEqual({
-			x: 8,
-			y: 187,
+			x: 200,
+			y: -5,
 			z: 2,
 		});
 
 		const position = new Vector3().setFromMatrixPosition(
 			buildStaticRenderablePartMatrix(part!),
 		);
-		expect(position).toEqual(new Vector3(8, 2, -187));
+		expect(position).toEqual(new Vector3(200, 2, 5));
 	});
 });
 

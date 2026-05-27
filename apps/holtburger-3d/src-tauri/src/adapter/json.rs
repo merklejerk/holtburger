@@ -1578,7 +1578,7 @@ mod tests {
     use super::*;
     use holtburger_content::{
         CellLandblockFact, LandblockOutdoorAsset, LandblockOutdoorStaticMember, PreparedAabb,
-        PreparedBvh, PreparedContentSourceDiagnostics, PreparedStaticInstance,
+        PreparedBvh, PreparedBvhNode, PreparedContentSourceDiagnostics, PreparedStaticInstance,
         PreparedStaticInstanceKind, PreparedTerrainMesh, PreparedTerrainTriangle, PreparedVec3,
     };
 
@@ -1782,5 +1782,137 @@ mod tests {
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].get("instanceId").unwrap().as_str().unwrap(), "b");
         assert_eq!(items[1].get("instanceId").unwrap().as_str().unwrap(), "c");
+    }
+
+    #[test]
+    fn serialize_landblock_outdoor_preserves_source_owned_overhanging_static_space() {
+        let source_landblock_id = 0x0203ffff;
+        let instance_bounds = PreparedAabb {
+            min: PreparedVec3 {
+                x: 199.,
+                y: 1.,
+                z: 3.,
+            },
+            max: PreparedVec3 {
+                x: 201.,
+                y: 3.,
+                z: 7.,
+            },
+        };
+        let mut instance = dummy_static_instance("overhang", PreparedStaticInstanceKind::Scenery);
+        instance.owning_landblock_id = source_landblock_id;
+        instance.local_placement.origin = holtburger_common::math::Vector3 {
+            x: 200.,
+            y: -5.,
+            z: 2.,
+        };
+
+        let outdoor = LandblockOutdoorAsset {
+            landblock_id: source_landblock_id,
+            cell_landblock: None,
+            terrain_mesh: None,
+            statics: vec![LandblockOutdoorStaticMember {
+                instance,
+                source_bounds: None,
+                instance_bounds: Some(instance_bounds),
+                building: None,
+                generated: None,
+            }],
+            outdoor_bvh: Some(PreparedBvh {
+                coordinate_space: "landblock-render-local",
+                landblock_id: source_landblock_id,
+                scope: "landblock-outdoor",
+                nodes: vec![PreparedBvhNode {
+                    bounds: instance_bounds,
+                    left: None,
+                    right: None,
+                    item_indices: vec![0],
+                    kind_mask: 1 << 1,
+                }],
+            }),
+            diagnostics: PreparedContentSourceDiagnostics::default(),
+        };
+
+        let payload = serialize_landblock_outdoor_payload_with_terrain(
+            &outdoor,
+            0,
+            0,
+            serde_json::Value::Null,
+        );
+
+        assert_eq!(
+            payload
+                .get("landblockId")
+                .and_then(serde_json::Value::as_u64),
+            Some(source_landblock_id as u64)
+        );
+
+        let static_member = payload
+            .get("statics")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|statics| statics.first())
+            .expect("serialized payload should include the overhanging static");
+        let local_origin = static_member
+            .pointer("/localPlacement/origin")
+            .expect("static member should include local placement origin");
+
+        assert_eq!(
+            local_origin.get("x").and_then(serde_json::Value::as_f64),
+            Some(200.)
+        );
+        assert_eq!(
+            local_origin.get("y").and_then(serde_json::Value::as_f64),
+            Some(-5.)
+        );
+        assert_eq!(
+            local_origin.get("z").and_then(serde_json::Value::as_f64),
+            Some(2.)
+        );
+        assert_eq!(
+            static_member
+                .pointer("/instanceBounds/min/x")
+                .and_then(serde_json::Value::as_f64),
+            Some(199.)
+        );
+        assert_eq!(
+            static_member
+                .pointer("/instanceBounds/min/z")
+                .and_then(serde_json::Value::as_f64),
+            Some(3.)
+        );
+
+        let outdoor_bvh = payload
+            .get("outdoorBvh")
+            .expect("serialized payload should include outdoor BVH");
+        assert_eq!(
+            outdoor_bvh
+                .get("coordinateSpace")
+                .and_then(serde_json::Value::as_str),
+            Some("landblock-render-local")
+        );
+        assert_eq!(
+            outdoor_bvh
+                .pointer("/items/0/instanceId")
+                .and_then(serde_json::Value::as_str),
+            Some("overhang")
+        );
+        assert_eq!(
+            outdoor_bvh
+                .pointer("/nodes/0/bounds/min/x")
+                .and_then(serde_json::Value::as_f64),
+            Some(199.)
+        );
+        assert_eq!(
+            outdoor_bvh
+                .pointer("/nodes/0/bounds/min/z")
+                .and_then(serde_json::Value::as_f64),
+            Some(3.)
+        );
+        assert_eq!(
+            outdoor_bvh
+                .pointer("/nodes/0/itemIndices/0")
+                .and_then(serde_json::Value::as_u64),
+            Some(0)
+        );
     }
 }

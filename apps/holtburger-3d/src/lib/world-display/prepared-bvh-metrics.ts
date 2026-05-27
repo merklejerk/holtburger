@@ -1,8 +1,5 @@
-import { Box3, Vector3 } from "three";
-
 import type {
 	AssetChannelState,
-	PreparedBounds,
 	PreparedEnvCellPayload,
 	PreparedLandblockOutdoorPayload,
 } from "../assets/types";
@@ -22,8 +19,8 @@ import {
 	type PreparedBvhVisibilityResult,
 	type RenderBvhItemKey,
 } from "./prepared-bvh-visibility";
-import type { RenderBounds, RenderFrustum } from "./render-spatial-math";
-import { buildAcPlacementMatrix } from "./static-renderable-geometry";
+import { transformEnvCellLocalBounds } from "./prepared-bvh-bounds";
+import type { RenderFrustum } from "./render-spatial-math";
 import type { StaticRenderableSceneModel } from "./static-renderables";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
@@ -292,34 +289,6 @@ function mergeVisibilityResult(
 		visibleItemKeys.add(itemKey);
 	}
 	fallbackReasons.push(...result.fallbackReasons);
-}
-
-function transformEnvCellLocalBounds(
-	bounds: PreparedBounds,
-	payload: PreparedEnvCellPayload,
-	transform: RenderChunkTransform,
-): RenderBounds {
-	const matrix = buildAcPlacementMatrix(
-		payload.localPlacement,
-		{ x: 0, y: 0, z: 0 },
-		{ x: 1, y: 1, z: 1 },
-	);
-	const box = new Box3(
-		new Vector3(bounds.min.x, bounds.min.y, bounds.min.z),
-		new Vector3(bounds.max.x, bounds.max.y, bounds.max.z),
-	).applyMatrix4(matrix);
-	return {
-		min: {
-			x: box.min.x + transform.offset.x,
-			y: box.min.y + transform.offset.y,
-			z: box.min.z + transform.offset.z,
-		},
-		max: {
-			x: box.max.x + transform.offset.x,
-			y: box.max.y + transform.offset.y,
-			z: box.max.z + transform.offset.z,
-		},
-	};
 }
 
 function countKeysWithPrefix(

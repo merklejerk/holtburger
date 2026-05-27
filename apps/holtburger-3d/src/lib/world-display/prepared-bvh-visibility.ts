@@ -17,6 +17,7 @@ import {
 	type RenderFrustum,
 	type RenderVec3,
 } from "./render-spatial-math";
+import { transformTerrainLocalBounds } from "./prepared-bvh-bounds";
 
 export type RenderBvhItemKey =
 	| `terrain:landblock:${string}:quad:${number}`
@@ -114,7 +115,7 @@ export function queryTerrainBvhVisibility(options: {
 		frustum: options.frustum,
 		itemKey: (item) => terrainBvhItemKey(options.landblockId, item.quadIndex),
 		boundsToRendererBounds: (bounds) =>
-			translateRenderBounds(terrainLocalBoundsToRenderBounds(bounds), options.chunkOffset),
+			transformTerrainLocalBounds(bounds, options.chunkOffset),
 		missingBvhReason: "missing terrain BVH",
 	});
 }
@@ -325,20 +326,6 @@ function translatePreparedBoundsByOffset(
 	return (bounds) => translateRenderBounds(bounds, offset);
 }
 
-function terrainLocalBoundsToRenderBounds(bounds: PreparedBounds): RenderBounds {
-	return {
-		min: {
-			x: bounds.min.x,
-			y: bounds.min.z,
-			z: -bounds.max.y,
-		},
-		max: {
-			x: bounds.max.x,
-			y: bounds.max.z,
-			z: -bounds.min.y,
-		},
-	};
-}
 
 function createEmptyCounters(): PreparedBvhQueryCounters {
 	return {

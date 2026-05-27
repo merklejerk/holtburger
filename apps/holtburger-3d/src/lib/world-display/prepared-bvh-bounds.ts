@@ -2,7 +2,11 @@ import { Box3, Vector3 } from "three";
 
 import type { PreparedBounds, PreparedEnvCellPayload } from "../assets/types";
 import type { RenderChunkTransform } from "./render-anchor";
-import type { RenderBounds } from "./render-spatial-math";
+import {
+	translateRenderBounds,
+	type RenderBounds,
+	type RenderVec3,
+} from "./render-spatial-math";
 import { buildAcPlacementMatrix } from "./static-renderable-geometry";
 
 export function transformEnvCellLocalBounds(
@@ -31,4 +35,25 @@ export function transformEnvCellLocalBounds(
 			z: box.max.z + transform.offset.z,
 		},
 	};
+}
+
+export function transformTerrainLocalBounds(
+	bounds: PreparedBounds,
+	chunkOffset: RenderVec3,
+): RenderBounds {
+	return translateRenderBounds(
+		{
+			min: {
+				x: bounds.min.x,
+				y: bounds.min.z,
+				z: -bounds.max.y,
+			},
+			max: {
+				x: bounds.max.x,
+				y: bounds.max.z,
+				z: -bounds.min.y,
+			},
+		},
+		chunkOffset,
+	);
 }

@@ -1,21 +1,9 @@
-import type {
-	AssetChannelState,
-	PreparedEnvCellPayload,
-	PreparedLandblockOutdoorPayload,
-} from "../assets/types";
+import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import {
-	formatEnvCellAssetId,
-	formatLandblockOutdoorAssetId,
-} from "../landblocks";
-import type { RenderChunkTransform } from "./render-anchor";
-import { deriveTerrainTileRenderChunk } from "./render-chunks";
-import {
-	queryEnvCellLocalBvhVisibility,
-	queryOutdoorBvhVisibility,
-	queryTerrainBvhVisibility,
-	type RenderBvhItemKey,
-} from "./prepared-bvh-visibility";
-import { transformEnvCellLocalBounds } from "./prepared-bvh-bounds";
+	queryRenderSpaceBvhSources,
+	type PortalCompositeRenderBvhSources,
+	type RenderSpaceBvhSource,
+} from "./prepared-bvh-render-sources";
 import {
 	crossRenderVec3,
 	dotRenderVec3,
@@ -24,16 +12,9 @@ import {
 	type RenderPlane,
 	type RenderVec3,
 } from "./render-spatial-math";
-import type { StaticRenderableSceneModel } from "./static-renderables";
-import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
-import type { TerrainSceneModel } from "./terrain-scene";
 
 export interface PortalClippedBvhVisibilityInput {
-	assetState: AssetChannelState;
-	terrainScene: TerrainSceneModel;
-	staticRenderableScene: StaticRenderableSceneModel;
-	structuredInteriorScene: StructuredInteriorSceneModel;
-	renderChunkTransforms: readonly RenderChunkTransform[];
+	renderSources: PortalCompositeRenderBvhSources;
 	cameraFrustum: RenderFrustum;
 	cameraPosition: RenderVec3;
 	apertureWorldPoints: readonly RenderVec3[];
@@ -62,19 +43,11 @@ export function derivePortalClippedBvhVisibility(
 			fallbackReasons: ["portal clipped BVH query missing aperture volume"],
 		};
 	}
-
-	const chunkTransformsByKey = new Map(
-		options.renderChunkTransforms.map((transform) => [
-			transform.chunkKey,
-			transform,
-		]),
-	);
+	fallbackReasons.push(...options.renderSources.fallbackReasons);
 
 	if (options.compositeScene === "interior") {
 		queryInteriorPortalVisibility({
-			assetState: options.assetState,
-			structuredInteriorScene: options.structuredInteriorScene,
-			renderChunkTransformsByKey: chunkTransformsByKey,
+			renderSources: options.renderSources,
 			requestedInteriorEnvCellIds: options.requestedInteriorEnvCellIds,
 			frustum,
 			visibleItemKeys,
@@ -84,10 +57,7 @@ export function derivePortalClippedBvhVisibility(
 	}
 
 	queryExteriorPortalVisibility({
-		assetState: options.assetState,
-		terrainScene: options.terrainScene,
-		staticRenderableScene: options.staticRenderableScene,
-		renderChunkTransformsByKey: chunkTransformsByKey,
+		renderSources: options.renderSources,
 		frustum,
 		visibleItemKeys,
 		fallbackReasons,
@@ -137,9 +107,7 @@ export function buildPortalClippedRenderFrustum(options: {
 }
 
 function queryInteriorPortalVisibility(options: {
-	assetState: AssetChannelState;
-	structuredInteriorScene: StructuredInteriorSceneModel;
-	renderChunkTransformsByKey: ReadonlyMap<string, RenderChunkTransform>;
+	renderSources: PortalCompositeRenderBvhSources;
 	requestedInteriorEnvCellIds: readonly number[];
 	frustum: RenderFrustum;
 	visibleItemKeys: Set<RenderBvhItemKey>;
@@ -150,116 +118,45 @@ function queryInteriorPortalVisibility(options: {
 		options.fallbackReasons.push("portal interior composite has no requested env cells");
 		return;
 	}
-	let queriedCellCount = 0;
-	for (const cell of options.structuredInteriorScene.cells) {
-		if (!requestedIds.has(cell.envCellId)) {
-			continue;
+	const sources: RenderSpaceBvhSource[] = [];
+	for (const envCellId of requestedIds) {
+		const source = options.renderSources.envCellSourcesById.get(envCellId);
+		if (source) {
+			sources.push(source);
 		}
-		queriedCellCount += 1;
-		const payload = findPreparedEnvCellPayload(
-			options.assetState,
-			cell.envCellId,
-		);
-		if (!payload) {
-			options.fallbackReasons.push(
-				`missing portal env-cell payload ${formatEnvCellAssetId(cell.envCellId)}`,
-			);
-			continue;
-		}
-		const transform = options.renderChunkTransformsByKey.get(
-			cell.renderChunk.chunkKey,
-		);
-		if (!transform) {
-			options.fallbackReasons.push(
-				`missing portal render chunk transform ${cell.renderChunk.chunkKey}`,
-			);
-			continue;
-		}
-		const result = queryEnvCellLocalBvhVisibility({
-			payload,
-			frustum: options.frustum,
-			boundsToRendererBounds: (bounds) =>
-				transformEnvCellLocalBounds(bounds, payload, transform),
-		});
-		mergePortalVisibilityResult(result, options);
 	}
-	if (queriedCellCount === 0) {
+	if (sources.length === 0) {
 		options.fallbackReasons.push(
 			"portal interior composite had no loaded structured cells to query",
 		);
+		return;
 	}
+	mergePortalVisibilityResult(
+		queryRenderSpaceBvhSources(sources, options.frustum),
+		options,
+	);
 }
 
 function queryExteriorPortalVisibility(options: {
-	assetState: AssetChannelState;
-	terrainScene: TerrainSceneModel;
-	staticRenderableScene: StaticRenderableSceneModel;
-	renderChunkTransformsByKey: ReadonlyMap<string, RenderChunkTransform>;
+	renderSources: PortalCompositeRenderBvhSources;
 	frustum: RenderFrustum;
 	visibleItemKeys: Set<RenderBvhItemKey>;
 	fallbackReasons: string[];
 }): void {
-	let queriedExteriorSourceCount = 0;
-	for (const tile of options.terrainScene.tiles) {
-		queriedExteriorSourceCount += 1;
-		const payload = findPreparedOutdoorPayload(
-			options.assetState,
-			tile.landblockId,
-		);
-		if (!payload) {
-			options.fallbackReasons.push(
-				`missing portal terrain payload ${formatLandblockOutdoorAssetId(tile.landblockId)}`,
-			);
-			continue;
-		}
-		const transform = options.renderChunkTransformsByKey.get(
-			tile.renderChunk.chunkKey,
-		);
-		if (!transform) {
-			options.fallbackReasons.push(
-				`missing portal render chunk transform ${tile.renderChunk.chunkKey}`,
-			);
-			continue;
-		}
-		mergePortalVisibilityResult(
-			queryTerrainBvhVisibility({
-				terrainBvh: payload.terrain.terrainBvh,
-				landblockId: payload.landblockId,
-				frustum: options.frustum,
-				chunkOffset: transform.offset,
-			}),
-			options,
-		);
-	}
-
-	for (const payload of findActiveOutdoorPayloads(
-		options.assetState,
-		options.staticRenderableScene,
-	)) {
-		queriedExteriorSourceCount += 1;
-		const transform = options.renderChunkTransformsByKey.get(
-			deriveTerrainTileRenderChunk(payload.landblockId).chunkKey,
-		);
-		if (!transform) {
-			options.fallbackReasons.push(
-				`missing portal render chunk transform ${deriveTerrainTileRenderChunk(payload.landblockId).chunkKey}`,
-			);
-			continue;
-		}
-		mergePortalVisibilityResult(
-			queryOutdoorBvhVisibility({
-				payload,
-				frustum: options.frustum,
-				chunkOffset: transform.offset,
-			}),
-			options,
-		);
-	}
-	if (queriedExteriorSourceCount === 0) {
+	const sources = [
+		...options.renderSources.terrainSources,
+		...options.renderSources.outdoorStaticSources,
+	];
+	if (sources.length === 0) {
 		options.fallbackReasons.push(
 			"portal exterior composite had no loaded outdoor sources to query",
 		);
+		return;
 	}
+	mergePortalVisibilityResult(
+		queryRenderSpaceBvhSources(sources, options.frustum),
+		options,
+	);
 }
 
 function mergePortalVisibilityResult(
@@ -329,42 +226,6 @@ function buildEdgePlane(options: {
 	return plane;
 }
 
-function findActiveOutdoorPayloads(
-	assetState: AssetChannelState,
-	staticRenderableScene: StaticRenderableSceneModel,
-): PreparedLandblockOutdoorPayload[] {
-	const landblockIds = new Set(
-		staticRenderableScene.sourceInstances
-			.filter((instance) => instance.owningEnvCellId === null)
-			.map((instance) => instance.owningLandblockId),
-	);
-	return [...landblockIds]
-		.map((landblockId) => findPreparedOutdoorPayload(assetState, landblockId))
-		.filter(
-			(payload): payload is PreparedLandblockOutdoorPayload => payload !== null,
-		)
-		.sort((left, right) => left.landblockId - right.landblockId);
-}
-
-function findPreparedOutdoorPayload(
-	assetState: AssetChannelState,
-	landblockId: number,
-): PreparedLandblockOutdoorPayload | null {
-	const asset =
-		assetState.preparedByAssetId[formatLandblockOutdoorAssetId(landblockId)];
-	return asset?.payload.kind === "landblock-outdoor" ? asset.payload : null;
-}
-
-function findPreparedEnvCellPayload(
-	assetState: AssetChannelState,
-	envCellId: number,
-): PreparedEnvCellPayload | null {
-	const asset = assetState.preparedByAssetId[formatEnvCellAssetId(envCellId)];
-	return asset?.payload.kind === "env-cell" &&
-		asset.payload.envCellId === envCellId
-		? asset.payload
-		: null;
-}
 
 function averageRenderVec3(points: readonly RenderVec3[]): RenderVec3 {
 	const sum = points.reduce(

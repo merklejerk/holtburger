@@ -145,9 +145,20 @@ import {
 } from "./portal-visibility";
 import {
 	createEmptyPreparedBvhDebugMetrics,
-	derivePreparedBvhDebugMetrics,
+	createEmptyPreparedBvhVisibilitySnapshot,
+	derivePreparedBvhVisibilitySnapshot,
 	type PreparedBvhDebugMetrics,
+	type PreparedBvhVisibilitySnapshot,
 } from "./prepared-bvh-metrics";
+import {
+	createEmptyRenderBatchCandidateSelection,
+	createRenderBatchCandidateRegistry,
+	type RenderBatchCandidateSelection,
+} from "./render-batch-candidates";
+import {
+	deriveStaticRenderableBatchBvhBinding,
+	staticRenderableBatchId,
+} from "./static-renderable-bvh-bindings";
 import {
 	createEmptyWorldRenderWorkingModel,
 	deriveWorldRenderWorkingModel,
@@ -538,6 +549,7 @@ export function createWorldDisplayRenderer(
 	const staticGeometryCache = new Map<string, BufferGeometry>();
 	const staticRenderableGroupMeshes = new Map<string, InstancedMesh>();
 	const staticRenderableGroupPartSignatures = new Map<string, string>();
+	const staticRenderableBatchCandidates = createRenderBatchCandidateRegistry();
 	const structuredInteriorMeshes = new Map<string, Mesh>();
 	const portalMaskMeshes = new Map<string, Mesh>();
 	const portalMaskGeometrySignatures = new Map<string, string>();
@@ -564,6 +576,10 @@ export function createWorldDisplayRenderer(
 	);
 	let latestPreparedBvhMetrics: PreparedBvhDebugMetrics =
 		createEmptyPreparedBvhDebugMetrics();
+	let latestPreparedBvhVisibilitySnapshot: PreparedBvhVisibilitySnapshot =
+		createEmptyPreparedBvhVisibilitySnapshot();
+	let latestStaticRenderableBatchCandidateSelection: RenderBatchCandidateSelection =
+		createEmptyRenderBatchCandidateSelection();
 	let latestRenderDebugMetrics: WorldRenderDebugMetrics =
 		createRenderDebugMetrics(renderer, {
 			renderPassCount: 0,
@@ -589,6 +605,11 @@ export function createWorldDisplayRenderer(
 			visibleTerrainMeshCount: 0,
 			staticGroupMeshCount: 0,
 			visibleStaticGroupMeshCount: 0,
+			staticRenderBatchCount: 0,
+			staticBvhCandidateBatchCount: 0,
+			staticBvhRepresentedInstanceKeyCount: 0,
+			staticBvhVisibleInstanceKeyCount: 0,
+			staticBvhFallbackIncludedBatchCount: 0,
 			structuredInteriorMeshCount: 0,
 			visibleStructuredInteriorMeshCount: 0,
 			...latestPreparedBvhMetrics,
@@ -882,6 +903,21 @@ export function createWorldDisplayRenderer(
 			),
 		);
 		renderer.info.reset();
+		latestPreparedBvhVisibilitySnapshot = derivePreparedBvhVisibilitySnapshot({
+			assetState,
+			terrainScene,
+			staticRenderableScene,
+			structuredInteriorScene,
+			renderChunkTransforms,
+			frustum: buildCameraRenderFrustum(),
+		});
+		latestPreparedBvhMetrics = latestPreparedBvhVisibilitySnapshot.metrics;
+		latestStaticRenderableBatchCandidateSelection =
+			staticRenderableBatchCandidates.selectCandidates({
+				visibleItemKeys: latestPreparedBvhVisibilitySnapshot.visibleItemKeys,
+				queryFallbackReasons:
+					latestPreparedBvhVisibilitySnapshot.fallbackReasons,
+			});
 		const renderPolicy = deriveActiveRenderPolicy();
 		const transitionWorkBatches =
 			collectVisibleTransitionPortalWorkBatches(renderPolicy);
@@ -911,14 +947,6 @@ export function createWorldDisplayRenderer(
 				.map((parts) => parts[0])
 				.filter((part): part is StaticRenderablePart => Boolean(part)),
 			materialOwners: staticRenderableGroupMeshes.values(),
-		});
-		latestPreparedBvhMetrics = derivePreparedBvhDebugMetrics({
-			assetState,
-			terrainScene,
-			staticRenderableScene,
-			structuredInteriorScene,
-			renderChunkTransforms,
-			frustum: buildCameraRenderFrustum(),
 		});
 		latestRenderDebugMetrics = createRenderDebugMetrics(renderer, {
 			renderPassCount: graph.length,
@@ -952,6 +980,24 @@ export function createWorldDisplayRenderer(
 			visibleStaticGroupMeshCount: countVisibleObjects(
 				staticRenderableGroupMeshes.values(),
 			),
+			staticRenderBatchCount:
+				latestStaticRenderableBatchCandidateSelection.counters
+					.registeredBatchCount,
+			staticBvhCandidateBatchCount:
+				latestStaticRenderableBatchCandidateSelection.counters
+					.candidateBatchCount,
+			staticBvhRepresentedInstanceKeyCount:
+				latestStaticRenderableBatchCandidateSelection.counters
+					.representedItemKeyCount,
+			staticBvhVisibleInstanceKeyCount:
+				latestPreparedBvhMetrics.visibleStaticInstanceKeyCount,
+			staticBvhFallbackIncludedBatchCount:
+				latestStaticRenderableBatchCandidateSelection.counters
+					.unboundFallbackBatchCount +
+				latestStaticRenderableBatchCandidateSelection.counters
+					.explicitFallbackBatchCount +
+				latestStaticRenderableBatchCandidateSelection.counters
+					.queryFallbackBatchCount,
 			structuredInteriorMeshCount: structuredInteriorMeshes.size,
 			visibleStructuredInteriorMeshCount: countVisibleObjects(
 				structuredInteriorMeshes.values(),
@@ -1020,12 +1066,24 @@ export function createWorldDisplayRenderer(
 				return;
 			case "exterior-base":
 			case "interior-base":
+				renderBaseGraphNode(node);
+				return;
 			case "diagnostic-interior":
 			case "debug-overlay":
+				setAllStaticRenderableMeshesVisible(true);
 				camera.layers.set(node.layer);
 				renderer.render(scene, camera);
 				return;
 		}
+	}
+
+	function renderBaseGraphNode(node: WorldRenderGraphNode): void {
+		const candidateBatchIds =
+			latestStaticRenderableBatchCandidateSelection.candidateBatchIds;
+		renderWithStaticRenderableBatchCandidates(candidateBatchIds, () => {
+			camera.layers.set(node.layer);
+			renderer.render(scene, camera);
+		});
 	}
 
 	function applyGraphNodeClear(node: WorldRenderGraphNode): void {
@@ -1562,6 +1620,35 @@ export function createWorldDisplayRenderer(
 		}
 	}
 
+	function applyStaticRenderableBatchVisibility(
+		candidateBatchIds: ReadonlySet<string>,
+	): void {
+		for (const [groupKey, mesh] of staticRenderableGroupMeshes.entries()) {
+			const batchId = staticRenderableBatchId(groupKey);
+			const registeredObject = staticRenderableBatchCandidates.getObject(batchId);
+			mesh.visible =
+				registeredObject !== mesh || candidateBatchIds.has(batchId);
+		}
+	}
+
+	function renderWithStaticRenderableBatchCandidates(
+		candidateBatchIds: ReadonlySet<string>,
+		render: () => void,
+	): void {
+		applyStaticRenderableBatchVisibility(candidateBatchIds);
+		try {
+			render();
+		} finally {
+			setAllStaticRenderableMeshesVisible(true);
+		}
+	}
+
+	function setAllStaticRenderableMeshesVisible(visible: boolean): void {
+		for (const mesh of staticRenderableGroupMeshes.values()) {
+			mesh.visible = visible;
+		}
+	}
+
 	function buildCameraRenderFrustum(): RenderFrustum {
 		camera.updateMatrixWorld();
 		const projectionScreenMatrix = new Matrix4().multiplyMatrices(
@@ -1752,6 +1839,9 @@ export function createWorldDisplayRenderer(
 			disposeMeshMaterial(mesh);
 			staticRenderableGroupMeshes.delete(groupKey);
 			staticRenderableGroupPartSignatures.delete(groupKey);
+			staticRenderableBatchCandidates.unregister(
+				staticRenderableBatchId(groupKey),
+			);
 		}
 
 		for (const [groupKey, parts] of partsByGroupKey.entries()) {
@@ -1829,6 +1919,7 @@ export function createWorldDisplayRenderer(
 			} else {
 				mesh.count = parts.length;
 			}
+			registerStaticRenderableBatchCandidate(groupKey, mesh, parts);
 		}
 
 		for (const [geometryKey, geometry] of staticGeometryCache.entries()) {
@@ -1842,6 +1933,20 @@ export function createWorldDisplayRenderer(
 
 		syncRenderChunkRoots(renderChunkTransforms);
 		updateCameraFrame();
+	}
+
+	function registerStaticRenderableBatchCandidate(
+		groupKey: string,
+		mesh: InstancedMesh,
+		parts: readonly StaticRenderablePart[],
+	): void {
+		const binding = deriveStaticRenderableBatchBvhBinding(groupKey, parts);
+		staticRenderableBatchCandidates.register({
+			batchId: binding.batchId,
+			object: mesh,
+			itemKeys: binding.itemKeys,
+			fallbackReason: binding.fallbackReason,
+		});
 	}
 
 	function syncDebugOverlayMeshes(sceneModel: WorldDebugOverlayModel): void {
@@ -1936,6 +2041,7 @@ export function createWorldDisplayRenderer(
 		}
 		staticRenderableGroupMeshes.clear();
 		staticRenderableGroupPartSignatures.clear();
+		staticRenderableBatchCandidates.clear();
 		for (const geometry of staticGeometryCache.values()) {
 			geometry.dispose();
 		}
@@ -1955,6 +2061,7 @@ export function createWorldDisplayRenderer(
 		}
 		staticRenderableGroupMeshes.clear();
 		staticRenderableGroupPartSignatures.clear();
+		staticRenderableBatchCandidates.clear();
 		for (const mesh of structuredInteriorMeshes.values()) {
 			mesh.removeFromParent();
 			disposeMesh(mesh);
@@ -2922,6 +3029,7 @@ export function createWorldDisplayRenderer(
 		}
 		staticRenderableGroupMeshes.clear();
 		staticRenderableGroupPartSignatures.clear();
+		staticRenderableBatchCandidates.clear();
 		for (const geometry of staticGeometryCache.values()) {
 			geometry.dispose();
 		}
@@ -3138,6 +3246,13 @@ function createRenderDebugMetrics(
 		visibleTerrainMeshCount: options.visibleTerrainMeshCount,
 		staticGroupMeshCount: options.staticGroupMeshCount,
 		visibleStaticGroupMeshCount: options.visibleStaticGroupMeshCount,
+		staticRenderBatchCount: options.staticRenderBatchCount,
+		staticBvhCandidateBatchCount: options.staticBvhCandidateBatchCount,
+		staticBvhRepresentedInstanceKeyCount:
+			options.staticBvhRepresentedInstanceKeyCount,
+		staticBvhVisibleInstanceKeyCount: options.staticBvhVisibleInstanceKeyCount,
+		staticBvhFallbackIncludedBatchCount:
+			options.staticBvhFallbackIncludedBatchCount,
 		structuredInteriorMeshCount: options.structuredInteriorMeshCount,
 		visibleStructuredInteriorMeshCount:
 			options.visibleStructuredInteriorMeshCount,

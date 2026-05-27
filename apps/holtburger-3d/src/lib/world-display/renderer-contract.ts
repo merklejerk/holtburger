@@ -82,6 +82,11 @@ export interface WorldRenderDebugMetrics {
 	visibleTerrainMeshCount: number;
 	staticGroupMeshCount: number;
 	visibleStaticGroupMeshCount: number;
+	staticRenderBatchCount: number;
+	staticBvhCandidateBatchCount: number;
+	staticBvhRepresentedInstanceKeyCount: number;
+	staticBvhVisibleInstanceKeyCount: number;
+	staticBvhFallbackIncludedBatchCount: number;
 	structuredInteriorMeshCount: number;
 	visibleStructuredInteriorMeshCount: number;
 	terrainBvhVisibleItemCount: number;

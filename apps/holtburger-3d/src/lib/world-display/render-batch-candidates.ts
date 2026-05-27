@@ -47,6 +47,26 @@ export interface RenderBatchCandidateRegistry {
 	): RenderBatchCandidateSelection;
 }
 
+export function createEmptyRenderBatchCandidateSelection(): RenderBatchCandidateSelection {
+	return {
+		candidateBatchIds: new Set(),
+		candidateObjects: [],
+		counters: {
+			registeredBatchCount: 0,
+			keyedBatchCount: 0,
+			representedItemKeyCount: 0,
+			visibleItemKeyCount: 0,
+			candidateBatchCount: 0,
+			itemKeyMatchedBatchCount: 0,
+			unboundFallbackBatchCount: 0,
+			explicitFallbackBatchCount: 0,
+			queryFallbackBatchCount: 0,
+			fallbackReasonCount: 0,
+		},
+		fallbackReasonSamples: [],
+	};
+}
+
 interface StoredRenderBatchCandidateBinding {
 	batchId: string;
 	object: Object3D;

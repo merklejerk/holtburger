@@ -420,9 +420,12 @@ pub fn serialize_prepared_polygon_set_render_geometry_binary(
 }
 
 fn encode_material_variant_signature(signature: &str) -> i32 {
+    const LEGACY_SAMPLER_CLAMP_MATERIAL_VARIANT_SIGNATURE: &str = "sampler=clamp";
+    const LEGACY_SAMPLER_REPEAT_MATERIAL_VARIANT_SIGNATURE: &str = "sampler=repeat";
+
     match signature {
-        "sampler=clamp" => 1,
-        "sampler=repeat" => 2,
+        LEGACY_SAMPLER_CLAMP_MATERIAL_VARIANT_SIGNATURE => 1,
+        LEGACY_SAMPLER_REPEAT_MATERIAL_VARIANT_SIGNATURE => 2,
         _ => 0,
     }
 }

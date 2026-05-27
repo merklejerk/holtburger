@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use holtburger_content::{
     ContentDecodeCache, ContentRepository, EnvCellAssetAssembler, ResolvedMaterialSource,
+    legacy_sampler_material_variant_signature,
 };
 use holtburger_dat::file_type::{EnvCell, Environment};
 use holtburger_dat::graphics::{CVertexArray, Polygon};
@@ -219,11 +220,7 @@ fn normalize_surface_slot(surface_slot: i16) -> Option<i16> {
 }
 
 fn legacy_sampler_variant(repeats: bool) -> &'static str {
-    if repeats {
-        "sampler=repeat"
-    } else {
-        "sampler=clamp"
-    }
+    legacy_sampler_material_variant_signature(repeats)
 }
 
 fn format_hex_list(values: &[u32]) -> String {

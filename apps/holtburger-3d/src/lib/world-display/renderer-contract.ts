@@ -107,6 +107,9 @@ export interface WorldRenderDebugMetrics {
 	structuredInteriorGeometryGroupCount: number;
 	materialTypeCounts: Record<string, number>;
 	materialProgramKeySamples: string[];
+	preparedTextureUploadCount: number;
+	preparedTextureGeneratedByteLength: number;
+	compressedSingleLevelFallbackUploadCount: number;
 	renderCalls: number;
 	renderTriangles: number;
 	renderLines: number;

@@ -1,8 +1,11 @@
-const BASE_MATERIAL_VARIANT_SIGNATURE = "base";
-const LEGACY_SAMPLER_CLAMP_MATERIAL_VARIANT_SIGNATURE = "sampler=clamp";
-const LEGACY_SAMPLER_REPEAT_MATERIAL_VARIANT_SIGNATURE = "sampler=repeat";
+import {
+	BASE_MATERIAL_VARIANT_SIGNATURE,
+	LEGACY_SAMPLER_CLAMP_MATERIAL_VARIANT_SIGNATURE,
+	LEGACY_SAMPLER_REPEAT_MATERIAL_VARIANT_SIGNATURE,
+	type LegacySamplerMaterialVariant,
+} from "../assets/material-variants";
 
-type LegacySamplerMaterialVariant = "clamp" | "repeat";
+export type { LegacySamplerMaterialVariant } from "../assets/material-variants";
 
 export function normalizeMaterialVariantSignature(
 	signature: string | null | undefined,

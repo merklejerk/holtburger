@@ -56,7 +56,7 @@ function createTerrainMesh(): PreparedTerrainMesh {
 				c: 2,
 				quadIndex: 7,
 				triangleInQuad: 0,
-				terrainType: 1234,
+				debugTerrainPcode: 1234,
 				averageHeight: 0,
 			},
 		],

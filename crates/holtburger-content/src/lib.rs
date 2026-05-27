@@ -3,6 +3,7 @@ pub mod decode_cache;
 pub mod landblock_scene_assets;
 pub mod material_capabilities;
 pub mod material_graph;
+pub mod material_variants;
 pub mod repository;
 pub mod soul_emote;
 mod source_reader;
@@ -36,6 +37,10 @@ pub use material_graph::{
     ResolvedSetupAppearancePart, ResolvedSurfaceTexture, ResolvedTerrainAlphaMap,
     ResolvedTerrainMaterialTable, ResolvedTerrainMaterialType, ResolvedTerrainRoadAlphaMap,
     ResolvedTextureChange, ResolvedTextureMaterial,
+};
+pub use material_variants::{
+    LEGACY_SAMPLER_CLAMP_MATERIAL_VARIANT_SIGNATURE,
+    LEGACY_SAMPLER_REPEAT_MATERIAL_VARIANT_SIGNATURE, legacy_sampler_material_variant_signature,
 };
 pub use repository::ContentRepository;
 pub use soul_emote::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteResolution, SoulEmoteToken};

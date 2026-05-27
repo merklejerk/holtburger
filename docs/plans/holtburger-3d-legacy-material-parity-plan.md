@@ -3403,6 +3403,11 @@ support, lighting parity, and indexed-color filtering remain separate work.
      The renderer path should not carry two appearance identities.
    - Audit tests that still assert `materialAppearanceKey` directly and move
      them to cache/signature/diagnostic behavior.
+   - Completion note: removed the `material-resources.ts`
+     `formatMaterialAssetId`/`MaterialAppearanceContext` re-export shims,
+     moved nearby imports to `material-signatures.ts` and
+     `material-appearance.ts`, removed `StaticRenderablePart.materialAppearanceKey`,
+     and updated assertions to inspect `MaterialAppearanceContext`.
 
 2. Make material variant identity less stringly typed.
    - Centralize the cross-boundary `sampler=clamp` and `sampler=repeat`
@@ -3413,6 +3418,10 @@ support, lighting parity, and indexed-color filtering remain separate work.
    - Keep missing browser DTO variants normalized to `base` only at legacy
      compatibility boundaries; new production payloads should emit explicit
      sampler variants.
+   - Completion note: added narrow material-variant helpers for the app asset
+     boundary and `holtburger-content`, then rewired TS binary hydration, Rust
+     content emission, and the sampler parity harness away from hand-written
+     sampler strings.
 
 3. Reduce `material-construction.ts` duplication before adding new material
    paths.
@@ -3423,6 +3432,11 @@ support, lighting parity, and indexed-color filtering remain separate work.
      swap or prepared indexed-color work touches it again.
    - Keep terrain diagnostics and terrain shader construction out of this
      module; terrain has its own material/resource boundary now.
+   - Completion note: extracted a local `createLegacyMeshStandardMaterial()`
+     factory so solid-color, direct-texture, indexed-placeholder, and fallback
+     material paths share legacy defaults, behavior application, and metadata.
+     Indexed palette source selection was left in place because this pass did
+     not touch that flow.
 
 4. Tighten sampler-policy ownership.
    - Keep `WorldMaterialResourceCache.getDefaultTextureSamplingPolicy()` as a
@@ -3431,6 +3445,10 @@ support, lighting parity, and indexed-color filtering remain separate work.
    - Remove broad all-clamped/static assumptions from any remaining call sites.
    - Decide whether the browser `Nearest` filtering mode is a true diagnostic
      mode or should be renamed/remapped to retail-style preference labels.
+   - Completion note: production terrain/detail callers now use
+     `getRenderSurfaceTextureSamplingPolicy()` before applying explicit wrap and
+     color-space overrides. `getDefaultTextureSamplingPolicy()` remains only as
+     a compatibility/test bridge.
 
 5. Clean up `SurfaceTexture`/`ImgTex` migration leftovers.
    - Polish compact debug labels that still say "tex" when they mean
@@ -3441,6 +3459,9 @@ support, lighting parity, and indexed-color filtering remain separate work.
    - Keep true `0x15` `RenderTexture` terminology reserved for the deferred
      modern resource family; do not revive `render-texture/{did}` for legacy
      `0x05` material assets.
+   - Completion note: polished compact material diagnostics from vague `tex`
+     wording to explicit `surface texture` wording. No `render-texture/{did}`
+     legacy route was reintroduced.
 
 6. Retire terrain debug compatibility naming where the material path has taken
    over.
@@ -3450,6 +3471,9 @@ support, lighting parity, and indexed-color filtering remain separate work.
      triangle fallback that fabricates quad metadata from debug terrain type.
    - Move terrain material readiness counts from compact status strings into
      structured debug rows if the Debug panel gets another renderer pass.
+   - Completion note: renamed frontend `PreparedTerrainTriangle.terrainType` to
+     `debugTerrainPcode`, kept structured quad pcodes as the normal source, and
+     limited the old triangle value to binary fallback/debug color usage.
 
 7. Split oversized browser renderer/debug modules along established boundaries.
    - Move any remaining material diagnostic aggregation, debug-overlay object
@@ -3461,6 +3485,9 @@ support, lighting parity, and indexed-color filtering remain separate work.
      or richer diagnostics.
    - Keep production rendering and diagnostic visualization separate; do not
      add ad hoc debug branches to renderer hot paths.
+   - Completion note: no broad module split was attempted in this pass. The
+     renderer-facing changes stayed scoped to typed metrics and material/cache
+     boundaries to avoid a high-risk move-only refactor.
 
 8. Harden prepared-texture planning and diagnostics.
    - Add debug counters for prepared-texture prepared asset count, generated
@@ -3470,6 +3497,9 @@ support, lighting parity, and indexed-color filtering remain separate work.
    - Decide whether raw `sourceBytes` should remain on `render-surface/{id}`,
      move to a separate raw-source route, or become debug-only before persistent
      prepared-texture caching is introduced.
+   - Completion note: added structured renderer metrics for prepared texture
+     uploads, generated prepared-texture bytes, and compressed single-level
+     fallback uploads. Raw `sourceBytes` routing remains unchanged.
 
 9. Clean up generated compressed mip implementation boundaries.
    - If prepared-texture generation remains visible during scene loads, add a
@@ -3479,6 +3509,12 @@ support, lighting parity, and indexed-color filtering remain separate work.
      keys unless they actually change generated bytes.
    - Reintroduce codec profiling as a dedicated benchmark or harness only if
      timing diagnostics show decode/encode remains a bottleneck.
+   - Completion note: no Rust prepared-texture cache was added. The new
+     prepared-texture counters are the intended signal for deciding whether
+     generation is still load-visible enough to justify that cache. The
+     prepared-texture DXT codec/downsample implementation now lives in a
+     focused adapter-local module separate from prepared-texture request
+     parsing, timing, and payload serialization.
 
 10. Document and validate known magic constants.
     - Name and cite the terrain alpha/road pcode PRNG constants currently
@@ -3488,6 +3524,10 @@ support, lighting parity, and indexed-color filtering remain separate work.
       modules that apply them.
     - Keep citations close to unusual constants so later cleanup does not
       "simplify" proven retail behavior into incorrect generic math.
+    - Completion note: named the terrain debug hue/height constants while
+      renaming the fallback terrain pcode path. Broader citation work for
+      terrain alpha/road PRNG and mip-cap constants remains a focused docs/code
+      annotation follow-up.
 
 11. Normalize diagnostics into typed categories.
     - Replace long concatenated debug summary strings with typed renderer
@@ -3497,6 +3537,9 @@ support, lighting parity, and indexed-color filtering remain separate work.
       for future UI panels and regression harnesses.
     - Do not write tests for debug-only presentation text; test the structured
       diagnostic producers.
+    - Completion note: added machine-readable prepared-texture counters to
+      `WorldRenderDebugMetrics` and material-cache stats. Existing long compact
+      status strings were not fully replaced in this pass.
 
 12. Remove rejected route and synthetic-test leftovers.
     - Ensure no production path recognizes
@@ -3505,6 +3548,9 @@ support, lighting parity, and indexed-color filtering remain separate work.
       variants except where they explicitly assert rejection.
     - Keep `dependency-manifest` out of production asset unions; graph tests
       should use production-shaped payloads.
+    - Completion note: audited rejected route usage. Production code does not
+      recognize `setup-appearance/{setupDid}/obj-desc/...`; the remaining
+      route-shaped test strings explicitly assert rejection/classification.
 
 13. Re-check fallback paths for real compatibility value.
     - Keep raw setup-model fallback only while base `setup-appearance/{setupDid}`
@@ -3513,6 +3559,10 @@ support, lighting parity, and indexed-color filtering remain separate work.
       from unsupported content.
     - Remove dead fallback paths that no longer execute after prepared
       setup-appearance, terrain, and prepared-texture routes are stable.
+    - Completion note: setup-appearance fallback behavior was left intact
+      because base `setup-appearance/{setupDid}` can still be missing, pending,
+      or failed. This pass did not find a clearly dead fallback path safe to
+      delete without runtime coverage.
 
 14. Consolidate formatting and asset-ID helpers.
     - Unify repeated material, palette, surface-texture, render-surface, and
@@ -3520,6 +3570,9 @@ support, lighting parity, and indexed-color filtering remain separate work.
       owns those route strings.
     - Do not move renderer-only policy, such as derived palette composition or
       sampler decisions, into shared host contracts while doing this.
+    - Completion note: removed the material ID barrel export and centralized
+      sampler variant formatting without moving renderer-only policy into host
+      contracts. Full route-helper consolidation remains intentionally deferred.
 
 15. Add cleanup verification gates.
     - Run the app checks from `apps/holtburger-3d`: `npm run check`,
@@ -3529,6 +3582,11 @@ support, lighting parity, and indexed-color filtering remain separate work.
     - Use `git diff --check` for whitespace/format drift.
     - For visual-risk cleanup, capture the existing comparison scenes before
       and after the cleanup so refactors do not regress material parity.
+    - Completion note: ran `npm run check`, `npm run lint:ts`,
+      `npm run lint:dead`, `npm run lint:rust`, targeted `npm run test:ts`,
+      `cargo fmt --check`, `cargo check -p holtburger-content -p
+      holtburger-debug-harness`, and `git diff --check`. Visual comparison
+      captures were not run because this cleanup did not start a render session.
 
 Completion criteria:
 

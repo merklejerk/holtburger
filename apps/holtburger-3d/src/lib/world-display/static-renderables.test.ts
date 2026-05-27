@@ -124,7 +124,9 @@ describe("static renderables", () => {
 
 		expect(scene.missingSetupAppearanceAssetIds).toEqual([]);
 		expect(part?.gfxObjId).toBe(appearanceGfxObjId);
-		expect(part?.materialAppearanceKey).toBe("setup-appearance/02000001");
+		expect(part?.materialAppearanceContext.appearanceKey).toBe(
+			"setup-appearance/02000001",
+		);
 		expect(part?.materialAppearanceContext.selectedPartsSignature).toContain(
 			"gfx-obj/01000002",
 		);

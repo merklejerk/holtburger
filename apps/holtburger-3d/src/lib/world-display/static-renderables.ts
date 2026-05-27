@@ -50,10 +50,8 @@ import {
 	type MaterialAppearanceContext,
 } from "./material-appearance";
 import { applyRenderGeometryMaterialVariants } from "./material-plan";
-import {
-	formatMaterialAssetId,
-	type ResolvedMaterialSlot,
-} from "./material-resources";
+import type { ResolvedMaterialSlot } from "./material-resources";
+import { formatMaterialAssetId } from "./material-signatures";
 import { describeMaterialVariantSignature } from "./material-variants";
 import {
 	describeRegionDetailRoleSignature,
@@ -102,7 +100,6 @@ export interface StaticRenderablePart {
 	partIndex: number;
 	gfxObjId: number;
 	gfxObjAssetId: string;
-	materialAppearanceKey: string;
 	materialAppearanceContext: MaterialAppearanceContext;
 	materialSlots: ResolvedMaterialSlot[];
 	materialSignature: string;
@@ -611,8 +608,7 @@ function createStaticRenderablePart(
 		partIndex: number;
 		gfxObjId: number;
 		gfxObjAssetId: string;
-		materialAppearanceKey: string;
-		materialAppearanceContext?: MaterialAppearanceContext;
+		materialAppearanceContext: MaterialAppearanceContext;
 		materialSlots: ResolvedMaterialSlot[];
 		partPlacements: PlacementTransformDto[];
 		scale: Vec3Dto;
@@ -624,9 +620,7 @@ function createStaticRenderablePart(
 	const renderChunk = deriveStaticRenderablePartRenderChunk(instance);
 	const renderDomain = staticRenderableRenderDomainForKind(instance.kind);
 	const localRenderKey = `${instance.instanceId}/part/${part.partIndex}/${part.gfxObjAssetId}`;
-	const materialAppearanceContext =
-		part.materialAppearanceContext ??
-		createBaseMaterialAppearanceContext(part.materialAppearanceKey);
+	const materialAppearanceContext = part.materialAppearanceContext;
 	const textureVelocity = normalizeTextureVelocity(
 		part.textureVelocity ?? null,
 	);
@@ -652,7 +646,6 @@ function createStaticRenderablePart(
 		partIndex: part.partIndex,
 		gfxObjId: part.gfxObjId,
 		gfxObjAssetId: part.gfxObjAssetId,
-		materialAppearanceKey: part.materialAppearanceKey,
 		materialAppearanceContext,
 		materialSlots: part.materialSlots,
 		materialSignature: describeMaterialSignature(
@@ -794,7 +787,7 @@ function expandStaticRenderableSourceInstanceParts(
 				partIndex: 0,
 				gfxObjId: sourceAsset.payload.gfxObjId,
 				gfxObjAssetId: instance.sourceAssetId,
-				materialAppearanceKey: "base",
+				materialAppearanceContext: createBaseMaterialAppearanceContext("base"),
 				materialSlots: resolveGfxObjMaterialSlots(sourceAsset.payload),
 				partPlacements: [],
 				scale: UNIT_SCALE,
@@ -833,7 +826,8 @@ function expandStaticRenderableSourceInstanceParts(
 					partIndex: part.partIndex,
 					gfxObjId: part.gfxObjId,
 					gfxObjAssetId: part.gfxObjAssetId,
-					materialAppearanceKey: "setup-base",
+					materialAppearanceContext:
+						createBaseMaterialAppearanceContext("setup-base"),
 					materialSlots: resolveSetupPartMaterialSlots(assetState, part),
 					partPlacements: deriveSetupPartDefaultPlacements(
 						sourceAsset.payload,
@@ -899,7 +893,6 @@ function expandSetupAppearanceParts(options: {
 				partIndex: part.partIndex,
 				gfxObjId: part.gfxObjId,
 				gfxObjAssetId: part.gfxObjAssetId,
-				materialAppearanceKey: options.setupAppearance.appearanceKey,
 				materialAppearanceContext: appearanceContext,
 				materialSlots: resolveSetupAppearancePartMaterialSlots(
 					options.assetState,

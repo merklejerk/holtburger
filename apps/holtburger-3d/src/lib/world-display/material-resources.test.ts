@@ -19,14 +19,12 @@ import type {
 	PreparedTexturePayload,
 } from "../assets/types";
 import type { AssetErrorCode, AssetLookupRequestDto } from "../host/contracts";
-import {
-	WorldMaterialResourceCache,
-	formatMaterialAssetId,
-} from "./material-resources";
+import { WorldMaterialResourceCache } from "./material-resources";
 import {
 	createBaseMaterialAppearanceContext,
 	type MaterialAppearanceContext,
 } from "./material-appearance";
+import { formatMaterialAssetId } from "./material-signatures";
 import {
 	createDefaultMaterialTextureSamplingPolicy,
 	type TextureSamplingPolicy,

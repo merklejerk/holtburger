@@ -125,17 +125,10 @@ export function createMaterial(options: {
 			behavior,
 			reportDiagnostic: options.reportDiagnostic,
 		});
-		return withLegacyMaterialBehaviorMetadata(
-			new MeshStandardMaterial(
-				applyLegacyMaterialBehavior(
-					withLegacyMeshStandardSurfaceDefaults({
-						color: colorFromArgb(recipe.source.argb).multiply(behavior.color),
-					}),
-					behavior,
-				),
-			),
+		return createLegacyMeshStandardMaterial({
 			behavior,
-		);
+			color: colorFromArgb(recipe.source.argb).multiply(behavior.color),
+		});
 	}
 
 	const surfaceTexture = firstPreparedSurfaceTexture(
@@ -151,15 +144,15 @@ export function createMaterial(options: {
 		renderSurface &&
 		(isSupportedDirectColorFormat(renderSurface.formatRaw) ||
 			isSupportedCompressedFormat(renderSurface.formatRaw))
-		? options.resolveTexture(
-				renderSurface,
-				selectVariantTextureSamplingPolicy(
+			? options.resolveTexture(
 					renderSurface,
-					options.textureSamplingPolicy,
-					options.materialVariantSignature,
-				),
-			)
-		: null;
+					selectVariantTextureSamplingPolicy(
+						renderSurface,
+						options.textureSamplingPolicy,
+						options.materialVariantSignature,
+					),
+				)
+			: null;
 	if (texture && renderSurface) {
 		const behavior = deriveLegacyMaterialBehavior({
 			recipe,
@@ -171,18 +164,11 @@ export function createMaterial(options: {
 			behavior,
 			reportDiagnostic: options.reportDiagnostic,
 		});
-		return withLegacyMaterialBehaviorMetadata(
-			new MeshStandardMaterial(
-				applyLegacyMaterialBehavior(
-					withLegacyMeshStandardSurfaceDefaults({
-						color: behavior.color,
-						map: texture,
-					}),
-					behavior,
-				),
-			),
+		return createLegacyMeshStandardMaterial({
 			behavior,
-		);
+			color: behavior.color,
+			map: texture,
+		});
 	}
 	if (renderSurface && isIndexedTextureFormat(renderSurface.formatRaw)) {
 		const indexedResources = resolveIndexedMaterialResources({
@@ -231,17 +217,10 @@ export function createMaterial(options: {
 			behavior,
 			reportDiagnostic: options.reportDiagnostic,
 		});
-		return withLegacyMaterialBehaviorMetadata(
-			new MeshStandardMaterial(
-				applyLegacyMaterialBehavior(
-					withLegacyMeshStandardSurfaceDefaults({
-						color: color.multiply(behavior.color),
-					}),
-					behavior,
-				),
-			),
+		return createLegacyMeshStandardMaterial({
 			behavior,
-		);
+			color: color.multiply(behavior.color),
+		});
 	}
 
 	reportTextureFallbackDiagnostics({
@@ -267,16 +246,28 @@ export function createMaterial(options: {
 		behavior,
 		reportDiagnostic: options.reportDiagnostic,
 	});
+	return createLegacyMeshStandardMaterial({
+		behavior,
+		color: color.multiply(behavior.color),
+	});
+}
+
+function createLegacyMeshStandardMaterial(options: {
+	behavior: LegacyMaterialBehavior;
+	color: Color;
+	map?: Texture;
+}): MeshStandardMaterial {
 	return withLegacyMaterialBehaviorMetadata(
 		new MeshStandardMaterial(
 			applyLegacyMaterialBehavior(
 				withLegacyMeshStandardSurfaceDefaults({
-					color: color.multiply(behavior.color),
+					color: options.color,
+					map: options.map,
 				}),
-				behavior,
+				options.behavior,
 			),
 		),
-		behavior,
+		options.behavior,
 	);
 }
 
@@ -681,8 +672,12 @@ function textureCandidateRenderSurfaceAssetIds(
 		: recipe.dependencies.renderSurfaceAssetIds;
 }
 
-function selectedRenderSurfaceAssetIds(renderSurfaceId: number | null): string[] {
-	return renderSurfaceId === null ? [] : [formatRenderSurfaceAssetId(renderSurfaceId)];
+function selectedRenderSurfaceAssetIds(
+	renderSurfaceId: number | null,
+): string[] {
+	return renderSurfaceId === null
+		? []
+		: [formatRenderSurfaceAssetId(renderSurfaceId)];
 }
 
 function formatRenderSurfaceAssetId(renderSurfaceId: number): string {

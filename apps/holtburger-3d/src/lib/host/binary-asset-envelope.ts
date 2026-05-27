@@ -4,6 +4,7 @@ import {
 	assetLookupResponseDtoSchema,
 	type AssetLookupResponseDto,
 } from "./contracts";
+import { formatLegacySamplerMaterialVariantSignature } from "../assets/material-variants";
 
 const HEADER_LENGTH = 16;
 const MAGIC = "HBAB";
@@ -227,7 +228,7 @@ function decodeBinarySection(
 				c,
 				quadIndex: terrainType,
 				triangleInQuad: 0,
-				terrainType,
+				debugTerrainPcode: terrainType,
 				averageHeight,
 			}),
 		);
@@ -283,10 +284,10 @@ function decodeBinarySection(
 
 function decodeMaterialVariantSignature(code: number): string | null {
 	if (code === 1) {
-		return "sampler=clamp";
+		return formatLegacySamplerMaterialVariantSignature("clamp");
 	}
 	if (code === 2) {
-		return "sampler=repeat";
+		return formatLegacySamplerMaterialVariantSignature("repeat");
 	}
 	return null;
 }

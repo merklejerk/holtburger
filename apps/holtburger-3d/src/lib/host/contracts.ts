@@ -903,7 +903,7 @@ export type RenderSurfacePayloadDto = z.infer<
 	typeof renderSurfacePayloadDtoSchema
 >;
 
-export const preparedTextureMipLevelDtoSchema = z.object({
+const preparedTextureMipLevelDtoSchema = z.object({
 	level: z.number().int().nonnegative(),
 	width: z.number().int().positive(),
 	height: z.number().int().positive(),

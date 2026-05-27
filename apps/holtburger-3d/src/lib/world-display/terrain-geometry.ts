@@ -101,14 +101,14 @@ export function buildDebugTerrainGeometry(
 		const quad = quadsByIndex.get(triangle.quadIndex) ?? null;
 		const color = buildTerrainColor(
 			terrainMesh,
-			triangle.terrainType,
+			triangle.debugTerrainPcode,
 			triangle.averageHeight,
 		);
 
 		for (const vertex of vertices) {
 			positions.push(vertex.x, vertex.z, -vertex.y);
 			colors.push(color.r, color.g, color.b);
-			terrainPcodes.push(quad?.pcode ?? triangle.terrainType);
+			terrainPcodes.push(quad?.pcode ?? triangle.debugTerrainPcode);
 			terrainQuadIndices.push(triangle.quadIndex);
 			terrainCornerCodes.push(...(quad?.cornerTerrainCodes ?? [0, 0, 0, 0]));
 		}
@@ -171,11 +171,17 @@ function terrainQuadUv(
 
 function buildTerrainColor(
 	terrainMesh: PreparedTerrainMesh,
-	terrainType: number,
+	debugTerrainPcode: number,
 	averageHeight: number,
 ): Color {
-	const terrainHues = [152, 104, 44, 190, 128, 24];
-	const absoluteHeightFactor = clamp((averageHeight + 12) / 72, 0, 1);
+	const DEBUG_TERRAIN_HUES = [152, 104, 44, 190, 128, 24];
+	const DEBUG_HEIGHT_OFFSET = 12;
+	const DEBUG_HEIGHT_RANGE = 72;
+	const absoluteHeightFactor = clamp(
+		(averageHeight + DEBUG_HEIGHT_OFFSET) / DEBUG_HEIGHT_RANGE,
+		0,
+		1,
+	);
 	const localHeightSpan = Math.max(
 		terrainMesh.maxHeight - terrainMesh.minHeight,
 		1,
@@ -187,7 +193,7 @@ function buildTerrainColor(
 	);
 
 	return new Color().setHSL(
-		terrainHues[terrainType % terrainHues.length] / 360,
+		DEBUG_TERRAIN_HUES[debugTerrainPcode % DEBUG_TERRAIN_HUES.length] / 360,
 		0.34 + absoluteHeightFactor * 0.12,
 		0.22 + absoluteHeightFactor * 0.18 + localHeightFactor * 0.08,
 	);

@@ -64,10 +64,10 @@ import {
 import {
 	type MaterialResourceDiagnostic,
 	WorldMaterialResourceCache,
-	formatMaterialAssetId,
 } from "./material-resources";
 import { applyRenderGeometryMaterialVariants } from "./material-plan";
 import { createBaseMaterialAppearanceContext } from "./material-appearance";
+import { formatMaterialAssetId } from "./material-signatures";
 import type { MaterialTextureCapabilities } from "./render-surface-texture-resources";
 import {
 	buildAcPlacementMatrix,
@@ -607,6 +607,9 @@ export function createWorldDisplayRenderer(
 			structuredInteriorGeometryGroupCount: 0,
 			materialTypeCounts: {},
 			materialProgramKeySamples: [],
+			preparedTextureUploadCount: 0,
+			preparedTextureGeneratedByteLength: 0,
+			compressedSingleLevelFallbackUploadCount: 0,
 		});
 	let frameId = 0;
 	let lastFrameAt: number | null = null;
@@ -972,6 +975,11 @@ export function createWorldDisplayRenderer(
 			),
 			materialTypeCounts: materialStats.materialTypeCounts,
 			materialProgramKeySamples: materialStats.materialProgramKeySamples,
+			preparedTextureUploadCount: materialStats.preparedTextureUploadCount,
+			preparedTextureGeneratedByteLength:
+				materialStats.preparedTextureGeneratedByteLength,
+			compressedSingleLevelFallbackUploadCount:
+				materialStats.compressedSingleLevelFallbackUploadCount,
 		});
 	}
 
@@ -2033,7 +2041,9 @@ export function createWorldDisplayRenderer(
 			cell.renderGeometry,
 			materialPlan.geometrySlots,
 			{
-				compactMaterialGroups: canCompactMaterialGroups(detailMaterials.materials),
+				compactMaterialGroups: canCompactMaterialGroups(
+					detailMaterials.materials,
+				),
 			},
 		);
 		const mesh = new Mesh(geometry, detailMaterials.materials);
@@ -2709,12 +2719,12 @@ export function createWorldDisplayRenderer(
 		const materialSet =
 			tile.materialResources.status === "ready"
 				? buildTerrainBlendMaterialSet({
-					assetState,
-					regionNumber: tile.materialResources.regionNumber,
-					pcodes: tile.mesh.quads.map((quad) => quad.pcode),
-					materialResourceCache,
-					detailTexturesEnabled,
-				})
+						assetState,
+						regionNumber: tile.materialResources.regionNumber,
+						pcodes: tile.mesh.quads.map((quad) => quad.pcode),
+						materialResourceCache,
+						detailTexturesEnabled,
+					})
 				: null;
 		const geometry = materialSet
 			? buildTerrainMaterialGeometry(
@@ -3138,6 +3148,11 @@ function createRenderDebugMetrics(
 			options.structuredInteriorGeometryGroupCount,
 		materialTypeCounts: options.materialTypeCounts,
 		materialProgramKeySamples: options.materialProgramKeySamples,
+		preparedTextureUploadCount: options.preparedTextureUploadCount,
+		preparedTextureGeneratedByteLength:
+			options.preparedTextureGeneratedByteLength,
+		compressedSingleLevelFallbackUploadCount:
+			options.compressedSingleLevelFallbackUploadCount,
 		renderCalls: renderer.info.render.calls,
 		renderTriangles: renderer.info.render.triangles,
 		renderLines: renderer.info.render.lines,

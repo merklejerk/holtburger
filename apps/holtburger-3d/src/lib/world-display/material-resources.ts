@@ -47,8 +47,6 @@ import {
 	type TextureSamplingPolicy,
 } from "./texture-sampling-policy";
 
-export { formatMaterialAssetId } from "./material-signatures";
-export type { MaterialAppearanceContext } from "./material-appearance";
 export type {
 	MaterialResourcePlan,
 	ResolvedMaterialSlot,
@@ -93,6 +91,9 @@ export interface MaterialResourceCacheStats {
 	textureSamplingPolicySamples: string[];
 	materialTypeCounts: Record<string, number>;
 	materialProgramKeySamples: string[];
+	preparedTextureUploadCount: number;
+	preparedTextureGeneratedByteLength: number;
+	compressedSingleLevelFallbackUploadCount: number;
 }
 
 export class WorldMaterialResourceCache {
@@ -104,6 +105,9 @@ export class WorldMaterialResourceCache {
 		IndexedTextureResourceRecord
 	>();
 	private readonly reportedDiagnosticKeys = new Set<string>();
+	private readonly preparedTextureUploadKeys = new Set<string>();
+	private preparedTextureGeneratedByteLength = 0;
+	private compressedSingleLevelFallbackUploadCount = 0;
 	private readonly textureCapabilities: MaterialTextureCapabilities;
 	private readonly textureSamplingPolicy: MaterialTextureSamplingPolicy;
 
@@ -159,6 +163,9 @@ export class WorldMaterialResourceCache {
 			record.resource.texture.dispose();
 		}
 		this.indexedTextureRecords.clear();
+		this.preparedTextureUploadKeys.clear();
+		this.preparedTextureGeneratedByteLength = 0;
+		this.compressedSingleLevelFallbackUploadCount = 0;
 	}
 
 	private getMaterial(options: {
@@ -209,10 +216,11 @@ export class WorldMaterialResourceCache {
 		preparedByAssetId?: Readonly<Record<string, PreparedAssetRecord>>;
 		usage?: PreparedTexturePayload["usage"];
 	}): Texture | null {
+		const preparedTexture = resolvePreparedTexture(options);
 		const textureKey = describeRenderSurfaceTextureResourceKey(
 			options.renderSurface,
 			options.samplingPolicy,
-			resolvePreparedTexture(options)?.sourceHash ?? null,
+			preparedTexture?.sourceHash ?? null,
 		);
 		const cached = this.textureRecords.get(textureKey);
 		if (cached) {
@@ -223,11 +231,12 @@ export class WorldMaterialResourceCache {
 			options.renderSurface,
 			options.samplingPolicy,
 			this.textureCapabilities,
-			resolvePreparedTexture(options),
+			preparedTexture,
 		);
 		if (!texture) {
 			return null;
 		}
+		this.recordPreparedTextureUpload(options.renderSurface, preparedTexture);
 		this.textureRecords.set(textureKey, {
 			texture,
 			samplingPolicy: describeTextureSamplingPolicy(options.samplingPolicy),
@@ -346,13 +355,19 @@ export class WorldMaterialResourceCache {
 		return resource;
 	}
 
-	getDefaultTextureSamplingPolicy(
+	getRenderSurfaceTextureSamplingPolicy(
 		renderSurface: PreparedRenderSurfacePayload,
 	): TextureSamplingPolicy {
 		return selectRenderSurfaceTextureSamplingPolicy(
 			renderSurface,
 			this.textureSamplingPolicy,
 		);
+	}
+
+	getDefaultTextureSamplingPolicy(
+		renderSurface: PreparedRenderSurfacePayload,
+	): TextureSamplingPolicy {
+		return this.getRenderSurfaceTextureSamplingPolicy(renderSurface);
 	}
 
 	getStats(): MaterialResourceCacheStats {
@@ -406,7 +421,30 @@ export class WorldMaterialResourceCache {
 				),
 			),
 			materialProgramKeySamples: materialProgramKeySamples.slice(0, 16),
+			preparedTextureUploadCount: this.preparedTextureUploadKeys.size,
+			preparedTextureGeneratedByteLength:
+				this.preparedTextureGeneratedByteLength,
+			compressedSingleLevelFallbackUploadCount:
+				this.compressedSingleLevelFallbackUploadCount,
 		};
+	}
+
+	private recordPreparedTextureUpload(
+		renderSurface: PreparedRenderSurfacePayload,
+		preparedTexture: PreparedTexturePayload | null,
+	): void {
+		if (preparedTexture) {
+			if (!this.preparedTextureUploadKeys.has(preparedTexture.sourceHash)) {
+				this.preparedTextureUploadKeys.add(preparedTexture.sourceHash);
+				this.preparedTextureGeneratedByteLength +=
+					preparedTexture.diagnostics.generatedByteLength;
+			}
+			return;
+		}
+
+		if (preparedDxtOutputFormat(renderSurface.formatRaw)) {
+			this.compressedSingleLevelFallbackUploadCount += 1;
+		}
 	}
 
 	private reportOnce(diagnostic: MaterialResourceDiagnostic): void {

@@ -342,6 +342,23 @@ pub struct PreparedAabb {
     pub max: PreparedVec3,
 }
 
+pub fn pad_bvh_bounds(mut bounds: PreparedAabb) -> PreparedAabb {
+    const EPSILON: f32 = 0.001;
+    if bounds.max.x - bounds.min.x < EPSILON {
+        bounds.min.x -= EPSILON;
+        bounds.max.x += EPSILON;
+    }
+    if bounds.max.y - bounds.min.y < EPSILON {
+        bounds.min.y -= EPSILON;
+        bounds.max.y += EPSILON;
+    }
+    if bounds.max.z - bounds.min.z < EPSILON {
+        bounds.min.z -= EPSILON;
+        bounds.max.z += EPSILON;
+    }
+    bounds
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct PreparedContentSourceDiagnostics {
     pub source_records: Vec<SourceRecordDiagnostic>,
@@ -1395,7 +1412,7 @@ fn build_outdoor_member_spatial_items(
                         PreparedSpatialItemKind::IndoorStatic
                     }
                 },
-                bounds,
+                bounds: pad_bvh_bounds(bounds),
             })
         })
         .collect::<Vec<_>>();

@@ -23,7 +23,7 @@ pub use landblock_scene_assets::{
     PreparedPortalAperturePlaneSource, PreparedStaticInstance, PreparedStaticInstanceKind,
     PreparedStaticMesh, PreparedTerrainMesh, PreparedTerrainTriangle, PreparedVec3,
     SourceLoadError, SourceOmissionDiagnostic, SourceRecordDiagnostic, SourceRecordStatus,
-    build_gfx_obj_render_geometry, format_static_object_source_asset_id,
+    build_gfx_obj_render_geometry, format_static_object_source_asset_id, pad_bvh_bounds,
 };
 pub use material_capabilities::{
     MaterialArchiveCapabilityReport, MaterialRecordAvailability, MaterialRecordCounts,

@@ -22,6 +22,9 @@ static `InstancedMesh` culling.
 
 - Rust content assembly prepares stable static instance identities for outdoor explicit objects,
   buildings, generated scenery, and indoor statics.
+- Outdoor static payloads now use source-landblock ownership consistently: overhanging static
+  placements stay in the source landblock payload, source render chunk, and source-landblock-local
+  BVH bounds instead of normalizing into neighbor chunks.
 - Outdoor landblock payloads expose `outdoorBvh` items keyed by `instanceId` with `static` or
   `building` kind.
 - Generated scenery is currently represented as `static` in `outdoorBvh` even though the static
@@ -80,14 +83,11 @@ static `InstancedMesh` culling.
 - Existing frustum and bounds intersection helpers live inside `render-spatial-index.ts`. Move the
   neutral math to a small shared helper before implementing prepared-BVH traversal so the renderer
   does not grow two subtly different frustum tests.
-- Outdoor static placement currently normalizes into neighboring render chunks when placement
-  coordinates leave the source landblock's `0..192` range. Remove that policy for outdoor statics.
-  The preferred invariant is symmetric source-landblock ownership: a landblock payload owns,
-  renders, and culls all statics sourced by that landblock. Its `outdoorBvh` root is expressed in
-  source-landblock render-local coordinates and includes overhanging statics outside the normal tile
-  range. Current Rust assembly appears to compute `instance_bounds` after normalizing placement into
-  a neighboring owning landblock, then stores those bounds in the source landblock BVH. Fix that
-  before using outdoor static BVH results to exclude batches.
+- Outdoor static placement used to normalize into neighboring render chunks when placement
+  coordinates left the source landblock's `0..192` range. Phase 0 removed that policy. The current
+  invariant is symmetric source-landblock ownership: a landblock payload owns, renders, and culls
+  all statics sourced by that landblock. Its `outdoorBvh` root is expressed in source-landblock
+  render-local coordinates and includes overhanging statics outside the normal tile range.
 - Existing portal visibility already computes world aperture points, a transformed portal plane, and
   clipped projected screen area. Portal-clipped BVH work should reuse those results rather than
   recomputing aperture transforms in a separate path.
@@ -178,17 +178,95 @@ once the generic batch candidate path is proven.
 
 ### Phase 0: Source-Owned Outdoor Static Cleanup
 
+Status: completed.
+
 Before outdoor static BVH results can exclude render batches, make outdoor static ownership
 symmetric.
 
 Responsibilities:
 
-- stop normalizing outdoor static placements into neighboring landblocks in Rust assembly;
-- stop normalizing outdoor static placements in the frontend static renderable path;
-- keep overhanging outdoor statics in their source landblock payload, source render chunk, and
-  source-landblock-local BVH bounds;
-- add a regression test for an overhanging static whose local placement leaves `0..192` but remains
-  source-owned for rendering and culling.
+- Done: Rust outdoor static assembly now keeps explicit objects, buildings, and generated scenery
+  on the normalized source landblock while preserving source-local placement coordinates, including
+  coordinates outside `0..192`.
+- Done: frontend static renderable derivation now treats outdoor statics as source-owned by the
+  payload landblock and no longer normalizes overhanging placements into neighboring render chunks.
+- Done: overhanging statics remain in the source render chunk; their chunk-local instance placement
+  stays source-landblock-local.
+- Done: Rust regression coverage verifies an overhanging source-owned static feeds a source
+  landblock outdoor BVH item whose padded render-space bounds still lie outside the normal tile
+  footprint.
+- Done: TypeScript regression coverage verifies an overhanging outdoor static renders from the
+  source landblock chunk with the original source-local placement.
+
+Decisions and course corrections:
+
+- The old "adjust to outside" style normalization is no longer part of the prepared outdoor static
+  rendering contract. Neighboring terrain chunks do not own overhanging statics sourced by another
+  landblock.
+- Generated scenery follows the same source-ownership policy as explicit outdoor objects and
+  buildings.
+- We still normalize the low 16 bits of the source landblock id to `ffff`; this keeps existing
+  outdoor-landblock chunk identity behavior without moving ownership across x/y chunks.
+
+Legacy shims removed:
+
+- Rust `normalize_outdoor_static_frame`.
+- TypeScript `normalizeOutdoorStaticPlacement`.
+
+Validation:
+
+```text
+cargo test -p holtburger-content outdoor_static_frames_remain_source_landblock_owned_when_overhanging
+npm run test:ts -- --run static-renderables
+npm run check
+```
+
+### Phase 0.5: Source-Owned Contract Audit
+
+Status: completed.
+
+Phase 0 removed the known normalization paths. Before prepared BVH query results exclude batches,
+do a short contract audit so Phase 1 does not bake in any hidden neighbor-owned assumptions.
+
+Responsibilities:
+
+- Done: verified the Tauri serializer emits outdoor static `localPlacement`, `instanceBounds`, and
+  `outdoorBvh.nodes` in source-landblock-local render space, while `outdoorBvh.items` remains keyed
+  by the source-owned instance id.
+- Done: added a Tauri/Rust contract test that serializes an overhanging static and verifies the
+  JSON payload preserves source landblock ownership, source-local placement, source-local static
+  bounds, source-local BVH node bounds, and matching BVH item indices.
+- Done: scanned browser resource coordination, render chunk, debug/spatial, and static-renderable
+  paths for assumptions that outdoor static coordinates are clamped to `0..192`.
+- Done: confirmed the relevant frontend static path uses `payload.landblockId` as the outdoor
+  static source landblock. Phase 1 key helpers should do the same.
+- Done: kept this phase contract-only; no traversal or candidate-selection behavior was introduced.
+
+Decisions and course corrections:
+
+- Do not add `owningLandblockId` to serialized outdoor static members for Phase 1. The source
+  landblock is already the payload `landblockId`; duplicating it would create a second contract
+  surface that could drift.
+- Keep `outdoorBvh.items` compact as `{ kind, instanceId }`. The landblock scope comes from the
+  containing payload and should be supplied by key-construction helpers.
+- Treat `outdoorBvh.coordinateSpace === "landblock-render-local"` as a query precondition. Phase 1
+  should fallback-include affected batches if a prepared BVH has an unexpected coordinate space.
+
+Validation:
+
+```text
+cargo test -p holtburger-3d serialize_landblock_outdoor_preserves_source_owned_overhanging_static_space
+cargo test -p holtburger-content outdoor_static_frames_remain_source_landblock_owned_when_overhanging
+```
+
+Discovered cleanup targets:
+
+- The names `owningLandblockId` and `chunkLocalInstancePlacement` are now accurate but easy to
+  misread as normalized chunk ownership. Phase 1 key helpers should introduce clearer source-scoped
+  helper names for outdoor BVH keys instead of leaning on ad hoc field interpretation.
+- The frontend scan did not find a remaining outdoor-static clamp/normalization path. Existing
+  `192` and `clamp` hits are terrain/chunk offset, LOD radius, generated-scenery source generation,
+  material sampling, or camera/UI math and do not block Phase 1.
 
 ### Phase 1: Identity Helpers and BVH Traversal
 
@@ -209,12 +287,15 @@ Responsibilities:
 - Traverse node arrays conservatively using existing `RenderFrustum`/bounds math or shared
   equivalents.
 - Return visible item keys plus query counters.
+- For outdoor static item keys, derive the landblock scope from the containing outdoor payload's
+  `landblockId`, not from duplicated member data or render chunk inference.
 - Support a two-stage env-cell query shape: identify relevant loaded env cells, then recurse into
   each cell's `localBvh` for cell-local item keys.
 - Validate coordinate spaces for outdoor static BVH bounds, env-cell local bounds, terrain quad
   bounds, and render chunk transforms before any query result can exclude a batch.
-- Enforce the source-owned outdoor static invariant: overhanging statics stay in the source
-  landblock's payload, render chunk, and BVH using source-landblock-local placement/bounds.
+- Consume the source-owned outdoor static invariant established in Phase 0 and audited in Phase 0.5:
+  overhanging statics stay in the source landblock's payload, render chunk, and BVH using
+  source-landblock-local placement/bounds.
 
 Initial traversal can be linear over node arrays because correctness and metrics matter first. If
 measurements show this is material, replace internals with a tighter traversal without changing the
@@ -351,6 +432,8 @@ Unit tests:
 - Item key helpers scope identical `instanceId`s differently by landblock/env-cell.
 - Outdoor source-landblock root BVH and render batch contain a static whose placement overhangs into
   a neighboring landblock, with placement/bounds expressed in source-landblock-local coordinates.
+  Phase 0 has focused Rust and TypeScript coverage for this; keep it as regression coverage for
+  later culling phases.
 - Batch candidate selection includes a batch when any item key is visible.
 - Batch candidate selection falls back to including batches with missing item-key data.
 - Static group binding maps all group parts to the expected scoped item keys.
@@ -370,6 +453,8 @@ Rust/Tauri contract tests:
 - Outdoor BVH item order stays aligned with BVH node `itemIndices`.
 - Env-cell local BVH item order stays aligned with filtered node inputs.
 - Prepared BVH bounds are non-degenerate after padding.
+- Serialized overhanging outdoor statics keep payload `landblockId`, member `localPlacement`,
+  member `instanceBounds`, and `outdoorBvh.nodes` in the same source-landblock-local contract.
 
 Validation commands:
 
@@ -435,8 +520,10 @@ Recommended answers for the first implementation:
   shared renderer spatial math.
 - Centralize renderer spatial key construction. `render-spatial-ids.ts` can grow prepared-BVH item
   key helpers or a sibling module can own them; avoid scattered template strings.
-- Remove outdoor static render-placement normalization from Rust assembly and the frontend
-  `normalizeOutdoorStaticPlacement` path once source-landblock ownership is enforced end to end.
+- Remove stale comments, names, or docs that still imply outdoor statics normalize into neighboring
+  chunks. The known Rust and TypeScript normalization helpers were removed in Phase 0.
+- Consider naming Phase 1 helpers around `sourceLandblockId` for outdoor static keys so the code
+  does not reintroduce normalized-neighbor ownership by reading render chunk identity as ownership.
 - Consider renaming the current `syncSpatialVisibility` once batch candidate selection exists,
   because it will otherwise sound like the only culling system even when prepared BVH batch culling
   is active.

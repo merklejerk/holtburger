@@ -1146,46 +1146,40 @@ fn build_prepared_outdoor_static_instances(
             .explicit_objects
             .iter()
             .filter_map(|instance| {
-                let (owning_landblock_id, local_placement) =
-                    normalize_outdoor_static_frame(instance.owning_landblock_id, &instance.frame);
                 build_prepared_static_instance(PreparedStaticInstanceSpec {
                     kind: PreparedStaticInstanceKind::Scenery,
                     instance_id: instance.identity.stable_id(),
-                    owning_landblock_id,
+                    owning_landblock_id: normalize_landblock_id(instance.owning_landblock_id),
                     owning_env_cell_id: None,
                     source_did: instance.source.did,
                     source_index: instance.source_index,
-                    local_placement,
+                    local_placement: convert_static_outdoor_frame(&instance.frame),
                     source_scale: unit_prepared_vec3(),
                 })
             })
             .chain(scene.buildings.iter().filter_map(|building| {
                 let instance = &building.instance;
-                let (owning_landblock_id, local_placement) =
-                    normalize_outdoor_static_frame(instance.owning_landblock_id, &instance.frame);
                 build_prepared_static_instance(PreparedStaticInstanceSpec {
                     kind: PreparedStaticInstanceKind::Building,
                     instance_id: instance.identity.stable_id(),
-                    owning_landblock_id,
+                    owning_landblock_id: normalize_landblock_id(instance.owning_landblock_id),
                     owning_env_cell_id: None,
                     source_did: instance.source.did,
                     source_index: instance.source_index,
-                    local_placement,
+                    local_placement: convert_static_outdoor_frame(&instance.frame),
                     source_scale: unit_prepared_vec3(),
                 })
             }))
             .chain(scene.generated_scenery.iter().filter_map(|generated| {
                 let instance = &generated.instance;
-                let (owning_landblock_id, local_placement) =
-                    normalize_outdoor_static_frame(instance.owning_landblock_id, &instance.frame);
                 build_prepared_static_instance(PreparedStaticInstanceSpec {
                     kind: PreparedStaticInstanceKind::GeneratedScenery,
                     instance_id: instance.identity.stable_id(),
-                    owning_landblock_id,
+                    owning_landblock_id: normalize_landblock_id(instance.owning_landblock_id),
                     owning_env_cell_id: None,
                     source_did: instance.source.did,
                     source_index: instance.source_index,
-                    local_placement,
+                    local_placement: convert_static_outdoor_frame(&instance.frame),
                     source_scale: PreparedVec3 {
                         x: generated.scale,
                         y: generated.scale,
@@ -1194,32 +1188,6 @@ fn build_prepared_outdoor_static_instances(
                 })
             }))
     })
-}
-
-fn normalize_outdoor_static_frame(
-    landblock_id: u32,
-    frame: &crate::static_outdoor_scene::StaticOutdoorFrame,
-) -> (u32, Frame) {
-    let block_delta_x = (frame.origin.x / 192.0).floor() as i32;
-    let block_delta_y = (frame.origin.y / 192.0).floor() as i32;
-    let normalized_landblock_id = normalize_landblock_id(landblock_id);
-    if block_delta_x == 0 && block_delta_y == 0 {
-        return (normalized_landblock_id, convert_static_outdoor_frame(frame));
-    }
-
-    let x = ((normalized_landblock_id >> 24) & 0xff) as i32 + block_delta_x;
-    let y = ((normalized_landblock_id >> 16) & 0xff) as i32 + block_delta_y;
-    (
-        ((x as u32 & 0xff) << 24) | ((y as u32 & 0xff) << 16) | 0xffff,
-        Frame {
-            origin: holtburger_common::Vector3 {
-                x: frame.origin.x - block_delta_x as f32 * 192.0,
-                y: frame.origin.y - block_delta_y as f32 * 192.0,
-                z: frame.origin.z,
-            },
-            orientation: frame.orientation,
-        },
-    )
 }
 
 fn build_prepared_indoor_static_instances(
@@ -2954,7 +2922,12 @@ mod tests {
     }
 
     #[test]
-    fn outdoor_static_frames_are_normalized_like_adjust_to_outside() {
+    fn outdoor_static_frames_remain_source_landblock_owned_when_overhanging() {
+        use crate::static_outdoor_scene::{
+            StaticOutdoorInstance, StaticOutdoorInstanceIdentity, StaticOutdoorLayerDiagnostics,
+            StaticOutdoorScene, StaticOutdoorSceneDiagnostics, StaticRenderableSourceRef,
+        };
+
         let frame = crate::static_outdoor_scene::StaticOutdoorFrame {
             origin: holtburger_common::Vector3 {
                 x: 200.0,
@@ -2963,18 +2936,85 @@ mod tests {
             },
             orientation: holtburger_common::Quaternion::identity(),
         };
+        let source_landblock_id = 0x0203fffe;
+        let scene = StaticOutdoorScene {
+            landblock_id: source_landblock_id,
+            explicit_objects: vec![StaticOutdoorInstance {
+                identity: StaticOutdoorInstanceIdentity::ExplicitObject {
+                    landblock_id: source_landblock_id,
+                    source_index: 0,
+                    source_did: 0x0100_0001,
+                },
+                owning_landblock_id: source_landblock_id,
+                source: StaticRenderableSourceRef::from_did(0x0100_0001),
+                source_index: 0,
+                frame,
+            }],
+            buildings: Vec::new(),
+            generated_scenery: Vec::new(),
+            diagnostics: StaticOutdoorSceneDiagnostics {
+                landblock_info_available: true,
+                landblock_info_error: None,
+                explicit: StaticOutdoorLayerDiagnostics {
+                    attempted: 1,
+                    accepted: 1,
+                    rejected_unsupported_source: 0,
+                },
+                ..StaticOutdoorSceneDiagnostics::default()
+            },
+        };
 
-        let (landblock_id, placement) = normalize_outdoor_static_frame(0x0203ffff, &frame);
+        let instances = build_prepared_outdoor_static_instances(Some(&scene)).collect::<Vec<_>>();
 
-        assert_eq!(landblock_id, 0x0302ffff);
+        assert_eq!(instances.len(), 1);
+        let instance = &instances[0];
+        assert_eq!(instance.owning_landblock_id, 0x0203ffff);
         assert_eq!(
-            placement.origin,
+            instance.local_placement.origin,
             holtburger_common::Vector3 {
-                x: 8.0,
-                y: 187.0,
+                x: 200.0,
+                y: -5.0,
                 z: 2.0,
             }
         );
+
+        let instance_bounds = conservative_instance_bounds(
+            &instance.local_placement,
+            &[],
+            PreparedAabb {
+                min: PreparedVec3 {
+                    x: -1.0,
+                    y: -1.0,
+                    z: 0.0,
+                },
+                max: PreparedVec3 {
+                    x: 1.0,
+                    y: 1.0,
+                    z: 2.0,
+                },
+            },
+            unit_prepared_vec3(),
+        );
+        let spatial_items = build_outdoor_member_spatial_items(
+            source_landblock_id,
+            &[LandblockOutdoorStaticMember {
+                instance: instance.clone(),
+                source_bounds: None,
+                instance_bounds: Some(instance_bounds),
+                building: None,
+                generated: None,
+            }],
+        );
+
+        assert_eq!(
+            spatial_items[0].id,
+            format!(
+                "landblock/{source_landblock_id:08x}/outdoor/spatial/static/{}",
+                instance.instance_id
+            )
+        );
+        assert!(spatial_items[0].bounds.min.x > 192.0);
+        assert!(spatial_items[0].bounds.min.z > 0.0);
     }
 
     #[test]

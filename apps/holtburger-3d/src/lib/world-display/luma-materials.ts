@@ -8,7 +8,6 @@ import type { TextureFormat } from "@luma.gl/core";
 
 import type {
 	AssetChannelState,
-	PreparedMaterialRecipePayload,
 	PreparedRenderSurfacePayload,
 	PreparedTexturePayload,
 } from "../assets/types";
@@ -23,6 +22,7 @@ import {
 } from "./material-behavior";
 import type { LumaVec4 } from "./luma-math";
 import { formatMaterialAssetId } from "./material-signatures";
+import { resolveFirstMaterialRenderSurface } from "./material-texture-resolution";
 import {
 	prepareRenderSurfaceTextureUploadData,
 	type DirectRenderSurfaceUploadDataType,
@@ -102,10 +102,10 @@ export function resolveLumaSurfaceMaterialPlan(options: {
 		});
 	}
 	const recipe = recipeAsset.payload;
-	const directRenderSurface = firstTextureUploadCandidateRenderSurface(
+	const directRenderSurface = resolveFirstMaterialRenderSurface({
 		recipe,
-		options.assetState,
-	);
+		assetState: options.assetState,
+	})?.renderSurface;
 	if (!directRenderSurface) {
 		return createFallbackMaterialPlan({
 			key: `missing-direct-texture/${materialAssetId}/${options.fallbackColorKey}`,
@@ -219,25 +219,6 @@ function createFallbackMaterialPlan(options: {
 		behavior: options.behavior ?? null,
 		fallbackReason: options.reason,
 	};
-}
-
-function firstTextureUploadCandidateRenderSurface(
-	recipe: PreparedMaterialRecipePayload,
-	assetState: AssetChannelState,
-): PreparedRenderSurfacePayload | null {
-	const assetIds =
-		recipe.source.kind === "texture"
-			? selectedRenderSurfaceAssetIds(recipe.source.selectedRenderSurfaceId)
-			: recipe.dependencies.renderSurfaceAssetIds;
-	const assetId = assetIds[0];
-	const asset = assetId === undefined ? null : assetState.preparedByAssetId[assetId];
-	return asset?.payload.kind === "render-surface" ? asset.payload : null;
-}
-
-function selectedRenderSurfaceAssetIds(renderSurfaceId: number | null): string[] {
-	return renderSurfaceId === null
-		? []
-		: [`render-surface/${formatHex32(renderSurfaceId)}`];
 }
 
 function resolvePreparedTexture(options: {

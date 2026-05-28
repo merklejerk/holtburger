@@ -76,6 +76,23 @@ export function renderBoundsIntersectsFrustum(
 	return true;
 }
 
+export function renderBoundsContainedByFrustum(
+	bounds: RenderBounds,
+	frustum: RenderFrustum,
+): boolean {
+	for (const plane of frustum.planes) {
+		const negativeVertex = {
+			x: plane.normal.x >= 0 ? bounds.min.x : bounds.max.x,
+			y: plane.normal.y >= 0 ? bounds.min.y : bounds.max.y,
+			z: plane.normal.z >= 0 ? bounds.min.z : bounds.max.z,
+		};
+		if (dotRenderVec3(plane.normal, negativeVertex) + plane.constant < 0) {
+			return false;
+		}
+	}
+	return true;
+}
+
 export function intersectRayRenderBounds(
 	ray: RenderRay,
 	bounds: RenderBounds,

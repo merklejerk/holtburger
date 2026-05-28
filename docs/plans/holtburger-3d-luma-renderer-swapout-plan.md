@@ -1333,13 +1333,19 @@ Progress as of 2026-05-28:
 - Luma metrics now receive frame/candidate counters for registered batches, keyed batches,
   represented item keys, visible item keys, visible draw counts, fallback-included draws, and
   category counts. These are currently mapped through existing debug metric fields where possible.
+- Added full-frustum-containment short-circuiting to prepared BVH traversal and render-space BVH
+  traversal. When an accepted parent node is fully inside the camera frustum, traversal collects the
+  whole subtree's item keys without testing each child node's bounds.
 - Added focused tests for:
   - culling a keyed batch when no prepared BVH item is visible;
   - keeping unkeyed fallback batches visible;
   - sorting terrain before staged static draws;
   - extracting normalized frustum planes from the luma camera matrix.
+  - accepting a fully contained prepared BVH subtree after one parent-node bounds test;
+  - accepting a fully contained render-space BVH subtree.
 - Validation run:
   - `npm run test:ts -- src/lib/world-display/luma-frame.test.ts src/lib/world-display/luma-resources.test.ts src/lib/world-display/scene-renderable-readiness.test.ts src/lib/world-display/static-renderable-readiness.test.ts`
+  - `npm run test:ts -- src/lib/world-display/prepared-bvh-visibility.test.ts src/lib/world-display/prepared-bvh-render-sources.test.ts src/lib/world-display/luma-frame.test.ts`
   - `npm run check`
   - `npm run lint:ts`
   - `npm run lint:dead`

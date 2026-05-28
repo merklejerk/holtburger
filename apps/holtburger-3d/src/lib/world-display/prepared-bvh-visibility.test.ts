@@ -76,6 +76,41 @@ describe("prepared BVH visibility", () => {
 		expect(result.fallbackReasons).toEqual([]);
 	});
 
+	it("accepts a fully contained prepared BVH subtree without testing child bounds", () => {
+		const result = queryTerrainBvhVisibility({
+			terrainBvh: {
+				coordinateSpace: "landblock-outdoor-terrain-local",
+				nodes: [
+					node(bounds(0, 2, 0, 2, 1, 2), 1, 2, []),
+					node(bounds(0, 1, 0, 1, 1, 2), null, null, [0]),
+					node(bounds(1, 2, 1, 2, 1, 2), null, null, [1]),
+				],
+				items: [
+					{ row: 0, col: 0, quadIndex: 10, triangleIndices: [0, 1] },
+					{ row: 0, col: 1, quadIndex: 11, triangleIndices: [2, 3] },
+				],
+			},
+			landblockId: 0x0203ffff,
+			frustum: renderFrustum({
+				minX: -10,
+				maxX: 10,
+				minY: -10,
+				maxY: 10,
+				minZ: -10,
+				maxZ: 10,
+			}),
+			chunkOffset: { x: 0, y: 0, z: 0 },
+		});
+
+		expect([...result.visibleItemKeys].sort()).toEqual([
+			"terrain:landblock:0203ffff:quad:10",
+			"terrain:landblock:0203ffff:quad:11",
+		]);
+		expect(result.counters.nodesVisited).toBe(1);
+		expect(result.counters.nodesIntersected).toBe(1);
+		expect(result.counters.itemIndicesVisited).toBe(2);
+	});
+
 	it("transforms terrain BVH bounds from AC terrain local coordinates into render coordinates", () => {
 		const result = queryTerrainBvhVisibility({
 			terrainBvh: {

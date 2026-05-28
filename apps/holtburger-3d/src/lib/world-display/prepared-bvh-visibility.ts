@@ -11,6 +11,7 @@ import type {
 } from "../assets/types";
 import { formatHex32 } from "../landblocks";
 import {
+	renderBoundsContainedByFrustum,
 	renderBoundsIntersectsFrustum,
 	translateRenderBounds,
 	type RenderBounds,
@@ -272,30 +273,32 @@ function queryPreparedBvh<Item>(
 			continue;
 		}
 		counters.nodesVisited += 1;
-		if (
-			!renderBoundsIntersectsFrustum(
-				options.boundsToRendererBounds(node.bounds),
-				options.frustum,
-			)
-		) {
+		const renderBounds = options.boundsToRendererBounds(node.bounds);
+		if (!renderBoundsIntersectsFrustum(renderBounds, options.frustum)) {
 			continue;
 		}
 		counters.nodesIntersected += 1;
-
-		for (const itemIndex of node.itemIndices) {
-			counters.itemIndicesVisited += 1;
-			const item = bvh.items[itemIndex];
-			if (!item) {
-				counters.invalidItemIndices += 1;
-				fallbackReasons.push(`BVH references missing item index ${itemIndex}`);
-				continue;
-			}
-			const itemKey = options.itemKey(item);
-			if (itemKey) {
-				visibleItemKeys.add(itemKey);
-				counters.visibleItems += 1;
-			}
+		if (renderBoundsContainedByFrustum(renderBounds, options.frustum)) {
+			collectPreparedBvhSubtreeItems({
+				bvh,
+				nodeIndex,
+				visitedNodeIndices,
+				visibleItemKeys,
+				counters,
+				fallbackReasons,
+				itemKey: options.itemKey,
+			});
+			continue;
 		}
+
+		collectPreparedBvhNodeItems({
+			bvh,
+			node,
+			visibleItemKeys,
+			counters,
+			fallbackReasons,
+			itemKey: options.itemKey,
+		});
 		if (node.left !== null) {
 			pendingNodeIndices.push(node.left);
 		}
@@ -305,6 +308,91 @@ function queryPreparedBvh<Item>(
 	}
 
 	return { visibleItemKeys, counters, fallbackReasons };
+}
+
+function collectPreparedBvhSubtreeItems<Item>({
+	bvh,
+	nodeIndex,
+	visitedNodeIndices,
+	visibleItemKeys,
+	counters,
+	fallbackReasons,
+	itemKey,
+}: {
+	bvh: PreparedBvhLike<Item>;
+	nodeIndex: number;
+	visitedNodeIndices: Set<number>;
+	visibleItemKeys: Set<RenderBvhItemKey>;
+	counters: PreparedBvhQueryCounters;
+	fallbackReasons: string[];
+	itemKey: (item: Item) => RenderBvhItemKey | null;
+}): void {
+	const pendingNodeIndices = [nodeIndex];
+	while (pendingNodeIndices.length > 0) {
+		const currentNodeIndex = pendingNodeIndices.pop();
+		if (currentNodeIndex === undefined) {
+			continue;
+		}
+		if (currentNodeIndex !== nodeIndex) {
+			if (
+				currentNodeIndex < 0 ||
+				currentNodeIndex >= bvh.nodes.length ||
+				visitedNodeIndices.has(currentNodeIndex)
+			) {
+				continue;
+			}
+			visitedNodeIndices.add(currentNodeIndex);
+		}
+		const node = bvh.nodes[currentNodeIndex];
+		if (!node) {
+			continue;
+		}
+		collectPreparedBvhNodeItems({
+			bvh,
+			node,
+			visibleItemKeys,
+			counters,
+			fallbackReasons,
+			itemKey,
+		});
+		if (node.left !== null) {
+			pendingNodeIndices.push(node.left);
+		}
+		if (node.right !== null) {
+			pendingNodeIndices.push(node.right);
+		}
+	}
+}
+
+function collectPreparedBvhNodeItems<Item>({
+	bvh,
+	node,
+	visibleItemKeys,
+	counters,
+	fallbackReasons,
+	itemKey,
+}: {
+	bvh: PreparedBvhLike<Item>;
+	node: PreparedLandblockBvhNode;
+	visibleItemKeys: Set<RenderBvhItemKey>;
+	counters: PreparedBvhQueryCounters;
+	fallbackReasons: string[];
+	itemKey: (item: Item) => RenderBvhItemKey | null;
+}): void {
+	for (const itemIndex of node.itemIndices) {
+		counters.itemIndicesVisited += 1;
+		const item = bvh.items[itemIndex];
+		if (!item) {
+			counters.invalidItemIndices += 1;
+			fallbackReasons.push(`BVH references missing item index ${itemIndex}`);
+			continue;
+		}
+		const key = itemKey(item);
+		if (key) {
+			visibleItemKeys.add(key);
+			counters.visibleItems += 1;
+		}
+	}
 }
 
 function envCellLocalItemKey(

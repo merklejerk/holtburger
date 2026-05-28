@@ -1,6 +1,6 @@
 # Holtburger 3D Luma Renderer Swapout Plan
 
-Status: Phase 6C.0 implemented; Phase 6C material/atlas planner foundation is next.
+Status: Phase 6C implemented; Phase 6C.1 shared luma material strategy module is next.
 
 ## Purpose
 
@@ -1577,9 +1577,9 @@ Decisions, course corrections, and cleanup targets:
 
 ## Phase 6C Policy Baseline
 
-Purpose: lock the initial atlas/material policy before implementing the planner and renderer paths.
-These decisions may be tuned from real scene metrics later, but implementation phases should start
-from one coherent policy instead of rediscovering it piecemeal.
+Purpose: lock the initial atlas/material policy before implementing the shared strategy module and
+renderer paths. These decisions may be tuned from real scene metrics later, but implementation
+phases should start from one coherent policy instead of rediscovering it piecemeal.
 
 Initial decisions:
 
@@ -1590,7 +1590,7 @@ Initial decisions:
   atlas candidates. Three's existing compressed prepared texture path remains separate.
 - Transfer policy: luma atlas entries use linear transfer by default. Do not use Three-style sRGB
   assumptions for atlas color matching unless later runtime evidence proves it is needed.
-- Material-aware eligibility: atlas candidate planning must evaluate material recipe, render
+- Material-aware eligibility: atlas eligibility must evaluate material recipe, render
   surface, texture usage, and render state together. Pixel format conversion alone must not decide
   whether a texture can enter an atlas.
 - Direct-color normalization policy: if direct-color render surfaces are normalized into atlas-ready
@@ -1623,8 +1623,8 @@ Initial decisions:
   is compatible. Blended transparency stays direct/staged/fallback until sorting and depth-write
   behavior are explicitly modeled.
 - Animated UV policy: materials with texture velocity, UV animation, or other time-varying
-  texture-coordinate behavior stay direct/staged/fallback unless the planner and shader explicitly
-  model the animated UV transform.
+  texture-coordinate behavior stay direct/staged/fallback unless the shared strategy module and
+  shader explicitly model the animated UV transform.
 - Atlas generation lifecycle: atlas set generations are immutable. Old generations remain alive
   while retained batches or staged draws reference them, then are destroyed deterministically during
   resource sync cleanup.
@@ -1770,91 +1770,272 @@ Exit criteria:
   policies are documented in code/tests and may be adjusted after real scene evidence.
 - No renderer path has switched to atlas rendering yet; this phase proves the planning contract.
 
-## Phase 6D: Atlas-Backed Static Vertical Slice
+Progress:
 
-Purpose: integrate atlas-set resources, the material-table shader, and Phase 4C static
-staging/promotion against real committed static scene inputs. Avoid a standalone fixture-only phase;
-policy should be evaluated against actual landblock/building/static material behavior as soon as the
-mechanism exists.
+- Added `luma-material-atlas-planner.ts` as the luma-local planning boundary for atlas-capable
+  material requirements. It accepts static, structured-interior, dynamic, terrain, and unknown
+  renderable-kind labels, but current tests exercise static and structured-interior requirements.
+- Added stable planner DTOs for atlas-ready material requirements, fallback requirements, atlas
+  entries, atlas texture placements, atlas set generations, and draw slices.
+- Implemented material-aware atlas eligibility:
+  - material recipe, first render surface, prepared atlas texture, render state, source alpha,
+    unsupported material flags, and texture velocity are evaluated together;
+  - compressed surfaces must have the Phase 6C.0 `rgba8/mips=none/linear` prepared-texture payload;
+  - direct-color surfaces currently fall back as `direct-color-normalization-deferred`;
+  - blended transparency and texture-velocity/animated UV paths stay out of atlas batches;
+  - clipmap/alpha-test behavior remains atlas-eligible when the rest of the material is supported.
+- Implemented deterministic atlas entry keys, material slot keys, atlas set generation keys, and
+  render-state/sampling keys. Atlas entries dedupe by render surface identity, source hash/source
+  shape, RGBA8 output, and linear transfer instead of by renderable type.
+- Implemented a deterministic first-pass atlas placement model:
+  - one atlas set may contain multiple atlas textures;
+  - placement uses configured max atlas texture size, max atlas texture count, and base gutter;
+  - entries that cannot fit become `atlas-full` fallbacks;
+  - oversized source textures become `source-texture-too-large` fallbacks before packing.
+- Implemented bounded material-table assignment and draw-slice planning. The initial planner keeps
+  one atlas sampler per slice and splits slices by atlas texture index and render-state key. Material
+  table overflow is explicit fallback rather than silently overfilling uniform tables.
+- Added `material-texture-resolution.ts` so luma direct materials and atlas planning share the
+  "first material render surface" rule instead of duplicating it.
+- Added focused tests covering atlas entry dedupe across static/interior candidates, missing
+  decompressed prepared texture fallback, direct-color and blended-transparency fallbacks,
+  multi-atlas placement plus atlas-full fallback, and material-table overflow fallback.
 
-Lifecycle target:
+Decisions and course corrections:
 
-- Object readiness/incubation remains the first gate. A static object is only eligible for luma
-  staging once the whole object has committed under the shared readiness policy.
-- Newly committed static objects enter staging first. Staging remains renderable and should not
-  trigger atlas packing or promoted-batch rebuilds one object at a time while landblocks hydrate.
-- Atlas coalescing happens at the static promotion boundary. Promotion collects promoted plus
-  promotable staged membership, resolves planner output, packs or reuses the atlas set generation,
-  and rebuilds promoted baked geometry only when membership/material-set changes require it.
-- Re-anchor-only updates must update draw-time transforms only. They must not repack atlases,
-  rewrite UVs, or rebuild promoted/staged vertex buffers.
+- No renderer path consumes the atlas plan yet. Phase 6C intentionally proves the initial strategy
+  contract without changing visual output.
+- Direct-color normalization remains deferred. This keeps Phase 6C aligned with Phase 6C.0, where
+  only compressed-DXT sources gained the decompressed atlas-ready route.
+- Atlas lifecycle is represented by immutable generation data and explicit generation IDs, but GPU
+  resource retirement is still a Phase 6F integration responsibility because retained batches and
+  staged draws do not reference atlas resources yet.
+- The first draw-slice policy is conservative: one atlas texture binding per slice, render-state
+  compatible materials only, and bounded material-table windows. Multi-sampler slices remain a
+  future optimization, not a Phase 6F dependency.
+- Course correction after Phase 6C: the atlas-only planner contract needs several smaller prep
+  phases before atlas-backed static compaction. Phases 6C.1-6C.4 split shared material strategy,
+  normalized texture preparation, scene object assembly/direct rendering, and atlas layout planning
+  before atlas resources are wired into compaction.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/luma-material-atlas-planner.test.ts src/lib/world-display/luma-resources.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run lint:dead`
+- `npm run build`
+- `VITE_HOLTBURGER_RENDER_BACKEND=luma npm run build`
+
+Cleanup targets and legacy shims:
+
+- `texture-sampling-policy.ts` still exposes Three-oriented color-space/filtering vocabulary.
+  Phase 6C.1/6D should avoid deepening that coupling; a later cleanup should split renderer-neutral
+  sampling DTOs from Three adapter names/imports.
+- `luma-materials.ts` still owns the direct texture render path and fallback material realization.
+  The atlas planner now shares material surface resolution with it, but direct-vs-atlas material
+  strategy convergence should happen before atlas rendering consumes shared strategy output.
+- Direct-color atlas normalization remains a known gap. When added, it must stay material-aware and
+  must not blindly normalize data/mask/detail/animated or blended-material uses into atlas entries.
+
+## Phase 6C.1: Shared Luma Material Strategy Core
+
+Purpose: refactor the Phase 6C atlas-only planner into a shared luma material strategy core without
+also changing scene assembly, request policy, or atlas layout ownership.
 
 Tasks:
 
-- Implement atlas-set packing from planner atlas entries used by committed static renderables, using
-  uncompressed base-level payloads and linear transfer. Create additional atlas textures in the set
-  when one atlas texture reaches its capacity.
-- Generate mipmaps for each atlas texture after packing and define padding/gutter extrusion to
-  prevent neighboring atlas entries from bleeding at lower mip levels.
-- Implement the material-index table shader path. Prefer bounded uniform-array material tables first;
-  leave room for a metadata texture fetched in the vertex shader if uniform limits become visible.
-- Include atlas texture index in material-slot data. For the first WebGL implementation, assume one
-  atlas sampler per draw slice unless a multi-sampler path is deliberately proven.
-- Preserve author UVs and provide enough per-vertex or per-surface material data for the shader to
-  apply repeat/clamp behavior inside each atlas slot.
-- Teach the luma static promotion path to promote only atlas-ready renderables into atlas-backed
-  baked batches. Objects with unresolved or unsupported atlas state should remain staged on an
-  explicit direct-texture, existing-atlas, or flat fallback path.
-- Prefer material-index table attributes for promoted/batched geometry so atlas set generation
-  changes can update material-slot tables without rewriting baked vertex buffers.
-- Partition large material sets into deterministic draw slices that reuse shared vertex/index
-  buffers while binding bounded material-table windows. Sort or group emitted triangles by material
-  slot/window so each slice can draw a contiguous index range with slice-local material indices.
-- Partition draw slices by atlas texture binding as well as material-table window. In the
-  conservative WebGL path, a slice must not reference material slots from multiple atlas textures
-  unless a multi-sampler shader path has been deliberately implemented.
-- Keep direct staging textures deduped through the existing luma texture resource cache. Multiple
-  staged objects sharing the same render surface and sampling policy should share one staging
-  texture, not allocate per-object duplicates.
-- Allow staged objects to opportunistically use existing atlas slots only when every required
-  surface exists in the current atlas set generation and doing so does not mutate that generation.
-- Add real-scene metrics/debug output for direct texture, atlas texture, flat fallback, animated UV
-  fallback, missing decompressed prepared texture, atlas full, and material table overflow.
-- Add tests for multi-atlas packing stability, capacity fallback, gutter/mip behavior,
-  material-slot table generation with atlas texture indices, repeat/clamp atlas sampling math,
-  promotion-triggered atlas coalescing, staged-object no-rebuild behavior, material-table slice
-  partitioning, vertex-buffer reuse when atlas rects change, fallback behavior, atlas set generation
-  reuse, multi-atlas draw-slice partitioning, old atlas generation retirement, and re-anchor-only
-  updates.
+- Refactor `luma-material-atlas-planner.ts` into a shared material strategy module, for example
+  `luma-material-strategy.ts`. Avoid a large orchestration planner object; expose focused pure
+  helpers that later scene object assembly and render compaction code can call directly.
+- Move reusable material policy into the shared module:
+  - material usage classification;
+  - prepared texture requirement derivation as pure IDs/policy outputs only;
+  - material behavior derivation;
+  - render-state and sampling compatibility keys;
+  - texture identity keys, atlas entry keys, and material slot keys;
+  - atlas/direct/flat/unsupported eligibility;
+  - compatibility group keys;
+  - fallback and overflow reason vocabulary.
+- Change the current atlas-only output shape from `atlas requirements + fallbacks` to explicit
+  strategy records where useful: `atlas`, `direct-texture`, `flat-fallback`, and `unsupported`.
+- Make non-atlas materials stop looking like rejected atlas candidates when they are valid direct
+  texture candidates. Blended transparency, direct-color surfaces, and other non-packable-but-renderable
+  materials should produce direct texture strategy records when their assets are available.
+- Keep the shared strategy module pure and deterministic. It should not allocate GPU resources,
+  compute atlas rect placement, own scene object assembly, or own render compaction orchestration.
+- Preserve existing Phase 6C atlas entry dedupe, material-table, and fallback tests under the new
+  strategy module boundary.
 
 Exit criteria:
 
-- Baked luma static batches can render common textured static objects through atlas-backed material
-  state.
-- Real luma static scene inputs, not only fixture geometry, drive the atlas/shader/promotion path.
-- Newly committed static objects remain immediately visible through staging and do not cause atlas
-  or promoted-batch rebuilds until promotion.
-- Large material sets can be split into deterministic draw slices that reuse shared buffers while
-  binding bounded material-slot tables and at most the supported atlas texture bindings.
-- Repeating/wrapping static materials can use atlas-backed sampling when represented by the shader
-  contract; unsupported sampler behavior remains explicit fallback.
-- Compressed source textures enter atlases only through the Phase 6C.0 decompressed prepared-texture
-  path; block-compressed atlas packing remains out of scope.
-- Re-anchor-only updates still reuse promoted static buffers and atlas resources.
+- One shared luma material strategy module can classify currently supported luma material inputs
+  into atlas, direct-texture, flat-fallback, or unsupported strategy records without owning assembly
+  or compaction orchestration.
+- Direct-texture strategy records reuse existing luma direct texture semantics instead of introducing
+  a second direct texture registry.
+- Atlas strategy logic remains deterministic and covered by the existing Phase 6C tests under the
+  new strategy boundary.
 
-## Phase 6E: Structured Interior Atlas Sharing
+Cleanup targets and legacy shims:
 
-Purpose: let structured interior/cell-structure surfaces share the luma atlas/material planner and
-atlas resources without inheriting the static staging/promotion lifecycle.
+- The old atlas-only planner name/API should not survive as the public entry point. If an internal
+  atlas helper remains, keep it unexported or narrowly exported for tests behind the shared strategy
+  module.
+- `resolveLumaSurfaceMaterialPlan(...)` in `luma-materials.ts` should either delegate to the shared
+  strategy helpers or become a thin compatibility shim for existing direct-material call sites. Do
+  not let it continue as an independent material resolver long-term.
+
+## Phase 6C.2: Normalized Texture Preparation Policy
+
+Purpose: make asset request planning/incubation request the normalized prepared texture payloads that
+the shared luma material strategy core expects, without waiting until scene object assembly to
+discover missing texture forms.
 
 Tasks:
 
-- Route structured interior surface material resolution through the unified luma material/atlas
-  planner.
+- Define a shared luma material texture preparation policy used by both scene asset request planning
+  and material strategy decisions. The policy should derive required `prepared-texture/` asset IDs
+  from material recipe, render surface, texture usage, and renderer backend before incubation marks a
+  renderable ready.
+- Expand the normalized `prepared-texture/` target model beyond the current compressed-color
+  `rgba8` path:
+  - base/color non-indexed textures use `out=rgba8&mips=none&cs=linear`;
+  - alpha-only, mask, and detail/intensity inputs should use a single-channel data target such as
+    `out=r8&mips=none&cs=data` once that route exists;
+  - do not blanket-widen alpha-only, mask, or detail textures to RGBA8 by default;
+  - unknown or unmodeled usages should stay direct/fallback with metrics instead of being normalized
+    blindly.
+- Keep indexed/paletted textures out of the generic non-indexed normalization policy for now.
+  Palette and subpalette context make them a separate future prepared-texture route, not just a raw
+  render-surface format conversion.
+- Add the missing prepared-texture routes needed by that policy:
+  - non-indexed direct-color to `rgba8/mips=none/linear`;
+  - single-channel `r8/mips=none/data` for alpha-only, mask, and detail/intensity inputs.
+- Prefer normalized prepared textures for luma direct-texture strategies when the needed target
+  payload is already part of the shared preparation policy. Atlas overflow should be able to fall
+  back to direct texture using the same normalized source payload when sampler/render-state semantics
+  allow it.
+
+Exit criteria:
+
+- Scene asset request planning/incubation uses the same luma material texture preparation policy as
+  material strategy decisions.
+- Strategy resolution does not discover missing normalized texture payloads only after a renderable
+  has entered scene object assembly.
+- Phase 6C.0's compressed-DXT `rgba8/mips=none/linear` route is joined by non-indexed direct-color
+  RGBA8 and single-channel R8 data routes.
+
+## Phase 6C.3: Scene Object Assembly and Direct Material Rendering
+
+Purpose: define the assemble-to-visible path that turns incubated renderables into complete
+individual render scene entries before any render compaction work runs. This is the first post-6B
+phase that should make common material strategies visible through the individual/staged render path,
+so atlas-backed compaction does not become the first proof that material rendering works.
+
+Planned ownership flow:
+
+```mermaid
+flowchart TD
+  world["Scene / world visibility"] --> requests["Asset request planner"]
+  requests --> incubation["Asset streaming + incubation"]
+  incubation --> assembly["Scene object assembly"]
+  assembly --> resolver["Assembly material/resource resolver"]
+  resolver --> directResource["Resolved independent direct texture resource"]
+  resolver --> existingAtlas["Resolved existing atlas generation slot"]
+  resolver --> flatRuntime["Resolved flat/current fallback resources"]
+  directResource --> sceneInsert["Insert into render scene"]
+  existingAtlas --> sceneInsert
+  flatRuntime --> sceneInsert
+  sceneInsert --> staging["Staging renderer path"]
+
+  sceneInsert -.-> compaction["Render compaction duty cycle"]
+  staging -.-> compaction
+  compaction --> strategy["Shared luma material strategy module"]
+  assembly --> strategy
+  strategy --> atlasCandidates["Atlas candidates and compatibility groups"]
+  strategy --> directPlan["Direct texture strategy"]
+  strategy --> fallbackPlan["Flat/unsupported strategy"]
+  atlasCandidates --> layout["Atlas layout planner"]
+  compaction --> layout
+  layout --> atlasPlan["Atlas layout/generation plan"]
+  atlasPlan --> resources["Luma resource layer"]
+  directPlan --> keepStaged["Keep on staging/direct path"]
+  fallbackPlan --> keepStaged
+  resources --> batches["Compacted baked batches"]
+```
+
+Tasks:
+
+- Add scene object assembly between renderable readiness and render-scene insertion. Its
+  material/resource resolver should resolve materials against currently available retained resources,
+  reuse existing atlas slots opportunistically without mutating atlas generations, realize
+  independent direct texture or flat/current fallback resources through the resource layer, and only
+  insert the renderable after the selected staging resources are ready.
+- Wire direct-texture strategy records from Phase 6C.1 through the individual/staged luma draw path.
+  Static objects, buildings, and structured-interior surfaces that can be represented by a direct
+  texture strategy should render visibly without waiting for atlas layout or render compaction.
+- Realize direct material resources from the normalized prepared textures introduced by Phase 6C.2
+  when those payloads exist. Reuse the existing luma direct texture cache/resource semantics rather
+  than introducing a second independent direct texture registry.
+- Keep flat fallback explicit for materials whose direct resources cannot be represented yet.
+  Unsupported indexed/paletted, detail, animated-UV, or unmodeled sampler cases should remain
+  visible as flat/current fallback with material metrics instead of entering the scene partially
+  textured.
+- Keep staging renderables from entering the scene with pending texture, vertex, or material
+  resources. Incubation resolves assets; scene object assembly resolves render resources.
+- Treat render policy/backend config changes as scene-rebuild triggers. Do not build a broad live
+  material strategy migration system for those cases in this phase.
+- Keep debug overlays out of the material strategy module, atlas layout planner, render compaction
+  policy, and material batching metrics except as separate debug-overlay render metrics.
+
+Exit criteria:
+
+- Newly assembled renderables can enter the render scene through scene object assembly with all
+  selected staging resources ready, without waiting for the render compaction duty cycle.
+- Direct-texture strategies render through individual/staged scene entries for common supported
+  materials before atlas layout or static compaction is implemented.
+- Flat fallback remains explicit and metric-visible for materials that cannot use direct textures yet.
+- Render policy/backend config changes are documented as scene rebuilds, and debug overlays remain
+  separate from material strategy planning and batching.
+
+## Phase 6C.4: Atlas Layout Planner
+
+Purpose: extract atlas page/rect placement into a pure layout helper separate from material strategy,
+resource realization, and render compaction scheduling.
+
+Tasks:
+
+- Introduce or extract a pure atlas layout planner. It should accept atlas entries with dimensions,
+  gutters, and capacity policy, then return atlas texture pages, rects, and capacity/source-size
+  overflow results.
+- Keep material semantics out of the layout planner. It should consume keys, dimensions, and policy
+  from strategy/compaction inputs without inspecting material recipes, render states, or texture
+  usages.
+- Preserve deterministic ordering for stable atlas generations.
+- Preserve existing multi-atlas, atlas-full, source-too-large, and placement tests under this
+  boundary.
+
+Exit criteria:
+
+- Atlas layout planning remains deterministic and covered by the existing Phase 6C placement and
+  overflow tests under the new layout boundary.
+- Render compaction can use shared material strategy helpers for candidates/compatibility and this
+  layout planner for page/rect placement without either module owning GPU resource realization.
+
+## Phase 6D: Structured Interior Material Sharing
+
+Purpose: let structured interior/cell-structure surfaces share the luma material strategy module and
+atlas/direct material resources without inheriting the static staging/render-compaction lifecycle.
+
+Tasks:
+
+- Route structured interior surface material resolution through the shared luma material strategy
+  module.
 - Let structured interiors consume existing atlas slots and atlas-backed materials when available,
-  and contribute stable committed cell-surface texture requirements to atlas set generation.
+  and contribute stable assembled cell-surface texture requirements to atlas set generation.
 - Keep structured interior geometry submission independent from static baked geometry. Do not force
-  per-cell geometry into static promotion batches.
+  per-cell geometry into static compaction batches.
 - Add tests that static and structured-interior atlas candidates share atlas entries by render
   surface and compatible shader sampling policy, without duplicating atlas slots by renderable type
   or by atlas texture when an existing atlas set placement is available.
@@ -1871,30 +2052,7 @@ Exit criteria:
 - Remaining atlas gaps are documented with concrete unsupported cases before Phase 7 terrain and
   indexed/paletted texture work.
 
-## Phase 7: Terrain Materials and Indexed/Paletted Textures
-
-Purpose: close the highest-volume material gaps after direct texture DTOs, luma direct materials,
-and static atlas groundwork are proven.
-
-Tasks:
-
-- Port the terrain blend shader behavior from `terrain-blend-materials.ts`.
-- Add indexed texture plus palette lookup equivalent to `indexed-materials.ts`.
-- Extract Three-free indexed texture and palette byte DTOs before luma upload. The current
-  `indexed-texture-resources.ts` and `palette-resources.ts` helpers create Three `DataTexture`
-  resources even though some byte conversion helpers are already pure.
-- Add palette and derived-palette texture uploads from `palette-resources.ts`,
-  `derived-palette-resources.ts`, and `indexed-texture-resources.ts` after those DTOs exist.
-- Add compressed texture support only after direct and indexed paths are stable.
-- Add detail overlays and texture velocity once base material parity is understandable.
-
-Exit criteria:
-
-- Terrain renders with recognizable AC terrain materials and roads.
-- Indexed/paletted setup appearances render close enough for visual inspection.
-- Remaining material differences are explicit TODOs with examples.
-
-## Phase 8: Portal Passes in Luma
+## Phase 6E: Portal Passes in Luma
 
 Purpose: use the extracted pass plan directly instead of mutating scene visibility per portal pass.
 
@@ -1927,7 +2085,113 @@ Exit criteria:
 - The luma profiler path no longer shows repeated full-scene traversal because there is no backend
   scene traversal.
 
-## Phase 9: Visual Parity and Hardening
+## Phase 6F: Atlas-Backed Static Compaction Vertical Slice
+
+Purpose: add atlas-backed render compaction after structured interiors and portal rendering are
+material/visibility-correct. Phase 6F should improve batching and prove atlas material tables for
+compacted statics; it should not be the first phase where common materials become visible.
+
+Lifecycle target:
+
+- Object readiness/incubation remains the first gate. A static object is only eligible for luma
+  staging once the whole object is ready and scene object assembly has produced complete individual
+  render entries.
+- Newly assembled static objects enter staging first. Staging remains renderable and should not
+  trigger atlas packing or compacted-batch rebuilds one object at a time while landblocks hydrate.
+  The visible staged/direct path from Phase 6C.3 is the fallback for compaction overflow and
+  unsupported atlas cases.
+- Atlas-backed compaction happens at the render compaction boundary. Compaction collects current
+  compacted membership plus compactable staged entries, uses Phase 6C.1 material strategy output
+  and Phase 6C.4 atlas layout output, realizes or reuses the atlas set generation for `atlas`
+  strategies, and rebuilds compacted baked geometry only when membership/material-set changes
+  require it.
+- Re-anchor-only updates must update draw-time transforms only. They must not repack atlases,
+  rewrite UVs, or rebuild compacted/staged vertex buffers.
+
+Tasks:
+
+- Consume Phase 6C.1 material strategy output and Phase 6C.4 atlas layout output for assembled
+  static renderables. Route `atlas` strategies into compacted atlas batches, keep `direct-texture`
+  strategies on staged/direct draw paths, and keep `flat-fallback`/`unsupported` explicit in metrics
+  and debug output.
+- Implement atlas-set resource realization from atlas layout pages/rects and material strategy atlas
+  entries, using uncompressed base-level payloads and linear transfer. Create additional atlas
+  textures in the set when the layout planner emits additional pages.
+- Generate mipmaps for each atlas texture after packing and define padding/gutter extrusion to
+  prevent neighboring atlas entries from bleeding at lower mip levels.
+- Implement the material-index table shader path. Prefer bounded uniform-array material tables first;
+  leave room for a metadata texture fetched in the vertex shader if uniform limits become visible.
+- Include atlas texture index in material-slot data. For the first WebGL implementation, assume one
+  atlas sampler per draw slice unless a multi-sampler path is deliberately proven.
+- Preserve author UVs and provide enough per-vertex or per-surface material data for the shader to
+  apply repeat/clamp behavior inside each atlas slot.
+- Teach the luma static compaction path to compact only renderables whose material strategy set is
+  atlas-backed and compaction-compatible. Objects with direct-texture, flat-fallback, or unsupported
+  strategies should remain staged on the appropriate explicit path.
+- Prefer material-index table attributes for compacted/batched geometry so atlas set generation
+  changes can update material-slot tables without rewriting baked vertex buffers.
+- Partition large material sets into deterministic draw slices that reuse shared vertex/index
+  buffers while binding bounded material-table windows. Sort or group emitted triangles by material
+  slot/window so each slice can draw a contiguous index range with slice-local material indices.
+- Partition draw slices by atlas texture binding as well as material-table window. In the
+  conservative WebGL path, a slice must not reference material slots from multiple atlas textures
+  unless a multi-sampler shader path has been deliberately implemented.
+- Keep direct staging textures deduped through the existing luma texture resource cache. Multiple
+  staged objects sharing the same render surface and sampling policy should share one staging
+  texture, not allocate per-object duplicates.
+- Allow staged objects to opportunistically use existing atlas slots only when every required
+  surface exists in the current atlas set generation and doing so does not mutate that generation.
+- Add real-scene metrics/debug output for direct texture, atlas texture, flat fallback, animated UV
+  fallback, missing decompressed prepared texture, atlas full, and material table overflow.
+- Add tests for multi-atlas layout stability, capacity fallback, gutter/mip behavior,
+  material-slot table generation with atlas texture indices, repeat/clamp atlas sampling math,
+  compaction-triggered atlas generation, staged-object no-rebuild behavior, material-table slice
+  partitioning, vertex-buffer reuse when atlas rects change, fallback behavior, atlas set generation
+  reuse, multi-atlas draw-slice partitioning, old atlas generation retirement, and re-anchor-only
+  updates.
+
+Exit criteria:
+
+- Compacted luma static batches can render common textured static objects through atlas-backed
+  material state.
+- Common supported static materials already render through the individual/staged direct path before
+  compaction, so Phase 6F can be evaluated as a batching/atlas correctness change rather than the
+  first material-rendering milestone.
+- Real luma static scene inputs, not only fixture geometry, drive the atlas/shader/compaction path.
+- Newly assembled static objects remain immediately visible through staging and do not cause atlas
+  or compacted-batch rebuilds until compaction.
+- Large material sets can be split into deterministic draw slices that reuse shared buffers while
+  binding bounded material-slot tables and at most the supported atlas texture bindings.
+- Repeating/wrapping static materials can use atlas-backed sampling when represented by the shader
+  contract; unsupported sampler behavior remains explicit fallback.
+- Compressed source textures enter atlases only through the Phase 6C.0 decompressed prepared-texture
+  path; block-compressed atlas packing remains out of scope.
+- Re-anchor-only updates still reuse compacted static buffers and atlas resources.
+
+## Phase 7: Terrain Materials and Indexed/Paletted Textures
+
+Purpose: close the highest-volume material gaps after direct texture DTOs, luma direct materials,
+portal correctness, and atlas-backed static compaction groundwork are proven.
+
+Tasks:
+
+- Port the terrain blend shader behavior from `terrain-blend-materials.ts`.
+- Add indexed texture plus palette lookup equivalent to `indexed-materials.ts`.
+- Extract Three-free indexed texture and palette byte DTOs before luma upload. The current
+  `indexed-texture-resources.ts` and `palette-resources.ts` helpers create Three `DataTexture`
+  resources even though some byte conversion helpers are already pure.
+- Add palette and derived-palette texture uploads from `palette-resources.ts`,
+  `derived-palette-resources.ts`, and `indexed-texture-resources.ts` after those DTOs exist.
+- Add compressed texture support only after direct and indexed paths are stable.
+- Add detail overlays and texture velocity once base material parity is understandable.
+
+Exit criteria:
+
+- Terrain renders with recognizable AC terrain materials and roads.
+- Indexed/paletted setup appearances render close enough for visual inspection.
+- Remaining material differences are explicit TODOs with examples.
+
+## Phase 8: Visual Parity and Hardening
 
 Purpose: close remaining luma visual landmines before deleting Three.
 
@@ -1960,7 +2224,7 @@ Exit criteria:
 - No common material code imports Three.
 - luma backend can run the normal browser-mode workflow.
 
-## Phase 10: Performance Gate
+## Phase 9: Performance Gate
 
 Purpose: prove that the swapout solves the original renderer bottleneck.
 

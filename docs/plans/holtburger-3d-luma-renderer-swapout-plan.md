@@ -1,6 +1,6 @@
 # Holtburger 3D Luma Renderer Swapout Plan
 
-Status: Phase 2A implemented; Phase 3 pending.
+Status: Phase 3 implemented; Phase 3A recommended before Phase 4.
 
 ## Purpose
 
@@ -502,6 +502,105 @@ Exit criteria:
 - Luma renders terrain and interior cell shell polygons in flat colors.
 - Camera framing, resize, and render chunk offsets work well enough to inspect loaded scenes.
 - This phase can ignore statics, instancing, textures, portals, and debug overlays.
+
+Progress as of 2026-05-28:
+
+- Added `luma-geometry.ts` with Three-free typed geometry payload helpers for:
+  - terrain meshes from `TerrainSceneModel.tiles[].mesh`;
+  - structured interior polygon-set render geometry from
+    `StructuredInteriorSceneModel.cells[].renderGeometry`;
+  - portal aperture point fans for future portal-mask work.
+- Added `luma-math.ts` with luma-local matrix/vector helpers:
+  - column-major matrix multiplication and translation;
+  - `SceneCameraFrame` projection/view matrix construction;
+  - AC placement transform conversion into renderer-space matrices;
+  - deterministic debug-color generation from stable keys.
+- Added `luma-resources.ts` with a luma-local world resource store and sync path for terrain and
+  structured interior batches. It applies render chunk offsets, terrain local offsets, and
+  structured interior cell placements before drawing.
+- Updated the luma renderer to keep the Phase 2 triangle as an empty-scene diagnostic fallback, but
+  draw flat-color terrain/interior batches whenever synced world batches exist.
+- Added a flat-color luma world pipeline with explicit WebGL uniform declarations for
+  `uModelViewProjection` and `uColor`.
+- Updated luma metrics so debug panels report luma terrain/interior batch counts and rendered
+  triangle counts instead of leaving the Phase 3 path hidden behind all-zero Three-era fields.
+- Added focused tests for luma geometry packing and matrix helpers.
+- Validation run:
+  - `npm run test:ts -- src/lib/app-config/render-backend.test.ts src/lib/world-display/render-passes.test.ts src/lib/world-display/render-policy.test.ts src/lib/world-display/luma-geometry.test.ts src/lib/world-display/luma-math.test.ts`
+  - `npm run check`
+  - `npm run lint:ts`
+  - `npm run lint:dead`
+  - `npm run build`
+  - `VITE_HOLTBURGER_RENDER_BACKEND=luma npm run build`
+  - public-factory diagnostic luma mount in Vite with a synthetic terrain tile and screenshot/pixel
+    sampling.
+
+Verification notes:
+
+- The Phase 3 browser check used a temporary Vite-served diagnostic page importing
+  `createWorldDisplayRenderer(...)`, supplying one synthetic terrain tile plus render chunk
+  transform and camera frame. Metrics reported `rendererBackend: "luma"`,
+  `renderGraphPolicy: "luma-flat-color-world"`, one terrain batch, two world triangles, and no
+  fallback samples.
+- Headless Chrome still needs SwiftShader flags in this environment. Pixel sampling confirmed the
+  flat-color terrain plane over the distinct luma clear color:
+  - center `(56, 188, 89)`;
+  - background `(4, 14, 22)`;
+  - sampled non-background terrain pixels `181`.
+
+Decisions and course corrections:
+
+- Did not extract the existing Three `BufferGeometry` builders into shared adapters yet. For Phase
+  3, the luma renderer can consume already-prepared terrain and polygon-set DTOs directly. Pulling
+  apart the mature Three material/group geometry builders before luma needs material-compatible
+  grouping would have increased churn without improving the flat-color proof.
+- Added a luma-local AC placement matrix helper instead of importing
+  `buildAcPlacementMatrix(...)` from `static-renderable-geometry.ts`, because that helper returns a
+  Three `Matrix4` and would pull Three into the luma path.
+- Runtime verification exposed two WebGL/luma integration details:
+  - direct uniforms must be declared in the luma shader layout for this path;
+  - indexed draw submission did not render in the current proof path, so Phase 3 expands indexed
+    geometry to non-indexed vertex buffers before upload while preserving typed index payloads at
+    the geometry-helper boundary.
+- The world pipeline temporarily uses `depthCompare: "always"` and disables depth writes. This is
+  acceptable for the flat-color terrain/interior proof, but not for statics or overlapping interior
+  shells.
+
+Introduced cleanup targets and temporary shims:
+
+- `luma-resources.ts` currently destroys and rebuilds all luma world buffers on every terrain,
+  structured-interior, or render-chunk transform update. This is simple and correct for Phase 3, but
+  Phase 4 should not add instanced statics on top of this rebuild-all policy without adding stable
+  batch signatures or incremental replacement.
+- The non-indexed expansion in `luma-resources.ts` is a compatibility shim around the failed
+  indexed draw proof. Before adding static instancing, re-test luma indexed draw with the now-fixed
+  shader layout and isolate whether the original issue was missing uniform declarations, index
+  buffer setup, or draw options.
+- The flat-color world pipeline has depth disabled. Before Phase 4 adds statics, restore a working
+  depth path with a clear depth value and verified depth compare/write behavior.
+- Luma still has no picking, culling, portal pass integration, material grouping, or retained draw
+  list planning. Those remain future phases.
+
+## Phase 3A: Resource Submission Hardening
+
+Purpose: remove Phase 3 proof-path debt before adding static instancing.
+
+Tasks:
+
+- Re-test indexed luma draw after the Phase 3 shader-layout uniform fix.
+- If indexed draw works, switch terrain and structured interior batches back to index buffers while
+  keeping the typed geometry payload boundary.
+- If indexed draw still fails, isolate and document the luma/WebGL API requirement with a minimal
+  local test before carrying non-indexed expansion into Phase 4.
+- Restore and verify depth clear/compare/write behavior for overlapping flat-color batches.
+- Add stable batch signatures or replacement granularity so Phase 4 does not rebuild all terrain and
+  interior buffers when only statics change.
+
+Exit criteria:
+
+- Terrain/interior luma batches render with verified depth behavior.
+- The resource store has a clear policy for indexed versus expanded submission.
+- Phase 4 can add static instancing without compounding Phase 3 proof-path shims.
 
 ## Phase 4: Static Geometry Without Real Materials
 

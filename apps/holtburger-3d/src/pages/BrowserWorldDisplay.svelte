@@ -27,6 +27,7 @@
 		prepareBrowserFreeCameraForDestinationFit,
 		rotateBrowserFreeCamera,
 		rotateBrowserFreeCameraAroundLocalUp,
+		syncBrowserFreeCameraStateFromFrame,
 		type BrowserFreeCameraState,
 		type SceneCameraFrame,
 		describeSceneCameraFrame,
@@ -510,6 +511,10 @@
 
 		if (!browserCameraFrame && metrics.cameraFrame) {
 			browserCameraFrame = metrics.cameraFrame;
+			browserCameraState = syncBrowserFreeCameraStateFromFrame(
+				browserCameraState,
+				metrics.cameraFrame,
+			);
 			syncControlledCameraFrame();
 			scheduleRenderedCameraHint({ normalizedX: 0.5, normalizedY: 0.5 }, true);
 		}
@@ -520,6 +525,10 @@
 	): void {
 		if (!browserCameraFrame) {
 			browserCameraFrame = cameraFrame;
+			browserCameraState = syncBrowserFreeCameraStateFromFrame(
+				browserCameraState,
+				cameraFrame,
+			);
 			syncControlledCameraFrame();
 			scheduleRenderedCameraHint({ normalizedX: 0.5, normalizedY: 0.5 }, true);
 		}

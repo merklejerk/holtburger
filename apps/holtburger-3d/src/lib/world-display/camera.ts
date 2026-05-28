@@ -388,6 +388,21 @@ export function buildBrowserFreeCameraFrame(
 	});
 }
 
+export function syncBrowserFreeCameraStateFromFrame(
+	state: BrowserFreeCameraState,
+	frame: SceneCameraFrame,
+): BrowserFreeCameraState {
+	const forward = normalizeVec3(subtractVec3(frame.target, frame.position));
+
+	return {
+		...state,
+		position: { ...frame.position },
+		yawRadians: Math.atan2(-forward.z, -forward.x),
+		pitchRadians: Math.asin(clamp(forward.y, -1, 1)),
+		focusDistance: distanceVec3(frame.position, frame.target),
+	};
+}
+
 function calculateSceneHorizontalSpan(bounds: SceneBoundsFrame): number {
 	return Math.max(bounds.size.x, bounds.size.z, bounds.minimumSpan);
 }
@@ -569,6 +584,10 @@ function subtractVec3(left: Vec3Dto, right: Vec3Dto): Vec3Dto {
 		y: left.y - right.y,
 		z: left.z - right.z,
 	};
+}
+
+function distanceVec3(left: Vec3Dto, right: Vec3Dto): number {
+	return Math.hypot(left.x - right.x, left.y - right.y, left.z - right.z);
 }
 
 function scaleVec3(vector: Vec3Dto, scale: number): Vec3Dto {

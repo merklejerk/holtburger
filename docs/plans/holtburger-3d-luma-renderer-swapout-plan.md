@@ -1,6 +1,6 @@
 # Holtburger 3D Luma Renderer Swapout Plan
 
-Status: Phase 1 implemented; Phase 2 pending.
+Status: Phase 2A implemented; Phase 3 pending.
 
 ## Purpose
 
@@ -315,6 +315,159 @@ Exit criteria:
 - No asset pipeline integration is required yet.
 - Remove the temporary `knip` dependency ignore for `@luma.gl/core` and `@luma.gl/webgl` once this
   phase introduces real luma imports.
+
+Progress as of 2026-05-28:
+
+- Replaced the Phase 1 luma placeholder with a real luma-owned `<canvas>`, WebGL2 device creation
+  through `luma.createDevice({ type: "webgl", adapters: [webgl2Adapter] })`, and low-level luma
+  resources:
+  - GLSL vertex/fragment shaders;
+  - render pipeline;
+  - vertex buffer;
+  - vertex array;
+  - command encoder/render pass submission.
+- The luma path clears to a distinct dark blue color and draws one flat-color orange triangle.
+- Added resize handling with a `ResizeObserver`, explicit drawing-buffer sizing, and redraw
+  scheduling on resize. Disposal cancels pending frames, disconnects the observer, removes the
+  canvas, and destroys luma resources/device.
+- Added luma metrics through the existing `WorldRenderDebugMetrics` shape:
+  - `rendererBackend: "luma"`;
+  - canvas dimensions;
+  - `clearCount`;
+  - `renderCalls`/`renderTriangles`.
+- Added `clearCount` to the shared debug metrics contract. The Three renderer reports `0` for now;
+  luma increments it per render pass.
+- Removed the temporary `knip` dependency ignore for `@luma.gl/core` and `@luma.gl/webgl` now that
+  the luma path imports them.
+- Validation run:
+  - `npm run test:ts -- src/lib/app-config/render-backend.test.ts src/lib/world-display/render-passes.test.ts src/lib/world-display/render-policy.test.ts`
+  - `npm run check`
+  - `npm run lint:ts`
+  - `npm run lint:dead`
+  - `npm run build`
+  - `VITE_HOLTBURGER_RENDER_BACKEND=luma npm run build`
+  - direct diagnostic luma mount in Vite with desktop and mobile screenshots/pixel sampling.
+
+Verification notes:
+
+- The normal app route still needs the Tauri runtime before it mounts `WorldDisplay`, so browser
+  screenshot verification used a temporary Vite-served diagnostic page that imports
+  `createLumaWorldDisplayRenderer(...)` directly and supplies empty scene models.
+- Plain headless Chrome failed WebGL context creation in this environment with
+  `BindToCurrentSequence failed`; rerunning headless Chrome with SwiftShader flags rendered the
+  triangle. Pixel sampling confirmed both the orange triangle and dark clear color:
+  - desktop 800x600: center `(250, 189, 87)`, background `(4, 14, 22)`, orange grid samples `51`;
+  - mobile 390x844: center `(250, 189, 87)`, background `(4, 14, 22)`, orange grid samples `73`.
+
+Decisions and course corrections:
+
+- The luma renderer still owns the same app-facing controller shape, but the implementation now
+  initializes the luma device asynchronously because `luma.createDevice(...)` is async. The factory
+  returns immediately, reports initializing metrics, and schedules the first render after resources
+  are ready.
+- The luma path uses luma core resources and explicit render pass submission rather than luma
+  `Model`, matching the swapout direction.
+- Initialization failures are not swallowed: they are logged with `[holtburger-3d][luma]`, shown in
+  the luma host, and surfaced through metrics fallback samples.
+
+Introduced cleanup targets and temporary shims:
+
+- Luma still reports through the full Three-era `WorldRenderDebugMetrics` shape, leaving many zeroed
+  fields. Before Phase 3 grows luma metrics further, extract a luma-local empty metrics helper or
+  split backend-specific metric details behind a nested field.
+- The public backend selector still statically imported both backends after Phase 2. Phase 2A
+  addressed startup/main-bundle cost by moving the luma implementation behind a deferred import.
+- The luma path has no picking, camera, or asset resource sync yet. That is expected for Phase 2,
+  but Phase 3 must replace the hardcoded triangle pipeline with a real flat-color asset pipeline.
+
+## Phase 2A: Backend Loading and Metrics Cleanup
+
+Purpose: keep the experiment from adding avoidable cost/debt before the real luma asset renderer
+starts growing.
+
+Tasks:
+
+- Decide whether `createWorldDisplayRenderer(...)` should stay synchronous. If it should, add a
+  tiny synchronous delegating controller for the luma path that dynamically imports and installs the
+  real luma backend after construction. If async construction is acceptable, update
+  `WorldDisplay.svelte` explicitly and keep the public lifecycle clear.
+- Stop loading/evaluating luma implementation code on the default Three startup path.
+- Extract luma empty/debug metrics creation so Phase 3 does not keep copying the full
+  `WorldRenderDebugMetrics` shape.
+- Keep the luma triangle path working after the loading split.
+
+Exit criteria:
+
+- Default Three startup does not load or evaluate luma implementation code unless the luma backend
+  is selected. The current single Vite build artifact may still emit lazy luma chunks; omitting
+  those files entirely is a packaging concern, not a Phase 2A startup-path blocker.
+- Luma still renders the Phase 2 triangle after backend loading changes.
+- Phase 3 can add terrain/interior resources without duplicating metrics boilerplate.
+
+Progress as of 2026-05-28:
+
+- Kept `createWorldDisplayRenderer(...)` synchronous so `WorldDisplay.svelte` does not need a
+  lifecycle rewrite before the renderer implementation is stable.
+- Replaced the static luma implementation import in the public factory with a small deferred luma
+  controller. The controller captures the latest app-facing renderer state and handlers, dynamically
+  imports the real luma implementation only on the selected luma path, installs it once loaded, and
+  forwards subsequent setter/picking/disposal calls.
+- Renamed the real luma renderer module to `luma-world-display-renderer-impl.ts` and exported
+  `createLumaWorldDisplayRendererImplementation(...)` from there. This keeps the heavy luma imports
+  out of the public renderer entrypoint.
+- Extracted luma's zeroed/debug metrics boilerplate into `luma-render-metrics.ts`, so Phase 3 can
+  add terrain/interior counts without copying the full `WorldRenderDebugMetrics` shape again.
+- Kept backend config parsing centralized in `app-config/render-backend.ts`; the public factory
+  still reads `import.meta.env.VITE_HOLTBURGER_RENDER_BACKEND` directly, then delegates parsing to
+  `parseWorldRenderBackend(...)`.
+- Validation run:
+  - `npm run test:ts -- src/lib/app-config/render-backend.test.ts src/lib/world-display/render-passes.test.ts src/lib/world-display/render-policy.test.ts`
+  - `npm run check`
+  - `npm run lint:ts`
+  - `npm run lint:dead`
+  - `npm run build`
+  - `VITE_HOLTBURGER_RENDER_BACKEND=luma npm run build`
+  - public-factory diagnostic luma mount in Vite with desktop and mobile screenshots/pixel
+    sampling.
+
+Verification notes:
+
+- The Phase 2A browser check used a temporary Vite-served diagnostic page importing
+  `createWorldDisplayRenderer(...)`, not the luma implementation directly. This verifies the
+  deferred loader and public backend selector together.
+- Headless Chrome still needs SwiftShader flags in this environment for WebGL. Pixel sampling
+  confirmed the orange triangle and dark clear color through the public factory:
+  - desktop 800x600: center `(250, 189, 87)`, background `(4, 14, 22)`, orange grid samples `51`;
+  - mobile 390x844: center `(250, 189, 87)`, background `(4, 14, 22)`, orange grid samples `76`.
+
+Decisions and course corrections:
+
+- Chose a synchronous deferred controller over making `createWorldDisplayRenderer(...)` async. This
+  keeps the app-facing renderer lifecycle stable while luma internals are still changing quickly.
+- The first strict reading of "default build does not pull in luma" was too broad for the current
+  single-artifact Vite app. Vite correctly code-splits the dynamic import, so the default main chunk
+  no longer contains the luma implementation and Three startup does not load/evaluate it. However,
+  both `npm run build` and `VITE_HOLTBURGER_RENDER_BACKEND=luma npm run build` still emit the lazy
+  luma/WebGL chunk files because they are reachable from the artifact. If a future distribution
+  requires the default artifact to contain no luma files at all, that should be handled as
+  backend-specific packaging or entrypoint work rather than mixed into Phase 3 geometry work.
+- The luma deferred controller is intentionally a narrow app-local shim. It exists to preserve the
+  synchronous public factory during migration, not to become a permanent renderer abstraction.
+
+Introduced cleanup targets and temporary shims:
+
+- `createDeferredLumaWorldDisplayRenderer(...)` is a temporary migration shim. Revisit it after the
+  luma renderer owns real camera and asset resource sync; either keep it as the backend loader or
+  replace it with an explicit async app lifecycle if the renderer needs startup progress/error UI.
+- The single-artifact Vite build still emits lazy luma/WebGL files on the default build. This is not
+  blocking Phase 3, but production packaging/performance work should decide whether the app needs
+  backend-specific build artifacts.
+- Luma metrics are now centralized, but they still conform to the full Three-era debug metrics
+  object with many zeroed fields. If this grows noisy during Phase 3 or Phase 4, split backend-local
+  metrics under a typed nested field instead of adding more backend-specific placeholders at the
+  top level.
+- No immediate interim phase is required before Phase 3. The Phase 2A debt is documented and does
+  not block flat-color terrain/interior resource work.
 
 ## Phase 3: Asset Polys With Flat Colors
 

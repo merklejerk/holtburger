@@ -73,6 +73,7 @@ export interface WorldRenderDebugMetrics {
 	renderGraphBaseScene: string;
 	transitionPortalMaxDepth: number;
 	renderPassCount: number;
+	clearCount: number;
 	portalRenderWorkItemCount: number;
 	transitionApertureMaskPassCount: number;
 	apertureDepthResetPassCount: number;

@@ -3618,6 +3618,7 @@ function createRenderDebugMetrics(
 		| "renderTriangles"
 		| "renderLines"
 		| "renderPoints"
+		| "clearCount"
 	>,
 ): WorldRenderDebugMetrics {
 	return {
@@ -3636,6 +3637,7 @@ function createRenderDebugMetrics(
 		renderGraphBaseScene: options.renderGraphBaseScene,
 		transitionPortalMaxDepth: options.transitionPortalMaxDepth,
 		renderPassCount: options.renderPassCount,
+		clearCount: 0,
 		portalRenderWorkItemCount: options.portalRenderWorkItemCount,
 		transitionApertureMaskPassCount: options.transitionApertureMaskPassCount,
 		apertureDepthResetPassCount: options.apertureDepthResetPassCount,

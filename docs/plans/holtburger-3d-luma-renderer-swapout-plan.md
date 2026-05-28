@@ -1,6 +1,6 @@
 # Holtburger 3D Luma Renderer Swapout Plan
 
-Status: Phase 5 implemented; Phase 6 is next, with one optional Phase 5A only if profiling shows promotion/culling hitches.
+Status: Phase 5 implemented; Phase 6A is next, with one optional Phase 5A only if profiling shows promotion/culling hitches.
 
 ## Purpose
 
@@ -1373,44 +1373,107 @@ Decisions, course corrections, and cleanup targets:
   BVH visibility, draw-list construction, or static promotion rebuilds cause visible hitches before
   material work.
 
-## Phase 6: Direct Textures and Simple Materials
+## Phase 6: Direct Texture and Material Staging
 
-Purpose: add the first real material path while keeping scope narrow. For baked static batches,
-direct texture work must either introduce atlas-backed static material state or explicitly leave
-statics on a less-batched fallback until atlas support lands.
+Purpose: add the first real luma material path without hiding texture DTO extraction, luma resource
+upload, and static atlas batching inside one oversized phase.
+
+Phase 6 should not force baked static batches to use direct per-surface textures. Baked statics are
+only a good fit for real textured rendering after atlas/material-set keys and UV remapping exist.
+Until then, textured statics can either stay on the generic individual draw path or remain in
+flat/debug mode while interiors and other non-atlas-friendly renderables prove the material system.
+
+## Phase 6A: Three-Free Direct Material DTOs
+
+Purpose: extract renderer-neutral texture and material facts that luma can upload later, while
+keeping the current Three material cache behavior intact.
+
+Tasks:
+
+- Extract Three-free texture decode DTOs from `render-surface-texture-resources.ts`. The current
+  direct texture path returns Three `DataTexture`/`CompressedTexture`; Phase 6A should expose typed
+  byte payloads, dimensions, format facts, mip metadata where available, color-space facts, and
+  sampling policy without creating GPU resources.
+- Extract Three-free material behavior DTOs from `material-behavior.ts`. The current behavior uses
+  Three `Color` and Three blend constants; Phase 6A should expose renderer-neutral color, side
+  policy, opacity/alpha-test facts, depth-write policy, and blend mode.
+- Reuse pure material selection facts from `material-plan.ts` and
+  `WorldMaterialResourceCache.resolveMaterialPlan(...)` where useful, but do not replace or
+  destabilize the Three material cache.
+- Keep unsupported direct texture cases explicit, including compressed payloads that luma cannot
+  upload yet, missing selected render surfaces, and material recipes that require indexed/paletted
+  lookup.
+- Add focused tests around DTO extraction and unsupported/fallback reporting. Do not add tests for
+  debug-oriented logging.
+
+Exit criteria:
+
+- Common direct-color render surfaces can be represented without importing Three.
+- Basic material behavior can be represented without importing Three.
+- Three still renders through its existing material cache.
+- Luma has enough DTO input to implement direct texture upload in Phase 6B.
+
+## Phase 6B: Luma Direct Materials for Non-Atlas Draws
+
+Purpose: add luma flat color, direct texture, and debug no-material modes for draw units that do
+not need static texture atlases.
 
 Tasks:
 
 - Add `luma-materials.ts` for flat color, direct texture, and debug no-material modes.
-- Add a static texture atlas plan before applying real textured materials to baked static batches:
-  - decide atlas scope, likely per chunk/domain/material family or per loaded static batch set;
-  - define atlas UV remapping DTOs;
-  - define atlas/material-set keys that can replace the temporary no-material signature from Phase
-    4B.
-- Extract Three-free texture decode DTOs from `render-surface-texture-resources.ts` before luma
-  upload. The current direct texture path returns Three `DataTexture`/`CompressedTexture`.
-- Extract Three-free material behavior DTOs from `material-behavior.ts` before luma use. The
-  current behavior uses Three `Color` and Three blend constants.
-- Reuse pure material selection facts from `material-plan.ts` and
-  `WorldMaterialResourceCache.resolveMaterialPlan(...)` where useful, but do not replace the Three
-  material cache.
-- Carry basic legacy material behavior: side policy, opacity/alpha test where needed, depth write,
-  and blend mode.
-- Apply direct textured materials to statics and interior shells.
-- If static texture atlases are not ready in this phase, apply direct textured materials to
-  interiors first and keep baked statics in flat/debug mode or in a clearly documented fallback.
+- Add luma texture upload/cache support for Phase 6A direct texture DTOs, including sampler state
+  from the renderer-neutral sampling policy.
+- Add luma material/pipeline keys for direct textured draws, flat/debug draws, side policy,
+  alpha-test/opacity, depth-write policy, and blend mode.
+- Apply direct textured materials first to structured interior shells/buildings and any generic
+  individual draw path that can bind one texture/material set without atlas remapping.
+- Keep baked promoted static batches in flat/debug mode unless a staged or generic individual
+  fallback path can render the whole object with resolved direct materials. Do not fragment the
+  promoted baked batch model with one draw per source surface just to claim static texturing.
+- Preserve flat/debug fallback for unsupported material cases and report the fallback reason in
+  luma metrics.
 
 Exit criteria:
 
-- Common direct-textured buildings/interiors render with recognizable textures.
+- Common direct-textured buildings/interiors render with recognizable textures in luma.
 - Flat/debug fallback remains available for unsupported material cases.
-- Static material batching has a clear atlas-backed path, even if full atlas coverage is deferred.
-- Indexed/paletted textures, terrain blends, detail overlays, and texture velocity may still be
-  TODOs.
+- Baked static batches are not forced into inefficient non-atlas direct texture grouping.
+- Indexed/paletted textures, terrain blends, detail overlays, texture velocity, and static atlas
+  texturing remain explicit TODOs.
+
+## Phase 6C: Static Texture Atlases and Baked Static Materials
+
+Purpose: make baked static batches compatible with real textured materials by introducing atlas
+construction, UV remapping, and atlas-aware material keys.
+
+Tasks:
+
+- Decide atlas scope, likely per chunk/domain/material family or per loaded static batch set, based
+  on measured rebuild behavior and texture reuse.
+- Define atlas UV remapping DTOs that can be consumed by baked static geometry construction without
+  tying the data shape to luma internals.
+- Define atlas/material-set keys that replace the temporary no-material static batch signature from
+  Phase 4B/4C.
+- Teach the luma static promotion path to use atlas-ready renderables only; unresolved atlas
+  construction should keep objects staged or on an explicit fallback path rather than baking
+  incomplete material state.
+- Promote the static batching policy if proven reusable; until then, keep atlas upload/cache and
+  draw submission luma-local.
+- Add tests for atlas key stability, UV remapping, fallback behavior, and no-rebuild behavior on
+  re-anchor-only updates.
+
+Exit criteria:
+
+- Baked luma static batches can render common direct textured static objects through atlas-backed
+  material state.
+- Static material batching has stable atlas/material-set keys.
+- Re-anchor-only updates still reuse promoted static buffers and atlas resources.
+- Remaining atlas gaps are documented with concrete unsupported cases.
 
 ## Phase 7: Terrain Materials and Indexed/Paletted Textures
 
-Purpose: close the highest-volume material gaps after direct textures are proven.
+Purpose: close the highest-volume material gaps after direct texture DTOs, luma direct materials,
+and static atlas groundwork are proven.
 
 Tasks:
 

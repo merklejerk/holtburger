@@ -1241,28 +1241,70 @@ Course corrections, refinements, and cleanup targets:
 
 ## Phase 5: Basic Frame Culling and Draw Lists
 
-Purpose: stop drawing everything before real materials make draw cost harder to read.
+Purpose: stop drawing every synced luma resource batch before real materials make draw cost harder
+to read. Phase 5 should introduce explicit frame/pass draw lists over all currently supported
+BVH-backed world geometry, while preserving Phase 4C's promoted/staged static resource lifecycle.
 
 Tasks:
 
-- Add `luma-frame.ts` to build `LumaFrame`, `LumaPass`, and ordered `LumaDraw` lists.
+- Add `luma-frame.ts` to build `LumaFrame`, `LumaPass`, and ordered `LumaDraw` lists. These should
+  describe submission for the current frame only; resource ownership stays in `luma-resources.ts`.
 - Create a luma candidate registry that stores batch ids and BVH item keys, not `Object3D`.
+  Candidate entries should cover all currently supported renderable categories that already have
+  source BVH/candidate facts: terrain, promoted static batches, staged static object batches,
+  structured interiors, portal masks, and debug overlay batches as those become available.
 - Extract the Three-free selection core from `render-batch-candidates.ts` or copy it locally first.
   The current registry stores `Object3D`, so luma should not import it directly.
 - Reuse existing pure helpers where they fit:
   - `derivePreparedBvhVisibilitySnapshot`;
   - `deriveWorldRenderPolicy`;
   - `deriveWorldRenderGraphForPolicy`.
-- Expand visible candidate batch ids into pass-local `LumaDraw` commands.
+- Keep candidate extraction broad. Phase 5 is not a static-only culling phase; statics just need
+  explicit handling because Phase 4C introduced two valid static resource tiers.
+- Register Phase 4C static draw units as first-class candidates:
+  - promoted baked static batch ids prefixed with `static-promoted/`;
+  - staged static object batch ids prefixed with `static-staged/`.
+- Do not collapse staged static objects into their parent promoted chunk/domain group during
+  culling. They are independent draw units until the promotion policy folds them into a promoted
+  batch.
+- Expand visible candidate batch ids into pass-local `LumaDraw` commands. The submitter should
+  receive draw commands and fetch already-synced resources by batch id; it should not run visibility
+  selection or decide which batches exist.
 - Sort `LumaDraw` commands by pass, pipeline/material class, batch id, geometry/range, and draw
-  state. Do not assume statics are instanced; Phase 4B/4C should make promoted baked static batch ids
-  and staged static object batch ids the normal static draw units.
+  state.
+- Keep Phase 4C promotion scheduling out of the first Phase 5 implementation unless profiling or
+  visual testing shows promotion rebuild hitches. If it does, add Phase 5A for frame-budgeted
+  promotion rather than mixing scheduling policy into the frame planner.
+- Add luma draw-list/culling metrics that make promoted and staged static counts visible without
+  extending Three-only terminology. Prefer luma-local metrics first if the shared
+  `WorldRenderDebugMetrics` contract would require fake values from the Three backend.
 
 Exit criteria:
 
 - Luma renders the same flat-color world through explicit pass-local draw lists.
-- Culling metrics report candidate counts without constructing Three objects.
+- Terrain, statics, structured interiors, portal masks, and debug overlays that have existing
+  source candidate/BVH facts can be registered without constructing Three objects.
+- Culling metrics report candidate and visible draw counts by renderable category.
+- Promoted static batches and staged static object batches can both be culled and submitted through
+  the same draw-list path.
+- Re-anchor-only updates still reuse promoted and staged static buffers; Phase 5 must not regress
+  Phase 4C's no-rebuild invariant.
 - The submitter receives draw commands and does not discover what to draw.
+
+Refinements after Phase 4C:
+
+- Phase 5 must not assume one static batch per chunk/domain/render-state group. A group can have one
+  promoted batch plus zero or more staged object batches.
+- Static-specific wording in this phase is only about preserving Phase 4C's two-tier static
+  lifecycle. It is not intended to narrow Phase 5's culling scope to static objects.
+- `staticInstanceCount` is still a legacy metric shim. Phase 5 should introduce clearer luma metric
+  names for promoted static batches, staged static objects, staged static parts, and visible static
+  draw count, then leave the shared metric cleanup explicitly documented if it cannot be completed
+  without adding fake Three values.
+- The resource store's `staticPromotionCount` is a cumulative resource-lifecycle counter, not a
+  per-frame draw metric. Do not treat it as visible draw count.
+- Phase 5 should not add texture-atlas assumptions to culling keys. Atlas/material-set compatibility
+  remains Phase 6+ material work.
 
 ## Phase 6: Direct Textures and Simple Materials
 

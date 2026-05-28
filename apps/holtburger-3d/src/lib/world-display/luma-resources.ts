@@ -26,6 +26,7 @@ import type {
 	StaticRenderablePart,
 	StaticRenderableSceneModel,
 } from "./static-renderables";
+import { deriveStaticRenderableReadinessModel } from "./static-renderable-readiness";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
 
@@ -147,6 +148,10 @@ export function syncLumaWorldResources({
 	);
 	const nextBatches: LumaWorldDrawBatch[] = [];
 	const retainedBatchIds = new Set<string>();
+	const committedStaticRenderableScene = deriveStaticRenderableReadinessModel({
+		assetState,
+		scene: staticRenderableScene,
+	}).committedScene;
 
 	for (const tile of terrainScene.tiles) {
 		const chunkOffset = chunkOffsetByKey.get(tile.renderChunk.chunkKey);
@@ -209,7 +214,10 @@ export function syncLumaWorldResources({
 		);
 	}
 
-	for (const [groupKey, parts] of staticRenderableScene.partsByRenderGroupKey) {
+	for (const [
+		groupKey,
+		parts,
+	] of committedStaticRenderableScene.partsByRenderGroupKey) {
 		const firstPart = parts[0];
 		if (!firstPart) {
 			continue;

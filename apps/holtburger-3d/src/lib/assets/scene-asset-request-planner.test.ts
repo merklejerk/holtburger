@@ -434,6 +434,56 @@ describe("scene asset request planner", () => {
 		);
 	});
 
+	it("requests atlas-ready decompressed textures for luma atlas candidates only", () => {
+		const destination = parseBrowserLocationInput("016c0155");
+		expect(destination).not.toBeNull();
+
+		const preparedTopology = createPreparedTopology(0x016cffff, [0x016c0155]);
+		const preparedEnvCell = createPreparedEnvCell(0x016c0155, [
+			"material/0800006c",
+		]);
+		const material = createPreparedMaterialRecipe(
+			"material/0800006c",
+			0x0800006c,
+			"render-surface/0600006c",
+		);
+		const visibleRenderSurface = createPreparedRenderSurface(
+			"render-surface/0600006c",
+			0x0600006c,
+			0x3154_5844,
+			"Dxt1",
+		);
+
+		const requests = createSceneCoverageRequests(
+			{
+				requestRevision: 10,
+				browserDestination: destination,
+				preparedByAssetId: {
+					[preparedTopology.request.assetId]: preparedTopology,
+					[preparedEnvCell.request.assetId]: preparedEnvCell,
+					[material.request.assetId]: material,
+					[visibleRenderSurface.request.assetId]: visibleRenderSurface,
+				},
+				pendingAssetIds: [],
+				options: {
+					terrainRadius: 2,
+					buildingRadius: 1,
+					detailRadius: 1,
+					envCellRadius: 1,
+					includeLumaAtlasPreparedTextures: true,
+				},
+			},
+			"streaming",
+		);
+
+		expect(requests.map((request) => request.assetId)).toContain(
+			"prepared-texture/0600006c?usage=raw&out=rgba8&mips=none&cs=linear",
+		);
+		expect(requests.map((request) => request.assetId)).not.toContain(
+			"prepared-texture/0600006c?usage=raw&out=dxt1&mips=retail4&cs=source",
+		);
+	});
+
 	it("retains visible prepared compressed textures as active coverage", () => {
 		const destination = parseBrowserLocationInput("016c0155");
 		expect(destination).not.toBeNull();
@@ -462,6 +512,51 @@ describe("scene asset request planner", () => {
 				[renderSurface.request.assetId]: renderSurface,
 			}),
 		).toContain(
+			"prepared-texture/0600006c?usage=raw&out=dxt5&mips=retail4&cs=source",
+		);
+	});
+
+	it("retains luma atlas-ready decompressed textures as active coverage when requested", () => {
+		const destination = parseBrowserLocationInput("016c0155");
+		expect(destination).not.toBeNull();
+
+		const preparedTopology = createPreparedTopology(0x016cffff, [0x016c0155]);
+		const preparedEnvCell = createPreparedEnvCell(0x016c0155, [
+			"material/0800006c",
+		]);
+		const material = createPreparedMaterialRecipe(
+			"material/0800006c",
+			0x0800006c,
+			"render-surface/0600006c",
+		);
+		const renderSurface = createPreparedRenderSurface(
+			"render-surface/0600006c",
+			0x0600006c,
+			0x3554_5844,
+			"Dxt5",
+		);
+
+		const assetIds = deriveSceneCoverageAssetIds(
+			destination,
+			{
+				[preparedTopology.request.assetId]: preparedTopology,
+				[preparedEnvCell.request.assetId]: preparedEnvCell,
+				[material.request.assetId]: material,
+				[renderSurface.request.assetId]: renderSurface,
+			},
+			{
+				terrainRadius: 2,
+				buildingRadius: 1,
+				detailRadius: 1,
+				envCellRadius: 1,
+				includeLumaAtlasPreparedTextures: true,
+			},
+		);
+
+		expect(assetIds).toContain(
+			"prepared-texture/0600006c?usage=raw&out=rgba8&mips=none&cs=linear",
+		);
+		expect(assetIds).not.toContain(
 			"prepared-texture/0600006c?usage=raw&out=dxt5&mips=retail4&cs=source",
 		);
 	});

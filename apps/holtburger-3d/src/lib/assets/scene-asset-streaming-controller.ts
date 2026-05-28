@@ -21,6 +21,7 @@ import {
 	type OutdoorSceneRequestOptions,
 } from "./scene-asset-request-planner";
 import type { PreparedAssetCacheMetadata, PreparedAssetRecord } from "./types";
+import type { WorldRenderBackend } from "../app-config/render-backend";
 
 interface SceneAssetChannel {
 	prepareAsset(request: AssetLookupRequestDto): Promise<PreparedAssetRecord>;
@@ -38,6 +39,7 @@ export interface SceneAssetStreamingInput {
 	envCellLodRadius: number;
 	appearancePreviewAssetIds: readonly string[];
 	preparedByAssetId: Record<string, PreparedAssetRecord>;
+	rendererBackend: WorldRenderBackend;
 }
 
 export interface SceneAssetStreamingControllerDeps {
@@ -145,6 +147,7 @@ export class SceneAssetStreamingController {
 					buildingRadius: input.buildingLodRadius,
 					detailRadius: input.detailLodRadius,
 					envCellRadius: input.envCellLodRadius,
+					includeLumaAtlasPreparedTextures: input.rendererBackend === "luma",
 				},
 			},
 			priority,
@@ -239,6 +242,7 @@ export class SceneAssetStreamingController {
 					buildingRadius: input.buildingLodRadius,
 					detailRadius: input.detailLodRadius,
 					envCellRadius: input.envCellLodRadius,
+					includeLumaAtlasPreparedTextures: input.rendererBackend === "luma",
 				},
 			).concat(input.appearancePreviewAssetIds),
 			inFlightAssetIds: [...this.inFlightAssetIds],
@@ -411,6 +415,7 @@ function createSceneInterestSyncKey(input: SceneAssetStreamingInput): string {
 		`buildings-${input.buildingLodRadius}`,
 		`detail-${input.detailLodRadius}`,
 		`env-cells-${input.envCellLodRadius}`,
+		`backend-${input.rendererBackend}`,
 		`appearance-preview-${[...input.appearancePreviewAssetIds].sort().join(",")}`,
 		`prepared-${preparedPlanningAssetKey}`,
 	].join(":");

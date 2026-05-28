@@ -80,6 +80,7 @@ describe("scene asset streaming controller", () => {
 				envCellLodRadius: 1,
 				appearancePreviewAssetIds: [],
 				preparedByAssetId: { ...preparedByAssetId },
+				rendererBackend: "three",
 			});
 		};
 

@@ -2,6 +2,7 @@
 	import { onMount } from "svelte";
 	import { get } from "svelte/store";
 	import { frontendState } from "./app/frontend-state";
+	import { parseWorldRenderBackend } from "./lib/app-config/render-backend";
 	import { AssetChannelController } from "./lib/assets/asset-channel";
 	import { SceneAssetStreamingController } from "./lib/assets/scene-asset-streaming-controller";
 	import { readDebugConfig } from "./lib/host/tauri";
@@ -11,6 +12,9 @@
 	const currentRoute =
 		typeof window === "undefined" ? "/browser" : window.location.pathname;
 	const isBrowserRoute = currentRoute === "/" || currentRoute === "/browser";
+	const rendererBackend = parseWorldRenderBackend(
+		import.meta.env.VITE_HOLTBURGER_RENDER_BACKEND,
+	);
 	let startupError = $state<string | null>(null);
 	let verboseDiagnostics = false;
 	let currentSceneStreamer: SceneAssetStreamingController | null = null;
@@ -82,6 +86,7 @@
 			envCellLodRadius: latestFrontendState.browserMode.envCellLodRadius,
 			appearancePreviewAssetIds,
 			preparedByAssetId: latestFrontendState.asset.preparedByAssetId,
+			rendererBackend,
 		});
 	}
 

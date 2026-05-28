@@ -15,6 +15,7 @@ import {
 	normalizeOutdoorLandblockId,
 } from "../landblocks";
 import {
+	formatAtlasReadyPreparedTextureAssetId,
 	formatPreparedTextureAssetId,
 	preparedDxtOutputFormat,
 	type PreparedAssetRecord,
@@ -49,6 +50,7 @@ export interface OutdoorSceneRequestOptions {
 	buildingRadius: number;
 	detailRadius: number;
 	envCellRadius?: number;
+	includeLumaAtlasPreparedTextures?: boolean;
 }
 
 export interface BrowserSceneRequestInput {
@@ -742,6 +744,14 @@ function collectVisiblePreparedTextureAssetIds(options: {
 			const outputFormat = preparedDxtOutputFormat(asset.payload.formatRaw);
 			if (!outputFormat) {
 				return [];
+			}
+			if (options.options.includeLumaAtlasPreparedTextures === true) {
+				return [
+					formatAtlasReadyPreparedTextureAssetId({
+						renderSurfaceId: asset.payload.renderSurfaceId,
+						usage: "raw",
+					}),
+				];
 			}
 			return [
 				formatPreparedTextureAssetId({

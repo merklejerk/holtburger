@@ -41,6 +41,8 @@
 		"vitest": "^4.0.7"
 	},
 	"dependencies": {
+		"@luma.gl/core": "^9.3.3",
+		"@luma.gl/webgl": "^9.3.3",
 		"@tauri-apps/api": "^2.10.1",
 		"three": "^0.184.0",
 		"zod": "^4.3.6"

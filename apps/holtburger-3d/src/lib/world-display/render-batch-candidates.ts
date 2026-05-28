@@ -11,7 +11,7 @@ export interface RenderBatchCandidateBinding {
 	fallbackReason?: string | null;
 }
 
-export interface RenderBatchCandidateSelectionOptions {
+interface RenderBatchCandidateSelectionOptions {
 	visibleItemKeys: ReadonlySet<RenderBvhItemKey>;
 	queryFallbackReasons?: readonly string[];
 }
@@ -23,7 +23,7 @@ export interface RenderBatchCandidateSelection {
 	fallbackReasonSamples: readonly string[];
 }
 
-export interface RenderBatchCandidateCounters {
+interface RenderBatchCandidateCounters {
 	registeredBatchCount: number;
 	keyedBatchCount: number;
 	representedItemKeyCount: number;
@@ -75,7 +75,10 @@ interface StoredRenderBatchCandidateBinding {
 }
 
 export function createRenderBatchCandidateRegistry(): RenderBatchCandidateRegistry {
-	const bindingsByBatchId = new Map<string, StoredRenderBatchCandidateBinding>();
+	const bindingsByBatchId = new Map<
+		string,
+		StoredRenderBatchCandidateBinding
+	>();
 
 	return {
 		get size() {
@@ -99,10 +102,7 @@ export function createRenderBatchCandidateRegistry(): RenderBatchCandidateRegist
 			return bindingsByBatchId.get(batchId)?.object ?? null;
 		},
 		selectCandidates(options) {
-			return selectRenderBatchCandidates(
-				bindingsByBatchId.values(),
-				options,
-			);
+			return selectRenderBatchCandidates(bindingsByBatchId.values(), options);
 		},
 	};
 }
@@ -191,7 +191,9 @@ function resolveBatchFallbackReason(
 	hasQueryFallback: boolean,
 ): string | null {
 	if (binding.itemKeys.length === 0) {
-		return binding.fallbackReason ?? `batch ${binding.batchId} has no BVH item keys`;
+		return (
+			binding.fallbackReason ?? `batch ${binding.batchId} has no BVH item keys`
+		);
 	}
 	if (binding.fallbackReason) {
 		return binding.fallbackReason;

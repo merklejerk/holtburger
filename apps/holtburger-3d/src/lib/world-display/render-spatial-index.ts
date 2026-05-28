@@ -19,8 +19,6 @@ import {
 export type {
 	RenderBounds,
 	RenderFrustum,
-	RenderPlane,
-	RenderRay,
 	RenderVec3,
 } from "./render-spatial-math";
 
@@ -31,8 +29,6 @@ export type RenderSpatialItemKind =
 	| "outdoor-static"
 	| "building"
 	| "indoor-static";
-
-export type { RenderPickShape } from "./render-picking-math";
 
 export type RenderSpatialMetadata =
 	| {

@@ -36,6 +36,7 @@ import {
 } from "three";
 
 import type { AssetChannelState } from "../assets/types";
+import { readWorldRenderBackend } from "../app-config/render-backend";
 import type { NormalizedViewportPoint } from "./model";
 import type {
 	CellDebugOverlay,
@@ -478,6 +479,13 @@ export function createWorldDisplayRenderer(
 	host: HTMLDivElement,
 	options: WorldDisplayRendererOptions,
 ): WorldDisplayRenderer {
+	const rendererBackend = readWorldRenderBackend();
+	if (rendererBackend !== "three") {
+		throw new Error(
+			`Renderer backend "${rendererBackend}" is recognized but is not wired yet. Phase 0 only supports the existing "three" backend.`,
+		);
+	}
+
 	let assetState = options.assetState;
 	let terrainScene = options.terrainScene;
 	let staticRenderableScene = options.staticRenderableScene;
@@ -573,7 +581,8 @@ export function createWorldDisplayRenderer(
 	const staticRenderableGroupPartSignatures = new Map<string, string>();
 	const staticRenderableBatchCandidates = createRenderBatchCandidateRegistry();
 	const terrainBatchCandidates = createRenderBatchCandidateRegistry();
-	const structuredInteriorBatchCandidates = createRenderBatchCandidateRegistry();
+	const structuredInteriorBatchCandidates =
+		createRenderBatchCandidateRegistry();
 	const debugOverlayBatchCandidates = createRenderBatchCandidateRegistry();
 	const portalMaskBatchCandidates = createRenderBatchCandidateRegistry();
 	const structuredInteriorMeshes = new Map<string, Mesh>();
@@ -1111,7 +1120,9 @@ export function createWorldDisplayRenderer(
 				countFallbackIncludedBatches(
 					latestStructuredInteriorBatchCandidateSelection,
 				) +
-				countFallbackIncludedBatches(latestDebugOverlayBatchCandidateSelection) +
+				countFallbackIncludedBatches(
+					latestDebugOverlayBatchCandidateSelection,
+				) +
 				countFallbackIncludedBatches(latestPortalMaskBatchCandidateSelection),
 			portalCompositeVisibleItemKeyCount:
 				latestPortalCompositeVisibleItemKeyCount,
@@ -1346,7 +1357,8 @@ export function createWorldDisplayRenderer(
 		maskMesh: Mesh,
 	): boolean {
 		const batchId =
-			readNonInstancedBatchId(maskMesh) ?? transitionPortalMaskBatchId(candidateId);
+			readNonInstancedBatchId(maskMesh) ??
+			transitionPortalMaskBatchId(candidateId);
 		const registeredObject = portalMaskBatchCandidates.getObject(batchId);
 		return (
 			registeredObject !== maskMesh ||
@@ -1412,7 +1424,11 @@ export function createWorldDisplayRenderer(
 			node.transition.stencilRef,
 		);
 		try {
-			renderPortalCompositeScene(node.transition.compositeScene, node.layer, batch);
+			renderPortalCompositeScene(
+				node.transition.compositeScene,
+				node.layer,
+				batch,
+			);
 		} finally {
 			clearPortalCompositeStencil(node.transition.compositeScene);
 		}
@@ -1965,7 +1981,8 @@ export function createWorldDisplayRenderer(
 	): void {
 		for (const [groupKey, mesh] of staticRenderableGroupMeshes.entries()) {
 			const batchId = staticRenderableBatchId(groupKey);
-			const registeredObject = staticRenderableBatchCandidates.getObject(batchId);
+			const registeredObject =
+				staticRenderableBatchCandidates.getObject(batchId);
 			mesh.visible =
 				registeredObject !== mesh || candidateBatchIds.has(batchId);
 		}
@@ -3665,6 +3682,7 @@ function createRenderDebugMetrics(
 	renderer: WebGLRenderer,
 	options: Omit<
 		WorldRenderDebugMetrics,
+		| "rendererBackend"
 		| "canvasWidth"
 		| "canvasHeight"
 		| "pixelRatio"
@@ -3675,6 +3693,7 @@ function createRenderDebugMetrics(
 	>,
 ): WorldRenderDebugMetrics {
 	return {
+		rendererBackend: "three",
 		canvasWidth: renderer.domElement.width,
 		canvasHeight: renderer.domElement.height,
 		pixelRatio: renderer.getPixelRatio(),

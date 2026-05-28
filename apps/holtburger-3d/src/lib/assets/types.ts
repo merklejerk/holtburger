@@ -193,14 +193,14 @@ export interface PreparedLandblockOutdoorPayload extends PreparedAssetPayloadBas
 	diagnostics: PreparedContentSourceDiagnostics;
 }
 
-export interface PreparedEnvCellResidencyBvhItem {
+interface PreparedEnvCellResidencyBvhItem {
 	envCellId: number;
 	memberId: string;
 	assetId: string;
 	source: "building-portal-link" | "env-cell-placement" | "derived";
 }
 
-export interface PreparedEnvCellResidencyBvh {
+interface PreparedEnvCellResidencyBvh {
 	coordinateSpace: "landblock-topology-residency";
 	nodes: PreparedLandblockBvhNode[];
 	items: PreparedEnvCellResidencyBvhItem[];
@@ -436,7 +436,7 @@ interface PreparedEnvCellPortal {
 	isOutsideTransition: boolean;
 }
 
-export interface PreparedEnvCellStaticMember {
+interface PreparedEnvCellStaticMember {
 	instanceId: string;
 	sourceDid: number;
 	sourceAssetId: string;
@@ -456,7 +456,7 @@ export type PreparedEnvCellBvhItem =
 	| { kind: "static"; instanceId: string }
 	| { kind: "portal"; portalId: string };
 
-export interface PreparedEnvCellBvh {
+interface PreparedEnvCellBvh {
 	coordinateSpace: "env-cell-local";
 	nodes: PreparedLandblockBvhNode[];
 	items: PreparedEnvCellBvhItem[];

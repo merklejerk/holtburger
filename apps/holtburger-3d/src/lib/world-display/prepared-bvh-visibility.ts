@@ -27,7 +27,7 @@ export type RenderBvhItemKey =
 	| `env-portal:cell:${string}:portal:${string}`
 	| `residency-cell:cell:${string}`;
 
-export interface PreparedBvhQueryCounters {
+interface PreparedBvhQueryCounters {
 	nodesVisited: number;
 	nodesIntersected: number;
 	itemIndicesVisited: number;
@@ -41,7 +41,7 @@ export interface PreparedBvhVisibilityResult {
 	fallbackReasons: readonly string[];
 }
 
-export interface EnvCellResidencyVisibilityResult extends PreparedBvhVisibilityResult {
+interface EnvCellResidencyVisibilityResult extends PreparedBvhVisibilityResult {
 	visibleEnvCellIds: ReadonlySet<number>;
 }
 
@@ -138,7 +138,7 @@ export function queryOutdoorBvhVisibility(options: {
 	});
 }
 
-export function queryEnvCellResidencyBvhVisibility(options: {
+function queryEnvCellResidencyBvhVisibility(options: {
 	topology: PreparedLandblockTopologyPayload;
 	frustum: RenderFrustum;
 	chunkOffset: RenderVec3;
@@ -325,7 +325,6 @@ function translatePreparedBoundsByOffset(
 ): (bounds: PreparedBounds) => RenderBounds {
 	return (bounds) => translateRenderBounds(bounds, offset);
 }
-
 
 function createEmptyCounters(): PreparedBvhQueryCounters {
 	return {

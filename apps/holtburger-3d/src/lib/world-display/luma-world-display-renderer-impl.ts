@@ -530,6 +530,7 @@ export function createLumaWorldDisplayRendererImplementation(
 			terrainScene,
 			staticRenderableScene,
 			structuredInteriorScene,
+			transitionPortalModel,
 			renderChunkTransforms,
 		});
 	}

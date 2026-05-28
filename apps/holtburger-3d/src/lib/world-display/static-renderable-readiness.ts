@@ -14,6 +14,10 @@ export type StaticRenderableReadinessStatus =
 	| "fallback-resolved"
 	| "failed";
 
+export type StaticRenderableReadinessCommitPolicy =
+	| "resolved-only"
+	| "allow-fallback";
+
 type StaticRenderableDependencyClass =
 	| "source"
 	| "setup-appearance"
@@ -51,16 +55,26 @@ const READINESS_REASON_SAMPLE_LIMIT = 12;
 
 export function deriveStaticRenderableReadinessModel({
 	assetState,
+	commitPolicy = "resolved-only",
 	scene,
 }: {
 	assetState: AssetChannelState;
+	commitPolicy?: StaticRenderableReadinessCommitPolicy;
 	scene: StaticRenderableSceneModel;
 }): StaticRenderableReadinessModel {
 	const records: StaticRenderableReadinessRecord[] = [
 		...deriveMissingDependencyRecords(scene),
-		...scene.parts.map((part) => derivePartReadinessRecord(assetState, part)),
+		...scene.parts.map((part) =>
+			derivePartReadinessRecord(assetState, commitPolicy, part),
+		),
 	];
-	const committedRecords = records.filter((record) => record.committed);
+	const committedObjectKeys = deriveCommittedObjectKeys(scene.parts, records);
+	const committedRecords = records.filter(
+		(record) =>
+			record.committed &&
+			record.part !== null &&
+			committedObjectKeys.has(staticRenderableObjectKey(record.part)),
+	);
 	const committedPartKeys = new Set(
 		committedRecords
 			.map((record) => record.part?.renderKey)
@@ -77,6 +91,47 @@ export function deriveStaticRenderableReadinessModel({
 		committedScene,
 		metrics: deriveReadinessMetrics(records, committedScene.parts.length),
 	};
+}
+
+function deriveCommittedObjectKeys(
+	parts: readonly StaticRenderablePart[],
+	records: readonly StaticRenderableReadinessRecord[],
+): Set<string> {
+	const partsByObjectKey = new Map<string, StaticRenderablePart[]>();
+	for (const part of parts) {
+		const objectKey = staticRenderableObjectKey(part);
+		const objectParts = partsByObjectKey.get(objectKey);
+		if (objectParts) {
+			objectParts.push(part);
+		} else {
+			partsByObjectKey.set(objectKey, [part]);
+		}
+	}
+
+	const committedPartKeys = new Set(
+		records
+			.filter((record) => record.committed)
+			.map((record) => record.part?.renderKey)
+			.filter((renderKey): renderKey is string => renderKey !== undefined),
+	);
+	const committedObjectKeys = new Set<string>();
+	for (const [objectKey, objectParts] of partsByObjectKey) {
+		if (objectParts.every((part) => committedPartKeys.has(part.renderKey))) {
+			committedObjectKeys.add(objectKey);
+		}
+	}
+	return committedObjectKeys;
+}
+
+function staticRenderableObjectKey(part: StaticRenderablePart): string {
+	return [
+		part.renderDomain,
+		part.instanceId,
+		part.sourceAssetId,
+		part.owningLandblockId,
+		part.owningEnvCellId ?? "outdoor",
+		part.renderChunk.chunkKey,
+	].join("|");
 }
 
 function deriveMissingDependencyRecords(
@@ -113,6 +168,7 @@ function deriveMissingDependencyRecords(
 
 function derivePartReadinessRecord(
 	assetState: AssetChannelState,
+	commitPolicy: StaticRenderableReadinessCommitPolicy,
 	part: StaticRenderablePart,
 ): StaticRenderableReadinessRecord {
 	const gfxAsset = assetState.preparedByAssetId[part.gfxObjAssetId];
@@ -120,6 +176,7 @@ function derivePartReadinessRecord(
 		return createPartRecord({
 			status: "pending",
 			dependencyClass: "gfx-geometry",
+			commitPolicy,
 			part,
 			assetId: part.gfxObjAssetId,
 			reason: "gfx geometry asset is not prepared",
@@ -133,6 +190,7 @@ function derivePartReadinessRecord(
 		return createPartRecord({
 			status: "failed",
 			dependencyClass: "gfx-geometry",
+			commitPolicy,
 			part,
 			assetId: part.gfxObjAssetId,
 			reason: "gfx geometry has no renderable triangles",
@@ -144,6 +202,7 @@ function derivePartReadinessRecord(
 		return createPartRecord({
 			status: "fallback-resolved",
 			dependencyClass: materialFallbackReason.dependencyClass,
+			commitPolicy,
 			part,
 			assetId: materialFallbackReason.assetId,
 			reason: materialFallbackReason.reason,
@@ -153,6 +212,7 @@ function derivePartReadinessRecord(
 	return createPartRecord({
 		status: "resolved",
 		dependencyClass: "gfx-geometry",
+		commitPolicy,
 		part,
 		assetId: part.gfxObjAssetId,
 		reason: "all current static renderable dependencies are prepared",
@@ -222,12 +282,14 @@ function createDependencyRecord({
 function createPartRecord({
 	status,
 	dependencyClass,
+	commitPolicy,
 	part,
 	assetId,
 	reason,
 }: {
 	status: StaticRenderableReadinessStatus;
 	dependencyClass: StaticRenderableDependencyClass;
+	commitPolicy: StaticRenderableReadinessCommitPolicy;
 	part: StaticRenderablePart;
 	assetId: string;
 	reason: string;
@@ -239,8 +301,18 @@ function createPartRecord({
 		part,
 		assetId,
 		reason,
-		committed: status === "resolved" || status === "fallback-resolved",
+		committed: isCommittedStatus(status, commitPolicy),
 	};
+}
+
+function isCommittedStatus(
+	status: StaticRenderableReadinessStatus,
+	commitPolicy: StaticRenderableReadinessCommitPolicy,
+): boolean {
+	return (
+		status === "resolved" ||
+		(commitPolicy === "allow-fallback" && status === "fallback-resolved")
+	);
 }
 
 function filterStaticRenderableSceneParts(

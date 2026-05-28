@@ -18,6 +18,7 @@ import type {
 	StaticRenderableSceneModel,
 } from "./static-renderables";
 import type { TerrainSceneModel, TerrainSceneTile } from "./terrain-scene";
+import type { TransitionPortalCandidateModel } from "./transition-portal-work-items";
 
 describe("syncLumaWorldResources", () => {
 	it("uploads indexed geometry and reuses unchanged batch resources", () => {
@@ -36,6 +37,7 @@ describe("syncLumaWorldResources", () => {
 			terrainScene: firstTerrainScene,
 			staticRenderableScene: createStaticRenderableScene(),
 			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
 			renderChunkTransforms: transforms,
 		});
 
@@ -60,6 +62,7 @@ describe("syncLumaWorldResources", () => {
 			terrainScene: firstTerrainScene,
 			staticRenderableScene: createStaticRenderableScene(),
 			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
 			renderChunkTransforms: [createChunkTransform({ x: 30, y: 0, z: 40 })],
 		});
 
@@ -84,6 +87,7 @@ describe("syncLumaWorldResources", () => {
 			}),
 			staticRenderableScene: createStaticRenderableScene(),
 			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
 			renderChunkTransforms: transforms,
 		});
 
@@ -98,6 +102,7 @@ describe("syncLumaWorldResources", () => {
 			terrainScene: createTerrainScene({ tiles: [] }),
 			staticRenderableScene: createStaticRenderableScene(),
 			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
 			renderChunkTransforms: transforms,
 		});
 
@@ -124,6 +129,7 @@ describe("syncLumaWorldResources", () => {
 				parts: [part],
 			}),
 			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
 			renderChunkTransforms: [createChunkTransform({ x: 10, y: 20, z: 30 })],
 		});
 
@@ -256,6 +262,22 @@ function createStructuredInteriorScene() {
 		missingCellStructureKeys: [],
 		statusText: "test interiors",
 		cacheText: "test cache",
+	};
+}
+
+function createTransitionPortalModel(): TransitionPortalCandidateModel {
+	return {
+		candidates: [],
+		diagnostics: {
+			loadedEnvCellPortalFactCount: 0,
+			topologyPortalCount: 0,
+			linkedTopologyPortalCount: 0,
+			apertureCandidateCount: 0,
+			workItemCandidateCount: 0,
+			skippedMissingApertureCount: 0,
+			skippedMissingPolygonCount: 0,
+			truncatedInteriorGroupCount: 0,
+		},
 	};
 }
 

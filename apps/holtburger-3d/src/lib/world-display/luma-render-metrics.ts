@@ -25,6 +25,8 @@ export interface LumaRenderMetricsInput {
 	initializationError: string | null;
 	terrainBatchCount?: number;
 	structuredInteriorBatchCount?: number;
+	staticBatchCount?: number;
+	staticInstanceCount?: number;
 	worldTriangleCount?: number;
 	textureFilteringMode: WorldDisplayTextureFilteringMode;
 	textureColorSpaceMode: WorldDisplayTextureColorSpaceMode;
@@ -80,9 +82,9 @@ export function createLumaRenderMetrics(
 			portalApertureMeshCount: 0,
 			terrainMeshCount: input.terrainBatchCount ?? 0,
 			visibleTerrainMeshCount: input.terrainBatchCount ?? 0,
-			staticGroupMeshCount: 0,
-			visibleStaticGroupMeshCount: 0,
-			staticRenderBatchCount: 0,
+			staticGroupMeshCount: input.staticBatchCount ?? 0,
+			visibleStaticGroupMeshCount: input.staticBatchCount ?? 0,
+			staticRenderBatchCount: input.staticBatchCount ?? 0,
 			staticBvhCandidateBatchCount: 0,
 			staticBvhRepresentedInstanceKeyCount: 0,
 			staticBvhVisibleInstanceKeyCount: 0,
@@ -111,7 +113,7 @@ export function createLumaRenderMetrics(
 			outdoorStaticBvhTotalItemCount: 0,
 			envCellLocalBvhVisibleItemCount: 0,
 			envCellLocalBvhTotalItemCount: 0,
-			visibleStaticInstanceKeyCount: 0,
+			visibleStaticInstanceKeyCount: input.staticInstanceCount ?? 0,
 			visiblePortalKeyCount: 0,
 			envCellBvhConsideredCount: 0,
 			fallbackReasonCount: input.initializationError ? 1 : 0,
@@ -137,8 +139,8 @@ export function createLumaRenderMetrics(
 			textureResourceCount: 0,
 			indexedTextureResourceCount: 0,
 			paletteResourceCount: 0,
-			staticGeometryGroupCount: 0,
-			staticVisibleGeometryGroupCount: 0,
+			staticGeometryGroupCount: input.staticBatchCount ?? 0,
+			staticVisibleGeometryGroupCount: input.staticBatchCount ?? 0,
 			structuredInteriorGeometryGroupCount: 0,
 			materialTypeCounts: {},
 			materialProgramKeySamples: [],

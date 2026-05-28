@@ -1,12 +1,22 @@
 import { Buffer as LumaBuffer, type Device } from "@luma.gl/core";
 import { describe, expect, it } from "vitest";
 
-import type { PreparedTerrainMesh } from "../assets/types";
+import {
+	createInitialAssetChannelState,
+	type AssetChannelState,
+	type PreparedTerrainMesh,
+} from "../assets/types";
+import { createBaseMaterialAppearanceContext } from "./material-appearance";
+import { WORLD_RENDER_DOMAIN } from "./render-domains";
 import {
 	createLumaWorldResourceStore,
 	syncLumaWorldResources,
 } from "./luma-resources";
 import type { RenderChunkTransform } from "./render-anchor";
+import type {
+	StaticRenderablePart,
+	StaticRenderableSceneModel,
+} from "./static-renderables";
 import type { TerrainSceneModel, TerrainSceneTile } from "./terrain-scene";
 
 describe("syncLumaWorldResources", () => {
@@ -22,7 +32,9 @@ describe("syncLumaWorldResources", () => {
 		syncLumaWorldResources({
 			device: device.asDevice(),
 			store,
+			assetState: createAssetState(),
 			terrainScene: firstTerrainScene,
+			staticRenderableScene: createStaticRenderableScene(),
 			structuredInteriorScene: createStructuredInteriorScene(),
 			renderChunkTransforms: transforms,
 		});
@@ -44,7 +56,9 @@ describe("syncLumaWorldResources", () => {
 		syncLumaWorldResources({
 			device: device.asDevice(),
 			store,
+			assetState: createAssetState(),
 			terrainScene: firstTerrainScene,
+			staticRenderableScene: createStaticRenderableScene(),
 			structuredInteriorScene: createStructuredInteriorScene(),
 			renderChunkTransforms: [createChunkTransform({ x: 30, y: 0, z: 40 })],
 		});
@@ -53,17 +67,22 @@ describe("syncLumaWorldResources", () => {
 		expect(reusedBatch?.vertexBuffer).toBe(firstVertexBuffer);
 		expect(reusedBatch?.indexBuffer).toBe(firstIndexBuffer);
 		expect(reusedBatch?.vertexArray).toBe(firstVertexArray);
-		expect(reusedBatch?.modelMatrix[12]).toBe(30);
-		expect(reusedBatch?.modelMatrix[14]).toBe(40);
+		expect(reusedBatch?.drawMode).toBe("indexed");
+		if (reusedBatch?.drawMode === "indexed") {
+			expect(reusedBatch.modelMatrix[12]).toBe(30);
+			expect(reusedBatch.modelMatrix[14]).toBe(40);
+		}
 		expect(device.createdBuffers).toHaveLength(2);
 
 		syncLumaWorldResources({
 			device: device.asDevice(),
 			store,
+			assetState: createAssetState(),
 			terrainScene: createTerrainScene({
 				assetId: "terrain-a",
 				mesh: createQuadTerrainMesh({ height: 5 }),
 			}),
+			staticRenderableScene: createStaticRenderableScene(),
 			structuredInteriorScene: createStructuredInteriorScene(),
 			renderChunkTransforms: transforms,
 		});
@@ -75,13 +94,56 @@ describe("syncLumaWorldResources", () => {
 		syncLumaWorldResources({
 			device: device.asDevice(),
 			store,
+			assetState: createAssetState(),
 			terrainScene: createTerrainScene({ tiles: [] }),
+			staticRenderableScene: createStaticRenderableScene(),
 			structuredInteriorScene: createStructuredInteriorScene(),
 			renderChunkTransforms: transforms,
 		});
 
 		expect(store.batches).toEqual([]);
 		expect(store.batchesById.size).toBe(0);
+	});
+
+	it("uploads instanced static geometry with chunk-relative instance matrices", () => {
+		const device = new FakeDevice();
+		const store = createLumaWorldResourceStore();
+		const part = createStaticPart({
+			groupKey: "static/group-a",
+			instanceId: "instance-a",
+			chunkLocalPosition: { x: 1, y: 2, z: 3 },
+		});
+
+		syncLumaWorldResources({
+			device: device.asDevice(),
+			store,
+			assetState: createAssetState(),
+			terrainScene: createTerrainScene({ tiles: [] }),
+			staticRenderableScene: createStaticRenderableScene({
+				groupKey: "static/group-a",
+				parts: [part],
+			}),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			renderChunkTransforms: [createChunkTransform({ x: 10, y: 20, z: 30 })],
+		});
+
+		const batch = store.batches[0];
+		expect(batch?.drawMode).toBe("instanced");
+		if (batch?.drawMode !== "instanced") {
+			throw new Error("expected an instanced static batch");
+		}
+		const instanceBuffer = toFakeBuffer(batch.instanceBuffer);
+		expect(batch.kind).toBe("static");
+		expect(batch.instanceCount).toBe(1);
+		expect(batch.vertexCount).toBe(3);
+		expect(store.staticBatchCount).toBe(1);
+		expect(store.staticInstanceCount).toBe(1);
+		expect(instanceBuffer?.data).toHaveLength(16);
+		expect(batch.vertexArray.buffers.get(1)).toBe(batch.instanceBuffer);
+		expect(batch.vertexArray.buffers.get(4)).toBe(batch.instanceBuffer);
+		expect(instanceBuffer?.data[12]).toBe(11);
+		expect(instanceBuffer?.data[13]).toBe(23);
+		expect(instanceBuffer?.data[14]).toBe(28);
 	});
 });
 
@@ -194,6 +256,96 @@ function createStructuredInteriorScene() {
 		missingCellStructureKeys: [],
 		statusText: "test interiors",
 		cacheText: "test cache",
+	};
+}
+
+function createStaticRenderableScene({
+	groupKey,
+	parts = [],
+}: {
+	groupKey?: string;
+	parts?: StaticRenderablePart[];
+} = {}): StaticRenderableSceneModel {
+	return {
+		focusLandblockId: null,
+		activeLandblockIds: [],
+		sourceInstances: [],
+		parts,
+		partsByRenderGroupKey: groupKey
+			? new Map([[groupKey, parts]])
+			: new Map(),
+		missingSourceAssetIds: [],
+		missingGfxAssetIds: [],
+		missingSetupAppearanceAssetIds: [],
+	};
+}
+
+function createAssetState(): AssetChannelState {
+	const state = createInitialAssetChannelState();
+	state.preparedByAssetId["gfx-obj/01000001"] = {
+		payload: {
+			kind: "gfx-obj",
+			renderGeometry: {
+				sourceId: 1,
+				vertexCount: 3,
+				triangleCount: 1,
+				positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+				normals: [],
+				uvs: [],
+				triangles: [{ polygonId: 0, surfaceId: null, firstVertex: 0 }],
+				surfaceIds: [],
+				bounds: null,
+			},
+		},
+	} as AssetChannelState["preparedAsset"];
+	return state;
+}
+
+function createStaticPart({
+	groupKey,
+	instanceId,
+	chunkLocalPosition,
+}: {
+	groupKey: string;
+	instanceId: string;
+	chunkLocalPosition: { x: number; y: number; z: number };
+}): StaticRenderablePart {
+	return {
+		renderKey: groupKey,
+		renderDomain: WORLD_RENDER_DOMAIN.exteriorStatic,
+		instanceId,
+		sourceAssetId: "gfx-obj/01000001",
+		sourceDid: 0x01000001,
+		owningLandblockId: 0x12340000,
+		regionNumber: 1,
+		owningEnvCellId: null,
+		renderChunk: {
+			chunkKey: "landblock/12340000",
+			chunkLandblockId: 0x12340000,
+		},
+		kind: "scenery",
+		partIndex: 0,
+		gfxObjId: 0x01000001,
+		gfxObjAssetId: "gfx-obj/01000001",
+		materialAppearanceContext: createBaseMaterialAppearanceContext("base"),
+		materialSlots: [],
+		materialSignature: "base",
+		parentPlacements: [],
+		chunkLocalInstancePlacement: createPlacement(chunkLocalPosition),
+		partPlacements: [],
+		scale: { x: 1, y: 1, z: 1 },
+		debugColorKey: instanceId,
+		textureVelocity: null,
+		textureVelocitySignature: "uv:none",
+		detailRoleKind: "scenery",
+		detailSignature: "detail:none",
+	};
+}
+
+function createPlacement(origin: { x: number; y: number; z: number }) {
+	return {
+		origin,
+		orientation: { w: 1, x: 0, y: 0, z: 0 },
 	};
 }
 

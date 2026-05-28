@@ -7,6 +7,7 @@ import type { Vec3Dto } from "../host/contracts";
 
 export interface LumaIndexedGeometry {
 	positions: Float32Array;
+	uvs: Float32Array | null;
 	indices: Uint16Array | Uint32Array;
 	vertexCount: number;
 	triangleCount: number;
@@ -37,6 +38,7 @@ export function buildLumaTerrainGeometry(
 
 	return {
 		positions,
+		uvs: null,
 		indices,
 		vertexCount: mesh.vertices.length,
 		triangleCount: mesh.triangles.length,
@@ -45,25 +47,43 @@ export function buildLumaTerrainGeometry(
 
 export function buildLumaPolygonSetGeometry(
 	renderGeometry: PreparedPolygonSetRenderGeometry,
+	options: {
+		surfaceId?: number | null;
+		materialVariantSignature?: string | null;
+	} = {},
 ): LumaIndexedGeometry {
-	const positions = toFloat32Array(renderGeometry.positions);
-	const indices = createIndexArray(
-		renderGeometry.vertexCount,
-		renderGeometry.triangles.length * 3,
+	const sourcePositions = toFloat32Array(renderGeometry.positions);
+	const sourceUvs = toFloat32Array(renderGeometry.uvs);
+	const triangles = renderGeometry.triangles.filter(
+		(triangle) =>
+			(options.surfaceId === undefined ||
+				triangle.surfaceId === options.surfaceId) &&
+			(options.materialVariantSignature === undefined ||
+				(triangle.materialVariantSignature ?? null) ===
+					options.materialVariantSignature),
 	);
+	const vertexCount = triangles.length * 3;
+	const positions = new Float32Array(vertexCount * 3);
+	const uvs = new Float32Array(vertexCount * 2);
+	const indices = createIndexArray(vertexCount, triangles.length * 3);
 
-	for (const [triangleIndex, triangle] of renderGeometry.triangles.entries()) {
+	for (const [triangleIndex, triangle] of triangles.entries()) {
 		const firstIndex = triangleIndex * 3;
-		indices[firstIndex] = triangle.firstVertex;
-		indices[firstIndex + 1] = triangle.firstVertex + 1;
-		indices[firstIndex + 2] = triangle.firstVertex + 2;
+		for (let triangleVertex = 0; triangleVertex < 3; triangleVertex += 1) {
+			const sourceVertexIndex = triangle.firstVertex + triangleVertex;
+			const targetVertexIndex = firstIndex + triangleVertex;
+			copyVec3(positions, targetVertexIndex, sourcePositions, sourceVertexIndex);
+			copyVec2(uvs, targetVertexIndex, sourceUvs, sourceVertexIndex);
+			indices[targetVertexIndex] = targetVertexIndex;
+		}
 	}
 
 	return {
 		positions,
+		uvs,
 		indices,
-		vertexCount: renderGeometry.vertexCount,
-		triangleCount: renderGeometry.triangles.length,
+		vertexCount,
+		triangleCount: triangles.length,
 	};
 }
 
@@ -87,6 +107,7 @@ export function buildLumaPortalApertureGeometry(
 
 	return {
 		positions,
+		uvs: null,
 		indices,
 		vertexCount: points.length,
 		triangleCount,
@@ -98,6 +119,31 @@ function writeVec3(target: Float32Array, vertexIndex: number, vertex: Vec3Dto) {
 	target[offset] = vertex.x;
 	target[offset + 1] = vertex.y;
 	target[offset + 2] = vertex.z;
+}
+
+function copyVec3(
+	target: Float32Array,
+	targetVertexIndex: number,
+	source: Float32Array,
+	sourceVertexIndex: number,
+): void {
+	const targetOffset = targetVertexIndex * 3;
+	const sourceOffset = sourceVertexIndex * 3;
+	target[targetOffset] = source[sourceOffset] ?? 0;
+	target[targetOffset + 1] = source[sourceOffset + 1] ?? 0;
+	target[targetOffset + 2] = source[sourceOffset + 2] ?? 0;
+}
+
+function copyVec2(
+	target: Float32Array,
+	targetVertexIndex: number,
+	source: Float32Array,
+	sourceVertexIndex: number,
+): void {
+	const targetOffset = targetVertexIndex * 2;
+	const sourceOffset = sourceVertexIndex * 2;
+	target[targetOffset] = source[sourceOffset] ?? 0;
+	target[targetOffset + 1] = source[sourceOffset + 1] ?? 0;
 }
 
 function createIndexArray(

@@ -4,6 +4,7 @@ import {
 	type Buffer,
 	type BufferLayout,
 	type Device,
+	type RenderPipelineParameters,
 	type RenderPipeline,
 	type Shader,
 	type ShaderLayout,
@@ -20,7 +21,10 @@ import {
 	destroyLumaWorldResources,
 	LUMA_WORLD_BUFFER_LAYOUT,
 	LUMA_WORLD_SHADER_LAYOUT,
+	LUMA_TEXTURED_WORLD_BUFFER_LAYOUT,
+	LUMA_TEXTURED_WORLD_SHADER_LAYOUT,
 	syncLumaWorldResources,
+	type LumaWorldDrawBatch,
 	type LumaWorldResourceStore,
 } from "./luma-resources";
 import type {
@@ -76,6 +80,20 @@ void main() {
 }
 `;
 
+const TEXTURED_WORLD_VERTEX_SHADER = `#version 300 es
+in vec3 position;
+in vec2 texCoord;
+
+uniform mat4 uModelViewProjection;
+
+out vec2 vTexCoord;
+
+void main() {
+	vTexCoord = texCoord;
+	gl_Position = uModelViewProjection * vec4(position, 1.0);
+}
+`;
+
 const WORLD_FRAGMENT_SHADER = `#version 300 es
 precision highp float;
 
@@ -85,6 +103,27 @@ out vec4 fragColor;
 
 void main() {
 	fragColor = uColor;
+}
+`;
+
+const TEXTURED_WORLD_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+
+uniform vec4 uColor;
+uniform float uAlphaTest;
+uniform sampler2D uTexture;
+
+in vec2 vTexCoord;
+
+out vec4 fragColor;
+
+void main() {
+	vec4 sampled = texture(uTexture, vTexCoord);
+	vec4 color = sampled * uColor;
+	if (color.a < uAlphaTest) {
+		discard;
+	}
+	fragColor = color;
 }
 `;
 
@@ -98,6 +137,9 @@ interface LumaRenderResources {
 	worldVertexShader: Shader;
 	worldFragmentShader: Shader;
 	worldPipeline: RenderPipeline;
+	texturedWorldVertexShader: Shader;
+	texturedWorldFragmentShader: Shader;
+	texturedWorldPipeline: RenderPipeline;
 	worldStore: LumaWorldResourceStore;
 }
 
@@ -319,6 +361,31 @@ export function createLumaWorldDisplayRendererImplementation(
 					depthCompare: "less-equal",
 				},
 			});
+			const texturedWorldVertexShader = device.createShader({
+				id: "luma-textured-world-vertex-shader",
+				language: "glsl",
+				stage: "vertex",
+				source: TEXTURED_WORLD_VERTEX_SHADER,
+			});
+			const texturedWorldFragmentShader = device.createShader({
+				id: "luma-textured-world-fragment-shader",
+				language: "glsl",
+				stage: "fragment",
+				source: TEXTURED_WORLD_FRAGMENT_SHADER,
+			});
+			const texturedWorldPipeline = device.createRenderPipeline({
+				id: "luma-world-direct-texture-pipeline",
+				vs: texturedWorldVertexShader,
+				fs: texturedWorldFragmentShader,
+				shaderLayout: LUMA_TEXTURED_WORLD_SHADER_LAYOUT,
+				bufferLayout: LUMA_TEXTURED_WORLD_BUFFER_LAYOUT,
+				topology: "triangle-list",
+				parameters: {
+					cullMode: "none",
+					depthWriteEnabled: true,
+					depthCompare: "less-equal",
+				},
+			});
 			const worldStore = createLumaWorldResourceStore();
 
 			resources = {
@@ -331,6 +398,9 @@ export function createLumaWorldDisplayRendererImplementation(
 				worldVertexShader,
 				worldFragmentShader,
 				worldPipeline,
+				texturedWorldVertexShader,
+				texturedWorldFragmentShader,
+				texturedWorldPipeline,
 				worldStore,
 			};
 			syncCanvasSize();
@@ -390,16 +460,26 @@ export function createLumaWorldDisplayRendererImplementation(
 				if (!batch) {
 					throw new Error(`Luma frame referenced missing batch ${draw.batchId}.`);
 				}
-				const didDraw = resources.worldPipeline.draw({
+				const pipeline =
+					batch.material.kind === "direct-texture"
+						? resources.texturedWorldPipeline
+						: resources.worldPipeline;
+				const didDraw = pipeline.draw({
 					renderPass,
 					vertexArray: batch.vertexArray,
 					vertexCount: batch.vertexCount,
+					bindings: batch.bindings,
+					parameters: createLumaMaterialParameters(batch),
 					uniforms: {
 						uModelViewProjection: multiplyMat4(
 							frame.viewProjectionMatrix,
 							batch.modelMatrix,
 						),
 						uColor: batch.color,
+						uAlphaTest:
+							batch.material.kind === "direct-texture"
+								? batch.material.behavior.alphaTest
+								: 0,
 					},
 				});
 				if (didDraw) {
@@ -445,6 +525,9 @@ export function createLumaWorldDisplayRendererImplementation(
 			resources.worldPipeline.destroy();
 			resources.worldVertexShader.destroy();
 			resources.worldFragmentShader.destroy();
+			resources.texturedWorldPipeline.destroy();
+			resources.texturedWorldVertexShader.destroy();
+			resources.texturedWorldFragmentShader.destroy();
 			resources.device.destroy();
 		}
 		resources = null;
@@ -528,6 +611,14 @@ export function createLumaWorldDisplayRendererImplementation(
 				resources?.worldStore.structuredInteriorBatchCount ?? 0,
 			staticBatchCount: resources?.worldStore.staticBatchCount ?? 0,
 			staticInstanceCount: resources?.worldStore.staticInstanceCount ?? 0,
+			materialCount: resources?.worldStore.materialCount ?? 0,
+			directTextureBatchCount: resources?.worldStore.directTextureBatchCount ?? 0,
+			textureResourceCount:
+				resources?.worldStore.textureStore.texturesByKey.size ?? 0,
+			materialFallbackReasonCount:
+				resources?.worldStore.materialFallbackReasonCount ?? 0,
+			materialFallbackReasonSamples:
+				resources?.worldStore.materialFallbackReasonSamples ?? [],
 			lumaFrameMetrics: latestFrameMetrics,
 			worldTriangleCount: resources?.worldStore.triangleCount ?? 0,
 			textureFilteringMode: options.textureFilteringMode ?? "anisotropic-4x",
@@ -535,4 +626,29 @@ export function createLumaWorldDisplayRendererImplementation(
 			detailTexturesEnabled: options.detailTexturesEnabled ?? true,
 		});
 	}
+}
+
+function createLumaMaterialParameters(
+	batch: LumaWorldDrawBatch,
+): RenderPipelineParameters {
+	if (batch.material.kind !== "direct-texture") {
+		return {
+			cullMode: "none" as const,
+			depthWriteEnabled: true,
+			depthCompare: "less-equal" as const,
+		};
+	}
+	const material = batch.material;
+	return {
+		cullMode: "none" as const,
+		depthWriteEnabled: material.behavior.blend.depthWrite,
+		depthCompare: "less-equal" as const,
+		blend: material.behavior.blend.enabled,
+		blendColorOperation: "add" as const,
+		blendAlphaOperation: "add" as const,
+		blendColorSrcFactor: material.behavior.blend.srcFactor ?? "one",
+		blendColorDstFactor: material.behavior.blend.dstFactor ?? "zero",
+		blendAlphaSrcFactor: material.behavior.blend.srcFactor ?? "one",
+		blendAlphaDstFactor: material.behavior.blend.dstFactor ?? "zero",
+	};
 }

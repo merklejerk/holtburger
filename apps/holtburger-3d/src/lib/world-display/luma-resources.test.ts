@@ -110,7 +110,7 @@ describe("syncLumaWorldResources", () => {
 		expect(store.batchesById.size).toBe(0);
 	});
 
-	it("uploads instanced static geometry with chunk-relative instance matrices", () => {
+	it("uploads baked chunk-local static geometry without instance buffers", () => {
 		const device = new FakeDevice();
 		const store = createLumaWorldResourceStore();
 		const part = createStaticPart({
@@ -118,6 +118,7 @@ describe("syncLumaWorldResources", () => {
 			instanceId: "instance-a",
 			chunkLocalPosition: { x: 1, y: 2, z: 3 },
 		});
+		const firstTransform = createChunkTransform({ x: 10, y: 20, z: 30 });
 
 		syncLumaWorldResources({
 			device: device.asDevice(),
@@ -130,26 +131,126 @@ describe("syncLumaWorldResources", () => {
 			}),
 			structuredInteriorScene: createStructuredInteriorScene(),
 			transitionPortalModel: createTransitionPortalModel(),
-			renderChunkTransforms: [createChunkTransform({ x: 10, y: 20, z: 30 })],
+			renderChunkTransforms: [firstTransform],
 		});
 
 		const batch = store.batches[0];
-		expect(batch?.drawMode).toBe("instanced");
-		if (batch?.drawMode !== "instanced") {
-			throw new Error("expected an instanced static batch");
+		expect(batch?.drawMode).toBe("indexed");
+		if (!batch) {
+			throw new Error("expected a baked static batch");
 		}
-		const instanceBuffer = toFakeBuffer(batch.instanceBuffer);
 		expect(batch.kind).toBe("static");
-		expect(batch.instanceCount).toBe(1);
 		expect(batch.vertexCount).toBe(3);
 		expect(store.staticBatchCount).toBe(1);
 		expect(store.staticInstanceCount).toBe(1);
-		expect(instanceBuffer?.data).toHaveLength(16);
-		expect(batch.vertexArray.buffers.get(1)).toBe(batch.instanceBuffer);
-		expect(batch.vertexArray.buffers.get(4)).toBe(batch.instanceBuffer);
-		expect(instanceBuffer?.data[12]).toBe(11);
-		expect(instanceBuffer?.data[13]).toBe(23);
-		expect(instanceBuffer?.data[14]).toBe(28);
+		expect(batch.vertexArray.buffers.get(1)).toBeUndefined();
+		expect(batch.modelMatrix[12]).toBe(10);
+		expect(batch.modelMatrix[13]).toBe(20);
+		expect(batch.modelMatrix[14]).toBe(30);
+		const vertexBuffer = toFakeBuffer(batch.vertexBuffer);
+		expect(vertexBuffer?.data).toBeInstanceOf(Float32Array);
+		const positions = vertexBuffer?.data as Float32Array | undefined;
+		expect(Array.from(positions?.slice(0, 3) ?? [])).toEqual([1, 3, -2]);
+
+		syncLumaWorldResources({
+			device: device.asDevice(),
+			store,
+			assetState: createAssetState(),
+			terrainScene: createTerrainScene({ tiles: [] }),
+			staticRenderableScene: createStaticRenderableScene({
+				groupKey: "static/group-a",
+				parts: [part],
+			}),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform({ x: 50, y: 60, z: 70 })],
+		});
+
+		const reusedBatch = store.batches[0];
+		expect(reusedBatch?.vertexBuffer).toBe(vertexBuffer);
+		expect(reusedBatch?.modelMatrix[12]).toBe(50);
+		expect(Array.from(positions?.slice(0, 3) ?? [])).toEqual([1, 3, -2]);
+	});
+
+	it("groups baked static geometry across gfx objects by chunk domain and render state", () => {
+		const device = new FakeDevice();
+		const store = createLumaWorldResourceStore();
+		const firstPart = createStaticPart({
+			groupKey: "static/first",
+			instanceId: "instance-a",
+			chunkLocalPosition: { x: 1, y: 2, z: 3 },
+		});
+		const secondPart = createStaticPart({
+			gfxObjAssetId: "gfx-obj/01000002",
+			gfxObjId: 0x01000002,
+			groupKey: "static/second",
+			instanceId: "instance-b",
+			chunkLocalPosition: { x: 4, y: 5, z: 6 },
+		});
+
+		syncLumaWorldResources({
+			device: device.asDevice(),
+			store,
+			assetState: createAssetState({
+				extraGfxObjAssetIds: ["gfx-obj/01000002"],
+			}),
+			terrainScene: createTerrainScene({ tiles: [] }),
+			staticRenderableScene: createStaticRenderableScene({
+				parts: [firstPart, secondPart],
+			}),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform({ x: 10, y: 20, z: 30 })],
+		});
+
+		expect(store.staticBatchCount).toBe(1);
+		expect(store.staticInstanceCount).toBe(2);
+		const batch = store.batches[0];
+		expect(batch?.kind).toBe("static");
+		expect(batch?.vertexCount).toBe(6);
+		expect(batch?.triangleCount).toBe(2);
+	});
+
+	it("splits baked static batches by chunk and render domain", () => {
+		const device = new FakeDevice();
+		const store = createLumaWorldResourceStore();
+		const exteriorPart = createStaticPart({
+			groupKey: "static/exterior",
+			instanceId: "instance-a",
+			chunkLocalPosition: { x: 1, y: 2, z: 3 },
+		});
+		const indoorPart = createStaticPart({
+			groupKey: "static/interior",
+			instanceId: "instance-b",
+			chunkKey: "landblock/12350000",
+			chunkLandblockId: 0x12350000,
+			renderDomain: WORLD_RENDER_DOMAIN.interiorStatic,
+			chunkLocalPosition: { x: 4, y: 5, z: 6 },
+		});
+
+		syncLumaWorldResources({
+			device: device.asDevice(),
+			store,
+			assetState: createAssetState(),
+			terrainScene: createTerrainScene({ tiles: [] }),
+			staticRenderableScene: createStaticRenderableScene({
+				parts: [exteriorPart, indoorPart],
+			}),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [
+				createChunkTransform({ x: 10, y: 20, z: 30 }),
+				createChunkTransform(
+					{ x: 40, y: 50, z: 60 },
+					{ chunkKey: "landblock/12350000", chunkLandblockId: 0x12350000 },
+				),
+			],
+		});
+
+		expect(store.staticBatchCount).toBe(2);
+		expect(store.batches.filter((batch) => batch.kind === "static")).toHaveLength(
+			2,
+		);
 	});
 });
 
@@ -302,53 +403,69 @@ function createStaticRenderableScene({
 	};
 }
 
-function createAssetState(): AssetChannelState {
+function createAssetState({
+	extraGfxObjAssetIds = [],
+}: {
+	extraGfxObjAssetIds?: string[];
+} = {}): AssetChannelState {
 	const state = createInitialAssetChannelState();
-	state.preparedByAssetId["gfx-obj/01000001"] = {
-		payload: {
-			kind: "gfx-obj",
-			renderGeometry: {
-				sourceId: 1,
-				vertexCount: 3,
-				triangleCount: 1,
-				positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
-				normals: [],
-				uvs: [],
-				triangles: [{ polygonId: 0, surfaceId: null, firstVertex: 0 }],
-				surfaceIds: [],
-				bounds: null,
+	for (const assetId of ["gfx-obj/01000001", ...extraGfxObjAssetIds]) {
+		state.preparedByAssetId[assetId] = {
+			payload: {
+				kind: "gfx-obj",
+				renderGeometry: {
+					sourceId: 1,
+					vertexCount: 3,
+					triangleCount: 1,
+					positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+					normals: [],
+					uvs: [],
+					triangles: [{ polygonId: 0, surfaceId: null, firstVertex: 0 }],
+					surfaceIds: [],
+					bounds: null,
+				},
 			},
-		},
-	} as AssetChannelState["preparedAsset"];
+		} as AssetChannelState["preparedAsset"];
+	}
 	return state;
 }
 
 function createStaticPart({
+	gfxObjAssetId = "gfx-obj/01000001",
+	gfxObjId = 0x01000001,
 	groupKey,
 	instanceId,
+	chunkKey = "landblock/12340000",
+	chunkLandblockId = 0x12340000,
+	renderDomain = WORLD_RENDER_DOMAIN.exteriorStatic,
 	chunkLocalPosition,
 }: {
+	gfxObjAssetId?: string;
+	gfxObjId?: number;
 	groupKey: string;
 	instanceId: string;
+	chunkKey?: string;
+	chunkLandblockId?: number;
+	renderDomain?: StaticRenderablePart["renderDomain"];
 	chunkLocalPosition: { x: number; y: number; z: number };
 }): StaticRenderablePart {
 	return {
 		renderKey: groupKey,
-		renderDomain: WORLD_RENDER_DOMAIN.exteriorStatic,
+		renderDomain,
 		instanceId,
-		sourceAssetId: "gfx-obj/01000001",
-		sourceDid: 0x01000001,
-		owningLandblockId: 0x12340000,
+		sourceAssetId: gfxObjAssetId,
+		sourceDid: gfxObjId,
+		owningLandblockId: chunkLandblockId,
 		regionNumber: 1,
 		owningEnvCellId: null,
 		renderChunk: {
-			chunkKey: "landblock/12340000",
-			chunkLandblockId: 0x12340000,
+			chunkKey,
+			chunkLandblockId,
 		},
 		kind: "scenery",
 		partIndex: 0,
-		gfxObjId: 0x01000001,
-		gfxObjAssetId: "gfx-obj/01000001",
+		gfxObjId,
+		gfxObjAssetId,
 		materialAppearanceContext: createBaseMaterialAppearanceContext("base"),
 		materialSlots: [],
 		materialSignature: "base",
@@ -377,10 +494,14 @@ function toFakeBuffer(buffer: unknown): FakeBuffer | undefined {
 
 function createChunkTransform(
 	offset: RenderChunkTransform["offset"],
+	{
+		chunkKey = "landblock/12340000",
+		chunkLandblockId = 0x12340000,
+	}: { chunkKey?: string; chunkLandblockId?: number } = {},
 ): RenderChunkTransform {
 	return {
-		chunkKey: "landblock/12340000",
-		chunkLandblockId: 0x12340000,
+		chunkKey,
+		chunkLandblockId,
 		offset,
 	};
 }

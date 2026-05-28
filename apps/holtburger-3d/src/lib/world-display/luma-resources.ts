@@ -44,37 +44,7 @@ export const LUMA_WORLD_BUFFER_LAYOUT: BufferLayout[] = [
 	{ name: "position", format: "float32x3" },
 ];
 
-export const LUMA_STATIC_SHADER_LAYOUT: ShaderLayout = {
-	attributes: [
-		{ name: "position", location: 0, type: "vec3<f32>" },
-		{ name: "instanceModel0", location: 1, type: "vec4<f32>" },
-		{ name: "instanceModel1", location: 2, type: "vec4<f32>" },
-		{ name: "instanceModel2", location: 3, type: "vec4<f32>" },
-		{ name: "instanceModel3", location: 4, type: "vec4<f32>" },
-	],
-	bindings: [],
-	uniforms: [
-		{ name: "uViewProjection", type: "mat4x4<f32>" },
-		{ name: "uColor", type: "vec4<f32>" },
-	],
-};
-
-export const LUMA_STATIC_BUFFER_LAYOUT: BufferLayout[] = [
-	{ name: "position", format: "float32x3" },
-	{
-		name: "instanceModel",
-		stepMode: "instance",
-		byteStride: 64,
-		attributes: [
-			{ attribute: "instanceModel0", format: "float32x4", byteOffset: 0 },
-			{ attribute: "instanceModel1", format: "float32x4", byteOffset: 16 },
-			{ attribute: "instanceModel2", format: "float32x4", byteOffset: 32 },
-			{ attribute: "instanceModel3", format: "float32x4", byteOffset: 48 },
-		],
-	},
-];
-
-type LumaWorldDrawBatch = LumaIndexedDrawBatch | LumaInstancedDrawBatch;
+type LumaWorldDrawBatch = LumaIndexedDrawBatch;
 
 interface LumaBaseDrawBatch {
 	id: string;
@@ -90,16 +60,9 @@ interface LumaBaseDrawBatch {
 
 interface LumaIndexedDrawBatch extends LumaBaseDrawBatch {
 	drawMode: "indexed";
-	kind: "terrain" | "structured-interior";
+	kind: "terrain" | "structured-interior" | "static";
 	modelMatrix: LumaMat4;
-}
-
-interface LumaInstancedDrawBatch extends LumaBaseDrawBatch {
-	drawMode: "instanced";
-	kind: "static";
-	instanceBuffer: Buffer;
-	instanceCount: number;
-	instanceSignature: string;
+	staticPartCount: number;
 }
 
 export interface LumaWorldResourceStore {
@@ -221,40 +184,23 @@ export function syncLumaWorldResources({
 		);
 	}
 
-	for (const [
-		groupKey,
-		parts,
-	] of committedScenes.committedStaticRenderableScene.partsByRenderGroupKey) {
-		const firstPart = parts[0];
-		if (!firstPart) {
-			continue;
-		}
-		const chunkOffset = chunkOffsetByKey.get(firstPart.renderChunk.chunkKey);
-		if (!chunkOffset) {
-			continue;
-		}
-		const asset = assetState.preparedByAssetId[firstPart.gfxObjAssetId];
-		if (
-			!asset ||
-			asset.payload.kind !== "gfx-obj" ||
-			asset.payload.renderGeometry.vertexCount === 0
-		) {
-			continue;
-		}
-		const geometry = buildLumaPolygonSetGeometry(asset.payload.renderGeometry);
-		if (geometry.triangleCount === 0) {
-			continue;
-		}
-
+	for (const bakedStaticBatch of buildBakedStaticBatches({
+		assetState,
+		chunkOffsetByKey,
+		staticRenderableScene: committedScenes.committedStaticRenderableScene,
+	})) {
 		nextBatches.push(
-			createOrReuseInstancedDrawBatch({
+			createOrReuseDrawBatch({
 				device,
 				store,
-				id: `static/${groupKey}`,
-				geometry,
-				instanceMatrices: buildStaticInstanceMatrices(parts, chunkOffset),
-				instanceCount: parts.length,
-				color: buildDebugColor(`static/${groupKey}`),
+				id: bakedStaticBatch.id,
+				kind: "static",
+				geometry: bakedStaticBatch.geometry,
+				modelMatrix: bakedStaticBatch.modelMatrix,
+				color: bakedStaticBatch.color,
+				shaderLayout: LUMA_WORLD_SHADER_LAYOUT,
+				bufferLayout: LUMA_WORLD_BUFFER_LAYOUT,
+				staticPartCount: bakedStaticBatch.staticPartCount,
 				retainedBatchIds,
 			}),
 		);
@@ -279,14 +225,11 @@ export function syncLumaWorldResources({
 	).length;
 	store.staticInstanceCount = store.batches.reduce(
 		(total, batch) =>
-			batch.drawMode === "instanced" ? total + batch.instanceCount : total,
+			batch.kind === "static" ? total + batch.staticPartCount : total,
 		0,
 	);
 	store.triangleCount = store.batches.reduce(
-		(total, batch) =>
-			total +
-			batch.triangleCount *
-				(batch.drawMode === "instanced" ? batch.instanceCount : 1),
+		(total, batch) => total + batch.triangleCount,
 		0,
 	);
 }
@@ -314,6 +257,7 @@ function createOrReuseDrawBatch({
 	color,
 	shaderLayout,
 	bufferLayout,
+	staticPartCount = 0,
 	retainedBatchIds,
 }: {
 	device: Device;
@@ -325,6 +269,7 @@ function createOrReuseDrawBatch({
 	color: LumaVec4;
 	shaderLayout: ShaderLayout;
 	bufferLayout: BufferLayout[];
+	staticPartCount?: number;
 	retainedBatchIds: Set<string>;
 }): LumaIndexedDrawBatch {
 	const geometrySignature = createGeometrySignature(kind, geometry);
@@ -337,6 +282,7 @@ function createOrReuseDrawBatch({
 	) {
 		previousBatch.modelMatrix = modelMatrix;
 		previousBatch.color = color;
+		previousBatch.staticPartCount = staticPartCount;
 		retainedBatchIds.add(id);
 		return previousBatch;
 	}
@@ -375,91 +321,8 @@ function createOrReuseDrawBatch({
 		triangleCount: geometry.triangleCount,
 		modelMatrix,
 		color,
+		staticPartCount,
 	} satisfies LumaIndexedDrawBatch;
-	store.batchesById.set(id, batch);
-	retainedBatchIds.add(id);
-	return batch;
-}
-
-function createOrReuseInstancedDrawBatch({
-	device,
-	store,
-	id,
-	geometry,
-	instanceMatrices,
-	instanceCount,
-	color,
-	retainedBatchIds,
-}: {
-	device: Device;
-	store: LumaWorldResourceStore;
-	id: string;
-	geometry: LumaIndexedGeometry;
-	instanceMatrices: Float32Array;
-	instanceCount: number;
-	color: LumaVec4;
-	retainedBatchIds: Set<string>;
-}): LumaInstancedDrawBatch {
-	const geometrySignature = createGeometrySignature("static", geometry);
-	const instanceSignature = hashFloat32Array(instanceMatrices);
-	const previousBatch = store.batchesById.get(id);
-	if (
-		previousBatch &&
-		previousBatch.drawMode === "instanced" &&
-		previousBatch.geometrySignature === geometrySignature &&
-		previousBatch.instanceSignature === instanceSignature
-	) {
-		previousBatch.color = color;
-		retainedBatchIds.add(id);
-		return previousBatch;
-	}
-
-	if (previousBatch) {
-		destroyDrawBatch(previousBatch);
-	}
-
-	const vertexBuffer = device.createBuffer({
-		id: `${id}/positions`,
-		usage: LumaBuffer.VERTEX,
-		data: geometry.positions,
-	});
-	const indexBuffer = device.createBuffer({
-		id: `${id}/indices`,
-		usage: LumaBuffer.INDEX,
-		data: geometry.indices,
-	});
-	const instanceBuffer = device.createBuffer({
-		id: `${id}/instances`,
-		usage: LumaBuffer.VERTEX,
-		data: instanceMatrices,
-	});
-	const vertexArray = device.createVertexArray({
-		id: `${id}/vertex-array`,
-		shaderLayout: LUMA_STATIC_SHADER_LAYOUT,
-		bufferLayout: LUMA_STATIC_BUFFER_LAYOUT,
-	});
-	vertexArray.setBuffer(0, vertexBuffer);
-	vertexArray.setBuffer(1, instanceBuffer);
-	vertexArray.setBuffer(2, instanceBuffer);
-	vertexArray.setBuffer(3, instanceBuffer);
-	vertexArray.setBuffer(4, instanceBuffer);
-	vertexArray.setIndexBuffer(indexBuffer);
-
-	const batch = {
-		id,
-		drawMode: "instanced",
-		kind: "static",
-		geometrySignature,
-		instanceSignature,
-		vertexArray,
-		vertexBuffer,
-		indexBuffer,
-		instanceBuffer,
-		vertexCount: geometry.indices.length,
-		triangleCount: geometry.triangleCount,
-		instanceCount,
-		color,
-	} satisfies LumaInstancedDrawBatch;
 	store.batchesById.set(id, batch);
 	retainedBatchIds.add(id);
 	return batch;
@@ -469,9 +332,6 @@ function destroyDrawBatch(batch: LumaWorldDrawBatch): void {
 	batch.vertexArray.destroy();
 	batch.vertexBuffer.destroy();
 	batch.indexBuffer.destroy();
-	if (batch.drawMode === "instanced") {
-		batch.instanceBuffer.destroy();
-	}
 }
 
 function createGeometrySignature(
@@ -510,21 +370,156 @@ function toUnsignedHex(value: number): string {
 	return (value >>> 0).toString(16).padStart(8, "0");
 }
 
-function buildStaticInstanceMatrices(
-	parts: readonly StaticRenderablePart[],
-	chunkOffset: RenderChunkTransform["offset"],
-): Float32Array {
-	const matrices = new Float32Array(parts.length * 16);
-	for (const [partIndex, part] of parts.entries()) {
-		matrices.set(
-			multiplyMat4(
-				createTranslationMat4(chunkOffset),
-				buildLumaStaticRenderablePartMatrix(part),
-			),
-			partIndex * 16,
-		);
+interface BakedStaticBatchInput {
+	id: string;
+	geometry: LumaIndexedGeometry;
+	modelMatrix: LumaMat4;
+	color: LumaVec4;
+	staticPartCount: number;
+}
+
+function buildBakedStaticBatches({
+	assetState,
+	chunkOffsetByKey,
+	staticRenderableScene,
+}: {
+	assetState: AssetChannelState;
+	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
+	staticRenderableScene: StaticRenderableSceneModel;
+}): BakedStaticBatchInput[] {
+	const partsByBatchKey = new Map<string, StaticRenderablePart[]>();
+	for (const part of staticRenderableScene.parts) {
+		const chunkOffset = chunkOffsetByKey.get(part.renderChunk.chunkKey);
+		if (!chunkOffset) {
+			continue;
+		}
+		const batchKey = formatBakedStaticBatchKey(part);
+		const parts = partsByBatchKey.get(batchKey);
+		if (parts) {
+			parts.push(part);
+		} else {
+			partsByBatchKey.set(batchKey, [part]);
+		}
 	}
-	return matrices;
+
+	return [...partsByBatchKey.entries()].flatMap(([batchKey, parts]) => {
+		const firstPart = parts[0];
+		if (!firstPart) {
+			return [];
+		}
+		const chunkOffset = chunkOffsetByKey.get(firstPart.renderChunk.chunkKey);
+		if (!chunkOffset) {
+			return [];
+		}
+		const geometry = buildBakedStaticGeometry(assetState, parts);
+		if (geometry.triangleCount === 0) {
+			return [];
+		}
+		return [
+			{
+				id: `static-baked/${batchKey}`,
+				geometry,
+				modelMatrix: createTranslationMat4(chunkOffset),
+				color: buildDebugColor(`static-baked/${batchKey}`),
+				staticPartCount: parts.length,
+			},
+		];
+	});
+}
+
+function formatBakedStaticBatchKey(part: StaticRenderablePart): string {
+	return [
+		part.renderDomain,
+		part.renderChunk.chunkKey,
+		"debug-flat",
+	].join("|");
+}
+
+function buildBakedStaticGeometry(
+	assetState: AssetChannelState,
+	parts: readonly StaticRenderablePart[],
+): LumaIndexedGeometry {
+	const bakedParts = parts.flatMap((part) => {
+		const asset = assetState.preparedByAssetId[part.gfxObjAssetId];
+		if (
+			!asset ||
+			asset.payload.kind !== "gfx-obj" ||
+			asset.payload.renderGeometry.vertexCount === 0
+		) {
+			return [];
+		}
+		const geometry = buildLumaPolygonSetGeometry(asset.payload.renderGeometry);
+		if (geometry.triangleCount === 0) {
+			return [];
+		}
+		return [{ geometry, part }];
+	});
+	const vertexCount = bakedParts.reduce(
+		(total, bakedPart) => total + bakedPart.geometry.vertexCount,
+		0,
+	);
+	const indexCount = bakedParts.reduce(
+		(total, bakedPart) => total + bakedPart.geometry.indices.length,
+		0,
+	);
+	const positions = new Float32Array(vertexCount * 3);
+	const indices = createIndexArray(vertexCount, indexCount);
+	let vertexOffset = 0;
+	let indexOffset = 0;
+
+	for (const { geometry, part } of bakedParts) {
+		const matrix = buildLumaStaticRenderablePartMatrix(part);
+		for (let vertexIndex = 0; vertexIndex < geometry.vertexCount; vertexIndex += 1) {
+			transformPosition(
+				positions,
+				vertexOffset + vertexIndex,
+				geometry.positions,
+				vertexIndex,
+				matrix,
+			);
+		}
+		for (const index of geometry.indices) {
+			indices[indexOffset] = vertexOffset + index;
+			indexOffset += 1;
+		}
+		vertexOffset += geometry.vertexCount;
+	}
+
+	return {
+		positions,
+		indices,
+		vertexCount,
+		triangleCount: indexCount / 3,
+	};
+}
+
+function transformPosition(
+	target: Float32Array,
+	targetVertexIndex: number,
+	source: Float32Array,
+	sourceVertexIndex: number,
+	matrix: LumaMat4,
+): void {
+	const sourceOffset = sourceVertexIndex * 3;
+	const targetOffset = targetVertexIndex * 3;
+	const x = source[sourceOffset];
+	const y = source[sourceOffset + 1];
+	const z = source[sourceOffset + 2];
+	target[targetOffset] =
+		matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12];
+	target[targetOffset + 1] =
+		matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13];
+	target[targetOffset + 2] =
+		matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14];
+}
+
+function createIndexArray(
+	vertexCount: number,
+	indexCount: number,
+): Uint16Array | Uint32Array {
+	return vertexCount > 65535
+		? new Uint32Array(indexCount)
+		: new Uint16Array(indexCount);
 }
 
 function buildLumaStaticRenderablePartMatrix(

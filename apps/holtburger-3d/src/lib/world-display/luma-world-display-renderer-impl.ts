@@ -20,8 +20,6 @@ import { createLumaRenderMetrics } from "./luma-render-metrics";
 import {
 	createLumaWorldResourceStore,
 	destroyLumaWorldResources,
-	LUMA_STATIC_BUFFER_LAYOUT,
-	LUMA_STATIC_SHADER_LAYOUT,
 	LUMA_WORLD_BUFFER_LAYOUT,
 	LUMA_WORLD_SHADER_LAYOUT,
 	syncLumaWorldResources,
@@ -92,38 +90,6 @@ void main() {
 }
 `;
 
-const STATIC_VERTEX_SHADER = `#version 300 es
-in vec3 position;
-in vec4 instanceModel0;
-in vec4 instanceModel1;
-in vec4 instanceModel2;
-in vec4 instanceModel3;
-
-uniform mat4 uViewProjection;
-
-void main() {
-	mat4 modelMatrix = mat4(
-		instanceModel0,
-		instanceModel1,
-		instanceModel2,
-		instanceModel3
-	);
-	gl_Position = uViewProjection * modelMatrix * vec4(position, 1.0);
-}
-`;
-
-const STATIC_FRAGMENT_SHADER = `#version 300 es
-precision highp float;
-
-uniform vec4 uColor;
-
-out vec4 fragColor;
-
-void main() {
-	fragColor = uColor;
-}
-`;
-
 interface LumaRenderResources {
 	device: Device;
 	triangleVertexShader: Shader;
@@ -134,9 +100,6 @@ interface LumaRenderResources {
 	worldVertexShader: Shader;
 	worldFragmentShader: Shader;
 	worldPipeline: RenderPipeline;
-	staticVertexShader: Shader;
-	staticFragmentShader: Shader;
-	staticPipeline: RenderPipeline;
 	worldStore: LumaWorldResourceStore;
 }
 
@@ -357,31 +320,6 @@ export function createLumaWorldDisplayRendererImplementation(
 					depthCompare: "less-equal",
 				},
 			});
-			const staticVertexShader = device.createShader({
-				id: "luma-static-vertex-shader",
-				language: "glsl",
-				stage: "vertex",
-				source: STATIC_VERTEX_SHADER,
-			});
-			const staticFragmentShader = device.createShader({
-				id: "luma-static-fragment-shader",
-				language: "glsl",
-				stage: "fragment",
-				source: STATIC_FRAGMENT_SHADER,
-			});
-			const staticPipeline = device.createRenderPipeline({
-				id: "luma-static-flat-color-pipeline",
-				vs: staticVertexShader,
-				fs: staticFragmentShader,
-				shaderLayout: LUMA_STATIC_SHADER_LAYOUT,
-				bufferLayout: LUMA_STATIC_BUFFER_LAYOUT,
-				topology: "triangle-list",
-				parameters: {
-					cullMode: "none",
-					depthWriteEnabled: true,
-					depthCompare: "less-equal",
-				},
-			});
 			const worldStore = createLumaWorldResourceStore();
 
 			resources = {
@@ -394,9 +332,6 @@ export function createLumaWorldDisplayRendererImplementation(
 				worldVertexShader,
 				worldFragmentShader,
 				worldPipeline,
-				staticVertexShader,
-				staticFragmentShader,
-				staticPipeline,
 				worldStore,
 			};
 			syncCanvasSize();
@@ -444,31 +379,18 @@ export function createLumaWorldDisplayRendererImplementation(
 			const viewProjectionMatrix =
 				buildSceneCameraViewProjectionMatrix(resolveCameraFrame());
 			for (const batch of resources.worldStore.batches) {
-				const didDraw =
-					batch.drawMode === "indexed"
-						? resources.worldPipeline.draw({
-								renderPass,
-								vertexArray: batch.vertexArray,
-								vertexCount: batch.vertexCount,
-								uniforms: {
-									uModelViewProjection: multiplyMat4(
-										viewProjectionMatrix,
-										batch.modelMatrix,
-									),
-									uColor: batch.color,
-								},
-							})
-						: resources.staticPipeline.draw({
-								renderPass,
-								vertexArray: batch.vertexArray,
-								vertexCount: batch.vertexCount,
-								instanceCount: batch.instanceCount,
-								isInstanced: true,
-								uniforms: {
-									uViewProjection: viewProjectionMatrix,
-									uColor: batch.color,
-								},
-							});
+				const didDraw = resources.worldPipeline.draw({
+					renderPass,
+					vertexArray: batch.vertexArray,
+					vertexCount: batch.vertexCount,
+					uniforms: {
+						uModelViewProjection: multiplyMat4(
+							viewProjectionMatrix,
+							batch.modelMatrix,
+						),
+						uColor: batch.color,
+					},
+				});
 				if (didDraw) {
 					drawCallCount += 1;
 				}
@@ -511,9 +433,6 @@ export function createLumaWorldDisplayRendererImplementation(
 			resources.worldPipeline.destroy();
 			resources.worldVertexShader.destroy();
 			resources.worldFragmentShader.destroy();
-			resources.staticPipeline.destroy();
-			resources.staticVertexShader.destroy();
-			resources.staticFragmentShader.destroy();
 			resources.device.destroy();
 		}
 		resources = null;

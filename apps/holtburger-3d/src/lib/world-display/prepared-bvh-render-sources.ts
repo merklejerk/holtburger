@@ -25,6 +25,7 @@ import {
 	transformTerrainLocalBounds,
 } from "./prepared-bvh-bounds";
 import {
+	renderBoundsContainedByFrustum,
 	renderBoundsIntersectsFrustum,
 	translateRenderBounds,
 	type RenderBounds,
@@ -254,21 +255,93 @@ function queryRenderSpaceBvhSource(
 		if (!node || !renderBoundsIntersectsFrustum(node.bounds, frustum)) {
 			continue;
 		}
-		for (const itemIndex of node.itemIndices) {
-			const itemKey = source.itemKeys[itemIndex];
-			if (itemKey) {
-				visibleItemKeys.add(itemKey);
-			} else {
-				fallbackReasons.push(
-					`render-space BVH source ${source.sourceId} references missing item index ${itemIndex}`,
-				);
-			}
+		if (renderBoundsContainedByFrustum(node.bounds, frustum)) {
+			collectRenderSpaceBvhSubtreeItems({
+				source,
+				nodeIndex,
+				visitedNodeIndices,
+				visibleItemKeys,
+				fallbackReasons,
+			});
+			continue;
 		}
+		collectRenderSpaceBvhNodeItems(
+			source,
+			node,
+			visibleItemKeys,
+			fallbackReasons,
+		);
 		if (node.left !== null) {
 			pendingNodeIndices.push(node.left);
 		}
 		if (node.right !== null) {
 			pendingNodeIndices.push(node.right);
+		}
+	}
+}
+
+function collectRenderSpaceBvhSubtreeItems({
+	source,
+	nodeIndex,
+	visitedNodeIndices,
+	visibleItemKeys,
+	fallbackReasons,
+}: {
+	source: RenderSpaceBvhSource;
+	nodeIndex: number;
+	visitedNodeIndices: Set<number>;
+	visibleItemKeys: Set<RenderBvhItemKey>;
+	fallbackReasons: string[];
+}): void {
+	const pendingNodeIndices = [nodeIndex];
+	while (pendingNodeIndices.length > 0) {
+		const currentNodeIndex = pendingNodeIndices.pop();
+		if (currentNodeIndex === undefined) {
+			continue;
+		}
+		if (currentNodeIndex !== nodeIndex) {
+			if (
+				currentNodeIndex < 0 ||
+				currentNodeIndex >= source.nodes.length ||
+				visitedNodeIndices.has(currentNodeIndex)
+			) {
+				continue;
+			}
+			visitedNodeIndices.add(currentNodeIndex);
+		}
+		const node = source.nodes[currentNodeIndex];
+		if (!node) {
+			continue;
+		}
+		collectRenderSpaceBvhNodeItems(
+			source,
+			node,
+			visibleItemKeys,
+			fallbackReasons,
+		);
+		if (node.left !== null) {
+			pendingNodeIndices.push(node.left);
+		}
+		if (node.right !== null) {
+			pendingNodeIndices.push(node.right);
+		}
+	}
+}
+
+function collectRenderSpaceBvhNodeItems(
+	source: RenderSpaceBvhSource,
+	node: RenderSpaceBvhNode,
+	visibleItemKeys: Set<RenderBvhItemKey>,
+	fallbackReasons: string[],
+): void {
+	for (const itemIndex of node.itemIndices) {
+		const itemKey = source.itemKeys[itemIndex];
+		if (itemKey) {
+			visibleItemKeys.add(itemKey);
+		} else {
+			fallbackReasons.push(
+				`render-space BVH source ${source.sourceId} references missing item index ${itemIndex}`,
+			);
 		}
 	}
 }

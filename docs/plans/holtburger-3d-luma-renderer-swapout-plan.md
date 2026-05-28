@@ -1,6 +1,6 @@
 # Holtburger 3D Luma Renderer Swapout Plan
 
-Status: Phase 3A implemented; Phase 4 next.
+Status: Phase 4 implemented; Phase 4A and Phase 4B recommended before Phase 5.
 
 ## Purpose
 
@@ -53,7 +53,9 @@ produce fake concepts and adapter churn.
   overlays explicit luma render batches.
 - Treat interiors and exteriors as the same render capability set. Portal stencil/depth/composite
   passes are pass state, not a separate renderer.
-- Keep instanced and non-instanced rendering as draw-mode details behind one batch model.
+- Keep baked, instanced, and non-instanced submission as draw-mode details behind explicit luma
+  batch/draw planning. Prefer baked static chunk batches over instancing when static duplication is
+  too low to justify per-gfx instanced batches.
 - Preserve existing renderer metrics and add backend-specific metrics only where useful.
 - Delete Three.js after the luma backend matures rather than leaving a permanent abstraction tax.
 
@@ -112,9 +114,11 @@ Suggested local concepts:
 - `LumaFrame`: camera uniforms, viewport, frame time, and ordered passes.
 - `LumaPass`: clear flags, depth/stencil/blend state, and ordered `LumaDraw[]`.
 - `LumaDraw`: batch id plus pipeline/material/texture/geometry keys, draw range, and optional
-  instance range.
+  submission metadata such as chunk offset, instance range, or subrange when a specific draw mode
+  needs it.
 - `LumaResourceStore`: GPU resource caches for buffers, pipelines, textures, samplers, binding
-  sets, and instance buffers.
+  sets, baked geometry buffers, and optional instance buffers for draw modes that truly benefit from
+  instancing.
 - `LumaMaterialPlan`: AC material semantics plus the luma shader/pipeline/binding facts needed to
   draw it.
 - `LumaGeometry`: typed vertex/index payloads and material groups.
@@ -688,6 +692,217 @@ Exit criteria:
 - Instanced statics appear in the right chunk-relative locations.
 - The resource store still does not maintain visibility or scene membership.
 
+Progress as of 2026-05-28:
+
+- Extended `LumaWorldResourceStore` with a static instanced batch mode alongside terrain/interior
+  indexed batches.
+- Added luma static shader and buffer layouts:
+  - vertex positions remain a per-vertex `vec3`;
+  - instance matrices are uploaded as one `mat4` split across four per-instance `vec4` attributes;
+  - the static shader receives `uViewProjection` and per-batch `uColor` uniforms.
+- Synced static render groups from `StaticRenderableSceneModel.partsByRenderGroupKey`.
+- Uploaded static gfx geometry from each group's first part `gfxObjAssetId`, using the prepared
+  `renderGeometry` source that the Three path also feeds into `getStaticRenderableGeometry(...)`.
+- Added a Three-free static placement composition equivalent to
+  `buildStaticRenderablePartMatrix(...)`:
+  - parent placements;
+  - chunk-local instance placement;
+  - part placements;
+  - AC scale conversion from `{ x, y, z }` to renderer scale `{ x, z, y }`.
+- Folded render chunk offsets into each luma instance matrix because luma does not use retained
+  Three chunk roots.
+- Updated the luma renderer to:
+  - create a dedicated static flat-color instanced pipeline;
+  - draw static batches with `isInstanced: true` and `instanceCount`;
+  - resync luma resources on `setAssetState(...)`, so later-arriving prepared gfx assets can
+    populate static batches;
+  - resync luma resources on `setStaticRenderableScene(...)`.
+- Updated luma metrics to report static batch and visible instance counts instead of leaving static
+  debug fields at zero.
+- Added tests that verify instanced static geometry upload, instance-buffer binding, chunk-offset
+  placement, and static batch/instance metrics.
+- Validation run:
+  - `npm run test:ts -- src/lib/world-display/luma-resources.test.ts src/lib/world-display/luma-geometry.test.ts src/lib/world-display/luma-math.test.ts src/lib/world-display/camera.test.ts`
+  - `npm run check`
+  - `npm run lint:ts`
+  - `npm run lint:dead`
+  - `npm run build`
+  - `VITE_HOLTBURGER_RENDER_BACKEND=luma npm run build`
+  - temporary Vite/Chrome luma diagnostic with a synthetic prepared gfx object and one instanced
+    static batch.
+
+Verification notes:
+
+- The Phase 4 browser diagnostic rendered a synthetic static triangle through the real luma
+  renderer implementation and sampled the center pixel:
+  - sampled pixel `(188, 56, 111, 255)`;
+  - expected static batch color `(188, 56, 111, 255)`.
+- Headless Chrome still required SwiftShader flags for WebGL in this environment.
+
+Decisions and course corrections:
+
+- Static batches use a dedicated instanced pipeline instead of trying to force per-instance matrices
+  through the terrain/interior world shader. This keeps the terrain/interior indexed path simple and
+  makes Phase 5 draw-list splitting clearer.
+- Luma statics consume un-compacted prepared `renderGeometry` directly for Phase 4. The Three path
+  may compact geometry by material groups, but luma has no real material path yet, so compaction
+  would be premature and could obscure placement/submission bugs.
+- Static instance matrices include render chunk offsets. This is intentionally different from the
+  Three path's retained chunk root transform but produces the same renderer-space placement without
+  adding scene graph state to luma.
+- Static flat color is currently per render group, not per instance. That is sufficient to prove
+  geometry/placement/instancing, but Phase 6 should decide whether debug/no-material mode needs
+  per-instance color attributes.
+- Phase 4's static instanced path is now considered a proof path, not the preferred luma end-state.
+  Before Phase 5 builds culling and draw lists around static batch ids, add Phase 4A for shared
+  renderable readiness/incubation and Phase 4B to pivot luma statics to baked chunk-local static
+  batches.
+- Baked cross-gfx static batching will only become a real material-batching win once luma has
+  atlas-backed material state. Without texture atlases, texture bindings would become the next batch
+  splitter even if geometry is baked together.
+
+Introduced cleanup targets and temporary shims:
+
+- Static geometry identity is currently implicit in each static batch's hashed position/index
+  payload plus group id. If static sync cost becomes visible, carry prepared gfx content signatures
+  from the asset layer rather than hashing full geometry every sync.
+- Static instance identity is currently hashed from the full matrix buffer. Phase 5 culling and
+  draw-list work should avoid turning visible-set changes into unnecessary static GPU buffer
+  rebuilds.
+- Phase 4 luma static grouping still includes `gfxObjAssetId` because it uses instanced draws over
+  one geometry buffer. Phase 4B should remove that constraint by baking transformed static vertices
+  into chunk-local material/domain batches.
+- The static luma path ignores material slots, texture velocity, region detail overlays, opacity,
+  and material grouping. These are intentional Phase 4 omissions and should be addressed in Phase 6,
+  not patched into the flat-color proof path.
+- The resource store still draws every uploaded batch. Phase 5 should add pass-local draw lists and
+  candidate selection before real materials increase draw cost.
+
+## Phase 4A: Static Renderable Readiness and Incubation
+
+Purpose: define a shared app-level readiness layer so partially hydrated static renderables do not
+churn renderer batches while gfx objects, setup appearances, render surfaces, textures, atlas slots,
+or explicit fallbacks resolve independently.
+
+Tasks:
+
+- Keep the readiness layer resource-agnostic. It must not allocate or reference Three resources,
+  luma GPU resources, pipelines, atlases, draw calls, or scene graph objects.
+- Consume `StaticRenderableSceneModel.parts` plus prepared asset/channel state and produce stable
+  readiness records for both renderers.
+- Define explicit static renderable readiness states:
+  - `pending`: required dependencies are still loading or not yet observed;
+  - `resolved`: all dependencies needed by the requested render mode are available;
+  - `fallback-resolved`: missing or failed dependencies have an explicit fallback material/texture or
+    debug/no-material decision;
+  - `failed`: the renderable cannot be drawn even with fallback.
+- Split readiness by dependency class instead of one vague "ready enough" flag:
+  - placement/chunk/domain identity;
+  - source gfx geometry;
+  - setup/model composition where applicable;
+  - material plan intent;
+  - render surfaces/textures;
+  - atlas slot/material-set readiness for baked luma statics once atlas work exists.
+- For current flat-color static rendering, allow resolution when placement, render chunk, render
+  domain, and prepared gfx geometry are ready, with material state resolved to explicit
+  debug/no-material fallback.
+- Treat failure-to-fallback as a valid terminal resolution state so one missing texture or unsupported
+  surface does not leave a renderable pending forever.
+- Emit committed renderable sets for downstream renderer-specific batch construction. Pending and
+  failed records should be visible in metrics/debug samples but excluded from normal batch commits.
+- Let the Three backend continue using its existing `InstancedMesh` path from committed records.
+- Let luma consume committed/fallback-resolved records for Phase 4B baked static batches.
+- Add metrics for pending, resolved, fallback-resolved, and failed static renderables with short
+  reason samples.
+- Add tests for:
+  - gfx geometry pending then resolved;
+  - material/texture failure becoming fallback-resolved;
+  - unresolved geometry remaining excluded from committed records;
+  - stable committed output when unrelated assets hydrate.
+
+Exit criteria:
+
+- Both renderer paths have a shared, resource-agnostic way to know which static renderables are
+  eligible for rendering.
+- Missing or failed material/texture dependencies can resolve through explicit fallback policy.
+- Luma baked static batches can be built from committed readiness records instead of raw
+  one-by-one hydration events.
+- Phase 4B can avoid rebuilding baked chunk buffers for renderables that are still incubating.
+
+Decisions and future debt:
+
+- This is shared app-level renderer pipeline work, not luma-only, because both Three and luma need
+  the same answer about which static renderables are eligible to enter the render pipeline.
+- Resource realization remains backend-specific. Readiness records may describe intent and fallback
+  decisions, but they must not carry Three materials/textures or luma buffers/textures.
+- Atlas readiness should be modeled here once atlas construction exists, but Phase 4A should not
+  implement texture atlases itself.
+
+## Phase 4B: Luma Baked Static Batch Model
+
+Purpose: replace the Phase 4 luma static instancing proof with the geometry-side static batch model
+that Phase 5 should build culling and draw-list planning around, while explicitly leaving real
+material batching blocked on atlas work.
+
+Tasks:
+
+- Keep `StaticRenderableSceneModel` and the Three backend unchanged. This is a luma-internal
+  submission model until it proves itself.
+- Derive luma static batches from Phase 4A committed static renderable readiness records, not from
+  raw `staticRenderableScene.parts` or `partsByRenderGroupKey`.
+- For the flat-color proof, group luma static geometry by at least:
+  - `renderDomain`;
+  - `renderChunk.chunkKey`;
+  - a temporary no-material/debug render-state signature.
+- Do not include `gfxObjAssetId` in the final baked draw-batch key. Different gfx objects with the
+  same chunk/domain/debug state should be able to share one baked static vertex/index buffer.
+- Bake each static part's placement into chunk-local vertex positions at sync time:
+  - parent placements;
+  - chunk-local instance placement;
+  - part placements;
+  - AC scale conversion.
+- Keep render chunk origin/re-anchor offset out of static vertex buffers. Pass chunk offset at draw
+  time with a small uniform, likely `uChunkOffset`, so re-anchoring does not rebuild static buffers.
+- Preserve flat-color debug rendering while keeping the grouping shape compatible with Phase 6
+  material work.
+- Do not claim final real-material batching in Phase 4B. The eventual material key should be based on
+  atlas/render-state compatibility, for example
+  `renderDomain | chunkKey | staticMaterialAtlasSetKey | renderStateKey`.
+- Remove or clearly retire the Phase 4 luma static instanced path once baked static batches render
+  correctly.
+- Add tests for:
+  - grouping across different `gfxObjAssetId` values when chunk/domain/render-state match;
+  - splitting groups by chunk and render domain;
+  - chunk-local baked positions not changing when render chunk offset changes;
+  - per-draw chunk offset affecting final rendered position in a browser diagnostic.
+
+Exit criteria:
+
+- Luma renders terrain, interiors, and baked static geometry in flat colors.
+- Static batches no longer require per-instance matrix attributes or `gfxObjAssetId` in the draw
+  batch key.
+- Re-anchor/chunk-offset changes update draw uniforms without rebuilding baked static vertex/index
+  buffers.
+- Phase 5 can build draw lists around luma static batch ids without inheriting the Phase 4
+  instancing proof shape.
+- The plan explicitly records that efficient real-material static batching still depends on texture
+  atlas construction.
+- Baked batch rebuilds are driven by committed readiness membership changes, not every raw asset
+  hydration event.
+
+Decisions and future debt:
+
+- This stays luma-specific for now. The Three backend's current `InstancedMesh` plus chunk-root model
+  should not be contorted to match luma's lower-level submission strategy during the swapout.
+- If the baked static batch model proves correct and useful, promote the pure grouping and
+  chunk-local static packing logic into a shared renderer-facing helper later. Do not promote the
+  luma GPU resource types, pipelines, or draw submission objects.
+- The promoted shape should remain frontend-renderer-local unless a future non-browser client also
+  needs the exact same static batch planning semantics.
+- Texture atlas construction is now a prerequisite for efficient real-material baked static batches.
+  Until atlas support exists, Phase 4B's baked static model is a geometry/draw-list proof, not proof
+  that textured statics can be submitted in the same coarse batches.
+
 ## Phase 5: Basic Frame Culling and Draw Lists
 
 Purpose: stop drawing everything before real materials make draw cost harder to read.
@@ -703,7 +918,9 @@ Tasks:
   - `deriveWorldRenderPolicy`;
   - `deriveWorldRenderGraphForPolicy`.
 - Expand visible candidate batch ids into pass-local `LumaDraw` commands.
-- Sort `LumaDraw` commands by pipeline/material class, geometry, and instance range.
+- Sort `LumaDraw` commands by pass, pipeline/material class, batch id, geometry/range, and draw
+  state. Do not assume statics are instanced; Phase 4B should make baked static batch ids the normal
+  static draw unit.
 
 Exit criteria:
 
@@ -713,11 +930,18 @@ Exit criteria:
 
 ## Phase 6: Direct Textures and Simple Materials
 
-Purpose: add the first real material path while keeping scope narrow.
+Purpose: add the first real material path while keeping scope narrow. For baked static batches,
+direct texture work must either introduce atlas-backed static material state or explicitly leave
+statics on a less-batched fallback until atlas support lands.
 
 Tasks:
 
 - Add `luma-materials.ts` for flat color, direct texture, and debug no-material modes.
+- Add a static texture atlas plan before applying real textured materials to baked static batches:
+  - decide atlas scope, likely per chunk/domain/material family or per loaded static batch set;
+  - define atlas UV remapping DTOs;
+  - define atlas/material-set keys that can replace the temporary no-material signature from Phase
+    4B.
 - Extract Three-free texture decode DTOs from `render-surface-texture-resources.ts` before luma
   upload. The current direct texture path returns Three `DataTexture`/`CompressedTexture`.
 - Extract Three-free material behavior DTOs from `material-behavior.ts` before luma use. The
@@ -728,11 +952,14 @@ Tasks:
 - Carry basic legacy material behavior: side policy, opacity/alpha test where needed, depth write,
   and blend mode.
 - Apply direct textured materials to statics and interior shells.
+- If static texture atlases are not ready in this phase, apply direct textured materials to
+  interiors first and keep baked statics in flat/debug mode or in a clearly documented fallback.
 
 Exit criteria:
 
 - Common direct-textured buildings/interiors render with recognizable textures.
 - Flat/debug fallback remains available for unsupported material cases.
+- Static material batching has a clear atlas-backed path, even if full atlas coverage is deferred.
 - Indexed/paletted textures, terrain blends, detail overlays, and texture velocity may still be
   TODOs.
 
@@ -803,9 +1030,12 @@ Tasks:
 - Audit terrain blend shader edge cases still not covered by Phase 7.
 - Audit detail texture overlays, texture velocity, and region detail signatures.
 - Audit coordinate handedness and matrix conventions against the Three renderer. Terrain currently
-  packs positions as `(x, z, -y)`, and static placement currently applies AC placement matrices via
-  Three `Matrix4`.
+  packs positions as `(x, z, -y)`. Luma static batching should bake static placement into
+  chunk-local vertices and apply render chunk offset as a draw uniform; compare that against the
+  Three renderer's chunk-root plus `InstancedMesh` matrix result.
 - Audit alpha/clip/depth-write behavior for foliage, fences, windows, and portals.
+- Audit atlas-backed static material grouping and UV remapping once baked static batches carry real
+  textures.
 - Add visual/debug scenarios for:
   - outdoor terrain with blended roads;
   - buildings with direct textures;

@@ -1,4 +1,5 @@
 import type { SceneCameraFrame } from "./camera";
+import type { LumaFrameMetrics } from "./luma-frame";
 import type {
 	WorldDisplayTextureColorSpaceMode,
 	WorldDisplayTextureFilteringMode,
@@ -27,6 +28,7 @@ export interface LumaRenderMetricsInput {
 	structuredInteriorBatchCount?: number;
 	staticBatchCount?: number;
 	staticInstanceCount?: number;
+	lumaFrameMetrics?: LumaFrameMetrics | null;
 	worldTriangleCount?: number;
 	textureFilteringMode: WorldDisplayTextureFilteringMode;
 	textureColorSpaceMode: WorldDisplayTextureColorSpaceMode;
@@ -85,20 +87,64 @@ export function createLumaRenderMetrics(
 			staticGroupMeshCount: input.staticBatchCount ?? 0,
 			visibleStaticGroupMeshCount: input.staticBatchCount ?? 0,
 			staticRenderBatchCount: input.staticBatchCount ?? 0,
-			staticBvhCandidateBatchCount: 0,
-			staticBvhRepresentedInstanceKeyCount: 0,
-			staticBvhVisibleInstanceKeyCount: 0,
-			staticBvhFallbackIncludedBatchCount: 0,
+			staticBvhCandidateBatchCount:
+				(input.lumaFrameMetrics?.candidateCountsByCategory["static-promoted"] ??
+					0) +
+				(input.lumaFrameMetrics?.candidateCountsByCategory["static-staged"] ??
+					0) +
+				(input.lumaFrameMetrics?.candidateCountsByCategory.static ?? 0),
+			staticBvhRepresentedInstanceKeyCount:
+				(input.lumaFrameMetrics?.representedItemKeyCountsByCategory[
+					"static-promoted"
+				] ?? 0) +
+				(input.lumaFrameMetrics?.representedItemKeyCountsByCategory[
+					"static-staged"
+				] ?? 0) +
+				(input.lumaFrameMetrics?.representedItemKeyCountsByCategory.static ??
+					0),
+			staticBvhVisibleInstanceKeyCount:
+				(input.lumaFrameMetrics?.visibleDrawCountsByCategory[
+					"static-promoted"
+				] ?? 0) +
+				(input.lumaFrameMetrics?.visibleDrawCountsByCategory[
+					"static-staged"
+				] ?? 0) +
+				(input.lumaFrameMetrics?.visibleDrawCountsByCategory.static ?? 0),
+			staticBvhFallbackIncludedBatchCount:
+				(input.lumaFrameMetrics?.fallbackCountsByCategory[
+					"static-promoted"
+				] ?? 0) +
+				(input.lumaFrameMetrics?.fallbackCountsByCategory["static-staged"] ??
+					0) +
+				(input.lumaFrameMetrics?.fallbackCountsByCategory.static ?? 0),
 			terrainRenderBatchCount: input.terrainBatchCount ?? 0,
-			terrainBvhCandidateBatchCount: 0,
+			terrainBvhCandidateBatchCount:
+				input.lumaFrameMetrics?.candidateCountsByCategory.terrain ?? 0,
 			structuredInteriorRenderBatchCount:
 				input.structuredInteriorBatchCount ?? 0,
-			structuredInteriorBvhCandidateBatchCount: 0,
-			debugOverlayRenderBatchCount: 0,
-			debugOverlayBvhCandidateBatchCount: 0,
-			portalMaskRenderBatchCount: 0,
-			portalMaskBvhCandidateBatchCount: 0,
-			nonStaticBvhFallbackIncludedBatchCount: 0,
+			structuredInteriorBvhCandidateBatchCount:
+				input.lumaFrameMetrics?.candidateCountsByCategory[
+					"structured-interior"
+				] ?? 0,
+			debugOverlayRenderBatchCount:
+				input.lumaFrameMetrics?.candidateCountsByCategory["debug-overlay"] ?? 0,
+			debugOverlayBvhCandidateBatchCount:
+				input.lumaFrameMetrics?.visibleDrawCountsByCategory["debug-overlay"] ??
+				0,
+			portalMaskRenderBatchCount:
+				input.lumaFrameMetrics?.candidateCountsByCategory["portal-mask"] ?? 0,
+			portalMaskBvhCandidateBatchCount:
+				input.lumaFrameMetrics?.visibleDrawCountsByCategory["portal-mask"] ??
+				0,
+			nonStaticBvhFallbackIncludedBatchCount:
+				(input.lumaFrameMetrics?.fallbackCountsByCategory.terrain ?? 0) +
+				(input.lumaFrameMetrics?.fallbackCountsByCategory[
+					"structured-interior"
+				] ?? 0) +
+				(input.lumaFrameMetrics?.fallbackCountsByCategory["portal-mask"] ??
+					0) +
+				(input.lumaFrameMetrics?.fallbackCountsByCategory["debug-overlay"] ??
+					0),
 			portalCompositeVisibleItemKeyCount: 0,
 			portalCompositeStaticCandidateBatchCount: 0,
 			portalCompositeTerrainCandidateBatchCount: 0,
@@ -107,19 +153,38 @@ export function createLumaRenderMetrics(
 			structuredInteriorMeshCount: input.structuredInteriorBatchCount ?? 0,
 			visibleStructuredInteriorMeshCount:
 				input.structuredInteriorBatchCount ?? 0,
-			terrainBvhVisibleItemCount: 0,
-			terrainBvhTotalItemCount: 0,
-			outdoorStaticBvhVisibleItemCount: 0,
-			outdoorStaticBvhTotalItemCount: 0,
-			envCellLocalBvhVisibleItemCount: 0,
-			envCellLocalBvhTotalItemCount: 0,
+			terrainBvhVisibleItemCount:
+				input.lumaFrameMetrics?.visibleDrawCountsByCategory.terrain ?? 0,
+			terrainBvhTotalItemCount:
+				input.lumaFrameMetrics?.candidateCountsByCategory.terrain ?? 0,
+			outdoorStaticBvhVisibleItemCount:
+				(input.lumaFrameMetrics?.visibleDrawCountsByCategory[
+					"static-promoted"
+				] ?? 0) +
+				(input.lumaFrameMetrics?.visibleDrawCountsByCategory[
+					"static-staged"
+				] ?? 0),
+			outdoorStaticBvhTotalItemCount:
+				(input.lumaFrameMetrics?.candidateCountsByCategory["static-promoted"] ??
+					0) +
+				(input.lumaFrameMetrics?.candidateCountsByCategory["static-staged"] ??
+					0),
+			envCellLocalBvhVisibleItemCount:
+				input.lumaFrameMetrics?.visibleItemKeyCount ?? 0,
+			envCellLocalBvhTotalItemCount:
+				input.lumaFrameMetrics?.representedItemKeyCount ?? 0,
 			visibleStaticInstanceKeyCount: input.staticInstanceCount ?? 0,
 			visiblePortalKeyCount: 0,
 			envCellBvhConsideredCount: 0,
-			fallbackReasonCount: input.initializationError ? 1 : 0,
-			fallbackReasonSamples: input.initializationError
-				? [`luma initialization failed: ${input.initializationError}`]
-				: [],
+			fallbackReasonCount:
+				(input.initializationError ? 1 : 0) +
+				(input.lumaFrameMetrics?.fallbackReasonCount ?? 0),
+			fallbackReasonSamples: [
+				...(input.initializationError
+					? [`luma initialization failed: ${input.initializationError}`]
+					: []),
+				...(input.lumaFrameMetrics?.fallbackReasonSamples ?? []),
+			],
 			queryTimeMs: 0,
 			debugOverlayObjectCount: 0,
 			visibleDebugOverlayObjectCount: 0,

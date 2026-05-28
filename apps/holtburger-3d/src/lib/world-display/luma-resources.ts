@@ -22,10 +22,16 @@ import {
 	type LumaVec4,
 } from "./luma-math";
 import type { RenderChunkTransform } from "./render-anchor";
+import {
+	deriveStructuredInteriorCellBatchBvhBinding,
+	deriveTerrainTileBatchBvhBinding,
+} from "./non-instanced-bvh-bindings";
+import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import type {
 	StaticRenderablePart,
 	StaticRenderableSceneModel,
 } from "./static-renderables";
+import { deriveStaticRenderablePartBvhItemKey } from "./static-renderable-bvh-bindings";
 import { deriveSceneRenderableReadinessModel } from "./scene-renderable-readiness";
 import { staticRenderableObjectKey } from "./static-renderable-readiness";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
@@ -45,11 +51,16 @@ export const LUMA_WORLD_BUFFER_LAYOUT: BufferLayout[] = [
 	{ name: "position", format: "float32x3" },
 ];
 
-type LumaWorldDrawBatch = LumaIndexedDrawBatch;
+export type LumaWorldDrawBatch = LumaIndexedDrawBatch;
+
+export type LumaWorldDrawBatchKind =
+	| "terrain"
+	| "structured-interior"
+	| "static";
 
 interface LumaBaseDrawBatch {
 	id: string;
-	kind: "terrain" | "structured-interior" | "static";
+	kind: LumaWorldDrawBatchKind;
 	geometrySignature: string;
 	vertexArray: VertexArray;
 	vertexBuffer: Buffer;
@@ -57,11 +68,13 @@ interface LumaBaseDrawBatch {
 	vertexCount: number;
 	triangleCount: number;
 	color: LumaVec4;
+	bvhItemKeys: readonly RenderBvhItemKey[];
+	bvhFallbackReason: string | null;
 }
 
 interface LumaIndexedDrawBatch extends LumaBaseDrawBatch {
 	drawMode: "indexed";
-	kind: "terrain" | "structured-interior" | "static";
+	kind: LumaWorldDrawBatchKind;
 	modelMatrix: LumaMat4;
 	staticPartCount: number;
 }
@@ -170,6 +183,7 @@ export function syncLumaWorldResources({
 				geometry,
 				modelMatrix,
 				color: buildDebugColor(`terrain/${tile.landblockId}`),
+				bvhBinding: deriveTerrainTileBatchBvhBinding(tile),
 				shaderLayout: LUMA_WORLD_SHADER_LAYOUT,
 				bufferLayout: LUMA_WORLD_BUFFER_LAYOUT,
 				retainedBatchIds,
@@ -201,6 +215,7 @@ export function syncLumaWorldResources({
 				geometry,
 				modelMatrix: multiplyMat4(chunkMatrix, placementMatrix),
 				color: buildDebugColor(cell.debugColorKey),
+				bvhBinding: deriveStructuredInteriorCellBatchBvhBinding(cell),
 				shaderLayout: LUMA_WORLD_SHADER_LAYOUT,
 				bufferLayout: LUMA_WORLD_BUFFER_LAYOUT,
 				retainedBatchIds,
@@ -224,6 +239,7 @@ export function syncLumaWorldResources({
 				geometry: bakedStaticBatch.geometry,
 				modelMatrix: bakedStaticBatch.modelMatrix,
 				color: bakedStaticBatch.color,
+				bvhBinding: bakedStaticBatch.bvhBinding,
 				shaderLayout: LUMA_WORLD_SHADER_LAYOUT,
 				bufferLayout: LUMA_WORLD_BUFFER_LAYOUT,
 				staticPartCount: bakedStaticBatch.staticPartCount,
@@ -299,6 +315,7 @@ function createOrReuseDrawBatch({
 	geometry,
 	modelMatrix,
 	color,
+	bvhBinding,
 	shaderLayout,
 	bufferLayout,
 	staticPartCount = 0,
@@ -311,6 +328,7 @@ function createOrReuseDrawBatch({
 	geometry: LumaIndexedGeometry;
 	modelMatrix: LumaMat4;
 	color: LumaVec4;
+	bvhBinding: LumaBatchBvhBinding;
 	shaderLayout: ShaderLayout;
 	bufferLayout: BufferLayout[];
 	staticPartCount?: number;
@@ -326,6 +344,8 @@ function createOrReuseDrawBatch({
 	) {
 		previousBatch.modelMatrix = modelMatrix;
 		previousBatch.color = color;
+		previousBatch.bvhItemKeys = bvhBinding.itemKeys;
+		previousBatch.bvhFallbackReason = bvhBinding.fallbackReason;
 		previousBatch.staticPartCount = staticPartCount;
 		retainedBatchIds.add(id);
 		return previousBatch;
@@ -365,6 +385,8 @@ function createOrReuseDrawBatch({
 		triangleCount: geometry.triangleCount,
 		modelMatrix,
 		color,
+		bvhItemKeys: bvhBinding.itemKeys,
+		bvhFallbackReason: bvhBinding.fallbackReason,
 		staticPartCount,
 	} satisfies LumaIndexedDrawBatch;
 	store.batchesById.set(id, batch);
@@ -419,7 +441,13 @@ interface BakedStaticBatchInput {
 	geometry: LumaIndexedGeometry;
 	modelMatrix: LumaMat4;
 	color: LumaVec4;
+	bvhBinding: LumaBatchBvhBinding;
 	staticPartCount: number;
+}
+
+interface LumaBatchBvhBinding {
+	itemKeys: readonly RenderBvhItemKey[];
+	fallbackReason: string | null;
 }
 
 function buildBakedStaticBatches({
@@ -658,9 +686,34 @@ function buildStaticBatch({
 			geometry,
 			modelMatrix: createTranslationMat4(chunkOffset),
 			color: buildDebugColor(colorKey),
+			bvhBinding: deriveStaticBatchBvhBinding(batchId, parts),
 			staticPartCount: parts.length,
 		},
 	];
+}
+
+function deriveStaticBatchBvhBinding(
+	batchId: string,
+	parts: readonly StaticRenderablePart[],
+): LumaBatchBvhBinding {
+	const itemKeys = new Set<RenderBvhItemKey>();
+	for (const part of parts) {
+		const itemKey = deriveStaticRenderablePartBvhItemKey(part);
+		if (!itemKey) {
+			return {
+				itemKeys: [],
+				fallbackReason: `luma static batch ${batchId} contains an unkeyed ${part.kind} part`,
+			};
+		}
+		itemKeys.add(itemKey);
+	}
+	return {
+		itemKeys: [...itemKeys],
+		fallbackReason:
+			itemKeys.size === 0
+				? `luma static batch ${batchId} contains no BVH item keys`
+				: null,
+	};
 }
 
 function formatBakedStaticBatchKey(part: StaticRenderablePart): string {

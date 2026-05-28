@@ -14,9 +14,3 @@ export function parseWorldRenderBackend(value: unknown): WorldRenderBackend {
 		`Unsupported ${WORLD_RENDER_BACKEND_ENV_NAME} value ${JSON.stringify(value)}. Expected "three" or "luma".`,
 	);
 }
-
-export function readWorldRenderBackend(): WorldRenderBackend {
-	return parseWorldRenderBackend(
-		import.meta.env.VITE_HOLTBURGER_RENDER_BACKEND,
-	);
-}

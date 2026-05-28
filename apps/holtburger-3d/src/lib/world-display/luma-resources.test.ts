@@ -211,6 +211,217 @@ describe("syncLumaWorldResources", () => {
 		expect(batch?.triangleCount).toBe(2);
 	});
 
+	it("stages newly committed static objects without rebuilding an existing promoted batch", () => {
+		const device = new FakeDevice();
+		const store = createLumaWorldResourceStore();
+		const promotedPart = createStaticPart({
+			groupKey: "static/promoted",
+			instanceId: "instance-a",
+			chunkLocalPosition: { x: 1, y: 2, z: 3 },
+		});
+		const stagedPart = createStaticPart({
+			gfxObjAssetId: "gfx-obj/01000002",
+			gfxObjId: 0x01000002,
+			groupKey: "static/staged",
+			instanceId: "instance-b",
+			chunkLocalPosition: { x: 4, y: 5, z: 6 },
+		});
+		const firstTransform = createChunkTransform({ x: 10, y: 20, z: 30 });
+
+		syncLumaWorldResources({
+			device: device.asDevice(),
+			store,
+			assetState: createAssetState({
+				extraGfxObjAssetIds: ["gfx-obj/01000002"],
+			}),
+			terrainScene: createTerrainScene({ tiles: [] }),
+			staticRenderableScene: createStaticRenderableScene({
+				parts: [promotedPart],
+			}),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [firstTransform],
+		});
+
+		const promotedBatch = store.batches.find((batch) =>
+			batch.id.startsWith("static-promoted/"),
+		);
+		const promotedVertexBuffer = toFakeBuffer(promotedBatch?.vertexBuffer);
+		expect(promotedBatch?.vertexCount).toBe(3);
+		expect(store.promotedStaticBatchCount).toBe(1);
+		expect(store.stagedStaticObjectCount).toBe(0);
+
+		syncLumaWorldResources({
+			device: device.asDevice(),
+			store,
+			assetState: createAssetState({
+				extraGfxObjAssetIds: ["gfx-obj/01000002"],
+			}),
+			terrainScene: createTerrainScene({ tiles: [] }),
+			staticRenderableScene: createStaticRenderableScene({
+				parts: [promotedPart, stagedPart],
+			}),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [firstTransform],
+		});
+
+		const reusedPromotedBatch = store.batches.find((batch) =>
+			batch.id.startsWith("static-promoted/"),
+		);
+		const stagedBatch = store.batches.find((batch) =>
+			batch.id.startsWith("static-staged/"),
+		);
+		expect(reusedPromotedBatch?.vertexBuffer).toBe(promotedVertexBuffer);
+		expect(reusedPromotedBatch?.staticPartCount).toBe(1);
+		expect(stagedBatch?.drawMode).toBe("indexed");
+		expect(stagedBatch?.kind).toBe("static");
+		expect(stagedBatch?.staticPartCount).toBe(1);
+		expect(store.promotedStaticBatchCount).toBe(1);
+		expect(store.stagedStaticObjectCount).toBe(1);
+		expect(store.stagedStaticPartCount).toBe(1);
+		expect(store.staticPromotionCount).toBe(0);
+	});
+
+	it("promotes staged static objects when the promotion threshold is reached", () => {
+		const device = new FakeDevice();
+		const store = createLumaWorldResourceStore();
+		const firstPart = createStaticPart({
+			groupKey: "static/first",
+			instanceId: "instance-a",
+			chunkLocalPosition: { x: 1, y: 2, z: 3 },
+		});
+		const secondPart = createStaticPart({
+			gfxObjAssetId: "gfx-obj/01000002",
+			gfxObjId: 0x01000002,
+			groupKey: "static/second",
+			instanceId: "instance-b",
+			chunkLocalPosition: { x: 4, y: 5, z: 6 },
+		});
+		const transform = createChunkTransform({ x: 10, y: 20, z: 30 });
+
+		syncLumaWorldResources({
+			device: device.asDevice(),
+			store,
+			assetState: createAssetState({
+				extraGfxObjAssetIds: ["gfx-obj/01000002"],
+			}),
+			terrainScene: createTerrainScene({ tiles: [] }),
+			staticRenderableScene: createStaticRenderableScene({ parts: [firstPart] }),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [transform],
+		});
+
+		syncLumaWorldResources({
+			device: device.asDevice(),
+			store,
+			assetState: createAssetState({
+				extraGfxObjAssetIds: ["gfx-obj/01000002"],
+			}),
+			terrainScene: createTerrainScene({ tiles: [] }),
+			staticRenderableScene: createStaticRenderableScene({
+				parts: [firstPart, secondPart],
+			}),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [transform],
+			staticPromotionPolicy: { stagedObjectPromotionThreshold: 1 },
+		});
+
+		const promotedBatch = store.batches.find((batch) =>
+			batch.id.startsWith("static-promoted/"),
+		);
+		expect(promotedBatch?.staticPartCount).toBe(2);
+		expect(promotedBatch?.vertexCount).toBe(6);
+		expect(store.promotedStaticBatchCount).toBe(1);
+		expect(store.stagedStaticObjectCount).toBe(0);
+		expect(store.stagedStaticPartCount).toBe(0);
+		expect(store.staticPromotionCount).toBe(1);
+		expect(
+			store.batches.some((batch) => batch.id.startsWith("static-staged/")),
+		).toBe(false);
+	});
+
+	it("reuses promoted and staged static vertex buffers when only chunk offsets change", () => {
+		const device = new FakeDevice();
+		const store = createLumaWorldResourceStore();
+		const promotedPart = createStaticPart({
+			groupKey: "static/promoted",
+			instanceId: "instance-a",
+			chunkLocalPosition: { x: 1, y: 2, z: 3 },
+		});
+		const stagedPart = createStaticPart({
+			gfxObjAssetId: "gfx-obj/01000002",
+			gfxObjId: 0x01000002,
+			groupKey: "static/staged",
+			instanceId: "instance-b",
+			chunkLocalPosition: { x: 4, y: 5, z: 6 },
+		});
+		const assetState = createAssetState({
+			extraGfxObjAssetIds: ["gfx-obj/01000002"],
+		});
+		const sceneWithBothParts = createStaticRenderableScene({
+			parts: [promotedPart, stagedPart],
+		});
+
+		syncLumaWorldResources({
+			device: device.asDevice(),
+			store,
+			assetState,
+			terrainScene: createTerrainScene({ tiles: [] }),
+			staticRenderableScene: createStaticRenderableScene({ parts: [promotedPart] }),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform({ x: 10, y: 20, z: 30 })],
+		});
+		syncLumaWorldResources({
+			device: device.asDevice(),
+			store,
+			assetState,
+			terrainScene: createTerrainScene({ tiles: [] }),
+			staticRenderableScene: sceneWithBothParts,
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform({ x: 10, y: 20, z: 30 })],
+		});
+
+		const promotedBatch = store.batches.find((batch) =>
+			batch.id.startsWith("static-promoted/"),
+		);
+		const stagedBatch = store.batches.find((batch) =>
+			batch.id.startsWith("static-staged/"),
+		);
+		const promotedVertexBuffer = toFakeBuffer(promotedBatch?.vertexBuffer);
+		const stagedVertexBuffer = toFakeBuffer(stagedBatch?.vertexBuffer);
+
+		syncLumaWorldResources({
+			device: device.asDevice(),
+			store,
+			assetState,
+			terrainScene: createTerrainScene({ tiles: [] }),
+			staticRenderableScene: sceneWithBothParts,
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform({ x: 50, y: 60, z: 70 })],
+		});
+
+		const reusedPromotedBatch = store.batches.find((batch) =>
+			batch.id.startsWith("static-promoted/"),
+		);
+		const reusedStagedBatch = store.batches.find((batch) =>
+			batch.id.startsWith("static-staged/"),
+		);
+		expect(reusedPromotedBatch?.vertexBuffer).toBe(promotedVertexBuffer);
+		expect(reusedStagedBatch?.vertexBuffer).toBe(stagedVertexBuffer);
+		expect(reusedPromotedBatch?.modelMatrix[12]).toBe(50);
+		expect(reusedPromotedBatch?.modelMatrix[13]).toBe(60);
+		expect(reusedPromotedBatch?.modelMatrix[14]).toBe(70);
+		expect(reusedStagedBatch?.modelMatrix[12]).toBe(50);
+		expect(reusedStagedBatch?.modelMatrix[13]).toBe(60);
+		expect(reusedStagedBatch?.modelMatrix[14]).toBe(70);
+	});
+
 	it("splits baked static batches by chunk and render domain", () => {
 		const device = new FakeDevice();
 		const store = createLumaWorldResourceStore();

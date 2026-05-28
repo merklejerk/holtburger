@@ -1,6 +1,6 @@
 # Holtburger 3D Luma Renderer Swapout Plan
 
-Status: Phase 4B implemented; Phase 4C recommended before Phase 5.
+Status: Phase 4C implemented; Phase 5 is next.
 
 ## Purpose
 
@@ -266,6 +266,8 @@ Progress as of 2026-05-28:
   - `npm run lint:ts`
   - `npm run lint:dead`
   - `npm run build`
+  - `VITE_HOLTBURGER_RENDER_BACKEND=luma npm run build`
+  - `git diff --check`
   - `VITE_HOLTBURGER_RENDER_BACKEND=luma npm run build`
 
 Decisions and course corrections:
@@ -1181,6 +1183,61 @@ Decisions and future debt:
 - Future optimization may replace full promoted-batch rebuilds with segmented buffers, free lists,
   or append-only pages. Do not add that complexity unless profiling shows the simple promotion
   policy is still too expensive.
+
+Progress as of 2026-05-28:
+
+- Added luma-local static promotion state to `LumaWorldResourceStore`:
+  - `staticPromotionGroups` tracks promoted object keys per chunk/domain/render-state batch key;
+  - promoted batches use stable `static-promoted/...` ids;
+  - staged object batches use stable `static-staged/...` ids;
+  - objects are rendered in exactly one tier per batch key.
+- Reused the Phase 4A whole-object readiness identity by exporting
+  `staticRenderableObjectKey(...)` from static readiness. This keeps luma staging aligned with the
+  same object boundary used to decide when multi-part objects may commit.
+- Kept the first committed object set for a batch key promoted immediately. Later committed objects
+  stage as per-object indexed batches until an explicit promotion condition is met. This preserves
+  the Phase 4B behavior for already-hydrated scenes while preventing one-by-one hydration from
+  rebuilding the existing promoted batch each time.
+- Added deterministic promotion controls to `syncLumaWorldResources(...)`:
+  - default staged-object threshold is `16`;
+  - callers/tests can override `stagedObjectPromotionThreshold`;
+  - callers/tests can force promotion with `forcePromote`.
+- Re-anchor/chunk-offset changes update promoted and staged draw-time transforms without rebuilding
+  either tier's vertex/index buffers.
+- Added luma-local counters on the resource store for promoted static batches, staged static object
+  batches, staged static parts, and promotion count. These are intentionally not added to the
+  shared `WorldRenderDebugMetrics` contract yet because the Three path has no honest equivalent.
+- Added tests covering:
+  - newly committed objects entering staging without rebuilding the existing promoted batch;
+  - staged objects rendering through indexed draw batches;
+  - threshold promotion moving staged objects into the promoted batch and removing staged draws;
+  - re-anchor updates reusing both promoted and staged buffers.
+- Validation run:
+  - `npm run test:ts -- src/lib/world-display/luma-resources.test.ts src/lib/world-display/static-renderable-readiness.test.ts`
+  - `npm run check`
+  - `npm run lint:ts`
+  - `npm run lint:dead`
+  - `npm run build`
+
+Course corrections, refinements, and cleanup targets:
+
+- The promotion hook currently lives on `syncLumaWorldResources(...)`; the app renderer does not yet
+  pass a policy override. Phase 5 should decide whether draw-list planning or a small renderer-local
+  scheduler owns force-promote/full-sync requests.
+- `staticInstanceCount` remains the legacy global metric shim and still reports total luma static
+  part count across promoted and staged tiers. Replace it with explicit baked/static/staged metric
+  names when the metrics contract is cleaned up after Phase 5.
+- Phase 5 should treat both `static-promoted/...` and `static-staged/...` ids as normal static draw
+  units. It must not assume a single static batch id per chunk/domain group.
+- The current threshold policy is deterministic and testable, but not frame-budget-aware. If Phase 5
+  reveals visible promotion hitches, add a small Phase 5A before material work to schedule promotion
+  rebuilds under an explicit frame budget.
+- Texture atlas support remains the prerequisite for promoting this from flat-color/debug statics to
+  real-material static batching. Atlas/material-set compatibility must join the batch key before
+  textured static promotion is considered correct.
+- No immediate interim phase is required before Phase 5. The remaining debt is either Phase 5
+  draw-list awareness or Phase 6 material/atlas work, not a blocker for basic culling and draw-list
+  planning.
 
 ## Phase 5: Basic Frame Culling and Draw Lists
 

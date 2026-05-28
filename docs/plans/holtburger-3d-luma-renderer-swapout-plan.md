@@ -1,6 +1,6 @@
 # Holtburger 3D Luma Renderer Swapout Plan
 
-Status: Phase 4A.1 implemented; Phase 4B recommended before Phase 5.
+Status: Phase 4B implemented; Phase 4C recommended before Phase 5.
 
 ## Purpose
 
@@ -1060,10 +1060,51 @@ Exit criteria:
 - Baked batch rebuilds are driven by committed readiness membership changes, not every raw asset
   hydration event.
 
-Decisions and future debt:
+Progress as of 2026-05-28:
+
+- Replaced the Phase 4 luma static instancing proof with baked indexed static batches in
+  `luma-resources.ts`.
+- Baked static batch keys now use `renderDomain | renderChunk.chunkKey | debug-flat`; they do not
+  include `gfxObjAssetId`.
+- Static geometry is packed by transforming each committed static part's source gfx vertices through
+  parent placements, chunk-local instance placement, part placements, and AC scale conversion into
+  chunk-local positions.
+- Render chunk offsets stay out of baked static vertex buffers. The luma renderer applies the chunk
+  offset as the indexed batch model transform at draw time, so re-anchor updates change uniforms
+  without rebuilding static buffers.
+- Removed the luma static instancing shader, pipeline, buffer layout, instance matrix buffer, and
+  instanced draw branch. Terrain, structured interiors, and baked statics now share the same indexed
+  flat-color world pipeline.
+- Added tests for:
+  - baked chunk-local static geometry with no instance attributes;
+  - re-anchor/chunk-offset changes reusing the baked vertex buffer;
+  - grouping different `gfxObjAssetId` values into one static batch when chunk/domain/render-state
+    match;
+  - splitting baked static batches by chunk and render domain.
+- Browser diagnostic:
+  - temporary `luma-phase4b-diagnostic.html` rendered a synthetic baked static triangle through the
+    real luma implementation under headless Chrome/SwiftShader;
+  - center `readPixels` sample was `188,105,56,255`, confirming the baked path rendered;
+  - temporary diagnostic file was deleted.
+- Validation run:
+  - `npm run test:ts -- src/lib/world-display/luma-resources.test.ts src/lib/world-display/scene-renderable-readiness.test.ts src/lib/world-display/static-renderable-readiness.test.ts`
+  - `npm run check`
+  - `npm run lint:ts`
+  - `npm run lint:dead`
+  - `npm run build`
+  - `VITE_HOLTBURGER_RENDER_BACKEND=luma npm run build`
+
+Decisions, course corrections, and future debt:
 
 - This stays luma-specific for now. The Three backend's current `InstancedMesh` plus chunk-root model
   should not be contorted to match luma's lower-level submission strategy during the swapout.
+- Phase 4B uses the existing indexed world shader's `uModelViewProjection` path for static chunk
+  offsets rather than introducing a separate `uChunkOffset` shader uniform. This preserves the same
+  invariant: baked static vertex buffers stay chunk-local and re-anchor updates change draw-time
+  uniform data only.
+- `staticInstanceCount` remains as a temporary legacy metric field and now reports baked static part
+  count for the luma path. Rename/promote this in a later metrics cleanup once Phase 5 draw-list
+  metrics establish the final terminology.
 - If the baked static batch model proves correct and useful, promote the pure grouping and
   chunk-local static packing logic into a shared renderer-facing helper later. Do not promote the
   luma GPU resource types, pipelines, or draw submission objects.
@@ -1072,6 +1113,74 @@ Decisions and future debt:
 - Texture atlas construction is now a prerequisite for efficient real-material baked static batches.
   Until atlas support exists, Phase 4B's baked static model is a geometry/draw-list proof, not proof
   that textured statics can be submitted in the same coarse batches.
+- Course correction: Phase 4B prevents raw hydration events from directly becoming baked batches,
+  but it still rebuilds the affected baked batch immediately whenever committed membership changes.
+  Because landblock statics can commit one object at a time, add Phase 4C before Phase 5 to stage
+  newly committed objects without making them invisible.
+- The next known cleanup target is replacing legacy static instance metric names and teaching Phase 5
+  draw-list metrics to report baked static batch/part/staging counts directly.
+
+## Phase 4C: Luma Static Batch Staging and Promotion
+
+Purpose: avoid rebuilding large baked static chunk/domain batches every time one more static object
+finishes incubation, while still rendering newly committed objects immediately.
+
+Tasks:
+
+- Keep Phase 4A/4A.1 object readiness unchanged: only whole committed static objects may enter luma.
+- Split luma static submission into two luma-local tiers:
+  - promoted baked batches: coarse chunk/domain/render-state buffers from Phase 4B;
+  - staging draws: newly committed objects that are renderable immediately but not yet folded into
+    the promoted baked batch.
+- Staging objects must be visible. They may use smaller baked-per-object indexed buffers or another
+  simple non-instanced indexed path, but should not force a promoted chunk/domain batch rebuild on
+  every arrival.
+- Define a deterministic staging object key based on the same object identity used by readiness plus
+  render-state facts needed for the current flat-color path.
+- Track promoted membership and staging membership separately. A committed object should be in
+  exactly one tier for a given render-state/chunk/domain group.
+- Add a promotion policy that rebuilds promoted baked batches only when one of these explicit
+  conditions is met:
+  - enough staged objects accumulate;
+  - a short debounce window expires;
+  - a chunk/domain group is marked stable enough by scene hydration signals if such a signal exists;
+  - an explicit full-sync/rebuild is requested;
+  - a future frame-budget scheduler permits it.
+- Keep the initial promotion policy simple and deterministic for tests. A count threshold plus
+  explicit force-promote hook is acceptable for Phase 4C; real frame-budget scheduling can wait.
+- Ensure re-anchor/chunk-offset changes still update draw-time transforms for both promoted and
+  staging tiers without rebuilding vertex buffers.
+- Make Phase 5 draw-list planning aware that luma static draw units can be either promoted baked
+  batches or staging object batches.
+- Add metrics for promoted static batch count, staged static object count, staged static part count,
+  and promotion/rebuild count. If the current metrics contract is too noisy, keep these luma-local
+  first and record the global metrics cleanup target.
+- Add tests for:
+  - a newly committed object entering staging without rebuilding an existing promoted batch;
+  - staged objects rendering as indexed draw batches;
+  - threshold or explicit promotion moving staged objects into the promoted baked batch;
+  - a staged object disappearing from staging after promotion;
+  - re-anchor updates reusing both promoted and staged vertex buffers.
+
+Exit criteria:
+
+- Newly committed luma static objects are renderable immediately.
+- Adding a staged object does not rebuild an existing promoted baked static batch until promotion
+  policy allows it.
+- Promoted and staged tiers produce stable batch ids that Phase 5 can include in draw lists.
+- The plan records any remaining legacy metric names or staging promotion heuristics that need
+  cleanup after Phase 5.
+
+Decisions and future debt:
+
+- This is luma-local. Do not change Three's `InstancedMesh` static path to mimic luma staging.
+- Staging is a renderable tier, not a hidden waiting room. The user should not see committed objects
+  vanish while waiting for batch promotion.
+- Texture atlas work will need to make promotion keys include atlas/material-set compatibility.
+  Until then, Phase 4C's staging/promotion policy is only proven for flat-color/debug statics.
+- Future optimization may replace full promoted-batch rebuilds with segmented buffers, free lists,
+  or append-only pages. Do not add that complexity unless profiling shows the simple promotion
+  policy is still too expensive.
 
 ## Phase 5: Basic Frame Culling and Draw Lists
 
@@ -1089,8 +1198,8 @@ Tasks:
   - `deriveWorldRenderGraphForPolicy`.
 - Expand visible candidate batch ids into pass-local `LumaDraw` commands.
 - Sort `LumaDraw` commands by pass, pipeline/material class, batch id, geometry/range, and draw
-  state. Do not assume statics are instanced; Phase 4B should make baked static batch ids the normal
-  static draw unit.
+  state. Do not assume statics are instanced; Phase 4B/4C should make promoted baked static batch ids
+  and staged static object batch ids the normal static draw units.
 
 Exit criteria:
 

@@ -26,9 +26,10 @@ import type {
 	StaticRenderablePart,
 	StaticRenderableSceneModel,
 } from "./static-renderables";
-import { deriveStaticRenderableReadinessModel } from "./static-renderable-readiness";
+import { deriveSceneRenderableReadinessModel } from "./scene-renderable-readiness";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
+import type { TransitionPortalCandidateModel } from "./transition-portal-work-items";
 
 export const LUMA_WORLD_SHADER_LAYOUT: ShaderLayout = {
 	attributes: [{ name: "position", location: 0, type: "vec3<f32>" }],
@@ -130,6 +131,7 @@ export function syncLumaWorldResources({
 	terrainScene,
 	staticRenderableScene,
 	structuredInteriorScene,
+	transitionPortalModel,
 	renderChunkTransforms,
 }: {
 	device: Device;
@@ -138,6 +140,7 @@ export function syncLumaWorldResources({
 	terrainScene: TerrainSceneModel;
 	staticRenderableScene: StaticRenderableSceneModel;
 	structuredInteriorScene: StructuredInteriorSceneModel;
+	transitionPortalModel: TransitionPortalCandidateModel;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 }): void {
 	const chunkOffsetByKey = new Map(
@@ -148,12 +151,16 @@ export function syncLumaWorldResources({
 	);
 	const nextBatches: LumaWorldDrawBatch[] = [];
 	const retainedBatchIds = new Set<string>();
-	const committedStaticRenderableScene = deriveStaticRenderableReadinessModel({
+	const committedScenes = deriveSceneRenderableReadinessModel({
 		assetState,
-		scene: staticRenderableScene,
-	}).committedScene;
+		commitPolicy: "allow-fallback",
+		terrainScene,
+		structuredInteriorScene,
+		staticRenderableScene,
+		transitionPortalModel,
+	});
 
-	for (const tile of terrainScene.tiles) {
+	for (const tile of committedScenes.committedTerrainScene.tiles) {
 		const chunkOffset = chunkOffsetByKey.get(tile.renderChunk.chunkKey);
 		if (!chunkOffset) {
 			continue;
@@ -183,7 +190,7 @@ export function syncLumaWorldResources({
 		);
 	}
 
-	for (const cell of structuredInteriorScene.cells) {
+	for (const cell of committedScenes.committedStructuredInteriorScene.cells) {
 		const chunkOffset = chunkOffsetByKey.get(cell.renderChunk.chunkKey);
 		if (!chunkOffset) {
 			continue;
@@ -217,7 +224,7 @@ export function syncLumaWorldResources({
 	for (const [
 		groupKey,
 		parts,
-	] of committedStaticRenderableScene.partsByRenderGroupKey) {
+	] of committedScenes.committedStaticRenderableScene.partsByRenderGroupKey) {
 		const firstPart = parts[0];
 		if (!firstPart) {
 			continue;

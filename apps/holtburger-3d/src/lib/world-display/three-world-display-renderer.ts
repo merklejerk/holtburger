@@ -55,7 +55,7 @@ import {
 	type StaticRenderableSceneModel,
 	isPreparedGfxObjAsset,
 } from "./static-renderables";
-import { deriveStaticRenderableReadinessModel } from "./static-renderable-readiness";
+import { deriveSceneRenderableReadinessModel } from "./scene-renderable-readiness";
 import {
 	type MaterialResourceDiagnostic,
 	WorldMaterialResourceCache,
@@ -1217,7 +1217,9 @@ export function createThreeWorldDisplayRenderer(
 		const eligibleDirections = new Set(
 			renderPolicy.transitionLevels.map((level) => level.direction),
 		);
-		for (const candidate of transitionPortalModel.candidates) {
+		const committedTransitionPortalModel = deriveCommittedRenderScenes({})
+			.committedTransitionPortalModel;
+		for (const candidate of committedTransitionPortalModel.candidates) {
 			const visibility = evaluateTransitionPortalVisibility(
 				candidate,
 				visibilityContext,
@@ -1734,11 +1736,32 @@ export function createThreeWorldDisplayRenderer(
 		return { ...frame, aspect };
 	}
 
+	function deriveCommittedRenderScenes(overrides: {
+		terrainScene?: TerrainSceneModel;
+		staticRenderableScene?: StaticRenderableSceneModel;
+		structuredInteriorScene?: StructuredInteriorSceneModel;
+		transitionPortalModel?: TransitionPortalCandidateModel;
+	}) {
+		return deriveSceneRenderableReadinessModel({
+			assetState,
+			terrainScene: overrides.terrainScene ?? terrainScene,
+			staticRenderableScene:
+				overrides.staticRenderableScene ?? staticRenderableScene,
+			structuredInteriorScene:
+				overrides.structuredInteriorScene ?? structuredInteriorScene,
+			transitionPortalModel:
+				overrides.transitionPortalModel ?? transitionPortalModel,
+		});
+	}
+
 	function syncTerrainMeshes(sceneModel: TerrainSceneModel): void {
 		syncRenderChunkRoots(renderChunkTransforms);
 
+		const committedSceneModel = deriveCommittedRenderScenes({
+			terrainScene: sceneModel,
+		}).committedTerrainScene;
 		const activeAssetIds = new Set(
-			sceneModel.tiles.map((tile) => tile.assetId),
+			committedSceneModel.tiles.map((tile) => tile.assetId),
 		);
 		for (const [assetId, mesh] of terrainMeshes.entries()) {
 			if (activeAssetIds.has(assetId)) {
@@ -1751,7 +1774,7 @@ export function createThreeWorldDisplayRenderer(
 			terrainBatchCandidates.unregister(terrainTileBatchId(assetId));
 		}
 
-		for (const tile of sceneModel.tiles) {
+		for (const tile of committedSceneModel.tiles) {
 			const chunkRoot = getRenderChunkRoot(tile.renderChunk.chunkKey);
 			const existing = terrainMeshes.get(tile.assetId);
 			if (existing) {
@@ -2136,11 +2159,9 @@ export function createThreeWorldDisplayRenderer(
 	): void {
 		syncRenderChunkRoots(renderChunkTransforms);
 
-		const readinessModel = deriveStaticRenderableReadinessModel({
-			assetState,
-			scene: sceneModel,
-		});
-		const partsByGroupKey = readinessModel.committedScene.partsByRenderGroupKey;
+		const partsByGroupKey = deriveCommittedRenderScenes({
+			staticRenderableScene: sceneModel,
+		}).committedStaticRenderableScene.partsByRenderGroupKey;
 		const activeStaticGeometryKeys = new Set<string>();
 
 		for (const [groupKey, mesh] of staticRenderableGroupMeshes.entries()) {
@@ -2330,8 +2351,11 @@ export function createThreeWorldDisplayRenderer(
 	): void {
 		syncRenderChunkRoots(renderChunkTransforms);
 
+		const committedSceneModel = deriveCommittedRenderScenes({
+			structuredInteriorScene: sceneModel,
+		}).committedStructuredInteriorScene;
 		const activeRenderKeys = new Set(
-			sceneModel.cells.map((cell) => cell.renderKey),
+			committedSceneModel.cells.map((cell) => cell.renderKey),
 		);
 		for (const [renderKey, mesh] of structuredInteriorMeshes.entries()) {
 			if (activeRenderKeys.has(renderKey)) {
@@ -2346,7 +2370,7 @@ export function createThreeWorldDisplayRenderer(
 			);
 		}
 
-		for (const cell of sceneModel.cells) {
+		for (const cell of committedSceneModel.cells) {
 			const chunkRoot = getRenderChunkRoot(cell.renderChunk.chunkKey);
 			let mesh = structuredInteriorMeshes.get(cell.renderKey);
 			if (
@@ -2446,9 +2470,12 @@ export function createThreeWorldDisplayRenderer(
 
 	function syncPortalMaskMeshes(model: TransitionPortalCandidateModel): void {
 		syncRenderChunkRoots(renderChunkTransforms);
+		const committedModel = deriveCommittedRenderScenes({
+			transitionPortalModel: model,
+		}).committedTransitionPortalModel;
 
 		const activeGroupIds = new Set(
-			model.candidates.map((candidate) => candidate.id),
+			committedModel.candidates.map((candidate) => candidate.id),
 		);
 		for (const [groupId, mesh] of portalMaskMeshes.entries()) {
 			if (activeGroupIds.has(groupId)) {
@@ -2469,7 +2496,7 @@ export function createThreeWorldDisplayRenderer(
 			}
 		}
 
-		for (const candidate of model.candidates) {
+		for (const candidate of committedModel.candidates) {
 			const chunkRoot = getRenderChunkRoot(candidate.renderChunk.chunkKey);
 			let mesh = portalMaskMeshes.get(candidate.id);
 			if (!mesh) {

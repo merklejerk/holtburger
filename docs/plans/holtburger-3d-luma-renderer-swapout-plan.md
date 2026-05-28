@@ -1,6 +1,6 @@
 # Holtburger 3D Luma Renderer Swapout Plan
 
-Status: Phase 4A implemented; Phase 4A.1 and Phase 4B recommended before Phase 5.
+Status: Phase 4A.1 implemented; Phase 4B recommended before Phase 5.
 
 ## Purpose
 
@@ -840,6 +840,13 @@ Progress as of 2026-05-28:
   - `fallback-resolved` for parts that can render with explicit debug/no-material fallback because a
     material recipe or texture dependency is missing;
   - `failed` for prepared gfx geometry that has no renderable triangles.
+- Added an explicit commit policy after the initial implementation proved too permissive for the
+  Three backend:
+  - default `resolved-only` waits for all known dependencies before committing a renderable;
+  - `allow-fallback` is opt-in for debug/no-material and flat-color proof paths.
+- Added object-level commit gating for static renderables composed of multiple parts. Part readiness
+  records remain per-part for diagnostics, but committed static output includes an object's parts
+  only when every part in that object is commit-eligible under the selected policy.
 - Routed the Three static `InstancedMesh` sync through the committed readiness scene before building
   or retaining instance groups.
 - Routed luma Phase 4 static instanced resource sync through the committed readiness scene before
@@ -859,6 +866,13 @@ Decisions, course corrections, and future debt:
   the same answer about which static renderables are eligible to enter the render pipeline.
 - Resource realization remains backend-specific. Readiness records may describe intent and fallback
   decisions, but they must not carry Three materials/textures or luma buffers/textures.
+- `fallback-resolved` is a terminal readiness state, not automatically a render commit. Normal
+  rendering should use the default `resolved-only` policy so objects do not pop in untextured while
+  material and texture dependencies hydrate.
+- Static commit granularity is now object-level, using render domain, instance id, source asset,
+  owning location, and render chunk as the object identity. If future setup/appearance data exposes a
+  better stable object id, switch to that and keep the current key as a compatibility fallback only
+  if needed.
 - Readiness metrics currently live on the readiness model rather than the global
   `WorldRenderDebugMetrics` contract. That keeps the renderer metrics surface stable while Phase 4B
   proves which counts and samples are useful in the UI. Promote selected counts after Phase 4B if
@@ -908,10 +922,12 @@ Tasks:
   for example a generic readiness record or committed-item filter keyed by `TItem`. Keep the
   dependency evaluators type-specific so terrain, interiors, statics, and portals keep their own
   honest readiness rules.
-- Terrain readiness should commit only tiles with render chunk placement, prepared terrain geometry,
-  and an explicit material/fallback state.
-- Structured interior readiness should commit only cells with render chunk placement, prepared cell
-  render geometry, and explicit material/fallback state.
+- Terrain readiness should commit by default only tiles with render chunk placement, prepared terrain
+  geometry, and resolved material state. Fallback material state should be commit-eligible only when
+  the caller explicitly chooses the `allow-fallback` policy.
+- Structured interior readiness should commit by default only cells with render chunk placement,
+  prepared cell render geometry, and resolved material state. Fallback material state should be
+  commit-eligible only when the caller explicitly chooses the `allow-fallback` policy.
 - Portal/aperture readiness should make missing aperture geometry, missing target cell data, and
   fallback/no-render decisions explicit before portal pass planning consumes them.
 - Route both renderer backends through the committed current-scene bundle. Backend code should no
@@ -932,7 +948,36 @@ Exit criteria:
 - Phase 4B can build baked luma static buffers from the committed static scene inside the broader
   committed-scene bundle.
 
-Decisions and future debt:
+Progress as of 2026-05-28:
+
+- Added `scene-renderable-readiness.ts`, a composed current-scene readiness boundary that emits
+  committed terrain, structured-interior, static, and transition-portal inputs plus combined
+  readiness records and metrics.
+- Kept readiness evaluation type-specific:
+  - terrain commits valid geometry with ready material resources by default, while explicit
+    `allow-fallback` callers may commit fallback material state;
+  - structured interiors commit cells with non-empty prepared render geometry and record missing
+    env-cell/geometry/cell-structure facts separately;
+  - statics reuse the Phase 4A static readiness model;
+  - transition portals commit candidates with usable aperture geometry and record skipped/no-render
+    portal aperture decisions.
+- Used TypeScript generics for shared readiness records, committed-item filtering, and record
+  creation while keeping the actual dependency evaluators family-specific.
+- Routed the Three backend's terrain, static, structured-interior, and portal-mask sync paths through
+  the committed current-scene bundle. Portal visibility work now iterates committed portal
+  candidates.
+- Routed luma world resource sync through the same committed current-scene bundle before uploading
+  terrain, structured-interior, and static batches. The current luma flat-color proof explicitly
+  opts into `allow-fallback`.
+- Added focused tests for terrain material fallback, empty terrain geometry failure, structured
+  interior missing/ready facts, empty interior geometry failure, portal no-render decisions, invalid
+  portal aperture filtering, and stable committed output under unrelated asset hydration.
+- Validation run:
+  - `npm run test:ts -- src/lib/world-display/scene-renderable-readiness.test.ts src/lib/world-display/static-renderable-readiness.test.ts src/lib/world-display/luma-resources.test.ts`
+  - `npm run check`
+  - `npm run lint:dead`
+
+Decisions, course corrections, and future debt:
 
 - Do not generalize around future dynamic entities yet, because players, mobs, projectiles, loot,
   particle systems, decals, and transient effects will add animation, pose, simulation, attachment,
@@ -942,9 +987,26 @@ Decisions and future debt:
 - Generic TypeScript readiness containers are acceptable if they reduce repeated status/metrics code,
   but the plan should avoid generic renderer-facing `Renderable<T>` abstractions until at least two
   materially different dynamic renderable families exist and prove the shape.
-- If Phase 4A.1 discovers that terrain/interior/portal models are already fully committed by their
-  derivation functions, document that as an invariant and keep the phase as a small consolidation
-  rather than adding unnecessary wrappers.
+- Course correction: the first Phase 4A.1 implementation committed `fallback-resolved` records by
+  default, which allowed Three to keep showing untextured fallback objects while dependencies
+  hydrated. Default commit policy is now `resolved-only`; luma's current flat-color path opts into
+  `allow-fallback` because it intentionally ignores real materials.
+- Static composed objects are committed as whole objects, not individual parts. A setup/model object
+  with one pending part now keeps all sibling parts incubating until every required part is
+  commit-eligible under the selected policy.
+- Terrain and structured-interior scene derivation were already mostly committed by construction:
+  missing prepared source data usually appears as missing-id diagnostics rather than half-built
+  renderables. Phase 4A.1 keeps that invariant visible at the renderer boundary rather than adding
+  unnecessary wrappers.
+- Readiness metrics still live on the readiness model rather than being promoted into
+  `WorldRenderDebugMetrics`. Promote selected combined counts only after Phase 4B shows which ones
+  are useful in the Scene/Debug panels.
+- Portal readiness currently filters impossible aperture candidates defensively and records existing
+  skipped/no-render diagnostics. It does not rederive portal candidates; candidate construction
+  remains the source of truth for portal topology and aperture matching.
+- No immediate interim phase is required before Phase 4B. The committed current-scene bundle now
+  gives Phase 4B a stable input; the main remaining prep is choosing the baked static batch
+  invalidation/signature shape.
 
 ## Phase 4B: Luma Baked Static Batch Model
 

@@ -53,7 +53,7 @@ describe("deriveStaticRenderableReadinessModel", () => {
 		expect(readiness.metrics.pendingCount).toBe(2);
 	});
 
-	it("treats material dependency misses as committed debug fallback resolution", () => {
+	it("keeps material dependency misses out of committed output by default", () => {
 		const part = createStaticPart({
 			materialSlots: [
 				{
@@ -72,11 +72,33 @@ describe("deriveStaticRenderableReadinessModel", () => {
 			"fallback-resolved",
 		]);
 		expect(readiness.records[0]?.dependencyClass).toBe("material-plan");
-		expect(readiness.committedScene.parts).toEqual([part]);
+		expect(readiness.committedScene.parts).toEqual([]);
 		expect(readiness.metrics.fallbackResolvedCount).toBe(1);
 	});
 
-	it("treats texture dependency misses as committed debug fallback resolution", () => {
+	it("can commit material fallback records when fallback policy is explicit", () => {
+		const part = createStaticPart({
+			materialSlots: [
+				{
+					slotIndex: 0,
+					surfaceId: 0x08000001,
+					materialAssetId: "material/08000001",
+				},
+			],
+		});
+		const readiness = deriveStaticRenderableReadinessModel({
+			assetState: createAssetState([createGfxObjRecord()]),
+			commitPolicy: "allow-fallback",
+			scene: createStaticRenderableScene([part]),
+		});
+
+		expect(readiness.records.map((record) => record.status)).toEqual([
+			"fallback-resolved",
+		]);
+		expect(readiness.committedScene.parts).toEqual([part]);
+	});
+
+	it("keeps texture dependency misses out of committed output by default", () => {
 		const part = createStaticPart({
 			materialSlots: [
 				{
@@ -100,7 +122,56 @@ describe("deriveStaticRenderableReadinessModel", () => {
 		expect(readiness.records.map(statusKey)).toEqual([
 			"fallback-resolved:surface-texture:render-surface/06000001",
 		]);
-		expect(readiness.committedScene.parts).toEqual([part]);
+		expect(readiness.committedScene.parts).toEqual([]);
+	});
+
+	it("commits no parts from a composed object until every part is commit eligible", () => {
+		const readyPart = createStaticPart({
+			gfxObjAssetId: "gfx-obj/01000001",
+			gfxObjId: 0x01000001,
+			partIndex: 0,
+			renderKey: "static/object-a/part-0",
+		});
+		const pendingPart = createStaticPart({
+			gfxObjAssetId: "gfx-obj/01000002",
+			gfxObjId: 0x01000002,
+			partIndex: 1,
+			renderKey: "static/object-a/part-1",
+		});
+		const readiness = deriveStaticRenderableReadinessModel({
+			assetState: createAssetState([createGfxObjRecord()]),
+			scene: createStaticRenderableScene([readyPart, pendingPart]),
+		});
+
+		expect(readiness.records.map(statusKey)).toEqual([
+			"resolved:gfx-geometry:gfx-obj/01000001",
+			"pending:gfx-geometry:gfx-obj/01000002",
+		]);
+		expect(readiness.committedScene.parts).toEqual([]);
+	});
+
+	it("commits all parts from a composed object once every part is commit eligible", () => {
+		const firstPart = createStaticPart({
+			gfxObjAssetId: "gfx-obj/01000001",
+			gfxObjId: 0x01000001,
+			partIndex: 0,
+			renderKey: "static/object-a/part-0",
+		});
+		const secondPart = createStaticPart({
+			gfxObjAssetId: "gfx-obj/01000002",
+			gfxObjId: 0x01000002,
+			partIndex: 1,
+			renderKey: "static/object-a/part-1",
+		});
+		const readiness = deriveStaticRenderableReadinessModel({
+			assetState: createAssetState([
+				createGfxObjRecord(),
+				createGfxObjRecord({ assetId: "gfx-obj/01000002" }),
+			]),
+			scene: createStaticRenderableScene([firstPart, secondPart]),
+		});
+
+		expect(readiness.committedScene.parts).toEqual([firstPart, secondPart]);
 	});
 
 	it("excludes failed empty geometry from committed output", () => {

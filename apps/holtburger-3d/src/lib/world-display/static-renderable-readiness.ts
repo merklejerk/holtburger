@@ -123,7 +123,7 @@ function deriveCommittedObjectKeys(
 	return committedObjectKeys;
 }
 
-function staticRenderableObjectKey(part: StaticRenderablePart): string {
+export function staticRenderableObjectKey(part: StaticRenderablePart): string {
 	return [
 		part.renderDomain,
 		part.instanceId,

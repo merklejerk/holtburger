@@ -27,6 +27,7 @@ import type {
 	StaticRenderableSceneModel,
 } from "./static-renderables";
 import { deriveSceneRenderableReadinessModel } from "./scene-renderable-readiness";
+import { staticRenderableObjectKey } from "./static-renderable-readiness";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
 import type { TransitionPortalCandidateModel } from "./transition-portal-work-items";
@@ -68,20 +69,41 @@ interface LumaIndexedDrawBatch extends LumaBaseDrawBatch {
 export interface LumaWorldResourceStore {
 	batches: LumaWorldDrawBatch[];
 	batchesById: Map<string, LumaWorldDrawBatch>;
+	staticPromotionGroups: Map<string, LumaStaticPromotionGroup>;
 	terrainBatchCount: number;
 	structuredInteriorBatchCount: number;
 	staticBatchCount: number;
+	promotedStaticBatchCount: number;
+	stagedStaticObjectCount: number;
+	stagedStaticPartCount: number;
+	staticPromotionCount: number;
 	staticInstanceCount: number;
 	triangleCount: number;
 }
+
+export interface LumaStaticPromotionPolicy {
+	stagedObjectPromotionThreshold?: number;
+	forcePromote?: boolean;
+}
+
+interface LumaStaticPromotionGroup {
+	promotedObjectKeys: Set<string>;
+}
+
+const DEFAULT_STATIC_STAGED_OBJECT_PROMOTION_THRESHOLD = 16;
 
 export function createLumaWorldResourceStore(): LumaWorldResourceStore {
 	return {
 		batches: [],
 		batchesById: new Map(),
+		staticPromotionGroups: new Map(),
 		terrainBatchCount: 0,
 		structuredInteriorBatchCount: 0,
 		staticBatchCount: 0,
+		promotedStaticBatchCount: 0,
+		stagedStaticObjectCount: 0,
+		stagedStaticPartCount: 0,
+		staticPromotionCount: 0,
 		staticInstanceCount: 0,
 		triangleCount: 0,
 	};
@@ -96,6 +118,7 @@ export function syncLumaWorldResources({
 	structuredInteriorScene,
 	transitionPortalModel,
 	renderChunkTransforms,
+	staticPromotionPolicy,
 }: {
 	device: Device;
 	store: LumaWorldResourceStore;
@@ -105,6 +128,7 @@ export function syncLumaWorldResources({
 	structuredInteriorScene: StructuredInteriorSceneModel;
 	transitionPortalModel: TransitionPortalCandidateModel;
 	renderChunkTransforms: readonly RenderChunkTransform[];
+	staticPromotionPolicy?: LumaStaticPromotionPolicy;
 }): void {
 	const chunkOffsetByKey = new Map(
 		renderChunkTransforms.map((transform) => [
@@ -187,6 +211,8 @@ export function syncLumaWorldResources({
 	for (const bakedStaticBatch of buildBakedStaticBatches({
 		assetState,
 		chunkOffsetByKey,
+		promotionPolicy: staticPromotionPolicy,
+		store,
 		staticRenderableScene: committedScenes.committedStaticRenderableScene,
 	})) {
 		nextBatches.push(
@@ -223,6 +249,19 @@ export function syncLumaWorldResources({
 	store.staticBatchCount = store.batches.filter(
 		(batch) => batch.kind === "static",
 	).length;
+	store.promotedStaticBatchCount = store.batches.filter((batch) =>
+		batch.id.startsWith("static-promoted/"),
+	).length;
+	store.stagedStaticObjectCount = store.batches.filter((batch) =>
+		batch.id.startsWith("static-staged/"),
+	).length;
+	store.stagedStaticPartCount = store.batches.reduce(
+		(total, batch) =>
+			batch.id.startsWith("static-staged/")
+				? total + batch.staticPartCount
+				: total,
+		0,
+	);
 	store.staticInstanceCount = store.batches.reduce(
 		(total, batch) =>
 			batch.kind === "static" ? total + batch.staticPartCount : total,
@@ -240,9 +279,14 @@ export function destroyLumaWorldResources(store: LumaWorldResourceStore): void {
 	}
 	store.batches = [];
 	store.batchesById.clear();
+	store.staticPromotionGroups.clear();
 	store.terrainBatchCount = 0;
 	store.structuredInteriorBatchCount = 0;
 	store.staticBatchCount = 0;
+	store.promotedStaticBatchCount = 0;
+	store.stagedStaticObjectCount = 0;
+	store.stagedStaticPartCount = 0;
+	store.staticPromotionCount = 0;
 	store.staticInstanceCount = 0;
 	store.triangleCount = 0;
 }
@@ -381,50 +425,242 @@ interface BakedStaticBatchInput {
 function buildBakedStaticBatches({
 	assetState,
 	chunkOffsetByKey,
+	promotionPolicy,
+	store,
 	staticRenderableScene,
 }: {
 	assetState: AssetChannelState;
 	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
+	promotionPolicy: LumaStaticPromotionPolicy | undefined;
+	store: LumaWorldResourceStore;
 	staticRenderableScene: StaticRenderableSceneModel;
 }): BakedStaticBatchInput[] {
-	const partsByBatchKey = new Map<string, StaticRenderablePart[]>();
+	const objectsByBatchKey = groupCommittedStaticObjectsByBatchKey({
+		chunkOffsetByKey,
+		staticRenderableScene,
+	});
+	const activeBatchKeys = new Set(objectsByBatchKey.keys());
+	for (const batchKey of store.staticPromotionGroups.keys()) {
+		if (!activeBatchKeys.has(batchKey)) {
+			store.staticPromotionGroups.delete(batchKey);
+		}
+	}
+
+	return [...objectsByBatchKey.entries()].flatMap(([batchKey, objectGroups]) => {
+		const group = resolveStaticPromotionGroup({
+			batchKey,
+			objectGroups,
+			promotionPolicy,
+			store,
+		});
+		const promotedParts = objectGroups.flatMap((objectGroup) =>
+			group.promotedObjectKeys.has(objectGroup.objectKey)
+				? objectGroup.parts
+				: [],
+		);
+		const stagedObjectGroups = objectGroups.filter(
+			(objectGroup) => !group.promotedObjectKeys.has(objectGroup.objectKey),
+		);
+		return [
+			...buildPromotedStaticBatch({
+				assetState,
+				batchKey,
+				chunkOffsetByKey,
+				parts: promotedParts,
+			}),
+			...stagedObjectGroups.flatMap((objectGroup) =>
+				buildStagedStaticBatch({
+					assetState,
+					batchKey,
+					chunkOffsetByKey,
+					objectGroup,
+				}),
+			),
+		];
+	});
+}
+
+interface StaticRenderableObjectGroup {
+	objectKey: string;
+	parts: StaticRenderablePart[];
+}
+
+function groupCommittedStaticObjectsByBatchKey({
+	chunkOffsetByKey,
+	staticRenderableScene,
+}: {
+	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
+	staticRenderableScene: StaticRenderableSceneModel;
+}): Map<string, StaticRenderableObjectGroup[]> {
+	const objectGroupsByBatchKey = new Map<
+		string,
+		Map<string, StaticRenderablePart[]>
+	>();
 	for (const part of staticRenderableScene.parts) {
 		const chunkOffset = chunkOffsetByKey.get(part.renderChunk.chunkKey);
 		if (!chunkOffset) {
 			continue;
 		}
 		const batchKey = formatBakedStaticBatchKey(part);
-		const parts = partsByBatchKey.get(batchKey);
-		if (parts) {
-			parts.push(part);
+		const objectKey = staticRenderableObjectKey(part);
+		let partsByObjectKey = objectGroupsByBatchKey.get(batchKey);
+		if (!partsByObjectKey) {
+			partsByObjectKey = new Map();
+			objectGroupsByBatchKey.set(batchKey, partsByObjectKey);
+		}
+		const objectParts = partsByObjectKey.get(objectKey);
+		if (objectParts) {
+			objectParts.push(part);
 		} else {
-			partsByBatchKey.set(batchKey, [part]);
+			partsByObjectKey.set(objectKey, [part]);
 		}
 	}
 
-	return [...partsByBatchKey.entries()].flatMap(([batchKey, parts]) => {
-		const firstPart = parts[0];
-		if (!firstPart) {
-			return [];
+	return new Map(
+		[...objectGroupsByBatchKey.entries()].map(([batchKey, objectGroups]) => [
+			batchKey,
+			[...objectGroups.entries()]
+				.map(([objectKey, parts]) => ({ objectKey, parts }))
+				.sort((left, right) => left.objectKey.localeCompare(right.objectKey)),
+		]),
+	);
+}
+
+function resolveStaticPromotionGroup({
+	batchKey,
+	objectGroups,
+	promotionPolicy,
+	store,
+}: {
+	batchKey: string;
+	objectGroups: readonly StaticRenderableObjectGroup[];
+	promotionPolicy: LumaStaticPromotionPolicy | undefined;
+	store: LumaWorldResourceStore;
+}): LumaStaticPromotionGroup {
+	let group = store.staticPromotionGroups.get(batchKey);
+	if (!group) {
+		group = {
+			promotedObjectKeys: new Set(objectGroups.map((object) => object.objectKey)),
+		};
+		store.staticPromotionGroups.set(batchKey, group);
+		return group;
+	}
+
+	const committedObjectKeys = new Set(
+		objectGroups.map((objectGroup) => objectGroup.objectKey),
+	);
+	for (const objectKey of group.promotedObjectKeys) {
+		if (!committedObjectKeys.has(objectKey)) {
+			group.promotedObjectKeys.delete(objectKey);
 		}
-		const chunkOffset = chunkOffsetByKey.get(firstPart.renderChunk.chunkKey);
-		if (!chunkOffset) {
-			return [];
+	}
+
+	const stagedObjectKeys = objectGroups
+		.map((objectGroup) => objectGroup.objectKey)
+		.filter((objectKey) => !group.promotedObjectKeys.has(objectKey));
+	if (shouldPromoteStagedStaticObjects(stagedObjectKeys.length, promotionPolicy)) {
+		for (const objectKey of stagedObjectKeys) {
+			group.promotedObjectKeys.add(objectKey);
 		}
-		const geometry = buildBakedStaticGeometry(assetState, parts);
-		if (geometry.triangleCount === 0) {
-			return [];
+		if (stagedObjectKeys.length > 0) {
+			store.staticPromotionCount += 1;
 		}
-		return [
-			{
-				id: `static-baked/${batchKey}`,
-				geometry,
-				modelMatrix: createTranslationMat4(chunkOffset),
-				color: buildDebugColor(`static-baked/${batchKey}`),
-				staticPartCount: parts.length,
-			},
-		];
+	}
+
+	return group;
+}
+
+function shouldPromoteStagedStaticObjects(
+	stagedObjectCount: number,
+	promotionPolicy: LumaStaticPromotionPolicy | undefined,
+): boolean {
+	if (stagedObjectCount === 0) {
+		return false;
+	}
+	if (promotionPolicy?.forcePromote === true) {
+		return true;
+	}
+	return (
+		stagedObjectCount >=
+		(promotionPolicy?.stagedObjectPromotionThreshold ??
+			DEFAULT_STATIC_STAGED_OBJECT_PROMOTION_THRESHOLD)
+	);
+}
+
+function buildPromotedStaticBatch({
+	assetState,
+	batchKey,
+	chunkOffsetByKey,
+	parts,
+}: {
+	assetState: AssetChannelState;
+	batchKey: string;
+	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
+	parts: readonly StaticRenderablePart[];
+}): BakedStaticBatchInput[] {
+	return buildStaticBatch({
+		assetState,
+		batchId: `static-promoted/${batchKey}`,
+		colorKey: `static-promoted/${batchKey}`,
+		chunkOffsetByKey,
+		parts,
 	});
+}
+
+function buildStagedStaticBatch({
+	assetState,
+	batchKey,
+	chunkOffsetByKey,
+	objectGroup,
+}: {
+	assetState: AssetChannelState;
+	batchKey: string;
+	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
+	objectGroup: StaticRenderableObjectGroup;
+}): BakedStaticBatchInput[] {
+	return buildStaticBatch({
+		assetState,
+		batchId: `static-staged/${batchKey}/${objectGroup.objectKey}`,
+		colorKey: `static-staged/${batchKey}`,
+		chunkOffsetByKey,
+		parts: objectGroup.parts,
+	});
+}
+
+function buildStaticBatch({
+	assetState,
+	batchId,
+	colorKey,
+	chunkOffsetByKey,
+	parts,
+}: {
+	assetState: AssetChannelState;
+	batchId: string;
+	colorKey: string;
+	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
+	parts: readonly StaticRenderablePart[];
+}): BakedStaticBatchInput[] {
+	const firstPart = parts[0];
+	if (!firstPart) {
+		return [];
+	}
+	const chunkOffset = chunkOffsetByKey.get(firstPart.renderChunk.chunkKey);
+	if (!chunkOffset) {
+		return [];
+	}
+	const geometry = buildBakedStaticGeometry(assetState, parts);
+	if (geometry.triangleCount === 0) {
+		return [];
+	}
+	return [
+		{
+			id: batchId,
+			geometry,
+			modelMatrix: createTranslationMat4(chunkOffset),
+			color: buildDebugColor(colorKey),
+			staticPartCount: parts.length,
+		},
+	];
 }
 
 function formatBakedStaticBatchKey(part: StaticRenderablePart): string {

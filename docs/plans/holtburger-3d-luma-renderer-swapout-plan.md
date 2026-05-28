@@ -1,6 +1,6 @@
 # Holtburger 3D Luma Renderer Swapout Plan
 
-Status: Phase 4 implemented; Phase 4A and Phase 4B recommended before Phase 5.
+Status: Phase 4A implemented; Phase 4A.1 and Phase 4B recommended before Phase 5.
 
 ## Purpose
 
@@ -829,14 +829,122 @@ Exit criteria:
   one-by-one hydration events.
 - Phase 4B can avoid rebuilding baked chunk buffers for renderables that are still incubating.
 
-Decisions and future debt:
+Progress as of 2026-05-28:
+
+- Added `static-renderable-readiness.ts`, a pure app-local readiness layer that consumes
+  `StaticRenderableSceneModel` plus `AssetChannelState` and emits readiness records, committed
+  records, a committed `StaticRenderableSceneModel`, and local readiness metrics.
+- Defined concrete readiness states:
+  - `pending` for missing source/gfx dependencies;
+  - `resolved` for parts with prepared non-empty gfx geometry and no current material/texture gaps;
+  - `fallback-resolved` for parts that can render with explicit debug/no-material fallback because a
+    material recipe or texture dependency is missing;
+  - `failed` for prepared gfx geometry that has no renderable triangles.
+- Routed the Three static `InstancedMesh` sync through the committed readiness scene before building
+  or retaining instance groups.
+- Routed luma Phase 4 static instanced resource sync through the committed readiness scene before
+  constructing static batches. This is intentionally still the Phase 4 proof path; Phase 4B should
+  consume the same committed scene when replacing instancing with baked chunk-local batches.
+- Added focused tests for resolved parts, pending gfx geometry, material fallback, texture fallback,
+  failed empty geometry, and stable committed output when unrelated assets hydrate.
+- Validation run:
+  - `npm run test:ts -- src/lib/world-display/static-renderable-readiness.test.ts src/lib/world-display/luma-resources.test.ts`
+  - `npm run check`
+  - `npm run lint:ts`
+  - `npm run lint:dead`
+
+Decisions, course corrections, and future debt:
 
 - This is shared app-level renderer pipeline work, not luma-only, because both Three and luma need
   the same answer about which static renderables are eligible to enter the render pipeline.
 - Resource realization remains backend-specific. Readiness records may describe intent and fallback
   decisions, but they must not carry Three materials/textures or luma buffers/textures.
+- Readiness metrics currently live on the readiness model rather than the global
+  `WorldRenderDebugMetrics` contract. That keeps the renderer metrics surface stable while Phase 4B
+  proves which counts and samples are useful in the UI. Promote selected counts after Phase 4B if
+  they help diagnose batch incubation.
+- Existing `StaticRenderableSceneModel.parts` is already partially incubated by upstream scene
+  derivation: unresolved source/setup/gfx dependencies often appear only as missing asset id lists,
+  not as per-instance part records. Phase 4A formalizes the renderer commit boundary without
+  reworking upstream scene derivation. If per-source pending diagnostics become important, add a
+  small follow-up to preserve source-instance-to-missing-dependency records before expanding 4B
+  diagnostics.
+- Setup appearance misses remain `fallback-resolved` at the dependency-record level because current
+  scene derivation already falls back to setup-model base parts. If future appearance overlays need
+  to swap committed parts in place, the readiness layer should gain a setup-composition signature.
 - Atlas readiness should be modeled here once atlas construction exists, but Phase 4A should not
   implement texture atlases itself.
+- Phase 4A deliberately landed as the static-object slice first, but the same incubate-then-commit
+  boundary should apply to the rest of the currently supported scene renderables before Phase 4B
+  starts depending on committed scene inputs. Add Phase 4A.1 before Phase 4B.
+
+## Phase 4A.1: Current Scene Renderable Readiness
+
+Purpose: broaden the Phase 4A readiness boundary from static object parts to every currently
+supported renderer-facing scene model, so Three and luma consume committed scene inputs instead of
+defensively handling partially hydrated renderables in backend-specific code.
+
+Tasks:
+
+- Introduce a shared current-scene readiness/incubation entry point that composes type-specific
+  readiness rules for:
+  - terrain tiles;
+  - structured interior cells;
+  - static renderable parts from Phase 4A;
+  - transition portal/aperture render inputs where incomplete prepared aperture data can otherwise
+    leak into renderer-specific pass construction;
+  - debug overlays only if they have incomplete asset-derived inputs today.
+- Keep the output shape explicit rather than forcing all renderables through one fake low-level
+  abstraction. A practical first shape is a committed-scene bundle:
+  - `committedTerrainScene`;
+  - `committedStructuredInteriorScene`;
+  - `committedStaticRenderableScene`;
+  - committed portal/debug inputs if those prove useful;
+  - combined readiness records and metrics.
+- Reuse the Phase 4A readiness vocabulary (`pending`, `resolved`, `fallback-resolved`, `failed`)
+  across renderable families, with family-specific dependency classes instead of a single vague
+  "ready enough" flag.
+- Allow TypeScript generics for shared readiness container helpers where they are genuinely useful,
+  for example a generic readiness record or committed-item filter keyed by `TItem`. Keep the
+  dependency evaluators type-specific so terrain, interiors, statics, and portals keep their own
+  honest readiness rules.
+- Terrain readiness should commit only tiles with render chunk placement, prepared terrain geometry,
+  and an explicit material/fallback state.
+- Structured interior readiness should commit only cells with render chunk placement, prepared cell
+  render geometry, and explicit material/fallback state.
+- Portal/aperture readiness should make missing aperture geometry, missing target cell data, and
+  fallback/no-render decisions explicit before portal pass planning consumes them.
+- Route both renderer backends through the committed current-scene bundle. Backend code should no
+  longer need to re-check for missing prepared geometry for the supported scene models except as a
+  defensive assertion or hard failure for broken invariants.
+- Surface combined readiness metrics/debug samples in the app-level diagnostics if the counts are
+  useful for understanding hydration stalls.
+- Add tests for terrain pending/resolved, structured interior pending/resolved, material fallback,
+  portal/aperture pending or no-render decisions, and stable committed outputs when unrelated assets
+  hydrate.
+
+Exit criteria:
+
+- Supported scene model sync paths in Three and luma consume committed scene models from one shared
+  readiness boundary.
+- Backend resource sync code can assume committed terrain/interior/static renderables have prepared
+  geometry and explicit material/fallback state.
+- Phase 4B can build baked luma static buffers from the committed static scene inside the broader
+  committed-scene bundle.
+
+Decisions and future debt:
+
+- Do not generalize around future dynamic entities yet, because players, mobs, projectiles, loot,
+  particle systems, decals, and transient effects will add animation, pose, simulation, attachment,
+  lifetime, and blend/sort dependencies that the current scene does not exercise.
+- Future dynamic entity work should promote this into a fuller scene renderable incubation system
+  rather than creating separate one-off pending/fallback checks in entity renderers.
+- Generic TypeScript readiness containers are acceptable if they reduce repeated status/metrics code,
+  but the plan should avoid generic renderer-facing `Renderable<T>` abstractions until at least two
+  materially different dynamic renderable families exist and prove the shape.
+- If Phase 4A.1 discovers that terrain/interior/portal models are already fully committed by their
+  derivation functions, document that as an invariant and keep the phase as a small consolidation
+  rather than adding unnecessary wrappers.
 
 ## Phase 4B: Luma Baked Static Batch Model
 

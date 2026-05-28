@@ -55,6 +55,7 @@ import {
 	type StaticRenderableSceneModel,
 	isPreparedGfxObjAsset,
 } from "./static-renderables";
+import { deriveStaticRenderableReadinessModel } from "./static-renderable-readiness";
 import {
 	type MaterialResourceDiagnostic,
 	WorldMaterialResourceCache,
@@ -2135,7 +2136,11 @@ export function createThreeWorldDisplayRenderer(
 	): void {
 		syncRenderChunkRoots(renderChunkTransforms);
 
-		const partsByGroupKey = sceneModel.partsByRenderGroupKey;
+		const readinessModel = deriveStaticRenderableReadinessModel({
+			assetState,
+			scene: sceneModel,
+		});
+		const partsByGroupKey = readinessModel.committedScene.partsByRenderGroupKey;
 		const activeStaticGeometryKeys = new Set<string>();
 
 		for (const [groupKey, mesh] of staticRenderableGroupMeshes.entries()) {

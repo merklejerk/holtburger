@@ -40,7 +40,7 @@ export interface RenderSpaceBvhSource {
 	itemKeys: readonly (RenderBvhItemKey | null)[];
 }
 
-export interface RenderSpaceBvhNode {
+interface RenderSpaceBvhNode {
 	bounds: RenderBounds;
 	left: number | null;
 	right: number | null;
@@ -99,7 +99,8 @@ export function buildPortalCompositeRenderBvhSources(options: {
 				items: payload.terrain.terrainBvh.items,
 				expectedCoordinateSpace: "landblock-outdoor-terrain-local",
 				coordinateSpace: payload.terrain.terrainBvh.coordinateSpace,
-				itemKey: (item) => terrainBvhItemKey(payload.landblockId, item.quadIndex),
+				itemKey: (item) =>
+					terrainBvhItemKey(payload.landblockId, item.quadIndex),
 				boundsToRendererBounds: (bounds) =>
 					transformTerrainLocalBounds(bounds, transform.offset),
 				fallbackReasons,
@@ -143,7 +144,10 @@ export function buildPortalCompositeRenderBvhSources(options: {
 
 	const envCellSourcesById = new Map<number, RenderSpaceBvhSource>();
 	for (const cell of options.structuredInteriorScene.cells) {
-		const payload = findPreparedEnvCellPayload(options.assetState, cell.envCellId);
+		const payload = findPreparedEnvCellPayload(
+			options.assetState,
+			cell.envCellId,
+		);
 		if (!payload) {
 			fallbackReasons.push(
 				`missing portal env-cell payload ${formatEnvCellAssetId(cell.envCellId)}`,
@@ -188,7 +192,12 @@ export function queryRenderSpaceBvhSources(
 	const visibleItemKeys = new Set<RenderBvhItemKey>();
 	const fallbackReasons: string[] = [];
 	for (const source of sources) {
-		queryRenderSpaceBvhSource(source, frustum, visibleItemKeys, fallbackReasons);
+		queryRenderSpaceBvhSource(
+			source,
+			frustum,
+			visibleItemKeys,
+			fallbackReasons,
+		);
 	}
 	return { visibleItemKeys, fallbackReasons };
 }

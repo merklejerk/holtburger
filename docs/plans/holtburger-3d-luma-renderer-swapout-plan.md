@@ -1,6 +1,6 @@
 # Holtburger 3D Luma Renderer Swapout Plan
 
-Status: draft implementation plan.
+Status: Phase 0 implemented; Phase 1 pending.
 
 ## Purpose
 
@@ -155,6 +155,50 @@ Exit criteria:
 - Setting the backend to an unsupported value fails hard with a clear error.
 - The luma backend is not constructed on the default path.
 
+Progress as of 2026-05-27:
+
+- Added `@luma.gl/core` and `@luma.gl/webgl` through `npm install`, which updated
+  `apps/holtburger-3d/package.json` and `package-lock.json` with package-manager-selected
+  versions. Did not add `@luma.gl/engine` or `@luma.gl/webgpu`; there is not yet a justified
+  non-`Model` utility or WebGPU evaluation path.
+- Added app-local renderer backend config parsing in
+  `apps/holtburger-3d/src/lib/app-config/render-backend.ts`, defaulting unset/null/empty values to
+  `three` and failing hard on unsupported values with a clear
+  `VITE_HOLTBURGER_RENDER_BACKEND` error.
+- Kept `WorldDisplay.svelte` on the single existing factory import path.
+- Added `rendererBackend` to `WorldRenderDebugMetrics` and report `"three"` from the current
+  renderer.
+- Added focused config parser tests. No frame-plan helper extraction was needed in Phase 0 because
+  the existing pure render policy/pass helpers already have coverage.
+- Validation run:
+  - `npm run test:ts -- src/lib/app-config/render-backend.test.ts src/lib/world-display/render-passes.test.ts src/lib/world-display/render-policy.test.ts src/lib/world-display/prepared-bvh-visibility.test.ts src/lib/world-display/render-batch-candidates.test.ts`
+  - `npm run check`
+  - `npm run lint:ts`
+  - `npm run lint:dead`
+
+Decisions and course corrections:
+
+- `luma` is a recognized config value, but Phase 0 intentionally gates it at
+  `createWorldDisplayRenderer(...)` with a clear "not wired yet" error. This keeps unsupported
+  values failing through the parser while avoiding a fake luma backend before the Phase 1 split.
+- The `rendererBackend` metrics field originally listed in Phase 1 landed in Phase 0 because the
+  debug metrics contract already had one centralized shape and this was the least disruptive place
+  to add the safety rail.
+- `knip` flagged stale exports while validating the change, so clearly module-internal prepared
+  asset/BVH/render-batch types were made private. This was cleanup, not a renderer behavior change.
+
+Introduced cleanup targets and temporary shims:
+
+- `apps/holtburger-3d/knip.json` now ignores `@luma.gl/core` and `@luma.gl/webgl` because Phase 0
+  installs the dependencies before any luma module imports them. Remove this ignore as soon as the
+  luma canvas/device implementation imports the packages, expected in Phase 2. If the ignore remains
+  after Phase 2, add an immediate cleanup phase before asset rendering work.
+- `createWorldDisplayRenderer(...)` contains a temporary Phase 0 gate that rejects the recognized
+  `luma` backend. Phase 1 must remove this gate and replace it with the coarse backend selector plus
+  luma stub.
+- No immediate interim phase is required before Phase 1. The blocking prep for Phase 1 is already
+  captured there: move the current Three implementation mostly intact and add the coarse selector.
+
 ## Phase 1: Extract Coarse Backend Selection
 
 Purpose: add a backend switch without pretending Three and luma are low-level isomorphic backends.
@@ -175,7 +219,9 @@ Tasks:
 - Preserve existing behavior by delegating all current draw work to the Three renderer.
 - Add a luma renderer stub that implements the app-facing methods and fails clearly when selected
   before implementation is available.
-- Add a typed `rendererBackend` field to `WorldRenderDebugMetrics` in `renderer-contract.ts`.
+- Preserve the typed `rendererBackend` field already added to `WorldRenderDebugMetrics` in Phase 0.
+- Remove the temporary Phase 0 `luma` rejection gate from `createWorldDisplayRenderer(...)` and put
+  the backend decision in the new coarse selector.
 
 Code anchors:
 
@@ -212,6 +258,8 @@ Exit criteria:
 - Selecting the luma backend shows a nonblank luma canvas.
 - Three is not constructed on the luma path.
 - No asset pipeline integration is required yet.
+- Remove the temporary `knip` dependency ignore for `@luma.gl/core` and `@luma.gl/webgl` once this
+  phase introduces real luma imports.
 
 ## Phase 3: Asset Polys With Flat Colors
 

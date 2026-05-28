@@ -1,4 +1,5 @@
 import type { SceneCameraFrame, SceneBoundsFrame } from "./camera";
+import type { WorldRenderBackend } from "../app-config/render-backend";
 
 export type WorldDisplayRenderStyle = "solid" | "wireframe" | "no-material";
 export type WorldDisplayTextureFilteringMode =
@@ -57,6 +58,7 @@ export interface WorldRenderPortalMetrics {
 }
 
 export interface WorldRenderDebugMetrics {
+	rendererBackend: WorldRenderBackend;
 	canvasWidth: number;
 	canvasHeight: number;
 	pixelRatio: number;

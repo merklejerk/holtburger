@@ -12,10 +12,8 @@ import {
 import { webgl2Adapter } from "@luma.gl/webgl";
 
 import { createFallbackSceneCameraFrame } from "./camera";
-import {
-	buildSceneCameraViewProjectionMatrix,
-	multiplyMat4,
-} from "./luma-math";
+import { multiplyMat4 } from "./luma-math";
+import { buildLumaFrame, type LumaFrameMetrics } from "./luma-frame";
 import { createLumaRenderMetrics } from "./luma-render-metrics";
 import {
 	createLumaWorldResourceStore,
@@ -120,6 +118,7 @@ export function createLumaWorldDisplayRendererImplementation(
 	let frameHandle: number | null = null;
 	let clearCount = 0;
 	let drawCallCount = 0;
+	let latestFrameMetrics: LumaFrameMetrics | null = null;
 	let initializationError: string | null = null;
 
 	const canvas = document.createElement("canvas");
@@ -376,16 +375,28 @@ export function createLumaWorldDisplayRendererImplementation(
 		clearCount += 1;
 
 		if (resources.worldStore.batches.length > 0) {
-			const viewProjectionMatrix =
-				buildSceneCameraViewProjectionMatrix(resolveCameraFrame());
-			for (const batch of resources.worldStore.batches) {
+			const frame = buildLumaFrame({
+				assetState,
+				batches: resources.worldStore.batches,
+				cameraFrame: resolveCameraFrame(),
+				renderChunkTransforms,
+				staticRenderableScene,
+				structuredInteriorScene,
+				terrainScene,
+			});
+			latestFrameMetrics = frame.metrics;
+			for (const draw of frame.passes.flatMap((pass) => pass.draws)) {
+				const batch = resources.worldStore.batchesById.get(draw.batchId);
+				if (!batch) {
+					throw new Error(`Luma frame referenced missing batch ${draw.batchId}.`);
+				}
 				const didDraw = resources.worldPipeline.draw({
 					renderPass,
 					vertexArray: batch.vertexArray,
 					vertexCount: batch.vertexCount,
 					uniforms: {
 						uModelViewProjection: multiplyMat4(
-							viewProjectionMatrix,
+							frame.viewProjectionMatrix,
 							batch.modelMatrix,
 						),
 						uColor: batch.color,
@@ -396,6 +407,7 @@ export function createLumaWorldDisplayRendererImplementation(
 				}
 			}
 		} else {
+			latestFrameMetrics = null;
 			const didDraw = resources.trianglePipeline.draw({
 				renderPass,
 				vertexArray: resources.triangleVertexArray,
@@ -516,6 +528,7 @@ export function createLumaWorldDisplayRendererImplementation(
 				resources?.worldStore.structuredInteriorBatchCount ?? 0,
 			staticBatchCount: resources?.worldStore.staticBatchCount ?? 0,
 			staticInstanceCount: resources?.worldStore.staticInstanceCount ?? 0,
+			lumaFrameMetrics: latestFrameMetrics,
 			worldTriangleCount: resources?.worldStore.triangleCount ?? 0,
 			textureFilteringMode: options.textureFilteringMode ?? "anisotropic-4x",
 			textureColorSpaceMode: options.textureColorSpaceMode ?? "auto",

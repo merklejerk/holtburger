@@ -1,6 +1,6 @@
 # Holtburger 3D Luma Renderer Swapout Plan
 
-Status: Phase 4C implemented; Phase 5 is next.
+Status: Phase 5 implemented; Phase 6 is next, with one optional Phase 5A only if profiling shows promotion/culling hitches.
 
 ## Purpose
 
@@ -266,6 +266,8 @@ Progress as of 2026-05-28:
   - `npm run lint:ts`
   - `npm run lint:dead`
   - `npm run build`
+  - `VITE_HOLTBURGER_RENDER_BACKEND=luma npm run build`
+  - `git diff --check`
   - `VITE_HOLTBURGER_RENDER_BACKEND=luma npm run build`
   - `git diff --check`
   - `VITE_HOLTBURGER_RENDER_BACKEND=luma npm run build`
@@ -1305,6 +1307,65 @@ Refinements after Phase 4C:
   per-frame draw metric. Do not treat it as visible draw count.
 - Phase 5 should not add texture-atlas assumptions to culling keys. Atlas/material-set compatibility
   remains Phase 6+ material work.
+
+Progress as of 2026-05-28:
+
+- Added `luma-frame.ts` as the luma-local frame planner:
+  - builds the current camera view-projection matrix;
+  - extracts a renderer-space frustum from that matrix;
+  - derives prepared BVH visibility with `derivePreparedBvhVisibilitySnapshot(...)`;
+  - builds a luma candidate set from synced batch ids and BVH item keys;
+  - emits a single ordered world pass containing `LumaDraw` batch ids for the current frame.
+- Luma resource batches now carry BVH candidate bindings:
+  - terrain batches use `deriveTerrainTileBatchBvhBinding(...)`;
+  - structured interior batches use `deriveStructuredInteriorCellBatchBvhBinding(...)`;
+  - promoted and staged static batches derive item keys from their contained static parts with
+    `deriveStaticRenderablePartBvhItemKey(...)`.
+- The luma renderer now submits draw commands from `buildLumaFrame(...)` instead of iterating every
+  synced resource batch directly. The submitter resolves each draw by batch id and fails hard if a
+  frame references a missing batch.
+- Phase 4C static ids are first-class draw units:
+  - `static-promoted/...` batches and `static-staged/...` batches are categorized separately;
+  - staged static objects are not collapsed into their parent promoted group during culling.
+- The luma frame planner intentionally mirrors the Three path's conservative fallback behavior:
+  if prepared BVH queries report fallback data, keyed batches are included rather than risking
+  disappearing geometry while upstream BVH facts are incomplete.
+- Luma metrics now receive frame/candidate counters for registered batches, keyed batches,
+  represented item keys, visible item keys, visible draw counts, fallback-included draws, and
+  category counts. These are currently mapped through existing debug metric fields where possible.
+- Added focused tests for:
+  - culling a keyed batch when no prepared BVH item is visible;
+  - keeping unkeyed fallback batches visible;
+  - sorting terrain before staged static draws;
+  - extracting normalized frustum planes from the luma camera matrix.
+- Validation run:
+  - `npm run test:ts -- src/lib/world-display/luma-frame.test.ts src/lib/world-display/luma-resources.test.ts src/lib/world-display/scene-renderable-readiness.test.ts src/lib/world-display/static-renderable-readiness.test.ts`
+  - `npm run check`
+  - `npm run lint:ts`
+  - `npm run lint:dead`
+  - `npm run build`
+  - `VITE_HOLTBURGER_RENDER_BACKEND=luma npm run build`
+  - `git diff --check`
+
+Decisions, course corrections, and cleanup targets:
+
+- Phase 5 stayed broad: the frame planner consumes terrain, structured interior, promoted static,
+  and staged static batches. Portal masks and debug overlays are represented in the category model
+  but still have no luma resources to register yet.
+- The first luma frame has one world pass. This is enough to stop direct all-batch submission while
+  preserving current flat-color output. Portal/composite pass expansion remains future work.
+- The candidate registry is luma-local rather than a retrofit of `render-batch-candidates.ts`
+  because that module still stores Three `Object3D` handles. The selection semantics are deliberately
+  kept close to the Three registry so fallback behavior remains consistent.
+- Existing `WorldRenderDebugMetrics` field names are still Three-era/instance-era names. Phase 5
+  maps luma frame counters into those fields where possible, but the metric contract still needs a
+  cleanup pass after luma draw units settle.
+- `queryTimeMs` remains `0` in luma metrics even though prepared BVH visibility now runs in the
+  luma frame planner. Promote timing from `PreparedBvhVisibilitySnapshot.metrics` into luma frame
+  metrics when performance reporting matters.
+- No immediate Phase 5A is required. Add Phase 5A only if real-scene profiling shows that per-frame
+  BVH visibility, draw-list construction, or static promotion rebuilds cause visible hitches before
+  material work.
 
 ## Phase 6: Direct Textures and Simple Materials
 

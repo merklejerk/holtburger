@@ -1,6 +1,6 @@
 # Holtburger 3D Luma Renderer Swapout Plan
 
-Status: Phase 0 implemented; Phase 1 pending.
+Status: Phase 1 implemented; Phase 2 pending.
 
 ## Purpose
 
@@ -238,12 +238,67 @@ Exit criteria:
   stub.
 - `WorldDisplay.svelte` does not need to know which backend was selected.
 
+Progress as of 2026-05-28:
+
+- Moved the existing Three implementation from `world-display-renderer.ts` to
+  `three-world-display-renderer.ts` and renamed the constructor to
+  `createThreeWorldDisplayRenderer(...)`. The animation loop, camera ownership, WebGL renderer,
+  scene graph, chunk roots, mesh/material/geometry caches, picking, portal pass logic, metrics, and
+  disposal stayed inside that module.
+- Added `world-display-renderer-contract.ts` for the app-facing
+  `WorldDisplayRendererOptions`/`WorldDisplayRenderer` contract. The public
+  `world-display-renderer.ts` path re-exports these types so `WorldDisplay.svelte` keeps one factory
+  import path.
+- Replaced `world-display-renderer.ts` with a coarse selector using `readWorldRenderBackend()`.
+  `three` delegates to `createThreeWorldDisplayRenderer(...)`; `luma` delegates to
+  `createLumaWorldDisplayRenderer(...)`.
+- Added a luma stub that constructs through the same app-facing controller interface, appends a
+  visible placeholder element, reports zeroed render metrics tagged `rendererBackend: "luma"`, uses
+  no-op state setters, and returns `null` for picking.
+- Removed the Phase 0 `luma` rejection gate from the Three implementation.
+- Validation run:
+  - `npm run test:ts -- src/lib/app-config/render-backend.test.ts src/lib/world-display/render-passes.test.ts src/lib/world-display/render-policy.test.ts`
+  - `npm run check`
+  - `npm run lint:ts`
+  - `npm run lint:dead`
+  - `npm run build`
+  - `VITE_HOLTBURGER_RENDER_BACKEND=luma npm run build`
+
+Decisions and course corrections:
+
+- The luma stub returns a stable controller rather than throwing during construction. That better
+  satisfies the Phase 1 exit criterion that either backend can be constructed through the app-facing
+  interface while still making the unsupported renderer obvious in the viewport and metrics.
+- The public `world-display-renderer.ts` module remains the compatibility boundary for Svelte
+  callers. The extracted `world-display-renderer-contract.ts` is app-local and exists only to avoid
+  selector/backend import cycles.
+- The selector uses static imports for both backend modules. This keeps the factory synchronous and
+  avoids changing `WorldDisplay.svelte` lifecycle code during Phase 1. It means the luma-selected
+  bundle still evaluates the Three module, but it does not construct a Three renderer, canvas, scene,
+  or WebGL context.
+
+Introduced cleanup targets and temporary shims:
+
+- `luma-world-display-renderer.ts` is a Phase 1 stub, not a renderer foundation. Phase 2 should
+  replace its placeholder element, no-op setters, null picking behavior, and zeroed metrics with a
+  real luma-owned canvas/device path.
+- The luma stub currently duplicates a full zeroed `WorldRenderMetrics` shape. If future luma
+  phases need fallback/empty metrics again, extract a small metrics factory local to the luma path
+  instead of copying the shape further.
+- The static backend imports can stay through Phase 2, but before performance/parity work begins
+  reconsider dynamic loading if bundle size or module evaluation becomes noise in luma diagnostics.
+- No immediate interim phase is required before Phase 2. The only required prep is to replace the
+  luma stub with a canvas/device/triangle implementation and remove the temporary `knip` dependency
+  ignore once luma packages are actually imported.
+
 ## Phase 2: Luma Canvas and Triangle
 
 Purpose: prove luma can own the canvas and submit a draw without touching Three.
 
 Tasks:
 
+- Replace the Phase 1 luma stub controller body with the real canvas/device path while keeping the
+  same app-facing methods.
 - Construct a luma-owned canvas and WebGL2 device when
   `VITE_HOLTBURGER_RENDER_BACKEND=luma`.
 - Clear the viewport with a distinct debug color.

@@ -3,8 +3,8 @@ use holtburger_dat::file_type::{PixelFormatId, RenderSurface};
 use std::time::{Duration, Instant};
 
 use crate::adapter::prepared_texture_dxt::{
-    decode_dxt_surface_downsampled_2x, downsample_rgba_2x, encode_dxt_surface, next_mip_dimension,
-    validate_compressed_source,
+    decode_dxt_surface_downsampled_2x, decode_dxt_surface_rgba8_bytes, downsample_rgba_2x,
+    encode_dxt_surface, next_mip_dimension, validate_compressed_source,
 };
 
 const PREPARED_TEXTURE_PREFIX: &str = "prepared-texture/";
@@ -32,10 +32,12 @@ pub enum PreparedTextureOutputFormat {
     Dxt1,
     Dxt3,
     Dxt5,
+    Rgba8,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreparedTextureMipPolicy {
+    None,
     Retail4,
 }
 
@@ -43,6 +45,7 @@ pub enum PreparedTextureMipPolicy {
 pub enum PreparedTextureColorSpace {
     Srgb,
     Data,
+    Linear,
     Source,
 }
 
@@ -131,7 +134,15 @@ pub fn prepare_texture(
         );
     }
     if request.mip_policy != PreparedTextureMipPolicy::Retail4 {
+        if request.output_format == PreparedTextureOutputFormat::Rgba8
+            && request.mip_policy == PreparedTextureMipPolicy::None
+        {
+            return prepare_decompressed_atlas_texture(total_started_at, request, render_surface);
+        }
         bail!("unsupported prepared texture mip policy");
+    }
+    if request.output_format == PreparedTextureOutputFormat::Rgba8 {
+        bail!("rgba8 prepared textures require mips=none");
     }
     let output_format = output_format_pixel_format(request.output_format);
     if render_surface.format != output_format {
@@ -211,6 +222,43 @@ pub fn prepare_texture(
             decode: decode_duration,
             downsample: downsample_duration,
             encode: encode_duration,
+            total: total_started_at.elapsed(),
+        },
+    })
+}
+
+fn prepare_decompressed_atlas_texture(
+    total_started_at: Instant,
+    request: PreparedTextureRequest,
+    render_surface: &RenderSurface,
+) -> Result<PreparedTexturePayload> {
+    if request.color_space != PreparedTextureColorSpace::Linear {
+        bail!("rgba8 atlas-ready prepared textures require cs=linear");
+    }
+    validate_compressed_source(render_surface)?;
+    let decode_started_at = Instant::now();
+    let bytes = decode_dxt_surface_rgba8_bytes(render_surface)?;
+    let decode_duration = decode_started_at.elapsed();
+    Ok(PreparedTexturePayload {
+        request,
+        source_format: render_surface.format,
+        source_format_raw: render_surface.format_raw,
+        source_width: render_surface.width,
+        source_height: render_surface.height,
+        source_byte_length: render_surface.source_data.len(),
+        source_hash: fnv1a64_hex(&render_surface.source_data),
+        levels: vec![PreparedTextureMipLevel {
+            level: 0,
+            width: render_surface.width,
+            height: render_surface.height,
+            format: PixelFormatId::A8R8G8B8,
+            format_raw: PixelFormatId::A8R8G8B8.raw(),
+            bytes,
+        }],
+        timing: PreparedTextureTiming {
+            decode: decode_duration,
+            downsample: Duration::ZERO,
+            encode: Duration::ZERO,
             total: total_started_at.elapsed(),
         },
     })
@@ -307,12 +355,14 @@ fn parse_output_format(value: &str) -> Option<PreparedTextureOutputFormat> {
         "dxt1" => Some(PreparedTextureOutputFormat::Dxt1),
         "dxt3" => Some(PreparedTextureOutputFormat::Dxt3),
         "dxt5" => Some(PreparedTextureOutputFormat::Dxt5),
+        "rgba8" => Some(PreparedTextureOutputFormat::Rgba8),
         _ => None,
     }
 }
 
 fn parse_mip_policy(value: &str) -> Option<PreparedTextureMipPolicy> {
     match value {
+        "none" => Some(PreparedTextureMipPolicy::None),
         "retail4" => Some(PreparedTextureMipPolicy::Retail4),
         _ => None,
     }
@@ -322,6 +372,7 @@ fn parse_color_space(value: &str) -> Option<PreparedTextureColorSpace> {
     match value {
         "srgb" => Some(PreparedTextureColorSpace::Srgb),
         "data" => Some(PreparedTextureColorSpace::Data),
+        "linear" => Some(PreparedTextureColorSpace::Linear),
         "source" => Some(PreparedTextureColorSpace::Source),
         _ => None,
     }
@@ -341,11 +392,13 @@ fn format_output_format(value: PreparedTextureOutputFormat) -> &'static str {
         PreparedTextureOutputFormat::Dxt1 => "dxt1",
         PreparedTextureOutputFormat::Dxt3 => "dxt3",
         PreparedTextureOutputFormat::Dxt5 => "dxt5",
+        PreparedTextureOutputFormat::Rgba8 => "rgba8",
     }
 }
 
 fn format_mip_policy(value: PreparedTextureMipPolicy) -> &'static str {
     match value {
+        PreparedTextureMipPolicy::None => "none",
         PreparedTextureMipPolicy::Retail4 => "retail4",
     }
 }
@@ -354,6 +407,7 @@ fn format_color_space(value: PreparedTextureColorSpace) -> &'static str {
     match value {
         PreparedTextureColorSpace::Srgb => "srgb",
         PreparedTextureColorSpace::Data => "data",
+        PreparedTextureColorSpace::Linear => "linear",
         PreparedTextureColorSpace::Source => "source",
     }
 }
@@ -363,6 +417,7 @@ fn output_format_pixel_format(value: PreparedTextureOutputFormat) -> PixelFormat
         PreparedTextureOutputFormat::Dxt1 => PixelFormatId::Dxt1,
         PreparedTextureOutputFormat::Dxt3 => PixelFormatId::Dxt3,
         PreparedTextureOutputFormat::Dxt5 => PixelFormatId::Dxt5,
+        PreparedTextureOutputFormat::Rgba8 => PixelFormatId::A8R8G8B8,
     }
 }
 
@@ -397,6 +452,23 @@ mod tests {
     }
 
     #[test]
+    fn parses_atlas_ready_decompressed_texture_keys() {
+        let request = parse_prepared_texture_asset_id(
+            "prepared-texture/06001234?usage=raw&out=rgba8&mips=none&cs=linear",
+        )
+        .expect("prepared texture key should parse");
+        assert_eq!(request.render_surface_id, 0x0600_1234);
+        assert_eq!(request.usage, PreparedTextureUsage::Raw);
+        assert_eq!(request.output_format, PreparedTextureOutputFormat::Rgba8);
+        assert_eq!(request.mip_policy, PreparedTextureMipPolicy::None);
+        assert_eq!(request.color_space, PreparedTextureColorSpace::Linear);
+        assert_eq!(
+            format_prepared_texture_asset_id(&request),
+            "prepared-texture/06001234?usage=raw&out=rgba8&mips=none&cs=linear"
+        );
+    }
+
+    #[test]
     fn preserves_dxt_level_zero_and_generates_retail_capped_mips() {
         let source_data = vec![0xff; 32 * 32 / 2];
         let render_surface = RenderSurface {
@@ -422,5 +494,42 @@ mod tests {
         assert_eq!(payload.levels[1].width, 16);
         assert_eq!(payload.levels[1].height, 16);
         assert_eq!(payload.levels[1].bytes.len(), 16 * 16 / 2);
+    }
+
+    #[test]
+    fn decodes_dxt_to_single_level_rgba8_atlas_payload() {
+        let render_surface = RenderSurface {
+            id: 0x0600_1234,
+            unknown: 0,
+            width: 4,
+            height: 4,
+            format: PixelFormatId::Dxt1,
+            format_raw: PixelFormatId::Dxt1.raw(),
+            source_data: vec![0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+            default_palette_id: None,
+        };
+        let request = PreparedTextureRequest {
+            render_surface_id: render_surface.id,
+            usage: PreparedTextureUsage::Raw,
+            output_format: PreparedTextureOutputFormat::Rgba8,
+            mip_policy: PreparedTextureMipPolicy::None,
+            color_space: PreparedTextureColorSpace::Linear,
+        };
+
+        let payload = prepare_texture(request, &render_surface).expect("prepare should succeed");
+
+        assert_eq!(payload.levels.len(), 1);
+        assert_eq!(payload.levels[0].width, 4);
+        assert_eq!(payload.levels[0].height, 4);
+        assert_eq!(payload.levels[0].format, PixelFormatId::A8R8G8B8);
+        assert_eq!(payload.levels[0].bytes.len(), 4 * 4 * 4);
+        assert!(
+            payload.levels[0]
+                .bytes
+                .chunks_exact(4)
+                .all(|pixel| pixel == [255, 255, 255, 255].as_slice())
+        );
+        assert_eq!(payload.timing.downsample, Duration::ZERO);
+        assert_eq!(payload.timing.encode, Duration::ZERO);
     }
 }

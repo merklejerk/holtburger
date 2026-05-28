@@ -768,9 +768,9 @@ export interface PreparedTexturePayload extends PreparedAssetPayloadBase {
 	sourceAssetKind: "prepared-texture";
 	renderSurfaceId: number;
 	usage: "color" | "detail" | "mask" | "raw";
-	outputFormat: "dxt1" | "dxt3" | "dxt5";
-	mipPolicy: "retail4";
-	colorSpace: "srgb" | "data" | "source";
+	outputFormat: "dxt1" | "dxt3" | "dxt5" | "rgba8";
+	mipPolicy: "none" | "retail4";
+	colorSpace: "srgb" | "data" | "linear" | "source";
 	sourceFormatRaw: number;
 	sourceFormat: string;
 	sourceWidth: number;
@@ -965,7 +965,7 @@ export function getPreparedAssetDependencies(
 
 export function preparedDxtOutputFormat(
 	formatRaw: number,
-): PreparedTexturePayload["outputFormat"] | null {
+): Exclude<PreparedTexturePayload["outputFormat"], "rgba8"> | null {
 	switch (formatRaw) {
 		case 0x3154_5844:
 			return "dxt1";
@@ -976,6 +976,19 @@ export function preparedDxtOutputFormat(
 		default:
 			return null;
 	}
+}
+
+export function formatAtlasReadyPreparedTextureAssetId(options: {
+	renderSurfaceId: number;
+	usage: PreparedTexturePayload["usage"];
+}): string {
+	return formatPreparedTextureAssetId({
+		renderSurfaceId: options.renderSurfaceId,
+		usage: options.usage,
+		outputFormat: "rgba8",
+		mipPolicy: "none",
+		colorSpace: "linear",
+	});
 }
 
 export function formatPreparedTextureAssetId(options: {

@@ -84,6 +84,15 @@ pub(super) fn decode_dxt_surface_downsampled_2x(
     Ok(target)
 }
 
+pub(super) fn decode_dxt_surface_rgba8_bytes(render_surface: &RenderSurface) -> Result<Vec<u8>> {
+    let pixels = decode_dxt_surface(render_surface)?;
+    let mut bytes = Vec::with_capacity(pixels.len() * 4);
+    for pixel in pixels {
+        bytes.extend_from_slice(&[pixel.r, pixel.g, pixel.b, pixel.a]);
+    }
+    Ok(bytes)
+}
+
 pub(super) fn downsample_rgba_2x(
     source: &[Rgba],
     source_width: u32,
@@ -179,6 +188,49 @@ fn compressed_byte_length(width: u32, height: u32, format: PixelFormatId) -> Opt
 
 fn block_count(size: u32) -> usize {
     usize::try_from(size.div_ceil(4)).expect("block count fits usize")
+}
+
+fn decode_dxt_surface(render_surface: &RenderSurface) -> Result<Vec<Rgba>> {
+    let width = usize::try_from(render_surface.width).context("width fits usize")?;
+    let height = usize::try_from(render_surface.height).context("height fits usize")?;
+    let mut pixels = vec![
+        Rgba {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 0,
+        };
+        width * height
+    ];
+    let blocks_x = block_count(render_surface.width);
+    let blocks_y = block_count(render_surface.height);
+    let bytes_per_block = usize::from(
+        render_surface
+            .format
+            .block_compressed_bytes_per_4x4_block()
+            .ok_or_else(|| anyhow!("unsupported DXT format {:?}", render_surface.format))?,
+    );
+    for block_y in 0..blocks_y {
+        for block_x in 0..blocks_x {
+            let offset = (block_y * blocks_x + block_x) * bytes_per_block;
+            let block = &render_surface.source_data[offset..offset + bytes_per_block];
+            let values = decode_dxt_block_values(block, render_surface.format)?;
+            for local_y in 0..4usize {
+                let y = block_y * 4 + local_y;
+                if y >= height {
+                    continue;
+                }
+                for local_x in 0..4usize {
+                    let x = block_x * 4 + local_x;
+                    if x >= width {
+                        continue;
+                    }
+                    pixels[y * width + x] = values[local_y * 4 + local_x];
+                }
+            }
+        }
+    }
+    Ok(pixels)
 }
 
 fn decode_dxt_block_values(block: &[u8], format: PixelFormatId) -> Result<[Rgba; 16]> {
@@ -720,45 +772,6 @@ mod tests {
     }
 
     fn decode_dxt_surface_for_test(render_surface: &RenderSurface) -> Result<Vec<Rgba>> {
-        let width = usize::try_from(render_surface.width).context("width fits usize")?;
-        let height = usize::try_from(render_surface.height).context("height fits usize")?;
-        let mut pixels = vec![
-            Rgba {
-                r: 0,
-                g: 0,
-                b: 0,
-                a: 0,
-            };
-            width * height
-        ];
-        let blocks_x = block_count(render_surface.width);
-        let blocks_y = block_count(render_surface.height);
-        let bytes_per_block = usize::from(
-            render_surface
-                .format
-                .block_compressed_bytes_per_4x4_block()
-                .ok_or_else(|| anyhow!("unsupported DXT format {:?}", render_surface.format))?,
-        );
-        for block_y in 0..blocks_y {
-            for block_x in 0..blocks_x {
-                let offset = (block_y * blocks_x + block_x) * bytes_per_block;
-                let block = &render_surface.source_data[offset..offset + bytes_per_block];
-                let values = decode_dxt_block_values(block, render_surface.format)?;
-                for local_y in 0..4usize {
-                    let y = block_y * 4 + local_y;
-                    if y >= height {
-                        continue;
-                    }
-                    for local_x in 0..4usize {
-                        let x = block_x * 4 + local_x;
-                        if x >= width {
-                            continue;
-                        }
-                        pixels[y * width + x] = values[local_y * 4 + local_x];
-                    }
-                }
-            }
-        }
-        Ok(pixels)
+        decode_dxt_surface(render_surface)
     }
 }

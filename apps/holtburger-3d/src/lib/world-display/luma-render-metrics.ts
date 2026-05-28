@@ -28,6 +28,11 @@ export interface LumaRenderMetricsInput {
 	structuredInteriorBatchCount?: number;
 	staticBatchCount?: number;
 	staticInstanceCount?: number;
+	materialCount?: number;
+	directTextureBatchCount?: number;
+	textureResourceCount?: number;
+	materialFallbackReasonCount?: number;
+	materialFallbackReasonSamples?: readonly string[];
 	lumaFrameMetrics?: LumaFrameMetrics | null;
 	worldTriangleCount?: number;
 	textureFilteringMode: WorldDisplayTextureFilteringMode;
@@ -178,18 +183,20 @@ export function createLumaRenderMetrics(
 			envCellBvhConsideredCount: 0,
 			fallbackReasonCount:
 				(input.initializationError ? 1 : 0) +
+				(input.materialFallbackReasonCount ?? 0) +
 				(input.lumaFrameMetrics?.fallbackReasonCount ?? 0),
 			fallbackReasonSamples: [
 				...(input.initializationError
 					? [`luma initialization failed: ${input.initializationError}`]
 					: []),
+				...(input.materialFallbackReasonSamples ?? []),
 				...(input.lumaFrameMetrics?.fallbackReasonSamples ?? []),
 			],
 			queryTimeMs: 0,
 			debugOverlayObjectCount: 0,
 			visibleDebugOverlayObjectCount: 0,
-			materialCount: 0,
-			materialProgramKeyCount: 0,
+			materialCount: input.materialCount ?? 0,
+			materialProgramKeyCount: input.materialCount ?? 0,
 			transparentMaterialCount: 0,
 			textureFilteringMode: input.textureFilteringMode,
 			textureColorSpaceMode: input.textureColorSpaceMode,
@@ -201,13 +208,17 @@ export function createLumaRenderMetrics(
 			textureVelocityMaterialCount: 0,
 			textureVelocitySignatureCount: 0,
 			textureVelocitySignatureSamples: [],
-			textureResourceCount: 0,
+			textureResourceCount: input.textureResourceCount ?? 0,
 			indexedTextureResourceCount: 0,
 			paletteResourceCount: 0,
 			staticGeometryGroupCount: input.staticBatchCount ?? 0,
 			staticVisibleGeometryGroupCount: input.staticBatchCount ?? 0,
 			structuredInteriorGeometryGroupCount: 0,
-			materialTypeCounts: {},
+			materialTypeCounts: {
+				...(input.directTextureBatchCount
+					? { "luma-direct-texture": input.directTextureBatchCount }
+					: {}),
+			},
 			materialProgramKeySamples: [],
 			preparedTextureUploadCount: 0,
 			preparedTextureGeneratedByteLength: 0,

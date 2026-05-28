@@ -4,6 +4,9 @@ import { describe, expect, it } from "vitest";
 import {
 	createInitialAssetChannelState,
 	type AssetChannelState,
+	type PreparedMaterialRecipePayload,
+	type PreparedPolygonSetRenderGeometry,
+	type PreparedRenderSurfacePayload,
 	type PreparedTerrainMesh,
 } from "../assets/types";
 import { createBaseMaterialAppearanceContext } from "./material-appearance";
@@ -13,6 +16,10 @@ import {
 	syncLumaWorldResources,
 } from "./luma-resources";
 import type { RenderChunkTransform } from "./render-anchor";
+import type {
+	StructuredInteriorCell,
+	StructuredInteriorSceneModel,
+} from "./structured-interior-scene";
 import type {
 	StaticRenderablePart,
 	StaticRenderableSceneModel,
@@ -463,11 +470,46 @@ describe("syncLumaWorldResources", () => {
 			2,
 		);
 	});
+
+	it("creates direct textured structured interior batches with uv buffers", () => {
+		const device = new FakeDevice();
+		const store = createLumaWorldResourceStore();
+		const assetState = createAssetState({
+			materialSurfaceId: 0x08000002,
+			renderSurfaceId: 0x06000002,
+		});
+
+		syncLumaWorldResources({
+			device: device.asDevice(),
+			store,
+			assetState,
+			terrainScene: createTerrainScene({ tiles: [] }),
+			staticRenderableScene: createStaticRenderableScene(),
+			structuredInteriorScene: createStructuredInteriorScene({
+				cells: [createStructuredInteriorCell({ surfaceId: 0x08000002 })],
+			}),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform({ x: 10, y: 20, z: 30 })],
+		});
+
+		expect(store.structuredInteriorBatchCount).toBe(1);
+		const batch = store.batches[0];
+		expect(batch?.kind).toBe("structured-interior");
+		expect(batch?.material.kind).toBe("direct-texture");
+		expect(batch?.uvBuffer).toBeInstanceOf(FakeBuffer);
+		expect(batch?.bindings.uTexture).toBeInstanceOf(FakeTexture);
+		expect(toFakeBuffer(batch?.uvBuffer)?.data).toBeInstanceOf(Float32Array);
+		expect(
+			Array.from((toFakeBuffer(batch?.uvBuffer)?.data as Float32Array).slice(0, 6)),
+		).toEqual([0, 0, 1, 0, 0, 1]);
+		expect(device.createdTextures).toHaveLength(1);
+	});
 });
 
 class FakeDevice {
 	readonly createdBuffers: FakeBuffer[] = [];
 	readonly createdVertexArrays: FakeVertexArray[] = [];
+	readonly createdTextures: FakeTexture[] = [];
 
 	createBuffer({
 		id,
@@ -489,8 +531,48 @@ class FakeDevice {
 		return vertexArray;
 	}
 
+	createTexture({
+		id,
+		format,
+		width,
+		height,
+	}: {
+		id: string;
+		format: string;
+		width: number;
+		height: number;
+	}): FakeTexture {
+		const texture = new FakeTexture(id, format, width, height);
+		this.createdTextures.push(texture);
+		return texture;
+	}
+
 	asDevice(): Device {
 		return this as unknown as Device;
+	}
+}
+
+class FakeTexture {
+	destroyed = false;
+	data: ArrayBuffer | ArrayBufferView | null = null;
+
+	constructor(
+		readonly id: string,
+		readonly format: string,
+		readonly width: number,
+		readonly height: number,
+	) {}
+
+	writeData(data: ArrayBuffer | ArrayBufferView): void {
+		this.data = data;
+	}
+
+	generateMipmapsWebGL(): void {
+		return;
+	}
+
+	destroy(): void {
+		this.destroyed = true;
 	}
 }
 
@@ -564,11 +646,15 @@ function createTerrainScene({
 	};
 }
 
-function createStructuredInteriorScene() {
+function createStructuredInteriorScene({
+	cells = [],
+}: {
+	cells?: StructuredInteriorCell[];
+} = {}): StructuredInteriorSceneModel {
 	return {
 		focusEnvCellId: null,
-		activeEnvCellIds: [],
-		cells: [],
+		activeEnvCellIds: cells.map((cell) => cell.envCellId),
+		cells,
 		missingEnvCellAssetIds: [],
 		missingInteriorGeometryAssetIds: [],
 		missingCellStructureKeys: [],
@@ -616,8 +702,12 @@ function createStaticRenderableScene({
 
 function createAssetState({
 	extraGfxObjAssetIds = [],
+	materialSurfaceId,
+	renderSurfaceId,
 }: {
 	extraGfxObjAssetIds?: string[];
+	materialSurfaceId?: number;
+	renderSurfaceId?: number;
 } = {}): AssetChannelState {
 	const state = createInitialAssetChannelState();
 	for (const assetId of ["gfx-obj/01000001", ...extraGfxObjAssetIds]) {
@@ -638,7 +728,126 @@ function createAssetState({
 			},
 		} as AssetChannelState["preparedAsset"];
 	}
+	if (materialSurfaceId !== undefined && renderSurfaceId !== undefined) {
+		const materialAssetId = `material/${materialSurfaceId.toString(16).padStart(8, "0")}`;
+		const renderSurfaceAssetId = `render-surface/${renderSurfaceId.toString(16).padStart(8, "0")}`;
+		state.preparedByAssetId[materialAssetId] = {
+			payload: createTextureMaterialRecipe(materialSurfaceId, renderSurfaceId),
+		} as AssetChannelState["preparedAsset"];
+		state.preparedByAssetId[renderSurfaceAssetId] = {
+			payload: createRenderSurfacePayload(renderSurfaceId),
+		} as AssetChannelState["preparedAsset"];
+	}
 	return state;
+}
+
+function createStructuredInteriorCell({
+	surfaceId,
+}: {
+	surfaceId: number;
+}): StructuredInteriorCell {
+	return {
+		renderKey: "interior-cell/test",
+		envCellId: 0x12340001,
+		regionNumber: 1,
+		renderChunk: {
+			chunkKey: "landblock/12340000",
+			chunkLandblockId: 0x12340000,
+		},
+		environmentId: 1,
+		cellStructureId: 1,
+		isFocus: true,
+		chunkLocalPlacement: createPlacement({ x: 0, y: 0, z: 0 }),
+		surfaceIds: [surfaceId],
+		portalCount: 0,
+		portals: [],
+		portalApertures: [],
+		staticObjectCount: 0,
+		cellStructure: null,
+		cellBsp: null,
+		renderGeometry: createPolygonSetGeometry(surfaceId),
+		debugColorKey: "interior-cell/test",
+		detailSignature: "detail:none",
+	};
+}
+
+function createPolygonSetGeometry(
+	surfaceId: number,
+): PreparedPolygonSetRenderGeometry {
+	return {
+		sourceId: 1,
+		vertexCount: 3,
+		triangleCount: 1,
+		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+		normals: [],
+		uvs: new Float32Array([0, 0, 1, 0, 0, 1]),
+		triangles: [{ polygonId: 0, surfaceId, firstVertex: 0 }],
+		surfaceIds: [surfaceId],
+		bounds: null,
+	};
+}
+
+function createTextureMaterialRecipe(
+	surfaceId: number,
+	renderSurfaceId: number,
+): PreparedMaterialRecipePayload {
+	return {
+		kind: "material-recipe",
+		sourceAssetKind: "material-recipe",
+		residencyKind: "unknown",
+		provenance: {
+			source: "repo-local-hba",
+			sourceAssetKind: "material-recipe",
+			errorCode: null,
+			detail: null,
+		},
+		surfaceId,
+		surfaceType: 1,
+		source: {
+			kind: "texture",
+			surfaceTextureId: renderSurfaceId,
+			selectedRenderSurfaceId: renderSurfaceId,
+			paletteId: null,
+			renderSurfaceDefaultPaletteIds: [],
+		},
+		translucency: 0,
+		luminosity: 0,
+		diffuse: 1,
+		dependencies: {
+			surfaceTextureAssetIds: [],
+			renderSurfaceAssetIds: [
+				`render-surface/${renderSurfaceId.toString(16).padStart(8, "0")}`,
+			],
+			paletteAssetIds: [],
+		},
+	};
+}
+
+function createRenderSurfacePayload(
+	renderSurfaceId: number,
+): PreparedRenderSurfacePayload {
+	const sourceBytes = new Uint8Array([0x10, 0x20, 0x30, 0xff]);
+	return {
+		kind: "render-surface",
+		sourceAssetKind: "render-surface",
+		residencyKind: "unknown",
+		provenance: {
+			source: "repo-local-hba",
+			sourceAssetKind: "render-surface",
+			errorCode: null,
+			detail: null,
+		},
+		renderSurfaceId,
+		unknown: 0,
+		width: 1,
+		height: 1,
+		formatRaw: 0x15,
+		format: "A8R8G8B8",
+		sourceByteLength: sourceBytes.byteLength,
+		sourceBytes,
+		defaultPaletteId: null,
+		dependencies: { paletteAssetIds: [] },
+	};
 }
 
 function createStaticPart({

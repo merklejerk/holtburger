@@ -1,6 +1,6 @@
 # Holtburger 3D Luma Renderer Swapout Plan
 
-Status: Phase 6A implemented; Phase 6B is next, with one optional Phase 5A only if profiling shows promotion/culling hitches.
+Status: Phase 6B implemented; Phase 6B.1 runtime smoke is accepted with limited UV proof; Phase 6C is next.
 
 ## Purpose
 
@@ -1481,6 +1481,99 @@ Exit criteria:
 - Baked static batches are not forced into inefficient non-atlas direct texture grouping.
 - Indexed/paletted textures, terrain blends, detail overlays, texture velocity, and static atlas
   texturing remain explicit TODOs.
+
+Progress as of 2026-05-28:
+
+- Added `luma-materials.ts` for luma-local flat/debug material plans, direct texture material plans,
+  texture upload/cache ownership, sampler mapping, material fallback reasons, and material keys.
+- Extended luma polygon geometry to carry UVs and to build compact per-surface/per-variant indexed
+  geometry slices. This lets structured interior shells bind one direct material per draw without
+  requiring static atlases or per-surface fragmentation of promoted static batches.
+- Added a textured luma world shader/pipeline with `texCoord`, `sampler2D`, color/opacity tint,
+  alpha-test discard, sampler bindings, and per-draw depth/blend parameters derived from the
+  renderer-neutral legacy material behavior DTO.
+- Routed structured interior cells through direct texture material planning. Cells now split into
+  surface/variant draw batches; direct-color render surfaces upload as luma textures and unsupported
+  cases fall back to flat debug material plans with explicit reasons.
+- Kept terrain and baked promoted/staged statics on flat/debug material plans. Phase 6B deliberately
+  did not force baked static batches into inefficient direct per-surface texture grouping before
+  atlas support.
+- Added luma material/texture metrics: material count, direct texture batch count, texture resource
+  count, and material fallback reasons now feed the existing debug metrics/fallback sample surface.
+- Added focused luma resource coverage for a direct-textured structured interior batch, including
+  UV buffer creation, texture binding, and luma texture cache use.
+- Validation run:
+  - `npm run test:ts -- src/lib/world-display/luma-resources.test.ts src/lib/world-display/luma-frame.test.ts src/lib/world-display/render-surface-texture-data.test.ts src/lib/world-display/material-behavior.test.ts`
+  - `npm run check`
+  - `npm run lint:ts`
+  - `npm run lint:dead`
+  - `npm run build`
+  - `VITE_HOLTBURGER_RENDER_BACKEND=luma npm run build`
+  - `git diff --check`
+
+Decisions, course corrections, and cleanup targets:
+
+- Course correction: the luma geometry path now compacts polygon-set triangles into luma-owned
+  indexed geometry instead of reusing source vertex indices directly. That makes per-surface
+  material splitting straightforward and avoids uploading unrelated triangles for direct material
+  batches.
+- Direct texture support is intentionally limited to direct-color render surfaces. S3TC compressed
+  payloads, indexed/paletted textures, terrain blends, detail overlays, and texture velocity still
+  fall back or remain later phases.
+- Luma texture capabilities currently assume no S3TC and no packed RGBA4444 upload. That keeps
+  WebGL compatibility conservative until compressed/indexed paths are handled deliberately.
+- Material fallback reasons are now included in luma metrics, but they still share the existing
+  generic `fallbackReasonSamples` debug field. A later metrics cleanup should split culling
+  fallback, material fallback, and renderer initialization fallback into distinct UI fields.
+- `knip` still discourages speculative type exports. Some luma material plan subtype interfaces
+  remain private until another module needs them directly.
+- Phase 6B was validated through unit/type/build checks. A luma browser smoke screenshot was
+  captured after implementation and showed stable geometry/camera/runtime behavior, but the scene
+  still renders through flat/debug colors and fake/legacy debug UI. That means Phase 6B.1 can
+  accept the runtime stability check, but cannot honestly claim visual UV orientation proof.
+
+## Phase 6B.1: Luma Direct Texture Runtime Smoke
+
+Purpose: validate the Phase 6B direct texture path in the actual luma WebGL backend before adding
+static atlas construction.
+
+Tasks:
+
+- Run the luma backend against a scene with at least one direct-textured structured interior shell
+  or building.
+- Verify that the textured shader links, sampler binding works in WebGL, UV orientation is sane,
+  alpha-test/discard behavior does not obviously break clip surfaces, and direct material fallback
+  metrics show useful reasons for unsupported cases.
+- Capture a screenshot or equivalent visual artifact for the plan notes.
+- Fix any runtime-only shader/binding/UV issues found before Phase 6C.
+
+Exit criteria:
+
+- Luma renders at least one real direct-textured interior/building surface in browser runtime.
+- Any remaining direct texture differences are documented as Phase 7/9 material parity work, not
+  unknown Phase 6B risk.
+- Phase 6C can focus on atlas construction instead of debugging basic texture binding.
+
+Progress as of 2026-05-28:
+
+- Runtime smoke was performed against the luma backend after Phase 6B. The scene rendered
+  recognizably with terrain, statics, and structured interiors still stable after the luma material
+  and UV-buffer changes.
+- The screenshot did not provide meaningful UV validation because the visible scene remains
+  flat/debug shaded and the debug panel still reports legacy/Three-era material text. Treat this as
+  a runtime stability smoke, not a visual material parity proof.
+- No runtime-only shader crash, camera regression, or obvious geometry corruption was reported in
+  the smoke image.
+
+Decisions, course corrections, and cleanup targets:
+
+- Course correction: do not block Phase 6C solely on visual UV proof from the current debug view.
+  The UI cannot show enough texture/UV evidence yet, so UV correctness should be validated when
+  visible material modes, UV debug output, or atlas-textured statics make it observable.
+- Add a future debug/material parity target: expose enough luma material state in the UI to
+  distinguish flat fallback, direct texture, atlas texture, and unsupported material reasons.
+- Phase 6C may proceed, but atlas implementation should include its own UV remapping tests and a
+  more meaningful visual/debug validation step before claiming static material parity.
 
 ## Phase 6C: Static Texture Atlases and Baked Static Materials
 

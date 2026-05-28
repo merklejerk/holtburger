@@ -11,7 +11,20 @@ import {
 } from "@luma.gl/core";
 import { webgl2Adapter } from "@luma.gl/webgl";
 
+import { createFallbackSceneCameraFrame } from "./camera";
+import {
+	buildSceneCameraViewProjectionMatrix,
+	multiplyMat4,
+} from "./luma-math";
 import { createLumaRenderMetrics } from "./luma-render-metrics";
+import {
+	createLumaWorldResourceStore,
+	destroyLumaWorldResources,
+	LUMA_WORLD_BUFFER_LAYOUT,
+	LUMA_WORLD_SHADER_LAYOUT,
+	syncLumaWorldResources,
+	type LumaWorldResourceStore,
+} from "./luma-resources";
 import type {
 	WorldDisplayRenderer,
 	WorldDisplayRendererOptions,
@@ -55,13 +68,39 @@ void main() {
 }
 `;
 
+const WORLD_VERTEX_SHADER = `#version 300 es
+in vec3 position;
+
+uniform mat4 uModelViewProjection;
+
+void main() {
+	gl_Position = uModelViewProjection * vec4(position, 1.0);
+}
+`;
+
+const WORLD_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+
+uniform vec4 uColor;
+
+out vec4 fragColor;
+
+void main() {
+	fragColor = uColor;
+}
+`;
+
 interface LumaRenderResources {
 	device: Device;
-	vertexShader: Shader;
-	fragmentShader: Shader;
-	pipeline: RenderPipeline;
-	vertexBuffer: Buffer;
-	vertexArray: VertexArray;
+	triangleVertexShader: Shader;
+	triangleFragmentShader: Shader;
+	trianglePipeline: RenderPipeline;
+	triangleVertexBuffer: Buffer;
+	triangleVertexArray: VertexArray;
+	worldVertexShader: Shader;
+	worldFragmentShader: Shader;
+	worldPipeline: RenderPipeline;
+	worldStore: LumaWorldResourceStore;
 }
 
 export function createLumaWorldDisplayRendererImplementation(
@@ -72,6 +111,7 @@ export function createLumaWorldDisplayRendererImplementation(
 	let staticRenderableScene = options.staticRenderableScene;
 	let structuredInteriorScene = options.structuredInteriorScene;
 	let transitionPortalModel = options.transitionPortalModel;
+	let renderChunkTransforms = options.renderChunkTransforms;
 	let controlledCameraFrame = options.controlledCameraFrame;
 	let renderMetricsChangeHandler = options.onRenderMetricsChange;
 	let resources: LumaRenderResources | null = null;
@@ -106,6 +146,8 @@ export function createLumaWorldDisplayRendererImplementation(
 		},
 		setTerrainScene(scene) {
 			terrainScene = scene;
+			syncWorldResources();
+			scheduleFrame();
 			reportMetrics();
 		},
 		setStaticRenderableScene(scene) {
@@ -114,6 +156,8 @@ export function createLumaWorldDisplayRendererImplementation(
 		},
 		setStructuredInteriorScene(scene) {
 			structuredInteriorScene = scene;
+			syncWorldResources();
+			scheduleFrame();
 			reportMetrics();
 		},
 		setTransitionPortalModel(model) {
@@ -126,7 +170,10 @@ export function createLumaWorldDisplayRendererImplementation(
 		setRenderSceneContext() {
 			reportMetrics();
 		},
-		setRenderChunkTransforms() {
+		setRenderChunkTransforms(transforms) {
+			renderChunkTransforms = transforms;
+			syncWorldResources();
+			scheduleFrame();
 			reportMetrics();
 		},
 		setRenderSpatialQuery() {
@@ -134,6 +181,7 @@ export function createLumaWorldDisplayRendererImplementation(
 		},
 		setControlledCameraFrame(frame) {
 			controlledCameraFrame = frame;
+			scheduleFrame();
 			reportMetrics();
 		},
 		setTransitionPortalMaxDepth() {
@@ -204,22 +252,22 @@ export function createLumaWorldDisplayRendererImplementation(
 				return;
 			}
 
-			const vertexShader = device.createShader({
+			const triangleVertexShader = device.createShader({
 				id: "luma-triangle-vertex-shader",
 				language: "glsl",
 				stage: "vertex",
 				source: TRIANGLE_VERTEX_SHADER,
 			});
-			const fragmentShader = device.createShader({
+			const triangleFragmentShader = device.createShader({
 				id: "luma-triangle-fragment-shader",
 				language: "glsl",
 				stage: "fragment",
 				source: TRIANGLE_FRAGMENT_SHADER,
 			});
-			const pipeline = device.createRenderPipeline({
+			const trianglePipeline = device.createRenderPipeline({
 				id: "luma-triangle-pipeline",
-				vs: vertexShader,
-				fs: fragmentShader,
+				vs: triangleVertexShader,
+				fs: triangleFragmentShader,
 				shaderLayout: TRIANGLE_SHADER_LAYOUT,
 				bufferLayout: TRIANGLE_BUFFER_LAYOUT,
 				topology: "triangle-list",
@@ -229,27 +277,59 @@ export function createLumaWorldDisplayRendererImplementation(
 					depthCompare: "always",
 				},
 			});
-			const vertexBuffer = device.createBuffer({
+			const triangleVertexBuffer = device.createBuffer({
 				id: "luma-triangle-vertices",
 				usage: LumaBuffer.VERTEX,
 				data: TRIANGLE_VERTICES,
 			});
-			const vertexArray = device.createVertexArray({
+			const triangleVertexArray = device.createVertexArray({
 				id: "luma-triangle-vertex-array",
 				shaderLayout: TRIANGLE_SHADER_LAYOUT,
 				bufferLayout: TRIANGLE_BUFFER_LAYOUT,
 			});
-			vertexArray.setBuffer(0, vertexBuffer);
+			triangleVertexArray.setBuffer(0, triangleVertexBuffer);
+
+			const worldVertexShader = device.createShader({
+				id: "luma-world-vertex-shader",
+				language: "glsl",
+				stage: "vertex",
+				source: WORLD_VERTEX_SHADER,
+			});
+			const worldFragmentShader = device.createShader({
+				id: "luma-world-fragment-shader",
+				language: "glsl",
+				stage: "fragment",
+				source: WORLD_FRAGMENT_SHADER,
+			});
+			const worldPipeline = device.createRenderPipeline({
+				id: "luma-world-flat-color-pipeline",
+				vs: worldVertexShader,
+				fs: worldFragmentShader,
+				shaderLayout: LUMA_WORLD_SHADER_LAYOUT,
+				bufferLayout: LUMA_WORLD_BUFFER_LAYOUT,
+				topology: "triangle-list",
+				parameters: {
+					cullMode: "none",
+					depthWriteEnabled: false,
+					depthCompare: "always",
+				},
+			});
+			const worldStore = createLumaWorldResourceStore();
 
 			resources = {
 				device,
-				vertexShader,
-				fragmentShader,
-				pipeline,
-				vertexBuffer,
-				vertexArray,
+				triangleVertexShader,
+				triangleFragmentShader,
+				trianglePipeline,
+				triangleVertexBuffer,
+				triangleVertexArray,
+				worldVertexShader,
+				worldFragmentShader,
+				worldPipeline,
+				worldStore,
 			};
 			syncCanvasSize();
+			syncWorldResources();
 			scheduleFrame();
 		} catch (error) {
 			initializationError =
@@ -277,25 +357,49 @@ export function createLumaWorldDisplayRendererImplementation(
 
 		syncCanvasSize();
 		const commandEncoder = resources.device.createCommandEncoder({
-			id: "luma-triangle-command-encoder",
+			id: "luma-world-command-encoder",
 		});
 		const renderPass = commandEncoder.beginRenderPass({
 			clearColor: LUMA_CLEAR_COLOR,
-			clearDepth: false,
+			clearDepth: 1,
 			clearStencil: false,
 			parameters: {
 				viewport: [0, 0, canvas.width, canvas.height],
 			},
 		});
 		clearCount += 1;
-		const didDraw = resources.pipeline.draw({
-			renderPass,
-			vertexArray: resources.vertexArray,
-			vertexCount: TRIANGLE_VERTEX_COUNT,
-		});
-		if (didDraw) {
-			drawCallCount += 1;
+
+		if (resources.worldStore.batches.length > 0) {
+			const viewProjectionMatrix =
+				buildSceneCameraViewProjectionMatrix(resolveCameraFrame());
+			for (const batch of resources.worldStore.batches) {
+				const didDraw = resources.worldPipeline.draw({
+					renderPass,
+					vertexArray: batch.vertexArray,
+					vertexCount: batch.vertexCount,
+					uniforms: {
+						uModelViewProjection: multiplyMat4(
+							viewProjectionMatrix,
+							batch.modelMatrix,
+						),
+						uColor: batch.color,
+					},
+				});
+				if (didDraw) {
+					drawCallCount += 1;
+				}
+			}
+		} else {
+			const didDraw = resources.trianglePipeline.draw({
+				renderPass,
+				vertexArray: resources.triangleVertexArray,
+				vertexCount: TRIANGLE_VERTEX_COUNT,
+			});
+			if (didDraw) {
+				drawCallCount += 1;
+			}
 		}
+
 		renderPass.end();
 		resources.device.submit(commandEncoder.finish());
 		reportMetrics();
@@ -313,13 +417,42 @@ export function createLumaWorldDisplayRendererImplementation(
 	}
 
 	function destroyResources(): void {
-		resources?.vertexArray.destroy();
-		resources?.vertexBuffer.destroy();
-		resources?.pipeline.destroy();
-		resources?.vertexShader.destroy();
-		resources?.fragmentShader.destroy();
-		resources?.device.destroy();
+		if (resources) {
+			destroyLumaWorldResources(resources.worldStore);
+			resources.triangleVertexArray.destroy();
+			resources.triangleVertexBuffer.destroy();
+			resources.trianglePipeline.destroy();
+			resources.triangleVertexShader.destroy();
+			resources.triangleFragmentShader.destroy();
+			resources.worldPipeline.destroy();
+			resources.worldVertexShader.destroy();
+			resources.worldFragmentShader.destroy();
+			resources.device.destroy();
+		}
 		resources = null;
+	}
+
+	function syncWorldResources(): void {
+		if (!resources) {
+			return;
+		}
+		syncLumaWorldResources({
+			device: resources.device,
+			store: resources.worldStore,
+			terrainScene,
+			structuredInteriorScene,
+			renderChunkTransforms,
+		});
+	}
+
+	function resolveCameraFrame() {
+		const aspect = canvas.width / Math.max(1, canvas.height);
+		if (controlledCameraFrame) {
+			return controlledCameraFrame.aspect === aspect
+				? controlledCameraFrame
+				: { ...controlledCameraFrame, aspect };
+		}
+		return createFallbackSceneCameraFrame(aspect);
 	}
 
 	function showInitializationError(message: string): void {
@@ -356,11 +489,23 @@ export function createLumaWorldDisplayRendererImplementation(
 			canvasWidth: canvas.width,
 			canvasHeight: canvas.height,
 			pixelRatio: window.devicePixelRatio || 1,
-			cameraViewResidency: resources ? "luma triangle" : "luma initializing",
-			renderGraphPolicy: resources ? "luma-triangle" : "luma-initializing",
+			cameraViewResidency: resources
+				? resources.worldStore.batches.length > 0
+					? "luma flat-color world"
+					: "luma triangle"
+				: "luma initializing",
+			renderGraphPolicy: resources
+				? resources.worldStore.batches.length > 0
+					? "luma-flat-color-world"
+					: "luma-triangle"
+				: "luma-initializing",
 			clearCount,
 			drawCallCount,
 			initializationError,
+			terrainBatchCount: resources?.worldStore.terrainBatchCount ?? 0,
+			structuredInteriorBatchCount:
+				resources?.worldStore.structuredInteriorBatchCount ?? 0,
+			worldTriangleCount: resources?.worldStore.triangleCount ?? 0,
 			textureFilteringMode: options.textureFilteringMode ?? "anisotropic-4x",
 			textureColorSpaceMode: options.textureColorSpaceMode ?? "auto",
 			detailTexturesEnabled: options.detailTexturesEnabled ?? true,

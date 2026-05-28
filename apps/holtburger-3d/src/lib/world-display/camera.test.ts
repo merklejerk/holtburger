@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
 	convertBrowserFreeCameraStateBetweenAnchors,
 	createBrowserFreeCameraState,
+	buildBrowserFreeCameraFrame,
 	prepareBrowserFreeCameraForDestinationFit,
+	syncBrowserFreeCameraStateFromFrame,
 } from "./camera";
 import { convertCameraFrameBetweenAnchors } from "./render-chunks";
 
@@ -52,5 +54,26 @@ describe("browser camera helpers", () => {
 			hasManualControl: false,
 			lastFitKey: null,
 		});
+	});
+
+	it("syncs free-camera state from a renderer-owned frame before manual input", () => {
+		const state = createBrowserFreeCameraState();
+		const frame = {
+			position: { x: 100, y: 40, z: -25 },
+			target: { x: 80, y: 30, z: -85 },
+			up: { x: 0, y: 1, z: 0 },
+			aspect: 16 / 9,
+			fovDegrees: 52,
+			near: 0.1,
+			far: 5000,
+		};
+
+		const syncedState = syncBrowserFreeCameraStateFromFrame(state, frame);
+		const syncedFrame = buildBrowserFreeCameraFrame(syncedState);
+
+		expect(syncedFrame.position).toEqual(frame.position);
+		expect(syncedFrame.target.x).toBeCloseTo(frame.target.x);
+		expect(syncedFrame.target.y).toBeCloseTo(frame.target.y);
+		expect(syncedFrame.target.z).toBeCloseTo(frame.target.z);
 	});
 });

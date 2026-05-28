@@ -23,6 +23,9 @@ export interface LumaRenderMetricsInput {
 	clearCount: number;
 	drawCallCount: number;
 	initializationError: string | null;
+	terrainBatchCount?: number;
+	structuredInteriorBatchCount?: number;
+	worldTriangleCount?: number;
 	textureFilteringMode: WorldDisplayTextureFilteringMode;
 	textureColorSpaceMode: WorldDisplayTextureColorSpaceMode;
 	detailTexturesEnabled: boolean;
@@ -75,8 +78,8 @@ export function createLumaRenderMetrics(
 			transitionPortalCandidateCount:
 				input.transitionPortalModel.candidates.length,
 			portalApertureMeshCount: 0,
-			terrainMeshCount: 0,
-			visibleTerrainMeshCount: 0,
+			terrainMeshCount: input.terrainBatchCount ?? 0,
+			visibleTerrainMeshCount: input.terrainBatchCount ?? 0,
 			staticGroupMeshCount: 0,
 			visibleStaticGroupMeshCount: 0,
 			staticRenderBatchCount: 0,
@@ -84,9 +87,10 @@ export function createLumaRenderMetrics(
 			staticBvhRepresentedInstanceKeyCount: 0,
 			staticBvhVisibleInstanceKeyCount: 0,
 			staticBvhFallbackIncludedBatchCount: 0,
-			terrainRenderBatchCount: 0,
+			terrainRenderBatchCount: input.terrainBatchCount ?? 0,
 			terrainBvhCandidateBatchCount: 0,
-			structuredInteriorRenderBatchCount: 0,
+			structuredInteriorRenderBatchCount:
+				input.structuredInteriorBatchCount ?? 0,
 			structuredInteriorBvhCandidateBatchCount: 0,
 			debugOverlayRenderBatchCount: 0,
 			debugOverlayBvhCandidateBatchCount: 0,
@@ -98,8 +102,9 @@ export function createLumaRenderMetrics(
 			portalCompositeTerrainCandidateBatchCount: 0,
 			portalCompositeInteriorCandidateBatchCount: 0,
 			portalCompositeFallbackIncludedBatchCount: 0,
-			structuredInteriorMeshCount: 0,
-			visibleStructuredInteriorMeshCount: 0,
+			structuredInteriorMeshCount: input.structuredInteriorBatchCount ?? 0,
+			visibleStructuredInteriorMeshCount:
+				input.structuredInteriorBatchCount ?? 0,
 			terrainBvhVisibleItemCount: 0,
 			terrainBvhTotalItemCount: 0,
 			outdoorStaticBvhVisibleItemCount: 0,
@@ -141,7 +146,7 @@ export function createLumaRenderMetrics(
 			preparedTextureGeneratedByteLength: 0,
 			compressedSingleLevelFallbackUploadCount: 0,
 			renderCalls: input.drawCallCount,
-			renderTriangles: input.drawCallCount,
+			renderTriangles: input.worldTriangleCount ?? input.drawCallCount,
 			renderLines: 0,
 			renderPoints: 0,
 		},

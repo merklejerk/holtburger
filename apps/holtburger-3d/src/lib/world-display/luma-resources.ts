@@ -40,8 +40,10 @@ export const LUMA_WORLD_BUFFER_LAYOUT: BufferLayout[] = [
 interface LumaWorldDrawBatch {
 	id: string;
 	kind: "terrain" | "structured-interior";
+	geometrySignature: string;
 	vertexArray: VertexArray;
 	vertexBuffer: Buffer;
+	indexBuffer: Buffer;
 	vertexCount: number;
 	triangleCount: number;
 	modelMatrix: LumaMat4;
@@ -50,6 +52,7 @@ interface LumaWorldDrawBatch {
 
 export interface LumaWorldResourceStore {
 	batches: LumaWorldDrawBatch[];
+	batchesById: Map<string, LumaWorldDrawBatch>;
 	terrainBatchCount: number;
 	structuredInteriorBatchCount: number;
 	triangleCount: number;
@@ -58,6 +61,7 @@ export interface LumaWorldResourceStore {
 export function createLumaWorldResourceStore(): LumaWorldResourceStore {
 	return {
 		batches: [],
+		batchesById: new Map(),
 		terrainBatchCount: 0,
 		structuredInteriorBatchCount: 0,
 		triangleCount: 0,
@@ -77,13 +81,14 @@ export function syncLumaWorldResources({
 	structuredInteriorScene: StructuredInteriorSceneModel;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 }): void {
-	destroyLumaWorldResources(store);
 	const chunkOffsetByKey = new Map(
 		renderChunkTransforms.map((transform) => [
 			transform.chunkKey,
 			transform.offset,
 		]),
 	);
+	const nextBatches: LumaWorldDrawBatch[] = [];
+	const retainedBatchIds = new Set<string>();
 
 	for (const tile of terrainScene.tiles) {
 		const chunkOffset = chunkOffsetByKey.get(tile.renderChunk.chunkKey);
@@ -99,14 +104,16 @@ export function syncLumaWorldResources({
 			y: chunkOffset.y + tile.chunkLocalOffset.y,
 			z: chunkOffset.z + tile.chunkLocalOffset.z,
 		});
-		store.batches.push(
-			createDrawBatch({
+		nextBatches.push(
+			createOrReuseDrawBatch({
 				device,
+				store,
 				id: `terrain/${tile.assetId}`,
 				kind: "terrain",
 				geometry,
 				modelMatrix,
 				color: buildDebugColor(`terrain/${tile.landblockId}`),
+				retainedBatchIds,
 			}),
 		);
 	}
@@ -126,18 +133,28 @@ export function syncLumaWorldResources({
 			{ x: 0, y: 0, z: 0 },
 			{ x: 1, y: 1, z: 1 },
 		);
-		store.batches.push(
-			createDrawBatch({
+		nextBatches.push(
+			createOrReuseDrawBatch({
 				device,
+				store,
 				id: `structured-interior/${cell.renderKey}`,
 				kind: "structured-interior",
 				geometry,
 				modelMatrix: multiplyMat4(chunkMatrix, placementMatrix),
 				color: buildDebugColor(cell.debugColorKey),
+				retainedBatchIds,
 			}),
 		);
 	}
 
+	for (const [batchId, batch] of store.batchesById) {
+		if (!retainedBatchIds.has(batchId)) {
+			destroyDrawBatch(batch);
+			store.batchesById.delete(batchId);
+		}
+	}
+
+	store.batches = nextBatches;
 	store.terrainBatchCount = store.batches.filter(
 		(batch) => batch.kind === "terrain",
 	).length;
@@ -152,35 +169,60 @@ export function syncLumaWorldResources({
 
 export function destroyLumaWorldResources(store: LumaWorldResourceStore): void {
 	for (const batch of store.batches) {
-		batch.vertexArray.destroy();
-		batch.vertexBuffer.destroy();
+		destroyDrawBatch(batch);
 	}
 	store.batches = [];
+	store.batchesById.clear();
 	store.terrainBatchCount = 0;
 	store.structuredInteriorBatchCount = 0;
 	store.triangleCount = 0;
 }
 
-function createDrawBatch({
+function createOrReuseDrawBatch({
 	device,
+	store,
 	id,
 	kind,
 	geometry,
 	modelMatrix,
 	color,
+	retainedBatchIds,
 }: {
 	device: Device;
+	store: LumaWorldResourceStore;
 	id: string;
 	kind: LumaWorldDrawBatch["kind"];
 	geometry: LumaIndexedGeometry;
 	modelMatrix: LumaMat4;
 	color: LumaVec4;
+	retainedBatchIds: Set<string>;
 }): LumaWorldDrawBatch {
-	const expandedPositions = expandIndexedPositions(geometry);
+	const geometrySignature = createGeometrySignature(kind, geometry);
+	const previousBatch = store.batchesById.get(id);
+	if (
+		previousBatch &&
+		previousBatch.kind === kind &&
+		previousBatch.geometrySignature === geometrySignature
+	) {
+		previousBatch.modelMatrix = modelMatrix;
+		previousBatch.color = color;
+		retainedBatchIds.add(id);
+		return previousBatch;
+	}
+
+	if (previousBatch) {
+		destroyDrawBatch(previousBatch);
+	}
+
 	const vertexBuffer = device.createBuffer({
 		id: `${id}/positions`,
 		usage: LumaBuffer.VERTEX,
-		data: expandedPositions,
+		data: geometry.positions,
+	});
+	const indexBuffer = device.createBuffer({
+		id: `${id}/indices`,
+		usage: LumaBuffer.INDEX,
+		data: geometry.indices,
 	});
 	const vertexArray = device.createVertexArray({
 		id: `${id}/vertex-array`,
@@ -188,27 +230,63 @@ function createDrawBatch({
 		bufferLayout: LUMA_WORLD_BUFFER_LAYOUT,
 	});
 	vertexArray.setBuffer(0, vertexBuffer);
+	vertexArray.setIndexBuffer(indexBuffer);
 
-	return {
+	const batch = {
 		id,
 		kind,
+		geometrySignature,
 		vertexArray,
 		vertexBuffer,
+		indexBuffer,
 		vertexCount: geometry.indices.length,
 		triangleCount: geometry.triangleCount,
 		modelMatrix,
 		color,
 	};
+	store.batchesById.set(id, batch);
+	retainedBatchIds.add(id);
+	return batch;
 }
 
-function expandIndexedPositions(geometry: LumaIndexedGeometry): Float32Array {
-	const positions = new Float32Array(geometry.indices.length * 3);
-	for (const [outputVertex, sourceVertex] of geometry.indices.entries()) {
-		const sourceOffset = sourceVertex * 3;
-		const outputOffset = outputVertex * 3;
-		positions[outputOffset] = geometry.positions[sourceOffset];
-		positions[outputOffset + 1] = geometry.positions[sourceOffset + 1];
-		positions[outputOffset + 2] = geometry.positions[sourceOffset + 2];
+function destroyDrawBatch(batch: LumaWorldDrawBatch): void {
+	batch.vertexArray.destroy();
+	batch.vertexBuffer.destroy();
+	batch.indexBuffer.destroy();
+}
+
+function createGeometrySignature(
+	kind: "terrain" | "structured-interior",
+	geometry: LumaIndexedGeometry,
+): string {
+	return [
+		kind,
+		`v${geometry.vertexCount}`,
+		`t${geometry.triangleCount}`,
+		`p${hashFloat32Array(geometry.positions)}`,
+		`i${hashIndexArray(geometry.indices)}`,
+	].join(":");
+}
+
+function hashFloat32Array(values: Float32Array): string {
+	let hash = 0x811c9dc5;
+	const view = new DataView(values.buffer, values.byteOffset, values.byteLength);
+	for (let byteOffset = 0; byteOffset < view.byteLength; byteOffset += 1) {
+		hash ^= view.getUint8(byteOffset);
+		hash = Math.imul(hash, 0x01000193);
 	}
-	return positions;
+	return toUnsignedHex(hash);
+}
+
+function hashIndexArray(values: Uint16Array | Uint32Array): string {
+	let hash = 0x811c9dc5;
+	for (const value of values) {
+		hash ^= value;
+		hash = Math.imul(hash, 0x01000193);
+	}
+	return toUnsignedHex(hash);
+}
+
+function toUnsignedHex(value: number): string {
+	return (value >>> 0).toString(16).padStart(8, "0");
 }

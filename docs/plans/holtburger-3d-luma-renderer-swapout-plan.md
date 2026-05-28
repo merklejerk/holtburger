@@ -1,6 +1,6 @@
 # Holtburger 3D Luma Renderer Swapout Plan
 
-Status: Phase 5 implemented; Phase 6A is next, with one optional Phase 5A only if profiling shows promotion/culling hitches.
+Status: Phase 6A implemented; Phase 6B is next, with one optional Phase 5A only if profiling shows promotion/culling hitches.
 
 ## Purpose
 
@@ -1412,6 +1412,47 @@ Exit criteria:
 - Basic material behavior can be represented without importing Three.
 - Three still renders through its existing material cache.
 - Luma has enough DTO input to implement direct texture upload in Phase 6B.
+
+Progress as of 2026-05-28:
+
+- Added `render-surface-texture-data.ts` as the Three-free direct/compressed texture preparation
+  layer. It exposes decoded direct texture upload payloads with byte data, dimensions, source
+  format, alpha presence, sampling policy, upload format/data type/internal format, and compressed
+  mip metadata without constructing `DataTexture` or `CompressedTexture`.
+- Rebuilt `render-surface-texture-resources.ts` as a Three adapter over the DTO layer. Existing
+  Three material/cache callers still receive `Texture | null`, but the byte decode and unsupported
+  format decisions now happen before Three resource construction.
+- Added `deriveLegacyMaterialBehaviorDto(...)` in `material-behavior.ts`. The DTO carries
+  renderer-neutral color/emissive triples, opacity, alpha test, front-side policy, depth-write
+  policy, blend mode, and renderer-neutral blend factors. The existing
+  `deriveLegacyMaterialBehavior(...)` now adapts that DTO back into Three `Color` and Three blend
+  constants for the current renderer.
+- Added focused tests for direct-color DTO decode, unsupported direct formats, S3TC compressed mip
+  metadata, missing compressed support, and renderer-neutral material behavior.
+- Validation run:
+  - `npm run test:ts -- src/lib/world-display/render-surface-texture-data.test.ts src/lib/world-display/material-behavior.test.ts src/lib/world-display/material-resources.test.ts`
+  - `npm run check`
+  - `npm run lint:ts`
+  - `npm run lint:dead`
+  - `npm run build`
+  - `VITE_HOLTBURGER_RENDER_BACKEND=luma npm run build`
+
+Decisions, course corrections, and cleanup targets:
+
+- Course correction: standalone DTO type exports were kept private until Phase 6B consumes them.
+  `knip` treats unused exported type names as dead code, so Phase 6A exports the preparation
+  functions and only the types currently needed by existing adapters. Phase 6B should promote any
+  luma-consumed DTO names at the point of use instead of adding speculative exports.
+- The current Three cache remains the material selection owner. Phase 6A intentionally did not
+  replace `WorldMaterialResourceCache.resolveMaterialPlan(...)`; luma should consume the extracted
+  DTO facts in Phase 6B without destabilizing Three.
+- Unsupported compressed texture support is explicit in the DTO layer, but user-facing fallback
+  diagnostics still live in `material-construction.ts`. Phase 6B should decide whether luma needs
+  its own material fallback reason surface or can reuse the existing diagnostic vocabulary.
+- Indexed/paletted textures remain outside Phase 6A. The DTO layer explicitly reports only
+  direct-color/compressed texture readiness; indexed texture byte DTO extraction remains Phase 7.
+- No immediate interim phase is required before Phase 6B. The remaining prep is luma-local:
+  texture upload/cache mapping, sampler mapping, material/pipeline keys, and fallback metrics.
 
 ## Phase 6B: Luma Direct Materials for Non-Atlas Draws
 

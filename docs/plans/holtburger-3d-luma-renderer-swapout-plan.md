@@ -1,6 +1,6 @@
 # Holtburger 3D Luma Renderer Swapout Plan
 
-Status: Phase 3 implemented; Phase 3A recommended before Phase 4.
+Status: Phase 3A implemented; Phase 4 next.
 
 ## Purpose
 
@@ -565,19 +565,20 @@ Decisions and course corrections:
 - The world pipeline temporarily uses `depthCompare: "always"` and disables depth writes. This is
   acceptable for the flat-color terrain/interior proof, but not for statics or overlapping interior
   shells.
+- Follow-up scene testing after Phase 3 exposed two renderer-space issues:
+  - the initial luma look-at matrix packing was transposed, making mouse drag and A/D rotation feel
+    like rotation around a translated point instead of yaw/pitch around the camera position;
+  - luma terrain packing initially missed the Three terrain coordinate conversion of `x, z, -y`,
+    which made outdoor terrain appear as vertical strips.
+  Both were fixed with focused camera/math and terrain-geometry tests before Phase 3A started.
+- A browser free-camera state sync cleanup also landed during this investigation. It was not the
+  luma camera root cause, but it keeps renderer-owned camera frames and browser-control yaw/pitch
+  state coherent on first handoff.
 
 Introduced cleanup targets and temporary shims:
 
-- `luma-resources.ts` currently destroys and rebuilds all luma world buffers on every terrain,
-  structured-interior, or render-chunk transform update. This is simple and correct for Phase 3, but
-  Phase 4 should not add instanced statics on top of this rebuild-all policy without adding stable
-  batch signatures or incremental replacement.
-- The non-indexed expansion in `luma-resources.ts` is a compatibility shim around the failed
-  indexed draw proof. Before adding static instancing, re-test luma indexed draw with the now-fixed
-  shader layout and isolate whether the original issue was missing uniform declarations, index
-  buffer setup, or draw options.
-- The flat-color world pipeline has depth disabled. Before Phase 4 adds statics, restore a working
-  depth path with a clear depth value and verified depth compare/write behavior.
+- Phase 3A removed the rebuild-all, non-indexed expansion, and disabled-depth shims listed in the
+  original Phase 3 cleanup notes.
 - Luma still has no picking, culling, portal pass integration, material grouping, or retained draw
   list planning. Those remain future phases.
 
@@ -601,6 +602,71 @@ Exit criteria:
 - Terrain/interior luma batches render with verified depth behavior.
 - The resource store has a clear policy for indexed versus expanded submission.
 - Phase 4 can add static instancing without compounding Phase 3 proof-path shims.
+
+Progress as of 2026-05-28:
+
+- Switched luma terrain and structured-interior world batches from expanded non-indexed vertex
+  buffers to explicit index buffers:
+  - positions upload once as `Buffer.VERTEX`;
+  - typed indices upload as `Buffer.INDEX`;
+  - the luma `VertexArray` is bound with `setIndexBuffer(...)`;
+  - draw calls pass `geometry.indices.length` as the luma WebGL adapter's indexed draw count.
+- Removed the Phase 3 `expandIndexedPositions(...)` compatibility shim. The geometry boundary still
+  stays typed as `LumaIndexedGeometry`, so future material grouping can continue to operate on
+  indexed payloads.
+- Restored depth for the flat-color world pipeline with `depthWriteEnabled: true` and
+  `depthCompare: "less-equal"`. Render passes continue clearing depth to `1`.
+- Added stable geometry signatures and `batchesById` replacement granularity to
+  `LumaWorldResourceStore`. Sync now:
+  - reuses existing GPU buffers when a terrain/interior batch id and geometry signature are
+    unchanged;
+  - updates model matrix and color on reused batches;
+  - destroys only removed batches or batches whose geometry payload changed.
+- Added `luma-resources.test.ts` with a fake luma device to verify indexed upload, index-buffer
+  binding, unchanged-resource reuse, changed-geometry replacement, and removed-batch cleanup.
+- Validation run:
+  - `npm run test:ts -- src/lib/world-display/luma-resources.test.ts src/lib/world-display/luma-geometry.test.ts src/lib/world-display/luma-math.test.ts`
+  - `npm run check`
+  - `npm run lint:ts`
+  - `npm run lint:dead`
+  - `npm run build`
+  - `VITE_HOLTBURGER_RENDER_BACKEND=luma npm run build`
+  - `git diff --check`
+  - temporary Vite/Chrome luma diagnostic with two overlapping indexed terrain batches.
+
+Verification notes:
+
+- The Phase 3A browser diagnostic rendered two overlapping indexed terrain quads in reverse depth
+  order. The farther quad drew after the nearer quad, so without depth it would have overwritten the
+  center pixel. With the Phase 3A pipeline, headless Chrome/SwiftShader sampled the nearer color:
+  - sampled pixel `(175, 56, 188, 255)`;
+  - expected nearer color `(175, 56, 188, 255)`;
+  - expected farther color `(56, 188, 56, 255)`.
+- The first Chrome attempt without SwiftShader could not create a WebGL context in this environment;
+  the SwiftShader retry succeeded. Keep this in mind for future automated browser diagnostics.
+
+Decisions and course corrections:
+
+- The earlier indexed failure is treated as a proof-path setup issue, not a luma capability gap. The
+  working path requires both an index buffer bound on the `VertexArray` and the index count passed
+  through luma's `vertexCount` draw option.
+- Resource signatures hash geometry payload bytes instead of relying only on ids and counts. This is
+  more conservative than count-only reuse and avoids stale buffers if a prepared asset keeps the same
+  id while its geometry changes.
+- Transform and color changes do not force buffer replacement. They update retained batch metadata
+  because the current world shader receives model/color as draw uniforms.
+- No immediate interim phase is required before Phase 4. The major Phase 3 proof-path shims are
+  gone.
+
+Introduced cleanup targets and temporary shims:
+
+- Geometry signatures currently hash the full position and index payload on sync. This is acceptable
+  for Phase 3A and safer than stale GPU buffers, but Phase 4/5 should consider carrying prepared
+  asset revision ids or content signatures from the asset pipeline if sync cost becomes visible.
+- `LumaWorldResourceStore` now owns terrain/interior batch identity, but static batch identity still
+  needs a matching policy when Phase 4 adds instanced static resources.
+- Luma still lacks material-aware grouping, culling/draw-list planning, portals, debug overlays, and
+  picking. Those remain planned future phases rather than Phase 3A debt.
 
 ## Phase 4: Static Geometry Without Real Materials
 

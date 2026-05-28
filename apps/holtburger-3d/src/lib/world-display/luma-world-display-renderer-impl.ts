@@ -310,8 +310,8 @@ export function createLumaWorldDisplayRendererImplementation(
 				topology: "triangle-list",
 				parameters: {
 					cullMode: "none",
-					depthWriteEnabled: false,
-					depthCompare: "always",
+					depthWriteEnabled: true,
+					depthCompare: "less-equal",
 				},
 			});
 			const worldStore = createLumaWorldResourceStore();

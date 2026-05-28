@@ -40,11 +40,31 @@ export interface LegacyMaterialBehavior {
 	unsupportedSurfaceFlags: string[];
 }
 
+export interface LegacyMaterialBehaviorDto {
+	color: readonly [number, number, number];
+	emissive: readonly [number, number, number];
+	emissiveIntensity: number;
+	opacity: number;
+	transparent: boolean;
+	alphaTest: number;
+	side: "front";
+	blend: LegacyMaterialBlendBehaviorDto;
+	unsupportedSurfaceFlags: string[];
+}
+
 interface LegacyMaterialBlendBehavior {
 	mode: LegacyMaterialBlendMode;
 	enabled: boolean;
 	srcFactor: BlendingSrcFactor | null;
 	dstFactor: BlendingDstFactor | null;
+	depthWrite: boolean;
+}
+
+interface LegacyMaterialBlendBehaviorDto {
+	mode: LegacyMaterialBlendMode;
+	enabled: boolean;
+	srcFactor: LegacyMaterialBlendFactor | null;
+	dstFactor: LegacyMaterialBlendFactor | null;
 	depthWrite: boolean;
 }
 
@@ -57,6 +77,11 @@ type LegacyMaterialBlendMode =
 	| "additive"
 	| "clipmap"
 	| "translucent";
+
+type LegacyMaterialBlendFactor =
+	| "one"
+	| "src-alpha"
+	| "one-minus-src-alpha";
 
 export function withLegacyMeshStandardSurfaceDefaults(
 	parameters: MeshStandardMaterialParameters,
@@ -75,6 +100,30 @@ export function deriveLegacyMaterialBehavior(options: {
 	hasSourceAlpha?: boolean;
 	usesIndexedClipDiscard?: boolean;
 }): LegacyMaterialBehavior {
+	const dto = deriveLegacyMaterialBehaviorDto(options);
+	return {
+		color: new Color(...dto.color),
+		emissive: new Color(...dto.emissive),
+		emissiveIntensity: dto.emissiveIntensity,
+		opacity: dto.opacity,
+		transparent: dto.transparent,
+		alphaTest: dto.alphaTest,
+		blend: {
+			mode: dto.blend.mode,
+			enabled: dto.blend.enabled,
+			srcFactor: toThreeBlendSrcFactor(dto.blend.srcFactor),
+			dstFactor: toThreeBlendDstFactor(dto.blend.dstFactor),
+			depthWrite: dto.blend.depthWrite,
+		},
+		unsupportedSurfaceFlags: dto.unsupportedSurfaceFlags,
+	};
+}
+
+export function deriveLegacyMaterialBehaviorDto(options: {
+	recipe: PreparedMaterialRecipePayload;
+	hasSourceAlpha?: boolean;
+	usesIndexedClipDiscard?: boolean;
+}): LegacyMaterialBehaviorDto {
 	const recipe = options.recipe;
 	const opacity = normalizeLegacyOpacity(recipe.translucency);
 	const diffuse = hasSurfaceFlag(recipe.surfaceType, SURFACE_TYPE_DIFFUSE)
@@ -100,12 +149,13 @@ export function deriveLegacyMaterialBehavior(options: {
 		isClipMap,
 	});
 	return {
-		color: new Color(diffuse, diffuse, diffuse),
-		emissive: new Color(1, 1, 1),
+		color: [diffuse, diffuse, diffuse],
+		emissive: [1, 1, 1],
 		emissiveIntensity: luminosity,
 		opacity,
 		transparent: blend.enabled,
 		alphaTest,
+		side: "front",
 		blend,
 		unsupportedSurfaceFlags: unsupportedSurfaceFlags(recipe.surfaceType),
 	};
@@ -151,13 +201,13 @@ function deriveLegacyBlendBehavior(options: {
 	surfaceType: number;
 	opacity: number;
 	isClipMap: boolean;
-}): LegacyMaterialBlendBehavior {
+}): LegacyMaterialBlendBehaviorDto {
 	if (hasSurfaceFlag(options.surfaceType, SURFACE_TYPE_TRANSLUCENT)) {
 		return {
 			mode: "translucent",
 			enabled: true,
-			srcFactor: SrcAlphaFactor,
-			dstFactor: OneMinusSrcAlphaFactor,
+			srcFactor: "src-alpha",
+			dstFactor: "one-minus-src-alpha",
 			depthWrite: false,
 		};
 	}
@@ -166,15 +216,15 @@ function deriveLegacyBlendBehavior(options: {
 			? {
 					mode: "alpha-additive",
 					enabled: true,
-					srcFactor: SrcAlphaFactor,
-					dstFactor: OneFactor,
+					srcFactor: "src-alpha",
+					dstFactor: "one",
 					depthWrite: false,
 				}
 			: {
 					mode: "alpha",
 					enabled: true,
-					srcFactor: SrcAlphaFactor,
-					dstFactor: OneMinusSrcAlphaFactor,
+					srcFactor: "src-alpha",
+					dstFactor: "one-minus-src-alpha",
 					depthWrite: false,
 				};
 	}
@@ -183,15 +233,15 @@ function deriveLegacyBlendBehavior(options: {
 			? {
 					mode: "inverse-alpha-additive",
 					enabled: true,
-					srcFactor: OneMinusSrcAlphaFactor,
-					dstFactor: OneFactor,
+					srcFactor: "one-minus-src-alpha",
+					dstFactor: "one",
 					depthWrite: false,
 				}
 			: {
 					mode: "inverse-alpha",
 					enabled: true,
-					srcFactor: OneMinusSrcAlphaFactor,
-					dstFactor: SrcAlphaFactor,
+					srcFactor: "one-minus-src-alpha",
+					dstFactor: "src-alpha",
 					depthWrite: false,
 				};
 	}
@@ -199,8 +249,8 @@ function deriveLegacyBlendBehavior(options: {
 		return {
 			mode: "additive",
 			enabled: true,
-			srcFactor: OneFactor,
-			dstFactor: OneFactor,
+			srcFactor: "one",
+			dstFactor: "one",
 			depthWrite: false,
 		};
 	}
@@ -208,8 +258,8 @@ function deriveLegacyBlendBehavior(options: {
 		return {
 			mode: "clipmap",
 			enabled: true,
-			srcFactor: OneFactor,
-			dstFactor: OneMinusSrcAlphaFactor,
+			srcFactor: "one",
+			dstFactor: "one-minus-src-alpha",
 			depthWrite: true,
 		};
 	}
@@ -217,8 +267,8 @@ function deriveLegacyBlendBehavior(options: {
 		return {
 			mode: "translucent",
 			enabled: true,
-			srcFactor: SrcAlphaFactor,
-			dstFactor: OneMinusSrcAlphaFactor,
+			srcFactor: "src-alpha",
+			dstFactor: "one-minus-src-alpha",
 			depthWrite: false,
 		};
 	}
@@ -229,6 +279,36 @@ function deriveLegacyBlendBehavior(options: {
 		dstFactor: null,
 		depthWrite: true,
 	};
+}
+
+function toThreeBlendSrcFactor(
+	factor: LegacyMaterialBlendFactor | null,
+): BlendingSrcFactor | null {
+	switch (factor) {
+		case null:
+			return null;
+		case "one":
+			return OneFactor;
+		case "src-alpha":
+			return SrcAlphaFactor;
+		case "one-minus-src-alpha":
+			return OneMinusSrcAlphaFactor;
+	}
+}
+
+function toThreeBlendDstFactor(
+	factor: LegacyMaterialBlendFactor | null,
+): BlendingDstFactor | null {
+	switch (factor) {
+		case null:
+			return null;
+		case "one":
+			return OneFactor;
+		case "src-alpha":
+			return SrcAlphaFactor;
+		case "one-minus-src-alpha":
+			return OneMinusSrcAlphaFactor;
+	}
 }
 
 function clipMapAlphaTest(options: {

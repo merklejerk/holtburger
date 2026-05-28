@@ -11,6 +11,7 @@ import {
 	DIRECT_CLIP_MAP_ALPHA_TEST,
 	INDEXED_CLIP_MAP_ALPHA_TEST,
 	deriveLegacyMaterialBehavior,
+	deriveLegacyMaterialBehaviorDto,
 	withLegacyMeshStandardSurfaceDefaults,
 } from "./material-behavior";
 
@@ -152,6 +153,31 @@ describe("legacy material behavior", () => {
 		});
 
 		expect(behavior.unsupportedSurfaceFlags).toEqual(["Detail"]);
+	});
+
+	it("exposes renderer-neutral material behavior DTOs", () => {
+		const behavior = deriveLegacyMaterialBehaviorDto({
+			recipe: createMaterialRecipe({
+				surfaceType: 0x4 | 0x20,
+				diffuse: 0.5,
+			}),
+			hasSourceAlpha: true,
+		});
+
+		expect(behavior).toMatchObject({
+			color: [0.5, 0.5, 0.5],
+			emissive: [1, 1, 1],
+			transparent: true,
+			alphaTest: DIRECT_CLIP_MAP_ALPHA_TEST,
+			side: "front",
+			blend: {
+				mode: "clipmap",
+				enabled: true,
+				srcFactor: "one",
+				dstFactor: "one-minus-src-alpha",
+				depthWrite: true,
+			},
+		});
 	});
 });
 

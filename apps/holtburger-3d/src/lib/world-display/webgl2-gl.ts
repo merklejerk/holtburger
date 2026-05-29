@@ -15,6 +15,12 @@ export interface Webgl2BufferResource {
 	dispose(): void;
 }
 
+export type Webgl2BufferUploadData =
+	| BufferSource
+	| ArrayBufferLike
+	| ArrayBufferView<ArrayBufferLike>
+	| null;
+
 export interface Webgl2VertexArrayResource {
 	readonly vertexArray: WebGLVertexArrayObject;
 	dispose(): void;
@@ -112,7 +118,7 @@ export function createWebgl2ArrayBuffer(
 	gl: WebGL2RenderingContext,
 	input: {
 		label: string;
-		data: BufferSource | null;
+		data: Webgl2BufferUploadData;
 		usage?: GLenum;
 	},
 ): Webgl2BufferResource {
@@ -128,7 +134,7 @@ export function createWebgl2ElementArrayBuffer(
 	gl: WebGL2RenderingContext,
 	input: {
 		label: string;
-		data: BufferSource | null;
+		data: Webgl2BufferUploadData;
 		usage?: GLenum;
 	},
 ): Webgl2BufferResource {
@@ -256,7 +262,7 @@ function createWebgl2Buffer(
 	input: {
 		label: string;
 		target: GLenum;
-		data: BufferSource | null;
+		data: Webgl2BufferUploadData;
 		usage: GLenum;
 	},
 ): Webgl2BufferResource {
@@ -265,7 +271,7 @@ function createWebgl2Buffer(
 		throw new Error(`Failed to create WebGL2 buffer ${input.label}.`);
 	}
 	gl.bindBuffer(input.target, buffer);
-	gl.bufferData(input.target, input.data, input.usage);
+	gl.bufferData(input.target, normalizeWebgl2BufferUploadData(input.data), input.usage);
 	gl.bindBuffer(input.target, null);
 	return {
 		buffer,
@@ -273,6 +279,31 @@ function createWebgl2Buffer(
 			gl.deleteBuffer(buffer);
 		},
 	};
+}
+
+function normalizeWebgl2BufferUploadData(
+	data: Webgl2BufferUploadData,
+): BufferSource | null {
+	if (!data) {
+		return null;
+	}
+	if (data instanceof ArrayBuffer) {
+		return data;
+	}
+	if (
+		typeof SharedArrayBuffer !== "undefined" &&
+		data instanceof SharedArrayBuffer
+	) {
+		return new Uint8Array(data).slice().buffer;
+	}
+	if (ArrayBuffer.isView(data)) {
+		if (data.buffer instanceof ArrayBuffer) {
+			return data as ArrayBufferView<ArrayBuffer>;
+		}
+		return new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice()
+			.buffer;
+	}
+	return new Uint8Array(data).slice().buffer;
 }
 
 function uploadWebgl2Texture2D(

@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Renderer Pivot Plan
 
-Status: Phase W2A complete; ready for Phase W3; replaces the luma low-level renderer track and blocks the old luma plan
+Status: Phase W3 complete; ready for Phase W4; replaces the luma low-level renderer track and blocks the old luma plan
 before continuing Phase 6C.4.
 
 Related plan: [Holtburger 3D Luma Renderer Swapout Plan](./holtburger-3d-luma-renderer-swapout-plan.md)
@@ -475,7 +475,7 @@ Legacy shims:
 
 ## Phase W3: WebGL2 Staged Resource Store
 
-Status: Not started.
+Status: Complete as of 2026-05-29.
 
 Purpose: realize renderer-neutral staged draw units as retained WebGL2 resources.
 
@@ -503,6 +503,66 @@ Exit criteria:
   resource realization has its own focused coverage.
 - Retained WebGL2 resources are disposed when draw units disappear or the renderer is destroyed.
 
+Progress:
+
+- Added `webgl2-world-resources.ts`, a WebGL2 retained resource store for staged draw units.
+- WebGL2 now syncs terrain, staged static, and structured-interior scene inputs into retained
+  draw-unit records with raw WebGL2 buffers/VAOs and explicit disposal.
+- Added graph lease/signature handling for WebGL2 scene-object/material-decision nodes.
+- Added resource metrics for retained draw units, material counts, deferred direct-texture counts,
+  fallback samples, and triangle counts.
+- Wired the WebGL2 renderer to sync resources on asset, terrain, static, structured-interior,
+  transition-portal, and render-chunk-transform updates.
+- Extended `staged-world-assembly.ts` so one neutral scene assembly entry point produces terrain,
+  static, and structured-interior draw-unit facts.
+- Split renderer-neutral material-plan resolution into `staged-world-materials.ts`. This prevents
+  the WebGL2 resource path from importing `luma-materials.ts`, which owns luma texture wrappers.
+- Added `webgl2-world-resources.test.ts` for retained resource creation, reuse across chunk-offset
+  changes, orphan disposal, graph lease release, and full store destruction.
+
+Decisions:
+
+- W3 realizes only flat/debug resources. Draw units whose material plan is `direct-texture` are
+  retained as flat-color-capable resources and counted as `webgl2-direct-texture-deferred`.
+- W3 invalidates the WebGL2 state cache after resource sync. Resource creation binds buffers/VAOs;
+  the W4 submitter should start each frame from the cache's known post-sync state.
+- The W1 triangle remains the only rendered geometry until W4. W3 is intentionally a retained
+  resource phase, not a submitter phase.
+- The WebGL2 resource store uses the W2 `webgl2-gl.ts` helpers directly. No extra backend
+  abstraction was added below `WorldDisplayRenderer`.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/staged-world-assembly.test.ts src/lib/world-display/luma-resources.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run build`
+
+Course corrections:
+
+- The first W3 implementation path accidentally pulled `luma-materials.ts` through the neutral
+  assembly module. That would have dragged luma texture resource classes into the WebGL2 chunk.
+  Material-plan resolution was split into `staged-world-materials.ts`; `luma-materials.ts` now owns
+  luma texture realization only.
+- `webgl2-gl.ts` now normalizes buffer upload inputs at the helper boundary because TypeScript's
+  DOM types are stricter about `ArrayBuffer` versus `ArrayBufferLike` than our generated typed-array
+  geometry.
+
+Discovered cleanup targets:
+
+- `staged-world-assembly.ts`, `staged-world-materials.ts`, and `webgl2-world-resources.ts` still use
+  luma-named math/geometry/material-strategy types. They are renderer-neutral in behavior, but the
+  names should be cleaned up once W4/W5 prove the shared surface.
+- W4 should stop drawing the W1 triangle whenever retained staged draw units exist and should
+  report actual draw-unit visibility/render counts rather than retained-resource counts.
+- WebGL2 direct texture realization remains deferred to W5; the W3 flat resource path intentionally
+  records this as a material fallback metric.
+
+Legacy shims:
+
+- None introduced. `luma-materials.ts` keeps luma-facing type aliases for its texture realization
+  function, but WebGL2 no longer imports that module.
+
 ## Phase W4: Fast Flat Staged WebGL2 Submitter
 
 Status: Not started.
@@ -512,6 +572,8 @@ direct texture parity, atlas, or compaction work resumes.
 
 Tasks:
 
+- Consume the retained `Webgl2WorldResourceStore` from W3; do not rebuild draw-unit resources in
+  the submitter.
 - Build frame visibility from the existing prepared BVH snapshot path.
 - Sort visible draw units by coarse submission key:
   - program/shader variant
@@ -532,6 +594,7 @@ Tasks:
   - state changes
   - visible draw units by material kind
 - Preserve the staged semantics. Do not merge geometry in this phase.
+- Stop drawing the W1 test triangle once retained staged draw units are available.
 
 Exit criteria:
 

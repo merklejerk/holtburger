@@ -8,6 +8,12 @@ import {
 } from "./webgl2-gl";
 import { createWebgl2RenderMetrics } from "./webgl2-render-metrics";
 import { Webgl2StateCache } from "./webgl2-state-cache";
+import {
+	createWebgl2WorldResourceStore,
+	destroyWebgl2WorldResources,
+	syncWebgl2WorldResources,
+	type Webgl2WorldResourceStore,
+} from "./webgl2-world-resources";
 import type { WorldRenderMetrics } from "./renderer-contract";
 import type {
 	WorldDisplayRenderer,
@@ -49,16 +55,19 @@ interface Webgl2RenderResources {
 	program: Webgl2ProgramResource<"position", never>;
 	vertexBuffer: Webgl2BufferResource;
 	vertexArray: Webgl2VertexArrayResource;
+	worldStore: Webgl2WorldResourceStore;
 }
 
 export function createWebgl2WorldDisplayRendererImplementation(
 	host: HTMLDivElement,
 	options: WorldDisplayRendererOptions,
 ): WorldDisplayRenderer {
+	let assetState = options.assetState;
 	let terrainScene = options.terrainScene;
 	let staticRenderableScene = options.staticRenderableScene;
 	let structuredInteriorScene = options.structuredInteriorScene;
 	let transitionPortalModel = options.transitionPortalModel;
+	let renderChunkTransforms = options.renderChunkTransforms;
 	let controlledCameraFrame = options.controlledCameraFrame;
 	let transitionPortalMaxDepth = options.transitionPortalMaxDepth ?? 1;
 	let textureFilteringMode = options.textureFilteringMode ?? "anisotropic-4x";
@@ -98,23 +107,29 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	reportMetrics();
 
 	return {
-		setAssetState() {
+		setAssetState(nextAssetState) {
+			assetState = nextAssetState;
+			syncWorldResources();
 			reportMetrics();
 		},
 		setTerrainScene(scene) {
 			terrainScene = scene;
+			syncWorldResources();
 			reportMetrics();
 		},
 		setStaticRenderableScene(scene) {
 			staticRenderableScene = scene;
+			syncWorldResources();
 			reportMetrics();
 		},
 		setStructuredInteriorScene(scene) {
 			structuredInteriorScene = scene;
+			syncWorldResources();
 			reportMetrics();
 		},
 		setTransitionPortalModel(model) {
 			transitionPortalModel = model;
+			syncWorldResources();
 			reportMetrics();
 		},
 		setDebugOverlayScene() {
@@ -123,7 +138,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		setRenderSceneContext() {
 			reportMetrics();
 		},
-		setRenderChunkTransforms() {
+		setRenderChunkTransforms(transforms) {
+			renderChunkTransforms = transforms;
+			syncWorldResources();
 			reportMetrics();
 		},
 		setRenderSpatialQuery() {
@@ -195,6 +212,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 
 			resources = createTriangleResources(gl);
 			syncCanvasSize();
+			syncWorldResources();
 			scheduleFrame();
 		} catch (error) {
 			initializationError =
@@ -331,7 +349,26 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		resources.vertexArray.dispose();
 		resources.vertexBuffer.dispose();
 		resources.program.dispose();
+		destroyWebgl2WorldResources(resources.worldStore);
 		resources = null;
+	}
+
+	function syncWorldResources(): void {
+		if (!resources) {
+			return;
+		}
+		syncWebgl2WorldResources({
+			gl: resources.gl,
+			store: resources.worldStore,
+			assetState,
+			terrainScene,
+			staticRenderableScene,
+			structuredInteriorScene,
+			transitionPortalModel,
+			renderChunkTransforms,
+			rendererResourceGraph: options.rendererResourceGraph,
+		});
+		resources.stateCache.invalidate();
 	}
 
 	function reportMetrics(): void {
@@ -347,12 +384,17 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				pixelRatio: window.devicePixelRatio || 1,
 				renderGraphPolicy: initializationError
 					? "webgl2-initialization-failed"
-					: "webgl2-test-frame",
+					: resources
+						? resources.worldStore.drawUnits.length > 0
+							? "webgl2-staged-resources"
+							: "webgl2-test-frame"
+						: "webgl2-initializing",
 				transitionPortalMaxDepth,
 				clearCount,
 				drawCallCount,
 				lastFrameDrawCount,
 				initializationError,
+				worldStore: resources?.worldStore ?? null,
 				performance: latestPerformanceMetrics,
 				textureFilteringMode,
 				textureColorSpaceMode,
@@ -418,5 +460,6 @@ function createTriangleResources(
 		program,
 		vertexBuffer,
 		vertexArray,
+		worldStore: createWebgl2WorldResourceStore(),
 	};
 }

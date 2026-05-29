@@ -8,6 +8,7 @@ import type { StaticRenderableSceneModel } from "./static-renderables";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
 import type { TransitionPortalCandidateModel } from "./transition-portal-work-items";
+import type { Webgl2WorldResourceStore } from "./webgl2-world-resources";
 
 export interface Webgl2RenderMetricsInput {
 	terrainScene: TerrainSceneModel;
@@ -24,6 +25,7 @@ export interface Webgl2RenderMetricsInput {
 	drawCallCount: number;
 	lastFrameDrawCount: number;
 	initializationError: string | null;
+	worldStore: Webgl2WorldResourceStore | null;
 	performance: WorldRenderMetrics["performance"];
 	textureFilteringMode: WorldDisplayTextureFilteringMode;
 	textureColorSpaceMode: WorldDisplayTextureColorSpaceMode;
@@ -59,7 +61,9 @@ export function createWebgl2RenderMetrics(
 			pixelRatio: input.pixelRatio,
 			cameraViewResidency: input.initializationError
 				? "webgl2 initialization failed"
-				: "webgl2 test frame",
+				: input.worldStore && input.worldStore.drawUnits.length > 0
+					? "webgl2 staged resources ready"
+					: "webgl2 test frame",
 			residencyCellCount: 0,
 			residencyLandblockCount: 0,
 			residencyAabbCandidateCount: 0,
@@ -79,18 +83,19 @@ export function createWebgl2RenderMetrics(
 			transitionPortalCandidateCount:
 				input.transitionPortalModel.candidates.length,
 			portalApertureMeshCount: 0,
-			terrainMeshCount: 0,
+			terrainMeshCount: input.worldStore?.terrainDrawUnitCount ?? 0,
 			visibleTerrainMeshCount: 0,
-			staticGroupMeshCount: 0,
+			staticGroupMeshCount: input.worldStore?.staticDrawUnitCount ?? 0,
 			visibleStaticGroupMeshCount: 0,
-			staticRenderBatchCount: 0,
+			staticRenderBatchCount: input.worldStore?.staticDrawUnitCount ?? 0,
 			staticBvhCandidateBatchCount: 0,
 			staticBvhRepresentedInstanceKeyCount: 0,
 			staticBvhVisibleInstanceKeyCount: 0,
 			staticBvhFallbackIncludedBatchCount: 0,
-			terrainRenderBatchCount: 0,
+			terrainRenderBatchCount: input.worldStore?.terrainDrawUnitCount ?? 0,
 			terrainBvhCandidateBatchCount: 0,
-			structuredInteriorRenderBatchCount: 0,
+			structuredInteriorRenderBatchCount:
+				input.worldStore?.structuredInteriorDrawUnitCount ?? 0,
 			structuredInteriorBvhCandidateBatchCount: 0,
 			debugOverlayRenderBatchCount: 0,
 			debugOverlayBvhCandidateBatchCount: 0,
@@ -102,7 +107,8 @@ export function createWebgl2RenderMetrics(
 			portalCompositeTerrainCandidateBatchCount: 0,
 			portalCompositeInteriorCandidateBatchCount: 0,
 			portalCompositeFallbackIncludedBatchCount: 0,
-			structuredInteriorMeshCount: 0,
+			structuredInteriorMeshCount:
+				input.worldStore?.structuredInteriorDrawUnitCount ?? 0,
 			visibleStructuredInteriorMeshCount: 0,
 			terrainBvhVisibleItemCount: 0,
 			terrainBvhTotalItemCount: 0,
@@ -110,18 +116,24 @@ export function createWebgl2RenderMetrics(
 			outdoorStaticBvhTotalItemCount: 0,
 			envCellLocalBvhVisibleItemCount: 0,
 			envCellLocalBvhTotalItemCount: 0,
-			visibleStaticInstanceKeyCount: 0,
+			visibleStaticInstanceKeyCount:
+				input.worldStore?.staticInstanceCount ?? 0,
 			visiblePortalKeyCount: 0,
 			envCellBvhConsideredCount: 0,
-			fallbackReasonCount: input.initializationError ? 1 : 0,
-			fallbackReasonSamples: input.initializationError
-				? [`webgl2 initialization failed: ${input.initializationError}`]
-				: [],
+			fallbackReasonCount:
+				(input.initializationError ? 1 : 0) +
+				(input.worldStore?.materialFallbackReasonCount ?? 0),
+			fallbackReasonSamples: [
+				...(input.initializationError
+					? [`webgl2 initialization failed: ${input.initializationError}`]
+					: []),
+				...(input.worldStore?.materialFallbackReasonSamples ?? []),
+			],
 			queryTimeMs: 0,
 			debugOverlayObjectCount: 0,
 			visibleDebugOverlayObjectCount: 0,
-			materialCount: 0,
-			materialProgramKeyCount: 0,
+			materialCount: input.worldStore?.materialCount ?? 0,
+			materialProgramKeyCount: input.worldStore?.materialCount ?? 0,
 			transparentMaterialCount: 0,
 			textureFilteringMode: input.textureFilteringMode,
 			textureColorSpaceMode: input.textureColorSpaceMode,
@@ -136,16 +148,25 @@ export function createWebgl2RenderMetrics(
 			textureResourceCount: 0,
 			indexedTextureResourceCount: 0,
 			paletteResourceCount: 0,
-			staticGeometryGroupCount: 0,
+			staticGeometryGroupCount: input.worldStore?.staticDrawUnitCount ?? 0,
 			staticVisibleGeometryGroupCount: 0,
-			structuredInteriorGeometryGroupCount: 0,
-			materialTypeCounts: {},
+			structuredInteriorGeometryGroupCount:
+				input.worldStore?.structuredInteriorDrawUnitCount ?? 0,
+			materialTypeCounts: input.worldStore
+				? {
+						"webgl2-flat-resource":
+							input.worldStore.drawUnits.length -
+							input.worldStore.directTextureDeferredDrawUnitCount,
+						"webgl2-direct-texture-deferred":
+							input.worldStore.directTextureDeferredDrawUnitCount,
+					}
+				: {},
 			materialProgramKeySamples: [],
 			preparedTextureUploadCount: 0,
 			preparedTextureGeneratedByteLength: 0,
 			compressedSingleLevelFallbackUploadCount: 0,
 			renderCalls: input.lastFrameDrawCount,
-			renderTriangles: input.lastFrameDrawCount,
+			renderTriangles: input.worldStore?.triangleCount ?? input.lastFrameDrawCount,
 			renderLines: 0,
 			renderPoints: 0,
 		},

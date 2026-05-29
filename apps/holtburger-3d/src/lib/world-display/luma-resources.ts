@@ -18,7 +18,6 @@ import {
 	createLumaTextureResourceStore,
 	destroyLumaTextureResources,
 	getOrCreateLumaTextureResource,
-	resolveLumaSurfaceMaterialPlan,
 	type LumaMaterialPlan,
 	type LumaTextureResourceStore,
 } from "./luma-materials";
@@ -56,6 +55,7 @@ import {
 	type StagedWorldAssemblyGraphRecord,
 	type StagedWorldDrawUnitBvhBinding,
 } from "./staged-world-assembly";
+import { resolveStagedWorldSurfaceMaterialPlan } from "./staged-world-materials";
 import type { TerrainSceneModel } from "./terrain-scene";
 import type { TransitionPortalCandidateModel } from "./transition-portal-work-items";
 
@@ -264,7 +264,7 @@ export function syncLumaWorldResources({
 			if (geometry.triangleCount === 0) {
 				continue;
 			}
-			const material = resolveLumaSurfaceMaterialPlan({
+			const material = resolveStagedWorldSurfaceMaterialPlan({
 				assetState,
 				surfaceId: surfaceKey.surfaceId,
 				fallbackColorKey: `${cell.debugColorKey}:${surfaceKey.surfaceId ?? "none"}`,

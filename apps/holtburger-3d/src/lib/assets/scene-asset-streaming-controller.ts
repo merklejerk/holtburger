@@ -20,6 +20,7 @@ import {
 	deriveVisibleMaterialAssetIdsForBrowserDestination,
 	type OutdoorSceneRequestOptions,
 } from "./scene-asset-request-planner";
+import { LUMA_MATERIAL_TEXTURE_PREPARATION_POLICY } from "./luma-material-texture-preparation-policy";
 import type { PreparedAssetCacheMetadata, PreparedAssetRecord } from "./types";
 import type { WorldRenderBackend } from "../app-config/render-backend";
 
@@ -147,7 +148,10 @@ export class SceneAssetStreamingController {
 					buildingRadius: input.buildingLodRadius,
 					detailRadius: input.detailLodRadius,
 					envCellRadius: input.envCellLodRadius,
-					includeLumaAtlasPreparedTextures: input.rendererBackend === "luma",
+					materialTexturePreparationPolicy:
+						input.rendererBackend === "luma"
+							? LUMA_MATERIAL_TEXTURE_PREPARATION_POLICY
+							: undefined,
 				},
 			},
 			priority,
@@ -242,7 +246,10 @@ export class SceneAssetStreamingController {
 					buildingRadius: input.buildingLodRadius,
 					detailRadius: input.detailLodRadius,
 					envCellRadius: input.envCellLodRadius,
-					includeLumaAtlasPreparedTextures: input.rendererBackend === "luma",
+					materialTexturePreparationPolicy:
+						input.rendererBackend === "luma"
+							? LUMA_MATERIAL_TEXTURE_PREPARATION_POLICY
+							: undefined,
 				},
 			).concat(input.appearancePreviewAssetIds),
 			inFlightAssetIds: [...this.inFlightAssetIds],

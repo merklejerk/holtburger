@@ -768,7 +768,7 @@ export interface PreparedTexturePayload extends PreparedAssetPayloadBase {
 	sourceAssetKind: "prepared-texture";
 	renderSurfaceId: number;
 	usage: "color" | "detail" | "mask" | "raw";
-	outputFormat: "dxt1" | "dxt3" | "dxt5" | "rgba8";
+	outputFormat: "dxt1" | "dxt3" | "dxt5" | "r8" | "rgba8";
 	mipPolicy: "none" | "retail4";
 	colorSpace: "srgb" | "data" | "linear" | "source";
 	sourceFormatRaw: number;
@@ -965,7 +965,7 @@ export function getPreparedAssetDependencies(
 
 export function preparedDxtOutputFormat(
 	formatRaw: number,
-): Exclude<PreparedTexturePayload["outputFormat"], "rgba8"> | null {
+): Exclude<PreparedTexturePayload["outputFormat"], "r8" | "rgba8"> | null {
 	switch (formatRaw) {
 		case 0x3154_5844:
 			return "dxt1";

@@ -77,7 +77,7 @@ describe("luma material strategy", () => {
 		});
 	});
 
-	it("classifies direct-color materials as direct-texture and blended compressed materials as fallback", () => {
+	it("classifies direct-color and normalized blended compressed materials as direct-texture", () => {
 		const state = createAssetState([
 			createMaterialRecipeRecord({
 				surfaceId: 0x08000001,
@@ -111,7 +111,7 @@ describe("luma material strategy", () => {
 					? entry.reason
 					: entry.kind,
 			),
-		).toEqual(["direct-texture", "blended-transparency"]);
+		).toEqual(["direct-texture", "direct-texture"]);
 
 		const s3tcPlan = planLumaMaterialStrategies({
 			assetState: state,

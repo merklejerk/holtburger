@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Renderer Pivot Plan
 
-Status: Phase W1 complete; ready for Phase W2; replaces the luma low-level renderer track and blocks the old luma plan
+Status: Phase W2 complete; ready for Phase W2A; replaces the luma low-level renderer track and blocks the old luma plan
 before continuing Phase 6C.4.
 
 Related plan: [Holtburger 3D Luma Renderer Swapout Plan](./holtburger-3d-luma-renderer-swapout-plan.md)
@@ -263,7 +263,7 @@ Legacy shims:
 
 ## Phase W2: WebGL2 Program, Buffer, Texture, and State Primitives
 
-Status: Not started.
+Status: Complete as of 2026-05-29.
 
 Purpose: establish a small renderer-local GL layer that gives us the missing fast baseline control
 without rebuilding a giant graphics framework.
@@ -307,12 +307,74 @@ Exit criteria:
 - State-cache tests prove redundant program, VAO, texture, depth, blend, cull, stencil, and viewport
   calls are skipped.
 
+Progress:
+
+- Added `webgl2-gl.ts` with renderer-local helpers for:
+  - shader compile/link and program attribute/uniform lookup with labeled error messages
+  - array/index buffer creation and disposal
+  - VAO creation and disposal
+  - 2D texture creation/upload/disposal
+  - sampler parameter application, including optional anisotropy when the extension exists
+- Added `webgl2-state-cache.ts` with a small hot-path state cache for:
+  - current program
+  - current VAO
+  - active texture unit and 2D texture bindings
+  - depth test/write/function
+  - blend enable/function/equation
+  - cull enable/mode
+  - stencil enable/mask/function/op
+  - viewport
+  - framebuffer
+- Rewired the W1 WebGL2 test triangle to use the new program, buffer, VAO, disposal helpers, and
+  state cache.
+- Removed W1's local shader/program helper functions from `webgl2-world-display-renderer-impl.ts`.
+- Added `webgl2-state-cache.test.ts` with a capturing fake GL surface that proves redundant program,
+  VAO, texture, framebuffer, viewport, depth, blend, cull, stencil, and invalidation behavior.
+
+Decisions:
+
+- Texture upload helpers exist in W2, but `webgl2` asset texture request policy remains disabled.
+  Direct material parity still owns the switch to request decompressed texture variants.
+- The state cache is intentionally explicit instead of reflecting GL state with `getParameter(...)`.
+  Runtime `getParameter` calls are avoided in the hot path; unknown external mutation should call
+  `invalidate()`.
+- The normal WebGL2 skeleton keeps stencil disabled through context creation and cached state.
+  Portal stencil work can opt in later without making the default world path pay for it.
+- `webgl2-gl.ts` owns raw texture upload directly. No luma texture wrapper or luma capability type
+  is part of the WebGL2 primitive layer.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/webgl2-state-cache.test.ts src/lib/app-config/render-backend.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run build`
+
+Discovered cleanup targets:
+
+- `webgl2-gl.ts` now has texture upload helpers that are only build-covered. Add focused fake/canvas
+  coverage when W5 starts using real direct textures.
+- W3 should use these resource helpers directly and should not add a second resource abstraction
+  layer before there is duplication to remove.
+- The W2 state cache should remain submitter-owned. Resource construction may temporarily bind GL
+  objects, but frame submission should treat the cache as authoritative and call `invalidate()` if
+  non-frame setup mutates shared state after the submitter begins running.
+
+Legacy shims:
+
+- None introduced. The W2 layer is first-party WebGL2 code and does not route through luma or alias
+  luma concepts.
+
 ## Phase W2A: Renderer-Neutral Staged Assembly Extraction
 
 Status: Not started.
 
 Purpose: extract the useful staged assembly semantics from luma-shaped modules before WebGL2
 resource creation, avoiding a luma-to-WebGL2 copy-paste fork.
+
+W2 refinement: extracted draw-unit/resource realization code should target the W2 `webgl2-gl.ts`
+helpers directly. Do not introduce an additional renderer abstraction below `WorldDisplayRenderer`
+unless W3/W4 reveal real duplication.
 
 Tasks:
 

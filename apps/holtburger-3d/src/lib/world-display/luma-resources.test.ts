@@ -117,7 +117,7 @@ describe("syncLumaWorldResources", () => {
 		expect(store.batchesById.size).toBe(0);
 	});
 
-	it("uploads baked chunk-local static geometry without instance buffers", () => {
+	it("stages first-seen static geometry with chunk-local transforms and uv buffers", () => {
 		const device = new FakeDevice();
 		const store = createLumaWorldResourceStore();
 		const part = createStaticPart({
@@ -150,7 +150,8 @@ describe("syncLumaWorldResources", () => {
 		expect(batch.vertexCount).toBe(3);
 		expect(store.staticBatchCount).toBe(1);
 		expect(store.staticInstanceCount).toBe(1);
-		expect(batch.vertexArray.buffers.get(1)).toBeUndefined();
+		expect(batch.id.startsWith("static-staged/")).toBe(true);
+		expect(batch.vertexArray.buffers.get(1)).toBeInstanceOf(FakeBuffer);
 		expect(batch.modelMatrix[12]).toBe(10);
 		expect(batch.modelMatrix[13]).toBe(20);
 		expect(batch.modelMatrix[14]).toBe(30);
@@ -179,118 +180,64 @@ describe("syncLumaWorldResources", () => {
 		expect(Array.from(positions?.slice(0, 3) ?? [])).toEqual([1, 3, -2]);
 	});
 
-	it("groups baked static geometry across gfx objects by chunk domain and render state", () => {
+	it("splits staged static geometry by material surface while preserving uv buffers", () => {
 		const device = new FakeDevice();
 		const store = createLumaWorldResourceStore();
-		const firstPart = createStaticPart({
-			groupKey: "static/first",
+		const surfaceA = 0x08000001;
+		const surfaceB = 0x08000002;
+		const part = createStaticPart({
+			groupKey: "static/textured",
 			instanceId: "instance-a",
 			chunkLocalPosition: { x: 1, y: 2, z: 3 },
-		});
-		const secondPart = createStaticPart({
-			gfxObjAssetId: "gfx-obj/01000002",
-			gfxObjId: 0x01000002,
-			groupKey: "static/second",
-			instanceId: "instance-b",
-			chunkLocalPosition: { x: 4, y: 5, z: 6 },
+			materialSlots: [
+				createMaterialSlot(0, surfaceA),
+				createMaterialSlot(1, surfaceB),
+			],
 		});
 
 		syncLumaWorldResources({
 			device: device.asDevice(),
 			store,
 			assetState: createAssetState({
-				extraGfxObjAssetIds: ["gfx-obj/01000002"],
+				renderGeometryByAssetId: {
+					"gfx-obj/01000001": createTwoSurfaceGfxGeometry(surfaceA, surfaceB),
+				},
 			}),
 			terrainScene: createTerrainScene({ tiles: [] }),
-			staticRenderableScene: createStaticRenderableScene({
-				parts: [firstPart, secondPart],
-			}),
+			staticRenderableScene: createStaticRenderableScene({ parts: [part] }),
 			structuredInteriorScene: createStructuredInteriorScene(),
 			transitionPortalModel: createTransitionPortalModel(),
 			renderChunkTransforms: [createChunkTransform({ x: 10, y: 20, z: 30 })],
 		});
 
-		expect(store.staticBatchCount).toBe(1);
-		expect(store.staticInstanceCount).toBe(2);
-		const batch = store.batches[0];
-		expect(batch?.kind).toBe("static");
-		expect(batch?.vertexCount).toBe(6);
-		expect(batch?.triangleCount).toBe(2);
+		const stagedBatches = store.batches
+			.filter((batch) => batch.id.startsWith("static-staged/"))
+			.sort((left, right) => left.id.localeCompare(right.id));
+		expect(stagedBatches).toHaveLength(2);
+		expect(stagedBatches.map((batch) => batch.triangleCount)).toEqual([1, 1]);
+		expect(stagedBatches.map((batch) => batch.uvBuffer)).toEqual([
+			expect.any(FakeBuffer),
+			expect.any(FakeBuffer),
+		]);
+		expect(
+			Array.from(
+				(toFakeBuffer(stagedBatches[0]?.uvBuffer)?.data as Float32Array).slice(
+					0,
+					6,
+				),
+			),
+		).toEqual([0, 0, 1, 0, 0, 1]);
+		expect(
+			Array.from(
+				(toFakeBuffer(stagedBatches[1]?.uvBuffer)?.data as Float32Array).slice(
+					0,
+					6,
+				),
+			),
+		).toEqual([1, 1, 2, 1, 1, 2]);
 	});
 
-	it("stages newly committed static objects without rebuilding an existing promoted batch", () => {
-		const device = new FakeDevice();
-		const store = createLumaWorldResourceStore();
-		const promotedPart = createStaticPart({
-			groupKey: "static/promoted",
-			instanceId: "instance-a",
-			chunkLocalPosition: { x: 1, y: 2, z: 3 },
-		});
-		const stagedPart = createStaticPart({
-			gfxObjAssetId: "gfx-obj/01000002",
-			gfxObjId: 0x01000002,
-			groupKey: "static/staged",
-			instanceId: "instance-b",
-			chunkLocalPosition: { x: 4, y: 5, z: 6 },
-		});
-		const firstTransform = createChunkTransform({ x: 10, y: 20, z: 30 });
-
-		syncLumaWorldResources({
-			device: device.asDevice(),
-			store,
-			assetState: createAssetState({
-				extraGfxObjAssetIds: ["gfx-obj/01000002"],
-			}),
-			terrainScene: createTerrainScene({ tiles: [] }),
-			staticRenderableScene: createStaticRenderableScene({
-				parts: [promotedPart],
-			}),
-			structuredInteriorScene: createStructuredInteriorScene(),
-			transitionPortalModel: createTransitionPortalModel(),
-			renderChunkTransforms: [firstTransform],
-		});
-
-		const promotedBatch = store.batches.find((batch) =>
-			batch.id.startsWith("static-promoted/"),
-		);
-		const promotedVertexBuffer = toFakeBuffer(promotedBatch?.vertexBuffer);
-		expect(promotedBatch?.vertexCount).toBe(3);
-		expect(store.promotedStaticBatchCount).toBe(1);
-		expect(store.stagedStaticObjectCount).toBe(0);
-
-		syncLumaWorldResources({
-			device: device.asDevice(),
-			store,
-			assetState: createAssetState({
-				extraGfxObjAssetIds: ["gfx-obj/01000002"],
-			}),
-			terrainScene: createTerrainScene({ tiles: [] }),
-			staticRenderableScene: createStaticRenderableScene({
-				parts: [promotedPart, stagedPart],
-			}),
-			structuredInteriorScene: createStructuredInteriorScene(),
-			transitionPortalModel: createTransitionPortalModel(),
-			renderChunkTransforms: [firstTransform],
-		});
-
-		const reusedPromotedBatch = store.batches.find((batch) =>
-			batch.id.startsWith("static-promoted/"),
-		);
-		const stagedBatch = store.batches.find((batch) =>
-			batch.id.startsWith("static-staged/"),
-		);
-		expect(reusedPromotedBatch?.vertexBuffer).toBe(promotedVertexBuffer);
-		expect(reusedPromotedBatch?.staticPartCount).toBe(1);
-		expect(stagedBatch?.drawMode).toBe("indexed");
-		expect(stagedBatch?.kind).toBe("static");
-		expect(stagedBatch?.staticPartCount).toBe(1);
-		expect(store.promotedStaticBatchCount).toBe(1);
-		expect(store.stagedStaticObjectCount).toBe(1);
-		expect(store.stagedStaticPartCount).toBe(1);
-		expect(store.staticPromotionCount).toBe(0);
-	});
-
-	it("promotes staged static objects when the promotion threshold is reached", () => {
+	it("reuses staged static vertex buffers when only chunk offsets change", () => {
 		const device = new FakeDevice();
 		const store = createLumaWorldResourceStore();
 		const firstPart = createStaticPart({
@@ -302,66 +249,6 @@ describe("syncLumaWorldResources", () => {
 			gfxObjAssetId: "gfx-obj/01000002",
 			gfxObjId: 0x01000002,
 			groupKey: "static/second",
-			instanceId: "instance-b",
-			chunkLocalPosition: { x: 4, y: 5, z: 6 },
-		});
-		const transform = createChunkTransform({ x: 10, y: 20, z: 30 });
-
-		syncLumaWorldResources({
-			device: device.asDevice(),
-			store,
-			assetState: createAssetState({
-				extraGfxObjAssetIds: ["gfx-obj/01000002"],
-			}),
-			terrainScene: createTerrainScene({ tiles: [] }),
-			staticRenderableScene: createStaticRenderableScene({ parts: [firstPart] }),
-			structuredInteriorScene: createStructuredInteriorScene(),
-			transitionPortalModel: createTransitionPortalModel(),
-			renderChunkTransforms: [transform],
-		});
-
-		syncLumaWorldResources({
-			device: device.asDevice(),
-			store,
-			assetState: createAssetState({
-				extraGfxObjAssetIds: ["gfx-obj/01000002"],
-			}),
-			terrainScene: createTerrainScene({ tiles: [] }),
-			staticRenderableScene: createStaticRenderableScene({
-				parts: [firstPart, secondPart],
-			}),
-			structuredInteriorScene: createStructuredInteriorScene(),
-			transitionPortalModel: createTransitionPortalModel(),
-			renderChunkTransforms: [transform],
-			staticPromotionPolicy: { stagedObjectPromotionThreshold: 1 },
-		});
-
-		const promotedBatch = store.batches.find((batch) =>
-			batch.id.startsWith("static-promoted/"),
-		);
-		expect(promotedBatch?.staticPartCount).toBe(2);
-		expect(promotedBatch?.vertexCount).toBe(6);
-		expect(store.promotedStaticBatchCount).toBe(1);
-		expect(store.stagedStaticObjectCount).toBe(0);
-		expect(store.stagedStaticPartCount).toBe(0);
-		expect(store.staticPromotionCount).toBe(1);
-		expect(
-			store.batches.some((batch) => batch.id.startsWith("static-staged/")),
-		).toBe(false);
-	});
-
-	it("reuses promoted and staged static vertex buffers when only chunk offsets change", () => {
-		const device = new FakeDevice();
-		const store = createLumaWorldResourceStore();
-		const promotedPart = createStaticPart({
-			groupKey: "static/promoted",
-			instanceId: "instance-a",
-			chunkLocalPosition: { x: 1, y: 2, z: 3 },
-		});
-		const stagedPart = createStaticPart({
-			gfxObjAssetId: "gfx-obj/01000002",
-			gfxObjId: 0x01000002,
-			groupKey: "static/staged",
 			instanceId: "instance-b",
 			chunkLocalPosition: { x: 4, y: 5, z: 6 },
 		});
@@ -369,19 +256,9 @@ describe("syncLumaWorldResources", () => {
 			extraGfxObjAssetIds: ["gfx-obj/01000002"],
 		});
 		const sceneWithBothParts = createStaticRenderableScene({
-			parts: [promotedPart, stagedPart],
+			parts: [firstPart, secondPart],
 		});
 
-		syncLumaWorldResources({
-			device: device.asDevice(),
-			store,
-			assetState,
-			terrainScene: createTerrainScene({ tiles: [] }),
-			staticRenderableScene: createStaticRenderableScene({ parts: [promotedPart] }),
-			structuredInteriorScene: createStructuredInteriorScene(),
-			transitionPortalModel: createTransitionPortalModel(),
-			renderChunkTransforms: [createChunkTransform({ x: 10, y: 20, z: 30 })],
-		});
 		syncLumaWorldResources({
 			device: device.asDevice(),
 			store,
@@ -393,14 +270,12 @@ describe("syncLumaWorldResources", () => {
 			renderChunkTransforms: [createChunkTransform({ x: 10, y: 20, z: 30 })],
 		});
 
-		const promotedBatch = store.batches.find((batch) =>
-			batch.id.startsWith("static-promoted/"),
-		);
-		const stagedBatch = store.batches.find((batch) =>
+		const stagedBatches = store.batches.filter((batch) =>
 			batch.id.startsWith("static-staged/"),
 		);
-		const promotedVertexBuffer = toFakeBuffer(promotedBatch?.vertexBuffer);
-		const stagedVertexBuffer = toFakeBuffer(stagedBatch?.vertexBuffer);
+		const stagedVertexBuffers = stagedBatches.map((batch) =>
+			toFakeBuffer(batch.vertexBuffer),
+		);
 
 		syncLumaWorldResources({
 			device: device.asDevice(),
@@ -413,20 +288,17 @@ describe("syncLumaWorldResources", () => {
 			renderChunkTransforms: [createChunkTransform({ x: 50, y: 60, z: 70 })],
 		});
 
-		const reusedPromotedBatch = store.batches.find((batch) =>
-			batch.id.startsWith("static-promoted/"),
-		);
-		const reusedStagedBatch = store.batches.find((batch) =>
+		const reusedStagedBatches = store.batches.filter((batch) =>
 			batch.id.startsWith("static-staged/"),
 		);
-		expect(reusedPromotedBatch?.vertexBuffer).toBe(promotedVertexBuffer);
-		expect(reusedStagedBatch?.vertexBuffer).toBe(stagedVertexBuffer);
-		expect(reusedPromotedBatch?.modelMatrix[12]).toBe(50);
-		expect(reusedPromotedBatch?.modelMatrix[13]).toBe(60);
-		expect(reusedPromotedBatch?.modelMatrix[14]).toBe(70);
-		expect(reusedStagedBatch?.modelMatrix[12]).toBe(50);
-		expect(reusedStagedBatch?.modelMatrix[13]).toBe(60);
-		expect(reusedStagedBatch?.modelMatrix[14]).toBe(70);
+		expect(reusedStagedBatches.map((batch) => batch.vertexBuffer)).toEqual(
+			stagedVertexBuffers,
+		);
+		for (const batch of reusedStagedBatches) {
+			expect(batch.modelMatrix[12]).toBe(50);
+			expect(batch.modelMatrix[13]).toBe(60);
+			expect(batch.modelMatrix[14]).toBe(70);
+		}
 	});
 
 	it("splits baked static batches by chunk and render domain", () => {
@@ -704,27 +576,21 @@ function createAssetState({
 	extraGfxObjAssetIds = [],
 	materialSurfaceId,
 	renderSurfaceId,
+	renderGeometryByAssetId = {},
 }: {
 	extraGfxObjAssetIds?: string[];
 	materialSurfaceId?: number;
 	renderSurfaceId?: number;
+	renderGeometryByAssetId?: Record<string, PreparedPolygonSetRenderGeometry>;
 } = {}): AssetChannelState {
 	const state = createInitialAssetChannelState();
 	for (const assetId of ["gfx-obj/01000001", ...extraGfxObjAssetIds]) {
+		const renderGeometry =
+			renderGeometryByAssetId[assetId] ?? createStaticGfxGeometry();
 		state.preparedByAssetId[assetId] = {
 			payload: {
 				kind: "gfx-obj",
-				renderGeometry: {
-					sourceId: 1,
-					vertexCount: 3,
-					triangleCount: 1,
-					positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
-					normals: [],
-					uvs: [],
-					triangles: [{ polygonId: 0, surfaceId: null, firstVertex: 0 }],
-					surfaceIds: [],
-					bounds: null,
-				},
+				renderGeometry,
 			},
 		} as AssetChannelState["preparedAsset"];
 	}
@@ -739,6 +605,42 @@ function createAssetState({
 		} as AssetChannelState["preparedAsset"];
 	}
 	return state;
+}
+
+function createStaticGfxGeometry(): PreparedPolygonSetRenderGeometry {
+	return {
+		sourceId: 1,
+		vertexCount: 3,
+		triangleCount: 1,
+		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+		normals: [],
+		uvs: new Float32Array([0, 0, 1, 0, 0, 1]),
+		triangles: [{ polygonId: 0, surfaceId: null, firstVertex: 0 }],
+		surfaceIds: [],
+		bounds: null,
+	};
+}
+
+function createTwoSurfaceGfxGeometry(
+	surfaceA: number,
+	surfaceB: number,
+): PreparedPolygonSetRenderGeometry {
+	return {
+		sourceId: 1,
+		vertexCount: 6,
+		triangleCount: 2,
+		positions: new Float32Array([
+			0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0, 0, 3, 0, 0, 2, 1, 0,
+		]),
+		normals: [],
+		uvs: new Float32Array([0, 0, 1, 0, 0, 1, 1, 1, 2, 1, 1, 2]),
+		triangles: [
+			{ polygonId: 0, surfaceId: surfaceA, firstVertex: 0 },
+			{ polygonId: 1, surfaceId: surfaceB, firstVertex: 3 },
+		],
+		surfaceIds: [surfaceA, surfaceB],
+		bounds: null,
+	};
 }
 
 function createStructuredInteriorCell({
@@ -859,6 +761,7 @@ function createStaticPart({
 	chunkLandblockId = 0x12340000,
 	renderDomain = WORLD_RENDER_DOMAIN.exteriorStatic,
 	chunkLocalPosition,
+	materialSlots = [],
 }: {
 	gfxObjAssetId?: string;
 	gfxObjId?: number;
@@ -868,6 +771,7 @@ function createStaticPart({
 	chunkLandblockId?: number;
 	renderDomain?: StaticRenderablePart["renderDomain"];
 	chunkLocalPosition: { x: number; y: number; z: number };
+	materialSlots?: StaticRenderablePart["materialSlots"];
 }): StaticRenderablePart {
 	return {
 		renderKey: groupKey,
@@ -887,7 +791,7 @@ function createStaticPart({
 		gfxObjId,
 		gfxObjAssetId,
 		materialAppearanceContext: createBaseMaterialAppearanceContext("base"),
-		materialSlots: [],
+		materialSlots,
 		materialSignature: "base",
 		parentPlacements: [],
 		chunkLocalInstancePlacement: createPlacement(chunkLocalPosition),
@@ -898,6 +802,18 @@ function createStaticPart({
 		textureVelocitySignature: "uv:none",
 		detailRoleKind: "scenery",
 		detailSignature: "detail:none",
+	};
+}
+
+function createMaterialSlot(
+	slotIndex: number,
+	surfaceId: number,
+): StaticRenderablePart["materialSlots"][number] {
+	return {
+		slotIndex,
+		surfaceId,
+		materialAssetId: `material/${surfaceId.toString(16).padStart(8, "0")}`,
+		materialVariantSignature: null,
 	};
 }
 

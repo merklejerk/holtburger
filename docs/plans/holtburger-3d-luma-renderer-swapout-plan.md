@@ -1,6 +1,6 @@
 # Holtburger 3D Luma Renderer Swapout Plan
 
-Status: Phase 6C.2A.1 implemented; Phase 6C.2B static staging boundary prep is next.
+Status: Phase 6C.2B implemented; Phase 6C.3 scene object assembly and direct material rendering is next.
 
 ## Purpose
 
@@ -2398,10 +2398,12 @@ Exit criteria:
 
 ## Phase 6C.2B: Static Staging Boundary Prep
 
+Status: Complete.
+
 Purpose: make the current luma static lifecycle match the planned assembly/compaction lifecycle
 before direct material scene assembly depends on it. Newly visible static objects should have a
-renderable staged path first; compaction/promotion should be a later duty-cycle decision, not the
-default path taken when an object first appears.
+renderable staged path first. Atlas-backed compaction is now deferred to later phases and should not
+have a live placeholder path in the current luma resource sync.
 
 Context:
 
@@ -2415,12 +2417,59 @@ Context:
   currently merges whole gfx objects into one position/index buffer and drops UVs, so it cannot be
   the only geometry path for staged direct materials.
 
+Progress:
+
+- Changed first-seen static objects to render through `static-staged/...` by default instead of
+  entering `static-promoted/...`.
+- Addendum: removed the live promoted/static compaction placeholder entirely. `staticPromotionGroups`,
+  `staticPromotionPolicy`, threshold promotion, `forcePromote`, `static-promoted/...`,
+  `buildBakedStaticGeometry(...)`, and the promoted debug-flat tests were deleted rather than kept as
+  misleading future compaction code.
+- Added staged static geometry generation that emits deterministic per-object/per-part/per-surface
+  draw batches. The staged batch id includes render domain/chunk grouping, object key, part render
+  key, part index, material slot/surface/variant, and the current `debug-flat` strategy key.
+- Staged static geometry now transforms positions into chunk-local renderer space while preserving UV
+  data in a luma UV buffer. The flat shader does not consume that UV buffer yet, but Phase 6C.3 can
+  swap in direct material strategies without changing the staged geometry boundary.
+- Added static object key metadata on luma draw batches so staged object/part metrics do not
+  overcount one object split into multiple material-surface draw batches.
+- Removed the obsolete `static-promoted` luma frame category and static-promoted metrics aggregation.
+- Added tests for default first-seen staging, staged buffer reuse on re-anchor, and material-surface
+  staged splits preserving UV buffers.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/luma-resources.test.ts src/lib/world-display/luma-frame.test.ts src/lib/world-display/renderer-resource-graph.test.ts src/lib/world-display/renderer-resource-cleanup.test.ts src/lib/assets/asset-cache-policy.test.ts src/lib/assets/scene-asset-streaming-controller.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+
+Decisions and course corrections:
+
+- Staged statics still use `debug-flat` material plans in this phase. This is intentional: 6C.2B
+  proves the lifecycle and UV-preserving staged geometry boundary, while Phase 6C.3 attaches direct
+  material strategies.
+- The staged path preserves UV buffers even for flat debug materials. This has a small short-term
+  memory cost, but it avoids rebuilding the staged geometry boundary just to prove direct material
+  rendering in the next phase.
+- Keeping live fake compaction would be worse than deleting it. Future compaction needs atlases,
+  material strategy compatibility, graph publication, cleanup coordination, generation retirement,
+  and scheduling; the old promoted flat path had the wrong behavior and the wrong ownership model.
+
+Cleanup targets and future refinements:
+
+- The staged geometry helper still creates debug-flat material plans. Phase 6C.3 should replace this
+  with direct/fallback material strategies at the staged draw-entry boundary.
+- Older historical plan sections still mention Phase 4C promotion/promoted batches because they
+  describe the path taken before this pivot. Treat those references as historical; the active current
+  code path no longer has live static promotion.
+- No immediate interim phase is required before Phase 6C.3.
+
 Tasks:
 
-- Change the static lifecycle so first-seen static objects remain staged by default. Promotion or
-  compaction should happen only after an explicit threshold/force/duty-cycle decision.
-- Keep the existing promoted flat batch path as a legacy/debug fallback for now, but do not route new
-  direct-material static proof through it.
+- Change the static lifecycle so first-seen static objects remain staged by default. Compaction should
+  happen only in the later atlas-backed compaction phase.
+- Delete the existing promoted flat batch path rather than carrying it as a misleading legacy/debug
+  fallback.
 - Add a staged static geometry helper that can build per-object/per-part/per-material-surface indexed
   geometry with UVs preserved. It may emit multiple staged draw entries for one object when material
   slots or material variants require separate direct texture bindings.
@@ -2433,18 +2482,14 @@ Tasks:
 Exit criteria:
 
 - New static objects are visible through the staged path before any compaction/promotion work runs.
-- Existing flat promoted batches remain available only as a legacy/debug path until Phase 9 replaces
-  promotion with real atlas-backed compaction.
 - Phase 6C.3 can attach direct material strategies to staged static geometry without fighting the
   old immediate-promotion behavior.
 
 Cleanup targets and legacy shims:
 
-- The old `staticPromotionGroups` naming is now misleading. Keep it only as a short-lived shim if
-  needed, and rename/extract it when Phase 9 introduces real compaction scheduling.
-- `buildBakedStaticGeometry(...)` should not become the universal static geometry helper. It is a
-  flat/debug compaction helper unless/until Phase 9 replaces it with material-aware compacted
-  geometry.
+- No live static promotion or flat compaction shim remains after the addendum. Future Phase 9
+  compaction should be implemented fresh against atlas/material/graph/resource-lifecycle
+  requirements.
 
 ## Phase 6C.3: Scene Object Assembly and Direct Material Rendering
 

@@ -16,7 +16,6 @@ import type { TerrainSceneModel } from "./terrain-scene";
 type LumaDrawCategory =
 	| "terrain"
 	| "structured-interior"
-	| "static-promoted"
 	| "static-staged"
 	| "static"
 	| "portal-mask"
@@ -201,9 +200,6 @@ function categorizeLumaBatch(batch: {
 	id: string;
 	kind: LumaWorldDrawBatchKind;
 }): LumaDrawCategory {
-	if (batch.id.startsWith("static-promoted/")) {
-		return "static-promoted";
-	}
 	if (batch.id.startsWith("static-staged/")) {
 		return "static-staged";
 	}
@@ -351,16 +347,14 @@ function categorySortRank(category: LumaDrawCategory): number {
 			return 0;
 		case "structured-interior":
 			return 1;
-		case "static-promoted":
-			return 2;
 		case "static-staged":
-			return 3;
+			return 2;
 		case "static":
-			return 4;
+			return 3;
 		case "portal-mask":
-			return 5;
+			return 4;
 		case "debug-overlay":
-			return 6;
+			return 5;
 	}
 }
 
@@ -368,7 +362,6 @@ function createEmptyCategoryCounts(): Record<LumaDrawCategory, number> {
 	return {
 		terrain: 0,
 		"structured-interior": 0,
-		"static-promoted": 0,
 		"static-staged": 0,
 		static: 0,
 		"portal-mask": 0,

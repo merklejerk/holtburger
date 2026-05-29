@@ -3,6 +3,7 @@ import type { SceneCameraFrame } from "./camera";
 import type { WorldDebugOverlayModel } from "./debug-overlays";
 import type { NormalizedViewportPoint } from "./model";
 import type { RenderChunkTransform } from "./render-anchor";
+import type { RendererResourceGraph } from "./renderer-resource-graph";
 import type {
 	RenderSpatialIndexQuery,
 	RenderSpatialItemKind,
@@ -32,6 +33,7 @@ export interface WorldDisplayRendererOptions {
 	renderSceneContext: WorldRenderSceneContext;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	renderSpatialQuery: RenderSpatialIndexQuery | null;
+	rendererResourceGraph?: RendererResourceGraph;
 	controlledCameraFrame: SceneCameraFrame | null;
 	transitionPortalMaxDepth?: number;
 	renderStyle?: WorldDisplayRenderStyle;

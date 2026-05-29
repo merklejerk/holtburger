@@ -50,6 +50,7 @@ function createDeferredLumaWorldDisplayRenderer(
 	let renderSceneContext = options.renderSceneContext;
 	let renderChunkTransforms = options.renderChunkTransforms;
 	let renderSpatialQuery = options.renderSpatialQuery;
+	const rendererResourceGraph = options.rendererResourceGraph;
 	let controlledCameraFrame = options.controlledCameraFrame;
 	let transitionPortalMaxDepth = options.transitionPortalMaxDepth;
 	let renderStyle = options.renderStyle;
@@ -185,6 +186,7 @@ function createDeferredLumaWorldDisplayRenderer(
 			renderSceneContext,
 			renderChunkTransforms,
 			renderSpatialQuery,
+			rendererResourceGraph,
 			controlledCameraFrame,
 			transitionPortalMaxDepth,
 			renderStyle,

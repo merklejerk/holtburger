@@ -15,6 +15,7 @@ import {
 	createLumaWorldResourceStore,
 	syncLumaWorldResources,
 } from "./luma-resources";
+import { RendererResourceGraph } from "./renderer-resource-graph";
 import type { RenderChunkTransform } from "./render-anchor";
 import type {
 	StructuredInteriorCell,
@@ -151,7 +152,8 @@ describe("syncLumaWorldResources", () => {
 		expect(store.staticBatchCount).toBe(1);
 		expect(store.staticInstanceCount).toBe(1);
 		expect(batch.id.startsWith("static-staged/")).toBe(true);
-		expect(batch.vertexArray.buffers.get(1)).toBeInstanceOf(FakeBuffer);
+		expect(batch.uvBuffer).toBeInstanceOf(FakeBuffer);
+		expect(batch.vertexArray.buffers.get(1)).toBeUndefined();
 		expect(batch.modelMatrix[12]).toBe(10);
 		expect(batch.modelMatrix[13]).toBe(20);
 		expect(batch.modelMatrix[14]).toBe(30);
@@ -180,7 +182,7 @@ describe("syncLumaWorldResources", () => {
 		expect(Array.from(positions?.slice(0, 3) ?? [])).toEqual([1, 3, -2]);
 	});
 
-	it("splits staged static geometry by material surface while preserving uv buffers", () => {
+	it("splits staged static geometry by material slot while preserving uv buffers", () => {
 		const device = new FakeDevice();
 		const store = createLumaWorldResourceStore();
 		const surfaceA = 0x08000001;
@@ -199,8 +201,12 @@ describe("syncLumaWorldResources", () => {
 			device: device.asDevice(),
 			store,
 			assetState: createAssetState({
+				materialPairs: [
+					{ materialSurfaceId: surfaceA, renderSurfaceId: 0x06000001 },
+					{ materialSurfaceId: surfaceB, renderSurfaceId: 0x06000002 },
+				],
 				renderGeometryByAssetId: {
-					"gfx-obj/01000001": createTwoSurfaceGfxGeometry(surfaceA, surfaceB),
+					"gfx-obj/01000001": createTwoSlotGfxGeometry(),
 				},
 			}),
 			terrainScene: createTerrainScene({ tiles: [] }),
@@ -235,6 +241,156 @@ describe("syncLumaWorldResources", () => {
 				),
 			),
 		).toEqual([1, 1, 2, 1, 1, 2]);
+	});
+
+	it("normalizes staged static BVH keys during assembly", () => {
+		const device = new FakeDevice();
+		const store = createLumaWorldResourceStore();
+		const firstPart = createStaticPart({
+			groupKey: "static/shared-key",
+			instanceId: "instance-a",
+			chunkLocalPosition: { x: 1, y: 2, z: 3 },
+		});
+		const duplicatePart = createStaticPart({
+			gfxObjAssetId: "gfx-obj/01000002",
+			gfxObjId: 0x01000002,
+			groupKey: "static/shared-key",
+			instanceId: "instance-a",
+			chunkLocalPosition: { x: 4, y: 5, z: 6 },
+		});
+
+		syncLumaWorldResources({
+			device: device.asDevice(),
+			store,
+			assetState: createAssetState({
+				extraGfxObjAssetIds: ["gfx-obj/01000002"],
+			}),
+			terrainScene: createTerrainScene({ tiles: [] }),
+			staticRenderableScene: createStaticRenderableScene({
+				groupKey: "static/shared-key",
+				parts: [firstPart, duplicatePart],
+			}),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform({ x: 10, y: 20, z: 30 })],
+		});
+
+		expect(store.batches).toHaveLength(2);
+		for (const batch of store.batches) {
+			expect(batch.bvhItemKeys).toEqual([...new Set(batch.bvhItemKeys)]);
+		}
+	});
+
+	it("assembles staged static direct material batches and publishes graph leases", () => {
+		const device = new FakeDevice();
+		const store = createLumaWorldResourceStore();
+		const graph = new RendererResourceGraph();
+		const materialSurfaceId = 0x08000002;
+		const renderSurfaceId = 0x06000002;
+		const part = createStaticPart({
+			groupKey: "static/textured",
+			instanceId: "instance-a",
+			chunkLocalPosition: { x: 1, y: 2, z: 3 },
+			materialSlots: [createMaterialSlot(0, materialSurfaceId)],
+		});
+
+		syncLumaWorldResources({
+			device: device.asDevice(),
+			store,
+			assetState: createAssetState({
+				materialSurfaceId,
+				renderSurfaceId,
+				renderGeometryByAssetId: {
+					"gfx-obj/01000001": createMaterialSlotGfxGeometry(),
+				},
+			}),
+			terrainScene: createTerrainScene({ tiles: [] }),
+			staticRenderableScene: createStaticRenderableScene({ parts: [part] }),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform({ x: 10, y: 20, z: 30 })],
+			rendererResourceGraph: graph,
+		});
+
+		const batch = store.batches[0];
+		expect(batch?.kind).toBe("static");
+		expect(batch?.material.kind).toBe("direct-texture");
+		expect(batch?.uvBuffer).toBeInstanceOf(FakeBuffer);
+		expect(batch?.bindings.uTexture).toBeInstanceOf(FakeTexture);
+		expect(graph.retainedPreparedAssetIds()).toEqual([
+			"gfx-obj/01000001",
+			"material/08000002",
+			"render-surface/06000002",
+		]);
+
+		syncLumaWorldResources({
+			device: device.asDevice(),
+			store,
+			assetState: createAssetState({
+				materialSurfaceId,
+				renderSurfaceId,
+				renderGeometryByAssetId: {
+					"gfx-obj/01000001": createMaterialSlotGfxGeometry(),
+				},
+			}),
+			terrainScene: createTerrainScene({ tiles: [] }),
+			staticRenderableScene: createStaticRenderableScene({ parts: [] }),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform({ x: 10, y: 20, z: 30 })],
+			rendererResourceGraph: graph,
+		});
+
+		expect(graph.retainedPreparedAssetIds()).toEqual([]);
+	});
+
+	it("waits to stage material-slot statics until material dependencies resolve", () => {
+		const device = new FakeDevice();
+		const store = createLumaWorldResourceStore();
+		const materialSurfaceId = 0x08000002;
+		const part = createStaticPart({
+			groupKey: "static/pending-material",
+			instanceId: "instance-a",
+			chunkLocalPosition: { x: 1, y: 2, z: 3 },
+			materialSlots: [createMaterialSlot(0, materialSurfaceId)],
+		});
+
+		syncLumaWorldResources({
+			device: device.asDevice(),
+			store,
+			assetState: createAssetState({
+				renderGeometryByAssetId: {
+					"gfx-obj/01000001": createMaterialSlotGfxGeometry(),
+				},
+			}),
+			terrainScene: createTerrainScene({ tiles: [] }),
+			staticRenderableScene: createStaticRenderableScene({ parts: [part] }),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform({ x: 10, y: 20, z: 30 })],
+		});
+
+		expect(store.batches).toEqual([]);
+
+		syncLumaWorldResources({
+			device: device.asDevice(),
+			store,
+			assetState: createAssetState({
+				materialSurfaceId,
+				renderSurfaceId: 0x06000002,
+				renderGeometryByAssetId: {
+					"gfx-obj/01000001": createMaterialSlotGfxGeometry(),
+				},
+			}),
+			terrainScene: createTerrainScene({ tiles: [] }),
+			staticRenderableScene: createStaticRenderableScene({ parts: [part] }),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform({ x: 10, y: 20, z: 30 })],
+		});
+
+		expect(store.batches).toHaveLength(1);
+		expect(store.batches[0]?.material.kind).toBe("direct-texture");
 	});
 
 	it("reuses staged static vertex buffers when only chunk offsets change", () => {
@@ -576,11 +732,16 @@ function createAssetState({
 	extraGfxObjAssetIds = [],
 	materialSurfaceId,
 	renderSurfaceId,
+	materialPairs = [],
 	renderGeometryByAssetId = {},
 }: {
 	extraGfxObjAssetIds?: string[];
 	materialSurfaceId?: number;
 	renderSurfaceId?: number;
+	materialPairs?: readonly {
+		materialSurfaceId: number;
+		renderSurfaceId: number;
+	}[];
 	renderGeometryByAssetId?: Record<string, PreparedPolygonSetRenderGeometry>;
 } = {}): AssetChannelState {
 	const state = createInitialAssetChannelState();
@@ -595,13 +756,22 @@ function createAssetState({
 		} as AssetChannelState["preparedAsset"];
 	}
 	if (materialSurfaceId !== undefined && renderSurfaceId !== undefined) {
-		const materialAssetId = `material/${materialSurfaceId.toString(16).padStart(8, "0")}`;
-		const renderSurfaceAssetId = `render-surface/${renderSurfaceId.toString(16).padStart(8, "0")}`;
+		materialPairs = [
+			...materialPairs,
+			{ materialSurfaceId, renderSurfaceId },
+		];
+	}
+	for (const pair of materialPairs) {
+		const materialAssetId = `material/${pair.materialSurfaceId.toString(16).padStart(8, "0")}`;
+		const renderSurfaceAssetId = `render-surface/${pair.renderSurfaceId.toString(16).padStart(8, "0")}`;
 		state.preparedByAssetId[materialAssetId] = {
-			payload: createTextureMaterialRecipe(materialSurfaceId, renderSurfaceId),
+			payload: createTextureMaterialRecipe(
+				pair.materialSurfaceId,
+				pair.renderSurfaceId,
+			),
 		} as AssetChannelState["preparedAsset"];
 		state.preparedByAssetId[renderSurfaceAssetId] = {
-			payload: createRenderSurfacePayload(renderSurfaceId),
+			payload: createRenderSurfacePayload(pair.renderSurfaceId),
 		} as AssetChannelState["preparedAsset"];
 	}
 	return state;
@@ -621,10 +791,7 @@ function createStaticGfxGeometry(): PreparedPolygonSetRenderGeometry {
 	};
 }
 
-function createTwoSurfaceGfxGeometry(
-	surfaceA: number,
-	surfaceB: number,
-): PreparedPolygonSetRenderGeometry {
+function createTwoSlotGfxGeometry(): PreparedPolygonSetRenderGeometry {
 	return {
 		sourceId: 1,
 		vertexCount: 6,
@@ -635,11 +802,19 @@ function createTwoSurfaceGfxGeometry(
 		normals: [],
 		uvs: new Float32Array([0, 0, 1, 0, 0, 1, 1, 1, 2, 1, 1, 2]),
 		triangles: [
-			{ polygonId: 0, surfaceId: surfaceA, firstVertex: 0 },
-			{ polygonId: 1, surfaceId: surfaceB, firstVertex: 3 },
+			{ polygonId: 0, surfaceId: 0, firstVertex: 0 },
+			{ polygonId: 1, surfaceId: 1, firstVertex: 3 },
 		],
-		surfaceIds: [surfaceA, surfaceB],
+		surfaceIds: [0, 1],
 		bounds: null,
+	};
+}
+
+function createMaterialSlotGfxGeometry(): PreparedPolygonSetRenderGeometry {
+	return {
+		...createStaticGfxGeometry(),
+		triangles: [{ polygonId: 0, surfaceId: 0, firstVertex: 0 }],
+		surfaceIds: [0],
 	};
 }
 

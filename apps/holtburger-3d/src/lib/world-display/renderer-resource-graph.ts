@@ -12,6 +12,16 @@ export interface RendererResourceGraphNode {
 	metadata?: Readonly<Record<string, string | number | boolean | null>>;
 }
 
+export interface RendererResourceGraphDependencyReplacement {
+	nodeKey: string;
+	dependencyKeys: readonly string[];
+}
+
+export interface RendererResourceGraphBatchUpdate {
+	nodes?: readonly RendererResourceGraphNode[];
+	dependencyReplacements?: readonly RendererResourceGraphDependencyReplacement[];
+}
+
 export interface RendererResourceGraphLease {
 	id: string;
 	nodeKey: string;
@@ -55,6 +65,22 @@ export class RendererResourceGraph {
 	replaceDependencies(nodeKey: string, dependencyKeys: readonly string[]): void {
 		const nextState = cloneState(this.state);
 		replaceDependencies(nextState, nodeKey, dependencyKeys);
+		this.state = nextState;
+	}
+
+	applyBatchUpdate(update: RendererResourceGraphBatchUpdate): void {
+		const nextState = cloneState(this.state);
+		for (const node of update.nodes ?? []) {
+			upsertNode(nextState, node);
+		}
+		for (const replacement of update.dependencyReplacements ?? []) {
+			replaceDependenciesWithoutCycleCheck(
+				nextState,
+				replacement.nodeKey,
+				replacement.dependencyKeys,
+			);
+		}
+		assertAcyclic(nextState);
 		this.state = nextState;
 	}
 
@@ -222,13 +248,21 @@ function replaceDependencies(
 	nodeKey: string,
 	dependencyKeys: readonly string[],
 ): void {
+	replaceDependenciesWithoutCycleCheck(state, nodeKey, dependencyKeys);
+	assertAcyclic(state);
+}
+
+function replaceDependenciesWithoutCycleCheck(
+	state: GraphState,
+	nodeKey: string,
+	dependencyKeys: readonly string[],
+): void {
 	assertKnownNode(state, nodeKey);
 	const dependencies = new Set(dependencyKeys);
 	for (const dependencyKey of dependencies) {
 		assertKnownNode(state, dependencyKey);
 	}
 	state.dependenciesByNodeKey.set(nodeKey, dependencies);
-	assertAcyclic(state);
 }
 
 function leaseNode(

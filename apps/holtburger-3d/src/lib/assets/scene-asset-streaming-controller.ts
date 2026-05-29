@@ -309,9 +309,9 @@ function getMaterialTexturePreparationPolicy(
 ): LumaMaterialTexturePreparationPolicy | undefined {
 	switch (rendererBackend) {
 		case "luma":
+		case "webgl2":
 			return LUMA_MATERIAL_TEXTURE_PREPARATION_POLICY;
 		case "three":
-		case "webgl2":
 			return undefined;
 	}
 }

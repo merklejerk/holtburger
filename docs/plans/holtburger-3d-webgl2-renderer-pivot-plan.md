@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Renderer Pivot Plan
 
-Status: Phase W4 complete; ready for Phase W5; replaces the luma low-level renderer track and blocks the old luma plan
+Status: Phase W5 complete; ready for Phase W6; replaces the luma low-level renderer track and blocks the old luma plan
 before continuing Phase 6C.4.
 
 Related plan: [Holtburger 3D Luma Renderer Swapout Plan](./holtburger-3d-luma-renderer-swapout-plan.md)
@@ -677,7 +677,7 @@ Legacy shims:
 
 ## Phase W5: WebGL2 Direct Material Parity
 
-Status: Not started.
+Status: Complete as of 2026-05-29.
 
 Purpose: bring WebGL2 staged direct material rendering to the same functional point reached by
 Phase 6C.3 in luma.
@@ -703,6 +703,68 @@ Exit criteria:
 - The debug panel reports WebGL2 material/resource/submitter metrics.
 - Direct texture scenes do not regress the W4 flat submitter's state-cache behavior for unchanged
   program/VAO/depth/cull/stencil state.
+
+Progress:
+
+- Added a WebGL2 textured world shader alongside the W4 flat shader. It supports per-draw
+  model-view-projection, vertex UVs, color modulation, texture sampling, and alpha-test discard.
+- WebGL2 resource sync now realizes staged `direct-texture` material plans as retained texture
+  resources and per-draw UV buffers when the geometry has UVs.
+- Direct-texture resources are cached by material texture key and pruned when no retained draw unit
+  references them.
+- The WebGL2 submitter now switches between flat and textured programs, binds direct textures
+  through the state cache, uploads alpha-test uniforms, and applies material depth/blend state from
+  the legacy material behavior DTO.
+- WebGL2 now requests the normalized decompressed prepared-texture policy used by the luma material
+  strategy, so compressed direct/fallback material decisions can resolve against
+  `rgba8/none/linear` prepared textures without enabling compressed WebGL uploads.
+- WebGL2 diagnostics now report texture resource count and prepared texture upload count from the
+  retained WebGL2 resource store.
+- Added resource coverage for direct-texture draw units with UV buffers, cached WebGL textures, and
+  texture pruning.
+
+Decisions:
+
+- W5 implements only staged material plans that already resolve to `direct-texture`. Atlas-candidate
+  materials still remain flat fallbacks until the deferred atlas/compaction track resumes.
+- Compressed texture upload remains intentionally disabled. WebGL2 uses normalized decompressed
+  prepared textures for direct material parity and leaves compressed uploads to a later evidence-led
+  phase.
+- Direct textured draw units without UVs remain flat-capable resources with a material fallback
+  reason instead of failing resource sync.
+- The submitter keeps the simple W4 global sort for now. The observed per-frame string sort cost is
+  tracked as hot-path debt, but optimizing it before atlas/compaction reshapes the draw model would
+  likely be throwaway work.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-state-cache.test.ts src/lib/assets/scene-asset-streaming-controller.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+
+Course corrections:
+
+- The phase name can sound broader than the implementation. W5 does not make all scene materials
+  textured because most normal opaque scene materials currently resolve as atlas candidates, and
+  atlas rendering is explicitly deferred. W5 makes the existing direct-material path functional in
+  WebGL2.
+- Texture byte diagnostics remain incomplete. The retained WebGL2 texture key does not keep the
+  original prepared-texture payload diagnostics, so `preparedTextureGeneratedByteLength` stays zero
+  until texture resource ownership is tied more explicitly into the resource graph.
+
+Discovered cleanup targets:
+
+- `LUMA_MATERIAL_TEXTURE_PREPARATION_POLICY` is now shared by luma and WebGL2. Rename/split this to
+  a renderer-neutral material texture preparation policy before luma retirement.
+- `webgl2-world-submit.ts` now owns flat and direct-texture state accounting. If portal or atlas
+  submitters need the same counters, extract a tiny submit metrics accumulator.
+- `webgl2-world-resources.ts` should eventually retain prepared-texture diagnostics or graph links
+  for byte accounting instead of reporting only texture counts.
+
+Legacy shims:
+
+- None introduced. WebGL2 reuses the existing normalized texture request policy by import, but does
+  not alias or route rendering through luma.
 
 ## Phase W6: Backend Parity Gate and Luma Retirement
 

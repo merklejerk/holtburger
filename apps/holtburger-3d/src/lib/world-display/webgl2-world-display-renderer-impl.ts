@@ -17,6 +17,7 @@ import {
 	createEmptyWebgl2WorldSubmitMetrics,
 	submitWebgl2FlatWorldFrame,
 	type Webgl2FlatWorldProgram,
+	type Webgl2TexturedWorldProgram,
 	type Webgl2WorldSubmitMetrics,
 } from "./webgl2-world-submit";
 import {
@@ -82,11 +83,47 @@ void main() {
 }
 `;
 
+const TEXTURED_WORLD_VERTEX_SHADER = `#version 300 es
+layout(location = 0) in vec3 position;
+layout(location = 1) in vec2 uv;
+
+uniform mat4 uModelViewProjection;
+
+out vec2 vUv;
+
+void main() {
+	vUv = uv;
+	gl_Position = uModelViewProjection * vec4(position, 1.0);
+}
+`;
+
+const TEXTURED_WORLD_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+
+uniform vec4 uColor;
+uniform float uAlphaTest;
+uniform sampler2D uTexture;
+
+in vec2 vUv;
+
+out vec4 fragColor;
+
+void main() {
+	vec4 texel = texture(uTexture, vUv);
+	vec4 color = texel * uColor;
+	if (color.a < uAlphaTest) {
+		discard;
+	}
+	fragColor = color;
+}
+`;
+
 interface Webgl2RenderResources {
 	gl: WebGL2RenderingContext;
 	stateCache: Webgl2StateCache;
 	triangleProgram: Webgl2ProgramResource<"position", never>;
 	flatWorldProgram: Webgl2FlatWorldProgram;
+	texturedWorldProgram: Webgl2TexturedWorldProgram;
 	vertexBuffer: Webgl2BufferResource;
 	vertexArray: Webgl2VertexArrayResource;
 	worldStore: Webgl2WorldResourceStore;
@@ -305,6 +342,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				gl,
 				stateCache: resources.stateCache,
 				program: resources.flatWorldProgram,
+				texturedProgram: resources.texturedWorldProgram,
 				drawUnitsById: resources.worldStore.drawUnitsById,
 				frame,
 			});
@@ -383,6 +421,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		resources.vertexBuffer.dispose();
 		resources.triangleProgram.dispose();
 		resources.flatWorldProgram.dispose();
+		resources.texturedWorldProgram.dispose();
 		destroyWebgl2WorldResources(resources.worldStore);
 		resources = null;
 	}
@@ -505,6 +544,7 @@ function createTriangleResources(
 		stateCache: new Webgl2StateCache(gl),
 		triangleProgram,
 		flatWorldProgram: createFlatWorldProgram(gl),
+		texturedWorldProgram: createTexturedWorldProgram(gl),
 		vertexBuffer,
 		vertexArray,
 		worldStore: createWebgl2WorldResourceStore(),
@@ -518,5 +558,17 @@ function createFlatWorldProgram(gl: WebGL2RenderingContext): Webgl2FlatWorldProg
 		fragmentSource: FLAT_WORLD_FRAGMENT_SHADER,
 		attributes: ["position"],
 		uniforms: ["uModelViewProjection", "uColor"],
+	});
+}
+
+function createTexturedWorldProgram(
+	gl: WebGL2RenderingContext,
+): Webgl2TexturedWorldProgram {
+	return createWebgl2Program(gl, {
+		label: "webgl2 textured world",
+		vertexSource: TEXTURED_WORLD_VERTEX_SHADER,
+		fragmentSource: TEXTURED_WORLD_FRAGMENT_SHADER,
+		attributes: ["position", "uv"],
+		uniforms: ["uModelViewProjection", "uColor", "uAlphaTest", "uTexture"],
 	});
 }

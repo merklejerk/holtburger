@@ -93,6 +93,66 @@ describe("scene asset streaming controller", () => {
 		expect(requestedAssetIds).toContain("gfx-obj/02000001");
 		expect(requestedAssetIds).toContain("material/0800006c");
 	});
+
+	it("passes renderer graph retained prepared ids into cache pruning", async () => {
+		const preparedByAssetId: Record<string, PreparedAssetRecord> = {
+			"gfx-obj/graph-retained": createPreparedGfxObj(
+				"gfx-obj/graph-retained",
+				[],
+			),
+			"gfx-obj/expired": createPreparedGfxObj("gfx-obj/expired", []),
+		};
+		let retainedAssetIds: readonly string[] = [];
+		const controller = new SceneAssetStreamingController({
+			assetChannel: {
+				async prepareAsset(request) {
+					throw new Error(`Unexpected request ${request.assetId}.`);
+				},
+				async prepareAssetGraph(rootRequest) {
+					throw new Error(`Unexpected graph request ${rootRequest.assetId}.`);
+				},
+			},
+			getPreparedByAssetId: () => preparedByAssetId,
+			getCacheMetadataByAssetId: () => ({
+				"gfx-obj/graph-retained": {
+					lastPreparedAtMs: 0,
+					lastRetainedAtMs: 0,
+				},
+				"gfx-obj/expired": {
+					lastPreparedAtMs: 0,
+					lastRetainedAtMs: 0,
+				},
+			}),
+			getRendererRetainedPreparedAssetIds: () => ["gfx-obj/graph-retained"],
+			markAssetsPending: () => {},
+			applyPreparedAssets: () => {},
+			applyAssetCachePrune: (plan) => {
+				retainedAssetIds = plan.retainedAssetIds;
+			},
+			applyAssetError: (request, message) => {
+				throw new Error(`${request.assetId}: ${message}`);
+			},
+			debugLog: () => {},
+			nowMs: () => 10_000,
+			warmRetainMs: 1_000,
+		});
+
+		controller.syncSceneInterest({
+			browserDestination: null,
+			terrainLodRadius: 0,
+			buildingLodRadius: 0,
+			detailLodRadius: 0,
+			envCellLodRadius: 0,
+			appearancePreviewAssetIds: [],
+			preparedByAssetId,
+			rendererBackend: "luma",
+		});
+
+		await waitFor(() => retainedAssetIds.length > 0);
+		controller.dispose();
+
+		expect(retainedAssetIds).toEqual(["gfx-obj/graph-retained"]);
+	});
 });
 
 function createPreparedTopology(

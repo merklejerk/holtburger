@@ -13,6 +13,7 @@ export interface PreparedAssetCachePolicyInput {
 	cacheMetadataByAssetId: Record<string, PreparedAssetCacheMetadata>;
 	activeCoverageAssetIds: readonly string[];
 	inFlightAssetIds: readonly string[];
+	rendererRetainedAssetIds?: readonly string[];
 	nowMs: number;
 	warmRetainMs: number;
 }
@@ -86,8 +87,9 @@ function deriveHardRetainedAssetIds(
 	const retainedAssetIds = new Set<string>([
 		...input.activeCoverageAssetIds,
 		...input.inFlightAssetIds,
+		...(input.rendererRetainedAssetIds ?? []),
 	]);
-	const pendingAssetIds = [...input.activeCoverageAssetIds].sort();
+	const pendingAssetIds = [...retainedAssetIds].sort();
 
 	while (pendingAssetIds.length > 0) {
 		const assetId = pendingAssetIds.shift();

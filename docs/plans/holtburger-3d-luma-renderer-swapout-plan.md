@@ -1,6 +1,6 @@
 # Holtburger 3D Luma Renderer Swapout Plan
 
-Status: Phase 6C.2 implemented; Phase 6C.2A renderer resource graph baseline is next.
+Status: Phase 6C.2A implemented; Phase 6C.2A.1 renderer resource cleanup boundary is next.
 
 ## Purpose
 
@@ -2069,6 +2069,8 @@ Decisions, course corrections, and cleanup targets:
 
 ## Phase 6C.2A: Renderer Resource Graph Baseline
 
+Status: Complete.
+
 Purpose: add a passive frontend-renderer resource graph before scene object assembly and compaction
 start sharing long-lived raw-ish prepared assets. The graph should centralize renderer-pipeline
 identity, dependency edges, leases, retained prepared-asset ids, and disposal candidates without
@@ -2095,6 +2097,70 @@ Context:
   updates are part of the same synchronous publication step that makes a scene object, atlas
   generation, or compacted batch visible to downstream render systems. Deferred duty cycles are fine
   for deciding when to compact, but not for retaining dependencies after publication.
+
+Progress:
+
+- Added `RendererResourceGraph` under `apps/holtburger-3d/src/lib/world-display/` with typed node
+  kinds for prepared assets, scene objects, material decisions, atlas generations, and static
+  batches. The atlas/static-batch node kinds are currently API/test fixtures only; real compaction
+  publication remains deferred to the later compaction phase.
+- Added canonical node-key helpers for `prepared-asset/<assetId>`, `scene-object/<key>`,
+  `material-decision/<key>`, `atlas-generation/<key>`, and `static-batch/<key>`.
+- Implemented passive graph operations for node upsert, atomic dependency replacement, explicit
+  leases, lease release, transactional publication, transitive retained prepared-asset ids,
+  deterministic disposal candidates, and retention explanations with owner/path detail.
+- Graph mutation fails hard for unknown nodes, stale lease release, duplicate generated lease ids,
+  node kind mismatches, empty lease owners, and dependency cycles. Dependency replacement and
+  transactions clone/validate first so failed updates leave the previous graph state unchanged.
+- Wired prepared-asset cache pruning to accept renderer-retained prepared ids as hard roots and walk
+  their prepared-asset dependencies. The scene asset streaming controller receives this through an
+  optional narrow dependency method, `getRendererRetainedPreparedAssetIds()`, instead of importing
+  renderer graph internals into the asset streaming layer.
+- Created the app-level graph instance in `App.svelte` and wired its retained prepared ids into the
+  scene streamer. It is empty until scene assembly starts publishing graph nodes, but the live
+  retention path is no longer test-only scaffolding.
+- Added focused tests for transitive graph retention, explicit multi-owner leases, disposal
+  candidates, transaction rollback, cycle rejection, deterministic output, canonical prepared-asset
+  identity, graph-before-visible-state publication shape, cache pruning retention, and the streaming
+  controller pruning hook.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/renderer-resource-graph.test.ts src/lib/assets/asset-cache-policy.test.ts src/lib/assets/scene-asset-streaming-controller.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+
+Decisions and course corrections:
+
+- The graph is intentionally passive and stores only identity, dependency edges, lease records, and
+  diagnostics. It does not own prepared payloads, assembled scene objects, luma textures/buffers, or
+  future atlas textures.
+- Prepared assets are represented only by physical `AssetChannelState.preparedByAssetId` ids using
+  `prepared-asset/<assetId>` nodes. The tests deliberately avoid inventing `render-surface/*` or
+  material-recipe semantic nodes when a prepared asset id is the canonical identity.
+- Pruning integration is string-id based at the asset streaming boundary. This keeps the asset cache
+  policy reusable and prevents a sideways dependency from `assets/` into `world-display/`.
+- Real scene assembly/compaction capability interfaces were not introduced as standalone adapters in
+  this phase because the consuming pipelines do not exist yet. The graph API and pruning hook are the
+  foundation; Phase 6C.3 and the later compaction phase should define only the narrow capability
+  surfaces they actually consume.
+
+Cleanup targets and future refinements:
+
+- Scene object assembly must register graph nodes, edges, and leases synchronously with visible staged
+  scene-object publication. The current luma path still derives committed scenes inside
+  `syncLumaWorldResources(...)`, so this is not yet a real publication boundary.
+- Phase 6C.2B should avoid adding retention-specific shims. It should prepare a staged static path
+  that Phase 6C.3 can publish through the graph instead of adding another local retain list.
+- Later compaction work should use the existing atlas-generation/static-batch node vocabulary but
+  should keep atlas texture objects and compacted GPU buffers in luma resource stores, not in the
+  graph.
+- Debug UI can now ask why a prepared asset is retained by using `explainRetention(...)`, but no panel
+  consumes it yet. Add that only when the material/scene assembly UI needs it.
+- Add immediate Phase 6C.2A.1 before Phase 6C.2B. The graph can report orphaned derived nodes, but
+  there is not yet a deterministic owner for deleting graph nodes after concrete renderer stores have
+  disposed their resources. Capturing that boundary now should keep staging and assembly from growing
+  local cleanup shims.
 
 Tasks:
 
@@ -2218,6 +2284,65 @@ Exit criteria:
 - Atlas-backed compaction in Phase 9 can extend the same graph for atlas generations, compacted
   batches, and old-generation retirement. Phase 6C.2A should not implement compaction-specific graph
   publication beyond tests/fixtures needed to prove the API can express it.
+
+## Phase 6C.2A.1: Renderer Resource Cleanup Boundary
+
+Purpose: define and implement the deterministic cleanup boundary that consumes renderer resource
+graph disposal candidates after ownership changes. This should happen before static staging and scene
+assembly start publishing graph nodes so cleanup is centralized from the start.
+
+Context:
+
+- Phase 6C.2A added retention and `disposalCandidates()`, but graph nodes are not deleted yet.
+- Cleanup must not be tied to per-frame visibility. Frame culling/render policy decides what draws
+  this frame; it must not acquire/release graph leases or prune resources.
+- Cleanup should be triggered by renderer publication/lifecycle changes: scene object removal,
+  scene object replacement, compaction generation replacement, renderer teardown, or context loss.
+- The graph is not the owner of concrete resources. It can prove a node is unleased/unreachable, but
+  it should not dispose luma buffers, luma textures, atlas metadata, or assembled scene-object
+  records.
+
+Tasks:
+
+- Add a graph deletion API such as `deleteNode(nodeKey)` or `deleteDisposalCandidate(nodeKey)` that
+  fails hard unless the node is a derived node, has no active lease path, and no remaining dependents.
+  Prepared-asset graph nodes should be removable only through a deliberate graph cleanup operation
+  after no derived nodes reference them, not as a side effect of prepared payload pruning.
+- Add tests proving deletion rejects leased nodes, reachable nodes, unknown nodes, prepared-asset
+  nodes with dependents, and nodes that still have dependents.
+- Add a small renderer lifecycle/cleanup coordinator or equivalent boundary near app renderer
+  orchestration. It should:
+  - run imperatively after scene/resource publication changes mark cleanup dirty;
+  - flush at a deterministic safe point, preferably after publication and before rendering the next
+    frame unless a later phase proves GPU command lifetime requires end-of-frame retirement;
+  - ask the graph for disposal candidates;
+  - call narrow owner-provided disposal methods for matching node kinds before deleting graph nodes;
+  - avoid timers and broad message-bus/eventual-consistency patterns.
+- Keep cleanup ownership separate from per-frame render planning. BVH/frustum/portal visibility
+  should only choose draw slices and never mutate graph leases.
+- Add narrow fixture owner interfaces in tests so cleanup order can be proven without concrete luma
+  stores. Real luma scene-object/static-batch/atlas owners can plug in as those stores land in later
+  phases.
+- Document current concrete resource owners:
+  - prepared payload pruning remains in scene asset streaming/frontend asset state;
+  - Three resources remain owned by the Three renderer and `WorldMaterialResourceCache`;
+  - luma draw batches remain owned by `LumaWorldResourceStore`;
+  - luma textures remain owned by `LumaTextureResourceStore`, with targeted texture pruning still a
+    future cleanup target;
+  - graph nodes are lifecycle metadata and must be deleted only after concrete owners have disposed
+    corresponding resources.
+
+Exit criteria:
+
+- Renderer graph orphan cleanup has one deterministic owner/boundary instead of ad hoc per-system
+  pruning.
+- Graph node deletion is guarded by graph invariants and cannot remove nodes still leased,
+  reachable, or depended on.
+- The cleanup boundary can be triggered imperatively by publication/lifecycle changes and flushed at
+  a known renderer-safe point.
+- Per-frame visibility/culling code remains outside cleanup and retention.
+- Phase 6C.2B and Phase 6C.3 can publish staged scene objects through the graph without inventing
+  local orphan-retention cleanup.
 
 ## Phase 6C.2B: Static Staging Boundary Prep
 

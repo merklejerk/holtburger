@@ -14,6 +14,7 @@ import { webgl2Adapter } from "@luma.gl/webgl";
 
 import { createFallbackSceneCameraFrame } from "./camera";
 import { multiplyMat4 } from "./luma-math";
+import { detectLumaMaterialTextureCapabilities } from "./luma-device-capabilities";
 import { buildLumaFrame, type LumaFrameMetrics } from "./luma-frame";
 import { createLumaRenderMetrics } from "./luma-render-metrics";
 import {
@@ -27,6 +28,7 @@ import {
 	type LumaWorldDrawBatch,
 	type LumaWorldResourceStore,
 } from "./luma-resources";
+import type { MaterialTextureCapabilities } from "./render-surface-texture-data";
 import type {
 	WorldDisplayRenderer,
 	WorldDisplayRendererOptions,
@@ -129,6 +131,7 @@ void main() {
 
 interface LumaRenderResources {
 	device: Device;
+	materialTextureCapabilities: MaterialTextureCapabilities;
 	triangleVertexShader: Shader;
 	triangleFragmentShader: Shader;
 	trianglePipeline: RenderPipeline;
@@ -298,6 +301,8 @@ export function createLumaWorldDisplayRendererImplementation(
 				device.destroy();
 				return;
 			}
+			const materialTextureCapabilities =
+				detectLumaMaterialTextureCapabilities(device);
 
 			const triangleVertexShader = device.createShader({
 				id: "luma-triangle-vertex-shader",
@@ -390,6 +395,7 @@ export function createLumaWorldDisplayRendererImplementation(
 
 			resources = {
 				device,
+				materialTextureCapabilities,
 				triangleVertexShader,
 				triangleFragmentShader,
 				trianglePipeline,
@@ -458,7 +464,9 @@ export function createLumaWorldDisplayRendererImplementation(
 			for (const draw of frame.passes.flatMap((pass) => pass.draws)) {
 				const batch = resources.worldStore.batchesById.get(draw.batchId);
 				if (!batch) {
-					throw new Error(`Luma frame referenced missing batch ${draw.batchId}.`);
+					throw new Error(
+						`Luma frame referenced missing batch ${draw.batchId}.`,
+					);
 				}
 				const pipeline =
 					batch.material.kind === "direct-texture"
@@ -539,6 +547,7 @@ export function createLumaWorldDisplayRendererImplementation(
 		}
 		syncLumaWorldResources({
 			device: resources.device,
+			materialTextureCapabilities: resources.materialTextureCapabilities,
 			store: resources.worldStore,
 			assetState,
 			terrainScene,
@@ -612,7 +621,8 @@ export function createLumaWorldDisplayRendererImplementation(
 			staticBatchCount: resources?.worldStore.staticBatchCount ?? 0,
 			staticInstanceCount: resources?.worldStore.staticInstanceCount ?? 0,
 			materialCount: resources?.worldStore.materialCount ?? 0,
-			directTextureBatchCount: resources?.worldStore.directTextureBatchCount ?? 0,
+			directTextureBatchCount:
+				resources?.worldStore.directTextureBatchCount ?? 0,
 			textureResourceCount:
 				resources?.worldStore.textureStore.texturesByKey.size ?? 0,
 			materialFallbackReasonCount:

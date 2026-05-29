@@ -9,7 +9,7 @@ import {
 	type PreparedRenderSurfacePayload,
 	type PreparedTexturePayload,
 } from "../assets/types";
-import { planLumaMaterialAtlasSet } from "./luma-material-atlas-planner";
+import { planLumaMaterialStrategies } from "./luma-material-strategy";
 import type { ResolvedMaterialSlot } from "./material-plan";
 
 const PIXEL_FORMAT_A8R8G8B8 = 0x15;
@@ -17,7 +17,7 @@ const PIXEL_FORMAT_DXT1 = 0x3154_5844;
 const SURFACE_TYPE_DIFFUSE = 0x20;
 const SURFACE_TYPE_ALPHA = 0x100;
 
-describe("luma material atlas planner", () => {
+describe("luma material strategy", () => {
 	it("deduplicates atlas entries across static and structured-interior requirements", () => {
 		const state = createAssetState([
 			createMaterialRecipeRecord({
@@ -28,7 +28,7 @@ describe("luma material atlas planner", () => {
 			createAtlasPreparedTextureRecord({ renderSurfaceId: 0x06000001 }),
 		]);
 
-		const plan = planLumaMaterialAtlasSet({
+		const plan = planLumaMaterialStrategies({
 			assetState: state,
 			requirements: [
 				createRequirement("static", 0),
@@ -38,12 +38,12 @@ describe("luma material atlas planner", () => {
 
 		expect(plan.atlasSet.atlasEntries).toHaveLength(1);
 		expect(plan.atlasSet.atlasTextures[0]?.placements).toHaveLength(1);
-		expect(plan.materialRequirements.map((entry) => entry.kind)).toEqual([
+		expect(plan.materialStrategies.map((entry) => entry.kind)).toEqual([
 			"atlas",
 			"atlas",
 		]);
 		expect(
-			plan.materialRequirements.map((entry) =>
+			plan.materialStrategies.map((entry) =>
 				entry.kind === "atlas" ? entry.atlasEntryKey : entry.reason,
 			),
 		).toEqual([
@@ -61,14 +61,14 @@ describe("luma material atlas planner", () => {
 			createRenderSurfaceRecord({ renderSurfaceId: 0x06000001 }),
 		]);
 
-		const plan = planLumaMaterialAtlasSet({
+		const plan = planLumaMaterialStrategies({
 			assetState: state,
 			requirements: [createRequirement("static", 0)],
 		});
 
-		expect(plan.materialRequirements).toMatchObject([
+		expect(plan.materialStrategies).toMatchObject([
 			{
-				kind: "fallback",
+				kind: "flat-fallback",
 				reason: "missing-decompressed-prepared-texture",
 			},
 		]);
@@ -77,7 +77,7 @@ describe("luma material atlas planner", () => {
 		});
 	});
 
-	it("keeps direct-color and blended materials out of atlas batches", () => {
+	it("classifies direct-color materials as direct-texture and blended compressed materials as fallback", () => {
 		const state = createAssetState([
 			createMaterialRecipeRecord({
 				surfaceId: 0x08000001,
@@ -97,7 +97,7 @@ describe("luma material atlas planner", () => {
 			createAtlasPreparedTextureRecord({ renderSurfaceId: 0x06000002 }),
 		]);
 
-		const plan = planLumaMaterialAtlasSet({
+		const plan = planLumaMaterialStrategies({
 			assetState: state,
 			requirements: [
 				createRequirement("static", 0, 0x08000001),
@@ -106,12 +106,31 @@ describe("luma material atlas planner", () => {
 		});
 
 		expect(
-			plan.materialRequirements.map((entry) =>
-				entry.kind === "fallback" ? entry.reason : entry.kind,
+			plan.materialStrategies.map((entry) =>
+				entry.kind === "flat-fallback" || entry.kind === "unsupported"
+					? entry.reason
+					: entry.kind,
 			),
-		).toEqual([
-			"direct-color-normalization-deferred",
-			"blended-transparency",
+		).toEqual(["direct-texture", "blended-transparency"]);
+
+		const s3tcPlan = planLumaMaterialStrategies({
+			assetState: state,
+			requirements: [
+				createRequirement("static", 0, 0x08000001),
+				createRequirement("static", 1, 0x08000002),
+			],
+			textureCapabilities: {
+				supportsS3tc: true,
+				supportsS3tcSrgb: false,
+				supportsPackedRgb565: false,
+				supportsPackedRgba4444: true,
+				maxAnisotropy: 1,
+			},
+		});
+
+		expect(s3tcPlan.materialStrategies.map((entry) => entry.kind)).toEqual([
+			"direct-texture",
+			"direct-texture",
 		]);
 	});
 
@@ -126,7 +145,7 @@ describe("luma material atlas planner", () => {
 				createAtlasPreparedTextureRecord({ renderSurfaceId }),
 			);
 		}
-		const plan = planLumaMaterialAtlasSet({
+		const plan = planLumaMaterialStrategies({
 			assetState: createAssetState(records),
 			requirements: [0, 1, 2].map((index) =>
 				createRequirement("static", index, 0x08000010 + index),
@@ -139,13 +158,16 @@ describe("luma material atlas planner", () => {
 		});
 
 		expect(plan.atlasSet.atlasTextures).toHaveLength(2);
-		expect(plan.atlasSet.drawSlices.map((slice) => slice.atlasTextureIndex)).toEqual([
-			0,
-			1,
-		]);
 		expect(
-			plan.materialRequirements.map((entry) =>
-				entry.kind === "fallback" ? entry.reason : entry.atlasTextureIndex,
+			plan.atlasSet.drawSlices.map((slice) => slice.atlasTextureIndex),
+		).toEqual([0, 1]);
+		expect(
+			plan.materialStrategies.map((entry) =>
+				entry.kind === "flat-fallback" || entry.kind === "unsupported"
+					? entry.reason
+					: entry.kind === "atlas"
+						? entry.atlasTextureIndex
+						: entry.kind,
 			),
 		).toEqual([0, 1, "atlas-full"]);
 	});
@@ -166,7 +188,7 @@ describe("luma material atlas planner", () => {
 			createAtlasPreparedTextureRecord({ renderSurfaceId: 0x06000002 }),
 		]);
 
-		const plan = planLumaMaterialAtlasSet({
+		const plan = planLumaMaterialStrategies({
 			assetState: state,
 			requirements: [
 				createRequirement("static", 0, 0x08000001),
@@ -176,8 +198,10 @@ describe("luma material atlas planner", () => {
 		});
 
 		expect(
-			plan.materialRequirements.map((entry) =>
-				entry.kind === "fallback" ? entry.reason : entry.kind,
+			plan.materialStrategies.map((entry) =>
+				entry.kind === "flat-fallback" || entry.kind === "unsupported"
+					? entry.reason
+					: entry.kind,
 			),
 		).toEqual(["atlas", "material-table-overflow"]);
 	});
@@ -253,6 +277,8 @@ function createRenderSurfaceRecord(options: {
 	format?: string;
 }): PreparedAssetRecord {
 	const assetId = `render-surface/${options.renderSurfaceId.toString(16).padStart(8, "0")}`;
+	const sourceByteLength =
+		options.formatRaw === PIXEL_FORMAT_A8R8G8B8 ? 8 * 8 * 4 : 32;
 	return createRecord(assetId, {
 		kind: "render-surface",
 		sourceAssetKind: "render-surface",
@@ -264,8 +290,8 @@ function createRenderSurfaceRecord(options: {
 		height: 8,
 		formatRaw: options.formatRaw ?? PIXEL_FORMAT_DXT1,
 		format: options.format ?? "DXT1",
-		sourceByteLength: 32,
-		sourceBytes: new Uint8Array(32),
+		sourceByteLength,
+		sourceBytes: new Uint8Array(sourceByteLength),
 		defaultPaletteId: null,
 		dependencies: { paletteAssetIds: [] },
 	} satisfies PreparedRenderSurfacePayload);

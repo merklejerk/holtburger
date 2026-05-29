@@ -6,38 +6,25 @@ import {
 } from "@luma.gl/core";
 import type { TextureFormat } from "@luma.gl/core";
 
-import type {
-	AssetChannelState,
-	PreparedRenderSurfacePayload,
-	PreparedTexturePayload,
-} from "../assets/types";
-import {
-	formatPreparedTextureAssetId,
-	preparedDxtOutputFormat,
-} from "../assets/types";
-import { formatHex32 } from "../landblocks";
-import {
-	deriveLegacyMaterialBehaviorDto,
-	type LegacyMaterialBehaviorDto,
-} from "./material-behavior";
+import type { AssetChannelState } from "../assets/types";
+import type { LegacyMaterialBehaviorDto } from "./material-behavior";
 import type { LumaVec4 } from "./luma-math";
 import { formatMaterialAssetId } from "./material-signatures";
-import { resolveFirstMaterialRenderSurface } from "./material-texture-resolution";
 import {
-	prepareRenderSurfaceTextureUploadData,
-	type DirectRenderSurfaceUploadDataType,
+	type CompressedRenderSurfaceUploadFormat,
 	type DirectRenderSurfaceUploadFormat,
-	type DirectRenderSurfaceUploadInternalFormat,
 	type MaterialTextureCapabilities,
 	type RenderSurfaceTextureUploadPreparation,
 } from "./render-surface-texture-data";
 import {
-	createDefaultMaterialTextureSamplingPolicy,
-	selectRenderSurfaceTextureSamplingPolicy,
-	type TextureSamplingPolicy,
-} from "./texture-sampling-policy";
+	defaultLumaMaterialTextureCapabilities,
+	resolveLumaMaterialStrategy,
+} from "./luma-material-strategy";
+import { type TextureSamplingPolicy } from "./texture-sampling-policy";
 
-export type LumaMaterialPlan = LumaFlatMaterialPlan | LumaDirectTextureMaterialPlan;
+export type LumaMaterialPlan =
+	| LumaFlatMaterialPlan
+	| LumaDirectTextureMaterialPlan;
 
 interface LumaFlatMaterialPlan {
 	kind: "flat";
@@ -57,6 +44,11 @@ export interface LumaDirectTextureMaterialPlan {
 	fallbackReason: string | null;
 }
 
+type LumaReadyTextureUpload = Extract<
+	RenderSurfaceTextureUploadPreparation,
+	{ status: "ready" }
+>["upload"];
+
 interface LumaTextureResourceRecord {
 	texture: Texture;
 	key: string;
@@ -72,7 +64,9 @@ export function createLumaTextureResourceStore(): LumaTextureResourceStore {
 	};
 }
 
-export function destroyLumaTextureResources(store: LumaTextureResourceStore): void {
+export function destroyLumaTextureResources(
+	store: LumaTextureResourceStore,
+): void {
 	for (const record of store.texturesByKey.values()) {
 		record.texture.destroy();
 	}
@@ -93,77 +87,43 @@ export function resolveLumaSurfaceMaterialPlan(options: {
 		});
 	}
 	const materialAssetId = formatMaterialAssetId(options.surfaceId);
-	const recipeAsset = options.assetState.preparedByAssetId[materialAssetId];
-	if (recipeAsset?.payload.kind !== "material-recipe") {
-		return createFallbackMaterialPlan({
-			key: `missing-recipe/${materialAssetId}/${options.fallbackColorKey}`,
-			colorKey: options.fallbackColorKey,
-			reason: `missing material recipe ${materialAssetId}`,
-		});
-	}
-	const recipe = recipeAsset.payload;
-	const directRenderSurface = resolveFirstMaterialRenderSurface({
-		recipe,
+	const strategy = resolveLumaMaterialStrategy({
 		assetState: options.assetState,
-	})?.renderSurface;
-	if (!directRenderSurface) {
-		return createFallbackMaterialPlan({
-			key: `missing-direct-texture/${materialAssetId}/${options.fallbackColorKey}`,
-			colorKey: options.fallbackColorKey,
-			behavior: deriveLegacyMaterialBehaviorDto({ recipe }),
-			reason: `material ${materialAssetId} has no direct render surface`,
-		});
-	}
-	const textureCapabilities =
-		options.textureCapabilities ?? defaultLumaMaterialTextureCapabilities();
-	const samplingPolicy = selectRenderSurfaceTextureSamplingPolicy(
-		directRenderSurface,
-		createDefaultMaterialTextureSamplingPolicy(textureCapabilities),
-	);
-	const textureUpload = prepareRenderSurfaceTextureUploadData(
-		directRenderSurface,
-		samplingPolicy,
-		textureCapabilities,
-		resolvePreparedTexture({
-			assetState: options.assetState,
-			renderSurface: directRenderSurface,
-		}),
-	);
-	if (textureUpload.status !== "ready" || textureUpload.upload.kind !== "direct") {
-		return createFallbackMaterialPlan({
-			key: `unsupported-direct-texture/${materialAssetId}/${directRenderSurface.renderSurfaceId}`,
-			colorKey: options.fallbackColorKey,
-			behavior: deriveLegacyMaterialBehaviorDto({ recipe }),
-			reason:
-				textureUpload.status === "ready"
-					? `material ${materialAssetId} resolved non-direct texture ${formatHex32(directRenderSurface.renderSurfaceId)}`
-					: `material ${materialAssetId} texture ${formatHex32(directRenderSurface.renderSurfaceId)} is ${textureUpload.reason}`,
-		});
-	}
-	const behavior = deriveLegacyMaterialBehaviorDto({
-		recipe,
-		hasSourceAlpha: textureUpload.upload.hasSourceAlpha,
+		input: {
+			slot: {
+				slotIndex: 0,
+				surfaceId: options.surfaceId,
+				materialAssetId,
+				materialVariantSignature: null,
+			},
+			renderableKind: "unknown",
+		},
+		textureCapabilities:
+			options.textureCapabilities ?? defaultLumaMaterialTextureCapabilities(),
 	});
-	const textureKey = describeLumaTextureKey(textureUpload.upload);
+	if (strategy.kind !== "direct-texture") {
+		return createFallbackMaterialPlan({
+			key: `${strategy.kind}/${materialAssetId}/${options.fallbackColorKey}`,
+			colorKey: options.fallbackColorKey,
+			behavior: strategy.behavior,
+			reason:
+				strategy.kind === "atlas"
+					? `material ${materialAssetId} resolved atlas strategy before atlas rendering is wired`
+					: strategy.detail,
+		});
+	}
 	return {
 		kind: "direct-texture",
-		key: [
-			"direct-texture",
-			materialAssetId,
-			textureKey,
-			behavior.blend.mode,
-			behavior.alphaTest,
-			behavior.blend.depthWrite ? "depth-write" : "depth-read",
-		].join("|"),
+		key: strategy.key,
 		color: new Float32Array([
-			behavior.color[0],
-			behavior.color[1],
-			behavior.color[2],
-			behavior.opacity,
+			strategy.behavior.color[0],
+			strategy.behavior.color[1],
+			strategy.behavior.color[2],
+			strategy.behavior.opacity,
 		]),
-		textureKey,
-		textureUpload,
-		behavior,
+		textureKey: strategy.textureKey,
+		textureUpload: strategy.textureUpload,
+		behavior: strategy.behavior,
 		fallbackReason: null,
 	};
 }
@@ -178,25 +138,22 @@ export function getOrCreateLumaTextureResource(options: {
 		return cached.texture;
 	}
 	const upload = options.plan.textureUpload.upload;
-	if (upload.kind !== "direct") {
-		throw new Error(`Luma direct material ${options.plan.key} did not carry direct texture data.`);
-	}
 	const texture = options.device.createTexture({
 		id: options.plan.textureKey,
 		format: toLumaTextureFormat(upload),
 		width: upload.width,
 		height: upload.height,
 		usage: LumaTexture.SAMPLE | LumaTexture.COPY_DST,
-		mipLevels: upload.samplingPolicy.generateMipmaps
-			? calculateMipLevelCount(upload.width, upload.height)
-			: 1,
+		mipLevels:
+			upload.kind === "compressed"
+				? upload.levels.length
+				: upload.samplingPolicy.generateMipmaps
+					? calculateMipLevelCount(upload.width, upload.height)
+					: 1,
 		sampler: toLumaSamplerProps(upload.samplingPolicy),
 	});
-	texture.writeData(upload.data, {
-		width: upload.width,
-		height: upload.height,
-	});
-	if (upload.samplingPolicy.generateMipmaps) {
+	writeLumaTextureUploadData(texture, upload);
+	if (upload.kind === "direct" && upload.samplingPolicy.generateMipmaps) {
 		texture.generateMipmapsWebGL();
 	}
 	options.store.texturesByKey.set(options.plan.textureKey, {
@@ -221,62 +178,10 @@ function createFallbackMaterialPlan(options: {
 	};
 }
 
-function resolvePreparedTexture(options: {
-	assetState: AssetChannelState;
-	renderSurface: PreparedRenderSurfacePayload;
-}): PreparedTexturePayload | null {
-	const outputFormat = preparedDxtOutputFormat(options.renderSurface.formatRaw);
-	if (!outputFormat) {
-		return null;
+function toLumaTextureFormat(upload: LumaReadyTextureUpload): TextureFormat {
+	if (upload.kind === "compressed") {
+		return toLumaCompressedTextureFormat(upload.format);
 	}
-	const assetId = formatPreparedTextureAssetId({
-		renderSurfaceId: options.renderSurface.renderSurfaceId,
-		usage: "raw",
-		outputFormat,
-		mipPolicy: "retail4",
-		colorSpace: "source",
-	});
-	const asset = options.assetState.preparedByAssetId[assetId];
-	return asset?.payload.kind === "prepared-texture" ? asset.payload : null;
-}
-
-function describeLumaTextureKey(
-	upload: Extract<
-		RenderSurfaceTextureUploadPreparation,
-		{ status: "ready" }
-	>["upload"],
-): string {
-	return [
-		"texture",
-		formatHex32(upload.renderSurfaceId),
-		upload.sourceFormatRaw,
-		upload.width,
-		upload.height,
-		upload.samplingPolicy.colorSpace,
-		upload.samplingPolicy.wrapS,
-		upload.samplingPolicy.wrapT,
-		upload.samplingPolicy.minFilter,
-		upload.samplingPolicy.magFilter,
-		upload.samplingPolicy.mipFilter,
-	].join("/");
-}
-
-function defaultLumaMaterialTextureCapabilities(): MaterialTextureCapabilities {
-	return {
-		supportsS3tc: false,
-		supportsS3tcSrgb: false,
-		supportsPackedRgb565: false,
-		supportsPackedRgba4444: false,
-		maxAnisotropy: 1,
-	};
-}
-
-function toLumaTextureFormat(upload: {
-	format: DirectRenderSurfaceUploadFormat;
-	dataType: DirectRenderSurfaceUploadDataType;
-	internalFormat: DirectRenderSurfaceUploadInternalFormat | null;
-	samplingPolicy: TextureSamplingPolicy;
-}): TextureFormat {
 	if (upload.format === "red") {
 		return "r8unorm";
 	}
@@ -291,6 +196,46 @@ function toLumaTextureFormat(upload: {
 		return "rgba8unorm-srgb";
 	}
 	return "rgba8unorm";
+}
+
+function toLumaCompressedTextureFormat(
+	format: CompressedRenderSurfaceUploadFormat | DirectRenderSurfaceUploadFormat,
+): TextureFormat {
+	switch (format) {
+		case "s3tc-dxt1-rgba":
+			return "bc1-rgba-unorm";
+		case "s3tc-dxt3-rgba":
+			return "bc2-rgba-unorm";
+		case "s3tc-dxt5-rgba":
+			return "bc3-rgba-unorm";
+		case "red":
+		case "rgb":
+		case "rgba":
+			throw new Error(`Direct texture format ${format} is not compressed.`);
+	}
+}
+
+function writeLumaTextureUploadData(
+	texture: Texture,
+	upload: Extract<
+		RenderSurfaceTextureUploadPreparation,
+		{ status: "ready" }
+	>["upload"],
+): void {
+	if (upload.kind === "compressed") {
+		for (const [mipLevel, level] of upload.levels.entries()) {
+			texture.writeData(level.data, {
+				mipLevel,
+				width: level.width,
+				height: level.height,
+			});
+		}
+		return;
+	}
+	texture.writeData(upload.data, {
+		width: upload.width,
+		height: upload.height,
+	});
 }
 
 function toLumaSamplerProps(policy: TextureSamplingPolicy): SamplerProps {

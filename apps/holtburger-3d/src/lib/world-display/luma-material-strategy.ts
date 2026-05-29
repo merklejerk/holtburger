@@ -4,7 +4,11 @@ import type {
 	PreparedRenderSurfacePayload,
 	PreparedTexturePayload,
 } from "../assets/types";
-import { formatAtlasReadyPreparedTextureAssetId } from "../assets/types";
+import {
+	formatAtlasReadyPreparedTextureAssetId,
+	formatPreparedTextureAssetId,
+	preparedDxtOutputFormat,
+} from "../assets/types";
 import { formatHex32 } from "../landblocks";
 import {
 	deriveLegacyMaterialBehaviorDto,
@@ -18,15 +22,24 @@ import {
 	isSupportedCompressedFormat,
 	isSupportedDirectColorFormat,
 } from "./render-surface-texture-resources";
+import {
+	prepareRenderSurfaceTextureUploadData,
+	type MaterialTextureCapabilities,
+	type RenderSurfaceTextureUploadPreparation,
+} from "./render-surface-texture-data";
+import {
+	createDefaultMaterialTextureSamplingPolicy,
+	selectRenderSurfaceTextureSamplingPolicy,
+} from "./texture-sampling-policy";
 
-type LumaAtlasPlannerRenderableKind =
+export type LumaMaterialRenderableKind =
 	| "static"
 	| "structured-interior"
 	| "dynamic"
 	| "terrain"
 	| "unknown";
 
-type LumaAtlasFallbackReason =
+export type LumaMaterialStrategyFallbackReason =
 	| "missing-material-recipe"
 	| "solid-color-material"
 	| "missing-render-surface"
@@ -41,34 +54,35 @@ type LumaAtlasFallbackReason =
 	| "atlas-full"
 	| "material-table-overflow";
 
-export interface LumaAtlasPlannerPolicy {
+export interface LumaMaterialStrategyPolicy {
 	maxAtlasTextureSize: number;
 	maxAtlasTextureCount: number;
 	baseGutterPixels: number;
 	maxMaterialSlotsPerDraw: number;
 }
 
-const DEFAULT_LUMA_ATLAS_PLANNER_POLICY: LumaAtlasPlannerPolicy = {
+const DEFAULT_LUMA_MATERIAL_STRATEGY_POLICY: LumaMaterialStrategyPolicy = {
 	maxAtlasTextureSize: 4096,
 	maxAtlasTextureCount: 8,
 	baseGutterPixels: 2,
 	maxMaterialSlotsPerDraw: 128,
 };
 
-export interface LumaAtlasMaterialRequirementInput {
+export interface LumaMaterialStrategyInput {
 	slot: ResolvedMaterialSlot;
-	renderableKind: LumaAtlasPlannerRenderableKind;
+	renderableKind: LumaMaterialRenderableKind;
 	textureVelocitySignature?: string | null;
 }
 
-type LumaAtlasMaterialRequirement =
-	| LumaAtlasReadyMaterialRequirement
-	| LumaAtlasFallbackMaterialRequirement;
+export type LumaMaterialStrategy =
+	| LumaAtlasMaterialStrategy
+	| LumaDirectTextureMaterialStrategy
+	| LumaMaterialFallbackStrategy;
 
-interface LumaAtlasReadyMaterialRequirement {
+export interface LumaAtlasMaterialStrategy {
 	kind: "atlas";
 	slot: ResolvedMaterialSlot;
-	renderableKind: LumaAtlasPlannerRenderableKind;
+	renderableKind: LumaMaterialRenderableKind;
 	materialAssetId: string;
 	materialSlotKey: string;
 	materialTableSlotIndex: number;
@@ -79,12 +93,37 @@ interface LumaAtlasReadyMaterialRequirement {
 	behavior: LegacyMaterialBehaviorDto;
 }
 
-interface LumaAtlasFallbackMaterialRequirement {
-	kind: "fallback";
+interface LumaAtlasCandidateStrategy extends LumaAtlasMaterialStrategy {
+	atlasEntry: {
+		renderSurfaceId: number;
+		preparedTextureAssetId: string;
+		level: PreparedTexturePayload["levels"][number];
+		sourceHash: string;
+		sourceFormatRaw: number;
+	};
+}
+
+export interface LumaDirectTextureMaterialStrategy {
+	kind: "direct-texture";
 	slot: ResolvedMaterialSlot;
-	renderableKind: LumaAtlasPlannerRenderableKind;
+	renderableKind: LumaMaterialRenderableKind;
 	materialAssetId: string;
-	reason: LumaAtlasFallbackReason;
+	key: string;
+	textureKey: string;
+	textureUpload: RenderSurfaceTextureUploadPreparation & { status: "ready" };
+	renderStateKey: string;
+	samplingKey: string;
+	behavior: LegacyMaterialBehaviorDto;
+	reason: LumaMaterialStrategyFallbackReason | null;
+	detail: string | null;
+}
+
+export interface LumaMaterialFallbackStrategy {
+	kind: "flat-fallback" | "unsupported";
+	slot: ResolvedMaterialSlot;
+	renderableKind: LumaMaterialRenderableKind;
+	materialAssetId: string;
+	reason: LumaMaterialStrategyFallbackReason;
 	detail: string;
 	behavior: LegacyMaterialBehaviorDto | null;
 }
@@ -128,20 +167,22 @@ interface LumaAtlasDrawSlicePlan {
 interface LumaAtlasSetGenerationPlan {
 	key: string;
 	generation: number;
-	policy: LumaAtlasPlannerPolicy;
+	policy: LumaMaterialStrategyPolicy;
 	atlasEntries: LumaAtlasEntryPlan[];
 	atlasTextures: LumaAtlasTexturePlan[];
 	drawSlices: LumaAtlasDrawSlicePlan[];
 }
 
-export interface LumaMaterialAtlasPlan {
+export interface LumaMaterialStrategyPlan {
 	atlasSet: LumaAtlasSetGenerationPlan;
-	materialRequirements: LumaAtlasMaterialRequirement[];
-	fallbackReasonCounts: Partial<Record<LumaAtlasFallbackReason, number>>;
+	materialStrategies: LumaMaterialStrategy[];
+	fallbackReasonCounts: Partial<
+		Record<LumaMaterialStrategyFallbackReason, number>
+	>;
 }
 
 interface AtlasCandidate {
-	input: LumaAtlasMaterialRequirementInput;
+	input: LumaMaterialStrategyInput;
 	materialAssetId: string;
 	materialSlotKey: string;
 	atlasEntryKey: string;
@@ -157,25 +198,28 @@ interface AtlasPlacementState {
 	failedEntryKeys: Set<string>;
 }
 
-export function planLumaMaterialAtlasSet(options: {
+export function planLumaMaterialStrategies(options: {
 	assetState: AssetChannelState;
-	requirements: readonly LumaAtlasMaterialRequirementInput[];
-	policy?: Partial<LumaAtlasPlannerPolicy>;
+	requirements: readonly LumaMaterialStrategyInput[];
+	policy?: Partial<LumaMaterialStrategyPolicy>;
 	generation?: number;
-}): LumaMaterialAtlasPlan {
+	textureCapabilities?: MaterialTextureCapabilities;
+}): LumaMaterialStrategyPlan {
 	const policy = normalizePolicy(options.policy);
 	const candidates: AtlasCandidate[] = [];
-	const materialRequirements: LumaAtlasMaterialRequirement[] = [];
+	const materialStrategies: LumaMaterialStrategy[] = [];
 	for (const input of options.requirements) {
 		const candidate = evaluateAtlasCandidate({
 			assetState: options.assetState,
 			input,
 			policy,
+			textureCapabilities:
+				options.textureCapabilities ?? defaultLumaMaterialTextureCapabilities(),
 		});
 		if (candidate.kind === "candidate") {
 			candidates.push(candidate.candidate);
 		} else {
-			materialRequirements.push(candidate.requirement);
+			materialStrategies.push(candidate.requirement);
 		}
 	}
 
@@ -193,11 +237,12 @@ export function planLumaMaterialAtlasSet(options: {
 			candidate.atlasEntryKey,
 		);
 		if (!placement) {
-			materialRequirements.push(
+			materialStrategies.push(
 				createFallbackRequirement({
 					input: candidate.input,
 					materialAssetId: candidate.materialAssetId,
 					behavior: candidate.behavior,
+					kind: "flat-fallback",
 					reason: "atlas-full",
 					detail: `atlas entry ${candidate.atlasEntryKey} did not fit in ${policy.maxAtlasTextureCount} atlas textures`,
 				}),
@@ -208,18 +253,19 @@ export function planLumaMaterialAtlasSet(options: {
 			candidate.materialSlotKey,
 		);
 		if (materialTableSlotIndex === undefined) {
-			materialRequirements.push(
+			materialStrategies.push(
 				createFallbackRequirement({
 					input: candidate.input,
 					materialAssetId: candidate.materialAssetId,
 					behavior: candidate.behavior,
+					kind: "flat-fallback",
 					reason: "material-table-overflow",
 					detail: `material table exceeded ${policy.maxMaterialSlotsPerDraw} slots`,
 				}),
 			);
 			continue;
 		}
-		materialRequirements.push({
+		materialStrategies.push({
 			kind: "atlas",
 			slot: candidate.input.slot,
 			renderableKind: candidate.input.renderableKind,
@@ -234,7 +280,7 @@ export function planLumaMaterialAtlasSet(options: {
 		});
 	}
 
-	const sortedRequirements = sortMaterialRequirements(materialRequirements);
+	const sortedRequirements = sortMaterialStrategies(materialStrategies);
 	const drawSlices = createDrawSlicePlans(sortedRequirements);
 	return {
 		atlasSet: {
@@ -249,33 +295,95 @@ export function planLumaMaterialAtlasSet(options: {
 			atlasTextures: placementState.textures,
 			drawSlices,
 		},
-		materialRequirements: sortedRequirements,
+		materialStrategies: sortedRequirements,
 		fallbackReasonCounts: countFallbackReasons(sortedRequirements),
 	};
 }
 
 function evaluateAtlasCandidate(options: {
 	assetState: AssetChannelState;
-	input: LumaAtlasMaterialRequirementInput;
-	policy: LumaAtlasPlannerPolicy;
+	input: LumaMaterialStrategyInput;
+	policy: LumaMaterialStrategyPolicy;
+	textureCapabilities: MaterialTextureCapabilities;
 }):
 	| { kind: "candidate"; candidate: AtlasCandidate }
-	| { kind: "fallback"; requirement: LumaAtlasFallbackMaterialRequirement } {
+	| { kind: "strategy"; requirement: LumaMaterialStrategy } {
+	const resolvedStrategy = resolveLumaMaterialStrategy({
+		assetState: options.assetState,
+		input: options.input,
+		textureCapabilities: options.textureCapabilities,
+	});
+	if (resolvedStrategy.kind === "direct-texture") {
+		return { kind: "strategy", requirement: resolvedStrategy };
+	}
+	if (resolvedStrategy.kind !== "atlas") {
+		return { kind: "strategy", requirement: resolvedStrategy };
+	}
+	const level = resolvedStrategy.atlasEntry.level;
+	if (
+		level.width + options.policy.baseGutterPixels * 2 >
+			options.policy.maxAtlasTextureSize ||
+		level.height + options.policy.baseGutterPixels * 2 >
+			options.policy.maxAtlasTextureSize
+	) {
+		return {
+			kind: "strategy",
+			requirement: createFallbackRequirement({
+				input: options.input,
+				materialAssetId: resolvedStrategy.materialAssetId,
+				behavior: resolvedStrategy.behavior,
+				kind: "flat-fallback",
+				reason: "source-texture-too-large",
+				detail: `texture ${resolvedStrategy.atlasEntry.preparedTextureAssetId} is ${level.width}x${level.height}, exceeding atlas capacity`,
+			}),
+		};
+	}
+	return {
+		kind: "candidate",
+		candidate: {
+			input: options.input,
+			materialAssetId: resolvedStrategy.materialAssetId,
+			materialSlotKey: resolvedStrategy.materialSlotKey,
+			atlasEntryKey: resolvedStrategy.atlasEntryKey,
+			renderStateKey: resolvedStrategy.renderStateKey,
+			samplingKey: resolvedStrategy.samplingKey,
+			behavior: resolvedStrategy.behavior,
+			entry: {
+				key: resolvedStrategy.atlasEntryKey,
+				renderSurfaceId: resolvedStrategy.atlasEntry.renderSurfaceId,
+				preparedTextureAssetId:
+					resolvedStrategy.atlasEntry.preparedTextureAssetId,
+				width: level.width,
+				height: level.height,
+				sourceHash: resolvedStrategy.atlasEntry.sourceHash,
+				sourceFormatRaw: resolvedStrategy.atlasEntry.sourceFormatRaw,
+				transfer: "linear",
+			},
+		},
+	};
+}
+
+export function resolveLumaMaterialStrategy(options: {
+	assetState: AssetChannelState;
+	input: LumaMaterialStrategyInput;
+	textureCapabilities?: MaterialTextureCapabilities;
+}):
+	| LumaAtlasCandidateStrategy
+	| LumaDirectTextureMaterialStrategy
+	| LumaMaterialFallbackStrategy {
 	const materialAssetId =
 		options.input.slot.materialAssetId ||
 		formatMaterialAssetId(options.input.slot.surfaceId);
 	const recipeAsset = options.assetState.preparedByAssetId[materialAssetId];
 	if (recipeAsset?.payload.kind !== "material-recipe") {
-		return {
-			kind: "fallback",
-			requirement: createFallbackRequirement({
-				input: options.input,
-				materialAssetId,
-				behavior: null,
-				reason: "missing-material-recipe",
-				detail: `missing material recipe ${materialAssetId}`,
-			}),
-		};
+		return createFallbackRequirement({
+			input: options.input,
+			materialAssetId,
+			behavior: null,
+			kind: "flat-fallback",
+			reason: "missing-material-recipe",
+			detail: `missing material recipe ${materialAssetId}`,
+		});
 	}
 	const recipe = recipeAsset.payload;
 	const behavior = deriveLegacyMaterialBehaviorDto({ recipe });
@@ -285,16 +393,29 @@ function evaluateAtlasCandidate(options: {
 		behavior,
 	});
 	if (fallbackReason) {
-		return {
-			kind: "fallback",
-			requirement: createFallbackRequirement({
+		if (fallbackReason.reason === "blended-transparency") {
+			return resolveDirectTextureStrategy({
+				assetState: options.assetState,
+				behaviorReason: fallbackReason,
 				input: options.input,
 				materialAssetId,
-				behavior,
-				reason: fallbackReason.reason,
-				detail: fallbackReason.detail,
-			}),
-		};
+				recipe,
+				textureCapabilities:
+					options.textureCapabilities ??
+					defaultLumaMaterialTextureCapabilities(),
+			});
+		}
+		return createFallbackRequirement({
+			input: options.input,
+			materialAssetId,
+			behavior,
+			kind:
+				fallbackReason.reason === "solid-color-material"
+					? "flat-fallback"
+					: "unsupported",
+			reason: fallbackReason.reason,
+			detail: fallbackReason.detail,
+		});
 	}
 
 	const resolvedSurface = resolveFirstMaterialRenderSurface({
@@ -302,36 +423,44 @@ function evaluateAtlasCandidate(options: {
 		assetState: options.assetState,
 	});
 	if (!resolvedSurface) {
-		return {
-			kind: "fallback",
-			requirement: createFallbackRequirement({
-				input: options.input,
-				materialAssetId,
-				behavior,
-				reason: "missing-render-surface",
-				detail: `material ${materialAssetId} has no prepared render surface`,
-			}),
-		};
+		return createFallbackRequirement({
+			input: options.input,
+			materialAssetId,
+			behavior,
+			kind: "flat-fallback",
+			reason: "missing-render-surface",
+			detail: `material ${materialAssetId} has no prepared render surface`,
+		});
 	}
 
 	const surface = resolvedSurface.renderSurface;
 	if (!isSupportedCompressedFormat(surface.formatRaw)) {
-		const reason = isSupportedDirectColorFormat(surface.formatRaw)
-			? "direct-color-normalization-deferred"
-			: "unsupported-render-surface-format";
-		return {
-			kind: "fallback",
-			requirement: createFallbackRequirement({
+		if (isSupportedDirectColorFormat(surface.formatRaw)) {
+			return resolveDirectTextureStrategy({
+				assetState: options.assetState,
+				behaviorReason: {
+					reason: "direct-color-normalization-deferred",
+					detail: `render surface ${formatHex32(surface.renderSurfaceId)} format ${surface.format} is not atlas-ready`,
+				},
 				input: options.input,
 				materialAssetId,
-				behavior: deriveLegacyMaterialBehaviorDto({
-					recipe,
-					hasSourceAlpha: hasSourceAlpha(surface.formatRaw),
-				}),
-				reason,
-				detail: `render surface ${formatHex32(surface.renderSurfaceId)} format ${surface.format} is not atlas-ready`,
+				recipe,
+				textureCapabilities:
+					options.textureCapabilities ??
+					defaultLumaMaterialTextureCapabilities(),
+			});
+		}
+		return createFallbackRequirement({
+			input: options.input,
+			materialAssetId,
+			behavior: deriveLegacyMaterialBehaviorDto({
+				recipe,
+				hasSourceAlpha: hasSourceAlpha(surface.formatRaw),
 			}),
-		};
+			kind: "unsupported",
+			reason: "unsupported-render-surface-format",
+			detail: `render surface ${formatHex32(surface.renderSurfaceId)} format ${surface.format} is not atlas-ready`,
+		});
 	}
 
 	const preparedTextureAssetId = formatAtlasReadyPreparedTextureAssetId({
@@ -341,37 +470,33 @@ function evaluateAtlasCandidate(options: {
 	const preparedTextureAsset =
 		options.assetState.preparedByAssetId[preparedTextureAssetId];
 	if (preparedTextureAsset?.payload.kind !== "prepared-texture") {
-		return {
-			kind: "fallback",
-			requirement: createFallbackRequirement({
-				input: options.input,
-				materialAssetId,
-				behavior: deriveLegacyMaterialBehaviorDto({
-					recipe,
-					hasSourceAlpha: hasSourceAlpha(surface.formatRaw),
-				}),
-				reason: "missing-decompressed-prepared-texture",
-				detail: `missing atlas-ready prepared texture ${preparedTextureAssetId}`,
+		return createFallbackRequirement({
+			input: options.input,
+			materialAssetId,
+			behavior: deriveLegacyMaterialBehaviorDto({
+				recipe,
+				hasSourceAlpha: hasSourceAlpha(surface.formatRaw),
 			}),
-		};
+			kind: "flat-fallback",
+			reason: "missing-decompressed-prepared-texture",
+			detail: `missing atlas-ready prepared texture ${preparedTextureAssetId}`,
+		});
 	}
 
 	const preparedTexture = preparedTextureAsset.payload;
 	const validTexture = validateAtlasPreparedTexture(surface, preparedTexture);
 	if (validTexture !== null) {
-		return {
-			kind: "fallback",
-			requirement: createFallbackRequirement({
-				input: options.input,
-				materialAssetId,
-				behavior: deriveLegacyMaterialBehaviorDto({
-					recipe,
-					hasSourceAlpha: hasSourceAlpha(surface.formatRaw),
-				}),
-				reason: "invalid-decompressed-prepared-texture",
-				detail: validTexture,
+		return createFallbackRequirement({
+			input: options.input,
+			materialAssetId,
+			behavior: deriveLegacyMaterialBehaviorDto({
+				recipe,
+				hasSourceAlpha: hasSourceAlpha(surface.formatRaw),
 			}),
-		};
+			kind: "flat-fallback",
+			reason: "invalid-decompressed-prepared-texture",
+			detail: validTexture,
+		});
 	}
 
 	const level = preparedTexture.levels[0];
@@ -380,27 +505,6 @@ function evaluateAtlasCandidate(options: {
 			`Prepared texture ${preparedTextureAssetId} passed validation without a level-0 payload.`,
 		);
 	}
-	if (
-		level.width + options.policy.baseGutterPixels * 2 >
-			options.policy.maxAtlasTextureSize ||
-		level.height + options.policy.baseGutterPixels * 2 >
-			options.policy.maxAtlasTextureSize
-	) {
-		return {
-			kind: "fallback",
-			requirement: createFallbackRequirement({
-				input: options.input,
-				materialAssetId,
-				behavior: deriveLegacyMaterialBehaviorDto({
-					recipe,
-					hasSourceAlpha: hasSourceAlpha(surface.formatRaw),
-				}),
-				reason: "source-texture-too-large",
-				detail: `texture ${preparedTextureAssetId} is ${level.width}x${level.height}, exceeding atlas capacity`,
-			}),
-		};
-	}
-
 	const behaviorWithAlpha = deriveLegacyMaterialBehaviorDto({
 		recipe,
 		hasSourceAlpha: hasSourceAlpha(surface.formatRaw),
@@ -412,42 +516,154 @@ function evaluateAtlasCandidate(options: {
 		preparedTexture,
 	});
 	return {
-		kind: "candidate",
-		candidate: {
-			input: options.input,
+		kind: "atlas",
+		slot: options.input.slot,
+		renderableKind: options.input.renderableKind,
+		materialAssetId,
+		materialSlotKey: describeMaterialSlotKey({
 			materialAssetId,
-			materialSlotKey: describeMaterialSlotKey({
-				materialAssetId,
-				atlasEntryKey,
-				behavior: behaviorWithAlpha,
-				samplingKey,
-				renderStateKey,
-				materialVariantSignature:
-					options.input.slot.materialVariantSignature ?? null,
-			}),
 			atlasEntryKey,
-			renderStateKey,
-			samplingKey,
 			behavior: behaviorWithAlpha,
-			entry: {
-				key: atlasEntryKey,
-				renderSurfaceId: surface.renderSurfaceId,
-				preparedTextureAssetId,
-				width: level.width,
-				height: level.height,
-				sourceHash: preparedTexture.sourceHash,
-				sourceFormatRaw: preparedTexture.sourceFormatRaw,
-				transfer: "linear",
-			},
+			samplingKey,
+			renderStateKey,
+			materialVariantSignature:
+				options.input.slot.materialVariantSignature ?? null,
+		}),
+		materialTableSlotIndex: -1,
+		atlasEntryKey,
+		atlasTextureIndex: -1,
+		renderStateKey,
+		samplingKey,
+		behavior: behaviorWithAlpha,
+		atlasEntry: {
+			renderSurfaceId: surface.renderSurfaceId,
+			preparedTextureAssetId,
+			level,
+			sourceHash: preparedTexture.sourceHash,
+			sourceFormatRaw: preparedTexture.sourceFormatRaw,
 		},
 	};
 }
 
+export function defaultLumaMaterialTextureCapabilities(): MaterialTextureCapabilities {
+	return {
+		supportsS3tc: false,
+		supportsS3tcSrgb: false,
+		supportsPackedRgb565: false,
+		supportsPackedRgba4444: false,
+		maxAnisotropy: 1,
+	};
+}
+
+export function describeLumaDirectTextureKey(
+	upload: Extract<
+		RenderSurfaceTextureUploadPreparation,
+		{ status: "ready" }
+	>["upload"],
+): string {
+	return [
+		"texture",
+		formatHex32(upload.renderSurfaceId),
+		upload.sourceFormatRaw,
+		upload.width,
+		upload.height,
+		upload.samplingPolicy.colorSpace,
+		upload.samplingPolicy.wrapS,
+		upload.samplingPolicy.wrapT,
+		upload.samplingPolicy.minFilter,
+		upload.samplingPolicy.magFilter,
+		upload.samplingPolicy.mipFilter,
+	].join("/");
+}
+
+function resolveDirectTextureStrategy(options: {
+	assetState: AssetChannelState;
+	behaviorReason: {
+		reason: LumaMaterialStrategyFallbackReason;
+		detail: string;
+	};
+	input: LumaMaterialStrategyInput;
+	materialAssetId: string;
+	recipe: PreparedMaterialRecipePayload;
+	textureCapabilities: MaterialTextureCapabilities;
+}): LumaDirectTextureMaterialStrategy | LumaMaterialFallbackStrategy {
+	const resolvedSurface = resolveFirstMaterialRenderSurface({
+		recipe: options.recipe,
+		assetState: options.assetState,
+	});
+	if (!resolvedSurface) {
+		return createFallbackRequirement({
+			input: options.input,
+			materialAssetId: options.materialAssetId,
+			behavior: deriveLegacyMaterialBehaviorDto({ recipe: options.recipe }),
+			kind: "flat-fallback",
+			reason: "missing-render-surface",
+			detail: `material ${options.materialAssetId} has no prepared render surface`,
+		});
+	}
+	const directRenderSurface = resolvedSurface.renderSurface;
+	const samplingPolicy = selectRenderSurfaceTextureSamplingPolicy(
+		directRenderSurface,
+		createDefaultMaterialTextureSamplingPolicy(options.textureCapabilities),
+	);
+	const textureUpload = prepareRenderSurfaceTextureUploadData(
+		directRenderSurface,
+		samplingPolicy,
+		options.textureCapabilities,
+		resolvePreparedTexture({
+			assetState: options.assetState,
+			renderSurface: directRenderSurface,
+		}),
+	);
+	if (textureUpload.status !== "ready") {
+		const behavior = deriveLegacyMaterialBehaviorDto({
+			recipe: options.recipe,
+			hasSourceAlpha: hasSourceAlpha(directRenderSurface.formatRaw),
+		});
+		return createFallbackRequirement({
+			input: options.input,
+			materialAssetId: options.materialAssetId,
+			behavior,
+			kind: "flat-fallback",
+			reason: options.behaviorReason.reason,
+			detail: `material ${options.materialAssetId} texture ${formatHex32(directRenderSurface.renderSurfaceId)} is ${textureUpload.reason}`,
+		});
+	}
+	const behavior = deriveLegacyMaterialBehaviorDto({
+		recipe: options.recipe,
+		hasSourceAlpha: textureUpload.upload.hasSourceAlpha,
+	});
+	const textureKey = describeLumaDirectTextureKey(textureUpload.upload);
+	const renderStateKey = describeDirectRenderStateKey(behavior);
+	const samplingKey = describeDirectSamplingKey(textureUpload.upload);
+	return {
+		kind: "direct-texture",
+		slot: options.input.slot,
+		renderableKind: options.input.renderableKind,
+		materialAssetId: options.materialAssetId,
+		key: [
+			"direct-texture",
+			options.materialAssetId,
+			textureKey,
+			behavior.blend.mode,
+			behavior.alphaTest,
+			behavior.blend.depthWrite ? "depth-write" : "depth-read",
+		].join("|"),
+		textureKey,
+		textureUpload,
+		renderStateKey,
+		samplingKey,
+		behavior,
+		reason: options.behaviorReason.reason,
+		detail: options.behaviorReason.detail,
+	};
+}
+
 function atlasFallbackReasonForRecipe(options: {
-	input: LumaAtlasMaterialRequirementInput;
+	input: LumaMaterialStrategyInput;
 	recipe: PreparedMaterialRecipePayload;
 	behavior: LegacyMaterialBehaviorDto;
-}): { reason: LumaAtlasFallbackReason; detail: string } | null {
+}): { reason: LumaMaterialStrategyFallbackReason; detail: string } | null {
 	if (options.recipe.source.kind !== "texture") {
 		return {
 			reason: "solid-color-material",
@@ -505,6 +721,25 @@ function validateAtlasPreparedTexture(
 	return null;
 }
 
+function resolvePreparedTexture(options: {
+	assetState: AssetChannelState;
+	renderSurface: PreparedRenderSurfacePayload;
+}): PreparedTexturePayload | null {
+	const outputFormat = preparedDxtOutputFormat(options.renderSurface.formatRaw);
+	if (!outputFormat) {
+		return null;
+	}
+	const assetId = formatPreparedTextureAssetId({
+		renderSurfaceId: options.renderSurface.renderSurfaceId,
+		usage: "raw",
+		outputFormat,
+		mipPolicy: "retail4",
+		colorSpace: "source",
+	});
+	const asset = options.assetState.preparedByAssetId[assetId];
+	return asset?.payload.kind === "prepared-texture" ? asset.payload : null;
+}
+
 function dedupeAtlasEntries(
 	candidates: readonly AtlasCandidate[],
 ): LumaAtlasEntryPlan[] {
@@ -519,7 +754,7 @@ function dedupeAtlasEntries(
 
 function packAtlasEntries(
 	entries: readonly LumaAtlasEntryPlan[],
-	policy: LumaAtlasPlannerPolicy,
+	policy: LumaMaterialStrategyPolicy,
 ): AtlasPlacementState {
 	if (entries.length === 0) {
 		return {
@@ -576,7 +811,7 @@ function packAtlasEntries(
 
 function createAtlasTexturePlan(
 	textureIndex: number,
-	policy: LumaAtlasPlannerPolicy,
+	policy: LumaMaterialStrategyPolicy,
 ): LumaAtlasTexturePlan {
 	return {
 		textureIndex,
@@ -588,26 +823,30 @@ function createAtlasTexturePlan(
 
 function assignMaterialTableSlots(
 	candidates: readonly AtlasCandidate[],
-	policy: LumaAtlasPlannerPolicy,
+	policy: LumaMaterialStrategyPolicy,
 ): Map<string, number> {
-	const keys = [...new Set(candidates.map((candidate) => candidate.materialSlotKey))]
-		.sort();
+	const keys = [
+		...new Set(candidates.map((candidate) => candidate.materialSlotKey)),
+	].sort();
 	const slotByKey = new Map<string, number>();
-	for (const [index, key] of keys.slice(0, policy.maxMaterialSlotsPerDraw).entries()) {
+	for (const [index, key] of keys
+		.slice(0, policy.maxMaterialSlotsPerDraw)
+		.entries()) {
 		slotByKey.set(key, index);
 	}
 	return slotByKey;
 }
 
 function createFallbackRequirement(options: {
-	input: LumaAtlasMaterialRequirementInput;
+	input: LumaMaterialStrategyInput;
 	materialAssetId: string;
-	reason: LumaAtlasFallbackReason;
+	kind: LumaMaterialFallbackStrategy["kind"];
+	reason: LumaMaterialStrategyFallbackReason;
 	detail: string;
 	behavior: LegacyMaterialBehaviorDto | null;
-}): LumaAtlasFallbackMaterialRequirement {
+}): LumaMaterialFallbackStrategy {
 	return {
-		kind: "fallback",
+		kind: options.kind,
 		slot: options.input.slot,
 		renderableKind: options.input.renderableKind,
 		materialAssetId: options.materialAssetId,
@@ -649,6 +888,34 @@ function describeAtlasRenderStateKey(
 	].join(";");
 }
 
+function describeDirectRenderStateKey(
+	behavior: LegacyMaterialBehaviorDto,
+): string {
+	return [
+		"shader=direct-texture",
+		`blend=${behavior.blend.mode}`,
+		`depth=${behavior.blend.depthWrite ? "write" : "read"}`,
+		`alphaTest=${behavior.alphaTest}`,
+		`side=${behavior.side}`,
+	].join(";");
+}
+
+function describeDirectSamplingKey(
+	upload: Extract<
+		RenderSurfaceTextureUploadPreparation,
+		{ status: "ready" }
+	>["upload"],
+): string {
+	const policy = upload.samplingPolicy;
+	return [
+		"direct-sampling",
+		`wrap=${policy.wrapS}/${policy.wrapT}`,
+		`filter=${policy.minFilter}/${policy.magFilter}/${policy.mipFilter}`,
+		`color=${policy.colorSpace}`,
+		`source=${formatHex32(upload.renderSurfaceId)}/${upload.sourceFormatRaw}`,
+	].join(";");
+}
+
 function describeMaterialSlotKey(options: {
 	materialAssetId: string;
 	atlasEntryKey: string;
@@ -671,7 +938,7 @@ function describeMaterialSlotKey(options: {
 
 function describeAtlasSetKey(options: {
 	entries: readonly LumaAtlasEntryPlan[];
-	policy: LumaAtlasPlannerPolicy;
+	policy: LumaMaterialStrategyPolicy;
 	materialSlots: readonly string[];
 }): string {
 	return [
@@ -684,26 +951,30 @@ function describeAtlasSetKey(options: {
 	].join("|");
 }
 
-function sortMaterialRequirements(
-	requirements: readonly LumaAtlasMaterialRequirement[],
-): LumaAtlasMaterialRequirement[] {
+function sortMaterialStrategies(
+	requirements: readonly LumaMaterialStrategy[],
+): LumaMaterialStrategy[] {
 	return [...requirements].sort(
 		(left, right) =>
 			left.slot.slotIndex - right.slot.slotIndex ||
 			left.materialAssetId.localeCompare(right.materialAssetId) ||
 			left.renderableKind.localeCompare(right.renderableKind) ||
-			(left.kind === "atlas" ? left.materialSlotKey : left.reason).localeCompare(
-				right.kind === "atlas" ? right.materialSlotKey : right.reason,
+			describeStrategySortKey(left).localeCompare(
+				describeStrategySortKey(right),
 			),
 	);
 }
 
 function countFallbackReasons(
-	requirements: readonly LumaAtlasMaterialRequirement[],
-): Partial<Record<LumaAtlasFallbackReason, number>> {
-	const counts: Partial<Record<LumaAtlasFallbackReason, number>> = {};
+	requirements: readonly LumaMaterialStrategy[],
+): Partial<Record<LumaMaterialStrategyFallbackReason, number>> {
+	const counts: Partial<Record<LumaMaterialStrategyFallbackReason, number>> =
+		{};
 	for (const requirement of requirements) {
-		if (requirement.kind !== "fallback") {
+		if (
+			requirement.kind !== "flat-fallback" &&
+			requirement.kind !== "unsupported"
+		) {
 			continue;
 		}
 		counts[requirement.reason] = (counts[requirement.reason] ?? 0) + 1;
@@ -711,8 +982,20 @@ function countFallbackReasons(
 	return counts;
 }
 
+function describeStrategySortKey(requirement: LumaMaterialStrategy): string {
+	switch (requirement.kind) {
+		case "atlas":
+			return requirement.materialSlotKey;
+		case "direct-texture":
+			return requirement.key;
+		case "flat-fallback":
+		case "unsupported":
+			return requirement.reason;
+	}
+}
+
 function createDrawSlicePlans(
-	requirements: readonly LumaAtlasMaterialRequirement[],
+	requirements: readonly LumaMaterialStrategy[],
 ): LumaAtlasDrawSlicePlan[] {
 	const groupByKey = new Map<
 		string,
@@ -731,14 +1014,12 @@ function createDrawSlicePlans(
 			requirement.atlasTextureIndex,
 			requirement.renderStateKey,
 		].join("|");
-		const group =
-			groupByKey.get(key) ??
-			{
-				atlasTextureIndex: requirement.atlasTextureIndex,
-				renderStateKey: requirement.renderStateKey,
-				slotIndices: [],
-				materialSlotKeys: new Set<string>(),
-			};
+		const group = groupByKey.get(key) ?? {
+			atlasTextureIndex: requirement.atlasTextureIndex,
+			renderStateKey: requirement.renderStateKey,
+			slotIndices: [],
+			materialSlotKeys: new Set<string>(),
+		};
 		group.slotIndices.push(requirement.materialTableSlotIndex);
 		group.materialSlotKeys.add(requirement.materialSlotKey);
 		groupByKey.set(key, group);
@@ -753,12 +1034,12 @@ function createDrawSlicePlans(
 			const materialTableSlotStart = Math.min(...group.slotIndices);
 			const materialTableSlotEnd = Math.max(...group.slotIndices);
 			return {
-			key: [
-				"atlas-draw-slice",
+				key: [
+					"atlas-draw-slice",
 					`texture=${group.atlasTextureIndex}`,
 					group.renderStateKey,
 					`table=${materialTableSlotStart}-${materialTableSlotEnd}`,
-			].join("|"),
+				].join("|"),
 				atlasTextureIndex: group.atlasTextureIndex,
 				renderStateKey: group.renderStateKey,
 				materialTableSlotStart,
@@ -770,9 +1051,9 @@ function createDrawSlicePlans(
 }
 
 function normalizePolicy(
-	policy: Partial<LumaAtlasPlannerPolicy> | undefined,
-): LumaAtlasPlannerPolicy {
-	const normalized = { ...DEFAULT_LUMA_ATLAS_PLANNER_POLICY, ...policy };
+	policy: Partial<LumaMaterialStrategyPolicy> | undefined,
+): LumaMaterialStrategyPolicy {
+	const normalized = { ...DEFAULT_LUMA_MATERIAL_STRATEGY_POLICY, ...policy };
 	if (normalized.maxAtlasTextureSize <= normalized.baseGutterPixels * 2) {
 		throw new Error("Luma atlas max texture size must exceed its gutters.");
 	}

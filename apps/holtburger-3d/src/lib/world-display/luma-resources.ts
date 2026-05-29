@@ -31,6 +31,7 @@ import {
 	type LumaVec4,
 } from "./luma-math";
 import type { RenderChunkTransform } from "./render-anchor";
+import type { MaterialTextureCapabilities } from "./render-surface-texture-data";
 import {
 	deriveStructuredInteriorCellBatchBvhBinding,
 	deriveTerrainTileBatchBvhBinding,
@@ -61,9 +62,7 @@ export const LUMA_TEXTURED_WORLD_SHADER_LAYOUT: ShaderLayout = {
 		{ name: "position", location: 0, type: "vec3<f32>" },
 		{ name: "texCoord", location: 1, type: "vec2<f32>" },
 	],
-	bindings: [
-		{ type: "texture", name: "uTexture", group: 0, location: 0 },
-	],
+	bindings: [{ type: "texture", name: "uTexture", group: 0, location: 0 }],
 	uniforms: [
 		{ name: "uModelViewProjection", type: "mat4x4<f32>" },
 		{ name: "uColor", type: "vec4<f32>" },
@@ -173,6 +172,7 @@ export function syncLumaWorldResources({
 	structuredInteriorScene,
 	transitionPortalModel,
 	renderChunkTransforms,
+	materialTextureCapabilities,
 	staticPromotionPolicy,
 }: {
 	device: Device;
@@ -183,6 +183,7 @@ export function syncLumaWorldResources({
 	structuredInteriorScene: StructuredInteriorSceneModel;
 	transitionPortalModel: TransitionPortalCandidateModel;
 	renderChunkTransforms: readonly RenderChunkTransform[];
+	materialTextureCapabilities?: MaterialTextureCapabilities;
 	staticPromotionPolicy?: LumaStaticPromotionPolicy;
 }): void {
 	const chunkOffsetByKey = new Map(
@@ -257,6 +258,7 @@ export function syncLumaWorldResources({
 				assetState,
 				surfaceId: surfaceKey.surfaceId,
 				fallbackColorKey: `${cell.debugColorKey}:${surfaceKey.surfaceId ?? "none"}`,
+				textureCapabilities: materialTextureCapabilities,
 			});
 			nextBatches.push(
 				createOrReuseDrawBatch({
@@ -347,8 +349,9 @@ export function syncLumaWorldResources({
 			batch.kind === "static" ? total + batch.staticPartCount : total,
 		0,
 	);
-	store.materialCount = new Set(store.batches.map((batch) => batch.material.key))
-		.size;
+	store.materialCount = new Set(
+		store.batches.map((batch) => batch.material.key),
+	).size;
 	store.directTextureBatchCount = store.batches.filter(
 		(batch) => batch.material.kind === "direct-texture",
 	).length;
@@ -356,10 +359,9 @@ export function syncLumaWorldResources({
 		batch.material.fallbackReason ? [batch.material.fallbackReason] : [],
 	);
 	store.materialFallbackReasonCount = materialFallbackReasons.length;
-	store.materialFallbackReasonSamples = [...new Set(materialFallbackReasons)].slice(
-		0,
-		8,
-	);
+	store.materialFallbackReasonSamples = [
+		...new Set(materialFallbackReasons),
+	].slice(0, 8);
 	store.triangleCount = store.batches.reduce(
 		(total, batch) => total + batch.triangleCount,
 		0,
@@ -427,7 +429,11 @@ function createOrReuseDrawBatch({
 		previousBatch.modelMatrix = modelMatrix;
 		previousBatch.color = material.color;
 		previousBatch.material = material;
-		previousBatch.bindings = createLumaBatchBindings({ device, store, material });
+		previousBatch.bindings = createLumaBatchBindings({
+			device,
+			store,
+			material,
+		});
 		previousBatch.bvhItemKeys = bvhBinding.itemKeys;
 		previousBatch.bvhFallbackReason = bvhBinding.fallbackReason;
 		previousBatch.staticPartCount = staticPartCount;
@@ -518,7 +524,11 @@ function createGeometrySignature(
 
 function hashFloat32Array(values: Float32Array): string {
 	let hash = 0x811c9dc5;
-	const view = new DataView(values.buffer, values.byteOffset, values.byteLength);
+	const view = new DataView(
+		values.buffer,
+		values.byteOffset,
+		values.byteLength,
+	);
 	for (let byteOffset = 0; byteOffset < view.byteLength; byteOffset += 1) {
 		hash ^= view.getUint8(byteOffset);
 		hash = Math.imul(hash, 0x01000193);
@@ -577,38 +587,40 @@ function buildBakedStaticBatches({
 		}
 	}
 
-	return [...objectsByBatchKey.entries()].flatMap(([batchKey, objectGroups]) => {
-		const group = resolveStaticPromotionGroup({
-			batchKey,
-			objectGroups,
-			promotionPolicy,
-			store,
-		});
-		const promotedParts = objectGroups.flatMap((objectGroup) =>
-			group.promotedObjectKeys.has(objectGroup.objectKey)
-				? objectGroup.parts
-				: [],
-		);
-		const stagedObjectGroups = objectGroups.filter(
-			(objectGroup) => !group.promotedObjectKeys.has(objectGroup.objectKey),
-		);
-		return [
-			...buildPromotedStaticBatch({
-				assetState,
+	return [...objectsByBatchKey.entries()].flatMap(
+		([batchKey, objectGroups]) => {
+			const group = resolveStaticPromotionGroup({
 				batchKey,
-				chunkOffsetByKey,
-				parts: promotedParts,
-			}),
-			...stagedObjectGroups.flatMap((objectGroup) =>
-				buildStagedStaticBatch({
+				objectGroups,
+				promotionPolicy,
+				store,
+			});
+			const promotedParts = objectGroups.flatMap((objectGroup) =>
+				group.promotedObjectKeys.has(objectGroup.objectKey)
+					? objectGroup.parts
+					: [],
+			);
+			const stagedObjectGroups = objectGroups.filter(
+				(objectGroup) => !group.promotedObjectKeys.has(objectGroup.objectKey),
+			);
+			return [
+				...buildPromotedStaticBatch({
 					assetState,
 					batchKey,
 					chunkOffsetByKey,
-					objectGroup,
+					parts: promotedParts,
 				}),
-			),
-		];
-	});
+				...stagedObjectGroups.flatMap((objectGroup) =>
+					buildStagedStaticBatch({
+						assetState,
+						batchKey,
+						chunkOffsetByKey,
+						objectGroup,
+					}),
+				),
+			];
+		},
+	);
 }
 
 interface StaticRenderableObjectGroup {
@@ -671,7 +683,9 @@ function resolveStaticPromotionGroup({
 	let group = store.staticPromotionGroups.get(batchKey);
 	if (!group) {
 		group = {
-			promotedObjectKeys: new Set(objectGroups.map((object) => object.objectKey)),
+			promotedObjectKeys: new Set(
+				objectGroups.map((object) => object.objectKey),
+			),
 		};
 		store.staticPromotionGroups.set(batchKey, group);
 		return group;
@@ -689,7 +703,9 @@ function resolveStaticPromotionGroup({
 	const stagedObjectKeys = objectGroups
 		.map((objectGroup) => objectGroup.objectKey)
 		.filter((objectKey) => !group.promotedObjectKeys.has(objectKey));
-	if (shouldPromoteStagedStaticObjects(stagedObjectKeys.length, promotionPolicy)) {
+	if (
+		shouldPromoteStagedStaticObjects(stagedObjectKeys.length, promotionPolicy)
+	) {
 		for (const objectKey of stagedObjectKeys) {
 			group.promotedObjectKeys.add(objectKey);
 		}
@@ -820,11 +836,7 @@ function deriveStaticBatchBvhBinding(
 }
 
 function formatBakedStaticBatchKey(part: StaticRenderablePart): string {
-	return [
-		part.renderDomain,
-		part.renderChunk.chunkKey,
-		"debug-flat",
-	].join("|");
+	return [part.renderDomain, part.renderChunk.chunkKey, "debug-flat"].join("|");
 }
 
 function buildBakedStaticGeometry(
@@ -861,7 +873,11 @@ function buildBakedStaticGeometry(
 
 	for (const { geometry, part } of bakedParts) {
 		const matrix = buildLumaStaticRenderablePartMatrix(part);
-		for (let vertexIndex = 0; vertexIndex < geometry.vertexCount; vertexIndex += 1) {
+		for (
+			let vertexIndex = 0;
+			vertexIndex < geometry.vertexCount;
+			vertexIndex += 1
+		) {
 			transformPosition(
 				positions,
 				vertexOffset + vertexIndex,
@@ -933,10 +949,12 @@ function structuredInteriorSurfaceKeys(
 	return [...keys.values()].sort((left, right) => {
 		const leftSurface = left.surfaceId ?? -1;
 		const rightSurface = right.surfaceId ?? -1;
-		return leftSurface - rightSurface ||
+		return (
+			leftSurface - rightSurface ||
 			(left.materialVariantSignature ?? "").localeCompare(
 				right.materialVariantSignature ?? "",
-			);
+			)
+		);
 	});
 }
 

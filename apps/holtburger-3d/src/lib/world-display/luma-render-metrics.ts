@@ -1,5 +1,5 @@
 import type { SceneCameraFrame } from "./camera";
-import type { LumaFrameMetrics } from "./luma-frame";
+import type { StagedWorldFrameMetrics } from "./staged-world-frame";
 import type {
 	WorldDisplayTextureColorSpaceMode,
 	WorldDisplayTextureFilteringMode,
@@ -34,7 +34,7 @@ export interface LumaRenderMetricsInput {
 	textureResourceCount?: number;
 	materialFallbackReasonCount?: number;
 	materialFallbackReasonSamples?: readonly string[];
-	lumaFrameMetrics?: LumaFrameMetrics | null;
+	lumaFrameMetrics?: StagedWorldFrameMetrics | null;
 	worldTriangleCount?: number;
 	performance: WorldRenderMetrics["performance"];
 	textureFilteringMode: WorldDisplayTextureFilteringMode;

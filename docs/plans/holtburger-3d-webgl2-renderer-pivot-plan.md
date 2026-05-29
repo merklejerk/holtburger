@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Renderer Pivot Plan
 
-Status: Phase W2 complete; ready for Phase W2A; replaces the luma low-level renderer track and blocks the old luma plan
+Status: Phase W2A complete; ready for Phase W3; replaces the luma low-level renderer track and blocks the old luma plan
 before continuing Phase 6C.4.
 
 Related plan: [Holtburger 3D Luma Renderer Swapout Plan](./holtburger-3d-luma-renderer-swapout-plan.md)
@@ -134,9 +134,8 @@ This plan was dry-run against the current code on 2026-05-29.
 - `luma-materials.ts` also mixes renderer-neutral material decisions with luma texture realization.
   `resolveLumaMaterialSlotPlan(...)` and `resolveLumaSurfaceMaterialPlan(...)` should become
   renderer-neutral direct/fallback material-plan helpers before WebGL2 texture upload is wired.
-- `luma-frame.ts` is mostly renderer-neutral except for naming and `LumaWorldDrawBatch` coupling.
-  It should be promoted/renamed to a staged frame-selection helper that consumes a small
-  `RenderableDrawUnitCandidate` shape.
+- `staged-world-frame.ts` now owns renderer-neutral frame selection and consumes a small draw-unit
+  candidate shape instead of luma resource classes.
 - `luma-math.ts` contains useful coordinate/matrix helpers but the name is now misleading. Rename
   only after WebGL2 uses it so the rename is mechanical and proven.
 - The current staged static path is per-object/per-part/per-material-slot. WebGL2 must call these
@@ -367,7 +366,7 @@ Legacy shims:
 
 ## Phase W2A: Renderer-Neutral Staged Assembly Extraction
 
-Status: Not started.
+Status: Complete as of 2026-05-29.
 
 Purpose: extract the useful staged assembly semantics from luma-shaped modules before WebGL2
 resource creation, avoiding a luma-to-WebGL2 copy-paste fork.
@@ -409,6 +408,70 @@ Exit criteria:
   until W6 deletes it.
 - Tests cover static material-slot staging, graph dependency derivation, normalized BVH keys, and
   fallback/direct material decisions at the renderer-neutral layer.
+
+Progress:
+
+- Renamed the luma frame-selection module to `staged-world-frame.ts`.
+- Replaced `buildLumaFrame(...)` with `buildStagedWorldFrame(...)`, which consumes
+  `StagedWorldFrameCandidate` records instead of `LumaWorldDrawBatch` resource objects.
+- Updated luma rendering to pass retained luma batches as staged frame candidates and resolve frame
+  draws by `drawUnitId`.
+- Extracted staged static draw-unit assembly into `staged-world-assembly.ts`, including:
+  - static object grouping by render domain/chunk/material staging key
+  - material-slot and geometry-surface splitting
+  - static part transform baking into chunk-local geometry
+  - normalized static BVH item keys and explicit fallback reasons
+  - flat debug material creation for staged draw units
+  - graph dependency signature helpers
+- Rewired `luma-resources.ts` so luma consumes staged static draw-unit assemblies instead of owning
+  those assembly rules locally.
+- Added renderer-neutral tests in `staged-world-assembly.test.ts` for material-slot staging,
+  normalized BVH keys, and graph dependency signature stability.
+- Renamed `luma-frame.test.ts` to `staged-world-frame.test.ts` and updated expectations to use
+  draw-unit terminology.
+
+Decisions:
+
+- W2A keeps raw typed-array geometry and material-plan payloads in the extracted assembly module.
+  That is enough for WebGL2 W3 to realize resources without importing luma resource classes, while
+  avoiding an extra renderer abstraction below `WorldDisplayRenderer`.
+- The extracted static assembly still calls luma-named geometry, math, and material helpers because
+  those helpers already produce renderer-neutral typed-array data or material decisions. Renaming
+  those helpers is tracked as future cleanup instead of mixed into this extraction.
+- Luma remains a consumer of the extracted assembly rather than keeping a parallel legacy wrapper.
+  This reduces drift while luma remains selectable for short-term comparison.
+- Frame metrics keep the existing batch-count field names for contract stability, but the new
+  frame API and tests use draw-unit terms.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/staged-world-frame.test.ts src/lib/world-display/staged-world-assembly.test.ts src/lib/world-display/luma-resources.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run build`
+
+Course corrections:
+
+- W2A did not fully rename material planning away from luma. Doing that now would entangle W2A with
+  direct texture policy and atlas-deferred code. The next clean step is to let W3 consume
+  `StagedWorldMaterialPlan` as a material-decision payload, then rename/split the luma material
+  helpers when WebGL2 direct material parity reaches W5.
+- Structured-interior surface-key derivation remains in `luma-resources.ts`. It is pure enough to
+  extract, but W3 can start with the staged static assembly and then pull terrain/interior assembly
+  when those draw units are realized.
+
+Discovered cleanup targets:
+
+- `staged-world-assembly.ts` still imports luma-named geometry/math/material helper modules. These
+  should be renamed or split once WebGL2 W3/W5 prove exactly which helpers are shared.
+- `WorldRenderMetrics` still exposes batch-oriented field names; keep API stability for now and
+  translate to draw-unit language in diagnostics.
+- Structured-interior and terrain assembly should move out of `luma-resources.ts` during W3 when
+  WebGL2 starts realizing those draw units.
+
+Legacy shims:
+
+- None introduced. The old `luma-frame.ts` file was removed rather than retained as a re-export.
 
 ## Phase W3: WebGL2 Staged Resource Store
 
@@ -548,11 +611,8 @@ Exit criteria:
 - `VITE_HOLTBURGER_RENDER_BACKEND=luma` should remain selectable only as a short-lived reference
   during the pivot. It must not become an alias for `webgl2`. Add a distinct `webgl2` backend value
   in W1 and remove `luma` after W6.
-- Rename luma files only when their contents are actually renderer-neutral. Preferred order:
-  - extract staged assembly/frame selection helpers first;
-  - keep luma wrappers compiling;
-  - point WebGL2 at the neutral helpers;
-  - delete or retire luma-specific modules after W6.
+- Rename luma files only when their contents are actually renderer-neutral. `luma-frame.ts` has
+  already moved to `staged-world-frame.ts`; keep applying this rule to remaining luma-named helpers.
 - Add fake/capturing GL tests from W2 onward. Runtime profiling is still required, but unit tests
   should guard the main reason for the pivot: avoiding redundant GL state calls.
 - Defer compressed texture upload until after decompressed direct material parity. The WebGL2 path
@@ -562,7 +622,8 @@ Exit criteria:
 
 ## Cleanup Targets
 
-- Rename or split `luma-frame.ts` once W2A lands. Most of it is renderer-neutral frame selection.
+- Continue splitting `luma-resources.ts`; W2A extracted staged static assembly and frame selection,
+  but terrain/structured-interior assembly and luma GPU realization still share the same module.
 - Split `luma-resources.ts`; do not let WebGL2 inherit its combined assembly/resource/graph/metrics
   god-module shape.
 - Split `luma-materials.ts` into material-plan resolution and luma texture realization. WebGL2 should

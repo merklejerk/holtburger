@@ -1,10 +1,6 @@
 import type { AssetChannelState } from "../assets/types";
 import type { SceneCameraFrame } from "./camera";
 import { buildSceneCameraViewProjectionMatrix, type LumaMat4 } from "./luma-math";
-import type {
-	LumaWorldDrawBatch,
-	LumaWorldDrawBatchKind,
-} from "./luma-resources";
 import { derivePreparedBvhVisibilitySnapshot } from "./prepared-bvh-metrics";
 import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import type { RenderChunkTransform } from "./render-anchor";
@@ -13,7 +9,7 @@ import type { StaticRenderableSceneModel } from "./static-renderables";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
 
-type LumaDrawCategory =
+export type StagedWorldDrawUnitCategory =
 	| "terrain"
 	| "structured-interior"
 	| "static-staged"
@@ -21,17 +17,29 @@ type LumaDrawCategory =
 	| "portal-mask"
 	| "debug-overlay";
 
-interface LumaDraw {
-	batchId: string;
-	category: LumaDrawCategory;
+export type StagedWorldDrawUnitKind =
+	| "terrain"
+	| "structured-interior"
+	| "static";
+
+export interface StagedWorldFrameCandidate {
+	id: string;
+	kind: StagedWorldDrawUnitKind;
+	bvhItemKeys: readonly RenderBvhItemKey[];
+	bvhFallbackReason: string | null;
 }
 
-interface LumaPass {
+export interface StagedWorldDraw {
+	drawUnitId: string;
+	category: StagedWorldDrawUnitCategory;
+}
+
+export interface StagedWorldPass {
 	id: "world";
-	draws: LumaDraw[];
+	draws: StagedWorldDraw[];
 }
 
-export interface LumaFrameMetrics {
+export interface StagedWorldFrameMetrics {
 	registeredBatchCount: number;
 	keyedBatchCount: number;
 	representedItemKeyCount: number;
@@ -43,28 +51,32 @@ export interface LumaFrameMetrics {
 	queryFallbackBatchCount: number;
 	fallbackReasonCount: number;
 	fallbackReasonSamples: readonly string[];
-	candidateCountsByCategory: Readonly<Record<LumaDrawCategory, number>>;
-	visibleDrawCountsByCategory: Readonly<Record<LumaDrawCategory, number>>;
-	fallbackCountsByCategory: Readonly<Record<LumaDrawCategory, number>>;
-	representedItemKeyCountsByCategory: Readonly<Record<LumaDrawCategory, number>>;
+	candidateCountsByCategory: Readonly<Record<StagedWorldDrawUnitCategory, number>>;
+	visibleDrawCountsByCategory: Readonly<
+		Record<StagedWorldDrawUnitCategory, number>
+	>;
+	fallbackCountsByCategory: Readonly<Record<StagedWorldDrawUnitCategory, number>>;
+	representedItemKeyCountsByCategory: Readonly<
+		Record<StagedWorldDrawUnitCategory, number>
+	>;
 }
 
-interface LumaFrame {
+export interface StagedWorldFrame {
 	viewProjectionMatrix: LumaMat4;
-	passes: LumaPass[];
-	metrics: LumaFrameMetrics;
+	passes: StagedWorldPass[];
+	metrics: StagedWorldFrameMetrics;
 }
 
-interface LumaBatchCandidateSelection {
-	draws: LumaDraw[];
-	metrics: LumaFrameMetrics;
+interface StagedWorldCandidateSelection {
+	draws: StagedWorldDraw[];
+	metrics: StagedWorldFrameMetrics;
 }
 
 const FALLBACK_REASON_SAMPLE_LIMIT = 8;
 
-export function buildLumaFrame({
+export function buildStagedWorldFrame({
 	assetState,
-	batches,
+	candidates,
 	cameraFrame,
 	renderChunkTransforms,
 	staticRenderableScene,
@@ -72,13 +84,13 @@ export function buildLumaFrame({
 	terrainScene,
 }: {
 	assetState: AssetChannelState;
-	batches: readonly LumaWorldDrawBatch[];
+	candidates: readonly StagedWorldFrameCandidate[];
 	cameraFrame: SceneCameraFrame;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	staticRenderableScene: StaticRenderableSceneModel;
 	structuredInteriorScene: StructuredInteriorSceneModel;
 	terrainScene: TerrainSceneModel;
-}): LumaFrame {
+}): StagedWorldFrame {
 	const viewProjectionMatrix = buildSceneCameraViewProjectionMatrix(cameraFrame);
 	const visibilitySnapshot = derivePreparedBvhVisibilitySnapshot({
 		assetState,
@@ -88,8 +100,8 @@ export function buildLumaFrame({
 		renderChunkTransforms,
 		frustum: buildRenderFrustumFromProjectionMatrix(viewProjectionMatrix),
 	});
-	const selection = selectLumaBatchCandidates(
-		batches,
+	const selection = selectStagedWorldCandidates(
+		candidates,
 		{
 			visibleItemKeys: visibilitySnapshot.visibleItemKeys,
 			queryFallbackReasons: visibilitySnapshot.fallbackReasons,
@@ -174,29 +186,29 @@ function normalizePlane(plane: RenderPlane): RenderPlane {
 	};
 }
 
-function categorizeLumaBatch(batch: {
+function categorizeStagedWorldCandidate(candidate: {
 	id: string;
-	kind: LumaWorldDrawBatchKind;
-}): LumaDrawCategory {
-	if (batch.id.startsWith("static-staged/")) {
+	kind: StagedWorldDrawUnitKind;
+}): StagedWorldDrawUnitCategory {
+	if (candidate.id.startsWith("static-staged/")) {
 		return "static-staged";
 	}
-	if (batch.kind === "terrain") {
+	if (candidate.kind === "terrain") {
 		return "terrain";
 	}
-	if (batch.kind === "structured-interior") {
+	if (candidate.kind === "structured-interior") {
 		return "structured-interior";
 	}
 	return "static";
 }
 
-function selectLumaBatchCandidates(
-	batches: readonly LumaWorldDrawBatch[],
+function selectStagedWorldCandidates(
+	candidates: readonly StagedWorldFrameCandidate[],
 	options: {
 		visibleItemKeys: ReadonlySet<RenderBvhItemKey>;
 		queryFallbackReasons: readonly string[];
 	},
-): LumaBatchCandidateSelection {
+): StagedWorldCandidateSelection {
 	const queryFallbackReasons = options.queryFallbackReasons;
 	const hasQueryFallback = queryFallbackReasons.length > 0;
 	const representedItemKeys = new Set<RenderBvhItemKey>();
@@ -210,11 +222,11 @@ function selectLumaBatchCandidates(
 	let unboundFallbackBatchCount = 0;
 	let explicitFallbackBatchCount = 0;
 	let queryFallbackBatchCount = 0;
-	const draws: LumaDraw[] = [];
+	const draws: StagedWorldDraw[] = [];
 
-	for (const batch of batches) {
-		const category = categorizeLumaBatch(batch);
-		const itemKeys = batch.bvhItemKeys;
+	for (const candidate of candidates) {
+		const category = categorizeStagedWorldCandidate(candidate);
+		const itemKeys = candidate.bvhItemKeys;
 		candidateCountsByCategory[category] += 1;
 		for (const itemKey of itemKeys) {
 			representedItemKeys.add(itemKey);
@@ -225,8 +237,8 @@ function selectLumaBatchCandidates(
 		}
 
 		const fallbackReason = resolveBatchFallbackReason({
-			batchId: batch.id,
-			fallbackReason: batch.bvhFallbackReason,
+			drawUnitId: candidate.id,
+			fallbackReason: candidate.bvhFallbackReason,
 			hasItemKeys: itemKeys.length > 0,
 			hasQueryFallback,
 		});
@@ -237,7 +249,7 @@ function selectLumaBatchCandidates(
 			continue;
 		}
 
-		draws.push({ batchId: batch.id, category });
+		draws.push({ drawUnitId: candidate.id, category });
 		visibleDrawCountsByCategory[category] += 1;
 		if (itemKeyMatched) {
 			itemKeyMatchedBatchCount += 1;
@@ -245,25 +257,25 @@ function selectLumaBatchCandidates(
 		}
 		if (fallbackReason === null) {
 			throw new Error(
-				`Luma batch ${batch.id} had neither a visible item key nor a fallback reason.`,
+				`Staged draw unit ${candidate.id} had neither a visible item key nor a fallback reason.`,
 			);
 		}
 		fallbackReasons.push(fallbackReason);
 		fallbackCountsByCategory[category] += 1;
 		if (itemKeys.length === 0) {
 			unboundFallbackBatchCount += 1;
-		} else if (batch.bvhFallbackReason) {
+		} else if (candidate.bvhFallbackReason) {
 			explicitFallbackBatchCount += 1;
 		} else {
 			queryFallbackBatchCount += 1;
 		}
 	}
 
-	draws.sort(compareLumaDraws);
+	draws.sort(compareStagedWorldDraws);
 	return {
 		draws,
 		metrics: {
-			registeredBatchCount: batches.length,
+			registeredBatchCount: candidates.length,
 			keyedBatchCount,
 			representedItemKeyCount: representedItemKeys.size,
 			visibleItemKeyCount: options.visibleItemKeys.size,
@@ -298,45 +310,48 @@ function hasVisibleItemKey(
 }
 
 function resolveBatchFallbackReason({
-	batchId,
+	drawUnitId,
 	fallbackReason,
 	hasItemKeys,
 	hasQueryFallback,
 }: {
-	batchId: string;
+	drawUnitId: string;
 	fallbackReason: string | null;
 	hasItemKeys: boolean;
 	hasQueryFallback: boolean;
 }): string | null {
 	if (!hasItemKeys) {
 		return (
-			fallbackReason ?? `luma batch ${batchId} has no BVH item keys`
+			fallbackReason ?? `staged draw unit ${drawUnitId} has no BVH item keys`
 		);
 	}
 	if (fallbackReason) {
 		return fallbackReason;
 	}
 	if (hasQueryFallback) {
-		return `luma batch ${batchId} included because BVH query reported fallback data`;
+		return `staged draw unit ${drawUnitId} included because BVH query reported fallback data`;
 	}
 	return null;
 }
 
-function compareLumaDraws(left: LumaDraw, right: LumaDraw): number {
+function compareStagedWorldDraws(
+	left: StagedWorldDraw,
+	right: StagedWorldDraw,
+): number {
 	return (
 		compareCategory(left.category, right.category) ||
-		left.batchId.localeCompare(right.batchId)
+		left.drawUnitId.localeCompare(right.drawUnitId)
 	);
 }
 
 function compareCategory(
-	left: LumaDrawCategory,
-	right: LumaDrawCategory,
+	left: StagedWorldDrawUnitCategory,
+	right: StagedWorldDrawUnitCategory,
 ): number {
 	return categorySortRank(left) - categorySortRank(right);
 }
 
-function categorySortRank(category: LumaDrawCategory): number {
+function categorySortRank(category: StagedWorldDrawUnitCategory): number {
 	switch (category) {
 		case "terrain":
 			return 0;
@@ -353,7 +368,7 @@ function categorySortRank(category: LumaDrawCategory): number {
 	}
 }
 
-function createEmptyCategoryCounts(): Record<LumaDrawCategory, number> {
+function createEmptyCategoryCounts(): Record<StagedWorldDrawUnitCategory, number> {
 	return {
 		terrain: 0,
 		"structured-interior": 0,

@@ -15,7 +15,10 @@ import { webgl2Adapter } from "@luma.gl/webgl";
 import { createFallbackSceneCameraFrame } from "./camera";
 import { multiplyMat4 } from "./luma-math";
 import { detectLumaMaterialTextureCapabilities } from "./luma-device-capabilities";
-import { buildLumaFrame, type LumaFrameMetrics } from "./luma-frame";
+import {
+	buildStagedWorldFrame,
+	type StagedWorldFrameMetrics,
+} from "./staged-world-frame";
 import { createLumaRenderMetrics } from "./luma-render-metrics";
 import {
 	createLumaWorldResourceStore,
@@ -172,7 +175,7 @@ export function createLumaWorldDisplayRendererImplementation(
 	let performanceWindowFrameCount = 0;
 	let performanceWindowFrameMs = 0;
 	let performanceWindowRenderMs = 0;
-	let latestFrameMetrics: LumaFrameMetrics | null = null;
+	let latestFrameMetrics: StagedWorldFrameMetrics | null = null;
 	let initializationError: string | null = null;
 
 	const canvas = document.createElement("canvas");
@@ -463,9 +466,9 @@ export function createLumaWorldDisplayRendererImplementation(
 		clearCount += 1;
 
 		if (resources.worldStore.batches.length > 0) {
-			const frame = buildLumaFrame({
+			const frame = buildStagedWorldFrame({
 				assetState,
-				batches: resources.worldStore.batches,
+				candidates: resources.worldStore.batches,
 				cameraFrame: resolveCameraFrame(),
 				renderChunkTransforms,
 				staticRenderableScene,
@@ -474,10 +477,10 @@ export function createLumaWorldDisplayRendererImplementation(
 			});
 			latestFrameMetrics = frame.metrics;
 			for (const draw of frame.passes.flatMap((pass) => pass.draws)) {
-				const batch = resources.worldStore.batchesById.get(draw.batchId);
+				const batch = resources.worldStore.batchesById.get(draw.drawUnitId);
 				if (!batch) {
 					throw new Error(
-						`Luma frame referenced missing batch ${draw.batchId}.`,
+						`Staged world frame referenced missing draw unit ${draw.drawUnitId}.`,
 					);
 				}
 				const pipeline =

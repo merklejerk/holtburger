@@ -1,4 +1,5 @@
 import type { SceneCameraFrame } from "./camera";
+import type { StagedWorldFrameMetrics } from "./staged-world-frame";
 import type {
 	WorldDisplayTextureColorSpaceMode,
 	WorldDisplayTextureFilteringMode,
@@ -8,6 +9,7 @@ import type { StaticRenderableSceneModel } from "./static-renderables";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
 import type { TransitionPortalCandidateModel } from "./transition-portal-work-items";
+import type { Webgl2WorldSubmitMetrics } from "./webgl2-world-submit";
 import type { Webgl2WorldResourceStore } from "./webgl2-world-resources";
 
 export interface Webgl2RenderMetricsInput {
@@ -26,6 +28,8 @@ export interface Webgl2RenderMetricsInput {
 	lastFrameDrawCount: number;
 	initializationError: string | null;
 	worldStore: Webgl2WorldResourceStore | null;
+	frameMetrics: StagedWorldFrameMetrics | null;
+	submitMetrics: Webgl2WorldSubmitMetrics;
 	performance: WorldRenderMetrics["performance"];
 	textureFilteringMode: WorldDisplayTextureFilteringMode;
 	textureColorSpaceMode: WorldDisplayTextureColorSpaceMode;
@@ -60,10 +64,10 @@ export function createWebgl2RenderMetrics(
 			canvasHeight: input.canvasHeight,
 			pixelRatio: input.pixelRatio,
 			cameraViewResidency: input.initializationError
-				? "webgl2 initialization failed"
-				: input.worldStore && input.worldStore.drawUnits.length > 0
-					? "webgl2 staged resources ready"
-					: "webgl2 test frame",
+					? "webgl2 initialization failed"
+					: input.worldStore && input.worldStore.drawUnits.length > 0
+						? "webgl2 flat staged submitter ready"
+						: "webgl2 test frame",
 			residencyCellCount: 0,
 			residencyLandblockCount: 0,
 			residencyAabbCandidateCount: 0,
@@ -84,24 +88,53 @@ export function createWebgl2RenderMetrics(
 				input.transitionPortalModel.candidates.length,
 			portalApertureMeshCount: 0,
 			terrainMeshCount: input.worldStore?.terrainDrawUnitCount ?? 0,
-			visibleTerrainMeshCount: 0,
+			visibleTerrainMeshCount:
+				input.frameMetrics?.visibleDrawCountsByCategory.terrain ?? 0,
 			staticGroupMeshCount: input.worldStore?.staticDrawUnitCount ?? 0,
-			visibleStaticGroupMeshCount: 0,
+			visibleStaticGroupMeshCount:
+				(input.frameMetrics?.visibleDrawCountsByCategory["static-staged"] ??
+					0) +
+				(input.frameMetrics?.visibleDrawCountsByCategory.static ?? 0),
 			staticRenderBatchCount: input.worldStore?.staticDrawUnitCount ?? 0,
-			staticBvhCandidateBatchCount: 0,
-			staticBvhRepresentedInstanceKeyCount: 0,
-			staticBvhVisibleInstanceKeyCount: 0,
-			staticBvhFallbackIncludedBatchCount: 0,
+			staticBvhCandidateBatchCount:
+				(input.frameMetrics?.candidateCountsByCategory["static-staged"] ??
+					0) +
+				(input.frameMetrics?.candidateCountsByCategory.static ?? 0),
+			staticBvhRepresentedInstanceKeyCount:
+				(input.frameMetrics?.representedItemKeyCountsByCategory[
+					"static-staged"
+				] ?? 0) +
+				(input.frameMetrics?.representedItemKeyCountsByCategory.static ?? 0),
+			staticBvhVisibleInstanceKeyCount:
+				(input.frameMetrics?.visibleDrawCountsByCategory["static-staged"] ??
+					0) + (input.frameMetrics?.visibleDrawCountsByCategory.static ?? 0),
+			staticBvhFallbackIncludedBatchCount:
+				(input.frameMetrics?.fallbackCountsByCategory["static-staged"] ?? 0) +
+				(input.frameMetrics?.fallbackCountsByCategory.static ?? 0),
 			terrainRenderBatchCount: input.worldStore?.terrainDrawUnitCount ?? 0,
-			terrainBvhCandidateBatchCount: 0,
+			terrainBvhCandidateBatchCount:
+				input.frameMetrics?.candidateCountsByCategory.terrain ?? 0,
 			structuredInteriorRenderBatchCount:
 				input.worldStore?.structuredInteriorDrawUnitCount ?? 0,
-			structuredInteriorBvhCandidateBatchCount: 0,
-			debugOverlayRenderBatchCount: 0,
-			debugOverlayBvhCandidateBatchCount: 0,
-			portalMaskRenderBatchCount: 0,
-			portalMaskBvhCandidateBatchCount: 0,
-			nonStaticBvhFallbackIncludedBatchCount: 0,
+			structuredInteriorBvhCandidateBatchCount:
+				input.frameMetrics?.candidateCountsByCategory[
+					"structured-interior"
+				] ?? 0,
+			debugOverlayRenderBatchCount:
+				input.frameMetrics?.candidateCountsByCategory["debug-overlay"] ?? 0,
+			debugOverlayBvhCandidateBatchCount:
+				input.frameMetrics?.visibleDrawCountsByCategory["debug-overlay"] ?? 0,
+			portalMaskRenderBatchCount:
+				input.frameMetrics?.candidateCountsByCategory["portal-mask"] ?? 0,
+			portalMaskBvhCandidateBatchCount:
+				input.frameMetrics?.visibleDrawCountsByCategory["portal-mask"] ?? 0,
+			nonStaticBvhFallbackIncludedBatchCount:
+				(input.frameMetrics?.fallbackCountsByCategory.terrain ?? 0) +
+				(input.frameMetrics?.fallbackCountsByCategory[
+					"structured-interior"
+				] ?? 0) +
+				(input.frameMetrics?.fallbackCountsByCategory["portal-mask"] ?? 0) +
+				(input.frameMetrics?.fallbackCountsByCategory["debug-overlay"] ?? 0),
 			portalCompositeVisibleItemKeyCount: 0,
 			portalCompositeStaticCandidateBatchCount: 0,
 			portalCompositeTerrainCandidateBatchCount: 0,
@@ -109,25 +142,36 @@ export function createWebgl2RenderMetrics(
 			portalCompositeFallbackIncludedBatchCount: 0,
 			structuredInteriorMeshCount:
 				input.worldStore?.structuredInteriorDrawUnitCount ?? 0,
-			visibleStructuredInteriorMeshCount: 0,
-			terrainBvhVisibleItemCount: 0,
-			terrainBvhTotalItemCount: 0,
-			outdoorStaticBvhVisibleItemCount: 0,
-			outdoorStaticBvhTotalItemCount: 0,
-			envCellLocalBvhVisibleItemCount: 0,
-			envCellLocalBvhTotalItemCount: 0,
+			visibleStructuredInteriorMeshCount:
+				input.frameMetrics?.visibleDrawCountsByCategory[
+					"structured-interior"
+				] ?? 0,
+			terrainBvhVisibleItemCount:
+				input.frameMetrics?.visibleDrawCountsByCategory.terrain ?? 0,
+			terrainBvhTotalItemCount:
+				input.frameMetrics?.candidateCountsByCategory.terrain ?? 0,
+			outdoorStaticBvhVisibleItemCount:
+				input.frameMetrics?.visibleDrawCountsByCategory["static-staged"] ?? 0,
+			outdoorStaticBvhTotalItemCount:
+				input.frameMetrics?.candidateCountsByCategory["static-staged"] ?? 0,
+			envCellLocalBvhVisibleItemCount:
+				input.frameMetrics?.visibleItemKeyCount ?? 0,
+			envCellLocalBvhTotalItemCount:
+				input.frameMetrics?.representedItemKeyCount ?? 0,
 			visibleStaticInstanceKeyCount:
 				input.worldStore?.staticInstanceCount ?? 0,
 			visiblePortalKeyCount: 0,
 			envCellBvhConsideredCount: 0,
 			fallbackReasonCount:
 				(input.initializationError ? 1 : 0) +
-				(input.worldStore?.materialFallbackReasonCount ?? 0),
+				(input.worldStore?.materialFallbackReasonCount ?? 0) +
+				(input.frameMetrics?.fallbackReasonCount ?? 0),
 			fallbackReasonSamples: [
 				...(input.initializationError
 					? [`webgl2 initialization failed: ${input.initializationError}`]
 					: []),
 				...(input.worldStore?.materialFallbackReasonSamples ?? []),
+				...(input.frameMetrics?.fallbackReasonSamples ?? []),
 			],
 			queryTimeMs: 0,
 			debugOverlayObjectCount: 0,
@@ -149,7 +193,10 @@ export function createWebgl2RenderMetrics(
 			indexedTextureResourceCount: 0,
 			paletteResourceCount: 0,
 			staticGeometryGroupCount: input.worldStore?.staticDrawUnitCount ?? 0,
-			staticVisibleGeometryGroupCount: 0,
+			staticVisibleGeometryGroupCount:
+				(input.frameMetrics?.visibleDrawCountsByCategory["static-staged"] ??
+					0) +
+				(input.frameMetrics?.visibleDrawCountsByCategory.static ?? 0),
 			structuredInteriorGeometryGroupCount:
 				input.worldStore?.structuredInteriorDrawUnitCount ?? 0,
 			materialTypeCounts: input.worldStore
@@ -159,14 +206,30 @@ export function createWebgl2RenderMetrics(
 							input.worldStore.directTextureDeferredDrawUnitCount,
 						"webgl2-direct-texture-deferred":
 							input.worldStore.directTextureDeferredDrawUnitCount,
+						...prefixCounts(
+							"webgl2-visible-",
+							input.submitMetrics.visibleDrawUnitCountsByMaterialKind,
+						),
+						"webgl2-program-switches":
+							input.submitMetrics.programSwitchCount,
+						"webgl2-vao-binds": input.submitMetrics.vertexArrayBindCount,
+						"webgl2-uniform-uploads":
+							input.submitMetrics.uniformUploadCount,
+						"webgl2-state-changes": input.submitMetrics.stateChangeCount,
 					}
 				: {},
 			materialProgramKeySamples: [],
 			preparedTextureUploadCount: 0,
 			preparedTextureGeneratedByteLength: 0,
 			compressedSingleLevelFallbackUploadCount: 0,
-			renderCalls: input.lastFrameDrawCount,
-			renderTriangles: input.worldStore?.triangleCount ?? input.lastFrameDrawCount,
+			renderCalls:
+				input.worldStore && input.worldStore.drawUnits.length > 0
+					? input.submitMetrics.drawCallCount
+					: input.lastFrameDrawCount,
+			renderTriangles:
+				input.worldStore && input.worldStore.drawUnits.length > 0
+					? input.submitMetrics.triangleCount
+					: input.lastFrameDrawCount,
 			renderLines: 0,
 			renderPoints: 0,
 		},
@@ -195,4 +258,13 @@ export function createWebgl2RenderMetrics(
 				),
 		},
 	};
+}
+
+function prefixCounts(
+	prefix: string,
+	counts: Readonly<Record<string, number>>,
+): Record<string, number> {
+	return Object.fromEntries(
+		Object.entries(counts).map(([key, value]) => [`${prefix}${key}`, value]),
+	);
 }

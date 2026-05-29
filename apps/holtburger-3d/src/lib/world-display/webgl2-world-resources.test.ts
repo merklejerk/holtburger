@@ -120,6 +120,30 @@ describe("webgl2 world resources", () => {
 		expect(gl.deletedVertexArrays).toHaveLength(1);
 		expect(gl.deletedBuffers).toHaveLength(2);
 	});
+
+	it("does not clear the element buffer from an already-bound draw VAO during sync", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2WorldResourceStore();
+		const previouslyBoundVertexArray = gl.createVertexArray();
+		const previousIndexBuffer = gl.createBuffer();
+		gl.bindVertexArray(previouslyBoundVertexArray);
+		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, previousIndexBuffer);
+
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState(),
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: createStaticRenderableScene([createStaticPart()]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform()],
+		});
+
+		expect(gl.elementArrayBufferFor(previouslyBoundVertexArray)).toBe(
+			previousIndexBuffer,
+		);
+	});
 });
 
 class FakeWebgl2 {
@@ -133,6 +157,11 @@ class FakeWebgl2 {
 	readonly deletedBuffers: object[] = [];
 	readonly createdVertexArrays: object[] = [];
 	readonly deletedVertexArrays: object[] = [];
+	private currentVertexArray: WebGLVertexArrayObject | null = null;
+	private readonly elementArrayBuffersByVertexArray = new Map<
+		WebGLVertexArrayObject,
+		WebGLBuffer | null
+	>();
 	bufferUploads: BufferSource[] = [];
 
 	asContext(): WebGL2RenderingContext {
@@ -145,8 +174,13 @@ class FakeWebgl2 {
 		return buffer as WebGLBuffer;
 	}
 
-	bindBuffer(): void {
-		return;
+	bindBuffer(target: GLenum, buffer: WebGLBuffer | null): void {
+		if (target === this.ELEMENT_ARRAY_BUFFER && this.currentVertexArray) {
+			this.elementArrayBuffersByVertexArray.set(
+				this.currentVertexArray,
+				buffer,
+			);
+		}
 	}
 
 	bufferData(_target: GLenum, data: BufferSource | null): void {
@@ -165,8 +199,8 @@ class FakeWebgl2 {
 		return vertexArray as WebGLVertexArrayObject;
 	}
 
-	bindVertexArray(): void {
-		return;
+	bindVertexArray(vertexArray: WebGLVertexArrayObject | null): void {
+		this.currentVertexArray = vertexArray;
 	}
 
 	deleteVertexArray(vertexArray: WebGLVertexArrayObject): void {
@@ -179,6 +213,12 @@ class FakeWebgl2 {
 
 	vertexAttribPointer(): void {
 		return;
+	}
+
+	elementArrayBufferFor(
+		vertexArray: WebGLVertexArrayObject,
+	): WebGLBuffer | null | undefined {
+		return this.elementArrayBuffersByVertexArray.get(vertexArray);
 	}
 }
 

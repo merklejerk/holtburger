@@ -112,6 +112,10 @@ export function syncWebgl2WorldResources({
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	rendererResourceGraph?: RendererResourceGraph;
 }): void {
+	// ELEMENT_ARRAY_BUFFER binding is VAO state in WebGL2. Resource sync creates
+	// and clears index buffers, so start from the default VAO to avoid stripping
+	// the index buffer from whichever draw-unit VAO the previous frame left bound.
+	gl.bindVertexArray(null);
 	const assembly = buildStagedWorldSceneAssembly({
 		assetState,
 		terrainScene,

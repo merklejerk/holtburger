@@ -100,53 +100,66 @@ export class Webgl2StateCache {
 		this.framebuffer = undefined;
 	}
 
-	useProgram(program: WebGLProgram | null): void {
+	useProgram(program: WebGLProgram | null): boolean {
 		if (this.currentProgram === program) {
-			return;
+			return false;
 		}
 		this.gl.useProgram(program);
 		this.currentProgram = program;
+		return true;
 	}
 
-	bindVertexArray(vertexArray: WebGLVertexArrayObject | null): void {
+	bindVertexArray(vertexArray: WebGLVertexArrayObject | null): boolean {
 		if (this.currentVertexArray === vertexArray) {
-			return;
+			return false;
 		}
 		this.gl.bindVertexArray(vertexArray);
 		this.currentVertexArray = vertexArray;
+		return true;
 	}
 
-	bindTexture2D(unit: number, texture: WebGLTexture | null): void {
+	bindTexture2D(unit: number, texture: WebGLTexture | null): boolean {
 		const currentTexture = this.textureBindingsByUnit.get(unit);
 		if (currentTexture === texture && this.currentActiveTextureUnit === unit) {
-			return;
+			return false;
 		}
+		let changed = false;
 		if (this.currentActiveTextureUnit !== unit) {
 			this.gl.activeTexture(this.gl.TEXTURE0 + unit);
 			this.currentActiveTextureUnit = unit;
+			changed = true;
 		}
 		if (currentTexture !== texture) {
 			this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
 			this.textureBindingsByUnit.set(unit, texture);
+			changed = true;
 		}
+		return changed;
 	}
 
-	setDepthState(state: Webgl2DepthState): void {
+	setDepthState(state: Webgl2DepthState): number {
+		let changeCount = 0;
 		if (!this.depthState || this.depthState.enabled !== state.enabled) {
 			this.setCapability(this.gl.DEPTH_TEST, state.enabled);
+			changeCount += 1;
 		}
 		if (!this.depthState || this.depthState.write !== state.write) {
 			this.gl.depthMask(state.write);
+			changeCount += 1;
 		}
 		if (!this.depthState || this.depthState.func !== state.func) {
 			this.gl.depthFunc(state.func);
+			changeCount += 1;
 		}
 		this.depthState = { ...state };
+		return changeCount;
 	}
 
-	setBlendState(state: Webgl2BlendState): void {
+	setBlendState(state: Webgl2BlendState): number {
+		let changeCount = 0;
 		if (!this.blendState || this.blendState.enabled !== state.enabled) {
 			this.setCapability(this.gl.BLEND, state.enabled);
+			changeCount += 1;
 		}
 		if (
 			!this.blendState ||
@@ -161,6 +174,7 @@ export class Webgl2StateCache {
 				state.srcAlpha,
 				state.dstAlpha,
 			);
+			changeCount += 1;
 		}
 		if (
 			!this.blendState ||
@@ -168,26 +182,35 @@ export class Webgl2StateCache {
 			this.blendState.equationAlpha !== state.equationAlpha
 		) {
 			this.gl.blendEquationSeparate(state.equationRgb, state.equationAlpha);
+			changeCount += 1;
 		}
 		this.blendState = { ...state };
+		return changeCount;
 	}
 
-	setCullState(state: Webgl2CullState): void {
+	setCullState(state: Webgl2CullState): number {
+		let changeCount = 0;
 		if (!this.cullState || this.cullState.enabled !== state.enabled) {
 			this.setCapability(this.gl.CULL_FACE, state.enabled);
+			changeCount += 1;
 		}
 		if (!this.cullState || this.cullState.mode !== state.mode) {
 			this.gl.cullFace(state.mode);
+			changeCount += 1;
 		}
 		this.cullState = { ...state };
+		return changeCount;
 	}
 
-	setStencilState(state: Webgl2StencilState): void {
+	setStencilState(state: Webgl2StencilState): number {
+		let changeCount = 0;
 		if (!this.stencilState || this.stencilState.enabled !== state.enabled) {
 			this.setCapability(this.gl.STENCIL_TEST, state.enabled);
+			changeCount += 1;
 		}
 		if (!this.stencilState || this.stencilState.writeMask !== state.writeMask) {
 			this.gl.stencilMask(state.writeMask);
+			changeCount += 1;
 		}
 		if (
 			!this.stencilState ||
@@ -196,6 +219,7 @@ export class Webgl2StateCache {
 			this.stencilState.readMask !== state.readMask
 		) {
 			this.gl.stencilFunc(state.func, state.ref, state.readMask);
+			changeCount += 1;
 		}
 		if (
 			!this.stencilState ||
@@ -204,11 +228,13 @@ export class Webgl2StateCache {
 			this.stencilState.zpass !== state.zpass
 		) {
 			this.gl.stencilOp(state.fail, state.zfail, state.zpass);
+			changeCount += 1;
 		}
 		this.stencilState = { ...state };
+		return changeCount;
 	}
 
-	setViewport(state: Webgl2ViewportState): void {
+	setViewport(state: Webgl2ViewportState): boolean {
 		if (
 			this.viewportState &&
 			this.viewportState.x === state.x &&
@@ -216,18 +242,20 @@ export class Webgl2StateCache {
 			this.viewportState.width === state.width &&
 			this.viewportState.height === state.height
 		) {
-			return;
+			return false;
 		}
 		this.gl.viewport(state.x, state.y, state.width, state.height);
 		this.viewportState = { ...state };
+		return true;
 	}
 
-	bindFramebuffer(framebuffer: WebGLFramebuffer | null): void {
+	bindFramebuffer(framebuffer: WebGLFramebuffer | null): boolean {
 		if (this.framebuffer === framebuffer) {
-			return;
+			return false;
 		}
 		this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, framebuffer);
 		this.framebuffer = framebuffer;
+		return true;
 	}
 
 	private setCapability(capability: GLenum, enabled: boolean): void {

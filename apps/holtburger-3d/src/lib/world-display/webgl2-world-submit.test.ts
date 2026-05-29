@@ -1,0 +1,276 @@
+import { describe, expect, it } from "vitest";
+
+import type { StagedWorldFrame } from "./staged-world-frame";
+import {
+	planWebgl2FlatWorldSubmitOrder,
+	submitWebgl2FlatWorldFrame,
+	type Webgl2FlatWorldProgram,
+} from "./webgl2-world-submit";
+import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
+import { Webgl2StateCache, type Webgl2StateCacheGl } from "./webgl2-state-cache";
+
+describe("planWebgl2FlatWorldSubmitOrder", () => {
+	it("sorts visible draw units by material and geometry key", () => {
+		const drawUnitsById = new Map<string, Webgl2WorldDrawUnit>([
+			["z", createDrawUnit({ id: "z", materialKey: "mat-b" })],
+			["a", createDrawUnit({ id: "a", materialKey: "mat-a" })],
+			[
+				"b",
+				createDrawUnit({
+					id: "b",
+					materialKey: "mat-a",
+					geometrySignature: "geo-b",
+				}),
+			],
+		]);
+
+		expect(
+			planWebgl2FlatWorldSubmitOrder(
+				createFrame(["z", "b", "a"]),
+				drawUnitsById,
+			).map((drawUnit) => drawUnit.id),
+		).toEqual(["a", "b", "z"]);
+	});
+
+	it("fails when frame visibility references a missing draw unit", () => {
+		expect(() =>
+			planWebgl2FlatWorldSubmitOrder(createFrame(["missing"]), new Map()),
+		).toThrow("missing WebGL2 draw unit missing");
+	});
+});
+
+describe("submitWebgl2FlatWorldFrame", () => {
+	it("submits visible draw units through the state cache", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+		const vertexArray = {} as WebGLVertexArrayObject;
+		const drawUnitsById = new Map<string, Webgl2WorldDrawUnit>([
+			["first", createDrawUnit({ id: "first", vertexArray })],
+			["second", createDrawUnit({ id: "second", vertexArray })],
+		]);
+		const program = {
+			program: {} as WebGLProgram,
+			attributes: { position: 0 },
+			uniforms: {
+				uModelViewProjection: {} as WebGLUniformLocation,
+				uColor: {} as WebGLUniformLocation,
+			},
+			dispose() {
+				return;
+			},
+		} satisfies Webgl2FlatWorldProgram;
+
+		const metrics = submitWebgl2FlatWorldFrame({
+			gl: gl.asContext(),
+			stateCache,
+			program,
+			drawUnitsById,
+			frame: createFrame(["first", "second"]),
+		});
+
+		expect(metrics.drawCallCount).toBe(2);
+		expect(metrics.programSwitchCount).toBe(1);
+		expect(metrics.vertexArrayBindCount).toBe(1);
+		expect(metrics.uniformUploadCount).toBe(2);
+		expect(metrics.triangleCount).toBe(2);
+		expect(gl.calls.filter((call) => call === "drawElements:4:3:5123:0")).toHaveLength(
+			2,
+		);
+	});
+});
+
+function createFrame(drawUnitIds: readonly string[]): StagedWorldFrame {
+	return {
+		viewProjectionMatrix: createIdentityMat4(),
+		passes: [
+			{
+				id: "world",
+				draws: drawUnitIds.map((drawUnitId) => ({
+					drawUnitId,
+					category: "static",
+				})),
+			},
+		],
+		metrics: {
+			registeredBatchCount: drawUnitIds.length,
+			keyedBatchCount: 0,
+			representedItemKeyCount: 0,
+			visibleItemKeyCount: 0,
+			candidateBatchCount: drawUnitIds.length,
+			itemKeyMatchedBatchCount: 0,
+			unboundFallbackBatchCount: 0,
+			explicitFallbackBatchCount: 0,
+			queryFallbackBatchCount: 0,
+			fallbackReasonCount: 0,
+			fallbackReasonSamples: [],
+			candidateCountsByCategory: createCategoryCounts(),
+			visibleDrawCountsByCategory: createCategoryCounts(),
+			fallbackCountsByCategory: createCategoryCounts(),
+			representedItemKeyCountsByCategory: createCategoryCounts(),
+		},
+	};
+}
+
+function createDrawUnit({
+	id,
+	materialKey = "mat-a",
+	geometrySignature = "geo-a",
+	vertexArray = {} as WebGLVertexArrayObject,
+}: {
+	id: string;
+	materialKey?: string;
+	geometrySignature?: string;
+	vertexArray?: WebGLVertexArrayObject;
+}): Webgl2WorldDrawUnit {
+	return {
+		id,
+		kind: "static",
+		geometrySignature,
+		vertexArray: {
+			vertexArray,
+			dispose() {
+				return;
+			},
+		},
+		vertexBuffer: {
+			buffer: {} as WebGLBuffer,
+			dispose() {
+				return;
+			},
+		},
+		indexBuffer: {
+			buffer: {} as WebGLBuffer,
+			dispose() {
+				return;
+			},
+		},
+		indexType: 5123,
+		vertexCount: 3,
+		triangleCount: 1,
+		color: new Float32Array([1, 0, 0, 1]),
+		materialKind: "flat",
+		materialKey,
+		materialFallbackReason: null,
+		modelMatrix: createIdentityMat4(),
+		bvhItemKeys: [],
+		bvhFallbackReason: null,
+		staticPartCount: 1,
+		staticObjectKeys: [id],
+	};
+}
+
+function createIdentityMat4(): Float32Array {
+	return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+}
+
+function createCategoryCounts() {
+	return {
+		terrain: 0,
+		"structured-interior": 0,
+		"static-staged": 0,
+		static: 0,
+		"portal-mask": 0,
+		"debug-overlay": 0,
+	};
+}
+
+class CapturingSubmitGl implements Webgl2StateCacheGl {
+	readonly TEXTURE0 = 33984;
+	readonly TEXTURE_2D = 3553;
+	readonly DEPTH_TEST = 2929;
+	readonly BLEND = 3042;
+	readonly CULL_FACE = 2884;
+	readonly STENCIL_TEST = 2960;
+	readonly FRAMEBUFFER = 36160;
+	readonly FRONT = 1028;
+	readonly BACK = 1029;
+	readonly FRONT_AND_BACK = 1032;
+	readonly ALWAYS = 519;
+	readonly KEEP = 7680;
+	readonly LEQUAL = 515;
+	readonly ONE = 1;
+	readonly ZERO = 0;
+	readonly FUNC_ADD = 32774;
+	readonly TRIANGLES = 4;
+	readonly calls: string[] = [];
+
+	asContext(): WebGL2RenderingContext {
+		return this as unknown as WebGL2RenderingContext;
+	}
+
+	useProgram(): void {
+		this.calls.push("useProgram");
+	}
+
+	bindVertexArray(): void {
+		this.calls.push("bindVertexArray");
+	}
+
+	activeTexture(): void {
+		this.calls.push("activeTexture");
+	}
+
+	bindTexture(): void {
+		this.calls.push("bindTexture");
+	}
+
+	enable(capability: GLenum): void {
+		this.calls.push(`enable:${capability}`);
+	}
+
+	disable(capability: GLenum): void {
+		this.calls.push(`disable:${capability}`);
+	}
+
+	depthMask(flag: boolean): void {
+		this.calls.push(`depthMask:${flag}`);
+	}
+
+	depthFunc(func: GLenum): void {
+		this.calls.push(`depthFunc:${func}`);
+	}
+
+	blendFuncSeparate(): void {
+		this.calls.push("blendFuncSeparate");
+	}
+
+	blendEquationSeparate(): void {
+		this.calls.push("blendEquationSeparate");
+	}
+
+	cullFace(mode: GLenum): void {
+		this.calls.push(`cullFace:${mode}`);
+	}
+
+	stencilMask(mask: number): void {
+		this.calls.push(`stencilMask:${mask}`);
+	}
+
+	stencilFunc(func: GLenum, ref: number, mask: number): void {
+		this.calls.push(`stencilFunc:${func}:${ref}:${mask}`);
+	}
+
+	stencilOp(): void {
+		this.calls.push("stencilOp");
+	}
+
+	viewport(): void {
+		this.calls.push("viewport");
+	}
+
+	bindFramebuffer(): void {
+		this.calls.push("bindFramebuffer");
+	}
+
+	uniformMatrix4fv(): void {
+		this.calls.push("uniformMatrix4fv");
+	}
+
+	uniform4fv(): void {
+		this.calls.push("uniform4fv");
+	}
+
+	drawElements(mode: GLenum, count: number, type: GLenum, offset: number): void {
+		this.calls.push(`drawElements:${mode}:${count}:${type}:${offset}`);
+	}
+}

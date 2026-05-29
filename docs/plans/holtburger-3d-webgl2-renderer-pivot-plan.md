@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Renderer Pivot Plan
 
-Status: Phase W3 complete; ready for Phase W4; replaces the luma low-level renderer track and blocks the old luma plan
+Status: Phase W4 complete; ready for Phase W5; replaces the luma low-level renderer track and blocks the old luma plan
 before continuing Phase 6C.4.
 
 Related plan: [Holtburger 3D Luma Renderer Swapout Plan](./holtburger-3d-luma-renderer-swapout-plan.md)
@@ -565,7 +565,7 @@ Legacy shims:
 
 ## Phase W4: Fast Flat Staged WebGL2 Submitter
 
-Status: Not started.
+Status: Complete as of 2026-05-29.
 
 Purpose: produce a fast flat-color baseline renderer for the existing staged draw-unit model before
 direct texture parity, atlas, or compaction work resumes.
@@ -602,6 +602,78 @@ Exit criteria:
 - Looking away from the scene stays near the cost of BVH query plus minimal draws.
 - Looking at the scene is not dominated by redundant state resets in the flat path.
 - Debug UI clearly distinguishes draw units from future compacted batches.
+
+Progress:
+
+- Added `webgl2-world-submit.ts`, a focused WebGL2 flat-world submitter that consumes W3 retained
+  draw units and a `StagedWorldFrame`.
+- WebGL2 now builds frame visibility through `buildStagedWorldFrame(...)` using the prepared BVH
+  snapshot path instead of rendering every retained draw unit.
+- The renderer now draws retained staged terrain, static, and structured-interior draw units through
+  raw `gl.drawElements(...)`; the W1 test triangle is only used while no retained draw units exist.
+- Added a flat world shader with per-draw `uModelViewProjection` and `uColor` uniforms.
+- Visible draw units are sorted by material kind, material key, geometry signature, then id. This
+  preserves staged semantics while creating a stable coarse order for future direct-texture state
+  grouping.
+- `Webgl2StateCache` now returns whether a state call actually touched GL, allowing submit metrics
+  to report program switches, VAO binds, render-state changes, and uniform uploads.
+- WebGL2 diagnostics now consume staged frame metrics and submit metrics so the debug panel can show
+  visible draw counts, BVH candidate/fallback counts, draw calls, visible material kinds, state
+  changes, and flat/direct-deferred material counts.
+- Added `webgl2-world-submit.test.ts` for submit ordering, missing draw-unit failures, and
+  state-cache-backed draw submission.
+
+Decisions:
+
+- W4 keeps one flat shader path even for draw units whose final material is `direct-texture`.
+  Direct-texture realization remains W5; W4 must prove the fast staged draw path first.
+- The submitter owns normal world render state: depth enabled/write-on, blending off, culling off,
+  stencil off. Portal stencil phases remain deferred and must not affect the normal flat path.
+- Uniform upload skipping is local and conservative. W4 skips repeated MVP/color uploads only when
+  consecutive sorted draws have identical values; broader per-draw uniform caching is not worth the
+  complexity before direct textures and compaction.
+- Canvas resize now invalidates the state cache because resizing the drawing buffer can reset GL
+  state outside the cache's knowledge.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-state-cache.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/staged-world-frame.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+
+Course corrections:
+
+- The first W4 wiring omitted WebGL2's fallback camera-frame resolver. WebGL2 now mirrors the luma
+  camera aspect handling so BVH visibility and MVP construction can run even before browser camera
+  control has published a frame.
+- Runtime testing exposed missing terrain and `glDrawElements: Must have element array buffer
+  bound` errors after later scene resources streamed in. The cause was WebGL2 VAO state mutation:
+  resource sync created and cleared `ELEMENT_ARRAY_BUFFER` bindings while the previous frame's
+  draw-unit VAO could still be bound, stripping that VAO's index-buffer binding. W4 now unbinds the
+  current VAO before resource sync creates index buffers, and coverage asserts that resource sync
+  does not clear an already-bound draw VAO's element buffer.
+- W4 metrics intentionally continue using the existing `WorldRenderMetrics` field names where the
+  shared diagnostics contract still says "batch". The WebGL2-specific material/type samples now add
+  `webgl2-visible-*`, `webgl2-program-switches`, `webgl2-vao-binds`, `webgl2-uniform-uploads`, and
+  `webgl2-state-changes` entries to make draw-unit behavior visible without changing the shared
+  contract mid-pivot.
+
+Discovered cleanup targets:
+
+- `Webgl2StateCache` now exposes change results, but the GL call counters still live in the
+  submitter. If future direct-texture/portal submitters need the same accounting, extract a small
+  metrics accumulator instead of duplicating counter glue.
+- WebGL2 still imports `luma-math.ts` for matrix multiplication and luma-named matrix types. W5 or
+  W6 should rename this to a renderer-neutral math module now that both resource realization and
+  submission depend on it.
+- The diagnostics panel can surface W4 counters through existing material type samples, but the
+  shared metrics contract still has batch-oriented names. A later diagnostics cleanup should add
+  explicit draw-unit fields instead of overloading batch fields.
+
+Legacy shims:
+
+- None introduced. The W1 triangle remains as a bootstrap fallback only when no staged draw units
+  are retained; it is not part of the WebGL2 world render path.
 
 ## Phase W5: WebGL2 Direct Material Parity
 

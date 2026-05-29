@@ -6,8 +6,19 @@ import {
 	type Webgl2ProgramResource,
 	type Webgl2VertexArrayResource,
 } from "./webgl2-gl";
+import { createFallbackSceneCameraFrame } from "./camera";
 import { createWebgl2RenderMetrics } from "./webgl2-render-metrics";
 import { Webgl2StateCache } from "./webgl2-state-cache";
+import {
+	buildStagedWorldFrame,
+	type StagedWorldFrameMetrics,
+} from "./staged-world-frame";
+import {
+	createEmptyWebgl2WorldSubmitMetrics,
+	submitWebgl2FlatWorldFrame,
+	type Webgl2FlatWorldProgram,
+	type Webgl2WorldSubmitMetrics,
+} from "./webgl2-world-submit";
 import {
 	createWebgl2WorldResourceStore,
 	destroyWebgl2WorldResources,
@@ -49,10 +60,33 @@ void main() {
 }
 `;
 
+const FLAT_WORLD_VERTEX_SHADER = `#version 300 es
+layout(location = 0) in vec3 position;
+
+uniform mat4 uModelViewProjection;
+
+void main() {
+	gl_Position = uModelViewProjection * vec4(position, 1.0);
+}
+`;
+
+const FLAT_WORLD_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+
+uniform vec4 uColor;
+
+out vec4 fragColor;
+
+void main() {
+	fragColor = uColor;
+}
+`;
+
 interface Webgl2RenderResources {
 	gl: WebGL2RenderingContext;
 	stateCache: Webgl2StateCache;
-	program: Webgl2ProgramResource<"position", never>;
+	triangleProgram: Webgl2ProgramResource<"position", never>;
+	flatWorldProgram: Webgl2FlatWorldProgram;
 	vertexBuffer: Webgl2BufferResource;
 	vertexArray: Webgl2VertexArrayResource;
 	worldStore: Webgl2WorldResourceStore;
@@ -87,6 +121,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	let performanceWindowFrameMs = 0;
 	let performanceWindowRenderMs = 0;
 	let latestPerformanceMetrics: WorldRenderMetrics["performance"] = null;
+	let latestSubmitMetrics: Webgl2WorldSubmitMetrics =
+		createEmptyWebgl2WorldSubmitMetrics();
+	let latestFrameMetrics: StagedWorldFrameMetrics | null = null;
 
 	const canvas = document.createElement("canvas");
 	canvas.className = WEBGL2_CANVAS_CLASS_NAME;
@@ -250,43 +287,38 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		});
 		gl.clearColor(...WEBGL2_CLEAR_COLOR);
 		gl.clearDepth(1);
-		resources.stateCache.setDepthState({
-			enabled: true,
-			write: true,
-			func: gl.LEQUAL,
-		});
-		resources.stateCache.setBlendState({
-			enabled: false,
-			srcRgb: gl.ONE,
-			dstRgb: gl.ZERO,
-			srcAlpha: gl.ONE,
-			dstAlpha: gl.ZERO,
-			equationRgb: gl.FUNC_ADD,
-			equationAlpha: gl.FUNC_ADD,
-		});
-		resources.stateCache.setCullState({
-			enabled: false,
-			mode: gl.BACK,
-		});
-		resources.stateCache.setStencilState({
-			enabled: false,
-			writeMask: 0xff,
-			func: gl.ALWAYS,
-			ref: 0,
-			readMask: 0xff,
-			fail: gl.KEEP,
-			zfail: gl.KEEP,
-			zpass: gl.KEEP,
-		});
 		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 		clearCount += 1;
 
-		resources.stateCache.useProgram(resources.program.program);
-		resources.stateCache.bindVertexArray(resources.vertexArray.vertexArray);
-		gl.drawArrays(gl.TRIANGLES, 0, TRIANGLE_VERTEX_COUNT);
-
-		drawCallCount += 1;
-		lastFrameDrawCount = 1;
+		if (resources.worldStore.drawUnits.length > 0) {
+			const frame = buildStagedWorldFrame({
+				assetState,
+				candidates: resources.worldStore.drawUnits,
+				cameraFrame: resolveCameraFrame(),
+				renderChunkTransforms,
+				staticRenderableScene,
+				structuredInteriorScene,
+				terrainScene,
+			});
+			latestFrameMetrics = frame.metrics;
+			latestSubmitMetrics = submitWebgl2FlatWorldFrame({
+				gl,
+				stateCache: resources.stateCache,
+				program: resources.flatWorldProgram,
+				drawUnitsById: resources.worldStore.drawUnitsById,
+				frame,
+			});
+			drawCallCount += latestSubmitMetrics.drawCallCount;
+			lastFrameDrawCount = latestSubmitMetrics.drawCallCount;
+		} else {
+			latestFrameMetrics = null;
+			latestSubmitMetrics = createEmptyWebgl2WorldSubmitMetrics();
+			resources.stateCache.useProgram(resources.triangleProgram.program);
+			resources.stateCache.bindVertexArray(resources.vertexArray.vertexArray);
+			gl.drawArrays(gl.TRIANGLES, 0, TRIANGLE_VERTEX_COUNT);
+			drawCallCount += 1;
+			lastFrameDrawCount = 1;
+		}
 		recordPerformanceSample({
 			frameAt,
 			renderMs: window.performance.now() - renderStartedAt,
@@ -301,6 +333,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		if (canvas.width !== width || canvas.height !== height) {
 			canvas.width = width;
 			canvas.height = height;
+			resources?.stateCache.invalidate();
 		}
 	}
 
@@ -348,7 +381,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		resources.stateCache.useProgram(null);
 		resources.vertexArray.dispose();
 		resources.vertexBuffer.dispose();
-		resources.program.dispose();
+		resources.triangleProgram.dispose();
+		resources.flatWorldProgram.dispose();
 		destroyWebgl2WorldResources(resources.worldStore);
 		resources = null;
 	}
@@ -369,6 +403,16 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			rendererResourceGraph: options.rendererResourceGraph,
 		});
 		resources.stateCache.invalidate();
+	}
+
+	function resolveCameraFrame() {
+		const aspect = canvas.width / Math.max(1, canvas.height);
+		if (controlledCameraFrame) {
+			return controlledCameraFrame.aspect === aspect
+				? controlledCameraFrame
+				: { ...controlledCameraFrame, aspect };
+		}
+		return createFallbackSceneCameraFrame(aspect);
 	}
 
 	function reportMetrics(): void {
@@ -395,6 +439,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				lastFrameDrawCount,
 				initializationError,
 				worldStore: resources?.worldStore ?? null,
+				frameMetrics: latestFrameMetrics,
+				submitMetrics: latestSubmitMetrics,
 				performance: latestPerformanceMetrics,
 				textureFilteringMode,
 				textureColorSpaceMode,
@@ -427,7 +473,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 function createTriangleResources(
 	gl: WebGL2RenderingContext,
 ): Webgl2RenderResources {
-	const program = createWebgl2Program(gl, {
+	const triangleProgram = createWebgl2Program(gl, {
 		label: "webgl2 test triangle",
 		vertexSource: TRIANGLE_VERTEX_SHADER,
 		fragmentSource: TRIANGLE_FRAGMENT_SHADER,
@@ -441,9 +487,9 @@ function createTriangleResources(
 		label: "webgl2 test triangle vertex array",
 		configure() {
 			gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer.buffer);
-			gl.enableVertexAttribArray(program.attributes.position);
+			gl.enableVertexAttribArray(triangleProgram.attributes.position);
 			gl.vertexAttribPointer(
-				program.attributes.position,
+				triangleProgram.attributes.position,
 				2,
 				gl.FLOAT,
 				false,
@@ -457,9 +503,20 @@ function createTriangleResources(
 	return {
 		gl,
 		stateCache: new Webgl2StateCache(gl),
-		program,
+		triangleProgram,
+		flatWorldProgram: createFlatWorldProgram(gl),
 		vertexBuffer,
 		vertexArray,
 		worldStore: createWebgl2WorldResourceStore(),
 	};
+}
+
+function createFlatWorldProgram(gl: WebGL2RenderingContext): Webgl2FlatWorldProgram {
+	return createWebgl2Program(gl, {
+		label: "webgl2 flat world",
+		vertexSource: FLAT_WORLD_VERTEX_SHADER,
+		fragmentSource: FLAT_WORLD_FRAGMENT_SHADER,
+		attributes: ["position"],
+		uniforms: ["uModelViewProjection", "uColor"],
+	});
 }

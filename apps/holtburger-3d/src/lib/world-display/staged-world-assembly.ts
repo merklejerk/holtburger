@@ -1,5 +1,9 @@
-import type { AssetChannelState } from "../assets/types";
+import type {
+	AssetChannelState,
+	PreparedPolygonSetRenderGeometry,
+} from "../assets/types";
 import type { ResolvedMaterialSlot } from "./material-plan";
+import { formatMaterialAssetId } from "./material-signatures";
 import {
 	buildStagedPolygonSetGeometry,
 	buildStagedTerrainGeometry,
@@ -99,13 +103,16 @@ interface StaticRenderableObjectGroup {
 	parts: StaticRenderablePart[];
 }
 
-interface StagedStaticSurfaceKey {
+interface StagedMaterialSurfaceKey {
 	slotIndex: number | null;
 	surfaceId: number | null;
 	geometrySurfaceId: number | null;
 	materialVariantSignature: string | null;
 	materialSlot: ResolvedMaterialSlot | null;
 }
+
+type StagedStaticSurfaceKey = StagedMaterialSurfaceKey;
+type StagedStructuredInteriorSurfaceKey = StagedMaterialSurfaceKey;
 
 export function buildStagedWorldSceneAssembly({
 	assetState,
@@ -248,22 +255,30 @@ export function buildStagedStructuredInteriorDrawUnitAssemblies({
 		const modelMatrix = multiplyMat4(chunkMatrix, placementMatrix);
 		return structuredInteriorSurfaceKeys(cell).flatMap((surfaceKey) => {
 			const geometry = buildStagedPolygonSetGeometry(cell.renderGeometry, {
-				surfaceId: surfaceKey.surfaceId,
+				surfaceId: surfaceKey.geometrySurfaceId,
 				materialVariantSignature: surfaceKey.materialVariantSignature,
 			});
 			if (geometry.triangleCount === 0) {
 				return [];
 			}
-			const material = resolveStagedWorldSurfaceMaterialPlan({
-				assetState,
-				surfaceId: surfaceKey.surfaceId,
-				fallbackColorKey: `${cell.debugColorKey}:${surfaceKey.surfaceId ?? "none"}`,
-				textureCapabilities: materialTextureCapabilities,
-			});
+			const material = surfaceKey.materialSlot
+				? resolveStagedWorldMaterialSlotPlan({
+						assetState,
+						slot: surfaceKey.materialSlot,
+						fallbackColorKey: `${cell.debugColorKey}:${formatStructuredInteriorSurfaceKey(surfaceKey)}`,
+						renderableKind: "structured-interior",
+						textureCapabilities: materialTextureCapabilities,
+					})
+				: resolveStagedWorldSurfaceMaterialPlan({
+						assetState,
+						surfaceId: surfaceKey.surfaceId,
+						fallbackColorKey: `${cell.debugColorKey}:${formatStructuredInteriorSurfaceKey(surfaceKey)}`,
+						textureCapabilities: materialTextureCapabilities,
+					});
 			const drawUnitId = [
 				"structured-interior",
 				cell.renderKey,
-				`surface=${surfaceKey.surfaceId ?? "none"}`,
+				formatStructuredInteriorSurfaceKey(surfaceKey),
 				`variant=${surfaceKey.materialVariantSignature ?? "base"}`,
 			].join("/");
 			return [
@@ -476,22 +491,27 @@ function buildStagedStaticSurfaceDrawUnit({
 
 function structuredInteriorSurfaceKeys(
 	cell: StructuredInteriorSceneModel["cells"][number],
-): { surfaceId: number | null; materialVariantSignature: string | null }[] {
-	const keys = new Map<
-		string,
-		{ surfaceId: number | null; materialVariantSignature: string | null }
-	>();
-	for (const triangle of cell.renderGeometry.triangles) {
-		const surfaceId = triangle.surfaceId;
-		const materialVariantSignature = triangle.materialVariantSignature ?? null;
-		const key = `${surfaceId ?? "none"}|${materialVariantSignature ?? "base"}`;
-		keys.set(key, { surfaceId, materialVariantSignature });
-	}
+): StagedStructuredInteriorSurfaceKey[] {
+	const keys = expandGeometryMaterialSurfaceKeys(
+		cell.renderGeometry,
+		cell.surfaceIds.map((surfaceId, slotIndex) => ({
+			slotIndex,
+			surfaceId,
+			materialAssetId: formatMaterialAssetId(surfaceId),
+			materialVariantSignature: null,
+		})),
+	);
 	return [...keys.values()].sort((left, right) => {
-		const leftSurface = left.surfaceId ?? -1;
-		const rightSurface = right.surfaceId ?? -1;
+		const leftSlot = left.slotIndex ?? -1;
+		const rightSlot = right.slotIndex ?? -1;
+		const leftGeometrySurface = left.geometrySurfaceId ?? -1;
+		const rightGeometrySurface = right.geometrySurfaceId ?? -1;
+		const leftMaterialSurface = left.surfaceId ?? -1;
+		const rightMaterialSurface = right.surfaceId ?? -1;
 		return (
-			leftSurface - rightSurface ||
+			leftSlot - rightSlot ||
+			leftGeometrySurface - rightGeometrySurface ||
+			leftMaterialSurface - rightMaterialSurface ||
 			(left.materialVariantSignature ?? "").localeCompare(
 				right.materialVariantSignature ?? "",
 			)
@@ -504,14 +524,17 @@ function deriveStagedStaticSurfaceKeys(
 	part: StaticRenderablePart,
 ): StagedStaticSurfaceKey[] {
 	if (part.materialSlots.length > 0) {
+		const asset = assetState.preparedByAssetId[part.gfxObjAssetId];
+		if (asset?.payload.kind === "gfx-obj") {
+			return [
+				...expandGeometryMaterialSurfaceKeys(
+					asset.payload.renderGeometry,
+					part.materialSlots,
+				).values(),
+			].sort(compareStagedStaticSurfaceKeys);
+		}
 		return part.materialSlots
-			.map((slot) => ({
-				slotIndex: slot.slotIndex,
-				surfaceId: slot.surfaceId,
-				geometrySurfaceId: slot.slotIndex,
-				materialVariantSignature: slot.materialVariantSignature ?? null,
-				materialSlot: slot,
-			}))
+			.map(materialSlotToSurfaceKey)
 			.sort(compareStagedStaticSurfaceKeys);
 	}
 
@@ -545,6 +568,54 @@ function deriveStagedStaticSurfaceKeys(
 	return [...keys.values()].sort(compareStagedStaticSurfaceKeys);
 }
 
+function expandGeometryMaterialSurfaceKeys(
+	renderGeometry: PreparedPolygonSetRenderGeometry,
+	materialSlots: readonly ResolvedMaterialSlot[],
+): Map<string, StagedMaterialSurfaceKey> {
+	const slotsByIndex = new Map(
+		materialSlots.map((slot) => [slot.slotIndex, slot] as const),
+	);
+	const keys = new Map<string, StagedMaterialSurfaceKey>();
+	for (const triangle of renderGeometry.triangles) {
+		if (triangle.surfaceId === null) {
+			continue;
+		}
+		const slot = slotsByIndex.get(triangle.surfaceId);
+		if (!slot) {
+			continue;
+		}
+		const materialVariantSignature =
+			triangle.materialVariantSignature ?? slot.materialVariantSignature ?? null;
+		const key = [
+			slot.slotIndex,
+			slot.surfaceId,
+			triangle.surfaceId,
+			materialVariantSignature ?? "base",
+		].join("|");
+		keys.set(key, {
+			slotIndex: slot.slotIndex,
+			surfaceId: slot.surfaceId,
+			geometrySurfaceId: triangle.surfaceId,
+			materialVariantSignature,
+			materialSlot: {
+				...slot,
+				materialVariantSignature,
+			},
+		});
+	}
+	return keys;
+}
+
+function materialSlotToSurfaceKey(slot: ResolvedMaterialSlot): StagedStaticSurfaceKey {
+	return {
+		slotIndex: slot.slotIndex,
+		surfaceId: slot.surfaceId,
+		geometrySurfaceId: slot.slotIndex,
+		materialVariantSignature: slot.materialVariantSignature ?? null,
+		materialSlot: slot,
+	};
+}
+
 function compareStagedStaticSurfaceKeys(
 	left: StagedStaticSurfaceKey,
 	right: StagedStaticSurfaceKey,
@@ -567,6 +638,16 @@ function formatStagedStaticSurfaceBatchKey(
 		`surface-${surfaceKey.surfaceId ?? "none"}`,
 		`geometry-surface-${surfaceKey.geometrySurfaceId ?? "none"}`,
 		`variant-${surfaceKey.materialVariantSignature ?? "base"}`,
+	].join("|");
+}
+
+function formatStructuredInteriorSurfaceKey(
+	surfaceKey: StagedStructuredInteriorSurfaceKey,
+): string {
+	return [
+		`slot=${surfaceKey.slotIndex ?? "none"}`,
+		`surface=${surfaceKey.surfaceId ?? "none"}`,
+		`geometry-surface=${surfaceKey.geometrySurfaceId ?? "none"}`,
 	].join("|");
 }
 

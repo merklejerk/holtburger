@@ -91,6 +91,40 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			2,
 		);
 	});
+
+	it("submits textured draw units with material color and opacity", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+		const drawUnitsById = new Map<string, Webgl2WorldDrawUnit>([
+			[
+				"textured",
+				createDrawUnit({
+					id: "textured",
+					color: new Float32Array([0, 0, 0, 0.5]),
+					materialKind: "direct-texture",
+					texture: {
+						texture: {} as WebGLTexture,
+						width: 1,
+						height: 1,
+						dispose() {
+							return;
+						},
+					},
+				}),
+			],
+		]);
+
+		submitWebgl2FlatWorldFrame({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			drawUnitsById,
+			frame: createFrame(["textured"]),
+		});
+
+		expect(gl.uniform4fvValues).toContainEqual([0, 0, 0, 0.5]);
+	});
 });
 
 function createFrame(drawUnitIds: readonly string[]): StagedWorldFrame {
@@ -128,12 +162,18 @@ function createFrame(drawUnitIds: readonly string[]): StagedWorldFrame {
 function createDrawUnit({
 	id,
 	materialKey = "mat-a",
+	materialKind = "flat",
 	geometrySignature = "geo-a",
+	color = new Float32Array([1, 0, 0, 1]),
+	texture = null,
 	vertexArray = {} as WebGLVertexArrayObject,
 }: {
 	id: string;
 	materialKey?: string;
+	materialKind?: Webgl2WorldDrawUnit["materialKind"];
 	geometrySignature?: string;
+	color?: Float32Array;
+	texture?: Webgl2WorldDrawUnit["texture"];
 	vertexArray?: WebGLVertexArrayObject;
 }): Webgl2WorldDrawUnit {
 	return {
@@ -162,18 +202,50 @@ function createDrawUnit({
 		indexType: 5123,
 		vertexCount: 3,
 		triangleCount: 1,
-		color: new Float32Array([1, 0, 0, 1]),
-		materialKind: "flat",
+		color,
+		materialKind,
 		materialKey,
 		materialFallbackReason: null,
 		materialBehavior: null,
+		textureSamplingPolicy: null,
+		textureUploadSample: null,
 		textureKey: null,
-		texture: null,
+		texture,
 		modelMatrix: createIdentityMat4(),
 		bvhItemKeys: [],
 		bvhFallbackReason: null,
 		staticPartCount: 1,
 		staticObjectKeys: [id],
+	};
+}
+
+function createFlatProgram(): Webgl2FlatWorldProgram {
+	return {
+		program: {} as WebGLProgram,
+		attributes: { position: 0 },
+		uniforms: {
+			uModelViewProjection: {} as WebGLUniformLocation,
+			uColor: {} as WebGLUniformLocation,
+		},
+		dispose() {
+			return;
+		},
+	};
+}
+
+function createTexturedProgram() {
+	return {
+		program: {} as WebGLProgram,
+		attributes: { position: 0, uv: 1 },
+		uniforms: {
+			uModelViewProjection: {} as WebGLUniformLocation,
+			uColor: {} as WebGLUniformLocation,
+			uAlphaTest: {} as WebGLUniformLocation,
+			uTexture: {} as WebGLUniformLocation,
+		},
+		dispose() {
+			return;
+		},
 	};
 }
 
@@ -213,6 +285,7 @@ class CapturingSubmitGl implements Webgl2StateCacheGl {
 	readonly ONE_MINUS_SRC_ALPHA = 771;
 	readonly TRIANGLES = 4;
 	readonly calls: string[] = [];
+	readonly uniform4fvValues: number[][] = [];
 
 	asContext(): WebGL2RenderingContext {
 		return this as unknown as WebGL2RenderingContext;
@@ -286,8 +359,9 @@ class CapturingSubmitGl implements Webgl2StateCacheGl {
 		this.calls.push("uniformMatrix4fv");
 	}
 
-	uniform4fv(): void {
+	uniform4fv(_location: WebGLUniformLocation, value: Iterable<number>): void {
 		this.calls.push("uniform4fv");
+		this.uniform4fvValues.push([...value]);
 	}
 
 	uniform1f(): void {

@@ -11,13 +11,19 @@ import {
 	type PreparedTexturePayload,
 } from "../assets/types";
 import { createBaseMaterialAppearanceContext } from "./material-appearance";
+import { LEGACY_SAMPLER_REPEAT_MATERIAL_VARIANT_SIGNATURE } from "../assets/material-variants";
 import { WORLD_RENDER_DOMAIN } from "./render-domains";
 import {
+	buildStagedStructuredInteriorDrawUnitAssemblies,
 	buildStagedStaticDrawUnitAssemblies,
 	describeStagedWorldAssemblyGraphRecordSignature,
 } from "./staged-world-assembly";
 import type { RenderChunkTransform } from "./render-anchor";
 import type { StaticRenderablePart } from "./static-renderables";
+import type {
+	StructuredInteriorCell,
+	StructuredInteriorSceneModel,
+} from "./structured-interior-scene";
 
 const PIXEL_FORMAT_DXT1 = 0x3154_5844;
 const PIXEL_FORMAT_A8R8G8B8 = 0x15;
@@ -73,9 +79,72 @@ describe("staged world assembly", () => {
 				unit.material.kind === "direct-texture" ? unit.material.textureKey : null,
 			),
 		).toEqual([
-			"texture/06000001/827611204/8/8/none/clamp/clamp/linear/linear/none",
-			"texture/06000002/827611204/8/8/none/clamp/clamp/linear/linear/none",
+			"texture/06000001/827611204/8/8/none/clamp/clamp/linear/linear/linear",
+			"texture/06000002/827611204/8/8/none/clamp/clamp/linear/linear/linear",
 		]);
+	});
+
+	it("preserves static sampler variants from material-slot geometry", () => {
+		const drawUnits = buildStagedStaticDrawUnitAssemblies({
+			assetState: createAssetState(createRepeatSlotGfxGeometry(), [
+				createMaterialRecipeRecord({
+					surfaceId: 0x08000001,
+					renderSurfaceId: 0x06000001,
+				}),
+				createRenderSurfaceRecord({ renderSurfaceId: 0x06000001 }),
+				createAtlasPreparedTextureRecord({ renderSurfaceId: 0x06000001 }),
+			]),
+			chunkOffsetByKey: new Map([
+				["landblock/12340000", { x: 10, y: 20, z: 30 }],
+			]),
+			staticRenderableScene: {
+				partsByRenderGroupKey: new Map(),
+				parts: [
+					createStaticPart({
+						materialSlots: [createMaterialSlot(0, 0x08000001)],
+					}),
+				],
+			},
+		});
+
+		expect(drawUnits).toHaveLength(1);
+		expect(drawUnits[0]?.id).toContain("variant-sampler=repeat");
+		expect(drawUnits[0]?.material.kind).toBe("direct-texture");
+		expect(
+			drawUnits[0]?.material.kind === "direct-texture"
+				? drawUnits[0].material.textureKey
+				: null,
+		).toBe(
+			"texture/06000001/827611204/8/8/none/repeat/repeat/linear/linear/linear",
+		);
+	});
+
+	it("maps structured-interior geometry surfaces through env-cell material slots", () => {
+		const drawUnits = buildStagedStructuredInteriorDrawUnitAssemblies({
+			assetState: createAssetState(createStaticGfxGeometry(), [
+				createMaterialRecipeRecord({
+					surfaceId: 0x08000001,
+					renderSurfaceId: 0x06000001,
+				}),
+				createRenderSurfaceRecord({ renderSurfaceId: 0x06000001 }),
+				createAtlasPreparedTextureRecord({ renderSurfaceId: 0x06000001 }),
+			]),
+			chunkOffsetByKey: new Map([
+				["landblock/12340000", { x: 10, y: 20, z: 30 }],
+			]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+		});
+
+		expect(drawUnits).toHaveLength(1);
+		expect(drawUnits[0]?.id).toContain("slot=0|surface=134217729");
+		expect(drawUnits[0]?.material.kind).toBe("direct-texture");
+		expect(
+			drawUnits[0]?.material.kind === "direct-texture"
+				? drawUnits[0].material.textureKey
+				: null,
+		).toBe(
+			"texture/06000001/827611204/8/8/none/repeat/repeat/linear/linear/linear",
+		);
 	});
 
 	it("normalizes duplicate static BVH keys during draw-unit assembly", () => {
@@ -166,6 +235,62 @@ function createTwoSlotGfxGeometry(): PreparedPolygonSetRenderGeometry {
 		],
 		surfaceIds: [0, 1],
 		bounds: null,
+	};
+}
+
+function createRepeatSlotGfxGeometry(): PreparedPolygonSetRenderGeometry {
+	return {
+		...createStaticGfxGeometry(),
+		uvs: new Float32Array([0, 0, 4, 0, 0, 4]),
+		triangles: [
+			{
+				polygonId: 0,
+				surfaceId: 0,
+				firstVertex: 0,
+				materialVariantSignature:
+					LEGACY_SAMPLER_REPEAT_MATERIAL_VARIANT_SIGNATURE,
+			},
+		],
+		surfaceIds: [0],
+	};
+}
+
+function createStructuredInteriorScene(): StructuredInteriorSceneModel {
+	return {
+		focusEnvCellId: null,
+		activeEnvCellIds: [0x12340100],
+		cells: [createStructuredInteriorCell()],
+		missingEnvCellAssetIds: [],
+		missingInteriorGeometryAssetIds: [],
+		missingCellStructureKeys: [],
+		statusText: "test structured interior",
+		cacheText: "test structured interior cache",
+	};
+}
+
+function createStructuredInteriorCell(): StructuredInteriorCell {
+	return {
+		renderKey: "interior/env-cell/12340100",
+		envCellId: 0x12340100,
+		regionNumber: 1,
+		renderChunk: {
+			chunkKey: "landblock/12340000",
+			chunkLandblockId: 0x12340000,
+		},
+		environmentId: 0x0d000001,
+		cellStructureId: 0x0d000001,
+		isFocus: false,
+		chunkLocalPlacement: createPlacement({ x: 0, y: 0, z: 0 }),
+		surfaceIds: [0x08000001],
+		portalCount: 0,
+		portals: [],
+		portalApertures: [],
+		staticObjectCount: 0,
+		cellStructure: null,
+		cellBsp: null,
+		renderGeometry: createRepeatSlotGfxGeometry(),
+		debugColorKey: "interior-test",
+		detailSignature: "detail:none",
 	};
 }
 

@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
-Status: Phase M1 complete; ready for immediate Phase M1A.
+Status: Phase M1A complete; ready for Phase M2.
 
 Related plans:
 
@@ -215,7 +215,7 @@ Cleanup targets and legacy shims:
 
 ## Phase M1A: Staged Direct Sampler and Interior Material Slot Fix
 
-Status: Not started.
+Status: Complete.
 
 Purpose: correct the direct staged material path now that textures are visible. Buildings and other
 setup-backed static objects need their authored repeat/clamp sampler variants preserved, staged
@@ -289,6 +289,73 @@ Course corrections for following phases:
 - If M1A shows that many interior surfaces are indexed/paletted, M3 should include an explicit
   before/after diagnostic count for indexed interior surfaces, not just terrain/setup appearances.
 
+Progress:
+
+- Added shared `selectVariantTextureSamplingPolicy()` behavior in the texture sampling policy module
+  and routed both the Three material constructor and WebGL2 staged material strategy through it.
+- Updated static staged assembly so material-slot-backed geometry expands by polygon
+  `materialVariantSignature`. Repeat/clamp sampler variants now reach direct staged material
+  resolution instead of being flattened to the part-level slot.
+- Updated structured-interior staged assembly so geometry `surfaceId` values are interpreted as
+  slot indices into `cell.surfaceIds`, with material asset IDs derived from the mapped env-cell
+  surface material. This fixes the slot-index-as-material-ID failure path for non-indexed interior
+  surfaces.
+- Changed normalized `rgba8` prepared texture direct uploads to preserve active mip filtering and
+  generate GPU mipmaps whenever the selected staged direct sampler uses a mipmapped minification
+  filter. The prepared texture asset request itself remains `mips=none`.
+- Added WebGL2 resource metrics for direct texture sampler policy counts and samples.
+- Added tests for static repeat sampler preservation, structured-interior material slot mapping,
+  normalized direct upload mip generation, WebGL2 mipmap generation, and sampler diagnostics.
+- Added targeted WebGL2 texture upload diagnostics after visual validation still showed black
+  textured materials. The debug panel now reports representative uploaded texture keys, dimensions,
+  upload format/type, mip generation policy, first pixel, first nonzero-alpha pixel, and nonzero
+  RGB/alpha counts from the first sampled texels. Upload-time WebGL errors are also surfaced through
+  fallback diagnostic samples. This is intended to distinguish black source bytes, failed/incomplete
+  texture upload, and later shader/sampling failures before making another rendering change.
+- Used the diagnostics to identify the black-texture regression: compressed-source materials were
+  decompressed to RGBA8 and assigned a mipmapped sampler, but the inherited compressed sampling
+  policy had `generateMipmaps=false`. WebGL therefore sampled incomplete textures and returned
+  black. The normalized RGBA8 direct upload path now generates GPU mips based on `mipFilter`, not on
+  the source compressed texture's native mip-generation flag.
+- Reverted the interim diffuse-tint submitter change because the diagnostic data proved the black
+  output was texture completeness, not material diffuse tinting.
+
+Decisions:
+
+- The source prepared texture policy remains non-mipmapped. Staged direct rendering may generate GPU
+  mips from that decompressed base level, while future atlas compaction still generates mip chains
+  from packed atlas pages.
+- Structured interiors now follow the Three path's material slot interpretation: geometry surface IDs
+  are slot indices, not material asset IDs.
+- The geometry/material-slot expansion helper is local to staged assembly for now because only staged
+  assembly needs the staging-specific key shape today.
+- Normalized RGBA8 direct uploads are WebGL2-owned texture resources, even when their source render
+  surface is compressed. Their mip-generation policy must be derived from the active WebGL2 sampler,
+  not from the source compressed texture policy.
+
+Course corrections:
+
+- Phase M2 should treat sampler policy as part of candidate reporting and dedupe. A direct texture
+  with `repeat` and one with `clamp` are not equivalent future atlas candidates.
+- M3 should still investigate indexed/paletted interior surfaces separately. M1A only fixes direct
+  non-indexed interior material plumbing.
+- M2 diagnostics should keep upload completeness visible enough to catch sampler/upload mismatches.
+  A future atlas or indexed path can hit the same class of bug if the texture's min filter requires
+  mips that were not generated or supplied.
+
+Cleanup targets and legacy shims:
+
+- If M2 or M3 needs geometry/material-slot expansion outside staged assembly, extract the helper into
+  a renderer-neutral module instead of copying it.
+- `resolveStagedWorldSurfaceMaterialPlan()` remains as a fallback route, but structured interiors now
+  use explicit slots. M2 should audit whether the surface-only resolver is still needed outside
+  terrain/fallback cases.
+- WebGL2 sampler diagnostics currently live on direct texture draw units only. If indexed/paletted
+  WebGL2 materials are added in M3, extend the same metric shape to those resource types.
+- The new texture upload diagnostics are intentionally narrow and temporary. Remove or compress them
+  once the black-texture regression is proven and fixed so the render debug panel does not become a
+  permanent dump of per-texture internals.
+
 ## Phase M2: Material Candidate Metrics and Structured Interior Unification
 
 Status: Not started.
@@ -305,9 +372,9 @@ Tasks:
 - Let structured interiors contribute stable `atlasEligibility` records for future atlas generation
   without folding per-cell geometry into static compaction.
 - Add metrics that distinguish direct texture, atlas-eligible-but-not-realized, flat fallback,
-  animated UV fallback, and missing normalized prepared texture.
+  animated UV fallback, missing normalized prepared texture, and sampler policy.
 - Add tests that static and structured-interior candidates dedupe by compatible render surface,
-  usage, transfer, sampler policy, and render-state signature.
+  usage, transfer, sampler policy, material variant, and render-state signature.
 - Reshape or clearly rename the future atlas planner result so staged direct material decisions and
   future atlas layout decisions are not both called material strategies.
 

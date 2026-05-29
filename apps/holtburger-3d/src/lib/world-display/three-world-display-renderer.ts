@@ -617,6 +617,7 @@ export function createThreeWorldDisplayRenderer(
 			detailTexturesEnabled,
 			textureSamplingPolicyCounts: {},
 			textureSamplingPolicySamples: [],
+			textureUploadSamples: [],
 			textureVelocityPartCount: 0,
 			textureVelocityRenderGroupCount: 0,
 			textureVelocityMaterialCount: 0,
@@ -1080,6 +1081,7 @@ export function createThreeWorldDisplayRenderer(
 			detailTexturesEnabled,
 			textureSamplingPolicyCounts: materialStats.textureSamplingPolicyCounts,
 			textureSamplingPolicySamples: materialStats.textureSamplingPolicySamples,
+			textureUploadSamples: [],
 			textureVelocityPartCount: textureVelocityMetrics.textureVelocityPartCount,
 			textureVelocityRenderGroupCount:
 				textureVelocityMetrics.textureVelocityRenderGroupCount,
@@ -3736,6 +3738,7 @@ function createRenderDebugMetrics(
 		detailTexturesEnabled: options.detailTexturesEnabled,
 		textureSamplingPolicyCounts: options.textureSamplingPolicyCounts,
 		textureSamplingPolicySamples: options.textureSamplingPolicySamples,
+		textureUploadSamples: options.textureUploadSamples,
 		textureVelocityPartCount: options.textureVelocityPartCount,
 		textureVelocityRenderGroupCount: options.textureVelocityRenderGroupCount,
 		textureVelocityMaterialCount: options.textureVelocityMaterialCount,

@@ -26,7 +26,7 @@ import {
 } from "./render-surface-texture-data";
 import {
 	createDefaultMaterialTextureSamplingPolicy,
-	selectRenderSurfaceTextureSamplingPolicy,
+	selectVariantTextureSamplingPolicy,
 } from "./texture-sampling-policy";
 
 export type StagedWorldMaterialRenderableKind =
@@ -609,9 +609,10 @@ function resolveDirectTextureStrategy(options: {
 		});
 	}
 	const directRenderSurface = resolvedSurface.renderSurface;
-	const samplingPolicy = selectRenderSurfaceTextureSamplingPolicy(
+	const samplingPolicy = selectVariantTextureSamplingPolicy(
 		directRenderSurface,
 		createDefaultMaterialTextureSamplingPolicy(options.textureCapabilities),
+		options.input.slot.materialVariantSignature,
 	);
 	const textureUpload = prepareRenderSurfaceTextureUploadData(
 		directRenderSurface,

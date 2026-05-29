@@ -182,8 +182,11 @@ export function createWebgl2RenderMetrics(
 			textureFilteringMode: input.textureFilteringMode,
 			textureColorSpaceMode: input.textureColorSpaceMode,
 			detailTexturesEnabled: input.detailTexturesEnabled,
-			textureSamplingPolicyCounts: {},
-			textureSamplingPolicySamples: [],
+			textureSamplingPolicyCounts:
+				input.worldStore?.textureSamplingPolicyCounts ?? {},
+			textureSamplingPolicySamples:
+				[...(input.worldStore?.textureSamplingPolicySamples ?? [])],
+			textureUploadSamples: [...(input.worldStore?.textureUploadSamples ?? [])],
 			textureVelocityPartCount: 0,
 			textureVelocityRenderGroupCount: 0,
 			textureVelocityMaterialCount: 0,

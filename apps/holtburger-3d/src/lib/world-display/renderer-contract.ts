@@ -128,6 +128,7 @@ export interface WorldRenderDebugMetrics {
 	detailTexturesEnabled: boolean;
 	textureSamplingPolicyCounts: Record<string, number>;
 	textureSamplingPolicySamples: string[];
+	textureUploadSamples: string[];
 	textureVelocityPartCount: number;
 	textureVelocityRenderGroupCount: number;
 	textureVelocityMaterialCount: number;

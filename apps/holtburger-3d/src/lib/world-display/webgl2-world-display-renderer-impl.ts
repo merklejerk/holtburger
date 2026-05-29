@@ -1,4 +1,13 @@
+import {
+	createWebgl2ArrayBuffer,
+	createWebgl2Program,
+	createWebgl2VertexArray,
+	type Webgl2BufferResource,
+	type Webgl2ProgramResource,
+	type Webgl2VertexArrayResource,
+} from "./webgl2-gl";
 import { createWebgl2RenderMetrics } from "./webgl2-render-metrics";
+import { Webgl2StateCache } from "./webgl2-state-cache";
 import type { WorldRenderMetrics } from "./renderer-contract";
 import type {
 	WorldDisplayRenderer,
@@ -36,9 +45,10 @@ void main() {
 
 interface Webgl2RenderResources {
 	gl: WebGL2RenderingContext;
-	program: WebGLProgram;
-	vertexBuffer: WebGLBuffer;
-	vertexArray: WebGLVertexArrayObject;
+	stateCache: Webgl2StateCache;
+	program: Webgl2ProgramResource<"position", never>;
+	vertexBuffer: Webgl2BufferResource;
+	vertexArray: Webgl2VertexArrayResource;
 }
 
 export function createWebgl2WorldDisplayRendererImplementation(
@@ -214,22 +224,48 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		syncCanvasSize();
 		const renderStartedAt = window.performance.now();
 		const { gl } = resources;
-		gl.viewport(0, 0, canvas.width, canvas.height);
+		resources.stateCache.setViewport({
+			x: 0,
+			y: 0,
+			width: canvas.width,
+			height: canvas.height,
+		});
 		gl.clearColor(...WEBGL2_CLEAR_COLOR);
 		gl.clearDepth(1);
-		gl.enable(gl.DEPTH_TEST);
-		gl.depthMask(true);
-		gl.depthFunc(gl.LEQUAL);
-		gl.disable(gl.BLEND);
-		gl.disable(gl.CULL_FACE);
-		gl.disable(gl.STENCIL_TEST);
+		resources.stateCache.setDepthState({
+			enabled: true,
+			write: true,
+			func: gl.LEQUAL,
+		});
+		resources.stateCache.setBlendState({
+			enabled: false,
+			srcRgb: gl.ONE,
+			dstRgb: gl.ZERO,
+			srcAlpha: gl.ONE,
+			dstAlpha: gl.ZERO,
+			equationRgb: gl.FUNC_ADD,
+			equationAlpha: gl.FUNC_ADD,
+		});
+		resources.stateCache.setCullState({
+			enabled: false,
+			mode: gl.BACK,
+		});
+		resources.stateCache.setStencilState({
+			enabled: false,
+			writeMask: 0xff,
+			func: gl.ALWAYS,
+			ref: 0,
+			readMask: 0xff,
+			fail: gl.KEEP,
+			zfail: gl.KEEP,
+			zpass: gl.KEEP,
+		});
 		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 		clearCount += 1;
 
-		gl.useProgram(resources.program);
-		gl.bindVertexArray(resources.vertexArray);
+		resources.stateCache.useProgram(resources.program.program);
+		resources.stateCache.bindVertexArray(resources.vertexArray.vertexArray);
 		gl.drawArrays(gl.TRIANGLES, 0, TRIANGLE_VERTEX_COUNT);
-		gl.bindVertexArray(null);
 
 		drawCallCount += 1;
 		lastFrameDrawCount = 1;
@@ -290,10 +326,11 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		if (!resources) {
 			return;
 		}
-		const { gl } = resources;
-		gl.deleteVertexArray(resources.vertexArray);
-		gl.deleteBuffer(resources.vertexBuffer);
-		gl.deleteProgram(resources.program);
+		resources.stateCache.bindVertexArray(null);
+		resources.stateCache.useProgram(null);
+		resources.vertexArray.dispose();
+		resources.vertexBuffer.dispose();
+		resources.program.dispose();
 		resources = null;
 	}
 
@@ -348,83 +385,38 @@ export function createWebgl2WorldDisplayRendererImplementation(
 function createTriangleResources(
 	gl: WebGL2RenderingContext,
 ): Webgl2RenderResources {
-	const vertexShader = compileShader(
-		gl,
-		gl.VERTEX_SHADER,
-		TRIANGLE_VERTEX_SHADER,
-	);
-	const fragmentShader = compileShader(
-		gl,
-		gl.FRAGMENT_SHADER,
-		TRIANGLE_FRAGMENT_SHADER,
-	);
-	const program = linkProgram(gl, vertexShader, fragmentShader);
-	gl.deleteShader(vertexShader);
-	gl.deleteShader(fragmentShader);
-
-	const vertexArray = gl.createVertexArray();
-	if (!vertexArray) {
-		gl.deleteProgram(program);
-		throw new Error("Failed to create WebGL2 vertex array.");
-	}
-	const vertexBuffer = gl.createBuffer();
-	if (!vertexBuffer) {
-		gl.deleteVertexArray(vertexArray);
-		gl.deleteProgram(program);
-		throw new Error("Failed to create WebGL2 vertex buffer.");
-	}
-
-	gl.bindVertexArray(vertexArray);
-	gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-	gl.bufferData(gl.ARRAY_BUFFER, TRIANGLE_VERTICES, gl.STATIC_DRAW);
-	gl.enableVertexAttribArray(0);
-	gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-	gl.bindVertexArray(null);
-	gl.bindBuffer(gl.ARRAY_BUFFER, null);
+	const program = createWebgl2Program(gl, {
+		label: "webgl2 test triangle",
+		vertexSource: TRIANGLE_VERTEX_SHADER,
+		fragmentSource: TRIANGLE_FRAGMENT_SHADER,
+		attributes: ["position"],
+	});
+	const vertexBuffer = createWebgl2ArrayBuffer(gl, {
+		label: "webgl2 test triangle vertices",
+		data: TRIANGLE_VERTICES,
+	});
+	const vertexArray = createWebgl2VertexArray(gl, {
+		label: "webgl2 test triangle vertex array",
+		configure() {
+			gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer.buffer);
+			gl.enableVertexAttribArray(program.attributes.position);
+			gl.vertexAttribPointer(
+				program.attributes.position,
+				2,
+				gl.FLOAT,
+				false,
+				0,
+				0,
+			);
+			gl.bindBuffer(gl.ARRAY_BUFFER, null);
+		},
+	});
 
 	return {
 		gl,
+		stateCache: new Webgl2StateCache(gl),
 		program,
 		vertexBuffer,
 		vertexArray,
 	};
-}
-
-function compileShader(
-	gl: WebGL2RenderingContext,
-	type: GLenum,
-	source: string,
-): WebGLShader {
-	const shader = gl.createShader(type);
-	if (!shader) {
-		throw new Error("Failed to create WebGL2 shader.");
-	}
-	gl.shaderSource(shader, source);
-	gl.compileShader(shader);
-	if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-		const message = gl.getShaderInfoLog(shader) ?? "unknown shader error";
-		gl.deleteShader(shader);
-		throw new Error(`Failed to compile WebGL2 shader: ${message}`);
-	}
-	return shader;
-}
-
-function linkProgram(
-	gl: WebGL2RenderingContext,
-	vertexShader: WebGLShader,
-	fragmentShader: WebGLShader,
-): WebGLProgram {
-	const program = gl.createProgram();
-	if (!program) {
-		throw new Error("Failed to create WebGL2 program.");
-	}
-	gl.attachShader(program, vertexShader);
-	gl.attachShader(program, fragmentShader);
-	gl.linkProgram(program);
-	if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-		const message = gl.getProgramInfoLog(program) ?? "unknown program error";
-		gl.deleteProgram(program);
-		throw new Error(`Failed to link WebGL2 program: ${message}`);
-	}
-	return program;
 }

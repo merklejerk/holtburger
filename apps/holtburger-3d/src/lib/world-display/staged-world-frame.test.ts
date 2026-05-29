@@ -2,18 +2,21 @@ import { describe, expect, it } from "vitest";
 
 import { createInitialAssetChannelState } from "../assets/types";
 import type { SceneCameraFrame } from "./camera";
-import { buildLumaFrame, buildRenderFrustumFromProjectionMatrix } from "./luma-frame";
+import {
+	buildRenderFrustumFromProjectionMatrix,
+	buildStagedWorldFrame,
+	type StagedWorldFrameCandidate,
+} from "./staged-world-frame";
 import { buildSceneCameraViewProjectionMatrix } from "./luma-math";
-import type { LumaWorldDrawBatch } from "./luma-resources";
 import type { TerrainSceneModel } from "./terrain-scene";
 import { createEmptyStaticRenderableSceneModel } from "./static-renderables";
 import { createEmptyStructuredInteriorSceneModel } from "./structured-interior-scene";
 
-describe("buildLumaFrame", () => {
+describe("buildStagedWorldFrame", () => {
 	it("culls keyed batches when no prepared BVH item is visible", () => {
-		const frame = buildLumaFrame({
+		const frame = buildStagedWorldFrame({
 			assetState: createInitialAssetChannelState(),
-			batches: [
+			candidates: [
 				createBatch({
 					id: "terrain/culled",
 					kind: "terrain",
@@ -34,9 +37,9 @@ describe("buildLumaFrame", () => {
 	});
 
 	it("keeps unkeyed fallback batches visible and sorts draw categories", () => {
-		const frame = buildLumaFrame({
+		const frame = buildStagedWorldFrame({
 			assetState: createInitialAssetChannelState(),
-			batches: [
+			candidates: [
 				createBatch({
 					id: "static-staged/world|landblock/0203ffff|debug-flat/object-b",
 					kind: "static",
@@ -56,9 +59,10 @@ describe("buildLumaFrame", () => {
 		});
 
 		expect(frame.passes[0]?.draws).toEqual([
-			{ batchId: "terrain/fallback", category: "terrain" },
+			{ drawUnitId: "terrain/fallback", category: "terrain" },
 			{
-				batchId: "static-staged/world|landblock/0203ffff|debug-flat/object-b",
+				drawUnitId:
+					"static-staged/world|landblock/0203ffff|debug-flat/object-b",
 				category: "static-staged",
 			},
 		]);
@@ -90,26 +94,16 @@ function createBatch({
 	fallbackReason = null,
 }: {
 	id: string;
-	kind: LumaWorldDrawBatch["kind"];
-	itemKeys?: LumaWorldDrawBatch["bvhItemKeys"];
+	kind: StagedWorldFrameCandidate["kind"];
+	itemKeys?: StagedWorldFrameCandidate["bvhItemKeys"];
 	fallbackReason?: string | null;
-}): LumaWorldDrawBatch {
+}): StagedWorldFrameCandidate {
 	return {
 		id,
 		kind,
-		drawMode: "indexed",
-		geometrySignature: "test",
-		vertexArray: null,
-		vertexBuffer: null,
-		indexBuffer: null,
-		vertexCount: 3,
-		triangleCount: 1,
-		color: new Float32Array([1, 1, 1, 1]),
-		modelMatrix: new Float32Array(16),
-		staticPartCount: kind === "static" ? 1 : 0,
 		bvhItemKeys: itemKeys,
 		bvhFallbackReason: fallbackReason,
-	} as unknown as LumaWorldDrawBatch;
+	};
 }
 
 function createTerrainScene(): TerrainSceneModel {

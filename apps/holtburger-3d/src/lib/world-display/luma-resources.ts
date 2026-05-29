@@ -18,21 +18,18 @@ import {
 	createLumaTextureResourceStore,
 	destroyLumaTextureResources,
 	getOrCreateLumaTextureResource,
-	resolveLumaMaterialSlotPlan,
 	resolveLumaSurfaceMaterialPlan,
 	type LumaMaterialPlan,
 	type LumaTextureResourceStore,
 } from "./luma-materials";
 import {
 	buildAcPlacementMatrix,
-	buildDebugColor,
 	createTranslationMat4,
 	multiplyMat4,
 	type LumaMat4,
 	type LumaVec4,
 } from "./luma-math";
 import type { RenderChunkTransform } from "./render-anchor";
-import type { ResolvedMaterialSlot } from "./material-plan";
 import type { MaterialTextureCapabilities } from "./render-surface-texture-data";
 import {
 	deriveStructuredInteriorCellBatchBvhBinding,
@@ -48,14 +45,17 @@ import {
 	type RendererResourceGraphNode,
 } from "./renderer-resource-graph";
 import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
-import type {
-	StaticRenderablePart,
-	StaticRenderableSceneModel,
-} from "./static-renderables";
-import { deriveStaticRenderablePartBvhItemKey } from "./static-renderable-bvh-bindings";
+import type { StaticRenderableSceneModel } from "./static-renderables";
 import { deriveSceneRenderableReadinessModel } from "./scene-renderable-readiness";
-import { staticRenderableObjectKey } from "./static-renderable-readiness";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
+import {
+	buildStagedStaticDrawUnitAssemblies,
+	createFlatDebugStagedMaterial,
+	describeStagedWorldAssemblyGraphRecordSignature,
+	uniqueSortedStrings,
+	type StagedWorldAssemblyGraphRecord,
+	type StagedWorldDrawUnitBvhBinding,
+} from "./staged-world-assembly";
 import type { TerrainSceneModel } from "./terrain-scene";
 import type { TransitionPortalCandidateModel } from "./transition-portal-work-items";
 
@@ -195,7 +195,7 @@ export function syncLumaWorldResources({
 	);
 	const nextBatches: LumaWorldDrawBatch[] = [];
 	const retainedBatchIds = new Set<string>();
-	const graphAssemblyRecords: LumaAssemblyGraphRecord[] = [];
+	const graphAssemblyRecords: StagedWorldAssemblyGraphRecord[] = [];
 	const fallbackCommittedScenes = deriveSceneRenderableReadinessModel({
 		assetState,
 		commitPolicy: "allow-fallback",
@@ -235,7 +235,7 @@ export function syncLumaWorldResources({
 				kind: "terrain",
 				geometry,
 				modelMatrix,
-				material: createFlatDebugLumaMaterial(`terrain/${tile.landblockId}`),
+				material: createFlatDebugStagedMaterial(`terrain/${tile.landblockId}`),
 				bvhBinding: deriveTerrainTileBatchBvhBinding(tile),
 				shaderLayout: LUMA_WORLD_SHADER_LAYOUT,
 				bufferLayout: LUMA_WORLD_BUFFER_LAYOUT,
@@ -298,7 +298,7 @@ export function syncLumaWorldResources({
 				}),
 			);
 			graphAssemblyRecords.push({
-				batchId,
+				drawUnitId: batchId,
 				label: `structured interior ${cell.renderKey}`,
 				material,
 				preparedAssetIds: material.preparedAssetIds,
@@ -306,7 +306,7 @@ export function syncLumaWorldResources({
 		}
 	}
 
-	const bakedStaticBatches = buildBakedStaticBatches({
+	const bakedStaticBatches = buildStagedStaticDrawUnitAssemblies({
 		assetState,
 		chunkOffsetByKey,
 		staticRenderableScene: fullyResolvedScenes.committedStaticRenderableScene,
@@ -339,11 +339,11 @@ export function syncLumaWorldResources({
 			}),
 		);
 		graphAssemblyRecords.push({
-			batchId: bakedStaticBatch.id,
-			label: `staged static ${bakedStaticBatch.staticObjectKeys.join(", ")}`,
-			material: bakedStaticBatch.material,
-			preparedAssetIds: bakedStaticBatch.preparedAssetIds,
-		});
+			drawUnitId: bakedStaticBatch.id,
+		label: `staged static ${bakedStaticBatch.staticObjectKeys.join(", ")}`,
+		material: bakedStaticBatch.material,
+		preparedAssetIds: bakedStaticBatch.preparedAssetIds,
+	});
 	}
 
 	for (const [batchId, batch] of store.batchesById) {
@@ -600,342 +600,7 @@ function toUnsignedHex(value: number): string {
 	return (value >>> 0).toString(16).padStart(8, "0");
 }
 
-interface BakedStaticBatchInput {
-	id: string;
-	geometry: LumaIndexedGeometry;
-	modelMatrix: LumaMat4;
-	material: LumaMaterialPlan;
-	preparedAssetIds: readonly string[];
-	bvhBinding: LumaBatchBvhBinding;
-	staticPartCount: number;
-	staticObjectKeys: readonly string[];
-}
-
-interface LumaBatchBvhBinding {
-	itemKeys: readonly RenderBvhItemKey[];
-	fallbackReason: string | null;
-}
-
-function buildBakedStaticBatches({
-	assetState,
-	chunkOffsetByKey,
-	staticRenderableScene,
-	materialTextureCapabilities,
-}: {
-	assetState: AssetChannelState;
-	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
-	staticRenderableScene: StaticRenderableSceneModel;
-	materialTextureCapabilities?: MaterialTextureCapabilities;
-}): BakedStaticBatchInput[] {
-	const objectsByBatchKey = groupCommittedStaticObjectsByBatchKey({
-		chunkOffsetByKey,
-		staticRenderableScene,
-	});
-
-	return [...objectsByBatchKey.entries()].flatMap(
-		([batchKey, objectGroups]) =>
-			objectGroups.flatMap((objectGroup) =>
-				buildStagedStaticBatch({
-					assetState,
-					batchKey,
-					chunkOffsetByKey,
-					objectGroup,
-					materialTextureCapabilities,
-				}),
-			),
-	);
-}
-
-interface StaticRenderableObjectGroup {
-	objectKey: string;
-	parts: StaticRenderablePart[];
-}
-
-function groupCommittedStaticObjectsByBatchKey({
-	chunkOffsetByKey,
-	staticRenderableScene,
-}: {
-	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
-	staticRenderableScene: StaticRenderableSceneModel;
-}): Map<string, StaticRenderableObjectGroup[]> {
-	const objectGroupsByBatchKey = new Map<
-		string,
-		Map<string, StaticRenderablePart[]>
-	>();
-	for (const part of staticRenderableScene.parts) {
-		const chunkOffset = chunkOffsetByKey.get(part.renderChunk.chunkKey);
-		if (!chunkOffset) {
-			continue;
-		}
-		const batchKey = formatBakedStaticBatchKey(part);
-		const objectKey = staticRenderableObjectKey(part);
-		let partsByObjectKey = objectGroupsByBatchKey.get(batchKey);
-		if (!partsByObjectKey) {
-			partsByObjectKey = new Map();
-			objectGroupsByBatchKey.set(batchKey, partsByObjectKey);
-		}
-		const objectParts = partsByObjectKey.get(objectKey);
-		if (objectParts) {
-			objectParts.push(part);
-		} else {
-			partsByObjectKey.set(objectKey, [part]);
-		}
-	}
-
-	return new Map(
-		[...objectGroupsByBatchKey.entries()].map(([batchKey, objectGroups]) => [
-			batchKey,
-			[...objectGroups.entries()]
-				.map(([objectKey, parts]) => ({ objectKey, parts }))
-				.sort((left, right) => left.objectKey.localeCompare(right.objectKey)),
-		]),
-	);
-}
-
-function buildStagedStaticBatch({
-	assetState,
-	batchKey,
-	chunkOffsetByKey,
-	objectGroup,
-	materialTextureCapabilities,
-}: {
-	assetState: AssetChannelState;
-	batchKey: string;
-	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
-	objectGroup: StaticRenderableObjectGroup;
-	materialTextureCapabilities?: MaterialTextureCapabilities;
-}): BakedStaticBatchInput[] {
-	return objectGroup.parts.flatMap((part) =>
-		deriveStagedStaticSurfaceKeys(assetState, part).flatMap((surfaceKey) =>
-			buildStagedStaticSurfaceBatch({
-				assetState,
-				batchKey,
-				chunkOffsetByKey,
-				objectKey: objectGroup.objectKey,
-				part,
-				surfaceKey,
-				materialTextureCapabilities,
-			}),
-		),
-	);
-}
-
-interface StagedStaticSurfaceKey {
-	slotIndex: number | null;
-	surfaceId: number | null;
-	geometrySurfaceId: number | null;
-	materialVariantSignature: string | null;
-	materialSlot: ResolvedMaterialSlot | null;
-}
-
-function buildStagedStaticSurfaceBatch({
-	assetState,
-	batchKey,
-	chunkOffsetByKey,
-	objectKey,
-	part,
-	surfaceKey,
-	materialTextureCapabilities,
-}: {
-	assetState: AssetChannelState;
-	batchKey: string;
-	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
-	objectKey: string;
-	part: StaticRenderablePart;
-	surfaceKey: StagedStaticSurfaceKey;
-	materialTextureCapabilities?: MaterialTextureCapabilities;
-}): BakedStaticBatchInput[] {
-	const chunkOffset = chunkOffsetByKey.get(part.renderChunk.chunkKey);
-	if (!chunkOffset) {
-		return [];
-	}
-	const geometry = buildStagedStaticPartGeometry(assetState, part, surfaceKey);
-	if (geometry.triangleCount === 0) {
-		return [];
-	}
-	const surfaceBatchKey = formatStagedStaticSurfaceBatchKey(surfaceKey);
-	const material = surfaceKey.materialSlot
-		? resolveLumaMaterialSlotPlan({
-				assetState,
-				slot: surfaceKey.materialSlot,
-				fallbackColorKey: `${part.debugColorKey}:${surfaceBatchKey}`,
-				renderableKind: "static",
-				textureCapabilities: materialTextureCapabilities,
-			})
-		: createFlatDebugLumaMaterial(
-				`static-staged/${batchKey}/${surfaceBatchKey}`,
-			);
-	const materialKey =
-		material.kind === "direct-texture" ? material.textureKey : material.key;
-	const batchId = [
-		"static-staged",
-		batchKey,
-		objectKey,
-		part.renderKey,
-		`part-${part.partIndex}`,
-		surfaceBatchKey,
-		materialKey,
-	].join("/");
-	return [
-		{
-			id: batchId,
-			geometry,
-			modelMatrix: createTranslationMat4(chunkOffset),
-			material,
-			preparedAssetIds: [part.gfxObjAssetId, ...material.preparedAssetIds],
-			bvhBinding: deriveStaticBatchBvhBinding(batchId, [part]),
-			staticPartCount: 1,
-			staticObjectKeys: [objectKey],
-		},
-	];
-}
-
-function deriveStagedStaticSurfaceKeys(
-	assetState: AssetChannelState,
-	part: StaticRenderablePart,
-): StagedStaticSurfaceKey[] {
-	if (part.materialSlots.length > 0) {
-		return part.materialSlots
-			.map((slot) => ({
-				slotIndex: slot.slotIndex,
-				surfaceId: slot.surfaceId,
-				geometrySurfaceId: slot.slotIndex,
-				materialVariantSignature: slot.materialVariantSignature ?? null,
-				materialSlot: slot,
-			}))
-			.sort(compareStagedStaticSurfaceKeys);
-	}
-
-	const asset = assetState.preparedByAssetId[part.gfxObjAssetId];
-	if (asset?.payload.kind !== "gfx-obj") {
-		return [
-			{
-				slotIndex: null,
-				surfaceId: null,
-				geometrySurfaceId: null,
-				materialVariantSignature: null,
-				materialSlot: null,
-			},
-		];
-	}
-
-	const keys = new Map<string, StagedStaticSurfaceKey>();
-	for (const triangle of asset.payload.renderGeometry.triangles) {
-		const key = [
-			triangle.surfaceId ?? "none",
-			triangle.materialVariantSignature ?? "base",
-		].join("|");
-		keys.set(key, {
-			slotIndex: null,
-			surfaceId: triangle.surfaceId,
-			geometrySurfaceId: triangle.surfaceId,
-			materialVariantSignature: triangle.materialVariantSignature ?? null,
-			materialSlot: null,
-		});
-	}
-	return [...keys.values()].sort(compareStagedStaticSurfaceKeys);
-}
-
-function compareStagedStaticSurfaceKeys(
-	left: StagedStaticSurfaceKey,
-	right: StagedStaticSurfaceKey,
-): number {
-	return (
-		(left.slotIndex ?? -1) - (right.slotIndex ?? -1) ||
-		(left.surfaceId ?? -1) - (right.surfaceId ?? -1) ||
-		(left.geometrySurfaceId ?? -1) - (right.geometrySurfaceId ?? -1) ||
-		(left.materialVariantSignature ?? "").localeCompare(
-			right.materialVariantSignature ?? "",
-		)
-	);
-}
-
-function formatStagedStaticSurfaceBatchKey(
-	surfaceKey: StagedStaticSurfaceKey,
-): string {
-	return [
-		`slot-${surfaceKey.slotIndex ?? "none"}`,
-		`surface-${surfaceKey.surfaceId ?? "none"}`,
-		`geometry-surface-${surfaceKey.geometrySurfaceId ?? "none"}`,
-		`variant-${surfaceKey.materialVariantSignature ?? "base"}`,
-	].join("|");
-}
-
-function buildStagedStaticPartGeometry(
-	assetState: AssetChannelState,
-	part: StaticRenderablePart,
-	surfaceKey: StagedStaticSurfaceKey,
-): LumaIndexedGeometry {
-	const asset = assetState.preparedByAssetId[part.gfxObjAssetId];
-	if (
-		!asset ||
-		asset.payload.kind !== "gfx-obj" ||
-		asset.payload.renderGeometry.vertexCount === 0
-	) {
-		return createEmptyLumaIndexedGeometry();
-	}
-	const geometry = buildLumaPolygonSetGeometry(asset.payload.renderGeometry, {
-		surfaceId: surfaceKey.geometrySurfaceId,
-		materialVariantSignature: surfaceKey.materialVariantSignature,
-	});
-	if (geometry.triangleCount === 0) {
-		return geometry;
-	}
-
-	const matrix = buildLumaStaticRenderablePartMatrix(part);
-	const positions = new Float32Array(geometry.positions.length);
-	for (let vertexIndex = 0; vertexIndex < geometry.vertexCount; vertexIndex += 1) {
-		transformPosition(
-			positions,
-			vertexIndex,
-			geometry.positions,
-			vertexIndex,
-			matrix,
-		);
-	}
-	return {
-		...geometry,
-		positions,
-	};
-}
-
-function createEmptyLumaIndexedGeometry(): LumaIndexedGeometry {
-	return {
-		positions: new Float32Array(),
-		uvs: new Float32Array(),
-		indices: new Uint16Array(),
-		vertexCount: 0,
-		triangleCount: 0,
-	};
-}
-
-function deriveStaticBatchBvhBinding(
-	batchId: string,
-	parts: readonly StaticRenderablePart[],
-): LumaBatchBvhBinding {
-	const itemKeys = new Set<RenderBvhItemKey>();
-	for (const part of parts) {
-		const itemKey = deriveStaticRenderablePartBvhItemKey(part);
-		if (!itemKey) {
-			return {
-				itemKeys: [],
-				fallbackReason: `luma static batch ${batchId} contains an unkeyed ${part.kind} part`,
-			};
-		}
-		itemKeys.add(itemKey);
-	}
-	return {
-		itemKeys: [...itemKeys],
-		fallbackReason:
-			itemKeys.size === 0
-				? `luma static batch ${batchId} contains no BVH item keys`
-				: null,
-	};
-}
-
-function formatBakedStaticBatchKey(part: StaticRenderablePart): string {
-	return [part.renderDomain, part.renderChunk.chunkKey, "debug-flat"].join("|");
-}
+type LumaBatchBvhBinding = StagedWorldDrawUnitBvhBinding;
 
 function createLumaBatchBindings({
 	device,
@@ -958,24 +623,6 @@ function createLumaBatchBindings({
 	};
 }
 
-function createFlatDebugLumaMaterial(colorKey: string): LumaMaterialPlan {
-	return {
-		kind: "flat",
-		key: `debug-flat/${colorKey}`,
-		color: buildDebugColor(colorKey),
-		behavior: null,
-		fallbackReason: null,
-		preparedAssetIds: [],
-	};
-}
-
-interface LumaAssemblyGraphRecord {
-	batchId: string;
-	label: string;
-	material: LumaMaterialPlan;
-	preparedAssetIds: readonly string[];
-}
-
 function syncLumaAssemblyGraph({
 	graph,
 	store,
@@ -984,7 +631,7 @@ function syncLumaAssemblyGraph({
 }: {
 	graph: RendererResourceGraph | undefined;
 	store: LumaWorldResourceStore;
-	records: readonly LumaAssemblyGraphRecord[];
+	records: readonly StagedWorldAssemblyGraphRecord[];
 	retainedBatchIds: ReadonlySet<string>;
 }): void {
 	if (!graph) {
@@ -1008,17 +655,17 @@ function syncLumaAssemblyGraph({
 	store.boundGraph = graph;
 
 	const changedRecords = records.filter((record) => {
-		const signature = describeAssemblyGraphRecordSignature(record);
-		return store.graphSignaturesByBatchId.get(record.batchId) !== signature;
+		const signature = describeStagedWorldAssemblyGraphRecordSignature(record);
+		return store.graphSignaturesByBatchId.get(record.drawUnitId) !== signature;
 	});
 	if (changedRecords.length > 0) {
 		const nodes: RendererResourceGraphNode[] = [];
 		const dependencyReplacements: RendererResourceGraphDependencyReplacement[] =
 			[];
 		for (const record of changedRecords) {
-			const sceneNodeKey = sceneObjectGraphNodeKey(record.batchId);
+			const sceneNodeKey = sceneObjectGraphNodeKey(record.drawUnitId);
 			const materialNodeKey = materialDecisionGraphNodeKey(
-				`${record.batchId}/${record.material.key}`,
+				`${record.drawUnitId}/${record.material.key}`,
 			);
 			const assetIds = uniqueSortedStrings(record.preparedAssetIds);
 			const preparedNodeKeys = assetIds.map(preparedAssetGraphNodeKey);
@@ -1028,7 +675,7 @@ function syncLumaAssemblyGraph({
 					kind: "scene-object",
 					label: record.label,
 					metadata: {
-						batchId: record.batchId,
+						drawUnitId: record.drawUnitId,
 						materialKind: record.material.kind,
 					},
 				},
@@ -1060,16 +707,16 @@ function syncLumaAssemblyGraph({
 		}
 		graph.applyBatchUpdate({ nodes, dependencyReplacements });
 		for (const record of changedRecords) {
-			const sceneNodeKey = sceneObjectGraphNodeKey(record.batchId);
-			if (!store.graphLeasesByBatchId.has(record.batchId)) {
+			const sceneNodeKey = sceneObjectGraphNodeKey(record.drawUnitId);
+			if (!store.graphLeasesByBatchId.has(record.drawUnitId)) {
 				store.graphLeasesByBatchId.set(
-					record.batchId,
+					record.drawUnitId,
 					graph.leaseNode(sceneNodeKey, "luma scene assembly"),
 				);
 			}
 			store.graphSignaturesByBatchId.set(
-				record.batchId,
-				describeAssemblyGraphRecordSignature(record),
+				record.drawUnitId,
+				describeStagedWorldAssemblyGraphRecordSignature(record),
 			);
 		}
 	}
@@ -1082,22 +729,6 @@ function syncLumaAssemblyGraph({
 		store.graphLeasesByBatchId.delete(batchId);
 		store.graphSignaturesByBatchId.delete(batchId);
 	}
-}
-
-function uniqueSortedStrings(values: readonly string[]): string[] {
-	return [...new Set(values.filter((value) => value.length > 0))].sort();
-}
-
-function describeAssemblyGraphRecordSignature(
-	record: LumaAssemblyGraphRecord,
-): string {
-	return [
-		record.label,
-		record.material.kind,
-		record.material.key,
-		record.material.fallbackReason ?? "none",
-		...uniqueSortedStrings(record.preparedAssetIds),
-	].join("|");
 }
 
 function structuredInteriorSurfaceKeys(
@@ -1123,87 +754,4 @@ function structuredInteriorSurfaceKeys(
 			)
 		);
 	});
-}
-
-function transformPosition(
-	target: Float32Array,
-	targetVertexIndex: number,
-	source: Float32Array,
-	sourceVertexIndex: number,
-	matrix: LumaMat4,
-): void {
-	const sourceOffset = sourceVertexIndex * 3;
-	const targetOffset = targetVertexIndex * 3;
-	const x = source[sourceOffset];
-	const y = source[sourceOffset + 1];
-	const z = source[sourceOffset + 2];
-	target[targetOffset] =
-		matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12];
-	target[targetOffset + 1] =
-		matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13];
-	target[targetOffset + 2] =
-		matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14];
-}
-
-function buildLumaStaticRenderablePartMatrix(
-	part: StaticRenderablePart,
-): LumaMat4 {
-	let matrix = createIdentityMat4();
-	for (const parentPlacement of part.parentPlacements) {
-		matrix = multiplyMat4(
-			matrix,
-			buildAcPlacementMatrix(
-				parentPlacement,
-				{ x: 0, y: 0, z: 0 },
-				{ x: 1, y: 1, z: 1 },
-			),
-		);
-	}
-	matrix = multiplyMat4(
-		matrix,
-		buildAcPlacementMatrix(
-			part.chunkLocalInstancePlacement,
-			{ x: 0, y: 0, z: 0 },
-			{ x: 1, y: 1, z: 1 },
-		),
-	);
-	for (const partPlacement of part.partPlacements) {
-		matrix = multiplyMat4(
-			matrix,
-			buildAcPlacementMatrix(
-				partPlacement,
-				{ x: 0, y: 0, z: 0 },
-				{ x: 1, y: 1, z: 1 },
-			),
-		);
-	}
-	return multiplyMat4(
-		matrix,
-		createScaleMat4({ x: part.scale.x, y: part.scale.z, z: part.scale.y }),
-	);
-}
-
-function createIdentityMat4(): LumaMat4 {
-	return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
-}
-
-function createScaleMat4(scale: { x: number; y: number; z: number }): LumaMat4 {
-	return new Float32Array([
-		scale.x,
-		0,
-		0,
-		0,
-		0,
-		scale.y,
-		0,
-		0,
-		0,
-		0,
-		scale.z,
-		0,
-		0,
-		0,
-		0,
-		1,
-	]);
 }

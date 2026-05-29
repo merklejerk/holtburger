@@ -1,6 +1,6 @@
 # Holtburger 3D Luma Renderer Swapout Plan
 
-Status: Phase 6C.2A implemented; Phase 6C.2A.1 renderer resource cleanup boundary is next.
+Status: Phase 6C.2A.1 implemented; Phase 6C.2B static staging boundary prep is next.
 
 ## Purpose
 
@@ -2287,6 +2287,8 @@ Exit criteria:
 
 ## Phase 6C.2A.1: Renderer Resource Cleanup Boundary
 
+Status: Complete.
+
 Purpose: define and implement the deterministic cleanup boundary that consumes renderer resource
 graph disposal candidates after ownership changes. This should happen before static staging and scene
 assembly start publishing graph nodes so cleanup is centralized from the start.
@@ -2301,6 +2303,56 @@ Context:
 - The graph is not the owner of concrete resources. It can prove a node is unleased/unreachable, but
   it should not dispose luma buffers, luma textures, atlas metadata, or assembled scene-object
   records.
+
+Progress:
+
+- Added guarded graph deletion APIs:
+  - `deleteDerivedNode(nodeKey)` removes only unleased, unreachable, dependency-leaf derived nodes.
+  - `deleteUnreferencedPreparedAssetNode(nodeKeyOrAssetId)` is the explicit prepared-asset graph-node
+    cleanup path and rejects prepared nodes that are still retained or referenced by derived nodes.
+- Added `RendererResourceCleanupCoordinator`, a small dirty/flush cleanup boundary that consumes
+  `RendererResourceGraph.disposalCandidates()`, walks dependency leaves first, calls optional
+  owner-provided disposal hooks for each node kind, and deletes graph nodes only after the owner hook
+  has run.
+- Added tests proving deletion rejects retained nodes, prepared-asset nodes through the derived path,
+  unknown nodes, nodes with dependents, and prepared-asset nodes that still have dependents.
+- Added cleanup coordinator tests proving cleanup does not run until marked dirty, concrete owner
+  disposal runs before graph deletion, dependency order is respected, retained nodes are skipped, and
+  a later dirty flush can clean them after lease release.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/renderer-resource-graph.test.ts src/lib/world-display/renderer-resource-cleanup.test.ts src/lib/assets/asset-cache-policy.test.ts src/lib/assets/scene-asset-streaming-controller.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+
+Decisions and course corrections:
+
+- Cleanup is explicit dirty/flush, not timer-driven. Publication/lifecycle code will call
+  `markDirty()` after releasing leases or replacing resources, then flush at a renderer-safe
+  boundary.
+- The coordinator accepts narrow per-node-kind owner hooks instead of importing luma or Three stores.
+  This keeps concrete ownership local to the stores that actually own scene objects, batches, atlas
+  generations, textures, or future compacted resources.
+- The coordinator does not participate in per-frame culling. Visibility decisions remain draw
+  planning only and do not mutate graph leases or prune resources.
+- Prepared-asset graph-node deletion is separate from prepared payload pruning. Asset payload
+  eviction remains owned by scene asset streaming/frontend state; graph cleanup only removes metadata
+  nodes after no derived graph node depends on them.
+
+Cleanup targets and future refinements:
+
+- The cleanup coordinator is not yet wired into a live scene-object or compaction publication path
+  because those stores do not exist yet. Phase 6C.2B/6C.3 should mark cleanup dirty when staged scene
+  objects are removed/replaced and flush after publication.
+- `LumaTextureResourceStore` still lacks targeted per-texture orphan pruning. That remains future
+  material/texture lifecycle debt; this phase only provides the coordinator boundary where such an
+  owner can plug in.
+- Current luma draw-batch pruning inside `syncLumaWorldResources(...)` remains separate and immediate.
+  As staged scene-object assembly takes over, batch disposal should move behind owner hooks rather
+  than adding parallel local cleanup paths.
+- No immediate interim phase is required before Phase 6C.2B. The cleanup boundary is ready for staged
+  static publication to use.
 
 Tasks:
 

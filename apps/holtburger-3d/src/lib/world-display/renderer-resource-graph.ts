@@ -105,6 +105,22 @@ export class RendererResourceGraph {
 		);
 	}
 
+	deleteDerivedNode(nodeKey: string): void {
+		const nextState = cloneState(this.state);
+		deleteNode(nextState, nodeKey, "derived");
+		this.state = nextState;
+	}
+
+	deleteUnreferencedPreparedAssetNode(nodeKeyOrAssetId: string): void {
+		const nodeKey = canonicalPreparedAssetDeletionKey(
+			this.state,
+			nodeKeyOrAssetId,
+		);
+		const nextState = cloneState(this.state);
+		deleteNode(nextState, nodeKey, "prepared-asset");
+		this.state = nextState;
+	}
+
 	explainRetention(nodeKeyOrPreparedAssetId: string): RendererResourceGraphRetentionExplanation {
 		const targetKey = canonicalExplanationTargetKey(
 			this.state,
@@ -237,6 +253,46 @@ function leaseNode(
 	return lease;
 }
 
+function deleteNode(
+	state: GraphState,
+	nodeKey: string,
+	mode: "derived" | "prepared-asset",
+): void {
+	assertKnownNode(state, nodeKey);
+	const node = state.nodes.get(nodeKey);
+	if (!node) {
+		throw new Error(`Renderer resource graph node is unknown: ${nodeKey}`);
+	}
+	if (mode === "derived" && node.kind === "prepared-asset") {
+		throw new Error(
+			`Renderer resource graph prepared asset node requires explicit prepared cleanup: ${nodeKey}`,
+		);
+	}
+	if (mode === "prepared-asset" && node.kind !== "prepared-asset") {
+		throw new Error(
+			`Renderer resource graph node is not a prepared asset: ${nodeKey}`,
+		);
+	}
+	assertNodeCanBeDeleted(state, nodeKey);
+	state.nodes.delete(nodeKey);
+	state.dependenciesByNodeKey.delete(nodeKey);
+}
+
+function assertNodeCanBeDeleted(state: GraphState, nodeKey: string): void {
+	const retention = findRetentionPaths(state, nodeKey);
+	if (retention.length > 0) {
+		throw new Error(
+			`Renderer resource graph node is still retained and cannot be deleted: ${nodeKey}`,
+		);
+	}
+	const dependentKeys = findDependentKeys(state, nodeKey);
+	if (dependentKeys.length > 0) {
+		throw new Error(
+			`Renderer resource graph node still has dependents and cannot be deleted: ${nodeKey} <- ${dependentKeys.join(", ")}`,
+		);
+	}
+}
+
 function assertKnownNode(state: GraphState, nodeKey: string): void {
 	if (!state.nodes.has(nodeKey)) {
 		throw new Error(`Renderer resource graph node is unknown: ${nodeKey}`);
@@ -319,6 +375,16 @@ function canonicalExplanationTargetKey(
 	return nodeKeyOrPreparedAssetId;
 }
 
+function canonicalPreparedAssetDeletionKey(
+	state: GraphState,
+	nodeKeyOrAssetId: string,
+): string {
+	if (state.nodes.get(nodeKeyOrAssetId)?.kind === "prepared-asset") {
+		return nodeKeyOrAssetId;
+	}
+	return preparedAssetGraphNodeKey(nodeKeyOrAssetId);
+}
+
 function findDependencyPath(
 	state: GraphState,
 	startKey: string,
@@ -348,6 +414,24 @@ function findDependencyPath(
 		return null;
 	};
 	return visit(startKey, [], new Set());
+}
+
+function findRetentionPaths(
+	state: GraphState,
+	targetKey: string,
+): RendererResourceGraphRetentionPath[] {
+	const paths: RendererResourceGraphRetentionPath[] = [];
+	for (const lease of sortedLeases(state.leasesById.values())) {
+		const path = findDependencyPath(state, lease.nodeKey, targetKey);
+		if (path) {
+			paths.push({
+				owner: lease.owner,
+				leaseId: lease.id,
+				path,
+			});
+		}
+	}
+	return paths.sort(compareRetentionPaths);
 }
 
 function sortedLeases(

@@ -176,6 +176,56 @@ describe("renderer resource graph", () => {
 		);
 		expect(graph.hasNode("render-surface/05000001")).toBe(false);
 	});
+
+	it("deletes only unleased, unreachable derived nodes without dependents", () => {
+		const graph = createFixtureGraph();
+
+		graph.deleteDerivedNode(staticBatchGraphNodeKey("batch-1"));
+
+		expect(graph.hasNode(staticBatchGraphNodeKey("batch-1"))).toBe(false);
+		expect(() =>
+			graph.deleteDerivedNode(materialDecisionGraphNodeKey("mat-1")),
+		).toThrow(/dependents/);
+	});
+
+	it("rejects deletion for leased, reachable, unknown, and prepared nodes", () => {
+		const graph = createFixtureGraph();
+		graph.leaseNode(staticBatchGraphNodeKey("batch-1"), "active batch store");
+
+		expect(() =>
+			graph.deleteDerivedNode(staticBatchGraphNodeKey("batch-1")),
+		).toThrow(/retained/);
+		expect(() =>
+			graph.deleteDerivedNode(materialDecisionGraphNodeKey("mat-1")),
+		).toThrow(/retained|dependents/);
+		expect(() => graph.deleteDerivedNode("scene-object/missing")).toThrow(
+			/unknown/,
+		);
+		expect(() =>
+			graph.deleteDerivedNode(preparedAssetGraphNodeKey("gfx-obj/02000001")),
+		).toThrow(/prepared asset/);
+		expect(() =>
+			graph.deleteUnreferencedPreparedAssetNode("gfx-obj/02000001"),
+		).toThrow(/retained|dependents/);
+	});
+
+	it("allows explicit prepared-asset graph node cleanup after derived references are gone", () => {
+		const graph = createFixtureGraph();
+		for (const nodeKey of [
+			staticBatchGraphNodeKey("batch-1"),
+			atlasGenerationGraphNodeKey("atlas-1"),
+			sceneObjectGraphNodeKey("tree-1"),
+			materialDecisionGraphNodeKey("mat-1"),
+		]) {
+			graph.deleteDerivedNode(nodeKey);
+		}
+
+		graph.deleteUnreferencedPreparedAssetNode("gfx-obj/02000001");
+
+		expect(graph.hasNode(preparedAssetGraphNodeKey("gfx-obj/02000001"))).toBe(
+			false,
+		);
+	});
 });
 
 function createFixtureGraph(): RendererResourceGraph {

@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
-Status: Draft; ready to start Phase M1 after the WebGL2 renderer pivot.
+Status: Phase M1 complete; ready for immediate Phase M1A.
 
 Related plans:
 
@@ -103,6 +103,9 @@ cycle that decides when to build or retire atlas generations and compacted stati
   rendering should keep common objects visible before compaction exists.
 - Do not make atlas layout the first continuation phase. Pure layout does not make materials
   visible; staged direct material completion does.
+- Do not advance to broader material metrics before staged sampler correctness is fixed. Textures are
+  visible now, so lost repeat/clamp metadata and disabled mipmaps are real rendering bugs rather
+  than future polish.
 - Do not rebuild atlas pages every time one renderable hydrates. Newly assembled objects enter
   staged direct/fallback rendering first. Later compaction runs on its own duty cycle.
 - Keep layout, material strategy, resource realization, and compaction separate. The atlas layout
@@ -116,7 +119,7 @@ cycle that decides when to build or retire atlas generations and compacted stati
 
 ## Phase M1: Staged Direct Material Completion
 
-Status: Not started.
+Status: Complete.
 
 Purpose: make staged WebGL2 draw units render with their resolved per-surface/material-slot
 materials whenever WebGL2 can represent those materials directly. Atlas candidacy should be recorded
@@ -161,6 +164,131 @@ Exit criteria:
 - Atlas eligibility is preserved for future compaction without blocking staged visibility.
 - Diagnostics explain why any visible draw unit is flat.
 
+Progress:
+
+- Changed the active staged material resolver so atlas-ready compressed materials resolve as
+  `direct-texture` when their normalized prepared texture is present.
+- Added `atlasEligibility` metadata to direct staged material strategies. Future atlas planning can
+  still see the atlas entry key, material slot key, sampling key, render-state key, and prepared
+  texture input without turning staged rendering flat.
+- Removed the staged fallback message that treated a resolved atlas strategy as an unwired render
+  mode. Flat fallback now means the material is unresolved or unsupported.
+- Added normalized prepared texture asset IDs to direct staged material dependencies when that
+  direct texture came from an atlas-ready prepared texture.
+- Audited static staged assembly with test coverage proving separate material-slot subsets produce
+  separate direct-texture draw units and texture keys.
+- Audited structured-interior material strategy with test coverage proving it follows the same
+  direct staged policy as static renderables.
+- Confirmed the existing static readiness tests already cover no partial commit for composed
+  objects and unresolved material dependencies; no new readiness path was needed in M1.
+
+Decisions:
+
+- `atlas` remains a future planner/layout output, but `resolveStagedWorldMaterialStrategy()` no
+  longer returns it as an active staged render strategy.
+- Direct-color render surfaces that WebGL2 can upload directly are no longer tagged with
+  `direct-color-normalization-deferred` as a fallback reason. They are direct materials, not
+  degraded materials.
+- WebGL2 staged direct materials reject compressed upload objects even if runtime S3TC capabilities
+  are present. The current WebGL2 direct submit path accepts decompressed direct uploads only; source
+  compressed upload support remains deferred.
+
+Course corrections:
+
+- The future atlas planner currently derives atlas candidates from `direct-texture.atlasEligibility`
+  instead of from the active staged strategy kind. Phase M2 should keep that separation and avoid
+  reintroducing an active staged `atlas` material mode.
+- The test default sampler expectation was corrected to the current clamp/clamp material sampling
+  policy. Repeating sampler support remains future material work, especially for atlas compaction.
+
+Cleanup targets and legacy shims:
+
+- The `planStagedWorldMaterialStrategies()` API still has luma-era shape: it returns
+  `materialStrategies` that can include `atlas` entries. That is acceptable as future compaction
+  scaffolding for now, but Phase M2 should rename or reshape the return model so active staged
+  strategies and future atlas layout outputs cannot be confused.
+- `direct-color-normalization-deferred` is now unused as an active staged fallback reason. Keep it
+  only if M2/M3 finds a real reporting use; otherwise remove it with the next material metrics pass.
+- Texture upload fallback reasons still collapse several direct upload failures into broad material
+  reasons. M2 should split metric labels for missing normalized prepared texture versus unsupported
+  direct upload path where practical.
+
+## Phase M1A: Staged Direct Sampler and Interior Material Slot Fix
+
+Status: Not started.
+
+Purpose: correct the direct staged material path now that textures are visible. Buildings and other
+setup-backed static objects need their authored repeat/clamp sampler variants preserved, staged
+direct normalized textures need mipmaps where legal, and structured interiors need their geometry
+surface indices mapped through env-cell material slots instead of being interpreted as material
+asset IDs.
+
+Why this phase is immediate:
+
+- Screenshot inspection after M1 showed many static objects rendering with real textures, but
+  buildings/walls show severe smeared UVs. The most likely cause is clamp sampling on surfaces whose
+  UVs intentionally repeat outside `0..1`.
+- Code inspection confirmed static setup parts with explicit material slots currently use
+  `part.materialSlots` directly in `deriveStagedStaticSurfaceKeys()`. That path does not expand
+  per-triangle `materialVariantSignature` values from the prepared render geometry, so
+  `sampler=repeat` can be lost before WebGL2 material resolution.
+- Code inspection also confirmed structured-interior staged assembly currently calls
+  `resolveStagedWorldSurfaceMaterialPlan()` with `triangle.surfaceId`. The Three.js path maps
+  `cell.surfaceIds` into material slots and treats geometry surface IDs as slot indices. WebGL2
+  should do the same. The current WebGL2 path can therefore look for `material/00000000` or other
+  slot-index recipes instead of the env-cell surface material IDs, explaining why interior cell
+  structures stay flat even when non-indexed material assets are available.
+- The normalized prepared-texture upload path disables mipmaps because it was originally designed as
+  atlas input. Staged direct rendering now reuses that path, so it should be allowed to generate GPU
+  mipmaps from the decompressed base level when the active direct sampler requests mips. Future atlas
+  inputs still stay non-mipmapped and generate atlas mips after packing.
+
+Tasks:
+
+- Add a renderer-neutral helper that expands a geometry/material slot list into staged surface keys
+  using prepared polygon `materialVariantSignature` values, matching the Three path's
+  `applyRenderGeometryMaterialVariants()` behavior without importing Three material concerns.
+- Update static staged assembly so setup-backed/static parts with explicit material slots split by
+  both material slot and geometry sampler variant. `sampler=repeat` and `sampler=clamp` must reach
+  `resolveStagedWorldMaterialSlotPlan()`.
+- Update structured-interior staged assembly so each geometry surface ID is treated as a slot index
+  into `cell.surfaceIds`, with material asset IDs derived from the mapped env-cell surface material.
+  Preserve per-triangle material variants for those slots.
+- Update staged direct material strategy to select sampler policy from
+  `materialVariantSignature`, matching the Three material path's
+  `parseLegacySamplerMaterialVariantSignature()` handling.
+- Enable GPU mipmap generation for staged direct normalized `rgba8` prepared texture uploads when
+  the selected sampler requests mip filtering and the texture dimensions are legal for WebGL2
+  mipmaps. Do not request source software mips for this path.
+- Keep future atlas eligibility/input policy non-mipmapped. Atlas pages still generate their own
+  padded mip chain after packing in a later compaction phase.
+- Add diagnostics/metrics samples for direct material sampler policy so clamp/repeat/mip choices can
+  be inspected without opening WebGL state.
+- Add tests for:
+  - setup/static material slots preserving repeat sampler variants from polygon geometry;
+  - structured-interior geometry surface indices mapping through `cell.surfaceIds`;
+  - structured-interior direct material resolution for a non-indexed surface;
+  - normalized direct texture upload generating mipmaps when sampler policy requests them;
+  - atlas eligibility still referencing non-mipmapped normalized prepared texture input.
+
+Exit criteria:
+
+- Building/wall static draw units that carry repeat sampler variants render with repeat sampling
+  instead of clamp smearing.
+- Staged direct normalized textures use mip filtering/generation where WebGL2 supports it.
+- Structured-interior non-indexed surfaces can resolve direct textures through env-cell material
+  slots rather than falling back because of slot-index material IDs.
+- Future atlas input policy remains non-mipmapped and distinct from the active staged direct sampler.
+
+Course corrections for following phases:
+
+- Phase M2 should consume the sampler and material-slot fixes from M1A when reporting
+  atlas-eligible staged direct materials.
+- Phase M3 should still own indexed/paletted interior and terrain texture support. M1A only proves
+  non-indexed structured-interior materials can reach the existing direct texture path.
+- If M1A shows that many interior surfaces are indexed/paletted, M3 should include an explicit
+  before/after diagnostic count for indexed interior surfaces, not just terrain/setup appearances.
+
 ## Phase M2: Material Candidate Metrics and Structured Interior Unification
 
 Status: Not started.
@@ -174,18 +302,22 @@ Tasks:
   resolution.
 - Route structured interior surface requirements through `staged-world-material-strategy.ts` for
   direct/fallback decisions and atlas-candidate metrics.
-- Let structured interiors contribute stable atlas candidate records for future atlas generation
+- Let structured interiors contribute stable `atlasEligibility` records for future atlas generation
   without folding per-cell geometry into static compaction.
 - Add metrics that distinguish direct texture, atlas-eligible-but-not-realized, flat fallback,
   animated UV fallback, and missing normalized prepared texture.
 - Add tests that static and structured-interior candidates dedupe by compatible render surface,
   usage, transfer, sampler policy, and render-state signature.
+- Reshape or clearly rename the future atlas planner result so staged direct material decisions and
+  future atlas layout decisions are not both called material strategies.
 
 Exit criteria:
 
 - Static and structured-interior materials share material strategy behavior and fallback reasons.
 - Structured interiors remain independent draw units, not static compacted geometry.
 - Atlas candidate dedupe is proven across renderable families without realizing atlas GPU resources.
+- Diagnostics can report atlas-eligible staged direct materials without implying an atlas texture is
+  currently bound.
 
 ## Phase M3: Terrain Materials and Indexed/Paletted Texture DTOs
 

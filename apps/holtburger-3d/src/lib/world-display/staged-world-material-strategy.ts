@@ -100,6 +100,14 @@ interface StagedWorldAtlasCandidateStrategy extends StagedWorldAtlasMaterialStra
 	};
 }
 
+export interface StagedWorldMaterialAtlasEligibility {
+	materialSlotKey: string;
+	atlasEntryKey: string;
+	renderStateKey: string;
+	samplingKey: string;
+	atlasEntry: StagedWorldAtlasCandidateStrategy["atlasEntry"];
+}
+
 export interface StagedWorldDirectTextureMaterialStrategy {
 	kind: "direct-texture";
 	slot: ResolvedMaterialSlot;
@@ -113,6 +121,7 @@ export interface StagedWorldDirectTextureMaterialStrategy {
 	behavior: LegacyMaterialBehaviorDto;
 	reason: StagedWorldMaterialStrategyFallbackReason | null;
 	detail: string | null;
+	atlasEligibility: StagedWorldMaterialAtlasEligibility | null;
 }
 
 export interface StagedWorldMaterialFallbackStrategy {
@@ -310,13 +319,14 @@ function evaluateAtlasCandidate(options: {
 		input: options.input,
 		textureCapabilities: options.textureCapabilities,
 	});
-	if (resolvedStrategy.kind === "direct-texture") {
+	if (
+		resolvedStrategy.kind !== "direct-texture" ||
+		!resolvedStrategy.atlasEligibility
+	) {
 		return { kind: "strategy", requirement: resolvedStrategy };
 	}
-	if (resolvedStrategy.kind !== "atlas") {
-		return { kind: "strategy", requirement: resolvedStrategy };
-	}
-	const level = resolvedStrategy.atlasEntry.level;
+	const atlasEligibility = resolvedStrategy.atlasEligibility;
+	const level = atlasEligibility.atlasEntry.level;
 	if (
 		level.width + options.policy.baseGutterPixels * 2 >
 			options.policy.maxAtlasTextureSize ||
@@ -331,7 +341,7 @@ function evaluateAtlasCandidate(options: {
 				behavior: resolvedStrategy.behavior,
 				kind: "flat-fallback",
 				reason: "source-texture-too-large",
-				detail: `texture ${resolvedStrategy.atlasEntry.preparedTextureAssetId} is ${level.width}x${level.height}, exceeding atlas capacity`,
+				detail: `texture ${atlasEligibility.atlasEntry.preparedTextureAssetId} is ${level.width}x${level.height}, exceeding atlas capacity`,
 			}),
 		};
 	}
@@ -340,20 +350,20 @@ function evaluateAtlasCandidate(options: {
 		candidate: {
 			input: options.input,
 			materialAssetId: resolvedStrategy.materialAssetId,
-			materialSlotKey: resolvedStrategy.materialSlotKey,
-			atlasEntryKey: resolvedStrategy.atlasEntryKey,
-			renderStateKey: resolvedStrategy.renderStateKey,
-			samplingKey: resolvedStrategy.samplingKey,
+			materialSlotKey: atlasEligibility.materialSlotKey,
+			atlasEntryKey: atlasEligibility.atlasEntryKey,
+			renderStateKey: atlasEligibility.renderStateKey,
+			samplingKey: atlasEligibility.samplingKey,
 			behavior: resolvedStrategy.behavior,
 			entry: {
-				key: resolvedStrategy.atlasEntryKey,
-				renderSurfaceId: resolvedStrategy.atlasEntry.renderSurfaceId,
+				key: atlasEligibility.atlasEntryKey,
+				renderSurfaceId: atlasEligibility.atlasEntry.renderSurfaceId,
 				preparedTextureAssetId:
-					resolvedStrategy.atlasEntry.preparedTextureAssetId,
+					atlasEligibility.atlasEntry.preparedTextureAssetId,
 				width: level.width,
 				height: level.height,
-				sourceHash: resolvedStrategy.atlasEntry.sourceHash,
-				sourceFormatRaw: resolvedStrategy.atlasEntry.sourceFormatRaw,
+				sourceHash: atlasEligibility.atlasEntry.sourceHash,
+				sourceFormatRaw: atlasEligibility.atlasEntry.sourceFormatRaw,
 				transfer: "linear",
 			},
 		},
@@ -365,7 +375,6 @@ export function resolveStagedWorldMaterialStrategy(options: {
 	input: StagedWorldMaterialStrategyInput;
 	textureCapabilities?: MaterialTextureCapabilities;
 }):
-	| StagedWorldAtlasCandidateStrategy
 	| StagedWorldDirectTextureMaterialStrategy
 	| StagedWorldMaterialFallbackStrategy {
 	const materialAssetId =
@@ -435,10 +444,7 @@ export function resolveStagedWorldMaterialStrategy(options: {
 		if (isSupportedDirectColorFormat(surface.formatRaw)) {
 			return resolveDirectTextureStrategy({
 				assetState: options.assetState,
-				behaviorReason: {
-					reason: "direct-color-normalization-deferred",
-					detail: `render surface ${formatHex32(surface.renderSurfaceId)} format ${surface.format} is not atlas-ready`,
-				},
+				behaviorReason: null,
 				input: options.input,
 				materialAssetId,
 				recipe,
@@ -512,34 +518,37 @@ export function resolveStagedWorldMaterialStrategy(options: {
 		renderSurface: surface,
 		preparedTexture,
 	});
-	return {
-		kind: "atlas",
-		slot: options.input.slot,
-		renderableKind: options.input.renderableKind,
+	return resolveDirectTextureStrategy({
+		assetState: options.assetState,
+		behaviorReason: null,
+		input: options.input,
 		materialAssetId,
-		materialSlotKey: describeMaterialSlotKey({
-			materialAssetId,
+		recipe,
+		textureCapabilities:
+			options.textureCapabilities ??
+			defaultStagedWorldMaterialTextureCapabilities(),
+		atlasEligibility: {
+			materialSlotKey: describeMaterialSlotKey({
+				materialAssetId,
+				atlasEntryKey,
+				behavior: behaviorWithAlpha,
+				samplingKey,
+				renderStateKey,
+				materialVariantSignature:
+					options.input.slot.materialVariantSignature ?? null,
+			}),
 			atlasEntryKey,
-			behavior: behaviorWithAlpha,
-			samplingKey,
 			renderStateKey,
-			materialVariantSignature:
-				options.input.slot.materialVariantSignature ?? null,
-		}),
-		materialTableSlotIndex: -1,
-		atlasEntryKey,
-		atlasTextureIndex: -1,
-		renderStateKey,
-		samplingKey,
-		behavior: behaviorWithAlpha,
-		atlasEntry: {
-			renderSurfaceId: surface.renderSurfaceId,
-			preparedTextureAssetId,
-			level,
-			sourceHash: preparedTexture.sourceHash,
-			sourceFormatRaw: preparedTexture.sourceFormatRaw,
+			samplingKey,
+			atlasEntry: {
+				renderSurfaceId: surface.renderSurfaceId,
+				preparedTextureAssetId,
+				level,
+				sourceHash: preparedTexture.sourceHash,
+				sourceFormatRaw: preparedTexture.sourceFormatRaw,
+			},
 		},
-	};
+	});
 }
 
 export function defaultStagedWorldMaterialTextureCapabilities(): MaterialTextureCapabilities {
@@ -578,11 +587,12 @@ function resolveDirectTextureStrategy(options: {
 	behaviorReason: {
 		reason: StagedWorldMaterialStrategyFallbackReason;
 		detail: string;
-	};
+	} | null;
 	input: StagedWorldMaterialStrategyInput;
 	materialAssetId: string;
 	recipe: PreparedMaterialRecipePayload;
 	textureCapabilities: MaterialTextureCapabilities;
+	atlasEligibility?: StagedWorldMaterialAtlasEligibility | null;
 }): StagedWorldDirectTextureMaterialStrategy | StagedWorldMaterialFallbackStrategy {
 	const resolvedSurface = resolveFirstMaterialRenderSurface({
 		recipe: options.recipe,
@@ -622,8 +632,24 @@ function resolveDirectTextureStrategy(options: {
 			materialAssetId: options.materialAssetId,
 			behavior,
 			kind: "flat-fallback",
-			reason: options.behaviorReason.reason,
+			reason:
+				options.behaviorReason?.reason ??
+				"missing-decompressed-prepared-texture",
 			detail: `material ${options.materialAssetId} texture ${formatHex32(directRenderSurface.renderSurfaceId)} is ${textureUpload.reason}`,
+		});
+	}
+	if (textureUpload.upload.kind !== "direct") {
+		const behavior = deriveLegacyMaterialBehaviorDto({
+			recipe: options.recipe,
+			hasSourceAlpha: textureUpload.upload.hasSourceAlpha,
+		});
+		return createFallbackRequirement({
+			input: options.input,
+			materialAssetId: options.materialAssetId,
+			behavior,
+			kind: "unsupported",
+			reason: "unsupported-render-surface-format",
+			detail: `material ${options.materialAssetId} texture ${formatHex32(directRenderSurface.renderSurfaceId)} resolved a compressed upload, which WebGL2 staged direct rendering does not support`,
 		});
 	}
 	const behavior = deriveLegacyMaterialBehaviorDto({
@@ -651,8 +677,9 @@ function resolveDirectTextureStrategy(options: {
 		renderStateKey,
 		samplingKey,
 		behavior,
-		reason: options.behaviorReason.reason,
-		detail: options.behaviorReason.detail,
+		reason: options.behaviorReason?.reason ?? null,
+		detail: options.behaviorReason?.detail ?? null,
+		atlasEligibility: options.atlasEligibility ?? null,
 	};
 }
 

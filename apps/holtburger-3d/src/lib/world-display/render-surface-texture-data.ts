@@ -185,8 +185,7 @@ function prepareNormalizedPreparedTextureUploadData(
 				samplingPolicy: {
 					...samplingPolicy,
 					colorSpace: "none",
-					mipFilter: "none",
-					generateMipmaps: false,
+					generateMipmaps: samplingPolicy.mipFilter !== "none",
 				},
 				data: level.bytes,
 				format: "rgba",

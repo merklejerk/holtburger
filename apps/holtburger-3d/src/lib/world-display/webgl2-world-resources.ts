@@ -38,7 +38,10 @@ import type {
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
 import type { TransitionPortalCandidateModel } from "./transition-portal-work-items";
-import type { TextureSamplingPolicy } from "./texture-sampling-policy";
+import {
+	describeTextureSamplingPolicy,
+	type TextureSamplingPolicy,
+} from "./texture-sampling-policy";
 
 export interface Webgl2WorldDrawUnit {
 	id: string;
@@ -56,6 +59,8 @@ export interface Webgl2WorldDrawUnit {
 	materialKey: string;
 	materialFallbackReason: string | null;
 	materialBehavior: LegacyMaterialBehaviorDto | null;
+	textureSamplingPolicy: string | null;
+	textureUploadSample: string | null;
 	textureKey: string | null;
 	texture: Webgl2Texture2DResource | null;
 	modelMatrix: RenderMat4;
@@ -81,6 +86,9 @@ export interface Webgl2WorldResourceStore {
 	directTextureDrawUnitCount: number;
 	materialFallbackReasonCount: number;
 	materialFallbackReasonSamples: readonly string[];
+	textureSamplingPolicyCounts: Record<string, number>;
+	textureSamplingPolicySamples: readonly string[];
+	textureUploadSamples: readonly string[];
 	textureCount: number;
 	preparedTextureUploadCount: number;
 	preparedTextureGeneratedByteLength: number;
@@ -105,6 +113,9 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		directTextureDrawUnitCount: 0,
 		materialFallbackReasonCount: 0,
 		materialFallbackReasonSamples: [],
+		textureSamplingPolicyCounts: {},
+		textureSamplingPolicySamples: [],
+		textureUploadSamples: [],
 		textureCount: 0,
 		preparedTextureUploadCount: 0,
 		preparedTextureGeneratedByteLength: 0,
@@ -199,6 +210,16 @@ export function syncWebgl2WorldResources({
 	store.materialFallbackReasonSamples = [
 		...new Set(materialFallbackReasons),
 	].slice(0, 8);
+	const textureSamplingPolicies = store.drawUnits.flatMap((drawUnit) =>
+		drawUnit.textureSamplingPolicy ? [drawUnit.textureSamplingPolicy] : [],
+	);
+	store.textureSamplingPolicyCounts = countStringOccurrences(
+		textureSamplingPolicies,
+	);
+	store.textureSamplingPolicySamples = [
+		...new Set(textureSamplingPolicies),
+	].slice(0, 8);
+	store.textureUploadSamples = [...collectTextureUploadSamples(store.drawUnits)];
 	for (const [textureKey, texture] of store.texturesByKey) {
 		if (!retainedTextureKeys.has(textureKey)) {
 			texture.dispose();
@@ -246,6 +267,9 @@ export function destroyWebgl2WorldResources(
 	store.directTextureDrawUnitCount = 0;
 	store.materialFallbackReasonCount = 0;
 	store.materialFallbackReasonSamples = [];
+	store.textureSamplingPolicyCounts = {};
+	store.textureSamplingPolicySamples = [];
+	store.textureUploadSamples = [];
 	for (const texture of store.texturesByKey.values()) {
 		texture.dispose();
 	}
@@ -275,6 +299,11 @@ function createOrReuseWebgl2DrawUnit({
 		previous.materialKey = drawUnit.material.key;
 		previous.materialFallbackReason = resolveWebgl2MaterialFallbackReason(drawUnit);
 		previous.materialBehavior = drawUnit.material.behavior;
+		previous.textureSamplingPolicy =
+			resolveWebgl2DrawUnitTextureSamplingPolicy(drawUnit);
+		previous.textureUploadSample = resolveWebgl2DrawUnitTextureUploadSample(
+			drawUnit,
+		);
 		previous.textureKey =
 			drawUnit.material.kind === "direct-texture"
 				? drawUnit.material.textureKey
@@ -342,6 +371,8 @@ function createOrReuseWebgl2DrawUnit({
 		materialKey: drawUnit.material.key,
 		materialFallbackReason: resolveWebgl2MaterialFallbackReason(drawUnit),
 		materialBehavior: drawUnit.material.behavior,
+		textureSamplingPolicy: resolveWebgl2DrawUnitTextureSamplingPolicy(drawUnit),
+		textureUploadSample: resolveWebgl2DrawUnitTextureUploadSample(drawUnit),
 		textureKey:
 			drawUnit.material.kind === "direct-texture"
 				? drawUnit.material.textureKey
@@ -377,6 +408,40 @@ function resolveWebgl2MaterialFallbackReason(
 	return drawUnit.material.fallbackReason;
 }
 
+function resolveWebgl2DrawUnitTextureSamplingPolicy(
+	drawUnit: StagedWorldDrawUnitAssembly,
+): string | null {
+	return drawUnit.material.kind === "direct-texture"
+		? describeTextureSamplingPolicy(
+				drawUnit.material.textureUpload.upload.samplingPolicy,
+			)
+		: null;
+}
+
+function resolveWebgl2DrawUnitTextureUploadSample(
+	drawUnit: StagedWorldDrawUnitAssembly,
+): string | null {
+	if (drawUnit.material.kind !== "direct-texture") {
+		return null;
+	}
+	const upload = drawUnit.material.textureUpload.upload;
+	if (upload.kind !== "direct") {
+		return null;
+	}
+	const stats = sampleDirectTextureBytes(upload.data, upload.format);
+	return [
+		drawUnit.material.textureKey,
+		`${upload.width}x${upload.height}`,
+		upload.format,
+		upload.dataType,
+		`mips=${upload.samplingPolicy.generateMipmaps ? "on" : "off"}`,
+		`first=${stats.firstPixel}`,
+		`firstAlpha=${stats.firstAlphaPixel}`,
+		`nonZeroRgb=${stats.nonZeroRgbSampleCount}/${stats.sampleCount}`,
+		`nonZeroAlpha=${stats.nonZeroAlphaSampleCount}/${stats.sampleCount}`,
+	].join(" ");
+}
+
 function resolveWebgl2DrawUnitTexture({
 	gl,
 	store,
@@ -393,6 +458,7 @@ function resolveWebgl2DrawUnitTexture({
 	if (cached) {
 		return cached;
 	}
+	const uploadErrorBefore = gl.getError();
 	const texture = createWebgl2Texture2D(gl, {
 		label: drawUnit.material.textureKey,
 		upload: toWebgl2TextureUpload(gl, drawUnit.material.textureUpload),
@@ -401,6 +467,13 @@ function resolveWebgl2DrawUnitTexture({
 			drawUnit.material.textureUpload.upload.samplingPolicy,
 		),
 	});
+	const uploadErrorAfter = gl.getError();
+	if (uploadErrorBefore !== gl.NO_ERROR || uploadErrorAfter !== gl.NO_ERROR) {
+		store.materialFallbackReasonSamples = [
+			...store.materialFallbackReasonSamples,
+			`webgl2 texture upload ${drawUnit.material.textureKey} gl errors before=${uploadErrorBefore} after=${uploadErrorAfter}`,
+		].slice(0, 8);
+	}
 	store.texturesByKey.set(drawUnit.material.textureKey, texture);
 	return texture;
 }
@@ -522,6 +595,83 @@ function countPreparedTextureUploads(
 	).size;
 }
 
+function countStringOccurrences(values: readonly string[]): Record<string, number> {
+	const counts: Record<string, number> = {};
+	for (const value of values) {
+		counts[value] = (counts[value] ?? 0) + 1;
+	}
+	return counts;
+}
+
+function collectTextureUploadSamples(
+	drawUnits: readonly Webgl2WorldDrawUnit[],
+): readonly string[] {
+	const samples = new Map<string, string>();
+	for (const drawUnit of drawUnits) {
+		if (
+			drawUnit.materialKind !== "direct-texture" ||
+			!drawUnit.textureKey ||
+			samples.has(drawUnit.textureKey)
+		) {
+			continue;
+		}
+		samples.set(drawUnit.textureKey, describeDrawUnitTextureUpload(drawUnit));
+		if (samples.size >= 8) {
+			break;
+		}
+	}
+	return [...samples.values()];
+}
+
+function describeDrawUnitTextureUpload(drawUnit: Webgl2WorldDrawUnit): string {
+	return drawUnit.textureUploadSample ?? `${drawUnit.textureKey ?? drawUnit.id}: unavailable`;
+}
+
+function sampleDirectTextureBytes(
+	data: Uint8Array | Uint16Array,
+	format: DirectRenderSurfaceUploadFormat,
+): {
+	firstPixel: string;
+	firstAlphaPixel: string;
+	nonZeroRgbSampleCount: number;
+	nonZeroAlphaSampleCount: number;
+	sampleCount: number;
+} {
+	const channelCount = format === "red" ? 1 : format === "rgb" ? 3 : 4;
+	const pixelCount = Math.floor(data.length / channelCount);
+	const sampleCount = Math.min(pixelCount, 256);
+	let firstPixel = "none";
+	let firstAlphaPixel = "none";
+	let nonZeroRgbSampleCount = 0;
+	let nonZeroAlphaSampleCount = 0;
+	for (let pixelIndex = 0; pixelIndex < sampleCount; pixelIndex += 1) {
+		const offset = pixelIndex * channelCount;
+		const red = data[offset] ?? 0;
+		const green = channelCount > 1 ? (data[offset + 1] ?? 0) : red;
+		const blue = channelCount > 2 ? (data[offset + 2] ?? 0) : red;
+		const alpha = channelCount > 3 ? (data[offset + 3] ?? 255) : 255;
+		const pixel = `${red},${green},${blue},${alpha}`;
+		if (pixelIndex === 0) {
+			firstPixel = pixel;
+		}
+		if (firstAlphaPixel === "none" && alpha > 0) {
+			firstAlphaPixel = pixel;
+		}
+		if (red > 0 || green > 0 || blue > 0) {
+			nonZeroRgbSampleCount += 1;
+		}
+		if (alpha > 0) {
+			nonZeroAlphaSampleCount += 1;
+		}
+	}
+	return {
+		firstPixel,
+		firstAlphaPixel,
+		nonZeroRgbSampleCount,
+		nonZeroAlphaSampleCount,
+		sampleCount,
+	};
+}
 
 function createGeometrySignature(drawUnit: StagedWorldDrawUnitAssembly): string {
 	return [

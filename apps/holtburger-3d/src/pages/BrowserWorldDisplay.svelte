@@ -280,12 +280,13 @@
 				: "draw pressure is not currently the dominant signal";
 		const materialTypes = summarizeRecord(debug.materialTypeCounts);
 		const fallbackSamples = summarizeSamples(debug.fallbackReasonSamples);
+		const textureUploadSamples = summarizeSamples(debug.textureUploadSamples);
 		const drawGroupTerm =
 			debug.rendererBackend === "webgl2" ? "draw units" : "batches";
 		const performanceText = renderMetrics?.performance
 			? `${renderMetrics.performance.fps.toFixed(1)} FPS, ${renderMetrics.performance.frameMs.toFixed(1)} ms/frame, ${renderMetrics.performance.renderMs.toFixed(1)} ms render`
 			: "waiting for performance sample";
-		return `Perf ${performanceText}. Diagnosis: ${diagnosis}. Draw pressure ${debug.renderCalls} visible draws from ${candidateBatchCount} candidate ${drawGroupTerm}; static candidates ${debug.staticBvhCandidateBatchCount}${staticCandidateRatio}; retained ${drawGroupTerm} terrain ${debug.terrainRenderBatchCount}, static ${debug.staticRenderBatchCount}, interiors ${debug.structuredInteriorRenderBatchCount}; retained tris ${debug.renderTriangles}. Material path ${debug.materialCount} materials, ${debug.textureResourceCount} textures, ${debug.indexedTextureResourceCount} indexed textures, ${debug.paletteResourceCount} palettes, direct/material types ${materialTypes}; fallbacks ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}. Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}, transition depth ${debug.transitionPortalMaxDepth}; canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
+		return `Perf ${performanceText}. Diagnosis: ${diagnosis}. Draw pressure ${debug.renderCalls} visible draws from ${candidateBatchCount} candidate ${drawGroupTerm}; static candidates ${debug.staticBvhCandidateBatchCount}${staticCandidateRatio}; retained ${drawGroupTerm} terrain ${debug.terrainRenderBatchCount}, static ${debug.staticRenderBatchCount}, interiors ${debug.structuredInteriorRenderBatchCount}; retained tris ${debug.renderTriangles}. Material path ${debug.materialCount} materials, ${debug.textureResourceCount} textures, ${debug.indexedTextureResourceCount} indexed textures, ${debug.paletteResourceCount} palettes, direct/material types ${materialTypes}; texture uploads${textureUploadSamples ? ` ${textureUploadSamples}` : " waiting"}; fallbacks ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}. Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}, transition depth ${debug.transitionPortalMaxDepth}; canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
 	});
 	const sceneContextText = $derived(renderResourceSnapshot.sceneContextText);
 	const cameraResidencyText = $derived.by(() => {

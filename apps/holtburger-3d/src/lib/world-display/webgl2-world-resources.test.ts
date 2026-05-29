@@ -176,6 +176,10 @@ describe("webgl2 world resources", () => {
 		expect(store.textureCount).toBe(1);
 		expect(gl.createdTextures).toHaveLength(1);
 		expect(gl.textureUploads).toEqual([{ width: 1, height: 1 }]);
+		expect(gl.generatedMipmapCount).toBe(1);
+		expect(store.textureSamplingPolicySamples).toEqual([
+			"wrap=clamp/clamp;filter=linear/linear/linear;color=srgb;aniso=1;mips=on;flipY=off",
+		]);
 
 		syncWebgl2WorldResources({
 			gl: gl.asContext(),
@@ -222,6 +226,7 @@ class FakeWebgl2 {
 	readonly TEXTURE_WRAP_T = 26;
 	readonly TEXTURE_MIN_FILTER = 27;
 	readonly TEXTURE_MAG_FILTER = 28;
+	readonly NO_ERROR = 0;
 	readonly createdBuffers: object[] = [];
 	readonly deletedBuffers: object[] = [];
 	readonly createdVertexArrays: object[] = [];
@@ -229,6 +234,7 @@ class FakeWebgl2 {
 	readonly createdTextures: object[] = [];
 	readonly deletedTextures: object[] = [];
 	readonly textureUploads: { width: number; height: number }[] = [];
+	generatedMipmapCount = 0;
 	private currentVertexArray: WebGLVertexArrayObject | null = null;
 	private readonly elementArrayBuffersByVertexArray = new Map<
 		WebGLVertexArrayObject,
@@ -319,11 +325,15 @@ class FakeWebgl2 {
 	}
 
 	generateMipmap(): void {
-		return;
+		this.generatedMipmapCount += 1;
 	}
 
 	getExtension(): null {
 		return null;
+	}
+
+	getError(): GLenum {
+		return this.NO_ERROR;
 	}
 
 	deleteTexture(texture: WebGLTexture): void {

@@ -34,7 +34,6 @@ import {
 } from "./material-behavior";
 import type { MaterialAppearanceContext } from "./material-appearance";
 import type { MaterialResourceDiagnostic } from "./material-resources";
-import { parseLegacySamplerMaterialVariantSignature } from "./material-variants";
 import type { PaletteTextureResource } from "./palette-resources";
 import {
 	hasSourceAlpha,
@@ -42,7 +41,7 @@ import {
 	isSupportedDirectColorFormat,
 } from "./render-surface-texture-resources";
 import {
-	selectRenderSurfaceTextureSamplingPolicy,
+	selectVariantTextureSamplingPolicy,
 	type MaterialTextureSamplingPolicy,
 	type TextureSamplingPolicy,
 } from "./texture-sampling-policy";
@@ -315,28 +314,6 @@ function reportUnsupportedSurfaceFlags(options: {
 			unsupportedSurfaceFlags: options.behavior.unsupportedSurfaceFlags,
 		},
 	});
-}
-
-function selectVariantTextureSamplingPolicy(
-	renderSurface: PreparedRenderSurfacePayload,
-	policy: MaterialTextureSamplingPolicy,
-	materialVariantSignature: string | null | undefined,
-): TextureSamplingPolicy {
-	const basePolicy = selectRenderSurfaceTextureSamplingPolicy(
-		renderSurface,
-		policy,
-	);
-	const legacySamplerVariant = parseLegacySamplerMaterialVariantSignature(
-		materialVariantSignature,
-	);
-	if (legacySamplerVariant === null) {
-		return basePolicy;
-	}
-	return {
-		...basePolicy,
-		wrapS: legacySamplerVariant,
-		wrapT: legacySamplerVariant,
-	};
 }
 
 function reportTextureFallbackDiagnostics(options: {

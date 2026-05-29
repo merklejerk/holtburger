@@ -102,7 +102,7 @@ describe("render surface texture upload data", () => {
 	it("prefers normalized rgba8 prepared payloads for compressed surfaces", () => {
 		const prepared = prepareRenderSurfaceTextureUploadData(
 			createDxtRenderSurfacePayload(0x06000006),
-			createSamplingPolicy(),
+			createSamplingPolicy({ generateMipmaps: false }),
 			{ supportsS3tc: false, supportsS3tcSrgb: false },
 			createPreparedRgba8TexturePayload(0x06000006),
 		);
@@ -126,15 +126,17 @@ describe("render surface texture upload data", () => {
 			dataType: "uint8",
 			samplingPolicy: {
 				colorSpace: "none",
-				mipFilter: "none",
-				generateMipmaps: false,
+				mipFilter: "linear",
+				generateMipmaps: true,
 			},
 		});
 		expect(prepared.upload.data.byteLength).toBe(4 * 4 * 4);
 	});
 });
 
-function createSamplingPolicy(): TextureSamplingPolicy {
+function createSamplingPolicy(
+	options: Partial<TextureSamplingPolicy> = {},
+): TextureSamplingPolicy {
 	return {
 		wrapS: "repeat",
 		wrapT: "repeat",
@@ -143,6 +145,9 @@ function createSamplingPolicy(): TextureSamplingPolicy {
 		mipFilter: "linear",
 		colorSpace: "srgb",
 		anisotropy: 1,
+		generateMipmaps: true,
+		flipY: false,
+		...options,
 	};
 }
 

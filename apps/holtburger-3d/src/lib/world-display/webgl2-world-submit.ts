@@ -1,4 +1,4 @@
-import { multiplyMat4, type RenderMat4, type RenderVec4 } from "./render-math";
+import { multiplyMat4, type RenderMat4 } from "./render-math";
 import type { StagedWorldFrame } from "./staged-world-frame";
 import type { Webgl2ProgramResource } from "./webgl2-gl";
 import type { Webgl2StateCache } from "./webgl2-state-cache";
@@ -97,7 +97,7 @@ export function submitWebgl2FlatWorldFrame({
 	});
 
 	let previousModelViewProjection: RenderMat4 | null = null;
-	let previousColor: RenderVec4 | null = null;
+	let previousColor: Float32Array | null = null;
 	let previousAlphaTest: number | null = null;
 	let previousTextureProgram = false;
 	for (const drawUnit of drawUnits) {

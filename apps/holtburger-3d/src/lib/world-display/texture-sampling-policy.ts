@@ -18,6 +18,7 @@ import {
 
 import type { PreparedRenderSurfacePayload } from "../assets/types";
 import { isIndexedTextureFormat } from "./indexed-texture-resources";
+import { parseLegacySamplerMaterialVariantSignature } from "./material-variants";
 import {
 	isSupportedCompressedFormat,
 	type MaterialTextureCapabilities,
@@ -133,6 +134,28 @@ export function selectRenderSurfaceTextureSamplingPolicy(
 		return policy.compressed;
 	}
 	return policy.directColor;
+}
+
+export function selectVariantTextureSamplingPolicy(
+	renderSurface: PreparedRenderSurfacePayload,
+	policy: MaterialTextureSamplingPolicy,
+	materialVariantSignature: string | null | undefined,
+): TextureSamplingPolicy {
+	const basePolicy = selectRenderSurfaceTextureSamplingPolicy(
+		renderSurface,
+		policy,
+	);
+	const legacySamplerVariant = parseLegacySamplerMaterialVariantSignature(
+		materialVariantSignature,
+	);
+	if (legacySamplerVariant === null) {
+		return basePolicy;
+	}
+	return {
+		...basePolicy,
+		wrapS: legacySamplerVariant,
+		wrapT: legacySamplerVariant,
+	};
 }
 
 export function applyTextureSamplingPolicy(

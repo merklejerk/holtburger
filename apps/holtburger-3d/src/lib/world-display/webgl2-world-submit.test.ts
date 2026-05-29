@@ -59,11 +59,25 @@ describe("submitWebgl2FlatWorldFrame", () => {
 				return;
 			},
 		} satisfies Webgl2FlatWorldProgram;
+		const texturedProgram = {
+			program: {} as WebGLProgram,
+			attributes: { position: 0, uv: 1 },
+			uniforms: {
+				uModelViewProjection: {} as WebGLUniformLocation,
+				uColor: {} as WebGLUniformLocation,
+				uAlphaTest: {} as WebGLUniformLocation,
+				uTexture: {} as WebGLUniformLocation,
+			},
+			dispose() {
+				return;
+			},
+		};
 
 		const metrics = submitWebgl2FlatWorldFrame({
 			gl: gl.asContext(),
 			stateCache,
 			program,
+			texturedProgram,
 			drawUnitsById,
 			frame: createFrame(["first", "second"]),
 		});
@@ -138,6 +152,7 @@ function createDrawUnit({
 				return;
 			},
 		},
+		uvBuffer: null,
 		indexBuffer: {
 			buffer: {} as WebGLBuffer,
 			dispose() {
@@ -151,6 +166,9 @@ function createDrawUnit({
 		materialKind: "flat",
 		materialKey,
 		materialFallbackReason: null,
+		materialBehavior: null,
+		textureKey: null,
+		texture: null,
 		modelMatrix: createIdentityMat4(),
 		bvhItemKeys: [],
 		bvhFallbackReason: null,
@@ -191,6 +209,8 @@ class CapturingSubmitGl implements Webgl2StateCacheGl {
 	readonly ONE = 1;
 	readonly ZERO = 0;
 	readonly FUNC_ADD = 32774;
+	readonly SRC_ALPHA = 770;
+	readonly ONE_MINUS_SRC_ALPHA = 771;
 	readonly TRIANGLES = 4;
 	readonly calls: string[] = [];
 
@@ -268,6 +288,14 @@ class CapturingSubmitGl implements Webgl2StateCacheGl {
 
 	uniform4fv(): void {
 		this.calls.push("uniform4fv");
+	}
+
+	uniform1f(): void {
+		this.calls.push("uniform1f");
+	}
+
+	uniform1i(): void {
+		this.calls.push("uniform1i");
 	}
 
 	drawElements(mode: GLenum, count: number, type: GLenum, offset: number): void {

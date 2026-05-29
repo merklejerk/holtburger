@@ -189,7 +189,7 @@ export function createWebgl2RenderMetrics(
 			textureVelocityMaterialCount: 0,
 			textureVelocitySignatureCount: 0,
 			textureVelocitySignatureSamples: [],
-			textureResourceCount: 0,
+			textureResourceCount: input.worldStore?.textureCount ?? 0,
 			indexedTextureResourceCount: 0,
 			paletteResourceCount: 0,
 			staticGeometryGroupCount: input.worldStore?.staticDrawUnitCount ?? 0,
@@ -203,9 +203,9 @@ export function createWebgl2RenderMetrics(
 				? {
 						"webgl2-flat-resource":
 							input.worldStore.drawUnits.length -
-							input.worldStore.directTextureDeferredDrawUnitCount,
-						"webgl2-direct-texture-deferred":
-							input.worldStore.directTextureDeferredDrawUnitCount,
+							input.worldStore.directTextureDrawUnitCount,
+						"webgl2-direct-texture":
+							input.worldStore.directTextureDrawUnitCount,
 						...prefixCounts(
 							"webgl2-visible-",
 							input.submitMetrics.visibleDrawUnitCountsByMaterialKind,
@@ -219,8 +219,10 @@ export function createWebgl2RenderMetrics(
 					}
 				: {},
 			materialProgramKeySamples: [],
-			preparedTextureUploadCount: 0,
-			preparedTextureGeneratedByteLength: 0,
+			preparedTextureUploadCount:
+				input.worldStore?.preparedTextureUploadCount ?? 0,
+			preparedTextureGeneratedByteLength:
+				input.worldStore?.preparedTextureGeneratedByteLength ?? 0,
 			compressedSingleLevelFallbackUploadCount: 0,
 			renderCalls:
 				input.worldStore && input.worldStore.drawUnits.length > 0

@@ -3,9 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
 	createInitialAssetChannelState,
 	type AssetChannelState,
+	type PreparedMaterialRecipePayload,
 	type PreparedPolygonSetRenderGeometry,
+	type PreparedRenderSurfacePayload,
 } from "../assets/types";
 import { createBaseMaterialAppearanceContext } from "./material-appearance";
+import type { ResolvedMaterialSlot } from "./material-plan";
 import { WORLD_RENDER_DOMAIN } from "./render-domains";
 import { RendererResourceGraph } from "./renderer-resource-graph";
 import type { RenderChunkTransform } from "./render-anchor";
@@ -144,6 +147,50 @@ describe("webgl2 world resources", () => {
 			previousIndexBuffer,
 		);
 	});
+
+	it("realizes direct-texture draw units with UV buffers and cached textures", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2WorldResourceStore();
+		const materialSurfaceId = 0x08000002;
+		const renderSurfaceId = 0x06000002;
+
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState({ materialSurfaceId, renderSurfaceId }),
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: createStaticRenderableScene([
+				createStaticPart({
+					materialSlots: [createMaterialSlot(0, materialSurfaceId)],
+				}),
+			]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform()],
+		});
+
+		expect(store.drawUnits).toHaveLength(1);
+		expect(store.drawUnits[0]?.materialKind).toBe("direct-texture");
+		expect(store.drawUnits[0]?.uvBuffer).not.toBeNull();
+		expect(store.drawUnits[0]?.texture).not.toBeNull();
+		expect(store.textureCount).toBe(1);
+		expect(gl.createdTextures).toHaveLength(1);
+		expect(gl.textureUploads).toEqual([{ width: 1, height: 1 }]);
+
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState({ materialSurfaceId, renderSurfaceId }),
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: createStaticRenderableScene([]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform()],
+		});
+
+		expect(store.textureCount).toBe(0);
+		expect(gl.deletedTextures).toHaveLength(1);
+	});
 });
 
 class FakeWebgl2 {
@@ -153,10 +200,35 @@ class FakeWebgl2 {
 	readonly FLOAT = 4;
 	readonly UNSIGNED_SHORT = 5;
 	readonly UNSIGNED_INT = 6;
+	readonly TEXTURE_2D = 7;
+	readonly RGBA = 8;
+	readonly RGB = 9;
+	readonly RED = 10;
+	readonly RGBA8 = 11;
+	readonly RGB8 = 12;
+	readonly R8 = 13;
+	readonly RGBA4 = 14;
+	readonly UNSIGNED_BYTE = 15;
+	readonly UNSIGNED_SHORT_4_4_4_4 = 16;
+	readonly CLAMP_TO_EDGE = 17;
+	readonly REPEAT = 18;
+	readonly NEAREST = 19;
+	readonly LINEAR = 20;
+	readonly NEAREST_MIPMAP_NEAREST = 21;
+	readonly NEAREST_MIPMAP_LINEAR = 22;
+	readonly LINEAR_MIPMAP_NEAREST = 23;
+	readonly LINEAR_MIPMAP_LINEAR = 24;
+	readonly TEXTURE_WRAP_S = 25;
+	readonly TEXTURE_WRAP_T = 26;
+	readonly TEXTURE_MIN_FILTER = 27;
+	readonly TEXTURE_MAG_FILTER = 28;
 	readonly createdBuffers: object[] = [];
 	readonly deletedBuffers: object[] = [];
 	readonly createdVertexArrays: object[] = [];
 	readonly deletedVertexArrays: object[] = [];
+	readonly createdTextures: object[] = [];
+	readonly deletedTextures: object[] = [];
+	readonly textureUploads: { width: number; height: number }[] = [];
 	private currentVertexArray: WebGLVertexArrayObject | null = null;
 	private readonly elementArrayBuffersByVertexArray = new Map<
 		WebGLVertexArrayObject,
@@ -215,6 +287,49 @@ class FakeWebgl2 {
 		return;
 	}
 
+	createTexture(): WebGLTexture {
+		const texture = {};
+		this.createdTextures.push(texture);
+		return texture as WebGLTexture;
+	}
+
+	bindTexture(): void {
+		return;
+	}
+
+	texImage2D(
+		_target: GLenum,
+		_level: number,
+		_internalFormat: GLenum,
+		widthOrFormat: GLenum,
+		heightOrType: GLenum,
+	): void {
+		this.textureUploads.push({
+			width: widthOrFormat,
+			height: heightOrType,
+		});
+	}
+
+	texParameteri(): void {
+		return;
+	}
+
+	texParameterf(): void {
+		return;
+	}
+
+	generateMipmap(): void {
+		return;
+	}
+
+	getExtension(): null {
+		return null;
+	}
+
+	deleteTexture(texture: WebGLTexture): void {
+		this.deletedTextures.push(texture);
+	}
+
 	elementArrayBufferFor(
 		vertexArray: WebGLVertexArrayObject,
 	): WebGLBuffer | null | undefined {
@@ -222,14 +337,35 @@ class FakeWebgl2 {
 	}
 }
 
-function createAssetState(): AssetChannelState {
+function createAssetState({
+	materialSurfaceId,
+	renderSurfaceId,
+}: {
+	materialSurfaceId?: number;
+	renderSurfaceId?: number;
+} = {}): AssetChannelState {
 	const state = createInitialAssetChannelState();
 	state.preparedByAssetId["gfx-obj/01000001"] = {
 		payload: {
 			kind: "gfx-obj",
-			renderGeometry: createStaticGfxGeometry(),
+			renderGeometry:
+				materialSurfaceId !== undefined
+					? createMaterialSlotGfxGeometry()
+					: createStaticGfxGeometry(),
 		},
 	} as AssetChannelState["preparedAsset"];
+	if (materialSurfaceId !== undefined && renderSurfaceId !== undefined) {
+		state.preparedByAssetId[
+			`material/${materialSurfaceId.toString(16).padStart(8, "0")}`
+		] = {
+			payload: createTextureMaterialRecipe(materialSurfaceId, renderSurfaceId),
+		} as AssetChannelState["preparedAsset"];
+		state.preparedByAssetId[
+			`render-surface/${renderSurfaceId.toString(16).padStart(8, "0")}`
+		] = {
+			payload: createRenderSurfacePayload(renderSurfaceId),
+		} as AssetChannelState["preparedAsset"];
+	}
 	return state;
 }
 
@@ -247,6 +383,14 @@ function createStaticGfxGeometry(): PreparedPolygonSetRenderGeometry {
 	};
 }
 
+function createMaterialSlotGfxGeometry(): PreparedPolygonSetRenderGeometry {
+	return {
+		...createStaticGfxGeometry(),
+		triangles: [{ polygonId: 0, surfaceId: 0, firstVertex: 0 }],
+		surfaceIds: [0],
+	};
+}
+
 function createStaticRenderableScene(parts: StaticRenderablePart[]) {
 	return {
 		...createEmptyStaticRenderableSceneModel(),
@@ -255,7 +399,11 @@ function createStaticRenderableScene(parts: StaticRenderablePart[]) {
 	};
 }
 
-function createStaticPart(): StaticRenderablePart {
+function createStaticPart({
+	materialSlots = [],
+}: {
+	materialSlots?: readonly ResolvedMaterialSlot[];
+} = {}): StaticRenderablePart {
 	return {
 		renderKey: "static/group",
 		renderDomain: WORLD_RENDER_DOMAIN.exteriorStatic,
@@ -274,8 +422,8 @@ function createStaticPart(): StaticRenderablePart {
 		gfxObjId: 0x01000001,
 		gfxObjAssetId: "gfx-obj/01000001",
 		materialAppearanceContext: createBaseMaterialAppearanceContext("base"),
-		materialSlots: [],
-		materialSignature: "base",
+		materialSlots,
+		materialSignature: materialSlots.length > 0 ? "textured" : "base",
 		parentPlacements: [],
 		chunkLocalInstancePlacement: createPlacement({ x: 1, y: 2, z: 3 }),
 		partPlacements: [],
@@ -285,6 +433,81 @@ function createStaticPart(): StaticRenderablePart {
 		textureVelocitySignature: "uv:none",
 		detailRoleKind: "scenery",
 		detailSignature: "detail:none",
+	};
+}
+
+function createMaterialSlot(
+	slotIndex: number,
+	surfaceId: number,
+): ResolvedMaterialSlot {
+	return {
+		slotIndex,
+		surfaceId,
+		materialAssetId: `material/${surfaceId.toString(16).padStart(8, "0")}`,
+		materialVariantSignature: null,
+	};
+}
+
+function createTextureMaterialRecipe(
+	surfaceId: number,
+	renderSurfaceId: number,
+): PreparedMaterialRecipePayload {
+	return {
+		kind: "material-recipe",
+		sourceAssetKind: "material-recipe",
+		residencyKind: "unknown",
+		provenance: {
+			source: "repo-local-hba",
+			sourceAssetKind: "material-recipe",
+			errorCode: null,
+			detail: null,
+		},
+		surfaceId,
+		surfaceType: 1,
+		source: {
+			kind: "texture",
+			surfaceTextureId: renderSurfaceId,
+			selectedRenderSurfaceId: renderSurfaceId,
+			paletteId: null,
+			renderSurfaceDefaultPaletteIds: [],
+		},
+		translucency: 0,
+		luminosity: 0,
+		diffuse: 1,
+		dependencies: {
+			surfaceTextureAssetIds: [],
+			renderSurfaceAssetIds: [
+				`render-surface/${renderSurfaceId.toString(16).padStart(8, "0")}`,
+			],
+			paletteAssetIds: [],
+		},
+	};
+}
+
+function createRenderSurfacePayload(
+	renderSurfaceId: number,
+): PreparedRenderSurfacePayload {
+	const sourceBytes = new Uint8Array([0x10, 0x20, 0x30, 0xff]);
+	return {
+		kind: "render-surface",
+		sourceAssetKind: "render-surface",
+		residencyKind: "unknown",
+		provenance: {
+			source: "repo-local-hba",
+			sourceAssetKind: "render-surface",
+			errorCode: null,
+			detail: null,
+		},
+		renderSurfaceId,
+		unknown: 0,
+		width: 1,
+		height: 1,
+		formatRaw: 0x15,
+		format: "A8R8G8B8",
+		sourceByteLength: sourceBytes.byteLength,
+		sourceBytes,
+		defaultPaletteId: null,
+		dependencies: { paletteAssetIds: [] },
 	};
 }
 

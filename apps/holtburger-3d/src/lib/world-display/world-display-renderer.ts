@@ -22,11 +22,46 @@ export function createWorldDisplayRenderer(
 		case "three":
 			return createThreeWorldDisplayRenderer(host, options);
 		case "luma":
-			return createDeferredLumaWorldDisplayRenderer(host, options);
+			return createDeferredWorldDisplayRenderer({
+				host,
+				options,
+				backendLabel: "luma",
+				loadModule: () => import("./luma-world-display-renderer-impl"),
+				createRenderer: (module, currentOptions) =>
+					module.createLumaWorldDisplayRendererImplementation(
+						host,
+						currentOptions,
+					),
+			});
+		case "webgl2":
+			return createDeferredWorldDisplayRenderer({
+				host,
+				options,
+				backendLabel: "webgl2",
+				loadModule: () => import("./webgl2-world-display-renderer-impl"),
+				createRenderer: (module, currentOptions) =>
+					module.createWebgl2WorldDisplayRendererImplementation(
+						host,
+						currentOptions,
+					),
+			});
 	}
 }
 
 type LumaRendererModule = typeof import("./luma-world-display-renderer-impl");
+type Webgl2RendererModule = typeof import("./webgl2-world-display-renderer-impl");
+type DeferredRendererModule = LumaRendererModule | Webgl2RendererModule;
+
+interface DeferredWorldDisplayRendererInput<TModule extends DeferredRendererModule> {
+	host: HTMLDivElement;
+	options: WorldDisplayRendererOptions;
+	backendLabel: string;
+	loadModule(): Promise<TModule>;
+	createRenderer(
+		module: TModule,
+		options: WorldDisplayRendererOptions,
+	): WorldDisplayRenderer;
+}
 
 function readConfiguredWorldRenderBackend(): WorldRenderBackend {
 	return parseWorldRenderBackend(
@@ -34,13 +69,13 @@ function readConfiguredWorldRenderBackend(): WorldRenderBackend {
 	);
 }
 
-function createDeferredLumaWorldDisplayRenderer(
-	host: HTMLDivElement,
-	options: WorldDisplayRendererOptions,
+function createDeferredWorldDisplayRenderer<TModule extends DeferredRendererModule>(
+	input: DeferredWorldDisplayRendererInput<TModule>,
 ): WorldDisplayRenderer {
 	let loadedRenderer: WorldDisplayRenderer | null = null;
 	let disposed = false;
 
+	const { options } = input;
 	let assetState = options.assetState;
 	let terrainScene = options.terrainScene;
 	let staticRenderableScene = options.staticRenderableScene;
@@ -61,10 +96,11 @@ function createDeferredLumaWorldDisplayRenderer(
 	let onRenderMetricsChange = options.onRenderMetricsChange;
 	let onCameraResidencyChange = options.onCameraResidencyChange;
 
-	void import("./luma-world-display-renderer-impl")
+	void input
+		.loadModule()
 		.then((module) => installRenderer(module))
 		.catch((error: unknown) => {
-			console.error("[holtburger-3d][luma-loader]", error);
+			console.error(`[holtburger-3d][${input.backendLabel}-loader]`, error);
 		});
 
 	return {
@@ -159,15 +195,12 @@ function createDeferredLumaWorldDisplayRenderer(
 		},
 	};
 
-	function installRenderer(module: LumaRendererModule): void {
+	function installRenderer(module: TModule): void {
 		if (disposed) {
 			return;
 		}
 
-		const renderer = module.createLumaWorldDisplayRendererImplementation(
-			host,
-			currentOptions(),
-		);
+		const renderer = input.createRenderer(module, currentOptions());
 		if (disposed) {
 			renderer.dispose();
 			return;

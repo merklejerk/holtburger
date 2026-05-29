@@ -20,7 +20,10 @@ import {
 	deriveVisibleMaterialAssetIdsForBrowserDestination,
 	type OutdoorSceneRequestOptions,
 } from "./scene-asset-request-planner";
-import { LUMA_MATERIAL_TEXTURE_PREPARATION_POLICY } from "./luma-material-texture-preparation-policy";
+import {
+	LUMA_MATERIAL_TEXTURE_PREPARATION_POLICY,
+	type LumaMaterialTexturePreparationPolicy,
+} from "./luma-material-texture-preparation-policy";
 import type { PreparedAssetCacheMetadata, PreparedAssetRecord } from "./types";
 import type { WorldRenderBackend } from "../app-config/render-backend";
 
@@ -150,9 +153,7 @@ export class SceneAssetStreamingController {
 					detailRadius: input.detailLodRadius,
 					envCellRadius: input.envCellLodRadius,
 					materialTexturePreparationPolicy:
-						input.rendererBackend === "luma"
-							? LUMA_MATERIAL_TEXTURE_PREPARATION_POLICY
-							: undefined,
+						getMaterialTexturePreparationPolicy(input.rendererBackend),
 				},
 			},
 			priority,
@@ -248,9 +249,7 @@ export class SceneAssetStreamingController {
 					detailRadius: input.detailLodRadius,
 					envCellRadius: input.envCellLodRadius,
 					materialTexturePreparationPolicy:
-						input.rendererBackend === "luma"
-							? LUMA_MATERIAL_TEXTURE_PREPARATION_POLICY
-							: undefined,
+						getMaterialTexturePreparationPolicy(input.rendererBackend),
 				},
 			).concat(input.appearancePreviewAssetIds),
 			inFlightAssetIds: [...this.inFlightAssetIds],
@@ -302,6 +301,18 @@ export class SceneAssetStreamingController {
 		} finally {
 			this.inFlightAssetIds.delete(request.assetId);
 		}
+	}
+}
+
+function getMaterialTexturePreparationPolicy(
+	rendererBackend: WorldRenderBackend,
+): LumaMaterialTexturePreparationPolicy | undefined {
+	switch (rendererBackend) {
+		case "luma":
+			return LUMA_MATERIAL_TEXTURE_PREPARATION_POLICY;
+		case "three":
+		case "webgl2":
+			return undefined;
 	}
 }
 

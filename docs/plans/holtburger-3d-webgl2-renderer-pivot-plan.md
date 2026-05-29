@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Renderer Pivot Plan
 
-Status: Ready for Phase W1; replaces the luma low-level renderer track and blocks the old luma plan
+Status: Phase W1 complete; ready for Phase W2; replaces the luma low-level renderer track and blocks the old luma plan
 before continuing Phase 6C.4.
 
 Related plan: [Holtburger 3D Luma Renderer Swapout Plan](./holtburger-3d-luma-renderer-swapout-plan.md)
@@ -177,7 +177,7 @@ Exit criteria:
 
 ## Phase W1: Minimal WebGL2 Backend Skeleton
 
-Status: Not started.
+Status: Complete as of 2026-05-29.
 
 Purpose: create a first-party WebGL2 backend that can own a canvas/context, render loop, resize
 handling, clear/depth setup, and metrics through the existing `WorldDisplayRenderer` contract.
@@ -210,6 +210,57 @@ Exit criteria:
 - Asset streaming recognizes `webgl2` as a backend value without falling into luma-only policy by
   accident.
 
+Progress:
+
+- Added `webgl2` to the backend parser, tests, and unsupported-value error text.
+- Added a shared deferred renderer loader in the `WorldDisplayRenderer` factory and routed both
+  `luma` and `webgl2` through it. This keeps default Three.js startup from loading either
+  implementation module.
+- Added a raw WebGL2 renderer implementation that creates/removes its own canvas, acquires a
+  `WebGL2RenderingContext`, resizes the drawing buffer from host size/device pixel ratio, clears
+  color/depth, and renders a small test triangle every animation frame.
+- Added WebGL2 metrics reporting with `rendererBackend: "webgl2"` and continuous performance
+  samples, so the existing diagnostics panel can distinguish the skeleton from Three.js and luma.
+- Updated scene asset streaming backend policy selection to switch explicitly on the backend. For
+  W1, `webgl2` intentionally uses the same no-special-texture-policy behavior as Three.js; luma is
+  the only backend that still requests luma-specific prepared texture variants.
+
+Decisions:
+
+- W1 does not reuse `createLumaRenderMetrics(...)`. A small `createWebgl2RenderMetrics(...)` helper
+  avoids smuggling luma names or assumptions into the new backend.
+- W1 keeps shader/program/buffer/VAO creation local to the skeleton. W2 will replace this with
+  typed WebGL2 helpers and state-cache tests, so the W1 code should be treated as bootstrap proof
+  code, not the final GL resource layer.
+- The WebGL2 context is created with `stencil: false`. Portal stencil rendering remains deferred,
+  and the normal world path should not pay stencil setup cost by default.
+- WebGL2 texture preparation is not enabled yet. The asset streamer now has an explicit backend
+  policy switch so W5 can turn on WebGL2 decompressed direct-texture requests deliberately instead
+  of inheriting luma policy by accident.
+
+Validation:
+
+- `npm run test:ts -- src/lib/app-config/render-backend.test.ts src/lib/assets/scene-asset-streaming-controller.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run build`
+
+Discovered cleanup targets:
+
+- The WebGL2 skeleton repeats a small amount of shader/program setup that W2 should replace with
+  reusable typed helpers. Delete the bootstrap functions once the W2 primitive layer exists.
+- The `WorldRenderMetrics` shape still uses batch-oriented field names. WebGL2 diagnostics should
+  keep saying "draw units" in user-facing text until a later metrics contract cleanup can rename
+  the underlying fields without destabilizing Three.js/luma consumers.
+- The scene asset streamer still imports `LUMA_MATERIAL_TEXTURE_PREPARATION_POLICY` directly.
+  Future WebGL2 texture work should rename or split this into a renderer-neutral material texture
+  request policy module before enabling WebGL2 prepared-texture requests.
+
+Legacy shims:
+
+- None introduced. The deferred-loader helper is shared factory infrastructure, not a backend alias;
+  `luma` and `webgl2` remain distinct selectable values.
+
 ## Phase W2: WebGL2 Program, Buffer, Texture, and State Primitives
 
 Status: Not started.
@@ -219,6 +270,8 @@ without rebuilding a giant graphics framework.
 
 Tasks:
 
+- Replace W1's local bootstrap shader/program/buffer helpers with reusable primitives instead of
+  growing those helpers in place.
 - Add typed helpers for:
   - shader compile/link with clear error reporting
   - program uniform/attribute lookup
@@ -243,6 +296,8 @@ Tasks:
   - defer compressed texture upload until after decompressed direct material parity
 - Add a fake/capturing GL test harness for the state cache. The important behavior is "does not call
   WebGL setters when state is unchanged", and that should be unit tested.
+- Keep `webgl2` asset texture request policy disabled in W2. Texture request policy should move
+  only when W5 direct material parity needs actual prepared texture resources.
 
 Exit criteria:
 

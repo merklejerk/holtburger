@@ -11,6 +11,7 @@
 		RenderSpatialItemKind,
 		RenderSpatialPick,
 	} from "./render-spatial-index";
+	import type { RendererResourceGraph } from "./renderer-resource-graph";
 	import type { RenderChunkTransform } from "./render-anchor";
 	import type { SceneCameraFrame } from "./camera";
 	import type {
@@ -51,10 +52,12 @@
 		onCameraFrameChange,
 		onRenderMetricsChange,
 		onCameraResidencyChange,
+		rendererResourceGraph,
 	}: {
 		onCameraFrameChange?: WorldRenderCameraFrameChangeHandler;
 		onRenderMetricsChange?: WorldRenderMetricsChangeHandler;
 		onCameraResidencyChange?: BrowserCameraResidencyChangeHandler;
+		rendererResourceGraph?: RendererResourceGraph;
 	} = $props();
 
 	let viewportHost = $state<HTMLDivElement | null>(null);
@@ -98,6 +101,7 @@
 				renderSceneContext,
 				renderChunkTransforms,
 				renderSpatialQuery,
+				rendererResourceGraph,
 				controlledCameraFrame,
 				onCameraFrameChange,
 				onRenderMetricsChange,

@@ -125,6 +125,57 @@ describe("renderer resource graph", () => {
 		expect(graph.retainedPreparedAssetIds()).toEqual(["gfx-obj/02000001"]);
 	});
 
+	it("applies many node and dependency updates with one validation pass", () => {
+		const graph = new RendererResourceGraph();
+		graph.applyBatchUpdate({
+			nodes: [
+				{ key: preparedAssetGraphNodeKey("a"), kind: "prepared-asset" },
+				{ key: preparedAssetGraphNodeKey("b"), kind: "prepared-asset" },
+				{ key: sceneObjectGraphNodeKey("first"), kind: "scene-object" },
+				{ key: sceneObjectGraphNodeKey("second"), kind: "scene-object" },
+			],
+			dependencyReplacements: [
+				{
+					nodeKey: sceneObjectGraphNodeKey("first"),
+					dependencyKeys: [preparedAssetGraphNodeKey("a")],
+				},
+				{
+					nodeKey: sceneObjectGraphNodeKey("second"),
+					dependencyKeys: [preparedAssetGraphNodeKey("b")],
+				},
+			],
+		});
+		graph.leaseNode(sceneObjectGraphNodeKey("first"), "first");
+		graph.leaseNode(sceneObjectGraphNodeKey("second"), "second");
+
+		expect(graph.retainedPreparedAssetIds()).toEqual(["a", "b"]);
+	});
+
+	it("rejects cycles from batch updates without committing partial state", () => {
+		const graph = new RendererResourceGraph();
+
+		expect(() =>
+			graph.applyBatchUpdate({
+				nodes: [
+					{ key: sceneObjectGraphNodeKey("first"), kind: "scene-object" },
+					{ key: sceneObjectGraphNodeKey("second"), kind: "scene-object" },
+				],
+				dependencyReplacements: [
+					{
+						nodeKey: sceneObjectGraphNodeKey("first"),
+						dependencyKeys: [sceneObjectGraphNodeKey("second")],
+					},
+					{
+						nodeKey: sceneObjectGraphNodeKey("second"),
+						dependencyKeys: [sceneObjectGraphNodeKey("first")],
+					},
+				],
+			}),
+		).toThrow(/cycle/);
+
+		expect(graph.hasNode(sceneObjectGraphNodeKey("first"))).toBe(false);
+	});
+
 	it("returns deterministic retained ids, candidates, and explanations", () => {
 		const graph = new RendererResourceGraph();
 		graph.transaction((draft) => {

@@ -7,7 +7,9 @@ import {
 import type { TextureFormat } from "@luma.gl/core";
 
 import type { AssetChannelState } from "../assets/types";
+import { formatHex32 } from "../landblocks";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
+import type { ResolvedMaterialSlot } from "./material-plan";
 import type { LumaVec4 } from "./luma-math";
 import { formatMaterialAssetId } from "./material-signatures";
 import {
@@ -19,6 +21,7 @@ import {
 import {
 	defaultLumaMaterialTextureCapabilities,
 	resolveLumaMaterialStrategy,
+	type LumaMaterialRenderableKind,
 } from "./luma-material-strategy";
 import { type TextureSamplingPolicy } from "./texture-sampling-policy";
 
@@ -32,6 +35,7 @@ interface LumaFlatMaterialPlan {
 	color: LumaVec4;
 	behavior: LegacyMaterialBehaviorDto | null;
 	fallbackReason: string | null;
+	preparedAssetIds: readonly string[];
 }
 
 export interface LumaDirectTextureMaterialPlan {
@@ -42,6 +46,7 @@ export interface LumaDirectTextureMaterialPlan {
 	textureUpload: RenderSurfaceTextureUploadPreparation & { status: "ready" };
 	behavior: LegacyMaterialBehaviorDto;
 	fallbackReason: string | null;
+	preparedAssetIds: readonly string[];
 }
 
 type LumaReadyTextureUpload = Extract<
@@ -84,32 +89,50 @@ export function resolveLumaSurfaceMaterialPlan(options: {
 			key: `missing-surface/${options.fallbackColorKey}`,
 			colorKey: options.fallbackColorKey,
 			reason: "missing surface id",
+			preparedAssetIds: [],
 		});
 	}
 	const materialAssetId = formatMaterialAssetId(options.surfaceId);
+	return resolveLumaMaterialSlotPlan({
+		assetState: options.assetState,
+		slot: {
+			slotIndex: 0,
+			surfaceId: options.surfaceId,
+			materialAssetId,
+			materialVariantSignature: null,
+		},
+		fallbackColorKey: options.fallbackColorKey,
+		renderableKind: "unknown",
+		textureCapabilities: options.textureCapabilities,
+	});
+}
+
+export function resolveLumaMaterialSlotPlan(options: {
+	assetState: AssetChannelState;
+	slot: ResolvedMaterialSlot;
+	fallbackColorKey: string;
+	renderableKind?: LumaMaterialRenderableKind;
+	textureCapabilities?: MaterialTextureCapabilities;
+}): LumaMaterialPlan {
 	const strategy = resolveLumaMaterialStrategy({
 		assetState: options.assetState,
 		input: {
-			slot: {
-				slotIndex: 0,
-				surfaceId: options.surfaceId,
-				materialAssetId,
-				materialVariantSignature: null,
-			},
-			renderableKind: "unknown",
+			slot: options.slot,
+			renderableKind: options.renderableKind ?? "unknown",
 		},
 		textureCapabilities:
 			options.textureCapabilities ?? defaultLumaMaterialTextureCapabilities(),
 	});
 	if (strategy.kind !== "direct-texture") {
 		return createFallbackMaterialPlan({
-			key: `${strategy.kind}/${materialAssetId}/${options.fallbackColorKey}`,
+			key: `${strategy.kind}/${strategy.materialAssetId}/${options.fallbackColorKey}`,
 			colorKey: options.fallbackColorKey,
 			behavior: strategy.behavior,
 			reason:
 				strategy.kind === "atlas"
-					? `material ${materialAssetId} resolved atlas strategy before atlas rendering is wired`
+					? `material ${strategy.materialAssetId} resolved atlas strategy before atlas rendering is wired`
 					: strategy.detail,
+			preparedAssetIds: collectStrategyPreparedAssetIds(strategy),
 		});
 	}
 	return {
@@ -125,6 +148,7 @@ export function resolveLumaSurfaceMaterialPlan(options: {
 		textureUpload: strategy.textureUpload,
 		behavior: strategy.behavior,
 		fallbackReason: null,
+		preparedAssetIds: collectStrategyPreparedAssetIds(strategy),
 	};
 }
 
@@ -168,6 +192,7 @@ function createFallbackMaterialPlan(options: {
 	colorKey: string;
 	behavior?: LegacyMaterialBehaviorDto | null;
 	reason: string;
+	preparedAssetIds?: readonly string[];
 }): LumaFlatMaterialPlan {
 	return {
 		kind: "flat",
@@ -175,7 +200,27 @@ function createFallbackMaterialPlan(options: {
 		color: buildFallbackColor(options.colorKey),
 		behavior: options.behavior ?? null,
 		fallbackReason: options.reason,
+		preparedAssetIds: options.preparedAssetIds ?? [],
 	};
+}
+
+function collectStrategyPreparedAssetIds(
+	strategy: ReturnType<typeof resolveLumaMaterialStrategy>,
+): readonly string[] {
+	const assetIds = new Set<string>();
+	if (strategy.materialAssetId !== "material/fallback") {
+		assetIds.add(strategy.materialAssetId);
+	}
+	if (strategy.kind === "direct-texture") {
+		assetIds.add(
+			`render-surface/${formatHex32(strategy.textureUpload.upload.renderSurfaceId)}`,
+		);
+	}
+	if (strategy.kind === "atlas") {
+		assetIds.add(strategy.atlasEntry.preparedTextureAssetId);
+		assetIds.add(`render-surface/${formatHex32(strategy.atlasEntry.renderSurfaceId)}`);
+	}
+	return [...assetIds].sort();
 }
 
 function toLumaTextureFormat(upload: LumaReadyTextureUpload): TextureFormat {

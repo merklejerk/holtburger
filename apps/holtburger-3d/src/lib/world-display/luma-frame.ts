@@ -55,17 +55,6 @@ interface LumaFrame {
 	metrics: LumaFrameMetrics;
 }
 
-interface LumaBatchCandidateBinding {
-	batchId: string;
-	category: LumaDrawCategory;
-	itemKeys: readonly RenderBvhItemKey[];
-	fallbackReason: string | null;
-}
-
-interface StoredLumaBatchCandidateBinding extends LumaBatchCandidateBinding {
-	itemKeys: readonly RenderBvhItemKey[];
-}
-
 interface LumaBatchCandidateSelection {
 	draws: LumaDraw[];
 	metrics: LumaFrameMetrics;
@@ -100,7 +89,7 @@ export function buildLumaFrame({
 		frustum: buildRenderFrustumFromProjectionMatrix(viewProjectionMatrix),
 	});
 	const selection = selectLumaBatchCandidates(
-		batches.map(createLumaBatchCandidateBinding),
+		batches,
 		{
 			visibleItemKeys: visibilitySnapshot.visibleItemKeys,
 			queryFallbackReasons: visibilitySnapshot.fallbackReasons,
@@ -185,17 +174,6 @@ function normalizePlane(plane: RenderPlane): RenderPlane {
 	};
 }
 
-function createLumaBatchCandidateBinding(
-	batch: LumaWorldDrawBatch,
-): LumaBatchCandidateBinding {
-	return {
-		batchId: batch.id,
-		category: categorizeLumaBatch(batch),
-		itemKeys: batch.bvhItemKeys,
-		fallbackReason: batch.bvhFallbackReason,
-	};
-}
-
 function categorizeLumaBatch(batch: {
 	id: string;
 	kind: LumaWorldDrawBatchKind;
@@ -213,7 +191,7 @@ function categorizeLumaBatch(batch: {
 }
 
 function selectLumaBatchCandidates(
-	bindings: readonly LumaBatchCandidateBinding[],
+	batches: readonly LumaWorldDrawBatch[],
 	options: {
 		visibleItemKeys: ReadonlySet<RenderBvhItemKey>;
 		queryFallbackReasons: readonly string[];
@@ -234,40 +212,47 @@ function selectLumaBatchCandidates(
 	let queryFallbackBatchCount = 0;
 	const draws: LumaDraw[] = [];
 
-	for (const binding of bindings.map(dedupeBindingKeys)) {
-		candidateCountsByCategory[binding.category] += 1;
-		for (const itemKey of binding.itemKeys) {
+	for (const batch of batches) {
+		const category = categorizeLumaBatch(batch);
+		const itemKeys = batch.bvhItemKeys;
+		candidateCountsByCategory[category] += 1;
+		for (const itemKey of itemKeys) {
 			representedItemKeys.add(itemKey);
 		}
-		representedItemKeyCountsByCategory[binding.category] += binding.itemKeys.length;
-		if (binding.itemKeys.length > 0) {
+		representedItemKeyCountsByCategory[category] += itemKeys.length;
+		if (itemKeys.length > 0) {
 			keyedBatchCount += 1;
 		}
 
-		const fallbackReason = resolveBatchFallbackReason(binding, hasQueryFallback);
+		const fallbackReason = resolveBatchFallbackReason({
+			batchId: batch.id,
+			fallbackReason: batch.bvhFallbackReason,
+			hasItemKeys: itemKeys.length > 0,
+			hasQueryFallback,
+		});
 		const itemKeyMatched =
 			fallbackReason === null &&
-			binding.itemKeys.some((itemKey) => options.visibleItemKeys.has(itemKey));
+			hasVisibleItemKey(itemKeys, options.visibleItemKeys);
 		if (fallbackReason === null && !itemKeyMatched) {
 			continue;
 		}
 
-		draws.push({ batchId: binding.batchId, category: binding.category });
-		visibleDrawCountsByCategory[binding.category] += 1;
+		draws.push({ batchId: batch.id, category });
+		visibleDrawCountsByCategory[category] += 1;
 		if (itemKeyMatched) {
 			itemKeyMatchedBatchCount += 1;
 			continue;
 		}
 		if (fallbackReason === null) {
 			throw new Error(
-				`Luma batch ${binding.batchId} had neither a visible item key nor a fallback reason.`,
+				`Luma batch ${batch.id} had neither a visible item key nor a fallback reason.`,
 			);
 		}
 		fallbackReasons.push(fallbackReason);
-		fallbackCountsByCategory[binding.category] += 1;
-		if (binding.itemKeys.length === 0) {
+		fallbackCountsByCategory[category] += 1;
+		if (itemKeys.length === 0) {
 			unboundFallbackBatchCount += 1;
-		} else if (binding.fallbackReason) {
+		} else if (batch.bvhFallbackReason) {
 			explicitFallbackBatchCount += 1;
 		} else {
 			queryFallbackBatchCount += 1;
@@ -278,7 +263,7 @@ function selectLumaBatchCandidates(
 	return {
 		draws,
 		metrics: {
-			registeredBatchCount: bindings.length,
+			registeredBatchCount: batches.length,
 			keyedBatchCount,
 			representedItemKeyCount: representedItemKeys.size,
 			visibleItemKeyCount: options.visibleItemKeys.size,
@@ -300,29 +285,39 @@ function selectLumaBatchCandidates(
 	};
 }
 
-function dedupeBindingKeys(
-	binding: LumaBatchCandidateBinding,
-): StoredLumaBatchCandidateBinding {
-	return {
-		...binding,
-		itemKeys: [...new Set(binding.itemKeys)],
-	};
+function hasVisibleItemKey(
+	itemKeys: readonly RenderBvhItemKey[],
+	visibleItemKeys: ReadonlySet<RenderBvhItemKey>,
+): boolean {
+	for (const itemKey of itemKeys) {
+		if (visibleItemKeys.has(itemKey)) {
+			return true;
+		}
+	}
+	return false;
 }
 
-function resolveBatchFallbackReason(
-	binding: StoredLumaBatchCandidateBinding,
-	hasQueryFallback: boolean,
-): string | null {
-	if (binding.itemKeys.length === 0) {
+function resolveBatchFallbackReason({
+	batchId,
+	fallbackReason,
+	hasItemKeys,
+	hasQueryFallback,
+}: {
+	batchId: string;
+	fallbackReason: string | null;
+	hasItemKeys: boolean;
+	hasQueryFallback: boolean;
+}): string | null {
+	if (!hasItemKeys) {
 		return (
-			binding.fallbackReason ?? `luma batch ${binding.batchId} has no BVH item keys`
+			fallbackReason ?? `luma batch ${batchId} has no BVH item keys`
 		);
 	}
-	if (binding.fallbackReason) {
-		return binding.fallbackReason;
+	if (fallbackReason) {
+		return fallbackReason;
 	}
 	if (hasQueryFallback) {
-		return `luma batch ${binding.batchId} included because BVH query reported fallback data`;
+		return `luma batch ${batchId} included because BVH query reported fallback data`;
 	}
 	return null;
 }

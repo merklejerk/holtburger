@@ -62,6 +62,7 @@
 		type RenderAnchorSource,
 	} from "../lib/world-display/render-anchor";
 	import { DEBUG_OVERLAY_SPATIAL_OWNER_KEY } from "../lib/world-display/render-spatial-scene";
+	import type { RendererResourceGraph } from "../lib/world-display/renderer-resource-graph";
 	import {
 		convertCameraFrameBetweenAnchors,
 		type RenderLandblockAnchor,
@@ -105,8 +106,10 @@
 
 	let {
 		onRuntimeAppearanceAssetIdsChange,
+		rendererResourceGraph,
 	}: {
 		onRuntimeAppearanceAssetIdsChange?: (assetIds: readonly string[]) => void;
+		rendererResourceGraph?: RendererResourceGraph;
 	} = $props();
 
 	const initialFrontendState = get(frontendState);
@@ -261,7 +264,26 @@
 		if (!debug) {
 			return "Renderer diagnostics are waiting for the first rendered frame.";
 		}
-		return `Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}, transition depth ${debug.transitionPortalMaxDepth}; passes ${debug.renderPassCount}, calls ${debug.renderCalls}, tris ${debug.renderTriangles}; materials ${debug.materialCount}, program keys ${debug.materialProgramKeyCount}, transparent ${debug.transparentMaterialCount}, textures ${debug.textureResourceCount}/${debug.indexedTextureResourceCount} indexed, palettes ${debug.paletteResourceCount}; filtering ${debug.textureFilteringMode}, color space ${debug.textureColorSpaceMode}, detail ${debug.detailTexturesEnabled ? "on" : "off"}, samplers ${JSON.stringify(debug.textureSamplingPolicyCounts)} (${debug.textureSamplingPolicySamples.join(" || ")}); texture velocity parts ${debug.textureVelocityPartCount}, groups ${debug.textureVelocityRenderGroupCount}, cloned materials ${debug.textureVelocityMaterialCount}, signatures ${debug.textureVelocitySignatureCount} (${debug.textureVelocitySignatureSamples.join(" || ")}); static groups ${debug.staticVisibleGeometryGroupCount}/${debug.staticGeometryGroupCount}; material types ${JSON.stringify(debug.materialTypeCounts)}; program samples ${debug.materialProgramKeySamples.join(" || ")}; portal work ${debug.portalRenderWorkItemCount}, masks ${debug.transitionApertureMaskPassCount}, depth resets ${debug.apertureDepthResetPassCount}, composites interior ${debug.interiorCompositePassCount}/exterior ${debug.exteriorCompositePassCount}; terrain ${debug.visibleTerrainMeshCount}/${debug.terrainMeshCount}, static ${debug.visibleStaticGroupMeshCount}/${debug.staticGroupMeshCount}, interiors ${debug.visibleStructuredInteriorMeshCount}/${debug.structuredInteriorMeshCount} with groups ${debug.structuredInteriorGeometryGroupCount}, overlays ${debug.visibleDebugOverlayObjectCount}/${debug.debugOverlayObjectCount}; BVH terrain ${debug.terrainBvhVisibleItemCount}/${debug.terrainBvhTotalItemCount}, outdoor statics ${debug.outdoorStaticBvhVisibleItemCount}/${debug.outdoorStaticBvhTotalItemCount}, env local ${debug.envCellLocalBvhVisibleItemCount}/${debug.envCellLocalBvhTotalItemCount}, static keys ${debug.visibleStaticInstanceKeyCount}, portal keys ${debug.visiblePortalKeyCount}, env cells ${debug.envCellBvhConsideredCount}, static batches ${debug.staticBvhCandidateBatchCount}/${debug.staticRenderBatchCount}, represented static keys ${debug.staticBvhRepresentedInstanceKeyCount}, fallback static batches ${debug.staticBvhFallbackIncludedBatchCount}, terrain batches ${debug.terrainBvhCandidateBatchCount}/${debug.terrainRenderBatchCount}, interior batches ${debug.structuredInteriorBvhCandidateBatchCount}/${debug.structuredInteriorRenderBatchCount}, overlay batches ${debug.debugOverlayBvhCandidateBatchCount}/${debug.debugOverlayRenderBatchCount}, portal mask batches ${debug.portalMaskBvhCandidateBatchCount}/${debug.portalMaskRenderBatchCount}, portal composite keys ${debug.portalCompositeVisibleItemKeyCount}, portal composite batches static ${debug.portalCompositeStaticCandidateBatchCount}, terrain ${debug.portalCompositeTerrainCandidateBatchCount}, interior ${debug.portalCompositeInteriorCandidateBatchCount}, fallback ${debug.portalCompositeFallbackIncludedBatchCount}, fallback non-static batches ${debug.nonStaticBvhFallbackIncludedBatchCount}, fallbacks ${debug.fallbackReasonCount} (${debug.fallbackReasonSamples.join(" || ")}), query ${debug.queryTimeMs.toFixed(2)} ms; portals ${debug.portalApertureMeshCount}/${debug.transitionPortalCandidateCount}; residency ${debug.cameraViewResidency} via ${debug.residencySource} (${debug.residencyCellCount} cells, ${debug.residencyLandblockCount} landblocks, ${debug.residencyAabbCandidateCount} AABB candidates, ${debug.residencyCellBspMatchCount} CellBSP matches, ${debug.residencyAabbFallbackCount} AABB fallbacks); canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
+		const candidateBatchCount =
+			debug.terrainBvhCandidateBatchCount +
+			debug.staticBvhCandidateBatchCount +
+			debug.structuredInteriorBvhCandidateBatchCount +
+			debug.debugOverlayBvhCandidateBatchCount +
+			debug.portalMaskBvhCandidateBatchCount;
+		const staticCandidateRatio = describeRatio(
+			debug.staticBvhCandidateBatchCount,
+			candidateBatchCount,
+		);
+		const diagnosis =
+			debug.renderCalls > 2_000
+				? "draw-call/state-change bound; static batching or later compaction is the next meaningful reducer"
+				: "draw pressure is not currently the dominant signal";
+		const materialTypes = summarizeRecord(debug.materialTypeCounts);
+		const fallbackSamples = summarizeSamples(debug.fallbackReasonSamples);
+		const performanceText = renderMetrics?.performance
+			? `${renderMetrics.performance.fps.toFixed(1)} FPS, ${renderMetrics.performance.frameMs.toFixed(1)} ms/frame, ${renderMetrics.performance.renderMs.toFixed(1)} ms render`
+			: "waiting for performance sample";
+		return `Perf ${performanceText}. Diagnosis: ${diagnosis}. Draw pressure ${debug.renderCalls} visible draws from ${candidateBatchCount} candidate batches; static candidates ${debug.staticBvhCandidateBatchCount}${staticCandidateRatio}; retained batches terrain ${debug.terrainRenderBatchCount}, static ${debug.staticRenderBatchCount}, interiors ${debug.structuredInteriorRenderBatchCount}; retained tris ${debug.renderTriangles}. Material path ${debug.materialCount} materials, ${debug.textureResourceCount} textures, ${debug.indexedTextureResourceCount} indexed textures, ${debug.paletteResourceCount} palettes, direct/material types ${materialTypes}; fallbacks ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}. Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}, transition depth ${debug.transitionPortalMaxDepth}; canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
 	});
 	const sceneContextText = $derived(renderResourceSnapshot.sceneContextText);
 	const cameraResidencyText = $derived.by(() => {
@@ -305,14 +327,18 @@
 		if (!debug) {
 			return "Waiting for renderer metrics.";
 		}
-		return `${debug.renderPassCount} pass${debug.renderPassCount === 1 ? "" : "es"}, ${debug.renderCalls} call${debug.renderCalls === 1 ? "" : "s"}, ${debug.renderTriangles} tris.`;
+		const performanceText = renderMetrics?.performance
+			? `${renderMetrics.performance.fps.toFixed(1)} FPS, ${renderMetrics.performance.renderMs.toFixed(1)} ms render`
+			: "waiting for perf";
+		return `${performanceText}; ${debug.renderCalls} visible draw${debug.renderCalls === 1 ? "" : "s"}, ${debug.renderTriangles} retained tris, ${debug.staticRenderBatchCount} static batches, ${debug.structuredInteriorRenderBatchCount} interior batches, ${debug.terrainRenderBatchCount} terrain batches.`;
 	});
 	const rendererBvhSummaryText = $derived.by(() => {
 		const debug = renderMetrics?.debug;
 		if (!debug) {
 			return "Waiting for BVH metrics.";
 		}
-		return `BVH terrain ${debug.terrainBvhVisibleItemCount}/${debug.terrainBvhTotalItemCount}, outdoor statics ${debug.outdoorStaticBvhVisibleItemCount}/${debug.outdoorStaticBvhTotalItemCount}, env local ${debug.envCellLocalBvhVisibleItemCount}/${debug.envCellLocalBvhTotalItemCount}, static keys ${debug.visibleStaticInstanceKeyCount}, static batches ${debug.staticBvhCandidateBatchCount}/${debug.staticRenderBatchCount}, terrain batches ${debug.terrainBvhCandidateBatchCount}/${debug.terrainRenderBatchCount}, interior batches ${debug.structuredInteriorBvhCandidateBatchCount}/${debug.structuredInteriorRenderBatchCount}, overlays ${debug.debugOverlayBvhCandidateBatchCount}/${debug.debugOverlayRenderBatchCount}, portal masks ${debug.portalMaskBvhCandidateBatchCount}/${debug.portalMaskRenderBatchCount}, fallback batches ${debug.staticBvhFallbackIncludedBatchCount + debug.nonStaticBvhFallbackIncludedBatchCount}, portal keys ${debug.visiblePortalKeyCount}, env cells ${debug.envCellBvhConsideredCount}, fallbacks ${debug.fallbackReasonCount} (${debug.fallbackReasonSamples.join(" || ")}), query ${debug.queryTimeMs.toFixed(2)} ms.`;
+		const fallbackSamples = summarizeSamples(debug.fallbackReasonSamples);
+		return `BVH visible/candidate: terrain ${debug.terrainBvhVisibleItemCount}/${debug.terrainBvhTotalItemCount}, outdoor statics ${debug.outdoorStaticBvhVisibleItemCount}/${debug.outdoorStaticBvhTotalItemCount}, env local ${debug.envCellLocalBvhVisibleItemCount}/${debug.envCellLocalBvhTotalItemCount}. Candidate batches: static ${debug.staticBvhCandidateBatchCount}/${debug.staticRenderBatchCount}, terrain ${debug.terrainBvhCandidateBatchCount}/${debug.terrainRenderBatchCount}, interiors ${debug.structuredInteriorBvhCandidateBatchCount}/${debug.structuredInteriorRenderBatchCount}, overlays ${debug.debugOverlayBvhCandidateBatchCount}/${debug.debugOverlayRenderBatchCount}, portal masks ${debug.portalMaskBvhCandidateBatchCount}/${debug.portalMaskRenderBatchCount}. Keys: static ${debug.visibleStaticInstanceKeyCount}, portals ${debug.visiblePortalKeyCount}, env cells ${debug.envCellBvhConsideredCount}. Fallback batches ${debug.staticBvhFallbackIncludedBatchCount + debug.nonStaticBvhFallbackIncludedBatchCount}; fallback reasons ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}; query ${debug.queryTimeMs.toFixed(2)} ms.`;
 	});
 	const runtimeAppearanceStatusText = $derived.by(() => {
 		if (runtimeAppearancePending) {
@@ -478,6 +504,41 @@
 			],
 		},
 	]);
+
+	function describeRatio(value: number, total: number): string {
+		if (total <= 0) {
+			return "";
+		}
+		return ` (${((value / total) * 100).toFixed(0)}%)`;
+	}
+
+	function summarizeRecord(values: Record<string, number>): string {
+		const entries = Object.entries(values)
+			.filter(([, count]) => count > 0)
+			.sort(([, left], [, right]) => right - left);
+		if (entries.length === 0) {
+			return "none";
+		}
+		return entries
+			.slice(0, 4)
+			.map(([key, count]) => `${key} ${count}`)
+			.join(", ");
+	}
+
+	function summarizeSamples(samples: readonly string[]): string {
+		if (samples.length === 0) {
+			return "";
+		}
+		const counts = new Map<string, number>();
+		for (const sample of samples) {
+			counts.set(sample, (counts.get(sample) ?? 0) + 1);
+		}
+		return [...counts.entries()]
+			.sort(([, left], [, right]) => right - left)
+			.slice(0, 4)
+			.map(([sample, count]) => (count === 1 ? sample : `${sample} x${count}`))
+			.join(" || ");
+	}
 
 	// Browser free-camera controls are a navigation policy, not the future client camera.
 	function handleRenderMetricsChange(metrics: WorldRenderMetrics): void {
@@ -1685,6 +1746,7 @@
 >
 	<WorldDisplay
 		bind:this={worldDisplaySurface}
+		{rendererResourceGraph}
 		onCameraFrameChange={handleRendererCameraFrameChange}
 		onRenderMetricsChange={handleRenderMetricsChange}
 		onCameraResidencyChange={handleRendererCameraResidencyChange}

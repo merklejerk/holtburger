@@ -21,11 +21,11 @@
 	let currentSceneStreamer: SceneAssetStreamingController | null = null;
 	let latestFrontendState = $state(get(frontendState));
 	let appearancePreviewAssetIds: readonly string[] = [];
+	const rendererResourceGraph = new RendererResourceGraph();
 
 	onMount(() => {
 		let dispose = () => {};
 		const assetChannel = new AssetChannelController();
-		const rendererResourceGraph = new RendererResourceGraph();
 		const sceneStreamer = new SceneAssetStreamingController({
 			assetChannel,
 			getPreparedByAssetId: () => get(frontendState).asset.preparedByAssetId,
@@ -130,6 +130,7 @@
 		</section>
 	{:else}
 		<BrowserWorldDisplay
+			{rendererResourceGraph}
 			onRuntimeAppearanceAssetIdsChange={handleAppearancePreviewAssetIdsChange}
 		/>
 	{/if}

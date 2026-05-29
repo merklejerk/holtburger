@@ -1,12 +1,22 @@
 # Holtburger 3D Luma Renderer Swapout Plan
 
-Status: Phase 6C.2B implemented; Phase 6C.3 scene object assembly and direct material rendering is next.
+Status: Phase 6C.3 implemented; paused before Phase 6C.4 while the luma low-level renderer track is
+replaced by the WebGL2 pivot.
+
+Current blocking follow-up: [Holtburger 3D WebGL2 Renderer Pivot Plan](./holtburger-3d-webgl2-renderer-pivot-plan.md).
 
 ## Purpose
 
 Add a parallel luma.gl renderer selected at startup. Keep the existing Three.js renderer working
 behind a coarse app-facing backend boundary until the luma renderer reaches visual and performance
 parity, then delete the Three.js renderer instead of maintaining both permanently.
+
+Course correction: Phase 6C.3 proved the staged scene assembly/material/resource graph path, but
+profiling showed luma's high-level WebGL `RenderPipeline.draw(...)` path repeatedly applies program,
+VAO, texture, uniform, and broad device/render-pass state for every tiny staged draw. Dense scenes
+therefore perform worse than the Three.js backend before atlas/compaction work starts. Further
+low-level renderer work should replace luma with the WebGL2 pivot plan before continuing Phase
+6C.4+.
 
 This is a renderer-local app architecture change for `apps/holtburger-3d`. It should not promote
 browser/Tauri renderer details into shared crates.
@@ -2493,6 +2503,8 @@ Cleanup targets and legacy shims:
 
 ## Phase 6C.3: Scene Object Assembly and Direct Material Rendering
 
+Status: Complete.
+
 Purpose: define the assemble-to-visible path that turns incubated renderables into complete
 individual render scene entries before any render compaction work runs. This is the first post-6B
 phase that should make common material strategies visible through the individual/staged render path,
@@ -2536,6 +2548,113 @@ flowchart TD
 The dotted compaction path documents the later Phase 9 consumer of the assembly, strategy, graph,
 and atlas-layout outputs. Phase 6C.3 itself should publish direct/fallback staged render entries
 without requiring atlas resources or compacted batches.
+
+Progress:
+
+- Threaded the app-level `RendererResourceGraph` into `WorldDisplay` and the luma renderer so luma
+  scene assembly can participate in prepared-asset retention. The Three renderer receives the same
+  optional dependency but does not consume it.
+- Extended luma material plans with explicit prepared-asset dependencies and added a slot-based luma
+  material-plan entry point. This lets staged static parts resolve material slots through the same
+  direct/fallback strategy path that structured interiors already use.
+- Updated staged static assembly so material-slot draws use the gfx geometry surface id as the slot
+  index and the material slot as the material/resource identity. This corrects the earlier staged
+  helper's conflation of geometry surface ids and material surface asset ids.
+- Static objects, including buildings represented as static parts, now enter the luma staged path as
+  per-object/per-part/per-material-slot draw entries. Supported direct-color materials produce luma
+  direct texture batches with UV buffers and texture bindings; unsupported or unresolved materials
+  remain explicit flat fallback batches.
+- Runtime course correction: staged flat fallback batches may retain UV buffers for later direct
+  material assembly, but they must not bind those buffers to vertex attribute location 1 unless the
+  active shader layout declares `texCoord`. Binding retained UVs to the flat shader caused luma's
+  WebGL vertex-array setup to throw `Unknown attribute location 1` and abort static/interior sync.
+- Stabilization correction: material-slot static objects now use the default resolved-only readiness
+  policy before entering luma staging. Terrain still uses the explicit flat fallback proof path, but
+  statics no longer churn from fallback to direct material one dependency at a time while material
+  graph requests hydrate. This matches the incubation requirement that composed objects should not
+  enter the render scene until all parts resolve one way or another.
+- Stabilization correction: luma scene-object graph publication now tracks per-batch graph
+  signatures and skips graph transactions when an assembled draw's material/dependency signature has
+  not changed. This avoids repeatedly cloning and validating the renderer resource graph during
+  asset-state updates that do not change assembled draw dependencies.
+- Investigation addendum: a frontend hang still appears after buildings render and before/while
+  static scene objects finish appearing. Added browser-only dev diagnostics to the luma resource sync
+  path rather than guessing another fix. The console now logs
+  `[holtburger-3d][luma-resources]` phase timings for readiness, terrain, structured interiors,
+  static group/build progress, static GPU upload progress, stale cleanup, metrics, graph planning,
+  graph completion, and total sync duration. The next correction should use the last emitted phase
+  before the freeze as the source of truth.
+- Follow-up correction from diagnostics: the freeze was in renderer resource graph publication.
+  Console timings showed `graph` planning to completion taking about 37 seconds for a static-heavy
+  sync. The root cause was API shape, not WebGL upload: luma used `RendererResourceGraph.transaction`,
+  but each `draft.replaceDependencies(...)` call cloned and cycle-validated the whole graph. Added a
+  graph batch update API that applies many node/dependency replacements with one state clone and one
+  acyclicity validation, then changed luma assembly publication to use that path before leasing
+  changed scene nodes.
+- Follow-up diagnostics cleanup: removed the temporary luma resource-sync console logging after it
+  identified the graph publication bottleneck. Luma now reports rolling FPS/frame/render timing and
+  per-frame visible draw counts through `WorldRenderMetrics.performance` and the existing debug panel
+  instead of flooding the browser console. No draw cap was added.
+- Follow-up diagnostics UX correction: the Debug tab now groups luma render metrics into performance,
+  draw-pressure, retained-batch, material-path, and BVH summaries. It deduplicates repeated fallback
+  samples and calls out draw-call/state-change pressure when visible draw counts are high, so the
+  panel points at the current bottleneck instead of dumping a long raw counter paragraph.
+- Follow-up frame-loop correction: luma now continuously schedules the next animation frame from
+  `renderFrame`, matching the Three backend's steady render-loop behavior. The previous luma loop
+  rendered on initialization and then mostly on camera/resource invalidations, which made FPS update
+  only when the camera moved and made diagnostics measure invalidation frequency instead of steady
+  render throughput.
+- Follow-up frame-build cleanup: profiling the steady loop while looking away from the scene showed
+  frame construction still spending time in luma batch candidate selection even when no static
+  batches were visible. Removed the per-frame `bindings.map(...)`/per-batch `Set` dedupe allocation
+  from the hot path and now walks batch BVH keys directly. Follow-up cleanup removed the remaining
+  lazy duplicate-key check from frame construction because luma BVH key arrays are normalized by the
+  batch assembly helpers; the frame path now treats that as an invariant instead of defensive work.
+- Added luma scene-object/material-decision graph publication and leases for structured-interior and
+  staged-static draw entries. Removing a draw releases its scene-object lease, allowing prepared
+  assets to fall out of renderer retention through the normal graph/pruning flow.
+- Kept terrain on the existing flat/debug path. Terrain real materials remain Phase 7 because they
+  need terrain blend/indexed/detail behavior rather than the direct single-surface path.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/luma-resources.test.ts`
+- `npm run test:ts -- src/lib/world-display/luma-resources.test.ts src/lib/world-display/luma-frame.test.ts src/lib/world-display/renderer-resource-graph.test.ts src/lib/world-display/renderer-resource-cleanup.test.ts src/lib/world-display/luma-material-strategy.test.ts src/lib/world-display/render-surface-texture-data.test.ts src/lib/world-display/material-behavior.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run test:ts -- src/lib/world-display/luma-frame.test.ts`
+
+Decisions and course corrections:
+
+- Assembly remains inside the luma resource-sync boundary for now, with graph publication factored
+  into a small local helper. Extracting a separate public scene-assembly subsystem before dynamic
+  entities, terrain materials, and compaction use it would add API surface without proving the right
+  abstraction.
+- Direct staged statics reuse the existing luma texture cache and material strategy helpers. No
+  second direct-texture registry was introduced.
+- Geometry filtering for staged statics uses material slot indices when a part has resolved material
+  slots. The material slot's `surfaceId` remains the material asset identity. This should remain
+  consistent with the Three material-slot grouping path.
+- Graph dependencies intentionally retain prepared gfx objects, material recipes, and render surfaces
+  used by live luma staged/direct scene entries. Prepared texture dependency edges can be broadened
+  when compressed/decompressed prepared-texture direct upload becomes a runtime path for common
+  materials.
+- Render policy/backend config changes remain scene-rebuild events. No live material migration path
+  was added.
+
+Cleanup targets and future refinements:
+
+- The luma assembly graph helper is private to `luma-resources.ts`. Promote it only when another
+  renderable family or Phase 9 compaction needs the same graph publication contract.
+- Material fallback reasons still flow through the generic luma fallback metrics sample list. A later
+  metrics cleanup should split renderer init, culling fallback, and material fallback diagnostics.
+- Structured interiors already use direct material planning, but Phase 6C.5 should route them through
+  the shared material-strategy candidate path for atlas eligibility metrics without changing their
+  current direct/fallback rendering behavior.
+- Immediate interim pivot is required before Phase 6C.4. The visible staged material path exposed a
+  renderer-substrate problem: luma's high-level WebGL draw API is too expensive for the dense staged
+  baseline. Continue with the WebGL2 pivot plan before resuming atlas layout, material atlas, terrain
+  material, portal, or compaction phases.
 
 Tasks:
 
@@ -2594,6 +2713,8 @@ Exit criteria:
 
 ## Phase 6C.4: Atlas Layout Planner
 
+Status: Paused behind the WebGL2 renderer pivot.
+
 Purpose: extract atlas page/rect placement into a pure layout helper separate from material strategy,
 resource realization, and render compaction scheduling.
 
@@ -2601,6 +2722,10 @@ Scheduling note: this phase is no longer on the critical path for first direct t
 assembly. It should run after the staged/direct path is real, or earlier only if it stays a pure
 extraction from the placement code currently inside `luma-material-strategy.ts` with no renderer
 wiring.
+
+Pivot note: after Phase 6C.3, "staged/direct path is real" is no longer sufficient. The staged path
+also needs a fast WebGL2 baseline that is not bottlenecked by luma high-level draw submission. Resume
+this phase only after the WebGL2 pivot plan reaches its staged baseline gate.
 
 Tasks:
 

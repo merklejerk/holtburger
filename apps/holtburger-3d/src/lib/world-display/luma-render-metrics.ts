@@ -23,6 +23,7 @@ export interface LumaRenderMetricsInput {
 	renderGraphPolicy: string;
 	clearCount: number;
 	drawCallCount: number;
+	lastFrameDrawCount: number;
 	initializationError: string | null;
 	terrainBatchCount?: number;
 	structuredInteriorBatchCount?: number;
@@ -35,6 +36,7 @@ export interface LumaRenderMetricsInput {
 	materialFallbackReasonSamples?: readonly string[];
 	lumaFrameMetrics?: LumaFrameMetrics | null;
 	worldTriangleCount?: number;
+	performance: WorldRenderMetrics["performance"];
 	textureFilteringMode: WorldDisplayTextureFilteringMode;
 	textureColorSpaceMode: WorldDisplayTextureColorSpaceMode;
 	detailTexturesEnabled: boolean;
@@ -46,7 +48,7 @@ export function createLumaRenderMetrics(
 	return {
 		bounds: null,
 		cameraFrame: input.cameraFrame,
-		performance: null,
+		performance: input.performance,
 		portal: {
 			topologyOutdoorPortalCount: 0,
 			apertureCandidateCount: input.transitionPortalModel.candidates.length,
@@ -207,8 +209,8 @@ export function createLumaRenderMetrics(
 			preparedTextureUploadCount: 0,
 			preparedTextureGeneratedByteLength: 0,
 			compressedSingleLevelFallbackUploadCount: 0,
-			renderCalls: input.drawCallCount,
-			renderTriangles: input.worldTriangleCount ?? input.drawCallCount,
+			renderCalls: input.lastFrameDrawCount,
+			renderTriangles: input.worldTriangleCount ?? 0,
 			renderLines: 0,
 			renderPoints: 0,
 		},

@@ -29,6 +29,7 @@ import {
 	type LumaWorldResourceStore,
 } from "./luma-resources";
 import type { MaterialTextureCapabilities } from "./render-surface-texture-data";
+import type { WorldRenderMetrics } from "./renderer-contract";
 import type {
 	WorldDisplayRenderer,
 	WorldDisplayRendererOptions,
@@ -39,6 +40,7 @@ const LUMA_ERROR_CLASS_NAME = "world-display__luma-error";
 const LUMA_CLEAR_COLOR: [number, number, number, number] = [
 	0.015, 0.055, 0.085, 1,
 ];
+const PERFORMANCE_REPORT_INTERVAL_MS = 500;
 const TRIANGLE_VERTEX_COUNT = 3;
 
 const TRIANGLE_VERTICES = new Float32Array([
@@ -163,6 +165,13 @@ export function createLumaWorldDisplayRendererImplementation(
 	let frameHandle: number | null = null;
 	let clearCount = 0;
 	let drawCallCount = 0;
+	let lastFrameDrawCount = 0;
+	let lastFrameAt: number | null = null;
+	let latestPerformanceMetrics: WorldRenderMetrics["performance"] = null;
+	let performanceWindowStartedAt = 0;
+	let performanceWindowFrameCount = 0;
+	let performanceWindowFrameMs = 0;
+	let performanceWindowRenderMs = 0;
 	let latestFrameMetrics: LumaFrameMetrics | null = null;
 	let initializationError: string | null = null;
 
@@ -425,18 +434,21 @@ export function createLumaWorldDisplayRendererImplementation(
 		if (disposed || frameHandle !== null) {
 			return;
 		}
-		frameHandle = requestAnimationFrame(() => {
+		frameHandle = requestAnimationFrame((frameAt) => {
 			frameHandle = null;
-			renderFrame();
+			renderFrame(frameAt);
 		});
 	}
 
-	function renderFrame(): void {
+	function renderFrame(frameAt: number): void {
 		if (!resources) {
 			return;
 		}
+		scheduleFrame();
 
 		syncCanvasSize();
+		const renderStartedAt = window.performance.now();
+		let frameDrawCount = 0;
 		const commandEncoder = resources.device.createCommandEncoder({
 			id: "luma-world-command-encoder",
 		});
@@ -492,6 +504,7 @@ export function createLumaWorldDisplayRendererImplementation(
 				});
 				if (didDraw) {
 					drawCallCount += 1;
+					frameDrawCount += 1;
 				}
 			}
 		} else {
@@ -503,11 +516,17 @@ export function createLumaWorldDisplayRendererImplementation(
 			});
 			if (didDraw) {
 				drawCallCount += 1;
+				frameDrawCount += 1;
 			}
 		}
 
 		renderPass.end();
 		resources.device.submit(commandEncoder.finish());
+		lastFrameDrawCount = frameDrawCount;
+		recordPerformanceSample({
+			frameAt,
+			renderMs: window.performance.now() - renderStartedAt,
+		});
 		reportMetrics();
 	}
 
@@ -520,6 +539,42 @@ export function createLumaWorldDisplayRendererImplementation(
 			canvas.height = height;
 			resources?.device.canvasContext?.setDrawingBufferSize(width, height);
 		}
+	}
+
+	function recordPerformanceSample({
+		frameAt,
+		renderMs,
+	}: {
+		frameAt: number;
+		renderMs: number;
+	}): void {
+		if (lastFrameAt !== null) {
+			const frameMs = frameAt - lastFrameAt;
+			performanceWindowFrameCount += 1;
+			performanceWindowFrameMs += frameMs;
+			performanceWindowRenderMs += renderMs;
+			if (
+				frameAt - performanceWindowStartedAt >=
+				PERFORMANCE_REPORT_INTERVAL_MS
+			) {
+				const averageFrameMs =
+					performanceWindowFrameMs / performanceWindowFrameCount;
+				const averageRenderMs =
+					performanceWindowRenderMs / performanceWindowFrameCount;
+				latestPerformanceMetrics = {
+					fps: averageFrameMs > 0 ? 1000 / averageFrameMs : 0,
+					frameMs: averageFrameMs,
+					renderMs: averageRenderMs,
+				};
+				performanceWindowStartedAt = frameAt;
+				performanceWindowFrameCount = 0;
+				performanceWindowFrameMs = 0;
+				performanceWindowRenderMs = 0;
+			}
+		} else {
+			performanceWindowStartedAt = frameAt;
+		}
+		lastFrameAt = frameAt;
 	}
 
 	function destroyResources(): void {
@@ -555,6 +610,7 @@ export function createLumaWorldDisplayRendererImplementation(
 			structuredInteriorScene,
 			transitionPortalModel,
 			renderChunkTransforms,
+			rendererResourceGraph: options.rendererResourceGraph,
 		});
 	}
 
@@ -614,6 +670,7 @@ export function createLumaWorldDisplayRendererImplementation(
 				: "luma-initializing",
 			clearCount,
 			drawCallCount,
+			lastFrameDrawCount,
 			initializationError,
 			terrainBatchCount: resources?.worldStore.terrainBatchCount ?? 0,
 			structuredInteriorBatchCount:
@@ -631,6 +688,7 @@ export function createLumaWorldDisplayRendererImplementation(
 				resources?.worldStore.materialFallbackReasonSamples ?? [],
 			lumaFrameMetrics: latestFrameMetrics,
 			worldTriangleCount: resources?.worldStore.triangleCount ?? 0,
+			performance: latestPerformanceMetrics,
 			textureFilteringMode: options.textureFilteringMode ?? "anisotropic-4x",
 			textureColorSpaceMode: options.textureColorSpaceMode ?? "auto",
 			detailTexturesEnabled: options.detailTexturesEnabled ?? true,

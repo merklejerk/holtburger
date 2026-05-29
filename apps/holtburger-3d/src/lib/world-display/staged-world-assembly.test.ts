@@ -2,8 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import {
 	createInitialAssetChannelState,
+	formatAtlasReadyPreparedTextureAssetId,
 	type AssetChannelState,
+	type PreparedAssetRecord,
+	type PreparedMaterialRecipePayload,
 	type PreparedPolygonSetRenderGeometry,
+	type PreparedRenderSurfacePayload,
+	type PreparedTexturePayload,
 } from "../assets/types";
 import { createBaseMaterialAppearanceContext } from "./material-appearance";
 import { WORLD_RENDER_DOMAIN } from "./render-domains";
@@ -14,10 +19,27 @@ import {
 import type { RenderChunkTransform } from "./render-anchor";
 import type { StaticRenderablePart } from "./static-renderables";
 
+const PIXEL_FORMAT_DXT1 = 0x3154_5844;
+const PIXEL_FORMAT_A8R8G8B8 = 0x15;
+const SURFACE_TYPE_DIFFUSE = 0x20;
+
 describe("staged world assembly", () => {
 	it("splits static draw units by material slot and keeps chunk-local geometry", () => {
 		const drawUnits = buildStagedStaticDrawUnitAssemblies({
-			assetState: createAssetState(createTwoSlotGfxGeometry()),
+			assetState: createAssetState(createTwoSlotGfxGeometry(), [
+				createMaterialRecipeRecord({
+					surfaceId: 0x08000001,
+					renderSurfaceId: 0x06000001,
+				}),
+				createRenderSurfaceRecord({ renderSurfaceId: 0x06000001 }),
+				createAtlasPreparedTextureRecord({ renderSurfaceId: 0x06000001 }),
+				createMaterialRecipeRecord({
+					surfaceId: 0x08000002,
+					renderSurfaceId: 0x06000002,
+				}),
+				createRenderSurfaceRecord({ renderSurfaceId: 0x06000002 }),
+				createAtlasPreparedTextureRecord({ renderSurfaceId: 0x06000002 }),
+			]),
 			chunkOffsetByKey: new Map([
 				["landblock/12340000", { x: 10, y: 20, z: 30 }],
 			]),
@@ -41,6 +63,18 @@ describe("staged world assembly", () => {
 		expect(drawUnits.map((unit) => unit.preparedAssetIds[0])).toEqual([
 			"gfx-obj/01000001",
 			"gfx-obj/01000001",
+		]);
+		expect(drawUnits.map((unit) => unit.material.kind)).toEqual([
+			"direct-texture",
+			"direct-texture",
+		]);
+		expect(
+			drawUnits.map((unit) =>
+				unit.material.kind === "direct-texture" ? unit.material.textureKey : null,
+			),
+		).toEqual([
+			"texture/06000001/827611204/8/8/none/clamp/clamp/linear/linear/none",
+			"texture/06000002/827611204/8/8/none/clamp/clamp/linear/linear/none",
 		]);
 	});
 
@@ -85,6 +119,7 @@ describe("staged world assembly", () => {
 
 function createAssetState(
 	renderGeometry: PreparedPolygonSetRenderGeometry,
+	records: PreparedAssetRecord[] = [],
 ): AssetChannelState {
 	const state = createInitialAssetChannelState();
 	for (const assetId of ["gfx-obj/01000001", "gfx-obj/01000002"]) {
@@ -94,6 +129,9 @@ function createAssetState(
 				renderGeometry,
 			},
 		} as AssetChannelState["preparedAsset"];
+	}
+	for (const record of records) {
+		state.preparedByAssetId[record.request.assetId] = record;
 	}
 	return state;
 }
@@ -178,6 +216,131 @@ function createMaterialSlot(
 		materialAssetId: `material/${surfaceId.toString(16).padStart(8, "0")}`,
 		materialVariantSignature: null,
 	};
+}
+
+function createMaterialRecipeRecord(options: {
+	surfaceId: number;
+	renderSurfaceId: number;
+}): PreparedAssetRecord {
+	const assetId = `material/${options.surfaceId.toString(16).padStart(8, "0")}`;
+	return createRecord(assetId, {
+		kind: "material-recipe",
+		sourceAssetKind: "material-recipe",
+		residencyKind: "unknown",
+		provenance: createProvenance(),
+		surfaceId: options.surfaceId,
+		surfaceType: SURFACE_TYPE_DIFFUSE,
+		source: {
+			kind: "texture",
+			surfaceTextureId: 0x05000001,
+			selectedRenderSurfaceId: options.renderSurfaceId,
+			paletteId: null,
+			renderSurfaceDefaultPaletteIds: [],
+		},
+		translucency: 0,
+		luminosity: 0,
+		diffuse: 1,
+		dependencies: {
+			surfaceTextureAssetIds: [],
+			renderSurfaceAssetIds: [
+				`render-surface/${options.renderSurfaceId.toString(16).padStart(8, "0")}`,
+			],
+			paletteAssetIds: [],
+		},
+	} satisfies PreparedMaterialRecipePayload);
+}
+
+function createRenderSurfaceRecord(options: {
+	renderSurfaceId: number;
+}): PreparedAssetRecord {
+	const assetId = `render-surface/${options.renderSurfaceId.toString(16).padStart(8, "0")}`;
+	return createRecord(assetId, {
+		kind: "render-surface",
+		sourceAssetKind: "render-surface",
+		residencyKind: "unknown",
+		provenance: createProvenance(),
+		renderSurfaceId: options.renderSurfaceId,
+		unknown: 0,
+		width: 8,
+		height: 8,
+		formatRaw: PIXEL_FORMAT_DXT1,
+		format: "DXT1",
+		sourceByteLength: 32,
+		sourceBytes: new Uint8Array(32),
+		defaultPaletteId: null,
+		dependencies: { paletteAssetIds: [] },
+	} satisfies PreparedRenderSurfacePayload);
+}
+
+function createAtlasPreparedTextureRecord(options: {
+	renderSurfaceId: number;
+}): PreparedAssetRecord {
+	const assetId = formatAtlasReadyPreparedTextureAssetId({
+		renderSurfaceId: options.renderSurfaceId,
+		usage: "raw",
+	});
+	return createRecord(assetId, {
+		kind: "prepared-texture",
+		sourceAssetKind: "prepared-texture",
+		residencyKind: "unknown",
+		provenance: createProvenance(),
+		renderSurfaceId: options.renderSurfaceId,
+		usage: "raw",
+		outputFormat: "rgba8",
+		mipPolicy: "none",
+		colorSpace: "linear",
+		sourceFormatRaw: PIXEL_FORMAT_DXT1,
+		sourceFormat: "DXT1",
+		sourceWidth: 8,
+		sourceHeight: 8,
+		sourceByteLength: 32,
+		sourceHash: `hash-${options.renderSurfaceId}`,
+		levels: [
+			{
+				level: 0,
+				width: 8,
+				height: 8,
+				formatRaw: PIXEL_FORMAT_A8R8G8B8,
+				format: "A8R8G8B8",
+				byteLength: 256,
+				bytes: new Uint8Array(256),
+			},
+		],
+		dependencies: {
+			renderSurfaceAssetIds: [
+				`render-surface/${options.renderSurfaceId.toString(16).padStart(8, "0")}`,
+			],
+		},
+		diagnostics: {
+			generatedLevelCount: 1,
+			generatedByteLength: 256,
+			decodeMs: 0,
+			downsampleMs: 0,
+			encodeMs: 0,
+			totalMs: 0,
+		},
+	} satisfies PreparedTexturePayload);
+}
+
+function createRecord(
+	assetId: string,
+	payload: PreparedAssetRecord["payload"],
+): PreparedAssetRecord {
+	return {
+		request: { assetId },
+		response: { assetId, status: "ready", payload },
+		payload,
+		preparedAt: "test",
+	} as PreparedAssetRecord;
+}
+
+function createProvenance() {
+	return {
+		source: "cache",
+		sourceAssetKind: null,
+		errorCode: null,
+		detail: null,
+	} as const;
 }
 
 function createPlacement(origin: RenderChunkTransform["offset"]) {

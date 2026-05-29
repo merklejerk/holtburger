@@ -9,7 +9,11 @@ import {
 	type PreparedRenderSurfacePayload,
 	type PreparedTexturePayload,
 } from "../assets/types";
-import { planStagedWorldMaterialStrategies } from "./staged-world-material-strategy";
+import {
+	planStagedWorldMaterialStrategies,
+	resolveStagedWorldMaterialStrategy,
+} from "./staged-world-material-strategy";
+import { resolveStagedWorldMaterialSlotPlan } from "./staged-world-materials";
 import type { ResolvedMaterialSlot } from "./material-plan";
 
 const PIXEL_FORMAT_A8R8G8B8 = 0x15;
@@ -18,6 +22,91 @@ const SURFACE_TYPE_DIFFUSE = 0x20;
 const SURFACE_TYPE_ALPHA = 0x100;
 
 describe("staged world material strategy", () => {
+	it("resolves atlas-eligible compressed materials as direct staged textures", () => {
+		const state = createAssetState([
+			createMaterialRecipeRecord({
+				surfaceId: 0x08000001,
+				renderSurfaceId: 0x06000001,
+			}),
+			createRenderSurfaceRecord({ renderSurfaceId: 0x06000001 }),
+			createAtlasPreparedTextureRecord({ renderSurfaceId: 0x06000001 }),
+		]);
+
+		const strategy = resolveStagedWorldMaterialStrategy({
+			assetState: state,
+			input: createRequirement("static", 0),
+		});
+
+		expect(strategy.kind).toBe("direct-texture");
+		expect(strategy).toMatchObject({
+			kind: "direct-texture",
+			reason: null,
+			detail: null,
+			atlasEligibility: {
+				atlasEntryKey: expect.stringContaining("atlas-entry"),
+				atlasEntry: {
+					preparedTextureAssetId:
+						"prepared-texture/06000001?usage=raw&out=rgba8&mips=none&cs=linear",
+				},
+			},
+		});
+	});
+
+	it("keeps atlas candidacy out of staged fallback reasons", () => {
+		const state = createAssetState([
+			createMaterialRecipeRecord({
+				surfaceId: 0x08000001,
+				renderSurfaceId: 0x06000001,
+			}),
+			createRenderSurfaceRecord({ renderSurfaceId: 0x06000001 }),
+			createAtlasPreparedTextureRecord({ renderSurfaceId: 0x06000001 }),
+		]);
+
+		const material = resolveStagedWorldMaterialSlotPlan({
+			assetState: state,
+			slot: createMaterialSlot({ slotIndex: 0, surfaceId: 0x08000001 }),
+			fallbackColorKey: "test/static",
+			renderableKind: "static",
+		});
+
+		expect(material).toMatchObject({
+			kind: "direct-texture",
+			fallbackReason: null,
+			preparedAssetIds: [
+				"material/08000001",
+				"prepared-texture/06000001?usage=raw&out=rgba8&mips=none&cs=linear",
+				"render-surface/06000001",
+			],
+		});
+	});
+
+	it("uses the same staged direct policy for structured interiors", () => {
+		const state = createAssetState([
+			createMaterialRecipeRecord({
+				surfaceId: 0x08000001,
+				renderSurfaceId: 0x06000001,
+			}),
+			createRenderSurfaceRecord({ renderSurfaceId: 0x06000001 }),
+			createAtlasPreparedTextureRecord({ renderSurfaceId: 0x06000001 }),
+		]);
+
+		const strategy = resolveStagedWorldMaterialStrategy({
+			assetState: state,
+			input: createRequirement("structured-interior", 0),
+		});
+
+		expect(strategy).toMatchObject({
+			kind: "direct-texture",
+			renderableKind: "structured-interior",
+			reason: null,
+			atlasEligibility: {
+				atlasEntry: {
+					renderSurfaceId: 0x06000001,
+				},
+			},
+		});
+	});
+
 	it("deduplicates atlas entries across static and structured-interior requirements", () => {
 		const state = createAssetState([
 			createMaterialRecipeRecord({

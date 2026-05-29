@@ -87,10 +87,7 @@ export function resolveStagedWorldMaterialSlotPlan(options: {
 			key: `${strategy.kind}/${strategy.materialAssetId}/${options.fallbackColorKey}`,
 			colorKey: options.fallbackColorKey,
 			behavior: strategy.behavior,
-			reason:
-				strategy.kind === "atlas"
-					? `material ${strategy.materialAssetId} resolved atlas strategy before atlas rendering is wired`
-					: strategy.detail,
+			reason: strategy.detail,
 			preparedAssetIds: collectStrategyPreparedAssetIds(strategy),
 		});
 	}
@@ -139,10 +136,9 @@ function collectStrategyPreparedAssetIds(
 		assetIds.add(
 			`render-surface/${formatHex32(strategy.textureUpload.upload.renderSurfaceId)}`,
 		);
-	}
-	if (strategy.kind === "atlas") {
-		assetIds.add(strategy.atlasEntry.preparedTextureAssetId);
-		assetIds.add(`render-surface/${formatHex32(strategy.atlasEntry.renderSurfaceId)}`);
+		if (strategy.atlasEligibility) {
+			assetIds.add(strategy.atlasEligibility.atlasEntry.preparedTextureAssetId);
+		}
 	}
 	return [...assetIds].sort();
 }

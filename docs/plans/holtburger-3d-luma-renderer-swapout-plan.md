@@ -1,7 +1,6 @@
 # Holtburger 3D Luma Renderer Swapout Plan
 
-Status: Phase 6C implemented; remaining Phase 6C.* phases have been dry-run against the codebase;
-Phase 6C.1 shared luma material strategy module is next.
+Status: Phase 6C.1 implemented; Phase 6C.2 normalized texture preparation policy is next.
 
 ## Purpose
 
@@ -1518,11 +1517,12 @@ Decisions, course corrections, and cleanup targets:
   indexed geometry instead of reusing source vertex indices directly. That makes per-surface
   material splitting straightforward and avoids uploading unrelated triangles for direct material
   batches.
-- Direct texture support is intentionally limited to direct-color render surfaces. S3TC compressed
-  payloads, indexed/paletted textures, terrain blends, detail overlays, and texture velocity still
-  fall back or remain later phases.
-- Luma texture capabilities currently assume no S3TC and no packed RGBA4444 upload. That keeps
-  WebGL compatibility conservative until compressed/indexed paths are handled deliberately.
+- Direct texture support initially covered direct-color render surfaces only. Phase 6C.1 now probes
+  runtime luma WebGL texture capabilities and can upload S3TC compressed prepared mips when the
+  device supports them. Indexed/paletted textures, terrain blends, detail overlays, and texture
+  velocity still fall back or remain later phases.
+- Luma texture capability defaults are now test/fallback values only. The luma renderer must inject
+  runtime-detected capabilities into resource synchronization.
 - Material fallback reasons are now included in luma metrics, but they still share the existing
   generic `fallbackReasonSamples` debug field. A later metrics cleanup should split culling
   fallback, material fallback, and renderer initialization fallback into distinct UI fields.
@@ -1775,16 +1775,17 @@ Exit criteria:
 
 Progress:
 
-- Added `luma-material-atlas-planner.ts` as the luma-local planning boundary for atlas-capable
-  material requirements. It accepts static, structured-interior, dynamic, terrain, and unknown
-  renderable-kind labels, but current tests exercise static and structured-interior requirements.
+- Added the initial luma-local planning boundary for atlas-capable material requirements. Phase
+  6C.1 later replaced this with `luma-material-strategy.ts`, which accepts static,
+  structured-interior, dynamic, terrain, and unknown renderable-kind labels.
 - Added stable planner DTOs for atlas-ready material requirements, fallback requirements, atlas
   entries, atlas texture placements, atlas set generations, and draw slices.
 - Implemented material-aware atlas eligibility:
   - material recipe, first render surface, prepared atlas texture, render state, source alpha,
     unsupported material flags, and texture velocity are evaluated together;
   - compressed surfaces must have the Phase 6C.0 `rgba8/mips=none/linear` prepared-texture payload;
-  - direct-color surfaces currently fall back as `direct-color-normalization-deferred`;
+  - direct-color surfaces were initially deferred, then Phase 6C.1 reclassified supported
+    direct-color surfaces as `direct-texture`;
   - blended transparency and texture-velocity/animated UV paths stay out of atlas batches;
   - clipmap/alpha-test behavior remains atlas-eligible when the rest of the material is supported.
 - Implemented deterministic atlas entry keys, material slot keys, atlas set generation keys, and
@@ -1829,7 +1830,7 @@ Decisions and course corrections:
 
 Validation:
 
-- `npm run test:ts -- src/lib/world-display/luma-material-atlas-planner.test.ts src/lib/world-display/luma-resources.test.ts`
+- `npm run test:ts -- src/lib/world-display/luma-material-strategy.test.ts src/lib/world-display/luma-resources.test.ts`
 - `npm run check`
 - `npm run lint:ts`
 - `npm run lint:dead`
@@ -1853,13 +1854,12 @@ Cleanup targets and legacy shims:
 
 ### Remaining Phase 6C.* dry-run findings
 
-Codebase reality as of the dry run:
+Codebase reality as of the dry run and Phase 6C.1 implementation:
 
-- `luma-material-atlas-planner.ts` and `luma-materials.ts` currently make overlapping material
-  decisions. The atlas planner classifies atlas-only requirements and fallbacks; `luma-materials.ts`
-  separately resolves direct-texture/flat material plans and owns luma texture resource creation.
-  Phase 6C.1 should merge policy/strategy first so 6C.3 does not build scene assembly on two
-  divergent material classifiers.
+- `luma-material-strategy.ts` is now the shared strategy boundary. The old
+  `luma-material-atlas-planner.ts` file was removed rather than kept as a public re-export shim.
+  `luma-materials.ts` delegates direct/flat material decisions to the shared strategy module while
+  retaining only GPU texture resource realization.
 - `material-texture-resolution.ts` is already the small shared helper both paths use to pick the
   first material render surface. Keep that helper, but do not let it grow into a planner.
 - `syncLumaWorldResources(...)` already renders structured-interior surfaces through direct luma
@@ -1888,6 +1888,8 @@ Codebase reality as of the dry run:
   real material state.
 
 ## Phase 6C.1: Shared Luma Material Strategy Core
+
+Status: Complete.
 
 Purpose: refactor the Phase 6C atlas-only planner into a shared luma material strategy core without
 also changing scene assembly, request policy, or atlas layout ownership.
@@ -1934,15 +1936,46 @@ Exit criteria:
 
 Cleanup targets and legacy shims:
 
-- The old atlas-only planner name/API should not survive as the public entry point. If an internal
-  atlas helper remains, keep it unexported or narrowly exported for tests behind the shared strategy
-  module.
-- `resolveLumaSurfaceMaterialPlan(...)` in `luma-materials.ts` should either delegate to the shared
-  strategy helpers or become a thin compatibility shim for existing direct-material call sites. Do
-  not let it continue as an independent material resolver long-term.
-- Do not expose `planLumaMaterialAtlasSet(...)` as the primary public API after this phase. Existing
-  tests may keep a compatibility wrapper briefly, but new callers should enter through the shared
-  strategy/classification helpers.
+- The old atlas-only planner name/API did not survive as the public entry point:
+  `luma-material-atlas-planner.ts` was deleted and the tests moved to
+  `luma-material-strategy.test.ts`.
+- `resolveLumaSurfaceMaterialPlan(...)` is now a thin compatibility shim for existing
+  structured-interior direct-material call sites. It should shrink or disappear once Phase 6C.3
+  routes assembled scene objects through strategy records directly.
+- `planLumaMaterialStrategies(...)` replaces the old atlas-only public entry point. It still includes
+  atlas placement and draw-slice planning because Phase 6C.4 has not extracted atlas layout yet; this
+  is the main introduced cleanup target before compaction work resumes.
+
+Progress notes:
+
+- Added `luma-material-strategy.ts` with explicit `atlas`, `direct-texture`, `flat-fallback`, and
+  `unsupported` strategy records.
+- Preserved atlas entry dedupe, atlas capacity overflow, material-table overflow, render-state keys,
+  sampling keys, and fallback reason tests under `luma-material-strategy.test.ts`.
+- Moved direct texture key construction and fallback luma material texture capabilities into the
+  shared strategy module so direct texture semantics have one source of truth.
+- Direct-color render surfaces now classify as `direct-texture` when they can be decoded/uploaded by
+  the current direct path instead of appearing as rejected atlas candidates.
+- Course correction after implementation review: the luma renderer now detects runtime WebGL
+  material texture capabilities and passes them into `syncLumaWorldResources(...)`; compressed DXT
+  direct-material uploads are supported when the runtime reports S3TC support. The hardcoded luma
+  capability defaults remain only as test/fallback inputs and should not drive renderer behavior.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/luma-material-strategy.test.ts src/lib/world-display/luma-resources.test.ts`
+- `npm run check`
+
+Course corrections and future refinements:
+
+- The shared strategy module is still doing simple shelf atlas packing because that logic came from
+  the previous atlas planner. Phase 6C.4 should still extract pure atlas layout so material strategy
+  owns classification and keys, not placement.
+- The strategy module returns ready direct upload data but does not allocate GPU resources. This is
+  intentional: upload preparation is deterministic material resolution; GPU texture creation remains
+  in `luma-materials.ts` until scene assembly capability injection replaces that shim.
+- No immediate interim phase is required before 6C.2. The next blocking debt remains 6C.2B before
+  6C.3, because static scene assembly still needs a staged, UV-preserving direct path.
 
 ## Phase 6C.2: Normalized Texture Preparation Policy
 
@@ -2305,7 +2338,8 @@ resource realization, and render compaction scheduling.
 
 Scheduling note: this phase is no longer on the critical path for first direct textured scene
 assembly. It should run after the staged/direct path is real, or earlier only if it stays a pure
-extraction from `luma-material-atlas-planner.ts` with no renderer wiring.
+extraction from the placement code currently inside `luma-material-strategy.ts` with no renderer
+wiring.
 
 Tasks:
 

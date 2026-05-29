@@ -47,6 +47,7 @@ export interface SceneAssetStreamingControllerDeps {
 	assetChannel: SceneAssetChannel;
 	getPreparedByAssetId(): Record<string, PreparedAssetRecord>;
 	getCacheMetadataByAssetId(): Record<string, PreparedAssetCacheMetadata>;
+	getRendererRetainedPreparedAssetIds?(): readonly string[];
 	markAssetsPending(requests: AssetLookupRequestDto[]): void;
 	applyPreparedAssets(assets: PreparedAssetRecord[]): void;
 	applyAssetCachePrune(prunePlan: PreparedAssetCachePrunePlan): void;
@@ -253,6 +254,8 @@ export class SceneAssetStreamingController {
 				},
 			).concat(input.appearancePreviewAssetIds),
 			inFlightAssetIds: [...this.inFlightAssetIds],
+			rendererRetainedAssetIds:
+				this.deps.getRendererRetainedPreparedAssetIds?.() ?? [],
 			nowMs: this.deps.nowMs?.() ?? Date.now(),
 			warmRetainMs:
 				this.deps.warmRetainMs ?? DEFAULT_PREPARED_ASSET_WARM_RETAIN_MS,

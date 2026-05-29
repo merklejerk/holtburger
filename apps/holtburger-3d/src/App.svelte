@@ -6,6 +6,7 @@
 	import { AssetChannelController } from "./lib/assets/asset-channel";
 	import { SceneAssetStreamingController } from "./lib/assets/scene-asset-streaming-controller";
 	import { readDebugConfig } from "./lib/host/tauri";
+	import { RendererResourceGraph } from "./lib/world-display/renderer-resource-graph";
 	import BrowserWorldDisplay from "./pages/BrowserWorldDisplay.svelte";
 
 	const tauriLaunchCommand = "npm run tauri:dev";
@@ -24,11 +25,14 @@
 	onMount(() => {
 		let dispose = () => {};
 		const assetChannel = new AssetChannelController();
+		const rendererResourceGraph = new RendererResourceGraph();
 		const sceneStreamer = new SceneAssetStreamingController({
 			assetChannel,
 			getPreparedByAssetId: () => get(frontendState).asset.preparedByAssetId,
 			getCacheMetadataByAssetId: () =>
 				get(frontendState).asset.cacheMetadataByAssetId,
+			getRendererRetainedPreparedAssetIds: () =>
+				rendererResourceGraph.retainedPreparedAssetIds(),
 			markAssetsPending: (requests) =>
 				frontendState.markAssetsPending(requests),
 			applyPreparedAssets: (assets) =>

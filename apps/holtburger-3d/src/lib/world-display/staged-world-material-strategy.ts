@@ -5,7 +5,7 @@ import type {
 	PreparedTexturePayload,
 } from "../assets/types";
 import { formatAtlasReadyPreparedTextureAssetId } from "../assets/types";
-import { resolveLumaPreparedTextureAssetIds } from "../assets/luma-material-texture-preparation-policy";
+import { resolveNormalizedPreparedTextureAssetIds } from "../assets/material-texture-preparation-policy";
 import { formatHex32 } from "../landblocks";
 import {
 	deriveLegacyMaterialBehaviorDto,
@@ -29,14 +29,14 @@ import {
 	selectRenderSurfaceTextureSamplingPolicy,
 } from "./texture-sampling-policy";
 
-export type LumaMaterialRenderableKind =
+export type StagedWorldMaterialRenderableKind =
 	| "static"
 	| "structured-interior"
 	| "dynamic"
 	| "terrain"
 	| "unknown";
 
-export type LumaMaterialStrategyFallbackReason =
+export type StagedWorldMaterialStrategyFallbackReason =
 	| "missing-material-recipe"
 	| "solid-color-material"
 	| "missing-render-surface"
@@ -51,35 +51,35 @@ export type LumaMaterialStrategyFallbackReason =
 	| "atlas-full"
 	| "material-table-overflow";
 
-export interface LumaMaterialStrategyPolicy {
+export interface StagedWorldMaterialStrategyPolicy {
 	maxAtlasTextureSize: number;
 	maxAtlasTextureCount: number;
 	baseGutterPixels: number;
 	maxMaterialSlotsPerDraw: number;
 }
 
-const DEFAULT_LUMA_MATERIAL_STRATEGY_POLICY: LumaMaterialStrategyPolicy = {
+const DEFAULT_STAGED_WORLD_MATERIAL_STRATEGY_POLICY: StagedWorldMaterialStrategyPolicy = {
 	maxAtlasTextureSize: 4096,
 	maxAtlasTextureCount: 8,
 	baseGutterPixels: 2,
 	maxMaterialSlotsPerDraw: 128,
 };
 
-export interface LumaMaterialStrategyInput {
+export interface StagedWorldMaterialStrategyInput {
 	slot: ResolvedMaterialSlot;
-	renderableKind: LumaMaterialRenderableKind;
+	renderableKind: StagedWorldMaterialRenderableKind;
 	textureVelocitySignature?: string | null;
 }
 
-export type LumaMaterialStrategy =
-	| LumaAtlasMaterialStrategy
-	| LumaDirectTextureMaterialStrategy
-	| LumaMaterialFallbackStrategy;
+export type StagedWorldMaterialStrategy =
+	| StagedWorldAtlasMaterialStrategy
+	| StagedWorldDirectTextureMaterialStrategy
+	| StagedWorldMaterialFallbackStrategy;
 
-export interface LumaAtlasMaterialStrategy {
+export interface StagedWorldAtlasMaterialStrategy {
 	kind: "atlas";
 	slot: ResolvedMaterialSlot;
-	renderableKind: LumaMaterialRenderableKind;
+	renderableKind: StagedWorldMaterialRenderableKind;
 	materialAssetId: string;
 	materialSlotKey: string;
 	materialTableSlotIndex: number;
@@ -90,7 +90,7 @@ export interface LumaAtlasMaterialStrategy {
 	behavior: LegacyMaterialBehaviorDto;
 }
 
-interface LumaAtlasCandidateStrategy extends LumaAtlasMaterialStrategy {
+interface StagedWorldAtlasCandidateStrategy extends StagedWorldAtlasMaterialStrategy {
 	atlasEntry: {
 		renderSurfaceId: number;
 		preparedTextureAssetId: string;
@@ -100,10 +100,10 @@ interface LumaAtlasCandidateStrategy extends LumaAtlasMaterialStrategy {
 	};
 }
 
-export interface LumaDirectTextureMaterialStrategy {
+export interface StagedWorldDirectTextureMaterialStrategy {
 	kind: "direct-texture";
 	slot: ResolvedMaterialSlot;
-	renderableKind: LumaMaterialRenderableKind;
+	renderableKind: StagedWorldMaterialRenderableKind;
 	materialAssetId: string;
 	key: string;
 	textureKey: string;
@@ -111,21 +111,21 @@ export interface LumaDirectTextureMaterialStrategy {
 	renderStateKey: string;
 	samplingKey: string;
 	behavior: LegacyMaterialBehaviorDto;
-	reason: LumaMaterialStrategyFallbackReason | null;
+	reason: StagedWorldMaterialStrategyFallbackReason | null;
 	detail: string | null;
 }
 
-export interface LumaMaterialFallbackStrategy {
+export interface StagedWorldMaterialFallbackStrategy {
 	kind: "flat-fallback" | "unsupported";
 	slot: ResolvedMaterialSlot;
-	renderableKind: LumaMaterialRenderableKind;
+	renderableKind: StagedWorldMaterialRenderableKind;
 	materialAssetId: string;
-	reason: LumaMaterialStrategyFallbackReason;
+	reason: StagedWorldMaterialStrategyFallbackReason;
 	detail: string;
 	behavior: LegacyMaterialBehaviorDto | null;
 }
 
-interface LumaAtlasEntryPlan {
+interface StagedWorldAtlasEntryPlan {
 	key: string;
 	renderSurfaceId: number;
 	preparedTextureAssetId: string;
@@ -136,7 +136,7 @@ interface LumaAtlasEntryPlan {
 	transfer: "linear";
 }
 
-interface LumaAtlasTexturePlacement {
+interface StagedWorldAtlasTexturePlacement {
 	atlasEntryKey: string;
 	x: number;
 	y: number;
@@ -145,14 +145,14 @@ interface LumaAtlasTexturePlacement {
 	gutterPixels: number;
 }
 
-interface LumaAtlasTexturePlan {
+interface StagedWorldAtlasTexturePlan {
 	textureIndex: number;
 	width: number;
 	height: number;
-	placements: LumaAtlasTexturePlacement[];
+	placements: StagedWorldAtlasTexturePlacement[];
 }
 
-interface LumaAtlasDrawSlicePlan {
+interface StagedWorldAtlasDrawSlicePlan {
 	key: string;
 	atlasTextureIndex: number;
 	renderStateKey: string;
@@ -161,57 +161,57 @@ interface LumaAtlasDrawSlicePlan {
 	materialSlotKeys: string[];
 }
 
-interface LumaAtlasSetGenerationPlan {
+interface StagedWorldAtlasSetGenerationPlan {
 	key: string;
 	generation: number;
-	policy: LumaMaterialStrategyPolicy;
-	atlasEntries: LumaAtlasEntryPlan[];
-	atlasTextures: LumaAtlasTexturePlan[];
-	drawSlices: LumaAtlasDrawSlicePlan[];
+	policy: StagedWorldMaterialStrategyPolicy;
+	atlasEntries: StagedWorldAtlasEntryPlan[];
+	atlasTextures: StagedWorldAtlasTexturePlan[];
+	drawSlices: StagedWorldAtlasDrawSlicePlan[];
 }
 
-export interface LumaMaterialStrategyPlan {
-	atlasSet: LumaAtlasSetGenerationPlan;
-	materialStrategies: LumaMaterialStrategy[];
+export interface StagedWorldMaterialStrategyPlan {
+	atlasSet: StagedWorldAtlasSetGenerationPlan;
+	materialStrategies: StagedWorldMaterialStrategy[];
 	fallbackReasonCounts: Partial<
-		Record<LumaMaterialStrategyFallbackReason, number>
+		Record<StagedWorldMaterialStrategyFallbackReason, number>
 	>;
 }
 
 interface AtlasCandidate {
-	input: LumaMaterialStrategyInput;
+	input: StagedWorldMaterialStrategyInput;
 	materialAssetId: string;
 	materialSlotKey: string;
 	atlasEntryKey: string;
 	renderStateKey: string;
 	samplingKey: string;
 	behavior: LegacyMaterialBehaviorDto;
-	entry: LumaAtlasEntryPlan;
+	entry: StagedWorldAtlasEntryPlan;
 }
 
 interface AtlasPlacementState {
-	textures: LumaAtlasTexturePlan[];
+	textures: StagedWorldAtlasTexturePlan[];
 	placementByEntryKey: Map<string, { textureIndex: number }>;
 	failedEntryKeys: Set<string>;
 }
 
-export function planLumaMaterialStrategies(options: {
+export function planStagedWorldMaterialStrategies(options: {
 	assetState: AssetChannelState;
-	requirements: readonly LumaMaterialStrategyInput[];
-	policy?: Partial<LumaMaterialStrategyPolicy>;
+	requirements: readonly StagedWorldMaterialStrategyInput[];
+	policy?: Partial<StagedWorldMaterialStrategyPolicy>;
 	generation?: number;
 	textureCapabilities?: MaterialTextureCapabilities;
-}): LumaMaterialStrategyPlan {
+}): StagedWorldMaterialStrategyPlan {
 	const policy = normalizePolicy(options.policy);
 	const candidates: AtlasCandidate[] = [];
-	const materialStrategies: LumaMaterialStrategy[] = [];
+	const materialStrategies: StagedWorldMaterialStrategy[] = [];
 	for (const input of options.requirements) {
 		const candidate = evaluateAtlasCandidate({
 			assetState: options.assetState,
 			input,
 			policy,
 			textureCapabilities:
-				options.textureCapabilities ?? defaultLumaMaterialTextureCapabilities(),
+				options.textureCapabilities ?? defaultStagedWorldMaterialTextureCapabilities(),
 		});
 		if (candidate.kind === "candidate") {
 			candidates.push(candidate.candidate);
@@ -299,13 +299,13 @@ export function planLumaMaterialStrategies(options: {
 
 function evaluateAtlasCandidate(options: {
 	assetState: AssetChannelState;
-	input: LumaMaterialStrategyInput;
-	policy: LumaMaterialStrategyPolicy;
+	input: StagedWorldMaterialStrategyInput;
+	policy: StagedWorldMaterialStrategyPolicy;
 	textureCapabilities: MaterialTextureCapabilities;
 }):
 	| { kind: "candidate"; candidate: AtlasCandidate }
-	| { kind: "strategy"; requirement: LumaMaterialStrategy } {
-	const resolvedStrategy = resolveLumaMaterialStrategy({
+	| { kind: "strategy"; requirement: StagedWorldMaterialStrategy } {
+	const resolvedStrategy = resolveStagedWorldMaterialStrategy({
 		assetState: options.assetState,
 		input: options.input,
 		textureCapabilities: options.textureCapabilities,
@@ -360,14 +360,14 @@ function evaluateAtlasCandidate(options: {
 	};
 }
 
-export function resolveLumaMaterialStrategy(options: {
+export function resolveStagedWorldMaterialStrategy(options: {
 	assetState: AssetChannelState;
-	input: LumaMaterialStrategyInput;
+	input: StagedWorldMaterialStrategyInput;
 	textureCapabilities?: MaterialTextureCapabilities;
 }):
-	| LumaAtlasCandidateStrategy
-	| LumaDirectTextureMaterialStrategy
-	| LumaMaterialFallbackStrategy {
+	| StagedWorldAtlasCandidateStrategy
+	| StagedWorldDirectTextureMaterialStrategy
+	| StagedWorldMaterialFallbackStrategy {
 	const materialAssetId =
 		options.input.slot.materialAssetId ||
 		formatMaterialAssetId(options.input.slot.surfaceId);
@@ -399,7 +399,7 @@ export function resolveLumaMaterialStrategy(options: {
 				recipe,
 				textureCapabilities:
 					options.textureCapabilities ??
-					defaultLumaMaterialTextureCapabilities(),
+					defaultStagedWorldMaterialTextureCapabilities(),
 			});
 		}
 		return createFallbackRequirement({
@@ -444,7 +444,7 @@ export function resolveLumaMaterialStrategy(options: {
 				recipe,
 				textureCapabilities:
 					options.textureCapabilities ??
-					defaultLumaMaterialTextureCapabilities(),
+					defaultStagedWorldMaterialTextureCapabilities(),
 			});
 		}
 		return createFallbackRequirement({
@@ -542,7 +542,7 @@ export function resolveLumaMaterialStrategy(options: {
 	};
 }
 
-export function defaultLumaMaterialTextureCapabilities(): MaterialTextureCapabilities {
+export function defaultStagedWorldMaterialTextureCapabilities(): MaterialTextureCapabilities {
 	return {
 		supportsS3tc: false,
 		supportsS3tcSrgb: false,
@@ -552,7 +552,7 @@ export function defaultLumaMaterialTextureCapabilities(): MaterialTextureCapabil
 	};
 }
 
-export function describeLumaDirectTextureKey(
+export function describeStagedWorldDirectTextureKey(
 	upload: Extract<
 		RenderSurfaceTextureUploadPreparation,
 		{ status: "ready" }
@@ -576,14 +576,14 @@ export function describeLumaDirectTextureKey(
 function resolveDirectTextureStrategy(options: {
 	assetState: AssetChannelState;
 	behaviorReason: {
-		reason: LumaMaterialStrategyFallbackReason;
+		reason: StagedWorldMaterialStrategyFallbackReason;
 		detail: string;
 	};
-	input: LumaMaterialStrategyInput;
+	input: StagedWorldMaterialStrategyInput;
 	materialAssetId: string;
 	recipe: PreparedMaterialRecipePayload;
 	textureCapabilities: MaterialTextureCapabilities;
-}): LumaDirectTextureMaterialStrategy | LumaMaterialFallbackStrategy {
+}): StagedWorldDirectTextureMaterialStrategy | StagedWorldMaterialFallbackStrategy {
 	const resolvedSurface = resolveFirstMaterialRenderSurface({
 		recipe: options.recipe,
 		assetState: options.assetState,
@@ -630,7 +630,7 @@ function resolveDirectTextureStrategy(options: {
 		recipe: options.recipe,
 		hasSourceAlpha: textureUpload.upload.hasSourceAlpha,
 	});
-	const textureKey = describeLumaDirectTextureKey(textureUpload.upload);
+	const textureKey = describeStagedWorldDirectTextureKey(textureUpload.upload);
 	const renderStateKey = describeDirectRenderStateKey(behavior);
 	const samplingKey = describeDirectSamplingKey(textureUpload.upload);
 	return {
@@ -657,10 +657,10 @@ function resolveDirectTextureStrategy(options: {
 }
 
 function atlasFallbackReasonForRecipe(options: {
-	input: LumaMaterialStrategyInput;
+	input: StagedWorldMaterialStrategyInput;
 	recipe: PreparedMaterialRecipePayload;
 	behavior: LegacyMaterialBehaviorDto;
-}): { reason: LumaMaterialStrategyFallbackReason; detail: string } | null {
+}): { reason: StagedWorldMaterialStrategyFallbackReason; detail: string } | null {
 	if (options.recipe.source.kind !== "texture") {
 		return {
 			reason: "solid-color-material",
@@ -722,7 +722,7 @@ function resolvePreparedTexture(options: {
 	assetState: AssetChannelState;
 	renderSurface: PreparedRenderSurfacePayload;
 }): PreparedTexturePayload | null {
-	for (const assetId of resolveLumaPreparedTextureAssetIds({
+	for (const assetId of resolveNormalizedPreparedTextureAssetIds({
 		renderSurface: options.renderSurface,
 		usage: "raw",
 	})) {
@@ -736,8 +736,8 @@ function resolvePreparedTexture(options: {
 
 function dedupeAtlasEntries(
 	candidates: readonly AtlasCandidate[],
-): LumaAtlasEntryPlan[] {
-	const entriesByKey = new Map<string, LumaAtlasEntryPlan>();
+): StagedWorldAtlasEntryPlan[] {
+	const entriesByKey = new Map<string, StagedWorldAtlasEntryPlan>();
 	for (const candidate of candidates) {
 		entriesByKey.set(candidate.entry.key, candidate.entry);
 	}
@@ -747,8 +747,8 @@ function dedupeAtlasEntries(
 }
 
 function packAtlasEntries(
-	entries: readonly LumaAtlasEntryPlan[],
-	policy: LumaMaterialStrategyPolicy,
+	entries: readonly StagedWorldAtlasEntryPlan[],
+	policy: StagedWorldMaterialStrategyPolicy,
 ): AtlasPlacementState {
 	if (entries.length === 0) {
 		return {
@@ -757,7 +757,7 @@ function packAtlasEntries(
 			failedEntryKeys: new Set(),
 		};
 	}
-	const textures: LumaAtlasTexturePlan[] = [];
+	const textures: StagedWorldAtlasTexturePlan[] = [];
 	const placementByEntryKey = new Map<string, { textureIndex: number }>();
 	const failedEntryKeys = new Set<string>();
 	let cursorX = policy.baseGutterPixels;
@@ -805,8 +805,8 @@ function packAtlasEntries(
 
 function createAtlasTexturePlan(
 	textureIndex: number,
-	policy: LumaMaterialStrategyPolicy,
-): LumaAtlasTexturePlan {
+	policy: StagedWorldMaterialStrategyPolicy,
+): StagedWorldAtlasTexturePlan {
 	return {
 		textureIndex,
 		width: policy.maxAtlasTextureSize,
@@ -817,7 +817,7 @@ function createAtlasTexturePlan(
 
 function assignMaterialTableSlots(
 	candidates: readonly AtlasCandidate[],
-	policy: LumaMaterialStrategyPolicy,
+	policy: StagedWorldMaterialStrategyPolicy,
 ): Map<string, number> {
 	const keys = [
 		...new Set(candidates.map((candidate) => candidate.materialSlotKey)),
@@ -832,13 +832,13 @@ function assignMaterialTableSlots(
 }
 
 function createFallbackRequirement(options: {
-	input: LumaMaterialStrategyInput;
+	input: StagedWorldMaterialStrategyInput;
 	materialAssetId: string;
-	kind: LumaMaterialFallbackStrategy["kind"];
-	reason: LumaMaterialStrategyFallbackReason;
+	kind: StagedWorldMaterialFallbackStrategy["kind"];
+	reason: StagedWorldMaterialStrategyFallbackReason;
 	detail: string;
 	behavior: LegacyMaterialBehaviorDto | null;
-}): LumaMaterialFallbackStrategy {
+}): StagedWorldMaterialFallbackStrategy {
 	return {
 		kind: options.kind,
 		slot: options.input.slot,
@@ -931,12 +931,12 @@ function describeMaterialSlotKey(options: {
 }
 
 function describeAtlasSetKey(options: {
-	entries: readonly LumaAtlasEntryPlan[];
-	policy: LumaMaterialStrategyPolicy;
+	entries: readonly StagedWorldAtlasEntryPlan[];
+	policy: StagedWorldMaterialStrategyPolicy;
 	materialSlots: readonly string[];
 }): string {
 	return [
-		"luma-atlas-set",
+		"staged-world-atlas-set",
 		`size=${options.policy.maxAtlasTextureSize}`,
 		`textures=${options.policy.maxAtlasTextureCount}`,
 		`gutter=${options.policy.baseGutterPixels}`,
@@ -946,8 +946,8 @@ function describeAtlasSetKey(options: {
 }
 
 function sortMaterialStrategies(
-	requirements: readonly LumaMaterialStrategy[],
-): LumaMaterialStrategy[] {
+	requirements: readonly StagedWorldMaterialStrategy[],
+): StagedWorldMaterialStrategy[] {
 	return [...requirements].sort(
 		(left, right) =>
 			left.slot.slotIndex - right.slot.slotIndex ||
@@ -960,9 +960,9 @@ function sortMaterialStrategies(
 }
 
 function countFallbackReasons(
-	requirements: readonly LumaMaterialStrategy[],
-): Partial<Record<LumaMaterialStrategyFallbackReason, number>> {
-	const counts: Partial<Record<LumaMaterialStrategyFallbackReason, number>> =
+	requirements: readonly StagedWorldMaterialStrategy[],
+): Partial<Record<StagedWorldMaterialStrategyFallbackReason, number>> {
+	const counts: Partial<Record<StagedWorldMaterialStrategyFallbackReason, number>> =
 		{};
 	for (const requirement of requirements) {
 		if (
@@ -976,7 +976,7 @@ function countFallbackReasons(
 	return counts;
 }
 
-function describeStrategySortKey(requirement: LumaMaterialStrategy): string {
+function describeStrategySortKey(requirement: StagedWorldMaterialStrategy): string {
 	switch (requirement.kind) {
 		case "atlas":
 			return requirement.materialSlotKey;
@@ -989,8 +989,8 @@ function describeStrategySortKey(requirement: LumaMaterialStrategy): string {
 }
 
 function createDrawSlicePlans(
-	requirements: readonly LumaMaterialStrategy[],
-): LumaAtlasDrawSlicePlan[] {
+	requirements: readonly StagedWorldMaterialStrategy[],
+): StagedWorldAtlasDrawSlicePlan[] {
 	const groupByKey = new Map<
 		string,
 		{
@@ -1045,17 +1045,17 @@ function createDrawSlicePlans(
 }
 
 function normalizePolicy(
-	policy: Partial<LumaMaterialStrategyPolicy> | undefined,
-): LumaMaterialStrategyPolicy {
-	const normalized = { ...DEFAULT_LUMA_MATERIAL_STRATEGY_POLICY, ...policy };
+	policy: Partial<StagedWorldMaterialStrategyPolicy> | undefined,
+): StagedWorldMaterialStrategyPolicy {
+	const normalized = { ...DEFAULT_STAGED_WORLD_MATERIAL_STRATEGY_POLICY, ...policy };
 	if (normalized.maxAtlasTextureSize <= normalized.baseGutterPixels * 2) {
-		throw new Error("Luma atlas max texture size must exceed its gutters.");
+		throw new Error("Staged world atlas max texture size must exceed its gutters.");
 	}
 	if (normalized.maxAtlasTextureCount <= 0) {
-		throw new Error("Luma atlas texture count must be positive.");
+		throw new Error("Staged world atlas texture count must be positive.");
 	}
 	if (normalized.maxMaterialSlotsPerDraw <= 0) {
-		throw new Error("Luma atlas material table size must be positive.");
+		throw new Error("Staged world atlas material table size must be positive.");
 	}
 	return normalized;
 }

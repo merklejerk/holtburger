@@ -5,7 +5,7 @@ import type {
 } from "../assets/types";
 import type { Vec3Dto } from "../host/contracts";
 
-export interface LumaIndexedGeometry {
+export interface StagedWorldIndexedGeometry {
 	positions: Float32Array;
 	uvs: Float32Array | null;
 	indices: Uint16Array | Uint32Array;
@@ -13,9 +13,9 @@ export interface LumaIndexedGeometry {
 	triangleCount: number;
 }
 
-export function buildLumaTerrainGeometry(
+export function buildStagedTerrainGeometry(
 	mesh: PreparedTerrainMesh,
-): LumaIndexedGeometry {
+): StagedWorldIndexedGeometry {
 	const positions = new Float32Array(mesh.vertices.length * 3);
 	for (const [vertexIndex, vertex] of mesh.vertices.entries()) {
 		writeVec3(positions, vertexIndex, {
@@ -45,13 +45,13 @@ export function buildLumaTerrainGeometry(
 	};
 }
 
-export function buildLumaPolygonSetGeometry(
+export function buildStagedPolygonSetGeometry(
 	renderGeometry: PreparedPolygonSetRenderGeometry,
 	options: {
 		surfaceId?: number | null;
 		materialVariantSignature?: string | null;
 	} = {},
-): LumaIndexedGeometry {
+): StagedWorldIndexedGeometry {
 	const sourcePositions = toFloat32Array(renderGeometry.positions);
 	const sourceUvs = toFloat32Array(renderGeometry.uvs);
 	const triangles = renderGeometry.triangles.filter(
@@ -87,9 +87,9 @@ export function buildLumaPolygonSetGeometry(
 	};
 }
 
-export function buildLumaPortalApertureGeometry(
+export function buildStagedPortalApertureGeometry(
 	points: readonly Vec3Dto[],
-): LumaIndexedGeometry {
+): StagedWorldIndexedGeometry {
 	const positions = new Float32Array(points.length * 3);
 	for (const [pointIndex, point] of points.entries()) {
 		writeVec3(positions, pointIndex, point);

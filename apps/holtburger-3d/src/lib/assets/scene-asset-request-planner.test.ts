@@ -14,7 +14,7 @@ import {
 	deriveAllVisibleMaterialAssetIdsForBrowserDestination,
 	deriveSceneCoverageAssetIds,
 } from "./scene-asset-request-planner";
-import { LUMA_MATERIAL_TEXTURE_PREPARATION_POLICY } from "./luma-material-texture-preparation-policy";
+import { NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY } from "./material-texture-preparation-policy";
 import type { PreparedAssetRecord } from "./types";
 
 describe("scene asset request planner", () => {
@@ -435,7 +435,7 @@ describe("scene asset request planner", () => {
 		);
 	});
 
-	it("requests atlas-ready decompressed textures for luma atlas candidates only", () => {
+	it("requests atlas-ready decompressed textures for staged world atlas candidates only", () => {
 		const destination = parseBrowserLocationInput("016c0155");
 		expect(destination).not.toBeNull();
 
@@ -472,7 +472,7 @@ describe("scene asset request planner", () => {
 					detailRadius: 1,
 					envCellRadius: 1,
 					materialTexturePreparationPolicy:
-						LUMA_MATERIAL_TEXTURE_PREPARATION_POLICY,
+						NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY,
 				},
 			},
 			"streaming",
@@ -486,7 +486,7 @@ describe("scene asset request planner", () => {
 		);
 	});
 
-	it("requests normalized rgba8 textures for luma direct-color material surfaces", () => {
+	it("requests normalized rgba8 textures for direct-color material surfaces", () => {
 		const destination = parseBrowserLocationInput("016c0155");
 		expect(destination).not.toBeNull();
 
@@ -523,7 +523,7 @@ describe("scene asset request planner", () => {
 					detailRadius: 1,
 					envCellRadius: 1,
 					materialTexturePreparationPolicy:
-						LUMA_MATERIAL_TEXTURE_PREPARATION_POLICY,
+						NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY,
 				},
 			},
 			"streaming",
@@ -566,7 +566,7 @@ describe("scene asset request planner", () => {
 		);
 	});
 
-	it("retains luma atlas-ready decompressed textures as active coverage when requested", () => {
+	it("retains staged world atlas-ready decompressed textures as active coverage when requested", () => {
 		const destination = parseBrowserLocationInput("016c0155");
 		expect(destination).not.toBeNull();
 
@@ -600,7 +600,7 @@ describe("scene asset request planner", () => {
 				detailRadius: 1,
 				envCellRadius: 1,
 				materialTexturePreparationPolicy:
-					LUMA_MATERIAL_TEXTURE_PREPARATION_POLICY,
+					NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY,
 			},
 		);
 

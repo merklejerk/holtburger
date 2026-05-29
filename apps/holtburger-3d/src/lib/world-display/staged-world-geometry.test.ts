@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
-	buildLumaPolygonSetGeometry,
-	buildLumaPortalApertureGeometry,
-	buildLumaTerrainGeometry,
-} from "./luma-geometry";
+	buildStagedPolygonSetGeometry,
+	buildStagedPortalApertureGeometry,
+	buildStagedTerrainGeometry,
+} from "./staged-world-geometry";
 
-describe("buildLumaTerrainGeometry", () => {
+describe("buildStagedTerrainGeometry", () => {
 	it("packs terrain vertices into renderer-space coordinates and triangle indices", () => {
-		const geometry = buildLumaTerrainGeometry({
+		const geometry = buildStagedTerrainGeometry({
 			landblockId: 0x12340000,
 			gridSize: 2,
 			tileSize: 24,
@@ -40,9 +40,9 @@ describe("buildLumaTerrainGeometry", () => {
 	});
 });
 
-describe("buildLumaPolygonSetGeometry", () => {
+describe("buildStagedPolygonSetGeometry", () => {
 	it("uses render triangle first-vertex runs as indices", () => {
-		const geometry = buildLumaPolygonSetGeometry({
+		const geometry = buildStagedPolygonSetGeometry({
 			sourceId: 7,
 			vertexCount: 6,
 			triangleCount: 2,
@@ -64,9 +64,9 @@ describe("buildLumaPolygonSetGeometry", () => {
 	});
 });
 
-describe("buildLumaPortalApertureGeometry", () => {
+describe("buildStagedPortalApertureGeometry", () => {
 	it("triangulates aperture points as a fan", () => {
-		const geometry = buildLumaPortalApertureGeometry([
+		const geometry = buildStagedPortalApertureGeometry([
 			{ x: 0, y: 0, z: 0 },
 			{ x: 1, y: 0, z: 0 },
 			{ x: 1, y: 1, z: 0 },

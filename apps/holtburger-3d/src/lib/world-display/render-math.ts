@@ -1,14 +1,14 @@
 import type { PlacementTransformDto, Vec3Dto } from "../host/contracts";
 import type { SceneCameraFrame } from "./camera";
 
-export type LumaMat4 = Float32Array;
-export type LumaVec4 = Float32Array;
+export type RenderMat4 = Float32Array;
+export type RenderVec4 = Float32Array;
 
-function createIdentityMat4(): LumaMat4 {
+function createIdentityMat4(): RenderMat4 {
 	return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 }
 
-export function createTranslationMat4(offset: Vec3Dto): LumaMat4 {
+export function createTranslationMat4(offset: Vec3Dto): RenderMat4 {
 	const matrix = createIdentityMat4();
 	matrix[12] = offset.x;
 	matrix[13] = offset.y;
@@ -16,7 +16,7 @@ export function createTranslationMat4(offset: Vec3Dto): LumaMat4 {
 	return matrix;
 }
 
-export function multiplyMat4(left: LumaMat4, right: LumaMat4): LumaMat4 {
+export function multiplyMat4(left: RenderMat4, right: RenderMat4): RenderMat4 {
 	const output = new Float32Array(16);
 	for (let column = 0; column < 4; column += 1) {
 		for (let row = 0; row < 4; row += 1) {
@@ -32,14 +32,14 @@ export function multiplyMat4(left: LumaMat4, right: LumaMat4): LumaMat4 {
 
 export function buildSceneCameraViewProjectionMatrix(
 	frame: SceneCameraFrame,
-): LumaMat4 {
+): RenderMat4 {
 	return multiplyMat4(
 		buildPerspectiveMatrix(frame),
 		buildLookAtMatrix(frame.position, frame.target, frame.up),
 	);
 }
 
-export function buildSceneCameraViewMatrix(frame: SceneCameraFrame): LumaMat4 {
+export function buildSceneCameraViewMatrix(frame: SceneCameraFrame): RenderMat4 {
 	return buildLookAtMatrix(frame.position, frame.target, frame.up);
 }
 
@@ -47,7 +47,7 @@ export function buildAcPlacementMatrix(
 	placement: PlacementTransformDto,
 	worldOffset: Vec3Dto,
 	scale: Vec3Dto,
-): LumaMat4 {
+): RenderMat4 {
 	const rotation = buildAcRotationMatrix(placement.orientation);
 	const scaleMatrix = new Float32Array([
 		scale.x,
@@ -74,7 +74,7 @@ export function buildAcPlacementMatrix(
 	return transform;
 }
 
-export function buildDebugColor(key: string): LumaVec4 {
+export function buildDebugColor(key: string): RenderVec4 {
 	let hash = 0;
 	for (let index = 0; index < key.length; index += 1) {
 		hash = (hash * 31 + key.charCodeAt(index)) >>> 0;
@@ -83,7 +83,7 @@ export function buildDebugColor(key: string): LumaVec4 {
 	return new Float32Array([red, green, blue, 1]);
 }
 
-function buildPerspectiveMatrix(frame: SceneCameraFrame): LumaMat4 {
+function buildPerspectiveMatrix(frame: SceneCameraFrame): RenderMat4 {
 	const fovRadians = (frame.fovDegrees * Math.PI) / 180;
 	const f = 1 / Math.tan(fovRadians / 2);
 	const nearMinusFar = frame.near - frame.far;
@@ -112,7 +112,7 @@ function buildLookAtMatrix(
 	position: Vec3Dto,
 	target: Vec3Dto,
 	up: Vec3Dto,
-): LumaMat4 {
+): RenderMat4 {
 	const zAxis = normalizeVec3(subtractVec3(position, target));
 	const xAxis = normalizeVec3(crossVec3(up, zAxis));
 	const yAxis = crossVec3(zAxis, xAxis);
@@ -139,7 +139,7 @@ function buildLookAtMatrix(
 
 function buildAcRotationMatrix(
 	quaternion: PlacementTransformDto["orientation"],
-): LumaMat4 {
+): RenderMat4 {
 	const acRotation = buildQuaternionRotationMatrix({
 		x: quaternion.x,
 		y: quaternion.y,
@@ -160,7 +160,7 @@ function buildQuaternionRotationMatrix(quaternion: {
 	y: number;
 	z: number;
 	w: number;
-}): LumaMat4 {
+}): RenderMat4 {
 	const { x, y, z, w } = quaternion;
 	const x2 = x + x;
 	const y2 = y + y;

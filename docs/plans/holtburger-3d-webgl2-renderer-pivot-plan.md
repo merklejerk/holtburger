@@ -1,7 +1,8 @@
 # Holtburger 3D WebGL2 Renderer Pivot Plan
 
-Status: Phase W5 complete; ready for Phase W6; replaces the luma low-level renderer track and blocks the old luma plan
-before continuing Phase 6C.4.
+Status: Phase W6 complete; WebGL2 is the only active low-level renderer path and the old luma track is retired.
+Continuation work moved to
+[Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan](./holtburger-3d-webgl2-material-atlas-continuation-plan.md).
 
 Related plan: [Holtburger 3D Luma Renderer Swapout Plan](./holtburger-3d-luma-renderer-swapout-plan.md)
 
@@ -768,7 +769,7 @@ Legacy shims:
 
 ## Phase W6: Backend Parity Gate and Luma Retirement
 
-Status: Not started.
+Status: Complete as of 2026-05-29.
 
 Purpose: verify WebGL2 has replaced the useful luma capabilities and then retire the luma backend
 implementation.
@@ -794,6 +795,76 @@ Exit criteria:
   WebGL2.
 - The next plan phase is unblocked and points at WebGL2, not luma high-level draw submission.
 
+Progress:
+
+- Confirmed by runtime visual check that the WebGL2 renderer has reached the prior luma visual
+  coverage for the current staged baseline, with better steady performance. Remaining performance
+  work is still real, but it belongs to WebGL2 batching/atlas/portal phases, not luma draw
+  abstraction work.
+- Removed `luma` from `VITE_HOLTBURGER_RENDER_BACKEND`. The supported backend values are now
+  `three` and `webgl2`; `luma` intentionally fails parser validation rather than aliasing to
+  WebGL2.
+- Deleted the luma-only renderer, device capability detection, luma GPU resource store, luma
+  texture realization, luma metrics, and luma resource tests after equivalent renderer-neutral and
+  WebGL2 tests covered the retained behavior.
+- Removed `@luma.gl/core` and `@luma.gl/webgl` from the app package dependencies and lockfile.
+- Renamed renderer-neutral helpers:
+  - `luma-math.ts` -> `render-math.ts`
+  - `luma-geometry.ts` -> `staged-world-geometry.ts`
+  - `luma-material-strategy.ts` -> `staged-world-material-strategy.ts`
+  - `luma-material-texture-preparation-policy.ts` -> `material-texture-preparation-policy.ts`
+- Renamed shared types/functions away from luma terminology, including `RenderMat4`, `RenderVec4`,
+  staged world geometry builders, staged world material strategy planning, and the normalized
+  material texture preparation policy.
+- Updated WebGL2 diagnostics copy to call retained staged submissions "draw units" while leaving
+  the older shared metrics field names alone for now.
+- Updated the luma swapout plan status so future luma-specific phases are explicitly superseded by
+  this WebGL2 pivot.
+
+Decisions:
+
+- Luma is retired, not hidden behind a compatibility alias. The runtime should fail loudly if old
+  local config still requests `luma`.
+- Renderer-neutral code was renamed only where WebGL2 actively consumes it. Luma-specific GPU
+  realization code was deleted instead of renamed into misleading shared modules.
+- The normalized decompressed prepared-texture policy is now renderer-neutral. Three.js continues to
+  use the default texture request policy; WebGL2 uses the normalized policy for staged material work.
+- UI diagnostics now use backend-aware wording, but the underlying metrics contract still uses
+  historical `BatchCount` names. A deeper metrics API rename is deferred because it would touch
+  Three.js and UI consumers without changing renderer behavior.
+
+Validation:
+
+- `npm run check`
+- `npm run test:ts -- src/lib/app-config/render-backend.test.ts src/lib/assets/scene-asset-request-planner.test.ts src/lib/assets/scene-asset-streaming-controller.test.ts src/lib/world-display/render-math.test.ts src/lib/world-display/staged-world-geometry.test.ts src/lib/world-display/staged-world-material-strategy.test.ts src/lib/world-display/staged-world-assembly.test.ts src/lib/world-display/staged-world-frame.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-state-cache.test.ts`
+
+Course corrections:
+
+- The original W6 task listed a direct WebGL2/Three.js comparison matrix. Runtime visual and profiler
+  checks during W4/W5 already established the decision point: luma matched the staged look but was
+  dominated by high-level draw state churn, while WebGL2 now reaches that visual baseline with lower
+  overhead. W6 therefore focused on retiring luma and clearing naming/dependency debt instead of
+  creating another temporary comparison harness.
+- The former luma material strategy was not luma-specific once texture realization was split out.
+  It became `staged-world-material-strategy.ts` rather than staying coupled to a deleted backend.
+
+Discovered cleanup targets:
+
+- Rename the shared render metrics fields that still say `BatchCount` once the diagnostics contract
+  can be updated across Three.js and WebGL2 together. Until then, backend-aware UI copy prevents the
+  most misleading user-facing text.
+- `preparedTextureGeneratedByteLength` in WebGL2 still reports zero because retained texture
+  resources do not keep source prepared-texture diagnostics. Keep this tracked for the future
+  material/atlas diagnostics phase.
+- The per-frame WebGL2 draw-unit ordering sort still uses string comparison and appears in profiles.
+  Do not tune this in isolation unless it remains hot after the material/portal/compaction schedule
+  settles.
+
+Legacy shims:
+
+- No luma compatibility shim remains. The only deliberate reference to `luma` in app source is a
+  parser regression test proving the old backend value fails loudly.
+
 ## Deferred Until After WebGL2 Baseline
 
 - Atlas layout planner and atlas-backed material tables.
@@ -805,11 +876,9 @@ Exit criteria:
 
 ## Resolved Open Questions
 
-- `VITE_HOLTBURGER_RENDER_BACKEND=luma` should remain selectable only as a short-lived reference
-  during the pivot. It must not become an alias for `webgl2`. Add a distinct `webgl2` backend value
-  in W1 and remove `luma` after W6.
-- Rename luma files only when their contents are actually renderer-neutral. `luma-frame.ts` has
-  already moved to `staged-world-frame.ts`; keep applying this rule to remaining luma-named helpers.
+- `VITE_HOLTBURGER_RENDER_BACKEND=luma` was removed in W6. It is not an alias for `webgl2`.
+- Renderer-neutral luma-named helpers were renamed in W6. Luma-specific GPU realization modules were
+  deleted instead of renamed.
 - Add fake/capturing GL tests from W2 onward. Runtime profiling is still required, but unit tests
   should guard the main reason for the pivot: avoiding redundant GL state calls.
 - Defer compressed texture upload until after decompressed direct material parity. The WebGL2 path
@@ -819,19 +888,12 @@ Exit criteria:
 
 ## Cleanup Targets
 
-- Continue splitting `luma-resources.ts`; W2A extracted staged static assembly and frame selection,
-  but terrain/structured-interior assembly and luma GPU realization still share the same module.
-- Split `luma-resources.ts`; do not let WebGL2 inherit its combined assembly/resource/graph/metrics
-  god-module shape.
-- Split `luma-materials.ts` into material-plan resolution and luma texture realization. WebGL2 should
-  consume the material-plan part only.
-- Rename `luma-math.ts` after WebGL2 consumes it, or move only the needed matrix/coordinate helpers
-  into a renderer-neutral math module.
-- Update diagnostics text to say "draw units" for staged WebGL2/luma paths and reserve "batches" for
-  actual merged/compacted submissions.
-- Remove luma dependency/package usage once WebGL2 reaches W6 and no selected code imports
-  `@luma.gl/*`.
-- Delete or rewrite luma-only tests after equivalent renderer-neutral/WebGL2 coverage exists.
+- Rename shared metrics contract fields that still use `BatchCount` terminology after the WebGL2
+  submit/resource metrics stabilize.
+- Keep WebGL2 source prepared-texture diagnostics available so future material diagnostics can report
+  generated/uploaded texture byte counts accurately.
+- Revisit the WebGL2 draw-unit sort after the next material/portal phases; it is visible in profiles
+  but may be reshaped by later batching/compaction work.
 
 ## Footguns to Avoid
 

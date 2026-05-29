@@ -21,9 +21,9 @@ import {
 	type OutdoorSceneRequestOptions,
 } from "./scene-asset-request-planner";
 import {
-	LUMA_MATERIAL_TEXTURE_PREPARATION_POLICY,
-	type LumaMaterialTexturePreparationPolicy,
-} from "./luma-material-texture-preparation-policy";
+	NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY,
+	type MaterialTexturePreparationPolicy,
+} from "./material-texture-preparation-policy";
 import type { PreparedAssetCacheMetadata, PreparedAssetRecord } from "./types";
 import type { WorldRenderBackend } from "../app-config/render-backend";
 
@@ -306,11 +306,10 @@ export class SceneAssetStreamingController {
 
 function getMaterialTexturePreparationPolicy(
 	rendererBackend: WorldRenderBackend,
-): LumaMaterialTexturePreparationPolicy | undefined {
+): MaterialTexturePreparationPolicy | undefined {
 	switch (rendererBackend) {
-		case "luma":
 		case "webgl2":
-			return LUMA_MATERIAL_TEXTURE_PREPARATION_POLICY;
+			return NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY;
 		case "three":
 			return undefined;
 	}

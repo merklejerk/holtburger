@@ -21,18 +21,6 @@ export function createWorldDisplayRenderer(
 	switch (rendererBackend) {
 		case "three":
 			return createThreeWorldDisplayRenderer(host, options);
-		case "luma":
-			return createDeferredWorldDisplayRenderer({
-				host,
-				options,
-				backendLabel: "luma",
-				loadModule: () => import("./luma-world-display-renderer-impl"),
-				createRenderer: (module, currentOptions) =>
-					module.createLumaWorldDisplayRendererImplementation(
-						host,
-						currentOptions,
-					),
-			});
 		case "webgl2":
 			return createDeferredWorldDisplayRenderer({
 				host,
@@ -48,9 +36,8 @@ export function createWorldDisplayRenderer(
 	}
 }
 
-type LumaRendererModule = typeof import("./luma-world-display-renderer-impl");
 type Webgl2RendererModule = typeof import("./webgl2-world-display-renderer-impl");
-type DeferredRendererModule = LumaRendererModule | Webgl2RendererModule;
+type DeferredRendererModule = Webgl2RendererModule;
 
 interface DeferredWorldDisplayRendererInput<TModule extends DeferredRendererModule> {
 	host: HTMLDivElement;

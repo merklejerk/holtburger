@@ -4,15 +4,15 @@ import type {
 } from "./types";
 import { formatPreparedTextureAssetId, preparedDxtOutputFormat } from "./types";
 
-export type LumaMaterialTextureUsage = PreparedTexturePayload["usage"];
+export type MaterialTextureUsage = PreparedTexturePayload["usage"];
 
-export interface LumaMaterialTexturePreparationPolicyInput {
+export interface MaterialTexturePreparationPolicyInput {
 	renderSurface: PreparedRenderSurfacePayload;
-	usage: LumaMaterialTextureUsage;
+	usage: MaterialTextureUsage;
 }
 
-export type LumaMaterialTexturePreparationPolicy = (
-	input: LumaMaterialTexturePreparationPolicyInput,
+export type MaterialTexturePreparationPolicy = (
+	input: MaterialTexturePreparationPolicyInput,
 ) => readonly string[];
 
 const PIXEL_FORMAT_R8G8B8 = 0x14;
@@ -24,7 +24,7 @@ const PIXEL_FORMAT_A8 = 0x1c;
 const PIXEL_FORMAT_CUSTOM_LANDSCAPE_R8G8B8 = 0xf3;
 const PIXEL_FORMAT_CUSTOM_LANDSCAPE_ALPHA = 0xf4;
 
-export const DEFAULT_MATERIAL_TEXTURE_PREPARATION_POLICY: LumaMaterialTexturePreparationPolicy =
+export const DEFAULT_MATERIAL_TEXTURE_PREPARATION_POLICY: MaterialTexturePreparationPolicy =
 	({ renderSurface, usage }) => {
 		const outputFormat = preparedDxtOutputFormat(renderSurface.formatRaw);
 		if (!outputFormat) {
@@ -41,7 +41,7 @@ export const DEFAULT_MATERIAL_TEXTURE_PREPARATION_POLICY: LumaMaterialTexturePre
 		];
 	};
 
-export const LUMA_MATERIAL_TEXTURE_PREPARATION_POLICY: LumaMaterialTexturePreparationPolicy =
+export const NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY: MaterialTexturePreparationPolicy =
 	({ renderSurface, usage }) => {
 		if (isSingleChannelTextureUsage(usage)) {
 			if (!isSingleChannelRenderSurfaceFormat(renderSurface.formatRaw)) {
@@ -75,11 +75,11 @@ export const LUMA_MATERIAL_TEXTURE_PREPARATION_POLICY: LumaMaterialTexturePrepar
 		];
 	};
 
-export function resolveLumaPreparedTextureAssetIds(input: {
+export function resolveNormalizedPreparedTextureAssetIds(input: {
 	renderSurface: PreparedRenderSurfacePayload;
-	usage?: LumaMaterialTextureUsage;
+	usage?: MaterialTextureUsage;
 }): readonly string[] {
-	return LUMA_MATERIAL_TEXTURE_PREPARATION_POLICY({
+	return NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY({
 		renderSurface: input.renderSurface,
 		usage: input.usage ?? "raw",
 	});
@@ -87,7 +87,7 @@ export function resolveLumaPreparedTextureAssetIds(input: {
 
 export function resolveDefaultPreparedTextureAssetIds(input: {
 	renderSurface: PreparedRenderSurfacePayload;
-	usage?: LumaMaterialTextureUsage;
+	usage?: MaterialTextureUsage;
 }): readonly string[] {
 	return DEFAULT_MATERIAL_TEXTURE_PREPARATION_POLICY({
 		renderSurface: input.renderSurface,
@@ -95,11 +95,11 @@ export function resolveDefaultPreparedTextureAssetIds(input: {
 	});
 }
 
-function isBaseColorTextureUsage(usage: LumaMaterialTextureUsage): boolean {
+function isBaseColorTextureUsage(usage: MaterialTextureUsage): boolean {
 	return usage === "raw" || usage === "color";
 }
 
-function isSingleChannelTextureUsage(usage: LumaMaterialTextureUsage): boolean {
+function isSingleChannelTextureUsage(usage: MaterialTextureUsage): boolean {
 	return usage === "detail" || usage === "mask";
 }
 

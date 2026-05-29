@@ -1,9 +1,12 @@
 # Holtburger 3D Luma Renderer Swapout Plan
 
-Status: Phase 6C.3 implemented; paused before Phase 6C.4 while the luma low-level renderer track is
-replaced by the WebGL2 pivot.
+Status: Superseded as of 2026-05-29. Phase 6C.3 was the last implemented luma phase; Phase 6C.4+
+and later luma-specific work are replaced by the WebGL2 pivot track.
 
-Current blocking follow-up: [Holtburger 3D WebGL2 Renderer Pivot Plan](./holtburger-3d-webgl2-renderer-pivot-plan.md).
+Current follow-up:
+[Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan](./holtburger-3d-webgl2-material-atlas-continuation-plan.md).
+The completed pivot plan is
+[Holtburger 3D WebGL2 Renderer Pivot Plan](./holtburger-3d-webgl2-renderer-pivot-plan.md).
 
 ## Purpose
 
@@ -15,8 +18,9 @@ Course correction: Phase 6C.3 proved the staged scene assembly/material/resource
 profiling showed luma's high-level WebGL `RenderPipeline.draw(...)` path repeatedly applies program,
 VAO, texture, uniform, and broad device/render-pass state for every tiny staged draw. Dense scenes
 therefore perform worse than the Three.js backend before atlas/compaction work starts. Further
-low-level renderer work should replace luma with the WebGL2 pivot plan before continuing Phase
-6C.4+.
+low-level renderer work replaced luma with the WebGL2 pivot plan. The app no longer accepts the
+`luma` backend value, no longer imports `@luma.gl/*`, and keeps only the renderer-neutral staged
+assembly/material concepts that were renamed during the WebGL2 pivot.
 
 This is a renderer-local app architecture change for `apps/holtburger-3d`. It should not promote
 browser/Tauri renderer details into shared crates.

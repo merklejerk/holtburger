@@ -14,12 +14,11 @@ import {
 	formatTerrainMaterialAssetId,
 	normalizeOutdoorLandblockId,
 } from "../landblocks";
+import { type PreparedAssetRecord } from "./types";
 import {
-	formatAtlasReadyPreparedTextureAssetId,
-	formatPreparedTextureAssetId,
-	preparedDxtOutputFormat,
-	type PreparedAssetRecord,
-} from "./types";
+	DEFAULT_MATERIAL_TEXTURE_PREPARATION_POLICY,
+	type LumaMaterialTexturePreparationPolicy,
+} from "./luma-material-texture-preparation-policy";
 import {
 	deriveBrowserFocusedStructuredInteriorMembershipPolicy,
 	deriveStructuredInteriorCoverage,
@@ -50,7 +49,7 @@ export interface OutdoorSceneRequestOptions {
 	buildingRadius: number;
 	detailRadius: number;
 	envCellRadius?: number;
-	includeLumaAtlasPreparedTextures?: boolean;
+	materialTexturePreparationPolicy?: LumaMaterialTexturePreparationPolicy;
 }
 
 export interface BrowserSceneRequestInput {
@@ -333,10 +332,7 @@ function createOutdoorRegionRenderProfileRequests(
 	landblockIds: readonly number[],
 ): AssetLookupRequestDto[] {
 	return createUnpreparedRequests(
-		collectOutdoorRegionRenderProfileAssetIds(
-			preparedByAssetId,
-			landblockIds,
-		),
+		collectOutdoorRegionRenderProfileAssetIds(preparedByAssetId, landblockIds),
 		requestRevision,
 		priority,
 		`${describeRequiredBrowserDestinationIdentity(browserDestination)}-region-render-profile`,
@@ -741,27 +737,13 @@ function collectVisiblePreparedTextureAssetIds(options: {
 			if (asset?.payload.kind !== "render-surface") {
 				return [];
 			}
-			const outputFormat = preparedDxtOutputFormat(asset.payload.formatRaw);
-			if (!outputFormat) {
-				return [];
-			}
-			if (options.options.includeLumaAtlasPreparedTextures === true) {
-				return [
-					formatAtlasReadyPreparedTextureAssetId({
-						renderSurfaceId: asset.payload.renderSurfaceId,
-						usage: "raw",
-					}),
-				];
-			}
-			return [
-				formatPreparedTextureAssetId({
-					renderSurfaceId: asset.payload.renderSurfaceId,
-					usage: "raw",
-					outputFormat,
-					mipPolicy: "retail4",
-					colorSpace: "source",
-				}),
-			];
+			return (
+				options.options.materialTexturePreparationPolicy ??
+				DEFAULT_MATERIAL_TEXTURE_PREPARATION_POLICY
+			)({
+				renderSurface: asset.payload,
+				usage: "raw",
+			});
 		}),
 	);
 }
@@ -772,7 +754,9 @@ function collectVisibleRenderSurfaceAssetIds(options: {
 	options: OutdoorSceneRequestOptions;
 	interest: NormalizedOutdoorSceneInterest | null;
 }): string[] {
-	const materialAssetIds = isIndoorBrowserDestination(options.browserDestination)
+	const materialAssetIds = isIndoorBrowserDestination(
+		options.browserDestination,
+	)
 		? collectIndoorVisibleMaterialAssetIds(
 				options.browserDestination,
 				options.preparedByAssetId,

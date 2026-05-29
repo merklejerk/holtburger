@@ -14,6 +14,7 @@ import {
 	deriveAllVisibleMaterialAssetIdsForBrowserDestination,
 	deriveSceneCoverageAssetIds,
 } from "./scene-asset-request-planner";
+import { LUMA_MATERIAL_TEXTURE_PREPARATION_POLICY } from "./luma-material-texture-preparation-policy";
 import type { PreparedAssetRecord } from "./types";
 
 describe("scene asset request planner", () => {
@@ -470,7 +471,8 @@ describe("scene asset request planner", () => {
 					buildingRadius: 1,
 					detailRadius: 1,
 					envCellRadius: 1,
-					includeLumaAtlasPreparedTextures: true,
+					materialTexturePreparationPolicy:
+						LUMA_MATERIAL_TEXTURE_PREPARATION_POLICY,
 				},
 			},
 			"streaming",
@@ -481,6 +483,54 @@ describe("scene asset request planner", () => {
 		);
 		expect(requests.map((request) => request.assetId)).not.toContain(
 			"prepared-texture/0600006c?usage=raw&out=dxt1&mips=retail4&cs=source",
+		);
+	});
+
+	it("requests normalized rgba8 textures for luma direct-color material surfaces", () => {
+		const destination = parseBrowserLocationInput("016c0155");
+		expect(destination).not.toBeNull();
+
+		const preparedTopology = createPreparedTopology(0x016cffff, [0x016c0155]);
+		const preparedEnvCell = createPreparedEnvCell(0x016c0155, [
+			"material/0800006c",
+		]);
+		const material = createPreparedMaterialRecipe(
+			"material/0800006c",
+			0x0800006c,
+			"render-surface/0600006c",
+		);
+		const visibleRenderSurface = createPreparedRenderSurface(
+			"render-surface/0600006c",
+			0x0600006c,
+			0x15,
+			"A8R8G8B8",
+		);
+
+		const requests = createSceneCoverageRequests(
+			{
+				requestRevision: 11,
+				browserDestination: destination,
+				preparedByAssetId: {
+					[preparedTopology.request.assetId]: preparedTopology,
+					[preparedEnvCell.request.assetId]: preparedEnvCell,
+					[material.request.assetId]: material,
+					[visibleRenderSurface.request.assetId]: visibleRenderSurface,
+				},
+				pendingAssetIds: [],
+				options: {
+					terrainRadius: 2,
+					buildingRadius: 1,
+					detailRadius: 1,
+					envCellRadius: 1,
+					materialTexturePreparationPolicy:
+						LUMA_MATERIAL_TEXTURE_PREPARATION_POLICY,
+				},
+			},
+			"streaming",
+		);
+
+		expect(requests.map((request) => request.assetId)).toContain(
+			"prepared-texture/0600006c?usage=raw&out=rgba8&mips=none&cs=linear",
 		);
 	});
 
@@ -549,7 +599,8 @@ describe("scene asset request planner", () => {
 				buildingRadius: 1,
 				detailRadius: 1,
 				envCellRadius: 1,
-				includeLumaAtlasPreparedTextures: true,
+				materialTexturePreparationPolicy:
+					LUMA_MATERIAL_TEXTURE_PREPARATION_POLICY,
 			},
 		);
 

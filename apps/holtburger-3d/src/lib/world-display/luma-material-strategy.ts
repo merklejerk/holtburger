@@ -4,11 +4,8 @@ import type {
 	PreparedRenderSurfacePayload,
 	PreparedTexturePayload,
 } from "../assets/types";
-import {
-	formatAtlasReadyPreparedTextureAssetId,
-	formatPreparedTextureAssetId,
-	preparedDxtOutputFormat,
-} from "../assets/types";
+import { formatAtlasReadyPreparedTextureAssetId } from "../assets/types";
+import { resolveLumaPreparedTextureAssetIds } from "../assets/luma-material-texture-preparation-policy";
 import { formatHex32 } from "../landblocks";
 import {
 	deriveLegacyMaterialBehaviorDto,
@@ -725,19 +722,16 @@ function resolvePreparedTexture(options: {
 	assetState: AssetChannelState;
 	renderSurface: PreparedRenderSurfacePayload;
 }): PreparedTexturePayload | null {
-	const outputFormat = preparedDxtOutputFormat(options.renderSurface.formatRaw);
-	if (!outputFormat) {
-		return null;
-	}
-	const assetId = formatPreparedTextureAssetId({
-		renderSurfaceId: options.renderSurface.renderSurfaceId,
+	for (const assetId of resolveLumaPreparedTextureAssetIds({
+		renderSurface: options.renderSurface,
 		usage: "raw",
-		outputFormat,
-		mipPolicy: "retail4",
-		colorSpace: "source",
-	});
-	const asset = options.assetState.preparedByAssetId[assetId];
-	return asset?.payload.kind === "prepared-texture" ? asset.payload : null;
+	})) {
+		const asset = options.assetState.preparedByAssetId[assetId];
+		if (asset?.payload.kind === "prepared-texture") {
+			return asset.payload;
+		}
+	}
+	return null;
 }
 
 function dedupeAtlasEntries(

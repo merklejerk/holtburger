@@ -98,6 +98,40 @@ describe("render surface texture upload data", () => {
 			},
 		});
 	});
+
+	it("prefers normalized rgba8 prepared payloads for compressed surfaces", () => {
+		const prepared = prepareRenderSurfaceTextureUploadData(
+			createDxtRenderSurfacePayload(0x06000006),
+			createSamplingPolicy(),
+			{ supportsS3tc: false, supportsS3tcSrgb: false },
+			createPreparedRgba8TexturePayload(0x06000006),
+		);
+
+		expect(prepared.status).toBe("ready");
+		if (prepared.status !== "ready") {
+			throw new Error("Expected normalized prepared texture to be ready.");
+		}
+		if (prepared.upload.kind !== "direct") {
+			throw new Error(
+				"Expected normalized prepared texture to upload directly.",
+			);
+		}
+		expect(prepared.upload).toMatchObject({
+			kind: "direct",
+			renderSurfaceId: 0x06000006,
+			width: 4,
+			height: 4,
+			sourceFormatRaw: 0x3154_5844,
+			format: "rgba",
+			dataType: "uint8",
+			samplingPolicy: {
+				colorSpace: "none",
+				mipFilter: "none",
+				generateMipmaps: false,
+			},
+		});
+		expect(prepared.upload.data.byteLength).toBe(4 * 4 * 4);
+	});
 });
 
 function createSamplingPolicy(): TextureSamplingPolicy {
@@ -207,6 +241,36 @@ function createPreparedDxtTexturePayload(
 		diagnostics: {
 			generatedLevelCount: 2,
 			generatedByteLength: 16,
+			decodeMs: 0,
+			downsampleMs: 0,
+			encodeMs: 0,
+			totalMs: 0,
+		},
+	};
+}
+
+function createPreparedRgba8TexturePayload(
+	renderSurfaceId: number,
+): PreparedTexturePayload {
+	return {
+		...createPreparedDxtTexturePayload(renderSurfaceId),
+		outputFormat: "rgba8",
+		mipPolicy: "none",
+		colorSpace: "linear",
+		levels: [
+			{
+				level: 0,
+				width: 4,
+				height: 4,
+				formatRaw: 0x15,
+				format: "A8R8G8B8",
+				byteLength: 64,
+				bytes: new Uint8Array(64),
+			},
+		],
+		diagnostics: {
+			generatedLevelCount: 1,
+			generatedByteLength: 64,
 			decodeMs: 0,
 			downsampleMs: 0,
 			encodeMs: 0,

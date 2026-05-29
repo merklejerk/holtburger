@@ -1,6 +1,6 @@
 # Holtburger 3D Luma Renderer Swapout Plan
 
-Status: Phase 6C.1 implemented; Phase 6C.2 normalized texture preparation policy is next.
+Status: Phase 6C.2 implemented; Phase 6C.2A renderer resource graph baseline is next.
 
 ## Purpose
 
@@ -1979,6 +1979,8 @@ Course corrections and future refinements:
 
 ## Phase 6C.2: Normalized Texture Preparation Policy
 
+Status: Complete.
+
 Purpose: make asset request planning/incubation request the normalized prepared texture payloads that
 the shared luma material strategy core expects, without waiting until scene object assembly to
 discover missing texture forms.
@@ -2027,6 +2029,43 @@ Exit criteria:
   RGBA8 and single-channel R8 data routes.
 - The common base/color path can proceed into Phase 6C.3 even if the single-channel R8 route is still
   marked as a documented follow-up for detail/mask work.
+
+Progress notes:
+
+- Added `luma-material-texture-preparation-policy.ts` as the shared policy boundary. The default
+  policy still requests the existing compressed `dxt*/retail4/source` prepared textures, while the
+  luma policy requests normalized `rgba8/mips=none/linear` for base/color non-indexed render
+  surfaces and `r8/mips=none/data` for single-channel detail/mask inputs.
+- Replaced the request planner's old `includeLumaAtlasPreparedTextures` boolean with injected
+  `materialTexturePreparationPolicy`. The scene streaming controller injects the luma policy only
+  for the luma backend; Three keeps the existing default prepared-texture requests.
+- Extended the prepared texture DTO contract and Tauri prepared-texture adapter with `out=r8`.
+  The host adapter can now produce direct-color `rgba8/mips=none/linear`, compressed-source
+  `rgba8/mips=none/linear`, and alpha-source `r8/mips=none/data` payloads.
+- Updated luma direct material strategy to look up normalized luma prepared-texture IDs from the same
+  policy before falling back to browser decode or runtime S3TC upload.
+- Updated renderer-neutral upload preparation so a normalized `rgba8` or `r8` payload becomes a
+  direct luma upload even when the source render surface was compressed.
+
+Validation:
+
+- `npm run test:ts -- src/lib/assets/scene-asset-request-planner.test.ts src/lib/world-display/render-surface-texture-data.test.ts src/lib/world-display/luma-material-strategy.test.ts src/lib/world-display/luma-resources.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+- `cargo test --manifest-path src-tauri/Cargo.toml prepared_texture`
+- `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`
+
+Decisions, course corrections, and cleanup targets:
+
+- The browser direct decode/S3TC path remains as an explicit compatibility fallback, but luma strategy
+  now prefers normalized prepared payloads when the policy requested and resolved them.
+- Single-channel R8 support landed even though no remaining 6C.3 direct scene path consumes
+  detail/mask textures yet. That keeps the policy honest and avoids another DTO/host interruption
+  later.
+- The shared policy currently works from visible render surfaces plus usage. It does not yet inspect
+  full material recipes or texture-velocity/detail-role context. Phase 6C.3 and later terrain/detail
+  work should pass richer usage when those renderables stop using only base/raw material surfaces.
+- No immediate interim phase is required before 6C.2A. The pre-6C.3 staging debt remains Phase 6C.2B.
 
 ## Phase 6C.2A: Renderer Resource Graph Baseline
 

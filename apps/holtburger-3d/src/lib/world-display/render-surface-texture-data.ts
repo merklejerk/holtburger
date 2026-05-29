@@ -108,6 +108,14 @@ export function prepareRenderSurfaceTextureUploadData(
 	},
 	preparedTexture: PreparedTexturePayload | null = null,
 ): RenderSurfaceTextureUploadPreparation {
+	const normalizedPreparedUpload = prepareNormalizedPreparedTextureUploadData(
+		renderSurface,
+		samplingPolicy,
+		preparedTexture,
+	);
+	if (normalizedPreparedUpload) {
+		return normalizedPreparedUpload;
+	}
 	if (isSupportedCompressedFormat(renderSurface.formatRaw)) {
 		return prepareCompressedTextureUploadData(
 			renderSurface,
@@ -135,6 +143,91 @@ export function prepareRenderSurfaceTextureUploadData(
 			samplingPolicy,
 		),
 	};
+}
+
+function prepareNormalizedPreparedTextureUploadData(
+	renderSurface: PreparedRenderSurfacePayload,
+	samplingPolicy: TextureSamplingPolicy,
+	preparedTexture: PreparedTexturePayload | null,
+): RenderSurfaceTextureUploadPreparation | null {
+	if (
+		preparedTexture?.kind !== "prepared-texture" ||
+		preparedTexture.renderSurfaceId !== renderSurface.renderSurfaceId ||
+		preparedTexture.sourceFormatRaw !== renderSurface.formatRaw ||
+		preparedTexture.mipPolicy !== "none" ||
+		preparedTexture.levels.length !== 1
+	) {
+		return null;
+	}
+	const level = preparedTexture.levels[0];
+	if (!level) {
+		return null;
+	}
+	if (
+		preparedTexture.outputFormat === "rgba8" &&
+		preparedTexture.colorSpace === "linear"
+	) {
+		const expectedByteLength = level.width * level.height * 4;
+		if (level.bytes.byteLength !== expectedByteLength) {
+			throw new Error(
+				`Prepared texture ${formatHex32(renderSurface.renderSurfaceId)} expected ${expectedByteLength} rgba8 bytes, got ${level.bytes.byteLength}.`,
+			);
+		}
+		return {
+			status: "ready",
+			upload: {
+				kind: "direct",
+				renderSurfaceId: renderSurface.renderSurfaceId,
+				width: level.width,
+				height: level.height,
+				sourceFormatRaw: renderSurface.formatRaw,
+				hasSourceAlpha: hasSourceAlpha(renderSurface.formatRaw),
+				samplingPolicy: {
+					...samplingPolicy,
+					colorSpace: "none",
+					mipFilter: "none",
+					generateMipmaps: false,
+				},
+				data: level.bytes,
+				format: "rgba",
+				dataType: "uint8",
+				internalFormat: null,
+			},
+		};
+	}
+	if (
+		preparedTexture.outputFormat === "r8" &&
+		preparedTexture.colorSpace === "data"
+	) {
+		const expectedByteLength = level.width * level.height;
+		if (level.bytes.byteLength !== expectedByteLength) {
+			throw new Error(
+				`Prepared texture ${formatHex32(renderSurface.renderSurfaceId)} expected ${expectedByteLength} r8 bytes, got ${level.bytes.byteLength}.`,
+			);
+		}
+		return {
+			status: "ready",
+			upload: {
+				kind: "direct",
+				renderSurfaceId: renderSurface.renderSurfaceId,
+				width: level.width,
+				height: level.height,
+				sourceFormatRaw: renderSurface.formatRaw,
+				hasSourceAlpha: hasSourceAlpha(renderSurface.formatRaw),
+				samplingPolicy: {
+					...samplingPolicy,
+					colorSpace: "none",
+					mipFilter: "none",
+					generateMipmaps: false,
+				},
+				data: level.bytes,
+				format: "red",
+				dataType: "uint8",
+				internalFormat: "r8",
+			},
+		};
+	}
+	return null;
 }
 
 export function isSupportedDirectColorFormat(formatRaw: number): boolean {
@@ -230,7 +323,9 @@ function prepareCompressedTextureUploadData(
 			sourceFormatRaw: renderSurface.formatRaw,
 			hasSourceAlpha: hasSourceAlpha(renderSurface.formatRaw),
 			samplingPolicy:
-				levels.length > 1 ? samplingPolicy : { ...samplingPolicy, mipFilter: "none" },
+				levels.length > 1
+					? samplingPolicy
+					: { ...samplingPolicy, mipFilter: "none" },
 			format,
 			levels,
 		},

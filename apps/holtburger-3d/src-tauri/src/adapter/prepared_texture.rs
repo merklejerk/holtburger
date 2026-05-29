@@ -32,6 +32,7 @@ pub enum PreparedTextureOutputFormat {
     Dxt1,
     Dxt3,
     Dxt5,
+    R8,
     Rgba8,
 }
 
@@ -134,15 +135,28 @@ pub fn prepare_texture(
         );
     }
     if request.mip_policy != PreparedTextureMipPolicy::Retail4 {
-        if request.output_format == PreparedTextureOutputFormat::Rgba8
-            && request.mip_policy == PreparedTextureMipPolicy::None
-        {
-            return prepare_decompressed_atlas_texture(total_started_at, request, render_surface);
+        if request.mip_policy == PreparedTextureMipPolicy::None {
+            return match request.output_format {
+                PreparedTextureOutputFormat::Rgba8 => {
+                    prepare_normalized_rgba8_texture(total_started_at, request, render_surface)
+                }
+                PreparedTextureOutputFormat::R8 => {
+                    prepare_normalized_r8_texture(total_started_at, request, render_surface)
+                }
+                PreparedTextureOutputFormat::Dxt1
+                | PreparedTextureOutputFormat::Dxt3
+                | PreparedTextureOutputFormat::Dxt5 => {
+                    bail!("compressed prepared textures require mips=retail4")
+                }
+            };
         }
         bail!("unsupported prepared texture mip policy");
     }
-    if request.output_format == PreparedTextureOutputFormat::Rgba8 {
-        bail!("rgba8 prepared textures require mips=none");
+    if matches!(
+        request.output_format,
+        PreparedTextureOutputFormat::R8 | PreparedTextureOutputFormat::Rgba8
+    ) {
+        bail!("normalized prepared textures require mips=none");
     }
     let output_format = output_format_pixel_format(request.output_format);
     if render_surface.format != output_format {
@@ -227,17 +241,16 @@ pub fn prepare_texture(
     })
 }
 
-fn prepare_decompressed_atlas_texture(
+fn prepare_normalized_rgba8_texture(
     total_started_at: Instant,
     request: PreparedTextureRequest,
     render_surface: &RenderSurface,
 ) -> Result<PreparedTexturePayload> {
     if request.color_space != PreparedTextureColorSpace::Linear {
-        bail!("rgba8 atlas-ready prepared textures require cs=linear");
+        bail!("rgba8 normalized prepared textures require cs=linear");
     }
-    validate_compressed_source(render_surface)?;
     let decode_started_at = Instant::now();
-    let bytes = decode_dxt_surface_rgba8_bytes(render_surface)?;
+    let bytes = decode_render_surface_rgba8_bytes(render_surface)?;
     let decode_duration = decode_started_at.elapsed();
     Ok(PreparedTexturePayload {
         request,
@@ -262,6 +275,160 @@ fn prepare_decompressed_atlas_texture(
             total: total_started_at.elapsed(),
         },
     })
+}
+
+fn prepare_normalized_r8_texture(
+    total_started_at: Instant,
+    request: PreparedTextureRequest,
+    render_surface: &RenderSurface,
+) -> Result<PreparedTexturePayload> {
+    if request.color_space != PreparedTextureColorSpace::Data {
+        bail!("r8 normalized prepared textures require cs=data");
+    }
+    let decode_started_at = Instant::now();
+    let bytes = decode_render_surface_r8_bytes(render_surface)?;
+    let decode_duration = decode_started_at.elapsed();
+    Ok(PreparedTexturePayload {
+        request,
+        source_format: render_surface.format,
+        source_format_raw: render_surface.format_raw,
+        source_width: render_surface.width,
+        source_height: render_surface.height,
+        source_byte_length: render_surface.source_data.len(),
+        source_hash: fnv1a64_hex(&render_surface.source_data),
+        levels: vec![PreparedTextureMipLevel {
+            level: 0,
+            width: render_surface.width,
+            height: render_surface.height,
+            format: PixelFormatId::A8,
+            format_raw: PixelFormatId::A8.raw(),
+            bytes,
+        }],
+        timing: PreparedTextureTiming {
+            decode: decode_duration,
+            downsample: Duration::ZERO,
+            encode: Duration::ZERO,
+            total: total_started_at.elapsed(),
+        },
+    })
+}
+
+fn decode_render_surface_rgba8_bytes(render_surface: &RenderSurface) -> Result<Vec<u8>> {
+    match render_surface.format {
+        PixelFormatId::Dxt1 | PixelFormatId::Dxt3 | PixelFormatId::Dxt5 => {
+            validate_compressed_source(render_surface)?;
+            decode_dxt_surface_rgba8_bytes(render_surface)
+        }
+        PixelFormatId::R8G8B8 | PixelFormatId::CustomLandscapeR8G8B8 => {
+            validate_uncompressed_source(render_surface)?;
+            let mut bytes = Vec::with_capacity(render_surface.source_data.len() / 3 * 4);
+            for pixel in render_surface.source_data.chunks_exact(3) {
+                bytes.extend_from_slice(&[pixel[2], pixel[1], pixel[0], 255]);
+            }
+            Ok(bytes)
+        }
+        PixelFormatId::A8R8G8B8 => {
+            validate_uncompressed_source(render_surface)?;
+            let mut bytes = Vec::with_capacity(render_surface.source_data.len());
+            for pixel in render_surface.source_data.chunks_exact(4) {
+                bytes.extend_from_slice(&[pixel[2], pixel[1], pixel[0], pixel[3]]);
+            }
+            Ok(bytes)
+        }
+        PixelFormatId::X8R8G8B8 => {
+            validate_uncompressed_source(render_surface)?;
+            let mut bytes = Vec::with_capacity(render_surface.source_data.len());
+            for pixel in render_surface.source_data.chunks_exact(4) {
+                bytes.extend_from_slice(&[pixel[2], pixel[1], pixel[0], 255]);
+            }
+            Ok(bytes)
+        }
+        PixelFormatId::R5G6B5 => {
+            validate_uncompressed_source(render_surface)?;
+            let mut bytes = Vec::with_capacity(render_surface.source_data.len() / 2 * 4);
+            for pixel in render_surface.source_data.chunks_exact(2) {
+                let value = u16::from_le_bytes([pixel[0], pixel[1]]);
+                let r = expand_5_to_8((value >> 11) & 0x1f);
+                let g = expand_6_to_8((value >> 5) & 0x3f);
+                let b = expand_5_to_8(value & 0x1f);
+                bytes.extend_from_slice(&[r, g, b, 255]);
+            }
+            Ok(bytes)
+        }
+        PixelFormatId::A4R4G4B4 => {
+            validate_uncompressed_source(render_surface)?;
+            let mut bytes = Vec::with_capacity(render_surface.source_data.len() / 2 * 4);
+            for pixel in render_surface.source_data.chunks_exact(2) {
+                let value = u16::from_le_bytes([pixel[0], pixel[1]]);
+                let a = expand_4_to_8((value >> 12) & 0x0f);
+                let r = expand_4_to_8((value >> 8) & 0x0f);
+                let g = expand_4_to_8((value >> 4) & 0x0f);
+                let b = expand_4_to_8(value & 0x0f);
+                bytes.extend_from_slice(&[r, g, b, a]);
+            }
+            Ok(bytes)
+        }
+        PixelFormatId::A8 | PixelFormatId::CustomLandscapeAlpha => {
+            validate_uncompressed_source(render_surface)?;
+            let mut bytes = Vec::with_capacity(render_surface.source_data.len() * 4);
+            for alpha in &render_surface.source_data {
+                bytes.extend_from_slice(&[*alpha, *alpha, *alpha, *alpha]);
+            }
+            Ok(bytes)
+        }
+        _ => bail!(
+            "render surface 0x{:08X} format {:?} cannot be normalized to rgba8",
+            render_surface.id,
+            render_surface.format
+        ),
+    }
+}
+
+fn decode_render_surface_r8_bytes(render_surface: &RenderSurface) -> Result<Vec<u8>> {
+    match render_surface.format {
+        PixelFormatId::A8 | PixelFormatId::CustomLandscapeAlpha => {
+            validate_uncompressed_source(render_surface)?;
+            Ok(render_surface.source_data.clone())
+        }
+        _ => bail!(
+            "render surface 0x{:08X} format {:?} cannot be normalized to r8",
+            render_surface.id,
+            render_surface.format
+        ),
+    }
+}
+
+fn validate_uncompressed_source(render_surface: &RenderSurface) -> Result<()> {
+    let bytes_per_pixel = render_surface
+        .format
+        .bytes_per_pixel()
+        .ok_or_else(|| anyhow::anyhow!("format {:?} has no byte width", render_surface.format))?;
+    let expected = usize::try_from(render_surface.width)
+        .expect("texture width fits usize")
+        .saturating_mul(usize::try_from(render_surface.height).expect("texture height fits usize"))
+        .saturating_mul(usize::from(bytes_per_pixel));
+    if render_surface.source_data.len() != expected {
+        bail!(
+            "render surface 0x{:08X} {:?} expected {} source bytes, got {}",
+            render_surface.id,
+            render_surface.format,
+            expected,
+            render_surface.source_data.len()
+        );
+    }
+    Ok(())
+}
+
+fn expand_4_to_8(value: u16) -> u8 {
+    ((value << 4) | value) as u8
+}
+
+fn expand_5_to_8(value: u16) -> u8 {
+    ((value << 3) | (value >> 2)) as u8
+}
+
+fn expand_6_to_8(value: u16) -> u8 {
+    ((value << 2) | (value >> 4)) as u8
 }
 
 pub fn serialize_prepared_texture_payload(
@@ -355,6 +522,7 @@ fn parse_output_format(value: &str) -> Option<PreparedTextureOutputFormat> {
         "dxt1" => Some(PreparedTextureOutputFormat::Dxt1),
         "dxt3" => Some(PreparedTextureOutputFormat::Dxt3),
         "dxt5" => Some(PreparedTextureOutputFormat::Dxt5),
+        "r8" => Some(PreparedTextureOutputFormat::R8),
         "rgba8" => Some(PreparedTextureOutputFormat::Rgba8),
         _ => None,
     }
@@ -392,6 +560,7 @@ fn format_output_format(value: PreparedTextureOutputFormat) -> &'static str {
         PreparedTextureOutputFormat::Dxt1 => "dxt1",
         PreparedTextureOutputFormat::Dxt3 => "dxt3",
         PreparedTextureOutputFormat::Dxt5 => "dxt5",
+        PreparedTextureOutputFormat::R8 => "r8",
         PreparedTextureOutputFormat::Rgba8 => "rgba8",
     }
 }
@@ -417,6 +586,7 @@ fn output_format_pixel_format(value: PreparedTextureOutputFormat) -> PixelFormat
         PreparedTextureOutputFormat::Dxt1 => PixelFormatId::Dxt1,
         PreparedTextureOutputFormat::Dxt3 => PixelFormatId::Dxt3,
         PreparedTextureOutputFormat::Dxt5 => PixelFormatId::Dxt5,
+        PreparedTextureOutputFormat::R8 => PixelFormatId::A8,
         PreparedTextureOutputFormat::Rgba8 => PixelFormatId::A8R8G8B8,
     }
 }
@@ -465,6 +635,23 @@ mod tests {
         assert_eq!(
             format_prepared_texture_asset_id(&request),
             "prepared-texture/06001234?usage=raw&out=rgba8&mips=none&cs=linear"
+        );
+    }
+
+    #[test]
+    fn parses_single_channel_prepared_texture_keys() {
+        let request = parse_prepared_texture_asset_id(
+            "prepared-texture/06001234?usage=detail&out=r8&mips=none&cs=data",
+        )
+        .expect("prepared texture key should parse");
+        assert_eq!(request.render_surface_id, 0x0600_1234);
+        assert_eq!(request.usage, PreparedTextureUsage::Detail);
+        assert_eq!(request.output_format, PreparedTextureOutputFormat::R8);
+        assert_eq!(request.mip_policy, PreparedTextureMipPolicy::None);
+        assert_eq!(request.color_space, PreparedTextureColorSpace::Data);
+        assert_eq!(
+            format_prepared_texture_asset_id(&request),
+            "prepared-texture/06001234?usage=detail&out=r8&mips=none&cs=data"
         );
     }
 
@@ -531,5 +718,59 @@ mod tests {
         );
         assert_eq!(payload.timing.downsample, Duration::ZERO);
         assert_eq!(payload.timing.encode, Duration::ZERO);
+    }
+
+    #[test]
+    fn normalizes_direct_color_to_single_level_rgba8_payload() {
+        let render_surface = RenderSurface {
+            id: 0x0600_1234,
+            unknown: 0,
+            width: 1,
+            height: 1,
+            format: PixelFormatId::A8R8G8B8,
+            format_raw: PixelFormatId::A8R8G8B8.raw(),
+            source_data: vec![0x10, 0x20, 0x30, 0x40],
+            default_palette_id: None,
+        };
+        let request = PreparedTextureRequest {
+            render_surface_id: render_surface.id,
+            usage: PreparedTextureUsage::Raw,
+            output_format: PreparedTextureOutputFormat::Rgba8,
+            mip_policy: PreparedTextureMipPolicy::None,
+            color_space: PreparedTextureColorSpace::Linear,
+        };
+
+        let payload = prepare_texture(request, &render_surface).expect("prepare should succeed");
+
+        assert_eq!(payload.levels.len(), 1);
+        assert_eq!(payload.levels[0].format, PixelFormatId::A8R8G8B8);
+        assert_eq!(payload.levels[0].bytes, vec![0x30, 0x20, 0x10, 0x40]);
+    }
+
+    #[test]
+    fn normalizes_alpha_to_single_level_r8_payload() {
+        let render_surface = RenderSurface {
+            id: 0x0600_1234,
+            unknown: 0,
+            width: 2,
+            height: 1,
+            format: PixelFormatId::A8,
+            format_raw: PixelFormatId::A8.raw(),
+            source_data: vec![0x10, 0x80],
+            default_palette_id: None,
+        };
+        let request = PreparedTextureRequest {
+            render_surface_id: render_surface.id,
+            usage: PreparedTextureUsage::Detail,
+            output_format: PreparedTextureOutputFormat::R8,
+            mip_policy: PreparedTextureMipPolicy::None,
+            color_space: PreparedTextureColorSpace::Data,
+        };
+
+        let payload = prepare_texture(request, &render_surface).expect("prepare should succeed");
+
+        assert_eq!(payload.levels.len(), 1);
+        assert_eq!(payload.levels[0].format, PixelFormatId::A8);
+        assert_eq!(payload.levels[0].bytes, vec![0x10, 0x80]);
     }
 }

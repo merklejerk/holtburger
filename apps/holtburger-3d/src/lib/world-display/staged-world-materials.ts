@@ -1,0 +1,162 @@
+import type { AssetChannelState } from "../assets/types";
+import { formatHex32 } from "../landblocks";
+import type { LegacyMaterialBehaviorDto } from "./material-behavior";
+import type { ResolvedMaterialSlot } from "./material-plan";
+import type { LumaVec4 } from "./luma-math";
+import {
+	defaultLumaMaterialTextureCapabilities,
+	resolveLumaMaterialStrategy,
+	type LumaMaterialRenderableKind,
+} from "./luma-material-strategy";
+import type {
+	MaterialTextureCapabilities,
+	RenderSurfaceTextureUploadPreparation,
+} from "./render-surface-texture-data";
+
+export type StagedWorldMaterialPlan =
+	| StagedWorldFlatMaterialPlan
+	| StagedWorldDirectTextureMaterialPlan;
+
+interface StagedWorldFlatMaterialPlan {
+	kind: "flat";
+	key: string;
+	color: LumaVec4;
+	behavior: LegacyMaterialBehaviorDto | null;
+	fallbackReason: string | null;
+	preparedAssetIds: readonly string[];
+}
+
+export interface StagedWorldDirectTextureMaterialPlan {
+	kind: "direct-texture";
+	key: string;
+	color: LumaVec4;
+	textureKey: string;
+	textureUpload: RenderSurfaceTextureUploadPreparation & { status: "ready" };
+	behavior: LegacyMaterialBehaviorDto;
+	fallbackReason: string | null;
+	preparedAssetIds: readonly string[];
+}
+
+export function resolveStagedWorldSurfaceMaterialPlan(options: {
+	assetState: AssetChannelState;
+	surfaceId: number | null;
+	fallbackColorKey: string;
+	textureCapabilities?: MaterialTextureCapabilities;
+}): StagedWorldMaterialPlan {
+	if (options.surfaceId === null) {
+		return createFallbackMaterialPlan({
+			key: `missing-surface/${options.fallbackColorKey}`,
+			colorKey: options.fallbackColorKey,
+			reason: "missing surface id",
+			preparedAssetIds: [],
+		});
+	}
+	const materialAssetId = `material/${formatHex32(options.surfaceId)}`;
+	return resolveStagedWorldMaterialSlotPlan({
+		assetState: options.assetState,
+		slot: {
+			slotIndex: 0,
+			surfaceId: options.surfaceId,
+			materialAssetId,
+			materialVariantSignature: null,
+		},
+		fallbackColorKey: options.fallbackColorKey,
+		renderableKind: "unknown",
+		textureCapabilities: options.textureCapabilities,
+	});
+}
+
+export function resolveStagedWorldMaterialSlotPlan(options: {
+	assetState: AssetChannelState;
+	slot: ResolvedMaterialSlot;
+	fallbackColorKey: string;
+	renderableKind?: LumaMaterialRenderableKind;
+	textureCapabilities?: MaterialTextureCapabilities;
+}): StagedWorldMaterialPlan {
+	const strategy = resolveLumaMaterialStrategy({
+		assetState: options.assetState,
+		input: {
+			slot: options.slot,
+			renderableKind: options.renderableKind ?? "unknown",
+		},
+		textureCapabilities:
+			options.textureCapabilities ?? defaultLumaMaterialTextureCapabilities(),
+	});
+	if (strategy.kind !== "direct-texture") {
+		return createFallbackMaterialPlan({
+			key: `${strategy.kind}/${strategy.materialAssetId}/${options.fallbackColorKey}`,
+			colorKey: options.fallbackColorKey,
+			behavior: strategy.behavior,
+			reason:
+				strategy.kind === "atlas"
+					? `material ${strategy.materialAssetId} resolved atlas strategy before atlas rendering is wired`
+					: strategy.detail,
+			preparedAssetIds: collectStrategyPreparedAssetIds(strategy),
+		});
+	}
+	return {
+		kind: "direct-texture",
+		key: strategy.key,
+		color: new Float32Array([
+			strategy.behavior.color[0],
+			strategy.behavior.color[1],
+			strategy.behavior.color[2],
+			strategy.behavior.opacity,
+		]),
+		textureKey: strategy.textureKey,
+		textureUpload: strategy.textureUpload,
+		behavior: strategy.behavior,
+		fallbackReason: null,
+		preparedAssetIds: collectStrategyPreparedAssetIds(strategy),
+	};
+}
+
+function createFallbackMaterialPlan(options: {
+	key: string;
+	colorKey: string;
+	behavior?: LegacyMaterialBehaviorDto | null;
+	reason: string;
+	preparedAssetIds?: readonly string[];
+}): StagedWorldFlatMaterialPlan {
+	return {
+		kind: "flat",
+		key: `flat/${options.key}`,
+		color: buildFallbackColor(options.colorKey),
+		behavior: options.behavior ?? null,
+		fallbackReason: options.reason,
+		preparedAssetIds: options.preparedAssetIds ?? [],
+	};
+}
+
+function collectStrategyPreparedAssetIds(
+	strategy: ReturnType<typeof resolveLumaMaterialStrategy>,
+): readonly string[] {
+	const assetIds = new Set<string>();
+	if (strategy.materialAssetId !== "material/fallback") {
+		assetIds.add(strategy.materialAssetId);
+	}
+	if (strategy.kind === "direct-texture") {
+		assetIds.add(
+			`render-surface/${formatHex32(strategy.textureUpload.upload.renderSurfaceId)}`,
+		);
+	}
+	if (strategy.kind === "atlas") {
+		assetIds.add(strategy.atlasEntry.preparedTextureAssetId);
+		assetIds.add(`render-surface/${formatHex32(strategy.atlasEntry.renderSurfaceId)}`);
+	}
+	return [...assetIds].sort();
+}
+
+function buildFallbackColor(colorKey: string): LumaVec4 {
+	let hash = 0x811c9dc5;
+	for (let index = 0; index < colorKey.length; index += 1) {
+		hash ^= colorKey.charCodeAt(index);
+		hash = Math.imul(hash, 0x01000193);
+	}
+	return new Float32Array([
+		((hash >>> 16) & 0xff) / 255,
+		((hash >>> 8) & 0xff) / 255,
+		(hash & 0xff) / 255,
+		1,
+	]);
+}

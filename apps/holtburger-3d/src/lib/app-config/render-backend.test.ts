@@ -11,13 +11,15 @@ describe("parseWorldRenderBackend", () => {
 
 	it("accepts explicit renderer backend values", () => {
 		expect(parseWorldRenderBackend("three")).toBe("three");
-		expect(parseWorldRenderBackend("luma")).toBe("luma");
 		expect(parseWorldRenderBackend("webgl2")).toBe("webgl2");
 	});
 
 	it("fails hard for unsupported renderer backend values", () => {
 		expect(() => parseWorldRenderBackend("webgpu")).toThrow(
-			'Unsupported VITE_HOLTBURGER_RENDER_BACKEND value "webgpu". Expected "three", "luma", or "webgl2".',
+			'Unsupported VITE_HOLTBURGER_RENDER_BACKEND value "webgpu". Expected "three" or "webgl2".',
+		);
+		expect(() => parseWorldRenderBackend("luma")).toThrow(
+			'Unsupported VITE_HOLTBURGER_RENDER_BACKEND value "luma". Expected "three" or "webgl2".',
 		);
 	});
 });

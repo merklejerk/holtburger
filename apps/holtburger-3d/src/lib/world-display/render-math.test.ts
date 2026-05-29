@@ -5,7 +5,7 @@ import {
 	buildSceneCameraViewMatrix,
 	createTranslationMat4,
 	multiplyMat4,
-} from "./luma-math";
+} from "./render-math";
 
 describe("multiplyMat4", () => {
 	it("composes column-major translations", () => {

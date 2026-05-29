@@ -1,6 +1,6 @@
 import type { AssetChannelState } from "../assets/types";
 import type { SceneCameraFrame } from "./camera";
-import { buildSceneCameraViewProjectionMatrix, type LumaMat4 } from "./luma-math";
+import { buildSceneCameraViewProjectionMatrix, type RenderMat4 } from "./render-math";
 import { derivePreparedBvhVisibilitySnapshot } from "./prepared-bvh-metrics";
 import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import type { RenderChunkTransform } from "./render-anchor";
@@ -62,7 +62,7 @@ export interface StagedWorldFrameMetrics {
 }
 
 export interface StagedWorldFrame {
-	viewProjectionMatrix: LumaMat4;
+	viewProjectionMatrix: RenderMat4;
 	passes: StagedWorldPass[];
 	metrics: StagedWorldFrameMetrics;
 }
@@ -115,7 +115,7 @@ export function buildStagedWorldFrame({
 }
 
 export function buildRenderFrustumFromProjectionMatrix(
-	matrix: LumaMat4,
+	matrix: RenderMat4,
 ): RenderFrustum {
 	return {
 		planes: [

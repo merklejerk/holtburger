@@ -16,7 +16,7 @@ import {
 	type StagedWorldDrawUnitAssembly,
 } from "./staged-world-assembly";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
-import type { LumaMat4, LumaVec4 } from "./luma-math";
+import type { RenderMat4, RenderVec4 } from "./render-math";
 import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import type { RenderChunkTransform } from "./render-anchor";
 import {
@@ -51,14 +51,14 @@ export interface Webgl2WorldDrawUnit {
 	indexType: GLenum;
 	vertexCount: number;
 	triangleCount: number;
-	color: LumaVec4;
+	color: RenderVec4;
 	materialKind: StagedWorldDrawUnitAssembly["material"]["kind"];
 	materialKey: string;
 	materialFallbackReason: string | null;
 	materialBehavior: LegacyMaterialBehaviorDto | null;
 	textureKey: string | null;
 	texture: Webgl2Texture2DResource | null;
-	modelMatrix: LumaMat4;
+	modelMatrix: RenderMat4;
 	bvhItemKeys: readonly RenderBvhItemKey[];
 	bvhFallbackReason: string | null;
 	staticPartCount: number;

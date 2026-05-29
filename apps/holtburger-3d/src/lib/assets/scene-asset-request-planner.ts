@@ -17,8 +17,8 @@ import {
 import { type PreparedAssetRecord } from "./types";
 import {
 	DEFAULT_MATERIAL_TEXTURE_PREPARATION_POLICY,
-	type LumaMaterialTexturePreparationPolicy,
-} from "./luma-material-texture-preparation-policy";
+	type MaterialTexturePreparationPolicy,
+} from "./material-texture-preparation-policy";
 import {
 	deriveBrowserFocusedStructuredInteriorMembershipPolicy,
 	deriveStructuredInteriorCoverage,
@@ -49,7 +49,7 @@ export interface OutdoorSceneRequestOptions {
 	buildingRadius: number;
 	detailRadius: number;
 	envCellRadius?: number;
-	materialTexturePreparationPolicy?: LumaMaterialTexturePreparationPolicy;
+	materialTexturePreparationPolicy?: MaterialTexturePreparationPolicy;
 }
 
 export interface BrowserSceneRequestInput {

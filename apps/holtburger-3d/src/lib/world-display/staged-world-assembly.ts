@@ -1,10 +1,10 @@
 import type { AssetChannelState } from "../assets/types";
 import type { ResolvedMaterialSlot } from "./material-plan";
 import {
-	buildLumaPolygonSetGeometry,
-	buildLumaTerrainGeometry,
-	type LumaIndexedGeometry,
-} from "./luma-geometry";
+	buildStagedPolygonSetGeometry,
+	buildStagedTerrainGeometry,
+	type StagedWorldIndexedGeometry,
+} from "./staged-world-geometry";
 import {
 	resolveStagedWorldSurfaceMaterialPlan,
 	resolveStagedWorldMaterialSlotPlan,
@@ -15,8 +15,8 @@ import {
 	buildDebugColor,
 	createTranslationMat4,
 	multiplyMat4,
-	type LumaMat4,
-} from "./luma-math";
+	type RenderMat4,
+} from "./render-math";
 import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import type { RenderChunkTransform } from "./render-anchor";
 import type { MaterialTextureCapabilities } from "./render-surface-texture-data";
@@ -35,7 +35,7 @@ import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
 import type { TransitionPortalCandidateModel } from "./transition-portal-work-items";
 
-export type StagedWorldDrawUnitGeometry = LumaIndexedGeometry;
+export type StagedWorldDrawUnitGeometry = StagedWorldIndexedGeometry;
 export interface StagedWorldDrawUnitBvhBinding {
 	itemKeys: readonly RenderBvhItemKey[];
 	fallbackReason: string | null;
@@ -45,7 +45,7 @@ export interface StagedStaticDrawUnitAssembly {
 	id: string;
 	kind: "static";
 	geometry: StagedWorldDrawUnitGeometry;
-	modelMatrix: LumaMat4;
+	modelMatrix: RenderMat4;
 	material: StagedWorldMaterialPlan;
 	preparedAssetIds: readonly string[];
 	bvhBinding: StagedWorldDrawUnitBvhBinding;
@@ -57,7 +57,7 @@ export interface StagedTerrainDrawUnitAssembly {
 	id: string;
 	kind: "terrain";
 	geometry: StagedWorldDrawUnitGeometry;
-	modelMatrix: LumaMat4;
+	modelMatrix: RenderMat4;
 	material: StagedWorldMaterialPlan;
 	preparedAssetIds: readonly string[];
 	bvhBinding: StagedWorldDrawUnitBvhBinding;
@@ -69,7 +69,7 @@ export interface StagedStructuredInteriorDrawUnitAssembly {
 	id: string;
 	kind: "structured-interior";
 	geometry: StagedWorldDrawUnitGeometry;
-	modelMatrix: LumaMat4;
+	modelMatrix: RenderMat4;
 	material: StagedWorldMaterialPlan;
 	preparedAssetIds: readonly string[];
 	bvhBinding: StagedWorldDrawUnitBvhBinding;
@@ -199,7 +199,7 @@ export function buildStagedTerrainDrawUnitAssemblies({
 		if (!chunkOffset) {
 			return [];
 		}
-		const geometry = buildLumaTerrainGeometry(tile.mesh);
+		const geometry = buildStagedTerrainGeometry(tile.mesh);
 		if (geometry.triangleCount === 0) {
 			return [];
 		}
@@ -247,7 +247,7 @@ export function buildStagedStructuredInteriorDrawUnitAssemblies({
 		);
 		const modelMatrix = multiplyMat4(chunkMatrix, placementMatrix);
 		return structuredInteriorSurfaceKeys(cell).flatMap((surfaceKey) => {
-			const geometry = buildLumaPolygonSetGeometry(cell.renderGeometry, {
+			const geometry = buildStagedPolygonSetGeometry(cell.renderGeometry, {
 				surfaceId: surfaceKey.surfaceId,
 				materialVariantSignature: surfaceKey.materialVariantSignature,
 			});
@@ -574,7 +574,7 @@ function buildStagedStaticPartGeometry(
 	assetState: AssetChannelState,
 	part: StaticRenderablePart,
 	surfaceKey: StagedStaticSurfaceKey,
-): LumaIndexedGeometry {
+): StagedWorldIndexedGeometry {
 	const asset = assetState.preparedByAssetId[part.gfxObjAssetId];
 	if (
 		!asset ||
@@ -583,7 +583,7 @@ function buildStagedStaticPartGeometry(
 	) {
 		return createEmptyIndexedGeometry();
 	}
-	const geometry = buildLumaPolygonSetGeometry(asset.payload.renderGeometry, {
+	const geometry = buildStagedPolygonSetGeometry(asset.payload.renderGeometry, {
 		surfaceId: surfaceKey.geometrySurfaceId,
 		materialVariantSignature: surfaceKey.materialVariantSignature,
 	});
@@ -608,7 +608,7 @@ function buildStagedStaticPartGeometry(
 	};
 }
 
-function createEmptyIndexedGeometry(): LumaIndexedGeometry {
+function createEmptyIndexedGeometry(): StagedWorldIndexedGeometry {
 	return {
 		positions: new Float32Array(),
 		uvs: new Float32Array(),
@@ -651,7 +651,7 @@ function transformPosition(
 	targetVertexIndex: number,
 	source: Float32Array,
 	sourceVertexIndex: number,
-	matrix: LumaMat4,
+	matrix: RenderMat4,
 ): void {
 	const sourceOffset = sourceVertexIndex * 3;
 	const targetOffset = targetVertexIndex * 3;
@@ -666,7 +666,7 @@ function transformPosition(
 		matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14];
 }
 
-function buildStaticRenderablePartMatrix(part: StaticRenderablePart): LumaMat4 {
+function buildStaticRenderablePartMatrix(part: StaticRenderablePart): RenderMat4 {
 	let matrix = createIdentityMat4();
 	for (const parentPlacement of part.parentPlacements) {
 		matrix = multiplyMat4(
@@ -702,11 +702,11 @@ function buildStaticRenderablePartMatrix(part: StaticRenderablePart): LumaMat4 {
 	);
 }
 
-function createIdentityMat4(): LumaMat4 {
+function createIdentityMat4(): RenderMat4 {
 	return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 }
 
-function createScaleMat4(scale: { x: number; y: number; z: number }): LumaMat4 {
+function createScaleMat4(scale: { x: number; y: number; z: number }): RenderMat4 {
 	return new Float32Array([
 		scale.x,
 		0,

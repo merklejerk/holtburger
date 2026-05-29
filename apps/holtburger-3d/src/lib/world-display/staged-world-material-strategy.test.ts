@@ -9,7 +9,7 @@ import {
 	type PreparedRenderSurfacePayload,
 	type PreparedTexturePayload,
 } from "../assets/types";
-import { planLumaMaterialStrategies } from "./luma-material-strategy";
+import { planStagedWorldMaterialStrategies } from "./staged-world-material-strategy";
 import type { ResolvedMaterialSlot } from "./material-plan";
 
 const PIXEL_FORMAT_A8R8G8B8 = 0x15;
@@ -17,7 +17,7 @@ const PIXEL_FORMAT_DXT1 = 0x3154_5844;
 const SURFACE_TYPE_DIFFUSE = 0x20;
 const SURFACE_TYPE_ALPHA = 0x100;
 
-describe("luma material strategy", () => {
+describe("staged world material strategy", () => {
 	it("deduplicates atlas entries across static and structured-interior requirements", () => {
 		const state = createAssetState([
 			createMaterialRecipeRecord({
@@ -28,7 +28,7 @@ describe("luma material strategy", () => {
 			createAtlasPreparedTextureRecord({ renderSurfaceId: 0x06000001 }),
 		]);
 
-		const plan = planLumaMaterialStrategies({
+		const plan = planStagedWorldMaterialStrategies({
 			assetState: state,
 			requirements: [
 				createRequirement("static", 0),
@@ -61,7 +61,7 @@ describe("luma material strategy", () => {
 			createRenderSurfaceRecord({ renderSurfaceId: 0x06000001 }),
 		]);
 
-		const plan = planLumaMaterialStrategies({
+		const plan = planStagedWorldMaterialStrategies({
 			assetState: state,
 			requirements: [createRequirement("static", 0)],
 		});
@@ -97,7 +97,7 @@ describe("luma material strategy", () => {
 			createAtlasPreparedTextureRecord({ renderSurfaceId: 0x06000002 }),
 		]);
 
-		const plan = planLumaMaterialStrategies({
+		const plan = planStagedWorldMaterialStrategies({
 			assetState: state,
 			requirements: [
 				createRequirement("static", 0, 0x08000001),
@@ -113,7 +113,7 @@ describe("luma material strategy", () => {
 			),
 		).toEqual(["direct-texture", "direct-texture"]);
 
-		const s3tcPlan = planLumaMaterialStrategies({
+		const s3tcPlan = planStagedWorldMaterialStrategies({
 			assetState: state,
 			requirements: [
 				createRequirement("static", 0, 0x08000001),
@@ -145,7 +145,7 @@ describe("luma material strategy", () => {
 				createAtlasPreparedTextureRecord({ renderSurfaceId }),
 			);
 		}
-		const plan = planLumaMaterialStrategies({
+		const plan = planStagedWorldMaterialStrategies({
 			assetState: createAssetState(records),
 			requirements: [0, 1, 2].map((index) =>
 				createRequirement("static", index, 0x08000010 + index),
@@ -188,7 +188,7 @@ describe("luma material strategy", () => {
 			createAtlasPreparedTextureRecord({ renderSurfaceId: 0x06000002 }),
 		]);
 
-		const plan = planLumaMaterialStrategies({
+		const plan = planStagedWorldMaterialStrategies({
 			assetState: state,
 			requirements: [
 				createRequirement("static", 0, 0x08000001),

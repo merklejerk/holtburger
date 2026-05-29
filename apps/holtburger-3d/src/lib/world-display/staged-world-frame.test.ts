@@ -7,7 +7,7 @@ import {
 	buildStagedWorldFrame,
 	type StagedWorldFrameCandidate,
 } from "./staged-world-frame";
-import { buildSceneCameraViewProjectionMatrix } from "./luma-math";
+import { buildSceneCameraViewProjectionMatrix } from "./render-math";
 import type { TerrainSceneModel } from "./terrain-scene";
 import { createEmptyStaticRenderableSceneModel } from "./static-renderables";
 import { createEmptyStructuredInteriorSceneModel } from "./structured-interior-scene";

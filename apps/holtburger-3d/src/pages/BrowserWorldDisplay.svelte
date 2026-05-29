@@ -280,10 +280,12 @@
 				: "draw pressure is not currently the dominant signal";
 		const materialTypes = summarizeRecord(debug.materialTypeCounts);
 		const fallbackSamples = summarizeSamples(debug.fallbackReasonSamples);
+		const drawGroupTerm =
+			debug.rendererBackend === "webgl2" ? "draw units" : "batches";
 		const performanceText = renderMetrics?.performance
 			? `${renderMetrics.performance.fps.toFixed(1)} FPS, ${renderMetrics.performance.frameMs.toFixed(1)} ms/frame, ${renderMetrics.performance.renderMs.toFixed(1)} ms render`
 			: "waiting for performance sample";
-		return `Perf ${performanceText}. Diagnosis: ${diagnosis}. Draw pressure ${debug.renderCalls} visible draws from ${candidateBatchCount} candidate batches; static candidates ${debug.staticBvhCandidateBatchCount}${staticCandidateRatio}; retained batches terrain ${debug.terrainRenderBatchCount}, static ${debug.staticRenderBatchCount}, interiors ${debug.structuredInteriorRenderBatchCount}; retained tris ${debug.renderTriangles}. Material path ${debug.materialCount} materials, ${debug.textureResourceCount} textures, ${debug.indexedTextureResourceCount} indexed textures, ${debug.paletteResourceCount} palettes, direct/material types ${materialTypes}; fallbacks ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}. Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}, transition depth ${debug.transitionPortalMaxDepth}; canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
+		return `Perf ${performanceText}. Diagnosis: ${diagnosis}. Draw pressure ${debug.renderCalls} visible draws from ${candidateBatchCount} candidate ${drawGroupTerm}; static candidates ${debug.staticBvhCandidateBatchCount}${staticCandidateRatio}; retained ${drawGroupTerm} terrain ${debug.terrainRenderBatchCount}, static ${debug.staticRenderBatchCount}, interiors ${debug.structuredInteriorRenderBatchCount}; retained tris ${debug.renderTriangles}. Material path ${debug.materialCount} materials, ${debug.textureResourceCount} textures, ${debug.indexedTextureResourceCount} indexed textures, ${debug.paletteResourceCount} palettes, direct/material types ${materialTypes}; fallbacks ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}. Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}, transition depth ${debug.transitionPortalMaxDepth}; canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
 	});
 	const sceneContextText = $derived(renderResourceSnapshot.sceneContextText);
 	const cameraResidencyText = $derived.by(() => {
@@ -330,7 +332,9 @@
 		const performanceText = renderMetrics?.performance
 			? `${renderMetrics.performance.fps.toFixed(1)} FPS, ${renderMetrics.performance.renderMs.toFixed(1)} ms render`
 			: "waiting for perf";
-		return `${performanceText}; ${debug.renderCalls} visible draw${debug.renderCalls === 1 ? "" : "s"}, ${debug.renderTriangles} retained tris, ${debug.staticRenderBatchCount} static batches, ${debug.structuredInteriorRenderBatchCount} interior batches, ${debug.terrainRenderBatchCount} terrain batches.`;
+		const drawGroupTerm =
+			debug.rendererBackend === "webgl2" ? "draw units" : "batches";
+		return `${performanceText}; ${debug.renderCalls} visible draw${debug.renderCalls === 1 ? "" : "s"}, ${debug.renderTriangles} retained tris, ${debug.staticRenderBatchCount} static ${drawGroupTerm}, ${debug.structuredInteriorRenderBatchCount} interior ${drawGroupTerm}, ${debug.terrainRenderBatchCount} terrain ${drawGroupTerm}.`;
 	});
 	const rendererBvhSummaryText = $derived.by(() => {
 		const debug = renderMetrics?.debug;
@@ -338,7 +342,9 @@
 			return "Waiting for BVH metrics.";
 		}
 		const fallbackSamples = summarizeSamples(debug.fallbackReasonSamples);
-		return `BVH visible/candidate: terrain ${debug.terrainBvhVisibleItemCount}/${debug.terrainBvhTotalItemCount}, outdoor statics ${debug.outdoorStaticBvhVisibleItemCount}/${debug.outdoorStaticBvhTotalItemCount}, env local ${debug.envCellLocalBvhVisibleItemCount}/${debug.envCellLocalBvhTotalItemCount}. Candidate batches: static ${debug.staticBvhCandidateBatchCount}/${debug.staticRenderBatchCount}, terrain ${debug.terrainBvhCandidateBatchCount}/${debug.terrainRenderBatchCount}, interiors ${debug.structuredInteriorBvhCandidateBatchCount}/${debug.structuredInteriorRenderBatchCount}, overlays ${debug.debugOverlayBvhCandidateBatchCount}/${debug.debugOverlayRenderBatchCount}, portal masks ${debug.portalMaskBvhCandidateBatchCount}/${debug.portalMaskRenderBatchCount}. Keys: static ${debug.visibleStaticInstanceKeyCount}, portals ${debug.visiblePortalKeyCount}, env cells ${debug.envCellBvhConsideredCount}. Fallback batches ${debug.staticBvhFallbackIncludedBatchCount + debug.nonStaticBvhFallbackIncludedBatchCount}; fallback reasons ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}; query ${debug.queryTimeMs.toFixed(2)} ms.`;
+		const drawGroupTerm =
+			debug.rendererBackend === "webgl2" ? "draw units" : "batches";
+		return `BVH visible/candidate: terrain ${debug.terrainBvhVisibleItemCount}/${debug.terrainBvhTotalItemCount}, outdoor statics ${debug.outdoorStaticBvhVisibleItemCount}/${debug.outdoorStaticBvhTotalItemCount}, env local ${debug.envCellLocalBvhVisibleItemCount}/${debug.envCellLocalBvhTotalItemCount}. Candidate ${drawGroupTerm}: static ${debug.staticBvhCandidateBatchCount}/${debug.staticRenderBatchCount}, terrain ${debug.terrainBvhCandidateBatchCount}/${debug.terrainRenderBatchCount}, interiors ${debug.structuredInteriorBvhCandidateBatchCount}/${debug.structuredInteriorRenderBatchCount}, overlays ${debug.debugOverlayBvhCandidateBatchCount}/${debug.debugOverlayRenderBatchCount}, portal masks ${debug.portalMaskBvhCandidateBatchCount}/${debug.portalMaskRenderBatchCount}. Keys: static ${debug.visibleStaticInstanceKeyCount}, portals ${debug.visiblePortalKeyCount}, env cells ${debug.envCellBvhConsideredCount}. Fallback ${drawGroupTerm} ${debug.staticBvhFallbackIncludedBatchCount + debug.nonStaticBvhFallbackIncludedBatchCount}; fallback reasons ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}; query ${debug.queryTimeMs.toFixed(2)} ms.`;
 	});
 	const runtimeAppearanceStatusText = $derived.by(() => {
 		if (runtimeAppearancePending) {

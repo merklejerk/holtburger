@@ -145,7 +145,7 @@ describe("scene asset streaming controller", () => {
 			envCellLodRadius: 0,
 			appearancePreviewAssetIds: [],
 			preparedByAssetId,
-			rendererBackend: "luma",
+			rendererBackend: "webgl2",
 		});
 
 		await waitFor(() => retainedAssetIds.length > 0);

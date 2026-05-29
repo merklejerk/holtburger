@@ -2,12 +2,12 @@ import type { AssetChannelState } from "../assets/types";
 import { formatHex32 } from "../landblocks";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
 import type { ResolvedMaterialSlot } from "./material-plan";
-import type { LumaVec4 } from "./luma-math";
+import type { RenderVec4 } from "./render-math";
 import {
-	defaultLumaMaterialTextureCapabilities,
-	resolveLumaMaterialStrategy,
-	type LumaMaterialRenderableKind,
-} from "./luma-material-strategy";
+	defaultStagedWorldMaterialTextureCapabilities,
+	resolveStagedWorldMaterialStrategy,
+	type StagedWorldMaterialRenderableKind,
+} from "./staged-world-material-strategy";
 import type {
 	MaterialTextureCapabilities,
 	RenderSurfaceTextureUploadPreparation,
@@ -20,7 +20,7 @@ export type StagedWorldMaterialPlan =
 interface StagedWorldFlatMaterialPlan {
 	kind: "flat";
 	key: string;
-	color: LumaVec4;
+	color: RenderVec4;
 	behavior: LegacyMaterialBehaviorDto | null;
 	fallbackReason: string | null;
 	preparedAssetIds: readonly string[];
@@ -29,7 +29,7 @@ interface StagedWorldFlatMaterialPlan {
 export interface StagedWorldDirectTextureMaterialPlan {
 	kind: "direct-texture";
 	key: string;
-	color: LumaVec4;
+	color: RenderVec4;
 	textureKey: string;
 	textureUpload: RenderSurfaceTextureUploadPreparation & { status: "ready" };
 	behavior: LegacyMaterialBehaviorDto;
@@ -70,17 +70,17 @@ export function resolveStagedWorldMaterialSlotPlan(options: {
 	assetState: AssetChannelState;
 	slot: ResolvedMaterialSlot;
 	fallbackColorKey: string;
-	renderableKind?: LumaMaterialRenderableKind;
+	renderableKind?: StagedWorldMaterialRenderableKind;
 	textureCapabilities?: MaterialTextureCapabilities;
 }): StagedWorldMaterialPlan {
-	const strategy = resolveLumaMaterialStrategy({
+	const strategy = resolveStagedWorldMaterialStrategy({
 		assetState: options.assetState,
 		input: {
 			slot: options.slot,
 			renderableKind: options.renderableKind ?? "unknown",
 		},
 		textureCapabilities:
-			options.textureCapabilities ?? defaultLumaMaterialTextureCapabilities(),
+			options.textureCapabilities ?? defaultStagedWorldMaterialTextureCapabilities(),
 	});
 	if (strategy.kind !== "direct-texture") {
 		return createFallbackMaterialPlan({
@@ -129,7 +129,7 @@ function createFallbackMaterialPlan(options: {
 }
 
 function collectStrategyPreparedAssetIds(
-	strategy: ReturnType<typeof resolveLumaMaterialStrategy>,
+	strategy: ReturnType<typeof resolveStagedWorldMaterialStrategy>,
 ): readonly string[] {
 	const assetIds = new Set<string>();
 	if (strategy.materialAssetId !== "material/fallback") {
@@ -147,7 +147,7 @@ function collectStrategyPreparedAssetIds(
 	return [...assetIds].sort();
 }
 
-function buildFallbackColor(colorKey: string): LumaVec4 {
+function buildFallbackColor(colorKey: string): RenderVec4 {
 	let hash = 0x811c9dc5;
 	for (let index = 0; index < colorKey.length; index += 1) {
 		hash ^= colorKey.charCodeAt(index);

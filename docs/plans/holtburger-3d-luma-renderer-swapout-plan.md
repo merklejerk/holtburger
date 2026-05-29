@@ -1926,6 +1926,81 @@ Exit criteria:
 - Phase 6C.0's compressed-DXT `rgba8/mips=none/linear` route is joined by non-indexed direct-color
   RGBA8 and single-channel R8 data routes.
 
+## Phase 6C.2A: Renderer Resource Graph Baseline
+
+Purpose: add a passive frontend-renderer resource graph before scene object assembly and compaction
+start sharing long-lived raw-ish prepared assets. The graph should centralize renderer-pipeline
+identity, dependency edges, leases, retained prepared-asset ids, and disposal candidates without
+owning prepared payloads or GPU resources.
+
+Context:
+
+- `AssetChannelState.preparedByAssetId` already owns prepared payloads and should remain the source
+  of truth for host/worker-prepared bytes and DTOs.
+- `LumaWorldResourceStore` and related luma resource modules already own GPU buffers, textures,
+  bindings, and eventual atlas resources.
+- The missing layer is renderer-pipeline retention across incubation, scene object assembly,
+  staging/direct rendering, atlas generation, and compaction. Without it, one component can prune a
+  prepared texture or material recipe that another component still needs for atlas generation,
+  compaction rebuild, context-loss recovery, or stale-generation retirement.
+
+Tasks:
+
+- Introduce an app-local `RendererResourceGraph` or equivalent, likely under
+  `apps/holtburger-3d/src/lib/world-display/`.
+- Keep the graph passive. It records facts and computes consequences; it must not decide readiness,
+  assemble scene objects, pack atlases, schedule compaction, or upload luma resources.
+- Define minimal graph primitives:
+  - node key and node kind;
+  - dependency edge from one node key to other node keys;
+  - explicit lease/retention owner records;
+  - transitive retained prepared-asset id derivation;
+  - unleased/disposal-candidate reporting.
+- Use explicit leases instead of opaque reference counts so diagnostics can explain why a prepared
+  asset or renderer node is retained.
+- Keep payload/resource ownership outside the graph:
+  - prepared asset records stay in `AssetChannelState.preparedByAssetId`;
+  - assembled scene-object payloads stay in the scene object/assembly store;
+  - luma GPU resources stay in luma resource stores;
+  - atlas generation metadata may have graph nodes, but atlas texture objects stay in luma resource
+    stores.
+- Start with a small typed node vocabulary and let later phases expand it only when needed:
+  - `prepared-asset/<assetId>`;
+  - `scene-object/<key>`;
+  - `atlas-generation/<key>`;
+  - `static-batch/<key>`;
+  - `material-decision/<key>` only if scene assembly and compaction both need stable identity for a
+    resolved material strategy.
+- Treat material recipes as prepared assets in the frontend cache, even when they are derived or
+  normalized from setup appearance/surface facts rather than direct content-file assets. Use graph
+  metadata or naming to distinguish derived prepared assets from source content assets where useful.
+- Add graph edges from higher-level renderer nodes to the prepared assets or derived nodes required
+  to rebuild them. Example dependencies:
+  - scene object -> gfx/setup/material-decision inputs;
+  - material decision -> material recipe, render surface, normalized prepared texture;
+  - atlas generation -> normalized prepared textures and material decisions it packed;
+  - compacted static batch -> scene objects and atlas generation it references.
+- Wire prepared asset pruning to include `RendererResourceGraph.retainedPreparedAssetIds()` in
+  addition to scene coverage roots, transitive prepared-asset dependencies, in-flight requests, and
+  warm retention.
+- Add focused tests for:
+  - transitive prepared-asset retention from leased scene-object and atlas-generation nodes;
+  - releasing a lease exposing unleased/disposal-candidate nodes;
+  - multiple lease owners retaining the same dependency without ref-count ambiguity;
+  - pruning retaining graph-reachable prepared assets while evicting unrelated warm-expired assets.
+
+Exit criteria:
+
+- Renderer pipeline components have one shared passive graph for dependency identity and prepared
+  asset retention.
+- The graph can answer which prepared asset ids must remain cached because renderer pipeline state
+  still depends on them.
+- Prepared payloads and luma GPU resources remain owned by their existing stores.
+- Scene object assembly in Phase 6C.3 can register graph nodes, edges, and leases from the start
+  instead of introducing ad hoc per-component retention.
+- Atlas-backed compaction in Phase 6F can extend the same graph for atlas generations, compacted
+  batches, and old-generation retirement.
+
 ## Phase 6C.3: Scene Object Assembly and Direct Material Rendering
 
 Purpose: define the assemble-to-visible path that turns incubated renderables into complete
@@ -1939,7 +2014,9 @@ Planned ownership flow:
 flowchart TD
   world["Scene / world visibility"] --> requests["Asset request planner"]
   requests --> incubation["Asset streaming + incubation"]
+  incubation --> graph["RendererResourceGraph"]
   incubation --> assembly["Scene object assembly"]
+  assembly --> graph
   assembly --> resolver["Assembly material/resource resolver"]
   resolver --> directResource["Resolved independent direct texture resource"]
   resolver --> existingAtlas["Resolved existing atlas generation slot"]
@@ -1958,8 +2035,10 @@ flowchart TD
   strategy --> fallbackPlan["Flat/unsupported strategy"]
   atlasCandidates --> layout["Atlas layout planner"]
   compaction --> layout
+  compaction --> graph
   layout --> atlasPlan["Atlas layout/generation plan"]
   atlasPlan --> resources["Luma resource layer"]
+  atlasPlan --> graph
   directPlan --> keepStaged["Keep on staging/direct path"]
   fallbackPlan --> keepStaged
   resources --> batches["Compacted baked batches"]
@@ -1972,6 +2051,12 @@ Tasks:
   reuse existing atlas slots opportunistically without mutating atlas generations, realize
   independent direct texture or flat/current fallback resources through the resource layer, and only
   insert the renderable after the selected staging resources are ready.
+- Register assembled scene objects, material decisions, and staging-resource dependencies with the
+  Phase 6C.2A renderer resource graph. Scene object assembly should add graph edges to prepared
+  asset ids and derived renderer nodes required to rebuild the assembled object.
+- Lease assembled and staged scene-object graph nodes for as long as they remain render-scene
+  members. Removing a renderable from residency should release its graph lease and let normal graph
+  disposal/pruning flow determine which derived nodes and prepared assets can be retired.
 - Wire direct-texture strategy records from Phase 6C.1 through the individual/staged luma draw path.
   Static objects, buildings, and structured-interior surfaces that can be represented by a direct
   texture strategy should render visibly without waiting for atlas layout or render compaction.
@@ -1993,6 +2078,8 @@ Exit criteria:
 
 - Newly assembled renderables can enter the render scene through scene object assembly with all
   selected staging resources ready, without waiting for the render compaction duty cycle.
+- Assembled/staged renderables register renderer resource graph nodes, edges, and leases, and
+  prepared-asset pruning keeps their required raw-ish prepared assets retained.
 - Direct-texture strategies render through individual/staged scene entries for common supported
   materials before atlas layout or static compaction is implemented.
 - Flat fallback remains explicit and metric-visible for materials that cannot use direct textures yet.
@@ -2105,6 +2192,10 @@ Lifecycle target:
   and Phase 6C.4 atlas layout output, realizes or reuses the atlas set generation for `atlas`
   strategies, and rebuilds compacted baked geometry only when membership/material-set changes
   require it.
+- Compaction records atlas generations, compacted static batches, draw slices, and their prepared
+  asset dependencies in the Phase 6C.2A renderer resource graph. This graph retention is what keeps
+  normalized prepared textures and material inputs available for rebuilds, old-generation retirement,
+  and context/resource recovery while the compacted renderer state still depends on them.
 - Re-anchor-only updates must update draw-time transforms only. They must not repack atlases,
   rewrite UVs, or rebuild compacted/staged vertex buffers.
 
@@ -2117,6 +2208,9 @@ Tasks:
 - Implement atlas-set resource realization from atlas layout pages/rects and material strategy atlas
   entries, using uncompressed base-level payloads and linear transfer. Create additional atlas
   textures in the set when the layout planner emits additional pages.
+- Register immutable atlas generation nodes in the renderer resource graph with edges to normalized
+  prepared texture assets, material decisions, and any source scene objects needed to explain or
+  rebuild the generation.
 - Generate mipmaps for each atlas texture after packing and define padding/gutter extrusion to
   prevent neighboring atlas entries from bleeding at lower mip levels.
 - Implement the material-index table shader path. Prefer bounded uniform-array material tables first;
@@ -2141,6 +2235,9 @@ Tasks:
   texture, not allocate per-object duplicates.
 - Allow staged objects to opportunistically use existing atlas slots only when every required
   surface exists in the current atlas set generation and doing so does not mutate that generation.
+- Use renderer resource graph disposal candidates to retire old atlas generations, compacted
+  batches, and stale draw slices. The graph should identify retirement candidates; luma resource
+  stores still perform the actual GPU resource destruction.
 - Add real-scene metrics/debug output for direct texture, atlas texture, flat fallback, animated UV
   fallback, missing decompressed prepared texture, atlas full, and material table overflow.
 - Add tests for multi-atlas layout stability, capacity fallback, gutter/mip behavior,
@@ -2166,6 +2263,8 @@ Exit criteria:
   contract; unsupported sampler behavior remains explicit fallback.
 - Compressed source textures enter atlases only through the Phase 6C.0 decompressed prepared-texture
   path; block-compressed atlas packing remains out of scope.
+- Renderer resource graph leases retain normalized prepared texture payloads and material inputs
+  while atlas generations or compacted batches still depend on them.
 - Re-anchor-only updates still reuse compacted static buffers and atlas resources.
 
 ## Phase 7: Terrain Materials and Indexed/Paletted Textures

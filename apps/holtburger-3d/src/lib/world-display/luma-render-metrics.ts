@@ -93,15 +93,10 @@ export function createLumaRenderMetrics(
 			visibleStaticGroupMeshCount: input.staticBatchCount ?? 0,
 			staticRenderBatchCount: input.staticBatchCount ?? 0,
 			staticBvhCandidateBatchCount:
-				(input.lumaFrameMetrics?.candidateCountsByCategory["static-promoted"] ??
-					0) +
 				(input.lumaFrameMetrics?.candidateCountsByCategory["static-staged"] ??
 					0) +
 				(input.lumaFrameMetrics?.candidateCountsByCategory.static ?? 0),
 			staticBvhRepresentedInstanceKeyCount:
-				(input.lumaFrameMetrics?.representedItemKeyCountsByCategory[
-					"static-promoted"
-				] ?? 0) +
 				(input.lumaFrameMetrics?.representedItemKeyCountsByCategory[
 					"static-staged"
 				] ?? 0) +
@@ -109,16 +104,10 @@ export function createLumaRenderMetrics(
 					0),
 			staticBvhVisibleInstanceKeyCount:
 				(input.lumaFrameMetrics?.visibleDrawCountsByCategory[
-					"static-promoted"
-				] ?? 0) +
-				(input.lumaFrameMetrics?.visibleDrawCountsByCategory[
 					"static-staged"
 				] ?? 0) +
 				(input.lumaFrameMetrics?.visibleDrawCountsByCategory.static ?? 0),
 			staticBvhFallbackIncludedBatchCount:
-				(input.lumaFrameMetrics?.fallbackCountsByCategory[
-					"static-promoted"
-				] ?? 0) +
 				(input.lumaFrameMetrics?.fallbackCountsByCategory["static-staged"] ??
 					0) +
 				(input.lumaFrameMetrics?.fallbackCountsByCategory.static ?? 0),
@@ -164,14 +153,9 @@ export function createLumaRenderMetrics(
 				input.lumaFrameMetrics?.candidateCountsByCategory.terrain ?? 0,
 			outdoorStaticBvhVisibleItemCount:
 				(input.lumaFrameMetrics?.visibleDrawCountsByCategory[
-					"static-promoted"
-				] ?? 0) +
-				(input.lumaFrameMetrics?.visibleDrawCountsByCategory[
 					"static-staged"
 				] ?? 0),
 			outdoorStaticBvhTotalItemCount:
-				(input.lumaFrameMetrics?.candidateCountsByCategory["static-promoted"] ??
-					0) +
 				(input.lumaFrameMetrics?.candidateCountsByCategory["static-staged"] ??
 					0),
 			envCellLocalBvhVisibleItemCount:

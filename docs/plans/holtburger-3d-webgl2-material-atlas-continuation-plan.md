@@ -1507,7 +1507,8 @@ Purpose: stop guessing about the remaining first-depth portal holes. M4C.1 fixed
 scene-domain ownership, hardened near-plane rect clipping, and added a mask-only depth bias, but
 field testing still shows outdoor scene strips through outdoor-to-indoor portals at distance. This
 phase must isolate whether the failure is stencil mask coverage, scissor/screen-rect coverage,
-composite sampling/state, or aperture/depth geometry before adding parent-bound optimization work.
+composite sampling/state, aperture/depth geometry, or depth-buffer precision before adding
+parent-bound optimization work.
 
 Why this phase is immediate:
 
@@ -1515,6 +1516,9 @@ Why this phase is immediate:
   not the primary suspect.
 - The artifact changes with camera distance, which is consistent with depth precision or projected
   coverage drift, but M4C.1's small mask-depth bias did not resolve it.
+- The default browser free camera currently uses a very large far/near range (`near=0.1`,
+  `far=5000`). That makes depth precision highly non-linear and can produce distance-dependent
+  banding when an aperture mask is re-rasterized against depth copied from an offscreen texture.
 - Parent rect intersection and skipped-reason counters are still useful, but they should not be
   implemented before the compositor can prove where pixels are being lost.
 
@@ -1531,10 +1535,19 @@ Tasks:
   - draw stencil-visible pixels as a flat debug color instead of sampling the scene-domain target.
 - Record debug metrics for mask-visible candidate count, composite rect count, rect area, and which
   triage override is active.
+- Add depth-precision probes for portal triage:
+  - report active camera `near`, `far`, and `far/near` ratio in WebGL2 portal debug metrics;
+  - add temporary/debug-only near/far overrides for WebGL2 portal rendering experiments;
+  - test whether increasing near plane (`1.0` or `2.0`) or reducing far plane (`500` or `1000`)
+    reduces the banding/strip artifact;
+  - optionally create scene-domain depth textures as `DEPTH_COMPONENT32F` behind a debug option to
+    separate offscreen depth texture precision from default-framebuffer precision.
 - If disabling scissor fixes the artifact, fix `screenRect` planning before parent-rect work.
 - If disabling mask depth testing fixes the artifact, inspect aperture mask geometry placement,
-  copied-depth precision, alpha/cutout occluder depth writes, and whether the aperture should use a
-  different depth function or mask-specific depth path.
+  copied-depth precision, camera near/far policy, alpha/cutout occluder depth writes, and whether
+  the aperture should use a different depth function or mask-specific depth path.
+- If near/far overrides materially reduce the artifact, treat depth precision as proven and design a
+  real camera clipping/depth policy instead of increasing polygon offset.
 - If stencil coverage is solid but sampled composite still has holes, inspect composite shader UVs,
   depth writes, state-cache invalidation around scissor/stencil/depth, and framebuffer target size.
 - Add tests for debug-mode planning/state where feasible without writing tests for debug logging.
@@ -1554,6 +1567,8 @@ Exit criteria:
   composite coverage for WebGL2 transition portals.
 - The current first-depth outdoor-to-indoor portal strip artifact is assigned to a proven root cause
   and fixed, or the plan records a concrete blocker with the exact failing pass.
+- Depth precision is explicitly ruled in or out with near/far experiments and, if needed,
+  offscreen-depth-format experiments.
 - Metrics distinguish visible portal work from skipped/invalid portal candidates.
 - Composite pixel-area estimates account for parent rect clipping.
 - M4D can focus on measured fill-rate and visual hardening rather than missing planning diagnostics.
@@ -1565,6 +1580,11 @@ Decisions:
 - Do not increase the mask polygon offset again until debug coverage proves the aperture depth test
   is the failing pass. Blindly increasing the offset risks letting portals draw through legitimate
   occluders.
+- Do not make `DEPTH_COMPONENT32F` the default unless evidence shows `DEPTH_COMPONENT24` is the
+  bottleneck and the compatibility/performance cost is acceptable.
+- If near/far policy is the root cause, prefer a renderer-level clipping strategy over special-case
+  portal hacks. The portal compositor should not depend on fragile depth equality across a
+  `50000:1` far/near range.
 - Debug rendering controls should be temporary or clearly marked. Keep permanent metrics useful,
   but do not let one-off triage flags become product-facing renderer policy.
 

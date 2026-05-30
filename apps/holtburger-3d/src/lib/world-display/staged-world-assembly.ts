@@ -46,6 +46,7 @@ import { deriveStaticRenderablePartBvhItemKey } from "./static-renderable-bvh-bi
 import { staticRenderableObjectKey } from "./static-renderable-readiness";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
+import type { TextureFilteringMode } from "./texture-sampling-policy";
 import type { TransitionPortalCandidateModel } from "./transition-portal-work-items";
 
 export type StagedWorldDrawUnitGeometry = StagedWorldIndexedGeometry;
@@ -131,6 +132,7 @@ export function buildStagedWorldSceneAssembly({
 	transitionPortalModel,
 	renderChunkTransforms,
 	materialTextureCapabilities,
+	textureFilteringMode,
 	detailTexturesEnabled = true,
 }: {
 	assetState: AssetChannelState;
@@ -140,6 +142,7 @@ export function buildStagedWorldSceneAssembly({
 	transitionPortalModel: TransitionPortalCandidateModel;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	materialTextureCapabilities?: MaterialTextureCapabilities;
+	textureFilteringMode?: TextureFilteringMode;
 	detailTexturesEnabled?: boolean;
 }): StagedWorldSceneAssembly {
 	const chunkOffsetByKey = new Map(
@@ -176,6 +179,7 @@ export function buildStagedWorldSceneAssembly({
 			structuredInteriorScene:
 				fullyResolvedScenes.committedStructuredInteriorScene,
 			materialTextureCapabilities,
+			textureFilteringMode,
 			detailTexturesEnabled,
 		});
 	const staticDrawUnits = buildStagedStaticDrawUnitAssemblies({
@@ -183,6 +187,7 @@ export function buildStagedWorldSceneAssembly({
 		chunkOffsetByKey,
 		staticRenderableScene: fullyResolvedScenes.committedStaticRenderableScene,
 		materialTextureCapabilities,
+		textureFilteringMode,
 		detailTexturesEnabled,
 	});
 	return {
@@ -336,12 +341,14 @@ export function buildStagedStructuredInteriorDrawUnitAssemblies({
 	chunkOffsetByKey,
 	structuredInteriorScene,
 	materialTextureCapabilities,
+	textureFilteringMode,
 	detailTexturesEnabled = true,
 }: {
 	assetState: AssetChannelState;
 	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
 	structuredInteriorScene: StructuredInteriorSceneModel;
 	materialTextureCapabilities?: MaterialTextureCapabilities;
+	textureFilteringMode?: TextureFilteringMode;
 	detailTexturesEnabled?: boolean;
 }): StagedStructuredInteriorDrawUnitAssembly[] {
 	return structuredInteriorScene.cells.flatMap((cell) => {
@@ -378,6 +385,7 @@ export function buildStagedStructuredInteriorDrawUnitAssemblies({
 						fallbackColorKey: `${cell.debugColorKey}:${formatStructuredInteriorSurfaceKey(surfaceKey)}`,
 						renderableKind: "structured-interior",
 						textureCapabilities: materialTextureCapabilities,
+						textureFilteringMode,
 						detailOverlay,
 					})
 				: resolveStagedWorldSurfaceMaterialPlan({
@@ -385,6 +393,7 @@ export function buildStagedStructuredInteriorDrawUnitAssemblies({
 						surfaceId: surfaceKey.surfaceId,
 						fallbackColorKey: `${cell.debugColorKey}:${formatStructuredInteriorSurfaceKey(surfaceKey)}`,
 						textureCapabilities: materialTextureCapabilities,
+						textureFilteringMode,
 					});
 			const drawUnitId = [
 				"structured-interior",
@@ -414,12 +423,14 @@ export function buildStagedStaticDrawUnitAssemblies({
 	chunkOffsetByKey,
 	staticRenderableScene,
 	materialTextureCapabilities,
+	textureFilteringMode,
 	detailTexturesEnabled = true,
 }: {
 	assetState: AssetChannelState;
 	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
 	staticRenderableScene: StaticRenderableSceneModel;
 	materialTextureCapabilities?: MaterialTextureCapabilities;
+	textureFilteringMode?: TextureFilteringMode;
 	detailTexturesEnabled?: boolean;
 }): StagedStaticDrawUnitAssembly[] {
 	const objectsByBatchKey = groupCommittedStaticObjectsByBatchKey({
@@ -435,6 +446,7 @@ export function buildStagedStaticDrawUnitAssemblies({
 				chunkOffsetByKey,
 				objectGroup,
 				materialTextureCapabilities,
+				textureFilteringMode,
 				detailTexturesEnabled,
 			}),
 		),
@@ -517,6 +529,7 @@ function buildStagedStaticObjectDrawUnits({
 	chunkOffsetByKey,
 	objectGroup,
 	materialTextureCapabilities,
+	textureFilteringMode,
 	detailTexturesEnabled,
 }: {
 	assetState: AssetChannelState;
@@ -524,6 +537,7 @@ function buildStagedStaticObjectDrawUnits({
 	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
 	objectGroup: StaticRenderableObjectGroup;
 	materialTextureCapabilities?: MaterialTextureCapabilities;
+	textureFilteringMode?: TextureFilteringMode;
 	detailTexturesEnabled: boolean;
 }): StagedStaticDrawUnitAssembly[] {
 	return objectGroup.parts.flatMap((part) =>
@@ -536,6 +550,7 @@ function buildStagedStaticObjectDrawUnits({
 				part,
 				surfaceKey,
 				materialTextureCapabilities,
+				textureFilteringMode,
 				detailTexturesEnabled,
 			}),
 		),
@@ -550,6 +565,7 @@ function buildStagedStaticSurfaceDrawUnit({
 	part,
 	surfaceKey,
 	materialTextureCapabilities,
+	textureFilteringMode,
 	detailTexturesEnabled,
 }: {
 	assetState: AssetChannelState;
@@ -559,6 +575,7 @@ function buildStagedStaticSurfaceDrawUnit({
 	part: StaticRenderablePart;
 	surfaceKey: StagedStaticSurfaceKey;
 	materialTextureCapabilities?: MaterialTextureCapabilities;
+	textureFilteringMode?: TextureFilteringMode;
 	detailTexturesEnabled: boolean;
 }): StagedStaticDrawUnitAssembly[] {
 	const chunkOffset = chunkOffsetByKey.get(part.renderChunk.chunkKey);
@@ -580,6 +597,7 @@ function buildStagedStaticSurfaceDrawUnit({
 				fallbackColorKey: `${part.debugColorKey}:${surfaceBatchKey}`,
 				renderableKind: "static",
 				textureCapabilities: materialTextureCapabilities,
+				textureFilteringMode,
 				appearance: part.materialAppearanceContext,
 				detailOverlay,
 			})

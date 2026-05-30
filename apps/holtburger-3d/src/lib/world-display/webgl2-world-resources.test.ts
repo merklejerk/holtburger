@@ -201,6 +201,82 @@ describe("webgl2 world resources", () => {
 		expect(gl.deletedTextures).toHaveLength(1);
 	});
 
+	it("applies WebGL2 texture filtering mode and anisotropy capability to direct uploads", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2WorldResourceStore();
+		const materialSurfaceId = 0x08000002;
+		const renderSurfaceId = 0x06000002;
+		const scene = createStaticRenderableScene([
+			createStaticPart({
+				materialSlots: [createMaterialSlot(0, materialSurfaceId)],
+			}),
+		]);
+
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState({ materialSurfaceId, renderSurfaceId }),
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: scene,
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform()],
+			materialTextureCapabilities: {
+				supportsS3tc: false,
+				supportsS3tcSrgb: false,
+				supportsPackedRgb565: false,
+				supportsPackedRgba4444: true,
+				maxAnisotropy: 8,
+			},
+			textureFilteringMode: "anisotropic-4x",
+		});
+
+		expect(store.textureSamplingPolicySamples).toEqual([
+			"wrap=clamp/clamp;filter=linear/linear/linear;color=srgb;aniso=4;mips=on;flipY=off",
+		]);
+		expect(gl.textureParameters).toContainEqual({
+			pname: gl.TEXTURE_MIN_FILTER,
+			param: gl.LINEAR_MIPMAP_LINEAR,
+		});
+		expect(gl.textureParameters).toContainEqual({
+			pname: gl.TEXTURE_MAG_FILTER,
+			param: gl.LINEAR,
+		});
+
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState({ materialSurfaceId, renderSurfaceId }),
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: scene,
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform()],
+			materialTextureCapabilities: {
+				supportsS3tc: false,
+				supportsS3tcSrgb: false,
+				supportsPackedRgb565: false,
+				supportsPackedRgba4444: true,
+				maxAnisotropy: 8,
+			},
+			textureFilteringMode: "nearest",
+		});
+
+		expect(store.textureSamplingPolicySamples).toEqual([
+			"wrap=clamp/clamp;filter=nearest/nearest/none;color=srgb;aniso=1;mips=off;flipY=off",
+		]);
+		expect(gl.generatedMipmapCount).toBe(1);
+		expect(gl.deletedTextures).toHaveLength(1);
+		expect(gl.textureParameters).toContainEqual({
+			pname: gl.TEXTURE_MIN_FILTER,
+			param: gl.NEAREST,
+		});
+		expect(gl.textureParameters).toContainEqual({
+			pname: gl.TEXTURE_MAG_FILTER,
+			param: gl.NEAREST,
+		});
+	});
+
 	it("realizes building region detail overlays for direct-texture draw units", () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
@@ -413,6 +489,7 @@ class FakeWebgl2 {
 		type: GLenum;
 		data: TexImageSource | ArrayBufferView | null;
 	}[] = [];
+	readonly textureParameters: { pname: GLenum; param: GLenum }[] = [];
 	generatedMipmapCount = 0;
 	private currentVertexArray: WebGLVertexArrayObject | null = null;
 	private readonly elementArrayBuffersByVertexArray = new Map<
@@ -517,8 +594,8 @@ class FakeWebgl2 {
 		});
 	}
 
-	texParameteri(): void {
-		return;
+	texParameteri(_target: GLenum, pname: GLenum, param: GLenum): void {
+		this.textureParameters.push({ pname, param });
 	}
 
 	texParameterf(): void {

@@ -79,6 +79,8 @@ const WEBGL2_CLEAR_COLOR: readonly [number, number, number, number] = [
 	0.015, 0.055, 0.085, 1,
 ];
 const PERFORMANCE_REPORT_INTERVAL_MS = 500;
+const PORTAL_MASK_DEPTH_BIAS_FACTOR = -1;
+const PORTAL_MASK_DEPTH_BIAS_UNITS = -1;
 const TRIANGLE_VERTEX_COUNT = 3;
 const TRIANGLE_VERTICES = new Float32Array([
 	0, 0.58, -0.58, -0.46, 0.58, -0.46,
@@ -1094,6 +1096,14 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		}
 		const { gl, stateCache } = resources;
 		gl.colorMask(false, false, false, false);
+		// Portal masks are re-rasterized against depth copied through a texture.
+		// A small negative offset avoids distance-dependent equality failures at
+		// aperture edges without changing the copied scene-domain depth itself.
+		gl.enable(gl.POLYGON_OFFSET_FILL);
+		gl.polygonOffset(
+			PORTAL_MASK_DEPTH_BIAS_FACTOR,
+			PORTAL_MASK_DEPTH_BIAS_UNITS,
+		);
 		try {
 			stateCache.setDepthState({
 				enabled: true,
@@ -1154,6 +1164,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				);
 			}
 		} finally {
+			gl.disable(gl.POLYGON_OFFSET_FILL);
 			gl.colorMask(true, true, true, true);
 		}
 	}

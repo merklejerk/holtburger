@@ -26,6 +26,7 @@ import type { ResolvedRegionDetailOverlayPlan } from "./region-detail-overlays";
 import type { RenderMat4, RenderVec4 } from "./render-math";
 import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import type { RenderChunkTransform } from "./render-anchor";
+import { WORLD_RENDER_DOMAIN } from "./render-domains";
 import {
 	materialDecisionGraphNodeKey,
 	preparedAssetGraphNodeKey,
@@ -63,6 +64,7 @@ import type {
 	TerrainBlendPlan,
 	TerrainBlendTextureRef,
 } from "./terrain-blend-plan";
+import type { Webgl2SceneDomain } from "./webgl2-scene-domain-targets";
 
 export interface Webgl2WorldDrawUnit {
 	id: string;
@@ -89,6 +91,7 @@ export interface Webgl2WorldDrawUnit {
 	indexedMaterial: Webgl2IndexedMaterialResources | null;
 	detailOverlay: Webgl2DetailOverlayResources | null;
 	terrainBlend: Webgl2TerrainBlendResources | null;
+	sceneDomain: Webgl2SceneDomain | null;
 	modelMatrix: RenderMat4;
 	bvhItemKeys: readonly RenderBvhItemKey[];
 	bvhFallbackReason: string | null;
@@ -505,6 +508,7 @@ function createOrReuseWebgl2DrawUnit({
 			materialTextureCapabilities,
 			textureFilteringMode,
 		});
+		previous.sceneDomain = deriveWebgl2DrawUnitSceneDomain(drawUnit);
 		previous.modelMatrix = drawUnit.modelMatrix;
 		previous.bvhItemKeys = drawUnit.bvhBinding.itemKeys;
 		previous.bvhFallbackReason = drawUnit.bvhBinding.fallbackReason;
@@ -605,6 +609,7 @@ function createOrReuseWebgl2DrawUnit({
 		indexedMaterial,
 		detailOverlay,
 		terrainBlend,
+		sceneDomain: deriveWebgl2DrawUnitSceneDomain(drawUnit),
 		modelMatrix: drawUnit.modelMatrix,
 		bvhItemKeys: drawUnit.bvhBinding.itemKeys,
 		bvhFallbackReason: drawUnit.bvhBinding.fallbackReason,
@@ -614,6 +619,23 @@ function createOrReuseWebgl2DrawUnit({
 	store.drawUnitsById.set(drawUnit.id, webgl2DrawUnit);
 	retainedDrawUnitIds.add(drawUnit.id);
 	return webgl2DrawUnit;
+}
+
+function deriveWebgl2DrawUnitSceneDomain(
+	drawUnit: StagedWorldDrawUnitAssembly,
+): Webgl2SceneDomain | null {
+	switch (drawUnit.kind) {
+		case "terrain":
+			return "exterior";
+		case "structured-interior":
+			return "interior";
+		case "static":
+			return drawUnit.renderDomain === WORLD_RENDER_DOMAIN.interiorStatic
+				? "interior"
+				: "exterior";
+		case "portal-mask":
+			return null;
+	}
 }
 
 function destroyWebgl2DrawUnit(drawUnit: Webgl2WorldDrawUnit): void {

@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
-Status: Phase M4C core complete; ready for Phase M4C.1.
+Status: Phase M4C.1 stabilization complete; ready for Phase M4C.2 diagnostics/parent-rect prep.
 
 Related plans:
 
@@ -1405,43 +1405,168 @@ Course corrections:
   from drawing outside the parent stencil region, but metrics/fill estimates still use each
   aperture's own projected rectangle.
 
-## Phase M4C.1: Portal Composite Clipping and Diagnostics
+## Phase M4C.1: Portal Composite Clipping and Static Domain Stabilization
 
-Status: Not started.
+Status: Complete.
 
 Purpose: harden the first WebGL2 portal compositor before broader fill-rate/visual work. M4C has the
-core dual-target stencil/depth pipeline, but the screen-rect and diagnostics path needs more precise
-clipping and skipped-reason reporting before M4D profiling.
+core dual-target stencil/depth pipeline, but close/partially clipped portal apertures exposed an
+unstable screen-rect path, and staged static draw units were all being routed to the exterior
+scene-domain target even when owned by interior env cells.
 
 Why this phase is immediate:
 
 - Per-aperture scissor rectangles are bounded but currently based on projected visible vertices
   rather than full near-plane clipped aperture polygons. Close or partially clipped portals can
   produce conservative or missing rects.
-- Parent portal bounds are enforced by stencil but not reflected in composite rect planning or fill
-  metrics.
-- WebGL2 portal metrics still lack detailed skipped-reason accounting comparable to the Three path.
+- Static object draw units already carry enough staged ownership to distinguish `exterior-static`
+  and `interior-static`, but WebGL2 partitioning ignored that ownership and put all statics in the
+  exterior target.
 
 Tasks:
 
 - Replace simple projected-point bounds with near/frustum-clipped aperture polygon projection for
   WebGL2 portal work items.
-- Intersect child-depth composite rectangles with parent portal rectangles where available so fill
-  estimates and scissor bounds better match stencil-visible area.
-- Add skipped-reason counters for missing candidate, missing mask draw unit, back-facing/missing
-  plane, outside-frustum, too-small, and invalid screen rect.
-- Add tests for partially clipped portals, portals behind the camera, multiple same-depth portals,
-  parent rect intersection, and skipped-reason accounting.
-- Consider moving mask/composite pass helpers out of `webgl2-world-display-renderer-impl.ts` once
-  the pass API stabilizes.
+- Carry static render-domain ownership through staged WebGL2 draw units and use it for
+  scene-domain partitioning.
+- Add tests for partially clipped portals and interior/exterior static partitioning.
 
 Exit criteria:
 
 - WebGL2 portal work-item planning produces stable bounded rects for close, edge-of-screen, and
   partially clipped apertures.
+- Interior-owned static objects no longer render into the exterior scene-domain target.
+- M4C.2 can focus on parent rects and skipped-reason diagnostics rather than the immediate visual
+  artifacts reported during first portal testing.
+
+Progress:
+
+- Replaced WebGL2 portal screen-rect projection with homogeneous clip-space polygon clipping against
+  the six frustum planes before converting to viewport bounds. This matches the clipping model used
+  by the Three portal visibility helper and prevents near-plane vertices from being dropped out of
+  the scissor calculation.
+- Added a regression test for a portal aperture crossing the near plane. The work item remains
+  visible and produces the clipped rect instead of disappearing.
+- Added explicit `sceneDomain` ownership to WebGL2 draw units and derived it from staged draw-unit
+  semantics:
+  - terrain -> exterior;
+  - structured interiors -> interior;
+  - `exterior-static` -> exterior;
+  - `interior-static` -> interior;
+  - portal masks -> neither.
+- Updated WebGL2 scene-domain partitioning to use `sceneDomain` instead of assuming every `static`
+  draw unit belongs outside.
+- Added partitioning coverage proving indoor statics go to the interior target while outdoor statics
+  stay in the exterior target.
+- Added a mask-only negative polygon offset around the WebGL2 portal aperture stencil pass. This
+  stabilizes aperture stencil coverage when the mask is depth-tested against default-framebuffer
+  depth that was copied from an offscreen depth texture.
+
+Decisions:
+
+- Static ownership belongs on the draw unit because the render-domain distinction is already decided
+  during staged assembly. Parsing draw-unit IDs in the partitioner would be a brittle shim.
+- Portal rect planning should clip in homogeneous clip space, not by dropping vertices with invalid
+  `w`. Dropping vertices was the likely cause of camera-distance-dependent holes near transition
+  portals.
+- Keep parent-rect intersection and skipped-reason metrics as a separate prep phase. They are still
+  needed before M4D, but the reported artifact had two sharper causes: near-plane/scissor clipping
+  and static domain ownership.
+- Portal mask depth bias is intentionally scoped to the mask pass. The scene-domain depth textures
+  and composite `gl_FragDepth` writes remain unbiased so downstream occluder depth stays authored.
+
+Course corrections:
+
+- The previous M4C.1 text combined immediate visual stabilization with broader diagnostics. This
+  phase now records the stabilization work that landed, and M4C.2 carries the remaining diagnostics
+  and parent-rect scope.
+- Visual inspection suggests aperture depth precision may still need review if coplanar wall/portal
+  masks shimmer after the clipping fix. A follow-up screenshot showed distance-dependent stencil
+  loss persisted while close-up coverage looked stable, which points to depth equality/precision
+  between copied offscreen depth and re-rasterized aperture masks. M4C.1 added a small mask-only
+  polygon offset as the targeted correction.
+
+Cleanup targets and legacy shims:
+
+- `Webgl2WorldDrawUnit.sceneDomain` is now the source of truth for dual-target ownership. Any future
+  draw-unit kind should set this explicitly instead of extending kind-based partition logic.
+- `StagedStaticDrawUnitAssembly.renderDomain` is currently carried only to derive WebGL2
+  `sceneDomain`. If other backends need the same static ownership, promote a renderer-neutral
+  scene-domain field in staged assembly rather than duplicating backend-specific mapping.
+- Parent portal bounds are still enforced only by stencil during rendering; fill estimates and
+  scissor rectangles do not yet intersect with parent rects.
+- WebGL2 portal work planning still lacks skipped-reason counters.
+- If portal coverage still leaks after the mask-depth bias, inspect mask geometry placement and
+  alpha-tested/cutout occluder depth writes before increasing the bias.
+
+## Phase M4C.2: Portal Coverage Triage and Diagnostics
+
+Status: Not started.
+
+Purpose: stop guessing about the remaining first-depth portal holes. M4C.1 fixed static
+scene-domain ownership, hardened near-plane rect clipping, and added a mask-only depth bias, but
+field testing still shows outdoor scene strips through outdoor-to-indoor portals at distance. This
+phase must isolate whether the failure is stencil mask coverage, scissor/screen-rect coverage,
+composite sampling/state, or aperture/depth geometry before adding parent-bound optimization work.
+
+Why this phase is immediate:
+
+- The observed artifact occurs on first-depth outdoor-to-indoor portals, so parent portal bounds are
+  not the primary suspect.
+- The artifact changes with camera distance, which is consistent with depth precision or projected
+  coverage drift, but M4C.1's small mask-depth bias did not resolve it.
+- Parent rect intersection and skipped-reason counters are still useful, but they should not be
+  implemented before the compositor can prove where pixels are being lost.
+
+Tasks:
+
+- Add a temporary WebGL2 portal coverage debug mode that can independently visualize or force:
+  - aperture stencil/mask coverage after the mask pass;
+  - composite rectangle/scissor coverage before sampling;
+  - final composite source sampling coverage.
+- Add controlled toggles, preferably debug-only renderer options or panel flags, for the triage
+  ladder:
+  - disable composite scissor while keeping stencil enabled;
+  - disable aperture mask depth testing while keeping stencil/composite enabled;
+  - draw stencil-visible pixels as a flat debug color instead of sampling the scene-domain target.
+- Record debug metrics for mask-visible candidate count, composite rect count, rect area, and which
+  triage override is active.
+- If disabling scissor fixes the artifact, fix `screenRect` planning before parent-rect work.
+- If disabling mask depth testing fixes the artifact, inspect aperture mask geometry placement,
+  copied-depth precision, alpha/cutout occluder depth writes, and whether the aperture should use a
+  different depth function or mask-specific depth path.
+- If stencil coverage is solid but sampled composite still has holes, inspect composite shader UVs,
+  depth writes, state-cache invalidation around scissor/stencil/depth, and framebuffer target size.
+- Add tests for debug-mode planning/state where feasible without writing tests for debug logging.
+- After the root cause is fixed, add skipped-reason counters for missing candidate, missing mask draw
+  unit, back-facing/missing plane, outside-frustum, too-small, and invalid screen rect.
+- After first-depth coverage is stable, intersect child-depth composite rectangles with parent
+  portal rectangles where available so fill estimates and scissor bounds better match
+  stencil-visible area.
+- Add tests for portals behind the camera, multiple same-depth portals, parent rect intersection,
+  and skipped-reason accounting after the root-cause fix lands.
+- Consider moving mask/composite pass helpers out of `webgl2-world-display-renderer-impl.ts` once
+  the pass API stabilizes.
+
+Exit criteria:
+
+- A debug screenshot or metric path can distinguish stencil coverage, scissor coverage, and sampled
+  composite coverage for WebGL2 transition portals.
+- The current first-depth outdoor-to-indoor portal strip artifact is assigned to a proven root cause
+  and fixed, or the plan records a concrete blocker with the exact failing pass.
 - Metrics distinguish visible portal work from skipped/invalid portal candidates.
 - Composite pixel-area estimates account for parent rect clipping.
 - M4D can focus on measured fill-rate and visual hardening rather than missing planning diagnostics.
+
+Decisions:
+
+- Parent-rect clipping is demoted behind first-depth coverage triage. It is still needed for better
+  fill estimates, but it cannot explain the current single-depth strip artifact.
+- Do not increase the mask polygon offset again until debug coverage proves the aperture depth test
+  is the failing pass. Blindly increasing the offset risks letting portals draw through legitimate
+  occluders.
+- Debug rendering controls should be temporary or clearly marked. Keep permanent metrics useful,
+  but do not let one-off triage flags become product-facing renderer policy.
 
 ## Phase M4D: Portal Fill-Rate and Visual Hardening
 

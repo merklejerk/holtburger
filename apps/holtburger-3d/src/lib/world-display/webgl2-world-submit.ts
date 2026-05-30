@@ -578,25 +578,24 @@ export function partitionWebgl2SceneDomainDrawUnits(
 	const exterior: Webgl2WorldDrawUnit[] = [];
 	const interior: Webgl2WorldDrawUnit[] = [];
 	for (const drawUnit of drawUnits) {
-		switch (drawUnit.kind) {
-			case "terrain":
-			case "static":
+		switch (drawUnit.sceneDomain) {
+			case "exterior":
 				exterior.push(drawUnit);
 				break;
-			case "structured-interior":
+			case "interior":
 				interior.push(drawUnit);
 				break;
-			case "portal-mask":
+			case null:
 				break;
 			default:
-				assertNeverWebgl2DrawUnitKind(drawUnit.kind);
+				assertNeverWebgl2SceneDomain(drawUnit.sceneDomain);
 		}
 	}
 	return { exterior, interior };
 }
 
-function assertNeverWebgl2DrawUnitKind(kind: never): never {
-	throw new Error(`Unsupported WebGL2 draw unit kind ${kind}.`);
+function assertNeverWebgl2SceneDomain(domain: never): never {
+	throw new Error(`Unsupported WebGL2 scene domain ${domain}.`);
 }
 
 function compareWebgl2FlatWorldDrawUnits(

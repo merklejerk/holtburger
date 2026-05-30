@@ -90,6 +90,43 @@ describe("planWebgl2TransitionPortalWork", () => {
 			"reachable",
 		]);
 	});
+
+	it("clips portal composite bounds against clip space instead of dropping near-plane vertices", () => {
+		const candidate = createCandidate({
+			id: "near-plane",
+			entryEnvCellId: 0x01020100,
+			points: [
+				{ x: -1, y: -1, z: 0 },
+				{ x: 1, y: -1, z: 0 },
+				{ x: 1, y: 1, z: -2 },
+				{ x: -1, y: 1, z: -2 },
+			],
+		});
+
+		const plan = planWebgl2TransitionPortalWork({
+			transitionPortalModel: {
+				candidates: [candidate],
+				diagnostics: createCandidateDiagnostics(1),
+			},
+			visiblePortalMaskDrawUnits: [
+				createPortalMaskDrawUnit("portal-mask/near-plane"),
+			],
+			cameraPosition: { x: 0, y: 0, z: 5 },
+			viewProjectionMatrix: createIdentityMat4(),
+			viewport: { width: 100, height: 80 },
+			baseScene: "exterior",
+			initialEnvCellId: null,
+			levels: createLevels("exterior"),
+		});
+
+		expect(plan.visibleWorkItems).toHaveLength(1);
+		expect(plan.visibleWorkItems[0]?.screenRect).toEqual({
+			x: 0,
+			y: 40,
+			width: 100,
+			height: 40,
+		});
+	});
 });
 
 describe("deriveWebgl2BaseSceneDomain", () => {
@@ -154,6 +191,7 @@ function createLevels(baseScene: WorldRenderBaseScene) {
 function createCandidate(options: {
 	id: string;
 	entryEnvCellId: number;
+	points?: TransitionPortalCandidate["aperture"]["points"];
 }): TransitionPortalCandidate {
 	return {
 		id: options.id,
@@ -166,7 +204,7 @@ function createCandidate(options: {
 				sourceIndex: 0,
 			},
 			targetStatus: "outside",
-			points: [
+			points: options.points ?? [
 				{ x: -1, y: -1, z: 0 },
 				{ x: 1, y: -1, z: 0 },
 				{ x: 1, y: 1, z: 0 },
@@ -233,6 +271,7 @@ function createPortalMaskDrawUnit(id: string): Webgl2WorldDrawUnit {
 		indexedMaterial: null,
 		detailOverlay: null,
 		terrainBlend: null,
+		sceneDomain: null,
 		modelMatrix: new Float32Array([
 			1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1,
 		]),

@@ -22,6 +22,7 @@ import {
 	multiplyMat4,
 	type RenderMat4,
 } from "./render-math";
+import type { StaticRenderableRenderDomain } from "./render-domains";
 import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import type { RenderChunkTransform } from "./render-anchor";
 import type { MaterialTextureCapabilities } from "./render-surface-texture-data";
@@ -62,6 +63,7 @@ export interface StagedWorldDrawUnitBvhBinding {
 export interface StagedStaticDrawUnitAssembly {
 	id: string;
 	kind: "static";
+	renderDomain: StaticRenderableRenderDomain;
 	geometry: StagedWorldDrawUnitGeometry;
 	modelMatrix: RenderMat4;
 	material: StagedWorldMaterialPlan;
@@ -711,6 +713,7 @@ function buildStagedStaticSurfaceDrawUnit({
 		{
 			id: drawUnitId,
 			kind: "static",
+			renderDomain: part.renderDomain,
 			geometry,
 			modelMatrix: createTranslationMat4(chunkOffset),
 			material,

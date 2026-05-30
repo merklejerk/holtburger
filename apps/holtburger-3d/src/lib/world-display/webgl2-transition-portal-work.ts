@@ -19,6 +19,17 @@ import type { CameraViewResidencyContext } from "./world-residency-index";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
 
+type ClipPlane = "left" | "right" | "bottom" | "top" | "near" | "far";
+
+const CLIP_PLANES: readonly ClipPlane[] = [
+	"left",
+	"right",
+	"bottom",
+	"top",
+	"near",
+	"far",
+];
+
 export interface Webgl2VisibleTransitionPortalWork {
 	workItem: TransitionPortalWorkItem;
 	maskDrawUnitId: string;
@@ -161,23 +172,25 @@ function projectPortalMaskScreenRect(options: {
 	viewProjectionMatrix: RenderMat4;
 	viewport: { width: number; height: number };
 }): Webgl2PortalScreenRect | null {
-	const projected = options.candidate.aperture.points.flatMap((point) => {
-		const world = transformPoint(options.modelMatrix, point);
-		const clip = transformPoint4(options.viewProjectionMatrix, world);
-		if (clip.w <= 0) {
-			return [];
-		}
-		const inverseW = 1 / clip.w;
-		return [
-			{
-				x: ((clip.x * inverseW + 1) / 2) * options.viewport.width,
-				y: ((1 - clip.y * inverseW) / 2) * options.viewport.height,
-			},
-		];
-	});
-	if (projected.length < 3) {
+	const clipped = CLIP_PLANES.reduce(
+		(polygon, plane) => clipPolygonToPlane(polygon, plane),
+		options.candidate.aperture.points.map((point) =>
+			transformPoint4(
+				options.viewProjectionMatrix,
+				transformPoint(options.modelMatrix, point),
+			),
+		),
+	);
+	if (clipped.length < 3) {
 		return null;
 	}
+	const projected = clipped.map((clip) => {
+		const inverseW = 1 / clip.w;
+		return {
+			x: ((clip.x * inverseW + 1) / 2) * options.viewport.width,
+			y: ((1 - clip.y * inverseW) / 2) * options.viewport.height,
+		};
+	});
 	const minX = Math.max(0, Math.floor(Math.min(...projected.map((point) => point.x))));
 	const maxX = Math.min(
 		options.viewport.width,
@@ -198,6 +211,71 @@ function projectPortalMaskScreenRect(options: {
 				height,
 			}
 		: null;
+}
+
+function clipPolygonToPlane(
+	points: readonly { x: number; y: number; z: number; w: number }[],
+	plane: ClipPlane,
+): { x: number; y: number; z: number; w: number }[] {
+	const output: { x: number; y: number; z: number; w: number }[] = [];
+	for (let index = 0; index < points.length; index += 1) {
+		const current = points[index];
+		const previous = points[(index + points.length - 1) % points.length];
+		if (!current || !previous) {
+			continue;
+		}
+
+		const currentInside = signedClipDistance(current, plane) >= 0;
+		const previousInside = signedClipDistance(previous, plane) >= 0;
+		if (currentInside !== previousInside) {
+			output.push(intersectClipEdge(previous, current, plane));
+		}
+		if (currentInside) {
+			output.push({ ...current });
+		}
+	}
+	return output;
+}
+
+function intersectClipEdge(
+	start: { x: number; y: number; z: number; w: number },
+	end: { x: number; y: number; z: number; w: number },
+	plane: ClipPlane,
+): { x: number; y: number; z: number; w: number } {
+	const startDistance = signedClipDistance(start, plane);
+	const endDistance = signedClipDistance(end, plane);
+	const denominator = startDistance - endDistance;
+	if (denominator === 0) {
+		return { ...end };
+	}
+
+	const t = startDistance / denominator;
+	return {
+		x: start.x + (end.x - start.x) * t,
+		y: start.y + (end.y - start.y) * t,
+		z: start.z + (end.z - start.z) * t,
+		w: start.w + (end.w - start.w) * t,
+	};
+}
+
+function signedClipDistance(
+	point: { x: number; y: number; z: number; w: number },
+	plane: ClipPlane,
+): number {
+	switch (plane) {
+		case "left":
+			return point.x + point.w;
+		case "right":
+			return point.w - point.x;
+		case "bottom":
+			return point.y + point.w;
+		case "top":
+			return point.w - point.y;
+		case "near":
+			return point.z + point.w;
+		case "far":
+			return point.w - point.z;
+	}
 }
 
 function transformPortalAperturePlane(

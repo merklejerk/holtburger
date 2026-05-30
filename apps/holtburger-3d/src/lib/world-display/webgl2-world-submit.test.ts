@@ -209,6 +209,8 @@ function createDrawUnit({
 		materialBehavior: null,
 		textureSamplingPolicy: null,
 		textureUploadSample: null,
+		atlasEligibility: null,
+		atlasCandidateSample: null,
 		textureKey: null,
 		texture,
 		modelMatrix: createIdentityMat4(),

@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
 	createInitialAssetChannelState,
+	formatAtlasReadyPreparedTextureAssetId,
 	type AssetChannelState,
 	type PreparedMaterialRecipePayload,
 	type PreparedPolygonSetRenderGeometry,
 	type PreparedRenderSurfacePayload,
+	type PreparedTexturePayload,
 } from "../assets/types";
 import { createBaseMaterialAppearanceContext } from "./material-appearance";
 import type { ResolvedMaterialSlot } from "./material-plan";
@@ -195,6 +197,39 @@ describe("webgl2 world resources", () => {
 		expect(store.textureCount).toBe(0);
 		expect(gl.deletedTextures).toHaveLength(1);
 	});
+
+	it("reports atlas-eligible direct materials without changing staged rendering", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2WorldResourceStore();
+		const materialSurfaceId = 0x08000002;
+		const renderSurfaceId = 0x06000002;
+
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState({
+				materialSurfaceId,
+				renderSurfaceId,
+				compressedAtlasReady: true,
+			}),
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: createStaticRenderableScene([
+				createStaticPart({
+					materialSlots: [createMaterialSlot(0, materialSurfaceId)],
+				}),
+			]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform()],
+		});
+
+		expect(store.drawUnits[0]?.materialKind).toBe("direct-texture");
+		expect(store.atlasEligibleMaterialCount).toBe(1);
+		expect(store.atlasCandidateEntryCount).toBe(1);
+		expect(store.atlasCandidateMaterialSlotCount).toBe(1);
+		expect(store.atlasCandidateSamples[0]).toContain("static");
+		expect(store.atlasCandidateSamples[0]).toContain("atlas-entry");
+	});
 });
 
 class FakeWebgl2 {
@@ -350,9 +385,11 @@ class FakeWebgl2 {
 function createAssetState({
 	materialSurfaceId,
 	renderSurfaceId,
+	compressedAtlasReady = false,
 }: {
 	materialSurfaceId?: number;
 	renderSurfaceId?: number;
+	compressedAtlasReady?: boolean;
 } = {}): AssetChannelState {
 	const state = createInitialAssetChannelState();
 	state.preparedByAssetId["gfx-obj/01000001"] = {
@@ -373,8 +410,22 @@ function createAssetState({
 		state.preparedByAssetId[
 			`render-surface/${renderSurfaceId.toString(16).padStart(8, "0")}`
 		] = {
-			payload: createRenderSurfacePayload(renderSurfaceId),
+			payload: createRenderSurfacePayload({
+				renderSurfaceId,
+				compressed: compressedAtlasReady,
+			}),
 		} as AssetChannelState["preparedAsset"];
+		if (compressedAtlasReady) {
+			const preparedTexture = createAtlasPreparedTexturePayload(renderSurfaceId);
+			state.preparedByAssetId[
+				formatAtlasReadyPreparedTextureAssetId({
+					renderSurfaceId,
+					usage: "raw",
+				})
+			] = {
+				payload: preparedTexture,
+			} as AssetChannelState["preparedAsset"];
+		}
 	}
 	return state;
 }
@@ -494,9 +545,13 @@ function createTextureMaterialRecipe(
 	};
 }
 
-function createRenderSurfacePayload(
-	renderSurfaceId: number,
-): PreparedRenderSurfacePayload {
+function createRenderSurfacePayload({
+	renderSurfaceId,
+	compressed,
+}: {
+	renderSurfaceId: number;
+	compressed: boolean;
+}): PreparedRenderSurfacePayload {
 	const sourceBytes = new Uint8Array([0x10, 0x20, 0x30, 0xff]);
 	return {
 		kind: "render-surface",
@@ -512,12 +567,64 @@ function createRenderSurfacePayload(
 		unknown: 0,
 		width: 1,
 		height: 1,
-		formatRaw: 0x15,
-		format: "A8R8G8B8",
+		formatRaw: compressed ? 0x3154_5844 : 0x15,
+		format: compressed ? "DXT1" : "A8R8G8B8",
 		sourceByteLength: sourceBytes.byteLength,
 		sourceBytes,
 		defaultPaletteId: null,
 		dependencies: { paletteAssetIds: [] },
+	};
+}
+
+function createAtlasPreparedTexturePayload(
+	renderSurfaceId: number,
+): PreparedTexturePayload {
+	const bytes = new Uint8Array([0x10, 0x20, 0x30, 0xff]);
+	return {
+		kind: "prepared-texture",
+		sourceAssetKind: "prepared-texture",
+		residencyKind: "unknown",
+		provenance: {
+			source: "repo-local-hba",
+			sourceAssetKind: "prepared-texture",
+			errorCode: null,
+			detail: null,
+		},
+		renderSurfaceId,
+		usage: "raw",
+		outputFormat: "rgba8",
+		mipPolicy: "none",
+		colorSpace: "linear",
+		sourceFormatRaw: 0x3154_5844,
+		sourceFormat: "DXT1",
+		sourceWidth: 1,
+		sourceHeight: 1,
+		sourceByteLength: bytes.byteLength,
+		sourceHash: `hash-${renderSurfaceId}`,
+		levels: [
+			{
+				level: 0,
+				width: 1,
+				height: 1,
+				formatRaw: 0x15,
+				format: "A8R8G8B8",
+				byteLength: bytes.byteLength,
+				bytes,
+			},
+		],
+		dependencies: {
+			renderSurfaceAssetIds: [
+				`render-surface/${renderSurfaceId.toString(16).padStart(8, "0")}`,
+			],
+		},
+		diagnostics: {
+			generatedLevelCount: 1,
+			generatedByteLength: bytes.byteLength,
+			decodeMs: 0,
+			downsampleMs: 0,
+			encodeMs: 0,
+			totalMs: 0,
+		},
 	};
 }
 

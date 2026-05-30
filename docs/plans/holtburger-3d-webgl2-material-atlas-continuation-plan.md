@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
-Status: Phase M1A complete; ready for Phase M2.
+Status: Phase M2 complete; ready for Phase M3A.
 
 Related plans:
 
@@ -203,10 +203,9 @@ Course corrections:
 
 Cleanup targets and legacy shims:
 
-- The `planStagedWorldMaterialStrategies()` API still has luma-era shape: it returns
-  `materialStrategies` that can include `atlas` entries. That is acceptable as future compaction
-  scaffolding for now, but Phase M2 should rename or reshape the return model so active staged
-  strategies and future atlas layout outputs cannot be confused.
+- The `planStagedWorldMaterialStrategies()` API now returns `atlasLayoutDecisions` instead of
+  `materialStrategies`, making it explicit that `atlas` entries are future layout decisions rather
+  than active staged material render strategies.
 - `direct-color-normalization-deferred` is now unused as an active staged fallback reason. Keep it
   only if M2/M3 finds a real reporting use; otherwise remove it with the next material metrics pass.
 - Texture upload fallback reasons still collapse several direct upload failures into broad material
@@ -358,7 +357,7 @@ Cleanup targets and legacy shims:
 
 ## Phase M2: Material Candidate Metrics and Structured Interior Unification
 
-Status: Not started.
+Status: Complete.
 
 Purpose: after staged materials are visible, make atlas candidate reporting consistent across static
 and structured-interior draw units without realizing atlas resources.
@@ -386,34 +385,233 @@ Exit criteria:
 - Diagnostics can report atlas-eligible staged direct materials without implying an atlas texture is
   currently bound.
 
-## Phase M3: Terrain Materials and Indexed/Paletted Texture DTOs
+Progress:
+
+- Preserved `atlasEligibility` on staged direct texture material plans instead of dropping it at the
+  `StagedWorldMaterialPlan` boundary. Static and structured-interior draw units can now remain
+  direct-rendered while still carrying future atlas candidate facts.
+- Added WebGL2 resource-store metrics for atlas-eligible direct draws, unique candidate atlas
+  entries, unique candidate material slots, and representative candidate samples.
+- Routed the new candidate metrics through `WorldRenderDebugMetrics`, the WebGL2 metrics adapter,
+  and the browser debug panel. The diagnostics now distinguish direct texture rendering from
+  atlas-eligible-but-not-realized materials without claiming an atlas is bound.
+- Renamed the future atlas planner result from `materialStrategies` to `atlasLayoutDecisions`.
+  This removes the most confusing remaining luma-era naming seam: active staged material decisions
+  are direct/fallback plans, while `atlas` records are layout/planning outputs.
+- Added coverage proving atlas-eligible direct WebGL2 materials report candidate metrics while still
+  using the staged direct texture path.
+- Kept the existing strategy coverage proving static and structured-interior requirements dedupe to
+  a shared atlas entry when render surface, prepared texture input, transfer, sampler policy,
+  material variant, and render state are compatible.
+
+Decisions:
+
+- Runtime candidate metrics are derived from staged direct draw units, not from the offline atlas
+  layout planner. This keeps diagnostics aligned with what the scene is actually rendering.
+- Candidate identity is split across entry and material-slot counts. The same texture entry may be
+  shared by many renderable families, while sampler/render-state/material-variant differences remain
+  distinct material slots for future draw slicing.
+- Structured interiors continue to render as independent staged draw units. They can contribute
+  atlas candidate facts now, but compaction must not fold per-cell geometry into static batches until
+  a later, explicit compaction phase.
+
+Course corrections:
+
+- Phase M3 should continue using direct staged rendering as the visual proof path. Indexed/paletted
+  and terrain materials should add candidate/fallback metrics only after their direct resource DTOs
+  exist.
+- The debug panel now has enough candidate signal to avoid resurrecting the old “flat because atlas
+  is not realized” ambiguity. Future fallback text should stay specific: missing normalized texture,
+  unsupported indexed/palette payload, animated UV, blended transparency, or sampler/render-state
+  incompatibility.
+- The current candidate samples are intentionally compact strings. If Phase M3 adds indexed or
+  terrain candidate support, prefer extending the same summary shape over adding per-material log
+  spam.
+
+Cleanup targets and legacy shims:
+
+- The function name `planStagedWorldMaterialStrategies()` still says “material strategies” even
+  though its return shape now says `atlasLayoutDecisions`. Rename the function when M6 extracts the
+  atlas layout planner so call sites do not mix staged strategy resolution with future layout.
+- The temporary `textureUploadSamples` diagnostics remain useful while M3 adds indexed/terrain
+  texture paths, but they should be compressed or removed once texture completeness bugs are no
+  longer active.
+- `direct-color-normalization-deferred` remains unused as an active fallback reason after M2. Remove
+  it during the M3 fallback-reason cleanup unless indexed/terrain DTO work uncovers a real use.
+
+## Phase M3A: Terrain Base Materials
 
 Status: Not started.
 
-Purpose: close the highest-volume visual material gaps before static compaction: terrain blend
-materials, indexed/paletted appearances, palette uploads, and material edge cases. Terrain moves
-ahead of portal passes because material visibility is the current scene-inspection blocker.
+Purpose: close the highest-volume visual material gap before indexed/paletted setup work: terrain
+blend materials. Terrain moves ahead of portal passes because material visibility is the current
+scene-inspection blocker.
 
 Tasks:
 
 - Port terrain blend shader behavior from `terrain-blend-materials.ts` into WebGL2-friendly shader
   and resource code.
-- Extract Three-free indexed texture and palette byte DTOs from the existing indexed/palette
-  resource helpers.
-- Add WebGL2 uploads for palette, derived palette, and indexed texture resources after DTO
-  extraction.
-- Keep compressed direct upload deferred unless runtime extension detection and memory evidence
-  justify it. The current atlas-prep path should keep using decompressed normalized payloads.
-- Add detail overlays and texture velocity only after base terrain/indexed material parity is
-  understandable.
-- Add diagnostics for terrain material table readiness, missing indexed payloads, missing palette
-  payloads, unsupported detail textures, and texture velocity fallback.
+- Reuse the existing terrain material preparation/cache facts where they are renderer-neutral, but
+  keep WebGL2 GL texture/program ownership inside the WebGL2 resource store.
+- Preserve current BVH terrain draw-unit visibility and only replace the flat terrain material path.
+- Add diagnostics for terrain material table readiness, missing terrain material tables, missing
+  terrain render surfaces, unsupported blend surfaces, and terrain shader fallback.
+- Keep detail textures, indexed/paletted setup appearances, and texture velocity out of this phase.
 
 Exit criteria:
 
-- Terrain renders with recognizable AC terrain materials and roads in WebGL2.
-- Indexed/paletted setup appearances render close enough for visual inspection.
-- Remaining material differences are explicit, metric-visible, and backed by examples.
+- Terrain renders with recognizable AC base terrain materials and roads in WebGL2.
+- Terrain fallback reasons are explicit enough to identify missing tables versus unsupported
+  surface/texture data.
+- Static/setup/interior indexed materials may still be flat fallback after this phase.
+
+## Phase M3B: Indexed/Paletted Texture DTO Extraction
+
+Status: Not started.
+
+Purpose: extract renderer-neutral indexed texture and palette DTOs from Three-era helpers before
+adding WebGL2 uploads. This keeps the shared material/resource pipeline honest and testable without
+mixing DTO design with GL upload behavior.
+
+Tasks:
+
+- Extract Three-free indexed texture and palette byte DTOs from the existing indexed/palette
+  resource helpers.
+- Include palette, derived palette, indexed texture dimensions/bytes, index bit depth, palette
+  binding, and transfer metadata needed by both WebGL2 and future non-Three renderers.
+- Add a multi-resource indexed material DTO that binds the indexed render surface, base palette
+  selection, optional derived palette, material recipe, sampler policy, render state, and appearance
+  palette context into one resolved material fact.
+- Model palette selection explicitly:
+  - setup appearance palette override when present;
+  - otherwise material recipe palette;
+  - otherwise render-surface default palette.
+- Model setup subpalettes as derived palette inputs. Derived palette DTO creation should copy the
+  selected base palette and apply each subpalette asset range before WebGL2 sees the palette.
+- Add DTO support for neighbor-packed indexed upload payloads:
+  - P8 packs four neighboring indices into `RGBA8` channels for manual bilinear filtering.
+  - P16 packs four neighboring indices into `RGBA16UI` channels for manual bilinear filtering.
+- Preserve raw indexed DTOs as source facts. Neighbor-packed payloads are renderer-prepared
+  derivatives, not replacements for the decoded source data.
+- Keep indexed mip DTOs out of this phase. Correct mip color depends on the palette, so hardware or
+  palette-independent index mips are not acceptable as a default.
+- Preserve material/readiness dependency reporting for indexed surface textures, base palette assets,
+  setup palette overrides, and every subpalette palette asset.
+- Add readiness tests proving a composed object with subpalette-dependent indexed materials is not
+  admitted to staged rendering until material recipe, indexed render surface, base palette, and all
+  subpalette assets are resolved or intentionally fallback-resolved.
+- Add tests that DTO extraction matches current Three-rendered indexed material inputs and that P8
+  and P16 neighbor packing handles edge texels deterministically.
+- Add tests for derived palette DTO range validation, missing subpalette diagnostics, and stable
+  derived palette keys that include base palette, override source, subpalette IDs, offsets, counts,
+  and prepared-state/version.
+- Keep compressed direct upload deferred unless runtime extension detection and memory evidence
+  justify it. The current atlas-prep path should keep using decompressed normalized payloads.
+
+Exit criteria:
+
+- Indexed material facts, palette data, derived palette data, and neighbor-packed P8/P16 derivatives
+  can be produced without importing Three resources.
+- DTO tests cover representative setup/static and structured-interior indexed materials.
+- Setup appearance palette overrides and subpalettes are dependency-visible and key-stable.
+- No WebGL2 shader/upload work is required to complete this phase.
+
+## Phase M3C: WebGL2 Indexed/Paletted Direct Materials
+
+Status: Not started.
+
+Purpose: render indexed/paletted setup and structured-interior materials directly in WebGL2 using
+the DTOs from M3B. This is still staged/direct rendering, not atlas compaction.
+
+Tasks:
+
+- Add WebGL2 uploads for palette, derived palette, and neighbor-packed indexed texture resources
+  after DTO extraction.
+- Upload one resolved palette texture per indexed material palette fact. If setup subpalettes apply,
+  WebGL2 receives the already-derived palette texture rather than applying subpalette patches in the
+  shader.
+- Upload P8 neighbor-packed textures as `RGBA8`.
+- Upload P16 neighbor-packed textures as `RGBA16UI` and sample them through a WebGL2 integer texture
+  path (`usampler2D`/`texelFetch`).
+- Query/runtime-gate the integer texture path and report `indexed-uint16-texture-unsupported` if the
+  required WebGL2 behavior is unavailable.
+- Add a WebGL2 indexed/paletted material shader path for staged draw units.
+- Do indexed filtering manually in the shader: nearest sample the packed-neighbor texel, lookup four
+  palette colors exactly, then bilinear blend colors using the original UV texel-local fractional
+  coordinates.
+- Disable indexed mipmapping for now and report mip use as unsupported/deferred for indexed
+  materials. Do not generate hardware mips over index values.
+- Route static/setup and structured-interior indexed surfaces through the same staged material
+  strategy/fallback reporting model used by direct RGBA materials.
+- Add diagnostics for missing indexed payloads, missing base palette payloads, missing setup palette
+  override payloads, missing subpalette payloads, invalid subpalette ranges, unsupported palette
+  variants, missing integer texture support, indexed no-mip fallback, and indexed material
+  upload/shader fallback.
+- Keep indexed atlas participation deferred. Neighbor-packed indexed textures may use RGBA-like
+  storage, but they require palette shader state and are not equivalent to ordinary RGBA base-color
+  atlas entries.
+- Keep detail overlays and texture velocity out of this phase.
+
+Exit criteria:
+
+- P8 and common P16 indexed/paletted setup appearances render close enough for visual inspection
+  with shader-side bilinear filtering.
+- Structured-interior indexed/paletted surfaces use the same material-slot interpretation as
+  non-indexed interiors.
+- Setup appearance palette overrides and subpalettes affect WebGL2 indexed output through derived
+  palette resources, not shader-side patch logic.
+- Indexed materials have explicit no-mip diagnostics rather than silently pretending mip support
+  exists.
+- Remaining indexed/paletted material differences are explicit, metric-visible, and backed by
+  examples.
+
+## Phase M3D: Detail Texture Policy and Static Detail Support
+
+Status: Not started.
+
+Purpose: add detail texture behavior only after base terrain and indexed/paletted direct materials
+are understandable. Detail should be a controlled material feature, not a masking layer over broken
+base materials.
+
+Tasks:
+
+- Audit detail texture usage across terrain, setup/static, and structured interiors using existing
+  material/resource metadata.
+- Decide which static/non-animated detail combinations WebGL2 should support directly before atlas
+  compaction.
+- Add shader/resource support for the selected direct detail path if it materially improves visual
+  parity.
+- Keep unsupported detail combinations explicit in diagnostics instead of silently flattening them.
+- Do not implement texture velocity or animated UV application here; leave those as animation-system
+  owned future work.
+
+Exit criteria:
+
+- Supported static detail texture cases render intentionally in WebGL2, or the phase records that
+  detail should stay deferred with measured examples.
+- Unsupported detail cases are counted separately from missing base materials.
+- Texture velocity remains a metric-visible fallback, not an active renderer-owned timer.
+
+## Future Phase: Texture Velocity and UV Animation System Integration
+
+Status: Deferred.
+
+Purpose: apply texture velocity/animated UV materials through a shared animation/time system rather
+than a WebGL2-only timer. Texture velocity should remain a resolved material fact in the shared
+pipeline, but active per-frame UV animation belongs with broader animation scheduling.
+
+Tasks:
+
+- Preserve texture velocity signatures as material metadata and fallback diagnostics in M3 phases.
+- Design shared animation timing/uniform update ownership before enabling animated UV rendering.
+- Add WebGL2 shader uniforms and submit-time updates only after the animation system can drive them
+  consistently.
+
+Exit criteria:
+
+- Animated UV materials use the same frame-time source and update lifecycle as other animated scene
+  systems.
+- WebGL2 no longer needs a one-off material timer for texture velocity.
 
 ## Phase M4: Portal Passes in WebGL2
 

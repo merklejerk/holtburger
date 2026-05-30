@@ -22,6 +22,7 @@ export interface Webgl2RenderMetricsInput {
 	canvasHeight: number;
 	pixelRatio: number;
 	renderGraphPolicy: string;
+	renderGraphBaseScene: string;
 	transitionPortalMaxDepth: number;
 	clearCount: number;
 	drawCallCount: number;
@@ -30,6 +31,9 @@ export interface Webgl2RenderMetricsInput {
 	worldStore: Webgl2WorldResourceStore | null;
 	frameMetrics: StagedWorldFrameMetrics | null;
 	submitMetrics: Webgl2WorldSubmitMetrics;
+	portalRenderWorkItemCandidateCount: number;
+	visiblePortalWorkItemCount: number;
+	maskedInteriorCellCount: number;
 	sceneDomainTargetWidth: number;
 	sceneDomainTargetHeight: number;
 	sceneDomainFramebufferFailureCount: number;
@@ -53,9 +57,10 @@ export function createWebgl2RenderMetrics(
 		portal: {
 			topologyOutdoorPortalCount: 0,
 			apertureCandidateCount: input.transitionPortalModel.candidates.length,
-			renderWorkItemCandidateCount: 0,
-			visiblePortalWorkItemCount: 0,
-			maskedInteriorCellCount: 0,
+			renderWorkItemCandidateCount:
+				input.portalRenderWorkItemCandidateCount,
+			visiblePortalWorkItemCount: input.visiblePortalWorkItemCount,
+			maskedInteriorCellCount: input.maskedInteriorCellCount,
 			skippedMissingApertureCount: 0,
 			skippedMissingPolygonCount: 0,
 			skippedOutsideFrustumCount: 0,
@@ -82,11 +87,11 @@ export function createWebgl2RenderMetrics(
 			residencyAabbFallbackCount: 0,
 			residencySource: "unknown",
 			renderGraphPolicy: input.renderGraphPolicy,
-			renderGraphBaseScene: "none",
+			renderGraphBaseScene: input.renderGraphBaseScene,
 			transitionPortalMaxDepth: input.transitionPortalMaxDepth,
 			renderPassCount: input.clearCount,
 			clearCount: input.clearCount,
-			portalRenderWorkItemCount: 0,
+			portalRenderWorkItemCount: input.visiblePortalWorkItemCount,
 			transitionApertureMaskPassCount: 0,
 			apertureDepthResetPassCount: 0,
 			interiorCompositePassCount: 0,

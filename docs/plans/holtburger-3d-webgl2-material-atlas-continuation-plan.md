@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
-Status: Phase M4B complete; ready for Phase M4B.1.
+Status: Phase M4B.1 complete; ready for Phase M4B.2.
 
 Related plans:
 
@@ -1104,11 +1104,11 @@ Cleanup targets and legacy shims:
 
 ## Phase M4B.1: Base-Domain and Portal Work-Item Prep
 
-Status: Not started.
+Status: Complete.
 
-Purpose: close the remaining M4B policy gap before iterative portal compositing. M4C needs to know
-which scene domain is the camera's base view, and it needs explicit visible portal work items rather
-than only visible mask counts.
+Purpose: close the immediate M4B policy gap before full residency is wired into WebGL2. M4C needs
+explicit visible portal work items and a temporary base-domain bridge, but correct portal rendering
+also needs real camera residency before stencil/depth compositing starts.
 
 Why this phase is immediate:
 
@@ -1120,9 +1120,8 @@ Why this phase is immediate:
 
 Tasks:
 
-- Derive a WebGL2 base scene domain from the existing browser camera residency/render-scene context.
-  Outdoor landblock/unknown views should default to `exterior`; env-cell views should use
-  `interior` when the structured interior domain is available.
+- Derive a temporary WebGL2 base scene domain from the existing render-scene context and loaded
+  structured-interior availability.
 - Thread the selected base domain into the scene-domain copy path and debug metrics.
 - Build the WebGL2 visible portal work-item plan from the existing transition portal candidate
   model without reintroducing clipped scene redraw as the primary composite strategy.
@@ -1133,11 +1132,127 @@ Tasks:
 
 Exit criteria:
 
-- The WebGL2 scene-domain copy path chooses exterior or interior based on camera residency rather
-  than a hard-coded exterior default.
+- The WebGL2 scene-domain copy path no longer hard-codes exterior as the base scene.
 - Metrics report the selected base scene domain and visible portal work-item counts.
 - M4C can consume a visible portal work-item list with mask draw-unit IDs, stencil refs, depth, and
   direction without changing scene-domain render target ownership.
+
+Progress:
+
+- Added a WebGL2 portal work planner that maps visible `portal-mask/*` draw units back to
+  transition portal candidates and derives `TransitionPortalWorkItem` records with the existing
+  shared `createTransitionPortalWorkItem()` helper.
+- Reused `deriveTransitionPortalDepthBatches()` so WebGL2 portal work follows the same recursive
+  direction and interior-frontier filtering rules as the Three comparison path.
+- Added WebGL2 base scene-domain selection. Dungeon/interior render contexts with loaded structured
+  interior cells copy the interior scene-domain target first; outdoor and unavailable-interior
+  contexts copy the exterior target.
+- Threaded the selected base domain into WebGL2 scene-domain target copy and debug metrics through
+  `renderGraphBaseScene`.
+- Added WebGL2 portal metrics for candidate work-item count, visible work-item count, and masked
+  interior cell count.
+- Added unit coverage for base-domain selection, visible mask-to-work-item planning, and
+  interior-base frontier filtering.
+
+Decisions:
+
+- M4B.1 uses visible portal mask draw units as the WebGL2 work-item visibility input. This keeps
+  work planning tied to the same staged/BVH visibility path that owns mask resources.
+- WebGL2 derives portal direction from the transformed aperture plane and camera position, but does
+  not yet calculate screen-space aperture rectangles. Rect planning belongs to M4C because it is
+  part of the actual stencil/composite pass contract.
+- Until WebGL2 has its own camera residency query, base-domain selection uses the existing
+  render-scene context plus structured-interior availability. This handles explicit dungeon/interior
+  destinations now and avoids copying a blank interior target when no interior cells are loaded, but
+  it is not sufficient for free-camera portal traversal.
+
+Course corrections:
+
+- The original M4B.1 wording referenced camera residency directly. The WebGL2 renderer does not yet
+  compute or publish camera residency like the Three path, so this phase uses render-scene context as
+  an interim bridge and records true WebGL2 residency as an immediate prerequisite phase.
+- Portal work planning intentionally does not resurrect clipped-BVH scene redraw. It only prepares
+  mask draw-unit IDs, directions, depth batches, and masked interior counts for the dual-target
+  compositor.
+
+Cleanup targets and legacy shims:
+
+- `submitWebgl2SceneDomainFrame()` still keeps the portal work plan local to
+  `webgl2-world-display-renderer-impl.ts`. M4C should pass explicit depth batches into mask and
+  composite submission helpers rather than letting the renderer implementation grow into a pass
+  scheduler god function.
+- WebGL2 still lacks Three's detailed portal skipped-reason metrics for outside-frustum,
+  back-facing, too-small, and missing aperture cases. M4C should add screen-space visibility and
+  skipped-reason accounting when it adds bounded composite rectangles.
+- WebGL2 base-domain selection must consume actual camera residency before M4C. Do not treat the
+  current render-scene-context bridge as final portal policy.
+- The transformed aperture-plane helper assumes the existing portal mask model matrices are affine
+  placement transforms. If future mask transforms include non-uniform scale/shear, replace the
+  normal transform with a full inverse-transpose plane transform.
+
+## Phase M4B.2: Shared Camera Residency for WebGL2
+
+Status: Not started.
+
+Purpose: make camera residency a renderer-agnostic input or helper so WebGL2 can choose the correct
+base scene, initial env-cell frontier, and residency metrics before stencil/depth portal compositing.
+
+Why this phase is immediate:
+
+- Three computes camera residency internally from `residencyIndex.queryDetailed(...)` and reports it
+  through `deriveBrowserCameraResidency()`. WebGL2 currently no-ops `setCameraResidencyChangeHandler`
+  and does not use `renderSpatialQuery`, so it cannot inherit that result.
+- Portal compositing depends on whether the camera is currently in exterior space, a specific
+  env-cell, or an unknown/fallback region. The M4B.1 render-scene-context bridge is only good enough
+  for explicit browser destination mode, not free-camera traversal.
+- `deriveTransitionPortalDepthBatches()` needs the correct initial env-cell for interior-base
+  portals. Guessing from `structuredInteriorScene.focusEnvCellId` is insufficient once the camera
+  moves between loaded interior cells.
+
+Tasks:
+
+- Extract or expose a shared camera residency query path that both Three and WebGL2 can call without
+  depending on Three camera objects or scene graph state.
+- Feed WebGL2's current `SceneCameraFrame.position` into the shared residency query each frame when
+  a render spatial query/residency source is available.
+- Implement WebGL2 `setCameraResidencyChangeHandler()` and report residency changes with the same
+  `BrowserCameraResidency` shape used by Three.
+- Use actual residency to select WebGL2 base scene domain:
+  - `env-cell` -> `interior`;
+  - `outdoor-landblock` -> `exterior`;
+  - `unknown` -> `exterior` with diagnostic/fallback metrics.
+- Use the actual env-cell residency as the initial interior frontier for
+  `deriveTransitionPortalDepthBatches()`.
+- Update WebGL2 metrics to report `cameraViewResidency`, `residencySource`, landblock/env-cell
+  counts, and fallback details from the shared residency query instead of placeholder values.
+- Add tests covering outdoor, env-cell, unknown/fallback, handler notification, and initial
+  frontier selection for portal work planning.
+
+Exit criteria:
+
+- WebGL2 reports camera residency through the existing renderer contract instead of no-oping it.
+- WebGL2 base-domain selection and portal depth-batch initial env-cell come from actual camera
+  residency, not render-scene context or focused-cell fallbacks.
+- The M4B.1 render-scene-context bridge is removed or demoted to a fallback used only when the
+  shared residency query is unavailable.
+- M4C can assume the base scene and initial interior frontier are correct for free-camera portal
+  traversal.
+
+Decisions:
+
+- Camera residency is a renderer-shared concern, not a Three implementation detail. The WebGL2
+  backend must not duplicate Three scene graph residency logic.
+- Keep browser-mode UX policy outside the shared residency helper. The helper should answer
+  "where is this camera position?" and return diagnostics; renderer/UI code can decide how to
+  present or react to that result.
+
+Cleanup targets and legacy shims:
+
+- Remove the WebGL2 `setCameraResidencyChangeHandler()` no-op once this phase lands.
+- Replace the temporary M4B.1 base-domain render-scene-context bridge with residency-backed policy.
+- Audit metrics fields currently hard-coded in `webgl2-render-metrics.ts`, especially
+  `cameraViewResidency`, `residencySource`, `residencyCellCount`, `residencyLandblockCount`,
+  `residencyAabbCandidateCount`, `residencyCellBspMatchCount`, and `residencyAabbFallbackCount`.
 
 ## Phase M4C: Iterative Stencil/Depth Portal Composite
 

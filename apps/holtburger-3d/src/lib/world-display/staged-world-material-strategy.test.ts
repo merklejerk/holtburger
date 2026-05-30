@@ -6,6 +6,7 @@ import {
 	type AssetChannelState,
 	type PreparedAssetRecord,
 	type PreparedMaterialRecipePayload,
+	type PreparedPalettePayload,
 	type PreparedRenderSurfacePayload,
 	type PreparedTexturePayload,
 } from "../assets/types";
@@ -108,7 +109,7 @@ describe("staged world material strategy", () => {
 		});
 	});
 
-	it("reports indexed materials as an explicit deferred WebGL2 path", () => {
+	it("reports invalid indexed payloads as explicit fallbacks", () => {
 		const state = createAssetState([
 			createMaterialRecipeRecord({
 				surfaceId: 0x08000001,
@@ -130,8 +131,42 @@ describe("staged world material strategy", () => {
 			kind: "flat-fallback",
 			reason: "indexed-paletted-deferred",
 			detail: expect.stringContaining(
-				"WebGL2 indexed material rendering starts in M3C",
+				"could not resolve indexed palette resources",
 			),
+		});
+	});
+
+	it("resolves indexed/paletted materials with prepared palette resources", () => {
+		const state = createAssetState([
+			createMaterialRecipeRecord({
+				surfaceId: 0x08000001,
+				renderSurfaceId: 0x06000001,
+				paletteId: 0x04000001,
+			}),
+			createRenderSurfaceRecord({
+				renderSurfaceId: 0x06000001,
+				formatRaw: PIXEL_FORMAT_INDEX16,
+				format: "Index16",
+				width: 2,
+				height: 1,
+				sourceBytes: new Uint8Array([0, 0, 1, 0]),
+				defaultPaletteId: 0x04000001,
+			}),
+			createPaletteRecord(0x04000001, [0xff000000, 0xffffffff]),
+		]);
+
+		const strategy = resolveStagedWorldMaterialStrategy({
+			assetState: state,
+			input: createRequirement("static", 0),
+		});
+
+		expect(strategy).toMatchObject({
+			kind: "indexed-paletted",
+			materialAssetId: "material/08000001",
+			indexedMaterial: {
+				texture: { format: "index16", maxIndex: 1 },
+				palette: { colorCount: 2 },
+			},
 		});
 	});
 
@@ -359,6 +394,7 @@ function createMaterialRecipeRecord(options: {
 	surfaceId: number;
 	renderSurfaceId: number;
 	surfaceType?: number;
+	paletteId?: number | null;
 }): PreparedAssetRecord {
 	const assetId = `material/${options.surfaceId.toString(16).padStart(8, "0")}`;
 	return createRecord(assetId, {
@@ -372,7 +408,7 @@ function createMaterialRecipeRecord(options: {
 			kind: "texture",
 			surfaceTextureId: 0x05000001,
 			selectedRenderSurfaceId: options.renderSurfaceId,
-			paletteId: null,
+			paletteId: options.paletteId ?? null,
 			renderSurfaceDefaultPaletteIds: [],
 		},
 		translucency: 0,
@@ -392,10 +428,17 @@ function createRenderSurfaceRecord(options: {
 	renderSurfaceId: number;
 	formatRaw?: number;
 	format?: string;
+	width?: number;
+	height?: number;
+	sourceBytes?: Uint8Array;
+	defaultPaletteId?: number | null;
 }): PreparedAssetRecord {
 	const assetId = `render-surface/${options.renderSurfaceId.toString(16).padStart(8, "0")}`;
+	const width = options.width ?? 8;
+	const height = options.height ?? 8;
 	const sourceByteLength =
-		options.formatRaw === PIXEL_FORMAT_A8R8G8B8 ? 8 * 8 * 4 : 32;
+		options.sourceBytes?.byteLength ??
+		(options.formatRaw === PIXEL_FORMAT_A8R8G8B8 ? width * height * 4 : 32);
 	return createRecord(assetId, {
 		kind: "render-surface",
 		sourceAssetKind: "render-surface",
@@ -403,15 +446,37 @@ function createRenderSurfaceRecord(options: {
 		provenance: createProvenance(),
 		renderSurfaceId: options.renderSurfaceId,
 		unknown: 0,
-		width: 8,
-		height: 8,
+		width,
+		height,
 		formatRaw: options.formatRaw ?? PIXEL_FORMAT_DXT1,
 		format: options.format ?? "DXT1",
 		sourceByteLength,
-		sourceBytes: new Uint8Array(sourceByteLength),
-		defaultPaletteId: null,
-		dependencies: { paletteAssetIds: [] },
+		sourceBytes: options.sourceBytes ?? new Uint8Array(sourceByteLength),
+		defaultPaletteId: options.defaultPaletteId ?? null,
+		dependencies: {
+			paletteAssetIds:
+				options.defaultPaletteId === undefined || options.defaultPaletteId === null
+					? []
+					: [
+							`palette/${options.defaultPaletteId.toString(16).padStart(8, "0")}`,
+						],
+		},
 	} satisfies PreparedRenderSurfacePayload);
+}
+
+function createPaletteRecord(
+	paletteId: number,
+	colorsArgb: readonly number[],
+): PreparedAssetRecord {
+	return createRecord(`palette/${paletteId.toString(16).padStart(8, "0")}`, {
+		kind: "palette",
+		sourceAssetKind: "palette",
+		residencyKind: "unknown",
+		provenance: createProvenance(),
+		paletteId,
+		colorCount: colorsArgb.length,
+		colorsArgb: new Uint32Array(colorsArgb),
+	} satisfies PreparedPalettePayload);
 }
 
 function createAtlasPreparedTextureRecord(options: {

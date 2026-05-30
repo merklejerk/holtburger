@@ -201,8 +201,8 @@ export function createWebgl2RenderMetrics(
 			textureVelocitySignatureCount: 0,
 			textureVelocitySignatureSamples: [],
 			textureResourceCount: input.worldStore?.textureCount ?? 0,
-			indexedTextureResourceCount: 0,
-			paletteResourceCount: 0,
+			indexedTextureResourceCount: input.worldStore?.indexedTextureCount ?? 0,
+			paletteResourceCount: input.worldStore?.paletteTextureCount ?? 0,
 			staticGeometryGroupCount: input.worldStore?.staticDrawUnitCount ?? 0,
 			staticVisibleGeometryGroupCount:
 				(input.frameMetrics?.visibleDrawCountsByCategory["static-staged"] ??

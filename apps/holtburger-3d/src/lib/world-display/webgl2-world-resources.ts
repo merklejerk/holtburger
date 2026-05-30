@@ -17,6 +17,10 @@ import {
 	type StagedWorldDrawUnitAssembly,
 } from "./staged-world-assembly";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
+import type {
+	NeighborPackedIndexedPayload,
+	ResolvedIndexedMaterialData,
+} from "./indexed-material-data";
 import type { RenderMat4, RenderVec4 } from "./render-math";
 import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import type { RenderChunkTransform } from "./render-anchor";
@@ -77,6 +81,7 @@ export interface Webgl2WorldDrawUnit {
 	atlasCandidateSample: string | null;
 	textureKey: string | null;
 	texture: Webgl2Texture2DResource | null;
+	indexedMaterial: Webgl2IndexedMaterialResources | null;
 	terrainBlend: Webgl2TerrainBlendResources | null;
 	modelMatrix: RenderMat4;
 	bvhItemKeys: readonly RenderBvhItemKey[];
@@ -109,6 +114,8 @@ export interface Webgl2WorldResourceStore {
 	atlasCandidateMaterialSlotCount: number;
 	atlasCandidateSamples: readonly string[];
 	textureCount: number;
+	indexedTextureCount: number;
+	paletteTextureCount: number;
 	preparedTextureUploadCount: number;
 	preparedTextureGeneratedByteLength: number;
 	triangleCount: number;
@@ -128,6 +135,20 @@ export interface Webgl2TerrainBlendResources {
 		alpha: Webgl2TerrainTextureBinding;
 		rotation: number;
 	}[];
+}
+
+export interface Webgl2IndexedMaterialResources {
+	key: string;
+	indexFormat: ResolvedIndexedMaterialData["texture"]["format"];
+	indexTextureKey: string;
+	paletteTextureKey: string;
+	indexTexture: Webgl2Texture2DResource;
+	paletteTexture: Webgl2Texture2DResource;
+	width: number;
+	height: number;
+	paletteColorCount: number;
+	wrapS: "clamp" | "repeat";
+	wrapT: "clamp" | "repeat";
 }
 
 export interface Webgl2TerrainTextureBinding {
@@ -161,6 +182,8 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		atlasCandidateMaterialSlotCount: 0,
 		atlasCandidateSamples: [],
 		textureCount: 0,
+		indexedTextureCount: 0,
+		paletteTextureCount: 0,
 		preparedTextureUploadCount: 0,
 		preparedTextureGeneratedByteLength: 0,
 		triangleCount: 0,
@@ -217,6 +240,9 @@ export function syncWebgl2WorldResources({
 			retainedTextureKeys.add(webgl2DrawUnit.textureKey);
 		}
 		for (const textureKey of collectTerrainBlendTextureKeys(webgl2DrawUnit)) {
+			retainedTextureKeys.add(textureKey);
+		}
+		for (const textureKey of collectIndexedMaterialTextureKeys(webgl2DrawUnit)) {
 			retainedTextureKeys.add(textureKey);
 		}
 	}
@@ -299,6 +325,18 @@ export function syncWebgl2WorldResources({
 		}
 	}
 	store.textureCount = store.texturesByKey.size;
+	store.indexedTextureCount = new Set(
+		store.drawUnits.flatMap((drawUnit) =>
+			drawUnit.indexedMaterial ? [drawUnit.indexedMaterial.indexTextureKey] : [],
+		),
+	).size;
+	store.paletteTextureCount = new Set(
+		store.drawUnits.flatMap((drawUnit) =>
+			drawUnit.indexedMaterial
+				? [drawUnit.indexedMaterial.paletteTextureKey]
+				: [],
+		),
+	).size;
 	store.preparedTextureUploadCount = countPreparedTextureUploads(store.drawUnits);
 	store.preparedTextureGeneratedByteLength = 0;
 	store.triangleCount = store.drawUnits.reduce(
@@ -351,6 +389,8 @@ export function destroyWebgl2WorldResources(
 	}
 	store.texturesByKey.clear();
 	store.textureCount = 0;
+	store.indexedTextureCount = 0;
+	store.paletteTextureCount = 0;
 	store.preparedTextureUploadCount = 0;
 	store.preparedTextureGeneratedByteLength = 0;
 	store.triangleCount = 0;
@@ -388,8 +428,15 @@ function createOrReuseWebgl2DrawUnit({
 		previous.textureKey =
 			drawUnit.material.kind === "direct-texture"
 				? drawUnit.material.textureKey
+				: drawUnit.material.kind === "indexed-paletted"
+					? drawUnit.material.indexedMaterial.renderSurfaceAssetId
 				: null;
 		previous.texture = resolveWebgl2DrawUnitTexture({ gl, store, drawUnit });
+		previous.indexedMaterial = resolveWebgl2IndexedMaterialResources({
+			gl,
+			store,
+			drawUnit,
+		});
 		previous.terrainBlend = resolveWebgl2TerrainBlendResources({
 			assetState,
 			gl,
@@ -418,7 +465,8 @@ function createOrReuseWebgl2DrawUnit({
 	});
 	const uvBuffer =
 		(drawUnit.material.kind === "direct-texture" ||
-			drawUnit.material.kind === "terrain-blend") &&
+			drawUnit.material.kind === "terrain-blend" ||
+			drawUnit.material.kind === "indexed-paletted") &&
 		drawUnit.geometry.uvs
 			? createWebgl2ArrayBuffer(gl, {
 					label: `${drawUnit.id}/uvs`,
@@ -441,6 +489,11 @@ function createOrReuseWebgl2DrawUnit({
 		},
 	});
 	const texture = resolveWebgl2DrawUnitTexture({ gl, store, drawUnit });
+	const indexedMaterial = resolveWebgl2IndexedMaterialResources({
+		gl,
+		store,
+		drawUnit,
+	});
 	const terrainBlend = resolveWebgl2TerrainBlendResources({
 		assetState,
 		gl,
@@ -473,8 +526,11 @@ function createOrReuseWebgl2DrawUnit({
 		textureKey:
 			drawUnit.material.kind === "direct-texture"
 				? drawUnit.material.textureKey
+				: drawUnit.material.kind === "indexed-paletted"
+					? drawUnit.material.indexedMaterial.renderSurfaceAssetId
 				: null,
 		texture,
+		indexedMaterial,
 		terrainBlend,
 		modelMatrix: drawUnit.modelMatrix,
 		bvhItemKeys: drawUnit.bvhBinding.itemKeys,
@@ -503,6 +559,12 @@ function resolveWebgl2MaterialFallbackReason(
 		}
 		return drawUnit.material.fallbackReason;
 	}
+	if (drawUnit.material.kind === "indexed-paletted") {
+		if (!drawUnit.geometry.uvs) {
+			return `webgl2 indexed material ${drawUnit.material.key} has no UV buffer`;
+		}
+		return drawUnit.material.fallbackReason;
+	}
 	if (drawUnit.material.kind === "terrain-blend" && !drawUnit.geometry.uvs) {
 		return `webgl2 terrain blend ${drawUnit.material.key} has no UV buffer`;
 	}
@@ -516,6 +578,10 @@ function resolveWebgl2DrawUnitTextureSamplingPolicy(
 		? describeTextureSamplingPolicy(
 				drawUnit.material.textureUpload.upload.samplingPolicy,
 			)
+		: drawUnit.material.kind === "indexed-paletted"
+			? describeTextureSamplingPolicy(
+					drawUnit.material.indexedMaterial.samplingPolicy,
+				)
 		: null;
 }
 
@@ -541,6 +607,152 @@ function resolveWebgl2DrawUnitTextureUploadSample(
 		`nonZeroRgb=${stats.nonZeroRgbSampleCount}/${stats.sampleCount}`,
 		`nonZeroAlpha=${stats.nonZeroAlphaSampleCount}/${stats.sampleCount}`,
 	].join(" ");
+}
+
+function resolveWebgl2IndexedMaterialResources({
+	gl,
+	store,
+	drawUnit,
+}: {
+	gl: WebGL2RenderingContext;
+	store: Webgl2WorldResourceStore;
+	drawUnit: StagedWorldDrawUnitAssembly;
+}): Webgl2IndexedMaterialResources | null {
+	if (drawUnit.material.kind !== "indexed-paletted" || !drawUnit.geometry.uvs) {
+		return null;
+	}
+	const indexedMaterial = drawUnit.material.indexedMaterial;
+	if (
+		indexedMaterial.texture.format === "index16" &&
+		(!("RGBA16UI" in gl) || !("RGBA_INTEGER" in gl))
+	) {
+		store.materialFallbackReasonSamples = [
+			...store.materialFallbackReasonSamples,
+			"indexed-uint16-texture-unsupported",
+		].slice(0, 8);
+		return null;
+	}
+	const indexTextureKey = describeIndexedTextureKey(indexedMaterial);
+	const paletteTextureKey = describeIndexedPaletteTextureKey(indexedMaterial);
+	const indexTexture =
+		store.texturesByKey.get(indexTextureKey) ??
+		createAndStoreWebgl2Texture2D({
+			gl,
+			store,
+			key: indexTextureKey,
+			upload: toWebgl2IndexedTextureUpload(gl, indexedMaterial.neighborPackedTexture),
+			sampler: {
+				wrapS: gl.CLAMP_TO_EDGE,
+				wrapT: gl.CLAMP_TO_EDGE,
+				minFilter: gl.NEAREST,
+				magFilter: gl.NEAREST,
+			},
+		});
+	const paletteTexture =
+		store.texturesByKey.get(paletteTextureKey) ??
+		createAndStoreWebgl2Texture2D({
+			gl,
+			store,
+			key: paletteTextureKey,
+			upload: {
+				width: indexedMaterial.palette.colorCount,
+				height: 1,
+				internalFormat: gl.RGBA8,
+				format: gl.RGBA,
+				type: gl.UNSIGNED_BYTE,
+				data: indexedMaterial.palette.colorsRgba,
+				generateMipmaps: false,
+			},
+			sampler: {
+				wrapS: gl.CLAMP_TO_EDGE,
+				wrapT: gl.CLAMP_TO_EDGE,
+				minFilter: gl.NEAREST,
+				magFilter: gl.NEAREST,
+			},
+		});
+	return {
+		key: drawUnit.material.key,
+		indexFormat: indexedMaterial.texture.format,
+		indexTextureKey,
+		paletteTextureKey,
+		indexTexture,
+		paletteTexture,
+		width: indexedMaterial.texture.width,
+		height: indexedMaterial.texture.height,
+		paletteColorCount: indexedMaterial.palette.colorCount,
+		wrapS: indexedMaterial.samplingPolicy.wrapS,
+		wrapT: indexedMaterial.samplingPolicy.wrapT,
+	};
+}
+
+function createAndStoreWebgl2Texture2D({
+	gl,
+	store,
+	key,
+	upload,
+	sampler,
+}: {
+	gl: WebGL2RenderingContext;
+	store: Webgl2WorldResourceStore;
+	key: string;
+	upload: Parameters<typeof createWebgl2Texture2D>[1]["upload"];
+	sampler: Parameters<typeof createWebgl2Texture2D>[1]["sampler"];
+}): Webgl2Texture2DResource {
+	const texture = createWebgl2Texture2D(gl, {
+		label: key,
+		upload,
+		sampler,
+	});
+	store.texturesByKey.set(key, texture);
+	return texture;
+}
+
+function toWebgl2IndexedTextureUpload(
+	gl: WebGL2RenderingContext,
+	payload: NeighborPackedIndexedPayload,
+) {
+	if (payload.format === "p8-neighbor-rgba8") {
+		return {
+			width: payload.width,
+			height: payload.height,
+			internalFormat: gl.RGBA8,
+			format: gl.RGBA,
+			type: gl.UNSIGNED_BYTE,
+			data: payload.data,
+			generateMipmaps: false,
+		};
+	}
+	return {
+		width: payload.width,
+		height: payload.height,
+		internalFormat: gl.RGBA16UI,
+		format: gl.RGBA_INTEGER,
+		type: gl.UNSIGNED_SHORT,
+		data: payload.data,
+		generateMipmaps: false,
+	};
+}
+
+function describeIndexedTextureKey(
+	indexedMaterial: ResolvedIndexedMaterialData,
+): string {
+	return [
+		"indexed-neighbor-texture",
+		indexedMaterial.renderSurfaceAssetId,
+		indexedMaterial.neighborPackedTexture.format,
+		indexedMaterial.samplingPolicy.wrapS,
+		indexedMaterial.samplingPolicy.wrapT,
+	].join("|");
+}
+
+function describeIndexedPaletteTextureKey(
+	indexedMaterial: ResolvedIndexedMaterialData,
+): string {
+	const paletteKey =
+		"key" in indexedMaterial.palette
+			? indexedMaterial.palette.key
+			: indexedMaterial.palette.paletteAssetId;
+	return ["indexed-palette", paletteKey].join("|");
 }
 
 function resolveWebgl2DrawUnitAtlasEligibility(
@@ -767,6 +979,18 @@ function collectTerrainBlendTextureKeys(
 	];
 }
 
+function collectIndexedMaterialTextureKeys(
+	drawUnit: Webgl2WorldDrawUnit,
+): readonly string[] {
+	if (!drawUnit.indexedMaterial) {
+		return [];
+	}
+	return [
+		drawUnit.indexedMaterial.indexTextureKey,
+		drawUnit.indexedMaterial.paletteTextureKey,
+	];
+}
+
 function toWebgl2TextureUpload(
 	gl: WebGL2RenderingContext,
 	textureUpload: RenderSurfaceTextureUploadPreparation & { status: "ready" },
@@ -880,8 +1104,15 @@ function countPreparedTextureUploads(
 	return new Set(
 		drawUnits.flatMap((drawUnit) =>
 			drawUnit.textureKey
-				? [drawUnit.textureKey, ...collectTerrainBlendTextureKeys(drawUnit)]
-				: collectTerrainBlendTextureKeys(drawUnit),
+				? [
+						drawUnit.textureKey,
+						...collectTerrainBlendTextureKeys(drawUnit),
+						...collectIndexedMaterialTextureKeys(drawUnit),
+					]
+				: [
+						...collectTerrainBlendTextureKeys(drawUnit),
+						...collectIndexedMaterialTextureKeys(drawUnit),
+					],
 		),
 	).size;
 }
@@ -900,7 +1131,6 @@ function collectTextureUploadSamples(
 	const samples = new Map<string, string>();
 	for (const drawUnit of drawUnits) {
 		if (
-			drawUnit.materialKind !== "direct-texture" ||
 			!drawUnit.textureKey ||
 			samples.has(drawUnit.textureKey)
 		) {
@@ -915,6 +1145,15 @@ function collectTextureUploadSamples(
 }
 
 function describeDrawUnitTextureUpload(drawUnit: Webgl2WorldDrawUnit): string {
+	if (drawUnit.indexedMaterial) {
+		return [
+			drawUnit.indexedMaterial.key,
+			drawUnit.indexedMaterial.indexFormat,
+			`${drawUnit.indexedMaterial.width}x${drawUnit.indexedMaterial.height}`,
+			`palette=${drawUnit.indexedMaterial.paletteColorCount}`,
+			"mips=deferred",
+		].join(" ");
+	}
 	return drawUnit.textureUploadSample ?? `${drawUnit.textureKey ?? drawUnit.id}: unavailable`;
 }
 
@@ -931,7 +1170,7 @@ function summarizeDiagnosticReasons(
 
 function normalizeDiagnosticReason(reason: string): string {
 	if (reason.includes("is indexed/paletted")) {
-		return "indexed/paletted material deferred to M3C";
+		return "indexed/paletted material unavailable";
 	}
 	if (reason.startsWith("missing atlas-ready prepared texture ")) {
 		return "missing atlas-ready prepared texture";

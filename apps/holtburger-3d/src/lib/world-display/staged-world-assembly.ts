@@ -552,6 +552,7 @@ function buildStagedStaticSurfaceDrawUnit({
 				fallbackColorKey: `${part.debugColorKey}:${surfaceBatchKey}`,
 				renderableKind: "static",
 				textureCapabilities: materialTextureCapabilities,
+				appearance: part.materialAppearanceContext,
 			})
 		: createFlatDebugStagedMaterial(
 				`static-staged/${batchKey}/${surfaceBatchKey}`,

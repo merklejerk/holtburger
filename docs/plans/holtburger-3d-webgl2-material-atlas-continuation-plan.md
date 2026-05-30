@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
-Status: Phase M3B complete; ready for Phase M3C.
+Status: Phase M3C complete; ready for Phase M3D.
 
 Related plans:
 
@@ -639,7 +639,7 @@ Cleanup targets and legacy shims:
 
 ## Phase M3C: WebGL2 Indexed/Paletted Direct Materials
 
-Status: Not started.
+Status: Complete.
 
 Purpose: render indexed/paletted setup and structured-interior materials directly in WebGL2 using
 the DTOs from M3B. This is still staged/direct rendering, not atlas compaction.
@@ -685,6 +685,59 @@ Exit criteria:
   exists.
 - Remaining indexed/paletted material differences are explicit, metric-visible, and backed by
   examples.
+
+Progress:
+
+- Added a first-class `indexed-paletted` staged material strategy/plan instead of routing indexed
+  materials through `flat-fallback` once their material recipe, indexed render surface, palette, and
+  setup subpalette dependencies resolve.
+- Threaded setup appearance context into static staged material resolution so palette overrides and
+  subpalette patches affect indexed WebGL2 output through the M3B derived-palette DTOs. Structured
+  interiors continue to use base/material palette selection.
+- Added WebGL2 uploads for neighbor-packed indexed textures and resolved palette textures:
+  - P8 uses `RGBA8`/`UNSIGNED_BYTE`.
+  - P16 uses `RGBA16UI`/`RGBA_INTEGER`/`UNSIGNED_SHORT`.
+  - Index and palette textures are retained in the existing WebGL2 texture store and counted in
+    renderer metrics as indexed texture and palette resources.
+- Added separate P8 and P16 indexed shader programs. Both use the staged UV buffer, nearest-fetch
+  the packed neighbor texel, look up four palette colors, and manually bilinear blend the palette
+  colors. Hardware mip generation stays disabled for indexed textures.
+- Added submit-path support for binding index texture unit 0 and palette texture unit 1, with
+  explicit indexed uniforms for texture dimensions, palette size, and wrap flags.
+- Added tests for indexed strategy resolution, invalid indexed fallback, WebGL2 indexed resource
+  realization, and indexed submit texture/uniform binding.
+
+Decisions:
+
+- Indexed materials remain excluded from atlas participation even though their packed P8 data is
+  stored in an RGBA-like texture. The palette dependency and shader state make them materially
+  different from ordinary RGBA base-color atlas entries.
+- Indexed mipmaps remain deferred. Mipping index values directly is wrong, and palette-aware
+  prefiltered mip chains should be designed separately if we need them.
+- P16 uses the WebGL2 integer texture path directly. If a runtime lacks the needed integer texture
+  constants, resource realization records `indexed-uint16-texture-unsupported` and the draw falls
+  back to flat behavior for that material.
+
+Course Corrections:
+
+- The old M3B-era `indexed-paletted-deferred` fallback was too broad after DTO extraction. It now
+  only represents unresolved/invalid indexed resources or the explicit no-mip caveat, not normal
+  indexed material rendering.
+- Static material resolution had enough data for setup palette overrides, but the staged strategy
+  was not receiving the appearance context. M3C fixed that handoff instead of duplicating palette
+  logic in WebGL2 resource upload.
+
+Cleanup Targets / Debt:
+
+- The P8/P16 shader programs duplicate most fragment logic. If indexed behavior grows, extract a
+  shader-source helper or generator before adding detail/velocity variants.
+- `BrowserWorldDisplay` still contains runtime appearance preview plumbing even though the debug UX
+  now hides it. Remove or relocate that plumbing before it becomes stale UI debt.
+- Indexed diagnostics are now metric-visible, but the generated report should eventually group
+  indexed samples by material/render-surface/palette instead of relying on generic texture upload
+  samples.
+- Indexed mip policy needs a future explicit design. Do not silently enable hardware mipmaps over
+  packed index textures.
 
 ## Phase M3D: Detail Texture Policy and Static Detail Support
 

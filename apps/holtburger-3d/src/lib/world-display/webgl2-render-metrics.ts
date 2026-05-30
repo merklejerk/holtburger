@@ -48,6 +48,12 @@ export interface Webgl2RenderMetricsInput {
 	sceneDomainBaseCopyPassCount: number;
 	sceneDomainExteriorDrawCallCount: number;
 	sceneDomainInteriorDrawCallCount: number;
+	transitionApertureMaskPassCount: number;
+	interiorCompositePassCount: number;
+	exteriorCompositePassCount: number;
+	portalCompositeRectCount: number;
+	portalCompositeEstimatedPixelArea: number;
+	portalCompositeMaxDepth: number;
 	performance: WorldRenderMetrics["performance"];
 	textureFilteringMode: WorldDisplayTextureFilteringMode;
 	textureColorSpaceMode: WorldDisplayTextureColorSpaceMode;
@@ -99,10 +105,11 @@ export function createWebgl2RenderMetrics(
 			renderPassCount: input.clearCount,
 			clearCount: input.clearCount,
 			portalRenderWorkItemCount: input.visiblePortalWorkItemCount,
-			transitionApertureMaskPassCount: 0,
+			transitionApertureMaskPassCount:
+				input.transitionApertureMaskPassCount,
 			apertureDepthResetPassCount: 0,
-			interiorCompositePassCount: 0,
-			exteriorCompositePassCount: 0,
+			interiorCompositePassCount: input.interiorCompositePassCount,
+			exteriorCompositePassCount: input.exteriorCompositePassCount,
 			transitionPortalCandidateCount:
 				input.transitionPortalModel.candidates.length,
 			portalApertureMeshCount: 0,
@@ -171,6 +178,10 @@ export function createWebgl2RenderMetrics(
 				input.submitMetrics.exteriorDomainDrawUnitCount,
 			sceneDomainInteriorDrawUnitCount:
 				input.submitMetrics.interiorDomainDrawUnitCount,
+			portalCompositeRectCount: input.portalCompositeRectCount,
+			portalCompositeEstimatedPixelArea:
+				input.portalCompositeEstimatedPixelArea,
+			portalCompositeMaxDepth: input.portalCompositeMaxDepth,
 			structuredInteriorMeshCount:
 				input.worldStore?.structuredInteriorDrawUnitCount ?? 0,
 			visibleStructuredInteriorMeshCount:

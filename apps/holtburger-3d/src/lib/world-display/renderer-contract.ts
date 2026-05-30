@@ -113,6 +113,9 @@ export interface WorldRenderDebugMetrics {
 	sceneDomainInteriorDrawCallCount: number;
 	sceneDomainExteriorDrawUnitCount: number;
 	sceneDomainInteriorDrawUnitCount: number;
+	portalCompositeRectCount: number;
+	portalCompositeEstimatedPixelArea: number;
+	portalCompositeMaxDepth: number;
 	structuredInteriorMeshCount: number;
 	visibleStructuredInteriorMeshCount: number;
 	terrainBvhVisibleItemCount: number;

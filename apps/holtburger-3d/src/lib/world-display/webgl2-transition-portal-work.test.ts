@@ -35,6 +35,8 @@ describe("planWebgl2TransitionPortalWork", () => {
 				createPortalMaskDrawUnit("portal-mask/outdoor/1:portal/1"),
 			],
 			cameraPosition: { x: 0, y: 0, z: 5 },
+			viewProjectionMatrix: createIdentityMat4(),
+			viewport: { width: 100, height: 80 },
 			baseScene: "exterior",
 			initialEnvCellId: null,
 			levels: createLevels("exterior"),
@@ -47,6 +49,7 @@ describe("planWebgl2TransitionPortalWork", () => {
 			maskDrawUnitId: "portal-mask/outdoor/1:portal/1",
 			direction: "outdoor-to-indoor",
 			entryEnvCellId: 0x01020100,
+			screenRect: { x: 0, y: 0, width: 100, height: 80 },
 		});
 		expect([...plan.batches.keys()]).toEqual(["outdoor-to-indoor:1"]);
 		expect(plan.maskedInteriorCellIds).toEqual(new Set([0x01020100]));
@@ -72,6 +75,8 @@ describe("planWebgl2TransitionPortalWork", () => {
 				createPortalMaskDrawUnit("portal-mask/unreachable"),
 			],
 			cameraPosition: { x: 0, y: 0, z: -5 },
+			viewProjectionMatrix: createIdentityMat4(),
+			viewport: { width: 100, height: 80 },
 			baseScene: "interior",
 			initialEnvCellId: 0x01020100,
 			levels: createLevels("interior"),
@@ -245,6 +250,10 @@ function createEmptyBuffer() {
 			return;
 		},
 	};
+}
+
+function createIdentityMat4(): Float32Array {
+	return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 }
 
 function createStructuredInteriorScene(focusEnvCellId: number | null) {

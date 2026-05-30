@@ -15,6 +15,10 @@ import {
 } from "./staged-world-frame";
 import {
 	createEmptyWebgl2WorldSubmitMetrics,
+	partitionWebgl2SceneDomainDrawUnits,
+	planWebgl2FlatWorldSubmitOrder,
+	planWebgl2PortalMaskSubmitOrder,
+	submitWebgl2FlatWorldDrawUnits,
 	submitWebgl2FlatWorldFrame,
 	type Webgl2FlatWorldProgram,
 	type Webgl2IndexedP16WorldProgram,
@@ -24,6 +28,11 @@ import {
 	type Webgl2WorldSubmitMetrics,
 } from "./webgl2-world-submit";
 import {
+	createWebgl2SceneDomainTargetSet,
+	type Webgl2SceneDomainTarget,
+	type Webgl2SceneDomainTargetSet,
+} from "./webgl2-scene-domain-targets";
+import {
 	createWebgl2WorldResourceStore,
 	destroyWebgl2WorldResources,
 	syncWebgl2WorldResources,
@@ -31,6 +40,7 @@ import {
 } from "./webgl2-world-resources";
 import type { WorldRenderMetrics } from "./renderer-contract";
 import type { MaterialTextureCapabilities } from "./render-surface-texture-data";
+import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
 import type {
 	WorldDisplayRenderer,
 	WorldDisplayRendererOptions,
@@ -390,6 +400,40 @@ void main() {
 }
 `;
 
+const SCENE_DOMAIN_COPY_VERTEX_SHADER = `#version 300 es
+precision highp float;
+
+out vec2 vUv;
+
+const vec2 POSITIONS[3] = vec2[3](
+	vec2(-1.0, -1.0),
+	vec2(3.0, -1.0),
+	vec2(-1.0, 3.0)
+);
+
+void main() {
+	vec2 position = POSITIONS[gl_VertexID];
+	vUv = position * 0.5 + 0.5;
+	gl_Position = vec4(position, 0.0, 1.0);
+}
+`;
+
+const SCENE_DOMAIN_COPY_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+
+uniform sampler2D uColorTexture;
+uniform sampler2D uDepthTexture;
+
+in vec2 vUv;
+
+out vec4 fragColor;
+
+void main() {
+	fragColor = texture(uColorTexture, vUv);
+	gl_FragDepth = texture(uDepthTexture, vUv).r;
+}
+`;
+
 interface Webgl2RenderResources {
 	gl: WebGL2RenderingContext;
 	stateCache: Webgl2StateCache;
@@ -399,10 +443,26 @@ interface Webgl2RenderResources {
 	indexedP8WorldProgram: Webgl2IndexedP8WorldProgram;
 	indexedP16WorldProgram: Webgl2IndexedP16WorldProgram;
 	terrainBlendWorldProgram: Webgl2TerrainBlendWorldProgram;
+	sceneDomainCopyProgram: Webgl2ProgramResource<
+		never,
+		"uColorTexture" | "uDepthTexture"
+	>;
 	vertexBuffer: Webgl2BufferResource;
 	vertexArray: Webgl2VertexArrayResource;
+	sceneDomainCopyVertexArray: Webgl2VertexArrayResource;
+	sceneDomainTargets: Webgl2SceneDomainTargetSet | null;
+	sceneDomainFramebufferFailureCount: number;
+	sceneDomainFramebufferFailureSamples: string[];
 	worldStore: Webgl2WorldResourceStore;
 	materialTextureCapabilities: MaterialTextureCapabilities;
+}
+
+interface Webgl2SceneDomainFrameMetrics {
+	width: number;
+	height: number;
+	exteriorDrawCallCount: number;
+	interiorDrawCallCount: number;
+	baseCopyPassCount: number;
 }
 
 export function createWebgl2WorldDisplayRendererImplementation(
@@ -437,6 +497,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	let latestSubmitMetrics: Webgl2WorldSubmitMetrics =
 		createEmptyWebgl2WorldSubmitMetrics();
 	let latestFrameMetrics: StagedWorldFrameMetrics | null = null;
+	let latestSceneDomainFrameMetrics: Webgl2SceneDomainFrameMetrics | null = null;
 
 	const canvas = document.createElement("canvas");
 	canvas.className = WEBGL2_CANVAS_CLASS_NAME;
@@ -619,21 +680,34 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				terrainScene,
 			});
 			latestFrameMetrics = frame.metrics;
-			latestSubmitMetrics = submitWebgl2FlatWorldFrame({
-				gl,
-				stateCache: resources.stateCache,
-				program: resources.flatWorldProgram,
-				texturedProgram: resources.texturedWorldProgram,
-				terrainBlendProgram: resources.terrainBlendWorldProgram,
-				indexedP8Program: resources.indexedP8WorldProgram,
-				indexedP16Program: resources.indexedP16WorldProgram,
-				drawUnitsById: resources.worldStore.drawUnitsById,
+			const portalMaskDrawUnits = planWebgl2PortalMaskSubmitOrder(
 				frame,
-			});
+				resources.worldStore.drawUnitsById,
+			);
+			if (shouldUseSceneDomainTargets(portalMaskDrawUnits.length)) {
+				latestSubmitMetrics = submitWebgl2SceneDomainFrame({
+					frame,
+					portalMaskDrawUnitCount: portalMaskDrawUnits.length,
+				});
+			} else {
+				latestSceneDomainFrameMetrics = null;
+				latestSubmitMetrics = submitWebgl2FlatWorldFrame({
+					gl,
+					stateCache: resources.stateCache,
+					program: resources.flatWorldProgram,
+					texturedProgram: resources.texturedWorldProgram,
+					terrainBlendProgram: resources.terrainBlendWorldProgram,
+					indexedP8Program: resources.indexedP8WorldProgram,
+					indexedP16Program: resources.indexedP16WorldProgram,
+					drawUnitsById: resources.worldStore.drawUnitsById,
+					frame,
+				});
+			}
 			drawCallCount += latestSubmitMetrics.drawCallCount;
 			lastFrameDrawCount = latestSubmitMetrics.drawCallCount;
 		} else {
 			latestFrameMetrics = null;
+			latestSceneDomainFrameMetrics = null;
 			latestSubmitMetrics = createEmptyWebgl2WorldSubmitMetrics();
 			resources.stateCache.useProgram(resources.triangleProgram.program);
 			resources.stateCache.bindVertexArray(resources.vertexArray.vertexArray);
@@ -656,7 +730,183 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			canvas.width = width;
 			canvas.height = height;
 			resources?.stateCache.invalidate();
+			if (resources?.sceneDomainTargets) {
+				resources.sceneDomainTargets.dispose();
+				resources.sceneDomainTargets = null;
+			}
 		}
+	}
+
+	function shouldUseSceneDomainTargets(portalMaskDrawUnitCount: number): boolean {
+		return transitionPortalMaxDepth > 0 && portalMaskDrawUnitCount > 0;
+	}
+
+	function submitWebgl2SceneDomainFrame({
+		frame,
+		portalMaskDrawUnitCount,
+	}: {
+		frame: ReturnType<typeof buildStagedWorldFrame>;
+		portalMaskDrawUnitCount: number;
+	}): Webgl2WorldSubmitMetrics {
+		if (!resources) {
+			return createEmptyWebgl2WorldSubmitMetrics();
+		}
+		const targets = syncSceneDomainTargets(resources);
+		const { gl, stateCache } = resources;
+		const visibleDrawUnits = planWebgl2FlatWorldSubmitOrder(
+			frame,
+			resources.worldStore.drawUnitsById,
+		);
+		const sceneDomainDrawUnits =
+			partitionWebgl2SceneDomainDrawUnits(visibleDrawUnits);
+		const exteriorMetrics = renderSceneDomainTarget({
+			target: targets.exterior,
+			drawUnits: sceneDomainDrawUnits.exterior,
+			frame,
+		});
+		const interiorMetrics = renderSceneDomainTarget({
+			target: targets.interior,
+			drawUnits: sceneDomainDrawUnits.interior,
+			frame,
+		});
+
+		stateCache.bindFramebuffer(null);
+		stateCache.setViewport({
+			x: 0,
+			y: 0,
+			width: canvas.width,
+			height: canvas.height,
+		});
+		gl.clear(gl.STENCIL_BUFFER_BIT);
+		copySceneDomainTargetToDefaultFramebuffer(targets.exterior);
+
+		latestSceneDomainFrameMetrics = {
+			width: targets.width,
+			height: targets.height,
+			exteriorDrawCallCount: exteriorMetrics.drawCallCount,
+			interiorDrawCallCount: interiorMetrics.drawCallCount,
+			baseCopyPassCount: 1,
+		};
+		return mergeSceneDomainSubmitMetrics({
+			exteriorMetrics,
+			interiorMetrics,
+			portalMaskDrawUnitCount,
+			exteriorDomainDrawUnitCount: sceneDomainDrawUnits.exterior.length,
+			interiorDomainDrawUnitCount: sceneDomainDrawUnits.interior.length,
+		});
+	}
+
+	function syncSceneDomainTargets(
+		currentResources: Webgl2RenderResources,
+	): Webgl2SceneDomainTargetSet {
+		const existing = currentResources.sceneDomainTargets;
+		if (
+			existing &&
+			existing.width === canvas.width &&
+			existing.height === canvas.height
+		) {
+			return existing;
+		}
+		existing?.dispose();
+		try {
+			const targets = createWebgl2SceneDomainTargetSet(currentResources.gl, {
+				width: canvas.width,
+				height: canvas.height,
+			});
+			currentResources.sceneDomainTargets = targets;
+			currentResources.stateCache.invalidate();
+			return targets;
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			currentResources.sceneDomainFramebufferFailureCount += 1;
+			currentResources.sceneDomainFramebufferFailureSamples = [
+				message,
+				...currentResources.sceneDomainFramebufferFailureSamples,
+			].slice(0, 4);
+			throw error;
+		}
+	}
+
+	function renderSceneDomainTarget({
+		target,
+		drawUnits,
+		frame,
+	}: {
+		target: Webgl2SceneDomainTarget;
+		drawUnits: readonly Webgl2WorldDrawUnit[];
+		frame: ReturnType<typeof buildStagedWorldFrame>;
+	}): Webgl2WorldSubmitMetrics {
+		if (!resources) {
+			return createEmptyWebgl2WorldSubmitMetrics();
+		}
+		const { gl, stateCache } = resources;
+		stateCache.bindFramebuffer(target.framebuffer);
+		stateCache.setViewport({
+			x: 0,
+			y: 0,
+			width: target.width,
+			height: target.height,
+		});
+		gl.clearColor(...WEBGL2_CLEAR_COLOR);
+		gl.clearDepth(1);
+		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+		return submitWebgl2FlatWorldDrawUnits({
+			gl,
+			stateCache,
+			program: resources.flatWorldProgram,
+			texturedProgram: resources.texturedWorldProgram,
+			terrainBlendProgram: resources.terrainBlendWorldProgram,
+			indexedP8Program: resources.indexedP8WorldProgram,
+			indexedP16Program: resources.indexedP16WorldProgram,
+			viewProjectionMatrix: frame.viewProjectionMatrix,
+			drawUnits,
+		});
+	}
+
+	function copySceneDomainTargetToDefaultFramebuffer(
+		target: Webgl2SceneDomainTarget,
+	): void {
+		if (!resources) {
+			return;
+		}
+		const { gl, stateCache } = resources;
+		stateCache.setDepthState({
+			enabled: true,
+			write: true,
+			func: gl.ALWAYS,
+		});
+		stateCache.setBlendState({
+			enabled: false,
+			srcRgb: gl.ONE,
+			dstRgb: gl.ZERO,
+			srcAlpha: gl.ONE,
+			dstAlpha: gl.ZERO,
+			equationRgb: gl.FUNC_ADD,
+			equationAlpha: gl.FUNC_ADD,
+		});
+		stateCache.setCullState({
+			enabled: false,
+			mode: gl.BACK,
+		});
+		stateCache.setStencilState({
+			enabled: false,
+			writeMask: 0xff,
+			func: gl.ALWAYS,
+			ref: 0,
+			readMask: 0xff,
+			fail: gl.KEEP,
+			zfail: gl.KEEP,
+			zpass: gl.KEEP,
+		});
+		stateCache.useProgram(resources.sceneDomainCopyProgram.program);
+		stateCache.bindVertexArray(
+			resources.sceneDomainCopyVertexArray.vertexArray,
+		);
+		gl.uniform1i(resources.sceneDomainCopyProgram.uniforms.uColorTexture, 0);
+		gl.uniform1i(resources.sceneDomainCopyProgram.uniforms.uDepthTexture, 1);
+		stateCache.bindTexture2D(0, target.colorTexture);
+		stateCache.bindTexture2D(1, target.depthTexture);
+		gl.drawArrays(gl.TRIANGLES, 0, 3);
 	}
 
 	function recordPerformanceSample({
@@ -709,6 +959,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		resources.indexedP8WorldProgram.dispose();
 		resources.indexedP16WorldProgram.dispose();
 		resources.terrainBlendWorldProgram.dispose();
+		resources.sceneDomainCopyProgram.dispose();
+		resources.sceneDomainCopyVertexArray.dispose();
+		resources.sceneDomainTargets?.dispose();
 		destroyWebgl2WorldResources(resources.worldStore);
 		resources = null;
 	}
@@ -770,6 +1023,24 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				worldStore: resources?.worldStore ?? null,
 				frameMetrics: latestFrameMetrics,
 				submitMetrics: latestSubmitMetrics,
+				sceneDomainTargetWidth:
+					latestSceneDomainFrameMetrics?.width ??
+					resources?.sceneDomainTargets?.width ??
+					0,
+				sceneDomainTargetHeight:
+					latestSceneDomainFrameMetrics?.height ??
+					resources?.sceneDomainTargets?.height ??
+					0,
+				sceneDomainFramebufferFailureCount:
+					resources?.sceneDomainFramebufferFailureCount ?? 0,
+				sceneDomainFramebufferFailureSamples:
+					resources?.sceneDomainFramebufferFailureSamples ?? [],
+				sceneDomainBaseCopyPassCount:
+					latestSceneDomainFrameMetrics?.baseCopyPassCount ?? 0,
+				sceneDomainExteriorDrawCallCount:
+					latestSceneDomainFrameMetrics?.exteriorDrawCallCount ?? 0,
+				sceneDomainInteriorDrawCallCount:
+					latestSceneDomainFrameMetrics?.interiorDrawCallCount ?? 0,
 				performance: latestPerformanceMetrics,
 				textureFilteringMode,
 				textureColorSpaceMode,
@@ -797,6 +1068,59 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		});
 		host.append(errorElement);
 	}
+}
+
+function mergeSceneDomainSubmitMetrics({
+	exteriorMetrics,
+	interiorMetrics,
+	portalMaskDrawUnitCount,
+	exteriorDomainDrawUnitCount,
+	interiorDomainDrawUnitCount,
+}: {
+	exteriorMetrics: Webgl2WorldSubmitMetrics;
+	interiorMetrics: Webgl2WorldSubmitMetrics;
+	portalMaskDrawUnitCount: number;
+	exteriorDomainDrawUnitCount: number;
+	interiorDomainDrawUnitCount: number;
+}): Webgl2WorldSubmitMetrics {
+	return {
+		visibleDrawUnitCount:
+			exteriorMetrics.visibleDrawUnitCount +
+			interiorMetrics.visibleDrawUnitCount,
+		portalMaskDrawUnitCount,
+		exteriorDomainDrawUnitCount,
+		interiorDomainDrawUnitCount,
+		drawCallCount:
+			exteriorMetrics.drawCallCount + interiorMetrics.drawCallCount + 1,
+		programSwitchCount:
+			exteriorMetrics.programSwitchCount + interiorMetrics.programSwitchCount + 1,
+		vertexArrayBindCount:
+			exteriorMetrics.vertexArrayBindCount +
+			interiorMetrics.vertexArrayBindCount +
+			1,
+		uniformUploadCount:
+			exteriorMetrics.uniformUploadCount +
+			interiorMetrics.uniformUploadCount +
+			2,
+		stateChangeCount:
+			exteriorMetrics.stateChangeCount + interiorMetrics.stateChangeCount,
+		triangleCount: exteriorMetrics.triangleCount + interiorMetrics.triangleCount,
+		visibleDrawUnitCountsByMaterialKind: mergeMaterialKindCounts(
+			exteriorMetrics.visibleDrawUnitCountsByMaterialKind,
+			interiorMetrics.visibleDrawUnitCountsByMaterialKind,
+		),
+	};
+}
+
+function mergeMaterialKindCounts(
+	left: Readonly<Record<string, number>>,
+	right: Readonly<Record<string, number>>,
+): Record<string, number> {
+	const counts: Record<string, number> = { ...left };
+	for (const [key, value] of Object.entries(right)) {
+		counts[key] = (counts[key] ?? 0) + value;
+	}
+	return counts;
 }
 
 function createTriangleResources(
@@ -838,8 +1162,18 @@ function createTriangleResources(
 		indexedP8WorldProgram: createIndexedP8WorldProgram(gl),
 		indexedP16WorldProgram: createIndexedP16WorldProgram(gl),
 		terrainBlendWorldProgram: createTerrainBlendWorldProgram(gl),
+		sceneDomainCopyProgram: createSceneDomainCopyProgram(gl),
 		vertexBuffer,
 		vertexArray,
+		sceneDomainCopyVertexArray: createWebgl2VertexArray(gl, {
+			label: "webgl2 scene-domain copy vertex array",
+			configure() {
+				return;
+			},
+		}),
+		sceneDomainTargets: null,
+		sceneDomainFramebufferFailureCount: 0,
+		sceneDomainFramebufferFailureSamples: [],
 		worldStore: createWebgl2WorldResourceStore(),
 		materialTextureCapabilities: detectWebgl2MaterialTextureCapabilities(gl),
 	};
@@ -980,5 +1314,16 @@ function createTerrainBlendWorldProgram(
 			"uRoadRotation1",
 			"uRoadCount",
 		],
+	});
+}
+
+function createSceneDomainCopyProgram(
+	gl: WebGL2RenderingContext,
+): Webgl2ProgramResource<never, "uColorTexture" | "uDepthTexture"> {
+	return createWebgl2Program(gl, {
+		label: "webgl2 scene-domain copy",
+		vertexSource: SCENE_DOMAIN_COPY_VERTEX_SHADER,
+		fragmentSource: SCENE_DOMAIN_COPY_FRAGMENT_SHADER,
+		uniforms: ["uColorTexture", "uDepthTexture"],
 	});
 }

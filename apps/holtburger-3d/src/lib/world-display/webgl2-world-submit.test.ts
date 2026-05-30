@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { StagedWorldFrame } from "./staged-world-frame";
 import {
+	partitionWebgl2SceneDomainDrawUnits,
 	planWebgl2FlatWorldSubmitOrder,
 	planWebgl2PortalMaskSubmitOrder,
 	submitWebgl2FlatWorldFrame,
@@ -69,6 +70,28 @@ describe("planWebgl2FlatWorldSubmitOrder", () => {
 				(drawUnit) => drawUnit.id,
 			),
 		).toEqual(["mask"]);
+	});
+});
+
+describe("partitionWebgl2SceneDomainDrawUnits", () => {
+	it("routes exterior, interior, and portal-mask draw units into separate ownership", () => {
+		const partition = partitionWebgl2SceneDomainDrawUnits([
+			createDrawUnit({ id: "terrain", kind: "terrain" }),
+			createDrawUnit({ id: "static", kind: "static" }),
+			createDrawUnit({
+				id: "interior",
+				kind: "structured-interior",
+			}),
+			createDrawUnit({ id: "mask", kind: "portal-mask" }),
+		]);
+
+		expect(partition.exterior.map((drawUnit) => drawUnit.id)).toEqual([
+			"terrain",
+			"static",
+		]);
+		expect(partition.interior.map((drawUnit) => drawUnit.id)).toEqual([
+			"interior",
+		]);
 	});
 });
 

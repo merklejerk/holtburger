@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
-Status: Phase M4A complete; ready for Phase M4B.
+Status: Phase M4B complete; ready for Phase M4B.1.
 
 Related plans:
 
@@ -996,7 +996,7 @@ Cleanup targets and legacy shims:
 
 ## Phase M4B: Dual Scene-Domain Render Targets
 
-Status: Not started.
+Status: Complete.
 
 Purpose: render the two portal scene domains once per frame into offscreen color/depth targets so
 portal recursion no longer redraws scene geometry per portal depth. This phase does not need to
@@ -1039,6 +1039,27 @@ Exit criteria:
   is enabled.
 - Portal masks remain pass resources, not scene-domain geometry.
 
+Progress:
+
+- Added WebGL2 scene-domain target resources with paired `exterior` and `interior` framebuffers.
+  Each target owns an RGB8 color texture and a DEPTH_COMPONENT24 depth texture so later portal
+  composites can sample both color and depth.
+- Scene-domain targets are created at the canvas backing size, disposed explicitly, recreated on
+  resize, and validated with `checkFramebufferStatus()`. Framebuffer failures are reported through
+  WebGL2 debug metrics and still fail loudly.
+- Split the flat submitter so existing frame submission can still plan visible draw units, while
+  domain rendering can submit a supplied draw-unit list into whichever framebuffer is currently
+  bound.
+- Added draw-list partitioning for the dual-domain model: terrain and statics render into the
+  exterior domain, structured interiors render into the interior domain, and portal masks render
+  into neither domain.
+- Added a full-screen base-copy shader that samples a domain color texture plus depth texture and
+  writes both `fragColor` and `gl_FragDepth` to the default framebuffer.
+- Added WebGL2 renderer metrics for scene-domain target dimensions, framebuffer failures, exterior
+  and interior domain draw counts, per-domain draw calls, and base-copy pass count.
+- Added unit coverage for scene-domain target lifecycle and framebuffer failure reporting, plus
+  submitter coverage proving portal masks do not leak into either scene domain.
+
 Decisions:
 
 - The target is fixed expensive geometry passes, not fixed total GPU work. Portal depth still costs
@@ -1047,13 +1068,76 @@ Decisions:
 - Both domain targets use the same camera projection for the first implementation. If AC portal
   semantics require camera transforms later, add explicit projected-coordinate remapping before
   changing the storage model.
+- The scene-domain path is currently gated to frames with visible portal mask draw units and a
+  positive portal depth limit. Non-portal frames continue using the existing direct default
+  framebuffer submit path so ordinary WebGL2 behavior does not regress while portal compositing is
+  incomplete.
+- The base copy currently uses the exterior target. This is correct for outdoor-origin portal
+  bring-up but is not the final base-domain policy for indoor camera views.
+- Scene-domain color targets use RGB8 instead of RGBA8 because the portal pipeline uses stencil and
+  copied depth to define aperture visibility; target alpha is not part of the composite contract.
+
+Course corrections:
+
+- M4B kept the old `submitWebgl2FlatWorldFrame()` API as the frame-planning entry point and added
+  `submitWebgl2FlatWorldDrawUnits()` for supplied domain draw lists. This avoided a broad rename
+  while preserving a clean separation between visibility planning and framebuffer ownership.
+- Target lifecycle lives outside the general world resource store for now. The targets are
+  frame-size resources, not scene-resource graph entries, and they are recreated by the renderer
+  when the canvas backing resolution changes.
 
 Cleanup targets and legacy shims:
 
-- Existing `submitWebgl2FlatWorldFrame()` naming will become misleading once it can submit domain
-  draw lists and copy targets. Rename it during this phase if the refactor touches most call sites.
+- Existing `submitWebgl2FlatWorldFrame()` naming is now a compatibility shim for frame-planned
+  submission. Rename the submitter API family when M4C adds explicit mask/composite submission so
+  the names describe scene-domain and composite responsibilities.
 - WebGL2 render metrics still use several "batch" terms from older Three/luma phases. Preserve
   compatibility during M4B, but mark renamed metrics for M5 if they become confusing.
+- Base-copy metrics are frame-level and do not yet expose source-domain selection. M4B.1 should add
+  that before M4C.
+- Scene-domain target framebuffer failure metrics only report samples after an attempted target
+  creation. If creation fails during a render frame, the renderer still throws; add graceful
+  degradation only if we need to keep the app alive on browsers without the required attachments.
+- RGB8 color targets assume WebGL2 framebuffer completeness for this attachment format. If browser
+  coverage proves weaker than expected, add an explicit RGB8 capability probe/fallback rather than
+  silently returning to RGBA8.
+
+## Phase M4B.1: Base-Domain and Portal Work-Item Prep
+
+Status: Not started.
+
+Purpose: close the remaining M4B policy gap before iterative portal compositing. M4C needs to know
+which scene domain is the camera's base view, and it needs explicit visible portal work items rather
+than only visible mask counts.
+
+Why this phase is immediate:
+
+- M4B deliberately copies the exterior target as the base scene. That is enough to validate
+  offscreen color/depth target ownership, but indoor camera views need to copy the interior target
+  first before compositing outward portals.
+- M4A/M4B metrics can count visible portal mask draw units, but M4C needs direction, parent stencil
+  ref, depth, screen bounds, and skipped-reason accounting from transition portal work items.
+
+Tasks:
+
+- Derive a WebGL2 base scene domain from the existing browser camera residency/render-scene context.
+  Outdoor landblock/unknown views should default to `exterior`; env-cell views should use
+  `interior` when the structured interior domain is available.
+- Thread the selected base domain into the scene-domain copy path and debug metrics.
+- Build the WebGL2 visible portal work-item plan from the existing transition portal candidate
+  model without reintroducing clipped scene redraw as the primary composite strategy.
+- Keep work items tied to M4A portal mask draw units so M4C can draw aperture masks by explicit
+  pass code.
+- Add tests for base-domain selection, metric reporting, and portal work-item visibility/counting
+  without drawing portal composites yet.
+
+Exit criteria:
+
+- The WebGL2 scene-domain copy path chooses exterior or interior based on camera residency rather
+  than a hard-coded exterior default.
+- Metrics report the selected base scene domain and visible portal work-item counts.
+- M4C can consume a visible portal work-item list with mask draw-unit IDs, stencil refs, depth, and
+  direction without changing scene-domain render target ownership.
 
 ## Phase M4C: Iterative Stencil/Depth Portal Composite
 

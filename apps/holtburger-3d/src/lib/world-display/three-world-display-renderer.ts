@@ -604,6 +604,15 @@ export function createThreeWorldDisplayRenderer(
 			portalCompositeTerrainCandidateBatchCount: 0,
 			portalCompositeInteriorCandidateBatchCount: 0,
 			portalCompositeFallbackIncludedBatchCount: 0,
+			sceneDomainTargetWidth: 0,
+			sceneDomainTargetHeight: 0,
+			sceneDomainFramebufferFailureCount: 0,
+			sceneDomainFramebufferFailureSamples: [],
+			sceneDomainBaseCopyPassCount: 0,
+			sceneDomainExteriorDrawCallCount: 0,
+			sceneDomainInteriorDrawCallCount: 0,
+			sceneDomainExteriorDrawUnitCount: 0,
+			sceneDomainInteriorDrawUnitCount: 0,
 			structuredInteriorMeshCount: 0,
 			visibleStructuredInteriorMeshCount: 0,
 			...latestPreparedBvhMetrics,
@@ -1068,6 +1077,15 @@ export function createThreeWorldDisplayRenderer(
 				latestPortalCompositeInteriorCandidateBatchCount,
 			portalCompositeFallbackIncludedBatchCount:
 				latestPortalCompositeFallbackIncludedBatchCount,
+			sceneDomainTargetWidth: 0,
+			sceneDomainTargetHeight: 0,
+			sceneDomainFramebufferFailureCount: 0,
+			sceneDomainFramebufferFailureSamples: [],
+			sceneDomainBaseCopyPassCount: 0,
+			sceneDomainExteriorDrawCallCount: 0,
+			sceneDomainInteriorDrawCallCount: 0,
+			sceneDomainExteriorDrawUnitCount: 0,
+			sceneDomainInteriorDrawUnitCount: 0,
 			structuredInteriorMeshCount: structuredInteriorMeshes.size,
 			visibleStructuredInteriorMeshCount: countVisibleObjects(
 				structuredInteriorMeshes.values(),
@@ -3721,6 +3739,22 @@ function createRenderDebugMetrics(
 			options.portalCompositeInteriorCandidateBatchCount,
 		portalCompositeFallbackIncludedBatchCount:
 			options.portalCompositeFallbackIncludedBatchCount,
+		sceneDomainTargetWidth: options.sceneDomainTargetWidth,
+		sceneDomainTargetHeight: options.sceneDomainTargetHeight,
+		sceneDomainFramebufferFailureCount:
+			options.sceneDomainFramebufferFailureCount,
+		sceneDomainFramebufferFailureSamples: [
+			...options.sceneDomainFramebufferFailureSamples,
+		],
+		sceneDomainBaseCopyPassCount: options.sceneDomainBaseCopyPassCount,
+		sceneDomainExteriorDrawCallCount:
+			options.sceneDomainExteriorDrawCallCount,
+		sceneDomainInteriorDrawCallCount:
+			options.sceneDomainInteriorDrawCallCount,
+		sceneDomainExteriorDrawUnitCount:
+			options.sceneDomainExteriorDrawUnitCount,
+		sceneDomainInteriorDrawUnitCount:
+			options.sceneDomainInteriorDrawUnitCount,
 		structuredInteriorMeshCount: options.structuredInteriorMeshCount,
 		visibleStructuredInteriorMeshCount:
 			options.visibleStructuredInteriorMeshCount,

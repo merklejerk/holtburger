@@ -80,6 +80,8 @@ export type Webgl2IndexedP16WorldProgram = Webgl2ProgramResource<
 export interface Webgl2WorldSubmitMetrics {
 	visibleDrawUnitCount: number;
 	portalMaskDrawUnitCount: number;
+	exteriorDomainDrawUnitCount: number;
+	interiorDomainDrawUnitCount: number;
 	drawCallCount: number;
 	programSwitchCount: number;
 	vertexArrayBindCount: number;
@@ -92,6 +94,8 @@ export interface Webgl2WorldSubmitMetrics {
 const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	visibleDrawUnitCount: 0,
 	portalMaskDrawUnitCount: 0,
+	exteriorDomainDrawUnitCount: 0,
+	interiorDomainDrawUnitCount: 0,
 	drawCallCount: 0,
 	programSwitchCount: 0,
 	vertexArrayBindCount: 0,
@@ -134,10 +138,57 @@ export function submitWebgl2FlatWorldFrame({
 		frame,
 		drawUnitsById,
 	);
+	const sceneDomainDrawUnits =
+		partitionWebgl2SceneDomainDrawUnits(drawUnits);
+	return submitWebgl2FlatWorldDrawUnits({
+		gl,
+		stateCache,
+		program,
+		texturedProgram,
+		terrainBlendProgram,
+		indexedP8Program,
+		indexedP16Program,
+		viewProjectionMatrix: frame.viewProjectionMatrix,
+		drawUnits,
+		portalMaskDrawUnitCount: portalMaskDrawUnits.length,
+		exteriorDomainDrawUnitCount: sceneDomainDrawUnits.exterior.length,
+		interiorDomainDrawUnitCount: sceneDomainDrawUnits.interior.length,
+	});
+}
+
+export function submitWebgl2FlatWorldDrawUnits({
+	gl,
+	stateCache,
+	program,
+	texturedProgram,
+	terrainBlendProgram,
+	indexedP8Program,
+	indexedP16Program,
+	viewProjectionMatrix,
+	drawUnits,
+	portalMaskDrawUnitCount = 0,
+	exteriorDomainDrawUnitCount = 0,
+	interiorDomainDrawUnitCount = 0,
+}: {
+	gl: WebGL2RenderingContext;
+	stateCache: Webgl2StateCache;
+	program: Webgl2FlatWorldProgram;
+	texturedProgram: Webgl2TexturedWorldProgram;
+	terrainBlendProgram: Webgl2TerrainBlendWorldProgram;
+	indexedP8Program: Webgl2IndexedP8WorldProgram;
+	indexedP16Program: Webgl2IndexedP16WorldProgram;
+	viewProjectionMatrix: RenderMat4;
+	drawUnits: readonly Webgl2WorldDrawUnit[];
+	portalMaskDrawUnitCount?: number;
+	exteriorDomainDrawUnitCount?: number;
+	interiorDomainDrawUnitCount?: number;
+}): Webgl2WorldSubmitMetrics {
 	const metrics: Webgl2WorldSubmitMetrics = {
 		...EMPTY_SUBMIT_METRICS,
 		visibleDrawUnitCount: drawUnits.length,
-		portalMaskDrawUnitCount: portalMaskDrawUnits.length,
+		portalMaskDrawUnitCount,
+		exteriorDomainDrawUnitCount,
+		interiorDomainDrawUnitCount,
 		visibleDrawUnitCountsByMaterialKind:
 			countDrawUnitsByMaterialKind(drawUnits),
 	};
@@ -268,7 +319,7 @@ export function submitWebgl2FlatWorldFrame({
 		}
 
 		const modelViewProjection = multiplyMat4(
-			frame.viewProjectionMatrix,
+			viewProjectionMatrix,
 			drawUnit.modelMatrix,
 		);
 		if (
@@ -514,6 +565,38 @@ export function planWebgl2PortalMaskSubmitOrder(
 		}
 	}
 	return maskDrawUnits.sort((left, right) => left.id.localeCompare(right.id));
+}
+
+export interface Webgl2SceneDomainDrawUnits {
+	exterior: Webgl2WorldDrawUnit[];
+	interior: Webgl2WorldDrawUnit[];
+}
+
+export function partitionWebgl2SceneDomainDrawUnits(
+	drawUnits: readonly Webgl2WorldDrawUnit[],
+): Webgl2SceneDomainDrawUnits {
+	const exterior: Webgl2WorldDrawUnit[] = [];
+	const interior: Webgl2WorldDrawUnit[] = [];
+	for (const drawUnit of drawUnits) {
+		switch (drawUnit.kind) {
+			case "terrain":
+			case "static":
+				exterior.push(drawUnit);
+				break;
+			case "structured-interior":
+				interior.push(drawUnit);
+				break;
+			case "portal-mask":
+				break;
+			default:
+				assertNeverWebgl2DrawUnitKind(drawUnit.kind);
+		}
+	}
+	return { exterior, interior };
+}
+
+function assertNeverWebgl2DrawUnitKind(kind: never): never {
+	throw new Error(`Unsupported WebGL2 draw unit kind ${kind}.`);
 }
 
 function compareWebgl2FlatWorldDrawUnits(

@@ -104,6 +104,15 @@ export interface WorldRenderDebugMetrics {
 	portalCompositeTerrainCandidateBatchCount: number;
 	portalCompositeInteriorCandidateBatchCount: number;
 	portalCompositeFallbackIncludedBatchCount: number;
+	sceneDomainTargetWidth: number;
+	sceneDomainTargetHeight: number;
+	sceneDomainFramebufferFailureCount: number;
+	sceneDomainFramebufferFailureSamples: string[];
+	sceneDomainBaseCopyPassCount: number;
+	sceneDomainExteriorDrawCallCount: number;
+	sceneDomainInteriorDrawCallCount: number;
+	sceneDomainExteriorDrawUnitCount: number;
+	sceneDomainInteriorDrawUnitCount: number;
 	structuredInteriorMeshCount: number;
 	visibleStructuredInteriorMeshCount: number;
 	terrainBvhVisibleItemCount: number;

@@ -30,6 +30,13 @@ export interface Webgl2RenderMetricsInput {
 	worldStore: Webgl2WorldResourceStore | null;
 	frameMetrics: StagedWorldFrameMetrics | null;
 	submitMetrics: Webgl2WorldSubmitMetrics;
+	sceneDomainTargetWidth: number;
+	sceneDomainTargetHeight: number;
+	sceneDomainFramebufferFailureCount: number;
+	sceneDomainFramebufferFailureSamples: readonly string[];
+	sceneDomainBaseCopyPassCount: number;
+	sceneDomainExteriorDrawCallCount: number;
+	sceneDomainInteriorDrawCallCount: number;
 	performance: WorldRenderMetrics["performance"];
 	textureFilteringMode: WorldDisplayTextureFilteringMode;
 	textureColorSpaceMode: WorldDisplayTextureColorSpaceMode;
@@ -136,6 +143,22 @@ export function createWebgl2RenderMetrics(
 			portalCompositeTerrainCandidateBatchCount: 0,
 			portalCompositeInteriorCandidateBatchCount: 0,
 			portalCompositeFallbackIncludedBatchCount: 0,
+			sceneDomainTargetWidth: input.sceneDomainTargetWidth,
+			sceneDomainTargetHeight: input.sceneDomainTargetHeight,
+			sceneDomainFramebufferFailureCount:
+				input.sceneDomainFramebufferFailureCount,
+			sceneDomainFramebufferFailureSamples: [
+				...input.sceneDomainFramebufferFailureSamples,
+			],
+			sceneDomainBaseCopyPassCount: input.sceneDomainBaseCopyPassCount,
+			sceneDomainExteriorDrawCallCount:
+				input.sceneDomainExteriorDrawCallCount,
+			sceneDomainInteriorDrawCallCount:
+				input.sceneDomainInteriorDrawCallCount,
+			sceneDomainExteriorDrawUnitCount:
+				input.submitMetrics.exteriorDomainDrawUnitCount,
+			sceneDomainInteriorDrawUnitCount:
+				input.submitMetrics.interiorDomainDrawUnitCount,
 			structuredInteriorMeshCount:
 				input.worldStore?.structuredInteriorDrawUnitCount ?? 0,
 			visibleStructuredInteriorMeshCount:

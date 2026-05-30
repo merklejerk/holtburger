@@ -17,6 +17,7 @@ import {
 	createEmptyWebgl2WorldSubmitMetrics,
 	submitWebgl2FlatWorldFrame,
 	type Webgl2FlatWorldProgram,
+	type Webgl2TerrainBlendWorldProgram,
 	type Webgl2TexturedWorldProgram,
 	type Webgl2WorldSubmitMetrics,
 } from "./webgl2-world-submit";
@@ -118,12 +119,106 @@ void main() {
 }
 `;
 
+const TERRAIN_BLEND_WORLD_VERTEX_SHADER = `#version 300 es
+layout(location = 0) in vec3 position;
+layout(location = 1) in vec2 uv;
+
+uniform mat4 uModelViewProjection;
+
+out vec2 vUv;
+
+void main() {
+	vUv = uv;
+	gl_Position = uModelViewProjection * vec4(position, 1.0);
+}
+`;
+
+const TERRAIN_BLEND_WORLD_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+
+uniform sampler2D uBaseTexture;
+uniform float uBaseTiling;
+uniform sampler2D uOverlay0;
+uniform sampler2D uOverlay1;
+uniform sampler2D uOverlay2;
+uniform sampler2D uOverlayAlpha0;
+uniform sampler2D uOverlayAlpha1;
+uniform sampler2D uOverlayAlpha2;
+uniform float uOverlayTiling0;
+uniform float uOverlayTiling1;
+uniform float uOverlayTiling2;
+uniform int uOverlayRotation0;
+uniform int uOverlayRotation1;
+uniform int uOverlayRotation2;
+uniform int uOverlayCount;
+uniform sampler2D uRoadTexture;
+uniform float uRoadTiling;
+uniform sampler2D uRoadAlpha0;
+uniform sampler2D uRoadAlpha1;
+uniform int uRoadRotation0;
+uniform int uRoadRotation1;
+uniform int uRoadCount;
+
+in vec2 vUv;
+
+out vec4 fragColor;
+
+vec2 legacyAlphaUv(vec2 uv) {
+	return vec2(uv.x, 1.0 - uv.y);
+}
+
+vec2 rotateLegacyAlphaUv(vec2 uv, int rotation) {
+	if (rotation == 1) {
+		return vec2(1.0 - uv.y, uv.x);
+	}
+	if (rotation == 2) {
+		return vec2(1.0 - uv.x, 1.0 - uv.y);
+	}
+	if (rotation == 3) {
+		return vec2(uv.y, 1.0 - uv.x);
+	}
+	return uv;
+}
+
+vec4 blendOverlay(vec4 baseColor, sampler2D overlayTexture, sampler2D alphaTexture, float tiling, int rotation) {
+	vec4 overlayColor = texture(overlayTexture, vUv * tiling);
+	float alpha = texture(alphaTexture, rotateLegacyAlphaUv(legacyAlphaUv(vUv), rotation)).r;
+	return mix(baseColor, overlayColor, clamp(1.0 - alpha, 0.0, 1.0));
+}
+
+void main() {
+	vec4 color = texture(uBaseTexture, vUv * uBaseTiling);
+	if (uOverlayCount > 0) {
+		color = blendOverlay(color, uOverlay0, uOverlayAlpha0, uOverlayTiling0, uOverlayRotation0);
+	}
+	if (uOverlayCount > 1) {
+		color = blendOverlay(color, uOverlay1, uOverlayAlpha1, uOverlayTiling1, uOverlayRotation1);
+	}
+	if (uOverlayCount > 2) {
+		color = blendOverlay(color, uOverlay2, uOverlayAlpha2, uOverlayTiling2, uOverlayRotation2);
+	}
+	if (uRoadCount > 0) {
+		vec4 roadColor = texture(uRoadTexture, vUv * uRoadTiling);
+		float roadAlpha = 1.0 - texture(uRoadAlpha0, rotateLegacyAlphaUv(legacyAlphaUv(vUv), uRoadRotation0)).r;
+		if (uRoadCount > 1) {
+			roadAlpha = 1.0 - (
+				texture(uRoadAlpha0, rotateLegacyAlphaUv(legacyAlphaUv(vUv), uRoadRotation0)).r *
+				texture(uRoadAlpha1, rotateLegacyAlphaUv(legacyAlphaUv(vUv), uRoadRotation1)).r
+			);
+		}
+		color = mix(color, roadColor, clamp(roadAlpha, 0.0, 1.0));
+	}
+	fragColor = vec4(color.rgb, 1.0);
+}
+`;
+
 interface Webgl2RenderResources {
 	gl: WebGL2RenderingContext;
 	stateCache: Webgl2StateCache;
 	triangleProgram: Webgl2ProgramResource<"position", never>;
 	flatWorldProgram: Webgl2FlatWorldProgram;
 	texturedWorldProgram: Webgl2TexturedWorldProgram;
+	terrainBlendWorldProgram: Webgl2TerrainBlendWorldProgram;
 	vertexBuffer: Webgl2BufferResource;
 	vertexArray: Webgl2VertexArrayResource;
 	worldStore: Webgl2WorldResourceStore;
@@ -343,6 +438,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				stateCache: resources.stateCache,
 				program: resources.flatWorldProgram,
 				texturedProgram: resources.texturedWorldProgram,
+				terrainBlendProgram: resources.terrainBlendWorldProgram,
 				drawUnitsById: resources.worldStore.drawUnitsById,
 				frame,
 			});
@@ -422,6 +518,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		resources.triangleProgram.dispose();
 		resources.flatWorldProgram.dispose();
 		resources.texturedWorldProgram.dispose();
+		resources.terrainBlendWorldProgram.dispose();
 		destroyWebgl2WorldResources(resources.worldStore);
 		resources = null;
 	}
@@ -545,6 +642,7 @@ function createTriangleResources(
 		triangleProgram,
 		flatWorldProgram: createFlatWorldProgram(gl),
 		texturedWorldProgram: createTexturedWorldProgram(gl),
+		terrainBlendWorldProgram: createTerrainBlendWorldProgram(gl),
 		vertexBuffer,
 		vertexArray,
 		worldStore: createWebgl2WorldResourceStore(),
@@ -570,5 +668,41 @@ function createTexturedWorldProgram(
 		fragmentSource: TEXTURED_WORLD_FRAGMENT_SHADER,
 		attributes: ["position", "uv"],
 		uniforms: ["uModelViewProjection", "uColor", "uAlphaTest", "uTexture"],
+	});
+}
+
+function createTerrainBlendWorldProgram(
+	gl: WebGL2RenderingContext,
+): Webgl2TerrainBlendWorldProgram {
+	return createWebgl2Program(gl, {
+		label: "webgl2 terrain blend world",
+		vertexSource: TERRAIN_BLEND_WORLD_VERTEX_SHADER,
+		fragmentSource: TERRAIN_BLEND_WORLD_FRAGMENT_SHADER,
+		attributes: ["position", "uv"],
+		uniforms: [
+			"uModelViewProjection",
+			"uBaseTexture",
+			"uBaseTiling",
+			"uOverlay0",
+			"uOverlay1",
+			"uOverlay2",
+			"uOverlayAlpha0",
+			"uOverlayAlpha1",
+			"uOverlayAlpha2",
+			"uOverlayTiling0",
+			"uOverlayTiling1",
+			"uOverlayTiling2",
+			"uOverlayRotation0",
+			"uOverlayRotation1",
+			"uOverlayRotation2",
+			"uOverlayCount",
+			"uRoadTexture",
+			"uRoadTiling",
+			"uRoadAlpha0",
+			"uRoadAlpha1",
+			"uRoadRotation0",
+			"uRoadRotation1",
+			"uRoadCount",
+		],
 	});
 }

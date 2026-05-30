@@ -3,6 +3,7 @@ import { formatHex32 } from "../landblocks";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
 import type { ResolvedMaterialSlot } from "./material-plan";
 import type { RenderVec4 } from "./render-math";
+import type { TerrainBlendPlan } from "./terrain-blend-plan";
 import {
 	defaultStagedWorldMaterialTextureCapabilities,
 	resolveStagedWorldMaterialStrategy,
@@ -16,7 +17,8 @@ import type {
 
 export type StagedWorldMaterialPlan =
 	| StagedWorldFlatMaterialPlan
-	| StagedWorldDirectTextureMaterialPlan;
+	| StagedWorldDirectTextureMaterialPlan
+	| StagedWorldTerrainBlendMaterialPlan;
 
 interface StagedWorldFlatMaterialPlan {
 	kind: "flat";
@@ -36,6 +38,16 @@ export interface StagedWorldDirectTextureMaterialPlan {
 	behavior: LegacyMaterialBehaviorDto;
 	fallbackReason: string | null;
 	atlasEligibility: StagedWorldMaterialAtlasEligibility | null;
+	preparedAssetIds: readonly string[];
+}
+
+export interface StagedWorldTerrainBlendMaterialPlan {
+	kind: "terrain-blend";
+	key: string;
+	color: RenderVec4;
+	plan: TerrainBlendPlan;
+	behavior: null;
+	fallbackReason: string | null;
 	preparedAssetIds: readonly string[];
 }
 

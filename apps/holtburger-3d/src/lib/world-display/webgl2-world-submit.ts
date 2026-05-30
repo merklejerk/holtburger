@@ -47,6 +47,7 @@ export type Webgl2IndexedP8WorldProgram = Webgl2ProgramResource<
 	| "uPaletteTexture"
 	| "uTextureSize"
 	| "uPaletteColorCount"
+	| "uClipThreshold"
 	| "uRepeatS"
 	| "uRepeatT"
 >;
@@ -59,6 +60,7 @@ export type Webgl2IndexedP16WorldProgram = Webgl2ProgramResource<
 	| "uPaletteTexture"
 	| "uTextureSize"
 	| "uPaletteColorCount"
+	| "uClipThreshold"
 	| "uRepeatS"
 	| "uRepeatT"
 >;
@@ -117,7 +119,8 @@ export function submitWebgl2FlatWorldFrame({
 	const metrics: Webgl2WorldSubmitMetrics = {
 		...EMPTY_SUBMIT_METRICS,
 		visibleDrawUnitCount: drawUnits.length,
-		visibleDrawUnitCountsByMaterialKind: countDrawUnitsByMaterialKind(drawUnits),
+		visibleDrawUnitCountsByMaterialKind:
+			countDrawUnitsByMaterialKind(drawUnits),
 	};
 	if (drawUnits.length === 0) {
 		return metrics;
@@ -177,7 +180,7 @@ export function submitWebgl2FlatWorldFrame({
 		const programKind = useTerrainBlend
 			? "terrain"
 			: useIndexed
-				? drawUnit.indexedMaterial?.indexFormat ?? "indexed"
+				? (drawUnit.indexedMaterial?.indexFormat ?? "indexed")
 				: useTexture
 					? "texture"
 					: "flat";
@@ -194,7 +197,9 @@ export function submitWebgl2FlatWorldFrame({
 			}
 			if (useIndexed) {
 				if (!activeIndexedProgram) {
-					throw new Error(`Indexed draw unit ${drawUnit.id} has no indexed program.`);
+					throw new Error(
+						`Indexed draw unit ${drawUnit.id} has no indexed program.`,
+					);
 				}
 				uploadIndexedSamplerUniforms(gl, activeIndexedProgram);
 				metrics.uniformUploadCount += 2;
@@ -254,7 +259,8 @@ export function submitWebgl2FlatWorldFrame({
 			!useTerrainBlend &&
 			(!previousColor || !arraysEqual(previousColor, drawUnit.color))
 		) {
-			const colorProgram = activeIndexedProgram ?? (useTexture ? texturedProgram : program);
+			const colorProgram =
+				activeIndexedProgram ?? (useTexture ? texturedProgram : program);
 			gl.uniform4fv(colorProgram.uniforms.uColor, drawUnit.color);
 			previousColor = drawUnit.color;
 			metrics.uniformUploadCount += 1;
@@ -270,7 +276,9 @@ export function submitWebgl2FlatWorldFrame({
 		}
 		if (drawUnit.indexedMaterial) {
 			if (!activeIndexedProgram) {
-				throw new Error(`Indexed draw unit ${drawUnit.id} has no indexed program.`);
+				throw new Error(
+					`Indexed draw unit ${drawUnit.id} has no indexed program.`,
+				);
 			}
 			uploadIndexedMaterialUniforms(
 				gl,
@@ -280,16 +288,15 @@ export function submitWebgl2FlatWorldFrame({
 			metrics.uniformUploadCount += INDEXED_DYNAMIC_UNIFORM_COUNT;
 		}
 		if (drawUnit.terrainBlend) {
-			uploadTerrainBlendUniforms(gl, terrainBlendProgram, drawUnit.terrainBlend);
+			uploadTerrainBlendUniforms(
+				gl,
+				terrainBlendProgram,
+				drawUnit.terrainBlend,
+			);
 			metrics.uniformUploadCount += TERRAIN_BLEND_DYNAMIC_UNIFORM_COUNT;
 		}
 
-		gl.drawElements(
-			gl.TRIANGLES,
-			drawUnit.vertexCount,
-			drawUnit.indexType,
-			0,
-		);
+		gl.drawElements(gl.TRIANGLES, drawUnit.vertexCount, drawUnit.indexType, 0);
 		metrics.drawCallCount += 1;
 		metrics.triangleCount += drawUnit.triangleCount;
 	}
@@ -298,7 +305,7 @@ export function submitWebgl2FlatWorldFrame({
 
 const TERRAIN_BLEND_SAMPLER_UNIFORM_COUNT = 10;
 const TERRAIN_BLEND_DYNAMIC_UNIFORM_COUNT = 13;
-const INDEXED_DYNAMIC_UNIFORM_COUNT = 5;
+const INDEXED_DYNAMIC_UNIFORM_COUNT = 6;
 
 function uploadTerrainBlendSamplerUniforms(
 	gl: WebGL2RenderingContext,
@@ -389,8 +396,15 @@ function uploadIndexedMaterialUniforms(
 		program.uniforms.uPaletteColorCount,
 		indexedMaterial.paletteColorCount,
 	);
-	gl.uniform1i(program.uniforms.uRepeatS, indexedMaterial.wrapS === "repeat" ? 1 : 0);
-	gl.uniform1i(program.uniforms.uRepeatT, indexedMaterial.wrapT === "repeat" ? 1 : 0);
+	gl.uniform1i(program.uniforms.uClipThreshold, indexedMaterial.clipThreshold);
+	gl.uniform1i(
+		program.uniforms.uRepeatS,
+		indexedMaterial.wrapS === "repeat" ? 1 : 0,
+	);
+	gl.uniform1i(
+		program.uniforms.uRepeatT,
+		indexedMaterial.wrapT === "repeat" ? 1 : 0,
+	);
 }
 
 function uploadTerrainBlendUniforms(
@@ -517,7 +531,10 @@ function countDrawUnitsByMaterialKind(
 	return counts;
 }
 
-function arraysEqual(left: ArrayLike<number>, right: ArrayLike<number>): boolean {
+function arraysEqual(
+	left: ArrayLike<number>,
+	right: ArrayLike<number>,
+): boolean {
 	if (left.length !== right.length) {
 		return false;
 	}

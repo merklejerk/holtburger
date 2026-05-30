@@ -646,37 +646,33 @@ the DTOs from M3B. This is still staged/direct rendering, not atlas compaction.
 
 Tasks:
 
-- Add WebGL2 uploads for palette, derived palette, and neighbor-packed indexed texture resources
-  after DTO extraction.
+- Add WebGL2 uploads for palette, derived palette, and indexed texture resources after DTO
+  extraction.
 - Upload one resolved palette texture per indexed material palette fact. If setup subpalettes apply,
   WebGL2 receives the already-derived palette texture rather than applying subpalette patches in the
   shader.
-- Upload P8 neighbor-packed textures as `RGBA8`.
-- Upload P16 neighbor-packed textures as `RGBA16UI` and sample them through a WebGL2 integer texture
-  path (`usampler2D`/`texelFetch`).
-- Query/runtime-gate the integer texture path and report `indexed-uint16-texture-unsupported` if the
-  required WebGL2 behavior is unavailable.
+- Upload P8 as an `R8` source-index texture.
+- Upload P16 as an `RG8` byte-pair source-index texture and reconstruct `low + high * 256` in the
+  shader, matching the known Three indexed shader behavior.
 - Add a WebGL2 indexed/paletted material shader path for staged draw units.
-- Do indexed filtering manually in the shader: nearest sample the packed-neighbor texel, lookup four
-  palette colors exactly, then bilinear blend colors using the original UV texel-local fractional
-  coordinates.
+- Sample indexed materials with shader-side palette-aware linear filtering over neighboring source
+  index texels. Preserve clip-map transparency by treating transparent clip indices as zero-alpha
+  palette samples before alpha testing.
 - Disable indexed mipmapping for now and report mip use as unsupported/deferred for indexed
   materials. Do not generate hardware mips over index values.
 - Route static/setup and structured-interior indexed surfaces through the same staged material
   strategy/fallback reporting model used by direct RGBA materials.
 - Add diagnostics for missing indexed payloads, missing base palette payloads, missing setup palette
   override payloads, missing subpalette payloads, invalid subpalette ranges, unsupported palette
-  variants, missing integer texture support, indexed no-mip fallback, and indexed material
-  upload/shader fallback.
-- Keep indexed atlas participation deferred. Neighbor-packed indexed textures may use RGBA-like
-  storage, but they require palette shader state and are not equivalent to ordinary RGBA base-color
-  atlas entries.
+  variants, indexed no-mip fallback, and indexed material upload/shader fallback.
+- Keep indexed atlas participation deferred. Indexed textures require palette shader state and are
+  not equivalent to ordinary RGBA base-color atlas entries.
 - Keep detail overlays and texture velocity out of this phase.
 
 Exit criteria:
 
 - P8 and common P16 indexed/paletted setup appearances render close enough for visual inspection
-  with shader-side bilinear filtering.
+  with shader-side palette-aware linear filtering.
 - Structured-interior indexed/paletted surfaces use the same material-slot interpretation as
   non-indexed interiors.
 - Setup appearance palette overrides and subpalettes affect WebGL2 indexed output through derived
@@ -694,29 +690,38 @@ Progress:
 - Threaded setup appearance context into static staged material resolution so palette overrides and
   subpalette patches affect indexed WebGL2 output through the M3B derived-palette DTOs. Structured
   interiors continue to use base/material palette selection.
-- Added WebGL2 uploads for neighbor-packed indexed textures and resolved palette textures:
-  - P8 uses `RGBA8`/`UNSIGNED_BYTE`.
-  - P16 uses `RGBA16UI`/`RGBA_INTEGER`/`UNSIGNED_SHORT`.
+- Added WebGL2 uploads for indexed textures and resolved palette textures:
+  - P8 uses `R8`/`RED`/`UNSIGNED_BYTE`.
+  - P16 uses `RG8`/`RG`/`UNSIGNED_BYTE` and reconstructs the palette index from the source byte pair.
   - Index and palette textures are retained in the existing WebGL2 texture store and counted in
     renderer metrics as indexed texture and palette resources.
-- Added separate P8 and P16 indexed shader programs. Both use the staged UV buffer, nearest-fetch
-  the packed neighbor texel, look up four palette colors, and manually bilinear blend the palette
-  colors. Hardware mip generation stays disabled for indexed textures.
+- Added separate P8 and P16 indexed shader programs. Both use the staged UV buffer and shader-side
+  palette-aware linear filtering over neighboring source index texels. Hardware mip generation stays
+  disabled for indexed textures.
 - Added submit-path support for binding index texture unit 0 and palette texture unit 1, with
-  explicit indexed uniforms for texture dimensions, palette size, and wrap flags.
+  explicit indexed uniforms for texture dimensions, palette size, clip threshold, and wrap flags.
 - Added tests for indexed strategy resolution, invalid indexed fallback, WebGL2 indexed resource
   realization, and indexed submit texture/uniform binding.
+- Added an Index16 upload regression test proving the WebGL2 source texture stays in the same RG
+  byte-pair shape that the Three indexed shader used.
 
 Decisions:
 
-- Indexed materials remain excluded from atlas participation even though their packed P8 data is
-  stored in an RGBA-like texture. The palette dependency and shader state make them materially
-  different from ordinary RGBA base-color atlas entries.
+- Indexed materials remain excluded from atlas participation. The palette dependency and shader
+  state make them materially different from ordinary RGBA base-color atlas entries.
 - Indexed mipmaps remain deferred. Mipping index values directly is wrong, and palette-aware
   prefiltered mip chains should be designed separately if we need them.
-- P16 uses the WebGL2 integer texture path directly. If a runtime lacks the needed integer texture
-  constants, resource realization records `indexed-uint16-texture-unsupported` and the draw falls
-  back to flat behavior for that material.
+- P16 now follows the Three path's normalized two-byte texture reconstruction instead of using a
+  WebGL2 integer texture path. This is less novel, keeps comparison behavior straightforward, and
+  avoids mixing `usampler2D` with normalized `RG8` uploads.
+- Shader-side linear filtering is the current direct-render policy for indexed materials. The
+  visible speckles were not caused by bilinear filtering because they persisted with nearest
+  sampling; the actual mismatch was the P16 upload/reconstruction path plus missing clip-map
+  threshold upload.
+- Indexed shaders apply the same clip-map threshold as the Three path (`paletteIndex < 8` for base-1
+  clip-map surfaces). For shader-side linear filtering, transparent clip-map indices contribute
+  zero-alpha samples before the final alpha test. Palette alpha remains a secondary discard guard,
+  but clip-map transparency must not rely on alpha values in the palette.
 
 Course Corrections:
 
@@ -726,6 +731,15 @@ Course Corrections:
 - Static material resolution had enough data for setup palette overrides, but the staged strategy
   was not receiving the appearance context. M3C fixed that handoff instead of duplicating palette
   logic in WebGL2 resource upload.
+- The initial M3C implementation shipped shader-side manual bilinear filtering. Visual testing
+  showed persistent chroma speckles, so the direct path was temporarily changed to nearest-index
+  sampling. Follow-up visual testing showed the speckles persisted, proving filtering was not the
+  root cause; shader-side linear filtering was restored after correcting the P16 byte-pair
+  reconstruction and clip-map threshold upload.
+- Compared the WebGL2 indexed shader against the older Three shader and found two mismatches:
+  Index16 was uploaded/read as an incompatible integer path instead of reconstructing low/high bytes,
+  and the clip-map index discard threshold was computed in resources but never uploaded to the
+  shader. Both are now corrected.
 
 Cleanup Targets / Debt:
 
@@ -738,6 +752,8 @@ Cleanup Targets / Debt:
   samples.
 - Indexed mip policy needs a future explicit design. Do not silently enable hardware mipmaps over
   packed index textures.
+- Neighbor-packed indexed DTOs are no longer consumed by the direct WebGL2 path. Remove them or move
+  them behind a future filtering experiment before M5 hardening if no other path uses them.
 
 ## Phase M3D: Detail Texture Policy and Static Detail Support
 

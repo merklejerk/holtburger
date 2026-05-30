@@ -130,6 +130,7 @@ uniform sampler2D uIndexTexture;
 uniform sampler2D uPaletteTexture;
 uniform vec2 uTextureSize;
 uniform float uPaletteColorCount;
+uniform int uClipThreshold;
 uniform int uRepeatS;
 uniform int uRepeatT;
 
@@ -138,25 +139,50 @@ in vec2 vUv;
 out vec4 fragColor;
 
 vec2 resolveIndexedUv(vec2 uv) {
-	float u = uRepeatS == 1 ? fract(uv.x) : clamp(uv.x, 0.0, 0.999999);
-	float v = uRepeatT == 1 ? fract(uv.y) : clamp(uv.y, 0.0, 0.999999);
-	return vec2(u, v);
+	vec2 wrapped = vec2(
+		uRepeatS == 1 ? fract(uv.x) : clamp(uv.x, 0.0, 0.999999),
+		uRepeatT == 1 ? fract(uv.y) : clamp(uv.y, 0.0, 0.999999)
+	);
+	return wrapped * uTextureSize;
+}
+
+ivec2 resolveIndexedSampleCoord(ivec2 baseCoord, ivec2 offset) {
+	ivec2 size = ivec2(uTextureSize);
+	ivec2 coord = baseCoord + offset;
+	coord.x = uRepeatS == 1 ? coord.x % size.x : clamp(coord.x, 0, size.x - 1);
+	coord.y = uRepeatT == 1 ? coord.y % size.y : clamp(coord.y, 0, size.y - 1);
+	return coord;
 }
 
 vec4 paletteColor(float index) {
+	if (uClipThreshold >= 0 && index < float(uClipThreshold)) {
+		return vec4(0.0);
+	}
 	float paletteU = (index + 0.5) / uPaletteColorCount;
 	return texture(uPaletteTexture, vec2(paletteU, 0.5));
 }
 
+float paletteIndexAt(ivec2 coord) {
+	vec4 packed = texelFetch(uIndexTexture, coord, 0) * 255.0;
+	return floor(packed.r + 0.5);
+}
+
 void main() {
-	vec2 texelPosition = resolveIndexedUv(vUv) * uTextureSize;
-	ivec2 texelCoord = ivec2(floor(texelPosition));
+	vec2 texelPosition = resolveIndexedUv(vUv);
+	ivec2 baseCoord = ivec2(floor(texelPosition));
 	vec2 blend = fract(texelPosition);
-	vec4 packed = texelFetch(uIndexTexture, texelCoord, 0) * 255.0;
-	vec4 top = mix(paletteColor(packed.r), paletteColor(packed.g), blend.x);
-	vec4 bottom = mix(paletteColor(packed.b), paletteColor(packed.a), blend.x);
+	vec4 top = mix(
+		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(0, 0)))),
+		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(1, 0)))),
+		blend.x
+	);
+	vec4 bottom = mix(
+		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(0, 1)))),
+		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(1, 1)))),
+		blend.x
+	);
 	vec4 color = mix(top, bottom, blend.y) * uColor;
-	if (color.a < uAlphaTest) {
+	if (color.a <= 0.0 || color.a < uAlphaTest) {
 		discard;
 	}
 	fragColor = color;
@@ -165,14 +191,14 @@ void main() {
 
 const INDEXED_P16_WORLD_FRAGMENT_SHADER = `#version 300 es
 precision highp float;
-precision highp usampler2D;
 
 uniform vec4 uColor;
 uniform float uAlphaTest;
-uniform usampler2D uIndexTexture;
+uniform sampler2D uIndexTexture;
 uniform sampler2D uPaletteTexture;
 uniform vec2 uTextureSize;
 uniform float uPaletteColorCount;
+uniform int uClipThreshold;
 uniform int uRepeatS;
 uniform int uRepeatT;
 
@@ -181,25 +207,50 @@ in vec2 vUv;
 out vec4 fragColor;
 
 vec2 resolveIndexedUv(vec2 uv) {
-	float u = uRepeatS == 1 ? fract(uv.x) : clamp(uv.x, 0.0, 0.999999);
-	float v = uRepeatT == 1 ? fract(uv.y) : clamp(uv.y, 0.0, 0.999999);
-	return vec2(u, v);
+	vec2 wrapped = vec2(
+		uRepeatS == 1 ? fract(uv.x) : clamp(uv.x, 0.0, 0.999999),
+		uRepeatT == 1 ? fract(uv.y) : clamp(uv.y, 0.0, 0.999999)
+	);
+	return wrapped * uTextureSize;
 }
 
-vec4 paletteColor(uint index) {
-	float paletteU = (float(index) + 0.5) / uPaletteColorCount;
+ivec2 resolveIndexedSampleCoord(ivec2 baseCoord, ivec2 offset) {
+	ivec2 size = ivec2(uTextureSize);
+	ivec2 coord = baseCoord + offset;
+	coord.x = uRepeatS == 1 ? coord.x % size.x : clamp(coord.x, 0, size.x - 1);
+	coord.y = uRepeatT == 1 ? coord.y % size.y : clamp(coord.y, 0, size.y - 1);
+	return coord;
+}
+
+vec4 paletteColor(float index) {
+	if (uClipThreshold >= 0 && index < float(uClipThreshold)) {
+		return vec4(0.0);
+	}
+	float paletteU = (index + 0.5) / uPaletteColorCount;
 	return texture(uPaletteTexture, vec2(paletteU, 0.5));
 }
 
+float paletteIndexAt(ivec2 coord) {
+	vec4 packed = texelFetch(uIndexTexture, coord, 0) * 255.0;
+	return floor(packed.r + 0.5) + floor(packed.g + 0.5) * 256.0;
+}
+
 void main() {
-	vec2 texelPosition = resolveIndexedUv(vUv) * uTextureSize;
-	ivec2 texelCoord = ivec2(floor(texelPosition));
+	vec2 texelPosition = resolveIndexedUv(vUv);
+	ivec2 baseCoord = ivec2(floor(texelPosition));
 	vec2 blend = fract(texelPosition);
-	uvec4 packed = texelFetch(uIndexTexture, texelCoord, 0);
-	vec4 top = mix(paletteColor(packed.r), paletteColor(packed.g), blend.x);
-	vec4 bottom = mix(paletteColor(packed.b), paletteColor(packed.a), blend.x);
+	vec4 top = mix(
+		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(0, 0)))),
+		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(1, 0)))),
+		blend.x
+	);
+	vec4 bottom = mix(
+		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(0, 1)))),
+		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(1, 1)))),
+		blend.x
+	);
 	vec4 color = mix(top, bottom, blend.y) * uColor;
-	if (color.a < uAlphaTest) {
+	if (color.a <= 0.0 || color.a < uAlphaTest) {
 		discard;
 	}
 	fragColor = color;
@@ -744,7 +795,9 @@ function createTriangleResources(
 	};
 }
 
-function createFlatWorldProgram(gl: WebGL2RenderingContext): Webgl2FlatWorldProgram {
+function createFlatWorldProgram(
+	gl: WebGL2RenderingContext,
+): Webgl2FlatWorldProgram {
 	return createWebgl2Program(gl, {
 		label: "webgl2 flat world",
 		vertexSource: FLAT_WORLD_VERTEX_SHADER,
@@ -801,6 +854,7 @@ function createIndexedWorldProgram(
 			"uPaletteTexture",
 			"uTextureSize",
 			"uPaletteColorCount",
+			"uClipThreshold",
 			"uRepeatS",
 			"uRepeatT",
 		],

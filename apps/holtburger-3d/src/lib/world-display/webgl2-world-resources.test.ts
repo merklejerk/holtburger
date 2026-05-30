@@ -178,7 +178,9 @@ describe("webgl2 world resources", () => {
 		expect(store.drawUnits[0]?.texture).not.toBeNull();
 		expect(store.textureCount).toBe(1);
 		expect(gl.createdTextures).toHaveLength(1);
-		expect(gl.textureUploads).toEqual([{ width: 1, height: 1 }]);
+		expect(
+			gl.textureUploads.map(({ width, height }) => ({ width, height })),
+		).toEqual([{ width: 1, height: 1 }]);
 		expect(gl.generatedMipmapCount).toBe(1);
 		expect(store.textureSamplingPolicySamples).toEqual([
 			"wrap=clamp/clamp;filter=linear/linear/linear;color=srgb;aniso=1;mips=on;flipY=off",
@@ -269,11 +271,57 @@ describe("webgl2 world resources", () => {
 		expect(store.textureCount).toBe(2);
 		expect(store.indexedTextureCount).toBe(1);
 		expect(store.paletteTextureCount).toBe(1);
-		expect(gl.textureUploads).toEqual([
+		expect(
+			gl.textureUploads.map(({ width, height }) => ({ width, height })),
+		).toEqual([
 			{ width: 2, height: 1 },
 			{ width: 2, height: 1 },
 		]);
 		expect(gl.generatedMipmapCount).toBe(0);
+	});
+
+	it("uploads Index16 draw units as RG byte-pair textures matching the Three indexed shader", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2WorldResourceStore();
+		const materialSurfaceId = 0x08000002;
+		const renderSurfaceId = 0x06000002;
+
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState({
+				materialSurfaceId,
+				renderSurfaceId,
+				indexed: true,
+				indexedFormat: "index16",
+			}),
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: createStaticRenderableScene([
+				createStaticPart({
+					materialSlots: [createMaterialSlot(0, materialSurfaceId)],
+				}),
+			]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform()],
+		});
+
+		expect(store.drawUnits[0]?.indexedMaterial).toMatchObject({
+			indexFormat: "index16",
+			width: 2,
+			height: 1,
+			paletteColorCount: 258,
+		});
+		expect(gl.textureUploads[0]).toMatchObject({
+			width: 2,
+			height: 1,
+			internalFormat: gl.RG8,
+			format: gl.RG,
+			type: gl.UNSIGNED_BYTE,
+		});
+		expect(gl.textureUploads[0]?.data).toEqual(
+			Uint8Array.from([0x00, 0x00, 0x01, 0x01]),
+		);
 	});
 });
 
@@ -288,9 +336,11 @@ class FakeWebgl2 {
 	readonly RGBA = 8;
 	readonly RGB = 9;
 	readonly RED = 10;
+	readonly RG = 101;
 	readonly RGBA8 = 11;
 	readonly RGB8 = 12;
 	readonly R8 = 13;
+	readonly RG8 = 131;
 	readonly RGBA4 = 14;
 	readonly UNSIGNED_BYTE = 15;
 	readonly UNSIGNED_SHORT_4_4_4_4 = 16;
@@ -315,7 +365,14 @@ class FakeWebgl2 {
 	readonly deletedVertexArrays: object[] = [];
 	readonly createdTextures: object[] = [];
 	readonly deletedTextures: object[] = [];
-	readonly textureUploads: { width: number; height: number }[] = [];
+	readonly textureUploads: {
+		width: number;
+		height: number;
+		internalFormat: GLenum;
+		format: GLenum;
+		type: GLenum;
+		data: TexImageSource | ArrayBufferView | null;
+	}[] = [];
 	generatedMipmapCount = 0;
 	private currentVertexArray: WebGLVertexArrayObject | null = null;
 	private readonly elementArrayBuffersByVertexArray = new Map<
@@ -388,13 +445,35 @@ class FakeWebgl2 {
 	texImage2D(
 		_target: GLenum,
 		_level: number,
-		_internalFormat: GLenum,
+		internalFormat: GLenum,
 		widthOrFormat: GLenum,
 		heightOrType: GLenum,
+		_borderOrSource?: GLenum | TexImageSource,
+		format?: GLenum,
+		type?: GLenum,
+		data?: TexImageSource | ArrayBufferView | null,
 	): void {
+		if (typeof _borderOrSource === "number") {
+			this.textureUploads.push({
+				width: widthOrFormat,
+				height: heightOrType,
+				internalFormat,
+				format: format ?? 0,
+				type: type ?? 0,
+				data: (data ?? null) as TexImageSource | ArrayBufferView | null,
+			});
+			return;
+		}
 		this.textureUploads.push({
-			width: widthOrFormat,
-			height: heightOrType,
+			width: 0,
+			height: 0,
+			internalFormat,
+			format: widthOrFormat,
+			type: heightOrType,
+			data: (_borderOrSource ?? null) as
+				| TexImageSource
+				| ArrayBufferView
+				| null,
 		});
 	}
 
@@ -434,11 +513,13 @@ function createAssetState({
 	renderSurfaceId,
 	compressedAtlasReady = false,
 	indexed = false,
+	indexedFormat = "p8",
 }: {
 	materialSurfaceId?: number;
 	renderSurfaceId?: number;
 	compressedAtlasReady?: boolean;
 	indexed?: boolean;
+	indexedFormat?: "p8" | "index16";
 } = {}): AssetChannelState {
 	const state = createInitialAssetChannelState();
 	state.preparedByAssetId["gfx-obj/01000001"] = {
@@ -467,15 +548,20 @@ function createAssetState({
 				renderSurfaceId,
 				compressed: compressedAtlasReady,
 				indexed,
+				indexedFormat,
 			}),
 		} as AssetChannelState["preparedAsset"];
 		if (indexed) {
 			state.preparedByAssetId["palette/04000001"] = {
-				payload: createPalettePayload(0x04000001),
+				payload: createPalettePayload(
+					0x04000001,
+					indexedFormat === "index16" ? 258 : 2,
+				),
 			} as AssetChannelState["preparedAsset"];
 		}
 		if (compressedAtlasReady) {
-			const preparedTexture = createAtlasPreparedTexturePayload(renderSurfaceId);
+			const preparedTexture =
+				createAtlasPreparedTexturePayload(renderSurfaceId);
 			state.preparedByAssetId[
 				formatAtlasReadyPreparedTextureAssetId({
 					renderSurfaceId,
@@ -609,13 +695,17 @@ function createRenderSurfacePayload({
 	renderSurfaceId,
 	compressed,
 	indexed = false,
+	indexedFormat = "p8",
 }: {
 	renderSurfaceId: number;
 	compressed: boolean;
 	indexed?: boolean;
+	indexedFormat?: "p8" | "index16";
 }): PreparedRenderSurfacePayload {
 	const sourceBytes = indexed
-		? new Uint8Array([0, 1])
+		? indexedFormat === "index16"
+			? new Uint8Array([0x00, 0x00, 0x01, 0x01])
+			: new Uint8Array([0, 1])
 		: new Uint8Array([0x10, 0x20, 0x30, 0xff]);
 	return {
 		kind: "render-surface",
@@ -631,8 +721,20 @@ function createRenderSurfacePayload({
 		unknown: 0,
 		width: indexed ? 2 : 1,
 		height: 1,
-		formatRaw: indexed ? 0x29 : compressed ? 0x3154_5844 : 0x15,
-		format: indexed ? "P8" : compressed ? "DXT1" : "A8R8G8B8",
+		formatRaw: indexed
+			? indexedFormat === "index16"
+				? 0x65
+				: 0x29
+			: compressed
+				? 0x3154_5844
+				: 0x15,
+		format: indexed
+			? indexedFormat === "index16"
+				? "Index16"
+				: "P8"
+			: compressed
+				? "DXT1"
+				: "A8R8G8B8",
 		sourceByteLength: sourceBytes.byteLength,
 		sourceBytes,
 		defaultPaletteId: indexed ? 0x04000001 : null,
@@ -640,7 +742,10 @@ function createRenderSurfacePayload({
 	};
 }
 
-function createPalettePayload(paletteId: number): PreparedPalettePayload {
+function createPalettePayload(
+	paletteId: number,
+	colorCount = 2,
+): PreparedPalettePayload {
 	return {
 		kind: "palette",
 		sourceAssetKind: "palette",
@@ -652,9 +757,17 @@ function createPalettePayload(paletteId: number): PreparedPalettePayload {
 			detail: null,
 		},
 		paletteId,
-		colorCount: 2,
-		colorsArgb: new Uint32Array([0xff000000, 0xffffffff]),
+		colorCount,
+		colorsArgb: createPaletteColors(colorCount),
 	};
+}
+
+function createPaletteColors(colorCount: number): Uint32Array {
+	const colors = new Uint32Array(colorCount);
+	for (let index = 0; index < colorCount; index += 1) {
+		colors[index] = 0xff000000 | index;
+	}
+	return colors;
 }
 
 function createAtlasPreparedTexturePayload(

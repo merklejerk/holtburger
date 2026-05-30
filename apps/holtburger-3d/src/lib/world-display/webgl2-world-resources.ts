@@ -42,6 +42,7 @@ import {
 	describeTextureSamplingPolicy,
 	type TextureSamplingPolicy,
 } from "./texture-sampling-policy";
+import type { StagedWorldMaterialAtlasEligibility } from "./staged-world-material-strategy";
 
 export interface Webgl2WorldDrawUnit {
 	id: string;
@@ -61,6 +62,8 @@ export interface Webgl2WorldDrawUnit {
 	materialBehavior: LegacyMaterialBehaviorDto | null;
 	textureSamplingPolicy: string | null;
 	textureUploadSample: string | null;
+	atlasEligibility: StagedWorldMaterialAtlasEligibility | null;
+	atlasCandidateSample: string | null;
 	textureKey: string | null;
 	texture: Webgl2Texture2DResource | null;
 	modelMatrix: RenderMat4;
@@ -89,6 +92,10 @@ export interface Webgl2WorldResourceStore {
 	textureSamplingPolicyCounts: Record<string, number>;
 	textureSamplingPolicySamples: readonly string[];
 	textureUploadSamples: readonly string[];
+	atlasEligibleMaterialCount: number;
+	atlasCandidateEntryCount: number;
+	atlasCandidateMaterialSlotCount: number;
+	atlasCandidateSamples: readonly string[];
 	textureCount: number;
 	preparedTextureUploadCount: number;
 	preparedTextureGeneratedByteLength: number;
@@ -116,6 +123,10 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		textureSamplingPolicyCounts: {},
 		textureSamplingPolicySamples: [],
 		textureUploadSamples: [],
+		atlasEligibleMaterialCount: 0,
+		atlasCandidateEntryCount: 0,
+		atlasCandidateMaterialSlotCount: 0,
+		atlasCandidateSamples: [],
 		textureCount: 0,
 		preparedTextureUploadCount: 0,
 		preparedTextureGeneratedByteLength: 0,
@@ -220,6 +231,29 @@ export function syncWebgl2WorldResources({
 		...new Set(textureSamplingPolicies),
 	].slice(0, 8);
 	store.textureUploadSamples = [...collectTextureUploadSamples(store.drawUnits)];
+	const atlasEligibleDrawUnits = store.drawUnits.filter(
+		(drawUnit) => drawUnit.atlasEligibility !== null,
+	);
+	store.atlasEligibleMaterialCount = atlasEligibleDrawUnits.length;
+	store.atlasCandidateEntryCount = new Set(
+		atlasEligibleDrawUnits.flatMap((drawUnit) =>
+			drawUnit.atlasEligibility ? [drawUnit.atlasEligibility.atlasEntryKey] : [],
+		),
+	).size;
+	store.atlasCandidateMaterialSlotCount = new Set(
+		atlasEligibleDrawUnits.flatMap((drawUnit) =>
+			drawUnit.atlasEligibility
+				? [drawUnit.atlasEligibility.materialSlotKey]
+				: [],
+		),
+	).size;
+	store.atlasCandidateSamples = [
+		...new Set(
+			atlasEligibleDrawUnits.flatMap((drawUnit) =>
+				drawUnit.atlasCandidateSample ? [drawUnit.atlasCandidateSample] : [],
+			),
+		),
+	].slice(0, 8);
 	for (const [textureKey, texture] of store.texturesByKey) {
 		if (!retainedTextureKeys.has(textureKey)) {
 			texture.dispose();
@@ -270,6 +304,10 @@ export function destroyWebgl2WorldResources(
 	store.textureSamplingPolicyCounts = {};
 	store.textureSamplingPolicySamples = [];
 	store.textureUploadSamples = [];
+	store.atlasEligibleMaterialCount = 0;
+	store.atlasCandidateEntryCount = 0;
+	store.atlasCandidateMaterialSlotCount = 0;
+	store.atlasCandidateSamples = [];
 	for (const texture of store.texturesByKey.values()) {
 		texture.dispose();
 	}
@@ -304,6 +342,9 @@ function createOrReuseWebgl2DrawUnit({
 		previous.textureUploadSample = resolveWebgl2DrawUnitTextureUploadSample(
 			drawUnit,
 		);
+		previous.atlasEligibility = resolveWebgl2DrawUnitAtlasEligibility(drawUnit);
+		previous.atlasCandidateSample =
+			resolveWebgl2DrawUnitAtlasCandidateSample(drawUnit);
 		previous.textureKey =
 			drawUnit.material.kind === "direct-texture"
 				? drawUnit.material.textureKey
@@ -373,6 +414,8 @@ function createOrReuseWebgl2DrawUnit({
 		materialBehavior: drawUnit.material.behavior,
 		textureSamplingPolicy: resolveWebgl2DrawUnitTextureSamplingPolicy(drawUnit),
 		textureUploadSample: resolveWebgl2DrawUnitTextureUploadSample(drawUnit),
+		atlasEligibility: resolveWebgl2DrawUnitAtlasEligibility(drawUnit),
+		atlasCandidateSample: resolveWebgl2DrawUnitAtlasCandidateSample(drawUnit),
 		textureKey:
 			drawUnit.material.kind === "direct-texture"
 				? drawUnit.material.textureKey
@@ -439,6 +482,31 @@ function resolveWebgl2DrawUnitTextureUploadSample(
 		`firstAlpha=${stats.firstAlphaPixel}`,
 		`nonZeroRgb=${stats.nonZeroRgbSampleCount}/${stats.sampleCount}`,
 		`nonZeroAlpha=${stats.nonZeroAlphaSampleCount}/${stats.sampleCount}`,
+	].join(" ");
+}
+
+function resolveWebgl2DrawUnitAtlasEligibility(
+	drawUnit: StagedWorldDrawUnitAssembly,
+): StagedWorldMaterialAtlasEligibility | null {
+	return drawUnit.material.kind === "direct-texture"
+		? drawUnit.material.atlasEligibility
+		: null;
+}
+
+function resolveWebgl2DrawUnitAtlasCandidateSample(
+	drawUnit: StagedWorldDrawUnitAssembly,
+): string | null {
+	const eligibility = resolveWebgl2DrawUnitAtlasEligibility(drawUnit);
+	if (!eligibility) {
+		return null;
+	}
+	return [
+		drawUnit.kind,
+		eligibility.materialSlotKey,
+		`entry=${eligibility.atlasEntryKey}`,
+		eligibility.renderStateKey,
+		eligibility.samplingKey,
+		`prepared=${eligibility.atlasEntry.preparedTextureAssetId}`,
 	].join(" ");
 }
 

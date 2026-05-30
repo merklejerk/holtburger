@@ -187,6 +187,14 @@ export function createWebgl2RenderMetrics(
 			textureSamplingPolicySamples:
 				[...(input.worldStore?.textureSamplingPolicySamples ?? [])],
 			textureUploadSamples: [...(input.worldStore?.textureUploadSamples ?? [])],
+			atlasEligibleMaterialCount:
+				input.worldStore?.atlasEligibleMaterialCount ?? 0,
+			atlasCandidateEntryCount: input.worldStore?.atlasCandidateEntryCount ?? 0,
+			atlasCandidateMaterialSlotCount:
+				input.worldStore?.atlasCandidateMaterialSlotCount ?? 0,
+			atlasCandidateSamples: [
+				...(input.worldStore?.atlasCandidateSamples ?? []),
+			],
 			textureVelocityPartCount: 0,
 			textureVelocityRenderGroupCount: 0,
 			textureVelocityMaterialCount: 0,
@@ -209,6 +217,8 @@ export function createWebgl2RenderMetrics(
 							input.worldStore.directTextureDrawUnitCount,
 						"webgl2-direct-texture":
 							input.worldStore.directTextureDrawUnitCount,
+						"webgl2-atlas-eligible":
+							input.worldStore.atlasEligibleMaterialCount,
 						...prefixCounts(
 							"webgl2-visible-",
 							input.submitMetrics.visibleDrawUnitCountsByMaterialKind,

@@ -127,12 +127,12 @@ describe("staged world material strategy", () => {
 
 		expect(plan.atlasSet.atlasEntries).toHaveLength(1);
 		expect(plan.atlasSet.atlasTextures[0]?.placements).toHaveLength(1);
-		expect(plan.materialStrategies.map((entry) => entry.kind)).toEqual([
+		expect(plan.atlasLayoutDecisions.map((entry) => entry.kind)).toEqual([
 			"atlas",
 			"atlas",
 		]);
 		expect(
-			plan.materialStrategies.map((entry) =>
+			plan.atlasLayoutDecisions.map((entry) =>
 				entry.kind === "atlas" ? entry.atlasEntryKey : entry.reason,
 			),
 		).toEqual([
@@ -155,7 +155,7 @@ describe("staged world material strategy", () => {
 			requirements: [createRequirement("static", 0)],
 		});
 
-		expect(plan.materialStrategies).toMatchObject([
+		expect(plan.atlasLayoutDecisions).toMatchObject([
 			{
 				kind: "flat-fallback",
 				reason: "missing-decompressed-prepared-texture",
@@ -195,7 +195,7 @@ describe("staged world material strategy", () => {
 		});
 
 		expect(
-			plan.materialStrategies.map((entry) =>
+			plan.atlasLayoutDecisions.map((entry) =>
 				entry.kind === "flat-fallback" || entry.kind === "unsupported"
 					? entry.reason
 					: entry.kind,
@@ -217,7 +217,7 @@ describe("staged world material strategy", () => {
 			},
 		});
 
-		expect(s3tcPlan.materialStrategies.map((entry) => entry.kind)).toEqual([
+		expect(s3tcPlan.atlasLayoutDecisions.map((entry) => entry.kind)).toEqual([
 			"direct-texture",
 			"direct-texture",
 		]);
@@ -251,7 +251,7 @@ describe("staged world material strategy", () => {
 			plan.atlasSet.drawSlices.map((slice) => slice.atlasTextureIndex),
 		).toEqual([0, 1]);
 		expect(
-			plan.materialStrategies.map((entry) =>
+			plan.atlasLayoutDecisions.map((entry) =>
 				entry.kind === "flat-fallback" || entry.kind === "unsupported"
 					? entry.reason
 					: entry.kind === "atlas"
@@ -287,7 +287,7 @@ describe("staged world material strategy", () => {
 		});
 
 		expect(
-			plan.materialStrategies.map((entry) =>
+			plan.atlasLayoutDecisions.map((entry) =>
 				entry.kind === "flat-fallback" || entry.kind === "unsupported"
 					? entry.reason
 					: entry.kind,

@@ -129,6 +129,10 @@ export interface WorldRenderDebugMetrics {
 	textureSamplingPolicyCounts: Record<string, number>;
 	textureSamplingPolicySamples: string[];
 	textureUploadSamples: string[];
+	atlasEligibleMaterialCount: number;
+	atlasCandidateEntryCount: number;
+	atlasCandidateMaterialSlotCount: number;
+	atlasCandidateSamples: string[];
 	textureVelocityPartCount: number;
 	textureVelocityRenderGroupCount: number;
 	textureVelocityMaterialCount: number;

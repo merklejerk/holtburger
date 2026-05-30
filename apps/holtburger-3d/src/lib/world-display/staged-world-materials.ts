@@ -6,6 +6,7 @@ import type { RenderVec4 } from "./render-math";
 import {
 	defaultStagedWorldMaterialTextureCapabilities,
 	resolveStagedWorldMaterialStrategy,
+	type StagedWorldMaterialAtlasEligibility,
 	type StagedWorldMaterialRenderableKind,
 } from "./staged-world-material-strategy";
 import type {
@@ -34,6 +35,7 @@ export interface StagedWorldDirectTextureMaterialPlan {
 	textureUpload: RenderSurfaceTextureUploadPreparation & { status: "ready" };
 	behavior: LegacyMaterialBehaviorDto;
 	fallbackReason: string | null;
+	atlasEligibility: StagedWorldMaterialAtlasEligibility | null;
 	preparedAssetIds: readonly string[];
 }
 
@@ -104,6 +106,7 @@ export function resolveStagedWorldMaterialSlotPlan(options: {
 		textureUpload: strategy.textureUpload,
 		behavior: strategy.behavior,
 		fallbackReason: null,
+		atlasEligibility: strategy.atlasEligibility,
 		preparedAssetIds: collectStrategyPreparedAssetIds(strategy),
 	};
 }

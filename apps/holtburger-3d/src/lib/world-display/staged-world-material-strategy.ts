@@ -181,7 +181,7 @@ interface StagedWorldAtlasSetGenerationPlan {
 
 export interface StagedWorldMaterialStrategyPlan {
 	atlasSet: StagedWorldAtlasSetGenerationPlan;
-	materialStrategies: StagedWorldMaterialStrategy[];
+	atlasLayoutDecisions: StagedWorldMaterialStrategy[];
 	fallbackReasonCounts: Partial<
 		Record<StagedWorldMaterialStrategyFallbackReason, number>
 	>;
@@ -213,7 +213,7 @@ export function planStagedWorldMaterialStrategies(options: {
 }): StagedWorldMaterialStrategyPlan {
 	const policy = normalizePolicy(options.policy);
 	const candidates: AtlasCandidate[] = [];
-	const materialStrategies: StagedWorldMaterialStrategy[] = [];
+	const atlasLayoutDecisions: StagedWorldMaterialStrategy[] = [];
 	for (const input of options.requirements) {
 		const candidate = evaluateAtlasCandidate({
 			assetState: options.assetState,
@@ -225,7 +225,7 @@ export function planStagedWorldMaterialStrategies(options: {
 		if (candidate.kind === "candidate") {
 			candidates.push(candidate.candidate);
 		} else {
-			materialStrategies.push(candidate.requirement);
+			atlasLayoutDecisions.push(candidate.requirement);
 		}
 	}
 
@@ -243,7 +243,7 @@ export function planStagedWorldMaterialStrategies(options: {
 			candidate.atlasEntryKey,
 		);
 		if (!placement) {
-			materialStrategies.push(
+			atlasLayoutDecisions.push(
 				createFallbackRequirement({
 					input: candidate.input,
 					materialAssetId: candidate.materialAssetId,
@@ -259,7 +259,7 @@ export function planStagedWorldMaterialStrategies(options: {
 			candidate.materialSlotKey,
 		);
 		if (materialTableSlotIndex === undefined) {
-			materialStrategies.push(
+			atlasLayoutDecisions.push(
 				createFallbackRequirement({
 					input: candidate.input,
 					materialAssetId: candidate.materialAssetId,
@@ -271,7 +271,7 @@ export function planStagedWorldMaterialStrategies(options: {
 			);
 			continue;
 		}
-		materialStrategies.push({
+		atlasLayoutDecisions.push({
 			kind: "atlas",
 			slot: candidate.input.slot,
 			renderableKind: candidate.input.renderableKind,
@@ -286,7 +286,7 @@ export function planStagedWorldMaterialStrategies(options: {
 		});
 	}
 
-	const sortedRequirements = sortMaterialStrategies(materialStrategies);
+	const sortedRequirements = sortMaterialStrategies(atlasLayoutDecisions);
 	const drawSlices = createDrawSlicePlans(sortedRequirements);
 	return {
 		atlasSet: {
@@ -301,7 +301,7 @@ export function planStagedWorldMaterialStrategies(options: {
 			atlasTextures: placementState.textures,
 			drawSlices,
 		},
-		materialStrategies: sortedRequirements,
+		atlasLayoutDecisions: sortedRequirements,
 		fallbackReasonCounts: countFallbackReasons(sortedRequirements),
 	};
 }

@@ -10,7 +10,10 @@ import {
 	type Webgl2TerrainBlendWorldProgram,
 } from "./webgl2-world-submit";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
-import { Webgl2StateCache, type Webgl2StateCacheGl } from "./webgl2-state-cache";
+import {
+	Webgl2StateCache,
+	type Webgl2StateCacheGl,
+} from "./webgl2-state-cache";
 
 describe("planWebgl2FlatWorldSubmitOrder", () => {
 	it("sorts visible draw units by material and geometry key", () => {
@@ -93,9 +96,9 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		expect(metrics.vertexArrayBindCount).toBe(1);
 		expect(metrics.uniformUploadCount).toBe(2);
 		expect(metrics.triangleCount).toBe(2);
-		expect(gl.calls.filter((call) => call === "drawElements:4:3:5123:0")).toHaveLength(
-			2,
-		);
+		expect(
+			gl.calls.filter((call) => call === "drawElements:4:3:5123:0"),
+		).toHaveLength(2);
 	});
 
 	it("submits textured draw units with material color and opacity", () => {
@@ -341,6 +344,7 @@ function createIndexedProgram() {
 				"uPaletteTexture",
 				"uTextureSize",
 				"uPaletteColorCount",
+				"uClipThreshold",
 				"uRepeatS",
 				"uRepeatT",
 			].map((name) => [name, {} as WebGLUniformLocation]),
@@ -515,7 +519,12 @@ class CapturingSubmitGl implements Webgl2StateCacheGl {
 		this.calls.push("uniform1i");
 	}
 
-	drawElements(mode: GLenum, count: number, type: GLenum, offset: number): void {
+	drawElements(
+		mode: GLenum,
+		count: number,
+		type: GLenum,
+		offset: number,
+	): void {
 		this.calls.push(`drawElements:${mode}:${count}:${type}:${offset}`);
 	}
 }

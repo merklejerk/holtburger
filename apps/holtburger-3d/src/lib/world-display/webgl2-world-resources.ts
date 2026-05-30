@@ -1,4 +1,7 @@
-import type { AssetChannelState, PreparedTexturePayload } from "../assets/types";
+import type {
+	AssetChannelState,
+	PreparedTexturePayload,
+} from "../assets/types";
 import { resolveNormalizedPreparedTextureAssetIds } from "../assets/material-texture-preparation-policy";
 import {
 	createWebgl2ArrayBuffer,
@@ -17,10 +20,7 @@ import {
 	type StagedWorldDrawUnitAssembly,
 } from "./staged-world-assembly";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
-import type {
-	NeighborPackedIndexedPayload,
-	ResolvedIndexedMaterialData,
-} from "./indexed-material-data";
+import type { ResolvedIndexedMaterialData } from "./indexed-material-data";
 import type { RenderMat4, RenderVec4 } from "./render-math";
 import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import type { RenderChunkTransform } from "./render-anchor";
@@ -41,6 +41,7 @@ import type {
 	RenderSurfaceTextureUploadPreparation,
 } from "./render-surface-texture-data";
 import { prepareRenderSurfaceTextureUploadData } from "./render-surface-texture-data";
+import { isBase1ClipMapSurface } from "./material-behavior";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
 import type { TransitionPortalCandidateModel } from "./transition-portal-work-items";
@@ -149,6 +150,7 @@ export interface Webgl2IndexedMaterialResources {
 	paletteColorCount: number;
 	wrapS: "clamp" | "repeat";
 	wrapT: "clamp" | "repeat";
+	clipThreshold: number;
 }
 
 export interface Webgl2TerrainTextureBinding {
@@ -242,7 +244,9 @@ export function syncWebgl2WorldResources({
 		for (const textureKey of collectTerrainBlendTextureKeys(webgl2DrawUnit)) {
 			retainedTextureKeys.add(textureKey);
 		}
-		for (const textureKey of collectIndexedMaterialTextureKeys(webgl2DrawUnit)) {
+		for (const textureKey of collectIndexedMaterialTextureKeys(
+			webgl2DrawUnit,
+		)) {
 			retainedTextureKeys.add(textureKey);
 		}
 	}
@@ -266,7 +270,9 @@ export function syncWebgl2WorldResources({
 	).length;
 	store.stagedStaticObjectCount = countUniqueStaticObjectKeys(store.drawUnits);
 	store.stagedStaticPartCount = countUniqueBvhItemKeys(
-		store.drawUnits.filter((drawUnit) => drawUnit.id.startsWith("static-staged/")),
+		store.drawUnits.filter((drawUnit) =>
+			drawUnit.id.startsWith("static-staged/"),
+		),
 	);
 	store.staticInstanceCount = countUniqueBvhItemKeys(
 		store.drawUnits.filter((drawUnit) => drawUnit.kind === "static"),
@@ -294,14 +300,18 @@ export function syncWebgl2WorldResources({
 	store.textureSamplingPolicySamples = [
 		...new Set(textureSamplingPolicies),
 	].slice(0, 8);
-	store.textureUploadSamples = [...collectTextureUploadSamples(store.drawUnits)];
+	store.textureUploadSamples = [
+		...collectTextureUploadSamples(store.drawUnits),
+	];
 	const atlasEligibleDrawUnits = store.drawUnits.filter(
 		(drawUnit) => drawUnit.atlasEligibility !== null,
 	);
 	store.atlasEligibleMaterialCount = atlasEligibleDrawUnits.length;
 	store.atlasCandidateEntryCount = new Set(
 		atlasEligibleDrawUnits.flatMap((drawUnit) =>
-			drawUnit.atlasEligibility ? [drawUnit.atlasEligibility.atlasEntryKey] : [],
+			drawUnit.atlasEligibility
+				? [drawUnit.atlasEligibility.atlasEntryKey]
+				: [],
 		),
 	).size;
 	store.atlasCandidateMaterialSlotCount = new Set(
@@ -327,7 +337,9 @@ export function syncWebgl2WorldResources({
 	store.textureCount = store.texturesByKey.size;
 	store.indexedTextureCount = new Set(
 		store.drawUnits.flatMap((drawUnit) =>
-			drawUnit.indexedMaterial ? [drawUnit.indexedMaterial.indexTextureKey] : [],
+			drawUnit.indexedMaterial
+				? [drawUnit.indexedMaterial.indexTextureKey]
+				: [],
 		),
 	).size;
 	store.paletteTextureCount = new Set(
@@ -337,7 +349,9 @@ export function syncWebgl2WorldResources({
 				: [],
 		),
 	).size;
-	store.preparedTextureUploadCount = countPreparedTextureUploads(store.drawUnits);
+	store.preparedTextureUploadCount = countPreparedTextureUploads(
+		store.drawUnits,
+	);
 	store.preparedTextureGeneratedByteLength = 0;
 	store.triangleCount = store.drawUnits.reduce(
 		(total, drawUnit) => total + drawUnit.triangleCount,
@@ -415,13 +429,13 @@ function createOrReuseWebgl2DrawUnit({
 		previous.color = drawUnit.material.color;
 		previous.materialKind = drawUnit.material.kind;
 		previous.materialKey = drawUnit.material.key;
-		previous.materialFallbackReason = resolveWebgl2MaterialFallbackReason(drawUnit);
+		previous.materialFallbackReason =
+			resolveWebgl2MaterialFallbackReason(drawUnit);
 		previous.materialBehavior = drawUnit.material.behavior;
 		previous.textureSamplingPolicy =
 			resolveWebgl2DrawUnitTextureSamplingPolicy(drawUnit);
-		previous.textureUploadSample = resolveWebgl2DrawUnitTextureUploadSample(
-			drawUnit,
-		);
+		previous.textureUploadSample =
+			resolveWebgl2DrawUnitTextureUploadSample(drawUnit);
 		previous.atlasEligibility = resolveWebgl2DrawUnitAtlasEligibility(drawUnit);
 		previous.atlasCandidateSample =
 			resolveWebgl2DrawUnitAtlasCandidateSample(drawUnit);
@@ -430,7 +444,7 @@ function createOrReuseWebgl2DrawUnit({
 				? drawUnit.material.textureKey
 				: drawUnit.material.kind === "indexed-paletted"
 					? drawUnit.material.indexedMaterial.renderSurfaceAssetId
-				: null;
+					: null;
 		previous.texture = resolveWebgl2DrawUnitTexture({ gl, store, drawUnit });
 		previous.indexedMaterial = resolveWebgl2IndexedMaterialResources({
 			gl,
@@ -528,7 +542,7 @@ function createOrReuseWebgl2DrawUnit({
 				? drawUnit.material.textureKey
 				: drawUnit.material.kind === "indexed-paletted"
 					? drawUnit.material.indexedMaterial.renderSurfaceAssetId
-				: null,
+					: null,
 		texture,
 		indexedMaterial,
 		terrainBlend,
@@ -582,7 +596,7 @@ function resolveWebgl2DrawUnitTextureSamplingPolicy(
 			? describeTextureSamplingPolicy(
 					drawUnit.material.indexedMaterial.samplingPolicy,
 				)
-		: null;
+			: null;
 }
 
 function resolveWebgl2DrawUnitTextureUploadSample(
@@ -622,16 +636,6 @@ function resolveWebgl2IndexedMaterialResources({
 		return null;
 	}
 	const indexedMaterial = drawUnit.material.indexedMaterial;
-	if (
-		indexedMaterial.texture.format === "index16" &&
-		(!("RGBA16UI" in gl) || !("RGBA_INTEGER" in gl))
-	) {
-		store.materialFallbackReasonSamples = [
-			...store.materialFallbackReasonSamples,
-			"indexed-uint16-texture-unsupported",
-		].slice(0, 8);
-		return null;
-	}
 	const indexTextureKey = describeIndexedTextureKey(indexedMaterial);
 	const paletteTextureKey = describeIndexedPaletteTextureKey(indexedMaterial);
 	const indexTexture =
@@ -640,10 +644,16 @@ function resolveWebgl2IndexedMaterialResources({
 			gl,
 			store,
 			key: indexTextureKey,
-			upload: toWebgl2IndexedTextureUpload(gl, indexedMaterial.neighborPackedTexture),
+			upload: toWebgl2IndexedTextureUpload(gl, indexedMaterial.texture),
 			sampler: {
-				wrapS: gl.CLAMP_TO_EDGE,
-				wrapT: gl.CLAMP_TO_EDGE,
+				wrapS:
+					indexedMaterial.samplingPolicy.wrapS === "repeat"
+						? gl.REPEAT
+						: gl.CLAMP_TO_EDGE,
+				wrapT:
+					indexedMaterial.samplingPolicy.wrapT === "repeat"
+						? gl.REPEAT
+						: gl.CLAMP_TO_EDGE,
 				minFilter: gl.NEAREST,
 				magFilter: gl.NEAREST,
 			},
@@ -682,6 +692,9 @@ function resolveWebgl2IndexedMaterialResources({
 		paletteColorCount: indexedMaterial.palette.colorCount,
 		wrapS: indexedMaterial.samplingPolicy.wrapS,
 		wrapT: indexedMaterial.samplingPolicy.wrapT,
+		clipThreshold: isBase1ClipMapSurface(indexedMaterial.recipe.surfaceType)
+			? 8
+			: -1,
 	};
 }
 
@@ -709,26 +722,26 @@ function createAndStoreWebgl2Texture2D({
 
 function toWebgl2IndexedTextureUpload(
 	gl: WebGL2RenderingContext,
-	payload: NeighborPackedIndexedPayload,
+	texture: ResolvedIndexedMaterialData["texture"],
 ) {
-	if (payload.format === "p8-neighbor-rgba8") {
+	if (texture.format === "p8") {
 		return {
-			width: payload.width,
-			height: payload.height,
-			internalFormat: gl.RGBA8,
-			format: gl.RGBA,
+			width: texture.width,
+			height: texture.height,
+			internalFormat: gl.R8,
+			format: gl.RED,
 			type: gl.UNSIGNED_BYTE,
-			data: payload.data,
+			data: texture.sourceBytes,
 			generateMipmaps: false,
 		};
 	}
 	return {
-		width: payload.width,
-		height: payload.height,
-		internalFormat: gl.RGBA16UI,
-		format: gl.RGBA_INTEGER,
-		type: gl.UNSIGNED_SHORT,
-		data: payload.data,
+		width: texture.width,
+		height: texture.height,
+		internalFormat: gl.RG8,
+		format: gl.RG,
+		type: gl.UNSIGNED_BYTE,
+		data: texture.sourceBytes,
 		generateMipmaps: false,
 	};
 }
@@ -737,9 +750,9 @@ function describeIndexedTextureKey(
 	indexedMaterial: ResolvedIndexedMaterialData,
 ): string {
 	return [
-		"indexed-neighbor-texture",
+		"indexed-texture",
 		indexedMaterial.renderSurfaceAssetId,
-		indexedMaterial.neighborPackedTexture.format,
+		indexedMaterial.texture.format,
 		indexedMaterial.samplingPolicy.wrapS,
 		indexedMaterial.samplingPolicy.wrapT,
 	].join("|");
@@ -1117,7 +1130,9 @@ function countPreparedTextureUploads(
 	).size;
 }
 
-function countStringOccurrences(values: readonly string[]): Record<string, number> {
+function countStringOccurrences(
+	values: readonly string[],
+): Record<string, number> {
 	const counts: Record<string, number> = {};
 	for (const value of values) {
 		counts[value] = (counts[value] ?? 0) + 1;
@@ -1130,10 +1145,7 @@ function collectTextureUploadSamples(
 ): readonly string[] {
 	const samples = new Map<string, string>();
 	for (const drawUnit of drawUnits) {
-		if (
-			!drawUnit.textureKey ||
-			samples.has(drawUnit.textureKey)
-		) {
+		if (!drawUnit.textureKey || samples.has(drawUnit.textureKey)) {
 			continue;
 		}
 		samples.set(drawUnit.textureKey, describeDrawUnitTextureUpload(drawUnit));
@@ -1154,7 +1166,10 @@ function describeDrawUnitTextureUpload(drawUnit: Webgl2WorldDrawUnit): string {
 			"mips=deferred",
 		].join(" ");
 	}
-	return drawUnit.textureUploadSample ?? `${drawUnit.textureKey ?? drawUnit.id}: unavailable`;
+	return (
+		drawUnit.textureUploadSample ??
+		`${drawUnit.textureKey ?? drawUnit.id}: unavailable`
+	);
 }
 
 function summarizeDiagnosticReasons(
@@ -1227,7 +1242,9 @@ function sampleDirectTextureBytes(
 	};
 }
 
-function createGeometrySignature(drawUnit: StagedWorldDrawUnitAssembly): string {
+function createGeometrySignature(
+	drawUnit: StagedWorldDrawUnitAssembly,
+): string {
 	return [
 		drawUnit.kind,
 		drawUnit.material.kind,
@@ -1243,7 +1260,8 @@ function createGeometrySignature(drawUnit: StagedWorldDrawUnitAssembly): string 
 function countUniqueStaticObjectKeys(
 	drawUnits: readonly Webgl2WorldDrawUnit[],
 ): number {
-	return new Set(drawUnits.flatMap((drawUnit) => drawUnit.staticObjectKeys)).size;
+	return new Set(drawUnits.flatMap((drawUnit) => drawUnit.staticObjectKeys))
+		.size;
 }
 
 function countUniqueBvhItemKeys(
@@ -1285,7 +1303,9 @@ function syncWebgl2AssemblyGraph({
 
 	const changedRecords = records.filter((record) => {
 		const signature = describeStagedWorldAssemblyGraphRecordSignature(record);
-		return store.graphSignaturesByDrawUnitId.get(record.drawUnitId) !== signature;
+		return (
+			store.graphSignaturesByDrawUnitId.get(record.drawUnitId) !== signature
+		);
 	});
 	if (changedRecords.length > 0) {
 		const nodes: RendererResourceGraphNode[] = [];

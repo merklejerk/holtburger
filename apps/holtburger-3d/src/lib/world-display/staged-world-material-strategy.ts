@@ -68,12 +68,13 @@ export interface StagedWorldMaterialStrategyPolicy {
 	maxMaterialSlotsPerDraw: number;
 }
 
-const DEFAULT_STAGED_WORLD_MATERIAL_STRATEGY_POLICY: StagedWorldMaterialStrategyPolicy = {
-	maxAtlasTextureSize: 4096,
-	maxAtlasTextureCount: 8,
-	baseGutterPixels: 2,
-	maxMaterialSlotsPerDraw: 128,
-};
+const DEFAULT_STAGED_WORLD_MATERIAL_STRATEGY_POLICY: StagedWorldMaterialStrategyPolicy =
+	{
+		maxAtlasTextureSize: 4096,
+		maxAtlasTextureCount: 8,
+		baseGutterPixels: 2,
+		maxMaterialSlotsPerDraw: 128,
+	};
 
 export interface StagedWorldMaterialStrategyInput {
 	slot: ResolvedMaterialSlot;
@@ -246,7 +247,8 @@ export function planStagedWorldMaterialStrategies(options: {
 			input,
 			policy,
 			textureCapabilities:
-				options.textureCapabilities ?? defaultStagedWorldMaterialTextureCapabilities(),
+				options.textureCapabilities ??
+				defaultStagedWorldMaterialTextureCapabilities(),
 		});
 		if (candidate.kind === "candidate") {
 			candidates.push(candidate.candidate);
@@ -595,7 +597,9 @@ function resolveIndexedPalettedTextureStrategy(options: {
 	materialAssetId: string;
 	recipe: PreparedMaterialRecipePayload;
 	textureCapabilities: MaterialTextureCapabilities;
-}): StagedWorldIndexedPalettedMaterialStrategy | StagedWorldMaterialFallbackStrategy {
+}):
+	| StagedWorldIndexedPalettedMaterialStrategy
+	| StagedWorldMaterialFallbackStrategy {
 	const resolvedSurface = resolveFirstMaterialRenderSurface({
 		recipe: options.recipe,
 		assetState: options.assetState,
@@ -650,7 +654,9 @@ function resolveIndexedPalettedTextureStrategy(options: {
 				.join(": "),
 		});
 	}
-	const renderStateKey = describeIndexedRenderStateKey(indexedMaterial.behavior);
+	const renderStateKey = describeIndexedRenderStateKey(
+		indexedMaterial.behavior,
+	);
 	const samplingKey = describeIndexedSamplingKey(indexedMaterial);
 	return {
 		kind: "indexed-paletted",
@@ -725,7 +731,9 @@ function resolveDirectTextureStrategy(options: {
 	recipe: PreparedMaterialRecipePayload;
 	textureCapabilities: MaterialTextureCapabilities;
 	atlasEligibility?: StagedWorldMaterialAtlasEligibility | null;
-}): StagedWorldDirectTextureMaterialStrategy | StagedWorldMaterialFallbackStrategy {
+}):
+	| StagedWorldDirectTextureMaterialStrategy
+	| StagedWorldMaterialFallbackStrategy {
 	const resolvedSurface = resolveFirstMaterialRenderSurface({
 		recipe: options.recipe,
 		assetState: options.assetState,
@@ -820,7 +828,10 @@ function atlasFallbackReasonForRecipe(options: {
 	input: StagedWorldMaterialStrategyInput;
 	recipe: PreparedMaterialRecipePayload;
 	behavior: LegacyMaterialBehaviorDto;
-}): { reason: StagedWorldMaterialStrategyFallbackReason; detail: string } | null {
+}): {
+	reason: StagedWorldMaterialStrategyFallbackReason;
+	detail: string;
+} | null {
 	if (options.recipe.source.kind !== "texture") {
 		return {
 			reason: "solid-color-material",
@@ -1072,9 +1083,9 @@ function describeIndexedSamplingKey(
 	const policy = indexedMaterial.samplingPolicy;
 	return [
 		"indexed-sampling",
-		`format=${indexedMaterial.neighborPackedTexture.format}`,
+		`format=${indexedMaterial.texture.format}`,
 		`wrap=${policy.wrapS}/${policy.wrapT}`,
-		"filter=manual-bilinear",
+		"filter=shader-linear",
 		"mips=deferred",
 		`palette=${describeIndexedPaletteKey(indexedMaterial.palette)}`,
 	].join(";");
@@ -1154,8 +1165,9 @@ function sortMaterialStrategies(
 function countFallbackReasons(
 	requirements: readonly StagedWorldMaterialStrategy[],
 ): Partial<Record<StagedWorldMaterialStrategyFallbackReason, number>> {
-	const counts: Partial<Record<StagedWorldMaterialStrategyFallbackReason, number>> =
-		{};
+	const counts: Partial<
+		Record<StagedWorldMaterialStrategyFallbackReason, number>
+	> = {};
 	for (const requirement of requirements) {
 		if (
 			requirement.kind !== "flat-fallback" &&
@@ -1168,7 +1180,9 @@ function countFallbackReasons(
 	return counts;
 }
 
-function describeStrategySortKey(requirement: StagedWorldMaterialStrategy): string {
+function describeStrategySortKey(
+	requirement: StagedWorldMaterialStrategy,
+): string {
 	switch (requirement.kind) {
 		case "atlas":
 			return requirement.materialSlotKey;
@@ -1241,9 +1255,14 @@ function createDrawSlicePlans(
 function normalizePolicy(
 	policy: Partial<StagedWorldMaterialStrategyPolicy> | undefined,
 ): StagedWorldMaterialStrategyPolicy {
-	const normalized = { ...DEFAULT_STAGED_WORLD_MATERIAL_STRATEGY_POLICY, ...policy };
+	const normalized = {
+		...DEFAULT_STAGED_WORLD_MATERIAL_STRATEGY_POLICY,
+		...policy,
+	};
 	if (normalized.maxAtlasTextureSize <= normalized.baseGutterPixels * 2) {
-		throw new Error("Staged world atlas max texture size must exceed its gutters.");
+		throw new Error(
+			"Staged world atlas max texture size must exceed its gutters.",
+		);
 	}
 	if (normalized.maxAtlasTextureCount <= 0) {
 		throw new Error("Staged world atlas texture count must be positive.");

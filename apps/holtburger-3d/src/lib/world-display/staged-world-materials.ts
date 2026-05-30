@@ -20,6 +20,7 @@ import type {
 	MaterialTextureCapabilities,
 	RenderSurfaceTextureUploadPreparation,
 } from "./render-surface-texture-data";
+import type { TextureFilteringMode } from "./texture-sampling-policy";
 
 export type StagedWorldMaterialPlan =
 	| StagedWorldFlatMaterialPlan
@@ -75,6 +76,7 @@ export function resolveStagedWorldSurfaceMaterialPlan(options: {
 	surfaceId: number | null;
 	fallbackColorKey: string;
 	textureCapabilities?: MaterialTextureCapabilities;
+	textureFilteringMode?: TextureFilteringMode;
 	appearance?: MaterialAppearanceContext | null;
 }): StagedWorldMaterialPlan {
 	if (options.surfaceId === null) {
@@ -97,6 +99,7 @@ export function resolveStagedWorldSurfaceMaterialPlan(options: {
 		fallbackColorKey: options.fallbackColorKey,
 		renderableKind: "unknown",
 		textureCapabilities: options.textureCapabilities,
+		textureFilteringMode: options.textureFilteringMode,
 		appearance: options.appearance,
 	});
 }
@@ -107,6 +110,7 @@ export function resolveStagedWorldMaterialSlotPlan(options: {
 	fallbackColorKey: string;
 	renderableKind?: StagedWorldMaterialRenderableKind;
 	textureCapabilities?: MaterialTextureCapabilities;
+	textureFilteringMode?: TextureFilteringMode;
 	appearance?: MaterialAppearanceContext | null;
 	detailOverlay?: ResolvedRegionDetailOverlayPlan | null;
 }): StagedWorldMaterialPlan {
@@ -121,6 +125,7 @@ export function resolveStagedWorldMaterialSlotPlan(options: {
 		textureCapabilities:
 			options.textureCapabilities ??
 			defaultStagedWorldMaterialTextureCapabilities(),
+		textureFilteringMode: options.textureFilteringMode,
 	});
 	if (strategy.kind !== "direct-texture") {
 		if (strategy.kind === "indexed-paletted") {

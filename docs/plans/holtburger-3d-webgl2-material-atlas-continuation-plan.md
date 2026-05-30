@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
-Status: Phase M3D complete; ready for Phase M4.
+Status: Phase M3D.1 complete; ready for Phase M4.
 
 Related plans:
 
@@ -836,6 +836,66 @@ Cleanup Targets / Debt:
   reporting hardening.
 - Atlas compaction must treat detail overlays as incompatible with single-texture atlas slices until
   a deliberate multi-texture material-table design exists.
+
+## Phase M3D.1: WebGL2 Texture Filtering UX Policy
+
+Status: Complete.
+
+Purpose: correct WebGL2 sampler policy plumbing discovered after M3D. The browser filtering select
+was reflected in metrics, but WebGL2 resource upload prep still used hidden default sampler policy
+inputs. This made the UX misleading and risked comparing Three and WebGL2 with different effective
+sampler state.
+
+Tasks:
+
+- Detect WebGL2 material texture capabilities, including maximum anisotropy, during renderer
+  initialization.
+- Thread the browser texture filtering mode into staged material strategy resolution and WebGL2
+  terrain/detail upload prep.
+- Rebuild WebGL2 staged resources when the filtering mode changes so retained texture keys and
+  sampler parameters are regenerated.
+- Keep indexed texture storage outside the UX filtering policy. Indexed materials continue to use
+  nearest raw index textures; palette-aware filtering is shader-owned.
+
+Progress:
+
+- Added explicit `textureFilteringMode` plumbing through staged scene assembly, material plan
+  resolution, and direct-texture strategy sampling policy selection.
+- WebGL2 now stores detected material texture capabilities on renderer resources and passes them
+  into resource sync. `anisotropic-4x` remains the default/target policy; if the browser exposes no
+  anisotropy extension or reports a low cap, policy selection degrades to ordinary linear mip
+  filtering.
+- WebGL2 direct material uploads, terrain blend texture uploads, and static/interior detail overlay
+  uploads now use the active filtering mode and detected capability object.
+- Changing the browser filtering mode now calls WebGL2 resource sync instead of only updating
+  metrics.
+- Added focused WebGL2 resource coverage proving direct uploads use 4x anisotropy when capability
+  allows it and rebuild to nearest/no-mips when the UX mode is changed to nearest.
+
+Decisions:
+
+- The UX filtering policy applies to direct color, compressed, terrain, and detail textures. It does
+  not apply to indexed raw index textures because those must remain exact integer/byte lookups for
+  palette reconstruction and clip-map semantics.
+- Capability degradation stays in `createDefaultMaterialTextureSamplingPolicy()`: requesting
+  `anisotropic-4x` with `maxAnisotropy <= 1` yields linear mip filtering with anisotropy 1 rather
+  than a fallback UI mode change.
+
+Course Corrections:
+
+- Earlier M3D notes treated WebGL2 detail toggle sync as the only UX-backed resource rebuild issue.
+  Filtering mode had the same class of bug: renderer state and metrics changed, but already prepared
+  WebGL2 resources did not. M3D.1 fixes that before portal work.
+- WebGL2 terrain and detail uploads had local default capability calls. They now consume the same
+  renderer-level capability/filtering policy as staged direct materials.
+
+Cleanup Targets / Debt:
+
+- Texture color-space mode still deserves the same audit. WebGL2 currently reports the UX value, but
+  color-space policy plumbing is not covered by the M3D.1 filtering fix.
+- Anisotropy extension lookup happens both during capability detection and sampler application.
+  This is acceptable for now, but a future WebGL2 context capability object could cache the extension
+  enum for cleaner sampler application.
 
 ## Future Phase: Texture Velocity and UV Animation System Integration
 

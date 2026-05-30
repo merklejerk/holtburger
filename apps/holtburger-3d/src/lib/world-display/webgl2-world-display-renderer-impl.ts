@@ -30,6 +30,7 @@ import {
 	type Webgl2WorldResourceStore,
 } from "./webgl2-world-resources";
 import type { WorldRenderMetrics } from "./renderer-contract";
+import type { MaterialTextureCapabilities } from "./render-surface-texture-data";
 import type {
 	WorldDisplayRenderer,
 	WorldDisplayRendererOptions,
@@ -401,6 +402,7 @@ interface Webgl2RenderResources {
 	vertexBuffer: Webgl2BufferResource;
 	vertexArray: Webgl2VertexArrayResource;
 	worldStore: Webgl2WorldResourceStore;
+	materialTextureCapabilities: MaterialTextureCapabilities;
 }
 
 export function createWebgl2WorldDisplayRendererImplementation(
@@ -506,7 +508,11 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			reportMetrics();
 		},
 		setTextureFilteringMode(mode) {
+			if (textureFilteringMode === mode) {
+				return;
+			}
 			textureFilteringMode = mode;
+			syncWorldResources();
 			reportMetrics();
 		},
 		setTextureColorSpaceMode(mode) {
@@ -721,6 +727,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			transitionPortalModel,
 			renderChunkTransforms,
 			rendererResourceGraph: options.rendererResourceGraph,
+			materialTextureCapabilities: resources.materialTextureCapabilities,
+			textureFilteringMode,
 			detailTexturesEnabled,
 		});
 		resources.stateCache.invalidate();
@@ -833,6 +841,32 @@ function createTriangleResources(
 		vertexBuffer,
 		vertexArray,
 		worldStore: createWebgl2WorldResourceStore(),
+		materialTextureCapabilities: detectWebgl2MaterialTextureCapabilities(gl),
+	};
+}
+
+function detectWebgl2MaterialTextureCapabilities(
+	gl: WebGL2RenderingContext,
+): MaterialTextureCapabilities {
+	const anisotropyExtension =
+		gl.getExtension("EXT_texture_filter_anisotropic") ??
+		gl.getExtension("WEBKIT_EXT_texture_filter_anisotropic") ??
+		gl.getExtension("MOZ_EXT_texture_filter_anisotropic");
+	const maxAnisotropy =
+		anisotropyExtension === null
+			? 1
+			: Number(
+					gl.getParameter(anisotropyExtension.MAX_TEXTURE_MAX_ANISOTROPY_EXT),
+				);
+	return {
+		supportsS3tc: gl.getExtension("WEBGL_compressed_texture_s3tc") !== null,
+		supportsS3tcSrgb:
+			gl.getExtension("WEBGL_compressed_texture_s3tc_srgb") !== null,
+		supportsPackedRgb565: false,
+		supportsPackedRgba4444: true,
+		maxAnisotropy: Number.isFinite(maxAnisotropy)
+			? Math.max(1, maxAnisotropy)
+			: 1,
 	};
 }
 

@@ -36,6 +36,7 @@ import {
 import {
 	createDefaultMaterialTextureSamplingPolicy,
 	selectVariantTextureSamplingPolicy,
+	type TextureFilteringMode,
 } from "./texture-sampling-policy";
 
 export type StagedWorldMaterialRenderableKind =
@@ -237,6 +238,7 @@ export function planStagedWorldMaterialStrategies(options: {
 	policy?: Partial<StagedWorldMaterialStrategyPolicy>;
 	generation?: number;
 	textureCapabilities?: MaterialTextureCapabilities;
+	textureFilteringMode?: TextureFilteringMode;
 }): StagedWorldMaterialStrategyPlan {
 	const policy = normalizePolicy(options.policy);
 	const candidates: AtlasCandidate[] = [];
@@ -249,6 +251,7 @@ export function planStagedWorldMaterialStrategies(options: {
 			textureCapabilities:
 				options.textureCapabilities ??
 				defaultStagedWorldMaterialTextureCapabilities(),
+			textureFilteringMode: options.textureFilteringMode,
 		});
 		if (candidate.kind === "candidate") {
 			candidates.push(candidate.candidate);
@@ -339,6 +342,7 @@ function evaluateAtlasCandidate(options: {
 	input: StagedWorldMaterialStrategyInput;
 	policy: StagedWorldMaterialStrategyPolicy;
 	textureCapabilities: MaterialTextureCapabilities;
+	textureFilteringMode?: TextureFilteringMode;
 }):
 	| { kind: "candidate"; candidate: AtlasCandidate }
 	| { kind: "strategy"; requirement: StagedWorldMaterialStrategy } {
@@ -346,6 +350,7 @@ function evaluateAtlasCandidate(options: {
 		assetState: options.assetState,
 		input: options.input,
 		textureCapabilities: options.textureCapabilities,
+		textureFilteringMode: options.textureFilteringMode,
 	});
 	if (
 		resolvedStrategy.kind !== "direct-texture" ||
@@ -402,6 +407,7 @@ export function resolveStagedWorldMaterialStrategy(options: {
 	assetState: AssetChannelState;
 	input: StagedWorldMaterialStrategyInput;
 	textureCapabilities?: MaterialTextureCapabilities;
+	textureFilteringMode?: TextureFilteringMode;
 }):
 	| StagedWorldDirectTextureMaterialStrategy
 	| StagedWorldIndexedPalettedMaterialStrategy
@@ -438,6 +444,7 @@ export function resolveStagedWorldMaterialStrategy(options: {
 				textureCapabilities:
 					options.textureCapabilities ??
 					defaultStagedWorldMaterialTextureCapabilities(),
+				textureFilteringMode: options.textureFilteringMode,
 			});
 		}
 		return createFallbackRequirement({
@@ -480,6 +487,7 @@ export function resolveStagedWorldMaterialStrategy(options: {
 				textureCapabilities:
 					options.textureCapabilities ??
 					defaultStagedWorldMaterialTextureCapabilities(),
+				textureFilteringMode: options.textureFilteringMode,
 			});
 		}
 		if (isIndexedTextureFormat(surface.formatRaw)) {
@@ -567,6 +575,7 @@ export function resolveStagedWorldMaterialStrategy(options: {
 		textureCapabilities:
 			options.textureCapabilities ??
 			defaultStagedWorldMaterialTextureCapabilities(),
+		textureFilteringMode: options.textureFilteringMode,
 		atlasEligibility: {
 			materialSlotKey: describeMaterialSlotKey({
 				materialAssetId,
@@ -730,6 +739,7 @@ function resolveDirectTextureStrategy(options: {
 	materialAssetId: string;
 	recipe: PreparedMaterialRecipePayload;
 	textureCapabilities: MaterialTextureCapabilities;
+	textureFilteringMode?: TextureFilteringMode;
 	atlasEligibility?: StagedWorldMaterialAtlasEligibility | null;
 }):
 	| StagedWorldDirectTextureMaterialStrategy
@@ -751,7 +761,10 @@ function resolveDirectTextureStrategy(options: {
 	const directRenderSurface = resolvedSurface.renderSurface;
 	const samplingPolicy = selectVariantTextureSamplingPolicy(
 		directRenderSurface,
-		createDefaultMaterialTextureSamplingPolicy(options.textureCapabilities),
+		createDefaultMaterialTextureSamplingPolicy(
+			options.textureCapabilities,
+			options.textureFilteringMode,
+		),
 		options.input.slot.materialVariantSignature,
 	);
 	const textureUpload = prepareRenderSurfaceTextureUploadData(

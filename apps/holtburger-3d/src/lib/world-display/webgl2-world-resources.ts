@@ -40,6 +40,7 @@ import type {
 	DirectRenderSurfaceUploadDataType,
 	DirectRenderSurfaceUploadFormat,
 	DirectRenderSurfaceUploadInternalFormat,
+	MaterialTextureCapabilities,
 	RenderSurfaceTextureUploadPreparation,
 } from "./render-surface-texture-data";
 import { prepareRenderSurfaceTextureUploadData } from "./render-surface-texture-data";
@@ -52,6 +53,7 @@ import {
 	describeTextureSamplingPolicy,
 	selectRenderSurfaceTextureSamplingPolicy,
 	type TextureSamplingPolicy,
+	type TextureFilteringMode,
 } from "./texture-sampling-policy";
 import {
 	describeStagedWorldDirectTextureKey,
@@ -215,6 +217,8 @@ export function syncWebgl2WorldResources({
 	transitionPortalModel,
 	renderChunkTransforms,
 	rendererResourceGraph,
+	materialTextureCapabilities = defaultWebgl2MaterialTextureCapabilities(),
+	textureFilteringMode = "anisotropic-4x",
 	detailTexturesEnabled = true,
 }: {
 	gl: WebGL2RenderingContext;
@@ -226,6 +230,8 @@ export function syncWebgl2WorldResources({
 	transitionPortalModel: TransitionPortalCandidateModel;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	rendererResourceGraph?: RendererResourceGraph;
+	materialTextureCapabilities?: MaterialTextureCapabilities;
+	textureFilteringMode?: TextureFilteringMode;
 	detailTexturesEnabled?: boolean;
 }): void {
 	// ELEMENT_ARRAY_BUFFER binding is VAO state in WebGL2. Resource sync creates
@@ -239,6 +245,8 @@ export function syncWebgl2WorldResources({
 		structuredInteriorScene,
 		transitionPortalModel,
 		renderChunkTransforms,
+		materialTextureCapabilities,
+		textureFilteringMode,
 		detailTexturesEnabled,
 	});
 	const nextDrawUnits: Webgl2WorldDrawUnit[] = [];
@@ -251,6 +259,8 @@ export function syncWebgl2WorldResources({
 			store,
 			drawUnit,
 			retainedDrawUnitIds,
+			materialTextureCapabilities,
+			textureFilteringMode,
 		});
 		nextDrawUnits.push(webgl2DrawUnit);
 		if (webgl2DrawUnit.textureKey) {
@@ -440,12 +450,16 @@ function createOrReuseWebgl2DrawUnit({
 	store,
 	drawUnit,
 	retainedDrawUnitIds,
+	materialTextureCapabilities,
+	textureFilteringMode,
 }: {
 	assetState: AssetChannelState;
 	gl: WebGL2RenderingContext;
 	store: Webgl2WorldResourceStore;
 	drawUnit: StagedWorldDrawUnitAssembly;
 	retainedDrawUnitIds: Set<string>;
+	materialTextureCapabilities: MaterialTextureCapabilities;
+	textureFilteringMode: TextureFilteringMode;
 }): Webgl2WorldDrawUnit {
 	const geometrySignature = createGeometrySignature(drawUnit);
 	const previous = store.drawUnitsById.get(drawUnit.id);
@@ -480,12 +494,16 @@ function createOrReuseWebgl2DrawUnit({
 			gl,
 			store,
 			drawUnit,
+			materialTextureCapabilities,
+			textureFilteringMode,
 		});
 		previous.terrainBlend = resolveWebgl2TerrainBlendResources({
 			assetState,
 			gl,
 			store,
 			drawUnit,
+			materialTextureCapabilities,
+			textureFilteringMode,
 		});
 		previous.modelMatrix = drawUnit.modelMatrix;
 		previous.bvhItemKeys = drawUnit.bvhBinding.itemKeys;
@@ -543,12 +561,16 @@ function createOrReuseWebgl2DrawUnit({
 		gl,
 		store,
 		drawUnit,
+		materialTextureCapabilities,
+		textureFilteringMode,
 	});
 	const terrainBlend = resolveWebgl2TerrainBlendResources({
 		assetState,
 		gl,
 		store,
 		drawUnit,
+		materialTextureCapabilities,
+		textureFilteringMode,
 	});
 	const webgl2DrawUnit = {
 		id: drawUnit.id,
@@ -871,11 +893,15 @@ function resolveWebgl2DetailOverlayResources({
 	gl,
 	store,
 	drawUnit,
+	materialTextureCapabilities,
+	textureFilteringMode,
 }: {
 	assetState: AssetChannelState;
 	gl: WebGL2RenderingContext;
 	store: Webgl2WorldResourceStore;
 	drawUnit: StagedWorldDrawUnitAssembly;
+	materialTextureCapabilities: MaterialTextureCapabilities;
+	textureFilteringMode: TextureFilteringMode;
 }): Webgl2DetailOverlayResources | null {
 	const overlay =
 		drawUnit.material.kind === "direct-texture" ||
@@ -888,7 +914,8 @@ function resolveWebgl2DetailOverlayResources({
 	const defaultPolicy = selectRenderSurfaceTextureSamplingPolicy(
 		overlay.renderSurface,
 		createDefaultMaterialTextureSamplingPolicy(
-			defaultWebgl2MaterialTextureCapabilities(),
+			materialTextureCapabilities,
+			textureFilteringMode,
 		),
 	);
 	const upload = prepareRenderSurfaceTextureUploadData(
@@ -899,7 +926,7 @@ function resolveWebgl2DetailOverlayResources({
 			wrapT: "repeat",
 			colorSpace: "none",
 		},
-		defaultWebgl2MaterialTextureCapabilities(),
+		materialTextureCapabilities,
 		resolvePreparedTextureForRenderSurface(assetState, overlay.renderSurface),
 	);
 	if (upload.status !== "ready" || upload.upload.kind !== "direct") {
@@ -942,11 +969,15 @@ function resolveWebgl2TerrainBlendResources({
 	gl,
 	store,
 	drawUnit,
+	materialTextureCapabilities,
+	textureFilteringMode,
 }: {
 	assetState: AssetChannelState;
 	gl: WebGL2RenderingContext;
 	store: Webgl2WorldResourceStore;
 	drawUnit: StagedWorldDrawUnitAssembly;
+	materialTextureCapabilities: MaterialTextureCapabilities;
+	textureFilteringMode: TextureFilteringMode;
 }): Webgl2TerrainBlendResources | null {
 	if (drawUnit.material.kind !== "terrain-blend" || !drawUnit.geometry.uvs) {
 		return null;
@@ -957,6 +988,8 @@ function resolveWebgl2TerrainBlendResources({
 		gl,
 		store,
 		ref: plan.base,
+		materialTextureCapabilities,
+		textureFilteringMode,
 	});
 	if (!base) {
 		return null;
@@ -970,12 +1003,16 @@ function resolveWebgl2TerrainBlendResources({
 				gl,
 				store,
 				ref: overlay.terrain,
+				materialTextureCapabilities,
+				textureFilteringMode,
 			});
 			const alpha = resolveWebgl2TerrainTextureBinding({
 				assetState,
 				gl,
 				store,
 				ref: overlay.alpha,
+				materialTextureCapabilities,
+				textureFilteringMode,
 			});
 			return terrain && alpha
 				? [{ terrain, alpha, rotation: overlay.rotation }]
@@ -987,12 +1024,16 @@ function resolveWebgl2TerrainBlendResources({
 				gl,
 				store,
 				ref: road.road,
+				materialTextureCapabilities,
+				textureFilteringMode,
 			});
 			const alpha = resolveWebgl2TerrainTextureBinding({
 				assetState,
 				gl,
 				store,
 				ref: road.alpha,
+				materialTextureCapabilities,
+				textureFilteringMode,
 			});
 			return roadTexture && alpha
 				? [{ road: roadTexture, alpha, rotation: road.rotation }]
@@ -1006,13 +1047,22 @@ function resolveWebgl2TerrainTextureBinding({
 	gl,
 	store,
 	ref,
+	materialTextureCapabilities,
+	textureFilteringMode,
 }: {
 	assetState: AssetChannelState;
 	gl: WebGL2RenderingContext;
 	store: Webgl2WorldResourceStore;
 	ref: TerrainBlendTextureRef;
+	materialTextureCapabilities: MaterialTextureCapabilities;
+	textureFilteringMode: TextureFilteringMode;
 }): Webgl2TerrainTextureBinding | null {
-	const upload = prepareTerrainTextureUpload(assetState, ref);
+	const upload = prepareTerrainTextureUpload(
+		assetState,
+		ref,
+		materialTextureCapabilities,
+		textureFilteringMode,
+	);
 	if (upload?.status !== "ready" || upload.upload.kind !== "direct") {
 		return null;
 	}
@@ -1033,11 +1083,14 @@ function resolveWebgl2TerrainTextureBinding({
 function prepareTerrainTextureUpload(
 	assetState: AssetChannelState,
 	ref: TerrainBlendTextureRef,
+	materialTextureCapabilities: MaterialTextureCapabilities,
+	textureFilteringMode: TextureFilteringMode,
 ): (RenderSurfaceTextureUploadPreparation & { status: "ready" }) | null {
 	const defaultPolicy = selectRenderSurfaceTextureSamplingPolicy(
 		ref.renderSurface,
 		createDefaultMaterialTextureSamplingPolicy(
-			defaultWebgl2MaterialTextureCapabilities(),
+			materialTextureCapabilities,
+			textureFilteringMode,
 		),
 	);
 	const samplingPolicy = {
@@ -1049,7 +1102,7 @@ function prepareTerrainTextureUpload(
 	const upload = prepareRenderSurfaceTextureUploadData(
 		ref.renderSurface,
 		samplingPolicy,
-		defaultWebgl2MaterialTextureCapabilities(),
+		materialTextureCapabilities,
 		resolvePreparedTextureForRenderSurface(assetState, ref.renderSurface),
 	);
 	return upload.status === "ready" ? upload : null;

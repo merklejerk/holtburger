@@ -248,6 +248,97 @@ ul {
 		monospace;
 }
 
+.browser-world-display__modal-backdrop {
+	position: absolute;
+	inset: 0;
+	z-index: 12;
+	display: grid;
+	place-items: center;
+	padding: 1rem;
+	background: rgba(0, 0, 0, 0.42);
+	pointer-events: auto;
+}
+
+.browser-world-display__debug-report-modal {
+	display: grid;
+	grid-template-rows: auto minmax(16rem, 1fr) auto;
+	gap: 0.75rem;
+	width: min(58rem, calc(100vw - 2rem));
+	height: min(42rem, calc(100vh - 2rem));
+	box-sizing: border-box;
+	padding: 0.9rem;
+	border-radius: 8px;
+	border: 1px solid rgba(162, 183, 209, 0.2);
+	background: rgba(7, 14, 24, 0.94);
+	color: #d9e4f0;
+	box-shadow: 0 24px 60px rgba(0, 0, 0, 0.44);
+	backdrop-filter: blur(18px);
+}
+
+.browser-world-display__debug-report-header,
+.browser-world-display__debug-report-actions {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.75rem;
+}
+
+.browser-world-display__debug-report-header p {
+	margin: 0 0 0.15rem;
+	color: #90a8c7;
+	font-size: 0.72rem;
+	line-height: 1.2;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+}
+
+.browser-world-display__debug-report-header h2 {
+	margin: 0;
+	font-size: 1rem;
+	line-height: 1.2;
+}
+
+.browser-world-display__debug-report-header button,
+.browser-world-display__debug-report-actions button,
+.browser-panel__debug-report button {
+	flex: 0 0 auto;
+	padding: 0.45rem 0.7rem;
+	border: 1px solid rgba(162, 183, 209, 0.18);
+	border-radius: 6px;
+	background: rgba(220, 232, 249, 0.08);
+	color: #d9e4f0;
+	font: inherit;
+	cursor: pointer;
+}
+
+.browser-world-display__debug-report-header button:hover,
+.browser-world-display__debug-report-actions button:hover,
+.browser-panel__debug-report button:hover {
+	background: rgba(220, 232, 249, 0.14);
+}
+
+.browser-world-display__debug-report-modal textarea {
+	width: 100%;
+	min-width: 0;
+	min-height: 0;
+	box-sizing: border-box;
+	resize: none;
+	padding: 0.75rem;
+	border-radius: 6px;
+	border: 1px solid rgba(162, 183, 209, 0.16);
+	background: rgba(0, 0, 0, 0.36);
+	color: #edf4fc;
+	font:
+		0.78rem/1.35 "Iosevka",
+		"Iosevka Aile",
+		monospace;
+}
+
+.browser-world-display__debug-report-actions span {
+	color: #90a8c7;
+	font-size: 0.78rem;
+}
+
 .world-display__viewport {
 	min-height: 100vh;
 	display: grid;
@@ -427,6 +518,15 @@ ul {
 .browser-panel__section-stack {
 	display: grid;
 	gap: 0.5rem;
+}
+
+.browser-panel__debug-report {
+	display: grid;
+	gap: 0.75rem;
+}
+
+.browser-panel__debug-report button {
+	justify-self: start;
 }
 
 .browser-panel__details {

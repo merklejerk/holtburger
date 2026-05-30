@@ -14,6 +14,7 @@ import {
 import type { ResolvedMaterialSlot } from "./material-plan";
 import { formatMaterialAssetId } from "./material-signatures";
 import { resolveFirstMaterialRenderSurface } from "./material-texture-resolution";
+import { isIndexedTextureFormat } from "./indexed-material-data";
 import {
 	hasSourceAlpha,
 	isSupportedCompressedFormat,
@@ -43,6 +44,7 @@ export type StagedWorldMaterialStrategyFallbackReason =
 	| "unsupported-surface-flags"
 	| "blended-transparency"
 	| "animated-uv"
+	| "indexed-paletted-deferred"
 	| "unsupported-render-surface-format"
 	| "direct-color-normalization-deferred"
 	| "missing-decompressed-prepared-texture"
@@ -451,6 +453,19 @@ export function resolveStagedWorldMaterialStrategy(options: {
 				textureCapabilities:
 					options.textureCapabilities ??
 					defaultStagedWorldMaterialTextureCapabilities(),
+			});
+		}
+		if (isIndexedTextureFormat(surface.formatRaw)) {
+			return createFallbackRequirement({
+				input: options.input,
+				materialAssetId,
+				behavior: deriveLegacyMaterialBehaviorDto({
+					recipe,
+					usesIndexedClipDiscard: true,
+				}),
+				kind: "flat-fallback",
+				reason: "indexed-paletted-deferred",
+				detail: `render surface ${formatHex32(surface.renderSurfaceId)} format ${surface.format} is indexed/paletted; WebGL2 indexed material rendering starts in M3C`,
 			});
 		}
 		return createFallbackRequirement({

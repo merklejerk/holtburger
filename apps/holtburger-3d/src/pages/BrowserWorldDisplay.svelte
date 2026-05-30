@@ -163,6 +163,8 @@
 	);
 	let renderMetrics = $state<WorldRenderMetrics | null>(null);
 	let rendererCameraResidency = $state<BrowserCameraResidency | null>(null);
+	let debugReportText = $state<string | null>(null);
+	let debugReportCopied = $state(false);
 	let browserCameraState = $state<BrowserFreeCameraState>(
 		createBrowserFreeCameraState(),
 	);
@@ -433,11 +435,13 @@
 		{ label: "Mode", value: sceneContextText },
 		{ label: "Navigation", value: navigationFocusText },
 		{ label: "Destination", value: worldDisplay.destinationFocusLabel },
-		{ label: "Destination source", value: destinationSourceText },
 		{ label: "Camera residency", value: cameraResidencyText },
 		{ label: "Base scene", value: renderGraphText },
 		{ label: "Landblocks", value: landblockVisibilityText },
 		{ label: "Cells", value: cellVisibilityText },
+		{ label: "Renderer", value: rendererSummaryText },
+		{ label: "Materials", value: assetMaterialDebugText },
+		{ label: "Assets", value: assetSummaryText },
 	]);
 	const browserPanelSceneDetailSections = $derived<BrowserPanelSection[]>([
 		{
@@ -539,13 +543,108 @@
 		}
 		const counts = new Map<string, number>();
 		for (const sample of samples) {
-			counts.set(sample, (counts.get(sample) ?? 0) + 1);
+			const label = truncateDiagnosticSample(sample);
+			counts.set(label, (counts.get(label) ?? 0) + 1);
 		}
 		return [...counts.entries()]
 			.sort(([, left], [, right]) => right - left)
 			.slice(0, 4)
 			.map(([sample, count]) => (count === 1 ? sample : `${sample} x${count}`))
 			.join(" || ");
+	}
+
+	function truncateDiagnosticSample(sample: string): string {
+		const maxLength = 120;
+		if (sample.length <= maxLength) {
+			return sample;
+		}
+		return `${sample.slice(0, maxLength - 1)}…`;
+	}
+
+	function handleGenerateDebugReport(): void {
+		debugReportText = buildCurrentFrameDebugReport();
+		debugReportCopied = false;
+	}
+
+	function closeDebugReport(): void {
+		debugReportText = null;
+		debugReportCopied = false;
+	}
+
+	async function copyDebugReport(): Promise<void> {
+		if (!debugReportText) {
+			return;
+		}
+		await navigator.clipboard.writeText(debugReportText);
+		debugReportCopied = true;
+	}
+
+	function buildCurrentFrameDebugReport(): string {
+		const lines: string[] = [
+			"Holtburger 3D Debug Report",
+			`Generated: ${new Date().toISOString()}`,
+			`Destination: ${worldDisplay.destinationFocusLabel}`,
+			"",
+			formatReportRows("Scene Summary", browserPanelSceneRows),
+			formatReportSections("Scene Details", browserPanelSceneDetailSections),
+			formatReportRows("Debug Summary", browserPanelDebugRows),
+			formatReportSections("Debug Details", browserPanelDebugDetailSections),
+			"Render Metrics JSON",
+			formatReportJson(renderMetrics),
+			"",
+			"Asset Snapshot",
+			formatReportJson({
+				status: assetState.status,
+				activeRequest: assetState.activeRequest,
+				preparedCounts: countPreparedAssetsByKind(assetState.preparedByAssetId),
+				cacheDiagnostics: assetState.cacheDiagnostics,
+				recentHistory: assetState.history.slice(-24),
+			}),
+			"",
+			"Runtime Appearance",
+			runtimeAppearanceStatusText,
+			formatReportRows("Runtime Appearance Rows", runtimeAppearanceRows),
+			formatReportJson({
+				pending: runtimeAppearancePending,
+				error: runtimeAppearanceError,
+				input: runtimeAppearanceInput,
+				previews: runtimeAppearancePreviews.map((preview) => ({
+					id: preview.id,
+					setupModelId: preview.resolved.setupAppearance.setupModelId,
+					appearanceKey: preview.resolved.setupAppearance.appearanceKey,
+				})),
+			}),
+		];
+		return lines.join("\n");
+	}
+
+	function formatReportRows(
+		title: string,
+		rows: readonly BrowserPanelRow[],
+	): string {
+		return [
+			title,
+			...rows.map((row) => `${row.label}: ${row.value}`),
+			"",
+		].join("\n");
+	}
+
+	function formatReportSections(
+		title: string,
+		sections: readonly BrowserPanelSection[],
+	): string {
+		return [
+			title,
+			...sections.flatMap((section) => [
+				`[${section.title}]`,
+				...section.rows.map((row) => `${row.label}: ${row.value}`),
+				"",
+			]),
+		].join("\n");
+	}
+
+	function formatReportJson(value: unknown): string {
+		return JSON.stringify(value, null, 2) ?? "null";
 	}
 
 	// Browser free-camera controls are a navigation policy, not the future client camera.
@@ -1766,17 +1865,35 @@
 		<BrowserModePanel
 			{sceneStatusText}
 			sceneSummaryRows={browserPanelSceneRows}
-			sceneDetailSections={browserPanelSceneDetailSections}
-			debugSummaryRows={browserPanelDebugRows}
-			debugDetailSections={browserPanelDebugDetailSections}
-			{runtimeAppearanceStatusText}
-			{runtimeAppearanceRows}
 			canResetCamera={Boolean(renderMetrics?.bounds)}
 			onResetCamera={resetBrowserCamera}
-			onRuntimeAppearanceSubmit={handleRuntimeAppearanceSubmit}
-			onRuntimeAppearanceClear={clearRuntimeAppearance}
+			onGenerateDebugReport={handleGenerateDebugReport}
 		/>
 	</div>
+
+	{#if debugReportText !== null}
+		<div class="browser-world-display__modal-backdrop" data-browser-panel>
+			<div
+				class="browser-world-display__debug-report-modal"
+				role="dialog"
+				aria-modal="true"
+				aria-labelledby="debug-report-title"
+			>
+				<div class="browser-world-display__debug-report-header">
+					<div>
+						<p>One-frame diagnostics</p>
+						<h2 id="debug-report-title">Debug Report</h2>
+					</div>
+					<button type="button" onclick={closeDebugReport}>Close</button>
+				</div>
+				<textarea readonly spellcheck="false" value={debugReportText}></textarea>
+				<div class="browser-world-display__debug-report-actions">
+					<span>{debugReportCopied ? "Copied." : "Ready to copy."}</span>
+					<button type="button" onclick={copyDebugReport}>Copy</button>
+				</div>
+			</div>
+		</div>
+	{/if}
 
 	{#if diagnosticInspector}
 		<aside class="browser-world-display__inspector" data-browser-panel>

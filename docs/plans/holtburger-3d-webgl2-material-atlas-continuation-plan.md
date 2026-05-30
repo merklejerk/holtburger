@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
-Status: Phase M3A complete; ready for Phase M3B.
+Status: Phase M3B complete; ready for Phase M3C.
 
 Related plans:
 
@@ -522,7 +522,7 @@ Cleanup targets and legacy shims:
 
 ## Phase M3B: Indexed/Paletted Texture DTO Extraction
 
-Status: Not started.
+Status: Complete.
 
 Purpose: extract renderer-neutral indexed texture and palette DTOs from Three-era helpers before
 adding WebGL2 uploads. This keeps the shared material/resource pipeline honest and testable without
@@ -570,6 +570,72 @@ Exit criteria:
 - DTO tests cover representative setup/static and structured-interior indexed materials.
 - Setup appearance palette overrides and subpalettes are dependency-visible and key-stable.
 - No WebGL2 shader/upload work is required to complete this phase.
+
+Progress:
+
+- Added renderer-neutral palette DTO extraction in `palette-data.ts`, including ARGB-to-RGBA byte
+  conversion, palette asset IDs, copied source ARGB data, and derived palette construction.
+- Moved derived palette range validation and stable derived palette key construction out of the
+  Three resource helper. The Three `derived-palette-resources.ts` adapter now delegates to the pure
+  DTO helper before creating a `DataTexture`.
+- Added renderer-neutral indexed texture DTO extraction in `indexed-material-data.ts`, including
+  format classification, source length validation, copied source bytes, dimensions, max palette
+  index scanning, and render-surface asset IDs.
+- Added renderer-neutral indexed material DTO resolution that binds material recipe, indexed render
+  surface, selected palette, optional derived palette, sampler policy, legacy behavior metadata, and
+  prepared asset dependencies into one material fact.
+- Added explicit palette selection order for indexed materials: setup appearance override first,
+  material recipe palette second, render-surface default palette third.
+- Added neighbor-packed indexed derivatives:
+  - P8 produces an `RGBA8`-shaped byte payload containing current/right/down/diagonal indices.
+  - P16 produces an `RGBA16UI`-shaped unsigned-short payload containing current/right/down/diagonal
+    indices.
+  - Edge neighbor policy follows the resolved sampler wrap mode, so repeat wraps edge neighbors and
+    clamp keeps edge neighbors pinned.
+- Kept the old Three indexed texture resource wrapper as an adapter over the new DTO extraction
+  rather than leaving duplicate decode/validation logic in the Three path.
+- Added focused tests for indexed DTO extraction, P8/P16 neighbor packing, setup palette override
+  precedence, derived palette application, missing subpalette diagnostics, and dependency visibility.
+
+Decisions:
+
+- Neighbor-packed payloads are renderer-prepared derivatives. Raw indexed source bytes remain the
+  source DTO so future upload paths can choose different packing or filtering strategies without
+  reparsing render surfaces.
+- Derived palettes are produced before renderer upload. WebGL2 should receive a complete palette
+  texture for the indexed material, not a base palette plus shader-side subpalette patch commands.
+- M3B keeps WebGL2 upload and shader work out of scope. The phase proves the data model and tests
+  first, then M3C can consume it for actual rendering.
+- Palette DTOs use copied arrays. Renderer/resource code should not mutate prepared asset payloads
+  in place.
+
+Course corrections:
+
+- The existing Three helper's `selectIndexedPalette(recipe, renderSurface)` signature is retained as
+  a compatibility adapter for current Three call sites, but the new renderer-neutral selector accepts
+  the appearance context needed for setup palette overrides.
+- The readiness/admission system already tracks setup appearance palette dependency asset IDs. M3B
+  added DTO-level proof that missing subpalettes block indexed material resolution and report a
+  concrete diagnostic; if M3C finds a composed object entering staged rendering with unresolved
+  subpalette assets, add an immediate readiness integration phase before enabling indexed WebGL2
+  drawing.
+
+Cleanup targets and legacy shims:
+
+- `indexed-texture-resources.ts` is now a Three adapter. After WebGL2 indexed materials are working
+  and Three is no longer the comparison source for indexed behavior, remove the adapter or move it
+  under a Three-specific path.
+- `palette-resources.ts` now carries the pure palette DTO alongside its Three `DataTexture`. Future
+  WebGL2 resources should consume `palette-data.ts` directly and should not depend on the Three
+  wrapper.
+- M3C should wire `ResolvedIndexedMaterialData` into staged material strategy/resource realization
+  and add diagnostics that distinguish missing base palette, missing setup override palette, missing
+  subpalette, invalid subpalette range, index out of range, and unsupported P16 integer upload.
+- Follow-up visual inspection after M3B confirmed indexed materials currently render as flat WebGL2
+  fallback silhouettes because M3C has not added the indexed upload/shader path yet. The staged
+  strategy now reports this as `indexed-paletted-deferred` instead of the generic
+  `unsupported-render-surface-format` reason, and the debug panel truncates long sample strings so
+  fallback/atlas diagnostics stay readable.
 
 ## Phase M3C: WebGL2 Indexed/Paletted Direct Materials
 

@@ -255,9 +255,10 @@ export function syncWebgl2WorldResources({
 		drawUnit.materialFallbackReason ? [drawUnit.materialFallbackReason] : [],
 	);
 	store.materialFallbackReasonCount = materialFallbackReasons.length;
-	store.materialFallbackReasonSamples = [
-		...new Set(materialFallbackReasons),
-	].slice(0, 8);
+	store.materialFallbackReasonSamples = summarizeDiagnosticReasons(
+		materialFallbackReasons,
+		8,
+	);
 	const textureSamplingPolicies = store.drawUnits.flatMap((drawUnit) =>
 		drawUnit.textureSamplingPolicy ? [drawUnit.textureSamplingPolicy] : [],
 	);
@@ -915,6 +916,30 @@ function collectTextureUploadSamples(
 
 function describeDrawUnitTextureUpload(drawUnit: Webgl2WorldDrawUnit): string {
 	return drawUnit.textureUploadSample ?? `${drawUnit.textureKey ?? drawUnit.id}: unavailable`;
+}
+
+function summarizeDiagnosticReasons(
+	reasons: readonly string[],
+	limit: number,
+): string[] {
+	const counts = countStringOccurrences(reasons.map(normalizeDiagnosticReason));
+	return Object.entries(counts)
+		.sort(([, left], [, right]) => right - left)
+		.slice(0, limit)
+		.map(([reason, count]) => (count === 1 ? reason : `${reason} x${count}`));
+}
+
+function normalizeDiagnosticReason(reason: string): string {
+	if (reason.includes("is indexed/paletted")) {
+		return "indexed/paletted material deferred to M3C";
+	}
+	if (reason.startsWith("missing atlas-ready prepared texture ")) {
+		return "missing atlas-ready prepared texture";
+	}
+	if (reason.includes("has no UV buffer")) {
+		return "material draw unit has no UV buffer";
+	}
+	return reason;
 }
 
 function sampleDirectTextureBytes(

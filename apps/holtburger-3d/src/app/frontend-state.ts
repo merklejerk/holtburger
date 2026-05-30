@@ -18,12 +18,16 @@ import {
 	updateNavigationFocusMode,
 	updatePortalPolygonVisibility,
 	updatePortalTargetHighlighting,
+	updatePortalDepthRangeMode,
+	updatePortalTriageMode,
 	updateTerrainLodRadius,
 	updateTransitionPortalMaxDepth,
 	type BrowserCameraResidencyDestinationInput,
 	type BrowserLandblockInputMode,
 	type BrowserModeState,
 	type BrowserNavigationFocusMode,
+	type BrowserPortalDepthRangeMode,
+	type BrowserPortalTriageMode,
 	type BrowserRenderStyle,
 	type BrowserTextureColorSpaceMode,
 	type BrowserTextureFilteringMode,
@@ -112,6 +116,26 @@ function createFrontendStateStore() {
 				browserMode: updateTransitionPortalMaxDepth(
 					state.browserMode,
 					maxDepth,
+				),
+			}));
+		},
+		updatePortalTriageMode(portalTriageMode: BrowserPortalTriageMode): void {
+			update((state) => ({
+				...state,
+				browserMode: updatePortalTriageMode(
+					state.browserMode,
+					portalTriageMode,
+				),
+			}));
+		},
+		updatePortalDepthRangeMode(
+			portalDepthRangeMode: BrowserPortalDepthRangeMode,
+		): void {
+			update((state) => ({
+				...state,
+				browserMode: updatePortalDepthRangeMode(
+					state.browserMode,
+					portalDepthRangeMode,
 				),
 			}));
 		},

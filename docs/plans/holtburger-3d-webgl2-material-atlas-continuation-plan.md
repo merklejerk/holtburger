@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
-Status: Phase M4C.1 stabilization complete; ready for Phase M4C.2 diagnostics/parent-rect prep.
+Status: Phase M4C.2 triage controls landed; awaiting field diagnosis using the new portal coverage modes.
 
 Related plans:
 
@@ -1501,7 +1501,7 @@ Cleanup targets and legacy shims:
 
 ## Phase M4C.2: Portal Coverage Triage and Diagnostics
 
-Status: Not started.
+Status: In progress. Depth-test failure isolated; near/far precision probes landed for field testing.
 
 Purpose: stop guessing about the remaining first-depth portal holes. M4C.1 fixed static
 scene-domain ownership, hardened near-plane rect clipping, and added a mask-only depth bias, but
@@ -1516,6 +1516,9 @@ Why this phase is immediate:
   not the primary suspect.
 - The artifact changes with camera distance, which is consistent with depth precision or projected
   coverage drift, but M4C.1's small mask-depth bias did not resolve it.
+- Field triage showed `no-composite-scissor` does not change the artifact, while `no-mask-depth`
+  removes the shimmering/clipping entirely at the expected cost of losing legitimate occluders. The
+  failing pass is therefore the portal aperture mask depth test against already-composited depth.
 - The default browser free camera currently uses a very large far/near range (`near=0.1`,
   `far=5000`). That makes depth precision highly non-linear and can produce distance-dependent
   banding when an aperture mask is re-rasterized against depth copied from an offscreen texture.
@@ -1524,18 +1527,24 @@ Why this phase is immediate:
 
 Tasks:
 
-- Add a temporary WebGL2 portal coverage debug mode that can independently visualize or force:
+- [In progress] Add a temporary WebGL2 portal coverage debug mode that can independently visualize
+  or force:
   - aperture stencil/mask coverage after the mask pass;
   - composite rectangle/scissor coverage before sampling;
   - final composite source sampling coverage.
-- Add controlled toggles, preferably debug-only renderer options or panel flags, for the triage
-  ladder:
-  - disable composite scissor while keeping stencil enabled;
-  - disable aperture mask depth testing while keeping stencil/composite enabled;
-  - draw stencil-visible pixels as a flat debug color instead of sampling the scene-domain target.
-- Record debug metrics for mask-visible candidate count, composite rect count, rect area, and which
-  triage override is active.
-- Add depth-precision probes for portal triage:
+- [Done] Add controlled toggles, preferably debug-only renderer options or panel flags, for the
+  triage ladder:
+  - `no-composite-scissor`: disables composite scissor while keeping stencil enabled;
+  - `no-mask-depth`: disables aperture mask depth testing while keeping stencil/composite enabled;
+  - `flat-stencil-color`: draws stencil-visible pixels as a flat debug color instead of sampling the
+    scene-domain target.
+- [Partial] Record debug metrics for mask-visible candidate count, composite rect count, rect area,
+  and which triage override is active.
+  - Existing WebGL2 metrics already report visible portal work item count, composite rect count, and
+    estimated pixel area.
+  - New metrics report the active `portalTriageMode`.
+  - Remaining: add explicit skipped/invalid counters after the failing pass is identified.
+- [Partial] Add depth-precision probes for portal triage:
   - report active camera `near`, `far`, and `far/near` ratio in WebGL2 portal debug metrics;
   - add temporary/debug-only near/far overrides for WebGL2 portal rendering experiments;
   - test whether increasing near plane (`1.0` or `2.0`) or reducing far plane (`500` or `1000`)
@@ -1575,6 +1584,18 @@ Exit criteria:
 
 Decisions:
 
+- M4C.2 now starts with runtime controls rather than another speculative compositor change. The
+  browser settings panel exposes the triage modes so field screenshots can identify the failing
+  pass directly.
+- `no-composite-scissor` having no visible effect rules out scissor/screen-rect bounds as the cause
+  of the current first-depth artifact.
+- `no-mask-depth` removing the artifact confirms the aperture mask depth test is the immediate
+  failure point. Keep testing with normal depth enabled and adjusted camera near/far before changing
+  bias or aperture geometry.
+- `flat-stencil-color` intentionally disables depth writes for the debug composite. It visualizes
+  stencil coverage and should not be interpreted as a faithful recursive-portal output mode.
+- Camera near/far metrics are permanent enough to keep: they are useful renderer diagnostics and
+  directly explain depth precision risk. The triage override itself remains debug policy.
 - Parent-rect clipping is demoted behind first-depth coverage triage. It is still needed for better
   fill estimates, but it cannot explain the current single-depth strip artifact.
 - Do not increase the mask polygon offset again until debug coverage proves the aperture depth test
@@ -1587,6 +1608,45 @@ Decisions:
   `50000:1` far/near range.
 - Debug rendering controls should be temporary or clearly marked. Keep permanent metrics useful,
   but do not let one-off triage flags become product-facing renderer policy.
+
+Progress:
+
+- Added `WorldDisplayPortalTriageMode` and propagated it through browser mode state, the resource
+  coordinator, renderer contract, deferred renderer, WebGL2 renderer, and settings panel.
+- Added WebGL2 compositor branches for `no-composite-scissor`, `no-mask-depth`, and
+  `flat-stencil-color`.
+- Added WebGL2 render metrics for active triage mode plus active camera `near`, `far`, and
+  `far/near` ratio. The debug summary now includes those values for quick screenshots/reports.
+- Added a browser-local portal depth range selector with `default`, `near=1/far=1000`,
+  `near=2/far=1000`, and `near=1/far=500`. The selector modifies the effective camera frame passed
+  into the renderer so scene projection, offscreen depth, and mask depth testing stay coherent.
+- Added focused browser-mode test coverage for preserving the portal triage mode.
+
+Next field triage order:
+
+1. Reproduce the distant strip artifact in `normal`.
+2. Switch to `flat-stencil-color`.
+   - If the flat color has the same strip/hole, the failure is mask/stencil coverage.
+   - If the flat color is solid, the failure is source sampling/depth write/state after stencil.
+3. Keep triage mode at `normal` and test depth ranges in this order:
+   - `near=1/far=1000`
+   - `near=2/far=1000`
+   - `near=1/far=500`
+4. If any adjusted range stabilizes the artifact while preserving occlusion, design the real camera
+   clipping/depth policy before increasing mask bias.
+5. If adjusted ranges do not help, inspect aperture geometry/depth-function mismatch and then test
+   `DEPTH_COMPONENT32F` scene-domain depth textures behind a debug option.
+
+Cleanup targets and legacy shims:
+
+- `portalTriageMode` is a debug override and should not become normal renderer policy. Remove or
+  hide it once the root cause is fixed.
+- The WebGL2 pass helpers in `webgl2-world-display-renderer-impl.ts` are growing. Extract mask,
+  copy, and debug-composite pass code after M4C.2 stabilizes the pass contract.
+- `flat-stencil-color` currently reuses per-rect draws so it can compare against normal scissored
+  behavior. If it remains beyond triage, collapse same-ref debug draws into one full-screen draw.
+- Near/far override controls are temporary debug UI. Remove or replace them with a real clipping
+  policy once the depth precision experiment is complete.
 
 ## Phase M4D: Portal Fill-Rate and Visual Hardening
 

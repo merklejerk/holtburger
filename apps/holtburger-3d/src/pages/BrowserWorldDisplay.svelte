@@ -6,6 +6,7 @@
 	import {
 		describeBrowserDestinationIdentity,
 		type BrowserLocationSelection,
+		type BrowserPortalDepthRangeMode,
 	} from "../app/browser-mode";
 	import type { AssetChannelState } from "../lib/assets/types";
 	import type { CameraHintAckDto, CameraHintDto } from "../lib/host/contracts";
@@ -131,6 +132,12 @@
 	);
 	let transitionPortalMaxDepth = $state(
 		initialFrontendState.browserMode.transitionPortalMaxDepth,
+	);
+	let portalTriageMode = $state(
+		initialFrontendState.browserMode.portalTriageMode,
+	);
+	let portalDepthRangeMode = $state(
+		initialFrontendState.browserMode.portalDepthRangeMode,
 	);
 	let showPortalPolygons = $state(
 		initialFrontendState.browserMode.showPortalPolygons,
@@ -284,12 +291,18 @@
 		const fallbackSamples = summarizeSamples(debug.fallbackReasonSamples);
 		const textureUploadSamples = summarizeSamples(debug.textureUploadSamples);
 		const atlasCandidateSamples = summarizeSamples(debug.atlasCandidateSamples);
+		const cameraDepthRange =
+			debug.cameraNear !== null &&
+			debug.cameraFar !== null &&
+			debug.cameraFarNearRatio !== null
+				? `, camera depth ${debug.cameraNear.toFixed(2)}-${debug.cameraFar.toFixed(0)} (${debug.cameraFarNearRatio.toFixed(0)}:1)`
+				: "";
 		const drawGroupTerm =
 			debug.rendererBackend === "webgl2" ? "draw units" : "batches";
 		const performanceText = renderMetrics?.performance
 			? `${renderMetrics.performance.fps.toFixed(1)} FPS, ${renderMetrics.performance.frameMs.toFixed(1)} ms/frame, ${renderMetrics.performance.renderMs.toFixed(1)} ms render`
 			: "waiting for performance sample";
-		return `Perf ${performanceText}. Diagnosis: ${diagnosis}. Draw pressure ${debug.renderCalls} visible draws from ${candidateBatchCount} candidate ${drawGroupTerm}; static candidates ${debug.staticBvhCandidateBatchCount}${staticCandidateRatio}; retained ${drawGroupTerm} terrain ${debug.terrainRenderBatchCount}, static ${debug.staticRenderBatchCount}, interiors ${debug.structuredInteriorRenderBatchCount}; retained tris ${debug.renderTriangles}. Material path ${debug.materialCount} materials, ${debug.textureResourceCount} textures, ${debug.indexedTextureResourceCount} indexed textures, ${debug.paletteResourceCount} palettes, direct/material types ${materialTypes}; atlas candidates ${debug.atlasEligibleMaterialCount} draws, ${debug.atlasCandidateEntryCount} entries, ${debug.atlasCandidateMaterialSlotCount} material slots${atlasCandidateSamples ? ` (${atlasCandidateSamples})` : ""}; texture uploads${textureUploadSamples ? ` ${textureUploadSamples}` : " waiting"}; fallbacks ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}. Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}, transition depth ${debug.transitionPortalMaxDepth}; canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
+		return `Perf ${performanceText}. Diagnosis: ${diagnosis}. Draw pressure ${debug.renderCalls} visible draws from ${candidateBatchCount} candidate ${drawGroupTerm}; static candidates ${debug.staticBvhCandidateBatchCount}${staticCandidateRatio}; retained ${drawGroupTerm} terrain ${debug.terrainRenderBatchCount}, static ${debug.staticRenderBatchCount}, interiors ${debug.structuredInteriorRenderBatchCount}; retained tris ${debug.renderTriangles}. Material path ${debug.materialCount} materials, ${debug.textureResourceCount} textures, ${debug.indexedTextureResourceCount} indexed textures, ${debug.paletteResourceCount} palettes, direct/material types ${materialTypes}; atlas candidates ${debug.atlasEligibleMaterialCount} draws, ${debug.atlasCandidateEntryCount} entries, ${debug.atlasCandidateMaterialSlotCount} material slots${atlasCandidateSamples ? ` (${atlasCandidateSamples})` : ""}; texture uploads${textureUploadSamples ? ` ${textureUploadSamples}` : " waiting"}; fallbacks ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}. Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}, transition depth ${debug.transitionPortalMaxDepth}, portal triage ${debug.portalTriageMode}${cameraDepthRange}; canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
 	});
 	const sceneContextText = $derived(renderResourceSnapshot.sceneContextText);
 	const cameraResidencyText = $derived.by(() => {
@@ -309,7 +322,7 @@
 		if (!debug) {
 			return "Waiting for render graph.";
 		}
-		return `${debug.renderGraphBaseScene} base, transition depth ${debug.transitionPortalMaxDepth}`;
+		return `${debug.renderGraphBaseScene} base, transition depth ${debug.transitionPortalMaxDepth}, triage ${debug.portalTriageMode}`;
 	});
 	const landblockVisibilityText = $derived(
 		renderResourceSnapshot.landblockVisibilityText,
@@ -717,6 +730,8 @@
 		detailLodRadius = state.browserMode.detailLodRadius;
 		envCellLodRadius = state.browserMode.envCellLodRadius;
 		transitionPortalMaxDepth = state.browserMode.transitionPortalMaxDepth;
+		portalTriageMode = state.browserMode.portalTriageMode;
+		portalDepthRangeMode = state.browserMode.portalDepthRangeMode;
 		showPortalPolygons = state.browserMode.showPortalPolygons;
 		showCellIndicators = state.browserMode.showCellIndicators;
 		highlightPortalTargets = state.browserMode.highlightPortalTargets;
@@ -819,6 +834,7 @@
 			detailLodRadius,
 			envCellLodRadius,
 			transitionPortalMaxDepth,
+			portalTriageMode,
 			renderStyle,
 			textureFilteringMode,
 			textureColorSpaceMode,
@@ -828,7 +844,7 @@
 			highlightPortalTargets,
 			diagnosticSelection,
 			activeRenderAnchor,
-			browserCameraFrame,
+			browserCameraFrame: getEffectiveBrowserCameraFrame(),
 			runtimeAppearancePreviews,
 			cameraAck,
 			pendingCameraHint,
@@ -985,7 +1001,44 @@
 	}
 
 	function syncControlledCameraFrame(): void {
-		renderResourceCoordinator.updateControlledCameraFrame(browserCameraFrame);
+		renderResourceCoordinator.updateControlledCameraFrame(
+			getEffectiveBrowserCameraFrame(),
+		);
+	}
+
+	function getEffectiveBrowserCameraFrame(): SceneCameraFrame | null {
+		return applyPortalDepthRangeMode(
+			browserCameraFrame,
+			portalDepthRangeMode,
+		);
+	}
+
+	function applyPortalDepthRangeMode(
+		frame: SceneCameraFrame | null,
+		mode: BrowserPortalDepthRangeMode,
+	): SceneCameraFrame | null {
+		if (!frame || mode === "default") {
+			return frame;
+		}
+		const depthRange = portalDepthRangeForMode(mode);
+		return {
+			...frame,
+			near: depthRange.near,
+			far: depthRange.far,
+		};
+	}
+
+	function portalDepthRangeForMode(
+		mode: Exclude<BrowserPortalDepthRangeMode, "default">,
+	): Pick<SceneCameraFrame, "near" | "far"> {
+		switch (mode) {
+			case "near-1-far-1000":
+				return { near: 1, far: 1000 };
+			case "near-2-far-1000":
+				return { near: 2, far: 1000 };
+			case "near-1-far-500":
+				return { near: 1, far: 500 };
+		}
 	}
 
 	function scheduleAssetDebugSummaryUpdate(): void {

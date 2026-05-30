@@ -67,7 +67,10 @@ import {
 import { deriveTransitionPortalCandidates } from "./transition-portal-work-items";
 import { WORLD_RENDER_DOMAIN } from "./render-domains";
 import type { SceneCameraFrame } from "./camera";
-import type { WorldDisplayRenderStyle } from "./renderer-contract";
+import type {
+	WorldDisplayPortalTriageMode,
+	WorldDisplayRenderStyle,
+} from "./renderer-contract";
 
 let lastPreparedOutdoorAssetsNotRenderedSignature: string | null = null;
 let lastReportedTerrainMaterialDiagnosticsSignature: string | null = null;
@@ -83,6 +86,7 @@ export interface BrowserRenderResourceCoordinatorInput {
 	detailLodRadius: number;
 	envCellLodRadius: number;
 	transitionPortalMaxDepth: number;
+	portalTriageMode: WorldDisplayPortalTriageMode;
 	renderStyle: WorldDisplayRenderStyle;
 	textureFilteringMode: BrowserTextureFilteringMode;
 	textureColorSpaceMode: BrowserTextureColorSpaceMode;
@@ -139,6 +143,7 @@ export interface BrowserRenderResourceSurface {
 	setRenderSpatialQuery(query: RenderSpatialIndexQuery | null): void;
 	setControlledCameraFrame(frame: SceneCameraFrame | null): void;
 	setTransitionPortalMaxDepth(maxDepth: number): void;
+	setPortalTriageMode(mode: WorldDisplayPortalTriageMode): void;
 	setRenderStyle(renderStyle: WorldDisplayRenderStyle): void;
 	setTextureFilteringMode(mode: BrowserTextureFilteringMode): void;
 	setTextureColorSpaceMode(mode: BrowserTextureColorSpaceMode): void;
@@ -407,6 +412,11 @@ export class BrowserRenderResourceCoordinator {
 				() =>
 					surface.setTransitionPortalMaxDepth(input.transitionPortalMaxDepth),
 			);
+			this.applySurfaceResource(
+				"portal-triage-mode",
+				input.portalTriageMode,
+				() => surface.setPortalTriageMode(input.portalTriageMode),
+			);
 			this.applySurfaceResource("render-style", input.renderStyle, () =>
 				surface.setRenderStyle(input.renderStyle),
 			);
@@ -469,6 +479,7 @@ type BrowserRenderResourceSurfaceKey =
 	| "render-spatial-query"
 	| "controlled-camera-frame"
 	| "transition-portal-depth"
+	| "portal-triage-mode"
 	| "render-style"
 	| "texture-filtering-mode"
 	| "texture-color-space-mode"

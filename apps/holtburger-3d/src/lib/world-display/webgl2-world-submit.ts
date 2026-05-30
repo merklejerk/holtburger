@@ -38,6 +38,30 @@ export type Webgl2TerrainBlendWorldProgram = Webgl2ProgramResource<
 	| "uRoadRotation1"
 	| "uRoadCount"
 >;
+export type Webgl2IndexedP8WorldProgram = Webgl2ProgramResource<
+	"position" | "uv",
+	| "uModelViewProjection"
+	| "uColor"
+	| "uAlphaTest"
+	| "uIndexTexture"
+	| "uPaletteTexture"
+	| "uTextureSize"
+	| "uPaletteColorCount"
+	| "uRepeatS"
+	| "uRepeatT"
+>;
+export type Webgl2IndexedP16WorldProgram = Webgl2ProgramResource<
+	"position" | "uv",
+	| "uModelViewProjection"
+	| "uColor"
+	| "uAlphaTest"
+	| "uIndexTexture"
+	| "uPaletteTexture"
+	| "uTextureSize"
+	| "uPaletteColorCount"
+	| "uRepeatS"
+	| "uRepeatT"
+>;
 
 export interface Webgl2WorldSubmitMetrics {
 	visibleDrawUnitCount: number;
@@ -74,6 +98,8 @@ export function submitWebgl2FlatWorldFrame({
 	program,
 	texturedProgram,
 	terrainBlendProgram,
+	indexedP8Program,
+	indexedP16Program,
 	drawUnitsById,
 	frame,
 }: {
@@ -82,6 +108,8 @@ export function submitWebgl2FlatWorldFrame({
 	program: Webgl2FlatWorldProgram;
 	texturedProgram: Webgl2TexturedWorldProgram;
 	terrainBlendProgram: Webgl2TerrainBlendWorldProgram;
+	indexedP8Program: Webgl2IndexedP8WorldProgram;
+	indexedP16Program: Webgl2IndexedP16WorldProgram;
 	drawUnitsById: ReadonlyMap<string, Webgl2WorldDrawUnit>;
 	frame: StagedWorldFrame;
 }): Webgl2WorldSubmitMetrics {
@@ -127,36 +155,59 @@ export function submitWebgl2FlatWorldFrame({
 	let previousModelViewProjection: RenderMat4 | null = null;
 	let previousColor: Float32Array | null = null;
 	let previousAlphaTest: number | null = null;
-	let previousTextureProgram = false;
+	let previousProgramKind = "";
 	for (const drawUnit of drawUnits) {
 		const texture = drawUnit.texture;
 		const useTerrainBlend = drawUnit.terrainBlend !== null;
+		const useIndexed = drawUnit.indexedMaterial !== null;
 		const useTexture = texture !== null && !useTerrainBlend;
+		const activeIndexedProgram =
+			drawUnit.indexedMaterial?.indexFormat === "p8"
+				? indexedP8Program
+				: drawUnit.indexedMaterial?.indexFormat === "index16"
+					? indexedP16Program
+					: null;
 		const activeProgram = useTerrainBlend
 			? terrainBlendProgram
-			: useTexture
-				? texturedProgram
-				: program;
+			: activeIndexedProgram
+				? activeIndexedProgram
+				: useTexture
+					? texturedProgram
+					: program;
+		const programKind = useTerrainBlend
+			? "terrain"
+			: useIndexed
+				? drawUnit.indexedMaterial?.indexFormat ?? "indexed"
+				: useTexture
+					? "texture"
+					: "flat";
 		if (stateCache.useProgram(activeProgram.program)) {
 			metrics.programSwitchCount += 1;
 			metrics.stateChangeCount += 1;
 			previousModelViewProjection = null;
 			previousColor = null;
 			previousAlphaTest = null;
-			previousTextureProgram = useTexture;
+			previousProgramKind = programKind;
 			if (useTexture) {
 				gl.uniform1i(texturedProgram.uniforms.uTexture, 0);
 				metrics.uniformUploadCount += 1;
+			}
+			if (useIndexed) {
+				if (!activeIndexedProgram) {
+					throw new Error(`Indexed draw unit ${drawUnit.id} has no indexed program.`);
+				}
+				uploadIndexedSamplerUniforms(gl, activeIndexedProgram);
+				metrics.uniformUploadCount += 2;
 			}
 			if (useTerrainBlend) {
 				uploadTerrainBlendSamplerUniforms(gl, terrainBlendProgram);
 				metrics.uniformUploadCount += TERRAIN_BLEND_SAMPLER_UNIFORM_COUNT;
 			}
-		} else if (previousTextureProgram !== useTexture) {
+		} else if (previousProgramKind !== programKind) {
 			previousModelViewProjection = null;
 			previousColor = null;
 			previousAlphaTest = null;
-			previousTextureProgram = useTexture;
+			previousProgramKind = programKind;
 		}
 		metrics.stateChangeCount += applyDrawUnitRenderState({
 			gl,
@@ -170,6 +221,12 @@ export function submitWebgl2FlatWorldFrame({
 			metrics.stateChangeCount += bindTerrainBlendTextures({
 				stateCache,
 				terrainBlend: drawUnit.terrainBlend,
+			});
+		}
+		if (drawUnit.indexedMaterial) {
+			metrics.stateChangeCount += bindIndexedMaterialTextures({
+				stateCache,
+				indexedMaterial: drawUnit.indexedMaterial,
 			});
 		}
 		if (stateCache.bindVertexArray(drawUnit.vertexArray.vertexArray)) {
@@ -197,18 +254,30 @@ export function submitWebgl2FlatWorldFrame({
 			!useTerrainBlend &&
 			(!previousColor || !arraysEqual(previousColor, drawUnit.color))
 		) {
-			const colorProgram = useTexture ? texturedProgram : program;
+			const colorProgram = activeIndexedProgram ?? (useTexture ? texturedProgram : program);
 			gl.uniform4fv(colorProgram.uniforms.uColor, drawUnit.color);
 			previousColor = drawUnit.color;
 			metrics.uniformUploadCount += 1;
 		}
-		if (useTexture) {
+		if (useTexture || useIndexed) {
 			const alphaTest = drawUnit.materialBehavior?.alphaTest ?? 0;
 			if (previousAlphaTest !== alphaTest) {
-				gl.uniform1f(texturedProgram.uniforms.uAlphaTest, alphaTest);
+				const alphaProgram = activeIndexedProgram ?? texturedProgram;
+				gl.uniform1f(alphaProgram.uniforms.uAlphaTest, alphaTest);
 				previousAlphaTest = alphaTest;
 				metrics.uniformUploadCount += 1;
 			}
+		}
+		if (drawUnit.indexedMaterial) {
+			if (!activeIndexedProgram) {
+				throw new Error(`Indexed draw unit ${drawUnit.id} has no indexed program.`);
+			}
+			uploadIndexedMaterialUniforms(
+				gl,
+				activeIndexedProgram,
+				drawUnit.indexedMaterial,
+			);
+			metrics.uniformUploadCount += INDEXED_DYNAMIC_UNIFORM_COUNT;
 		}
 		if (drawUnit.terrainBlend) {
 			uploadTerrainBlendUniforms(gl, terrainBlendProgram, drawUnit.terrainBlend);
@@ -229,6 +298,7 @@ export function submitWebgl2FlatWorldFrame({
 
 const TERRAIN_BLEND_SAMPLER_UNIFORM_COUNT = 10;
 const TERRAIN_BLEND_DYNAMIC_UNIFORM_COUNT = 13;
+const INDEXED_DYNAMIC_UNIFORM_COUNT = 5;
 
 function uploadTerrainBlendSamplerUniforms(
 	gl: WebGL2RenderingContext,
@@ -278,6 +348,49 @@ function bindTerrainBlendTextures({
 		}
 	}
 	return changeCount;
+}
+
+function uploadIndexedSamplerUniforms(
+	gl: WebGL2RenderingContext,
+	program: Webgl2IndexedP8WorldProgram | Webgl2IndexedP16WorldProgram,
+): void {
+	gl.uniform1i(program.uniforms.uIndexTexture, 0);
+	gl.uniform1i(program.uniforms.uPaletteTexture, 1);
+}
+
+function bindIndexedMaterialTextures({
+	stateCache,
+	indexedMaterial,
+}: {
+	stateCache: Webgl2StateCache;
+	indexedMaterial: NonNullable<Webgl2WorldDrawUnit["indexedMaterial"]>;
+}): number {
+	let changeCount = 0;
+	if (stateCache.bindTexture2D(0, indexedMaterial.indexTexture.texture)) {
+		changeCount += 1;
+	}
+	if (stateCache.bindTexture2D(1, indexedMaterial.paletteTexture.texture)) {
+		changeCount += 1;
+	}
+	return changeCount;
+}
+
+function uploadIndexedMaterialUniforms(
+	gl: WebGL2RenderingContext,
+	program: Webgl2IndexedP8WorldProgram | Webgl2IndexedP16WorldProgram,
+	indexedMaterial: NonNullable<Webgl2WorldDrawUnit["indexedMaterial"]>,
+): void {
+	gl.uniform2f(
+		program.uniforms.uTextureSize,
+		indexedMaterial.width,
+		indexedMaterial.height,
+	);
+	gl.uniform1f(
+		program.uniforms.uPaletteColorCount,
+		indexedMaterial.paletteColorCount,
+	);
+	gl.uniform1i(program.uniforms.uRepeatS, indexedMaterial.wrapS === "repeat" ? 1 : 0);
+	gl.uniform1i(program.uniforms.uRepeatT, indexedMaterial.wrapT === "repeat" ? 1 : 0);
 }
 
 function uploadTerrainBlendUniforms(

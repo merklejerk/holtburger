@@ -11,10 +11,18 @@ import {
 	deriveLegacyMaterialBehaviorDto,
 	type LegacyMaterialBehaviorDto,
 } from "./material-behavior";
+import {
+	createBaseMaterialAppearanceContext,
+	type MaterialAppearanceContext,
+} from "./material-appearance";
 import type { ResolvedMaterialSlot } from "./material-plan";
 import { formatMaterialAssetId } from "./material-signatures";
 import { resolveFirstMaterialRenderSurface } from "./material-texture-resolution";
-import { isIndexedTextureFormat } from "./indexed-material-data";
+import {
+	isIndexedTextureFormat,
+	resolveIndexedMaterialData,
+	type ResolvedIndexedMaterialData,
+} from "./indexed-material-data";
 import {
 	hasSourceAlpha,
 	isSupportedCompressedFormat,
@@ -70,12 +78,14 @@ const DEFAULT_STAGED_WORLD_MATERIAL_STRATEGY_POLICY: StagedWorldMaterialStrategy
 export interface StagedWorldMaterialStrategyInput {
 	slot: ResolvedMaterialSlot;
 	renderableKind: StagedWorldMaterialRenderableKind;
+	appearance?: MaterialAppearanceContext | null;
 	textureVelocitySignature?: string | null;
 }
 
 export type StagedWorldMaterialStrategy =
 	| StagedWorldAtlasMaterialStrategy
 	| StagedWorldDirectTextureMaterialStrategy
+	| StagedWorldIndexedPalettedMaterialStrategy
 	| StagedWorldMaterialFallbackStrategy;
 
 export interface StagedWorldAtlasMaterialStrategy {
@@ -124,6 +134,20 @@ export interface StagedWorldDirectTextureMaterialStrategy {
 	reason: StagedWorldMaterialStrategyFallbackReason | null;
 	detail: string | null;
 	atlasEligibility: StagedWorldMaterialAtlasEligibility | null;
+}
+
+export interface StagedWorldIndexedPalettedMaterialStrategy {
+	kind: "indexed-paletted";
+	slot: ResolvedMaterialSlot;
+	renderableKind: StagedWorldMaterialRenderableKind;
+	materialAssetId: string;
+	key: string;
+	indexedMaterial: ResolvedIndexedMaterialData;
+	renderStateKey: string;
+	samplingKey: string;
+	behavior: LegacyMaterialBehaviorDto;
+	reason: StagedWorldMaterialStrategyFallbackReason | null;
+	detail: string | null;
 }
 
 export interface StagedWorldMaterialFallbackStrategy {
@@ -378,6 +402,7 @@ export function resolveStagedWorldMaterialStrategy(options: {
 	textureCapabilities?: MaterialTextureCapabilities;
 }):
 	| StagedWorldDirectTextureMaterialStrategy
+	| StagedWorldIndexedPalettedMaterialStrategy
 	| StagedWorldMaterialFallbackStrategy {
 	const materialAssetId =
 		options.input.slot.materialAssetId ||
@@ -456,16 +481,14 @@ export function resolveStagedWorldMaterialStrategy(options: {
 			});
 		}
 		if (isIndexedTextureFormat(surface.formatRaw)) {
-			return createFallbackRequirement({
+			return resolveIndexedPalettedTextureStrategy({
+				assetState: options.assetState,
 				input: options.input,
 				materialAssetId,
-				behavior: deriveLegacyMaterialBehaviorDto({
-					recipe,
-					usesIndexedClipDiscard: true,
-				}),
-				kind: "flat-fallback",
-				reason: "indexed-paletted-deferred",
-				detail: `render surface ${formatHex32(surface.renderSurfaceId)} format ${surface.format} is indexed/paletted; WebGL2 indexed material rendering starts in M3C`,
+				recipe,
+				textureCapabilities:
+					options.textureCapabilities ??
+					defaultStagedWorldMaterialTextureCapabilities(),
 			});
 		}
 		return createFallbackRequirement({
@@ -564,6 +587,100 @@ export function resolveStagedWorldMaterialStrategy(options: {
 			},
 		},
 	});
+}
+
+function resolveIndexedPalettedTextureStrategy(options: {
+	assetState: AssetChannelState;
+	input: StagedWorldMaterialStrategyInput;
+	materialAssetId: string;
+	recipe: PreparedMaterialRecipePayload;
+	textureCapabilities: MaterialTextureCapabilities;
+}): StagedWorldIndexedPalettedMaterialStrategy | StagedWorldMaterialFallbackStrategy {
+	const resolvedSurface = resolveFirstMaterialRenderSurface({
+		recipe: options.recipe,
+		assetState: options.assetState,
+	});
+	if (!resolvedSurface) {
+		return createFallbackRequirement({
+			input: options.input,
+			materialAssetId: options.materialAssetId,
+			behavior: deriveLegacyMaterialBehaviorDto({
+				recipe: options.recipe,
+				usesIndexedClipDiscard: true,
+			}),
+			kind: "flat-fallback",
+			reason: "missing-render-surface",
+			detail: `material ${options.materialAssetId} has no prepared indexed render surface`,
+		});
+	}
+	const samplingPolicy = selectVariantTextureSamplingPolicy(
+		resolvedSurface.renderSurface,
+		createDefaultMaterialTextureSamplingPolicy(options.textureCapabilities),
+		options.input.slot.materialVariantSignature,
+	);
+	let indexedMaterial: ResolvedIndexedMaterialData | null = null;
+	let resolveError: unknown = null;
+	try {
+		indexedMaterial = resolveIndexedMaterialData({
+			assetState: options.assetState,
+			slot: options.input.slot,
+			appearance:
+				options.input.appearance ?? createBaseMaterialAppearanceContext("base"),
+			samplingPolicy,
+		});
+	} catch (error) {
+		resolveError = error;
+	}
+	if (!indexedMaterial) {
+		const behavior = deriveLegacyMaterialBehaviorDto({
+			recipe: options.recipe,
+			usesIndexedClipDiscard: true,
+		});
+		return createFallbackRequirement({
+			input: options.input,
+			materialAssetId: options.materialAssetId,
+			behavior,
+			kind: "flat-fallback",
+			reason: "indexed-paletted-deferred",
+			detail: [
+				`render surface ${formatHex32(resolvedSurface.renderSurface.renderSurfaceId)} format ${resolvedSurface.renderSurface.format} could not resolve indexed palette resources`,
+				resolveError instanceof Error ? resolveError.message : null,
+			]
+				.filter((part) => part !== null)
+				.join(": "),
+		});
+	}
+	const renderStateKey = describeIndexedRenderStateKey(indexedMaterial.behavior);
+	const samplingKey = describeIndexedSamplingKey(indexedMaterial);
+	return {
+		kind: "indexed-paletted",
+		slot: options.input.slot,
+		renderableKind: options.input.renderableKind,
+		materialAssetId: options.materialAssetId,
+		key: [
+			"indexed-paletted",
+			options.materialAssetId,
+			indexedMaterial.renderSurfaceAssetId,
+			describeIndexedPaletteKey(indexedMaterial.palette),
+			indexedMaterial.neighborPackedTexture.format,
+			renderStateKey,
+			samplingKey,
+		].join("|"),
+		indexedMaterial,
+		renderStateKey,
+		samplingKey,
+		behavior: indexedMaterial.behavior,
+		reason:
+			indexedMaterial.samplingPolicy.generateMipmaps ||
+			indexedMaterial.samplingPolicy.mipFilter !== "none"
+				? "indexed-paletted-deferred"
+				: null,
+		detail:
+			indexedMaterial.samplingPolicy.generateMipmaps ||
+			indexedMaterial.samplingPolicy.mipFilter !== "none"
+				? "indexed materials intentionally disable hardware mipmapping until a palette-safe mip policy exists"
+				: null,
+	};
 }
 
 export function defaultStagedWorldMaterialTextureCapabilities(): MaterialTextureCapabilities {
@@ -937,6 +1054,38 @@ function describeDirectRenderStateKey(
 	].join(";");
 }
 
+function describeIndexedRenderStateKey(
+	behavior: LegacyMaterialBehaviorDto,
+): string {
+	return [
+		"shader=indexed-paletted",
+		`blend=${behavior.blend.mode}`,
+		`depth=${behavior.blend.depthWrite ? "write" : "read"}`,
+		`alphaTest=${behavior.alphaTest}`,
+		`side=${behavior.side}`,
+	].join(";");
+}
+
+function describeIndexedSamplingKey(
+	indexedMaterial: ResolvedIndexedMaterialData,
+): string {
+	const policy = indexedMaterial.samplingPolicy;
+	return [
+		"indexed-sampling",
+		`format=${indexedMaterial.neighborPackedTexture.format}`,
+		`wrap=${policy.wrapS}/${policy.wrapT}`,
+		"filter=manual-bilinear",
+		"mips=deferred",
+		`palette=${describeIndexedPaletteKey(indexedMaterial.palette)}`,
+	].join(";");
+}
+
+function describeIndexedPaletteKey(
+	palette: ResolvedIndexedMaterialData["palette"],
+): string {
+	return "key" in palette ? palette.key : palette.paletteAssetId;
+}
+
 function describeDirectSamplingKey(
 	upload: Extract<
 		RenderSurfaceTextureUploadPreparation,
@@ -1024,6 +1173,8 @@ function describeStrategySortKey(requirement: StagedWorldMaterialStrategy): stri
 		case "atlas":
 			return requirement.materialSlotKey;
 		case "direct-texture":
+			return requirement.key;
+		case "indexed-paletted":
 			return requirement.key;
 		case "flat-fallback":
 		case "unsupported":

@@ -5,6 +5,7 @@ import {
 	formatAtlasReadyPreparedTextureAssetId,
 	type AssetChannelState,
 	type PreparedMaterialRecipePayload,
+	type PreparedPalettePayload,
 	type PreparedPolygonSetRenderGeometry,
 	type PreparedRenderSurfacePayload,
 	type PreparedTexturePayload,
@@ -230,6 +231,50 @@ describe("webgl2 world resources", () => {
 		expect(store.atlasCandidateSamples[0]).toContain("static");
 		expect(store.atlasCandidateSamples[0]).toContain("atlas-entry");
 	});
+
+	it("realizes indexed/paletted draw units with separate index and palette textures", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2WorldResourceStore();
+		const materialSurfaceId = 0x08000002;
+		const renderSurfaceId = 0x06000002;
+
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState({
+				materialSurfaceId,
+				renderSurfaceId,
+				indexed: true,
+			}),
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: createStaticRenderableScene([
+				createStaticPart({
+					materialSlots: [createMaterialSlot(0, materialSurfaceId)],
+				}),
+			]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform()],
+		});
+
+		expect(store.drawUnits).toHaveLength(1);
+		expect(store.drawUnits[0]?.materialKind).toBe("indexed-paletted");
+		expect(store.drawUnits[0]?.uvBuffer).not.toBeNull();
+		expect(store.drawUnits[0]?.indexedMaterial).toMatchObject({
+			indexFormat: "p8",
+			width: 2,
+			height: 1,
+			paletteColorCount: 2,
+		});
+		expect(store.textureCount).toBe(2);
+		expect(store.indexedTextureCount).toBe(1);
+		expect(store.paletteTextureCount).toBe(1);
+		expect(gl.textureUploads).toEqual([
+			{ width: 2, height: 1 },
+			{ width: 2, height: 1 },
+		]);
+		expect(gl.generatedMipmapCount).toBe(0);
+	});
 });
 
 class FakeWebgl2 {
@@ -249,6 +294,8 @@ class FakeWebgl2 {
 	readonly RGBA4 = 14;
 	readonly UNSIGNED_BYTE = 15;
 	readonly UNSIGNED_SHORT_4_4_4_4 = 16;
+	readonly RGBA16UI = 161;
+	readonly RGBA_INTEGER = 162;
 	readonly CLAMP_TO_EDGE = 17;
 	readonly REPEAT = 18;
 	readonly NEAREST = 19;
@@ -386,10 +433,12 @@ function createAssetState({
 	materialSurfaceId,
 	renderSurfaceId,
 	compressedAtlasReady = false,
+	indexed = false,
 }: {
 	materialSurfaceId?: number;
 	renderSurfaceId?: number;
 	compressedAtlasReady?: boolean;
+	indexed?: boolean;
 } = {}): AssetChannelState {
 	const state = createInitialAssetChannelState();
 	state.preparedByAssetId["gfx-obj/01000001"] = {
@@ -405,7 +454,11 @@ function createAssetState({
 		state.preparedByAssetId[
 			`material/${materialSurfaceId.toString(16).padStart(8, "0")}`
 		] = {
-			payload: createTextureMaterialRecipe(materialSurfaceId, renderSurfaceId),
+			payload: createTextureMaterialRecipe(
+				materialSurfaceId,
+				renderSurfaceId,
+				indexed ? 0x04000001 : null,
+			),
 		} as AssetChannelState["preparedAsset"];
 		state.preparedByAssetId[
 			`render-surface/${renderSurfaceId.toString(16).padStart(8, "0")}`
@@ -413,8 +466,14 @@ function createAssetState({
 			payload: createRenderSurfacePayload({
 				renderSurfaceId,
 				compressed: compressedAtlasReady,
+				indexed,
 			}),
 		} as AssetChannelState["preparedAsset"];
+		if (indexed) {
+			state.preparedByAssetId["palette/04000001"] = {
+				payload: createPalettePayload(0x04000001),
+			} as AssetChannelState["preparedAsset"];
+		}
 		if (compressedAtlasReady) {
 			const preparedTexture = createAtlasPreparedTexturePayload(renderSurfaceId);
 			state.preparedByAssetId[
@@ -512,6 +571,7 @@ function createMaterialSlot(
 function createTextureMaterialRecipe(
 	surfaceId: number,
 	renderSurfaceId: number,
+	paletteId: number | null = null,
 ): PreparedMaterialRecipePayload {
 	return {
 		kind: "material-recipe",
@@ -529,7 +589,7 @@ function createTextureMaterialRecipe(
 			kind: "texture",
 			surfaceTextureId: renderSurfaceId,
 			selectedRenderSurfaceId: renderSurfaceId,
-			paletteId: null,
+			paletteId,
 			renderSurfaceDefaultPaletteIds: [],
 		},
 		translucency: 0,
@@ -548,11 +608,15 @@ function createTextureMaterialRecipe(
 function createRenderSurfacePayload({
 	renderSurfaceId,
 	compressed,
+	indexed = false,
 }: {
 	renderSurfaceId: number;
 	compressed: boolean;
+	indexed?: boolean;
 }): PreparedRenderSurfacePayload {
-	const sourceBytes = new Uint8Array([0x10, 0x20, 0x30, 0xff]);
+	const sourceBytes = indexed
+		? new Uint8Array([0, 1])
+		: new Uint8Array([0x10, 0x20, 0x30, 0xff]);
 	return {
 		kind: "render-surface",
 		sourceAssetKind: "render-surface",
@@ -565,14 +629,31 @@ function createRenderSurfacePayload({
 		},
 		renderSurfaceId,
 		unknown: 0,
-		width: 1,
+		width: indexed ? 2 : 1,
 		height: 1,
-		formatRaw: compressed ? 0x3154_5844 : 0x15,
-		format: compressed ? "DXT1" : "A8R8G8B8",
+		formatRaw: indexed ? 0x29 : compressed ? 0x3154_5844 : 0x15,
+		format: indexed ? "P8" : compressed ? "DXT1" : "A8R8G8B8",
 		sourceByteLength: sourceBytes.byteLength,
 		sourceBytes,
-		defaultPaletteId: null,
-		dependencies: { paletteAssetIds: [] },
+		defaultPaletteId: indexed ? 0x04000001 : null,
+		dependencies: { paletteAssetIds: indexed ? ["palette/04000001"] : [] },
+	};
+}
+
+function createPalettePayload(paletteId: number): PreparedPalettePayload {
+	return {
+		kind: "palette",
+		sourceAssetKind: "palette",
+		residencyKind: "unknown",
+		provenance: {
+			source: "repo-local-hba",
+			sourceAssetKind: "palette",
+			errorCode: null,
+			detail: null,
+		},
+		paletteId,
+		colorCount: 2,
+		colorsArgb: new Uint32Array([0xff000000, 0xffffffff]),
 	};
 }
 

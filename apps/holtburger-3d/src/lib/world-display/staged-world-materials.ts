@@ -1,8 +1,13 @@
 import type { AssetChannelState } from "../assets/types";
 import { formatHex32 } from "../landblocks";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
+import {
+	createBaseMaterialAppearanceContext,
+	type MaterialAppearanceContext,
+} from "./material-appearance";
 import type { ResolvedMaterialSlot } from "./material-plan";
 import type { RenderVec4 } from "./render-math";
+import type { ResolvedIndexedMaterialData } from "./indexed-material-data";
 import type { TerrainBlendPlan } from "./terrain-blend-plan";
 import {
 	defaultStagedWorldMaterialTextureCapabilities,
@@ -18,6 +23,7 @@ import type {
 export type StagedWorldMaterialPlan =
 	| StagedWorldFlatMaterialPlan
 	| StagedWorldDirectTextureMaterialPlan
+	| StagedWorldIndexedPalettedMaterialPlan
 	| StagedWorldTerrainBlendMaterialPlan;
 
 interface StagedWorldFlatMaterialPlan {
@@ -41,6 +47,16 @@ export interface StagedWorldDirectTextureMaterialPlan {
 	preparedAssetIds: readonly string[];
 }
 
+export interface StagedWorldIndexedPalettedMaterialPlan {
+	kind: "indexed-paletted";
+	key: string;
+	color: RenderVec4;
+	indexedMaterial: ResolvedIndexedMaterialData;
+	behavior: LegacyMaterialBehaviorDto;
+	fallbackReason: string | null;
+	preparedAssetIds: readonly string[];
+}
+
 export interface StagedWorldTerrainBlendMaterialPlan {
 	kind: "terrain-blend";
 	key: string;
@@ -56,6 +72,7 @@ export function resolveStagedWorldSurfaceMaterialPlan(options: {
 	surfaceId: number | null;
 	fallbackColorKey: string;
 	textureCapabilities?: MaterialTextureCapabilities;
+	appearance?: MaterialAppearanceContext | null;
 }): StagedWorldMaterialPlan {
 	if (options.surfaceId === null) {
 		return createFallbackMaterialPlan({
@@ -77,6 +94,7 @@ export function resolveStagedWorldSurfaceMaterialPlan(options: {
 		fallbackColorKey: options.fallbackColorKey,
 		renderableKind: "unknown",
 		textureCapabilities: options.textureCapabilities,
+		appearance: options.appearance,
 	});
 }
 
@@ -86,17 +104,36 @@ export function resolveStagedWorldMaterialSlotPlan(options: {
 	fallbackColorKey: string;
 	renderableKind?: StagedWorldMaterialRenderableKind;
 	textureCapabilities?: MaterialTextureCapabilities;
+	appearance?: MaterialAppearanceContext | null;
 }): StagedWorldMaterialPlan {
 	const strategy = resolveStagedWorldMaterialStrategy({
 		assetState: options.assetState,
 		input: {
 			slot: options.slot,
 			renderableKind: options.renderableKind ?? "unknown",
+			appearance:
+				options.appearance ?? createBaseMaterialAppearanceContext("base"),
 		},
 		textureCapabilities:
 			options.textureCapabilities ?? defaultStagedWorldMaterialTextureCapabilities(),
 	});
 	if (strategy.kind !== "direct-texture") {
+		if (strategy.kind === "indexed-paletted") {
+			return {
+				kind: "indexed-paletted",
+				key: strategy.key,
+				color: new Float32Array([
+					strategy.behavior.color[0],
+					strategy.behavior.color[1],
+					strategy.behavior.color[2],
+					strategy.behavior.opacity,
+				]),
+				indexedMaterial: strategy.indexedMaterial,
+				behavior: strategy.behavior,
+				fallbackReason: strategy.detail,
+				preparedAssetIds: collectStrategyPreparedAssetIds(strategy),
+			};
+		}
 		return createFallbackMaterialPlan({
 			key: `${strategy.kind}/${strategy.materialAssetId}/${options.fallbackColorKey}`,
 			colorKey: options.fallbackColorKey,
@@ -153,6 +190,11 @@ function collectStrategyPreparedAssetIds(
 		);
 		if (strategy.atlasEligibility) {
 			assetIds.add(strategy.atlasEligibility.atlasEntry.preparedTextureAssetId);
+		}
+	}
+	if (strategy.kind === "indexed-paletted") {
+		for (const assetId of strategy.indexedMaterial.preparedAssetIds) {
+			assetIds.add(assetId);
 		}
 	}
 	return [...assetIds].sort();

@@ -5,6 +5,8 @@ import {
 	planWebgl2FlatWorldSubmitOrder,
 	submitWebgl2FlatWorldFrame,
 	type Webgl2FlatWorldProgram,
+	type Webgl2IndexedP16WorldProgram,
+	type Webgl2IndexedP8WorldProgram,
 	type Webgl2TerrainBlendWorldProgram,
 } from "./webgl2-world-submit";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
@@ -80,6 +82,8 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			program,
 			texturedProgram,
 			terrainBlendProgram: createTerrainBlendProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
 			drawUnitsById,
 			frame: createFrame(["first", "second"]),
 		});
@@ -122,11 +126,69 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			program: createFlatProgram(),
 			texturedProgram: createTexturedProgram(),
 			terrainBlendProgram: createTerrainBlendProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
 			drawUnitsById,
 			frame: createFrame(["textured"]),
 		});
 
 		expect(gl.uniform4fvValues).toContainEqual([0, 0, 0, 0.5]);
+	});
+
+	it("submits indexed draw units with index and palette texture bindings", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+		const drawUnitsById = new Map<string, Webgl2WorldDrawUnit>([
+			[
+				"indexed",
+				createDrawUnit({
+					id: "indexed",
+					materialKind: "indexed-paletted",
+					indexedMaterial: {
+						key: "indexed",
+						indexFormat: "p8",
+						indexTextureKey: "index",
+						paletteTextureKey: "palette",
+						indexTexture: {
+							texture: {} as WebGLTexture,
+							width: 2,
+							height: 1,
+							dispose() {
+								return;
+							},
+						},
+						paletteTexture: {
+							texture: {} as WebGLTexture,
+							width: 2,
+							height: 1,
+							dispose() {
+								return;
+							},
+						},
+						width: 2,
+						height: 1,
+						paletteColorCount: 2,
+						wrapS: "clamp",
+						wrapT: "repeat",
+					},
+				}),
+			],
+		]);
+
+		submitWebgl2FlatWorldFrame({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			terrainBlendProgram: createTerrainBlendProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			drawUnitsById,
+			frame: createFrame(["indexed"]),
+		});
+
+		expect(gl.calls.filter((call) => call === "bindTexture")).toHaveLength(2);
+		expect(gl.calls).toContain("uniform2f");
 	});
 });
 
@@ -169,6 +231,7 @@ function createDrawUnit({
 	geometrySignature = "geo-a",
 	color = new Float32Array([1, 0, 0, 1]),
 	texture = null,
+	indexedMaterial = null,
 	vertexArray = {} as WebGLVertexArrayObject,
 }: {
 	id: string;
@@ -177,6 +240,7 @@ function createDrawUnit({
 	geometrySignature?: string;
 	color?: Float32Array;
 	texture?: Webgl2WorldDrawUnit["texture"];
+	indexedMaterial?: Webgl2WorldDrawUnit["indexedMaterial"];
 	vertexArray?: WebGLVertexArrayObject;
 }): Webgl2WorldDrawUnit {
 	return {
@@ -216,6 +280,7 @@ function createDrawUnit({
 		atlasCandidateSample: null,
 		textureKey: null,
 		texture,
+		indexedMaterial,
 		terrainBlend: null,
 		modelMatrix: createIdentityMat4(),
 		bvhItemKeys: [],
@@ -249,6 +314,37 @@ function createTexturedProgram() {
 			uAlphaTest: {} as WebGLUniformLocation,
 			uTexture: {} as WebGLUniformLocation,
 		},
+		dispose() {
+			return;
+		},
+	};
+}
+
+function createIndexedP8Program(): Webgl2IndexedP8WorldProgram {
+	return createIndexedProgram() as Webgl2IndexedP8WorldProgram;
+}
+
+function createIndexedP16Program(): Webgl2IndexedP16WorldProgram {
+	return createIndexedProgram() as Webgl2IndexedP16WorldProgram;
+}
+
+function createIndexedProgram() {
+	return {
+		program: {} as WebGLProgram,
+		attributes: { position: 0, uv: 1 },
+		uniforms: Object.fromEntries(
+			[
+				"uModelViewProjection",
+				"uColor",
+				"uAlphaTest",
+				"uIndexTexture",
+				"uPaletteTexture",
+				"uTextureSize",
+				"uPaletteColorCount",
+				"uRepeatS",
+				"uRepeatT",
+			].map((name) => [name, {} as WebGLUniformLocation]),
+		),
 		dispose() {
 			return;
 		},
@@ -409,6 +505,10 @@ class CapturingSubmitGl implements Webgl2StateCacheGl {
 
 	uniform1f(): void {
 		this.calls.push("uniform1f");
+	}
+
+	uniform2f(): void {
+		this.calls.push("uniform2f");
 	}
 
 	uniform1i(): void {

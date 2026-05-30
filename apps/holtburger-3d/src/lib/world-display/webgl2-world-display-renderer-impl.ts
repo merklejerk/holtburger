@@ -17,6 +17,8 @@ import {
 	createEmptyWebgl2WorldSubmitMetrics,
 	submitWebgl2FlatWorldFrame,
 	type Webgl2FlatWorldProgram,
+	type Webgl2IndexedP16WorldProgram,
+	type Webgl2IndexedP8WorldProgram,
 	type Webgl2TerrainBlendWorldProgram,
 	type Webgl2TexturedWorldProgram,
 	type Webgl2WorldSubmitMetrics,
@@ -112,6 +114,91 @@ out vec4 fragColor;
 void main() {
 	vec4 texel = texture(uTexture, vUv);
 	vec4 color = texel * uColor;
+	if (color.a < uAlphaTest) {
+		discard;
+	}
+	fragColor = color;
+}
+`;
+
+const INDEXED_P8_WORLD_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+
+uniform vec4 uColor;
+uniform float uAlphaTest;
+uniform sampler2D uIndexTexture;
+uniform sampler2D uPaletteTexture;
+uniform vec2 uTextureSize;
+uniform float uPaletteColorCount;
+uniform int uRepeatS;
+uniform int uRepeatT;
+
+in vec2 vUv;
+
+out vec4 fragColor;
+
+vec2 resolveIndexedUv(vec2 uv) {
+	float u = uRepeatS == 1 ? fract(uv.x) : clamp(uv.x, 0.0, 0.999999);
+	float v = uRepeatT == 1 ? fract(uv.y) : clamp(uv.y, 0.0, 0.999999);
+	return vec2(u, v);
+}
+
+vec4 paletteColor(float index) {
+	float paletteU = (index + 0.5) / uPaletteColorCount;
+	return texture(uPaletteTexture, vec2(paletteU, 0.5));
+}
+
+void main() {
+	vec2 texelPosition = resolveIndexedUv(vUv) * uTextureSize;
+	ivec2 texelCoord = ivec2(floor(texelPosition));
+	vec2 blend = fract(texelPosition);
+	vec4 packed = texelFetch(uIndexTexture, texelCoord, 0) * 255.0;
+	vec4 top = mix(paletteColor(packed.r), paletteColor(packed.g), blend.x);
+	vec4 bottom = mix(paletteColor(packed.b), paletteColor(packed.a), blend.x);
+	vec4 color = mix(top, bottom, blend.y) * uColor;
+	if (color.a < uAlphaTest) {
+		discard;
+	}
+	fragColor = color;
+}
+`;
+
+const INDEXED_P16_WORLD_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+precision highp usampler2D;
+
+uniform vec4 uColor;
+uniform float uAlphaTest;
+uniform usampler2D uIndexTexture;
+uniform sampler2D uPaletteTexture;
+uniform vec2 uTextureSize;
+uniform float uPaletteColorCount;
+uniform int uRepeatS;
+uniform int uRepeatT;
+
+in vec2 vUv;
+
+out vec4 fragColor;
+
+vec2 resolveIndexedUv(vec2 uv) {
+	float u = uRepeatS == 1 ? fract(uv.x) : clamp(uv.x, 0.0, 0.999999);
+	float v = uRepeatT == 1 ? fract(uv.y) : clamp(uv.y, 0.0, 0.999999);
+	return vec2(u, v);
+}
+
+vec4 paletteColor(uint index) {
+	float paletteU = (float(index) + 0.5) / uPaletteColorCount;
+	return texture(uPaletteTexture, vec2(paletteU, 0.5));
+}
+
+void main() {
+	vec2 texelPosition = resolveIndexedUv(vUv) * uTextureSize;
+	ivec2 texelCoord = ivec2(floor(texelPosition));
+	vec2 blend = fract(texelPosition);
+	uvec4 packed = texelFetch(uIndexTexture, texelCoord, 0);
+	vec4 top = mix(paletteColor(packed.r), paletteColor(packed.g), blend.x);
+	vec4 bottom = mix(paletteColor(packed.b), paletteColor(packed.a), blend.x);
+	vec4 color = mix(top, bottom, blend.y) * uColor;
 	if (color.a < uAlphaTest) {
 		discard;
 	}
@@ -218,6 +305,8 @@ interface Webgl2RenderResources {
 	triangleProgram: Webgl2ProgramResource<"position", never>;
 	flatWorldProgram: Webgl2FlatWorldProgram;
 	texturedWorldProgram: Webgl2TexturedWorldProgram;
+	indexedP8WorldProgram: Webgl2IndexedP8WorldProgram;
+	indexedP16WorldProgram: Webgl2IndexedP16WorldProgram;
 	terrainBlendWorldProgram: Webgl2TerrainBlendWorldProgram;
 	vertexBuffer: Webgl2BufferResource;
 	vertexArray: Webgl2VertexArrayResource;
@@ -439,6 +528,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				program: resources.flatWorldProgram,
 				texturedProgram: resources.texturedWorldProgram,
 				terrainBlendProgram: resources.terrainBlendWorldProgram,
+				indexedP8Program: resources.indexedP8WorldProgram,
+				indexedP16Program: resources.indexedP16WorldProgram,
 				drawUnitsById: resources.worldStore.drawUnitsById,
 				frame,
 			});
@@ -518,6 +609,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		resources.triangleProgram.dispose();
 		resources.flatWorldProgram.dispose();
 		resources.texturedWorldProgram.dispose();
+		resources.indexedP8WorldProgram.dispose();
+		resources.indexedP16WorldProgram.dispose();
 		resources.terrainBlendWorldProgram.dispose();
 		destroyWebgl2WorldResources(resources.worldStore);
 		resources = null;
@@ -642,6 +735,8 @@ function createTriangleResources(
 		triangleProgram,
 		flatWorldProgram: createFlatWorldProgram(gl),
 		texturedWorldProgram: createTexturedWorldProgram(gl),
+		indexedP8WorldProgram: createIndexedP8WorldProgram(gl),
+		indexedP16WorldProgram: createIndexedP16WorldProgram(gl),
 		terrainBlendWorldProgram: createTerrainBlendWorldProgram(gl),
 		vertexBuffer,
 		vertexArray,
@@ -668,6 +763,47 @@ function createTexturedWorldProgram(
 		fragmentSource: TEXTURED_WORLD_FRAGMENT_SHADER,
 		attributes: ["position", "uv"],
 		uniforms: ["uModelViewProjection", "uColor", "uAlphaTest", "uTexture"],
+	});
+}
+
+function createIndexedP8WorldProgram(
+	gl: WebGL2RenderingContext,
+): Webgl2IndexedP8WorldProgram {
+	return createIndexedWorldProgram(gl, {
+		label: "webgl2 indexed p8 world",
+		fragmentSource: INDEXED_P8_WORLD_FRAGMENT_SHADER,
+	});
+}
+
+function createIndexedP16WorldProgram(
+	gl: WebGL2RenderingContext,
+): Webgl2IndexedP16WorldProgram {
+	return createIndexedWorldProgram(gl, {
+		label: "webgl2 indexed p16 world",
+		fragmentSource: INDEXED_P16_WORLD_FRAGMENT_SHADER,
+	});
+}
+
+function createIndexedWorldProgram(
+	gl: WebGL2RenderingContext,
+	options: { label: string; fragmentSource: string },
+): Webgl2IndexedP8WorldProgram | Webgl2IndexedP16WorldProgram {
+	return createWebgl2Program(gl, {
+		label: options.label,
+		vertexSource: TEXTURED_WORLD_VERTEX_SHADER,
+		fragmentSource: options.fragmentSource,
+		attributes: ["position", "uv"],
+		uniforms: [
+			"uModelViewProjection",
+			"uColor",
+			"uAlphaTest",
+			"uIndexTexture",
+			"uPaletteTexture",
+			"uTextureSize",
+			"uPaletteColorCount",
+			"uRepeatS",
+			"uRepeatT",
+		],
 	});
 }
 

@@ -14,7 +14,6 @@
 	} from "../app/browser-mode";
 	import { formatHex32, normalizeOutdoorLandblockId } from "../lib/landblocks";
 	import { countOutdoorSceneLodTiles } from "../lib/world-display/outdoor-scene-interest";
-	import type { RuntimeAppearanceRequestDto } from "../lib/host/contracts";
 
 	type BrowserPanelTabId = "navigate" | "lod" | "scene" | "debug";
 
@@ -36,43 +35,19 @@
 	let {
 		sceneStatusText,
 		sceneSummaryRows,
-		sceneDetailSections,
-		debugSummaryRows,
-		debugDetailSections,
-		runtimeAppearanceStatusText,
-		runtimeAppearanceRows,
 		canResetCamera,
 		onResetCamera,
-		onRuntimeAppearanceSubmit,
-		onRuntimeAppearanceClear,
+		onGenerateDebugReport,
 	}: {
 		sceneStatusText: string;
 		sceneSummaryRows: BrowserPanelRow[];
-		sceneDetailSections: BrowserPanelSection[];
-		debugSummaryRows: BrowserPanelRow[];
-		debugDetailSections: BrowserPanelSection[];
-		runtimeAppearanceStatusText: string;
-		runtimeAppearanceRows: BrowserPanelRow[];
 		canResetCamera: boolean;
 		onResetCamera: () => void;
-		onRuntimeAppearanceSubmit: (request: RuntimeAppearanceRequestDto) => void;
-		onRuntimeAppearanceClear: () => void;
+		onGenerateDebugReport: () => void;
 	} = $props();
 
 	let activeTab = $state<BrowserPanelTabId>("navigate");
 	let isCollapsed = $state(false);
-	let previewSetupDid = $state("02000001");
-	let previewPaletteId = $state("");
-	let previewSubPalettes = $state<
-		{ subId: string; offset: string; numColors: string }[]
-	>([]);
-	let previewTextureChanges = $state<
-		{ partIndex: string; oldTexture: string; newTexture: string }[]
-	>([]);
-	let previewAnimPartChanges = $state<{ partIndex: string; partId: string }[]>(
-		[],
-	);
-	let previewValidationMessage = $state<string | null>(null);
 	const focusedCellReference = $derived.by<FocusedCellReference>(() => {
 		const destination = $frontendState.browserMode.destination;
 		if (destination?.kind === "interior-cell") {
@@ -194,96 +169,6 @@
 	function handleDetailTexturesToggle(event: Event): void {
 		const input = event.currentTarget as HTMLInputElement;
 		frontendState.updateBrowserDetailTexturesEnabled(input.checked);
-	}
-
-	function submitRuntimeAppearance(event?: SubmitEvent): void {
-		event?.preventDefault();
-		try {
-			const setupModelId = parseHexInput(previewSetupDid, "setupDid");
-			const paletteId =
-				previewPaletteId.trim().length === 0
-					? null
-					: parseHexInput(previewPaletteId, "palette ID");
-			onRuntimeAppearanceSubmit({
-				setupModelId,
-				objDesc: {
-					paletteId,
-					subPalettes: previewSubPalettes.map((row) => ({
-						subId: parseHexInput(row.subId, "subpalette ID"),
-						offset: parseDecimalInput(row.offset, "subpalette offset"),
-						numColors: parseDecimalInput(row.numColors, "subpalette size"),
-					})),
-					textureChanges: previewTextureChanges.map((row) => ({
-						partIndex: parseDecimalInput(row.partIndex, "texture part"),
-						oldTexture: parseHexInput(row.oldTexture, "old texture"),
-						newTexture: parseHexInput(row.newTexture, "new texture"),
-					})),
-					animPartChanges: previewAnimPartChanges.map((row) => ({
-						partIndex: parseDecimalInput(row.partIndex, "animation part"),
-						partId: parseHexInput(row.partId, "part ID"),
-					})),
-				},
-			});
-			previewValidationMessage = null;
-		} catch (error) {
-			previewValidationMessage =
-				error instanceof Error ? error.message : String(error);
-		}
-	}
-
-	function addSubPaletteRow(): void {
-		previewSubPalettes = [
-			...previewSubPalettes,
-			{ subId: "", offset: "0", numColors: "0" },
-		];
-	}
-
-	function addTextureChangeRow(): void {
-		previewTextureChanges = [
-			...previewTextureChanges,
-			{ partIndex: "0", oldTexture: "", newTexture: "" },
-		];
-	}
-
-	function addAnimPartChangeRow(): void {
-		previewAnimPartChanges = [
-			...previewAnimPartChanges,
-			{ partIndex: "0", partId: "" },
-		];
-	}
-
-	function removeSubPaletteRow(index: number): void {
-		previewSubPalettes = previewSubPalettes.filter(
-			(_row, rowIndex) => rowIndex !== index,
-		);
-	}
-
-	function removeTextureChangeRow(index: number): void {
-		previewTextureChanges = previewTextureChanges.filter(
-			(_row, rowIndex) => rowIndex !== index,
-		);
-	}
-
-	function removeAnimPartChangeRow(index: number): void {
-		previewAnimPartChanges = previewAnimPartChanges.filter(
-			(_row, rowIndex) => rowIndex !== index,
-		);
-	}
-
-	function parseHexInput(value: string, label: string): number {
-		const normalized = value.trim().replace(/^0x/i, "");
-		if (!/^[0-9a-fA-F]+$/.test(normalized)) {
-			throw new Error(`${label} must be hexadecimal.`);
-		}
-		return Number.parseInt(normalized, 16);
-	}
-
-	function parseDecimalInput(value: string, label: string): number {
-		const normalized = value.trim();
-		if (!/^\d+$/.test(normalized)) {
-			throw new Error(`${label} must be a non-negative integer.`);
-		}
-		return Number.parseInt(normalized, 10);
 	}
 
 	function formatOptionalHex32(value: number | null): string {
@@ -704,142 +589,17 @@
 					</div>
 				{/each}
 			</dl>
-			<div class="browser-panel__section-stack">
-				{#each sceneDetailSections as section}
-					<details class="browser-panel__details">
-						<summary>{section.title}</summary>
-						<dl class="data-list compact-data-list">
-							{#each section.rows as row}
-								<div>
-									<dt>{row.label}</dt>
-									<dd>{row.value}</dd>
-								</div>
-							{/each}
-						</dl>
-					</details>
-				{/each}
-			</div>
 		</div>
 	{:else if !isCollapsed}
 		<div class="browser-panel__body" role="tabpanel">
-			<form class="browser-form" onsubmit={submitRuntimeAppearance}>
-				<fieldset class="browser-form__fieldset">
-					<legend>Runtime appearance</legend>
-					<p class="browser-panel__status">{runtimeAppearanceStatusText}</p>
-					<label class="browser-form__field" for="appearance-preview-setup">
-						<span>Setup DID</span>
-						<input
-							id="appearance-preview-setup"
-							type="text"
-							bind:value={previewSetupDid}
-							placeholder="02000001"
-							spellcheck="false"
-						/>
-					</label>
-					<label class="browser-form__field" for="appearance-preview-palette">
-						<span>Palette ID</span>
-						<input
-							id="appearance-preview-palette"
-							type="text"
-							bind:value={previewPaletteId}
-							placeholder="optional"
-							spellcheck="false"
-						/>
-					</label>
-
-					<div class="browser-form__row-header">
-						<span>Subpalettes</span>
-						<button type="button" onclick={addSubPaletteRow}>Add</button>
-					</div>
-					{#each previewSubPalettes as row, index}
-						<div class="browser-form__inline-row">
-							<input bind:value={row.subId} placeholder="sub ID" />
-							<input bind:value={row.offset} placeholder="offset" />
-							<input bind:value={row.numColors} placeholder="count" />
-							<button type="button" onclick={() => removeSubPaletteRow(index)}>
-								Remove
-							</button>
-						</div>
-					{/each}
-
-					<div class="browser-form__row-header">
-						<span>Texture swaps</span>
-						<button type="button" onclick={addTextureChangeRow}>Add</button>
-					</div>
-					{#each previewTextureChanges as row, index}
-						<div class="browser-form__inline-row">
-							<input bind:value={row.partIndex} placeholder="part" />
-							<input bind:value={row.oldTexture} placeholder="old tex" />
-							<input bind:value={row.newTexture} placeholder="new tex" />
-							<button
-								type="button"
-								onclick={() => removeTextureChangeRow(index)}
-							>
-								Remove
-							</button>
-						</div>
-					{/each}
-
-					<div class="browser-form__row-header">
-						<span>Part swaps</span>
-						<button type="button" onclick={addAnimPartChangeRow}>Add</button>
-					</div>
-					{#each previewAnimPartChanges as row, index}
-						<div class="browser-form__inline-row">
-							<input bind:value={row.partIndex} placeholder="part" />
-							<input bind:value={row.partId} placeholder="part DID" />
-							<button
-								type="button"
-								onclick={() => removeAnimPartChangeRow(index)}
-							>
-								Remove
-							</button>
-						</div>
-					{/each}
-
-					<div class="browser-form__actions">
-						<button type="submit">Preview</button>
-						<button type="button" onclick={onRuntimeAppearanceClear}>
-							Clear
-						</button>
-					</div>
-					{#if previewValidationMessage}
-						<p class="validation-message">{previewValidationMessage}</p>
-					{/if}
-					{#if runtimeAppearanceRows.length > 0}
-						<dl class="data-list compact-data-list">
-							{#each runtimeAppearanceRows as row}
-								<div>
-									<dt>{row.label}</dt>
-									<dd>{row.value}</dd>
-								</div>
-							{/each}
-						</dl>
-					{/if}
-				</fieldset>
-			</form>
-			<dl class="data-list compact-data-list browser-panel__summary-list">
-				{#each debugSummaryRows as row}
-					<div>
-						<dt>{row.label}</dt>
-						<dd>{row.value}</dd>
-					</div>
-				{/each}
-			</dl>
-			<div class="browser-panel__section-stack">
-				{#each debugDetailSections as section}
-					<details class="browser-panel__details">
-						<summary>{section.title}</summary>
-						<dl class="data-list compact-data-list">
-							{#each section.rows as row}
-								<div>
-									<dt>{row.label}</dt>
-									<dd>{row.value}</dd>
-								</div>
-							{/each}
-						</dl>
-					</details>
-				{/each}
+			<div class="browser-panel__debug-report">
+				<p class="browser-panel__status">
+					Generate a one-frame diagnostics report with the detailed renderer,
+					asset, camera, and scene state.
+				</p>
+				<button type="button" onclick={onGenerateDebugReport}>
+					Generate Report
+				</button>
 			</div>
 		</div>
 	{/if}

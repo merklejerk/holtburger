@@ -18,6 +18,7 @@ import type { ResolvedMaterialSlot } from "./material-plan";
 
 const PIXEL_FORMAT_A8R8G8B8 = 0x15;
 const PIXEL_FORMAT_DXT1 = 0x3154_5844;
+const PIXEL_FORMAT_INDEX16 = 0x65;
 const SURFACE_TYPE_DIFFUSE = 0x20;
 const SURFACE_TYPE_ALPHA = 0x100;
 
@@ -104,6 +105,33 @@ describe("staged world material strategy", () => {
 					renderSurfaceId: 0x06000001,
 				},
 			},
+		});
+	});
+
+	it("reports indexed materials as an explicit deferred WebGL2 path", () => {
+		const state = createAssetState([
+			createMaterialRecipeRecord({
+				surfaceId: 0x08000001,
+				renderSurfaceId: 0x06000001,
+			}),
+			createRenderSurfaceRecord({
+				renderSurfaceId: 0x06000001,
+				formatRaw: PIXEL_FORMAT_INDEX16,
+				format: "Index16",
+			}),
+		]);
+
+		const strategy = resolveStagedWorldMaterialStrategy({
+			assetState: state,
+			input: createRequirement("static", 0),
+		});
+
+		expect(strategy).toMatchObject({
+			kind: "flat-fallback",
+			reason: "indexed-paletted-deferred",
+			detail: expect.stringContaining(
+				"WebGL2 indexed material rendering starts in M3C",
+			),
 		});
 	});
 

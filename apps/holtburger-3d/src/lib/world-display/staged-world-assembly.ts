@@ -30,6 +30,10 @@ import {
 	type TerrainBlendPlan,
 } from "./terrain-blend-plan";
 import {
+	resolveRegionDetailOverlayPlan,
+	type ResolvedRegionDetailOverlayPlan,
+} from "./region-detail-overlays";
+import {
 	deriveStructuredInteriorCellBatchBvhBinding,
 	deriveTerrainTileBatchBvhBinding,
 } from "./non-instanced-bvh-bindings";
@@ -127,6 +131,7 @@ export function buildStagedWorldSceneAssembly({
 	transitionPortalModel,
 	renderChunkTransforms,
 	materialTextureCapabilities,
+	detailTexturesEnabled = true,
 }: {
 	assetState: AssetChannelState;
 	terrainScene: TerrainSceneModel;
@@ -135,6 +140,7 @@ export function buildStagedWorldSceneAssembly({
 	transitionPortalModel: TransitionPortalCandidateModel;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	materialTextureCapabilities?: MaterialTextureCapabilities;
+	detailTexturesEnabled?: boolean;
 }): StagedWorldSceneAssembly {
 	const chunkOffsetByKey = new Map(
 		renderChunkTransforms.map((transform) => [
@@ -170,12 +176,14 @@ export function buildStagedWorldSceneAssembly({
 			structuredInteriorScene:
 				fullyResolvedScenes.committedStructuredInteriorScene,
 			materialTextureCapabilities,
+			detailTexturesEnabled,
 		});
 	const staticDrawUnits = buildStagedStaticDrawUnitAssemblies({
 		assetState,
 		chunkOffsetByKey,
 		staticRenderableScene: fullyResolvedScenes.committedStaticRenderableScene,
 		materialTextureCapabilities,
+		detailTexturesEnabled,
 	});
 	return {
 		drawUnits: [
@@ -328,11 +336,13 @@ export function buildStagedStructuredInteriorDrawUnitAssemblies({
 	chunkOffsetByKey,
 	structuredInteriorScene,
 	materialTextureCapabilities,
+	detailTexturesEnabled = true,
 }: {
 	assetState: AssetChannelState;
 	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
 	structuredInteriorScene: StructuredInteriorSceneModel;
 	materialTextureCapabilities?: MaterialTextureCapabilities;
+	detailTexturesEnabled?: boolean;
 }): StagedStructuredInteriorDrawUnitAssembly[] {
 	return structuredInteriorScene.cells.flatMap((cell) => {
 		const chunkOffset = chunkOffsetByKey.get(cell.renderChunk.chunkKey);
@@ -346,6 +356,13 @@ export function buildStagedStructuredInteriorDrawUnitAssemblies({
 			{ x: 1, y: 1, z: 1 },
 		);
 		const modelMatrix = multiplyMat4(chunkMatrix, placementMatrix);
+		const detailOverlay = detailTexturesEnabled
+			? resolveRegionDetailOverlayPlan({
+					assetState,
+					regionNumber: cell.regionNumber,
+					roleKind: "environment",
+				})
+			: null;
 		return structuredInteriorSurfaceKeys(cell).flatMap((surfaceKey) => {
 			const geometry = buildStagedPolygonSetGeometry(cell.renderGeometry, {
 				surfaceId: surfaceKey.geometrySurfaceId,
@@ -361,6 +378,7 @@ export function buildStagedStructuredInteriorDrawUnitAssemblies({
 						fallbackColorKey: `${cell.debugColorKey}:${formatStructuredInteriorSurfaceKey(surfaceKey)}`,
 						renderableKind: "structured-interior",
 						textureCapabilities: materialTextureCapabilities,
+						detailOverlay,
 					})
 				: resolveStagedWorldSurfaceMaterialPlan({
 						assetState,
@@ -396,28 +414,30 @@ export function buildStagedStaticDrawUnitAssemblies({
 	chunkOffsetByKey,
 	staticRenderableScene,
 	materialTextureCapabilities,
+	detailTexturesEnabled = true,
 }: {
 	assetState: AssetChannelState;
 	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
 	staticRenderableScene: StaticRenderableSceneModel;
 	materialTextureCapabilities?: MaterialTextureCapabilities;
+	detailTexturesEnabled?: boolean;
 }): StagedStaticDrawUnitAssembly[] {
 	const objectsByBatchKey = groupCommittedStaticObjectsByBatchKey({
 		chunkOffsetByKey,
 		staticRenderableScene,
 	});
 
-	return [...objectsByBatchKey.entries()].flatMap(
-		([batchKey, objectGroups]) =>
-			objectGroups.flatMap((objectGroup) =>
-				buildStagedStaticObjectDrawUnits({
-					assetState,
-					batchKey,
-					chunkOffsetByKey,
-					objectGroup,
-					materialTextureCapabilities,
-				}),
-			),
+	return [...objectsByBatchKey.entries()].flatMap(([batchKey, objectGroups]) =>
+		objectGroups.flatMap((objectGroup) =>
+			buildStagedStaticObjectDrawUnits({
+				assetState,
+				batchKey,
+				chunkOffsetByKey,
+				objectGroup,
+				materialTextureCapabilities,
+				detailTexturesEnabled,
+			}),
+		),
 	);
 }
 
@@ -497,12 +517,14 @@ function buildStagedStaticObjectDrawUnits({
 	chunkOffsetByKey,
 	objectGroup,
 	materialTextureCapabilities,
+	detailTexturesEnabled,
 }: {
 	assetState: AssetChannelState;
 	batchKey: string;
 	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
 	objectGroup: StaticRenderableObjectGroup;
 	materialTextureCapabilities?: MaterialTextureCapabilities;
+	detailTexturesEnabled: boolean;
 }): StagedStaticDrawUnitAssembly[] {
 	return objectGroup.parts.flatMap((part) =>
 		deriveStagedStaticSurfaceKeys(assetState, part).flatMap((surfaceKey) =>
@@ -514,6 +536,7 @@ function buildStagedStaticObjectDrawUnits({
 				part,
 				surfaceKey,
 				materialTextureCapabilities,
+				detailTexturesEnabled,
 			}),
 		),
 	);
@@ -527,6 +550,7 @@ function buildStagedStaticSurfaceDrawUnit({
 	part,
 	surfaceKey,
 	materialTextureCapabilities,
+	detailTexturesEnabled,
 }: {
 	assetState: AssetChannelState;
 	batchKey: string;
@@ -535,6 +559,7 @@ function buildStagedStaticSurfaceDrawUnit({
 	part: StaticRenderablePart;
 	surfaceKey: StagedStaticSurfaceKey;
 	materialTextureCapabilities?: MaterialTextureCapabilities;
+	detailTexturesEnabled: boolean;
 }): StagedStaticDrawUnitAssembly[] {
 	const chunkOffset = chunkOffsetByKey.get(part.renderChunk.chunkKey);
 	if (!chunkOffset) {
@@ -545,6 +570,9 @@ function buildStagedStaticSurfaceDrawUnit({
 		return [];
 	}
 	const surfaceBatchKey = formatStagedStaticSurfaceBatchKey(surfaceKey);
+	const detailOverlay = detailTexturesEnabled
+		? resolveStaticPartDetailOverlayPlan({ assetState, part })
+		: null;
 	const material = surfaceKey.materialSlot
 		? resolveStagedWorldMaterialSlotPlan({
 				assetState,
@@ -553,6 +581,7 @@ function buildStagedStaticSurfaceDrawUnit({
 				renderableKind: "static",
 				textureCapabilities: materialTextureCapabilities,
 				appearance: part.materialAppearanceContext,
+				detailOverlay,
 			})
 		: createFlatDebugStagedMaterial(
 				`static-staged/${batchKey}/${surfaceBatchKey}`,
@@ -581,6 +610,20 @@ function buildStagedStaticSurfaceDrawUnit({
 			staticObjectKeys: [objectKey],
 		},
 	];
+}
+
+function resolveStaticPartDetailOverlayPlan({
+	assetState,
+	part,
+}: {
+	assetState: AssetChannelState;
+	part: StaticRenderablePart;
+}): ResolvedRegionDetailOverlayPlan | null {
+	return resolveRegionDetailOverlayPlan({
+		assetState,
+		regionNumber: part.regionNumber,
+		roleKind: part.detailRoleKind,
+	});
 }
 
 function structuredInteriorSurfaceKeys(
@@ -679,7 +722,9 @@ function expandGeometryMaterialSurfaceKeys(
 			continue;
 		}
 		const materialVariantSignature =
-			triangle.materialVariantSignature ?? slot.materialVariantSignature ?? null;
+			triangle.materialVariantSignature ??
+			slot.materialVariantSignature ??
+			null;
 		const key = [
 			slot.slotIndex,
 			slot.surfaceId,
@@ -700,7 +745,9 @@ function expandGeometryMaterialSurfaceKeys(
 	return keys;
 }
 
-function materialSlotToSurfaceKey(slot: ResolvedMaterialSlot): StagedStaticSurfaceKey {
+function materialSlotToSurfaceKey(
+	slot: ResolvedMaterialSlot,
+): StagedStaticSurfaceKey {
 	return {
 		slotIndex: slot.slotIndex,
 		surfaceId: slot.surfaceId,
@@ -768,7 +815,11 @@ function buildStagedStaticPartGeometry(
 
 	const matrix = buildStaticRenderablePartMatrix(part);
 	const positions = new Float32Array(geometry.positions.length);
-	for (let vertexIndex = 0; vertexIndex < geometry.vertexCount; vertexIndex += 1) {
+	for (
+		let vertexIndex = 0;
+		vertexIndex < geometry.vertexCount;
+		vertexIndex += 1
+	) {
 		transformPosition(
 			positions,
 			vertexIndex,
@@ -841,7 +892,9 @@ function transformPosition(
 		matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14];
 }
 
-function buildStaticRenderablePartMatrix(part: StaticRenderablePart): RenderMat4 {
+function buildStaticRenderablePartMatrix(
+	part: StaticRenderablePart,
+): RenderMat4 {
 	let matrix = createIdentityMat4();
 	for (const parentPlacement of part.parentPlacements) {
 		matrix = multiplyMat4(
@@ -881,7 +934,11 @@ function createIdentityMat4(): RenderMat4 {
 	return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 }
 
-function createScaleMat4(scale: { x: number; y: number; z: number }): RenderMat4 {
+function createScaleMat4(scale: {
+	x: number;
+	y: number;
+	z: number;
+}): RenderMat4 {
 	return new Float32Array([
 		scale.x,
 		0,

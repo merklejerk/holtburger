@@ -18,6 +18,17 @@ export type RegionDetailRoleKind =
 type RegionDetailBlendMode = "src-alpha" | "dst-color";
 type RegionDetailFadeMode = "distance" | "constant";
 
+export interface ResolvedRegionDetailOverlayPlan {
+	regionNumber: number;
+	profileAssetId: string;
+	roleKind: RegionDetailRoleKind;
+	role: PreparedRegionDetailRole;
+	blendMode: RegionDetailBlendMode;
+	fadeMode: RegionDetailFadeMode;
+	renderSurface: PreparedRenderSurfacePayload;
+	signature: string;
+}
+
 export interface ResolvedRegionDetailOverlay {
 	regionNumber: number;
 	profileAssetId: string;
@@ -42,6 +53,36 @@ export function resolveRegionDetailOverlay(options: {
 	materialResourceCache: WorldMaterialResourceCache;
 	reportDiagnostic: (message: string) => void;
 }): ResolvedRegionDetailOverlay | null {
+	const plan = resolveRegionDetailOverlayPlan(options);
+	if (!plan) {
+		return null;
+	}
+	const texture = resolveRegionDetailTexture({
+		roleKind: options.roleKind,
+		role: plan.role,
+		assetState: options.assetState,
+		materialResourceCache: options.materialResourceCache,
+		reportDiagnostic: options.reportDiagnostic,
+	});
+	return texture
+		? {
+				regionNumber: plan.regionNumber,
+				profileAssetId: plan.profileAssetId,
+				role: plan.role,
+				blendMode: plan.blendMode,
+				fadeMode: plan.fadeMode,
+				texture,
+				signature: plan.signature,
+			}
+		: null;
+}
+
+export function resolveRegionDetailOverlayPlan(options: {
+	assetState: AssetChannelState;
+	regionNumber: number;
+	roleKind: RegionDetailRoleKind;
+	reportDiagnostic?: (message: string) => void;
+}): ResolvedRegionDetailOverlayPlan | null {
 	const normalizedRegionNumber = Math.trunc(options.regionNumber);
 	const blendMode = regionDetailBlendModeForRole(options.roleKind);
 	if (!blendMode) {
@@ -55,13 +96,13 @@ export function resolveRegionDetailOverlay(options: {
 			? profileRecord.payload
 			: null;
 	if (!profile) {
-		options.reportDiagnostic(
+		options.reportDiagnostic?.(
 			`Missing region render profile ${profileAssetId}; ${options.roleKind} detail disabled.`,
 		);
 		return null;
 	}
 	if (profile.regionNumber !== normalizedRegionNumber) {
-		options.reportDiagnostic(
+		options.reportDiagnostic?.(
 			`Region render profile ${profileAssetId} reports region ${profile.regionNumber}; ${options.roleKind} detail disabled.`,
 		);
 		return null;
@@ -69,46 +110,57 @@ export function resolveRegionDetailOverlay(options: {
 
 	const role = profile.detailRoles[options.roleKind];
 	if (!role) {
-		options.reportDiagnostic(
+		options.reportDiagnostic?.(
 			`Region render profile ${profileAssetId} has no ${options.roleKind} detail role.`,
 		);
 		return null;
 	}
 	if (role.tiling <= 0) {
-		options.reportDiagnostic(
+		options.reportDiagnostic?.(
 			`Invalid ${options.roleKind} detail tiling ${role.tiling} for ${role.textureAssetId}.`,
 		);
 		return null;
 	}
 	if (role.fadeFar <= role.fadeNear) {
-		options.reportDiagnostic(
+		options.reportDiagnostic?.(
 			`Invalid ${options.roleKind} detail fade range ${role.fadeNear}-${role.fadeFar} for ${role.textureAssetId}.`,
 		);
 		return null;
 	}
-
-	const texture = resolveRegionDetailTexture({
+	const surfaceTexture = getSurfaceTexture(
+		options.assetState,
+		role.textureAssetId,
+	);
+	if (!surfaceTexture) {
+		options.reportDiagnostic?.(
+			`Missing ${options.roleKind} detail surface texture ${role.textureAssetId}.`,
+		);
+		return null;
+	}
+	const renderSurface = getSelectedRenderSurface({
+		assetState: options.assetState,
+		surfaceTexture,
+	});
+	if (!renderSurface) {
+		options.reportDiagnostic?.(
+			`Missing selected render surface for ${options.roleKind} detail texture ${role.textureAssetId}.`,
+		);
+		return null;
+	}
+	return {
+		regionNumber: normalizedRegionNumber,
+		profileAssetId,
 		roleKind: options.roleKind,
 		role,
-		assetState: options.assetState,
-		materialResourceCache: options.materialResourceCache,
-		reportDiagnostic: options.reportDiagnostic,
-	});
-	return texture
-		? {
-				regionNumber: normalizedRegionNumber,
-				profileAssetId,
-				role,
-				blendMode,
-				fadeMode,
-				texture,
-				signature: describeRegionDetailOverlaySignature(
-					normalizedRegionNumber,
-					options.roleKind,
-					role,
-				),
-			}
-		: null;
+		blendMode,
+		fadeMode,
+		renderSurface,
+		signature: describeRegionDetailOverlaySignature(
+			normalizedRegionNumber,
+			options.roleKind,
+			role,
+		),
+	};
 }
 
 export function describeRegionDetailRoleSignature(options: {
@@ -225,10 +277,10 @@ function resolveRegionDetailTexture(options: {
 		);
 		return null;
 	}
-	const renderSurface = getSelectedRenderSurface(
-		options.assetState,
+	const renderSurface = getSelectedRenderSurface({
+		assetState: options.assetState,
 		surfaceTexture,
-	);
+	});
 	if (!renderSurface) {
 		options.reportDiagnostic(
 			`Missing selected render surface for ${options.roleKind} detail texture ${options.role.textureAssetId}.`,
@@ -266,10 +318,13 @@ function getSurfaceTexture(
 	return record?.payload.kind === "surface-texture" ? record.payload : null;
 }
 
-function getSelectedRenderSurface(
-	assetState: AssetChannelState,
-	surfaceTexture: PreparedSurfaceTexturePayload,
-): PreparedRenderSurfacePayload | null {
+function getSelectedRenderSurface({
+	assetState,
+	surfaceTexture,
+}: {
+	assetState: AssetChannelState;
+	surfaceTexture: PreparedSurfaceTexturePayload;
+}): PreparedRenderSurfacePayload | null {
 	const renderSurfaceIds = preferredDetailRenderSurfaceIds(surfaceTexture);
 	for (const renderSurfaceId of renderSurfaceIds) {
 		const assetId = `render-surface/${formatHex32(renderSurfaceId)}`;

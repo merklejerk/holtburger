@@ -201,6 +201,46 @@ describe("webgl2 world resources", () => {
 		expect(gl.deletedTextures).toHaveLength(1);
 	});
 
+	it("realizes building region detail overlays for direct-texture draw units", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2WorldResourceStore();
+		const materialSurfaceId = 0x08000002;
+		const renderSurfaceId = 0x06000002;
+		const detailTextureId = 0x05001787;
+		const detailRenderSurfaceId = 0x06001787;
+
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState({
+				materialSurfaceId,
+				renderSurfaceId,
+				detailTextureId,
+				detailRenderSurfaceId,
+			}),
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: createStaticRenderableScene([
+				createStaticPart({
+					kind: "building",
+					detailRoleKind: "building",
+					materialSlots: [createMaterialSlot(0, materialSurfaceId)],
+				}),
+			]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform()],
+		});
+
+		expect(store.drawUnits[0]?.materialKind).toBe("direct-texture");
+		expect(store.drawUnits[0]?.detailOverlay).toMatchObject({
+			tiling: 8,
+			blendMode: "dst-color",
+		});
+		expect(store.textureCount).toBe(2);
+		expect(store.detailTextureCount).toBe(1);
+		expect(gl.createdTextures).toHaveLength(2);
+	});
+
 	it("reports atlas-eligible direct materials without changing staged rendering", () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
@@ -514,12 +554,16 @@ function createAssetState({
 	compressedAtlasReady = false,
 	indexed = false,
 	indexedFormat = "p8",
+	detailTextureId,
+	detailRenderSurfaceId,
 }: {
 	materialSurfaceId?: number;
 	renderSurfaceId?: number;
 	compressedAtlasReady?: boolean;
 	indexed?: boolean;
 	indexedFormat?: "p8" | "index16";
+	detailTextureId?: number;
+	detailRenderSurfaceId?: number;
 } = {}): AssetChannelState {
 	const state = createInitialAssetChannelState();
 	state.preparedByAssetId["gfx-obj/01000001"] = {
@@ -572,6 +616,30 @@ function createAssetState({
 			} as AssetChannelState["preparedAsset"];
 		}
 	}
+	if (detailTextureId !== undefined && detailRenderSurfaceId !== undefined) {
+		state.preparedByAssetId["region-render-profile/1"] = {
+			payload: createRegionRenderProfilePayload({
+				textureId: detailTextureId,
+				renderSurfaceId: detailRenderSurfaceId,
+			}),
+		} as AssetChannelState["preparedAsset"];
+		state.preparedByAssetId[
+			`surface-texture/${detailTextureId.toString(16).padStart(8, "0")}`
+		] = {
+			payload: createSurfaceTexturePayload({
+				textureId: detailTextureId,
+				renderSurfaceId: detailRenderSurfaceId,
+			}),
+		} as AssetChannelState["preparedAsset"];
+		state.preparedByAssetId[
+			`render-surface/${detailRenderSurfaceId.toString(16).padStart(8, "0")}`
+		] = {
+			payload: createRenderSurfacePayload({
+				renderSurfaceId: detailRenderSurfaceId,
+				compressed: false,
+			}),
+		} as AssetChannelState["preparedAsset"];
+	}
 	return state;
 }
 
@@ -606,8 +674,12 @@ function createStaticRenderableScene(parts: StaticRenderablePart[]) {
 }
 
 function createStaticPart({
+	kind = "scenery",
+	detailRoleKind = "object",
 	materialSlots = [],
 }: {
+	kind?: StaticRenderablePart["kind"];
+	detailRoleKind?: StaticRenderablePart["detailRoleKind"];
 	materialSlots?: readonly ResolvedMaterialSlot[];
 } = {}): StaticRenderablePart {
 	return {
@@ -623,7 +695,7 @@ function createStaticPart({
 			chunkKey: "landblock/12340000",
 			chunkLandblockId: 0x12340000,
 		},
-		kind: "scenery",
+		kind,
 		partIndex: 0,
 		gfxObjId: 0x01000001,
 		gfxObjAssetId: "gfx-obj/01000001",
@@ -637,8 +709,83 @@ function createStaticPart({
 		debugColorKey: "instance-a",
 		textureVelocity: null,
 		textureVelocitySignature: "uv:none",
-		detailRoleKind: "scenery",
+		detailRoleKind,
 		detailSignature: "detail:none",
+	};
+}
+
+function createRegionRenderProfilePayload({
+	textureId,
+	renderSurfaceId,
+}: {
+	textureId: number;
+	renderSurfaceId: number;
+}) {
+	const textureAssetId = `surface-texture/${textureId
+		.toString(16)
+		.padStart(8, "0")}`;
+	return {
+		kind: "region-render-profile",
+		sourceAssetKind: "region-render-profile",
+		residencyKind: "unknown",
+		provenance: {
+			source: "repo-local-hba",
+			sourceAssetKind: "region-render-profile",
+			errorCode: null,
+			detail: null,
+		},
+		regionNumber: 1,
+		detailRoles: {
+			landscape: null,
+			building: {
+				role: "building",
+				sourceTerrainDescIndex: 0,
+				textureAssetId,
+				textureDid: textureId,
+				tiling: 8,
+				fadeNear: 10,
+				fadeFar: 50,
+			},
+			environment: null,
+			object: null,
+		},
+		dependencies: {
+			surfaceTextureAssetIds: [textureAssetId],
+			renderSurfaceAssetIds: [
+				`render-surface/${renderSurfaceId.toString(16).padStart(8, "0")}`,
+			],
+			paletteAssetIds: [],
+		},
+	};
+}
+
+function createSurfaceTexturePayload({
+	textureId,
+	renderSurfaceId,
+}: {
+	textureId: number;
+	renderSurfaceId: number;
+}) {
+	return {
+		kind: "surface-texture",
+		sourceAssetKind: "surface-texture",
+		residencyKind: "unknown",
+		provenance: {
+			source: "repo-local-hba",
+			sourceAssetKind: "surface-texture",
+			errorCode: null,
+			detail: null,
+		},
+		surfaceTextureId: textureId,
+		textureType: 0,
+		unknown: 0,
+		selectedRenderSurfaceId: renderSurfaceId,
+		renderSurfaceIds: [renderSurfaceId],
+		dependencies: {
+			renderSurfaceAssetIds: [
+				`render-surface/${renderSurfaceId.toString(16).padStart(8, "0")}`,
+			],
+		},
 	};
 }
 

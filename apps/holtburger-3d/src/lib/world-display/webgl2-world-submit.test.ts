@@ -173,6 +173,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 						paletteColorCount: 2,
 						wrapS: "clamp",
 						wrapT: "repeat",
+						clipThreshold: -1,
 					},
 				}),
 			],
@@ -284,6 +285,7 @@ function createDrawUnit({
 		textureKey: null,
 		texture,
 		indexedMaterial,
+		detailOverlay: null,
 		terrainBlend: null,
 		modelMatrix: createIdentityMat4(),
 		bvhItemKeys: [],
@@ -316,6 +318,9 @@ function createTexturedProgram() {
 			uColor: {} as WebGLUniformLocation,
 			uAlphaTest: {} as WebGLUniformLocation,
 			uTexture: {} as WebGLUniformLocation,
+			uDetailTexture: {} as WebGLUniformLocation,
+			uDetailTiling: {} as WebGLUniformLocation,
+			uDetailEnabled: {} as WebGLUniformLocation,
 		},
 		dispose() {
 			return;
@@ -347,6 +352,9 @@ function createIndexedProgram() {
 				"uClipThreshold",
 				"uRepeatS",
 				"uRepeatT",
+				"uDetailTexture",
+				"uDetailTiling",
+				"uDetailEnabled",
 			].map((name) => [name, {} as WebGLUniformLocation]),
 		),
 		dispose() {

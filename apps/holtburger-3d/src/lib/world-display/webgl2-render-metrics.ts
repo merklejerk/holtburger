@@ -64,10 +64,10 @@ export function createWebgl2RenderMetrics(
 			canvasHeight: input.canvasHeight,
 			pixelRatio: input.pixelRatio,
 			cameraViewResidency: input.initializationError
-					? "webgl2 initialization failed"
-					: input.worldStore && input.worldStore.drawUnits.length > 0
-						? "webgl2 flat staged submitter ready"
-						: "webgl2 test frame",
+				? "webgl2 initialization failed"
+				: input.worldStore && input.worldStore.drawUnits.length > 0
+					? "webgl2 flat staged submitter ready"
+					: "webgl2 test frame",
 			residencyCellCount: 0,
 			residencyLandblockCount: 0,
 			residencyAabbCandidateCount: 0,
@@ -93,12 +93,10 @@ export function createWebgl2RenderMetrics(
 			staticGroupMeshCount: input.worldStore?.staticDrawUnitCount ?? 0,
 			visibleStaticGroupMeshCount:
 				(input.frameMetrics?.visibleDrawCountsByCategory["static-staged"] ??
-					0) +
-				(input.frameMetrics?.visibleDrawCountsByCategory.static ?? 0),
+					0) + (input.frameMetrics?.visibleDrawCountsByCategory.static ?? 0),
 			staticRenderBatchCount: input.worldStore?.staticDrawUnitCount ?? 0,
 			staticBvhCandidateBatchCount:
-				(input.frameMetrics?.candidateCountsByCategory["static-staged"] ??
-					0) +
+				(input.frameMetrics?.candidateCountsByCategory["static-staged"] ?? 0) +
 				(input.frameMetrics?.candidateCountsByCategory.static ?? 0),
 			staticBvhRepresentedInstanceKeyCount:
 				(input.frameMetrics?.representedItemKeyCountsByCategory[
@@ -117,9 +115,8 @@ export function createWebgl2RenderMetrics(
 			structuredInteriorRenderBatchCount:
 				input.worldStore?.structuredInteriorDrawUnitCount ?? 0,
 			structuredInteriorBvhCandidateBatchCount:
-				input.frameMetrics?.candidateCountsByCategory[
-					"structured-interior"
-				] ?? 0,
+				input.frameMetrics?.candidateCountsByCategory["structured-interior"] ??
+				0,
 			debugOverlayRenderBatchCount:
 				input.frameMetrics?.candidateCountsByCategory["debug-overlay"] ?? 0,
 			debugOverlayBvhCandidateBatchCount:
@@ -130,9 +127,8 @@ export function createWebgl2RenderMetrics(
 				input.frameMetrics?.visibleDrawCountsByCategory["portal-mask"] ?? 0,
 			nonStaticBvhFallbackIncludedBatchCount:
 				(input.frameMetrics?.fallbackCountsByCategory.terrain ?? 0) +
-				(input.frameMetrics?.fallbackCountsByCategory[
-					"structured-interior"
-				] ?? 0) +
+				(input.frameMetrics?.fallbackCountsByCategory["structured-interior"] ??
+					0) +
 				(input.frameMetrics?.fallbackCountsByCategory["portal-mask"] ?? 0) +
 				(input.frameMetrics?.fallbackCountsByCategory["debug-overlay"] ?? 0),
 			portalCompositeVisibleItemKeyCount: 0,
@@ -158,8 +154,7 @@ export function createWebgl2RenderMetrics(
 				input.frameMetrics?.visibleItemKeyCount ?? 0,
 			envCellLocalBvhTotalItemCount:
 				input.frameMetrics?.representedItemKeyCount ?? 0,
-			visibleStaticInstanceKeyCount:
-				input.worldStore?.staticInstanceCount ?? 0,
+			visibleStaticInstanceKeyCount: input.worldStore?.staticInstanceCount ?? 0,
 			visiblePortalKeyCount: 0,
 			envCellBvhConsideredCount: 0,
 			fallbackReasonCount:
@@ -184,8 +179,9 @@ export function createWebgl2RenderMetrics(
 			detailTexturesEnabled: input.detailTexturesEnabled,
 			textureSamplingPolicyCounts:
 				input.worldStore?.textureSamplingPolicyCounts ?? {},
-			textureSamplingPolicySamples:
-				[...(input.worldStore?.textureSamplingPolicySamples ?? [])],
+			textureSamplingPolicySamples: [
+				...(input.worldStore?.textureSamplingPolicySamples ?? []),
+			],
 			textureUploadSamples: [...(input.worldStore?.textureUploadSamples ?? [])],
 			atlasEligibleMaterialCount:
 				input.worldStore?.atlasEligibleMaterialCount ?? 0,
@@ -206,8 +202,7 @@ export function createWebgl2RenderMetrics(
 			staticGeometryGroupCount: input.worldStore?.staticDrawUnitCount ?? 0,
 			staticVisibleGeometryGroupCount:
 				(input.frameMetrics?.visibleDrawCountsByCategory["static-staged"] ??
-					0) +
-				(input.frameMetrics?.visibleDrawCountsByCategory.static ?? 0),
+					0) + (input.frameMetrics?.visibleDrawCountsByCategory.static ?? 0),
 			structuredInteriorGeometryGroupCount:
 				input.worldStore?.structuredInteriorDrawUnitCount ?? 0,
 			materialTypeCounts: input.worldStore
@@ -219,15 +214,14 @@ export function createWebgl2RenderMetrics(
 							input.worldStore.directTextureDrawUnitCount,
 						"webgl2-atlas-eligible":
 							input.worldStore.atlasEligibleMaterialCount,
+						"webgl2-detail-overlay": input.worldStore.detailTextureCount,
 						...prefixCounts(
 							"webgl2-visible-",
 							input.submitMetrics.visibleDrawUnitCountsByMaterialKind,
 						),
-						"webgl2-program-switches":
-							input.submitMetrics.programSwitchCount,
+						"webgl2-program-switches": input.submitMetrics.programSwitchCount,
 						"webgl2-vao-binds": input.submitMetrics.vertexArrayBindCount,
-						"webgl2-uniform-uploads":
-							input.submitMetrics.uniformUploadCount,
+						"webgl2-uniform-uploads": input.submitMetrics.uniformUploadCount,
 						"webgl2-state-changes": input.submitMetrics.stateChangeCount,
 					}
 				: {},

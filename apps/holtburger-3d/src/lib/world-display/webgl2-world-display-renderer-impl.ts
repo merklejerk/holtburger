@@ -106,10 +106,22 @@ precision highp float;
 uniform vec4 uColor;
 uniform float uAlphaTest;
 uniform sampler2D uTexture;
+uniform sampler2D uDetailTexture;
+uniform float uDetailTiling;
+uniform int uDetailEnabled;
 
 in vec2 vUv;
 
 out vec4 fragColor;
+
+vec3 applyDetailOverlay(vec3 baseColor) {
+	if (uDetailEnabled == 0) {
+		return baseColor;
+	}
+	vec4 detailColor = texture(uDetailTexture, vUv * uDetailTiling);
+	float sourceAlpha = clamp(detailColor.a, 0.0, 1.0);
+	return clamp(baseColor * (detailColor.rgb + (1.0 - sourceAlpha)), 0.0, 1.0);
+}
 
 void main() {
 	vec4 texel = texture(uTexture, vUv);
@@ -117,6 +129,7 @@ void main() {
 	if (color.a < uAlphaTest) {
 		discard;
 	}
+	color.rgb = applyDetailOverlay(color.rgb);
 	fragColor = color;
 }
 `;
@@ -133,6 +146,9 @@ uniform float uPaletteColorCount;
 uniform int uClipThreshold;
 uniform int uRepeatS;
 uniform int uRepeatT;
+uniform sampler2D uDetailTexture;
+uniform float uDetailTiling;
+uniform int uDetailEnabled;
 
 in vec2 vUv;
 
@@ -167,6 +183,15 @@ float paletteIndexAt(ivec2 coord) {
 	return floor(packed.r + 0.5);
 }
 
+vec3 applyDetailOverlay(vec3 baseColor) {
+	if (uDetailEnabled == 0) {
+		return baseColor;
+	}
+	vec4 detailColor = texture(uDetailTexture, vUv * uDetailTiling);
+	float sourceAlpha = clamp(detailColor.a, 0.0, 1.0);
+	return clamp(baseColor * (detailColor.rgb + (1.0 - sourceAlpha)), 0.0, 1.0);
+}
+
 void main() {
 	vec2 texelPosition = resolveIndexedUv(vUv);
 	ivec2 baseCoord = ivec2(floor(texelPosition));
@@ -185,6 +210,7 @@ void main() {
 	if (color.a <= 0.0 || color.a < uAlphaTest) {
 		discard;
 	}
+	color.rgb = applyDetailOverlay(color.rgb);
 	fragColor = color;
 }
 `;
@@ -201,6 +227,9 @@ uniform float uPaletteColorCount;
 uniform int uClipThreshold;
 uniform int uRepeatS;
 uniform int uRepeatT;
+uniform sampler2D uDetailTexture;
+uniform float uDetailTiling;
+uniform int uDetailEnabled;
 
 in vec2 vUv;
 
@@ -235,6 +264,15 @@ float paletteIndexAt(ivec2 coord) {
 	return floor(packed.r + 0.5) + floor(packed.g + 0.5) * 256.0;
 }
 
+vec3 applyDetailOverlay(vec3 baseColor) {
+	if (uDetailEnabled == 0) {
+		return baseColor;
+	}
+	vec4 detailColor = texture(uDetailTexture, vUv * uDetailTiling);
+	float sourceAlpha = clamp(detailColor.a, 0.0, 1.0);
+	return clamp(baseColor * (detailColor.rgb + (1.0 - sourceAlpha)), 0.0, 1.0);
+}
+
 void main() {
 	vec2 texelPosition = resolveIndexedUv(vUv);
 	ivec2 baseCoord = ivec2(floor(texelPosition));
@@ -253,6 +291,7 @@ void main() {
 	if (color.a <= 0.0 || color.a < uAlphaTest) {
 		discard;
 	}
+	color.rgb = applyDetailOverlay(color.rgb);
 	fragColor = color;
 }
 `;
@@ -476,6 +515,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		},
 		setDetailTexturesEnabled(enabled) {
 			detailTexturesEnabled = enabled;
+			syncWorldResources();
 			reportMetrics();
 		},
 		setCameraFrameChangeHandler() {
@@ -681,6 +721,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			transitionPortalModel,
 			renderChunkTransforms,
 			rendererResourceGraph: options.rendererResourceGraph,
+			detailTexturesEnabled,
 		});
 		resources.stateCache.invalidate();
 	}
@@ -815,7 +856,15 @@ function createTexturedWorldProgram(
 		vertexSource: TEXTURED_WORLD_VERTEX_SHADER,
 		fragmentSource: TEXTURED_WORLD_FRAGMENT_SHADER,
 		attributes: ["position", "uv"],
-		uniforms: ["uModelViewProjection", "uColor", "uAlphaTest", "uTexture"],
+		uniforms: [
+			"uModelViewProjection",
+			"uColor",
+			"uAlphaTest",
+			"uTexture",
+			"uDetailTexture",
+			"uDetailTiling",
+			"uDetailEnabled",
+		],
 	});
 }
 
@@ -857,6 +906,9 @@ function createIndexedWorldProgram(
 			"uClipThreshold",
 			"uRepeatS",
 			"uRepeatT",
+			"uDetailTexture",
+			"uDetailTiling",
+			"uDetailEnabled",
 		],
 	});
 }

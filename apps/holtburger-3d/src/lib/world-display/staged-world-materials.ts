@@ -8,6 +8,7 @@ import {
 import type { ResolvedMaterialSlot } from "./material-plan";
 import type { RenderVec4 } from "./render-math";
 import type { ResolvedIndexedMaterialData } from "./indexed-material-data";
+import type { ResolvedRegionDetailOverlayPlan } from "./region-detail-overlays";
 import type { TerrainBlendPlan } from "./terrain-blend-plan";
 import {
 	defaultStagedWorldMaterialTextureCapabilities,
@@ -44,6 +45,7 @@ export interface StagedWorldDirectTextureMaterialPlan {
 	behavior: LegacyMaterialBehaviorDto;
 	fallbackReason: string | null;
 	atlasEligibility: StagedWorldMaterialAtlasEligibility | null;
+	detailOverlay: ResolvedRegionDetailOverlayPlan | null;
 	preparedAssetIds: readonly string[];
 }
 
@@ -54,6 +56,7 @@ export interface StagedWorldIndexedPalettedMaterialPlan {
 	indexedMaterial: ResolvedIndexedMaterialData;
 	behavior: LegacyMaterialBehaviorDto;
 	fallbackReason: string | null;
+	detailOverlay: ResolvedRegionDetailOverlayPlan | null;
 	preparedAssetIds: readonly string[];
 }
 
@@ -105,6 +108,7 @@ export function resolveStagedWorldMaterialSlotPlan(options: {
 	renderableKind?: StagedWorldMaterialRenderableKind;
 	textureCapabilities?: MaterialTextureCapabilities;
 	appearance?: MaterialAppearanceContext | null;
+	detailOverlay?: ResolvedRegionDetailOverlayPlan | null;
 }): StagedWorldMaterialPlan {
 	const strategy = resolveStagedWorldMaterialStrategy({
 		assetState: options.assetState,
@@ -115,7 +119,8 @@ export function resolveStagedWorldMaterialSlotPlan(options: {
 				options.appearance ?? createBaseMaterialAppearanceContext("base"),
 		},
 		textureCapabilities:
-			options.textureCapabilities ?? defaultStagedWorldMaterialTextureCapabilities(),
+			options.textureCapabilities ??
+			defaultStagedWorldMaterialTextureCapabilities(),
 	});
 	if (strategy.kind !== "direct-texture") {
 		if (strategy.kind === "indexed-paletted") {
@@ -131,7 +136,11 @@ export function resolveStagedWorldMaterialSlotPlan(options: {
 				indexedMaterial: strategy.indexedMaterial,
 				behavior: strategy.behavior,
 				fallbackReason: strategy.detail,
-				preparedAssetIds: collectStrategyPreparedAssetIds(strategy),
+				detailOverlay: options.detailOverlay ?? null,
+				preparedAssetIds: collectStrategyPreparedAssetIds(
+					strategy,
+					options.detailOverlay ?? null,
+				),
 			};
 		}
 		return createFallbackMaterialPlan({
@@ -156,7 +165,11 @@ export function resolveStagedWorldMaterialSlotPlan(options: {
 		behavior: strategy.behavior,
 		fallbackReason: null,
 		atlasEligibility: strategy.atlasEligibility,
-		preparedAssetIds: collectStrategyPreparedAssetIds(strategy),
+		detailOverlay: options.detailOverlay ?? null,
+		preparedAssetIds: collectStrategyPreparedAssetIds(
+			strategy,
+			options.detailOverlay ?? null,
+		),
 	};
 }
 
@@ -179,6 +192,7 @@ function createFallbackMaterialPlan(options: {
 
 function collectStrategyPreparedAssetIds(
 	strategy: ReturnType<typeof resolveStagedWorldMaterialStrategy>,
+	detailOverlay: ResolvedRegionDetailOverlayPlan | null = null,
 ): readonly string[] {
 	const assetIds = new Set<string>();
 	if (strategy.materialAssetId !== "material/fallback") {
@@ -196,6 +210,13 @@ function collectStrategyPreparedAssetIds(
 		for (const assetId of strategy.indexedMaterial.preparedAssetIds) {
 			assetIds.add(assetId);
 		}
+	}
+	if (detailOverlay) {
+		assetIds.add(detailOverlay.profileAssetId);
+		assetIds.add(detailOverlay.role.textureAssetId);
+		assetIds.add(
+			`render-surface/${formatHex32(detailOverlay.renderSurface.renderSurfaceId)}`,
+		);
 	}
 	return [...assetIds].sort();
 }

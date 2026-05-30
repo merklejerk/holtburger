@@ -10,7 +10,13 @@ export type Webgl2FlatWorldProgram = Webgl2ProgramResource<
 >;
 export type Webgl2TexturedWorldProgram = Webgl2ProgramResource<
 	"position" | "uv",
-	"uModelViewProjection" | "uColor" | "uAlphaTest" | "uTexture"
+	| "uModelViewProjection"
+	| "uColor"
+	| "uAlphaTest"
+	| "uTexture"
+	| "uDetailTexture"
+	| "uDetailTiling"
+	| "uDetailEnabled"
 >;
 export type Webgl2TerrainBlendWorldProgram = Webgl2ProgramResource<
 	"position" | "uv",
@@ -50,6 +56,9 @@ export type Webgl2IndexedP8WorldProgram = Webgl2ProgramResource<
 	| "uClipThreshold"
 	| "uRepeatS"
 	| "uRepeatT"
+	| "uDetailTexture"
+	| "uDetailTiling"
+	| "uDetailEnabled"
 >;
 export type Webgl2IndexedP16WorldProgram = Webgl2ProgramResource<
 	"position" | "uv",
@@ -63,6 +72,9 @@ export type Webgl2IndexedP16WorldProgram = Webgl2ProgramResource<
 	| "uClipThreshold"
 	| "uRepeatS"
 	| "uRepeatT"
+	| "uDetailTexture"
+	| "uDetailTiling"
+	| "uDetailEnabled"
 >;
 
 export interface Webgl2WorldSubmitMetrics {
@@ -193,7 +205,8 @@ export function submitWebgl2FlatWorldFrame({
 			previousProgramKind = programKind;
 			if (useTexture) {
 				gl.uniform1i(texturedProgram.uniforms.uTexture, 0);
-				metrics.uniformUploadCount += 1;
+				gl.uniform1i(texturedProgram.uniforms.uDetailTexture, 1);
+				metrics.uniformUploadCount += 2;
 			}
 			if (useIndexed) {
 				if (!activeIndexedProgram) {
@@ -202,7 +215,7 @@ export function submitWebgl2FlatWorldFrame({
 					);
 				}
 				uploadIndexedSamplerUniforms(gl, activeIndexedProgram);
-				metrics.uniformUploadCount += 2;
+				metrics.uniformUploadCount += 3;
 			}
 			if (useTerrainBlend) {
 				uploadTerrainBlendSamplerUniforms(gl, terrainBlendProgram);
@@ -221,6 +234,14 @@ export function submitWebgl2FlatWorldFrame({
 		});
 		if (texture && stateCache.bindTexture2D(0, texture.texture)) {
 			metrics.stateChangeCount += 1;
+		}
+		if (drawUnit.detailOverlay) {
+			const unit = drawUnit.indexedMaterial ? 2 : 1;
+			if (
+				stateCache.bindTexture2D(unit, drawUnit.detailOverlay.texture.texture)
+			) {
+				metrics.stateChangeCount += 1;
+			}
 		}
 		if (drawUnit.terrainBlend) {
 			metrics.stateChangeCount += bindTerrainBlendTextures({
@@ -287,6 +308,11 @@ export function submitWebgl2FlatWorldFrame({
 			);
 			metrics.uniformUploadCount += INDEXED_DYNAMIC_UNIFORM_COUNT;
 		}
+		if (useTexture || useIndexed) {
+			const detailProgram = activeIndexedProgram ?? texturedProgram;
+			uploadDetailOverlayUniforms(gl, detailProgram, drawUnit.detailOverlay);
+			metrics.uniformUploadCount += DETAIL_DYNAMIC_UNIFORM_COUNT;
+		}
 		if (drawUnit.terrainBlend) {
 			uploadTerrainBlendUniforms(
 				gl,
@@ -306,6 +332,7 @@ export function submitWebgl2FlatWorldFrame({
 const TERRAIN_BLEND_SAMPLER_UNIFORM_COUNT = 10;
 const TERRAIN_BLEND_DYNAMIC_UNIFORM_COUNT = 13;
 const INDEXED_DYNAMIC_UNIFORM_COUNT = 6;
+const DETAIL_DYNAMIC_UNIFORM_COUNT = 2;
 
 function uploadTerrainBlendSamplerUniforms(
 	gl: WebGL2RenderingContext,
@@ -363,6 +390,7 @@ function uploadIndexedSamplerUniforms(
 ): void {
 	gl.uniform1i(program.uniforms.uIndexTexture, 0);
 	gl.uniform1i(program.uniforms.uPaletteTexture, 1);
+	gl.uniform1i(program.uniforms.uDetailTexture, 2);
 }
 
 function bindIndexedMaterialTextures({
@@ -405,6 +433,18 @@ function uploadIndexedMaterialUniforms(
 		program.uniforms.uRepeatT,
 		indexedMaterial.wrapT === "repeat" ? 1 : 0,
 	);
+}
+
+function uploadDetailOverlayUniforms(
+	gl: WebGL2RenderingContext,
+	program:
+		| Webgl2TexturedWorldProgram
+		| Webgl2IndexedP8WorldProgram
+		| Webgl2IndexedP16WorldProgram,
+	detailOverlay: Webgl2WorldDrawUnit["detailOverlay"],
+): void {
+	gl.uniform1f(program.uniforms.uDetailTiling, detailOverlay?.tiling ?? 1);
+	gl.uniform1i(program.uniforms.uDetailEnabled, detailOverlay ? 1 : 0);
 }
 
 function uploadTerrainBlendUniforms(

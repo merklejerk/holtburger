@@ -77,7 +77,16 @@ describe("partitionWebgl2SceneDomainDrawUnits", () => {
 	it("routes exterior, interior, and portal-mask draw units into separate ownership", () => {
 		const partition = partitionWebgl2SceneDomainDrawUnits([
 			createDrawUnit({ id: "terrain", kind: "terrain" }),
-			createDrawUnit({ id: "static", kind: "static" }),
+			createDrawUnit({
+				id: "outdoor-static",
+				kind: "static",
+				sceneDomain: "exterior",
+			}),
+			createDrawUnit({
+				id: "indoor-static",
+				kind: "static",
+				sceneDomain: "interior",
+			}),
 			createDrawUnit({
 				id: "interior",
 				kind: "structured-interior",
@@ -87,9 +96,10 @@ describe("partitionWebgl2SceneDomainDrawUnits", () => {
 
 		expect(partition.exterior.map((drawUnit) => drawUnit.id)).toEqual([
 			"terrain",
-			"static",
+			"outdoor-static",
 		]);
 		expect(partition.interior.map((drawUnit) => drawUnit.id)).toEqual([
+			"indoor-static",
 			"interior",
 		]);
 	});
@@ -288,9 +298,11 @@ function createDrawUnit({
 	indexedMaterial = null,
 	vertexArray = {} as WebGLVertexArrayObject,
 	kind = "static",
+	sceneDomain,
 }: {
 	id: string;
 	kind?: Webgl2WorldDrawUnit["kind"];
+	sceneDomain?: Webgl2WorldDrawUnit["sceneDomain"];
 	materialKey?: string;
 	materialKind?: Webgl2WorldDrawUnit["materialKind"];
 	geometrySignature?: string;
@@ -339,12 +351,28 @@ function createDrawUnit({
 		indexedMaterial,
 		detailOverlay: null,
 		terrainBlend: null,
+		sceneDomain: sceneDomain ?? defaultSceneDomainForKind(kind),
 		modelMatrix: createIdentityMat4(),
 		bvhItemKeys: [],
 		bvhFallbackReason: null,
 		staticPartCount: 1,
 		staticObjectKeys: [id],
 	};
+}
+
+function defaultSceneDomainForKind(
+	kind: Webgl2WorldDrawUnit["kind"],
+): Webgl2WorldDrawUnit["sceneDomain"] {
+	switch (kind) {
+		case "terrain":
+			return "exterior";
+		case "static":
+			return "exterior";
+		case "structured-interior":
+			return "interior";
+		case "portal-mask":
+			return null;
+	}
 }
 
 function createFlatProgram(): Webgl2FlatWorldProgram {

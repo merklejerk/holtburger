@@ -39,15 +39,29 @@ import {
 	type Webgl2WorldResourceStore,
 } from "./webgl2-world-resources";
 import type { WorldRenderMetrics } from "./renderer-contract";
+import type {
+	BrowserCameraResidency,
+} from "./renderer-contract";
 import type { MaterialTextureCapabilities } from "./render-surface-texture-data";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
 import { deriveTransitionPortalRenderLevels } from "./render-policy";
 import {
 	deriveWebgl2BaseSceneDomain,
+	deriveWebgl2BaseSceneDomainFromResidency,
+	deriveWebgl2InitialPortalEnvCellId,
 	planWebgl2TransitionPortalWork,
 	type Webgl2TransitionPortalWorkPlan,
 } from "./webgl2-transition-portal-work";
 import type { TransitionPortalScene } from "./transition-portal-work-items";
+import {
+	buildWorldResidencyIndex,
+	createEmptyWorldResidencyIndex,
+	deriveBrowserCameraResidency,
+	describeCameraViewResidencyContext,
+	type CameraViewResidencyContext,
+	type WorldResidencyIndex,
+	type WorldResidencyQueryDiagnostics,
+} from "./world-residency-index";
 import type {
 	WorldDisplayRenderer,
 	WorldDisplayRendererOptions,
@@ -489,6 +503,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	let textureColorSpaceMode = options.textureColorSpaceMode ?? "auto";
 	let detailTexturesEnabled = options.detailTexturesEnabled ?? true;
 	let renderMetricsChangeHandler = options.onRenderMetricsChange;
+	let cameraResidencyChangeHandler = options.onCameraResidencyChange;
 	let disposed = false;
 	let frameHandle: number | null = null;
 	let resources: Webgl2RenderResources | null = null;
@@ -506,6 +521,19 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		createEmptyWebgl2WorldSubmitMetrics();
 	let latestFrameMetrics: StagedWorldFrameMetrics | null = null;
 	let latestSceneDomainFrameMetrics: Webgl2SceneDomainFrameMetrics | null = null;
+	let residencyIndex: WorldResidencyIndex = createEmptyWorldResidencyIndex();
+	let latestCameraResidencyContext: CameraViewResidencyContext = {
+		kind: "unknown",
+		landblockId: null,
+	};
+	let latestCameraResidencyDiagnostics: WorldResidencyQueryDiagnostics = {
+		landblockId: null,
+		aabbCandidateCount: 0,
+		cellBspMatchCount: 0,
+		aabbFallbackCount: 0,
+		source: "unknown",
+	};
+	let latestCameraResidencyKey = "";
 	let latestBaseSceneDomain: TransitionPortalScene = deriveWebgl2BaseSceneDomain({
 		renderSceneContext,
 		structuredInteriorScene,
@@ -549,6 +577,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		setStructuredInteriorScene(scene) {
 			structuredInteriorScene = scene;
 			syncWorldResources();
+			syncResidencyIndex();
 			reportMetrics();
 		},
 		setTransitionPortalModel(model) {
@@ -561,11 +590,13 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		},
 		setRenderSceneContext(context) {
 			renderSceneContext = context;
+			syncResidencyIndex();
 			reportMetrics();
 		},
 		setRenderChunkTransforms(transforms) {
 			renderChunkTransforms = transforms;
 			syncWorldResources();
+			syncResidencyIndex();
 			reportMetrics();
 		},
 		setRenderSpatialQuery() {
@@ -606,8 +637,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			renderMetricsChangeHandler = handler;
 			reportMetrics();
 		},
-		setCameraResidencyChangeHandler() {
-			return;
+		setCameraResidencyChangeHandler(handler) {
+			cameraResidencyChangeHandler = handler;
+			reportCameraResidency();
 		},
 		pickTerrainLandblockAtViewportPoint() {
 			return null;
@@ -643,6 +675,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			resources = createTriangleResources(gl);
 			syncCanvasSize();
 			syncWorldResources();
+			syncResidencyIndex();
 			scheduleFrame();
 		} catch (error) {
 			initializationError =
@@ -682,12 +715,14 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		gl.clearDepth(1);
 		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 		clearCount += 1;
+		const cameraFrame = resolveCameraFrame();
+		updateCameraResidency(cameraFrame.position);
 
 		if (resources.worldStore.drawUnits.length > 0) {
 			const frame = buildStagedWorldFrame({
 				assetState,
 				candidates: resources.worldStore.drawUnits,
-				cameraFrame: resolveCameraFrame(),
+				cameraFrame,
 				renderChunkTransforms,
 				staticRenderableScene,
 				structuredInteriorScene,
@@ -706,10 +741,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			} else {
 				latestSceneDomainFrameMetrics = null;
 				latestPortalWorkPlan = null;
-				latestBaseSceneDomain = deriveWebgl2BaseSceneDomain({
-					renderSceneContext,
-					structuredInteriorScene,
-				});
+				latestBaseSceneDomain = deriveWebgl2BaseSceneDomainFromResidency(
+					latestCameraResidencyContext,
+				);
 				latestSubmitMetrics = submitWebgl2FlatWorldFrame({
 					gl,
 					stateCache: resources.stateCache,
@@ -778,20 +812,18 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		);
 		const sceneDomainDrawUnits =
 			partitionWebgl2SceneDomainDrawUnits(visibleDrawUnits);
-		const baseScene = deriveWebgl2BaseSceneDomain({
-			renderSceneContext,
-			structuredInteriorScene,
-		});
+		const baseScene = deriveWebgl2BaseSceneDomainFromResidency(
+			latestCameraResidencyContext,
+		);
 		latestBaseSceneDomain = baseScene;
 		latestPortalWorkPlan = planWebgl2TransitionPortalWork({
 			transitionPortalModel,
 			visiblePortalMaskDrawUnits: portalMaskDrawUnits,
 			cameraPosition: frameCameraPosition(),
 			baseScene,
-			initialEnvCellId:
-				baseScene === "interior"
-					? structuredInteriorScene.focusEnvCellId
-					: null,
+			initialEnvCellId: deriveWebgl2InitialPortalEnvCellId(
+				latestCameraResidencyContext,
+			),
 			levels: deriveTransitionPortalRenderLevels({
 				baseScene,
 				maxDepth: transitionPortalMaxDepth,
@@ -1031,6 +1063,45 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		resources.stateCache.invalidate();
 	}
 
+	function syncResidencyIndex(): void {
+		residencyIndex = buildWorldResidencyIndex({
+			cells: structuredInteriorScene.cells,
+			renderChunkTransforms,
+			sceneContext: renderSceneContext,
+		});
+		updateCameraResidency(resolveCameraFrame().position);
+	}
+
+	function updateCameraResidency(position: {
+		x: number;
+		y: number;
+		z: number;
+	}): void {
+		const result = residencyIndex.queryDetailed(position);
+		latestCameraResidencyContext = result.context;
+		latestCameraResidencyDiagnostics = result.diagnostics;
+		latestBaseSceneDomain = deriveWebgl2BaseSceneDomainFromResidency(
+			result.context,
+		);
+		reportCameraResidency();
+	}
+
+	function reportCameraResidency(): void {
+		if (!cameraResidencyChangeHandler) {
+			return;
+		}
+		const residency = deriveBrowserCameraResidency(
+			latestCameraResidencyContext,
+			latestCameraResidencyDiagnostics,
+		);
+		const residencyKey = describeWebgl2BrowserCameraResidencyKey(residency);
+		if (residencyKey === latestCameraResidencyKey) {
+			return;
+		}
+		latestCameraResidencyKey = residencyKey;
+		cameraResidencyChangeHandler(residency);
+	}
+
 	function resolveCameraFrame() {
 		const aspect = canvas.width / Math.max(1, canvas.height);
 		if (controlledCameraFrame) {
@@ -1052,6 +1123,18 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				canvasWidth: canvas.width,
 				canvasHeight: canvas.height,
 				pixelRatio: window.devicePixelRatio || 1,
+				cameraViewResidency: describeCameraViewResidencyContext(
+					latestCameraResidencyContext,
+				),
+				residencyCellCount: residencyIndex.cellCount,
+				residencyLandblockCount: residencyIndex.landblockCount,
+				residencyAabbCandidateCount:
+					latestCameraResidencyDiagnostics.aabbCandidateCount,
+				residencyCellBspMatchCount:
+					latestCameraResidencyDiagnostics.cellBspMatchCount,
+				residencyAabbFallbackCount:
+					latestCameraResidencyDiagnostics.aabbFallbackCount,
+				residencySource: latestCameraResidencyDiagnostics.source,
 				renderGraphPolicy: initializationError
 					? "webgl2-initialization-failed"
 					: resources
@@ -1161,6 +1244,17 @@ function mergeSceneDomainSubmitMetrics({
 			interiorMetrics.visibleDrawUnitCountsByMaterialKind,
 		),
 	};
+}
+
+function describeWebgl2BrowserCameraResidencyKey(
+	residency: BrowserCameraResidency,
+): string {
+	return [
+		residency.kind,
+		residency.landblockId ?? "none",
+		residency.envCellId ?? "none",
+		residency.source,
+	].join(":");
 }
 
 function mergeMaterialKindCounts(

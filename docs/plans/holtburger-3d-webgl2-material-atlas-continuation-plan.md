@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
-Status: Phase M4B.1 complete; ready for Phase M4B.2.
+Status: Phase M4B.2 complete; ready for Phase M4C.
 
 Related plans:
 
@@ -1192,7 +1192,7 @@ Cleanup targets and legacy shims:
 
 ## Phase M4B.2: Shared Camera Residency for WebGL2
 
-Status: Not started.
+Status: Complete.
 
 Purpose: make camera residency a renderer-agnostic input or helper so WebGL2 can choose the correct
 base scene, initial env-cell frontier, and residency metrics before stencil/depth portal compositing.
@@ -1238,6 +1238,24 @@ Exit criteria:
 - M4C can assume the base scene and initial interior frontier are correct for free-camera portal
   traversal.
 
+Progress:
+
+- Wired WebGL2 to build and retain the shared `WorldResidencyIndex` from structured interior cells,
+  render chunk transforms, and render-scene context. This reuses the same renderer-neutral residency
+  query path that the Three backend already uses.
+- WebGL2 now queries camera residency each frame from the current `SceneCameraFrame.position`.
+- Implemented WebGL2 `setCameraResidencyChangeHandler()` so browser-mode observers receive
+  `BrowserCameraResidency` updates from `deriveBrowserCameraResidency()` instead of a no-op.
+- Replaced WebGL2 base-domain selection with actual camera residency:
+  - `env-cell` selects `interior`;
+  - `outdoor-landblock` and `unknown` select `exterior`.
+- Replaced the focused-cell fallback for portal depth batching with the current env-cell residency
+  when the camera is actually in an env-cell.
+- Updated WebGL2 metrics to report camera residency text, residency source, residency index counts,
+  AABB candidate count, BSP match count, and AABB fallback count from the shared residency query.
+- Added pure WebGL2 portal work tests covering residency-backed base-scene selection and initial
+  portal env-cell selection.
+
 Decisions:
 
 - Camera residency is a renderer-shared concern, not a Three implementation detail. The WebGL2
@@ -1245,14 +1263,36 @@ Decisions:
 - Keep browser-mode UX policy outside the shared residency helper. The helper should answer
   "where is this camera position?" and return diagnostics; renderer/UI code can decide how to
   present or react to that result.
+- WebGL2 does not need to consume `renderSpatialQuery` for camera residency. The existing
+  `WorldResidencyIndex` is already the renderer-neutral API; M4B.2 wires that directly into the
+  WebGL2 backend.
+- Unknown residency intentionally selects the exterior base domain. That matches the existing Three
+  policy's diagnostic/fallback stance and avoids copying an arbitrary interior target when the
+  camera is outside known env-cell bounds.
+- The M4B.1 render-scene-context base-domain helper remains only as a compatibility/fallback helper
+  for tests and future unavailable-residency cases. The active WebGL2 render path now uses actual
+  residency.
+
+Course corrections:
+
+- The phase text assumed a new shared residency query might need to be extracted. Code inspection
+  showed the shared `buildWorldResidencyIndex()` path already existed; the missing work was WebGL2
+  ownership, per-frame querying, callback reporting, and metrics wiring.
+- Handler notification is keyed by residency kind, landblock, env-cell, and source so repeated
+  frames do not spam unchanged residency events.
 
 Cleanup targets and legacy shims:
 
-- Remove the WebGL2 `setCameraResidencyChangeHandler()` no-op once this phase lands.
-- Replace the temporary M4B.1 base-domain render-scene-context bridge with residency-backed policy.
-- Audit metrics fields currently hard-coded in `webgl2-render-metrics.ts`, especially
-  `cameraViewResidency`, `residencySource`, `residencyCellCount`, `residencyLandblockCount`,
-  `residencyAabbCandidateCount`, `residencyCellBspMatchCount`, and `residencyAabbFallbackCount`.
+- The WebGL2 `setCameraResidencyChangeHandler()` no-op has been replaced with real callback
+  reporting.
+- The old `deriveWebgl2BaseSceneDomain()` render-scene-context helper is now a fallback shim. Remove
+  or rename it after M4C proves no tests or unavailable-residency paths need it.
+- WebGL2 residency still does not drive picking APIs; `pickTerrainLandblockAtViewportPoint()` and
+  `pickAtViewportPoint()` remain null. That is outside M4 portal rendering but should be revisited
+  when WebGL2 becomes the primary backend.
+- WebGL2 metrics now report residency query diagnostics, but the debug labels still use older
+  `renderGraph*` naming inherited from Three/luma. M5 should rationalize metric names once portal
+  compositing lands.
 
 ## Phase M4C: Iterative Stencil/Depth Portal Composite
 

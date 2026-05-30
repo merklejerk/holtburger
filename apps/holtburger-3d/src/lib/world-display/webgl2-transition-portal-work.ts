@@ -15,6 +15,7 @@ import {
 	type TransitionPortalWorkItem,
 } from "./transition-portal-work-items";
 import type { WorldRenderSceneContext } from "./render-scene-context";
+import type { CameraViewResidencyContext } from "./world-residency-index";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
 
@@ -39,6 +40,18 @@ export function deriveWebgl2BaseSceneDomain(options: {
 		options.structuredInteriorScene.cells.length > 0
 		? "interior"
 		: "exterior";
+}
+
+export function deriveWebgl2BaseSceneDomainFromResidency(
+	context: CameraViewResidencyContext,
+): TransitionPortalScene {
+	return context.kind === "env-cell" ? "interior" : "exterior";
+}
+
+export function deriveWebgl2InitialPortalEnvCellId(
+	context: CameraViewResidencyContext,
+): number | null {
+	return context.kind === "env-cell" ? context.envCellId : null;
 }
 
 export function planWebgl2TransitionPortalWork(options: {

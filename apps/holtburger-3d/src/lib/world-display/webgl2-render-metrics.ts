@@ -21,6 +21,13 @@ export interface Webgl2RenderMetricsInput {
 	canvasWidth: number;
 	canvasHeight: number;
 	pixelRatio: number;
+	cameraViewResidency: string;
+	residencyCellCount: number;
+	residencyLandblockCount: number;
+	residencyAabbCandidateCount: number;
+	residencyCellBspMatchCount: number;
+	residencyAabbFallbackCount: number;
+	residencySource: string;
 	renderGraphPolicy: string;
 	renderGraphBaseScene: string;
 	transitionPortalMaxDepth: number;
@@ -78,14 +85,14 @@ export function createWebgl2RenderMetrics(
 			cameraViewResidency: input.initializationError
 				? "webgl2 initialization failed"
 				: input.worldStore && input.worldStore.drawUnits.length > 0
-					? "webgl2 flat staged submitter ready"
+					? input.cameraViewResidency
 					: "webgl2 test frame",
-			residencyCellCount: 0,
-			residencyLandblockCount: 0,
-			residencyAabbCandidateCount: 0,
-			residencyCellBspMatchCount: 0,
-			residencyAabbFallbackCount: 0,
-			residencySource: "unknown",
+			residencyCellCount: input.residencyCellCount,
+			residencyLandblockCount: input.residencyLandblockCount,
+			residencyAabbCandidateCount: input.residencyAabbCandidateCount,
+			residencyCellBspMatchCount: input.residencyCellBspMatchCount,
+			residencyAabbFallbackCount: input.residencyAabbFallbackCount,
+			residencySource: input.residencySource,
 			renderGraphPolicy: input.renderGraphPolicy,
 			renderGraphBaseScene: input.renderGraphBaseScene,
 			transitionPortalMaxDepth: input.transitionPortalMaxDepth,

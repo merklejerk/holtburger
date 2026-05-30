@@ -970,13 +970,18 @@ Decisions:
   will opt into those masks explicitly.
 - M4A does not fake a portal composite. Rendering a convincing but wrong portal would hide the
   remaining depth-reset and clipped-scene work.
+- After M4A, the portal strategy pivoted away from redrawing clipped scene geometry per portal
+  depth. The target design is now dual scene-domain render targets plus iterative stencil/depth
+  compositing. This keeps expensive scene draw-unit submission bounded to the exterior and interior
+  domain renders while preserving portal occluders through copied depth.
 
 Course corrections:
 
 - The original M4 was too large for one clean step because WebGL2 had a missing prerequisite: no
   stencil context and no aperture mask resources. M4A was added as an immediate interim phase.
-- Full portal parity should now continue as M4B with explicit pass submission rather than adding
-  mask resources and composite state in the same change.
+- Full portal parity should now continue as a dual-target pipeline. Do not resurrect the old plan of
+  recursively redrawing clipped interior/exterior scene geometry through each portal pass unless the
+  dual-target composite proves incorrect for AC portal semantics.
 
 Cleanup targets and legacy shims:
 
@@ -986,40 +991,171 @@ Cleanup targets and legacy shims:
   zero. M4B should derive visible work batches and update work-item/skipped metrics.
 - The submitter now has separate flat-world and portal-mask order planners. When M4B adds explicit
   graph-node submission, keep this separation and avoid a boolean flag on the flat submitter.
-- Full M4 still needs a dedicated depth-reset shader/path that writes `gl_FragDepth = 1.0` with
-  color writes disabled; do not approximate this with ordinary flat geometry.
+- The old "portal depth reset" language is superseded by depth-copy compositing. If a reset shader is
+  still needed for an intermediate debug path, keep it outside the main dual-target portal pipeline.
 
-## Phase M4B: Portal Passes in WebGL2
+## Phase M4B: Dual Scene-Domain Render Targets
 
 Status: Not started.
 
-Purpose: restore portal stencil/depth/composite rendering against the WebGL2 renderer without
-mutating scene visibility per portal pass, after the core staged/terrain material path is visible
-enough to make portal views useful to inspect.
+Purpose: render the two portal scene domains once per frame into offscreen color/depth targets so
+portal recursion no longer redraws scene geometry per portal depth. This phase does not need to
+solve nested portal compositing yet; it establishes the render-target ownership, scene-domain draw
+partitioning, and base copy path.
+
+Strategy:
+
+- Render the exterior domain into `exteriorTarget`.
+- Render the interior domain into `interiorTarget`.
+- Copy the active base domain's color and depth to the default framebuffer.
+- Keep portal aperture masks separate from both scene-domain draw lists.
 
 Tasks:
 
-- Reuse the existing portal work item and clipped BVH candidate planning where it remains
-  renderer-neutral.
-- Add explicit WebGL2 portal pass submission phases:
-  - aperture mask/stencil pass;
-  - portal depth reset or depth-scoped pass as needed;
-  - clipped scene composite pass;
-  - normal scene pass.
-- Keep portal mask geometry as separate draw units or pass work items; do not run it through
-  material atlas planning.
-- Keep per-portal clipped candidate selection in frame/pass planning, not in resource stores.
-- Add metrics for portal work item counts, skipped aperture cases, stencil-visible candidates, and
-  fallback/unmasked cases.
-- Add tests for pass ordering, stencil state setup, clipped candidate plumbing, and empty/invalid
-  aperture handling.
+- Add WebGL2 framebuffer resources for offscreen scene-domain targets with color texture and depth
+  texture attachments. Resize them with the canvas and retire them through explicit disposal.
+- Detect and fail loudly when required WebGL2 depth-texture/framebuffer capabilities are unavailable.
+- Partition staged world draws into exterior-domain and interior-domain draw lists:
+  - terrain and outdoor statics belong to exterior;
+  - structured interiors belong to interior;
+  - portal masks belong to neither and remain pass-owned;
+  - debug overlays stay out of this phase unless they are needed for validation.
+- Refactor the flat world submit path so it can submit a supplied draw list into either an offscreen
+  framebuffer or the default framebuffer without rebuilding resources.
+- Add a base composite/copy shader that copies color and depth from one scene-domain target to the
+  default framebuffer. The shader must write `gl_FragDepth` from the sampled depth texture.
+- Preserve current non-portal WebGL2 behavior when portal compositing is disabled or no portal
+  candidates are visible.
+- Add metrics for exterior-domain draw calls, interior-domain draw calls, render-target dimensions,
+  framebuffer completeness failures, and base-copy pass count.
+- Add tests for target lifecycle, draw-list partitioning, base-domain selection, framebuffer failure
+  reporting, and no portal-mask leakage into scene-domain renders.
+
+Exit criteria:
+
+- WebGL2 can render exterior and interior scene domains into separate offscreen targets each frame.
+- The default framebuffer can be populated by copying one domain target's color and depth.
+- Scene geometry submission is prepared to be bounded to two domain renders before portal recursion
+  is enabled.
+- Portal masks remain pass resources, not scene-domain geometry.
+
+Decisions:
+
+- The target is fixed expensive geometry passes, not fixed total GPU work. Portal depth still costs
+  mask/composite iterations, but those iterations should be small aperture/rect fills rather than
+  full scene draw-unit redraws.
+- Both domain targets use the same camera projection for the first implementation. If AC portal
+  semantics require camera transforms later, add explicit projected-coordinate remapping before
+  changing the storage model.
+
+Cleanup targets and legacy shims:
+
+- Existing `submitWebgl2FlatWorldFrame()` naming will become misleading once it can submit domain
+  draw lists and copy targets. Rename it during this phase if the refactor touches most call sites.
+- WebGL2 render metrics still use several "batch" terms from older Three/luma phases. Preserve
+  compatibility during M4B, but mark renamed metrics for M5 if they become confusing.
+
+## Phase M4C: Iterative Stencil/Depth Portal Composite
+
+Status: Not started.
+
+Purpose: composite portals by iteratively drawing visible aperture masks to stencil and copying
+color/depth from the opposite scene-domain target through screen-space portal bounds. This preserves
+occluders because every composite writes both color and depth back to the default framebuffer before
+the next aperture mask depth-test.
+
+Pipeline target:
+
+1. Render `exteriorTarget` once.
+2. Render `interiorTarget` once.
+3. Copy the camera's base scene target color/depth to the default framebuffer.
+4. For each visible portal depth up to the configured limit:
+   - draw all aperture masks for that depth with stencil/depth state;
+   - composite the opposite scene target through bounded/scissored screen-space portal rects where
+     the stencil ref matches;
+   - write sampled color and sampled depth (`gl_FragDepth`) into the default framebuffer.
+
+Tasks:
+
+- Reuse transition portal visibility/work-item planning for direction, visible side, screen area,
+  recursion-depth batching, and skipped aperture diagnostics.
+- Replace clipped-scene redraw planning with scene-domain target compositing. `derivePortalClippedBvhVisibility()`
+  should remain available for diagnostics/comparison, but it is no longer the main composite input.
+- Draw portal aperture masks from M4A draw units with explicit stencil state:
+  - depth 1 writes stencil ref 1 where the aperture depth-tests against the current default depth;
+  - deeper masks test the parent stencil ref and write/increment to the current depth ref;
+  - masks must write no color;
+  - masks must depth-test against the current composited default depth so current-scene occluders
+    hide downstream portals.
+- Add a portal composite shader that samples a source domain color/depth target and writes both
+  color and `gl_FragDepth`.
+- Composite with bounded screen-space rects rather than fullscreen quads. Start with one rect per
+  visible portal aperture, scissored to the projected aperture bounds and parent bounds where
+  available.
+- Add a later-merge hook for nearby/overlapping portal rects, but do not implement aggressive rect
+  union until metrics prove fill rate needs it.
+- Keep the configured recursion depth as a correctness/performance cap. This strategy fixes scene
+  geometry pass growth, not the mathematical need for iterative portal crossings.
+- Add metrics for visible work-item count, mask pass count, composite pass count, composite rect
+  count, estimated composite pixel area, skipped/invalid aperture counts, stencil-visible candidate
+  count, and max composited depth reached.
+- Add tests for mask/composite ordering, parent stencil behavior, depth-copy shader state,
+  per-portal rect planning, multiple portals at the same depth, empty/invalid aperture handling, and
+  no scene-geometry redraw during portal composite iterations.
 
 Exit criteria:
 
 - Outdoor-to-indoor and indoor-to-outdoor portal views render through WebGL2.
-- Portal rendering uses explicit WebGL2 pass state rather than Three scene mutation or luma-era
-  abstractions.
+- Portal rendering uses two scene-domain geometry renders plus iterative mask/composite passes
+  instead of recursively redrawing clipped scene geometry.
+- Current-scene occluders affect downstream portal visibility through the default framebuffer depth
+  copied from prior composites.
+- Multiple visible portals at the same depth composite correctly without forcing a single wasteful
+  fullscreen or whole-union blit.
 - Portal work remains separate from material batching and atlas compaction.
+
+Decisions:
+
+- Fullscreen composite quads are acceptable only for bring-up/debug. The default path should use
+  aperture screen bounds and scissor to keep fill rate proportional to visible portal area.
+- A single union rectangle for all same-depth portals is not the default. Prefer one rect per
+  aperture first, then add measured rect merging when it reduces total cost.
+- Fixed total passes for unbounded portal depth is not a goal. The project goal is fixed scene
+  geometry renders plus bounded/metric-visible composite iterations.
+
+Cleanup targets and legacy shims:
+
+- Remove or clearly demote old clipped-BVH composite counters once dual-target metrics are proven.
+- The existing Three path can remain as a comparison backend, but new WebGL2 portal code should not
+  copy Three's scene-mutation/layer toggling model.
+
+## Phase M4D: Portal Fill-Rate and Visual Hardening
+
+Status: Not started.
+
+Purpose: harden the dual-target portal compositor after it renders correctly. This phase is about
+performance envelope, edge cases, and deciding which portal limits are product policy versus
+temporary diagnostics.
+
+Tasks:
+
+- Profile composite fill cost at common desktop and high-DPI canvas sizes.
+- Add rect merging only if measured composite fill or draw-call cost justifies it. Use a deterministic
+  merge heuristic that compares merged area against separate area.
+- Validate large close portals, multiple separated same-depth portals, nested portal chains, and
+  portals partially clipped by the screen.
+- Verify depth precision around aperture edges, indoor tables/window frames, outdoor trees/buildings,
+  terrain, and alpha-tested materials.
+- Decide the default `transitionPortalMaxDepth` for browser mode after measuring scene-domain render
+  cost versus composite cost.
+- Add debug metrics and overlay samples for composite rects, parent-depth clipping, depth-copy
+  failures, and max-depth fallback.
+
+Exit criteria:
+
+- Portal compositor cost is visible in metrics as geometry draw cost versus composite fill cost.
+- Common indoor/outdoor portal cases are visually stable enough for M5 material hardening.
+- Known remaining portal artifacts have examples and owners.
 
 ## Phase M5: Visual Parity and Material Hardening
 

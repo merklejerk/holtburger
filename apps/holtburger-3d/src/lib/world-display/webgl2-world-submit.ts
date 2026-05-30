@@ -79,6 +79,7 @@ export type Webgl2IndexedP16WorldProgram = Webgl2ProgramResource<
 
 export interface Webgl2WorldSubmitMetrics {
 	visibleDrawUnitCount: number;
+	portalMaskDrawUnitCount: number;
 	drawCallCount: number;
 	programSwitchCount: number;
 	vertexArrayBindCount: number;
@@ -90,6 +91,7 @@ export interface Webgl2WorldSubmitMetrics {
 
 const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	visibleDrawUnitCount: 0,
+	portalMaskDrawUnitCount: 0,
 	drawCallCount: 0,
 	programSwitchCount: 0,
 	vertexArrayBindCount: 0,
@@ -128,9 +130,14 @@ export function submitWebgl2FlatWorldFrame({
 	frame: StagedWorldFrame;
 }): Webgl2WorldSubmitMetrics {
 	const drawUnits = planWebgl2FlatWorldSubmitOrder(frame, drawUnitsById);
+	const portalMaskDrawUnits = planWebgl2PortalMaskSubmitOrder(
+		frame,
+		drawUnitsById,
+	);
 	const metrics: Webgl2WorldSubmitMetrics = {
 		...EMPTY_SUBMIT_METRICS,
 		visibleDrawUnitCount: drawUnits.length,
+		portalMaskDrawUnitCount: portalMaskDrawUnits.length,
 		visibleDrawUnitCountsByMaterialKind:
 			countDrawUnitsByMaterialKind(drawUnits),
 	};
@@ -483,9 +490,30 @@ export function planWebgl2FlatWorldSubmitOrder(
 				`Staged world frame referenced missing WebGL2 draw unit ${draw.drawUnitId}.`,
 			);
 		}
-		visibleDrawUnits.push(drawUnit);
+		if (drawUnit.kind !== "portal-mask") {
+			visibleDrawUnits.push(drawUnit);
+		}
 	}
 	return visibleDrawUnits.sort(compareWebgl2FlatWorldDrawUnits);
+}
+
+export function planWebgl2PortalMaskSubmitOrder(
+	frame: StagedWorldFrame,
+	drawUnitsById: ReadonlyMap<string, Webgl2WorldDrawUnit>,
+): Webgl2WorldDrawUnit[] {
+	const maskDrawUnits: Webgl2WorldDrawUnit[] = [];
+	for (const draw of frame.passes.flatMap((pass) => pass.draws)) {
+		const drawUnit = drawUnitsById.get(draw.drawUnitId);
+		if (!drawUnit) {
+			throw new Error(
+				`Staged world frame referenced missing WebGL2 draw unit ${draw.drawUnitId}.`,
+			);
+		}
+		if (drawUnit.kind === "portal-mask") {
+			maskDrawUnits.push(drawUnit);
+		}
+	}
+	return maskDrawUnits.sort((left, right) => left.id.localeCompare(right.id));
 }
 
 function compareWebgl2FlatWorldDrawUnits(

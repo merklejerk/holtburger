@@ -124,7 +124,7 @@ export function createWebgl2RenderMetrics(
 			portalMaskRenderBatchCount:
 				input.frameMetrics?.candidateCountsByCategory["portal-mask"] ?? 0,
 			portalMaskBvhCandidateBatchCount:
-				input.frameMetrics?.visibleDrawCountsByCategory["portal-mask"] ?? 0,
+				input.submitMetrics.portalMaskDrawUnitCount,
 			nonStaticBvhFallbackIncludedBatchCount:
 				(input.frameMetrics?.fallbackCountsByCategory.terrain ?? 0) +
 				(input.frameMetrics?.fallbackCountsByCategory["structured-interior"] ??

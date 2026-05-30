@@ -559,7 +559,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				alpha: false,
 				antialias: true,
 				depth: true,
-				stencil: false,
+				stencil: true,
 			});
 			if (!gl) {
 				throw new Error("Browser did not provide a WebGL2 rendering context.");

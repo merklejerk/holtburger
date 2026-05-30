@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { StagedWorldFrame } from "./staged-world-frame";
 import {
 	planWebgl2FlatWorldSubmitOrder,
+	planWebgl2PortalMaskSubmitOrder,
 	submitWebgl2FlatWorldFrame,
 	type Webgl2FlatWorldProgram,
 	type Webgl2IndexedP16WorldProgram,
@@ -42,6 +43,32 @@ describe("planWebgl2FlatWorldSubmitOrder", () => {
 		expect(() =>
 			planWebgl2FlatWorldSubmitOrder(createFrame(["missing"]), new Map()),
 		).toThrow("missing WebGL2 draw unit missing");
+	});
+
+	it("keeps portal masks out of the normal world submit order", () => {
+		const drawUnitsById = new Map<string, Webgl2WorldDrawUnit>([
+			["world", createDrawUnit({ id: "world" })],
+			[
+				"mask",
+				createDrawUnit({
+					id: "mask",
+					kind: "portal-mask",
+					materialKey: "portal-mask",
+				}),
+			],
+		]);
+		const frame = createFrame(["mask", "world"]);
+
+		expect(
+			planWebgl2FlatWorldSubmitOrder(frame, drawUnitsById).map(
+				(drawUnit) => drawUnit.id,
+			),
+		).toEqual(["world"]);
+		expect(
+			planWebgl2PortalMaskSubmitOrder(frame, drawUnitsById).map(
+				(drawUnit) => drawUnit.id,
+			),
+		).toEqual(["mask"]);
 	});
 });
 
@@ -237,8 +264,10 @@ function createDrawUnit({
 	texture = null,
 	indexedMaterial = null,
 	vertexArray = {} as WebGLVertexArrayObject,
+	kind = "static",
 }: {
 	id: string;
+	kind?: Webgl2WorldDrawUnit["kind"];
 	materialKey?: string;
 	materialKind?: Webgl2WorldDrawUnit["materialKind"];
 	geometrySignature?: string;
@@ -249,7 +278,7 @@ function createDrawUnit({
 }): Webgl2WorldDrawUnit {
 	return {
 		id,
-		kind: "static",
+		kind,
 		geometrySignature,
 		vertexArray: {
 			vertexArray,

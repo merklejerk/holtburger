@@ -3,6 +3,7 @@ import type {
 	PreparedTexturePayload,
 } from "../assets/types";
 import { resolveNormalizedPreparedTextureAssetIds } from "../assets/material-texture-preparation-policy";
+import { formatHex32 } from "../landblocks";
 import {
 	createWebgl2ArrayBuffer,
 	createWebgl2ElementArrayBuffer,
@@ -21,6 +22,7 @@ import {
 } from "./staged-world-assembly";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
 import type { ResolvedIndexedMaterialData } from "./indexed-material-data";
+import type { ResolvedRegionDetailOverlayPlan } from "./region-detail-overlays";
 import type { RenderMat4, RenderVec4 } from "./render-math";
 import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import type { RenderChunkTransform } from "./render-anchor";
@@ -83,6 +85,7 @@ export interface Webgl2WorldDrawUnit {
 	textureKey: string | null;
 	texture: Webgl2Texture2DResource | null;
 	indexedMaterial: Webgl2IndexedMaterialResources | null;
+	detailOverlay: Webgl2DetailOverlayResources | null;
 	terrainBlend: Webgl2TerrainBlendResources | null;
 	modelMatrix: RenderMat4;
 	bvhItemKeys: readonly RenderBvhItemKey[];
@@ -117,6 +120,7 @@ export interface Webgl2WorldResourceStore {
 	textureCount: number;
 	indexedTextureCount: number;
 	paletteTextureCount: number;
+	detailTextureCount: number;
 	preparedTextureUploadCount: number;
 	preparedTextureGeneratedByteLength: number;
 	triangleCount: number;
@@ -136,6 +140,13 @@ export interface Webgl2TerrainBlendResources {
 		alpha: Webgl2TerrainTextureBinding;
 		rotation: number;
 	}[];
+}
+
+export interface Webgl2DetailOverlayResources {
+	key: string;
+	texture: Webgl2Texture2DResource;
+	tiling: number;
+	blendMode: ResolvedRegionDetailOverlayPlan["blendMode"];
 }
 
 export interface Webgl2IndexedMaterialResources {
@@ -186,6 +197,7 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		textureCount: 0,
 		indexedTextureCount: 0,
 		paletteTextureCount: 0,
+		detailTextureCount: 0,
 		preparedTextureUploadCount: 0,
 		preparedTextureGeneratedByteLength: 0,
 		triangleCount: 0,
@@ -203,6 +215,7 @@ export function syncWebgl2WorldResources({
 	transitionPortalModel,
 	renderChunkTransforms,
 	rendererResourceGraph,
+	detailTexturesEnabled = true,
 }: {
 	gl: WebGL2RenderingContext;
 	store: Webgl2WorldResourceStore;
@@ -213,6 +226,7 @@ export function syncWebgl2WorldResources({
 	transitionPortalModel: TransitionPortalCandidateModel;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	rendererResourceGraph?: RendererResourceGraph;
+	detailTexturesEnabled?: boolean;
 }): void {
 	// ELEMENT_ARRAY_BUFFER binding is VAO state in WebGL2. Resource sync creates
 	// and clears index buffers, so start from the default VAO to avoid stripping
@@ -225,6 +239,7 @@ export function syncWebgl2WorldResources({
 		structuredInteriorScene,
 		transitionPortalModel,
 		renderChunkTransforms,
+		detailTexturesEnabled,
 	});
 	const nextDrawUnits: Webgl2WorldDrawUnit[] = [];
 	const retainedDrawUnitIds = new Set<string>();
@@ -248,6 +263,9 @@ export function syncWebgl2WorldResources({
 			webgl2DrawUnit,
 		)) {
 			retainedTextureKeys.add(textureKey);
+		}
+		if (webgl2DrawUnit.detailOverlay) {
+			retainedTextureKeys.add(webgl2DrawUnit.detailOverlay.key);
 		}
 	}
 
@@ -349,6 +367,11 @@ export function syncWebgl2WorldResources({
 				: [],
 		),
 	).size;
+	store.detailTextureCount = new Set(
+		store.drawUnits.flatMap((drawUnit) =>
+			drawUnit.detailOverlay ? [drawUnit.detailOverlay.key] : [],
+		),
+	).size;
 	store.preparedTextureUploadCount = countPreparedTextureUploads(
 		store.drawUnits,
 	);
@@ -405,6 +428,7 @@ export function destroyWebgl2WorldResources(
 	store.textureCount = 0;
 	store.indexedTextureCount = 0;
 	store.paletteTextureCount = 0;
+	store.detailTextureCount = 0;
 	store.preparedTextureUploadCount = 0;
 	store.preparedTextureGeneratedByteLength = 0;
 	store.triangleCount = 0;
@@ -447,6 +471,12 @@ function createOrReuseWebgl2DrawUnit({
 					: null;
 		previous.texture = resolveWebgl2DrawUnitTexture({ gl, store, drawUnit });
 		previous.indexedMaterial = resolveWebgl2IndexedMaterialResources({
+			gl,
+			store,
+			drawUnit,
+		});
+		previous.detailOverlay = resolveWebgl2DetailOverlayResources({
+			assetState,
 			gl,
 			store,
 			drawUnit,
@@ -508,6 +538,12 @@ function createOrReuseWebgl2DrawUnit({
 		store,
 		drawUnit,
 	});
+	const detailOverlay = resolveWebgl2DetailOverlayResources({
+		assetState,
+		gl,
+		store,
+		drawUnit,
+	});
 	const terrainBlend = resolveWebgl2TerrainBlendResources({
 		assetState,
 		gl,
@@ -545,6 +581,7 @@ function createOrReuseWebgl2DrawUnit({
 					: null,
 		texture,
 		indexedMaterial,
+		detailOverlay,
 		terrainBlend,
 		modelMatrix: drawUnit.modelMatrix,
 		bvhItemKeys: drawUnit.bvhBinding.itemKeys,
@@ -827,6 +864,77 @@ function resolveWebgl2DrawUnitTexture({
 	}
 	store.texturesByKey.set(drawUnit.material.textureKey, texture);
 	return texture;
+}
+
+function resolveWebgl2DetailOverlayResources({
+	assetState,
+	gl,
+	store,
+	drawUnit,
+}: {
+	assetState: AssetChannelState;
+	gl: WebGL2RenderingContext;
+	store: Webgl2WorldResourceStore;
+	drawUnit: StagedWorldDrawUnitAssembly;
+}): Webgl2DetailOverlayResources | null {
+	const overlay =
+		drawUnit.material.kind === "direct-texture" ||
+		drawUnit.material.kind === "indexed-paletted"
+			? drawUnit.material.detailOverlay
+			: null;
+	if (!overlay || !drawUnit.geometry.uvs || overlay.blendMode !== "dst-color") {
+		return null;
+	}
+	const defaultPolicy = selectRenderSurfaceTextureSamplingPolicy(
+		overlay.renderSurface,
+		createDefaultMaterialTextureSamplingPolicy(
+			defaultWebgl2MaterialTextureCapabilities(),
+		),
+	);
+	const upload = prepareRenderSurfaceTextureUploadData(
+		overlay.renderSurface,
+		{
+			...defaultPolicy,
+			wrapS: "repeat",
+			wrapT: "repeat",
+			colorSpace: "none",
+		},
+		defaultWebgl2MaterialTextureCapabilities(),
+		resolvePreparedTextureForRenderSurface(assetState, overlay.renderSurface),
+	);
+	if (upload.status !== "ready" || upload.upload.kind !== "direct") {
+		store.materialFallbackReasonSamples = [
+			...store.materialFallbackReasonSamples,
+			`detail-overlay ${overlay.signature} texture ${formatHex32(overlay.renderSurface.renderSurfaceId)} is ${upload.status === "ready" ? "compressed-direct-unsupported" : upload.reason}`,
+		].slice(0, 8);
+		return null;
+	}
+	const key = [
+		"detail-overlay",
+		overlay.signature,
+		describeStagedWorldDirectTextureKey(upload.upload),
+	].join("|");
+	const cached = store.texturesByKey.get(key);
+	if (cached) {
+		return {
+			key,
+			texture: cached,
+			tiling: overlay.role.tiling,
+			blendMode: overlay.blendMode,
+		};
+	}
+	const texture = createWebgl2Texture2D(gl, {
+		label: key,
+		upload: toWebgl2TextureUpload(gl, upload),
+		sampler: toWebgl2SamplerParameters(gl, upload.upload.samplingPolicy),
+	});
+	store.texturesByKey.set(key, texture);
+	return {
+		key,
+		texture,
+		tiling: overlay.role.tiling,
+		blendMode: overlay.blendMode,
+	};
 }
 
 function resolveWebgl2TerrainBlendResources({
@@ -1121,10 +1229,12 @@ function countPreparedTextureUploads(
 						drawUnit.textureKey,
 						...collectTerrainBlendTextureKeys(drawUnit),
 						...collectIndexedMaterialTextureKeys(drawUnit),
+						...(drawUnit.detailOverlay ? [drawUnit.detailOverlay.key] : []),
 					]
 				: [
 						...collectTerrainBlendTextureKeys(drawUnit),
 						...collectIndexedMaterialTextureKeys(drawUnit),
+						...(drawUnit.detailOverlay ? [drawUnit.detailOverlay.key] : []),
 					],
 		),
 	).size;

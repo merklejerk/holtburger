@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
-Status: Phase M3C complete; ready for Phase M3D.
+Status: Phase M3D complete; ready for Phase M4.
 
 Related plans:
 
@@ -757,7 +757,7 @@ Cleanup Targets / Debt:
 
 ## Phase M3D: Detail Texture Policy and Static Detail Support
 
-Status: Not started.
+Status: Complete.
 
 Purpose: add detail texture behavior only after base terrain and indexed/paletted direct materials
 are understandable. Detail should be a controlled material feature, not a masking layer over broken
@@ -781,6 +781,61 @@ Exit criteria:
   detail should stay deferred with measured examples.
 - Unsupported detail cases are counted separately from missing base materials.
 - Texture velocity remains a metric-visible fallback, not an active renderer-owned timer.
+
+Progress:
+
+- Audited the existing Three detail path and confirmed region detail overlays are already applied to
+  static buildings and structured interiors through `applyRegionDetailOverlayToMaterials()`.
+- Split region detail overlay resolution into a renderer-neutral plan plus the existing Three texture
+  material adapter. WebGL2 now consumes the plan without importing Three resource classes.
+- Threaded detail overlay plans through staged static and structured-interior material assembly.
+  Detail overlays are controlled by the existing browser detail-textures toggle, and toggling now
+  rebuilds WebGL2 staged resources.
+- Added WebGL2 resource realization for supported region detail textures. Detail textures are
+  uploaded as repeat-sampled direct textures and retained through the existing texture store.
+- Added direct-texture and indexed/paletted shader support for constant destination-color detail
+  blending, matching the current Three building/environment approximation:
+  `base * (detail.rgb + (1 - detail.a))`.
+- Added metrics visibility for WebGL2 detail overlay texture resources and test coverage proving a
+  building direct-texture draw unit realizes a detail overlay texture.
+
+Decisions:
+
+- M3D supports only building and environment region detail roles in WebGL2. Those are the roles with
+  an existing destination-color blend policy and are the practical static/interior detail cases.
+- Landscape detail remains owned by the terrain material path. It has separate source-alpha,
+  distance-fade behavior and should not be conflated with static building/interior detail.
+- Object/scenery detail remains disabled because the existing shared detail policy intentionally has
+  no blend mode for the `object` role. Do not invent one without retail/ACE/ACViewer evidence.
+- Detail overlays stay staged/direct only. They are not atlas candidates and do not participate in
+  static compaction until atlas material tables can represent multi-texture material state.
+- Texture velocity remains deferred. M3D does not add a renderer-local time source or animated UV
+  uniforms.
+
+Course Corrections:
+
+- The phase name said "static detail," but the audited Three path applies the same region detail
+  concept to structured interior cell shells through the `environment` role. M3D includes that path
+  so WebGL2 does not regress indoor material parity.
+- The implementation uses raw/base-color prepared texture selection for detail textures in WebGL2
+  rather than the terrain-specific `usage=detail` single-channel policy. Static building/environment
+  detail samples RGB and alpha, while terrain masks/detail still use their existing specialized
+  upload policy.
+- WebGL2 resource sync originally treated the detail-textures toggle as metrics-only. M3D made it a
+  scene resource rebuild input so the toggle actually adds/removes detail overlay resources.
+
+Cleanup Targets / Debt:
+
+- WebGL2 detail overlay diagnostics currently surface as upload/fallback samples, not a dedicated
+  grouped detail-overlay diagnostic table. M5 should group detail failures by
+  region/role/surface-texture/render-surface.
+- The direct-texture, P8 indexed, and P16 indexed shaders now duplicate the small destination-color
+  detail helper. Extract shader-source helpers before adding more material variants.
+- Detail overlays use the existing general texture store but do not yet contribute generated
+  prepared-texture byte totals separately from base textures. Preserve this distinction before M5
+  reporting hardening.
+- Atlas compaction must treat detail overlays as incompatible with single-texture atlas slices until
+  a deliberate multi-texture material-table design exists.
 
 ## Future Phase: Texture Velocity and UV Animation System Integration
 

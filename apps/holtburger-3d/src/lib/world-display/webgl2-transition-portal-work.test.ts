@@ -7,6 +7,8 @@ import {
 import type { TransitionPortalCandidate } from "./transition-portal-work-items";
 import {
 	deriveWebgl2BaseSceneDomain,
+	deriveWebgl2BaseSceneDomainFromResidency,
+	deriveWebgl2InitialPortalEnvCellId,
 	planWebgl2TransitionPortalWork,
 } from "./webgl2-transition-portal-work";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
@@ -103,6 +105,35 @@ describe("deriveWebgl2BaseSceneDomain", () => {
 			deriveWebgl2BaseSceneDomain({
 				renderSceneContext: { kind: "outdoor", anchorLandblockId: null },
 				structuredInteriorScene: createStructuredInteriorScene(0x01020100),
+			}),
+		).toBe("exterior");
+	});
+});
+
+describe("deriveWebgl2BaseSceneDomainFromResidency", () => {
+	it("selects base scene and initial env-cell from actual camera residency", () => {
+		const envCellResidency = {
+			kind: "env-cell" as const,
+			landblockId: 0x0102ffff,
+			envCellId: 0x01020100,
+		};
+
+		expect(deriveWebgl2BaseSceneDomainFromResidency(envCellResidency)).toBe(
+			"interior",
+		);
+		expect(deriveWebgl2InitialPortalEnvCellId(envCellResidency)).toBe(
+			0x01020100,
+		);
+		expect(
+			deriveWebgl2BaseSceneDomainFromResidency({
+				kind: "outdoor-landblock",
+				landblockId: 0x0102ffff,
+			}),
+		).toBe("exterior");
+		expect(
+			deriveWebgl2BaseSceneDomainFromResidency({
+				kind: "unknown",
+				landblockId: 0x0102ffff,
 			}),
 		).toBe("exterior");
 	});

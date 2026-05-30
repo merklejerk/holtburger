@@ -727,6 +727,9 @@ export function createThreeWorldDisplayRenderer(
 		setTransitionPortalMaxDepth(maxDepth) {
 			transitionPortalMaxDepth = clampTransitionPortalMaxDepth(maxDepth);
 		},
+		setPortalTriageMode() {
+			return;
+		},
 		setRenderStyle(nextRenderStyle) {
 			renderStyle = nextRenderStyle;
 			syncRenderStyle();
@@ -3685,6 +3688,10 @@ function createRenderDebugMetrics(
 		| "renderLines"
 		| "renderPoints"
 		| "clearCount"
+		| "portalTriageMode"
+		| "cameraNear"
+		| "cameraFar"
+		| "cameraFarNearRatio"
 	>,
 ): WorldRenderDebugMetrics {
 	return {
@@ -3702,6 +3709,10 @@ function createRenderDebugMetrics(
 		renderGraphPolicy: options.renderGraphPolicy,
 		renderGraphBaseScene: options.renderGraphBaseScene,
 		transitionPortalMaxDepth: options.transitionPortalMaxDepth,
+		portalTriageMode: "normal",
+		cameraNear: null,
+		cameraFar: null,
+		cameraFarNearRatio: null,
 		renderPassCount: options.renderPassCount,
 		clearCount: 0,
 		portalRenderWorkItemCount: options.portalRenderWorkItemCount,

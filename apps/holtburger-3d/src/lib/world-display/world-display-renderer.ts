@@ -75,6 +75,7 @@ function createDeferredWorldDisplayRenderer<TModule extends DeferredRendererModu
 	const rendererResourceGraph = options.rendererResourceGraph;
 	let controlledCameraFrame = options.controlledCameraFrame;
 	let transitionPortalMaxDepth = options.transitionPortalMaxDepth;
+	let portalTriageMode = options.portalTriageMode;
 	let renderStyle = options.renderStyle;
 	let textureFilteringMode = options.textureFilteringMode;
 	let textureColorSpaceMode = options.textureColorSpaceMode;
@@ -134,6 +135,10 @@ function createDeferredWorldDisplayRenderer<TModule extends DeferredRendererModu
 		setTransitionPortalMaxDepth(maxDepth) {
 			transitionPortalMaxDepth = maxDepth;
 			loadedRenderer?.setTransitionPortalMaxDepth(maxDepth);
+		},
+		setPortalTriageMode(mode) {
+			portalTriageMode = mode;
+			loadedRenderer?.setPortalTriageMode(mode);
 		},
 		setRenderStyle(nextRenderStyle) {
 			renderStyle = nextRenderStyle;
@@ -209,6 +214,7 @@ function createDeferredWorldDisplayRenderer<TModule extends DeferredRendererModu
 			rendererResourceGraph,
 			controlledCameraFrame,
 			transitionPortalMaxDepth,
+			portalTriageMode,
 			renderStyle,
 			textureFilteringMode,
 			textureColorSpaceMode,

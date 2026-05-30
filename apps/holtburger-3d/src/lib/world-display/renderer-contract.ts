@@ -11,6 +11,11 @@ export type WorldDisplayTextureColorSpaceMode =
 	| "srgb"
 	| "linear"
 	| "compressed-linear";
+export type WorldDisplayPortalTriageMode =
+	| "normal"
+	| "no-composite-scissor"
+	| "no-mask-depth"
+	| "flat-stencil-color";
 
 export interface WorldRenderMetrics {
 	bounds: SceneBoundsFrame | null;
@@ -72,6 +77,10 @@ export interface WorldRenderDebugMetrics {
 	renderGraphPolicy: string;
 	renderGraphBaseScene: string;
 	transitionPortalMaxDepth: number;
+	portalTriageMode: WorldDisplayPortalTriageMode;
+	cameraNear: number | null;
+	cameraFar: number | null;
+	cameraFarNearRatio: number | null;
 	renderPassCount: number;
 	clearCount: number;
 	portalRenderWorkItemCount: number;

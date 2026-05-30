@@ -22,6 +22,8 @@ import {
 	updateNavigationFocusMode,
 	updatePortalPolygonVisibility,
 	updatePortalTargetHighlighting,
+	updatePortalDepthRangeMode,
+	updatePortalTriageMode,
 	updateTerrainLodRadius,
 	updateTransitionPortalMaxDepth,
 } from "./browser-mode";
@@ -47,23 +49,33 @@ describe("browser-mode location policy", () => {
 		expect(state.showPortalPolygons).toBe(false);
 		expect(state.showCellIndicators).toBe(false);
 		expect(state.highlightPortalTargets).toBe(false);
+		expect(state.portalTriageMode).toBe("normal");
+		expect(state.portalDepthRangeMode).toBe("default");
 		expect(state.detailTexturesEnabled).toBe(true);
 		expect(state.navigationFocusMode).toBe("manual");
 		expect(state.page).toBe("destination-preview");
 	});
 
 	it("keeps portal diagnostic toggles in browser-owned mode state", () => {
-		const state = updatePortalTargetHighlighting(
-			updateCellIndicatorVisibility(
-				updatePortalPolygonVisibility(createBrowserModeState(), true),
-				false,
+		const state = updatePortalDepthRangeMode(
+			updatePortalTriageMode(
+				updatePortalTargetHighlighting(
+					updateCellIndicatorVisibility(
+						updatePortalPolygonVisibility(createBrowserModeState(), true),
+						false,
+					),
+					false,
+				),
+				"no-mask-depth",
 			),
-			false,
+			"near-1-far-1000",
 		);
 
 		expect(state.showPortalPolygons).toBe(true);
 		expect(state.showCellIndicators).toBe(false);
 		expect(state.highlightPortalTargets).toBe(false);
+		expect(state.portalTriageMode).toBe("no-mask-depth");
+		expect(state.portalDepthRangeMode).toBe("near-1-far-1000");
 	});
 
 	it("keeps detail texture visibility in browser-owned mode state", () => {

@@ -40,6 +40,7 @@ import {
 } from "./webgl2-world-resources";
 import type {
 	BrowserCameraResidency,
+	WorldDisplayPortalTriageMode,
 	WorldRenderMetrics,
 } from "./renderer-contract";
 import type { MaterialTextureCapabilities } from "./render-surface-texture-data";
@@ -463,6 +464,18 @@ void main() {
 }
 `;
 
+const SCENE_DOMAIN_STENCIL_DEBUG_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+
+uniform vec4 uColor;
+
+out vec4 fragColor;
+
+void main() {
+	fragColor = uColor;
+}
+`;
+
 interface Webgl2RenderResources {
 	gl: WebGL2RenderingContext;
 	stateCache: Webgl2StateCache;
@@ -476,6 +489,7 @@ interface Webgl2RenderResources {
 		never,
 		"uColorTexture" | "uDepthTexture"
 	>;
+	sceneDomainStencilDebugProgram: Webgl2ProgramResource<never, "uColor">;
 	vertexBuffer: Webgl2BufferResource;
 	vertexArray: Webgl2VertexArrayResource;
 	sceneDomainCopyVertexArray: Webgl2VertexArrayResource;
@@ -513,6 +527,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	let renderChunkTransforms = options.renderChunkTransforms;
 	let controlledCameraFrame = options.controlledCameraFrame;
 	let transitionPortalMaxDepth = options.transitionPortalMaxDepth ?? 1;
+	let portalTriageMode: WorldDisplayPortalTriageMode =
+		options.portalTriageMode ?? "normal";
 	let textureFilteringMode = options.textureFilteringMode ?? "anisotropic-4x";
 	let textureColorSpaceMode = options.textureColorSpaceMode ?? "auto";
 	let detailTexturesEnabled = options.detailTexturesEnabled ?? true;
@@ -622,6 +638,10 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		},
 		setTransitionPortalMaxDepth(maxDepth) {
 			transitionPortalMaxDepth = maxDepth;
+			reportMetrics();
+		},
+		setPortalTriageMode(mode) {
+			portalTriageMode = mode;
 			reportMetrics();
 		},
 		setRenderStyle() {
@@ -1096,19 +1116,22 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		}
 		const { gl, stateCache } = resources;
 		gl.colorMask(false, false, false, false);
-		// Portal masks are re-rasterized against depth copied through a texture.
-		// A small negative offset avoids distance-dependent equality failures at
-		// aperture edges without changing the copied scene-domain depth itself.
-		gl.enable(gl.POLYGON_OFFSET_FILL);
-		gl.polygonOffset(
-			PORTAL_MASK_DEPTH_BIAS_FACTOR,
-			PORTAL_MASK_DEPTH_BIAS_UNITS,
-		);
+		const shouldDepthTestMask = portalTriageMode !== "no-mask-depth";
+		if (shouldDepthTestMask) {
+			// Portal masks are re-rasterized against depth copied through a texture.
+			// A small negative offset avoids distance-dependent equality failures at
+			// aperture edges without changing the copied scene-domain depth itself.
+			gl.enable(gl.POLYGON_OFFSET_FILL);
+			gl.polygonOffset(
+				PORTAL_MASK_DEPTH_BIAS_FACTOR,
+				PORTAL_MASK_DEPTH_BIAS_UNITS,
+			);
+		}
 		try {
 			stateCache.setDepthState({
-				enabled: true,
+				enabled: shouldDepthTestMask,
 				write: false,
-				func: gl.LEQUAL,
+				func: shouldDepthTestMask ? gl.LEQUAL : gl.ALWAYS,
 			});
 			stateCache.setBlendState({
 				enabled: false,
@@ -1164,7 +1187,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				);
 			}
 		} finally {
-			gl.disable(gl.POLYGON_OFFSET_FILL);
+			if (shouldDepthTestMask) {
+				gl.disable(gl.POLYGON_OFFSET_FILL);
+			}
 			gl.colorMask(true, true, true, true);
 		}
 	}
@@ -1206,6 +1231,10 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			zfail: gl.KEEP,
 			zpass: gl.KEEP,
 		});
+		if (portalTriageMode === "flat-stencil-color") {
+			drawStencilDebugComposite(stencilRef, batch);
+			return;
+		}
 		stateCache.useProgram(resources.sceneDomainCopyProgram.program);
 		stateCache.bindVertexArray(
 			resources.sceneDomainCopyVertexArray.vertexArray,
@@ -1214,19 +1243,70 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		gl.uniform1i(resources.sceneDomainCopyProgram.uniforms.uDepthTexture, 1);
 		stateCache.bindTexture2D(0, sourceTarget.colorTexture);
 		stateCache.bindTexture2D(1, sourceTarget.depthTexture);
-		gl.enable(gl.SCISSOR_TEST);
+		const shouldScissor = portalTriageMode !== "no-composite-scissor";
+		if (shouldScissor) {
+			gl.enable(gl.SCISSOR_TEST);
+		}
 		try {
 			for (const work of batch) {
-				gl.scissor(
-					work.screenRect.x,
-					canvas.height - work.screenRect.y - work.screenRect.height,
-					work.screenRect.width,
-					work.screenRect.height,
-				);
+				if (shouldScissor) {
+					gl.scissor(
+						work.screenRect.x,
+						canvas.height - work.screenRect.y - work.screenRect.height,
+						work.screenRect.width,
+						work.screenRect.height,
+					);
+				}
 				gl.drawArrays(gl.TRIANGLES, 0, 3);
 			}
 		} finally {
-			gl.disable(gl.SCISSOR_TEST);
+			if (shouldScissor) {
+				gl.disable(gl.SCISSOR_TEST);
+			}
+		}
+	}
+
+	function drawStencilDebugComposite(
+		stencilRef: number,
+		batch: readonly Webgl2VisibleTransitionPortalWork[],
+	): void {
+		if (!resources) {
+			return;
+		}
+		const { gl, stateCache } = resources;
+		stateCache.setDepthState({
+			enabled: false,
+			write: false,
+			func: gl.ALWAYS,
+		});
+		stateCache.useProgram(resources.sceneDomainStencilDebugProgram.program);
+		stateCache.bindVertexArray(
+			resources.sceneDomainCopyVertexArray.vertexArray,
+		);
+		gl.uniform4fv(
+			resources.sceneDomainStencilDebugProgram.uniforms.uColor,
+			stencilDebugColorForRef(stencilRef),
+		);
+		const shouldScissor = portalTriageMode !== "no-composite-scissor";
+		if (shouldScissor) {
+			gl.enable(gl.SCISSOR_TEST);
+		}
+		try {
+			for (const work of batch) {
+				if (shouldScissor) {
+					gl.scissor(
+						work.screenRect.x,
+						canvas.height - work.screenRect.y - work.screenRect.height,
+						work.screenRect.width,
+						work.screenRect.height,
+					);
+				}
+				gl.drawArrays(gl.TRIANGLES, 0, 3);
+			}
+		} finally {
+			if (shouldScissor) {
+				gl.disable(gl.SCISSOR_TEST);
+			}
 		}
 	}
 
@@ -1281,6 +1361,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		resources.indexedP16WorldProgram.dispose();
 		resources.terrainBlendWorldProgram.dispose();
 		resources.sceneDomainCopyProgram.dispose();
+		resources.sceneDomainStencilDebugProgram.dispose();
 		resources.sceneDomainCopyVertexArray.dispose();
 		resources.sceneDomainTargets?.dispose();
 		destroyWebgl2WorldResources(resources.worldStore);
@@ -1358,6 +1439,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	}
 
 	function reportMetrics(): void {
+		const metricsCameraFrame = resolveCameraFrame();
 		renderMetricsChangeHandler?.(
 			createWebgl2RenderMetrics({
 				terrainScene,
@@ -1389,6 +1471,13 @@ export function createWebgl2WorldDisplayRendererImplementation(
 						: "webgl2-initializing",
 				renderGraphBaseScene: latestBaseSceneDomain,
 				transitionPortalMaxDepth,
+				portalTriageMode,
+				cameraNear: metricsCameraFrame.near,
+				cameraFar: metricsCameraFrame.far,
+				cameraFarNearRatio:
+					metricsCameraFrame.near > 0
+						? metricsCameraFrame.far / metricsCameraFrame.near
+						: null,
 				clearCount,
 				drawCallCount,
 				lastFrameDrawCount,
@@ -1516,6 +1605,16 @@ function describeWebgl2BrowserCameraResidencyKey(
 	].join(":");
 }
 
+function stencilDebugColorForRef(stencilRef: number): Float32Array {
+	const colors: readonly (readonly [number, number, number, number])[] = [
+		[1, 0.08, 0.35, 1],
+		[0.1, 0.85, 1, 1],
+		[1, 0.9, 0.1, 1],
+		[0.65, 0.35, 1, 1],
+	];
+	return new Float32Array(colors[(stencilRef - 1) % colors.length]);
+}
+
 function mergeMaterialKindCounts(
 	left: Readonly<Record<string, number>>,
 	right: Readonly<Record<string, number>>,
@@ -1567,6 +1666,8 @@ function createTriangleResources(
 		indexedP16WorldProgram: createIndexedP16WorldProgram(gl),
 		terrainBlendWorldProgram: createTerrainBlendWorldProgram(gl),
 		sceneDomainCopyProgram: createSceneDomainCopyProgram(gl),
+		sceneDomainStencilDebugProgram:
+			createSceneDomainStencilDebugProgram(gl),
 		vertexBuffer,
 		vertexArray,
 		sceneDomainCopyVertexArray: createWebgl2VertexArray(gl, {
@@ -1729,5 +1830,16 @@ function createSceneDomainCopyProgram(
 		vertexSource: SCENE_DOMAIN_COPY_VERTEX_SHADER,
 		fragmentSource: SCENE_DOMAIN_COPY_FRAGMENT_SHADER,
 		uniforms: ["uColorTexture", "uDepthTexture"],
+	});
+}
+
+function createSceneDomainStencilDebugProgram(
+	gl: WebGL2RenderingContext,
+): Webgl2ProgramResource<never, "uColor"> {
+	return createWebgl2Program(gl, {
+		label: "webgl2 scene-domain stencil debug",
+		vertexSource: SCENE_DOMAIN_COPY_VERTEX_SHADER,
+		fragmentSource: SCENE_DOMAIN_STENCIL_DEBUG_FRAGMENT_SHADER,
+		uniforms: ["uColor"],
 	});
 }

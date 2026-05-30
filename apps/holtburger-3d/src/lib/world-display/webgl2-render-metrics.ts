@@ -3,6 +3,7 @@ import type { StagedWorldFrameMetrics } from "./staged-world-frame";
 import type {
 	WorldDisplayTextureColorSpaceMode,
 	WorldDisplayTextureFilteringMode,
+	WorldDisplayPortalTriageMode,
 	WorldRenderMetrics,
 } from "./renderer-contract";
 import type { StaticRenderableSceneModel } from "./static-renderables";
@@ -31,6 +32,10 @@ export interface Webgl2RenderMetricsInput {
 	renderGraphPolicy: string;
 	renderGraphBaseScene: string;
 	transitionPortalMaxDepth: number;
+	portalTriageMode: WorldDisplayPortalTriageMode;
+	cameraNear: number | null;
+	cameraFar: number | null;
+	cameraFarNearRatio: number | null;
 	clearCount: number;
 	drawCallCount: number;
 	lastFrameDrawCount: number;
@@ -102,6 +107,10 @@ export function createWebgl2RenderMetrics(
 			renderGraphPolicy: input.renderGraphPolicy,
 			renderGraphBaseScene: input.renderGraphBaseScene,
 			transitionPortalMaxDepth: input.transitionPortalMaxDepth,
+			portalTriageMode: input.portalTriageMode,
+			cameraNear: input.cameraNear,
+			cameraFar: input.cameraFar,
+			cameraFarNearRatio: input.cameraFarNearRatio,
 			renderPassCount: input.clearCount,
 			clearCount: input.clearCount,
 			portalRenderWorkItemCount: input.visiblePortalWorkItemCount,

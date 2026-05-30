@@ -7,6 +7,8 @@
 		MAX_TRANSITION_PORTAL_MAX_DEPTH,
 		MIN_BROWSER_LOD_RADIUS,
 		MIN_TRANSITION_PORTAL_MAX_DEPTH,
+		type BrowserPortalDepthRangeMode,
+		type BrowserPortalTriageMode,
 		type BrowserTextureColorSpaceMode,
 		type BrowserRenderStyle,
 		type BrowserNavigationFocusMode,
@@ -131,6 +133,20 @@
 	function handleTransitionPortalMaxDepthInput(event: Event): void {
 		const input = event.currentTarget as HTMLInputElement;
 		frontendState.updateTransitionPortalMaxDepth(Number(input.value));
+	}
+
+	function handlePortalTriageModeChange(event: Event): void {
+		const select = event.currentTarget as HTMLSelectElement;
+		frontendState.updatePortalTriageMode(
+			select.value as BrowserPortalTriageMode,
+		);
+	}
+
+	function handlePortalDepthRangeModeChange(event: Event): void {
+		const select = event.currentTarget as HTMLSelectElement;
+		frontendState.updatePortalDepthRangeMode(
+			select.value as BrowserPortalDepthRangeMode,
+		);
 	}
 
 	function handlePortalPolygonsToggle(event: Event): void {
@@ -467,6 +483,36 @@
 						/>
 					</label>
 				</div>
+			</fieldset>
+
+			<fieldset class="browser-form__fieldset">
+				<legend>Portal triage</legend>
+				<label class="browser-form__field" for="portal-triage-mode">
+					<span>Mode</span>
+					<select
+						id="portal-triage-mode"
+						value={$frontendState.browserMode.portalTriageMode}
+						onchange={handlePortalTriageModeChange}
+					>
+						<option value="normal">Normal</option>
+						<option value="no-composite-scissor">No composite scissor</option>
+						<option value="no-mask-depth">No mask depth test</option>
+						<option value="flat-stencil-color">Flat stencil color</option>
+					</select>
+				</label>
+				<label class="browser-form__field" for="portal-depth-range-mode">
+					<span>Depth range</span>
+					<select
+						id="portal-depth-range-mode"
+						value={$frontendState.browserMode.portalDepthRangeMode}
+						onchange={handlePortalDepthRangeModeChange}
+					>
+						<option value="default">Default 0.1-5000</option>
+						<option value="near-1-far-1000">Near 1, far 1000</option>
+						<option value="near-2-far-1000">Near 2, far 1000</option>
+						<option value="near-1-far-500">Near 1, far 500</option>
+					</select>
+				</label>
 			</fieldset>
 
 			<fieldset class="browser-form__fieldset">

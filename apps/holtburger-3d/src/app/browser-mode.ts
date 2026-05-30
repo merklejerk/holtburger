@@ -34,6 +34,16 @@ export type BrowserTextureColorSpaceMode =
 	| "srgb"
 	| "linear"
 	| "compressed-linear";
+export type BrowserPortalTriageMode =
+	| "normal"
+	| "no-composite-scissor"
+	| "no-mask-depth"
+	| "flat-stencil-color";
+export type BrowserPortalDepthRangeMode =
+	| "default"
+	| "near-1-far-1000"
+	| "near-2-far-1000"
+	| "near-1-far-500";
 type BrowserDestinationSource = "manual" | "landblock-pick" | "follow-camera";
 export type BrowserLandblockInputMode = "outdoor" | "dungeon";
 type NorthSouthHemisphere = "N" | "S";
@@ -80,6 +90,8 @@ export interface BrowserModeState {
 	detailLodRadius: number;
 	envCellLodRadius: number;
 	transitionPortalMaxDepth: number;
+	portalTriageMode: BrowserPortalTriageMode;
+	portalDepthRangeMode: BrowserPortalDepthRangeMode;
 	landblockInputMode: BrowserLandblockInputMode;
 	showPortalPolygons: boolean;
 	showCellIndicators: boolean;
@@ -115,6 +127,8 @@ export function createBrowserModeState(): BrowserModeState {
 		detailLodRadius: DEFAULT_DETAIL_LOD_RADIUS,
 		envCellLodRadius: DEFAULT_ENV_CELL_LOD_RADIUS,
 		transitionPortalMaxDepth: DEFAULT_TRANSITION_PORTAL_MAX_DEPTH,
+		portalTriageMode: "normal",
+		portalDepthRangeMode: "default",
 		landblockInputMode: "dungeon",
 		showPortalPolygons: false,
 		showCellIndicators: false,
@@ -286,6 +300,26 @@ export function updateTransitionPortalMaxDepth(
 	};
 }
 
+export function updatePortalTriageMode(
+	browserMode: BrowserModeState,
+	portalTriageMode: BrowserPortalTriageMode,
+): BrowserModeState {
+	return {
+		...browserMode,
+		portalTriageMode,
+	};
+}
+
+export function updatePortalDepthRangeMode(
+	browserMode: BrowserModeState,
+	portalDepthRangeMode: BrowserPortalDepthRangeMode,
+): BrowserModeState {
+	return {
+		...browserMode,
+		portalDepthRangeMode,
+	};
+}
+
 export function updateLandblockInputMode(
 	browserMode: BrowserModeState,
 	landblockInputMode: BrowserLandblockInputMode,
@@ -396,6 +430,8 @@ export function previewBrowserLocation(
 		detailLodRadius: browserMode.detailLodRadius,
 		envCellLodRadius: browserMode.envCellLodRadius,
 		transitionPortalMaxDepth: browserMode.transitionPortalMaxDepth,
+		portalTriageMode: browserMode.portalTriageMode,
+		portalDepthRangeMode: browserMode.portalDepthRangeMode,
 		landblockInputMode: browserMode.landblockInputMode,
 		showPortalPolygons: browserMode.showPortalPolygons,
 		showCellIndicators: browserMode.showCellIndicators,
@@ -433,6 +469,8 @@ export function selectBrowserLandblockDestination(
 		detailLodRadius: browserMode.detailLodRadius,
 		envCellLodRadius: browserMode.envCellLodRadius,
 		transitionPortalMaxDepth: browserMode.transitionPortalMaxDepth,
+		portalTriageMode: browserMode.portalTriageMode,
+		portalDepthRangeMode: browserMode.portalDepthRangeMode,
 		landblockInputMode: browserMode.landblockInputMode,
 		showPortalPolygons: browserMode.showPortalPolygons,
 		showCellIndicators: browserMode.showCellIndicators,

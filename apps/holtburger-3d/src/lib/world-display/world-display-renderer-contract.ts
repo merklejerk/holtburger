@@ -12,6 +12,7 @@ import type {
 import type {
 	BrowserCameraResidencyChangeHandler,
 	WorldDisplayRenderStyle,
+	WorldDisplayPortalTriageMode,
 	WorldDisplayTextureColorSpaceMode,
 	WorldDisplayTextureFilteringMode,
 	WorldRenderCameraFrameChangeHandler,
@@ -36,6 +37,7 @@ export interface WorldDisplayRendererOptions {
 	rendererResourceGraph?: RendererResourceGraph;
 	controlledCameraFrame: SceneCameraFrame | null;
 	transitionPortalMaxDepth?: number;
+	portalTriageMode?: WorldDisplayPortalTriageMode;
 	renderStyle?: WorldDisplayRenderStyle;
 	textureFilteringMode?: WorldDisplayTextureFilteringMode;
 	textureColorSpaceMode?: WorldDisplayTextureColorSpaceMode;
@@ -57,6 +59,7 @@ export interface WorldDisplayRenderer {
 	setRenderSpatialQuery(query: RenderSpatialIndexQuery | null): void;
 	setControlledCameraFrame(frame: SceneCameraFrame | null): void;
 	setTransitionPortalMaxDepth(maxDepth: number): void;
+	setPortalTriageMode(mode: WorldDisplayPortalTriageMode): void;
 	setRenderStyle(renderStyle: WorldDisplayRenderStyle): void;
 	setTextureFilteringMode(mode: WorldDisplayTextureFilteringMode): void;
 	setTextureColorSpaceMode(mode: WorldDisplayTextureColorSpaceMode): void;

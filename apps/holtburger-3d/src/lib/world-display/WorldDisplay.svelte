@@ -16,6 +16,7 @@
 	import type { SceneCameraFrame } from "./camera";
 	import type {
 		BrowserCameraResidencyChangeHandler,
+		WorldDisplayPortalTriageMode,
 		WorldDisplayTextureColorSpaceMode,
 		WorldDisplayTextureFilteringMode,
 		WorldDisplayRenderStyle,
@@ -77,6 +78,7 @@
 	let renderSpatialQuery: RenderSpatialIndexQuery | null = null;
 	let controlledCameraFrame: SceneCameraFrame | null = null;
 	let transitionPortalMaxDepth = 1;
+	let portalTriageMode: WorldDisplayPortalTriageMode = "normal";
 	let renderStyle: WorldDisplayRenderStyle = "solid";
 	let textureFilteringMode: WorldDisplayTextureFilteringMode = "anisotropic-4x";
 	let textureColorSpaceMode: WorldDisplayTextureColorSpaceMode = "auto";
@@ -106,6 +108,7 @@
 				onCameraFrameChange,
 				onRenderMetricsChange,
 				onCameraResidencyChange,
+				portalTriageMode,
 				renderStyle,
 				textureFilteringMode,
 				textureColorSpaceMode,
@@ -190,6 +193,13 @@
 	export function setTransitionPortalMaxDepth(nextMaxDepth: number): void {
 		transitionPortalMaxDepth = nextMaxDepth;
 		rendererController?.setTransitionPortalMaxDepth(transitionPortalMaxDepth);
+	}
+
+	export function setPortalTriageMode(
+		nextMode: WorldDisplayPortalTriageMode,
+	): void {
+		portalTriageMode = nextMode;
+		rendererController?.setPortalTriageMode(portalTriageMode);
 	}
 
 	export function setRenderStyle(nextStyle: WorldDisplayRenderStyle): void {

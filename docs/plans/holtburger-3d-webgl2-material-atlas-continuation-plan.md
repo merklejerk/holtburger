@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
-Status: Phase M3D.1 complete; ready for Phase M4.
+Status: Phase M4A complete; ready for Phase M4B.
 
 Related plans:
 
@@ -918,7 +918,78 @@ Exit criteria:
   systems.
 - WebGL2 no longer needs a one-off material timer for texture velocity.
 
-## Phase M4: Portal Passes in WebGL2
+## Phase M4A: WebGL2 Portal Mask Resource Prep
+
+Status: Complete.
+
+Purpose: add an immediate prep slice before full portal compositing because the WebGL2 path had no
+stencil buffer and no aperture mask draw-unit resources. Full portal rendering cannot be correct
+until masks are represented separately from normal scene geometry.
+
+Tasks:
+
+- Request a stencil-capable WebGL2 context.
+- Stage transition portal aperture masks as WebGL2 draw-unit resources using the existing
+  renderer-neutral portal candidate model.
+- Transform portal mask geometry through the same render-chunk and AC placement matrix path as
+  structured interiors.
+- Bind portal masks to their existing portal BVH item keys so frame selection and diagnostics can
+  account for them.
+- Keep portal masks out of the normal world submit order; they must be submitted only by explicit
+  portal pass code.
+- Add test coverage proving visible portal masks are partitioned away from normal world draws.
+
+Exit criteria:
+
+- WebGL2 owns portal aperture mask buffers/VAOs alongside other staged resources.
+- Portal masks are counted as `portal-mask` frame candidates without drawing into the base world
+  pass.
+- The browser creates WebGL2 with stencil storage available for upcoming pass work.
+
+Progress:
+
+- Added `portal-mask` as a first-class staged draw-unit kind/category.
+- Added staged portal mask draw-unit assembly from committed transition portal candidates. The
+  geometry triangulates aperture polygons and applies render-chunk offset plus the aperture's
+  chunk-local placement.
+- Reused `deriveTransitionPortalMaskBatchBvhBinding()` so portal masks retain the same BVH identity
+  as the Three path.
+- Updated WebGL2 resource realization to accept the new staged draw-unit kind without treating masks
+  as static/material scene geometry.
+- Added `planWebgl2PortalMaskSubmitOrder()` and filtered masks out of
+  `planWebgl2FlatWorldSubmitOrder()`. This prevents accidental base-pass aperture drawing before
+  explicit stencil/depth/composite passes exist.
+- Switched WebGL2 context creation from `stencil: false` to `stencil: true`.
+- Routed portal-mask visible draw counts into WebGL2 debug metrics.
+
+Decisions:
+
+- Portal mask resources live in staged WebGL2 resources for now because they share buffer/VAO
+  ownership and lifecycle with other retained draw units. Their pass policy remains submitter-owned.
+- The normal flat world submitter must not draw `portal-mask` units. Future portal pass submission
+  will opt into those masks explicitly.
+- M4A does not fake a portal composite. Rendering a convincing but wrong portal would hide the
+  remaining depth-reset and clipped-scene work.
+
+Course corrections:
+
+- The original M4 was too large for one clean step because WebGL2 had a missing prerequisite: no
+  stencil context and no aperture mask resources. M4A was added as an immediate interim phase.
+- Full portal parity should now continue as M4B with explicit pass submission rather than adding
+  mask resources and composite state in the same change.
+
+Cleanup targets and legacy shims:
+
+- Portal masks currently do not register renderer-resource graph leases. M4B should either add graph
+  records for mask draw units or document why they are retained only through `drawUnitsById`.
+- WebGL2 portal metrics now count visible mask draw units, but portal work-item counts are still
+  zero. M4B should derive visible work batches and update work-item/skipped metrics.
+- The submitter now has separate flat-world and portal-mask order planners. When M4B adds explicit
+  graph-node submission, keep this separation and avoid a boolean flag on the flat submitter.
+- Full M4 still needs a dedicated depth-reset shader/path that writes `gl_FragDepth = 1.0` with
+  color writes disabled; do not approximate this with ordinary flat geometry.
+
+## Phase M4B: Portal Passes in WebGL2
 
 Status: Not started.
 

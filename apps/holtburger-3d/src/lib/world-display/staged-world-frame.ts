@@ -20,7 +20,8 @@ export type StagedWorldDrawUnitCategory =
 export type StagedWorldDrawUnitKind =
 	| "terrain"
 	| "structured-interior"
-	| "static";
+	| "static"
+	| "portal-mask";
 
 export interface StagedWorldFrameCandidate {
 	id: string;
@@ -195,6 +196,9 @@ function categorizeStagedWorldCandidate(candidate: {
 	}
 	if (candidate.kind === "terrain") {
 		return "terrain";
+	}
+	if (candidate.kind === "portal-mask") {
+		return "portal-mask";
 	}
 	if (candidate.kind === "structured-interior") {
 		return "structured-interior";

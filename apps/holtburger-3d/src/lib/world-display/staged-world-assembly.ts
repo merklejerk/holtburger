@@ -36,6 +36,7 @@ import {
 import {
 	deriveStructuredInteriorCellBatchBvhBinding,
 	deriveTerrainTileBatchBvhBinding,
+	deriveTransitionPortalMaskBatchBvhBinding,
 } from "./non-instanced-bvh-bindings";
 import { deriveSceneRenderableReadinessModel } from "./scene-renderable-readiness";
 import {
@@ -47,7 +48,10 @@ import { staticRenderableObjectKey } from "./static-renderable-readiness";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
 import type { TextureFilteringMode } from "./texture-sampling-policy";
-import type { TransitionPortalCandidateModel } from "./transition-portal-work-items";
+import type {
+	TransitionPortalCandidate,
+	TransitionPortalCandidateModel,
+} from "./transition-portal-work-items";
 
 export type StagedWorldDrawUnitGeometry = StagedWorldIndexedGeometry;
 export interface StagedWorldDrawUnitBvhBinding {
@@ -91,10 +95,24 @@ export interface StagedStructuredInteriorDrawUnitAssembly {
 	staticObjectKeys: readonly [];
 }
 
+export interface StagedPortalMaskDrawUnitAssembly {
+	id: string;
+	kind: "portal-mask";
+	geometry: StagedWorldDrawUnitGeometry;
+	modelMatrix: RenderMat4;
+	material: StagedWorldMaterialPlan;
+	preparedAssetIds: readonly string[];
+	bvhBinding: StagedWorldDrawUnitBvhBinding;
+	staticPartCount: 0;
+	staticObjectKeys: readonly [];
+	portalCandidate: TransitionPortalCandidate;
+}
+
 export type StagedWorldDrawUnitAssembly =
 	| StagedTerrainDrawUnitAssembly
 	| StagedStaticDrawUnitAssembly
-	| StagedStructuredInteriorDrawUnitAssembly;
+	| StagedStructuredInteriorDrawUnitAssembly
+	| StagedPortalMaskDrawUnitAssembly;
 
 export interface StagedWorldSceneAssembly {
 	drawUnits: StagedWorldDrawUnitAssembly[];
@@ -190,11 +208,16 @@ export function buildStagedWorldSceneAssembly({
 		textureFilteringMode,
 		detailTexturesEnabled,
 	});
+	const portalMaskDrawUnits = buildStagedPortalMaskDrawUnitAssemblies({
+		chunkOffsetByKey,
+		transitionPortalModel: fullyResolvedScenes.committedTransitionPortalModel,
+	});
 	return {
 		drawUnits: [
 			...terrainDrawUnits,
 			...structuredInteriorDrawUnits,
 			...staticDrawUnits,
+			...portalMaskDrawUnits,
 		],
 		graphRecords: [
 			...structuredInteriorDrawUnits.map((drawUnit) => ({
@@ -210,6 +233,75 @@ export function buildStagedWorldSceneAssembly({
 				preparedAssetIds: drawUnit.preparedAssetIds,
 			})),
 		],
+	};
+}
+
+export function buildStagedPortalMaskDrawUnitAssemblies({
+	chunkOffsetByKey,
+	transitionPortalModel,
+}: {
+	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
+	transitionPortalModel: TransitionPortalCandidateModel;
+}): StagedPortalMaskDrawUnitAssembly[] {
+	return transitionPortalModel.candidates.flatMap((candidate) => {
+		const chunkOffset = chunkOffsetByKey.get(candidate.renderChunk.chunkKey);
+		if (!chunkOffset || candidate.aperture.points.length < 3) {
+			return [];
+		}
+		const bvhBinding = deriveTransitionPortalMaskBatchBvhBinding(candidate);
+		return [
+			{
+				id: `portal-mask/${candidate.id}`,
+				kind: "portal-mask",
+				geometry: buildPortalMaskGeometry(candidate),
+				modelMatrix: multiplyMat4(
+					createTranslationMat4(chunkOffset),
+					buildAcPlacementMatrix(
+						candidate.aperture.chunkLocalPlacement,
+						{ x: 0, y: 0, z: 0 },
+						{ x: 1, y: 1, z: 1 },
+					),
+				),
+				material: {
+					kind: "flat",
+					key: `portal-mask/${candidate.id}`,
+					color: new Float32Array([0, 0, 0, 0]),
+					behavior: null,
+					fallbackReason: null,
+					preparedAssetIds: [],
+				},
+				preparedAssetIds: [],
+				bvhBinding: {
+					itemKeys: bvhBinding.itemKeys,
+					fallbackReason: bvhBinding.fallbackReason,
+				},
+				staticPartCount: 0,
+				staticObjectKeys: [],
+				portalCandidate: candidate,
+			},
+		];
+	});
+}
+
+function buildPortalMaskGeometry(
+	candidate: TransitionPortalCandidate,
+): StagedWorldDrawUnitGeometry {
+	const positions = new Float32Array(
+		candidate.aperture.points.flatMap((point) => [point.x, point.y, point.z]),
+	);
+	const indices: number[] = [];
+	for (let index = 1; index < candidate.aperture.points.length - 1; index += 1) {
+		indices.push(0, index, index + 1);
+	}
+	return {
+		positions,
+		uvs: null,
+		indices:
+			candidate.aperture.points.length > 65535
+				? new Uint32Array(indices)
+				: new Uint16Array(indices),
+		vertexCount: candidate.aperture.points.length,
+		triangleCount: indices.length / 3,
 	};
 }
 

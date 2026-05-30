@@ -613,6 +613,9 @@ export function createThreeWorldDisplayRenderer(
 			sceneDomainInteriorDrawCallCount: 0,
 			sceneDomainExteriorDrawUnitCount: 0,
 			sceneDomainInteriorDrawUnitCount: 0,
+			portalCompositeRectCount: 0,
+			portalCompositeEstimatedPixelArea: 0,
+			portalCompositeMaxDepth: 0,
 			structuredInteriorMeshCount: 0,
 			visibleStructuredInteriorMeshCount: 0,
 			...latestPreparedBvhMetrics,
@@ -1086,6 +1089,9 @@ export function createThreeWorldDisplayRenderer(
 			sceneDomainInteriorDrawCallCount: 0,
 			sceneDomainExteriorDrawUnitCount: 0,
 			sceneDomainInteriorDrawUnitCount: 0,
+			portalCompositeRectCount: 0,
+			portalCompositeEstimatedPixelArea: 0,
+			portalCompositeMaxDepth: 0,
 			structuredInteriorMeshCount: structuredInteriorMeshes.size,
 			visibleStructuredInteriorMeshCount: countVisibleObjects(
 				structuredInteriorMeshes.values(),
@@ -3755,6 +3761,10 @@ function createRenderDebugMetrics(
 			options.sceneDomainExteriorDrawUnitCount,
 		sceneDomainInteriorDrawUnitCount:
 			options.sceneDomainInteriorDrawUnitCount,
+		portalCompositeRectCount: options.portalCompositeRectCount,
+		portalCompositeEstimatedPixelArea:
+			options.portalCompositeEstimatedPixelArea,
+		portalCompositeMaxDepth: options.portalCompositeMaxDepth,
 		structuredInteriorMeshCount: options.structuredInteriorMeshCount,
 		visibleStructuredInteriorMeshCount:
 			options.visibleStructuredInteriorMeshCount,

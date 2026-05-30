@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
-Status: Phase M4B.2 complete; ready for Phase M4C.
+Status: Phase M4C core complete; ready for Phase M4C.1.
 
 Related plans:
 
@@ -1296,7 +1296,7 @@ Cleanup targets and legacy shims:
 
 ## Phase M4C: Iterative Stencil/Depth Portal Composite
 
-Status: Not started.
+Status: Core complete; immediate M4C.1 hardening required.
 
 Purpose: composite portals by iteratively drawing visible aperture masks to stencil and copying
 color/depth from the opposite scene-domain target through screen-space portal bounds. This preserves
@@ -1353,6 +1353,23 @@ Exit criteria:
   fullscreen or whole-union blit.
 - Portal work remains separate from material batching and atlas compaction.
 
+Progress:
+
+- Extended WebGL2 portal work items with projected screen rectangles and estimated pixel area.
+- Added one scissored composite rectangle per visible portal aperture instead of a fullscreen or
+  same-depth union blit.
+- Added iterative WebGL2 portal composite execution after the base scene-domain copy:
+  - draw each visible portal depth batch to stencil using M4A portal-mask draw units;
+  - use depth testing against the current default framebuffer depth so current-scene occluders can
+    block downstream portals;
+  - composite the opposite scene-domain color and depth target through the matching stencil ref;
+  - write sampled depth via the existing scene-domain copy shader's `gl_FragDepth`.
+- Kept scene geometry bounded to the two scene-domain renders. Portal iterations draw only mask
+  geometry and screen-space composite triangles.
+- Added WebGL2 metrics for transition mask pass count, interior/exterior composite pass counts,
+  composite rect count, estimated composite pixel area, and max composited depth reached.
+- Added portal-work test coverage for screen-rect planning.
+
 Decisions:
 
 - Fullscreen composite quads are acceptable only for bring-up/debug. The default path should use
@@ -1361,12 +1378,70 @@ Decisions:
   aperture first, then add measured rect merging when it reduces total cost.
 - Fixed total passes for unbounded portal depth is not a goal. The project goal is fixed scene
   geometry renders plus bounded/metric-visible composite iterations.
+- WebGL2 cannot test one stencil ref and replace with a different ref in one draw. The compositor
+  uses replace for depth 1 and parent-ref test plus stencil increment for deeper masks, matching the
+  sequential stencil-ref model.
+- The first WebGL2 compositor path uses a full-screen triangle shader clipped by per-portal scissor
+  rectangles. That keeps shader code simple while bounding fill to projected aperture rectangles.
 
 Cleanup targets and legacy shims:
 
 - Remove or clearly demote old clipped-BVH composite counters once dual-target metrics are proven.
 - The existing Three path can remain as a comparison backend, but new WebGL2 portal code should not
   copy Three's scene-mutation/layer toggling model.
+- Portal mask and composite pass submission currently live inside
+  `webgl2-world-display-renderer-impl.ts`. Extract pass helpers before adding more portal state or
+  debug overlays.
+- The projected aperture rectangle path currently drops portals with all vertices behind the camera
+  and clamps visible vertex bounds; it does not yet do full near-plane polygon clipping. M4C.1 should
+  harden this before broader visual validation.
+
+Course corrections:
+
+- M4C initially looked like it might need a separate copy shader. The M4B scene-domain copy shader
+  already samples color/depth and writes `gl_FragDepth`, so M4C reuses it for both base copy and
+  portal composite.
+- Parent bounds intersection is deferred to M4C.1. The stencil test already prevents child portals
+  from drawing outside the parent stencil region, but metrics/fill estimates still use each
+  aperture's own projected rectangle.
+
+## Phase M4C.1: Portal Composite Clipping and Diagnostics
+
+Status: Not started.
+
+Purpose: harden the first WebGL2 portal compositor before broader fill-rate/visual work. M4C has the
+core dual-target stencil/depth pipeline, but the screen-rect and diagnostics path needs more precise
+clipping and skipped-reason reporting before M4D profiling.
+
+Why this phase is immediate:
+
+- Per-aperture scissor rectangles are bounded but currently based on projected visible vertices
+  rather than full near-plane clipped aperture polygons. Close or partially clipped portals can
+  produce conservative or missing rects.
+- Parent portal bounds are enforced by stencil but not reflected in composite rect planning or fill
+  metrics.
+- WebGL2 portal metrics still lack detailed skipped-reason accounting comparable to the Three path.
+
+Tasks:
+
+- Replace simple projected-point bounds with near/frustum-clipped aperture polygon projection for
+  WebGL2 portal work items.
+- Intersect child-depth composite rectangles with parent portal rectangles where available so fill
+  estimates and scissor bounds better match stencil-visible area.
+- Add skipped-reason counters for missing candidate, missing mask draw unit, back-facing/missing
+  plane, outside-frustum, too-small, and invalid screen rect.
+- Add tests for partially clipped portals, portals behind the camera, multiple same-depth portals,
+  parent rect intersection, and skipped-reason accounting.
+- Consider moving mask/composite pass helpers out of `webgl2-world-display-renderer-impl.ts` once
+  the pass API stabilizes.
+
+Exit criteria:
+
+- WebGL2 portal work-item planning produces stable bounded rects for close, edge-of-screen, and
+  partially clipped apertures.
+- Metrics distinguish visible portal work from skipped/invalid portal candidates.
+- Composite pixel-area estimates account for parent rect clipping.
+- M4D can focus on measured fill-rate and visual hardening rather than missing planning diagnostics.
 
 ## Phase M4D: Portal Fill-Rate and Visual Hardening
 

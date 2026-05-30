@@ -38,19 +38,25 @@ import {
 	syncWebgl2WorldResources,
 	type Webgl2WorldResourceStore,
 } from "./webgl2-world-resources";
-import type { WorldRenderMetrics } from "./renderer-contract";
 import type {
 	BrowserCameraResidency,
+	WorldRenderMetrics,
 } from "./renderer-contract";
 import type { MaterialTextureCapabilities } from "./render-surface-texture-data";
+import { multiplyMat4 } from "./render-math";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
-import { deriveTransitionPortalRenderLevels } from "./render-policy";
+import {
+	deriveTransitionPortalRenderLevels,
+	type TransitionPortalRenderLevel,
+} from "./render-policy";
+import { transitionPortalDepthBatchKey } from "./transition-portal-depth-batches";
 import {
 	deriveWebgl2BaseSceneDomain,
 	deriveWebgl2BaseSceneDomainFromResidency,
 	deriveWebgl2InitialPortalEnvCellId,
 	planWebgl2TransitionPortalWork,
 	type Webgl2TransitionPortalWorkPlan,
+	type Webgl2VisibleTransitionPortalWork,
 } from "./webgl2-transition-portal-work";
 import type { TransitionPortalScene } from "./transition-portal-work-items";
 import {
@@ -484,6 +490,12 @@ interface Webgl2SceneDomainFrameMetrics {
 	exteriorDrawCallCount: number;
 	interiorDrawCallCount: number;
 	baseCopyPassCount: number;
+	transitionApertureMaskPassCount: number;
+	interiorCompositePassCount: number;
+	exteriorCompositePassCount: number;
+	portalCompositeRectCount: number;
+	portalCompositeEstimatedPixelArea: number;
+	portalCompositeMaxDepth: number;
 }
 
 export function createWebgl2WorldDisplayRendererImplementation(
@@ -815,19 +827,22 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		const baseScene = deriveWebgl2BaseSceneDomainFromResidency(
 			latestCameraResidencyContext,
 		);
+		const transitionLevels = deriveTransitionPortalRenderLevels({
+			baseScene,
+			maxDepth: transitionPortalMaxDepth,
+		});
 		latestBaseSceneDomain = baseScene;
 		latestPortalWorkPlan = planWebgl2TransitionPortalWork({
 			transitionPortalModel,
 			visiblePortalMaskDrawUnits: portalMaskDrawUnits,
 			cameraPosition: frameCameraPosition(),
+			viewProjectionMatrix: frame.viewProjectionMatrix,
+			viewport: { width: canvas.width, height: canvas.height },
 			baseScene,
 			initialEnvCellId: deriveWebgl2InitialPortalEnvCellId(
 				latestCameraResidencyContext,
 			),
-			levels: deriveTransitionPortalRenderLevels({
-				baseScene,
-				maxDepth: transitionPortalMaxDepth,
-			}),
+			levels: transitionLevels,
 		});
 		const exteriorMetrics = renderSceneDomainTarget({
 			target: targets.exterior,
@@ -851,6 +866,12 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		});
 		gl.clear(gl.STENCIL_BUFFER_BIT);
 		copySceneDomainTargetToDefaultFramebuffer(baseTarget);
+		const portalCompositeMetrics = compositeTransitionPortals({
+			frame,
+			targets,
+			transitionLevels,
+			workPlan: latestPortalWorkPlan,
+		});
 
 		latestSceneDomainFrameMetrics = {
 			width: targets.width,
@@ -858,6 +879,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			exteriorDrawCallCount: exteriorMetrics.drawCallCount,
 			interiorDrawCallCount: interiorMetrics.drawCallCount,
 			baseCopyPassCount: 1,
+			...portalCompositeMetrics,
 		};
 		return mergeSceneDomainSubmitMetrics({
 			exteriorMetrics,
@@ -983,6 +1005,218 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		stateCache.bindTexture2D(0, target.colorTexture);
 		stateCache.bindTexture2D(1, target.depthTexture);
 		gl.drawArrays(gl.TRIANGLES, 0, 3);
+	}
+
+	function compositeTransitionPortals({
+		frame,
+		targets,
+		transitionLevels,
+		workPlan,
+	}: {
+		frame: ReturnType<typeof buildStagedWorldFrame>;
+		targets: Webgl2SceneDomainTargetSet;
+		transitionLevels: readonly TransitionPortalRenderLevel[];
+		workPlan: Webgl2TransitionPortalWorkPlan;
+	}): Omit<
+		Webgl2SceneDomainFrameMetrics,
+		| "width"
+		| "height"
+		| "exteriorDrawCallCount"
+		| "interiorDrawCallCount"
+		| "baseCopyPassCount"
+	> {
+		const metrics = {
+			transitionApertureMaskPassCount: 0,
+			interiorCompositePassCount: 0,
+			exteriorCompositePassCount: 0,
+			portalCompositeRectCount: 0,
+			portalCompositeEstimatedPixelArea: 0,
+			portalCompositeMaxDepth: 0,
+		};
+		for (const level of transitionLevels) {
+			const batch =
+				workPlan.batches.get(transitionPortalDepthBatchKey(level)) ?? [];
+			if (batch.length === 0) {
+				break;
+			}
+			drawTransitionPortalMaskBatch({
+				frame,
+				level,
+				batch,
+			});
+			metrics.transitionApertureMaskPassCount += 1;
+
+			const sourceTarget =
+				level.compositeScene === "interior"
+					? targets.interior
+					: targets.exterior;
+			compositeTransitionPortalBatch({
+				sourceTarget,
+				stencilRef: level.stencilRef,
+				batch,
+			});
+			if (level.compositeScene === "interior") {
+				metrics.interiorCompositePassCount += 1;
+			} else {
+				metrics.exteriorCompositePassCount += 1;
+			}
+			metrics.portalCompositeRectCount += batch.length;
+			metrics.portalCompositeEstimatedPixelArea += batch.reduce(
+				(total, work) => total + work.screenAreaPx,
+				0,
+			);
+			metrics.portalCompositeMaxDepth = level.recursionDepth;
+		}
+		resources?.stateCache.setStencilState({
+			enabled: false,
+			writeMask: 0xff,
+			func: resources.gl.ALWAYS,
+			ref: 0,
+			readMask: 0xff,
+			fail: resources.gl.KEEP,
+			zfail: resources.gl.KEEP,
+			zpass: resources.gl.KEEP,
+		});
+		return metrics;
+	}
+
+	function drawTransitionPortalMaskBatch({
+		frame,
+		level,
+		batch,
+	}: {
+		frame: ReturnType<typeof buildStagedWorldFrame>;
+		level: TransitionPortalRenderLevel;
+		batch: readonly Webgl2VisibleTransitionPortalWork[];
+	}): void {
+		if (!resources) {
+			return;
+		}
+		const { gl, stateCache } = resources;
+		gl.colorMask(false, false, false, false);
+		try {
+			stateCache.setDepthState({
+				enabled: true,
+				write: false,
+				func: gl.LEQUAL,
+			});
+			stateCache.setBlendState({
+				enabled: false,
+				srcRgb: gl.ONE,
+				dstRgb: gl.ZERO,
+				srcAlpha: gl.ONE,
+				dstAlpha: gl.ZERO,
+				equationRgb: gl.FUNC_ADD,
+				equationAlpha: gl.FUNC_ADD,
+			});
+			stateCache.setCullState({
+				enabled: false,
+				mode: gl.BACK,
+			});
+			stateCache.setStencilState({
+				enabled: true,
+				writeMask: 0xff,
+				func:
+					level.parentStencilRef === null ? gl.ALWAYS : gl.EQUAL,
+				ref: level.parentStencilRef ?? level.stencilRef,
+				readMask: 0xff,
+				fail: gl.KEEP,
+				zfail: gl.KEEP,
+				zpass:
+					level.parentStencilRef === null ? gl.REPLACE : gl.INCR,
+			});
+			stateCache.useProgram(resources.flatWorldProgram.program);
+			gl.uniform4fv(
+				resources.flatWorldProgram.uniforms.uColor,
+				new Float32Array([1, 1, 1, 1]),
+			);
+			for (const work of batch) {
+				const drawUnit =
+					resources.worldStore.drawUnitsById.get(work.maskDrawUnitId);
+				if (!drawUnit) {
+					continue;
+				}
+				const modelViewProjection = multiplyMat4(
+					frame.viewProjectionMatrix,
+					drawUnit.modelMatrix,
+				);
+				gl.uniformMatrix4fv(
+					resources.flatWorldProgram.uniforms.uModelViewProjection,
+					false,
+					modelViewProjection,
+				);
+				stateCache.bindVertexArray(drawUnit.vertexArray.vertexArray);
+				gl.drawElements(
+					gl.TRIANGLES,
+					drawUnit.vertexCount,
+					drawUnit.indexType,
+					0,
+				);
+			}
+		} finally {
+			gl.colorMask(true, true, true, true);
+		}
+	}
+
+	function compositeTransitionPortalBatch({
+		sourceTarget,
+		stencilRef,
+		batch,
+	}: {
+		sourceTarget: Webgl2SceneDomainTarget;
+		stencilRef: number;
+		batch: readonly Webgl2VisibleTransitionPortalWork[];
+	}): void {
+		if (!resources || batch.length === 0) {
+			return;
+		}
+		const { gl, stateCache } = resources;
+		stateCache.setDepthState({
+			enabled: true,
+			write: true,
+			func: gl.ALWAYS,
+		});
+		stateCache.setBlendState({
+			enabled: false,
+			srcRgb: gl.ONE,
+			dstRgb: gl.ZERO,
+			srcAlpha: gl.ONE,
+			dstAlpha: gl.ZERO,
+			equationRgb: gl.FUNC_ADD,
+			equationAlpha: gl.FUNC_ADD,
+		});
+		stateCache.setStencilState({
+			enabled: true,
+			writeMask: 0x00,
+			func: gl.EQUAL,
+			ref: stencilRef,
+			readMask: 0xff,
+			fail: gl.KEEP,
+			zfail: gl.KEEP,
+			zpass: gl.KEEP,
+		});
+		stateCache.useProgram(resources.sceneDomainCopyProgram.program);
+		stateCache.bindVertexArray(
+			resources.sceneDomainCopyVertexArray.vertexArray,
+		);
+		gl.uniform1i(resources.sceneDomainCopyProgram.uniforms.uColorTexture, 0);
+		gl.uniform1i(resources.sceneDomainCopyProgram.uniforms.uDepthTexture, 1);
+		stateCache.bindTexture2D(0, sourceTarget.colorTexture);
+		stateCache.bindTexture2D(1, sourceTarget.depthTexture);
+		gl.enable(gl.SCISSOR_TEST);
+		try {
+			for (const work of batch) {
+				gl.scissor(
+					work.screenRect.x,
+					canvas.height - work.screenRect.y - work.screenRect.height,
+					work.screenRect.width,
+					work.screenRect.height,
+				);
+				gl.drawArrays(gl.TRIANGLES, 0, 3);
+			}
+		} finally {
+			gl.disable(gl.SCISSOR_TEST);
+		}
 	}
 
 	function recordPerformanceSample({
@@ -1175,6 +1409,20 @@ export function createWebgl2WorldDisplayRendererImplementation(
 					latestSceneDomainFrameMetrics?.exteriorDrawCallCount ?? 0,
 				sceneDomainInteriorDrawCallCount:
 					latestSceneDomainFrameMetrics?.interiorDrawCallCount ?? 0,
+				transitionApertureMaskPassCount:
+					latestSceneDomainFrameMetrics?.transitionApertureMaskPassCount ??
+					0,
+				interiorCompositePassCount:
+					latestSceneDomainFrameMetrics?.interiorCompositePassCount ?? 0,
+				exteriorCompositePassCount:
+					latestSceneDomainFrameMetrics?.exteriorCompositePassCount ?? 0,
+				portalCompositeRectCount:
+					latestSceneDomainFrameMetrics?.portalCompositeRectCount ?? 0,
+				portalCompositeEstimatedPixelArea:
+					latestSceneDomainFrameMetrics
+						?.portalCompositeEstimatedPixelArea ?? 0,
+				portalCompositeMaxDepth:
+					latestSceneDomainFrameMetrics?.portalCompositeMaxDepth ?? 0,
 				performance: latestPerformanceMetrics,
 				textureFilteringMode,
 				textureColorSpaceMode,

@@ -1,0 +1,250 @@
+import { describe, expect, it } from "vitest";
+
+import {
+	deriveTransitionPortalRenderLevels,
+	type WorldRenderBaseScene,
+} from "./render-policy";
+import type { TransitionPortalCandidate } from "./transition-portal-work-items";
+import {
+	deriveWebgl2BaseSceneDomain,
+	planWebgl2TransitionPortalWork,
+} from "./webgl2-transition-portal-work";
+import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
+
+describe("planWebgl2TransitionPortalWork", () => {
+	it("builds visible portal work only from visible portal mask draw units", () => {
+		const candidate = createCandidate({
+			id: "outdoor/1:portal/1",
+			entryEnvCellId: 0x01020100,
+		});
+
+		const plan = planWebgl2TransitionPortalWork({
+			transitionPortalModel: {
+				candidates: [
+					candidate,
+					createCandidate({
+						id: "outdoor/2:portal/2",
+						entryEnvCellId: 0x01020200,
+					}),
+				],
+				diagnostics: createCandidateDiagnostics(2),
+			},
+			visiblePortalMaskDrawUnits: [
+				createPortalMaskDrawUnit("portal-mask/outdoor/1:portal/1"),
+			],
+			cameraPosition: { x: 0, y: 0, z: 5 },
+			baseScene: "exterior",
+			initialEnvCellId: null,
+			levels: createLevels("exterior"),
+		});
+
+		expect(plan.visibleWorkItems.map((work) => work.workItem.id)).toEqual([
+			"outdoor/1:portal/1",
+		]);
+		expect(plan.visibleWorkItems[0]).toMatchObject({
+			maskDrawUnitId: "portal-mask/outdoor/1:portal/1",
+			direction: "outdoor-to-indoor",
+			entryEnvCellId: 0x01020100,
+		});
+		expect([...plan.batches.keys()]).toEqual(["outdoor-to-indoor:1"]);
+		expect(plan.maskedInteriorCellIds).toEqual(new Set([0x01020100]));
+	});
+
+	it("uses interior base-scene frontier rules for indoor-to-outdoor portals", () => {
+		const plan = planWebgl2TransitionPortalWork({
+			transitionPortalModel: {
+				candidates: [
+					createCandidate({
+						id: "reachable",
+						entryEnvCellId: 0x01020100,
+					}),
+					createCandidate({
+						id: "unreachable",
+						entryEnvCellId: 0x01020200,
+					}),
+				],
+				diagnostics: createCandidateDiagnostics(2),
+			},
+			visiblePortalMaskDrawUnits: [
+				createPortalMaskDrawUnit("portal-mask/reachable"),
+				createPortalMaskDrawUnit("portal-mask/unreachable"),
+			],
+			cameraPosition: { x: 0, y: 0, z: -5 },
+			baseScene: "interior",
+			initialEnvCellId: 0x01020100,
+			levels: createLevels("interior"),
+		});
+
+		expect(plan.visibleWorkItems.map((work) => work.workItem.id)).toEqual([
+			"reachable",
+			"unreachable",
+		]);
+		expect(plan.batches.get("indoor-to-outdoor:1")?.map((work) => work.workItem.id)).toEqual([
+			"reachable",
+		]);
+	});
+});
+
+describe("deriveWebgl2BaseSceneDomain", () => {
+	it("selects interior only for dungeon contexts with loaded interior cells", () => {
+		expect(
+			deriveWebgl2BaseSceneDomain({
+				renderSceneContext: { kind: "dungeon", anchorLandblockId: null },
+				structuredInteriorScene: createStructuredInteriorScene(0x01020100),
+			}),
+		).toBe("interior");
+		expect(
+			deriveWebgl2BaseSceneDomain({
+				renderSceneContext: { kind: "dungeon", anchorLandblockId: null },
+				structuredInteriorScene: createStructuredInteriorScene(null),
+			}),
+		).toBe("exterior");
+		expect(
+			deriveWebgl2BaseSceneDomain({
+				renderSceneContext: { kind: "outdoor", anchorLandblockId: null },
+				structuredInteriorScene: createStructuredInteriorScene(0x01020100),
+			}),
+		).toBe("exterior");
+	});
+});
+
+function createLevels(baseScene: WorldRenderBaseScene) {
+	return deriveTransitionPortalRenderLevels({
+		baseScene,
+		maxDepth: 2,
+	});
+}
+
+function createCandidate(options: {
+	id: string;
+	entryEnvCellId: number;
+}): TransitionPortalCandidate {
+	return {
+		id: options.id,
+		source: "browser-free-camera",
+		outdoorPortalId: options.id,
+		aperture: {
+			id: options.id,
+			source: {
+				envCellId: options.entryEnvCellId,
+				sourceIndex: 0,
+			},
+			targetStatus: "outside",
+			points: [
+				{ x: -1, y: -1, z: 0 },
+				{ x: 1, y: -1, z: 0 },
+				{ x: 1, y: 1, z: 0 },
+			],
+			plane: {
+				normal: { x: 0, y: 0, z: 1 },
+				constant: 0,
+				source: "derived-from-render-points",
+			},
+			visibleSide: "negative",
+			renderChunk: {
+				chunkKey: "landblock/0102ffff",
+				chunkLandblockId: 0x0102ffff,
+				worldOffset: { x: 0, y: 0, z: 0 },
+				renderOffset: { x: 0, y: 0, z: 0 },
+			},
+			outsideTransition: {
+				targetLandblockId: 0x0102ffff,
+			},
+		},
+		insideVisibleSide: "negative",
+		outsideVisibleSide: "positive",
+		renderChunk: {
+			chunkKey: "landblock/0102ffff",
+			chunkLandblockId: 0x0102ffff,
+			worldOffset: { x: 0, y: 0, z: 0 },
+			renderOffset: { x: 0, y: 0, z: 0 },
+		},
+		entryEnvCellId: options.entryEnvCellId,
+		requestedInteriorEnvCellIds: [options.entryEnvCellId],
+		targetStatus: "outside",
+		stencilRef: 1,
+	};
+}
+
+function createPortalMaskDrawUnit(id: string): Webgl2WorldDrawUnit {
+	return {
+		id,
+		kind: "portal-mask",
+		geometrySignature: "portal-mask",
+		vertexArray: {
+			vertexArray: {} as WebGLVertexArrayObject,
+			dispose() {
+				return;
+			},
+		},
+		vertexBuffer: createEmptyBuffer(),
+		uvBuffer: null,
+		indexBuffer: createEmptyBuffer(),
+		indexType: 5123,
+		vertexCount: 3,
+		triangleCount: 1,
+		color: new Float32Array([1, 1, 1, 1]),
+		materialKind: "flat",
+		materialKey: "portal-mask",
+		materialFallbackReason: null,
+		materialBehavior: null,
+		textureSamplingPolicy: null,
+		textureUploadSample: null,
+		atlasEligibility: null,
+		atlasCandidateSample: null,
+		textureKey: null,
+		texture: null,
+		indexedMaterial: null,
+		detailOverlay: null,
+		terrainBlend: null,
+		modelMatrix: new Float32Array([
+			1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1,
+		]),
+		bvhItemKeys: [],
+		bvhFallbackReason: null,
+		staticPartCount: 0,
+		staticObjectKeys: [],
+	};
+}
+
+function createEmptyBuffer() {
+	return {
+		buffer: {} as WebGLBuffer,
+		dispose() {
+			return;
+		},
+	};
+}
+
+function createStructuredInteriorScene(focusEnvCellId: number | null) {
+	return {
+		focusEnvCellId,
+		activeEnvCellIds: focusEnvCellId === null ? [] : [focusEnvCellId],
+		cells:
+			focusEnvCellId === null
+				? []
+				: [
+						{
+							envCellId: focusEnvCellId,
+						},
+					],
+		missingEnvCellAssetIds: [],
+		missingInteriorGeometryAssetIds: [],
+		missingCellStructureKeys: [],
+		statusText: "",
+		cacheText: "",
+	} as unknown as Parameters<typeof deriveWebgl2BaseSceneDomain>[0]["structuredInteriorScene"];
+}
+
+function createCandidateDiagnostics(workItemCandidateCount: number) {
+	return {
+		loadedEnvCellPortalFactCount: 0,
+		topologyPortalCount: workItemCandidateCount,
+		linkedTopologyPortalCount: workItemCandidateCount,
+		apertureCandidateCount: workItemCandidateCount,
+		workItemCandidateCount,
+		skippedMissingApertureCount: 0,
+		skippedMissingPolygonCount: 0,
+		truncatedInteriorGroupCount: 0,
+	};
+}

@@ -41,6 +41,13 @@ import {
 import type { WorldRenderMetrics } from "./renderer-contract";
 import type { MaterialTextureCapabilities } from "./render-surface-texture-data";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
+import { deriveTransitionPortalRenderLevels } from "./render-policy";
+import {
+	deriveWebgl2BaseSceneDomain,
+	planWebgl2TransitionPortalWork,
+	type Webgl2TransitionPortalWorkPlan,
+} from "./webgl2-transition-portal-work";
+import type { TransitionPortalScene } from "./transition-portal-work-items";
 import type {
 	WorldDisplayRenderer,
 	WorldDisplayRendererOptions,
@@ -474,6 +481,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	let staticRenderableScene = options.staticRenderableScene;
 	let structuredInteriorScene = options.structuredInteriorScene;
 	let transitionPortalModel = options.transitionPortalModel;
+	let renderSceneContext = options.renderSceneContext;
 	let renderChunkTransforms = options.renderChunkTransforms;
 	let controlledCameraFrame = options.controlledCameraFrame;
 	let transitionPortalMaxDepth = options.transitionPortalMaxDepth ?? 1;
@@ -498,6 +506,11 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		createEmptyWebgl2WorldSubmitMetrics();
 	let latestFrameMetrics: StagedWorldFrameMetrics | null = null;
 	let latestSceneDomainFrameMetrics: Webgl2SceneDomainFrameMetrics | null = null;
+	let latestBaseSceneDomain: TransitionPortalScene = deriveWebgl2BaseSceneDomain({
+		renderSceneContext,
+		structuredInteriorScene,
+	});
+	let latestPortalWorkPlan: Webgl2TransitionPortalWorkPlan | null = null;
 
 	const canvas = document.createElement("canvas");
 	canvas.className = WEBGL2_CANVAS_CLASS_NAME;
@@ -546,7 +559,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		setDebugOverlayScene() {
 			reportMetrics();
 		},
-		setRenderSceneContext() {
+		setRenderSceneContext(context) {
+			renderSceneContext = context;
 			reportMetrics();
 		},
 		setRenderChunkTransforms(transforms) {
@@ -687,10 +701,15 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			if (shouldUseSceneDomainTargets(portalMaskDrawUnits.length)) {
 				latestSubmitMetrics = submitWebgl2SceneDomainFrame({
 					frame,
-					portalMaskDrawUnitCount: portalMaskDrawUnits.length,
+					portalMaskDrawUnits,
 				});
 			} else {
 				latestSceneDomainFrameMetrics = null;
+				latestPortalWorkPlan = null;
+				latestBaseSceneDomain = deriveWebgl2BaseSceneDomain({
+					renderSceneContext,
+					structuredInteriorScene,
+				});
 				latestSubmitMetrics = submitWebgl2FlatWorldFrame({
 					gl,
 					stateCache: resources.stateCache,
@@ -743,10 +762,10 @@ export function createWebgl2WorldDisplayRendererImplementation(
 
 	function submitWebgl2SceneDomainFrame({
 		frame,
-		portalMaskDrawUnitCount,
+		portalMaskDrawUnits,
 	}: {
 		frame: ReturnType<typeof buildStagedWorldFrame>;
-		portalMaskDrawUnitCount: number;
+		portalMaskDrawUnits: readonly Webgl2WorldDrawUnit[];
 	}): Webgl2WorldSubmitMetrics {
 		if (!resources) {
 			return createEmptyWebgl2WorldSubmitMetrics();
@@ -759,6 +778,25 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		);
 		const sceneDomainDrawUnits =
 			partitionWebgl2SceneDomainDrawUnits(visibleDrawUnits);
+		const baseScene = deriveWebgl2BaseSceneDomain({
+			renderSceneContext,
+			structuredInteriorScene,
+		});
+		latestBaseSceneDomain = baseScene;
+		latestPortalWorkPlan = planWebgl2TransitionPortalWork({
+			transitionPortalModel,
+			visiblePortalMaskDrawUnits: portalMaskDrawUnits,
+			cameraPosition: frameCameraPosition(),
+			baseScene,
+			initialEnvCellId:
+				baseScene === "interior"
+					? structuredInteriorScene.focusEnvCellId
+					: null,
+			levels: deriveTransitionPortalRenderLevels({
+				baseScene,
+				maxDepth: transitionPortalMaxDepth,
+			}),
+		});
 		const exteriorMetrics = renderSceneDomainTarget({
 			target: targets.exterior,
 			drawUnits: sceneDomainDrawUnits.exterior,
@@ -769,6 +807,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			drawUnits: sceneDomainDrawUnits.interior,
 			frame,
 		});
+		const baseTarget =
+			baseScene === "interior" ? targets.interior : targets.exterior;
 
 		stateCache.bindFramebuffer(null);
 		stateCache.setViewport({
@@ -778,7 +818,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			height: canvas.height,
 		});
 		gl.clear(gl.STENCIL_BUFFER_BIT);
-		copySceneDomainTargetToDefaultFramebuffer(targets.exterior);
+		copySceneDomainTargetToDefaultFramebuffer(baseTarget);
 
 		latestSceneDomainFrameMetrics = {
 			width: targets.width,
@@ -790,10 +830,14 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		return mergeSceneDomainSubmitMetrics({
 			exteriorMetrics,
 			interiorMetrics,
-			portalMaskDrawUnitCount,
+			portalMaskDrawUnitCount: portalMaskDrawUnits.length,
 			exteriorDomainDrawUnitCount: sceneDomainDrawUnits.exterior.length,
 			interiorDomainDrawUnitCount: sceneDomainDrawUnits.interior.length,
 		});
+	}
+
+	function frameCameraPosition(): { x: number; y: number; z: number } {
+		return resolveCameraFrame().position;
 	}
 
 	function syncSceneDomainTargets(
@@ -1015,6 +1059,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 							? "webgl2-staged-resources"
 							: "webgl2-test-frame"
 						: "webgl2-initializing",
+				renderGraphBaseScene: latestBaseSceneDomain,
 				transitionPortalMaxDepth,
 				clearCount,
 				drawCallCount,
@@ -1023,6 +1068,12 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				worldStore: resources?.worldStore ?? null,
 				frameMetrics: latestFrameMetrics,
 				submitMetrics: latestSubmitMetrics,
+				portalRenderWorkItemCandidateCount:
+					transitionPortalModel.diagnostics.workItemCandidateCount,
+				visiblePortalWorkItemCount:
+					latestPortalWorkPlan?.visibleWorkItems.length ?? 0,
+				maskedInteriorCellCount:
+					latestPortalWorkPlan?.maskedInteriorCellIds.size ?? 0,
 				sceneDomainTargetWidth:
 					latestSceneDomainFrameMetrics?.width ??
 					resources?.sceneDomainTargets?.width ??

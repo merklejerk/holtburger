@@ -5,6 +5,7 @@ import {
 	planWebgl2FlatWorldSubmitOrder,
 	submitWebgl2FlatWorldFrame,
 	type Webgl2FlatWorldProgram,
+	type Webgl2TerrainBlendWorldProgram,
 } from "./webgl2-world-submit";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
 import { Webgl2StateCache, type Webgl2StateCacheGl } from "./webgl2-state-cache";
@@ -78,6 +79,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			stateCache,
 			program,
 			texturedProgram,
+			terrainBlendProgram: createTerrainBlendProgram(),
 			drawUnitsById,
 			frame: createFrame(["first", "second"]),
 		});
@@ -119,6 +121,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			stateCache,
 			program: createFlatProgram(),
 			texturedProgram: createTexturedProgram(),
+			terrainBlendProgram: createTerrainBlendProgram(),
 			drawUnitsById,
 			frame: createFrame(["textured"]),
 		});
@@ -213,6 +216,7 @@ function createDrawUnit({
 		atlasCandidateSample: null,
 		textureKey: null,
 		texture,
+		terrainBlend: null,
 		modelMatrix: createIdentityMat4(),
 		bvhItemKeys: [],
 		bvhFallbackReason: null,
@@ -245,6 +249,43 @@ function createTexturedProgram() {
 			uAlphaTest: {} as WebGLUniformLocation,
 			uTexture: {} as WebGLUniformLocation,
 		},
+		dispose() {
+			return;
+		},
+	};
+}
+
+function createTerrainBlendProgram(): Webgl2TerrainBlendWorldProgram {
+	return {
+		program: {} as WebGLProgram,
+		attributes: { position: 0, uv: 1 },
+		uniforms: Object.fromEntries(
+			[
+				"uModelViewProjection",
+				"uBaseTexture",
+				"uBaseTiling",
+				"uOverlay0",
+				"uOverlay1",
+				"uOverlay2",
+				"uOverlayAlpha0",
+				"uOverlayAlpha1",
+				"uOverlayAlpha2",
+				"uOverlayTiling0",
+				"uOverlayTiling1",
+				"uOverlayTiling2",
+				"uOverlayRotation0",
+				"uOverlayRotation1",
+				"uOverlayRotation2",
+				"uOverlayCount",
+				"uRoadTexture",
+				"uRoadTiling",
+				"uRoadAlpha0",
+				"uRoadAlpha1",
+				"uRoadRotation0",
+				"uRoadRotation1",
+				"uRoadCount",
+			].map((name) => [name, {} as WebGLUniformLocation]),
+		) as Webgl2TerrainBlendWorldProgram["uniforms"],
 		dispose() {
 			return;
 		},

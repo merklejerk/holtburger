@@ -1,4 +1,5 @@
-import type { AssetChannelState } from "../assets/types";
+import type { AssetChannelState, PreparedTexturePayload } from "../assets/types";
+import { resolveNormalizedPreparedTextureAssetIds } from "../assets/material-texture-preparation-policy";
 import {
 	createWebgl2ArrayBuffer,
 	createWebgl2ElementArrayBuffer,
@@ -35,14 +36,24 @@ import type {
 	DirectRenderSurfaceUploadInternalFormat,
 	RenderSurfaceTextureUploadPreparation,
 } from "./render-surface-texture-data";
+import { prepareRenderSurfaceTextureUploadData } from "./render-surface-texture-data";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
 import type { TransitionPortalCandidateModel } from "./transition-portal-work-items";
 import {
+	createDefaultMaterialTextureSamplingPolicy,
 	describeTextureSamplingPolicy,
+	selectRenderSurfaceTextureSamplingPolicy,
 	type TextureSamplingPolicy,
 } from "./texture-sampling-policy";
-import type { StagedWorldMaterialAtlasEligibility } from "./staged-world-material-strategy";
+import {
+	describeStagedWorldDirectTextureKey,
+	type StagedWorldMaterialAtlasEligibility,
+} from "./staged-world-material-strategy";
+import type {
+	TerrainBlendPlan,
+	TerrainBlendTextureRef,
+} from "./terrain-blend-plan";
 
 export interface Webgl2WorldDrawUnit {
 	id: string;
@@ -66,6 +77,7 @@ export interface Webgl2WorldDrawUnit {
 	atlasCandidateSample: string | null;
 	textureKey: string | null;
 	texture: Webgl2Texture2DResource | null;
+	terrainBlend: Webgl2TerrainBlendResources | null;
 	modelMatrix: RenderMat4;
 	bvhItemKeys: readonly RenderBvhItemKey[];
 	bvhFallbackReason: string | null;
@@ -101,6 +113,27 @@ export interface Webgl2WorldResourceStore {
 	preparedTextureGeneratedByteLength: number;
 	triangleCount: number;
 	texturesByKey: Map<string, Webgl2Texture2DResource>;
+}
+
+export interface Webgl2TerrainBlendResources {
+	plan: TerrainBlendPlan;
+	base: Webgl2TerrainTextureBinding;
+	overlays: readonly {
+		terrain: Webgl2TerrainTextureBinding;
+		alpha: Webgl2TerrainTextureBinding;
+		rotation: number;
+	}[];
+	roads: readonly {
+		road: Webgl2TerrainTextureBinding;
+		alpha: Webgl2TerrainTextureBinding;
+		rotation: number;
+	}[];
+}
+
+export interface Webgl2TerrainTextureBinding {
+	key: string;
+	texture: Webgl2Texture2DResource;
+	tiling: number;
 }
 
 export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
@@ -173,6 +206,7 @@ export function syncWebgl2WorldResources({
 	const retainedTextureKeys = new Set<string>();
 	for (const drawUnit of assembly.drawUnits) {
 		const webgl2DrawUnit = createOrReuseWebgl2DrawUnit({
+			assetState,
 			gl,
 			store,
 			drawUnit,
@@ -181,6 +215,9 @@ export function syncWebgl2WorldResources({
 		nextDrawUnits.push(webgl2DrawUnit);
 		if (webgl2DrawUnit.textureKey) {
 			retainedTextureKeys.add(webgl2DrawUnit.textureKey);
+		}
+		for (const textureKey of collectTerrainBlendTextureKeys(webgl2DrawUnit)) {
+			retainedTextureKeys.add(textureKey);
 		}
 	}
 
@@ -319,11 +356,13 @@ export function destroyWebgl2WorldResources(
 }
 
 function createOrReuseWebgl2DrawUnit({
+	assetState,
 	gl,
 	store,
 	drawUnit,
 	retainedDrawUnitIds,
 }: {
+	assetState: AssetChannelState;
 	gl: WebGL2RenderingContext;
 	store: Webgl2WorldResourceStore;
 	drawUnit: StagedWorldDrawUnitAssembly;
@@ -350,6 +389,12 @@ function createOrReuseWebgl2DrawUnit({
 				? drawUnit.material.textureKey
 				: null;
 		previous.texture = resolveWebgl2DrawUnitTexture({ gl, store, drawUnit });
+		previous.terrainBlend = resolveWebgl2TerrainBlendResources({
+			assetState,
+			gl,
+			store,
+			drawUnit,
+		});
 		previous.modelMatrix = drawUnit.modelMatrix;
 		previous.bvhItemKeys = drawUnit.bvhBinding.itemKeys;
 		previous.bvhFallbackReason = drawUnit.bvhBinding.fallbackReason;
@@ -371,7 +416,9 @@ function createOrReuseWebgl2DrawUnit({
 		data: drawUnit.geometry.indices,
 	});
 	const uvBuffer =
-		drawUnit.material.kind === "direct-texture" && drawUnit.geometry.uvs
+		(drawUnit.material.kind === "direct-texture" ||
+			drawUnit.material.kind === "terrain-blend") &&
+		drawUnit.geometry.uvs
 			? createWebgl2ArrayBuffer(gl, {
 					label: `${drawUnit.id}/uvs`,
 					data: drawUnit.geometry.uvs,
@@ -393,6 +440,12 @@ function createOrReuseWebgl2DrawUnit({
 		},
 	});
 	const texture = resolveWebgl2DrawUnitTexture({ gl, store, drawUnit });
+	const terrainBlend = resolveWebgl2TerrainBlendResources({
+		assetState,
+		gl,
+		store,
+		drawUnit,
+	});
 	const webgl2DrawUnit = {
 		id: drawUnit.id,
 		kind: drawUnit.kind,
@@ -421,6 +474,7 @@ function createOrReuseWebgl2DrawUnit({
 				? drawUnit.material.textureKey
 				: null,
 		texture,
+		terrainBlend,
 		modelMatrix: drawUnit.modelMatrix,
 		bvhItemKeys: drawUnit.bvhBinding.itemKeys,
 		bvhFallbackReason: drawUnit.bvhBinding.fallbackReason,
@@ -447,6 +501,9 @@ function resolveWebgl2MaterialFallbackReason(
 			return `webgl2 direct texture ${drawUnit.material.key} has no UV buffer`;
 		}
 		return drawUnit.material.fallbackReason;
+	}
+	if (drawUnit.material.kind === "terrain-blend" && !drawUnit.geometry.uvs) {
+		return `webgl2 terrain blend ${drawUnit.material.key} has no UV buffer`;
 	}
 	return drawUnit.material.fallbackReason;
 }
@@ -544,6 +601,169 @@ function resolveWebgl2DrawUnitTexture({
 	}
 	store.texturesByKey.set(drawUnit.material.textureKey, texture);
 	return texture;
+}
+
+function resolveWebgl2TerrainBlendResources({
+	assetState,
+	gl,
+	store,
+	drawUnit,
+}: {
+	assetState: AssetChannelState;
+	gl: WebGL2RenderingContext;
+	store: Webgl2WorldResourceStore;
+	drawUnit: StagedWorldDrawUnitAssembly;
+}): Webgl2TerrainBlendResources | null {
+	if (drawUnit.material.kind !== "terrain-blend" || !drawUnit.geometry.uvs) {
+		return null;
+	}
+	const plan = drawUnit.material.plan;
+	const base = resolveWebgl2TerrainTextureBinding({
+		assetState,
+		gl,
+		store,
+		ref: plan.base,
+	});
+	if (!base) {
+		return null;
+	}
+	return {
+		plan,
+		base,
+		overlays: plan.overlays.flatMap((overlay) => {
+			const terrain = resolveWebgl2TerrainTextureBinding({
+				assetState,
+				gl,
+				store,
+				ref: overlay.terrain,
+			});
+			const alpha = resolveWebgl2TerrainTextureBinding({
+				assetState,
+				gl,
+				store,
+				ref: overlay.alpha,
+			});
+			return terrain && alpha
+				? [{ terrain, alpha, rotation: overlay.rotation }]
+				: [];
+		}),
+		roads: plan.roads.flatMap((road) => {
+			const roadTexture = resolveWebgl2TerrainTextureBinding({
+				assetState,
+				gl,
+				store,
+				ref: road.road,
+			});
+			const alpha = resolveWebgl2TerrainTextureBinding({
+				assetState,
+				gl,
+				store,
+				ref: road.alpha,
+			});
+			return roadTexture && alpha
+				? [{ road: roadTexture, alpha, rotation: road.rotation }]
+				: [];
+		}),
+	};
+}
+
+function resolveWebgl2TerrainTextureBinding({
+	assetState,
+	gl,
+	store,
+	ref,
+}: {
+	assetState: AssetChannelState;
+	gl: WebGL2RenderingContext;
+	store: Webgl2WorldResourceStore;
+	ref: TerrainBlendTextureRef;
+}): Webgl2TerrainTextureBinding | null {
+	const upload = prepareTerrainTextureUpload(assetState, ref);
+	if (upload?.status !== "ready" || upload.upload.kind !== "direct") {
+		return null;
+	}
+	const key = describeStagedWorldDirectTextureKey(upload.upload);
+	const cached = store.texturesByKey.get(key);
+	if (cached) {
+		return { key, texture: cached, tiling: ref.tiling };
+	}
+	const texture = createWebgl2Texture2D(gl, {
+		label: key,
+		upload: toWebgl2TextureUpload(gl, upload),
+		sampler: toWebgl2SamplerParameters(gl, upload.upload.samplingPolicy),
+	});
+	store.texturesByKey.set(key, texture);
+	return { key, texture, tiling: ref.tiling };
+}
+
+function prepareTerrainTextureUpload(
+	assetState: AssetChannelState,
+	ref: TerrainBlendTextureRef,
+): (RenderSurfaceTextureUploadPreparation & { status: "ready" }) | null {
+	const defaultPolicy = selectRenderSurfaceTextureSamplingPolicy(
+		ref.renderSurface,
+		createDefaultMaterialTextureSamplingPolicy(
+			defaultWebgl2MaterialTextureCapabilities(),
+		),
+	);
+	const samplingPolicy = {
+		...defaultPolicy,
+		wrapS: ref.wrap,
+		wrapT: ref.wrap,
+		colorSpace: ref.role === "mask" ? "none" : defaultPolicy.colorSpace,
+	} satisfies TextureSamplingPolicy;
+	const upload = prepareRenderSurfaceTextureUploadData(
+		ref.renderSurface,
+		samplingPolicy,
+		defaultWebgl2MaterialTextureCapabilities(),
+		resolvePreparedTextureForRenderSurface(assetState, ref.renderSurface),
+	);
+	return upload.status === "ready" ? upload : null;
+}
+
+function resolvePreparedTextureForRenderSurface(
+	assetState: AssetChannelState,
+	renderSurface: TerrainBlendTextureRef["renderSurface"],
+): PreparedTexturePayload | null {
+	for (const assetId of resolveNormalizedPreparedTextureAssetIds({
+		renderSurface,
+		usage: "raw",
+	})) {
+		const asset = assetState.preparedByAssetId[assetId];
+		if (asset?.payload.kind === "prepared-texture") {
+			return asset.payload;
+		}
+	}
+	return null;
+}
+
+function defaultWebgl2MaterialTextureCapabilities() {
+	return {
+		supportsS3tc: false,
+		supportsS3tcSrgb: false,
+		supportsPackedRgb565: false,
+		supportsPackedRgba4444: true,
+		maxAnisotropy: 1,
+	};
+}
+
+function collectTerrainBlendTextureKeys(
+	drawUnit: Webgl2WorldDrawUnit,
+): readonly string[] {
+	if (!drawUnit.terrainBlend) {
+		return [];
+	}
+	return [
+		drawUnit.terrainBlend.base.key,
+		...drawUnit.terrainBlend.overlays.flatMap((overlay) => [
+			overlay.terrain.key,
+			overlay.alpha.key,
+		]),
+		...drawUnit.terrainBlend.roads.flatMap((road) => [
+			road.road.key,
+			road.alpha.key,
+		]),
+	];
 }
 
 function toWebgl2TextureUpload(
@@ -658,7 +878,9 @@ function countPreparedTextureUploads(
 ): number {
 	return new Set(
 		drawUnits.flatMap((drawUnit) =>
-			drawUnit.textureKey ? [drawUnit.textureKey] : [],
+			drawUnit.textureKey
+				? [drawUnit.textureKey, ...collectTerrainBlendTextureKeys(drawUnit)]
+				: collectTerrainBlendTextureKeys(drawUnit),
 		),
 	).size;
 }

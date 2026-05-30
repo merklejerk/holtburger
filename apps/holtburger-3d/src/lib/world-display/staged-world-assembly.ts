@@ -2,6 +2,7 @@ import type {
 	AssetChannelState,
 	PreparedPolygonSetRenderGeometry,
 } from "../assets/types";
+import { formatHex32 } from "../landblocks";
 import type { ResolvedMaterialSlot } from "./material-plan";
 import { formatMaterialAssetId } from "./material-signatures";
 import {
@@ -24,6 +25,10 @@ import {
 import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import type { RenderChunkTransform } from "./render-anchor";
 import type { MaterialTextureCapabilities } from "./render-surface-texture-data";
+import {
+	buildTerrainBlendPlanSet,
+	type TerrainBlendPlan,
+} from "./terrain-blend-plan";
 import {
 	deriveStructuredInteriorCellBatchBvhBinding,
 	deriveTerrainTileBatchBvhBinding,
@@ -154,6 +159,7 @@ export function buildStagedWorldSceneAssembly({
 		transitionPortalModel,
 	});
 	const terrainDrawUnits = buildStagedTerrainDrawUnitAssemblies({
+		assetState,
 		chunkOffsetByKey,
 		terrainScene: fallbackCommittedScenes.committedTerrainScene,
 	});
@@ -195,9 +201,11 @@ export function buildStagedWorldSceneAssembly({
 }
 
 export function buildStagedTerrainDrawUnitAssemblies({
+	assetState,
 	chunkOffsetByKey,
 	terrainScene,
 }: {
+	assetState: AssetChannelState;
 	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
 	terrainScene: TerrainSceneModel;
 }): StagedTerrainDrawUnitAssembly[] {
@@ -205,6 +213,48 @@ export function buildStagedTerrainDrawUnitAssemblies({
 		const chunkOffset = chunkOffsetByKey.get(tile.renderChunk.chunkKey);
 		if (!chunkOffset) {
 			return [];
+		}
+		const planSet =
+			tile.materialResources.status === "ready"
+				? buildTerrainBlendPlanSet({
+						assetState,
+						regionNumber: tile.materialResources.regionNumber,
+						pcodes: tile.mesh.quads.map((quad) => quad.pcode),
+					})
+				: null;
+		if (planSet) {
+			return planSet.plans.flatMap((plan) => {
+				const geometry = buildStagedTerrainGeometry(tile.mesh, {
+					pcode: plan.pcode,
+				});
+				if (geometry.triangleCount === 0) {
+					return [];
+				}
+				return [
+					{
+						id: `terrain/${tile.assetId}/pcode/${plan.pcode}`,
+						kind: "terrain" as const,
+						geometry,
+						modelMatrix: createTranslationMat4({
+							x: chunkOffset.x + tile.chunkLocalOffset.x,
+							y: chunkOffset.y + tile.chunkLocalOffset.y,
+							z: chunkOffset.z + tile.chunkLocalOffset.z,
+						}),
+						material: createTerrainBlendStagedMaterial({
+							tileAssetId: tile.assetId,
+							plan,
+						}),
+						preparedAssetIds: [
+							tile.assetId,
+							tile.materialResources.terrainMaterialAssetId,
+							...collectTerrainBlendPlanPreparedAssetIds(plan),
+						],
+						bvhBinding: deriveTerrainTileBatchBvhBinding(tile),
+						staticPartCount: 0 as const,
+						staticObjectKeys: [],
+					},
+				];
+			});
 		}
 		const geometry = buildStagedTerrainGeometry(tile.mesh);
 		if (geometry.triangleCount === 0) {
@@ -221,13 +271,56 @@ export function buildStagedTerrainDrawUnitAssemblies({
 					z: chunkOffset.z + tile.chunkLocalOffset.z,
 				}),
 				material: createFlatDebugStagedMaterial(`terrain/${tile.landblockId}`),
-				preparedAssetIds: [],
+				preparedAssetIds: [tile.assetId],
 				bvhBinding: deriveTerrainTileBatchBvhBinding(tile),
 				staticPartCount: 0,
 				staticObjectKeys: [],
 			},
 		];
 	});
+}
+
+function createTerrainBlendStagedMaterial({
+	tileAssetId,
+	plan,
+}: {
+	tileAssetId: string;
+	plan: TerrainBlendPlan;
+}): StagedWorldMaterialPlan {
+	return {
+		kind: "terrain-blend",
+		key: `terrain-blend/${tileAssetId}/${plan.pcode}`,
+		color: new Float32Array([1, 1, 1, 1]),
+		plan,
+		behavior: null,
+		fallbackReason: null,
+		preparedAssetIds: collectTerrainBlendPlanPreparedAssetIds(plan),
+	};
+}
+
+function collectTerrainBlendPlanPreparedAssetIds(
+	plan: TerrainBlendPlan,
+): readonly string[] {
+	return uniqueSortedStrings([
+		...terrainTextureAssetIds(plan.base),
+		...plan.overlays.flatMap((overlay) => [
+			...terrainTextureAssetIds(overlay.terrain),
+			...terrainTextureAssetIds(overlay.alpha),
+		]),
+		...plan.roads.flatMap((road) => [
+			...terrainTextureAssetIds(road.road),
+			...terrainTextureAssetIds(road.alpha),
+		]),
+	]);
+}
+
+function terrainTextureAssetIds(
+	texture: TerrainBlendPlan["base"],
+): readonly string[] {
+	return [
+		texture.textureAssetId,
+		`render-surface/${formatHex32(texture.renderSurface.renderSurfaceId)}`,
+	];
 }
 
 export function buildStagedStructuredInteriorDrawUnitAssemblies({

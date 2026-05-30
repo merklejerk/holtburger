@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
-Status: Phase M2 complete; ready for Phase M3A.
+Status: Phase M3A complete; ready for Phase M3B.
 
 Related plans:
 
@@ -441,7 +441,7 @@ Cleanup targets and legacy shims:
 
 ## Phase M3A: Terrain Base Materials
 
-Status: Not started.
+Status: Complete.
 
 Purpose: close the highest-volume visual material gap before indexed/paletted setup work: terrain
 blend materials. Terrain moves ahead of portal passes because material visibility is the current
@@ -464,6 +464,61 @@ Exit criteria:
 - Terrain fallback reasons are explicit enough to identify missing tables versus unsupported
   surface/texture data.
 - Static/setup/interior indexed materials may still be flat fallback after this phase.
+
+Progress:
+
+- Added a renderer-neutral terrain blend plan module that resolves terrain pcodes into base,
+  overlay, road, and alpha-mask texture references without creating Three materials or GL resources.
+- Added WebGL2 staged terrain draw units split by terrain pcode when terrain material resources are
+  ready. Flat terrain fallback remains in place when the terrain material table/resource plan is not
+  ready.
+- Extended staged terrain geometry so pcode-specific draw units emit terrain UVs while preserving
+  the existing whole-tile flat debug geometry path.
+- Added a `terrain-blend` staged material plan kind for multi-texture terrain materials. This keeps
+  terrain blend state separate from the single-texture direct material path.
+- Added WebGL2 terrain blend resource realization in the WebGL2 world resource store. Terrain
+  texture GL ownership stays in WebGL2 resources and reuses the existing texture cache/disposal path.
+- Added a WebGL2 terrain blend shader/program and submit path with base terrain, up to three terrain
+  overlays, and up to two road alpha overlays. Detail textures remain out of scope for this phase.
+- Added focused tests for the renderer-neutral terrain blend plan and kept existing terrain,
+  staged-geometry, staged-assembly, WebGL2 resource, and submit tests passing.
+
+Decisions:
+
+- Terrain material rendering uses one staged draw unit per resolved pcode instead of per-tile
+  material groups. This matches the current WebGL2 retained draw-unit model and avoids adding
+  indexed draw ranges before the submit path has a broader batching/compaction story.
+- The WebGL2 terrain path intentionally ports the existing Three shader behavior for base,
+  terrain-overlay, road-overlay, alpha rotation, and repeat/clamp sampling, but excludes landscape
+  detail overlays until M3D.
+- Terrain blend textures currently use WebGL2 direct uploads through the existing render-surface
+  upload helper. Compressed terrain surfaces still require the normalized prepared texture path just
+  like staged direct materials.
+
+Course corrections:
+
+- M3B should treat the new renderer-neutral terrain blend plan as the pattern for indexed material
+  DTO work: resolve multi-resource material facts first, then let WebGL2 resource realization own GL
+  textures/programs.
+- M3C should avoid folding indexed/paletted materials into the single-texture direct path. Terrain
+  proved that distinct multi-texture material kinds are cleaner and easier to diagnose.
+- M3D should reuse the terrain blend plan's explicit omission of detail overlays and add them as a
+  deliberate material feature, not as part of terrain base parity.
+
+Cleanup targets and legacy shims:
+
+- Terrain pcode selection logic now exists in both `terrain-blend-materials.ts` and
+  `terrain-blend-plan.ts`. Keep both until Three comparison is retired, then move the shared pure
+  logic behind the renderer-neutral plan and have any remaining Three path consume it.
+- WebGL2 terrain blend submit uploads terrain material uniforms per draw. This is acceptable for the
+  staged baseline, but future batching/compaction should group by terrain material key and reduce
+  redundant uniform/texture binding churn.
+- Terrain material graph records still do not lease terrain material dependencies per pcode draw
+  unit. If M3B/M3C expands renderer-resource graph visibility for multi-resource materials, include
+  terrain blend draw units in the same cleanup.
+- Terrain blend diagnostics currently rely on terrain resource-plan status plus resource realization
+  fallback behavior. If visual testing finds white terrain draw units from failed texture
+  realization, add explicit WebGL2 terrain upload fallback samples before M3B.
 
 ## Phase M3B: Indexed/Paletted Texture DTO Extraction
 

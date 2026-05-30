@@ -12,6 +12,32 @@ export type Webgl2TexturedWorldProgram = Webgl2ProgramResource<
 	"position" | "uv",
 	"uModelViewProjection" | "uColor" | "uAlphaTest" | "uTexture"
 >;
+export type Webgl2TerrainBlendWorldProgram = Webgl2ProgramResource<
+	"position" | "uv",
+	| "uModelViewProjection"
+	| "uBaseTexture"
+	| "uBaseTiling"
+	| "uOverlay0"
+	| "uOverlay1"
+	| "uOverlay2"
+	| "uOverlayAlpha0"
+	| "uOverlayAlpha1"
+	| "uOverlayAlpha2"
+	| "uOverlayTiling0"
+	| "uOverlayTiling1"
+	| "uOverlayTiling2"
+	| "uOverlayRotation0"
+	| "uOverlayRotation1"
+	| "uOverlayRotation2"
+	| "uOverlayCount"
+	| "uRoadTexture"
+	| "uRoadTiling"
+	| "uRoadAlpha0"
+	| "uRoadAlpha1"
+	| "uRoadRotation0"
+	| "uRoadRotation1"
+	| "uRoadCount"
+>;
 
 export interface Webgl2WorldSubmitMetrics {
 	visibleDrawUnitCount: number;
@@ -47,6 +73,7 @@ export function submitWebgl2FlatWorldFrame({
 	stateCache,
 	program,
 	texturedProgram,
+	terrainBlendProgram,
 	drawUnitsById,
 	frame,
 }: {
@@ -54,6 +81,7 @@ export function submitWebgl2FlatWorldFrame({
 	stateCache: Webgl2StateCache;
 	program: Webgl2FlatWorldProgram;
 	texturedProgram: Webgl2TexturedWorldProgram;
+	terrainBlendProgram: Webgl2TerrainBlendWorldProgram;
 	drawUnitsById: ReadonlyMap<string, Webgl2WorldDrawUnit>;
 	frame: StagedWorldFrame;
 }): Webgl2WorldSubmitMetrics {
@@ -102,8 +130,13 @@ export function submitWebgl2FlatWorldFrame({
 	let previousTextureProgram = false;
 	for (const drawUnit of drawUnits) {
 		const texture = drawUnit.texture;
-		const useTexture = texture !== null;
-		const activeProgram = useTexture ? texturedProgram : program;
+		const useTerrainBlend = drawUnit.terrainBlend !== null;
+		const useTexture = texture !== null && !useTerrainBlend;
+		const activeProgram = useTerrainBlend
+			? terrainBlendProgram
+			: useTexture
+				? texturedProgram
+				: program;
 		if (stateCache.useProgram(activeProgram.program)) {
 			metrics.programSwitchCount += 1;
 			metrics.stateChangeCount += 1;
@@ -114,6 +147,10 @@ export function submitWebgl2FlatWorldFrame({
 			if (useTexture) {
 				gl.uniform1i(texturedProgram.uniforms.uTexture, 0);
 				metrics.uniformUploadCount += 1;
+			}
+			if (useTerrainBlend) {
+				uploadTerrainBlendSamplerUniforms(gl, terrainBlendProgram);
+				metrics.uniformUploadCount += TERRAIN_BLEND_SAMPLER_UNIFORM_COUNT;
 			}
 		} else if (previousTextureProgram !== useTexture) {
 			previousModelViewProjection = null;
@@ -128,6 +165,12 @@ export function submitWebgl2FlatWorldFrame({
 		});
 		if (texture && stateCache.bindTexture2D(0, texture.texture)) {
 			metrics.stateChangeCount += 1;
+		}
+		if (drawUnit.terrainBlend) {
+			metrics.stateChangeCount += bindTerrainBlendTextures({
+				stateCache,
+				terrainBlend: drawUnit.terrainBlend,
+			});
 		}
 		if (stateCache.bindVertexArray(drawUnit.vertexArray.vertexArray)) {
 			metrics.vertexArrayBindCount += 1;
@@ -150,8 +193,12 @@ export function submitWebgl2FlatWorldFrame({
 			previousModelViewProjection = modelViewProjection;
 			metrics.uniformUploadCount += 1;
 		}
-		if (!previousColor || !arraysEqual(previousColor, drawUnit.color)) {
-			gl.uniform4fv(activeProgram.uniforms.uColor, drawUnit.color);
+		if (
+			!useTerrainBlend &&
+			(!previousColor || !arraysEqual(previousColor, drawUnit.color))
+		) {
+			const colorProgram = useTexture ? texturedProgram : program;
+			gl.uniform4fv(colorProgram.uniforms.uColor, drawUnit.color);
 			previousColor = drawUnit.color;
 			metrics.uniformUploadCount += 1;
 		}
@@ -162,6 +209,10 @@ export function submitWebgl2FlatWorldFrame({
 				previousAlphaTest = alphaTest;
 				metrics.uniformUploadCount += 1;
 			}
+		}
+		if (drawUnit.terrainBlend) {
+			uploadTerrainBlendUniforms(gl, terrainBlendProgram, drawUnit.terrainBlend);
+			metrics.uniformUploadCount += TERRAIN_BLEND_DYNAMIC_UNIFORM_COUNT;
 		}
 
 		gl.drawElements(
@@ -174,6 +225,83 @@ export function submitWebgl2FlatWorldFrame({
 		metrics.triangleCount += drawUnit.triangleCount;
 	}
 	return metrics;
+}
+
+const TERRAIN_BLEND_SAMPLER_UNIFORM_COUNT = 10;
+const TERRAIN_BLEND_DYNAMIC_UNIFORM_COUNT = 13;
+
+function uploadTerrainBlendSamplerUniforms(
+	gl: WebGL2RenderingContext,
+	program: Webgl2TerrainBlendWorldProgram,
+): void {
+	gl.uniform1i(program.uniforms.uBaseTexture, 0);
+	gl.uniform1i(program.uniforms.uOverlay0, 1);
+	gl.uniform1i(program.uniforms.uOverlay1, 2);
+	gl.uniform1i(program.uniforms.uOverlay2, 3);
+	gl.uniform1i(program.uniforms.uOverlayAlpha0, 4);
+	gl.uniform1i(program.uniforms.uOverlayAlpha1, 5);
+	gl.uniform1i(program.uniforms.uOverlayAlpha2, 6);
+	gl.uniform1i(program.uniforms.uRoadTexture, 7);
+	gl.uniform1i(program.uniforms.uRoadAlpha0, 8);
+	gl.uniform1i(program.uniforms.uRoadAlpha1, 9);
+}
+
+function bindTerrainBlendTextures({
+	stateCache,
+	terrainBlend,
+}: {
+	stateCache: Webgl2StateCache;
+	terrainBlend: NonNullable<Webgl2WorldDrawUnit["terrainBlend"]>;
+}): number {
+	let changeCount = 0;
+	const base = terrainBlend.base.texture.texture;
+	const overlay0 = terrainBlend.overlays[0];
+	const overlay1 = terrainBlend.overlays[1];
+	const overlay2 = terrainBlend.overlays[2];
+	const road0 = terrainBlend.roads[0];
+	const road1 = terrainBlend.roads[1];
+	const bindings = [
+		terrainBlend.base.texture.texture,
+		overlay0?.terrain.texture.texture ?? base,
+		overlay1?.terrain.texture.texture ?? base,
+		overlay2?.terrain.texture.texture ?? base,
+		overlay0?.alpha.texture.texture ?? base,
+		overlay1?.alpha.texture.texture ?? base,
+		overlay2?.alpha.texture.texture ?? base,
+		road0?.road.texture.texture ?? base,
+		road0?.alpha.texture.texture ?? base,
+		road1?.alpha.texture.texture ?? base,
+	];
+	for (const [unit, texture] of bindings.entries()) {
+		if (stateCache.bindTexture2D(unit, texture)) {
+			changeCount += 1;
+		}
+	}
+	return changeCount;
+}
+
+function uploadTerrainBlendUniforms(
+	gl: WebGL2RenderingContext,
+	program: Webgl2TerrainBlendWorldProgram,
+	terrainBlend: NonNullable<Webgl2WorldDrawUnit["terrainBlend"]>,
+): void {
+	const overlay0 = terrainBlend.overlays[0];
+	const overlay1 = terrainBlend.overlays[1];
+	const overlay2 = terrainBlend.overlays[2];
+	const road0 = terrainBlend.roads[0];
+	const road1 = terrainBlend.roads[1];
+	gl.uniform1f(program.uniforms.uBaseTiling, terrainBlend.base.tiling);
+	gl.uniform1f(program.uniforms.uOverlayTiling0, overlay0?.terrain.tiling ?? 1);
+	gl.uniform1f(program.uniforms.uOverlayTiling1, overlay1?.terrain.tiling ?? 1);
+	gl.uniform1f(program.uniforms.uOverlayTiling2, overlay2?.terrain.tiling ?? 1);
+	gl.uniform1i(program.uniforms.uOverlayRotation0, overlay0?.rotation ?? 0);
+	gl.uniform1i(program.uniforms.uOverlayRotation1, overlay1?.rotation ?? 0);
+	gl.uniform1i(program.uniforms.uOverlayRotation2, overlay2?.rotation ?? 0);
+	gl.uniform1i(program.uniforms.uOverlayCount, terrainBlend.overlays.length);
+	gl.uniform1f(program.uniforms.uRoadTiling, road0?.road.tiling ?? 1);
+	gl.uniform1i(program.uniforms.uRoadRotation0, road0?.rotation ?? 0);
+	gl.uniform1i(program.uniforms.uRoadRotation1, road1?.rotation ?? 0);
+	gl.uniform1i(program.uniforms.uRoadCount, terrainBlend.roads.length);
 }
 
 export function planWebgl2FlatWorldSubmitOrder(

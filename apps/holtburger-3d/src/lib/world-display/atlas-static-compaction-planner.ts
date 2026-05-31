@@ -61,10 +61,16 @@ export interface AtlasStaticCompactionDrawSlice {
 	drawUnitIds: readonly string[];
 }
 
+export interface AtlasStaticCompactionEntry {
+	key: string;
+	entry: StagedWorldMaterialAtlasEligibility["atlasEntry"];
+}
+
 export interface AtlasStaticCompactionPlan {
 	key: string;
 	compactableDrawUnitIds: readonly string[];
 	bypasses: readonly AtlasStaticCompactionBypass[];
+	atlasEntryRecords: readonly AtlasStaticCompactionEntry[];
 	atlasEntries: readonly StagedWorldMaterialAtlasEligibility["atlasEntry"][];
 	atlasTextures: readonly AtlasTexturePage[];
 	materialSlots: readonly AtlasStaticCompactionMaterialSlot[];
@@ -90,6 +96,7 @@ export function createEmptyAtlasStaticCompactionPlan(): AtlasStaticCompactionPla
 		key: "atlas-static-compaction/empty",
 		compactableDrawUnitIds: [],
 		bypasses: [],
+		atlasEntryRecords: [],
 		atlasEntries: [],
 		atlasTextures: [],
 		materialSlots: [],
@@ -192,6 +199,9 @@ export function planAtlasStaticCompaction(options: {
 		}),
 		compactableDrawUnitIds,
 		bypasses,
+		atlasEntryRecords: atlasEntries.filter((record) =>
+			compactableEntryKeys.has(record.key),
+		),
 		atlasEntries: atlasEntries
 			.filter((record) => compactableEntryKeys.has(record.key))
 			.map((record) => record.entry),

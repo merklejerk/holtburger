@@ -628,6 +628,7 @@ export function createThreeWorldDisplayRenderer(
 			atlasStaticCompactableDrawUnitCount: 0,
 			atlasStaticCompactionBypassReasonCount: 0,
 			atlasStaticCompactionBypassSamples: [],
+			atlasStaticGenerationTextureCount: 0,
 			textureVelocityPartCount: 0,
 			textureVelocityRenderGroupCount: 0,
 			textureVelocityMaterialCount: 0,
@@ -1092,6 +1093,7 @@ export function createThreeWorldDisplayRenderer(
 			atlasStaticCompactableDrawUnitCount: 0,
 			atlasStaticCompactionBypassReasonCount: 0,
 			atlasStaticCompactionBypassSamples: [],
+			atlasStaticGenerationTextureCount: 0,
 			textureVelocityPartCount: textureVelocityMetrics.textureVelocityPartCount,
 			textureVelocityRenderGroupCount:
 				textureVelocityMetrics.textureVelocityRenderGroupCount,
@@ -3781,6 +3783,8 @@ function createRenderDebugMetrics(
 			options.atlasStaticCompactionBypassReasonCount,
 		atlasStaticCompactionBypassSamples:
 			options.atlasStaticCompactionBypassSamples,
+		atlasStaticGenerationTextureCount:
+			options.atlasStaticGenerationTextureCount,
 		textureVelocityPartCount: options.textureVelocityPartCount,
 		textureVelocityRenderGroupCount: options.textureVelocityRenderGroupCount,
 		textureVelocityMaterialCount: options.textureVelocityMaterialCount,

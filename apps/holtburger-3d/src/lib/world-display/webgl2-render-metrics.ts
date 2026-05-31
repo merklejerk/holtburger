@@ -244,6 +244,8 @@ export function createWebgl2RenderMetrics(
 			atlasStaticCompactionBypassSamples: [
 				...(input.worldStore?.atlasStaticCompactionBypassSamples ?? []),
 			],
+			atlasStaticGenerationTextureCount:
+				input.worldStore?.atlasStaticGenerationTextureCount ?? 0,
 			textureVelocityPartCount: 0,
 			textureVelocityRenderGroupCount: 0,
 			textureVelocityMaterialCount: 0,
@@ -271,6 +273,8 @@ export function createWebgl2RenderMetrics(
 							input.worldStore.atlasStaticCompactableDrawUnitCount,
 						"webgl2-atlas-static-bypassed":
 							input.worldStore.atlasStaticCompactionBypassReasonCount,
+						"webgl2-atlas-static-generation-textures":
+							input.worldStore.atlasStaticGenerationTextureCount,
 						"webgl2-detail-overlay": input.worldStore.detailTextureCount,
 						...prefixCounts(
 							"webgl2-visible-",

@@ -2179,8 +2179,9 @@ Exit criteria:
 
 ## Phase M7: Atlas-Backed Static Compaction Vertical Slice
 
-Status: Not started. M7.1 split out atlas generation because draw substitution still needs compacted
-buffer/shader/visibility work.
+Status: Not started. M7.1 split out atlas generation; the remaining atlas-backed compaction work is
+explicitly staged as M7.2 static-batch resources, M7.3 gated atlas submission, and M7.4 default draw
+substitution.
 
 Purpose: add atlas-backed render compaction after direct materials, structured interiors, portals,
 terrain/indexed material parity, and visual hardening are far enough along that compaction is a
@@ -2228,6 +2229,15 @@ Lifecycle target:
 - Re-anchor-only updates adjust draw-time transforms only. They must not repack atlases, rewrite UVs,
   or rebuild compacted/staged vertex buffers.
 
+Sub-phases:
+
+### Phase M7.2: Compacted Outdoor Static Batch Resources
+
+Status: Not started.
+
+Purpose: build graph-backed compacted geometry resources from the M7.0 compaction plan and M7.1
+atlas generation without changing visible rendering.
+
 Tasks:
 
 - Consume the M7.1 atlas generation resource as the immutable texture source for compacted static
@@ -2236,24 +2246,83 @@ Tasks:
   enough to realize as GPU resources.
 - Consume atlas-capable material strategy output, M6 atlas layout output, and M7.0 material-slot /
   draw-slice output for compatible static renderables.
+- Build compacted position, author-UV, material-slot, and index buffers for eligible outdoor static
+  draw units.
+- Build compacted VAOs and draw-slice descriptors, but do not submit them in the visible path yet.
+- Register compacted static-batch nodes and dependencies in `RendererResourceGraph`; atlas-generation
+  texture dependencies are already registered by M7.1.
+- Retire replaced compacted buffers through graph cleanup and owning WebGL2 stores.
+- Surface debug-report metrics for compacted static batch count, compacted draw-unit count,
+  compacted triangle count, compacted vertex/index byte sizes, compacted draw-slice count, and
+  planned-but-not-submitted/fallback reason samples.
+- Add tests for compaction scheduling, static-batch generation reuse, old-generation retirement,
+  material-table partitioning, multi-atlas slice partitioning, staged-object no-rebuild behavior,
+  fallback handling, and re-anchor-only updates.
+
+Exit criteria:
+
+- A non-empty eligible outdoor static compaction plan can produce retained compacted static-batch
+  resources and graph nodes.
+- Visible rendering remains staged/direct while compacted batch resources are validated by metrics.
+- Debug reports expose enough compaction resource metrics to diagnose generation size and coverage
+  before submission is enabled.
+
+### Phase M7.3: Gated Atlas Static Submit Path
+
+Status: Not started.
+
+Purpose: add the atlas material-table shader and submit compacted batches behind an explicit
+debug/development gate before changing the default visible path.
+
+Tasks:
+
 - Implement a material-index table shader path. Start with bounded uniform arrays and partition draw
   slices when material slots exceed the limit.
 - Include atlas texture index in material-slot data. Conservative slices bind one atlas texture unless
   a multi-sampler path is deliberately implemented.
 - Preserve author UVs and encode enough material/sampler data for repeat/clamp behavior within atlas
   slots.
+- Submit compacted static batches only when the gate is enabled and every required atlas generation,
+  compacted buffer, draw slice, and material-table slot is available.
+- Keep direct-texture, flat-fallback, unsupported, blended, animated-UV, indexed/paletted, terrain,
+  structured-interior, and dynamic materials on staged paths.
+- Surface debug-report metrics for atlas shader draw calls, compacted submitted draw slices, staged
+  draw units retained, staged draw units replaced in gated mode, and gated-submit fallback reason
+  samples.
+- Add tests for shader-program selection, material-table upload partitioning, atlas texture binding,
+  missing-resource fallback, and gated submit ordering.
+
+Exit criteria:
+
+- Common textured outdoor static objects can render through atlas-backed compacted batches when the
+  gate is enabled.
+- The default path remains staged/direct until M7.4.
+- Debug reports distinguish planned, generated, submitted, replaced, retained, and fallback
+  compaction counts.
+
+### Phase M7.4: Default Outdoor Static Draw Substitution
+
+Status: Not started.
+
+Purpose: make atlas-backed compacted outdoor static batches the normal visible path for eligible
+draw units while preserving staged fallback behavior.
+
+Tasks:
+
 - Keep direct-texture, flat-fallback, unsupported, blended, and animated-UV materials on staged paths.
 - Deduplicate direct staging textures by texture key while staged objects wait for or bypass
   compaction.
 - Allow staged entries to opportunistically use an existing immutable atlas generation only when all
   required surfaces already exist in that generation and no mutation is required.
-- Register atlas generations, compacted buffers, draw slices, material decisions, and prepared
-  texture dependencies in `RendererResourceGraph`. Atlas-generation texture dependencies are already
-  registered by M7.1; M7 must add compacted static-batch nodes and dependencies.
-- Retire old atlas generations and compacted buffers through graph cleanup and owning WebGL2 stores.
-- Add tests for compaction scheduling, atlas generation reuse, old-generation retirement,
-  material-table partitioning, multi-atlas slice partitioning, repeat/clamp sampling data,
-  staged-object no-rebuild behavior, fallback handling, and re-anchor-only updates.
+- Replace eligible staged outdoor static draw units with compacted batch submission in the normal
+  submit path.
+- Define and document the first substitution visibility policy. If M7.4 uses conservative batch
+  submission when any member draw unit is visible, expose conservative overdraw metrics and keep that
+  policy isolated behind the static-batch submit planner.
+- Surface debug-report metrics for staged draw units replaced vs retained, compacted/default draw
+  calls, conservative overdraw count if applicable, and normal-path fallback reason samples.
+- Add tests for visibility substitution, staged fallback when compacted resources are missing,
+  default submit ordering, graph-retained resource lifetime, and re-anchor-only updates.
 - Add or reserve M7A tests for structured-interior atlas participation through portal/domain
   rendering once outdoor static compaction is stable.
 
@@ -2265,6 +2334,10 @@ Exit criteria:
 - Atlas generations and compacted buffers are retained and retired through the renderer graph.
 - Large material sets split into deterministic draw slices that reuse shared buffers.
 - Re-anchor-only updates reuse compacted buffers and atlas resources.
+- Debug reports expose compaction coverage and behavior: compacted batch count, compacted draw-unit
+  count, compacted triangle count, compacted vertex/index byte sizes, compacted draw-slice count,
+  atlas shader draw calls, staged draw units replaced vs retained, normal-path fallback samples, and
+  conservative overdraw count if the first visibility policy uses whole-batch submission.
 - The plan names structured-interior direct-texture atlas participation as the next direct atlas
   expansion, while indexed/paletted and terrain atlas work remain explicit dedicated designs.
 

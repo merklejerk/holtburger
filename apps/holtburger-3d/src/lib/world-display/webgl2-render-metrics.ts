@@ -282,6 +282,10 @@ export function createWebgl2RenderMetrics(
 				input.submitMetrics.atlasStaticReplacedDrawUnitCount,
 			atlasStaticReplacedDrawUnitTriangleCount:
 				input.submitMetrics.atlasStaticReplacedDrawUnitTriangleCount,
+			atlasStaticConservativeOverdrawTriangleCount:
+				input.submitMetrics.atlasStaticConservativeOverdrawTriangleCount,
+			atlasStaticConservativeOverdrawRatio:
+				input.submitMetrics.atlasStaticConservativeOverdrawRatio,
 			atlasStaticRetainedDrawUnitCount:
 				input.submitMetrics.atlasStaticRetainedDrawUnitCount,
 			atlasStaticOriginalDrawCallEstimateCount:
@@ -355,6 +359,9 @@ export function createWebgl2RenderMetrics(
 							input.submitMetrics.atlasStaticReplacedDrawUnitCount,
 						"webgl2-atlas-static-replaced-triangles":
 							input.submitMetrics.atlasStaticReplacedDrawUnitTriangleCount,
+						"webgl2-atlas-static-conservative-overdraw-triangles":
+							input.submitMetrics
+								.atlasStaticConservativeOverdrawTriangleCount,
 						"webgl2-atlas-static-draw-call-savings":
 							input.submitMetrics.atlasStaticDrawCallSavingsCount,
 						"webgl2-atlas-static-no-visible-routes":

@@ -103,6 +103,8 @@ export interface Webgl2WorldSubmitMetrics {
 	atlasStaticSubmittedTriangleCount: number;
 	atlasStaticReplacedDrawUnitCount: number;
 	atlasStaticReplacedDrawUnitTriangleCount: number;
+	atlasStaticConservativeOverdrawTriangleCount: number;
+	atlasStaticConservativeOverdrawRatio: number;
 	atlasStaticRetainedDrawUnitCount: number;
 	atlasStaticOriginalDrawCallEstimateCount: number;
 	atlasStaticSubmittedDrawCallEstimateCount: number;
@@ -133,6 +135,8 @@ const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	atlasStaticSubmittedTriangleCount: 0,
 	atlasStaticReplacedDrawUnitCount: 0,
 	atlasStaticReplacedDrawUnitTriangleCount: 0,
+	atlasStaticConservativeOverdrawTriangleCount: 0,
+	atlasStaticConservativeOverdrawRatio: 0,
 	atlasStaticRetainedDrawUnitCount: 0,
 	atlasStaticOriginalDrawCallEstimateCount: 0,
 	atlasStaticSubmittedDrawCallEstimateCount: 0,
@@ -555,6 +559,7 @@ function submitAtlasStaticDrawUnits({
 			atlasMetrics.replacedDrawUnitCount;
 		metrics.atlasStaticReplacedDrawUnitTriangleCount =
 			replaceableDrawUnitTriangleCount;
+		applyAtlasStaticConservativeOverdraw(metrics);
 		metrics.atlasStaticRetainedDrawUnitCount =
 			atlasMetrics.retainedDrawUnitCount;
 		metrics.atlasStaticSubmitNoVisibleRouteCount =
@@ -584,6 +589,7 @@ function submitAtlasStaticDrawUnits({
 	metrics.atlasStaticRetainedDrawUnitCount = retainedDrawUnitCount;
 	metrics.atlasStaticReplacedDrawUnitTriangleCount =
 		replaceableDrawUnitTriangleCount;
+	applyAtlasStaticConservativeOverdraw(metrics);
 	metrics.atlasStaticSubmitNoVisibleRouteCount +=
 		emptyAtlasMetrics.noVisibleRouteCount;
 	applyAtlasStaticNoVisibleRoute(
@@ -623,6 +629,21 @@ function applyAtlasStaticDrawCallArithmetic(
 	metrics.atlasStaticDrawCallSavingsCount =
 		metrics.atlasStaticOriginalDrawCallEstimateCount -
 		metrics.atlasStaticSubmittedDrawCallEstimateCount;
+}
+
+function applyAtlasStaticConservativeOverdraw(
+	metrics: Webgl2WorldSubmitMetrics,
+): void {
+	metrics.atlasStaticConservativeOverdrawTriangleCount = Math.max(
+		0,
+		metrics.atlasStaticSubmittedTriangleCount -
+			metrics.atlasStaticReplacedDrawUnitTriangleCount,
+	);
+	metrics.atlasStaticConservativeOverdrawRatio =
+		metrics.atlasStaticSubmittedTriangleCount === 0
+			? 0
+			: metrics.atlasStaticConservativeOverdrawTriangleCount /
+				metrics.atlasStaticSubmittedTriangleCount;
 }
 
 function applyAtlasStaticNoVisibleRoute(

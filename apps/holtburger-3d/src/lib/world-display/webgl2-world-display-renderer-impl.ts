@@ -1936,6 +1936,17 @@ function mergeSceneDomainSubmitMetrics({
 		atlasStaticReplacedDrawUnitTriangleCount:
 			exteriorMetrics.atlasStaticReplacedDrawUnitTriangleCount +
 			interiorMetrics.atlasStaticReplacedDrawUnitTriangleCount,
+		atlasStaticConservativeOverdrawTriangleCount:
+			exteriorMetrics.atlasStaticConservativeOverdrawTriangleCount +
+			interiorMetrics.atlasStaticConservativeOverdrawTriangleCount,
+		atlasStaticConservativeOverdrawRatio: calculateCombinedRatio({
+			numerator:
+				exteriorMetrics.atlasStaticConservativeOverdrawTriangleCount +
+				interiorMetrics.atlasStaticConservativeOverdrawTriangleCount,
+			denominator:
+				exteriorMetrics.atlasStaticSubmittedTriangleCount +
+				interiorMetrics.atlasStaticSubmittedTriangleCount,
+		}),
 		atlasStaticRetainedDrawUnitCount:
 			exteriorMetrics.atlasStaticRetainedDrawUnitCount +
 			interiorMetrics.atlasStaticRetainedDrawUnitCount,
@@ -1965,6 +1976,16 @@ function mergeSceneDomainSubmitMetrics({
 			...interiorMetrics.atlasStaticSubmitFallbackSamples,
 		].slice(0, 8),
 	};
+}
+
+function calculateCombinedRatio({
+	numerator,
+	denominator,
+}: {
+	numerator: number;
+	denominator: number;
+}): number {
+	return denominator === 0 ? 0 : numerator / denominator;
 }
 
 function describeWebgl2BrowserCameraResidencyKey(

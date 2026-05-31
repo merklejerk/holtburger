@@ -13,7 +13,10 @@ import {
 import { createBaseMaterialAppearanceContext } from "./material-appearance";
 import type { ResolvedMaterialSlot } from "./material-plan";
 import { WORLD_RENDER_DOMAIN } from "./render-domains";
-import { RendererResourceGraph } from "./renderer-resource-graph";
+import {
+	RendererResourceGraph,
+	staticBatchGraphNodeKey,
+} from "./renderer-resource-graph";
 import type { RenderChunkTransform } from "./render-anchor";
 import {
 	createEmptyStaticRenderableSceneModel,
@@ -25,6 +28,7 @@ import {
 	createWebgl2WorldResourceStore,
 	destroyWebgl2WorldResources,
 	syncWebgl2WorldResources,
+	type Webgl2WorldResourceStore,
 } from "./webgl2-world-resources";
 
 describe("webgl2 world resources", () => {
@@ -63,7 +67,9 @@ describe("webgl2 world resources", () => {
 			staticRenderableScene: createStaticRenderableScene([part]),
 			structuredInteriorScene: createStructuredInteriorScene(),
 			transitionPortalModel: createTransitionPortalModel(),
-			renderChunkTransforms: [createChunkTransform({ x: 40, y: 50, z: 60 })],
+			renderChunkTransforms: [
+				createChunkTransform({ offset: { x: 40, y: 50, z: 60 } }),
+			],
 			rendererResourceGraph: graph,
 		});
 
@@ -348,6 +354,185 @@ describe("webgl2 world resources", () => {
 		expect(store.atlasCandidateMaterialSlotCount).toBe(1);
 		expect(store.atlasCandidateSamples[0]).toContain("static");
 		expect(store.atlasCandidateSamples[0]).toContain("atlas-entry");
+	});
+
+	it("retains and releases landblock-scoped atlas static batches through the renderer graph", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2WorldResourceStore();
+		const graph = new RendererResourceGraph();
+		const materialSurfaceId = 0x08000002;
+		const renderSurfaceId = 0x06000002;
+		const retainedPart = createStaticPart({
+			instanceId: "instance-a",
+			landblockId: 0x12340000,
+			materialSlots: [createMaterialSlot(0, materialSurfaceId)],
+		});
+		const removedPart = createStaticPart({
+			instanceId: "instance-b",
+			landblockId: 0x12350000,
+			materialSlots: [createMaterialSlot(0, materialSurfaceId)],
+		});
+
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState({
+				materialSurfaceId,
+				renderSurfaceId,
+				compressedAtlasReady: true,
+			}),
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: createStaticRenderableScene([
+				retainedPart,
+				removedPart,
+			]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [
+				createChunkTransform({ landblockId: 0x12340000 }),
+				createChunkTransform({ landblockId: 0x12350000 }),
+			],
+			rendererResourceGraph: graph,
+		});
+
+		const initialBatches = sortAtlasBatchesByLandblock(store);
+		expect(initialBatches.map((batch) => batch.landblockId)).toEqual([
+			0x12340000, 0x12350000,
+		]);
+		expect(store.atlasStaticBatchGraphLeasesByKey.size).toBe(2);
+
+		const removedBatchKey = initialBatches[1]?.key;
+		const retainedBatchKey = initialBatches[0]?.key;
+		expect(removedBatchKey).toBeDefined();
+		expect(retainedBatchKey).toBeDefined();
+
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState({
+				materialSurfaceId,
+				renderSurfaceId,
+				compressedAtlasReady: true,
+			}),
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: createStaticRenderableScene([retainedPart]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [
+				createChunkTransform({ landblockId: 0x12340000 }),
+			],
+			rendererResourceGraph: graph,
+		});
+
+		expect(
+			sortAtlasBatchesByLandblock(store).map((batch) => batch.key),
+		).toEqual([retainedBatchKey]);
+		expect(store.atlasStaticBatchGraphLeasesByKey.size).toBe(1);
+		expect(
+			store.atlasStaticBatchGraphLeasesByKey.has(
+				staticBatchGraphNodeKey(retainedBatchKey ?? ""),
+			),
+		).toBe(true);
+		expect(
+			graph.explainRetention(staticBatchGraphNodeKey(retainedBatchKey ?? ""))
+				.retained,
+		).toBe(true);
+		expect(
+			graph.explainRetention(staticBatchGraphNodeKey(removedBatchKey ?? ""))
+				.retained,
+		).toBe(false);
+		expect(
+			graph
+				.disposalCandidates()
+				.map((candidate) => candidate.nodeKey)
+				.includes(staticBatchGraphNodeKey(removedBatchKey ?? "")),
+		).toBe(true);
+	});
+
+	it("reuses atlas textures and compacted batch buffers across common re-anchor shifts", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2WorldResourceStore();
+		const graph = new RendererResourceGraph();
+		const materialSurfaceId = 0x08000002;
+		const renderSurfaceId = 0x06000002;
+		const scene = createStaticRenderableScene([
+			createStaticPart({
+				instanceId: "instance-a",
+				landblockId: 0x12340000,
+				materialSlots: [createMaterialSlot(0, materialSurfaceId)],
+			}),
+			createStaticPart({
+				instanceId: "instance-b",
+				landblockId: 0x12340000,
+				materialSlots: [createMaterialSlot(0, materialSurfaceId)],
+			}),
+		]);
+		const assetState = createAssetState({
+			materialSurfaceId,
+			renderSurfaceId,
+			compressedAtlasReady: true,
+		});
+
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState,
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: scene,
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [
+				createChunkTransform({
+					landblockId: 0x12340000,
+					offset: { x: 10, y: 20, z: 30 },
+				}),
+			],
+			rendererResourceGraph: graph,
+		});
+
+		const atlasGeneration = store.atlasStaticGeneration;
+		const atlasTexture = atlasGeneration?.textures[0]?.texture.texture;
+		const batch = sortAtlasBatchesByLandblock(store)[0];
+		expect(batch).toBeDefined();
+		const positionBuffer = batch?.positionBuffer;
+		const uvBuffer = batch?.uvBuffer;
+		const materialSlotBuffer = batch?.materialSlotBuffer;
+		const indexBuffer = batch?.indexBuffer;
+		const createdBufferCount = gl.createdBuffers.length;
+		const createdTextureCount = gl.createdTextures.length;
+		const firstBatchModelX = batch?.batchModelMatrix[12];
+
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState,
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: scene,
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [
+				createChunkTransform({
+					landblockId: 0x12340000,
+					offset: { x: 40, y: 50, z: 60 },
+				}),
+			],
+			rendererResourceGraph: graph,
+		});
+
+		const nextBatch = sortAtlasBatchesByLandblock(store)[0];
+		expect(store.atlasStaticGeneration).toBe(atlasGeneration);
+		expect(store.atlasStaticGeneration?.textures[0]?.texture.texture).toBe(
+			atlasTexture,
+		);
+		expect(nextBatch).toBe(batch);
+		expect(nextBatch?.positionBuffer).toBe(positionBuffer);
+		expect(nextBatch?.uvBuffer).toBe(uvBuffer);
+		expect(nextBatch?.materialSlotBuffer).toBe(materialSlotBuffer);
+		expect(nextBatch?.indexBuffer).toBe(indexBuffer);
+		expect(gl.createdBuffers).toHaveLength(createdBufferCount);
+		expect(gl.createdTextures).toHaveLength(createdTextureCount);
+		expect(nextBatch?.batchModelMatrix[12]).toBe(40);
+		expect(firstBatchModelX).toBe(10);
 	});
 
 	it("realizes indexed/paletted draw units with separate index and palette textures", () => {
@@ -753,24 +938,29 @@ function createStaticRenderableScene(parts: StaticRenderablePart[]) {
 function createStaticPart({
 	kind = "scenery",
 	detailRoleKind = "object",
+	instanceId = "instance-a",
+	landblockId = 0x12340000,
 	materialSlots = [],
 }: {
 	kind?: StaticRenderablePart["kind"];
 	detailRoleKind?: StaticRenderablePart["detailRoleKind"];
+	instanceId?: string;
+	landblockId?: number;
 	materialSlots?: readonly ResolvedMaterialSlot[];
 } = {}): StaticRenderablePart {
+	const landblockKey = `landblock/${landblockId.toString(16).padStart(8, "0")}`;
 	return {
-		renderKey: "static/group",
+		renderKey: `static/${instanceId}`,
 		renderDomain: WORLD_RENDER_DOMAIN.exteriorStatic,
-		instanceId: "instance-a",
+		instanceId,
 		sourceAssetId: "gfx-obj/01000001",
 		sourceDid: 0x01000001,
-		owningLandblockId: 0x12340000,
+		owningLandblockId: landblockId,
 		regionNumber: 1,
 		owningEnvCellId: null,
 		renderChunk: {
-			chunkKey: "landblock/12340000",
-			chunkLandblockId: 0x12340000,
+			chunkKey: landblockKey,
+			chunkLandblockId: landblockId,
 		},
 		kind,
 		partIndex: 0,
@@ -783,7 +973,7 @@ function createStaticPart({
 		chunkLocalInstancePlacement: createPlacement({ x: 1, y: 2, z: 3 }),
 		partPlacements: [],
 		scale: { x: 1, y: 1, z: 1 },
-		debugColorKey: "instance-a",
+		debugColorKey: instanceId,
 		textureVelocity: null,
 		textureVelocitySignature: "uv:none",
 		detailRoleKind,
@@ -1053,14 +1243,24 @@ function createPlacement(origin: RenderChunkTransform["offset"]) {
 	};
 }
 
-function createChunkTransform(
-	offset: RenderChunkTransform["offset"] = { x: 10, y: 20, z: 30 },
-): RenderChunkTransform {
+function createChunkTransform({
+	landblockId = 0x12340000,
+	offset = { x: 10, y: 20, z: 30 },
+}: {
+	landblockId?: number;
+	offset?: RenderChunkTransform["offset"];
+} = {}): RenderChunkTransform {
 	return {
-		chunkKey: "landblock/12340000",
-		chunkLandblockId: 0x12340000,
+		chunkKey: `landblock/${landblockId.toString(16).padStart(8, "0")}`,
+		chunkLandblockId: landblockId,
 		offset,
 	};
+}
+
+function sortAtlasBatchesByLandblock(store: Webgl2WorldResourceStore) {
+	return [...store.atlasStaticBatches.values()].sort(
+		(left, right) => left.landblockId - right.landblockId,
+	);
 }
 
 function createTerrainScene() {

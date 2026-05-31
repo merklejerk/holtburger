@@ -14,14 +14,15 @@ describe("atlas static geometry compactor", () => {
 				createDrawUnit("draw-a", "material-slot-a", 10),
 				createDrawUnit("draw-b", "material-slot-b", 20),
 			],
+			batchOrigin: { x: 0, y: 0, z: 0 },
 		});
 
 		expect(geometry?.positions).toEqual(
 			Float32Array.from([
-				0, 0, 0, 1, 0, 0, 0, 1, 0, 10, 0, 0, 11, 0, 0, 10, 1, 0,
+				10, 0, 0, 11, 0, 0, 10, 1, 0, 20, 0, 0, 21, 0, 0, 20, 1, 0,
 			]),
 		);
-		expect(geometry?.batchModelMatrix[12]).toBe(10);
+		expect(geometry?.batchModelMatrix[12]).toBe(0);
 		expect(geometry?.uvs).toEqual(
 			Float32Array.from([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
 		);
@@ -79,10 +80,12 @@ describe("atlas static geometry compactor", () => {
 		const first = buildAtlasStaticCompactedGeometry({
 			plan,
 			drawUnits: [createDrawUnit("draw-a", "material-slot-a", 10)],
+			batchOrigin: { x: 10, y: 0, z: 0 },
 		});
 		const second = buildAtlasStaticCompactedGeometry({
 			plan,
 			drawUnits: [createDrawUnit("draw-a", "material-slot-a", 99)],
+			batchOrigin: { x: 99, y: 0, z: 0 },
 		});
 
 		expect(first?.key).toBe(second?.key);
@@ -96,6 +99,7 @@ describe("atlas static geometry compactor", () => {
 				createDrawUnit("draw-a", "material-slot-a", 10),
 				createDrawUnit("draw-b", "material-slot-b", 20),
 			],
+			batchOrigin: { x: 10, y: 0, z: 0 },
 		});
 		const second = buildAtlasStaticCompactedGeometry({
 			plan: basePlan,
@@ -103,6 +107,7 @@ describe("atlas static geometry compactor", () => {
 				createDrawUnit("draw-a", "material-slot-a", 10),
 				createDrawUnit("draw-b", "material-slot-b", 30),
 			],
+			batchOrigin: { x: 10, y: 0, z: 0 },
 		});
 
 		expect(first?.key).not.toBe(second?.key);

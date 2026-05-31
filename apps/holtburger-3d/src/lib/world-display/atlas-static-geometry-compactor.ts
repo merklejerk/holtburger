@@ -44,9 +44,11 @@ export interface AtlasStaticCompactedGeometry {
 export function buildAtlasStaticCompactedGeometry({
 	plan,
 	drawUnits,
+	batchOrigin,
 }: {
 	plan: AtlasStaticCompactionPlan;
 	drawUnits: readonly StagedWorldDrawUnitAssembly[];
+	batchOrigin: { x: number; y: number; z: number };
 }): AtlasStaticCompactedGeometry | null {
 	if (plan.compactableDrawUnitIds.length === 0) {
 		return null;
@@ -80,7 +82,6 @@ export function buildAtlasStaticCompactedGeometry({
 	const materialSlots = new Float32Array(vertexCount);
 	const indices = createCompactedIndexArray(vertexCount, indexCount);
 	const drawRanges: AtlasStaticCompactedDrawRange[] = [];
-	const batchOrigin = deriveBatchOrigin(compactableDrawUnits);
 	const batchModelMatrix = createTranslationMat4(batchOrigin);
 	let vertexOffset = 0;
 	let indexOffset = 0;
@@ -165,24 +166,6 @@ export function buildAtlasStaticCompactedGeometry({
 			uvByteLength +
 			materialSlotByteLength +
 			indexByteLength,
-	};
-}
-
-function deriveBatchOrigin(drawUnits: readonly StagedWorldDrawUnitAssembly[]): {
-	x: number;
-	y: number;
-	z: number;
-} {
-	const firstDrawUnit = drawUnits[0];
-	if (!firstDrawUnit) {
-		throw new Error(
-			"Cannot derive atlas static batch origin without draw units.",
-		);
-	}
-	return {
-		x: firstDrawUnit.modelMatrix[12] ?? 0,
-		y: firstDrawUnit.modelMatrix[13] ?? 0,
-		z: firstDrawUnit.modelMatrix[14] ?? 0,
 	};
 }
 

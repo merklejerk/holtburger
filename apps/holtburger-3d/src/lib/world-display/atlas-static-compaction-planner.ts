@@ -196,7 +196,6 @@ export function planAtlasStaticCompaction(options: {
 			policy: options.policy,
 			atlasEntryKeys: [...compactableEntryKeys].sort(),
 			materialSlotKeys: materialSlots.map((slot) => slot.key),
-			drawUnitIds: compactableDrawUnitIds,
 		}),
 		compactableDrawUnitIds,
 		bypasses,
@@ -413,7 +412,6 @@ function describeAtlasStaticCompactionPlanKey(options: {
 	policy: AtlasStaticCompactionPolicy;
 	atlasEntryKeys: readonly string[];
 	materialSlotKeys: readonly string[];
-	drawUnitIds: readonly string[];
 }): string {
 	return [
 		"atlas-static-compaction",
@@ -423,7 +421,6 @@ function describeAtlasStaticCompactionPlanKey(options: {
 		`slots=${options.policy.maxMaterialSlotsPerDraw}`,
 		...options.atlasEntryKeys,
 		...options.materialSlotKeys,
-		...options.drawUnitIds,
 	].join("|");
 }
 

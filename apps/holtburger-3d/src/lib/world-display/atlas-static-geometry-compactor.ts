@@ -66,7 +66,7 @@ export function buildAtlasStaticCompactedGeometry({
 				`Atlas static compaction plan references missing draw unit ${drawUnitId}.`,
 			);
 		}
-		assertCompactedStaticDrawUnit(drawUnit);
+		assertAtlasCompactedGeometryDrawUnit(drawUnit);
 		return drawUnit;
 	});
 	const vertexCount = compactableDrawUnits.reduce(
@@ -209,25 +209,25 @@ function bakeDrawUnitPositions({
 	}
 }
 
-function assertCompactedStaticDrawUnit(
+function assertAtlasCompactedGeometryDrawUnit(
 	drawUnit: StagedWorldDrawUnitAssembly,
 ): asserts drawUnit is StagedWorldDrawUnitAssembly & {
-	kind: "static";
+	kind: "static" | "structured-interior";
 	geometry: { uvs: Float32Array };
 } {
-	if (drawUnit.kind !== "static") {
+	if (drawUnit.kind !== "static" && drawUnit.kind !== "structured-interior") {
 		throw new Error(
-			`Atlas static compaction cannot compact non-static draw unit ${drawUnit.id}.`,
+			`Atlas compacted geometry cannot compact ${drawUnit.kind} draw unit ${drawUnit.id}.`,
 		);
 	}
 	if (drawUnit.material.kind !== "direct-texture") {
 		throw new Error(
-			`Atlas static compaction cannot compact ${drawUnit.material.kind} draw unit ${drawUnit.id}.`,
+			`Atlas compacted geometry cannot compact ${drawUnit.material.kind} draw unit ${drawUnit.id}.`,
 		);
 	}
 	if (!drawUnit.geometry.uvs) {
 		throw new Error(
-			`Atlas static compaction draw unit ${drawUnit.id} has no UVs.`,
+			`Atlas compacted geometry draw unit ${drawUnit.id} has no UVs.`,
 		);
 	}
 }

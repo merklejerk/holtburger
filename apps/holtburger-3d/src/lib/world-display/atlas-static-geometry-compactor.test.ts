@@ -112,6 +112,47 @@ describe("atlas static geometry compactor", () => {
 
 		expect(first?.key).not.toBe(second?.key);
 	});
+
+	it("compacts structured-interior geometry in the same landblock-local buffer", () => {
+		const basePlan = createPlan();
+		const firstSlice = basePlan.drawSlices[0];
+		if (!firstSlice) {
+			throw new Error("Fixture plan is missing its first draw slice.");
+		}
+		const plan = {
+			...basePlan,
+			compactableDrawUnitIds: ["structured-a"],
+			drawSlices: [
+				{
+					...firstSlice,
+					drawUnitIds: ["structured-a"],
+				},
+			],
+		};
+		const geometry = buildAtlasStaticCompactedGeometry({
+			plan,
+			drawUnits: [
+				createDrawUnit("structured-a", "material-slot-a", 100, {
+					kind: "structured-interior",
+					owningLandblockId: 0x0203ffff,
+				}),
+			],
+			batchOrigin: { x: 96, y: 0, z: 0 },
+		});
+
+		expect(geometry?.batchModelMatrix[12]).toBe(96);
+		expect(geometry?.positions).toEqual(
+			Float32Array.from([4, 0, 0, 5, 0, 0, 4, 1, 0]),
+		);
+		expect(geometry?.drawRanges).toMatchObject([
+			{
+				drawUnitId: "structured-a",
+				firstIndex: 0,
+				indexCount: 3,
+				materialSlotIndex: 0,
+			},
+		]);
+	});
 });
 
 function createPlan(): AtlasStaticCompactionPlan {
@@ -169,12 +210,16 @@ function createDrawUnit(
 	id: string,
 	materialSlotKey: string,
 	xOffset: number,
+	options: {
+		kind?: "static" | "structured-interior";
+		owningLandblockId?: number;
+	} = {},
 ): StagedWorldDrawUnitAssembly {
-	return {
+	const kind = options.kind ?? "static";
+	const base = {
 		id,
-		kind: "static",
-		renderDomain: "exterior-static",
-		owningLandblockId: 0x0102ffff,
+		kind,
+		owningLandblockId: options.owningLandblockId ?? 0x0102ffff,
 		geometry: {
 			positions: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0]),
 			uvs: Float32Array.from([0, 0, 1, 0, 0, 1]),
@@ -249,7 +294,15 @@ function createDrawUnit(
 			itemKeys: [],
 			fallbackReason: null,
 		},
-		staticPartCount: 1,
-		staticObjectKeys: [`object/${id}`],
+		staticPartCount: kind === "static" ? 1 : 0,
+		staticObjectKeys: kind === "static" ? [`object/${id}`] : [],
+	};
+	if (kind === "structured-interior") {
+		return base;
+	}
+	return {
+		...base,
+		kind: "static",
+		renderDomain: "exterior-static",
 	};
 }

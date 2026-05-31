@@ -162,6 +162,8 @@ export interface WorldRenderDebugMetrics {
 	atlasStaticSubmittedTriangleCount: number;
 	atlasStaticReplacedDrawUnitCount: number;
 	atlasStaticReplacedDrawUnitTriangleCount: number;
+	atlasStaticConservativeOverdrawTriangleCount: number;
+	atlasStaticConservativeOverdrawRatio: number;
 	atlasStaticRetainedDrawUnitCount: number;
 	atlasStaticOriginalDrawCallEstimateCount: number;
 	atlasStaticSubmittedDrawCallEstimateCount: number;

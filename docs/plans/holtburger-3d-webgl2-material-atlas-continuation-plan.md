@@ -2200,14 +2200,16 @@ First vertical-slice boundary:
 
 Near-follow expansion:
 
-- Structured-interior direct-texture materials should be the first atlas expansion after outdoor
-  static compaction proves the generation, shader table, and resource-graph lifetime path.
-  Structured interiors use the same material strategy and should share atlas entries/generations
-  with outdoor statics when their prepared texture, sampler, and render-state requirements match.
-- Keep structured interiors out of the first slice only to isolate compaction correctness from
-  portal/domain membership, stencil masking, and env-cell visibility. Add them in an M7A-style
-  follow-up with portal/domain coverage tests rather than treating them as a separate texture-format
-  problem.
+- Structured-interior direct-texture materials are the first atlas expansion after outdoor static
+  compaction proves the generation, shader table, and resource-graph lifetime path. Structured
+  interiors use the same material strategy and should share atlas entries/generations with outdoor
+  statics when their prepared texture, sampler, and render-state requirements match.
+- Compact structured interiors by owning landblock, using the same landblock render origin as outdoor
+  statics. Do not introduce env-cell/cell-local compaction partitions until field metrics prove
+  landblock-scoped conservative overdraw is a problem.
+- Keep structured interiors out of the first slice only to isolate compaction correctness from the
+  initial outdoor-static vertical slice. Add them in M7A as the same direct-texture atlas family, with
+  portal/domain submit coverage tests, rather than treating them as a separate texture-format problem.
 
 Dedicated later atlas families:
 
@@ -2708,7 +2710,7 @@ Decision:
 
 ### Phase M7.4: Default Outdoor Static Draw Substitution
 
-Status: Not started.
+Status: Complete.
 
 Purpose: after M7.3.2 removes the per-object transform blocker, M7.3.3 restores landblock-scale
 culling granularity, M7.3.4 closes metric debt, and M7.3.5 closes lifecycle debt, harden
@@ -2717,11 +2719,14 @@ while preserving staged fallback behavior.
 
 Tasks:
 
-- Keep direct-texture, flat-fallback, unsupported, blended, and animated-UV materials on staged paths.
-- Deduplicate direct staging textures by texture key while staged objects wait for or bypass
+- Replace only submitted atlas-compacted outdoor static direct-texture draw units. Keep all remaining
+  direct-texture draw units, plus flat-fallback, unsupported, blended, and animated-UV materials, on
+  staged paths.
+- Keep direct staging textures deduplicated by texture key while staged objects wait for or bypass
   compaction.
-- Allow staged entries to opportunistically use an existing immutable atlas generation only when all
-  required surfaces already exist in that generation and no mutation is required.
+- Do not remap standalone staged entries onto atlas textures in this phase. Atlas use is limited to
+  submitted compacted batches; non-substituted draw units stay on direct staged textures until a
+  later phase designs staged-atlas material binding explicitly.
 - Validate and harden eligible staged outdoor static replacement with landblock-scoped compacted
   batch submission in the normal submit path.
 - Use conservative whole-slice submission: if any member draw unit in a compacted slice is visible,
@@ -2753,6 +2758,88 @@ Exit criteria:
   conservative overdraw count from whole-slice submission.
 - The plan names structured-interior direct-texture atlas participation as the next direct atlas
   expansion, while indexed/paletted and terrain atlas work remain explicit dedicated designs.
+
+Progress notes:
+
+- Default atlas substitution was already active through the normal WebGL2 submit path when M7.4
+  started: visible compacted draw units are removed from the staged draw list and submitted through
+  landblock-scoped atlas static batches, while retained direct/fallback materials stay staged.
+- Added conservative whole-slice overdraw reporting. Submit metrics and debug reports now expose
+  atlas static conservative overdraw triangles and overdraw ratio, alongside replaced/submitted
+  triangle counts and draw-call savings.
+- Added focused coverage for whole-slice overdraw: a visible draw unit in a compacted slice submits
+  the full slice, reports the extra submitted triangles, and keeps unrelated staged draw units on the
+  staged path.
+- Course correction: M7.4 does not opportunistically bind standalone staged draw units to existing
+  atlas textures. That would introduce a second staged material binding mode before we have evidence
+  it is useful. Keep the migration shape simple: compacted atlas batches use atlas textures;
+  non-compacted draw units use the existing direct staged texture cache.
+- Existing lifecycle and graph-retention coverage from M7.3.5 remains the resource-lifetime proof for
+  M7.4. No extra graph-retention shim was introduced.
+
+Cleanup targets:
+
+- The debug-report atlas line is now dense. If it keeps growing during M7A/M8, split atlas coverage,
+  submission, and fallback diagnostics into separate report lines instead of appending more fields to
+  the same sentence.
+- Reassess staged-atlas binding only if texture residency or upload metrics show direct staged
+  texture duplication remains material after compacted batches cover common outdoor and
+  structured-interior direct textures.
+
+### Phase M7A: Landblock-Scoped Structured-Interior Direct Compaction
+
+Status: Not started.
+
+Purpose: extend the proven M7 outdoor static atlas path to structured-interior direct-texture geometry
+without splitting atlas generations by render domain. Atlas entries/generations are material
+resources; exterior/interior ownership only affects compacted geometry grouping and submit routing.
+
+Tasks:
+
+- Rename the active `atlas static` terminology toward `atlas compacted geometry` before or during this
+  phase. Use the rename for shared planner/resource/submit concepts that will cover outdoor statics
+  and structured interiors; keep narrow `static` naming only where a type truly refers to static
+  renderable source data.
+- Add structured-interior direct-texture draw units to atlas compaction eligibility when they are
+  landblock-owned, UV-backed, opaque, atlas-eligible, and compatible with the existing RGBA atlas
+  shader/material-table path.
+- Preserve a shared direct-texture atlas generation across outdoor static and structured-interior
+  candidates. Do not create separate exterior/interior atlas textures unless sampler/render-state
+  constraints require it.
+- Build compacted geometry batches by owning landblock for structured interiors, using the owning
+  landblock render origin as the batch origin. Do not partition by env cell or portal domain in M7A.
+- Submit landblock-scoped compacted batches in whichever scene-domain route sees member draw units.
+  If current outdoor-residency filtering only exposes a subset of interior cells, do not treat that as
+  a compaction constraint; use the staged visible draw-unit set as the source of truth and relax that
+  visibility/residency filter only if it blocks correct replacement.
+- Keep conservative whole-slice submission: if any member draw unit in a landblock-local compacted
+  slice is visible in the active route, submit that entire slice. Track overdraw separately for
+  outdoor-static and structured-interior source kinds if practical; otherwise add the split as the next
+  cleanup target after M7A lands.
+- Keep indexed/paletted and terrain materials out of this phase. They need dedicated atlas/shader
+  designs.
+- Add tests for structured-interior atlas eligibility, landblock-origin baking, route-local
+  replacement, staged fallback when compacted resources are missing, and no-visible interior route
+  accounting.
+
+Exit criteria:
+
+- Compatible structured-interior direct-texture draw units can be replaced by landblock-scoped
+  atlas-backed compacted batches in the normal scene-domain submit path.
+- Outdoor static atlas substitution continues to work with the renamed compacted-geometry concepts.
+- Shared atlas generations can contain compatible outdoor static and structured-interior entries
+  without duplicating textures by render domain.
+- Debug metrics make it possible to compare outdoor-static and structured-interior replacement
+  coverage, or explicitly name that split as the next cleanup if M7A only lands aggregate metrics.
+
+Decisions:
+
+- Landblock is the batch scope for both outdoor static and structured-interior compaction. Overdraw is
+  acceptable while bounded by landblock; finer partitions should follow evidence, not preemptive
+  caution.
+- Interior cells use the landblock render origin for batch-local baked geometry. Env-cell local origins
+  are not part of the M7A design.
+- Atlas generation is render-domain agnostic for compatible direct RGBA textures.
 
 ## Phase M8: Performance Gate and Post-Three Cleanup
 
@@ -2804,6 +2891,8 @@ Exit criteria:
   show real scenes exceeding 128 material slots after M7.3.2 removes the transform-table path.
 - After M7.4, assess whether conservative whole-slice submission is too expensive in portal-heavy or
   dense static scenes before designing per-visible-range submission.
+- Rename `atlas static` files/types/metrics to `atlas compacted geometry` as M7A broadens the path to
+  structured interiors. Avoid compatibility reexports; rename call sites directly.
 - Revisit the per-frame WebGL2 draw-unit sort after M3-M7 reshape the submit path.
 - Split renderer-neutral material sampling DTOs from any Three adapter names/imports if they still
   imply Three ownership.

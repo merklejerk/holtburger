@@ -237,10 +237,50 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		expect(metrics.atlasStaticShaderDrawCallCount).toBe(1);
 		expect(metrics.atlasStaticSubmittedSliceRepresentedDrawUnitCount).toBe(1);
 		expect(metrics.atlasStaticSubmittedTriangleCount).toBe(1);
+		expect(metrics.atlasStaticConservativeOverdrawTriangleCount).toBe(0);
+		expect(metrics.atlasStaticConservativeOverdrawRatio).toBe(0);
 		expect(metrics.atlasStaticOriginalDrawCallEstimateCount).toBe(2);
 		expect(metrics.atlasStaticSubmittedDrawCallEstimateCount).toBe(2);
 		expect(metrics.atlasStaticDrawCallSavingsCount).toBe(0);
 		expect(metrics.atlasStaticSubmitFallbackSamples).toEqual([]);
+	});
+
+	it("reports conservative whole-slice atlas overdraw", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+		const drawUnitsById = new Map<string, Webgl2WorldDrawUnit>([
+			["atlas", createDrawUnit({ id: "atlas" })],
+			["staged", createDrawUnit({ id: "staged" })],
+		]);
+
+		const metrics = submitWebgl2FlatWorldFrame({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			terrainBlendProgram: createTerrainBlendProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			atlasStaticProgram: createAtlasStaticProgram(),
+			atlasStaticResources: {
+				batches: [
+					createAtlasStaticBatch(["atlas", "not-visible"], {
+						indexCount: 6,
+						triangleCount: 2,
+					}),
+				],
+				generation: createAtlasStaticGeneration(),
+			},
+			drawUnitsById,
+			frame: createFrame(["atlas", "staged"]),
+		});
+
+		expect(metrics.atlasStaticReplacedDrawUnitCount).toBe(1);
+		expect(metrics.atlasStaticReplacedDrawUnitTriangleCount).toBe(1);
+		expect(metrics.atlasStaticSubmittedSliceRepresentedDrawUnitCount).toBe(2);
+		expect(metrics.atlasStaticSubmittedTriangleCount).toBe(2);
+		expect(metrics.atlasStaticConservativeOverdrawTriangleCount).toBe(1);
+		expect(metrics.atlasStaticConservativeOverdrawRatio).toBe(0.5);
 	});
 
 	it("attributes no-visible atlas route checks to the submit route", () => {
@@ -653,7 +693,13 @@ function createAtlasStaticProgram(): Webgl2AtlasStaticWorldProgram {
 
 function createAtlasStaticBatch(
 	drawUnitIds: readonly string[],
+	options: {
+		indexCount?: number;
+		triangleCount?: number;
+	} = {},
 ): Webgl2AtlasStaticBatchResource {
+	const indexCount = options.indexCount ?? 3;
+	const triangleCount = options.triangleCount ?? indexCount / 3;
 	return {
 		key: "atlas-batch",
 		landblockId: 0x0102ffff,
@@ -685,14 +731,14 @@ function createAtlasStaticBatch(
 				atlasTextureIndex: 0,
 				renderStateKey: "opaque",
 				firstIndex: 0,
-				indexCount: 3,
+				indexCount,
 				drawUnitIds,
 				materialSlotKeys: ["material-slot"],
 			},
 		],
 		vertexCount: 3,
-		indexCount: 3,
-		triangleCount: 1,
+		indexCount,
+		triangleCount,
 		drawSliceCount: 1,
 		drawUnitCount: drawUnitIds.length,
 		positionByteLength: 36,

@@ -170,6 +170,48 @@ describe("staged world material strategy", () => {
 		});
 	});
 
+	it("keeps alpha indexed/paletted materials on the indexed shader path", () => {
+		const state = createAssetState([
+			createMaterialRecipeRecord({
+				surfaceId: 0x08000001,
+				renderSurfaceId: 0x06000001,
+				paletteId: 0x04000001,
+				surfaceType: SURFACE_TYPE_DIFFUSE | SURFACE_TYPE_ALPHA,
+			}),
+			createRenderSurfaceRecord({
+				renderSurfaceId: 0x06000001,
+				formatRaw: PIXEL_FORMAT_INDEX16,
+				format: "Index16",
+				width: 2,
+				height: 1,
+				sourceBytes: new Uint8Array([0, 0, 1, 0]),
+				defaultPaletteId: 0x04000001,
+			}),
+			createPaletteRecord(0x04000001, [0x00000000, 0xffffffff]),
+		]);
+
+		const strategy = resolveStagedWorldMaterialStrategy({
+			assetState: state,
+			input: createRequirement("static", 0),
+		});
+
+		expect(strategy).toMatchObject({
+			kind: "indexed-paletted",
+			behavior: {
+				transparent: true,
+				blend: {
+					enabled: true,
+					mode: "alpha",
+					depthWrite: false,
+				},
+			},
+			indexedMaterial: {
+				texture: { format: "index16", maxIndex: 1 },
+				palette: { colorCount: 2 },
+			},
+		});
+	});
+
 	it("deduplicates atlas entries across static and structured-interior requirements", () => {
 		const state = createAssetState([
 			createMaterialRecipeRecord({

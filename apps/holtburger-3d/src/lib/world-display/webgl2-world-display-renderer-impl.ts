@@ -6,7 +6,7 @@ import {
 	type Webgl2ProgramResource,
 	type Webgl2VertexArrayResource,
 } from "./webgl2-gl";
-import { createFallbackSceneCameraFrame } from "./camera";
+import { createFallbackSceneCameraFrame, type SceneBoundsFrame } from "./camera";
 import { createWebgl2RenderMetrics } from "./webgl2-render-metrics";
 import { Webgl2StateCache } from "./webgl2-state-cache";
 import {
@@ -76,6 +76,10 @@ import type {
 	WorldDisplayRenderer,
 	WorldDisplayRendererOptions,
 } from "./world-display-renderer-contract";
+import {
+	buildPortalCompositeRenderBvhSources,
+	calculateRenderSpaceBvhSourcesBoundsFrame,
+} from "./prepared-bvh-render-sources";
 
 const WEBGL2_CANVAS_CLASS_NAME = "world-display__webgl2-canvas";
 const WEBGL2_ERROR_CLASS_NAME = "world-display__webgl2-error";
@@ -567,6 +571,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			structuredInteriorScene,
 		});
 	let latestPortalWorkPlan: Webgl2TransitionPortalWorkPlan | null = null;
+	let latestSceneBounds: SceneBoundsFrame | null = null;
 
 	const canvas = document.createElement("canvas");
 	canvas.className = WEBGL2_CANVAS_CLASS_NAME;
@@ -1539,6 +1544,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 
 	function syncWorldResources(): void {
 		if (!resources) {
+			latestSceneBounds = null;
 			return;
 		}
 		syncWebgl2WorldResources({
@@ -1555,6 +1561,15 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			textureFilteringMode,
 			detailTexturesEnabled,
 		});
+		latestSceneBounds = calculateRenderSpaceBvhSourcesBoundsFrame(
+			buildPortalCompositeRenderBvhSources({
+				assetState,
+				terrainScene,
+				staticRenderableScene,
+				structuredInteriorScene,
+				renderChunkTransforms,
+			}),
+		);
 		resources.stateCache.invalidate();
 	}
 
@@ -1692,6 +1707,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				performance: latestPerformanceMetrics,
 				textureFilteringMode,
 				detailTexturesEnabled,
+				sceneBounds: latestSceneBounds,
 			}),
 		);
 	}

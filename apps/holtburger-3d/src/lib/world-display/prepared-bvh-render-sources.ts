@@ -11,6 +11,7 @@ import {
 	formatLandblockOutdoorAssetId,
 } from "../landblocks";
 import type { RenderChunkTransform } from "./render-anchor";
+import type { SceneBoundsFrame } from "./camera";
 import { deriveTerrainTileRenderChunk } from "./render-chunks";
 import {
 	envPortalBvhItemKey,
@@ -59,6 +60,8 @@ export interface RenderSpaceBvhQueryResult {
 	visibleItemKeys: ReadonlySet<RenderBvhItemKey>;
 	fallbackReasons: readonly string[];
 }
+
+const RENDER_SPACE_BVH_SCENE_MINIMUM_SPAN = 180;
 
 export function buildPortalCompositeRenderBvhSources(options: {
 	assetState: AssetChannelState;
@@ -184,6 +187,58 @@ export function buildPortalCompositeRenderBvhSources(options: {
 		envCellSourcesById,
 		fallbackReasons,
 	};
+}
+
+export function calculateRenderSpaceBvhSourcesBoundsFrame(
+	sources: PortalCompositeRenderBvhSources,
+): SceneBoundsFrame | null {
+	let minX = Number.POSITIVE_INFINITY;
+	let minY = Number.POSITIVE_INFINITY;
+	let minZ = Number.POSITIVE_INFINITY;
+	let maxX = Number.NEGATIVE_INFINITY;
+	let maxY = Number.NEGATIVE_INFINITY;
+	let maxZ = Number.NEGATIVE_INFINITY;
+	let sourceCount = 0;
+
+	for (const source of allRenderSpaceBvhSources(sources)) {
+		const root = source.nodes[0];
+		if (!root) {
+			continue;
+		}
+		minX = Math.min(minX, root.bounds.min.x);
+		minY = Math.min(minY, root.bounds.min.y);
+		minZ = Math.min(minZ, root.bounds.min.z);
+		maxX = Math.max(maxX, root.bounds.max.x);
+		maxY = Math.max(maxY, root.bounds.max.y);
+		maxZ = Math.max(maxZ, root.bounds.max.z);
+		sourceCount += 1;
+	}
+
+	if (sourceCount === 0) {
+		return null;
+	}
+
+	return {
+		center: {
+			x: (minX + maxX) / 2,
+			y: (minY + maxY) / 2,
+			z: (minZ + maxZ) / 2,
+		},
+		size: {
+			x: maxX - minX,
+			y: maxY - minY,
+			z: maxZ - minZ,
+		},
+		minimumSpan: RENDER_SPACE_BVH_SCENE_MINIMUM_SPAN,
+	};
+}
+
+function* allRenderSpaceBvhSources(
+	sources: PortalCompositeRenderBvhSources,
+): Generator<RenderSpaceBvhSource> {
+	yield* sources.terrainSources;
+	yield* sources.outdoorStaticSources;
+	yield* sources.envCellSourcesById.values();
 }
 
 export function queryRenderSpaceBvhSources(

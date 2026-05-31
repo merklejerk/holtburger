@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+	calculateRenderSpaceBvhSourcesBoundsFrame,
 	queryRenderSpaceBvhSources,
 	type RenderSpaceBvhSource,
 } from "./prepared-bvh-render-sources";
@@ -33,6 +34,56 @@ describe("queryRenderSpaceBvhSources", () => {
 		expect(result.fallbackReasons).toEqual([]);
 	});
 });
+
+describe("calculateRenderSpaceBvhSourcesBoundsFrame", () => {
+	it("unions root bounds from terrain, outdoor static, and env-cell BVH sources", () => {
+		const frame = calculateRenderSpaceBvhSourcesBoundsFrame({
+			terrainSources: [
+				source("terrain", [node(bounds(-10, 0, 2, 4, -5, 5), null, null, [])]),
+			],
+			outdoorStaticSources: [
+				source("static", [node(bounds(20, 30, -2, 1, 6, 12), null, null, [])]),
+			],
+			envCellSourcesById: new Map([
+				[
+					0x02030100,
+					source("cell", [
+						node(bounds(-2, 3, -8, -4, -20, -10), null, null, []),
+					]),
+				],
+			]),
+			fallbackReasons: [],
+		});
+
+		expect(frame).toEqual({
+			center: { x: 10, y: -2, z: -4 },
+			size: { x: 40, y: 12, z: 32 },
+			minimumSpan: 180,
+		});
+	});
+
+	it("returns null when no BVH root bounds are available", () => {
+		const frame = calculateRenderSpaceBvhSourcesBoundsFrame({
+			terrainSources: [source("empty", [])],
+			outdoorStaticSources: [],
+			envCellSourcesById: new Map(),
+			fallbackReasons: [],
+		});
+
+		expect(frame).toBeNull();
+	});
+});
+
+function source(
+	sourceId: string,
+	nodes: RenderSpaceBvhSource["nodes"],
+): RenderSpaceBvhSource {
+	return {
+		sourceId,
+		nodes,
+		itemKeys: [],
+	};
+}
 
 function node(
 	boundsValue: RenderBounds,

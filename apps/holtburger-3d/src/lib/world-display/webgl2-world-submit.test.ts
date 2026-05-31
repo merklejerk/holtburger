@@ -221,7 +221,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			indexedP16Program: createIndexedP16Program(),
 			atlasStaticProgram: createAtlasStaticProgram(),
 			atlasStaticResources: {
-				batch: createAtlasStaticBatch(["atlas"]),
+				batches: [createAtlasStaticBatch(["atlas"])],
 				generation: createAtlasStaticGeneration(),
 			},
 			drawUnitsById,
@@ -419,6 +419,7 @@ function createDrawUnit({
 	return {
 		id,
 		kind,
+		owningLandblockId: kind === "static" ? 0x0102ffff : null,
 		geometrySignature,
 		submitOrderKey: [
 			texture ? "0" : "1",
@@ -619,6 +620,7 @@ function createAtlasStaticBatch(
 ): Webgl2AtlasStaticBatchResource {
 	return {
 		key: "atlas-batch",
+		landblockId: 0x0102ffff,
 		vertexArray: {
 			vertexArray: {} as WebGLVertexArrayObject,
 			dispose() {

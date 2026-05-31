@@ -270,6 +270,8 @@ export function createWebgl2RenderMetrics(
 			],
 			atlasStaticShaderDrawCallCount:
 				input.submitMetrics.atlasStaticShaderDrawCallCount,
+			atlasStaticSubmittedBatchCount:
+				input.submitMetrics.atlasStaticSubmittedBatchCount,
 			atlasStaticSubmittedDrawSliceCount:
 				input.submitMetrics.atlasStaticSubmittedDrawSliceCount,
 			atlasStaticReplacedDrawUnitCount:
@@ -322,6 +324,8 @@ export function createWebgl2RenderMetrics(
 							input.worldStore.atlasStaticTransformTableEntryCount,
 						"webgl2-atlas-static-shader-draws":
 							input.submitMetrics.atlasStaticShaderDrawCallCount,
+						"webgl2-atlas-static-submitted-batches":
+							input.submitMetrics.atlasStaticSubmittedBatchCount,
 						"webgl2-atlas-static-submitted-slices":
 							input.submitMetrics.atlasStaticSubmittedDrawSliceCount,
 						"webgl2-atlas-static-replaced-draw-units":

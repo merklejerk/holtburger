@@ -25,6 +25,7 @@ export interface AtlasStaticCompactionPolicy {
 export interface AtlasStaticCompactionCandidate {
 	id: string;
 	kind: string;
+	owningLandblockId: number | null;
 	sceneDomain: Webgl2SceneDomain | null;
 	materialKind: string;
 	materialKey: string;

@@ -169,6 +169,7 @@ function createDrawUnit(
 		id,
 		kind: "static",
 		renderDomain: "exterior-static",
+		owningLandblockId: 0x0102ffff,
 		geometry: {
 			positions: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0]),
 			uvs: Float32Array.from([0, 0, 1, 0, 0, 1]),

@@ -120,7 +120,7 @@ cycle that decides when to build or retire atlas generations and compacted stati
 
 ## Phase M1: Staged Direct Material Completion
 
-Status: Complete.
+Status: Implemented; validation debt moved to M7.3.4.
 
 Purpose: make staged WebGL2 draw units render with their resolved per-surface/material-slot
 materials whenever WebGL2 can represent those materials directly. Atlas candidacy should be recorded
@@ -2518,7 +2518,7 @@ Future-step refinements:
 
 ### Phase M7.3.3: Landblock-Scoped Static Compacted Batches
 
-Status: Not started.
+Status: Complete.
 
 Purpose: replace the first global outdoor static compacted batch with landblock-scoped compacted
 batches before M7.4 measures and hardens default substitution. The global batch proved the atlas
@@ -2528,25 +2528,24 @@ most draw-call savings while recouping coarse spatial culling.
 
 Tasks:
 
-- Group compactable outdoor static draw units by owning outdoor landblock, not one global first-slice
-  batch.
-- Use the landblock origin, or a landblock-stable nearby origin, as the batch-local origin for baked
-  static positions.
-- Create one or more graph-backed compacted static batch resources per landblock. Split further by
-  atlas texture/material-slot limits only when required.
-- Submit compacted atlas slices only for visible landblock-scoped batches. Keep the current
-  conservative policy inside each landblock batch: if any member draw unit in a compacted slice is
-  visible, submit the whole slice.
-- Preserve staged fallback for unsupported, not-yet-compacted, non-exterior, non-opaque, indexed,
-  detail-overlay, terrain, and structured-interior draw units.
-- Update replacement planning so draw-unit replacement maps to the correct landblock batch and does
-  not require scanning a single global compacted slice.
-- Update metrics/debug reports to distinguish global compacted batch count from landblock-scoped
-  batch count, visible submitted landblock batch count, replaced draw units, retained staged draw
-  units, no-visible route count, and coarse overdraw per landblock batch.
-- Add tests for landblock grouping, landblock-origin baked positions, visibility substitution that
-  submits only visible landblock batches, graph lifetime across landblock streaming, and re-anchor
-  reuse of landblock batch buffers.
+- [x] Group compactable outdoor static draw units by owning outdoor landblock, not one global batch.
+- [x] Use each landblock batch's current renderer-space first draw origin as the batch-local origin
+      for baked static positions. This is stable across common re-anchor shifts because the geometry key
+      hashes batch-local baked positions, while `uBatchModel` carries the current offset.
+- [x] Create graph-backed compacted static batch resources per landblock. Split further by atlas
+      texture/material-slot limits only when required.
+- [x] Submit compacted atlas slices only for visible landblock-scoped batches. Keep the current
+      conservative policy inside each landblock batch: if any member draw unit in a compacted slice is
+      visible, submit the whole slice.
+- [x] Preserve staged fallback for unsupported, not-yet-compacted, non-exterior, non-opaque, indexed,
+      detail-overlay, terrain, and structured-interior draw units.
+- [x] Update replacement planning so draw-unit replacement maps to the correct landblock batch and does
+      not require scanning a single global compacted slice.
+- [x] Update metrics/debug reports to report compacted landblock batch count, submitted landblock
+      batch count, replaced draw units, retained staged draw units, no-visible route count, and retained
+      no-transform-table diagnostics.
+- [x] Add focused tests for batch-local baked positions and visibility substitution that submits only
+      visible landblock batches.
 
 Decisions and course corrections:
 
@@ -2557,6 +2556,31 @@ Decisions and course corrections:
 - Keep atlas texture generation shared for now unless resource ownership becomes unclear. Landblock
   batch partitioning is a geometry/submit granularity change, not necessarily an atlas texture
   partitioning requirement.
+- Staged static draw units now carry structured `owningLandblockId` from `StaticRenderablePart`
+  instead of requiring string parsing. Missing/mismatched ownership is treated as renderer pipeline
+  state that should fail loudly.
+- The WebGL2 resource store now owns `atlasStaticBatches` as a map keyed by compacted geometry key.
+  The old single global `atlasStaticBatch` resource shape has been removed rather than kept as a
+  compatibility shim.
+- Submit planning counts one no-visible route per compacted landblock batch that has no currently
+  visible compacted draw unit. This is not a fallback; it is expected culling signal.
+
+Field report: 2026-05-31 21:19 at destination `33.50S, 72.80E, 0.0Z` showed the
+landblock split behaving correctly:
+
+- `atlasStaticCompactedBatchCount = 9`, `atlasStaticBatchOriginCount = 9`, and
+  `atlasStaticTransformTableEntryCount = 0`.
+- `atlasStaticSubmittedBatchCount = 4`, `atlasStaticSubmittedDrawSliceCount = 4`, and
+  `atlasStaticReplacedDrawUnitCount = 357`.
+- Exterior draw-call arithmetic matched the intended replacement model:
+  `sceneDomainExteriorDrawUnitCount 2655 - replaced 357 + submitted 4 =
+sceneDomainExteriorDrawCallCount 2302`.
+- Total frame time remained dominated by interior/portal-domain drawing: exterior was `2302` draw
+  calls while interior was `12358`, so M7.3.3 improved the targeted exterior path but did not move
+  the overall bottleneck in that camera pose.
+- `atlasStaticSubmitNoVisibleRouteCount = 9` while `submitted batches = 4`, which is likely counting
+  no-visible atlas planning checks from more than one scene-domain submit route. Treat this as a
+  diagnostics issue for M7.3.4, not as a rendering failure.
 
 Exit criteria:
 
@@ -2568,13 +2592,49 @@ Exit criteria:
 - Re-anchor-only updates preserve atlas textures and landblock compacted VBOs while updating only
   batch model offsets.
 
+### Phase M7.3.4: Landblock Batch Metrics and Lifecycle Hardening
+
+Status: Not started.
+
+Purpose: close the remaining validation/diagnostic debt from M7.3.3 before treating default outdoor
+static atlas substitution as hardened in M7.4.
+
+Tasks:
+
+- Add coarse overdraw diagnostics per submitted landblock compacted batch: submitted slice count,
+  replaced visible draw-unit count, total draw-unit count represented by submitted slices, and
+  triangle deltas.
+- Split atlas no-visible route diagnostics by submit route/domain so exterior-visible batches are
+  not mixed with interior or other route checks in the human summary.
+- Add draw-call arithmetic diagnostics for atlas substitution:
+  `candidate draw units - replaced draw units + submitted batches/slices = submitted draw calls`.
+- Add graph/resource lifecycle tests for landblock-scoped batch creation, retained batch reuse,
+  streaming removal, and graph lease release.
+- Add re-anchor reuse tests proving common render-origin shifts update batch model offsets without
+  rebuilding compacted VBOs.
+- Review whether the batch origin should become an explicit landblock render origin instead of the
+  first compacted draw unit's current translation. Keep the current first-draw origin only if field
+  reports show stable reuse and no precision issues.
+
+Exit criteria:
+
+- Debug reports make visible-submitted landblock batch cost obvious without dumping long texture or
+  atlas candidate samples.
+- Human summaries explain whether no-visible route counts came from exterior, interior, or other
+  submit routes.
+- Field reports can quickly verify atlas substitution savings from the arithmetic line without
+  manually comparing JSON counters.
+- Resource graph and re-anchor tests cover the multi-batch lifetime paths introduced in M7.3.3.
+- M7.4 can focus on default-substitution hardening instead of proving batch lifetime basics.
+
 ### Phase M7.4: Default Outdoor Static Draw Substitution
 
 Status: Not started.
 
-Purpose: after M7.3.2 removes the per-object transform blocker and M7.3.3 restores landblock-scale
-culling granularity, harden atlas-backed compacted outdoor static batches as the normal visible path
-for eligible draw units while preserving staged fallback behavior.
+Purpose: after M7.3.2 removes the per-object transform blocker, M7.3.3 restores landblock-scale
+culling granularity, and M7.3.4 closes lifecycle/metric debt, harden atlas-backed compacted outdoor
+static batches as the normal visible path for eligible draw units while preserving staged fallback
+behavior.
 
 Tasks:
 

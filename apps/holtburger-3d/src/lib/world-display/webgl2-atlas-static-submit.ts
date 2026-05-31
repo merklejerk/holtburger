@@ -17,6 +17,7 @@ export type Webgl2AtlasStaticWorldProgram = Webgl2ProgramResource<
 
 export interface Webgl2AtlasStaticSubmitMetrics {
 	shaderDrawCallCount: number;
+	submittedBatchCount: number;
 	submittedDrawSliceCount: number;
 	submittedTriangleCount: number;
 	replacedDrawUnitCount: number;
@@ -26,13 +27,14 @@ export interface Webgl2AtlasStaticSubmitMetrics {
 }
 
 export interface Webgl2AtlasStaticSubmitResources {
-	batch: Webgl2AtlasStaticBatchResource | null;
+	batches: readonly Webgl2AtlasStaticBatchResource[];
 	generation: Webgl2AtlasStaticGenerationResource | null;
 }
 
 export function createEmptyWebgl2AtlasStaticSubmitMetrics(): Webgl2AtlasStaticSubmitMetrics {
 	return {
 		shaderDrawCallCount: 0,
+		submittedBatchCount: 0,
 		submittedDrawSliceCount: 0,
 		submittedTriangleCount: 0,
 		replacedDrawUnitCount: 0,
@@ -57,41 +59,49 @@ export function planWebgl2AtlasStaticReplacement(options: {
 			fallbackSamples: ["atlas static submit missing atlas generation"],
 		};
 	}
-	if (!options.resources.batch) {
+	if (options.resources.batches.length === 0) {
 		return {
 			replaceableDrawUnitIds: new Set(),
 			noVisibleRouteCount: 0,
-			fallbackSamples: ["atlas static submit missing compacted batch"],
+			fallbackSamples: ["atlas static submit missing compacted batches"],
 		};
 	}
-	if (
-		options.resources.batch.materialSlots.length >
-		WEBGL2_ATLAS_STATIC_MAX_MATERIAL_SLOTS
-	) {
-		return {
-			replaceableDrawUnitIds: new Set(),
-			noVisibleRouteCount: 0,
-			fallbackSamples: [
-				`atlas static submit material slots ${options.resources.batch.materialSlots.length} exceed ${WEBGL2_ATLAS_STATIC_MAX_MATERIAL_SLOTS}`,
-			],
-		};
+	for (const batch of options.resources.batches) {
+		if (batch.materialSlots.length > WEBGL2_ATLAS_STATIC_MAX_MATERIAL_SLOTS) {
+			return {
+				replaceableDrawUnitIds: new Set(),
+				noVisibleRouteCount: 0,
+				fallbackSamples: [
+					`atlas static submit material slots ${batch.materialSlots.length} exceed ${WEBGL2_ATLAS_STATIC_MAX_MATERIAL_SLOTS}`,
+				],
+			};
+		}
 	}
 	const visibleIds = new Set(options.visibleDrawUnitIds);
-	const replaceableDrawUnitIds = new Set(
-		options.resources.batch.drawSlices.flatMap((slice) =>
+	const replaceableDrawUnitIds = new Set<string>();
+	let noVisibleRouteCount = 0;
+	for (const batch of options.resources.batches) {
+		const batchVisibleDrawUnitIds = batch.drawSlices.flatMap((slice) =>
 			slice.drawUnitIds.filter((drawUnitId) => visibleIds.has(drawUnitId)),
-		),
-	);
+		);
+		if (batchVisibleDrawUnitIds.length === 0) {
+			noVisibleRouteCount += 1;
+			continue;
+		}
+		for (const drawUnitId of batchVisibleDrawUnitIds) {
+			replaceableDrawUnitIds.add(drawUnitId);
+		}
+	}
 	if (replaceableDrawUnitIds.size === 0) {
 		return {
 			replaceableDrawUnitIds,
-			noVisibleRouteCount: 1,
+			noVisibleRouteCount,
 			fallbackSamples: [],
 		};
 	}
 	return {
 		replaceableDrawUnitIds,
-		noVisibleRouteCount: 0,
+		noVisibleRouteCount,
 		fallbackSamples: [],
 	};
 }
@@ -110,7 +120,7 @@ export function submitWebgl2AtlasStaticBatch({
 	program: Webgl2AtlasStaticWorldProgram;
 	viewProjectionMatrix: RenderMat4;
 	resources: {
-		batch: Webgl2AtlasStaticBatchResource;
+		batches: readonly Webgl2AtlasStaticBatchResource[];
 		generation: Webgl2AtlasStaticGenerationResource;
 	};
 	replaceableDrawUnitIds: ReadonlySet<string>;
@@ -124,6 +134,7 @@ export function submitWebgl2AtlasStaticBatch({
 	}
 	const metrics: Webgl2AtlasStaticSubmitMetrics = {
 		shaderDrawCallCount: 0,
+		submittedBatchCount: 0,
 		submittedDrawSliceCount: 0,
 		submittedTriangleCount: 0,
 		replacedDrawUnitCount: replaceableDrawUnitIds.size,
@@ -141,46 +152,50 @@ export function submitWebgl2AtlasStaticBatch({
 		false,
 		viewProjectionMatrix,
 	);
-	gl.uniformMatrix4fv(
-		program.uniforms.uBatchModel,
-		false,
-		resources.batch.batchModelMatrix,
-	);
-	uploadAtlasStaticMaterialRects(gl, program, resources.batch);
-	if (stateCache.bindVertexArray(resources.batch.vertexArray.vertexArray)) {
-		metrics.shaderDrawCallCount += 0;
-	}
-	for (const slice of resources.batch.drawSlices) {
-		if (
-			!slice.drawUnitIds.some((drawUnitId) =>
+	for (const batch of resources.batches) {
+		const visibleSlices = batch.drawSlices.filter((slice) =>
+			slice.drawUnitIds.some((drawUnitId) =>
 				replaceableDrawUnitIds.has(drawUnitId),
-			)
-		) {
+			),
+		);
+		if (visibleSlices.length === 0) {
 			continue;
 		}
-		const texture = resources.generation.textures.find(
-			(candidate) => candidate.textureIndex === slice.atlasTextureIndex,
+		metrics.submittedBatchCount += 1;
+		gl.uniformMatrix4fv(
+			program.uniforms.uBatchModel,
+			false,
+			batch.batchModelMatrix,
 		);
-		if (!texture) {
-			metrics.fallbackSamples = [
-				...metrics.fallbackSamples,
-				`atlas static draw slice ${slice.key} missing atlas texture ${slice.atlasTextureIndex}`,
-			].slice(0, 8);
-			continue;
+		uploadAtlasStaticMaterialRects(gl, program, batch);
+		if (stateCache.bindVertexArray(batch.vertexArray.vertexArray)) {
+			metrics.shaderDrawCallCount += 0;
 		}
-		if (stateCache.bindTexture2D(0, texture.texture.texture)) {
-			// Counted as a state change in the aggregate submit path by callers.
+		for (const slice of visibleSlices) {
+			const texture = resources.generation.textures.find(
+				(candidate) => candidate.textureIndex === slice.atlasTextureIndex,
+			);
+			if (!texture) {
+				metrics.fallbackSamples = [
+					...metrics.fallbackSamples,
+					`atlas static draw slice ${slice.key} missing atlas texture ${slice.atlasTextureIndex}`,
+				].slice(0, 8);
+				continue;
+			}
+			if (stateCache.bindTexture2D(0, texture.texture.texture)) {
+				// Counted as a state change in the aggregate submit path by callers.
+			}
+			gl.uniform2f(program.uniforms.uAtlasSize, texture.width, texture.height);
+			gl.drawElements(
+				gl.TRIANGLES,
+				slice.indexCount,
+				batch.indexType,
+				slice.firstIndex * indexTypeByteLength(gl, batch.indexType),
+			);
+			metrics.shaderDrawCallCount += 1;
+			metrics.submittedDrawSliceCount += 1;
+			metrics.submittedTriangleCount += slice.indexCount / 3;
 		}
-		gl.uniform2f(program.uniforms.uAtlasSize, texture.width, texture.height);
-		gl.drawElements(
-			gl.TRIANGLES,
-			slice.indexCount,
-			resources.batch.indexType,
-			slice.firstIndex * indexTypeByteLength(gl, resources.batch.indexType),
-		);
-		metrics.shaderDrawCallCount += 1;
-		metrics.submittedDrawSliceCount += 1;
-		metrics.submittedTriangleCount += slice.indexCount / 3;
 	}
 	return metrics;
 }

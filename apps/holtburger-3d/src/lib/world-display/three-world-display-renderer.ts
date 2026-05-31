@@ -640,6 +640,7 @@ export function createThreeWorldDisplayRenderer(
 			atlasStaticTransformTableEntryCount: 0,
 			atlasStaticCompactionResourceFallbackSamples: [],
 			atlasStaticShaderDrawCallCount: 0,
+			atlasStaticSubmittedBatchCount: 0,
 			atlasStaticSubmittedDrawSliceCount: 0,
 			atlasStaticReplacedDrawUnitCount: 0,
 			atlasStaticRetainedDrawUnitCount: 0,
@@ -1121,6 +1122,7 @@ export function createThreeWorldDisplayRenderer(
 			atlasStaticTransformTableEntryCount: 0,
 			atlasStaticCompactionResourceFallbackSamples: [],
 			atlasStaticShaderDrawCallCount: 0,
+			atlasStaticSubmittedBatchCount: 0,
 			atlasStaticSubmittedDrawSliceCount: 0,
 			atlasStaticReplacedDrawUnitCount: 0,
 			atlasStaticRetainedDrawUnitCount: 0,
@@ -3836,6 +3838,7 @@ function createRenderDebugMetrics(
 		atlasStaticCompactionResourceFallbackSamples:
 			options.atlasStaticCompactionResourceFallbackSamples,
 		atlasStaticShaderDrawCallCount: options.atlasStaticShaderDrawCallCount,
+		atlasStaticSubmittedBatchCount: options.atlasStaticSubmittedBatchCount,
 		atlasStaticSubmittedDrawSliceCount:
 			options.atlasStaticSubmittedDrawSliceCount,
 		atlasStaticReplacedDrawUnitCount: options.atlasStaticReplacedDrawUnitCount,

@@ -144,6 +144,7 @@ function createCandidate(
 	return {
 		id: options.id ?? "static",
 		kind: options.kind ?? "static",
+		owningLandblockId: options.owningLandblockId ?? 0x0102ffff,
 		sceneDomain: options.sceneDomain ?? "exterior",
 		materialKind: options.materialKind ?? "direct-texture",
 		materialKey: options.materialKey ?? `material-${entryKey}`,

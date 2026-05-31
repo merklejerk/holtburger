@@ -120,6 +120,7 @@ describe("planWebgl2AtlasStaticReplacement", () => {
 			shaderDrawCallCount: 1,
 			submittedDrawSliceCount: 1,
 			submittedTriangleCount: 1,
+			submittedSliceRepresentedDrawUnitCount: 1,
 			replacedDrawUnitCount: 1,
 			retainedDrawUnitCount: 3,
 		});

@@ -274,12 +274,30 @@ export function createWebgl2RenderMetrics(
 				input.submitMetrics.atlasStaticSubmittedBatchCount,
 			atlasStaticSubmittedDrawSliceCount:
 				input.submitMetrics.atlasStaticSubmittedDrawSliceCount,
+			atlasStaticSubmittedSliceRepresentedDrawUnitCount:
+				input.submitMetrics.atlasStaticSubmittedSliceRepresentedDrawUnitCount,
+			atlasStaticSubmittedTriangleCount:
+				input.submitMetrics.atlasStaticSubmittedTriangleCount,
 			atlasStaticReplacedDrawUnitCount:
 				input.submitMetrics.atlasStaticReplacedDrawUnitCount,
+			atlasStaticReplacedDrawUnitTriangleCount:
+				input.submitMetrics.atlasStaticReplacedDrawUnitTriangleCount,
 			atlasStaticRetainedDrawUnitCount:
 				input.submitMetrics.atlasStaticRetainedDrawUnitCount,
+			atlasStaticOriginalDrawCallEstimateCount:
+				input.submitMetrics.atlasStaticOriginalDrawCallEstimateCount,
+			atlasStaticSubmittedDrawCallEstimateCount:
+				input.submitMetrics.atlasStaticSubmittedDrawCallEstimateCount,
+			atlasStaticDrawCallSavingsCount:
+				input.submitMetrics.atlasStaticDrawCallSavingsCount,
 			atlasStaticSubmitNoVisibleRouteCount:
 				input.submitMetrics.atlasStaticSubmitNoVisibleRouteCount,
+			atlasStaticSubmitNoVisibleExteriorRouteCount:
+				input.submitMetrics.atlasStaticSubmitNoVisibleExteriorRouteCount,
+			atlasStaticSubmitNoVisibleInteriorRouteCount:
+				input.submitMetrics.atlasStaticSubmitNoVisibleInteriorRouteCount,
+			atlasStaticSubmitNoVisibleOtherRouteCount:
+				input.submitMetrics.atlasStaticSubmitNoVisibleOtherRouteCount,
 			atlasStaticSubmitFallbackSamples: [
 				...input.submitMetrics.atlasStaticSubmitFallbackSamples,
 			],
@@ -328,8 +346,17 @@ export function createWebgl2RenderMetrics(
 							input.submitMetrics.atlasStaticSubmittedBatchCount,
 						"webgl2-atlas-static-submitted-slices":
 							input.submitMetrics.atlasStaticSubmittedDrawSliceCount,
+						"webgl2-atlas-static-submitted-slice-draw-units":
+							input.submitMetrics
+								.atlasStaticSubmittedSliceRepresentedDrawUnitCount,
+						"webgl2-atlas-static-submitted-triangles":
+							input.submitMetrics.atlasStaticSubmittedTriangleCount,
 						"webgl2-atlas-static-replaced-draw-units":
 							input.submitMetrics.atlasStaticReplacedDrawUnitCount,
+						"webgl2-atlas-static-replaced-triangles":
+							input.submitMetrics.atlasStaticReplacedDrawUnitTriangleCount,
+						"webgl2-atlas-static-draw-call-savings":
+							input.submitMetrics.atlasStaticDrawCallSavingsCount,
 						"webgl2-atlas-static-no-visible-routes":
 							input.submitMetrics.atlasStaticSubmitNoVisibleRouteCount,
 						"webgl2-detail-overlay": input.worldStore.detailTextureCount,

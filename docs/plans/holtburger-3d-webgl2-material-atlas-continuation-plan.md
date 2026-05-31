@@ -22,8 +22,9 @@ eligibility is metadata for future compaction, not a prerequisite for seeing mat
 
 ## Current Baseline
 
-- `webgl2` is the only active low-level renderer backend.
-- `three` remains the comparison/high-level backend.
+- `webgl2` is the only active renderer backend.
+- The old Three.js renderer backend has been retired early. Remaining imports from `three` are
+  renderer-neutral math/material DTO adapters or tests, not an alternate runtime backend.
 - `luma` is no longer selectable and `@luma.gl/*` dependencies have been removed.
 - Renderer-neutral helpers now live under WebGL2/staged names:
   - `render-math.ts`
@@ -2594,27 +2595,41 @@ Exit criteria:
 
 ### Phase M7.3.4: Landblock Batch Metrics and Lifecycle Hardening
 
-Status: Not started.
+Status: Implemented for submit diagnostics; lifecycle validation moved to M7.3.5.
 
 Purpose: close the remaining validation/diagnostic debt from M7.3.3 before treating default outdoor
 static atlas substitution as hardened in M7.4.
 
 Tasks:
 
-- Add coarse overdraw diagnostics per submitted landblock compacted batch: submitted slice count,
-  replaced visible draw-unit count, total draw-unit count represented by submitted slices, and
-  triangle deltas.
-- Split atlas no-visible route diagnostics by submit route/domain so exterior-visible batches are
-  not mixed with interior or other route checks in the human summary.
-- Add draw-call arithmetic diagnostics for atlas substitution:
-  `candidate draw units - replaced draw units + submitted batches/slices = submitted draw calls`.
-- Add graph/resource lifecycle tests for landblock-scoped batch creation, retained batch reuse,
-  streaming removal, and graph lease release.
-- Add re-anchor reuse tests proving common render-origin shifts update batch model offsets without
-  rebuilding compacted VBOs.
-- Review whether the batch origin should become an explicit landblock render origin instead of the
-  first compacted draw unit's current translation. Keep the current first-draw origin only if field
-  reports show stable reuse and no precision issues.
+- [x] Add coarse overdraw diagnostics per submitted landblock compacted batch: submitted slice count,
+      replaced visible draw-unit count, total draw-unit count represented by submitted slices, and
+      triangle deltas.
+- [x] Split atlas no-visible route diagnostics by submit route/domain so exterior-visible batches are
+      not mixed with interior or other route checks in the human summary.
+- [x] Add draw-call arithmetic diagnostics for atlas substitution:
+      `candidate draw units - replaced draw units + submitted batches/slices = submitted draw calls`.
+- [ ] Add graph/resource lifecycle tests for landblock-scoped batch creation, retained batch reuse,
+      streaming removal, and graph lease release.
+- [ ] Add re-anchor reuse tests proving common render-origin shifts update batch model offsets without
+      rebuilding compacted VBOs.
+- [ ] Review whether the batch origin should become an explicit landblock render origin instead of the
+      first compacted draw unit's current translation. Keep the current first-draw origin only if field
+      reports show stable reuse and no precision issues.
+
+Progress Notes:
+
+- Added atlas submit metrics for represented slice draw units, replaced/submitted triangle counts,
+  estimated original draw calls, estimated submitted draw calls, and estimated draw-call savings.
+- Split no-visible route counts into exterior, interior, and other submit routes. Scene-domain
+  exterior/interior submits now pass explicit route labels into the atlas submit path.
+- Updated the browser debug summary so field reports show the atlas substitution arithmetic directly:
+  `original - replaced + shader draws = submitted`, plus the savings count.
+- Focused tests now cover the route split and the expanded submit metrics. Full app type checking
+  passed after the metric contract update.
+- Course correction: graph/resource lifecycle and re-anchor reuse coverage is still important, but it
+  is separable from the human-debugger-facing metric work. It should land before M7.4, so it has been
+  moved into the immediate M7.3.5 validation phase below.
 
 Exit criteria:
 
@@ -2627,14 +2642,61 @@ Exit criteria:
 - Resource graph and re-anchor tests cover the multi-batch lifetime paths introduced in M7.3.3.
 - M7.4 can focus on default-substitution hardening instead of proving batch lifetime basics.
 
+### Phase M7.3.5: Landblock Batch Lifecycle Validation
+
+Status: Not started.
+
+Purpose: close the remaining M7.3.4 validation debt before M7.4 hardens default outdoor static
+substitution.
+
+Tasks:
+
+- Add graph/resource lifecycle tests for landblock-scoped batch creation, retained batch reuse,
+  streaming removal, and graph lease release.
+- Add re-anchor reuse tests proving common render-origin shifts update batch model offsets without
+  rebuilding compacted VBOs.
+- Decide whether the batch origin should become an explicit landblock render origin instead of the
+  first compacted draw unit's current translation. Keep the current first-draw origin only if the
+  tests and field reports show stable reuse and no precision issues.
+
+Exit Criteria:
+
+- Multi-batch graph leases are proven to be released when landblock batches disappear.
+- Re-anchor-only updates are proven to preserve atlas textures and compacted VBO resources.
+- M7.4 starts with lifecycle behavior covered by focused tests instead of relying on field reports.
+
+### Phase M7.3.6: WebGL2-Only Renderer Cleanup
+
+Status: Complete.
+
+Purpose: retire the old Three.js runtime backend before the remaining atlas/compaction phases, so new
+renderer contract changes no longer need to preserve an obsolete comparison path.
+
+Completed:
+
+- Deleted the Three.js world display renderer implementation and removed the runtime backend switch.
+- Removed `VITE_HOLTBURGER_RENDER_BACKEND` parsing and made the app construct the deferred WebGL2
+  renderer directly.
+- Made scene asset streaming always use the normalized WebGL2 material texture preparation policy
+  instead of keying interest and cache pruning by backend.
+- Narrowed debug metrics to the `webgl2` backend and simplified browser debug copy from
+  backend-conditional "batches" terminology to WebGL2 draw-unit terminology.
+- Renamed the viewport host CSS from Three-specific wording to renderer-neutral wording.
+
+Decision:
+
+- This is intentionally not a compatibility shim. WebGL2 is now the only runtime renderer. Any
+  remaining Three imports should be audited opportunistically and either proven to be math/data
+  helpers or extracted behind renderer-neutral DTOs when they block WebGL2 work.
+
 ### Phase M7.4: Default Outdoor Static Draw Substitution
 
 Status: Not started.
 
 Purpose: after M7.3.2 removes the per-object transform blocker, M7.3.3 restores landblock-scale
-culling granularity, and M7.3.4 closes lifecycle/metric debt, harden atlas-backed compacted outdoor
-static batches as the normal visible path for eligible draw units while preserving staged fallback
-behavior.
+culling granularity, M7.3.4 closes metric debt, and M7.3.5 closes lifecycle debt, harden
+atlas-backed compacted outdoor static batches as the normal visible path for eligible draw units
+while preserving staged fallback behavior.
 
 Tasks:
 
@@ -2675,32 +2737,32 @@ Exit criteria:
 - The plan names structured-interior direct-texture atlas participation as the next direct atlas
   expansion, while indexed/paletted and terrain atlas work remain explicit dedicated designs.
 
-## Phase M8: Performance Gate and Three.js Retirement Decision
+## Phase M8: Performance Gate and Post-Three Cleanup
 
-Status: Not started.
+Status: Retired early; remaining work reframed as WebGL2 performance validation.
 
-Purpose: prove whether the WebGL2 path has replaced the practical value of the Three.js backend for
-the normal browser workflow.
+Purpose: WebGL2 has replaced the practical value of the Three.js backend for the normal browser
+workflow. The remaining work is to validate WebGL2 performance and remove stale Three-era naming or
+DTO ownership where it still slows WebGL2 work.
 
 Tasks:
 
-- Compare WebGL2 and Three.js on the same dense outdoor scene:
+- Profile WebGL2 on dense outdoor, portal-heavy, and static-heavy scenes:
   - load time;
   - steady FPS looking at the scene;
   - steady FPS looking away;
   - visible draw count;
   - CPU profile shape;
   - material and portal visual coverage.
-- Profile portal-heavy scenes and static-heavy scenes separately.
 - Confirm material/portal gaps are either closed or explicitly accepted.
-- Decide whether Three.js remains a comparison backend, becomes a debug-only backend, or can be
-  removed in a later cleanup plan.
+- Audit remaining imports from `three` and either prove they are renderer-neutral math/material DTO
+  helpers or extract their data shapes behind renderer-neutral modules.
 
 Exit criteria:
 
-- WebGL2 has credible visual and performance parity for the common browser-mode workflow.
+- WebGL2 has credible visual coverage and performance for the common browser-mode workflow.
 - Remaining renderer gaps have named owners/phases.
-- The project has an explicit decision about the future of the Three.js backend.
+- Three-era naming/imports no longer imply a second runtime backend.
 
 ## Cleanup Targets
 
@@ -2728,6 +2790,8 @@ Exit criteria:
 - Revisit the per-frame WebGL2 draw-unit sort after M3-M7 reshape the submit path.
 - Split renderer-neutral material sampling DTOs from any Three adapter names/imports if they still
   imply Three ownership.
+- Delete stale Three-backend references from older plan notes opportunistically when those sections
+  are edited; do not preserve them as active guidance.
 - Keep renderer graph APIs explicit around node identity, dependency edges, leases, disposal
   candidates, and cycle prevention.
 - Avoid compatibility shims for retired luma names. Rename call sites instead.

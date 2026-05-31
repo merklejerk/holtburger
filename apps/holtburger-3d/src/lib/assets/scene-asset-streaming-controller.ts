@@ -26,12 +26,8 @@ import {
 	deriveVisibleMaterialAssetIdsForBrowserDestination,
 	type OutdoorSceneRequestOptions,
 } from "./scene-asset-request-planner";
-import {
-	NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY,
-	type MaterialTexturePreparationPolicy,
-} from "./material-texture-preparation-policy";
+import { NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY } from "./material-texture-preparation-policy";
 import type { PreparedAssetCacheMetadata, PreparedAssetRecord } from "./types";
-import type { WorldRenderBackend } from "../app-config/render-backend";
 
 interface SceneAssetChannel {
 	prepareAsset(request: AssetLookupRequestDto): Promise<PreparedAssetRecord>;
@@ -49,7 +45,6 @@ export interface SceneAssetStreamingInput {
 	envCellLodRadius: number;
 	appearancePreviewAssetIds: readonly string[];
 	preparedByAssetId: Record<string, PreparedAssetRecord>;
-	rendererBackend: WorldRenderBackend;
 }
 
 export interface SceneAssetStreamingControllerDeps {
@@ -173,7 +168,7 @@ export class SceneAssetStreamingController {
 							detailRadius: input.detailLodRadius,
 							envCellRadius: input.envCellLodRadius,
 							materialTexturePreparationPolicy:
-								getMaterialTexturePreparationPolicy(input.rendererBackend),
+								NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY,
 						},
 					},
 					priority,
@@ -282,9 +277,8 @@ export class SceneAssetStreamingController {
 					buildingRadius: input.buildingLodRadius,
 					detailRadius: input.detailLodRadius,
 					envCellRadius: input.envCellLodRadius,
-					materialTexturePreparationPolicy: getMaterialTexturePreparationPolicy(
-						input.rendererBackend,
-					),
+					materialTexturePreparationPolicy:
+						NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY,
 				},
 			).concat(input.appearancePreviewAssetIds),
 			inFlightAssetIds: [...this.inFlightAssetIds],
@@ -387,17 +381,6 @@ function recordPreparedAssetOutputShape(
 			`asset-stream.preparedOutputKind.${hydrationKind}.${asset.payload.kind}`,
 			0,
 		);
-	}
-}
-
-function getMaterialTexturePreparationPolicy(
-	rendererBackend: WorldRenderBackend,
-): MaterialTexturePreparationPolicy | undefined {
-	switch (rendererBackend) {
-		case "webgl2":
-			return NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY;
-		case "three":
-			return undefined;
 	}
 }
 
@@ -521,7 +504,6 @@ function createSceneInterestSyncKey(input: SceneAssetStreamingInput): string {
 		`buildings-${input.buildingLodRadius}`,
 		`detail-${input.detailLodRadius}`,
 		`env-cells-${input.envCellLodRadius}`,
-		`backend-${input.rendererBackend}`,
 		`appearance-preview-${[...input.appearancePreviewAssetIds].sort().join(",")}`,
 		`prepared-${preparedPlanningAssetKey}`,
 	].join(":");

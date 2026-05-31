@@ -1,5 +1,4 @@
 import type { SceneCameraFrame, SceneBoundsFrame } from "./camera";
-import type { WorldRenderBackend } from "../app-config/render-backend";
 
 export type WorldDisplayRenderStyle = "solid" | "wireframe" | "no-material";
 export type WorldDisplayTextureFilteringMode =
@@ -53,7 +52,7 @@ export interface WorldRenderPortalMetrics {
 }
 
 export interface WorldRenderDebugMetrics {
-	rendererBackend: WorldRenderBackend;
+	rendererBackend: "webgl2";
 	canvasWidth: number;
 	canvasHeight: number;
 	pixelRatio: number;
@@ -159,9 +158,18 @@ export interface WorldRenderDebugMetrics {
 	atlasStaticShaderDrawCallCount: number;
 	atlasStaticSubmittedBatchCount: number;
 	atlasStaticSubmittedDrawSliceCount: number;
+	atlasStaticSubmittedSliceRepresentedDrawUnitCount: number;
+	atlasStaticSubmittedTriangleCount: number;
 	atlasStaticReplacedDrawUnitCount: number;
+	atlasStaticReplacedDrawUnitTriangleCount: number;
 	atlasStaticRetainedDrawUnitCount: number;
+	atlasStaticOriginalDrawCallEstimateCount: number;
+	atlasStaticSubmittedDrawCallEstimateCount: number;
+	atlasStaticDrawCallSavingsCount: number;
 	atlasStaticSubmitNoVisibleRouteCount: number;
+	atlasStaticSubmitNoVisibleExteriorRouteCount: number;
+	atlasStaticSubmitNoVisibleInteriorRouteCount: number;
+	atlasStaticSubmitNoVisibleOtherRouteCount: number;
 	atlasStaticSubmitFallbackSamples: string[];
 	textureVelocityPartCount: number;
 	textureVelocityRenderGroupCount: number;

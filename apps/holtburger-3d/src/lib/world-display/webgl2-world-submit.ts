@@ -99,9 +99,18 @@ export interface Webgl2WorldSubmitMetrics {
 	atlasStaticShaderDrawCallCount: number;
 	atlasStaticSubmittedBatchCount: number;
 	atlasStaticSubmittedDrawSliceCount: number;
+	atlasStaticSubmittedSliceRepresentedDrawUnitCount: number;
+	atlasStaticSubmittedTriangleCount: number;
 	atlasStaticReplacedDrawUnitCount: number;
+	atlasStaticReplacedDrawUnitTriangleCount: number;
 	atlasStaticRetainedDrawUnitCount: number;
+	atlasStaticOriginalDrawCallEstimateCount: number;
+	atlasStaticSubmittedDrawCallEstimateCount: number;
+	atlasStaticDrawCallSavingsCount: number;
 	atlasStaticSubmitNoVisibleRouteCount: number;
+	atlasStaticSubmitNoVisibleExteriorRouteCount: number;
+	atlasStaticSubmitNoVisibleInteriorRouteCount: number;
+	atlasStaticSubmitNoVisibleOtherRouteCount: number;
 	atlasStaticSubmitFallbackSamples: readonly string[];
 }
 
@@ -120,11 +129,25 @@ const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	atlasStaticShaderDrawCallCount: 0,
 	atlasStaticSubmittedBatchCount: 0,
 	atlasStaticSubmittedDrawSliceCount: 0,
+	atlasStaticSubmittedSliceRepresentedDrawUnitCount: 0,
+	atlasStaticSubmittedTriangleCount: 0,
 	atlasStaticReplacedDrawUnitCount: 0,
+	atlasStaticReplacedDrawUnitTriangleCount: 0,
 	atlasStaticRetainedDrawUnitCount: 0,
+	atlasStaticOriginalDrawCallEstimateCount: 0,
+	atlasStaticSubmittedDrawCallEstimateCount: 0,
+	atlasStaticDrawCallSavingsCount: 0,
 	atlasStaticSubmitNoVisibleRouteCount: 0,
+	atlasStaticSubmitNoVisibleExteriorRouteCount: 0,
+	atlasStaticSubmitNoVisibleInteriorRouteCount: 0,
+	atlasStaticSubmitNoVisibleOtherRouteCount: 0,
 	atlasStaticSubmitFallbackSamples: [],
 };
+
+export type Webgl2AtlasStaticSubmitRoute =
+	| "flat-world"
+	| "scene-domain-exterior"
+	| "scene-domain-interior";
 
 export function createEmptyWebgl2WorldSubmitMetrics(): Webgl2WorldSubmitMetrics {
 	return {
@@ -198,6 +221,7 @@ export function submitWebgl2FlatWorldDrawUnits({
 	portalMaskDrawUnitCount = 0,
 	exteriorDomainDrawUnitCount = 0,
 	interiorDomainDrawUnitCount = 0,
+	atlasStaticSubmitRoute = "flat-world",
 	terrainBackfaceCulling = false,
 }: {
 	gl: WebGL2RenderingContext;
@@ -214,6 +238,7 @@ export function submitWebgl2FlatWorldDrawUnits({
 	portalMaskDrawUnitCount?: number;
 	exteriorDomainDrawUnitCount?: number;
 	interiorDomainDrawUnitCount?: number;
+	atlasStaticSubmitRoute?: Webgl2AtlasStaticSubmitRoute;
 	terrainBackfaceCulling?: boolean;
 }): Webgl2WorldSubmitMetrics {
 	const metrics: Webgl2WorldSubmitMetrics = {
@@ -240,6 +265,10 @@ export function submitWebgl2FlatWorldDrawUnits({
 						!atlasReplacement.replaceableDrawUnitIds.has(drawUnit.id),
 				);
 	const retainedDrawUnitCount = stagedDrawUnits.length;
+	const replaceableDrawUnitTriangleCount = sumDrawUnitTriangles(
+		drawUnits,
+		atlasReplacement.replaceableDrawUnitIds,
+	);
 	metrics.stateChangeCount += stateCache.setDepthState({
 		enabled: true,
 		write: true,
@@ -278,6 +307,8 @@ export function submitWebgl2FlatWorldDrawUnits({
 			resources: atlasStaticResources,
 			replaceableDrawUnitIds: atlasReplacement.replaceableDrawUnitIds,
 			retainedDrawUnitCount,
+			replaceableDrawUnitTriangleCount,
+			route: atlasStaticSubmitRoute,
 			metrics,
 			planningNoVisibleRouteCount: atlasReplacement.noVisibleRouteCount,
 			planningFallbackSamples: atlasReplacement.fallbackSamples,
@@ -456,6 +487,8 @@ export function submitWebgl2FlatWorldDrawUnits({
 		resources: atlasStaticResources,
 		replaceableDrawUnitIds: atlasReplacement.replaceableDrawUnitIds,
 		retainedDrawUnitCount,
+		replaceableDrawUnitTriangleCount,
+		route: atlasStaticSubmitRoute,
 		metrics,
 		planningNoVisibleRouteCount: atlasReplacement.noVisibleRouteCount,
 		planningFallbackSamples: atlasReplacement.fallbackSamples,
@@ -471,6 +504,8 @@ function submitAtlasStaticDrawUnits({
 	resources,
 	replaceableDrawUnitIds,
 	retainedDrawUnitCount,
+	replaceableDrawUnitTriangleCount,
+	route,
 	metrics,
 	planningNoVisibleRouteCount,
 	planningFallbackSamples,
@@ -482,6 +517,8 @@ function submitAtlasStaticDrawUnits({
 	resources: Webgl2AtlasStaticSubmitResources;
 	replaceableDrawUnitIds: ReadonlySet<string>;
 	retainedDrawUnitCount: number;
+	replaceableDrawUnitTriangleCount: number;
+	route: Webgl2AtlasStaticSubmitRoute;
 	metrics: Webgl2WorldSubmitMetrics;
 	planningNoVisibleRouteCount: number;
 	planningFallbackSamples: readonly string[];
@@ -510,17 +547,31 @@ function submitAtlasStaticDrawUnits({
 		metrics.atlasStaticSubmittedBatchCount = atlasMetrics.submittedBatchCount;
 		metrics.atlasStaticSubmittedDrawSliceCount =
 			atlasMetrics.submittedDrawSliceCount;
+		metrics.atlasStaticSubmittedSliceRepresentedDrawUnitCount =
+			atlasMetrics.submittedSliceRepresentedDrawUnitCount;
+		metrics.atlasStaticSubmittedTriangleCount =
+			atlasMetrics.submittedTriangleCount;
 		metrics.atlasStaticReplacedDrawUnitCount =
 			atlasMetrics.replacedDrawUnitCount;
+		metrics.atlasStaticReplacedDrawUnitTriangleCount =
+			replaceableDrawUnitTriangleCount;
 		metrics.atlasStaticRetainedDrawUnitCount =
 			atlasMetrics.retainedDrawUnitCount;
 		metrics.atlasStaticSubmitNoVisibleRouteCount =
-			atlasMetrics.noVisibleRouteCount;
+			planningNoVisibleRouteCount + atlasMetrics.noVisibleRouteCount;
+		applyAtlasStaticNoVisibleRoute(metrics, route, planningNoVisibleRouteCount);
+		applyAtlasStaticNoVisibleRoute(
+			metrics,
+			route,
+			atlasMetrics.noVisibleRouteCount,
+		);
 		metrics.atlasStaticSubmitFallbackSamples = atlasMetrics.fallbackSamples;
+		applyAtlasStaticDrawCallArithmetic(metrics);
 		return;
 	}
 	const fallbackSamples = [...planningFallbackSamples];
 	metrics.atlasStaticSubmitNoVisibleRouteCount = planningNoVisibleRouteCount;
+	applyAtlasStaticNoVisibleRoute(metrics, route, planningNoVisibleRouteCount);
 	if (
 		!program &&
 		resources.batches.length > 0 &&
@@ -531,12 +582,68 @@ function submitAtlasStaticDrawUnits({
 	}
 	const emptyAtlasMetrics = createEmptyWebgl2AtlasStaticSubmitMetrics();
 	metrics.atlasStaticRetainedDrawUnitCount = retainedDrawUnitCount;
+	metrics.atlasStaticReplacedDrawUnitTriangleCount =
+		replaceableDrawUnitTriangleCount;
 	metrics.atlasStaticSubmitNoVisibleRouteCount +=
 		emptyAtlasMetrics.noVisibleRouteCount;
+	applyAtlasStaticNoVisibleRoute(
+		metrics,
+		route,
+		emptyAtlasMetrics.noVisibleRouteCount,
+	);
 	metrics.atlasStaticSubmitFallbackSamples = [
 		...fallbackSamples,
 		...emptyAtlasMetrics.fallbackSamples,
 	].slice(0, 8);
+	applyAtlasStaticDrawCallArithmetic(metrics);
+}
+
+function sumDrawUnitTriangles(
+	drawUnits: readonly Webgl2WorldDrawUnit[],
+	drawUnitIds: ReadonlySet<string>,
+): number {
+	let triangleCount = 0;
+	for (const drawUnit of drawUnits) {
+		if (drawUnitIds.has(drawUnit.id)) {
+			triangleCount += drawUnit.triangleCount;
+		}
+	}
+	return triangleCount;
+}
+
+function applyAtlasStaticDrawCallArithmetic(
+	metrics: Webgl2WorldSubmitMetrics,
+): void {
+	metrics.atlasStaticOriginalDrawCallEstimateCount =
+		metrics.atlasStaticRetainedDrawUnitCount +
+		metrics.atlasStaticReplacedDrawUnitCount;
+	metrics.atlasStaticSubmittedDrawCallEstimateCount =
+		metrics.atlasStaticRetainedDrawUnitCount +
+		metrics.atlasStaticShaderDrawCallCount;
+	metrics.atlasStaticDrawCallSavingsCount =
+		metrics.atlasStaticOriginalDrawCallEstimateCount -
+		metrics.atlasStaticSubmittedDrawCallEstimateCount;
+}
+
+function applyAtlasStaticNoVisibleRoute(
+	metrics: Webgl2WorldSubmitMetrics,
+	route: Webgl2AtlasStaticSubmitRoute,
+	count: number,
+): void {
+	if (count <= 0) {
+		return;
+	}
+	switch (route) {
+		case "scene-domain-exterior":
+			metrics.atlasStaticSubmitNoVisibleExteriorRouteCount += count;
+			return;
+		case "scene-domain-interior":
+			metrics.atlasStaticSubmitNoVisibleInteriorRouteCount += count;
+			return;
+		case "flat-world":
+			metrics.atlasStaticSubmitNoVisibleOtherRouteCount += count;
+			return;
+	}
 }
 
 const TERRAIN_BLEND_SAMPLER_UNIFORM_COUNT = 10;

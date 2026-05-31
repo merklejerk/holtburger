@@ -232,8 +232,44 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		expect(metrics.drawCallCount).toBe(2);
 		expect(metrics.triangleCount).toBe(2);
 		expect(metrics.atlasStaticReplacedDrawUnitCount).toBe(1);
+		expect(metrics.atlasStaticReplacedDrawUnitTriangleCount).toBe(1);
 		expect(metrics.atlasStaticRetainedDrawUnitCount).toBe(1);
 		expect(metrics.atlasStaticShaderDrawCallCount).toBe(1);
+		expect(metrics.atlasStaticSubmittedSliceRepresentedDrawUnitCount).toBe(1);
+		expect(metrics.atlasStaticSubmittedTriangleCount).toBe(1);
+		expect(metrics.atlasStaticOriginalDrawCallEstimateCount).toBe(2);
+		expect(metrics.atlasStaticSubmittedDrawCallEstimateCount).toBe(2);
+		expect(metrics.atlasStaticDrawCallSavingsCount).toBe(0);
+		expect(metrics.atlasStaticSubmitFallbackSamples).toEqual([]);
+	});
+
+	it("attributes no-visible atlas route checks to the submit route", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+		const drawUnits = [createDrawUnit({ id: "visible" })];
+
+		const metrics = submitWebgl2FlatWorldDrawUnits({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			terrainBlendProgram: createTerrainBlendProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			atlasStaticProgram: createAtlasStaticProgram(),
+			atlasStaticResources: {
+				batches: [createAtlasStaticBatch(["not-visible"])],
+				generation: createAtlasStaticGeneration(),
+			},
+			viewProjectionMatrix: createIdentityMat4(),
+			drawUnits,
+			atlasStaticSubmitRoute: "scene-domain-interior",
+		});
+
+		expect(metrics.atlasStaticSubmitNoVisibleRouteCount).toBe(1);
+		expect(metrics.atlasStaticSubmitNoVisibleExteriorRouteCount).toBe(0);
+		expect(metrics.atlasStaticSubmitNoVisibleInteriorRouteCount).toBe(1);
+		expect(metrics.atlasStaticSubmitNoVisibleOtherRouteCount).toBe(0);
 		expect(metrics.atlasStaticSubmitFallbackSamples).toEqual([]);
 	});
 

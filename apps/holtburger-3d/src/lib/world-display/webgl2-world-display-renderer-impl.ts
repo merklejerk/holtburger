@@ -996,6 +996,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 					target: targets.exterior,
 					drawUnits: sceneDomainDrawUnits.exterior,
 					frame,
+					atlasStaticSubmitRoute: "scene-domain-exterior",
 					terrainBackfaceCulling: baseScene === "interior",
 				}),
 		);
@@ -1006,6 +1007,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 					target: targets.interior,
 					drawUnits: sceneDomainDrawUnits.interior,
 					frame,
+					atlasStaticSubmitRoute: "scene-domain-interior",
 					terrainBackfaceCulling: false,
 				}),
 		);
@@ -1131,11 +1133,13 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		target,
 		drawUnits,
 		frame,
+		atlasStaticSubmitRoute,
 		terrainBackfaceCulling,
 	}: {
 		target: Webgl2SceneDomainTarget;
 		drawUnits: readonly Webgl2WorldDrawUnit[];
 		frame: ReturnType<typeof buildStagedWorldFrame>;
+		atlasStaticSubmitRoute: "scene-domain-exterior" | "scene-domain-interior";
 		terrainBackfaceCulling: boolean;
 	}): Webgl2WorldSubmitMetrics {
 		if (!resources) {
@@ -1174,6 +1178,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			},
 			viewProjectionMatrix: frame.viewProjectionMatrix,
 			drawUnits,
+			atlasStaticSubmitRoute,
 			terrainBackfaceCulling,
 		});
 	}
@@ -1919,15 +1924,42 @@ function mergeSceneDomainSubmitMetrics({
 		atlasStaticSubmittedDrawSliceCount:
 			exteriorMetrics.atlasStaticSubmittedDrawSliceCount +
 			interiorMetrics.atlasStaticSubmittedDrawSliceCount,
+		atlasStaticSubmittedSliceRepresentedDrawUnitCount:
+			exteriorMetrics.atlasStaticSubmittedSliceRepresentedDrawUnitCount +
+			interiorMetrics.atlasStaticSubmittedSliceRepresentedDrawUnitCount,
+		atlasStaticSubmittedTriangleCount:
+			exteriorMetrics.atlasStaticSubmittedTriangleCount +
+			interiorMetrics.atlasStaticSubmittedTriangleCount,
 		atlasStaticReplacedDrawUnitCount:
 			exteriorMetrics.atlasStaticReplacedDrawUnitCount +
 			interiorMetrics.atlasStaticReplacedDrawUnitCount,
+		atlasStaticReplacedDrawUnitTriangleCount:
+			exteriorMetrics.atlasStaticReplacedDrawUnitTriangleCount +
+			interiorMetrics.atlasStaticReplacedDrawUnitTriangleCount,
 		atlasStaticRetainedDrawUnitCount:
 			exteriorMetrics.atlasStaticRetainedDrawUnitCount +
 			interiorMetrics.atlasStaticRetainedDrawUnitCount,
+		atlasStaticOriginalDrawCallEstimateCount:
+			exteriorMetrics.atlasStaticOriginalDrawCallEstimateCount +
+			interiorMetrics.atlasStaticOriginalDrawCallEstimateCount,
+		atlasStaticSubmittedDrawCallEstimateCount:
+			exteriorMetrics.atlasStaticSubmittedDrawCallEstimateCount +
+			interiorMetrics.atlasStaticSubmittedDrawCallEstimateCount,
+		atlasStaticDrawCallSavingsCount:
+			exteriorMetrics.atlasStaticDrawCallSavingsCount +
+			interiorMetrics.atlasStaticDrawCallSavingsCount,
 		atlasStaticSubmitNoVisibleRouteCount:
 			exteriorMetrics.atlasStaticSubmitNoVisibleRouteCount +
 			interiorMetrics.atlasStaticSubmitNoVisibleRouteCount,
+		atlasStaticSubmitNoVisibleExteriorRouteCount:
+			exteriorMetrics.atlasStaticSubmitNoVisibleExteriorRouteCount +
+			interiorMetrics.atlasStaticSubmitNoVisibleExteriorRouteCount,
+		atlasStaticSubmitNoVisibleInteriorRouteCount:
+			exteriorMetrics.atlasStaticSubmitNoVisibleInteriorRouteCount +
+			interiorMetrics.atlasStaticSubmitNoVisibleInteriorRouteCount,
+		atlasStaticSubmitNoVisibleOtherRouteCount:
+			exteriorMetrics.atlasStaticSubmitNoVisibleOtherRouteCount +
+			interiorMetrics.atlasStaticSubmitNoVisibleOtherRouteCount,
 		atlasStaticSubmitFallbackSamples: [
 			...exteriorMetrics.atlasStaticSubmitFallbackSamples,
 			...interiorMetrics.atlasStaticSubmitFallbackSamples,

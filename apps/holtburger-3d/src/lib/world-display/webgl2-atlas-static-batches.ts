@@ -134,6 +134,18 @@ export function createWebgl2AtlasStaticBatchResource({
 	};
 }
 
+export function updateWebgl2AtlasStaticBatchDynamicTables(
+	batch: Webgl2AtlasStaticBatchResource,
+	geometry: AtlasStaticCompactedGeometry,
+): void {
+	if (batch.key !== geometry.key) {
+		throw new Error(
+			`Cannot update atlas static batch ${batch.key} with geometry ${geometry.key}.`,
+		);
+	}
+	batch.transformTable = geometry.transformTable;
+}
+
 function toWebgl2AtlasStaticMaterialSlot(
 	slot: AtlasStaticCompactionMaterialSlot,
 	placementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>,

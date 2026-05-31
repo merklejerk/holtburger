@@ -19,6 +19,7 @@ export type Webgl2AtlasStaticWorldProgram = Webgl2ProgramResource<
 export interface Webgl2AtlasStaticSubmitMetrics {
 	shaderDrawCallCount: number;
 	submittedDrawSliceCount: number;
+	submittedTriangleCount: number;
 	replacedDrawUnitCount: number;
 	retainedDrawUnitCount: number;
 	fallbackSamples: readonly string[];
@@ -33,6 +34,7 @@ export function createEmptyWebgl2AtlasStaticSubmitMetrics(): Webgl2AtlasStaticSu
 	return {
 		shaderDrawCallCount: 0,
 		submittedDrawSliceCount: 0,
+		submittedTriangleCount: 0,
 		replacedDrawUnitCount: 0,
 		retainedDrawUnitCount: 0,
 		fallbackSamples: [],
@@ -40,29 +42,22 @@ export function createEmptyWebgl2AtlasStaticSubmitMetrics(): Webgl2AtlasStaticSu
 }
 
 export function planWebgl2AtlasStaticReplacement(options: {
-	enabled: boolean;
 	visibleDrawUnitIds: readonly string[];
 	resources: Webgl2AtlasStaticSubmitResources;
 }): {
 	replaceableDrawUnitIds: ReadonlySet<string>;
 	fallbackSamples: readonly string[];
 } {
-	if (!options.enabled) {
-		return {
-			replaceableDrawUnitIds: new Set(),
-			fallbackSamples: ["atlas static gated submit disabled"],
-		};
-	}
 	if (!options.resources.generation) {
 		return {
 			replaceableDrawUnitIds: new Set(),
-			fallbackSamples: ["atlas static gated submit missing atlas generation"],
+			fallbackSamples: ["atlas static submit missing atlas generation"],
 		};
 	}
 	if (!options.resources.batch) {
 		return {
 			replaceableDrawUnitIds: new Set(),
-			fallbackSamples: ["atlas static gated submit missing compacted batch"],
+			fallbackSamples: ["atlas static submit missing compacted batch"],
 		};
 	}
 	if (
@@ -72,7 +67,7 @@ export function planWebgl2AtlasStaticReplacement(options: {
 		return {
 			replaceableDrawUnitIds: new Set(),
 			fallbackSamples: [
-				`atlas static gated submit material slots ${options.resources.batch.materialSlots.length} exceed ${WEBGL2_ATLAS_STATIC_MAX_MATERIAL_SLOTS}`,
+				`atlas static submit material slots ${options.resources.batch.materialSlots.length} exceed ${WEBGL2_ATLAS_STATIC_MAX_MATERIAL_SLOTS}`,
 			],
 		};
 	}
@@ -83,7 +78,7 @@ export function planWebgl2AtlasStaticReplacement(options: {
 		return {
 			replaceableDrawUnitIds: new Set(),
 			fallbackSamples: [
-				`atlas static gated submit transforms ${options.resources.batch.transformTable.length} exceed ${WEBGL2_ATLAS_STATIC_MAX_TRANSFORMS}`,
+				`atlas static submit transforms ${options.resources.batch.transformTable.length} exceed ${WEBGL2_ATLAS_STATIC_MAX_TRANSFORMS}`,
 			],
 		};
 	}
@@ -97,7 +92,7 @@ export function planWebgl2AtlasStaticReplacement(options: {
 		return {
 			replaceableDrawUnitIds,
 			fallbackSamples: [
-				"atlas static gated submit has no visible compacted draw units",
+				"atlas static submit has no visible compacted draw units",
 			],
 		};
 	}
@@ -136,6 +131,7 @@ export function submitWebgl2AtlasStaticBatch({
 	const metrics: Webgl2AtlasStaticSubmitMetrics = {
 		shaderDrawCallCount: 0,
 		submittedDrawSliceCount: 0,
+		submittedTriangleCount: 0,
 		replacedDrawUnitCount: replaceableDrawUnitIds.size,
 		retainedDrawUnitCount,
 		fallbackSamples: [],
@@ -185,6 +181,7 @@ export function submitWebgl2AtlasStaticBatch({
 		);
 		metrics.shaderDrawCallCount += 1;
 		metrics.submittedDrawSliceCount += 1;
+		metrics.submittedTriangleCount += slice.indexCount / 3;
 	}
 	return metrics;
 }

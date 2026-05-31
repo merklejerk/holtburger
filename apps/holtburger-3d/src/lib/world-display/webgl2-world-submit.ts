@@ -139,7 +139,6 @@ export function submitWebgl2FlatWorldFrame({
 	indexedP8Program,
 	indexedP16Program,
 	atlasStaticProgram,
-	atlasStaticSubmitEnabled = false,
 	atlasStaticResources = { batch: null, generation: null },
 	drawUnitsById,
 	frame,
@@ -152,31 +151,17 @@ export function submitWebgl2FlatWorldFrame({
 	indexedP8Program: Webgl2IndexedP8WorldProgram;
 	indexedP16Program: Webgl2IndexedP16WorldProgram;
 	atlasStaticProgram?: Webgl2AtlasStaticWorldProgram;
-	atlasStaticSubmitEnabled?: boolean;
 	atlasStaticResources?: Webgl2AtlasStaticSubmitResources;
 	drawUnitsById: ReadonlyMap<string, Webgl2WorldDrawUnit>;
 	frame: StagedWorldFrame;
 }): Webgl2WorldSubmitMetrics {
 	const drawUnits = planWebgl2FlatWorldSubmitOrder(frame, drawUnitsById);
-	const atlasReplacement = planWebgl2AtlasStaticReplacement({
-		enabled: atlasStaticSubmitEnabled && atlasStaticProgram !== undefined,
-		visibleDrawUnitIds: drawUnits.map((drawUnit) => drawUnit.id),
-		resources: atlasStaticResources,
-	});
-	const stagedDrawUnits =
-		atlasReplacement.replaceableDrawUnitIds.size === 0
-			? drawUnits
-			: drawUnits.filter(
-					(drawUnit) =>
-						!atlasReplacement.replaceableDrawUnitIds.has(drawUnit.id),
-				);
 	const portalMaskDrawUnits = planWebgl2PortalMaskSubmitOrder(
 		frame,
 		drawUnitsById,
 	);
-	const sceneDomainDrawUnits =
-		partitionWebgl2SceneDomainDrawUnits(stagedDrawUnits);
-	const metrics = submitWebgl2FlatWorldDrawUnits({
+	const sceneDomainDrawUnits = partitionWebgl2SceneDomainDrawUnits(drawUnits);
+	return submitWebgl2FlatWorldDrawUnits({
 		gl,
 		stateCache,
 		program,
@@ -184,49 +169,14 @@ export function submitWebgl2FlatWorldFrame({
 		terrainBlendProgram,
 		indexedP8Program,
 		indexedP16Program,
+		atlasStaticProgram,
+		atlasStaticResources,
 		viewProjectionMatrix: frame.viewProjectionMatrix,
-		drawUnits: stagedDrawUnits,
+		drawUnits,
 		portalMaskDrawUnitCount: portalMaskDrawUnits.length,
 		exteriorDomainDrawUnitCount: sceneDomainDrawUnits.exterior.length,
 		interiorDomainDrawUnitCount: sceneDomainDrawUnits.interior.length,
 	});
-	const retainedDrawUnitCount = stagedDrawUnits.length;
-	if (
-		atlasStaticProgram &&
-		atlasStaticResources.batch &&
-		atlasStaticResources.generation &&
-		atlasReplacement.replaceableDrawUnitIds.size > 0
-	) {
-		const atlasMetrics = submitWebgl2AtlasStaticBatch({
-			gl,
-			stateCache,
-			program: atlasStaticProgram,
-			viewProjectionMatrix: frame.viewProjectionMatrix,
-			resources: {
-				batch: atlasStaticResources.batch,
-				generation: atlasStaticResources.generation,
-			},
-			replaceableDrawUnitIds: atlasReplacement.replaceableDrawUnitIds,
-			retainedDrawUnitCount,
-		});
-		metrics.drawCallCount += atlasMetrics.shaderDrawCallCount;
-		metrics.atlasStaticShaderDrawCallCount = atlasMetrics.shaderDrawCallCount;
-		metrics.atlasStaticSubmittedDrawSliceCount =
-			atlasMetrics.submittedDrawSliceCount;
-		metrics.atlasStaticReplacedDrawUnitCount =
-			atlasMetrics.replacedDrawUnitCount;
-		metrics.atlasStaticRetainedDrawUnitCount =
-			atlasMetrics.retainedDrawUnitCount;
-		metrics.atlasStaticSubmitFallbackSamples = atlasMetrics.fallbackSamples;
-		return metrics;
-	}
-	const emptyAtlasMetrics = createEmptyWebgl2AtlasStaticSubmitMetrics();
-	metrics.atlasStaticRetainedDrawUnitCount = retainedDrawUnitCount;
-	metrics.atlasStaticSubmitFallbackSamples = [
-		...atlasReplacement.fallbackSamples,
-		...emptyAtlasMetrics.fallbackSamples,
-	].slice(0, 8);
-	return metrics;
 }
 
 export function submitWebgl2FlatWorldDrawUnits({
@@ -237,6 +187,8 @@ export function submitWebgl2FlatWorldDrawUnits({
 	terrainBlendProgram,
 	indexedP8Program,
 	indexedP16Program,
+	atlasStaticProgram,
+	atlasStaticResources = { batch: null, generation: null },
 	viewProjectionMatrix,
 	drawUnits,
 	portalMaskDrawUnitCount = 0,
@@ -251,6 +203,8 @@ export function submitWebgl2FlatWorldDrawUnits({
 	terrainBlendProgram: Webgl2TerrainBlendWorldProgram;
 	indexedP8Program: Webgl2IndexedP8WorldProgram;
 	indexedP16Program: Webgl2IndexedP16WorldProgram;
+	atlasStaticProgram?: Webgl2AtlasStaticWorldProgram;
+	atlasStaticResources?: Webgl2AtlasStaticSubmitResources;
 	viewProjectionMatrix: RenderMat4;
 	drawUnits: readonly Webgl2WorldDrawUnit[];
 	portalMaskDrawUnitCount?: number;
@@ -270,7 +224,18 @@ export function submitWebgl2FlatWorldDrawUnits({
 	if (drawUnits.length === 0) {
 		return metrics;
 	}
-
+	const atlasReplacement = planWebgl2AtlasStaticReplacement({
+		visibleDrawUnitIds: drawUnits.map((drawUnit) => drawUnit.id),
+		resources: atlasStaticResources,
+	});
+	const stagedDrawUnits =
+		atlasReplacement.replaceableDrawUnitIds.size === 0
+			? drawUnits
+			: drawUnits.filter(
+					(drawUnit) =>
+						!atlasReplacement.replaceableDrawUnitIds.has(drawUnit.id),
+				);
+	const retainedDrawUnitCount = stagedDrawUnits.length;
 	metrics.stateChangeCount += stateCache.setDepthState({
 		enabled: true,
 		write: true,
@@ -299,12 +264,27 @@ export function submitWebgl2FlatWorldDrawUnits({
 		zfail: gl.KEEP,
 		zpass: gl.KEEP,
 	});
+	if (stagedDrawUnits.length === 0) {
+		metrics.atlasStaticRetainedDrawUnitCount = retainedDrawUnitCount;
+		submitAtlasStaticDrawUnits({
+			gl,
+			stateCache,
+			program: atlasStaticProgram,
+			viewProjectionMatrix,
+			resources: atlasStaticResources,
+			replaceableDrawUnitIds: atlasReplacement.replaceableDrawUnitIds,
+			retainedDrawUnitCount,
+			metrics,
+			planningFallbackSamples: atlasReplacement.fallbackSamples,
+		});
+		return metrics;
+	}
 
 	let previousModelViewProjection: RenderMat4 | null = null;
 	let previousColor: Float32Array | null = null;
 	let previousAlphaTest: number | null = null;
 	let previousProgramKind = "";
-	for (const drawUnit of drawUnits) {
+	for (const drawUnit of stagedDrawUnits) {
 		const texture = drawUnit.texture;
 		const useTerrainBlend = drawUnit.terrainBlend !== null;
 		const useIndexed = drawUnit.indexedMaterial !== null;
@@ -463,7 +443,86 @@ export function submitWebgl2FlatWorldDrawUnits({
 		metrics.drawCallCount += 1;
 		metrics.triangleCount += drawUnit.triangleCount;
 	}
+	submitAtlasStaticDrawUnits({
+		gl,
+		stateCache,
+		program: atlasStaticProgram,
+		viewProjectionMatrix,
+		resources: atlasStaticResources,
+		replaceableDrawUnitIds: atlasReplacement.replaceableDrawUnitIds,
+		retainedDrawUnitCount,
+		metrics,
+		planningFallbackSamples: atlasReplacement.fallbackSamples,
+	});
 	return metrics;
+}
+
+function submitAtlasStaticDrawUnits({
+	gl,
+	stateCache,
+	program,
+	viewProjectionMatrix,
+	resources,
+	replaceableDrawUnitIds,
+	retainedDrawUnitCount,
+	metrics,
+	planningFallbackSamples,
+}: {
+	gl: WebGL2RenderingContext;
+	stateCache: Webgl2StateCache;
+	program: Webgl2AtlasStaticWorldProgram | undefined;
+	viewProjectionMatrix: RenderMat4;
+	resources: Webgl2AtlasStaticSubmitResources;
+	replaceableDrawUnitIds: ReadonlySet<string>;
+	retainedDrawUnitCount: number;
+	metrics: Webgl2WorldSubmitMetrics;
+	planningFallbackSamples: readonly string[];
+}): void {
+	if (
+		program &&
+		resources.batch &&
+		resources.generation &&
+		replaceableDrawUnitIds.size > 0
+	) {
+		const atlasMetrics = submitWebgl2AtlasStaticBatch({
+			gl,
+			stateCache,
+			program,
+			viewProjectionMatrix,
+			resources: {
+				batch: resources.batch,
+				generation: resources.generation,
+			},
+			replaceableDrawUnitIds,
+			retainedDrawUnitCount,
+		});
+		metrics.drawCallCount += atlasMetrics.shaderDrawCallCount;
+		metrics.triangleCount += atlasMetrics.submittedTriangleCount;
+		metrics.atlasStaticShaderDrawCallCount = atlasMetrics.shaderDrawCallCount;
+		metrics.atlasStaticSubmittedDrawSliceCount =
+			atlasMetrics.submittedDrawSliceCount;
+		metrics.atlasStaticReplacedDrawUnitCount =
+			atlasMetrics.replacedDrawUnitCount;
+		metrics.atlasStaticRetainedDrawUnitCount =
+			atlasMetrics.retainedDrawUnitCount;
+		metrics.atlasStaticSubmitFallbackSamples = atlasMetrics.fallbackSamples;
+		return;
+	}
+	const fallbackSamples = [...planningFallbackSamples];
+	if (
+		!program &&
+		resources.batch &&
+		resources.generation &&
+		replaceableDrawUnitIds.size > 0
+	) {
+		fallbackSamples.push("atlas static submit missing shader program");
+	}
+	const emptyAtlasMetrics = createEmptyWebgl2AtlasStaticSubmitMetrics();
+	metrics.atlasStaticRetainedDrawUnitCount = retainedDrawUnitCount;
+	metrics.atlasStaticSubmitFallbackSamples = [
+		...fallbackSamples,
+		...emptyAtlasMetrics.fallbackSamples,
+	].slice(0, 8);
 }
 
 const TERRAIN_BLEND_SAMPLER_UNIFORM_COUNT = 10;

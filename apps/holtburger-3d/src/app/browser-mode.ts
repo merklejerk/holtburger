@@ -74,6 +74,8 @@ export interface BrowserModeState {
 	buildingLodRadius: number;
 	detailLodRadius: number;
 	envCellLodRadius: number;
+	cameraNearPlane: number;
+	cameraFarPlane: number;
 	transitionPortalMaxDepth: number;
 	landblockInputMode: BrowserLandblockInputMode;
 	showPortalPolygons: boolean;
@@ -95,6 +97,12 @@ const DEFAULT_BROWSER_DESTINATION = parseBrowserLocationInput(
 );
 export const MIN_BROWSER_LOD_RADIUS = MIN_OUTDOOR_SCENE_LOD_RADIUS;
 export const MAX_BROWSER_LOD_RADIUS = MAX_OUTDOOR_SCENE_LOD_RADIUS;
+const DEFAULT_BROWSER_CAMERA_NEAR_PLANE = 0.1;
+const DEFAULT_BROWSER_CAMERA_FAR_PLANE = 3000;
+export const MIN_BROWSER_CAMERA_NEAR_PLANE = 0.01;
+export const MAX_BROWSER_CAMERA_NEAR_PLANE = 1;
+export const MIN_BROWSER_CAMERA_FAR_PLANE = 250;
+export const MAX_BROWSER_CAMERA_FAR_PLANE = 5000;
 export { MIN_TRANSITION_PORTAL_MAX_DEPTH, MAX_TRANSITION_PORTAL_MAX_DEPTH };
 
 export function createBrowserModeState(): BrowserModeState {
@@ -108,6 +116,8 @@ export function createBrowserModeState(): BrowserModeState {
 		buildingLodRadius: DEFAULT_BUILDING_LOD_RADIUS,
 		detailLodRadius: DEFAULT_DETAIL_LOD_RADIUS,
 		envCellLodRadius: DEFAULT_ENV_CELL_LOD_RADIUS,
+		cameraNearPlane: DEFAULT_BROWSER_CAMERA_NEAR_PLANE,
+		cameraFarPlane: DEFAULT_BROWSER_CAMERA_FAR_PLANE,
 		transitionPortalMaxDepth: DEFAULT_TRANSITION_PORTAL_MAX_DEPTH,
 		landblockInputMode: "dungeon",
 		showPortalPolygons: false,
@@ -279,6 +289,35 @@ export function updateTransitionPortalMaxDepth(
 	};
 }
 
+export function updateBrowserCameraNearPlane(
+	browserMode: BrowserModeState,
+	nearPlane: number,
+): BrowserModeState {
+	const nextNearPlane = clampBrowserCameraNearPlane(nearPlane);
+
+	return {
+		...browserMode,
+		cameraNearPlane: nextNearPlane,
+		cameraFarPlane: Math.max(
+			browserMode.cameraFarPlane,
+			nextNearPlane + 1,
+		),
+	};
+}
+
+export function updateBrowserCameraFarPlane(
+	browserMode: BrowserModeState,
+	farPlane: number,
+): BrowserModeState {
+	return {
+		...browserMode,
+		cameraFarPlane: Math.max(
+			clampBrowserCameraFarPlane(farPlane),
+			browserMode.cameraNearPlane + 1,
+		),
+	};
+}
+
 export function updateLandblockInputMode(
 	browserMode: BrowserModeState,
 	landblockInputMode: BrowserLandblockInputMode,
@@ -378,6 +417,8 @@ export function previewBrowserLocation(
 		buildingLodRadius: browserMode.buildingLodRadius,
 		detailLodRadius: browserMode.detailLodRadius,
 		envCellLodRadius: browserMode.envCellLodRadius,
+		cameraNearPlane: browserMode.cameraNearPlane,
+		cameraFarPlane: browserMode.cameraFarPlane,
 		transitionPortalMaxDepth: browserMode.transitionPortalMaxDepth,
 		landblockInputMode: browserMode.landblockInputMode,
 		showPortalPolygons: browserMode.showPortalPolygons,
@@ -414,6 +455,8 @@ export function selectBrowserLandblockDestination(
 		buildingLodRadius: browserMode.buildingLodRadius,
 		detailLodRadius: browserMode.detailLodRadius,
 		envCellLodRadius: browserMode.envCellLodRadius,
+		cameraNearPlane: browserMode.cameraNearPlane,
+		cameraFarPlane: browserMode.cameraFarPlane,
 		transitionPortalMaxDepth: browserMode.transitionPortalMaxDepth,
 		landblockInputMode: browserMode.landblockInputMode,
 		showPortalPolygons: browserMode.showPortalPolygons,
@@ -705,4 +748,26 @@ function formatBrowserLocationLabel(
 
 function clampLandblockAxis(value: number): number {
 	return Math.min(Math.max(value, 0), 0xfe);
+}
+
+function clampBrowserCameraNearPlane(value: number): number {
+	if (!Number.isFinite(value)) {
+		return DEFAULT_BROWSER_CAMERA_NEAR_PLANE;
+	}
+
+	return Math.min(
+		MAX_BROWSER_CAMERA_NEAR_PLANE,
+		Math.max(MIN_BROWSER_CAMERA_NEAR_PLANE, value),
+	);
+}
+
+function clampBrowserCameraFarPlane(value: number): number {
+	if (!Number.isFinite(value)) {
+		return DEFAULT_BROWSER_CAMERA_FAR_PLANE;
+	}
+
+	return Math.min(
+		MAX_BROWSER_CAMERA_FAR_PLANE,
+		Math.max(MIN_BROWSER_CAMERA_FAR_PLANE, value),
+	);
 }

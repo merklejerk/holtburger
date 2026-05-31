@@ -7,6 +7,8 @@ export interface Webgl2SceneDomainTarget {
 	readonly framebuffer: WebGLFramebuffer;
 	readonly colorTexture: WebGLTexture;
 	readonly depthTexture: WebGLTexture;
+	readonly hasDepth: true;
+	readonly hasStencil: true;
 	dispose(): void;
 }
 
@@ -25,6 +27,8 @@ export interface Webgl2PortalCompositeTarget {
 	readonly framebuffer: WebGLFramebuffer;
 	readonly colorTexture: WebGLTexture;
 	readonly depthTexture: WebGLTexture;
+	readonly hasDepth: true;
+	readonly hasStencil: true;
 	dispose(): void;
 }
 
@@ -186,6 +190,8 @@ function createWebgl2SceneDomainTarget(
 				framebuffer,
 				colorTexture,
 				depthTexture,
+				hasDepth: true,
+				hasStencil: true,
 				dispose() {
 					gl.deleteFramebuffer(framebuffer);
 					gl.deleteTexture(colorTexture);
@@ -269,6 +275,8 @@ function createWebgl2PortalCompositeTarget(
 				framebuffer,
 				colorTexture,
 				depthTexture,
+				hasDepth: true,
+				hasStencil: true,
 				dispose() {
 					gl.deleteFramebuffer(framebuffer);
 					gl.deleteTexture(colorTexture);

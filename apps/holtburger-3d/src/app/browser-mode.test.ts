@@ -14,6 +14,8 @@ import {
 	selectBrowserLandblockDestination,
 	updateBuildingLodRadius,
 	updateBrowserDraft,
+	updateBrowserCameraFarPlane,
+	updateBrowserCameraNearPlane,
 	updateBrowserDetailTexturesEnabled,
 	updateCellIndicatorVisibility,
 	updateDetailLodRadius,
@@ -37,6 +39,8 @@ describe("browser-mode location policy", () => {
 		expect(state.buildingLodRadius).toBe(1);
 		expect(state.detailLodRadius).toBe(1);
 		expect(state.envCellLodRadius).toBe(1);
+		expect(state.cameraNearPlane).toBe(0.1);
+		expect(state.cameraFarPlane).toBe(3000);
 		expect(state.transitionPortalMaxDepth).toBeGreaterThanOrEqual(
 			MIN_TRANSITION_PORTAL_MAX_DEPTH,
 		);
@@ -93,6 +97,28 @@ describe("browser-mode location policy", () => {
 			updateTransitionPortalMaxDepth(createBrowserModeState(), 3.8)
 				.transitionPortalMaxDepth,
 		).toBe(3);
+	});
+
+	it("keeps camera clipping planes bounded and ordered", () => {
+		const nearState = updateBrowserCameraNearPlane(
+			createBrowserModeState(),
+			99,
+		);
+		expect(nearState.cameraNearPlane).toBe(1);
+		expect(nearState.cameraFarPlane).toBe(3000);
+
+		const farState = updateBrowserCameraFarPlane(
+			createBrowserModeState(),
+			10,
+		);
+		expect(farState.cameraFarPlane).toBe(250);
+
+		const invalidState = updateBrowserCameraFarPlane(
+			updateBrowserCameraNearPlane(createBrowserModeState(), Number.NaN),
+			Number.NaN,
+		);
+		expect(invalidState.cameraNearPlane).toBe(0.1);
+		expect(invalidState.cameraFarPlane).toBe(3000);
 	});
 
 	it("parses AC-style coordinate input into a stable selection label", () => {

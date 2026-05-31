@@ -253,18 +253,18 @@ function describeStructuredInteriorStatus(
 ): string {
 	if (focusEnvCellId === null) {
 		if (cells.length === 0) {
-			return "Three.js is waiting for outdoor-linked structured-interior geometry.";
+			return "Renderer is waiting for outdoor-linked structured-interior geometry.";
 		}
 
-		return `Three.js is rendering ${cells.length} outdoor-linked structured interior cell${cells.length === 1 ? "" : "s"}.`;
+		return `Renderer has ${cells.length} outdoor-linked structured interior cell${cells.length === 1 ? "" : "s"} ready.`;
 	}
 
 	const focusLabel = formatEnvCellLabel(focusEnvCellId);
 	if (cells.length === 0) {
-		return `Three.js is waiting for structured-interior geometry around focus ${focusLabel}.`;
+		return `Renderer is waiting for structured-interior geometry around focus ${focusLabel}.`;
 	}
 
-	return `Three.js is rendering ${cells.length} structured interior cell${cells.length === 1 ? "" : "s"} around focus ${focusLabel}.`;
+	return `Renderer has ${cells.length} structured interior cell${cells.length === 1 ? "" : "s"} ready around focus ${focusLabel}.`;
 }
 
 function describePreparedIndoorCache(assetState: AssetChannelState): string {

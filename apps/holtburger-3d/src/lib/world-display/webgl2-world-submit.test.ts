@@ -5,6 +5,7 @@ import {
 	partitionWebgl2SceneDomainDrawUnits,
 	planWebgl2FlatWorldSubmitOrder,
 	planWebgl2PortalMaskSubmitOrder,
+	submitWebgl2FlatWorldDrawUnits,
 	submitWebgl2FlatWorldFrame,
 	type Webgl2FlatWorldProgram,
 	type Webgl2IndexedP16WorldProgram,
@@ -156,6 +157,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		expect(metrics.vertexArrayBindCount).toBe(1);
 		expect(metrics.uniformUploadCount).toBe(2);
 		expect(metrics.triangleCount).toBe(2);
+		expect(gl.calls).toContain(`disable:${gl.CULL_FACE}`);
 		expect(
 			gl.calls.filter((call) => call === "drawElements:4:3:5123:0"),
 		).toHaveLength(2);
@@ -196,6 +198,69 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		});
 
 		expect(gl.uniform4fvValues).toContainEqual([0, 0, 0, 0.5]);
+	});
+
+	it("enables backface culling only for terrain when requested", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+		const drawUnits = [
+			createDrawUnit({
+				id: "terrain",
+				kind: "terrain",
+				materialKind: "terrain-blend",
+				terrainBlend: createTerrainBlendResources(),
+			}),
+			createDrawUnit({ id: "static", kind: "static" }),
+		];
+
+		submitWebgl2FlatWorldDrawUnits({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			terrainBlendProgram: createTerrainBlendProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			viewProjectionMatrix: createIdentityMat4(),
+			drawUnits,
+			terrainBackfaceCulling: true,
+		});
+
+		const cullCalls = gl.calls.filter(
+			(call) => call === `enable:${gl.CULL_FACE}` || call === `disable:${gl.CULL_FACE}`,
+		);
+		expect(cullCalls).toEqual([
+			`disable:${gl.CULL_FACE}`,
+			`enable:${gl.CULL_FACE}`,
+			`disable:${gl.CULL_FACE}`,
+		]);
+	});
+
+	it("keeps terrain backface culling disabled by default", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+
+		submitWebgl2FlatWorldDrawUnits({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			terrainBlendProgram: createTerrainBlendProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			viewProjectionMatrix: createIdentityMat4(),
+			drawUnits: [
+				createDrawUnit({
+					id: "terrain",
+					kind: "terrain",
+					materialKind: "terrain-blend",
+					terrainBlend: createTerrainBlendResources(),
+				}),
+			],
+		});
+
+		expect(gl.calls).toContain(`disable:${gl.CULL_FACE}`);
+		expect(gl.calls).not.toContain(`enable:${gl.CULL_FACE}`);
 	});
 
 	it("submits indexed draw units with index and palette texture bindings", () => {
@@ -296,6 +361,7 @@ function createDrawUnit({
 	color = new Float32Array([1, 0, 0, 1]),
 	texture = null,
 	indexedMaterial = null,
+	terrainBlend = null,
 	vertexArray = {} as WebGLVertexArrayObject,
 	kind = "static",
 	sceneDomain,
@@ -309,6 +375,7 @@ function createDrawUnit({
 	color?: Float32Array;
 	texture?: Webgl2WorldDrawUnit["texture"];
 	indexedMaterial?: Webgl2WorldDrawUnit["indexedMaterial"];
+	terrainBlend?: Webgl2WorldDrawUnit["terrainBlend"];
 	vertexArray?: WebGLVertexArrayObject;
 }): Webgl2WorldDrawUnit {
 	return {
@@ -350,7 +417,7 @@ function createDrawUnit({
 		texture,
 		indexedMaterial,
 		detailOverlay: null,
-		terrainBlend: null,
+		terrainBlend,
 		sceneDomain: sceneDomain ?? defaultSceneDomainForKind(kind),
 		modelMatrix: createIdentityMat4(),
 		bvhItemKeys: [],
@@ -477,6 +544,29 @@ function createTerrainBlendProgram(): Webgl2TerrainBlendWorldProgram {
 		dispose() {
 			return;
 		},
+	};
+}
+
+function createTerrainBlendResources(): NonNullable<
+	Webgl2WorldDrawUnit["terrainBlend"]
+> {
+	const texture = {
+		texture: {} as WebGLTexture,
+		width: 1,
+		height: 1,
+		dispose() {
+			return;
+		},
+	};
+	return {
+		plan: {} as NonNullable<Webgl2WorldDrawUnit["terrainBlend"]>["plan"],
+		base: {
+			key: "terrain/base",
+			texture,
+			tiling: 1,
+		},
+		overlays: [],
+		roads: [],
 	};
 }
 

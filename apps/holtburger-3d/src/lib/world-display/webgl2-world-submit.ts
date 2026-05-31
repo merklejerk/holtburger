@@ -100,6 +100,7 @@ export interface Webgl2WorldSubmitMetrics {
 	atlasStaticSubmittedDrawSliceCount: number;
 	atlasStaticReplacedDrawUnitCount: number;
 	atlasStaticRetainedDrawUnitCount: number;
+	atlasStaticSubmitNoVisibleRouteCount: number;
 	atlasStaticSubmitFallbackSamples: readonly string[];
 }
 
@@ -119,6 +120,7 @@ const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	atlasStaticSubmittedDrawSliceCount: 0,
 	atlasStaticReplacedDrawUnitCount: 0,
 	atlasStaticRetainedDrawUnitCount: 0,
+	atlasStaticSubmitNoVisibleRouteCount: 0,
 	atlasStaticSubmitFallbackSamples: [],
 };
 
@@ -275,6 +277,7 @@ export function submitWebgl2FlatWorldDrawUnits({
 			replaceableDrawUnitIds: atlasReplacement.replaceableDrawUnitIds,
 			retainedDrawUnitCount,
 			metrics,
+			planningNoVisibleRouteCount: atlasReplacement.noVisibleRouteCount,
 			planningFallbackSamples: atlasReplacement.fallbackSamples,
 		});
 		return metrics;
@@ -452,6 +455,7 @@ export function submitWebgl2FlatWorldDrawUnits({
 		replaceableDrawUnitIds: atlasReplacement.replaceableDrawUnitIds,
 		retainedDrawUnitCount,
 		metrics,
+		planningNoVisibleRouteCount: atlasReplacement.noVisibleRouteCount,
 		planningFallbackSamples: atlasReplacement.fallbackSamples,
 	});
 	return metrics;
@@ -466,6 +470,7 @@ function submitAtlasStaticDrawUnits({
 	replaceableDrawUnitIds,
 	retainedDrawUnitCount,
 	metrics,
+	planningNoVisibleRouteCount,
 	planningFallbackSamples,
 }: {
 	gl: WebGL2RenderingContext;
@@ -476,6 +481,7 @@ function submitAtlasStaticDrawUnits({
 	replaceableDrawUnitIds: ReadonlySet<string>;
 	retainedDrawUnitCount: number;
 	metrics: Webgl2WorldSubmitMetrics;
+	planningNoVisibleRouteCount: number;
 	planningFallbackSamples: readonly string[];
 }): void {
 	if (
@@ -505,10 +511,13 @@ function submitAtlasStaticDrawUnits({
 			atlasMetrics.replacedDrawUnitCount;
 		metrics.atlasStaticRetainedDrawUnitCount =
 			atlasMetrics.retainedDrawUnitCount;
+		metrics.atlasStaticSubmitNoVisibleRouteCount =
+			atlasMetrics.noVisibleRouteCount;
 		metrics.atlasStaticSubmitFallbackSamples = atlasMetrics.fallbackSamples;
 		return;
 	}
 	const fallbackSamples = [...planningFallbackSamples];
+	metrics.atlasStaticSubmitNoVisibleRouteCount = planningNoVisibleRouteCount;
 	if (
 		!program &&
 		resources.batch &&
@@ -519,6 +528,8 @@ function submitAtlasStaticDrawUnits({
 	}
 	const emptyAtlasMetrics = createEmptyWebgl2AtlasStaticSubmitMetrics();
 	metrics.atlasStaticRetainedDrawUnitCount = retainedDrawUnitCount;
+	metrics.atlasStaticSubmitNoVisibleRouteCount +=
+		emptyAtlasMetrics.noVisibleRouteCount;
 	metrics.atlasStaticSubmitFallbackSamples = [
 		...fallbackSamples,
 		...emptyAtlasMetrics.fallbackSamples,

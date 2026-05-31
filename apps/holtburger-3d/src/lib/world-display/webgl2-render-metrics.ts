@@ -260,6 +260,10 @@ export function createWebgl2RenderMetrics(
 				input.worldStore?.atlasStaticCompactedTotalByteLength ?? 0,
 			atlasStaticCompactedDrawSliceCount:
 				input.worldStore?.atlasStaticCompactedDrawSliceCount ?? 0,
+			atlasStaticBatchOriginCount:
+				input.worldStore?.atlasStaticBatchOriginCount ?? 0,
+			atlasStaticTransformTableEntryCount:
+				input.worldStore?.atlasStaticTransformTableEntryCount ?? 0,
 			atlasStaticCompactionResourceFallbackSamples: [
 				...(input.worldStore?.atlasStaticCompactionResourceFallbackSamples ??
 					[]),
@@ -272,6 +276,8 @@ export function createWebgl2RenderMetrics(
 				input.submitMetrics.atlasStaticReplacedDrawUnitCount,
 			atlasStaticRetainedDrawUnitCount:
 				input.submitMetrics.atlasStaticRetainedDrawUnitCount,
+			atlasStaticSubmitNoVisibleRouteCount:
+				input.submitMetrics.atlasStaticSubmitNoVisibleRouteCount,
 			atlasStaticSubmitFallbackSamples: [
 				...input.submitMetrics.atlasStaticSubmitFallbackSamples,
 			],
@@ -310,12 +316,18 @@ export function createWebgl2RenderMetrics(
 							input.worldStore.atlasStaticCompactedDrawUnitCount,
 						"webgl2-atlas-static-compacted-draw-slices":
 							input.worldStore.atlasStaticCompactedDrawSliceCount,
+						"webgl2-atlas-static-batch-origins":
+							input.worldStore.atlasStaticBatchOriginCount,
+						"webgl2-atlas-static-transform-table-entries":
+							input.worldStore.atlasStaticTransformTableEntryCount,
 						"webgl2-atlas-static-shader-draws":
 							input.submitMetrics.atlasStaticShaderDrawCallCount,
 						"webgl2-atlas-static-submitted-slices":
 							input.submitMetrics.atlasStaticSubmittedDrawSliceCount,
 						"webgl2-atlas-static-replaced-draw-units":
 							input.submitMetrics.atlasStaticReplacedDrawUnitCount,
+						"webgl2-atlas-static-no-visible-routes":
+							input.submitMetrics.atlasStaticSubmitNoVisibleRouteCount,
 						"webgl2-detail-overlay": input.worldStore.detailTextureCount,
 						...prefixCounts(
 							"webgl2-visible-",

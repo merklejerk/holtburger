@@ -636,11 +636,14 @@ export function createThreeWorldDisplayRenderer(
 			atlasStaticCompactedIndexByteLength: 0,
 			atlasStaticCompactedTotalByteLength: 0,
 			atlasStaticCompactedDrawSliceCount: 0,
+			atlasStaticBatchOriginCount: 0,
+			atlasStaticTransformTableEntryCount: 0,
 			atlasStaticCompactionResourceFallbackSamples: [],
 			atlasStaticShaderDrawCallCount: 0,
 			atlasStaticSubmittedDrawSliceCount: 0,
 			atlasStaticReplacedDrawUnitCount: 0,
 			atlasStaticRetainedDrawUnitCount: 0,
+			atlasStaticSubmitNoVisibleRouteCount: 0,
 			atlasStaticSubmitFallbackSamples: [],
 			textureVelocityPartCount: 0,
 			textureVelocityRenderGroupCount: 0,
@@ -1114,11 +1117,14 @@ export function createThreeWorldDisplayRenderer(
 			atlasStaticCompactedIndexByteLength: 0,
 			atlasStaticCompactedTotalByteLength: 0,
 			atlasStaticCompactedDrawSliceCount: 0,
+			atlasStaticBatchOriginCount: 0,
+			atlasStaticTransformTableEntryCount: 0,
 			atlasStaticCompactionResourceFallbackSamples: [],
 			atlasStaticShaderDrawCallCount: 0,
 			atlasStaticSubmittedDrawSliceCount: 0,
 			atlasStaticReplacedDrawUnitCount: 0,
 			atlasStaticRetainedDrawUnitCount: 0,
+			atlasStaticSubmitNoVisibleRouteCount: 0,
 			atlasStaticSubmitFallbackSamples: [],
 			textureVelocityPartCount: textureVelocityMetrics.textureVelocityPartCount,
 			textureVelocityRenderGroupCount:
@@ -3824,6 +3830,9 @@ function createRenderDebugMetrics(
 			options.atlasStaticCompactedTotalByteLength,
 		atlasStaticCompactedDrawSliceCount:
 			options.atlasStaticCompactedDrawSliceCount,
+		atlasStaticBatchOriginCount: options.atlasStaticBatchOriginCount,
+		atlasStaticTransformTableEntryCount:
+			options.atlasStaticTransformTableEntryCount,
 		atlasStaticCompactionResourceFallbackSamples:
 			options.atlasStaticCompactionResourceFallbackSamples,
 		atlasStaticShaderDrawCallCount: options.atlasStaticShaderDrawCallCount,
@@ -3831,6 +3840,8 @@ function createRenderDebugMetrics(
 			options.atlasStaticSubmittedDrawSliceCount,
 		atlasStaticReplacedDrawUnitCount: options.atlasStaticReplacedDrawUnitCount,
 		atlasStaticRetainedDrawUnitCount: options.atlasStaticRetainedDrawUnitCount,
+		atlasStaticSubmitNoVisibleRouteCount:
+			options.atlasStaticSubmitNoVisibleRouteCount,
 		atlasStaticSubmitFallbackSamples: options.atlasStaticSubmitFallbackSamples,
 		textureVelocityPartCount: options.textureVelocityPartCount,
 		textureVelocityRenderGroupCount: options.textureVelocityRenderGroupCount,

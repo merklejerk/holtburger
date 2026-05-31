@@ -161,6 +161,8 @@ export interface Webgl2WorldResourceStore {
 	atlasStaticCompactedIndexByteLength: number;
 	atlasStaticCompactedTotalByteLength: number;
 	atlasStaticCompactedDrawSliceCount: number;
+	atlasStaticBatchOriginCount: number;
+	atlasStaticTransformTableEntryCount: number;
 	atlasStaticCompactionResourceFallbackSamples: readonly string[];
 	textureCount: number;
 	indexedTextureCount: number;
@@ -259,6 +261,8 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		atlasStaticCompactedIndexByteLength: 0,
 		atlasStaticCompactedTotalByteLength: 0,
 		atlasStaticCompactedDrawSliceCount: 0,
+		atlasStaticBatchOriginCount: 0,
+		atlasStaticTransformTableEntryCount: 0,
 		atlasStaticCompactionResourceFallbackSamples: [],
 		textureCount: 0,
 		indexedTextureCount: 0,
@@ -558,6 +562,8 @@ export function destroyWebgl2WorldResources(
 	store.atlasStaticCompactedIndexByteLength = 0;
 	store.atlasStaticCompactedTotalByteLength = 0;
 	store.atlasStaticCompactedDrawSliceCount = 0;
+	store.atlasStaticBatchOriginCount = 0;
+	store.atlasStaticTransformTableEntryCount = 0;
 	store.atlasStaticCompactionResourceFallbackSamples = [];
 	for (const texture of store.texturesByKey.values()) {
 		texture.dispose();
@@ -1872,14 +1878,15 @@ function syncWebgl2AtlasStaticBatch({
 	store.atlasStaticCompactedVertexByteLength =
 		(store.atlasStaticBatch?.positionByteLength ?? 0) +
 		(store.atlasStaticBatch?.uvByteLength ?? 0) +
-		(store.atlasStaticBatch?.materialSlotByteLength ?? 0) +
-		(store.atlasStaticBatch?.transformSlotByteLength ?? 0);
+		(store.atlasStaticBatch?.materialSlotByteLength ?? 0);
 	store.atlasStaticCompactedIndexByteLength =
 		store.atlasStaticBatch?.indexByteLength ?? 0;
 	store.atlasStaticCompactedTotalByteLength =
 		store.atlasStaticBatch?.totalByteLength ?? 0;
 	store.atlasStaticCompactedDrawSliceCount =
 		store.atlasStaticBatch?.drawSliceCount ?? 0;
+	store.atlasStaticBatchOriginCount = store.atlasStaticBatch ? 1 : 0;
+	store.atlasStaticTransformTableEntryCount = 0;
 	if (!rendererResourceGraph || !store.atlasStaticBatch) {
 		releaseWebgl2AtlasStaticBatchGraphLease(store);
 		return;
@@ -1961,6 +1968,8 @@ function disposeWebgl2AtlasStaticBatch(store: Webgl2WorldResourceStore): void {
 	store.atlasStaticCompactedIndexByteLength = 0;
 	store.atlasStaticCompactedTotalByteLength = 0;
 	store.atlasStaticCompactedDrawSliceCount = 0;
+	store.atlasStaticBatchOriginCount = 0;
+	store.atlasStaticTransformTableEntryCount = 0;
 	releaseWebgl2AtlasStaticBatchGraphLease(store);
 }
 

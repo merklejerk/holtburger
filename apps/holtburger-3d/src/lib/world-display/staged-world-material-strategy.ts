@@ -39,6 +39,7 @@ import {
 	selectVariantTextureSamplingPolicy,
 	type TextureFilteringMode,
 } from "./texture-sampling-policy";
+import { planAtlasLayout, type AtlasTexturePage } from "./atlas-layout-planner";
 
 export type StagedWorldMaterialRenderableKind =
 	| "static"
@@ -174,21 +175,7 @@ interface StagedWorldAtlasEntryPlan {
 	transfer: "linear";
 }
 
-interface StagedWorldAtlasTexturePlacement {
-	atlasEntryKey: string;
-	x: number;
-	y: number;
-	width: number;
-	height: number;
-	gutterPixels: number;
-}
-
-interface StagedWorldAtlasTexturePlan {
-	textureIndex: number;
-	width: number;
-	height: number;
-	placements: StagedWorldAtlasTexturePlacement[];
-}
+type StagedWorldAtlasTexturePlan = AtlasTexturePage;
 
 interface StagedWorldAtlasDrawSlicePlan {
 	key: string;
@@ -227,12 +214,6 @@ interface AtlasCandidate {
 	entry: StagedWorldAtlasEntryPlan;
 }
 
-interface AtlasPlacementState {
-	textures: StagedWorldAtlasTexturePlan[];
-	placementByEntryKey: Map<string, { textureIndex: number }>;
-	failedEntryKeys: Set<string>;
-}
-
 export function planStagedWorldMaterialStrategies(options: {
 	assetState: AssetChannelState;
 	requirements: readonly StagedWorldMaterialStrategyInput[];
@@ -262,27 +243,42 @@ export function planStagedWorldMaterialStrategies(options: {
 	}
 
 	const entries = dedupeAtlasEntries(candidates);
-	const placementState = packAtlasEntries(entries, policy);
-	const placedCandidates = candidates.filter(
-		(candidate) => !placementState.failedEntryKeys.has(candidate.atlasEntryKey),
+	const layoutPlan = planAtlasLayout({
+		entries,
+		policy: {
+			maxTextureSize: policy.maxAtlasTextureSize,
+			maxTextureCount: policy.maxAtlasTextureCount,
+			gutterPixels: policy.baseGutterPixels,
+		},
+	});
+	const placedCandidates = candidates.filter((candidate) =>
+		layoutPlan.placementsByEntryKey.has(candidate.atlasEntryKey),
 	);
 	const materialTableSlotByKey = assignMaterialTableSlots(
 		placedCandidates,
 		policy,
 	);
 	for (const candidate of candidates) {
-		const placement = placementState.placementByEntryKey.get(
+		const placement = layoutPlan.placementsByEntryKey.get(
 			candidate.atlasEntryKey,
 		);
 		if (!placement) {
+			const overflow = layoutPlan.overflowsByEntryKey.get(
+				candidate.atlasEntryKey,
+			);
 			atlasLayoutDecisions.push(
 				createFallbackRequirement({
 					input: candidate.input,
 					materialAssetId: candidate.materialAssetId,
 					behavior: candidate.behavior,
 					kind: "flat-fallback",
-					reason: "atlas-full",
-					detail: `atlas entry ${candidate.atlasEntryKey} did not fit in ${policy.maxAtlasTextureCount} atlas textures`,
+					reason:
+						overflow?.reason === "source-too-large"
+							? "source-texture-too-large"
+							: "atlas-full",
+					detail:
+						overflow?.detail ??
+						`atlas entry ${candidate.atlasEntryKey} did not fit in ${policy.maxAtlasTextureCount} atlas textures`,
 				}),
 			);
 			continue;
@@ -330,7 +326,7 @@ export function planStagedWorldMaterialStrategies(options: {
 			generation: options.generation ?? 0,
 			policy,
 			atlasEntries: entries,
-			atlasTextures: placementState.textures,
+			atlasTextures: [...layoutPlan.texturePages],
 			drawSlices,
 		},
 		atlasLayoutDecisions: sortedRequirements,
@@ -361,24 +357,6 @@ function evaluateAtlasCandidate(options: {
 	}
 	const atlasEligibility = resolvedStrategy.atlasEligibility;
 	const level = atlasEligibility.atlasEntry.level;
-	if (
-		level.width + options.policy.baseGutterPixels * 2 >
-			options.policy.maxAtlasTextureSize ||
-		level.height + options.policy.baseGutterPixels * 2 >
-			options.policy.maxAtlasTextureSize
-	) {
-		return {
-			kind: "strategy",
-			requirement: createFallbackRequirement({
-				input: options.input,
-				materialAssetId: resolvedStrategy.materialAssetId,
-				behavior: resolvedStrategy.behavior,
-				kind: "flat-fallback",
-				reason: "source-texture-too-large",
-				detail: `texture ${atlasEligibility.atlasEntry.preparedTextureAssetId} is ${level.width}x${level.height}, exceeding atlas capacity`,
-			}),
-		};
-	}
 	return {
 		kind: "candidate",
 		candidate: {
@@ -924,75 +902,6 @@ function dedupeAtlasEntries(
 	return [...entriesByKey.values()].sort((left, right) =>
 		left.key.localeCompare(right.key),
 	);
-}
-
-function packAtlasEntries(
-	entries: readonly StagedWorldAtlasEntryPlan[],
-	policy: StagedWorldMaterialStrategyPolicy,
-): AtlasPlacementState {
-	if (entries.length === 0) {
-		return {
-			textures: [],
-			placementByEntryKey: new Map(),
-			failedEntryKeys: new Set(),
-		};
-	}
-	const textures: StagedWorldAtlasTexturePlan[] = [];
-	const placementByEntryKey = new Map<string, { textureIndex: number }>();
-	const failedEntryKeys = new Set<string>();
-	let cursorX = policy.baseGutterPixels;
-	let cursorY = policy.baseGutterPixels;
-	let rowHeight = 0;
-	let currentTexture = createAtlasTexturePlan(0, policy);
-	textures.push(currentTexture);
-
-	for (const entry of entries) {
-		const paddedWidth = entry.width + policy.baseGutterPixels * 2;
-		const paddedHeight = entry.height + policy.baseGutterPixels * 2;
-		if (cursorX + paddedWidth > policy.maxAtlasTextureSize) {
-			cursorX = policy.baseGutterPixels;
-			cursorY += rowHeight + policy.baseGutterPixels;
-			rowHeight = 0;
-		}
-		if (cursorY + paddedHeight > policy.maxAtlasTextureSize) {
-			if (textures.length >= policy.maxAtlasTextureCount) {
-				failedEntryKeys.add(entry.key);
-				continue;
-			}
-			currentTexture = createAtlasTexturePlan(textures.length, policy);
-			textures.push(currentTexture);
-			cursorX = policy.baseGutterPixels;
-			cursorY = policy.baseGutterPixels;
-			rowHeight = 0;
-		}
-		currentTexture.placements.push({
-			atlasEntryKey: entry.key,
-			x: cursorX + policy.baseGutterPixels,
-			y: cursorY + policy.baseGutterPixels,
-			width: entry.width,
-			height: entry.height,
-			gutterPixels: policy.baseGutterPixels,
-		});
-		placementByEntryKey.set(entry.key, {
-			textureIndex: currentTexture.textureIndex,
-		});
-		cursorX += paddedWidth;
-		rowHeight = Math.max(rowHeight, paddedHeight);
-	}
-
-	return { textures, placementByEntryKey, failedEntryKeys };
-}
-
-function createAtlasTexturePlan(
-	textureIndex: number,
-	policy: StagedWorldMaterialStrategyPolicy,
-): StagedWorldAtlasTexturePlan {
-	return {
-		textureIndex,
-		width: policy.maxAtlasTextureSize,
-		height: policy.maxAtlasTextureSize,
-		placements: [],
-	};
 }
 
 function assignMaterialTableSlots(

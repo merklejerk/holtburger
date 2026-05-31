@@ -6,6 +6,18 @@ import {
 	type Webgl2VertexArrayResource,
 } from "./webgl2-gl";
 import type { AtlasStaticCompactedGeometry } from "./atlas-static-geometry-compactor";
+import type { AtlasTexturePlacement } from "./atlas-layout-planner";
+import type { AtlasStaticCompactionMaterialSlot } from "./atlas-static-compaction-planner";
+import type { RenderMat4 } from "./render-math";
+
+export interface Webgl2AtlasStaticMaterialSlot {
+	key: string;
+	index: number;
+	atlasTextureIndex: number;
+	atlasRect: readonly [number, number, number, number];
+	renderStateKey: string;
+	samplingKey: string;
+}
 
 export interface Webgl2AtlasStaticBatchResource {
 	key: string;
@@ -16,6 +28,9 @@ export interface Webgl2AtlasStaticBatchResource {
 	transformSlotBuffer: Webgl2BufferResource;
 	indexBuffer: Webgl2BufferResource;
 	indexType: GLenum;
+	materialSlots: readonly Webgl2AtlasStaticMaterialSlot[];
+	transformTable: readonly RenderMat4[];
+	drawSlices: AtlasStaticCompactedGeometry["drawSlices"];
 	vertexCount: number;
 	indexCount: number;
 	triangleCount: number;
@@ -33,9 +48,13 @@ export interface Webgl2AtlasStaticBatchResource {
 export function createWebgl2AtlasStaticBatchResource({
 	gl,
 	geometry,
+	materialSlots,
+	placementsByEntryKey,
 }: {
 	gl: WebGL2RenderingContext;
 	geometry: AtlasStaticCompactedGeometry;
+	materialSlots: readonly AtlasStaticCompactionMaterialSlot[];
+	placementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>;
 }): Webgl2AtlasStaticBatchResource {
 	const positionBuffer = createWebgl2ArrayBuffer(gl, {
 		label: `${geometry.key}/positions`,
@@ -88,6 +107,11 @@ export function createWebgl2AtlasStaticBatchResource({
 			geometry.indices instanceof Uint32Array
 				? gl.UNSIGNED_INT
 				: gl.UNSIGNED_SHORT,
+		materialSlots: materialSlots.map((slot) =>
+			toWebgl2AtlasStaticMaterialSlot(slot, placementsByEntryKey),
+		),
+		transformTable: geometry.transformTable,
+		drawSlices: geometry.drawSlices,
 		vertexCount: geometry.vertexCount,
 		indexCount: geometry.indexCount,
 		triangleCount: geometry.triangleCount,
@@ -107,5 +131,25 @@ export function createWebgl2AtlasStaticBatchResource({
 			transformSlotBuffer.dispose();
 			indexBuffer.dispose();
 		},
+	};
+}
+
+function toWebgl2AtlasStaticMaterialSlot(
+	slot: AtlasStaticCompactionMaterialSlot,
+	placementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>,
+): Webgl2AtlasStaticMaterialSlot {
+	const placement = placementsByEntryKey.get(slot.atlasEntryKey);
+	if (!placement) {
+		throw new Error(
+			`Atlas static material slot ${slot.key} references missing placement ${slot.atlasEntryKey}.`,
+		);
+	}
+	return {
+		key: slot.key,
+		index: slot.index,
+		atlasTextureIndex: placement.textureIndex,
+		atlasRect: [placement.x, placement.y, placement.width, placement.height],
+		renderStateKey: slot.renderStateKey,
+		samplingKey: slot.samplingKey,
 	};
 }

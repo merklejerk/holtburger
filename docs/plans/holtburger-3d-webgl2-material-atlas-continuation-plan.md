@@ -2289,8 +2289,8 @@ Future-step refinements:
 
 - M7.3 must treat transform slot upload as part of the atlas shader contract, not as a geometry
   rebuild trigger.
-- M7.3/M7.4 should keep the static-batch submit planner as the only place that decides whether a
-  compacted batch is drawn conservatively or split by visible draw ranges.
+- M7.4 should use conservative compacted submission: if any member draw unit in a compacted slice is
+  visible, draw the whole compacted slice/batch and measure the overdraw afterward.
 
 Exit criteria:
 
@@ -2300,12 +2300,13 @@ Exit criteria:
 - Debug reports expose enough compaction resource metrics to diagnose generation size and coverage
   before submission is enabled.
 
-### Phase M7.3: Gated Atlas Static Submit Path
+### Phase M7.3: Atlas Static Submit Path
 
-Status: Not started.
+Status: Partial and needs M7.3.1 cleanup. The shader and submit helper exist, but the current
+flat-world URL gate is the wrong migration shape and should be removed before M7.4.
 
-Purpose: add the atlas material-table shader and submit compacted batches behind an explicit
-debug/development gate before changing the default visible path.
+Purpose: add the atlas material-table shader and submit compacted batches as part of the WebGL2
+pipeline migration. This is not meant to become a long-lived parallel pipeline.
 
 Tasks:
 
@@ -2315,23 +2316,86 @@ Tasks:
   a multi-sampler path is deliberately implemented.
 - Preserve author UVs and encode enough material/sampler data for repeat/clamp behavior within atlas
   slots.
-- Submit compacted static batches only when the gate is enabled and every required atlas generation,
-  compacted buffer, draw slice, and material-table slot is available.
+- Submit compacted static batches when every required atlas generation, compacted buffer, draw slice,
+  and material-table slot is available; unsupported or missing resources fall back to staged draws.
 - Keep direct-texture, flat-fallback, unsupported, blended, animated-UV, indexed/paletted, terrain,
   structured-interior, and dynamic materials on staged paths.
 - Surface debug-report metrics for atlas shader draw calls, compacted submitted draw slices, staged
-  draw units retained, staged draw units replaced in gated mode, and gated-submit fallback reason
-  samples.
+  draw units retained, staged draw units replaced, and submit fallback reason samples.
 - Add tests for shader-program selection, material-table upload partitioning, atlas texture binding,
   missing-resource fallback, and gated submit ordering.
 
+Progress:
+
+- Added `webgl2-atlas-static-submit`, which plans replacement for visible compactable draw units,
+  validates bounded material-slot and transform-table limits, and submits compacted atlas static draw
+  slices when all resources are available.
+- Added an atlas static WebGL2 shader/program with position, author-UV, material-slot, and
+  transform-slot attributes. The shader uses bounded uniform arrays for material atlas rects and
+  transform matrices.
+- Current implementation note: the submit path is still behind `?webgl2AtlasStaticSubmit=1` and only
+  wired into flat-world rendering. This is now considered debt, not the desired product direction.
+  M7.3.1 should remove the URL gate and integrate conservative atlas substitution into the normal
+  submit path before proceeding to M7.4.
+- Render metrics/debug reports now distinguish atlas shader draw calls, submitted atlas draw slices,
+  staged draw units replaced in gated mode, staged draw units retained, and submit fallback samples.
+- Added tests for replacement planning, disabled-gate fallback, bounded transform-table fallback, and
+  compacted slice submission.
+
+Decisions and course corrections:
+
+- The first shader path is intentionally bounded to 128 material slots and 128 transform slots.
+  Larger scenes stay on staged rendering and report a submit fallback instead of partially drawing.
+- The flat-world URL gate is a course-correction target. We are migrating the WebGL2 pipeline, not
+  keeping a parallel opt-in renderer branch.
+- Scene-domain rendering still reports staged behavior. M7.3.1/M7.4 should extend substitution using
+  conservative whole-slice submission rather than waiting for per-range visibility design.
+- No `localStorage` persistence was added.
+- No legacy shims were added.
+
+Future-step refinements:
+
+- M7.3.1 must remove the URL-query gate and make atlas substitution a normal pipeline decision with
+  staged fallback for missing/unsupported resources.
+- M7.4 must decide whether the default path keeps the bounded uniform-array shader, partitions
+  compacted batches further, or moves material/transform tables to texture buffers/2D lookup
+  textures for larger scenes.
+- M7.4 should make conservative whole-slice submission the default for eligible compacted statics and
+  use metrics/field captures to decide whether finer visibility partitioning is worth doing later.
+
 Exit criteria:
 
-- Common textured outdoor static objects can render through atlas-backed compacted batches when the
-  gate is enabled.
-- The default path remains staged/direct until M7.4.
+- The atlas shader submit path exists and has tests, but the remaining URL gate is tracked as debt
+  for immediate cleanup.
 - Debug reports distinguish planned, generated, submitted, replaced, retained, and fallback
   compaction counts.
+
+### Phase M7.3.1: Remove Atlas Submit Gate and Fold Into Normal Pipeline
+
+Status: Not started.
+
+Purpose: correct the M7.3 course before M7.4. Atlas static submission should be a normal WebGL2
+pipeline decision, not a URL-gated flat-world side path.
+
+Tasks:
+
+- Remove `?webgl2AtlasStaticSubmit=1` as a runtime requirement.
+- Make conservative atlas static substitution run automatically whenever atlas generation,
+  compacted batch resources, material-slot data, and transform tables are available.
+- Apply the same conservative whole-slice replacement policy to flat-world and scene-domain submit
+  routes. If any member draw unit in a compacted slice is visible in that route, submit the whole
+  compacted slice for that route.
+- Keep staged fallback only for missing resources, unsupported materials, exceeded shader table
+  limits, or routes not yet supplied with required atlas resources.
+- Rename remaining "gated" metric/fallback wording to normal-path atlas submit wording.
+- Update tests to assert default atlas replacement behavior and staged fallback without a gate.
+
+Exit criteria:
+
+- No URL/query/debug gate is required for atlas static substitution.
+- Flat-world and scene-domain submit paths both use conservative atlas static replacement when
+  resources are ready.
+- Debug reports describe normal-path atlas submit behavior rather than gated behavior.
 
 ### Phase M7.4: Default Outdoor Static Draw Substitution
 
@@ -2349,11 +2413,11 @@ Tasks:
   required surfaces already exist in that generation and no mutation is required.
 - Replace eligible staged outdoor static draw units with compacted batch submission in the normal
   submit path.
-- Define and document the first substitution visibility policy. If M7.4 uses conservative batch
-  submission when any member draw unit is visible, expose conservative overdraw metrics and keep that
-  policy isolated behind the static-batch submit planner.
+- Use conservative whole-slice submission: if any member draw unit in a compacted slice is visible,
+  submit the entire slice/batch. Expose overdraw metrics, but do not block M7.4 on per-visible-range
+  submission.
 - Surface debug-report metrics for staged draw units replaced vs retained, compacted/default draw
-  calls, conservative overdraw count if applicable, and normal-path fallback reason samples.
+  calls, conservative overdraw count, and normal-path fallback reason samples.
 - Add tests for visibility substitution, staged fallback when compacted resources are missing,
   default submit ordering, graph-retained resource lifetime, and re-anchor-only updates.
 - Add or reserve M7A tests for structured-interior atlas participation through portal/domain
@@ -2370,7 +2434,7 @@ Exit criteria:
 - Debug reports expose compaction coverage and behavior: compacted batch count, compacted draw-unit
   count, compacted triangle count, compacted vertex/index byte sizes, compacted draw-slice count,
   atlas shader draw calls, staged draw units replaced vs retained, normal-path fallback samples, and
-  conservative overdraw count if the first visibility policy uses whole-batch submission.
+  conservative overdraw count from whole-slice submission.
 - The plan names structured-interior direct-texture atlas participation as the next direct atlas
   expansion, while indexed/paletted and terrain atlas work remain explicit dedicated designs.
 
@@ -2417,6 +2481,12 @@ Exit criteria:
   domain rather than one resource containing all compactable outdoor static draw units.
 - Keep transform-slot table upload explicit in M7.3; do not backslide into world-space baked compacted
   vertices just to make shader submission simpler.
+- Remove the M7.3 URL-gated flat-world atlas submit branch in M7.3.1; atlas submission should be a
+  normal pipeline decision with staged fallback, not a parallel opt-in path.
+- Replace the first submit shader's bounded uniform arrays with a partitioned or texture-backed table
+  path if field captures show real scenes exceeding 128 material slots or 128 transforms.
+- After M7.4, assess whether conservative whole-slice submission is too expensive in portal-heavy or
+  dense static scenes before designing per-visible-range submission.
 - Revisit the per-frame WebGL2 draw-unit sort after M3-M7 reshape the submit path.
 - Split renderer-neutral material sampling DTOs from any Three adapter names/imports if they still
   imply Three ownership.

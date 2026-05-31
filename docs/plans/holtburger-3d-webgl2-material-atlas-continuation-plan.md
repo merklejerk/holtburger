@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
-Status: Phase M5 complete; Phase M5A direct texture performance audit next.
+Status: Phase M6 complete; Phase M7 atlas-backed static compaction vertical slice next.
 
 Related plans:
 
@@ -1972,26 +1972,51 @@ Exit criteria:
 - The next phase has evidence for the dominant bottleneck rather than assuming draw-call count is
   the only issue.
 
-## Phase M6: Atlas Layout Planner Extraction
+## Phase M6: Atlas Layout Planner Extraction and Compaction Contract
 
-Status: Not started.
+Status: Complete.
 
 Purpose: extract atlas page/rect placement into a pure helper separate from material strategy,
-resource realization, and compaction scheduling. This phase is compaction prep; it is not expected
-to change visible materials by itself.
+material-table/draw-slice planning, resource realization, and compaction scheduling. This phase is
+compaction prep; it is not expected to change visible materials by itself. It should also turn the
+atlas/compaction pipeline shape into explicit interfaces so M7 starts from a known contract instead
+of discovering ownership while GPU resources and renderer graph lifetime are being added.
+
+Expected pipeline shape:
+
+- Material strategy resolves material semantics and atlas eligibility from prepared assets, recipes,
+  render state, sampler policy, appearance, and fallback rules.
+- Atlas layout receives only stable atlas entries plus layout policy, then returns immutable page,
+  rect, texture-index, and overflow decisions.
+- Material-table and draw-slice planning consume material strategy output plus layout decisions, but
+  do not live inside the rectangle packer.
+- Compaction scheduling later consumes staged/current static membership and readiness, then chooses
+  when to build immutable atlas generations and compacted buffers.
+- WebGL2 resource stores and `RendererResourceGraph` later own realized atlas textures, compacted
+  buffers, leases, dependencies, and retirement.
 
 Tasks:
 
 - Move atlas entry placement logic out of `staged-world-material-strategy.ts` into a dedicated pure
   layout module.
-- Inputs should be atlas entries with stable keys, dimensions, gutters, and capacity policy.
-- Outputs should include atlas texture pages, rects, atlas texture indices, and explicit overflow
-  results for source-too-large and atlas-full cases.
+- Define the planner input DTO around atlas entries with stable entry keys, dimensions, per-entry or
+  policy gutter requirements, and capacity policy. Do not include material recipes, render states,
+  prepared asset records, WebGL handles, or renderer graph node keys.
+- Define the planner output DTO around atlas texture pages, rects, atlas texture indices,
+  deterministic placement lookup, and explicit overflow results for source-too-large and atlas-full
+  cases.
 - Keep material semantics out of the layout planner. Material strategy owns recipes, render states,
   usages, sampler compatibility, and fallback reasons.
+- Keep material-table slot assignment and draw-slice partitioning out of the atlas layout planner.
+  Leave them in material strategy for M6 unless extracting a second pure helper makes M7 simpler.
 - Preserve deterministic ordering for stable atlas generations.
-- Keep or add tests for multi-atlas page layout, deterministic placement, source-too-large,
-  atlas-full, and gutter policy.
+- Decide and document whether source-too-large is detected inside the layout planner or by
+  pre-validation before layout. The decision must be represented by tests and by the returned
+  overflow shape.
+- Decide and document which stable keys M7 needs for atlas generation reuse and graph retention:
+  layout policy key, ordered entry keys, page keys, material-slot keys, and dependency asset IDs.
+- Keep or add tests for empty input, multi-atlas page layout, deterministic placement,
+  source-too-large, atlas-full, duplicate entry handling, and gutter policy.
 
 Exit criteria:
 
@@ -2001,6 +2026,43 @@ Exit criteria:
   packing.
 - Future compaction can consume material strategy output plus layout output without either module
   allocating GPU resources.
+- Material-table slot assignment and draw-slice planning have an explicit owner and are not hidden
+  inside the rectangle packer.
+- The M7 handoff contract is written down in this plan or colocated module docs: material strategy
+  output, atlas layout output, material-table/draw-slice owner, atlas generation key inputs, and
+  resource-graph dependency inputs.
+- Any unresolved compaction-shape questions are named as M7 sub-phase risks rather than left
+  implicit in the extraction.
+
+Progress:
+
+- Added a pure `atlas-layout-planner` module that accepts stable atlas entries plus layout policy
+  and returns deterministic atlas texture pages, per-entry placements, lookup maps, and explicit
+  overflow records.
+- Moved source-too-large detection into the layout planner. That decision is dimension/policy-only,
+  so material strategy now translates the planner overflow back into its existing
+  `source-texture-too-large` fallback reason instead of pre-validating it.
+- Removed rectangle packing from `staged-world-material-strategy.ts`. Material strategy now dedupes
+  semantic atlas entries, asks the pure planner for placement, then continues to own material-table
+  slot assignment, draw-slice planning, fallback translation, and atlas-set generation keys.
+- Added planner tests for empty input, deterministic sorted placement, multi-page packing,
+  atlas-full overflow, source-too-large overflow, duplicate handling, conflicting duplicate
+  rejection, and per-entry gutter override.
+
+Decisions and course corrections:
+
+- The planner deliberately has no prepared asset payloads, material recipes, render states, WebGL
+  handles, renderer graph node keys, or compaction scheduler inputs. M7 should keep those concerns
+  outside the rectangle packer.
+- Material-table slot assignment and draw-slice planning remain in material strategy for now. If M7
+  needs reuse or more complex partitioning, extract that as a second pure helper rather than folding
+  it into atlas layout.
+- The new planner returns readonly page collections, while the existing staged atlas-set plan still
+  exposes mutable arrays. The strategy boundary copies planner pages to preserve the current plan
+  shape; future cleanup should make the atlas-set plan readonly instead of relying on this copy.
+- No interim phase is required before M7. The remaining uncertainty belongs in the M7 vertical slice:
+  compaction scheduler timing, immutable generation reuse/retirement, and material-table shader
+  partitioning.
 
 ## Phase M7: Atlas-Backed Static Compaction Vertical Slice
 
@@ -2009,6 +2071,37 @@ Status: Not started.
 Purpose: add atlas-backed render compaction after direct materials, structured interiors, portals,
 terrain/indexed material parity, and visual hardening are far enough along that compaction is a
 batching/correctness change rather than the first material-rendering milestone.
+
+First vertical-slice boundary:
+
+- Start with opaque outdoor static direct-texture materials that already have atlas eligibility.
+- Use one atlas texture per draw slice unless a multi-sampler path is deliberately added.
+- Keep direct staged rendering as the visible path for unsupported, not-yet-compacted, blended,
+  animated-UV, indexed/paletted, terrain, structured-interior, and dynamic materials.
+- Treat repeat/clamp sampling data, material-table partitioning, generation reuse, retirement, and
+  re-anchor behavior as required M7 work, but split them into M7 sub-phases if the first slice grows
+  past a contained vertical implementation.
+
+Near-follow expansion:
+
+- Structured-interior direct-texture materials should be the first atlas expansion after outdoor
+  static compaction proves the generation, shader table, and resource-graph lifetime path.
+  Structured interiors use the same material strategy and should share atlas entries/generations
+  with outdoor statics when their prepared texture, sampler, and render-state requirements match.
+- Keep structured interiors out of the first slice only to isolate compaction correctness from
+  portal/domain membership, stencil masking, and env-cell visibility. Add them in an M7A-style
+  follow-up with portal/domain coverage tests rather than treating them as a separate texture-format
+  problem.
+
+Dedicated later atlas families:
+
+- Indexed/paletted materials need a separate atlas design. The current indexed path relies on index
+  textures, palette resources, and shader-side palette/neighbor sampling; folding them into the
+  direct RGBA atlas would either bake palette output or require a dedicated indexed atlas and
+  palette-table contract.
+- Terrain should stay out of M7 static compaction. Terrain has tile/chunk/blend-table semantics and
+  a different batching problem from object static draw units. Revisit terrain atlas/blend compaction
+  only after profiling proves terrain remains a meaningful bottleneck.
 
 Lifecycle target:
 
@@ -2023,7 +2116,8 @@ Lifecycle target:
 
 Tasks:
 
-- Add a compaction scheduler that decides when staged static entries are ready enough to compact.
+- Add a compaction scheduler that decides when staged outdoor static entries are ready enough to
+  compact.
 - Consume atlas-capable material strategy output and M6 atlas layout output for compatible static
   renderables.
 - Realize atlas set generations as one or more WebGL2 atlas textures using normalized base-level
@@ -2046,6 +2140,8 @@ Tasks:
 - Add tests for compaction scheduling, atlas generation reuse, old-generation retirement,
   material-table partitioning, multi-atlas slice partitioning, repeat/clamp sampling data,
   staged-object no-rebuild behavior, fallback handling, and re-anchor-only updates.
+- Add or reserve M7A tests for structured-interior atlas participation through portal/domain
+  rendering once outdoor static compaction is stable.
 
 Exit criteria:
 
@@ -2055,6 +2151,8 @@ Exit criteria:
 - Atlas generations and compacted buffers are retained and retired through the renderer graph.
 - Large material sets split into deterministic draw slices that reuse shared buffers.
 - Re-anchor-only updates reuse compacted buffers and atlas resources.
+- The plan names structured-interior direct-texture atlas participation as the next direct atlas
+  expansion, while indexed/paletted and terrain atlas work remain explicit dedicated designs.
 
 ## Phase M8: Performance Gate and Three.js Retirement Decision
 
@@ -2088,6 +2186,8 @@ Exit criteria:
 - Rename shared metrics fields that still use `BatchCount` terminology once WebGL2 metrics stabilize.
 - Preserve prepared-texture diagnostics in WebGL2 resource records so texture byte counts and fallback
   explanations are accurate.
+- Make staged atlas-set plan collections readonly so pure planner output can flow into material
+  strategy without boundary copies.
 - Revisit the per-frame WebGL2 draw-unit sort after M3-M7 reshape the submit path.
 - Split renderer-neutral material sampling DTOs from any Three adapter names/imports if they still
   imply Three ownership.

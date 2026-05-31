@@ -8,7 +8,6 @@ import {
 import type { AtlasStaticCompactedGeometry } from "./atlas-static-geometry-compactor";
 import type { AtlasTexturePlacement } from "./atlas-layout-planner";
 import type { AtlasStaticCompactionMaterialSlot } from "./atlas-static-compaction-planner";
-import type { RenderMat4 } from "./render-math";
 
 export interface Webgl2AtlasStaticMaterialSlot {
 	key: string;
@@ -25,11 +24,10 @@ export interface Webgl2AtlasStaticBatchResource {
 	positionBuffer: Webgl2BufferResource;
 	uvBuffer: Webgl2BufferResource;
 	materialSlotBuffer: Webgl2BufferResource;
-	transformSlotBuffer: Webgl2BufferResource;
 	indexBuffer: Webgl2BufferResource;
 	indexType: GLenum;
 	materialSlots: readonly Webgl2AtlasStaticMaterialSlot[];
-	transformTable: readonly RenderMat4[];
+	batchModelMatrix: AtlasStaticCompactedGeometry["batchModelMatrix"];
 	drawSlices: AtlasStaticCompactedGeometry["drawSlices"];
 	vertexCount: number;
 	indexCount: number;
@@ -39,7 +37,6 @@ export interface Webgl2AtlasStaticBatchResource {
 	positionByteLength: number;
 	uvByteLength: number;
 	materialSlotByteLength: number;
-	transformSlotByteLength: number;
 	indexByteLength: number;
 	totalByteLength: number;
 	dispose(): void;
@@ -68,10 +65,6 @@ export function createWebgl2AtlasStaticBatchResource({
 		label: `${geometry.key}/material-slots`,
 		data: geometry.materialSlots,
 	});
-	const transformSlotBuffer = createWebgl2ArrayBuffer(gl, {
-		label: `${geometry.key}/transform-slots`,
-		data: geometry.transformSlots,
-	});
 	const indexBuffer = createWebgl2ElementArrayBuffer(gl, {
 		label: `${geometry.key}/indices`,
 		data: geometry.indices,
@@ -88,9 +81,6 @@ export function createWebgl2AtlasStaticBatchResource({
 			gl.bindBuffer(gl.ARRAY_BUFFER, materialSlotBuffer.buffer);
 			gl.enableVertexAttribArray(2);
 			gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0);
-			gl.bindBuffer(gl.ARRAY_BUFFER, transformSlotBuffer.buffer);
-			gl.enableVertexAttribArray(3);
-			gl.vertexAttribPointer(3, 1, gl.FLOAT, false, 0, 0);
 			gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer.buffer);
 			gl.bindBuffer(gl.ARRAY_BUFFER, null);
 		},
@@ -101,7 +91,6 @@ export function createWebgl2AtlasStaticBatchResource({
 		positionBuffer,
 		uvBuffer,
 		materialSlotBuffer,
-		transformSlotBuffer,
 		indexBuffer,
 		indexType:
 			geometry.indices instanceof Uint32Array
@@ -110,7 +99,7 @@ export function createWebgl2AtlasStaticBatchResource({
 		materialSlots: materialSlots.map((slot) =>
 			toWebgl2AtlasStaticMaterialSlot(slot, placementsByEntryKey),
 		),
-		transformTable: geometry.transformTable,
+		batchModelMatrix: geometry.batchModelMatrix,
 		drawSlices: geometry.drawSlices,
 		vertexCount: geometry.vertexCount,
 		indexCount: geometry.indexCount,
@@ -120,7 +109,6 @@ export function createWebgl2AtlasStaticBatchResource({
 		positionByteLength: geometry.positionByteLength,
 		uvByteLength: geometry.uvByteLength,
 		materialSlotByteLength: geometry.materialSlotByteLength,
-		transformSlotByteLength: geometry.transformSlotByteLength,
 		indexByteLength: geometry.indexByteLength,
 		totalByteLength: geometry.totalByteLength,
 		dispose() {
@@ -128,7 +116,6 @@ export function createWebgl2AtlasStaticBatchResource({
 			positionBuffer.dispose();
 			uvBuffer.dispose();
 			materialSlotBuffer.dispose();
-			transformSlotBuffer.dispose();
 			indexBuffer.dispose();
 		},
 	};
@@ -143,7 +130,7 @@ export function updateWebgl2AtlasStaticBatchDynamicTables(
 			`Cannot update atlas static batch ${batch.key} with geometry ${geometry.key}.`,
 		);
 	}
-	batch.transformTable = geometry.transformTable;
+	batch.batchModelMatrix = geometry.batchModelMatrix;
 }
 
 function toWebgl2AtlasStaticMaterialSlot(

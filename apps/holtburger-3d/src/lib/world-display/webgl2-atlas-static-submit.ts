@@ -5,15 +5,14 @@ import type { Webgl2AtlasStaticBatchResource } from "./webgl2-atlas-static-batch
 import type { Webgl2AtlasStaticGenerationResource } from "./webgl2-atlas-static-generation";
 
 export const WEBGL2_ATLAS_STATIC_MAX_MATERIAL_SLOTS = 128;
-export const WEBGL2_ATLAS_STATIC_MAX_TRANSFORMS = 128;
 
 export type Webgl2AtlasStaticWorldProgram = Webgl2ProgramResource<
-	"position" | "uv" | "materialSlot" | "transformSlot",
+	"position" | "uv" | "materialSlot",
 	| "uViewProjection"
+	| "uBatchModel"
 	| "uAtlasTexture"
 	| "uAtlasSize"
 	| "uMaterialRects"
-	| "uTransforms"
 >;
 
 export interface Webgl2AtlasStaticSubmitMetrics {
@@ -22,6 +21,7 @@ export interface Webgl2AtlasStaticSubmitMetrics {
 	submittedTriangleCount: number;
 	replacedDrawUnitCount: number;
 	retainedDrawUnitCount: number;
+	noVisibleRouteCount: number;
 	fallbackSamples: readonly string[];
 }
 
@@ -37,6 +37,7 @@ export function createEmptyWebgl2AtlasStaticSubmitMetrics(): Webgl2AtlasStaticSu
 		submittedTriangleCount: 0,
 		replacedDrawUnitCount: 0,
 		retainedDrawUnitCount: 0,
+		noVisibleRouteCount: 0,
 		fallbackSamples: [],
 	};
 }
@@ -46,17 +47,20 @@ export function planWebgl2AtlasStaticReplacement(options: {
 	resources: Webgl2AtlasStaticSubmitResources;
 }): {
 	replaceableDrawUnitIds: ReadonlySet<string>;
+	noVisibleRouteCount: number;
 	fallbackSamples: readonly string[];
 } {
 	if (!options.resources.generation) {
 		return {
 			replaceableDrawUnitIds: new Set(),
+			noVisibleRouteCount: 0,
 			fallbackSamples: ["atlas static submit missing atlas generation"],
 		};
 	}
 	if (!options.resources.batch) {
 		return {
 			replaceableDrawUnitIds: new Set(),
+			noVisibleRouteCount: 0,
 			fallbackSamples: ["atlas static submit missing compacted batch"],
 		};
 	}
@@ -66,19 +70,9 @@ export function planWebgl2AtlasStaticReplacement(options: {
 	) {
 		return {
 			replaceableDrawUnitIds: new Set(),
+			noVisibleRouteCount: 0,
 			fallbackSamples: [
 				`atlas static submit material slots ${options.resources.batch.materialSlots.length} exceed ${WEBGL2_ATLAS_STATIC_MAX_MATERIAL_SLOTS}`,
-			],
-		};
-	}
-	if (
-		options.resources.batch.transformTable.length >
-		WEBGL2_ATLAS_STATIC_MAX_TRANSFORMS
-	) {
-		return {
-			replaceableDrawUnitIds: new Set(),
-			fallbackSamples: [
-				`atlas static submit transforms ${options.resources.batch.transformTable.length} exceed ${WEBGL2_ATLAS_STATIC_MAX_TRANSFORMS}`,
 			],
 		};
 	}
@@ -91,13 +85,13 @@ export function planWebgl2AtlasStaticReplacement(options: {
 	if (replaceableDrawUnitIds.size === 0) {
 		return {
 			replaceableDrawUnitIds,
-			fallbackSamples: [
-				"atlas static submit has no visible compacted draw units",
-			],
+			noVisibleRouteCount: 1,
+			fallbackSamples: [],
 		};
 	}
 	return {
 		replaceableDrawUnitIds,
+		noVisibleRouteCount: 0,
 		fallbackSamples: [],
 	};
 }
@@ -134,6 +128,7 @@ export function submitWebgl2AtlasStaticBatch({
 		submittedTriangleCount: 0,
 		replacedDrawUnitCount: replaceableDrawUnitIds.size,
 		retainedDrawUnitCount,
+		noVisibleRouteCount: 0,
 		fallbackSamples: [],
 	};
 	if (stateCache.useProgram(program.program)) {
@@ -146,8 +141,12 @@ export function submitWebgl2AtlasStaticBatch({
 		false,
 		viewProjectionMatrix,
 	);
+	gl.uniformMatrix4fv(
+		program.uniforms.uBatchModel,
+		false,
+		resources.batch.batchModelMatrix,
+	);
 	uploadAtlasStaticMaterialRects(gl, program, resources.batch);
-	uploadAtlasStaticTransforms(gl, program, resources.batch);
 	if (stateCache.bindVertexArray(resources.batch.vertexArray.vertexArray)) {
 		metrics.shaderDrawCallCount += 0;
 	}
@@ -196,18 +195,6 @@ function uploadAtlasStaticMaterialRects(
 		rects.set(slot.atlasRect, slot.index * 4);
 	}
 	gl.uniform4fv(program.uniforms.uMaterialRects, rects);
-}
-
-function uploadAtlasStaticTransforms(
-	gl: WebGL2RenderingContext,
-	program: Webgl2AtlasStaticWorldProgram,
-	batch: Webgl2AtlasStaticBatchResource,
-): void {
-	const transforms = new Float32Array(WEBGL2_ATLAS_STATIC_MAX_TRANSFORMS * 16);
-	for (const [index, matrix] of batch.transformTable.entries()) {
-		transforms.set(matrix, index * 16);
-	}
-	gl.uniformMatrix4fv(program.uniforms.uTransforms, false, transforms);
 }
 
 function indexTypeByteLength(

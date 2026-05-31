@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-	WEBGL2_ATLAS_STATIC_MAX_TRANSFORMS,
+	WEBGL2_ATLAS_STATIC_MAX_MATERIAL_SLOTS,
 	planWebgl2AtlasStaticReplacement,
 	submitWebgl2AtlasStaticBatch,
 	type Webgl2AtlasStaticWorldProgram,
@@ -21,6 +21,7 @@ describe("planWebgl2AtlasStaticReplacement", () => {
 		});
 
 		expect([...plan.replaceableDrawUnitIds]).toEqual([]);
+		expect(plan.noVisibleRouteCount).toBe(0);
 		expect(plan.fallbackSamples).toEqual([
 			"atlas static submit missing atlas generation",
 		]);
@@ -36,18 +37,40 @@ describe("planWebgl2AtlasStaticReplacement", () => {
 		});
 
 		expect([...plan.replaceableDrawUnitIds]).toEqual(["draw-a"]);
+		expect(plan.noVisibleRouteCount).toBe(0);
 		expect(plan.fallbackSamples).toEqual([]);
 	});
 
-	it("falls back when the transform table exceeds the bounded shader path", () => {
+	it("counts no-visible route checks without reporting a fallback", () => {
+		const plan = planWebgl2AtlasStaticReplacement({
+			visibleDrawUnitIds: ["staged-only"],
+			resources: {
+				batch: createBatch(["draw-a"]),
+				generation: createGeneration(),
+			},
+		});
+
+		expect([...plan.replaceableDrawUnitIds]).toEqual([]);
+		expect(plan.noVisibleRouteCount).toBe(1);
+		expect(plan.fallbackSamples).toEqual([]);
+	});
+
+	it("falls back when material slots exceed the bounded shader path", () => {
 		const plan = planWebgl2AtlasStaticReplacement({
 			visibleDrawUnitIds: ["draw-a"],
 			resources: {
 				batch: {
 					...createBatch(["draw-a"]),
-					transformTable: Array.from(
-						{ length: WEBGL2_ATLAS_STATIC_MAX_TRANSFORMS + 1 },
-						() => new Float32Array(16),
+					materialSlots: Array.from(
+						{ length: WEBGL2_ATLAS_STATIC_MAX_MATERIAL_SLOTS + 1 },
+						(_, index) => ({
+							key: `material-slot-${index}`,
+							index,
+							atlasTextureIndex: 0,
+							atlasRect: [0, 0, 1, 1],
+							renderStateKey: "opaque",
+							samplingKey: "sampling",
+						}),
 					),
 				},
 				generation: createGeneration(),
@@ -55,7 +78,8 @@ describe("planWebgl2AtlasStaticReplacement", () => {
 		});
 
 		expect([...plan.replaceableDrawUnitIds]).toEqual([]);
-		expect(plan.fallbackSamples[0]).toContain("transforms");
+		expect(plan.noVisibleRouteCount).toBe(0);
+		expect(plan.fallbackSamples[0]).toContain("material slots");
 	});
 
 	it("submits visible compacted draw slices with atlas texture and table uniforms", () => {
@@ -85,7 +109,7 @@ describe("planWebgl2AtlasStaticReplacement", () => {
 		expect(gl.calls).toContain("bindTexture");
 		expect(gl.calls).toContain("drawElements:4:3:5123:0");
 		expect(gl.uniform4fvLengths).toEqual([128 * 4]);
-		expect(gl.uniformMatrix4fvLengths).toEqual([16, 128 * 16]);
+		expect(gl.uniformMatrix4fvLengths).toEqual([16, 16]);
 	});
 });
 
@@ -103,7 +127,6 @@ function createBatch(
 		positionBuffer: null as never,
 		uvBuffer: null as never,
 		materialSlotBuffer: null as never,
-		transformSlotBuffer: null as never,
 		indexBuffer: null as never,
 		indexType: 5123,
 		materialSlots: [
@@ -116,7 +139,7 @@ function createBatch(
 				samplingKey: "sampling",
 			},
 		],
-		transformTable: [new Float32Array(16)],
+		batchModelMatrix: new Float32Array(16),
 		drawSlices: [
 			{
 				key: "slice",
@@ -136,9 +159,8 @@ function createBatch(
 		positionByteLength: 36,
 		uvByteLength: 24,
 		materialSlotByteLength: 12,
-		transformSlotByteLength: 12,
 		indexByteLength: 6,
-		totalByteLength: 90,
+		totalByteLength: 78,
 		dispose() {
 			return;
 		},
@@ -180,14 +202,13 @@ function createProgram(): Webgl2AtlasStaticWorldProgram {
 			position: 0,
 			uv: 1,
 			materialSlot: 2,
-			transformSlot: 3,
 		},
 		uniforms: {
 			uViewProjection: {} as WebGLUniformLocation,
+			uBatchModel: {} as WebGLUniformLocation,
 			uAtlasTexture: {} as WebGLUniformLocation,
 			uAtlasSize: {} as WebGLUniformLocation,
 			uMaterialRects: {} as WebGLUniformLocation,
-			uTransforms: {} as WebGLUniformLocation,
 		},
 		dispose() {
 			return;

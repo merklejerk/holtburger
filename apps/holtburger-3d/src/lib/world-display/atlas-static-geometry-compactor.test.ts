@@ -6,7 +6,7 @@ import type { AtlasStaticCompactionPlan } from "./atlas-static-compaction-planne
 import { buildAtlasStaticCompactedGeometry } from "./atlas-static-geometry-compactor";
 
 describe("atlas static geometry compactor", () => {
-	it("builds local geometry buffers with material and transform slots", () => {
+	it("builds batch-local geometry buffers with baked static positions", () => {
 		const plan = createPlan();
 		const geometry = buildAtlasStaticCompactedGeometry({
 			plan,
@@ -17,20 +17,17 @@ describe("atlas static geometry compactor", () => {
 		});
 
 		expect(geometry?.positions).toEqual(
-			Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0]),
+			Float32Array.from([
+				0, 0, 0, 1, 0, 0, 0, 1, 0, 10, 0, 0, 11, 0, 0, 10, 1, 0,
+			]),
 		);
+		expect(geometry?.batchModelMatrix[12]).toBe(10);
 		expect(geometry?.uvs).toEqual(
 			Float32Array.from([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
 		);
 		expect(geometry?.materialSlots).toEqual(
 			Float32Array.from([0, 0, 0, 1, 1, 1]),
 		);
-		expect(geometry?.transformSlots).toEqual(
-			Float32Array.from([0, 0, 0, 1, 1, 1]),
-		);
-		expect(geometry?.transformTable.map((matrix) => matrix[12])).toEqual([
-			10, 20,
-		]);
 		expect(geometry?.indices).toEqual(Uint16Array.from([0, 1, 2, 3, 4, 5]));
 		expect(geometry?.drawRanges).toEqual([
 			{
@@ -68,7 +65,7 @@ describe("atlas static geometry compactor", () => {
 		]);
 	});
 
-	it("does not include transform matrix values in the resource key", () => {
+	it("keeps the resource key stable for a common re-anchor shift", () => {
 		const basePlan = createPlan();
 		const firstSlice = basePlan.drawSlices[0];
 		if (!firstSlice) {
@@ -89,6 +86,26 @@ describe("atlas static geometry compactor", () => {
 		});
 
 		expect(first?.key).toBe(second?.key);
+	});
+
+	it("changes the resource key when relative static placement changes", () => {
+		const basePlan = createPlan();
+		const first = buildAtlasStaticCompactedGeometry({
+			plan: basePlan,
+			drawUnits: [
+				createDrawUnit("draw-a", "material-slot-a", 10),
+				createDrawUnit("draw-b", "material-slot-b", 20),
+			],
+		});
+		const second = buildAtlasStaticCompactedGeometry({
+			plan: basePlan,
+			drawUnits: [
+				createDrawUnit("draw-a", "material-slot-a", 10),
+				createDrawUnit("draw-b", "material-slot-b", 30),
+			],
+		});
+
+		expect(first?.key).not.toBe(second?.key);
 	});
 });
 

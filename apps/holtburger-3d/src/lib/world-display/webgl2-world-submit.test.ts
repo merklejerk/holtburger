@@ -600,14 +600,13 @@ function createAtlasStaticProgram(): Webgl2AtlasStaticWorldProgram {
 			position: 0,
 			uv: 1,
 			materialSlot: 2,
-			transformSlot: 3,
 		},
 		uniforms: {
 			uViewProjection: {} as WebGLUniformLocation,
+			uBatchModel: {} as WebGLUniformLocation,
 			uAtlasTexture: {} as WebGLUniformLocation,
 			uAtlasSize: {} as WebGLUniformLocation,
 			uMaterialRects: {} as WebGLUniformLocation,
-			uTransforms: {} as WebGLUniformLocation,
 		},
 		dispose() {
 			return;
@@ -629,7 +628,6 @@ function createAtlasStaticBatch(
 		positionBuffer: null as never,
 		uvBuffer: null as never,
 		materialSlotBuffer: null as never,
-		transformSlotBuffer: null as never,
 		indexBuffer: null as never,
 		indexType: 5123,
 		materialSlots: [
@@ -642,7 +640,7 @@ function createAtlasStaticBatch(
 				samplingKey: "sampling",
 			},
 		],
-		transformTable: [createIdentityMat4()],
+		batchModelMatrix: createIdentityMat4(),
 		drawSlices: [
 			{
 				key: "slice",
@@ -662,9 +660,8 @@ function createAtlasStaticBatch(
 		positionByteLength: 36,
 		uvByteLength: 24,
 		materialSlotByteLength: 12,
-		transformSlotByteLength: 12,
 		indexByteLength: 6,
-		totalByteLength: 90,
+		totalByteLength: 78,
 		dispose() {
 			return;
 		},

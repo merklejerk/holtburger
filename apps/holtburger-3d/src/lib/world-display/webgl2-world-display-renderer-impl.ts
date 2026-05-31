@@ -32,7 +32,6 @@ import {
 } from "./webgl2-world-submit";
 import {
 	WEBGL2_ATLAS_STATIC_MAX_MATERIAL_SLOTS,
-	WEBGL2_ATLAS_STATIC_MAX_TRANSFORMS,
 	type Webgl2AtlasStaticWorldProgram,
 } from "./webgl2-atlas-static-submit";
 import {
@@ -190,24 +189,20 @@ void main() {
 `;
 
 const ATLAS_STATIC_WORLD_VERTEX_SHADER = `#version 300 es
-#define MAX_TRANSFORMS ${WEBGL2_ATLAS_STATIC_MAX_TRANSFORMS}
-
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec2 uv;
 layout(location = 2) in float materialSlot;
-layout(location = 3) in float transformSlot;
 
 uniform mat4 uViewProjection;
-uniform mat4 uTransforms[MAX_TRANSFORMS];
+uniform mat4 uBatchModel;
 
 out vec2 vUv;
 flat out int vMaterialSlot;
 
 void main() {
-	int transformIndex = int(transformSlot + 0.5);
 	vUv = uv;
 	vMaterialSlot = int(materialSlot + 0.5);
-	gl_Position = uViewProjection * uTransforms[transformIndex] * vec4(position, 1.0);
+	gl_Position = uViewProjection * uBatchModel * vec4(position, 1.0);
 }
 `;
 
@@ -1925,6 +1920,9 @@ function mergeSceneDomainSubmitMetrics({
 		atlasStaticRetainedDrawUnitCount:
 			exteriorMetrics.atlasStaticRetainedDrawUnitCount +
 			interiorMetrics.atlasStaticRetainedDrawUnitCount,
+		atlasStaticSubmitNoVisibleRouteCount:
+			exteriorMetrics.atlasStaticSubmitNoVisibleRouteCount +
+			interiorMetrics.atlasStaticSubmitNoVisibleRouteCount,
 		atlasStaticSubmitFallbackSamples: [
 			...exteriorMetrics.atlasStaticSubmitFallbackSamples,
 			...interiorMetrics.atlasStaticSubmitFallbackSamples,
@@ -2192,13 +2190,13 @@ function createAtlasStaticWorldProgram(
 		label: "webgl2 atlas static world",
 		vertexSource: ATLAS_STATIC_WORLD_VERTEX_SHADER,
 		fragmentSource: ATLAS_STATIC_WORLD_FRAGMENT_SHADER,
-		attributes: ["position", "uv", "materialSlot", "transformSlot"],
+		attributes: ["position", "uv", "materialSlot"],
 		uniforms: [
 			"uViewProjection",
+			"uBatchModel",
 			"uAtlasTexture",
 			"uAtlasSize",
 			"uMaterialRects",
-			"uTransforms",
 		],
 	});
 }

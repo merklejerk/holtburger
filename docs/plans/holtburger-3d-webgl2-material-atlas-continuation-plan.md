@@ -2432,7 +2432,7 @@ Exit criteria:
 
 ### Phase M7.3.2: Bake Static Positions Relative to Batch Origin
 
-Status: Not started.
+Status: Complete.
 
 Purpose: correct the first submit shader's transform-table design for static geometry before M7.4.
 The latest field report built one atlas generation, one compacted batch, and 581 compacted static
@@ -2442,27 +2442,43 @@ need one shader transform per static object.
 
 Tasks:
 
-- Remove per-object transform slots and transform-table uniforms from atlas static compacted
+- Removed per-object transform slots and transform-table uniforms from atlas static compacted
   geometry and the atlas static shader path.
-- Choose a stable batch-local origin for each compacted static batch. Prefer a nearby origin such as
-  the anchor landblock origin, first-landblock origin, or batch AABB center so compacted vertex
-  positions stay small enough for float32 precision.
-- Bake static placement into compacted vertex positions during geometry compaction:
+- Chose the first compacted draw unit's current render-space translation as the batch-local origin.
+  This keeps compacted positions local and makes common re-anchor shifts update only the batch model
+  matrix.
+- Baked static placement into compacted vertex positions during geometry compaction:
   landblock/chunk placement plus setup/object placement plus source vertex position, expressed
   relative to the batch origin.
-- Submit atlas static batches with a single batch transform/offset from batch-local coordinates into
+- Submitted atlas static batches with a single batch model matrix from batch-local coordinates into
   the current render-anchor coordinate space. Re-anchor should update this one offset/matrix rather
   than rebuilding compacted VBOs.
-- Keep material-slot uniforms for this phase. If material slots exceed the current 128-slot bounded
+- Kept material-slot uniforms for this phase. If material slots exceed the current 128-slot bounded
   shader path, report that as a material-table fallback rather than reintroducing per-object
   transforms.
-- Update graph/resource keys so transform-only or re-anchor-only changes do not rebuild compacted
-  buffers, while membership, geometry, material-slot, atlas-placement, or batch-origin changes do.
-- Add tests proving static vertices are baked relative to the batch origin, re-anchor updates only the
+- Updated graph/resource keys so common re-anchor shifts do not rebuild compacted buffers, while
+  relative placement, membership, geometry, material-slot, or atlas-placement changes do.
+- Added tests proving static vertices are baked relative to the batch origin, re-anchor updates only the
   batch offset, atlas submit no longer rejects batches for transform count, and material-slot overflow
   remains a distinct fallback.
-- Update debug reports to expose batch-origin count, transform table count avoided/removed, batch
-  offset updates, and separate material-slot vs geometry/resource submit fallback samples.
+- Updated debug reports to expose batch-origin count and transform table entry count. The expected
+  transform table entry count for the baked static path is now zero.
+
+Progress:
+
+- `atlas-static-geometry-compactor` now bakes each compacted static draw unit through its staged
+  model matrix, subtracts the compacted batch origin, and writes batch-local positions directly into
+  the compacted position buffer.
+- `webgl2-atlas-static-batches` no longer creates transform-slot buffers or stores transform tables.
+  It stores a dynamic `batchModelMatrix` that can be refreshed when the compacted geometry key is
+  unchanged.
+- The atlas static shader now has `position`, `uv`, and `materialSlot` attributes plus
+  `uViewProjection`, `uBatchModel`, atlas texture, atlas size, and material-rect uniforms.
+- The submit planner no longer has a transform-count fallback. The field failure
+  `atlas static submit transforms 581 exceed 128` should not occur on the baked static path.
+- Debug metrics now include `atlasStaticBatchOriginCount` and
+  `atlasStaticTransformTableEntryCount`; normal baked static batches should report one batch origin
+  and zero transform table entries.
 
 Decisions and course corrections:
 
@@ -2472,6 +2488,9 @@ Decisions and course corrections:
   and use a single batch offset/model transform at submit time.
 - Keep the current conservative whole-slice visibility policy. If any draw unit in a compacted slice
   is visible, submit the full slice and measure overdraw later.
+- The first-origin policy is intentionally pragmatic. If later field captures show precision or
+  lifetime problems, split compacted static batches by landblock/batch origin instead of returning to
+  per-object shader transforms.
 
 Exit criteria:
 
@@ -2484,13 +2503,78 @@ Exit criteria:
 - Remaining default-substitution blockers are material-table capacity, unsupported material classes,
   visibility overdraw, or resource readiness, not per-static-object transforms.
 
+Future-step refinements:
+
+- M7.4 should now verify whether the same field scene submits atlas shader slices. If it still falls
+  back, the next blocker should be material-slot capacity, resource readiness, or visibility domain,
+  not transform table size.
+- Add batch offset update counters only if future profiling needs to distinguish re-anchor updates
+  from ordinary compacted geometry reuse. The current debug report exposes batch-origin count and
+  confirms transform-table removal.
+- The human debug summary should stay focused on atlas/compaction progress while M7 is active. Long
+  atlas candidate samples and texture upload samples remain available in JSON, but the summary should
+  foreground compactable/generated/compacted/submitted/replaced counts, top bypasses, real submit
+  fallbacks, and no-visible route counts.
+
+### Phase M7.3.3: Landblock-Scoped Static Compacted Batches
+
+Status: Not started.
+
+Purpose: replace the first global outdoor static compacted batch with landblock-scoped compacted
+batches before M7.4 measures and hardens default substitution. The global batch proved the atlas
+shader path works, but its visibility granularity is too coarse: one visible compacted draw unit can
+submit the entire global slice across the resident outdoor area. Landblock-scoped batches should keep
+most draw-call savings while recouping coarse spatial culling.
+
+Tasks:
+
+- Group compactable outdoor static draw units by owning outdoor landblock, not one global first-slice
+  batch.
+- Use the landblock origin, or a landblock-stable nearby origin, as the batch-local origin for baked
+  static positions.
+- Create one or more graph-backed compacted static batch resources per landblock. Split further by
+  atlas texture/material-slot limits only when required.
+- Submit compacted atlas slices only for visible landblock-scoped batches. Keep the current
+  conservative policy inside each landblock batch: if any member draw unit in a compacted slice is
+  visible, submit the whole slice.
+- Preserve staged fallback for unsupported, not-yet-compacted, non-exterior, non-opaque, indexed,
+  detail-overlay, terrain, and structured-interior draw units.
+- Update replacement planning so draw-unit replacement maps to the correct landblock batch and does
+  not require scanning a single global compacted slice.
+- Update metrics/debug reports to distinguish global compacted batch count from landblock-scoped
+  batch count, visible submitted landblock batch count, replaced draw units, retained staged draw
+  units, no-visible route count, and coarse overdraw per landblock batch.
+- Add tests for landblock grouping, landblock-origin baked positions, visibility substitution that
+  submits only visible landblock batches, graph lifetime across landblock streaming, and re-anchor
+  reuse of landblock batch buffers.
+
+Decisions and course corrections:
+
+- Do not continue measuring M7.4 overdraw against the global compacted batch as the target design.
+  It already throws away too much culling signal.
+- Do not partition down to object-sized batches. Landblock is the intended coarse unit: spatially
+  meaningful, stable, and still large enough to reduce draw calls.
+- Keep atlas texture generation shared for now unless resource ownership becomes unclear. Landblock
+  batch partitioning is a geometry/submit granularity change, not necessarily an atlas texture
+  partitioning requirement.
+
+Exit criteria:
+
+- The renderer can hold multiple landblock-scoped atlas static batch resources and submit only those
+  whose compacted draw units are visible in the current route/domain.
+- Field reports show atlas submitted slice/draw-call counts scale with visible landblocks rather than
+  one global batch.
+- Coarse overdraw is bounded by landblock batch visibility, making M7.4 overdraw metrics meaningful.
+- Re-anchor-only updates preserve atlas textures and landblock compacted VBOs while updating only
+  batch model offsets.
+
 ### Phase M7.4: Default Outdoor Static Draw Substitution
 
 Status: Not started.
 
-Purpose: after M7.3.2 removes the per-object transform blocker, harden atlas-backed compacted
-outdoor static batches as the normal visible path for eligible draw units while preserving staged
-fallback behavior.
+Purpose: after M7.3.2 removes the per-object transform blocker and M7.3.3 restores landblock-scale
+culling granularity, harden atlas-backed compacted outdoor static batches as the normal visible path
+for eligible draw units while preserving staged fallback behavior.
 
 Tasks:
 
@@ -2499,14 +2583,16 @@ Tasks:
   compaction.
 - Allow staged entries to opportunistically use an existing immutable atlas generation only when all
   required surfaces already exist in that generation and no mutation is required.
-- Validate and harden eligible staged outdoor static replacement with compacted batch submission in
-  the normal submit path.
+- Validate and harden eligible staged outdoor static replacement with landblock-scoped compacted
+  batch submission in the normal submit path.
 - Use conservative whole-slice submission: if any member draw unit in a compacted slice is visible,
-  submit the entire slice/batch. Add conservative overdraw metrics, but do not block M7.4 on
-  per-visible-range submission.
+  submit the entire landblock-local slice/batch. Add conservative overdraw metrics, but do not block
+  M7.4 on per-visible-range submission.
 - Surface debug-report metrics for staged draw units replaced vs retained, compacted/default draw
   calls, conservative overdraw count, whole-slice overdraw ratio, and normal-path fallback reason
   samples.
+- Keep normal route no-ops separate from failures. A scene-domain pass with no visible compacted
+  draw units should increment a no-visible route counter, not produce a submit fallback sample.
 - Add tests for visibility substitution, staged fallback when compacted resources are missing,
   default submit ordering, graph-retained resource lifetime, and re-anchor-only updates after
   batch-origin baking.
@@ -2520,8 +2606,8 @@ Exit criteria:
   objects.
 - Atlas generations and compacted buffers are retained and retired through the renderer graph.
 - Large material sets split into deterministic draw slices that reuse shared buffers.
-- Re-anchor-only updates reuse compacted buffers and atlas resources through the batch-origin submit
-  offset from M7.3.2.
+- Re-anchor-only updates reuse compacted buffers and atlas resources through the landblock/batch
+  origin submit offset from M7.3.2/M7.3.3.
 - Debug reports expose compaction coverage and behavior: compacted batch count, compacted draw-unit
   count, compacted triangle count, compacted vertex/index byte sizes, compacted draw-slice count,
   atlas shader draw calls, staged draw units replaced vs retained, normal-path fallback samples, and
@@ -2567,13 +2653,12 @@ Exit criteria:
   resources now that M7.1 realizes atlas-generation textures.
 - Remove the temporary duplicate `atlasEntries` / `atlasEntryRecords` plan shape once downstream
   diagnostics consume keyed atlas records directly.
-- Revisit the first-slice single static-batch resource after M7.3.2 proves the baked-position shader
-  path; large scenes may need multiple graph-backed static batches partitioned by atlas texture,
-  render state, landblock/batch origin, or visibility domain rather than one resource containing all
-  compactable outdoor static draw units.
-- Remove the M7.3 transform-slot table from static compaction in M7.3.2. Static atlas compaction
-  should bake placement into batch-local vertex positions and submit with one batch offset/model
-  transform rather than one transform uniform per static object.
+- Replace the first-slice single static-batch resource in M7.3.3. Large scenes should use multiple
+  graph-backed static batches partitioned by landblock/batch origin, and then by atlas texture,
+  render state, or visibility domain only when needed.
+- The M7.3 transform-slot table was removed from static compaction in M7.3.2. Static atlas
+  compaction now bakes placement into batch-local vertex positions and submits with one batch
+  offset/model transform rather than one transform uniform per static object.
 - The M7.3 URL-gated flat-world atlas submit branch was removed in M7.3.1; atlas submission is now a
   normal pipeline decision with staged fallback, not a parallel opt-in path.
 - Replace or partition the first submit shader's bounded material uniform arrays if field captures

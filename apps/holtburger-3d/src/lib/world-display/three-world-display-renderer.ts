@@ -625,6 +625,9 @@ export function createThreeWorldDisplayRenderer(
 			atlasCandidateEntryCount: 0,
 			atlasCandidateMaterialSlotCount: 0,
 			atlasCandidateSamples: [],
+			atlasStaticCompactableDrawUnitCount: 0,
+			atlasStaticCompactionBypassReasonCount: 0,
+			atlasStaticCompactionBypassSamples: [],
 			textureVelocityPartCount: 0,
 			textureVelocityRenderGroupCount: 0,
 			textureVelocityMaterialCount: 0,
@@ -1086,6 +1089,9 @@ export function createThreeWorldDisplayRenderer(
 			atlasCandidateEntryCount: 0,
 			atlasCandidateMaterialSlotCount: 0,
 			atlasCandidateSamples: [],
+			atlasStaticCompactableDrawUnitCount: 0,
+			atlasStaticCompactionBypassReasonCount: 0,
+			atlasStaticCompactionBypassSamples: [],
 			textureVelocityPartCount: textureVelocityMetrics.textureVelocityPartCount,
 			textureVelocityRenderGroupCount:
 				textureVelocityMetrics.textureVelocityRenderGroupCount,
@@ -1223,8 +1229,9 @@ export function createThreeWorldDisplayRenderer(
 		const eligibleDirections = new Set(
 			renderPolicy.transitionLevels.map((level) => level.direction),
 		);
-		const committedTransitionPortalModel = deriveCommittedRenderScenes({})
-			.committedTransitionPortalModel;
+		const committedTransitionPortalModel = deriveCommittedRenderScenes(
+			{},
+		).committedTransitionPortalModel;
 		for (const candidate of committedTransitionPortalModel.candidates) {
 			const visibility = evaluateTransitionPortalVisibility(
 				candidate,
@@ -3731,14 +3738,10 @@ function createRenderDebugMetrics(
 			...options.sceneDomainFramebufferFailureSamples,
 		],
 		sceneDomainBaseCopyPassCount: options.sceneDomainBaseCopyPassCount,
-		sceneDomainExteriorDrawCallCount:
-			options.sceneDomainExteriorDrawCallCount,
-		sceneDomainInteriorDrawCallCount:
-			options.sceneDomainInteriorDrawCallCount,
-		sceneDomainExteriorDrawUnitCount:
-			options.sceneDomainExteriorDrawUnitCount,
-		sceneDomainInteriorDrawUnitCount:
-			options.sceneDomainInteriorDrawUnitCount,
+		sceneDomainExteriorDrawCallCount: options.sceneDomainExteriorDrawCallCount,
+		sceneDomainInteriorDrawCallCount: options.sceneDomainInteriorDrawCallCount,
+		sceneDomainExteriorDrawUnitCount: options.sceneDomainExteriorDrawUnitCount,
+		sceneDomainInteriorDrawUnitCount: options.sceneDomainInteriorDrawUnitCount,
 		portalCompositeRectCount: options.portalCompositeRectCount,
 		portalCompositeEstimatedPixelArea:
 			options.portalCompositeEstimatedPixelArea,
@@ -3772,6 +3775,12 @@ function createRenderDebugMetrics(
 		atlasCandidateEntryCount: options.atlasCandidateEntryCount,
 		atlasCandidateMaterialSlotCount: options.atlasCandidateMaterialSlotCount,
 		atlasCandidateSamples: options.atlasCandidateSamples,
+		atlasStaticCompactableDrawUnitCount:
+			options.atlasStaticCompactableDrawUnitCount,
+		atlasStaticCompactionBypassReasonCount:
+			options.atlasStaticCompactionBypassReasonCount,
+		atlasStaticCompactionBypassSamples:
+			options.atlasStaticCompactionBypassSamples,
 		textureVelocityPartCount: options.textureVelocityPartCount,
 		textureVelocityRenderGroupCount: options.textureVelocityRenderGroupCount,
 		textureVelocityMaterialCount: options.textureVelocityMaterialCount,

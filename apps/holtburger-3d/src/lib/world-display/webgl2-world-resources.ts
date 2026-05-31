@@ -62,6 +62,12 @@ import {
 	type TextureFilteringMode,
 } from "./texture-sampling-policy";
 import { type StagedWorldMaterialAtlasEligibility } from "./staged-world-material-strategy";
+import {
+	createEmptyAtlasStaticCompactionPlan,
+	planAtlasStaticCompaction,
+	type AtlasStaticCompactionPlan,
+	type AtlasStaticCompactionPolicy,
+} from "./atlas-static-compaction-planner";
 import type {
 	TerrainBlendPlan,
 	TerrainBlendTextureRef,
@@ -125,6 +131,10 @@ export interface Webgl2WorldResourceStore {
 	atlasCandidateEntryCount: number;
 	atlasCandidateMaterialSlotCount: number;
 	atlasCandidateSamples: readonly string[];
+	atlasStaticCompactionPlan: AtlasStaticCompactionPlan;
+	atlasStaticCompactableDrawUnitCount: number;
+	atlasStaticCompactionBypassReasonCount: number;
+	atlasStaticCompactionBypassSamples: readonly string[];
 	textureCount: number;
 	indexedTextureCount: number;
 	paletteTextureCount: number;
@@ -204,6 +214,10 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		atlasCandidateEntryCount: 0,
 		atlasCandidateMaterialSlotCount: 0,
 		atlasCandidateSamples: [],
+		atlasStaticCompactionPlan: createEmptyAtlasStaticCompactionPlan(),
+		atlasStaticCompactableDrawUnitCount: 0,
+		atlasStaticCompactionBypassReasonCount: 0,
+		atlasStaticCompactionBypassSamples: [],
 		textureCount: 0,
 		indexedTextureCount: 0,
 		paletteTextureCount: 0,
@@ -374,6 +388,24 @@ export function syncWebgl2WorldResources({
 			),
 		),
 	].slice(0, 8);
+	store.atlasStaticCompactionPlan = profileBrowserJsScope(
+		"webgl2.resource.planAtlasStaticCompaction",
+		() =>
+			planAtlasStaticCompaction({
+				drawUnits: store.drawUnits.map(toAtlasStaticCompactionCandidate),
+				policy: DEFAULT_WEBGL2_ATLAS_STATIC_COMPACTION_POLICY,
+			}),
+	);
+	store.atlasStaticCompactableDrawUnitCount =
+		store.atlasStaticCompactionPlan.compactableDrawUnitIds.length;
+	store.atlasStaticCompactionBypassReasonCount =
+		store.atlasStaticCompactionPlan.bypasses.length;
+	store.atlasStaticCompactionBypassSamples = summarizeDiagnosticReasons(
+		store.atlasStaticCompactionPlan.bypasses.map(
+			(bypass) => `${bypass.reason}: ${bypass.detail}`,
+		),
+		8,
+	);
 	for (const [textureKey, texture] of store.texturesByKey) {
 		if (!retainedTextureKeys.has(textureKey)) {
 			texture.dispose();
@@ -449,6 +481,10 @@ export function destroyWebgl2WorldResources(
 	store.atlasCandidateEntryCount = 0;
 	store.atlasCandidateMaterialSlotCount = 0;
 	store.atlasCandidateSamples = [];
+	store.atlasStaticCompactionPlan = createEmptyAtlasStaticCompactionPlan();
+	store.atlasStaticCompactableDrawUnitCount = 0;
+	store.atlasStaticCompactionBypassReasonCount = 0;
+	store.atlasStaticCompactionBypassSamples = [];
 	for (const texture of store.texturesByKey.values()) {
 		texture.dispose();
 	}
@@ -463,6 +499,14 @@ export function destroyWebgl2WorldResources(
 	store.preparedTextureGeneratedByteLength = 0;
 	store.triangleCount = 0;
 }
+
+const DEFAULT_WEBGL2_ATLAS_STATIC_COMPACTION_POLICY: AtlasStaticCompactionPolicy =
+	{
+		maxAtlasTextureSize: 4096,
+		maxAtlasTextureCount: 8,
+		baseGutterPixels: 2,
+		maxMaterialSlotsPerDraw: 128,
+	};
 
 function createOrReuseWebgl2DrawUnit({
 	assetState,
@@ -685,6 +729,23 @@ function deriveWebgl2DrawUnitSceneDomain(
 		case "portal-mask":
 			return null;
 	}
+}
+
+function toAtlasStaticCompactionCandidate(drawUnit: Webgl2WorldDrawUnit) {
+	return {
+		id: drawUnit.id,
+		kind: drawUnit.kind,
+		sceneDomain: drawUnit.sceneDomain,
+		materialKind: drawUnit.materialKind,
+		materialKey: drawUnit.materialKey,
+		materialBehavior: drawUnit.materialBehavior,
+		hasUvBuffer: drawUnit.uvBuffer !== null,
+		hasDetailOverlay: drawUnit.detailOverlay !== null,
+		atlasEligibility: drawUnit.atlasEligibility,
+		triangleCount: drawUnit.triangleCount,
+		staticPartCount: drawUnit.staticPartCount,
+		staticObjectKeys: drawUnit.staticObjectKeys,
+	};
 }
 
 function destroyWebgl2DrawUnit(drawUnit: Webgl2WorldDrawUnit): void {

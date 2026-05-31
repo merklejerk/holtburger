@@ -1,6 +1,5 @@
 import type {
 	BrowserLocationSelection,
-	BrowserTextureColorSpaceMode,
 	BrowserTextureFilteringMode,
 } from "../../app/browser-mode";
 import { browserDestinationToInteriorCellId } from "../../app/browser-mode";
@@ -67,10 +66,7 @@ import {
 import { deriveTransitionPortalCandidates } from "./transition-portal-work-items";
 import { WORLD_RENDER_DOMAIN } from "./render-domains";
 import type { SceneCameraFrame } from "./camera";
-import type {
-	WorldDisplayPortalTriageMode,
-	WorldDisplayRenderStyle,
-} from "./renderer-contract";
+import type { WorldDisplayRenderStyle } from "./renderer-contract";
 
 let lastPreparedOutdoorAssetsNotRenderedSignature: string | null = null;
 let lastReportedTerrainMaterialDiagnosticsSignature: string | null = null;
@@ -86,10 +82,8 @@ export interface BrowserRenderResourceCoordinatorInput {
 	detailLodRadius: number;
 	envCellLodRadius: number;
 	transitionPortalMaxDepth: number;
-	portalTriageMode: WorldDisplayPortalTriageMode;
 	renderStyle: WorldDisplayRenderStyle;
 	textureFilteringMode: BrowserTextureFilteringMode;
-	textureColorSpaceMode: BrowserTextureColorSpaceMode;
 	detailTexturesEnabled: boolean;
 	showPortalPolygons: boolean;
 	showCellIndicators: boolean;
@@ -143,10 +137,8 @@ export interface BrowserRenderResourceSurface {
 	setRenderSpatialQuery(query: RenderSpatialIndexQuery | null): void;
 	setControlledCameraFrame(frame: SceneCameraFrame | null): void;
 	setTransitionPortalMaxDepth(maxDepth: number): void;
-	setPortalTriageMode(mode: WorldDisplayPortalTriageMode): void;
 	setRenderStyle(renderStyle: WorldDisplayRenderStyle): void;
 	setTextureFilteringMode(mode: BrowserTextureFilteringMode): void;
-	setTextureColorSpaceMode(mode: BrowserTextureColorSpaceMode): void;
 	setDetailTexturesEnabled(enabled: boolean): void;
 }
 
@@ -412,11 +404,6 @@ export class BrowserRenderResourceCoordinator {
 				() =>
 					surface.setTransitionPortalMaxDepth(input.transitionPortalMaxDepth),
 			);
-			this.applySurfaceResource(
-				"portal-triage-mode",
-				input.portalTriageMode,
-				() => surface.setPortalTriageMode(input.portalTriageMode),
-			);
 			this.applySurfaceResource("render-style", input.renderStyle, () =>
 				surface.setRenderStyle(input.renderStyle),
 			);
@@ -424,11 +411,6 @@ export class BrowserRenderResourceCoordinator {
 				"texture-filtering-mode",
 				input.textureFilteringMode,
 				() => surface.setTextureFilteringMode(input.textureFilteringMode),
-			);
-			this.applySurfaceResource(
-				"texture-color-space-mode",
-				input.textureColorSpaceMode,
-				() => surface.setTextureColorSpaceMode(input.textureColorSpaceMode),
 			);
 			this.applySurfaceResource(
 				"detail-textures-enabled",
@@ -479,10 +461,8 @@ type BrowserRenderResourceSurfaceKey =
 	| "render-spatial-query"
 	| "controlled-camera-frame"
 	| "transition-portal-depth"
-	| "portal-triage-mode"
 	| "render-style"
 	| "texture-filtering-mode"
-	| "texture-color-space-mode"
 	| "detail-textures-enabled";
 
 function describeAssetStateSignature(state: AssetChannelState): string {

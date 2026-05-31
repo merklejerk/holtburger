@@ -6,16 +6,6 @@ export type WorldDisplayTextureFilteringMode =
 	| "nearest"
 	| "linear"
 	| "anisotropic-4x";
-export type WorldDisplayTextureColorSpaceMode =
-	| "auto"
-	| "srgb"
-	| "linear"
-	| "compressed-linear";
-export type WorldDisplayPortalTriageMode =
-	| "normal"
-	| "no-composite-scissor"
-	| "no-mask-depth"
-	| "flat-stencil-color";
 
 export interface WorldRenderMetrics {
 	bounds: SceneBoundsFrame | null;
@@ -77,7 +67,6 @@ export interface WorldRenderDebugMetrics {
 	renderGraphPolicy: string;
 	renderGraphBaseScene: string;
 	transitionPortalMaxDepth: number;
-	portalTriageMode: WorldDisplayPortalTriageMode;
 	cameraNear: number | null;
 	cameraFar: number | null;
 	cameraFarNearRatio: number | null;
@@ -145,7 +134,6 @@ export interface WorldRenderDebugMetrics {
 	materialProgramKeyCount: number;
 	transparentMaterialCount: number;
 	textureFilteringMode: WorldDisplayTextureFilteringMode;
-	textureColorSpaceMode: WorldDisplayTextureColorSpaceMode;
 	detailTexturesEnabled: boolean;
 	textureSamplingPolicyCounts: Record<string, number>;
 	textureSamplingPolicySamples: string[];

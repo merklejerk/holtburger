@@ -1,11 +1,12 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
-Status: Phase M4C.2 triage controls landed; awaiting field diagnosis using the new portal coverage modes.
+Status: Phase M4C.2 portal depth-copy and mask-depth root cause fixed; cleanup pending.
 
 Related plans:
 
 - [Holtburger 3D WebGL2 Renderer Pivot Plan](./holtburger-3d-webgl2-renderer-pivot-plan.md)
 - [Holtburger 3D Luma Renderer Swapout Plan](./holtburger-3d-luma-renderer-swapout-plan.md)
+- [Holtburger 3D Portal Depth Copy Postmortem](./holtburger-3d-portal-depth-copy-postmortem.md)
 
 ## Purpose
 
@@ -1501,7 +1502,10 @@ Cleanup targets and legacy shims:
 
 ## Phase M4C.2: Portal Coverage Triage and Diagnostics
 
-Status: In progress. Depth-test failure isolated; near/far precision probes landed for field testing.
+Status: Fixed and cleaned up. Field validation proved the compositor depth copy and normal aperture
+mask depth policy were the root cause. Production WebGL2 portal compositing now uses framebuffer
+depth blits for portal composite depth transfer and fixed-function `LEQUAL` for aperture masks.
+Temporary portal triage controls and renderer branches have been removed after validation.
 
 Purpose: stop guessing about the remaining first-depth portal holes. M4C.1 fixed static
 scene-domain ownership, hardened near-plane rect clipping, and added a mask-only depth bias, but
@@ -1519,6 +1523,9 @@ Why this phase is immediate:
 - Field triage showed `no-composite-scissor` does not change the artifact, while `no-mask-depth`
   removes the shimmering/clipping entirely at the expected cost of losing legitimate occluders. The
   failing pass is therefore the portal aperture mask depth test against already-composited depth.
+- Near/far experiments showed contradictory near/far behavior instead of a stable tuning point:
+  larger near planes improved far portals but damaged near portals, and shorter far ranges still
+  showed banded holes. This makes near/far tuning an unacceptable long-term fix.
 - The default browser free camera currently uses a very large far/near range (`near=0.1`,
   `far=5000`). That makes depth precision highly non-linear and can produce distance-dependent
   banding when an aperture mask is re-rasterized against depth copied from an offscreen texture.
@@ -1527,7 +1534,7 @@ Why this phase is immediate:
 
 Tasks:
 
-- [In progress] Add a temporary WebGL2 portal coverage debug mode that can independently visualize
+- [Done] Add a temporary WebGL2 portal coverage debug mode that can independently visualize
   or force:
   - aperture stencil/mask coverage after the mask pass;
   - composite rectangle/scissor coverage before sampling;
@@ -1537,20 +1544,35 @@ Tasks:
   - `no-composite-scissor`: disables composite scissor while keeping stencil enabled;
   - `no-mask-depth`: disables aperture mask depth testing while keeping stencil/composite enabled;
   - `flat-stencil-color`: draws stencil-visible pixels as a flat debug color instead of sampling the
-    scene-domain target.
-- [Partial] Record debug metrics for mask-visible candidate count, composite rect count, rect area,
+    scene-domain target;
+  - `incoming-depth-test`: disables aperture mask depth testing and enables `LEQUAL` depth testing
+    for the incoming scene-domain composite pass.
+- [Done] Record debug metrics for mask-visible candidate count, composite rect count, rect area,
   and which triage override is active.
   - Existing WebGL2 metrics already report visible portal work item count, composite rect count, and
     estimated pixel area.
-  - New metrics report the active `portalTriageMode`.
-  - Remaining: add explicit skipped/invalid counters after the failing pass is identified.
-- [Partial] Add depth-precision probes for portal triage:
+  - The temporary active-triage metric was removed with the triage controls after the root cause was
+    fixed.
+- [Done] Add depth-precision probes for portal triage:
   - report active camera `near`, `far`, and `far/near` ratio in WebGL2 portal debug metrics;
   - add temporary/debug-only near/far overrides for WebGL2 portal rendering experiments;
   - test whether increasing near plane (`1.0` or `2.0`) or reducing far plane (`500` or `1000`)
     reduces the banding/strip artifact;
   - optionally create scene-domain depth textures as `DEPTH_COMPONENT32F` behind a debug option to
     separate offscreen depth texture precision from default-framebuffer precision.
+- [Done] Replace the fragile shader depth-copy path and shader-side portal mask comparison with
+  production framebuffer/fixed-function depth operations:
+  - base scene now copies into an offscreen portal composite target instead of directly to the
+    default framebuffer;
+  - each portal depth level copies the current composite color/depth/stencil into the alternate
+    composite target;
+  - portal composite color copies use the fullscreen shader path, while composite depth transfer uses
+    `gl.blitFramebuffer(... DEPTH_BUFFER_BIT ...)`;
+  - portal aperture masks use fixed-function `LEQUAL` against the copied composite depth buffer;
+  - stencil history is blitted between ping-pong composite targets so recursive parent aperture
+    tests keep working;
+  - final composited color/depth copies to the default framebuffer once all requested portal levels
+    are complete.
 - If disabling scissor fixes the artifact, fix `screenRect` planning before parent-rect work.
 - If disabling mask depth testing fixes the artifact, inspect aperture mask geometry placement,
   copied-depth precision, camera near/far policy, alpha/cutout occluder depth writes, and whether
@@ -1592,6 +1614,23 @@ Decisions:
 - `no-mask-depth` removing the artifact confirms the aperture mask depth test is the immediate
   failure point. Keep testing with normal depth enabled and adjusted camera near/far before changing
   bias or aperture geometry.
+- Near/far range tuning is not a viable product policy. The current direction is to remove the
+  fixed-function depth equality dependency from portal masks rather than balance per-camera clipping
+  values.
+- The portal compositor now owns ping-pong color/depth/stencil targets. This costs an additional
+  fullscreen copy per active portal depth, but it keeps the "current composited depth" sampleable and
+  avoids sampling from the framebuffer being written.
+- Stencil is still the parent-aperture ownership mechanism. Because stencil is not a texture, the
+  compositor explicitly blits stencil from the previous composite target to the next target before
+  drawing child-depth masks.
+- Course correction: the first composite-target version used a sampleable depth texture plus a
+  separate STENCIL_INDEX8 renderbuffer, which produced `FRAMEBUFFER_UNSUPPORTED` on the field
+  browser/GPU. Composite targets now use packed DEPTH24_STENCIL8 textures attached as
+  DEPTH_STENCIL_ATTACHMENT so the framebuffer has a WebGL2-compatible depth/stencil shape while the
+  mask shader can still sample the depth component.
+- Shader-side mask depth comparison currently uses linearized depth plus a small world-space
+  tolerance (`0.5`) and an adaptive screen-space derivative tolerance. Treat those tolerances as
+  implementation details to validate, not gameplay or product policy.
 - `flat-stencil-color` intentionally disables depth writes for the debug composite. It visualizes
   stencil coverage and should not be interpreted as a faithful recursive-portal output mode.
 - Camera near/far metrics are permanent enough to keep: they are useful renderer diagnostics and
@@ -1620,33 +1659,106 @@ Progress:
 - Added a browser-local portal depth range selector with `default`, `near=1/far=1000`,
   `near=2/far=1000`, and `near=1/far=500`. The selector modifies the effective camera frame passed
   into the renderer so scene projection, offscreen depth, and mask depth testing stay coherent.
+- Added WebGL2 portal composite target creation with RGB8 color and packed DEPTH24_STENCIL8
+  depth-stencil textures.
+- Added a WebGL2 portal mask depth-compare shader and moved portal compositing into ping-pong
+  offscreen targets before the final default-framebuffer copy.
+- Added adaptive derivative tolerance to the portal mask depth shader after field testing showed the
+  initial shader-side compare still shimmered/clipped like the fixed-function path.
+- Field testing showed adaptive tolerance still did not change the artifact. Added
+  `depth-delta-color` triage mode to paint the aperture by `portalDepth - sampledSceneDepth` so the
+  next screenshot can distinguish wrong/noisy depth samples from wrong aperture depth.
+- Added a browser-local terrain rendering toggle to test whether exterior terrain depth under or
+  behind the portal opening is poisoning the sampled depth source.
+- Added `sampled-depth-color` triage mode and a `flip-y` depth-sample switch to test whether the
+  mask shader is sampling a vertically flipped or otherwise misaligned depth texel.
+- Added `raw-depth-delta-color` triage mode to compare `gl_FragCoord.z - sampledDepth` before
+  depth linearization. This separates raw depth-buffer ordering problems from linearization or
+  world-unit tolerance artifacts.
+- Added `mask-clear-depth` triage mode. Accepted aperture mask fragments still pass the same manual
+  depth comparison, but also write far depth (`1.0`) into the composite depth buffer while writing
+  stencil. This tests whether stale accepted-mask depth is poisoning later composite or child-mask
+  work.
+- Added `incoming-depth-test` triage mode to test the proposed pipeline pivot: use the aperture mask
+  as coverage only, then let incoming scene-domain depth test against the current composite depth
+  during the fullscreen composite pass.
+- Added `aperture-incoming-depth-color` triage mode. The portal mask shader now receives the
+  incoming scene-domain depth texture for the current transition level and colors aperture fragments
+  by `apertureDepth - incomingSceneDepth`. This compares aperture depth, current/base depth, and
+  incoming depth inside the same mask shader and screen-space sample path.
+- Added `aperture-raw-depth-color` and `current-raw-depth-color` triage modes to visualize the two
+  raw depth values independently before linearization or delta comparison. The shader uses a
+  false-color raw-depth ramp instead of plain grayscale because WebGL depth is heavily compressed
+  near `1.0`.
+- Added `mask-triangle-color` triage mode to draw aperture mask indices one triangle at a time with
+  a stable debug palette. This distinguishes real overlapping/triangulation discontinuities from the
+  expected periodic bands in the raw-depth false-color ramp.
+- Added `fixed-mask-depth` triage mode to bypass shader-side depth sampling/linearization and use
+  fixed-function `LEQUAL` depth testing for the aperture mask against the composite framebuffer
+  depth. Accepted aperture fragments render green and stop before the incoming composite pass.
+- Added `scene-portal-geometry` triage mode to draw portal aperture meshes as ordinary magenta
+  geometry directly into the base scene-domain framebuffer before any portal-composite target copy.
+  This is the strict no-stencil/no-compositor diagnostic for the simple "portal polygon in the
+  scene" case.
+- Added `portal-geometry-depth` triage mode to draw portal aperture meshes as ordinary magenta
+  opaque geometry against the copied current/base depth, with fixed-function `LEQUAL`, depth writes
+  enabled, stencil disabled, and no incoming portal composite.
+- Added `portal-geometry-depth-blit` triage mode to run the same copied-composite-target magenta
+  geometry test as `portal-geometry-depth`, but with the base scene depth transferred into the
+  portal composite target by `gl.blitFramebuffer(... DEPTH_BUFFER_BIT ...)` instead of the shader
+  `gl_FragDepth` copy.
+- Added `blit-depth-copy` triage mode to A/B the composited-depth copy path. This mode keeps normal
+  portal rendering semantics, draws copied color with shader depth writes disabled, and then copies
+  the source framebuffer depth into the portal composite target with
+  `gl.blitFramebuffer(... DEPTH_BUFFER_BIT ...)`.
+- Field testing of the first `blit-depth-copy` attempt showed camera-motion streaking. The likely
+  cause was the diagnostic blitting from scene-domain `DEPTH_COMPONENT24` targets into portal
+  composite `DEPTH24_STENCIL8` targets. Scene-domain targets now also use packed `DEPTH24_STENCIL8`
+  depth-stencil textures so the diagnostic blits between matching depth formats.
+- Field testing then showed `scene-portal-geometry` renders the aperture solid in the scene-domain
+  target, `portal-geometry-depth` clips after the shader depth copy into the portal composite
+  target, and `portal-geometry-depth-blit` renders solid after a depth blit into that same composite
+  target. Portal composite copies now use a shader color copy plus framebuffer depth blit by default;
+  the final default-framebuffer copy still uses the shader color/depth copy.
+- Follow-up field testing showed `portal-geometry-depth` is solid after the depth-blit copy fix, but
+  `flat-stencil-color` still has holes. That means the remaining normal mask loss was the
+  shader-side manual depth compare itself. Normal aperture masks now use fixed-function `LEQUAL`
+  against the copied composite depth buffer.
+- Field review of `aperture-incoming-depth-color` showed a large incoming-depth slab that looked
+  like grass/terrain. WebGL2 terrain draw units are already exterior-only, so added
+  `no-interior-shell` triage mode to render the interior scene-domain target without
+  `structured-interior` draw units and test whether the slab is coming from the cell shell rather
+  than terrain ownership.
+- Added `StagedWorldFrame.cameraFrame` so the mask shader receives the exact near/far values used
+  for the frame projection.
 - Added focused browser-mode test coverage for preserving the portal triage mode.
+- Removed the temporary portal triage state, settings controls, renderer contract options,
+  diagnostic shader branches, manual mask-depth compare program, stencil debug composite program,
+  terrain-rendering toggle, and near/far override plumbing after the field fix was validated.
 
-Next field triage order:
+Completed validation summary:
 
-1. Reproduce the distant strip artifact in `normal`.
-2. Switch to `flat-stencil-color`.
-   - If the flat color has the same strip/hole, the failure is mask/stencil coverage.
-   - If the flat color is solid, the failure is source sampling/depth write/state after stencil.
-3. Keep triage mode at `normal` and test depth ranges in this order:
-   - `near=1/far=1000`
-   - `near=2/far=1000`
-   - `near=1/far=500`
-4. If any adjusted range stabilizes the artifact while preserving occlusion, design the real camera
-   clipping/depth policy before increasing mask bias.
-5. If adjusted ranges do not help, inspect aperture geometry/depth-function mismatch and then test
-   `DEPTH_COMPONENT32F` scene-domain depth textures behind a debug option.
+- `scene-portal-geometry` proved the aperture polygon itself was ordinary scene geometry and did not
+  overlap terrain in the source scene-domain target.
+- `portal-geometry-depth` versus `portal-geometry-depth-blit` proved the shader `gl_FragDepth`
+  depth-copy path was not equivalent to framebuffer depth transfer for the portal composite target.
+- Matching scene-domain and portal-composite targets on packed `DEPTH24_STENCIL8` removed the noisy
+  first blit attempt.
+- After promoting the depth blit to the normal portal composite copy path, the remaining normal
+  aperture holes were isolated to the shader-side manual mask-depth comparison.
+- Fixed-function `LEQUAL` aperture masking against the copied composite depth resolved the normal
+  terrain/base-scene bands.
 
 Cleanup targets and legacy shims:
 
-- `portalTriageMode` is a debug override and should not become normal renderer policy. Remove or
-  hide it once the root cause is fixed.
+- Temporary portal triage modes, depth sample controls, near/far portal override controls, and the
+  terrain rendering toggle have been removed from runtime state, settings UI, renderer contracts,
+  and WebGL2 pass code.
 - The WebGL2 pass helpers in `webgl2-world-display-renderer-impl.ts` are growing. Extract mask,
   copy, and debug-composite pass code after M4C.2 stabilizes the pass contract.
-- `flat-stencil-color` currently reuses per-rect draws so it can compare against normal scissored
-  behavior. If it remains beyond triage, collapse same-ref debug draws into one full-screen draw.
-- Near/far override controls are temporary debug UI. Remove or replace them with a real clipping
-  policy once the depth precision experiment is complete.
+- The offscreen compositor adds another target set beside scene-domain targets. Extract these pass
+  resources from `webgl2-world-display-renderer-impl.ts` before M4D if the current design validates.
+- Keep camera near/far metrics because they are generally useful depth-precision diagnostics.
 
 ## Phase M4D: Portal Fill-Rate and Visual Hardening
 

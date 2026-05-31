@@ -63,6 +63,7 @@ export interface StagedWorldFrameMetrics {
 }
 
 export interface StagedWorldFrame {
+	cameraFrame: SceneCameraFrame;
 	viewProjectionMatrix: RenderMat4;
 	passes: StagedWorldPass[];
 	metrics: StagedWorldFrameMetrics;
@@ -109,6 +110,7 @@ export function buildStagedWorldFrame({
 		},
 	);
 	return {
+		cameraFrame,
 		viewProjectionMatrix,
 		passes: [{ id: "world", draws: selection.draws }],
 		metrics: selection.metrics,

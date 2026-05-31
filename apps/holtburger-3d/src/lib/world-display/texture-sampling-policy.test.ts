@@ -130,43 +130,6 @@ describe("texture sampling policy", () => {
 		).toBe("none");
 	});
 
-	it("applies browser texture color-space overrides", () => {
-		const capabilities = {
-			supportsS3tc: true,
-			supportsS3tcSrgb: true,
-			maxAnisotropy: 1,
-		};
-
-		const linear = createDefaultMaterialTextureSamplingPolicy(
-			capabilities,
-			"linear",
-			"linear",
-		);
-		expect(linear.directColor.colorSpace).toBe("none");
-		expect(linear.compressed.colorSpace).toBe("none");
-
-		const compressedLinear = createDefaultMaterialTextureSamplingPolicy(
-			capabilities,
-			"linear",
-			"compressed-linear",
-		);
-		expect(compressedLinear.directColor.colorSpace).toBe("srgb");
-		expect(compressedLinear.compressed.colorSpace).toBe("none");
-
-		const srgbWithoutCompressedSrgb =
-			createDefaultMaterialTextureSamplingPolicy(
-				{
-					supportsS3tc: true,
-					supportsS3tcSrgb: false,
-					maxAnisotropy: 1,
-				},
-				"linear",
-				"srgb",
-			);
-		expect(srgbWithoutCompressedSrgb.directColor.colorSpace).toBe("srgb");
-		expect(srgbWithoutCompressedSrgb.compressed.colorSpace).toBe("none");
-	});
-
 	it("selects the policy bucket from render-surface format", () => {
 		const policy = createDefaultMaterialTextureSamplingPolicy();
 

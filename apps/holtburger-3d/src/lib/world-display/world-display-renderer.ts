@@ -75,10 +75,8 @@ function createDeferredWorldDisplayRenderer<TModule extends DeferredRendererModu
 	const rendererResourceGraph = options.rendererResourceGraph;
 	let controlledCameraFrame = options.controlledCameraFrame;
 	let transitionPortalMaxDepth = options.transitionPortalMaxDepth;
-	let portalTriageMode = options.portalTriageMode;
 	let renderStyle = options.renderStyle;
 	let textureFilteringMode = options.textureFilteringMode;
-	let textureColorSpaceMode = options.textureColorSpaceMode;
 	let detailTexturesEnabled = options.detailTexturesEnabled;
 	let onCameraFrameChange = options.onCameraFrameChange;
 	let onRenderMetricsChange = options.onRenderMetricsChange;
@@ -136,10 +134,6 @@ function createDeferredWorldDisplayRenderer<TModule extends DeferredRendererModu
 			transitionPortalMaxDepth = maxDepth;
 			loadedRenderer?.setTransitionPortalMaxDepth(maxDepth);
 		},
-		setPortalTriageMode(mode) {
-			portalTriageMode = mode;
-			loadedRenderer?.setPortalTriageMode(mode);
-		},
 		setRenderStyle(nextRenderStyle) {
 			renderStyle = nextRenderStyle;
 			loadedRenderer?.setRenderStyle(nextRenderStyle);
@@ -147,10 +141,6 @@ function createDeferredWorldDisplayRenderer<TModule extends DeferredRendererModu
 		setTextureFilteringMode(mode) {
 			textureFilteringMode = mode;
 			loadedRenderer?.setTextureFilteringMode(mode);
-		},
-		setTextureColorSpaceMode(mode) {
-			textureColorSpaceMode = mode;
-			loadedRenderer?.setTextureColorSpaceMode(mode);
 		},
 		setDetailTexturesEnabled(enabled) {
 			detailTexturesEnabled = enabled;
@@ -214,10 +204,8 @@ function createDeferredWorldDisplayRenderer<TModule extends DeferredRendererModu
 			rendererResourceGraph,
 			controlledCameraFrame,
 			transitionPortalMaxDepth,
-			portalTriageMode,
 			renderStyle,
 			textureFilteringMode,
-			textureColorSpaceMode,
 			detailTexturesEnabled,
 			onCameraFrameChange,
 			onRenderMetricsChange,

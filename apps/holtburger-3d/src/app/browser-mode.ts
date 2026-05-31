@@ -29,21 +29,6 @@ export type BrowserTextureFilteringMode =
 	| "nearest"
 	| "linear"
 	| "anisotropic-4x";
-export type BrowserTextureColorSpaceMode =
-	| "auto"
-	| "srgb"
-	| "linear"
-	| "compressed-linear";
-export type BrowserPortalTriageMode =
-	| "normal"
-	| "no-composite-scissor"
-	| "no-mask-depth"
-	| "flat-stencil-color";
-export type BrowserPortalDepthRangeMode =
-	| "default"
-	| "near-1-far-1000"
-	| "near-2-far-1000"
-	| "near-1-far-500";
 type BrowserDestinationSource = "manual" | "landblock-pick" | "follow-camera";
 export type BrowserLandblockInputMode = "outdoor" | "dungeon";
 type NorthSouthHemisphere = "N" | "S";
@@ -90,15 +75,12 @@ export interface BrowserModeState {
 	detailLodRadius: number;
 	envCellLodRadius: number;
 	transitionPortalMaxDepth: number;
-	portalTriageMode: BrowserPortalTriageMode;
-	portalDepthRangeMode: BrowserPortalDepthRangeMode;
 	landblockInputMode: BrowserLandblockInputMode;
 	showPortalPolygons: boolean;
 	showCellIndicators: boolean;
 	highlightPortalTargets: boolean;
 	renderStyle: BrowserRenderStyle;
 	textureFilteringMode: BrowserTextureFilteringMode;
-	textureColorSpaceMode: BrowserTextureColorSpaceMode;
 	detailTexturesEnabled: boolean;
 	page: BrowserPageId;
 }
@@ -127,15 +109,12 @@ export function createBrowserModeState(): BrowserModeState {
 		detailLodRadius: DEFAULT_DETAIL_LOD_RADIUS,
 		envCellLodRadius: DEFAULT_ENV_CELL_LOD_RADIUS,
 		transitionPortalMaxDepth: DEFAULT_TRANSITION_PORTAL_MAX_DEPTH,
-		portalTriageMode: "normal",
-		portalDepthRangeMode: "default",
 		landblockInputMode: "dungeon",
 		showPortalPolygons: false,
 		showCellIndicators: false,
 		highlightPortalTargets: false,
 		renderStyle: "solid",
 		textureFilteringMode: "anisotropic-4x",
-		textureColorSpaceMode: "auto",
 		detailTexturesEnabled: true,
 		page: DEFAULT_BROWSER_DESTINATION
 			? "destination-preview"
@@ -300,26 +279,6 @@ export function updateTransitionPortalMaxDepth(
 	};
 }
 
-export function updatePortalTriageMode(
-	browserMode: BrowserModeState,
-	portalTriageMode: BrowserPortalTriageMode,
-): BrowserModeState {
-	return {
-		...browserMode,
-		portalTriageMode,
-	};
-}
-
-export function updatePortalDepthRangeMode(
-	browserMode: BrowserModeState,
-	portalDepthRangeMode: BrowserPortalDepthRangeMode,
-): BrowserModeState {
-	return {
-		...browserMode,
-		portalDepthRangeMode,
-	};
-}
-
 export function updateLandblockInputMode(
 	browserMode: BrowserModeState,
 	landblockInputMode: BrowserLandblockInputMode,
@@ -381,16 +340,6 @@ export function updateBrowserTextureFilteringMode(
 	};
 }
 
-export function updateBrowserTextureColorSpaceMode(
-	browserMode: BrowserModeState,
-	textureColorSpaceMode: BrowserTextureColorSpaceMode,
-): BrowserModeState {
-	return {
-		...browserMode,
-		textureColorSpaceMode,
-	};
-}
-
 export function updateBrowserDetailTexturesEnabled(
 	browserMode: BrowserModeState,
 	detailTexturesEnabled: boolean,
@@ -430,15 +379,12 @@ export function previewBrowserLocation(
 		detailLodRadius: browserMode.detailLodRadius,
 		envCellLodRadius: browserMode.envCellLodRadius,
 		transitionPortalMaxDepth: browserMode.transitionPortalMaxDepth,
-		portalTriageMode: browserMode.portalTriageMode,
-		portalDepthRangeMode: browserMode.portalDepthRangeMode,
 		landblockInputMode: browserMode.landblockInputMode,
 		showPortalPolygons: browserMode.showPortalPolygons,
 		showCellIndicators: browserMode.showCellIndicators,
 		highlightPortalTargets: browserMode.highlightPortalTargets,
 		renderStyle: browserMode.renderStyle,
 		textureFilteringMode: browserMode.textureFilteringMode,
-		textureColorSpaceMode: browserMode.textureColorSpaceMode,
 		detailTexturesEnabled: browserMode.detailTexturesEnabled,
 		page: "destination-preview",
 	};
@@ -469,15 +415,12 @@ export function selectBrowserLandblockDestination(
 		detailLodRadius: browserMode.detailLodRadius,
 		envCellLodRadius: browserMode.envCellLodRadius,
 		transitionPortalMaxDepth: browserMode.transitionPortalMaxDepth,
-		portalTriageMode: browserMode.portalTriageMode,
-		portalDepthRangeMode: browserMode.portalDepthRangeMode,
 		landblockInputMode: browserMode.landblockInputMode,
 		showPortalPolygons: browserMode.showPortalPolygons,
 		showCellIndicators: browserMode.showCellIndicators,
 		highlightPortalTargets: browserMode.highlightPortalTargets,
 		renderStyle: browserMode.renderStyle,
 		textureFilteringMode: browserMode.textureFilteringMode,
-		textureColorSpaceMode: browserMode.textureColorSpaceMode,
 		detailTexturesEnabled: browserMode.detailTexturesEnabled,
 		page: "destination-preview",
 	};

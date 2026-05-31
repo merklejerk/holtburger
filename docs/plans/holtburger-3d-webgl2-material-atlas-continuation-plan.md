@@ -2644,20 +2644,37 @@ Exit criteria:
 
 ### Phase M7.3.5: Landblock Batch Lifecycle Validation
 
-Status: Not started.
+Status: Complete.
 
 Purpose: close the remaining M7.3.4 validation debt before M7.4 hardens default outdoor static
 substitution.
 
 Tasks:
 
-- Add graph/resource lifecycle tests for landblock-scoped batch creation, retained batch reuse,
-  streaming removal, and graph lease release.
-- Add re-anchor reuse tests proving common render-origin shifts update batch model offsets without
-  rebuilding compacted VBOs.
-- Decide whether the batch origin should become an explicit landblock render origin instead of the
-  first compacted draw unit's current translation. Keep the current first-draw origin only if the
-  tests and field reports show stable reuse and no precision issues.
+- [x] Add graph/resource lifecycle tests for landblock-scoped batch creation, retained batch reuse,
+      streaming removal, and graph lease release.
+- [x] Add re-anchor reuse tests proving common render-origin shifts update batch model offsets without
+      rebuilding compacted VBOs.
+- [x] Decide whether the batch origin should become an explicit landblock render origin instead of the
+      first compacted draw unit's current translation. Keep the current first-draw origin only if the
+      tests and field reports show stable reuse and no precision issues.
+
+Progress Notes:
+
+- Added WebGL2 world-resource tests covering two landblock-scoped compacted batches, one-landblock
+  streaming removal, retained batch graph lease survival, removed batch lease release, and disposal
+  candidate reporting.
+- Added a re-anchor reuse test proving a common chunk offset shift updates only the compacted batch
+  model matrix while preserving the atlas generation texture and compacted VBO/IBO resources.
+- Course correction: the atlas compaction plan key previously included all compactable draw-unit IDs.
+  That made an unchanged landblock batch rebuild when a neighboring landblock streamed out. The key
+  is now atlas-content based, while per-landblock compacted geometry keys still include local draw
+  units and baked positions.
+- Refreshed atlas generation coverage metadata when a content-equivalent generation is reused, so
+  graph metadata tracks the current compactable draw-unit set without reallocating GL textures.
+- Course correction: compacted static batches now use the owning landblock render chunk offset as the
+  batch origin instead of deriving it from the first compacted draw unit. This makes batch-local space
+  semantic, deterministic, and aligned with re-anchor behavior.
 
 Exit Criteria:
 

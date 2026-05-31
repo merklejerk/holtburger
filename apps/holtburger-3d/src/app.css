@@ -525,7 +525,14 @@ ul {
 	gap: 0.75rem;
 }
 
-.browser-panel__debug-report button {
+.browser-panel__debug-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	align-items: center;
+}
+
+.browser-panel__debug-actions button {
 	justify-self: start;
 }
 

@@ -82,6 +82,89 @@ describe("staged world material strategy", () => {
 		});
 	});
 
+	it("reuses staged material plans while prepared dependencies are unchanged", () => {
+		const materialRecord = createMaterialRecipeRecord({
+			surfaceId: 0x08000001,
+			renderSurfaceId: 0x06000001,
+		});
+		const renderSurfaceRecord = createRenderSurfaceRecord({
+			renderSurfaceId: 0x06000001,
+		});
+		const preparedTextureRecord = createAtlasPreparedTextureRecord({
+			renderSurfaceId: 0x06000001,
+		});
+		const state = createAssetState([
+			materialRecord,
+			renderSurfaceRecord,
+			preparedTextureRecord,
+		]);
+		const slot = createMaterialSlot({ slotIndex: 0, surfaceId: 0x08000001 });
+		const materialPlanCache = new Map();
+
+		const first = resolveStagedWorldMaterialSlotPlan({
+			assetState: state,
+			slot,
+			fallbackColorKey: "test/static",
+			renderableKind: "static",
+			materialPlanCache,
+		});
+		const second = resolveStagedWorldMaterialSlotPlan({
+			assetState: state,
+			slot,
+			fallbackColorKey: "test/static",
+			renderableKind: "static",
+			materialPlanCache,
+		});
+		const refreshed = resolveStagedWorldMaterialSlotPlan({
+			assetState: createAssetState([
+				materialRecord,
+				{ ...renderSurfaceRecord, preparedAt: "refreshed" },
+				preparedTextureRecord,
+			]),
+			slot,
+			fallbackColorKey: "test/static",
+			renderableKind: "static",
+			materialPlanCache,
+		});
+
+		expect(second).toBe(first);
+		expect(refreshed).not.toBe(first);
+	});
+
+	it("does not cache transient unresolved material plans", () => {
+		const materialRecord = createMaterialRecipeRecord({
+			surfaceId: 0x08000001,
+			renderSurfaceId: 0x06000001,
+		});
+		const slot = createMaterialSlot({ slotIndex: 0, surfaceId: 0x08000001 });
+		const materialPlanCache = new Map();
+
+		const unresolved = resolveStagedWorldMaterialSlotPlan({
+			assetState: createAssetState([materialRecord]),
+			slot,
+			fallbackColorKey: "test/static",
+			renderableKind: "static",
+			materialPlanCache,
+		});
+		const resolved = resolveStagedWorldMaterialSlotPlan({
+			assetState: createAssetState([
+				materialRecord,
+				createRenderSurfaceRecord({ renderSurfaceId: 0x06000001 }),
+				createAtlasPreparedTextureRecord({ renderSurfaceId: 0x06000001 }),
+			]),
+			slot,
+			fallbackColorKey: "test/static",
+			renderableKind: "static",
+			materialPlanCache,
+		});
+
+		expect(unresolved).toMatchObject({
+			kind: "flat",
+			fallbackReasonCode: "missing-render-surface",
+		});
+		expect(resolved.kind).toBe("direct-texture");
+	});
+
 	it("uses the same staged direct policy for structured interiors", () => {
 		const state = createAssetState([
 			createMaterialRecipeRecord({
@@ -497,7 +580,8 @@ function createRenderSurfaceRecord(options: {
 		defaultPaletteId: options.defaultPaletteId ?? null,
 		dependencies: {
 			paletteAssetIds:
-				options.defaultPaletteId === undefined || options.defaultPaletteId === null
+				options.defaultPaletteId === undefined ||
+				options.defaultPaletteId === null
 					? []
 					: [
 							`palette/${options.defaultPaletteId.toString(16).padStart(8, "0")}`,

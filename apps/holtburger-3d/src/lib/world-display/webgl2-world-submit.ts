@@ -540,15 +540,17 @@ export function planWebgl2FlatWorldSubmitOrder(
 	drawUnitsById: ReadonlyMap<string, Webgl2WorldDrawUnit>,
 ): Webgl2WorldDrawUnit[] {
 	const visibleDrawUnits: Webgl2WorldDrawUnit[] = [];
-	for (const draw of frame.passes.flatMap((pass) => pass.draws)) {
-		const drawUnit = drawUnitsById.get(draw.drawUnitId);
-		if (!drawUnit) {
-			throw new Error(
-				`Staged world frame referenced missing WebGL2 draw unit ${draw.drawUnitId}.`,
-			);
-		}
-		if (drawUnit.kind !== "portal-mask") {
-			visibleDrawUnits.push(drawUnit);
+	for (const pass of frame.passes) {
+		for (const draw of pass.draws) {
+			const drawUnit = drawUnitsById.get(draw.drawUnitId);
+			if (!drawUnit) {
+				throw new Error(
+					`Staged world frame referenced missing WebGL2 draw unit ${draw.drawUnitId}.`,
+				);
+			}
+			if (drawUnit.kind !== "portal-mask") {
+				visibleDrawUnits.push(drawUnit);
+			}
 		}
 	}
 	return visibleDrawUnits.sort(compareWebgl2FlatWorldDrawUnits);
@@ -559,18 +561,22 @@ export function planWebgl2PortalMaskSubmitOrder(
 	drawUnitsById: ReadonlyMap<string, Webgl2WorldDrawUnit>,
 ): Webgl2WorldDrawUnit[] {
 	const maskDrawUnits: Webgl2WorldDrawUnit[] = [];
-	for (const draw of frame.passes.flatMap((pass) => pass.draws)) {
-		const drawUnit = drawUnitsById.get(draw.drawUnitId);
-		if (!drawUnit) {
-			throw new Error(
-				`Staged world frame referenced missing WebGL2 draw unit ${draw.drawUnitId}.`,
-			);
-		}
-		if (drawUnit.kind === "portal-mask") {
-			maskDrawUnits.push(drawUnit);
+	for (const pass of frame.passes) {
+		for (const draw of pass.draws) {
+			const drawUnit = drawUnitsById.get(draw.drawUnitId);
+			if (!drawUnit) {
+				throw new Error(
+					`Staged world frame referenced missing WebGL2 draw unit ${draw.drawUnitId}.`,
+				);
+			}
+			if (drawUnit.kind === "portal-mask") {
+				maskDrawUnits.push(drawUnit);
+			}
 		}
 	}
-	return maskDrawUnits.sort((left, right) => left.id.localeCompare(right.id));
+	return maskDrawUnits.sort((left, right) =>
+		compareStableAsciiStrings(left.id, right.id),
+	);
 }
 
 export interface Webgl2SceneDomainDrawUnits {
@@ -608,14 +614,17 @@ function compareWebgl2FlatWorldDrawUnits(
 	left: Webgl2WorldDrawUnit,
 	right: Webgl2WorldDrawUnit,
 ): number {
-	return (
-		Number(left.texture === null) - Number(right.texture === null) ||
-		left.materialKind.localeCompare(right.materialKind) ||
-		left.materialKey.localeCompare(right.materialKey) ||
-		(left.textureKey ?? "").localeCompare(right.textureKey ?? "") ||
-		left.geometrySignature.localeCompare(right.geometrySignature) ||
-		left.id.localeCompare(right.id)
-	);
+	return compareStableAsciiStrings(left.submitOrderKey, right.submitOrderKey);
+}
+
+function compareStableAsciiStrings(left: string, right: string): number {
+	if (left < right) {
+		return -1;
+	}
+	if (left > right) {
+		return 1;
+	}
+	return 0;
 }
 
 function applyDrawUnitRenderState({

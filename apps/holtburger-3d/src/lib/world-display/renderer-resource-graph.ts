@@ -62,26 +62,27 @@ export class RendererResourceGraph {
 		upsertNode(this.state, node);
 	}
 
-	replaceDependencies(nodeKey: string, dependencyKeys: readonly string[]): void {
+	replaceDependencies(
+		nodeKey: string,
+		dependencyKeys: readonly string[],
+	): void {
 		const nextState = cloneState(this.state);
 		replaceDependencies(nextState, nodeKey, dependencyKeys);
 		this.state = nextState;
 	}
 
 	applyBatchUpdate(update: RendererResourceGraphBatchUpdate): void {
-		const nextState = cloneState(this.state);
 		for (const node of update.nodes ?? []) {
-			upsertNode(nextState, node);
+			upsertNode(this.state, node);
 		}
 		for (const replacement of update.dependencyReplacements ?? []) {
 			replaceDependenciesWithoutCycleCheck(
-				nextState,
+				this.state,
 				replacement.nodeKey,
 				replacement.dependencyKeys,
 			);
 		}
-		assertAcyclic(nextState);
-		this.state = nextState;
+		assertAcyclic(this.state);
 	}
 
 	leaseNode(nodeKey: string, owner: string): RendererResourceGraphLease {
@@ -106,7 +107,9 @@ export class RendererResourceGraph {
 	}
 
 	retainedPreparedAssetIds(): string[] {
-		return sortedPreparedAssetIdsForKeys(reachableNodeKeysFromLeases(this.state));
+		return sortedPreparedAssetIdsForKeys(
+			reachableNodeKeysFromLeases(this.state),
+		);
 	}
 
 	disposalCandidates(): RendererResourceGraphDisposalCandidate[] {
@@ -147,7 +150,9 @@ export class RendererResourceGraph {
 		this.state = nextState;
 	}
 
-	explainRetention(nodeKeyOrPreparedAssetId: string): RendererResourceGraphRetentionExplanation {
+	explainRetention(
+		nodeKeyOrPreparedAssetId: string,
+	): RendererResourceGraphRetentionExplanation {
 		const targetKey = canonicalExplanationTargetKey(
 			this.state,
 			nodeKeyOrPreparedAssetId,
@@ -210,9 +215,7 @@ function createEmptyState(): GraphState {
 
 function cloneState(state: GraphState): GraphState {
 	return {
-		nodes: new Map(
-			[...state.nodes].map(([key, node]) => [key, { ...node }]),
-		),
+		nodes: new Map([...state.nodes].map(([key, node]) => [key, { ...node }])),
 		dependenciesByNodeKey: new Map(
 			[...state.dependenciesByNodeKey].map(([key, dependencies]) => [
 				key,
@@ -346,16 +349,15 @@ function assertAcyclic(state: GraphState): void {
 			);
 		}
 		visiting.add(nodeKey);
-		for (const dependencyKey of sortedStrings([
-			...(state.dependenciesByNodeKey.get(nodeKey) ?? []),
-		])) {
+		for (const dependencyKey of state.dependenciesByNodeKey.get(nodeKey) ??
+			[]) {
 			visit(dependencyKey, [...path, nodeKey]);
 		}
 		visiting.delete(nodeKey);
 		visited.add(nodeKey);
 	};
 
-	for (const nodeKey of sortedStrings([...state.nodes.keys()])) {
+	for (const nodeKey of state.nodes.keys()) {
 		visit(nodeKey, []);
 	}
 }
@@ -378,7 +380,9 @@ function reachableNodeKeysFromLeases(state: GraphState): Set<string> {
 	return reachable;
 }
 
-function sortedPreparedAssetIdsForKeys(nodeKeys: ReadonlySet<string>): string[] {
+function sortedPreparedAssetIdsForKeys(
+	nodeKeys: ReadonlySet<string>,
+): string[] {
 	return [...nodeKeys]
 		.filter((nodeKey) => nodeKey.startsWith("prepared-asset/"))
 		.map((nodeKey) => nodeKey.slice("prepared-asset/".length))

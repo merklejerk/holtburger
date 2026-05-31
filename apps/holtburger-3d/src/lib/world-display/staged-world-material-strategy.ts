@@ -21,6 +21,7 @@ import { resolveFirstMaterialRenderSurface } from "./material-texture-resolution
 import {
 	isIndexedTextureFormat,
 	resolveIndexedMaterialData,
+	type IndexedMaterialDataCache,
 	type ResolvedIndexedMaterialData,
 } from "./indexed-material-data";
 import {
@@ -408,6 +409,7 @@ export function resolveStagedWorldMaterialStrategy(options: {
 	input: StagedWorldMaterialStrategyInput;
 	textureCapabilities?: MaterialTextureCapabilities;
 	textureFilteringMode?: TextureFilteringMode;
+	indexedMaterialDataCache?: IndexedMaterialDataCache;
 }):
 	| StagedWorldDirectTextureMaterialStrategy
 	| StagedWorldIndexedPalettedMaterialStrategy
@@ -488,6 +490,7 @@ export function resolveStagedWorldMaterialStrategy(options: {
 				textureCapabilities:
 					options.textureCapabilities ??
 					defaultStagedWorldMaterialTextureCapabilities(),
+				indexedMaterialDataCache: options.indexedMaterialDataCache,
 			});
 		}
 		return createFallbackRequirement({
@@ -597,6 +600,7 @@ function resolveIndexedPalettedTextureStrategy(options: {
 	materialAssetId: string;
 	recipe: PreparedMaterialRecipePayload;
 	textureCapabilities: MaterialTextureCapabilities;
+	indexedMaterialDataCache?: IndexedMaterialDataCache;
 }):
 	| StagedWorldIndexedPalettedMaterialStrategy
 	| StagedWorldMaterialFallbackStrategy {
@@ -631,6 +635,7 @@ function resolveIndexedPalettedTextureStrategy(options: {
 			appearance:
 				options.input.appearance ?? createBaseMaterialAppearanceContext("base"),
 			samplingPolicy,
+			cache: options.indexedMaterialDataCache,
 		});
 	} catch (error) {
 		resolveError = error;

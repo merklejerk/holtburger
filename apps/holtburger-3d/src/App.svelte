@@ -5,6 +5,7 @@
 	import { parseWorldRenderBackend } from "./lib/app-config/render-backend";
 	import { AssetChannelController } from "./lib/assets/asset-channel";
 	import { SceneAssetStreamingController } from "./lib/assets/scene-asset-streaming-controller";
+	import "./lib/diagnostics/browser-js-profiler";
 	import { readDebugConfig } from "./lib/host/tauri";
 	import { RendererResourceGraph } from "./lib/world-display/renderer-resource-graph";
 	import BrowserWorldDisplay from "./pages/BrowserWorldDisplay.svelte";

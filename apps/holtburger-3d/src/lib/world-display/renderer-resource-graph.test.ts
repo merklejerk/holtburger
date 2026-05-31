@@ -27,14 +27,18 @@ describe("renderer resource graph", () => {
 		const graph = createFixtureGraph();
 		const lease = graph.leaseNode(sceneObjectGraphNodeKey("tree-1"), "scene");
 
-		expect(graph.disposalCandidates().map((candidate) => candidate.nodeKey)).toEqual([
+		expect(
+			graph.disposalCandidates().map((candidate) => candidate.nodeKey),
+		).toEqual([
 			atlasGenerationGraphNodeKey("atlas-1"),
 			staticBatchGraphNodeKey("batch-1"),
 		]);
 
 		graph.releaseLease(lease);
 
-		expect(graph.disposalCandidates().map((candidate) => candidate.nodeKey)).toEqual([
+		expect(
+			graph.disposalCandidates().map((candidate) => candidate.nodeKey),
+		).toEqual([
 			atlasGenerationGraphNodeKey("atlas-1"),
 			materialDecisionGraphNodeKey("mat-1"),
 			sceneObjectGraphNodeKey("tree-1"),
@@ -44,7 +48,10 @@ describe("renderer resource graph", () => {
 
 	it("keeps multiple lease owners explicit without reference-count ambiguity", () => {
 		const graph = createFixtureGraph();
-		const first = graph.leaseNode(sceneObjectGraphNodeKey("tree-1"), "visible scene");
+		const first = graph.leaseNode(
+			sceneObjectGraphNodeKey("tree-1"),
+			"visible scene",
+		);
 		graph.leaseNode(sceneObjectGraphNodeKey("tree-1"), "debug picker");
 
 		graph.releaseLease(first);
@@ -56,7 +63,9 @@ describe("renderer resource graph", () => {
 			"setup-appearance/02000001",
 		]);
 		expect(
-			graph.explainRetention("material/08000001").paths.map((path) => path.owner),
+			graph
+				.explainRetention("material/08000001")
+				.paths.map((path) => path.owner),
 		).toEqual(["debug picker"]);
 	});
 
@@ -151,7 +160,7 @@ describe("renderer resource graph", () => {
 		expect(graph.retainedPreparedAssetIds()).toEqual(["a", "b"]);
 	});
 
-	it("rejects cycles from batch updates without committing partial state", () => {
+	it("rejects cycles from batch updates as catastrophic graph errors", () => {
 		const graph = new RendererResourceGraph();
 
 		expect(() =>
@@ -173,15 +182,21 @@ describe("renderer resource graph", () => {
 			}),
 		).toThrow(/cycle/);
 
-		expect(graph.hasNode(sceneObjectGraphNodeKey("first"))).toBe(false);
+		expect(graph.hasNode(sceneObjectGraphNodeKey("first"))).toBe(true);
 	});
 
 	it("returns deterministic retained ids, candidates, and explanations", () => {
 		const graph = new RendererResourceGraph();
 		graph.transaction((draft) => {
 			for (const node of [
-				{ key: preparedAssetGraphNodeKey("z"), kind: "prepared-asset" as const },
-				{ key: preparedAssetGraphNodeKey("a"), kind: "prepared-asset" as const },
+				{
+					key: preparedAssetGraphNodeKey("z"),
+					kind: "prepared-asset" as const,
+				},
+				{
+					key: preparedAssetGraphNodeKey("a"),
+					kind: "prepared-asset" as const,
+				},
 				{ key: sceneObjectGraphNodeKey("b"), kind: "scene-object" as const },
 				{ key: sceneObjectGraphNodeKey("a"), kind: "scene-object" as const },
 			]) {
@@ -200,10 +215,12 @@ describe("renderer resource graph", () => {
 		expect(graph.retainedPreparedAssetIds()).toEqual(["a", "z"]);
 		expect(graph.disposalCandidates()).toEqual([]);
 		expect(
-			graph.explainRetention(preparedAssetGraphNodeKey("z")).paths.map((path) => ({
-				owner: path.owner,
-				path: path.path,
-			})),
+			graph
+				.explainRetention(preparedAssetGraphNodeKey("z"))
+				.paths.map((path) => ({
+					owner: path.owner,
+					path: path.path,
+				})),
 		).toEqual([
 			{
 				owner: "z-owner",

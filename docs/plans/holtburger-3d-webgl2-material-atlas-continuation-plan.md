@@ -1866,7 +1866,7 @@ Known remaining risk:
 
 ## Phase M5A: Direct Texture Path Performance Audit
 
-Status: Not started.
+Status: Complete.
 
 Purpose: measure the current WebGL2 direct/staged texture path before starting atlas layout or
 static compaction. The renderer is visibly much better, but performance may be limited by draw
@@ -1901,6 +1901,68 @@ Tasks:
 - Use the audit to decide whether the next optimization should be atlas/static compaction, candidate
   pruning, staged assembly caching, resource-sync scheduling, texture upload throttling, or asset
   incubation changes.
+
+Progress:
+
+- Added a runtime-toggleable browser JS profiler exposed as `window.holtburgerJsProfiler` and
+  `?holtburgerJsProfile=1`, plus a Debug-tab start/flush button. Profiling no longer persists
+  across reloads.
+- Instrumented the first M5A loading and frame scopes:
+  - asset interest-key creation, coverage request planning, bootstrap/streaming batches, asset
+    pending/apply/prune updates, worker prepare waits, and Tauri binary lookup waits;
+  - WebGL2 resource sync, staged scene assembly, draw-unit creation/reuse, scene bounds generation,
+    direct/shared/indexed/detail/terrain texture upload scopes;
+  - WebGL2 frame camera residency, staged-frame build, portal-mask planning, flat submit,
+    scene-domain target sync, portal work planning, domain renders, composite copies, and metrics
+    reporting.
+- First profile pass showed repeated render-surface decode work during WebGL2 resource sync. Terrain
+  and detail-overlay texture binding now check the cached WebGL texture key before decoding upload
+  bytes, avoiding repeated CPU decode on texture cache hits.
+- Follow-up profile showed the browser resource coordinator and WebGL2 renderer were still shaped
+  like a snapshot browser rather than a streaming client: each asset-state wave could trigger
+  immediate whole-scene WebGL2 sync, and signature diffing rebuilt/sorted large structured-interior
+  strings on the hot path. WebGL2 resource sync is now dirty/coalesced into the next render frame,
+  and the coordinator reuses per-update scene signatures instead of recomputing structured-interior
+  signatures for render-spatial updates.
+- Steady-frame profiling showed a separate per-frame bottleneck in visible draw ordering:
+  `buildStagedWorldFrame` and WebGL2 submit planning rebuilt visible arrays and sorted them with
+  repeated `localeCompare` calls over long material, texture, geometry, and draw-unit identifiers.
+  Submit planning now avoids `flatMap` allocation, uses cheap stable ASCII comparisons, and
+  compares a precomputed WebGL2 draw-unit submit key generated during resource sync.
+- Follow-mode streaming profiles showed indexed/paletted material derivation repeatedly rebuilding
+  CPU-side indexed DTOs, including neighbor-packed index payloads, before WebGL2 texture-cache reuse
+  could help. WebGL2 resource sync now owns an indexed material data cache and threads it through
+  staged assembly/material resolution so unchanged prepared indexed inputs reuse the derived DTO
+  across resource syncs.
+- A later follow-mode profile showed resource sync dominated by renderer resource graph batch
+  updates, specifically full-state cloning and sorted full-graph acyclic validation. Batch updates
+  now mutate the graph in place and treat invalid batches as catastrophic internal renderer errors;
+  explicit `transaction()` remains the rollback API. Hot acyclic validation also avoids
+  deterministic sorting, leaving sorted traversal to reporting/explanation paths.
+- Follow-up profiles then moved the dominant cost back to full staged static assembly and repeated
+  material strategy resolution. WebGL2 resource sync now owns a staged material plan cache, threaded
+  through staged assembly, that reuses material decisions while their prepared dependency states are
+  unchanged. The lower indexed material data cache remains as a miss-path optimization.
+- After resource-sync caching, a longer follow-mode profile showed asset streaming/preparation as
+  the next ambiguous cost center. The asset profiler now records request-kind, hydration-mode, batch
+  shape, prepared-output-kind, worker host-lookup/decode, worker payload preparation, and transfer
+  preparation samples so the next capture can separate prepared texture work from graph expansion,
+  host lookup, envelope decode, and main-thread apply work.
+- The first sharper asset profile showed prepared texture requests incorrectly going through graph
+  hydration even though prepared textures are dependency-free leaf assets. Prepared texture asset IDs
+  now use direct hydration, while material recipes remain graph-hydrated pending a later batched
+  graph scheduler decision if per-material graph roots remain hot.
+- Final M5A profile after direct prepared-texture hydration showed the remaining streaming stalls
+  dominated by host binary lookup latency for landblock outdoor/topology batches. Worker envelope
+  decode and landblock payload preparation were small, so host lookup/Tauri/Rust DAT delivery is the
+  deferred loading follow-up. WebGL2 resource sync remains nontrivial after asset waves, but the
+  dominant direct-texture path evidence is sufficient to proceed to M6 atlas layout extraction.
+- Deferred submit-order follow-up: if per-frame sort/submit planning becomes hot again, replace
+  full visible-list sorting with global render-domain submit buckets keyed by material kind,
+  material state, texture/sampler state, and geometry. Landblocks should own draw-unit lifetime and
+  streaming membership, but final submit buckets should be global per render domain so shared
+  materials/textures batch across many loaded landblocks. Keep true blended transparency in a
+  separate visible depth-sorted path.
 
 Exit criteria:
 

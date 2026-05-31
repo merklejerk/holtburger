@@ -382,6 +382,14 @@ function createDrawUnit({
 		id,
 		kind,
 		geometrySignature,
+		submitOrderKey: [
+			texture ? "0" : "1",
+			materialKind,
+			materialKey,
+			"",
+			geometrySignature,
+			id,
+		].join("\0"),
 		vertexArray: {
 			vertexArray,
 			dispose() {

@@ -4,6 +4,12 @@ import {
 } from "../../app/browser-mode";
 import type { AssetLookupRequestDto, AssetPriority } from "../host/contracts";
 import {
+	profileBrowserJsScope,
+	profileBrowserJsScopeAsync,
+	recordBrowserJsProfileSample,
+} from "../diagnostics/browser-js-profiler";
+import {
+	classifyAssetRequestProfileKind,
 	classifyAssetHydration,
 	isDirectSceneRootAssetId,
 	isStaticRenderableAssetId,
@@ -94,7 +100,10 @@ export class SceneAssetStreamingController {
 		try {
 			while (!this.disposed && this.latestInput) {
 				const input = this.latestInput;
-				const syncKey = createSceneInterestSyncKey(input);
+				const syncKey = profileBrowserJsScope(
+					"asset-stream.createSceneInterestSyncKey",
+					() => createSceneInterestSyncKey(input),
+				);
 				if (syncKey === this.lastSyncedKey) {
 					break;
 				}
@@ -113,9 +122,17 @@ export class SceneAssetStreamingController {
 					requestRevision: this.requestRevision,
 				});
 
-				await this.syncPriority(input, "bootstrap");
-				await this.syncPriority(input, "streaming");
-				this.prunePreparedCache(input);
+				await profileBrowserJsScopeAsync(
+					"asset-stream.syncPriority.bootstrap",
+					() => this.syncPriority(input, "bootstrap"),
+				);
+				await profileBrowserJsScopeAsync(
+					"asset-stream.syncPriority.streaming",
+					() => this.syncPriority(input, "streaming"),
+				);
+				profileBrowserJsScope("asset-stream.prunePreparedCache", () => {
+					this.prunePreparedCache(input);
+				});
 
 				if (this.latestInput === input) {
 					break;
@@ -141,30 +158,34 @@ export class SceneAssetStreamingController {
 		}
 
 		const preparedByAssetId = this.deps.getPreparedByAssetId();
-		const requests = createSceneCoverageRequests(
-			{
-				requestRevision: this.requestRevision,
-				browserDestination: input.browserDestination,
-				preparedByAssetId,
-				pendingAssetIds: [...this.inFlightAssetIds],
-				options: {
-					terrainRadius: input.terrainLodRadius,
-					buildingRadius: input.buildingLodRadius,
-					detailRadius: input.detailLodRadius,
-					envCellRadius: input.envCellLodRadius,
-					materialTexturePreparationPolicy:
-						getMaterialTexturePreparationPolicy(input.rendererBackend),
-				},
-			},
-			priority,
-		).concat(
-			createAppearancePreviewRequests({
-				requestRevision: this.requestRevision,
-				assetIds: input.appearancePreviewAssetIds,
-				preparedByAssetId,
-				pendingAssetIds: [...this.inFlightAssetIds],
-				priority,
-			}),
+		const requests = profileBrowserJsScope(
+			`asset-stream.planRequests.${priority}`,
+			() =>
+				createSceneCoverageRequests(
+					{
+						requestRevision: this.requestRevision,
+						browserDestination: input.browserDestination,
+						preparedByAssetId,
+						pendingAssetIds: [...this.inFlightAssetIds],
+						options: {
+							terrainRadius: input.terrainLodRadius,
+							buildingRadius: input.buildingLodRadius,
+							detailRadius: input.detailLodRadius,
+							envCellRadius: input.envCellLodRadius,
+							materialTexturePreparationPolicy:
+								getMaterialTexturePreparationPolicy(input.rendererBackend),
+						},
+					},
+					priority,
+				).concat(
+					createAppearancePreviewRequests({
+						requestRevision: this.requestRevision,
+						assetIds: input.appearancePreviewAssetIds,
+						preparedByAssetId,
+						pendingAssetIds: [...this.inFlightAssetIds],
+						priority,
+					}),
+				),
 		);
 
 		this.deps.debugLog("scene-coverage", {
@@ -202,19 +223,30 @@ export class SceneAssetStreamingController {
 		});
 
 		if (requests.length === 0) {
-			this.prunePreparedCache(input);
+			profileBrowserJsScope("asset-stream.prunePreparedCache", () => {
+				this.prunePreparedCache(input);
+			});
 			return;
 		}
 
 		for (const request of requests) {
 			this.inFlightAssetIds.add(request.assetId);
 		}
-		this.deps.markAssetsPending(requests);
+		recordAssetStreamBatchShape(priority, requests);
+		profileBrowserJsScope("asset-stream.markAssetsPending", () => {
+			this.deps.markAssetsPending(requests);
+		});
 
-		await Promise.allSettled(
-			requests.map((request) => this.prepareAndApplyRequest(request)),
+		await profileBrowserJsScopeAsync(
+			`asset-stream.prepareBatch.${priority}`,
+			() =>
+				Promise.allSettled(
+					requests.map((request) => this.prepareAndApplyRequest(request)),
+				),
 		);
-		this.prunePreparedCache(input);
+		profileBrowserJsScope("asset-stream.prunePreparedCache", () => {
+			this.prunePreparedCache(input);
+		});
 	}
 
 	private prunePreparedCache(input: SceneAssetStreamingInput): void {
@@ -230,7 +262,9 @@ export class SceneAssetStreamingController {
 			evictedAssetIds: prunePlan.evictedAssetIds,
 			diagnostics: prunePlan.diagnostics,
 		});
-		this.deps.applyAssetCachePrune(prunePlan);
+		profileBrowserJsScope("asset-stream.applyAssetCachePrune", () => {
+			this.deps.applyAssetCachePrune(prunePlan);
+		});
 	}
 
 	private planPreparedCachePrune(
@@ -248,8 +282,9 @@ export class SceneAssetStreamingController {
 					buildingRadius: input.buildingLodRadius,
 					detailRadius: input.detailLodRadius,
 					envCellRadius: input.envCellLodRadius,
-					materialTexturePreparationPolicy:
-						getMaterialTexturePreparationPolicy(input.rendererBackend),
+					materialTexturePreparationPolicy: getMaterialTexturePreparationPolicy(
+						input.rendererBackend,
+					),
 				},
 			).concat(input.appearancePreviewAssetIds),
 			inFlightAssetIds: [...this.inFlightAssetIds],
@@ -266,21 +301,32 @@ export class SceneAssetStreamingController {
 	): Promise<void> {
 		const hydrationKind = classifyAssetHydration(request.assetId);
 		try {
-			const preparedAssets =
-				hydrationKind === "direct"
-					? [await this.deps.assetChannel.prepareAsset(request)]
-					: (
-							await this.deps.assetChannel.prepareAssetGraph(
-								request,
-								this.deps.getPreparedByAssetId(),
-							)
-						).preparedAssets;
+			const preparedAssets = await profileBrowserJsScopeAsync(
+				`asset-stream.prepareRequest.${hydrationKind}.${classifyAssetRequestProfileKind(
+					request.assetId,
+				)}`,
+				async () => {
+					const assets =
+						hydrationKind === "direct"
+							? [await this.deps.assetChannel.prepareAsset(request)]
+							: (
+									await this.deps.assetChannel.prepareAssetGraph(
+										request,
+										this.deps.getPreparedByAssetId(),
+									)
+								).preparedAssets;
+					recordPreparedAssetOutputShape(hydrationKind, assets);
+					return assets;
+				},
+			);
 
 			if (this.disposed) {
 				return;
 			}
 
-			this.deps.applyPreparedAssets(preparedAssets);
+			profileBrowserJsScope("asset-stream.applyPreparedAssets", () => {
+				this.deps.applyPreparedAssets(preparedAssets);
+			});
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			const detail = {
@@ -301,6 +347,46 @@ export class SceneAssetStreamingController {
 		} finally {
 			this.inFlightAssetIds.delete(request.assetId);
 		}
+	}
+}
+
+function recordAssetStreamBatchShape(
+	priority: AssetPriority,
+	requests: readonly AssetLookupRequestDto[],
+): void {
+	recordBrowserJsProfileSample(
+		`asset-stream.batchRequestCount.${priority}`,
+		requests.length,
+	);
+	for (const request of requests) {
+		recordBrowserJsProfileSample(
+			`asset-stream.batchRequestKind.${priority}.${classifyAssetRequestProfileKind(
+				request.assetId,
+			)}`,
+			0,
+		);
+		recordBrowserJsProfileSample(
+			`asset-stream.batchHydration.${priority}.${classifyAssetHydration(
+				request.assetId,
+			)}`,
+			0,
+		);
+	}
+}
+
+function recordPreparedAssetOutputShape(
+	hydrationKind: ReturnType<typeof classifyAssetHydration>,
+	assets: readonly PreparedAssetRecord[],
+): void {
+	recordBrowserJsProfileSample(
+		`asset-stream.preparedOutputCount.${hydrationKind}`,
+		assets.length,
+	);
+	for (const asset of assets) {
+		recordBrowserJsProfileSample(
+			`asset-stream.preparedOutputKind.${hydrationKind}.${asset.payload.kind}`,
+			0,
+		);
 	}
 }
 

@@ -15,6 +15,7 @@
 		type BrowserNavigationFocusMode,
 		type BrowserTextureFilteringMode,
 	} from "../app/browser-mode";
+	import { browserJsProfiler } from "../lib/diagnostics/browser-js-profiler";
 	import { formatHex32, normalizeOutdoorLandblockId } from "../lib/landblocks";
 	import { countOutdoorSceneLodTiles } from "../lib/world-display/outdoor-scene-interest";
 
@@ -51,6 +52,7 @@
 
 	let activeTab = $state<BrowserPanelTabId>("navigate");
 	let isCollapsed = $state(false);
+	let isJsProfilerRunning = $state(browserJsProfiler.isEnabled());
 	const focusedCellReference = $derived.by<FocusedCellReference>(() => {
 		const destination = $frontendState.browserMode.destination;
 		if (destination?.kind === "interior-cell") {
@@ -175,6 +177,18 @@
 	function handleDetailTexturesToggle(event: Event): void {
 		const input = event.currentTarget as HTMLInputElement;
 		frontendState.updateBrowserDetailTexturesEnabled(input.checked);
+	}
+
+	function toggleJsProfiler(): void {
+		if (isJsProfilerRunning) {
+			browserJsProfiler.disable();
+			isJsProfilerRunning = false;
+			return;
+		}
+
+		browserJsProfiler.reset();
+		browserJsProfiler.enable();
+		isJsProfilerRunning = true;
 	}
 
 	function formatOptionalHex32(value: number | null): string {
@@ -632,9 +646,18 @@
 					Generate a one-frame diagnostics report with the detailed renderer,
 					asset, camera, and scene state.
 				</p>
-				<button type="button" onclick={onGenerateDebugReport}>
-					Generate Report
-				</button>
+				<div class="browser-panel__debug-actions">
+					<button type="button" onclick={onGenerateDebugReport}>
+						Generate Report
+					</button>
+					<button
+						type="button"
+						aria-pressed={isJsProfilerRunning}
+						onclick={toggleJsProfiler}
+					>
+						{isJsProfilerRunning ? "Flush Profiler" : "Start Profiler"}
+					</button>
+				</div>
 			</div>
 		</div>
 	{/if}

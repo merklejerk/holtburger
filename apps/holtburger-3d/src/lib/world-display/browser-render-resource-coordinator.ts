@@ -316,6 +316,15 @@ export class BrowserRenderResourceCoordinator {
 			activeRenderAnchor: input.activeRenderAnchor,
 			browserDestination: input.browserDestination,
 		});
+		const terrainSceneSignature = describeTerrainSceneSignature(terrainScene);
+		const staticRenderableSceneSignature =
+			describeStaticRenderableSceneSignature(staticRenderableScene);
+		const structuredInteriorSceneSignature =
+			describeStructuredInteriorSceneSignature(structuredInteriorScene);
+		const debugOverlaySceneSignature =
+			describeDebugOverlaySceneSignature(debugOverlayScene);
+		const renderChunkTransformsSignature =
+			describeRenderChunkTransformsSignature(activeRenderChunkTransforms);
 		reportPreparedOutdoorAssetsNotRendered({
 			input,
 			outdoorSceneInterest,
@@ -354,22 +363,22 @@ export class BrowserRenderResourceCoordinator {
 			);
 			this.applySurfaceResource(
 				"render-chunk-transforms",
-				describeRenderChunkTransformsSignature(activeRenderChunkTransforms),
+				renderChunkTransformsSignature,
 				() => surface.setRenderChunkTransforms(activeRenderChunkTransforms),
 			);
 			this.applySurfaceResource(
 				"terrain-scene",
-				describeTerrainSceneSignature(terrainScene),
+				terrainSceneSignature,
 				() => surface.setTerrainScene(terrainScene),
 			);
 			this.applySurfaceResource(
 				"static-renderable-scene",
-				describeStaticRenderableSceneSignature(staticRenderableScene),
+				staticRenderableSceneSignature,
 				() => surface.setStaticRenderableScene(staticRenderableScene),
 			);
 			this.applySurfaceResource(
 				"structured-interior-scene",
-				describeStructuredInteriorSceneSignature(structuredInteriorScene),
+				structuredInteriorSceneSignature,
 				() => surface.setStructuredInteriorScene(structuredInteriorScene),
 			);
 			this.applySurfaceResource(
@@ -379,16 +388,16 @@ export class BrowserRenderResourceCoordinator {
 			);
 			this.applySurfaceResource(
 				"debug-overlay-scene",
-				describeDebugOverlaySceneSignature(debugOverlayScene),
+				debugOverlaySceneSignature,
 				() => surface.setDebugOverlayScene(debugOverlayScene),
 			);
 			this.applySurfaceResource(
 				"render-spatial-query",
 				describeRenderSpatialIndexSignature({
-					terrainScene,
-					structuredInteriorScene,
-					debugOverlayScene,
-					activeRenderChunkTransforms,
+					terrainSceneSignature,
+					structuredInteriorSceneSignature,
+					debugOverlaySceneSignature,
+					renderChunkTransformsSignature,
 					assetState: input.assetState,
 				}),
 				() => surface.setRenderSpatialQuery(this.renderSpatialIndex),
@@ -689,7 +698,6 @@ function describeStructuredInteriorSceneSignature(
 				(cell) =>
 					`${cell.envCellId}:${cell.renderKey}:${cell.renderChunk.chunkKey}:${cell.portalCount}:${cell.staticObjectCount}:${cell.renderGeometry.vertexCount}:${cell.renderGeometry.triangleCount}`,
 			)
-			.sort()
 			.join(",")}`,
 		`missingEnv=${scene.missingEnvCellAssetIds.join(",")}`,
 	].join(";");
@@ -722,23 +730,23 @@ function describeDebugOverlaySceneSignature(
 }
 
 function describeRenderSpatialIndexSignature({
-	terrainScene,
-	structuredInteriorScene,
-	debugOverlayScene,
-	activeRenderChunkTransforms,
+	terrainSceneSignature,
+	structuredInteriorSceneSignature,
+	debugOverlaySceneSignature,
+	renderChunkTransformsSignature,
 	assetState,
 }: {
-	terrainScene: TerrainSceneModel;
-	structuredInteriorScene: StructuredInteriorSceneModel;
-	debugOverlayScene: WorldDebugOverlayModel;
-	activeRenderChunkTransforms: readonly RenderChunkTransform[];
+	terrainSceneSignature: string;
+	structuredInteriorSceneSignature: string;
+	debugOverlaySceneSignature: string;
+	renderChunkTransformsSignature: string;
 	assetState: AssetChannelState;
 }): string {
 	return [
-		describeTerrainSceneSignature(terrainScene),
-		describeStructuredInteriorSceneSignature(structuredInteriorScene),
-		describeDebugOverlaySceneSignature(debugOverlayScene),
-		describeRenderChunkTransformsSignature(activeRenderChunkTransforms),
+		terrainSceneSignature,
+		structuredInteriorSceneSignature,
+		debugOverlaySceneSignature,
+		renderChunkTransformsSignature,
 		Object.keys(assetState.preparedByAssetId)
 			.filter((assetId) =>
 				/^landblock\/[0-9a-fA-F]{8}\/(?:outdoor|topology)$/.test(assetId),

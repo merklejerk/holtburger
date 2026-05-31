@@ -234,7 +234,7 @@
 		type="button"
 	>
 		<div class="world-display__viewport">
-			<div bind:this={viewportHost} class="world-display__three-host"></div>
+			<div bind:this={viewportHost} class="world-display__renderer-host"></div>
 		</div>
 	</button>
 </div>

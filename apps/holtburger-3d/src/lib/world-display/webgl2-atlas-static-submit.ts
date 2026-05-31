@@ -20,6 +20,7 @@ export interface Webgl2AtlasStaticSubmitMetrics {
 	submittedBatchCount: number;
 	submittedDrawSliceCount: number;
 	submittedTriangleCount: number;
+	submittedSliceRepresentedDrawUnitCount: number;
 	replacedDrawUnitCount: number;
 	retainedDrawUnitCount: number;
 	noVisibleRouteCount: number;
@@ -37,6 +38,7 @@ export function createEmptyWebgl2AtlasStaticSubmitMetrics(): Webgl2AtlasStaticSu
 		submittedBatchCount: 0,
 		submittedDrawSliceCount: 0,
 		submittedTriangleCount: 0,
+		submittedSliceRepresentedDrawUnitCount: 0,
 		replacedDrawUnitCount: 0,
 		retainedDrawUnitCount: 0,
 		noVisibleRouteCount: 0,
@@ -137,6 +139,7 @@ export function submitWebgl2AtlasStaticBatch({
 		submittedBatchCount: 0,
 		submittedDrawSliceCount: 0,
 		submittedTriangleCount: 0,
+		submittedSliceRepresentedDrawUnitCount: 0,
 		replacedDrawUnitCount: replaceableDrawUnitIds.size,
 		retainedDrawUnitCount,
 		noVisibleRouteCount: 0,
@@ -195,6 +198,8 @@ export function submitWebgl2AtlasStaticBatch({
 			metrics.shaderDrawCallCount += 1;
 			metrics.submittedDrawSliceCount += 1;
 			metrics.submittedTriangleCount += slice.indexCount / 3;
+			metrics.submittedSliceRepresentedDrawUnitCount +=
+				slice.drawUnitIds.length;
 		}
 	}
 	return metrics;

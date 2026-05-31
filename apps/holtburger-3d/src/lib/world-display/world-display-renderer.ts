@@ -1,8 +1,3 @@
-import {
-	parseWorldRenderBackend,
-	type WorldRenderBackend,
-} from "../app-config/render-backend";
-import { createThreeWorldDisplayRenderer } from "./three-world-display-renderer";
 import type {
 	WorldDisplayRenderer,
 	WorldDisplayRendererOptions,
@@ -17,29 +12,26 @@ export function createWorldDisplayRenderer(
 	host: HTMLDivElement,
 	options: WorldDisplayRendererOptions,
 ): WorldDisplayRenderer {
-	const rendererBackend = readConfiguredWorldRenderBackend();
-	switch (rendererBackend) {
-		case "three":
-			return createThreeWorldDisplayRenderer(host, options);
-		case "webgl2":
-			return createDeferredWorldDisplayRenderer({
+	return createDeferredWorldDisplayRenderer({
+		host,
+		options,
+		backendLabel: "webgl2",
+		loadModule: () => import("./webgl2-world-display-renderer-impl"),
+		createRenderer: (module, currentOptions) =>
+			module.createWebgl2WorldDisplayRendererImplementation(
 				host,
-				options,
-				backendLabel: "webgl2",
-				loadModule: () => import("./webgl2-world-display-renderer-impl"),
-				createRenderer: (module, currentOptions) =>
-					module.createWebgl2WorldDisplayRendererImplementation(
-						host,
-						currentOptions,
-					),
-			});
-	}
+				currentOptions,
+			),
+	});
 }
 
-type Webgl2RendererModule = typeof import("./webgl2-world-display-renderer-impl");
+type Webgl2RendererModule =
+	typeof import("./webgl2-world-display-renderer-impl");
 type DeferredRendererModule = Webgl2RendererModule;
 
-interface DeferredWorldDisplayRendererInput<TModule extends DeferredRendererModule> {
+interface DeferredWorldDisplayRendererInput<
+	TModule extends DeferredRendererModule,
+> {
 	host: HTMLDivElement;
 	options: WorldDisplayRendererOptions;
 	backendLabel: string;
@@ -50,15 +42,9 @@ interface DeferredWorldDisplayRendererInput<TModule extends DeferredRendererModu
 	): WorldDisplayRenderer;
 }
 
-function readConfiguredWorldRenderBackend(): WorldRenderBackend {
-	return parseWorldRenderBackend(
-		import.meta.env.VITE_HOLTBURGER_RENDER_BACKEND,
-	);
-}
-
-function createDeferredWorldDisplayRenderer<TModule extends DeferredRendererModule>(
-	input: DeferredWorldDisplayRendererInput<TModule>,
-): WorldDisplayRenderer {
+function createDeferredWorldDisplayRenderer<
+	TModule extends DeferredRendererModule,
+>(input: DeferredWorldDisplayRendererInput<TModule>): WorldDisplayRenderer {
 	let loadedRenderer: WorldDisplayRenderer | null = null;
 	let disposed = false;
 

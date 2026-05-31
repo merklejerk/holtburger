@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
-Status: Phase M6 complete; Phase M7 atlas-backed static compaction vertical slice next.
+Status: Phase M7.0 complete; Phase M7 atlas-backed static compaction rendering next.
 
 Related plans:
 
@@ -2060,9 +2060,64 @@ Decisions and course corrections:
 - The new planner returns readonly page collections, while the existing staged atlas-set plan still
   exposes mutable arrays. The strategy boundary copies planner pages to preserve the current plan
   shape; future cleanup should make the atlas-set plan readonly instead of relying on this copy.
-- No interim phase is required before M7. The remaining uncertainty belongs in the M7 vertical slice:
-  compaction scheduler timing, immutable generation reuse/retirement, and material-table shader
-  partitioning.
+- M7 needed one immediate prep slice before shader/resource work because the renderer only had atlas
+  eligibility metrics, not a deterministic compaction membership/generation contract over current
+  WebGL2 draw units.
+
+## Phase M7.0: Outdoor Static Atlas Compaction Planner
+
+Status: Complete.
+
+Purpose: add the immediate prep needed before atlas-backed GPU rendering: a deterministic planner
+that consumes current WebGL2 draw units, selects the first-slice outdoor static compaction set,
+builds atlas layout/material-slot/draw-slice descriptors, and reports why remaining draw units stay
+on the staged direct path.
+
+Tasks:
+
+- Add a pure outdoor-static atlas compaction planner over renderer-neutral draw-unit DTOs.
+- Accept only the first M7 slice: exterior static, direct-texture, atlas-eligible, UV-backed,
+  opaque, no detail overlay.
+- Reuse the M6 atlas layout planner for atlas pages/placements and keep material-table and draw-slice
+  partitioning outside the rectangle packer.
+- Report bypass reasons for non-static, non-exterior, non-direct, missing UVs, missing atlas
+  eligibility, non-opaque material behavior, detail overlays, atlas overflow, and material-table
+  overflow.
+- Thread the planner through WebGL2 resource sync as metrics only. Do not alter rendering yet.
+- Surface compactable/bypass counts in render metrics/debug summaries so field captures can validate
+  first-slice coverage before shader work lands.
+
+Progress:
+
+- Added `atlas-static-compaction-planner`, which produces compactable draw-unit IDs, atlas entries,
+  texture pages, material slots, draw slices, static object keys, triangle/static-part totals, and
+  prepared texture dependencies.
+- WebGL2 resource sync now builds an atlas static compaction plan after staged draw-unit realization
+  and exposes compactable/bypass counts through render metrics.
+- Browser debug summary now reports atlas static compactable draw units and bypass samples beside
+  atlas candidate metrics.
+- Added tests for deterministic outdoor static planning, staged-path bypass reasons, source texture
+  overflow, material-table overflow, and empty-store initialization.
+
+Decisions and course corrections:
+
+- This phase intentionally does not create atlas textures, compacted buffers, graph leases, or an
+  atlas shader. The point is to freeze membership and generation descriptors before introducing GPU
+  lifetime and visibility changes.
+- Detail overlays stay staged for the first slice even when the base material is atlas-compatible.
+  M7 can either encode detail as a second material-table texture path or keep those objects staged
+  until a later material-table expansion.
+- The compaction planner uses the material strategy's `atlasEntryKey` directly. It must not derive a
+  parallel atlas identity from texture payload fields.
+- No legacy shims were added.
+
+Exit criteria:
+
+- Current WebGL2 resource sync can report which outdoor static draw units would compact without
+  changing visible rendering.
+- M7 has a deterministic handoff for compactable draw-unit IDs, atlas pages, material slots,
+  draw slices, and prepared texture dependencies.
+- Bypass reasons make first-slice exclusions explicit before shader work starts.
 
 ## Phase M7: Atlas-Backed Static Compaction Vertical Slice
 
@@ -2116,10 +2171,12 @@ Lifecycle target:
 
 Tasks:
 
-- Add a compaction scheduler that decides when staged outdoor static entries are ready enough to
-  compact.
-- Consume atlas-capable material strategy output and M6 atlas layout output for compatible static
-  renderables.
+- Promote the M7.0 compaction plan into an actual renderable resource generation. The planner is now
+  the membership/generation contract for first-slice outdoor static compaction.
+- Add a compaction scheduler that decides when the planned staged outdoor static membership is ready
+  enough to realize as GPU resources.
+- Consume atlas-capable material strategy output, M6 atlas layout output, and M7.0 material-slot /
+  draw-slice output for compatible static renderables.
 - Realize atlas set generations as one or more WebGL2 atlas textures using normalized base-level
   prepared texture payloads.
 - Generate mipmaps after packing and gutter extrusion.
@@ -2188,6 +2245,8 @@ Exit criteria:
   explanations are accurate.
 - Make staged atlas-set plan collections readonly so pure planner output can flow into material
   strategy without boundary copies.
+- Replace atlas static compaction metrics-only planning with graph-backed atlas generation/static
+  batch resources as soon as M7 realizes GPU resources.
 - Revisit the per-frame WebGL2 draw-unit sort after M3-M7 reshape the submit path.
 - Split renderer-neutral material sampling DTOs from any Three adapter names/imports if they still
   imply Three ownership.

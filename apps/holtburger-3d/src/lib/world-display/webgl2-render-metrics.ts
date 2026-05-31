@@ -72,8 +72,7 @@ export function createWebgl2RenderMetrics(
 		portal: {
 			topologyOutdoorPortalCount: 0,
 			apertureCandidateCount: input.transitionPortalModel.candidates.length,
-			renderWorkItemCandidateCount:
-				input.portalRenderWorkItemCandidateCount,
+			renderWorkItemCandidateCount: input.portalRenderWorkItemCandidateCount,
 			visiblePortalWorkItemCount: input.visiblePortalWorkItemCount,
 			maskedInteriorCellCount: input.maskedInteriorCellCount,
 			skippedMissingApertureCount: 0,
@@ -110,8 +109,7 @@ export function createWebgl2RenderMetrics(
 			renderPassCount: input.clearCount,
 			clearCount: input.clearCount,
 			portalRenderWorkItemCount: input.visiblePortalWorkItemCount,
-			transitionApertureMaskPassCount:
-				input.transitionApertureMaskPassCount,
+			transitionApertureMaskPassCount: input.transitionApertureMaskPassCount,
 			apertureDepthResetPassCount: 0,
 			interiorCompositePassCount: input.interiorCompositePassCount,
 			exteriorCompositePassCount: input.exteriorCompositePassCount,
@@ -175,10 +173,8 @@ export function createWebgl2RenderMetrics(
 				...input.sceneDomainFramebufferFailureSamples,
 			],
 			sceneDomainBaseCopyPassCount: input.sceneDomainBaseCopyPassCount,
-			sceneDomainExteriorDrawCallCount:
-				input.sceneDomainExteriorDrawCallCount,
-			sceneDomainInteriorDrawCallCount:
-				input.sceneDomainInteriorDrawCallCount,
+			sceneDomainExteriorDrawCallCount: input.sceneDomainExteriorDrawCallCount,
+			sceneDomainInteriorDrawCallCount: input.sceneDomainInteriorDrawCallCount,
 			sceneDomainExteriorDrawUnitCount:
 				input.submitMetrics.exteriorDomainDrawUnitCount,
 			sceneDomainInteriorDrawUnitCount:
@@ -241,6 +237,13 @@ export function createWebgl2RenderMetrics(
 			atlasCandidateSamples: [
 				...(input.worldStore?.atlasCandidateSamples ?? []),
 			],
+			atlasStaticCompactableDrawUnitCount:
+				input.worldStore?.atlasStaticCompactableDrawUnitCount ?? 0,
+			atlasStaticCompactionBypassReasonCount:
+				input.worldStore?.atlasStaticCompactionBypassReasonCount ?? 0,
+			atlasStaticCompactionBypassSamples: [
+				...(input.worldStore?.atlasStaticCompactionBypassSamples ?? []),
+			],
 			textureVelocityPartCount: 0,
 			textureVelocityRenderGroupCount: 0,
 			textureVelocityMaterialCount: 0,
@@ -264,6 +267,10 @@ export function createWebgl2RenderMetrics(
 							input.worldStore.directTextureDrawUnitCount,
 						"webgl2-atlas-eligible":
 							input.worldStore.atlasEligibleMaterialCount,
+						"webgl2-atlas-static-compactable":
+							input.worldStore.atlasStaticCompactableDrawUnitCount,
+						"webgl2-atlas-static-bypassed":
+							input.worldStore.atlasStaticCompactionBypassReasonCount,
 						"webgl2-detail-overlay": input.worldStore.detailTextureCount,
 						...prefixCounts(
 							"webgl2-visible-",

@@ -285,12 +285,15 @@
 		const fallbackSamples = summarizeSamples(debug.fallbackReasonSamples);
 		const textureUploadSamples = summarizeSamples(debug.textureUploadSamples);
 		const atlasCandidateSamples = summarizeSamples(debug.atlasCandidateSamples);
+		const atlasCompactionBypassSamples = summarizeSamples(
+			debug.atlasStaticCompactionBypassSamples,
+		);
 		const drawGroupTerm =
 			debug.rendererBackend === "webgl2" ? "draw units" : "batches";
 		const performanceText = renderMetrics?.performance
 			? `${renderMetrics.performance.fps.toFixed(1)} FPS, ${renderMetrics.performance.frameMs.toFixed(1)} ms/frame, ${renderMetrics.performance.renderMs.toFixed(1)} ms render`
 			: "waiting for performance sample";
-		return `Perf ${performanceText}. Diagnosis: ${diagnosis}. Draw pressure ${debug.renderCalls} visible draws from ${candidateBatchCount} candidate ${drawGroupTerm}; static candidates ${debug.staticBvhCandidateBatchCount}${staticCandidateRatio}; retained ${drawGroupTerm} terrain ${debug.terrainRenderBatchCount}, static ${debug.staticRenderBatchCount}, interiors ${debug.structuredInteriorRenderBatchCount}; retained tris ${debug.renderTriangles}. Material path ${debug.materialCount} materials, ${debug.textureResourceCount} textures, ${debug.indexedTextureResourceCount} indexed textures, ${debug.paletteResourceCount} palettes, direct/material types ${materialTypes}; atlas candidates ${debug.atlasEligibleMaterialCount} draws, ${debug.atlasCandidateEntryCount} entries, ${debug.atlasCandidateMaterialSlotCount} material slots${atlasCandidateSamples ? ` (${atlasCandidateSamples})` : ""}; texture uploads${textureUploadSamples ? ` ${textureUploadSamples}` : " waiting"}; fallbacks ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}. Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}, transition depth ${debug.transitionPortalMaxDepth}; canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
+		return `Perf ${performanceText}. Diagnosis: ${diagnosis}. Draw pressure ${debug.renderCalls} visible draws from ${candidateBatchCount} candidate ${drawGroupTerm}; static candidates ${debug.staticBvhCandidateBatchCount}${staticCandidateRatio}; retained ${drawGroupTerm} terrain ${debug.terrainRenderBatchCount}, static ${debug.staticRenderBatchCount}, interiors ${debug.structuredInteriorRenderBatchCount}; retained tris ${debug.renderTriangles}. Material path ${debug.materialCount} materials, ${debug.textureResourceCount} textures, ${debug.indexedTextureResourceCount} indexed textures, ${debug.paletteResourceCount} palettes, direct/material types ${materialTypes}; atlas candidates ${debug.atlasEligibleMaterialCount} draws, ${debug.atlasCandidateEntryCount} entries, ${debug.atlasCandidateMaterialSlotCount} material slots${atlasCandidateSamples ? ` (${atlasCandidateSamples})` : ""}; atlas static compactable ${debug.atlasStaticCompactableDrawUnitCount}, bypasses ${debug.atlasStaticCompactionBypassReasonCount}${atlasCompactionBypassSamples ? ` (${atlasCompactionBypassSamples})` : ""}; texture uploads${textureUploadSamples ? ` ${textureUploadSamples}` : " waiting"}; fallbacks ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}. Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}, transition depth ${debug.transitionPortalMaxDepth}; canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
 	});
 	const sceneContextText = $derived(renderResourceSnapshot.sceneContextText);
 	const cameraResidencyText = $derived.by(() => {
@@ -623,11 +626,9 @@
 		title: string,
 		rows: readonly BrowserPanelRow[],
 	): string {
-		return [
-			title,
-			...rows.map((row) => `${row.label}: ${row.value}`),
-			"",
-		].join("\n");
+		return [title, ...rows.map((row) => `${row.label}: ${row.value}`), ""].join(
+			"\n",
+		);
 	}
 
 	function formatReportSections(
@@ -1901,7 +1902,8 @@
 					</div>
 					<button type="button" onclick={closeDebugReport}>Close</button>
 				</div>
-				<textarea readonly spellcheck="false" value={debugReportText}></textarea>
+				<textarea readonly spellcheck="false" value={debugReportText}
+				></textarea>
 				<div class="browser-world-display__debug-report-actions">
 					<span>{debugReportCopied ? "Copied." : "Ready to copy."}</span>
 					<button type="button" onclick={copyDebugReport}>Copy</button>

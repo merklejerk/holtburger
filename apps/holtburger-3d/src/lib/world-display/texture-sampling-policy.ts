@@ -29,11 +29,6 @@ type TextureFilterMode = "nearest" | "linear";
 type TextureMipFilterMode = "none" | "nearest" | "linear";
 type TextureColorSpaceMode = "none" | "srgb";
 export type TextureFilteringMode = "nearest" | "linear" | "anisotropic-4x";
-export type TextureColorSpaceOverrideMode =
-	| "auto"
-	| "srgb"
-	| "linear"
-	| "compressed-linear";
 
 export interface TextureSamplingPolicy {
 	wrapS: TextureWrapMode;
@@ -60,7 +55,6 @@ export function createDefaultMaterialTextureSamplingPolicy(
 		maxAnisotropy: 1,
 	},
 	filteringMode: TextureFilteringMode = "anisotropic-4x",
-	colorSpaceMode: TextureColorSpaceOverrideMode = "auto",
 ): MaterialTextureSamplingPolicy {
 	const colorTextureAnisotropy = selectAnisotropy(
 		capabilities.maxAnisotropy,
@@ -74,7 +68,7 @@ export function createDefaultMaterialTextureSamplingPolicy(
 			magFilter: colorTextureFilter.magFilter,
 			minFilter: colorTextureFilter.minFilter,
 			mipFilter: colorTextureFilter.mipFilter,
-			colorSpace: directColorTextureColorSpace(colorSpaceMode),
+			colorSpace: "srgb",
 			anisotropy: colorTextureAnisotropy,
 			generateMipmaps: colorTextureFilter.mipFilter !== "none",
 			flipY: false,
@@ -85,7 +79,7 @@ export function createDefaultMaterialTextureSamplingPolicy(
 			magFilter: colorTextureFilter.magFilter,
 			minFilter: colorTextureFilter.minFilter,
 			mipFilter: colorTextureFilter.mipFilter,
-			colorSpace: compressedTextureColorSpace(capabilities, colorSpaceMode),
+			colorSpace: compressedTextureColorSpace(capabilities),
 			anisotropy: colorTextureAnisotropy,
 			generateMipmaps: false,
 			flipY: false,
@@ -104,22 +98,9 @@ export function createDefaultMaterialTextureSamplingPolicy(
 	};
 }
 
-function directColorTextureColorSpace(
-	colorSpaceMode: TextureColorSpaceOverrideMode,
-): TextureColorSpaceMode {
-	return colorSpaceMode === "linear" ? "none" : "srgb";
-}
-
 function compressedTextureColorSpace(
 	capabilities: MaterialTextureCapabilities,
-	colorSpaceMode: TextureColorSpaceOverrideMode,
 ): TextureColorSpaceMode {
-	if (colorSpaceMode === "linear" || colorSpaceMode === "compressed-linear") {
-		return "none";
-	}
-	if (colorSpaceMode === "srgb") {
-		return capabilities.supportsS3tcSrgb ? "srgb" : "none";
-	}
 	return capabilities.supportsS3tcSrgb ? "srgb" : "none";
 }
 

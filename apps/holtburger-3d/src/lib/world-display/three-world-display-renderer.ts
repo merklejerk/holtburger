@@ -86,7 +86,6 @@ import {
 import type {
 	BrowserCameraResidency,
 	WorldDisplayRenderStyle,
-	WorldDisplayTextureColorSpaceMode,
 	WorldDisplayTextureFilteringMode,
 	WorldRenderDebugMetrics,
 	WorldRenderMetrics,
@@ -431,8 +430,6 @@ export function createThreeWorldDisplayRenderer(
 	let renderStyle: WorldDisplayRenderStyle = options.renderStyle ?? "solid";
 	let textureFilteringMode: WorldDisplayTextureFilteringMode =
 		options.textureFilteringMode ?? "anisotropic-4x";
-	let textureColorSpaceMode: WorldDisplayTextureColorSpaceMode =
-		options.textureColorSpaceMode ?? "auto";
 	let detailTexturesEnabled = options.detailTexturesEnabled ?? true;
 	const noMaterialOverrideMaterials = new Map<string, MeshStandardMaterial>();
 	const wireframeOverrideMaterials = new Map<string, MeshBasicMaterial>();
@@ -470,14 +467,10 @@ export function createThreeWorldDisplayRenderer(
 	};
 	const materialTextureCapabilities =
 		detectMaterialTextureCapabilities(renderer);
-	let materialResourceCache = createMaterialResourceCache(
-		textureFilteringMode,
-		textureColorSpaceMode,
-	);
+	let materialResourceCache = createMaterialResourceCache(textureFilteringMode);
 
 	function createMaterialResourceCache(
 		filteringMode: WorldDisplayTextureFilteringMode,
-		colorSpaceMode: WorldDisplayTextureColorSpaceMode,
 	): WorldMaterialResourceCache {
 		return new WorldMaterialResourceCache(
 			reportMaterialDiagnostic,
@@ -485,7 +478,6 @@ export function createThreeWorldDisplayRenderer(
 			createDefaultMaterialTextureSamplingPolicy(
 				materialTextureCapabilities,
 				filteringMode,
-				colorSpaceMode,
 			),
 		);
 	}
@@ -625,7 +617,6 @@ export function createThreeWorldDisplayRenderer(
 			materialProgramKeyCount: 0,
 			transparentMaterialCount: 0,
 			textureFilteringMode,
-			textureColorSpaceMode,
 			detailTexturesEnabled,
 			textureSamplingPolicyCounts: {},
 			textureSamplingPolicySamples: [],
@@ -727,9 +718,6 @@ export function createThreeWorldDisplayRenderer(
 		setTransitionPortalMaxDepth(maxDepth) {
 			transitionPortalMaxDepth = clampTransitionPortalMaxDepth(maxDepth);
 		},
-		setPortalTriageMode() {
-			return;
-		},
 		setRenderStyle(nextRenderStyle) {
 			renderStyle = nextRenderStyle;
 			syncRenderStyle();
@@ -741,25 +729,7 @@ export function createThreeWorldDisplayRenderer(
 			textureFilteringMode = nextMode;
 			clearMaterializedSceneMeshes();
 			materialResourceCache.dispose();
-			materialResourceCache = createMaterialResourceCache(
-				textureFilteringMode,
-				textureColorSpaceMode,
-			);
-			syncTerrainMeshes(terrainScene);
-			syncStaticRenderableMeshes(staticRenderableScene);
-			syncStructuredInteriorMeshes(structuredInteriorScene);
-		},
-		setTextureColorSpaceMode(nextMode) {
-			if (textureColorSpaceMode === nextMode) {
-				return;
-			}
-			textureColorSpaceMode = nextMode;
-			clearMaterializedSceneMeshes();
-			materialResourceCache.dispose();
-			materialResourceCache = createMaterialResourceCache(
-				textureFilteringMode,
-				textureColorSpaceMode,
-			);
+			materialResourceCache = createMaterialResourceCache(textureFilteringMode);
 			syncTerrainMeshes(terrainScene);
 			syncStaticRenderableMeshes(staticRenderableScene);
 			syncStructuredInteriorMeshes(structuredInteriorScene);
@@ -1108,7 +1078,6 @@ export function createThreeWorldDisplayRenderer(
 			materialProgramKeyCount: materialStats.materialProgramKeyCount,
 			transparentMaterialCount: materialStats.transparentMaterialCount,
 			textureFilteringMode,
-			textureColorSpaceMode,
 			detailTexturesEnabled,
 			textureSamplingPolicyCounts: materialStats.textureSamplingPolicyCounts,
 			textureSamplingPolicySamples: materialStats.textureSamplingPolicySamples,
@@ -3688,7 +3657,6 @@ function createRenderDebugMetrics(
 		| "renderLines"
 		| "renderPoints"
 		| "clearCount"
-		| "portalTriageMode"
 		| "cameraNear"
 		| "cameraFar"
 		| "cameraFarNearRatio"
@@ -3709,7 +3677,6 @@ function createRenderDebugMetrics(
 		renderGraphPolicy: options.renderGraphPolicy,
 		renderGraphBaseScene: options.renderGraphBaseScene,
 		transitionPortalMaxDepth: options.transitionPortalMaxDepth,
-		portalTriageMode: "normal",
 		cameraNear: null,
 		cameraFar: null,
 		cameraFarNearRatio: null,
@@ -3797,7 +3764,6 @@ function createRenderDebugMetrics(
 		materialProgramKeyCount: options.materialProgramKeyCount,
 		transparentMaterialCount: options.transparentMaterialCount,
 		textureFilteringMode: options.textureFilteringMode,
-		textureColorSpaceMode: options.textureColorSpaceMode,
 		detailTexturesEnabled: options.detailTexturesEnabled,
 		textureSamplingPolicyCounts: options.textureSamplingPolicyCounts,
 		textureSamplingPolicySamples: options.textureSamplingPolicySamples,

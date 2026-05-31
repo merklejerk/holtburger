@@ -1,9 +1,7 @@
 import type { SceneCameraFrame } from "./camera";
 import type { StagedWorldFrameMetrics } from "./staged-world-frame";
 import type {
-	WorldDisplayTextureColorSpaceMode,
 	WorldDisplayTextureFilteringMode,
-	WorldDisplayPortalTriageMode,
 	WorldRenderMetrics,
 } from "./renderer-contract";
 import type { StaticRenderableSceneModel } from "./static-renderables";
@@ -32,7 +30,6 @@ export interface Webgl2RenderMetricsInput {
 	renderGraphPolicy: string;
 	renderGraphBaseScene: string;
 	transitionPortalMaxDepth: number;
-	portalTriageMode: WorldDisplayPortalTriageMode;
 	cameraNear: number | null;
 	cameraFar: number | null;
 	cameraFarNearRatio: number | null;
@@ -61,7 +58,6 @@ export interface Webgl2RenderMetricsInput {
 	portalCompositeMaxDepth: number;
 	performance: WorldRenderMetrics["performance"];
 	textureFilteringMode: WorldDisplayTextureFilteringMode;
-	textureColorSpaceMode: WorldDisplayTextureColorSpaceMode;
 	detailTexturesEnabled: boolean;
 }
 
@@ -107,7 +103,6 @@ export function createWebgl2RenderMetrics(
 			renderGraphPolicy: input.renderGraphPolicy,
 			renderGraphBaseScene: input.renderGraphBaseScene,
 			transitionPortalMaxDepth: input.transitionPortalMaxDepth,
-			portalTriageMode: input.portalTriageMode,
 			cameraNear: input.cameraNear,
 			cameraFar: input.cameraFar,
 			cameraFarNearRatio: input.cameraFarNearRatio,
@@ -230,7 +225,6 @@ export function createWebgl2RenderMetrics(
 			materialProgramKeyCount: input.worldStore?.materialCount ?? 0,
 			transparentMaterialCount: 0,
 			textureFilteringMode: input.textureFilteringMode,
-			textureColorSpaceMode: input.textureColorSpaceMode,
 			detailTexturesEnabled: input.detailTexturesEnabled,
 			textureSamplingPolicyCounts:
 				input.worldStore?.textureSamplingPolicyCounts ?? {},

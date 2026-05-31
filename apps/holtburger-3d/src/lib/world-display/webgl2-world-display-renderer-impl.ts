@@ -28,7 +28,10 @@ import {
 	type Webgl2WorldSubmitMetrics,
 } from "./webgl2-world-submit";
 import {
+	createWebgl2PortalCompositeTargetSet,
 	createWebgl2SceneDomainTargetSet,
+	type Webgl2PortalCompositeTarget,
+	type Webgl2PortalCompositeTargetSet,
 	type Webgl2SceneDomainTarget,
 	type Webgl2SceneDomainTargetSet,
 } from "./webgl2-scene-domain-targets";
@@ -40,7 +43,6 @@ import {
 } from "./webgl2-world-resources";
 import type {
 	BrowserCameraResidency,
-	WorldDisplayPortalTriageMode,
 	WorldRenderMetrics,
 } from "./renderer-contract";
 import type { MaterialTextureCapabilities } from "./render-surface-texture-data";
@@ -80,8 +82,6 @@ const WEBGL2_CLEAR_COLOR: readonly [number, number, number, number] = [
 	0.015, 0.055, 0.085, 1,
 ];
 const PERFORMANCE_REPORT_INTERVAL_MS = 500;
-const PORTAL_MASK_DEPTH_BIAS_FACTOR = -1;
-const PORTAL_MASK_DEPTH_BIAS_UNITS = -1;
 const TRIANGLE_VERTEX_COUNT = 3;
 const TRIANGLE_VERTICES = new Float32Array([
 	0, 0.58, -0.58, -0.46, 0.58, -0.46,
@@ -464,17 +464,13 @@ void main() {
 }
 `;
 
-const SCENE_DOMAIN_STENCIL_DEBUG_FRAGMENT_SHADER = `#version 300 es
-precision highp float;
-
-uniform vec4 uColor;
-
-out vec4 fragColor;
-
-void main() {
-	fragColor = uColor;
+interface Webgl2ColorDepthTarget {
+	readonly width: number;
+	readonly height: number;
+	readonly framebuffer: WebGLFramebuffer;
+	readonly colorTexture: WebGLTexture;
+	readonly depthTexture: WebGLTexture;
 }
-`;
 
 interface Webgl2RenderResources {
 	gl: WebGL2RenderingContext;
@@ -489,11 +485,11 @@ interface Webgl2RenderResources {
 		never,
 		"uColorTexture" | "uDepthTexture"
 	>;
-	sceneDomainStencilDebugProgram: Webgl2ProgramResource<never, "uColor">;
 	vertexBuffer: Webgl2BufferResource;
 	vertexArray: Webgl2VertexArrayResource;
 	sceneDomainCopyVertexArray: Webgl2VertexArrayResource;
 	sceneDomainTargets: Webgl2SceneDomainTargetSet | null;
+	portalCompositeTargets: Webgl2PortalCompositeTargetSet | null;
 	sceneDomainFramebufferFailureCount: number;
 	sceneDomainFramebufferFailureSamples: string[];
 	worldStore: Webgl2WorldResourceStore;
@@ -527,10 +523,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	let renderChunkTransforms = options.renderChunkTransforms;
 	let controlledCameraFrame = options.controlledCameraFrame;
 	let transitionPortalMaxDepth = options.transitionPortalMaxDepth ?? 1;
-	let portalTriageMode: WorldDisplayPortalTriageMode =
-		options.portalTriageMode ?? "normal";
 	let textureFilteringMode = options.textureFilteringMode ?? "anisotropic-4x";
-	let textureColorSpaceMode = options.textureColorSpaceMode ?? "auto";
 	let detailTexturesEnabled = options.detailTexturesEnabled ?? true;
 	let renderMetricsChangeHandler = options.onRenderMetricsChange;
 	let cameraResidencyChangeHandler = options.onCameraResidencyChange;
@@ -550,7 +543,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	let latestSubmitMetrics: Webgl2WorldSubmitMetrics =
 		createEmptyWebgl2WorldSubmitMetrics();
 	let latestFrameMetrics: StagedWorldFrameMetrics | null = null;
-	let latestSceneDomainFrameMetrics: Webgl2SceneDomainFrameMetrics | null = null;
+	let latestSceneDomainFrameMetrics: Webgl2SceneDomainFrameMetrics | null =
+		null;
 	let residencyIndex: WorldResidencyIndex = createEmptyWorldResidencyIndex();
 	let latestCameraResidencyContext: CameraViewResidencyContext = {
 		kind: "unknown",
@@ -564,10 +558,11 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		source: "unknown",
 	};
 	let latestCameraResidencyKey = "";
-	let latestBaseSceneDomain: TransitionPortalScene = deriveWebgl2BaseSceneDomain({
-		renderSceneContext,
-		structuredInteriorScene,
-	});
+	let latestBaseSceneDomain: TransitionPortalScene =
+		deriveWebgl2BaseSceneDomain({
+			renderSceneContext,
+			structuredInteriorScene,
+		});
 	let latestPortalWorkPlan: Webgl2TransitionPortalWorkPlan | null = null;
 
 	const canvas = document.createElement("canvas");
@@ -640,10 +635,6 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			transitionPortalMaxDepth = maxDepth;
 			reportMetrics();
 		},
-		setPortalTriageMode(mode) {
-			portalTriageMode = mode;
-			reportMetrics();
-		},
 		setRenderStyle() {
 			reportMetrics();
 		},
@@ -653,10 +644,6 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			}
 			textureFilteringMode = mode;
 			syncWorldResources();
-			reportMetrics();
-		},
-		setTextureColorSpaceMode(mode) {
-			textureColorSpaceMode = mode;
 			reportMetrics();
 		},
 		setDetailTexturesEnabled(enabled) {
@@ -821,10 +808,16 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				resources.sceneDomainTargets.dispose();
 				resources.sceneDomainTargets = null;
 			}
+			if (resources?.portalCompositeTargets) {
+				resources.portalCompositeTargets.dispose();
+				resources.portalCompositeTargets = null;
+			}
 		}
 	}
 
-	function shouldUseSceneDomainTargets(portalMaskDrawUnitCount: number): boolean {
+	function shouldUseSceneDomainTargets(
+		portalMaskDrawUnitCount: number,
+	): boolean {
 		return transitionPortalMaxDepth > 0 && portalMaskDrawUnitCount > 0;
 	}
 
@@ -839,7 +832,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			return createEmptyWebgl2WorldSubmitMetrics();
 		}
 		const targets = syncSceneDomainTargets(resources);
-		const { gl, stateCache } = resources;
+		const compositeTargets = syncPortalCompositeTargets(resources);
 		const visibleDrawUnits = planWebgl2FlatWorldSubmitOrder(
 			frame,
 			resources.worldStore.drawUnitsById,
@@ -879,21 +872,17 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		const baseTarget =
 			baseScene === "interior" ? targets.interior : targets.exterior;
 
-		stateCache.bindFramebuffer(null);
-		stateCache.setViewport({
-			x: 0,
-			y: 0,
-			width: canvas.width,
-			height: canvas.height,
-		});
-		gl.clear(gl.STENCIL_BUFFER_BIT);
-		copySceneDomainTargetToDefaultFramebuffer(baseTarget);
+		copySceneDomainTargetToFramebuffer(baseTarget, compositeTargets.read);
 		const portalCompositeMetrics = compositeTransitionPortals({
 			frame,
 			targets,
+			compositeTargets,
 			transitionLevels,
 			workPlan: latestPortalWorkPlan,
 		});
+		copySceneDomainTargetToDefaultFramebuffer(
+			portalCompositeMetrics.finalTarget,
+		);
 
 		latestSceneDomainFrameMetrics = {
 			width: targets.width,
@@ -901,7 +890,16 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			exteriorDrawCallCount: exteriorMetrics.drawCallCount,
 			interiorDrawCallCount: interiorMetrics.drawCallCount,
 			baseCopyPassCount: 1,
-			...portalCompositeMetrics,
+			transitionApertureMaskPassCount:
+				portalCompositeMetrics.transitionApertureMaskPassCount,
+			interiorCompositePassCount:
+				portalCompositeMetrics.interiorCompositePassCount,
+			exteriorCompositePassCount:
+				portalCompositeMetrics.exteriorCompositePassCount,
+			portalCompositeRectCount: portalCompositeMetrics.portalCompositeRectCount,
+			portalCompositeEstimatedPixelArea:
+				portalCompositeMetrics.portalCompositeEstimatedPixelArea,
+			portalCompositeMaxDepth: portalCompositeMetrics.portalCompositeMaxDepth,
 		};
 		return mergeSceneDomainSubmitMetrics({
 			exteriorMetrics,
@@ -934,6 +932,40 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				height: canvas.height,
 			});
 			currentResources.sceneDomainTargets = targets;
+			currentResources.stateCache.invalidate();
+			return targets;
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			currentResources.sceneDomainFramebufferFailureCount += 1;
+			currentResources.sceneDomainFramebufferFailureSamples = [
+				message,
+				...currentResources.sceneDomainFramebufferFailureSamples,
+			].slice(0, 4);
+			throw error;
+		}
+	}
+
+	function syncPortalCompositeTargets(
+		currentResources: Webgl2RenderResources,
+	): Webgl2PortalCompositeTargetSet {
+		const existing = currentResources.portalCompositeTargets;
+		if (
+			existing &&
+			existing.width === canvas.width &&
+			existing.height === canvas.height
+		) {
+			return existing;
+		}
+		existing?.dispose();
+		try {
+			const targets = createWebgl2PortalCompositeTargetSet(
+				currentResources.gl,
+				{
+					width: canvas.width,
+					height: canvas.height,
+				},
+			);
+			currentResources.portalCompositeTargets = targets;
 			currentResources.stateCache.invalidate();
 			return targets;
 		} catch (error) {
@@ -984,17 +1016,116 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	}
 
 	function copySceneDomainTargetToDefaultFramebuffer(
-		target: Webgl2SceneDomainTarget,
+		target: Webgl2ColorDepthTarget,
 	): void {
+		copyColorDepthTarget({
+			sourceTarget: target,
+			destinationFramebuffer: null,
+			width: canvas.width,
+			height: canvas.height,
+			clearStencil: false,
+			depthCopyMode: "shader",
+		});
+	}
+
+	function copySceneDomainTargetToFramebuffer(
+		sourceTarget: Webgl2ColorDepthTarget,
+		destinationTarget: Webgl2PortalCompositeTarget,
+	): void {
+		copyColorDepthTarget({
+			sourceTarget,
+			destinationTarget,
+			destinationFramebuffer: destinationTarget.framebuffer,
+			width: destinationTarget.width,
+			height: destinationTarget.height,
+			clearStencil: true,
+			depthCopyMode: "blit",
+		});
+	}
+
+	function copyPortalCompositeTargetToFramebuffer(
+		sourceTarget: Webgl2PortalCompositeTarget,
+		destinationTarget: Webgl2PortalCompositeTarget,
+	): void {
+		copySceneDomainTargetToFramebuffer(sourceTarget, destinationTarget);
+		copyPortalStencilBuffer({
+			sourceTarget,
+			destinationTarget,
+		});
+	}
+
+	function copyPortalStencilBuffer({
+		sourceTarget,
+		destinationTarget,
+	}: {
+		sourceTarget: Webgl2PortalCompositeTarget;
+		destinationTarget: Webgl2PortalCompositeTarget;
+	}): void {
+		if (!resources) {
+			return;
+		}
+		const { gl } = resources;
+		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, sourceTarget.framebuffer);
+		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, destinationTarget.framebuffer);
+		gl.blitFramebuffer(
+			0,
+			0,
+			sourceTarget.width,
+			sourceTarget.height,
+			0,
+			0,
+			destinationTarget.width,
+			destinationTarget.height,
+			gl.STENCIL_BUFFER_BIT,
+			gl.NEAREST,
+		);
+		resources.stateCache.invalidate();
+	}
+
+	function copyColorDepthTarget({
+		sourceTarget,
+		destinationTarget,
+		destinationFramebuffer,
+		width,
+		height,
+		clearStencil,
+		depthCopyMode,
+	}: {
+		sourceTarget: Webgl2ColorDepthTarget;
+		destinationTarget?: Webgl2ColorDepthTarget;
+		destinationFramebuffer: WebGLFramebuffer | null;
+		width: number;
+		height: number;
+		clearStencil: boolean;
+		depthCopyMode: "shader" | "blit";
+	}): void {
 		if (!resources) {
 			return;
 		}
 		const { gl, stateCache } = resources;
-		stateCache.setDepthState({
-			enabled: true,
-			write: true,
-			func: gl.ALWAYS,
+		stateCache.bindFramebuffer(destinationFramebuffer);
+		stateCache.setViewport({
+			x: 0,
+			y: 0,
+			width,
+			height,
 		});
+		if (clearStencil) {
+			gl.clear(gl.STENCIL_BUFFER_BIT);
+		}
+		stateCache.setDepthState(
+			depthCopyMode === "shader"
+				? {
+						enabled: true,
+						write: true,
+						func: gl.ALWAYS,
+					}
+				: {
+						enabled: false,
+						write: false,
+						func: gl.ALWAYS,
+					},
+		);
 		stateCache.setBlendState({
 			enabled: false,
 			srcRgb: gl.ONE,
@@ -1024,19 +1155,58 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		);
 		gl.uniform1i(resources.sceneDomainCopyProgram.uniforms.uColorTexture, 0);
 		gl.uniform1i(resources.sceneDomainCopyProgram.uniforms.uDepthTexture, 1);
-		stateCache.bindTexture2D(0, target.colorTexture);
-		stateCache.bindTexture2D(1, target.depthTexture);
+		stateCache.bindTexture2D(0, sourceTarget.colorTexture);
+		stateCache.bindTexture2D(1, sourceTarget.depthTexture);
 		gl.drawArrays(gl.TRIANGLES, 0, 3);
+		if (depthCopyMode === "blit") {
+			if (!destinationTarget) {
+				throw new Error("WebGL2 depth blit copy requires a destination target.");
+			}
+			copyDepthBuffer({
+				sourceTarget,
+				destinationTarget,
+			});
+		}
+	}
+
+	function copyDepthBuffer({
+		sourceTarget,
+		destinationTarget,
+	}: {
+		sourceTarget: Webgl2ColorDepthTarget;
+		destinationTarget: Webgl2ColorDepthTarget;
+	}): void {
+		if (!resources) {
+			return;
+		}
+		const { gl } = resources;
+		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, sourceTarget.framebuffer);
+		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, destinationTarget.framebuffer);
+		gl.blitFramebuffer(
+			0,
+			0,
+			sourceTarget.width,
+			sourceTarget.height,
+			0,
+			0,
+			destinationTarget.width,
+			destinationTarget.height,
+			gl.DEPTH_BUFFER_BIT,
+			gl.NEAREST,
+		);
+		resources.stateCache.invalidate();
 	}
 
 	function compositeTransitionPortals({
 		frame,
 		targets,
+		compositeTargets,
 		transitionLevels,
 		workPlan,
 	}: {
 		frame: ReturnType<typeof buildStagedWorldFrame>;
 		targets: Webgl2SceneDomainTargetSet;
+		compositeTargets: Webgl2PortalCompositeTargetSet;
 		transitionLevels: readonly TransitionPortalRenderLevel[];
 		workPlan: Webgl2TransitionPortalWorkPlan;
 	}): Omit<
@@ -1046,7 +1216,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		| "exteriorDrawCallCount"
 		| "interiorDrawCallCount"
 		| "baseCopyPassCount"
-	> {
+	> & { finalTarget: Webgl2PortalCompositeTarget } {
 		const metrics = {
 			transitionApertureMaskPassCount: 0,
 			interiorCompositePassCount: 0,
@@ -1055,25 +1225,29 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			portalCompositeEstimatedPixelArea: 0,
 			portalCompositeMaxDepth: 0,
 		};
+		let currentTarget = compositeTargets.read;
+		let nextTarget = compositeTargets.write;
 		for (const level of transitionLevels) {
 			const batch =
 				workPlan.batches.get(transitionPortalDepthBatchKey(level)) ?? [];
 			if (batch.length === 0) {
 				break;
 			}
-			drawTransitionPortalMaskBatch({
-				frame,
-				level,
-				batch,
-			});
-			metrics.transitionApertureMaskPassCount += 1;
-
+			copyPortalCompositeTargetToFramebuffer(currentTarget, nextTarget);
 			const sourceTarget =
 				level.compositeScene === "interior"
 					? targets.interior
 					: targets.exterior;
+			drawTransitionPortalMaskBatch({
+				frame,
+				level,
+				batch,
+				destinationTarget: nextTarget,
+			});
+			metrics.transitionApertureMaskPassCount += 1;
 			compositeTransitionPortalBatch({
 				sourceTarget,
+				destinationTarget: nextTarget,
 				stencilRef: level.stencilRef,
 				batch,
 			});
@@ -1088,6 +1262,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				0,
 			);
 			metrics.portalCompositeMaxDepth = level.recursionDepth;
+			[currentTarget, nextTarget] = [nextTarget, currentTarget];
 		}
 		resources?.stateCache.setStencilState({
 			enabled: false,
@@ -1099,39 +1274,37 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			zfail: resources.gl.KEEP,
 			zpass: resources.gl.KEEP,
 		});
-		return metrics;
+		return { ...metrics, finalTarget: currentTarget };
 	}
 
 	function drawTransitionPortalMaskBatch({
 		frame,
 		level,
 		batch,
+		destinationTarget,
 	}: {
 		frame: ReturnType<typeof buildStagedWorldFrame>;
 		level: TransitionPortalRenderLevel;
 		batch: readonly Webgl2VisibleTransitionPortalWork[];
+		destinationTarget: Webgl2PortalCompositeTarget;
 	}): void {
 		if (!resources) {
 			return;
 		}
 		const { gl, stateCache } = resources;
+		stateCache.bindFramebuffer(destinationTarget.framebuffer);
+		stateCache.setViewport({
+			x: 0,
+			y: 0,
+			width: destinationTarget.width,
+			height: destinationTarget.height,
+		});
 		gl.colorMask(false, false, false, false);
-		const shouldDepthTestMask = portalTriageMode !== "no-mask-depth";
-		if (shouldDepthTestMask) {
-			// Portal masks are re-rasterized against depth copied through a texture.
-			// A small negative offset avoids distance-dependent equality failures at
-			// aperture edges without changing the copied scene-domain depth itself.
-			gl.enable(gl.POLYGON_OFFSET_FILL);
-			gl.polygonOffset(
-				PORTAL_MASK_DEPTH_BIAS_FACTOR,
-				PORTAL_MASK_DEPTH_BIAS_UNITS,
-			);
-		}
 		try {
 			stateCache.setDepthState({
-				enabled: shouldDepthTestMask,
+				enabled: true,
 				write: false,
-				func: shouldDepthTestMask ? gl.LEQUAL : gl.ALWAYS,
+				func: gl.LEQUAL,
 			});
 			stateCache.setBlendState({
 				enabled: false,
@@ -1149,14 +1322,12 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			stateCache.setStencilState({
 				enabled: true,
 				writeMask: 0xff,
-				func:
-					level.parentStencilRef === null ? gl.ALWAYS : gl.EQUAL,
+				func: level.parentStencilRef === null ? gl.ALWAYS : gl.EQUAL,
 				ref: level.parentStencilRef ?? level.stencilRef,
 				readMask: 0xff,
 				fail: gl.KEEP,
 				zfail: gl.KEEP,
-				zpass:
-					level.parentStencilRef === null ? gl.REPLACE : gl.INCR,
+				zpass: level.parentStencilRef === null ? gl.REPLACE : gl.INCR,
 			});
 			stateCache.useProgram(resources.flatWorldProgram.program);
 			gl.uniform4fv(
@@ -1164,8 +1335,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				new Float32Array([1, 1, 1, 1]),
 			);
 			for (const work of batch) {
-				const drawUnit =
-					resources.worldStore.drawUnitsById.get(work.maskDrawUnitId);
+				const drawUnit = resources.worldStore.drawUnitsById.get(
+					work.maskDrawUnitId,
+				);
 				if (!drawUnit) {
 					continue;
 				}
@@ -1187,19 +1359,18 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				);
 			}
 		} finally {
-			if (shouldDepthTestMask) {
-				gl.disable(gl.POLYGON_OFFSET_FILL);
-			}
 			gl.colorMask(true, true, true, true);
 		}
 	}
 
 	function compositeTransitionPortalBatch({
 		sourceTarget,
+		destinationTarget,
 		stencilRef,
 		batch,
 	}: {
 		sourceTarget: Webgl2SceneDomainTarget;
+		destinationTarget: Webgl2PortalCompositeTarget;
 		stencilRef: number;
 		batch: readonly Webgl2VisibleTransitionPortalWork[];
 	}): void {
@@ -1207,6 +1378,13 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			return;
 		}
 		const { gl, stateCache } = resources;
+		stateCache.bindFramebuffer(destinationTarget.framebuffer);
+		stateCache.setViewport({
+			x: 0,
+			y: 0,
+			width: destinationTarget.width,
+			height: destinationTarget.height,
+		});
 		stateCache.setDepthState({
 			enabled: true,
 			write: true,
@@ -1231,10 +1409,6 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			zfail: gl.KEEP,
 			zpass: gl.KEEP,
 		});
-		if (portalTriageMode === "flat-stencil-color") {
-			drawStencilDebugComposite(stencilRef, batch);
-			return;
-		}
 		stateCache.useProgram(resources.sceneDomainCopyProgram.program);
 		stateCache.bindVertexArray(
 			resources.sceneDomainCopyVertexArray.vertexArray,
@@ -1243,70 +1417,19 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		gl.uniform1i(resources.sceneDomainCopyProgram.uniforms.uDepthTexture, 1);
 		stateCache.bindTexture2D(0, sourceTarget.colorTexture);
 		stateCache.bindTexture2D(1, sourceTarget.depthTexture);
-		const shouldScissor = portalTriageMode !== "no-composite-scissor";
-		if (shouldScissor) {
-			gl.enable(gl.SCISSOR_TEST);
-		}
+		gl.enable(gl.SCISSOR_TEST);
 		try {
 			for (const work of batch) {
-				if (shouldScissor) {
-					gl.scissor(
-						work.screenRect.x,
-						canvas.height - work.screenRect.y - work.screenRect.height,
-						work.screenRect.width,
-						work.screenRect.height,
-					);
-				}
+				gl.scissor(
+					work.screenRect.x,
+					canvas.height - work.screenRect.y - work.screenRect.height,
+					work.screenRect.width,
+					work.screenRect.height,
+				);
 				gl.drawArrays(gl.TRIANGLES, 0, 3);
 			}
 		} finally {
-			if (shouldScissor) {
-				gl.disable(gl.SCISSOR_TEST);
-			}
-		}
-	}
-
-	function drawStencilDebugComposite(
-		stencilRef: number,
-		batch: readonly Webgl2VisibleTransitionPortalWork[],
-	): void {
-		if (!resources) {
-			return;
-		}
-		const { gl, stateCache } = resources;
-		stateCache.setDepthState({
-			enabled: false,
-			write: false,
-			func: gl.ALWAYS,
-		});
-		stateCache.useProgram(resources.sceneDomainStencilDebugProgram.program);
-		stateCache.bindVertexArray(
-			resources.sceneDomainCopyVertexArray.vertexArray,
-		);
-		gl.uniform4fv(
-			resources.sceneDomainStencilDebugProgram.uniforms.uColor,
-			stencilDebugColorForRef(stencilRef),
-		);
-		const shouldScissor = portalTriageMode !== "no-composite-scissor";
-		if (shouldScissor) {
-			gl.enable(gl.SCISSOR_TEST);
-		}
-		try {
-			for (const work of batch) {
-				if (shouldScissor) {
-					gl.scissor(
-						work.screenRect.x,
-						canvas.height - work.screenRect.y - work.screenRect.height,
-						work.screenRect.width,
-						work.screenRect.height,
-					);
-				}
-				gl.drawArrays(gl.TRIANGLES, 0, 3);
-			}
-		} finally {
-			if (shouldScissor) {
-				gl.disable(gl.SCISSOR_TEST);
-			}
+			gl.disable(gl.SCISSOR_TEST);
 		}
 	}
 
@@ -1361,9 +1484,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		resources.indexedP16WorldProgram.dispose();
 		resources.terrainBlendWorldProgram.dispose();
 		resources.sceneDomainCopyProgram.dispose();
-		resources.sceneDomainStencilDebugProgram.dispose();
 		resources.sceneDomainCopyVertexArray.dispose();
 		resources.sceneDomainTargets?.dispose();
+		resources.portalCompositeTargets?.dispose();
 		destroyWebgl2WorldResources(resources.worldStore);
 		resources = null;
 	}
@@ -1471,7 +1594,6 @@ export function createWebgl2WorldDisplayRendererImplementation(
 						: "webgl2-initializing",
 				renderGraphBaseScene: latestBaseSceneDomain,
 				transitionPortalMaxDepth,
-				portalTriageMode,
 				cameraNear: metricsCameraFrame.near,
 				cameraFar: metricsCameraFrame.far,
 				cameraFarNearRatio:
@@ -1510,8 +1632,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				sceneDomainInteriorDrawCallCount:
 					latestSceneDomainFrameMetrics?.interiorDrawCallCount ?? 0,
 				transitionApertureMaskPassCount:
-					latestSceneDomainFrameMetrics?.transitionApertureMaskPassCount ??
-					0,
+					latestSceneDomainFrameMetrics?.transitionApertureMaskPassCount ?? 0,
 				interiorCompositePassCount:
 					latestSceneDomainFrameMetrics?.interiorCompositePassCount ?? 0,
 				exteriorCompositePassCount:
@@ -1519,13 +1640,11 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				portalCompositeRectCount:
 					latestSceneDomainFrameMetrics?.portalCompositeRectCount ?? 0,
 				portalCompositeEstimatedPixelArea:
-					latestSceneDomainFrameMetrics
-						?.portalCompositeEstimatedPixelArea ?? 0,
+					latestSceneDomainFrameMetrics?.portalCompositeEstimatedPixelArea ?? 0,
 				portalCompositeMaxDepth:
 					latestSceneDomainFrameMetrics?.portalCompositeMaxDepth ?? 0,
 				performance: latestPerformanceMetrics,
 				textureFilteringMode,
-				textureColorSpaceMode,
 				detailTexturesEnabled,
 			}),
 		);
@@ -1575,7 +1694,9 @@ function mergeSceneDomainSubmitMetrics({
 		drawCallCount:
 			exteriorMetrics.drawCallCount + interiorMetrics.drawCallCount + 1,
 		programSwitchCount:
-			exteriorMetrics.programSwitchCount + interiorMetrics.programSwitchCount + 1,
+			exteriorMetrics.programSwitchCount +
+			interiorMetrics.programSwitchCount +
+			1,
 		vertexArrayBindCount:
 			exteriorMetrics.vertexArrayBindCount +
 			interiorMetrics.vertexArrayBindCount +
@@ -1586,7 +1707,8 @@ function mergeSceneDomainSubmitMetrics({
 			2,
 		stateChangeCount:
 			exteriorMetrics.stateChangeCount + interiorMetrics.stateChangeCount,
-		triangleCount: exteriorMetrics.triangleCount + interiorMetrics.triangleCount,
+		triangleCount:
+			exteriorMetrics.triangleCount + interiorMetrics.triangleCount,
 		visibleDrawUnitCountsByMaterialKind: mergeMaterialKindCounts(
 			exteriorMetrics.visibleDrawUnitCountsByMaterialKind,
 			interiorMetrics.visibleDrawUnitCountsByMaterialKind,
@@ -1603,16 +1725,6 @@ function describeWebgl2BrowserCameraResidencyKey(
 		residency.envCellId ?? "none",
 		residency.source,
 	].join(":");
-}
-
-function stencilDebugColorForRef(stencilRef: number): Float32Array {
-	const colors: readonly (readonly [number, number, number, number])[] = [
-		[1, 0.08, 0.35, 1],
-		[0.1, 0.85, 1, 1],
-		[1, 0.9, 0.1, 1],
-		[0.65, 0.35, 1, 1],
-	];
-	return new Float32Array(colors[(stencilRef - 1) % colors.length]);
 }
 
 function mergeMaterialKindCounts(
@@ -1666,8 +1778,6 @@ function createTriangleResources(
 		indexedP16WorldProgram: createIndexedP16WorldProgram(gl),
 		terrainBlendWorldProgram: createTerrainBlendWorldProgram(gl),
 		sceneDomainCopyProgram: createSceneDomainCopyProgram(gl),
-		sceneDomainStencilDebugProgram:
-			createSceneDomainStencilDebugProgram(gl),
 		vertexBuffer,
 		vertexArray,
 		sceneDomainCopyVertexArray: createWebgl2VertexArray(gl, {
@@ -1677,6 +1787,7 @@ function createTriangleResources(
 			},
 		}),
 		sceneDomainTargets: null,
+		portalCompositeTargets: null,
 		sceneDomainFramebufferFailureCount: 0,
 		sceneDomainFramebufferFailureSamples: [],
 		worldStore: createWebgl2WorldResourceStore(),
@@ -1830,16 +1941,5 @@ function createSceneDomainCopyProgram(
 		vertexSource: SCENE_DOMAIN_COPY_VERTEX_SHADER,
 		fragmentSource: SCENE_DOMAIN_COPY_FRAGMENT_SHADER,
 		uniforms: ["uColorTexture", "uDepthTexture"],
-	});
-}
-
-function createSceneDomainStencilDebugProgram(
-	gl: WebGL2RenderingContext,
-): Webgl2ProgramResource<never, "uColor"> {
-	return createWebgl2Program(gl, {
-		label: "webgl2 scene-domain stencil debug",
-		vertexSource: SCENE_DOMAIN_COPY_VERTEX_SHADER,
-		fragmentSource: SCENE_DOMAIN_STENCIL_DEBUG_FRAGMENT_SHADER,
-		uniforms: ["uColor"],
 	});
 }

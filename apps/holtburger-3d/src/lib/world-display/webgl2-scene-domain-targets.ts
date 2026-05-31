@@ -18,6 +18,24 @@ export interface Webgl2SceneDomainTargetSet {
 	dispose(): void;
 }
 
+export interface Webgl2PortalCompositeTarget {
+	readonly label: string;
+	readonly width: number;
+	readonly height: number;
+	readonly framebuffer: WebGLFramebuffer;
+	readonly colorTexture: WebGLTexture;
+	readonly depthTexture: WebGLTexture;
+	dispose(): void;
+}
+
+export interface Webgl2PortalCompositeTargetSet {
+	readonly width: number;
+	readonly height: number;
+	readonly read: Webgl2PortalCompositeTarget;
+	readonly write: Webgl2PortalCompositeTarget;
+	dispose(): void;
+}
+
 export function createWebgl2SceneDomainTargetSet(
 	gl: WebGL2RenderingContext,
 	options: { width: number; height: number },
@@ -69,6 +87,38 @@ export function createWebgl2SceneDomainTargetSet(
 	}
 }
 
+export function createWebgl2PortalCompositeTargetSet(
+	gl: WebGL2RenderingContext,
+	options: { width: number; height: number },
+): Webgl2PortalCompositeTargetSet {
+	validateTargetSize(gl, "portal composite", options);
+	const read = createWebgl2PortalCompositeTarget(gl, {
+		label: "portal composite read",
+		width: options.width,
+		height: options.height,
+	});
+	try {
+		const write = createWebgl2PortalCompositeTarget(gl, {
+			label: "portal composite write",
+			width: options.width,
+			height: options.height,
+		});
+		return {
+			width: options.width,
+			height: options.height,
+			read,
+			write,
+			dispose() {
+				read.dispose();
+				write.dispose();
+			},
+		};
+	} catch (error) {
+		read.dispose();
+		throw error;
+	}
+}
+
 function createWebgl2SceneDomainTarget(
 	gl: WebGL2RenderingContext,
 	options: {
@@ -87,12 +137,12 @@ function createWebgl2SceneDomainTarget(
 	});
 	try {
 		const depthTexture = createSceneDomainTexture(gl, {
-			label: `${options.domain} depth`,
+			label: `${options.domain} depth-stencil`,
 			width: options.width,
 			height: options.height,
-			internalFormat: gl.DEPTH_COMPONENT24,
-			format: gl.DEPTH_COMPONENT,
-			type: gl.UNSIGNED_INT,
+			internalFormat: gl.DEPTH24_STENCIL8,
+			format: gl.DEPTH_STENCIL,
+			type: gl.UNSIGNED_INT_24_8,
 		});
 		try {
 			const framebuffer = gl.createFramebuffer();
@@ -112,7 +162,7 @@ function createWebgl2SceneDomainTarget(
 				);
 				gl.framebufferTexture2D(
 					gl.FRAMEBUFFER,
-					gl.DEPTH_ATTACHMENT,
+					gl.DEPTH_STENCIL_ATTACHMENT,
 					gl.TEXTURE_2D,
 					depthTexture,
 					0,
@@ -131,6 +181,89 @@ function createWebgl2SceneDomainTarget(
 			}
 			return {
 				domain: options.domain,
+				width: options.width,
+				height: options.height,
+				framebuffer,
+				colorTexture,
+				depthTexture,
+				dispose() {
+					gl.deleteFramebuffer(framebuffer);
+					gl.deleteTexture(colorTexture);
+					gl.deleteTexture(depthTexture);
+				},
+			};
+		} catch (error) {
+			gl.deleteTexture(depthTexture);
+			throw error;
+		}
+	} catch (error) {
+		gl.deleteTexture(colorTexture);
+		throw error;
+	}
+}
+
+function createWebgl2PortalCompositeTarget(
+	gl: WebGL2RenderingContext,
+	options: {
+		label: string;
+		width: number;
+		height: number;
+	},
+): Webgl2PortalCompositeTarget {
+	const colorTexture = createSceneDomainTexture(gl, {
+		label: `${options.label} color`,
+		width: options.width,
+		height: options.height,
+		internalFormat: gl.RGB8,
+		format: gl.RGB,
+		type: gl.UNSIGNED_BYTE,
+	});
+	try {
+		const depthTexture = createSceneDomainTexture(gl, {
+			label: `${options.label} depth-stencil`,
+			width: options.width,
+			height: options.height,
+			internalFormat: gl.DEPTH24_STENCIL8,
+			format: gl.DEPTH_STENCIL,
+			type: gl.UNSIGNED_INT_24_8,
+		});
+		try {
+			const framebuffer = gl.createFramebuffer();
+			if (!framebuffer) {
+				throw new Error(
+					`Failed to create WebGL2 ${options.label} framebuffer.`,
+				);
+			}
+			gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+			try {
+				gl.framebufferTexture2D(
+					gl.FRAMEBUFFER,
+					gl.COLOR_ATTACHMENT0,
+					gl.TEXTURE_2D,
+					colorTexture,
+					0,
+				);
+				gl.framebufferTexture2D(
+					gl.FRAMEBUFFER,
+					gl.DEPTH_STENCIL_ATTACHMENT,
+					gl.TEXTURE_2D,
+					depthTexture,
+					0,
+				);
+				const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+				if (status !== gl.FRAMEBUFFER_COMPLETE) {
+					throw new Error(
+						`WebGL2 ${options.label} framebuffer is incomplete: ${describeFramebufferStatus(
+							gl,
+							status,
+						)}.`,
+					);
+				}
+			} finally {
+				gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+			}
+			return {
+				label: options.label,
 				width: options.width,
 				height: options.height,
 				framebuffer,
@@ -188,6 +321,32 @@ function createSceneDomainTexture(
 		gl.bindTexture(gl.TEXTURE_2D, null);
 	}
 	return texture;
+}
+
+function validateTargetSize(
+	gl: WebGL2RenderingContext,
+	label: string,
+	options: { width: number; height: number },
+): void {
+	if (!Number.isInteger(options.width) || options.width <= 0) {
+		throw new Error(
+			`WebGL2 ${label} target width must be a positive integer, got ${options.width}.`,
+		);
+	}
+	if (!Number.isInteger(options.height) || options.height <= 0) {
+		throw new Error(
+			`WebGL2 ${label} target height must be a positive integer, got ${options.height}.`,
+		);
+	}
+	const maxTextureSize = Number(gl.getParameter(gl.MAX_TEXTURE_SIZE));
+	if (
+		Number.isFinite(maxTextureSize) &&
+		(options.width > maxTextureSize || options.height > maxTextureSize)
+	) {
+		throw new Error(
+			`WebGL2 ${label} target ${options.width}x${options.height} exceeds MAX_TEXTURE_SIZE ${maxTextureSize}.`,
+		);
+	}
 }
 
 function describeFramebufferStatus(

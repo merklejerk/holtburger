@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { createWebgl2SceneDomainTargetSet } from "./webgl2-scene-domain-targets";
+import {
+	createWebgl2PortalCompositeTargetSet,
+	createWebgl2SceneDomainTargetSet,
+} from "./webgl2-scene-domain-targets";
 
 describe("createWebgl2SceneDomainTargetSet", () => {
 	it("creates exterior and interior color/depth framebuffers at the canvas backing size", () => {
@@ -17,9 +20,9 @@ describe("createWebgl2SceneDomainTargetSet", () => {
 		expect(targets.interior.domain).toBe("interior");
 		expect(gl.texImage2DFormats).toEqual([
 			[gl.RGB8, gl.RGB],
-			[gl.DEPTH_COMPONENT24, gl.DEPTH_COMPONENT],
+			[gl.DEPTH24_STENCIL8, gl.DEPTH_STENCIL],
 			[gl.RGB8, gl.RGB],
-			[gl.DEPTH_COMPONENT24, gl.DEPTH_COMPONENT],
+			[gl.DEPTH24_STENCIL8, gl.DEPTH_STENCIL],
 		]);
 		expect(gl.texImage2DSizes).toEqual([
 			[320, 240],
@@ -47,6 +50,32 @@ describe("createWebgl2SceneDomainTargetSet", () => {
 		).toThrow("FRAMEBUFFER_UNSUPPORTED");
 		expect(gl.deletedTextures).toBe(2);
 	});
+
+	it("creates ping-pong portal composite color/depth-stencil framebuffers", () => {
+		const gl = new CapturingSceneDomainTargetGl();
+
+		const targets = createWebgl2PortalCompositeTargetSet(gl.asContext(), {
+			width: 128,
+			height: 96,
+		});
+
+		expect(targets.width).toBe(128);
+		expect(targets.height).toBe(96);
+		expect(targets.read.label).toBe("portal composite read");
+		expect(targets.write.label).toBe("portal composite write");
+		expect(gl.texImage2DFormats).toEqual([
+			[gl.RGB8, gl.RGB],
+			[gl.DEPTH24_STENCIL8, gl.DEPTH_STENCIL],
+			[gl.RGB8, gl.RGB],
+			[gl.DEPTH24_STENCIL8, gl.DEPTH_STENCIL],
+		]);
+		expect(gl.framebufferAttachmentCount).toBe(4);
+
+		targets.dispose();
+
+		expect(gl.deletedFramebuffers).toBe(2);
+		expect(gl.deletedTextures).toBe(4);
+	});
 });
 
 class CapturingSceneDomainTargetGl {
@@ -58,6 +87,9 @@ class CapturingSceneDomainTargetGl {
 	readonly DEPTH_COMPONENT24 = 33190;
 	readonly DEPTH_COMPONENT = 6402;
 	readonly UNSIGNED_INT = 5125;
+	readonly DEPTH24_STENCIL8 = 35056;
+	readonly DEPTH_STENCIL = 34041;
+	readonly UNSIGNED_INT_24_8 = 34042;
 	readonly CLAMP_TO_EDGE = 33071;
 	readonly NEAREST = 9728;
 	readonly TEXTURE_WRAP_S = 10242;
@@ -67,6 +99,7 @@ class CapturingSceneDomainTargetGl {
 	readonly FRAMEBUFFER = 36160;
 	readonly COLOR_ATTACHMENT0 = 36064;
 	readonly DEPTH_ATTACHMENT = 36096;
+	readonly DEPTH_STENCIL_ATTACHMENT = 33306;
 	readonly FRAMEBUFFER_COMPLETE = 36053;
 	readonly FRAMEBUFFER_INCOMPLETE_ATTACHMENT = 36054;
 	readonly FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT = 36055;

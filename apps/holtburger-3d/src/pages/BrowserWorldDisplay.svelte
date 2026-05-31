@@ -129,6 +129,10 @@
 	let envCellLodRadius = $state(
 		initialFrontendState.browserMode.envCellLodRadius,
 	);
+	let cameraNearPlane = $state(
+		initialFrontendState.browserMode.cameraNearPlane,
+	);
+	let cameraFarPlane = $state(initialFrontendState.browserMode.cameraFarPlane);
 	let transitionPortalMaxDepth = $state(
 		initialFrontendState.browserMode.transitionPortalMaxDepth,
 	);
@@ -713,6 +717,8 @@
 		buildingLodRadius = state.browserMode.buildingLodRadius;
 		detailLodRadius = state.browserMode.detailLodRadius;
 		envCellLodRadius = state.browserMode.envCellLodRadius;
+		cameraNearPlane = state.browserMode.cameraNearPlane;
+		cameraFarPlane = state.browserMode.cameraFarPlane;
 		transitionPortalMaxDepth = state.browserMode.transitionPortalMaxDepth;
 		showPortalPolygons = state.browserMode.showPortalPolygons;
 		showCellIndicators = state.browserMode.showCellIndicators;
@@ -986,7 +992,15 @@
 	}
 
 	function getEffectiveBrowserCameraFrame(): SceneCameraFrame | null {
-		return browserCameraFrame;
+		if (!browserCameraFrame) {
+			return null;
+		}
+
+		return {
+			...browserCameraFrame,
+			near: cameraNearPlane,
+			far: cameraFarPlane,
+		};
 	}
 
 	function scheduleAssetDebugSummaryUpdate(): void {

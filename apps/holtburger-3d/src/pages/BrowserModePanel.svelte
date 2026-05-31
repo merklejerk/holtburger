@@ -3,8 +3,12 @@
 	import {
 		browserLocationToLandblockId,
 		isLandblockPrefixInput,
+		MAX_BROWSER_CAMERA_FAR_PLANE,
+		MAX_BROWSER_CAMERA_NEAR_PLANE,
 		MAX_BROWSER_LOD_RADIUS,
 		MAX_TRANSITION_PORTAL_MAX_DEPTH,
+		MIN_BROWSER_CAMERA_FAR_PLANE,
+		MIN_BROWSER_CAMERA_NEAR_PLANE,
 		MIN_BROWSER_LOD_RADIUS,
 		MIN_TRANSITION_PORTAL_MAX_DEPTH,
 		type BrowserRenderStyle,
@@ -130,6 +134,16 @@
 	function handleTransitionPortalMaxDepthInput(event: Event): void {
 		const input = event.currentTarget as HTMLInputElement;
 		frontendState.updateTransitionPortalMaxDepth(Number(input.value));
+	}
+
+	function handleCameraNearPlaneInput(event: Event): void {
+		const input = event.currentTarget as HTMLInputElement;
+		frontendState.updateBrowserCameraNearPlane(Number(input.value));
+	}
+
+	function handleCameraFarPlaneInput(event: Event): void {
+		const input = event.currentTarget as HTMLInputElement;
+		frontendState.updateBrowserCameraFarPlane(Number(input.value));
 	}
 
 	function handlePortalPolygonsToggle(event: Event): void {
@@ -456,6 +470,48 @@
 							step="1"
 							value={$frontendState.browserMode.transitionPortalMaxDepth}
 							oninput={handleTransitionPortalMaxDepthInput}
+						/>
+					</label>
+				</div>
+			</fieldset>
+
+			<fieldset class="browser-form__fieldset">
+				<legend>Camera clipping</legend>
+				<div class="browser-form__slider-row">
+					<label
+						class="browser-form__field browser-form__field--range"
+						for="camera-near-plane-input"
+					>
+						<span>Near</span>
+						<strong>
+							{$frontendState.browserMode.cameraNearPlane.toFixed(1)}
+						</strong>
+						<input
+							id="camera-near-plane-input"
+							type="range"
+							min={MIN_BROWSER_CAMERA_NEAR_PLANE}
+							max={MAX_BROWSER_CAMERA_NEAR_PLANE}
+							step="0.01"
+							value={$frontendState.browserMode.cameraNearPlane}
+							oninput={handleCameraNearPlaneInput}
+						/>
+					</label>
+					<label
+						class="browser-form__field browser-form__field--range"
+						for="camera-far-plane-input"
+					>
+						<span>Far</span>
+						<strong>
+							{$frontendState.browserMode.cameraFarPlane.toFixed(0)}
+						</strong>
+						<input
+							id="camera-far-plane-input"
+							type="range"
+							min={MIN_BROWSER_CAMERA_FAR_PLANE}
+							max={MAX_BROWSER_CAMERA_FAR_PLANE}
+							step="250"
+							value={$frontendState.browserMode.cameraFarPlane}
+							oninput={handleCameraFarPlaneInput}
 						/>
 					</label>
 				</div>

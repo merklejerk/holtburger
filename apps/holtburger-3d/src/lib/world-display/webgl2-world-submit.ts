@@ -169,6 +169,7 @@ export function submitWebgl2FlatWorldDrawUnits({
 	portalMaskDrawUnitCount = 0,
 	exteriorDomainDrawUnitCount = 0,
 	interiorDomainDrawUnitCount = 0,
+	terrainBackfaceCulling = false,
 }: {
 	gl: WebGL2RenderingContext;
 	stateCache: Webgl2StateCache;
@@ -182,6 +183,7 @@ export function submitWebgl2FlatWorldDrawUnits({
 	portalMaskDrawUnitCount?: number;
 	exteriorDomainDrawUnitCount?: number;
 	interiorDomainDrawUnitCount?: number;
+	terrainBackfaceCulling?: boolean;
 }): Webgl2WorldSubmitMetrics {
 	const metrics: Webgl2WorldSubmitMetrics = {
 		...EMPTY_SUBMIT_METRICS,
@@ -289,6 +291,10 @@ export function submitWebgl2FlatWorldDrawUnits({
 			gl,
 			stateCache,
 			drawUnit,
+		});
+		metrics.stateChangeCount += stateCache.setCullState({
+			enabled: terrainBackfaceCulling && useTerrainBlend,
+			mode: gl.BACK,
 		});
 		if (texture && stateCache.bindTexture2D(0, texture.texture)) {
 			metrics.stateChangeCount += 1;

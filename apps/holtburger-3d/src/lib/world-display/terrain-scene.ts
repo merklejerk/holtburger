@@ -45,7 +45,7 @@ export function createEmptyTerrainSceneModel(): TerrainSceneModel {
 	return {
 		focusLandblockId: null,
 		statusText:
-			"Waiting for a browser destination before the Three.js terrain scene can select landblocks.",
+			"Waiting for a browser destination before terrain scene selection can start.",
 		cacheText: "Terrain cache is idle.",
 		dataSourceText: "No terrain provenance available yet.",
 		tiles: [],
@@ -62,7 +62,7 @@ export function deriveTerrainSceneModel(
 		return {
 			focusLandblockId: null,
 			statusText:
-				"Waiting for a browser destination before the Three.js terrain scene can select landblocks.",
+				"Waiting for a browser destination before terrain scene selection can start.",
 			cacheText: `Terrain cache is idle with ${Object.keys(assetState.preparedByAssetId).length} prepared records.`,
 			dataSourceText: "No terrain provenance available yet.",
 			tiles: [],
@@ -136,8 +136,8 @@ export function deriveTerrainSceneModel(
 	return {
 		focusLandblockId,
 		statusText: focusTile
-			? `Three.js is rendering ${tiles.length} cached outdoor landblock${tiles.length === 1 ? "" : "s"} around focus ${focusTile.label}.`
-			: `Three.js is waiting for the focus landblock ${formatLandblockLabel(focusLandblockId)} while ${tiles.length} neighbor tile${tiles.length === 1 ? " is" : "s are"} cached.`,
+			? `Renderer has ${tiles.length} cached outdoor landblock${tiles.length === 1 ? "" : "s"} ready around focus ${focusTile.label}.`
+			: `Renderer is waiting for the focus landblock ${formatLandblockLabel(focusLandblockId)} while ${tiles.length} neighbor tile${tiles.length === 1 ? " is" : "s are"} cached.`,
 		cacheText: `Terrain cache contains ${countPreparedTerrainAssets(assetState.preparedByAssetId)} prepared landblock payload${countPreparedTerrainAssets(assetState.preparedByAssetId) === 1 ? "" : "s"}; ${materialText}`,
 		dataSourceText,
 		tiles,

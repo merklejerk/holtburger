@@ -539,6 +539,12 @@ function reportTerrainMaterialDiagnostics(scene: TerrainSceneModel): void {
 		return;
 	}
 	lastReportedTerrainMaterialDiagnosticsSignature = signature;
+	const hasUnsupportedRenderSurfaces =
+		statusCounts.has("unsupported-render-surface") ||
+		unsupportedRenderSurfaceAssetIds.size > 0;
+	if (!hasUnsupportedRenderSurfaces) {
+		return;
+	}
 	console.warn(
 		TERRAIN_MATERIAL_DIAGNOSTIC_LOG_PREFIX,
 		`${nonReadyTiles.length}/${scene.tiles.length} terrain tile${scene.tiles.length === 1 ? "" : "s"} cannot use terrain blend materials: ${statusCountSummary}; ${blockerSummary}.`,

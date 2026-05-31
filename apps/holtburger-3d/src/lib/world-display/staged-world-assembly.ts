@@ -171,14 +171,6 @@ export function buildStagedWorldSceneAssembly({
 			transform.offset,
 		]),
 	);
-	const fallbackCommittedScenes = deriveSceneRenderableReadinessModel({
-		assetState,
-		commitPolicy: "allow-fallback",
-		terrainScene,
-		structuredInteriorScene,
-		staticRenderableScene,
-		transitionPortalModel,
-	});
 	const fullyResolvedScenes = deriveSceneRenderableReadinessModel({
 		assetState,
 		commitPolicy: "resolved-only",
@@ -190,7 +182,7 @@ export function buildStagedWorldSceneAssembly({
 	const terrainDrawUnits = buildStagedTerrainDrawUnitAssemblies({
 		assetState,
 		chunkOffsetByKey,
-		terrainScene: fallbackCommittedScenes.committedTerrainScene,
+		terrainScene: fullyResolvedScenes.committedTerrainScene,
 	});
 	const structuredInteriorDrawUnits =
 		buildStagedStructuredInteriorDrawUnitAssemblies({
@@ -270,6 +262,7 @@ export function buildStagedPortalMaskDrawUnitAssemblies({
 					color: new Float32Array([0, 0, 0, 0]),
 					behavior: null,
 					fallbackReason: null,
+					fallbackReasonCode: null,
 					preparedAssetIds: [],
 				},
 				preparedAssetIds: [],
@@ -489,6 +482,9 @@ export function buildStagedStructuredInteriorDrawUnitAssemblies({
 						textureCapabilities: materialTextureCapabilities,
 						textureFilteringMode,
 					});
+			if (shouldDeferStagedMaterialPlan(material)) {
+				return [];
+			}
 			const drawUnitId = [
 				"structured-interior",
 				cell.renderKey,
@@ -556,6 +552,7 @@ export function createFlatDebugStagedMaterial(
 		color: buildDebugColor(colorKey),
 		behavior: null,
 		fallbackReason: null,
+		fallbackReasonCode: null,
 		preparedAssetIds: [],
 	};
 }
@@ -698,6 +695,9 @@ function buildStagedStaticSurfaceDrawUnit({
 		: createFlatDebugStagedMaterial(
 				`static-staged/${batchKey}/${surfaceBatchKey}`,
 			);
+	if (shouldDeferStagedMaterialPlan(material)) {
+		return [];
+	}
 	const materialKey =
 		material.kind === "direct-texture" ? material.textureKey : material.key;
 	const drawUnitId = [
@@ -724,6 +724,26 @@ function buildStagedStaticSurfaceDrawUnit({
 		},
 	];
 }
+
+function shouldDeferStagedMaterialPlan(
+	material: StagedWorldMaterialPlan,
+): boolean {
+	if (material.kind !== "flat" || material.fallbackReasonCode === null) {
+		return false;
+	}
+	return TRANSIENT_STAGED_MATERIAL_FALLBACK_REASONS.has(
+		material.fallbackReasonCode,
+	);
+}
+
+const TRANSIENT_STAGED_MATERIAL_FALLBACK_REASONS: ReadonlySet<string> = new Set([
+	"missing-material-recipe",
+	"missing-render-surface",
+	"indexed-paletted-deferred",
+	"direct-color-normalization-deferred",
+	"missing-decompressed-prepared-texture",
+	"invalid-decompressed-prepared-texture",
+]);
 
 function resolveStaticPartDetailOverlayPlan({
 	assetState,

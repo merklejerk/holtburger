@@ -14,6 +14,7 @@ import {
 	defaultStagedWorldMaterialTextureCapabilities,
 	resolveStagedWorldMaterialStrategy,
 	type StagedWorldMaterialAtlasEligibility,
+	type StagedWorldMaterialStrategyFallbackReason,
 	type StagedWorldMaterialRenderableKind,
 } from "./staged-world-material-strategy";
 import type {
@@ -34,6 +35,7 @@ interface StagedWorldFlatMaterialPlan {
 	color: RenderVec4;
 	behavior: LegacyMaterialBehaviorDto | null;
 	fallbackReason: string | null;
+	fallbackReasonCode: StagedWorldMaterialStrategyFallbackReason | null;
 	preparedAssetIds: readonly string[];
 }
 
@@ -153,6 +155,7 @@ export function resolveStagedWorldMaterialSlotPlan(options: {
 			colorKey: options.fallbackColorKey,
 			behavior: strategy.behavior,
 			reason: strategy.detail,
+			reasonCode: strategy.reason,
 			preparedAssetIds: collectStrategyPreparedAssetIds(strategy),
 		});
 	}
@@ -183,6 +186,7 @@ function createFallbackMaterialPlan(options: {
 	colorKey: string;
 	behavior?: LegacyMaterialBehaviorDto | null;
 	reason: string;
+	reasonCode?: StagedWorldMaterialStrategyFallbackReason | null;
 	preparedAssetIds?: readonly string[];
 }): StagedWorldFlatMaterialPlan {
 	return {
@@ -191,6 +195,7 @@ function createFallbackMaterialPlan(options: {
 		color: buildFallbackColor(options.colorKey),
 		behavior: options.behavior ?? null,
 		fallbackReason: options.reason,
+		fallbackReasonCode: options.reasonCode ?? null,
 		preparedAssetIds: options.preparedAssetIds ?? [],
 	};
 }

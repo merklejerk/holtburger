@@ -7,6 +7,8 @@ import {
 	selectBrowserLandblockDestination,
 	updateBuildingLodRadius,
 	updateBrowserDraft,
+	updateBrowserCameraFarPlane,
+	updateBrowserCameraNearPlane,
 	updateBrowserDetailTexturesEnabled,
 	updateBrowserRenderStyle,
 	updateBrowserTextureFilteringMode,
@@ -111,6 +113,21 @@ function createFrontendStateStore() {
 					state.browserMode,
 					maxDepth,
 				),
+			}));
+		},
+		updateBrowserCameraNearPlane(nearPlane: number): void {
+			update((state) => ({
+				...state,
+				browserMode: updateBrowserCameraNearPlane(
+					state.browserMode,
+					nearPlane,
+				),
+			}));
+		},
+		updateBrowserCameraFarPlane(farPlane: number): void {
+			update((state) => ({
+				...state,
+				browserMode: updateBrowserCameraFarPlane(state.browserMode, farPlane),
 			}));
 		},
 		updateLandblockInputMode(

@@ -32,6 +32,7 @@ import {
 	createWebgl2SceneDomainTargetSet,
 	type Webgl2PortalCompositeTarget,
 	type Webgl2PortalCompositeTargetSet,
+	type Webgl2SceneDomain,
 	type Webgl2SceneDomainTarget,
 	type Webgl2SceneDomainTargetSet,
 } from "./webgl2-scene-domain-targets";
@@ -470,6 +471,8 @@ interface Webgl2ColorDepthTarget {
 	readonly framebuffer: WebGLFramebuffer;
 	readonly colorTexture: WebGLTexture;
 	readonly depthTexture: WebGLTexture;
+	readonly hasDepth: boolean;
+	readonly hasStencil: boolean;
 }
 
 interface Webgl2RenderResources {
@@ -726,6 +729,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		syncCanvasSize();
 		const renderStartedAt = window.performance.now();
 		const { gl } = resources;
+		resources.stateCache.bindFramebuffer(null);
 		resources.stateCache.setViewport({
 			x: 0,
 			y: 0,
@@ -734,7 +738,14 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		});
 		gl.clearColor(...WEBGL2_CLEAR_COLOR);
 		gl.clearDepth(1);
-		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+		clearBoundFramebuffer({
+			gl,
+			color: true,
+			depth: true,
+			stencil: false,
+			hasDepth: defaultFramebufferHasDepth(gl),
+			hasStencil: defaultFramebufferHasStencil(gl),
+		});
 		clearCount += 1;
 		const cameraFrame = resolveCameraFrame();
 		updateCameraResidency(cameraFrame.position);
@@ -754,7 +765,17 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				frame,
 				resources.worldStore.drawUnitsById,
 			);
-			if (shouldUseSceneDomainTargets(portalMaskDrawUnits.length)) {
+			const baseSceneDomain = deriveWebgl2BaseSceneDomainFromResidency(
+				latestCameraResidencyContext,
+			);
+			if (
+				shouldUseSceneDomainTargets({
+					portalMaskDrawUnitCount: portalMaskDrawUnits.length,
+					baseSceneDomain,
+					transitionPortalCandidateCount:
+						transitionPortalModel.diagnostics.workItemCandidateCount,
+				})
+			) {
 				latestSubmitMetrics = submitWebgl2SceneDomainFrame({
 					frame,
 					portalMaskDrawUnits,
@@ -762,9 +783,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			} else {
 				latestSceneDomainFrameMetrics = null;
 				latestPortalWorkPlan = null;
-				latestBaseSceneDomain = deriveWebgl2BaseSceneDomainFromResidency(
-					latestCameraResidencyContext,
-				);
+				latestBaseSceneDomain = baseSceneDomain;
 				latestSubmitMetrics = submitWebgl2FlatWorldFrame({
 					gl,
 					stateCache: resources.stateCache,
@@ -815,10 +834,20 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		}
 	}
 
-	function shouldUseSceneDomainTargets(
-		portalMaskDrawUnitCount: number,
-	): boolean {
-		return transitionPortalMaxDepth > 0 && portalMaskDrawUnitCount > 0;
+	function shouldUseSceneDomainTargets({
+		portalMaskDrawUnitCount,
+		baseSceneDomain,
+		transitionPortalCandidateCount,
+	}: {
+		portalMaskDrawUnitCount: number;
+		baseSceneDomain: Webgl2SceneDomain;
+		transitionPortalCandidateCount: number;
+	}): boolean {
+		return (
+			transitionPortalMaxDepth > 0 &&
+			(portalMaskDrawUnitCount > 0 ||
+				(baseSceneDomain === "interior" && transitionPortalCandidateCount > 0))
+		);
 	}
 
 	function submitWebgl2SceneDomainFrame({
@@ -863,11 +892,13 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			target: targets.exterior,
 			drawUnits: sceneDomainDrawUnits.exterior,
 			frame,
+			terrainBackfaceCulling: baseScene === "interior",
 		});
 		const interiorMetrics = renderSceneDomainTarget({
 			target: targets.interior,
 			drawUnits: sceneDomainDrawUnits.interior,
 			frame,
+			terrainBackfaceCulling: false,
 		});
 		const baseTarget =
 			baseScene === "interior" ? targets.interior : targets.exterior;
@@ -983,10 +1014,12 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		target,
 		drawUnits,
 		frame,
+		terrainBackfaceCulling,
 	}: {
 		target: Webgl2SceneDomainTarget;
 		drawUnits: readonly Webgl2WorldDrawUnit[];
 		frame: ReturnType<typeof buildStagedWorldFrame>;
+		terrainBackfaceCulling: boolean;
 	}): Webgl2WorldSubmitMetrics {
 		if (!resources) {
 			return createEmptyWebgl2WorldSubmitMetrics();
@@ -1001,7 +1034,14 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		});
 		gl.clearColor(...WEBGL2_CLEAR_COLOR);
 		gl.clearDepth(1);
-		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+		clearBoundFramebuffer({
+			gl,
+			color: true,
+			depth: true,
+			stencil: false,
+			hasDepth: target.hasDepth,
+			hasStencil: target.hasStencil,
+		});
 		return submitWebgl2FlatWorldDrawUnits({
 			gl,
 			stateCache,
@@ -1012,6 +1052,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			indexedP16Program: resources.indexedP16WorldProgram,
 			viewProjectionMatrix: frame.viewProjectionMatrix,
 			drawUnits,
+			terrainBackfaceCulling,
 		});
 	}
 
@@ -1110,9 +1151,14 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			width,
 			height,
 		});
-		if (clearStencil) {
-			gl.clear(gl.STENCIL_BUFFER_BIT);
-		}
+		clearBoundFramebuffer({
+			gl,
+			color: false,
+			depth: false,
+			stencil: clearStencil,
+			hasDepth: destinationTarget?.hasDepth ?? false,
+			hasStencil: destinationTarget?.hasStencil ?? false,
+		});
 		stateCache.setDepthState(
 			depthCopyMode === "shader"
 				? {
@@ -1793,6 +1839,41 @@ function createTriangleResources(
 		worldStore: createWebgl2WorldResourceStore(),
 		materialTextureCapabilities: detectWebgl2MaterialTextureCapabilities(gl),
 	};
+}
+
+function defaultFramebufferHasDepth(gl: WebGL2RenderingContext): boolean {
+	return gl.getContextAttributes()?.depth === true;
+}
+
+function defaultFramebufferHasStencil(gl: WebGL2RenderingContext): boolean {
+	return gl.getContextAttributes()?.stencil === true;
+}
+
+function clearBoundFramebuffer({
+	gl,
+	color,
+	depth,
+	stencil,
+	hasDepth,
+	hasStencil,
+}: {
+	gl: WebGL2RenderingContext;
+	color: boolean;
+	depth: boolean;
+	stencil: boolean;
+	hasDepth: boolean;
+	hasStencil: boolean;
+}): void {
+	let mask = color ? gl.COLOR_BUFFER_BIT : 0;
+	if (depth && hasDepth) {
+		mask |= gl.DEPTH_BUFFER_BIT;
+	}
+	if (stencil && hasStencil) {
+		mask |= gl.STENCIL_BUFFER_BIT;
+	}
+	if (mask !== 0) {
+		gl.clear(mask);
+	}
 }
 
 function detectWebgl2MaterialTextureCapabilities(

@@ -871,7 +871,6 @@ export function createWebgl2WorldDisplayRendererImplementation(
 							indexedP8Program: currentResources.indexedP8WorldProgram,
 							indexedP16Program: currentResources.indexedP16WorldProgram,
 							atlasStaticProgram: currentResources.atlasStaticWorldProgram,
-							atlasStaticSubmitEnabled: isWebgl2AtlasStaticSubmitEnabled(),
 							atlasStaticResources: {
 								batch: currentResources.worldStore.atlasStaticBatch,
 								generation: currentResources.worldStore.atlasStaticGeneration,
@@ -1171,6 +1170,11 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			terrainBlendProgram: resources.terrainBlendWorldProgram,
 			indexedP8Program: resources.indexedP8WorldProgram,
 			indexedP16Program: resources.indexedP16WorldProgram,
+			atlasStaticProgram: resources.atlasStaticWorldProgram,
+			atlasStaticResources: {
+				batch: resources.worldStore.atlasStaticBatch,
+				generation: resources.worldStore.atlasStaticGeneration,
+			},
 			viewProjectionMatrix: frame.viewProjectionMatrix,
 			drawUnits,
 			terrainBackfaceCulling,
@@ -1909,15 +1913,22 @@ function mergeSceneDomainSubmitMetrics({
 			exteriorMetrics.visibleDrawUnitCountsByMaterialKind,
 			interiorMetrics.visibleDrawUnitCountsByMaterialKind,
 		),
-		atlasStaticShaderDrawCallCount: 0,
-		atlasStaticSubmittedDrawSliceCount: 0,
-		atlasStaticReplacedDrawUnitCount: 0,
+		atlasStaticShaderDrawCallCount:
+			exteriorMetrics.atlasStaticShaderDrawCallCount +
+			interiorMetrics.atlasStaticShaderDrawCallCount,
+		atlasStaticSubmittedDrawSliceCount:
+			exteriorMetrics.atlasStaticSubmittedDrawSliceCount +
+			interiorMetrics.atlasStaticSubmittedDrawSliceCount,
+		atlasStaticReplacedDrawUnitCount:
+			exteriorMetrics.atlasStaticReplacedDrawUnitCount +
+			interiorMetrics.atlasStaticReplacedDrawUnitCount,
 		atlasStaticRetainedDrawUnitCount:
-			exteriorMetrics.visibleDrawUnitCount +
-			interiorMetrics.visibleDrawUnitCount,
+			exteriorMetrics.atlasStaticRetainedDrawUnitCount +
+			interiorMetrics.atlasStaticRetainedDrawUnitCount,
 		atlasStaticSubmitFallbackSamples: [
-			"atlas static gated submit is disabled for scene-domain rendering",
-		],
+			...exteriorMetrics.atlasStaticSubmitFallbackSamples,
+			...interiorMetrics.atlasStaticSubmitFallbackSamples,
+		].slice(0, 8),
 	};
 }
 
@@ -1930,14 +1941,6 @@ function describeWebgl2BrowserCameraResidencyKey(
 		residency.envCellId ?? "none",
 		residency.source,
 	].join(":");
-}
-
-function isWebgl2AtlasStaticSubmitEnabled(): boolean {
-	return (
-		new URLSearchParams(window.location.search).get(
-			"webgl2AtlasStaticSubmit",
-		) === "1"
-	);
 }
 
 function mergeMaterialKindCounts(

@@ -11,25 +11,23 @@ import type { Webgl2AtlasStaticGenerationResource } from "./webgl2-atlas-static-
 import { Webgl2StateCache } from "./webgl2-state-cache";
 
 describe("planWebgl2AtlasStaticReplacement", () => {
-	it("keeps staged draws when the gated submit path is disabled", () => {
+	it("keeps staged draws when atlas resources are missing", () => {
 		const plan = planWebgl2AtlasStaticReplacement({
-			enabled: false,
 			visibleDrawUnitIds: ["draw-a"],
 			resources: {
-				batch: createBatch(["draw-a"]),
-				generation: createGeneration(),
+				batch: null,
+				generation: null,
 			},
 		});
 
 		expect([...plan.replaceableDrawUnitIds]).toEqual([]);
 		expect(plan.fallbackSamples).toEqual([
-			"atlas static gated submit disabled",
+			"atlas static submit missing atlas generation",
 		]);
 	});
 
 	it("selects visible compacted draw units when resources are ready", () => {
 		const plan = planWebgl2AtlasStaticReplacement({
-			enabled: true,
 			visibleDrawUnitIds: ["draw-a", "staged-only"],
 			resources: {
 				batch: createBatch(["draw-a", "draw-b"]),
@@ -43,7 +41,6 @@ describe("planWebgl2AtlasStaticReplacement", () => {
 
 	it("falls back when the transform table exceeds the bounded shader path", () => {
 		const plan = planWebgl2AtlasStaticReplacement({
-			enabled: true,
 			visibleDrawUnitIds: ["draw-a"],
 			resources: {
 				batch: {
@@ -79,6 +76,7 @@ describe("planWebgl2AtlasStaticReplacement", () => {
 		expect(metrics).toMatchObject({
 			shaderDrawCallCount: 1,
 			submittedDrawSliceCount: 1,
+			submittedTriangleCount: 1,
 			replacedDrawUnitCount: 1,
 			retainedDrawUnitCount: 3,
 		});

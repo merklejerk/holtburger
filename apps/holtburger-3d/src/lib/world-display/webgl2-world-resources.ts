@@ -77,6 +77,7 @@ import {
 } from "./webgl2-atlas-static-generation";
 import {
 	createWebgl2AtlasStaticBatchResource,
+	updateWebgl2AtlasStaticBatchDynamicTables,
 	type Webgl2AtlasStaticBatchResource,
 } from "./webgl2-atlas-static-batches";
 import type {
@@ -1854,13 +1855,14 @@ function syncWebgl2AtlasStaticBatch({
 					gl,
 					geometry,
 					materialSlots: plan.materialSlots,
-					placementsByEntryKey:
-						createAtlasStaticPlacementsByEntryKey(plan),
+					placementsByEntryKey: createAtlasStaticPlacementsByEntryKey(plan),
 				}),
 		);
 		store.atlasStaticBatch?.dispose();
 		store.atlasStaticBatch = nextBatch;
 		releaseWebgl2AtlasStaticBatchGraphLease(store);
+	} else if (store.atlasStaticBatch) {
+		updateWebgl2AtlasStaticBatchDynamicTables(store.atlasStaticBatch, geometry);
 	}
 	store.atlasStaticCompactedBatchCount = store.atlasStaticBatch ? 1 : 0;
 	store.atlasStaticCompactedDrawUnitCount =
@@ -1942,10 +1944,9 @@ function createAtlasStaticPlacementsByEntryKey(
 ) {
 	return new Map(
 		plan.atlasTextures.flatMap((texture) =>
-			texture.placements.map((placement) => [
-				placement.atlasEntryKey,
-				placement,
-			] as const),
+			texture.placements.map(
+				(placement) => [placement.atlasEntryKey, placement] as const,
+			),
 		),
 	);
 }

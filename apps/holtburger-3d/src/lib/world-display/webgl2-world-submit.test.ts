@@ -12,6 +12,9 @@ import {
 	type Webgl2IndexedP8WorldProgram,
 	type Webgl2TerrainBlendWorldProgram,
 } from "./webgl2-world-submit";
+import type { Webgl2AtlasStaticBatchResource } from "./webgl2-atlas-static-batches";
+import type { Webgl2AtlasStaticGenerationResource } from "./webgl2-atlas-static-generation";
+import type { Webgl2AtlasStaticWorldProgram } from "./webgl2-atlas-static-submit";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
 import {
 	Webgl2StateCache,
@@ -200,6 +203,40 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		expect(gl.uniform4fvValues).toContainEqual([0, 0, 0, 0.5]);
 	});
 
+	it("replaces compacted static draw units through the default atlas submit path", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+		const drawUnitsById = new Map<string, Webgl2WorldDrawUnit>([
+			["atlas", createDrawUnit({ id: "atlas" })],
+			["staged", createDrawUnit({ id: "staged" })],
+		]);
+
+		const metrics = submitWebgl2FlatWorldFrame({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			terrainBlendProgram: createTerrainBlendProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			atlasStaticProgram: createAtlasStaticProgram(),
+			atlasStaticResources: {
+				batch: createAtlasStaticBatch(["atlas"]),
+				generation: createAtlasStaticGeneration(),
+			},
+			drawUnitsById,
+			frame: createFrame(["atlas", "staged"]),
+		});
+
+		expect(metrics.visibleDrawUnitCount).toBe(2);
+		expect(metrics.drawCallCount).toBe(2);
+		expect(metrics.triangleCount).toBe(2);
+		expect(metrics.atlasStaticReplacedDrawUnitCount).toBe(1);
+		expect(metrics.atlasStaticRetainedDrawUnitCount).toBe(1);
+		expect(metrics.atlasStaticShaderDrawCallCount).toBe(1);
+		expect(metrics.atlasStaticSubmitFallbackSamples).toEqual([]);
+	});
+
 	it("enables backface culling only for terrain when requested", () => {
 		const gl = new CapturingSubmitGl();
 		const stateCache = new Webgl2StateCache(gl);
@@ -227,7 +264,8 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		});
 
 		const cullCalls = gl.calls.filter(
-			(call) => call === `enable:${gl.CULL_FACE}` || call === `disable:${gl.CULL_FACE}`,
+			(call) =>
+				call === `enable:${gl.CULL_FACE}` || call === `disable:${gl.CULL_FACE}`,
 		);
 		expect(cullCalls).toEqual([
 			`disable:${gl.CULL_FACE}`,
@@ -555,6 +593,112 @@ function createTerrainBlendProgram(): Webgl2TerrainBlendWorldProgram {
 	};
 }
 
+function createAtlasStaticProgram(): Webgl2AtlasStaticWorldProgram {
+	return {
+		program: {} as WebGLProgram,
+		attributes: {
+			position: 0,
+			uv: 1,
+			materialSlot: 2,
+			transformSlot: 3,
+		},
+		uniforms: {
+			uViewProjection: {} as WebGLUniformLocation,
+			uAtlasTexture: {} as WebGLUniformLocation,
+			uAtlasSize: {} as WebGLUniformLocation,
+			uMaterialRects: {} as WebGLUniformLocation,
+			uTransforms: {} as WebGLUniformLocation,
+		},
+		dispose() {
+			return;
+		},
+	};
+}
+
+function createAtlasStaticBatch(
+	drawUnitIds: readonly string[],
+): Webgl2AtlasStaticBatchResource {
+	return {
+		key: "atlas-batch",
+		vertexArray: {
+			vertexArray: {} as WebGLVertexArrayObject,
+			dispose() {
+				return;
+			},
+		},
+		positionBuffer: null as never,
+		uvBuffer: null as never,
+		materialSlotBuffer: null as never,
+		transformSlotBuffer: null as never,
+		indexBuffer: null as never,
+		indexType: 5123,
+		materialSlots: [
+			{
+				key: "material-slot",
+				index: 0,
+				atlasTextureIndex: 0,
+				atlasRect: [0, 0, 1, 1],
+				renderStateKey: "opaque",
+				samplingKey: "sampling",
+			},
+		],
+		transformTable: [createIdentityMat4()],
+		drawSlices: [
+			{
+				key: "slice",
+				atlasTextureIndex: 0,
+				renderStateKey: "opaque",
+				firstIndex: 0,
+				indexCount: 3,
+				drawUnitIds,
+				materialSlotKeys: ["material-slot"],
+			},
+		],
+		vertexCount: 3,
+		indexCount: 3,
+		triangleCount: 1,
+		drawSliceCount: 1,
+		drawUnitCount: drawUnitIds.length,
+		positionByteLength: 36,
+		uvByteLength: 24,
+		materialSlotByteLength: 12,
+		transformSlotByteLength: 12,
+		indexByteLength: 6,
+		totalByteLength: 90,
+		dispose() {
+			return;
+		},
+	};
+}
+
+function createAtlasStaticGeneration(): Webgl2AtlasStaticGenerationResource {
+	return {
+		key: "generation",
+		textures: [
+			{
+				key: "texture",
+				textureIndex: 0,
+				texture: {
+					texture: {} as WebGLTexture,
+					width: 4,
+					height: 4,
+					dispose() {
+						return;
+					},
+				},
+				width: 4,
+				height: 4,
+				placementCount: 1,
+			},
+		],
+		preparedTextureAssetIds: [],
+		compactableDrawUnitIds: [],
+		dispose() {
+			return;
+		},
+	};
+}
+
 function createTerrainBlendResources(): NonNullable<
 	Webgl2WorldDrawUnit["terrainBlend"]
 > {
@@ -613,6 +757,8 @@ class CapturingSubmitGl implements Webgl2StateCacheGl {
 	readonly SRC_ALPHA = 770;
 	readonly ONE_MINUS_SRC_ALPHA = 771;
 	readonly TRIANGLES = 4;
+	readonly UNSIGNED_SHORT = 5123;
+	readonly UNSIGNED_INT = 5125;
 	readonly calls: string[] = [];
 	readonly uniform4fvValues: number[][] = [];
 

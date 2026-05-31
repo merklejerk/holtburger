@@ -20,6 +20,7 @@ export interface Webgl2AtlasStaticMaterialSlot {
 
 export interface Webgl2AtlasStaticBatchResource {
 	key: string;
+	landblockId: number;
 	vertexArray: Webgl2VertexArrayResource;
 	positionBuffer: Webgl2BufferResource;
 	uvBuffer: Webgl2BufferResource;
@@ -45,11 +46,13 @@ export interface Webgl2AtlasStaticBatchResource {
 export function createWebgl2AtlasStaticBatchResource({
 	gl,
 	geometry,
+	landblockId,
 	materialSlots,
 	placementsByEntryKey,
 }: {
 	gl: WebGL2RenderingContext;
 	geometry: AtlasStaticCompactedGeometry;
+	landblockId: number;
 	materialSlots: readonly AtlasStaticCompactionMaterialSlot[];
 	placementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>;
 }): Webgl2AtlasStaticBatchResource {
@@ -87,6 +90,7 @@ export function createWebgl2AtlasStaticBatchResource({
 	});
 	return {
 		key: geometry.key,
+		landblockId,
 		vertexArray,
 		positionBuffer,
 		uvBuffer,

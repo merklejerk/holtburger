@@ -157,6 +157,7 @@ export interface WorldRenderDebugMetrics {
 	atlasStaticTransformTableEntryCount: number;
 	atlasStaticCompactionResourceFallbackSamples: string[];
 	atlasStaticShaderDrawCallCount: number;
+	atlasStaticSubmittedBatchCount: number;
 	atlasStaticSubmittedDrawSliceCount: number;
 	atlasStaticReplacedDrawUnitCount: number;
 	atlasStaticRetainedDrawUnitCount: number;

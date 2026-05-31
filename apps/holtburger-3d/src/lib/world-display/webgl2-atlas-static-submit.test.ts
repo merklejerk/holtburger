@@ -15,7 +15,7 @@ describe("planWebgl2AtlasStaticReplacement", () => {
 		const plan = planWebgl2AtlasStaticReplacement({
 			visibleDrawUnitIds: ["draw-a"],
 			resources: {
-				batch: null,
+				batches: [],
 				generation: null,
 			},
 		});
@@ -31,7 +31,7 @@ describe("planWebgl2AtlasStaticReplacement", () => {
 		const plan = planWebgl2AtlasStaticReplacement({
 			visibleDrawUnitIds: ["draw-a", "staged-only"],
 			resources: {
-				batch: createBatch(["draw-a", "draw-b"]),
+				batches: [createBatch(["draw-a", "draw-b"])],
 				generation: createGeneration(),
 			},
 		});
@@ -45,7 +45,7 @@ describe("planWebgl2AtlasStaticReplacement", () => {
 		const plan = planWebgl2AtlasStaticReplacement({
 			visibleDrawUnitIds: ["staged-only"],
 			resources: {
-				batch: createBatch(["draw-a"]),
+				batches: [createBatch(["draw-a"])],
 				generation: createGeneration(),
 			},
 		});
@@ -55,24 +55,43 @@ describe("planWebgl2AtlasStaticReplacement", () => {
 		expect(plan.fallbackSamples).toEqual([]);
 	});
 
+	it("selects visible draw units from landblock-scoped batches", () => {
+		const plan = planWebgl2AtlasStaticReplacement({
+			visibleDrawUnitIds: ["landblock-a"],
+			resources: {
+				batches: [
+					createBatch(["landblock-a"], 0x0102ffff),
+					createBatch(["landblock-b"], 0x0103ffff),
+				],
+				generation: createGeneration(),
+			},
+		});
+
+		expect([...plan.replaceableDrawUnitIds]).toEqual(["landblock-a"]);
+		expect(plan.noVisibleRouteCount).toBe(1);
+		expect(plan.fallbackSamples).toEqual([]);
+	});
+
 	it("falls back when material slots exceed the bounded shader path", () => {
 		const plan = planWebgl2AtlasStaticReplacement({
 			visibleDrawUnitIds: ["draw-a"],
 			resources: {
-				batch: {
-					...createBatch(["draw-a"]),
-					materialSlots: Array.from(
-						{ length: WEBGL2_ATLAS_STATIC_MAX_MATERIAL_SLOTS + 1 },
-						(_, index) => ({
-							key: `material-slot-${index}`,
-							index,
-							atlasTextureIndex: 0,
-							atlasRect: [0, 0, 1, 1],
-							renderStateKey: "opaque",
-							samplingKey: "sampling",
-						}),
-					),
-				},
+				batches: [
+					{
+						...createBatch(["draw-a"]),
+						materialSlots: Array.from(
+							{ length: WEBGL2_ATLAS_STATIC_MAX_MATERIAL_SLOTS + 1 },
+							(_, index) => ({
+								key: `material-slot-${index}`,
+								index,
+								atlasTextureIndex: 0,
+								atlasRect: [0, 0, 1, 1],
+								renderStateKey: "opaque",
+								samplingKey: "sampling",
+							}),
+						),
+					},
+				],
 				generation: createGeneration(),
 			},
 		});
@@ -92,7 +111,7 @@ describe("planWebgl2AtlasStaticReplacement", () => {
 			stateCache: new Webgl2StateCache(gl),
 			program: createProgram(),
 			viewProjectionMatrix: new Float32Array(16),
-			resources: { batch, generation },
+			resources: { batches: [batch], generation },
 			replaceableDrawUnitIds: new Set(["draw-a"]),
 			retainedDrawUnitCount: 3,
 		});
@@ -115,9 +134,11 @@ describe("planWebgl2AtlasStaticReplacement", () => {
 
 function createBatch(
 	drawUnitIds: readonly string[],
+	landblockId = 0x0102ffff,
 ): Webgl2AtlasStaticBatchResource {
 	return {
 		key: "batch",
+		landblockId,
 		vertexArray: {
 			vertexArray: {} as WebGLVertexArrayObject,
 			dispose() {

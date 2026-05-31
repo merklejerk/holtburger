@@ -97,6 +97,7 @@ export interface Webgl2WorldSubmitMetrics {
 	triangleCount: number;
 	visibleDrawUnitCountsByMaterialKind: Readonly<Record<string, number>>;
 	atlasStaticShaderDrawCallCount: number;
+	atlasStaticSubmittedBatchCount: number;
 	atlasStaticSubmittedDrawSliceCount: number;
 	atlasStaticReplacedDrawUnitCount: number;
 	atlasStaticRetainedDrawUnitCount: number;
@@ -117,6 +118,7 @@ const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	triangleCount: 0,
 	visibleDrawUnitCountsByMaterialKind: {},
 	atlasStaticShaderDrawCallCount: 0,
+	atlasStaticSubmittedBatchCount: 0,
 	atlasStaticSubmittedDrawSliceCount: 0,
 	atlasStaticReplacedDrawUnitCount: 0,
 	atlasStaticRetainedDrawUnitCount: 0,
@@ -141,7 +143,7 @@ export function submitWebgl2FlatWorldFrame({
 	indexedP8Program,
 	indexedP16Program,
 	atlasStaticProgram,
-	atlasStaticResources = { batch: null, generation: null },
+	atlasStaticResources = { batches: [], generation: null },
 	drawUnitsById,
 	frame,
 }: {
@@ -190,7 +192,7 @@ export function submitWebgl2FlatWorldDrawUnits({
 	indexedP8Program,
 	indexedP16Program,
 	atlasStaticProgram,
-	atlasStaticResources = { batch: null, generation: null },
+	atlasStaticResources = { batches: [], generation: null },
 	viewProjectionMatrix,
 	drawUnits,
 	portalMaskDrawUnitCount = 0,
@@ -486,7 +488,7 @@ function submitAtlasStaticDrawUnits({
 }): void {
 	if (
 		program &&
-		resources.batch &&
+		resources.batches.length > 0 &&
 		resources.generation &&
 		replaceableDrawUnitIds.size > 0
 	) {
@@ -496,7 +498,7 @@ function submitAtlasStaticDrawUnits({
 			program,
 			viewProjectionMatrix,
 			resources: {
-				batch: resources.batch,
+				batches: resources.batches,
 				generation: resources.generation,
 			},
 			replaceableDrawUnitIds,
@@ -505,6 +507,7 @@ function submitAtlasStaticDrawUnits({
 		metrics.drawCallCount += atlasMetrics.shaderDrawCallCount;
 		metrics.triangleCount += atlasMetrics.submittedTriangleCount;
 		metrics.atlasStaticShaderDrawCallCount = atlasMetrics.shaderDrawCallCount;
+		metrics.atlasStaticSubmittedBatchCount = atlasMetrics.submittedBatchCount;
 		metrics.atlasStaticSubmittedDrawSliceCount =
 			atlasMetrics.submittedDrawSliceCount;
 		metrics.atlasStaticReplacedDrawUnitCount =
@@ -520,7 +523,7 @@ function submitAtlasStaticDrawUnits({
 	metrics.atlasStaticSubmitNoVisibleRouteCount = planningNoVisibleRouteCount;
 	if (
 		!program &&
-		resources.batch &&
+		resources.batches.length > 0 &&
 		resources.generation &&
 		replaceableDrawUnitIds.size > 0
 	) {

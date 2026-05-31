@@ -67,6 +67,7 @@ export interface StagedStaticDrawUnitAssembly {
 	id: string;
 	kind: "static";
 	renderDomain: StaticRenderableRenderDomain;
+	owningLandblockId: number;
 	geometry: StagedWorldDrawUnitGeometry;
 	modelMatrix: RenderMat4;
 	material: StagedWorldMaterialPlan;
@@ -755,6 +756,7 @@ function buildStagedStaticSurfaceDrawUnit({
 			id: drawUnitId,
 			kind: "static",
 			renderDomain: part.renderDomain,
+			owningLandblockId: part.owningLandblockId,
 			geometry,
 			modelMatrix: createTranslationMat4(chunkOffset),
 			material,

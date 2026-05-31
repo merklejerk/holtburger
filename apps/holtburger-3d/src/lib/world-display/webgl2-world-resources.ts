@@ -89,6 +89,7 @@ import type { Webgl2SceneDomain } from "./webgl2-scene-domain-targets";
 export interface Webgl2WorldDrawUnit {
 	id: string;
 	kind: StagedWorldDrawUnitAssembly["kind"];
+	owningLandblockId: number | null;
 	geometrySignature: string;
 	submitOrderKey: string;
 	vertexArray: Webgl2VertexArrayResource;
@@ -147,9 +148,9 @@ export interface Webgl2WorldResourceStore {
 	atlasStaticGeneration: Webgl2AtlasStaticGenerationResource | null;
 	atlasStaticGenerationGraph: RendererResourceGraph | null;
 	atlasStaticGenerationGraphLease: RendererResourceGraphLease | null;
-	atlasStaticBatch: Webgl2AtlasStaticBatchResource | null;
+	atlasStaticBatches: Map<string, Webgl2AtlasStaticBatchResource>;
 	atlasStaticBatchGraph: RendererResourceGraph | null;
-	atlasStaticBatchGraphLease: RendererResourceGraphLease | null;
+	atlasStaticBatchGraphLeasesByKey: Map<string, RendererResourceGraphLease>;
 	atlasStaticCompactableDrawUnitCount: number;
 	atlasStaticCompactionBypassReasonCount: number;
 	atlasStaticCompactionBypassSamples: readonly string[];
@@ -247,9 +248,9 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		atlasStaticGeneration: null,
 		atlasStaticGenerationGraph: null,
 		atlasStaticGenerationGraphLease: null,
-		atlasStaticBatch: null,
+		atlasStaticBatches: new Map(),
 		atlasStaticBatchGraph: null,
-		atlasStaticBatchGraphLease: null,
+		atlasStaticBatchGraphLeasesByKey: new Map(),
 		atlasStaticCompactableDrawUnitCount: 0,
 		atlasStaticCompactionBypassReasonCount: 0,
 		atlasStaticCompactionBypassSamples: [],
@@ -516,7 +517,7 @@ export function destroyWebgl2WorldResources(
 		}
 	}
 	releaseWebgl2AtlasStaticGenerationGraphLease(store);
-	releaseWebgl2AtlasStaticBatchGraphLease(store);
+	releaseWebgl2AtlasStaticBatchGraphLeases(store);
 	for (const drawUnit of store.drawUnits) {
 		destroyWebgl2DrawUnit(drawUnit);
 	}
@@ -527,7 +528,7 @@ export function destroyWebgl2WorldResources(
 	store.atlasStaticGenerationGraph = null;
 	store.atlasStaticGenerationGraphLease = null;
 	store.atlasStaticBatchGraph = null;
-	store.atlasStaticBatchGraphLease = null;
+	store.atlasStaticBatchGraphLeasesByKey.clear();
 	store.boundGraph = null;
 	store.terrainDrawUnitCount = 0;
 	store.structuredInteriorDrawUnitCount = 0;
@@ -549,8 +550,10 @@ export function destroyWebgl2WorldResources(
 	store.atlasStaticCompactionPlan = createEmptyAtlasStaticCompactionPlan();
 	store.atlasStaticGeneration?.dispose();
 	store.atlasStaticGeneration = null;
-	store.atlasStaticBatch?.dispose();
-	store.atlasStaticBatch = null;
+	for (const batch of store.atlasStaticBatches.values()) {
+		batch.dispose();
+	}
+	store.atlasStaticBatches.clear();
 	store.atlasStaticCompactableDrawUnitCount = 0;
 	store.atlasStaticCompactionBypassReasonCount = 0;
 	store.atlasStaticCompactionBypassSamples = [];
@@ -609,6 +612,8 @@ function createOrReuseWebgl2DrawUnit({
 	const previous = store.drawUnitsById.get(drawUnit.id);
 	if (previous && previous.geometrySignature === geometrySignature) {
 		previous.color = drawUnit.material.color;
+		previous.owningLandblockId =
+			drawUnit.kind === "static" ? drawUnit.owningLandblockId : null;
 		previous.materialKind = drawUnit.material.kind;
 		previous.materialKey = drawUnit.material.key;
 		previous.submitOrderKey = describeWebgl2DrawUnitSubmitOrderKey(
@@ -724,6 +729,8 @@ function createOrReuseWebgl2DrawUnit({
 	const webgl2DrawUnit = {
 		id: drawUnit.id,
 		kind: drawUnit.kind,
+		owningLandblockId:
+			drawUnit.kind === "static" ? drawUnit.owningLandblockId : null,
 		geometrySignature,
 		submitOrderKey: describeWebgl2DrawUnitSubmitOrderKey(
 			drawUnit,
@@ -815,6 +822,7 @@ function toAtlasStaticCompactionCandidate(drawUnit: Webgl2WorldDrawUnit) {
 	return {
 		id: drawUnit.id,
 		kind: drawUnit.kind,
+		owningLandblockId: drawUnit.owningLandblockId,
 		sceneDomain: drawUnit.sceneDomain,
 		materialKind: drawUnit.materialKind,
 		materialKey: drawUnit.materialKey,
@@ -1824,7 +1832,7 @@ function syncWebgl2AtlasStaticBatch({
 		store.atlasStaticBatchGraph &&
 		store.atlasStaticBatchGraph !== rendererResourceGraph
 	) {
-		releaseWebgl2AtlasStaticBatchGraphLease(store);
+		releaseWebgl2AtlasStaticBatchGraphLeases(store);
 	}
 	store.atlasStaticCompactionResourceFallbackSamples = [];
 	if (plan.compactableDrawUnitIds.length === 0) {
@@ -1838,98 +1846,134 @@ function syncWebgl2AtlasStaticBatch({
 		disposeWebgl2AtlasStaticBatch(store);
 		return;
 	}
-	const geometry = profileBrowserJsScope(
-		"webgl2.resource.buildAtlasStaticCompactedGeometry",
-		() =>
-			buildAtlasStaticCompactedGeometry({
-				plan,
-				drawUnits,
-			}),
-	);
-	if (!geometry) {
+	const batchPlans = createAtlasStaticLandblockBatchPlans({ plan, drawUnits });
+	if (batchPlans.length === 0) {
 		store.atlasStaticCompactionResourceFallbackSamples = [
 			`atlas static batch ${plan.key} produced no compacted geometry`,
 		];
 		disposeWebgl2AtlasStaticBatch(store);
 		return;
 	}
-	if (store.atlasStaticBatch?.key !== geometry.key) {
-		const nextBatch = profileBrowserJsScope(
-			"webgl2.resource.createAtlasStaticBatch",
+	const retainedBatchKeys = new Set<string>();
+	const placementsByEntryKey = createAtlasStaticPlacementsByEntryKey(plan);
+	for (const batchPlan of batchPlans) {
+		const geometry = profileBrowserJsScope(
+			"webgl2.resource.buildAtlasStaticCompactedGeometry",
 			() =>
-				createWebgl2AtlasStaticBatchResource({
-					gl,
-					geometry,
-					materialSlots: plan.materialSlots,
-					placementsByEntryKey: createAtlasStaticPlacementsByEntryKey(plan),
+				buildAtlasStaticCompactedGeometry({
+					plan: batchPlan.plan,
+					drawUnits,
 				}),
 		);
-		store.atlasStaticBatch?.dispose();
-		store.atlasStaticBatch = nextBatch;
-		releaseWebgl2AtlasStaticBatchGraphLease(store);
-	} else if (store.atlasStaticBatch) {
-		updateWebgl2AtlasStaticBatchDynamicTables(store.atlasStaticBatch, geometry);
+		if (!geometry) {
+			continue;
+		}
+		retainedBatchKeys.add(geometry.key);
+		const previousBatch = store.atlasStaticBatches.get(geometry.key);
+		if (!previousBatch) {
+			const nextBatch = profileBrowserJsScope(
+				"webgl2.resource.createAtlasStaticBatch",
+				() =>
+					createWebgl2AtlasStaticBatchResource({
+						gl,
+						geometry,
+						landblockId: batchPlan.landblockId,
+						materialSlots: batchPlan.plan.materialSlots,
+						placementsByEntryKey,
+					}),
+			);
+			store.atlasStaticBatches.set(nextBatch.key, nextBatch);
+		} else {
+			updateWebgl2AtlasStaticBatchDynamicTables(previousBatch, geometry);
+		}
 	}
-	store.atlasStaticCompactedBatchCount = store.atlasStaticBatch ? 1 : 0;
-	store.atlasStaticCompactedDrawUnitCount =
-		store.atlasStaticBatch?.drawUnitCount ?? 0;
-	store.atlasStaticCompactedTriangleCount =
-		store.atlasStaticBatch?.triangleCount ?? 0;
-	store.atlasStaticCompactedVertexByteLength =
-		(store.atlasStaticBatch?.positionByteLength ?? 0) +
-		(store.atlasStaticBatch?.uvByteLength ?? 0) +
-		(store.atlasStaticBatch?.materialSlotByteLength ?? 0);
-	store.atlasStaticCompactedIndexByteLength =
-		store.atlasStaticBatch?.indexByteLength ?? 0;
-	store.atlasStaticCompactedTotalByteLength =
-		store.atlasStaticBatch?.totalByteLength ?? 0;
-	store.atlasStaticCompactedDrawSliceCount =
-		store.atlasStaticBatch?.drawSliceCount ?? 0;
-	store.atlasStaticBatchOriginCount = store.atlasStaticBatch ? 1 : 0;
-	store.atlasStaticTransformTableEntryCount = 0;
-	if (!rendererResourceGraph || !store.atlasStaticBatch) {
-		releaseWebgl2AtlasStaticBatchGraphLease(store);
-		return;
+	for (const [batchKey, batch] of store.atlasStaticBatches) {
+		if (!retainedBatchKeys.has(batchKey)) {
+			batch.dispose();
+			store.atlasStaticBatches.delete(batchKey);
+			releaseWebgl2AtlasStaticBatchGraphLease(
+				store,
+				staticBatchGraphNodeKey(batchKey),
+			);
+		}
 	}
-	const batchNodeKey = staticBatchGraphNodeKey(store.atlasStaticBatch.key);
-	if (store.atlasStaticBatchGraphLease?.nodeKey === batchNodeKey) {
-		return;
-	}
-	upsertWebgl2AtlasStaticBatchGraph({
-		graph: rendererResourceGraph,
-		batch: store.atlasStaticBatch,
-		atlasGenerationKey: store.atlasStaticGeneration.key,
-		drawUnitIds: plan.compactableDrawUnitIds,
-	});
-	releaseWebgl2AtlasStaticBatchGraphLease(store);
-	store.atlasStaticBatchGraphLease = rendererResourceGraph.leaseNode(
-		batchNodeKey,
-		"webgl2 atlas static batch",
+	store.atlasStaticCompactedBatchCount = store.atlasStaticBatches.size;
+	store.atlasStaticCompactedDrawUnitCount = sumAtlasStaticBatches(
+		store,
+		(batch) => batch.drawUnitCount,
 	);
+	store.atlasStaticCompactedTriangleCount = sumAtlasStaticBatches(
+		store,
+		(batch) => batch.triangleCount,
+	);
+	store.atlasStaticCompactedVertexByteLength = sumAtlasStaticBatches(
+		store,
+		(batch) =>
+			batch.positionByteLength +
+			batch.uvByteLength +
+			batch.materialSlotByteLength,
+	);
+	store.atlasStaticCompactedIndexByteLength = sumAtlasStaticBatches(
+		store,
+		(batch) => batch.indexByteLength,
+	);
+	store.atlasStaticCompactedTotalByteLength = sumAtlasStaticBatches(
+		store,
+		(batch) => batch.totalByteLength,
+	);
+	store.atlasStaticCompactedDrawSliceCount = sumAtlasStaticBatches(
+		store,
+		(batch) => batch.drawSliceCount,
+	);
+	store.atlasStaticBatchOriginCount = store.atlasStaticBatches.size;
+	store.atlasStaticTransformTableEntryCount = 0;
+	if (!rendererResourceGraph || store.atlasStaticBatches.size === 0) {
+		releaseWebgl2AtlasStaticBatchGraphLeases(store);
+		return;
+	}
 	store.atlasStaticBatchGraph = rendererResourceGraph;
+	for (const batch of store.atlasStaticBatches.values()) {
+		const batchNodeKey = staticBatchGraphNodeKey(batch.key);
+		if (store.atlasStaticBatchGraphLeasesByKey.has(batchNodeKey)) {
+			continue;
+		}
+		upsertWebgl2AtlasStaticBatchGraph({
+			graph: rendererResourceGraph,
+			batch,
+			atlasGenerationKey: store.atlasStaticGeneration.key,
+		});
+		store.atlasStaticBatchGraphLeasesByKey.set(
+			batchNodeKey,
+			rendererResourceGraph.leaseNode(
+				batchNodeKey,
+				"webgl2 atlas static landblock batch",
+			),
+		);
+	}
 }
 
 function upsertWebgl2AtlasStaticBatchGraph({
 	graph,
 	batch,
 	atlasGenerationKey,
-	drawUnitIds,
 }: {
 	graph: RendererResourceGraph;
 	batch: Webgl2AtlasStaticBatchResource;
 	atlasGenerationKey: string;
-	drawUnitIds: readonly string[];
 }): void {
 	const batchNodeKey = staticBatchGraphNodeKey(batch.key);
 	const atlasNodeKey = atlasGenerationGraphNodeKey(atlasGenerationKey);
-	const sceneNodeKeys = drawUnitIds.map(sceneObjectGraphNodeKey);
+	const sceneNodeKeys = uniqueSortedStrings(
+		batch.drawSlices.flatMap((slice) => slice.drawUnitIds),
+	).map(sceneObjectGraphNodeKey);
 	graph.applyBatchUpdate({
 		nodes: [
 			{
 				key: batchNodeKey,
 				kind: "static-batch",
-				label: "outdoor static atlas batch",
+				label: `outdoor static atlas batch ${formatHex32(batch.landblockId)}`,
 				metadata: {
+					landblockId: formatHex32(batch.landblockId),
 					drawUnitCount: batch.drawUnitCount,
 					drawSliceCount: batch.drawSliceCount,
 					triangleCount: batch.triangleCount,
@@ -1958,9 +2002,165 @@ function createAtlasStaticPlacementsByEntryKey(
 	);
 }
 
+function createAtlasStaticLandblockBatchPlans({
+	plan,
+	drawUnits,
+}: {
+	plan: AtlasStaticCompactionPlan;
+	drawUnits: readonly StagedWorldDrawUnitAssembly[];
+}): { landblockId: number; plan: AtlasStaticCompactionPlan }[] {
+	const drawUnitById = new Map(
+		drawUnits.map((drawUnit) => [drawUnit.id, drawUnit]),
+	);
+	const drawUnitIdsByLandblockId = new Map<number, string[]>();
+	for (const drawUnitId of plan.compactableDrawUnitIds) {
+		const drawUnit = drawUnitById.get(drawUnitId);
+		if (!drawUnit) {
+			throw new Error(
+				`Atlas static compaction plan references missing draw unit ${drawUnitId}.`,
+			);
+		}
+		if (drawUnit.kind !== "static") {
+			throw new Error(
+				`Atlas static compaction plan references non-static draw unit ${drawUnit.id}.`,
+			);
+		}
+		const group =
+			drawUnitIdsByLandblockId.get(drawUnit.owningLandblockId) ?? [];
+		group.push(drawUnit.id);
+		drawUnitIdsByLandblockId.set(drawUnit.owningLandblockId, group);
+	}
+	return [...drawUnitIdsByLandblockId.entries()]
+		.sort(([left], [right]) => left - right)
+		.map(([landblockId, drawUnitIds]) => ({
+			landblockId,
+			plan: createAtlasStaticLandblockBatchPlan({
+				sourcePlan: plan,
+				drawUnits,
+				landblockId,
+				drawUnitIds: drawUnitIds.sort(),
+			}),
+		}));
+}
+
+function createAtlasStaticLandblockBatchPlan({
+	sourcePlan,
+	drawUnits,
+	landblockId,
+	drawUnitIds,
+}: {
+	sourcePlan: AtlasStaticCompactionPlan;
+	drawUnits: readonly StagedWorldDrawUnitAssembly[];
+	landblockId: number;
+	drawUnitIds: readonly string[];
+}): AtlasStaticCompactionPlan {
+	const drawUnitIdSet = new Set(drawUnitIds);
+	const drawUnitById = new Map(
+		drawUnits.map((drawUnit) => [drawUnit.id, drawUnit]),
+	);
+	const batchDrawUnits = drawUnitIds.map((drawUnitId) => {
+		const drawUnit = drawUnitById.get(drawUnitId);
+		if (!drawUnit) {
+			throw new Error(
+				`Atlas static landblock batch ${formatHex32(landblockId)} references missing draw unit ${drawUnitId}.`,
+			);
+		}
+		return drawUnit;
+	});
+	const sourceMaterialSlotByKey = new Map(
+		sourcePlan.materialSlots.map((slot) => [slot.key, slot] as const),
+	);
+	const batchMaterialSlotKeys = uniqueSortedStrings(
+		batchDrawUnits.map((drawUnit) => {
+			if (drawUnit.material.kind !== "direct-texture") {
+				throw new Error(
+					`Atlas static landblock batch ${formatHex32(landblockId)} references non-direct material draw unit ${drawUnit.id}.`,
+				);
+			}
+			return drawUnit.material.atlasEligibility?.materialSlotKey ?? "";
+		}),
+	);
+	const localMaterialSlots = batchMaterialSlotKeys.map((slotKey, index) => {
+		const sourceSlot = sourceMaterialSlotByKey.get(slotKey);
+		if (!sourceSlot) {
+			throw new Error(
+				`Atlas static landblock batch ${formatHex32(landblockId)} references missing material slot ${slotKey}.`,
+			);
+		}
+		return { ...sourceSlot, index };
+	});
+	const localMaterialSlotByKey = new Map(
+		localMaterialSlots.map((slot) => [slot.key, slot] as const),
+	);
+	const sourceSlices = sourcePlan.drawSlices
+		.map((slice) => {
+			const localDrawUnitIds = slice.drawUnitIds.filter((drawUnitId) =>
+				drawUnitIdSet.has(drawUnitId),
+			);
+			const localMaterialSlotKeys = slice.materialSlotKeys.filter((slotKey) =>
+				localMaterialSlotByKey.has(slotKey),
+			);
+			const localSlotIndices = localMaterialSlotKeys.map((slotKey) => {
+				const slot = localMaterialSlotByKey.get(slotKey);
+				if (!slot) {
+					throw new Error(
+						`Atlas static landblock batch ${formatHex32(landblockId)} could not remap material slot ${slotKey}.`,
+					);
+				}
+				return slot.index;
+			});
+			const materialTableSlotStart =
+				localSlotIndices.length === 0 ? 0 : Math.min(...localSlotIndices);
+			const materialTableSlotEnd =
+				localSlotIndices.length === 0 ? 0 : Math.max(...localSlotIndices);
+			return {
+				...slice,
+				key: `${slice.key}|landblock=${formatHex32(landblockId)}`,
+				materialTableSlotStart,
+				materialTableSlotCount:
+					localSlotIndices.length === 0
+						? 0
+						: materialTableSlotEnd - materialTableSlotStart + 1,
+				materialSlotKeys: localMaterialSlotKeys,
+				drawUnitIds: localDrawUnitIds,
+			};
+		})
+		.filter((slice) => slice.drawUnitIds.length > 0);
+	return {
+		...sourcePlan,
+		key: `${sourcePlan.key}|landblock=${formatHex32(landblockId)}`,
+		compactableDrawUnitIds: drawUnitIds,
+		materialSlots: localMaterialSlots,
+		drawSlices: sourceSlices,
+		staticObjectKeys: uniqueSortedStrings(
+			batchDrawUnits.flatMap((drawUnit) => drawUnit.staticObjectKeys),
+		),
+		staticPartCount: batchDrawUnits.reduce(
+			(total, drawUnit) => total + drawUnit.staticPartCount,
+			0,
+		),
+		triangleCount: batchDrawUnits.reduce(
+			(total, drawUnit) => total + drawUnit.geometry.triangleCount,
+			0,
+		),
+	};
+}
+
+function sumAtlasStaticBatches(
+	store: Webgl2WorldResourceStore,
+	select: (batch: Webgl2AtlasStaticBatchResource) => number,
+): number {
+	return [...store.atlasStaticBatches.values()].reduce(
+		(total, batch) => total + select(batch),
+		0,
+	);
+}
+
 function disposeWebgl2AtlasStaticBatch(store: Webgl2WorldResourceStore): void {
-	store.atlasStaticBatch?.dispose();
-	store.atlasStaticBatch = null;
+	for (const batch of store.atlasStaticBatches.values()) {
+		batch.dispose();
+	}
+	store.atlasStaticBatches.clear();
 	store.atlasStaticCompactedBatchCount = 0;
 	store.atlasStaticCompactedDrawUnitCount = 0;
 	store.atlasStaticCompactedTriangleCount = 0;
@@ -1970,21 +2170,35 @@ function disposeWebgl2AtlasStaticBatch(store: Webgl2WorldResourceStore): void {
 	store.atlasStaticCompactedDrawSliceCount = 0;
 	store.atlasStaticBatchOriginCount = 0;
 	store.atlasStaticTransformTableEntryCount = 0;
-	releaseWebgl2AtlasStaticBatchGraphLease(store);
+	releaseWebgl2AtlasStaticBatchGraphLeases(store);
 }
 
 function releaseWebgl2AtlasStaticBatchGraphLease(
 	store: Webgl2WorldResourceStore,
+	batchNodeKey: string,
 ): void {
-	if (!store.atlasStaticBatchGraphLease) {
+	const lease = store.atlasStaticBatchGraphLeasesByKey.get(batchNodeKey);
+	if (!lease) {
 		return;
 	}
 	if (!store.atlasStaticBatchGraph) {
 		throw new Error("Atlas static batch graph lease has no bound graph.");
 	}
-	store.atlasStaticBatchGraph.releaseLease(store.atlasStaticBatchGraphLease);
-	store.atlasStaticBatchGraphLease = null;
-	store.atlasStaticBatchGraph = null;
+	store.atlasStaticBatchGraph.releaseLease(lease);
+	store.atlasStaticBatchGraphLeasesByKey.delete(batchNodeKey);
+	if (store.atlasStaticBatchGraphLeasesByKey.size === 0) {
+		store.atlasStaticBatchGraph = null;
+	}
+}
+
+function releaseWebgl2AtlasStaticBatchGraphLeases(
+	store: Webgl2WorldResourceStore,
+): void {
+	for (const batchNodeKey of [
+		...store.atlasStaticBatchGraphLeasesByKey.keys(),
+	]) {
+		releaseWebgl2AtlasStaticBatchGraphLease(store, batchNodeKey);
+	}
 }
 
 function syncWebgl2AssemblyGraph({

@@ -867,7 +867,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 							indexedP16Program: currentResources.indexedP16WorldProgram,
 							atlasStaticProgram: currentResources.atlasStaticWorldProgram,
 							atlasStaticResources: {
-								batch: currentResources.worldStore.atlasStaticBatch,
+								batches: [
+									...currentResources.worldStore.atlasStaticBatches.values(),
+								],
 								generation: currentResources.worldStore.atlasStaticGeneration,
 							},
 							drawUnitsById: currentResources.worldStore.drawUnitsById,
@@ -1167,7 +1169,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			indexedP16Program: resources.indexedP16WorldProgram,
 			atlasStaticProgram: resources.atlasStaticWorldProgram,
 			atlasStaticResources: {
-				batch: resources.worldStore.atlasStaticBatch,
+				batches: [...resources.worldStore.atlasStaticBatches.values()],
 				generation: resources.worldStore.atlasStaticGeneration,
 			},
 			viewProjectionMatrix: frame.viewProjectionMatrix,
@@ -1911,6 +1913,9 @@ function mergeSceneDomainSubmitMetrics({
 		atlasStaticShaderDrawCallCount:
 			exteriorMetrics.atlasStaticShaderDrawCallCount +
 			interiorMetrics.atlasStaticShaderDrawCallCount,
+		atlasStaticSubmittedBatchCount:
+			exteriorMetrics.atlasStaticSubmittedBatchCount +
+			interiorMetrics.atlasStaticSubmittedBatchCount,
 		atlasStaticSubmittedDrawSliceCount:
 			exteriorMetrics.atlasStaticSubmittedDrawSliceCount +
 			interiorMetrics.atlasStaticSubmittedDrawSliceCount,

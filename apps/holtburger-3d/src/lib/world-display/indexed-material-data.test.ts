@@ -62,10 +62,7 @@ describe("indexed material data", () => {
 
 		expect(packed.format).toBe("p8-neighbor-rgba8");
 		expect(Array.from(packed.data)).toEqual([
-			1, 2, 3, 4,
-			2, 1, 4, 3,
-			3, 4, 1, 2,
-			4, 3, 2, 1,
+			1, 2, 3, 4, 2, 1, 4, 3, 3, 4, 1, 2, 4, 3, 2, 1,
 		]);
 	});
 
@@ -77,10 +74,7 @@ describe("indexed material data", () => {
 				width: 2,
 				height: 2,
 				sourceBytes: new Uint8Array([
-					0x01, 0x00,
-					0x02, 0x00,
-					0x00, 0x01,
-					0x00, 0x02,
+					0x01, 0x00, 0x02, 0x00, 0x00, 0x01, 0x00, 0x02,
 				]),
 			}),
 		);
@@ -93,10 +87,8 @@ describe("indexed material data", () => {
 
 		expect(packed.format).toBe("index16-neighbor-rgba16ui");
 		expect(Array.from(packed.data)).toEqual([
-			1, 2, 0x0100, 0x0200,
-			2, 2, 0x0200, 0x0200,
-			0x0100, 0x0200, 0x0100, 0x0200,
-			0x0200, 0x0200, 0x0200, 0x0200,
+			1, 2, 0x0100, 0x0200, 2, 2, 0x0200, 0x0200, 0x0100, 0x0200, 0x0100,
+			0x0200, 0x0200, 0x0200, 0x0200, 0x0200,
 		]);
 	});
 
@@ -151,21 +143,17 @@ describe("indexed material data", () => {
 			),
 			"palette/04000003": createPreparedAsset(
 				"palette/04000003",
-				createPalettePayload(0x04000003, [
-					0xff000000,
-					0xff111111,
-					0xff222222,
-					0xff333333,
-				]),
+				createPalettePayload(
+					0x04000003,
+					[0xff000000, 0xff111111, 0xff222222, 0xff333333],
+				),
 			),
 			"palette/04000004": createPreparedAsset(
 				"palette/04000004",
-				createPalettePayload(0x04000004, [
-					0xff990000,
-					0xffaa0000,
-					0xff00bb00,
-					0xff0000cc,
-				]),
+				createPalettePayload(
+					0x04000004,
+					[0xff990000, 0xffaa0000, 0xff00bb00, 0xff0000cc],
+				),
 			),
 		});
 
@@ -198,6 +186,62 @@ describe("indexed material data", () => {
 			"palette/04000004",
 			"render-surface/06000001",
 		]);
+	});
+
+	it("reuses cached indexed material DTOs for unchanged prepared inputs", () => {
+		const materialAssetId = "material/08000001";
+		const renderSurfaceAssetId = "render-surface/06000001";
+		const assetState = createAssetState({
+			[materialAssetId]: createPreparedAsset(
+				materialAssetId,
+				createTextureMaterialRecipe({
+					paletteId: 0x04000001,
+					renderSurfaceId: 0x06000001,
+				}),
+			),
+			[renderSurfaceAssetId]: createPreparedAsset(
+				renderSurfaceAssetId,
+				createRenderSurfacePayload({
+					formatRaw: PIXEL_FORMAT_P8,
+					format: "P8",
+					width: 2,
+					height: 1,
+					sourceBytes: new Uint8Array([0, 1]),
+				}),
+			),
+			"palette/04000001": createPreparedAsset(
+				"palette/04000001",
+				createPalettePayload(0x04000001, [0xff000000, 0xffffffff]),
+			),
+		});
+		const slot = {
+			slotIndex: 0,
+			surfaceId: 0x08000001,
+			materialAssetId,
+			materialVariantSignature: null,
+		};
+		const appearance = createAppearance({});
+		const samplingPolicy = createDefaultMaterialTextureSamplingPolicy().indexed;
+		const cache = new Map();
+
+		const first = resolveIndexedMaterialData({
+			assetState,
+			slot,
+			appearance,
+			samplingPolicy,
+			cache,
+		});
+		const second = resolveIndexedMaterialData({
+			assetState,
+			slot,
+			appearance,
+			samplingPolicy,
+			cache,
+		});
+
+		expect(second).toBe(first);
+		expect(second?.neighborPackedTexture).toBe(first?.neighborPackedTexture);
+		expect(cache.size).toBe(1);
 	});
 
 	it("reports missing subpalettes before an indexed material DTO is resolved", () => {
@@ -418,11 +462,7 @@ function createTextureMaterialRecipe(options: {
 			paletteAssetIds:
 				options.paletteId === null
 					? []
-					: [
-							`palette/${options.paletteId
-								.toString(16)
-								.padStart(8, "0")}`,
-						],
+					: [`palette/${options.paletteId.toString(16).padStart(8, "0")}`],
 		},
 	};
 }

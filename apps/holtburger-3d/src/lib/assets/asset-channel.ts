@@ -1,5 +1,10 @@
 import type { AssetLookupRequestDto } from "../host/contracts";
 import {
+	profileBrowserJsScope,
+	profileBrowserJsScopeAsync,
+	recordBrowserJsProfileSample,
+} from "../diagnostics/browser-js-profiler";
+import {
 	lookupBinaryAssetEnvelopes,
 	type BinaryAssetLookupEnvelopeDto,
 } from "../host/tauri";
@@ -7,6 +12,7 @@ import {
 	AssetGraphScheduler,
 	type AssetGraphPreparationResult,
 } from "./asset-graph-scheduler";
+import { classifyAssetRequestProfileKind } from "./asset-hydration-policy";
 import type { PreparedAssetRecord } from "./types";
 import type {
 	AssetWorkerHostBinaryEnvelope,
@@ -71,6 +77,7 @@ export class AssetChannelController {
 				return;
 			}
 
+			recordAssetWorkerProfileSamples(message.profileSamples ?? []);
 			for (const result of message.results) {
 				if (result.type === "asset-ready") {
 					this.resolvePreparedAsset(result.asset);
@@ -102,7 +109,10 @@ export class AssetChannelController {
 	async prepareAsset(
 		request: AssetLookupRequestDto,
 	): Promise<PreparedAssetRecord> {
-		const [asset] = await this.prepareAssets([request]);
+		const [asset] = await profileBrowserJsScopeAsync(
+			"asset-channel.prepareAsset",
+			() => this.prepareAssets([request]),
+		);
 		if (!asset) {
 			throw new Error(`No prepared asset returned for ${request.assetId}.`);
 		}
@@ -115,8 +125,17 @@ export class AssetChannelController {
 		if (requests.length === 0) {
 			return [];
 		}
-		return Promise.all(
-			requests.map((request) => this.prepareAssetSingle(request)),
+		return profileBrowserJsScopeAsync("asset-channel.prepareAssets", () =>
+			Promise.all(
+				requests.map((request) =>
+					profileBrowserJsScopeAsync(
+						`asset-channel.prepareAssetSingle.${classifyAssetRequestProfileKind(
+							request.assetId,
+						)}`,
+						() => this.prepareAssetSingle(request),
+					),
+				),
+			),
 		);
 	}
 
@@ -234,7 +253,9 @@ export class AssetChannelController {
 
 		try {
 			this.throwIfDisposed();
-			this.postPrepareRequests(pendingRequests);
+			profileBrowserJsScope("asset-channel.postPrepareRequests", () => {
+				this.postPrepareRequests(pendingRequests);
+			});
 		} catch (error) {
 			const normalized = toError(error);
 			for (const pending of pendingRequests) {
@@ -247,6 +268,10 @@ export class AssetChannelController {
 	private postPrepareRequests(
 		pendingRequests: readonly PendingAssetRequest[],
 	): void {
+		recordAssetRequestKindCounts(
+			"asset-channel.postPrepareRequests.requestKind",
+			pendingRequests.map((pending) => pending.request),
+		);
 		const message = {
 			type: "prepare-assets",
 			items: pendingRequests.map((pending) => ({
@@ -260,7 +285,10 @@ export class AssetChannelController {
 		message: AssetWorkerHostLookupBinaryRequestMessage,
 	): Promise<void> {
 		try {
-			const envelopes = await this.lookupAssetsFn(message.requests);
+			const envelopes = await profileBrowserJsScopeAsync(
+				"asset-channel.hostLookupBinary",
+				() => this.lookupAssetsFn(message.requests),
+			);
 			const workerEnvelopes = envelopes.map((envelope) => ({
 				payload: envelope.payload,
 			})) satisfies AssetWorkerHostBinaryEnvelope[];
@@ -289,6 +317,26 @@ export class AssetChannelController {
 
 		this.pendingRequests.delete(asset.request.requestId);
 		pending.resolve(asset);
+	}
+}
+
+function recordAssetWorkerProfileSamples(
+	samples: readonly { label: string; durationMs: number }[],
+): void {
+	for (const sample of samples) {
+		recordBrowserJsProfileSample(sample.label, sample.durationMs);
+	}
+}
+
+function recordAssetRequestKindCounts(
+	labelPrefix: string,
+	requests: readonly AssetLookupRequestDto[],
+): void {
+	for (const request of requests) {
+		recordBrowserJsProfileSample(
+			`${labelPrefix}.${classifyAssetRequestProfileKind(request.assetId)}`,
+			0,
+		);
 	}
 }
 

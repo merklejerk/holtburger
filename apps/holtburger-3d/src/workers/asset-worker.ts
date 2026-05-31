@@ -33,7 +33,10 @@ import {
 	setupModelPayloadDtoSchema,
 	terrainMaterialPayloadDtoSchema,
 } from "../lib/host/contracts";
-import { isSetupAppearanceAssetId } from "../lib/assets/asset-hydration-policy";
+import {
+	classifyAssetRequestProfileKind,
+	isSetupAppearanceAssetId,
+} from "../lib/assets/asset-hydration-policy";
 import { decodeBinaryAssetBatchEnvelope } from "../lib/host/binary-asset-envelope";
 import type {
 	AssetResidencyKind,
@@ -84,6 +87,7 @@ export interface AssetWorkerErrorMessage {
 export interface AssetWorkerPreparedBatchMessage {
 	type: "assets-prepared";
 	results: AssetWorkerPreparedResult[];
+	profileSamples?: AssetWorkerProfileSample[];
 }
 
 export interface AssetWorkerHostLookupBinaryRequestMessage {
@@ -102,6 +106,11 @@ export type AssetWorkerPreparedResult =
 export type AssetWorkerResponseMessage =
 	| AssetWorkerPreparedBatchMessage
 	| AssetWorkerHostLookupBinaryRequestMessage;
+
+export interface AssetWorkerProfileSample {
+	label: string;
+	durationMs: number;
+}
 
 export function prepareAssetPayload(
 	request: AssetLookupRequestDto,
@@ -173,9 +182,8 @@ export function prepareAssetPayload(
 		);
 	}
 
-	const regionRenderProfilePayload = regionRenderProfilePayloadDtoSchema.safeParse(
-		response.payload,
-	);
+	const regionRenderProfilePayload =
+		regionRenderProfilePayloadDtoSchema.safeParse(response.payload);
 	if (regionRenderProfilePayload.success) {
 		return preparePassthroughAsset(
 			request,
@@ -670,14 +678,27 @@ class AssetWorkerHostBridge {
 
 	async lookupBinaryAssets(
 		requests: readonly AssetLookupRequestDto[],
-	): Promise<AssetLookupResponseDto[]> {
+	): Promise<AssetWorkerLookupResult> {
 		if (requests.length === 0) {
-			return [];
+			return {
+				responses: [],
+				profileSamples: [],
+			};
 		}
 
-		const envelopes = await this.requestBinaryEnvelopes(requests);
-		const responses = envelopes.flatMap((envelope) =>
-			decodeBinaryAssetBatchEnvelope(envelope.payload),
+		const profileSamples: AssetWorkerProfileSample[] = [];
+		const envelopes = await measureWorkerProfileAsync(
+			"asset-worker.hostLookup.awaitHost",
+			() => this.requestBinaryEnvelopes(requests),
+			profileSamples,
+		);
+		const responses = measureWorkerProfile(
+			"asset-worker.hostLookup.decodeEnvelope",
+			() =>
+				envelopes.flatMap((envelope) =>
+					decodeBinaryAssetBatchEnvelope(envelope.payload),
+				),
+			profileSamples,
 		);
 		const missingPayloadResponses = responses.filter(
 			(response) => response.payload === undefined,
@@ -694,7 +715,10 @@ class AssetWorkerHostBridge {
 				)}.`,
 			);
 		}
-		return responses;
+		return {
+			responses,
+			profileSamples,
+		};
 	}
 
 	resolve(message: AssetWorkerHostLookupBinaryCompleteMessage): void {
@@ -730,6 +754,11 @@ class AssetWorkerHostBridge {
 	}
 }
 
+interface AssetWorkerLookupResult {
+	responses: AssetLookupResponseDto[];
+	profileSamples: AssetWorkerProfileSample[];
+}
+
 class AssetWorkerPrepareScheduler {
 	constructor(
 		private readonly hostBridge: AssetWorkerHostBridge,
@@ -747,20 +776,25 @@ class AssetWorkerPrepareScheduler {
 		items: readonly AssetWorkerPrepareBatchItem[],
 	): Promise<void> {
 		const results: AssetWorkerPreparedResult[] = [];
+		const profileSamples: AssetWorkerProfileSample[] = [];
 		const transferables: Transferable[] = [];
-		let responses: AssetLookupResponseDto[];
+		let lookupResult: AssetWorkerLookupResult;
 
 		try {
-			responses = await this.hostBridge.lookupBinaryAssets(
-				items.map((item) => item.request),
+			lookupResult = await measureWorkerProfileAsync(
+				"asset-worker.lookupBinaryAssets",
+				() =>
+					this.hostBridge.lookupBinaryAssets(items.map((item) => item.request)),
+				profileSamples,
 			);
 		} catch (error) {
 			this.postBatchError(items, error);
 			return;
 		}
+		profileSamples.push(...lookupResult.profileSamples);
 
 		const responsesByRequestId = new Map(
-			responses.map((response) => [response.requestId, response]),
+			lookupResult.responses.map((response) => [response.requestId, response]),
 		);
 		const preparedAssets: PreparedAssetRecord[] = [];
 
@@ -772,8 +806,21 @@ class AssetWorkerPrepareScheduler {
 						`Host binary lookup did not return ${item.request.assetId}.`,
 					);
 				}
-				const asset = prepareAssetPayload(item.request, response);
-				transferables.push(...prepareAssetForPostMessage(asset));
+				const requestKind = classifyAssetRequestProfileKind(
+					item.request.assetId,
+				);
+				const asset = measureWorkerProfile(
+					`asset-worker.preparePayload.${requestKind}`,
+					() => prepareAssetPayload(item.request, response),
+					profileSamples,
+				);
+				measureWorkerProfile(
+					`asset-worker.prepareTransfer.${asset.payload.kind}`,
+					() => {
+						transferables.push(...prepareAssetForPostMessage(asset));
+					},
+					profileSamples,
+				);
 				preparedAssets.push(asset);
 			} catch (error) {
 				results.push({
@@ -795,6 +842,7 @@ class AssetWorkerPrepareScheduler {
 			{
 				type: "assets-prepared",
 				results,
+				profileSamples,
 			},
 			transferables,
 		);
@@ -814,6 +862,36 @@ class AssetWorkerPrepareScheduler {
 			})),
 		});
 	}
+}
+
+function measureWorkerProfile<T>(
+	label: string,
+	action: () => T,
+	samples: AssetWorkerProfileSample[],
+): T {
+	const startedAt = workerNowMs();
+	try {
+		return action();
+	} finally {
+		samples.push({ label, durationMs: workerNowMs() - startedAt });
+	}
+}
+
+async function measureWorkerProfileAsync<T>(
+	label: string,
+	action: () => Promise<T>,
+	samples: AssetWorkerProfileSample[],
+): Promise<T> {
+	const startedAt = workerNowMs();
+	try {
+		return await action();
+	} finally {
+		samples.push({ label, durationMs: workerNowMs() - startedAt });
+	}
+}
+
+function workerNowMs(): number {
+	return globalThis.performance?.now() ?? Date.now();
 }
 
 function formatWorkerDiagnosticError(error: unknown): string {

@@ -4,6 +4,7 @@ import type {
 } from "../assets/types";
 import { formatHex32 } from "../landblocks";
 import type { ResolvedMaterialSlot } from "./material-plan";
+import type { IndexedMaterialDataCache } from "./indexed-material-data";
 import { formatMaterialAssetId } from "./material-signatures";
 import {
 	buildStagedPolygonSetGeometry,
@@ -11,8 +12,10 @@ import {
 	type StagedWorldIndexedGeometry,
 } from "./staged-world-geometry";
 import {
+	isTransientStagedMaterialPlan,
 	resolveStagedWorldSurfaceMaterialPlan,
 	resolveStagedWorldMaterialSlotPlan,
+	type StagedWorldMaterialPlanCache,
 	type StagedWorldMaterialPlan,
 } from "./staged-world-materials";
 import {
@@ -154,6 +157,8 @@ export function buildStagedWorldSceneAssembly({
 	materialTextureCapabilities,
 	textureFilteringMode,
 	detailTexturesEnabled = true,
+	indexedMaterialDataCache,
+	materialPlanCache,
 }: {
 	assetState: AssetChannelState;
 	terrainScene: TerrainSceneModel;
@@ -164,6 +169,8 @@ export function buildStagedWorldSceneAssembly({
 	materialTextureCapabilities?: MaterialTextureCapabilities;
 	textureFilteringMode?: TextureFilteringMode;
 	detailTexturesEnabled?: boolean;
+	indexedMaterialDataCache?: IndexedMaterialDataCache;
+	materialPlanCache?: StagedWorldMaterialPlanCache;
 }): StagedWorldSceneAssembly {
 	const chunkOffsetByKey = new Map(
 		renderChunkTransforms.map((transform) => [
@@ -193,6 +200,8 @@ export function buildStagedWorldSceneAssembly({
 			materialTextureCapabilities,
 			textureFilteringMode,
 			detailTexturesEnabled,
+			indexedMaterialDataCache,
+			materialPlanCache,
 		});
 	const staticDrawUnits = buildStagedStaticDrawUnitAssemblies({
 		assetState,
@@ -201,6 +210,8 @@ export function buildStagedWorldSceneAssembly({
 		materialTextureCapabilities,
 		textureFilteringMode,
 		detailTexturesEnabled,
+		indexedMaterialDataCache,
+		materialPlanCache,
 	});
 	const portalMaskDrawUnits = buildStagedPortalMaskDrawUnitAssemblies({
 		chunkOffsetByKey,
@@ -285,7 +296,11 @@ function buildPortalMaskGeometry(
 		candidate.aperture.points.flatMap((point) => [point.x, point.y, point.z]),
 	);
 	const indices: number[] = [];
-	for (let index = 1; index < candidate.aperture.points.length - 1; index += 1) {
+	for (
+		let index = 1;
+		index < candidate.aperture.points.length - 1;
+		index += 1
+	) {
 		indices.push(0, index, index + 1);
 	}
 	return {
@@ -430,6 +445,8 @@ export function buildStagedStructuredInteriorDrawUnitAssemblies({
 	materialTextureCapabilities,
 	textureFilteringMode,
 	detailTexturesEnabled = true,
+	indexedMaterialDataCache,
+	materialPlanCache,
 }: {
 	assetState: AssetChannelState;
 	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
@@ -437,6 +454,8 @@ export function buildStagedStructuredInteriorDrawUnitAssemblies({
 	materialTextureCapabilities?: MaterialTextureCapabilities;
 	textureFilteringMode?: TextureFilteringMode;
 	detailTexturesEnabled?: boolean;
+	indexedMaterialDataCache?: IndexedMaterialDataCache;
+	materialPlanCache?: StagedWorldMaterialPlanCache;
 }): StagedStructuredInteriorDrawUnitAssembly[] {
 	return structuredInteriorScene.cells.flatMap((cell) => {
 		const chunkOffset = chunkOffsetByKey.get(cell.renderChunk.chunkKey);
@@ -474,6 +493,8 @@ export function buildStagedStructuredInteriorDrawUnitAssemblies({
 						textureCapabilities: materialTextureCapabilities,
 						textureFilteringMode,
 						detailOverlay,
+						indexedMaterialDataCache,
+						materialPlanCache,
 					})
 				: resolveStagedWorldSurfaceMaterialPlan({
 						assetState,
@@ -481,6 +502,8 @@ export function buildStagedStructuredInteriorDrawUnitAssemblies({
 						fallbackColorKey: `${cell.debugColorKey}:${formatStructuredInteriorSurfaceKey(surfaceKey)}`,
 						textureCapabilities: materialTextureCapabilities,
 						textureFilteringMode,
+						indexedMaterialDataCache,
+						materialPlanCache,
 					});
 			if (shouldDeferStagedMaterialPlan(material)) {
 				return [];
@@ -515,6 +538,8 @@ export function buildStagedStaticDrawUnitAssemblies({
 	materialTextureCapabilities,
 	textureFilteringMode,
 	detailTexturesEnabled = true,
+	indexedMaterialDataCache,
+	materialPlanCache,
 }: {
 	assetState: AssetChannelState;
 	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
@@ -522,6 +547,8 @@ export function buildStagedStaticDrawUnitAssemblies({
 	materialTextureCapabilities?: MaterialTextureCapabilities;
 	textureFilteringMode?: TextureFilteringMode;
 	detailTexturesEnabled?: boolean;
+	indexedMaterialDataCache?: IndexedMaterialDataCache;
+	materialPlanCache?: StagedWorldMaterialPlanCache;
 }): StagedStaticDrawUnitAssembly[] {
 	const objectsByBatchKey = groupCommittedStaticObjectsByBatchKey({
 		chunkOffsetByKey,
@@ -538,6 +565,8 @@ export function buildStagedStaticDrawUnitAssemblies({
 				materialTextureCapabilities,
 				textureFilteringMode,
 				detailTexturesEnabled,
+				indexedMaterialDataCache,
+				materialPlanCache,
 			}),
 		),
 	);
@@ -622,6 +651,8 @@ function buildStagedStaticObjectDrawUnits({
 	materialTextureCapabilities,
 	textureFilteringMode,
 	detailTexturesEnabled,
+	indexedMaterialDataCache,
+	materialPlanCache,
 }: {
 	assetState: AssetChannelState;
 	batchKey: string;
@@ -630,6 +661,8 @@ function buildStagedStaticObjectDrawUnits({
 	materialTextureCapabilities?: MaterialTextureCapabilities;
 	textureFilteringMode?: TextureFilteringMode;
 	detailTexturesEnabled: boolean;
+	indexedMaterialDataCache?: IndexedMaterialDataCache;
+	materialPlanCache?: StagedWorldMaterialPlanCache;
 }): StagedStaticDrawUnitAssembly[] {
 	return objectGroup.parts.flatMap((part) =>
 		deriveStagedStaticSurfaceKeys(assetState, part).flatMap((surfaceKey) =>
@@ -643,6 +676,8 @@ function buildStagedStaticObjectDrawUnits({
 				materialTextureCapabilities,
 				textureFilteringMode,
 				detailTexturesEnabled,
+				indexedMaterialDataCache,
+				materialPlanCache,
 			}),
 		),
 	);
@@ -658,6 +693,8 @@ function buildStagedStaticSurfaceDrawUnit({
 	materialTextureCapabilities,
 	textureFilteringMode,
 	detailTexturesEnabled,
+	indexedMaterialDataCache,
+	materialPlanCache,
 }: {
 	assetState: AssetChannelState;
 	batchKey: string;
@@ -668,6 +705,8 @@ function buildStagedStaticSurfaceDrawUnit({
 	materialTextureCapabilities?: MaterialTextureCapabilities;
 	textureFilteringMode?: TextureFilteringMode;
 	detailTexturesEnabled: boolean;
+	indexedMaterialDataCache?: IndexedMaterialDataCache;
+	materialPlanCache?: StagedWorldMaterialPlanCache;
 }): StagedStaticDrawUnitAssembly[] {
 	const chunkOffset = chunkOffsetByKey.get(part.renderChunk.chunkKey);
 	if (!chunkOffset) {
@@ -691,6 +730,8 @@ function buildStagedStaticSurfaceDrawUnit({
 				textureFilteringMode,
 				appearance: part.materialAppearanceContext,
 				detailOverlay,
+				indexedMaterialDataCache,
+				materialPlanCache,
 			})
 		: createFlatDebugStagedMaterial(
 				`static-staged/${batchKey}/${surfaceBatchKey}`,
@@ -728,22 +769,8 @@ function buildStagedStaticSurfaceDrawUnit({
 function shouldDeferStagedMaterialPlan(
 	material: StagedWorldMaterialPlan,
 ): boolean {
-	if (material.kind !== "flat" || material.fallbackReasonCode === null) {
-		return false;
-	}
-	return TRANSIENT_STAGED_MATERIAL_FALLBACK_REASONS.has(
-		material.fallbackReasonCode,
-	);
+	return isTransientStagedMaterialPlan(material);
 }
-
-const TRANSIENT_STAGED_MATERIAL_FALLBACK_REASONS: ReadonlySet<string> = new Set([
-	"missing-material-recipe",
-	"missing-render-surface",
-	"indexed-paletted-deferred",
-	"direct-color-normalization-deferred",
-	"missing-decompressed-prepared-texture",
-	"invalid-decompressed-prepared-texture",
-]);
 
 function resolveStaticPartDetailOverlayPlan({
 	assetState,

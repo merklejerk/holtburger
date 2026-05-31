@@ -9,7 +9,10 @@ import {
 	deriveLegacyMaterialBehaviorDto,
 	type LegacyMaterialBehaviorDto,
 } from "./material-behavior";
-import type { MaterialAppearanceContext } from "./material-appearance";
+import {
+	describeMaterialAppearanceSignature,
+	type MaterialAppearanceContext,
+} from "./material-appearance";
 import type { ResolvedMaterialSlot } from "./material-plan";
 import { resolveFirstMaterialRenderSurface } from "./material-texture-resolution";
 import {
@@ -80,6 +83,12 @@ export interface ResolvedIndexedMaterialData {
 	preparedAssetIds: readonly string[];
 }
 
+export interface IndexedMaterialDataCache {
+	get(key: string): ResolvedIndexedMaterialData | undefined;
+	set(key: string, value: ResolvedIndexedMaterialData): void;
+	clear(): void;
+}
+
 export interface IndexedMaterialDataDiagnostic {
 	key: string;
 	message: string;
@@ -118,7 +127,9 @@ export function createIndexedTextureData(
 	}
 	assertIndexedSourceLength(renderSurface, format);
 	return {
-		renderSurfaceAssetId: formatRenderSurfaceAssetId(renderSurface.renderSurfaceId),
+		renderSurfaceAssetId: formatRenderSurfaceAssetId(
+			renderSurface.renderSurfaceId,
+		),
 		renderSurfaceId: renderSurface.renderSurfaceId,
 		width: renderSurface.width,
 		height: renderSurface.height,
@@ -178,7 +189,9 @@ export function selectIndexedPalette(options: {
 	}
 	if (options.renderSurface.defaultPaletteId !== null) {
 		return {
-			paletteAssetId: formatPaletteAssetId(options.renderSurface.defaultPaletteId),
+			paletteAssetId: formatPaletteAssetId(
+				options.renderSurface.defaultPaletteId,
+			),
 			paletteId: options.renderSurface.defaultPaletteId,
 			source: "render-surface-default",
 		};
@@ -191,6 +204,7 @@ export function resolveIndexedMaterialData(options: {
 	slot: ResolvedMaterialSlot;
 	appearance: MaterialAppearanceContext;
 	samplingPolicy: TextureSamplingPolicy;
+	cache?: IndexedMaterialDataCache;
 	reportDiagnostic?: IndexedMaterialDataDiagnosticHandler;
 }): ResolvedIndexedMaterialData | null {
 	const recipeAsset =
@@ -226,7 +240,6 @@ export function resolveIndexedMaterialData(options: {
 		return null;
 	}
 
-	const texture = createIndexedTextureData(resolvedSurface.renderSurface);
 	const paletteSelection = selectIndexedPalette({
 		recipe,
 		renderSurface: resolvedSurface.renderSurface,
@@ -273,6 +286,22 @@ export function resolveIndexedMaterialData(options: {
 	if (!palette) {
 		return null;
 	}
+	const cacheKey = describeIndexedMaterialDataCacheKey({
+		materialAssetId: options.slot.materialAssetId,
+		materialAsset: recipeAsset,
+		renderSurfaceAssetId: resolvedSurface.assetId,
+		renderSurfaceAsset:
+			options.assetState.preparedByAssetId[resolvedSurface.assetId],
+		palette,
+		paletteAsset,
+		appearance: options.appearance,
+		samplingPolicy: options.samplingPolicy,
+	});
+	const cached = options.cache?.get(cacheKey);
+	if (cached) {
+		return cached;
+	}
+	const texture = createIndexedTextureData(resolvedSurface.renderSurface);
 	if (texture.maxIndex >= palette.colorCount) {
 		options.reportDiagnostic?.({
 			key: `indexed-material-index-out-of-range:${options.slot.materialAssetId}:${resolvedSurface.assetId}:${paletteSelection.paletteAssetId}`,
@@ -297,7 +326,7 @@ export function resolveIndexedMaterialData(options: {
 	for (const subPalette of options.appearance.paletteView?.subPalettes ?? []) {
 		preparedAssetIds.add(formatPaletteAssetId(subPalette.subId));
 	}
-	return {
+	const resolved = {
 		materialAssetId: options.slot.materialAssetId,
 		slot: options.slot,
 		recipe,
@@ -317,7 +346,72 @@ export function resolveIndexedMaterialData(options: {
 			usesIndexedClipDiscard: true,
 		}),
 		preparedAssetIds: [...preparedAssetIds].sort(),
-	};
+	} satisfies ResolvedIndexedMaterialData;
+	options.cache?.set(cacheKey, resolved);
+	return resolved;
+}
+
+function describeIndexedMaterialDataCacheKey(options: {
+	materialAssetId: string;
+	materialAsset: PreparedAssetRecord;
+	renderSurfaceAssetId: string;
+	renderSurfaceAsset: PreparedAssetRecord | undefined;
+	palette: PaletteData | DerivedPaletteData;
+	paletteAsset: PreparedAssetRecord;
+	appearance: MaterialAppearanceContext;
+	samplingPolicy: TextureSamplingPolicy;
+}): string {
+	return [
+		options.materialAssetId,
+		describePreparedAssetState(options.materialAsset),
+		options.renderSurfaceAssetId,
+		describePreparedAssetState(options.renderSurfaceAsset),
+		describeResolvedPaletteCacheKey(options.palette, options.paletteAsset),
+		describeMaterialAppearanceSignature(options.appearance),
+		describeIndexedSamplingCacheKey(options.samplingPolicy),
+	].join("|");
+}
+
+function describeResolvedPaletteCacheKey(
+	palette: PaletteData | DerivedPaletteData,
+	paletteAsset: PreparedAssetRecord,
+): string {
+	if ("key" in palette) {
+		return palette.key;
+	}
+	return [
+		palette.paletteAssetId,
+		describePreparedAssetState(paletteAsset),
+		palette.paletteId,
+		palette.colorCount,
+	].join(":");
+}
+
+function describeIndexedSamplingCacheKey(
+	samplingPolicy: TextureSamplingPolicy,
+): string {
+	return [
+		`wrapS=${samplingPolicy.wrapS}`,
+		`wrapT=${samplingPolicy.wrapT}`,
+		`min=${samplingPolicy.minFilter}`,
+		`mag=${samplingPolicy.magFilter}`,
+		`mip=${samplingPolicy.mipFilter}`,
+		`mips=${samplingPolicy.generateMipmaps ? "on" : "off"}`,
+		`aniso=${samplingPolicy.anisotropy}`,
+	].join(":");
+}
+
+function describePreparedAssetState(
+	asset: PreparedAssetRecord | undefined,
+): string {
+	if (!asset) {
+		return "missing";
+	}
+	return [
+		asset.payload.kind,
+		asset.preparedAt,
+		asset.payload.provenance.errorCode ?? "ok",
+	].join(":");
 }
 
 export function scanMaxPaletteIndex(
@@ -403,8 +497,16 @@ function packNeighborIndices<TArray extends Uint8Array | Uint16Array>(
 	for (let y = 0; y < options.texture.height; y += 1) {
 		for (let x = 0; x < options.texture.width; x += 1) {
 			const offset = (y * options.texture.width + x) * 4;
-			const rightX = resolveNeighborCoord(x + 1, options.texture.width, options.wrapS);
-			const downY = resolveNeighborCoord(y + 1, options.texture.height, options.wrapT);
+			const rightX = resolveNeighborCoord(
+				x + 1,
+				options.texture.width,
+				options.wrapS,
+			);
+			const downY = resolveNeighborCoord(
+				y + 1,
+				options.texture.height,
+				options.wrapT,
+			);
 			packed[offset] = readIndex(options.texture, x, y);
 			packed[offset + 1] = readIndex(options.texture, rightX, y);
 			packed[offset + 2] = readIndex(options.texture, x, downY);
@@ -414,11 +516,19 @@ function packNeighborIndices<TArray extends Uint8Array | Uint16Array>(
 	return packed as TArray;
 }
 
-function readP8Index(texture: IndexedTextureData, x: number, y: number): number {
+function readP8Index(
+	texture: IndexedTextureData,
+	x: number,
+	y: number,
+): number {
 	return texture.sourceBytes[y * texture.width + x] ?? 0;
 }
 
-function readIndex16(texture: IndexedTextureData, x: number, y: number): number {
+function readIndex16(
+	texture: IndexedTextureData,
+	x: number,
+	y: number,
+): number {
 	const byteOffset = (y * texture.width + x) * 2;
 	return (
 		(texture.sourceBytes[byteOffset] ?? 0) |

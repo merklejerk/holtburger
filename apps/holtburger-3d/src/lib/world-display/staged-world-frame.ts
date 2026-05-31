@@ -346,8 +346,18 @@ function compareStagedWorldDraws(
 ): number {
 	return (
 		compareCategory(left.category, right.category) ||
-		left.drawUnitId.localeCompare(right.drawUnitId)
+		compareStableAsciiStrings(left.drawUnitId, right.drawUnitId)
 	);
+}
+
+function compareStableAsciiStrings(left: string, right: string): number {
+	if (left < right) {
+		return -1;
+	}
+	if (left > right) {
+		return 1;
+	}
+	return 0;
 }
 
 function compareCategory(

@@ -6,7 +6,10 @@ import {
 	type Webgl2ProgramResource,
 	type Webgl2VertexArrayResource,
 } from "./webgl2-gl";
-import { createFallbackSceneCameraFrame, type SceneBoundsFrame } from "./camera";
+import {
+	createFallbackSceneCameraFrame,
+	type SceneBoundsFrame,
+} from "./camera";
 import { createWebgl2RenderMetrics } from "./webgl2-render-metrics";
 import { Webgl2StateCache } from "./webgl2-state-cache";
 import {
@@ -27,6 +30,11 @@ import {
 	type Webgl2TexturedWorldProgram,
 	type Webgl2WorldSubmitMetrics,
 } from "./webgl2-world-submit";
+import {
+	WEBGL2_ATLAS_STATIC_MAX_MATERIAL_SLOTS,
+	WEBGL2_ATLAS_STATIC_MAX_TRANSFORMS,
+	type Webgl2AtlasStaticWorldProgram,
+} from "./webgl2-atlas-static-submit";
 import {
 	createWebgl2PortalCompositeTargetSet,
 	createWebgl2SceneDomainTargetSet,
@@ -178,6 +186,49 @@ void main() {
 	}
 	color.rgb = applyDetailOverlay(color.rgb);
 	fragColor = color;
+}
+`;
+
+const ATLAS_STATIC_WORLD_VERTEX_SHADER = `#version 300 es
+#define MAX_TRANSFORMS ${WEBGL2_ATLAS_STATIC_MAX_TRANSFORMS}
+
+layout(location = 0) in vec3 position;
+layout(location = 1) in vec2 uv;
+layout(location = 2) in float materialSlot;
+layout(location = 3) in float transformSlot;
+
+uniform mat4 uViewProjection;
+uniform mat4 uTransforms[MAX_TRANSFORMS];
+
+out vec2 vUv;
+flat out int vMaterialSlot;
+
+void main() {
+	int transformIndex = int(transformSlot + 0.5);
+	vUv = uv;
+	vMaterialSlot = int(materialSlot + 0.5);
+	gl_Position = uViewProjection * uTransforms[transformIndex] * vec4(position, 1.0);
+}
+`;
+
+const ATLAS_STATIC_WORLD_FRAGMENT_SHADER = `#version 300 es
+#define MAX_MATERIAL_SLOTS ${WEBGL2_ATLAS_STATIC_MAX_MATERIAL_SLOTS}
+
+precision highp float;
+
+uniform sampler2D uAtlasTexture;
+uniform vec2 uAtlasSize;
+uniform vec4 uMaterialRects[MAX_MATERIAL_SLOTS];
+
+in vec2 vUv;
+flat in int vMaterialSlot;
+
+out vec4 fragColor;
+
+void main() {
+	vec4 rect = uMaterialRects[vMaterialSlot];
+	vec2 atlasUv = (rect.xy + clamp(vUv, 0.0, 1.0) * rect.zw) / uAtlasSize;
+	fragColor = texture(uAtlasTexture, atlasUv);
 }
 `;
 
@@ -489,6 +540,7 @@ interface Webgl2RenderResources {
 	indexedP8WorldProgram: Webgl2IndexedP8WorldProgram;
 	indexedP16WorldProgram: Webgl2IndexedP16WorldProgram;
 	terrainBlendWorldProgram: Webgl2TerrainBlendWorldProgram;
+	atlasStaticWorldProgram: Webgl2AtlasStaticWorldProgram;
 	sceneDomainCopyProgram: Webgl2ProgramResource<
 		never,
 		"uColorTexture" | "uDepthTexture"
@@ -818,6 +870,12 @@ export function createWebgl2WorldDisplayRendererImplementation(
 							terrainBlendProgram: currentResources.terrainBlendWorldProgram,
 							indexedP8Program: currentResources.indexedP8WorldProgram,
 							indexedP16Program: currentResources.indexedP16WorldProgram,
+							atlasStaticProgram: currentResources.atlasStaticWorldProgram,
+							atlasStaticSubmitEnabled: isWebgl2AtlasStaticSubmitEnabled(),
+							atlasStaticResources: {
+								batch: currentResources.worldStore.atlasStaticBatch,
+								generation: currentResources.worldStore.atlasStaticGeneration,
+							},
 							drawUnitsById: currentResources.worldStore.drawUnitsById,
 							frame,
 						}),
@@ -1269,7 +1327,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		gl.drawArrays(gl.TRIANGLES, 0, 3);
 		if (depthCopyMode === "blit") {
 			if (!destinationTarget) {
-				throw new Error("WebGL2 depth blit copy requires a destination target.");
+				throw new Error(
+					"WebGL2 depth blit copy requires a destination target.",
+				);
 			}
 			copyDepthBuffer({
 				sourceTarget,
@@ -1592,6 +1652,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		resources.indexedP8WorldProgram.dispose();
 		resources.indexedP16WorldProgram.dispose();
 		resources.terrainBlendWorldProgram.dispose();
+		resources.atlasStaticWorldProgram.dispose();
 		resources.sceneDomainCopyProgram.dispose();
 		resources.sceneDomainCopyVertexArray.dispose();
 		resources.sceneDomainTargets?.dispose();
@@ -1848,6 +1909,15 @@ function mergeSceneDomainSubmitMetrics({
 			exteriorMetrics.visibleDrawUnitCountsByMaterialKind,
 			interiorMetrics.visibleDrawUnitCountsByMaterialKind,
 		),
+		atlasStaticShaderDrawCallCount: 0,
+		atlasStaticSubmittedDrawSliceCount: 0,
+		atlasStaticReplacedDrawUnitCount: 0,
+		atlasStaticRetainedDrawUnitCount:
+			exteriorMetrics.visibleDrawUnitCount +
+			interiorMetrics.visibleDrawUnitCount,
+		atlasStaticSubmitFallbackSamples: [
+			"atlas static gated submit is disabled for scene-domain rendering",
+		],
 	};
 }
 
@@ -1860,6 +1930,14 @@ function describeWebgl2BrowserCameraResidencyKey(
 		residency.envCellId ?? "none",
 		residency.source,
 	].join(":");
+}
+
+function isWebgl2AtlasStaticSubmitEnabled(): boolean {
+	return (
+		new URLSearchParams(window.location.search).get(
+			"webgl2AtlasStaticSubmit",
+		) === "1"
+	);
 }
 
 function mergeMaterialKindCounts(
@@ -1912,6 +1990,7 @@ function createTriangleResources(
 		indexedP8WorldProgram: createIndexedP8WorldProgram(gl),
 		indexedP16WorldProgram: createIndexedP16WorldProgram(gl),
 		terrainBlendWorldProgram: createTerrainBlendWorldProgram(gl),
+		atlasStaticWorldProgram: createAtlasStaticWorldProgram(gl),
 		sceneDomainCopyProgram: createSceneDomainCopyProgram(gl),
 		vertexBuffer,
 		vertexArray,
@@ -2099,6 +2178,24 @@ function createTerrainBlendWorldProgram(
 			"uRoadRotation0",
 			"uRoadRotation1",
 			"uRoadCount",
+		],
+	});
+}
+
+function createAtlasStaticWorldProgram(
+	gl: WebGL2RenderingContext,
+): Webgl2AtlasStaticWorldProgram {
+	return createWebgl2Program(gl, {
+		label: "webgl2 atlas static world",
+		vertexSource: ATLAS_STATIC_WORLD_VERTEX_SHADER,
+		fragmentSource: ATLAS_STATIC_WORLD_FRAGMENT_SHADER,
+		attributes: ["position", "uv", "materialSlot", "transformSlot"],
+		uniforms: [
+			"uViewProjection",
+			"uAtlasTexture",
+			"uAtlasSize",
+			"uMaterialRects",
+			"uTransforms",
 		],
 	});
 }

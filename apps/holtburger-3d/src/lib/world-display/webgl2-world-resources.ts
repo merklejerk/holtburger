@@ -1853,6 +1853,9 @@ function syncWebgl2AtlasStaticBatch({
 				createWebgl2AtlasStaticBatchResource({
 					gl,
 					geometry,
+					materialSlots: plan.materialSlots,
+					placementsByEntryKey:
+						createAtlasStaticPlacementsByEntryKey(plan),
 				}),
 		);
 		store.atlasStaticBatch?.dispose();
@@ -1932,6 +1935,19 @@ function upsertWebgl2AtlasStaticBatchGraph({
 			},
 		],
 	});
+}
+
+function createAtlasStaticPlacementsByEntryKey(
+	plan: AtlasStaticCompactionPlan,
+) {
+	return new Map(
+		plan.atlasTextures.flatMap((texture) =>
+			texture.placements.map((placement) => [
+				placement.atlasEntryKey,
+				placement,
+			] as const),
+		),
+	);
 }
 
 function disposeWebgl2AtlasStaticBatch(store: Webgl2WorldResourceStore): void {

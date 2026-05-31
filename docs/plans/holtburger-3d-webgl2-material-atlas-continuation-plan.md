@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
-Status: Phase M7.0 complete; Phase M7 atlas-backed static compaction rendering next.
+Status: Phase M7.1 complete; Phase M7 atlas-backed static draw substitution next.
 
 Related plans:
 
@@ -2119,9 +2119,68 @@ Exit criteria:
   draw slices, and prepared texture dependencies.
 - Bypass reasons make first-slice exclusions explicit before shader work starts.
 
+## Phase M7.1: Graph-Backed Outdoor Static Atlas Generation
+
+Status: Complete.
+
+Purpose: add the immediate resource-realization prep before replacing visible draw submission. This
+phase turns the M7.0 compaction plan into immutable WebGL2 atlas texture generations, registers their
+prepared-texture dependencies in `RendererResourceGraph`, and keeps staged direct rendering as the
+visible path.
+
+Tasks:
+
+- Preserve keyed atlas-entry records in the compaction plan so texture placement can resolve source
+  payloads without re-deriving atlas identity from diagnostic strings.
+- Build WebGL2 atlas textures from compactable RGBA8 base-level prepared textures.
+- Extrude gutters into the atlas bitmap before mip generation so later atlas sampling has stable edge
+  texels.
+- Upload atlas textures with clamp-to-edge atlas sampling and generated mip chains.
+- Own atlas generation resources separately from staged direct texture resources.
+- Register atlas generation nodes and prepared-texture dependencies in `RendererResourceGraph` and
+  lease the active generation without sharing the scene-assembly graph lease slot.
+- Surface generated atlas texture count in metrics/debug summaries.
+- Keep rendering unchanged; staged direct/fallback draw units remain the visible path until M7 draw
+  substitution lands.
+
+Progress:
+
+- Added `webgl2-atlas-static-generation`, which copies planned atlas placements into RGBA8 atlas
+  bitmaps, applies clamped gutter extrusion, uploads mipmapped WebGL2 textures, and owns disposal.
+- Extended `AtlasStaticCompactionPlan` with `atlasEntryRecords` while keeping the existing unkeyed
+  `atlasEntries` field for current diagnostics.
+- WebGL2 resource sync now creates/reuses an atlas static generation for the active compaction plan,
+  disposes replaced generations, and reports atlas generation texture count.
+- Active atlas generations now lease dedicated `atlas-generation` graph nodes with prepared-texture
+  dependencies. Atlas graph ownership is separate from scene-assembly graph ownership to avoid
+  stranding leases across graph swaps.
+- Added unit coverage for atlas pixel packing, gutter extrusion, mip upload, sampler parameters, and
+  empty-plan behavior.
+
+Decisions and course corrections:
+
+- This phase deliberately stops before compacted geometry buffers, material-table shader uniforms, or
+  visible draw substitution. That keeps GPU lifetime and pixel packing separate from the harder
+  visibility/order change.
+- Atlas texture generation uses the compaction plan's keyed records as the source of truth. It does
+  not parse or reconstruct atlas keys.
+- Atlas textures are uploaded as one texture per planned atlas page with `CLAMP_TO_EDGE`; repeat
+  semantics must be handled by the future atlas shader/material slot data rather than by atlas texture
+  sampler state.
+- No legacy shims were added.
+
+Exit criteria:
+
+- A non-empty outdoor static compaction plan creates retained WebGL2 atlas textures.
+- Atlas textures include gutter extrusion and generated mipmaps.
+- Prepared texture dependencies are retained by graph-backed atlas-generation leases.
+- Visible staged rendering is unchanged, making M7.1 safe to validate with existing scenes before
+  draw substitution.
+
 ## Phase M7: Atlas-Backed Static Compaction Vertical Slice
 
-Status: Not started.
+Status: Not started. M7.1 split out atlas generation because draw substitution still needs compacted
+buffer/shader/visibility work.
 
 Purpose: add atlas-backed render compaction after direct materials, structured interiors, portals,
 terrain/indexed material parity, and visual hardening are far enough along that compaction is a
@@ -2171,15 +2230,12 @@ Lifecycle target:
 
 Tasks:
 
-- Promote the M7.0 compaction plan into an actual renderable resource generation. The planner is now
-  the membership/generation contract for first-slice outdoor static compaction.
+- Consume the M7.1 atlas generation resource as the immutable texture source for compacted static
+  drawing.
 - Add a compaction scheduler that decides when the planned staged outdoor static membership is ready
   enough to realize as GPU resources.
 - Consume atlas-capable material strategy output, M6 atlas layout output, and M7.0 material-slot /
   draw-slice output for compatible static renderables.
-- Realize atlas set generations as one or more WebGL2 atlas textures using normalized base-level
-  prepared texture payloads.
-- Generate mipmaps after packing and gutter extrusion.
 - Implement a material-index table shader path. Start with bounded uniform arrays and partition draw
   slices when material slots exceed the limit.
 - Include atlas texture index in material-slot data. Conservative slices bind one atlas texture unless
@@ -2192,7 +2248,8 @@ Tasks:
 - Allow staged entries to opportunistically use an existing immutable atlas generation only when all
   required surfaces already exist in that generation and no mutation is required.
 - Register atlas generations, compacted buffers, draw slices, material decisions, and prepared
-  texture dependencies in `RendererResourceGraph`.
+  texture dependencies in `RendererResourceGraph`. Atlas-generation texture dependencies are already
+  registered by M7.1; M7 must add compacted static-batch nodes and dependencies.
 - Retire old atlas generations and compacted buffers through graph cleanup and owning WebGL2 stores.
 - Add tests for compaction scheduling, atlas generation reuse, old-generation retirement,
   material-table partitioning, multi-atlas slice partitioning, repeat/clamp sampling data,
@@ -2245,8 +2302,10 @@ Exit criteria:
   explanations are accurate.
 - Make staged atlas-set plan collections readonly so pure planner output can flow into material
   strategy without boundary copies.
-- Replace atlas static compaction metrics-only planning with graph-backed atlas generation/static
-  batch resources as soon as M7 realizes GPU resources.
+- Replace atlas static compaction metrics-only draw handling with graph-backed compacted static-batch
+  resources now that M7.1 realizes atlas-generation textures.
+- Remove the temporary duplicate `atlasEntries` / `atlasEntryRecords` plan shape once downstream
+  diagnostics consume keyed atlas records directly.
 - Revisit the per-frame WebGL2 draw-unit sort after M3-M7 reshape the submit path.
 - Split renderer-neutral material sampling DTOs from any Three adapter names/imports if they still
   imply Three ownership.

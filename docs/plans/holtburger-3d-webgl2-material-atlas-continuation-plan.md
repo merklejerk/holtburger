@@ -2233,7 +2233,7 @@ Sub-phases:
 
 ### Phase M7.2: Compacted Outdoor Static Batch Resources
 
-Status: Not started.
+Status: Complete.
 
 Purpose: build graph-backed compacted geometry resources from the M7.0 compaction plan and M7.1
 atlas generation without changing visible rendering.
@@ -2258,6 +2258,39 @@ Tasks:
 - Add tests for compaction scheduling, static-batch generation reuse, old-generation retirement,
   material-table partitioning, multi-atlas slice partitioning, staged-object no-rebuild behavior,
   fallback handling, and re-anchor-only updates.
+
+Progress:
+
+- Added `atlas-static-geometry-compactor`, which builds compacted local-position, author-UV,
+  material-slot, transform-slot, and index arrays from the M7.0 compaction plan and staged outdoor
+  static draw units.
+- Added `webgl2-atlas-static-batches`, which uploads compacted static batch VBOs/IBOs and creates a
+  VAO with reserved attributes for position, UV, material slot, and transform slot.
+- WebGL2 resource sync now creates/reuses one first-slice compacted outdoor static batch when an
+  atlas generation is available, disposes replaced batches, and registers a `static-batch` graph node
+  depending on the active atlas generation plus the source staged scene-object nodes.
+- Debug metrics now report compacted batch count, compacted draw-unit count, compacted triangle
+  count, compacted vertex/index/total bytes, compacted draw-slice count, and resource fallback
+  samples.
+- Added unit coverage for compacted geometry layout, material/transform slot assignment, draw-range
+  and draw-slice descriptors, and transform-only key stability.
+
+Decisions and course corrections:
+
+- M7.2 preserves local object geometry and stores a per-vertex transform slot instead of baking
+  vertices to world space. Baking would have simplified this phase but would force buffer rebuilds on
+  re-anchor/transform-only updates, which conflicts with the lifecycle target.
+- The first compacted batch is still not submit-ready by itself: M7.3 must add the shader-side
+  transform table upload path along with material-table uniforms.
+- Static-batch graph ownership is separate from atlas-generation and scene-assembly graph leases.
+- No legacy shims were added.
+
+Future-step refinements:
+
+- M7.3 must treat transform slot upload as part of the atlas shader contract, not as a geometry
+  rebuild trigger.
+- M7.3/M7.4 should keep the static-batch submit planner as the only place that decides whether a
+  compacted batch is drawn conservatively or split by visible draw ranges.
 
 Exit criteria:
 
@@ -2379,6 +2412,11 @@ Exit criteria:
   resources now that M7.1 realizes atlas-generation textures.
 - Remove the temporary duplicate `atlasEntries` / `atlasEntryRecords` plan shape once downstream
   diagnostics consume keyed atlas records directly.
+- Revisit the first-slice single static-batch resource after M7.3 proves the shader path; large scenes
+  may need multiple graph-backed static batches partitioned by atlas texture/render state/visibility
+  domain rather than one resource containing all compactable outdoor static draw units.
+- Keep transform-slot table upload explicit in M7.3; do not backslide into world-space baked compacted
+  vertices just to make shader submission simpler.
 - Revisit the per-frame WebGL2 draw-unit sort after M3-M7 reshape the submit path.
 - Split renderer-neutral material sampling DTOs from any Three adapter names/imports if they still
   imply Three ownership.

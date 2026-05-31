@@ -629,6 +629,14 @@ export function createThreeWorldDisplayRenderer(
 			atlasStaticCompactionBypassReasonCount: 0,
 			atlasStaticCompactionBypassSamples: [],
 			atlasStaticGenerationTextureCount: 0,
+			atlasStaticCompactedBatchCount: 0,
+			atlasStaticCompactedDrawUnitCount: 0,
+			atlasStaticCompactedTriangleCount: 0,
+			atlasStaticCompactedVertexByteLength: 0,
+			atlasStaticCompactedIndexByteLength: 0,
+			atlasStaticCompactedTotalByteLength: 0,
+			atlasStaticCompactedDrawSliceCount: 0,
+			atlasStaticCompactionResourceFallbackSamples: [],
 			textureVelocityPartCount: 0,
 			textureVelocityRenderGroupCount: 0,
 			textureVelocityMaterialCount: 0,
@@ -1094,6 +1102,14 @@ export function createThreeWorldDisplayRenderer(
 			atlasStaticCompactionBypassReasonCount: 0,
 			atlasStaticCompactionBypassSamples: [],
 			atlasStaticGenerationTextureCount: 0,
+			atlasStaticCompactedBatchCount: 0,
+			atlasStaticCompactedDrawUnitCount: 0,
+			atlasStaticCompactedTriangleCount: 0,
+			atlasStaticCompactedVertexByteLength: 0,
+			atlasStaticCompactedIndexByteLength: 0,
+			atlasStaticCompactedTotalByteLength: 0,
+			atlasStaticCompactedDrawSliceCount: 0,
+			atlasStaticCompactionResourceFallbackSamples: [],
 			textureVelocityPartCount: textureVelocityMetrics.textureVelocityPartCount,
 			textureVelocityRenderGroupCount:
 				textureVelocityMetrics.textureVelocityRenderGroupCount,
@@ -3785,6 +3801,21 @@ function createRenderDebugMetrics(
 			options.atlasStaticCompactionBypassSamples,
 		atlasStaticGenerationTextureCount:
 			options.atlasStaticGenerationTextureCount,
+		atlasStaticCompactedBatchCount: options.atlasStaticCompactedBatchCount,
+		atlasStaticCompactedDrawUnitCount:
+			options.atlasStaticCompactedDrawUnitCount,
+		atlasStaticCompactedTriangleCount:
+			options.atlasStaticCompactedTriangleCount,
+		atlasStaticCompactedVertexByteLength:
+			options.atlasStaticCompactedVertexByteLength,
+		atlasStaticCompactedIndexByteLength:
+			options.atlasStaticCompactedIndexByteLength,
+		atlasStaticCompactedTotalByteLength:
+			options.atlasStaticCompactedTotalByteLength,
+		atlasStaticCompactedDrawSliceCount:
+			options.atlasStaticCompactedDrawSliceCount,
+		atlasStaticCompactionResourceFallbackSamples:
+			options.atlasStaticCompactionResourceFallbackSamples,
 		textureVelocityPartCount: options.textureVelocityPartCount,
 		textureVelocityRenderGroupCount: options.textureVelocityRenderGroupCount,
 		textureVelocityMaterialCount: options.textureVelocityMaterialCount,

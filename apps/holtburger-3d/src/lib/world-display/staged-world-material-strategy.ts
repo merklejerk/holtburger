@@ -433,20 +433,9 @@ export function resolveStagedWorldMaterialStrategy(options: {
 		recipe,
 		behavior,
 	});
-	if (fallbackReason) {
-		if (fallbackReason.reason === "blended-transparency") {
-			return resolveDirectTextureStrategy({
-				assetState: options.assetState,
-				behaviorReason: fallbackReason,
-				input: options.input,
-				materialAssetId,
-				recipe,
-				textureCapabilities:
-					options.textureCapabilities ??
-					defaultStagedWorldMaterialTextureCapabilities(),
-				textureFilteringMode: options.textureFilteringMode,
-			});
-		}
+	const blendedTransparencyReason =
+		fallbackReason?.reason === "blended-transparency" ? fallbackReason : null;
+	if (fallbackReason && fallbackReason.reason !== "blended-transparency") {
 		return createFallbackRequirement({
 			input: options.input,
 			materialAssetId,
@@ -480,7 +469,7 @@ export function resolveStagedWorldMaterialStrategy(options: {
 		if (isSupportedDirectColorFormat(surface.formatRaw)) {
 			return resolveDirectTextureStrategy({
 				assetState: options.assetState,
-				behaviorReason: null,
+				behaviorReason: blendedTransparencyReason,
 				input: options.input,
 				materialAssetId,
 				recipe,
@@ -568,7 +557,7 @@ export function resolveStagedWorldMaterialStrategy(options: {
 	});
 	return resolveDirectTextureStrategy({
 		assetState: options.assetState,
-		behaviorReason: null,
+		behaviorReason: blendedTransparencyReason,
 		input: options.input,
 		materialAssetId,
 		recipe,
@@ -576,27 +565,29 @@ export function resolveStagedWorldMaterialStrategy(options: {
 			options.textureCapabilities ??
 			defaultStagedWorldMaterialTextureCapabilities(),
 		textureFilteringMode: options.textureFilteringMode,
-		atlasEligibility: {
-			materialSlotKey: describeMaterialSlotKey({
-				materialAssetId,
-				atlasEntryKey,
-				behavior: behaviorWithAlpha,
-				samplingKey,
-				renderStateKey,
-				materialVariantSignature:
-					options.input.slot.materialVariantSignature ?? null,
-			}),
-			atlasEntryKey,
-			renderStateKey,
-			samplingKey,
-			atlasEntry: {
-				renderSurfaceId: surface.renderSurfaceId,
-				preparedTextureAssetId,
-				level,
-				sourceHash: preparedTexture.sourceHash,
-				sourceFormatRaw: preparedTexture.sourceFormatRaw,
-			},
-		},
+		atlasEligibility: blendedTransparencyReason
+			? null
+			: {
+					materialSlotKey: describeMaterialSlotKey({
+						materialAssetId,
+						atlasEntryKey,
+						behavior: behaviorWithAlpha,
+						samplingKey,
+						renderStateKey,
+						materialVariantSignature:
+							options.input.slot.materialVariantSignature ?? null,
+					}),
+					atlasEntryKey,
+					renderStateKey,
+					samplingKey,
+					atlasEntry: {
+						renderSurfaceId: surface.renderSurfaceId,
+						preparedTextureAssetId,
+						level,
+						sourceHash: preparedTexture.sourceHash,
+						sourceFormatRaw: preparedTexture.sourceFormatRaw,
+					},
+				},
 	});
 }
 

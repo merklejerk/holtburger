@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
-Status: Phase M4C.2 portal depth-copy and mask-depth root cause fixed; cleanup pending.
+Status: Phase M5 complete; Phase M5A direct texture performance audit next.
 
 Related plans:
 
@@ -1762,7 +1762,7 @@ Cleanup targets and legacy shims:
 
 ## Phase M4D: Portal Fill-Rate and Visual Hardening
 
-Status: Not started.
+Status: Complete; rect merging and extra composite overlays deferred until metrics prove they are needed.
 
 Purpose: harden the dual-target portal compositor after it renders correctly. This phase is about
 performance envelope, edge cases, and deciding which portal limits are product policy versus
@@ -1788,9 +1788,32 @@ Exit criteria:
 - Common indoor/outdoor portal cases are visually stable enough for M5 material hardening.
 - Known remaining portal artifacts have examples and owners.
 
+Progress:
+
+- Captured comparable WebGL2 field baselines at transition portal depth 4 and depth 0. The measured
+  frame rate and render time did not show a meaningful win from disabling portal recursion in the
+  tested outdoor/indoor transition scene, so composite fill did not appear to be the dominant cost.
+- Kept rect merging out of the renderer because current measurements do not justify adding an area
+  heuristic, extra planning work, or more compositor complexity.
+- Fixed interior-base WebGL2 scene-domain selection so an indoor camera can still use the
+  dual-domain path even when no transition portal masks are currently visible. This prevents outdoor
+  terrain/static depth from leaking through interior floors in indoor views.
+- Added browser camera near/far controls and WebGL2 camera metrics to make depth precision and
+  clipping experiments repeatable.
+- Tightened terrain backface culling for indoor-base exterior-domain renders so underground/indoor
+  views looking outward do not let terrain backfaces overwrite portal views.
+- Cleaned up framebuffer clear behavior and attachment metadata so WebGL2 no longer spams
+  attachment/clear warnings during normal portal-domain rendering.
+
+Deferred:
+
+- Composite rect merging remains a measured optimization, not default behavior.
+- Extra overlay samples for composite rects and parent-depth clipping should be added only if a new
+  portal artifact needs that visibility.
+
 ## Phase M5: Visual Parity and Material Hardening
 
-Status: Not started.
+Status: Complete for pre-compaction WebGL2 hardening.
 
 Purpose: audit and harden the WebGL2 staged/direct material path before introducing atlas-backed
 static compaction.
@@ -1818,6 +1841,74 @@ Exit criteria:
 - Common material differences are either fixed or explicitly accepted with examples.
 - No common material code imports Three-specific resource classes.
 - WebGL2 can run the normal browser-mode workflow with known gaps tracked in metrics.
+
+Progress:
+
+- Fixed startup material pop-in by preventing transient unresolved material fallbacks from being
+  committed as visible flat draw units. Terrain, static, and structured-interior materials now wait
+  for required material resources instead of briefly rendering untextured.
+- Suppressed transient terrain-material readiness noise while keeping durable unsupported terrain
+  material diagnostics visible.
+- Fixed alpha/blended indexed material classification so indexed/paletted materials stay on the
+  indexed shader path instead of being misrouted through direct texture fallback and rendered as
+  opaque debug colors.
+- Added WebGL2 bounds reporting from render-space BVH sources so reset-camera and the existing
+  browser free-camera fit path work without depending on Three scene graph bounds.
+- Replaced misleading backend UI copy that referred to Three.js even when WebGL2 was active.
+- Added WebGL2 near/far camera UX and metrics, with the browser default far distance reduced to the
+  current diagnostic default.
+
+Known remaining risk:
+
+- Direct texture rendering is functionally good enough for the normal browser-mode workflow, but
+  performance is not yet understood. Slow loading, high steady-state CPU cost, and poor performance
+  when little is visible need a measured audit before atlas compaction work.
+
+## Phase M5A: Direct Texture Path Performance Audit
+
+Status: Not started.
+
+Purpose: measure the current WebGL2 direct/staged texture path before starting atlas layout or
+static compaction. The renderer is visibly much better, but performance may be limited by draw
+calls, state churn, staged frame assembly, visibility candidate pressure, resource realization,
+texture upload bursts, metrics generation, or asset-prep latency. This phase should separate those
+costs with instrumentation before choosing the next optimization.
+
+Tasks:
+
+- Add frame-phase timings for:
+  - staged frame visibility/build;
+  - submit-order planning and sorting;
+  - GL draw submission;
+  - scene-domain/portal composite passes;
+  - metrics/report generation.
+- Add resource-sync timings for:
+  - staged scene assembly;
+  - material strategy resolution;
+  - WebGL buffer/VAO creation and reuse;
+  - direct texture and indexed texture uploads;
+  - renderer resource graph lease/update work.
+- Track texture upload volume by frame: upload count, dimensions, approximate bytes, material kind,
+  and whether the upload came from direct texture, indexed texture, terrain blend, detail overlay,
+  or prepared normalized texture.
+- Track steady-state direct texture submit pressure: visible draw units, candidate draw units,
+  program switches, VAO binds, texture binds, uniform uploads, blend/depth/cull state changes, and
+  material/sampler buckets.
+- Add a "looking at nothing" diagnostic scenario or metric grouping that distinguishes visible draw
+  pressure from retained/candidate/frame-assembly pressure.
+- Add loading diagnostics that measure time from destination/landblock request to committed visible
+  resources, with prepared asset counts and deferred material reasons by kind.
+- Use the audit to decide whether the next optimization should be atlas/static compaction, candidate
+  pruning, staged assembly caching, resource-sync scheduling, texture upload throttling, or asset
+  incubation changes.
+
+Exit criteria:
+
+- Direct texture frame cost is broken down into CPU frame assembly, CPU/GL submit, resource sync,
+  texture upload, and portal/composite costs.
+- Loading slowness is separated from steady-state render slowness.
+- The next phase has evidence for the dominant bottleneck rather than assuming draw-call count is
+  the only issue.
 
 ## Phase M6: Atlas Layout Planner Extraction
 

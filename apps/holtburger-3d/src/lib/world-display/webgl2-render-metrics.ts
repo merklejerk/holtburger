@@ -1,4 +1,4 @@
-import type { SceneCameraFrame } from "./camera";
+import type { SceneBoundsFrame, SceneCameraFrame } from "./camera";
 import type { StagedWorldFrameMetrics } from "./staged-world-frame";
 import type {
 	WorldDisplayTextureFilteringMode,
@@ -59,13 +59,14 @@ export interface Webgl2RenderMetricsInput {
 	performance: WorldRenderMetrics["performance"];
 	textureFilteringMode: WorldDisplayTextureFilteringMode;
 	detailTexturesEnabled: boolean;
+	sceneBounds: SceneBoundsFrame | null;
 }
 
 export function createWebgl2RenderMetrics(
 	input: Webgl2RenderMetricsInput,
 ): WorldRenderMetrics {
 	return {
-		bounds: null,
+		bounds: input.sceneBounds,
 		cameraFrame: input.cameraFrame,
 		performance: input.performance,
 		portal: {

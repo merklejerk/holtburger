@@ -146,6 +146,14 @@ export interface WorldRenderDebugMetrics {
 	atlasStaticCompactionBypassReasonCount: number;
 	atlasStaticCompactionBypassSamples: string[];
 	atlasStaticGenerationTextureCount: number;
+	atlasStaticCompactedBatchCount: number;
+	atlasStaticCompactedDrawUnitCount: number;
+	atlasStaticCompactedTriangleCount: number;
+	atlasStaticCompactedVertexByteLength: number;
+	atlasStaticCompactedIndexByteLength: number;
+	atlasStaticCompactedTotalByteLength: number;
+	atlasStaticCompactedDrawSliceCount: number;
+	atlasStaticCompactionResourceFallbackSamples: string[];
 	textureVelocityPartCount: number;
 	textureVelocityRenderGroupCount: number;
 	textureVelocityMaterialCount: number;

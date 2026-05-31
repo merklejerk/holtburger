@@ -246,6 +246,24 @@ export function createWebgl2RenderMetrics(
 			],
 			atlasStaticGenerationTextureCount:
 				input.worldStore?.atlasStaticGenerationTextureCount ?? 0,
+			atlasStaticCompactedBatchCount:
+				input.worldStore?.atlasStaticCompactedBatchCount ?? 0,
+			atlasStaticCompactedDrawUnitCount:
+				input.worldStore?.atlasStaticCompactedDrawUnitCount ?? 0,
+			atlasStaticCompactedTriangleCount:
+				input.worldStore?.atlasStaticCompactedTriangleCount ?? 0,
+			atlasStaticCompactedVertexByteLength:
+				input.worldStore?.atlasStaticCompactedVertexByteLength ?? 0,
+			atlasStaticCompactedIndexByteLength:
+				input.worldStore?.atlasStaticCompactedIndexByteLength ?? 0,
+			atlasStaticCompactedTotalByteLength:
+				input.worldStore?.atlasStaticCompactedTotalByteLength ?? 0,
+			atlasStaticCompactedDrawSliceCount:
+				input.worldStore?.atlasStaticCompactedDrawSliceCount ?? 0,
+			atlasStaticCompactionResourceFallbackSamples: [
+				...(input.worldStore?.atlasStaticCompactionResourceFallbackSamples ??
+					[]),
+			],
 			textureVelocityPartCount: 0,
 			textureVelocityRenderGroupCount: 0,
 			textureVelocityMaterialCount: 0,
@@ -275,6 +293,12 @@ export function createWebgl2RenderMetrics(
 							input.worldStore.atlasStaticCompactionBypassReasonCount,
 						"webgl2-atlas-static-generation-textures":
 							input.worldStore.atlasStaticGenerationTextureCount,
+						"webgl2-atlas-static-compacted-batches":
+							input.worldStore.atlasStaticCompactedBatchCount,
+						"webgl2-atlas-static-compacted-draw-units":
+							input.worldStore.atlasStaticCompactedDrawUnitCount,
+						"webgl2-atlas-static-compacted-draw-slices":
+							input.worldStore.atlasStaticCompactedDrawSliceCount,
 						"webgl2-detail-overlay": input.worldStore.detailTextureCount,
 						...prefixCounts(
 							"webgl2-visible-",

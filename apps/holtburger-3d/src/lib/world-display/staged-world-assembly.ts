@@ -92,6 +92,7 @@ export interface StagedTerrainDrawUnitAssembly {
 export interface StagedStructuredInteriorDrawUnitAssembly {
 	id: string;
 	kind: "structured-interior";
+	owningLandblockId: number;
 	geometry: StagedWorldDrawUnitGeometry;
 	modelMatrix: RenderMat4;
 	material: StagedWorldMaterialPlan;
@@ -519,6 +520,7 @@ export function buildStagedStructuredInteriorDrawUnitAssemblies({
 				{
 					id: drawUnitId,
 					kind: "structured-interior",
+					owningLandblockId: cell.renderChunk.chunkLandblockId,
 					geometry,
 					modelMatrix,
 					material,

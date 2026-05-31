@@ -2788,7 +2788,7 @@ Cleanup targets:
 
 ### Phase M7A: Landblock-Scoped Structured-Interior Direct Compaction
 
-Status: Not started.
+Status: Complete, with terminology cleanup carried forward.
 
 Purpose: extend the proven M7 outdoor static atlas path to structured-interior direct-texture geometry
 without splitting atlas generations by render domain. Atlas entries/generations are material
@@ -2840,6 +2840,83 @@ Decisions:
 - Interior cells use the landblock render origin for batch-local baked geometry. Env-cell local origins
   are not part of the M7A design.
 - Atlas generation is render-domain agnostic for compatible direct RGBA textures.
+- The first M7A implementation broadened the existing planner and resource path instead of creating a
+  separate interior atlas/compaction pipeline. `structured-interior` draw units now carry
+  `owningLandblockId`, can pass the same direct-texture atlas eligibility checks as static draw units,
+  and build into the same landblock-scoped compacted batch resources.
+- The old `non-exterior-domain` planner gate was removed. Scene-domain ownership remains submit-route
+  metadata, not a material atlas eligibility constraint.
+- The current TypeScript symbols and debug metrics still use `atlasStatic*` names. That naming is now
+  legacy terminology for the widened direct atlas-compacted geometry path and should be renamed in a
+  dedicated cleanup pass rather than mixed into the behavior change.
+
+Progress:
+
+- Added structured-interior landblock ownership in staged draw-unit assembly so interior geometry can
+  bake positions relative to the same landblock render origin used by outdoor static batches.
+- Extended atlas compaction planning to accept landblock-owned `static` and `structured-interior`
+  direct-texture draw units. Unsupported draw-unit kinds and missing landblock origins remain staged
+  with explicit bypass reasons.
+- Updated landblock batch planning and compacted-geometry building so structured-interior draw units
+  share the existing atlas generation, material-slot remapping, batch-local position bake, graph-backed
+  batch resource lifecycle, and submit replacement path.
+- Added focused planner, compactor, and WebGL2 resource tests covering structured-interior atlas
+  eligibility, landblock-origin baking, and graph-backed landblock batch creation.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/atlas-static-compaction-planner.test.ts src/lib/world-display/atlas-static-geometry-compactor.test.ts src/lib/world-display/webgl2-world-resources.test.ts`
+- `npm run test:ts -- src/lib/world-display/atlas-static-geometry-compactor.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/atlas-static-compaction-planner.test.ts src/lib/world-display/webgl2-atlas-static-submit.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/staged-world-assembly.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+
+Course corrections:
+
+- M7A did not split overdraw/replacement metrics by outdoor-static versus structured-interior source
+  kind. The aggregate metrics still prove replacement and conservative overdraw; source-kind splits
+  should be added with the terminology cleanup if field captures need them.
+- Route-local replacement and missing-resource staged fallback remain covered by the existing submit
+  tests rather than new structured-interior-specific submit fixtures. Add explicit interior route
+  replacement tests if a field capture shows replacement works in flat/exterior routes but not in the
+  interior scene-domain route.
+
+Immediate cleanup before the next performance phase:
+
+- Rename the widened path from `atlasStatic*` to `atlasCompactedGeometry*` across files, types,
+  resource-store fields, debug metrics, and report labels. Avoid compatibility reexports or alias
+  shims; this is a straight rename of the active WebGL2-only path.
+- After the rename, add optional source-kind counters for compactable, submitted, replaced, and
+  conservative-overdraw triangles so field reports can distinguish outdoor static from
+  structured-interior coverage without reading bypass samples.
+
+### Phase M7B: Atlas Compacted Geometry Terminology Cleanup
+
+Status: Immediate interim phase.
+
+Purpose: remove the misleading `atlas static` terminology from the active direct atlas-compaction
+path now that it covers both outdoor static and structured-interior draw units. This should happen
+before the next performance-focused phase so profiling and field reports describe the pipeline that
+actually exists.
+
+Tasks:
+
+- Rename files, exported types, internal helpers, resource-store fields, and debug/report metric names
+  from `atlasStatic*` / `AtlasStatic*` / "atlas static" to `atlasCompactedGeometry*` /
+  `AtlasCompactedGeometry*` / "atlas compacted geometry" where the concept covers both outdoor
+  static and structured-interior draw units.
+- Keep `static` in names only where the object is specifically a static-renderable source concept,
+  such as `staticObjectKeys` or `staticPartCount`.
+- Update tests and plan references directly. Do not add compatibility reexports, aliases, duplicate
+  metric names, or migration shims.
+- Keep behavior unchanged during the rename except for optional source-kind metric splits if they stay
+  small and help field-debug clarity.
+
+Exit criteria:
+
+- No active WebGL2 atlas-compaction code path presents structured-interior-capable resources as
+  static-only.
+- Existing M7A behavior remains covered by planner, compactor, resource, submit, and report tests.
+- Debug reports use terminology that matches the widened direct atlas-compacted geometry path.
 
 ## Phase M8: Performance Gate and Post-Three Cleanup
 

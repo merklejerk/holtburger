@@ -9,11 +9,18 @@ import type { LegacyMaterialBehaviorDto } from "./material-behavior";
 import type { StagedWorldMaterialAtlasEligibility } from "./staged-world-material-strategy";
 
 describe("atlas static compaction planner", () => {
-	it("plans exterior opaque static direct-texture units into deterministic atlas slices", () => {
+	it("plans landblock-owned opaque direct-texture units into deterministic atlas slices", () => {
 		const plan = planAtlasStaticCompaction({
 			drawUnits: [
 				createCandidate({ id: "static-b", entryKey: "entry-b" }),
-				createCandidate({ id: "static-a", entryKey: "entry-a" }),
+				createCandidate({
+					id: "structured-a",
+					kind: "structured-interior",
+					sceneDomain: "interior",
+					entryKey: "entry-a",
+					staticPartCount: 0,
+					staticObjectKeys: [],
+				}),
 			],
 			policy: {
 				maxAtlasTextureSize: 32,
@@ -23,7 +30,7 @@ describe("atlas static compaction planner", () => {
 			},
 		});
 
-		expect(plan.compactableDrawUnitIds).toEqual(["static-b", "static-a"]);
+		expect(plan.compactableDrawUnitIds).toEqual(["static-b", "structured-a"]);
 		expect(plan.bypasses).toEqual([]);
 		expect(
 			plan.atlasTextures[0]?.placements.map((entry) => entry.atlasEntryKey),
@@ -37,10 +44,10 @@ describe("atlas static compaction planner", () => {
 				atlasTextureIndex: 0,
 				materialTableSlotStart: 0,
 				materialTableSlotCount: 2,
-				drawUnitIds: ["static-a", "static-b"],
+				drawUnitIds: ["static-b", "structured-a"],
 			},
 		]);
-		expect(plan.staticPartCount).toBe(2);
+		expect(plan.staticPartCount).toBe(1);
 		expect(plan.triangleCount).toBe(4);
 		expect(plan.preparedTextureAssetIds).toEqual([
 			"prepared-texture/entry-a",
@@ -51,7 +58,8 @@ describe("atlas static compaction planner", () => {
 	it("keeps unsupported first-slice materials on the staged path with reasons", () => {
 		const plan = planAtlasStaticCompaction({
 			drawUnits: [
-				createCandidate({ id: "interior", sceneDomain: "interior" }),
+				createCandidate({ id: "terrain", kind: "terrain" }),
+				createCandidate({ id: "missing-landblock", owningLandblockId: null }),
 				createCandidate({ id: "indexed", materialKind: "indexed-paletted" }),
 				createCandidate({ id: "detail", hasDetailOverlay: true }),
 				createCandidate({
@@ -70,7 +78,8 @@ describe("atlas static compaction planner", () => {
 
 		expect(plan.compactableDrawUnitIds).toEqual([]);
 		expect(plan.bypasses.map((bypass) => bypass.reason)).toEqual([
-			"non-exterior-domain",
+			"non-static",
+			"missing-landblock-origin",
 			"non-direct-texture",
 			"detail-overlay",
 			"non-opaque-material",
@@ -144,7 +153,10 @@ function createCandidate(
 	return {
 		id: options.id ?? "static",
 		kind: options.kind ?? "static",
-		owningLandblockId: options.owningLandblockId ?? 0x0102ffff,
+		owningLandblockId:
+			options.owningLandblockId === undefined
+				? 0x0102ffff
+				: options.owningLandblockId,
 		sceneDomain: options.sceneDomain ?? "exterior",
 		materialKind: options.materialKind ?? "direct-texture",
 		materialKey: options.materialKey ?? `material-${entryKey}`,

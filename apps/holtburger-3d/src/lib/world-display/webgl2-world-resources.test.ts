@@ -22,7 +22,11 @@ import {
 	createEmptyStaticRenderableSceneModel,
 	type StaticRenderablePart,
 } from "./static-renderables";
-import { createEmptyStructuredInteriorSceneModel } from "./structured-interior-scene";
+import {
+	createEmptyStructuredInteriorSceneModel,
+	type StructuredInteriorCell,
+	type StructuredInteriorSceneModel,
+} from "./structured-interior-scene";
 import { createEmptyTransitionPortalCandidateModel } from "./transition-portal-work-items";
 import {
 	createWebgl2WorldResourceStore,
@@ -447,6 +451,50 @@ describe("webgl2 world resources", () => {
 				.map((candidate) => candidate.nodeKey)
 				.includes(staticBatchGraphNodeKey(removedBatchKey ?? "")),
 		).toBe(true);
+	});
+
+	it("compacts structured-interior direct-texture draw units into landblock atlas batches", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2WorldResourceStore();
+		const graph = new RendererResourceGraph();
+		const materialSurfaceId = 0x08000002;
+		const renderSurfaceId = 0x06000002;
+
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState({
+				materialSurfaceId,
+				renderSurfaceId,
+				compressedAtlasReady: true,
+			}),
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: createStaticRenderableScene([]),
+			structuredInteriorScene: createStructuredInteriorScene([
+				createStructuredInteriorCell({
+					landblockId: 0x12340000,
+					materialSlots: [createMaterialSlot(0, materialSurfaceId)],
+				}),
+			]),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform({ landblockId: 0x12340000 })],
+			rendererResourceGraph: graph,
+		});
+
+		expect(store.structuredInteriorDrawUnitCount).toBe(1);
+		expect(store.atlasStaticCompactableDrawUnitCount).toBe(1);
+		expect(store.atlasStaticCompactionPlan.compactableDrawUnitIds[0]).toContain(
+			"structured-interior",
+		);
+		const batch = sortAtlasBatchesByLandblock(store)[0];
+		expect(batch?.landblockId).toBe(0x12340000);
+		expect(batch?.batchModelMatrix[12]).toBe(10);
+		expect(batch?.drawSlices[0]?.drawUnitIds[0]).toContain(
+			"structured-interior",
+		);
+		expect(store.atlasStaticCompactionBypassSamples).not.toContain(
+			"non-static: draw unit kind structured-interior is not compacted atlas geometry",
+		);
 	});
 
 	it("reuses atlas textures and compacted batch buffers across common re-anchor shifts", () => {
@@ -1273,8 +1321,60 @@ function createTerrainScene() {
 	};
 }
 
-function createStructuredInteriorScene() {
-	return createEmptyStructuredInteriorSceneModel();
+function createStructuredInteriorScene(
+	cells: StructuredInteriorCell[] = [],
+): StructuredInteriorSceneModel {
+	if (cells.length === 0) {
+		return createEmptyStructuredInteriorSceneModel();
+	}
+	return {
+		focusEnvCellId: null,
+		activeEnvCellIds: cells.map((cell) => cell.envCellId),
+		cells,
+		missingEnvCellAssetIds: [],
+		missingInteriorGeometryAssetIds: [],
+		missingCellStructureKeys: [],
+		statusText: "test structured interior",
+		cacheText: "test structured interior cache",
+	};
+}
+
+function createStructuredInteriorCell({
+	landblockId = 0x12340000,
+	envCellId = landblockId | 0x100,
+	materialSlots = [],
+}: {
+	landblockId?: number;
+	envCellId?: number;
+	materialSlots?: readonly ResolvedMaterialSlot[];
+} = {}): StructuredInteriorCell {
+	const landblockKey = `landblock/${landblockId.toString(16).padStart(8, "0")}`;
+	return {
+		renderKey: `interior/env-cell/${envCellId.toString(16).padStart(8, "0")}`,
+		envCellId,
+		regionNumber: 1,
+		renderChunk: {
+			chunkKey: landblockKey,
+			chunkLandblockId: landblockId,
+		},
+		environmentId: 0x0d000001,
+		cellStructureId: 0x0d000001,
+		isFocus: false,
+		chunkLocalPlacement: createPlacement({ x: 1, y: 2, z: 3 }),
+		surfaceIds: [materialSlots[0]?.surfaceId ?? 0],
+		portalCount: 0,
+		portals: [],
+		portalApertures: [],
+		staticObjectCount: 0,
+		cellStructure: null,
+		cellBsp: null,
+		renderGeometry:
+			materialSlots.length > 0
+				? createMaterialSlotGfxGeometry()
+				: createStaticGfxGeometry(),
+		debugColorKey: "interior-test",
+		detailSignature: "detail:none",
+	};
 }
 
 function createTransitionPortalModel() {

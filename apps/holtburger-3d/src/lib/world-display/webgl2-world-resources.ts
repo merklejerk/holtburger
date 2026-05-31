@@ -613,8 +613,7 @@ function createOrReuseWebgl2DrawUnit({
 	const previous = store.drawUnitsById.get(drawUnit.id);
 	if (previous && previous.geometrySignature === geometrySignature) {
 		previous.color = drawUnit.material.color;
-		previous.owningLandblockId =
-			drawUnit.kind === "static" ? drawUnit.owningLandblockId : null;
+		previous.owningLandblockId = resolveAtlasCompactionLandblockId(drawUnit);
 		previous.materialKind = drawUnit.material.kind;
 		previous.materialKey = drawUnit.material.key;
 		previous.submitOrderKey = describeWebgl2DrawUnitSubmitOrderKey(
@@ -730,8 +729,7 @@ function createOrReuseWebgl2DrawUnit({
 	const webgl2DrawUnit = {
 		id: drawUnit.id,
 		kind: drawUnit.kind,
-		owningLandblockId:
-			drawUnit.kind === "static" ? drawUnit.owningLandblockId : null,
+		owningLandblockId: resolveAtlasCompactionLandblockId(drawUnit),
 		geometrySignature,
 		submitOrderKey: describeWebgl2DrawUnitSubmitOrderKey(
 			drawUnit,
@@ -814,6 +812,19 @@ function deriveWebgl2DrawUnitSceneDomain(
 			return drawUnit.renderDomain === WORLD_RENDER_DOMAIN.interiorStatic
 				? "interior"
 				: "exterior";
+		case "portal-mask":
+			return null;
+	}
+}
+
+function resolveAtlasCompactionLandblockId(
+	drawUnit: StagedWorldDrawUnitAssembly,
+): number | null {
+	switch (drawUnit.kind) {
+		case "static":
+		case "structured-interior":
+			return drawUnit.owningLandblockId;
+		case "terrain":
 		case "portal-mask":
 			return null;
 	}
@@ -2085,15 +2096,15 @@ function createAtlasStaticLandblockBatchPlans({
 				`Atlas static compaction plan references missing draw unit ${drawUnitId}.`,
 			);
 		}
-		if (drawUnit.kind !== "static") {
+		if (drawUnit.kind !== "static" && drawUnit.kind !== "structured-interior") {
 			throw new Error(
-				`Atlas static compaction plan references non-static draw unit ${drawUnit.id}.`,
+				`Atlas compacted geometry plan references unsupported draw unit ${drawUnit.id} of kind ${drawUnit.kind}.`,
 			);
 		}
-		const group =
-			drawUnitIdsByLandblockId.get(drawUnit.owningLandblockId) ?? [];
+		const owningLandblockId = drawUnit.owningLandblockId;
+		const group = drawUnitIdsByLandblockId.get(owningLandblockId) ?? [];
 		group.push(drawUnit.id);
-		drawUnitIdsByLandblockId.set(drawUnit.owningLandblockId, group);
+		drawUnitIdsByLandblockId.set(owningLandblockId, group);
 	}
 	return [...drawUnitIdsByLandblockId.entries()]
 		.sort(([left], [right]) => left - right)

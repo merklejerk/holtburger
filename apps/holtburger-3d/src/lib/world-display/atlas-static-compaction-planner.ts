@@ -5,7 +5,7 @@ import type { Webgl2SceneDomain } from "./webgl2-scene-domain-targets";
 
 export type AtlasStaticCompactionBypassReason =
 	| "non-static"
-	| "non-exterior-domain"
+	| "missing-landblock-origin"
 	| "non-direct-texture"
 	| "missing-uv-buffer"
 	| "missing-atlas-eligibility"
@@ -238,17 +238,19 @@ function classifyAtlasStaticCompactionBypass(
 	drawUnit: AtlasStaticCompactionCandidate,
 ): AtlasStaticCompactionBypass | null {
 	if (drawUnit.kind !== "static") {
-		return {
-			drawUnitId: drawUnit.id,
-			reason: "non-static",
-			detail: `draw unit kind ${drawUnit.kind} is not static`,
-		};
+		if (drawUnit.kind !== "structured-interior") {
+			return {
+				drawUnitId: drawUnit.id,
+				reason: "non-static",
+				detail: `draw unit kind ${drawUnit.kind} is not compacted atlas geometry`,
+			};
+		}
 	}
-	if (drawUnit.sceneDomain !== "exterior") {
+	if (drawUnit.owningLandblockId === null) {
 		return {
 			drawUnitId: drawUnit.id,
-			reason: "non-exterior-domain",
-			detail: `draw unit scene domain ${drawUnit.sceneDomain ?? "none"} is not exterior`,
+			reason: "missing-landblock-origin",
+			detail: "atlas compacted geometry draw unit has no owning landblock",
 		};
 	}
 	if (drawUnit.materialKind !== "direct-texture") {
@@ -262,14 +264,14 @@ function classifyAtlasStaticCompactionBypass(
 		return {
 			drawUnitId: drawUnit.id,
 			reason: "missing-uv-buffer",
-			detail: "direct texture static draw unit has no UV buffer",
+			detail: "direct texture atlas compacted geometry draw unit has no UV buffer",
 		};
 	}
 	if (!drawUnit.atlasEligibility) {
 		return {
 			drawUnitId: drawUnit.id,
 			reason: "missing-atlas-eligibility",
-			detail: "direct texture static draw unit has no atlas eligibility",
+			detail: "direct texture atlas compacted geometry draw unit has no atlas eligibility",
 		};
 	}
 	if (drawUnit.hasDetailOverlay) {

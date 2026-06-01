@@ -1,7 +1,10 @@
 import type { RenderMat4 } from "./render-math";
 import type { Webgl2ProgramResource } from "./webgl2-gl";
 import type { Webgl2StateCache } from "./webgl2-state-cache";
-import type { Webgl2BakedGeometryBatchResource } from "./webgl2-baked-geometry-batches";
+import type {
+	Webgl2CompactedGeometryBatchResource,
+	Webgl2RgbaTexturePageFamilyResource,
+} from "./webgl2-compacted-geometry-resources";
 import type { Webgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
 
 export const WEBGL2_BAKED_MAX_MATERIAL_SLOTS = 128;
@@ -34,7 +37,8 @@ export interface Webgl2BakedGeometrySubmitMetrics {
 }
 
 export interface Webgl2BakedGeometrySubmitResources {
-	batches: readonly Webgl2BakedGeometryBatchResource[];
+	batches: readonly Webgl2CompactedGeometryBatchResource[];
+	rgbaTexturePageFamilies: readonly Webgl2RgbaTexturePageFamilyResource[];
 	generation: Webgl2TextureAtlasGenerationResource | null;
 }
 
@@ -74,16 +78,13 @@ export function planWebgl2BakedGeometryReplacement(options: {
 			fallbackSamples: ["baked submit missing baked geometry batches"],
 		};
 	}
-	for (const batch of options.resources.batches) {
-		if (
-			batch.materialSlots.length >
-			WEBGL2_BAKED_MAX_MATERIAL_SLOTS
-		) {
+	for (const family of options.resources.rgbaTexturePageFamilies) {
+		if (family.materialSlots.length > WEBGL2_BAKED_MAX_MATERIAL_SLOTS) {
 			return {
 				replaceableDrawUnitIds: new Set(),
 				noVisibleRouteCount: 0,
 				fallbackSamples: [
-					`baked submit material slots ${batch.materialSlots.length} exceed ${WEBGL2_BAKED_MAX_MATERIAL_SLOTS}`,
+					`baked submit material slots ${family.materialSlots.length} exceed ${WEBGL2_BAKED_MAX_MATERIAL_SLOTS}`,
 				],
 			};
 		}
@@ -91,8 +92,8 @@ export function planWebgl2BakedGeometryReplacement(options: {
 	const visibleIds = new Set(options.visibleDrawUnitIds);
 	const replaceableDrawUnitIds = new Set<string>();
 	let noVisibleRouteCount = 0;
-	for (const batch of options.resources.batches) {
-		const batchVisibleDrawUnitIds = batch.drawSlices.flatMap((slice) =>
+	for (const family of options.resources.rgbaTexturePageFamilies) {
+		const batchVisibleDrawUnitIds = family.drawSlices.flatMap((slice) =>
 			slice.drawUnitIds.filter((drawUnitId) => visibleIds.has(drawUnitId)),
 		);
 		if (batchVisibleDrawUnitIds.length === 0) {
@@ -131,7 +132,8 @@ export function submitWebgl2BakedGeometryBatch({
 	program: Webgl2BakedGeometryWorldProgram;
 	viewProjectionMatrix: RenderMat4;
 	resources: {
-		batches: readonly Webgl2BakedGeometryBatchResource[];
+		batches: readonly Webgl2CompactedGeometryBatchResource[];
+		rgbaTexturePageFamilies: readonly Webgl2RgbaTexturePageFamilyResource[];
 		generation: Webgl2TextureAtlasGenerationResource;
 	};
 	replaceableDrawUnitIds: ReadonlySet<string>;
@@ -166,7 +168,13 @@ export function submitWebgl2BakedGeometryBatch({
 		viewProjectionMatrix,
 	);
 	for (const batch of resources.batches) {
-		const visibleSlices = batch.drawSlices.filter((slice) =>
+		const family = resources.rgbaTexturePageFamilies.find(
+			(candidate) => candidate.geometryBatchKey === batch.key,
+		);
+		if (!family) {
+			continue;
+		}
+		const visibleSlices = family.drawSlices.filter((slice) =>
 			slice.drawUnitIds.some((drawUnitId) =>
 				replaceableDrawUnitIds.has(drawUnitId),
 			),
@@ -180,7 +188,7 @@ export function submitWebgl2BakedGeometryBatch({
 			false,
 			batch.batchModelMatrix,
 		);
-		uploadBakedGeometryMaterialRects(gl, program, batch);
+		uploadBakedGeometryMaterialRects(gl, program, family);
 		if (stateCache.bindVertexArray(batch.vertexArray.vertexArray)) {
 			metrics.shaderDrawCallCount += 0;
 		}
@@ -243,24 +251,14 @@ export function submitWebgl2BakedGeometryBatch({
 function uploadBakedGeometryMaterialRects(
 	gl: WebGL2RenderingContext,
 	program: Webgl2BakedGeometryWorldProgram,
-	batch: Webgl2BakedGeometryBatchResource,
+	family: Webgl2RgbaTexturePageFamilyResource,
 ): void {
-	const rects = new Float32Array(
-		WEBGL2_BAKED_MAX_MATERIAL_SLOTS * 4,
-	);
-	const detailRects = new Float32Array(
-		WEBGL2_BAKED_MAX_MATERIAL_SLOTS * 4,
-	);
-	const wrapModes = new Int32Array(
-		WEBGL2_BAKED_MAX_MATERIAL_SLOTS * 2,
-	);
-	const detailTilings = new Float32Array(
-		WEBGL2_BAKED_MAX_MATERIAL_SLOTS,
-	);
-	const detailEnabled = new Int32Array(
-		WEBGL2_BAKED_MAX_MATERIAL_SLOTS,
-	);
-	for (const slot of batch.materialSlots) {
+	const rects = new Float32Array(WEBGL2_BAKED_MAX_MATERIAL_SLOTS * 4);
+	const detailRects = new Float32Array(WEBGL2_BAKED_MAX_MATERIAL_SLOTS * 4);
+	const wrapModes = new Int32Array(WEBGL2_BAKED_MAX_MATERIAL_SLOTS * 2);
+	const detailTilings = new Float32Array(WEBGL2_BAKED_MAX_MATERIAL_SLOTS);
+	const detailEnabled = new Int32Array(WEBGL2_BAKED_MAX_MATERIAL_SLOTS);
+	for (const slot of family.materialSlots) {
 		rects.set(slot.atlasRect, slot.index * 4);
 		wrapModes.set(
 			[slot.wrapS === "repeat" ? 1 : 0, slot.wrapT === "repeat" ? 1 : 0],

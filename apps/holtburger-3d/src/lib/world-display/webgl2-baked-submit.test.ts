@@ -6,7 +6,10 @@ import {
 	submitWebgl2BakedGeometryBatch,
 	type Webgl2BakedGeometryWorldProgram,
 } from "./webgl2-baked-submit";
-import type { Webgl2BakedGeometryBatchResource } from "./webgl2-baked-geometry-batches";
+import type {
+	Webgl2CompactedGeometryBatchResource,
+	Webgl2RgbaTexturePageFamilyResource,
+} from "./webgl2-compacted-geometry-resources";
 import type { Webgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
 import { Webgl2StateCache } from "./webgl2-state-cache";
 
@@ -16,6 +19,7 @@ describe("planWebgl2BakedGeometryReplacement", () => {
 			visibleDrawUnitIds: ["draw-a"],
 			resources: {
 				batches: [],
+				rgbaTexturePageFamilies: [],
 				generation: null,
 			},
 		});
@@ -32,6 +36,7 @@ describe("planWebgl2BakedGeometryReplacement", () => {
 			visibleDrawUnitIds: ["draw-a", "staged-only"],
 			resources: {
 				batches: [createBatch(["draw-a", "draw-b"])],
+				rgbaTexturePageFamilies: [createFamily(["draw-a", "draw-b"])],
 				generation: createGeneration(),
 			},
 		});
@@ -46,6 +51,7 @@ describe("planWebgl2BakedGeometryReplacement", () => {
 			visibleDrawUnitIds: ["staged-only"],
 			resources: {
 				batches: [createBatch(["draw-a"])],
+				rgbaTexturePageFamilies: [createFamily(["draw-a"])],
 				generation: createGeneration(),
 			},
 		});
@@ -63,6 +69,10 @@ describe("planWebgl2BakedGeometryReplacement", () => {
 					createBatch(["landblock-a"], 0x0102ffff),
 					createBatch(["landblock-b"], 0x0103ffff),
 				],
+				rgbaTexturePageFamilies: [
+					createFamily(["landblock-a"]),
+					createFamily(["landblock-b"]),
+				],
 				generation: createGeneration(),
 			},
 		});
@@ -76,9 +86,10 @@ describe("planWebgl2BakedGeometryReplacement", () => {
 		const plan = planWebgl2BakedGeometryReplacement({
 			visibleDrawUnitIds: ["draw-a"],
 			resources: {
-				batches: [
+				batches: [createBatch(["draw-a"])],
+				rgbaTexturePageFamilies: [
 					{
-						...createBatch(["draw-a"]),
+						...createFamily(["draw-a"]),
 						materialSlots: Array.from(
 							{ length: WEBGL2_BAKED_MAX_MATERIAL_SLOTS + 1 },
 							(_, index) => ({
@@ -116,7 +127,11 @@ describe("planWebgl2BakedGeometryReplacement", () => {
 			stateCache: new Webgl2StateCache(gl),
 			program: createProgram(),
 			viewProjectionMatrix: new Float32Array(16),
-			resources: { batches: [batch], generation },
+			resources: {
+				batches: [batch],
+				rgbaTexturePageFamilies: [createFamily(["draw-a"])],
+				generation,
+			},
 			replaceableDrawUnitIds: new Set(["draw-a"]),
 			retainedDrawUnitCount: 3,
 		});
@@ -142,9 +157,7 @@ describe("planWebgl2BakedGeometryReplacement", () => {
 
 	it("binds a detail atlas page when the visible baked slice requires detail", () => {
 		const gl = new FakeAtlasSubmitGl();
-		const batch = createBatch(["draw-a"], 0x0102ffff, {
-			detailAtlasTextureIndex: 0,
-		});
+		const batch = createBatch(["draw-a"], 0x0102ffff);
 
 		const metrics = submitWebgl2BakedGeometryBatch({
 			gl: gl.asContext(),
@@ -153,6 +166,11 @@ describe("planWebgl2BakedGeometryReplacement", () => {
 			viewProjectionMatrix: new Float32Array(16),
 			resources: {
 				batches: [batch],
+				rgbaTexturePageFamilies: [
+					createFamily(["draw-a"], {
+						detailAtlasTextureIndex: 0,
+					}),
+				],
 				generation: createGeneration({ detail: true }),
 			},
 			replaceableDrawUnitIds: new Set(["draw-a"]),
@@ -169,8 +187,7 @@ describe("planWebgl2BakedGeometryReplacement", () => {
 function createBatch(
 	drawUnitIds: readonly string[],
 	landblockId = 0x0102ffff,
-	options: { detailAtlasTextureIndex?: number | null } = {},
-): Webgl2BakedGeometryBatchResource {
+): Webgl2CompactedGeometryBatchResource {
 	return {
 		key: "batch",
 		landblockId,
@@ -185,6 +202,31 @@ function createBatch(
 		materialSlotBuffer: null as never,
 		indexBuffer: null as never,
 		indexType: 5123,
+		batchModelMatrix: new Float32Array(16),
+		vertexCount: 3,
+		indexCount: 3,
+		triangleCount: 1,
+		drawSliceCount: 1,
+		drawUnitCount: drawUnitIds.length,
+		positionByteLength: 36,
+		uvByteLength: 24,
+		materialSlotByteLength: 12,
+		indexByteLength: 6,
+		totalByteLength: 78,
+		dispose() {
+			return;
+		},
+	};
+}
+
+function createFamily(
+	drawUnitIds: readonly string[],
+	options: { detailAtlasTextureIndex?: number | null } = {},
+): Webgl2RgbaTexturePageFamilyResource {
+	return {
+		family: "rgba-texture-page",
+		key: "rgba-texture-page|batch",
+		geometryBatchKey: "batch",
 		materialSlots: [
 			{
 				key: "material-slot",
@@ -200,7 +242,6 @@ function createBatch(
 				wrapT: "clamp",
 			},
 		],
-		batchModelMatrix: new Float32Array(16),
 		drawSlices: [
 			{
 				key: "slice",
@@ -213,19 +254,6 @@ function createBatch(
 				materialSlotKeys: ["material-slot"],
 			},
 		],
-		vertexCount: 3,
-		indexCount: 3,
-		triangleCount: 1,
-		drawSliceCount: 1,
-		drawUnitCount: drawUnitIds.length,
-		positionByteLength: 36,
-		uvByteLength: 24,
-		materialSlotByteLength: 12,
-		indexByteLength: 6,
-		totalByteLength: 78,
-		dispose() {
-			return;
-		},
 	};
 }
 

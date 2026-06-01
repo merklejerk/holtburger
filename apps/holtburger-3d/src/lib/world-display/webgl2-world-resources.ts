@@ -84,12 +84,14 @@ import {
 	type Webgl2TextureAtlasGenerationResource,
 } from "./webgl2-texture-atlas-generation";
 import {
-	createWebgl2BakedIndexedGeometryBatchResource,
-	createWebgl2BakedGeometryBatchResource,
-	updateWebgl2BakedGeometryBatchDynamicTables,
-	type Webgl2BakedIndexedGeometryBatchResource,
-	type Webgl2BakedGeometryBatchResource,
-} from "./webgl2-baked-geometry-batches";
+	compactedFamilyResourceKey,
+	createWebgl2CompactedGeometryBatchResource,
+	createWebgl2IndexedPalettedFamilyResource,
+	createWebgl2RgbaTexturePageFamilyResource,
+	updateWebgl2CompactedGeometryBatchDynamicTables,
+	type Webgl2CompactedGeometryFamilyResource,
+	type Webgl2CompactedGeometryBatchResource,
+} from "./webgl2-compacted-geometry-resources";
 import type {
 	TerrainBlendPlan,
 	TerrainBlendTextureRef,
@@ -166,14 +168,10 @@ export interface Webgl2WorldResourceStore {
 	textureAtlasGeneration: Webgl2TextureAtlasGenerationResource | null;
 	textureAtlasGenerationGraph: RendererResourceGraph | null;
 	textureAtlasGenerationGraphLease: RendererResourceGraphLease | null;
-	bakedGeometryBatches: Map<string, Webgl2BakedGeometryBatchResource>;
-	// Temporary migration debt: indexed compacted geometry must not grow as a
-	// durable sibling of the RGBA baked batch map. The replacement plan should
-	// collapse both into one compacted geometry resource lifecycle plus
-	// family-owned material payloads.
-	bakedIndexedGeometryBatches: Map<
+	compactedGeometryBatches: Map<string, Webgl2CompactedGeometryBatchResource>;
+	compactedGeometryFamilyResources: Map<
 		string,
-		Webgl2BakedIndexedGeometryBatchResource
+		Webgl2CompactedGeometryFamilyResource
 	>;
 	bakedGeometryBatchGraph: RendererResourceGraph | null;
 	bakedGeometryBatchGraphLeasesByKey: Map<string, RendererResourceGraphLease>;
@@ -291,8 +289,8 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		textureAtlasGeneration: null,
 		textureAtlasGenerationGraph: null,
 		textureAtlasGenerationGraphLease: null,
-		bakedGeometryBatches: new Map(),
-		bakedIndexedGeometryBatches: new Map(),
+		compactedGeometryBatches: new Map(),
+		compactedGeometryFamilyResources: new Map(),
 		bakedGeometryBatchGraph: null,
 		bakedGeometryBatchGraphLeasesByKey: new Map(),
 		bakedCandidateDrawUnitCount: 0,
@@ -563,20 +561,13 @@ export function syncWebgl2WorldResources({
 		records: assembly.graphRecords,
 		retainedDrawUnitIds,
 	});
-	syncWebgl2BakedGeometryBatch({
+	syncWebgl2CompactedGeometryResources({
 		gl,
 		store,
 		plan: store.bakedRenderablePlan,
 		drawUnits: assembly.drawUnits,
 		renderChunkTransforms,
 		rendererResourceGraph,
-	});
-	syncWebgl2BakedIndexedGeometryBatch({
-		gl,
-		store,
-		plan: store.bakedRenderablePlan,
-		drawUnits: assembly.drawUnits,
-		renderChunkTransforms,
 	});
 }
 
@@ -622,14 +613,11 @@ export function destroyWebgl2WorldResources(
 	store.bakedRenderablePlan = createEmptyBakedRenderablePlan();
 	store.textureAtlasGeneration?.dispose();
 	store.textureAtlasGeneration = null;
-	for (const batch of store.bakedGeometryBatches.values()) {
+	for (const batch of store.compactedGeometryBatches.values()) {
 		batch.dispose();
 	}
-	store.bakedGeometryBatches.clear();
-	for (const batch of store.bakedIndexedGeometryBatches.values()) {
-		batch.dispose();
-	}
-	store.bakedIndexedGeometryBatches.clear();
+	store.compactedGeometryBatches.clear();
+	store.compactedGeometryFamilyResources.clear();
 	store.bakedCandidateDrawUnitCount = 0;
 	store.bakedBypassReasonCount = 0;
 	store.bakedBypassSamples = [];
@@ -2216,7 +2204,7 @@ function releaseWebgl2TextureAtlasGenerationGraphLease(
 	store.textureAtlasGenerationGraph = null;
 }
 
-function syncWebgl2BakedGeometryBatch({
+function syncWebgl2CompactedGeometryResources({
 	gl,
 	store,
 	plan,
@@ -2238,78 +2226,121 @@ function syncWebgl2BakedGeometryBatch({
 		releaseWebgl2BakedGeometryBatchGraphLeases(store);
 	}
 	store.bakedResourceFallbackSamples = [];
-	if (plan.submitFamilies.rgbaAtlas.compactableDrawUnitIds.length === 0) {
-		disposeWebgl2BakedGeometryBatch(store);
-		return;
-	}
-	if (!store.textureAtlasGeneration) {
+	const retainedGeometryBatchKeys = new Set<string>();
+	const retainedFamilyResourceKeys = new Set<string>();
+	if (
+		plan.submitFamilies.rgbaAtlas.compactableDrawUnitIds.length > 0 &&
+		!store.textureAtlasGeneration
+	) {
 		store.bakedResourceFallbackSamples = [
-			`baked batch ${plan.key} waiting for texture atlas generation`,
+			`compacted batch ${plan.key} waiting for texture atlas generation`,
 		];
-		disposeWebgl2BakedGeometryBatch(store);
-		return;
 	}
-	const batchPlans = createBakedGeometryLandblockBatchPlans({
-		plan,
-		drawUnits,
-		renderChunkTransforms,
-	});
-	if (batchPlans.length === 0) {
-		store.bakedResourceFallbackSamples = [
-			`baked batch ${plan.key} produced no compacted geometry`,
-		];
-		disposeWebgl2BakedGeometryBatch(store);
-		return;
-	}
-	const retainedBatchKeys = new Set<string>();
-	const placementsByEntryKey = createTextureAtlasPlacementsByEntryKey(plan);
-	const detailPlacementsByEntryKey =
-		createDetailTextureAtlasPlacementsByEntryKey(plan);
-	for (const batchPlan of batchPlans) {
-		const geometry = profileBrowserJsScope(
-			"webgl2.resource.buildCompactedGeometryBatch",
-			() =>
-				buildCompactedGeometryBatch({
-					plan: batchPlan.plan,
-					drawUnits,
-					batchOrigin: batchPlan.batchOrigin,
-				}),
-		);
-		if (!geometry) {
-			continue;
+	if (
+		plan.submitFamilies.rgbaAtlas.compactableDrawUnitIds.length > 0 &&
+		store.textureAtlasGeneration
+	) {
+		const batchPlans = createBakedGeometryLandblockBatchPlans({
+			plan,
+			drawUnits,
+			renderChunkTransforms,
+		});
+		if (batchPlans.length === 0) {
+			store.bakedResourceFallbackSamples = [
+				`compacted batch ${plan.key} produced no RGBA texture-page geometry`,
+			];
 		}
-		retainedBatchKeys.add(geometry.key);
-		const previousBatch = store.bakedGeometryBatches.get(geometry.key);
-		if (!previousBatch) {
-			const nextBatch = profileBrowserJsScope(
-				"webgl2.resource.createBakedGeometryBatch",
+		const placementsByEntryKey = createTextureAtlasPlacementsByEntryKey(plan);
+		const detailPlacementsByEntryKey =
+			createDetailTextureAtlasPlacementsByEntryKey(plan);
+		for (const batchPlan of batchPlans) {
+			const geometry = profileBrowserJsScope(
+				"webgl2.resource.buildCompactedGeometryBatch",
 				() =>
-					createWebgl2BakedGeometryBatchResource({
-						gl,
-						geometry,
-						landblockId: batchPlan.landblockId,
-						materialSlots: batchPlan.plan.materialSlots,
-						materialDrawSlices: batchPlan.plan.drawSlices,
-						placementsByEntryKey,
-						detailPlacementsByEntryKey,
+					buildCompactedGeometryBatch({
+						plan: batchPlan.plan,
+						drawUnits,
+						batchOrigin: batchPlan.batchOrigin,
 					}),
 			);
-			store.bakedGeometryBatches.set(nextBatch.key, nextBatch);
-		} else {
-			updateWebgl2BakedGeometryBatchDynamicTables(previousBatch, geometry);
+			if (!geometry) {
+				continue;
+			}
+			retainWebgl2CompactedGeometryBatch({
+				gl,
+				store,
+				geometry,
+				landblockId: batchPlan.landblockId,
+				retainedGeometryBatchKeys,
+			});
+			const familyResource = createWebgl2RgbaTexturePageFamilyResource({
+				geometry,
+				materialSlots: batchPlan.plan.materialSlots,
+				materialDrawSlices: batchPlan.plan.drawSlices,
+				placementsByEntryKey,
+				detailPlacementsByEntryKey,
+			});
+			retainedFamilyResourceKeys.add(familyResource.key);
+			store.compactedGeometryFamilyResources.set(
+				familyResource.key,
+				familyResource,
+			);
 		}
 	}
-	for (const [batchKey, batch] of store.bakedGeometryBatches) {
-		if (!retainedBatchKeys.has(batchKey)) {
+	if (plan.submitFamilies.indexedPaletted.compactableDrawUnitIds.length > 0) {
+		const batchPlans = createBakedIndexedGeometryLandblockBatchPlans({
+			plan,
+			drawUnits,
+			renderChunkTransforms,
+		});
+		for (const batchPlan of batchPlans) {
+			const geometry = profileBrowserJsScope(
+				"webgl2.resource.buildCompactedIndexedGeometryBatch",
+				() =>
+					buildCompactedGeometryBatch({
+						plan: batchPlan.plan,
+						drawUnits,
+						batchOrigin: batchPlan.batchOrigin,
+					}),
+			);
+			if (!geometry) {
+				continue;
+			}
+			retainWebgl2CompactedGeometryBatch({
+				gl,
+				store,
+				geometry,
+				landblockId: batchPlan.landblockId,
+				retainedGeometryBatchKeys,
+			});
+			const familyResource = createWebgl2IndexedPalettedFamilyResource({
+				geometry,
+				materialTableRecords: batchPlan.materialTableRecords,
+				materialDrawSlices: batchPlan.plan.drawSlices,
+			});
+			retainedFamilyResourceKeys.add(familyResource.key);
+			store.compactedGeometryFamilyResources.set(
+				familyResource.key,
+				familyResource,
+			);
+		}
+	}
+	for (const familyKey of store.compactedGeometryFamilyResources.keys()) {
+		if (!retainedFamilyResourceKeys.has(familyKey)) {
+			store.compactedGeometryFamilyResources.delete(familyKey);
+		}
+	}
+	for (const [batchKey, batch] of store.compactedGeometryBatches) {
+		if (!retainedGeometryBatchKeys.has(batchKey)) {
 			batch.dispose();
-			store.bakedGeometryBatches.delete(batchKey);
+			store.compactedGeometryBatches.delete(batchKey);
 			releaseWebgl2BakedGeometryBatchGraphLease(
 				store,
 				staticBatchGraphNodeKey(batchKey),
 			);
 		}
 	}
-	store.bakedGeometryBatchCount = store.bakedGeometryBatches.size;
+	store.bakedGeometryBatchCount = store.compactedGeometryBatches.size;
 	store.bakedGeometryDrawUnitCount = sumBakedGeometryBatches(
 		store,
 		(batch) => batch.drawUnitCount,
@@ -2337,14 +2368,14 @@ function syncWebgl2BakedGeometryBatch({
 		store,
 		(batch) => batch.drawSliceCount,
 	);
-	store.bakedGeometryBatchOriginCount = store.bakedGeometryBatches.size;
+	store.bakedGeometryBatchOriginCount = store.compactedGeometryBatches.size;
 	store.bakedGeometryTransformTableEntryCount = 0;
-	if (!rendererResourceGraph || store.bakedGeometryBatches.size === 0) {
+	if (!rendererResourceGraph || store.compactedGeometryBatches.size === 0) {
 		releaseWebgl2BakedGeometryBatchGraphLeases(store);
 		return;
 	}
 	store.bakedGeometryBatchGraph = rendererResourceGraph;
-	for (const batch of store.bakedGeometryBatches.values()) {
+	for (const batch of store.compactedGeometryBatches.values()) {
 		const batchNodeKey = staticBatchGraphNodeKey(batch.key);
 		if (store.bakedGeometryBatchGraphLeasesByKey.has(batchNodeKey)) {
 			continue;
@@ -2352,7 +2383,10 @@ function syncWebgl2BakedGeometryBatch({
 		upsertWebgl2BakedGeometryBatchGraph({
 			graph: rendererResourceGraph,
 			batch,
-			atlasGenerationKey: store.textureAtlasGeneration.key,
+			familyResources: [
+				...store.compactedGeometryFamilyResources.values(),
+			].filter((resource) => resource.geometryBatchKey === batch.key),
+			atlasGenerationKey: store.textureAtlasGeneration?.key ?? null,
 		});
 		store.bakedGeometryBatchGraphLeasesByKey.set(
 			batchNodeKey,
@@ -2364,19 +2398,56 @@ function syncWebgl2BakedGeometryBatch({
 	}
 }
 
+function retainWebgl2CompactedGeometryBatch({
+	gl,
+	store,
+	geometry,
+	landblockId,
+	retainedGeometryBatchKeys,
+}: {
+	gl: WebGL2RenderingContext;
+	store: Webgl2WorldResourceStore;
+	geometry: NonNullable<ReturnType<typeof buildCompactedGeometryBatch>>;
+	landblockId: number;
+	retainedGeometryBatchKeys: Set<string>;
+}): void {
+	retainedGeometryBatchKeys.add(geometry.key);
+	const previousBatch = store.compactedGeometryBatches.get(geometry.key);
+	if (!previousBatch) {
+		const nextBatch = profileBrowserJsScope(
+			"webgl2.resource.createCompactedGeometryBatch",
+			() =>
+				createWebgl2CompactedGeometryBatchResource({
+					gl,
+					geometry,
+					landblockId,
+				}),
+		);
+		store.compactedGeometryBatches.set(nextBatch.key, nextBatch);
+		return;
+	}
+	updateWebgl2CompactedGeometryBatchDynamicTables(previousBatch, geometry);
+}
+
 function upsertWebgl2BakedGeometryBatchGraph({
 	graph,
 	batch,
+	familyResources,
 	atlasGenerationKey,
 }: {
 	graph: RendererResourceGraph;
-	batch: Webgl2BakedGeometryBatchResource;
-	atlasGenerationKey: string;
+	batch: Webgl2CompactedGeometryBatchResource;
+	familyResources: readonly Webgl2CompactedGeometryFamilyResource[];
+	atlasGenerationKey: string | null;
 }): void {
 	const batchNodeKey = staticBatchGraphNodeKey(batch.key);
-	const atlasNodeKey = atlasGenerationGraphNodeKey(atlasGenerationKey);
+	const atlasNodeKey = atlasGenerationKey
+		? atlasGenerationGraphNodeKey(atlasGenerationKey)
+		: null;
 	const sceneNodeKeys = uniqueSortedStrings(
-		batch.drawSlices.flatMap((slice) => slice.drawUnitIds),
+		familyResources.flatMap((resource) =>
+			resource.drawSlices.flatMap((slice) => slice.drawUnitIds),
+		),
 	).map(sceneObjectGraphNodeKey);
 	graph.applyBatchUpdate({
 		nodes: [
@@ -2396,73 +2467,13 @@ function upsertWebgl2BakedGeometryBatchGraph({
 		dependencyReplacements: [
 			{
 				nodeKey: batchNodeKey,
-				dependencyKeys: [atlasNodeKey, ...sceneNodeKeys],
+				dependencyKeys: [
+					...(atlasNodeKey ? [atlasNodeKey] : []),
+					...sceneNodeKeys,
+				],
 			},
 		],
 	});
-}
-
-function syncWebgl2BakedIndexedGeometryBatch({
-	gl,
-	store,
-	plan,
-	drawUnits,
-	renderChunkTransforms,
-}: {
-	gl: WebGL2RenderingContext;
-	store: Webgl2WorldResourceStore;
-	plan: BakedRenderablePlan;
-	drawUnits: readonly StagedWorldDrawUnitAssembly[];
-	renderChunkTransforms: readonly RenderChunkTransform[];
-}): void {
-	if (plan.submitFamilies.indexedPaletted.compactableDrawUnitIds.length === 0) {
-		disposeWebgl2BakedIndexedGeometryBatch(store);
-		return;
-	}
-	const batchPlans = createBakedIndexedGeometryLandblockBatchPlans({
-		plan,
-		drawUnits,
-		renderChunkTransforms,
-	});
-	const retainedBatchKeys = new Set<string>();
-	for (const batchPlan of batchPlans) {
-		const geometry = profileBrowserJsScope(
-			"webgl2.resource.buildBakedIndexedGeometry",
-			() =>
-				buildCompactedGeometryBatch({
-					plan: batchPlan.plan,
-					drawUnits,
-					batchOrigin: batchPlan.batchOrigin,
-				}),
-		);
-		if (!geometry) {
-			continue;
-		}
-		retainedBatchKeys.add(geometry.key);
-		const previousBatch = store.bakedIndexedGeometryBatches.get(geometry.key);
-		if (!previousBatch) {
-			const nextBatch = profileBrowserJsScope(
-				"webgl2.resource.createBakedIndexedGeometryBatch",
-				() =>
-					createWebgl2BakedIndexedGeometryBatchResource({
-						gl,
-						geometry,
-						landblockId: batchPlan.landblockId,
-						materialTableRecords: batchPlan.materialTableRecords,
-						materialDrawSlices: batchPlan.plan.drawSlices,
-					}),
-			);
-			store.bakedIndexedGeometryBatches.set(nextBatch.key, nextBatch);
-		} else {
-			updateWebgl2BakedGeometryBatchDynamicTables(previousBatch, geometry);
-		}
-	}
-	for (const [batchKey, batch] of store.bakedIndexedGeometryBatches) {
-		if (!retainedBatchKeys.has(batchKey)) {
-			batch.dispose();
-			store.bakedIndexedGeometryBatches.delete(batchKey);
-		}
-	}
 }
 
 function createBakedIndexedGeometryLandblockBatchPlans({
@@ -2503,12 +2514,12 @@ function createBakedIndexedGeometryLandblockBatchPlans({
 		const drawUnit = drawUnitById.get(drawUnitId);
 		if (!drawUnit) {
 			throw new Error(
-				`Baked indexed geometry plan references missing draw unit ${drawUnitId}.`,
+				`Indexed-paletted family plan references missing draw unit ${drawUnitId}.`,
 			);
 		}
 		if (drawUnit.kind !== "static" && drawUnit.kind !== "structured-interior") {
 			throw new Error(
-				`Baked indexed geometry plan references unsupported draw unit ${drawUnit.id} of kind ${drawUnit.kind}.`,
+				`Indexed-paletted family plan references unsupported draw unit ${drawUnit.id} of kind ${drawUnit.kind}.`,
 			);
 		}
 		const group =
@@ -2522,7 +2533,7 @@ function createBakedIndexedGeometryLandblockBatchPlans({
 			const batchOrigin = chunkOffsetByLandblockId.get(landblockId);
 			if (!batchOrigin) {
 				throw new Error(
-					`Baked indexed geometry landblock batch ${formatHex32(landblockId)} has no render chunk origin.`,
+					`Indexed-paletted family landblock batch ${formatHex32(landblockId)} has no render chunk origin.`,
 				);
 			}
 			return {
@@ -2570,7 +2581,7 @@ function createBakedIndexedGeometryLandblockBatchPlan({
 		const drawUnit = drawUnitById.get(drawUnitId);
 		if (!drawUnit) {
 			throw new Error(
-				`Baked indexed geometry landblock batch ${formatHex32(landblockId)} references missing draw unit ${drawUnitId}.`,
+				`Indexed-paletted family landblock batch ${formatHex32(landblockId)} references missing draw unit ${drawUnitId}.`,
 			);
 		}
 		return drawUnit;
@@ -2589,7 +2600,7 @@ function createBakedIndexedGeometryLandblockBatchPlan({
 			const slotKey = sourceSlotKeyByDrawUnitId.get(drawUnitId);
 			if (!slotKey) {
 				throw new Error(
-					`Baked indexed geometry landblock batch ${formatHex32(landblockId)} draw unit ${drawUnitId} has no explicit material slot mapping.`,
+					`Indexed-paletted family landblock batch ${formatHex32(landblockId)} draw unit ${drawUnitId} has no explicit material slot mapping.`,
 				);
 			}
 			return slotKey;
@@ -2599,7 +2610,7 @@ function createBakedIndexedGeometryLandblockBatchPlan({
 		const record = sourceRecordByKey.get(recordKey);
 		if (!record) {
 			throw new Error(
-				`Baked indexed geometry landblock batch ${formatHex32(landblockId)} references missing material record ${recordKey}.`,
+				`Indexed-paletted family landblock batch ${formatHex32(landblockId)} references missing material record ${recordKey}.`,
 			);
 		}
 		return record;
@@ -2619,7 +2630,7 @@ function createBakedIndexedGeometryLandblockBatchPlan({
 				const index = localSlotIndexByKey.get(slotKey);
 				if (index === undefined) {
 					throw new Error(
-						`Baked indexed geometry landblock batch ${formatHex32(landblockId)} could not remap material slot ${slotKey}.`,
+						`Indexed-paletted family landblock batch ${formatHex32(landblockId)} could not remap material slot ${slotKey}.`,
 					);
 				}
 				return index;
@@ -2882,9 +2893,9 @@ function createBakedGeometryLandblockBatchPlan({
 
 function sumBakedGeometryBatches(
 	store: Webgl2WorldResourceStore,
-	select: (batch: Webgl2BakedGeometryBatchResource) => number,
+	select: (batch: Webgl2CompactedGeometryBatchResource) => number,
 ): number {
-	return [...store.bakedGeometryBatches.values()].reduce(
+	return [...store.compactedGeometryBatches.values()].reduce(
 		(total, batch) => total + select(batch),
 		0,
 	);
@@ -2893,10 +2904,11 @@ function sumBakedGeometryBatches(
 function disposeWebgl2BakedGeometryBatch(
 	store: Webgl2WorldResourceStore,
 ): void {
-	for (const batch of store.bakedGeometryBatches.values()) {
+	for (const batch of store.compactedGeometryBatches.values()) {
 		batch.dispose();
 	}
-	store.bakedGeometryBatches.clear();
+	store.compactedGeometryBatches.clear();
+	store.compactedGeometryFamilyResources.clear();
 	store.bakedGeometryBatchCount = 0;
 	store.bakedGeometryDrawUnitCount = 0;
 	store.bakedGeometryTriangleCount = 0;
@@ -2907,15 +2919,6 @@ function disposeWebgl2BakedGeometryBatch(
 	store.bakedGeometryBatchOriginCount = 0;
 	store.bakedGeometryTransformTableEntryCount = 0;
 	releaseWebgl2BakedGeometryBatchGraphLeases(store);
-}
-
-function disposeWebgl2BakedIndexedGeometryBatch(
-	store: Webgl2WorldResourceStore,
-): void {
-	for (const batch of store.bakedIndexedGeometryBatches.values()) {
-		batch.dispose();
-	}
-	store.bakedIndexedGeometryBatches.clear();
 }
 
 function releaseWebgl2BakedGeometryBatchGraphLease(

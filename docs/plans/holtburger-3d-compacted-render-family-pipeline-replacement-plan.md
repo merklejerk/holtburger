@@ -920,7 +920,7 @@ Course corrections:
 
 Discovered debt and cleanup targets:
 
-- `webgl2-baked-geometry-batches.ts` now contains the intended split in miniature: neutral compacted
+- `webgl2-compacted-geometry-resources.ts` now contains the intended split in miniature: neutral compacted
   buffers plus temporary RGBA/indexed family payload reattachment. C5 should turn this into the
   authoritative compacted geometry resource plus family-resource maps, then rename the module.
 - `syncWebgl2BakedGeometryBatch()` and `syncWebgl2BakedIndexedGeometryBatch()` both build neutral
@@ -933,7 +933,7 @@ Discovered debt and cleanup targets:
 Legacy shims introduced:
 
 - No import reexport shim was introduced for `baked-geometry.ts`.
-- Temporary family slice reattachment helpers in `webgl2-baked-geometry-batches.ts` are migration
+- Temporary family slice reattachment helpers in `webgl2-compacted-geometry-resources.ts` are migration
   scaffolding. Their deletion target is C5, where family payloads become first-class resources rather
   than fields on baked-named batch resources.
 
@@ -951,7 +951,7 @@ Exit criteria:
 
 ## Phase C5: Collapse Family Resource Storage
 
-Status: Planned.
+Status: Complete.
 
 Purpose: replace parallel RGBA and indexed compacted resource maps with one compacted geometry
 resource store and family pipeline resource payloads.
@@ -973,6 +973,77 @@ Tasks:
   shape blocks sharing between direct and compacted family planning.
 - Ensure resource disposal and renderer graph retention operate on compacted geometry plus family
   resources without duplicated cleanup paths.
+
+Progress:
+
+- Renamed `webgl2-baked-geometry-batches.ts` to `webgl2-compacted-geometry-resources.ts` without a
+  compatibility reexport.
+- Replaced the parallel resource maps:
+  - removed `bakedGeometryBatches`;
+  - removed `bakedIndexedGeometryBatches`;
+  - added `compactedGeometryBatches`;
+  - added `compactedGeometryFamilyResources`.
+- Split WebGL resources into:
+  - `Webgl2CompactedGeometryBatchResource`, which owns only VAO/VBO/IBO buffers, index type, batch
+    model matrix, and geometry byte/count metrics;
+  - `Webgl2RgbaTexturePageFamilyResource`, keyed by `rgba-texture-page|geometryBatchKey`, which owns
+    RGBA material slots and RGBA family draw-slice payloads;
+  - `Webgl2IndexedPalettedFamilyResource`, keyed by `indexed-paletted|geometryBatchKey`, which owns
+    indexed material table records and indexed family draw-slice payloads.
+- Collapsed `syncWebgl2BakedGeometryBatch()` and `syncWebgl2BakedIndexedGeometryBatch()` into one
+  `syncWebgl2CompactedGeometryResources()` path that builds neutral compacted geometry once per
+  family batch plan and retains/deletes geometry and family resources through one lifecycle.
+- Updated RGBA compacted submit to consume compacted geometry batches plus `rgba-texture-page` family
+  resources instead of expecting material slots and atlas slice fields on the geometry batch.
+- Updated renderer handoff and tests to pass compacted geometry resources and filtered RGBA family
+  resources explicitly.
+- Updated resource tests so indexed assertions inspect the indexed family payload and neutral geometry
+  separately.
+
+Decisions:
+
+- Keep the existing `webgl2-baked-submit.ts` name for now. The code now consumes the new compacted
+  geometry/family resource split, but C6 owns replacement planning and metric vocabulary. Renaming
+  submit before C6 would create a mostly cosmetic diff while the public metrics are still baked-named.
+- Keep one generic `compactedGeometryFamilyResources` map rather than separate RGBA/indexed family
+  maps. This makes the resource store match the target `(family, geometryBatchKey)` model and avoids
+  recreating the parallel-map problem under better names.
+- Do not split `TexturePageBinding` facts from realized WebGL textures in C5. The unified resource
+  model no longer requires that split to collapse storage. Move that work to the family pipeline
+  implementation phase where direct and compacted indexed/RGBA resource collection actually share the
+  page facts.
+
+Course corrections:
+
+- The first submit refactor missed the internal `submitBakedGeometryDrawUnits()` handoff and passed
+  only geometry batches to the RGBA submit path. Tests caught this immediately; the handoff now
+  includes `rgbaTexturePageFamilies`.
+- Resource graph node dependencies can no longer derive draw-unit IDs from geometry batches, because
+  geometry is material-agnostic. The graph update now receives the family resources for a geometry
+  batch and derives scene-object dependencies from those family slices.
+
+Discovered debt and cleanup targets:
+
+- `bakedGeometry*` counters now measure unified compacted geometry resources, not only RGBA submitted
+  geometry. C6 must rename/split these diagnostics so the report distinguishes compacted geometry
+  built, family resources built, and family resources actually rendered.
+- `webgl2-baked-submit.ts` is now a narrow RGBA compacted family path wearing baked terminology. C6
+  should rename replacement planning around rendered families; C8 should either rename this to an
+  RGBA family pipeline module or replace it while implementing indexed rendering.
+- `BakedRenderablePlan.submitFamilies` still feeds family resources. This is acceptable planner debt,
+  but C7 should remove the old root RGBA fields and make family plans authoritative.
+
+Legacy shims introduced:
+
+- No old resource module reexport was introduced.
+- No old `bakedGeometryBatches` or `bakedIndexedGeometryBatches` map aliases were introduced.
+- The remaining baked-named submit/metrics APIs are not storage shims; they are terminology debt
+  scheduled for C6/C7.
+
+Validation:
+
+- `npm exec tsc -- --noEmit`
+- `npm exec vitest -- src/lib/world-display/webgl2-baked-submit.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/compacted-geometry.test.ts --run`
 
 Exit criteria:
 

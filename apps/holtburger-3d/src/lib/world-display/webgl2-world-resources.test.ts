@@ -360,7 +360,7 @@ describe("webgl2 world resources", () => {
 		expect(store.atlasCandidateMaterialSlotCount).toBe(1);
 	});
 
-	it("retains and releases landblock-scoped baked batches through the renderer graph", () => {
+	it("retains and releases landblock-scoped compacted batches through the renderer graph", () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
 		const graph = new RendererResourceGraph();
@@ -489,9 +489,16 @@ describe("webgl2 world resources", () => {
 			"structured-interior",
 		);
 		const batch = sortAtlasBatchesByLandblock(store)[0];
+		const rgbaFamily = [
+			...store.compactedGeometryFamilyResources.values(),
+		].find(
+			(resource) =>
+				resource.family === "rgba-texture-page" &&
+				resource.geometryBatchKey === batch?.key,
+		);
 		expect(batch?.landblockId).toBe(0x12340000);
 		expect(batch?.batchModelMatrix[12]).toBe(10);
-		expect(batch?.drawSlices[0]?.drawUnitIds[0]).toContain(
+		expect(rgbaFamily?.drawSlices[0]?.drawUnitIds[0]).toContain(
 			"structured-interior",
 		);
 		expect(store.bakedBypassSamples).not.toContain(
@@ -499,7 +506,7 @@ describe("webgl2 world resources", () => {
 		);
 	});
 
-	it("reuses atlas textures and baked batch buffers across common re-anchor shifts", () => {
+	it("reuses atlas textures and compacted batch buffers across common re-anchor shifts", () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
 		const graph = new RendererResourceGraph();
@@ -649,11 +656,18 @@ describe("webgl2 world resources", () => {
 				drawUnitIds: [store.drawUnits[0]?.id],
 			},
 		]);
-		const indexedBatch = [...store.bakedIndexedGeometryBatches.values()][0];
-		expect(indexedBatch).toMatchObject({
+		const indexedGeometryBatch = [
+			...store.compactedGeometryBatches.values(),
+		][0];
+		const indexedFamily = [
+			...store.compactedGeometryFamilyResources.values(),
+		].find((resource) => resource.family === "indexed-paletted");
+		expect(indexedGeometryBatch).toMatchObject({
 			landblockId: 0x12340000,
 			drawUnitCount: 1,
 			drawSliceCount: 1,
+		});
+		expect(indexedFamily).toMatchObject({
 			materialTableRecords: [
 				{
 					indexFormat: "p8",
@@ -664,7 +678,7 @@ describe("webgl2 world resources", () => {
 				},
 			],
 		});
-		expect(indexedBatch?.drawSlices).toMatchObject([
+		expect(indexedFamily?.drawSlices).toMatchObject([
 			{
 				indexFormat: "p8",
 				renderStateKey: "indexed-opaque",
@@ -1357,7 +1371,7 @@ function createChunkTransform({
 }
 
 function sortAtlasBatchesByLandblock(store: Webgl2WorldResourceStore) {
-	return [...store.bakedGeometryBatches.values()].sort(
+	return [...store.compactedGeometryBatches.values()].sort(
 		(left, right) => left.landblockId - right.landblockId,
 	);
 }

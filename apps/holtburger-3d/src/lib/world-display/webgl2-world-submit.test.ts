@@ -16,7 +16,10 @@ import {
 	type Webgl2IndexedP8WorldProgram,
 	type Webgl2TerrainBlendWorldProgram,
 } from "./webgl2-world-submit";
-import type { Webgl2BakedGeometryBatchResource } from "./webgl2-baked-geometry-batches";
+import type {
+	Webgl2CompactedGeometryBatchResource,
+	Webgl2RgbaTexturePageFamilyResource,
+} from "./webgl2-compacted-geometry-resources";
 import type { Webgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
 import type { Webgl2BakedGeometryWorldProgram } from "./webgl2-baked-submit";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
@@ -335,6 +338,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			indexedP16Program: createIndexedP16Program(),
 			bakedGeometryResources: {
 				batches: [],
+				rgbaTexturePageFamilies: [],
 				generation: createTextureAtlasGeneration({
 					atlasEntryKey: "entry/a",
 					texture: atlasTexture,
@@ -383,6 +387,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			bakedGeometryProgram: createBakedGeometryProgram(),
 			bakedGeometryResources: {
 				batches: [createBakedGeometryBatch(["atlas"])],
+				rgbaTexturePageFamilies: [createBakedGeometryFamily(["atlas"])],
 				generation: createTextureAtlasGeneration({ atlasEntryKey: "entry/a" }),
 			},
 			drawUnitsById,
@@ -464,6 +469,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			indexedP16Program: createIndexedP16Program(),
 			bakedGeometryResources: {
 				batches: [],
+				rgbaTexturePageFamilies: [],
 				generation: createTextureAtlasGeneration({ atlasEntryKey: "entry/a" }),
 			},
 			drawUnitsById,
@@ -496,6 +502,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			bakedGeometryProgram: createBakedGeometryProgram(),
 			bakedGeometryResources: {
 				batches: [createBakedGeometryBatch(["atlas"])],
+				rgbaTexturePageFamilies: [createBakedGeometryFamily(["atlas"])],
 				generation: createTextureAtlasGeneration(),
 			},
 			drawUnitsById,
@@ -548,6 +555,11 @@ describe("submitWebgl2FlatWorldFrame", () => {
 						triangleCount: 2,
 					}),
 				],
+				rgbaTexturePageFamilies: [
+					createBakedGeometryFamily(["atlas", "not-visible"], {
+						indexCount: 6,
+					}),
+				],
 				generation: createTextureAtlasGeneration(),
 			},
 			drawUnitsById,
@@ -578,6 +590,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			bakedGeometryProgram: createBakedGeometryProgram(),
 			bakedGeometryResources: {
 				batches: [createBakedGeometryBatch(["not-visible"])],
+				rgbaTexturePageFamilies: [createBakedGeometryFamily(["not-visible"])],
 				generation: createTextureAtlasGeneration(),
 			},
 			viewProjectionMatrix: createIdentityMat4(),
@@ -1109,7 +1122,7 @@ function createBakedGeometryBatch(
 		indexCount?: number;
 		triangleCount?: number;
 	} = {},
-): Webgl2BakedGeometryBatchResource {
+): Webgl2CompactedGeometryBatchResource {
 	const indexCount = options.indexCount ?? 3;
 	const triangleCount = options.triangleCount ?? indexCount / 3;
 	return {
@@ -1126,6 +1139,31 @@ function createBakedGeometryBatch(
 		materialSlotBuffer: null as never,
 		indexBuffer: null as never,
 		indexType: 5123,
+		batchModelMatrix: createIdentityMat4(),
+		vertexCount: 3,
+		indexCount,
+		triangleCount,
+		drawSliceCount: 1,
+		drawUnitCount: drawUnitIds.length,
+		positionByteLength: 36,
+		uvByteLength: 24,
+		materialSlotByteLength: 12,
+		indexByteLength: 6,
+		totalByteLength: 78,
+		dispose() {
+			return;
+		},
+	};
+}
+
+function createBakedGeometryFamily(
+	drawUnitIds: readonly string[],
+	options: { indexCount?: number } = {},
+): Webgl2RgbaTexturePageFamilyResource {
+	return {
+		family: "rgba-texture-page",
+		key: "rgba-texture-page|atlas-batch",
+		geometryBatchKey: "atlas-batch",
 		materialSlots: [
 			{
 				key: "material-slot",
@@ -1141,7 +1179,6 @@ function createBakedGeometryBatch(
 				wrapT: "clamp",
 			},
 		],
-		batchModelMatrix: createIdentityMat4(),
 		drawSlices: [
 			{
 				key: "slice",
@@ -1149,24 +1186,11 @@ function createBakedGeometryBatch(
 				detailAtlasTextureIndex: null,
 				renderStateKey: "opaque",
 				firstIndex: 0,
-				indexCount,
+				indexCount: options.indexCount ?? 3,
 				drawUnitIds,
 				materialSlotKeys: ["material-slot"],
 			},
 		],
-		vertexCount: 3,
-		indexCount,
-		triangleCount,
-		drawSliceCount: 1,
-		drawUnitCount: drawUnitIds.length,
-		positionByteLength: 36,
-		uvByteLength: 24,
-		materialSlotByteLength: 12,
-		indexByteLength: 6,
-		totalByteLength: 78,
-		dispose() {
-			return;
-		},
 	};
 }
 

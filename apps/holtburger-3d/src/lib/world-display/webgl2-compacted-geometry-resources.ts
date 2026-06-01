@@ -17,7 +17,7 @@ import type {
 	BakedRenderableMaterialSlot,
 } from "./baked-renderable-planner";
 
-export interface Webgl2BakedGeometryMaterialSlot {
+export interface Webgl2RgbaTexturePageFamilyMaterialSlot {
 	key: string;
 	index: number;
 	atlasTextureIndex: number;
@@ -31,54 +31,47 @@ export interface Webgl2BakedGeometryMaterialSlot {
 	wrapT: "clamp" | "repeat";
 }
 
-export interface Webgl2BakedGeometryDrawSlice extends CompactedGeometrySlice {
+export interface Webgl2RgbaTexturePageFamilyDrawSlice extends CompactedGeometrySlice {
 	atlasTextureIndex: number;
 	detailAtlasTextureIndex: number | null;
 }
 
-export interface Webgl2BakedIndexedGeometryDrawSlice extends CompactedGeometrySlice {
+export interface Webgl2IndexedPalettedFamilyDrawSlice extends CompactedGeometrySlice {
 	indexFormat: "p8" | "index16";
 	indexPageKey: string;
 	palettePageKey: string;
 }
 
-export interface Webgl2BakedGeometryBatchResource {
+export interface Webgl2RgbaTexturePageFamilyResource {
+	family: "rgba-texture-page";
 	key: string;
-	landblockId: number;
-	vertexArray: Webgl2VertexArrayResource;
-	positionBuffer: Webgl2BufferResource;
-	uvBuffer: Webgl2BufferResource;
-	materialSlotBuffer: Webgl2BufferResource;
-	indexBuffer: Webgl2BufferResource;
-	indexType: GLenum;
-	materialSlots: readonly Webgl2BakedGeometryMaterialSlot[];
-	batchModelMatrix: CompactedGeometryBatch["batchModelMatrix"];
-	drawSlices: readonly Webgl2BakedGeometryDrawSlice[];
-	vertexCount: number;
-	indexCount: number;
-	triangleCount: number;
-	drawSliceCount: number;
-	drawUnitCount: number;
-	positionByteLength: number;
-	uvByteLength: number;
-	materialSlotByteLength: number;
-	indexByteLength: number;
-	totalByteLength: number;
-	dispose(): void;
+	geometryBatchKey: string;
+	materialSlots: readonly Webgl2RgbaTexturePageFamilyMaterialSlot[];
+	drawSlices: readonly Webgl2RgbaTexturePageFamilyDrawSlice[];
 }
 
-export interface Webgl2BakedIndexedGeometryBatchResource {
+export interface Webgl2IndexedPalettedFamilyResource {
+	family: "indexed-paletted";
 	key: string;
-	landblockId: number;
-	vertexArray: Webgl2VertexArrayResource;
-	positionBuffer: Webgl2BufferResource;
-	uvBuffer: Webgl2BufferResource;
-	materialSlotBuffer: Webgl2BufferResource;
-	indexBuffer: Webgl2BufferResource;
-	indexType: GLenum;
+	geometryBatchKey: string;
 	materialTableRecords: readonly BakedIndexedMaterialTableRecord[];
+	drawSlices: readonly Webgl2IndexedPalettedFamilyDrawSlice[];
+}
+
+export type Webgl2CompactedGeometryFamilyResource =
+	| Webgl2RgbaTexturePageFamilyResource
+	| Webgl2IndexedPalettedFamilyResource;
+
+export interface Webgl2CompactedGeometryBatchResource {
+	key: string;
+	landblockId: number;
+	vertexArray: Webgl2VertexArrayResource;
+	positionBuffer: Webgl2BufferResource;
+	uvBuffer: Webgl2BufferResource;
+	materialSlotBuffer: Webgl2BufferResource;
+	indexBuffer: Webgl2BufferResource;
+	indexType: GLenum;
 	batchModelMatrix: CompactedGeometryBatch["batchModelMatrix"];
-	drawSlices: readonly Webgl2BakedIndexedGeometryDrawSlice[];
 	vertexCount: number;
 	indexCount: number;
 	triangleCount: number;
@@ -92,112 +85,110 @@ export interface Webgl2BakedIndexedGeometryBatchResource {
 	dispose(): void;
 }
 
-export function createWebgl2BakedGeometryBatchResource({
+export function createWebgl2CompactedGeometryBatchResource({
 	gl,
 	geometry,
 	landblockId,
+}: {
+	gl: WebGL2RenderingContext;
+	geometry: CompactedGeometryBatch;
+	landblockId: number;
+}): Webgl2CompactedGeometryBatchResource {
+	const buffers = createWebgl2CompactedGeometryBuffers({ gl, geometry });
+	return {
+		key: geometry.key,
+		landblockId,
+		...buffers,
+		batchModelMatrix: geometry.batchModelMatrix,
+		vertexCount: geometry.vertexCount,
+		indexCount: geometry.indexCount,
+		triangleCount: geometry.triangleCount,
+		drawSliceCount: geometry.drawSlices.length,
+		drawUnitCount: geometry.drawRanges.length,
+		positionByteLength: geometry.positionByteLength,
+		uvByteLength: geometry.uvByteLength,
+		materialSlotByteLength: geometry.materialSlotByteLength,
+		indexByteLength: geometry.indexByteLength,
+		totalByteLength: geometry.totalByteLength,
+		dispose() {
+			disposeWebgl2CompactedGeometryBuffers(buffers);
+		},
+	};
+}
+
+export function createWebgl2RgbaTexturePageFamilyResource({
+	geometry,
 	materialSlots,
 	materialDrawSlices,
 	placementsByEntryKey,
 	detailPlacementsByEntryKey,
 }: {
-	gl: WebGL2RenderingContext;
 	geometry: CompactedGeometryBatch<BakedRenderableDrawSlice>;
-	landblockId: number;
 	materialSlots: readonly BakedRenderableMaterialSlot[];
 	materialDrawSlices: readonly BakedRenderableDrawSlice[];
 	placementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>;
 	detailPlacementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>;
-}): Webgl2BakedGeometryBatchResource {
-	const buffers = createWebgl2CompactedGeometryBuffers({ gl, geometry });
+}): Webgl2RgbaTexturePageFamilyResource {
 	const materialDrawSliceByKey = new Map(
 		materialDrawSlices.map((slice) => [slice.key, slice] as const),
 	);
 	return {
-		key: geometry.key,
-		landblockId,
-		...buffers,
+		family: "rgba-texture-page",
+		key: compactedFamilyResourceKey("rgba-texture-page", geometry.key),
+		geometryBatchKey: geometry.key,
 		materialSlots: materialSlots.map((slot) =>
-			toWebgl2BakedGeometryMaterialSlot(
+			toWebgl2RgbaTexturePageFamilyMaterialSlot(
 				slot,
 				placementsByEntryKey,
 				detailPlacementsByEntryKey,
 			),
 		),
-		batchModelMatrix: geometry.batchModelMatrix,
 		drawSlices: geometry.drawSlices.map((slice) =>
-			toWebgl2BakedGeometryDrawSlice(slice, materialDrawSliceByKey),
+			toWebgl2RgbaTexturePageFamilyDrawSlice(slice, materialDrawSliceByKey),
 		),
-		vertexCount: geometry.vertexCount,
-		indexCount: geometry.indexCount,
-		triangleCount: geometry.triangleCount,
-		drawSliceCount: geometry.drawSlices.length,
-		drawUnitCount: geometry.drawRanges.length,
-		positionByteLength: geometry.positionByteLength,
-		uvByteLength: geometry.uvByteLength,
-		materialSlotByteLength: geometry.materialSlotByteLength,
-		indexByteLength: geometry.indexByteLength,
-		totalByteLength: geometry.totalByteLength,
-		dispose() {
-			disposeWebgl2CompactedGeometryBuffers(buffers);
-		},
 	};
 }
 
-export function createWebgl2BakedIndexedGeometryBatchResource({
-	gl,
+export function createWebgl2IndexedPalettedFamilyResource({
 	geometry,
-	landblockId,
 	materialTableRecords,
 	materialDrawSlices,
 }: {
-	gl: WebGL2RenderingContext;
 	geometry: CompactedGeometryBatch<BakedIndexedRenderableDrawSlice>;
-	landblockId: number;
 	materialTableRecords: readonly BakedIndexedMaterialTableRecord[];
 	materialDrawSlices: readonly BakedIndexedRenderableDrawSlice[];
-}): Webgl2BakedIndexedGeometryBatchResource {
-	const buffers = createWebgl2CompactedGeometryBuffers({ gl, geometry });
+}): Webgl2IndexedPalettedFamilyResource {
 	const materialDrawSliceByKey = new Map(
 		materialDrawSlices.map((slice) => [slice.key, slice] as const),
 	);
 	return {
-		key: geometry.key,
-		landblockId,
-		...buffers,
+		family: "indexed-paletted",
+		key: compactedFamilyResourceKey("indexed-paletted", geometry.key),
+		geometryBatchKey: geometry.key,
 		materialTableRecords,
-		batchModelMatrix: geometry.batchModelMatrix,
 		drawSlices: geometry.drawSlices.map((slice) =>
-			toWebgl2BakedIndexedGeometryDrawSlice(slice, materialDrawSliceByKey),
+			toWebgl2IndexedPalettedFamilyDrawSlice(slice, materialDrawSliceByKey),
 		),
-		vertexCount: geometry.vertexCount,
-		indexCount: geometry.indexCount,
-		triangleCount: geometry.triangleCount,
-		drawSliceCount: geometry.drawSlices.length,
-		drawUnitCount: geometry.drawRanges.length,
-		positionByteLength: geometry.positionByteLength,
-		uvByteLength: geometry.uvByteLength,
-		materialSlotByteLength: geometry.materialSlotByteLength,
-		indexByteLength: geometry.indexByteLength,
-		totalByteLength: geometry.totalByteLength,
-		dispose() {
-			disposeWebgl2CompactedGeometryBuffers(buffers);
-		},
 	};
 }
 
-export function updateWebgl2BakedGeometryBatchDynamicTables(
-	batch:
-		| Webgl2BakedGeometryBatchResource
-		| Webgl2BakedIndexedGeometryBatchResource,
+export function updateWebgl2CompactedGeometryBatchDynamicTables(
+	batch: Webgl2CompactedGeometryBatchResource,
 	geometry: CompactedGeometryBatch,
 ): void {
 	if (batch.key !== geometry.key) {
 		throw new Error(
-			`Cannot update baked batch ${batch.key} with geometry ${geometry.key}.`,
+			`Cannot update compacted batch ${batch.key} with geometry ${geometry.key}.`,
 		);
 	}
 	batch.batchModelMatrix = geometry.batchModelMatrix;
+}
+
+export function compactedFamilyResourceKey(
+	family: Webgl2CompactedGeometryFamilyResource["family"],
+	geometryBatchKey: string,
+): string {
+	return `${family}|${geometryBatchKey}`;
 }
 
 function createWebgl2CompactedGeometryBuffers({
@@ -279,14 +270,14 @@ function disposeWebgl2CompactedGeometryBuffers({
 	indexBuffer.dispose();
 }
 
-function toWebgl2BakedGeometryDrawSlice(
+function toWebgl2RgbaTexturePageFamilyDrawSlice(
 	slice: CompactedGeometrySlice,
 	materialDrawSliceByKey: ReadonlyMap<string, BakedRenderableDrawSlice>,
-): Webgl2BakedGeometryDrawSlice {
+): Webgl2RgbaTexturePageFamilyDrawSlice {
 	const materialSlice = materialDrawSliceByKey.get(slice.key);
 	if (!materialSlice) {
 		throw new Error(
-			`Baked geometry draw slice ${slice.key} has no RGBA family payload.`,
+			`RGBA texture-page family draw slice ${slice.key} has no RGBA family payload.`,
 		);
 	}
 	return {
@@ -296,14 +287,14 @@ function toWebgl2BakedGeometryDrawSlice(
 	};
 }
 
-function toWebgl2BakedIndexedGeometryDrawSlice(
+function toWebgl2IndexedPalettedFamilyDrawSlice(
 	slice: CompactedGeometrySlice,
 	materialDrawSliceByKey: ReadonlyMap<string, BakedIndexedRenderableDrawSlice>,
-): Webgl2BakedIndexedGeometryDrawSlice {
+): Webgl2IndexedPalettedFamilyDrawSlice {
 	const materialSlice = materialDrawSliceByKey.get(slice.key);
 	if (!materialSlice) {
 		throw new Error(
-			`Baked indexed geometry draw slice ${slice.key} has no indexed family payload.`,
+			`Indexed-paletted family draw slice ${slice.key} has no indexed family payload.`,
 		);
 	}
 	return {
@@ -314,11 +305,11 @@ function toWebgl2BakedIndexedGeometryDrawSlice(
 	};
 }
 
-function toWebgl2BakedGeometryMaterialSlot(
+function toWebgl2RgbaTexturePageFamilyMaterialSlot(
 	slot: BakedRenderableMaterialSlot,
 	placementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>,
 	detailPlacementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>,
-): Webgl2BakedGeometryMaterialSlot {
+): Webgl2RgbaTexturePageFamilyMaterialSlot {
 	const placement = placementsByEntryKey.get(slot.atlasEntryKey);
 	if (!placement) {
 		throw new Error(

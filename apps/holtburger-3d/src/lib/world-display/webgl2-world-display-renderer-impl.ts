@@ -925,12 +925,14 @@ export function createWebgl2WorldDisplayRendererImplementation(
 							terrainBlendProgram: currentResources.terrainBlendWorldProgram,
 							indexedP8Program: currentResources.indexedP8WorldProgram,
 							indexedP16Program: currentResources.indexedP16WorldProgram,
-							bakedGeometryProgram:
-								currentResources.bakedGeometryWorldProgram,
+							bakedGeometryProgram: currentResources.bakedGeometryWorldProgram,
 							bakedGeometryResources: {
 								batches: [
-									...currentResources.worldStore.bakedGeometryBatches.values(),
+									...currentResources.worldStore.compactedGeometryBatches.values(),
 								],
+								rgbaTexturePageFamilies: [
+									...currentResources.worldStore.compactedGeometryFamilyResources.values(),
+								].filter((resource) => resource.family === "rgba-texture-page"),
 								generation: currentResources.worldStore.textureAtlasGeneration,
 							},
 							drawUnitsById: currentResources.worldStore.drawUnitsById,
@@ -1234,7 +1236,10 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			indexedP16Program: resources.indexedP16WorldProgram,
 			bakedGeometryProgram: resources.bakedGeometryWorldProgram,
 			bakedGeometryResources: {
-				batches: [...resources.worldStore.bakedGeometryBatches.values()],
+				batches: [...resources.worldStore.compactedGeometryBatches.values()],
+				rgbaTexturePageFamilies: [
+					...resources.worldStore.compactedGeometryFamilyResources.values(),
+				].filter((resource) => resource.family === "rgba-texture-page"),
 				generation: resources.worldStore.textureAtlasGeneration,
 			},
 			viewProjectionMatrix: frame.viewProjectionMatrix,
@@ -2152,8 +2157,7 @@ function createTriangleResources(
 		indexedP8WorldProgram: createIndexedP8WorldProgram(gl),
 		indexedP16WorldProgram: createIndexedP16WorldProgram(gl),
 		terrainBlendWorldProgram: createTerrainBlendWorldProgram(gl),
-		bakedGeometryWorldProgram:
-			createBakedGeometryWorldProgram(gl),
+		bakedGeometryWorldProgram: createBakedGeometryWorldProgram(gl),
 		sceneDomainCopyProgram: createSceneDomainCopyProgram(gl),
 		vertexBuffer,
 		vertexArray,

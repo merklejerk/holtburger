@@ -218,7 +218,11 @@ export function submitWebgl2FlatWorldFrame({
 	indexedP8Program,
 	indexedP16Program,
 	bakedGeometryProgram,
-	bakedGeometryResources = { batches: [], generation: null },
+	bakedGeometryResources = {
+		batches: [],
+		rgbaTexturePageFamilies: [],
+		generation: null,
+	},
 	drawUnitsById,
 	frame,
 }: {
@@ -267,7 +271,11 @@ export function submitWebgl2FlatWorldDrawUnits({
 	indexedP8Program,
 	indexedP16Program,
 	bakedGeometryProgram,
-	bakedGeometryResources = { batches: [], generation: null },
+	bakedGeometryResources = {
+		batches: [],
+		rgbaTexturePageFamilies: [],
+		generation: null,
+	},
 	viewProjectionMatrix,
 	drawUnits,
 	portalMaskDrawUnitCount = 0,
@@ -565,6 +573,7 @@ function submitBakedGeometryDrawUnits({
 			viewProjectionMatrix,
 			resources: {
 				batches: resources.batches,
+				rgbaTexturePageFamilies: resources.rgbaTexturePageFamilies,
 				generation: resources.generation,
 			},
 			replaceableDrawUnitIds,

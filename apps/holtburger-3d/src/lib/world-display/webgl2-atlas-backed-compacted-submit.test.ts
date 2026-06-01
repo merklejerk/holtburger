@@ -209,6 +209,7 @@ function createGeneration(): Webgl2TextureAtlasGenerationResource {
 				placementCount: 1,
 			},
 		],
+		placements: [],
 		preparedTextureAssetIds: [],
 		compactableDrawUnitIds: [],
 		dispose() {

@@ -10,6 +10,10 @@ import {
 	type Webgl2AtlasBackedCompactedSubmitResources,
 	type Webgl2AtlasBackedCompactedWorldProgram,
 } from "./webgl2-atlas-backed-compacted-submit";
+import type {
+	Webgl2TextureAtlasGenerationResource,
+	Webgl2TextureAtlasTextureResource,
+} from "./webgl2-texture-atlas-generation";
 
 export type Webgl2FlatWorldProgram = Webgl2ProgramResource<
 	"position",
@@ -21,6 +25,9 @@ export type Webgl2TexturedWorldProgram = Webgl2ProgramResource<
 	| "uColor"
 	| "uAlphaTest"
 	| "uTexture"
+	| "uAtlasEnabled"
+	| "uAtlasRect"
+	| "uAtlasSize"
 	| "uDetailTexture"
 	| "uDetailTiling"
 	| "uDetailEnabled"
@@ -114,6 +121,11 @@ export interface Webgl2WorldSubmitMetrics {
 	atlasBackedCompactedSubmitNoVisibleInteriorRouteCount: number;
 	atlasBackedCompactedSubmitNoVisibleOtherRouteCount: number;
 	atlasBackedCompactedSubmitFallbackSamples: readonly string[];
+	stagedAtlasDrawCount: number;
+	stagedAtlasStandaloneDirectDrawCount: number;
+	stagedAtlasEstimatedTextureBindAvoidedCount: number;
+	stagedAtlasSharedTextureAtlasTextureCount: number;
+	stagedAtlasFallbackSamples: readonly string[];
 }
 
 const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
@@ -146,6 +158,11 @@ const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	atlasBackedCompactedSubmitNoVisibleInteriorRouteCount: 0,
 	atlasBackedCompactedSubmitNoVisibleOtherRouteCount: 0,
 	atlasBackedCompactedSubmitFallbackSamples: [],
+	stagedAtlasDrawCount: 0,
+	stagedAtlasStandaloneDirectDrawCount: 0,
+	stagedAtlasEstimatedTextureBindAvoidedCount: 0,
+	stagedAtlasSharedTextureAtlasTextureCount: 0,
+	stagedAtlasFallbackSamples: [],
 };
 
 export type Webgl2AtlasBackedCompactedSubmitRoute =
@@ -158,6 +175,7 @@ export function createEmptyWebgl2WorldSubmitMetrics(): Webgl2WorldSubmitMetrics 
 		...EMPTY_SUBMIT_METRICS,
 		visibleDrawUnitCountsByMaterialKind: {},
 		atlasBackedCompactedSubmitFallbackSamples: [],
+		stagedAtlasFallbackSamples: [],
 	};
 }
 
@@ -253,6 +271,8 @@ export function submitWebgl2FlatWorldDrawUnits({
 		interiorDomainDrawUnitCount,
 		visibleDrawUnitCountsByMaterialKind:
 			countDrawUnitsByMaterialKind(drawUnits),
+		stagedAtlasSharedTextureAtlasTextureCount:
+			atlasBackedCompactedResources.generation?.textures.length ?? 0,
 	};
 	if (drawUnits.length === 0) {
 		return metrics;
@@ -389,7 +409,29 @@ export function submitWebgl2FlatWorldDrawUnits({
 			enabled: terrainBackfaceCulling && useTerrainBlend,
 			mode: gl.BACK,
 		});
-		if (texture && stateCache.bindTexture2D(0, texture.texture)) {
+		const stagedAtlasResolution =
+			useTexture && texture
+				? resolveStagedAtlasTextureBinding({
+						drawUnit,
+						generation: atlasBackedCompactedResources.generation,
+						fallbackSamples: metrics.stagedAtlasFallbackSamples,
+					})
+				: null;
+		const stagedAtlasBinding = stagedAtlasResolution?.binding ?? null;
+		metrics.stagedAtlasFallbackSamples =
+			stagedAtlasResolution?.fallbackSamples ??
+			metrics.stagedAtlasFallbackSamples;
+		if (useTexture) {
+			if (stagedAtlasBinding) {
+				metrics.stagedAtlasDrawCount += 1;
+				metrics.stagedAtlasEstimatedTextureBindAvoidedCount += 1;
+			} else {
+				metrics.stagedAtlasStandaloneDirectDrawCount += 1;
+			}
+		}
+		const activeTexture =
+			stagedAtlasBinding?.texture.texture.texture ?? texture?.texture ?? null;
+		if (activeTexture && stateCache.bindTexture2D(0, activeTexture)) {
 			metrics.stateChangeCount += 1;
 		}
 		if (drawUnit.detailOverlay) {
@@ -470,6 +512,10 @@ export function submitWebgl2FlatWorldDrawUnits({
 			uploadDetailOverlayUniforms(gl, detailProgram, drawUnit.detailOverlay);
 			metrics.uniformUploadCount += DETAIL_DYNAMIC_UNIFORM_COUNT;
 		}
+		if (useTexture) {
+			uploadStagedAtlasUniforms(gl, texturedProgram, stagedAtlasBinding);
+			metrics.uniformUploadCount += STAGED_ATLAS_DYNAMIC_UNIFORM_COUNT;
+		}
 		if (drawUnit.terrainBlend) {
 			uploadTerrainBlendUniforms(
 				gl,
@@ -498,6 +544,73 @@ export function submitWebgl2FlatWorldDrawUnits({
 		planningFallbackSamples: atlasReplacement.fallbackSamples,
 	});
 	return metrics;
+}
+
+interface StagedAtlasTextureBinding {
+	texture: Webgl2TextureAtlasTextureResource;
+	rect: readonly [number, number, number, number];
+	width: number;
+	height: number;
+}
+
+function resolveStagedAtlasTextureBinding({
+	drawUnit,
+	generation,
+	fallbackSamples,
+}: {
+	drawUnit: Webgl2WorldDrawUnit;
+	generation: Webgl2TextureAtlasGenerationResource | null;
+	fallbackSamples: readonly string[];
+}): {
+	binding: StagedAtlasTextureBinding | null;
+	fallbackSamples: readonly string[];
+} {
+	const fallback = (sample: string) => {
+		return {
+			binding: null,
+			fallbackSamples: [...fallbackSamples, sample].slice(0, 8),
+		};
+	};
+	if (!drawUnit.atlasEligibility) {
+		return { binding: null, fallbackSamples };
+	}
+	if (drawUnit.detailOverlay) {
+		return fallback("staged atlas requires standalone detail overlay path");
+	}
+	if (!drawUnit.textureSamplingPolicy?.includes("wrap=clamp/clamp")) {
+		return fallback(
+			`staged atlas draw unit ${drawUnit.id} uses unsupported sampler ${drawUnit.textureSamplingPolicy ?? "unknown"}`,
+		);
+	}
+	if (!generation) {
+		return fallback("staged atlas missing texture atlas generation");
+	}
+	const placement = generation.placements.find(
+		(candidate) =>
+			candidate.atlasEntryKey === drawUnit.atlasEligibility?.atlasEntryKey,
+	);
+	if (!placement) {
+		return fallback(
+			`staged atlas missing placed entry ${drawUnit.atlasEligibility.atlasEntryKey}`,
+		);
+	}
+	const texture = generation.textures.find(
+		(candidate) => candidate.textureIndex === placement.textureIndex,
+	);
+	if (!texture) {
+		return fallback(
+			`staged atlas missing texture ${placement.textureIndex} for ${placement.atlasEntryKey}`,
+		);
+	}
+	return {
+		binding: {
+			texture,
+			rect: placement.rect,
+			width: placement.width,
+			height: placement.height,
+		},
+		fallbackSamples,
+	};
 }
 
 function submitAtlasBackedCompactedDrawUnits({
@@ -671,6 +784,7 @@ const TERRAIN_BLEND_SAMPLER_UNIFORM_COUNT = 10;
 const TERRAIN_BLEND_DYNAMIC_UNIFORM_COUNT = 13;
 const INDEXED_DYNAMIC_UNIFORM_COUNT = 6;
 const DETAIL_DYNAMIC_UNIFORM_COUNT = 2;
+const STAGED_ATLAS_DYNAMIC_UNIFORM_COUNT = 3;
 
 function uploadTerrainBlendSamplerUniforms(
 	gl: WebGL2RenderingContext,
@@ -783,6 +897,28 @@ function uploadDetailOverlayUniforms(
 ): void {
 	gl.uniform1f(program.uniforms.uDetailTiling, detailOverlay?.tiling ?? 1);
 	gl.uniform1i(program.uniforms.uDetailEnabled, detailOverlay ? 1 : 0);
+}
+
+function uploadStagedAtlasUniforms(
+	gl: WebGL2RenderingContext,
+	program: Webgl2TexturedWorldProgram,
+	binding: StagedAtlasTextureBinding | null,
+): void {
+	if (!binding) {
+		gl.uniform1i(program.uniforms.uAtlasEnabled, 0);
+		gl.uniform4f(program.uniforms.uAtlasRect, 0, 0, 1, 1);
+		gl.uniform2f(program.uniforms.uAtlasSize, 1, 1);
+		return;
+	}
+	gl.uniform1i(program.uniforms.uAtlasEnabled, 1);
+	gl.uniform4f(
+		program.uniforms.uAtlasRect,
+		binding.rect[0],
+		binding.rect[1],
+		binding.rect[2],
+		binding.rect[3],
+	);
+	gl.uniform2f(program.uniforms.uAtlasSize, binding.width, binding.height);
 }
 
 function uploadTerrainBlendUniforms(

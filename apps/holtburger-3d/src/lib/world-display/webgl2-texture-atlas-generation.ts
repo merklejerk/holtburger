@@ -11,6 +11,14 @@ import type {
 	AtlasTexturePlacement,
 } from "./atlas-layout-planner";
 
+export interface Webgl2TextureAtlasPlacementResource {
+	atlasEntryKey: string;
+	textureIndex: number;
+	rect: readonly [number, number, number, number];
+	width: number;
+	height: number;
+}
+
 export interface Webgl2TextureAtlasTextureResource {
 	key: string;
 	textureIndex: number;
@@ -23,6 +31,7 @@ export interface Webgl2TextureAtlasTextureResource {
 export interface Webgl2TextureAtlasGenerationResource {
 	key: string;
 	textures: readonly Webgl2TextureAtlasTextureResource[];
+	placements: readonly Webgl2TextureAtlasPlacementResource[];
 	preparedTextureAssetIds: readonly string[];
 	compactableDrawUnitIds: readonly string[];
 	dispose(): void;
@@ -49,9 +58,24 @@ export function createWebgl2TextureAtlasGenerationResource({
 			entriesByKey,
 		}),
 	);
+	const placements = plan.atlasTextures.flatMap((page) =>
+		page.placements.map((placement) => ({
+			atlasEntryKey: placement.atlasEntryKey,
+			textureIndex: page.textureIndex,
+			rect: [
+				placement.x,
+				placement.y,
+				placement.width,
+				placement.height,
+			] as const,
+			width: page.width,
+			height: page.height,
+		})),
+	);
 	return {
 		key: plan.key,
 		textures,
+		placements,
 		preparedTextureAssetIds: plan.preparedTextureAssetIds,
 		compactableDrawUnitIds: plan.compactableDrawUnitIds,
 		dispose() {

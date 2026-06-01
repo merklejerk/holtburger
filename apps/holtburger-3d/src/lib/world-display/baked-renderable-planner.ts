@@ -104,6 +104,7 @@ export interface BakedRenderableCandidate {
 	materialKind: BakeMaterialKind;
 	materialKey: string;
 	detailAtlasEntry: BakedRenderableDetailEntry | null;
+	indexedMaterialTableRecord: BakedIndexedMaterialTableRecord | null;
 	bakeEligibility: BakeEligibility;
 	triangleCount: number;
 	staticPartCount: number;
@@ -126,6 +127,22 @@ export interface BakedRenderableMaterialSlot {
 	atlasEntryKey: string;
 	detailAtlasEntryKey: string | null;
 	detailTiling: number;
+}
+
+export interface BakedIndexedMaterialTableRecord {
+	key: string;
+	sourceMaterialKey: string;
+	indexPageKey: string;
+	palettePageKey: string;
+	indexFormat: "p8" | "index16";
+	indexPageWidth: number;
+	indexPageHeight: number;
+	paletteColorCount: number;
+	clipThreshold: number;
+	wrapS: "clamp" | "repeat";
+	wrapT: "clamp" | "repeat";
+	alphaPolicy: "opaque";
+	filteringMode: "shader-palette-linear";
 }
 
 export interface BakedRenderableDrawSlice {
@@ -166,6 +183,7 @@ export interface BakedRenderablePlan {
 	detailAtlasEntryRecords: readonly BakedRenderableDetailEntry[];
 	detailAtlasTextures: readonly AtlasTexturePage[];
 	materialSlots: readonly BakedRenderableMaterialSlot[];
+	indexedMaterialTableRecords: readonly BakedIndexedMaterialTableRecord[];
 	drawUnitMaterialSlots: readonly {
 		drawUnitId: string;
 		materialSlotKey: string;
@@ -198,6 +216,7 @@ export function createEmptyBakedRenderablePlan(): BakedRenderablePlan {
 		detailAtlasEntryRecords: [],
 		detailAtlasTextures: [],
 		materialSlots: [],
+		indexedMaterialTableRecords: [],
 		drawUnitMaterialSlots: [],
 		drawSlices: [],
 		staticObjectKeys: [],
@@ -297,6 +316,8 @@ export function planBakedRenderables(options: {
 		});
 	}
 
+	const indexedMaterialTableRecords =
+		collectBakedIndexedMaterialTableRecords(options.drawUnits);
 	const materialSlots = assignBakedRenderableMaterialSlots(
 		detailPlaced,
 		options.policy,
@@ -340,6 +361,9 @@ export function planBakedRenderables(options: {
 				)
 				.map((entry) => entry.key),
 			materialSlotKeys: materialSlots.map((slot) => slot.key),
+			indexedMaterialTableRecordKeys: indexedMaterialTableRecords.map(
+				(record) => record.key,
+			),
 		}),
 		compactableDrawUnitIds,
 		bypasses,
@@ -375,6 +399,7 @@ export function planBakedRenderables(options: {
 			}))
 			.filter((page) => page.placements.length > 0),
 		materialSlots,
+		indexedMaterialTableRecords,
 		drawUnitMaterialSlots: compactable.map((candidate) => ({
 			drawUnitId: candidate.drawUnit.id,
 			materialSlotKey: describeCompactionMaterialSlotKey(candidate),
@@ -397,6 +422,47 @@ export function planBakedRenderables(options: {
 			),
 		),
 	};
+}
+
+function collectBakedIndexedMaterialTableRecords(
+	drawUnits: readonly BakedRenderableCandidate[],
+): BakedIndexedMaterialTableRecord[] {
+	const recordsByKey = new Map<string, BakedIndexedMaterialTableRecord>();
+	for (const drawUnit of drawUnits) {
+		if (!isBakedIndexedMaterialTableReady(drawUnit)) {
+			continue;
+		}
+		const record = drawUnit.indexedMaterialTableRecord;
+		if (!record) {
+			throw new Error(
+				`Indexed material candidate ${drawUnit.id} is table-ready without a material-table record.`,
+			);
+		}
+		recordsByKey.set(record.key, record);
+	}
+	return [...recordsByKey.values()].sort((left, right) =>
+		left.key.localeCompare(right.key),
+	);
+}
+
+function isBakedIndexedMaterialTableReady(
+	drawUnit: BakedRenderableCandidate,
+): boolean {
+	if (drawUnit.materialKind !== "indexed-paletted") {
+		return false;
+	}
+	if (!drawUnit.bakeEligibility.geometry.compatible) {
+		return false;
+	}
+	const material = drawUnit.bakeEligibility.material;
+	return (
+		material.family === "indexed-paletted" &&
+		material.alphaPolicy === "opaque" &&
+		!material.blockers.includes("missing-indexed-texel-page") &&
+		!material.blockers.includes("missing-indexed-palette-page") &&
+		!material.blockers.includes("unsupported-texture-page-behavior") &&
+		!material.blockers.includes("indexed-alpha-policy-unsupported")
+	);
 }
 
 function classifyBakedRenderableBypass(
@@ -985,6 +1051,7 @@ function describeBakedRenderablePlanKey(options: {
 	atlasEntryKeys: readonly string[];
 	detailAtlasEntryKeys: readonly string[];
 	materialSlotKeys: readonly string[];
+	indexedMaterialTableRecordKeys: readonly string[];
 }): string {
 	return [
 		"baked-renderables",
@@ -995,6 +1062,7 @@ function describeBakedRenderablePlanKey(options: {
 		...options.atlasEntryKeys,
 		...options.detailAtlasEntryKeys.map((key) => `detail=${key}`),
 		...options.materialSlotKeys,
+		...options.indexedMaterialTableRecordKeys.map((key) => `indexed=${key}`),
 	].join("|");
 }
 

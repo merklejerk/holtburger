@@ -4302,7 +4302,7 @@ Validation:
 
 ### Phase M7D.5a: Baked Indexed Material-Table Prep
 
-Status: Next.
+Status: Complete.
 
 Purpose: convert the now-proven indexed texture-page facts into a concrete baked indexed material-table
 and submit design before writing the shader. This is an immediate prep phase because adding baked
@@ -4329,6 +4329,98 @@ Exit criteria:
 - The submit-path split for indexed baked slices is decided before shader work starts.
 - Indexed alpha modes remain explicit retained-direct blockers rather than falling back to generic
   indexed unsupported.
+
+Progress:
+
+- Added a typed `BakedIndexedMaterialTableRecord` for the first intended baked indexed slice:
+  `indexed-paletted|alpha=opaque`.
+- The record carries:
+  - source material key;
+  - index texture-page key;
+  - palette texture-page key;
+  - P8/P16 index format;
+  - source index page dimensions;
+  - palette color count;
+  - clip threshold;
+  - wrap flags;
+  - `alphaPolicy: opaque`;
+  - `filteringMode: shader-palette-linear`.
+- WebGL2 resource sync now derives this record from direct indexed material resources after index and
+  palette pages are resolved. Non-opaque indexed materials do not receive a baked indexed table record.
+- The baked renderable plan now carries `indexedMaterialTableRecords` separately from the existing RGBA
+  atlas `materialSlots`.
+- Added planner tests proving indexed opaque table records are produced while draw units remain direct
+  until submit support exists, and indexed cutout stays blocked by alpha policy.
+- Added a resource integration test proving real P8 indexed draw units produce baked indexed
+  material-table records with exact clip threshold, page dimensions, palette count, and shader-owned
+  filtering mode.
+
+Decisions:
+
+- Reuse the compacted VBA shape for future indexed baked geometry, but do **not** reuse the existing
+  RGBA atlas draw-slice submit path as-is. Indexed baked slices need a separate shader/material-table
+  variant because they bind index and palette pages, not a base-color atlas rect.
+- Keep indexed material-table records in the plan even while indexed draw units remain retained direct.
+  This lets the next shader/submit phase consume a stable typed contract without changing direct
+  indexed rendering first.
+- Keep `clipThreshold = -1` for non-clip indexed surfaces. The table preserves this existing shader
+  contract instead of normalizing it to zero.
+- Continue treating `indexed-paletted` as a sampling family and alpha policy as a separate axis.
+  `indexed-paletted|alpha=opaque` is the first table shape; indexed cutout/blend/opacity remain direct.
+
+Course Corrections:
+
+- The existing `buildBakedGeometry` path currently hard-requires compacted draw units to be
+  `direct-texture`. Accepting indexed draw units into `compactableDrawUnitIds` in this phase would
+  create a runtime failure. The implementation therefore prepares indexed material-table records but
+  leaves compaction acceptance to the next shader/submit phase.
+
+Cleanup Targets:
+
+- `BakedRenderablePlan` now has two material-table concepts: RGBA atlas `materialSlots` and deferred
+  indexed `indexedMaterialTableRecords`. The next phase should either create an explicit baked submit
+  family enum or split the plan into typed submit groups so this does not become another mixed table.
+- `buildBakedGeometry` still has a direct-texture assumption in its material lookup. M7D.5b must relax
+  or route around that assumption before indexed compacted geometry can be submitted.
+- Indexed table record keys are diagnostic/stability keys. Avoid parsing them in hot paths; carry typed
+  fields forward into submit code.
+
+Validation:
+
+- `npm exec tsc -- --noEmit`
+- `npm exec vitest -- src/lib/world-display/baked-renderable-planner.test.ts src/lib/world-display/baked-geometry.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts --run`
+
+### Phase M7D.5b: Baked Indexed Submit Variant
+
+Status: Next.
+
+Purpose: consume the indexed material-table records from M7D.5a and add the first actual baked indexed
+submit path for `indexed-paletted|alpha=opaque`.
+
+Tasks:
+
+- Split baked submit resources by material-table family or add an explicit submit-family enum so RGBA
+  atlas slices and indexed/palette slices cannot be confused.
+- Relax or route around `buildBakedGeometry`'s direct-texture-only material lookup so indexed opaque
+  draw units can share compacted vertex/index buffers with a typed indexed material-table slot.
+- Add baked indexed draw slices that bind index texture pages and palette texture pages instead of
+  base-color atlas pages.
+- Add a baked indexed shader variant that preserves current direct indexed semantics:
+  - P8/P16 index reconstruction;
+  - palette lookup;
+  - `clipThreshold = -1` as no clip threshold;
+  - shader-owned palette-aware linear filtering;
+  - wrap flags from the table record.
+- Keep indexed cutout/blend/opacity retained direct with `indexed-alpha-policy-unsupported`.
+- Add tests for indexed opaque compaction acceptance, indexed draw-slice grouping, texture binding,
+  palette binding, uniforms/table upload, and retained-direct blockers for indexed alpha modes.
+
+Exit criteria:
+
+- Indexed opaque static/structured-interior draw units can be compacted and submitted through a baked
+  indexed path.
+- Existing RGBA baked submit behavior is unchanged.
+- Indexed alpha modes remain retained direct with explicit alpha-policy blockers.
 
 ### Phase M7D.6: Alpha/Blend Material Policy and Texture-Page Integration
 

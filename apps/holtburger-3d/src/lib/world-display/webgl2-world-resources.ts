@@ -69,6 +69,7 @@ import {
 	createEmptyBakedRenderablePlan,
 	planBakedRenderables,
 	type BakeEligibility,
+	type BakedIndexedMaterialTableRecord,
 	type BakedRenderableDetailEntry,
 	type BakedRenderablePlan,
 	type BakedRenderablePolicy,
@@ -943,10 +944,47 @@ function toBakedRenderableCandidate(drawUnit: Webgl2WorldDrawUnit) {
 		materialKind: drawUnit.materialKind,
 		materialKey: drawUnit.materialKey,
 		detailAtlasEntry: drawUnit.detailOverlay?.atlasEntry ?? null,
+		indexedMaterialTableRecord:
+			createBakedIndexedMaterialTableRecord(drawUnit),
 		bakeEligibility: drawUnit.bakeEligibility,
 		triangleCount: drawUnit.triangleCount,
 		staticPartCount: drawUnit.staticPartCount,
 		staticObjectKeys: drawUnit.staticObjectKeys,
+	};
+}
+
+function createBakedIndexedMaterialTableRecord(
+	drawUnit: Webgl2WorldDrawUnit,
+): BakedIndexedMaterialTableRecord | null {
+	const indexedMaterial = drawUnit.indexedMaterial;
+	if (
+		!indexedMaterial ||
+		drawUnit.bakeEligibility.material.alphaPolicy !== "opaque"
+	) {
+		return null;
+	}
+	return {
+		key: [
+			"baked-indexed-material",
+			drawUnit.materialKey,
+			indexedMaterial.indexTextureKey,
+			indexedMaterial.paletteTextureKey,
+			indexedMaterial.indexFormat,
+			`clip=${indexedMaterial.clipThreshold}`,
+			`wrap=${indexedMaterial.wrapS}/${indexedMaterial.wrapT}`,
+		].join("|"),
+		sourceMaterialKey: drawUnit.materialKey,
+		indexPageKey: indexedMaterial.indexTextureKey,
+		palettePageKey: indexedMaterial.paletteTextureKey,
+		indexFormat: indexedMaterial.indexFormat,
+		indexPageWidth: indexedMaterial.width,
+		indexPageHeight: indexedMaterial.height,
+		paletteColorCount: indexedMaterial.paletteColorCount,
+		clipThreshold: indexedMaterial.clipThreshold,
+		wrapS: indexedMaterial.wrapS,
+		wrapT: indexedMaterial.wrapT,
+		alphaPolicy: "opaque",
+		filteringMode: "shader-palette-linear",
 	};
 }
 

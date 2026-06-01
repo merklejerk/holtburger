@@ -620,6 +620,18 @@ describe("webgl2 world resources", () => {
 		expect(store.textureCount).toBe(2);
 		expect(store.indexedTextureCount).toBe(1);
 		expect(store.paletteTextureCount).toBe(1);
+		expect(store.bakedRenderablePlan.indexedMaterialTableRecords).toMatchObject([
+			{
+				sourceMaterialKey: expect.stringContaining("indexed-paletted"),
+				indexFormat: "p8",
+				indexPageWidth: 2,
+				indexPageHeight: 1,
+				paletteColorCount: 2,
+				clipThreshold: -1,
+				filteringMode: "shader-palette-linear",
+				alphaPolicy: "opaque",
+			},
+		]);
 		expect(
 			gl.textureUploads.map(({ width, height }) => ({ width, height })),
 		).toEqual([

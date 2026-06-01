@@ -5,6 +5,7 @@ import {
 	createEmptyBakedRenderablePlan,
 	planBakedRenderables,
 	type BakedRenderableCandidate,
+	type BakedIndexedMaterialTableRecord,
 } from "./baked-renderable-planner";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
 import type { StagedWorldMaterialAtlasEligibility } from "./staged-world-material-strategy";
@@ -24,6 +25,7 @@ type CandidateOptions = Partial<BakedRenderableCandidate> & {
 	hasDetailOverlay?: boolean;
 	atlasEligibility?: StagedWorldMaterialAtlasEligibility | null;
 	texturePageBindings?: readonly TexturePageBinding[];
+	indexedMaterialTableRecord?: BakedIndexedMaterialTableRecord | null;
 };
 
 describe("baked renderable planner", () => {
@@ -171,6 +173,41 @@ describe("baked renderable planner", () => {
 				"indexed-alpha-policy-unsupported",
 			],
 		});
+	});
+
+	it("builds indexed opaque material-table records without compacting them before submit support", () => {
+		const plan = planBakedRenderables({
+			drawUnits: [
+				createCandidate({
+					id: "indexed-a",
+					materialKey: "indexed/material-a",
+					materialKind: "indexed-paletted",
+					indexedMaterialTableRecord: createIndexedMaterialTableRecord("a"),
+				}),
+				createCandidate({
+					id: "indexed-cutout",
+					materialKey: "indexed/material-cutout",
+					materialKind: "indexed-paletted",
+					materialBehavior: { ...OPAQUE_BEHAVIOR, alphaTest: 0.5 },
+					indexedMaterialTableRecord: createIndexedMaterialTableRecord("cutout"),
+				}),
+			],
+			policy: {
+				maxAtlasTextureSize: 32,
+				maxAtlasTextureCount: 1,
+				baseGutterPixels: 2,
+				maxMaterialSlotsPerDraw: 4,
+			},
+		});
+
+		expect(plan.compactableDrawUnitIds).toEqual([]);
+		expect(plan.indexedMaterialTableRecords).toEqual([
+			createIndexedMaterialTableRecord("a"),
+		]);
+		expect(plan.bypasses.map((bypass) => bypass.reason)).toEqual([
+			"unsupported-indexed-paletted-material",
+			"unsupported-indexed-paletted-material",
+		]);
 	});
 
 	it("keeps detail-overlay draw units compactable when an RGBA8 detail atlas entry is available", () => {
@@ -387,6 +424,12 @@ function createCandidate(
 		materialKind: options.materialKind ?? "direct-texture",
 		materialKey: options.materialKey ?? `material-${entryKey}`,
 		detailAtlasEntry,
+		indexedMaterialTableRecord:
+			options.indexedMaterialTableRecord === undefined
+				? options.materialKind === "indexed-paletted"
+					? createIndexedMaterialTableRecord(entryKey)
+					: null
+				: options.indexedMaterialTableRecord,
 		bakeEligibility: createBakeEligibility({
 			kind: options.kind ?? "static",
 			owningLandblockId:
@@ -404,6 +447,26 @@ function createCandidate(
 		triangleCount: options.triangleCount ?? 2,
 		staticPartCount: options.staticPartCount ?? 1,
 		staticObjectKeys: options.staticObjectKeys ?? [`object-${entryKey}`],
+	};
+}
+
+function createIndexedMaterialTableRecord(
+	key: string,
+): BakedIndexedMaterialTableRecord {
+	return {
+		key: `indexed-table-${key}`,
+		sourceMaterialKey: `indexed/material-${key}`,
+		indexPageKey: `index-page-${key}`,
+		palettePageKey: `palette-page-${key}`,
+		indexFormat: "p8",
+		indexPageWidth: 8,
+		indexPageHeight: 8,
+		paletteColorCount: 256,
+		clipThreshold: 8,
+		wrapS: "clamp",
+		wrapT: "clamp",
+		alphaPolicy: "opaque",
+		filteringMode: "shader-palette-linear",
 	};
 }
 

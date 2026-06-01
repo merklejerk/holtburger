@@ -13,6 +13,15 @@ describe("webgl2 texture atlas generation", () => {
 
 		expect(generation?.key).toBe("atlas-backed-compaction/test");
 		expect(generation?.textures).toHaveLength(1);
+		expect(generation?.placements).toEqual([
+			{
+				atlasEntryKey: "entry-a",
+				textureIndex: 0,
+				rect: [1, 1, 2, 2],
+				width: 4,
+				height: 4,
+			},
+		]);
 		expect(gl.textureUploads).toHaveLength(1);
 		expect(gl.textureUploads[0]).toMatchObject({
 			width: 4,

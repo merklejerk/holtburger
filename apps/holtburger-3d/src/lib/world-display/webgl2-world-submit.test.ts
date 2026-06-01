@@ -137,6 +137,12 @@ describe("submitWebgl2FlatWorldFrame", () => {
 				uColor: {} as WebGLUniformLocation,
 				uAlphaTest: {} as WebGLUniformLocation,
 				uTexture: {} as WebGLUniformLocation,
+				uAtlasEnabled: {} as WebGLUniformLocation,
+				uAtlasRect: {} as WebGLUniformLocation,
+				uAtlasSize: {} as WebGLUniformLocation,
+				uDetailTexture: {} as WebGLUniformLocation,
+				uDetailTiling: {} as WebGLUniformLocation,
+				uDetailEnabled: {} as WebGLUniformLocation,
 			},
 			dispose() {
 				return;
@@ -201,6 +207,176 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		});
 
 		expect(gl.uniform4fvValues).toContainEqual([0, 0, 0, 0.5]);
+	});
+
+	it("submits eligible retained direct draw units through the shared texture atlas", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+		const standaloneTexture = {} as WebGLTexture;
+		const atlasTexture = {} as WebGLTexture;
+		const drawUnitsById = new Map<string, Webgl2WorldDrawUnit>([
+			[
+				"atlas-staged",
+				createDrawUnit({
+					id: "atlas-staged",
+					materialKind: "direct-texture",
+					texture: createTextureResource(standaloneTexture),
+					textureSamplingPolicy:
+						"wrap=clamp/clamp;filter=linear/linear/linear;color=none;aniso=4;mips=on;flipY=off",
+					atlasEntryKey: "entry/a",
+				}),
+			],
+		]);
+
+		const metrics = submitWebgl2FlatWorldFrame({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			terrainBlendProgram: createTerrainBlendProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			atlasBackedCompactedResources: {
+				batches: [],
+				generation: createTextureAtlasGeneration({
+					atlasEntryKey: "entry/a",
+					texture: atlasTexture,
+				}),
+			},
+			drawUnitsById,
+			frame: createFrame(["atlas-staged"]),
+		});
+
+		expect(metrics.stagedAtlasDrawCount).toBe(1);
+		expect(metrics.stagedAtlasStandaloneDirectDrawCount).toBe(0);
+		expect(metrics.stagedAtlasEstimatedTextureBindAvoidedCount).toBe(1);
+		expect(metrics.stagedAtlasSharedTextureAtlasTextureCount).toBe(1);
+		expect(metrics.stagedAtlasFallbackSamples).toEqual([]);
+		expect(gl.boundTextures).toContain(atlasTexture);
+		expect(gl.boundTextures).not.toContain(standaloneTexture);
+		expect(gl.uniform1iValues).toContain(1);
+		expect(gl.uniform4fValues).toContainEqual([1, 2, 3, 4]);
+		expect(gl.uniform2fValues).toContainEqual([16, 16]);
+	});
+
+	it("keeps compacted replacement ahead of staged atlas routing", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+		const drawUnitsById = new Map<string, Webgl2WorldDrawUnit>([
+			[
+				"atlas",
+				createDrawUnit({
+					id: "atlas",
+					materialKind: "direct-texture",
+					texture: createTextureResource({} as WebGLTexture),
+					textureSamplingPolicy:
+						"wrap=clamp/clamp;filter=linear/linear/linear;color=none",
+					atlasEntryKey: "entry/a",
+				}),
+			],
+		]);
+
+		const metrics = submitWebgl2FlatWorldFrame({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			terrainBlendProgram: createTerrainBlendProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			atlasBackedCompactedProgram: createAtlasBackedCompactedProgram(),
+			atlasBackedCompactedResources: {
+				batches: [createAtlasBackedCompactedBatch(["atlas"])],
+				generation: createTextureAtlasGeneration({ atlasEntryKey: "entry/a" }),
+			},
+			drawUnitsById,
+			frame: createFrame(["atlas"]),
+		});
+
+		expect(metrics.atlasBackedCompactedReplacedDrawUnitCount).toBe(1);
+		expect(metrics.stagedAtlasDrawCount).toBe(0);
+		expect(metrics.stagedAtlasStandaloneDirectDrawCount).toBe(0);
+	});
+
+	it("falls back to standalone direct texture when staged atlas has no generation", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+		const standaloneTexture = {} as WebGLTexture;
+		const drawUnitsById = new Map<string, Webgl2WorldDrawUnit>([
+			[
+				"standalone",
+				createDrawUnit({
+					id: "standalone",
+					materialKind: "direct-texture",
+					texture: createTextureResource(standaloneTexture),
+					textureSamplingPolicy:
+						"wrap=clamp/clamp;filter=linear/linear/linear;color=none",
+					atlasEntryKey: "entry/a",
+				}),
+			],
+		]);
+
+		const metrics = submitWebgl2FlatWorldFrame({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			terrainBlendProgram: createTerrainBlendProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			drawUnitsById,
+			frame: createFrame(["standalone"]),
+		});
+
+		expect(metrics.stagedAtlasDrawCount).toBe(0);
+		expect(metrics.stagedAtlasStandaloneDirectDrawCount).toBe(1);
+		expect(metrics.stagedAtlasFallbackSamples).toContain(
+			"staged atlas missing texture atlas generation",
+		);
+		expect(gl.boundTextures).toContain(standaloneTexture);
+		expect(gl.uniform1iValues).toContain(0);
+	});
+
+	it("keeps repeat sampler draw units on standalone direct textures", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+		const standaloneTexture = {} as WebGLTexture;
+		const drawUnitsById = new Map<string, Webgl2WorldDrawUnit>([
+			[
+				"repeat",
+				createDrawUnit({
+					id: "repeat",
+					materialKind: "direct-texture",
+					texture: createTextureResource(standaloneTexture),
+					textureSamplingPolicy:
+						"wrap=repeat/repeat;filter=linear/linear/linear;color=none",
+					atlasEntryKey: "entry/a",
+				}),
+			],
+		]);
+
+		const metrics = submitWebgl2FlatWorldFrame({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			terrainBlendProgram: createTerrainBlendProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			atlasBackedCompactedResources: {
+				batches: [],
+				generation: createTextureAtlasGeneration({ atlasEntryKey: "entry/a" }),
+			},
+			drawUnitsById,
+			frame: createFrame(["repeat"]),
+		});
+
+		expect(metrics.stagedAtlasDrawCount).toBe(0);
+		expect(metrics.stagedAtlasStandaloneDirectDrawCount).toBe(1);
+		expect(metrics.stagedAtlasFallbackSamples[0]).toContain(
+			"unsupported sampler",
+		);
+		expect(gl.boundTextures).toContain(standaloneTexture);
 	});
 
 	it("replaces compacted static draw units through the default atlas submit path", () => {
@@ -476,6 +652,8 @@ function createDrawUnit({
 	texture = null,
 	indexedMaterial = null,
 	terrainBlend = null,
+	textureSamplingPolicy = null,
+	atlasEntryKey = null,
 	vertexArray = {} as WebGLVertexArrayObject,
 	kind = "static",
 	sceneDomain,
@@ -490,6 +668,8 @@ function createDrawUnit({
 	texture?: Webgl2WorldDrawUnit["texture"];
 	indexedMaterial?: Webgl2WorldDrawUnit["indexedMaterial"];
 	terrainBlend?: Webgl2WorldDrawUnit["terrainBlend"];
+	textureSamplingPolicy?: string | null;
+	atlasEntryKey?: string | null;
 	vertexArray?: WebGLVertexArrayObject;
 }): Webgl2WorldDrawUnit {
 	return {
@@ -532,9 +712,27 @@ function createDrawUnit({
 		materialKey,
 		materialFallbackReason: null,
 		materialBehavior: null,
-		textureSamplingPolicy: null,
+		textureSamplingPolicy,
 		textureUploadSample: null,
-		atlasEligibility: null,
+		atlasEligibility: atlasEntryKey
+			? {
+					atlasEntryKey,
+					materialSlotKey: `${materialKey}|slot`,
+					renderStateKey: "shader=atlas-color;blend=opaque;depth=write;alphaTest=0;side=front",
+					samplingKey: "wrap=vertex;filter=linear/linear/linear;color=linear;mips=atlas",
+					atlasEntry: {
+						renderSurfaceId: 1,
+						preparedTextureAssetId: "prepared-texture/00000001",
+						level: {
+							width: 1,
+							height: 1,
+							bytes: new Uint8Array([255, 255, 255, 255]),
+						},
+						sourceHash: "hash",
+						sourceFormatRaw: 0,
+					},
+				}
+			: null,
 		atlasCandidateSample: null,
 		textureKey: null,
 		texture,
@@ -588,6 +786,9 @@ function createTexturedProgram() {
 			uColor: {} as WebGLUniformLocation,
 			uAlphaTest: {} as WebGLUniformLocation,
 			uTexture: {} as WebGLUniformLocation,
+			uAtlasEnabled: {} as WebGLUniformLocation,
+			uAtlasRect: {} as WebGLUniformLocation,
+			uAtlasSize: {} as WebGLUniformLocation,
 			uDetailTexture: {} as WebGLUniformLocation,
 			uDetailTiling: {} as WebGLUniformLocation,
 			uDetailEnabled: {} as WebGLUniformLocation,
@@ -752,7 +953,26 @@ function createAtlasBackedCompactedBatch(
 	};
 }
 
-function createTextureAtlasGeneration(): Webgl2TextureAtlasGenerationResource {
+function createTextureResource(
+	texture: WebGLTexture,
+): NonNullable<Webgl2WorldDrawUnit["texture"]> {
+	return {
+		texture,
+		width: 1,
+		height: 1,
+		dispose() {
+			return;
+		},
+	};
+}
+
+function createTextureAtlasGeneration(
+	options: {
+		atlasEntryKey?: string;
+		texture?: WebGLTexture;
+	} = {},
+): Webgl2TextureAtlasGenerationResource {
+	const atlasEntryKey = options.atlasEntryKey ?? "entry/default";
 	return {
 		key: "generation",
 		textures: [
@@ -760,7 +980,7 @@ function createTextureAtlasGeneration(): Webgl2TextureAtlasGenerationResource {
 				key: "texture",
 				textureIndex: 0,
 				texture: {
-					texture: {} as WebGLTexture,
+					texture: options.texture ?? ({} as WebGLTexture),
 					width: 4,
 					height: 4,
 					dispose() {
@@ -770,6 +990,15 @@ function createTextureAtlasGeneration(): Webgl2TextureAtlasGenerationResource {
 				width: 4,
 				height: 4,
 				placementCount: 1,
+			},
+		],
+		placements: [
+			{
+				atlasEntryKey,
+				textureIndex: 0,
+				rect: [1, 2, 3, 4],
+				width: 16,
+				height: 16,
 			},
 		],
 		preparedTextureAssetIds: [],
@@ -842,6 +1071,10 @@ class CapturingSubmitGl implements Webgl2StateCacheGl {
 	readonly UNSIGNED_INT = 5125;
 	readonly calls: string[] = [];
 	readonly uniform4fvValues: number[][] = [];
+	readonly uniform4fValues: number[][] = [];
+	readonly uniform2fValues: number[][] = [];
+	readonly uniform1iValues: number[] = [];
+	readonly boundTextures: WebGLTexture[] = [];
 
 	asContext(): WebGL2RenderingContext {
 		return this as unknown as WebGL2RenderingContext;
@@ -859,8 +1092,9 @@ class CapturingSubmitGl implements Webgl2StateCacheGl {
 		this.calls.push("activeTexture");
 	}
 
-	bindTexture(): void {
+	bindTexture(_target: GLenum, texture: WebGLTexture): void {
 		this.calls.push("bindTexture");
+		this.boundTextures.push(texture);
 	}
 
 	enable(capability: GLenum): void {
@@ -924,12 +1158,29 @@ class CapturingSubmitGl implements Webgl2StateCacheGl {
 		this.calls.push("uniform1f");
 	}
 
-	uniform2f(): void {
+	uniform2f(
+		_location: WebGLUniformLocation,
+		x: number,
+		y: number,
+	): void {
 		this.calls.push("uniform2f");
+		this.uniform2fValues.push([x, y]);
 	}
 
-	uniform1i(): void {
+	uniform4f(
+		_location: WebGLUniformLocation,
+		x: number,
+		y: number,
+		z: number,
+		w: number,
+	): void {
+		this.calls.push("uniform4f");
+		this.uniform4fValues.push([x, y, z, w]);
+	}
+
+	uniform1i(_location: WebGLUniformLocation, value: number): void {
 		this.calls.push("uniform1i");
+		this.uniform1iValues.push(value);
 	}
 
 	drawElements(

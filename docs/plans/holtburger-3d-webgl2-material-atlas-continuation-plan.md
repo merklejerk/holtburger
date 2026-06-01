@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
-Status: Phase M7.1 complete; Phase M7 atlas-backed static draw substitution next.
+Status: Phase M7C complete; Phase M7D detail-overlay atlas support next.
 
 Related plans:
 
@@ -2976,7 +2976,7 @@ Cleanup targets:
 
 ### Phase M7C: Atlas-Backed Staged Direct Materials
 
-Status: Planned.
+Status: Complete.
 
 Purpose: allow staged direct-texture draw units that are not replaced by compacted geometry to sample
 from atlas textures instead of binding their standalone base texture. This is a texture-bind/resource
@@ -3029,6 +3029,57 @@ Decisions:
   M7D detail atlas bucket, keep those draw units on standalone staged textures until that phase lands.
 - Do not add compatibility shims or parallel material models. This should reuse the same texture-atlas
   entry and placement data as atlas-backed compacted geometry wherever possible.
+
+Progress:
+
+- Added texture-atlas placement metadata to `Webgl2TextureAtlasGenerationResource`, so both compacted
+  geometry and retained staged direct draws can resolve an atlas entry to a concrete atlas texture and
+  pixel rect.
+- Extended the staged textured shader with optional atlas rect/size uniforms. Standalone direct
+  textures still use author UVs unchanged; atlas-backed staged draws remap clamp-compatible UVs into
+  the shared base atlas.
+- Updated the WebGL2 submit path so compacted geometry replacement is evaluated first. Only retained
+  direct-texture draw units are considered for staged atlas binding.
+- Routed eligible retained direct-texture draw units to the shared base texture atlas when:
+  - the draw unit has atlas eligibility;
+  - the atlas generation has a placement for that atlas entry;
+  - the direct sampler is clamp/clamp;
+  - the draw unit has no detail overlay.
+- Added staged-atlas metrics for atlas-backed staged draws, standalone direct draws, estimated
+  standalone texture binds avoided, shared atlas texture count, and fallback samples.
+- Surfaced staged-atlas metrics in the render debug summary and material-type counters.
+- Added focused tests for atlas-backed staged direct submission, compacted replacement precedence,
+  missing-generation fallback, repeat-sampler fallback, and texture-atlas placement metadata.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts src/lib/world-display/webgl2-atlas-backed-compacted-submit.test.ts`
+- `npm run check`
+
+Decisions and implementation boundaries:
+
+- M7C intentionally supports clamp/clamp staged atlas sampling first. Repeat/wrap draw units remain on
+  standalone direct textures with explicit `staged atlas` fallback samples. This is intentional M7C
+  scope, not a discovered correctness failure.
+- Detail-overlay draw units remain on standalone staged direct textures. This is not optional debt;
+  M7D must add a separate detail texture-atlas bucket before those materials can safely move to an
+  atlas-backed path.
+- Next sequencing is M7D first, then M7D.1 repeat/wrap staged atlas support as a narrow follow-up
+  unless field metrics show repeat/wrap standalone direct draws dominate texture-bind pressure before
+  M7D.
+- The texture atlas generation is now the shared base texture-atlas resource. No staged-only atlas
+  resource or compatibility shim was introduced.
+
+Cleanup targets and legacy shims:
+
+- The staged textured shader now has atlas uniforms even for standalone direct draws. If future shader
+  variant count grows, consider splitting shader-source helpers before adding terrain/detail variants.
+- Staged-atlas bind avoidance is currently an estimate based on atlas-routed draw count, not a replay
+  of the standalone texture-binding sequence. Keep it as directional telemetry until field captures
+  show we need exact avoided-bind accounting.
+- The render-pipeline debug sentence is now carrying texture-atlas, compacted-geometry, and
+  atlas-backed submit fields. Split this into grouped report lines before adding the M7D detail atlas
+  counters.
 
 ### Phase M7D: Detail-Overlay Support for Atlas-Backed Compacted Direct Geometry
 
@@ -3097,6 +3148,36 @@ Decisions:
   the base direct RGBA atlas.
 - Do not fold terrain into this phase. Terrain uses a different material family and needs its own
   batching/compaction design.
+
+### Phase M7D.1: Repeat/Wrap Staged Atlas Sampling
+
+Status: Deferred follow-up after M7D unless metrics force it earlier.
+
+Purpose: allow atlas-backed staged direct draw units with repeat/wrap sampler policy to use the base
+texture atlas without bleeding into neighboring atlas entries or breaking the authored UV behavior.
+This is mostly a texture-bind/resource optimization for retained staged draws, so it should not
+preempt M7D unless reports show repeat/wrap standalone direct draws are the dominant remaining
+texture-bind cost.
+
+Tasks:
+
+- Audit staged-atlas fallback samples after M7D to quantify repeat/wrap pressure separately from
+  missing atlas placements and detail-overlay deferrals.
+- Extend the staged textured shader to repeat or clamp inside the atlas rect per sampler axis. The
+  repeat path must not sample outside the atlas entry or across gutters.
+- Validate derivatives/mipmap behavior for repeated atlas rect sampling. If derivatives produce
+  unacceptable bleeding or shimmer, either use an explicit derivative path or keep repeat staged
+  textures standalone with clear diagnostics.
+- Add tests for repeat/repeat, repeat/clamp, clamp/repeat, and clamp/clamp staged atlas sampling
+  decisions.
+- Keep compacted replacement precedence unchanged.
+
+Exit criteria:
+
+- Repeat/wrap staged direct draw units can use the base texture atlas with representative visual
+  parity, or the phase documents measured reasons to keep them standalone.
+- Debug reports distinguish repeat/wrap staged-atlas fallbacks from detail-overlay and missing-atlas
+  fallbacks.
 
 ### Phase M7E: Terrain Compaction Design and First Path
 

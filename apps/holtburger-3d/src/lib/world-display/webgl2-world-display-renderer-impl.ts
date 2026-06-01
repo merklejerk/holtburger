@@ -160,6 +160,9 @@ precision highp float;
 uniform vec4 uColor;
 uniform float uAlphaTest;
 uniform sampler2D uTexture;
+uniform int uAtlasEnabled;
+uniform vec4 uAtlasRect;
+uniform vec2 uAtlasSize;
 uniform sampler2D uDetailTexture;
 uniform float uDetailTiling;
 uniform int uDetailEnabled;
@@ -178,7 +181,10 @@ vec3 applyDetailOverlay(vec3 baseColor) {
 }
 
 void main() {
-	vec4 texel = texture(uTexture, vUv);
+	vec2 baseUv = uAtlasEnabled == 0
+		? vUv
+		: (uAtlasRect.xy + clamp(vUv, 0.0, 1.0) * uAtlasRect.zw) / uAtlasSize;
+	vec4 texel = texture(uTexture, baseUv);
 	vec4 color = texel * uColor;
 	if (color.a < uAlphaTest) {
 		discard;
@@ -1975,6 +1981,23 @@ function mergeSceneDomainSubmitMetrics({
 			...exteriorMetrics.atlasBackedCompactedSubmitFallbackSamples,
 			...interiorMetrics.atlasBackedCompactedSubmitFallbackSamples,
 		].slice(0, 8),
+		stagedAtlasDrawCount:
+			exteriorMetrics.stagedAtlasDrawCount +
+			interiorMetrics.stagedAtlasDrawCount,
+		stagedAtlasStandaloneDirectDrawCount:
+			exteriorMetrics.stagedAtlasStandaloneDirectDrawCount +
+			interiorMetrics.stagedAtlasStandaloneDirectDrawCount,
+		stagedAtlasEstimatedTextureBindAvoidedCount:
+			exteriorMetrics.stagedAtlasEstimatedTextureBindAvoidedCount +
+			interiorMetrics.stagedAtlasEstimatedTextureBindAvoidedCount,
+		stagedAtlasSharedTextureAtlasTextureCount: Math.max(
+			exteriorMetrics.stagedAtlasSharedTextureAtlasTextureCount,
+			interiorMetrics.stagedAtlasSharedTextureAtlasTextureCount,
+		),
+		stagedAtlasFallbackSamples: [
+			...exteriorMetrics.stagedAtlasFallbackSamples,
+			...interiorMetrics.stagedAtlasFallbackSamples,
+		].slice(0, 8),
 	};
 }
 
@@ -2153,6 +2176,9 @@ function createTexturedWorldProgram(
 			"uColor",
 			"uAlphaTest",
 			"uTexture",
+			"uAtlasEnabled",
+			"uAtlasRect",
+			"uAtlasSize",
 			"uDetailTexture",
 			"uDetailTiling",
 			"uDetailEnabled",

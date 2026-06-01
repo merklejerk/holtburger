@@ -305,6 +305,16 @@ export function createWebgl2RenderMetrics(
 			atlasBackedCompactedSubmitFallbackSamples: [
 				...input.submitMetrics.atlasBackedCompactedSubmitFallbackSamples,
 			],
+			stagedAtlasDrawCount: input.submitMetrics.stagedAtlasDrawCount,
+			stagedAtlasStandaloneDirectDrawCount:
+				input.submitMetrics.stagedAtlasStandaloneDirectDrawCount,
+			stagedAtlasEstimatedTextureBindAvoidedCount:
+				input.submitMetrics.stagedAtlasEstimatedTextureBindAvoidedCount,
+			stagedAtlasSharedTextureAtlasTextureCount:
+				input.submitMetrics.stagedAtlasSharedTextureAtlasTextureCount,
+			stagedAtlasFallbackSamples: [
+				...input.submitMetrics.stagedAtlasFallbackSamples,
+			],
 			textureVelocityPartCount: 0,
 			textureVelocityRenderGroupCount: 0,
 			textureVelocityMaterialCount: 0,
@@ -366,6 +376,14 @@ export function createWebgl2RenderMetrics(
 							input.submitMetrics.atlasBackedCompactedDrawCallSavingsCount,
 						"webgl2-atlas-backed-compacted-no-visible-routes":
 							input.submitMetrics.atlasBackedCompactedSubmitNoVisibleRouteCount,
+						"webgl2-staged-atlas-draws":
+							input.submitMetrics.stagedAtlasDrawCount,
+						"webgl2-staged-atlas-standalone-direct-draws":
+							input.submitMetrics.stagedAtlasStandaloneDirectDrawCount,
+						"webgl2-staged-atlas-estimated-texture-binds-avoided":
+							input.submitMetrics.stagedAtlasEstimatedTextureBindAvoidedCount,
+						"webgl2-staged-atlas-shared-texture-atlas-textures":
+							input.submitMetrics.stagedAtlasSharedTextureAtlasTextureCount,
 						"webgl2-detail-overlay": input.worldStore.detailTextureCount,
 						...prefixCounts(
 							"webgl2-visible-",

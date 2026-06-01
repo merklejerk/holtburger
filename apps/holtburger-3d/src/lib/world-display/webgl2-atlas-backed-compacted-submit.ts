@@ -64,23 +64,26 @@ export function planWebgl2AtlasBackedCompactedReplacement(options: {
 		return {
 			replaceableDrawUnitIds: new Set(),
 			noVisibleRouteCount: 0,
-			fallbackSamples: ["atlas-backed compacted submit missing atlas generation"],
+			fallbackSamples: ["baked submit missing texture atlas generation"],
 		};
 	}
 	if (options.resources.batches.length === 0) {
 		return {
 			replaceableDrawUnitIds: new Set(),
 			noVisibleRouteCount: 0,
-			fallbackSamples: ["atlas-backed compacted submit missing compacted batches"],
+			fallbackSamples: ["baked submit missing compacted geometry batches"],
 		};
 	}
 	for (const batch of options.resources.batches) {
-		if (batch.materialSlots.length > WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS) {
+		if (
+			batch.materialSlots.length >
+			WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS
+		) {
 			return {
 				replaceableDrawUnitIds: new Set(),
 				noVisibleRouteCount: 0,
 				fallbackSamples: [
-					`atlas-backed compacted submit material slots ${batch.materialSlots.length} exceed ${WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS}`,
+					`baked submit material slots ${batch.materialSlots.length} exceed ${WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS}`,
 				],
 			};
 		}
@@ -188,27 +191,31 @@ export function submitWebgl2AtlasBackedCompactedBatch({
 			if (!texture) {
 				metrics.fallbackSamples = [
 					...metrics.fallbackSamples,
-					`atlas-backed compacted draw slice ${slice.key} missing atlas texture ${slice.atlasTextureIndex}`,
+					`baked draw slice ${slice.key} missing atlas texture ${slice.atlasTextureIndex}`,
 				].slice(0, 8);
 				continue;
 			}
 			if (stateCache.bindTexture2D(0, texture.texture.texture)) {
 				// Counted as a state change in the aggregate submit path by callers.
 			}
-			const detailTexture = slice.detailAtlasTextureIndex == null
-				? null
-				: (resources.generation.detailTextures ?? []).find(
-						(candidate) =>
-							candidate.textureIndex === slice.detailAtlasTextureIndex,
-					);
+			const detailTexture =
+				slice.detailAtlasTextureIndex == null
+					? null
+					: (resources.generation.detailTextures ?? []).find(
+							(candidate) =>
+								candidate.textureIndex === slice.detailAtlasTextureIndex,
+						);
 			if (slice.detailAtlasTextureIndex != null && !detailTexture) {
 				metrics.fallbackSamples = [
 					...metrics.fallbackSamples,
-					`atlas-backed compacted draw slice ${slice.key} missing detail atlas texture ${slice.detailAtlasTextureIndex}`,
+					`baked draw slice ${slice.key} missing detail atlas texture ${slice.detailAtlasTextureIndex}`,
 				].slice(0, 8);
 				continue;
 			}
-			if (detailTexture && stateCache.bindTexture2D(1, detailTexture.texture.texture)) {
+			if (
+				detailTexture &&
+				stateCache.bindTexture2D(1, detailTexture.texture.texture)
+			) {
 				// Counted as a state change in the aggregate submit path by callers.
 			}
 			gl.uniform2f(program.uniforms.uAtlasSize, texture.width, texture.height);
@@ -238,15 +245,21 @@ function uploadAtlasBackedCompactedMaterialRects(
 	program: Webgl2AtlasBackedCompactedWorldProgram,
 	batch: Webgl2AtlasBackedCompactedBatchResource,
 ): void {
-	const rects = new Float32Array(WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS * 4);
+	const rects = new Float32Array(
+		WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS * 4,
+	);
 	const detailRects = new Float32Array(
 		WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS * 4,
 	);
 	const wrapModes = new Int32Array(
 		WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS * 2,
 	);
-	const detailTilings = new Float32Array(WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS);
-	const detailEnabled = new Int32Array(WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS);
+	const detailTilings = new Float32Array(
+		WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS,
+	);
+	const detailEnabled = new Int32Array(
+		WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS,
+	);
 	for (const slot of batch.materialSlots) {
 		rects.set(slot.atlasRect, slot.index * 4);
 		wrapModes.set(
@@ -274,5 +287,5 @@ function indexTypeByteLength(
 	if (indexType === gl.UNSIGNED_INT) {
 		return 4;
 	}
-	throw new Error(`Unsupported atlas-backed compacted index type ${indexType}.`);
+	throw new Error(`Unsupported baked submit index type ${indexType}.`);
 }

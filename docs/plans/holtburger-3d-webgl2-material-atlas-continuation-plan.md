@@ -3628,7 +3628,8 @@ Introduced cleanup targets and legacy shims:
 
 ### Phase M7D.2: Baked Terminology and Boundary Rename
 
-Status: Next.
+Status: Implemented on 2026-06-01 for active debug/user-facing terminology; DTO field renames
+deferred as explicit legacy shim cleanup.
 
 Purpose: update active code and docs terminology around the new renderer boundary. "Texture page" is
 the shared material-resource abstraction for direct draw and baked draw. "Baked" specifically means
@@ -3667,9 +3668,53 @@ Exit criteria:
 - There are no active code paths or tests that describe a renderable as "baked" merely because it
   samples a packed texture page.
 
+Progress on 2026-06-01:
+
+- Updated active browser debug text so promoted compacted/material-table submission is reported as
+  baked candidates, baked batches, baked draws/slices, baked shader draws, baked draw-call math,
+  baked replaced/submitted triangles, baked bypasses, and baked submit/resource fallbacks.
+- Renamed debug metric labels emitted in `materialTypeCounts` from `webgl2-atlas-backed-compacted-*`
+  and `webgl2-atlas-backed-compaction-*` to `webgl2-baked-*` where they describe promoted draw
+  pressure rather than concrete atlas texture resources.
+- Updated active baked submit fallback samples from "atlas-backed compacted submit ..." to "baked
+  submit ...". Missing atlas texture/detail atlas texture fallbacks still name atlas textures because
+  those are concrete texture-page resources used by the current baked family.
+- Updated renderer graph lease/debug labels for landblock-scoped promoted batches to "webgl2 baked
+  landblock batch".
+- Updated bake-candidate bypass samples to describe blockers as baked-geometry blockers rather than
+  "atlas-backed compacted geometry" blockers.
+
+Decisions and course corrections:
+
+- Kept low-level implementation module/type names such as `webgl2-atlas-backed-compacted-submit` and
+  `AtlasBackedCompactionPlan` for now. Those names still describe the current concrete implementation
+  family and changing them touches a broad API surface.
+- Kept `atlasBackedCompacted*`, `atlasBackedCompaction*`, and `compactedGeometry*` DTO fields as
+  compatibility shims. The visible/debug labels now say baked, but the structural field rename should
+  be a dedicated follow-up to avoid a large compatibility layer.
+- Did not rename packed-atlas resource labels, base/detail atlas texture counts, or atlas eligibility
+  diagnostics when they refer to concrete texture-page resources rather than baked renderable
+  categories.
+
+Validation:
+
+- `npm exec vitest -- src/lib/world-display/atlas-backed-compaction-planner.test.ts src/lib/world-display/webgl2-atlas-backed-compacted-submit.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts --run`
+- `npm exec tsc -- --noEmit`
+
+Introduced cleanup targets and legacy shims:
+
+- Rename `atlasBackedCompacted*`, `atlasBackedCompaction*`, and submit/resource DTO fields to baked
+  terminology in a focused follow-up once downstream debug consumers are ready. Until then they are
+  legacy structural names over baked renderable metrics.
+- Rename implementation modules only when the current baked family no longer needs the concrete
+  "atlas-backed compacted" qualifier to distinguish it from future baked indexed, terrain, or
+  transparent families.
+- Keep future metric additions in baked/direct-draw terminology at the boundary. Do not add new
+  user-facing `atlas-backed compacted` metric labels.
+
 ### Phase M7D.3: Unified Bake Eligibility
 
-Status: Planned.
+Status: Next.
 
 Purpose: make bake planning consume the shared texture-page binding model while requiring
 compacted-geometry compatibility. A renderable should not be promoted into the baked path unless the

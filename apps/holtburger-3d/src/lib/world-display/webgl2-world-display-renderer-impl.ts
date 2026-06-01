@@ -2350,7 +2350,7 @@ function createAtlasBackedCompactedWorldProgram(
 	gl: WebGL2RenderingContext,
 ): Webgl2AtlasBackedCompactedWorldProgram {
 	return createWebgl2Program(gl, {
-		label: "webgl2 atlas-backed compacted world",
+		label: "webgl2 baked world",
 		vertexSource: ATLAS_STATIC_WORLD_VERTEX_SHADER,
 		fragmentSource: ATLAS_STATIC_WORLD_FRAGMENT_SHADER,
 		attributes: ["position", "uv", "materialSlot"],

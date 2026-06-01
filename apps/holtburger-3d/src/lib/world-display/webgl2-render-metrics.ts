@@ -361,9 +361,9 @@ export function createWebgl2RenderMetrics(
 							input.worldStore.directTextureDrawUnitCount,
 						"webgl2-atlas-eligible":
 							input.worldStore.atlasEligibleMaterialCount,
-						"webgl2-atlas-backed-compaction-compactable":
+						"webgl2-baked-candidates":
 							input.worldStore.atlasBackedCompactionCompactableDrawUnitCount,
-						"webgl2-atlas-backed-compaction-bypassed":
+						"webgl2-baked-bypasses":
 							input.worldStore.atlasBackedCompactionBypassReasonCount,
 						"webgl2-texture-atlas-generation-textures":
 							input.worldStore.textureAtlasGenerationTextureCount,
@@ -379,28 +379,28 @@ export function createWebgl2RenderMetrics(
 							input.worldStore.compactedGeometryBatchOriginCount,
 						"webgl2-compacted-geometry-transform-table-entries":
 							input.worldStore.compactedGeometryTransformTableEntryCount,
-						"webgl2-atlas-backed-compacted-shader-draws":
+						"webgl2-baked-shader-draws":
 							input.submitMetrics.atlasBackedCompactedShaderDrawCallCount,
-						"webgl2-atlas-backed-compacted-submitted-batches":
+						"webgl2-baked-submitted-batches":
 							input.submitMetrics.atlasBackedCompactedSubmittedBatchCount,
-						"webgl2-atlas-backed-compacted-submitted-slices":
+						"webgl2-baked-submitted-slices":
 							input.submitMetrics.atlasBackedCompactedSubmittedDrawSliceCount,
-						"webgl2-atlas-backed-compacted-submitted-slice-draw-units":
+						"webgl2-baked-submitted-slice-draw-units":
 							input.submitMetrics
 								.atlasBackedCompactedSubmittedSliceRepresentedDrawUnitCount,
-						"webgl2-atlas-backed-compacted-submitted-triangles":
+						"webgl2-baked-submitted-triangles":
 							input.submitMetrics.atlasBackedCompactedSubmittedTriangleCount,
-						"webgl2-atlas-backed-compacted-replaced-draw-units":
+						"webgl2-baked-replaced-draw-units":
 							input.submitMetrics.atlasBackedCompactedReplacedDrawUnitCount,
-						"webgl2-atlas-backed-compacted-replaced-triangles":
+						"webgl2-baked-replaced-triangles":
 							input.submitMetrics
 								.atlasBackedCompactedReplacedDrawUnitTriangleCount,
-						"webgl2-atlas-backed-compacted-conservative-overdraw-triangles":
+						"webgl2-baked-conservative-overdraw-triangles":
 							input.submitMetrics
 								.atlasBackedCompactedConservativeOverdrawTriangleCount,
-						"webgl2-atlas-backed-compacted-draw-call-savings":
+						"webgl2-baked-draw-call-savings":
 							input.submitMetrics.atlasBackedCompactedDrawCallSavingsCount,
-						"webgl2-atlas-backed-compacted-no-visible-routes":
+						"webgl2-baked-no-visible-routes":
 							input.submitMetrics.atlasBackedCompactedSubmitNoVisibleRouteCount,
 						"webgl2-staged-atlas-draws":
 							input.submitMetrics.stagedAtlasDrawCount,

@@ -264,7 +264,8 @@ export function planAtlasBackedCompaction(options: {
 			detailAtlasEntryKeys: detailEntries
 				.filter((entry) =>
 					compactable.some(
-						(candidate) => candidate.drawUnit.detailAtlasEntry?.key === entry.key,
+						(candidate) =>
+							candidate.drawUnit.detailAtlasEntry?.key === entry.key,
 					),
 				)
 				.map((entry) => entry.key),
@@ -336,7 +337,7 @@ function classifyAtlasBackedCompactionBypass(
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "non-static",
-				detail: `draw unit kind ${drawUnit.kind} is not compacted atlas geometry`,
+				detail: `draw unit kind ${drawUnit.kind} is not baked geometry`,
 			};
 		}
 	}
@@ -344,7 +345,7 @@ function classifyAtlasBackedCompactionBypass(
 		return {
 			drawUnitId: drawUnit.id,
 			reason: "missing-landblock-origin",
-			detail: "atlas-backed compacted geometry draw unit has no owning landblock",
+			detail: "baked geometry draw unit has no owning landblock",
 		};
 	}
 	if (drawUnit.materialKind !== "direct-texture") {
@@ -358,14 +359,15 @@ function classifyAtlasBackedCompactionBypass(
 		return {
 			drawUnitId: drawUnit.id,
 			reason: "missing-uv-buffer",
-			detail: "direct texture atlas-backed compacted geometry draw unit has no UV buffer",
+			detail: "direct texture baked geometry draw unit has no UV buffer",
 		};
 	}
 	if (!drawUnit.atlasEligibility) {
 		return {
 			drawUnitId: drawUnit.id,
 			reason: "missing-atlas-eligibility",
-			detail: "direct texture atlas-backed compacted geometry draw unit has no atlas eligibility",
+			detail:
+				"direct texture baked geometry draw unit has no packed texture-page eligibility",
 		};
 	}
 	if (drawUnit.hasDetailOverlay && !drawUnit.detailAtlasEntry) {
@@ -518,7 +520,9 @@ function createAtlasBackedCompactionDrawSlices(
 		}
 	>();
 	for (const candidate of candidates) {
-		const slot = materialSlotByKey.get(describeCompactionMaterialSlotKey(candidate));
+		const slot = materialSlotByKey.get(
+			describeCompactionMaterialSlotKey(candidate),
+		);
 		if (!slot) {
 			continue;
 		}
@@ -526,8 +530,8 @@ function createAtlasBackedCompactionDrawSlices(
 			placementsByEntryKey.get(candidate.eligibility.atlasEntryKey)
 				?.textureIndex ?? 0;
 		const detailAtlasTextureIndex = slot.detailAtlasEntryKey
-			? (detailPlacementsByEntryKey.get(slot.detailAtlasEntryKey)?.textureIndex ??
-				null)
+			? (detailPlacementsByEntryKey.get(slot.detailAtlasEntryKey)
+					?.textureIndex ?? null)
 			: null;
 		const key = [
 			atlasTextureIndex,

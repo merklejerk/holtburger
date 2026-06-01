@@ -670,9 +670,7 @@ function submitAtlasBackedCompactedDrawUnits({
 		resources.generation &&
 		replaceableDrawUnitIds.size > 0
 	) {
-		fallbackSamples.push(
-			"atlas-backed compacted submit missing shader program",
-		);
+		fallbackSamples.push("baked submit missing shader program");
 	}
 	const emptyAtlasMetrics =
 		createEmptyWebgl2AtlasBackedCompactedSubmitMetrics();

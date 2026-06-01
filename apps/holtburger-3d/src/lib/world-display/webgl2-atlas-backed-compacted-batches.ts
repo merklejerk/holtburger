@@ -142,7 +142,7 @@ export function updateWebgl2AtlasBackedCompactedBatchDynamicTables(
 ): void {
 	if (batch.key !== geometry.key) {
 		throw new Error(
-			`Cannot update atlas-backed compacted batch ${batch.key} with geometry ${geometry.key}.`,
+			`Cannot update baked batch ${batch.key} with geometry ${geometry.key}.`,
 		);
 	}
 	batch.batchModelMatrix = geometry.batchModelMatrix;

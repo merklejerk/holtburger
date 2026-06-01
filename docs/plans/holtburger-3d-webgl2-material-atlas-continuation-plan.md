@@ -4197,7 +4197,7 @@ Verification:
 
 ### Phase M7D.5: Indexed and Palette Texture-Page Integration
 
-Status: Next.
+Status: Complete.
 
 Purpose: indexed/paletted is the largest visible retained-direct sampling family in the M7D.4a
 capture (`2068` visible retained draw units; `5964` total retained draw units). Finish validating the
@@ -4240,6 +4240,95 @@ Exit criteria:
   bypass, and it can express indexed plus alpha-policy combinations.
 - If baked indexed submission remains deferred, the blocker is the baked indexed shader/material table
   rather than texture-page resource modeling.
+
+Progress:
+
+- Added explicit indexed texture-page readiness to baked eligibility. Indexed/paletted draw units now
+  require both an `indexed-texels` / `indexed-data` page and a `palette-lookup` / `palette-data` page
+  before they are considered resource-ready for a future baked indexed path.
+- Indexed texel and palette readiness requires exact data-page policy: nearest filtering, no mipmaps,
+  data sampling domain, and exact lookup semantics. This matches the direct indexed shader contract
+  where palette-aware filtering is shader-owned.
+- Added `alphaPolicy` to baked material eligibility so sampling family and alpha behavior are no
+  longer collapsed into one axis. Indexed/paletted materials can now report `opaque`, `cutout`,
+  `transparent-blend`, `opacity-translucent`, or `unknown` alpha policy while remaining in the
+  indexed sampling family.
+- Added explicit blockers for indexed resource/modeling gaps:
+  - `missing-indexed-texel-page`;
+  - `missing-indexed-palette-page`;
+  - `unsupported-texture-page-behavior` for indexed/palette pages that lose exact data semantics;
+  - `indexed-alpha-policy-unsupported` when indexed materials have non-opaque alpha policy before the
+    baked indexed alpha contract exists.
+- Added baked coverage metrics for material alpha policy and material-family plus alpha-policy
+  combinations. The browser render-pipeline report now includes retained `family/alpha` counts so a
+  capture can distinguish `indexed-paletted|alpha=opaque` from indexed cutout/blend pressure.
+- Added focused planner tests proving:
+  - direct indexed texture-page readiness is separate from the missing baked indexed shader family;
+  - missing palette pages are named resource blockers;
+  - indexed sampling and alpha policy are orthogonal bake facts.
+
+Decisions:
+
+- Direct indexed rendering remains the proof path. It already samples indexed texel and palette
+  resources through texture-page records, so M7D.5 does not change WebGL submit behavior.
+- Baked indexed submission remains deferred. The current blocker is now intentionally the missing
+  baked indexed shader/material-table contract, not direct texture-page modeling.
+- Initial baked indexed implementation should start with `indexed-paletted|alpha=opaque`. Indexed
+  cutout/blend/opacity should stay direct with named alpha-policy blockers until the alpha render
+  policy is designed.
+- Keep indexed/paletted as the sampling family and alpha as a render-policy axis. Do not introduce
+  separate "indexed-alpha-test" or "indexed-blended" families.
+
+Course Corrections:
+
+- M7D.5 was originally phrased like it might include actual baked indexed shader support. The
+  implementation confirmed that this should be a separate phase: the direct texture-page model is now
+  ready, but baked indexed needs material-table encoding, shader uniforms, and submit-path branching.
+
+Cleanup Targets:
+
+- The direct indexed submit path still names some values as index textures and palette textures
+  internally. That is acceptable at the GL binding boundary, but renderer-facing diagnostics should
+  continue using texture-page terminology.
+- Baked diagnostics now expose family/alpha string keys for report output. Keep those strings at the
+  diagnostic boundary; do not feed them back into hot-path behavior.
+- The existing direct packed base-page fallback for missing placed entries remains unrelated debt and
+  should be handled before evaluating direct packed-page savings.
+
+Validation:
+
+- `npm exec tsc -- --noEmit`
+- `npm exec vitest -- src/lib/world-display/baked-renderable-planner.test.ts src/lib/world-display/texture-page-binding.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-transition-portal-work.test.ts --run`
+
+### Phase M7D.5a: Baked Indexed Material-Table Prep
+
+Status: Next.
+
+Purpose: convert the now-proven indexed texture-page facts into a concrete baked indexed material-table
+and submit design before writing the shader. This is an immediate prep phase because adding baked
+indexed support directly in M7D.6 would mix sampling-family work with alpha/blend policy work.
+
+Tasks:
+
+- Define the baked indexed material-table record for the first supported slice:
+  `indexed-paletted|alpha=opaque`.
+- Include index page handle, palette page handle, palette dimensions, source texture dimensions, clip
+  threshold, wrap flags, index format, and shader-owned filtering mode.
+- Decide whether the existing baked geometry compacted VBA and draw-slice layout can be reused with a
+  shader/material-table variant, or whether indexed slices need a separate submit bucket.
+- Add an eligibility gate that can accept indexed opaque only when indexed texture-page readiness is
+  complete and geometry is compactable.
+- Keep indexed cutout/blend/opacity direct with `indexed-alpha-policy-unsupported` until the alpha
+  render-policy phase lands.
+- Add tests for material-table record construction, indexed opaque eligibility acceptance behind the
+  new submit design, and retained-direct blockers for indexed alpha modes.
+
+Exit criteria:
+
+- The first baked indexed material-table shape is typed and tested.
+- The submit-path split for indexed baked slices is decided before shader work starts.
+- Indexed alpha modes remain explicit retained-direct blockers rather than falling back to generic
+  indexed unsupported.
 
 ### Phase M7D.6: Alpha/Blend Material Policy and Texture-Page Integration
 

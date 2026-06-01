@@ -174,7 +174,13 @@ export interface Webgl2WorldResourceStore {
 	bakedCoverageMaterialBlockerCounts: Record<string, number>;
 	bakedCoverageGeometryBlockerCounts: Record<string, number>;
 	bakedCoverageMaterialFamilyCounts: Record<string, number>;
+	bakedCoverageMaterialAlphaPolicyCounts: Record<string, number>;
+	bakedCoverageMaterialFamilyAlphaPolicyCounts: Record<string, number>;
 	bakedCoverageRetainedDirectMaterialFamilyCounts: Record<string, number>;
+	bakedCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts: Record<
+		string,
+		number
+	>;
 	textureAtlasGenerationTextureCount: number;
 	detailTextureAtlasGenerationTextureCount: number;
 	bakedGeometryBatchCount: number;
@@ -285,7 +291,10 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		bakedCoverageMaterialBlockerCounts: {},
 		bakedCoverageGeometryBlockerCounts: {},
 		bakedCoverageMaterialFamilyCounts: {},
+		bakedCoverageMaterialAlphaPolicyCounts: {},
+		bakedCoverageMaterialFamilyAlphaPolicyCounts: {},
 		bakedCoverageRetainedDirectMaterialFamilyCounts: {},
+		bakedCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts: {},
 		textureAtlasGenerationTextureCount: 0,
 		detailTextureAtlasGenerationTextureCount: 0,
 		bakedGeometryBatchCount: 0,
@@ -489,8 +498,14 @@ export function syncWebgl2WorldResources({
 		bakedCoverageMetrics.geometryBlockerCounts;
 	store.bakedCoverageMaterialFamilyCounts =
 		bakedCoverageMetrics.materialFamilyCounts;
+	store.bakedCoverageMaterialAlphaPolicyCounts =
+		bakedCoverageMetrics.materialAlphaPolicyCounts;
+	store.bakedCoverageMaterialFamilyAlphaPolicyCounts =
+		bakedCoverageMetrics.materialFamilyAlphaPolicyCounts;
 	store.bakedCoverageRetainedDirectMaterialFamilyCounts =
 		bakedCoverageMetrics.retainedDirectMaterialFamilyCounts;
+	store.bakedCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts =
+		bakedCoverageMetrics.retainedDirectMaterialFamilyAlphaPolicyCounts;
 	syncWebgl2TextureAtlasGeneration({
 		gl,
 		store,
@@ -601,7 +616,10 @@ export function destroyWebgl2WorldResources(
 	store.bakedCoverageMaterialBlockerCounts = {};
 	store.bakedCoverageGeometryBlockerCounts = {};
 	store.bakedCoverageMaterialFamilyCounts = {};
+	store.bakedCoverageMaterialAlphaPolicyCounts = {};
+	store.bakedCoverageMaterialFamilyAlphaPolicyCounts = {};
 	store.bakedCoverageRetainedDirectMaterialFamilyCounts = {};
+	store.bakedCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts = {};
 	store.textureAtlasGenerationTextureCount = 0;
 	store.detailTextureAtlasGenerationTextureCount = 0;
 	store.bakedGeometryBatchCount = 0;
@@ -1753,14 +1771,23 @@ function collectBakedCoverageMetrics(
 	materialBlockerCounts: Record<string, number>;
 	geometryBlockerCounts: Record<string, number>;
 	materialFamilyCounts: Record<string, number>;
+	materialAlphaPolicyCounts: Record<string, number>;
+	materialFamilyAlphaPolicyCounts: Record<string, number>;
 	retainedDirectMaterialFamilyCounts: Record<string, number>;
+	retainedDirectMaterialFamilyAlphaPolicyCounts: Record<string, number>;
 } {
 	const drawUnitCounts: Record<string, number> = {};
 	const materialBlockers: string[] = [];
 	const geometryBlockers: string[] = [];
 	const materialFamilies: string[] = [];
+	const materialAlphaPolicies: string[] = [];
+	const materialFamilyAlphaPolicies: string[] = [];
 	const retainedDirectMaterialFamilies: string[] = [];
+	const retainedDirectMaterialFamilyAlphaPolicies: string[] = [];
 	for (const drawUnit of drawUnits) {
+		const materialFamily = drawUnit.bakeEligibility.material.family;
+		const alphaPolicy = drawUnit.bakeEligibility.material.alphaPolicy;
+		const materialFamilyAlphaPolicy = `${materialFamily}|alpha=${alphaPolicy}`;
 		incrementCount(drawUnitCounts, "total");
 		if (
 			drawUnit.kind === "static" ||
@@ -1781,11 +1808,14 @@ function collectBakedCoverageMetrics(
 					"static-or-structured-retained-direct",
 				);
 			}
-			retainedDirectMaterialFamilies.push(
-				drawUnit.bakeEligibility.material.family,
+			retainedDirectMaterialFamilies.push(materialFamily);
+			retainedDirectMaterialFamilyAlphaPolicies.push(
+				materialFamilyAlphaPolicy,
 			);
 		}
-		materialFamilies.push(drawUnit.bakeEligibility.material.family);
+		materialFamilies.push(materialFamily);
+		materialAlphaPolicies.push(alphaPolicy);
+		materialFamilyAlphaPolicies.push(materialFamilyAlphaPolicy);
 		materialBlockers.push(...drawUnit.bakeEligibility.material.blockers);
 		geometryBlockers.push(...drawUnit.bakeEligibility.geometry.blockers);
 	}
@@ -1794,8 +1824,15 @@ function collectBakedCoverageMetrics(
 		materialBlockerCounts: countStringOccurrences(materialBlockers),
 		geometryBlockerCounts: countStringOccurrences(geometryBlockers),
 		materialFamilyCounts: countStringOccurrences(materialFamilies),
+		materialAlphaPolicyCounts: countStringOccurrences(materialAlphaPolicies),
+		materialFamilyAlphaPolicyCounts: countStringOccurrences(
+			materialFamilyAlphaPolicies,
+		),
 		retainedDirectMaterialFamilyCounts: countStringOccurrences(
 			retainedDirectMaterialFamilies,
+		),
+		retainedDirectMaterialFamilyAlphaPolicyCounts: countStringOccurrences(
+			retainedDirectMaterialFamilyAlphaPolicies,
 		),
 	};
 }

@@ -775,6 +775,7 @@ function createDrawUnit({
 								: "flat-constant-color",
 				compatible: false,
 				blockers: ["missing-base-texture-page"],
+				alphaPolicy: "opaque",
 				atlasEligibility: null,
 				detailAtlasEntry: null,
 			},

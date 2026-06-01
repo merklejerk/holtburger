@@ -86,8 +86,13 @@ describe("planWebgl2AtlasBackedCompactedReplacement", () => {
 								index,
 								atlasTextureIndex: 0,
 								atlasRect: [0, 0, 1, 1],
+								detailAtlasTextureIndex: null,
+								detailAtlasRect: [0, 0, 1, 1],
+								detailTiling: 1,
 								renderStateKey: "opaque",
 								samplingKey: "sampling",
+								wrapS: "clamp",
+								wrapT: "clamp",
 							}),
 						),
 					},
@@ -131,6 +136,7 @@ describe("planWebgl2AtlasBackedCompactedReplacement", () => {
 		expect(gl.uniform4fvLengths).toEqual([128 * 4, 128 * 4]);
 		expect(gl.uniform1fvLengths).toEqual([128]);
 		expect(gl.uniform1ivLengths).toEqual([128]);
+		expect(gl.uniform2ivLengths).toEqual([128 * 2]);
 		expect(gl.uniformMatrix4fvLengths).toEqual([16, 16]);
 	});
 
@@ -187,6 +193,8 @@ function createBatch(
 				detailTiling: 8,
 				renderStateKey: "opaque",
 				samplingKey: "sampling",
+				wrapS: "repeat",
+				wrapT: "clamp",
 			},
 		],
 		batchModelMatrix: new Float32Array(16),
@@ -285,6 +293,7 @@ function createProgram(): Webgl2AtlasBackedCompactedWorldProgram {
 			uDetailAtlasTexture: {} as WebGLUniformLocation,
 			uDetailAtlasSize: {} as WebGLUniformLocation,
 			uMaterialRects: {} as WebGLUniformLocation,
+			uMaterialWrapModes: {} as WebGLUniformLocation,
 			uDetailMaterialRects: {} as WebGLUniformLocation,
 			uDetailMaterialTilings: {} as WebGLUniformLocation,
 			uDetailMaterialEnabled: {} as WebGLUniformLocation,
@@ -315,6 +324,7 @@ class FakeAtlasSubmitGl {
 	readonly uniform4fvLengths: number[] = [];
 	readonly uniform1fvLengths: number[] = [];
 	readonly uniform1ivLengths: number[] = [];
+	readonly uniform2ivLengths: number[] = [];
 	readonly uniformMatrix4fvLengths: number[] = [];
 
 	asContext(): WebGL2RenderingContext {
@@ -355,6 +365,10 @@ class FakeAtlasSubmitGl {
 
 	uniform1iv(_location: WebGLUniformLocation, value: Int32Array): void {
 		this.uniform1ivLengths.push(value.length);
+	}
+
+	uniform2iv(_location: WebGLUniformLocation, value: Int32Array): void {
+		this.uniform2ivLengths.push(value.length);
 	}
 
 	uniformMatrix4fv(

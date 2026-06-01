@@ -15,6 +15,7 @@ export type Webgl2AtlasBackedCompactedWorldProgram = Webgl2ProgramResource<
 	| "uDetailAtlasTexture"
 	| "uDetailAtlasSize"
 	| "uMaterialRects"
+	| "uMaterialWrapModes"
 	| "uDetailMaterialRects"
 	| "uDetailMaterialTilings"
 	| "uDetailMaterialEnabled"
@@ -241,15 +242,23 @@ function uploadAtlasBackedCompactedMaterialRects(
 	const detailRects = new Float32Array(
 		WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS * 4,
 	);
+	const wrapModes = new Int32Array(
+		WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS * 2,
+	);
 	const detailTilings = new Float32Array(WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS);
 	const detailEnabled = new Int32Array(WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS);
 	for (const slot of batch.materialSlots) {
 		rects.set(slot.atlasRect, slot.index * 4);
+		wrapModes.set(
+			[slot.wrapS === "repeat" ? 1 : 0, slot.wrapT === "repeat" ? 1 : 0],
+			slot.index * 2,
+		);
 		detailRects.set(slot.detailAtlasRect ?? [0, 0, 1, 1], slot.index * 4);
 		detailTilings[slot.index] = slot.detailTiling ?? 1;
 		detailEnabled[slot.index] = slot.detailAtlasTextureIndex == null ? 0 : 1;
 	}
 	gl.uniform4fv(program.uniforms.uMaterialRects, rects);
+	gl.uniform2iv(program.uniforms.uMaterialWrapModes, wrapModes);
 	gl.uniform4fv(program.uniforms.uDetailMaterialRects, detailRects);
 	gl.uniform1fv(program.uniforms.uDetailMaterialTilings, detailTilings);
 	gl.uniform1iv(program.uniforms.uDetailMaterialEnabled, detailEnabled);

@@ -719,7 +719,9 @@ function createDrawUnit({
 					atlasEntryKey,
 					materialSlotKey: `${materialKey}|slot`,
 					renderStateKey: "shader=atlas-color;blend=opaque;depth=write;alphaTest=0;side=front",
-					samplingKey: "wrap=vertex;filter=linear/linear/linear;color=linear;mips=atlas",
+					samplingKey:
+						"wrap=clamp/clamp;filter=linear/linear/linear;color=linear;mips=atlas",
+					samplingPolicy: { wrapS: "clamp", wrapT: "clamp" },
 					atlasEntry: {
 						renderSurfaceId: 1,
 						preparedTextureAssetId: "prepared-texture/00000001",
@@ -921,8 +923,13 @@ function createAtlasBackedCompactedBatch(
 				index: 0,
 				atlasTextureIndex: 0,
 				atlasRect: [0, 0, 1, 1],
+				detailAtlasTextureIndex: null,
+				detailAtlasRect: [0, 0, 1, 1],
+				detailTiling: 1,
 				renderStateKey: "opaque",
 				samplingKey: "sampling",
+				wrapS: "clamp",
+				wrapT: "clamp",
 			},
 		],
 		batchModelMatrix: createIdentityMat4(),
@@ -930,6 +937,7 @@ function createAtlasBackedCompactedBatch(
 			{
 				key: "slice",
 				atlasTextureIndex: 0,
+				detailAtlasTextureIndex: null,
 				renderStateKey: "opaque",
 				firstIndex: 0,
 				indexCount,
@@ -1181,6 +1189,18 @@ class CapturingSubmitGl implements Webgl2StateCacheGl {
 	uniform1i(_location: WebGLUniformLocation, value: number): void {
 		this.calls.push("uniform1i");
 		this.uniform1iValues.push(value);
+	}
+
+	uniform1fv(): void {
+		this.calls.push("uniform1fv");
+	}
+
+	uniform1iv(): void {
+		this.calls.push("uniform1iv");
+	}
+
+	uniform2iv(): void {
+		this.calls.push("uniform2iv");
 	}
 
 	drawElements(

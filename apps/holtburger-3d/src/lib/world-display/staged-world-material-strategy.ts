@@ -38,6 +38,7 @@ import {
 	createDefaultMaterialTextureSamplingPolicy,
 	selectVariantTextureSamplingPolicy,
 	type TextureFilteringMode,
+	type TextureWrapMode,
 } from "./texture-sampling-policy";
 import { planAtlasLayout, type AtlasTexturePage } from "./atlas-layout-planner";
 
@@ -121,7 +122,13 @@ export interface StagedWorldMaterialAtlasEligibility {
 	atlasEntryKey: string;
 	renderStateKey: string;
 	samplingKey: string;
+	samplingPolicy: StagedWorldAtlasSamplingPolicy;
 	atlasEntry: StagedWorldAtlasCandidateStrategy["atlasEntry"];
+}
+
+export interface StagedWorldAtlasSamplingPolicy {
+	wrapS: TextureWrapMode;
+	wrapT: TextureWrapMode;
 }
 
 export interface StagedWorldDirectTextureMaterialStrategy {
@@ -530,7 +537,20 @@ export function resolveStagedWorldMaterialStrategy(options: {
 		recipe,
 		hasSourceAlpha: hasSourceAlpha(surface.formatRaw),
 	});
-	const samplingKey = describeAtlasSamplingKey();
+	const samplingPolicy = selectVariantTextureSamplingPolicy(
+		surface,
+		createDefaultMaterialTextureSamplingPolicy(
+			options.textureCapabilities ??
+				defaultStagedWorldMaterialTextureCapabilities(),
+			options.textureFilteringMode,
+		),
+		options.input.slot.materialVariantSignature,
+	);
+	const atlasSamplingPolicy = {
+		wrapS: samplingPolicy.wrapS,
+		wrapT: samplingPolicy.wrapT,
+	} satisfies StagedWorldAtlasSamplingPolicy;
+	const samplingKey = describeAtlasSamplingKey(atlasSamplingPolicy);
 	const renderStateKey = describeAtlasRenderStateKey(behaviorWithAlpha);
 	const atlasEntryKey = describeAtlasEntryKey({
 		renderSurface: surface,
@@ -561,6 +581,7 @@ export function resolveStagedWorldMaterialStrategy(options: {
 					atlasEntryKey,
 					renderStateKey,
 					samplingKey,
+					samplingPolicy: atlasSamplingPolicy,
 					atlasEntry: {
 						renderSurfaceId: surface.renderSurfaceId,
 						preparedTextureAssetId,
@@ -955,8 +976,13 @@ function describeAtlasEntryKey(options: {
 	].join("|");
 }
 
-function describeAtlasSamplingKey(): string {
-	return "wrap=vertex;filter=linear/linear/linear;color=linear;mips=atlas";
+function describeAtlasSamplingKey(policy: StagedWorldAtlasSamplingPolicy): string {
+	return [
+		`wrap=${policy.wrapS}/${policy.wrapT}`,
+		"filter=linear/linear/linear",
+		"color=linear",
+		"mips=atlas",
+	].join(";");
 }
 
 function describeAtlasRenderStateKey(

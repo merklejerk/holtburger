@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
-Status: Phase M7D complete; Phase M7D.1 repeat/wrap staged atlas sampling next.
+Status: Phase M7D.1a implemented; Phase M7D.1a.1 compacted wrap field validation next.
 
 Related plans:
 
@@ -3208,22 +3208,126 @@ Cleanup targets and legacy shims:
   node. That is acceptable for M7D because they are generated and retired together, but M7E/M8 should
   split lifecycle metrics further if terrain or independent detail-atlas reuse needs it.
 
-### Phase M7D.1: Repeat/Wrap Staged Atlas Sampling
+### Phase M7D.1a: Repeat/Wrap Atlas Sampling for Compacted Geometry
 
-Status: Deferred follow-up after M7D unless metrics force it earlier.
+Status: Implemented; field validation carried into M7D.1a.1.
 
-Purpose: allow atlas-backed staged direct draw units with repeat/wrap sampler policy to use the base
-texture atlas without bleeding into neighboring atlas entries or breaking the authored UV behavior.
-This is mostly a texture-bind/resource optimization for retained staged draws, so it should not
-preempt M7D unless reports show repeat/wrap standalone direct draws are the dominant remaining
-texture-bind cost.
+Purpose: fix authored repeat/wrap behavior for atlas-backed compacted geometry. The current compacted
+shader samples the base atlas with clamped author UVs, so repeated static and structured-interior
+surfaces that enter landblock-scoped compacted batches can look smeared even though their direct
+staged material would wrap correctly. Detail textures already repeat through their own tiling path;
+this phase is specifically about base texture-atlas sampling inside compacted material slots.
 
 Tasks:
 
-- Audit staged-atlas fallback samples after M7D to quantify repeat/wrap pressure separately from
+- Carry sampler wrap policy from atlas eligibility into compacted material slots without parsing
+  debug strings.
+- Extend the atlas-backed compacted shader to repeat or clamp inside the atlas rect per sampler axis.
+  The repeat path must not sample outside the atlas entry or across gutters.
+- Ensure compacted material-slot/slice grouping remains deterministic when otherwise identical
+  material slots differ only by wrap policy.
+- Validate derivatives/mipmap behavior for repeated atlas rect sampling. If derivatives produce
+  unacceptable bleeding or shimmer, either use an explicit derivative path or document the remaining
+  artifact and keep the implementation bounded by gutter/padding behavior.
+- Add tests for repeat/repeat, repeat/clamp, clamp/repeat, and clamp/clamp compacted atlas sampling
+  data flow and shader uniforms.
+- Keep staged-atlas behavior unchanged except for shared helper/types that safely expose wrap policy.
+
+Exit criteria:
+
+- Atlas-backed compacted geometry preserves representative base texture repeat/clamp behavior for
+  static and structured-interior draw units.
+- Debug reports no longer require retaining otherwise eligible repeated base textures on standalone
+  direct paths solely to avoid compacted atlas clamping.
+- Any remaining atlas wrap limitations are named as mip/derivative/gutter limitations, not confused
+  with staged-atlas fallback policy.
+
+Decisions:
+
+- M7D.1 was split because the visible post-M7D wrapping issue is in atlas-backed compacted geometry,
+  not in retained staged direct draw units. The staged atlas optimization remains useful, but it does
+  not fix compacted shader UV clamping.
+- Atlas eligibility now carries structured `samplingPolicy.wrapS/wrapT` in addition to the diagnostic
+  `samplingKey`. Compaction uses the structured policy and does not parse key strings.
+- Compacted material-slot identity explicitly includes wrap policy. This prevents otherwise identical
+  clamp and repeat variants from merging even if an upstream caller supplies a coarse material-slot
+  key.
+
+Progress:
+
+- Replaced the hardcoded atlas sampling key `wrap=vertex` with authored clamp/repeat policy derived
+  from the material variant sampler policy.
+- Threaded atlas sampling policy through staged atlas eligibility, atlas-backed compaction material
+  slots, WebGL2 compacted batch material records, and compacted submit uniforms.
+- Added `uMaterialWrapModes` to the atlas-backed compacted shader and switched base atlas sampling
+  from unconditional `clamp(vUv)` to per-axis repeat/clamp inside the atlas rect.
+- Preserved the existing detail overlay path; detail textures still use their own `fract(vUv *
+  tiling)` sampling.
+- Added focused coverage for atlas eligibility repeat policy, compaction slot splitting by wrap
+  policy, compacted submit uniform upload, and existing compacted replacement behavior.
+
+Course corrections:
+
+- The first M7D.1 text treated repeat/wrap as a staged-atlas-only optimization. Field inspection
+  showed the current visual defect is in atlas-backed compacted base sampling, so compacted shader
+  support was implemented first and staged atlas repeat/wrap remains M7D.1b.
+- The compacted shader currently uses `fract` for repeat atlas lookup. That restores author wrapping
+  but still needs field validation for mip/derivative behavior at tile boundaries.
+
+Cleanup targets and legacy shims:
+
+- The atlas sampling key is still retained as a diagnostic/cache identity string. New logic should
+  prefer structured `samplingPolicy` when making behavior decisions.
+- The compacted submit path now uploads one additional bounded material table,
+  `uMaterialWrapModes`. If material tables grow again, consider packing material constants into a
+  texture-backed table instead of continuing to add uniform arrays.
+
+Validation:
+
+- `npm exec vitest -- src/lib/world-display/staged-world-material-strategy.test.ts src/lib/world-display/atlas-backed-compaction-planner.test.ts src/lib/world-display/atlas-backed-compacted-geometry.test.ts src/lib/world-display/webgl2-atlas-backed-compacted-submit.test.ts src/lib/world-display/webgl2-world-submit.test.ts --run`
+- `npm run check`
+- `npm run lint:ts`
+
+### Phase M7D.1a.1: Compacted Wrap Field Validation
+
+Status: Immediate validation phase before M7D.1b.
+
+Purpose: verify the compacted repeat/wrap shader change against the Holtburger field scene before
+expanding staged atlas repeat/wrap. This is a visual/mipmap validation step, not a new architecture
+phase.
+
+Tasks:
+
+- Capture a debug report and screenshot around the static/detail surfaces that previously showed
+  clamped or smeared base textures.
+- Confirm repeated base textures now wrap in atlas-backed compacted geometry while clamp materials
+  remain clamped.
+- Watch for mip seam, gutter bleeding, shimmer, or derivative artifacts on repeated atlas entries.
+- If artifacts are visible, decide whether M7D.1b should first introduce explicit derivative sampling
+  or larger/generator-aware gutter handling.
+
+Exit criteria:
+
+- Representative repeated compacted static/interior surfaces visually match the staged direct path
+  closely enough to proceed to staged atlas repeat/wrap.
+- Any remaining issue is recorded as derivative/gutter work with reproduction details.
+
+### Phase M7D.1b: Repeat/Wrap Staged Atlas Sampling
+
+Status: Follow-up after M7D.1a.1 unless metrics force it earlier.
+
+Purpose: allow atlas-backed staged direct draw units with repeat/wrap sampler policy to use the base
+texture atlas without bleeding into neighboring atlas entries or breaking the authored UV behavior.
+This is mostly a texture-bind/resource optimization for retained staged draws that are not replaced
+by compacted geometry.
+
+Tasks:
+
+- Audit staged-atlas fallback samples after M7D.1a.1 to quantify repeat/wrap pressure separately from
   missing atlas placements and detail-overlay deferrals.
-- Extend the staged textured shader to repeat or clamp inside the atlas rect per sampler axis. The
-  repeat path must not sample outside the atlas entry or across gutters.
+- Reuse the compacted atlas wrap helper/policy from M7D.1a where possible, but keep staged draw
+  submission independent from compacted replacement.
+- Extend the staged textured shader to repeat or clamp inside the atlas rect per sampler axis.
 - Validate derivatives/mipmap behavior for repeated atlas rect sampling. If derivatives produce
   unacceptable bleeding or shimmer, either use an explicit derivative path or keep repeat staged
   textures standalone with clear diagnostics.

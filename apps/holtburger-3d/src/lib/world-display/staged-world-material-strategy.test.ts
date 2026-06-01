@@ -54,6 +54,31 @@ describe("staged world material strategy", () => {
 		});
 	});
 
+	it("carries authored repeat sampler policy into atlas eligibility", () => {
+		const state = createAssetState([
+			createMaterialRecipeRecord({
+				surfaceId: 0x08000001,
+				renderSurfaceId: 0x06000001,
+			}),
+			createRenderSurfaceRecord({ renderSurfaceId: 0x06000001 }),
+			createAtlasPreparedTextureRecord({ renderSurfaceId: 0x06000001 }),
+		]);
+
+		const strategy = resolveStagedWorldMaterialStrategy({
+			assetState: state,
+			input: createRequirement("static", 0, 0x08000001, "sampler=repeat"),
+		});
+
+		expect(strategy).toMatchObject({
+			kind: "direct-texture",
+			atlasEligibility: {
+				samplingKey:
+					"wrap=repeat/repeat;filter=linear/linear/linear;color=linear;mips=atlas",
+				samplingPolicy: { wrapS: "repeat", wrapT: "repeat" },
+			},
+		});
+	});
+
 	it("keeps atlas candidacy out of staged fallback reasons", () => {
 		const state = createAssetState([
 			createMaterialRecipeRecord({
@@ -488,22 +513,24 @@ function createRequirement(
 	renderableKind: "static" | "structured-interior",
 	slotIndex: number,
 	surfaceId = 0x08000001,
+	materialVariantSignature: string | null = null,
 ) {
 	return {
 		renderableKind,
-		slot: createMaterialSlot({ slotIndex, surfaceId }),
+		slot: createMaterialSlot({ slotIndex, surfaceId, materialVariantSignature }),
 	};
 }
 
 function createMaterialSlot(options: {
 	slotIndex: number;
 	surfaceId: number;
+	materialVariantSignature?: string | null;
 }): ResolvedMaterialSlot {
 	return {
 		slotIndex: options.slotIndex,
 		surfaceId: options.surfaceId,
 		materialAssetId: `material/${options.surfaceId.toString(16).padStart(8, "0")}`,
-		materialVariantSignature: null,
+		materialVariantSignature: options.materialVariantSignature ?? null,
 	};
 }
 

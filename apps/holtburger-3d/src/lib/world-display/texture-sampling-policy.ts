@@ -24,7 +24,7 @@ import {
 	type MaterialTextureCapabilities,
 } from "./render-surface-texture-resources";
 
-type TextureWrapMode = "clamp" | "repeat";
+export type TextureWrapMode = "clamp" | "repeat";
 type TextureFilterMode = "nearest" | "linear";
 type TextureMipFilterMode = "none" | "nearest" | "linear";
 type TextureColorSpaceMode = "none" | "srgb";

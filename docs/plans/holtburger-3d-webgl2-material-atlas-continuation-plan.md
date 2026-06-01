@@ -20,10 +20,13 @@ The next implementation work should simplify the renderer into two broad rendera
 direct-draw renderables and baked renderables, while making texture-page binding a shared material
 resource model used by both. A direct texture is a single-entry texture page with a full-texture rect;
 a packed atlas is a texture page with multiple rects and gutter/mip policy. Baked renderables are
-promoted resources that combine compacted geometry with material-table submission. Direct draw and
-baked draw may both sample texture pages by rect, but only baked draw uses baked VBAs and material
-slot tables. Atlas-rect texture-page sampling should become the only texture sampling mode for both
-direct draw and baked draw; direct texture sampling is just the single-entry case.
+the compacted-geometry/material-table submission category. The direct-versus-baked boundary is not
+whether a texture is packed, atlased, or single-entry; it is whether the renderable still submits its
+own per-draw geometry/material state or has been represented by compacted geometry, material slots,
+and draw slices. Direct draw and baked draw may both sample texture pages by rect, but only baked draw
+uses baked VBAs and material slot tables. Atlas-rect texture-page sampling should become the only
+texture sampling mode for both direct draw and baked draw; direct texture sampling is just the
+single-entry case.
 
 The broader goal is to make the direct and baked pipelines more isomorphic. They should consume the
 same resolved material facts, texture-page bindings, sampler policies, render-state facts, and
@@ -53,9 +56,12 @@ material-slot attributes, and material tables.
   metrics vocabulary instead of adding more one-off shader/resource paths.
 - Detail textures already use a detail-atlas path in baked static/interior draws. That should become
   part of the general texture-page model rather than a one-off detail path.
-- Indexed, paletted, and blended material inputs should also move to texture-page buckets instead of
-  remaining as standalone sampler paths. Index and palette pages must preserve data sampling:
-  no mipmapping, no filtering, no color-space conversion, and integer/nearest semantics where needed.
+- Indexed and paletted material inputs should also move to texture-page buckets instead of remaining
+  as standalone sampler paths. Index and palette pages must preserve data sampling: no mipmapping,
+  no filtering, no color-space conversion, and integer/nearest semantics where needed. Blended and
+  alpha-tested materials can often use the same RGBA color texture-page bucket as opaque base color;
+  their blend, clip, depth, and sorting behavior is material/render policy unless they sample a
+  separate data/control mask.
 - The normalized prepared-texture path exists for decompressed, base-level material texture inputs:
   `prepared-texture/<renderSurfaceId>?usage=<usage>&out=rgba8|r8&mips=none&cs=linear|data`.
 - The renderer resource graph, cleanup scheduler, readiness/incubation, staged assembly, BVH
@@ -77,9 +83,9 @@ material-slot attributes, and material tables.
   resolved material/texture-page fact, then consumed by direct and baked submit paths according to
   their capabilities. Avoid duplicating feature detection separately inside each submit path.
 - All texture-bearing material inputs should resolve through texture-page bindings before submit:
-  base color, detail, indexed texels, palettes, terrain/blend inputs, alpha masks, roads, and any
-  later material texture channels. Different usage buckets may have different formats, filtering,
-  mip, and gutter policies.
+  base/detail RGBA color pages, indexed texels, palettes, terrain/road inputs, separate alpha/control
+  masks, and any later material texture channels. RGBA color pages may carry alpha. Different usage
+  buckets may have different formats, filtering, mip, and gutter policies.
 - One atlas set may contain multiple atlas textures. Pack additional atlas textures into the same
   atlas set before falling back for capacity.
 - Initial atlas packing should use deterministic ordering, power-of-two page dimensions where
@@ -105,6 +111,10 @@ material-slot attributes, and material tables.
 - A direct texture may be represented as a single-entry atlas page with a full-texture rect. This
   representation is valid for both direct draw and baked draw. Baked rendering is still defined by
   compacted geometry and material-table submission, not by whether the texture page is packed.
+- Do not use "baked" as shorthand for atlassed or texture-page-backed. Direct draw can sample packed
+  texture pages, and baked draw can sample single-entry texture pages. The category boundary is
+  submission shape: per-draw geometry/material state versus compacted geometry plus material-table
+  draw slices.
 - Baked vertex-buffer assemblies are scoped to landblocks or similarly local world ownership units.
   Packed texture pages are not landblock-scoped; they are content/material resources that direct draw
   and baked geometry can reference from multiple landblocks when residency policy allows. Single-entry
@@ -3313,7 +3323,7 @@ Progress:
 - Added `uMaterialWrapModes` to the atlas-backed compacted shader and switched base atlas sampling
   from unconditional `clamp(vUv)` to per-axis repeat/clamp inside the atlas rect.
 - Preserved the existing detail overlay path; detail textures still use their own `fract(vUv *
-  tiling)` sampling.
+tiling)` sampling.
 - Added focused coverage for atlas eligibility repeat policy, compaction slot splitting by wrap
   policy, compacted submit uniform upload, and existing compacted replacement behavior.
 
@@ -3431,8 +3441,10 @@ Tasks:
 - Define data texture-page policies for indexed texel pages and palette pages: no mipmaps, no linear
   filtering, no color-space conversion, and exact lookup semantics. Keep unsupported indexed/palette
   paths direct only until their texture-page buckets exist.
-- Define blend/alpha/road/terrain texture-page buckets, even if terrain baking remains deferred.
-  Terrain should use the same texture-page abstraction when its dedicated pipeline arrives.
+- Define road/terrain texture-page buckets and separate alpha/control data buckets, even if terrain
+  baking remains deferred. Do not split ordinary RGBA color pages into opaque versus blended buckets;
+  blending is render policy. Terrain should use the same texture-page abstraction when its dedicated
+  pipeline arrives.
 - Replace staged-atlas terminology in direct submit, metrics, tests, and debug text with
   texture-page terminology.
 - Extend or share the atlas-rect sampling helper so direct draw and baked draw handle clamp/repeat,
@@ -3520,14 +3532,16 @@ Status: Immediate before M7D.2.
 
 Purpose: finish the part of M7D.1b that could not honestly land in the base-color submit slice.
 Direct base-color sampling is now a texture-page path, but detail overlays, indexed/palette
-resources, terrain/blend/road inputs, and alpha/blend inputs still have older binding terminology and
-resource-specific submit paths. Before renaming the architecture to baked/direct draw, make those
-inputs visible as texture-page buckets with explicit sampling policies.
+resources, terrain/road inputs, and separate alpha/control masks still have older binding terminology
+and resource-specific submit paths. Before renaming the architecture to baked/direct draw, make those
+inputs visible as texture-page buckets with explicit sampling policies. Do not create separate
+alpha/blend page buckets merely because an RGBA color page carries alpha; alpha-test, opacity,
+blending, depth-write, and sorting are material/render-state facts.
 
 Tasks:
 
 - Extend the texture-page binding model beyond base color with usage buckets for detail, indexed
-  texels, palette lookup, alpha mask, blend control, road, and terrain input.
+  texels, palette lookup, separate alpha/control masks, road, and terrain input.
 - Preserve the current direct shaders and texture units while exposing their bound textures through
   texture-page records. This phase is terminology and contract unification first, not a shader-family
   rewrite.
@@ -3536,8 +3550,9 @@ Tasks:
 - Represent indexed texel and palette resources as data/lookup texture pages with no mipmaps, no
   linear filtering, no color-space conversion, and exact lookup semantics. Keep direct indexed
   rendering as the proof path; baked indexed rendering remains deferred.
-- Name terrain base/overlay/road/alpha bindings as terrain/road/alpha texture-page buckets while
-  leaving terrain's dedicated pipeline to M7E.
+- Name terrain base/overlay/road bindings as terrain/road texture-page buckets while leaving
+  terrain's dedicated pipeline to M7E. Terrain alpha/control textures should use a separate data or
+  control bucket only when their sampling semantics differ from ordinary RGBA color sampling.
 - Replace remaining user-facing "staged atlas" fallback samples with texture-page fallback samples.
   Keep low-level packed-atlas wording only when the resource really is a packed atlas page.
 - Add tests that assert detail, indexed/palette, and terrain binding records preserve their existing
@@ -3558,14 +3573,18 @@ Exit criteria:
 Status: Immediate after M7D.1c.
 
 Purpose: update active code and docs terminology around the new renderer boundary. "Texture page" is
-the shared material-resource abstraction for direct draw and baked draw. "Baked" is the promoted
-geometry/submission category. Packed atlases, single-entry pages, and compacted vertex-buffer
-assemblies are implementation resources, not standalone renderable categories.
+the shared material-resource abstraction for direct draw and baked draw. "Baked" specifically means
+compacted geometry submitted through a baked material-table/draw-slice path. Packed atlases and
+single-entry pages are texture-page resources, not baked/direct category markers. Compacted
+vertex-buffer assemblies are part of baked submission only when paired with the baked material-table
+contract.
 
 Tasks:
 
 - Rename active user-facing and debug terminology from `atlas-backed compacted` to `baked` where the
   concept is the promoted renderable or submitted draw family.
+- Make docs, metrics, and code comments state that a renderable is not baked merely because it samples
+  a packed atlas page, and is not direct merely because it samples a single-entry page.
 - Keep concrete implementation names where they name concrete resources, for example packed texture
   atlas generation, single-entry texture page, atlas rect placement, compacted vertex buffer, or
   compacted geometry planner.
@@ -3652,8 +3671,9 @@ Tasks:
 - Add indexed/paletted texture-page buckets before deciding whether indexed/paletted materials can
   bake. The index and palette pages should be usable by direct draw first, then by a dedicated baked
   material family if batching pressure justifies it.
-- Add blended/terrain texture-page buckets as shared material infrastructure, but keep terrain's
-  geometry baking and shader pipeline in M7E.
+- Add terrain/road texture-page buckets and alpha/control data-page buckets as shared material
+  infrastructure, but keep terrain's geometry baking and shader pipeline in M7E. Blended RGBA color
+  inputs should reuse the RGBA color-page bucket; transparent ordering remains material/render policy.
 - Keep debug/diagnostic overlays direct or in a separate debug pipeline.
 - Validate repeat/clamp, detail overlay, and alpha-test behavior against representative field scenes.
 - Track baked coverage as candidate count, baked count, retained direct count, retained reason
@@ -3707,24 +3727,31 @@ Exit criteria:
 - If baked indexed submission remains deferred, the blocker is the baked indexed shader/material table
   rather than texture-page resource modeling.
 
-### Phase M7D.6: Alpha and Blended Texture-Page and Bake Policy
+### Phase M7D.6: Alpha/Blend Material Policy and Texture-Page Integration
 
 Status: Planned.
 
-Purpose: move alpha masks and blended-material texture inputs into the shared texture-page model while
-keeping transparency ordering honest. Alpha-test/cutout materials can usually share opaque baked
-families when render state is compatible. True blended transparency needs explicit sorting,
-depth-write, and visibility policy before it can safely enter baked geometry.
+Purpose: keep alpha and blending semantics honest without inventing unnecessary texture-page buckets.
+RGBA color pages may carry alpha for opaque, alpha-tested/cutout, and blended materials. The
+important split is material/render policy: alpha-test thresholds, opacity, blend mode, depth writes,
+sorting, and visibility behavior. Separate alpha/control texture-page buckets are only needed for
+mask/control inputs whose sampling semantics differ from ordinary RGBA color pages.
 
 Tasks:
 
-- Define alpha/blend texture-page usage buckets:
-  - alpha mask or clip map pages;
-  - blended base/color pages;
-  - any blend-control or mask pages used by terrain/static/interior materials.
-- Require alpha/lookup pages that are data-like to use no unintended mip/filter/color-space behavior.
-  Color blended pages may use color texture policy when the material recipe calls for it.
-- Route direct alpha-test and blended material texture inputs through texture-page bindings.
+- Define alpha/blend material policy facts separately from texture-page usage buckets:
+  - alpha-test/cutout threshold and discard behavior;
+  - opacity and blend mode;
+  - depth write/test behavior;
+  - sorting/visibility requirements for true blended transparency;
+  - separate alpha/control mask page bindings only when an actual mask/control texture exists.
+- Keep blended base/color textures in the RGBA color texture-page bucket when they use normal color
+  sampling. Do not create a separate "blended base/color page" bucket solely because the material is
+  transparent.
+- Require alpha/control pages that are data-like to use no unintended mip/filter/color-space behavior.
+  RGBA color pages with alpha may use color texture policy when the material recipe calls for it.
+- Route direct alpha-test and blended material color inputs through ordinary RGBA texture-page
+  bindings, plus separate data/control page bindings only when needed.
 - Promote alpha-test/cutout static and structured-interior materials into the baked opaque/cutout
   family when their texture pages, sampler policy, render state, and material-table constants are
   compatible.
@@ -3733,12 +3760,15 @@ Tasks:
   whole-slice conservative submission is acceptable for transparent geometry.
 - Add metrics separating alpha-test baked candidates from true blended transparent retained direct
   draws.
-- Add tests for alpha mask texture-page binding, alpha-test baked eligibility, blended transparency
-  retained-direct fallback, and explicit transparent-bake blockers.
+- Add tests for RGBA color pages carrying alpha, separate alpha/control mask texture-page binding,
+  alpha-test baked eligibility, blended transparency retained-direct fallback, and explicit
+  transparent-bake blockers.
 
 Exit criteria:
 
-- Alpha and blend texture inputs use texture-page bindings in direct draw.
+- Alpha-tested and blended color inputs use ordinary RGBA texture-page bindings in direct draw.
+- Separate alpha/control mask inputs use data/control texture-page bindings only when they are
+  separate sampled resources.
 - Alpha-test/cutout materials can enter baked static/interior geometry when compatible.
 - True blended transparency is either represented by a dedicated transparent baked design or remains
   direct draw with sorting/depth blockers named in metrics.
@@ -3837,9 +3867,10 @@ Exit criteria:
 - Finish replacing staged atlas-set submit plumbing after M7D.1c. Base-color direct draw now uses
   explicit texture-page binding, but metric compatibility shims and non-base texture inputs still
   carry old staged/detail/indexed/terrain binding terminology.
-- Fold existing base, detail, indexed, palette, alpha, road, blend, and terrain texture binding
-  diagnostics into texture-page terminology. Keep usage bucket and sample class visible in fallback
-  samples.
+- Fold existing base, detail, indexed, palette, separate alpha/control, road, and terrain texture
+  binding diagnostics into texture-page terminology. Keep usage bucket and sample class visible in
+  fallback samples. Keep blend/alpha-test diagnostics with render-state/material policy unless a
+  separate sampled control texture is involved.
 - Audit direct and baked shader/resource setup for duplicated material feature detection. Move
   duplicated detection into shared material/texture-page planning and leave submit paths to adapt
   already-resolved facts.

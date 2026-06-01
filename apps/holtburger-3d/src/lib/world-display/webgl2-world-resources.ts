@@ -74,6 +74,10 @@ import {
 	type BakedRenderablePlan,
 	type BakedRenderablePolicy,
 } from "./baked-renderable-planner";
+import {
+	deriveDirectGeometrySubmissionLayout,
+	type GeometrySubmissionLayout,
+} from "./webgl2-direct-render-family";
 import { buildBakedGeometry } from "./baked-geometry";
 import {
 	createWebgl2TextureAtlasGenerationResource,
@@ -106,6 +110,7 @@ export interface Webgl2WorldDrawUnit {
 	vertexArray: Webgl2VertexArrayResource;
 	vertexBuffer: Webgl2BufferResource;
 	uvBuffer: Webgl2BufferResource | null;
+	directGeometryLayout: GeometrySubmissionLayout;
 	indexBuffer: Webgl2BufferResource;
 	indexType: GLenum;
 	vertexCount: number;
@@ -743,6 +748,8 @@ function createOrReuseWebgl2DrawUnit({
 			atlasEligibility: previous.atlasEligibility,
 		});
 		previous.texturePageBindingFallbackSamples = [];
+		previous.directGeometryLayout =
+			deriveDirectGeometrySubmissionLayout(previous);
 		previous.bakeEligibility = createBakeEligibility({
 			kind: previous.kind,
 			owningLandblockId: previous.owningLandblockId,
@@ -845,6 +852,7 @@ function createOrReuseWebgl2DrawUnit({
 		vertexArray,
 		vertexBuffer,
 		uvBuffer,
+		directGeometryLayout: deriveDirectGeometrySubmissionLayout({ uvBuffer }),
 		indexBuffer,
 		indexType:
 			drawUnit.geometry.indices instanceof Uint32Array

@@ -58,6 +58,7 @@ describe("webgl2 world resources", () => {
 		expect(store.staticDrawUnitCount).toBe(1);
 		expect(store.staticInstanceCount).toBe(1);
 		expect(store.triangleCount).toBe(1);
+		expect(store.drawUnits[0]?.directGeometryLayout).toBe("position");
 		expect(gl.createdBuffers).toHaveLength(2);
 		expect(gl.createdVertexArrays).toHaveLength(1);
 		expect(graph.retainedPreparedAssetIds()).toEqual(["gfx-obj/01000001"]);
@@ -185,6 +186,7 @@ describe("webgl2 world resources", () => {
 		expect(store.drawUnits).toHaveLength(1);
 		expect(store.drawUnits[0]?.materialKind).toBe("direct-texture");
 		expect(store.drawUnits[0]?.uvBuffer).not.toBeNull();
+		expect(store.drawUnits[0]?.directGeometryLayout).toBe("position-uv");
 		expect(store.drawUnits[0]?.texture).not.toBeNull();
 		expect(store.textureCount).toBe(1);
 		expect(gl.createdTextures).toHaveLength(1);

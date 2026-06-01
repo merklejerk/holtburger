@@ -253,6 +253,7 @@ function createPortalMaskDrawUnit(id: string): Webgl2WorldDrawUnit {
 		},
 		vertexBuffer: createEmptyBuffer(),
 		uvBuffer: null,
+		directGeometryLayout: "position",
 		indexBuffer: createEmptyBuffer(),
 		indexType: 5123,
 		vertexCount: 3,

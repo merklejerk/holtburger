@@ -12,7 +12,7 @@ describe("collectDirectDrawTexturePageBindings", () => {
 
 		const bindings = collectDirectDrawTexturePageBindings({
 			texture: null,
-			textureSamplingPolicy: null,
+			directTextureSamplingPolicy: null,
 			atlasEligibility: null,
 			detailOverlay: {
 				key: "detail",
@@ -45,7 +45,7 @@ describe("collectDirectDrawTexturePageBindings", () => {
 	it("records indexed texels and palettes as exact data pages", () => {
 		const bindings = collectDirectDrawTexturePageBindings({
 			texture: null,
-			textureSamplingPolicy: null,
+			directTextureSamplingPolicy: null,
 			atlasEligibility: null,
 			detailOverlay: null,
 			indexedMaterial: {
@@ -98,7 +98,7 @@ describe("collectDirectDrawTexturePageBindings", () => {
 	it("records terrain color and mask inputs as separate page buckets", () => {
 		const bindings = collectDirectDrawTexturePageBindings({
 			texture: null,
-			textureSamplingPolicy: null,
+			directTextureSamplingPolicy: null,
 			atlasEligibility: null,
 			detailOverlay: null,
 			indexedMaterial: null,

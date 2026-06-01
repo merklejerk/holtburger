@@ -7,7 +7,7 @@ import type { Webgl2SceneDomain } from "./webgl2-scene-domain-targets";
 export type BakedRenderableBypassReason =
 	| "non-static"
 	| "missing-landblock-origin"
-	| "non-direct-texture"
+	| "unsupported-baked-material-family"
 	| "missing-uv-buffer"
 	| "missing-atlas-eligibility"
 	| "non-opaque-material"
@@ -457,7 +457,7 @@ function createMaterialBakeBypass(
 		case "missing-base-texture-page":
 			return {
 				drawUnitId: drawUnit.id,
-				reason: "non-direct-texture",
+				reason: "unsupported-baked-material-family",
 				detail: `draw unit material ${drawUnit.materialKey} has no baked-compatible base texture page`,
 			};
 		case "missing-atlas-eligibility":
@@ -481,7 +481,7 @@ function createMaterialBakeBypass(
 		case "unsupported-texture-page-behavior":
 			return {
 				drawUnitId: drawUnit.id,
-				reason: "non-direct-texture",
+				reason: "unsupported-baked-material-family",
 				detail: "texture-page bindings require a baked shader family that is not implemented",
 			};
 	}

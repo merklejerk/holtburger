@@ -11,10 +11,7 @@ import {
 	type Webgl2BakedGeometryWorldProgram,
 } from "./webgl2-baked-submit";
 import type { Webgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
-import {
-	resolveDirectDrawBaseTexturePageBinding,
-	type TexturePageBinding,
-} from "./texture-page-binding";
+import type { TexturePageBinding } from "./texture-page-binding";
 
 export type Webgl2FlatWorldProgram = Webgl2ProgramResource<
 	"position",
@@ -428,16 +425,13 @@ export function submitWebgl2FlatWorldDrawUnits({
 		});
 		const texturePageResolution =
 			useTexture && texture
-				? resolveDirectDrawBaseTexturePageBinding({
-						drawUnit,
-						generation: bakedGeometryResources.generation,
-						fallbackSamples: metrics.directTexturePageFallbackSamples,
-					})
+				? resolveDrawUnitBaseTexturePageBinding(drawUnit)
 				: null;
-		const texturePageBinding = texturePageResolution?.binding ?? null;
-		metrics.directTexturePageFallbackSamples =
-			texturePageResolution?.fallbackSamples ??
-			metrics.directTexturePageFallbackSamples;
+		const texturePageBinding = texturePageResolution;
+		metrics.directTexturePageFallbackSamples = appendSubmitFallbackSamples(
+			metrics.directTexturePageFallbackSamples,
+			drawUnit.texturePageBindingFallbackSamples,
+		);
 		metrics.stagedAtlasFallbackSamples =
 			metrics.directTexturePageFallbackSamples;
 		if (useTexture) {
@@ -826,6 +820,26 @@ function bindIndexedMaterialTextures({
 		changeCount += 1;
 	}
 	return changeCount;
+}
+
+function resolveDrawUnitBaseTexturePageBinding(
+	drawUnit: Webgl2WorldDrawUnit,
+): TexturePageBinding | null {
+	return (
+		drawUnit.texturePageBindings.find(
+			(binding) => binding.usageBucket === "base-color",
+		) ?? null
+	);
+}
+
+function appendSubmitFallbackSamples(
+	current: readonly string[],
+	next: readonly string[],
+): readonly string[] {
+	if (next.length === 0) {
+		return current;
+	}
+	return [...current, ...next].slice(0, 8);
 }
 
 function uploadIndexedMaterialUniforms(

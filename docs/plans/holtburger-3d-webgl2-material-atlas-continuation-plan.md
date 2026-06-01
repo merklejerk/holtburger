@@ -3801,16 +3801,13 @@ Verification:
 
 Residual cleanup:
 
-- `resolveTexturePageWrapMode` still parses the legacy `textureSamplingPolicy` string when a direct
-  draw unit has no atlas eligibility. This is now isolated fallback debt and should be removed before
-  expanding baked coverage.
-- Direct packed base-page placement is still resolved by direct submit from draw-unit atlas
-  eligibility and the active atlas generation. Move this into shared texture-page resolution so
-  direct and baked submit both consume resolved page facts.
+- Completed by M7D.3a: `resolveTexturePageWrapMode` no longer parses the legacy
+  `textureSamplingPolicy` string, and direct submit no longer derives packed base-page placement from
+  atlas generation.
 
 ### Phase M7D.3a: Texture-Page Eligibility Cleanup
 
-Status: Next.
+Status: Implemented.
 
 Purpose: finish the cleanup exposed by M7D.3 before expanding baked coverage. The renderer should
 not rely on legacy sampler strings or submit-local atlas lookup when it can consume typed
@@ -3836,9 +3833,97 @@ Exit criteria:
 - Baked fallback samples distinguish material-family incompatibility from missing texture-page
   resource facts without relying on legacy reason wording.
 
+Progress:
+
+- Added typed direct color sampling facts to `Webgl2WorldDrawUnit` via
+  `directTextureSamplingPolicy`. Texture-page wrap selection now consumes those facts or
+  `atlasEligibility.samplingPolicy`; it no longer parses the diagnostic `textureSamplingPolicy`
+  string.
+- Moved final direct base texture-page resolution into WebGL2 resource sync. Resource sync now
+  resolves packed-atlas or single-entry base pages after texture atlas generation exists, records any
+  texture-page fallback samples on the draw unit, and leaves submit to consume
+  `drawUnit.texturePageBindings`.
+- Removed direct submit's packed atlas placement lookup. Submit no longer searches atlas generation
+  placements for retained direct draw units; it only binds the resolved texture-page binding supplied
+  by the resource store.
+- Renamed the active baked planner bypass reason from `non-direct-texture` to
+  `unsupported-baked-material-family` so retained direct-draw reports describe a baked-family
+  blocker rather than old direct-texture terminology.
+- Updated hand-built texture-page and submit tests to use typed `directTextureSamplingPolicy`,
+  resolved texture-page bindings, and draw-unit texture-page fallback samples.
+
+Decisions and course corrections:
+
+- `textureSamplingPolicy` remains on draw units as a diagnostic/metric string, but it is no longer a
+  behavior source for texture-page wrapping. Future code should treat it as display/cache context
+  only.
+- Direct submit still receives `bakedGeometryResources.generation` for existing baked replacement
+  planning and texture-count metrics, but retained direct draw no longer derives page placement from
+  that generation.
+- Texture-page fallback samples now travel with the draw unit from resource sync to submit. This
+  keeps submit simple while preserving the existing debug visibility for missing atlas generation or
+  placement failures.
+
+Verification:
+
+- `npm exec tsc -- --noEmit`
+- `npm exec vitest -- src/lib/world-display/texture-page-binding.test.ts src/lib/world-display/baked-renderable-planner.test.ts src/lib/world-display/baked-geometry.test.ts src/lib/world-display/webgl2-baked-submit.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts src/lib/world-display/webgl2-transition-portal-work.test.ts --run`
+
+Residual cleanup:
+
+- Completed by M7D.3b: texture sampling policy and atlas candidate diagnostic samples are no longer
+  stored on `Webgl2WorldDrawUnit`; they are generated while refreshing debug metrics.
+- Direct texture-page fallback samples are currently capped per draw unit and again during submit
+  aggregation. If future field captures need more diagnosis, add structured fallback reason records
+  rather than increasing string sample limits.
+
+### Phase M7D.3b: Diagnostic String Boundary Cleanup
+
+Status: Implemented.
+
+Purpose: keep draw units focused on typed behavior/resource facts and generate diagnostic strings at
+the metric boundary.
+
+Tasks:
+
+- Remove diagnostic-only `textureSamplingPolicy` and `atlasCandidateSample` fields from
+  `Webgl2WorldDrawUnit`.
+- Keep typed sampler facts (`directTextureSamplingPolicy`), atlas eligibility facts, texture-page
+  facts, and bake eligibility facts on draw units.
+- Generate `textureSamplingPolicyCounts`, `textureSamplingPolicySamples`, and atlas candidate sample
+  strings while refreshing resource-store metrics instead of storing those strings on every draw
+  unit.
+- Keep identity strings that are still real resource/grouping keys (`materialKey`, `textureKey`,
+  baked material `renderStateKey`, and baked material `samplingKey`) until the corresponding keyed
+  systems are replaced with structured identities.
+
+Progress:
+
+- Removed `textureSamplingPolicy` and `atlasCandidateSample` from the WebGL2 draw-unit contract.
+- `textureSamplingPolicyCounts` and `textureSamplingPolicySamples` now stringify typed direct
+  sampling policy and indexed page sampling facts during metric refresh.
+- Atlas candidate samples are now generated from `drawUnit.kind` plus typed
+  `drawUnit.atlasEligibility` during metric refresh.
+- Updated hand-built draw-unit tests so diagnostic strings are not required to construct renderer
+  draw units.
+
+Decisions and course corrections:
+
+- `textureSamplingPolicyCounts`, `textureSamplingPolicySamples`, and `atlasCandidateSamples` remain
+  string DTO/debug fields at the renderer boundary. The cleanup is about where the strings are
+  produced, not removing human-readable diagnostics.
+- Indexed texture sampling diagnostics are currently reconstructed from WebGL2 indexed page facts.
+  If indexed sampling grows beyond wrap/filter defaults, carry a typed indexed sampling policy on the
+  draw unit instead of reintroducing diagnostic strings.
+
+Verification:
+
+- `npm exec tsc -- --noEmit`
+- `npm exec vitest -- src/lib/world-display/texture-page-binding.test.ts src/lib/world-display/baked-renderable-planner.test.ts src/lib/world-display/baked-geometry.test.ts src/lib/world-display/webgl2-baked-submit.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts src/lib/world-display/webgl2-transition-portal-work.test.ts --run`
+
 ### Phase M7D.4: Expand Baked Static and Interior Coverage
 
-Status: Planned.
+Status: Next.
 
 Purpose: after the boundary cleanup, improve performance by making more static and structured
 interior renderables bake, while allowing retained direct draws to keep using the shared texture-page
@@ -4082,14 +4167,11 @@ Exit criteria:
   supersedes that active guidance: forward-looking renderable names should use baked or direct-draw,
   material-resource names should use texture page, and low-level resource names should remain precise
   about packed atlases, single-entry pages, and compacted geometry.
-- Direct base-color texture-page binding currently derives packed-page placement in direct submit
-  from draw-unit atlas eligibility plus the active atlas generation. M7D.3a should move that
-  derivation into shared material/resource planning so direct and baked submit consume the same
-  resolved facts.
+- Direct base-color texture-page binding now resolves packed-page placement during WebGL2 resource
+  sync. Direct submit consumes resolved texture-page bindings and draw-unit fallback samples.
 - The renderer still relies on string identifiers, feature-flag strings, and string/regexp matching in
-  some hot or near-hot material paths, for example sampler policy parsing and cache-key-style feature
-  strings. M7D.3a should finish replacing behavior-driving parsing with typed facts emitted by material and
-  texture-page planning. Keep strings for stable keys, diagnostics, and graph identity only.
+  some hot or near-hot material paths, especially cache-key-style feature strings outside the
+  texture-page submit path. Keep strings for stable keys, diagnostics, and graph identity only.
 - Revisit the per-frame WebGL2 draw-unit sort after M3-M7 reshape the submit path.
 - Split renderer-neutral material sampling DTOs from any Three adapter names/imports if they still
   imply Three ownership.

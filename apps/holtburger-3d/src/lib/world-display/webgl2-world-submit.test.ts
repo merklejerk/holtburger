@@ -713,6 +713,7 @@ function createDrawUnit({
 			},
 		},
 		uvBuffer: null,
+		directGeometryLayout: "position",
 		indexBuffer: {
 			buffer: {} as WebGLBuffer,
 			dispose() {

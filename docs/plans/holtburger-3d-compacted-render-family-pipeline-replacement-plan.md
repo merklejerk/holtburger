@@ -400,7 +400,7 @@ Exit criteria:
 
 ## Phase C2: Direct Family Facts and Geometry Submission Views
 
-Status: Next.
+Status: Complete.
 
 Purpose: introduce typed direct draw family facts and neutral geometry submission views without moving
 draw behavior yet. This proves the direct-side vocabulary with minimal risk because direct draw is
@@ -471,6 +471,61 @@ Tasks:
   - debug/portal families as explicit non-production families.
 - Keep the current central draw loop active. This phase should only add and test the typed views.
 
+Progress:
+
+- Added `webgl2-direct-render-family.ts` with typed direct geometry submission and material payload
+  views:
+  - `GeometrySubmissionLayout`;
+  - `DirectRenderFamilyKind`;
+  - `DirectGeometrySubmission`;
+  - `DirectFamilyMaterialPayload`;
+  - `DirectRenderFamilySubmission`;
+  - `mapWebgl2DrawUnitToDirectRenderFamilySubmission()`.
+- Labeled direct draw units with `directGeometryLayout`, derived from the actual VAO inputs:
+  - `position` when only the position buffer is bound;
+  - `position-uv` when a UV buffer is bound;
+  - no direct path uses `position-uv-material-slot` yet.
+- Confirmed direct RGBA texture-page and indexed/paletted submissions use material slot `0` as a
+  family payload fact rather than adding a compacted-only material-slot vertex attribute.
+- Added focused tests for flat, RGBA texture-page, indexed/paletted, terrain, and portal-mask/debug
+  family mapping.
+- Added resource-sync assertions proving flat direct resources are layout-labeled as `position` and
+  direct texture resources are layout-labeled as `position-uv`.
+
+Decisions:
+
+- Classify direct family submissions from the active realized resources, matching current draw-loop
+  behavior:
+  - portal masks route to `debug-pipeline`;
+  - terrain resources route to `terrain-blend`;
+  - indexed resources route to `indexed-paletted`;
+  - realized base textures route to `rgba-texture-page`;
+  - remaining units route to `flat-constant-color`.
+- Keep the C2 mapper as a temporary migration adapter over `Webgl2WorldDrawUnit`. It is allowed only
+  until direct family adapters own RGBA/indexed draw behavior and `Webgl2WorldDrawUnit` can be split.
+- Do not introduce a shared family draw context as an unused object in C2. That would create a
+  passive mirror of the central loop rather than an owned boundary.
+
+Course correction:
+
+- Added immediate C2.5 before C3 to extract the direct family draw context and route plan in the same
+  slice that starts consuming them. This keeps C3 from beginning with a hand-wavy "shared context"
+  step and avoids another compatibility shell.
+
+Legacy shims introduced:
+
+- `mapWebgl2DrawUnitToDirectRenderFamilySubmission()` is a temporary mapper from the old
+  `Webgl2WorldDrawUnit` aggregate into the new family/submission shape. C7 must delete it or reduce
+  it to a construction helper after direct family adapters own behavior.
+- `directGeometryLayout` is currently duplicated beside `uvBuffer` so the old draw loop remains
+  authoritative. C7 should either keep the layout as the resource contract and delete implicit UV
+  checks, or move layout construction into the split direct geometry resource.
+
+Validation:
+
+- `npm exec tsc -- --noEmit`
+- `npm exec vitest -- src/lib/world-display/webgl2-direct-render-family.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-transition-portal-work.test.ts --run`
+
 Exit criteria:
 
 - Every current direct draw unit can be mapped to a `DirectGeometrySubmission` and
@@ -479,12 +534,57 @@ Exit criteria:
 - Dynamic/direct resources still use direct lifecycle and per-draw transforms.
 - Existing direct draw behavior and metrics are unchanged.
 
+## Phase C2.5: Direct Family Draw Context Prep
+
+Status: Next.
+
+Purpose: prepare C3 by extracting the draw-loop context and route decisions that family adapters will
+actually consume. This is an immediate interim phase because adding an unused context object in C2
+would have been a passive shim.
+
+Tasks:
+
+- Define a `DirectFamilyDrawContext` that contains only data and helpers consumed by the first C3
+  adapters:
+  - `gl`;
+  - `stateCache`;
+  - view/projection matrix;
+  - texture unit assignments;
+  - metric increment hooks or a narrow mutable metric recorder;
+  - render-state helper access.
+- Define a typed direct route record for the existing central loop:
+  - draw unit;
+  - direct render family submission;
+  - active program kind;
+  - active program resource;
+  - indexed program variant where relevant;
+  - texture-page binding resolution where relevant.
+- Replace local string `programKind` decisions in the central loop with the typed route record without
+  moving draw behavior yet.
+- Preserve current draw order, state-cache behavior, texture binding order, uniform upload counts,
+  and metrics.
+- Add tests that prove route construction matches the current program/material decisions for:
+  - flat;
+  - RGBA texture-page;
+  - indexed P8/P16;
+  - terrain blend;
+  - portal masks/debug.
+
+Exit criteria:
+
+- C3 can move RGBA texture-page drawing behind a family adapter by consuming `DirectFamilyDrawContext`
+  and typed route records, without re-deriving program/material decisions from strings.
+- The central loop has fewer ad hoc local booleans for material routing, or those booleans are
+  confined to one route-construction helper with typed output.
+- No draw behavior or metrics change.
+
 ## Phase C3: Direct Family Pipeline Draw Adapters
 
 Status: Planned.
 
 Purpose: move direct RGBA texture-page and indexed/paletted draw behavior behind family pipeline
-adapters after C2 has established typed direct geometry submission views.
+adapters after C2/C2.5 have established typed direct geometry submission views and typed direct draw
+route/context records.
 
 Tasks:
 

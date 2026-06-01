@@ -754,7 +754,7 @@ Exit criteria:
 
 ## Phase C3.5: Direct Adapter Consolidation Cleanup
 
-Status: Next.
+Status: Complete.
 
 Purpose: keep the direct family work from becoming a new pile inside `webgl2-world-submit.ts` before
 compacted geometry work resumes. C3 moved behavior behind adapters, but the implementation is still
@@ -784,6 +784,57 @@ Tasks:
 - Add or update tests so adapter dispatch is covered without testing debug-only logging.
 - Do not change rendered behavior or metrics.
 
+Progress:
+
+- Added `webgl2-direct-family-adapters.ts` as the direct family adapter owner for:
+  - direct draw context and texture-unit contracts;
+  - direct family uniform cache;
+  - route planning;
+  - RGBA texture-page prep/upload;
+  - indexed/paletted prep/upload;
+  - direct flat color upload helper.
+- Moved RGBA/indexed adapter helpers and route planning out of `webgl2-world-submit.ts`.
+- Converted `Webgl2DirectDrawRoute` from convenience booleans into discriminated route variants keyed
+  by `programKind`:
+  - `flat`;
+  - `texture`;
+  - `indexed-p8` / `indexed-p16`;
+  - `terrain`.
+- Updated route tests to import route planning from the direct family adapter module.
+- Kept `webgl2-world-submit.ts` responsible for orchestration: replacement planning, draw order,
+  render state, VAO binding, MVP upload, terrain, draw calls, and compacted submit handoff.
+
+Decisions:
+
+- Keep `programKind: "texture"` as the internal discriminant for `rgba-texture-page` because it still
+  maps to the existing WebGL2 textured program name. The family payload remains named
+  `rgba-texture-page`.
+- Keep portal masks classified as `debug-pipeline` in direct family submissions while routing them
+  through the flat direct shader path.
+- Keep terrain in the direct route union only for orchestration clarity. Terrain material binding and
+  shader behavior remain dedicated terrain logic, not part of the RGBA/indexed adapter ownership.
+
+Course corrections:
+
+- The cleanup did not add a separate adapter dispatch test file. Existing route tests already cover
+  adapter dispatch decisions without testing debug-only logging, and the submit tests cover behavior.
+- The new adapter module still imports submit program/metric types as type-only imports. This avoids a
+  runtime cycle, but C7 should revisit whether program type ownership belongs in a smaller shared
+  direct-program-types module.
+
+Legacy shims introduced:
+
+- `webgl2-direct-family-adapters.ts` still plans routes from `Webgl2WorldDrawUnit`. This remains a
+  migration bridge until the draw unit aggregate is split.
+- Route variants still carry the old draw unit because the central loop owns VAO binding, MVP upload,
+  draw counts, and terrain. This is acceptable until C4-C6 define the compacted-side equivalent and
+  C7 deletes old aggregate ownership where possible.
+
+Validation:
+
+- `npm exec tsc -- --noEmit`
+- `npm exec vitest -- src/lib/world-display/webgl2-direct-render-family.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-transition-portal-work.test.ts --run`
+
 Exit criteria:
 
 - `webgl2-world-submit.ts` is smaller and reads as orchestration, not the owner of RGBA/indexed
@@ -794,7 +845,7 @@ Exit criteria:
 
 ## Phase C4: Extract Material-Agnostic Compacted Geometry
 
-Status: Planned.
+Status: Next.
 
 Purpose: replace `buildBakedGeometry()` and RGBA-shaped baked geometry types with a material-agnostic
 compaction subsystem.

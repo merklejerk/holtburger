@@ -2,13 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import type { StagedWorldFrame } from "./staged-world-frame";
 import {
-	partitionWebgl2SceneDomainDrawUnits,
 	planWebgl2DirectDrawRoute,
+	type Webgl2DirectDrawPrograms,
+} from "./webgl2-direct-family-adapters";
+import {
+	partitionWebgl2SceneDomainDrawUnits,
 	planWebgl2FlatWorldSubmitOrder,
 	planWebgl2PortalMaskSubmitOrder,
 	submitWebgl2FlatWorldDrawUnits,
 	submitWebgl2FlatWorldFrame,
-	type Webgl2DirectDrawPrograms,
 	type Webgl2FlatWorldProgram,
 	type Webgl2IndexedP16WorldProgram,
 	type Webgl2IndexedP8WorldProgram,

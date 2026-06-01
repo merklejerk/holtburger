@@ -2719,9 +2719,9 @@ while preserving staged fallback behavior.
 
 Tasks:
 
-- Replace only submitted atlas-compacted outdoor static direct-texture draw units. Keep all remaining
-  direct-texture draw units, plus flat-fallback, unsupported, blended, and animated-UV materials, on
-  staged paths.
+- Replace only submitted atlas-backed compacted outdoor static direct-texture draw units. Keep all
+  remaining direct-texture draw units, plus flat-fallback, unsupported, blended, and animated-UV
+  materials, on staged paths.
 - Keep direct staging textures deduplicated by texture key while staged objects wait for or bypass
   compaction.
 - Do not remap standalone staged entries onto atlas textures in this phase. Atlas use is limited to
@@ -2796,10 +2796,10 @@ resources; exterior/interior ownership only affects compacted geometry grouping 
 
 Tasks:
 
-- Rename the active `atlas static` terminology toward `atlas compacted geometry` before or during this
-  phase. Use the rename for shared planner/resource/submit concepts that will cover outdoor statics
-  and structured interiors; keep narrow `static` naming only where a type truly refers to static
-  renderable source data.
+- Do not collapse texture-atlas and geometry-compaction terminology into one concept. This phase can
+  keep legacy `atlasStatic*` names while landing behavior, but the follow-up cleanup must separate
+  texture-atlas resources from compacted-geometry resources and name the current combined submit path
+  as atlas-backed compacted geometry only where both are required.
 - Add structured-interior direct-texture draw units to atlas compaction eligibility when they are
   landblock-owned, UV-backed, opaque, atlas-eligible, and compatible with the existing RGBA atlas
   shader/material-table path.
@@ -2847,8 +2847,9 @@ Decisions:
 - The old `non-exterior-domain` planner gate was removed. Scene-domain ownership remains submit-route
   metadata, not a material atlas eligibility constraint.
 - The current TypeScript symbols and debug metrics still use `atlasStatic*` names. That naming is now
-  legacy terminology for the widened direct atlas-compacted geometry path and should be renamed in a
-  dedicated cleanup pass rather than mixed into the behavior change.
+  legacy terminology for the widened path and should be renamed in a dedicated cleanup pass rather
+  than mixed into the behavior change. The cleanup must avoid replacing it with a single ambiguous
+  term: texture atlases and compacted geometry buffers are separate concepts.
 
 Progress:
 
@@ -2882,30 +2883,39 @@ Course corrections:
 
 Immediate cleanup before the next performance phase:
 
-- Rename the widened path from `atlasStatic*` to `atlasCompactedGeometry*` across files, types,
-  resource-store fields, debug metrics, and report labels. Avoid compatibility reexports or alias
-  shims; this is a straight rename of the active WebGL2-only path.
+- Rename the widened path away from `atlasStatic*` across files, types, resource-store fields, debug
+  metrics, and report labels. Avoid compatibility reexports or alias shims. Use split terminology:
+  texture-atlas names for atlas pages/entries/material sampling, compacted-geometry names for baked
+  VBO/IBO resources, and atlas-backed compacted names only for submit paths that require both.
 - After the rename, add optional source-kind counters for compactable, submitted, replaced, and
   conservative-overdraw triangles so field reports can distinguish outdoor static from
   structured-interior coverage without reading bypass samples.
 
-### Phase M7B: Atlas Compacted Geometry Terminology Cleanup
+### Phase M7B: Texture Atlas and Compacted Geometry Terminology Cleanup
 
 Status: Immediate interim phase.
 
-Purpose: remove the misleading `atlas static` terminology from the active direct atlas-compaction
-path now that it covers both outdoor static and structured-interior draw units. This should happen
-before the next performance-focused phase so profiling and field reports describe the pipeline that
-actually exists.
+Purpose: remove the misleading `atlas static` terminology without replacing it with another muddy
+name. Texture atlasing and geometry compaction are separate capabilities: staged geometry can sample
+atlas textures, compacted geometry might later use non-atlas material families, and the current direct
+replacement path happens to use both. This should happen before the next performance-focused phase so
+profiling and field reports describe the pipeline that actually exists.
 
 Tasks:
 
 - Rename files, exported types, internal helpers, resource-store fields, and debug/report metric names
-  from `atlasStatic*` / `AtlasStatic*` / "atlas static" to `atlasCompactedGeometry*` /
-  `AtlasCompactedGeometry*` / "atlas compacted geometry" where the concept covers both outdoor
-  static and structured-interior draw units.
+  from `atlasStatic*` / `AtlasStatic*` / "atlas static" to more precise names:
+  - `textureAtlas*` / `TextureAtlas*` / "texture atlas" for atlas pages, atlas entries, atlas
+    placement records, and material sampling data that can be shared by staged and compacted paths;
+  - `compactedGeometry*` / `CompactedGeometry*` / "compacted geometry" for baked vertex/index
+    buffers, batch origins, geometry slices, replacement accounting, and culling/submission coverage;
+  - `atlasBackedCompacted*` / `AtlasBackedCompacted*` / "atlas-backed compacted" only where the
+    resource or submit path specifically requires both an atlas-backed material and compacted
+    geometry.
 - Keep `static` in names only where the object is specifically a static-renderable source concept,
   such as `staticObjectKeys` or `staticPartCount`.
+- Keep `directTexture` or equivalent material-family wording where the concept is about a source
+  material that has not necessarily been atlassed or compacted yet.
 - Update tests and plan references directly. Do not add compatibility reexports, aliases, duplicate
   metric names, or migration shims.
 - Keep behavior unchanged during the rename except for optional source-kind metric splits if they stay
@@ -2913,10 +2923,199 @@ Tasks:
 
 Exit criteria:
 
-- No active WebGL2 atlas-compaction code path presents structured-interior-capable resources as
-  static-only.
+- No active WebGL2 atlas/compaction code path presents structured-interior-capable resources as
+  static-only, and no active names imply texture atlasing and geometry compaction are the same thing.
 - Existing M7A behavior remains covered by planner, compactor, resource, submit, and report tests.
-- Debug reports use terminology that matches the widened direct atlas-compacted geometry path.
+- Debug reports distinguish texture-atlas coverage from compacted-geometry coverage and use
+  "atlas-backed compacted" only for metrics that are truly about the current combined submit path.
+
+Decisions:
+
+- `AtlasCompactedGeometry` should not become the blanket replacement term. It conflates two axes:
+  material sampling through atlas textures and geometry submission through compacted VBO/IBO batches.
+- The current M7A replacement path is an atlas-backed compacted direct-texture path, but future phases
+  intentionally create other combinations: atlas-backed staged draws in M7C, detail atlas resources
+  in M7D, and terrain-specific geometry compaction in M7E.
+
+### Phase M7C: Atlas-Backed Staged Direct Materials
+
+Status: Planned.
+
+Purpose: allow staged direct-texture draw units that are not replaced by compacted geometry to sample
+from atlas textures instead of binding their standalone base texture. This is a texture-bind/resource
+optimization, not a draw-call optimization: staged atlas draws still submit one draw call per staged
+draw unit.
+
+Tasks:
+
+- Reuse the direct base texture-atlas generation produced for atlas-backed compacted geometry. Do not
+  create a separate staged-only base atlas if the material entry, sampler, and render state are
+  compatible.
+- Add staged-atlas material binding metadata for direct-texture draw units that:
+  - have atlas eligibility;
+  - have a placed atlas entry in the current atlas generation;
+  - are not replaced by compacted geometry in the active submit route;
+  - can preserve their sampler/wrap behavior through atlas rect remapping.
+- Add a staged-atlas shader path, or extend the staged textured shader, to sample the base atlas using
+  per-draw atlas rect uniforms. Preserve color, opacity, alpha-test, culling, and detail-overlay
+  behavior exactly when supported.
+- Keep unsupported staged cases on standalone texture binding with explicit fallback diagnostics.
+  Start conservatively for repeat/wrap cases if atlas rect remapping cannot preserve the current
+  staged behavior without bleeding.
+- Ensure compacted replacement wins over staged-atlas binding. A draw unit replaced by compacted
+  geometry should not also render through the staged-atlas path.
+- Add debug metrics for staged atlas:
+  - staged atlas draw count;
+  - standalone direct draw count;
+  - staged atlas fallback reasons;
+  - estimated standalone texture binds avoided;
+  - texture-atlas resources shared with atlas-backed compacted geometry.
+- Add tests for:
+  - atlas-backed staged direct draw submission;
+  - compacted replacement taking precedence over staged atlas;
+  - missing atlas resource fallback to standalone staged texture;
+  - wrap/repeat fallback or correct rect remapping;
+  - staged-atlas metrics.
+
+Exit criteria:
+
+- Eligible non-compacted staged direct-texture draw units can sample from the base atlas without
+  changing visual behavior.
+- Compacted geometry still replaces draw units before staged-atlas routing.
+- Debug reports make staged atlas effects visible separately from compacted draw-call savings.
+
+Decisions:
+
+- Atlas-backed staged materials are useful but separate from geometry compaction. They reduce texture
+  binds/resource churn; they do not reduce draw count.
+- Do not block M7C on detail-overlay atlas support. If detail-overlay staged-atlas support needs the
+  M7D detail atlas bucket, keep those draw units on standalone staged textures until that phase lands.
+- Do not add compatibility shims or parallel material models. This should reuse the same texture-atlas
+  entry and placement data as atlas-backed compacted geometry wherever possible.
+
+### Phase M7D: Detail-Overlay Support for Atlas-Backed Compacted Direct Geometry
+
+Status: Planned.
+
+Purpose: allow draw units that already render correctly on the staged `direct-texture` path with a
+detail overlay to move into the atlas-backed compacted direct-geometry path without losing the
+overlay. Base direct textures already have texture-atlas support; staged detail overlays already
+render. The missing work is carrying the separate detail-overlay texture atlas and parameters through
+compacted material/slice data and shader submission. Field captures show `detail-overlay x1000`, so
+this is a major remaining blocker for structured-interior and static compaction coverage.
+
+Tasks:
+
+- After M7B, rename the bypass and metric language around detail-overlay exclusions to use the split
+  terminology: detail texture-atlas coverage, compacted-geometry coverage, and atlas-backed compacted
+  submission where both apply.
+- Extend the compacted-geometry material key/slice grouping so detail-overlay and non-detail
+  materials do not get mixed in a draw slice unless the compacted shader/material record can represent
+  both states correctly.
+- Add a compacted direct-geometry shader variant, or extend the existing compacted shader, to support:
+  - base atlas texture lookup for the already-compacted base direct texture;
+  - a separate detail-overlay atlas bucket. Do not pack detail textures into the base RGBA atlas;
+    detail textures may be R8/single-channel and need their own format-specific atlas pages;
+  - detail-atlas rect lookup per compacted material slot;
+  - detail tiling;
+  - detail enable/blend behavior matching the staged direct-texture path.
+- Add graph-backed detail-atlas generation resources alongside the base direct atlas generation. The
+  detail atlas key should include source texture identity, decoded format, dimensions, sampling, and
+  detail-behavior inputs that affect shader output.
+- Keep detail-overlay and non-detail materials in compatible compacted slices only when the shader can
+  represent both with explicit enable state. Otherwise split slices by detail-atlas requirement.
+- Preserve shared base atlas generations across detail and non-detail direct textures when their base
+  texture/render-state compatibility matches.
+- Keep the staged direct-texture path as the fallback when detail resources, shader variant, or
+  material parameters are missing. Fail hard for impossible internal combinations.
+- Add tests proving:
+  - detail-overlay direct draw units become compactable when all detail resources are present;
+  - detail and non-detail draw units do not incorrectly share an incompatible draw slice;
+  - compacted submit binds/uploads detail atlas uniforms and textures;
+  - detail atlas resources are graph-retained and disposed with the same lifecycle guarantees as base
+    atlas resources;
+  - missing detail resources keep draw units staged with explicit bypass/fallback diagnostics;
+  - existing non-detail compacted geometry behavior remains unchanged.
+
+Exit criteria:
+
+- Common static and structured-interior direct-texture draw units with detail overlays are submitted
+  through atlas-backed compacted geometry instead of bypassing solely because
+  `detailOverlay !== null`.
+- Detail overlays use a separate R8/single-channel-capable atlas bucket rather than standalone
+  per-slice texture binds or RGBA base-atlas entries.
+- Debug reports distinguish detail-overlay compacted coverage from remaining staged detail-overlay
+  fallbacks.
+- Visual parity with the staged direct-texture detail overlay path is preserved for representative
+  building/cell-structure surfaces.
+
+Decisions:
+
+- Detail overlays are not inherently incompatible with compaction. The current bypass is an
+  implementation gap in the compacted direct shader/material table: the base texture can already live
+  in the RGBA atlas, while the detail overlay is a separate texture input with its own format and
+  parameters.
+- Detail overlays should be packed into a separate detail-atlas bucket in M7D. This is required design,
+  not an optional future optimization, because detail textures have different format constraints from
+  the base direct RGBA atlas.
+- Do not fold terrain into this phase. Terrain uses a different material family and needs its own
+  batching/compaction design.
+
+### Phase M7E: Terrain Compaction Design and First Path
+
+Status: Planned discovery/prototype phase.
+
+Purpose: design and start a terrain-specific compaction path. Terrain uses `terrain-blend` materials
+with base, overlay, road, alpha, tiling, rotation, and detail behavior, so it should not be forced
+through the direct RGBA texture-atlas path or the direct-texture atlas-backed compacted shader.
+
+Tasks:
+
+- Audit the current terrain draw-unit shape and shader/material inputs:
+  - terrain tile geometry boundaries;
+  - base texture and overlay texture references;
+  - road/alpha textures;
+  - detail overlay usage;
+  - sampler and tiling requirements;
+  - landblock ownership and render-origin behavior.
+- Use field metrics to identify the real terrain pressure:
+  - terrain draw-unit count;
+  - visible terrain draw count;
+  - terrain texture count;
+  - terrain state changes/uniform uploads;
+  - whether terrain is draw-call bound, texture-bind bound, or shader/uniform bound.
+- Choose a first compaction strategy:
+  - likely landblock-scoped terrain geometry batches using the landblock render origin;
+  - keep existing terrain-blend textures bound per terrain material/slice initially;
+  - avoid terrain texture atlasing until texture-bind metrics prove it is needed;
+  - preserve current terrain blend shader semantics.
+- Define terrain batch keys around the material state that actually changes: base/overlay/road
+  texture set, alpha texture set, tiling/rotation parameters, render state, and detail overlay state.
+- Prototype terrain compacted geometry submission for the common outdoor terrain path with staged
+  fallback for unsupported blend states.
+- Add debug metrics for terrain compactable/submitted/replaced draw units, submitted terrain
+  triangles, terrain draw-call savings, and terrain overdraw if whole-batch submission is used.
+- Add tests for landblock-origin terrain baking, terrain material grouping, resource fallback, and
+  draw-call replacement arithmetic.
+
+Exit criteria:
+
+- We have a documented terrain compaction shape backed by code or a narrow prototype, not just a
+  guess.
+- The first terrain path either submits representative terrain through compacted batches or names the
+  exact blocker and adds an immediate follow-up phase.
+- Terrain compaction metrics appear in the debug report separately from direct atlas-backed compacted
+  geometry metrics.
+
+Decisions:
+
+- Terrain compaction is a dedicated material-family path. It may share geometry-baking and
+  landblock-batch helpers with direct compacted geometry, but it should not share direct texture atlas
+  assumptions.
+- Landblock is the initial terrain batch scope. Finer terrain tile or visibility partitions should be
+  evidence-driven.
+- Terrain texture atlasing is deferred until we understand whether texture binds, uniforms, or draw
+  calls dominate after geometry compaction.
 
 ## Phase M8: Performance Gate and Post-Three Cleanup
 
@@ -2968,8 +3167,10 @@ Exit criteria:
   show real scenes exceeding 128 material slots after M7.3.2 removes the transform-table path.
 - After M7.4, assess whether conservative whole-slice submission is too expensive in portal-heavy or
   dense static scenes before designing per-visible-range submission.
-- Rename `atlas static` files/types/metrics to `atlas compacted geometry` as M7A broadens the path to
-  structured interiors. Avoid compatibility reexports; rename call sites directly.
+- Rename `atlas static` files/types/metrics with split terminology as M7A broadens the path to
+  structured interiors: texture-atlas names for atlas pages/entries/material sampling,
+  compacted-geometry names for baked buffers and replacement accounting, and atlas-backed compacted
+  names only where both axes are required. Avoid compatibility reexports; rename call sites directly.
 - Revisit the per-frame WebGL2 draw-unit sort after M3-M7 reshape the submit path.
 - Split renderer-neutral material sampling DTOs from any Three adapter names/imports if they still
   imply Three ownership.

@@ -2775,12 +2775,12 @@ Status: Complete.
 
 Purpose: after M7.3.2 removes the per-object transform blocker, M7.3.3 restores landblock-scale
 culling granularity, M7.3.4 closes metric debt, and M7.3.5 closes lifecycle debt, harden
-atlas-backed compacted outdoor static batches as the normal visible path for eligible draw units
+baked geometry outdoor static batches as the normal visible path for eligible draw units
 while preserving staged fallback behavior.
 
 Tasks:
 
-- Replace only submitted atlas-backed compacted outdoor static direct-texture draw units. Keep all
+- Replace only submitted baked geometry outdoor static direct-texture draw units. Keep all
   remaining direct-texture draw units, plus flat-fallback, unsupported, blended, and animated-UV
   materials, on staged paths.
 - Keep direct staging textures deduplicated by texture key while staged objects wait for or bypass
@@ -2806,7 +2806,7 @@ Tasks:
 
 Exit criteria:
 
-- Common textured static objects can render through atlas-backed compacted WebGL2 batches.
+- Common textured static objects can render through baked geometry WebGL2 batches.
 - Staged direct/fallback rendering remains the visible fallback for unsupported or not-yet-compacted
   objects.
 - Atlas generations and compacted buffers are retained and retired through the renderer graph.
@@ -2860,7 +2860,7 @@ Tasks:
 - Do not collapse texture-atlas and geometry-compaction terminology into one concept. This phase can
   keep legacy `atlasStatic*` names while landing behavior, but the follow-up cleanup must separate
   texture-atlas resources from compacted-geometry resources and name the current combined submit path
-  as atlas-backed compacted geometry only where both are required.
+  as baked geometry geometry only where both are required.
 - Add structured-interior direct-texture draw units to atlas compaction eligibility when they are
   landblock-owned, UV-backed, opaque, atlas-eligible, and compatible with the existing RGBA atlas
   shader/material-table path.
@@ -2886,7 +2886,7 @@ Tasks:
 Exit criteria:
 
 - Compatible structured-interior direct-texture draw units can be replaced by landblock-scoped
-  atlas-backed compacted batches in the normal scene-domain submit path.
+  baked geometry batches in the normal scene-domain submit path.
 - Outdoor static atlas substitution continues to work with the renamed compacted-geometry concepts.
 - Shared atlas generations can contain compatible outdoor static and structured-interior entries
   without duplicating textures by render domain.
@@ -2968,7 +2968,7 @@ Tasks:
     placement records, and material sampling data that can be shared by staged and compacted paths;
   - `compactedGeometry*` / `CompactedGeometry*` / "compacted geometry" for baked vertex/index
     buffers, batch origins, geometry slices, replacement accounting, and culling/submission coverage;
-  - `atlasBackedCompacted*` / `AtlasBackedCompacted*` / "atlas-backed compacted" only where the
+  - `bakedGeometry*` / `BakedGeometry*` / "baked geometry" only where the
     resource or submit path specifically requires both an atlas-backed material and compacted
     geometry.
 - Keep `static` in names only where the object is specifically a static-renderable source concept,
@@ -2986,38 +2986,38 @@ Exit criteria:
   static-only, and no active names imply texture atlasing and geometry compaction are the same thing.
 - Existing M7A behavior remains covered by planner, compactor, resource, submit, and report tests.
 - Debug reports distinguish texture-atlas coverage from compacted-geometry coverage and use
-  "atlas-backed compacted" only for metrics that are truly about the current combined submit path.
+  "baked geometry" only for metrics that are truly about the current combined submit path.
 
 Decisions:
 
 - `AtlasCompactedGeometry` should not become the blanket replacement term. It conflates two axes:
   material sampling through atlas textures and geometry submission through compacted VBO/IBO batches.
-- The current M7A replacement path is an atlas-backed compacted direct-texture path, but future phases
+- The current M7A replacement path is an baked geometry direct-texture path, but future phases
   intentionally create other combinations: atlas-backed staged draws in M7C, detail atlas resources
   in M7D, and terrain-specific geometry compaction in M7E.
 
 Progress:
 
 - Renamed the active planner from `atlas-static-compaction-planner` to
-  `atlas-backed-compaction-planner`. The plan/candidate/bypass types now use
-  `AtlasBackedCompaction*` because they describe draw units that can enter the current combined
-  atlas-backed compacted path.
+  `baked-renderables-planner`. The plan/candidate/bypass types now use
+  `BakedRenderable*` because they describe draw units that can enter the current combined
+  baked geometry path.
 - Renamed WebGL2 texture-atlas generation to `webgl2-texture-atlas-generation` and
   `Webgl2TextureAtlas*`. These resources own atlas pages/textures and are intentionally reusable by
   future staged-atlas routing.
 - Renamed compacted geometry construction and batch resources to
-  `atlas-backed-compacted-geometry` / `webgl2-atlas-backed-compacted-batches` for the current
+  `baked-geometry` / `webgl2-atlas-backed-compacted-batches` for the current
   combined direct-texture path. The renderer metrics now split texture-atlas generation counts,
-  compacted-geometry resource counts/bytes, and atlas-backed compacted submit/replacement counts.
+  compacted-geometry resource counts/bytes, and baked geometry submit/replacement counts.
 - Renamed debug report labels and material-type counter keys from `webgl2-atlas-static-*` to split
-  `webgl2-atlas-backed-compaction-*`, `webgl2-texture-atlas-*`,
+  `webgl2-baked-renderables-*`, `webgl2-texture-atlas-*`,
   `webgl2-compacted-geometry-*`, and `webgl2-atlas-backed-compacted-*` names.
 - Updated tests and imports directly. No compatibility reexports, duplicate metric names, or legacy
   aliases were added.
 
 Validation:
 
-- `npm run test:ts -- src/lib/world-display/atlas-backed-compaction-planner.test.ts src/lib/world-display/atlas-backed-compacted-geometry.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts src/lib/world-display/webgl2-atlas-backed-compacted-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts`
+- `npm run test:ts -- src/lib/world-display/baked-renderables-planner.test.ts src/lib/world-display/baked-geometry.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts src/lib/world-display/webgl2-atlas-backed-compacted-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts`
 - `npm run check`
 
 Course corrections:
@@ -3046,7 +3046,7 @@ draw unit.
 
 Tasks:
 
-- Reuse the direct base texture-atlas generation produced for atlas-backed compacted geometry. Do not
+- Reuse the direct base texture-atlas generation produced for baked geometry geometry. Do not
   create a separate staged-only base atlas if the material entry, sampler, and render state are
   compatible.
 - Add staged-atlas material binding metadata for direct-texture draw units that:
@@ -3067,7 +3067,7 @@ Tasks:
   - standalone direct draw count;
   - staged atlas fallback reasons;
   - estimated standalone texture binds avoided;
-  - texture-atlas resources shared with atlas-backed compacted geometry.
+  - texture-atlas resources shared with baked geometry geometry.
 - Add tests for:
   - atlas-backed staged direct draw submission;
   - compacted replacement taking precedence over staged atlas;
@@ -3089,7 +3089,7 @@ Decisions:
 - Do not block M7C on detail-overlay atlas support. If detail-overlay staged-atlas support needs the
   M7D detail atlas bucket, keep those draw units on standalone staged textures until that phase lands.
 - Do not add compatibility shims or parallel material models. This should reuse the same texture-atlas
-  entry and placement data as atlas-backed compacted geometry wherever possible.
+  entry and placement data as baked geometry geometry wherever possible.
 
 Progress:
 
@@ -3147,7 +3147,7 @@ Cleanup targets and legacy shims:
 Status: Complete.
 
 Purpose: allow draw units that already render correctly on the staged `direct-texture` path with a
-detail overlay to move into the atlas-backed compacted direct-geometry path without losing the
+detail overlay to move into the baked geometry direct-geometry path without losing the
 overlay. Base direct textures already have texture-atlas support; staged detail overlays already
 render. The missing work is carrying the separate detail-overlay texture atlas and parameters through
 compacted material/slice data and shader submission. Field captures show `detail-overlay x1000`, so
@@ -3156,7 +3156,7 @@ this is a major remaining blocker for structured-interior and static compaction 
 Tasks:
 
 - After M7B, rename the bypass and metric language around detail-overlay exclusions to use the split
-  terminology: detail texture-atlas coverage, compacted-geometry coverage, and atlas-backed compacted
+  terminology: detail texture-atlas coverage, compacted-geometry coverage, and baked geometry
   submission where both apply.
 - Extend the compacted-geometry material key/slice grouping so detail-overlay and non-detail
   materials do not get mixed in a draw slice unless the compacted shader/material record can represent
@@ -3190,7 +3190,7 @@ Tasks:
 Exit criteria:
 
 - Common static and structured-interior direct-texture draw units with detail overlays are submitted
-  through atlas-backed compacted geometry instead of bypassing solely because
+  through baked geometry geometry instead of bypassing solely because
   `detailOverlay !== null`.
 - Detail overlays use a separate RGBA8 atlas bucket rather than standalone
   per-slice texture binds or RGBA base-atlas entries.
@@ -3229,7 +3229,7 @@ Progress:
 - Split compacted material slots by base material plus detail-atlas entry, and added an explicit
   draw-unit-to-compaction-slot table so a base material reused with and without detail cannot inherit
   the wrong overlay.
-- Extended the atlas-backed compacted shader/submission path to bind a detail atlas page per slice
+- Extended the baked geometry shader/submission path to bind a detail atlas page per slice
   and apply the current `dst-color` detail overlay in the compacted shader.
 - Updated asset preparation requests and material dependencies so detail overlays can request
   normalized `usage=detail&out=rgba8&mips=none&cs=linear` prepared textures instead of accidentally
@@ -3240,7 +3240,7 @@ Progress:
 
 Validation:
 
-- `npm exec vitest -- src/lib/assets/scene-asset-request-planner.test.ts src/lib/world-display/atlas-backed-compaction-planner.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts src/lib/world-display/webgl2-atlas-backed-compacted-submit.test.ts --run`
+- `npm exec vitest -- src/lib/assets/scene-asset-request-planner.test.ts src/lib/world-display/baked-renderables-planner.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts src/lib/world-display/webgl2-atlas-backed-compacted-submit.test.ts --run`
 - `npm run check`
 - `npm run lint:ts`
 
@@ -3273,7 +3273,7 @@ Cleanup targets and legacy shims:
 
 Status: Implemented; field validation carried into M7D.1a.1.
 
-Purpose: fix authored repeat/wrap behavior for atlas-backed compacted geometry. The current compacted
+Purpose: fix authored repeat/wrap behavior for baked geometry geometry. The current compacted
 shader samples the base atlas with clamped author UVs, so repeated static and structured-interior
 surfaces that enter landblock-scoped compacted batches can look smeared even though their direct
 staged material would wrap correctly. Detail textures already repeat through their own tiling path;
@@ -3283,7 +3283,7 @@ Tasks:
 
 - Carry sampler wrap policy from atlas eligibility into compacted material slots without parsing
   debug strings.
-- Extend the atlas-backed compacted shader to repeat or clamp inside the atlas rect per sampler axis.
+- Extend the baked geometry shader to repeat or clamp inside the atlas rect per sampler axis.
   The repeat path must not sample outside the atlas entry or across gutters.
 - Ensure compacted material-slot/slice grouping remains deterministic when otherwise identical
   material slots differ only by wrap policy.
@@ -3296,7 +3296,7 @@ Tasks:
 
 Exit criteria:
 
-- Atlas-backed compacted geometry preserves representative base texture repeat/clamp behavior for
+- Baked geometry geometry preserves representative base texture repeat/clamp behavior for
   static and structured-interior draw units.
 - Debug reports no longer require retaining otherwise eligible repeated base textures on standalone
   direct paths solely to avoid compacted atlas clamping.
@@ -3305,7 +3305,7 @@ Exit criteria:
 
 Decisions:
 
-- M7D.1 was split because the visible post-M7D wrapping issue is in atlas-backed compacted geometry,
+- M7D.1 was split because the visible post-M7D wrapping issue is in baked geometry geometry,
   not in retained staged direct draw units. The staged atlas optimization remains useful, but it does
   not fix compacted shader UV clamping.
 - Atlas eligibility now carries structured `samplingPolicy.wrapS/wrapT` in addition to the diagnostic
@@ -3320,7 +3320,7 @@ Progress:
   from the material variant sampler policy.
 - Threaded atlas sampling policy through staged atlas eligibility, atlas-backed compaction material
   slots, WebGL2 compacted batch material records, and compacted submit uniforms.
-- Added `uMaterialWrapModes` to the atlas-backed compacted shader and switched base atlas sampling
+- Added `uMaterialWrapModes` to the baked geometry shader and switched base atlas sampling
   from unconditional `clamp(vUv)` to per-axis repeat/clamp inside the atlas rect.
 - Preserved the existing detail overlay path; detail textures still use their own `fract(vUv *
 tiling)` sampling.
@@ -3330,7 +3330,7 @@ tiling)` sampling.
 Course corrections:
 
 - The first M7D.1 text treated repeat/wrap as a staged-atlas-only optimization. Field inspection
-  showed the current visual defect is in atlas-backed compacted base sampling, so compacted shader
+  showed the current visual defect is in baked geometry base sampling, so compacted shader
   support was implemented first and staged atlas repeat/wrap remains M7D.1b.
 - The compacted shader currently uses `fract` for repeat atlas lookup. That restores author wrapping
   but still needs field validation for mip/derivative behavior at tile boundaries.
@@ -3345,7 +3345,7 @@ Cleanup targets and legacy shims:
 
 Validation:
 
-- `npm exec vitest -- src/lib/world-display/staged-world-material-strategy.test.ts src/lib/world-display/atlas-backed-compaction-planner.test.ts src/lib/world-display/atlas-backed-compacted-geometry.test.ts src/lib/world-display/webgl2-atlas-backed-compacted-submit.test.ts src/lib/world-display/webgl2-world-submit.test.ts --run`
+- `npm exec vitest -- src/lib/world-display/staged-world-material-strategy.test.ts src/lib/world-display/baked-renderables-planner.test.ts src/lib/world-display/baked-geometry.test.ts src/lib/world-display/webgl2-atlas-backed-compacted-submit.test.ts src/lib/world-display/webgl2-world-submit.test.ts --run`
 - `npm run check`
 - `npm run lint:ts`
 
@@ -3361,7 +3361,7 @@ Tasks:
 
 - Capture a debug report and screenshot around the static/detail surfaces that previously showed
   clamped or smeared base textures.
-- Confirm repeated base textures now wrap in atlas-backed compacted geometry while clamp materials
+- Confirm repeated base textures now wrap in baked geometry geometry while clamp materials
   remain clamped.
 - Watch for mip seam, gutter bleeding, shimmer, or derivative artifacts on repeated atlas entries.
 - If artifacts are visible, decide whether M7D.1b should first introduce explicit derivative sampling
@@ -3377,15 +3377,15 @@ Progress:
 
 - Field validation found slight seams on wrapped atlassed textures after the initial `fract`-based
   repeat fix.
-- Updated atlas-backed compacted base atlas sampling to use `textureGrad()` with gradients derived
+- Updated baked geometry base atlas sampling to use `textureGrad()` with gradients derived
   from the unwrapped author UV, scaled into the atlas rect. This keeps mip selection continuous
   across repeat boundaries instead of deriving from the discontinuous `fract` coordinate.
 - Updated detail-atlas sampling the same way: detail UVs still repeat with `fract(vUv * tiling)`,
   but mip gradients come from the unwrapped tiled UV.
 - Field revalidation on 2026-06-01 confirmed the visible wrapped-atlas seams are gone.
 - The validation report still shows the expected post-M7D shape: 9 compacted batches, 15 compacted
-  slices, 17 atlas-backed compacted shader draws, 1 base atlas texture, 1 detail atlas texture,
-  1,816 replaced draw units, 1,799 estimated draw-call savings, and no atlas-backed compacted
+  slices, 17 baked geometry shader draws, 1 base atlas texture, 1 detail atlas texture,
+  1,816 replaced draw units, 1,799 estimated draw-call savings, and no baked geometry
   submit fallbacks.
 - The remaining staged-atlas work is small in this scene: 25 staged atlas draws, 1,133 standalone
   direct draws, and 8 staged-atlas missing-placement fallback samples for `06003789`.
@@ -3405,7 +3405,7 @@ Cleanup targets and legacy shims:
 
 Validation:
 
-- `npm exec vitest -- src/lib/world-display/staged-world-material-strategy.test.ts src/lib/world-display/atlas-backed-compaction-planner.test.ts src/lib/world-display/atlas-backed-compacted-geometry.test.ts src/lib/world-display/webgl2-atlas-backed-compacted-submit.test.ts src/lib/world-display/webgl2-world-submit.test.ts --run`
+- `npm exec vitest -- src/lib/world-display/staged-world-material-strategy.test.ts src/lib/world-display/baked-renderables-planner.test.ts src/lib/world-display/baked-geometry.test.ts src/lib/world-display/webgl2-atlas-backed-compacted-submit.test.ts src/lib/world-display/webgl2-world-submit.test.ts --run`
 - `npm run check`
 - `npm run lint:ts`
 
@@ -3640,7 +3640,7 @@ contract.
 
 Tasks:
 
-- Rename active user-facing and debug terminology from `atlas-backed compacted` to `baked` where the
+- Rename active user-facing and debug terminology from `baked geometry` to `baked` where the
   concept is the promoted renderable or submitted draw family.
 - Make docs, metrics, and code comments state that a renderable is not baked merely because it samples
   a packed atlas page, and is not direct merely because it samples a single-entry page.
@@ -3674,27 +3674,27 @@ Progress on 2026-06-01:
   baked candidates, baked batches, baked draws/slices, baked shader draws, baked draw-call math,
   baked replaced/submitted triangles, baked bypasses, and baked submit/resource fallbacks.
 - Renamed debug metric labels emitted in `materialTypeCounts` from `webgl2-atlas-backed-compacted-*`
-  and `webgl2-atlas-backed-compaction-*` to `webgl2-baked-*` where they describe promoted draw
+  and `webgl2-baked-renderables-*` to `webgl2-baked-*` where they describe promoted draw
   pressure rather than concrete atlas texture resources.
-- Updated active baked submit fallback samples from "atlas-backed compacted submit ..." to "baked
+- Updated active baked submit fallback samples from "baked geometry submit ..." to "baked
   submit ...". Missing atlas texture/detail atlas texture fallbacks still name atlas textures because
   those are concrete texture-page resources used by the current baked family.
 - Updated renderer graph lease/debug labels for landblock-scoped promoted batches to "webgl2 baked
   landblock batch".
 - Updated bake-candidate bypass samples to describe blockers as baked-geometry blockers rather than
-  "atlas-backed compacted geometry" blockers.
-- Renamed the boundary DTO/debug fields from `atlasBackedCompacted*`,
-  `atlasBackedCompaction*`, and `compactedGeometry*` to baked terminology:
+  "baked geometry geometry" blockers.
+- Renamed the boundary DTO/debug fields from `bakedGeometry*`,
+  `bakedRenderable*`, and `compactedGeometry*` to baked terminology:
   `baked*` for submitted/replaced/retained draw metrics, `bakedGeometry*` for compacted geometry
   resource metrics, and `bakedSubmitRoute` for route ownership.
 
 Decisions and course corrections:
 
 - Kept low-level implementation module/type names such as `webgl2-atlas-backed-compacted-submit` and
-  `AtlasBackedCompactionPlan` for now. Those names still describe the current concrete implementation
+  `BakedRenderablePlan` for now. Those names still describe the current concrete implementation
   family and changing them touches a broad API surface.
-- Kept concrete resource-store collections such as `atlasBackedCompactedBatches` and the
-  `AtlasBackedCompactionPlan` implementation type. Those are not boundary DTO names; they describe
+- Kept concrete resource-store collections such as `bakedGeometryBatches` and the
+  `BakedRenderablePlan` implementation type. Those are not boundary DTO names; they describe
   the current concrete baked family that requires packed atlas texture pages plus compacted geometry.
 - Did not rename packed-atlas resource labels, base/detail atlas texture counts, or atlas eligibility
   diagnostics when they refer to concrete texture-page resources rather than baked renderable
@@ -3702,22 +3702,22 @@ Decisions and course corrections:
 
 Validation:
 
-- `npm exec vitest -- src/lib/world-display/texture-page-binding.test.ts src/lib/world-display/atlas-backed-compaction-planner.test.ts src/lib/world-display/webgl2-atlas-backed-compacted-submit.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts --run`
+- `npm exec vitest -- src/lib/world-display/texture-page-binding.test.ts src/lib/world-display/baked-renderables-planner.test.ts src/lib/world-display/webgl2-atlas-backed-compacted-submit.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts --run`
 - `npm exec tsc -- --noEmit`
 
 Introduced cleanup targets and legacy shims:
 
 - Rename implementation modules only when the current baked family no longer needs the concrete
-  "atlas-backed compacted" qualifier to distinguish it from future baked indexed, terrain, or
+  "baked geometry" qualifier to distinguish it from future baked indexed, terrain, or
   transparent families.
 - Audit downstream consumers for the old debug DTO field names before merging with external tooling.
   No compatibility alias was kept inside the renderer contract.
 - Keep future metric additions in baked/direct-draw terminology at the boundary. Do not add new
-  user-facing `atlas-backed compacted` metric labels.
+  user-facing `baked geometry` metric labels.
 
 ### Phase M7D.3: Unified Bake Eligibility
 
-Status: Next.
+Status: Implemented.
 
 Purpose: make bake planning consume the shared texture-page binding model while requiring
 compacted-geometry compatibility. A renderable should not be promoted into the baked path unless the
@@ -3762,6 +3762,79 @@ Exit criteria:
 - Retained direct-draw counts explain why each unsupported candidate could not bake.
 - Existing static and structured-interior baked scenes still submit with the current draw-call
   savings shape or a documented difference caused by stricter eligibility.
+
+Progress:
+
+- Added a typed `BakeEligibility` record to the WebGL2 draw-unit path. The record separates material
+  blockers from geometry blockers and exposes a single baked/direct-draw decision for the current
+  baked family.
+- Moved the active baked renderable planner to consume `BakeEligibility` instead of deriving
+  bake promotion directly from `materialKind`, raw atlas eligibility, detail flags, UV presence, and
+  opacity checks.
+- Bake eligibility now consumes the same texture-page binding facts recorded for direct draw. The
+  current baked family accepts color-filtered base pages and optional color-filtered detail pages,
+  and rejects indexed texel pages, palette pages, terrain/road pages, alpha-control pages, and other
+  data/control lookup behavior until a later baked shader family explicitly supports them.
+- Split geometry-only and material-only eligibility in planner tests: material-compatible draw units
+  without landblock ownership stay direct draw, geometry-compatible draw units without packed
+  texture-page eligibility stay direct draw, and fully eligible draw units bake.
+- Replaced the temporary `TexturePageSamplingPolicy.colorSpace` field with `samplingDomain`
+  (`color`, `data`, `control`). This keeps the shared texture-page model honest: WebGL2 is choosing
+  sampling behavior, not performing managed color-space conversion.
+
+Decisions and course corrections:
+
+- Missing packed texture-page eligibility is reported before generic missing base page behavior. This
+  keeps baked fallback reports focused on the bake-only blocker instead of obscuring it behind direct
+  texture-page resolution details.
+- Existing bypass reason names were preserved at the metric boundary for now, but the behavior
+  decision no longer depends on parsing or checking those diagnostic strings.
+- Follow-up rename: active implementation modules now use baked terminology too:
+  `baked-renderable-planner`, `baked-geometry`, `webgl2-baked-geometry-batches`, and
+  `webgl2-baked-submit`. Low-level fields still keep precise atlas/texture-page names where they
+  refer to packed texture resources.
+
+Verification:
+
+- `npm exec tsc -- --noEmit`
+- `npm exec vitest -- src/lib/world-display/texture-page-binding.test.ts src/lib/world-display/baked-renderable-planner.test.ts src/lib/world-display/baked-geometry.test.ts src/lib/world-display/webgl2-baked-submit.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts --run`
+
+Residual cleanup:
+
+- `resolveTexturePageWrapMode` still parses the legacy `textureSamplingPolicy` string when a direct
+  draw unit has no atlas eligibility. This is now isolated fallback debt and should be removed before
+  expanding baked coverage.
+- Direct packed base-page placement is still resolved by direct submit from draw-unit atlas
+  eligibility and the active atlas generation. Move this into shared texture-page resolution so
+  direct and baked submit both consume resolved page facts.
+
+### Phase M7D.3a: Texture-Page Eligibility Cleanup
+
+Status: Next.
+
+Purpose: finish the cleanup exposed by M7D.3 before expanding baked coverage. The renderer should
+not rely on legacy sampler strings or submit-local atlas lookup when it can consume typed
+texture-page facts.
+
+Tasks:
+
+- Replace the `resolveTexturePageWrapMode` regex fallback with typed sampler facts carried from the
+  material resolver into texture-page binding.
+- Move packed base-page placement resolution out of direct submit and into shared texture-page
+  planning/resource sync, so direct and baked paths consume the same resolved page binding shape.
+- Rename or split remaining active bypass reason labels whose wording still implies direct texture
+  rather than baked material-family incompatibility.
+- Audit tests for hand-built texture-page bindings and keep them aligned with `samplingDomain`
+  instead of older color-space wording.
+
+Exit criteria:
+
+- No direct/baked hot-path behavior depends on parsing `textureSamplingPolicy`, sampling cache keys,
+  or diagnostic strings.
+- Direct submit receives resolved packed or single-entry base-page bindings instead of deriving
+  placement from atlas eligibility at submit time.
+- Baked fallback samples distinguish material-family incompatibility from missing texture-page
+  resource facts without relying on legacy reason wording.
 
 ### Phase M7D.4: Expand Baked Static and Interior Coverage
 
@@ -3969,7 +4042,7 @@ Exit criteria:
 
 ## Cleanup Targets
 
-- Rename shared metrics fields that still use stale `BatchCount`, `atlas-backed compacted`, or
+- Rename shared metrics fields that still use stale `BatchCount`, `baked geometry`, or
   staged-atlas terminology once the texture-page and baked/direct-draw boundaries are implemented.
 - Preserve prepared-texture diagnostics in WebGL2 resource records so texture byte counts and fallback
   explanations are accurate.
@@ -3980,14 +4053,16 @@ Exit criteria:
   binding diagnostics into texture-page terminology. Keep usage bucket and sample class visible in
   fallback samples. Keep blend/alpha-test diagnostics with render-state/material policy unless a
   separate sampled control texture is involved.
-- Replace the temporary texture-page `colorSpace` policy naming with an explicit sampling-domain or
-  conversion-policy field. Current WebGL2 code distinguishes color sampling from data/control
-  sampling, not real renderer color spaces.
+- The temporary texture-page `colorSpace` policy naming was replaced with `samplingDomain` in M7D.3.
+  Keep future texture-page fields focused on sampler behavior and explicit conversion policy rather
+  than implying renderer-wide color management.
 - Audit direct and baked shader/resource setup for duplicated material feature detection. Move
   duplicated detection into shared material/texture-page planning and leave submit paths to adapt
   already-resolved facts.
-- Replace active atlas static compaction terminology with baked terminology where the code is naming
-  the promoted renderable rather than the concrete atlas or compacted-buffer resource.
+- Active atlas static compaction terminology has been renamed to baked terminology where the code is
+  naming the promoted renderable rather than the concrete atlas or compacted-buffer resource. Keep
+  future additions on the `baked-renderable-planner`, `baked-geometry`, and `webgl2-baked-*` naming
+  path.
 - Remove the temporary duplicate `atlasEntries` / `atlasEntryRecords` plan shape once downstream
   diagnostics consume keyed atlas records directly.
 - Replace the first-slice single static-batch resource in M7.3.3. Large scenes should use multiple
@@ -4008,11 +4083,12 @@ Exit criteria:
   material-resource names should use texture page, and low-level resource names should remain precise
   about packed atlases, single-entry pages, and compacted geometry.
 - Direct base-color texture-page binding currently derives packed-page placement in direct submit
-  from draw-unit atlas eligibility plus the active atlas generation. M7D.3 should move that derivation
-  into shared material/resource planning so direct and baked submit consume the same resolved facts.
+  from draw-unit atlas eligibility plus the active atlas generation. M7D.3a should move that
+  derivation into shared material/resource planning so direct and baked submit consume the same
+  resolved facts.
 - The renderer still relies on string identifiers, feature-flag strings, and string/regexp matching in
   some hot or near-hot material paths, for example sampler policy parsing and cache-key-style feature
-  strings. M7D.3 should replace behavior-driving parsing with typed facts emitted by material and
+  strings. M7D.3a should finish replacing behavior-driving parsing with typed facts emitted by material and
   texture-page planning. Keep strings for stable keys, diagnostics, and graph identity only.
 - Revisit the per-frame WebGL2 draw-unit sort after M3-M7 reshape the submit path.
 - Split renderer-neutral material sampling DTOs from any Three adapter names/imports if they still

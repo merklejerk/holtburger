@@ -357,15 +357,15 @@ export function createWebgl2RenderMetrics(
 							input.worldStore.textureAtlasGenerationTextureCount,
 						"webgl2-detail-texture-atlas-generation-textures":
 							input.worldStore.detailTextureAtlasGenerationTextureCount,
-						"webgl2-compacted-geometry-batches":
+						"webgl2-baked-geometry-batches":
 							input.worldStore.bakedGeometryBatchCount,
-						"webgl2-compacted-geometry-draw-units":
+						"webgl2-baked-geometry-draw-units":
 							input.worldStore.bakedGeometryDrawUnitCount,
-						"webgl2-compacted-geometry-draw-slices":
+						"webgl2-baked-geometry-draw-slices":
 							input.worldStore.bakedGeometryDrawSliceCount,
-						"webgl2-compacted-geometry-batch-origins":
+						"webgl2-baked-geometry-batch-origins":
 							input.worldStore.bakedGeometryBatchOriginCount,
-						"webgl2-compacted-geometry-transform-table-entries":
+						"webgl2-baked-geometry-transform-table-entries":
 							input.worldStore.bakedGeometryTransformTableEntryCount,
 						"webgl2-baked-shader-draws":
 							input.submitMetrics.bakedShaderDrawCallCount,

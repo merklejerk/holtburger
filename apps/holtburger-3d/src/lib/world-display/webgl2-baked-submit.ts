@@ -1,12 +1,12 @@
 import type { RenderMat4 } from "./render-math";
 import type { Webgl2ProgramResource } from "./webgl2-gl";
 import type { Webgl2StateCache } from "./webgl2-state-cache";
-import type { Webgl2AtlasBackedCompactedBatchResource } from "./webgl2-atlas-backed-compacted-batches";
+import type { Webgl2BakedGeometryBatchResource } from "./webgl2-baked-geometry-batches";
 import type { Webgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
 
-export const WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS = 128;
+export const WEBGL2_BAKED_MAX_MATERIAL_SLOTS = 128;
 
-export type Webgl2AtlasBackedCompactedWorldProgram = Webgl2ProgramResource<
+export type Webgl2BakedGeometryWorldProgram = Webgl2ProgramResource<
 	"position" | "uv" | "materialSlot",
 	| "uViewProjection"
 	| "uBatchModel"
@@ -21,7 +21,7 @@ export type Webgl2AtlasBackedCompactedWorldProgram = Webgl2ProgramResource<
 	| "uDetailMaterialEnabled"
 >;
 
-export interface Webgl2AtlasBackedCompactedSubmitMetrics {
+export interface Webgl2BakedGeometrySubmitMetrics {
 	shaderDrawCallCount: number;
 	submittedBatchCount: number;
 	submittedDrawSliceCount: number;
@@ -33,12 +33,12 @@ export interface Webgl2AtlasBackedCompactedSubmitMetrics {
 	fallbackSamples: readonly string[];
 }
 
-export interface Webgl2AtlasBackedCompactedSubmitResources {
-	batches: readonly Webgl2AtlasBackedCompactedBatchResource[];
+export interface Webgl2BakedGeometrySubmitResources {
+	batches: readonly Webgl2BakedGeometryBatchResource[];
 	generation: Webgl2TextureAtlasGenerationResource | null;
 }
 
-export function createEmptyWebgl2AtlasBackedCompactedSubmitMetrics(): Webgl2AtlasBackedCompactedSubmitMetrics {
+export function createEmptyWebgl2BakedGeometrySubmitMetrics(): Webgl2BakedGeometrySubmitMetrics {
 	return {
 		shaderDrawCallCount: 0,
 		submittedBatchCount: 0,
@@ -52,9 +52,9 @@ export function createEmptyWebgl2AtlasBackedCompactedSubmitMetrics(): Webgl2Atla
 	};
 }
 
-export function planWebgl2AtlasBackedCompactedReplacement(options: {
+export function planWebgl2BakedGeometryReplacement(options: {
 	visibleDrawUnitIds: readonly string[];
-	resources: Webgl2AtlasBackedCompactedSubmitResources;
+	resources: Webgl2BakedGeometrySubmitResources;
 }): {
 	replaceableDrawUnitIds: ReadonlySet<string>;
 	noVisibleRouteCount: number;
@@ -71,19 +71,19 @@ export function planWebgl2AtlasBackedCompactedReplacement(options: {
 		return {
 			replaceableDrawUnitIds: new Set(),
 			noVisibleRouteCount: 0,
-			fallbackSamples: ["baked submit missing compacted geometry batches"],
+			fallbackSamples: ["baked submit missing baked geometry batches"],
 		};
 	}
 	for (const batch of options.resources.batches) {
 		if (
 			batch.materialSlots.length >
-			WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS
+			WEBGL2_BAKED_MAX_MATERIAL_SLOTS
 		) {
 			return {
 				replaceableDrawUnitIds: new Set(),
 				noVisibleRouteCount: 0,
 				fallbackSamples: [
-					`baked submit material slots ${batch.materialSlots.length} exceed ${WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS}`,
+					`baked submit material slots ${batch.materialSlots.length} exceed ${WEBGL2_BAKED_MAX_MATERIAL_SLOTS}`,
 				],
 			};
 		}
@@ -117,7 +117,7 @@ export function planWebgl2AtlasBackedCompactedReplacement(options: {
 	};
 }
 
-export function submitWebgl2AtlasBackedCompactedBatch({
+export function submitWebgl2BakedGeometryBatch({
 	gl,
 	stateCache,
 	program,
@@ -128,22 +128,22 @@ export function submitWebgl2AtlasBackedCompactedBatch({
 }: {
 	gl: WebGL2RenderingContext;
 	stateCache: Webgl2StateCache;
-	program: Webgl2AtlasBackedCompactedWorldProgram;
+	program: Webgl2BakedGeometryWorldProgram;
 	viewProjectionMatrix: RenderMat4;
 	resources: {
-		batches: readonly Webgl2AtlasBackedCompactedBatchResource[];
+		batches: readonly Webgl2BakedGeometryBatchResource[];
 		generation: Webgl2TextureAtlasGenerationResource;
 	};
 	replaceableDrawUnitIds: ReadonlySet<string>;
 	retainedDrawUnitCount: number;
-}): Webgl2AtlasBackedCompactedSubmitMetrics {
+}): Webgl2BakedGeometrySubmitMetrics {
 	if (replaceableDrawUnitIds.size === 0) {
 		return {
-			...createEmptyWebgl2AtlasBackedCompactedSubmitMetrics(),
+			...createEmptyWebgl2BakedGeometrySubmitMetrics(),
 			retainedDrawUnitCount,
 		};
 	}
-	const metrics: Webgl2AtlasBackedCompactedSubmitMetrics = {
+	const metrics: Webgl2BakedGeometrySubmitMetrics = {
 		shaderDrawCallCount: 0,
 		submittedBatchCount: 0,
 		submittedDrawSliceCount: 0,
@@ -180,7 +180,7 @@ export function submitWebgl2AtlasBackedCompactedBatch({
 			false,
 			batch.batchModelMatrix,
 		);
-		uploadAtlasBackedCompactedMaterialRects(gl, program, batch);
+		uploadBakedGeometryMaterialRects(gl, program, batch);
 		if (stateCache.bindVertexArray(batch.vertexArray.vertexArray)) {
 			metrics.shaderDrawCallCount += 0;
 		}
@@ -240,25 +240,25 @@ export function submitWebgl2AtlasBackedCompactedBatch({
 	return metrics;
 }
 
-function uploadAtlasBackedCompactedMaterialRects(
+function uploadBakedGeometryMaterialRects(
 	gl: WebGL2RenderingContext,
-	program: Webgl2AtlasBackedCompactedWorldProgram,
-	batch: Webgl2AtlasBackedCompactedBatchResource,
+	program: Webgl2BakedGeometryWorldProgram,
+	batch: Webgl2BakedGeometryBatchResource,
 ): void {
 	const rects = new Float32Array(
-		WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS * 4,
+		WEBGL2_BAKED_MAX_MATERIAL_SLOTS * 4,
 	);
 	const detailRects = new Float32Array(
-		WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS * 4,
+		WEBGL2_BAKED_MAX_MATERIAL_SLOTS * 4,
 	);
 	const wrapModes = new Int32Array(
-		WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS * 2,
+		WEBGL2_BAKED_MAX_MATERIAL_SLOTS * 2,
 	);
 	const detailTilings = new Float32Array(
-		WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS,
+		WEBGL2_BAKED_MAX_MATERIAL_SLOTS,
 	);
 	const detailEnabled = new Int32Array(
-		WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS,
+		WEBGL2_BAKED_MAX_MATERIAL_SLOTS,
 	);
 	for (const slot of batch.materialSlots) {
 		rects.set(slot.atlasRect, slot.index * 4);

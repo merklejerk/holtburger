@@ -1,18 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import {
-	WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS,
-	planWebgl2AtlasBackedCompactedReplacement,
-	submitWebgl2AtlasBackedCompactedBatch,
-	type Webgl2AtlasBackedCompactedWorldProgram,
-} from "./webgl2-atlas-backed-compacted-submit";
-import type { Webgl2AtlasBackedCompactedBatchResource } from "./webgl2-atlas-backed-compacted-batches";
+	WEBGL2_BAKED_MAX_MATERIAL_SLOTS,
+	planWebgl2BakedGeometryReplacement,
+	submitWebgl2BakedGeometryBatch,
+	type Webgl2BakedGeometryWorldProgram,
+} from "./webgl2-baked-submit";
+import type { Webgl2BakedGeometryBatchResource } from "./webgl2-baked-geometry-batches";
 import type { Webgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
 import { Webgl2StateCache } from "./webgl2-state-cache";
 
-describe("planWebgl2AtlasBackedCompactedReplacement", () => {
+describe("planWebgl2BakedGeometryReplacement", () => {
 	it("keeps staged draws when atlas resources are missing", () => {
-		const plan = planWebgl2AtlasBackedCompactedReplacement({
+		const plan = planWebgl2BakedGeometryReplacement({
 			visibleDrawUnitIds: ["draw-a"],
 			resources: {
 				batches: [],
@@ -27,8 +27,8 @@ describe("planWebgl2AtlasBackedCompactedReplacement", () => {
 		]);
 	});
 
-	it("selects visible compacted draw units when resources are ready", () => {
-		const plan = planWebgl2AtlasBackedCompactedReplacement({
+	it("selects visible baked draw units when resources are ready", () => {
+		const plan = planWebgl2BakedGeometryReplacement({
 			visibleDrawUnitIds: ["draw-a", "staged-only"],
 			resources: {
 				batches: [createBatch(["draw-a", "draw-b"])],
@@ -42,7 +42,7 @@ describe("planWebgl2AtlasBackedCompactedReplacement", () => {
 	});
 
 	it("counts no-visible route checks without reporting a fallback", () => {
-		const plan = planWebgl2AtlasBackedCompactedReplacement({
+		const plan = planWebgl2BakedGeometryReplacement({
 			visibleDrawUnitIds: ["staged-only"],
 			resources: {
 				batches: [createBatch(["draw-a"])],
@@ -56,7 +56,7 @@ describe("planWebgl2AtlasBackedCompactedReplacement", () => {
 	});
 
 	it("selects visible draw units from landblock-scoped batches", () => {
-		const plan = planWebgl2AtlasBackedCompactedReplacement({
+		const plan = planWebgl2BakedGeometryReplacement({
 			visibleDrawUnitIds: ["landblock-a"],
 			resources: {
 				batches: [
@@ -73,14 +73,14 @@ describe("planWebgl2AtlasBackedCompactedReplacement", () => {
 	});
 
 	it("falls back when material slots exceed the bounded shader path", () => {
-		const plan = planWebgl2AtlasBackedCompactedReplacement({
+		const plan = planWebgl2BakedGeometryReplacement({
 			visibleDrawUnitIds: ["draw-a"],
 			resources: {
 				batches: [
 					{
 						...createBatch(["draw-a"]),
 						materialSlots: Array.from(
-							{ length: WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS + 1 },
+							{ length: WEBGL2_BAKED_MAX_MATERIAL_SLOTS + 1 },
 							(_, index) => ({
 								key: `material-slot-${index}`,
 								index,
@@ -106,12 +106,12 @@ describe("planWebgl2AtlasBackedCompactedReplacement", () => {
 		expect(plan.fallbackSamples[0]).toContain("material slots");
 	});
 
-	it("submits visible compacted draw slices with atlas texture and table uniforms", () => {
+	it("submits visible baked draw slices with atlas texture and table uniforms", () => {
 		const gl = new FakeAtlasSubmitGl();
 		const batch = createBatch(["draw-a"]);
 		const generation = createGeneration();
 
-		const metrics = submitWebgl2AtlasBackedCompactedBatch({
+		const metrics = submitWebgl2BakedGeometryBatch({
 			gl: gl.asContext(),
 			stateCache: new Webgl2StateCache(gl),
 			program: createProgram(),
@@ -140,13 +140,13 @@ describe("planWebgl2AtlasBackedCompactedReplacement", () => {
 		expect(gl.uniformMatrix4fvLengths).toEqual([16, 16]);
 	});
 
-	it("binds a detail atlas page when the visible compacted slice requires detail", () => {
+	it("binds a detail atlas page when the visible baked slice requires detail", () => {
 		const gl = new FakeAtlasSubmitGl();
 		const batch = createBatch(["draw-a"], 0x0102ffff, {
 			detailAtlasTextureIndex: 0,
 		});
 
-		const metrics = submitWebgl2AtlasBackedCompactedBatch({
+		const metrics = submitWebgl2BakedGeometryBatch({
 			gl: gl.asContext(),
 			stateCache: new Webgl2StateCache(gl),
 			program: createProgram(),
@@ -170,7 +170,7 @@ function createBatch(
 	drawUnitIds: readonly string[],
 	landblockId = 0x0102ffff,
 	options: { detailAtlasTextureIndex?: number | null } = {},
-): Webgl2AtlasBackedCompactedBatchResource {
+): Webgl2BakedGeometryBatchResource {
 	return {
 		key: "batch",
 		landblockId,
@@ -280,7 +280,7 @@ function createGeneration(
 	};
 }
 
-function createProgram(): Webgl2AtlasBackedCompactedWorldProgram {
+function createProgram(): Webgl2BakedGeometryWorldProgram {
 	return {
 		program: {} as WebGLProgram,
 		attributes: {

@@ -403,7 +403,7 @@ describe("webgl2 world resources", () => {
 		expect(initialBatches.map((batch) => batch.landblockId)).toEqual([
 			0x12340000, 0x12350000,
 		]);
-		expect(store.atlasBackedCompactedBatchGraphLeasesByKey.size).toBe(2);
+		expect(store.bakedGeometryBatchGraphLeasesByKey.size).toBe(2);
 
 		const removedBatchKey = initialBatches[1]?.key;
 		const retainedBatchKey = initialBatches[0]?.key;
@@ -431,9 +431,9 @@ describe("webgl2 world resources", () => {
 		expect(
 			sortAtlasBatchesByLandblock(store).map((batch) => batch.key),
 		).toEqual([retainedBatchKey]);
-		expect(store.atlasBackedCompactedBatchGraphLeasesByKey.size).toBe(1);
+		expect(store.bakedGeometryBatchGraphLeasesByKey.size).toBe(1);
 		expect(
-			store.atlasBackedCompactedBatchGraphLeasesByKey.has(
+			store.bakedGeometryBatchGraphLeasesByKey.has(
 				staticBatchGraphNodeKey(retainedBatchKey ?? ""),
 			),
 		).toBe(true);
@@ -485,7 +485,7 @@ describe("webgl2 world resources", () => {
 
 		expect(store.structuredInteriorDrawUnitCount).toBe(1);
 		expect(store.bakedCandidateDrawUnitCount).toBe(1);
-		expect(store.atlasBackedCompactionPlan.compactableDrawUnitIds[0]).toContain(
+		expect(store.bakedRenderablePlan.compactableDrawUnitIds[0]).toContain(
 			"structured-interior",
 		);
 		const batch = sortAtlasBatchesByLandblock(store)[0];
@@ -499,7 +499,7 @@ describe("webgl2 world resources", () => {
 		);
 	});
 
-	it("reuses atlas textures and compacted batch buffers across common re-anchor shifts", () => {
+	it("reuses atlas textures and baked batch buffers across common re-anchor shifts", () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
 		const graph = new RendererResourceGraph();
@@ -1308,7 +1308,7 @@ function createChunkTransform({
 }
 
 function sortAtlasBatchesByLandblock(store: Webgl2WorldResourceStore) {
-	return [...store.atlasBackedCompactedBatches.values()].sort(
+	return [...store.bakedGeometryBatches.values()].sort(
 		(left, right) => left.landblockId - right.landblockId,
 	);
 }

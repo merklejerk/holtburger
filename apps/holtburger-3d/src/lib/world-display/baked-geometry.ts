@@ -1,18 +1,18 @@
 import type { StagedWorldDrawUnitAssembly } from "./staged-world-assembly";
 import type {
-	AtlasBackedCompactionMaterialSlot,
-	AtlasBackedCompactionPlan,
-} from "./atlas-backed-compaction-planner";
+	BakedRenderableMaterialSlot,
+	BakedRenderablePlan,
+} from "./baked-renderable-planner";
 import { createTranslationMat4, type RenderMat4 } from "./render-math";
 
-export interface AtlasBackedCompactedDrawRange {
+export interface BakedGeometryDrawRange {
 	drawUnitId: string;
 	firstIndex: number;
 	indexCount: number;
 	materialSlotIndex: number;
 }
 
-export interface AtlasBackedCompactedDrawSlice {
+export interface BakedGeometryDrawSlice {
 	key: string;
 	atlasTextureIndex: number;
 	detailAtlasTextureIndex: number | null;
@@ -23,7 +23,7 @@ export interface AtlasBackedCompactedDrawSlice {
 	materialSlotKeys: readonly string[];
 }
 
-export interface AtlasBackedCompactedGeometry {
+export interface BakedGeometry {
 	key: string;
 	positions: Float32Array;
 	uvs: Float32Array;
@@ -33,8 +33,8 @@ export interface AtlasBackedCompactedGeometry {
 	vertexCount: number;
 	indexCount: number;
 	triangleCount: number;
-	drawRanges: readonly AtlasBackedCompactedDrawRange[];
-	drawSlices: readonly AtlasBackedCompactedDrawSlice[];
+	drawRanges: readonly BakedGeometryDrawRange[];
+	drawSlices: readonly BakedGeometryDrawSlice[];
 	positionByteLength: number;
 	uvByteLength: number;
 	materialSlotByteLength: number;
@@ -42,15 +42,15 @@ export interface AtlasBackedCompactedGeometry {
 	totalByteLength: number;
 }
 
-export function buildAtlasBackedCompactedGeometry({
+export function buildBakedGeometry({
 	plan,
 	drawUnits,
 	batchOrigin,
 }: {
-	plan: AtlasBackedCompactionPlan;
+	plan: BakedRenderablePlan;
 	drawUnits: readonly StagedWorldDrawUnitAssembly[];
 	batchOrigin: { x: number; y: number; z: number };
-}): AtlasBackedCompactedGeometry | null {
+}): BakedGeometry | null {
 	if (plan.compactableDrawUnitIds.length === 0) {
 		return null;
 	}
@@ -69,10 +69,10 @@ export function buildAtlasBackedCompactedGeometry({
 		const drawUnit = drawUnitById.get(drawUnitId);
 		if (!drawUnit) {
 			throw new Error(
-				`Atlas-backed compaction plan references missing draw unit ${drawUnitId}.`,
+				`Baked geometry plan references missing draw unit ${drawUnitId}.`,
 			);
 		}
-		assertAtlasBackedCompactedGeometryDrawUnit(drawUnit);
+		assertBakedGeometryDrawUnit(drawUnit);
 		return drawUnit;
 	});
 	const vertexCount = compactableDrawUnits.reduce(
@@ -87,7 +87,7 @@ export function buildAtlasBackedCompactedGeometry({
 	const uvs = new Float32Array(vertexCount * 2);
 	const materialSlots = new Float32Array(vertexCount);
 	const indices = createCompactedIndexArray(vertexCount, indexCount);
-	const drawRanges: AtlasBackedCompactedDrawRange[] = [];
+	const drawRanges: BakedGeometryDrawRange[] = [];
 	const batchModelMatrix = createTranslationMat4(batchOrigin);
 	let vertexOffset = 0;
 	let indexOffset = 0;
@@ -98,7 +98,7 @@ export function buildAtlasBackedCompactedGeometry({
 				: null;
 		if (!eligibility) {
 			throw new Error(
-				`Atlas-backed compaction draw unit ${drawUnit.id} has no atlas eligibility.`,
+				`Baked geometry draw unit ${drawUnit.id} has no atlas eligibility.`,
 			);
 		}
 		const materialSlotKey =
@@ -106,7 +106,7 @@ export function buildAtlasBackedCompactedGeometry({
 		const materialSlot = materialSlotByKey.get(materialSlotKey);
 		if (!materialSlot) {
 			throw new Error(
-				`Atlas-backed compaction draw unit ${drawUnit.id} references missing material slot ${materialSlotKey}.`,
+				`Baked geometry draw unit ${drawUnit.id} references missing material slot ${materialSlotKey}.`,
 			);
 		}
 		bakeDrawUnitPositions({
@@ -217,7 +217,7 @@ function bakeDrawUnitPositions({
 	}
 }
 
-function assertAtlasBackedCompactedGeometryDrawUnit(
+function assertBakedGeometryDrawUnit(
 	drawUnit: StagedWorldDrawUnitAssembly,
 ): asserts drawUnit is StagedWorldDrawUnitAssembly & {
 	kind: "static" | "structured-interior";
@@ -225,17 +225,17 @@ function assertAtlasBackedCompactedGeometryDrawUnit(
 } {
 	if (drawUnit.kind !== "static" && drawUnit.kind !== "structured-interior") {
 		throw new Error(
-			`Atlas compacted geometry cannot compact ${drawUnit.kind} draw unit ${drawUnit.id}.`,
+			`Baked geometry cannot bake ${drawUnit.kind} draw unit ${drawUnit.id}.`,
 		);
 	}
 	if (drawUnit.material.kind !== "direct-texture") {
 		throw new Error(
-			`Atlas compacted geometry cannot compact ${drawUnit.material.kind} draw unit ${drawUnit.id}.`,
+			`Baked geometry cannot bake ${drawUnit.material.kind} draw unit ${drawUnit.id}.`,
 		);
 	}
 	if (!drawUnit.geometry.uvs) {
 		throw new Error(
-			`Atlas compacted geometry draw unit ${drawUnit.id} has no UVs.`,
+			`Baked geometry draw unit ${drawUnit.id} has no UVs.`,
 		);
 	}
 }
@@ -245,15 +245,15 @@ function compactDrawSlice({
 	rangeByDrawUnitId,
 	materialSlotByKey,
 }: {
-	slice: AtlasBackedCompactionPlan["drawSlices"][number];
-	rangeByDrawUnitId: ReadonlyMap<string, AtlasBackedCompactedDrawRange>;
-	materialSlotByKey: ReadonlyMap<string, AtlasBackedCompactionMaterialSlot>;
-}): AtlasBackedCompactedDrawSlice {
+	slice: BakedRenderablePlan["drawSlices"][number];
+	rangeByDrawUnitId: ReadonlyMap<string, BakedGeometryDrawRange>;
+	materialSlotByKey: ReadonlyMap<string, BakedRenderableMaterialSlot>;
+}): BakedGeometryDrawSlice {
 	const ranges = slice.drawUnitIds.map((drawUnitId) => {
 		const range = rangeByDrawUnitId.get(drawUnitId);
 		if (!range) {
 			throw new Error(
-				`Atlas-backed compacted draw slice ${slice.key} references missing compacted draw unit ${drawUnitId}.`,
+				`Baked geometry draw slice ${slice.key} references missing baked draw unit ${drawUnitId}.`,
 			);
 		}
 		return range;
@@ -269,7 +269,7 @@ function compactDrawSlice({
 	for (const materialSlotKey of slice.materialSlotKeys) {
 		if (!materialSlotByKey.has(materialSlotKey)) {
 			throw new Error(
-				`Atlas-backed compacted draw slice ${slice.key} references missing material slot ${materialSlotKey}.`,
+				`Baked geometry draw slice ${slice.key} references missing material slot ${materialSlotKey}.`,
 			);
 		}
 	}
@@ -299,12 +299,12 @@ function describeCompactedGeometryKey({
 	drawUnits,
 	positions,
 }: {
-	plan: AtlasBackedCompactionPlan;
+	plan: BakedRenderablePlan;
 	drawUnits: readonly StagedWorldDrawUnitAssembly[];
 	positions: Float32Array;
 }): string {
 	return [
-		"atlas-backed-compacted-geometry",
+		"baked-geometry",
 		plan.key,
 		`bp${hashFloat32Array(positions)}`,
 		...drawUnits.map((drawUnit) =>

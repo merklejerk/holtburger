@@ -31,9 +31,9 @@ import {
 	type Webgl2WorldSubmitMetrics,
 } from "./webgl2-world-submit";
 import {
-	WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS,
-	type Webgl2AtlasBackedCompactedWorldProgram,
-} from "./webgl2-atlas-backed-compacted-submit";
+	WEBGL2_BAKED_MAX_MATERIAL_SLOTS,
+	type Webgl2BakedGeometryWorldProgram,
+} from "./webgl2-baked-submit";
 import {
 	createWebgl2PortalCompositeTargetSet,
 	createWebgl2SceneDomainTargetSet,
@@ -219,7 +219,7 @@ void main() {
 `;
 
 const ATLAS_STATIC_WORLD_FRAGMENT_SHADER = `#version 300 es
-#define MAX_MATERIAL_SLOTS ${WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS}
+#define MAX_MATERIAL_SLOTS ${WEBGL2_BAKED_MAX_MATERIAL_SLOTS}
 
 precision highp float;
 
@@ -595,7 +595,7 @@ interface Webgl2RenderResources {
 	indexedP8WorldProgram: Webgl2IndexedP8WorldProgram;
 	indexedP16WorldProgram: Webgl2IndexedP16WorldProgram;
 	terrainBlendWorldProgram: Webgl2TerrainBlendWorldProgram;
-	atlasBackedCompactedWorldProgram: Webgl2AtlasBackedCompactedWorldProgram;
+	bakedGeometryWorldProgram: Webgl2BakedGeometryWorldProgram;
 	sceneDomainCopyProgram: Webgl2ProgramResource<
 		never,
 		"uColorTexture" | "uDepthTexture"
@@ -925,11 +925,11 @@ export function createWebgl2WorldDisplayRendererImplementation(
 							terrainBlendProgram: currentResources.terrainBlendWorldProgram,
 							indexedP8Program: currentResources.indexedP8WorldProgram,
 							indexedP16Program: currentResources.indexedP16WorldProgram,
-							atlasBackedCompactedProgram:
-								currentResources.atlasBackedCompactedWorldProgram,
-							atlasBackedCompactedResources: {
+							bakedGeometryProgram:
+								currentResources.bakedGeometryWorldProgram,
+							bakedGeometryResources: {
 								batches: [
-									...currentResources.worldStore.atlasBackedCompactedBatches.values(),
+									...currentResources.worldStore.bakedGeometryBatches.values(),
 								],
 								generation: currentResources.worldStore.textureAtlasGeneration,
 							},
@@ -1232,9 +1232,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			terrainBlendProgram: resources.terrainBlendWorldProgram,
 			indexedP8Program: resources.indexedP8WorldProgram,
 			indexedP16Program: resources.indexedP16WorldProgram,
-			atlasBackedCompactedProgram: resources.atlasBackedCompactedWorldProgram,
-			atlasBackedCompactedResources: {
-				batches: [...resources.worldStore.atlasBackedCompactedBatches.values()],
+			bakedGeometryProgram: resources.bakedGeometryWorldProgram,
+			bakedGeometryResources: {
+				batches: [...resources.worldStore.bakedGeometryBatches.values()],
 				generation: resources.worldStore.textureAtlasGeneration,
 			},
 			viewProjectionMatrix: frame.viewProjectionMatrix,
@@ -1719,7 +1719,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		resources.indexedP8WorldProgram.dispose();
 		resources.indexedP16WorldProgram.dispose();
 		resources.terrainBlendWorldProgram.dispose();
-		resources.atlasBackedCompactedWorldProgram.dispose();
+		resources.bakedGeometryWorldProgram.dispose();
 		resources.sceneDomainCopyProgram.dispose();
 		resources.sceneDomainCopyVertexArray.dispose();
 		resources.sceneDomainTargets?.dispose();
@@ -2147,8 +2147,8 @@ function createTriangleResources(
 		indexedP8WorldProgram: createIndexedP8WorldProgram(gl),
 		indexedP16WorldProgram: createIndexedP16WorldProgram(gl),
 		terrainBlendWorldProgram: createTerrainBlendWorldProgram(gl),
-		atlasBackedCompactedWorldProgram:
-			createAtlasBackedCompactedWorldProgram(gl),
+		bakedGeometryWorldProgram:
+			createBakedGeometryWorldProgram(gl),
 		sceneDomainCopyProgram: createSceneDomainCopyProgram(gl),
 		vertexBuffer,
 		vertexArray,
@@ -2344,9 +2344,9 @@ function createTerrainBlendWorldProgram(
 	});
 }
 
-function createAtlasBackedCompactedWorldProgram(
+function createBakedGeometryWorldProgram(
 	gl: WebGL2RenderingContext,
-): Webgl2AtlasBackedCompactedWorldProgram {
+): Webgl2BakedGeometryWorldProgram {
 	return createWebgl2Program(gl, {
 		label: "webgl2 baked world",
 		vertexSource: ATLAS_STATIC_WORLD_VERTEX_SHADER,

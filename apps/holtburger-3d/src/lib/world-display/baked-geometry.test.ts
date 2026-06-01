@@ -2,13 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import type { StagedWorldDrawUnitAssembly } from "./staged-world-assembly";
 import type { StagedWorldDirectTextureMaterialPlan } from "./staged-world-materials";
-import type { AtlasBackedCompactionPlan } from "./atlas-backed-compaction-planner";
-import { buildAtlasBackedCompactedGeometry } from "./atlas-backed-compacted-geometry";
+import type { BakedRenderablePlan } from "./baked-renderable-planner";
+import { buildBakedGeometry } from "./baked-geometry";
 
-describe("atlas-backed compacted geometry builder", () => {
+describe("baked geometry geometry builder", () => {
 	it("builds batch-local geometry buffers with baked static positions", () => {
 		const plan = createPlan();
-		const geometry = buildAtlasBackedCompactedGeometry({
+		const geometry = buildBakedGeometry({
 			plan,
 			drawUnits: [
 				createDrawUnit("draw-a", "material-slot-a", 10),
@@ -79,12 +79,12 @@ describe("atlas-backed compacted geometry builder", () => {
 			compactableDrawUnitIds: ["draw-a"],
 			drawSlices: [firstSlice],
 		};
-		const first = buildAtlasBackedCompactedGeometry({
+		const first = buildBakedGeometry({
 			plan,
 			drawUnits: [createDrawUnit("draw-a", "material-slot-a", 10)],
 			batchOrigin: { x: 10, y: 0, z: 0 },
 		});
-		const second = buildAtlasBackedCompactedGeometry({
+		const second = buildBakedGeometry({
 			plan,
 			drawUnits: [createDrawUnit("draw-a", "material-slot-a", 99)],
 			batchOrigin: { x: 99, y: 0, z: 0 },
@@ -95,7 +95,7 @@ describe("atlas-backed compacted geometry builder", () => {
 
 	it("changes the resource key when relative static placement changes", () => {
 		const basePlan = createPlan();
-		const first = buildAtlasBackedCompactedGeometry({
+		const first = buildBakedGeometry({
 			plan: basePlan,
 			drawUnits: [
 				createDrawUnit("draw-a", "material-slot-a", 10),
@@ -103,7 +103,7 @@ describe("atlas-backed compacted geometry builder", () => {
 			],
 			batchOrigin: { x: 10, y: 0, z: 0 },
 		});
-		const second = buildAtlasBackedCompactedGeometry({
+		const second = buildBakedGeometry({
 			plan: basePlan,
 			drawUnits: [
 				createDrawUnit("draw-a", "material-slot-a", 10),
@@ -131,7 +131,7 @@ describe("atlas-backed compacted geometry builder", () => {
 				},
 			],
 		};
-		const geometry = buildAtlasBackedCompactedGeometry({
+		const geometry = buildBakedGeometry({
 			plan,
 			drawUnits: [
 				createDrawUnit("structured-a", "material-slot-a", 100, {
@@ -157,7 +157,7 @@ describe("atlas-backed compacted geometry builder", () => {
 	});
 });
 
-function createPlan(): AtlasBackedCompactionPlan {
+function createPlan(): BakedRenderablePlan {
 	return {
 		key: "plan-a",
 		compactableDrawUnitIds: ["draw-a", "draw-b"],

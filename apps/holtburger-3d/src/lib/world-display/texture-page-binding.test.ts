@@ -35,7 +35,7 @@ describe("collectDirectDrawTexturePageBindings", () => {
 				wrapS: "repeat",
 				wrapT: "repeat",
 				sampling: {
-					colorSpace: "linear",
+					samplingDomain: "color",
 					lookup: "color-filtered",
 				},
 			},
@@ -77,7 +77,7 @@ describe("collectDirectDrawTexturePageBindings", () => {
 				minFilter: "nearest",
 				magFilter: "nearest",
 				mip: "none",
-				colorSpace: "data",
+				samplingDomain: "data",
 				lookup: "exact",
 			},
 		} satisfies Partial<TexturePageBinding>);
@@ -89,7 +89,7 @@ describe("collectDirectDrawTexturePageBindings", () => {
 				minFilter: "nearest",
 				magFilter: "nearest",
 				mip: "none",
-				colorSpace: "data",
+				samplingDomain: "data",
 				lookup: "exact",
 			},
 		} satisfies Partial<TexturePageBinding>);
@@ -135,14 +135,14 @@ describe("collectDirectDrawTexturePageBindings", () => {
 			expect.objectContaining({
 				sampleClass: "control-data",
 				sampling: expect.objectContaining({
-					colorSpace: "none",
+					samplingDomain: "control",
 					lookup: "control-filtered",
 				}),
 			}),
 			expect.objectContaining({
 				sampleClass: "control-data",
 				sampling: expect.objectContaining({
-					colorSpace: "none",
+					samplingDomain: "control",
 					lookup: "control-filtered",
 				}),
 			}),

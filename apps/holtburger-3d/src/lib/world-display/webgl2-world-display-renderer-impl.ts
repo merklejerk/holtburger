@@ -35,6 +35,10 @@ import {
 	type Webgl2RgbaTexturePageFamilyWorldProgram,
 } from "./webgl2-rgba-texture-page-family-submit";
 import {
+	WEBGL2_INDEXED_PALETTED_MAX_MATERIAL_SLOTS,
+	type Webgl2IndexedPalettedFamilyWorldProgram,
+} from "./webgl2-indexed-paletted-family-submit";
+import {
 	createWebgl2PortalCompositeTargetSet,
 	createWebgl2SceneDomainTargetSet,
 	type Webgl2PortalCompositeTarget,
@@ -449,6 +453,148 @@ void main() {
 }
 `;
 
+const INDEXED_PALETTED_FAMILY_P8_FRAGMENT_SHADER = `#version 300 es
+#define MAX_MATERIAL_SLOTS ${WEBGL2_INDEXED_PALETTED_MAX_MATERIAL_SLOTS}
+
+precision highp float;
+
+uniform sampler2D uIndexTexture;
+uniform sampler2D uPaletteTexture;
+uniform vec4 uMaterialColors[MAX_MATERIAL_SLOTS];
+uniform vec2 uTextureSizes[MAX_MATERIAL_SLOTS];
+uniform float uPaletteColorCounts[MAX_MATERIAL_SLOTS];
+uniform int uClipThresholds[MAX_MATERIAL_SLOTS];
+uniform ivec2 uWrapModes[MAX_MATERIAL_SLOTS];
+
+in vec2 vUv;
+flat in int vMaterialSlot;
+
+out vec4 fragColor;
+
+vec2 resolveIndexedUv(vec2 uv, int materialSlot) {
+	ivec2 wrapMode = uWrapModes[materialSlot];
+	vec2 wrapped = vec2(
+		wrapMode.x == 1 ? fract(uv.x) : clamp(uv.x, 0.0, 0.999999),
+		wrapMode.y == 1 ? fract(uv.y) : clamp(uv.y, 0.0, 0.999999)
+	);
+	return wrapped * uTextureSizes[materialSlot];
+}
+
+ivec2 resolveIndexedSampleCoord(ivec2 baseCoord, ivec2 offset, int materialSlot) {
+	ivec2 size = ivec2(uTextureSizes[materialSlot]);
+	ivec2 wrapMode = uWrapModes[materialSlot];
+	ivec2 coord = baseCoord + offset;
+	coord.x = wrapMode.x == 1 ? coord.x % size.x : clamp(coord.x, 0, size.x - 1);
+	coord.y = wrapMode.y == 1 ? coord.y % size.y : clamp(coord.y, 0, size.y - 1);
+	return coord;
+}
+
+vec4 paletteColor(float index, int materialSlot) {
+	if (uClipThresholds[materialSlot] >= 0 && index < float(uClipThresholds[materialSlot])) {
+		return vec4(0.0);
+	}
+	float paletteU = (index + 0.5) / uPaletteColorCounts[materialSlot];
+	return texture(uPaletteTexture, vec2(paletteU, 0.5));
+}
+
+float paletteIndexAt(ivec2 coord) {
+	vec4 packed = texelFetch(uIndexTexture, coord, 0) * 255.0;
+	return floor(packed.r + 0.5);
+}
+
+void main() {
+	vec2 texelPosition = resolveIndexedUv(vUv, vMaterialSlot);
+	ivec2 baseCoord = ivec2(floor(texelPosition));
+	vec2 blend = fract(texelPosition);
+	vec4 top = mix(
+		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(0, 0), vMaterialSlot)), vMaterialSlot),
+		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(1, 0), vMaterialSlot)), vMaterialSlot),
+		blend.x
+	);
+	vec4 bottom = mix(
+		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(0, 1), vMaterialSlot)), vMaterialSlot),
+		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(1, 1), vMaterialSlot)), vMaterialSlot),
+		blend.x
+	);
+	vec4 color = mix(top, bottom, blend.y) * uMaterialColors[vMaterialSlot];
+	if (color.a <= 0.0) {
+		discard;
+	}
+	fragColor = color;
+}
+`;
+
+const INDEXED_PALETTED_FAMILY_P16_FRAGMENT_SHADER = `#version 300 es
+#define MAX_MATERIAL_SLOTS ${WEBGL2_INDEXED_PALETTED_MAX_MATERIAL_SLOTS}
+
+precision highp float;
+
+uniform sampler2D uIndexTexture;
+uniform sampler2D uPaletteTexture;
+uniform vec4 uMaterialColors[MAX_MATERIAL_SLOTS];
+uniform vec2 uTextureSizes[MAX_MATERIAL_SLOTS];
+uniform float uPaletteColorCounts[MAX_MATERIAL_SLOTS];
+uniform int uClipThresholds[MAX_MATERIAL_SLOTS];
+uniform ivec2 uWrapModes[MAX_MATERIAL_SLOTS];
+
+in vec2 vUv;
+flat in int vMaterialSlot;
+
+out vec4 fragColor;
+
+vec2 resolveIndexedUv(vec2 uv, int materialSlot) {
+	ivec2 wrapMode = uWrapModes[materialSlot];
+	vec2 wrapped = vec2(
+		wrapMode.x == 1 ? fract(uv.x) : clamp(uv.x, 0.0, 0.999999),
+		wrapMode.y == 1 ? fract(uv.y) : clamp(uv.y, 0.0, 0.999999)
+	);
+	return wrapped * uTextureSizes[materialSlot];
+}
+
+ivec2 resolveIndexedSampleCoord(ivec2 baseCoord, ivec2 offset, int materialSlot) {
+	ivec2 size = ivec2(uTextureSizes[materialSlot]);
+	ivec2 wrapMode = uWrapModes[materialSlot];
+	ivec2 coord = baseCoord + offset;
+	coord.x = wrapMode.x == 1 ? coord.x % size.x : clamp(coord.x, 0, size.x - 1);
+	coord.y = wrapMode.y == 1 ? coord.y % size.y : clamp(coord.y, 0, size.y - 1);
+	return coord;
+}
+
+vec4 paletteColor(float index, int materialSlot) {
+	if (uClipThresholds[materialSlot] >= 0 && index < float(uClipThresholds[materialSlot])) {
+		return vec4(0.0);
+	}
+	float paletteU = (index + 0.5) / uPaletteColorCounts[materialSlot];
+	return texture(uPaletteTexture, vec2(paletteU, 0.5));
+}
+
+float paletteIndexAt(ivec2 coord) {
+	vec4 packed = texelFetch(uIndexTexture, coord, 0) * 255.0;
+	return floor(packed.r + 0.5) + floor(packed.g + 0.5) * 256.0;
+}
+
+void main() {
+	vec2 texelPosition = resolveIndexedUv(vUv, vMaterialSlot);
+	ivec2 baseCoord = ivec2(floor(texelPosition));
+	vec2 blend = fract(texelPosition);
+	vec4 top = mix(
+		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(0, 0), vMaterialSlot)), vMaterialSlot),
+		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(1, 0), vMaterialSlot)), vMaterialSlot),
+		blend.x
+	);
+	vec4 bottom = mix(
+		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(0, 1), vMaterialSlot)), vMaterialSlot),
+		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(1, 1), vMaterialSlot)), vMaterialSlot),
+		blend.x
+	);
+	vec4 color = mix(top, bottom, blend.y) * uMaterialColors[vMaterialSlot];
+	if (color.a <= 0.0) {
+		discard;
+	}
+	fragColor = color;
+}
+`;
+
 const TERRAIN_BLEND_WORLD_VERTEX_SHADER = `#version 300 es
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec2 uv;
@@ -596,6 +742,8 @@ interface Webgl2RenderResources {
 	indexedP16WorldProgram: Webgl2IndexedP16WorldProgram;
 	terrainBlendWorldProgram: Webgl2TerrainBlendWorldProgram;
 	rgbaTexturePageFamilyWorldProgram: Webgl2RgbaTexturePageFamilyWorldProgram;
+	indexedPalettedFamilyP8WorldProgram: Webgl2IndexedPalettedFamilyWorldProgram;
+	indexedPalettedFamilyP16WorldProgram: Webgl2IndexedPalettedFamilyWorldProgram;
 	sceneDomainCopyProgram: Webgl2ProgramResource<
 		never,
 		"uColorTexture" | "uDepthTexture"
@@ -926,6 +1074,10 @@ export function createWebgl2WorldDisplayRendererImplementation(
 							indexedP8Program: currentResources.indexedP8WorldProgram,
 							indexedP16Program: currentResources.indexedP16WorldProgram,
 							rgbaTexturePageFamilyProgram: currentResources.rgbaTexturePageFamilyWorldProgram,
+							indexedPalettedFamilyP8Program:
+								currentResources.indexedPalettedFamilyP8WorldProgram,
+							indexedPalettedFamilyP16Program:
+								currentResources.indexedPalettedFamilyP16WorldProgram,
 							rgbaTexturePageFamilyResources: {
 								batches: [
 									...currentResources.worldStore.compactedGeometryBatches.values(),
@@ -934,6 +1086,15 @@ export function createWebgl2WorldDisplayRendererImplementation(
 									...currentResources.worldStore.compactedGeometryFamilyResources.values(),
 								].filter((resource) => resource.family === "rgba-texture-page"),
 								generation: currentResources.worldStore.textureAtlasGeneration,
+							},
+							indexedPalettedFamilyResources: {
+								batches: [
+									...currentResources.worldStore.compactedGeometryBatches.values(),
+								],
+								indexedPalettedFamilies: [
+									...currentResources.worldStore.compactedGeometryFamilyResources.values(),
+								].filter((resource) => resource.family === "indexed-paletted"),
+								texturesByKey: currentResources.worldStore.texturesByKey,
 							},
 							drawUnitsById: currentResources.worldStore.drawUnitsById,
 							frame,
@@ -1235,12 +1396,23 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			indexedP8Program: resources.indexedP8WorldProgram,
 			indexedP16Program: resources.indexedP16WorldProgram,
 			rgbaTexturePageFamilyProgram: resources.rgbaTexturePageFamilyWorldProgram,
+			indexedPalettedFamilyP8Program:
+				resources.indexedPalettedFamilyP8WorldProgram,
+			indexedPalettedFamilyP16Program:
+				resources.indexedPalettedFamilyP16WorldProgram,
 			rgbaTexturePageFamilyResources: {
 				batches: [...resources.worldStore.compactedGeometryBatches.values()],
 				rgbaTexturePageFamilies: [
 					...resources.worldStore.compactedGeometryFamilyResources.values(),
 				].filter((resource) => resource.family === "rgba-texture-page"),
 				generation: resources.worldStore.textureAtlasGeneration,
+			},
+			indexedPalettedFamilyResources: {
+				batches: [...resources.worldStore.compactedGeometryBatches.values()],
+				indexedPalettedFamilies: [
+					...resources.worldStore.compactedGeometryFamilyResources.values(),
+				].filter((resource) => resource.family === "indexed-paletted"),
+				texturesByKey: resources.worldStore.texturesByKey,
 			},
 			viewProjectionMatrix: frame.viewProjectionMatrix,
 			drawUnits,
@@ -1725,6 +1897,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		resources.indexedP16WorldProgram.dispose();
 		resources.terrainBlendWorldProgram.dispose();
 		resources.rgbaTexturePageFamilyWorldProgram.dispose();
+		resources.indexedPalettedFamilyP8WorldProgram.dispose();
+		resources.indexedPalettedFamilyP16WorldProgram.dispose();
 		resources.sceneDomainCopyProgram.dispose();
 		resources.sceneDomainCopyVertexArray.dispose();
 		resources.sceneDomainTargets?.dispose();
@@ -2046,6 +2220,33 @@ function mergeSceneDomainSubmitMetrics({
 			...exteriorMetrics.rgbaTexturePageFamilyFallbackSamples,
 			...interiorMetrics.rgbaTexturePageFamilyFallbackSamples,
 		].slice(0, 8),
+		indexedPalettedFamilyShaderDrawCallCount:
+			exteriorMetrics.indexedPalettedFamilyShaderDrawCallCount +
+			interiorMetrics.indexedPalettedFamilyShaderDrawCallCount,
+		indexedPalettedFamilySubmittedBatchCount:
+			exteriorMetrics.indexedPalettedFamilySubmittedBatchCount +
+			interiorMetrics.indexedPalettedFamilySubmittedBatchCount,
+		indexedPalettedFamilySubmittedDrawSliceCount:
+			exteriorMetrics.indexedPalettedFamilySubmittedDrawSliceCount +
+			interiorMetrics.indexedPalettedFamilySubmittedDrawSliceCount,
+		indexedPalettedFamilySubmittedSliceRepresentedDrawUnitCount:
+			exteriorMetrics.indexedPalettedFamilySubmittedSliceRepresentedDrawUnitCount +
+			interiorMetrics.indexedPalettedFamilySubmittedSliceRepresentedDrawUnitCount,
+		indexedPalettedFamilySubmittedTriangleCount:
+			exteriorMetrics.indexedPalettedFamilySubmittedTriangleCount +
+			interiorMetrics.indexedPalettedFamilySubmittedTriangleCount,
+		indexedPalettedFamilyReplacedDrawUnitCount:
+			exteriorMetrics.indexedPalettedFamilyReplacedDrawUnitCount +
+			interiorMetrics.indexedPalettedFamilyReplacedDrawUnitCount,
+		indexedPalettedFamilyReplacedDrawUnitTriangleCount:
+			exteriorMetrics.indexedPalettedFamilyReplacedDrawUnitTriangleCount +
+			interiorMetrics.indexedPalettedFamilyReplacedDrawUnitTriangleCount,
+		indexedPalettedFamilyRetainedDirectDrawUnitCount:
+			exteriorMetrics.indexedPalettedFamilyRetainedDirectDrawUnitCount +
+			interiorMetrics.indexedPalettedFamilyRetainedDirectDrawUnitCount,
+		indexedPalettedFamilyNoVisibleRouteCount:
+			exteriorMetrics.indexedPalettedFamilyNoVisibleRouteCount +
+			interiorMetrics.indexedPalettedFamilyNoVisibleRouteCount,
 		directTexturePageDrawCount:
 			exteriorMetrics.directTexturePageDrawCount +
 			interiorMetrics.directTexturePageDrawCount,
@@ -2158,6 +2359,16 @@ function createTriangleResources(
 		indexedP16WorldProgram: createIndexedP16WorldProgram(gl),
 		terrainBlendWorldProgram: createTerrainBlendWorldProgram(gl),
 		rgbaTexturePageFamilyWorldProgram: createRgbaTexturePageFamilyWorldProgram(gl),
+		indexedPalettedFamilyP8WorldProgram:
+			createIndexedPalettedFamilyWorldProgram(gl, {
+				label: "webgl2 indexed-paletted p8 family world",
+				fragmentSource: INDEXED_PALETTED_FAMILY_P8_FRAGMENT_SHADER,
+			}),
+		indexedPalettedFamilyP16WorldProgram:
+			createIndexedPalettedFamilyWorldProgram(gl, {
+				label: "webgl2 indexed-paletted p16 family world",
+				fragmentSource: INDEXED_PALETTED_FAMILY_P16_FRAGMENT_SHADER,
+			}),
 		sceneDomainCopyProgram: createSceneDomainCopyProgram(gl),
 		vertexBuffer,
 		vertexArray,
@@ -2373,6 +2584,29 @@ function createRgbaTexturePageFamilyWorldProgram(
 			"uDetailMaterialRects",
 			"uDetailMaterialTilings",
 			"uDetailMaterialEnabled",
+		],
+	});
+}
+
+function createIndexedPalettedFamilyWorldProgram(
+	gl: WebGL2RenderingContext,
+	options: { label: string; fragmentSource: string },
+): Webgl2IndexedPalettedFamilyWorldProgram {
+	return createWebgl2Program(gl, {
+		label: options.label,
+		vertexSource: ATLAS_STATIC_WORLD_VERTEX_SHADER,
+		fragmentSource: options.fragmentSource,
+		attributes: ["position", "uv", "materialSlot"],
+		uniforms: [
+			"uViewProjection",
+			"uBatchModel",
+			"uIndexTexture",
+			"uPaletteTexture",
+			"uMaterialColors",
+			"uTextureSizes",
+			"uPaletteColorCounts",
+			"uClipThresholds",
+			"uWrapModes",
 		],
 	});
 }

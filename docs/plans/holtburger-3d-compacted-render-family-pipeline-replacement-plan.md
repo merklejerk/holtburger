@@ -1342,7 +1342,7 @@ Validation:
 
 ## Phase C8: Reintroduce Indexed-Paletted Rendering Through the New Boundary
 
-Status: Planned.
+Status: Complete for opaque no-detail indexed materials.
 
 Purpose: implement opaque indexed/paletted compacted rendering only after the compacted geometry and
 family pipeline boundaries are clean. This is the completion target for the detour, not a stretch
@@ -1368,10 +1368,126 @@ Exit criteria:
 - Opaque indexed static/structured-interior draw units can be replaced by compacted indexed family
   rendering.
 - RGBA texture-page family behavior is unchanged.
-- The implementation adds less code than the old parallel-path approach would have required, and
-  removes the temporary indexed resource path.
+- The implementation uses the existing compacted geometry resource model and indexed family resources
+  as the authoritative path instead of reintroducing `bakedIndexedGeometryBatches`.
 - Diagnostics show indexed/paletted compacted family rendering as actual submitted/replaced draw
   units, not merely planned resources.
+
+Progress:
+
+- Added `webgl2-indexed-paletted-family-submit.ts` as the compacted indexed family submitter over
+  `Webgl2CompactedGeometryBatchResource` plus `Webgl2IndexedPalettedFamilyResource`.
+- Added compacted indexed P8 and Index16 WebGL programs using the compacted
+  `position-uv-material-slot` layout and bounded material tables.
+- Wired indexed family replacement into `submitWebgl2FlatWorldDrawUnits()` before direct draw
+  submission, alongside RGBA family replacement.
+- Threaded indexed family resources through flat-world and scene-domain submissions so exterior and
+  interior rendering use the same compacted indexed path.
+- Removed `missing-compacted-indexed-paletted-family` as a blanket blocker for table-ready opaque
+  indexed materials. Indexed alpha/cutout/blend still block explicitly via
+  `indexed-alpha-policy-unsupported`.
+- Added indexed family submit metrics:
+  - shader draw calls;
+  - submitted batches/slices/triangles;
+  - replaced draw units/triangles;
+  - retained direct draw units;
+  - no-visible route count.
+- Added debug summary and `materialTypeCounts` keys for indexed family submitted/replaced work.
+- Added tests for:
+  - indexed opaque planning as a first-class compacted family;
+  - retained indexed alpha/cutout blockers;
+  - indexed compacted family submit replacing direct indexed draw units;
+  - existing RGBA family and resource sync behavior.
+
+Decisions:
+
+- Keep separate compacted indexed P8 and Index16 shaders. The index unpack differs enough that a
+  single branchy shader is not cleaner.
+- Store material color in the indexed family material table. It is family material payload, not
+  compacted geometry payload, and preserves direct indexed tint behavior.
+- Fail hard if a planned indexed compacted slice references missing index or palette textures. This
+  is an internal consistency error, not a fallback condition.
+- Temporarily gate indexed materials with detail overlays out of C8. This is implementation debt, not
+  a material-family split: indexed detail should be handled inside the same `indexed-paletted`
+  family, mirroring how the RGBA family uses per-slot detail atlas state.
+
+Course corrections:
+
+- Split root `compactableDrawUnitIds` away from RGBA atlas eligibility. It now includes all compacted
+  family draw units, while RGBA atlas-specific table fields remain RGBA-owned.
+- `planCompactionFamilies()` no longer throws when an indexed compactable candidate lacks RGBA atlas
+  eligibility. Indexed texture-page/palette readiness is validated through indexed family records.
+
+Discovered cleanup targets:
+
+- The RGBA root fields on `CompactionFamilyPlan` are still legacy compatibility shape. They are less
+  dangerous now that C8 uses `renderFamilies.indexedPaletted`, but they should be deleted in the
+  cleanup phase.
+- `submitWebgl2FlatWorldDrawUnits()` now has two compacted family replacement planners inline.
+  Continue moving toward a family submit registry instead of expanding central branching.
+- Indexed detail overlay support should be folded into the existing indexed family:
+  - add per-slot detail atlas rect/tiling/enabled records;
+  - bind the existing detail atlas texture in indexed family submit;
+  - remove the temporary `detail-overlay` blocker for opaque indexed materials once the shader
+    samples detail correctly.
+- Indexed family draw-call savings are not yet reported with the same arithmetic as RGBA. Current
+  diagnostics report actual submitted/replaced indexed counts; savings can be generalized when RGBA
+  and indexed metrics are folded into a common family metrics structure.
+
+Verification:
+
+- `npm exec tsc -- --noEmit`
+- `npm exec vitest -- src/lib/world-display/compaction-family-planner.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-rgba-texture-page-family-submit.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts src/lib/world-display/compacted-geometry.test.ts --run`
+
+## Phase C8.5: Fold Detail Overlays Into the Indexed Family
+
+Status: Immediate next phase.
+
+Purpose: remove the temporary no-detail restriction from C8 by making detail overlays part of the
+same `indexed-paletted` render family. This should mirror the RGBA family design: one family shader
+path with per-material-slot detail state, not separate detail/no-detail pipelines.
+
+Tasks:
+
+- Extend indexed family material records/resources with:
+  - `detailAtlasTextureIndex`;
+  - `detailAtlasRect`;
+  - `detailTiling`;
+  - `detailEnabled`.
+- Reuse the existing detail atlas generation/binding model. Do not create a separate indexed-detail
+  atlas bucket unless the existing detail atlas format is proven incompatible.
+- Bind detail atlas texture(s) in `webgl2-indexed-paletted-family-submit.ts`.
+- Apply detail overlay in both compacted indexed P8 and Index16 shaders using the same blend behavior
+  as direct indexed/RGBA detail overlays.
+- Remove `detail-overlay` as a blocker for opaque indexed compacted materials once indexed detail
+  rendering is active.
+- Keep indexed alpha/cutout/blend retained direct with explicit blockers. Do not mix alpha policy
+  work into this phase.
+- Run/inspect the live browser debug report and confirm:
+  - `missing-compacted-indexed-paletted-family` is gone for table-ready opaque indexed materials;
+  - `detail-overlay` is gone for opaque indexed materials that have detail overlays;
+  - indexed retained counts drop by roughly the visible/replaced opaque indexed count;
+  - `indexedPalettedFamilyShaderDrawCallCount` and
+    `indexedPalettedFamilyReplacedDrawUnitCount` are non-zero when indexed family resources are
+    present;
+  - `Fallbacks 0` remains true.
+- If indexed compacted rendering is visually wrong, prove whether the problem is:
+  - P8/Index16 unpacking;
+  - palette lookup;
+  - wrap behavior;
+  - clip threshold;
+  - missing material color;
+  - missing detail overlay support.
+- Add a typed internal family metrics structure if the next change would otherwise add another
+  parallel metrics block for alpha work.
+
+Exit criteria:
+
+- Live diagnostics confirm indexed compacted rendering replaces opaque indexed draw units with and
+  without detail overlays.
+- Any indexed visual discrepancy is either fixed or captured as a targeted next phase.
+- The next phase has a concrete target: alpha RGBA, indexed alpha policy, metric consolidation, or
+  cleanup.
 
 ## Cleanup Targets
 

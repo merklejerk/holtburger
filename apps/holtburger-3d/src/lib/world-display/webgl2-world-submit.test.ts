@@ -18,10 +18,12 @@ import {
 } from "./webgl2-world-submit";
 import type {
 	Webgl2CompactedGeometryBatchResource,
+	Webgl2IndexedPalettedFamilyResource,
 	Webgl2RgbaTexturePageFamilyResource,
 } from "./webgl2-compacted-geometry-resources";
 import type { Webgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
 import type { Webgl2RgbaTexturePageFamilyWorldProgram } from "./webgl2-rgba-texture-page-family-submit";
+import type { Webgl2IndexedPalettedFamilyWorldProgram } from "./webgl2-indexed-paletted-family-submit";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
 import {
 	Webgl2StateCache,
@@ -725,6 +727,68 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		expect(gl.calls.filter((call) => call === "bindTexture")).toHaveLength(2);
 		expect(gl.calls).toContain("uniform2f");
 	});
+
+	it("replaces opaque indexed draw units through the indexed-paletted family submit path", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+		const indexTexture = {} as WebGLTexture;
+		const paletteTexture = {} as WebGLTexture;
+		const indexedMaterial = createIndexedMaterial("p8");
+		const drawUnitsById = new Map<string, Webgl2WorldDrawUnit>([
+			[
+				"indexed",
+				createDrawUnit({
+					id: "indexed",
+					materialKind: "indexed-paletted",
+					indexedMaterial,
+				}),
+			],
+			["staged", createDrawUnit({ id: "staged" })],
+		]);
+
+		const metrics = submitWebgl2FlatWorldFrame({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			terrainBlendProgram: createTerrainBlendProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			indexedPalettedFamilyP8Program: createIndexedPalettedFamilyProgram(),
+			indexedPalettedFamilyP16Program: createIndexedPalettedFamilyProgram(),
+			indexedPalettedFamilyResources: {
+				batches: [createRgbaTexturePageFamilyBatch(["indexed"])],
+				indexedPalettedFamilies: [
+					createIndexedPalettedFamilyResource(["indexed"]),
+				],
+				texturesByKey: new Map([
+					[
+						indexedMaterial.indexTextureKey,
+						createTextureResource(indexTexture),
+					],
+					[
+						indexedMaterial.paletteTextureKey,
+						createTextureResource(paletteTexture),
+					],
+				]),
+			},
+			drawUnitsById,
+			frame: createFrame(["indexed", "staged"]),
+		});
+
+		expect(metrics.visibleDrawUnitCount).toBe(2);
+		expect(metrics.drawCallCount).toBe(2);
+		expect(metrics.indexedPalettedFamilyReplacedDrawUnitCount).toBe(1);
+		expect(metrics.indexedPalettedFamilyShaderDrawCallCount).toBe(1);
+		expect(metrics.indexedPalettedFamilySubmittedTriangleCount).toBe(1);
+		expect(metrics.indexedPalettedFamilyRetainedDirectDrawUnitCount).toBe(1);
+		expect(metrics.visibleRetainedDirectDrawUnitCountsByCompactionFamily).toEqual({
+			"flat-constant-color": 1,
+		});
+		expect(gl.boundTextures).toContain(indexTexture);
+		expect(gl.boundTextures).toContain(paletteTexture);
+		expect(gl.calls.filter((call) => call.startsWith("drawElements"))).toHaveLength(2);
+	});
 });
 
 function createFrame(drawUnitIds: readonly string[]): StagedWorldFrame {
@@ -1116,6 +1180,31 @@ function createRgbaTexturePageFamilyProgram(): Webgl2RgbaTexturePageFamilyWorldP
 	};
 }
 
+function createIndexedPalettedFamilyProgram(): Webgl2IndexedPalettedFamilyWorldProgram {
+	return {
+		program: {} as WebGLProgram,
+		attributes: {
+			position: 0,
+			uv: 1,
+			materialSlot: 2,
+		},
+		uniforms: {
+			uViewProjection: {} as WebGLUniformLocation,
+			uBatchModel: {} as WebGLUniformLocation,
+			uIndexTexture: {} as WebGLUniformLocation,
+			uPaletteTexture: {} as WebGLUniformLocation,
+			uMaterialColors: {} as WebGLUniformLocation,
+			uTextureSizes: {} as WebGLUniformLocation,
+			uPaletteColorCounts: {} as WebGLUniformLocation,
+			uClipThresholds: {} as WebGLUniformLocation,
+			uWrapModes: {} as WebGLUniformLocation,
+		},
+		dispose() {
+			return;
+		},
+	};
+}
+
 function createRgbaTexturePageFamilyBatch(
 	drawUnitIds: readonly string[],
 	options: {
@@ -1189,6 +1278,47 @@ function createRgbaTexturePageFamilyResource(
 				indexCount: options.indexCount ?? 3,
 				drawUnitIds,
 				materialSlotKeys: ["material-slot"],
+			},
+		],
+	};
+}
+
+function createIndexedPalettedFamilyResource(
+	drawUnitIds: readonly string[],
+): Webgl2IndexedPalettedFamilyResource {
+	return {
+		family: "indexed-paletted",
+		key: "indexed-paletted|atlas-batch",
+		geometryBatchKey: "atlas-batch",
+		materialTableRecords: [
+			{
+				key: "indexed-material-slot",
+				sourceMaterialKey: "indexed",
+				indexPageKey: "index",
+				palettePageKey: "palette",
+				indexFormat: "p8",
+				indexPageWidth: 2,
+				indexPageHeight: 1,
+				paletteColorCount: 2,
+				clipThreshold: -1,
+				wrapS: "clamp",
+				wrapT: "repeat",
+				color: new Float32Array([1, 1, 1, 1]),
+				alphaPolicy: "opaque",
+				filteringMode: "shader-palette-linear",
+			},
+		],
+		drawSlices: [
+			{
+				key: "indexed-slice",
+				indexFormat: "p8",
+				indexPageKey: "index",
+				palettePageKey: "palette",
+				renderStateKey: "indexed-opaque",
+				firstIndex: 0,
+				indexCount: 3,
+				drawUnitIds,
+				materialSlotKeys: ["indexed-material-slot"],
 			},
 		],
 	};
@@ -1443,6 +1573,10 @@ class CapturingSubmitGl implements Webgl2StateCacheGl {
 
 	uniform1fv(): void {
 		this.calls.push("uniform1fv");
+	}
+
+	uniform2fv(): void {
+		this.calls.push("uniform2fv");
 	}
 
 	uniform1iv(): void {

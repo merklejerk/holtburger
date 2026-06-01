@@ -94,7 +94,11 @@ describe("compaction family planner", () => {
 			drawUnits: [
 				createCandidate({ id: "terrain", kind: "terrain" }),
 				createCandidate({ id: "missing-landblock", owningLandblockId: null }),
-				createCandidate({ id: "indexed", materialKind: "indexed-paletted" }),
+				createCandidate({
+					id: "indexed-cutout",
+					materialKind: "indexed-paletted",
+					materialBehavior: { ...OPAQUE_BEHAVIOR, alphaTest: 0.5 },
+				}),
 				createCandidate({ id: "detail", hasDetailOverlay: true }),
 				createCandidate({
 					id: "clip",
@@ -114,7 +118,7 @@ describe("compaction family planner", () => {
 		expect(plan.bypasses.map((bypass) => bypass.reason)).toEqual([
 			"non-static",
 			"missing-landblock-origin",
-			"unsupported-indexed-paletted-material",
+			"indexed-alpha-policy-unsupported",
 			"missing-detail-atlas-entry",
 			"unsupported-alpha-test-material",
 			"missing-atlas-eligibility",
@@ -149,13 +153,13 @@ describe("compaction family planner", () => {
 		]);
 	});
 
-	it("keeps indexed texture-page readiness separate from compacted indexed shader support", () => {
+	it("accepts indexed texture-page readiness for the compacted indexed family", () => {
 		const indexed = createCandidate({ materialKind: "indexed-paletted" });
 
 		expect(indexed.compactionEligibility.material).toMatchObject({
 			family: "indexed-paletted",
 			alphaPolicy: "opaque",
-			blockers: ["missing-compacted-indexed-paletted-family"],
+			blockers: [],
 		});
 
 		const missingPalette = createCandidate({
@@ -165,7 +169,6 @@ describe("compaction family planner", () => {
 
 		expect(missingPalette.compactionEligibility.material.blockers).toEqual([
 			"missing-indexed-palette-page",
-			"missing-compacted-indexed-paletted-family",
 		]);
 	});
 
@@ -178,10 +181,7 @@ describe("compaction family planner", () => {
 		expect(cutoutIndexed.compactionEligibility.material).toMatchObject({
 			family: "indexed-paletted",
 			alphaPolicy: "cutout",
-			blockers: [
-				"missing-compacted-indexed-paletted-family",
-				"indexed-alpha-policy-unsupported",
-			],
+			blockers: ["indexed-alpha-policy-unsupported"],
 		});
 	});
 
@@ -210,7 +210,7 @@ describe("compaction family planner", () => {
 			},
 		});
 
-		expect(plan.compactableDrawUnitIds).toEqual([]);
+		expect(plan.compactableDrawUnitIds).toEqual(["indexed-a"]);
 		expect(plan.indexedMaterialTableRecords).toEqual([
 			createIndexedMaterialTableRecord("a"),
 		]);
@@ -236,8 +236,7 @@ describe("compaction family planner", () => {
 			],
 		});
 		expect(plan.bypasses.map((bypass) => bypass.reason)).toEqual([
-			"unsupported-indexed-paletted-material",
-			"unsupported-indexed-paletted-material",
+			"indexed-alpha-policy-unsupported",
 		]);
 	});
 
@@ -496,6 +495,7 @@ function createIndexedMaterialTableRecord(
 		clipThreshold: 8,
 		wrapS: "clamp",
 		wrapT: "clamp",
+		color: new Float32Array([1, 1, 1, 1]),
 		alphaPolicy: "opaque",
 		filteringMode: "shader-palette-linear",
 	};

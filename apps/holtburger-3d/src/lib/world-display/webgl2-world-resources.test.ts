@@ -620,18 +620,20 @@ describe("webgl2 world resources", () => {
 		expect(store.textureCount).toBe(2);
 		expect(store.indexedTextureCount).toBe(1);
 		expect(store.paletteTextureCount).toBe(1);
-		expect(store.bakedRenderablePlan.indexedMaterialTableRecords).toMatchObject([
-			{
-				sourceMaterialKey: expect.stringContaining("indexed-paletted"),
-				indexFormat: "p8",
-				indexPageWidth: 2,
-				indexPageHeight: 1,
-				paletteColorCount: 2,
-				clipThreshold: -1,
-				filteringMode: "shader-palette-linear",
-				alphaPolicy: "opaque",
-			},
-		]);
+		expect(store.bakedRenderablePlan.indexedMaterialTableRecords).toMatchObject(
+			[
+				{
+					sourceMaterialKey: expect.stringContaining("indexed-paletted"),
+					indexFormat: "p8",
+					indexPageWidth: 2,
+					indexPageHeight: 1,
+					paletteColorCount: 2,
+					clipThreshold: -1,
+					filteringMode: "shader-palette-linear",
+					alphaPolicy: "opaque",
+				},
+			],
+		);
 		expect(
 			store.bakedRenderablePlan.submitFamilies.indexedPaletted
 				.compactableDrawUnitIds,
@@ -639,6 +641,28 @@ describe("webgl2 world resources", () => {
 		expect(
 			store.bakedRenderablePlan.submitFamilies.indexedPaletted.drawSlices,
 		).toMatchObject([
+			{
+				indexFormat: "p8",
+				renderStateKey: "indexed-opaque",
+				drawUnitIds: [store.drawUnits[0]?.id],
+			},
+		]);
+		const indexedBatch = [...store.bakedIndexedGeometryBatches.values()][0];
+		expect(indexedBatch).toMatchObject({
+			landblockId: 0x12340000,
+			drawUnitCount: 1,
+			drawSliceCount: 1,
+			materialTableRecords: [
+				{
+					indexFormat: "p8",
+					indexPageWidth: 2,
+					indexPageHeight: 1,
+					paletteColorCount: 2,
+					alphaPolicy: "opaque",
+				},
+			],
+		});
+		expect(indexedBatch?.drawSlices).toMatchObject([
 			{
 				indexFormat: "p8",
 				renderStateKey: "indexed-opaque",

@@ -222,9 +222,10 @@ describe("submitWebgl2FlatWorldFrame", () => {
 					id: "atlas-staged",
 					materialKind: "direct-texture",
 					texture: createTextureResource(standaloneTexture),
-					textureSamplingPolicy:
-						"wrap=clamp/clamp;filter=linear/linear/linear;color=none;aniso=4;mips=on;flipY=off",
 					atlasEntryKey: "entry/a",
+					baseTexturePageBinding: createPackedBaseTexturePageBinding(
+						createTextureResource(atlasTexture, 4, 4),
+					),
 				}),
 			],
 		]);
@@ -271,8 +272,6 @@ describe("submitWebgl2FlatWorldFrame", () => {
 					id: "atlas",
 					materialKind: "direct-texture",
 					texture: createTextureResource({} as WebGLTexture),
-					textureSamplingPolicy:
-						"wrap=clamp/clamp;filter=linear/linear/linear;color=none",
 					atlasEntryKey: "entry/a",
 				}),
 			],
@@ -311,8 +310,6 @@ describe("submitWebgl2FlatWorldFrame", () => {
 					id: "standalone",
 					materialKind: "direct-texture",
 					texture: createTextureResource(standaloneTexture),
-					textureSamplingPolicy:
-						"wrap=clamp/clamp;filter=linear/linear/linear;color=none",
 					atlasEntryKey: "entry/a",
 				}),
 			],
@@ -350,11 +347,14 @@ describe("submitWebgl2FlatWorldFrame", () => {
 					id: "repeat",
 					materialKind: "direct-texture",
 					texture: createTextureResource(standaloneTexture),
-					textureSamplingPolicy:
-						"wrap=repeat/repeat;filter=linear/linear/linear;color=none",
 					atlasEntryKey: "entry/a",
 					atlasWrapS: "repeat",
 					atlasWrapT: "repeat",
+					baseTexturePageBinding: createPackedBaseTexturePageBinding(
+						createTextureResource({} as WebGLTexture, 4, 4),
+						"repeat",
+						"repeat",
+					),
 				}),
 			],
 		]);
@@ -655,10 +655,10 @@ function createDrawUnit({
 	texture = null,
 	indexedMaterial = null,
 	terrainBlend = null,
-	textureSamplingPolicy = null,
 	atlasEntryKey = null,
 	atlasWrapS = "clamp",
 	atlasWrapT = "clamp",
+	baseTexturePageBinding,
 	vertexArray = {} as WebGLVertexArrayObject,
 	kind = "static",
 	sceneDomain,
@@ -673,12 +673,15 @@ function createDrawUnit({
 	texture?: Webgl2WorldDrawUnit["texture"];
 	indexedMaterial?: Webgl2WorldDrawUnit["indexedMaterial"];
 	terrainBlend?: Webgl2WorldDrawUnit["terrainBlend"];
-	textureSamplingPolicy?: string | null;
 	atlasEntryKey?: string | null;
 	atlasWrapS?: "clamp" | "repeat";
 	atlasWrapT?: "clamp" | "repeat";
+	baseTexturePageBinding?: Webgl2WorldDrawUnit["texturePageBindings"][number];
 	vertexArray?: WebGLVertexArrayObject;
 }): Webgl2WorldDrawUnit {
+	const defaultTexturePageBinding = texture
+		? createSingleEntryBaseTexturePageBinding(texture, atlasWrapS, atlasWrapT)
+		: null;
 	return {
 		id,
 		kind,
@@ -719,7 +722,19 @@ function createDrawUnit({
 		materialKey,
 		materialFallbackReason: null,
 		materialBehavior: null,
-		textureSamplingPolicy,
+		directTextureSamplingPolicy: texture
+			? {
+					wrapS: atlasWrapS,
+					wrapT: atlasWrapT,
+					magFilter: "linear",
+					minFilter: "linear",
+					mipFilter: "linear",
+					colorSpace: "srgb",
+					anisotropy: 1,
+					generateMipmaps: true,
+					flipY: false,
+				}
+			: null,
 		textureUploadSample: null,
 		atlasEligibility: atlasEntryKey
 			? {
@@ -742,18 +757,84 @@ function createDrawUnit({
 					},
 				}
 			: null,
-		atlasCandidateSample: null,
+		bakeEligibility: {
+			decision: "direct-draw",
+			material: {
+				compatible: false,
+				blockers: ["missing-base-texture-page"],
+				atlasEligibility: null,
+				detailAtlasEntry: null,
+			},
+			geometry: {
+				compatible: false,
+				blockers: ["missing-landblock-origin"],
+			},
+		},
 		textureKey: null,
 		texture,
 		indexedMaterial,
 		detailOverlay: null,
 		terrainBlend,
+		texturePageBindings:
+			baseTexturePageBinding ?? defaultTexturePageBinding
+				? [baseTexturePageBinding ?? defaultTexturePageBinding].filter(
+						(binding): binding is NonNullable<typeof binding> =>
+							binding !== null,
+					)
+				: [],
+		texturePageBindingFallbackSamples:
+			texture && atlasEntryKey && !baseTexturePageBinding
+				? ["direct packed base page missing texture atlas generation"]
+				: [],
 		sceneDomain: sceneDomain ?? defaultSceneDomainForKind(kind),
 		modelMatrix: createIdentityMat4(),
 		bvhItemKeys: [],
 		bvhFallbackReason: null,
 		staticPartCount: 1,
 		staticObjectKeys: [id],
+	};
+}
+
+function createSingleEntryBaseTexturePageBinding(
+	texture: NonNullable<Webgl2WorldDrawUnit["texture"]>,
+	wrapS: "clamp" | "repeat" = "clamp",
+	wrapT: "clamp" | "repeat" = "clamp",
+): Webgl2WorldDrawUnit["texturePageBindings"][number] {
+	return {
+		pageKind: "single-entry",
+		usageBucket: "base-color",
+		sampleClass: "rgba-color",
+		texture,
+		rect: [0, 0, texture.width, texture.height],
+		width: texture.width,
+		height: texture.height,
+		wrapS,
+		wrapT,
+		sampling: {
+			wrapS,
+			wrapT,
+			minFilter: "linear",
+			magFilter: "linear",
+			mip: "material-policy",
+			samplingDomain: "color",
+			lookup: "color-filtered",
+		},
+		source: "standalone-direct-texture",
+	};
+}
+
+function createPackedBaseTexturePageBinding(
+	texture: NonNullable<Webgl2WorldDrawUnit["texture"]>,
+	wrapS: "clamp" | "repeat" = "clamp",
+	wrapT: "clamp" | "repeat" = "clamp",
+): Webgl2WorldDrawUnit["texturePageBindings"][number] {
+	return {
+		...createSingleEntryBaseTexturePageBinding(texture, wrapS, wrapT),
+		pageKind: "packed-atlas",
+		rect: [1, 2, 3, 4],
+		width: 4,
+		height: 4,
+		source: "shared-packed-page",
 	};
 }
 

@@ -90,6 +90,7 @@ import type {
 import type { Webgl2SceneDomain } from "./webgl2-scene-domain-targets";
 import {
 	collectDirectDrawTexturePageBindings,
+	resolveDirectDrawBaseTexturePageBinding,
 	type TexturePageBinding,
 } from "./texture-page-binding";
 
@@ -111,10 +112,9 @@ export interface Webgl2WorldDrawUnit {
 	materialKey: string;
 	materialFallbackReason: string | null;
 	materialBehavior: LegacyMaterialBehaviorDto | null;
-	textureSamplingPolicy: string | null;
+	directTextureSamplingPolicy: TextureSamplingPolicy | null;
 	textureUploadSample: string | null;
 	atlasEligibility: StagedWorldMaterialAtlasEligibility | null;
-	atlasCandidateSample: string | null;
 	bakeEligibility: BakeEligibility;
 	textureKey: string | null;
 	texture: Webgl2Texture2DResource | null;
@@ -122,6 +122,7 @@ export interface Webgl2WorldDrawUnit {
 	detailOverlay: Webgl2DetailOverlayResources | null;
 	terrainBlend: Webgl2TerrainBlendResources | null;
 	texturePageBindings: readonly TexturePageBinding[];
+	texturePageBindingFallbackSamples: readonly string[];
 	sceneDomain: Webgl2SceneDomain | null;
 	modelMatrix: RenderMat4;
 	bvhItemKeys: readonly RenderBvhItemKey[];
@@ -426,8 +427,8 @@ export function syncWebgl2WorldResources({
 		materialFallbackReasons,
 		8,
 	);
-	const textureSamplingPolicies = store.drawUnits.flatMap((drawUnit) =>
-		drawUnit.textureSamplingPolicy ? [drawUnit.textureSamplingPolicy] : [],
+	const textureSamplingPolicies = collectTextureSamplingPolicySamples(
+		store.drawUnits,
 	);
 	store.textureSamplingPolicyCounts = countStringOccurrences(
 		textureSamplingPolicies,
@@ -467,11 +468,7 @@ export function syncWebgl2WorldResources({
 		),
 	).size;
 	store.atlasCandidateSamples = [
-		...new Set(
-			atlasEligibleDrawUnits.flatMap((drawUnit) =>
-				drawUnit.atlasCandidateSample ? [drawUnit.atlasCandidateSample] : [],
-			),
-		),
+		...new Set(atlasEligibleDrawUnits.map(describeAtlasCandidateSample)),
 	].slice(0, 8);
 	store.bakedRenderablePlan = profileBrowserJsScope(
 		"webgl2.resource.planBakedRenderables",
@@ -497,6 +494,7 @@ export function syncWebgl2WorldResources({
 		plan: store.bakedRenderablePlan,
 		rendererResourceGraph,
 	});
+	resolveWebgl2DrawUnitTexturePageBindings(store);
 	for (const [textureKey, texture] of store.texturesByKey) {
 		if (!retainedTextureKeys.has(textureKey)) {
 			texture.dispose();
@@ -665,13 +663,11 @@ function createOrReuseWebgl2DrawUnit({
 		previous.materialFallbackReason =
 			resolveWebgl2MaterialFallbackReason(drawUnit);
 		previous.materialBehavior = drawUnit.material.behavior;
-		previous.textureSamplingPolicy =
-			resolveWebgl2DrawUnitTextureSamplingPolicy(drawUnit);
+		previous.directTextureSamplingPolicy =
+			resolveWebgl2DrawUnitDirectTextureSamplingPolicy(drawUnit);
 		previous.textureUploadSample =
 			resolveWebgl2DrawUnitTextureUploadSample(drawUnit);
 		previous.atlasEligibility = resolveWebgl2DrawUnitAtlasEligibility(drawUnit);
-		previous.atlasCandidateSample =
-			resolveWebgl2DrawUnitAtlasCandidateSample(drawUnit);
 		previous.textureKey =
 			drawUnit.material.kind === "direct-texture"
 				? drawUnit.material.textureKey
@@ -705,9 +701,10 @@ function createOrReuseWebgl2DrawUnit({
 			indexedMaterial: previous.indexedMaterial,
 			detailOverlay: previous.detailOverlay,
 			terrainBlend: previous.terrainBlend,
-			textureSamplingPolicy: previous.textureSamplingPolicy,
+			directTextureSamplingPolicy: previous.directTextureSamplingPolicy,
 			atlasEligibility: previous.atlasEligibility,
 		});
+		previous.texturePageBindingFallbackSamples = [];
 		previous.bakeEligibility = createBakeEligibility({
 			kind: previous.kind,
 			owningLandblockId: previous.owningLandblockId,
@@ -786,14 +783,15 @@ function createOrReuseWebgl2DrawUnit({
 		materialTextureCapabilities,
 		textureFilteringMode,
 	});
-	const textureSamplingPolicy = resolveWebgl2DrawUnitTextureSamplingPolicy(drawUnit);
+	const directTextureSamplingPolicy =
+		resolveWebgl2DrawUnitDirectTextureSamplingPolicy(drawUnit);
 	const atlasEligibility = resolveWebgl2DrawUnitAtlasEligibility(drawUnit);
 	const texturePageBindings = collectDirectDrawTexturePageBindings({
 		texture,
 		indexedMaterial,
 		detailOverlay,
 		terrainBlend,
-		textureSamplingPolicy,
+		directTextureSamplingPolicy,
 		atlasEligibility,
 	});
 	const webgl2DrawUnit = {
@@ -820,10 +818,9 @@ function createOrReuseWebgl2DrawUnit({
 		materialKey: drawUnit.material.key,
 		materialFallbackReason: resolveWebgl2MaterialFallbackReason(drawUnit),
 		materialBehavior: drawUnit.material.behavior,
-		textureSamplingPolicy,
+		directTextureSamplingPolicy,
 		textureUploadSample: resolveWebgl2DrawUnitTextureUploadSample(drawUnit),
 		atlasEligibility,
-		atlasCandidateSample: resolveWebgl2DrawUnitAtlasCandidateSample(drawUnit),
 		bakeEligibility: createBakeEligibility({
 			kind: drawUnit.kind,
 			owningLandblockId: resolveAtlasCompactionLandblockId(drawUnit),
@@ -845,6 +842,7 @@ function createOrReuseWebgl2DrawUnit({
 		detailOverlay,
 		terrainBlend,
 		texturePageBindings,
+		texturePageBindingFallbackSamples: [],
 		sceneDomain: deriveWebgl2DrawUnitSceneDomain(drawUnit),
 		modelMatrix: drawUnit.modelMatrix,
 		bvhItemKeys: drawUnit.bvhBinding.itemKeys,
@@ -954,18 +952,12 @@ function resolveWebgl2MaterialFallbackReason(
 	return drawUnit.material.fallbackReason;
 }
 
-function resolveWebgl2DrawUnitTextureSamplingPolicy(
+function resolveWebgl2DrawUnitDirectTextureSamplingPolicy(
 	drawUnit: StagedWorldDrawUnitAssembly,
-): string | null {
+): TextureSamplingPolicy | null {
 	return drawUnit.material.kind === "direct-texture"
-		? describeTextureSamplingPolicy(
-				drawUnit.material.textureUpload.upload.samplingPolicy,
-			)
-		: drawUnit.material.kind === "indexed-paletted"
-			? describeTextureSamplingPolicy(
-					drawUnit.material.indexedMaterial.samplingPolicy,
-				)
-			: null;
+		? drawUnit.material.textureUpload.upload.samplingPolicy
+		: null;
 }
 
 function resolveWebgl2DrawUnitTextureUploadSample(
@@ -1147,12 +1139,12 @@ function resolveWebgl2DrawUnitAtlasEligibility(
 		: null;
 }
 
-function resolveWebgl2DrawUnitAtlasCandidateSample(
-	drawUnit: StagedWorldDrawUnitAssembly,
-): string | null {
-	const eligibility = resolveWebgl2DrawUnitAtlasEligibility(drawUnit);
+function describeAtlasCandidateSample(drawUnit: Webgl2WorldDrawUnit): string {
+	const eligibility = drawUnit.atlasEligibility;
 	if (!eligibility) {
-		return null;
+		throw new Error(
+			`Cannot describe atlas candidate sample for draw unit ${drawUnit.id} without atlas eligibility.`,
+		);
 	}
 	return [
 		drawUnit.kind,
@@ -1891,6 +1883,62 @@ function countUniqueBvhItemKeys(
 	drawUnits: readonly Webgl2WorldDrawUnit[],
 ): number {
 	return new Set(drawUnits.flatMap((drawUnit) => drawUnit.bvhItemKeys)).size;
+}
+
+function collectTextureSamplingPolicySamples(
+	drawUnits: readonly Webgl2WorldDrawUnit[],
+): readonly string[] {
+	return drawUnits.flatMap((drawUnit) => {
+		if (drawUnit.directTextureSamplingPolicy) {
+			return [describeTextureSamplingPolicy(drawUnit.directTextureSamplingPolicy)];
+		}
+		if (drawUnit.indexedMaterial) {
+			return [
+				describeIndexedTexturePageSamplingPolicy(
+					drawUnit.indexedMaterial.wrapS,
+					drawUnit.indexedMaterial.wrapT,
+				),
+			];
+		}
+		return [];
+	});
+}
+
+function describeIndexedTexturePageSamplingPolicy(
+	wrapS: TextureSamplingPolicy["wrapS"],
+	wrapT: TextureSamplingPolicy["wrapT"],
+): string {
+	return describeTextureSamplingPolicy({
+		wrapS,
+		wrapT,
+		magFilter: "nearest",
+		minFilter: "nearest",
+		mipFilter: "none",
+		colorSpace: "none",
+		anisotropy: 1,
+		generateMipmaps: false,
+		flipY: false,
+	});
+}
+
+function resolveWebgl2DrawUnitTexturePageBindings(
+	store: Webgl2WorldResourceStore,
+): void {
+	for (const drawUnit of store.drawUnits) {
+		const baseResolution = resolveDirectDrawBaseTexturePageBinding({
+			drawUnit,
+			generation: store.textureAtlasGeneration,
+			fallbackSamples: [],
+		});
+		drawUnit.texturePageBindings = [
+			...(baseResolution.binding ? [baseResolution.binding] : []),
+			...drawUnit.texturePageBindings.filter(
+				(binding) => binding.usageBucket !== "base-color",
+			),
+		];
+		drawUnit.texturePageBindingFallbackSamples =
+			baseResolution.fallbackSamples;
+	}
 }
 
 function syncWebgl2TextureAtlasGeneration({

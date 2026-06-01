@@ -165,7 +165,7 @@ export function collectDirectDrawTexturePageBindings(
 	drawUnit: Pick<
 		Webgl2WorldDrawUnit,
 		| "texture"
-		| "textureSamplingPolicy"
+		| "directTextureSamplingPolicy"
 		| "atlasEligibility"
 		| "detailOverlay"
 		| "indexedMaterial"
@@ -404,9 +404,8 @@ function resolveTexturePageWrapMode(drawUnit: Webgl2WorldDrawUnit): {
 			wrapT: samplingPolicy.wrapT,
 		};
 	}
-	const match = drawUnit.textureSamplingPolicy?.match(/wrap=([^/;]+)\/([^;]+)/);
 	return {
-		wrapS: match?.[1] === "repeat" ? "repeat" : "clamp",
-		wrapT: match?.[2] === "repeat" ? "repeat" : "clamp",
+		wrapS: drawUnit.directTextureSamplingPolicy?.wrapS ?? "clamp",
+		wrapT: drawUnit.directTextureSamplingPolicy?.wrapT ?? "clamp",
 	};
 }

@@ -96,7 +96,7 @@ describe("baked renderable planner", () => {
 		expect(plan.bypasses.map((bypass) => bypass.reason)).toEqual([
 			"non-static",
 			"missing-landblock-origin",
-			"non-direct-texture",
+			"unsupported-baked-material-family",
 			"missing-detail-atlas-entry",
 			"non-opaque-material",
 			"missing-atlas-eligibility",

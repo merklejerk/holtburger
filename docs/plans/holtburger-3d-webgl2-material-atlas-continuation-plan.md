@@ -3683,32 +3683,35 @@ Progress on 2026-06-01:
   landblock batch".
 - Updated bake-candidate bypass samples to describe blockers as baked-geometry blockers rather than
   "atlas-backed compacted geometry" blockers.
+- Renamed the boundary DTO/debug fields from `atlasBackedCompacted*`,
+  `atlasBackedCompaction*`, and `compactedGeometry*` to baked terminology:
+  `baked*` for submitted/replaced/retained draw metrics, `bakedGeometry*` for compacted geometry
+  resource metrics, and `bakedSubmitRoute` for route ownership.
 
 Decisions and course corrections:
 
 - Kept low-level implementation module/type names such as `webgl2-atlas-backed-compacted-submit` and
   `AtlasBackedCompactionPlan` for now. Those names still describe the current concrete implementation
   family and changing them touches a broad API surface.
-- Kept `atlasBackedCompacted*`, `atlasBackedCompaction*`, and `compactedGeometry*` DTO fields as
-  compatibility shims. The visible/debug labels now say baked, but the structural field rename should
-  be a dedicated follow-up to avoid a large compatibility layer.
+- Kept concrete resource-store collections such as `atlasBackedCompactedBatches` and the
+  `AtlasBackedCompactionPlan` implementation type. Those are not boundary DTO names; they describe
+  the current concrete baked family that requires packed atlas texture pages plus compacted geometry.
 - Did not rename packed-atlas resource labels, base/detail atlas texture counts, or atlas eligibility
   diagnostics when they refer to concrete texture-page resources rather than baked renderable
   categories.
 
 Validation:
 
-- `npm exec vitest -- src/lib/world-display/atlas-backed-compaction-planner.test.ts src/lib/world-display/webgl2-atlas-backed-compacted-submit.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts --run`
+- `npm exec vitest -- src/lib/world-display/texture-page-binding.test.ts src/lib/world-display/atlas-backed-compaction-planner.test.ts src/lib/world-display/webgl2-atlas-backed-compacted-submit.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts --run`
 - `npm exec tsc -- --noEmit`
 
 Introduced cleanup targets and legacy shims:
 
-- Rename `atlasBackedCompacted*`, `atlasBackedCompaction*`, and submit/resource DTO fields to baked
-  terminology in a focused follow-up once downstream debug consumers are ready. Until then they are
-  legacy structural names over baked renderable metrics.
 - Rename implementation modules only when the current baked family no longer needs the concrete
   "atlas-backed compacted" qualifier to distinguish it from future baked indexed, terrain, or
   transparent families.
+- Audit downstream consumers for the old debug DTO field names before merging with external tooling.
+  No compatibility alias was kept inside the renderer contract.
 - Keep future metric additions in baked/direct-draw terminology at the boundary. Do not add new
   user-facing `atlas-backed compacted` metric labels.
 

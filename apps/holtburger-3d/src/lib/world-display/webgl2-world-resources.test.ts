@@ -484,7 +484,7 @@ describe("webgl2 world resources", () => {
 		});
 
 		expect(store.structuredInteriorDrawUnitCount).toBe(1);
-		expect(store.atlasBackedCompactionCompactableDrawUnitCount).toBe(1);
+		expect(store.bakedCandidateDrawUnitCount).toBe(1);
 		expect(store.atlasBackedCompactionPlan.compactableDrawUnitIds[0]).toContain(
 			"structured-interior",
 		);
@@ -494,7 +494,7 @@ describe("webgl2 world resources", () => {
 		expect(batch?.drawSlices[0]?.drawUnitIds[0]).toContain(
 			"structured-interior",
 		);
-		expect(store.atlasBackedCompactionBypassSamples).not.toContain(
+		expect(store.bakedBypassSamples).not.toContain(
 			"non-static: draw unit kind structured-interior is not baked geometry",
 		);
 	});

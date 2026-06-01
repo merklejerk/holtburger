@@ -105,24 +105,24 @@ export interface Webgl2WorldSubmitMetrics {
 	stateChangeCount: number;
 	triangleCount: number;
 	visibleDrawUnitCountsByMaterialKind: Readonly<Record<string, number>>;
-	atlasBackedCompactedShaderDrawCallCount: number;
-	atlasBackedCompactedSubmittedBatchCount: number;
-	atlasBackedCompactedSubmittedDrawSliceCount: number;
-	atlasBackedCompactedSubmittedSliceRepresentedDrawUnitCount: number;
-	atlasBackedCompactedSubmittedTriangleCount: number;
-	atlasBackedCompactedReplacedDrawUnitCount: number;
-	atlasBackedCompactedReplacedDrawUnitTriangleCount: number;
-	atlasBackedCompactedConservativeOverdrawTriangleCount: number;
-	atlasBackedCompactedConservativeOverdrawRatio: number;
-	atlasBackedCompactedRetainedDrawUnitCount: number;
-	atlasBackedCompactedOriginalDrawCallEstimateCount: number;
-	atlasBackedCompactedSubmittedDrawCallEstimateCount: number;
-	atlasBackedCompactedDrawCallSavingsCount: number;
-	atlasBackedCompactedSubmitNoVisibleRouteCount: number;
-	atlasBackedCompactedSubmitNoVisibleExteriorRouteCount: number;
-	atlasBackedCompactedSubmitNoVisibleInteriorRouteCount: number;
-	atlasBackedCompactedSubmitNoVisibleOtherRouteCount: number;
-	atlasBackedCompactedSubmitFallbackSamples: readonly string[];
+	bakedShaderDrawCallCount: number;
+	bakedSubmittedBatchCount: number;
+	bakedSubmittedDrawSliceCount: number;
+	bakedSubmittedSliceRepresentedDrawUnitCount: number;
+	bakedSubmittedTriangleCount: number;
+	bakedReplacedDrawUnitCount: number;
+	bakedReplacedDrawUnitTriangleCount: number;
+	bakedConservativeOverdrawTriangleCount: number;
+	bakedConservativeOverdrawRatio: number;
+	bakedRetainedDirectDrawUnitCount: number;
+	bakedOriginalDrawCallEstimateCount: number;
+	bakedSubmittedDrawCallEstimateCount: number;
+	bakedDrawCallSavingsCount: number;
+	bakedSubmitNoVisibleRouteCount: number;
+	bakedSubmitNoVisibleExteriorRouteCount: number;
+	bakedSubmitNoVisibleInteriorRouteCount: number;
+	bakedSubmitNoVisibleOtherRouteCount: number;
+	bakedSubmitFallbackSamples: readonly string[];
 	directTexturePageDrawCount: number;
 	directSingleEntryTexturePageDrawCount: number;
 	directPackedTexturePageDrawCount: number;
@@ -148,24 +148,24 @@ const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	stateChangeCount: 0,
 	triangleCount: 0,
 	visibleDrawUnitCountsByMaterialKind: {},
-	atlasBackedCompactedShaderDrawCallCount: 0,
-	atlasBackedCompactedSubmittedBatchCount: 0,
-	atlasBackedCompactedSubmittedDrawSliceCount: 0,
-	atlasBackedCompactedSubmittedSliceRepresentedDrawUnitCount: 0,
-	atlasBackedCompactedSubmittedTriangleCount: 0,
-	atlasBackedCompactedReplacedDrawUnitCount: 0,
-	atlasBackedCompactedReplacedDrawUnitTriangleCount: 0,
-	atlasBackedCompactedConservativeOverdrawTriangleCount: 0,
-	atlasBackedCompactedConservativeOverdrawRatio: 0,
-	atlasBackedCompactedRetainedDrawUnitCount: 0,
-	atlasBackedCompactedOriginalDrawCallEstimateCount: 0,
-	atlasBackedCompactedSubmittedDrawCallEstimateCount: 0,
-	atlasBackedCompactedDrawCallSavingsCount: 0,
-	atlasBackedCompactedSubmitNoVisibleRouteCount: 0,
-	atlasBackedCompactedSubmitNoVisibleExteriorRouteCount: 0,
-	atlasBackedCompactedSubmitNoVisibleInteriorRouteCount: 0,
-	atlasBackedCompactedSubmitNoVisibleOtherRouteCount: 0,
-	atlasBackedCompactedSubmitFallbackSamples: [],
+	bakedShaderDrawCallCount: 0,
+	bakedSubmittedBatchCount: 0,
+	bakedSubmittedDrawSliceCount: 0,
+	bakedSubmittedSliceRepresentedDrawUnitCount: 0,
+	bakedSubmittedTriangleCount: 0,
+	bakedReplacedDrawUnitCount: 0,
+	bakedReplacedDrawUnitTriangleCount: 0,
+	bakedConservativeOverdrawTriangleCount: 0,
+	bakedConservativeOverdrawRatio: 0,
+	bakedRetainedDirectDrawUnitCount: 0,
+	bakedOriginalDrawCallEstimateCount: 0,
+	bakedSubmittedDrawCallEstimateCount: 0,
+	bakedDrawCallSavingsCount: 0,
+	bakedSubmitNoVisibleRouteCount: 0,
+	bakedSubmitNoVisibleExteriorRouteCount: 0,
+	bakedSubmitNoVisibleInteriorRouteCount: 0,
+	bakedSubmitNoVisibleOtherRouteCount: 0,
+	bakedSubmitFallbackSamples: [],
 	directTexturePageDrawCount: 0,
 	directSingleEntryTexturePageDrawCount: 0,
 	directPackedTexturePageDrawCount: 0,
@@ -179,7 +179,7 @@ const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	stagedAtlasFallbackSamples: [],
 };
 
-export type Webgl2AtlasBackedCompactedSubmitRoute =
+export type Webgl2BakedSubmitRoute =
 	| "flat-world"
 	| "scene-domain-exterior"
 	| "scene-domain-interior";
@@ -188,7 +188,7 @@ export function createEmptyWebgl2WorldSubmitMetrics(): Webgl2WorldSubmitMetrics 
 	return {
 		...EMPTY_SUBMIT_METRICS,
 		visibleDrawUnitCountsByMaterialKind: {},
-		atlasBackedCompactedSubmitFallbackSamples: [],
+		bakedSubmitFallbackSamples: [],
 		directTexturePageFallbackSamples: [],
 		stagedAtlasFallbackSamples: [],
 	};
@@ -258,7 +258,7 @@ export function submitWebgl2FlatWorldDrawUnits({
 	portalMaskDrawUnitCount = 0,
 	exteriorDomainDrawUnitCount = 0,
 	interiorDomainDrawUnitCount = 0,
-	atlasBackedCompactedSubmitRoute = "flat-world",
+	bakedSubmitRoute = "flat-world",
 	terrainBackfaceCulling = false,
 }: {
 	gl: WebGL2RenderingContext;
@@ -275,7 +275,7 @@ export function submitWebgl2FlatWorldDrawUnits({
 	portalMaskDrawUnitCount?: number;
 	exteriorDomainDrawUnitCount?: number;
 	interiorDomainDrawUnitCount?: number;
-	atlasBackedCompactedSubmitRoute?: Webgl2AtlasBackedCompactedSubmitRoute;
+	bakedSubmitRoute?: Webgl2BakedSubmitRoute;
 	terrainBackfaceCulling?: boolean;
 }): Webgl2WorldSubmitMetrics {
 	const metrics: Webgl2WorldSubmitMetrics = {
@@ -339,7 +339,7 @@ export function submitWebgl2FlatWorldDrawUnits({
 		zpass: gl.KEEP,
 	});
 	if (stagedDrawUnits.length === 0) {
-		metrics.atlasBackedCompactedRetainedDrawUnitCount = retainedDrawUnitCount;
+		metrics.bakedRetainedDirectDrawUnitCount = retainedDrawUnitCount;
 		submitAtlasBackedCompactedDrawUnits({
 			gl,
 			stateCache,
@@ -349,7 +349,7 @@ export function submitWebgl2FlatWorldDrawUnits({
 			replaceableDrawUnitIds: atlasReplacement.replaceableDrawUnitIds,
 			retainedDrawUnitCount,
 			replaceableDrawUnitTriangleCount,
-			route: atlasBackedCompactedSubmitRoute,
+			route: bakedSubmitRoute,
 			metrics,
 			planningNoVisibleRouteCount: atlasReplacement.noVisibleRouteCount,
 			planningFallbackSamples: atlasReplacement.fallbackSamples,
@@ -567,7 +567,7 @@ export function submitWebgl2FlatWorldDrawUnits({
 		replaceableDrawUnitIds: atlasReplacement.replaceableDrawUnitIds,
 		retainedDrawUnitCount,
 		replaceableDrawUnitTriangleCount,
-		route: atlasBackedCompactedSubmitRoute,
+		route: bakedSubmitRoute,
 		metrics,
 		planningNoVisibleRouteCount: atlasReplacement.noVisibleRouteCount,
 		planningFallbackSamples: atlasReplacement.fallbackSamples,
@@ -597,7 +597,7 @@ function submitAtlasBackedCompactedDrawUnits({
 	replaceableDrawUnitIds: ReadonlySet<string>;
 	retainedDrawUnitCount: number;
 	replaceableDrawUnitTriangleCount: number;
-	route: Webgl2AtlasBackedCompactedSubmitRoute;
+	route: Webgl2BakedSubmitRoute;
 	metrics: Webgl2WorldSubmitMetrics;
 	planningNoVisibleRouteCount: number;
 	planningFallbackSamples: readonly string[];
@@ -622,24 +622,19 @@ function submitAtlasBackedCompactedDrawUnits({
 		});
 		metrics.drawCallCount += atlasMetrics.shaderDrawCallCount;
 		metrics.triangleCount += atlasMetrics.submittedTriangleCount;
-		metrics.atlasBackedCompactedShaderDrawCallCount =
-			atlasMetrics.shaderDrawCallCount;
-		metrics.atlasBackedCompactedSubmittedBatchCount =
-			atlasMetrics.submittedBatchCount;
-		metrics.atlasBackedCompactedSubmittedDrawSliceCount =
-			atlasMetrics.submittedDrawSliceCount;
-		metrics.atlasBackedCompactedSubmittedSliceRepresentedDrawUnitCount =
+		metrics.bakedShaderDrawCallCount = atlasMetrics.shaderDrawCallCount;
+		metrics.bakedSubmittedBatchCount = atlasMetrics.submittedBatchCount;
+		metrics.bakedSubmittedDrawSliceCount = atlasMetrics.submittedDrawSliceCount;
+		metrics.bakedSubmittedSliceRepresentedDrawUnitCount =
 			atlasMetrics.submittedSliceRepresentedDrawUnitCount;
-		metrics.atlasBackedCompactedSubmittedTriangleCount =
-			atlasMetrics.submittedTriangleCount;
-		metrics.atlasBackedCompactedReplacedDrawUnitCount =
-			atlasMetrics.replacedDrawUnitCount;
-		metrics.atlasBackedCompactedReplacedDrawUnitTriangleCount =
+		metrics.bakedSubmittedTriangleCount = atlasMetrics.submittedTriangleCount;
+		metrics.bakedReplacedDrawUnitCount = atlasMetrics.replacedDrawUnitCount;
+		metrics.bakedReplacedDrawUnitTriangleCount =
 			replaceableDrawUnitTriangleCount;
 		applyAtlasBackedCompactedConservativeOverdraw(metrics);
-		metrics.atlasBackedCompactedRetainedDrawUnitCount =
+		metrics.bakedRetainedDirectDrawUnitCount =
 			atlasMetrics.retainedDrawUnitCount;
-		metrics.atlasBackedCompactedSubmitNoVisibleRouteCount =
+		metrics.bakedSubmitNoVisibleRouteCount =
 			planningNoVisibleRouteCount + atlasMetrics.noVisibleRouteCount;
 		applyAtlasBackedCompactedNoVisibleRoute(
 			metrics,
@@ -651,14 +646,12 @@ function submitAtlasBackedCompactedDrawUnits({
 			route,
 			atlasMetrics.noVisibleRouteCount,
 		);
-		metrics.atlasBackedCompactedSubmitFallbackSamples =
-			atlasMetrics.fallbackSamples;
+		metrics.bakedSubmitFallbackSamples = atlasMetrics.fallbackSamples;
 		applyAtlasBackedCompactedDrawCallArithmetic(metrics);
 		return;
 	}
 	const fallbackSamples = [...planningFallbackSamples];
-	metrics.atlasBackedCompactedSubmitNoVisibleRouteCount =
-		planningNoVisibleRouteCount;
+	metrics.bakedSubmitNoVisibleRouteCount = planningNoVisibleRouteCount;
 	applyAtlasBackedCompactedNoVisibleRoute(
 		metrics,
 		route,
@@ -674,18 +667,17 @@ function submitAtlasBackedCompactedDrawUnits({
 	}
 	const emptyAtlasMetrics =
 		createEmptyWebgl2AtlasBackedCompactedSubmitMetrics();
-	metrics.atlasBackedCompactedRetainedDrawUnitCount = retainedDrawUnitCount;
-	metrics.atlasBackedCompactedReplacedDrawUnitTriangleCount =
-		replaceableDrawUnitTriangleCount;
+	metrics.bakedRetainedDirectDrawUnitCount = retainedDrawUnitCount;
+	metrics.bakedReplacedDrawUnitTriangleCount = replaceableDrawUnitTriangleCount;
 	applyAtlasBackedCompactedConservativeOverdraw(metrics);
-	metrics.atlasBackedCompactedSubmitNoVisibleRouteCount +=
+	metrics.bakedSubmitNoVisibleRouteCount +=
 		emptyAtlasMetrics.noVisibleRouteCount;
 	applyAtlasBackedCompactedNoVisibleRoute(
 		metrics,
 		route,
 		emptyAtlasMetrics.noVisibleRouteCount,
 	);
-	metrics.atlasBackedCompactedSubmitFallbackSamples = [
+	metrics.bakedSubmitFallbackSamples = [
 		...fallbackSamples,
 		...emptyAtlasMetrics.fallbackSamples,
 	].slice(0, 8);
@@ -708,35 +700,34 @@ function sumDrawUnitTriangles(
 function applyAtlasBackedCompactedDrawCallArithmetic(
 	metrics: Webgl2WorldSubmitMetrics,
 ): void {
-	metrics.atlasBackedCompactedOriginalDrawCallEstimateCount =
-		metrics.atlasBackedCompactedRetainedDrawUnitCount +
-		metrics.atlasBackedCompactedReplacedDrawUnitCount;
-	metrics.atlasBackedCompactedSubmittedDrawCallEstimateCount =
-		metrics.atlasBackedCompactedRetainedDrawUnitCount +
-		metrics.atlasBackedCompactedShaderDrawCallCount;
-	metrics.atlasBackedCompactedDrawCallSavingsCount =
-		metrics.atlasBackedCompactedOriginalDrawCallEstimateCount -
-		metrics.atlasBackedCompactedSubmittedDrawCallEstimateCount;
+	metrics.bakedOriginalDrawCallEstimateCount =
+		metrics.bakedRetainedDirectDrawUnitCount +
+		metrics.bakedReplacedDrawUnitCount;
+	metrics.bakedSubmittedDrawCallEstimateCount =
+		metrics.bakedRetainedDirectDrawUnitCount + metrics.bakedShaderDrawCallCount;
+	metrics.bakedDrawCallSavingsCount =
+		metrics.bakedOriginalDrawCallEstimateCount -
+		metrics.bakedSubmittedDrawCallEstimateCount;
 }
 
 function applyAtlasBackedCompactedConservativeOverdraw(
 	metrics: Webgl2WorldSubmitMetrics,
 ): void {
-	metrics.atlasBackedCompactedConservativeOverdrawTriangleCount = Math.max(
+	metrics.bakedConservativeOverdrawTriangleCount = Math.max(
 		0,
-		metrics.atlasBackedCompactedSubmittedTriangleCount -
-			metrics.atlasBackedCompactedReplacedDrawUnitTriangleCount,
+		metrics.bakedSubmittedTriangleCount -
+			metrics.bakedReplacedDrawUnitTriangleCount,
 	);
-	metrics.atlasBackedCompactedConservativeOverdrawRatio =
-		metrics.atlasBackedCompactedSubmittedTriangleCount === 0
+	metrics.bakedConservativeOverdrawRatio =
+		metrics.bakedSubmittedTriangleCount === 0
 			? 0
-			: metrics.atlasBackedCompactedConservativeOverdrawTriangleCount /
-				metrics.atlasBackedCompactedSubmittedTriangleCount;
+			: metrics.bakedConservativeOverdrawTriangleCount /
+				metrics.bakedSubmittedTriangleCount;
 }
 
 function applyAtlasBackedCompactedNoVisibleRoute(
 	metrics: Webgl2WorldSubmitMetrics,
-	route: Webgl2AtlasBackedCompactedSubmitRoute,
+	route: Webgl2BakedSubmitRoute,
 	count: number,
 ): void {
 	if (count <= 0) {
@@ -744,13 +735,13 @@ function applyAtlasBackedCompactedNoVisibleRoute(
 	}
 	switch (route) {
 		case "scene-domain-exterior":
-			metrics.atlasBackedCompactedSubmitNoVisibleExteriorRouteCount += count;
+			metrics.bakedSubmitNoVisibleExteriorRouteCount += count;
 			return;
 		case "scene-domain-interior":
-			metrics.atlasBackedCompactedSubmitNoVisibleInteriorRouteCount += count;
+			metrics.bakedSubmitNoVisibleInteriorRouteCount += count;
 			return;
 		case "flat-world":
-			metrics.atlasBackedCompactedSubmitNoVisibleOtherRouteCount += count;
+			metrics.bakedSubmitNoVisibleOtherRouteCount += count;
 			return;
 	}
 }

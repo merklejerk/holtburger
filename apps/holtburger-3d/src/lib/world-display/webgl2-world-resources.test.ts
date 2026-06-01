@@ -360,7 +360,7 @@ describe("webgl2 world resources", () => {
 		expect(store.atlasCandidateSamples[0]).toContain("atlas-entry");
 	});
 
-	it("retains and releases landblock-scoped atlas static batches through the renderer graph", () => {
+	it("retains and releases landblock-scoped atlas-backed compacted batches through the renderer graph", () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
 		const graph = new RendererResourceGraph();
@@ -403,7 +403,7 @@ describe("webgl2 world resources", () => {
 		expect(initialBatches.map((batch) => batch.landblockId)).toEqual([
 			0x12340000, 0x12350000,
 		]);
-		expect(store.atlasStaticBatchGraphLeasesByKey.size).toBe(2);
+		expect(store.atlasBackedCompactedBatchGraphLeasesByKey.size).toBe(2);
 
 		const removedBatchKey = initialBatches[1]?.key;
 		const retainedBatchKey = initialBatches[0]?.key;
@@ -431,9 +431,9 @@ describe("webgl2 world resources", () => {
 		expect(
 			sortAtlasBatchesByLandblock(store).map((batch) => batch.key),
 		).toEqual([retainedBatchKey]);
-		expect(store.atlasStaticBatchGraphLeasesByKey.size).toBe(1);
+		expect(store.atlasBackedCompactedBatchGraphLeasesByKey.size).toBe(1);
 		expect(
-			store.atlasStaticBatchGraphLeasesByKey.has(
+			store.atlasBackedCompactedBatchGraphLeasesByKey.has(
 				staticBatchGraphNodeKey(retainedBatchKey ?? ""),
 			),
 		).toBe(true);
@@ -482,8 +482,8 @@ describe("webgl2 world resources", () => {
 		});
 
 		expect(store.structuredInteriorDrawUnitCount).toBe(1);
-		expect(store.atlasStaticCompactableDrawUnitCount).toBe(1);
-		expect(store.atlasStaticCompactionPlan.compactableDrawUnitIds[0]).toContain(
+		expect(store.atlasBackedCompactionCompactableDrawUnitCount).toBe(1);
+		expect(store.atlasBackedCompactionPlan.compactableDrawUnitIds[0]).toContain(
 			"structured-interior",
 		);
 		const batch = sortAtlasBatchesByLandblock(store)[0];
@@ -492,7 +492,7 @@ describe("webgl2 world resources", () => {
 		expect(batch?.drawSlices[0]?.drawUnitIds[0]).toContain(
 			"structured-interior",
 		);
-		expect(store.atlasStaticCompactionBypassSamples).not.toContain(
+		expect(store.atlasBackedCompactionBypassSamples).not.toContain(
 			"non-static: draw unit kind structured-interior is not compacted atlas geometry",
 		);
 	});
@@ -538,7 +538,7 @@ describe("webgl2 world resources", () => {
 			rendererResourceGraph: graph,
 		});
 
-		const atlasGeneration = store.atlasStaticGeneration;
+		const atlasGeneration = store.textureAtlasGeneration;
 		const atlasTexture = atlasGeneration?.textures[0]?.texture.texture;
 		const batch = sortAtlasBatchesByLandblock(store)[0];
 		expect(batch).toBeDefined();
@@ -568,8 +568,8 @@ describe("webgl2 world resources", () => {
 		});
 
 		const nextBatch = sortAtlasBatchesByLandblock(store)[0];
-		expect(store.atlasStaticGeneration).toBe(atlasGeneration);
-		expect(store.atlasStaticGeneration?.textures[0]?.texture.texture).toBe(
+		expect(store.textureAtlasGeneration).toBe(atlasGeneration);
+		expect(store.textureAtlasGeneration?.textures[0]?.texture.texture).toBe(
 			atlasTexture,
 		);
 		expect(nextBatch).toBe(batch);
@@ -1306,7 +1306,7 @@ function createChunkTransform({
 }
 
 function sortAtlasBatchesByLandblock(store: Webgl2WorldResourceStore) {
-	return [...store.atlasStaticBatches.values()].sort(
+	return [...store.atlasBackedCompactedBatches.values()].sort(
 		(left, right) => left.landblockId - right.landblockId,
 	);
 }

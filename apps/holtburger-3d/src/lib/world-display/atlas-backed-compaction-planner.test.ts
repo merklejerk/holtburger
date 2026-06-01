@@ -1,16 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import {
-	createEmptyAtlasStaticCompactionPlan,
-	planAtlasStaticCompaction,
-	type AtlasStaticCompactionCandidate,
-} from "./atlas-static-compaction-planner";
+	createEmptyAtlasBackedCompactionPlan,
+	planAtlasBackedCompaction,
+	type AtlasBackedCompactionCandidate,
+} from "./atlas-backed-compaction-planner";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
 import type { StagedWorldMaterialAtlasEligibility } from "./staged-world-material-strategy";
 
-describe("atlas static compaction planner", () => {
+describe("atlas-backed compaction planner", () => {
 	it("plans landblock-owned opaque direct-texture units into deterministic atlas slices", () => {
-		const plan = planAtlasStaticCompaction({
+		const plan = planAtlasBackedCompaction({
 			drawUnits: [
 				createCandidate({ id: "static-b", entryKey: "entry-b" }),
 				createCandidate({
@@ -56,7 +56,7 @@ describe("atlas static compaction planner", () => {
 	});
 
 	it("keeps unsupported first-slice materials on the staged path with reasons", () => {
-		const plan = planAtlasStaticCompaction({
+		const plan = planAtlasBackedCompaction({
 			drawUnits: [
 				createCandidate({ id: "terrain", kind: "terrain" }),
 				createCandidate({ id: "missing-landblock", owningLandblockId: null }),
@@ -88,7 +88,7 @@ describe("atlas static compaction planner", () => {
 	});
 
 	it("reports source texture and material table overflow before GPU resources exist", () => {
-		const plan = planAtlasStaticCompaction({
+		const plan = planAtlasBackedCompaction({
 			drawUnits: [
 				createCandidate({
 					id: "too-big",
@@ -115,8 +115,8 @@ describe("atlas static compaction planner", () => {
 	});
 
 	it("creates an empty plan for store initialization", () => {
-		expect(createEmptyAtlasStaticCompactionPlan()).toMatchObject({
-			key: "atlas-static-compaction/empty",
+		expect(createEmptyAtlasBackedCompactionPlan()).toMatchObject({
+			key: "atlas-backed-compaction/empty",
 			compactableDrawUnitIds: [],
 			atlasTextures: [],
 			drawSlices: [],
@@ -143,12 +143,12 @@ const OPAQUE_BEHAVIOR: LegacyMaterialBehaviorDto = {
 };
 
 function createCandidate(
-	options: Partial<AtlasStaticCompactionCandidate> & {
+	options: Partial<AtlasBackedCompactionCandidate> & {
 		entryKey?: string;
 		width?: number;
 		height?: number;
 	} = {},
-): AtlasStaticCompactionCandidate {
+): AtlasBackedCompactionCandidate {
 	const entryKey = options.entryKey ?? "entry";
 	return {
 		id: options.id ?? "static",

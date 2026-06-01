@@ -3,15 +3,15 @@ import {
 	type Webgl2Texture2DResource,
 } from "./webgl2-gl";
 import type {
-	AtlasStaticCompactionEntry,
-	AtlasStaticCompactionPlan,
-} from "./atlas-static-compaction-planner";
+	AtlasBackedCompactionEntry,
+	AtlasBackedCompactionPlan,
+} from "./atlas-backed-compaction-planner";
 import type {
 	AtlasTexturePage,
 	AtlasTexturePlacement,
 } from "./atlas-layout-planner";
 
-export interface Webgl2AtlasStaticTextureResource {
+export interface Webgl2TextureAtlasTextureResource {
 	key: string;
 	textureIndex: number;
 	texture: Webgl2Texture2DResource;
@@ -20,21 +20,21 @@ export interface Webgl2AtlasStaticTextureResource {
 	placementCount: number;
 }
 
-export interface Webgl2AtlasStaticGenerationResource {
+export interface Webgl2TextureAtlasGenerationResource {
 	key: string;
-	textures: readonly Webgl2AtlasStaticTextureResource[];
+	textures: readonly Webgl2TextureAtlasTextureResource[];
 	preparedTextureAssetIds: readonly string[];
 	compactableDrawUnitIds: readonly string[];
 	dispose(): void;
 }
 
-export function createWebgl2AtlasStaticGenerationResource({
+export function createWebgl2TextureAtlasGenerationResource({
 	gl,
 	plan,
 }: {
 	gl: WebGL2RenderingContext;
-	plan: AtlasStaticCompactionPlan;
-}): Webgl2AtlasStaticGenerationResource | null {
+	plan: AtlasBackedCompactionPlan;
+}): Webgl2TextureAtlasGenerationResource | null {
 	if (plan.compactableDrawUnitIds.length === 0) {
 		return null;
 	}
@@ -42,7 +42,7 @@ export function createWebgl2AtlasStaticGenerationResource({
 		plan.atlasEntryRecords.map((record) => [record.key, record] as const),
 	);
 	const textures = plan.atlasTextures.map((page) =>
-		createWebgl2AtlasStaticTexture({
+		createWebgl2TextureAtlasTexture({
 			gl,
 			generationKey: plan.key,
 			page,
@@ -62,7 +62,7 @@ export function createWebgl2AtlasStaticGenerationResource({
 	};
 }
 
-function createWebgl2AtlasStaticTexture({
+function createWebgl2TextureAtlasTexture({
 	gl,
 	generationKey,
 	page,
@@ -71,17 +71,17 @@ function createWebgl2AtlasStaticTexture({
 	gl: WebGL2RenderingContext;
 	generationKey: string;
 	page: AtlasTexturePage;
-	entriesByKey: ReadonlyMap<string, AtlasStaticCompactionEntry>;
-}): Webgl2AtlasStaticTextureResource {
+	entriesByKey: ReadonlyMap<string, AtlasBackedCompactionEntry>;
+}): Webgl2TextureAtlasTextureResource {
 	const pixels = new Uint8Array(page.width * page.height * 4);
 	for (const placement of page.placements) {
 		const record = entriesByKey.get(placement.atlasEntryKey);
 		if (!record) {
 			throw new Error(
-				`Atlas static generation ${generationKey} references missing entry ${placement.atlasEntryKey}.`,
+				`Texture atlas generation ${generationKey} references missing entry ${placement.atlasEntryKey}.`,
 			);
 		}
-		copyAtlasStaticPlacement({
+		copyTextureAtlasPlacement({
 			atlasPixels: pixels,
 			atlasWidth: page.width,
 			atlasHeight: page.height,
@@ -118,7 +118,7 @@ function createWebgl2AtlasStaticTexture({
 	};
 }
 
-function copyAtlasStaticPlacement({
+function copyTextureAtlasPlacement({
 	atlasPixels,
 	atlasWidth,
 	atlasHeight,
@@ -129,9 +129,9 @@ function copyAtlasStaticPlacement({
 	atlasWidth: number;
 	atlasHeight: number;
 	placement: AtlasTexturePlacement;
-	entry: AtlasStaticCompactionEntry["entry"];
+	entry: AtlasBackedCompactionEntry["entry"];
 }): void {
-	validateAtlasStaticSource(entry);
+	validateTextureAtlasSource(entry);
 	const source = entry.level.bytes;
 	const sourceWidth = entry.level.width;
 	const sourceHeight = entry.level.height;
@@ -159,8 +159,8 @@ function copyAtlasStaticPlacement({
 	}
 }
 
-function validateAtlasStaticSource(
-	entry: AtlasStaticCompactionEntry["entry"],
+function validateTextureAtlasSource(
+	entry: AtlasBackedCompactionEntry["entry"],
 ): void {
 	const level = entry.level;
 	if (level.width <= 0 || level.height <= 0) {

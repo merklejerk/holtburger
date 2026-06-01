@@ -51,6 +51,16 @@ describe("baked renderable planner", () => {
 		});
 
 		expect(plan.compactableDrawUnitIds).toEqual(["static-b", "structured-a"]);
+		expect(plan.submitFamilies.rgbaAtlas.compactableDrawUnitIds).toEqual([
+			"static-b",
+			"structured-a",
+		]);
+		expect(plan.submitFamilies.rgbaAtlas.materialSlots).toEqual(
+			plan.materialSlots,
+		);
+		expect(plan.submitFamilies.indexedPaletted.materialTableRecords).toEqual(
+			[],
+		);
 		expect(plan.bypasses).toEqual([]);
 		expect(
 			plan.atlasTextures[0]?.placements.map((entry) => entry.atlasEntryKey),
@@ -204,6 +214,14 @@ describe("baked renderable planner", () => {
 		expect(plan.indexedMaterialTableRecords).toEqual([
 			createIndexedMaterialTableRecord("a"),
 		]);
+		expect(plan.submitFamilies.rgbaAtlas.compactableDrawUnitIds).toEqual([]);
+		expect(plan.submitFamilies.indexedPaletted).toMatchObject({
+			kind: "indexed-paletted",
+			compactableDrawUnitIds: [],
+			materialTableRecords: [createIndexedMaterialTableRecord("a")],
+			drawUnitMaterialSlots: [],
+			drawSlices: [],
+		});
 		expect(plan.bypasses.map((bypass) => bypass.reason)).toEqual([
 			"unsupported-indexed-paletted-material",
 			"unsupported-indexed-paletted-material",

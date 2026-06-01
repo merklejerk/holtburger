@@ -55,7 +55,8 @@ export function createWebgl2TextureAtlasGenerationResource({
 	gl: WebGL2RenderingContext;
 	plan: BakedRenderablePlan;
 }): Webgl2TextureAtlasGenerationResource | null {
-	if (plan.compactableDrawUnitIds.length === 0) {
+	const rgbaAtlasFamily = plan.submitFamilies.rgbaAtlas;
+	if (rgbaAtlasFamily.compactableDrawUnitIds.length === 0) {
 		return null;
 	}
 	const entriesByKey = new Map(
@@ -117,7 +118,7 @@ export function createWebgl2TextureAtlasGenerationResource({
 		detailTextures,
 		detailPlacements,
 		preparedTextureAssetIds: plan.preparedTextureAssetIds,
-		compactableDrawUnitIds: plan.compactableDrawUnitIds,
+		compactableDrawUnitIds: rgbaAtlasFamily.compactableDrawUnitIds,
 		dispose() {
 			for (const texture of textures) {
 				texture.texture.dispose();

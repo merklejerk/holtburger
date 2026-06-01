@@ -175,6 +175,7 @@ export interface BakedRenderableDetailEntry {
 
 export interface BakedRenderablePlan {
 	key: string;
+	submitFamilies: BakedRenderableSubmitFamilies;
 	compactableDrawUnitIds: readonly string[];
 	bypasses: readonly BakedRenderableBypass[];
 	atlasEntryRecords: readonly BakedRenderableEntry[];
@@ -195,6 +196,33 @@ export interface BakedRenderablePlan {
 	preparedTextureAssetIds: readonly string[];
 }
 
+export interface BakedRenderableSubmitFamilies {
+	rgbaAtlas: BakedRgbaAtlasSubmitFamilyPlan;
+	indexedPaletted: BakedIndexedPalettedSubmitFamilyPlan;
+}
+
+export interface BakedRgbaAtlasSubmitFamilyPlan {
+	kind: "rgba-atlas";
+	compactableDrawUnitIds: readonly string[];
+	materialSlots: readonly BakedRenderableMaterialSlot[];
+	drawUnitMaterialSlots: readonly {
+		drawUnitId: string;
+		materialSlotKey: string;
+	}[];
+	drawSlices: readonly BakedRenderableDrawSlice[];
+}
+
+export interface BakedIndexedPalettedSubmitFamilyPlan {
+	kind: "indexed-paletted";
+	compactableDrawUnitIds: readonly string[];
+	materialTableRecords: readonly BakedIndexedMaterialTableRecord[];
+	drawUnitMaterialSlots: readonly {
+		drawUnitId: string;
+		materialSlotKey: string;
+	}[];
+	drawSlices: readonly BakedRenderableDrawSlice[];
+}
+
 interface EligibleBakedRenderableCandidate {
 	drawUnit: BakedRenderableCandidate;
 	eligibility: StagedWorldMaterialAtlasEligibility;
@@ -208,6 +236,13 @@ interface BakedRenderableEntryRecord {
 export function createEmptyBakedRenderablePlan(): BakedRenderablePlan {
 	return {
 		key: "baked-renderables/empty",
+		submitFamilies: createBakedRenderableSubmitFamilies({
+			compactableDrawUnitIds: [],
+			materialSlots: [],
+			indexedMaterialTableRecords: [],
+			drawUnitMaterialSlots: [],
+			drawSlices: [],
+		}),
 		compactableDrawUnitIds: [],
 		bypasses: [],
 		atlasEntryRecords: [],
@@ -345,6 +380,10 @@ export function planBakedRenderables(options: {
 	const compactableDrawUnitIds = compactable.map(
 		(candidate) => candidate.drawUnit.id,
 	);
+	const drawUnitMaterialSlots = compactable.map((candidate) => ({
+		drawUnitId: candidate.drawUnit.id,
+		materialSlotKey: describeCompactionMaterialSlotKey(candidate),
+	}));
 	const compactableEntryKeys = new Set(
 		compactable.map((candidate) => candidate.eligibility.atlasEntryKey),
 	);
@@ -366,6 +405,13 @@ export function planBakedRenderables(options: {
 			),
 		}),
 		compactableDrawUnitIds,
+		submitFamilies: createBakedRenderableSubmitFamilies({
+			compactableDrawUnitIds,
+			materialSlots,
+			indexedMaterialTableRecords,
+			drawUnitMaterialSlots,
+			drawSlices,
+		}),
 		bypasses,
 		atlasEntryRecords: atlasEntries.filter((record) =>
 			compactableEntryKeys.has(record.key),
@@ -400,10 +446,7 @@ export function planBakedRenderables(options: {
 			.filter((page) => page.placements.length > 0),
 		materialSlots,
 		indexedMaterialTableRecords,
-		drawUnitMaterialSlots: compactable.map((candidate) => ({
-			drawUnitId: candidate.drawUnit.id,
-			materialSlotKey: describeCompactionMaterialSlotKey(candidate),
-		})),
+		drawUnitMaterialSlots,
 		drawSlices,
 		staticObjectKeys: uniqueSortedStrings(
 			compactable.flatMap((candidate) => candidate.drawUnit.staticObjectKeys),
@@ -421,6 +464,40 @@ export function planBakedRenderables(options: {
 				(candidate) => candidate.eligibility.atlasEntry.preparedTextureAssetId,
 			),
 		),
+	};
+}
+
+function createBakedRenderableSubmitFamilies({
+	compactableDrawUnitIds,
+	materialSlots,
+	indexedMaterialTableRecords,
+	drawUnitMaterialSlots,
+	drawSlices,
+}: {
+	compactableDrawUnitIds: readonly string[];
+	materialSlots: readonly BakedRenderableMaterialSlot[];
+	indexedMaterialTableRecords: readonly BakedIndexedMaterialTableRecord[];
+	drawUnitMaterialSlots: readonly {
+		drawUnitId: string;
+		materialSlotKey: string;
+	}[];
+	drawSlices: readonly BakedRenderableDrawSlice[];
+}): BakedRenderableSubmitFamilies {
+	return {
+		rgbaAtlas: {
+			kind: "rgba-atlas",
+			compactableDrawUnitIds,
+			materialSlots,
+			drawUnitMaterialSlots,
+			drawSlices,
+		},
+		indexedPaletted: {
+			kind: "indexed-paletted",
+			compactableDrawUnitIds: [],
+			materialTableRecords: indexedMaterialTableRecords,
+			drawUnitMaterialSlots: [],
+			drawSlices: [],
+		},
 	};
 }
 

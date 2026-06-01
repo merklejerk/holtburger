@@ -175,7 +175,10 @@ export interface Webgl2WorldResourceStore {
 	>;
 	compactedGeometryFamilyResourceCounts: Record<string, number>;
 	compactedGeometryBatchGraph: RendererResourceGraph | null;
-	compactedGeometryBatchGraphLeasesByKey: Map<string, RendererResourceGraphLease>;
+	compactedGeometryBatchGraphLeasesByKey: Map<
+		string,
+		RendererResourceGraphLease
+	>;
 	compactionCandidateDrawUnitCount: number;
 	compactionBypassReasonCount: number;
 	compactionBypassSamples: readonly string[];
@@ -495,13 +498,17 @@ export function syncWebgl2WorldResources({
 	);
 	store.compactionCandidateDrawUnitCount =
 		store.compactionFamilyPlan.renderFamilies.rgbaTexturePage.compactableDrawUnitIds.length;
-	store.compactionBypassReasonCount = store.compactionFamilyPlan.bypasses.length;
+	store.compactionBypassReasonCount =
+		store.compactionFamilyPlan.bypasses.length;
 	store.compactionBypassSamples = summarizeDiagnosticReasons(
 		store.compactionFamilyPlan.bypasses.map((bypass) => bypass.reason),
 		8,
 	);
-	const compactionCoverageMetrics = collectCompactionCoverageMetrics(store.drawUnits);
-	store.compactionCoverageDrawUnitCounts = compactionCoverageMetrics.drawUnitCounts;
+	const compactionCoverageMetrics = collectCompactionCoverageMetrics(
+		store.drawUnits,
+	);
+	store.compactionCoverageDrawUnitCounts =
+		compactionCoverageMetrics.drawUnitCounts;
 	store.compactionCoverageMaterialBlockerCounts =
 		compactionCoverageMetrics.materialBlockerCounts;
 	store.compactionCoverageGeometryBlockerCounts =
@@ -659,12 +666,13 @@ export function destroyWebgl2WorldResources(
 	store.triangleCount = 0;
 }
 
-const DEFAULT_WEBGL2_COMPACTION_FAMILY_PLANNING_POLICY: CompactionFamilyPlanningPolicy = {
-	maxAtlasTextureSize: 4096,
-	maxAtlasTextureCount: 8,
-	baseGutterPixels: 2,
-	maxMaterialSlotsPerDraw: 128,
-};
+const DEFAULT_WEBGL2_COMPACTION_FAMILY_PLANNING_POLICY: CompactionFamilyPlanningPolicy =
+	{
+		maxAtlasTextureSize: 4096,
+		maxAtlasTextureCount: 8,
+		baseGutterPixels: 2,
+		maxMaterialSlotsPerDraw: 128,
+	};
 
 function createOrReuseWebgl2DrawUnit({
 	assetState,
@@ -954,15 +962,29 @@ function toCompactionFamilyCandidate(drawUnit: Webgl2WorldDrawUnit) {
 		kind: drawUnit.kind,
 		owningLandblockId: drawUnit.owningLandblockId,
 		sceneDomain: drawUnit.sceneDomain,
+		visibilityPartitionKey: describeCompactionVisibilityPartition(drawUnit),
 		materialKind: drawUnit.materialKind,
 		materialKey: drawUnit.materialKey,
 		detailAtlasEntry: drawUnit.detailOverlay?.atlasEntry ?? null,
-		indexedMaterialTableRecord: createIndexedPalettedFamilyMaterialTableRecord(drawUnit),
+		indexedMaterialTableRecord:
+			createIndexedPalettedFamilyMaterialTableRecord(drawUnit),
 		compactionEligibility: drawUnit.compactionEligibility,
 		triangleCount: drawUnit.triangleCount,
 		staticPartCount: drawUnit.staticPartCount,
 		staticObjectKeys: drawUnit.staticObjectKeys,
 	};
+}
+
+function describeCompactionVisibilityPartition(
+	drawUnit: Webgl2WorldDrawUnit,
+): string {
+	const bvhKey =
+		drawUnit.bvhItemKeys.length > 0
+			? [...drawUnit.bvhItemKeys].sort().join(",")
+			: drawUnit.id;
+	return [drawUnit.sceneDomain ?? "domain-none", drawUnit.kind, bvhKey].join(
+		"|",
+	);
 }
 
 function createIndexedPalettedFamilyMaterialTableRecord(

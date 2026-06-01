@@ -1566,12 +1566,75 @@ Verification:
 - `npm exec tsc -- --noEmit`
 - `npm exec vitest -- src/lib/world-display/compaction-family-planner.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-rgba-texture-page-family-submit.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts src/lib/world-display/compacted-geometry.test.ts --run`
 
-## Phase C8.6: Live Indexed Family Validation
+## Phase C8.6: Immediate Compacted Slice Containment Repair
 
-Status: Immediate next phase.
+Status: Complete.
+
+Purpose: repair the compacted draw range invariant exposed by live indexed-family validation before
+adding any more material coverage. The renderer was submitting a compacted family slice as one
+contiguous `drawElements` range, but the compacted buffer layout did not guarantee that the slice's
+draw units were physically contiguous. A visible draw unit could therefore pull unrelated geometry
+between the first and last slice member into the same draw call. For indexed materials this made
+intervening static objects sample the currently bound indexed texture/palette. For portal/interior
+views this could draw geometry outside the intended visible containment route.
+
+Tasks:
+
+- Order compacted batch geometry by draw slice so each planned slice maps to a contiguous index range.
+- Fail hard when a compacted draw unit appears in multiple slices or has no slice.
+- Fail hard if a generated compacted slice is not physically contiguous after layout.
+- Add an explicit `visibilityPartitionKey` to compaction candidates and include it in RGBA and
+  indexed family slice grouping.
+- Derive the runtime visibility partition from scene domain, draw-unit kind, and BVH item keys, so
+  distinct env cells/static visibility items cannot share one compacted family slice.
+- Add tests covering slice-ordered compacted layout, overlapping-slice rejection, and visibility
+  partition splitting for both RGBA and indexed families.
+
+Progress:
+
+- `buildCompactedGeometryBatch()` now lays out draw units in slice order rather than relying on
+  `compactableDrawUnitIds` order.
+- `compactDrawSlice()` now validates contiguity instead of silently spanning intervening draw units.
+- RGBA and indexed family planners now partition slices by visibility containment as well as material
+  resource bindings.
+- `toCompactionFamilyCandidate()` now carries a required visibility partition key from live WebGL2
+  draw-unit BVH bindings.
+
+Decisions:
+
+- Chose physical slice ordering plus visibility partitioning instead of multi-range draw slices.
+  Multi-range slices would preserve the loose packing model and make draw count harder to reason
+  about.
+- Kept the compacted geometry data material-agnostic. Visibility partitioning belongs in the
+  material-aware family plan; the geometry builder only enforces the final slice invariants.
+
+Course corrections:
+
+- The previous live validation checklist was too narrow. Indexed visual corruption and portal
+  bleed-through were not shader-only risks; they exposed a core compacted submission invariant bug.
+- Future family work must treat "one submitted compacted slice equals one exact compatible
+  visibility/resource range" as a hard requirement.
+
+Verification:
+
+- `npm exec tsc -- --noEmit`
+- `npm exec vitest -- src/lib/world-display/compacted-geometry.test.ts src/lib/world-display/compaction-family-planner.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts --run`
+- `npm exec vitest -- src/lib/world-display/compaction-family-planner.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-rgba-texture-page-family-submit.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts src/lib/world-display/compacted-geometry.test.ts --run`
+
+Cleanup targets introduced:
+
+- Diagnostics should report submitted compacted slice count per family after visibility partitioning;
+  the count is now expected to rise when it prevents over-broad route submission.
+- Consider exposing a compacted "slice containment violation" metric only if another live issue is
+  found. Do not add debug logging for successful slice paths.
+
+## Phase C8.7: Live Indexed Family Validation
+
+Status: In progress. First live validation follow-up complete.
 
 Purpose: validate the completed indexed family path against the browser debug report before expanding
-alpha material coverage.
+alpha material coverage. This validation must happen after C8.6 because earlier reports may have
+included over-broad compacted ranges rather than true indexed shader failures.
 
 Tasks:
 
@@ -1583,6 +1646,8 @@ Tasks:
   - visible retained indexed counts drop relative to the pre-C8 report;
   - `Fallbacks 0` remains true.
 - If indexed visual output is wrong, isolate it to:
+  - slice containment/visibility partitioning, which should now fail hard or show up as excessive
+    slice counts rather than silent unrelated geometry;
   - P8/Index16 unpacking;
   - palette lookup;
   - wrap behavior;
@@ -1594,6 +1659,33 @@ Exit criteria:
 
 - Live diagnostics confirm indexed compacted rendering is replacing opaque indexed draw units.
 - Any visual or diagnostic discrepancy is captured as a targeted follow-up.
+
+Progress:
+
+- Live validation after C8.6 showed portal/interior geometry containment was fixed.
+- A new artifact appeared on tree bark-like RGBA materials: repeated surfaces showed a neat packed
+  atlas pattern. This is not indexed-specific; the affected materials appear to be RGBA tree bark
+  materials.
+
+Course correction:
+
+- Disabling detail atlas mipmaps was tested and rejected. It made the artifact spread to additional
+  trees, so detail atlas page-wide mips are not the primary cause.
+- A shader gradient change was also tested and rejected as the primary fix.
+- A stale material-slot-buffer key change was tested and rejected as the primary fix.
+- The active diagnosis is that repeated RGBA base textures with detail overlays are not yet safe for
+  compacted atlas sampling. Direct draw uses the original repeated base texture plus a separate detail
+  texture. The compacted path manually wraps an atlas member and samples a detail atlas, and the live
+  tree bark artifacts show this path is not equivalent yet.
+- Repeated base-color RGBA materials with detail overlays are now explicitly retained on the direct
+  path with `repeat-detail-atlas-unsupported` until compacted sampling for that material class is
+  proven.
+
+Cleanup target introduced:
+
+- Add a targeted repeat+detail atlas sampling phase before re-enabling compaction for these materials.
+  The phase should compare direct and compacted UV sampling for tree bark-like inputs, not rely only
+  on live visual inspection.
 
 ## Cleanup Targets
 

@@ -199,7 +199,8 @@ describe("compaction family planner", () => {
 					materialKey: "indexed/material-cutout",
 					materialKind: "indexed-paletted",
 					materialBehavior: { ...OPAQUE_BEHAVIOR, alphaTest: 0.5 },
-					indexedMaterialTableRecord: createIndexedMaterialTableRecord("cutout"),
+					indexedMaterialTableRecord:
+						createIndexedMaterialTableRecord("cutout"),
 				}),
 			],
 			policy: {
@@ -214,7 +215,9 @@ describe("compaction family planner", () => {
 		expect(plan.indexedMaterialTableRecords).toEqual([
 			createIndexedMaterialTableRecord("a"),
 		]);
-		expect(plan.renderFamilies.rgbaTexturePage.compactableDrawUnitIds).toEqual([]);
+		expect(plan.renderFamilies.rgbaTexturePage.compactableDrawUnitIds).toEqual(
+			[],
+		);
 		expect(plan.renderFamilies.indexedPaletted).toMatchObject({
 			kind: "indexed-paletted",
 			compactableDrawUnitIds: ["indexed-a"],
@@ -313,9 +316,42 @@ describe("compaction family planner", () => {
 				detailAtlasEntryKey: "detail-b",
 			},
 		]);
-		expect(plan.drawSlices.map((slice) => slice.detailAtlasTextureIndex)).toEqual([
-			null,
-			0,
+		expect(
+			plan.drawSlices.map((slice) => slice.detailAtlasTextureIndex),
+		).toEqual([null, 0]);
+	});
+
+	it("retains repeated base-color materials with detail overlays on the direct path", () => {
+		const plan = planCompactionFamilies({
+			drawUnits: [
+				createCandidate({
+					id: "repeat-detail",
+					entryKey: "repeat-detail",
+					hasDetailOverlay: true,
+					detailAtlasEntry: createDetailAtlasEntry("detail-repeat"),
+					atlasEligibility: createAtlasEligibility({
+						entryKey: "repeat-detail",
+						width: 8,
+						height: 8,
+						wrapS: "repeat",
+						wrapT: "repeat",
+					}),
+				}),
+			],
+			policy: {
+				maxAtlasTextureSize: 64,
+				maxAtlasTextureCount: 1,
+				baseGutterPixels: 2,
+				maxMaterialSlotsPerDraw: 4,
+			},
+		});
+
+		expect(plan.compactableDrawUnitIds).toEqual([]);
+		expect(plan.bypasses).toMatchObject([
+			{
+				drawUnitId: "repeat-detail",
+				reason: "unsupported-compacted-material-family",
+			},
 		]);
 	});
 
@@ -437,6 +473,68 @@ describe("compaction family planner", () => {
 			drawSlices: [],
 		});
 	});
+
+	it("splits RGBA texture-page slices by visibility partition", () => {
+		const plan = planCompactionFamilies({
+			drawUnits: [
+				createCandidate({
+					id: "cell-a",
+					entryKey: "shared",
+					visibilityPartitionKey: "interior-cell/a",
+				}),
+				createCandidate({
+					id: "cell-b",
+					entryKey: "shared",
+					visibilityPartitionKey: "interior-cell/b",
+				}),
+			],
+			policy: {
+				maxAtlasTextureSize: 64,
+				maxAtlasTextureCount: 1,
+				baseGutterPixels: 2,
+				maxMaterialSlotsPerDraw: 4,
+			},
+		});
+
+		expect(plan.drawSlices.map((slice) => slice.drawUnitIds)).toEqual([
+			["cell-a"],
+			["cell-b"],
+		]);
+	});
+
+	it("splits indexed-paletted slices by visibility partition", () => {
+		const indexedRecord = createIndexedMaterialTableRecord("shared");
+		const plan = planCompactionFamilies({
+			drawUnits: [
+				createCandidate({
+					id: "indexed-a",
+					entryKey: "shared",
+					materialKind: "indexed-paletted",
+					indexedMaterialTableRecord: indexedRecord,
+					visibilityPartitionKey: "interior-cell/a",
+				}),
+				createCandidate({
+					id: "indexed-b",
+					entryKey: "shared",
+					materialKind: "indexed-paletted",
+					indexedMaterialTableRecord: indexedRecord,
+					visibilityPartitionKey: "interior-cell/b",
+				}),
+			],
+			policy: {
+				maxAtlasTextureSize: 64,
+				maxAtlasTextureCount: 1,
+				baseGutterPixels: 2,
+				maxMaterialSlotsPerDraw: 4,
+			},
+		});
+
+		expect(
+			plan.renderFamilies.indexedPaletted.drawSlices.map(
+				(slice) => slice.drawUnitIds,
+			),
+		).toEqual([["indexed-a"], ["indexed-b"]]);
+	});
 });
 
 const OPAQUE_BEHAVIOR: LegacyMaterialBehaviorDto = {
@@ -487,6 +585,8 @@ function createCandidate(
 				? 0x0102ffff
 				: options.owningLandblockId,
 		sceneDomain: options.sceneDomain ?? "exterior",
+		visibilityPartitionKey:
+			options.visibilityPartitionKey ?? "visibility/static",
 		materialKind: options.materialKind ?? "direct-texture",
 		materialKey: options.materialKey ?? `material-${entryKey}`,
 		detailAtlasEntry,
@@ -667,8 +767,7 @@ function createAtlasEligibility(options: {
 		atlasEntryKey: options.entryKey,
 		renderStateKey:
 			"shader=atlas-color;blend=opaque;depth=write;alphaTest=0;side=front",
-		samplingKey:
-			`wrap=${wrapS}/${wrapT};filter=linear/linear/linear;color=linear;mips=atlas`,
+		samplingKey: `wrap=${wrapS}/${wrapT};filter=linear/linear/linear;color=linear;mips=atlas`,
 		samplingPolicy: { wrapS, wrapT },
 		atlasEntry: {
 			renderSurfaceId: 0x06000001,

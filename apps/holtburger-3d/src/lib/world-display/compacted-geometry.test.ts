@@ -77,6 +77,57 @@ describe("compacted geometry builder", () => {
 		]);
 	});
 
+	it("orders compacted geometry by draw slice so each slice is contiguous", () => {
+		const plan: CompactedGeometryPlan<TestCompactedGeometryDrawSlice> = {
+			...createPlan(),
+			compactableDrawUnitIds: ["draw-b", "draw-a"],
+		};
+
+		const geometry = buildCompactedGeometryBatch({
+			plan,
+			drawUnits: [
+				createDrawUnit("draw-a", "material-slot-a", 10),
+				createDrawUnit("draw-b", "material-slot-b", 20),
+			],
+			batchOrigin: { x: 0, y: 0, z: 0 },
+		});
+
+		expect(geometry?.drawRanges.map((range) => range.drawUnitId)).toEqual([
+			"draw-a",
+			"draw-b",
+		]);
+		expect(geometry?.drawSlices.map((slice) => slice.firstIndex)).toEqual([
+			0, 3,
+		]);
+	});
+
+	it("rejects draw units assigned to multiple compacted slices", () => {
+		const basePlan = createPlan();
+		const plan: CompactedGeometryPlan<TestCompactedGeometryDrawSlice> = {
+			...basePlan,
+			drawSlices: [
+				...basePlan.drawSlices,
+				{
+					key: "slice-overlap",
+					renderStateKey: "opaque",
+					materialSlotKeys: ["material-slot-a"],
+					drawUnitIds: ["draw-a"],
+				},
+			],
+		};
+
+		expect(() =>
+			buildCompactedGeometryBatch({
+				plan,
+				drawUnits: [
+					createDrawUnit("draw-a", "material-slot-a", 10),
+					createDrawUnit("draw-b", "material-slot-b", 20),
+				],
+				batchOrigin: { x: 0, y: 0, z: 0 },
+			}),
+		).toThrow(/multiple draw slices/);
+	});
+
 	it("keeps the resource key stable for a common re-anchor shift", () => {
 		const basePlan = createPlan();
 		const firstSlice = basePlan.drawSlices[0];

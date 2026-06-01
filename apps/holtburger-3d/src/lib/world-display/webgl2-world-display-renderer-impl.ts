@@ -33,7 +33,7 @@ import {
 import {
 	WEBGL2_RGBA_TEXTURE_PAGE_MAX_MATERIAL_SLOTS,
 	type Webgl2RgbaTexturePageFamilyWorldProgram,
-} from "./webgl2-baked-submit";
+} from "./webgl2-rgba-texture-page-family-submit";
 import {
 	createWebgl2PortalCompositeTargetSet,
 	createWebgl2SceneDomainTargetSet,
@@ -595,7 +595,7 @@ interface Webgl2RenderResources {
 	indexedP8WorldProgram: Webgl2IndexedP8WorldProgram;
 	indexedP16WorldProgram: Webgl2IndexedP16WorldProgram;
 	terrainBlendWorldProgram: Webgl2TerrainBlendWorldProgram;
-	bakedGeometryWorldProgram: Webgl2RgbaTexturePageFamilyWorldProgram;
+	rgbaTexturePageFamilyWorldProgram: Webgl2RgbaTexturePageFamilyWorldProgram;
 	sceneDomainCopyProgram: Webgl2ProgramResource<
 		never,
 		"uColorTexture" | "uDepthTexture"
@@ -925,8 +925,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 							terrainBlendProgram: currentResources.terrainBlendWorldProgram,
 							indexedP8Program: currentResources.indexedP8WorldProgram,
 							indexedP16Program: currentResources.indexedP16WorldProgram,
-							bakedGeometryProgram: currentResources.bakedGeometryWorldProgram,
-							bakedGeometryResources: {
+							rgbaTexturePageFamilyProgram: currentResources.rgbaTexturePageFamilyWorldProgram,
+							rgbaTexturePageFamilyResources: {
 								batches: [
 									...currentResources.worldStore.compactedGeometryBatches.values(),
 								],
@@ -1059,7 +1059,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 					target: targets.exterior,
 					drawUnits: sceneDomainDrawUnits.exterior,
 					frame,
-					bakedSubmitRoute: "scene-domain-exterior",
+					rgbaTexturePageFamilySubmitRoute: "scene-domain-exterior",
 					terrainBackfaceCulling: baseScene === "interior",
 				}),
 		);
@@ -1070,7 +1070,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 					target: targets.interior,
 					drawUnits: sceneDomainDrawUnits.interior,
 					frame,
-					bakedSubmitRoute: "scene-domain-interior",
+					rgbaTexturePageFamilySubmitRoute: "scene-domain-interior",
 					terrainBackfaceCulling: false,
 				}),
 		);
@@ -1196,13 +1196,13 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		target,
 		drawUnits,
 		frame,
-		bakedSubmitRoute,
+		rgbaTexturePageFamilySubmitRoute,
 		terrainBackfaceCulling,
 	}: {
 		target: Webgl2SceneDomainTarget;
 		drawUnits: readonly Webgl2WorldDrawUnit[];
 		frame: ReturnType<typeof buildStagedWorldFrame>;
-		bakedSubmitRoute: "scene-domain-exterior" | "scene-domain-interior";
+		rgbaTexturePageFamilySubmitRoute: "scene-domain-exterior" | "scene-domain-interior";
 		terrainBackfaceCulling: boolean;
 	}): Webgl2WorldSubmitMetrics {
 		if (!resources) {
@@ -1234,8 +1234,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			terrainBlendProgram: resources.terrainBlendWorldProgram,
 			indexedP8Program: resources.indexedP8WorldProgram,
 			indexedP16Program: resources.indexedP16WorldProgram,
-			bakedGeometryProgram: resources.bakedGeometryWorldProgram,
-			bakedGeometryResources: {
+			rgbaTexturePageFamilyProgram: resources.rgbaTexturePageFamilyWorldProgram,
+			rgbaTexturePageFamilyResources: {
 				batches: [...resources.worldStore.compactedGeometryBatches.values()],
 				rgbaTexturePageFamilies: [
 					...resources.worldStore.compactedGeometryFamilyResources.values(),
@@ -1244,7 +1244,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			},
 			viewProjectionMatrix: frame.viewProjectionMatrix,
 			drawUnits,
-			bakedSubmitRoute,
+			rgbaTexturePageFamilySubmitRoute,
 			terrainBackfaceCulling,
 		});
 	}
@@ -1724,7 +1724,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		resources.indexedP8WorldProgram.dispose();
 		resources.indexedP16WorldProgram.dispose();
 		resources.terrainBlendWorldProgram.dispose();
-		resources.bakedGeometryWorldProgram.dispose();
+		resources.rgbaTexturePageFamilyWorldProgram.dispose();
 		resources.sceneDomainCopyProgram.dispose();
 		resources.sceneDomainCopyVertexArray.dispose();
 		resources.sceneDomainTargets?.dispose();
@@ -1981,70 +1981,70 @@ function mergeSceneDomainSubmitMetrics({
 			exteriorMetrics.visibleDrawUnitCountsByMaterialKind,
 			interiorMetrics.visibleDrawUnitCountsByMaterialKind,
 		),
-		visibleRetainedDirectDrawUnitCountsByBakeMaterialFamily:
+		visibleRetainedDirectDrawUnitCountsByCompactionFamily:
 			mergeMaterialKindCounts(
-				exteriorMetrics.visibleRetainedDirectDrawUnitCountsByBakeMaterialFamily,
-				interiorMetrics.visibleRetainedDirectDrawUnitCountsByBakeMaterialFamily,
+				exteriorMetrics.visibleRetainedDirectDrawUnitCountsByCompactionFamily,
+				interiorMetrics.visibleRetainedDirectDrawUnitCountsByCompactionFamily,
 			),
-		bakedShaderDrawCallCount:
-			exteriorMetrics.bakedShaderDrawCallCount +
-			interiorMetrics.bakedShaderDrawCallCount,
-		bakedSubmittedBatchCount:
-			exteriorMetrics.bakedSubmittedBatchCount +
-			interiorMetrics.bakedSubmittedBatchCount,
-		bakedSubmittedDrawSliceCount:
-			exteriorMetrics.bakedSubmittedDrawSliceCount +
-			interiorMetrics.bakedSubmittedDrawSliceCount,
-		bakedSubmittedSliceRepresentedDrawUnitCount:
-			exteriorMetrics.bakedSubmittedSliceRepresentedDrawUnitCount +
-			interiorMetrics.bakedSubmittedSliceRepresentedDrawUnitCount,
-		bakedSubmittedTriangleCount:
-			exteriorMetrics.bakedSubmittedTriangleCount +
-			interiorMetrics.bakedSubmittedTriangleCount,
-		bakedReplacedDrawUnitCount:
-			exteriorMetrics.bakedReplacedDrawUnitCount +
-			interiorMetrics.bakedReplacedDrawUnitCount,
-		bakedReplacedDrawUnitTriangleCount:
-			exteriorMetrics.bakedReplacedDrawUnitTriangleCount +
-			interiorMetrics.bakedReplacedDrawUnitTriangleCount,
-		bakedConservativeOverdrawTriangleCount:
-			exteriorMetrics.bakedConservativeOverdrawTriangleCount +
-			interiorMetrics.bakedConservativeOverdrawTriangleCount,
-		bakedConservativeOverdrawRatio: calculateCombinedRatio({
+		rgbaTexturePageFamilyShaderDrawCallCount:
+			exteriorMetrics.rgbaTexturePageFamilyShaderDrawCallCount +
+			interiorMetrics.rgbaTexturePageFamilyShaderDrawCallCount,
+		rgbaTexturePageFamilySubmittedBatchCount:
+			exteriorMetrics.rgbaTexturePageFamilySubmittedBatchCount +
+			interiorMetrics.rgbaTexturePageFamilySubmittedBatchCount,
+		rgbaTexturePageFamilySubmittedDrawSliceCount:
+			exteriorMetrics.rgbaTexturePageFamilySubmittedDrawSliceCount +
+			interiorMetrics.rgbaTexturePageFamilySubmittedDrawSliceCount,
+		rgbaTexturePageFamilySubmittedSliceRepresentedDrawUnitCount:
+			exteriorMetrics.rgbaTexturePageFamilySubmittedSliceRepresentedDrawUnitCount +
+			interiorMetrics.rgbaTexturePageFamilySubmittedSliceRepresentedDrawUnitCount,
+		rgbaTexturePageFamilySubmittedTriangleCount:
+			exteriorMetrics.rgbaTexturePageFamilySubmittedTriangleCount +
+			interiorMetrics.rgbaTexturePageFamilySubmittedTriangleCount,
+		rgbaTexturePageFamilyReplacedDrawUnitCount:
+			exteriorMetrics.rgbaTexturePageFamilyReplacedDrawUnitCount +
+			interiorMetrics.rgbaTexturePageFamilyReplacedDrawUnitCount,
+		rgbaTexturePageFamilyReplacedDrawUnitTriangleCount:
+			exteriorMetrics.rgbaTexturePageFamilyReplacedDrawUnitTriangleCount +
+			interiorMetrics.rgbaTexturePageFamilyReplacedDrawUnitTriangleCount,
+		rgbaTexturePageFamilyConservativeOverdrawTriangleCount:
+			exteriorMetrics.rgbaTexturePageFamilyConservativeOverdrawTriangleCount +
+			interiorMetrics.rgbaTexturePageFamilyConservativeOverdrawTriangleCount,
+		rgbaTexturePageFamilyConservativeOverdrawRatio: calculateCombinedRatio({
 			numerator:
-				exteriorMetrics.bakedConservativeOverdrawTriangleCount +
-				interiorMetrics.bakedConservativeOverdrawTriangleCount,
+				exteriorMetrics.rgbaTexturePageFamilyConservativeOverdrawTriangleCount +
+				interiorMetrics.rgbaTexturePageFamilyConservativeOverdrawTriangleCount,
 			denominator:
-				exteriorMetrics.bakedSubmittedTriangleCount +
-				interiorMetrics.bakedSubmittedTriangleCount,
+				exteriorMetrics.rgbaTexturePageFamilySubmittedTriangleCount +
+				interiorMetrics.rgbaTexturePageFamilySubmittedTriangleCount,
 		}),
-		bakedRetainedDirectDrawUnitCount:
-			exteriorMetrics.bakedRetainedDirectDrawUnitCount +
-			interiorMetrics.bakedRetainedDirectDrawUnitCount,
-		bakedOriginalDrawCallEstimateCount:
-			exteriorMetrics.bakedOriginalDrawCallEstimateCount +
-			interiorMetrics.bakedOriginalDrawCallEstimateCount,
-		bakedSubmittedDrawCallEstimateCount:
-			exteriorMetrics.bakedSubmittedDrawCallEstimateCount +
-			interiorMetrics.bakedSubmittedDrawCallEstimateCount,
-		bakedDrawCallSavingsCount:
-			exteriorMetrics.bakedDrawCallSavingsCount +
-			interiorMetrics.bakedDrawCallSavingsCount,
-		bakedSubmitNoVisibleRouteCount:
-			exteriorMetrics.bakedSubmitNoVisibleRouteCount +
-			interiorMetrics.bakedSubmitNoVisibleRouteCount,
-		bakedSubmitNoVisibleExteriorRouteCount:
-			exteriorMetrics.bakedSubmitNoVisibleExteriorRouteCount +
-			interiorMetrics.bakedSubmitNoVisibleExteriorRouteCount,
-		bakedSubmitNoVisibleInteriorRouteCount:
-			exteriorMetrics.bakedSubmitNoVisibleInteriorRouteCount +
-			interiorMetrics.bakedSubmitNoVisibleInteriorRouteCount,
-		bakedSubmitNoVisibleOtherRouteCount:
-			exteriorMetrics.bakedSubmitNoVisibleOtherRouteCount +
-			interiorMetrics.bakedSubmitNoVisibleOtherRouteCount,
-		bakedSubmitFallbackSamples: [
-			...exteriorMetrics.bakedSubmitFallbackSamples,
-			...interiorMetrics.bakedSubmitFallbackSamples,
+		rgbaTexturePageFamilyRetainedDirectDrawUnitCount:
+			exteriorMetrics.rgbaTexturePageFamilyRetainedDirectDrawUnitCount +
+			interiorMetrics.rgbaTexturePageFamilyRetainedDirectDrawUnitCount,
+		rgbaTexturePageFamilyOriginalDrawCallEstimateCount:
+			exteriorMetrics.rgbaTexturePageFamilyOriginalDrawCallEstimateCount +
+			interiorMetrics.rgbaTexturePageFamilyOriginalDrawCallEstimateCount,
+		rgbaTexturePageFamilySubmittedDrawCallEstimateCount:
+			exteriorMetrics.rgbaTexturePageFamilySubmittedDrawCallEstimateCount +
+			interiorMetrics.rgbaTexturePageFamilySubmittedDrawCallEstimateCount,
+		rgbaTexturePageFamilyDrawCallSavingsCount:
+			exteriorMetrics.rgbaTexturePageFamilyDrawCallSavingsCount +
+			interiorMetrics.rgbaTexturePageFamilyDrawCallSavingsCount,
+		rgbaTexturePageFamilyNoVisibleRouteCount:
+			exteriorMetrics.rgbaTexturePageFamilyNoVisibleRouteCount +
+			interiorMetrics.rgbaTexturePageFamilyNoVisibleRouteCount,
+		rgbaTexturePageFamilyNoVisibleExteriorRouteCount:
+			exteriorMetrics.rgbaTexturePageFamilyNoVisibleExteriorRouteCount +
+			interiorMetrics.rgbaTexturePageFamilyNoVisibleExteriorRouteCount,
+		rgbaTexturePageFamilyNoVisibleInteriorRouteCount:
+			exteriorMetrics.rgbaTexturePageFamilyNoVisibleInteriorRouteCount +
+			interiorMetrics.rgbaTexturePageFamilyNoVisibleInteriorRouteCount,
+		rgbaTexturePageFamilyNoVisibleOtherRouteCount:
+			exteriorMetrics.rgbaTexturePageFamilyNoVisibleOtherRouteCount +
+			interiorMetrics.rgbaTexturePageFamilyNoVisibleOtherRouteCount,
+		rgbaTexturePageFamilyFallbackSamples: [
+			...exteriorMetrics.rgbaTexturePageFamilyFallbackSamples,
+			...interiorMetrics.rgbaTexturePageFamilyFallbackSamples,
 		].slice(0, 8),
 		directTexturePageDrawCount:
 			exteriorMetrics.directTexturePageDrawCount +
@@ -2157,7 +2157,7 @@ function createTriangleResources(
 		indexedP8WorldProgram: createIndexedP8WorldProgram(gl),
 		indexedP16WorldProgram: createIndexedP16WorldProgram(gl),
 		terrainBlendWorldProgram: createTerrainBlendWorldProgram(gl),
-		bakedGeometryWorldProgram: createBakedGeometryWorldProgram(gl),
+		rgbaTexturePageFamilyWorldProgram: createRgbaTexturePageFamilyWorldProgram(gl),
 		sceneDomainCopyProgram: createSceneDomainCopyProgram(gl),
 		vertexBuffer,
 		vertexArray,
@@ -2353,11 +2353,11 @@ function createTerrainBlendWorldProgram(
 	});
 }
 
-function createBakedGeometryWorldProgram(
+function createRgbaTexturePageFamilyWorldProgram(
 	gl: WebGL2RenderingContext,
 ): Webgl2RgbaTexturePageFamilyWorldProgram {
 	return createWebgl2Program(gl, {
-		label: "webgl2 baked world",
+		label: "webgl2 rgba texture-page family world",
 		vertexSource: ATLAS_STATIC_WORLD_VERTEX_SHADER,
 		fragmentSource: ATLAS_STATIC_WORLD_FRAGMENT_SHADER,
 		attributes: ["position", "uv", "materialSlot"],

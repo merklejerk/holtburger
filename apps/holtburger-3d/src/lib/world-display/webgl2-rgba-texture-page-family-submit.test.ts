@@ -5,7 +5,7 @@ import {
 	planWebgl2RgbaTexturePageFamilyReplacement,
 	submitWebgl2RgbaTexturePageFamilyBatches,
 	type Webgl2RgbaTexturePageFamilyWorldProgram,
-} from "./webgl2-baked-submit";
+} from "./webgl2-rgba-texture-page-family-submit";
 import type {
 	Webgl2CompactedGeometryBatchResource,
 	Webgl2RgbaTexturePageFamilyResource,
@@ -31,7 +31,7 @@ describe("planWebgl2RgbaTexturePageFamilyReplacement", () => {
 		]);
 	});
 
-	it("selects visible baked draw units when resources are ready", () => {
+	it("selects visible RGBA family draw units when resources are ready", () => {
 		const plan = planWebgl2RgbaTexturePageFamilyReplacement({
 			visibleDrawUnitIds: ["draw-a", "staged-only"],
 			resources: {

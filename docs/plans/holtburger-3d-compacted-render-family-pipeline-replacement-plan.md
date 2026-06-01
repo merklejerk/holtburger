@@ -1156,7 +1156,7 @@ Exit criteria:
 
 ## Phase C7: Old Pipeline Cleanup and Dead Pattern Removal
 
-Status: Planned.
+Status: In progress. First cleanup pass complete; planner-shape cleanup remains before C8.
 
 Purpose: make sure the replacement architecture is actually a replacement. By this point direct family
 adapters, material-agnostic compacted geometry, family resource storage, and family-aware replacement
@@ -1189,6 +1189,94 @@ Exit criteria:
   and deletion task.
 - The next phase can implement indexed compacted rendering by adding an indexed family pipeline over
   the new model, not by touching old baked resource maps.
+
+Progress:
+
+- Renamed the RGBA compacted submit module from `webgl2-baked-submit.ts` to
+  `webgl2-rgba-texture-page-family-submit.ts` without a reexport shim.
+- Renamed the RGBA submit test module to match the new module name.
+- Renamed world-submit parameters, routes, helper functions, program fields, and debug contract fields
+  that described rendered RGBA family submissions:
+  - `bakedGeometryProgram` -> `rgbaTexturePageFamilyProgram`;
+  - `bakedGeometryResources` -> `rgbaTexturePageFamilyResources`;
+  - `bakedSubmitRoute` -> `rgbaTexturePageFamilySubmitRoute`;
+  - `bakedGeometryWorldProgram` -> `rgbaTexturePageFamilyWorldProgram`;
+  - `baked*Submitted/Replaced/Overdraw/NoVisible/Fallback*` submit metrics ->
+    `rgbaTexturePageFamily*` submit metrics.
+- Renamed `visibleRetainedDirectDrawUnitCountsByBakeMaterialFamily` to
+  `visibleRetainedDirectDrawUnitCountsByCompactionFamily`.
+- Renamed compacted resource graph store fields from `bakedGeometryBatchGraph*` to
+  `compactedGeometryBatchGraph*`.
+- Updated browser diagnostics and material type counts to consume the renamed RGBA family submit
+  metrics.
+
+Decisions:
+
+- Keep the planner-facing `baked*` names for this pass. They still describe the old
+  `BakedRenderablePlan` shape and `submitFamilies` source-of-truth problem, so renaming only their
+  output fields would hide the debt instead of deleting it.
+- Keep the RGBA family submit path in place as the current rendered compacted family. The cleanup
+  removed old naming and old module paths, not the working replacement behavior.
+- Do not add compatibility exports from the old `webgl2-baked-submit.ts` path. Imports must move to
+  the new family module.
+
+Course corrections:
+
+- C7 is too broad to finish safely as one phase without turning into another thousand-line rename.
+  Split the remaining planner-shape cleanup into C7.5 so C8 starts from a clearer boundary.
+- The next work should attack `BakedRenderablePlan` and `submitFamilies` directly, not continue
+  renaming submit-side leaf fields.
+
+Discovered cleanup targets:
+
+- `baked-renderable-planner.ts` still owns the material-aware compaction plan and blocker vocabulary.
+- `BakedRenderablePlan.submitFamilies` is still the authoritative source for RGBA and indexed family
+  resource creation.
+- `webgl2-texture-atlas-generation.ts` still consumes `BakedRenderablePlan` directly for RGBA atlas
+  generation.
+- `webgl2-world-resources.ts` still stores planner diagnostics as `bakedCandidate*`,
+  `bakedBypass*`, and `bakedCoverage*`.
+- Browser diagnostics still surface planner debt through `bakedCoverage*` debug fields.
+
+Legacy shims:
+
+- None added. The old `webgl2-baked-submit.ts` import path was removed instead of preserved.
+
+Validation:
+
+- `npm exec tsc -- --noEmit`
+- `npm exec vitest -- src/lib/world-display/webgl2-rgba-texture-page-family-submit.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/compacted-geometry.test.ts --run`
+
+## Phase C7.5: Replace BakedRenderablePlan With a Compaction Family Plan
+
+Status: Planned.
+
+Purpose: finish the old-pipeline cleanup before indexed compacted rendering. The rendered RGBA family
+path and compacted resource graph now use the replacement terminology, but the planner still exposes
+`BakedRenderablePlan` and `submitFamilies`. Indexed rendering should not be implemented against that
+old shape.
+
+Tasks:
+
+- Rename `baked-renderable-planner.ts` to a compaction/family planner module without a reexport shim.
+- Replace `BakedRenderablePlan` with a material-aware compaction plan name.
+- Replace `submitFamilies` with an authoritative render-family plan shape that can feed both RGBA
+  texture-page and indexed-paletted family resources.
+- Rename blocker names from `missing-baked-*` to `missing-compacted-family-*` or a shorter typed
+  family blocker vocabulary.
+- Rename store/debug fields that still use `bakedCandidate*`, `bakedBypass*`, and `bakedCoverage*`
+  when they describe compaction planning rather than rendered RGBA submissions.
+- Move RGBA atlas-generation consumers off root `BakedRenderablePlan` naming and onto the RGBA
+  family subplan.
+- Update tests to assert the new plan shape and remove assertions against `submitFamilies`.
+
+Exit criteria:
+
+- No production module imports `BakedRenderablePlan`.
+- No production code reads `submitFamilies`.
+- Planner diagnostics use compaction/family terminology.
+- C8 can add indexed family rendering by adding an indexed family pipeline, not by extending a
+  baked-named planner compatibility shape.
 
 ## Phase C8: Reintroduce Indexed-Paletted Rendering Through the New Boundary
 
@@ -1236,10 +1324,8 @@ Exit criteria:
   pipeline adapters.
 - Move direct texture-page mutation in `resolveWebgl2DrawUnitTexturePageBindings()` into an explicit
   family/page-resolution step.
-- Delete `bakedIndexedGeometryBatches`.
 - Delete root RGBA atlas compatibility fields from `BakedRenderablePlan`.
 - Rename `BakedRenderablePlan` if it remains; "baked" is now too overloaded.
-- Rename `Webgl2BakedGeometryBatchResource` to a compacted geometry resource name.
 - Replace `submitFamilies` with `renderFamilyPipelines` or a shorter local equivalent.
 - Rename `BakedRenderablePolicy` / `DEFAULT_WEBGL2_BAKED_RENDERABLE_POLICY` to compacted/family
   planning policy names after root RGBA fields are gone.

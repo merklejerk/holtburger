@@ -174,8 +174,8 @@ export interface Webgl2WorldResourceStore {
 		Webgl2CompactedGeometryFamilyResource
 	>;
 	compactedGeometryFamilyResourceCounts: Record<string, number>;
-	bakedGeometryBatchGraph: RendererResourceGraph | null;
-	bakedGeometryBatchGraphLeasesByKey: Map<string, RendererResourceGraphLease>;
+	compactedGeometryBatchGraph: RendererResourceGraph | null;
+	compactedGeometryBatchGraphLeasesByKey: Map<string, RendererResourceGraphLease>;
 	bakedCandidateDrawUnitCount: number;
 	bakedBypassReasonCount: number;
 	bakedBypassSamples: readonly string[];
@@ -293,8 +293,8 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		compactedGeometryBatches: new Map(),
 		compactedGeometryFamilyResources: new Map(),
 		compactedGeometryFamilyResourceCounts: {},
-		bakedGeometryBatchGraph: null,
-		bakedGeometryBatchGraphLeasesByKey: new Map(),
+		compactedGeometryBatchGraph: null,
+		compactedGeometryBatchGraphLeasesByKey: new Map(),
 		bakedCandidateDrawUnitCount: 0,
 		bakedBypassReasonCount: 0,
 		bakedBypassSamples: [],
@@ -582,7 +582,7 @@ export function destroyWebgl2WorldResources(
 		}
 	}
 	releaseWebgl2TextureAtlasGenerationGraphLease(store);
-	releaseWebgl2BakedGeometryBatchGraphLeases(store);
+	releaseWebgl2CompactedGeometryBatchGraphLeases(store);
 	for (const drawUnit of store.drawUnits) {
 		destroyWebgl2DrawUnit(drawUnit);
 	}
@@ -592,8 +592,8 @@ export function destroyWebgl2WorldResources(
 	store.graphSignaturesByDrawUnitId.clear();
 	store.textureAtlasGenerationGraph = null;
 	store.textureAtlasGenerationGraphLease = null;
-	store.bakedGeometryBatchGraph = null;
-	store.bakedGeometryBatchGraphLeasesByKey.clear();
+	store.compactedGeometryBatchGraph = null;
+	store.compactedGeometryBatchGraphLeasesByKey.clear();
 	store.boundGraph = null;
 	store.terrainDrawUnitCount = 0;
 	store.structuredInteriorDrawUnitCount = 0;
@@ -2223,10 +2223,10 @@ function syncWebgl2CompactedGeometryResources({
 	rendererResourceGraph?: RendererResourceGraph;
 }): void {
 	if (
-		store.bakedGeometryBatchGraph &&
-		store.bakedGeometryBatchGraph !== rendererResourceGraph
+		store.compactedGeometryBatchGraph &&
+		store.compactedGeometryBatchGraph !== rendererResourceGraph
 	) {
-		releaseWebgl2BakedGeometryBatchGraphLeases(store);
+		releaseWebgl2CompactedGeometryBatchGraphLeases(store);
 	}
 	store.compactedResourceFallbackSamples = [];
 	const retainedGeometryBatchKeys = new Set<string>();
@@ -2337,7 +2337,7 @@ function syncWebgl2CompactedGeometryResources({
 		if (!retainedGeometryBatchKeys.has(batchKey)) {
 			batch.dispose();
 			store.compactedGeometryBatches.delete(batchKey);
-			releaseWebgl2BakedGeometryBatchGraphLease(
+			releaseWebgl2CompactedGeometryBatchGraphLease(
 				store,
 				staticBatchGraphNodeKey(batchKey),
 			);
@@ -2377,13 +2377,13 @@ function syncWebgl2CompactedGeometryResources({
 	store.compactedGeometryBatchOriginCount = store.compactedGeometryBatches.size;
 	store.compactedGeometryTransformTableEntryCount = 0;
 	if (!rendererResourceGraph || store.compactedGeometryBatches.size === 0) {
-		releaseWebgl2BakedGeometryBatchGraphLeases(store);
+		releaseWebgl2CompactedGeometryBatchGraphLeases(store);
 		return;
 	}
-	store.bakedGeometryBatchGraph = rendererResourceGraph;
+	store.compactedGeometryBatchGraph = rendererResourceGraph;
 	for (const batch of store.compactedGeometryBatches.values()) {
 		const batchNodeKey = staticBatchGraphNodeKey(batch.key);
-		if (store.bakedGeometryBatchGraphLeasesByKey.has(batchNodeKey)) {
+		if (store.compactedGeometryBatchGraphLeasesByKey.has(batchNodeKey)) {
 			continue;
 		}
 		upsertWebgl2BakedGeometryBatchGraph({
@@ -2394,7 +2394,7 @@ function syncWebgl2CompactedGeometryResources({
 			].filter((resource) => resource.geometryBatchKey === batch.key),
 			atlasGenerationKey: store.textureAtlasGeneration?.key ?? null,
 		});
-		store.bakedGeometryBatchGraphLeasesByKey.set(
+		store.compactedGeometryBatchGraphLeasesByKey.set(
 			batchNodeKey,
 			rendererResourceGraph.leaseNode(
 				batchNodeKey,
@@ -2935,34 +2935,34 @@ function disposeWebgl2BakedGeometryBatch(
 	store.compactedGeometryDrawSliceCount = 0;
 	store.compactedGeometryBatchOriginCount = 0;
 	store.compactedGeometryTransformTableEntryCount = 0;
-	releaseWebgl2BakedGeometryBatchGraphLeases(store);
+	releaseWebgl2CompactedGeometryBatchGraphLeases(store);
 }
 
-function releaseWebgl2BakedGeometryBatchGraphLease(
+function releaseWebgl2CompactedGeometryBatchGraphLease(
 	store: Webgl2WorldResourceStore,
 	batchNodeKey: string,
 ): void {
-	const lease = store.bakedGeometryBatchGraphLeasesByKey.get(batchNodeKey);
+	const lease = store.compactedGeometryBatchGraphLeasesByKey.get(batchNodeKey);
 	if (!lease) {
 		return;
 	}
-	if (!store.bakedGeometryBatchGraph) {
+	if (!store.compactedGeometryBatchGraph) {
 		throw new Error("Compacted geometry batch graph lease has no bound graph.");
 	}
-	store.bakedGeometryBatchGraph.releaseLease(lease);
-	store.bakedGeometryBatchGraphLeasesByKey.delete(batchNodeKey);
-	if (store.bakedGeometryBatchGraphLeasesByKey.size === 0) {
-		store.bakedGeometryBatchGraph = null;
+	store.compactedGeometryBatchGraph.releaseLease(lease);
+	store.compactedGeometryBatchGraphLeasesByKey.delete(batchNodeKey);
+	if (store.compactedGeometryBatchGraphLeasesByKey.size === 0) {
+		store.compactedGeometryBatchGraph = null;
 	}
 }
 
-function releaseWebgl2BakedGeometryBatchGraphLeases(
+function releaseWebgl2CompactedGeometryBatchGraphLeases(
 	store: Webgl2WorldResourceStore,
 ): void {
 	for (const batchNodeKey of [
-		...store.bakedGeometryBatchGraphLeasesByKey.keys(),
+		...store.compactedGeometryBatchGraphLeasesByKey.keys(),
 	]) {
-		releaseWebgl2BakedGeometryBatchGraphLease(store, batchNodeKey);
+		releaseWebgl2CompactedGeometryBatchGraphLease(store, batchNodeKey);
 	}
 }
 

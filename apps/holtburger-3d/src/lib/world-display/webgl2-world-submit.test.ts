@@ -21,7 +21,7 @@ import type {
 	Webgl2RgbaTexturePageFamilyResource,
 } from "./webgl2-compacted-geometry-resources";
 import type { Webgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
-import type { Webgl2RgbaTexturePageFamilyWorldProgram } from "./webgl2-baked-submit";
+import type { Webgl2RgbaTexturePageFamilyWorldProgram } from "./webgl2-rgba-texture-page-family-submit";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
 import {
 	Webgl2StateCache,
@@ -336,7 +336,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
-			bakedGeometryResources: {
+			rgbaTexturePageFamilyResources: {
 				batches: [],
 				rgbaTexturePageFamilies: [],
 				generation: createTextureAtlasGeneration({
@@ -361,7 +361,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		expect(gl.uniform2fValues).toContainEqual([4, 4]);
 	});
 
-	it("keeps baked replacement ahead of staged atlas routing", () => {
+	it("keeps RGBA family replacement ahead of staged atlas routing", () => {
 		const gl = new CapturingSubmitGl();
 		const stateCache = new Webgl2StateCache(gl);
 		const drawUnitsById = new Map<string, Webgl2WorldDrawUnit>([
@@ -384,17 +384,17 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
-			bakedGeometryProgram: createBakedGeometryProgram(),
-			bakedGeometryResources: {
-				batches: [createBakedGeometryBatch(["atlas"])],
-				rgbaTexturePageFamilies: [createBakedGeometryFamily(["atlas"])],
+			rgbaTexturePageFamilyProgram: createRgbaTexturePageFamilyProgram(),
+			rgbaTexturePageFamilyResources: {
+				batches: [createRgbaTexturePageFamilyBatch(["atlas"])],
+				rgbaTexturePageFamilies: [createRgbaTexturePageFamilyResource(["atlas"])],
 				generation: createTextureAtlasGeneration({ atlasEntryKey: "entry/a" }),
 			},
 			drawUnitsById,
 			frame: createFrame(["atlas"]),
 		});
 
-		expect(metrics.bakedReplacedDrawUnitCount).toBe(1);
+		expect(metrics.rgbaTexturePageFamilyReplacedDrawUnitCount).toBe(1);
 		expect(metrics.directPackedTexturePageDrawCount).toBe(0);
 		expect(metrics.directSingleEntryTexturePageDrawCount).toBe(0);
 	});
@@ -467,7 +467,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
-			bakedGeometryResources: {
+			rgbaTexturePageFamilyResources: {
 				batches: [],
 				rgbaTexturePageFamilies: [],
 				generation: createTextureAtlasGeneration({ atlasEntryKey: "entry/a" }),
@@ -483,7 +483,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		expect(gl.uniform2fValues).toContainEqual([1, 1]);
 	});
 
-	it("replaces baked static draw units through the default atlas submit path", () => {
+	it("replaces RGBA texture-page family draw units through the RGBA family submit path", () => {
 		const gl = new CapturingSubmitGl();
 		const stateCache = new Webgl2StateCache(gl);
 		const drawUnitsById = new Map<string, Webgl2WorldDrawUnit>([
@@ -499,10 +499,10 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
-			bakedGeometryProgram: createBakedGeometryProgram(),
-			bakedGeometryResources: {
-				batches: [createBakedGeometryBatch(["atlas"])],
-				rgbaTexturePageFamilies: [createBakedGeometryFamily(["atlas"])],
+			rgbaTexturePageFamilyProgram: createRgbaTexturePageFamilyProgram(),
+			rgbaTexturePageFamilyResources: {
+				batches: [createRgbaTexturePageFamilyBatch(["atlas"])],
+				rgbaTexturePageFamilies: [createRgbaTexturePageFamilyResource(["atlas"])],
 				generation: createTextureAtlasGeneration(),
 			},
 			drawUnitsById,
@@ -512,23 +512,23 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		expect(metrics.visibleDrawUnitCount).toBe(2);
 		expect(metrics.drawCallCount).toBe(2);
 		expect(metrics.triangleCount).toBe(2);
-		expect(metrics.bakedReplacedDrawUnitCount).toBe(1);
-		expect(metrics.bakedReplacedDrawUnitTriangleCount).toBe(1);
-		expect(metrics.bakedRetainedDirectDrawUnitCount).toBe(1);
-		expect(metrics.bakedShaderDrawCallCount).toBe(1);
-		expect(metrics.bakedSubmittedSliceRepresentedDrawUnitCount).toBe(1);
-		expect(metrics.bakedSubmittedTriangleCount).toBe(1);
-		expect(metrics.bakedConservativeOverdrawTriangleCount).toBe(0);
-		expect(metrics.bakedConservativeOverdrawRatio).toBe(0);
-		expect(metrics.bakedOriginalDrawCallEstimateCount).toBe(2);
-		expect(metrics.bakedSubmittedDrawCallEstimateCount).toBe(2);
-		expect(metrics.bakedDrawCallSavingsCount).toBe(0);
+		expect(metrics.rgbaTexturePageFamilyReplacedDrawUnitCount).toBe(1);
+		expect(metrics.rgbaTexturePageFamilyReplacedDrawUnitTriangleCount).toBe(1);
+		expect(metrics.rgbaTexturePageFamilyRetainedDirectDrawUnitCount).toBe(1);
+		expect(metrics.rgbaTexturePageFamilyShaderDrawCallCount).toBe(1);
+		expect(metrics.rgbaTexturePageFamilySubmittedSliceRepresentedDrawUnitCount).toBe(1);
+		expect(metrics.rgbaTexturePageFamilySubmittedTriangleCount).toBe(1);
+		expect(metrics.rgbaTexturePageFamilyConservativeOverdrawTriangleCount).toBe(0);
+		expect(metrics.rgbaTexturePageFamilyConservativeOverdrawRatio).toBe(0);
+		expect(metrics.rgbaTexturePageFamilyOriginalDrawCallEstimateCount).toBe(2);
+		expect(metrics.rgbaTexturePageFamilySubmittedDrawCallEstimateCount).toBe(2);
+		expect(metrics.rgbaTexturePageFamilyDrawCallSavingsCount).toBe(0);
 		expect(
-			metrics.visibleRetainedDirectDrawUnitCountsByBakeMaterialFamily,
+			metrics.visibleRetainedDirectDrawUnitCountsByCompactionFamily,
 		).toEqual({
 			"flat-constant-color": 1,
 		});
-		expect(metrics.bakedSubmitFallbackSamples).toEqual([]);
+		expect(metrics.rgbaTexturePageFamilyFallbackSamples).toEqual([]);
 	});
 
 	it("reports conservative whole-slice atlas overdraw", () => {
@@ -547,16 +547,16 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
-			bakedGeometryProgram: createBakedGeometryProgram(),
-			bakedGeometryResources: {
+			rgbaTexturePageFamilyProgram: createRgbaTexturePageFamilyProgram(),
+			rgbaTexturePageFamilyResources: {
 				batches: [
-					createBakedGeometryBatch(["atlas", "not-visible"], {
+					createRgbaTexturePageFamilyBatch(["atlas", "not-visible"], {
 						indexCount: 6,
 						triangleCount: 2,
 					}),
 				],
 				rgbaTexturePageFamilies: [
-					createBakedGeometryFamily(["atlas", "not-visible"], {
+					createRgbaTexturePageFamilyResource(["atlas", "not-visible"], {
 						indexCount: 6,
 					}),
 				],
@@ -566,12 +566,12 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			frame: createFrame(["atlas", "staged"]),
 		});
 
-		expect(metrics.bakedReplacedDrawUnitCount).toBe(1);
-		expect(metrics.bakedReplacedDrawUnitTriangleCount).toBe(1);
-		expect(metrics.bakedSubmittedSliceRepresentedDrawUnitCount).toBe(2);
-		expect(metrics.bakedSubmittedTriangleCount).toBe(2);
-		expect(metrics.bakedConservativeOverdrawTriangleCount).toBe(1);
-		expect(metrics.bakedConservativeOverdrawRatio).toBe(0.5);
+		expect(metrics.rgbaTexturePageFamilyReplacedDrawUnitCount).toBe(1);
+		expect(metrics.rgbaTexturePageFamilyReplacedDrawUnitTriangleCount).toBe(1);
+		expect(metrics.rgbaTexturePageFamilySubmittedSliceRepresentedDrawUnitCount).toBe(2);
+		expect(metrics.rgbaTexturePageFamilySubmittedTriangleCount).toBe(2);
+		expect(metrics.rgbaTexturePageFamilyConservativeOverdrawTriangleCount).toBe(1);
+		expect(metrics.rgbaTexturePageFamilyConservativeOverdrawRatio).toBe(0.5);
 	});
 
 	it("attributes no-visible atlas route checks to the submit route", () => {
@@ -587,22 +587,22 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
-			bakedGeometryProgram: createBakedGeometryProgram(),
-			bakedGeometryResources: {
-				batches: [createBakedGeometryBatch(["not-visible"])],
-				rgbaTexturePageFamilies: [createBakedGeometryFamily(["not-visible"])],
+			rgbaTexturePageFamilyProgram: createRgbaTexturePageFamilyProgram(),
+			rgbaTexturePageFamilyResources: {
+				batches: [createRgbaTexturePageFamilyBatch(["not-visible"])],
+				rgbaTexturePageFamilies: [createRgbaTexturePageFamilyResource(["not-visible"])],
 				generation: createTextureAtlasGeneration(),
 			},
 			viewProjectionMatrix: createIdentityMat4(),
 			drawUnits,
-			bakedSubmitRoute: "scene-domain-interior",
+			rgbaTexturePageFamilySubmitRoute: "scene-domain-interior",
 		});
 
-		expect(metrics.bakedSubmitNoVisibleRouteCount).toBe(1);
-		expect(metrics.bakedSubmitNoVisibleExteriorRouteCount).toBe(0);
-		expect(metrics.bakedSubmitNoVisibleInteriorRouteCount).toBe(1);
-		expect(metrics.bakedSubmitNoVisibleOtherRouteCount).toBe(0);
-		expect(metrics.bakedSubmitFallbackSamples).toEqual([]);
+		expect(metrics.rgbaTexturePageFamilyNoVisibleRouteCount).toBe(1);
+		expect(metrics.rgbaTexturePageFamilyNoVisibleExteriorRouteCount).toBe(0);
+		expect(metrics.rgbaTexturePageFamilyNoVisibleInteriorRouteCount).toBe(1);
+		expect(metrics.rgbaTexturePageFamilyNoVisibleOtherRouteCount).toBe(0);
+		expect(metrics.rgbaTexturePageFamilyFallbackSamples).toEqual([]);
 	});
 
 	it("enables backface culling only for terrain when requested", () => {
@@ -1095,7 +1095,7 @@ function createDirectDrawPrograms(): Webgl2DirectDrawPrograms {
 	};
 }
 
-function createBakedGeometryProgram(): Webgl2RgbaTexturePageFamilyWorldProgram {
+function createRgbaTexturePageFamilyProgram(): Webgl2RgbaTexturePageFamilyWorldProgram {
 	return {
 		program: {} as WebGLProgram,
 		attributes: {
@@ -1116,7 +1116,7 @@ function createBakedGeometryProgram(): Webgl2RgbaTexturePageFamilyWorldProgram {
 	};
 }
 
-function createBakedGeometryBatch(
+function createRgbaTexturePageFamilyBatch(
 	drawUnitIds: readonly string[],
 	options: {
 		indexCount?: number;
@@ -1156,7 +1156,7 @@ function createBakedGeometryBatch(
 	};
 }
 
-function createBakedGeometryFamily(
+function createRgbaTexturePageFamilyResource(
 	drawUnitIds: readonly string[],
 	options: { indexCount?: number } = {},
 ): Webgl2RgbaTexturePageFamilyResource {

@@ -403,7 +403,7 @@ describe("webgl2 world resources", () => {
 		expect(initialBatches.map((batch) => batch.landblockId)).toEqual([
 			0x12340000, 0x12350000,
 		]);
-		expect(store.bakedGeometryBatchGraphLeasesByKey.size).toBe(2);
+		expect(store.compactedGeometryBatchGraphLeasesByKey.size).toBe(2);
 
 		const removedBatchKey = initialBatches[1]?.key;
 		const retainedBatchKey = initialBatches[0]?.key;
@@ -431,9 +431,9 @@ describe("webgl2 world resources", () => {
 		expect(
 			sortAtlasBatchesByLandblock(store).map((batch) => batch.key),
 		).toEqual([retainedBatchKey]);
-		expect(store.bakedGeometryBatchGraphLeasesByKey.size).toBe(1);
+		expect(store.compactedGeometryBatchGraphLeasesByKey.size).toBe(1);
 		expect(
-			store.bakedGeometryBatchGraphLeasesByKey.has(
+			store.compactedGeometryBatchGraphLeasesByKey.has(
 				staticBatchGraphNodeKey(retainedBatchKey ?? ""),
 			),
 		).toBe(true);

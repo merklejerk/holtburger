@@ -1,12 +1,12 @@
 import type { RenderMat4 } from "./render-math";
 import type { Webgl2ProgramResource } from "./webgl2-gl";
 import type { Webgl2StateCache } from "./webgl2-state-cache";
-import type { Webgl2AtlasStaticBatchResource } from "./webgl2-atlas-static-batches";
-import type { Webgl2AtlasStaticGenerationResource } from "./webgl2-atlas-static-generation";
+import type { Webgl2AtlasBackedCompactedBatchResource } from "./webgl2-atlas-backed-compacted-batches";
+import type { Webgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
 
-export const WEBGL2_ATLAS_STATIC_MAX_MATERIAL_SLOTS = 128;
+export const WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS = 128;
 
-export type Webgl2AtlasStaticWorldProgram = Webgl2ProgramResource<
+export type Webgl2AtlasBackedCompactedWorldProgram = Webgl2ProgramResource<
 	"position" | "uv" | "materialSlot",
 	| "uViewProjection"
 	| "uBatchModel"
@@ -15,7 +15,7 @@ export type Webgl2AtlasStaticWorldProgram = Webgl2ProgramResource<
 	| "uMaterialRects"
 >;
 
-export interface Webgl2AtlasStaticSubmitMetrics {
+export interface Webgl2AtlasBackedCompactedSubmitMetrics {
 	shaderDrawCallCount: number;
 	submittedBatchCount: number;
 	submittedDrawSliceCount: number;
@@ -27,12 +27,12 @@ export interface Webgl2AtlasStaticSubmitMetrics {
 	fallbackSamples: readonly string[];
 }
 
-export interface Webgl2AtlasStaticSubmitResources {
-	batches: readonly Webgl2AtlasStaticBatchResource[];
-	generation: Webgl2AtlasStaticGenerationResource | null;
+export interface Webgl2AtlasBackedCompactedSubmitResources {
+	batches: readonly Webgl2AtlasBackedCompactedBatchResource[];
+	generation: Webgl2TextureAtlasGenerationResource | null;
 }
 
-export function createEmptyWebgl2AtlasStaticSubmitMetrics(): Webgl2AtlasStaticSubmitMetrics {
+export function createEmptyWebgl2AtlasBackedCompactedSubmitMetrics(): Webgl2AtlasBackedCompactedSubmitMetrics {
 	return {
 		shaderDrawCallCount: 0,
 		submittedBatchCount: 0,
@@ -46,9 +46,9 @@ export function createEmptyWebgl2AtlasStaticSubmitMetrics(): Webgl2AtlasStaticSu
 	};
 }
 
-export function planWebgl2AtlasStaticReplacement(options: {
+export function planWebgl2AtlasBackedCompactedReplacement(options: {
 	visibleDrawUnitIds: readonly string[];
-	resources: Webgl2AtlasStaticSubmitResources;
+	resources: Webgl2AtlasBackedCompactedSubmitResources;
 }): {
 	replaceableDrawUnitIds: ReadonlySet<string>;
 	noVisibleRouteCount: number;
@@ -58,23 +58,23 @@ export function planWebgl2AtlasStaticReplacement(options: {
 		return {
 			replaceableDrawUnitIds: new Set(),
 			noVisibleRouteCount: 0,
-			fallbackSamples: ["atlas static submit missing atlas generation"],
+			fallbackSamples: ["atlas-backed compacted submit missing atlas generation"],
 		};
 	}
 	if (options.resources.batches.length === 0) {
 		return {
 			replaceableDrawUnitIds: new Set(),
 			noVisibleRouteCount: 0,
-			fallbackSamples: ["atlas static submit missing compacted batches"],
+			fallbackSamples: ["atlas-backed compacted submit missing compacted batches"],
 		};
 	}
 	for (const batch of options.resources.batches) {
-		if (batch.materialSlots.length > WEBGL2_ATLAS_STATIC_MAX_MATERIAL_SLOTS) {
+		if (batch.materialSlots.length > WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS) {
 			return {
 				replaceableDrawUnitIds: new Set(),
 				noVisibleRouteCount: 0,
 				fallbackSamples: [
-					`atlas static submit material slots ${batch.materialSlots.length} exceed ${WEBGL2_ATLAS_STATIC_MAX_MATERIAL_SLOTS}`,
+					`atlas-backed compacted submit material slots ${batch.materialSlots.length} exceed ${WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS}`,
 				],
 			};
 		}
@@ -108,7 +108,7 @@ export function planWebgl2AtlasStaticReplacement(options: {
 	};
 }
 
-export function submitWebgl2AtlasStaticBatch({
+export function submitWebgl2AtlasBackedCompactedBatch({
 	gl,
 	stateCache,
 	program,
@@ -119,22 +119,22 @@ export function submitWebgl2AtlasStaticBatch({
 }: {
 	gl: WebGL2RenderingContext;
 	stateCache: Webgl2StateCache;
-	program: Webgl2AtlasStaticWorldProgram;
+	program: Webgl2AtlasBackedCompactedWorldProgram;
 	viewProjectionMatrix: RenderMat4;
 	resources: {
-		batches: readonly Webgl2AtlasStaticBatchResource[];
-		generation: Webgl2AtlasStaticGenerationResource;
+		batches: readonly Webgl2AtlasBackedCompactedBatchResource[];
+		generation: Webgl2TextureAtlasGenerationResource;
 	};
 	replaceableDrawUnitIds: ReadonlySet<string>;
 	retainedDrawUnitCount: number;
-}): Webgl2AtlasStaticSubmitMetrics {
+}): Webgl2AtlasBackedCompactedSubmitMetrics {
 	if (replaceableDrawUnitIds.size === 0) {
 		return {
-			...createEmptyWebgl2AtlasStaticSubmitMetrics(),
+			...createEmptyWebgl2AtlasBackedCompactedSubmitMetrics(),
 			retainedDrawUnitCount,
 		};
 	}
-	const metrics: Webgl2AtlasStaticSubmitMetrics = {
+	const metrics: Webgl2AtlasBackedCompactedSubmitMetrics = {
 		shaderDrawCallCount: 0,
 		submittedBatchCount: 0,
 		submittedDrawSliceCount: 0,
@@ -170,7 +170,7 @@ export function submitWebgl2AtlasStaticBatch({
 			false,
 			batch.batchModelMatrix,
 		);
-		uploadAtlasStaticMaterialRects(gl, program, batch);
+		uploadAtlasBackedCompactedMaterialRects(gl, program, batch);
 		if (stateCache.bindVertexArray(batch.vertexArray.vertexArray)) {
 			metrics.shaderDrawCallCount += 0;
 		}
@@ -181,7 +181,7 @@ export function submitWebgl2AtlasStaticBatch({
 			if (!texture) {
 				metrics.fallbackSamples = [
 					...metrics.fallbackSamples,
-					`atlas static draw slice ${slice.key} missing atlas texture ${slice.atlasTextureIndex}`,
+					`atlas-backed compacted draw slice ${slice.key} missing atlas texture ${slice.atlasTextureIndex}`,
 				].slice(0, 8);
 				continue;
 			}
@@ -205,12 +205,12 @@ export function submitWebgl2AtlasStaticBatch({
 	return metrics;
 }
 
-function uploadAtlasStaticMaterialRects(
+function uploadAtlasBackedCompactedMaterialRects(
 	gl: WebGL2RenderingContext,
-	program: Webgl2AtlasStaticWorldProgram,
-	batch: Webgl2AtlasStaticBatchResource,
+	program: Webgl2AtlasBackedCompactedWorldProgram,
+	batch: Webgl2AtlasBackedCompactedBatchResource,
 ): void {
-	const rects = new Float32Array(WEBGL2_ATLAS_STATIC_MAX_MATERIAL_SLOTS * 4);
+	const rects = new Float32Array(WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS * 4);
 	for (const slot of batch.materialSlots) {
 		rects.set(slot.atlasRect, slot.index * 4);
 	}
@@ -227,5 +227,5 @@ function indexTypeByteLength(
 	if (indexType === gl.UNSIGNED_INT) {
 		return 4;
 	}
-	throw new Error(`Unsupported atlas static index type ${indexType}.`);
+	throw new Error(`Unsupported atlas-backed compacted index type ${indexType}.`);
 }

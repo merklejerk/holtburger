@@ -3,7 +3,7 @@ import type { LegacyMaterialBehaviorDto } from "./material-behavior";
 import type { StagedWorldMaterialAtlasEligibility } from "./staged-world-material-strategy";
 import type { Webgl2SceneDomain } from "./webgl2-scene-domain-targets";
 
-export type AtlasStaticCompactionBypassReason =
+export type AtlasBackedCompactionBypassReason =
 	| "non-static"
 	| "missing-landblock-origin"
 	| "non-direct-texture"
@@ -15,14 +15,14 @@ export type AtlasStaticCompactionBypassReason =
 	| "atlas-full"
 	| "material-table-overflow";
 
-export interface AtlasStaticCompactionPolicy {
+export interface AtlasBackedCompactionPolicy {
 	maxAtlasTextureSize: number;
 	maxAtlasTextureCount: number;
 	baseGutterPixels: number;
 	maxMaterialSlotsPerDraw: number;
 }
 
-export interface AtlasStaticCompactionCandidate {
+export interface AtlasBackedCompactionCandidate {
 	id: string;
 	kind: string;
 	owningLandblockId: number | null;
@@ -38,13 +38,13 @@ export interface AtlasStaticCompactionCandidate {
 	staticObjectKeys: readonly string[];
 }
 
-export interface AtlasStaticCompactionBypass {
+export interface AtlasBackedCompactionBypass {
 	drawUnitId: string;
-	reason: AtlasStaticCompactionBypassReason;
+	reason: AtlasBackedCompactionBypassReason;
 	detail: string;
 }
 
-export interface AtlasStaticCompactionMaterialSlot {
+export interface AtlasBackedCompactionMaterialSlot {
 	key: string;
 	index: number;
 	renderStateKey: string;
@@ -52,7 +52,7 @@ export interface AtlasStaticCompactionMaterialSlot {
 	atlasEntryKey: string;
 }
 
-export interface AtlasStaticCompactionDrawSlice {
+export interface AtlasBackedCompactionDrawSlice {
 	key: string;
 	atlasTextureIndex: number;
 	renderStateKey: string;
@@ -62,39 +62,39 @@ export interface AtlasStaticCompactionDrawSlice {
 	drawUnitIds: readonly string[];
 }
 
-export interface AtlasStaticCompactionEntry {
+export interface AtlasBackedCompactionEntry {
 	key: string;
 	entry: StagedWorldMaterialAtlasEligibility["atlasEntry"];
 }
 
-export interface AtlasStaticCompactionPlan {
+export interface AtlasBackedCompactionPlan {
 	key: string;
 	compactableDrawUnitIds: readonly string[];
-	bypasses: readonly AtlasStaticCompactionBypass[];
-	atlasEntryRecords: readonly AtlasStaticCompactionEntry[];
+	bypasses: readonly AtlasBackedCompactionBypass[];
+	atlasEntryRecords: readonly AtlasBackedCompactionEntry[];
 	atlasEntries: readonly StagedWorldMaterialAtlasEligibility["atlasEntry"][];
 	atlasTextures: readonly AtlasTexturePage[];
-	materialSlots: readonly AtlasStaticCompactionMaterialSlot[];
-	drawSlices: readonly AtlasStaticCompactionDrawSlice[];
+	materialSlots: readonly AtlasBackedCompactionMaterialSlot[];
+	drawSlices: readonly AtlasBackedCompactionDrawSlice[];
 	staticObjectKeys: readonly string[];
 	staticPartCount: number;
 	triangleCount: number;
 	preparedTextureAssetIds: readonly string[];
 }
 
-interface EligibleAtlasStaticCandidate {
-	drawUnit: AtlasStaticCompactionCandidate;
+interface EligibleAtlasBackedCompactionCandidate {
+	drawUnit: AtlasBackedCompactionCandidate;
 	eligibility: StagedWorldMaterialAtlasEligibility;
 }
 
-interface AtlasStaticCompactionEntryRecord {
+interface AtlasBackedCompactionEntryRecord {
 	key: string;
 	entry: StagedWorldMaterialAtlasEligibility["atlasEntry"];
 }
 
-export function createEmptyAtlasStaticCompactionPlan(): AtlasStaticCompactionPlan {
+export function createEmptyAtlasBackedCompactionPlan(): AtlasBackedCompactionPlan {
 	return {
-		key: "atlas-static-compaction/empty",
+		key: "atlas-backed-compaction/empty",
 		compactableDrawUnitIds: [],
 		bypasses: [],
 		atlasEntryRecords: [],
@@ -109,14 +109,14 @@ export function createEmptyAtlasStaticCompactionPlan(): AtlasStaticCompactionPla
 	};
 }
 
-export function planAtlasStaticCompaction(options: {
-	drawUnits: readonly AtlasStaticCompactionCandidate[];
-	policy: AtlasStaticCompactionPolicy;
-}): AtlasStaticCompactionPlan {
-	const eligible: EligibleAtlasStaticCandidate[] = [];
-	const bypasses: AtlasStaticCompactionBypass[] = [];
+export function planAtlasBackedCompaction(options: {
+	drawUnits: readonly AtlasBackedCompactionCandidate[];
+	policy: AtlasBackedCompactionPolicy;
+}): AtlasBackedCompactionPlan {
+	const eligible: EligibleAtlasBackedCompactionCandidate[] = [];
+	const bypasses: AtlasBackedCompactionBypass[] = [];
 	for (const drawUnit of options.drawUnits) {
-		const bypass = classifyAtlasStaticCompactionBypass(drawUnit);
+		const bypass = classifyAtlasBackedCompactionBypass(drawUnit);
 		if (bypass) {
 			bypasses.push(bypass);
 			continue;
@@ -129,7 +129,7 @@ export function planAtlasStaticCompaction(options: {
 		eligible.push({ drawUnit, eligibility: drawUnit.atlasEligibility });
 	}
 
-	const atlasEntries = dedupeAtlasStaticCompactionEntries(eligible);
+	const atlasEntries = dedupeAtlasBackedCompactionEntries(eligible);
 	const layout = planAtlasLayout({
 		entries: atlasEntries.map((record) => ({
 			key: record.key,
@@ -162,7 +162,7 @@ export function planAtlasStaticCompaction(options: {
 		});
 	}
 
-	const materialSlots = assignAtlasStaticCompactionMaterialSlots(
+	const materialSlots = assignAtlasBackedCompactionMaterialSlots(
 		placed,
 		options.policy,
 	);
@@ -180,7 +180,7 @@ export function planAtlasStaticCompaction(options: {
 		});
 		return false;
 	});
-	const drawSlices = createAtlasStaticCompactionDrawSlices(
+	const drawSlices = createAtlasBackedCompactionDrawSlices(
 		compactable,
 		materialSlotByKey,
 		layout.placementsByEntryKey,
@@ -192,7 +192,7 @@ export function planAtlasStaticCompaction(options: {
 		compactable.map((candidate) => candidate.eligibility.atlasEntryKey),
 	);
 	return {
-		key: describeAtlasStaticCompactionPlanKey({
+		key: describeAtlasBackedCompactionPlanKey({
 			policy: options.policy,
 			atlasEntryKeys: [...compactableEntryKeys].sort(),
 			materialSlotKeys: materialSlots.map((slot) => slot.key),
@@ -234,9 +234,9 @@ export function planAtlasStaticCompaction(options: {
 	};
 }
 
-function classifyAtlasStaticCompactionBypass(
-	drawUnit: AtlasStaticCompactionCandidate,
-): AtlasStaticCompactionBypass | null {
+function classifyAtlasBackedCompactionBypass(
+	drawUnit: AtlasBackedCompactionCandidate,
+): AtlasBackedCompactionBypass | null {
 	if (drawUnit.kind !== "static") {
 		if (drawUnit.kind !== "structured-interior") {
 			return {
@@ -250,7 +250,7 @@ function classifyAtlasStaticCompactionBypass(
 		return {
 			drawUnitId: drawUnit.id,
 			reason: "missing-landblock-origin",
-			detail: "atlas compacted geometry draw unit has no owning landblock",
+			detail: "atlas-backed compacted geometry draw unit has no owning landblock",
 		};
 	}
 	if (drawUnit.materialKind !== "direct-texture") {
@@ -264,14 +264,14 @@ function classifyAtlasStaticCompactionBypass(
 		return {
 			drawUnitId: drawUnit.id,
 			reason: "missing-uv-buffer",
-			detail: "direct texture atlas compacted geometry draw unit has no UV buffer",
+			detail: "direct texture atlas-backed compacted geometry draw unit has no UV buffer",
 		};
 	}
 	if (!drawUnit.atlasEligibility) {
 		return {
 			drawUnitId: drawUnit.id,
 			reason: "missing-atlas-eligibility",
-			detail: "direct texture atlas compacted geometry draw unit has no atlas eligibility",
+			detail: "direct texture atlas-backed compacted geometry draw unit has no atlas eligibility",
 		};
 	}
 	if (drawUnit.hasDetailOverlay) {
@@ -304,10 +304,10 @@ function isOpaqueStaticCompactionMaterial(
 	);
 }
 
-function dedupeAtlasStaticCompactionEntries(
-	candidates: readonly EligibleAtlasStaticCandidate[],
-): AtlasStaticCompactionEntryRecord[] {
-	const entriesByKey = new Map<string, AtlasStaticCompactionEntryRecord>();
+function dedupeAtlasBackedCompactionEntries(
+	candidates: readonly EligibleAtlasBackedCompactionCandidate[],
+): AtlasBackedCompactionEntryRecord[] {
+	const entriesByKey = new Map<string, AtlasBackedCompactionEntryRecord>();
 	for (const candidate of candidates) {
 		entriesByKey.set(candidate.eligibility.atlasEntryKey, {
 			key: candidate.eligibility.atlasEntryKey,
@@ -319,10 +319,10 @@ function dedupeAtlasStaticCompactionEntries(
 	);
 }
 
-function assignAtlasStaticCompactionMaterialSlots(
-	candidates: readonly EligibleAtlasStaticCandidate[],
-	policy: AtlasStaticCompactionPolicy,
-): AtlasStaticCompactionMaterialSlot[] {
+function assignAtlasBackedCompactionMaterialSlots(
+	candidates: readonly EligibleAtlasBackedCompactionCandidate[],
+	policy: AtlasBackedCompactionPolicy,
+): AtlasBackedCompactionMaterialSlot[] {
 	return [
 		...new Map(
 			candidates.map(
@@ -345,11 +345,11 @@ function assignAtlasStaticCompactionMaterialSlots(
 		}));
 }
 
-function createAtlasStaticCompactionDrawSlices(
-	candidates: readonly EligibleAtlasStaticCandidate[],
-	materialSlotByKey: ReadonlyMap<string, AtlasStaticCompactionMaterialSlot>,
+function createAtlasBackedCompactionDrawSlices(
+	candidates: readonly EligibleAtlasBackedCompactionCandidate[],
+	materialSlotByKey: ReadonlyMap<string, AtlasBackedCompactionMaterialSlot>,
 	placementsByEntryKey: ReadonlyMap<string, { textureIndex: number }>,
-): AtlasStaticCompactionDrawSlice[] {
+): AtlasBackedCompactionDrawSlice[] {
 	const groups = new Map<
 		string,
 		{
@@ -394,7 +394,7 @@ function createAtlasStaticCompactionDrawSlices(
 			const drawUnitIds = [...group.drawUnitIds].sort();
 			return {
 				key: [
-					"atlas-static-draw-slice",
+					"atlas-backed-compacted-draw-slice",
 					`texture=${group.atlasTextureIndex}`,
 					group.renderStateKey,
 					`table=${materialTableSlotStart}-${materialTableSlotEnd}`,
@@ -410,13 +410,13 @@ function createAtlasStaticCompactionDrawSlices(
 		});
 }
 
-function describeAtlasStaticCompactionPlanKey(options: {
-	policy: AtlasStaticCompactionPolicy;
+function describeAtlasBackedCompactionPlanKey(options: {
+	policy: AtlasBackedCompactionPolicy;
 	atlasEntryKeys: readonly string[];
 	materialSlotKeys: readonly string[];
 }): string {
 	return [
-		"atlas-static-compaction",
+		"atlas-backed-compaction",
 		`size=${options.policy.maxAtlasTextureSize}`,
 		`textures=${options.policy.maxAtlasTextureCount}`,
 		`gutter=${options.policy.baseGutterPixels}`,

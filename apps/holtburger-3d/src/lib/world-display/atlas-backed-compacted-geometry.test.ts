@@ -2,13 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import type { StagedWorldDrawUnitAssembly } from "./staged-world-assembly";
 import type { StagedWorldDirectTextureMaterialPlan } from "./staged-world-materials";
-import type { AtlasStaticCompactionPlan } from "./atlas-static-compaction-planner";
-import { buildAtlasStaticCompactedGeometry } from "./atlas-static-geometry-compactor";
+import type { AtlasBackedCompactionPlan } from "./atlas-backed-compaction-planner";
+import { buildAtlasBackedCompactedGeometry } from "./atlas-backed-compacted-geometry";
 
-describe("atlas static geometry compactor", () => {
+describe("atlas-backed compacted geometry builder", () => {
 	it("builds batch-local geometry buffers with baked static positions", () => {
 		const plan = createPlan();
-		const geometry = buildAtlasStaticCompactedGeometry({
+		const geometry = buildAtlasBackedCompactedGeometry({
 			plan,
 			drawUnits: [
 				createDrawUnit("draw-a", "material-slot-a", 10),
@@ -77,12 +77,12 @@ describe("atlas static geometry compactor", () => {
 			compactableDrawUnitIds: ["draw-a"],
 			drawSlices: [firstSlice],
 		};
-		const first = buildAtlasStaticCompactedGeometry({
+		const first = buildAtlasBackedCompactedGeometry({
 			plan,
 			drawUnits: [createDrawUnit("draw-a", "material-slot-a", 10)],
 			batchOrigin: { x: 10, y: 0, z: 0 },
 		});
-		const second = buildAtlasStaticCompactedGeometry({
+		const second = buildAtlasBackedCompactedGeometry({
 			plan,
 			drawUnits: [createDrawUnit("draw-a", "material-slot-a", 99)],
 			batchOrigin: { x: 99, y: 0, z: 0 },
@@ -93,7 +93,7 @@ describe("atlas static geometry compactor", () => {
 
 	it("changes the resource key when relative static placement changes", () => {
 		const basePlan = createPlan();
-		const first = buildAtlasStaticCompactedGeometry({
+		const first = buildAtlasBackedCompactedGeometry({
 			plan: basePlan,
 			drawUnits: [
 				createDrawUnit("draw-a", "material-slot-a", 10),
@@ -101,7 +101,7 @@ describe("atlas static geometry compactor", () => {
 			],
 			batchOrigin: { x: 10, y: 0, z: 0 },
 		});
-		const second = buildAtlasStaticCompactedGeometry({
+		const second = buildAtlasBackedCompactedGeometry({
 			plan: basePlan,
 			drawUnits: [
 				createDrawUnit("draw-a", "material-slot-a", 10),
@@ -129,7 +129,7 @@ describe("atlas static geometry compactor", () => {
 				},
 			],
 		};
-		const geometry = buildAtlasStaticCompactedGeometry({
+		const geometry = buildAtlasBackedCompactedGeometry({
 			plan,
 			drawUnits: [
 				createDrawUnit("structured-a", "material-slot-a", 100, {
@@ -155,7 +155,7 @@ describe("atlas static geometry compactor", () => {
 	});
 });
 
-function createPlan(): AtlasStaticCompactionPlan {
+function createPlan(): AtlasBackedCompactionPlan {
 	return {
 		key: "plan-a",
 		compactableDrawUnitIds: ["draw-a", "draw-b"],

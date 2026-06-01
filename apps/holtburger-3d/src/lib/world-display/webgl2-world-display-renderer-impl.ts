@@ -31,9 +31,9 @@ import {
 	type Webgl2WorldSubmitMetrics,
 } from "./webgl2-world-submit";
 import {
-	WEBGL2_ATLAS_STATIC_MAX_MATERIAL_SLOTS,
-	type Webgl2AtlasStaticWorldProgram,
-} from "./webgl2-atlas-static-submit";
+	WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS,
+	type Webgl2AtlasBackedCompactedWorldProgram,
+} from "./webgl2-atlas-backed-compacted-submit";
 import {
 	createWebgl2PortalCompositeTargetSet,
 	createWebgl2SceneDomainTargetSet,
@@ -207,7 +207,7 @@ void main() {
 `;
 
 const ATLAS_STATIC_WORLD_FRAGMENT_SHADER = `#version 300 es
-#define MAX_MATERIAL_SLOTS ${WEBGL2_ATLAS_STATIC_MAX_MATERIAL_SLOTS}
+#define MAX_MATERIAL_SLOTS ${WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS}
 
 precision highp float;
 
@@ -535,7 +535,7 @@ interface Webgl2RenderResources {
 	indexedP8WorldProgram: Webgl2IndexedP8WorldProgram;
 	indexedP16WorldProgram: Webgl2IndexedP16WorldProgram;
 	terrainBlendWorldProgram: Webgl2TerrainBlendWorldProgram;
-	atlasStaticWorldProgram: Webgl2AtlasStaticWorldProgram;
+	atlasBackedCompactedWorldProgram: Webgl2AtlasBackedCompactedWorldProgram;
 	sceneDomainCopyProgram: Webgl2ProgramResource<
 		never,
 		"uColorTexture" | "uDepthTexture"
@@ -865,12 +865,12 @@ export function createWebgl2WorldDisplayRendererImplementation(
 							terrainBlendProgram: currentResources.terrainBlendWorldProgram,
 							indexedP8Program: currentResources.indexedP8WorldProgram,
 							indexedP16Program: currentResources.indexedP16WorldProgram,
-							atlasStaticProgram: currentResources.atlasStaticWorldProgram,
-							atlasStaticResources: {
+							atlasBackedCompactedProgram: currentResources.atlasBackedCompactedWorldProgram,
+							atlasBackedCompactedResources: {
 								batches: [
-									...currentResources.worldStore.atlasStaticBatches.values(),
+									...currentResources.worldStore.atlasBackedCompactedBatches.values(),
 								],
-								generation: currentResources.worldStore.atlasStaticGeneration,
+								generation: currentResources.worldStore.textureAtlasGeneration,
 							},
 							drawUnitsById: currentResources.worldStore.drawUnitsById,
 							frame,
@@ -996,7 +996,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 					target: targets.exterior,
 					drawUnits: sceneDomainDrawUnits.exterior,
 					frame,
-					atlasStaticSubmitRoute: "scene-domain-exterior",
+					atlasBackedCompactedSubmitRoute: "scene-domain-exterior",
 					terrainBackfaceCulling: baseScene === "interior",
 				}),
 		);
@@ -1007,7 +1007,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 					target: targets.interior,
 					drawUnits: sceneDomainDrawUnits.interior,
 					frame,
-					atlasStaticSubmitRoute: "scene-domain-interior",
+					atlasBackedCompactedSubmitRoute: "scene-domain-interior",
 					terrainBackfaceCulling: false,
 				}),
 		);
@@ -1133,13 +1133,13 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		target,
 		drawUnits,
 		frame,
-		atlasStaticSubmitRoute,
+		atlasBackedCompactedSubmitRoute,
 		terrainBackfaceCulling,
 	}: {
 		target: Webgl2SceneDomainTarget;
 		drawUnits: readonly Webgl2WorldDrawUnit[];
 		frame: ReturnType<typeof buildStagedWorldFrame>;
-		atlasStaticSubmitRoute: "scene-domain-exterior" | "scene-domain-interior";
+		atlasBackedCompactedSubmitRoute: "scene-domain-exterior" | "scene-domain-interior";
 		terrainBackfaceCulling: boolean;
 	}): Webgl2WorldSubmitMetrics {
 		if (!resources) {
@@ -1171,14 +1171,14 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			terrainBlendProgram: resources.terrainBlendWorldProgram,
 			indexedP8Program: resources.indexedP8WorldProgram,
 			indexedP16Program: resources.indexedP16WorldProgram,
-			atlasStaticProgram: resources.atlasStaticWorldProgram,
-			atlasStaticResources: {
-				batches: [...resources.worldStore.atlasStaticBatches.values()],
-				generation: resources.worldStore.atlasStaticGeneration,
+			atlasBackedCompactedProgram: resources.atlasBackedCompactedWorldProgram,
+			atlasBackedCompactedResources: {
+				batches: [...resources.worldStore.atlasBackedCompactedBatches.values()],
+				generation: resources.worldStore.textureAtlasGeneration,
 			},
 			viewProjectionMatrix: frame.viewProjectionMatrix,
 			drawUnits,
-			atlasStaticSubmitRoute,
+			atlasBackedCompactedSubmitRoute,
 			terrainBackfaceCulling,
 		});
 	}
@@ -1658,7 +1658,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		resources.indexedP8WorldProgram.dispose();
 		resources.indexedP16WorldProgram.dispose();
 		resources.terrainBlendWorldProgram.dispose();
-		resources.atlasStaticWorldProgram.dispose();
+		resources.atlasBackedCompactedWorldProgram.dispose();
 		resources.sceneDomainCopyProgram.dispose();
 		resources.sceneDomainCopyVertexArray.dispose();
 		resources.sceneDomainTargets?.dispose();
@@ -1915,65 +1915,65 @@ function mergeSceneDomainSubmitMetrics({
 			exteriorMetrics.visibleDrawUnitCountsByMaterialKind,
 			interiorMetrics.visibleDrawUnitCountsByMaterialKind,
 		),
-		atlasStaticShaderDrawCallCount:
-			exteriorMetrics.atlasStaticShaderDrawCallCount +
-			interiorMetrics.atlasStaticShaderDrawCallCount,
-		atlasStaticSubmittedBatchCount:
-			exteriorMetrics.atlasStaticSubmittedBatchCount +
-			interiorMetrics.atlasStaticSubmittedBatchCount,
-		atlasStaticSubmittedDrawSliceCount:
-			exteriorMetrics.atlasStaticSubmittedDrawSliceCount +
-			interiorMetrics.atlasStaticSubmittedDrawSliceCount,
-		atlasStaticSubmittedSliceRepresentedDrawUnitCount:
-			exteriorMetrics.atlasStaticSubmittedSliceRepresentedDrawUnitCount +
-			interiorMetrics.atlasStaticSubmittedSliceRepresentedDrawUnitCount,
-		atlasStaticSubmittedTriangleCount:
-			exteriorMetrics.atlasStaticSubmittedTriangleCount +
-			interiorMetrics.atlasStaticSubmittedTriangleCount,
-		atlasStaticReplacedDrawUnitCount:
-			exteriorMetrics.atlasStaticReplacedDrawUnitCount +
-			interiorMetrics.atlasStaticReplacedDrawUnitCount,
-		atlasStaticReplacedDrawUnitTriangleCount:
-			exteriorMetrics.atlasStaticReplacedDrawUnitTriangleCount +
-			interiorMetrics.atlasStaticReplacedDrawUnitTriangleCount,
-		atlasStaticConservativeOverdrawTriangleCount:
-			exteriorMetrics.atlasStaticConservativeOverdrawTriangleCount +
-			interiorMetrics.atlasStaticConservativeOverdrawTriangleCount,
-		atlasStaticConservativeOverdrawRatio: calculateCombinedRatio({
+		atlasBackedCompactedShaderDrawCallCount:
+			exteriorMetrics.atlasBackedCompactedShaderDrawCallCount +
+			interiorMetrics.atlasBackedCompactedShaderDrawCallCount,
+		atlasBackedCompactedSubmittedBatchCount:
+			exteriorMetrics.atlasBackedCompactedSubmittedBatchCount +
+			interiorMetrics.atlasBackedCompactedSubmittedBatchCount,
+		atlasBackedCompactedSubmittedDrawSliceCount:
+			exteriorMetrics.atlasBackedCompactedSubmittedDrawSliceCount +
+			interiorMetrics.atlasBackedCompactedSubmittedDrawSliceCount,
+		atlasBackedCompactedSubmittedSliceRepresentedDrawUnitCount:
+			exteriorMetrics.atlasBackedCompactedSubmittedSliceRepresentedDrawUnitCount +
+			interiorMetrics.atlasBackedCompactedSubmittedSliceRepresentedDrawUnitCount,
+		atlasBackedCompactedSubmittedTriangleCount:
+			exteriorMetrics.atlasBackedCompactedSubmittedTriangleCount +
+			interiorMetrics.atlasBackedCompactedSubmittedTriangleCount,
+		atlasBackedCompactedReplacedDrawUnitCount:
+			exteriorMetrics.atlasBackedCompactedReplacedDrawUnitCount +
+			interiorMetrics.atlasBackedCompactedReplacedDrawUnitCount,
+		atlasBackedCompactedReplacedDrawUnitTriangleCount:
+			exteriorMetrics.atlasBackedCompactedReplacedDrawUnitTriangleCount +
+			interiorMetrics.atlasBackedCompactedReplacedDrawUnitTriangleCount,
+		atlasBackedCompactedConservativeOverdrawTriangleCount:
+			exteriorMetrics.atlasBackedCompactedConservativeOverdrawTriangleCount +
+			interiorMetrics.atlasBackedCompactedConservativeOverdrawTriangleCount,
+		atlasBackedCompactedConservativeOverdrawRatio: calculateCombinedRatio({
 			numerator:
-				exteriorMetrics.atlasStaticConservativeOverdrawTriangleCount +
-				interiorMetrics.atlasStaticConservativeOverdrawTriangleCount,
+				exteriorMetrics.atlasBackedCompactedConservativeOverdrawTriangleCount +
+				interiorMetrics.atlasBackedCompactedConservativeOverdrawTriangleCount,
 			denominator:
-				exteriorMetrics.atlasStaticSubmittedTriangleCount +
-				interiorMetrics.atlasStaticSubmittedTriangleCount,
+				exteriorMetrics.atlasBackedCompactedSubmittedTriangleCount +
+				interiorMetrics.atlasBackedCompactedSubmittedTriangleCount,
 		}),
-		atlasStaticRetainedDrawUnitCount:
-			exteriorMetrics.atlasStaticRetainedDrawUnitCount +
-			interiorMetrics.atlasStaticRetainedDrawUnitCount,
-		atlasStaticOriginalDrawCallEstimateCount:
-			exteriorMetrics.atlasStaticOriginalDrawCallEstimateCount +
-			interiorMetrics.atlasStaticOriginalDrawCallEstimateCount,
-		atlasStaticSubmittedDrawCallEstimateCount:
-			exteriorMetrics.atlasStaticSubmittedDrawCallEstimateCount +
-			interiorMetrics.atlasStaticSubmittedDrawCallEstimateCount,
-		atlasStaticDrawCallSavingsCount:
-			exteriorMetrics.atlasStaticDrawCallSavingsCount +
-			interiorMetrics.atlasStaticDrawCallSavingsCount,
-		atlasStaticSubmitNoVisibleRouteCount:
-			exteriorMetrics.atlasStaticSubmitNoVisibleRouteCount +
-			interiorMetrics.atlasStaticSubmitNoVisibleRouteCount,
-		atlasStaticSubmitNoVisibleExteriorRouteCount:
-			exteriorMetrics.atlasStaticSubmitNoVisibleExteriorRouteCount +
-			interiorMetrics.atlasStaticSubmitNoVisibleExteriorRouteCount,
-		atlasStaticSubmitNoVisibleInteriorRouteCount:
-			exteriorMetrics.atlasStaticSubmitNoVisibleInteriorRouteCount +
-			interiorMetrics.atlasStaticSubmitNoVisibleInteriorRouteCount,
-		atlasStaticSubmitNoVisibleOtherRouteCount:
-			exteriorMetrics.atlasStaticSubmitNoVisibleOtherRouteCount +
-			interiorMetrics.atlasStaticSubmitNoVisibleOtherRouteCount,
-		atlasStaticSubmitFallbackSamples: [
-			...exteriorMetrics.atlasStaticSubmitFallbackSamples,
-			...interiorMetrics.atlasStaticSubmitFallbackSamples,
+		atlasBackedCompactedRetainedDrawUnitCount:
+			exteriorMetrics.atlasBackedCompactedRetainedDrawUnitCount +
+			interiorMetrics.atlasBackedCompactedRetainedDrawUnitCount,
+		atlasBackedCompactedOriginalDrawCallEstimateCount:
+			exteriorMetrics.atlasBackedCompactedOriginalDrawCallEstimateCount +
+			interiorMetrics.atlasBackedCompactedOriginalDrawCallEstimateCount,
+		atlasBackedCompactedSubmittedDrawCallEstimateCount:
+			exteriorMetrics.atlasBackedCompactedSubmittedDrawCallEstimateCount +
+			interiorMetrics.atlasBackedCompactedSubmittedDrawCallEstimateCount,
+		atlasBackedCompactedDrawCallSavingsCount:
+			exteriorMetrics.atlasBackedCompactedDrawCallSavingsCount +
+			interiorMetrics.atlasBackedCompactedDrawCallSavingsCount,
+		atlasBackedCompactedSubmitNoVisibleRouteCount:
+			exteriorMetrics.atlasBackedCompactedSubmitNoVisibleRouteCount +
+			interiorMetrics.atlasBackedCompactedSubmitNoVisibleRouteCount,
+		atlasBackedCompactedSubmitNoVisibleExteriorRouteCount:
+			exteriorMetrics.atlasBackedCompactedSubmitNoVisibleExteriorRouteCount +
+			interiorMetrics.atlasBackedCompactedSubmitNoVisibleExteriorRouteCount,
+		atlasBackedCompactedSubmitNoVisibleInteriorRouteCount:
+			exteriorMetrics.atlasBackedCompactedSubmitNoVisibleInteriorRouteCount +
+			interiorMetrics.atlasBackedCompactedSubmitNoVisibleInteriorRouteCount,
+		atlasBackedCompactedSubmitNoVisibleOtherRouteCount:
+			exteriorMetrics.atlasBackedCompactedSubmitNoVisibleOtherRouteCount +
+			interiorMetrics.atlasBackedCompactedSubmitNoVisibleOtherRouteCount,
+		atlasBackedCompactedSubmitFallbackSamples: [
+			...exteriorMetrics.atlasBackedCompactedSubmitFallbackSamples,
+			...interiorMetrics.atlasBackedCompactedSubmitFallbackSamples,
 		].slice(0, 8),
 	};
 }
@@ -2049,7 +2049,7 @@ function createTriangleResources(
 		indexedP8WorldProgram: createIndexedP8WorldProgram(gl),
 		indexedP16WorldProgram: createIndexedP16WorldProgram(gl),
 		terrainBlendWorldProgram: createTerrainBlendWorldProgram(gl),
-		atlasStaticWorldProgram: createAtlasStaticWorldProgram(gl),
+		atlasBackedCompactedWorldProgram: createAtlasBackedCompactedWorldProgram(gl),
 		sceneDomainCopyProgram: createSceneDomainCopyProgram(gl),
 		vertexBuffer,
 		vertexArray,
@@ -2241,11 +2241,11 @@ function createTerrainBlendWorldProgram(
 	});
 }
 
-function createAtlasStaticWorldProgram(
+function createAtlasBackedCompactedWorldProgram(
 	gl: WebGL2RenderingContext,
-): Webgl2AtlasStaticWorldProgram {
+): Webgl2AtlasBackedCompactedWorldProgram {
 	return createWebgl2Program(gl, {
-		label: "webgl2 atlas static world",
+		label: "webgl2 atlas-backed compacted world",
 		vertexSource: ATLAS_STATIC_WORLD_VERTEX_SHADER,
 		fragmentSource: ATLAS_STATIC_WORLD_FRAGMENT_SHADER,
 		attributes: ["position", "uv", "materialSlot"],

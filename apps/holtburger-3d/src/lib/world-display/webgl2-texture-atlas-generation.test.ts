@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import type { AtlasStaticCompactionPlan } from "./atlas-static-compaction-planner";
-import { createWebgl2AtlasStaticGenerationResource } from "./webgl2-atlas-static-generation";
+import type { AtlasBackedCompactionPlan } from "./atlas-backed-compaction-planner";
+import { createWebgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
 
-describe("webgl2 atlas static generation", () => {
+describe("webgl2 texture atlas generation", () => {
 	it("packs atlas entries with gutter extrusion and uploads mipmapped rgba8 textures", () => {
 		const gl = new FakeWebgl2();
-		const generation = createWebgl2AtlasStaticGenerationResource({
+		const generation = createWebgl2TextureAtlasGenerationResource({
 			gl: gl.asContext(),
 			plan: createPlan(),
 		});
 
-		expect(generation?.key).toBe("atlas-static-compaction/test");
+		expect(generation?.key).toBe("atlas-backed-compaction/test");
 		expect(generation?.textures).toHaveLength(1);
 		expect(gl.textureUploads).toHaveLength(1);
 		expect(gl.textureUploads[0]).toMatchObject({
@@ -47,7 +47,7 @@ describe("webgl2 atlas static generation", () => {
 		const gl = new FakeWebgl2();
 
 		expect(
-			createWebgl2AtlasStaticGenerationResource({
+			createWebgl2TextureAtlasGenerationResource({
 				gl: gl.asContext(),
 				plan: {
 					...createPlan(),
@@ -59,12 +59,12 @@ describe("webgl2 atlas static generation", () => {
 	});
 });
 
-function createPlan(): AtlasStaticCompactionPlan {
+function createPlan(): AtlasBackedCompactionPlan {
 	const levelBytes = Uint8Array.from([
 		1, 2, 3, 255, 4, 5, 6, 255, 7, 8, 9, 255, 10, 11, 12, 255,
 	]);
 	return {
-		key: "atlas-static-compaction/test",
+		key: "atlas-backed-compaction/test",
 		compactableDrawUnitIds: ["draw-a"],
 		bypasses: [],
 		atlasEntryRecords: [

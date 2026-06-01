@@ -5,11 +5,11 @@ import {
 	type Webgl2BufferResource,
 	type Webgl2VertexArrayResource,
 } from "./webgl2-gl";
-import type { AtlasStaticCompactedGeometry } from "./atlas-static-geometry-compactor";
+import type { AtlasBackedCompactedGeometry } from "./atlas-backed-compacted-geometry";
 import type { AtlasTexturePlacement } from "./atlas-layout-planner";
-import type { AtlasStaticCompactionMaterialSlot } from "./atlas-static-compaction-planner";
+import type { AtlasBackedCompactionMaterialSlot } from "./atlas-backed-compaction-planner";
 
-export interface Webgl2AtlasStaticMaterialSlot {
+export interface Webgl2AtlasBackedCompactedMaterialSlot {
 	key: string;
 	index: number;
 	atlasTextureIndex: number;
@@ -18,7 +18,7 @@ export interface Webgl2AtlasStaticMaterialSlot {
 	samplingKey: string;
 }
 
-export interface Webgl2AtlasStaticBatchResource {
+export interface Webgl2AtlasBackedCompactedBatchResource {
 	key: string;
 	landblockId: number;
 	vertexArray: Webgl2VertexArrayResource;
@@ -27,9 +27,9 @@ export interface Webgl2AtlasStaticBatchResource {
 	materialSlotBuffer: Webgl2BufferResource;
 	indexBuffer: Webgl2BufferResource;
 	indexType: GLenum;
-	materialSlots: readonly Webgl2AtlasStaticMaterialSlot[];
-	batchModelMatrix: AtlasStaticCompactedGeometry["batchModelMatrix"];
-	drawSlices: AtlasStaticCompactedGeometry["drawSlices"];
+	materialSlots: readonly Webgl2AtlasBackedCompactedMaterialSlot[];
+	batchModelMatrix: AtlasBackedCompactedGeometry["batchModelMatrix"];
+	drawSlices: AtlasBackedCompactedGeometry["drawSlices"];
 	vertexCount: number;
 	indexCount: number;
 	triangleCount: number;
@@ -43,7 +43,7 @@ export interface Webgl2AtlasStaticBatchResource {
 	dispose(): void;
 }
 
-export function createWebgl2AtlasStaticBatchResource({
+export function createWebgl2AtlasBackedCompactedBatchResource({
 	gl,
 	geometry,
 	landblockId,
@@ -51,11 +51,11 @@ export function createWebgl2AtlasStaticBatchResource({
 	placementsByEntryKey,
 }: {
 	gl: WebGL2RenderingContext;
-	geometry: AtlasStaticCompactedGeometry;
+	geometry: AtlasBackedCompactedGeometry;
 	landblockId: number;
-	materialSlots: readonly AtlasStaticCompactionMaterialSlot[];
+	materialSlots: readonly AtlasBackedCompactionMaterialSlot[];
 	placementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>;
-}): Webgl2AtlasStaticBatchResource {
+}): Webgl2AtlasBackedCompactedBatchResource {
 	const positionBuffer = createWebgl2ArrayBuffer(gl, {
 		label: `${geometry.key}/positions`,
 		data: geometry.positions,
@@ -101,7 +101,7 @@ export function createWebgl2AtlasStaticBatchResource({
 				? gl.UNSIGNED_INT
 				: gl.UNSIGNED_SHORT,
 		materialSlots: materialSlots.map((slot) =>
-			toWebgl2AtlasStaticMaterialSlot(slot, placementsByEntryKey),
+			toWebgl2AtlasBackedCompactedMaterialSlot(slot, placementsByEntryKey),
 		),
 		batchModelMatrix: geometry.batchModelMatrix,
 		drawSlices: geometry.drawSlices,
@@ -125,26 +125,26 @@ export function createWebgl2AtlasStaticBatchResource({
 	};
 }
 
-export function updateWebgl2AtlasStaticBatchDynamicTables(
-	batch: Webgl2AtlasStaticBatchResource,
-	geometry: AtlasStaticCompactedGeometry,
+export function updateWebgl2AtlasBackedCompactedBatchDynamicTables(
+	batch: Webgl2AtlasBackedCompactedBatchResource,
+	geometry: AtlasBackedCompactedGeometry,
 ): void {
 	if (batch.key !== geometry.key) {
 		throw new Error(
-			`Cannot update atlas static batch ${batch.key} with geometry ${geometry.key}.`,
+			`Cannot update atlas-backed compacted batch ${batch.key} with geometry ${geometry.key}.`,
 		);
 	}
 	batch.batchModelMatrix = geometry.batchModelMatrix;
 }
 
-function toWebgl2AtlasStaticMaterialSlot(
-	slot: AtlasStaticCompactionMaterialSlot,
+function toWebgl2AtlasBackedCompactedMaterialSlot(
+	slot: AtlasBackedCompactionMaterialSlot,
 	placementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>,
-): Webgl2AtlasStaticMaterialSlot {
+): Webgl2AtlasBackedCompactedMaterialSlot {
 	const placement = placementsByEntryKey.get(slot.atlasEntryKey);
 	if (!placement) {
 		throw new Error(
-			`Atlas static material slot ${slot.key} references missing placement ${slot.atlasEntryKey}.`,
+			`Atlas-backed compacted material slot ${slot.key} references missing placement ${slot.atlasEntryKey}.`,
 		);
 	}
 	return {

@@ -2883,17 +2883,15 @@ Course corrections:
 
 Immediate cleanup before the next performance phase:
 
-- Rename the widened path away from `atlasStatic*` across files, types, resource-store fields, debug
-  metrics, and report labels. Avoid compatibility reexports or alias shims. Use split terminology:
-  texture-atlas names for atlas pages/entries/material sampling, compacted-geometry names for baked
-  VBO/IBO resources, and atlas-backed compacted names only for submit paths that require both.
-- After the rename, add optional source-kind counters for compactable, submitted, replaced, and
-  conservative-overdraw triangles so field reports can distinguish outdoor static from
+- M7B completed the rename away from `atlasStatic*` across active files, types, resource-store fields,
+  debug metrics, and report labels. No compatibility reexports or alias shims were kept.
+- Remaining optional cleanup: add source-kind counters for compactable, submitted, replaced, and
+  conservative-overdraw triangles if field reports need to distinguish outdoor static from
   structured-interior coverage without reading bypass samples.
 
 ### Phase M7B: Texture Atlas and Compacted Geometry Terminology Cleanup
 
-Status: Immediate interim phase.
+Status: Complete.
 
 Purpose: remove the misleading `atlas static` terminology without replacing it with another muddy
 name. Texture atlasing and geometry compaction are separate capabilities: staged geometry can sample
@@ -2936,6 +2934,45 @@ Decisions:
 - The current M7A replacement path is an atlas-backed compacted direct-texture path, but future phases
   intentionally create other combinations: atlas-backed staged draws in M7C, detail atlas resources
   in M7D, and terrain-specific geometry compaction in M7E.
+
+Progress:
+
+- Renamed the active planner from `atlas-static-compaction-planner` to
+  `atlas-backed-compaction-planner`. The plan/candidate/bypass types now use
+  `AtlasBackedCompaction*` because they describe draw units that can enter the current combined
+  atlas-backed compacted path.
+- Renamed WebGL2 texture-atlas generation to `webgl2-texture-atlas-generation` and
+  `Webgl2TextureAtlas*`. These resources own atlas pages/textures and are intentionally reusable by
+  future staged-atlas routing.
+- Renamed compacted geometry construction and batch resources to
+  `atlas-backed-compacted-geometry` / `webgl2-atlas-backed-compacted-batches` for the current
+  combined direct-texture path. The renderer metrics now split texture-atlas generation counts,
+  compacted-geometry resource counts/bytes, and atlas-backed compacted submit/replacement counts.
+- Renamed debug report labels and material-type counter keys from `webgl2-atlas-static-*` to split
+  `webgl2-atlas-backed-compaction-*`, `webgl2-texture-atlas-*`,
+  `webgl2-compacted-geometry-*`, and `webgl2-atlas-backed-compacted-*` names.
+- Updated tests and imports directly. No compatibility reexports, duplicate metric names, or legacy
+  aliases were added.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/atlas-backed-compaction-planner.test.ts src/lib/world-display/atlas-backed-compacted-geometry.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts src/lib/world-display/webgl2-atlas-backed-compacted-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts`
+- `npm run check`
+
+Course corrections:
+
+- M7B stayed behavior-preserving. Source-kind metric splits for outdoor-static versus
+  structured-interior coverage were not added in this rename pass because the aggregate replacement
+  metrics are already stable and the next phases need the terminology cleanup more than new
+  accounting.
+
+Cleanup targets:
+
+- Add optional source-kind counters for compactable, submitted, replaced, and conservative-overdraw
+  triangles if future field reports need to separate outdoor-static and structured-interior coverage.
+- The debug report still has a dense render-pipeline sentence. If M7C/M7D adds more atlas fields,
+  split texture-atlas, compacted-geometry, and atlas-backed submit diagnostics into separate report
+  lines before adding more comma-separated fields.
 
 ### Phase M7C: Atlas-Backed Staged Direct Materials
 
@@ -3167,10 +3204,9 @@ Exit criteria:
   show real scenes exceeding 128 material slots after M7.3.2 removes the transform-table path.
 - After M7.4, assess whether conservative whole-slice submission is too expensive in portal-heavy or
   dense static scenes before designing per-visible-range submission.
-- Rename `atlas static` files/types/metrics with split terminology as M7A broadens the path to
-  structured interiors: texture-atlas names for atlas pages/entries/material sampling,
-  compacted-geometry names for baked buffers and replacement accounting, and atlas-backed compacted
-  names only where both axes are required. Avoid compatibility reexports; rename call sites directly.
+- M7B completed the active `atlas static` file/type/metric rename with split terminology. Older
+  historical plan notes may still mention the old name when describing past phases, but active code
+  and forward guidance should use texture-atlas, compacted-geometry, or atlas-backed compacted names.
 - Revisit the per-frame WebGL2 draw-unit sort after M3-M7 reshape the submit path.
 - Split renderer-neutral material sampling DTOs from any Three adapter names/imports if they still
   imply Three ownership.

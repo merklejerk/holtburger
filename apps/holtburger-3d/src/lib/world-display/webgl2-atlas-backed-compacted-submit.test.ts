@@ -1,18 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import {
-	WEBGL2_ATLAS_STATIC_MAX_MATERIAL_SLOTS,
-	planWebgl2AtlasStaticReplacement,
-	submitWebgl2AtlasStaticBatch,
-	type Webgl2AtlasStaticWorldProgram,
-} from "./webgl2-atlas-static-submit";
-import type { Webgl2AtlasStaticBatchResource } from "./webgl2-atlas-static-batches";
-import type { Webgl2AtlasStaticGenerationResource } from "./webgl2-atlas-static-generation";
+	WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS,
+	planWebgl2AtlasBackedCompactedReplacement,
+	submitWebgl2AtlasBackedCompactedBatch,
+	type Webgl2AtlasBackedCompactedWorldProgram,
+} from "./webgl2-atlas-backed-compacted-submit";
+import type { Webgl2AtlasBackedCompactedBatchResource } from "./webgl2-atlas-backed-compacted-batches";
+import type { Webgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
 import { Webgl2StateCache } from "./webgl2-state-cache";
 
-describe("planWebgl2AtlasStaticReplacement", () => {
+describe("planWebgl2AtlasBackedCompactedReplacement", () => {
 	it("keeps staged draws when atlas resources are missing", () => {
-		const plan = planWebgl2AtlasStaticReplacement({
+		const plan = planWebgl2AtlasBackedCompactedReplacement({
 			visibleDrawUnitIds: ["draw-a"],
 			resources: {
 				batches: [],
@@ -23,12 +23,12 @@ describe("planWebgl2AtlasStaticReplacement", () => {
 		expect([...plan.replaceableDrawUnitIds]).toEqual([]);
 		expect(plan.noVisibleRouteCount).toBe(0);
 		expect(plan.fallbackSamples).toEqual([
-			"atlas static submit missing atlas generation",
+			"atlas-backed compacted submit missing atlas generation",
 		]);
 	});
 
 	it("selects visible compacted draw units when resources are ready", () => {
-		const plan = planWebgl2AtlasStaticReplacement({
+		const plan = planWebgl2AtlasBackedCompactedReplacement({
 			visibleDrawUnitIds: ["draw-a", "staged-only"],
 			resources: {
 				batches: [createBatch(["draw-a", "draw-b"])],
@@ -42,7 +42,7 @@ describe("planWebgl2AtlasStaticReplacement", () => {
 	});
 
 	it("counts no-visible route checks without reporting a fallback", () => {
-		const plan = planWebgl2AtlasStaticReplacement({
+		const plan = planWebgl2AtlasBackedCompactedReplacement({
 			visibleDrawUnitIds: ["staged-only"],
 			resources: {
 				batches: [createBatch(["draw-a"])],
@@ -56,7 +56,7 @@ describe("planWebgl2AtlasStaticReplacement", () => {
 	});
 
 	it("selects visible draw units from landblock-scoped batches", () => {
-		const plan = planWebgl2AtlasStaticReplacement({
+		const plan = planWebgl2AtlasBackedCompactedReplacement({
 			visibleDrawUnitIds: ["landblock-a"],
 			resources: {
 				batches: [
@@ -73,14 +73,14 @@ describe("planWebgl2AtlasStaticReplacement", () => {
 	});
 
 	it("falls back when material slots exceed the bounded shader path", () => {
-		const plan = planWebgl2AtlasStaticReplacement({
+		const plan = planWebgl2AtlasBackedCompactedReplacement({
 			visibleDrawUnitIds: ["draw-a"],
 			resources: {
 				batches: [
 					{
 						...createBatch(["draw-a"]),
 						materialSlots: Array.from(
-							{ length: WEBGL2_ATLAS_STATIC_MAX_MATERIAL_SLOTS + 1 },
+							{ length: WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS + 1 },
 							(_, index) => ({
 								key: `material-slot-${index}`,
 								index,
@@ -106,7 +106,7 @@ describe("planWebgl2AtlasStaticReplacement", () => {
 		const batch = createBatch(["draw-a"]);
 		const generation = createGeneration();
 
-		const metrics = submitWebgl2AtlasStaticBatch({
+		const metrics = submitWebgl2AtlasBackedCompactedBatch({
 			gl: gl.asContext(),
 			stateCache: new Webgl2StateCache(gl),
 			program: createProgram(),
@@ -136,7 +136,7 @@ describe("planWebgl2AtlasStaticReplacement", () => {
 function createBatch(
 	drawUnitIds: readonly string[],
 	landblockId = 0x0102ffff,
-): Webgl2AtlasStaticBatchResource {
+): Webgl2AtlasBackedCompactedBatchResource {
 	return {
 		key: "batch",
 		landblockId,
@@ -189,7 +189,7 @@ function createBatch(
 	};
 }
 
-function createGeneration(): Webgl2AtlasStaticGenerationResource {
+function createGeneration(): Webgl2TextureAtlasGenerationResource {
 	return {
 		key: "generation",
 		textures: [
@@ -217,7 +217,7 @@ function createGeneration(): Webgl2AtlasStaticGenerationResource {
 	};
 }
 
-function createProgram(): Webgl2AtlasStaticWorldProgram {
+function createProgram(): Webgl2AtlasBackedCompactedWorldProgram {
 	return {
 		program: {} as WebGLProgram,
 		attributes: {

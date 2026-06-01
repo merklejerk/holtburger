@@ -12,9 +12,9 @@ import {
 	type Webgl2IndexedP8WorldProgram,
 	type Webgl2TerrainBlendWorldProgram,
 } from "./webgl2-world-submit";
-import type { Webgl2AtlasStaticBatchResource } from "./webgl2-atlas-static-batches";
-import type { Webgl2AtlasStaticGenerationResource } from "./webgl2-atlas-static-generation";
-import type { Webgl2AtlasStaticWorldProgram } from "./webgl2-atlas-static-submit";
+import type { Webgl2AtlasBackedCompactedBatchResource } from "./webgl2-atlas-backed-compacted-batches";
+import type { Webgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
+import type { Webgl2AtlasBackedCompactedWorldProgram } from "./webgl2-atlas-backed-compacted-submit";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
 import {
 	Webgl2StateCache,
@@ -219,10 +219,10 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
-			atlasStaticProgram: createAtlasStaticProgram(),
-			atlasStaticResources: {
-				batches: [createAtlasStaticBatch(["atlas"])],
-				generation: createAtlasStaticGeneration(),
+			atlasBackedCompactedProgram: createAtlasBackedCompactedProgram(),
+			atlasBackedCompactedResources: {
+				batches: [createAtlasBackedCompactedBatch(["atlas"])],
+				generation: createTextureAtlasGeneration(),
 			},
 			drawUnitsById,
 			frame: createFrame(["atlas", "staged"]),
@@ -231,18 +231,18 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		expect(metrics.visibleDrawUnitCount).toBe(2);
 		expect(metrics.drawCallCount).toBe(2);
 		expect(metrics.triangleCount).toBe(2);
-		expect(metrics.atlasStaticReplacedDrawUnitCount).toBe(1);
-		expect(metrics.atlasStaticReplacedDrawUnitTriangleCount).toBe(1);
-		expect(metrics.atlasStaticRetainedDrawUnitCount).toBe(1);
-		expect(metrics.atlasStaticShaderDrawCallCount).toBe(1);
-		expect(metrics.atlasStaticSubmittedSliceRepresentedDrawUnitCount).toBe(1);
-		expect(metrics.atlasStaticSubmittedTriangleCount).toBe(1);
-		expect(metrics.atlasStaticConservativeOverdrawTriangleCount).toBe(0);
-		expect(metrics.atlasStaticConservativeOverdrawRatio).toBe(0);
-		expect(metrics.atlasStaticOriginalDrawCallEstimateCount).toBe(2);
-		expect(metrics.atlasStaticSubmittedDrawCallEstimateCount).toBe(2);
-		expect(metrics.atlasStaticDrawCallSavingsCount).toBe(0);
-		expect(metrics.atlasStaticSubmitFallbackSamples).toEqual([]);
+		expect(metrics.atlasBackedCompactedReplacedDrawUnitCount).toBe(1);
+		expect(metrics.atlasBackedCompactedReplacedDrawUnitTriangleCount).toBe(1);
+		expect(metrics.atlasBackedCompactedRetainedDrawUnitCount).toBe(1);
+		expect(metrics.atlasBackedCompactedShaderDrawCallCount).toBe(1);
+		expect(metrics.atlasBackedCompactedSubmittedSliceRepresentedDrawUnitCount).toBe(1);
+		expect(metrics.atlasBackedCompactedSubmittedTriangleCount).toBe(1);
+		expect(metrics.atlasBackedCompactedConservativeOverdrawTriangleCount).toBe(0);
+		expect(metrics.atlasBackedCompactedConservativeOverdrawRatio).toBe(0);
+		expect(metrics.atlasBackedCompactedOriginalDrawCallEstimateCount).toBe(2);
+		expect(metrics.atlasBackedCompactedSubmittedDrawCallEstimateCount).toBe(2);
+		expect(metrics.atlasBackedCompactedDrawCallSavingsCount).toBe(0);
+		expect(metrics.atlasBackedCompactedSubmitFallbackSamples).toEqual([]);
 	});
 
 	it("reports conservative whole-slice atlas overdraw", () => {
@@ -261,26 +261,26 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
-			atlasStaticProgram: createAtlasStaticProgram(),
-			atlasStaticResources: {
+			atlasBackedCompactedProgram: createAtlasBackedCompactedProgram(),
+			atlasBackedCompactedResources: {
 				batches: [
-					createAtlasStaticBatch(["atlas", "not-visible"], {
+					createAtlasBackedCompactedBatch(["atlas", "not-visible"], {
 						indexCount: 6,
 						triangleCount: 2,
 					}),
 				],
-				generation: createAtlasStaticGeneration(),
+				generation: createTextureAtlasGeneration(),
 			},
 			drawUnitsById,
 			frame: createFrame(["atlas", "staged"]),
 		});
 
-		expect(metrics.atlasStaticReplacedDrawUnitCount).toBe(1);
-		expect(metrics.atlasStaticReplacedDrawUnitTriangleCount).toBe(1);
-		expect(metrics.atlasStaticSubmittedSliceRepresentedDrawUnitCount).toBe(2);
-		expect(metrics.atlasStaticSubmittedTriangleCount).toBe(2);
-		expect(metrics.atlasStaticConservativeOverdrawTriangleCount).toBe(1);
-		expect(metrics.atlasStaticConservativeOverdrawRatio).toBe(0.5);
+		expect(metrics.atlasBackedCompactedReplacedDrawUnitCount).toBe(1);
+		expect(metrics.atlasBackedCompactedReplacedDrawUnitTriangleCount).toBe(1);
+		expect(metrics.atlasBackedCompactedSubmittedSliceRepresentedDrawUnitCount).toBe(2);
+		expect(metrics.atlasBackedCompactedSubmittedTriangleCount).toBe(2);
+		expect(metrics.atlasBackedCompactedConservativeOverdrawTriangleCount).toBe(1);
+		expect(metrics.atlasBackedCompactedConservativeOverdrawRatio).toBe(0.5);
 	});
 
 	it("attributes no-visible atlas route checks to the submit route", () => {
@@ -296,21 +296,21 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
-			atlasStaticProgram: createAtlasStaticProgram(),
-			atlasStaticResources: {
-				batches: [createAtlasStaticBatch(["not-visible"])],
-				generation: createAtlasStaticGeneration(),
+			atlasBackedCompactedProgram: createAtlasBackedCompactedProgram(),
+			atlasBackedCompactedResources: {
+				batches: [createAtlasBackedCompactedBatch(["not-visible"])],
+				generation: createTextureAtlasGeneration(),
 			},
 			viewProjectionMatrix: createIdentityMat4(),
 			drawUnits,
-			atlasStaticSubmitRoute: "scene-domain-interior",
+			atlasBackedCompactedSubmitRoute: "scene-domain-interior",
 		});
 
-		expect(metrics.atlasStaticSubmitNoVisibleRouteCount).toBe(1);
-		expect(metrics.atlasStaticSubmitNoVisibleExteriorRouteCount).toBe(0);
-		expect(metrics.atlasStaticSubmitNoVisibleInteriorRouteCount).toBe(1);
-		expect(metrics.atlasStaticSubmitNoVisibleOtherRouteCount).toBe(0);
-		expect(metrics.atlasStaticSubmitFallbackSamples).toEqual([]);
+		expect(metrics.atlasBackedCompactedSubmitNoVisibleRouteCount).toBe(1);
+		expect(metrics.atlasBackedCompactedSubmitNoVisibleExteriorRouteCount).toBe(0);
+		expect(metrics.atlasBackedCompactedSubmitNoVisibleInteriorRouteCount).toBe(1);
+		expect(metrics.atlasBackedCompactedSubmitNoVisibleOtherRouteCount).toBe(0);
+		expect(metrics.atlasBackedCompactedSubmitFallbackSamples).toEqual([]);
 	});
 
 	it("enables backface culling only for terrain when requested", () => {
@@ -670,7 +670,7 @@ function createTerrainBlendProgram(): Webgl2TerrainBlendWorldProgram {
 	};
 }
 
-function createAtlasStaticProgram(): Webgl2AtlasStaticWorldProgram {
+function createAtlasBackedCompactedProgram(): Webgl2AtlasBackedCompactedWorldProgram {
 	return {
 		program: {} as WebGLProgram,
 		attributes: {
@@ -691,13 +691,13 @@ function createAtlasStaticProgram(): Webgl2AtlasStaticWorldProgram {
 	};
 }
 
-function createAtlasStaticBatch(
+function createAtlasBackedCompactedBatch(
 	drawUnitIds: readonly string[],
 	options: {
 		indexCount?: number;
 		triangleCount?: number;
 	} = {},
-): Webgl2AtlasStaticBatchResource {
+): Webgl2AtlasBackedCompactedBatchResource {
 	const indexCount = options.indexCount ?? 3;
 	const triangleCount = options.triangleCount ?? indexCount / 3;
 	return {
@@ -752,7 +752,7 @@ function createAtlasStaticBatch(
 	};
 }
 
-function createAtlasStaticGeneration(): Webgl2AtlasStaticGenerationResource {
+function createTextureAtlasGeneration(): Webgl2TextureAtlasGenerationResource {
 	return {
 		key: "generation",
 		textures: [

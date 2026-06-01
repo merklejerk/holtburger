@@ -263,25 +263,28 @@ export function createWebgl2RenderMetrics(
 				input.worldStore?.textureAtlasGenerationTextureCount ?? 0,
 			detailTextureAtlasGenerationTextureCount:
 				input.worldStore?.detailTextureAtlasGenerationTextureCount ?? 0,
-			bakedGeometryBatchCount: input.worldStore?.bakedGeometryBatchCount ?? 0,
-			bakedGeometryDrawUnitCount:
-				input.worldStore?.bakedGeometryDrawUnitCount ?? 0,
-			bakedGeometryTriangleCount:
-				input.worldStore?.bakedGeometryTriangleCount ?? 0,
-			bakedGeometryVertexByteLength:
-				input.worldStore?.bakedGeometryVertexByteLength ?? 0,
-			bakedGeometryIndexByteLength:
-				input.worldStore?.bakedGeometryIndexByteLength ?? 0,
-			bakedGeometryTotalByteLength:
-				input.worldStore?.bakedGeometryTotalByteLength ?? 0,
-			bakedGeometryDrawSliceCount:
-				input.worldStore?.bakedGeometryDrawSliceCount ?? 0,
-			bakedGeometryBatchOriginCount:
-				input.worldStore?.bakedGeometryBatchOriginCount ?? 0,
-			bakedGeometryTransformTableEntryCount:
-				input.worldStore?.bakedGeometryTransformTableEntryCount ?? 0,
-			bakedResourceFallbackSamples: [
-				...(input.worldStore?.bakedResourceFallbackSamples ?? []),
+			compactedGeometryFamilyResourceCounts:
+				input.worldStore?.compactedGeometryFamilyResourceCounts ?? {},
+			compactedGeometryBatchCount:
+				input.worldStore?.compactedGeometryBatchCount ?? 0,
+			compactedGeometryDrawUnitCount:
+				input.worldStore?.compactedGeometryDrawUnitCount ?? 0,
+			compactedGeometryTriangleCount:
+				input.worldStore?.compactedGeometryTriangleCount ?? 0,
+			compactedGeometryVertexByteLength:
+				input.worldStore?.compactedGeometryVertexByteLength ?? 0,
+			compactedGeometryIndexByteLength:
+				input.worldStore?.compactedGeometryIndexByteLength ?? 0,
+			compactedGeometryTotalByteLength:
+				input.worldStore?.compactedGeometryTotalByteLength ?? 0,
+			compactedGeometryDrawSliceCount:
+				input.worldStore?.compactedGeometryDrawSliceCount ?? 0,
+			compactedGeometryBatchOriginCount:
+				input.worldStore?.compactedGeometryBatchOriginCount ?? 0,
+			compactedGeometryTransformTableEntryCount:
+				input.worldStore?.compactedGeometryTransformTableEntryCount ?? 0,
+			compactedResourceFallbackSamples: [
+				...(input.worldStore?.compactedResourceFallbackSamples ?? []),
 			],
 			bakedShaderDrawCallCount: input.submitMetrics.bakedShaderDrawCallCount,
 			bakedSubmittedBatchCount: input.submitMetrics.bakedSubmittedBatchCount,
@@ -392,8 +395,7 @@ export function createWebgl2RenderMetrics(
 						),
 						...prefixCounts(
 							"webgl2-baked-retained-family-",
-							input.worldStore
-								.bakedCoverageRetainedDirectMaterialFamilyCounts,
+							input.worldStore.bakedCoverageRetainedDirectMaterialFamilyCounts,
 						),
 						...prefixCounts(
 							"webgl2-baked-retained-family-alpha-policy-",
@@ -409,35 +411,39 @@ export function createWebgl2RenderMetrics(
 							input.worldStore.textureAtlasGenerationTextureCount,
 						"webgl2-detail-texture-atlas-generation-textures":
 							input.worldStore.detailTextureAtlasGenerationTextureCount,
-						"webgl2-baked-geometry-batches":
-							input.worldStore.bakedGeometryBatchCount,
-						"webgl2-baked-geometry-draw-units":
-							input.worldStore.bakedGeometryDrawUnitCount,
-						"webgl2-baked-geometry-draw-slices":
-							input.worldStore.bakedGeometryDrawSliceCount,
-						"webgl2-baked-geometry-batch-origins":
-							input.worldStore.bakedGeometryBatchOriginCount,
-						"webgl2-baked-geometry-transform-table-entries":
-							input.worldStore.bakedGeometryTransformTableEntryCount,
-						"webgl2-baked-shader-draws":
+						...prefixCounts(
+							"webgl2-compacted-family-resources-",
+							input.worldStore.compactedGeometryFamilyResourceCounts,
+						),
+						"webgl2-compacted-geometry-batches":
+							input.worldStore.compactedGeometryBatchCount,
+						"webgl2-compacted-geometry-draw-units":
+							input.worldStore.compactedGeometryDrawUnitCount,
+						"webgl2-compacted-geometry-draw-slices":
+							input.worldStore.compactedGeometryDrawSliceCount,
+						"webgl2-compacted-geometry-batch-origins":
+							input.worldStore.compactedGeometryBatchOriginCount,
+						"webgl2-compacted-geometry-transform-table-entries":
+							input.worldStore.compactedGeometryTransformTableEntryCount,
+						"webgl2-rgba-family-shader-draws":
 							input.submitMetrics.bakedShaderDrawCallCount,
-						"webgl2-baked-submitted-batches":
+						"webgl2-rgba-family-submitted-batches":
 							input.submitMetrics.bakedSubmittedBatchCount,
-						"webgl2-baked-submitted-slices":
+						"webgl2-rgba-family-submitted-slices":
 							input.submitMetrics.bakedSubmittedDrawSliceCount,
-						"webgl2-baked-submitted-slice-draw-units":
+						"webgl2-rgba-family-submitted-slice-draw-units":
 							input.submitMetrics.bakedSubmittedSliceRepresentedDrawUnitCount,
-						"webgl2-baked-submitted-triangles":
+						"webgl2-rgba-family-submitted-triangles":
 							input.submitMetrics.bakedSubmittedTriangleCount,
-						"webgl2-baked-replaced-draw-units":
+						"webgl2-rgba-family-replaced-draw-units":
 							input.submitMetrics.bakedReplacedDrawUnitCount,
-						"webgl2-baked-replaced-triangles":
+						"webgl2-rgba-family-replaced-triangles":
 							input.submitMetrics.bakedReplacedDrawUnitTriangleCount,
-						"webgl2-baked-conservative-overdraw-triangles":
+						"webgl2-rgba-family-conservative-overdraw-triangles":
 							input.submitMetrics.bakedConservativeOverdrawTriangleCount,
-						"webgl2-baked-draw-call-savings":
+						"webgl2-rgba-family-draw-call-savings":
 							input.submitMetrics.bakedDrawCallSavingsCount,
-						"webgl2-baked-no-visible-routes":
+						"webgl2-rgba-family-no-visible-routes":
 							input.submitMetrics.bakedSubmitNoVisibleRouteCount,
 						"webgl2-staged-atlas-draws":
 							input.submitMetrics.stagedAtlasDrawCount,

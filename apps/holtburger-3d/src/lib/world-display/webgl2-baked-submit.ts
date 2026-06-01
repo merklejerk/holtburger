@@ -7,9 +7,9 @@ import type {
 } from "./webgl2-compacted-geometry-resources";
 import type { Webgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
 
-export const WEBGL2_BAKED_MAX_MATERIAL_SLOTS = 128;
+export const WEBGL2_RGBA_TEXTURE_PAGE_MAX_MATERIAL_SLOTS = 128;
 
-export type Webgl2BakedGeometryWorldProgram = Webgl2ProgramResource<
+export type Webgl2RgbaTexturePageFamilyWorldProgram = Webgl2ProgramResource<
 	"position" | "uv" | "materialSlot",
 	| "uViewProjection"
 	| "uBatchModel"
@@ -24,7 +24,7 @@ export type Webgl2BakedGeometryWorldProgram = Webgl2ProgramResource<
 	| "uDetailMaterialEnabled"
 >;
 
-export interface Webgl2BakedGeometrySubmitMetrics {
+export interface Webgl2RgbaTexturePageFamilySubmitMetrics {
 	shaderDrawCallCount: number;
 	submittedBatchCount: number;
 	submittedDrawSliceCount: number;
@@ -36,13 +36,13 @@ export interface Webgl2BakedGeometrySubmitMetrics {
 	fallbackSamples: readonly string[];
 }
 
-export interface Webgl2BakedGeometrySubmitResources {
+export interface Webgl2RgbaTexturePageFamilySubmitResources {
 	batches: readonly Webgl2CompactedGeometryBatchResource[];
 	rgbaTexturePageFamilies: readonly Webgl2RgbaTexturePageFamilyResource[];
 	generation: Webgl2TextureAtlasGenerationResource | null;
 }
 
-export function createEmptyWebgl2BakedGeometrySubmitMetrics(): Webgl2BakedGeometrySubmitMetrics {
+export function createEmptyWebgl2RgbaTexturePageFamilySubmitMetrics(): Webgl2RgbaTexturePageFamilySubmitMetrics {
 	return {
 		shaderDrawCallCount: 0,
 		submittedBatchCount: 0,
@@ -56,9 +56,9 @@ export function createEmptyWebgl2BakedGeometrySubmitMetrics(): Webgl2BakedGeomet
 	};
 }
 
-export function planWebgl2BakedGeometryReplacement(options: {
+export function planWebgl2RgbaTexturePageFamilyReplacement(options: {
 	visibleDrawUnitIds: readonly string[];
-	resources: Webgl2BakedGeometrySubmitResources;
+	resources: Webgl2RgbaTexturePageFamilySubmitResources;
 }): {
 	replaceableDrawUnitIds: ReadonlySet<string>;
 	noVisibleRouteCount: number;
@@ -68,23 +68,29 @@ export function planWebgl2BakedGeometryReplacement(options: {
 		return {
 			replaceableDrawUnitIds: new Set(),
 			noVisibleRouteCount: 0,
-			fallbackSamples: ["baked submit missing texture atlas generation"],
+			fallbackSamples: [
+				"RGBA texture-page family submit missing texture atlas generation",
+			],
 		};
 	}
 	if (options.resources.batches.length === 0) {
 		return {
 			replaceableDrawUnitIds: new Set(),
 			noVisibleRouteCount: 0,
-			fallbackSamples: ["baked submit missing baked geometry batches"],
+			fallbackSamples: [
+				"RGBA texture-page family submit missing compacted geometry batches",
+			],
 		};
 	}
 	for (const family of options.resources.rgbaTexturePageFamilies) {
-		if (family.materialSlots.length > WEBGL2_BAKED_MAX_MATERIAL_SLOTS) {
+		if (
+			family.materialSlots.length > WEBGL2_RGBA_TEXTURE_PAGE_MAX_MATERIAL_SLOTS
+		) {
 			return {
 				replaceableDrawUnitIds: new Set(),
 				noVisibleRouteCount: 0,
 				fallbackSamples: [
-					`baked submit material slots ${family.materialSlots.length} exceed ${WEBGL2_BAKED_MAX_MATERIAL_SLOTS}`,
+					`RGBA texture-page family submit material slots ${family.materialSlots.length} exceed ${WEBGL2_RGBA_TEXTURE_PAGE_MAX_MATERIAL_SLOTS}`,
 				],
 			};
 		}
@@ -118,7 +124,7 @@ export function planWebgl2BakedGeometryReplacement(options: {
 	};
 }
 
-export function submitWebgl2BakedGeometryBatch({
+export function submitWebgl2RgbaTexturePageFamilyBatches({
 	gl,
 	stateCache,
 	program,
@@ -129,7 +135,7 @@ export function submitWebgl2BakedGeometryBatch({
 }: {
 	gl: WebGL2RenderingContext;
 	stateCache: Webgl2StateCache;
-	program: Webgl2BakedGeometryWorldProgram;
+	program: Webgl2RgbaTexturePageFamilyWorldProgram;
 	viewProjectionMatrix: RenderMat4;
 	resources: {
 		batches: readonly Webgl2CompactedGeometryBatchResource[];
@@ -138,14 +144,14 @@ export function submitWebgl2BakedGeometryBatch({
 	};
 	replaceableDrawUnitIds: ReadonlySet<string>;
 	retainedDrawUnitCount: number;
-}): Webgl2BakedGeometrySubmitMetrics {
+}): Webgl2RgbaTexturePageFamilySubmitMetrics {
 	if (replaceableDrawUnitIds.size === 0) {
 		return {
-			...createEmptyWebgl2BakedGeometrySubmitMetrics(),
+			...createEmptyWebgl2RgbaTexturePageFamilySubmitMetrics(),
 			retainedDrawUnitCount,
 		};
 	}
-	const metrics: Webgl2BakedGeometrySubmitMetrics = {
+	const metrics: Webgl2RgbaTexturePageFamilySubmitMetrics = {
 		shaderDrawCallCount: 0,
 		submittedBatchCount: 0,
 		submittedDrawSliceCount: 0,
@@ -188,7 +194,7 @@ export function submitWebgl2BakedGeometryBatch({
 			false,
 			batch.batchModelMatrix,
 		);
-		uploadBakedGeometryMaterialRects(gl, program, family);
+		uploadRgbaTexturePageFamilyMaterialRects(gl, program, family);
 		if (stateCache.bindVertexArray(batch.vertexArray.vertexArray)) {
 			metrics.shaderDrawCallCount += 0;
 		}
@@ -199,7 +205,7 @@ export function submitWebgl2BakedGeometryBatch({
 			if (!texture) {
 				metrics.fallbackSamples = [
 					...metrics.fallbackSamples,
-					`baked draw slice ${slice.key} missing atlas texture ${slice.atlasTextureIndex}`,
+					`RGBA texture-page family draw slice ${slice.key} missing atlas texture ${slice.atlasTextureIndex}`,
 				].slice(0, 8);
 				continue;
 			}
@@ -216,7 +222,7 @@ export function submitWebgl2BakedGeometryBatch({
 			if (slice.detailAtlasTextureIndex != null && !detailTexture) {
 				metrics.fallbackSamples = [
 					...metrics.fallbackSamples,
-					`baked draw slice ${slice.key} missing detail atlas texture ${slice.detailAtlasTextureIndex}`,
+					`RGBA texture-page family draw slice ${slice.key} missing detail atlas texture ${slice.detailAtlasTextureIndex}`,
 				].slice(0, 8);
 				continue;
 			}
@@ -248,16 +254,26 @@ export function submitWebgl2BakedGeometryBatch({
 	return metrics;
 }
 
-function uploadBakedGeometryMaterialRects(
+function uploadRgbaTexturePageFamilyMaterialRects(
 	gl: WebGL2RenderingContext,
-	program: Webgl2BakedGeometryWorldProgram,
+	program: Webgl2RgbaTexturePageFamilyWorldProgram,
 	family: Webgl2RgbaTexturePageFamilyResource,
 ): void {
-	const rects = new Float32Array(WEBGL2_BAKED_MAX_MATERIAL_SLOTS * 4);
-	const detailRects = new Float32Array(WEBGL2_BAKED_MAX_MATERIAL_SLOTS * 4);
-	const wrapModes = new Int32Array(WEBGL2_BAKED_MAX_MATERIAL_SLOTS * 2);
-	const detailTilings = new Float32Array(WEBGL2_BAKED_MAX_MATERIAL_SLOTS);
-	const detailEnabled = new Int32Array(WEBGL2_BAKED_MAX_MATERIAL_SLOTS);
+	const rects = new Float32Array(
+		WEBGL2_RGBA_TEXTURE_PAGE_MAX_MATERIAL_SLOTS * 4,
+	);
+	const detailRects = new Float32Array(
+		WEBGL2_RGBA_TEXTURE_PAGE_MAX_MATERIAL_SLOTS * 4,
+	);
+	const wrapModes = new Int32Array(
+		WEBGL2_RGBA_TEXTURE_PAGE_MAX_MATERIAL_SLOTS * 2,
+	);
+	const detailTilings = new Float32Array(
+		WEBGL2_RGBA_TEXTURE_PAGE_MAX_MATERIAL_SLOTS,
+	);
+	const detailEnabled = new Int32Array(
+		WEBGL2_RGBA_TEXTURE_PAGE_MAX_MATERIAL_SLOTS,
+	);
 	for (const slot of family.materialSlots) {
 		rects.set(slot.atlasRect, slot.index * 4);
 		wrapModes.set(
@@ -285,5 +301,7 @@ function indexTypeByteLength(
 	if (indexType === gl.UNSIGNED_INT) {
 		return 4;
 	}
-	throw new Error(`Unsupported baked submit index type ${indexType}.`);
+	throw new Error(
+		`Unsupported RGBA texture-page family submit index type ${indexType}.`,
+	);
 }

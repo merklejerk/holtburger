@@ -173,6 +173,7 @@ export interface Webgl2WorldResourceStore {
 		string,
 		Webgl2CompactedGeometryFamilyResource
 	>;
+	compactedGeometryFamilyResourceCounts: Record<string, number>;
 	bakedGeometryBatchGraph: RendererResourceGraph | null;
 	bakedGeometryBatchGraphLeasesByKey: Map<string, RendererResourceGraphLease>;
 	bakedCandidateDrawUnitCount: number;
@@ -191,16 +192,16 @@ export interface Webgl2WorldResourceStore {
 	>;
 	textureAtlasGenerationTextureCount: number;
 	detailTextureAtlasGenerationTextureCount: number;
-	bakedGeometryBatchCount: number;
-	bakedGeometryDrawUnitCount: number;
-	bakedGeometryTriangleCount: number;
-	bakedGeometryVertexByteLength: number;
-	bakedGeometryIndexByteLength: number;
-	bakedGeometryTotalByteLength: number;
-	bakedGeometryDrawSliceCount: number;
-	bakedGeometryBatchOriginCount: number;
-	bakedGeometryTransformTableEntryCount: number;
-	bakedResourceFallbackSamples: readonly string[];
+	compactedGeometryBatchCount: number;
+	compactedGeometryDrawUnitCount: number;
+	compactedGeometryTriangleCount: number;
+	compactedGeometryVertexByteLength: number;
+	compactedGeometryIndexByteLength: number;
+	compactedGeometryTotalByteLength: number;
+	compactedGeometryDrawSliceCount: number;
+	compactedGeometryBatchOriginCount: number;
+	compactedGeometryTransformTableEntryCount: number;
+	compactedResourceFallbackSamples: readonly string[];
 	textureCount: number;
 	indexedTextureCount: number;
 	paletteTextureCount: number;
@@ -291,6 +292,7 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		textureAtlasGenerationGraphLease: null,
 		compactedGeometryBatches: new Map(),
 		compactedGeometryFamilyResources: new Map(),
+		compactedGeometryFamilyResourceCounts: {},
 		bakedGeometryBatchGraph: null,
 		bakedGeometryBatchGraphLeasesByKey: new Map(),
 		bakedCandidateDrawUnitCount: 0,
@@ -306,16 +308,16 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		bakedCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts: {},
 		textureAtlasGenerationTextureCount: 0,
 		detailTextureAtlasGenerationTextureCount: 0,
-		bakedGeometryBatchCount: 0,
-		bakedGeometryDrawUnitCount: 0,
-		bakedGeometryTriangleCount: 0,
-		bakedGeometryVertexByteLength: 0,
-		bakedGeometryIndexByteLength: 0,
-		bakedGeometryTotalByteLength: 0,
-		bakedGeometryDrawSliceCount: 0,
-		bakedGeometryBatchOriginCount: 0,
-		bakedGeometryTransformTableEntryCount: 0,
-		bakedResourceFallbackSamples: [],
+		compactedGeometryBatchCount: 0,
+		compactedGeometryDrawUnitCount: 0,
+		compactedGeometryTriangleCount: 0,
+		compactedGeometryVertexByteLength: 0,
+		compactedGeometryIndexByteLength: 0,
+		compactedGeometryTotalByteLength: 0,
+		compactedGeometryDrawSliceCount: 0,
+		compactedGeometryBatchOriginCount: 0,
+		compactedGeometryTransformTableEntryCount: 0,
+		compactedResourceFallbackSamples: [],
 		textureCount: 0,
 		indexedTextureCount: 0,
 		paletteTextureCount: 0,
@@ -618,6 +620,7 @@ export function destroyWebgl2WorldResources(
 	}
 	store.compactedGeometryBatches.clear();
 	store.compactedGeometryFamilyResources.clear();
+	store.compactedGeometryFamilyResourceCounts = {};
 	store.bakedCandidateDrawUnitCount = 0;
 	store.bakedBypassReasonCount = 0;
 	store.bakedBypassSamples = [];
@@ -631,16 +634,16 @@ export function destroyWebgl2WorldResources(
 	store.bakedCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts = {};
 	store.textureAtlasGenerationTextureCount = 0;
 	store.detailTextureAtlasGenerationTextureCount = 0;
-	store.bakedGeometryBatchCount = 0;
-	store.bakedGeometryDrawUnitCount = 0;
-	store.bakedGeometryTriangleCount = 0;
-	store.bakedGeometryVertexByteLength = 0;
-	store.bakedGeometryIndexByteLength = 0;
-	store.bakedGeometryTotalByteLength = 0;
-	store.bakedGeometryDrawSliceCount = 0;
-	store.bakedGeometryBatchOriginCount = 0;
-	store.bakedGeometryTransformTableEntryCount = 0;
-	store.bakedResourceFallbackSamples = [];
+	store.compactedGeometryBatchCount = 0;
+	store.compactedGeometryDrawUnitCount = 0;
+	store.compactedGeometryTriangleCount = 0;
+	store.compactedGeometryVertexByteLength = 0;
+	store.compactedGeometryIndexByteLength = 0;
+	store.compactedGeometryTotalByteLength = 0;
+	store.compactedGeometryDrawSliceCount = 0;
+	store.compactedGeometryBatchOriginCount = 0;
+	store.compactedGeometryTransformTableEntryCount = 0;
+	store.compactedResourceFallbackSamples = [];
 	for (const texture of store.texturesByKey.values()) {
 		texture.dispose();
 	}
@@ -2225,14 +2228,14 @@ function syncWebgl2CompactedGeometryResources({
 	) {
 		releaseWebgl2BakedGeometryBatchGraphLeases(store);
 	}
-	store.bakedResourceFallbackSamples = [];
+	store.compactedResourceFallbackSamples = [];
 	const retainedGeometryBatchKeys = new Set<string>();
 	const retainedFamilyResourceKeys = new Set<string>();
 	if (
 		plan.submitFamilies.rgbaAtlas.compactableDrawUnitIds.length > 0 &&
 		!store.textureAtlasGeneration
 	) {
-		store.bakedResourceFallbackSamples = [
+		store.compactedResourceFallbackSamples = [
 			`compacted batch ${plan.key} waiting for texture atlas generation`,
 		];
 	}
@@ -2246,7 +2249,7 @@ function syncWebgl2CompactedGeometryResources({
 			renderChunkTransforms,
 		});
 		if (batchPlans.length === 0) {
-			store.bakedResourceFallbackSamples = [
+			store.compactedResourceFallbackSamples = [
 				`compacted batch ${plan.key} produced no RGBA texture-page geometry`,
 			];
 		}
@@ -2340,36 +2343,39 @@ function syncWebgl2CompactedGeometryResources({
 			);
 		}
 	}
-	store.bakedGeometryBatchCount = store.compactedGeometryBatches.size;
-	store.bakedGeometryDrawUnitCount = sumBakedGeometryBatches(
+	store.compactedGeometryFamilyResourceCounts = countCompactedFamilyResources(
+		store.compactedGeometryFamilyResources,
+	);
+	store.compactedGeometryBatchCount = store.compactedGeometryBatches.size;
+	store.compactedGeometryDrawUnitCount = sumBakedGeometryBatches(
 		store,
 		(batch) => batch.drawUnitCount,
 	);
-	store.bakedGeometryTriangleCount = sumBakedGeometryBatches(
+	store.compactedGeometryTriangleCount = sumBakedGeometryBatches(
 		store,
 		(batch) => batch.triangleCount,
 	);
-	store.bakedGeometryVertexByteLength = sumBakedGeometryBatches(
+	store.compactedGeometryVertexByteLength = sumBakedGeometryBatches(
 		store,
 		(batch) =>
 			batch.positionByteLength +
 			batch.uvByteLength +
 			batch.materialSlotByteLength,
 	);
-	store.bakedGeometryIndexByteLength = sumBakedGeometryBatches(
+	store.compactedGeometryIndexByteLength = sumBakedGeometryBatches(
 		store,
 		(batch) => batch.indexByteLength,
 	);
-	store.bakedGeometryTotalByteLength = sumBakedGeometryBatches(
+	store.compactedGeometryTotalByteLength = sumBakedGeometryBatches(
 		store,
 		(batch) => batch.totalByteLength,
 	);
-	store.bakedGeometryDrawSliceCount = sumBakedGeometryBatches(
+	store.compactedGeometryDrawSliceCount = sumBakedGeometryBatches(
 		store,
 		(batch) => batch.drawSliceCount,
 	);
-	store.bakedGeometryBatchOriginCount = store.compactedGeometryBatches.size;
-	store.bakedGeometryTransformTableEntryCount = 0;
+	store.compactedGeometryBatchOriginCount = store.compactedGeometryBatches.size;
+	store.compactedGeometryTransformTableEntryCount = 0;
 	if (!rendererResourceGraph || store.compactedGeometryBatches.size === 0) {
 		releaseWebgl2BakedGeometryBatchGraphLeases(store);
 		return;
@@ -2901,6 +2907,16 @@ function sumBakedGeometryBatches(
 	);
 }
 
+function countCompactedFamilyResources(
+	resources: ReadonlyMap<string, Webgl2CompactedGeometryFamilyResource>,
+): Record<string, number> {
+	const counts: Record<string, number> = {};
+	for (const resource of resources.values()) {
+		counts[resource.family] = (counts[resource.family] ?? 0) + 1;
+	}
+	return counts;
+}
+
 function disposeWebgl2BakedGeometryBatch(
 	store: Webgl2WorldResourceStore,
 ): void {
@@ -2909,15 +2925,16 @@ function disposeWebgl2BakedGeometryBatch(
 	}
 	store.compactedGeometryBatches.clear();
 	store.compactedGeometryFamilyResources.clear();
-	store.bakedGeometryBatchCount = 0;
-	store.bakedGeometryDrawUnitCount = 0;
-	store.bakedGeometryTriangleCount = 0;
-	store.bakedGeometryVertexByteLength = 0;
-	store.bakedGeometryIndexByteLength = 0;
-	store.bakedGeometryTotalByteLength = 0;
-	store.bakedGeometryDrawSliceCount = 0;
-	store.bakedGeometryBatchOriginCount = 0;
-	store.bakedGeometryTransformTableEntryCount = 0;
+	store.compactedGeometryFamilyResourceCounts = {};
+	store.compactedGeometryBatchCount = 0;
+	store.compactedGeometryDrawUnitCount = 0;
+	store.compactedGeometryTriangleCount = 0;
+	store.compactedGeometryVertexByteLength = 0;
+	store.compactedGeometryIndexByteLength = 0;
+	store.compactedGeometryTotalByteLength = 0;
+	store.compactedGeometryDrawSliceCount = 0;
+	store.compactedGeometryBatchOriginCount = 0;
+	store.compactedGeometryTransformTableEntryCount = 0;
 	releaseWebgl2BakedGeometryBatchGraphLeases(store);
 }
 

@@ -21,7 +21,7 @@ import type {
 	Webgl2RgbaTexturePageFamilyResource,
 } from "./webgl2-compacted-geometry-resources";
 import type { Webgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
-import type { Webgl2BakedGeometryWorldProgram } from "./webgl2-baked-submit";
+import type { Webgl2RgbaTexturePageFamilyWorldProgram } from "./webgl2-baked-submit";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
 import {
 	Webgl2StateCache,
@@ -1095,7 +1095,7 @@ function createDirectDrawPrograms(): Webgl2DirectDrawPrograms {
 	};
 }
 
-function createBakedGeometryProgram(): Webgl2BakedGeometryWorldProgram {
+function createBakedGeometryProgram(): Webgl2RgbaTexturePageFamilyWorldProgram {
 	return {
 		program: {} as WebGLProgram,
 		attributes: {

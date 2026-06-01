@@ -1053,7 +1053,7 @@ Exit criteria:
 
 ## Phase C6: Replace Replacement Planning and Metrics
 
-Status: Planned.
+Status: Complete.
 
 Purpose: make draw replacement and diagnostics family-aware without using RGBA baked geometry as the
 default meaning of "baked."
@@ -1073,6 +1073,80 @@ Tasks:
   - direct draw units retained by family/blocker.
 - Remove successful-path history from hot diagnostics unless it points to an actual blocker or error.
 - Delete or rename `bakedGeometry*` metrics that only describe RGBA atlas behavior.
+
+Progress:
+
+- Renamed the RGBA compacted replacement planner and submit surface from baked-geometry names to
+  family-specific names:
+  - `planWebgl2RgbaTexturePageFamilyReplacement()`;
+  - `submitWebgl2RgbaTexturePageFamilyBatches()`;
+  - `Webgl2RgbaTexturePageFamilySubmitResources`;
+  - `Webgl2RgbaTexturePageFamilySubmitMetrics`;
+  - `WEBGL2_RGBA_TEXTURE_PAGE_MAX_MATERIAL_SLOTS`.
+- Replacement planning now explicitly plans only the rendered `rgba-texture-page` family. Indexed
+  family resources can be built without being counted as rendered or replaceable.
+- Renamed resource diagnostics that describe neutral compacted geometry:
+  - `compactedGeometryBatchCount`;
+  - `compactedGeometryDrawUnitCount`;
+  - `compactedGeometryTriangleCount`;
+  - `compactedGeometryVertexByteLength`;
+  - `compactedGeometryIndexByteLength`;
+  - `compactedGeometryTotalByteLength`;
+  - `compactedGeometryDrawSliceCount`;
+  - `compactedGeometryBatchOriginCount`;
+  - `compactedGeometryTransformTableEntryCount`;
+  - `compactedResourceFallbackSamples`.
+- Added `compactedGeometryFamilyResourceCounts`, keyed by family, so diagnostics can show resources
+  built for `rgba-texture-page` and `indexed-paletted` separately from rendered family submissions.
+- Updated material type counters so resource-building metrics use `webgl2-compacted-*` keys and
+  rendered RGBA submit metrics use `webgl2-rgba-family-*` keys.
+- Updated the browser debug summary from "Baked coverage" to "Compaction coverage" and added compacted
+  family-resource counts to the concise render pipeline line.
+
+Decisions:
+
+- Do not rename `BakedRenderablePlan` or the root planner in C6. The planner still owns material-aware
+  compaction decisions and still has old root RGBA fields. C7 is the cleanup phase for deleting those
+  old planner shapes after the resource and replacement outputs are already split.
+- Do not rename every renderer resource field related to the current RGBA shader program in C6. The
+  submit module now exposes family-specific names, but renderer member names such as
+  `bakedGeometryWorldProgram` are legacy wiring that should be cleaned with the old-pipeline removal
+  pass.
+- Keep submitted/replaced world-submit metrics as the existing `baked*` fields for this phase, while
+  changing diagnostic material-type keys and summary text to family-specific language. The next
+  cleanup should rename the metrics struct fields in one coordinated pass.
+
+Course corrections:
+
+- The earlier C5 split made indexed family resources visible in the store, but the diagnostic text
+  still implied all compacted resources were "baked" and render-submitted. C6 corrects the public
+  debug view: compacted geometry resources, family resources, and rendered RGBA family submissions are
+  now distinct.
+- The replacement planner was already effectively RGBA-only, but its name hid that. Renaming it was
+  more important than changing behavior because the behavior was correct and the wording was not.
+
+Discovered debt and cleanup targets:
+
+- `webgl2-baked-submit.ts` should be renamed to an RGBA texture-page family pipeline module once C7
+  removes the remaining old baked renderer wiring.
+- `Webgl2WorldSubmitMetrics` still uses `baked*` field names for rendered RGBA family submissions.
+  C7 should rename those to `rgbaTexturePageFamily*` or a generic rendered-family metric structure.
+- `webgl2-world-resources.ts` still uses baked names for graph leases and planner helpers. Those no
+  longer define storage, but they are cleanup targets before implementing indexed rendering.
+- The debug summary still says "bypass" and several planner coverage fields still use `baked*`
+  property names because they come from `BakedRenderablePlan`. C7 should collapse that planner naming
+  with the old root fields.
+
+Legacy shims introduced:
+
+- No compatibility aliases were added for the renamed RGBA replacement planner or submit functions.
+- No old `bakedGeometry*` debug metric aliases were added for neutral compacted resource metrics.
+- Remaining baked-named fields are existing legacy wiring, not new shims.
+
+Validation:
+
+- `npm exec tsc -- --noEmit`
+- `npm exec vitest -- src/lib/world-display/webgl2-baked-submit.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/compacted-geometry.test.ts --run`
 
 Exit criteria:
 

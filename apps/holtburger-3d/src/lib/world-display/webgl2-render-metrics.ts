@@ -320,6 +320,25 @@ export function createWebgl2RenderMetrics(
 			rgbaTexturePageFamilyFallbackSamples: [
 				...input.submitMetrics.rgbaTexturePageFamilyFallbackSamples,
 			],
+			indexedPalettedFamilyShaderDrawCallCount:
+				input.submitMetrics.indexedPalettedFamilyShaderDrawCallCount,
+			indexedPalettedFamilySubmittedBatchCount:
+				input.submitMetrics.indexedPalettedFamilySubmittedBatchCount,
+			indexedPalettedFamilySubmittedDrawSliceCount:
+				input.submitMetrics.indexedPalettedFamilySubmittedDrawSliceCount,
+			indexedPalettedFamilySubmittedSliceRepresentedDrawUnitCount:
+				input.submitMetrics
+					.indexedPalettedFamilySubmittedSliceRepresentedDrawUnitCount,
+			indexedPalettedFamilySubmittedTriangleCount:
+				input.submitMetrics.indexedPalettedFamilySubmittedTriangleCount,
+			indexedPalettedFamilyReplacedDrawUnitCount:
+				input.submitMetrics.indexedPalettedFamilyReplacedDrawUnitCount,
+			indexedPalettedFamilyReplacedDrawUnitTriangleCount:
+				input.submitMetrics.indexedPalettedFamilyReplacedDrawUnitTriangleCount,
+			indexedPalettedFamilyRetainedDirectDrawUnitCount:
+				input.submitMetrics.indexedPalettedFamilyRetainedDirectDrawUnitCount,
+			indexedPalettedFamilyNoVisibleRouteCount:
+				input.submitMetrics.indexedPalettedFamilyNoVisibleRouteCount,
 			directTexturePageDrawCount:
 				input.submitMetrics.directTexturePageDrawCount,
 			directSingleEntryTexturePageDrawCount:
@@ -445,6 +464,24 @@ export function createWebgl2RenderMetrics(
 							input.submitMetrics.rgbaTexturePageFamilyDrawCallSavingsCount,
 						"webgl2-rgba-family-no-visible-routes":
 							input.submitMetrics.rgbaTexturePageFamilyNoVisibleRouteCount,
+						"webgl2-indexed-family-shader-draws":
+							input.submitMetrics.indexedPalettedFamilyShaderDrawCallCount,
+						"webgl2-indexed-family-submitted-batches":
+							input.submitMetrics.indexedPalettedFamilySubmittedBatchCount,
+						"webgl2-indexed-family-submitted-slices":
+							input.submitMetrics.indexedPalettedFamilySubmittedDrawSliceCount,
+						"webgl2-indexed-family-submitted-slice-draw-units":
+							input.submitMetrics
+								.indexedPalettedFamilySubmittedSliceRepresentedDrawUnitCount,
+						"webgl2-indexed-family-submitted-triangles":
+							input.submitMetrics.indexedPalettedFamilySubmittedTriangleCount,
+						"webgl2-indexed-family-replaced-draw-units":
+							input.submitMetrics.indexedPalettedFamilyReplacedDrawUnitCount,
+						"webgl2-indexed-family-replaced-triangles":
+							input.submitMetrics
+								.indexedPalettedFamilyReplacedDrawUnitTriangleCount,
+						"webgl2-indexed-family-no-visible-routes":
+							input.submitMetrics.indexedPalettedFamilyNoVisibleRouteCount,
 						"webgl2-staged-atlas-draws":
 							input.submitMetrics.stagedAtlasDrawCount,
 						"webgl2-direct-packed-texture-page-draws":

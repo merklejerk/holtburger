@@ -11,6 +11,13 @@ import {
 	type Webgl2RgbaTexturePageFamilyWorldProgram,
 } from "./webgl2-rgba-texture-page-family-submit";
 import {
+	createEmptyWebgl2IndexedPalettedFamilySubmitMetrics,
+	planWebgl2IndexedPalettedFamilyReplacement,
+	submitWebgl2IndexedPalettedFamilyBatches,
+	type Webgl2IndexedPalettedFamilySubmitResources,
+	type Webgl2IndexedPalettedFamilyWorldProgram,
+} from "./webgl2-indexed-paletted-family-submit";
+import {
 	createDirectFamilyUniformCache,
 	DIRECT_FAMILY_DRAW_TEXTURE_UNITS,
 	planWebgl2DirectDrawRoute,
@@ -137,6 +144,15 @@ export interface Webgl2WorldSubmitMetrics {
 	rgbaTexturePageFamilyNoVisibleInteriorRouteCount: number;
 	rgbaTexturePageFamilyNoVisibleOtherRouteCount: number;
 	rgbaTexturePageFamilyFallbackSamples: readonly string[];
+	indexedPalettedFamilyShaderDrawCallCount: number;
+	indexedPalettedFamilySubmittedBatchCount: number;
+	indexedPalettedFamilySubmittedDrawSliceCount: number;
+	indexedPalettedFamilySubmittedSliceRepresentedDrawUnitCount: number;
+	indexedPalettedFamilySubmittedTriangleCount: number;
+	indexedPalettedFamilyReplacedDrawUnitCount: number;
+	indexedPalettedFamilyReplacedDrawUnitTriangleCount: number;
+	indexedPalettedFamilyRetainedDirectDrawUnitCount: number;
+	indexedPalettedFamilyNoVisibleRouteCount: number;
 	directTexturePageDrawCount: number;
 	directSingleEntryTexturePageDrawCount: number;
 	directPackedTexturePageDrawCount: number;
@@ -181,6 +197,15 @@ const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	rgbaTexturePageFamilyNoVisibleInteriorRouteCount: 0,
 	rgbaTexturePageFamilyNoVisibleOtherRouteCount: 0,
 	rgbaTexturePageFamilyFallbackSamples: [],
+	indexedPalettedFamilyShaderDrawCallCount: 0,
+	indexedPalettedFamilySubmittedBatchCount: 0,
+	indexedPalettedFamilySubmittedDrawSliceCount: 0,
+	indexedPalettedFamilySubmittedSliceRepresentedDrawUnitCount: 0,
+	indexedPalettedFamilySubmittedTriangleCount: 0,
+	indexedPalettedFamilyReplacedDrawUnitCount: 0,
+	indexedPalettedFamilyReplacedDrawUnitTriangleCount: 0,
+	indexedPalettedFamilyRetainedDirectDrawUnitCount: 0,
+	indexedPalettedFamilyNoVisibleRouteCount: 0,
 	directTexturePageDrawCount: 0,
 	directSingleEntryTexturePageDrawCount: 0,
 	directPackedTexturePageDrawCount: 0,
@@ -218,10 +243,17 @@ export function submitWebgl2FlatWorldFrame({
 	indexedP8Program,
 	indexedP16Program,
 	rgbaTexturePageFamilyProgram,
+	indexedPalettedFamilyP8Program,
+	indexedPalettedFamilyP16Program,
 	rgbaTexturePageFamilyResources = {
 		batches: [],
 		rgbaTexturePageFamilies: [],
 		generation: null,
+	},
+	indexedPalettedFamilyResources = {
+		batches: [],
+		indexedPalettedFamilies: [],
+		texturesByKey: new Map(),
 	},
 	drawUnitsById,
 	frame,
@@ -234,7 +266,10 @@ export function submitWebgl2FlatWorldFrame({
 	indexedP8Program: Webgl2IndexedP8WorldProgram;
 	indexedP16Program: Webgl2IndexedP16WorldProgram;
 	rgbaTexturePageFamilyProgram?: Webgl2RgbaTexturePageFamilyWorldProgram;
+	indexedPalettedFamilyP8Program?: Webgl2IndexedPalettedFamilyWorldProgram;
+	indexedPalettedFamilyP16Program?: Webgl2IndexedPalettedFamilyWorldProgram;
 	rgbaTexturePageFamilyResources?: Webgl2RgbaTexturePageFamilySubmitResources;
+	indexedPalettedFamilyResources?: Webgl2IndexedPalettedFamilySubmitResources;
 	drawUnitsById: ReadonlyMap<string, Webgl2WorldDrawUnit>;
 	frame: StagedWorldFrame;
 }): Webgl2WorldSubmitMetrics {
@@ -253,7 +288,10 @@ export function submitWebgl2FlatWorldFrame({
 		indexedP8Program,
 		indexedP16Program,
 		rgbaTexturePageFamilyProgram,
+		indexedPalettedFamilyP8Program,
+		indexedPalettedFamilyP16Program,
 		rgbaTexturePageFamilyResources,
+		indexedPalettedFamilyResources,
 		viewProjectionMatrix: frame.viewProjectionMatrix,
 		drawUnits,
 		portalMaskDrawUnitCount: portalMaskDrawUnits.length,
@@ -271,10 +309,17 @@ export function submitWebgl2FlatWorldDrawUnits({
 	indexedP8Program,
 	indexedP16Program,
 	rgbaTexturePageFamilyProgram,
+	indexedPalettedFamilyP8Program,
+	indexedPalettedFamilyP16Program,
 	rgbaTexturePageFamilyResources = {
 		batches: [],
 		rgbaTexturePageFamilies: [],
 		generation: null,
+	},
+	indexedPalettedFamilyResources = {
+		batches: [],
+		indexedPalettedFamilies: [],
+		texturesByKey: new Map(),
 	},
 	viewProjectionMatrix,
 	drawUnits,
@@ -292,7 +337,10 @@ export function submitWebgl2FlatWorldDrawUnits({
 	indexedP8Program: Webgl2IndexedP8WorldProgram;
 	indexedP16Program: Webgl2IndexedP16WorldProgram;
 	rgbaTexturePageFamilyProgram?: Webgl2RgbaTexturePageFamilyWorldProgram;
+	indexedPalettedFamilyP8Program?: Webgl2IndexedPalettedFamilyWorldProgram;
+	indexedPalettedFamilyP16Program?: Webgl2IndexedPalettedFamilyWorldProgram;
 	rgbaTexturePageFamilyResources?: Webgl2RgbaTexturePageFamilySubmitResources;
+	indexedPalettedFamilyResources?: Webgl2IndexedPalettedFamilySubmitResources;
 	viewProjectionMatrix: RenderMat4;
 	drawUnits: readonly Webgl2WorldDrawUnit[];
 	portalMaskDrawUnitCount?: number;
@@ -322,12 +370,20 @@ export function submitWebgl2FlatWorldDrawUnits({
 		visibleDrawUnitIds: drawUnits.map((drawUnit) => drawUnit.id),
 		resources: rgbaTexturePageFamilyResources,
 	});
+	const indexedReplacement = planWebgl2IndexedPalettedFamilyReplacement({
+		visibleDrawUnitIds: drawUnits.map((drawUnit) => drawUnit.id),
+		resources: indexedPalettedFamilyResources,
+	});
+	const compactedReplacementDrawUnitIds = new Set([
+		...atlasReplacement.replaceableDrawUnitIds,
+		...indexedReplacement.replaceableDrawUnitIds,
+	]);
 	const stagedDrawUnits =
-		atlasReplacement.replaceableDrawUnitIds.size === 0
+		compactedReplacementDrawUnitIds.size === 0
 			? drawUnits
 			: drawUnits.filter(
 					(drawUnit) =>
-						!atlasReplacement.replaceableDrawUnitIds.has(drawUnit.id),
+						!compactedReplacementDrawUnitIds.has(drawUnit.id),
 				);
 	const retainedDrawUnitCount = stagedDrawUnits.length;
 	metrics.visibleRetainedDirectDrawUnitCountsByCompactionFamily =
@@ -335,6 +391,10 @@ export function submitWebgl2FlatWorldDrawUnits({
 	const replaceableDrawUnitTriangleCount = sumDrawUnitTriangles(
 		drawUnits,
 		atlasReplacement.replaceableDrawUnitIds,
+	);
+	const indexedReplaceableDrawUnitTriangleCount = sumDrawUnitTriangles(
+		drawUnits,
+		indexedReplacement.replaceableDrawUnitIds,
 	);
 	metrics.stateChangeCount += stateCache.setDepthState({
 		enabled: true,
@@ -379,6 +439,19 @@ export function submitWebgl2FlatWorldDrawUnits({
 			metrics,
 			planningNoVisibleRouteCount: atlasReplacement.noVisibleRouteCount,
 			planningFallbackSamples: atlasReplacement.fallbackSamples,
+		});
+		submitIndexedPalettedFamilyDrawUnits({
+			gl,
+			stateCache,
+			p8Program: indexedPalettedFamilyP8Program,
+			p16Program: indexedPalettedFamilyP16Program,
+			viewProjectionMatrix,
+			resources: indexedPalettedFamilyResources,
+			replaceableDrawUnitIds: indexedReplacement.replaceableDrawUnitIds,
+			retainedDrawUnitCount,
+			replaceableDrawUnitTriangleCount: indexedReplaceableDrawUnitTriangleCount,
+			metrics,
+			planningNoVisibleRouteCount: indexedReplacement.noVisibleRouteCount,
 		});
 		return metrics;
 	}
@@ -530,7 +603,130 @@ export function submitWebgl2FlatWorldDrawUnits({
 		planningNoVisibleRouteCount: atlasReplacement.noVisibleRouteCount,
 		planningFallbackSamples: atlasReplacement.fallbackSamples,
 	});
+	submitIndexedPalettedFamilyDrawUnits({
+		gl,
+		stateCache,
+		p8Program: indexedPalettedFamilyP8Program,
+		p16Program: indexedPalettedFamilyP16Program,
+		viewProjectionMatrix,
+		resources: indexedPalettedFamilyResources,
+		replaceableDrawUnitIds: indexedReplacement.replaceableDrawUnitIds,
+		retainedDrawUnitCount,
+		replaceableDrawUnitTriangleCount: indexedReplaceableDrawUnitTriangleCount,
+		metrics,
+		planningNoVisibleRouteCount: indexedReplacement.noVisibleRouteCount,
+	});
 	return metrics;
+}
+
+function submitIndexedPalettedFamilyDrawUnits({
+	gl,
+	stateCache,
+	p8Program,
+	p16Program,
+	viewProjectionMatrix,
+	resources,
+	replaceableDrawUnitIds,
+	retainedDrawUnitCount,
+	replaceableDrawUnitTriangleCount,
+	metrics,
+	planningNoVisibleRouteCount,
+}: {
+	gl: WebGL2RenderingContext;
+	stateCache: Webgl2StateCache;
+	p8Program: Webgl2IndexedPalettedFamilyWorldProgram | undefined;
+	p16Program: Webgl2IndexedPalettedFamilyWorldProgram | undefined;
+	viewProjectionMatrix: RenderMat4;
+	resources: Webgl2IndexedPalettedFamilySubmitResources;
+	replaceableDrawUnitIds: ReadonlySet<string>;
+	retainedDrawUnitCount: number;
+	replaceableDrawUnitTriangleCount: number;
+	metrics: Webgl2WorldSubmitMetrics;
+	planningNoVisibleRouteCount: number;
+}): void {
+	if (replaceableDrawUnitIds.size === 0) {
+		const emptyMetrics =
+			createEmptyWebgl2IndexedPalettedFamilySubmitMetrics();
+		metrics.indexedPalettedFamilyRetainedDirectDrawUnitCount =
+			retainedDrawUnitCount;
+		metrics.indexedPalettedFamilyNoVisibleRouteCount =
+			planningNoVisibleRouteCount + emptyMetrics.noVisibleRouteCount;
+		return;
+	}
+	if (!p8Program || !p16Program) {
+		throw new Error(
+			"Indexed-paletted family replacement was planned without compacted indexed shader programs.",
+		);
+	}
+	const p8Resources = filterIndexedPalettedFamilyResourcesByFormat(
+		resources,
+		"p8",
+	);
+	const p16Resources = filterIndexedPalettedFamilyResourcesByFormat(
+		resources,
+		"index16",
+	);
+	const p8Metrics = submitWebgl2IndexedPalettedFamilyBatches({
+		gl,
+		stateCache,
+		program: p8Program,
+		viewProjectionMatrix,
+		resources: p8Resources,
+		replaceableDrawUnitIds,
+		retainedDrawUnitCount,
+	});
+	const p16Metrics = submitWebgl2IndexedPalettedFamilyBatches({
+		gl,
+		stateCache,
+		program: p16Program,
+		viewProjectionMatrix,
+		resources: p16Resources,
+		replaceableDrawUnitIds,
+		retainedDrawUnitCount,
+	});
+	metrics.drawCallCount +=
+		p8Metrics.shaderDrawCallCount + p16Metrics.shaderDrawCallCount;
+	metrics.triangleCount +=
+		p8Metrics.submittedTriangleCount + p16Metrics.submittedTriangleCount;
+	metrics.indexedPalettedFamilyShaderDrawCallCount =
+		p8Metrics.shaderDrawCallCount + p16Metrics.shaderDrawCallCount;
+	metrics.indexedPalettedFamilySubmittedBatchCount =
+		p8Metrics.submittedBatchCount + p16Metrics.submittedBatchCount;
+	metrics.indexedPalettedFamilySubmittedDrawSliceCount =
+		p8Metrics.submittedDrawSliceCount + p16Metrics.submittedDrawSliceCount;
+	metrics.indexedPalettedFamilySubmittedSliceRepresentedDrawUnitCount =
+		p8Metrics.submittedSliceRepresentedDrawUnitCount +
+		p16Metrics.submittedSliceRepresentedDrawUnitCount;
+	metrics.indexedPalettedFamilySubmittedTriangleCount =
+		p8Metrics.submittedTriangleCount + p16Metrics.submittedTriangleCount;
+	metrics.indexedPalettedFamilyReplacedDrawUnitCount =
+		replaceableDrawUnitIds.size;
+	metrics.indexedPalettedFamilyReplacedDrawUnitTriangleCount =
+		replaceableDrawUnitTriangleCount;
+	metrics.indexedPalettedFamilyRetainedDirectDrawUnitCount =
+		retainedDrawUnitCount;
+	metrics.indexedPalettedFamilyNoVisibleRouteCount =
+		planningNoVisibleRouteCount +
+		p8Metrics.noVisibleRouteCount +
+		p16Metrics.noVisibleRouteCount;
+}
+
+function filterIndexedPalettedFamilyResourcesByFormat(
+	resources: Webgl2IndexedPalettedFamilySubmitResources,
+	indexFormat: "p8" | "index16",
+): Webgl2IndexedPalettedFamilySubmitResources {
+	return {
+		batches: resources.batches,
+		indexedPalettedFamilies: resources.indexedPalettedFamilies
+			.map((family) => ({
+				...family,
+				drawSlices: family.drawSlices.filter(
+					(slice) => slice.indexFormat === indexFormat,
+				),
+			}))
+			.filter((family) => family.drawSlices.length > 0),
+		texturesByKey: resources.texturesByKey,
+	};
 }
 
 function submitRgbaTexturePageFamilyDrawUnits({

@@ -190,6 +190,15 @@ export interface WorldRenderDebugMetrics {
 	rgbaTexturePageFamilyNoVisibleInteriorRouteCount: number;
 	rgbaTexturePageFamilyNoVisibleOtherRouteCount: number;
 	rgbaTexturePageFamilyFallbackSamples: string[];
+	indexedPalettedFamilyShaderDrawCallCount: number;
+	indexedPalettedFamilySubmittedBatchCount: number;
+	indexedPalettedFamilySubmittedDrawSliceCount: number;
+	indexedPalettedFamilySubmittedSliceRepresentedDrawUnitCount: number;
+	indexedPalettedFamilySubmittedTriangleCount: number;
+	indexedPalettedFamilyReplacedDrawUnitCount: number;
+	indexedPalettedFamilyReplacedDrawUnitTriangleCount: number;
+	indexedPalettedFamilyRetainedDirectDrawUnitCount: number;
+	indexedPalettedFamilyNoVisibleRouteCount: number;
 	directTexturePageDrawCount: number;
 	directSingleEntryTexturePageDrawCount: number;
 	directPackedTexturePageDrawCount: number;

@@ -995,6 +995,7 @@ function createIndexedPalettedFamilyMaterialTableRecord(
 		clipThreshold: indexedMaterial.clipThreshold,
 		wrapS: indexedMaterial.wrapS,
 		wrapT: indexedMaterial.wrapT,
+		color: drawUnit.color,
 		alphaPolicy: "opaque",
 		filteringMode: "shader-palette-linear",
 	};

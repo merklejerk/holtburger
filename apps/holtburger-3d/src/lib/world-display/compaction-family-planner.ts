@@ -1,5 +1,6 @@
 import { planAtlasLayout, type AtlasTexturePage } from "./atlas-layout-planner";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
+import type { RenderVec4 } from "./render-math";
 import type { StagedWorldMaterialAtlasEligibility } from "./staged-world-material-strategy";
 import type { TexturePageBinding } from "./texture-page-binding";
 import type { Webgl2SceneDomain } from "./webgl2-scene-domain-targets";
@@ -64,6 +65,7 @@ export type CompactionMaterialBlocker =
 	| "missing-compacted-opacity-translucent-family"
 	| "missing-compacted-terrain-family"
 	| "debug-pipeline-material"
+	| "detail-overlay"
 	| "missing-detail-atlas-entry"
 	| "unsupported-material-state"
 	| "unsupported-texture-page-behavior";
@@ -141,6 +143,7 @@ export interface IndexedPalettedFamilyMaterialTableRecord {
 	clipThreshold: number;
 	wrapS: "clamp" | "repeat";
 	wrapT: "clamp" | "repeat";
+	color: RenderVec4;
 	alphaPolicy: "opaque";
 	filteringMode: "shader-palette-linear";
 }
@@ -281,12 +284,15 @@ export function planCompactionFamilies(options: {
 	drawUnits: readonly CompactionFamilyCandidate[];
 	policy: CompactionFamilyPlanningPolicy;
 }): CompactionFamilyPlan {
-	const eligible: EligibleCompactionFamilyCandidate[] = [];
+	const rgbaEligible: EligibleCompactionFamilyCandidate[] = [];
 	const bypasses: CompactionFamilyBypass[] = [];
 	for (const drawUnit of options.drawUnits) {
 		const bypass = classifyCompactionFamilyBypass(drawUnit);
 		if (bypass) {
 			bypasses.push(bypass);
+			continue;
+		}
+		if (drawUnit.compactionEligibility.material.family === "indexed-paletted") {
 			continue;
 		}
 		const atlasEligibility = drawUnit.compactionEligibility.material.atlasEligibility;
@@ -295,10 +301,10 @@ export function planCompactionFamilies(options: {
 				`Compacted geometry candidate ${drawUnit.id} was accepted without packed texture-page eligibility.`,
 			);
 		}
-		eligible.push({ drawUnit, eligibility: atlasEligibility });
+		rgbaEligible.push({ drawUnit, eligibility: atlasEligibility });
 	}
 
-	const atlasEntries = dedupeRgbaTexturePageEntries(eligible);
+	const atlasEntries = dedupeRgbaTexturePageEntries(rgbaEligible);
 	const layout = planAtlasLayout({
 		entries: atlasEntries.map((record) => ({
 			key: record.key,
@@ -311,10 +317,10 @@ export function planCompactionFamilies(options: {
 			gutterPixels: options.policy.baseGutterPixels,
 		},
 	});
-	const placed = eligible.filter((candidate) =>
+	const placed = rgbaEligible.filter((candidate) =>
 		layout.placementsByEntryKey.has(candidate.eligibility.atlasEntryKey),
 	);
-	for (const candidate of eligible) {
+	for (const candidate of rgbaEligible) {
 		const overflow = layout.overflowsByEntryKey.get(
 			candidate.eligibility.atlasEntryKey,
 		);
@@ -420,6 +426,13 @@ export function planCompactionFamilies(options: {
 	const compactableDrawUnitIds = compactable.map(
 		(candidate) => candidate.drawUnit.id,
 	);
+	const indexedCompactableDrawUnitIds = indexedCompactable.map(
+		(candidate) => candidate.id,
+	);
+	const allCompactableDrawUnitIds = [
+		...compactableDrawUnitIds,
+		...indexedCompactableDrawUnitIds,
+	];
 	const drawUnitMaterialSlots = compactable.map((candidate) => ({
 		drawUnitId: candidate.drawUnit.id,
 		materialSlotKey: describeCompactionMaterialSlotKey(candidate),
@@ -444,14 +457,12 @@ export function planCompactionFamilies(options: {
 				(record) => record.key,
 			),
 		}),
-		compactableDrawUnitIds,
+		compactableDrawUnitIds: allCompactableDrawUnitIds,
 		renderFamilies: createCompactionRenderFamilies({
 			compactableDrawUnitIds,
 			materialSlots,
 			indexedMaterialTableRecords,
-			indexedCompactableDrawUnitIds: indexedCompactable.map(
-				(candidate) => candidate.id,
-			),
+			indexedCompactableDrawUnitIds,
 			indexedDrawUnitMaterialSlots,
 			indexedDrawSlices,
 			drawUnitMaterialSlots,
@@ -494,14 +505,23 @@ export function planCompactionFamilies(options: {
 		drawUnitMaterialSlots,
 		drawSlices,
 		staticObjectKeys: uniqueSortedStrings(
-			compactable.flatMap((candidate) => candidate.drawUnit.staticObjectKeys),
+			[
+				...compactable.flatMap((candidate) => candidate.drawUnit.staticObjectKeys),
+				...indexedCompactable.flatMap((candidate) => candidate.staticObjectKeys),
+			],
 		),
 		staticPartCount: compactable.reduce(
 			(total, candidate) => total + candidate.drawUnit.staticPartCount,
 			0,
+		) + indexedCompactable.reduce(
+			(total, candidate) => total + candidate.staticPartCount,
+			0,
 		),
 		triangleCount: compactable.reduce(
 			(total, candidate) => total + candidate.drawUnit.triangleCount,
+			0,
+		) + indexedCompactable.reduce(
+			(total, candidate) => total + candidate.triangleCount,
 			0,
 		),
 		preparedTextureAssetIds: uniqueSortedStrings(
@@ -667,7 +687,8 @@ function isIndexedPalettedMaterialTableReady(
 		!material.blockers.includes("missing-indexed-texel-page") &&
 		!material.blockers.includes("missing-indexed-palette-page") &&
 		!material.blockers.includes("unsupported-texture-page-behavior") &&
-		!material.blockers.includes("indexed-alpha-policy-unsupported")
+		!material.blockers.includes("indexed-alpha-policy-unsupported") &&
+		!material.blockers.includes("detail-overlay")
 	);
 }
 
@@ -730,9 +751,11 @@ export function createCompactionEligibility(options: {
 			) {
 				materialBlockers.push("unsupported-texture-page-behavior");
 			}
-			materialBlockers.push("missing-compacted-indexed-paletted-family");
 			if (alphaPolicy !== "opaque") {
 				materialBlockers.push("indexed-alpha-policy-unsupported");
+			}
+			if (options.hasDetailOverlay) {
+				materialBlockers.push("detail-overlay");
 			}
 			break;
 		case "terrain-blend":
@@ -851,6 +874,12 @@ function createMaterialCompactionBypass(
 				drawUnitId: drawUnit.id,
 				reason: "indexed-alpha-policy-unsupported",
 				detail: `indexed/paletted material ${drawUnit.materialKey} has alpha policy that is not supported by the compacted indexed path`,
+			};
+		case "detail-overlay":
+			return {
+				drawUnitId: drawUnit.id,
+				reason: "detail-overlay",
+				detail: `indexed/paletted material ${drawUnit.materialKey} has a detail overlay not yet supported by the compacted indexed family`,
 			};
 		case "missing-compacted-alpha-test-family":
 			return {

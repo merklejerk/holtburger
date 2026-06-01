@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
-Status: Phase M7D.1a.1 validated; Phase M7D.1b staged repeat/wrap atlas sampling next.
+Status: Phase M7D.1a.1 validated; pivoting next to baked versus direct-draw renderables.
 
 Related plans:
 
@@ -16,9 +16,20 @@ atlas-ready prepared textures, object assembly, resource-graph retention, portal
 parity, and later static compaction. The luma backend itself is retired, so this plan carries those
 designs forward without retaining luma terminology or implementation targets.
 
-The next implementation work should correct staged material visibility. A staged draw unit should
-render its resolved per-surface material directly whenever WebGL2 supports that material. Atlas
-eligibility is metadata for future compaction, not a prerequisite for seeing materials.
+The next implementation work should simplify the renderer into two broad renderable categories:
+direct-draw renderables and baked renderables, while making texture-page binding a shared material
+resource model used by both. A direct texture is a single-entry texture page with a full-texture rect;
+a packed atlas is a texture page with multiple rects and gutter/mip policy. Baked renderables are
+promoted resources that combine compacted geometry with material-table submission. Direct draw and
+baked draw may both sample texture pages by rect, but only baked draw uses baked VBAs and material
+slot tables. Atlas-rect texture-page sampling should become the only texture sampling mode for both
+direct draw and baked draw; direct texture sampling is just the single-entry case.
+
+The broader goal is to make the direct and baked pipelines more isomorphic. They should consume the
+same resolved material facts, texture-page bindings, sampler policies, render-state facts, and
+fallback reasons wherever practical. They should diverge only where their submission model genuinely
+differs: direct draw uses per-draw resources/uniforms, while baked draw uses compacted geometry,
+material-slot attributes, and material tables.
 
 ## Current Baseline
 
@@ -32,9 +43,19 @@ eligibility is metadata for future compaction, not a prerequisite for seeing mat
   - `staged-world-materials.ts`
   - `staged-world-material-strategy.ts`
   - `material-texture-preparation-policy.ts`
-- WebGL2 can render the staged baseline with flat fallback and direct-texture draw units.
-- Current visual behavior is still too flat because many common material slots are classified as
-  future atlas candidates and then rendered as fallback. That is the next problem to fix.
+- WebGL2 can render the current scene with flat fallback, direct-texture draw units, and baked
+  static/structured-interior batches for eligible draw units.
+- The next problem is architectural simplification: the old staged-atlas route should become explicit
+  texture-page binding, and baking should mean compacted geometry plus material-table submission for a
+  supported bake family.
+- Direct and baked material paths are currently too divergent. The next phases should reduce that
+  divergence by sharing material facts, texture-page records, sampler helpers, fallback reasons, and
+  metrics vocabulary instead of adding more one-off shader/resource paths.
+- Detail textures already use a detail-atlas path in baked static/interior draws. That should become
+  part of the general texture-page model rather than a one-off detail path.
+- Indexed, paletted, and blended material inputs should also move to texture-page buckets instead of
+  remaining as standalone sampler paths. Index and palette pages must preserve data sampling:
+  no mipmapping, no filtering, no color-space conversion, and integer/nearest semantics where needed.
 - The normalized prepared-texture path exists for decompressed, base-level material texture inputs:
   `prepared-texture/<renderSurfaceId>?usage=<usage>&out=rgba8|r8&mips=none&cs=linear|data`.
 - The renderer resource graph, cleanup scheduler, readiness/incubation, staged assembly, BVH
@@ -49,9 +70,16 @@ eligibility is metadata for future compaction, not a prerequisite for seeing mat
   policy is needed. Do not adopt Three-style sRGB assumptions by default.
 - Atlas eligibility is material-aware. Evaluate material recipe, render surface, texture usage,
   sampler policy, render state, alpha behavior, and UV animation together.
-- Atlas eligibility must not suppress staged material visibility. For staged draw units, the active
-  render path should prefer direct material rendering when supported, while separately recording
-  atlas eligibility for later compaction.
+- Atlas-page eligibility must not suppress direct-draw material visibility. Direct-draw units render
+  with a single-entry texture page or a compatible packed texture page when supported. Texture-page
+  binding is a material-resource decision, not a bake decision by itself.
+- Prefer isomorphic material planning. A material feature should generally be proven once as a
+  resolved material/texture-page fact, then consumed by direct and baked submit paths according to
+  their capabilities. Avoid duplicating feature detection separately inside each submit path.
+- All texture-bearing material inputs should resolve through texture-page bindings before submit:
+  base color, detail, indexed texels, palettes, terrain/blend inputs, alpha masks, roads, and any
+  later material texture channels. Different usage buckets may have different formats, filtering,
+  mip, and gutter policies.
 - One atlas set may contain multiple atlas textures. Pack additional atlas textures into the same
   atlas set before falling back for capacity.
 - Initial atlas packing should use deterministic ordering, power-of-two page dimensions where
@@ -59,21 +87,32 @@ eligibility is metadata for future compaction, not a prerequisite for seeing mat
 - Generate mipmaps from packed atlas pages after padding/gutter extrusion. Do not stitch source mips.
 - Preserve author UVs. For repeating/wrapping atlas materials, either use shader sampling that keeps
   derivatives correct or fall back explicitly.
+- Preserve data texture semantics. Indexed texel pages, palette pages, and other lookup/data pages
+  must not use mipmaps or filtering, and their shader paths should avoid normalized-color assumptions
+  unless that is explicitly part of the source format.
 - Start material tables with bounded uniform arrays. Partition draw slices deterministically when
   material slots exceed the selected uniform limit.
-- Conservative WebGL2 draw slices should bind one atlas texture unless a deliberate multi-sampler
-  path is implemented and measured.
-- Split draw slices on render-state compatibility: shader variant, atlas set, atlas texture binding,
+- Conservative WebGL2 draw slices should bind one texture page unless a deliberate multi-sampler path
+  is implemented and measured.
+- Split draw slices on render-state compatibility: shader variant, texture-page set, texture binding,
   blend mode, depth write/test, alpha test, cull/two-sided mode, and other non-varying GL state.
-- Alpha-test/cutout materials may enter atlas batching when compatible. Blended transparency remains
-  direct/staged/fallback until sorting and depth-write behavior are explicitly modeled.
-- Materials with texture velocity or UV animation stay direct/staged/fallback until shader and
+- Alpha-test/cutout materials may enter texture-page-backed baking when compatible. Blended transparency
+  remains direct draw or fallback until sorting and depth-write behavior are explicitly modeled.
+- Materials with texture velocity or UV animation stay direct draw or fallback until shader and
   strategy support exists.
-- Atlas generations are immutable. Old generations stay alive while draw units, compacted batches,
-  or staged entries reference them, then retire through resource graph cleanup and owning stores.
-- Debug metrics must distinguish direct texture, atlas texture, flat fallback, missing decompressed
-  prepared texture, atlas full, source texture too large, material-table overflow, unsupported render
-  state, blended transparency fallback, animated UV fallback, and mip/repeat derivative fallback.
+- Packed atlas generations are immutable. Old generations stay alive while baked renderables
+  reference them, then retire through resource graph cleanup and owning stores.
+- A direct texture may be represented as a single-entry atlas page with a full-texture rect. This
+  representation is valid for both direct draw and baked draw. Baked rendering is still defined by
+  compacted geometry and material-table submission, not by whether the texture page is packed.
+- Baked vertex-buffer assemblies are scoped to landblocks or similarly local world ownership units.
+  Packed texture pages are not landblock-scoped; they are content/material resources that direct draw
+  and baked geometry can reference from multiple landblocks when residency policy allows. Single-entry
+  direct texture pages follow direct-texture residency unless promoted to a shared packed atlas later.
+- Debug metrics must distinguish direct draw versus baked draw, packed-atlas texture pages versus
+  single-entry texture pages, flat fallback, missing decompressed prepared texture, atlas full, source
+  texture too large, material-table overflow, unsupported render state, blended transparency fallback,
+  animated UV fallback, data-page unsupported fallback, and mip/repeat derivative fallback.
 
 ## Ownership Model
 
@@ -84,40 +123,52 @@ flowchart TD
   incubation --> assembly["Staged world assembly"]
   assembly --> graph["RendererResourceGraph"]
   assembly --> strategy["Staged material strategy"]
-  strategy --> direct["Direct texture / flat staged resources"]
-  direct --> webgl2Scene["WebGL2 draw units"]
+  strategy --> direct["Direct-draw texture / flat resources"]
+  direct --> webgl2Scene["WebGL2 direct draw units"]
   webgl2Scene --> submit["State-cached WebGL2 submitter"]
 
-  strategy -. future atlas candidates .-> layout["Atlas layout planner"]
-  layout -. future atlas plan .-> compaction["Render compaction scheduler"]
-  compaction -. atlas generation + compacted buffers .-> graph
-  compaction -. compacted draw slices .-> submit
+  strategy -. texture-page candidates .-> layout["Texture-page planner"]
+  strategy -. bake candidates .-> baking["Baking planner"]
+  baking -. landblock bake plan .-> compaction["Geometry compaction planner"]
+  layout -. texture-page resources .-> graph
+  layout -. direct draw bindings .-> webgl2Scene
+  layout -. baked material pages .-> baking
+  compaction -. baked VBAs .-> graph
+  baking -. baked draw slices .-> submit
 ```
 
 Assembly turns ready scene objects into complete renderable facts. WebGL2 resource realization owns
 GL buffers, VAOs, textures, programs, and disposal. The material strategy decides eligibility and
-fallback reasons. The atlas layout planner is pure placement logic. Later compaction is the duty
-cycle that decides when to build or retire atlas generations and compacted static buffers.
+fallback reasons. The texture-page planner is pure placement/resource-selection logic shared by
+direct draw and baked draw. The baking planner decides when direct-draw units can be promoted into
+baked renderables, which requires baked-material-table compatibility and compacted-geometry
+compatibility for that bake family.
 
 ## Scheduling Principles
 
-- Do not make atlas-backed compaction the first proof of a material feature. Direct/staged material
-  rendering should keep common objects visible before compaction exists.
-- Do not make atlas layout the first continuation phase. Pure layout does not make materials
-  visible; staged direct material completion does.
-- Do not advance to broader material metrics before staged sampler correctness is fixed. Textures are
-  visible now, so lost repeat/clamp metadata and disabled mipmaps are real rendering bugs rather
-  than future polish.
-- Do not rebuild atlas pages every time one renderable hydrates. Newly assembled objects enter
-  staged direct/fallback rendering first. Later compaction runs on its own duty cycle.
-- Keep layout, material strategy, resource realization, and compaction separate. The atlas layout
-  planner should not inspect material recipes or allocate GL resources.
-- Use injected capability interfaces at assembly/compaction boundaries where tests need fake asset,
-  graph, and resource stores. Do not let future compaction reach directly into WebGL2 resource maps
-  or asset-channel internals.
+- Do not make baked rendering the first proof of a material feature. Direct-draw rendering should
+  keep common objects visible before baking exists.
+- Do not make texture-page layout the first proof of a baked feature. Pure layout proves only that a
+  material can be sampled by rect; it does not prove a renderable can bake.
+- Do not broaden baked eligibility before direct-draw sampler correctness is preserved. Lost
+  repeat/clamp metadata and disabled mipmaps are real rendering bugs rather than future polish.
+- Do not rebuild packed atlas pages every time one renderable hydrates. Newly assembled objects enter
+  direct/fallback rendering first. Baking runs on its own duty cycle. Single-entry texture pages may
+  be reused from direct texture resources when that keeps baking incremental.
+- Keep texture-page layout, material strategy, resource realization, and baking separate. The
+  texture-page planner should not inspect material recipes or allocate GL resources.
+- Do not create intermediate optimized categories where an object only receives baked compacted
+  geometry. Texture-page sampling is shared material infrastructure; baked means the renderable uses
+  compacted geometry plus the baked material-table shader for its bake family.
+- Keep direct and baked material pipelines isomorphic where possible: shared material resolution,
+  shared texture-page records, shared sampler/data-page helpers, shared fallback vocabulary, and
+  submit-specific adapters at the edge.
+- Use injected capability interfaces at assembly/baking boundaries where tests need fake asset,
+  graph, and resource stores. Do not let future baking reach directly into WebGL2 resource maps or
+  asset-channel internals.
 - Treat render policy/backend config changes as scene rebuild events. Do not build a broad live
   migration system for those cases until there is evidence it is needed.
-- Keep debug overlays outside material strategy, atlas layout, and compaction.
+- Keep debug overlays outside material strategy, texture-page layout, and baking.
 
 ## Phase M1: Staged Direct Material Completion
 
@@ -3348,43 +3399,272 @@ Validation:
 - `npm run check`
 - `npm run lint:ts`
 
-### Phase M7D.1b: Repeat/Wrap Staged Atlas Sampling
+### Phase M7D.1b: Make Texture-Page Binding Explicit
 
 Status: Next.
 
-Purpose: allow atlas-backed staged direct draw units with repeat/wrap sampler policy to use the base
-texture atlas without bleeding into neighboring atlas entries or breaking the authored UV behavior.
-This is mostly a texture-bind/resource optimization for retained staged draws that are not replaced
-by compacted geometry.
+Purpose: replace the ad hoc "staged atlas" submit path with an explicit texture-page binding model.
+The current direct shader already treats an atlas texture as a texture plus rect, and a standalone
+direct texture is the same abstraction with one full-texture rect. Make that relationship first-class
+instead of modeling it as a staged-only optimization or as baked-only infrastructure. Atlas-rect
+sampling becomes the only texture sampling mode; standalone direct textures are represented as
+single-entry pages.
 
 Tasks:
 
-- Audit staged-atlas fallback samples after M7D.1a.1 to quantify repeat/wrap pressure separately from
-  missing atlas placements and detail-overlay deferrals.
-- Reuse the compacted atlas wrap helper/policy from M7D.1a where possible, but keep staged draw
-  submission independent from compacted replacement.
-- Extend the staged textured shader to repeat or clamp inside the atlas rect per sampler axis.
-- Validate derivatives/mipmap behavior for repeated atlas rect sampling. If derivatives produce
-  unacceptable bleeding or shimmer, either use an explicit derivative path or keep repeat staged
-  textures standalone with clear diagnostics.
-- Add tests for repeat/repeat, repeat/clamp, clamp/repeat, and clamp/clamp staged atlas sampling
-  decisions.
-- Keep compacted replacement precedence unchanged.
+- Introduce or rename the direct material binding shape around a texture page:
+  - page texture resource;
+  - page kind, initially `single-entry` or `packed-atlas`;
+  - usage bucket, such as base color, detail, index, palette, blend, alpha, road, or terrain input;
+  - sample class, such as color, linear/data, integer/data, or lookup;
+  - rect in page pixels;
+  - page size;
+  - sampler wrap policy;
+  - filter and mip policy;
+  - gutter capability or limitation.
+- Make standalone direct textures resolve to single-entry texture-page bindings.
+- Make packed atlas placements resolve to packed texture-page bindings for direct draw when the
+  material sampling policy is supported.
+- Fold detail texture binding into the same texture-page shape. The existing detail-atlas behavior
+  should become a usage bucket, not a separate conceptual material path.
+- Define data texture-page policies for indexed texel pages and palette pages: no mipmaps, no linear
+  filtering, no color-space conversion, and exact lookup semantics. Keep unsupported indexed/palette
+  paths direct only until their texture-page buckets exist.
+- Define blend/alpha/road/terrain texture-page buckets, even if terrain baking remains deferred.
+  Terrain should use the same texture-page abstraction when its dedicated pipeline arrives.
+- Replace staged-atlas terminology in direct submit, metrics, tests, and debug text with
+  texture-page terminology.
+- Extend or share the atlas-rect sampling helper so direct draw and baked draw handle clamp/repeat,
+  derivatives, mips, and gutters consistently where their material families overlap.
+- Extend or share data-page sampling helpers so indexed, palette, alpha, and other lookup textures do
+  not accidentally inherit color-texture filtering or mip behavior.
+- Normalize direct and baked material diagnostics around the same fallback reason vocabulary. Direct
+  draw and baked draw may make different decisions, but they should explain those decisions using the
+  same material facts.
+- Keep direct draw independent from baked VBA/material-table submission. A direct draw may sample a
+  packed texture page, but it remains direct draw because it still submits one draw unit with
+  per-draw material uniforms.
+- Keep compacted replacement precedence unchanged: if a draw unit is baked and submitted through a
+  baked batch, it should not also submit through the direct texture-page path.
+- Update tests that expected staged atlas draws so they now assert texture-page binding behavior:
+  single-entry fallback, packed-page direct sampling, repeat/clamp policy, and baked replacement
+  precedence.
 
 Exit criteria:
 
-- Repeat/wrap staged direct draw units can use the base texture atlas with representative visual
-  parity, or the phase documents measured reasons to keep them standalone.
-- Debug reports distinguish repeat/wrap staged-atlas fallbacks from detail-overlay and missing-atlas
-  fallbacks.
+- Direct draw can sample either a single-entry texture page or a compatible packed texture page
+  through the same explicit binding model.
+- Detail textures use the same texture-page binding model as base textures.
+- Indexed and palette material work has named texture-page buckets and explicit no-mip/no-filter
+  semantics, even if shader support lands in a follow-up phase.
+- Direct-draw material correctness remains unchanged or improves for clamp, repeat, alpha-test, and
+  detail-overlay cases that were already supported.
+- Metrics and debug text distinguish direct texture-page draws from baked draws without using staged
+  atlas terminology.
+- The remaining direct-draw packed-page fallbacks are named as material sampling, missing placement,
+  unsupported data-page policy, or texture-page resource limitations.
+- Direct and baked paths consume the same texture-page records and sampler policy facts for
+  overlapping material families.
 
-### Phase M7E: Terrain Compaction Design and First Path
+### Phase M7D.2: Baked Terminology and Boundary Rename
+
+Status: Immediate after M7D.1b.
+
+Purpose: update active code and docs terminology around the new renderer boundary. "Texture page" is
+the shared material-resource abstraction for direct draw and baked draw. "Baked" is the promoted
+geometry/submission category. Packed atlases, single-entry pages, and compacted vertex-buffer
+assemblies are implementation resources, not standalone renderable categories.
+
+Tasks:
+
+- Rename active user-facing and debug terminology from `atlas-backed compacted` to `baked` where the
+  concept is the promoted renderable or submitted draw family.
+- Keep concrete implementation names where they name concrete resources, for example packed texture
+  atlas generation, single-entry texture page, atlas rect placement, compacted vertex buffer, or
+  compacted geometry planner.
+- Use texture-page bucket terminology for material texture classes. Avoid separate conceptual paths
+  such as "detail texture binding" or "indexed texture binding" when the code is really selecting a
+  usage-specific texture page.
+- Replace forward-looking plan references to "staged atlas" with texture-page binding language.
+- Rename metrics enough that the debug report reads as direct draw plus baked draw pressure. Avoid a
+  compatibility layer of duplicate metric names unless a short migration step is unavoidable.
+- Update tests and helper names that encode the old category split when those names describe baked
+  renderables rather than low-level atlas or compaction resources.
+- Document that baked VBAs are landblock-scoped while packed texture pages are content/material-scoped
+  and can be reused across landblocks by both direct draw and baked draw. Single-entry texture pages
+  can reuse direct texture residency until packing proves useful.
+
+Exit criteria:
+
+- Active docs and debug text describe renderables as direct draw or baked, and describe texture
+  source as single-entry or packed texture page with a usage bucket.
+- Resource-level implementation terms remain precise and do not obscure atlas or compacted-buffer
+  ownership.
+- There are no active code paths or tests that describe a renderable as "baked" merely because it
+  samples a packed texture page.
+
+### Phase M7D.3: Unified Bake Eligibility
+
+Status: Planned.
+
+Purpose: make bake planning consume the shared texture-page binding model while requiring
+compacted-geometry compatibility. A renderable should not be promoted into the baked path unless the
+bake family can represent both its material table and geometry. Unsupported cases remain direct draw
+with explicit reasons.
+
+Tasks:
+
+- Introduce or rename the planning shape around `BakeEligibility`, with shared texture-page material
+  facts, baked material-table facts, geometry facts, and a single final baked/direct decision.
+- Bake eligibility should be derived from the same resolved material facts used by direct draw, plus
+  explicit baked-only requirements. It should not re-parse recipes, sampler strings, or texture
+  identities that the direct material resolver already proved.
+- Require baked static and structured-interior candidates to have:
+  - texture-page material behavior compatible with the baked shader family;
+  - texture-page inputs for every sampled material channel used by that family, including base and
+    detail where present;
+  - supported alpha-test/cutout state;
+  - supported sampler policy, including repeat/clamp data needed by the baked shader;
+  - compactable geometry with stable landblock/local ownership and bake-origin behavior;
+  - no indexed/paletted, animated UV, blended transparency, or debug-overlay behavior unless a later
+    baked family explicitly supports it.
+- Split fallback reasons by material blocker versus geometry blocker, but expose a single
+  "retained direct draw" outcome.
+- Preserve deterministic grouping for baked draw slices by baked shader family, texture-page binding,
+  material constants, render state, visibility domain, and landblock-scoped VBA ownership.
+- Keep packed texture-page generation independent from landblock identity. Landblock-scoped baked
+  VBAs should reference texture-page records rather than owning packed atlas pages.
+- Add tests proving that material-only eligibility and geometry-only eligibility both stay direct
+  draw, while fully eligible candidates become baked.
+
+Exit criteria:
+
+- Baked planning no longer treats packed texture-page sampling as sufficient for baking.
+- Baked planning consumes the same texture-page facts as direct draw; it only adds baked material
+  table and compacted-geometry requirements.
+- Direct and baked fallback reports remain comparable: a material unsupported by baked but supported
+  by direct should name the baked-only blocker, not restate the whole material resolution process.
+- Retained direct-draw counts explain why each unsupported candidate could not bake.
+- Existing static and structured-interior baked scenes still submit with the current draw-call
+  savings shape or a documented difference caused by stricter eligibility.
+
+### Phase M7D.4: Expand Baked Static and Interior Coverage
+
+Status: Planned.
+
+Purpose: after the boundary cleanup, improve performance by making more static and structured
+interior renderables bake, while allowing retained direct draws to keep using the shared texture-page
+binding model.
+
+Tasks:
+
+- Use field metrics to identify the top retained direct-draw reasons for static and structured
+  interior renderables.
+- Add baked support for the highest-value compatible material features first, likely alpha-test and
+  detail overlay where they can share the same baked shader family without compromising correctness.
+- Add indexed/paletted texture-page buckets before deciding whether indexed/paletted materials can
+  bake. The index and palette pages should be usable by direct draw first, then by a dedicated baked
+  material family if batching pressure justifies it.
+- Add blended/terrain texture-page buckets as shared material infrastructure, but keep terrain's
+  geometry baking and shader pipeline in M7E.
+- Keep debug/diagnostic overlays direct or in a separate debug pipeline.
+- Validate repeat/clamp, detail overlay, and alpha-test behavior against representative field scenes.
+- Track baked coverage as candidate count, baked count, retained direct count, retained reason
+  samples, draw-call savings, packed texture-page count, single-entry texture-page count, direct
+  texture-page draw count, and baked VBA resource counts.
+
+Exit criteria:
+
+- Static and structured-interior baked coverage improves through broader bake eligibility, while
+  direct-draw texture-page sampling remains a separate material-resource optimization.
+- Detail and alpha-test support are either represented in the baked shader family with tests or
+  remain explicitly direct-draw with named blockers.
+- Terrain remains out of this phase and continues to be planned as its own pipeline.
+
+### Phase M7D.5: Indexed and Palette Texture-Page Integration
+
+Status: Planned.
+
+Purpose: move indexed/paletted material resources into the shared texture-page model, then decide
+which indexed/paletted renderables can participate in baked geometry. Indexed texture pages and
+palette pages are data/lookup resources, not color pages, so they must preserve exact lookup
+semantics before any compaction/baking work consumes them.
+
+Tasks:
+
+- Define indexed texture-page usage buckets:
+  - indexed texel page for P8/P16 source texels;
+  - palette page for resolved base or derived palette data;
+  - optional derived/override palette page records when setup appearance palettes apply.
+- Require indexed texel and palette pages to use no mipmaps, no linear filtering, no color-space
+  conversion, and exact lookup semantics. Any manual palette-aware filtering remains shader-owned.
+- Replace direct indexed texture/palette binding terminology with texture-page binding terminology in
+  direct submit, metrics, resource records, and tests.
+- Keep direct indexed rendering as the first proof path: direct draw should sample indexed texel and
+  palette pages through explicit page bindings before baked indexed geometry is attempted.
+- Design a baked indexed material family only after direct texture-page behavior is correct. The
+  baked family must include material-table records for index page, palette page, palette dimensions,
+  clip threshold, wrap policy, and any shader-owned filtering mode.
+- Decide whether indexed/paletted baked slices can share the existing baked static/interior geometry
+  path with a shader variant or need a separate baked indexed submit path.
+- Add tests for direct indexed texture-page binding, palette page binding, no-mip/no-filter upload
+  policy, baked indexed eligibility rejection before the baked family exists, and baked indexed
+  eligibility acceptance once the family is implemented.
+
+Exit criteria:
+
+- Indexed and palette resources are represented as texture pages in direct draw.
+- Indexed/paletted renderables no longer bypass the texture-page model.
+- Baked planning has explicit indexed/paletted material-family eligibility instead of a generic
+  indexed bypass.
+- If baked indexed submission remains deferred, the blocker is the baked indexed shader/material table
+  rather than texture-page resource modeling.
+
+### Phase M7D.6: Alpha and Blended Texture-Page and Bake Policy
+
+Status: Planned.
+
+Purpose: move alpha masks and blended-material texture inputs into the shared texture-page model while
+keeping transparency ordering honest. Alpha-test/cutout materials can usually share opaque baked
+families when render state is compatible. True blended transparency needs explicit sorting,
+depth-write, and visibility policy before it can safely enter baked geometry.
+
+Tasks:
+
+- Define alpha/blend texture-page usage buckets:
+  - alpha mask or clip map pages;
+  - blended base/color pages;
+  - any blend-control or mask pages used by terrain/static/interior materials.
+- Require alpha/lookup pages that are data-like to use no unintended mip/filter/color-space behavior.
+  Color blended pages may use color texture policy when the material recipe calls for it.
+- Route direct alpha-test and blended material texture inputs through texture-page bindings.
+- Promote alpha-test/cutout static and structured-interior materials into the baked opaque/cutout
+  family when their texture pages, sampler policy, render state, and material-table constants are
+  compatible.
+- Keep true blended transparency direct until a transparent baked family is designed. That design must
+  name sorting granularity, depth write/test behavior, portal/scene-domain ordering, and whether
+  whole-slice conservative submission is acceptable for transparent geometry.
+- Add metrics separating alpha-test baked candidates from true blended transparent retained direct
+  draws.
+- Add tests for alpha mask texture-page binding, alpha-test baked eligibility, blended transparency
+  retained-direct fallback, and explicit transparent-bake blockers.
+
+Exit criteria:
+
+- Alpha and blend texture inputs use texture-page bindings in direct draw.
+- Alpha-test/cutout materials can enter baked static/interior geometry when compatible.
+- True blended transparency is either represented by a dedicated transparent baked design or remains
+  direct draw with sorting/depth blockers named in metrics.
+- The plan no longer treats all alpha/blended materials as a single generic non-opaque bypass.
+
+### Phase M7E: Terrain Pipeline Design and First Bake Path
 
 Status: Planned discovery/prototype phase.
 
-Purpose: design and start a terrain-specific compaction path. Terrain uses `terrain-blend` materials
-with base, overlay, road, alpha, tiling, rotation, and detail behavior, so it should not be forced
-through the direct RGBA texture-atlas path or the direct-texture atlas-backed compacted shader.
+Purpose: design and start a terrain-specific rendering and baking path. Terrain uses
+`terrain-blend` materials with base, overlay, road, alpha, tiling, rotation, and detail behavior, so
+it should not be forced through the direct RGBA static/interior baked material family. Terrain should
+still consume the shared texture-page model for its sampled texture inputs.
 
 Tasks:
 
@@ -3401,14 +3681,15 @@ Tasks:
   - terrain texture count;
   - terrain state changes/uniform uploads;
   - whether terrain is draw-call bound, texture-bind bound, or shader/uniform bound.
-- Choose a first compaction strategy:
+- Choose a first terrain bake strategy:
   - likely landblock-scoped terrain geometry batches using the landblock render origin;
-  - keep existing terrain-blend textures bound per terrain material/slice initially;
-  - avoid terrain texture atlasing until texture-bind metrics prove it is needed;
+  - represent terrain-blend textures as texture pages from the start, using single-entry pages until
+    packed terrain buckets are justified;
+  - avoid packed terrain atlasing until texture-bind metrics prove it is needed;
   - preserve current terrain blend shader semantics.
 - Define terrain batch keys around the material state that actually changes: base/overlay/road
   texture set, alpha texture set, tiling/rotation parameters, render state, and detail overlay state.
-- Prototype terrain compacted geometry submission for the common outdoor terrain path with staged
+- Prototype terrain baked geometry submission for the common outdoor terrain path with direct-draw
   fallback for unsupported blend states.
 - Add debug metrics for terrain compactable/submitted/replaced draw units, submitted terrain
   triangles, terrain draw-call savings, and terrain overdraw if whole-batch submission is used.
@@ -3417,22 +3698,21 @@ Tasks:
 
 Exit criteria:
 
-- We have a documented terrain compaction shape backed by code or a narrow prototype, not just a
-  guess.
-- The first terrain path either submits representative terrain through compacted batches or names the
+- We have a documented terrain pipeline and bake shape backed by code or a narrow prototype, not just
+  a guess.
+- The first terrain path either submits representative terrain through baked batches or names the
   exact blocker and adds an immediate follow-up phase.
-- Terrain compaction metrics appear in the debug report separately from direct atlas-backed compacted
-  geometry metrics.
+- Terrain metrics appear in the debug report separately from static/interior baked metrics.
 
 Decisions:
 
-- Terrain compaction is a dedicated material-family path. It may share geometry-baking and
-  landblock-batch helpers with direct compacted geometry, but it should not share direct texture atlas
-  assumptions.
+- Terrain baking is a dedicated material-family path. It may share geometry-baking and
+  landblock-batch helpers with static/interior baked geometry, but it should not share direct texture
+  atlas assumptions beyond the shared texture-page binding contract.
 - Landblock is the initial terrain batch scope. Finer terrain tile or visibility partitions should be
   evidence-driven.
-- Terrain texture atlasing is deferred until we understand whether texture binds, uniforms, or draw
-  calls dominate after geometry compaction.
+- Packed terrain texture atlasing is deferred until we understand whether texture binds, uniforms, or
+  draw calls dominate after terrain geometry baking.
 
 ## Phase M8: Performance Gate and Post-Three Cleanup
 
@@ -3463,13 +3743,20 @@ Exit criteria:
 
 ## Cleanup Targets
 
-- Rename shared metrics fields that still use `BatchCount` terminology once WebGL2 metrics stabilize.
+- Rename shared metrics fields that still use stale `BatchCount`, `atlas-backed compacted`, or
+  staged-atlas terminology once the texture-page and baked/direct-draw boundaries are implemented.
 - Preserve prepared-texture diagnostics in WebGL2 resource records so texture byte counts and fallback
   explanations are accurate.
-- Make staged atlas-set plan collections readonly so pure planner output can flow into material
-  strategy without boundary copies.
-- Replace atlas static compaction metrics-only draw handling with graph-backed compacted static-batch
-  resources now that M7.1 realizes atlas-generation textures.
+- Replace staged atlas-set submit plumbing after M7D.1b with explicit texture-page binding. Planner
+  outputs may still expose atlas entries as texture-page records and bake-planning metadata.
+- Fold existing base, detail, indexed, palette, alpha, road, blend, and terrain texture binding
+  diagnostics into texture-page terminology. Keep usage bucket and sample class visible in fallback
+  samples.
+- Audit direct and baked shader/resource setup for duplicated material feature detection. Move
+  duplicated detection into shared material/texture-page planning and leave submit paths to adapt
+  already-resolved facts.
+- Replace active atlas static compaction terminology with baked terminology where the code is naming
+  the promoted renderable rather than the concrete atlas or compacted-buffer resource.
 - Remove the temporary duplicate `atlasEntries` / `atlasEntryRecords` plan shape once downstream
   diagnostics consume keyed atlas records directly.
 - Replace the first-slice single static-batch resource in M7.3.3. Large scenes should use multiple
@@ -3478,15 +3765,17 @@ Exit criteria:
 - The M7.3 transform-slot table was removed from static compaction in M7.3.2. Static atlas
   compaction now bakes placement into batch-local vertex positions and submits with one batch
   offset/model transform rather than one transform uniform per static object.
-- The M7.3 URL-gated flat-world atlas submit branch was removed in M7.3.1; atlas submission is now a
-  normal pipeline decision with staged fallback, not a parallel opt-in path.
+- The M7.3 URL-gated flat-world atlas submit branch was removed in M7.3.1. After M7D.1b, packed
+  atlas sampling should be a texture-page binding decision shared by direct and baked draw, not a
+  staged direct optimization.
 - Replace or partition the first submit shader's bounded material uniform arrays if field captures
   show real scenes exceeding 128 material slots after M7.3.2 removes the transform-table path.
 - After M7.4, assess whether conservative whole-slice submission is too expensive in portal-heavy or
   dense static scenes before designing per-visible-range submission.
-- M7B completed the active `atlas static` file/type/metric rename with split terminology. Older
-  historical plan notes may still mention the old name when describing past phases, but active code
-  and forward guidance should use texture-atlas, compacted-geometry, or atlas-backed compacted names.
+- M7B completed the earlier `atlas static` file/type/metric rename with split terminology. M7D.2
+  supersedes that active guidance: forward-looking renderable names should use baked or direct-draw,
+  material-resource names should use texture page, and low-level resource names should remain precise
+  about packed atlases, single-entry pages, and compacted geometry.
 - Revisit the per-frame WebGL2 draw-unit sort after M3-M7 reshape the submit path.
 - Split renderer-neutral material sampling DTOs from any Three adapter names/imports if they still
   imply Three ownership.
@@ -3500,11 +3789,21 @@ Exit criteria:
 
 - Do not reintroduce luma terminology into active modules.
 - Do not alias old luma behavior to WebGL2.
-- Do not add atlas-backed compaction before common materials are visible through direct/staged paths.
+- Do not add baked rendering before common materials are visible through direct-draw paths.
 - Do not pack blended transparency into opaque atlas batches.
 - Do not silently drop unsupported sampler, UV animation, indexed, or palette behavior.
-- Do not let atlas layout allocate WebGL resources or inspect material recipes.
-- Do not let compaction mutate atlas generations in place.
-- Do not rebuild compacted buffers on camera re-anchor alone.
+- Do not let any texture-bearing material path bypass texture-page binding once M7D.1b lands.
+- Do not put indexed texel pages, palette pages, alpha masks, or other data/lookup pages into color
+  texture buckets with mipmapping, linear filtering, or color-space conversion.
+- Do not let texture-page layout allocate WebGL resources or inspect material recipes.
+- Do not let direct and baked submit paths independently rediscover the same material feature. They
+  should consume shared resolved facts and only add submit-specific capability checks.
+- Do not let baking mutate packed atlas generations in place.
+- Do not rebuild baked VBAs on camera re-anchor alone.
+- Do not call a renderable baked merely because it samples a packed texture page; baked requires the
+  baked geometry/material-table submission path.
+- Do not route direct-draw renderables through baked VBAs as a partial optimization.
+- Do not create renderables that independently use baked VBA compaction without the baked material
+  table; they are direct draw until they can be fully baked for their material family.
 - Do not call synchronous GL queries in hot paths.
-- Do not route debug overlays through material strategy or compaction.
+- Do not route debug overlays through material strategy or baking.

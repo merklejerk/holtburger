@@ -1,9 +1,34 @@
 import type { StagedWorldDrawUnitAssembly } from "./staged-world-assembly";
-import type {
-	BakedRenderableMaterialSlot,
-	BakedRenderablePlan,
-} from "./baked-renderable-planner";
 import { createTranslationMat4, type RenderMat4 } from "./render-math";
+
+export interface CompactedGeometryMaterialSlot {
+	key: string;
+	index: number;
+}
+
+export interface CompactedGeometryDrawUnitMaterialSlot {
+	drawUnitId: string;
+	materialSlotKey: string;
+}
+
+export interface CompactedGeometryDrawSliceInput {
+	key: string;
+	renderStateKey: string;
+	materialSlotKeys: readonly string[];
+	drawUnitIds: readonly string[];
+}
+
+export interface CompactedGeometryPlan<
+	TDrawSlice extends CompactedGeometryDrawSliceInput =
+		CompactedGeometryDrawSliceInput,
+> {
+	key: string;
+	compactableDrawUnitIds: readonly string[];
+	materialSlots: readonly CompactedGeometryMaterialSlot[];
+	drawUnitMaterialSlots: readonly CompactedGeometryDrawUnitMaterialSlot[];
+	drawSlices: readonly TDrawSlice[];
+	triangleCount: number;
+}
 
 export interface BakedGeometryDrawRange {
 	drawUnitId: string;
@@ -14,8 +39,6 @@ export interface BakedGeometryDrawRange {
 
 export interface BakedGeometryDrawSlice {
 	key: string;
-	atlasTextureIndex: number;
-	detailAtlasTextureIndex: number | null;
 	renderStateKey: string;
 	firstIndex: number;
 	indexCount: number;
@@ -23,7 +46,14 @@ export interface BakedGeometryDrawSlice {
 	materialSlotKeys: readonly string[];
 }
 
-export interface BakedGeometry {
+export type BakedGeometryDrawSliceFor<
+	TDrawSlice extends CompactedGeometryDrawSliceInput,
+> = TDrawSlice & BakedGeometryDrawSlice;
+
+export interface BakedGeometry<
+	TDrawSlice extends CompactedGeometryDrawSliceInput =
+		CompactedGeometryDrawSliceInput,
+> {
 	key: string;
 	positions: Float32Array;
 	uvs: Float32Array;
@@ -42,15 +72,17 @@ export interface BakedGeometry {
 	totalByteLength: number;
 }
 
-export function buildBakedGeometry({
+export function buildBakedGeometry<
+	TDrawSlice extends CompactedGeometryDrawSliceInput,
+>({
 	plan,
 	drawUnits,
 	batchOrigin,
 }: {
-	plan: BakedRenderablePlan;
+	plan: CompactedGeometryPlan<TDrawSlice>;
 	drawUnits: readonly StagedWorldDrawUnitAssembly[];
 	batchOrigin: { x: number; y: number; z: number };
-}): BakedGeometry | null {
+}): BakedGeometry<TDrawSlice> | null {
 	if (plan.compactableDrawUnitIds.length === 0) {
 		return null;
 	}
@@ -222,9 +254,7 @@ function assertBakedGeometryDrawUnit(
 		);
 	}
 	if (!drawUnit.geometry.uvs) {
-		throw new Error(
-			`Baked geometry draw unit ${drawUnit.id} has no UVs.`,
-		);
+		throw new Error(`Baked geometry draw unit ${drawUnit.id} has no UVs.`);
 	}
 }
 
@@ -249,10 +279,10 @@ function compactDrawSlice({
 	rangeByDrawUnitId,
 	materialSlotByKey,
 }: {
-	slice: BakedRenderablePlan["drawSlices"][number];
+	slice: CompactedGeometryDrawSliceInput;
 	rangeByDrawUnitId: ReadonlyMap<string, BakedGeometryDrawRange>;
-	materialSlotByKey: ReadonlyMap<string, BakedRenderableMaterialSlot>;
-}): BakedGeometryDrawSlice {
+	materialSlotByKey: ReadonlyMap<string, CompactedGeometryMaterialSlot>;
+}): BakedGeometryDrawSliceFor<typeof slice> {
 	const ranges = slice.drawUnitIds.map((drawUnitId) => {
 		const range = rangeByDrawUnitId.get(drawUnitId);
 		if (!range) {
@@ -278,9 +308,8 @@ function compactDrawSlice({
 		}
 	}
 	return {
+		...slice,
 		key: slice.key,
-		atlasTextureIndex: slice.atlasTextureIndex,
-		detailAtlasTextureIndex: slice.detailAtlasTextureIndex,
 		renderStateKey: slice.renderStateKey,
 		firstIndex,
 		indexCount,
@@ -303,7 +332,7 @@ function describeCompactedGeometryKey({
 	drawUnits,
 	positions,
 }: {
-	plan: BakedRenderablePlan;
+	plan: CompactedGeometryPlan;
 	drawUnits: readonly StagedWorldDrawUnitAssembly[];
 	positions: Float32Array;
 }): string {

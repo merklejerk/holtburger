@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
-Status: Phase M7D.1a.1 validated; pivoting next to baked versus direct-draw renderables.
+Status: Phase M7D.5b4 complete; next is the baked indexed shader submit variant.
 
 Related plans:
 
@@ -3970,27 +3970,27 @@ Tasks:
 
 Field capture: 2026-06-01, outdoor destination `33.50S, 72.80E`, anchor `0xda55ffff`.
 
-| Metric | Value | Read |
-| --- | ---: | --- |
-| Visible draws | 3368 | Still draw-call/state-change bound at 35 FPS / 27 ms render. |
-| Candidate draw units | 18857 | 17420 static, 811 structured interior, 457 terrain, 200 portal masks. |
-| Baked draw units | 9590 | Current compacted-geometry path is active and useful. |
-| Baked shader draws | 17 | Baked submit is already collapsing substantial draw pressure. |
-| Baked replaced draw units | 1816 | Conservative route replacement is still limited by visibility/routing. |
-| Baked retained direct draw units | 3350 | Retained direct draw is still large enough to optimize. |
-| Baked bypasses | 9298 | Top blocker population for the next phase. |
-| Direct texture-page draws | 1158 | 25 packed, 1133 single-entry; texture pages are now shared infrastructure. |
-| Texture-page bindings | 26775 | Buckets already include base-color, detail, indexed-texels, palette-lookup, terrain, road, and alpha-control. |
+| Metric                           | Value | Read                                                                                                          |
+| -------------------------------- | ----: | ------------------------------------------------------------------------------------------------------------- |
+| Visible draws                    |  3368 | Still draw-call/state-change bound at 35 FPS / 27 ms render.                                                  |
+| Candidate draw units             | 18857 | 17420 static, 811 structured interior, 457 terrain, 200 portal masks.                                         |
+| Baked draw units                 |  9590 | Current compacted-geometry path is active and useful.                                                         |
+| Baked shader draws               |    17 | Baked submit is already collapsing substantial draw pressure.                                                 |
+| Baked replaced draw units        |  1816 | Conservative route replacement is still limited by visibility/routing.                                        |
+| Baked retained direct draw units |  3350 | Retained direct draw is still large enough to optimize.                                                       |
+| Baked bypasses                   |  9298 | Top blocker population for the next phase.                                                                    |
+| Direct texture-page draws        |  1158 | 25 packed, 1133 single-entry; texture pages are now shared infrastructure.                                    |
+| Texture-page bindings            | 26775 | Buckets already include base-color, detail, indexed-texels, palette-lookup, terrain, road, and alpha-control. |
 
 Top baked bypasses in this capture:
 
-| Bypass | Count | Likely category | Immediate interpretation |
-| --- | ---: | --- | --- |
-| `missing-atlas-eligibility` | 6324 | Material-family/eligibility modeling gap | This likely maps to the large `webgl2-flat-resource` population (6621). Flat/solid materials do not need a base texture page, so the current blocker name is stale and the planner may be requiring atlas eligibility where a constant-color baked material record would be enough. Prove this before adding alpha/detail support. |
-| `non-opaque-material` | 2099 | Material-family missing / stale blocker name | This roughly lines up with visible indexed/paletted draw pressure (2068) and should be split into indexed/paletted, alpha-test/cutout, true blended transparency, and other unsupported families. The current label is too broad to choose the next shader work. |
-| `non-static` terrain | 457 | Geometry/pipeline boundary | Terrain remains M7E. Do not consume M7D capacity here. |
-| `material-table-overflow` | 218 | Baked resource sizing/grouping | Keep as a secondary cleanup unless it blocks the chosen high-value material family. |
-| `non-static` portal-mask | 200 | Debug/portal pipeline boundary | Keep direct or in a portal/debug-specific path. |
+| Bypass                      | Count | Likely category                              | Immediate interpretation                                                                                                                                                                                                                                                                                                           |
+| --------------------------- | ----: | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `missing-atlas-eligibility` |  6324 | Material-family/eligibility modeling gap     | This likely maps to the large `webgl2-flat-resource` population (6621). Flat/solid materials do not need a base texture page, so the current blocker name is stale and the planner may be requiring atlas eligibility where a constant-color baked material record would be enough. Prove this before adding alpha/detail support. |
+| `non-opaque-material`       |  2099 | Material-family missing / stale blocker name | This roughly lines up with visible indexed/paletted draw pressure (2068) and should be split into indexed/paletted, alpha-test/cutout, true blended transparency, and other unsupported families. The current label is too broad to choose the next shader work.                                                                   |
+| `non-static` terrain        |   457 | Geometry/pipeline boundary                   | Terrain remains M7E. Do not consume M7D capacity here.                                                                                                                                                                                                                                                                             |
+| `material-table-overflow`   |   218 | Baked resource sizing/grouping               | Keep as a secondary cleanup unless it blocks the chosen high-value material family.                                                                                                                                                                                                                                                |
+| `non-static` portal-mask    |   200 | Debug/portal pipeline boundary               | Keep direct or in a portal/debug-specific path.                                                                                                                                                                                                                                                                                    |
 
 Course correction from the capture:
 
@@ -4014,13 +4014,13 @@ Course correction from the capture:
 
 Follow-up field capture after typed M7D.4 metrics: 2026-06-01T17:11:01Z, same destination and anchor.
 
-| Signal | Count | Read |
-| --- | ---: | --- |
-| Baked material families | textured-opaque 9808, indexed-paletted 5964, blended 2459, terrain-blend 457 | Flat/constant-color is not the dominant blocker. The earlier flat hypothesis was wrong. |
-| Retained direct families | indexed-paletted 5964, blended 2459, terrain-blend 457, debug-pipeline 200 | The next production target is indexed/paletted or blended policy, not flat. Terrain remains M7E. |
-| Material blockers | missing-baked-indexed-paletted-family 5964, missing-baked-blended-family 2459, missing-baked-terrain-family 457, debug-pipeline-material 200 | Indexed/paletted is the largest actionable retained-direct family. |
-| Geometry blockers | non-static 657, missing-landblock-origin 657, missing-uv-buffer 200 | Terrain and portal-mask blockers are expected, but the paired non-static/missing-landblock counts should stay out of static/interior bake decisions. |
-| Texture-page fallback | direct packed base page missing placed entry `06003789...` x8 | Still needs classification; it is separate from the dominant baked-family blockers. |
+| Signal                   |                                                                                                                                        Count | Read                                                                                                                                                 |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------: | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Baked material families  |                                                                 textured-opaque 9808, indexed-paletted 5964, blended 2459, terrain-blend 457 | Flat/constant-color is not the dominant blocker. The earlier flat hypothesis was wrong.                                                              |
+| Retained direct families |                                                                   indexed-paletted 5964, blended 2459, terrain-blend 457, debug-pipeline 200 | The next production target is indexed/paletted or blended policy, not flat. Terrain remains M7E.                                                     |
+| Material blockers        | missing-baked-indexed-paletted-family 5964, missing-baked-blended-family 2459, missing-baked-terrain-family 457, debug-pipeline-material 200 | Indexed/paletted is the largest actionable retained-direct family.                                                                                   |
+| Geometry blockers        |                                                                          non-static 657, missing-landblock-origin 657, missing-uv-buffer 200 | Terrain and portal-mask blockers are expected, but the paired non-static/missing-landblock counts should stay out of static/interior bake decisions. |
+| Texture-page fallback    |                                                                                direct packed base page missing placed entry `06003789...` x8 | Still needs classification; it is separate from the dominant baked-family blockers.                                                                  |
 
 Course correction from the follow-up capture:
 
@@ -4625,6 +4625,73 @@ Validation:
 - `npm exec tsc -- --noEmit`
 - `npm exec vitest -- src/lib/world-display/baked-renderable-planner.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/baked-geometry.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts --run`
 
+### Phase M7D.5b4: Indexed Compacted Geometry Resources
+
+Status: Complete.
+
+Purpose: turn the indexed submit-family plan into landblock-scoped compacted geometry resources before
+adding the indexed shader submitter. This keeps the geometry compaction layer material-family
+agnostic and avoids routing indexed material records through RGBA atlas slots.
+
+Tasks:
+
+- Generalize the compacted geometry builder so it consumes a small compacted-geometry plan shape:
+  compactable draw unit IDs, explicit draw-unit material-slot mappings, material slot indices, draw
+  slices, and triangle count.
+- Keep RGBA atlas slices and indexed/palette slices typed separately while sharing the same position,
+  UV, material-slot, and index buffer construction.
+- Add indexed landblock batch planning from `submitFamilies.indexedPaletted`, with explicit local
+  material-table remapping per landblock.
+- Add WebGL2 indexed compacted batch resources that own VAO/buffer resources and indexed material
+  table records without pretending they are RGBA atlas batches.
+- Add tests proving a real indexed/paletted draw unit creates an indexed compacted batch with the
+  expected material table record and draw slice.
+
+Progress:
+
+- `buildBakedGeometry()` now accepts a generic compacted-geometry plan instead of depending on the
+  full baked renderable plan or RGBA atlas material-slot type.
+- RGBA baked batches still use the existing `Webgl2BakedGeometryBatchResource` and preserve their
+  atlas/detail draw-slice fields.
+- Added `Webgl2BakedIndexedGeometryBatchResource`, sharing the same compacted VAO/buffer layout but
+  carrying `BakedIndexedMaterialTableRecord[]` and indexed draw slices.
+- Added `bakedIndexedGeometryBatches` to the WebGL2 world resource store and synchronized it from
+  `submitFamilies.indexedPaletted`.
+- Indexed compacted batch planning is landblock-scoped and fails hard if a planned draw unit lacks an
+  explicit material-table mapping or render chunk origin.
+- Existing RGBA atlas compaction and texture-atlas generation behavior is unchanged.
+
+Decisions:
+
+- Indexed compacted resources are intentionally separate from RGBA atlas batch resources. They share
+  geometry buffers, but not material slot payloads, texture bindings, or submit slices.
+- The indexed material table slot index is the local record order inside each landblock batch. Shader
+  upload should consume the batch-local record array rather than reusing global plan indices.
+- This phase still does not mark indexed draw units replaceable during submit. Replacement should
+  begin only when the indexed shader path can actually bind index/palette pages and issue draw calls.
+
+Course Corrections:
+
+- M7D.5b was still too broad for one safe change. The next meaningful step is now shader submit and
+  replacement planning on top of already-realized indexed compacted resources, not another planner
+  or resource split.
+
+Cleanup Targets:
+
+- `bakedIndexedGeometryBatches` is a resource-store-only path until the indexed submitter consumes it.
+  This is intentional short-lived wiring debt; do not expose it as a diagnostic success path until it
+  can replace direct draws.
+- The root `bakedGeometry*` metrics still describe only submitted/active RGBA atlas compacted batches.
+  Future metrics should split compacted resource counts from submitted replacement counts by family.
+- `missing-baked-indexed-paletted-family` remains as a material blocker for submit coverage until the
+  indexed shader path is active. M7D.5b should remove or narrow it for table-ready opaque indexed
+  materials once replacement is real.
+
+Validation:
+
+- `npm exec tsc -- --noEmit`
+- `npm exec vitest -- src/lib/world-display/baked-renderable-planner.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/baked-geometry.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts --run`
+
 ### Phase M7D.5b: Baked Indexed Submit Variant
 
 Status: Next.
@@ -4634,12 +4701,12 @@ submit path for `indexed-paletted|alpha=opaque`.
 
 Tasks:
 
-- Split baked submit resources by material-table family or add an explicit submit-family enum so RGBA
-  atlas slices and indexed/palette slices cannot be confused.
-- Relax or route around `buildBakedGeometry`'s direct-texture-only material lookup so indexed opaque
-  draw units can share compacted vertex/index buffers with a typed indexed material-table slot.
-- Add baked indexed draw slices that bind index texture pages and palette texture pages instead of
-  base-color atlas pages.
+- Add a baked indexed submit resource boundary that consumes `bakedIndexedGeometryBatches` separately
+  from RGBA atlas `bakedGeometryBatches`.
+- Add replacement planning that unions RGBA atlas replacement and indexed-paletted replacement without
+  letting either family hide the other's missing-resource errors.
+- Add baked indexed draw submission that binds index texture pages and palette texture pages instead
+  of base-color atlas pages.
 - Add a baked indexed shader variant that preserves current direct indexed semantics:
   - P8/P16 index reconstruction;
   - palette lookup;
@@ -4647,8 +4714,10 @@ Tasks:
   - shader-owned palette-aware linear filtering;
   - wrap flags from the table record.
 - Keep indexed cutout/blend/opacity retained direct with `indexed-alpha-policy-unsupported`.
-- Add tests for indexed opaque compaction acceptance, indexed draw-slice grouping, texture binding,
-  palette binding, uniforms/table upload, and retained-direct blockers for indexed alpha modes.
+- Remove or narrow `missing-baked-indexed-paletted-family` only for table-ready opaque indexed
+  materials that have synchronized indexed compacted resources and a working submit route.
+- Add tests for indexed replacement planning, texture binding, palette binding, uniforms/table upload,
+  draw-call metrics, and retained-direct blockers for indexed alpha modes.
 
 Exit criteria:
 

@@ -996,6 +996,8 @@ function createIndexedPalettedFamilyMaterialTableRecord(
 		wrapS: indexedMaterial.wrapS,
 		wrapT: indexedMaterial.wrapT,
 		color: drawUnit.color,
+		detailAtlasEntryKey: drawUnit.detailOverlay?.atlasEntry?.key ?? null,
+		detailTiling: drawUnit.detailOverlay?.tiling ?? 1,
 		alphaPolicy: "opaque",
 		filteringMode: "shader-palette-linear",
 	};
@@ -2056,7 +2058,7 @@ function syncWebgl2TextureAtlasGeneration({
 	) {
 		releaseWebgl2TextureAtlasGenerationGraphLease(store);
 	}
-	if (plan.renderFamilies.rgbaTexturePage.compactableDrawUnitIds.length === 0) {
+	if (!requiresTextureAtlasGeneration(plan)) {
 		store.textureAtlasGeneration?.dispose();
 		store.textureAtlasGeneration = null;
 		store.textureAtlasGenerationTextureCount = 0;
@@ -2111,6 +2113,13 @@ function syncWebgl2TextureAtlasGeneration({
 		"webgl2 texture atlas generation",
 	);
 	store.textureAtlasGenerationGraph = rendererResourceGraph;
+}
+
+function requiresTextureAtlasGeneration(plan: CompactionFamilyPlan): boolean {
+	return (
+		plan.renderFamilies.rgbaTexturePage.compactableDrawUnitIds.length > 0 ||
+		plan.detailAtlasTextures.length > 0
+	);
 }
 
 function refreshWebgl2TextureAtlasGenerationCoverage({
@@ -2232,10 +2241,9 @@ function syncWebgl2CompactedGeometryResources({
 	store.compactedResourceFallbackSamples = [];
 	const retainedGeometryBatchKeys = new Set<string>();
 	const retainedFamilyResourceKeys = new Set<string>();
-	if (
-		plan.renderFamilies.rgbaTexturePage.compactableDrawUnitIds.length > 0 &&
-		!store.textureAtlasGeneration
-	) {
+	const detailPlacementsByEntryKey =
+		createDetailTextureAtlasPlacementsByEntryKey(plan);
+	if (requiresTextureAtlasGeneration(plan) && !store.textureAtlasGeneration) {
 		store.compactedResourceFallbackSamples = [
 			`compacted batch ${plan.key} waiting for texture atlas generation`,
 		];
@@ -2255,8 +2263,6 @@ function syncWebgl2CompactedGeometryResources({
 			];
 		}
 		const placementsByEntryKey = createTextureAtlasPlacementsByEntryKey(plan);
-		const detailPlacementsByEntryKey =
-			createDetailTextureAtlasPlacementsByEntryKey(plan);
 		for (const batchPlan of batchPlans) {
 			const geometry = profileBrowserJsScope(
 				"webgl2.resource.buildCompactedGeometryBatch",
@@ -2321,6 +2327,7 @@ function syncWebgl2CompactedGeometryResources({
 				geometry,
 				materialTableRecords: batchPlan.materialTableRecords,
 				materialDrawSlices: batchPlan.plan.drawSlices,
+				detailPlacementsByEntryKey,
 			});
 			retainedFamilyResourceKeys.add(familyResource.key);
 			store.compactedGeometryFamilyResources.set(

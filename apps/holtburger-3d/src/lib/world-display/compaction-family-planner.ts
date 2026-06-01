@@ -144,6 +144,8 @@ export interface IndexedPalettedFamilyMaterialTableRecord {
 	wrapS: "clamp" | "repeat";
 	wrapT: "clamp" | "repeat";
 	color: RenderVec4;
+	detailAtlasEntryKey: string | null;
+	detailTiling: number;
 	alphaPolicy: "opaque";
 	filteringMode: "shader-palette-linear";
 }
@@ -337,7 +339,11 @@ export function planCompactionFamilies(options: {
 		});
 	}
 
-	const detailEntries = dedupeRgbaTexturePageDetailEntries(placed);
+	const indexedCandidates = collectIndexedPalettedCompactionCandidates(options.drawUnits);
+	const detailEntries = dedupeCompactionFamilyDetailEntries([
+		...placed.map((candidate) => candidate.drawUnit),
+		...indexedCandidates,
+	]);
 	const detailLayout = planAtlasLayout({
 		entries: detailEntries.map((entry) => ({
 			key: entry.key,
@@ -352,6 +358,13 @@ export function planCompactionFamilies(options: {
 	});
 	const detailPlaced = placed.filter((candidate) => {
 		const detailEntryKey = candidate.drawUnit.detailAtlasEntry?.key ?? null;
+		return (
+			detailEntryKey === null ||
+			detailLayout.placementsByEntryKey.has(detailEntryKey)
+		);
+	});
+	const detailReadyIndexedCandidates = indexedCandidates.filter((candidate) => {
+		const detailEntryKey = candidate.detailAtlasEntry?.key ?? null;
 		return (
 			detailEntryKey === null ||
 			detailLayout.placementsByEntryKey.has(detailEntryKey)
@@ -372,14 +385,28 @@ export function planCompactionFamilies(options: {
 			detail: overflow.detail,
 		});
 	}
+	for (const candidate of indexedCandidates) {
+		const detailEntryKey = candidate.detailAtlasEntry?.key ?? null;
+		if (detailEntryKey === null) {
+			continue;
+		}
+		const overflow = detailLayout.overflowsByEntryKey.get(detailEntryKey);
+		if (!overflow) {
+			continue;
+		}
+		bypasses.push({
+			drawUnitId: candidate.id,
+			reason: "detail-atlas-full",
+			detail: overflow.detail,
+		});
+	}
 
-	const indexedCandidates = collectIndexedPalettedCompactionCandidates(options.drawUnits);
 	const indexedMaterialTableRecords =
-		assignIndexedPalettedFamilyMaterialTableRecords(indexedCandidates, options.policy);
+		assignIndexedPalettedFamilyMaterialTableRecords(detailReadyIndexedCandidates, options.policy);
 	const indexedMaterialTableRecordByKey = new Map(
 		indexedMaterialTableRecords.map((record) => [record.key, record] as const),
 	);
-	const indexedCompactable = indexedCandidates.filter((candidate) => {
+	const indexedCompactable = detailReadyIndexedCandidates.filter((candidate) => {
 		const record = candidate.indexedMaterialTableRecord;
 		if (record && indexedMaterialTableRecordByKey.has(record.key)) {
 			return true;
@@ -440,17 +467,22 @@ export function planCompactionFamilies(options: {
 	const compactableEntryKeys = new Set(
 		compactable.map((candidate) => candidate.eligibility.atlasEntryKey),
 	);
+	const usedDetailEntryKeys = new Set(
+		[
+			...compactable.map(
+				(candidate) => candidate.drawUnit.detailAtlasEntry?.key ?? "",
+			),
+			...indexedCompactable.map(
+				(candidate) => candidate.detailAtlasEntry?.key ?? "",
+			),
+		].filter((key) => key.length > 0),
+	);
 	return {
 		key: describeCompactionFamilyPlanKey({
 			policy: options.policy,
 			atlasEntryKeys: [...compactableEntryKeys].sort(),
 			detailAtlasEntryKeys: detailEntries
-				.filter((entry) =>
-					compactable.some(
-						(candidate) =>
-							candidate.drawUnit.detailAtlasEntry?.key === entry.key,
-					),
-				)
+				.filter((entry) => usedDetailEntryKeys.has(entry.key))
 				.map((entry) => entry.key),
 			materialSlotKeys: materialSlots.map((slot) => slot.key),
 			indexedMaterialTableRecordKeys: indexedMaterialTableRecords.map(
@@ -484,19 +516,13 @@ export function planCompactionFamilies(options: {
 			}))
 			.filter((page) => page.placements.length > 0),
 		detailAtlasEntryRecords: detailEntries.filter((entry) =>
-			compactable.some(
-				(candidate) => candidate.drawUnit.detailAtlasEntry?.key === entry.key,
-			),
+			usedDetailEntryKeys.has(entry.key),
 		),
 		detailAtlasTextures: detailLayout.texturePages
 			.map((page) => ({
 				...page,
 				placements: page.placements.filter((placement) =>
-					compactable.some(
-						(candidate) =>
-							candidate.drawUnit.detailAtlasEntry?.key ===
-							placement.atlasEntryKey,
-					),
+					usedDetailEntryKeys.has(placement.atlasEntryKey),
 				),
 			}))
 			.filter((page) => page.placements.length > 0),
@@ -635,6 +661,7 @@ function createIndexedPalettedFamilyDrawSlices({
 			record.indexFormat,
 			record.indexPageKey,
 			record.palettePageKey,
+			record.key,
 			"indexed-opaque",
 		].join("|");
 		const group = groups.get(key) ?? {
@@ -658,6 +685,7 @@ function createIndexedPalettedFamilyDrawSlices({
 				group.record.indexFormat,
 				group.record.indexPageKey,
 				group.record.palettePageKey,
+				group.record.key,
 				`table=${group.slotIndex}`,
 			].join("|"),
 			indexFormat: group.record.indexFormat,
@@ -687,8 +715,7 @@ function isIndexedPalettedMaterialTableReady(
 		!material.blockers.includes("missing-indexed-texel-page") &&
 		!material.blockers.includes("missing-indexed-palette-page") &&
 		!material.blockers.includes("unsupported-texture-page-behavior") &&
-		!material.blockers.includes("indexed-alpha-policy-unsupported") &&
-		!material.blockers.includes("detail-overlay")
+		!material.blockers.includes("indexed-alpha-policy-unsupported")
 	);
 }
 
@@ -753,9 +780,6 @@ export function createCompactionEligibility(options: {
 			}
 			if (alphaPolicy !== "opaque") {
 				materialBlockers.push("indexed-alpha-policy-unsupported");
-			}
-			if (options.hasDetailOverlay) {
-				materialBlockers.push("detail-overlay");
 			}
 			break;
 		case "terrain-blend":
@@ -1111,12 +1135,14 @@ function dedupeRgbaTexturePageEntries(
 	);
 }
 
-function dedupeRgbaTexturePageDetailEntries(
-	candidates: readonly EligibleCompactionFamilyCandidate[],
+function dedupeCompactionFamilyDetailEntries(
+	candidates: readonly {
+		detailAtlasEntry: RgbaTexturePageDetailAtlasEntry | null;
+	}[],
 ): RgbaTexturePageDetailAtlasEntry[] {
 	const entriesByKey = new Map<string, RgbaTexturePageDetailAtlasEntry>();
 	for (const candidate of candidates) {
-		const detailEntry = candidate.drawUnit.detailAtlasEntry;
+		const detailEntry = candidate.detailAtlasEntry;
 		if (detailEntry) {
 			entriesByKey.set(detailEntry.key, detailEntry);
 		}

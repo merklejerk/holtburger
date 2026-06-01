@@ -761,6 +761,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 				indexedPalettedFamilies: [
 					createIndexedPalettedFamilyResource(["indexed"]),
 				],
+				detailTextures: [],
 				texturesByKey: new Map([
 					[
 						indexedMaterial.indexTextureKey,
@@ -788,6 +789,73 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		expect(gl.boundTextures).toContain(indexTexture);
 		expect(gl.boundTextures).toContain(paletteTexture);
 		expect(gl.calls.filter((call) => call.startsWith("drawElements"))).toHaveLength(2);
+	});
+
+	it("binds detail atlas pages for compacted indexed family draw slices", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+		const indexTexture = {} as WebGLTexture;
+		const paletteTexture = {} as WebGLTexture;
+		const detailTexture = {} as WebGLTexture;
+		const indexedMaterial = createIndexedMaterial("p8");
+		const drawUnitsById = new Map<string, Webgl2WorldDrawUnit>([
+			[
+				"indexed-detail",
+				createDrawUnit({
+					id: "indexed-detail",
+					materialKind: "indexed-paletted",
+					indexedMaterial,
+				}),
+			],
+		]);
+
+		const metrics = submitWebgl2FlatWorldFrame({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			terrainBlendProgram: createTerrainBlendProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			indexedPalettedFamilyP8Program: createIndexedPalettedFamilyProgram(),
+			indexedPalettedFamilyP16Program: createIndexedPalettedFamilyProgram(),
+			indexedPalettedFamilyResources: {
+				batches: [createRgbaTexturePageFamilyBatch(["indexed-detail"])],
+				indexedPalettedFamilies: [
+					createIndexedPalettedFamilyResource(["indexed-detail"], {
+						detailAtlasTextureIndex: 0,
+					}),
+				],
+				detailTextures: [
+					{
+						key: "detail-texture",
+						textureIndex: 0,
+						texture: createTextureResource(detailTexture),
+						width: 4,
+						height: 4,
+						placementCount: 1,
+					},
+				],
+				texturesByKey: new Map([
+					[
+						indexedMaterial.indexTextureKey,
+						createTextureResource(indexTexture),
+					],
+					[
+						indexedMaterial.paletteTextureKey,
+						createTextureResource(paletteTexture),
+					],
+				]),
+			},
+			drawUnitsById,
+			frame: createFrame(["indexed-detail"]),
+		});
+
+		expect(metrics.indexedPalettedFamilyReplacedDrawUnitCount).toBe(1);
+		expect(gl.boundTextures).toContain(indexTexture);
+		expect(gl.boundTextures).toContain(paletteTexture);
+		expect(gl.boundTextures).toContain(detailTexture);
+		expect(gl.uniform2fValues).toContainEqual([4, 4]);
 	});
 });
 
@@ -1193,11 +1261,12 @@ function createIndexedPalettedFamilyProgram(): Webgl2IndexedPalettedFamilyWorldP
 			uBatchModel: {} as WebGLUniformLocation,
 			uIndexTexture: {} as WebGLUniformLocation,
 			uPaletteTexture: {} as WebGLUniformLocation,
+			uDetailAtlasTexture: {} as WebGLUniformLocation,
+			uDetailAtlasSize: {} as WebGLUniformLocation,
 			uMaterialColors: {} as WebGLUniformLocation,
-			uTextureSizes: {} as WebGLUniformLocation,
-			uPaletteColorCounts: {} as WebGLUniformLocation,
-			uClipThresholds: {} as WebGLUniformLocation,
-			uWrapModes: {} as WebGLUniformLocation,
+			uMaterialParams: {} as WebGLUniformLocation,
+			uDetailMaterialRects: {} as WebGLUniformLocation,
+			uDetailMaterialParams: {} as WebGLUniformLocation,
 		},
 		dispose() {
 			return;
@@ -1285,7 +1354,9 @@ function createRgbaTexturePageFamilyResource(
 
 function createIndexedPalettedFamilyResource(
 	drawUnitIds: readonly string[],
+	options: { detailAtlasTextureIndex?: number | null } = {},
 ): Webgl2IndexedPalettedFamilyResource {
+	const detailAtlasTextureIndex = options.detailAtlasTextureIndex ?? null;
 	return {
 		family: "indexed-paletted",
 		key: "indexed-paletted|atlas-batch",
@@ -1304,6 +1375,12 @@ function createIndexedPalettedFamilyResource(
 				wrapS: "clamp",
 				wrapT: "repeat",
 				color: new Float32Array([1, 1, 1, 1]),
+				detailAtlasEntryKey:
+					detailAtlasTextureIndex == null ? null : "detail-entry",
+				detailAtlasTextureIndex,
+				detailAtlasRect:
+					detailAtlasTextureIndex == null ? [0, 0, 1, 1] : [1, 1, 2, 2],
+				detailTiling: detailAtlasTextureIndex == null ? 1 : 12,
 				alphaPolicy: "opaque",
 				filteringMode: "shader-palette-linear",
 			},
@@ -1314,6 +1391,7 @@ function createIndexedPalettedFamilyResource(
 				indexFormat: "p8",
 				indexPageKey: "index",
 				palettePageKey: "palette",
+				detailAtlasTextureIndex,
 				renderStateKey: "indexed-opaque",
 				firstIndex: 0,
 				indexCount: 3,

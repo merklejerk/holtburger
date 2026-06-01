@@ -240,6 +240,42 @@ describe("compaction family planner", () => {
 		]);
 	});
 
+	it("keeps indexed detail-overlay draw units in the indexed family", () => {
+		const detailEntry = createDetailAtlasEntry("indexed-detail");
+		const detailRecord = {
+			...createIndexedMaterialTableRecord("detail"),
+			detailAtlasEntryKey: detailEntry.key,
+			detailTiling: detailEntry.tiling,
+		};
+		const plan = planCompactionFamilies({
+			drawUnits: [
+				createCandidate({
+					id: "indexed-detail",
+					entryKey: "detail",
+					materialKind: "indexed-paletted",
+					hasDetailOverlay: true,
+					detailAtlasEntry: detailEntry,
+					indexedMaterialTableRecord: detailRecord,
+				}),
+			],
+			policy: {
+				maxAtlasTextureSize: 64,
+				maxAtlasTextureCount: 1,
+				baseGutterPixels: 2,
+				maxMaterialSlotsPerDraw: 4,
+			},
+		});
+
+		expect(plan.compactableDrawUnitIds).toEqual(["indexed-detail"]);
+		expect(plan.bypasses).toEqual([]);
+		expect(plan.detailAtlasEntryRecords.map((entry) => entry.key)).toEqual([
+			"indexed-detail",
+		]);
+		expect(plan.renderFamilies.indexedPaletted.materialTableRecords).toEqual([
+			detailRecord,
+		]);
+	});
+
 	it("keeps detail-overlay draw units compactable when an RGBA8 detail atlas entry is available", () => {
 		const plan = planCompactionFamilies({
 			drawUnits: [
@@ -496,6 +532,8 @@ function createIndexedMaterialTableRecord(
 		wrapS: "clamp",
 		wrapT: "clamp",
 		color: new Float32Array([1, 1, 1, 1]),
+		detailAtlasEntryKey: null,
+		detailTiling: 1,
 		alphaPolicy: "opaque",
 		filteringMode: "shader-palette-linear",
 	};

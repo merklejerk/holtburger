@@ -192,9 +192,9 @@ describe("webgl2 world resources", () => {
 			gl.textureUploads.map(({ width, height }) => ({ width, height })),
 		).toEqual([{ width: 1, height: 1 }]);
 		expect(gl.generatedMipmapCount).toBe(1);
-		expect(store.textureSamplingPolicySamples).toEqual([
-			"wrap=clamp/clamp;filter=linear/linear/linear;color=srgb;aniso=1;mips=on;flipY=off",
-		]);
+		expect(store.textureSamplingPolicyCounts).toEqual({
+			"wrap=clamp/clamp;filter=linear/linear/linear;color=srgb;aniso=1;mips=on;flipY=off": 1,
+		});
 
 		syncWebgl2WorldResources({
 			gl: gl.asContext(),
@@ -241,9 +241,9 @@ describe("webgl2 world resources", () => {
 			textureFilteringMode: "anisotropic-4x",
 		});
 
-		expect(store.textureSamplingPolicySamples).toEqual([
-			"wrap=clamp/clamp;filter=linear/linear/linear;color=srgb;aniso=4;mips=on;flipY=off",
-		]);
+		expect(store.textureSamplingPolicyCounts).toEqual({
+			"wrap=clamp/clamp;filter=linear/linear/linear;color=srgb;aniso=4;mips=on;flipY=off": 1,
+		});
 		expect(gl.textureParameters).toContainEqual({
 			pname: gl.TEXTURE_MIN_FILTER,
 			param: gl.LINEAR_MIPMAP_LINEAR,
@@ -272,9 +272,9 @@ describe("webgl2 world resources", () => {
 			textureFilteringMode: "nearest",
 		});
 
-		expect(store.textureSamplingPolicySamples).toEqual([
-			"wrap=clamp/clamp;filter=nearest/nearest/none;color=srgb;aniso=1;mips=off;flipY=off",
-		]);
+		expect(store.textureSamplingPolicyCounts).toEqual({
+			"wrap=clamp/clamp;filter=nearest/nearest/none;color=srgb;aniso=1;mips=off;flipY=off": 1,
+		});
 		expect(gl.generatedMipmapCount).toBe(1);
 		expect(gl.deletedTextures).toHaveLength(1);
 		expect(gl.textureParameters).toContainEqual({
@@ -356,8 +356,6 @@ describe("webgl2 world resources", () => {
 		expect(store.atlasEligibleMaterialCount).toBe(1);
 		expect(store.atlasCandidateEntryCount).toBe(1);
 		expect(store.atlasCandidateMaterialSlotCount).toBe(1);
-		expect(store.atlasCandidateSamples[0]).toContain("static");
-		expect(store.atlasCandidateSamples[0]).toContain("atlas-entry");
 	});
 
 	it("retains and releases landblock-scoped baked batches through the renderer graph", () => {

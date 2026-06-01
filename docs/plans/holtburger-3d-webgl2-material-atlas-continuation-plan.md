@@ -3921,39 +3921,226 @@ Verification:
 - `npm exec tsc -- --noEmit`
 - `npm exec vitest -- src/lib/world-display/texture-page-binding.test.ts src/lib/world-display/baked-renderable-planner.test.ts src/lib/world-display/baked-geometry.test.ts src/lib/world-display/webgl2-baked-submit.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts src/lib/world-display/webgl2-transition-portal-work.test.ts --run`
 
-### Phase M7D.4: Expand Baked Static and Interior Coverage
+### Phase M7D.4: Baked Coverage Audit and Eligibility Targets
 
-Status: Next.
+Status: Implemented.
 
-Purpose: after the boundary cleanup, improve performance by making more static and structured
-interior renderables bake, while allowing retained direct draws to keep using the shared texture-page
-binding model.
+Purpose: turn the current retained-direct-draw population into concrete, typed bake targets before
+adding another baked shader/material family. This phase should not broaden baked eligibility by
+guessing. It should identify which static and structured-interior draw units are still direct, why
+they are direct, and which single material-family expansion buys the most coverage without weakening
+the direct-draw versus compacted-geometry boundary.
 
 Tasks:
 
-- Use field metrics to identify the top retained direct-draw reasons for static and structured
-  interior renderables.
-- Add baked support for the highest-value compatible material features first, likely alpha-test and
-  detail overlay where they can share the same baked shader family without compromising correctness.
-- Add indexed/paletted texture-page buckets before deciding whether indexed/paletted materials can
-  bake. The index and palette pages should be usable by direct draw first, then by a dedicated baked
-  material family if batching pressure justifies it.
-- Add terrain/road texture-page buckets and alpha/control data-page buckets as shared material
-  infrastructure, but keep terrain's geometry baking and shader pipeline in M7E. Blended RGBA color
-  inputs should reuse the RGBA color-page bucket; transparent ordering remains material/render policy.
-- Keep debug/diagnostic overlays direct or in a separate debug pipeline.
-- Validate repeat/clamp, detail overlay, and alpha-test behavior against representative field scenes.
-- Track baked coverage as candidate count, baked count, retained direct count, retained reason
-  samples, draw-call savings, packed texture-page count, single-entry texture-page count, direct
-  texture-page draw count, and baked VBA resource counts.
+- Add or tighten typed coverage metrics for the current bake decision:
+  - total static and structured-interior draw units;
+  - baked versus retained-direct counts;
+  - retained-direct counts by `BakeEligibility` material blocker;
+  - retained-direct counts by `BakeEligibility` geometry blocker;
+  - retained-direct counts by material family (`opaque`, `alpha-test`, `blended`, `indexed`,
+    `terrain-blend`, debug/overlay, and unknown/unsupported);
+  - draw-call and material-bind estimates for the top retained-direct groups.
+- Keep string formatting for these metrics at the debug/DTO boundary. Do not add diagnostic strings
+  back onto draw units.
+- Split retained-direct reasons into actionable categories:
+  - `material-family-missing`: shader/material-table support does not exist yet;
+  - `texture-page-missing`: required sampled resource is not represented as a texture page yet;
+  - `geometry-incompatible`: geometry cannot safely enter compacted geometry;
+  - `ordering-policy`: transparency, portal, or overlay ordering prevents batching;
+  - `debug-pipeline`: debug/diagnostic rendering should not be optimized through the production
+    baked path.
+- Produce a small field-capture table in this plan with the top blockers and the chosen next target.
+  The first target should be one of:
+  - flat/solid constant-color static or structured-interior materials if they are the dominant
+    stale `missing-atlas-eligibility` population;
+  - alpha-test/cutout static or structured-interior materials if they already use RGBA color pages
+    and only need material-table/render-state support;
+  - detail-overlay static or structured-interior materials if detail pages are already present and
+    compatible with the existing baked submit shape;
+  - indexed/paletted direct texture-page integration if indexed resources are the dominant blocker;
+  - no baked expansion yet, if geometry blockers or ordering blockers dominate.
+- Confirm that retained direct draw already consumes the same texture-page binding abstraction as
+  baked submit for the chosen target. If it does not, add an interim texture-page cleanup phase before
+  adding baked eligibility.
+- Keep terrain, road, terrain alpha/control textures, and terrain geometry baking out of this phase.
+  Terrain remains M7E even if terrain dominates the retained-direct population.
+- Keep true blended transparency direct unless this audit proves a transparent baked family is the
+  next highest-value target and its ordering policy can be designed concretely.
+
+Field capture: 2026-06-01, outdoor destination `33.50S, 72.80E`, anchor `0xda55ffff`.
+
+| Metric | Value | Read |
+| --- | ---: | --- |
+| Visible draws | 3368 | Still draw-call/state-change bound at 35 FPS / 27 ms render. |
+| Candidate draw units | 18857 | 17420 static, 811 structured interior, 457 terrain, 200 portal masks. |
+| Baked draw units | 9590 | Current compacted-geometry path is active and useful. |
+| Baked shader draws | 17 | Baked submit is already collapsing substantial draw pressure. |
+| Baked replaced draw units | 1816 | Conservative route replacement is still limited by visibility/routing. |
+| Baked retained direct draw units | 3350 | Retained direct draw is still large enough to optimize. |
+| Baked bypasses | 9298 | Top blocker population for the next phase. |
+| Direct texture-page draws | 1158 | 25 packed, 1133 single-entry; texture pages are now shared infrastructure. |
+| Texture-page bindings | 26775 | Buckets already include base-color, detail, indexed-texels, palette-lookup, terrain, road, and alpha-control. |
+
+Top baked bypasses in this capture:
+
+| Bypass | Count | Likely category | Immediate interpretation |
+| --- | ---: | --- | --- |
+| `missing-atlas-eligibility` | 6324 | Material-family/eligibility modeling gap | This likely maps to the large `webgl2-flat-resource` population (6621). Flat/solid materials do not need a base texture page, so the current blocker name is stale and the planner may be requiring atlas eligibility where a constant-color baked material record would be enough. Prove this before adding alpha/detail support. |
+| `non-opaque-material` | 2099 | Material-family missing / stale blocker name | This roughly lines up with visible indexed/paletted draw pressure (2068) and should be split into indexed/paletted, alpha-test/cutout, true blended transparency, and other unsupported families. The current label is too broad to choose the next shader work. |
+| `non-static` terrain | 457 | Geometry/pipeline boundary | Terrain remains M7E. Do not consume M7D capacity here. |
+| `material-table-overflow` | 218 | Baked resource sizing/grouping | Keep as a secondary cleanup unless it blocks the chosen high-value material family. |
+| `non-static` portal-mask | 200 | Debug/portal pipeline boundary | Keep direct or in a portal/debug-specific path. |
+
+Course correction from the capture:
+
+- The next concrete target is **not** alpha-test/detail by default. First, split the stale
+  `missing-atlas-eligibility` bucket and confirm whether it is mostly flat/solid materials. If so,
+  M7D.4a should implement a constant-color baked material family before alpha-test/detail work.
+- `non-opaque-material` is not actionable enough. Replace or supplement it with typed material-family
+  blockers so indexed/paletted, alpha-test/cutout, true blended transparency, and unsupported debug
+  paths are visible independently.
+- Indexed/paletted resources are already represented in texture-page metrics (`indexed-texels` and
+  `palette-lookup` buckets). M7D.5 should be treated as hardening/completing indexed texture-page
+  semantics and then designing baked indexed material support, not as if no direct texture-page
+  integration exists.
+- `stagedAtlas*` debug fields are now legacy aliases for direct packed texture-page metrics. Keep
+  them only as temporary DTO shims and remove or rename them when the debug UI no longer consumes
+  the old names.
+- The direct packed base-page fallback sample for `atlas-entry|06003789|...|512|512|rgba8|linear`
+  repeats eight times. Before expanding baked coverage, determine whether this is a missing placement
+  bug, a stale candidate entry, or a normal single-entry fallback being reported with misleading
+  severity.
+
+Follow-up field capture after typed M7D.4 metrics: 2026-06-01T17:11:01Z, same destination and anchor.
+
+| Signal | Count | Read |
+| --- | ---: | --- |
+| Baked material families | textured-opaque 9808, indexed-paletted 5964, blended 2459, terrain-blend 457 | Flat/constant-color is not the dominant blocker. The earlier flat hypothesis was wrong. |
+| Retained direct families | indexed-paletted 5964, blended 2459, terrain-blend 457, debug-pipeline 200 | The next production target is indexed/paletted or blended policy, not flat. Terrain remains M7E. |
+| Material blockers | missing-baked-indexed-paletted-family 5964, missing-baked-blended-family 2459, missing-baked-terrain-family 457, debug-pipeline-material 200 | Indexed/paletted is the largest actionable retained-direct family. |
+| Geometry blockers | non-static 657, missing-landblock-origin 657, missing-uv-buffer 200 | Terrain and portal-mask blockers are expected, but the paired non-static/missing-landblock counts should stay out of static/interior bake decisions. |
+| Texture-page fallback | direct packed base page missing placed entry `06003789...` x8 | Still needs classification; it is separate from the dominant baked-family blockers. |
+
+Course correction from the follow-up capture:
+
+- M7D.4a should no longer default to constant-color/flat support. There is no visible retained
+  `flat-constant-color` pressure in the typed family counts.
+- The largest actionable family is indexed/paletted. Before writing a baked indexed shader, add an
+  immediate focused phase to verify that indexed texture-page direct draw is complete enough for a
+  baked material-table design and to separate visible indexed pressure from total retained indexed
+  draw units.
+- The second largest family is `blended`. This bucket needs a material-policy split before shader
+  work: alpha-test/cutout, true blended transparency, opacity-only, and any AC-specific masked
+  behavior should not remain collapsed under one `blended` family if only some can bake safely.
 
 Exit criteria:
 
-- Static and structured-interior baked coverage improves through broader bake eligibility, while
-  direct-draw texture-page sampling remains a separate material-resource optimization.
-- Detail and alpha-test support are either represented in the baked shader family with tests or
-  remain explicitly direct-draw with named blockers.
+- Debug metrics can answer, without string parsing or manual log inspection, why static and
+  structured-interior draw units are retained direct.
+- The plan includes a measured top-blocker table and a named next implementation target.
+- No new baked material family is added in this phase unless the metrics needed to justify it already
+  exist and the target is mechanically obvious.
+- If the next target is blocked by missing texture-page infrastructure, an immediate interim phase is
+  inserted before baked eligibility changes.
 - Terrain remains out of this phase and continues to be planned as its own pipeline.
+
+Progress:
+
+- Added typed baked coverage metrics to the WebGL2 resource store and debug DTO:
+  - `bakedCoverageDrawUnitCounts`;
+  - `bakedCoverageMaterialBlockerCounts`;
+  - `bakedCoverageGeometryBlockerCounts`;
+  - `bakedCoverageMaterialFamilyCounts`;
+  - `bakedCoverageRetainedDirectMaterialFamilyCounts`.
+- Added a typed baked material-family classifier. Current families are `flat-constant-color`,
+  `textured-opaque`, `alpha-test`, `blended`, `indexed-paletted`, `terrain-blend`,
+  `debug-pipeline`, and `unknown-unsupported`.
+- Split stale baked bypass reporting:
+  - `non-opaque-material` is replaced by family-specific blockers such as
+    `unsupported-alpha-test-material`, `unsupported-blended-material`,
+    `unsupported-indexed-paletted-material`, and `unsupported-material-state`;
+  - flat/solid materials now report `unsupported-constant-color-material` instead of being hidden
+    behind missing atlas eligibility;
+  - portal/debug materials are counted as `debug-pipeline` in typed material-family/blocker metrics
+    even though their primary bypass remains the geometry/pipeline boundary;
+  - direct textured opaque materials still use `missing-atlas-eligibility` when their baked path
+    specifically lacks packed base-color atlas eligibility.
+- Surfaced the new coverage summaries in the browser debug report text and `materialTypeCounts`
+  under `webgl2-baked-coverage-*`, `webgl2-baked-material-blocker-*`,
+  `webgl2-baked-geometry-blocker-*`, `webgl2-baked-material-family-*`, and
+  `webgl2-baked-retained-family-*`.
+
+Decisions and course corrections:
+
+- The first implementation target remains gated on a fresh field capture. The prior capture strongly
+  suggests constant-color/flat support, but M7D.4 now has the metrics needed to prove that directly.
+- `missing-atlas-eligibility` is no longer allowed to stand in for every non-textured material
+  family. It should now mean a direct textured opaque material lacks the packed base-color atlas
+  eligibility currently required by the baked path.
+- Indexed/paletted resources are still direct draw for baked geometry, but they now have explicit
+  family/blocker metrics. M7D.5 should consume those counts rather than inferring indexed pressure
+  from broad non-opaque bypasses.
+
+Cleanup targets and legacy shims:
+
+- Completed immediately after M7D.4: the browser debug report now omits verbose successful-path
+  dumps by default. Full renderer metrics JSON, texture upload samples, atlas candidate samples, and
+  prepared-asset history are not included unless a future explicit drilldown/report mode needs them.
+- The WebGL renderer debug DTO also dropped success-path sample fields for texture sampling policy,
+  texture uploads, and atlas candidates. Counts remain; blocker/fallback samples remain.
+- `stagedAtlas*` metrics remain as legacy debug aliases for direct packed texture-page metrics.
+- The repeated direct packed base-page fallback for `atlas-entry|06003789|...` still needs a field
+  follow-up to classify it as a missing placement bug, stale candidate, or misleading fallback
+  severity.
+- The fresh report did not show `flat-constant-color` pressure. Constant-color baked support is no
+  longer the likely M7D.4a target.
+
+Verification:
+
+- `npm exec tsc -- --noEmit`
+- `npm exec vitest -- src/lib/world-display/texture-page-binding.test.ts src/lib/world-display/baked-renderable-planner.test.ts src/lib/world-display/baked-geometry.test.ts src/lib/world-display/webgl2-baked-submit.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts src/lib/world-display/webgl2-transition-portal-work.test.ts --run`
+
+### Phase M7D.4a: Indexed/Blended Target Classification Prep
+
+Status: Next.
+
+Purpose: avoid jumping straight from typed blocker counts to a baked shader. The follow-up field
+capture shows indexed/paletted and blended materials dominate retained direct draw. This phase should
+verify indexed texture-page completeness, split blended policy into bakeable versus non-bakeable
+subfamilies, and choose the first material-family expansion with visible-count context.
+
+Tasks:
+
+- Add visible retained-direct family counts if the existing totals are not enough to choose the next
+  target. The total retained indexed count is 5964, but the visible indexed count in the previous
+  report was 2068, so visible pressure should be explicit.
+- Verify indexed/paletted direct texture-page completeness:
+  - indexed texel and palette page bindings exist for the direct path;
+  - page upload policy is no-mip/no-filter/data lookup;
+  - palette dimensions, clip threshold, wrap policy, and shader-owned filtering facts are available
+    at the boundary where a baked material-table record would be encoded.
+- Split `blended` into more precise material-policy families before baking:
+  - alpha-test/cutout;
+  - true blended transparency;
+  - opacity-only/translucent;
+  - other unsupported material state.
+- Decide the first expansion:
+  - if indexed/paletted visible pressure dominates and direct texture-page facts are complete, move to
+    M7D.5 baked indexed design;
+  - if alpha-test/cutout is a large subset of `blended`, add a cutout baked material-family phase
+    before true blended transparency;
+  - if true blended transparency dominates, keep it direct until ordering/depth policy is designed.
+- Keep flat/constant-color as a later opportunistic cleanup unless a different field capture shows it
+  as meaningful retained-direct pressure.
+
+Exit criteria:
+
+- The next implementation target is selected from visible retained-direct family pressure, not total
+  retained counts alone.
+- Indexed/paletted direct texture-page readiness is proven or has named prep blockers.
+- `blended` is no longer a single blocker bucket for materially different alpha/ordering policies.
+- Flat/constant-color is explicitly deprioritized unless future captures show real pressure.
 
 ### Phase M7D.5: Indexed and Palette Texture-Page Integration
 

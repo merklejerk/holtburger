@@ -3528,7 +3528,7 @@ Introduced cleanup targets:
 
 ### Phase M7D.1c: Fold Remaining Texture Inputs Into Texture-Page Buckets
 
-Status: Immediate before M7D.2.
+Status: Implemented on 2026-06-01 for direct-draw texture-page records and diagnostics.
 
 Purpose: finish the part of M7D.1b that could not honestly land in the base-color submit slice.
 Direct base-color sampling is now a texture-page path, but detail overlays, indexed/palette
@@ -3568,9 +3568,67 @@ Exit criteria:
 - The only remaining `stagedAtlas*` names are deliberate compatibility shims listed in cleanup
   targets.
 
+Progress on 2026-06-01:
+
+- Extended the direct texture-page binding model beyond base color. Bindings now carry usage bucket,
+  sample class, wrap policy, and explicit sampling policy facts for filtering, mip behavior,
+  color-space/data handling, and lookup semantics.
+- Added direct-draw texture-page records for current non-base resources without changing shader
+  texture units:
+  - detail overlays as `detail` / `rgba-color`;
+  - indexed texels as `indexed-texels` / `indexed-data`;
+  - palettes as `palette-lookup` / `palette-data`;
+  - terrain color inputs as `terrain` / `rgba-color`;
+  - road color inputs as `road` / `rgba-color`;
+  - terrain and road alpha masks as `alpha-control` / `control-data`.
+- Indexed texel and palette page records explicitly use nearest filtering, no mipmaps, data
+  color-space, and exact lookup semantics. This preserves the current direct indexed shader contract
+  and keeps baked indexed submission deferred to M7D.5.
+- Terrain alpha/control records use `colorSpace=none` and `control-filtered` lookup semantics rather
+  than pretending they are ordinary linear RGBA color pages.
+- Added WebGL2 draw-unit `texturePageBindings` and renderer metrics for texture-page binding count,
+  usage-bucket counts, and sample-class counts. Browser debug output now includes those aggregates so
+  field captures can show whether detail/indexed/palette/terrain inputs are flowing through the
+  texture-page vocabulary.
+- Added focused tests proving detail RGBA page records, indexed/palette exact data-page policy, and
+  terrain color/control bucket classification.
+
+Decisions and course corrections:
+
+- This phase intentionally records existing bound resources as texture pages; it does not repack
+  indexed, palette, terrain, road, or alpha/control inputs into packed atlas pages yet.
+- Ordinary alpha carried by RGBA color pages remains in the RGBA color bucket. Separate
+  `alpha-control` pages are used only for separate mask/control inputs.
+- Base-color packed-page selection still happens in direct submit because it depends on the active
+  atlas generation. The newly added draw-unit texture-page records describe realized direct resources;
+  M7D.3 should move packed/single-entry material-resource resolution into shared planning so direct
+  and baked submit consume the same resolved facts.
+
+Validation:
+
+- `npm exec vitest -- src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/texture-page-binding.test.ts src/lib/world-display/webgl2-world-submit.test.ts --run`
+- `npm exec tsc -- --noEmit`
+
+Introduced cleanup targets and legacy shims:
+
+- `texturePageBindings` currently records the realized direct resources on each WebGL2 draw unit,
+  while direct-submit base-color packed-page selection is still derived separately from atlas
+  eligibility and active generation. This split is a temporary shim until shared texture-page
+  planning owns both single-entry and packed-page selection.
+- Terrain alpha/control page policy is named, but terrain still uses its dedicated direct shader and
+  direct texture units. M7E should consume these records rather than re-deriving terrain texture
+  classes.
+- Indexed and palette records are contract/diagnostic records only. M7D.5 still owns actual
+  indexed/palette atlas packing and any baked indexed material family.
+- The current `TexturePageSamplingPolicy.colorSpace` field is terminology debt. WebGL2 does not
+  implement managed color-space conversion; the real distinction today is color-filtered texture
+  sampling versus data/control sampling with no unintended conversion. Rename or replace this field
+  before M7D.3 shares the policy with bake planning, otherwise the plan will imply color-management
+  support that does not exist.
+
 ### Phase M7D.2: Baked Terminology and Boundary Rename
 
-Status: Immediate after M7D.1c.
+Status: Next.
 
 Purpose: update active code and docs terminology around the new renderer boundary. "Texture page" is
 the shared material-resource abstraction for direct draw and baked draw. "Baked" specifically means
@@ -3625,6 +3683,9 @@ Tasks:
 - Bake eligibility should be derived from the same resolved material facts used by direct draw, plus
   explicit baked-only requirements. It should not re-parse recipes, sampler strings, or texture
   identities that the direct material resolver already proved.
+- Replace string/regexp feature detection in bake/direct hot paths with typed material, sampler,
+  render-state, and texture-page facts. Stable string keys remain useful for cache identity and debug
+  samples, but behavior must not depend on parsing those strings during submit or eligibility checks.
 - Require baked static and structured-interior candidates to have:
   - texture-page material behavior compatible with the baked shader family;
   - texture-page inputs for every sampled material channel used by that family, including base and
@@ -3871,6 +3932,9 @@ Exit criteria:
   binding diagnostics into texture-page terminology. Keep usage bucket and sample class visible in
   fallback samples. Keep blend/alpha-test diagnostics with render-state/material policy unless a
   separate sampled control texture is involved.
+- Replace the temporary texture-page `colorSpace` policy naming with an explicit sampling-domain or
+  conversion-policy field. Current WebGL2 code distinguishes color sampling from data/control
+  sampling, not real renderer color spaces.
 - Audit direct and baked shader/resource setup for duplicated material feature detection. Move
   duplicated detection into shared material/texture-page planning and leave submit paths to adapt
   already-resolved facts.
@@ -3898,6 +3962,10 @@ Exit criteria:
 - Direct base-color texture-page binding currently derives packed-page placement in direct submit
   from draw-unit atlas eligibility plus the active atlas generation. M7D.3 should move that derivation
   into shared material/resource planning so direct and baked submit consume the same resolved facts.
+- The renderer still relies on string identifiers, feature-flag strings, and string/regexp matching in
+  some hot or near-hot material paths, for example sampler policy parsing and cache-key-style feature
+  strings. M7D.3 should replace behavior-driving parsing with typed facts emitted by material and
+  texture-page planning. Keep strings for stable keys, diagnostics, and graph identity only.
 - Revisit the per-frame WebGL2 draw-unit sort after M3-M7 reshape the submit path.
 - Split renderer-neutral material sampling DTOs from any Three adapter names/imports if they still
   imply Three ownership.
@@ -3920,6 +3988,9 @@ Exit criteria:
 - Do not let texture-page layout allocate WebGL resources or inspect material recipes.
 - Do not let direct and baked submit paths independently rediscover the same material feature. They
   should consume shared resolved facts and only add submit-specific capability checks.
+- Do not add new behavior that depends on parsing cache keys, feature-flag strings, diagnostic
+  strings, or regex matches in submit/resource hot paths. Add typed fields to the resolved material or
+  texture-page record instead.
 - Do not let baking mutate packed atlas generations in place.
 - Do not rebuild baked VBAs on camera re-anchor alone.
 - Do not call a renderable baked merely because it samples a packed texture page; baked requires the

@@ -6,9 +6,41 @@ import type {
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
 
 export type TexturePageKind = "single-entry" | "packed-atlas";
-export type TexturePageUsageBucket = "base-color";
-export type TexturePageSampleClass = "rgba-color";
+export type TexturePageUsageBucket =
+	| "base-color"
+	| "detail"
+	| "indexed-texels"
+	| "palette-lookup"
+	| "terrain"
+	| "road"
+	| "alpha-control";
+export type TexturePageSampleClass =
+	| "rgba-color"
+	| "indexed-data"
+	| "palette-data"
+	| "control-data";
 export type TexturePageWrapMode = "clamp" | "repeat";
+export type TexturePageFilterPolicy = "linear" | "nearest" | "material-policy";
+export type TexturePageMipPolicy = "generated" | "none" | "material-policy";
+export type TexturePageColorSpacePolicy =
+	| "linear"
+	| "data"
+	| "none"
+	| "material-policy";
+export type TexturePageLookupPolicy =
+	| "color-filtered"
+	| "exact"
+	| "control-filtered";
+
+export interface TexturePageSamplingPolicy {
+	wrapS: TexturePageWrapMode;
+	wrapT: TexturePageWrapMode;
+	minFilter: TexturePageFilterPolicy;
+	magFilter: TexturePageFilterPolicy;
+	mip: TexturePageMipPolicy;
+	colorSpace: TexturePageColorSpacePolicy;
+	lookup: TexturePageLookupPolicy;
+}
 
 export interface TexturePageBinding {
 	pageKind: TexturePageKind;
@@ -20,7 +52,13 @@ export interface TexturePageBinding {
 	height: number;
 	wrapS: TexturePageWrapMode;
 	wrapT: TexturePageWrapMode;
-	source: "standalone-direct-texture" | "shared-packed-page";
+	sampling: TexturePageSamplingPolicy;
+	source:
+		| "standalone-direct-texture"
+		| "shared-packed-page"
+		| "detail-overlay"
+		| "indexed-material"
+		| "terrain-blend";
 }
 
 export interface TexturePageBindingResolution {
@@ -73,6 +111,7 @@ export function resolveDirectDrawBaseTexturePageBinding({
 			height: drawUnit.texture.height,
 			wrapS: wrapMode.wrapS,
 			wrapT: wrapMode.wrapT,
+			sampling: colorTexturePageSamplingPolicy(wrapMode),
 			source: "standalone-direct-texture",
 		},
 		fallbackSamples,
@@ -119,9 +158,219 @@ function resolvePackedBaseTexturePageBinding({
 			height: placement.height,
 			wrapS: wrapMode.wrapS,
 			wrapT: wrapMode.wrapT,
+			sampling: colorTexturePageSamplingPolicy(wrapMode),
 			source: "shared-packed-page",
 		},
 		fallbackSamples,
+	};
+}
+
+export function collectDirectDrawTexturePageBindings(
+	drawUnit: Pick<
+		Webgl2WorldDrawUnit,
+		| "texture"
+		| "textureSamplingPolicy"
+		| "atlasEligibility"
+		| "detailOverlay"
+		| "indexedMaterial"
+		| "terrainBlend"
+	>,
+): readonly TexturePageBinding[] {
+	const baseWrap = resolveTexturePageWrapMode(drawUnit);
+	return [
+		...(drawUnit.texture
+			? [
+					createSingleEntryTexturePageBinding({
+						texture: drawUnit.texture,
+						usageBucket: "base-color",
+						sampleClass: "rgba-color",
+						wrapS: baseWrap.wrapS,
+						wrapT: baseWrap.wrapT,
+						sampling: colorTexturePageSamplingPolicy(baseWrap),
+						source: "standalone-direct-texture",
+					}),
+				]
+			: []),
+		...(drawUnit.detailOverlay
+			? [
+					createSingleEntryTexturePageBinding({
+						texture: drawUnit.detailOverlay.texture,
+						usageBucket: "detail",
+						sampleClass: "rgba-color",
+						wrapS: "repeat",
+						wrapT: "repeat",
+						sampling: colorTexturePageSamplingPolicy({
+							wrapS: "repeat",
+							wrapT: "repeat",
+						}),
+						source: "detail-overlay",
+					}),
+				]
+			: []),
+		...(drawUnit.indexedMaterial
+			? [
+					createSingleEntryTexturePageBinding({
+						texture: drawUnit.indexedMaterial.indexTexture,
+						usageBucket: "indexed-texels",
+						sampleClass: "indexed-data",
+						wrapS: drawUnit.indexedMaterial.wrapS,
+						wrapT: drawUnit.indexedMaterial.wrapT,
+						sampling: exactDataTexturePageSamplingPolicy({
+							wrapS: drawUnit.indexedMaterial.wrapS,
+							wrapT: drawUnit.indexedMaterial.wrapT,
+						}),
+						source: "indexed-material",
+					}),
+					createSingleEntryTexturePageBinding({
+						texture: drawUnit.indexedMaterial.paletteTexture,
+						usageBucket: "palette-lookup",
+						sampleClass: "palette-data",
+						wrapS: "clamp",
+						wrapT: "clamp",
+						sampling: exactDataTexturePageSamplingPolicy({
+							wrapS: "clamp",
+							wrapT: "clamp",
+						}),
+						source: "indexed-material",
+					}),
+				]
+			: []),
+		...(drawUnit.terrainBlend
+			? collectTerrainBlendTexturePageBindings(drawUnit.terrainBlend)
+			: []),
+	];
+}
+
+function collectTerrainBlendTexturePageBindings(
+	terrainBlend: NonNullable<Webgl2WorldDrawUnit["terrainBlend"]>,
+): readonly TexturePageBinding[] {
+	return [
+		createTerrainTexturePageBinding(terrainBlend.base, "terrain", "rgba-color"),
+		...terrainBlend.overlays.flatMap((overlay) => [
+			createTerrainTexturePageBinding(overlay.terrain, "terrain", "rgba-color"),
+			createTerrainTexturePageBinding(
+				overlay.alpha,
+				"alpha-control",
+				"control-data",
+			),
+		]),
+		...terrainBlend.roads.flatMap((road) => [
+			createTerrainTexturePageBinding(road.road, "road", "rgba-color"),
+			createTerrainTexturePageBinding(
+				road.alpha,
+				"alpha-control",
+				"control-data",
+			),
+		]),
+	];
+}
+
+function createTerrainTexturePageBinding(
+	binding: NonNullable<Webgl2WorldDrawUnit["terrainBlend"]>["base"],
+	usageBucket: TexturePageUsageBucket,
+	sampleClass: TexturePageSampleClass,
+): TexturePageBinding {
+	const wrap = {
+		wrapS: binding.wrapS,
+		wrapT: binding.wrapT,
+	};
+	return createSingleEntryTexturePageBinding({
+		texture: binding.texture,
+		usageBucket,
+		sampleClass,
+		wrapS: binding.wrapS,
+		wrapT: binding.wrapT,
+		sampling:
+			sampleClass === "control-data"
+				? controlTexturePageSamplingPolicy(wrap)
+				: colorTexturePageSamplingPolicy(wrap),
+		source: "terrain-blend",
+	});
+}
+
+function createSingleEntryTexturePageBinding({
+	texture,
+	usageBucket,
+	sampleClass,
+	wrapS,
+	wrapT,
+	sampling,
+	source,
+}: {
+	texture: Webgl2Texture2DResource;
+	usageBucket: TexturePageUsageBucket;
+	sampleClass: TexturePageSampleClass;
+	wrapS: TexturePageWrapMode;
+	wrapT: TexturePageWrapMode;
+	sampling: TexturePageSamplingPolicy;
+	source: TexturePageBinding["source"];
+}): TexturePageBinding {
+	return {
+		pageKind: "single-entry",
+		usageBucket,
+		sampleClass,
+		texture,
+		rect: [0, 0, texture.width, texture.height],
+		width: texture.width,
+		height: texture.height,
+		wrapS,
+		wrapT,
+		sampling,
+		source,
+	};
+}
+
+function colorTexturePageSamplingPolicy({
+	wrapS,
+	wrapT,
+}: {
+	wrapS: TexturePageWrapMode;
+	wrapT: TexturePageWrapMode;
+}): TexturePageSamplingPolicy {
+	return {
+		wrapS,
+		wrapT,
+		minFilter: "linear",
+		magFilter: "linear",
+		mip: "material-policy",
+		colorSpace: "linear",
+		lookup: "color-filtered",
+	};
+}
+
+function exactDataTexturePageSamplingPolicy({
+	wrapS,
+	wrapT,
+}: {
+	wrapS: TexturePageWrapMode;
+	wrapT: TexturePageWrapMode;
+}): TexturePageSamplingPolicy {
+	return {
+		wrapS,
+		wrapT,
+		minFilter: "nearest",
+		magFilter: "nearest",
+		mip: "none",
+		colorSpace: "data",
+		lookup: "exact",
+	};
+}
+
+function controlTexturePageSamplingPolicy({
+	wrapS,
+	wrapT,
+}: {
+	wrapS: TexturePageWrapMode;
+	wrapT: TexturePageWrapMode;
+}): TexturePageSamplingPolicy {
+	return {
+		wrapS,
+		wrapT,
+		minFilter: "material-policy",
+		magFilter: "material-policy",
+		mip: "material-policy",
+		colorSpace: "none",
+		lookup: "control-filtered",
 	};
 }
 

@@ -86,6 +86,10 @@ import type {
 	TerrainBlendTextureRef,
 } from "./terrain-blend-plan";
 import type { Webgl2SceneDomain } from "./webgl2-scene-domain-targets";
+import {
+	collectDirectDrawTexturePageBindings,
+	type TexturePageBinding,
+} from "./texture-page-binding";
 
 export interface Webgl2WorldDrawUnit {
 	id: string;
@@ -114,6 +118,7 @@ export interface Webgl2WorldDrawUnit {
 	indexedMaterial: Webgl2IndexedMaterialResources | null;
 	detailOverlay: Webgl2DetailOverlayResources | null;
 	terrainBlend: Webgl2TerrainBlendResources | null;
+	texturePageBindings: readonly TexturePageBinding[];
 	sceneDomain: Webgl2SceneDomain | null;
 	modelMatrix: RenderMat4;
 	bvhItemKeys: readonly RenderBvhItemKey[];
@@ -141,6 +146,9 @@ export interface Webgl2WorldResourceStore {
 	textureSamplingPolicyCounts: Record<string, number>;
 	textureSamplingPolicySamples: readonly string[];
 	textureUploadSamples: readonly string[];
+	texturePageBindingCount: number;
+	texturePageUsageBucketCounts: Record<string, number>;
+	texturePageSampleClassCounts: Record<string, number>;
 	atlasEligibleMaterialCount: number;
 	atlasCandidateEntryCount: number;
 	atlasCandidateMaterialSlotCount: number;
@@ -149,9 +157,15 @@ export interface Webgl2WorldResourceStore {
 	textureAtlasGeneration: Webgl2TextureAtlasGenerationResource | null;
 	textureAtlasGenerationGraph: RendererResourceGraph | null;
 	textureAtlasGenerationGraphLease: RendererResourceGraphLease | null;
-	atlasBackedCompactedBatches: Map<string, Webgl2AtlasBackedCompactedBatchResource>;
+	atlasBackedCompactedBatches: Map<
+		string,
+		Webgl2AtlasBackedCompactedBatchResource
+	>;
 	atlasBackedCompactedBatchGraph: RendererResourceGraph | null;
-	atlasBackedCompactedBatchGraphLeasesByKey: Map<string, RendererResourceGraphLease>;
+	atlasBackedCompactedBatchGraphLeasesByKey: Map<
+		string,
+		RendererResourceGraphLease
+	>;
 	atlasBackedCompactionCompactableDrawUnitCount: number;
 	atlasBackedCompactionBypassReasonCount: number;
 	atlasBackedCompactionBypassSamples: readonly string[];
@@ -223,6 +237,8 @@ export interface Webgl2TerrainTextureBinding {
 	key: string;
 	texture: Webgl2Texture2DResource;
 	tiling: number;
+	wrapS: "clamp" | "repeat";
+	wrapT: "clamp" | "repeat";
 }
 
 export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
@@ -245,6 +261,9 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		textureSamplingPolicyCounts: {},
 		textureSamplingPolicySamples: [],
 		textureUploadSamples: [],
+		texturePageBindingCount: 0,
+		texturePageUsageBucketCounts: {},
+		texturePageSampleClassCounts: {},
 		atlasEligibleMaterialCount: 0,
 		atlasCandidateEntryCount: 0,
 		atlasCandidateMaterialSlotCount: 0,
@@ -416,6 +435,16 @@ export function syncWebgl2WorldResources({
 	store.textureUploadSamples = [
 		...collectTextureUploadSamples(store.drawUnits),
 	];
+	const texturePageBindings = store.drawUnits.flatMap((drawUnit) => [
+		...drawUnit.texturePageBindings,
+	]);
+	store.texturePageBindingCount = texturePageBindings.length;
+	store.texturePageUsageBucketCounts = countStringOccurrences(
+		texturePageBindings.map((binding) => binding.usageBucket),
+	);
+	store.texturePageSampleClassCounts = countStringOccurrences(
+		texturePageBindings.map((binding) => binding.sampleClass),
+	);
 	const atlasEligibleDrawUnits = store.drawUnits.filter(
 		(drawUnit) => drawUnit.atlasEligibility !== null,
 	);
@@ -550,6 +579,9 @@ export function destroyWebgl2WorldResources(
 	store.textureSamplingPolicyCounts = {};
 	store.textureSamplingPolicySamples = [];
 	store.textureUploadSamples = [];
+	store.texturePageBindingCount = 0;
+	store.texturePageUsageBucketCounts = {};
+	store.texturePageSampleClassCounts = {};
 	store.atlasEligibleMaterialCount = 0;
 	store.atlasCandidateEntryCount = 0;
 	store.atlasCandidateMaterialSlotCount = 0;
@@ -665,6 +697,14 @@ function createOrReuseWebgl2DrawUnit({
 			materialTextureCapabilities,
 			textureFilteringMode,
 		});
+		previous.texturePageBindings = collectDirectDrawTexturePageBindings({
+			texture: previous.texture,
+			indexedMaterial: previous.indexedMaterial,
+			detailOverlay: previous.detailOverlay,
+			terrainBlend: previous.terrainBlend,
+			textureSamplingPolicy: previous.textureSamplingPolicy,
+			atlasEligibility: previous.atlasEligibility,
+		});
 		previous.sceneDomain = deriveWebgl2DrawUnitSceneDomain(drawUnit);
 		previous.modelMatrix = drawUnit.modelMatrix;
 		previous.bvhItemKeys = drawUnit.bvhBinding.itemKeys;
@@ -771,6 +811,15 @@ function createOrReuseWebgl2DrawUnit({
 		indexedMaterial,
 		detailOverlay,
 		terrainBlend,
+		texturePageBindings: collectDirectDrawTexturePageBindings({
+			texture,
+			indexedMaterial,
+			detailOverlay,
+			terrainBlend,
+			textureSamplingPolicy:
+				resolveWebgl2DrawUnitTextureSamplingPolicy(drawUnit),
+			atlasEligibility: resolveWebgl2DrawUnitAtlasEligibility(drawUnit),
+		}),
 		sceneDomain: deriveWebgl2DrawUnitSceneDomain(drawUnit),
 		modelMatrix: drawUnit.modelMatrix,
 		bvhItemKeys: drawUnit.bvhBinding.itemKeys,
@@ -1411,7 +1460,13 @@ function resolveWebgl2TerrainTextureBinding({
 	);
 	const cached = store.texturesByKey.get(key);
 	if (cached) {
-		return { key, texture: cached, tiling: ref.tiling };
+		return {
+			key,
+			texture: cached,
+			tiling: ref.tiling,
+			wrapS: ref.wrap,
+			wrapT: ref.wrap,
+		};
 	}
 	const upload = prepareTerrainTextureUpload(
 		assetState,
@@ -1430,7 +1485,13 @@ function resolveWebgl2TerrainTextureBinding({
 		}),
 	);
 	store.texturesByKey.set(key, texture);
-	return { key, texture, tiling: ref.tiling };
+	return {
+		key,
+		texture,
+		tiling: ref.tiling,
+		wrapS: ref.wrap,
+		wrapT: ref.wrap,
+	};
 }
 
 function prepareTerrainTextureUpload(
@@ -2058,7 +2119,10 @@ function syncWebgl2AtlasBackedCompactedBatch({
 			);
 			store.atlasBackedCompactedBatches.set(nextBatch.key, nextBatch);
 		} else {
-			updateWebgl2AtlasBackedCompactedBatchDynamicTables(previousBatch, geometry);
+			updateWebgl2AtlasBackedCompactedBatchDynamicTables(
+				previousBatch,
+				geometry,
+			);
 		}
 	}
 	for (const [batchKey, batch] of store.atlasBackedCompactedBatches) {
@@ -2099,7 +2163,8 @@ function syncWebgl2AtlasBackedCompactedBatch({
 		store,
 		(batch) => batch.drawSliceCount,
 	);
-	store.compactedGeometryBatchOriginCount = store.atlasBackedCompactedBatches.size;
+	store.compactedGeometryBatchOriginCount =
+		store.atlasBackedCompactedBatches.size;
 	store.compactedGeometryTransformTableEntryCount = 0;
 	if (!rendererResourceGraph || store.atlasBackedCompactedBatches.size === 0) {
 		releaseWebgl2AtlasBackedCompactedBatchGraphLeases(store);
@@ -2377,7 +2442,9 @@ function sumAtlasBackedCompactedBatches(
 	);
 }
 
-function disposeWebgl2AtlasBackedCompactedBatch(store: Webgl2WorldResourceStore): void {
+function disposeWebgl2AtlasBackedCompactedBatch(
+	store: Webgl2WorldResourceStore,
+): void {
 	for (const batch of store.atlasBackedCompactedBatches.values()) {
 		batch.dispose();
 	}
@@ -2398,12 +2465,15 @@ function releaseWebgl2AtlasBackedCompactedBatchGraphLease(
 	store: Webgl2WorldResourceStore,
 	batchNodeKey: string,
 ): void {
-	const lease = store.atlasBackedCompactedBatchGraphLeasesByKey.get(batchNodeKey);
+	const lease =
+		store.atlasBackedCompactedBatchGraphLeasesByKey.get(batchNodeKey);
 	if (!lease) {
 		return;
 	}
 	if (!store.atlasBackedCompactedBatchGraph) {
-		throw new Error("Atlas-backed compacted batch graph lease has no bound graph.");
+		throw new Error(
+			"Atlas-backed compacted batch graph lease has no bound graph.",
+		);
 	}
 	store.atlasBackedCompactedBatchGraph.releaseLease(lease);
 	store.atlasBackedCompactedBatchGraphLeasesByKey.delete(batchNodeKey);

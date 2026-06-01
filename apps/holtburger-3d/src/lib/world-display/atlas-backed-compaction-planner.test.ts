@@ -36,8 +36,12 @@ describe("atlas-backed compaction planner", () => {
 			plan.atlasTextures[0]?.placements.map((entry) => entry.atlasEntryKey),
 		).toEqual(["entry-a", "entry-b"]);
 		expect(plan.materialSlots.map((slot) => slot.key)).toEqual([
-			"slot-entry-a|detail=none",
-			"slot-entry-b|detail=none",
+			"slot-entry-a|wrap=clamp/clamp|detail=none",
+			"slot-entry-b|wrap=clamp/clamp|detail=none",
+		]);
+		expect(plan.materialSlots.map((slot) => slot.samplingPolicy)).toEqual([
+			{ wrapS: "clamp", wrapT: "clamp" },
+			{ wrapS: "clamp", wrapT: "clamp" },
 		]);
 		expect(plan.drawSlices).toMatchObject([
 			{
@@ -115,8 +119,14 @@ describe("atlas-backed compaction planner", () => {
 			"detail-b",
 		]);
 		expect(plan.materialSlots).toMatchObject([
-			{ key: "slot-base-a|detail=none", detailAtlasEntryKey: null },
-			{ key: "slot-base-b|detail=detail-b", detailAtlasEntryKey: "detail-b" },
+			{
+				key: "slot-base-a|wrap=clamp/clamp|detail=none",
+				detailAtlasEntryKey: null,
+			},
+			{
+				key: "slot-base-b|wrap=clamp/clamp|detail=detail-b",
+				detailAtlasEntryKey: "detail-b",
+			},
 		]);
 		expect(plan.drawSlices.map((slice) => slice.detailAtlasTextureIndex)).toEqual([
 			null,
@@ -144,14 +154,65 @@ describe("atlas-backed compaction planner", () => {
 		});
 
 		expect(plan.materialSlots.map((slot) => slot.key)).toEqual([
-			"slot-shared|detail=detail-shared",
-			"slot-shared|detail=none",
+			"slot-shared|wrap=clamp/clamp|detail=detail-shared",
+			"slot-shared|wrap=clamp/clamp|detail=none",
 		]);
 		expect(plan.drawUnitMaterialSlots).toEqual([
-			{ drawUnitId: "plain", materialSlotKey: "slot-shared|detail=none" },
+			{
+				drawUnitId: "plain",
+				materialSlotKey: "slot-shared|wrap=clamp/clamp|detail=none",
+			},
 			{
 				drawUnitId: "detailed",
-				materialSlotKey: "slot-shared|detail=detail-shared",
+				materialSlotKey: "slot-shared|wrap=clamp/clamp|detail=detail-shared",
+			},
+		]);
+	});
+
+	it("splits compaction material slots when the same base material has different wrap policy", () => {
+		const plan = planAtlasBackedCompaction({
+			drawUnits: [
+				createCandidate({
+					id: "clamp",
+					entryKey: "shared",
+					atlasEligibility: createAtlasEligibility({
+						entryKey: "shared",
+						width: 8,
+						height: 8,
+						materialSlotKey: "slot-shared",
+						wrapS: "clamp",
+						wrapT: "clamp",
+					}),
+				}),
+				createCandidate({
+					id: "repeat",
+					entryKey: "shared",
+					atlasEligibility: createAtlasEligibility({
+						entryKey: "shared",
+						width: 8,
+						height: 8,
+						materialSlotKey: "slot-shared",
+						wrapS: "repeat",
+						wrapT: "repeat",
+					}),
+				}),
+			],
+			policy: {
+				maxAtlasTextureSize: 64,
+				maxAtlasTextureCount: 1,
+				baseGutterPixels: 2,
+				maxMaterialSlotsPerDraw: 4,
+			},
+		});
+
+		expect(plan.materialSlots).toMatchObject([
+			{
+				key: "slot-shared|wrap=clamp/clamp|detail=none",
+				samplingPolicy: { wrapS: "clamp", wrapT: "clamp" },
+			},
+			{
+				key: "slot-shared|wrap=repeat/repeat|detail=none",
+				samplingPolicy: { wrapS: "repeat", wrapT: "repeat" },
 			},
 		]);
 	});
@@ -265,14 +326,20 @@ function createAtlasEligibility(options: {
 	entryKey: string;
 	width: number;
 	height: number;
+	materialSlotKey?: string;
+	wrapS?: "clamp" | "repeat";
+	wrapT?: "clamp" | "repeat";
 }): StagedWorldMaterialAtlasEligibility {
+	const wrapS = options.wrapS ?? "clamp";
+	const wrapT = options.wrapT ?? "clamp";
 	return {
-		materialSlotKey: `slot-${options.entryKey}`,
+		materialSlotKey: options.materialSlotKey ?? `slot-${options.entryKey}`,
 		atlasEntryKey: options.entryKey,
 		renderStateKey:
 			"shader=atlas-color;blend=opaque;depth=write;alphaTest=0;side=front",
 		samplingKey:
-			"wrap=vertex;filter=linear/linear/linear;color=linear;mips=atlas",
+			`wrap=${wrapS}/${wrapT};filter=linear/linear/linear;color=linear;mips=atlas`,
+		samplingPolicy: { wrapS, wrapT },
 		atlasEntry: {
 			renderSurfaceId: 0x06000001,
 			preparedTextureAssetId: `prepared-texture/${options.entryKey}`,

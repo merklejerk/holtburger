@@ -53,6 +53,7 @@ export interface AtlasBackedCompactionMaterialSlot {
 	index: number;
 	renderStateKey: string;
 	samplingKey: string;
+	samplingPolicy: StagedWorldMaterialAtlasEligibility["samplingPolicy"];
 	atlasEntryKey: string;
 	detailAtlasEntryKey: string | null;
 	detailTiling: number;
@@ -449,6 +450,7 @@ function assignAtlasBackedCompactionMaterialSlots(
 			index,
 			renderStateKey: eligibility.renderStateKey,
 			samplingKey: eligibility.samplingKey,
+			samplingPolicy: eligibility.samplingPolicy,
 			atlasEntryKey: eligibility.atlasEntryKey,
 			...describeAtlasBackedCompactionDetailSlot(candidates, key),
 		}));
@@ -493,6 +495,7 @@ function describeCompactionMaterialSlotKey(
 ): string {
 	return [
 		candidate.eligibility.materialSlotKey,
+		`wrap=${candidate.eligibility.samplingPolicy.wrapS}/${candidate.eligibility.samplingPolicy.wrapT}`,
 		`detail=${candidate.drawUnit.detailAtlasEntry?.key ?? "none"}`,
 	].join("|");
 }

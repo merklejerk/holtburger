@@ -19,6 +19,8 @@ export interface Webgl2AtlasBackedCompactedMaterialSlot {
 	detailTiling: number;
 	renderStateKey: string;
 	samplingKey: string;
+	wrapS: "clamp" | "repeat";
+	wrapT: "clamp" | "repeat";
 }
 
 export interface Webgl2AtlasBackedCompactedBatchResource {
@@ -182,5 +184,7 @@ function toWebgl2AtlasBackedCompactedMaterialSlot(
 		detailTiling: slot.detailTiling,
 		renderStateKey: slot.renderStateKey,
 		samplingKey: slot.samplingKey,
+		wrapS: slot.samplingPolicy.wrapS,
+		wrapT: slot.samplingPolicy.wrapT,
 	};
 }

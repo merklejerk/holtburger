@@ -222,6 +222,7 @@ uniform vec2 uAtlasSize;
 uniform sampler2D uDetailAtlasTexture;
 uniform vec2 uDetailAtlasSize;
 uniform vec4 uMaterialRects[MAX_MATERIAL_SLOTS];
+uniform ivec2 uMaterialWrapModes[MAX_MATERIAL_SLOTS];
 uniform vec4 uDetailMaterialRects[MAX_MATERIAL_SLOTS];
 uniform float uDetailMaterialTilings[MAX_MATERIAL_SLOTS];
 uniform int uDetailMaterialEnabled[MAX_MATERIAL_SLOTS];
@@ -230,6 +231,14 @@ in vec2 vUv;
 flat in int vMaterialSlot;
 
 out vec4 fragColor;
+
+vec2 resolveAtlasLocalUv(vec2 uv, int materialSlot) {
+	ivec2 wrapMode = uMaterialWrapModes[materialSlot];
+	return vec2(
+		wrapMode.x == 1 ? fract(uv.x) : clamp(uv.x, 0.0, 1.0),
+		wrapMode.y == 1 ? fract(uv.y) : clamp(uv.y, 0.0, 1.0)
+	);
+}
 
 vec3 applyDetailOverlay(vec3 baseColor, int materialSlot) {
 	if (uDetailMaterialEnabled[materialSlot] == 0) {
@@ -245,7 +254,7 @@ vec3 applyDetailOverlay(vec3 baseColor, int materialSlot) {
 
 void main() {
 	vec4 rect = uMaterialRects[vMaterialSlot];
-	vec2 atlasUv = (rect.xy + clamp(vUv, 0.0, 1.0) * rect.zw) / uAtlasSize;
+	vec2 atlasUv = (rect.xy + resolveAtlasLocalUv(vUv, vMaterialSlot) * rect.zw) / uAtlasSize;
 	vec4 color = texture(uAtlasTexture, atlasUv);
 	color.rgb = applyDetailOverlay(color.rgb, vMaterialSlot);
 	fragColor = color;
@@ -2302,6 +2311,7 @@ function createAtlasBackedCompactedWorldProgram(
 			"uDetailAtlasTexture",
 			"uDetailAtlasSize",
 			"uMaterialRects",
+			"uMaterialWrapModes",
 			"uDetailMaterialRects",
 			"uDetailMaterialTilings",
 			"uDetailMaterialEnabled",

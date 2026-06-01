@@ -174,6 +174,7 @@ function createPlan(): AtlasBackedCompactionPlan {
 				index: 0,
 				renderStateKey: "opaque",
 				samplingKey: "sampling",
+				samplingPolicy: { wrapS: "clamp", wrapT: "clamp" },
 				atlasEntryKey: "entry-a",
 				detailAtlasEntryKey: null,
 				detailTiling: 1,
@@ -184,6 +185,7 @@ function createPlan(): AtlasBackedCompactionPlan {
 				index: 1,
 				renderStateKey: "opaque",
 				samplingKey: "sampling",
+				samplingPolicy: { wrapS: "clamp", wrapT: "clamp" },
 				atlasEntryKey: "entry-b",
 				detailAtlasEntryKey: null,
 				detailTiling: 1,
@@ -286,6 +288,7 @@ function createDrawUnit(
 				atlasEntryKey: "entry-a",
 				renderStateKey: "opaque",
 				samplingKey: "sampling",
+				samplingPolicy: { wrapS: "clamp", wrapT: "clamp" },
 				atlasEntry: {
 					renderSurfaceId: 1,
 					preparedTextureAssetId: "prepared-texture/a",

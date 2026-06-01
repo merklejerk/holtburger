@@ -638,7 +638,7 @@ Exit criteria:
 
 ## Phase C3: Direct Family Pipeline Draw Adapters
 
-Status: Next.
+Status: Complete.
 
 Purpose: move direct RGBA texture-page and indexed/paletted draw behavior behind family pipeline
 adapters after C2/C2.5 have established typed direct geometry submission views and typed direct draw
@@ -685,6 +685,62 @@ Tasks:
 - Add tests proving direct RGBA and direct indexed draw units route through family classification and
   still bind the same textures, palettes, uniforms, and render state.
 
+Progress:
+
+- Moved RGBA texture-page direct material work behind adapter functions in `webgl2-world-submit.ts`:
+  - sampler uniform setup;
+  - base/detail texture binding;
+  - direct texture-page/staged atlas metrics;
+  - color and alpha-test uniforms;
+  - detail overlay uniforms;
+  - texture-page rect/wrap uniforms.
+- Moved indexed/paletted direct material work behind adapter functions:
+  - sampler uniform setup;
+  - index/palette/detail texture binding;
+  - color and alpha-test uniforms;
+  - indexed material dynamic uniforms;
+  - indexed detail overlay uniforms.
+- Replaced the central loop's RGBA/indexed duplicate material ownership with calls to the family
+  adapter prep/upload functions. The central loop still owns draw order, render-state application,
+  VAO binding, MVP upload, terrain, flat color, draw calls, and compacted submit handoff.
+- Added a `DirectFamilyUniformCache` so family adapters share the same cache invalidation behavior
+  that the central loop previously owned.
+- Preserved current route tests and submit behavior tests; no metric behavior changes were intended.
+
+Decisions:
+
+- Keep the first adapter functions in `webgl2-world-submit.ts` for this phase so the old central
+  logic could be deleted in-place instead of copied into a second module and then rethreaded.
+- Treat RGBA and indexed material prep/upload as two-phase adapters because current WebGL ordering
+  binds textures before VAO/MVP upload and uploads material uniforms after MVP upload.
+- Leave terrain in the central submit path. Terrain still has a dedicated pipeline and is explicitly
+  outside this replacement detour.
+
+Course corrections:
+
+- This phase achieved ownership separation but increased `webgl2-world-submit.ts` size. That is not a
+  good stopping point before compacted work. Add C3.5 as an immediate cleanup phase to move the
+  direct family adapter surface into a dedicated module, reduce route booleans, and keep the central
+  loop small.
+
+Legacy shims introduced:
+
+- `prepareDirectRgbaTexturePageDraw()` / `uploadDirectRgbaTexturePageUniforms()` and
+  `prepareDirectIndexedPalettedDraw()` / `uploadDirectIndexedPalettedUniforms()` are adapter-shaped
+  but still colocated in the old submit module. C3.5 should either move them to a direct family
+  adapter module or collapse them into a smaller dispatch table.
+- `Webgl2DirectDrawRoute` still contains convenience booleans. C3.5 should convert route decisions to
+  discriminated route variants so adapters do not rely on boolean combinations.
+- Central-loop flat and terrain behavior still uses older direct branches. This is acceptable because
+  C3 targeted RGBA and indexed, but C7 should decide whether flat/debug/terrain need thin family
+  wrappers or should remain explicit non-production/dedicated paths.
+
+Validation:
+
+- `npm exec tsc -- --noEmit`
+- `npm exec vitest -- src/lib/world-display/webgl2-world-submit.test.ts --run`
+- `npm exec vitest -- src/lib/world-display/webgl2-direct-render-family.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-transition-portal-work.test.ts --run`
+
 Exit criteria:
 
 - Direct draw has the same family vocabulary planned for compacted draw.
@@ -695,6 +751,46 @@ Exit criteria:
 - RGBA and indexed direct draw behavior is not implemented in both the old central branch and the new
   family adapters.
 - Existing direct draw behavior and metrics are unchanged except for clearer family names.
+
+## Phase C3.5: Direct Adapter Consolidation Cleanup
+
+Status: Next.
+
+Purpose: keep the direct family work from becoming a new pile inside `webgl2-world-submit.ts` before
+compacted geometry work resumes. C3 moved behavior behind adapters, but the implementation is still
+too colocated with the central loop.
+
+Tasks:
+
+- Move RGBA and indexed direct adapter functions into a dedicated direct family adapter module, or
+  otherwise collapse them behind a small dispatch table with clear ownership.
+- Convert `Webgl2DirectDrawRoute` from convenience booleans into discriminated route variants:
+  - `flat`;
+  - `rgba-texture-page`;
+  - `indexed-paletted`;
+  - `terrain-blend`.
+- Keep `debug-pipeline` visible through direct family submissions, while allowing portal masks to use
+  the flat shader route until debug rendering gets its own pipeline.
+- Keep texture-unit constants and shared direct draw context colocated with the adapters that consume
+  them.
+- Keep central `submitWebgl2FlatWorldDrawUnits()` responsible for:
+  - replacement planning;
+  - draw order;
+  - render-state orchestration;
+  - VAO binding;
+  - MVP upload;
+  - draw call/triangle totals;
+  - terrain until the terrain-specific plan resumes.
+- Add or update tests so adapter dispatch is covered without testing debug-only logging.
+- Do not change rendered behavior or metrics.
+
+Exit criteria:
+
+- `webgl2-world-submit.ts` is smaller and reads as orchestration, not the owner of RGBA/indexed
+  material binding details.
+- Direct RGBA/indexed adapter ownership remains authoritative; duplicate central material logic does
+  not return.
+- C4 can start compacted geometry extraction without dragging direct-adapter cleanup debt forward.
 
 ## Phase C4: Extract Material-Agnostic Compacted Geometry
 

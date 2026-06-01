@@ -100,15 +100,9 @@ export function buildCompactedGeometryBatch<
 			(record) => [record.drawUnitId, record.materialSlotKey] as const,
 		),
 	);
-	const compactableDrawUnits = plan.compactableDrawUnitIds.map((drawUnitId) => {
-		const drawUnit = drawUnitById.get(drawUnitId);
-		if (!drawUnit) {
-			throw new Error(
-				`Compacted geometry plan references missing draw unit ${drawUnitId}.`,
-			);
-		}
-		assertCompactedGeometryDrawUnit(drawUnit);
-		return drawUnit;
+	const compactableDrawUnits = orderCompactedDrawUnitsBySlice({
+		plan,
+		drawUnitById,
 	});
 	const vertexCount = compactableDrawUnits.reduce(
 		(total, drawUnit) => total + drawUnit.geometry.vertexCount,
@@ -304,6 +298,7 @@ function compactDrawSlice({
 	const indexCount = lastRange
 		? lastRange.firstIndex + lastRange.indexCount - firstIndex
 		: 0;
+	assertCompactedDrawSliceIsContiguous({ slice, sortedRanges, firstIndex });
 	for (const materialSlotKey of slice.materialSlotKeys) {
 		if (!materialSlotByKey.has(materialSlotKey)) {
 			throw new Error(
@@ -319,6 +314,75 @@ function compactDrawSlice({
 		drawUnitIds: slice.drawUnitIds,
 		materialSlotKeys: slice.materialSlotKeys,
 	};
+}
+
+function orderCompactedDrawUnitsBySlice<
+	TDrawSlice extends CompactedGeometryDrawSliceInput,
+>({
+	plan,
+	drawUnitById,
+}: {
+	plan: CompactedGeometryPlan<TDrawSlice>;
+	drawUnitById: ReadonlyMap<string, StagedWorldDrawUnitAssembly>;
+}): StagedWorldDrawUnitAssembly[] {
+	const sliceOrdinalByDrawUnitId = new Map<string, number>();
+	for (const [sliceOrdinal, slice] of plan.drawSlices.entries()) {
+		for (const drawUnitId of slice.drawUnitIds) {
+			const previous = sliceOrdinalByDrawUnitId.get(drawUnitId);
+			if (previous !== undefined) {
+				throw new Error(
+					`Compacted geometry draw unit ${drawUnitId} appears in multiple draw slices (${previous} and ${sliceOrdinal}).`,
+				);
+			}
+			sliceOrdinalByDrawUnitId.set(drawUnitId, sliceOrdinal);
+		}
+	}
+	return plan.compactableDrawUnitIds
+		.map((drawUnitId) => {
+			const drawUnit = drawUnitById.get(drawUnitId);
+			if (!drawUnit) {
+				throw new Error(
+					`Compacted geometry plan references missing draw unit ${drawUnitId}.`,
+				);
+			}
+			assertCompactedGeometryDrawUnit(drawUnit);
+			if (!sliceOrdinalByDrawUnitId.has(drawUnit.id)) {
+				throw new Error(
+					`Compacted geometry draw unit ${drawUnit.id} has no draw slice.`,
+				);
+			}
+			return drawUnit;
+		})
+		.sort((left, right) => {
+			const leftOrdinal = sliceOrdinalByDrawUnitId.get(left.id);
+			const rightOrdinal = sliceOrdinalByDrawUnitId.get(right.id);
+			if (leftOrdinal === undefined || rightOrdinal === undefined) {
+				throw new Error(
+					"Compacted geometry slice ordering lost a validated draw unit.",
+				);
+			}
+			return leftOrdinal - rightOrdinal || left.id.localeCompare(right.id);
+		});
+}
+
+function assertCompactedDrawSliceIsContiguous({
+	slice,
+	sortedRanges,
+	firstIndex,
+}: {
+	slice: CompactedGeometryDrawSliceInput;
+	sortedRanges: readonly CompactedDrawRange[];
+	firstIndex: number;
+}): void {
+	let expectedFirstIndex = firstIndex;
+	for (const range of sortedRanges) {
+		if (range.firstIndex !== expectedFirstIndex) {
+			throw new Error(
+				`Compacted geometry draw slice ${slice.key} is not contiguous at draw unit ${range.drawUnitId}.`,
+			);
+		}
+		expectedFirstIndex += range.indexCount;
+	}
 }
 
 function createCompactedIndexArray(

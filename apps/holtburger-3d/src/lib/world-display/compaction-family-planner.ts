@@ -67,6 +67,7 @@ export type CompactionMaterialBlocker =
 	| "debug-pipeline-material"
 	| "detail-overlay"
 	| "missing-detail-atlas-entry"
+	| "repeat-detail-atlas-unsupported"
 	| "unsupported-material-state"
 	| "unsupported-texture-page-behavior";
 
@@ -103,6 +104,7 @@ export interface CompactionFamilyCandidate {
 	kind: string;
 	owningLandblockId: number | null;
 	sceneDomain: Webgl2SceneDomain | null;
+	visibilityPartitionKey: string;
 	materialKind: CompactionMaterialKind;
 	materialKey: string;
 	detailAtlasEntry: RgbaTexturePageDetailAtlasEntry | null;
@@ -297,7 +299,8 @@ export function planCompactionFamilies(options: {
 		if (drawUnit.compactionEligibility.material.family === "indexed-paletted") {
 			continue;
 		}
-		const atlasEligibility = drawUnit.compactionEligibility.material.atlasEligibility;
+		const atlasEligibility =
+			drawUnit.compactionEligibility.material.atlasEligibility;
 		if (!atlasEligibility) {
 			throw new Error(
 				`Compacted geometry candidate ${drawUnit.id} was accepted without packed texture-page eligibility.`,
@@ -339,7 +342,9 @@ export function planCompactionFamilies(options: {
 		});
 	}
 
-	const indexedCandidates = collectIndexedPalettedCompactionCandidates(options.drawUnits);
+	const indexedCandidates = collectIndexedPalettedCompactionCandidates(
+		options.drawUnits,
+	);
 	const detailEntries = dedupeCompactionFamilyDetailEntries([
 		...placed.map((candidate) => candidate.drawUnit),
 		...indexedCandidates,
@@ -402,25 +407,31 @@ export function planCompactionFamilies(options: {
 	}
 
 	const indexedMaterialTableRecords =
-		assignIndexedPalettedFamilyMaterialTableRecords(detailReadyIndexedCandidates, options.policy);
+		assignIndexedPalettedFamilyMaterialTableRecords(
+			detailReadyIndexedCandidates,
+			options.policy,
+		);
 	const indexedMaterialTableRecordByKey = new Map(
 		indexedMaterialTableRecords.map((record) => [record.key, record] as const),
 	);
-	const indexedCompactable = detailReadyIndexedCandidates.filter((candidate) => {
-		const record = candidate.indexedMaterialTableRecord;
-		if (record && indexedMaterialTableRecordByKey.has(record.key)) {
-			return true;
-		}
-		bypasses.push({
-			drawUnitId: candidate.id,
-			reason: "material-table-overflow",
-			detail: `indexed material table exceeded ${options.policy.maxMaterialSlotsPerDraw} slots`,
-		});
-		return false;
-	});
+	const indexedCompactable = detailReadyIndexedCandidates.filter(
+		(candidate) => {
+			const record = candidate.indexedMaterialTableRecord;
+			if (record && indexedMaterialTableRecordByKey.has(record.key)) {
+				return true;
+			}
+			bypasses.push({
+				drawUnitId: candidate.id,
+				reason: "material-table-overflow",
+				detail: `indexed material table exceeded ${options.policy.maxMaterialSlotsPerDraw} slots`,
+			});
+			return false;
+		},
+	);
 	const indexedDrawUnitMaterialSlots = indexedCompactable.map((candidate) => ({
 		drawUnitId: candidate.id,
-		materialSlotKey: requireIndexedPalettedFamilyMaterialTableRecord(candidate).key,
+		materialSlotKey:
+			requireIndexedPalettedFamilyMaterialTableRecord(candidate).key,
 	}));
 	const indexedDrawSlices = createIndexedPalettedFamilyDrawSlices({
 		candidates: indexedCompactable,
@@ -530,26 +541,30 @@ export function planCompactionFamilies(options: {
 		indexedMaterialTableRecords,
 		drawUnitMaterialSlots,
 		drawSlices,
-		staticObjectKeys: uniqueSortedStrings(
-			[
-				...compactable.flatMap((candidate) => candidate.drawUnit.staticObjectKeys),
-				...indexedCompactable.flatMap((candidate) => candidate.staticObjectKeys),
-			],
-		),
-		staticPartCount: compactable.reduce(
-			(total, candidate) => total + candidate.drawUnit.staticPartCount,
-			0,
-		) + indexedCompactable.reduce(
-			(total, candidate) => total + candidate.staticPartCount,
-			0,
-		),
-		triangleCount: compactable.reduce(
-			(total, candidate) => total + candidate.drawUnit.triangleCount,
-			0,
-		) + indexedCompactable.reduce(
-			(total, candidate) => total + candidate.triangleCount,
-			0,
-		),
+		staticObjectKeys: uniqueSortedStrings([
+			...compactable.flatMap(
+				(candidate) => candidate.drawUnit.staticObjectKeys,
+			),
+			...indexedCompactable.flatMap((candidate) => candidate.staticObjectKeys),
+		]),
+		staticPartCount:
+			compactable.reduce(
+				(total, candidate) => total + candidate.drawUnit.staticPartCount,
+				0,
+			) +
+			indexedCompactable.reduce(
+				(total, candidate) => total + candidate.staticPartCount,
+				0,
+			),
+		triangleCount:
+			compactable.reduce(
+				(total, candidate) => total + candidate.drawUnit.triangleCount,
+				0,
+			) +
+			indexedCompactable.reduce(
+				(total, candidate) => total + candidate.triangleCount,
+				0,
+			),
 		preparedTextureAssetIds: uniqueSortedStrings(
 			compactable.map(
 				(candidate) => candidate.eligibility.atlasEntry.preparedTextureAssetId,
@@ -611,14 +626,17 @@ function assignIndexedPalettedFamilyMaterialTableRecords(
 	candidates: readonly CompactionFamilyCandidate[],
 	policy: CompactionFamilyPlanningPolicy,
 ): IndexedPalettedFamilyMaterialTableRecord[] {
-	const recordsByKey = new Map<string, IndexedPalettedFamilyMaterialTableRecord>();
+	const recordsByKey = new Map<
+		string,
+		IndexedPalettedFamilyMaterialTableRecord
+	>();
 	for (const drawUnit of candidates) {
 		const record = requireIndexedPalettedFamilyMaterialTableRecord(drawUnit);
 		recordsByKey.set(record.key, record);
 	}
-	return [...recordsByKey.values()].sort((left, right) =>
-		left.key.localeCompare(right.key),
-	).slice(0, policy.maxMaterialSlotsPerDraw);
+	return [...recordsByKey.values()]
+		.sort((left, right) => left.key.localeCompare(right.key))
+		.slice(0, policy.maxMaterialSlotsPerDraw);
 }
 
 function requireIndexedPalettedFamilyMaterialTableRecord(
@@ -662,6 +680,7 @@ function createIndexedPalettedFamilyDrawSlices({
 			record.indexPageKey,
 			record.palettePageKey,
 			record.key,
+			candidate.visibilityPartitionKey,
 			"indexed-opaque",
 		].join("|");
 		const group = groups.get(key) ?? {
@@ -677,7 +696,8 @@ function createIndexedPalettedFamilyDrawSlices({
 			(left, right) =>
 				left.record.indexFormat.localeCompare(right.record.indexFormat) ||
 				left.record.indexPageKey.localeCompare(right.record.indexPageKey) ||
-				left.record.palettePageKey.localeCompare(right.record.palettePageKey),
+				left.record.palettePageKey.localeCompare(right.record.palettePageKey) ||
+				compareFirstDrawUnitId(left.drawUnitIds, right.drawUnitIds),
 		)
 		.map((group) => ({
 			key: [
@@ -686,6 +706,7 @@ function createIndexedPalettedFamilyDrawSlices({
 				group.record.indexPageKey,
 				group.record.palettePageKey,
 				group.record.key,
+				`visibility=${describeDrawSliceVisibilityPartition(group.drawUnitIds)}`,
 				`table=${group.slotIndex}`,
 			].join("|"),
 			indexFormat: group.record.indexFormat,
@@ -722,11 +743,13 @@ function isIndexedPalettedMaterialTableReady(
 function classifyCompactionFamilyBypass(
 	drawUnit: CompactionFamilyCandidate,
 ): CompactionFamilyBypass | null {
-	const geometryBlocker = drawUnit.compactionEligibility.geometry.blockers[0] ?? null;
+	const geometryBlocker =
+		drawUnit.compactionEligibility.geometry.blockers[0] ?? null;
 	if (geometryBlocker) {
 		return createGeometryCompactionBypass(drawUnit, geometryBlocker);
 	}
-	const materialBlocker = drawUnit.compactionEligibility.material.blockers[0] ?? null;
+	const materialBlocker =
+		drawUnit.compactionEligibility.material.blockers[0] ?? null;
 	if (materialBlocker) {
 		return createMaterialCompactionBypass(drawUnit, materialBlocker);
 	}
@@ -811,7 +834,15 @@ export function createCompactionEligibility(options: {
 				materialBlockers.push("missing-detail-atlas-entry");
 			}
 			if (
-				!hasOnlySupportedCompactedTexturePageBehavior(options.texturePageBindings)
+				options.hasDetailOverlay &&
+				hasRepeatedBaseColorTexturePage(options.texturePageBindings)
+			) {
+				materialBlockers.push("repeat-detail-atlas-unsupported");
+			}
+			if (
+				!hasOnlySupportedCompactedTexturePageBehavior(
+					options.texturePageBindings,
+				)
 			) {
 				materialBlockers.push("unsupported-texture-page-behavior");
 			}
@@ -945,13 +976,21 @@ function createMaterialCompactionBypass(
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "missing-atlas-eligibility",
-				detail: "compacted geometry draw unit has no packed texture-page eligibility",
+				detail:
+					"compacted geometry draw unit has no packed texture-page eligibility",
 			};
 		case "missing-detail-atlas-entry":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "missing-detail-atlas-entry",
 				detail: "detail overlay has no compactable RGBA8 detail atlas entry",
+			};
+		case "repeat-detail-atlas-unsupported":
+			return {
+				drawUnitId: drawUnit.id,
+				reason: "unsupported-compacted-material-family",
+				detail:
+					"repeated base-color material with detail overlay is retained direct until compacted atlas sampling supports this path",
 			};
 		case "unsupported-material-state":
 			return {
@@ -963,7 +1002,8 @@ function createMaterialCompactionBypass(
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "unsupported-compacted-material-family",
-				detail: "texture-page bindings require a compacted shader family that is not implemented",
+				detail:
+					"texture-page bindings require a compacted shader family that is not implemented",
 			};
 	}
 }
@@ -1035,6 +1075,17 @@ function hasCompatibleCompactedBaseTexturePage(
 			binding.sampleClass === "rgba-color" &&
 			binding.sampling.samplingDomain === "color" &&
 			binding.sampling.lookup === "color-filtered",
+	);
+}
+
+function hasRepeatedBaseColorTexturePage(
+	texturePageBindings: readonly TexturePageBinding[],
+): boolean {
+	return texturePageBindings.some(
+		(binding) =>
+			binding.usageBucket === "base-color" &&
+			binding.sampleClass === "rgba-color" &&
+			(binding.wrapS === "repeat" || binding.wrapT === "repeat"),
 	);
 }
 
@@ -1260,6 +1311,7 @@ function createRgbaTexturePageFamilyDrawSlices(
 			atlasTextureIndex,
 			detailAtlasTextureIndex ?? "no-detail",
 			slot.renderStateKey,
+			candidate.drawUnit.visibilityPartitionKey,
 		].join("|");
 		const group = groups.get(key) ?? {
 			atlasTextureIndex,
@@ -1280,7 +1332,8 @@ function createRgbaTexturePageFamilyDrawSlices(
 				left.atlasTextureIndex - right.atlasTextureIndex ||
 				(left.detailAtlasTextureIndex ?? -1) -
 					(right.detailAtlasTextureIndex ?? -1) ||
-				left.renderStateKey.localeCompare(right.renderStateKey),
+				left.renderStateKey.localeCompare(right.renderStateKey) ||
+				compareFirstDrawUnitId(left.drawUnitIds, right.drawUnitIds),
 		)
 		.map((group) => {
 			const materialTableSlotStart = Math.min(...group.slotIndices);
@@ -1293,6 +1346,7 @@ function createRgbaTexturePageFamilyDrawSlices(
 					`texture=${group.atlasTextureIndex}`,
 					`detail=${group.detailAtlasTextureIndex ?? "none"}`,
 					group.renderStateKey,
+					`visibility=${describeDrawSliceVisibilityPartition(drawUnitIds)}`,
 					`table=${materialTableSlotStart}-${materialTableSlotEnd}`,
 				].join("|"),
 				atlasTextureIndex: group.atlasTextureIndex,
@@ -1305,6 +1359,21 @@ function createRgbaTexturePageFamilyDrawSlices(
 				drawUnitIds,
 			};
 		});
+}
+
+function compareFirstDrawUnitId(
+	left: readonly string[],
+	right: readonly string[],
+): number {
+	return (left[0] ?? "").localeCompare(right[0] ?? "");
+}
+
+function describeDrawSliceVisibilityPartition(
+	drawUnitIds: readonly string[],
+): string {
+	return drawUnitIds.length === 1
+		? drawUnitIds[0]
+		: `${drawUnitIds[0] ?? "empty"}..${drawUnitIds[drawUnitIds.length - 1] ?? "empty"}`;
 }
 
 function describeCompactionFamilyPlanKey(options: {

@@ -360,7 +360,7 @@ describe("webgl2 world resources", () => {
 		expect(store.atlasCandidateSamples[0]).toContain("atlas-entry");
 	});
 
-	it("retains and releases landblock-scoped atlas-backed compacted batches through the renderer graph", () => {
+	it("retains and releases landblock-scoped baked batches through the renderer graph", () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
 		const graph = new RendererResourceGraph();
@@ -477,7 +477,9 @@ describe("webgl2 world resources", () => {
 				}),
 			]),
 			transitionPortalModel: createTransitionPortalModel(),
-			renderChunkTransforms: [createChunkTransform({ landblockId: 0x12340000 })],
+			renderChunkTransforms: [
+				createChunkTransform({ landblockId: 0x12340000 }),
+			],
 			rendererResourceGraph: graph,
 		});
 
@@ -493,7 +495,7 @@ describe("webgl2 world resources", () => {
 			"structured-interior",
 		);
 		expect(store.atlasBackedCompactionBypassSamples).not.toContain(
-			"non-static: draw unit kind structured-interior is not compacted atlas geometry",
+			"non-static: draw unit kind structured-interior is not baked geometry",
 		);
 	});
 

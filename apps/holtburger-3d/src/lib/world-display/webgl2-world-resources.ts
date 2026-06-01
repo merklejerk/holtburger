@@ -2068,7 +2068,7 @@ function syncWebgl2AtlasBackedCompactedBatch({
 	}
 	if (!store.textureAtlasGeneration) {
 		store.compactedGeometryResourceFallbackSamples = [
-			`atlas-backed compacted batch ${plan.key} waiting for atlas generation`,
+			`baked batch ${plan.key} waiting for texture atlas generation`,
 		];
 		disposeWebgl2AtlasBackedCompactedBatch(store);
 		return;
@@ -2080,7 +2080,7 @@ function syncWebgl2AtlasBackedCompactedBatch({
 	});
 	if (batchPlans.length === 0) {
 		store.compactedGeometryResourceFallbackSamples = [
-			`atlas-backed compacted batch ${plan.key} produced no compacted geometry`,
+			`baked batch ${plan.key} produced no compacted geometry`,
 		];
 		disposeWebgl2AtlasBackedCompactedBatch(store);
 		return;
@@ -2185,7 +2185,7 @@ function syncWebgl2AtlasBackedCompactedBatch({
 			batchNodeKey,
 			rendererResourceGraph.leaseNode(
 				batchNodeKey,
-				"webgl2 atlas-backed compacted landblock batch",
+				"webgl2 baked landblock batch",
 			),
 		);
 	}

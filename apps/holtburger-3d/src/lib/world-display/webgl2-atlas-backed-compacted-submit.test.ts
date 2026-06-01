@@ -23,7 +23,7 @@ describe("planWebgl2AtlasBackedCompactedReplacement", () => {
 		expect([...plan.replaceableDrawUnitIds]).toEqual([]);
 		expect(plan.noVisibleRouteCount).toBe(0);
 		expect(plan.fallbackSamples).toEqual([
-			"atlas-backed compacted submit missing atlas generation",
+			"baked submit missing texture atlas generation",
 		]);
 	});
 
@@ -151,7 +151,10 @@ describe("planWebgl2AtlasBackedCompactedReplacement", () => {
 			stateCache: new Webgl2StateCache(gl),
 			program: createProgram(),
 			viewProjectionMatrix: new Float32Array(16),
-			resources: { batches: [batch], generation: createGeneration({ detail: true }) },
+			resources: {
+				batches: [batch],
+				generation: createGeneration({ detail: true }),
+			},
 			replaceableDrawUnitIds: new Set(["draw-a"]),
 			retainedDrawUnitCount: 0,
 		});

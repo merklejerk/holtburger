@@ -17,3 +17,9 @@ export function debugCellSpatialItemId(renderKey: string): RenderSpatialItemId {
 export function portalSpatialItemId(portalId: string): RenderSpatialItemId {
 	return `portal:${portalId}`;
 }
+
+export function staticRenderablePartSpatialItemId(
+	renderKey: string,
+): RenderSpatialItemId {
+	return `static-renderable:${renderKey}`;
+}

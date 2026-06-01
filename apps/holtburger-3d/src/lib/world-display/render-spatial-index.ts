@@ -57,6 +57,28 @@ export type RenderSpatialMetadata =
 			polygonId: number;
 			otherPortalId: number;
 			flags: number;
+	  }
+	| {
+			kind: "static-renderable";
+			renderKey: string;
+			instanceId: string;
+			staticKind:
+				| "indoor-static"
+				| "scenery"
+				| "building"
+				| "generated-scenery";
+			renderDomain: string;
+			owningLandblockId: number;
+			owningEnvCellId: number | null;
+			sourceAssetId: string;
+			gfxObjAssetId: string;
+			gfxObjId: number;
+			partIndex: number;
+			materialSignature: string;
+			materialSlotCount: number;
+			detailRoleKind: string;
+			detailSignature: string;
+			textureVelocitySignature: string;
 	  };
 
 export interface RenderSpatialItem {
@@ -93,6 +115,7 @@ export interface RenderSpatialIndexQuery {
 		ray: RenderRay,
 		mask: ReadonlySet<RenderSpatialItemKind>,
 		ownerKeys?: ReadonlySet<string>,
+		acceptItem?: (item: RenderSpatialItem) => boolean,
 	): RenderSpatialPick | null;
 	queryFrustum(
 		frustum: RenderFrustum,
@@ -186,13 +209,16 @@ export function createLinearRenderSpatialIndex(): RenderSpatialIndex {
 		hasItem(itemId) {
 			return itemsById.has(itemId);
 		},
-		pickRay(ray, mask, ownerKeys) {
+		pickRay(ray, mask, ownerKeys, acceptItem) {
 			let nearestPick: RenderSpatialPick | null = null;
 			for (const item of itemsById.values()) {
 				if (!mask.has(item.kind)) {
 					continue;
 				}
 				if (ownerKeys && !ownerKeys.has(item.ownerKey)) {
+					continue;
+				}
+				if (acceptItem && !acceptItem(item)) {
 					continue;
 				}
 				const transform = resolveItemChunkTransform(item, chunkTransformsByKey);

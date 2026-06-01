@@ -499,11 +499,6 @@ function bindDirectDetailOverlayTexture({
 		return;
 	}
 	const unit = route.detailTextureUnit;
-	if (unit === null) {
-		throw new Error(
-			`Draw unit ${route.drawUnit.id} has detail overlay without a detail texture unit.`,
-		);
-	}
 	if (
 		context.stateCache.bindTexture2D(
 			unit,

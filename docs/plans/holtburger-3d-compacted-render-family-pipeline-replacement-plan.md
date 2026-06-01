@@ -1630,7 +1630,7 @@ Cleanup targets introduced:
 
 ## Phase C8.7: Live Indexed Family Validation
 
-Status: In progress. First live validation follow-up complete.
+Status: In progress. Second live validation follow-up reverted; diagnostic phase required.
 
 Purpose: validate the completed indexed family path against the browser debug report before expanding
 alpha material coverage. This validation must happen after C8.6 because earlier reports may have
@@ -1666,26 +1666,207 @@ Progress:
 - A new artifact appeared on tree bark-like RGBA materials: repeated surfaces showed a neat packed
   atlas pattern. This is not indexed-specific; the affected materials appear to be RGBA tree bark
   materials.
+- The artifact was later narrowed away from indexed materials and away from a detail-only path. Direct
+  draw inspection suggests affected trunks may have no detail texture; the common signal is repeated
+  RGBA base atlas sampling after compaction replaces direct draw.
 
 Course correction:
 
 - Disabling detail atlas mipmaps was tested and rejected. It made the artifact spread to additional
   trees, so detail atlas page-wide mips are not the primary cause.
-- A shader gradient change was also tested and rejected as the primary fix.
+- An earlier shader gradient experiment was tested and rejected as the primary fix.
 - A stale material-slot-buffer key change was tested and rejected as the primary fix.
-- The active diagnosis is that repeated RGBA base textures with detail overlays are not yet safe for
-  compacted atlas sampling. Direct draw uses the original repeated base texture plus a separate detail
-  texture. The compacted path manually wraps an atlas member and samples a detail atlas, and the live
-  tree bark artifacts show this path is not equivalent yet.
-- Repeated base-color RGBA materials with detail overlays are now explicitly retained on the direct
-  path with `repeat-detail-atlas-unsupported` until compacted sampling for that material class is
-  proven.
+- Temporarily retaining repeated RGBA detail materials on the direct path was tested and fixed the
+  observed tree bark corruption, but this was rejected as the final direction because it avoided the
+  compacted atlas sampling bug instead of fixing it.
+- A repeat-atlas gradient clamp was tested and rejected. It preserved the tree trunk corruption and
+  introduced additional UV issues on objects that had not previously exhibited the bug. The change was
+  reverted.
+- `repeat-detail-atlas-unsupported` remains in place as containment for the known repeat+detail class,
+  but live evidence suggests the true bug may also affect repeated RGBA no-detail compacted materials.
+  Do not add another shader or planner fix until a targeted diagnostic identifies the failing input or
+  transform.
 
 Cleanup target introduced:
 
-- Add a targeted repeat+detail atlas sampling phase before re-enabling compaction for these materials.
-  The phase should compare direct and compacted UV sampling for tree bark-like inputs, not rely only
-  on live visual inspection.
+- Add a CPU renderable picker diagnostic before changing repeat-atlas sampling again. Use the existing
+  BVH/camera data to identify the renderable under the crosshair or pointer and report its direct and
+  compacted material facts.
+- Add a CPU-side equivalence test for direct vs compacted atlas UV mapping using captured bark-like UV
+  ranges before attempting the next renderer fix.
+
+## Phase C8.8: Immediate Browser Renderable Picker Diagnostic
+
+Status: Implemented as a bounds-level browser picker foundation. Follow-up C8.9 is required before
+changing atlas sampling because compacted atlas/material-slot metadata is not yet exposed for picked
+static parts.
+
+Purpose: stop guessing at repeat-atlas shader fixes by identifying the exact renderable under the
+crosshair or pointer and dumping its direct/compacted material data in the browser UI. The current
+visible symptom is a crisp atlas-sheet pattern on repeated RGBA compacted materials, including likely
+no-detail tree trunks. A CPU picker is lower scope than an offscreen ID pass because the renderer
+already maintains BVH candidates and camera frame data, and it is useful beyond this bug for future
+object inspection.
+
+Tasks:
+
+- Add a dedicated browser `Picker` tab alongside the existing browser debug/scene controls.
+  - Completed in `BrowserModePanel.svelte`.
+- In the Picker tab, add controls for which renderable families are pickable:
+  - static objects;
+  - structured interiors/cell geometry;
+  - terrain;
+  - portal masks/overlays;
+  - debug overlays.
+  - Completed with explicit family toggles. Static and structured are enabled by default; terrain,
+    portals, and debug overlays are available but disabled by default.
+- Make static objects and structured interiors enabled by default for this phase; terrain and overlays
+  can be available but disabled by default if they add noise.
+  - Completed.
+- Add a target source control:
+  - last pointer position inside the canvas;
+  - screen center/crosshair.
+  - Completed as `Pointer`/`Center`.
+- Add an action or live-toggle for picking. Prefer an explicit "Pick" action first so the picker does
+  not add per-frame work while navigating.
+  - Completed with an explicit `Pick` action.
+- Add a CPU pick ray builder from the current camera frame and either:
+  - the last pointer position inside the canvas; or
+  - the screen center when no pointer position is available.
+  - Completed via `buildSceneCameraRenderRay()`.
+- Query existing render BVH sources for candidate draw units. Prefer the same candidate pools used for
+  static and structured-interior visibility so the picker reports what the renderer could actually
+  draw.
+  - Partially completed. The picker uses the browser-owned `RenderSpatialIndex` and exact owner/kind
+    filtering. Static renderable parts were added to that index using the same static placement matrix
+    as staged draw-unit assembly. This is object/part-level rather than draw-unit/material-surface-level.
+- Start with bounds-level picking only. Do not add triangle-level intersection unless bounds picking
+  cannot identify the corrupt tree trunk well enough.
+  - Completed. Static objects, structured interiors, terrain, portal overlays, and debug overlays use
+    bounds or existing overlay pick shapes.
+- Resolve the closest picked draw unit to its render/compaction metadata:
+  - draw unit id, kind, scene domain, owning landblock, BVH item keys, and static object keys;
+  - material key, material kind/family, render state key, direct texture key, indexed data if present;
+  - direct texture-page binding source, rect, wrap modes, detail presence, and UV min/max/span;
+  - compacted family resource key, compacted slice key, material slot key, material slot index, atlas
+    entry key, atlas texture index, atlas rect, detail atlas entry, and detail rect when replaced by a
+    compacted family;
+  - replacement status: direct-retained, compacted-replaced, or not-eligible, with blocker reason when
+    retained.
+  - Not completed. C8.8 exposes exact static part identity plus source/gfx/material/detail signatures,
+    but it does not yet resolve surface-level draw units, texture-page bindings, UV ranges, or
+    compacted family slots.
+- Show the picked target in the Picker tab with compact, copyable sections:
+  - identity and bounds;
+  - material/direct draw;
+  - compacted family/replacement;
+  - UV and atlas facts.
+  - Partially completed. The tab shows hit and metadata sections. C8.9 must add material/direct,
+    compacted family/replacement, and UV/atlas sections.
+- Add the picked renderable record to the debug report as a small optional section. Keep it capped to
+  the current target plus one or two recent failed-pick reasons; do not add successful path history.
+  - Completed for the current target or current miss reason only. No history was added.
+- Use the picked tree trunk record to build a CPU-side direct-vs-compacted UV equivalence test before
+  changing shader sampling again.
+  - Deferred to C8.9/C8.10 because the picker does not yet expose the needed direct/compacted atlas
+    mapping fields.
+
+Progress completed:
+
+- Added `buildSceneCameraRenderRay()` so browser diagnostics can construct CPU pick rays from the
+  same camera frame used by rendering.
+- Added static renderable part spatial items with bounds transformed by the staged static placement
+  matrix.
+- Extended the render spatial query with an optional item predicate so picker family toggles filter
+  exact owner/kind pairs instead of leaking debug overlay kinds into structured picks.
+- Routed the legacy click inspector and Ctrl terrain-pick path through the CPU spatial query instead
+  of the WebGL renderer's stubbed picker.
+- Added the browser `Picker` tab with family toggles, pointer/center target selection, an explicit
+  `Pick` action, compact current-target output, and debug-report output.
+- Fixed three blocking frontend type-safety debts encountered during validation:
+  - narrowed texture-page wrap-mode helper input to the fields it actually reads;
+  - made the compacted geometry UV invariant explicit with a hard failure for missing UV buffers;
+  - removed an unreachable direct-detail texture-unit null branch.
+
+Validation:
+
+- `npm exec prettier -- --write ...` from `apps/holtburger-3d` passed for touched files.
+- `npm run check` from `apps/holtburger-3d` passed.
+- `npm exec vitest -- run src/lib/world-display/render-spatial-index.test.ts src/lib/world-display/render-picking-math.test.ts src/lib/world-display/compacted-geometry.test.ts` passed.
+
+Course correction:
+
+- The WebGL renderer `pickAtViewportPoint()` path is still a stub. C8.8 intentionally moved browser
+  diagnostics to the app-owned CPU spatial index instead of expanding WebGL submission with a picking
+  side channel.
+- Static picking is currently part-level, not draw-unit-level. This is acceptable for identifying the
+  corrupt object, but insufficient for atlas diagnosis because a part can expand into multiple material
+  surface draw units.
+- Bounds-level picking may select a broad trunk/foliage part when overlapping vegetation is dense. Add
+  triangle-level picking only if the first captured tree records prove bounds picking is ambiguous.
+
+Cleanup target introduced:
+
+- `RenderSpatialMetadata` now carries static renderable diagnostic fields. If this grows further,
+  split picker-only renderable diagnostics from general-purpose spatial metadata so the spatial index
+  does not become a dumping ground.
+- `buildStaticRenderablePartMatrix()` was exported from staged assembly for picker parity. If more
+  systems need it, move static placement math into a narrower static-renderable transform module.
+- The legacy click inspector and Picker tab now share CPU picking concepts but still format separate
+  reports. Collapse their row formatting once the picker becomes the primary browser inspector.
+
+## Phase C8.9: Immediate Picker Material And Compaction Metadata Enrichment
+
+Status: Immediate next phase.
+
+Purpose: turn the bounds-level picker into the diagnostic needed for the tree bark atlas-sheet bug by
+resolving a picked static part to the exact direct draw unit(s), texture-page bindings, UV range, and
+compacted family replacement/slice/material-slot facts.
+
+Tasks:
+
+- Build a part-to-draw-unit diagnostic lookup during staged/WebGL resource realization, keyed by static
+  part render key and static object key. Do not inspect WebGL buffers; use the typed staged draw-unit,
+  family planner, and compacted geometry records.
+- For a picked static part, list matching material-surface draw units with:
+  - draw unit id;
+  - material family/kind;
+  - material key/render state key;
+  - texture-page binding source and wrap modes;
+  - detail overlay presence and detail texture-page binding;
+  - UV min/max/span from the staged geometry.
+- For compacted-replaced draw units, add:
+  - compacted batch key;
+  - family resource key;
+  - slice key;
+  - material slot key/index;
+  - atlas entry key/texture index/rect;
+  - detail atlas entry/rect when present.
+- For retained direct draw units, add the blocker/reason and whether the material was intentionally
+  outside the compacted family.
+- Keep the Picker tab compact: show the closest picked part plus a short list of matching draw units,
+  with long keys wrapped but no history.
+- Add a unit test for the diagnostic lookup using one static part that expands into multiple material
+  surface draw units, one direct-retained route, and one compacted-replaced route.
+- After the first live trunk pick, add a focused direct-vs-compacted UV/atlas equivalence test before
+  any shader or planner sampling changes.
+
+Exit criteria:
+
+- Picking the corrupt trunk reports the exact draw unit(s), UV span, direct texture-page rect/wrap, and
+  compacted atlas rect/material slot.
+- The report can distinguish "UV range wrong before shader" from "UV range correct, shader atlas
+  transform wrong".
+- No new fallback path is introduced for the bark issue.
+
+Exit criteria:
+
+- A user can open the Picker tab, choose pickable renderable families, point at the corrupt trunk, and
+  see the exact draw unit/material plus compacted atlas data in the tab.
+- The same picked target appears in the debug report without adding noisy successful-path history.
+- We can name the exact mismatch causing the bark atlas-sheet pattern or identify the next missing
+  diagnostic field.
+- The next renderer change is backed by a failing unit or diagnostic test.
 
 ## Cleanup Targets
 

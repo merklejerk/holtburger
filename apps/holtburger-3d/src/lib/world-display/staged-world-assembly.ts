@@ -1056,7 +1056,7 @@ function transformPosition(
 		matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14];
 }
 
-function buildStaticRenderablePartMatrix(
+export function buildStaticRenderablePartMatrix(
 	part: StaticRenderablePart,
 ): RenderMat4 {
 	let matrix = createIdentityMat4();

@@ -2508,16 +2508,13 @@ function createBakedGeometryLandblockBatchPlan({
 	);
 	const batchMaterialSlotKeys = uniqueSortedStrings(
 		batchDrawUnits.map((drawUnit) => {
-			if (drawUnit.material.kind !== "direct-texture") {
+			const slotKey = sourceMaterialSlotKeyByDrawUnitId.get(drawUnit.id);
+			if (!slotKey) {
 				throw new Error(
-					`Baked geometry landblock batch ${formatHex32(landblockId)} references non-direct material draw unit ${drawUnit.id}.`,
+					`Baked geometry landblock batch ${formatHex32(landblockId)} draw unit ${drawUnit.id} has no explicit material slot mapping.`,
 				);
 			}
-			return (
-				sourceMaterialSlotKeyByDrawUnitId.get(drawUnit.id) ??
-				drawUnit.material.atlasEligibility?.materialSlotKey ??
-				""
-			);
+			return slotKey;
 		}),
 	);
 	const localMaterialSlots = batchMaterialSlotKeys.map((slotKey, index) => {

@@ -4446,6 +4446,51 @@ Validation:
 - `npm exec tsc -- --noEmit`
 - `npm exec vitest -- src/lib/world-display/baked-geometry.test.ts --run`
 
+### Phase M7D.5b1: Landblock Batch Explicit Slot Enforcement
+
+Status: Complete.
+
+Purpose: carry the explicit material-slot mapping rule from compacted geometry construction into the
+landblock batch splitter. M7D.5b0 removed slot inference from `buildBakedGeometry`, but resource sync
+still had a second direct-texture assumption when remapping material slots per landblock batch.
+
+Tasks:
+
+- Remove the landblock batch splitter's direct-texture material requirement.
+- Remove the slot-key inference from `drawUnit.material.atlasEligibility`.
+- Require every batched compacted draw unit to have an explicit source-plan `drawUnitMaterialSlots`
+  mapping before local material-slot remapping.
+- Fail hard with a specific error if a compacted draw unit reaches resource sync without that mapping.
+
+Progress:
+
+- `createBakedGeometryLandblockBatchPlan()` now reads material slot keys only from
+  `sourcePlan.drawUnitMaterialSlots`.
+- Removed the remaining direct-texture material-kind check from the landblock batch splitter.
+- Removed the remaining atlas-eligibility slot fallback from landblock-local material-slot remapping.
+
+Decisions:
+
+- The planner is the single owner of draw-unit-to-material-slot mappings. Resource sync may remap slot
+  indices for a landblock-local table, but it must not infer material slots from material payloads.
+- This applies to the current RGBA atlas path and all future indexed/palette submit groups.
+
+Course Corrections:
+
+- M7D.5b still needs an explicit submit-family split before shader work. The discovered issue was a
+  second hidden direct-texture assumption in resource sync, not only in the geometry builder.
+
+Cleanup Targets:
+
+- Resource sync still uses the RGBA `materialSlots` table for the only active compacted family. M7D.5b
+  should introduce typed submit groups so indexed material-table records are not forced through that
+  RGBA table.
+
+Validation:
+
+- `npm exec tsc -- --noEmit`
+- `npm exec vitest -- src/lib/world-display/baked-geometry.test.ts src/lib/world-display/baked-renderable-planner.test.ts src/lib/world-display/webgl2-world-resources.test.ts --run`
+
 ### Phase M7D.5b: Baked Indexed Submit Variant
 
 Status: Next.

@@ -10,10 +10,11 @@ import {
 	type Webgl2AtlasBackedCompactedSubmitResources,
 	type Webgl2AtlasBackedCompactedWorldProgram,
 } from "./webgl2-atlas-backed-compacted-submit";
-import type {
-	Webgl2TextureAtlasGenerationResource,
-	Webgl2TextureAtlasTextureResource,
-} from "./webgl2-texture-atlas-generation";
+import type { Webgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
+import {
+	resolveDirectDrawBaseTexturePageBinding,
+	type TexturePageBinding,
+} from "./texture-page-binding";
 
 export type Webgl2FlatWorldProgram = Webgl2ProgramResource<
 	"position",
@@ -28,6 +29,7 @@ export type Webgl2TexturedWorldProgram = Webgl2ProgramResource<
 	| "uAtlasEnabled"
 	| "uAtlasRect"
 	| "uAtlasSize"
+	| "uTexturePageWrapMode"
 	| "uDetailTexture"
 	| "uDetailTiling"
 	| "uDetailEnabled"
@@ -121,6 +123,12 @@ export interface Webgl2WorldSubmitMetrics {
 	atlasBackedCompactedSubmitNoVisibleInteriorRouteCount: number;
 	atlasBackedCompactedSubmitNoVisibleOtherRouteCount: number;
 	atlasBackedCompactedSubmitFallbackSamples: readonly string[];
+	directTexturePageDrawCount: number;
+	directSingleEntryTexturePageDrawCount: number;
+	directPackedTexturePageDrawCount: number;
+	directPackedTexturePageEstimatedBindAvoidedCount: number;
+	directPackedTexturePageTextureCount: number;
+	directTexturePageFallbackSamples: readonly string[];
 	stagedAtlasDrawCount: number;
 	stagedAtlasStandaloneDirectDrawCount: number;
 	stagedAtlasEstimatedTextureBindAvoidedCount: number;
@@ -158,6 +166,12 @@ const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	atlasBackedCompactedSubmitNoVisibleInteriorRouteCount: 0,
 	atlasBackedCompactedSubmitNoVisibleOtherRouteCount: 0,
 	atlasBackedCompactedSubmitFallbackSamples: [],
+	directTexturePageDrawCount: 0,
+	directSingleEntryTexturePageDrawCount: 0,
+	directPackedTexturePageDrawCount: 0,
+	directPackedTexturePageEstimatedBindAvoidedCount: 0,
+	directPackedTexturePageTextureCount: 0,
+	directTexturePageFallbackSamples: [],
 	stagedAtlasDrawCount: 0,
 	stagedAtlasStandaloneDirectDrawCount: 0,
 	stagedAtlasEstimatedTextureBindAvoidedCount: 0,
@@ -175,6 +189,7 @@ export function createEmptyWebgl2WorldSubmitMetrics(): Webgl2WorldSubmitMetrics 
 		...EMPTY_SUBMIT_METRICS,
 		visibleDrawUnitCountsByMaterialKind: {},
 		atlasBackedCompactedSubmitFallbackSamples: [],
+		directTexturePageFallbackSamples: [],
 		stagedAtlasFallbackSamples: [],
 	};
 }
@@ -271,6 +286,8 @@ export function submitWebgl2FlatWorldDrawUnits({
 		interiorDomainDrawUnitCount,
 		visibleDrawUnitCountsByMaterialKind:
 			countDrawUnitsByMaterialKind(drawUnits),
+		directPackedTexturePageTextureCount:
+			atlasBackedCompactedResources.generation?.textures.length ?? 0,
 		stagedAtlasSharedTextureAtlasTextureCount:
 			atlasBackedCompactedResources.generation?.textures.length ?? 0,
 	};
@@ -409,28 +426,40 @@ export function submitWebgl2FlatWorldDrawUnits({
 			enabled: terrainBackfaceCulling && useTerrainBlend,
 			mode: gl.BACK,
 		});
-		const stagedAtlasResolution =
+		const texturePageResolution =
 			useTexture && texture
-				? resolveStagedAtlasTextureBinding({
+				? resolveDirectDrawBaseTexturePageBinding({
 						drawUnit,
 						generation: atlasBackedCompactedResources.generation,
-						fallbackSamples: metrics.stagedAtlasFallbackSamples,
+						fallbackSamples: metrics.directTexturePageFallbackSamples,
 					})
 				: null;
-		const stagedAtlasBinding = stagedAtlasResolution?.binding ?? null;
+		const texturePageBinding = texturePageResolution?.binding ?? null;
+		metrics.directTexturePageFallbackSamples =
+			texturePageResolution?.fallbackSamples ??
+			metrics.directTexturePageFallbackSamples;
 		metrics.stagedAtlasFallbackSamples =
-			stagedAtlasResolution?.fallbackSamples ??
-			metrics.stagedAtlasFallbackSamples;
+			metrics.directTexturePageFallbackSamples;
 		if (useTexture) {
-			if (stagedAtlasBinding) {
-				metrics.stagedAtlasDrawCount += 1;
-				metrics.stagedAtlasEstimatedTextureBindAvoidedCount += 1;
+			if (texturePageBinding) {
+				metrics.directTexturePageDrawCount += 1;
+				if (texturePageBinding.pageKind === "packed-atlas") {
+					metrics.directPackedTexturePageDrawCount += 1;
+					metrics.directPackedTexturePageEstimatedBindAvoidedCount += 1;
+				} else {
+					metrics.directSingleEntryTexturePageDrawCount += 1;
+				}
+				metrics.stagedAtlasDrawCount = metrics.directPackedTexturePageDrawCount;
+				metrics.stagedAtlasEstimatedTextureBindAvoidedCount =
+					metrics.directPackedTexturePageEstimatedBindAvoidedCount;
+				metrics.stagedAtlasStandaloneDirectDrawCount =
+					metrics.directSingleEntryTexturePageDrawCount;
 			} else {
 				metrics.stagedAtlasStandaloneDirectDrawCount += 1;
 			}
 		}
 		const activeTexture =
-			stagedAtlasBinding?.texture.texture.texture ?? texture?.texture ?? null;
+			texturePageBinding?.texture.texture ?? texture?.texture ?? null;
 		if (activeTexture && stateCache.bindTexture2D(0, activeTexture)) {
 			metrics.stateChangeCount += 1;
 		}
@@ -513,8 +542,8 @@ export function submitWebgl2FlatWorldDrawUnits({
 			metrics.uniformUploadCount += DETAIL_DYNAMIC_UNIFORM_COUNT;
 		}
 		if (useTexture) {
-			uploadStagedAtlasUniforms(gl, texturedProgram, stagedAtlasBinding);
-			metrics.uniformUploadCount += STAGED_ATLAS_DYNAMIC_UNIFORM_COUNT;
+			uploadDirectTexturePageUniforms(gl, texturedProgram, texturePageBinding);
+			metrics.uniformUploadCount += DIRECT_TEXTURE_PAGE_DYNAMIC_UNIFORM_COUNT;
 		}
 		if (drawUnit.terrainBlend) {
 			uploadTerrainBlendUniforms(
@@ -544,73 +573,6 @@ export function submitWebgl2FlatWorldDrawUnits({
 		planningFallbackSamples: atlasReplacement.fallbackSamples,
 	});
 	return metrics;
-}
-
-interface StagedAtlasTextureBinding {
-	texture: Webgl2TextureAtlasTextureResource;
-	rect: readonly [number, number, number, number];
-	width: number;
-	height: number;
-}
-
-function resolveStagedAtlasTextureBinding({
-	drawUnit,
-	generation,
-	fallbackSamples,
-}: {
-	drawUnit: Webgl2WorldDrawUnit;
-	generation: Webgl2TextureAtlasGenerationResource | null;
-	fallbackSamples: readonly string[];
-}): {
-	binding: StagedAtlasTextureBinding | null;
-	fallbackSamples: readonly string[];
-} {
-	const fallback = (sample: string) => {
-		return {
-			binding: null,
-			fallbackSamples: [...fallbackSamples, sample].slice(0, 8),
-		};
-	};
-	if (!drawUnit.atlasEligibility) {
-		return { binding: null, fallbackSamples };
-	}
-	if (drawUnit.detailOverlay) {
-		return fallback("staged atlas requires standalone detail overlay path");
-	}
-	if (!drawUnit.textureSamplingPolicy?.includes("wrap=clamp/clamp")) {
-		return fallback(
-			`staged atlas draw unit ${drawUnit.id} uses unsupported sampler ${drawUnit.textureSamplingPolicy ?? "unknown"}`,
-		);
-	}
-	if (!generation) {
-		return fallback("staged atlas missing texture atlas generation");
-	}
-	const placement = generation.placements.find(
-		(candidate) =>
-			candidate.atlasEntryKey === drawUnit.atlasEligibility?.atlasEntryKey,
-	);
-	if (!placement) {
-		return fallback(
-			`staged atlas missing placed entry ${drawUnit.atlasEligibility.atlasEntryKey}`,
-		);
-	}
-	const texture = generation.textures.find(
-		(candidate) => candidate.textureIndex === placement.textureIndex,
-	);
-	if (!texture) {
-		return fallback(
-			`staged atlas missing texture ${placement.textureIndex} for ${placement.atlasEntryKey}`,
-		);
-	}
-	return {
-		binding: {
-			texture,
-			rect: placement.rect,
-			width: placement.width,
-			height: placement.height,
-		},
-		fallbackSamples,
-	};
 }
 
 function submitAtlasBackedCompactedDrawUnits({
@@ -660,8 +622,10 @@ function submitAtlasBackedCompactedDrawUnits({
 		});
 		metrics.drawCallCount += atlasMetrics.shaderDrawCallCount;
 		metrics.triangleCount += atlasMetrics.submittedTriangleCount;
-		metrics.atlasBackedCompactedShaderDrawCallCount = atlasMetrics.shaderDrawCallCount;
-		metrics.atlasBackedCompactedSubmittedBatchCount = atlasMetrics.submittedBatchCount;
+		metrics.atlasBackedCompactedShaderDrawCallCount =
+			atlasMetrics.shaderDrawCallCount;
+		metrics.atlasBackedCompactedSubmittedBatchCount =
+			atlasMetrics.submittedBatchCount;
 		metrics.atlasBackedCompactedSubmittedDrawSliceCount =
 			atlasMetrics.submittedDrawSliceCount;
 		metrics.atlasBackedCompactedSubmittedSliceRepresentedDrawUnitCount =
@@ -677,28 +641,41 @@ function submitAtlasBackedCompactedDrawUnits({
 			atlasMetrics.retainedDrawUnitCount;
 		metrics.atlasBackedCompactedSubmitNoVisibleRouteCount =
 			planningNoVisibleRouteCount + atlasMetrics.noVisibleRouteCount;
-		applyAtlasBackedCompactedNoVisibleRoute(metrics, route, planningNoVisibleRouteCount);
+		applyAtlasBackedCompactedNoVisibleRoute(
+			metrics,
+			route,
+			planningNoVisibleRouteCount,
+		);
 		applyAtlasBackedCompactedNoVisibleRoute(
 			metrics,
 			route,
 			atlasMetrics.noVisibleRouteCount,
 		);
-		metrics.atlasBackedCompactedSubmitFallbackSamples = atlasMetrics.fallbackSamples;
+		metrics.atlasBackedCompactedSubmitFallbackSamples =
+			atlasMetrics.fallbackSamples;
 		applyAtlasBackedCompactedDrawCallArithmetic(metrics);
 		return;
 	}
 	const fallbackSamples = [...planningFallbackSamples];
-	metrics.atlasBackedCompactedSubmitNoVisibleRouteCount = planningNoVisibleRouteCount;
-	applyAtlasBackedCompactedNoVisibleRoute(metrics, route, planningNoVisibleRouteCount);
+	metrics.atlasBackedCompactedSubmitNoVisibleRouteCount =
+		planningNoVisibleRouteCount;
+	applyAtlasBackedCompactedNoVisibleRoute(
+		metrics,
+		route,
+		planningNoVisibleRouteCount,
+	);
 	if (
 		!program &&
 		resources.batches.length > 0 &&
 		resources.generation &&
 		replaceableDrawUnitIds.size > 0
 	) {
-		fallbackSamples.push("atlas-backed compacted submit missing shader program");
+		fallbackSamples.push(
+			"atlas-backed compacted submit missing shader program",
+		);
 	}
-	const emptyAtlasMetrics = createEmptyWebgl2AtlasBackedCompactedSubmitMetrics();
+	const emptyAtlasMetrics =
+		createEmptyWebgl2AtlasBackedCompactedSubmitMetrics();
 	metrics.atlasBackedCompactedRetainedDrawUnitCount = retainedDrawUnitCount;
 	metrics.atlasBackedCompactedReplacedDrawUnitTriangleCount =
 		replaceableDrawUnitTriangleCount;
@@ -784,7 +761,7 @@ const TERRAIN_BLEND_SAMPLER_UNIFORM_COUNT = 10;
 const TERRAIN_BLEND_DYNAMIC_UNIFORM_COUNT = 13;
 const INDEXED_DYNAMIC_UNIFORM_COUNT = 6;
 const DETAIL_DYNAMIC_UNIFORM_COUNT = 2;
-const STAGED_ATLAS_DYNAMIC_UNIFORM_COUNT = 3;
+const DIRECT_TEXTURE_PAGE_DYNAMIC_UNIFORM_COUNT = 4;
 
 function uploadTerrainBlendSamplerUniforms(
 	gl: WebGL2RenderingContext,
@@ -899,15 +876,16 @@ function uploadDetailOverlayUniforms(
 	gl.uniform1i(program.uniforms.uDetailEnabled, detailOverlay ? 1 : 0);
 }
 
-function uploadStagedAtlasUniforms(
+function uploadDirectTexturePageUniforms(
 	gl: WebGL2RenderingContext,
 	program: Webgl2TexturedWorldProgram,
-	binding: StagedAtlasTextureBinding | null,
+	binding: TexturePageBinding | null,
 ): void {
 	if (!binding) {
 		gl.uniform1i(program.uniforms.uAtlasEnabled, 0);
 		gl.uniform4f(program.uniforms.uAtlasRect, 0, 0, 1, 1);
 		gl.uniform2f(program.uniforms.uAtlasSize, 1, 1);
+		gl.uniform2f(program.uniforms.uTexturePageWrapMode, 0, 0);
 		return;
 	}
 	gl.uniform1i(program.uniforms.uAtlasEnabled, 1);
@@ -919,6 +897,11 @@ function uploadStagedAtlasUniforms(
 		binding.rect[3],
 	);
 	gl.uniform2f(program.uniforms.uAtlasSize, binding.width, binding.height);
+	gl.uniform2f(
+		program.uniforms.uTexturePageWrapMode,
+		binding.wrapS === "repeat" ? 1 : 0,
+		binding.wrapT === "repeat" ? 1 : 0,
+	);
 }
 
 function uploadTerrainBlendUniforms(

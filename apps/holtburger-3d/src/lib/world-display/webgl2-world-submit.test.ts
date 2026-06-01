@@ -140,6 +140,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 				uAtlasEnabled: {} as WebGLUniformLocation,
 				uAtlasRect: {} as WebGLUniformLocation,
 				uAtlasSize: {} as WebGLUniformLocation,
+				uTexturePageWrapMode: {} as WebGLUniformLocation,
 				uDetailTexture: {} as WebGLUniformLocation,
 				uDetailTiling: {} as WebGLUniformLocation,
 				uDetailEnabled: {} as WebGLUniformLocation,
@@ -247,16 +248,17 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			frame: createFrame(["atlas-staged"]),
 		});
 
-		expect(metrics.stagedAtlasDrawCount).toBe(1);
-		expect(metrics.stagedAtlasStandaloneDirectDrawCount).toBe(0);
-		expect(metrics.stagedAtlasEstimatedTextureBindAvoidedCount).toBe(1);
-		expect(metrics.stagedAtlasSharedTextureAtlasTextureCount).toBe(1);
-		expect(metrics.stagedAtlasFallbackSamples).toEqual([]);
+		expect(metrics.directTexturePageDrawCount).toBe(1);
+		expect(metrics.directPackedTexturePageDrawCount).toBe(1);
+		expect(metrics.directSingleEntryTexturePageDrawCount).toBe(0);
+		expect(metrics.directPackedTexturePageEstimatedBindAvoidedCount).toBe(1);
+		expect(metrics.directPackedTexturePageTextureCount).toBe(1);
+		expect(metrics.directTexturePageFallbackSamples).toEqual([]);
 		expect(gl.boundTextures).toContain(atlasTexture);
 		expect(gl.boundTextures).not.toContain(standaloneTexture);
 		expect(gl.uniform1iValues).toContain(1);
 		expect(gl.uniform4fValues).toContainEqual([1, 2, 3, 4]);
-		expect(gl.uniform2fValues).toContainEqual([16, 16]);
+		expect(gl.uniform2fValues).toContainEqual([4, 4]);
 	});
 
 	it("keeps compacted replacement ahead of staged atlas routing", () => {
@@ -294,8 +296,8 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		});
 
 		expect(metrics.atlasBackedCompactedReplacedDrawUnitCount).toBe(1);
-		expect(metrics.stagedAtlasDrawCount).toBe(0);
-		expect(metrics.stagedAtlasStandaloneDirectDrawCount).toBe(0);
+		expect(metrics.directPackedTexturePageDrawCount).toBe(0);
+		expect(metrics.directSingleEntryTexturePageDrawCount).toBe(0);
 	});
 
 	it("falls back to standalone direct texture when staged atlas has no generation", () => {
@@ -328,16 +330,16 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			frame: createFrame(["standalone"]),
 		});
 
-		expect(metrics.stagedAtlasDrawCount).toBe(0);
-		expect(metrics.stagedAtlasStandaloneDirectDrawCount).toBe(1);
-		expect(metrics.stagedAtlasFallbackSamples).toContain(
-			"staged atlas missing texture atlas generation",
+		expect(metrics.directPackedTexturePageDrawCount).toBe(0);
+		expect(metrics.directSingleEntryTexturePageDrawCount).toBe(1);
+		expect(metrics.directTexturePageFallbackSamples).toContain(
+			"direct packed base page missing texture atlas generation",
 		);
 		expect(gl.boundTextures).toContain(standaloneTexture);
-		expect(gl.uniform1iValues).toContain(0);
+		expect(gl.uniform1iValues).toContain(1);
 	});
 
-	it("keeps repeat sampler draw units on standalone direct textures", () => {
+	it("samples repeat direct draw units through packed texture pages with wrap uniforms", () => {
 		const gl = new CapturingSubmitGl();
 		const stateCache = new Webgl2StateCache(gl);
 		const standaloneTexture = {} as WebGLTexture;
@@ -351,6 +353,8 @@ describe("submitWebgl2FlatWorldFrame", () => {
 					textureSamplingPolicy:
 						"wrap=repeat/repeat;filter=linear/linear/linear;color=none",
 					atlasEntryKey: "entry/a",
+					atlasWrapS: "repeat",
+					atlasWrapT: "repeat",
 				}),
 			],
 		]);
@@ -371,12 +375,11 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			frame: createFrame(["repeat"]),
 		});
 
-		expect(metrics.stagedAtlasDrawCount).toBe(0);
-		expect(metrics.stagedAtlasStandaloneDirectDrawCount).toBe(1);
-		expect(metrics.stagedAtlasFallbackSamples[0]).toContain(
-			"unsupported sampler",
-		);
-		expect(gl.boundTextures).toContain(standaloneTexture);
+		expect(metrics.directPackedTexturePageDrawCount).toBe(1);
+		expect(metrics.directSingleEntryTexturePageDrawCount).toBe(0);
+		expect(metrics.directTexturePageFallbackSamples).toEqual([]);
+		expect(gl.boundTextures).not.toContain(standaloneTexture);
+		expect(gl.uniform2fValues).toContainEqual([1, 1]);
 	});
 
 	it("replaces compacted static draw units through the default atlas submit path", () => {
@@ -411,9 +414,13 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		expect(metrics.atlasBackedCompactedReplacedDrawUnitTriangleCount).toBe(1);
 		expect(metrics.atlasBackedCompactedRetainedDrawUnitCount).toBe(1);
 		expect(metrics.atlasBackedCompactedShaderDrawCallCount).toBe(1);
-		expect(metrics.atlasBackedCompactedSubmittedSliceRepresentedDrawUnitCount).toBe(1);
+		expect(
+			metrics.atlasBackedCompactedSubmittedSliceRepresentedDrawUnitCount,
+		).toBe(1);
 		expect(metrics.atlasBackedCompactedSubmittedTriangleCount).toBe(1);
-		expect(metrics.atlasBackedCompactedConservativeOverdrawTriangleCount).toBe(0);
+		expect(metrics.atlasBackedCompactedConservativeOverdrawTriangleCount).toBe(
+			0,
+		);
 		expect(metrics.atlasBackedCompactedConservativeOverdrawRatio).toBe(0);
 		expect(metrics.atlasBackedCompactedOriginalDrawCallEstimateCount).toBe(2);
 		expect(metrics.atlasBackedCompactedSubmittedDrawCallEstimateCount).toBe(2);
@@ -453,9 +460,13 @@ describe("submitWebgl2FlatWorldFrame", () => {
 
 		expect(metrics.atlasBackedCompactedReplacedDrawUnitCount).toBe(1);
 		expect(metrics.atlasBackedCompactedReplacedDrawUnitTriangleCount).toBe(1);
-		expect(metrics.atlasBackedCompactedSubmittedSliceRepresentedDrawUnitCount).toBe(2);
+		expect(
+			metrics.atlasBackedCompactedSubmittedSliceRepresentedDrawUnitCount,
+		).toBe(2);
 		expect(metrics.atlasBackedCompactedSubmittedTriangleCount).toBe(2);
-		expect(metrics.atlasBackedCompactedConservativeOverdrawTriangleCount).toBe(1);
+		expect(metrics.atlasBackedCompactedConservativeOverdrawTriangleCount).toBe(
+			1,
+		);
 		expect(metrics.atlasBackedCompactedConservativeOverdrawRatio).toBe(0.5);
 	});
 
@@ -483,8 +494,12 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		});
 
 		expect(metrics.atlasBackedCompactedSubmitNoVisibleRouteCount).toBe(1);
-		expect(metrics.atlasBackedCompactedSubmitNoVisibleExteriorRouteCount).toBe(0);
-		expect(metrics.atlasBackedCompactedSubmitNoVisibleInteriorRouteCount).toBe(1);
+		expect(metrics.atlasBackedCompactedSubmitNoVisibleExteriorRouteCount).toBe(
+			0,
+		);
+		expect(metrics.atlasBackedCompactedSubmitNoVisibleInteriorRouteCount).toBe(
+			1,
+		);
 		expect(metrics.atlasBackedCompactedSubmitNoVisibleOtherRouteCount).toBe(0);
 		expect(metrics.atlasBackedCompactedSubmitFallbackSamples).toEqual([]);
 	});
@@ -654,6 +669,8 @@ function createDrawUnit({
 	terrainBlend = null,
 	textureSamplingPolicy = null,
 	atlasEntryKey = null,
+	atlasWrapS = "clamp",
+	atlasWrapT = "clamp",
 	vertexArray = {} as WebGLVertexArrayObject,
 	kind = "static",
 	sceneDomain,
@@ -670,6 +687,8 @@ function createDrawUnit({
 	terrainBlend?: Webgl2WorldDrawUnit["terrainBlend"];
 	textureSamplingPolicy?: string | null;
 	atlasEntryKey?: string | null;
+	atlasWrapS?: "clamp" | "repeat";
+	atlasWrapT?: "clamp" | "repeat";
 	vertexArray?: WebGLVertexArrayObject;
 }): Webgl2WorldDrawUnit {
 	return {
@@ -718,10 +737,10 @@ function createDrawUnit({
 			? {
 					atlasEntryKey,
 					materialSlotKey: `${materialKey}|slot`,
-					renderStateKey: "shader=atlas-color;blend=opaque;depth=write;alphaTest=0;side=front",
-					samplingKey:
-						"wrap=clamp/clamp;filter=linear/linear/linear;color=linear;mips=atlas",
-					samplingPolicy: { wrapS: "clamp", wrapT: "clamp" },
+					renderStateKey:
+						"shader=atlas-color;blend=opaque;depth=write;alphaTest=0;side=front",
+					samplingKey: `wrap=${atlasWrapS}/${atlasWrapT};filter=linear/linear/linear;color=linear;mips=atlas`,
+					samplingPolicy: { wrapS: atlasWrapS, wrapT: atlasWrapT },
 					atlasEntry: {
 						renderSurfaceId: 1,
 						preparedTextureAssetId: "prepared-texture/00000001",
@@ -791,6 +810,7 @@ function createTexturedProgram() {
 			uAtlasEnabled: {} as WebGLUniformLocation,
 			uAtlasRect: {} as WebGLUniformLocation,
 			uAtlasSize: {} as WebGLUniformLocation,
+			uTexturePageWrapMode: {} as WebGLUniformLocation,
 			uDetailTexture: {} as WebGLUniformLocation,
 			uDetailTiling: {} as WebGLUniformLocation,
 			uDetailEnabled: {} as WebGLUniformLocation,
@@ -1005,8 +1025,8 @@ function createTextureAtlasGeneration(
 				atlasEntryKey,
 				textureIndex: 0,
 				rect: [1, 2, 3, 4],
-				width: 16,
-				height: 16,
+				width: 4,
+				height: 4,
 			},
 		],
 		preparedTextureAssetIds: [],
@@ -1166,11 +1186,7 @@ class CapturingSubmitGl implements Webgl2StateCacheGl {
 		this.calls.push("uniform1f");
 	}
 
-	uniform2f(
-		_location: WebGLUniformLocation,
-		x: number,
-		y: number,
-	): void {
+	uniform2f(_location: WebGLUniformLocation, x: number, y: number): void {
 		this.calls.push("uniform2f");
 		this.uniform2fValues.push([x, y]);
 	}

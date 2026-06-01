@@ -3401,7 +3401,8 @@ Validation:
 
 ### Phase M7D.1b: Make Texture-Page Binding Explicit
 
-Status: Next.
+Status: Base-color direct draw implemented on 2026-06-01; remaining non-base buckets split to
+M7D.1c before M7D.2.
 
 Purpose: replace the ad hoc "staged atlas" submit path with an explicit texture-page binding model.
 The current direct shader already treats an atlas texture as a texture plus rect, and a standalone
@@ -3466,9 +3467,95 @@ Exit criteria:
 - Direct and baked paths consume the same texture-page records and sampler policy facts for
   overlapping material families.
 
+Progress on 2026-06-01:
+
+- Added an explicit direct-draw `TexturePageBinding` shape for base-color texture pages. The binding
+  carries page resource, page kind (`single-entry` or `packed-atlas`), usage bucket, sample class,
+  page rect, page size, wrap policy, and source.
+- Standalone direct textures now resolve as single-entry base-color texture pages with a full-page
+  rect. Packed atlas placements resolve as packed base-color texture pages when a placement and page
+  resource exist.
+- Direct textured draw submit now binds the resolved texture-page resource instead of branching on a
+  staged-atlas binding. Legacy staged-atlas metric fields remain as compatibility shims for current
+  DTO consumers, but new direct texture-page metrics are the preferred active names.
+- The direct textured shader now samples base color through the atlas-rect path for single-entry and
+  packed pages. Repeat/clamp is passed as explicit wrap uniforms, so repeat base textures can sample
+  packed pages instead of falling back solely because the authored sampler repeats.
+- Browser debug text now reports direct texture-page draws as packed versus single-entry, with
+  texture-page fallback samples.
+- Baked/compacted replacement precedence is unchanged: replaced draw units do not also submit through
+  the direct texture-page path.
+
+Decisions and course corrections:
+
+- Treating direct textures as degenerate atlas pages is viable for base-color direct draw. The shader
+  no longer needs a conceptual "non-atlas direct texture" mode for this family, although the uniform
+  is still named `uAtlasEnabled` until the shader API is renamed.
+- The old clamp-only packed direct path was stricter than necessary. Manual wrap in the direct
+  texture-page shader lets repeat/repeat packed pages participate without depending on GL sampler
+  wrap outside the page rect.
+- M7D.1b should not be declared fully complete until detail, indexed/palette, alpha/blend, road, and
+  terrain inputs stop bypassing texture-page terminology. Those are now an immediate interim phase
+  rather than being buried in M7D.2 terminology work.
+
+Validation:
+
+- `npm exec vitest -- src/lib/world-display/webgl2-world-submit.test.ts --run`
+- `npm exec tsc -- --noEmit`
+
+Introduced cleanup targets:
+
+- Rename direct shader uniforms from `uAtlasEnabled`, `uAtlasRect`, and `uAtlasSize` to
+  texture-page names once baked/direct shader helper sharing is ready. They are currently semantic
+  legacy names over the new direct texture-page contract.
+- Remove `stagedAtlas*` submit/renderer metric fields after the debug DTO and any downstream panels
+  consume the direct texture-page fields. They are compatibility shims now, not active terminology.
+- Move base-color texture-page binding out of direct submit and into shared material/resource
+  planning when M7D.3 unifies bake eligibility. Direct submit should eventually adapt resolved
+  texture-page facts rather than deriving them from draw-unit atlas eligibility and generation data.
+
+### Phase M7D.1c: Fold Remaining Texture Inputs Into Texture-Page Buckets
+
+Status: Immediate before M7D.2.
+
+Purpose: finish the part of M7D.1b that could not honestly land in the base-color submit slice.
+Direct base-color sampling is now a texture-page path, but detail overlays, indexed/palette
+resources, terrain/blend/road inputs, and alpha/blend inputs still have older binding terminology and
+resource-specific submit paths. Before renaming the architecture to baked/direct draw, make those
+inputs visible as texture-page buckets with explicit sampling policies.
+
+Tasks:
+
+- Extend the texture-page binding model beyond base color with usage buckets for detail, indexed
+  texels, palette lookup, alpha mask, blend control, road, and terrain input.
+- Preserve the current direct shaders and texture units while exposing their bound textures through
+  texture-page records. This phase is terminology and contract unification first, not a shader-family
+  rewrite.
+- Make detail overlays use a detail texture-page binding in direct draw. Existing baked detail-atlas
+  records should map to the same bucket vocabulary.
+- Represent indexed texel and palette resources as data/lookup texture pages with no mipmaps, no
+  linear filtering, no color-space conversion, and exact lookup semantics. Keep direct indexed
+  rendering as the proof path; baked indexed rendering remains deferred.
+- Name terrain base/overlay/road/alpha bindings as terrain/road/alpha texture-page buckets while
+  leaving terrain's dedicated pipeline to M7E.
+- Replace remaining user-facing "staged atlas" fallback samples with texture-page fallback samples.
+  Keep low-level packed-atlas wording only when the resource really is a packed atlas page.
+- Add tests that assert detail, indexed/palette, and terrain binding records preserve their existing
+  sampler/data policy.
+
+Exit criteria:
+
+- Every texture-bearing direct draw family has texture-page records or an explicit blocker explaining
+  why its bucket is deferred.
+- Detail direct draw and baked detail atlas terminology use the same usage-bucket vocabulary.
+- Indexed/palette resources have data-page policy tests proving they do not inherit color-page
+  mip/filter/color-space behavior.
+- The only remaining `stagedAtlas*` names are deliberate compatibility shims listed in cleanup
+  targets.
+
 ### Phase M7D.2: Baked Terminology and Boundary Rename
 
-Status: Immediate after M7D.1b.
+Status: Immediate after M7D.1c.
 
 Purpose: update active code and docs terminology around the new renderer boundary. "Texture page" is
 the shared material-resource abstraction for direct draw and baked draw. "Baked" is the promoted
@@ -3747,8 +3834,9 @@ Exit criteria:
   staged-atlas terminology once the texture-page and baked/direct-draw boundaries are implemented.
 - Preserve prepared-texture diagnostics in WebGL2 resource records so texture byte counts and fallback
   explanations are accurate.
-- Replace staged atlas-set submit plumbing after M7D.1b with explicit texture-page binding. Planner
-  outputs may still expose atlas entries as texture-page records and bake-planning metadata.
+- Finish replacing staged atlas-set submit plumbing after M7D.1c. Base-color direct draw now uses
+  explicit texture-page binding, but metric compatibility shims and non-base texture inputs still
+  carry old staged/detail/indexed/terrain binding terminology.
 - Fold existing base, detail, indexed, palette, alpha, road, blend, and terrain texture binding
   diagnostics into texture-page terminology. Keep usage bucket and sample class visible in fallback
   samples.
@@ -3776,6 +3864,9 @@ Exit criteria:
   supersedes that active guidance: forward-looking renderable names should use baked or direct-draw,
   material-resource names should use texture page, and low-level resource names should remain precise
   about packed atlases, single-entry pages, and compacted geometry.
+- Direct base-color texture-page binding currently derives packed-page placement in direct submit
+  from draw-unit atlas eligibility plus the active atlas generation. M7D.3 should move that derivation
+  into shared material/resource planning so direct and baked submit consume the same resolved facts.
 - Revisit the per-frame WebGL2 draw-unit sort after M3-M7 reshape the submit path.
 - Split renderer-neutral material sampling DTOs from any Three adapter names/imports if they still
   imply Three ownership.

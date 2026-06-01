@@ -10,6 +10,10 @@ import {
 	type Webgl2BakedGeometrySubmitResources,
 	type Webgl2BakedGeometryWorldProgram,
 } from "./webgl2-baked-submit";
+import {
+	mapWebgl2DrawUnitToDirectRenderFamilySubmission,
+	type DirectRenderFamilySubmission,
+} from "./webgl2-direct-render-family";
 import type { Webgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
 import type { TexturePageBinding } from "./texture-page-binding";
 
@@ -89,6 +93,102 @@ export type Webgl2IndexedP16WorldProgram = Webgl2ProgramResource<
 	| "uDetailTiling"
 	| "uDetailEnabled"
 >;
+
+type Webgl2DirectWorldProgram =
+	| Webgl2FlatWorldProgram
+	| Webgl2TexturedWorldProgram
+	| Webgl2TerrainBlendWorldProgram
+	| Webgl2IndexedP8WorldProgram
+	| Webgl2IndexedP16WorldProgram;
+
+type Webgl2DirectColorWorldProgram =
+	| Webgl2FlatWorldProgram
+	| Webgl2TexturedWorldProgram
+	| Webgl2IndexedP8WorldProgram
+	| Webgl2IndexedP16WorldProgram;
+
+type Webgl2DirectAlphaWorldProgram =
+	| Webgl2TexturedWorldProgram
+	| Webgl2IndexedP8WorldProgram
+	| Webgl2IndexedP16WorldProgram;
+
+export type Webgl2DirectProgramKind =
+	| "flat"
+	| "texture"
+	| "indexed-p8"
+	| "indexed-p16"
+	| "terrain";
+
+export interface DirectFamilyDrawTextureUnits {
+	rgbaTexture: 0;
+	rgbaDetail: 1;
+	indexedTexels: 0;
+	indexedPalette: 1;
+	indexedDetail: 2;
+	terrainBase: 0;
+	terrainOverlay0: 1;
+	terrainOverlay1: 2;
+	terrainOverlay2: 3;
+	terrainOverlayAlpha0: 4;
+	terrainOverlayAlpha1: 5;
+	terrainOverlayAlpha2: 6;
+	terrainRoad: 7;
+	terrainRoadAlpha0: 8;
+	terrainRoadAlpha1: 9;
+}
+
+export interface DirectFamilyDrawContext {
+	gl: WebGL2RenderingContext;
+	stateCache: Webgl2StateCache;
+	viewProjectionMatrix: RenderMat4;
+	textureUnits: DirectFamilyDrawTextureUnits;
+}
+
+export interface Webgl2DirectDrawPrograms {
+	flat: Webgl2FlatWorldProgram;
+	rgbaTexturePage: Webgl2TexturedWorldProgram;
+	terrainBlend: Webgl2TerrainBlendWorldProgram;
+	indexedP8: Webgl2IndexedP8WorldProgram;
+	indexedP16: Webgl2IndexedP16WorldProgram;
+}
+
+export interface Webgl2DirectDrawRoute {
+	drawUnit: Webgl2WorldDrawUnit;
+	submission: DirectRenderFamilySubmission;
+	programKind: Webgl2DirectProgramKind;
+	activeProgram: Webgl2DirectWorldProgram;
+	indexedProgram:
+		| Webgl2IndexedP8WorldProgram
+		| Webgl2IndexedP16WorldProgram
+		| null;
+	colorProgram: Webgl2DirectColorWorldProgram | null;
+	alphaProgram: Webgl2DirectAlphaWorldProgram | null;
+	detailProgram: Webgl2DirectAlphaWorldProgram | null;
+	texturePageBinding: TexturePageBinding | null;
+	activeBaseTexture: WebGLTexture | null;
+	detailTextureUnit: number | null;
+	usesRgbaTexturePage: boolean;
+	usesIndexed: boolean;
+	usesTerrainBlend: boolean;
+}
+
+export const DIRECT_FAMILY_DRAW_TEXTURE_UNITS: DirectFamilyDrawTextureUnits = {
+	rgbaTexture: 0,
+	rgbaDetail: 1,
+	indexedTexels: 0,
+	indexedPalette: 1,
+	indexedDetail: 2,
+	terrainBase: 0,
+	terrainOverlay0: 1,
+	terrainOverlay1: 2,
+	terrainOverlay2: 3,
+	terrainOverlayAlpha0: 4,
+	terrainOverlayAlpha1: 5,
+	terrainOverlayAlpha2: 6,
+	terrainRoad: 7,
+	terrainRoadAlpha0: 8,
+	terrainRoadAlpha1: 9,
+};
 
 export interface Webgl2WorldSubmitMetrics {
 	visibleDrawUnitCount: number;
@@ -364,87 +464,78 @@ export function submitWebgl2FlatWorldDrawUnits({
 	let previousModelViewProjection: RenderMat4 | null = null;
 	let previousColor: Float32Array | null = null;
 	let previousAlphaTest: number | null = null;
-	let previousProgramKind = "";
+	let previousProgramKind: Webgl2DirectProgramKind | null = null;
+	const directContext: DirectFamilyDrawContext = {
+		gl,
+		stateCache,
+		viewProjectionMatrix,
+		textureUnits: DIRECT_FAMILY_DRAW_TEXTURE_UNITS,
+	};
+	const directPrograms: Webgl2DirectDrawPrograms = {
+		flat: program,
+		rgbaTexturePage: texturedProgram,
+		terrainBlend: terrainBlendProgram,
+		indexedP8: indexedP8Program,
+		indexedP16: indexedP16Program,
+	};
 	for (const drawUnit of stagedDrawUnits) {
-		const texture = drawUnit.texture;
-		const useTerrainBlend = drawUnit.terrainBlend !== null;
-		const useIndexed = drawUnit.indexedMaterial !== null;
-		const useTexture = texture !== null && !useTerrainBlend;
-		const activeIndexedProgram =
-			drawUnit.indexedMaterial?.indexFormat === "p8"
-				? indexedP8Program
-				: drawUnit.indexedMaterial?.indexFormat === "index16"
-					? indexedP16Program
-					: null;
-		const activeProgram = useTerrainBlend
-			? terrainBlendProgram
-			: activeIndexedProgram
-				? activeIndexedProgram
-				: useTexture
-					? texturedProgram
-					: program;
-		const programKind = useTerrainBlend
-			? "terrain"
-			: useIndexed
-				? (drawUnit.indexedMaterial?.indexFormat ?? "indexed")
-				: useTexture
-					? "texture"
-					: "flat";
-		if (stateCache.useProgram(activeProgram.program)) {
+		const route = planWebgl2DirectDrawRoute({
+			drawUnit,
+			programs: directPrograms,
+		});
+		if (directContext.stateCache.useProgram(route.activeProgram.program)) {
 			metrics.programSwitchCount += 1;
 			metrics.stateChangeCount += 1;
 			previousModelViewProjection = null;
 			previousColor = null;
 			previousAlphaTest = null;
-			previousProgramKind = programKind;
-			if (useTexture) {
-				gl.uniform1i(texturedProgram.uniforms.uTexture, 0);
-				gl.uniform1i(texturedProgram.uniforms.uDetailTexture, 1);
+			previousProgramKind = route.programKind;
+			if (route.usesRgbaTexturePage) {
+				directContext.gl.uniform1i(texturedProgram.uniforms.uTexture, 0);
+				directContext.gl.uniform1i(texturedProgram.uniforms.uDetailTexture, 1);
 				metrics.uniformUploadCount += 2;
 			}
-			if (useIndexed) {
-				if (!activeIndexedProgram) {
+			if (route.usesIndexed) {
+				if (!route.indexedProgram) {
 					throw new Error(
 						`Indexed draw unit ${drawUnit.id} has no indexed program.`,
 					);
 				}
-				uploadIndexedSamplerUniforms(gl, activeIndexedProgram);
+				uploadIndexedSamplerUniforms(directContext.gl, route.indexedProgram);
 				metrics.uniformUploadCount += 3;
 			}
-			if (useTerrainBlend) {
-				uploadTerrainBlendSamplerUniforms(gl, terrainBlendProgram);
+			if (route.usesTerrainBlend) {
+				uploadTerrainBlendSamplerUniforms(
+					directContext.gl,
+					terrainBlendProgram,
+				);
 				metrics.uniformUploadCount += TERRAIN_BLEND_SAMPLER_UNIFORM_COUNT;
 			}
-		} else if (previousProgramKind !== programKind) {
+		} else if (previousProgramKind !== route.programKind) {
 			previousModelViewProjection = null;
 			previousColor = null;
 			previousAlphaTest = null;
-			previousProgramKind = programKind;
+			previousProgramKind = route.programKind;
 		}
 		metrics.stateChangeCount += applyDrawUnitRenderState({
 			gl,
-			stateCache,
+			stateCache: directContext.stateCache,
 			drawUnit,
 		});
-		metrics.stateChangeCount += stateCache.setCullState({
-			enabled: terrainBackfaceCulling && useTerrainBlend,
+		metrics.stateChangeCount += directContext.stateCache.setCullState({
+			enabled: terrainBackfaceCulling && route.usesTerrainBlend,
 			mode: gl.BACK,
 		});
-		const texturePageResolution =
-			useTexture && texture
-				? resolveDrawUnitBaseTexturePageBinding(drawUnit)
-				: null;
-		const texturePageBinding = texturePageResolution;
 		metrics.directTexturePageFallbackSamples = appendSubmitFallbackSamples(
 			metrics.directTexturePageFallbackSamples,
 			drawUnit.texturePageBindingFallbackSamples,
 		);
 		metrics.stagedAtlasFallbackSamples =
 			metrics.directTexturePageFallbackSamples;
-		if (useTexture) {
-			if (texturePageBinding) {
+		if (route.usesRgbaTexturePage) {
+			if (route.texturePageBinding) {
 				metrics.directTexturePageDrawCount += 1;
-				if (texturePageBinding.pageKind === "packed-atlas") {
+				if (route.texturePageBinding.pageKind === "packed-atlas") {
 					metrics.directPackedTexturePageDrawCount += 1;
 					metrics.directPackedTexturePageEstimatedBindAvoidedCount += 1;
 				} else {
@@ -459,46 +550,60 @@ export function submitWebgl2FlatWorldDrawUnits({
 				metrics.stagedAtlasStandaloneDirectDrawCount += 1;
 			}
 		}
-		const activeTexture =
-			texturePageBinding?.texture.texture ?? texture?.texture ?? null;
-		if (activeTexture && stateCache.bindTexture2D(0, activeTexture)) {
+		if (
+			route.activeBaseTexture &&
+			directContext.stateCache.bindTexture2D(
+				directContext.textureUnits.rgbaTexture,
+				route.activeBaseTexture,
+			)
+		) {
 			metrics.stateChangeCount += 1;
 		}
 		if (drawUnit.detailOverlay) {
-			const unit = drawUnit.indexedMaterial ? 2 : 1;
+			const unit = route.detailTextureUnit;
+			if (unit === null) {
+				throw new Error(
+					`Draw unit ${drawUnit.id} has detail overlay without a detail texture unit.`,
+				);
+			}
 			if (
-				stateCache.bindTexture2D(unit, drawUnit.detailOverlay.texture.texture)
+				directContext.stateCache.bindTexture2D(
+					unit,
+					drawUnit.detailOverlay.texture.texture,
+				)
 			) {
 				metrics.stateChangeCount += 1;
 			}
 		}
 		if (drawUnit.terrainBlend) {
 			metrics.stateChangeCount += bindTerrainBlendTextures({
-				stateCache,
+				stateCache: directContext.stateCache,
 				terrainBlend: drawUnit.terrainBlend,
 			});
 		}
 		if (drawUnit.indexedMaterial) {
 			metrics.stateChangeCount += bindIndexedMaterialTextures({
-				stateCache,
+				stateCache: directContext.stateCache,
 				indexedMaterial: drawUnit.indexedMaterial,
 			});
 		}
-		if (stateCache.bindVertexArray(drawUnit.vertexArray.vertexArray)) {
+		if (
+			directContext.stateCache.bindVertexArray(drawUnit.vertexArray.vertexArray)
+		) {
 			metrics.vertexArrayBindCount += 1;
 			metrics.stateChangeCount += 1;
 		}
 
 		const modelViewProjection = multiplyMat4(
-			viewProjectionMatrix,
+			directContext.viewProjectionMatrix,
 			drawUnit.modelMatrix,
 		);
 		if (
 			!previousModelViewProjection ||
 			!arraysEqual(previousModelViewProjection, modelViewProjection)
 		) {
-			gl.uniformMatrix4fv(
-				activeProgram.uniforms.uModelViewProjection,
+			directContext.gl.uniformMatrix4fv(
+				route.activeProgram.uniforms.uModelViewProjection,
 				false,
 				modelViewProjection,
 			);
@@ -506,56 +611,74 @@ export function submitWebgl2FlatWorldDrawUnits({
 			metrics.uniformUploadCount += 1;
 		}
 		if (
-			!useTerrainBlend &&
+			!route.usesTerrainBlend &&
 			(!previousColor || !arraysEqual(previousColor, drawUnit.color))
 		) {
-			const colorProgram =
-				activeIndexedProgram ?? (useTexture ? texturedProgram : program);
-			gl.uniform4fv(colorProgram.uniforms.uColor, drawUnit.color);
+			if (!route.colorProgram) {
+				throw new Error(`Draw unit ${drawUnit.id} has no color program.`);
+			}
+			directContext.gl.uniform4fv(
+				route.colorProgram.uniforms.uColor,
+				drawUnit.color,
+			);
 			previousColor = drawUnit.color;
 			metrics.uniformUploadCount += 1;
 		}
-		if (useTexture || useIndexed) {
+		if (route.alphaProgram) {
 			const alphaTest = drawUnit.materialBehavior?.alphaTest ?? 0;
 			if (previousAlphaTest !== alphaTest) {
-				const alphaProgram = activeIndexedProgram ?? texturedProgram;
-				gl.uniform1f(alphaProgram.uniforms.uAlphaTest, alphaTest);
+				directContext.gl.uniform1f(
+					route.alphaProgram.uniforms.uAlphaTest,
+					alphaTest,
+				);
 				previousAlphaTest = alphaTest;
 				metrics.uniformUploadCount += 1;
 			}
 		}
 		if (drawUnit.indexedMaterial) {
-			if (!activeIndexedProgram) {
+			if (!route.indexedProgram) {
 				throw new Error(
 					`Indexed draw unit ${drawUnit.id} has no indexed program.`,
 				);
 			}
 			uploadIndexedMaterialUniforms(
-				gl,
-				activeIndexedProgram,
+				directContext.gl,
+				route.indexedProgram,
 				drawUnit.indexedMaterial,
 			);
 			metrics.uniformUploadCount += INDEXED_DYNAMIC_UNIFORM_COUNT;
 		}
-		if (useTexture || useIndexed) {
-			const detailProgram = activeIndexedProgram ?? texturedProgram;
-			uploadDetailOverlayUniforms(gl, detailProgram, drawUnit.detailOverlay);
+		if (route.detailProgram) {
+			uploadDetailOverlayUniforms(
+				directContext.gl,
+				route.detailProgram,
+				drawUnit.detailOverlay,
+			);
 			metrics.uniformUploadCount += DETAIL_DYNAMIC_UNIFORM_COUNT;
 		}
-		if (useTexture) {
-			uploadDirectTexturePageUniforms(gl, texturedProgram, texturePageBinding);
+		if (route.usesRgbaTexturePage) {
+			uploadDirectTexturePageUniforms(
+				directContext.gl,
+				texturedProgram,
+				route.texturePageBinding,
+			);
 			metrics.uniformUploadCount += DIRECT_TEXTURE_PAGE_DYNAMIC_UNIFORM_COUNT;
 		}
 		if (drawUnit.terrainBlend) {
 			uploadTerrainBlendUniforms(
-				gl,
+				directContext.gl,
 				terrainBlendProgram,
 				drawUnit.terrainBlend,
 			);
 			metrics.uniformUploadCount += TERRAIN_BLEND_DYNAMIC_UNIFORM_COUNT;
 		}
 
-		gl.drawElements(gl.TRIANGLES, drawUnit.vertexCount, drawUnit.indexType, 0);
+		directContext.gl.drawElements(
+			directContext.gl.TRIANGLES,
+			drawUnit.vertexCount,
+			drawUnit.indexType,
+			0,
+		);
 		metrics.drawCallCount += 1;
 		metrics.triangleCount += drawUnit.triangleCount;
 	}
@@ -574,6 +697,113 @@ export function submitWebgl2FlatWorldDrawUnits({
 		planningFallbackSamples: atlasReplacement.fallbackSamples,
 	});
 	return metrics;
+}
+
+export function planWebgl2DirectDrawRoute({
+	drawUnit,
+	programs,
+}: {
+	drawUnit: Webgl2WorldDrawUnit;
+	programs: Webgl2DirectDrawPrograms;
+}): Webgl2DirectDrawRoute {
+	const submission = mapWebgl2DrawUnitToDirectRenderFamilySubmission(drawUnit);
+	const indexedProgram = resolveIndexedProgram(drawUnit, programs);
+	const usesTerrainBlend = drawUnit.terrainBlend !== null;
+	const usesIndexed = drawUnit.indexedMaterial !== null;
+	const usesRgbaTexturePage = drawUnit.texture !== null && !usesTerrainBlend;
+	const texturePageBinding =
+		usesRgbaTexturePage && drawUnit.texture
+			? resolveDrawUnitBaseTexturePageBinding(drawUnit)
+			: null;
+	const activeBaseTexture =
+		texturePageBinding?.texture.texture ?? drawUnit.texture?.texture ?? null;
+	if (usesTerrainBlend) {
+		return {
+			drawUnit,
+			submission,
+			programKind: "terrain",
+			activeProgram: programs.terrainBlend,
+			indexedProgram: null,
+			colorProgram: null,
+			alphaProgram: null,
+			detailProgram: null,
+			texturePageBinding: null,
+			activeBaseTexture: null,
+			detailTextureUnit: null,
+			usesRgbaTexturePage: false,
+			usesIndexed: false,
+			usesTerrainBlend: true,
+		};
+	}
+	if (indexedProgram) {
+		return {
+			drawUnit,
+			submission,
+			programKind:
+				drawUnit.indexedMaterial?.indexFormat === "p8"
+					? "indexed-p8"
+					: "indexed-p16",
+			activeProgram: indexedProgram,
+			indexedProgram,
+			colorProgram: indexedProgram,
+			alphaProgram: indexedProgram,
+			detailProgram: indexedProgram,
+			texturePageBinding: null,
+			activeBaseTexture: null,
+			detailTextureUnit: DIRECT_FAMILY_DRAW_TEXTURE_UNITS.indexedDetail,
+			usesRgbaTexturePage: false,
+			usesIndexed,
+			usesTerrainBlend: false,
+		};
+	}
+	if (usesRgbaTexturePage) {
+		return {
+			drawUnit,
+			submission,
+			programKind: "texture",
+			activeProgram: programs.rgbaTexturePage,
+			indexedProgram: null,
+			colorProgram: programs.rgbaTexturePage,
+			alphaProgram: programs.rgbaTexturePage,
+			detailProgram: programs.rgbaTexturePage,
+			texturePageBinding,
+			activeBaseTexture,
+			detailTextureUnit: DIRECT_FAMILY_DRAW_TEXTURE_UNITS.rgbaDetail,
+			usesRgbaTexturePage: true,
+			usesIndexed: false,
+			usesTerrainBlend: false,
+		};
+	}
+	return {
+		drawUnit,
+		submission,
+		programKind: "flat",
+		activeProgram: programs.flat,
+		indexedProgram: null,
+		colorProgram: programs.flat,
+		alphaProgram: null,
+		detailProgram: null,
+		texturePageBinding: null,
+		activeBaseTexture: null,
+		detailTextureUnit: null,
+		usesRgbaTexturePage: false,
+		usesIndexed: false,
+		usesTerrainBlend: false,
+	};
+}
+
+function resolveIndexedProgram(
+	drawUnit: Webgl2WorldDrawUnit,
+	programs: Webgl2DirectDrawPrograms,
+): Webgl2IndexedP8WorldProgram | Webgl2IndexedP16WorldProgram | null {
+	switch (drawUnit.indexedMaterial?.indexFormat) {
+		case "p8":
+			return programs.indexedP8;
+		case "index16":
+			return programs.indexedP16;
+		case undefined:
+			return null;
+	}
 }
 
 function submitBakedGeometryDrawUnits({
@@ -653,11 +883,7 @@ function submitBakedGeometryDrawUnits({
 	}
 	const fallbackSamples = [...planningFallbackSamples];
 	metrics.bakedSubmitNoVisibleRouteCount = planningNoVisibleRouteCount;
-	applyBakedGeometryNoVisibleRoute(
-		metrics,
-		route,
-		planningNoVisibleRouteCount,
-	);
+	applyBakedGeometryNoVisibleRoute(metrics, route, planningNoVisibleRouteCount);
 	if (
 		!program &&
 		resources.batches.length > 0 &&
@@ -666,8 +892,7 @@ function submitBakedGeometryDrawUnits({
 	) {
 		fallbackSamples.push("baked submit missing shader program");
 	}
-	const emptyAtlasMetrics =
-		createEmptyWebgl2BakedGeometrySubmitMetrics();
+	const emptyAtlasMetrics = createEmptyWebgl2BakedGeometrySubmitMetrics();
 	metrics.bakedRetainedDirectDrawUnitCount = retainedDrawUnitCount;
 	metrics.bakedReplacedDrawUnitTriangleCount = replaceableDrawUnitTriangleCount;
 	applyBakedGeometryConservativeOverdraw(metrics);

@@ -421,6 +421,11 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		expect(metrics.bakedOriginalDrawCallEstimateCount).toBe(2);
 		expect(metrics.bakedSubmittedDrawCallEstimateCount).toBe(2);
 		expect(metrics.bakedDrawCallSavingsCount).toBe(0);
+		expect(
+			metrics.visibleRetainedDirectDrawUnitCountsByBakeMaterialFamily,
+		).toEqual({
+			"flat-constant-color": 1,
+		});
 		expect(metrics.bakedSubmitFallbackSamples).toEqual([]);
 	});
 
@@ -760,6 +765,14 @@ function createDrawUnit({
 		bakeEligibility: {
 			decision: "direct-draw",
 			material: {
+				family:
+					materialKind === "indexed-paletted"
+						? "indexed-paletted"
+						: materialKind === "terrain-blend"
+							? "terrain-blend"
+							: materialKind === "direct-texture"
+								? "textured-opaque"
+								: "flat-constant-color",
 				compatible: false,
 				blockers: ["missing-base-texture-page"],
 				atlasEligibility: null,

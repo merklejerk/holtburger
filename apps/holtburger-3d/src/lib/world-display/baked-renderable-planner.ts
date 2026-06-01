@@ -11,7 +11,8 @@ export type BakedRenderableBypassReason =
 	| "missing-uv-buffer"
 	| "missing-atlas-eligibility"
 	| "unsupported-alpha-test-material"
-	| "unsupported-blended-material"
+	| "unsupported-transparent-blended-material"
+	| "unsupported-opacity-translucent-material"
 	| "unsupported-constant-color-material"
 	| "unsupported-indexed-paletted-material"
 	| "unsupported-terrain-material"
@@ -34,7 +35,8 @@ export type BakeMaterialFamily =
 	| "flat-constant-color"
 	| "textured-opaque"
 	| "alpha-test"
-	| "blended"
+	| "transparent-blended"
+	| "opacity-translucent"
 	| "indexed-paletted"
 	| "terrain-blend"
 	| "debug-pipeline"
@@ -46,7 +48,8 @@ export type BakeMaterialBlocker =
 	| "missing-baked-constant-color-family"
 	| "missing-baked-indexed-paletted-family"
 	| "missing-baked-alpha-test-family"
-	| "missing-baked-blended-family"
+	| "missing-baked-transparent-blended-family"
+	| "missing-baked-opacity-translucent-family"
 	| "missing-baked-terrain-family"
 	| "debug-pipeline-material"
 	| "missing-detail-atlas-entry"
@@ -441,8 +444,11 @@ export function createBakeEligibility(options: {
 		case "alpha-test":
 			materialBlockers.push("missing-baked-alpha-test-family");
 			break;
-		case "blended":
-			materialBlockers.push("missing-baked-blended-family");
+		case "transparent-blended":
+			materialBlockers.push("missing-baked-transparent-blended-family");
+			break;
+		case "opacity-translucent":
+			materialBlockers.push("missing-baked-opacity-translucent-family");
 			break;
 		case "unknown-unsupported":
 			materialBlockers.push("unsupported-material-state");
@@ -533,11 +539,17 @@ function createMaterialBakeBypass(
 				reason: "unsupported-alpha-test-material",
 				detail: `alpha-test material ${drawUnit.materialKey} has no baked cutout material family`,
 			};
-		case "missing-baked-blended-family":
+		case "missing-baked-transparent-blended-family":
 			return {
 				drawUnitId: drawUnit.id,
-				reason: "unsupported-blended-material",
+				reason: "unsupported-transparent-blended-material",
 				detail: `blended material ${drawUnit.materialKey} has no baked transparent material family`,
+			};
+		case "missing-baked-opacity-translucent-family":
+			return {
+				drawUnitId: drawUnit.id,
+				reason: "unsupported-opacity-translucent-material",
+				detail: `opacity/translucent material ${drawUnit.materialKey} has no baked translucent material family`,
 			};
 		case "missing-baked-terrain-family":
 			return {
@@ -612,11 +624,14 @@ function classifyDirectTextureBakeMaterialFamily(
 	if (behavior === null) {
 		return "unknown-unsupported";
 	}
-	if (behavior.blend.enabled || behavior.transparent || behavior.opacity < 1) {
-		return "blended";
-	}
 	if (behavior.alphaTest > 0) {
 		return "alpha-test";
+	}
+	if (behavior.blend.enabled) {
+		return "transparent-blended";
+	}
+	if (behavior.transparent || behavior.opacity < 1) {
+		return "opacity-translucent";
 	}
 	return "textured-opaque";
 }

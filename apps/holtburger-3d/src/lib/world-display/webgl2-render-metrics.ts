@@ -267,8 +267,7 @@ export function createWebgl2RenderMetrics(
 			compactedGeometryTransformTableEntryCount:
 				input.worldStore?.compactedGeometryTransformTableEntryCount ?? 0,
 			compactedGeometryResourceFallbackSamples: [
-				...(input.worldStore?.compactedGeometryResourceFallbackSamples ??
-					[]),
+				...(input.worldStore?.compactedGeometryResourceFallbackSamples ?? []),
 			],
 			atlasBackedCompactedShaderDrawCallCount:
 				input.submitMetrics.atlasBackedCompactedShaderDrawCallCount,
@@ -277,7 +276,8 @@ export function createWebgl2RenderMetrics(
 			atlasBackedCompactedSubmittedDrawSliceCount:
 				input.submitMetrics.atlasBackedCompactedSubmittedDrawSliceCount,
 			atlasBackedCompactedSubmittedSliceRepresentedDrawUnitCount:
-				input.submitMetrics.atlasBackedCompactedSubmittedSliceRepresentedDrawUnitCount,
+				input.submitMetrics
+					.atlasBackedCompactedSubmittedSliceRepresentedDrawUnitCount,
 			atlasBackedCompactedSubmittedTriangleCount:
 				input.submitMetrics.atlasBackedCompactedSubmittedTriangleCount,
 			atlasBackedCompactedReplacedDrawUnitCount:
@@ -285,7 +285,8 @@ export function createWebgl2RenderMetrics(
 			atlasBackedCompactedReplacedDrawUnitTriangleCount:
 				input.submitMetrics.atlasBackedCompactedReplacedDrawUnitTriangleCount,
 			atlasBackedCompactedConservativeOverdrawTriangleCount:
-				input.submitMetrics.atlasBackedCompactedConservativeOverdrawTriangleCount,
+				input.submitMetrics
+					.atlasBackedCompactedConservativeOverdrawTriangleCount,
 			atlasBackedCompactedConservativeOverdrawRatio:
 				input.submitMetrics.atlasBackedCompactedConservativeOverdrawRatio,
 			atlasBackedCompactedRetainedDrawUnitCount:
@@ -299,13 +300,28 @@ export function createWebgl2RenderMetrics(
 			atlasBackedCompactedSubmitNoVisibleRouteCount:
 				input.submitMetrics.atlasBackedCompactedSubmitNoVisibleRouteCount,
 			atlasBackedCompactedSubmitNoVisibleExteriorRouteCount:
-				input.submitMetrics.atlasBackedCompactedSubmitNoVisibleExteriorRouteCount,
+				input.submitMetrics
+					.atlasBackedCompactedSubmitNoVisibleExteriorRouteCount,
 			atlasBackedCompactedSubmitNoVisibleInteriorRouteCount:
-				input.submitMetrics.atlasBackedCompactedSubmitNoVisibleInteriorRouteCount,
+				input.submitMetrics
+					.atlasBackedCompactedSubmitNoVisibleInteriorRouteCount,
 			atlasBackedCompactedSubmitNoVisibleOtherRouteCount:
 				input.submitMetrics.atlasBackedCompactedSubmitNoVisibleOtherRouteCount,
 			atlasBackedCompactedSubmitFallbackSamples: [
 				...input.submitMetrics.atlasBackedCompactedSubmitFallbackSamples,
+			],
+			directTexturePageDrawCount:
+				input.submitMetrics.directTexturePageDrawCount,
+			directSingleEntryTexturePageDrawCount:
+				input.submitMetrics.directSingleEntryTexturePageDrawCount,
+			directPackedTexturePageDrawCount:
+				input.submitMetrics.directPackedTexturePageDrawCount,
+			directPackedTexturePageEstimatedBindAvoidedCount:
+				input.submitMetrics.directPackedTexturePageEstimatedBindAvoidedCount,
+			directPackedTexturePageTextureCount:
+				input.submitMetrics.directPackedTexturePageTextureCount,
+			directTexturePageFallbackSamples: [
+				...input.submitMetrics.directTexturePageFallbackSamples,
 			],
 			stagedAtlasDrawCount: input.submitMetrics.stagedAtlasDrawCount,
 			stagedAtlasStandaloneDirectDrawCount:
@@ -372,7 +388,8 @@ export function createWebgl2RenderMetrics(
 						"webgl2-atlas-backed-compacted-replaced-draw-units":
 							input.submitMetrics.atlasBackedCompactedReplacedDrawUnitCount,
 						"webgl2-atlas-backed-compacted-replaced-triangles":
-							input.submitMetrics.atlasBackedCompactedReplacedDrawUnitTriangleCount,
+							input.submitMetrics
+								.atlasBackedCompactedReplacedDrawUnitTriangleCount,
 						"webgl2-atlas-backed-compacted-conservative-overdraw-triangles":
 							input.submitMetrics
 								.atlasBackedCompactedConservativeOverdrawTriangleCount,
@@ -382,6 +399,10 @@ export function createWebgl2RenderMetrics(
 							input.submitMetrics.atlasBackedCompactedSubmitNoVisibleRouteCount,
 						"webgl2-staged-atlas-draws":
 							input.submitMetrics.stagedAtlasDrawCount,
+						"webgl2-direct-packed-texture-page-draws":
+							input.submitMetrics.directPackedTexturePageDrawCount,
+						"webgl2-direct-single-entry-texture-page-draws":
+							input.submitMetrics.directSingleEntryTexturePageDrawCount,
 						"webgl2-staged-atlas-standalone-direct-draws":
 							input.submitMetrics.stagedAtlasStandaloneDirectDrawCount,
 						"webgl2-staged-atlas-estimated-texture-binds-avoided":

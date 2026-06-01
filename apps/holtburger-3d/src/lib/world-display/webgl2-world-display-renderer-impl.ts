@@ -163,6 +163,7 @@ uniform sampler2D uTexture;
 uniform int uAtlasEnabled;
 uniform vec4 uAtlasRect;
 uniform vec2 uAtlasSize;
+uniform vec2 uTexturePageWrapMode;
 uniform sampler2D uDetailTexture;
 uniform float uDetailTiling;
 uniform int uDetailEnabled;
@@ -180,10 +181,15 @@ vec3 applyDetailOverlay(vec3 baseColor) {
 	return clamp(baseColor * (detailColor.rgb + (1.0 - sourceAlpha)), 0.0, 1.0);
 }
 
+vec2 resolveTexturePageUv(vec2 uv) {
+	vec2 wrappedUv = mix(clamp(uv, 0.0, 1.0), fract(uv), uTexturePageWrapMode);
+	return (uAtlasRect.xy + wrappedUv * uAtlasRect.zw) / uAtlasSize;
+}
+
 void main() {
 	vec2 baseUv = uAtlasEnabled == 0
 		? vUv
-		: (uAtlasRect.xy + clamp(vUv, 0.0, 1.0) * uAtlasRect.zw) / uAtlasSize;
+		: resolveTexturePageUv(vUv);
 	vec4 texel = texture(uTexture, baseUv);
 	vec4 color = texel * uColor;
 	if (color.a < uAlphaTest) {
@@ -919,7 +925,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 							terrainBlendProgram: currentResources.terrainBlendWorldProgram,
 							indexedP8Program: currentResources.indexedP8WorldProgram,
 							indexedP16Program: currentResources.indexedP16WorldProgram,
-							atlasBackedCompactedProgram: currentResources.atlasBackedCompactedWorldProgram,
+							atlasBackedCompactedProgram:
+								currentResources.atlasBackedCompactedWorldProgram,
 							atlasBackedCompactedResources: {
 								batches: [
 									...currentResources.worldStore.atlasBackedCompactedBatches.values(),
@@ -1193,7 +1200,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		target: Webgl2SceneDomainTarget;
 		drawUnits: readonly Webgl2WorldDrawUnit[];
 		frame: ReturnType<typeof buildStagedWorldFrame>;
-		atlasBackedCompactedSubmitRoute: "scene-domain-exterior" | "scene-domain-interior";
+		atlasBackedCompactedSubmitRoute:
+			| "scene-domain-exterior"
+			| "scene-domain-interior";
 		terrainBackfaceCulling: boolean;
 	}): Webgl2WorldSubmitMetrics {
 		if (!resources) {
@@ -2029,6 +2038,26 @@ function mergeSceneDomainSubmitMetrics({
 			...exteriorMetrics.atlasBackedCompactedSubmitFallbackSamples,
 			...interiorMetrics.atlasBackedCompactedSubmitFallbackSamples,
 		].slice(0, 8),
+		directTexturePageDrawCount:
+			exteriorMetrics.directTexturePageDrawCount +
+			interiorMetrics.directTexturePageDrawCount,
+		directSingleEntryTexturePageDrawCount:
+			exteriorMetrics.directSingleEntryTexturePageDrawCount +
+			interiorMetrics.directSingleEntryTexturePageDrawCount,
+		directPackedTexturePageDrawCount:
+			exteriorMetrics.directPackedTexturePageDrawCount +
+			interiorMetrics.directPackedTexturePageDrawCount,
+		directPackedTexturePageEstimatedBindAvoidedCount:
+			exteriorMetrics.directPackedTexturePageEstimatedBindAvoidedCount +
+			interiorMetrics.directPackedTexturePageEstimatedBindAvoidedCount,
+		directPackedTexturePageTextureCount: Math.max(
+			exteriorMetrics.directPackedTexturePageTextureCount,
+			interiorMetrics.directPackedTexturePageTextureCount,
+		),
+		directTexturePageFallbackSamples: [
+			...exteriorMetrics.directTexturePageFallbackSamples,
+			...interiorMetrics.directTexturePageFallbackSamples,
+		].slice(0, 8),
 		stagedAtlasDrawCount:
 			exteriorMetrics.stagedAtlasDrawCount +
 			interiorMetrics.stagedAtlasDrawCount,
@@ -2120,7 +2149,8 @@ function createTriangleResources(
 		indexedP8WorldProgram: createIndexedP8WorldProgram(gl),
 		indexedP16WorldProgram: createIndexedP16WorldProgram(gl),
 		terrainBlendWorldProgram: createTerrainBlendWorldProgram(gl),
-		atlasBackedCompactedWorldProgram: createAtlasBackedCompactedWorldProgram(gl),
+		atlasBackedCompactedWorldProgram:
+			createAtlasBackedCompactedWorldProgram(gl),
 		sceneDomainCopyProgram: createSceneDomainCopyProgram(gl),
 		vertexBuffer,
 		vertexArray,
@@ -2227,6 +2257,7 @@ function createTexturedWorldProgram(
 			"uAtlasEnabled",
 			"uAtlasRect",
 			"uAtlasSize",
+			"uTexturePageWrapMode",
 			"uDetailTexture",
 			"uDetailTiling",
 			"uDetailEnabled",

@@ -174,6 +174,12 @@ export interface WorldRenderDebugMetrics {
 	atlasBackedCompactedSubmitNoVisibleInteriorRouteCount: number;
 	atlasBackedCompactedSubmitNoVisibleOtherRouteCount: number;
 	atlasBackedCompactedSubmitFallbackSamples: string[];
+	directTexturePageDrawCount: number;
+	directSingleEntryTexturePageDrawCount: number;
+	directPackedTexturePageDrawCount: number;
+	directPackedTexturePageEstimatedBindAvoidedCount: number;
+	directPackedTexturePageTextureCount: number;
+	directTexturePageFallbackSamples: string[];
 	stagedAtlasDrawCount: number;
 	stagedAtlasStandaloneDirectDrawCount: number;
 	stagedAtlasEstimatedTextureBindAvoidedCount: number;

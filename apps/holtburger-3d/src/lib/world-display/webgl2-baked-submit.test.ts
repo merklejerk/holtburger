@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
-	WEBGL2_BAKED_MAX_MATERIAL_SLOTS,
-	planWebgl2BakedGeometryReplacement,
-	submitWebgl2BakedGeometryBatch,
-	type Webgl2BakedGeometryWorldProgram,
+	WEBGL2_RGBA_TEXTURE_PAGE_MAX_MATERIAL_SLOTS,
+	planWebgl2RgbaTexturePageFamilyReplacement,
+	submitWebgl2RgbaTexturePageFamilyBatches,
+	type Webgl2RgbaTexturePageFamilyWorldProgram,
 } from "./webgl2-baked-submit";
 import type {
 	Webgl2CompactedGeometryBatchResource,
@@ -13,9 +13,9 @@ import type {
 import type { Webgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
 import { Webgl2StateCache } from "./webgl2-state-cache";
 
-describe("planWebgl2BakedGeometryReplacement", () => {
+describe("planWebgl2RgbaTexturePageFamilyReplacement", () => {
 	it("keeps staged draws when atlas resources are missing", () => {
-		const plan = planWebgl2BakedGeometryReplacement({
+		const plan = planWebgl2RgbaTexturePageFamilyReplacement({
 			visibleDrawUnitIds: ["draw-a"],
 			resources: {
 				batches: [],
@@ -27,12 +27,12 @@ describe("planWebgl2BakedGeometryReplacement", () => {
 		expect([...plan.replaceableDrawUnitIds]).toEqual([]);
 		expect(plan.noVisibleRouteCount).toBe(0);
 		expect(plan.fallbackSamples).toEqual([
-			"baked submit missing texture atlas generation",
+			"RGBA texture-page family submit missing texture atlas generation",
 		]);
 	});
 
 	it("selects visible baked draw units when resources are ready", () => {
-		const plan = planWebgl2BakedGeometryReplacement({
+		const plan = planWebgl2RgbaTexturePageFamilyReplacement({
 			visibleDrawUnitIds: ["draw-a", "staged-only"],
 			resources: {
 				batches: [createBatch(["draw-a", "draw-b"])],
@@ -47,7 +47,7 @@ describe("planWebgl2BakedGeometryReplacement", () => {
 	});
 
 	it("counts no-visible route checks without reporting a fallback", () => {
-		const plan = planWebgl2BakedGeometryReplacement({
+		const plan = planWebgl2RgbaTexturePageFamilyReplacement({
 			visibleDrawUnitIds: ["staged-only"],
 			resources: {
 				batches: [createBatch(["draw-a"])],
@@ -62,7 +62,7 @@ describe("planWebgl2BakedGeometryReplacement", () => {
 	});
 
 	it("selects visible draw units from landblock-scoped batches", () => {
-		const plan = planWebgl2BakedGeometryReplacement({
+		const plan = planWebgl2RgbaTexturePageFamilyReplacement({
 			visibleDrawUnitIds: ["landblock-a"],
 			resources: {
 				batches: [
@@ -83,7 +83,7 @@ describe("planWebgl2BakedGeometryReplacement", () => {
 	});
 
 	it("falls back when material slots exceed the bounded shader path", () => {
-		const plan = planWebgl2BakedGeometryReplacement({
+		const plan = planWebgl2RgbaTexturePageFamilyReplacement({
 			visibleDrawUnitIds: ["draw-a"],
 			resources: {
 				batches: [createBatch(["draw-a"])],
@@ -91,7 +91,7 @@ describe("planWebgl2BakedGeometryReplacement", () => {
 					{
 						...createFamily(["draw-a"]),
 						materialSlots: Array.from(
-							{ length: WEBGL2_BAKED_MAX_MATERIAL_SLOTS + 1 },
+							{ length: WEBGL2_RGBA_TEXTURE_PAGE_MAX_MATERIAL_SLOTS + 1 },
 							(_, index) => ({
 								key: `material-slot-${index}`,
 								index,
@@ -117,12 +117,12 @@ describe("planWebgl2BakedGeometryReplacement", () => {
 		expect(plan.fallbackSamples[0]).toContain("material slots");
 	});
 
-	it("submits visible baked draw slices with atlas texture and table uniforms", () => {
+	it("submits visible RGBA texture-page family draw slices with atlas texture and table uniforms", () => {
 		const gl = new FakeAtlasSubmitGl();
 		const batch = createBatch(["draw-a"]);
 		const generation = createGeneration();
 
-		const metrics = submitWebgl2BakedGeometryBatch({
+		const metrics = submitWebgl2RgbaTexturePageFamilyBatches({
 			gl: gl.asContext(),
 			stateCache: new Webgl2StateCache(gl),
 			program: createProgram(),
@@ -159,7 +159,7 @@ describe("planWebgl2BakedGeometryReplacement", () => {
 		const gl = new FakeAtlasSubmitGl();
 		const batch = createBatch(["draw-a"], 0x0102ffff);
 
-		const metrics = submitWebgl2BakedGeometryBatch({
+		const metrics = submitWebgl2RgbaTexturePageFamilyBatches({
 			gl: gl.asContext(),
 			stateCache: new Webgl2StateCache(gl),
 			program: createProgram(),
@@ -308,7 +308,7 @@ function createGeneration(
 	};
 }
 
-function createProgram(): Webgl2BakedGeometryWorldProgram {
+function createProgram(): Webgl2RgbaTexturePageFamilyWorldProgram {
 	return {
 		program: {} as WebGLProgram,
 		attributes: {

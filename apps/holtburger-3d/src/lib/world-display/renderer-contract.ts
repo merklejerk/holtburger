@@ -155,19 +155,23 @@ export interface WorldRenderDebugMetrics {
 		string,
 		number
 	>;
-	bakedCoverageVisibleRetainedDirectMaterialFamilyCounts: Record<string, number>;
+	bakedCoverageVisibleRetainedDirectMaterialFamilyCounts: Record<
+		string,
+		number
+	>;
 	textureAtlasGenerationTextureCount: number;
 	detailTextureAtlasGenerationTextureCount: number;
-	bakedGeometryBatchCount: number;
-	bakedGeometryDrawUnitCount: number;
-	bakedGeometryTriangleCount: number;
-	bakedGeometryVertexByteLength: number;
-	bakedGeometryIndexByteLength: number;
-	bakedGeometryTotalByteLength: number;
-	bakedGeometryDrawSliceCount: number;
-	bakedGeometryBatchOriginCount: number;
-	bakedGeometryTransformTableEntryCount: number;
-	bakedResourceFallbackSamples: string[];
+	compactedGeometryFamilyResourceCounts: Record<string, number>;
+	compactedGeometryBatchCount: number;
+	compactedGeometryDrawUnitCount: number;
+	compactedGeometryTriangleCount: number;
+	compactedGeometryVertexByteLength: number;
+	compactedGeometryIndexByteLength: number;
+	compactedGeometryTotalByteLength: number;
+	compactedGeometryDrawSliceCount: number;
+	compactedGeometryBatchOriginCount: number;
+	compactedGeometryTransformTableEntryCount: number;
+	compactedResourceFallbackSamples: string[];
 	bakedShaderDrawCallCount: number;
 	bakedSubmittedBatchCount: number;
 	bakedSubmittedDrawSliceCount: number;

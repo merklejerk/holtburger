@@ -4,11 +4,11 @@ import type { Webgl2ProgramResource } from "./webgl2-gl";
 import type { Webgl2StateCache } from "./webgl2-state-cache";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
 import {
-	createEmptyWebgl2BakedGeometrySubmitMetrics,
-	planWebgl2BakedGeometryReplacement,
-	submitWebgl2BakedGeometryBatch,
-	type Webgl2BakedGeometrySubmitResources,
-	type Webgl2BakedGeometryWorldProgram,
+	createEmptyWebgl2RgbaTexturePageFamilySubmitMetrics,
+	planWebgl2RgbaTexturePageFamilyReplacement,
+	submitWebgl2RgbaTexturePageFamilyBatches,
+	type Webgl2RgbaTexturePageFamilySubmitResources,
+	type Webgl2RgbaTexturePageFamilyWorldProgram,
 } from "./webgl2-baked-submit";
 import {
 	createDirectFamilyUniformCache,
@@ -233,8 +233,8 @@ export function submitWebgl2FlatWorldFrame({
 	terrainBlendProgram: Webgl2TerrainBlendWorldProgram;
 	indexedP8Program: Webgl2IndexedP8WorldProgram;
 	indexedP16Program: Webgl2IndexedP16WorldProgram;
-	bakedGeometryProgram?: Webgl2BakedGeometryWorldProgram;
-	bakedGeometryResources?: Webgl2BakedGeometrySubmitResources;
+	bakedGeometryProgram?: Webgl2RgbaTexturePageFamilyWorldProgram;
+	bakedGeometryResources?: Webgl2RgbaTexturePageFamilySubmitResources;
 	drawUnitsById: ReadonlyMap<string, Webgl2WorldDrawUnit>;
 	frame: StagedWorldFrame;
 }): Webgl2WorldSubmitMetrics {
@@ -291,8 +291,8 @@ export function submitWebgl2FlatWorldDrawUnits({
 	terrainBlendProgram: Webgl2TerrainBlendWorldProgram;
 	indexedP8Program: Webgl2IndexedP8WorldProgram;
 	indexedP16Program: Webgl2IndexedP16WorldProgram;
-	bakedGeometryProgram?: Webgl2BakedGeometryWorldProgram;
-	bakedGeometryResources?: Webgl2BakedGeometrySubmitResources;
+	bakedGeometryProgram?: Webgl2RgbaTexturePageFamilyWorldProgram;
+	bakedGeometryResources?: Webgl2RgbaTexturePageFamilySubmitResources;
 	viewProjectionMatrix: RenderMat4;
 	drawUnits: readonly Webgl2WorldDrawUnit[];
 	portalMaskDrawUnitCount?: number;
@@ -318,7 +318,7 @@ export function submitWebgl2FlatWorldDrawUnits({
 	if (drawUnits.length === 0) {
 		return metrics;
 	}
-	const atlasReplacement = planWebgl2BakedGeometryReplacement({
+	const atlasReplacement = planWebgl2RgbaTexturePageFamilyReplacement({
 		visibleDrawUnitIds: drawUnits.map((drawUnit) => drawUnit.id),
 		resources: bakedGeometryResources,
 	});
@@ -549,9 +549,9 @@ function submitBakedGeometryDrawUnits({
 }: {
 	gl: WebGL2RenderingContext;
 	stateCache: Webgl2StateCache;
-	program: Webgl2BakedGeometryWorldProgram | undefined;
+	program: Webgl2RgbaTexturePageFamilyWorldProgram | undefined;
 	viewProjectionMatrix: RenderMat4;
-	resources: Webgl2BakedGeometrySubmitResources;
+	resources: Webgl2RgbaTexturePageFamilySubmitResources;
 	replaceableDrawUnitIds: ReadonlySet<string>;
 	retainedDrawUnitCount: number;
 	replaceableDrawUnitTriangleCount: number;
@@ -566,7 +566,7 @@ function submitBakedGeometryDrawUnits({
 		resources.generation &&
 		replaceableDrawUnitIds.size > 0
 	) {
-		const atlasMetrics = submitWebgl2BakedGeometryBatch({
+		const atlasMetrics = submitWebgl2RgbaTexturePageFamilyBatches({
 			gl,
 			stateCache,
 			program,
@@ -618,9 +618,12 @@ function submitBakedGeometryDrawUnits({
 		resources.generation &&
 		replaceableDrawUnitIds.size > 0
 	) {
-		fallbackSamples.push("baked submit missing shader program");
+		fallbackSamples.push(
+			"RGBA texture-page family submit missing shader program",
+		);
 	}
-	const emptyAtlasMetrics = createEmptyWebgl2BakedGeometrySubmitMetrics();
+	const emptyAtlasMetrics =
+		createEmptyWebgl2RgbaTexturePageFamilySubmitMetrics();
 	metrics.bakedRetainedDirectDrawUnitCount = retainedDrawUnitCount;
 	metrics.bakedReplacedDrawUnitTriangleCount = replaceableDrawUnitTriangleCount;
 	applyBakedGeometryConservativeOverdraw(metrics);

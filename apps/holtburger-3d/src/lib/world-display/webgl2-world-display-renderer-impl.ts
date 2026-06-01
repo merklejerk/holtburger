@@ -31,8 +31,8 @@ import {
 	type Webgl2WorldSubmitMetrics,
 } from "./webgl2-world-submit";
 import {
-	WEBGL2_BAKED_MAX_MATERIAL_SLOTS,
-	type Webgl2BakedGeometryWorldProgram,
+	WEBGL2_RGBA_TEXTURE_PAGE_MAX_MATERIAL_SLOTS,
+	type Webgl2RgbaTexturePageFamilyWorldProgram,
 } from "./webgl2-baked-submit";
 import {
 	createWebgl2PortalCompositeTargetSet,
@@ -219,7 +219,7 @@ void main() {
 `;
 
 const ATLAS_STATIC_WORLD_FRAGMENT_SHADER = `#version 300 es
-#define MAX_MATERIAL_SLOTS ${WEBGL2_BAKED_MAX_MATERIAL_SLOTS}
+#define MAX_MATERIAL_SLOTS ${WEBGL2_RGBA_TEXTURE_PAGE_MAX_MATERIAL_SLOTS}
 
 precision highp float;
 
@@ -595,7 +595,7 @@ interface Webgl2RenderResources {
 	indexedP8WorldProgram: Webgl2IndexedP8WorldProgram;
 	indexedP16WorldProgram: Webgl2IndexedP16WorldProgram;
 	terrainBlendWorldProgram: Webgl2TerrainBlendWorldProgram;
-	bakedGeometryWorldProgram: Webgl2BakedGeometryWorldProgram;
+	bakedGeometryWorldProgram: Webgl2RgbaTexturePageFamilyWorldProgram;
 	sceneDomainCopyProgram: Webgl2ProgramResource<
 		never,
 		"uColorTexture" | "uDepthTexture"
@@ -2355,7 +2355,7 @@ function createTerrainBlendWorldProgram(
 
 function createBakedGeometryWorldProgram(
 	gl: WebGL2RenderingContext,
-): Webgl2BakedGeometryWorldProgram {
+): Webgl2RgbaTexturePageFamilyWorldProgram {
 	return createWebgl2Program(gl, {
 		label: "webgl2 baked world",
 		vertexSource: ATLAS_STATIC_WORLD_VERTEX_SHADER,

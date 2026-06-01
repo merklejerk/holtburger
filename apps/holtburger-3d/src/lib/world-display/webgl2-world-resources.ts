@@ -78,7 +78,7 @@ import {
 	deriveDirectGeometrySubmissionLayout,
 	type GeometrySubmissionLayout,
 } from "./webgl2-direct-render-family";
-import { buildBakedGeometry } from "./baked-geometry";
+import { buildCompactedGeometryBatch } from "./compacted-geometry";
 import {
 	createWebgl2TextureAtlasGenerationResource,
 	type Webgl2TextureAtlasGenerationResource,
@@ -1390,7 +1390,7 @@ function warnUnsupportedDetailAtlasTexture({
 			: `compressed ${texture.format}`;
 	console.warn(
 		[
-			"[Holtburger 3D] Detail overlay texture is not RGBA8 atlas-compatible; baked geometry will stage it separately.",
+			"[Holtburger 3D] Detail overlay texture is not RGBA8 atlas-compatible; compacted geometry will stage it separately.",
 			`surface=${formatHex32(overlay.renderSurface.renderSurfaceId)}`,
 			`sourceFormat=${overlay.renderSurface.format}(${formatHex32(overlay.renderSurface.formatRaw)})`,
 			`upload=${uploadShape}`,
@@ -2083,7 +2083,7 @@ function syncWebgl2TextureAtlasGeneration({
 		);
 		if (!nextGeneration) {
 			throw new Error(
-				`Baked geometry plan ${plan.key} has compactable draw units but produced no generation.`,
+				`Compacted geometry plan ${plan.key} has compactable draw units but produced no generation.`,
 			);
 		}
 		store.textureAtlasGeneration?.dispose();
@@ -2256,7 +2256,7 @@ function syncWebgl2BakedGeometryBatch({
 	});
 	if (batchPlans.length === 0) {
 		store.bakedResourceFallbackSamples = [
-			`baked batch ${plan.key} produced no baked geometry`,
+			`baked batch ${plan.key} produced no compacted geometry`,
 		];
 		disposeWebgl2BakedGeometryBatch(store);
 		return;
@@ -2267,9 +2267,9 @@ function syncWebgl2BakedGeometryBatch({
 		createDetailTextureAtlasPlacementsByEntryKey(plan);
 	for (const batchPlan of batchPlans) {
 		const geometry = profileBrowserJsScope(
-			"webgl2.resource.buildBakedGeometry",
+			"webgl2.resource.buildCompactedGeometryBatch",
 			() =>
-				buildBakedGeometry({
+				buildCompactedGeometryBatch({
 					plan: batchPlan.plan,
 					drawUnits,
 					batchOrigin: batchPlan.batchOrigin,
@@ -2289,6 +2289,7 @@ function syncWebgl2BakedGeometryBatch({
 						geometry,
 						landblockId: batchPlan.landblockId,
 						materialSlots: batchPlan.plan.materialSlots,
+						materialDrawSlices: batchPlan.plan.drawSlices,
 						placementsByEntryKey,
 						detailPlacementsByEntryKey,
 					}),
@@ -2428,7 +2429,7 @@ function syncWebgl2BakedIndexedGeometryBatch({
 		const geometry = profileBrowserJsScope(
 			"webgl2.resource.buildBakedIndexedGeometry",
 			() =>
-				buildBakedGeometry({
+				buildCompactedGeometryBatch({
 					plan: batchPlan.plan,
 					drawUnits,
 					batchOrigin: batchPlan.batchOrigin,
@@ -2448,6 +2449,7 @@ function syncWebgl2BakedIndexedGeometryBatch({
 						geometry,
 						landblockId: batchPlan.landblockId,
 						materialTableRecords: batchPlan.materialTableRecords,
+						materialDrawSlices: batchPlan.plan.drawSlices,
 					}),
 			);
 			store.bakedIndexedGeometryBatches.set(nextBatch.key, nextBatch);
@@ -2709,12 +2711,12 @@ function createBakedGeometryLandblockBatchPlans({
 		const drawUnit = drawUnitById.get(drawUnitId);
 		if (!drawUnit) {
 			throw new Error(
-				`Baked geometry plan references missing draw unit ${drawUnitId}.`,
+				`Compacted geometry plan references missing draw unit ${drawUnitId}.`,
 			);
 		}
 		if (drawUnit.kind !== "static" && drawUnit.kind !== "structured-interior") {
 			throw new Error(
-				`Baked geometry plan references unsupported draw unit ${drawUnit.id} of kind ${drawUnit.kind}.`,
+				`Compacted geometry plan references unsupported draw unit ${drawUnit.id} of kind ${drawUnit.kind}.`,
 			);
 		}
 		const owningLandblockId = drawUnit.owningLandblockId;
@@ -2728,7 +2730,7 @@ function createBakedGeometryLandblockBatchPlans({
 			const batchOrigin = chunkOffsetByLandblockId.get(landblockId);
 			if (!batchOrigin) {
 				throw new Error(
-					`Baked geometry landblock batch ${formatHex32(landblockId)} has no render chunk origin.`,
+					`Compacted geometry landblock batch ${formatHex32(landblockId)} has no render chunk origin.`,
 				);
 			}
 			return {
@@ -2763,7 +2765,7 @@ function createBakedGeometryLandblockBatchPlan({
 		const drawUnit = drawUnitById.get(drawUnitId);
 		if (!drawUnit) {
 			throw new Error(
-				`Baked geometry landblock batch ${formatHex32(landblockId)} references missing draw unit ${drawUnitId}.`,
+				`Compacted geometry landblock batch ${formatHex32(landblockId)} references missing draw unit ${drawUnitId}.`,
 			);
 		}
 		return drawUnit;
@@ -2783,7 +2785,7 @@ function createBakedGeometryLandblockBatchPlan({
 			const slotKey = sourceMaterialSlotKeyByDrawUnitId.get(drawUnit.id);
 			if (!slotKey) {
 				throw new Error(
-					`Baked geometry landblock batch ${formatHex32(landblockId)} draw unit ${drawUnit.id} has no explicit material slot mapping.`,
+					`Compacted geometry landblock batch ${formatHex32(landblockId)} draw unit ${drawUnit.id} has no explicit material slot mapping.`,
 				);
 			}
 			return slotKey;
@@ -2793,7 +2795,7 @@ function createBakedGeometryLandblockBatchPlan({
 		const sourceSlot = sourceMaterialSlotByKey.get(slotKey);
 		if (!sourceSlot) {
 			throw new Error(
-				`Baked geometry landblock batch ${formatHex32(landblockId)} references missing material slot ${slotKey}.`,
+				`Compacted geometry landblock batch ${formatHex32(landblockId)} references missing material slot ${slotKey}.`,
 			);
 		}
 		return { ...sourceSlot, index };
@@ -2813,7 +2815,7 @@ function createBakedGeometryLandblockBatchPlan({
 				const slot = localMaterialSlotByKey.get(slotKey);
 				if (!slot) {
 					throw new Error(
-						`Baked geometry landblock batch ${formatHex32(landblockId)} could not remap material slot ${slotKey}.`,
+						`Compacted geometry landblock batch ${formatHex32(landblockId)} could not remap material slot ${slotKey}.`,
 					);
 				}
 				return slot.index;
@@ -2925,7 +2927,7 @@ function releaseWebgl2BakedGeometryBatchGraphLease(
 		return;
 	}
 	if (!store.bakedGeometryBatchGraph) {
-		throw new Error("Baked geometry batch graph lease has no bound graph.");
+		throw new Error("Compacted geometry batch graph lease has no bound graph.");
 	}
 	store.bakedGeometryBatchGraph.releaseLease(lease);
 	store.bakedGeometryBatchGraphLeasesByKey.delete(batchNodeKey);

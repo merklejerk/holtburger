@@ -5,13 +5,22 @@ import type {
 	StagedWorldDirectTextureMaterialPlan,
 	StagedWorldIndexedPalettedMaterialPlan,
 } from "./staged-world-materials";
-import type { BakedRenderablePlan } from "./baked-renderable-planner";
-import { buildBakedGeometry } from "./baked-geometry";
+import {
+	buildCompactedGeometryBatch,
+	type CompactedGeometryPlan,
+} from "./compacted-geometry";
 
-describe("baked geometry geometry builder", () => {
-	it("builds batch-local geometry buffers with baked static positions", () => {
+interface TestCompactedGeometryDrawSlice {
+	key: string;
+	renderStateKey: string;
+	materialSlotKeys: readonly string[];
+	drawUnitIds: readonly string[];
+}
+
+describe("compacted geometry builder", () => {
+	it("builds batch-local geometry buffers with compacted static positions", () => {
 		const plan = createPlan();
-		const geometry = buildBakedGeometry({
+		const geometry = buildCompactedGeometryBatch({
 			plan,
 			drawUnits: [
 				createDrawUnit("draw-a", "material-slot-a", 10),
@@ -29,7 +38,8 @@ describe("baked geometry geometry builder", () => {
 		expect(geometry?.uvs).toEqual(
 			Float32Array.from([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
 		);
-		expect(geometry?.materialSlots).toEqual(
+		expect(geometry?.layout).toBe("position-uv-material-slot");
+		expect(geometry?.materialSlotIndices).toEqual(
 			Float32Array.from([0, 0, 0, 1, 1, 1]),
 		);
 		expect(geometry?.indices).toEqual(Uint16Array.from([0, 1, 2, 3, 4, 5]));
@@ -50,11 +60,7 @@ describe("baked geometry geometry builder", () => {
 		expect(geometry?.drawSlices).toEqual([
 			{
 				key: "slice-a",
-				atlasTextureIndex: 0,
-				detailAtlasTextureIndex: null,
 				renderStateKey: "opaque",
-				materialTableSlotStart: 0,
-				materialTableSlotCount: 1,
 				firstIndex: 0,
 				indexCount: 3,
 				drawUnitIds: ["draw-a"],
@@ -62,11 +68,7 @@ describe("baked geometry geometry builder", () => {
 			},
 			{
 				key: "slice-b",
-				atlasTextureIndex: 0,
-				detailAtlasTextureIndex: null,
 				renderStateKey: "opaque",
-				materialTableSlotStart: 1,
-				materialTableSlotCount: 1,
 				firstIndex: 3,
 				indexCount: 3,
 				drawUnitIds: ["draw-b"],
@@ -86,12 +88,12 @@ describe("baked geometry geometry builder", () => {
 			compactableDrawUnitIds: ["draw-a"],
 			drawSlices: [firstSlice],
 		};
-		const first = buildBakedGeometry({
+		const first = buildCompactedGeometryBatch({
 			plan,
 			drawUnits: [createDrawUnit("draw-a", "material-slot-a", 10)],
 			batchOrigin: { x: 10, y: 0, z: 0 },
 		});
-		const second = buildBakedGeometry({
+		const second = buildCompactedGeometryBatch({
 			plan,
 			drawUnits: [createDrawUnit("draw-a", "material-slot-a", 99)],
 			batchOrigin: { x: 99, y: 0, z: 0 },
@@ -102,7 +104,7 @@ describe("baked geometry geometry builder", () => {
 
 	it("changes the resource key when relative static placement changes", () => {
 		const basePlan = createPlan();
-		const first = buildBakedGeometry({
+		const first = buildCompactedGeometryBatch({
 			plan: basePlan,
 			drawUnits: [
 				createDrawUnit("draw-a", "material-slot-a", 10),
@@ -110,7 +112,7 @@ describe("baked geometry geometry builder", () => {
 			],
 			batchOrigin: { x: 10, y: 0, z: 0 },
 		});
-		const second = buildBakedGeometry({
+		const second = buildCompactedGeometryBatch({
 			plan: basePlan,
 			drawUnits: [
 				createDrawUnit("draw-a", "material-slot-a", 10),
@@ -141,7 +143,7 @@ describe("baked geometry geometry builder", () => {
 				},
 			],
 		};
-		const geometry = buildBakedGeometry({
+		const geometry = buildCompactedGeometryBatch({
 			plan,
 			drawUnits: [
 				createDrawUnit("structured-a", "material-slot-a", 100, {
@@ -166,14 +168,14 @@ describe("baked geometry geometry builder", () => {
 		]);
 	});
 
-	it("uses explicit material slot mappings for non-RGBA baked geometry families", () => {
+	it("uses explicit material slot mappings for non-RGBA compacted geometry families", () => {
 		const basePlan = createPlan();
 		const firstSlice = basePlan.drawSlices[0];
 		const firstSlot = basePlan.materialSlots[0];
 		if (!firstSlice || !firstSlot) {
 			throw new Error("Fixture plan is missing its first slice or slot.");
 		}
-		const plan: BakedRenderablePlan = {
+		const plan: CompactedGeometryPlan<TestCompactedGeometryDrawSlice> = {
 			...basePlan,
 			compactableDrawUnitIds: ["indexed-a"],
 			materialSlots: [{ ...firstSlot, key: "indexed-slot", index: 0 }],
@@ -189,7 +191,7 @@ describe("baked geometry geometry builder", () => {
 			],
 		};
 
-		const geometry = buildBakedGeometry({
+		const geometry = buildCompactedGeometryBatch({
 			plan,
 			drawUnits: [
 				createDrawUnit("indexed-a", "ignored-atlas-slot", 10, {
@@ -199,7 +201,7 @@ describe("baked geometry geometry builder", () => {
 			batchOrigin: { x: 10, y: 0, z: 0 },
 		});
 
-		expect(geometry?.materialSlots).toEqual(Float32Array.from([0, 0, 0]));
+		expect(geometry?.materialSlotIndices).toEqual(Float32Array.from([0, 0, 0]));
 		expect(geometry?.drawRanges).toMatchObject([
 			{
 				drawUnitId: "indexed-a",
@@ -209,38 +211,18 @@ describe("baked geometry geometry builder", () => {
 	});
 });
 
-function createPlan(): BakedRenderablePlan {
+function createPlan(): CompactedGeometryPlan<TestCompactedGeometryDrawSlice> {
 	return {
 		key: "plan-a",
 		compactableDrawUnitIds: ["draw-a", "draw-b"],
-		bypasses: [],
-		atlasEntryRecords: [],
-		atlasEntries: [],
-		atlasTextures: [],
-		detailAtlasEntryRecords: [],
-		detailAtlasTextures: [],
 		materialSlots: [
 			{
 				key: "material-slot-a",
-				sourceMaterialSlotKey: "material-slot-a",
 				index: 0,
-				renderStateKey: "opaque",
-				samplingKey: "sampling",
-				samplingPolicy: { wrapS: "clamp", wrapT: "clamp" },
-				atlasEntryKey: "entry-a",
-				detailAtlasEntryKey: null,
-				detailTiling: 1,
 			},
 			{
 				key: "material-slot-b",
-				sourceMaterialSlotKey: "material-slot-b",
 				index: 1,
-				renderStateKey: "opaque",
-				samplingKey: "sampling",
-				samplingPolicy: { wrapS: "clamp", wrapT: "clamp" },
-				atlasEntryKey: "entry-b",
-				detailAtlasEntryKey: null,
-				detailTiling: 1,
 			},
 		],
 		drawUnitMaterialSlots: [
@@ -250,29 +232,18 @@ function createPlan(): BakedRenderablePlan {
 		drawSlices: [
 			{
 				key: "slice-a",
-				atlasTextureIndex: 0,
-				detailAtlasTextureIndex: null,
 				renderStateKey: "opaque",
-				materialTableSlotStart: 0,
-				materialTableSlotCount: 1,
 				materialSlotKeys: ["material-slot-a"],
 				drawUnitIds: ["draw-a"],
 			},
 			{
 				key: "slice-b",
-				atlasTextureIndex: 0,
-				detailAtlasTextureIndex: null,
 				renderStateKey: "opaque",
-				materialTableSlotStart: 1,
-				materialTableSlotCount: 1,
 				materialSlotKeys: ["material-slot-b"],
 				drawUnitIds: ["draw-b"],
 			},
 		],
-		staticObjectKeys: ["object-a", "object-b"],
-		staticPartCount: 2,
 		triangleCount: 2,
-		preparedTextureAssetIds: ["prepared-texture/a", "prepared-texture/b"],
 	};
 }
 

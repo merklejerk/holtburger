@@ -484,7 +484,8 @@ export function syncWebgl2WorldResources({
 			}),
 	);
 	store.bakedCandidateDrawUnitCount =
-		store.bakedRenderablePlan.compactableDrawUnitIds.length;
+		store.bakedRenderablePlan.submitFamilies.rgbaAtlas.compactableDrawUnitIds
+			.length;
 	store.bakedBypassReasonCount =
 		store.bakedRenderablePlan.bypasses.length;
 	store.bakedBypassSamples = summarizeDiagnosticReasons(
@@ -2050,7 +2051,7 @@ function syncWebgl2TextureAtlasGeneration({
 	) {
 		releaseWebgl2TextureAtlasGenerationGraphLease(store);
 	}
-	if (plan.compactableDrawUnitIds.length === 0) {
+	if (plan.submitFamilies.rgbaAtlas.compactableDrawUnitIds.length === 0) {
 		store.textureAtlasGeneration?.dispose();
 		store.textureAtlasGeneration = null;
 		store.textureAtlasGenerationTextureCount = 0;
@@ -2117,7 +2118,7 @@ function refreshWebgl2TextureAtlasGenerationCoverage({
 	if (
 		stringArraysEqual(
 			generation.compactableDrawUnitIds,
-			plan.compactableDrawUnitIds,
+			plan.submitFamilies.rgbaAtlas.compactableDrawUnitIds,
 		) &&
 		stringArraysEqual(
 			generation.preparedTextureAssetIds,
@@ -2128,7 +2129,8 @@ function refreshWebgl2TextureAtlasGenerationCoverage({
 	}
 	return {
 		...generation,
-		compactableDrawUnitIds: plan.compactableDrawUnitIds,
+		compactableDrawUnitIds:
+			plan.submitFamilies.rgbaAtlas.compactableDrawUnitIds,
 		preparedTextureAssetIds: plan.preparedTextureAssetIds,
 	};
 }
@@ -2223,7 +2225,7 @@ function syncWebgl2BakedGeometryBatch({
 		releaseWebgl2BakedGeometryBatchGraphLeases(store);
 	}
 	store.bakedResourceFallbackSamples = [];
-	if (plan.compactableDrawUnitIds.length === 0) {
+	if (plan.submitFamilies.rgbaAtlas.compactableDrawUnitIds.length === 0) {
 		disposeWebgl2BakedGeometryBatch(store);
 		return;
 	}
@@ -2435,7 +2437,7 @@ function createBakedGeometryLandblockBatchPlans({
 		),
 	);
 	const drawUnitIdsByLandblockId = new Map<number, string[]>();
-	for (const drawUnitId of plan.compactableDrawUnitIds) {
+	for (const drawUnitId of plan.submitFamilies.rgbaAtlas.compactableDrawUnitIds) {
 		const drawUnit = drawUnitById.get(drawUnitId);
 		if (!drawUnit) {
 			throw new Error(
@@ -2499,10 +2501,12 @@ function createBakedGeometryLandblockBatchPlan({
 		return drawUnit;
 	});
 	const sourceMaterialSlotByKey = new Map(
-		sourcePlan.materialSlots.map((slot) => [slot.key, slot] as const),
+		sourcePlan.submitFamilies.rgbaAtlas.materialSlots.map(
+			(slot) => [slot.key, slot] as const,
+		),
 	);
 	const sourceMaterialSlotKeyByDrawUnitId = new Map(
-		sourcePlan.drawUnitMaterialSlots.map(
+		sourcePlan.submitFamilies.rgbaAtlas.drawUnitMaterialSlots.map(
 			(record) => [record.drawUnitId, record.materialSlotKey] as const,
 		),
 	);
@@ -2529,7 +2533,7 @@ function createBakedGeometryLandblockBatchPlan({
 	const localMaterialSlotByKey = new Map(
 		localMaterialSlots.map((slot) => [slot.key, slot] as const),
 	);
-	const sourceSlices = sourcePlan.drawSlices
+	const sourceSlices = sourcePlan.submitFamilies.rgbaAtlas.drawSlices
 		.map((slice) => {
 			const localDrawUnitIds = slice.drawUnitIds.filter((drawUnitId) =>
 				drawUnitIdSet.has(drawUnitId),
@@ -2566,9 +2570,25 @@ function createBakedGeometryLandblockBatchPlan({
 	return {
 		...sourcePlan,
 		key: `${sourcePlan.key}|landblock=${formatHex32(landblockId)}`,
+		submitFamilies: {
+			...sourcePlan.submitFamilies,
+			rgbaAtlas: {
+				kind: "rgba-atlas",
+				compactableDrawUnitIds: drawUnitIds,
+				materialSlots: localMaterialSlots,
+				drawUnitMaterialSlots:
+					sourcePlan.submitFamilies.rgbaAtlas.drawUnitMaterialSlots
+						.filter((record) => drawUnitIdSet.has(record.drawUnitId))
+						.map((record) => ({
+							drawUnitId: record.drawUnitId,
+							materialSlotKey: record.materialSlotKey,
+						})),
+				drawSlices: sourceSlices,
+			},
+		},
 		compactableDrawUnitIds: drawUnitIds,
 		materialSlots: localMaterialSlots,
-		drawUnitMaterialSlots: sourcePlan.drawUnitMaterialSlots
+		drawUnitMaterialSlots: sourcePlan.submitFamilies.rgbaAtlas.drawUnitMaterialSlots
 			.filter((record) => drawUnitIdSet.has(record.drawUnitId))
 			.map((record) => ({
 				drawUnitId: record.drawUnitId,

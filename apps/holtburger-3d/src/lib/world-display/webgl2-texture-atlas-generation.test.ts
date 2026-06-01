@@ -72,13 +72,21 @@ describe("webgl2 texture atlas generation", () => {
 
 	it("returns no generation for an empty compaction plan", () => {
 		const gl = new FakeWebgl2();
+		const plan = createPlan();
 
 		expect(
 			createWebgl2TextureAtlasGenerationResource({
 				gl: gl.asContext(),
 				plan: {
-					...createPlan(),
+					...plan,
 					compactableDrawUnitIds: [],
+					submitFamilies: {
+						...plan.submitFamilies,
+						rgbaAtlas: {
+							...plan.submitFamilies.rgbaAtlas,
+							compactableDrawUnitIds: [],
+						},
+					},
 				},
 			}),
 		).toBeNull();
@@ -92,6 +100,22 @@ function createPlan(): BakedRenderablePlan {
 	]);
 	return {
 		key: "baked-renderables/test",
+		submitFamilies: {
+			rgbaAtlas: {
+				kind: "rgba-atlas",
+				compactableDrawUnitIds: ["draw-a"],
+				materialSlots: [],
+				drawUnitMaterialSlots: [],
+				drawSlices: [],
+			},
+			indexedPaletted: {
+				kind: "indexed-paletted",
+				compactableDrawUnitIds: [],
+				materialTableRecords: [],
+				drawUnitMaterialSlots: [],
+				drawSlices: [],
+			},
+		},
 		compactableDrawUnitIds: ["draw-a"],
 		bypasses: [],
 		atlasEntryRecords: [

@@ -4491,6 +4491,68 @@ Validation:
 - `npm exec tsc -- --noEmit`
 - `npm exec vitest -- src/lib/world-display/baked-geometry.test.ts src/lib/world-display/baked-renderable-planner.test.ts src/lib/world-display/webgl2-world-resources.test.ts --run`
 
+### Phase M7D.5b2: Baked Submit Family Plan Split
+
+Status: Complete.
+
+Purpose: introduce an explicit typed submit-family boundary before adding the indexed shader path.
+The prior plan still had one root `compactableDrawUnitIds` list and one RGBA-shaped material table,
+which made it too easy to accidentally mix RGBA atlas slices and indexed/palette slices.
+
+Tasks:
+
+- Add a typed submit-family structure to the baked renderable plan.
+- Put the existing RGBA atlas path in an explicit `rgba-atlas` family.
+- Put indexed/paletted table records in an explicit `indexed-paletted` family without pretending they
+  are RGBA atlas slots.
+- Route resource sync and texture-atlas generation through the `rgba-atlas` family instead of the root
+  compatibility fields.
+- Add tests proving RGBA atlas compactable draw units and indexed table records land in separate
+  submit-family buckets.
+
+Progress:
+
+- Added `BakedRenderableSubmitFamilies` with:
+  - `rgbaAtlas`, carrying compactable draw unit IDs, RGBA material slots, explicit draw-unit slot
+    mappings, and RGBA draw slices;
+  - `indexedPaletted`, carrying indexed material-table records and empty draw-unit/slice lists until
+    the indexed submit path is implemented.
+- `planBakedRenderables()` now populates both submit families while preserving the existing root fields
+  for currently wired RGBA atlas call sites.
+- WebGL2 resource sync now counts baked candidates and builds landblock batches from
+  `submitFamilies.rgbaAtlas`.
+- Texture atlas generation now uses `submitFamilies.rgbaAtlas.compactableDrawUnitIds`, so indexed table
+  records cannot accidentally trigger RGBA atlas generation.
+- Added planner assertions for family separation and updated texture-atlas generation tests to provide
+  the explicit family shape.
+
+Decisions:
+
+- Root `compactableDrawUnitIds`, `materialSlots`, `drawUnitMaterialSlots`, and `drawSlices` remain for
+  the active RGBA atlas path during this migration, but resource sync now treats `rgbaAtlas` as the
+  authoritative group.
+- `indexedPaletted` intentionally carries material-table records without compactable draw unit IDs yet.
+  M7D.5b must add indexed draw-unit acceptance and indexed slices together with the shader/submit
+  variant.
+
+Course Corrections:
+
+- M7D.5b needs this family split before shader work. Without it, the first indexed implementation
+  would either overload RGBA slot fields or depend on root fields whose meaning was still
+  "RGBA-atlas compactable".
+
+Cleanup Targets:
+
+- Remove or rename the root RGBA atlas fields after submit code consumes `submitFamilies` end to end.
+  They are now migration debt, not the preferred API.
+- `buildBakedGeometry()` still accepts the whole baked plan. A later cleanup should narrow it to the
+  submit-family geometry shape it actually needs.
+
+Validation:
+
+- `npm exec tsc -- --noEmit`
+- `npm exec vitest -- src/lib/world-display/baked-renderable-planner.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/baked-geometry.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts --run`
+
 ### Phase M7D.5b: Baked Indexed Submit Variant
 
 Status: Next.

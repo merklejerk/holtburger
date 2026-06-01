@@ -12,7 +12,12 @@ export type Webgl2AtlasBackedCompactedWorldProgram = Webgl2ProgramResource<
 	| "uBatchModel"
 	| "uAtlasTexture"
 	| "uAtlasSize"
+	| "uDetailAtlasTexture"
+	| "uDetailAtlasSize"
 	| "uMaterialRects"
+	| "uDetailMaterialRects"
+	| "uDetailMaterialTilings"
+	| "uDetailMaterialEnabled"
 >;
 
 export interface Webgl2AtlasBackedCompactedSubmitMetrics {
@@ -150,6 +155,7 @@ export function submitWebgl2AtlasBackedCompactedBatch({
 	}
 	metrics.shaderDrawCallCount += 0;
 	gl.uniform1i(program.uniforms.uAtlasTexture, 0);
+	gl.uniform1i(program.uniforms.uDetailAtlasTexture, 1);
 	gl.uniformMatrix4fv(
 		program.uniforms.uViewProjection,
 		false,
@@ -188,7 +194,28 @@ export function submitWebgl2AtlasBackedCompactedBatch({
 			if (stateCache.bindTexture2D(0, texture.texture.texture)) {
 				// Counted as a state change in the aggregate submit path by callers.
 			}
+			const detailTexture = slice.detailAtlasTextureIndex == null
+				? null
+				: (resources.generation.detailTextures ?? []).find(
+						(candidate) =>
+							candidate.textureIndex === slice.detailAtlasTextureIndex,
+					);
+			if (slice.detailAtlasTextureIndex != null && !detailTexture) {
+				metrics.fallbackSamples = [
+					...metrics.fallbackSamples,
+					`atlas-backed compacted draw slice ${slice.key} missing detail atlas texture ${slice.detailAtlasTextureIndex}`,
+				].slice(0, 8);
+				continue;
+			}
+			if (detailTexture && stateCache.bindTexture2D(1, detailTexture.texture.texture)) {
+				// Counted as a state change in the aggregate submit path by callers.
+			}
 			gl.uniform2f(program.uniforms.uAtlasSize, texture.width, texture.height);
+			gl.uniform2f(
+				program.uniforms.uDetailAtlasSize,
+				detailTexture?.width ?? 1,
+				detailTexture?.height ?? 1,
+			);
 			gl.drawElements(
 				gl.TRIANGLES,
 				slice.indexCount,
@@ -211,10 +238,21 @@ function uploadAtlasBackedCompactedMaterialRects(
 	batch: Webgl2AtlasBackedCompactedBatchResource,
 ): void {
 	const rects = new Float32Array(WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS * 4);
+	const detailRects = new Float32Array(
+		WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS * 4,
+	);
+	const detailTilings = new Float32Array(WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS);
+	const detailEnabled = new Int32Array(WEBGL2_ATLAS_BACKED_COMPACTED_MAX_MATERIAL_SLOTS);
 	for (const slot of batch.materialSlots) {
 		rects.set(slot.atlasRect, slot.index * 4);
+		detailRects.set(slot.detailAtlasRect ?? [0, 0, 1, 1], slot.index * 4);
+		detailTilings[slot.index] = slot.detailTiling ?? 1;
+		detailEnabled[slot.index] = slot.detailAtlasTextureIndex == null ? 0 : 1;
 	}
 	gl.uniform4fv(program.uniforms.uMaterialRects, rects);
+	gl.uniform4fv(program.uniforms.uDetailMaterialRects, detailRects);
+	gl.uniform1fv(program.uniforms.uDetailMaterialTilings, detailTilings);
+	gl.uniform1iv(program.uniforms.uDetailMaterialEnabled, detailEnabled);
 }
 
 function indexTypeByteLength(

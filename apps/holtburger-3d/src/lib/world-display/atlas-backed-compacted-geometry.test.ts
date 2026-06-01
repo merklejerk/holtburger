@@ -48,6 +48,7 @@ describe("atlas-backed compacted geometry builder", () => {
 			{
 				key: "slice-a",
 				atlasTextureIndex: 0,
+				detailAtlasTextureIndex: null,
 				renderStateKey: "opaque",
 				firstIndex: 0,
 				indexCount: 3,
@@ -57,6 +58,7 @@ describe("atlas-backed compacted geometry builder", () => {
 			{
 				key: "slice-b",
 				atlasTextureIndex: 0,
+				detailAtlasTextureIndex: null,
 				renderStateKey: "opaque",
 				firstIndex: 3,
 				indexCount: 3,
@@ -163,26 +165,39 @@ function createPlan(): AtlasBackedCompactionPlan {
 		atlasEntryRecords: [],
 		atlasEntries: [],
 		atlasTextures: [],
+		detailAtlasEntryRecords: [],
+		detailAtlasTextures: [],
 		materialSlots: [
 			{
 				key: "material-slot-a",
+				sourceMaterialSlotKey: "material-slot-a",
 				index: 0,
 				renderStateKey: "opaque",
 				samplingKey: "sampling",
 				atlasEntryKey: "entry-a",
+				detailAtlasEntryKey: null,
+				detailTiling: 1,
 			},
 			{
 				key: "material-slot-b",
+				sourceMaterialSlotKey: "material-slot-b",
 				index: 1,
 				renderStateKey: "opaque",
 				samplingKey: "sampling",
 				atlasEntryKey: "entry-b",
+				detailAtlasEntryKey: null,
+				detailTiling: 1,
 			},
+		],
+		drawUnitMaterialSlots: [
+			{ drawUnitId: "draw-a", materialSlotKey: "material-slot-a" },
+			{ drawUnitId: "draw-b", materialSlotKey: "material-slot-b" },
 		],
 		drawSlices: [
 			{
 				key: "slice-a",
 				atlasTextureIndex: 0,
+				detailAtlasTextureIndex: null,
 				renderStateKey: "opaque",
 				materialTableSlotStart: 0,
 				materialTableSlotCount: 1,
@@ -192,6 +207,7 @@ function createPlan(): AtlasBackedCompactionPlan {
 			{
 				key: "slice-b",
 				atlasTextureIndex: 0,
+				detailAtlasTextureIndex: null,
 				renderStateKey: "opaque",
 				materialTableSlotStart: 1,
 				materialTableSlotCount: 1,

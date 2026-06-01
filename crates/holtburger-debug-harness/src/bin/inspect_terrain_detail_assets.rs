@@ -130,6 +130,54 @@ fn print_surface_summary(hba: &HbaReader, surface: &RenderSurface) -> Result<()>
                 / values.len().max(1) as f64;
             println!("    channel {label}: unique={unique} min={min} max={max} avg={avg:.2}");
         }
+
+        let mut exact_gray = 0usize;
+        let mut near_gray_1 = 0usize;
+        let mut near_gray_2 = 0usize;
+        let mut near_gray_4 = 0usize;
+        let mut max_rgb_delta = 0u8;
+        let mut total_rgb_delta = 0usize;
+        let mut alpha_matches_any_rgb = 0usize;
+        let mut alpha_matches_luma = 0usize;
+        let pixel_count = surface.source_data.len() / 4;
+        for pixel in surface.source_data.chunks_exact(4) {
+            let b = pixel[0];
+            let g = pixel[1];
+            let r = pixel[2];
+            let a = pixel[3];
+            let rg = r.abs_diff(g);
+            let rb = r.abs_diff(b);
+            let gb = g.abs_diff(b);
+            let delta = rg.max(rb).max(gb);
+            max_rgb_delta = max_rgb_delta.max(delta);
+            total_rgb_delta += usize::from(delta);
+            if delta == 0 {
+                exact_gray += 1;
+            }
+            if delta <= 1 {
+                near_gray_1 += 1;
+            }
+            if delta <= 2 {
+                near_gray_2 += 1;
+            }
+            if delta <= 4 {
+                near_gray_4 += 1;
+            }
+            if a == r || a == g || a == b {
+                alpha_matches_any_rgb += 1;
+            }
+            let luma = ((u16::from(r) + u16::from(g) + u16::from(b)) / 3) as u8;
+            if a.abs_diff(luma) <= 1 {
+                alpha_matches_luma += 1;
+            }
+        }
+        let avg_rgb_delta = total_rgb_delta as f64 / pixel_count.max(1) as f64;
+        println!(
+            "    rgb relation: exactGray={exact_gray}/{pixel_count} nearGray<=1={near_gray_1}/{pixel_count} nearGray<=2={near_gray_2}/{pixel_count} nearGray<=4={near_gray_4}/{pixel_count} maxDelta={max_rgb_delta} avgMaxDelta={avg_rgb_delta:.2}"
+        );
+        println!(
+            "    alpha relation: matchesAnyRgb={alpha_matches_any_rgb}/{pixel_count} matchesAverageRgb<=1={alpha_matches_luma}/{pixel_count}"
+        );
     }
 
     if let Some(palette_id) = surface.default_palette_id {

@@ -43,7 +43,7 @@ export const DEFAULT_MATERIAL_TEXTURE_PREPARATION_POLICY: MaterialTexturePrepara
 
 export const NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY: MaterialTexturePreparationPolicy =
 	({ renderSurface, usage }) => {
-		if (isSingleChannelTextureUsage(usage)) {
+		if (isMaskTextureUsage(usage)) {
 			if (!isSingleChannelRenderSurfaceFormat(renderSurface.formatRaw)) {
 				return [];
 			}
@@ -96,11 +96,11 @@ export function resolveDefaultPreparedTextureAssetIds(input: {
 }
 
 function isBaseColorTextureUsage(usage: MaterialTextureUsage): boolean {
-	return usage === "raw" || usage === "color";
+	return usage === "raw" || usage === "color" || usage === "detail";
 }
 
-function isSingleChannelTextureUsage(usage: MaterialTextureUsage): boolean {
-	return usage === "detail" || usage === "mask";
+function isMaskTextureUsage(usage: MaterialTextureUsage): boolean {
+	return usage === "mask";
 }
 
 function isNonIndexedColorRenderSurfaceFormat(formatRaw: number): boolean {

@@ -36,8 +36,8 @@ describe("atlas-backed compaction planner", () => {
 			plan.atlasTextures[0]?.placements.map((entry) => entry.atlasEntryKey),
 		).toEqual(["entry-a", "entry-b"]);
 		expect(plan.materialSlots.map((slot) => slot.key)).toEqual([
-			"slot-entry-a",
-			"slot-entry-b",
+			"slot-entry-a|detail=none",
+			"slot-entry-b|detail=none",
 		]);
 		expect(plan.drawSlices).toMatchObject([
 			{
@@ -81,9 +81,78 @@ describe("atlas-backed compaction planner", () => {
 			"non-static",
 			"missing-landblock-origin",
 			"non-direct-texture",
-			"detail-overlay",
+			"missing-detail-atlas-entry",
 			"non-opaque-material",
 			"missing-atlas-eligibility",
+		]);
+	});
+
+	it("keeps detail-overlay draw units compactable when an RGBA8 detail atlas entry is available", () => {
+		const plan = planAtlasBackedCompaction({
+			drawUnits: [
+				createCandidate({
+					id: "plain",
+					entryKey: "base-a",
+				}),
+				createCandidate({
+					id: "detailed",
+					entryKey: "base-b",
+					hasDetailOverlay: true,
+					detailAtlasEntry: createDetailAtlasEntry("detail-b"),
+				}),
+			],
+			policy: {
+				maxAtlasTextureSize: 64,
+				maxAtlasTextureCount: 1,
+				baseGutterPixels: 2,
+				maxMaterialSlotsPerDraw: 4,
+			},
+		});
+
+		expect(plan.compactableDrawUnitIds).toEqual(["plain", "detailed"]);
+		expect(plan.bypasses).toEqual([]);
+		expect(plan.detailAtlasEntryRecords.map((entry) => entry.key)).toEqual([
+			"detail-b",
+		]);
+		expect(plan.materialSlots).toMatchObject([
+			{ key: "slot-base-a|detail=none", detailAtlasEntryKey: null },
+			{ key: "slot-base-b|detail=detail-b", detailAtlasEntryKey: "detail-b" },
+		]);
+		expect(plan.drawSlices.map((slice) => slice.detailAtlasTextureIndex)).toEqual([
+			null,
+			0,
+		]);
+	});
+
+	it("splits compaction material slots when the same base material has different detail state", () => {
+		const plan = planAtlasBackedCompaction({
+			drawUnits: [
+				createCandidate({ id: "plain", entryKey: "shared" }),
+				createCandidate({
+					id: "detailed",
+					entryKey: "shared",
+					hasDetailOverlay: true,
+					detailAtlasEntry: createDetailAtlasEntry("detail-shared"),
+				}),
+			],
+			policy: {
+				maxAtlasTextureSize: 64,
+				maxAtlasTextureCount: 1,
+				baseGutterPixels: 2,
+				maxMaterialSlotsPerDraw: 4,
+			},
+		});
+
+		expect(plan.materialSlots.map((slot) => slot.key)).toEqual([
+			"slot-shared|detail=detail-shared",
+			"slot-shared|detail=none",
+		]);
+		expect(plan.drawUnitMaterialSlots).toEqual([
+			{ drawUnitId: "plain", materialSlotKey: "slot-shared|detail=none" },
+			{
+				drawUnitId: "detailed",
+				materialSlotKey: "slot-shared|detail=detail-shared",
+			},
 		]);
 	});
 
@@ -163,6 +232,7 @@ function createCandidate(
 		materialBehavior: options.materialBehavior ?? OPAQUE_BEHAVIOR,
 		hasUvBuffer: options.hasUvBuffer ?? true,
 		hasDetailOverlay: options.hasDetailOverlay ?? false,
+		detailAtlasEntry: options.detailAtlasEntry ?? null,
 		atlasEligibility:
 			options.atlasEligibility === undefined
 				? createAtlasEligibility({
@@ -174,6 +244,20 @@ function createCandidate(
 		triangleCount: options.triangleCount ?? 2,
 		staticPartCount: options.staticPartCount ?? 1,
 		staticObjectKeys: options.staticObjectKeys ?? [`object-${entryKey}`],
+	};
+}
+
+function createDetailAtlasEntry(key: string) {
+	return {
+		key,
+		renderSurfaceId: 0x06000002,
+		sourceFormatRaw: 0x1c,
+		width: 4,
+		height: 4,
+		bytes: new Uint8Array(4 * 4 * 4),
+		format: "rgba8" as const,
+		tiling: 12,
+		blendMode: "dst-color" as const,
 	};
 }
 

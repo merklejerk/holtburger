@@ -13,6 +13,7 @@ describe("webgl2 texture atlas generation", () => {
 
 		expect(generation?.key).toBe("atlas-backed-compaction/test");
 		expect(generation?.textures).toHaveLength(1);
+		expect(generation?.detailTextures).toHaveLength(1);
 		expect(generation?.placements).toEqual([
 			{
 				atlasEntryKey: "entry-a",
@@ -22,7 +23,16 @@ describe("webgl2 texture atlas generation", () => {
 				height: 4,
 			},
 		]);
-		expect(gl.textureUploads).toHaveLength(1);
+		expect(generation?.detailPlacements).toEqual([
+			{
+				atlasEntryKey: "detail-a",
+				textureIndex: 0,
+				rect: [1, 1, 2, 2],
+				width: 4,
+				height: 4,
+			},
+		]);
+		expect(gl.textureUploads).toHaveLength(2);
 		expect(gl.textureUploads[0]).toMatchObject({
 			width: 4,
 			height: 4,
@@ -30,13 +40,21 @@ describe("webgl2 texture atlas generation", () => {
 			format: gl.RGBA,
 			type: gl.UNSIGNED_BYTE,
 		});
-		expect(gl.generatedMipmapCount).toBe(1);
-		expect(gl.textureParameters).toEqual([
+		expect(gl.textureUploads[1]).toMatchObject({
+			width: 4,
+			height: 4,
+			internalFormat: gl.RGBA8,
+			format: gl.RGBA,
+			type: gl.UNSIGNED_BYTE,
+		});
+		expect(gl.generatedMipmapCount).toBe(2);
+		expect(gl.textureParameters.slice(0, 4)).toEqual([
 			{ pname: gl.TEXTURE_WRAP_S, param: gl.CLAMP_TO_EDGE },
 			{ pname: gl.TEXTURE_WRAP_T, param: gl.CLAMP_TO_EDGE },
 			{ pname: gl.TEXTURE_MIN_FILTER, param: gl.LINEAR_MIPMAP_LINEAR },
 			{ pname: gl.TEXTURE_MAG_FILTER, param: gl.LINEAR },
 		]);
+		expect(gl.textureParameters.slice(4)).toEqual(gl.textureParameters.slice(0, 4));
 		const pixels = gl.textureUploads[0]?.data;
 		expect(pixels).toBeInstanceOf(Uint8Array);
 		expect([
@@ -49,7 +67,7 @@ describe("webgl2 texture atlas generation", () => {
 		]);
 
 		generation?.dispose();
-		expect(gl.deletedTextures).toHaveLength(1);
+		expect(gl.deletedTextures).toHaveLength(2);
 	});
 
 	it("returns no generation for an empty compaction plan", () => {
@@ -115,7 +133,41 @@ function createPlan(): AtlasBackedCompactionPlan {
 				],
 			},
 		],
+		detailAtlasEntryRecords: [
+			{
+				key: "detail-a",
+				renderSurfaceId: 0x0600_0002,
+				sourceFormatRaw: 0x15,
+				width: 2,
+				height: 2,
+				bytes: Uint8Array.from([
+					11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
+				]),
+				format: "rgba8",
+				tiling: 12,
+				blendMode: "dst-color",
+			},
+		],
+		detailAtlasTextures: [
+			{
+				textureIndex: 0,
+				width: 4,
+				height: 4,
+				placements: [
+					{
+						atlasEntryKey: "detail-a",
+						textureIndex: 0,
+						x: 1,
+						y: 1,
+						width: 2,
+						height: 2,
+						gutterPixels: 1,
+					},
+				],
+			},
+		],
 		materialSlots: [],
+		drawUnitMaterialSlots: [],
 		drawSlices: [],
 		staticObjectKeys: ["object-a"],
 		staticPartCount: 1,
@@ -132,6 +184,8 @@ class FakeWebgl2 {
 	readonly CLAMP_TO_EDGE = 5;
 	readonly LINEAR = 6;
 	readonly LINEAR_MIPMAP_LINEAR = 7;
+	readonly RED = 12;
+	readonly R8 = 13;
 	readonly TEXTURE_WRAP_S = 8;
 	readonly TEXTURE_WRAP_T = 9;
 	readonly TEXTURE_MIN_FILTER = 10;

@@ -737,13 +737,19 @@ function collectVisiblePreparedTextureAssetIds(options: {
 			if (asset?.payload.kind !== "render-surface") {
 				return [];
 			}
-			return (
+			const policy =
 				options.options.materialTexturePreparationPolicy ??
-				DEFAULT_MATERIAL_TEXTURE_PREPARATION_POLICY
-			)({
-				renderSurface: asset.payload,
-				usage: "raw",
-			});
+				DEFAULT_MATERIAL_TEXTURE_PREPARATION_POLICY;
+			return [
+				...policy({
+					renderSurface: asset.payload,
+					usage: "raw",
+				}),
+				...policy({
+					renderSurface: asset.payload,
+					usage: "detail",
+				}),
+			];
 		}),
 	);
 }

@@ -145,6 +145,7 @@ export interface WorldRenderDebugMetrics {
 	atlasBackedCompactionBypassReasonCount: number;
 	atlasBackedCompactionBypassSamples: string[];
 	textureAtlasGenerationTextureCount: number;
+	detailTextureAtlasGenerationTextureCount: number;
 	compactedGeometryBatchCount: number;
 	compactedGeometryDrawUnitCount: number;
 	compactedGeometryTriangleCount: number;

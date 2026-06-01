@@ -1,4 +1,5 @@
 import type { AssetChannelState } from "../assets/types";
+import { resolveNormalizedPreparedTextureAssetIds } from "../assets/material-texture-preparation-policy";
 import { formatHex32 } from "../landblocks";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
 import {
@@ -416,6 +417,12 @@ function collectStrategyPreparedAssetIds(
 		assetIds.add(
 			`render-surface/${formatHex32(detailOverlay.renderSurface.renderSurfaceId)}`,
 		);
+		for (const assetId of resolveNormalizedPreparedTextureAssetIds({
+			renderSurface: detailOverlay.renderSurface,
+			usage: "detail",
+		})) {
+			assetIds.add(assetId);
+		}
 	}
 	return [...assetIds].sort();
 }

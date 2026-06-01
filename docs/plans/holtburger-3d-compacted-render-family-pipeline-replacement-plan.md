@@ -1441,7 +1441,7 @@ Verification:
 
 ## Phase C8.5: Fold Detail Overlays Into the Indexed Family
 
-Status: Immediate next phase.
+Status: Complete.
 
 Purpose: remove the temporary no-detail restriction from C8 by making detail overlays part of the
 same `indexed-paletted` render family. This should mirror the RGBA family design: one family shader
@@ -1488,6 +1488,112 @@ Exit criteria:
 - Any indexed visual discrepancy is either fixed or captured as a targeted next phase.
 - The next phase has a concrete target: alpha RGBA, indexed alpha policy, metric consolidation, or
   cleanup.
+
+Progress:
+
+- Extended indexed family material records with detail atlas entry keys and tiling.
+- Extended WebGL indexed family resources with resolved detail atlas texture indices and detail atlas
+  rects.
+- Reused the existing detail atlas generation path for indexed materials. Texture atlas generation now
+  stays alive when the only required atlas pages are detail pages.
+- Bound detail atlas textures in `webgl2-indexed-paletted-family-submit.ts` on texture unit 2.
+- Uploaded per-slot indexed detail tables:
+  - detail rect;
+  - detail tiling;
+  - detail enabled flag.
+- Applied detail overlays in both compacted indexed P8 and Index16 shaders using the same
+  destination-color style blend as direct/RGBA detail overlays.
+- Removed the indexed `detail-overlay` blocker by no longer adding it for opaque indexed materials.
+- Expanded detail atlas planning so detail entries/pages are retained for both RGBA and indexed
+  compacted families, not only RGBA candidates.
+- Added tests proving:
+  - indexed detail-overlay draw units remain compactable;
+  - indexed detail atlas records survive the compaction plan return shape;
+  - compacted indexed submit binds the detail atlas texture and uploads detail atlas size;
+  - empty atlas generation still returns `null` when no base or detail pages are needed.
+
+Decisions:
+
+- Keep detail/no-detail as per-slot state inside the `indexed-paletted` family, matching the RGBA
+  family. No indexed detail sub-family was introduced.
+- Keep indexed alpha/cutout/blend direct for now. Detail support is orthogonal to alpha policy and
+  should not broaden coverage accidentally.
+- Keep one detail atlas generation shared by RGBA and indexed families. A separate indexed-detail
+  atlas bucket is unnecessary unless a future format incompatibility is proven.
+- Fail hard if a compacted indexed slice references a missing detail atlas texture. Silent direct
+  fallback would hide an internal planning/resource mismatch.
+
+Course corrections:
+
+- The detail atlas planner previously derived detail entries only from RGBA candidates after RGBA
+  atlas placement. C8.5 changed that to derive detail entries from all compactable family candidates
+  with detail overlays.
+- The compaction plan return shape previously filtered `detailAtlasEntryRecords` and
+  `detailAtlasTextures` through RGBA compactables only. It now uses a family-wide detail-entry set.
+- Indexed draw slices are keyed by material record as well as index page/palette page. This makes
+  per-slot detail page binding explicit and prevents a slice from spanning multiple detail atlas
+  textures.
+- The first C8.5 shader used separate 128-entry uniform arrays for texture size, palette count, clip
+  threshold, wrap state, detail tiling, and detail enable flags. Chrome rejected the indexed family
+  shader because the fragment uniform vector count exceeded `MAX_FRAGMENT_UNIFORM_VECTORS`.
+  C8.5 corrected this by packing indexed material state into four `vec4[MAX_MATERIAL_SLOTS]` tables:
+  material color, base material params, detail rect, and detail params.
+
+Refinements for future steps:
+
+- Live diagnostics are still needed to confirm the expected retained/replaced count movement in the
+  browser scene.
+- Metric consolidation should happen before adding alpha material families if the next phase would
+  otherwise add another family-specific metrics block.
+- Alpha RGBA and indexed alpha should remain separate explicit phases because they change render
+  state, ordering, and discard/blend behavior.
+- Do not add more large fragment uniform arrays for material families. If another family needs more
+  per-slot state, pack fields into existing vec4 tables or move to a texture-backed material table.
+
+Discovered cleanup targets:
+
+- `detail-overlay` remains a valid texture-page source/debug string elsewhere. It should no longer
+  appear as an indexed opaque compaction blocker, but the generic blocker enum still exists for other
+  unsupported/detail-resource conditions.
+- `CompactionFamilyPlan` still has root RGBA atlas fields. C8.5 made detail pages family-wide, which
+  makes the old root/RGBA split more awkward. Cleanup should move atlas records under explicit family
+  resource plans.
+- `submitWebgl2FlatWorldDrawUnits()` still centrally orchestrates RGBA and indexed replacement. A
+  family submit registry would reduce the next alpha-family change.
+
+Verification:
+
+- `npm exec tsc -- --noEmit`
+- `npm exec vitest -- src/lib/world-display/compaction-family-planner.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-rgba-texture-page-family-submit.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts src/lib/world-display/compacted-geometry.test.ts --run`
+
+## Phase C8.6: Live Indexed Family Validation
+
+Status: Immediate next phase.
+
+Purpose: validate the completed indexed family path against the browser debug report before expanding
+alpha material coverage.
+
+Tasks:
+
+- Capture the live debug report for the target scene and confirm:
+  - `missing-compacted-indexed-paletted-family` is gone for table-ready opaque indexed materials;
+  - indexed `detail-overlay` no longer appears as an opaque indexed material blocker;
+  - `indexedPalettedFamilyShaderDrawCallCount` and
+    `indexedPalettedFamilyReplacedDrawUnitCount` are non-zero;
+  - visible retained indexed counts drop relative to the pre-C8 report;
+  - `Fallbacks 0` remains true.
+- If indexed visual output is wrong, isolate it to:
+  - P8/Index16 unpacking;
+  - palette lookup;
+  - wrap behavior;
+  - clip threshold;
+  - material color;
+  - detail atlas rect/tiling/binding.
+
+Exit criteria:
+
+- Live diagnostics confirm indexed compacted rendering is replacing opaque indexed draw units.
+- Any visual or diagnostic discrepancy is captured as a targeted follow-up.
 
 ## Cleanup Targets
 

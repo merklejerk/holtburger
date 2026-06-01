@@ -460,11 +460,12 @@ precision highp float;
 
 uniform sampler2D uIndexTexture;
 uniform sampler2D uPaletteTexture;
+uniform sampler2D uDetailAtlasTexture;
+uniform vec2 uDetailAtlasSize;
 uniform vec4 uMaterialColors[MAX_MATERIAL_SLOTS];
-uniform vec2 uTextureSizes[MAX_MATERIAL_SLOTS];
-uniform float uPaletteColorCounts[MAX_MATERIAL_SLOTS];
-uniform int uClipThresholds[MAX_MATERIAL_SLOTS];
-uniform ivec2 uWrapModes[MAX_MATERIAL_SLOTS];
+uniform vec4 uMaterialParams[MAX_MATERIAL_SLOTS];
+uniform vec4 uDetailMaterialRects[MAX_MATERIAL_SLOTS];
+uniform vec4 uDetailMaterialParams[MAX_MATERIAL_SLOTS];
 
 in vec2 vUv;
 flat in int vMaterialSlot;
@@ -472,34 +473,59 @@ flat in int vMaterialSlot;
 out vec4 fragColor;
 
 vec2 resolveIndexedUv(vec2 uv, int materialSlot) {
-	ivec2 wrapMode = uWrapModes[materialSlot];
+	vec4 detailParams = uDetailMaterialParams[materialSlot];
 	vec2 wrapped = vec2(
-		wrapMode.x == 1 ? fract(uv.x) : clamp(uv.x, 0.0, 0.999999),
-		wrapMode.y == 1 ? fract(uv.y) : clamp(uv.y, 0.0, 0.999999)
+		detailParams.x >= 0.5 ? fract(uv.x) : clamp(uv.x, 0.0, 0.999999),
+		detailParams.y >= 0.5 ? fract(uv.y) : clamp(uv.y, 0.0, 0.999999)
 	);
-	return wrapped * uTextureSizes[materialSlot];
+	return wrapped * uMaterialParams[materialSlot].xy;
 }
 
 ivec2 resolveIndexedSampleCoord(ivec2 baseCoord, ivec2 offset, int materialSlot) {
-	ivec2 size = ivec2(uTextureSizes[materialSlot]);
-	ivec2 wrapMode = uWrapModes[materialSlot];
+	ivec2 size = ivec2(uMaterialParams[materialSlot].xy);
+	vec4 detailParams = uDetailMaterialParams[materialSlot];
 	ivec2 coord = baseCoord + offset;
-	coord.x = wrapMode.x == 1 ? coord.x % size.x : clamp(coord.x, 0, size.x - 1);
-	coord.y = wrapMode.y == 1 ? coord.y % size.y : clamp(coord.y, 0, size.y - 1);
+	coord.x = detailParams.x >= 0.5 ? coord.x % size.x : clamp(coord.x, 0, size.x - 1);
+	coord.y = detailParams.y >= 0.5 ? coord.y % size.y : clamp(coord.y, 0, size.y - 1);
 	return coord;
 }
 
 vec4 paletteColor(float index, int materialSlot) {
-	if (uClipThresholds[materialSlot] >= 0 && index < float(uClipThresholds[materialSlot])) {
+	vec4 materialParams = uMaterialParams[materialSlot];
+	if (materialParams.w >= 0.0 && index < materialParams.w) {
 		return vec4(0.0);
 	}
-	float paletteU = (index + 0.5) / uPaletteColorCounts[materialSlot];
+	float paletteU = (index + 0.5) / materialParams.z;
 	return texture(uPaletteTexture, vec2(paletteU, 0.5));
 }
 
 float paletteIndexAt(ivec2 coord) {
 	vec4 packed = texelFetch(uIndexTexture, coord, 0) * 255.0;
 	return floor(packed.r + 0.5);
+}
+
+vec4 sampleDetailAtlasRect(vec4 rect, vec2 localUv, vec2 gradX, vec2 gradY) {
+	vec2 atlasUv = (rect.xy + localUv * rect.zw) / uDetailAtlasSize;
+	vec2 atlasGradX = gradX * rect.zw / uDetailAtlasSize;
+	vec2 atlasGradY = gradY * rect.zw / uDetailAtlasSize;
+	return textureGrad(uDetailAtlasTexture, atlasUv, atlasGradX, atlasGradY);
+}
+
+vec3 applyDetailOverlay(vec3 baseColor, int materialSlot) {
+	vec4 detailParams = uDetailMaterialParams[materialSlot];
+	if (detailParams.w < 0.5) {
+		return baseColor;
+	}
+	float tiling = detailParams.z;
+	vec2 tiledUv = vUv * tiling;
+	vec4 detailColor = sampleDetailAtlasRect(
+		uDetailMaterialRects[materialSlot],
+		fract(tiledUv),
+		dFdx(tiledUv),
+		dFdy(tiledUv)
+	);
+	float sourceAlpha = clamp(detailColor.a, 0.0, 1.0);
+	return clamp(baseColor * (detailColor.rgb + (1.0 - sourceAlpha)), 0.0, 1.0);
 }
 
 void main() {
@@ -520,6 +546,7 @@ void main() {
 	if (color.a <= 0.0) {
 		discard;
 	}
+	color.rgb = applyDetailOverlay(color.rgb, vMaterialSlot);
 	fragColor = color;
 }
 `;
@@ -531,11 +558,12 @@ precision highp float;
 
 uniform sampler2D uIndexTexture;
 uniform sampler2D uPaletteTexture;
+uniform sampler2D uDetailAtlasTexture;
+uniform vec2 uDetailAtlasSize;
 uniform vec4 uMaterialColors[MAX_MATERIAL_SLOTS];
-uniform vec2 uTextureSizes[MAX_MATERIAL_SLOTS];
-uniform float uPaletteColorCounts[MAX_MATERIAL_SLOTS];
-uniform int uClipThresholds[MAX_MATERIAL_SLOTS];
-uniform ivec2 uWrapModes[MAX_MATERIAL_SLOTS];
+uniform vec4 uMaterialParams[MAX_MATERIAL_SLOTS];
+uniform vec4 uDetailMaterialRects[MAX_MATERIAL_SLOTS];
+uniform vec4 uDetailMaterialParams[MAX_MATERIAL_SLOTS];
 
 in vec2 vUv;
 flat in int vMaterialSlot;
@@ -543,34 +571,59 @@ flat in int vMaterialSlot;
 out vec4 fragColor;
 
 vec2 resolveIndexedUv(vec2 uv, int materialSlot) {
-	ivec2 wrapMode = uWrapModes[materialSlot];
+	vec4 detailParams = uDetailMaterialParams[materialSlot];
 	vec2 wrapped = vec2(
-		wrapMode.x == 1 ? fract(uv.x) : clamp(uv.x, 0.0, 0.999999),
-		wrapMode.y == 1 ? fract(uv.y) : clamp(uv.y, 0.0, 0.999999)
+		detailParams.x >= 0.5 ? fract(uv.x) : clamp(uv.x, 0.0, 0.999999),
+		detailParams.y >= 0.5 ? fract(uv.y) : clamp(uv.y, 0.0, 0.999999)
 	);
-	return wrapped * uTextureSizes[materialSlot];
+	return wrapped * uMaterialParams[materialSlot].xy;
 }
 
 ivec2 resolveIndexedSampleCoord(ivec2 baseCoord, ivec2 offset, int materialSlot) {
-	ivec2 size = ivec2(uTextureSizes[materialSlot]);
-	ivec2 wrapMode = uWrapModes[materialSlot];
+	ivec2 size = ivec2(uMaterialParams[materialSlot].xy);
+	vec4 detailParams = uDetailMaterialParams[materialSlot];
 	ivec2 coord = baseCoord + offset;
-	coord.x = wrapMode.x == 1 ? coord.x % size.x : clamp(coord.x, 0, size.x - 1);
-	coord.y = wrapMode.y == 1 ? coord.y % size.y : clamp(coord.y, 0, size.y - 1);
+	coord.x = detailParams.x >= 0.5 ? coord.x % size.x : clamp(coord.x, 0, size.x - 1);
+	coord.y = detailParams.y >= 0.5 ? coord.y % size.y : clamp(coord.y, 0, size.y - 1);
 	return coord;
 }
 
 vec4 paletteColor(float index, int materialSlot) {
-	if (uClipThresholds[materialSlot] >= 0 && index < float(uClipThresholds[materialSlot])) {
+	vec4 materialParams = uMaterialParams[materialSlot];
+	if (materialParams.w >= 0.0 && index < materialParams.w) {
 		return vec4(0.0);
 	}
-	float paletteU = (index + 0.5) / uPaletteColorCounts[materialSlot];
+	float paletteU = (index + 0.5) / materialParams.z;
 	return texture(uPaletteTexture, vec2(paletteU, 0.5));
 }
 
 float paletteIndexAt(ivec2 coord) {
 	vec4 packed = texelFetch(uIndexTexture, coord, 0) * 255.0;
 	return floor(packed.r + 0.5) + floor(packed.g + 0.5) * 256.0;
+}
+
+vec4 sampleDetailAtlasRect(vec4 rect, vec2 localUv, vec2 gradX, vec2 gradY) {
+	vec2 atlasUv = (rect.xy + localUv * rect.zw) / uDetailAtlasSize;
+	vec2 atlasGradX = gradX * rect.zw / uDetailAtlasSize;
+	vec2 atlasGradY = gradY * rect.zw / uDetailAtlasSize;
+	return textureGrad(uDetailAtlasTexture, atlasUv, atlasGradX, atlasGradY);
+}
+
+vec3 applyDetailOverlay(vec3 baseColor, int materialSlot) {
+	vec4 detailParams = uDetailMaterialParams[materialSlot];
+	if (detailParams.w < 0.5) {
+		return baseColor;
+	}
+	float tiling = detailParams.z;
+	vec2 tiledUv = vUv * tiling;
+	vec4 detailColor = sampleDetailAtlasRect(
+		uDetailMaterialRects[materialSlot],
+		fract(tiledUv),
+		dFdx(tiledUv),
+		dFdy(tiledUv)
+	);
+	float sourceAlpha = clamp(detailColor.a, 0.0, 1.0);
+	return clamp(baseColor * (detailColor.rgb + (1.0 - sourceAlpha)), 0.0, 1.0);
 }
 
 void main() {
@@ -591,6 +644,7 @@ void main() {
 	if (color.a <= 0.0) {
 		discard;
 	}
+	color.rgb = applyDetailOverlay(color.rgb, vMaterialSlot);
 	fragColor = color;
 }
 `;
@@ -1095,6 +1149,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 									...currentResources.worldStore.compactedGeometryFamilyResources.values(),
 								].filter((resource) => resource.family === "indexed-paletted"),
 								texturesByKey: currentResources.worldStore.texturesByKey,
+								detailTextures:
+									currentResources.worldStore.textureAtlasGeneration
+										?.detailTextures ?? [],
 							},
 							drawUnitsById: currentResources.worldStore.drawUnitsById,
 							frame,
@@ -1413,6 +1470,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 					...resources.worldStore.compactedGeometryFamilyResources.values(),
 				].filter((resource) => resource.family === "indexed-paletted"),
 				texturesByKey: resources.worldStore.texturesByKey,
+				detailTextures:
+					resources.worldStore.textureAtlasGeneration?.detailTextures ?? [],
 			},
 			viewProjectionMatrix: frame.viewProjectionMatrix,
 			drawUnits,
@@ -2602,11 +2661,12 @@ function createIndexedPalettedFamilyWorldProgram(
 			"uBatchModel",
 			"uIndexTexture",
 			"uPaletteTexture",
+			"uDetailAtlasTexture",
+			"uDetailAtlasSize",
 			"uMaterialColors",
-			"uTextureSizes",
-			"uPaletteColorCounts",
-			"uClipThresholds",
-			"uWrapModes",
+			"uMaterialParams",
+			"uDetailMaterialRects",
+			"uDetailMaterialParams",
 		],
 	});
 }

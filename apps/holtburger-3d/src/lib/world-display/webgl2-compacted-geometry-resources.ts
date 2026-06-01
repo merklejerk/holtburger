@@ -40,6 +40,13 @@ export interface Webgl2IndexedPalettedFamilyDrawSlice extends CompactedGeometryS
 	indexFormat: "p8" | "index16";
 	indexPageKey: string;
 	palettePageKey: string;
+	detailAtlasTextureIndex: number | null;
+}
+
+export interface Webgl2IndexedPalettedFamilyMaterialTableRecord
+	extends IndexedPalettedFamilyMaterialTableRecord {
+	detailAtlasTextureIndex: number | null;
+	detailAtlasRect: readonly [number, number, number, number];
 }
 
 export interface Webgl2RgbaTexturePageFamilyResource {
@@ -54,7 +61,7 @@ export interface Webgl2IndexedPalettedFamilyResource {
 	family: "indexed-paletted";
 	key: string;
 	geometryBatchKey: string;
-	materialTableRecords: readonly IndexedPalettedFamilyMaterialTableRecord[];
+	materialTableRecords: readonly Webgl2IndexedPalettedFamilyMaterialTableRecord[];
 	drawSlices: readonly Webgl2IndexedPalettedFamilyDrawSlice[];
 }
 
@@ -153,21 +160,36 @@ export function createWebgl2IndexedPalettedFamilyResource({
 	geometry,
 	materialTableRecords,
 	materialDrawSlices,
+	detailPlacementsByEntryKey,
 }: {
 	geometry: CompactedGeometryBatch<IndexedPalettedFamilyDrawSlice>;
 	materialTableRecords: readonly IndexedPalettedFamilyMaterialTableRecord[];
 	materialDrawSlices: readonly IndexedPalettedFamilyDrawSlice[];
+	detailPlacementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>;
 }): Webgl2IndexedPalettedFamilyResource {
 	const materialDrawSliceByKey = new Map(
 		materialDrawSlices.map((slice) => [slice.key, slice] as const),
+	);
+	const materialRecordsByKey = new Map(
+		materialTableRecords.map((record) => [record.key, record] as const),
 	);
 	return {
 		family: "indexed-paletted",
 		key: compactedFamilyResourceKey("indexed-paletted", geometry.key),
 		geometryBatchKey: geometry.key,
-		materialTableRecords,
+		materialTableRecords: materialTableRecords.map((record) =>
+			toWebgl2IndexedPalettedFamilyMaterialRecord(
+				record,
+				detailPlacementsByEntryKey,
+			),
+		),
 		drawSlices: geometry.drawSlices.map((slice) =>
-			toWebgl2IndexedPalettedFamilyDrawSlice(slice, materialDrawSliceByKey),
+			toWebgl2IndexedPalettedFamilyDrawSlice(
+				slice,
+				materialDrawSliceByKey,
+				materialRecordsByKey,
+				detailPlacementsByEntryKey,
+			),
 		),
 	};
 }
@@ -290,6 +312,8 @@ function toWebgl2RgbaTexturePageFamilyDrawSlice(
 function toWebgl2IndexedPalettedFamilyDrawSlice(
 	slice: CompactedGeometrySlice,
 	materialDrawSliceByKey: ReadonlyMap<string, IndexedPalettedFamilyDrawSlice>,
+	materialRecordsByKey: ReadonlyMap<string, IndexedPalettedFamilyMaterialTableRecord>,
+	detailPlacementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>,
 ): Webgl2IndexedPalettedFamilyDrawSlice {
 	const materialSlice = materialDrawSliceByKey.get(slice.key);
 	if (!materialSlice) {
@@ -297,12 +321,66 @@ function toWebgl2IndexedPalettedFamilyDrawSlice(
 			`Indexed-paletted family draw slice ${slice.key} has no indexed family payload.`,
 		);
 	}
+	const detailAtlasTextureIndices = uniqueNumbers(
+		materialSlice.materialSlotKeys.flatMap((slotKey) => {
+			const record = materialRecordsByKey.get(slotKey);
+			if (!record?.detailAtlasEntryKey) {
+				return [];
+			}
+			const placement = detailPlacementsByEntryKey.get(record.detailAtlasEntryKey);
+			if (!placement) {
+				throw new Error(
+					`Indexed-paletted family draw slice ${slice.key} references missing detail placement ${record.detailAtlasEntryKey}.`,
+				);
+			}
+			return [placement.textureIndex];
+		}),
+	);
+	if (detailAtlasTextureIndices.length > 1) {
+		throw new Error(
+			`Indexed-paletted family draw slice ${slice.key} spans multiple detail atlas textures.`,
+		);
+	}
 	return {
 		...slice,
 		indexFormat: materialSlice.indexFormat,
 		indexPageKey: materialSlice.indexPageKey,
 		palettePageKey: materialSlice.palettePageKey,
+		detailAtlasTextureIndex: detailAtlasTextureIndices[0] ?? null,
 	};
+}
+
+function toWebgl2IndexedPalettedFamilyMaterialRecord(
+	record: IndexedPalettedFamilyMaterialTableRecord,
+	detailPlacementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>,
+): Webgl2IndexedPalettedFamilyMaterialTableRecord {
+	if (!record.detailAtlasEntryKey) {
+		return {
+			...record,
+			detailAtlasTextureIndex: null,
+			detailAtlasRect: [0, 0, 1, 1],
+		};
+	}
+	const placement = detailPlacementsByEntryKey.get(record.detailAtlasEntryKey);
+	if (!placement) {
+		throw new Error(
+			`Indexed-paletted material record ${record.key} references missing detail placement ${record.detailAtlasEntryKey}.`,
+		);
+	}
+	return {
+		...record,
+		detailAtlasTextureIndex: placement.textureIndex,
+		detailAtlasRect: [
+			placement.x,
+			placement.y,
+			placement.width,
+			placement.height,
+		],
+	};
+}
+
+function uniqueNumbers(values: readonly number[]): number[] {
+	return [...new Set(values)].sort((left, right) => left - right);
 }
 
 function toWebgl2RgbaTexturePageFamilyMaterialSlot(

@@ -5,6 +5,7 @@ import type {
 	Webgl2CompactedGeometryBatchResource,
 	Webgl2IndexedPalettedFamilyResource,
 } from "./webgl2-compacted-geometry-resources";
+import type { Webgl2DetailTextureAtlasTextureResource } from "./webgl2-texture-atlas-generation";
 
 export const WEBGL2_INDEXED_PALETTED_MAX_MATERIAL_SLOTS = 128;
 
@@ -14,11 +15,12 @@ export type Webgl2IndexedPalettedFamilyWorldProgram = Webgl2ProgramResource<
 	| "uBatchModel"
 	| "uIndexTexture"
 	| "uPaletteTexture"
+	| "uDetailAtlasTexture"
+	| "uDetailAtlasSize"
 	| "uMaterialColors"
-	| "uTextureSizes"
-	| "uPaletteColorCounts"
-	| "uClipThresholds"
-	| "uWrapModes"
+	| "uMaterialParams"
+	| "uDetailMaterialRects"
+	| "uDetailMaterialParams"
 >;
 
 export interface Webgl2IndexedPalettedFamilySubmitMetrics {
@@ -36,6 +38,7 @@ export interface Webgl2IndexedPalettedFamilySubmitResources {
 	batches: readonly Webgl2CompactedGeometryBatchResource[];
 	indexedPalettedFamilies: readonly Webgl2IndexedPalettedFamilyResource[];
 	texturesByKey: ReadonlyMap<string, Webgl2Texture2DResource>;
+	detailTextures: readonly Webgl2DetailTextureAtlasTextureResource[];
 }
 
 export function createEmptyWebgl2IndexedPalettedFamilySubmitMetrics(): Webgl2IndexedPalettedFamilySubmitMetrics {
@@ -123,6 +126,7 @@ export function submitWebgl2IndexedPalettedFamilyBatches({
 	stateCache.useProgram(program.program);
 	gl.uniform1i(program.uniforms.uIndexTexture, 0);
 	gl.uniform1i(program.uniforms.uPaletteTexture, 1);
+	gl.uniform1i(program.uniforms.uDetailAtlasTexture, 2);
 	gl.uniformMatrix4fv(
 		program.uniforms.uViewProjection,
 		false,
@@ -161,6 +165,26 @@ export function submitWebgl2IndexedPalettedFamilyBatches({
 			}
 			stateCache.bindTexture2D(0, indexTexture.texture);
 			stateCache.bindTexture2D(1, paletteTexture.texture);
+			const detailTexture =
+				slice.detailAtlasTextureIndex == null
+					? null
+					: resources.detailTextures.find(
+							(candidate) =>
+								candidate.textureIndex === slice.detailAtlasTextureIndex,
+						);
+			if (slice.detailAtlasTextureIndex != null && !detailTexture) {
+				throw new Error(
+					`Indexed-paletted family draw slice ${slice.key} references missing detail atlas texture ${slice.detailAtlasTextureIndex}.`,
+				);
+			}
+			if (detailTexture) {
+				stateCache.bindTexture2D(2, detailTexture.texture.texture);
+			}
+			gl.uniform2f(
+				program.uniforms.uDetailAtlasSize,
+				detailTexture?.width ?? 1,
+				detailTexture?.height ?? 1,
+			);
 			gl.drawElements(
 				gl.TRIANGLES,
 				slice.indexCount,
@@ -185,33 +209,41 @@ function uploadIndexedPalettedFamilyMaterialTable(
 	const colors = new Float32Array(
 		WEBGL2_INDEXED_PALETTED_MAX_MATERIAL_SLOTS * 4,
 	);
-	const textureSizes = new Float32Array(
-		WEBGL2_INDEXED_PALETTED_MAX_MATERIAL_SLOTS * 2,
+	const materialParams = new Float32Array(
+		WEBGL2_INDEXED_PALETTED_MAX_MATERIAL_SLOTS * 4,
 	);
-	const paletteColorCounts = new Float32Array(
-		WEBGL2_INDEXED_PALETTED_MAX_MATERIAL_SLOTS,
+	const detailRects = new Float32Array(
+		WEBGL2_INDEXED_PALETTED_MAX_MATERIAL_SLOTS * 4,
 	);
-	const clipThresholds = new Int32Array(
-		WEBGL2_INDEXED_PALETTED_MAX_MATERIAL_SLOTS,
-	);
-	const wrapModes = new Int32Array(
-		WEBGL2_INDEXED_PALETTED_MAX_MATERIAL_SLOTS * 2,
+	const detailParams = new Float32Array(
+		WEBGL2_INDEXED_PALETTED_MAX_MATERIAL_SLOTS * 4,
 	);
 	for (const [index, record] of family.materialTableRecords.entries()) {
 		colors.set(record.color, index * 4);
-		textureSizes.set([record.indexPageWidth, record.indexPageHeight], index * 2);
-		paletteColorCounts[index] = record.paletteColorCount;
-		clipThresholds[index] = record.clipThreshold;
-		wrapModes.set(
-			[record.wrapS === "repeat" ? 1 : 0, record.wrapT === "repeat" ? 1 : 0],
-			index * 2,
+		materialParams.set(
+			[
+				record.indexPageWidth,
+				record.indexPageHeight,
+				record.paletteColorCount,
+				record.clipThreshold,
+			],
+			index * 4,
+		);
+		detailRects.set(record.detailAtlasRect, index * 4);
+		detailParams.set(
+			[
+				record.wrapS === "repeat" ? 1 : 0,
+				record.wrapT === "repeat" ? 1 : 0,
+				record.detailTiling,
+				record.detailAtlasTextureIndex == null ? 0 : 1,
+			],
+			index * 4,
 		);
 	}
 	gl.uniform4fv(program.uniforms.uMaterialColors, colors);
-	gl.uniform2fv(program.uniforms.uTextureSizes, textureSizes);
-	gl.uniform1fv(program.uniforms.uPaletteColorCounts, paletteColorCounts);
-	gl.uniform1iv(program.uniforms.uClipThresholds, clipThresholds);
-	gl.uniform2iv(program.uniforms.uWrapModes, wrapModes);
+	gl.uniform4fv(program.uniforms.uMaterialParams, materialParams);
+	gl.uniform4fv(program.uniforms.uDetailMaterialRects, detailRects);
+	gl.uniform4fv(program.uniforms.uDetailMaterialParams, detailParams);
 }
 
 function indexTypeByteLength(

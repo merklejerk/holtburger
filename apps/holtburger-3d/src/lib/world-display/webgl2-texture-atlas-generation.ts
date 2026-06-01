@@ -56,7 +56,10 @@ export function createWebgl2TextureAtlasGenerationResource({
 	plan: CompactionFamilyPlan;
 }): Webgl2TextureAtlasGenerationResource | null {
 	const rgbaTexturePageFamily = plan.renderFamilies.rgbaTexturePage;
-	if (rgbaTexturePageFamily.compactableDrawUnitIds.length === 0) {
+	if (
+		rgbaTexturePageFamily.compactableDrawUnitIds.length === 0 &&
+		plan.detailAtlasTextures.length === 0
+	) {
 		return null;
 	}
 	const entriesByKey = new Map(

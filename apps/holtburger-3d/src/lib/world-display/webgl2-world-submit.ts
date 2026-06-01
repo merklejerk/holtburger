@@ -254,6 +254,7 @@ export function submitWebgl2FlatWorldFrame({
 		batches: [],
 		indexedPalettedFamilies: [],
 		texturesByKey: new Map(),
+		detailTextures: [],
 	},
 	drawUnitsById,
 	frame,
@@ -320,6 +321,7 @@ export function submitWebgl2FlatWorldDrawUnits({
 		batches: [],
 		indexedPalettedFamilies: [],
 		texturesByKey: new Map(),
+		detailTextures: [],
 	},
 	viewProjectionMatrix,
 	drawUnits,
@@ -718,7 +720,7 @@ function filterIndexedPalettedFamilyResourcesByFormat(
 	return {
 		batches: resources.batches,
 		indexedPalettedFamilies: resources.indexedPalettedFamilies
-			.map((family) => ({
+		.map((family) => ({
 				...family,
 				drawSlices: family.drawSlices.filter(
 					(slice) => slice.indexFormat === indexFormat,
@@ -726,6 +728,7 @@ function filterIndexedPalettedFamilyResourcesByFormat(
 			}))
 			.filter((family) => family.drawSlices.length > 0),
 		texturesByKey: resources.texturesByKey,
+		detailTextures: resources.detailTextures,
 	};
 }
 

@@ -87,6 +87,10 @@ describe("webgl2 texture atlas generation", () => {
 							compactableDrawUnitIds: [],
 						},
 					},
+					atlasEntryRecords: [],
+					atlasTextures: [],
+					detailAtlasEntryRecords: [],
+					detailAtlasTextures: [],
 				},
 			}),
 		).toBeNull();

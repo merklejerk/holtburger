@@ -933,7 +933,7 @@ function countDrawUnitsByCompactionFamily(
 ): Record<string, number> {
 	const counts: Record<string, number> = {};
 	for (const drawUnit of drawUnits) {
-		const family = drawUnit.bakeEligibility.material.family;
+		const family = drawUnit.compactionEligibility.material.family;
 		counts[family] = (counts[family] ?? 0) + 1;
 	}
 	return counts;

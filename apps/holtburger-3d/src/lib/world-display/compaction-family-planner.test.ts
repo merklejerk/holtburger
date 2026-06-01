@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import {
-	createBakeEligibility,
-	createEmptyBakedRenderablePlan,
-	planBakedRenderables,
-	type BakedRenderableCandidate,
-	type BakedIndexedMaterialTableRecord,
-} from "./baked-renderable-planner";
+	createCompactionEligibility,
+	createEmptyCompactionFamilyPlan,
+	planCompactionFamilies,
+	type CompactionFamilyCandidate,
+	type IndexedPalettedFamilyMaterialTableRecord,
+} from "./compaction-family-planner";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
 import type { StagedWorldMaterialAtlasEligibility } from "./staged-world-material-strategy";
 import type { TexturePageBinding } from "./texture-page-binding";
 
-type CandidateOptions = Partial<BakedRenderableCandidate> & {
+type CandidateOptions = Partial<CompactionFamilyCandidate> & {
 	entryKey?: string;
 	width?: number;
 	height?: number;
@@ -25,12 +25,12 @@ type CandidateOptions = Partial<BakedRenderableCandidate> & {
 	hasDetailOverlay?: boolean;
 	atlasEligibility?: StagedWorldMaterialAtlasEligibility | null;
 	texturePageBindings?: readonly TexturePageBinding[];
-	indexedMaterialTableRecord?: BakedIndexedMaterialTableRecord | null;
+	indexedMaterialTableRecord?: IndexedPalettedFamilyMaterialTableRecord | null;
 };
 
-describe("baked renderable planner", () => {
+describe("compaction family planner", () => {
 	it("plans landblock-owned opaque direct-texture units into deterministic atlas slices", () => {
-		const plan = planBakedRenderables({
+		const plan = planCompactionFamilies({
 			drawUnits: [
 				createCandidate({ id: "static-b", entryKey: "entry-b" }),
 				createCandidate({
@@ -51,14 +51,14 @@ describe("baked renderable planner", () => {
 		});
 
 		expect(plan.compactableDrawUnitIds).toEqual(["static-b", "structured-a"]);
-		expect(plan.submitFamilies.rgbaAtlas.compactableDrawUnitIds).toEqual([
+		expect(plan.renderFamilies.rgbaTexturePage.compactableDrawUnitIds).toEqual([
 			"static-b",
 			"structured-a",
 		]);
-		expect(plan.submitFamilies.rgbaAtlas.materialSlots).toEqual(
+		expect(plan.renderFamilies.rgbaTexturePage.materialSlots).toEqual(
 			plan.materialSlots,
 		);
-		expect(plan.submitFamilies.indexedPaletted.materialTableRecords).toEqual(
+		expect(plan.renderFamilies.indexedPaletted.materialTableRecords).toEqual(
 			[],
 		);
 		expect(plan.bypasses).toEqual([]);
@@ -90,7 +90,7 @@ describe("baked renderable planner", () => {
 	});
 
 	it("keeps unsupported first-slice materials on the staged path with reasons", () => {
-		const plan = planBakedRenderables({
+		const plan = planCompactionFamilies({
 			drawUnits: [
 				createCandidate({ id: "terrain", kind: "terrain" }),
 				createCandidate({ id: "missing-landblock", owningLandblockId: null }),
@@ -122,7 +122,7 @@ describe("baked renderable planner", () => {
 	});
 
 	it("keeps material-only and geometry-only eligibility on the direct path", () => {
-		const plan = planBakedRenderables({
+		const plan = planCompactionFamilies({
 			drawUnits: [
 				createCandidate({ id: "material-only", owningLandblockId: null }),
 				createCandidate({ id: "geometry-only", atlasEligibility: null }),
@@ -149,13 +149,13 @@ describe("baked renderable planner", () => {
 		]);
 	});
 
-	it("keeps indexed texture-page readiness separate from baked indexed shader support", () => {
+	it("keeps indexed texture-page readiness separate from compacted indexed shader support", () => {
 		const indexed = createCandidate({ materialKind: "indexed-paletted" });
 
-		expect(indexed.bakeEligibility.material).toMatchObject({
+		expect(indexed.compactionEligibility.material).toMatchObject({
 			family: "indexed-paletted",
 			alphaPolicy: "opaque",
-			blockers: ["missing-baked-indexed-paletted-family"],
+			blockers: ["missing-compacted-indexed-paletted-family"],
 		});
 
 		const missingPalette = createCandidate({
@@ -163,30 +163,30 @@ describe("baked renderable planner", () => {
 			texturePageBindings: [createIndexedTexelTexturePageBinding()],
 		});
 
-		expect(missingPalette.bakeEligibility.material.blockers).toEqual([
+		expect(missingPalette.compactionEligibility.material.blockers).toEqual([
 			"missing-indexed-palette-page",
-			"missing-baked-indexed-paletted-family",
+			"missing-compacted-indexed-paletted-family",
 		]);
 	});
 
-	it("expresses indexed sampling and alpha policy as orthogonal bake facts", () => {
+	it("expresses indexed sampling and alpha policy as orthogonal compaction facts", () => {
 		const cutoutIndexed = createCandidate({
 			materialKind: "indexed-paletted",
 			materialBehavior: { ...OPAQUE_BEHAVIOR, alphaTest: 0.5 },
 		});
 
-		expect(cutoutIndexed.bakeEligibility.material).toMatchObject({
+		expect(cutoutIndexed.compactionEligibility.material).toMatchObject({
 			family: "indexed-paletted",
 			alphaPolicy: "cutout",
 			blockers: [
-				"missing-baked-indexed-paletted-family",
+				"missing-compacted-indexed-paletted-family",
 				"indexed-alpha-policy-unsupported",
 			],
 		});
 	});
 
 	it("plans indexed opaque material-table slots and draw slices in the indexed submit family", () => {
-		const plan = planBakedRenderables({
+		const plan = planCompactionFamilies({
 			drawUnits: [
 				createCandidate({
 					id: "indexed-a",
@@ -214,8 +214,8 @@ describe("baked renderable planner", () => {
 		expect(plan.indexedMaterialTableRecords).toEqual([
 			createIndexedMaterialTableRecord("a"),
 		]);
-		expect(plan.submitFamilies.rgbaAtlas.compactableDrawUnitIds).toEqual([]);
-		expect(plan.submitFamilies.indexedPaletted).toMatchObject({
+		expect(plan.renderFamilies.rgbaTexturePage.compactableDrawUnitIds).toEqual([]);
+		expect(plan.renderFamilies.indexedPaletted).toMatchObject({
 			kind: "indexed-paletted",
 			compactableDrawUnitIds: ["indexed-a"],
 			materialTableRecords: [createIndexedMaterialTableRecord("a")],
@@ -242,7 +242,7 @@ describe("baked renderable planner", () => {
 	});
 
 	it("keeps detail-overlay draw units compactable when an RGBA8 detail atlas entry is available", () => {
-		const plan = planBakedRenderables({
+		const plan = planCompactionFamilies({
 			drawUnits: [
 				createCandidate({
 					id: "plain",
@@ -285,7 +285,7 @@ describe("baked renderable planner", () => {
 	});
 
 	it("splits compaction material slots when the same base material has different detail state", () => {
-		const plan = planBakedRenderables({
+		const plan = planCompactionFamilies({
 			drawUnits: [
 				createCandidate({ id: "plain", entryKey: "shared" }),
 				createCandidate({
@@ -320,7 +320,7 @@ describe("baked renderable planner", () => {
 	});
 
 	it("splits compaction material slots when the same base material has different wrap policy", () => {
-		const plan = planBakedRenderables({
+		const plan = planCompactionFamilies({
 			drawUnits: [
 				createCandidate({
 					id: "clamp",
@@ -368,7 +368,7 @@ describe("baked renderable planner", () => {
 	});
 
 	it("reports source texture and material table overflow before GPU resources exist", () => {
-		const plan = planBakedRenderables({
+		const plan = planCompactionFamilies({
 			drawUnits: [
 				createCandidate({
 					id: "too-big",
@@ -395,8 +395,8 @@ describe("baked renderable planner", () => {
 	});
 
 	it("creates an empty plan for store initialization", () => {
-		expect(createEmptyBakedRenderablePlan()).toMatchObject({
-			key: "baked-renderables/empty",
+		expect(createEmptyCompactionFamilyPlan()).toMatchObject({
+			key: "compaction-families/empty",
 			compactableDrawUnitIds: [],
 			atlasTextures: [],
 			drawSlices: [],
@@ -424,7 +424,7 @@ const OPAQUE_BEHAVIOR: LegacyMaterialBehaviorDto = {
 
 function createCandidate(
 	options: CandidateOptions = {},
-): BakedRenderableCandidate {
+): CompactionFamilyCandidate {
 	const entryKey = options.entryKey ?? "entry";
 	const atlasEligibility =
 		options.atlasEligibility === undefined
@@ -461,7 +461,7 @@ function createCandidate(
 					? createIndexedMaterialTableRecord(entryKey)
 					: null
 				: options.indexedMaterialTableRecord,
-		bakeEligibility: createBakeEligibility({
+		compactionEligibility: createCompactionEligibility({
 			kind: options.kind ?? "static",
 			owningLandblockId:
 				options.owningLandblockId === undefined
@@ -483,7 +483,7 @@ function createCandidate(
 
 function createIndexedMaterialTableRecord(
 	key: string,
-): BakedIndexedMaterialTableRecord {
+): IndexedPalettedFamilyMaterialTableRecord {
 	return {
 		key: `indexed-table-${key}`,
 		sourceMaterialKey: `indexed/material-${key}`,

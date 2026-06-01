@@ -4,10 +4,10 @@ import type { StagedWorldMaterialAtlasEligibility } from "./staged-world-materia
 import type { TexturePageBinding } from "./texture-page-binding";
 import type { Webgl2SceneDomain } from "./webgl2-scene-domain-targets";
 
-export type BakedRenderableBypassReason =
+export type CompactionFamilyBypassReason =
 	| "non-static"
 	| "missing-landblock-origin"
-	| "unsupported-baked-material-family"
+	| "unsupported-compacted-material-family"
 	| "missing-uv-buffer"
 	| "missing-atlas-eligibility"
 	| "unsupported-alpha-test-material"
@@ -27,13 +27,13 @@ export type BakedRenderableBypassReason =
 	| "detail-atlas-full"
 	| "material-table-overflow";
 
-export type BakeMaterialKind =
+export type CompactionMaterialKind =
 	| "flat"
 	| "direct-texture"
 	| "indexed-paletted"
 	| "terrain-blend";
 
-export type BakeMaterialFamily =
+export type CompactionMaterialFamily =
 	| "flat-constant-color"
 	| "textured-opaque"
 	| "alpha-test"
@@ -44,80 +44,80 @@ export type BakeMaterialFamily =
 	| "debug-pipeline"
 	| "unknown-unsupported";
 
-export type BakeAlphaPolicy =
+export type CompactionAlphaPolicy =
 	| "opaque"
 	| "cutout"
 	| "transparent-blend"
 	| "opacity-translucent"
 	| "unknown";
 
-export type BakeMaterialBlocker =
+export type CompactionMaterialBlocker =
 	| "missing-base-texture-page"
 	| "missing-indexed-texel-page"
 	| "missing-indexed-palette-page"
 	| "missing-atlas-eligibility"
-	| "missing-baked-constant-color-family"
-	| "missing-baked-indexed-paletted-family"
+	| "missing-compacted-constant-color-family"
+	| "missing-compacted-indexed-paletted-family"
 	| "indexed-alpha-policy-unsupported"
-	| "missing-baked-alpha-test-family"
-	| "missing-baked-transparent-blended-family"
-	| "missing-baked-opacity-translucent-family"
-	| "missing-baked-terrain-family"
+	| "missing-compacted-alpha-test-family"
+	| "missing-compacted-transparent-blended-family"
+	| "missing-compacted-opacity-translucent-family"
+	| "missing-compacted-terrain-family"
 	| "debug-pipeline-material"
 	| "missing-detail-atlas-entry"
 	| "unsupported-material-state"
 	| "unsupported-texture-page-behavior";
 
-export type BakeGeometryBlocker =
+export type CompactionGeometryBlocker =
 	| "non-static"
 	| "missing-landblock-origin"
 	| "missing-uv-buffer";
 
-export interface BakeEligibility {
-	decision: "baked" | "direct-draw";
+export interface CompactionEligibility {
+	decision: "compacted" | "direct-draw";
 	material: {
-		family: BakeMaterialFamily;
+		family: CompactionMaterialFamily;
 		compatible: boolean;
-		blockers: readonly BakeMaterialBlocker[];
-		alphaPolicy: BakeAlphaPolicy;
+		blockers: readonly CompactionMaterialBlocker[];
+		alphaPolicy: CompactionAlphaPolicy;
 		atlasEligibility: StagedWorldMaterialAtlasEligibility | null;
-		detailAtlasEntry: BakedRenderableDetailEntry | null;
+		detailAtlasEntry: RgbaTexturePageDetailAtlasEntry | null;
 	};
 	geometry: {
 		compatible: boolean;
-		blockers: readonly BakeGeometryBlocker[];
+		blockers: readonly CompactionGeometryBlocker[];
 	};
 }
 
-export interface BakedRenderablePolicy {
+export interface CompactionFamilyPlanningPolicy {
 	maxAtlasTextureSize: number;
 	maxAtlasTextureCount: number;
 	baseGutterPixels: number;
 	maxMaterialSlotsPerDraw: number;
 }
 
-export interface BakedRenderableCandidate {
+export interface CompactionFamilyCandidate {
 	id: string;
 	kind: string;
 	owningLandblockId: number | null;
 	sceneDomain: Webgl2SceneDomain | null;
-	materialKind: BakeMaterialKind;
+	materialKind: CompactionMaterialKind;
 	materialKey: string;
-	detailAtlasEntry: BakedRenderableDetailEntry | null;
-	indexedMaterialTableRecord: BakedIndexedMaterialTableRecord | null;
-	bakeEligibility: BakeEligibility;
+	detailAtlasEntry: RgbaTexturePageDetailAtlasEntry | null;
+	indexedMaterialTableRecord: IndexedPalettedFamilyMaterialTableRecord | null;
+	compactionEligibility: CompactionEligibility;
 	triangleCount: number;
 	staticPartCount: number;
 	staticObjectKeys: readonly string[];
 }
 
-export interface BakedRenderableBypass {
+export interface CompactionFamilyBypass {
 	drawUnitId: string;
-	reason: BakedRenderableBypassReason;
+	reason: CompactionFamilyBypassReason;
 	detail: string;
 }
 
-export interface BakedRenderableMaterialSlot {
+export interface RgbaTexturePageFamilyMaterialSlot {
 	key: string;
 	sourceMaterialSlotKey: string;
 	index: number;
@@ -129,7 +129,7 @@ export interface BakedRenderableMaterialSlot {
 	detailTiling: number;
 }
 
-export interface BakedIndexedMaterialTableRecord {
+export interface IndexedPalettedFamilyMaterialTableRecord {
 	key: string;
 	sourceMaterialKey: string;
 	indexPageKey: string;
@@ -145,7 +145,7 @@ export interface BakedIndexedMaterialTableRecord {
 	filteringMode: "shader-palette-linear";
 }
 
-export interface BakedIndexedRenderableDrawSlice {
+export interface IndexedPalettedFamilyDrawSlice {
 	key: string;
 	indexFormat: "p8" | "index16";
 	indexPageKey: string;
@@ -157,7 +157,7 @@ export interface BakedIndexedRenderableDrawSlice {
 	drawUnitIds: readonly string[];
 }
 
-export interface BakedRenderableDrawSlice {
+export interface RgbaTexturePageFamilyDrawSlice {
 	key: string;
 	atlasTextureIndex: number;
 	detailAtlasTextureIndex: number | null;
@@ -168,12 +168,12 @@ export interface BakedRenderableDrawSlice {
 	drawUnitIds: readonly string[];
 }
 
-export interface BakedRenderableEntry {
+export interface RgbaTexturePageAtlasEntryRecord {
 	key: string;
 	entry: StagedWorldMaterialAtlasEligibility["atlasEntry"];
 }
 
-export interface BakedRenderableDetailEntry {
+export interface RgbaTexturePageDetailAtlasEntry {
 	key: string;
 	renderSurfaceId: number;
 	sourceFormatRaw: number;
@@ -185,74 +185,74 @@ export interface BakedRenderableDetailEntry {
 	blendMode: "dst-color";
 }
 
-export interface BakedRenderablePlan {
+export interface CompactionFamilyPlan {
 	key: string;
-	// Temporary migration debt: submitFamilies is the old baked/RGBA-atlas-shaped
+	// Temporary migration debt: renderFamilies is the old RGBA-atlas-shaped
 	// planning boundary. New compacted material work should replace this with
 	// render family pipeline plans instead of adding more parallel submit-family
 	// fields.
-	submitFamilies: BakedRenderableSubmitFamilies;
+	renderFamilies: CompactionRenderFamilies;
 	compactableDrawUnitIds: readonly string[];
-	bypasses: readonly BakedRenderableBypass[];
-	atlasEntryRecords: readonly BakedRenderableEntry[];
+	bypasses: readonly CompactionFamilyBypass[];
+	atlasEntryRecords: readonly RgbaTexturePageAtlasEntryRecord[];
 	atlasEntries: readonly StagedWorldMaterialAtlasEligibility["atlasEntry"][];
 	atlasTextures: readonly AtlasTexturePage[];
-	detailAtlasEntryRecords: readonly BakedRenderableDetailEntry[];
+	detailAtlasEntryRecords: readonly RgbaTexturePageDetailAtlasEntry[];
 	detailAtlasTextures: readonly AtlasTexturePage[];
-	materialSlots: readonly BakedRenderableMaterialSlot[];
-	indexedMaterialTableRecords: readonly BakedIndexedMaterialTableRecord[];
+	materialSlots: readonly RgbaTexturePageFamilyMaterialSlot[];
+	indexedMaterialTableRecords: readonly IndexedPalettedFamilyMaterialTableRecord[];
 	drawUnitMaterialSlots: readonly {
 		drawUnitId: string;
 		materialSlotKey: string;
 	}[];
-	drawSlices: readonly BakedRenderableDrawSlice[];
+	drawSlices: readonly RgbaTexturePageFamilyDrawSlice[];
 	staticObjectKeys: readonly string[];
 	staticPartCount: number;
 	triangleCount: number;
 	preparedTextureAssetIds: readonly string[];
 }
 
-export interface BakedRenderableSubmitFamilies {
-	rgbaAtlas: BakedRgbaAtlasSubmitFamilyPlan;
-	indexedPaletted: BakedIndexedPalettedSubmitFamilyPlan;
+export interface CompactionRenderFamilies {
+	rgbaTexturePage: RgbaTexturePageRenderFamilyPlan;
+	indexedPaletted: IndexedPalettedRenderFamilyPlan;
 }
 
-export interface BakedRgbaAtlasSubmitFamilyPlan {
+export interface RgbaTexturePageRenderFamilyPlan {
 	kind: "rgba-atlas";
 	compactableDrawUnitIds: readonly string[];
-	materialSlots: readonly BakedRenderableMaterialSlot[];
+	materialSlots: readonly RgbaTexturePageFamilyMaterialSlot[];
 	drawUnitMaterialSlots: readonly {
 		drawUnitId: string;
 		materialSlotKey: string;
 	}[];
-	drawSlices: readonly BakedRenderableDrawSlice[];
+	drawSlices: readonly RgbaTexturePageFamilyDrawSlice[];
 }
 
-export interface BakedIndexedPalettedSubmitFamilyPlan {
+export interface IndexedPalettedRenderFamilyPlan {
 	kind: "indexed-paletted";
 	compactableDrawUnitIds: readonly string[];
-	materialTableRecords: readonly BakedIndexedMaterialTableRecord[];
+	materialTableRecords: readonly IndexedPalettedFamilyMaterialTableRecord[];
 	drawUnitMaterialSlots: readonly {
 		drawUnitId: string;
 		materialSlotKey: string;
 	}[];
-	drawSlices: readonly BakedIndexedRenderableDrawSlice[];
+	drawSlices: readonly IndexedPalettedFamilyDrawSlice[];
 }
 
-interface EligibleBakedRenderableCandidate {
-	drawUnit: BakedRenderableCandidate;
+interface EligibleCompactionFamilyCandidate {
+	drawUnit: CompactionFamilyCandidate;
 	eligibility: StagedWorldMaterialAtlasEligibility;
 }
 
-interface BakedRenderableEntryRecord {
+interface RgbaTexturePageEntryRecord {
 	key: string;
 	entry: StagedWorldMaterialAtlasEligibility["atlasEntry"];
 }
 
-export function createEmptyBakedRenderablePlan(): BakedRenderablePlan {
+export function createEmptyCompactionFamilyPlan(): CompactionFamilyPlan {
 	return {
-		key: "baked-renderables/empty",
-		submitFamilies: createBakedRenderableSubmitFamilies({
+		key: "compaction-families/empty",
+		renderFamilies: createCompactionRenderFamilies({
 			compactableDrawUnitIds: [],
 			materialSlots: [],
 			indexedMaterialTableRecords: [],
@@ -277,28 +277,28 @@ export function createEmptyBakedRenderablePlan(): BakedRenderablePlan {
 	};
 }
 
-export function planBakedRenderables(options: {
-	drawUnits: readonly BakedRenderableCandidate[];
-	policy: BakedRenderablePolicy;
-}): BakedRenderablePlan {
-	const eligible: EligibleBakedRenderableCandidate[] = [];
-	const bypasses: BakedRenderableBypass[] = [];
+export function planCompactionFamilies(options: {
+	drawUnits: readonly CompactionFamilyCandidate[];
+	policy: CompactionFamilyPlanningPolicy;
+}): CompactionFamilyPlan {
+	const eligible: EligibleCompactionFamilyCandidate[] = [];
+	const bypasses: CompactionFamilyBypass[] = [];
 	for (const drawUnit of options.drawUnits) {
-		const bypass = classifyBakedRenderableBypass(drawUnit);
+		const bypass = classifyCompactionFamilyBypass(drawUnit);
 		if (bypass) {
 			bypasses.push(bypass);
 			continue;
 		}
-		const atlasEligibility = drawUnit.bakeEligibility.material.atlasEligibility;
+		const atlasEligibility = drawUnit.compactionEligibility.material.atlasEligibility;
 		if (!atlasEligibility) {
 			throw new Error(
-				`Baked geometry candidate ${drawUnit.id} was accepted without packed texture-page eligibility.`,
+				`Compacted geometry candidate ${drawUnit.id} was accepted without packed texture-page eligibility.`,
 			);
 		}
 		eligible.push({ drawUnit, eligibility: atlasEligibility });
 	}
 
-	const atlasEntries = dedupeBakedRenderableEntries(eligible);
+	const atlasEntries = dedupeRgbaTexturePageEntries(eligible);
 	const layout = planAtlasLayout({
 		entries: atlasEntries.map((record) => ({
 			key: record.key,
@@ -331,7 +331,7 @@ export function planBakedRenderables(options: {
 		});
 	}
 
-	const detailEntries = dedupeBakedRenderableDetailEntries(placed);
+	const detailEntries = dedupeRgbaTexturePageDetailEntries(placed);
 	const detailLayout = planAtlasLayout({
 		entries: detailEntries.map((entry) => ({
 			key: entry.key,
@@ -367,9 +367,9 @@ export function planBakedRenderables(options: {
 		});
 	}
 
-	const indexedCandidates = collectBakedIndexedSubmitCandidates(options.drawUnits);
+	const indexedCandidates = collectIndexedPalettedCompactionCandidates(options.drawUnits);
 	const indexedMaterialTableRecords =
-		assignBakedIndexedMaterialTableRecords(indexedCandidates, options.policy);
+		assignIndexedPalettedFamilyMaterialTableRecords(indexedCandidates, options.policy);
 	const indexedMaterialTableRecordByKey = new Map(
 		indexedMaterialTableRecords.map((record) => [record.key, record] as const),
 	);
@@ -387,13 +387,13 @@ export function planBakedRenderables(options: {
 	});
 	const indexedDrawUnitMaterialSlots = indexedCompactable.map((candidate) => ({
 		drawUnitId: candidate.id,
-		materialSlotKey: requireBakedIndexedMaterialTableRecord(candidate).key,
+		materialSlotKey: requireIndexedPalettedFamilyMaterialTableRecord(candidate).key,
 	}));
-	const indexedDrawSlices = createBakedIndexedRenderableDrawSlices({
+	const indexedDrawSlices = createIndexedPalettedFamilyDrawSlices({
 		candidates: indexedCompactable,
 		materialTableRecords: indexedMaterialTableRecords,
 	});
-	const materialSlots = assignBakedRenderableMaterialSlots(
+	const materialSlots = assignRgbaTexturePageFamilyMaterialSlots(
 		detailPlaced,
 		options.policy,
 	);
@@ -411,7 +411,7 @@ export function planBakedRenderables(options: {
 		});
 		return false;
 	});
-	const drawSlices = createBakedRenderableDrawSlices(
+	const drawSlices = createRgbaTexturePageFamilyDrawSlices(
 		compactable,
 		materialSlotByKey,
 		layout.placementsByEntryKey,
@@ -428,7 +428,7 @@ export function planBakedRenderables(options: {
 		compactable.map((candidate) => candidate.eligibility.atlasEntryKey),
 	);
 	return {
-		key: describeBakedRenderablePlanKey({
+		key: describeCompactionFamilyPlanKey({
 			policy: options.policy,
 			atlasEntryKeys: [...compactableEntryKeys].sort(),
 			detailAtlasEntryKeys: detailEntries
@@ -445,7 +445,7 @@ export function planBakedRenderables(options: {
 			),
 		}),
 		compactableDrawUnitIds,
-		submitFamilies: createBakedRenderableSubmitFamilies({
+		renderFamilies: createCompactionRenderFamilies({
 			compactableDrawUnitIds,
 			materialSlots,
 			indexedMaterialTableRecords,
@@ -512,7 +512,7 @@ export function planBakedRenderables(options: {
 	};
 }
 
-function createBakedRenderableSubmitFamilies({
+function createCompactionRenderFamilies({
 	compactableDrawUnitIds,
 	materialSlots,
 	indexedMaterialTableRecords,
@@ -523,22 +523,22 @@ function createBakedRenderableSubmitFamilies({
 	drawSlices,
 }: {
 	compactableDrawUnitIds: readonly string[];
-	materialSlots: readonly BakedRenderableMaterialSlot[];
-	indexedMaterialTableRecords: readonly BakedIndexedMaterialTableRecord[];
+	materialSlots: readonly RgbaTexturePageFamilyMaterialSlot[];
+	indexedMaterialTableRecords: readonly IndexedPalettedFamilyMaterialTableRecord[];
 	indexedCompactableDrawUnitIds?: readonly string[];
 	indexedDrawUnitMaterialSlots?: readonly {
 		drawUnitId: string;
 		materialSlotKey: string;
 	}[];
-	indexedDrawSlices?: readonly BakedIndexedRenderableDrawSlice[];
+	indexedDrawSlices?: readonly IndexedPalettedFamilyDrawSlice[];
 	drawUnitMaterialSlots: readonly {
 		drawUnitId: string;
 		materialSlotKey: string;
 	}[];
-	drawSlices: readonly BakedRenderableDrawSlice[];
-}): BakedRenderableSubmitFamilies {
+	drawSlices: readonly RgbaTexturePageFamilyDrawSlice[];
+}): CompactionRenderFamilies {
 	return {
-		rgbaAtlas: {
+		rgbaTexturePage: {
 			kind: "rgba-atlas",
 			compactableDrawUnitIds,
 			materialSlots,
@@ -555,19 +555,19 @@ function createBakedRenderableSubmitFamilies({
 	};
 }
 
-function collectBakedIndexedSubmitCandidates(
-	drawUnits: readonly BakedRenderableCandidate[],
-): BakedRenderableCandidate[] {
-	return drawUnits.filter(isBakedIndexedMaterialTableReady);
+function collectIndexedPalettedCompactionCandidates(
+	drawUnits: readonly CompactionFamilyCandidate[],
+): CompactionFamilyCandidate[] {
+	return drawUnits.filter(isIndexedPalettedMaterialTableReady);
 }
 
-function assignBakedIndexedMaterialTableRecords(
-	candidates: readonly BakedRenderableCandidate[],
-	policy: BakedRenderablePolicy,
-): BakedIndexedMaterialTableRecord[] {
-	const recordsByKey = new Map<string, BakedIndexedMaterialTableRecord>();
+function assignIndexedPalettedFamilyMaterialTableRecords(
+	candidates: readonly CompactionFamilyCandidate[],
+	policy: CompactionFamilyPlanningPolicy,
+): IndexedPalettedFamilyMaterialTableRecord[] {
+	const recordsByKey = new Map<string, IndexedPalettedFamilyMaterialTableRecord>();
 	for (const drawUnit of candidates) {
-		const record = requireBakedIndexedMaterialTableRecord(drawUnit);
+		const record = requireIndexedPalettedFamilyMaterialTableRecord(drawUnit);
 		recordsByKey.set(record.key, record);
 	}
 	return [...recordsByKey.values()].sort((left, right) =>
@@ -575,9 +575,9 @@ function assignBakedIndexedMaterialTableRecords(
 	).slice(0, policy.maxMaterialSlotsPerDraw);
 }
 
-function requireBakedIndexedMaterialTableRecord(
-	drawUnit: BakedRenderableCandidate,
-): BakedIndexedMaterialTableRecord {
+function requireIndexedPalettedFamilyMaterialTableRecord(
+	drawUnit: CompactionFamilyCandidate,
+): IndexedPalettedFamilyMaterialTableRecord {
 	const record = drawUnit.indexedMaterialTableRecord;
 	if (!record) {
 		throw new Error(
@@ -587,26 +587,26 @@ function requireBakedIndexedMaterialTableRecord(
 	return record;
 }
 
-function createBakedIndexedRenderableDrawSlices({
+function createIndexedPalettedFamilyDrawSlices({
 	candidates,
 	materialTableRecords,
 }: {
-	candidates: readonly BakedRenderableCandidate[];
-	materialTableRecords: readonly BakedIndexedMaterialTableRecord[];
-}): BakedIndexedRenderableDrawSlice[] {
+	candidates: readonly CompactionFamilyCandidate[];
+	materialTableRecords: readonly IndexedPalettedFamilyMaterialTableRecord[];
+}): IndexedPalettedFamilyDrawSlice[] {
 	const materialTableIndexByKey = new Map(
 		materialTableRecords.map((record, index) => [record.key, index] as const),
 	);
 	const groups = new Map<
 		string,
 		{
-			record: BakedIndexedMaterialTableRecord;
+			record: IndexedPalettedFamilyMaterialTableRecord;
 			slotIndex: number;
 			drawUnitIds: string[];
 		}
 	>();
 	for (const candidate of candidates) {
-		const record = requireBakedIndexedMaterialTableRecord(candidate);
+		const record = requireIndexedPalettedFamilyMaterialTableRecord(candidate);
 		const slotIndex = materialTableIndexByKey.get(record.key);
 		if (slotIndex === undefined) {
 			continue;
@@ -634,7 +634,7 @@ function createBakedIndexedRenderableDrawSlices({
 		)
 		.map((group) => ({
 			key: [
-				"baked-indexed-draw-slice",
+				"compacted-indexed-draw-slice",
 				group.record.indexFormat,
 				group.record.indexPageKey,
 				group.record.palettePageKey,
@@ -651,16 +651,16 @@ function createBakedIndexedRenderableDrawSlices({
 		}));
 }
 
-function isBakedIndexedMaterialTableReady(
-	drawUnit: BakedRenderableCandidate,
+function isIndexedPalettedMaterialTableReady(
+	drawUnit: CompactionFamilyCandidate,
 ): boolean {
 	if (drawUnit.materialKind !== "indexed-paletted") {
 		return false;
 	}
-	if (!drawUnit.bakeEligibility.geometry.compatible) {
+	if (!drawUnit.compactionEligibility.geometry.compatible) {
 		return false;
 	}
-	const material = drawUnit.bakeEligibility.material;
+	const material = drawUnit.compactionEligibility.material;
 	return (
 		material.family === "indexed-paletted" &&
 		material.alphaPolicy === "opaque" &&
@@ -671,32 +671,32 @@ function isBakedIndexedMaterialTableReady(
 	);
 }
 
-function classifyBakedRenderableBypass(
-	drawUnit: BakedRenderableCandidate,
-): BakedRenderableBypass | null {
-	const geometryBlocker = drawUnit.bakeEligibility.geometry.blockers[0] ?? null;
+function classifyCompactionFamilyBypass(
+	drawUnit: CompactionFamilyCandidate,
+): CompactionFamilyBypass | null {
+	const geometryBlocker = drawUnit.compactionEligibility.geometry.blockers[0] ?? null;
 	if (geometryBlocker) {
-		return createGeometryBakeBypass(drawUnit, geometryBlocker);
+		return createGeometryCompactionBypass(drawUnit, geometryBlocker);
 	}
-	const materialBlocker = drawUnit.bakeEligibility.material.blockers[0] ?? null;
+	const materialBlocker = drawUnit.compactionEligibility.material.blockers[0] ?? null;
 	if (materialBlocker) {
-		return createMaterialBakeBypass(drawUnit, materialBlocker);
+		return createMaterialCompactionBypass(drawUnit, materialBlocker);
 	}
 	return null;
 }
 
-export function createBakeEligibility(options: {
+export function createCompactionEligibility(options: {
 	kind: string;
 	owningLandblockId: number | null;
-	materialKind: BakeMaterialKind;
+	materialKind: CompactionMaterialKind;
 	hasUvBuffer: boolean;
 	texturePageBindings: readonly TexturePageBinding[];
 	materialBehavior: LegacyMaterialBehaviorDto | null;
 	hasDetailOverlay: boolean;
-	detailAtlasEntry: BakedRenderableDetailEntry | null;
+	detailAtlasEntry: RgbaTexturePageDetailAtlasEntry | null;
 	atlasEligibility: StagedWorldMaterialAtlasEligibility | null;
-}): BakeEligibility {
-	const geometryBlockers: BakeGeometryBlocker[] = [];
+}): CompactionEligibility {
+	const geometryBlockers: CompactionGeometryBlocker[] = [];
 	if (options.kind !== "static" && options.kind !== "structured-interior") {
 		geometryBlockers.push("non-static");
 	}
@@ -707,16 +707,16 @@ export function createBakeEligibility(options: {
 		geometryBlockers.push("missing-uv-buffer");
 	}
 
-	const materialFamily = classifyBakeMaterialFamily({
+	const materialFamily = classifyCompactionMaterialFamily({
 		drawUnitKind: options.kind,
 		materialKind: options.materialKind,
 		materialBehavior: options.materialBehavior,
 	});
-	const alphaPolicy = classifyBakeAlphaPolicy(options.materialBehavior);
-	const materialBlockers: BakeMaterialBlocker[] = [];
+	const alphaPolicy = classifyCompactionAlphaPolicy(options.materialBehavior);
+	const materialBlockers: CompactionMaterialBlocker[] = [];
 	switch (materialFamily) {
 		case "flat-constant-color":
-			materialBlockers.push("missing-baked-constant-color-family");
+			materialBlockers.push("missing-compacted-constant-color-family");
 			break;
 		case "indexed-paletted":
 			if (!hasIndexedTexelTexturePage(options.texturePageBindings)) {
@@ -730,25 +730,25 @@ export function createBakeEligibility(options: {
 			) {
 				materialBlockers.push("unsupported-texture-page-behavior");
 			}
-			materialBlockers.push("missing-baked-indexed-paletted-family");
+			materialBlockers.push("missing-compacted-indexed-paletted-family");
 			if (alphaPolicy !== "opaque") {
 				materialBlockers.push("indexed-alpha-policy-unsupported");
 			}
 			break;
 		case "terrain-blend":
-			materialBlockers.push("missing-baked-terrain-family");
+			materialBlockers.push("missing-compacted-terrain-family");
 			break;
 		case "debug-pipeline":
 			materialBlockers.push("debug-pipeline-material");
 			break;
 		case "alpha-test":
-			materialBlockers.push("missing-baked-alpha-test-family");
+			materialBlockers.push("missing-compacted-alpha-test-family");
 			break;
 		case "transparent-blended":
-			materialBlockers.push("missing-baked-transparent-blended-family");
+			materialBlockers.push("missing-compacted-transparent-blended-family");
 			break;
 		case "opacity-translucent":
-			materialBlockers.push("missing-baked-opacity-translucent-family");
+			materialBlockers.push("missing-compacted-opacity-translucent-family");
 			break;
 		case "unknown-unsupported":
 			materialBlockers.push("unsupported-material-state");
@@ -757,14 +757,14 @@ export function createBakeEligibility(options: {
 			if (!options.atlasEligibility) {
 				materialBlockers.push("missing-atlas-eligibility");
 			}
-			if (!hasCompatibleBakedBaseTexturePage(options.texturePageBindings)) {
+			if (!hasCompatibleCompactedBaseTexturePage(options.texturePageBindings)) {
 				materialBlockers.push("missing-base-texture-page");
 			}
 			if (options.hasDetailOverlay && !options.detailAtlasEntry) {
 				materialBlockers.push("missing-detail-atlas-entry");
 			}
 			if (
-				!hasOnlySupportedBakedTexturePageBehavior(options.texturePageBindings)
+				!hasOnlySupportedCompactedTexturePageBehavior(options.texturePageBindings)
 			) {
 				materialBlockers.push("unsupported-texture-page-behavior");
 			}
@@ -775,7 +775,7 @@ export function createBakeEligibility(options: {
 	const materialCompatible = materialBlockers.length === 0;
 	return {
 		decision:
-			geometryCompatible && materialCompatible ? "baked" : "direct-draw",
+			geometryCompatible && materialCompatible ? "compacted" : "direct-draw",
 		material: {
 			family: materialFamily,
 			compatible: materialCompatible,
@@ -791,48 +791,48 @@ export function createBakeEligibility(options: {
 	};
 }
 
-function createGeometryBakeBypass(
-	drawUnit: BakedRenderableCandidate,
-	blocker: BakeGeometryBlocker,
-): BakedRenderableBypass {
+function createGeometryCompactionBypass(
+	drawUnit: CompactionFamilyCandidate,
+	blocker: CompactionGeometryBlocker,
+): CompactionFamilyBypass {
 	switch (blocker) {
 		case "non-static":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "non-static",
-				detail: `draw unit kind ${drawUnit.kind} is not baked geometry`,
+				detail: `draw unit kind ${drawUnit.kind} is not compacted geometry`,
 			};
 		case "missing-landblock-origin":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "missing-landblock-origin",
-				detail: "baked geometry draw unit has no owning landblock",
+				detail: "compacted geometry draw unit has no owning landblock",
 			};
 		case "missing-uv-buffer":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "missing-uv-buffer",
-				detail: "baked geometry draw unit has no UV buffer",
+				detail: "compacted geometry draw unit has no UV buffer",
 			};
 	}
 }
 
-function createMaterialBakeBypass(
-	drawUnit: BakedRenderableCandidate,
-	blocker: BakeMaterialBlocker,
-): BakedRenderableBypass {
+function createMaterialCompactionBypass(
+	drawUnit: CompactionFamilyCandidate,
+	blocker: CompactionMaterialBlocker,
+): CompactionFamilyBypass {
 	switch (blocker) {
-		case "missing-baked-constant-color-family":
+		case "missing-compacted-constant-color-family":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "unsupported-constant-color-material",
-				detail: `flat/solid material ${drawUnit.materialKey} has no baked constant-color material family`,
+				detail: `flat/solid material ${drawUnit.materialKey} has no compacted constant-color material family`,
 			};
-		case "missing-baked-indexed-paletted-family":
+		case "missing-compacted-indexed-paletted-family":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "unsupported-indexed-paletted-material",
-				detail: `indexed/paletted material ${drawUnit.materialKey} has no baked indexed material family`,
+				detail: `indexed/paletted material ${drawUnit.materialKey} has no compacted indexed material family`,
 			};
 		case "missing-indexed-texel-page":
 			return {
@@ -850,27 +850,27 @@ function createMaterialBakeBypass(
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "indexed-alpha-policy-unsupported",
-				detail: `indexed/paletted material ${drawUnit.materialKey} has alpha policy that is not supported by the baked indexed path`,
+				detail: `indexed/paletted material ${drawUnit.materialKey} has alpha policy that is not supported by the compacted indexed path`,
 			};
-		case "missing-baked-alpha-test-family":
+		case "missing-compacted-alpha-test-family":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "unsupported-alpha-test-material",
-				detail: `alpha-test material ${drawUnit.materialKey} has no baked cutout material family`,
+				detail: `alpha-test material ${drawUnit.materialKey} has no compacted cutout material family`,
 			};
-		case "missing-baked-transparent-blended-family":
+		case "missing-compacted-transparent-blended-family":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "unsupported-transparent-blended-material",
-				detail: `blended material ${drawUnit.materialKey} has no baked transparent material family`,
+				detail: `blended material ${drawUnit.materialKey} has no compacted transparent material family`,
 			};
-		case "missing-baked-opacity-translucent-family":
+		case "missing-compacted-opacity-translucent-family":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "unsupported-opacity-translucent-material",
-				detail: `opacity/translucent material ${drawUnit.materialKey} has no baked translucent material family`,
+				detail: `opacity/translucent material ${drawUnit.materialKey} has no compacted translucent material family`,
 			};
-		case "missing-baked-terrain-family":
+		case "missing-compacted-terrain-family":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "unsupported-terrain-material",
@@ -880,19 +880,19 @@ function createMaterialBakeBypass(
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "debug-pipeline-material",
-				detail: `debug/portal material ${drawUnit.materialKey} is outside the production baked path`,
+				detail: `debug/portal material ${drawUnit.materialKey} is outside the production compacted path`,
 			};
 		case "missing-base-texture-page":
 			return {
 				drawUnitId: drawUnit.id,
-				reason: "unsupported-baked-material-family",
-				detail: `draw unit material ${drawUnit.materialKey} has no baked-compatible base texture page`,
+				reason: "unsupported-compacted-material-family",
+				detail: `draw unit material ${drawUnit.materialKey} has no compacted-compatible base texture page`,
 			};
 		case "missing-atlas-eligibility":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "missing-atlas-eligibility",
-				detail: "baked geometry draw unit has no packed texture-page eligibility",
+				detail: "compacted geometry draw unit has no packed texture-page eligibility",
 			};
 		case "missing-detail-atlas-entry":
 			return {
@@ -904,22 +904,22 @@ function createMaterialBakeBypass(
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "unsupported-material-state",
-				detail: `material ${drawUnit.materialKey} is not supported by any current baked material family`,
+				detail: `material ${drawUnit.materialKey} is not supported by any current compacted material family`,
 			};
 		case "unsupported-texture-page-behavior":
 			return {
 				drawUnitId: drawUnit.id,
-				reason: "unsupported-baked-material-family",
-				detail: "texture-page bindings require a baked shader family that is not implemented",
+				reason: "unsupported-compacted-material-family",
+				detail: "texture-page bindings require a compacted shader family that is not implemented",
 			};
 	}
 }
 
-export function classifyBakeMaterialFamily(options: {
+export function classifyCompactionMaterialFamily(options: {
 	drawUnitKind: string;
-	materialKind: BakeMaterialKind;
+	materialKind: CompactionMaterialKind;
 	materialBehavior: LegacyMaterialBehaviorDto | null;
-}): BakeMaterialFamily {
+}): CompactionMaterialFamily {
 	if (options.drawUnitKind === "portal-mask") {
 		return "debug-pipeline";
 	}
@@ -931,16 +931,16 @@ export function classifyBakeMaterialFamily(options: {
 		case "terrain-blend":
 			return "terrain-blend";
 		case "direct-texture":
-			return classifyDirectTextureBakeMaterialFamily(
+			return classifyDirectTextureCompactionMaterialFamily(
 				options.materialBehavior,
 			);
 	}
 }
 
-function classifyDirectTextureBakeMaterialFamily(
+function classifyDirectTextureCompactionMaterialFamily(
 	behavior: LegacyMaterialBehaviorDto | null,
-): BakeMaterialFamily {
-	const alphaPolicy = classifyBakeAlphaPolicy(behavior);
+): CompactionMaterialFamily {
+	const alphaPolicy = classifyCompactionAlphaPolicy(behavior);
 	switch (alphaPolicy) {
 		case "cutout":
 			return "alpha-test";
@@ -955,9 +955,9 @@ function classifyDirectTextureBakeMaterialFamily(
 	}
 }
 
-export function classifyBakeAlphaPolicy(
+export function classifyCompactionAlphaPolicy(
 	behavior: LegacyMaterialBehaviorDto | null,
-): BakeAlphaPolicy {
+): CompactionAlphaPolicy {
 	if (behavior === null) {
 		return "unknown";
 	}
@@ -973,7 +973,7 @@ export function classifyBakeAlphaPolicy(
 	return "opaque";
 }
 
-function hasCompatibleBakedBaseTexturePage(
+function hasCompatibleCompactedBaseTexturePage(
 	texturePageBindings: readonly TexturePageBinding[],
 ): boolean {
 	return texturePageBindings.some(
@@ -1037,7 +1037,7 @@ function hasExactDataTexturePageSampling(binding: TexturePageBinding): boolean {
 	);
 }
 
-function hasOnlySupportedBakedTexturePageBehavior(
+function hasOnlySupportedCompactedTexturePageBehavior(
 	texturePageBindings: readonly TexturePageBinding[],
 ): boolean {
 	return texturePageBindings.every((binding) => {
@@ -1067,10 +1067,10 @@ function isOpaqueStaticCompactionMaterial(
 	);
 }
 
-function dedupeBakedRenderableEntries(
-	candidates: readonly EligibleBakedRenderableCandidate[],
-): BakedRenderableEntryRecord[] {
-	const entriesByKey = new Map<string, BakedRenderableEntryRecord>();
+function dedupeRgbaTexturePageEntries(
+	candidates: readonly EligibleCompactionFamilyCandidate[],
+): RgbaTexturePageEntryRecord[] {
+	const entriesByKey = new Map<string, RgbaTexturePageEntryRecord>();
 	for (const candidate of candidates) {
 		entriesByKey.set(candidate.eligibility.atlasEntryKey, {
 			key: candidate.eligibility.atlasEntryKey,
@@ -1082,10 +1082,10 @@ function dedupeBakedRenderableEntries(
 	);
 }
 
-function dedupeBakedRenderableDetailEntries(
-	candidates: readonly EligibleBakedRenderableCandidate[],
-): BakedRenderableDetailEntry[] {
-	const entriesByKey = new Map<string, BakedRenderableDetailEntry>();
+function dedupeRgbaTexturePageDetailEntries(
+	candidates: readonly EligibleCompactionFamilyCandidate[],
+): RgbaTexturePageDetailAtlasEntry[] {
+	const entriesByKey = new Map<string, RgbaTexturePageDetailAtlasEntry>();
 	for (const candidate of candidates) {
 		const detailEntry = candidate.drawUnit.detailAtlasEntry;
 		if (detailEntry) {
@@ -1097,10 +1097,10 @@ function dedupeBakedRenderableDetailEntries(
 	);
 }
 
-function assignBakedRenderableMaterialSlots(
-	candidates: readonly EligibleBakedRenderableCandidate[],
-	policy: BakedRenderablePolicy,
-): BakedRenderableMaterialSlot[] {
+function assignRgbaTexturePageFamilyMaterialSlots(
+	candidates: readonly EligibleCompactionFamilyCandidate[],
+	policy: CompactionFamilyPlanningPolicy,
+): RgbaTexturePageFamilyMaterialSlot[] {
 	return [
 		...new Map(
 			candidates.map(
@@ -1122,15 +1122,15 @@ function assignBakedRenderableMaterialSlots(
 			samplingKey: eligibility.samplingKey,
 			samplingPolicy: eligibility.samplingPolicy,
 			atlasEntryKey: eligibility.atlasEntryKey,
-			...describeBakedRenderableDetailSlot(candidates, key),
+			...describeRgbaTexturePageDetailSlot(candidates, key),
 		}));
 }
 
-function describeBakedRenderableDetailSlot(
-	candidates: readonly EligibleBakedRenderableCandidate[],
+function describeRgbaTexturePageDetailSlot(
+	candidates: readonly EligibleCompactionFamilyCandidate[],
 	materialSlotKey: string,
 ): Pick<
-	BakedRenderableMaterialSlot,
+	RgbaTexturePageFamilyMaterialSlot,
 	"detailAtlasEntryKey" | "detailTiling"
 > {
 	const detailEntries = [
@@ -1142,7 +1142,7 @@ function describeBakedRenderableDetailSlot(
 				)
 				.map((candidate) => candidate.drawUnit.detailAtlasEntry)
 				.filter(
-					(entry): entry is BakedRenderableDetailEntry =>
+					(entry): entry is RgbaTexturePageDetailAtlasEntry =>
 						entry !== null && entry !== undefined,
 				)
 				.map((entry) => [entry.key, entry] as const),
@@ -1150,7 +1150,7 @@ function describeBakedRenderableDetailSlot(
 	];
 	if (detailEntries.length > 1) {
 		throw new Error(
-			`Baked geometry material slot ${materialSlotKey} has multiple detail atlas entries.`,
+			`Compacted geometry material slot ${materialSlotKey} has multiple detail atlas entries.`,
 		);
 	}
 	const detailEntry = detailEntries[0] ?? null;
@@ -1161,7 +1161,7 @@ function describeBakedRenderableDetailSlot(
 }
 
 function describeCompactionMaterialSlotKey(
-	candidate: EligibleBakedRenderableCandidate,
+	candidate: EligibleCompactionFamilyCandidate,
 ): string {
 	return [
 		candidate.eligibility.materialSlotKey,
@@ -1170,12 +1170,12 @@ function describeCompactionMaterialSlotKey(
 	].join("|");
 }
 
-function createBakedRenderableDrawSlices(
-	candidates: readonly EligibleBakedRenderableCandidate[],
-	materialSlotByKey: ReadonlyMap<string, BakedRenderableMaterialSlot>,
+function createRgbaTexturePageFamilyDrawSlices(
+	candidates: readonly EligibleCompactionFamilyCandidate[],
+	materialSlotByKey: ReadonlyMap<string, RgbaTexturePageFamilyMaterialSlot>,
 	placementsByEntryKey: ReadonlyMap<string, { textureIndex: number }>,
 	detailPlacementsByEntryKey: ReadonlyMap<string, { textureIndex: number }>,
-): BakedRenderableDrawSlice[] {
+): RgbaTexturePageFamilyDrawSlice[] {
 	const groups = new Map<
 		string,
 		{
@@ -1234,7 +1234,7 @@ function createBakedRenderableDrawSlices(
 			const drawUnitIds = [...group.drawUnitIds].sort();
 			return {
 				key: [
-					"baked-draw-slice",
+					"rgba-texture-page-draw-slice",
 					`texture=${group.atlasTextureIndex}`,
 					`detail=${group.detailAtlasTextureIndex ?? "none"}`,
 					group.renderStateKey,
@@ -1252,15 +1252,15 @@ function createBakedRenderableDrawSlices(
 		});
 }
 
-function describeBakedRenderablePlanKey(options: {
-	policy: BakedRenderablePolicy;
+function describeCompactionFamilyPlanKey(options: {
+	policy: CompactionFamilyPlanningPolicy;
 	atlasEntryKeys: readonly string[];
 	detailAtlasEntryKeys: readonly string[];
 	materialSlotKeys: readonly string[];
 	indexedMaterialTableRecordKeys: readonly string[];
 }): string {
 	return [
-		"baked-renderables",
+		"compaction-families",
 		`size=${options.policy.maxAtlasTextureSize}`,
 		`textures=${options.policy.maxAtlasTextureCount}`,
 		`gutter=${options.policy.baseGutterPixels}`,

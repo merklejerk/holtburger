@@ -235,28 +235,28 @@ export function createWebgl2RenderMetrics(
 			atlasCandidateEntryCount: input.worldStore?.atlasCandidateEntryCount ?? 0,
 			atlasCandidateMaterialSlotCount:
 				input.worldStore?.atlasCandidateMaterialSlotCount ?? 0,
-			bakedCandidateDrawUnitCount:
-				input.worldStore?.bakedCandidateDrawUnitCount ?? 0,
-			bakedBypassReasonCount: input.worldStore?.bakedBypassReasonCount ?? 0,
-			bakedBypassSamples: [...(input.worldStore?.bakedBypassSamples ?? [])],
-			bakedCoverageDrawUnitCounts:
-				input.worldStore?.bakedCoverageDrawUnitCounts ?? {},
-			bakedCoverageMaterialBlockerCounts:
-				input.worldStore?.bakedCoverageMaterialBlockerCounts ?? {},
-			bakedCoverageGeometryBlockerCounts:
-				input.worldStore?.bakedCoverageGeometryBlockerCounts ?? {},
-			bakedCoverageMaterialFamilyCounts:
-				input.worldStore?.bakedCoverageMaterialFamilyCounts ?? {},
-			bakedCoverageMaterialAlphaPolicyCounts:
-				input.worldStore?.bakedCoverageMaterialAlphaPolicyCounts ?? {},
-			bakedCoverageMaterialFamilyAlphaPolicyCounts:
-				input.worldStore?.bakedCoverageMaterialFamilyAlphaPolicyCounts ?? {},
-			bakedCoverageRetainedDirectMaterialFamilyCounts:
-				input.worldStore?.bakedCoverageRetainedDirectMaterialFamilyCounts ?? {},
-			bakedCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts:
+			compactionCandidateDrawUnitCount:
+				input.worldStore?.compactionCandidateDrawUnitCount ?? 0,
+			compactionBypassReasonCount: input.worldStore?.compactionBypassReasonCount ?? 0,
+			compactionBypassSamples: [...(input.worldStore?.compactionBypassSamples ?? [])],
+			compactionCoverageDrawUnitCounts:
+				input.worldStore?.compactionCoverageDrawUnitCounts ?? {},
+			compactionCoverageMaterialBlockerCounts:
+				input.worldStore?.compactionCoverageMaterialBlockerCounts ?? {},
+			compactionCoverageGeometryBlockerCounts:
+				input.worldStore?.compactionCoverageGeometryBlockerCounts ?? {},
+			compactionCoverageMaterialFamilyCounts:
+				input.worldStore?.compactionCoverageMaterialFamilyCounts ?? {},
+			compactionCoverageMaterialAlphaPolicyCounts:
+				input.worldStore?.compactionCoverageMaterialAlphaPolicyCounts ?? {},
+			compactionCoverageMaterialFamilyAlphaPolicyCounts:
+				input.worldStore?.compactionCoverageMaterialFamilyAlphaPolicyCounts ?? {},
+			compactionCoverageRetainedDirectMaterialFamilyCounts:
+				input.worldStore?.compactionCoverageRetainedDirectMaterialFamilyCounts ?? {},
+			compactionCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts:
 				input.worldStore
-					?.bakedCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts ?? {},
-			bakedCoverageVisibleRetainedDirectMaterialFamilyCounts:
+					?.compactionCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts ?? {},
+			compactionCoverageVisibleRetainedDirectMaterialFamilyCounts:
 				input.submitMetrics
 					.visibleRetainedDirectDrawUnitCountsByCompactionFamily,
 			textureAtlasGenerationTextureCount:
@@ -366,44 +366,44 @@ export function createWebgl2RenderMetrics(
 							input.worldStore.directTextureDrawUnitCount,
 						"webgl2-atlas-eligible":
 							input.worldStore.atlasEligibleMaterialCount,
-						"webgl2-baked-candidates":
-							input.worldStore.bakedCandidateDrawUnitCount,
-						"webgl2-baked-bypasses": input.worldStore.bakedBypassReasonCount,
+						"webgl2-compacted-candidates":
+							input.worldStore.compactionCandidateDrawUnitCount,
+						"webgl2-compacted-bypasses": input.worldStore.compactionBypassReasonCount,
 						...prefixCounts(
-							"webgl2-baked-coverage-",
-							input.worldStore.bakedCoverageDrawUnitCounts,
+							"webgl2-compacted-coverage-",
+							input.worldStore.compactionCoverageDrawUnitCounts,
 						),
 						...prefixCounts(
-							"webgl2-baked-material-blocker-",
-							input.worldStore.bakedCoverageMaterialBlockerCounts,
+							"webgl2-compacted-material-blocker-",
+							input.worldStore.compactionCoverageMaterialBlockerCounts,
 						),
 						...prefixCounts(
-							"webgl2-baked-geometry-blocker-",
-							input.worldStore.bakedCoverageGeometryBlockerCounts,
+							"webgl2-compacted-geometry-blocker-",
+							input.worldStore.compactionCoverageGeometryBlockerCounts,
 						),
 						...prefixCounts(
-							"webgl2-baked-material-family-",
-							input.worldStore.bakedCoverageMaterialFamilyCounts,
+							"webgl2-compacted-material-family-",
+							input.worldStore.compactionCoverageMaterialFamilyCounts,
 						),
 						...prefixCounts(
-							"webgl2-baked-alpha-policy-",
-							input.worldStore.bakedCoverageMaterialAlphaPolicyCounts,
+							"webgl2-compacted-alpha-policy-",
+							input.worldStore.compactionCoverageMaterialAlphaPolicyCounts,
 						),
 						...prefixCounts(
-							"webgl2-baked-family-alpha-policy-",
-							input.worldStore.bakedCoverageMaterialFamilyAlphaPolicyCounts,
+							"webgl2-compacted-family-alpha-policy-",
+							input.worldStore.compactionCoverageMaterialFamilyAlphaPolicyCounts,
 						),
 						...prefixCounts(
-							"webgl2-baked-retained-family-",
-							input.worldStore.bakedCoverageRetainedDirectMaterialFamilyCounts,
+							"webgl2-compacted-retained-family-",
+							input.worldStore.compactionCoverageRetainedDirectMaterialFamilyCounts,
 						),
 						...prefixCounts(
-							"webgl2-baked-retained-family-alpha-policy-",
+							"webgl2-compacted-retained-family-alpha-policy-",
 							input.worldStore
-								.bakedCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts,
+								.compactionCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts,
 						),
 						...prefixCounts(
-							"webgl2-baked-visible-retained-family-",
+							"webgl2-compacted-visible-retained-family-",
 							input.submitMetrics
 								.visibleRetainedDirectDrawUnitCountsByCompactionFamily,
 						),

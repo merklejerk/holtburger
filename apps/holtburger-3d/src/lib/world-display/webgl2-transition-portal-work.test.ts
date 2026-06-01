@@ -266,7 +266,7 @@ function createPortalMaskDrawUnit(id: string): Webgl2WorldDrawUnit {
 		directTextureSamplingPolicy: null,
 		textureUploadSample: null,
 		atlasEligibility: null,
-		bakeEligibility: {
+		compactionEligibility: {
 			decision: "direct-draw",
 			material: {
 				family: "flat-constant-color",

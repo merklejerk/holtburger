@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { BakedRenderablePlan } from "./baked-renderable-planner";
+import type { CompactionFamilyPlan } from "./compaction-family-planner";
 import { createWebgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
 
 describe("webgl2 texture atlas generation", () => {
@@ -11,7 +11,7 @@ describe("webgl2 texture atlas generation", () => {
 			plan: createPlan(),
 		});
 
-		expect(generation?.key).toBe("baked-renderables/test");
+		expect(generation?.key).toBe("compaction-families/test");
 		expect(generation?.textures).toHaveLength(1);
 		expect(generation?.detailTextures).toHaveLength(1);
 		expect(generation?.placements).toEqual([
@@ -80,10 +80,10 @@ describe("webgl2 texture atlas generation", () => {
 				plan: {
 					...plan,
 					compactableDrawUnitIds: [],
-					submitFamilies: {
-						...plan.submitFamilies,
-						rgbaAtlas: {
-							...plan.submitFamilies.rgbaAtlas,
+					renderFamilies: {
+						...plan.renderFamilies,
+						rgbaTexturePage: {
+							...plan.renderFamilies.rgbaTexturePage,
 							compactableDrawUnitIds: [],
 						},
 					},
@@ -94,14 +94,14 @@ describe("webgl2 texture atlas generation", () => {
 	});
 });
 
-function createPlan(): BakedRenderablePlan {
+function createPlan(): CompactionFamilyPlan {
 	const levelBytes = Uint8Array.from([
 		1, 2, 3, 255, 4, 5, 6, 255, 7, 8, 9, 255, 10, 11, 12, 255,
 	]);
 	return {
-		key: "baked-renderables/test",
-		submitFamilies: {
-			rgbaAtlas: {
+		key: "compaction-families/test",
+		renderFamilies: {
+			rgbaTexturePage: {
 				kind: "rgba-atlas",
 				compactableDrawUnitIds: ["draw-a"],
 				materialSlots: [],

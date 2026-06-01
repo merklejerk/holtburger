@@ -65,15 +65,15 @@ import {
 } from "./texture-sampling-policy";
 import { type StagedWorldMaterialAtlasEligibility } from "./staged-world-material-strategy";
 import {
-	createBakeEligibility,
-	createEmptyBakedRenderablePlan,
-	planBakedRenderables,
-	type BakeEligibility,
-	type BakedIndexedMaterialTableRecord,
-	type BakedRenderableDetailEntry,
-	type BakedRenderablePlan,
-	type BakedRenderablePolicy,
-} from "./baked-renderable-planner";
+	createCompactionEligibility,
+	createEmptyCompactionFamilyPlan,
+	planCompactionFamilies,
+	type CompactionEligibility,
+	type IndexedPalettedFamilyMaterialTableRecord,
+	type RgbaTexturePageDetailAtlasEntry,
+	type CompactionFamilyPlan,
+	type CompactionFamilyPlanningPolicy,
+} from "./compaction-family-planner";
 import {
 	deriveDirectGeometrySubmissionLayout,
 	type GeometrySubmissionLayout,
@@ -125,7 +125,7 @@ export interface Webgl2WorldDrawUnit {
 	directTextureSamplingPolicy: TextureSamplingPolicy | null;
 	textureUploadSample: string | null;
 	atlasEligibility: StagedWorldMaterialAtlasEligibility | null;
-	bakeEligibility: BakeEligibility;
+	compactionEligibility: CompactionEligibility;
 	textureKey: string | null;
 	texture: Webgl2Texture2DResource | null;
 	indexedMaterial: Webgl2IndexedMaterialResources | null;
@@ -164,7 +164,7 @@ export interface Webgl2WorldResourceStore {
 	atlasEligibleMaterialCount: number;
 	atlasCandidateEntryCount: number;
 	atlasCandidateMaterialSlotCount: number;
-	bakedRenderablePlan: BakedRenderablePlan;
+	compactionFamilyPlan: CompactionFamilyPlan;
 	textureAtlasGeneration: Webgl2TextureAtlasGenerationResource | null;
 	textureAtlasGenerationGraph: RendererResourceGraph | null;
 	textureAtlasGenerationGraphLease: RendererResourceGraphLease | null;
@@ -176,17 +176,17 @@ export interface Webgl2WorldResourceStore {
 	compactedGeometryFamilyResourceCounts: Record<string, number>;
 	compactedGeometryBatchGraph: RendererResourceGraph | null;
 	compactedGeometryBatchGraphLeasesByKey: Map<string, RendererResourceGraphLease>;
-	bakedCandidateDrawUnitCount: number;
-	bakedBypassReasonCount: number;
-	bakedBypassSamples: readonly string[];
-	bakedCoverageDrawUnitCounts: Record<string, number>;
-	bakedCoverageMaterialBlockerCounts: Record<string, number>;
-	bakedCoverageGeometryBlockerCounts: Record<string, number>;
-	bakedCoverageMaterialFamilyCounts: Record<string, number>;
-	bakedCoverageMaterialAlphaPolicyCounts: Record<string, number>;
-	bakedCoverageMaterialFamilyAlphaPolicyCounts: Record<string, number>;
-	bakedCoverageRetainedDirectMaterialFamilyCounts: Record<string, number>;
-	bakedCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts: Record<
+	compactionCandidateDrawUnitCount: number;
+	compactionBypassReasonCount: number;
+	compactionBypassSamples: readonly string[];
+	compactionCoverageDrawUnitCounts: Record<string, number>;
+	compactionCoverageMaterialBlockerCounts: Record<string, number>;
+	compactionCoverageGeometryBlockerCounts: Record<string, number>;
+	compactionCoverageMaterialFamilyCounts: Record<string, number>;
+	compactionCoverageMaterialAlphaPolicyCounts: Record<string, number>;
+	compactionCoverageMaterialFamilyAlphaPolicyCounts: Record<string, number>;
+	compactionCoverageRetainedDirectMaterialFamilyCounts: Record<string, number>;
+	compactionCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts: Record<
 		string,
 		number
 	>;
@@ -234,7 +234,7 @@ export interface Webgl2DetailOverlayResources {
 	texture: Webgl2Texture2DResource;
 	tiling: number;
 	blendMode: ResolvedRegionDetailOverlayPlan["blendMode"];
-	atlasEntry: BakedRenderableDetailEntry | null;
+	atlasEntry: RgbaTexturePageDetailAtlasEntry | null;
 }
 
 export interface Webgl2IndexedMaterialResources {
@@ -286,7 +286,7 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		atlasEligibleMaterialCount: 0,
 		atlasCandidateEntryCount: 0,
 		atlasCandidateMaterialSlotCount: 0,
-		bakedRenderablePlan: createEmptyBakedRenderablePlan(),
+		compactionFamilyPlan: createEmptyCompactionFamilyPlan(),
 		textureAtlasGeneration: null,
 		textureAtlasGenerationGraph: null,
 		textureAtlasGenerationGraphLease: null,
@@ -295,17 +295,17 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		compactedGeometryFamilyResourceCounts: {},
 		compactedGeometryBatchGraph: null,
 		compactedGeometryBatchGraphLeasesByKey: new Map(),
-		bakedCandidateDrawUnitCount: 0,
-		bakedBypassReasonCount: 0,
-		bakedBypassSamples: [],
-		bakedCoverageDrawUnitCounts: {},
-		bakedCoverageMaterialBlockerCounts: {},
-		bakedCoverageGeometryBlockerCounts: {},
-		bakedCoverageMaterialFamilyCounts: {},
-		bakedCoverageMaterialAlphaPolicyCounts: {},
-		bakedCoverageMaterialFamilyAlphaPolicyCounts: {},
-		bakedCoverageRetainedDirectMaterialFamilyCounts: {},
-		bakedCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts: {},
+		compactionCandidateDrawUnitCount: 0,
+		compactionBypassReasonCount: 0,
+		compactionBypassSamples: [],
+		compactionCoverageDrawUnitCounts: {},
+		compactionCoverageMaterialBlockerCounts: {},
+		compactionCoverageGeometryBlockerCounts: {},
+		compactionCoverageMaterialFamilyCounts: {},
+		compactionCoverageMaterialAlphaPolicyCounts: {},
+		compactionCoverageMaterialFamilyAlphaPolicyCounts: {},
+		compactionCoverageRetainedDirectMaterialFamilyCounts: {},
+		compactionCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts: {},
 		textureAtlasGenerationTextureCount: 0,
 		detailTextureAtlasGenerationTextureCount: 0,
 		compactedGeometryBatchCount: 0,
@@ -485,41 +485,41 @@ export function syncWebgl2WorldResources({
 				: [],
 		),
 	).size;
-	store.bakedRenderablePlan = profileBrowserJsScope(
-		"webgl2.resource.planBakedRenderables",
+	store.compactionFamilyPlan = profileBrowserJsScope(
+		"webgl2.resource.planCompactionFamilies",
 		() =>
-			planBakedRenderables({
-				drawUnits: store.drawUnits.map(toBakedRenderableCandidate),
-				policy: DEFAULT_WEBGL2_BAKED_RENDERABLE_POLICY,
+			planCompactionFamilies({
+				drawUnits: store.drawUnits.map(toCompactionFamilyCandidate),
+				policy: DEFAULT_WEBGL2_COMPACTION_FAMILY_PLANNING_POLICY,
 			}),
 	);
-	store.bakedCandidateDrawUnitCount =
-		store.bakedRenderablePlan.submitFamilies.rgbaAtlas.compactableDrawUnitIds.length;
-	store.bakedBypassReasonCount = store.bakedRenderablePlan.bypasses.length;
-	store.bakedBypassSamples = summarizeDiagnosticReasons(
-		store.bakedRenderablePlan.bypasses.map((bypass) => bypass.reason),
+	store.compactionCandidateDrawUnitCount =
+		store.compactionFamilyPlan.renderFamilies.rgbaTexturePage.compactableDrawUnitIds.length;
+	store.compactionBypassReasonCount = store.compactionFamilyPlan.bypasses.length;
+	store.compactionBypassSamples = summarizeDiagnosticReasons(
+		store.compactionFamilyPlan.bypasses.map((bypass) => bypass.reason),
 		8,
 	);
-	const bakedCoverageMetrics = collectBakedCoverageMetrics(store.drawUnits);
-	store.bakedCoverageDrawUnitCounts = bakedCoverageMetrics.drawUnitCounts;
-	store.bakedCoverageMaterialBlockerCounts =
-		bakedCoverageMetrics.materialBlockerCounts;
-	store.bakedCoverageGeometryBlockerCounts =
-		bakedCoverageMetrics.geometryBlockerCounts;
-	store.bakedCoverageMaterialFamilyCounts =
-		bakedCoverageMetrics.materialFamilyCounts;
-	store.bakedCoverageMaterialAlphaPolicyCounts =
-		bakedCoverageMetrics.materialAlphaPolicyCounts;
-	store.bakedCoverageMaterialFamilyAlphaPolicyCounts =
-		bakedCoverageMetrics.materialFamilyAlphaPolicyCounts;
-	store.bakedCoverageRetainedDirectMaterialFamilyCounts =
-		bakedCoverageMetrics.retainedDirectMaterialFamilyCounts;
-	store.bakedCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts =
-		bakedCoverageMetrics.retainedDirectMaterialFamilyAlphaPolicyCounts;
+	const compactionCoverageMetrics = collectCompactionCoverageMetrics(store.drawUnits);
+	store.compactionCoverageDrawUnitCounts = compactionCoverageMetrics.drawUnitCounts;
+	store.compactionCoverageMaterialBlockerCounts =
+		compactionCoverageMetrics.materialBlockerCounts;
+	store.compactionCoverageGeometryBlockerCounts =
+		compactionCoverageMetrics.geometryBlockerCounts;
+	store.compactionCoverageMaterialFamilyCounts =
+		compactionCoverageMetrics.materialFamilyCounts;
+	store.compactionCoverageMaterialAlphaPolicyCounts =
+		compactionCoverageMetrics.materialAlphaPolicyCounts;
+	store.compactionCoverageMaterialFamilyAlphaPolicyCounts =
+		compactionCoverageMetrics.materialFamilyAlphaPolicyCounts;
+	store.compactionCoverageRetainedDirectMaterialFamilyCounts =
+		compactionCoverageMetrics.retainedDirectMaterialFamilyCounts;
+	store.compactionCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts =
+		compactionCoverageMetrics.retainedDirectMaterialFamilyAlphaPolicyCounts;
 	syncWebgl2TextureAtlasGeneration({
 		gl,
 		store,
-		plan: store.bakedRenderablePlan,
+		plan: store.compactionFamilyPlan,
 		rendererResourceGraph,
 	});
 	resolveWebgl2DrawUnitTexturePageBindings(store);
@@ -566,7 +566,7 @@ export function syncWebgl2WorldResources({
 	syncWebgl2CompactedGeometryResources({
 		gl,
 		store,
-		plan: store.bakedRenderablePlan,
+		plan: store.compactionFamilyPlan,
 		drawUnits: assembly.drawUnits,
 		renderChunkTransforms,
 		rendererResourceGraph,
@@ -612,7 +612,7 @@ export function destroyWebgl2WorldResources(
 	store.atlasEligibleMaterialCount = 0;
 	store.atlasCandidateEntryCount = 0;
 	store.atlasCandidateMaterialSlotCount = 0;
-	store.bakedRenderablePlan = createEmptyBakedRenderablePlan();
+	store.compactionFamilyPlan = createEmptyCompactionFamilyPlan();
 	store.textureAtlasGeneration?.dispose();
 	store.textureAtlasGeneration = null;
 	for (const batch of store.compactedGeometryBatches.values()) {
@@ -621,17 +621,17 @@ export function destroyWebgl2WorldResources(
 	store.compactedGeometryBatches.clear();
 	store.compactedGeometryFamilyResources.clear();
 	store.compactedGeometryFamilyResourceCounts = {};
-	store.bakedCandidateDrawUnitCount = 0;
-	store.bakedBypassReasonCount = 0;
-	store.bakedBypassSamples = [];
-	store.bakedCoverageDrawUnitCounts = {};
-	store.bakedCoverageMaterialBlockerCounts = {};
-	store.bakedCoverageGeometryBlockerCounts = {};
-	store.bakedCoverageMaterialFamilyCounts = {};
-	store.bakedCoverageMaterialAlphaPolicyCounts = {};
-	store.bakedCoverageMaterialFamilyAlphaPolicyCounts = {};
-	store.bakedCoverageRetainedDirectMaterialFamilyCounts = {};
-	store.bakedCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts = {};
+	store.compactionCandidateDrawUnitCount = 0;
+	store.compactionBypassReasonCount = 0;
+	store.compactionBypassSamples = [];
+	store.compactionCoverageDrawUnitCounts = {};
+	store.compactionCoverageMaterialBlockerCounts = {};
+	store.compactionCoverageGeometryBlockerCounts = {};
+	store.compactionCoverageMaterialFamilyCounts = {};
+	store.compactionCoverageMaterialAlphaPolicyCounts = {};
+	store.compactionCoverageMaterialFamilyAlphaPolicyCounts = {};
+	store.compactionCoverageRetainedDirectMaterialFamilyCounts = {};
+	store.compactionCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts = {};
 	store.textureAtlasGenerationTextureCount = 0;
 	store.detailTextureAtlasGenerationTextureCount = 0;
 	store.compactedGeometryBatchCount = 0;
@@ -659,7 +659,7 @@ export function destroyWebgl2WorldResources(
 	store.triangleCount = 0;
 }
 
-const DEFAULT_WEBGL2_BAKED_RENDERABLE_POLICY: BakedRenderablePolicy = {
+const DEFAULT_WEBGL2_COMPACTION_FAMILY_PLANNING_POLICY: CompactionFamilyPlanningPolicy = {
 	maxAtlasTextureSize: 4096,
 	maxAtlasTextureCount: 8,
 	baseGutterPixels: 2,
@@ -741,7 +741,7 @@ function createOrReuseWebgl2DrawUnit({
 		previous.texturePageBindingFallbackSamples = [];
 		previous.directGeometryLayout =
 			deriveDirectGeometrySubmissionLayout(previous);
-		previous.bakeEligibility = createBakeEligibility({
+		previous.compactionEligibility = createCompactionEligibility({
 			kind: previous.kind,
 			owningLandblockId: previous.owningLandblockId,
 			materialKind: previous.materialKind,
@@ -859,7 +859,7 @@ function createOrReuseWebgl2DrawUnit({
 		directTextureSamplingPolicy,
 		textureUploadSample: resolveWebgl2DrawUnitTextureUploadSample(drawUnit),
 		atlasEligibility,
-		bakeEligibility: createBakeEligibility({
+		compactionEligibility: createCompactionEligibility({
 			kind: drawUnit.kind,
 			owningLandblockId: resolveAtlasCompactionLandblockId(drawUnit),
 			materialKind: drawUnit.material.kind,
@@ -948,7 +948,7 @@ function resolveAtlasCompactionLandblockId(
 	}
 }
 
-function toBakedRenderableCandidate(drawUnit: Webgl2WorldDrawUnit) {
+function toCompactionFamilyCandidate(drawUnit: Webgl2WorldDrawUnit) {
 	return {
 		id: drawUnit.id,
 		kind: drawUnit.kind,
@@ -957,27 +957,27 @@ function toBakedRenderableCandidate(drawUnit: Webgl2WorldDrawUnit) {
 		materialKind: drawUnit.materialKind,
 		materialKey: drawUnit.materialKey,
 		detailAtlasEntry: drawUnit.detailOverlay?.atlasEntry ?? null,
-		indexedMaterialTableRecord: createBakedIndexedMaterialTableRecord(drawUnit),
-		bakeEligibility: drawUnit.bakeEligibility,
+		indexedMaterialTableRecord: createIndexedPalettedFamilyMaterialTableRecord(drawUnit),
+		compactionEligibility: drawUnit.compactionEligibility,
 		triangleCount: drawUnit.triangleCount,
 		staticPartCount: drawUnit.staticPartCount,
 		staticObjectKeys: drawUnit.staticObjectKeys,
 	};
 }
 
-function createBakedIndexedMaterialTableRecord(
+function createIndexedPalettedFamilyMaterialTableRecord(
 	drawUnit: Webgl2WorldDrawUnit,
-): BakedIndexedMaterialTableRecord | null {
+): IndexedPalettedFamilyMaterialTableRecord | null {
 	const indexedMaterial = drawUnit.indexedMaterial;
 	if (
 		!indexedMaterial ||
-		drawUnit.bakeEligibility.material.alphaPolicy !== "opaque"
+		drawUnit.compactionEligibility.material.alphaPolicy !== "opaque"
 	) {
 		return null;
 	}
 	return {
 		key: [
-			"baked-indexed-material",
+			"compacted-indexed-material",
 			drawUnit.materialKey,
 			indexedMaterial.indexTextureKey,
 			indexedMaterial.paletteTextureKey,
@@ -1399,7 +1399,7 @@ function resolveDetailAtlasEntry({
 	key: string;
 	overlay: ResolvedRegionDetailOverlayPlan;
 	upload: (RenderSurfaceTextureUploadPreparation & { status: "ready" }) | null;
-}): BakedRenderableDetailEntry | null {
+}): RgbaTexturePageDetailAtlasEntry | null {
 	if (overlay.blendMode !== "dst-color") {
 		return null;
 	}
@@ -1814,7 +1814,7 @@ function countStringOccurrences(
 	return counts;
 }
 
-function collectBakedCoverageMetrics(
+function collectCompactionCoverageMetrics(
 	drawUnits: readonly Webgl2WorldDrawUnit[],
 ): {
 	drawUnitCounts: Record<string, number>;
@@ -1835,15 +1835,15 @@ function collectBakedCoverageMetrics(
 	const retainedDirectMaterialFamilies: string[] = [];
 	const retainedDirectMaterialFamilyAlphaPolicies: string[] = [];
 	for (const drawUnit of drawUnits) {
-		const materialFamily = drawUnit.bakeEligibility.material.family;
-		const alphaPolicy = drawUnit.bakeEligibility.material.alphaPolicy;
+		const materialFamily = drawUnit.compactionEligibility.material.family;
+		const alphaPolicy = drawUnit.compactionEligibility.material.alphaPolicy;
 		const materialFamilyAlphaPolicy = `${materialFamily}|alpha=${alphaPolicy}`;
 		incrementCount(drawUnitCounts, "total");
 		if (drawUnit.kind === "static" || drawUnit.kind === "structured-interior") {
 			incrementCount(drawUnitCounts, "static-or-structured-total");
 		}
-		if (drawUnit.bakeEligibility.decision === "baked") {
-			incrementCount(drawUnitCounts, "baked-compatible");
+		if (drawUnit.compactionEligibility.decision === "compacted") {
+			incrementCount(drawUnitCounts, "compacted-compatible");
 		} else {
 			incrementCount(drawUnitCounts, "retained-direct");
 			if (
@@ -1858,8 +1858,8 @@ function collectBakedCoverageMetrics(
 		materialFamilies.push(materialFamily);
 		materialAlphaPolicies.push(alphaPolicy);
 		materialFamilyAlphaPolicies.push(materialFamilyAlphaPolicy);
-		materialBlockers.push(...drawUnit.bakeEligibility.material.blockers);
-		geometryBlockers.push(...drawUnit.bakeEligibility.geometry.blockers);
+		materialBlockers.push(...drawUnit.compactionEligibility.material.blockers);
+		geometryBlockers.push(...drawUnit.compactionEligibility.geometry.blockers);
 	}
 	return {
 		drawUnitCounts,
@@ -2046,7 +2046,7 @@ function syncWebgl2TextureAtlasGeneration({
 }: {
 	gl: WebGL2RenderingContext;
 	store: Webgl2WorldResourceStore;
-	plan: BakedRenderablePlan;
+	plan: CompactionFamilyPlan;
 	rendererResourceGraph?: RendererResourceGraph;
 }): void {
 	if (
@@ -2055,7 +2055,7 @@ function syncWebgl2TextureAtlasGeneration({
 	) {
 		releaseWebgl2TextureAtlasGenerationGraphLease(store);
 	}
-	if (plan.submitFamilies.rgbaAtlas.compactableDrawUnitIds.length === 0) {
+	if (plan.renderFamilies.rgbaTexturePage.compactableDrawUnitIds.length === 0) {
 		store.textureAtlasGeneration?.dispose();
 		store.textureAtlasGeneration = null;
 		store.textureAtlasGenerationTextureCount = 0;
@@ -2117,12 +2117,12 @@ function refreshWebgl2TextureAtlasGenerationCoverage({
 	plan,
 }: {
 	generation: Webgl2TextureAtlasGenerationResource;
-	plan: BakedRenderablePlan;
+	plan: CompactionFamilyPlan;
 }): Webgl2TextureAtlasGenerationResource {
 	if (
 		stringArraysEqual(
 			generation.compactableDrawUnitIds,
-			plan.submitFamilies.rgbaAtlas.compactableDrawUnitIds,
+			plan.renderFamilies.rgbaTexturePage.compactableDrawUnitIds,
 		) &&
 		stringArraysEqual(
 			generation.preparedTextureAssetIds,
@@ -2134,7 +2134,7 @@ function refreshWebgl2TextureAtlasGenerationCoverage({
 	return {
 		...generation,
 		compactableDrawUnitIds:
-			plan.submitFamilies.rgbaAtlas.compactableDrawUnitIds,
+			plan.renderFamilies.rgbaTexturePage.compactableDrawUnitIds,
 		preparedTextureAssetIds: plan.preparedTextureAssetIds,
 	};
 }
@@ -2217,7 +2217,7 @@ function syncWebgl2CompactedGeometryResources({
 }: {
 	gl: WebGL2RenderingContext;
 	store: Webgl2WorldResourceStore;
-	plan: BakedRenderablePlan;
+	plan: CompactionFamilyPlan;
 	drawUnits: readonly StagedWorldDrawUnitAssembly[];
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	rendererResourceGraph?: RendererResourceGraph;
@@ -2232,7 +2232,7 @@ function syncWebgl2CompactedGeometryResources({
 	const retainedGeometryBatchKeys = new Set<string>();
 	const retainedFamilyResourceKeys = new Set<string>();
 	if (
-		plan.submitFamilies.rgbaAtlas.compactableDrawUnitIds.length > 0 &&
+		plan.renderFamilies.rgbaTexturePage.compactableDrawUnitIds.length > 0 &&
 		!store.textureAtlasGeneration
 	) {
 		store.compactedResourceFallbackSamples = [
@@ -2240,10 +2240,10 @@ function syncWebgl2CompactedGeometryResources({
 		];
 	}
 	if (
-		plan.submitFamilies.rgbaAtlas.compactableDrawUnitIds.length > 0 &&
+		plan.renderFamilies.rgbaTexturePage.compactableDrawUnitIds.length > 0 &&
 		store.textureAtlasGeneration
 	) {
-		const batchPlans = createBakedGeometryLandblockBatchPlans({
+		const batchPlans = createRgbaTexturePageCompactedLandblockBatchPlans({
 			plan,
 			drawUnits,
 			renderChunkTransforms,
@@ -2290,8 +2290,8 @@ function syncWebgl2CompactedGeometryResources({
 			);
 		}
 	}
-	if (plan.submitFamilies.indexedPaletted.compactableDrawUnitIds.length > 0) {
-		const batchPlans = createBakedIndexedGeometryLandblockBatchPlans({
+	if (plan.renderFamilies.indexedPaletted.compactableDrawUnitIds.length > 0) {
+		const batchPlans = createIndexedPalettedCompactedLandblockBatchPlans({
 			plan,
 			drawUnits,
 			renderChunkTransforms,
@@ -2347,30 +2347,30 @@ function syncWebgl2CompactedGeometryResources({
 		store.compactedGeometryFamilyResources,
 	);
 	store.compactedGeometryBatchCount = store.compactedGeometryBatches.size;
-	store.compactedGeometryDrawUnitCount = sumBakedGeometryBatches(
+	store.compactedGeometryDrawUnitCount = sumCompactedGeometryBatches(
 		store,
 		(batch) => batch.drawUnitCount,
 	);
-	store.compactedGeometryTriangleCount = sumBakedGeometryBatches(
+	store.compactedGeometryTriangleCount = sumCompactedGeometryBatches(
 		store,
 		(batch) => batch.triangleCount,
 	);
-	store.compactedGeometryVertexByteLength = sumBakedGeometryBatches(
+	store.compactedGeometryVertexByteLength = sumCompactedGeometryBatches(
 		store,
 		(batch) =>
 			batch.positionByteLength +
 			batch.uvByteLength +
 			batch.materialSlotByteLength,
 	);
-	store.compactedGeometryIndexByteLength = sumBakedGeometryBatches(
+	store.compactedGeometryIndexByteLength = sumCompactedGeometryBatches(
 		store,
 		(batch) => batch.indexByteLength,
 	);
-	store.compactedGeometryTotalByteLength = sumBakedGeometryBatches(
+	store.compactedGeometryTotalByteLength = sumCompactedGeometryBatches(
 		store,
 		(batch) => batch.totalByteLength,
 	);
-	store.compactedGeometryDrawSliceCount = sumBakedGeometryBatches(
+	store.compactedGeometryDrawSliceCount = sumCompactedGeometryBatches(
 		store,
 		(batch) => batch.drawSliceCount,
 	);
@@ -2386,7 +2386,7 @@ function syncWebgl2CompactedGeometryResources({
 		if (store.compactedGeometryBatchGraphLeasesByKey.has(batchNodeKey)) {
 			continue;
 		}
-		upsertWebgl2BakedGeometryBatchGraph({
+		upsertWebgl2CompactedGeometryBatchGraph({
 			graph: rendererResourceGraph,
 			batch,
 			familyResources: [
@@ -2398,7 +2398,7 @@ function syncWebgl2CompactedGeometryResources({
 			batchNodeKey,
 			rendererResourceGraph.leaseNode(
 				batchNodeKey,
-				"webgl2 baked landblock batch",
+				"webgl2 compacted landblock batch",
 			),
 		);
 	}
@@ -2435,7 +2435,7 @@ function retainWebgl2CompactedGeometryBatch({
 	updateWebgl2CompactedGeometryBatchDynamicTables(previousBatch, geometry);
 }
 
-function upsertWebgl2BakedGeometryBatchGraph({
+function upsertWebgl2CompactedGeometryBatchGraph({
 	graph,
 	batch,
 	familyResources,
@@ -2482,18 +2482,18 @@ function upsertWebgl2BakedGeometryBatchGraph({
 	});
 }
 
-function createBakedIndexedGeometryLandblockBatchPlans({
+function createIndexedPalettedCompactedLandblockBatchPlans({
 	plan,
 	drawUnits,
 	renderChunkTransforms,
 }: {
-	plan: BakedRenderablePlan;
+	plan: CompactionFamilyPlan;
 	drawUnits: readonly StagedWorldDrawUnitAssembly[];
 	renderChunkTransforms: readonly RenderChunkTransform[];
 }): {
 	landblockId: number;
 	batchOrigin: RenderChunkTransform["offset"];
-	materialTableRecords: readonly BakedIndexedMaterialTableRecord[];
+	materialTableRecords: readonly IndexedPalettedFamilyMaterialTableRecord[];
 	plan: {
 		key: string;
 		compactableDrawUnitIds: readonly string[];
@@ -2502,11 +2502,11 @@ function createBakedIndexedGeometryLandblockBatchPlans({
 			drawUnitId: string;
 			materialSlotKey: string;
 		}[];
-		drawSlices: BakedRenderablePlan["submitFamilies"]["indexedPaletted"]["drawSlices"];
+		drawSlices: CompactionFamilyPlan["renderFamilies"]["indexedPaletted"]["drawSlices"];
 		triangleCount: number;
 	};
 }[] {
-	const family = plan.submitFamilies.indexedPaletted;
+	const family = plan.renderFamilies.indexedPaletted;
 	const drawUnitById = new Map(
 		drawUnits.map((drawUnit) => [drawUnit.id, drawUnit]),
 	);
@@ -2545,7 +2545,7 @@ function createBakedIndexedGeometryLandblockBatchPlans({
 			return {
 				landblockId,
 				batchOrigin,
-				...createBakedIndexedGeometryLandblockBatchPlan({
+				...createIndexedPalettedCompactedLandblockBatchPlan({
 					sourcePlan: plan,
 					landblockId,
 					drawUnitIds: drawUnitIds.sort(),
@@ -2555,18 +2555,18 @@ function createBakedIndexedGeometryLandblockBatchPlans({
 		});
 }
 
-function createBakedIndexedGeometryLandblockBatchPlan({
+function createIndexedPalettedCompactedLandblockBatchPlan({
 	sourcePlan,
 	landblockId,
 	drawUnitIds,
 	drawUnits,
 }: {
-	sourcePlan: BakedRenderablePlan;
+	sourcePlan: CompactionFamilyPlan;
 	landblockId: number;
 	drawUnitIds: readonly string[];
 	drawUnits: readonly StagedWorldDrawUnitAssembly[];
 }): {
-	materialTableRecords: readonly BakedIndexedMaterialTableRecord[];
+	materialTableRecords: readonly IndexedPalettedFamilyMaterialTableRecord[];
 	plan: {
 		key: string;
 		compactableDrawUnitIds: readonly string[];
@@ -2575,7 +2575,7 @@ function createBakedIndexedGeometryLandblockBatchPlan({
 			drawUnitId: string;
 			materialSlotKey: string;
 		}[];
-		drawSlices: BakedRenderablePlan["submitFamilies"]["indexedPaletted"]["drawSlices"];
+		drawSlices: CompactionFamilyPlan["renderFamilies"]["indexedPaletted"]["drawSlices"];
 		triangleCount: number;
 	};
 } {
@@ -2592,7 +2592,7 @@ function createBakedIndexedGeometryLandblockBatchPlan({
 		}
 		return drawUnit;
 	});
-	const family = sourcePlan.submitFamilies.indexedPaletted;
+	const family = sourcePlan.renderFamilies.indexedPaletted;
 	const sourceRecordByKey = new Map(
 		family.materialTableRecords.map((record) => [record.key, record] as const),
 	);
@@ -2679,7 +2679,7 @@ function createBakedIndexedGeometryLandblockBatchPlan({
 	};
 }
 
-function createTextureAtlasPlacementsByEntryKey(plan: BakedRenderablePlan) {
+function createTextureAtlasPlacementsByEntryKey(plan: CompactionFamilyPlan) {
 	return new Map(
 		plan.atlasTextures.flatMap((texture) =>
 			texture.placements.map(
@@ -2690,7 +2690,7 @@ function createTextureAtlasPlacementsByEntryKey(plan: BakedRenderablePlan) {
 }
 
 function createDetailTextureAtlasPlacementsByEntryKey(
-	plan: BakedRenderablePlan,
+	plan: CompactionFamilyPlan,
 ) {
 	return new Map(
 		plan.detailAtlasTextures.flatMap((texture) =>
@@ -2701,18 +2701,18 @@ function createDetailTextureAtlasPlacementsByEntryKey(
 	);
 }
 
-function createBakedGeometryLandblockBatchPlans({
+function createRgbaTexturePageCompactedLandblockBatchPlans({
 	plan,
 	drawUnits,
 	renderChunkTransforms,
 }: {
-	plan: BakedRenderablePlan;
+	plan: CompactionFamilyPlan;
 	drawUnits: readonly StagedWorldDrawUnitAssembly[];
 	renderChunkTransforms: readonly RenderChunkTransform[];
 }): {
 	landblockId: number;
 	batchOrigin: RenderChunkTransform["offset"];
-	plan: BakedRenderablePlan;
+	plan: CompactionFamilyPlan;
 }[] {
 	const drawUnitById = new Map(
 		drawUnits.map((drawUnit) => [drawUnit.id, drawUnit]),
@@ -2723,7 +2723,7 @@ function createBakedGeometryLandblockBatchPlans({
 		),
 	);
 	const drawUnitIdsByLandblockId = new Map<number, string[]>();
-	for (const drawUnitId of plan.submitFamilies.rgbaAtlas
+	for (const drawUnitId of plan.renderFamilies.rgbaTexturePage
 		.compactableDrawUnitIds) {
 		const drawUnit = drawUnitById.get(drawUnitId);
 		if (!drawUnit) {
@@ -2753,7 +2753,7 @@ function createBakedGeometryLandblockBatchPlans({
 			return {
 				landblockId,
 				batchOrigin,
-				plan: createBakedGeometryLandblockBatchPlan({
+				plan: createRgbaTexturePageCompactedLandblockBatchPlan({
 					sourcePlan: plan,
 					drawUnits,
 					landblockId,
@@ -2763,17 +2763,17 @@ function createBakedGeometryLandblockBatchPlans({
 		});
 }
 
-function createBakedGeometryLandblockBatchPlan({
+function createRgbaTexturePageCompactedLandblockBatchPlan({
 	sourcePlan,
 	drawUnits,
 	landblockId,
 	drawUnitIds,
 }: {
-	sourcePlan: BakedRenderablePlan;
+	sourcePlan: CompactionFamilyPlan;
 	drawUnits: readonly StagedWorldDrawUnitAssembly[];
 	landblockId: number;
 	drawUnitIds: readonly string[];
-}): BakedRenderablePlan {
+}): CompactionFamilyPlan {
 	const drawUnitIdSet = new Set(drawUnitIds);
 	const drawUnitById = new Map(
 		drawUnits.map((drawUnit) => [drawUnit.id, drawUnit]),
@@ -2788,12 +2788,12 @@ function createBakedGeometryLandblockBatchPlan({
 		return drawUnit;
 	});
 	const sourceMaterialSlotByKey = new Map(
-		sourcePlan.submitFamilies.rgbaAtlas.materialSlots.map(
+		sourcePlan.renderFamilies.rgbaTexturePage.materialSlots.map(
 			(slot) => [slot.key, slot] as const,
 		),
 	);
 	const sourceMaterialSlotKeyByDrawUnitId = new Map(
-		sourcePlan.submitFamilies.rgbaAtlas.drawUnitMaterialSlots.map(
+		sourcePlan.renderFamilies.rgbaTexturePage.drawUnitMaterialSlots.map(
 			(record) => [record.drawUnitId, record.materialSlotKey] as const,
 		),
 	);
@@ -2820,7 +2820,7 @@ function createBakedGeometryLandblockBatchPlan({
 	const localMaterialSlotByKey = new Map(
 		localMaterialSlots.map((slot) => [slot.key, slot] as const),
 	);
-	const sourceSlices = sourcePlan.submitFamilies.rgbaAtlas.drawSlices
+	const sourceSlices = sourcePlan.renderFamilies.rgbaTexturePage.drawSlices
 		.map((slice) => {
 			const localDrawUnitIds = slice.drawUnitIds.filter((drawUnitId) =>
 				drawUnitIdSet.has(drawUnitId),
@@ -2857,14 +2857,14 @@ function createBakedGeometryLandblockBatchPlan({
 	return {
 		...sourcePlan,
 		key: `${sourcePlan.key}|landblock=${formatHex32(landblockId)}`,
-		submitFamilies: {
-			...sourcePlan.submitFamilies,
-			rgbaAtlas: {
+		renderFamilies: {
+			...sourcePlan.renderFamilies,
+			rgbaTexturePage: {
 				kind: "rgba-atlas",
 				compactableDrawUnitIds: drawUnitIds,
 				materialSlots: localMaterialSlots,
 				drawUnitMaterialSlots:
-					sourcePlan.submitFamilies.rgbaAtlas.drawUnitMaterialSlots
+					sourcePlan.renderFamilies.rgbaTexturePage.drawUnitMaterialSlots
 						.filter((record) => drawUnitIdSet.has(record.drawUnitId))
 						.map((record) => ({
 							drawUnitId: record.drawUnitId,
@@ -2876,7 +2876,7 @@ function createBakedGeometryLandblockBatchPlan({
 		compactableDrawUnitIds: drawUnitIds,
 		materialSlots: localMaterialSlots,
 		drawUnitMaterialSlots:
-			sourcePlan.submitFamilies.rgbaAtlas.drawUnitMaterialSlots
+			sourcePlan.renderFamilies.rgbaTexturePage.drawUnitMaterialSlots
 				.filter((record) => drawUnitIdSet.has(record.drawUnitId))
 				.map((record) => ({
 					drawUnitId: record.drawUnitId,
@@ -2897,7 +2897,7 @@ function createBakedGeometryLandblockBatchPlan({
 	};
 }
 
-function sumBakedGeometryBatches(
+function sumCompactedGeometryBatches(
 	store: Webgl2WorldResourceStore,
 	select: (batch: Webgl2CompactedGeometryBatchResource) => number,
 ): number {
@@ -2917,7 +2917,7 @@ function countCompactedFamilyResources(
 	return counts;
 }
 
-function disposeWebgl2BakedGeometryBatch(
+function disposeWebgl2CompactedGeometryBatch(
 	store: Webgl2WorldResourceStore,
 ): void {
 	for (const batch of store.compactedGeometryBatches.values()) {

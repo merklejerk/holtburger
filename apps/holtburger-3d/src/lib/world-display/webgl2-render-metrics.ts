@@ -258,7 +258,7 @@ export function createWebgl2RenderMetrics(
 					?.bakedCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts ?? {},
 			bakedCoverageVisibleRetainedDirectMaterialFamilyCounts:
 				input.submitMetrics
-					.visibleRetainedDirectDrawUnitCountsByBakeMaterialFamily,
+					.visibleRetainedDirectDrawUnitCountsByCompactionFamily,
 			textureAtlasGenerationTextureCount:
 				input.worldStore?.textureAtlasGenerationTextureCount ?? 0,
 			detailTextureAtlasGenerationTextureCount:
@@ -286,39 +286,39 @@ export function createWebgl2RenderMetrics(
 			compactedResourceFallbackSamples: [
 				...(input.worldStore?.compactedResourceFallbackSamples ?? []),
 			],
-			bakedShaderDrawCallCount: input.submitMetrics.bakedShaderDrawCallCount,
-			bakedSubmittedBatchCount: input.submitMetrics.bakedSubmittedBatchCount,
-			bakedSubmittedDrawSliceCount:
-				input.submitMetrics.bakedSubmittedDrawSliceCount,
-			bakedSubmittedSliceRepresentedDrawUnitCount:
-				input.submitMetrics.bakedSubmittedSliceRepresentedDrawUnitCount,
-			bakedSubmittedTriangleCount:
-				input.submitMetrics.bakedSubmittedTriangleCount,
-			bakedReplacedDrawUnitCount:
-				input.submitMetrics.bakedReplacedDrawUnitCount,
-			bakedReplacedDrawUnitTriangleCount:
-				input.submitMetrics.bakedReplacedDrawUnitTriangleCount,
-			bakedConservativeOverdrawTriangleCount:
-				input.submitMetrics.bakedConservativeOverdrawTriangleCount,
-			bakedConservativeOverdrawRatio:
-				input.submitMetrics.bakedConservativeOverdrawRatio,
-			bakedRetainedDirectDrawUnitCount:
-				input.submitMetrics.bakedRetainedDirectDrawUnitCount,
-			bakedOriginalDrawCallEstimateCount:
-				input.submitMetrics.bakedOriginalDrawCallEstimateCount,
-			bakedSubmittedDrawCallEstimateCount:
-				input.submitMetrics.bakedSubmittedDrawCallEstimateCount,
-			bakedDrawCallSavingsCount: input.submitMetrics.bakedDrawCallSavingsCount,
-			bakedSubmitNoVisibleRouteCount:
-				input.submitMetrics.bakedSubmitNoVisibleRouteCount,
-			bakedSubmitNoVisibleExteriorRouteCount:
-				input.submitMetrics.bakedSubmitNoVisibleExteriorRouteCount,
-			bakedSubmitNoVisibleInteriorRouteCount:
-				input.submitMetrics.bakedSubmitNoVisibleInteriorRouteCount,
-			bakedSubmitNoVisibleOtherRouteCount:
-				input.submitMetrics.bakedSubmitNoVisibleOtherRouteCount,
-			bakedSubmitFallbackSamples: [
-				...input.submitMetrics.bakedSubmitFallbackSamples,
+			rgbaTexturePageFamilyShaderDrawCallCount: input.submitMetrics.rgbaTexturePageFamilyShaderDrawCallCount,
+			rgbaTexturePageFamilySubmittedBatchCount: input.submitMetrics.rgbaTexturePageFamilySubmittedBatchCount,
+			rgbaTexturePageFamilySubmittedDrawSliceCount:
+				input.submitMetrics.rgbaTexturePageFamilySubmittedDrawSliceCount,
+			rgbaTexturePageFamilySubmittedSliceRepresentedDrawUnitCount:
+				input.submitMetrics.rgbaTexturePageFamilySubmittedSliceRepresentedDrawUnitCount,
+			rgbaTexturePageFamilySubmittedTriangleCount:
+				input.submitMetrics.rgbaTexturePageFamilySubmittedTriangleCount,
+			rgbaTexturePageFamilyReplacedDrawUnitCount:
+				input.submitMetrics.rgbaTexturePageFamilyReplacedDrawUnitCount,
+			rgbaTexturePageFamilyReplacedDrawUnitTriangleCount:
+				input.submitMetrics.rgbaTexturePageFamilyReplacedDrawUnitTriangleCount,
+			rgbaTexturePageFamilyConservativeOverdrawTriangleCount:
+				input.submitMetrics.rgbaTexturePageFamilyConservativeOverdrawTriangleCount,
+			rgbaTexturePageFamilyConservativeOverdrawRatio:
+				input.submitMetrics.rgbaTexturePageFamilyConservativeOverdrawRatio,
+			rgbaTexturePageFamilyRetainedDirectDrawUnitCount:
+				input.submitMetrics.rgbaTexturePageFamilyRetainedDirectDrawUnitCount,
+			rgbaTexturePageFamilyOriginalDrawCallEstimateCount:
+				input.submitMetrics.rgbaTexturePageFamilyOriginalDrawCallEstimateCount,
+			rgbaTexturePageFamilySubmittedDrawCallEstimateCount:
+				input.submitMetrics.rgbaTexturePageFamilySubmittedDrawCallEstimateCount,
+			rgbaTexturePageFamilyDrawCallSavingsCount: input.submitMetrics.rgbaTexturePageFamilyDrawCallSavingsCount,
+			rgbaTexturePageFamilyNoVisibleRouteCount:
+				input.submitMetrics.rgbaTexturePageFamilyNoVisibleRouteCount,
+			rgbaTexturePageFamilyNoVisibleExteriorRouteCount:
+				input.submitMetrics.rgbaTexturePageFamilyNoVisibleExteriorRouteCount,
+			rgbaTexturePageFamilyNoVisibleInteriorRouteCount:
+				input.submitMetrics.rgbaTexturePageFamilyNoVisibleInteriorRouteCount,
+			rgbaTexturePageFamilyNoVisibleOtherRouteCount:
+				input.submitMetrics.rgbaTexturePageFamilyNoVisibleOtherRouteCount,
+			rgbaTexturePageFamilyFallbackSamples: [
+				...input.submitMetrics.rgbaTexturePageFamilyFallbackSamples,
 			],
 			directTexturePageDrawCount:
 				input.submitMetrics.directTexturePageDrawCount,
@@ -405,7 +405,7 @@ export function createWebgl2RenderMetrics(
 						...prefixCounts(
 							"webgl2-baked-visible-retained-family-",
 							input.submitMetrics
-								.visibleRetainedDirectDrawUnitCountsByBakeMaterialFamily,
+								.visibleRetainedDirectDrawUnitCountsByCompactionFamily,
 						),
 						"webgl2-texture-atlas-generation-textures":
 							input.worldStore.textureAtlasGenerationTextureCount,
@@ -426,25 +426,25 @@ export function createWebgl2RenderMetrics(
 						"webgl2-compacted-geometry-transform-table-entries":
 							input.worldStore.compactedGeometryTransformTableEntryCount,
 						"webgl2-rgba-family-shader-draws":
-							input.submitMetrics.bakedShaderDrawCallCount,
+							input.submitMetrics.rgbaTexturePageFamilyShaderDrawCallCount,
 						"webgl2-rgba-family-submitted-batches":
-							input.submitMetrics.bakedSubmittedBatchCount,
+							input.submitMetrics.rgbaTexturePageFamilySubmittedBatchCount,
 						"webgl2-rgba-family-submitted-slices":
-							input.submitMetrics.bakedSubmittedDrawSliceCount,
+							input.submitMetrics.rgbaTexturePageFamilySubmittedDrawSliceCount,
 						"webgl2-rgba-family-submitted-slice-draw-units":
-							input.submitMetrics.bakedSubmittedSliceRepresentedDrawUnitCount,
+							input.submitMetrics.rgbaTexturePageFamilySubmittedSliceRepresentedDrawUnitCount,
 						"webgl2-rgba-family-submitted-triangles":
-							input.submitMetrics.bakedSubmittedTriangleCount,
+							input.submitMetrics.rgbaTexturePageFamilySubmittedTriangleCount,
 						"webgl2-rgba-family-replaced-draw-units":
-							input.submitMetrics.bakedReplacedDrawUnitCount,
+							input.submitMetrics.rgbaTexturePageFamilyReplacedDrawUnitCount,
 						"webgl2-rgba-family-replaced-triangles":
-							input.submitMetrics.bakedReplacedDrawUnitTriangleCount,
+							input.submitMetrics.rgbaTexturePageFamilyReplacedDrawUnitTriangleCount,
 						"webgl2-rgba-family-conservative-overdraw-triangles":
-							input.submitMetrics.bakedConservativeOverdrawTriangleCount,
+							input.submitMetrics.rgbaTexturePageFamilyConservativeOverdrawTriangleCount,
 						"webgl2-rgba-family-draw-call-savings":
-							input.submitMetrics.bakedDrawCallSavingsCount,
+							input.submitMetrics.rgbaTexturePageFamilyDrawCallSavingsCount,
 						"webgl2-rgba-family-no-visible-routes":
-							input.submitMetrics.bakedSubmitNoVisibleRouteCount,
+							input.submitMetrics.rgbaTexturePageFamilyNoVisibleRouteCount,
 						"webgl2-staged-atlas-draws":
 							input.submitMetrics.stagedAtlasDrawCount,
 						"webgl2-direct-packed-texture-page-draws":

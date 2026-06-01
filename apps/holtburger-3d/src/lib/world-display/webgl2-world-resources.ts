@@ -148,15 +148,12 @@ export interface Webgl2WorldResourceStore {
 	materialFallbackReasonCount: number;
 	materialFallbackReasonSamples: readonly string[];
 	textureSamplingPolicyCounts: Record<string, number>;
-	textureSamplingPolicySamples: readonly string[];
-	textureUploadSamples: readonly string[];
 	texturePageBindingCount: number;
 	texturePageUsageBucketCounts: Record<string, number>;
 	texturePageSampleClassCounts: Record<string, number>;
 	atlasEligibleMaterialCount: number;
 	atlasCandidateEntryCount: number;
 	atlasCandidateMaterialSlotCount: number;
-	atlasCandidateSamples: readonly string[];
 	bakedRenderablePlan: BakedRenderablePlan;
 	textureAtlasGeneration: Webgl2TextureAtlasGenerationResource | null;
 	textureAtlasGenerationGraph: RendererResourceGraph | null;
@@ -173,6 +170,11 @@ export interface Webgl2WorldResourceStore {
 	bakedCandidateDrawUnitCount: number;
 	bakedBypassReasonCount: number;
 	bakedBypassSamples: readonly string[];
+	bakedCoverageDrawUnitCounts: Record<string, number>;
+	bakedCoverageMaterialBlockerCounts: Record<string, number>;
+	bakedCoverageGeometryBlockerCounts: Record<string, number>;
+	bakedCoverageMaterialFamilyCounts: Record<string, number>;
+	bakedCoverageRetainedDirectMaterialFamilyCounts: Record<string, number>;
 	textureAtlasGenerationTextureCount: number;
 	detailTextureAtlasGenerationTextureCount: number;
 	bakedGeometryBatchCount: number;
@@ -263,15 +265,12 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		materialFallbackReasonCount: 0,
 		materialFallbackReasonSamples: [],
 		textureSamplingPolicyCounts: {},
-		textureSamplingPolicySamples: [],
-		textureUploadSamples: [],
 		texturePageBindingCount: 0,
 		texturePageUsageBucketCounts: {},
 		texturePageSampleClassCounts: {},
 		atlasEligibleMaterialCount: 0,
 		atlasCandidateEntryCount: 0,
 		atlasCandidateMaterialSlotCount: 0,
-		atlasCandidateSamples: [],
 		bakedRenderablePlan: createEmptyBakedRenderablePlan(),
 		textureAtlasGeneration: null,
 		textureAtlasGenerationGraph: null,
@@ -282,6 +281,11 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		bakedCandidateDrawUnitCount: 0,
 		bakedBypassReasonCount: 0,
 		bakedBypassSamples: [],
+		bakedCoverageDrawUnitCounts: {},
+		bakedCoverageMaterialBlockerCounts: {},
+		bakedCoverageGeometryBlockerCounts: {},
+		bakedCoverageMaterialFamilyCounts: {},
+		bakedCoverageRetainedDirectMaterialFamilyCounts: {},
 		textureAtlasGenerationTextureCount: 0,
 		detailTextureAtlasGenerationTextureCount: 0,
 		bakedGeometryBatchCount: 0,
@@ -433,12 +437,6 @@ export function syncWebgl2WorldResources({
 	store.textureSamplingPolicyCounts = countStringOccurrences(
 		textureSamplingPolicies,
 	);
-	store.textureSamplingPolicySamples = [
-		...new Set(textureSamplingPolicies),
-	].slice(0, 8);
-	store.textureUploadSamples = [
-		...collectTextureUploadSamples(store.drawUnits),
-	];
 	const texturePageBindings = store.drawUnits.flatMap((drawUnit) => [
 		...drawUnit.texturePageBindings,
 	]);
@@ -467,9 +465,6 @@ export function syncWebgl2WorldResources({
 				: [],
 		),
 	).size;
-	store.atlasCandidateSamples = [
-		...new Set(atlasEligibleDrawUnits.map(describeAtlasCandidateSample)),
-	].slice(0, 8);
 	store.bakedRenderablePlan = profileBrowserJsScope(
 		"webgl2.resource.planBakedRenderables",
 		() =>
@@ -488,6 +483,16 @@ export function syncWebgl2WorldResources({
 		),
 		8,
 	);
+	const bakedCoverageMetrics = collectBakedCoverageMetrics(store.drawUnits);
+	store.bakedCoverageDrawUnitCounts = bakedCoverageMetrics.drawUnitCounts;
+	store.bakedCoverageMaterialBlockerCounts =
+		bakedCoverageMetrics.materialBlockerCounts;
+	store.bakedCoverageGeometryBlockerCounts =
+		bakedCoverageMetrics.geometryBlockerCounts;
+	store.bakedCoverageMaterialFamilyCounts =
+		bakedCoverageMetrics.materialFamilyCounts;
+	store.bakedCoverageRetainedDirectMaterialFamilyCounts =
+		bakedCoverageMetrics.retainedDirectMaterialFamilyCounts;
 	syncWebgl2TextureAtlasGeneration({
 		gl,
 		store,
@@ -578,15 +583,12 @@ export function destroyWebgl2WorldResources(
 	store.materialFallbackReasonCount = 0;
 	store.materialFallbackReasonSamples = [];
 	store.textureSamplingPolicyCounts = {};
-	store.textureSamplingPolicySamples = [];
-	store.textureUploadSamples = [];
 	store.texturePageBindingCount = 0;
 	store.texturePageUsageBucketCounts = {};
 	store.texturePageSampleClassCounts = {};
 	store.atlasEligibleMaterialCount = 0;
 	store.atlasCandidateEntryCount = 0;
 	store.atlasCandidateMaterialSlotCount = 0;
-	store.atlasCandidateSamples = [];
 	store.bakedRenderablePlan = createEmptyBakedRenderablePlan();
 	store.textureAtlasGeneration?.dispose();
 	store.textureAtlasGeneration = null;
@@ -597,6 +599,11 @@ export function destroyWebgl2WorldResources(
 	store.bakedCandidateDrawUnitCount = 0;
 	store.bakedBypassReasonCount = 0;
 	store.bakedBypassSamples = [];
+	store.bakedCoverageDrawUnitCounts = {};
+	store.bakedCoverageMaterialBlockerCounts = {};
+	store.bakedCoverageGeometryBlockerCounts = {};
+	store.bakedCoverageMaterialFamilyCounts = {};
+	store.bakedCoverageRetainedDirectMaterialFamilyCounts = {};
 	store.textureAtlasGenerationTextureCount = 0;
 	store.detailTextureAtlasGenerationTextureCount = 0;
 	store.bakedGeometryBatchCount = 0;
@@ -708,6 +715,7 @@ function createOrReuseWebgl2DrawUnit({
 		previous.bakeEligibility = createBakeEligibility({
 			kind: previous.kind,
 			owningLandblockId: previous.owningLandblockId,
+			materialKind: previous.materialKind,
 			hasUvBuffer: previous.uvBuffer !== null,
 			texturePageBindings: previous.texturePageBindings,
 			materialBehavior: previous.materialBehavior,
@@ -824,6 +832,7 @@ function createOrReuseWebgl2DrawUnit({
 		bakeEligibility: createBakeEligibility({
 			kind: drawUnit.kind,
 			owningLandblockId: resolveAtlasCompactionLandblockId(drawUnit),
+			materialKind: drawUnit.material.kind,
 			hasUvBuffer: uvBuffer !== null,
 			texturePageBindings,
 			materialBehavior: drawUnit.material.behavior,
@@ -915,6 +924,7 @@ function toBakedRenderableCandidate(drawUnit: Webgl2WorldDrawUnit) {
 		kind: drawUnit.kind,
 		owningLandblockId: drawUnit.owningLandblockId,
 		sceneDomain: drawUnit.sceneDomain,
+		materialKind: drawUnit.materialKind,
 		materialKey: drawUnit.materialKey,
 		detailAtlasEntry: drawUnit.detailOverlay?.atlasEntry ?? null,
 		bakeEligibility: drawUnit.bakeEligibility,
@@ -1137,23 +1147,6 @@ function resolveWebgl2DrawUnitAtlasEligibility(
 	return drawUnit.material.kind === "direct-texture"
 		? drawUnit.material.atlasEligibility
 		: null;
-}
-
-function describeAtlasCandidateSample(drawUnit: Webgl2WorldDrawUnit): string {
-	const eligibility = drawUnit.atlasEligibility;
-	if (!eligibility) {
-		throw new Error(
-			`Cannot describe atlas candidate sample for draw unit ${drawUnit.id} without atlas eligibility.`,
-		);
-	}
-	return [
-		drawUnit.kind,
-		eligibility.materialSlotKey,
-		`entry=${eligibility.atlasEntryKey}`,
-		eligibility.renderStateKey,
-		eligibility.samplingKey,
-		`prepared=${eligibility.atlasEntry.preparedTextureAssetId}`,
-	].join(" ");
 }
 
 function resolveWebgl2DrawUnitTexture({
@@ -1755,36 +1748,62 @@ function countStringOccurrences(
 	return counts;
 }
 
-function collectTextureUploadSamples(
+function collectBakedCoverageMetrics(
 	drawUnits: readonly Webgl2WorldDrawUnit[],
-): readonly string[] {
-	const samples = new Map<string, string>();
+): {
+	drawUnitCounts: Record<string, number>;
+	materialBlockerCounts: Record<string, number>;
+	geometryBlockerCounts: Record<string, number>;
+	materialFamilyCounts: Record<string, number>;
+	retainedDirectMaterialFamilyCounts: Record<string, number>;
+} {
+	const drawUnitCounts: Record<string, number> = {};
+	const materialBlockers: string[] = [];
+	const geometryBlockers: string[] = [];
+	const materialFamilies: string[] = [];
+	const retainedDirectMaterialFamilies: string[] = [];
 	for (const drawUnit of drawUnits) {
-		if (!drawUnit.textureKey || samples.has(drawUnit.textureKey)) {
-			continue;
+		incrementCount(drawUnitCounts, "total");
+		if (
+			drawUnit.kind === "static" ||
+			drawUnit.kind === "structured-interior"
+		) {
+			incrementCount(drawUnitCounts, "static-or-structured-total");
 		}
-		samples.set(drawUnit.textureKey, describeDrawUnitTextureUpload(drawUnit));
-		if (samples.size >= 8) {
-			break;
+		if (drawUnit.bakeEligibility.decision === "baked") {
+			incrementCount(drawUnitCounts, "baked-compatible");
+		} else {
+			incrementCount(drawUnitCounts, "retained-direct");
+			if (
+				drawUnit.kind === "static" ||
+				drawUnit.kind === "structured-interior"
+			) {
+				incrementCount(
+					drawUnitCounts,
+					"static-or-structured-retained-direct",
+				);
+			}
+			retainedDirectMaterialFamilies.push(
+				drawUnit.bakeEligibility.material.family,
+			);
 		}
+		materialFamilies.push(drawUnit.bakeEligibility.material.family);
+		materialBlockers.push(...drawUnit.bakeEligibility.material.blockers);
+		geometryBlockers.push(...drawUnit.bakeEligibility.geometry.blockers);
 	}
-	return [...samples.values()];
+	return {
+		drawUnitCounts,
+		materialBlockerCounts: countStringOccurrences(materialBlockers),
+		geometryBlockerCounts: countStringOccurrences(geometryBlockers),
+		materialFamilyCounts: countStringOccurrences(materialFamilies),
+		retainedDirectMaterialFamilyCounts: countStringOccurrences(
+			retainedDirectMaterialFamilies,
+		),
+	};
 }
 
-function describeDrawUnitTextureUpload(drawUnit: Webgl2WorldDrawUnit): string {
-	if (drawUnit.indexedMaterial) {
-		return [
-			drawUnit.indexedMaterial.key,
-			drawUnit.indexedMaterial.indexFormat,
-			`${drawUnit.indexedMaterial.width}x${drawUnit.indexedMaterial.height}`,
-			`palette=${drawUnit.indexedMaterial.paletteColorCount}`,
-			"mips=deferred",
-		].join(" ");
-	}
-	return (
-		drawUnit.textureUploadSample ??
-		`${drawUnit.textureKey ?? drawUnit.id}: unavailable`
-	);
+function incrementCount(counts: Record<string, number>, key: string): void {
+	counts[key] = (counts[key] ?? 0) + 1;
 }
 
 function summarizeDiagnosticReasons(

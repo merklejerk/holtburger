@@ -10,7 +10,13 @@ export type BakedRenderableBypassReason =
 	| "unsupported-baked-material-family"
 	| "missing-uv-buffer"
 	| "missing-atlas-eligibility"
-	| "non-opaque-material"
+	| "unsupported-alpha-test-material"
+	| "unsupported-blended-material"
+	| "unsupported-constant-color-material"
+	| "unsupported-indexed-paletted-material"
+	| "unsupported-terrain-material"
+	| "debug-pipeline-material"
+	| "unsupported-material-state"
 	| "detail-overlay"
 	| "missing-detail-atlas-entry"
 	| "source-texture-too-large"
@@ -18,9 +24,31 @@ export type BakedRenderableBypassReason =
 	| "detail-atlas-full"
 	| "material-table-overflow";
 
+export type BakeMaterialKind =
+	| "flat"
+	| "direct-texture"
+	| "indexed-paletted"
+	| "terrain-blend";
+
+export type BakeMaterialFamily =
+	| "flat-constant-color"
+	| "textured-opaque"
+	| "alpha-test"
+	| "blended"
+	| "indexed-paletted"
+	| "terrain-blend"
+	| "debug-pipeline"
+	| "unknown-unsupported";
+
 export type BakeMaterialBlocker =
 	| "missing-base-texture-page"
 	| "missing-atlas-eligibility"
+	| "missing-baked-constant-color-family"
+	| "missing-baked-indexed-paletted-family"
+	| "missing-baked-alpha-test-family"
+	| "missing-baked-blended-family"
+	| "missing-baked-terrain-family"
+	| "debug-pipeline-material"
 	| "missing-detail-atlas-entry"
 	| "unsupported-material-state"
 	| "unsupported-texture-page-behavior";
@@ -33,6 +61,7 @@ export type BakeGeometryBlocker =
 export interface BakeEligibility {
 	decision: "baked" | "direct-draw";
 	material: {
+		family: BakeMaterialFamily;
 		compatible: boolean;
 		blockers: readonly BakeMaterialBlocker[];
 		atlasEligibility: StagedWorldMaterialAtlasEligibility | null;
@@ -56,6 +85,7 @@ export interface BakedRenderableCandidate {
 	kind: string;
 	owningLandblockId: number | null;
 	sceneDomain: Webgl2SceneDomain | null;
+	materialKind: BakeMaterialKind;
 	materialKey: string;
 	detailAtlasEntry: BakedRenderableDetailEntry | null;
 	bakeEligibility: BakeEligibility;
@@ -370,6 +400,7 @@ function classifyBakedRenderableBypass(
 export function createBakeEligibility(options: {
 	kind: string;
 	owningLandblockId: number | null;
+	materialKind: BakeMaterialKind;
 	hasUvBuffer: boolean;
 	texturePageBindings: readonly TexturePageBinding[];
 	materialBehavior: LegacyMaterialBehaviorDto | null;
@@ -388,21 +419,50 @@ export function createBakeEligibility(options: {
 		geometryBlockers.push("missing-uv-buffer");
 	}
 
+	const materialFamily = classifyBakeMaterialFamily({
+		drawUnitKind: options.kind,
+		materialKind: options.materialKind,
+		materialBehavior: options.materialBehavior,
+	});
 	const materialBlockers: BakeMaterialBlocker[] = [];
-	if (!options.atlasEligibility) {
-		materialBlockers.push("missing-atlas-eligibility");
-	}
-	if (!hasCompatibleBakedBaseTexturePage(options.texturePageBindings)) {
-		materialBlockers.push("missing-base-texture-page");
-	}
-	if (options.hasDetailOverlay && !options.detailAtlasEntry) {
-		materialBlockers.push("missing-detail-atlas-entry");
-	}
-	if (!isOpaqueStaticCompactionMaterial(options.materialBehavior)) {
-		materialBlockers.push("unsupported-material-state");
-	}
-	if (!hasOnlySupportedBakedTexturePageBehavior(options.texturePageBindings)) {
-		materialBlockers.push("unsupported-texture-page-behavior");
+	switch (materialFamily) {
+		case "flat-constant-color":
+			materialBlockers.push("missing-baked-constant-color-family");
+			break;
+		case "indexed-paletted":
+			materialBlockers.push("missing-baked-indexed-paletted-family");
+			break;
+		case "terrain-blend":
+			materialBlockers.push("missing-baked-terrain-family");
+			break;
+		case "debug-pipeline":
+			materialBlockers.push("debug-pipeline-material");
+			break;
+		case "alpha-test":
+			materialBlockers.push("missing-baked-alpha-test-family");
+			break;
+		case "blended":
+			materialBlockers.push("missing-baked-blended-family");
+			break;
+		case "unknown-unsupported":
+			materialBlockers.push("unsupported-material-state");
+			break;
+		case "textured-opaque":
+			if (!options.atlasEligibility) {
+				materialBlockers.push("missing-atlas-eligibility");
+			}
+			if (!hasCompatibleBakedBaseTexturePage(options.texturePageBindings)) {
+				materialBlockers.push("missing-base-texture-page");
+			}
+			if (options.hasDetailOverlay && !options.detailAtlasEntry) {
+				materialBlockers.push("missing-detail-atlas-entry");
+			}
+			if (
+				!hasOnlySupportedBakedTexturePageBehavior(options.texturePageBindings)
+			) {
+				materialBlockers.push("unsupported-texture-page-behavior");
+			}
+			break;
 	}
 
 	const geometryCompatible = geometryBlockers.length === 0;
@@ -411,6 +471,7 @@ export function createBakeEligibility(options: {
 		decision:
 			geometryCompatible && materialCompatible ? "baked" : "direct-draw",
 		material: {
+			family: materialFamily,
 			compatible: materialCompatible,
 			blockers: materialBlockers,
 			atlasEligibility: options.atlasEligibility,
@@ -454,6 +515,42 @@ function createMaterialBakeBypass(
 	blocker: BakeMaterialBlocker,
 ): BakedRenderableBypass {
 	switch (blocker) {
+		case "missing-baked-constant-color-family":
+			return {
+				drawUnitId: drawUnit.id,
+				reason: "unsupported-constant-color-material",
+				detail: `flat/solid material ${drawUnit.materialKey} has no baked constant-color material family`,
+			};
+		case "missing-baked-indexed-paletted-family":
+			return {
+				drawUnitId: drawUnit.id,
+				reason: "unsupported-indexed-paletted-material",
+				detail: `indexed/paletted material ${drawUnit.materialKey} has no baked indexed material family`,
+			};
+		case "missing-baked-alpha-test-family":
+			return {
+				drawUnitId: drawUnit.id,
+				reason: "unsupported-alpha-test-material",
+				detail: `alpha-test material ${drawUnit.materialKey} has no baked cutout material family`,
+			};
+		case "missing-baked-blended-family":
+			return {
+				drawUnitId: drawUnit.id,
+				reason: "unsupported-blended-material",
+				detail: `blended material ${drawUnit.materialKey} has no baked transparent material family`,
+			};
+		case "missing-baked-terrain-family":
+			return {
+				drawUnitId: drawUnit.id,
+				reason: "unsupported-terrain-material",
+				detail: `terrain material ${drawUnit.materialKey} belongs to the terrain pipeline`,
+			};
+		case "debug-pipeline-material":
+			return {
+				drawUnitId: drawUnit.id,
+				reason: "debug-pipeline-material",
+				detail: `debug/portal material ${drawUnit.materialKey} is outside the production baked path`,
+			};
 		case "missing-base-texture-page":
 			return {
 				drawUnitId: drawUnit.id,
@@ -475,8 +572,8 @@ function createMaterialBakeBypass(
 		case "unsupported-material-state":
 			return {
 				drawUnitId: drawUnit.id,
-				reason: "non-opaque-material",
-				detail: "material state is not supported by the current baked shader family",
+				reason: "unsupported-material-state",
+				detail: `material ${drawUnit.materialKey} is not supported by any current baked material family`,
 			};
 		case "unsupported-texture-page-behavior":
 			return {
@@ -485,6 +582,43 @@ function createMaterialBakeBypass(
 				detail: "texture-page bindings require a baked shader family that is not implemented",
 			};
 	}
+}
+
+export function classifyBakeMaterialFamily(options: {
+	drawUnitKind: string;
+	materialKind: BakeMaterialKind;
+	materialBehavior: LegacyMaterialBehaviorDto | null;
+}): BakeMaterialFamily {
+	if (options.drawUnitKind === "portal-mask") {
+		return "debug-pipeline";
+	}
+	switch (options.materialKind) {
+		case "flat":
+			return "flat-constant-color";
+		case "indexed-paletted":
+			return "indexed-paletted";
+		case "terrain-blend":
+			return "terrain-blend";
+		case "direct-texture":
+			return classifyDirectTextureBakeMaterialFamily(
+				options.materialBehavior,
+			);
+	}
+}
+
+function classifyDirectTextureBakeMaterialFamily(
+	behavior: LegacyMaterialBehaviorDto | null,
+): BakeMaterialFamily {
+	if (behavior === null) {
+		return "unknown-unsupported";
+	}
+	if (behavior.blend.enabled || behavior.transparent || behavior.opacity < 1) {
+		return "blended";
+	}
+	if (behavior.alphaTest > 0) {
+		return "alpha-test";
+	}
+	return "textured-opaque";
 }
 
 function hasCompatibleBakedBaseTexturePage(

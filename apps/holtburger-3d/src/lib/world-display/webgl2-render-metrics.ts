@@ -225,10 +225,6 @@ export function createWebgl2RenderMetrics(
 			detailTexturesEnabled: input.detailTexturesEnabled,
 			textureSamplingPolicyCounts:
 				input.worldStore?.textureSamplingPolicyCounts ?? {},
-			textureSamplingPolicySamples: [
-				...(input.worldStore?.textureSamplingPolicySamples ?? []),
-			],
-			textureUploadSamples: [...(input.worldStore?.textureUploadSamples ?? [])],
 			texturePageBindingCount: input.worldStore?.texturePageBindingCount ?? 0,
 			texturePageUsageBucketCounts:
 				input.worldStore?.texturePageUsageBucketCounts ?? {},
@@ -239,13 +235,20 @@ export function createWebgl2RenderMetrics(
 			atlasCandidateEntryCount: input.worldStore?.atlasCandidateEntryCount ?? 0,
 			atlasCandidateMaterialSlotCount:
 				input.worldStore?.atlasCandidateMaterialSlotCount ?? 0,
-			atlasCandidateSamples: [
-				...(input.worldStore?.atlasCandidateSamples ?? []),
-			],
 			bakedCandidateDrawUnitCount:
 				input.worldStore?.bakedCandidateDrawUnitCount ?? 0,
 			bakedBypassReasonCount: input.worldStore?.bakedBypassReasonCount ?? 0,
 			bakedBypassSamples: [...(input.worldStore?.bakedBypassSamples ?? [])],
+			bakedCoverageDrawUnitCounts:
+				input.worldStore?.bakedCoverageDrawUnitCounts ?? {},
+			bakedCoverageMaterialBlockerCounts:
+				input.worldStore?.bakedCoverageMaterialBlockerCounts ?? {},
+			bakedCoverageGeometryBlockerCounts:
+				input.worldStore?.bakedCoverageGeometryBlockerCounts ?? {},
+			bakedCoverageMaterialFamilyCounts:
+				input.worldStore?.bakedCoverageMaterialFamilyCounts ?? {},
+			bakedCoverageRetainedDirectMaterialFamilyCounts:
+				input.worldStore?.bakedCoverageRetainedDirectMaterialFamilyCounts ?? {},
 			textureAtlasGenerationTextureCount:
 				input.worldStore?.textureAtlasGenerationTextureCount ?? 0,
 			detailTextureAtlasGenerationTextureCount:
@@ -353,6 +356,27 @@ export function createWebgl2RenderMetrics(
 						"webgl2-baked-candidates":
 							input.worldStore.bakedCandidateDrawUnitCount,
 						"webgl2-baked-bypasses": input.worldStore.bakedBypassReasonCount,
+						...prefixCounts(
+							"webgl2-baked-coverage-",
+							input.worldStore.bakedCoverageDrawUnitCounts,
+						),
+						...prefixCounts(
+							"webgl2-baked-material-blocker-",
+							input.worldStore.bakedCoverageMaterialBlockerCounts,
+						),
+						...prefixCounts(
+							"webgl2-baked-geometry-blocker-",
+							input.worldStore.bakedCoverageGeometryBlockerCounts,
+						),
+						...prefixCounts(
+							"webgl2-baked-material-family-",
+							input.worldStore.bakedCoverageMaterialFamilyCounts,
+						),
+						...prefixCounts(
+							"webgl2-baked-retained-family-",
+							input.worldStore
+								.bakedCoverageRetainedDirectMaterialFamilyCounts,
+						),
 						"webgl2-texture-atlas-generation-textures":
 							input.worldStore.textureAtlasGenerationTextureCount,
 						"webgl2-detail-texture-atlas-generation-textures":

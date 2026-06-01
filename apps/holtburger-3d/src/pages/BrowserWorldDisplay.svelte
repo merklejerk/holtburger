@@ -281,12 +281,20 @@
 			debug.renderCalls > 2_000
 				? "draw-call/state-change bound; static batching or later compaction is the next meaningful reducer"
 				: "draw pressure is not currently the dominant signal";
-		const materialTypes = summarizeRecord(debug.materialTypeCounts);
 		const texturePageBuckets = summarizeRecord(
 			debug.texturePageUsageBucketCounts,
 		);
-		const texturePageSampleClasses = summarizeRecord(
-			debug.texturePageSampleClassCounts,
+		const bakedMaterialFamilies = summarizeRecord(
+			debug.bakedCoverageMaterialFamilyCounts,
+		);
+		const bakedRetainedFamilies = summarizeRecord(
+			debug.bakedCoverageRetainedDirectMaterialFamilyCounts,
+		);
+		const bakedMaterialBlockers = summarizeRecord(
+			debug.bakedCoverageMaterialBlockerCounts,
+		);
+		const bakedGeometryBlockers = summarizeRecord(
+			debug.bakedCoverageGeometryBlockerCounts,
 		);
 		const fallbackSamples = summarizeSamples(debug.fallbackReasonSamples);
 		const bakedBypassSamples = summarizeSamples(debug.bakedBypassSamples);
@@ -303,7 +311,7 @@
 		const performanceText = renderMetrics?.performance
 			? `${renderMetrics.performance.fps.toFixed(1)} FPS, ${renderMetrics.performance.frameMs.toFixed(1)} ms/frame, ${renderMetrics.performance.renderMs.toFixed(1)} ms render`
 			: "waiting for performance sample";
-		return `Perf ${performanceText}. Diagnosis: ${diagnosis}. Draw pressure ${debug.renderCalls} visible draws from ${candidateBatchCount} candidate ${drawGroupTerm}; static candidates ${debug.staticBvhCandidateBatchCount}${staticCandidateRatio}; retained ${drawGroupTerm} terrain ${debug.terrainRenderBatchCount}, static ${debug.staticRenderBatchCount}, interiors ${debug.structuredInteriorRenderBatchCount}; retained tris ${debug.renderTriangles}. Material path ${debug.materialCount} materials, ${debug.textureResourceCount} textures, ${debug.indexedTextureResourceCount} indexed textures, ${debug.paletteResourceCount} palettes, direct/material types ${materialTypes}; texture-page bindings ${debug.texturePageBindingCount} buckets ${texturePageBuckets}, samples ${texturePageSampleClasses}; atlas candidates ${debug.atlasEligibleMaterialCount} draws, ${debug.atlasCandidateEntryCount} entries, ${debug.atlasCandidateMaterialSlotCount} material slots; direct texture-page draws ${debug.directTexturePageDrawCount} (${debug.directPackedTexturePageDrawCount} packed, ${debug.directSingleEntryTexturePageDrawCount} single-entry), est. binds avoided ${debug.directPackedTexturePageEstimatedBindAvoidedCount}, packed page textures ${debug.directPackedTexturePageTextureCount}${directTexturePageFallbackSamples ? `, texture-page fallbacks ${directTexturePageFallbackSamples}` : ""}; baked candidates ${debug.bakedCandidateDrawUnitCount}, base atlas textures ${debug.textureAtlasGenerationTextureCount}, detail atlas textures ${debug.detailTextureAtlasGenerationTextureCount}, baked batches ${debug.bakedGeometryBatchCount}, baked draws ${debug.bakedGeometryDrawUnitCount}, baked slices ${debug.bakedGeometryDrawSliceCount}, batch origins ${debug.bakedGeometryBatchOriginCount}, transform table entries ${debug.bakedGeometryTransformTableEntryCount}, baked bytes ${debug.bakedGeometryTotalByteLength}, baked shader draws ${debug.bakedShaderDrawCallCount}, submitted batches ${debug.bakedSubmittedBatchCount}, submitted slices ${debug.bakedSubmittedDrawSliceCount}, represented slice draws ${debug.bakedSubmittedSliceRepresentedDrawUnitCount}, replaced ${debug.bakedReplacedDrawUnitCount}, retained ${debug.bakedRetainedDirectDrawUnitCount}, baked draw-call math ${debug.bakedOriginalDrawCallEstimateCount}-${debug.bakedReplacedDrawUnitCount}+${debug.bakedShaderDrawCallCount}=${debug.bakedSubmittedDrawCallEstimateCount} saved ${debug.bakedDrawCallSavingsCount}, baked tris replaced/submitted ${debug.bakedReplacedDrawUnitTriangleCount}/${debug.bakedSubmittedTriangleCount}, conservative overdraw ${debug.bakedConservativeOverdrawTriangleCount} tris (${debug.bakedConservativeOverdrawRatio.toFixed(2)}), no-visible routes ${debug.bakedSubmitNoVisibleRouteCount} (exterior ${debug.bakedSubmitNoVisibleExteriorRouteCount}, interior ${debug.bakedSubmitNoVisibleInteriorRouteCount}, other ${debug.bakedSubmitNoVisibleOtherRouteCount}), baked bypasses ${debug.bakedBypassReasonCount}${bakedBypassSamples ? ` (${bakedBypassSamples})` : ""}${bakedResourceFallbackSamples ? `, baked resource fallbacks ${bakedResourceFallbackSamples}` : ""}${bakedSubmitFallbackSamples ? `, baked submit fallbacks ${bakedSubmitFallbackSamples}` : ""}; fallbacks ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}. Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}, transition depth ${debug.transitionPortalMaxDepth}; canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
+		return `Perf ${performanceText}. Diagnosis: ${diagnosis}. Draw pressure ${debug.renderCalls} visible draws from ${candidateBatchCount} candidate ${drawGroupTerm}; static candidates ${debug.staticBvhCandidateBatchCount}${staticCandidateRatio}; retained terrain ${debug.terrainRenderBatchCount}, static ${debug.staticRenderBatchCount}, interiors ${debug.structuredInteriorRenderBatchCount}; retained tris ${debug.renderTriangles}. Materials ${debug.materialCount}, textures ${debug.textureResourceCount}, indexed textures ${debug.indexedTextureResourceCount}, palettes ${debug.paletteResourceCount}; texture pages ${debug.texturePageBindingCount} bindings (${texturePageBuckets}); direct texture-page draws ${debug.directTexturePageDrawCount} (${debug.directPackedTexturePageDrawCount} packed, ${debug.directSingleEntryTexturePageDrawCount} single-entry)${directTexturePageFallbackSamples ? `, texture-page fallbacks ${directTexturePageFallbackSamples}` : ""}. Baked coverage: candidates ${debug.bakedCandidateDrawUnitCount}, families ${bakedMaterialFamilies}, retained families ${bakedRetainedFamilies}, material blockers ${bakedMaterialBlockers}, geometry blockers ${bakedGeometryBlockers}; batches ${debug.bakedGeometryBatchCount}, shader draws ${debug.bakedShaderDrawCallCount}, replaced ${debug.bakedReplacedDrawUnitCount}, retained ${debug.bakedRetainedDirectDrawUnitCount}, saved ${debug.bakedDrawCallSavingsCount}, overdraw ${debug.bakedConservativeOverdrawTriangleCount} tris (${debug.bakedConservativeOverdrawRatio.toFixed(2)}), no-visible routes ${debug.bakedSubmitNoVisibleRouteCount}; bypasses ${debug.bakedBypassReasonCount}${bakedBypassSamples ? ` (${bakedBypassSamples})` : ""}${bakedResourceFallbackSamples ? `, baked resource fallbacks ${bakedResourceFallbackSamples}` : ""}${bakedSubmitFallbackSamples ? `, baked submit fallbacks ${bakedSubmitFallbackSamples}` : ""}. Fallbacks ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}. Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}, transition depth ${debug.transitionPortalMaxDepth}; canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
 	});
 	const sceneContextText = $derived(renderResourceSnapshot.sceneContextText);
 	const cameraResidencyText = $derived.by(() => {
@@ -601,18 +609,6 @@
 			formatReportSections("Scene Details", browserPanelSceneDetailSections),
 			formatReportRows("Debug Summary", browserPanelDebugRows),
 			formatReportSections("Debug Details", browserPanelDebugDetailSections),
-			"Render Metrics JSON",
-			formatReportJson(renderMetrics),
-			"",
-			"Asset Snapshot",
-			formatReportJson({
-				status: assetState.status,
-				activeRequest: assetState.activeRequest,
-				preparedCounts: countPreparedAssetsByKind(assetState.preparedByAssetId),
-				cacheDiagnostics: assetState.cacheDiagnostics,
-				recentHistory: assetState.history.slice(-24),
-			}),
-			"",
 			"Runtime Appearance",
 			runtimeAppearanceStatusText,
 			formatReportRows("Runtime Appearance Rows", runtimeAppearanceRows),
@@ -1799,10 +1795,10 @@
 				/^landblock\/[0-9a-fA-F]{8}\/(?:outdoor|topology)$/.test(assetId),
 			)
 			.sort();
-		const recentHistory = assetState.history
-			.map((entry) => `${entry.status}:${entry.assetId}`)
-			.join(" | ");
-		return `landblock routes ${preparedLandblockRouteIds.length}: ${preparedLandblockRouteIds.slice(0, 4).join(", ") || "none"}; recent ${recentHistory || "none"}.`;
+		const problemCount = assetState.history.filter(
+			(entry) => entry.status !== "prepared",
+		).length;
+		return `landblock routes ${preparedLandblockRouteIds.length}: ${preparedLandblockRouteIds.slice(0, 4).join(", ") || "none"}; asset history problems ${problemCount}.`;
 	}
 
 	function describeAssetCacheDebugState(): string {

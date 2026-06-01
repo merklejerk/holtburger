@@ -13,7 +13,11 @@ type CandidateOptions = Partial<BakedRenderableCandidate> & {
 	entryKey?: string;
 	width?: number;
 	height?: number;
-	materialKind?: "direct-texture" | "indexed-paletted";
+	materialKind?:
+		| "flat"
+		| "direct-texture"
+		| "indexed-paletted"
+		| "terrain-blend";
 	materialBehavior?: LegacyMaterialBehaviorDto | null;
 	hasUvBuffer?: boolean;
 	hasDetailOverlay?: boolean;
@@ -96,9 +100,9 @@ describe("baked renderable planner", () => {
 		expect(plan.bypasses.map((bypass) => bypass.reason)).toEqual([
 			"non-static",
 			"missing-landblock-origin",
-			"unsupported-baked-material-family",
+			"unsupported-indexed-paletted-material",
 			"missing-detail-atlas-entry",
-			"non-opaque-material",
+			"unsupported-alpha-test-material",
 			"missing-atlas-eligibility",
 		]);
 	});
@@ -360,6 +364,7 @@ function createCandidate(
 				? 0x0102ffff
 				: options.owningLandblockId,
 		sceneDomain: options.sceneDomain ?? "exterior",
+		materialKind: options.materialKind ?? "direct-texture",
 		materialKey: options.materialKey ?? `material-${entryKey}`,
 		detailAtlasEntry,
 		bakeEligibility: createBakeEligibility({
@@ -368,6 +373,7 @@ function createCandidate(
 				options.owningLandblockId === undefined
 					? 0x0102ffff
 					: options.owningLandblockId,
+			materialKind: options.materialKind ?? "direct-texture",
 			hasUvBuffer: options.hasUvBuffer ?? true,
 			texturePageBindings,
 			materialBehavior: options.materialBehavior ?? OPAQUE_BEHAVIOR,

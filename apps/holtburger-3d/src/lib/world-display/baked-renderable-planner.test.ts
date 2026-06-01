@@ -1,16 +1,28 @@
 import { describe, expect, it } from "vitest";
 
 import {
-	createEmptyAtlasBackedCompactionPlan,
-	planAtlasBackedCompaction,
-	type AtlasBackedCompactionCandidate,
-} from "./atlas-backed-compaction-planner";
+	createBakeEligibility,
+	createEmptyBakedRenderablePlan,
+	planBakedRenderables,
+	type BakedRenderableCandidate,
+} from "./baked-renderable-planner";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
 import type { StagedWorldMaterialAtlasEligibility } from "./staged-world-material-strategy";
 
-describe("atlas-backed compaction planner", () => {
+type CandidateOptions = Partial<BakedRenderableCandidate> & {
+	entryKey?: string;
+	width?: number;
+	height?: number;
+	materialKind?: "direct-texture" | "indexed-paletted";
+	materialBehavior?: LegacyMaterialBehaviorDto | null;
+	hasUvBuffer?: boolean;
+	hasDetailOverlay?: boolean;
+	atlasEligibility?: StagedWorldMaterialAtlasEligibility | null;
+};
+
+describe("baked renderable planner", () => {
 	it("plans landblock-owned opaque direct-texture units into deterministic atlas slices", () => {
-		const plan = planAtlasBackedCompaction({
+		const plan = planBakedRenderables({
 			drawUnits: [
 				createCandidate({ id: "static-b", entryKey: "entry-b" }),
 				createCandidate({
@@ -60,7 +72,7 @@ describe("atlas-backed compaction planner", () => {
 	});
 
 	it("keeps unsupported first-slice materials on the staged path with reasons", () => {
-		const plan = planAtlasBackedCompaction({
+		const plan = planBakedRenderables({
 			drawUnits: [
 				createCandidate({ id: "terrain", kind: "terrain" }),
 				createCandidate({ id: "missing-landblock", owningLandblockId: null }),
@@ -91,8 +103,36 @@ describe("atlas-backed compaction planner", () => {
 		]);
 	});
 
+	it("keeps material-only and geometry-only eligibility on the direct path", () => {
+		const plan = planBakedRenderables({
+			drawUnits: [
+				createCandidate({ id: "material-only", owningLandblockId: null }),
+				createCandidate({ id: "geometry-only", atlasEligibility: null }),
+				createCandidate({ id: "fully-eligible" }),
+			],
+			policy: {
+				maxAtlasTextureSize: 32,
+				maxAtlasTextureCount: 1,
+				baseGutterPixels: 2,
+				maxMaterialSlotsPerDraw: 4,
+			},
+		});
+
+		expect(plan.compactableDrawUnitIds).toEqual(["fully-eligible"]);
+		expect(plan.bypasses).toMatchObject([
+			{
+				drawUnitId: "material-only",
+				reason: "missing-landblock-origin",
+			},
+			{
+				drawUnitId: "geometry-only",
+				reason: "missing-atlas-eligibility",
+			},
+		]);
+	});
+
 	it("keeps detail-overlay draw units compactable when an RGBA8 detail atlas entry is available", () => {
-		const plan = planAtlasBackedCompaction({
+		const plan = planBakedRenderables({
 			drawUnits: [
 				createCandidate({
 					id: "plain",
@@ -135,7 +175,7 @@ describe("atlas-backed compaction planner", () => {
 	});
 
 	it("splits compaction material slots when the same base material has different detail state", () => {
-		const plan = planAtlasBackedCompaction({
+		const plan = planBakedRenderables({
 			drawUnits: [
 				createCandidate({ id: "plain", entryKey: "shared" }),
 				createCandidate({
@@ -170,7 +210,7 @@ describe("atlas-backed compaction planner", () => {
 	});
 
 	it("splits compaction material slots when the same base material has different wrap policy", () => {
-		const plan = planAtlasBackedCompaction({
+		const plan = planBakedRenderables({
 			drawUnits: [
 				createCandidate({
 					id: "clamp",
@@ -218,7 +258,7 @@ describe("atlas-backed compaction planner", () => {
 	});
 
 	it("reports source texture and material table overflow before GPU resources exist", () => {
-		const plan = planAtlasBackedCompaction({
+		const plan = planBakedRenderables({
 			drawUnits: [
 				createCandidate({
 					id: "too-big",
@@ -245,8 +285,8 @@ describe("atlas-backed compaction planner", () => {
 	});
 
 	it("creates an empty plan for store initialization", () => {
-		expect(createEmptyAtlasBackedCompactionPlan()).toMatchObject({
-			key: "atlas-backed-compaction/empty",
+		expect(createEmptyBakedRenderablePlan()).toMatchObject({
+			key: "baked-renderables/empty",
 			compactableDrawUnitIds: [],
 			atlasTextures: [],
 			drawSlices: [],
@@ -273,13 +313,45 @@ const OPAQUE_BEHAVIOR: LegacyMaterialBehaviorDto = {
 };
 
 function createCandidate(
-	options: Partial<AtlasBackedCompactionCandidate> & {
-		entryKey?: string;
-		width?: number;
-		height?: number;
-	} = {},
-): AtlasBackedCompactionCandidate {
+	options: CandidateOptions = {},
+): BakedRenderableCandidate {
 	const entryKey = options.entryKey ?? "entry";
+	const atlasEligibility =
+		options.atlasEligibility === undefined
+			? createAtlasEligibility({
+					entryKey,
+					width: options.width ?? 8,
+					height: options.height ?? 8,
+				})
+			: options.atlasEligibility;
+	const hasDetailOverlay = options.hasDetailOverlay ?? false;
+	const detailAtlasEntry = options.detailAtlasEntry ?? null;
+	const texturePageBindings =
+		options.materialKind === "indexed-paletted" || !atlasEligibility
+			? []
+			: [
+					{
+						pageKind: "single-entry" as const,
+						usageBucket: "base-color" as const,
+						sampleClass: "rgba-color" as const,
+						texture: {} as never,
+						rect: [0, 0, options.width ?? 8, options.height ?? 8] as const,
+						width: options.width ?? 8,
+						height: options.height ?? 8,
+						wrapS: atlasEligibility.samplingPolicy.wrapS,
+						wrapT: atlasEligibility.samplingPolicy.wrapT,
+						sampling: {
+							wrapS: atlasEligibility.samplingPolicy.wrapS,
+							wrapT: atlasEligibility.samplingPolicy.wrapT,
+							minFilter: "linear" as const,
+							magFilter: "linear" as const,
+							mip: "material-policy" as const,
+							samplingDomain: "color" as const,
+							lookup: "color-filtered" as const,
+						},
+						source: "standalone-direct-texture" as const,
+					},
+				];
 	return {
 		id: options.id ?? "static",
 		kind: options.kind ?? "static",
@@ -288,20 +360,21 @@ function createCandidate(
 				? 0x0102ffff
 				: options.owningLandblockId,
 		sceneDomain: options.sceneDomain ?? "exterior",
-		materialKind: options.materialKind ?? "direct-texture",
 		materialKey: options.materialKey ?? `material-${entryKey}`,
-		materialBehavior: options.materialBehavior ?? OPAQUE_BEHAVIOR,
-		hasUvBuffer: options.hasUvBuffer ?? true,
-		hasDetailOverlay: options.hasDetailOverlay ?? false,
-		detailAtlasEntry: options.detailAtlasEntry ?? null,
-		atlasEligibility:
-			options.atlasEligibility === undefined
-				? createAtlasEligibility({
-						entryKey,
-						width: options.width ?? 8,
-						height: options.height ?? 8,
-					})
-				: options.atlasEligibility,
+		detailAtlasEntry,
+		bakeEligibility: createBakeEligibility({
+			kind: options.kind ?? "static",
+			owningLandblockId:
+				options.owningLandblockId === undefined
+					? 0x0102ffff
+					: options.owningLandblockId,
+			hasUvBuffer: options.hasUvBuffer ?? true,
+			texturePageBindings,
+			materialBehavior: options.materialBehavior ?? OPAQUE_BEHAVIOR,
+			hasDetailOverlay,
+			detailAtlasEntry,
+			atlasEligibility,
+		}),
 		triangleCount: options.triangleCount ?? 2,
 		staticPartCount: options.staticPartCount ?? 1,
 		staticObjectKeys: options.staticObjectKeys ?? [`object-${entryKey}`],

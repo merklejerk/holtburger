@@ -4,12 +4,12 @@ import type { Webgl2ProgramResource } from "./webgl2-gl";
 import type { Webgl2StateCache } from "./webgl2-state-cache";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
 import {
-	createEmptyWebgl2AtlasBackedCompactedSubmitMetrics,
-	planWebgl2AtlasBackedCompactedReplacement,
-	submitWebgl2AtlasBackedCompactedBatch,
-	type Webgl2AtlasBackedCompactedSubmitResources,
-	type Webgl2AtlasBackedCompactedWorldProgram,
-} from "./webgl2-atlas-backed-compacted-submit";
+	createEmptyWebgl2BakedGeometrySubmitMetrics,
+	planWebgl2BakedGeometryReplacement,
+	submitWebgl2BakedGeometryBatch,
+	type Webgl2BakedGeometrySubmitResources,
+	type Webgl2BakedGeometryWorldProgram,
+} from "./webgl2-baked-submit";
 import type { Webgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
 import {
 	resolveDirectDrawBaseTexturePageBinding,
@@ -202,8 +202,8 @@ export function submitWebgl2FlatWorldFrame({
 	terrainBlendProgram,
 	indexedP8Program,
 	indexedP16Program,
-	atlasBackedCompactedProgram,
-	atlasBackedCompactedResources = { batches: [], generation: null },
+	bakedGeometryProgram,
+	bakedGeometryResources = { batches: [], generation: null },
 	drawUnitsById,
 	frame,
 }: {
@@ -214,8 +214,8 @@ export function submitWebgl2FlatWorldFrame({
 	terrainBlendProgram: Webgl2TerrainBlendWorldProgram;
 	indexedP8Program: Webgl2IndexedP8WorldProgram;
 	indexedP16Program: Webgl2IndexedP16WorldProgram;
-	atlasBackedCompactedProgram?: Webgl2AtlasBackedCompactedWorldProgram;
-	atlasBackedCompactedResources?: Webgl2AtlasBackedCompactedSubmitResources;
+	bakedGeometryProgram?: Webgl2BakedGeometryWorldProgram;
+	bakedGeometryResources?: Webgl2BakedGeometrySubmitResources;
 	drawUnitsById: ReadonlyMap<string, Webgl2WorldDrawUnit>;
 	frame: StagedWorldFrame;
 }): Webgl2WorldSubmitMetrics {
@@ -233,8 +233,8 @@ export function submitWebgl2FlatWorldFrame({
 		terrainBlendProgram,
 		indexedP8Program,
 		indexedP16Program,
-		atlasBackedCompactedProgram,
-		atlasBackedCompactedResources,
+		bakedGeometryProgram,
+		bakedGeometryResources,
 		viewProjectionMatrix: frame.viewProjectionMatrix,
 		drawUnits,
 		portalMaskDrawUnitCount: portalMaskDrawUnits.length,
@@ -251,8 +251,8 @@ export function submitWebgl2FlatWorldDrawUnits({
 	terrainBlendProgram,
 	indexedP8Program,
 	indexedP16Program,
-	atlasBackedCompactedProgram,
-	atlasBackedCompactedResources = { batches: [], generation: null },
+	bakedGeometryProgram,
+	bakedGeometryResources = { batches: [], generation: null },
 	viewProjectionMatrix,
 	drawUnits,
 	portalMaskDrawUnitCount = 0,
@@ -268,8 +268,8 @@ export function submitWebgl2FlatWorldDrawUnits({
 	terrainBlendProgram: Webgl2TerrainBlendWorldProgram;
 	indexedP8Program: Webgl2IndexedP8WorldProgram;
 	indexedP16Program: Webgl2IndexedP16WorldProgram;
-	atlasBackedCompactedProgram?: Webgl2AtlasBackedCompactedWorldProgram;
-	atlasBackedCompactedResources?: Webgl2AtlasBackedCompactedSubmitResources;
+	bakedGeometryProgram?: Webgl2BakedGeometryWorldProgram;
+	bakedGeometryResources?: Webgl2BakedGeometrySubmitResources;
 	viewProjectionMatrix: RenderMat4;
 	drawUnits: readonly Webgl2WorldDrawUnit[];
 	portalMaskDrawUnitCount?: number;
@@ -287,16 +287,16 @@ export function submitWebgl2FlatWorldDrawUnits({
 		visibleDrawUnitCountsByMaterialKind:
 			countDrawUnitsByMaterialKind(drawUnits),
 		directPackedTexturePageTextureCount:
-			atlasBackedCompactedResources.generation?.textures.length ?? 0,
+			bakedGeometryResources.generation?.textures.length ?? 0,
 		stagedAtlasSharedTextureAtlasTextureCount:
-			atlasBackedCompactedResources.generation?.textures.length ?? 0,
+			bakedGeometryResources.generation?.textures.length ?? 0,
 	};
 	if (drawUnits.length === 0) {
 		return metrics;
 	}
-	const atlasReplacement = planWebgl2AtlasBackedCompactedReplacement({
+	const atlasReplacement = planWebgl2BakedGeometryReplacement({
 		visibleDrawUnitIds: drawUnits.map((drawUnit) => drawUnit.id),
-		resources: atlasBackedCompactedResources,
+		resources: bakedGeometryResources,
 	});
 	const stagedDrawUnits =
 		atlasReplacement.replaceableDrawUnitIds.size === 0
@@ -340,12 +340,12 @@ export function submitWebgl2FlatWorldDrawUnits({
 	});
 	if (stagedDrawUnits.length === 0) {
 		metrics.bakedRetainedDirectDrawUnitCount = retainedDrawUnitCount;
-		submitAtlasBackedCompactedDrawUnits({
+		submitBakedGeometryDrawUnits({
 			gl,
 			stateCache,
-			program: atlasBackedCompactedProgram,
+			program: bakedGeometryProgram,
 			viewProjectionMatrix,
-			resources: atlasBackedCompactedResources,
+			resources: bakedGeometryResources,
 			replaceableDrawUnitIds: atlasReplacement.replaceableDrawUnitIds,
 			retainedDrawUnitCount,
 			replaceableDrawUnitTriangleCount,
@@ -430,7 +430,7 @@ export function submitWebgl2FlatWorldDrawUnits({
 			useTexture && texture
 				? resolveDirectDrawBaseTexturePageBinding({
 						drawUnit,
-						generation: atlasBackedCompactedResources.generation,
+						generation: bakedGeometryResources.generation,
 						fallbackSamples: metrics.directTexturePageFallbackSamples,
 					})
 				: null;
@@ -558,12 +558,12 @@ export function submitWebgl2FlatWorldDrawUnits({
 		metrics.drawCallCount += 1;
 		metrics.triangleCount += drawUnit.triangleCount;
 	}
-	submitAtlasBackedCompactedDrawUnits({
+	submitBakedGeometryDrawUnits({
 		gl,
 		stateCache,
-		program: atlasBackedCompactedProgram,
+		program: bakedGeometryProgram,
 		viewProjectionMatrix,
-		resources: atlasBackedCompactedResources,
+		resources: bakedGeometryResources,
 		replaceableDrawUnitIds: atlasReplacement.replaceableDrawUnitIds,
 		retainedDrawUnitCount,
 		replaceableDrawUnitTriangleCount,
@@ -575,7 +575,7 @@ export function submitWebgl2FlatWorldDrawUnits({
 	return metrics;
 }
 
-function submitAtlasBackedCompactedDrawUnits({
+function submitBakedGeometryDrawUnits({
 	gl,
 	stateCache,
 	program,
@@ -591,9 +591,9 @@ function submitAtlasBackedCompactedDrawUnits({
 }: {
 	gl: WebGL2RenderingContext;
 	stateCache: Webgl2StateCache;
-	program: Webgl2AtlasBackedCompactedWorldProgram | undefined;
+	program: Webgl2BakedGeometryWorldProgram | undefined;
 	viewProjectionMatrix: RenderMat4;
-	resources: Webgl2AtlasBackedCompactedSubmitResources;
+	resources: Webgl2BakedGeometrySubmitResources;
 	replaceableDrawUnitIds: ReadonlySet<string>;
 	retainedDrawUnitCount: number;
 	replaceableDrawUnitTriangleCount: number;
@@ -608,7 +608,7 @@ function submitAtlasBackedCompactedDrawUnits({
 		resources.generation &&
 		replaceableDrawUnitIds.size > 0
 	) {
-		const atlasMetrics = submitWebgl2AtlasBackedCompactedBatch({
+		const atlasMetrics = submitWebgl2BakedGeometryBatch({
 			gl,
 			stateCache,
 			program,
@@ -631,28 +631,28 @@ function submitAtlasBackedCompactedDrawUnits({
 		metrics.bakedReplacedDrawUnitCount = atlasMetrics.replacedDrawUnitCount;
 		metrics.bakedReplacedDrawUnitTriangleCount =
 			replaceableDrawUnitTriangleCount;
-		applyAtlasBackedCompactedConservativeOverdraw(metrics);
+		applyBakedGeometryConservativeOverdraw(metrics);
 		metrics.bakedRetainedDirectDrawUnitCount =
 			atlasMetrics.retainedDrawUnitCount;
 		metrics.bakedSubmitNoVisibleRouteCount =
 			planningNoVisibleRouteCount + atlasMetrics.noVisibleRouteCount;
-		applyAtlasBackedCompactedNoVisibleRoute(
+		applyBakedGeometryNoVisibleRoute(
 			metrics,
 			route,
 			planningNoVisibleRouteCount,
 		);
-		applyAtlasBackedCompactedNoVisibleRoute(
+		applyBakedGeometryNoVisibleRoute(
 			metrics,
 			route,
 			atlasMetrics.noVisibleRouteCount,
 		);
 		metrics.bakedSubmitFallbackSamples = atlasMetrics.fallbackSamples;
-		applyAtlasBackedCompactedDrawCallArithmetic(metrics);
+		applyBakedGeometryDrawCallArithmetic(metrics);
 		return;
 	}
 	const fallbackSamples = [...planningFallbackSamples];
 	metrics.bakedSubmitNoVisibleRouteCount = planningNoVisibleRouteCount;
-	applyAtlasBackedCompactedNoVisibleRoute(
+	applyBakedGeometryNoVisibleRoute(
 		metrics,
 		route,
 		planningNoVisibleRouteCount,
@@ -666,13 +666,13 @@ function submitAtlasBackedCompactedDrawUnits({
 		fallbackSamples.push("baked submit missing shader program");
 	}
 	const emptyAtlasMetrics =
-		createEmptyWebgl2AtlasBackedCompactedSubmitMetrics();
+		createEmptyWebgl2BakedGeometrySubmitMetrics();
 	metrics.bakedRetainedDirectDrawUnitCount = retainedDrawUnitCount;
 	metrics.bakedReplacedDrawUnitTriangleCount = replaceableDrawUnitTriangleCount;
-	applyAtlasBackedCompactedConservativeOverdraw(metrics);
+	applyBakedGeometryConservativeOverdraw(metrics);
 	metrics.bakedSubmitNoVisibleRouteCount +=
 		emptyAtlasMetrics.noVisibleRouteCount;
-	applyAtlasBackedCompactedNoVisibleRoute(
+	applyBakedGeometryNoVisibleRoute(
 		metrics,
 		route,
 		emptyAtlasMetrics.noVisibleRouteCount,
@@ -681,7 +681,7 @@ function submitAtlasBackedCompactedDrawUnits({
 		...fallbackSamples,
 		...emptyAtlasMetrics.fallbackSamples,
 	].slice(0, 8);
-	applyAtlasBackedCompactedDrawCallArithmetic(metrics);
+	applyBakedGeometryDrawCallArithmetic(metrics);
 }
 
 function sumDrawUnitTriangles(
@@ -697,7 +697,7 @@ function sumDrawUnitTriangles(
 	return triangleCount;
 }
 
-function applyAtlasBackedCompactedDrawCallArithmetic(
+function applyBakedGeometryDrawCallArithmetic(
 	metrics: Webgl2WorldSubmitMetrics,
 ): void {
 	metrics.bakedOriginalDrawCallEstimateCount =
@@ -710,7 +710,7 @@ function applyAtlasBackedCompactedDrawCallArithmetic(
 		metrics.bakedSubmittedDrawCallEstimateCount;
 }
 
-function applyAtlasBackedCompactedConservativeOverdraw(
+function applyBakedGeometryConservativeOverdraw(
 	metrics: Webgl2WorldSubmitMetrics,
 ): void {
 	metrics.bakedConservativeOverdrawTriangleCount = Math.max(
@@ -725,7 +725,7 @@ function applyAtlasBackedCompactedConservativeOverdraw(
 				metrics.bakedSubmittedTriangleCount;
 }
 
-function applyAtlasBackedCompactedNoVisibleRoute(
+function applyBakedGeometryNoVisibleRoute(
 	metrics: Webgl2WorldSubmitMetrics,
 	route: Webgl2BakedSubmitRoute,
 	count: number,

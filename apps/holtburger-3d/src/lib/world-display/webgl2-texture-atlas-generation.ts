@@ -3,9 +3,9 @@ import {
 	type Webgl2Texture2DResource,
 } from "./webgl2-gl";
 import type {
-	AtlasBackedCompactionEntry,
-	AtlasBackedCompactionPlan,
-} from "./atlas-backed-compaction-planner";
+	BakedRenderableEntry,
+	BakedRenderablePlan,
+} from "./baked-renderable-planner";
 import type {
 	AtlasTexturePage,
 	AtlasTexturePlacement,
@@ -53,7 +53,7 @@ export function createWebgl2TextureAtlasGenerationResource({
 	plan,
 }: {
 	gl: WebGL2RenderingContext;
-	plan: AtlasBackedCompactionPlan;
+	plan: BakedRenderablePlan;
 }): Webgl2TextureAtlasGenerationResource | null {
 	if (plan.compactableDrawUnitIds.length === 0) {
 		return null;
@@ -138,7 +138,7 @@ function createWebgl2TextureAtlasTexture({
 	gl: WebGL2RenderingContext;
 	generationKey: string;
 	page: AtlasTexturePage;
-	entriesByKey: ReadonlyMap<string, AtlasBackedCompactionEntry>;
+	entriesByKey: ReadonlyMap<string, BakedRenderableEntry>;
 }): Webgl2TextureAtlasTextureResource {
 	const pixels = new Uint8Array(page.width * page.height * 4);
 	for (const placement of page.placements) {
@@ -196,7 +196,7 @@ function createWebgl2DetailTextureAtlasTexture({
 	page: AtlasTexturePage;
 	entriesByKey: ReadonlyMap<
 		string,
-		AtlasBackedCompactionPlan["detailAtlasEntryRecords"][number]
+		BakedRenderablePlan["detailAtlasEntryRecords"][number]
 	>;
 }): Webgl2DetailTextureAtlasTextureResource {
 	const pixels = new Uint8Array(page.width * page.height * 4);
@@ -255,7 +255,7 @@ function copyTextureAtlasPlacement({
 	atlasWidth: number;
 	atlasHeight: number;
 	placement: AtlasTexturePlacement;
-	entry: AtlasBackedCompactionEntry["entry"];
+	entry: BakedRenderableEntry["entry"];
 }): void {
 	validateTextureAtlasSource(entry);
 	const source = entry.level.bytes;
@@ -296,7 +296,7 @@ function copyDetailTextureAtlasPlacement({
 	atlasWidth: number;
 	atlasHeight: number;
 	placement: AtlasTexturePlacement;
-	entry: AtlasBackedCompactionPlan["detailAtlasEntryRecords"][number];
+	entry: BakedRenderablePlan["detailAtlasEntryRecords"][number];
 }): void {
 	validateDetailTextureAtlasSource(entry);
 	const gutter = placement.gutterPixels;
@@ -324,7 +324,7 @@ function copyDetailTextureAtlasPlacement({
 }
 
 function validateTextureAtlasSource(
-	entry: AtlasBackedCompactionEntry["entry"],
+	entry: BakedRenderableEntry["entry"],
 ): void {
 	const level = entry.level;
 	if (level.width <= 0 || level.height <= 0) {
@@ -340,7 +340,7 @@ function validateTextureAtlasSource(
 }
 
 function validateDetailTextureAtlasSource(
-	entry: AtlasBackedCompactionPlan["detailAtlasEntryRecords"][number],
+	entry: BakedRenderablePlan["detailAtlasEntryRecords"][number],
 ): void {
 	if (entry.width <= 0 || entry.height <= 0) {
 		throw new Error(

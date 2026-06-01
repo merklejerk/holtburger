@@ -12,9 +12,9 @@ import {
 	type Webgl2IndexedP8WorldProgram,
 	type Webgl2TerrainBlendWorldProgram,
 } from "./webgl2-world-submit";
-import type { Webgl2AtlasBackedCompactedBatchResource } from "./webgl2-atlas-backed-compacted-batches";
+import type { Webgl2BakedGeometryBatchResource } from "./webgl2-baked-geometry-batches";
 import type { Webgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
-import type { Webgl2AtlasBackedCompactedWorldProgram } from "./webgl2-atlas-backed-compacted-submit";
+import type { Webgl2BakedGeometryWorldProgram } from "./webgl2-baked-submit";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
 import {
 	Webgl2StateCache,
@@ -237,7 +237,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
-			atlasBackedCompactedResources: {
+			bakedGeometryResources: {
 				batches: [],
 				generation: createTextureAtlasGeneration({
 					atlasEntryKey: "entry/a",
@@ -261,7 +261,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		expect(gl.uniform2fValues).toContainEqual([4, 4]);
 	});
 
-	it("keeps compacted replacement ahead of staged atlas routing", () => {
+	it("keeps baked replacement ahead of staged atlas routing", () => {
 		const gl = new CapturingSubmitGl();
 		const stateCache = new Webgl2StateCache(gl);
 		const drawUnitsById = new Map<string, Webgl2WorldDrawUnit>([
@@ -286,9 +286,9 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
-			atlasBackedCompactedProgram: createAtlasBackedCompactedProgram(),
-			atlasBackedCompactedResources: {
-				batches: [createAtlasBackedCompactedBatch(["atlas"])],
+			bakedGeometryProgram: createBakedGeometryProgram(),
+			bakedGeometryResources: {
+				batches: [createBakedGeometryBatch(["atlas"])],
 				generation: createTextureAtlasGeneration({ atlasEntryKey: "entry/a" }),
 			},
 			drawUnitsById,
@@ -367,7 +367,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
-			atlasBackedCompactedResources: {
+			bakedGeometryResources: {
 				batches: [],
 				generation: createTextureAtlasGeneration({ atlasEntryKey: "entry/a" }),
 			},
@@ -382,7 +382,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		expect(gl.uniform2fValues).toContainEqual([1, 1]);
 	});
 
-	it("replaces compacted static draw units through the default atlas submit path", () => {
+	it("replaces baked static draw units through the default atlas submit path", () => {
 		const gl = new CapturingSubmitGl();
 		const stateCache = new Webgl2StateCache(gl);
 		const drawUnitsById = new Map<string, Webgl2WorldDrawUnit>([
@@ -398,9 +398,9 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
-			atlasBackedCompactedProgram: createAtlasBackedCompactedProgram(),
-			atlasBackedCompactedResources: {
-				batches: [createAtlasBackedCompactedBatch(["atlas"])],
+			bakedGeometryProgram: createBakedGeometryProgram(),
+			bakedGeometryResources: {
+				batches: [createBakedGeometryBatch(["atlas"])],
 				generation: createTextureAtlasGeneration(),
 			},
 			drawUnitsById,
@@ -440,10 +440,10 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
-			atlasBackedCompactedProgram: createAtlasBackedCompactedProgram(),
-			atlasBackedCompactedResources: {
+			bakedGeometryProgram: createBakedGeometryProgram(),
+			bakedGeometryResources: {
 				batches: [
-					createAtlasBackedCompactedBatch(["atlas", "not-visible"], {
+					createBakedGeometryBatch(["atlas", "not-visible"], {
 						indexCount: 6,
 						triangleCount: 2,
 					}),
@@ -475,9 +475,9 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
-			atlasBackedCompactedProgram: createAtlasBackedCompactedProgram(),
-			atlasBackedCompactedResources: {
-				batches: [createAtlasBackedCompactedBatch(["not-visible"])],
+			bakedGeometryProgram: createBakedGeometryProgram(),
+			bakedGeometryResources: {
+				batches: [createBakedGeometryBatch(["not-visible"])],
 				generation: createTextureAtlasGeneration(),
 			},
 			viewProjectionMatrix: createIdentityMat4(),
@@ -881,7 +881,7 @@ function createTerrainBlendProgram(): Webgl2TerrainBlendWorldProgram {
 	};
 }
 
-function createAtlasBackedCompactedProgram(): Webgl2AtlasBackedCompactedWorldProgram {
+function createBakedGeometryProgram(): Webgl2BakedGeometryWorldProgram {
 	return {
 		program: {} as WebGLProgram,
 		attributes: {
@@ -902,13 +902,13 @@ function createAtlasBackedCompactedProgram(): Webgl2AtlasBackedCompactedWorldPro
 	};
 }
 
-function createAtlasBackedCompactedBatch(
+function createBakedGeometryBatch(
 	drawUnitIds: readonly string[],
 	options: {
 		indexCount?: number;
 		triangleCount?: number;
 	} = {},
-): Webgl2AtlasBackedCompactedBatchResource {
+): Webgl2BakedGeometryBatchResource {
 	const indexCount = options.indexCount ?? 3;
 	const triangleCount = options.triangleCount ?? indexCount / 3;
 	return {

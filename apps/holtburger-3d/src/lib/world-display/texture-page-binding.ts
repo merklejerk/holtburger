@@ -22,11 +22,7 @@ export type TexturePageSampleClass =
 export type TexturePageWrapMode = "clamp" | "repeat";
 export type TexturePageFilterPolicy = "linear" | "nearest" | "material-policy";
 export type TexturePageMipPolicy = "generated" | "none" | "material-policy";
-export type TexturePageColorSpacePolicy =
-	| "linear"
-	| "data"
-	| "none"
-	| "material-policy";
+export type TexturePageSamplingDomain = "color" | "data" | "control";
 export type TexturePageLookupPolicy =
 	| "color-filtered"
 	| "exact"
@@ -38,7 +34,7 @@ export interface TexturePageSamplingPolicy {
 	minFilter: TexturePageFilterPolicy;
 	magFilter: TexturePageFilterPolicy;
 	mip: TexturePageMipPolicy;
-	colorSpace: TexturePageColorSpacePolicy;
+	samplingDomain: TexturePageSamplingDomain;
 	lookup: TexturePageLookupPolicy;
 }
 
@@ -333,7 +329,7 @@ function colorTexturePageSamplingPolicy({
 		minFilter: "linear",
 		magFilter: "linear",
 		mip: "material-policy",
-		colorSpace: "linear",
+		samplingDomain: "color",
 		lookup: "color-filtered",
 	};
 }
@@ -351,7 +347,7 @@ function exactDataTexturePageSamplingPolicy({
 		minFilter: "nearest",
 		magFilter: "nearest",
 		mip: "none",
-		colorSpace: "data",
+		samplingDomain: "data",
 		lookup: "exact",
 	};
 }
@@ -369,7 +365,7 @@ function controlTexturePageSamplingPolicy({
 		minFilter: "material-policy",
 		magFilter: "material-policy",
 		mip: "material-policy",
-		colorSpace: "none",
+		samplingDomain: "control",
 		lookup: "control-filtered",
 	};
 }

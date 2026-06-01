@@ -5,11 +5,11 @@ import {
 	type Webgl2BufferResource,
 	type Webgl2VertexArrayResource,
 } from "./webgl2-gl";
-import type { AtlasBackedCompactedGeometry } from "./atlas-backed-compacted-geometry";
+import type { BakedGeometry } from "./baked-geometry";
 import type { AtlasTexturePlacement } from "./atlas-layout-planner";
-import type { AtlasBackedCompactionMaterialSlot } from "./atlas-backed-compaction-planner";
+import type { BakedRenderableMaterialSlot } from "./baked-renderable-planner";
 
-export interface Webgl2AtlasBackedCompactedMaterialSlot {
+export interface Webgl2BakedGeometryMaterialSlot {
 	key: string;
 	index: number;
 	atlasTextureIndex: number;
@@ -23,7 +23,7 @@ export interface Webgl2AtlasBackedCompactedMaterialSlot {
 	wrapT: "clamp" | "repeat";
 }
 
-export interface Webgl2AtlasBackedCompactedBatchResource {
+export interface Webgl2BakedGeometryBatchResource {
 	key: string;
 	landblockId: number;
 	vertexArray: Webgl2VertexArrayResource;
@@ -32,9 +32,9 @@ export interface Webgl2AtlasBackedCompactedBatchResource {
 	materialSlotBuffer: Webgl2BufferResource;
 	indexBuffer: Webgl2BufferResource;
 	indexType: GLenum;
-	materialSlots: readonly Webgl2AtlasBackedCompactedMaterialSlot[];
-	batchModelMatrix: AtlasBackedCompactedGeometry["batchModelMatrix"];
-	drawSlices: AtlasBackedCompactedGeometry["drawSlices"];
+	materialSlots: readonly Webgl2BakedGeometryMaterialSlot[];
+	batchModelMatrix: BakedGeometry["batchModelMatrix"];
+	drawSlices: BakedGeometry["drawSlices"];
 	vertexCount: number;
 	indexCount: number;
 	triangleCount: number;
@@ -48,7 +48,7 @@ export interface Webgl2AtlasBackedCompactedBatchResource {
 	dispose(): void;
 }
 
-export function createWebgl2AtlasBackedCompactedBatchResource({
+export function createWebgl2BakedGeometryBatchResource({
 	gl,
 	geometry,
 	landblockId,
@@ -57,12 +57,12 @@ export function createWebgl2AtlasBackedCompactedBatchResource({
 	detailPlacementsByEntryKey,
 }: {
 	gl: WebGL2RenderingContext;
-	geometry: AtlasBackedCompactedGeometry;
+	geometry: BakedGeometry;
 	landblockId: number;
-	materialSlots: readonly AtlasBackedCompactionMaterialSlot[];
+	materialSlots: readonly BakedRenderableMaterialSlot[];
 	placementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>;
 	detailPlacementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>;
-}): Webgl2AtlasBackedCompactedBatchResource {
+}): Webgl2BakedGeometryBatchResource {
 	const positionBuffer = createWebgl2ArrayBuffer(gl, {
 		label: `${geometry.key}/positions`,
 		data: geometry.positions,
@@ -108,7 +108,7 @@ export function createWebgl2AtlasBackedCompactedBatchResource({
 				? gl.UNSIGNED_INT
 				: gl.UNSIGNED_SHORT,
 		materialSlots: materialSlots.map((slot) =>
-			toWebgl2AtlasBackedCompactedMaterialSlot(
+			toWebgl2BakedGeometryMaterialSlot(
 				slot,
 				placementsByEntryKey,
 				detailPlacementsByEntryKey,
@@ -136,9 +136,9 @@ export function createWebgl2AtlasBackedCompactedBatchResource({
 	};
 }
 
-export function updateWebgl2AtlasBackedCompactedBatchDynamicTables(
-	batch: Webgl2AtlasBackedCompactedBatchResource,
-	geometry: AtlasBackedCompactedGeometry,
+export function updateWebgl2BakedGeometryBatchDynamicTables(
+	batch: Webgl2BakedGeometryBatchResource,
+	geometry: BakedGeometry,
 ): void {
 	if (batch.key !== geometry.key) {
 		throw new Error(
@@ -148,15 +148,15 @@ export function updateWebgl2AtlasBackedCompactedBatchDynamicTables(
 	batch.batchModelMatrix = geometry.batchModelMatrix;
 }
 
-function toWebgl2AtlasBackedCompactedMaterialSlot(
-	slot: AtlasBackedCompactionMaterialSlot,
+function toWebgl2BakedGeometryMaterialSlot(
+	slot: BakedRenderableMaterialSlot,
 	placementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>,
 	detailPlacementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>,
-): Webgl2AtlasBackedCompactedMaterialSlot {
+): Webgl2BakedGeometryMaterialSlot {
 	const placement = placementsByEntryKey.get(slot.atlasEntryKey);
 	if (!placement) {
 		throw new Error(
-			`Atlas-backed compacted material slot ${slot.key} references missing placement ${slot.atlasEntryKey}.`,
+			`Baked geometry material slot ${slot.key} references missing placement ${slot.atlasEntryKey}.`,
 		);
 	}
 	const detailPlacement = slot.detailAtlasEntryKey
@@ -164,7 +164,7 @@ function toWebgl2AtlasBackedCompactedMaterialSlot(
 		: null;
 	if (slot.detailAtlasEntryKey && !detailPlacement) {
 		throw new Error(
-			`Atlas-backed compacted material slot ${slot.key} references missing detail placement ${slot.detailAtlasEntryKey}.`,
+			`Baked geometry material slot ${slot.key} references missing detail placement ${slot.detailAtlasEntryKey}.`,
 		);
 	}
 	return {

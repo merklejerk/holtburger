@@ -1,9 +1,10 @@
 import { planAtlasLayout, type AtlasTexturePage } from "./atlas-layout-planner";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
 import type { StagedWorldMaterialAtlasEligibility } from "./staged-world-material-strategy";
+import type { TexturePageBinding } from "./texture-page-binding";
 import type { Webgl2SceneDomain } from "./webgl2-scene-domain-targets";
 
-export type AtlasBackedCompactionBypassReason =
+export type BakedRenderableBypassReason =
 	| "non-static"
 	| "missing-landblock-origin"
 	| "non-direct-texture"
@@ -17,37 +18,59 @@ export type AtlasBackedCompactionBypassReason =
 	| "detail-atlas-full"
 	| "material-table-overflow";
 
-export interface AtlasBackedCompactionPolicy {
+export type BakeMaterialBlocker =
+	| "missing-base-texture-page"
+	| "missing-atlas-eligibility"
+	| "missing-detail-atlas-entry"
+	| "unsupported-material-state"
+	| "unsupported-texture-page-behavior";
+
+export type BakeGeometryBlocker =
+	| "non-static"
+	| "missing-landblock-origin"
+	| "missing-uv-buffer";
+
+export interface BakeEligibility {
+	decision: "baked" | "direct-draw";
+	material: {
+		compatible: boolean;
+		blockers: readonly BakeMaterialBlocker[];
+		atlasEligibility: StagedWorldMaterialAtlasEligibility | null;
+		detailAtlasEntry: BakedRenderableDetailEntry | null;
+	};
+	geometry: {
+		compatible: boolean;
+		blockers: readonly BakeGeometryBlocker[];
+	};
+}
+
+export interface BakedRenderablePolicy {
 	maxAtlasTextureSize: number;
 	maxAtlasTextureCount: number;
 	baseGutterPixels: number;
 	maxMaterialSlotsPerDraw: number;
 }
 
-export interface AtlasBackedCompactionCandidate {
+export interface BakedRenderableCandidate {
 	id: string;
 	kind: string;
 	owningLandblockId: number | null;
 	sceneDomain: Webgl2SceneDomain | null;
-	materialKind: string;
 	materialKey: string;
-	materialBehavior: LegacyMaterialBehaviorDto | null;
-	hasUvBuffer: boolean;
-	hasDetailOverlay: boolean;
-	detailAtlasEntry: AtlasBackedCompactionDetailEntry | null;
-	atlasEligibility: StagedWorldMaterialAtlasEligibility | null;
+	detailAtlasEntry: BakedRenderableDetailEntry | null;
+	bakeEligibility: BakeEligibility;
 	triangleCount: number;
 	staticPartCount: number;
 	staticObjectKeys: readonly string[];
 }
 
-export interface AtlasBackedCompactionBypass {
+export interface BakedRenderableBypass {
 	drawUnitId: string;
-	reason: AtlasBackedCompactionBypassReason;
+	reason: BakedRenderableBypassReason;
 	detail: string;
 }
 
-export interface AtlasBackedCompactionMaterialSlot {
+export interface BakedRenderableMaterialSlot {
 	key: string;
 	sourceMaterialSlotKey: string;
 	index: number;
@@ -59,7 +82,7 @@ export interface AtlasBackedCompactionMaterialSlot {
 	detailTiling: number;
 }
 
-export interface AtlasBackedCompactionDrawSlice {
+export interface BakedRenderableDrawSlice {
 	key: string;
 	atlasTextureIndex: number;
 	detailAtlasTextureIndex: number | null;
@@ -70,12 +93,12 @@ export interface AtlasBackedCompactionDrawSlice {
 	drawUnitIds: readonly string[];
 }
 
-export interface AtlasBackedCompactionEntry {
+export interface BakedRenderableEntry {
 	key: string;
 	entry: StagedWorldMaterialAtlasEligibility["atlasEntry"];
 }
 
-export interface AtlasBackedCompactionDetailEntry {
+export interface BakedRenderableDetailEntry {
 	key: string;
 	renderSurfaceId: number;
 	sourceFormatRaw: number;
@@ -87,40 +110,40 @@ export interface AtlasBackedCompactionDetailEntry {
 	blendMode: "dst-color";
 }
 
-export interface AtlasBackedCompactionPlan {
+export interface BakedRenderablePlan {
 	key: string;
 	compactableDrawUnitIds: readonly string[];
-	bypasses: readonly AtlasBackedCompactionBypass[];
-	atlasEntryRecords: readonly AtlasBackedCompactionEntry[];
+	bypasses: readonly BakedRenderableBypass[];
+	atlasEntryRecords: readonly BakedRenderableEntry[];
 	atlasEntries: readonly StagedWorldMaterialAtlasEligibility["atlasEntry"][];
 	atlasTextures: readonly AtlasTexturePage[];
-	detailAtlasEntryRecords: readonly AtlasBackedCompactionDetailEntry[];
+	detailAtlasEntryRecords: readonly BakedRenderableDetailEntry[];
 	detailAtlasTextures: readonly AtlasTexturePage[];
-	materialSlots: readonly AtlasBackedCompactionMaterialSlot[];
+	materialSlots: readonly BakedRenderableMaterialSlot[];
 	drawUnitMaterialSlots: readonly {
 		drawUnitId: string;
 		materialSlotKey: string;
 	}[];
-	drawSlices: readonly AtlasBackedCompactionDrawSlice[];
+	drawSlices: readonly BakedRenderableDrawSlice[];
 	staticObjectKeys: readonly string[];
 	staticPartCount: number;
 	triangleCount: number;
 	preparedTextureAssetIds: readonly string[];
 }
 
-interface EligibleAtlasBackedCompactionCandidate {
-	drawUnit: AtlasBackedCompactionCandidate;
+interface EligibleBakedRenderableCandidate {
+	drawUnit: BakedRenderableCandidate;
 	eligibility: StagedWorldMaterialAtlasEligibility;
 }
 
-interface AtlasBackedCompactionEntryRecord {
+interface BakedRenderableEntryRecord {
 	key: string;
 	entry: StagedWorldMaterialAtlasEligibility["atlasEntry"];
 }
 
-export function createEmptyAtlasBackedCompactionPlan(): AtlasBackedCompactionPlan {
+export function createEmptyBakedRenderablePlan(): BakedRenderablePlan {
 	return {
-		key: "atlas-backed-compaction/empty",
+		key: "baked-renderables/empty",
 		compactableDrawUnitIds: [],
 		bypasses: [],
 		atlasEntryRecords: [],
@@ -138,27 +161,28 @@ export function createEmptyAtlasBackedCompactionPlan(): AtlasBackedCompactionPla
 	};
 }
 
-export function planAtlasBackedCompaction(options: {
-	drawUnits: readonly AtlasBackedCompactionCandidate[];
-	policy: AtlasBackedCompactionPolicy;
-}): AtlasBackedCompactionPlan {
-	const eligible: EligibleAtlasBackedCompactionCandidate[] = [];
-	const bypasses: AtlasBackedCompactionBypass[] = [];
+export function planBakedRenderables(options: {
+	drawUnits: readonly BakedRenderableCandidate[];
+	policy: BakedRenderablePolicy;
+}): BakedRenderablePlan {
+	const eligible: EligibleBakedRenderableCandidate[] = [];
+	const bypasses: BakedRenderableBypass[] = [];
 	for (const drawUnit of options.drawUnits) {
-		const bypass = classifyAtlasBackedCompactionBypass(drawUnit);
+		const bypass = classifyBakedRenderableBypass(drawUnit);
 		if (bypass) {
 			bypasses.push(bypass);
 			continue;
 		}
-		if (!drawUnit.atlasEligibility) {
+		const atlasEligibility = drawUnit.bakeEligibility.material.atlasEligibility;
+		if (!atlasEligibility) {
 			throw new Error(
-				`Atlas compaction candidate ${drawUnit.id} was accepted without atlas eligibility.`,
+				`Baked geometry candidate ${drawUnit.id} was accepted without packed texture-page eligibility.`,
 			);
 		}
-		eligible.push({ drawUnit, eligibility: drawUnit.atlasEligibility });
+		eligible.push({ drawUnit, eligibility: atlasEligibility });
 	}
 
-	const atlasEntries = dedupeAtlasBackedCompactionEntries(eligible);
+	const atlasEntries = dedupeBakedRenderableEntries(eligible);
 	const layout = planAtlasLayout({
 		entries: atlasEntries.map((record) => ({
 			key: record.key,
@@ -191,7 +215,7 @@ export function planAtlasBackedCompaction(options: {
 		});
 	}
 
-	const detailEntries = dedupeAtlasBackedCompactionDetailEntries(placed);
+	const detailEntries = dedupeBakedRenderableDetailEntries(placed);
 	const detailLayout = planAtlasLayout({
 		entries: detailEntries.map((entry) => ({
 			key: entry.key,
@@ -227,7 +251,7 @@ export function planAtlasBackedCompaction(options: {
 		});
 	}
 
-	const materialSlots = assignAtlasBackedCompactionMaterialSlots(
+	const materialSlots = assignBakedRenderableMaterialSlots(
 		detailPlaced,
 		options.policy,
 	);
@@ -245,7 +269,7 @@ export function planAtlasBackedCompaction(options: {
 		});
 		return false;
 	});
-	const drawSlices = createAtlasBackedCompactionDrawSlices(
+	const drawSlices = createBakedRenderableDrawSlices(
 		compactable,
 		materialSlotByKey,
 		layout.placementsByEntryKey,
@@ -258,7 +282,7 @@ export function planAtlasBackedCompaction(options: {
 		compactable.map((candidate) => candidate.eligibility.atlasEntryKey),
 	);
 	return {
-		key: describeAtlasBackedCompactionPlanKey({
+		key: describeBakedRenderablePlanKey({
 			policy: options.policy,
 			atlasEntryKeys: [...compactableEntryKeys].sort(),
 			detailAtlasEntryKeys: detailEntries
@@ -329,62 +353,168 @@ export function planAtlasBackedCompaction(options: {
 	};
 }
 
-function classifyAtlasBackedCompactionBypass(
-	drawUnit: AtlasBackedCompactionCandidate,
-): AtlasBackedCompactionBypass | null {
-	if (drawUnit.kind !== "static") {
-		if (drawUnit.kind !== "structured-interior") {
+function classifyBakedRenderableBypass(
+	drawUnit: BakedRenderableCandidate,
+): BakedRenderableBypass | null {
+	const geometryBlocker = drawUnit.bakeEligibility.geometry.blockers[0] ?? null;
+	if (geometryBlocker) {
+		return createGeometryBakeBypass(drawUnit, geometryBlocker);
+	}
+	const materialBlocker = drawUnit.bakeEligibility.material.blockers[0] ?? null;
+	if (materialBlocker) {
+		return createMaterialBakeBypass(drawUnit, materialBlocker);
+	}
+	return null;
+}
+
+export function createBakeEligibility(options: {
+	kind: string;
+	owningLandblockId: number | null;
+	hasUvBuffer: boolean;
+	texturePageBindings: readonly TexturePageBinding[];
+	materialBehavior: LegacyMaterialBehaviorDto | null;
+	hasDetailOverlay: boolean;
+	detailAtlasEntry: BakedRenderableDetailEntry | null;
+	atlasEligibility: StagedWorldMaterialAtlasEligibility | null;
+}): BakeEligibility {
+	const geometryBlockers: BakeGeometryBlocker[] = [];
+	if (options.kind !== "static" && options.kind !== "structured-interior") {
+		geometryBlockers.push("non-static");
+	}
+	if (options.owningLandblockId === null) {
+		geometryBlockers.push("missing-landblock-origin");
+	}
+	if (!options.hasUvBuffer) {
+		geometryBlockers.push("missing-uv-buffer");
+	}
+
+	const materialBlockers: BakeMaterialBlocker[] = [];
+	if (!options.atlasEligibility) {
+		materialBlockers.push("missing-atlas-eligibility");
+	}
+	if (!hasCompatibleBakedBaseTexturePage(options.texturePageBindings)) {
+		materialBlockers.push("missing-base-texture-page");
+	}
+	if (options.hasDetailOverlay && !options.detailAtlasEntry) {
+		materialBlockers.push("missing-detail-atlas-entry");
+	}
+	if (!isOpaqueStaticCompactionMaterial(options.materialBehavior)) {
+		materialBlockers.push("unsupported-material-state");
+	}
+	if (!hasOnlySupportedBakedTexturePageBehavior(options.texturePageBindings)) {
+		materialBlockers.push("unsupported-texture-page-behavior");
+	}
+
+	const geometryCompatible = geometryBlockers.length === 0;
+	const materialCompatible = materialBlockers.length === 0;
+	return {
+		decision:
+			geometryCompatible && materialCompatible ? "baked" : "direct-draw",
+		material: {
+			compatible: materialCompatible,
+			blockers: materialBlockers,
+			atlasEligibility: options.atlasEligibility,
+			detailAtlasEntry: options.detailAtlasEntry,
+		},
+		geometry: {
+			compatible: geometryCompatible,
+			blockers: geometryBlockers,
+		},
+	};
+}
+
+function createGeometryBakeBypass(
+	drawUnit: BakedRenderableCandidate,
+	blocker: BakeGeometryBlocker,
+): BakedRenderableBypass {
+	switch (blocker) {
+		case "non-static":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "non-static",
 				detail: `draw unit kind ${drawUnit.kind} is not baked geometry`,
 			};
+		case "missing-landblock-origin":
+			return {
+				drawUnitId: drawUnit.id,
+				reason: "missing-landblock-origin",
+				detail: "baked geometry draw unit has no owning landblock",
+			};
+		case "missing-uv-buffer":
+			return {
+				drawUnitId: drawUnit.id,
+				reason: "missing-uv-buffer",
+				detail: "baked geometry draw unit has no UV buffer",
+			};
+	}
+}
+
+function createMaterialBakeBypass(
+	drawUnit: BakedRenderableCandidate,
+	blocker: BakeMaterialBlocker,
+): BakedRenderableBypass {
+	switch (blocker) {
+		case "missing-base-texture-page":
+			return {
+				drawUnitId: drawUnit.id,
+				reason: "non-direct-texture",
+				detail: `draw unit material ${drawUnit.materialKey} has no baked-compatible base texture page`,
+			};
+		case "missing-atlas-eligibility":
+			return {
+				drawUnitId: drawUnit.id,
+				reason: "missing-atlas-eligibility",
+				detail: "baked geometry draw unit has no packed texture-page eligibility",
+			};
+		case "missing-detail-atlas-entry":
+			return {
+				drawUnitId: drawUnit.id,
+				reason: "missing-detail-atlas-entry",
+				detail: "detail overlay has no compactable RGBA8 detail atlas entry",
+			};
+		case "unsupported-material-state":
+			return {
+				drawUnitId: drawUnit.id,
+				reason: "non-opaque-material",
+				detail: "material state is not supported by the current baked shader family",
+			};
+		case "unsupported-texture-page-behavior":
+			return {
+				drawUnitId: drawUnit.id,
+				reason: "non-direct-texture",
+				detail: "texture-page bindings require a baked shader family that is not implemented",
+			};
+	}
+}
+
+function hasCompatibleBakedBaseTexturePage(
+	texturePageBindings: readonly TexturePageBinding[],
+): boolean {
+	return texturePageBindings.some(
+		(binding) =>
+			binding.usageBucket === "base-color" &&
+			binding.sampleClass === "rgba-color" &&
+			binding.sampling.samplingDomain === "color" &&
+			binding.sampling.lookup === "color-filtered",
+	);
+}
+
+function hasOnlySupportedBakedTexturePageBehavior(
+	texturePageBindings: readonly TexturePageBinding[],
+): boolean {
+	return texturePageBindings.every((binding) => {
+		if (
+			binding.usageBucket === "base-color" ||
+			binding.usageBucket === "detail"
+		) {
+			return (
+				binding.sampleClass === "rgba-color" &&
+				binding.sampling.samplingDomain === "color" &&
+				binding.sampling.lookup === "color-filtered"
+			);
 		}
-	}
-	if (drawUnit.owningLandblockId === null) {
-		return {
-			drawUnitId: drawUnit.id,
-			reason: "missing-landblock-origin",
-			detail: "baked geometry draw unit has no owning landblock",
-		};
-	}
-	if (drawUnit.materialKind !== "direct-texture") {
-		return {
-			drawUnitId: drawUnit.id,
-			reason: "non-direct-texture",
-			detail: `draw unit material kind ${drawUnit.materialKind} is not direct-texture`,
-		};
-	}
-	if (!drawUnit.hasUvBuffer) {
-		return {
-			drawUnitId: drawUnit.id,
-			reason: "missing-uv-buffer",
-			detail: "direct texture baked geometry draw unit has no UV buffer",
-		};
-	}
-	if (!drawUnit.atlasEligibility) {
-		return {
-			drawUnitId: drawUnit.id,
-			reason: "missing-atlas-eligibility",
-			detail:
-				"direct texture baked geometry draw unit has no packed texture-page eligibility",
-		};
-	}
-	if (drawUnit.hasDetailOverlay && !drawUnit.detailAtlasEntry) {
-		return {
-			drawUnitId: drawUnit.id,
-			reason: "missing-detail-atlas-entry",
-			detail: "detail overlay has no compactable RGBA8 detail atlas entry",
-		};
-	}
-	if (!isOpaqueStaticCompactionMaterial(drawUnit.materialBehavior)) {
-		return {
-			drawUnitId: drawUnit.id,
-			reason: "non-opaque-material",
-			detail: "non-opaque direct texture material stays on staged direct path",
-		};
-	}
-	return null;
+		return false;
+	});
 }
 
 function isOpaqueStaticCompactionMaterial(
@@ -399,10 +529,10 @@ function isOpaqueStaticCompactionMaterial(
 	);
 }
 
-function dedupeAtlasBackedCompactionEntries(
-	candidates: readonly EligibleAtlasBackedCompactionCandidate[],
-): AtlasBackedCompactionEntryRecord[] {
-	const entriesByKey = new Map<string, AtlasBackedCompactionEntryRecord>();
+function dedupeBakedRenderableEntries(
+	candidates: readonly EligibleBakedRenderableCandidate[],
+): BakedRenderableEntryRecord[] {
+	const entriesByKey = new Map<string, BakedRenderableEntryRecord>();
 	for (const candidate of candidates) {
 		entriesByKey.set(candidate.eligibility.atlasEntryKey, {
 			key: candidate.eligibility.atlasEntryKey,
@@ -414,10 +544,10 @@ function dedupeAtlasBackedCompactionEntries(
 	);
 }
 
-function dedupeAtlasBackedCompactionDetailEntries(
-	candidates: readonly EligibleAtlasBackedCompactionCandidate[],
-): AtlasBackedCompactionDetailEntry[] {
-	const entriesByKey = new Map<string, AtlasBackedCompactionDetailEntry>();
+function dedupeBakedRenderableDetailEntries(
+	candidates: readonly EligibleBakedRenderableCandidate[],
+): BakedRenderableDetailEntry[] {
+	const entriesByKey = new Map<string, BakedRenderableDetailEntry>();
 	for (const candidate of candidates) {
 		const detailEntry = candidate.drawUnit.detailAtlasEntry;
 		if (detailEntry) {
@@ -429,10 +559,10 @@ function dedupeAtlasBackedCompactionDetailEntries(
 	);
 }
 
-function assignAtlasBackedCompactionMaterialSlots(
-	candidates: readonly EligibleAtlasBackedCompactionCandidate[],
-	policy: AtlasBackedCompactionPolicy,
-): AtlasBackedCompactionMaterialSlot[] {
+function assignBakedRenderableMaterialSlots(
+	candidates: readonly EligibleBakedRenderableCandidate[],
+	policy: BakedRenderablePolicy,
+): BakedRenderableMaterialSlot[] {
 	return [
 		...new Map(
 			candidates.map(
@@ -454,15 +584,15 @@ function assignAtlasBackedCompactionMaterialSlots(
 			samplingKey: eligibility.samplingKey,
 			samplingPolicy: eligibility.samplingPolicy,
 			atlasEntryKey: eligibility.atlasEntryKey,
-			...describeAtlasBackedCompactionDetailSlot(candidates, key),
+			...describeBakedRenderableDetailSlot(candidates, key),
 		}));
 }
 
-function describeAtlasBackedCompactionDetailSlot(
-	candidates: readonly EligibleAtlasBackedCompactionCandidate[],
+function describeBakedRenderableDetailSlot(
+	candidates: readonly EligibleBakedRenderableCandidate[],
 	materialSlotKey: string,
 ): Pick<
-	AtlasBackedCompactionMaterialSlot,
+	BakedRenderableMaterialSlot,
 	"detailAtlasEntryKey" | "detailTiling"
 > {
 	const detailEntries = [
@@ -474,7 +604,7 @@ function describeAtlasBackedCompactionDetailSlot(
 				)
 				.map((candidate) => candidate.drawUnit.detailAtlasEntry)
 				.filter(
-					(entry): entry is AtlasBackedCompactionDetailEntry =>
+					(entry): entry is BakedRenderableDetailEntry =>
 						entry !== null && entry !== undefined,
 				)
 				.map((entry) => [entry.key, entry] as const),
@@ -482,7 +612,7 @@ function describeAtlasBackedCompactionDetailSlot(
 	];
 	if (detailEntries.length > 1) {
 		throw new Error(
-			`Atlas-backed compaction material slot ${materialSlotKey} has multiple detail atlas entries.`,
+			`Baked geometry material slot ${materialSlotKey} has multiple detail atlas entries.`,
 		);
 	}
 	const detailEntry = detailEntries[0] ?? null;
@@ -493,7 +623,7 @@ function describeAtlasBackedCompactionDetailSlot(
 }
 
 function describeCompactionMaterialSlotKey(
-	candidate: EligibleAtlasBackedCompactionCandidate,
+	candidate: EligibleBakedRenderableCandidate,
 ): string {
 	return [
 		candidate.eligibility.materialSlotKey,
@@ -502,12 +632,12 @@ function describeCompactionMaterialSlotKey(
 	].join("|");
 }
 
-function createAtlasBackedCompactionDrawSlices(
-	candidates: readonly EligibleAtlasBackedCompactionCandidate[],
-	materialSlotByKey: ReadonlyMap<string, AtlasBackedCompactionMaterialSlot>,
+function createBakedRenderableDrawSlices(
+	candidates: readonly EligibleBakedRenderableCandidate[],
+	materialSlotByKey: ReadonlyMap<string, BakedRenderableMaterialSlot>,
 	placementsByEntryKey: ReadonlyMap<string, { textureIndex: number }>,
 	detailPlacementsByEntryKey: ReadonlyMap<string, { textureIndex: number }>,
-): AtlasBackedCompactionDrawSlice[] {
+): BakedRenderableDrawSlice[] {
 	const groups = new Map<
 		string,
 		{
@@ -566,7 +696,7 @@ function createAtlasBackedCompactionDrawSlices(
 			const drawUnitIds = [...group.drawUnitIds].sort();
 			return {
 				key: [
-					"atlas-backed-compacted-draw-slice",
+					"baked-draw-slice",
 					`texture=${group.atlasTextureIndex}`,
 					`detail=${group.detailAtlasTextureIndex ?? "none"}`,
 					group.renderStateKey,
@@ -584,14 +714,14 @@ function createAtlasBackedCompactionDrawSlices(
 		});
 }
 
-function describeAtlasBackedCompactionPlanKey(options: {
-	policy: AtlasBackedCompactionPolicy;
+function describeBakedRenderablePlanKey(options: {
+	policy: BakedRenderablePolicy;
 	atlasEntryKeys: readonly string[];
 	detailAtlasEntryKeys: readonly string[];
 	materialSlotKeys: readonly string[];
 }): string {
 	return [
-		"atlas-backed-compaction",
+		"baked-renderables",
 		`size=${options.policy.maxAtlasTextureSize}`,
 		`textures=${options.policy.maxAtlasTextureCount}`,
 		`gutter=${options.policy.baseGutterPixels}`,

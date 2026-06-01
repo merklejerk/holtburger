@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { AtlasBackedCompactionPlan } from "./atlas-backed-compaction-planner";
+import type { BakedRenderablePlan } from "./baked-renderable-planner";
 import { createWebgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
 
 describe("webgl2 texture atlas generation", () => {
@@ -11,7 +11,7 @@ describe("webgl2 texture atlas generation", () => {
 			plan: createPlan(),
 		});
 
-		expect(generation?.key).toBe("atlas-backed-compaction/test");
+		expect(generation?.key).toBe("baked-renderables/test");
 		expect(generation?.textures).toHaveLength(1);
 		expect(generation?.detailTextures).toHaveLength(1);
 		expect(generation?.placements).toEqual([
@@ -86,12 +86,12 @@ describe("webgl2 texture atlas generation", () => {
 	});
 });
 
-function createPlan(): AtlasBackedCompactionPlan {
+function createPlan(): BakedRenderablePlan {
 	const levelBytes = Uint8Array.from([
 		1, 2, 3, 255, 4, 5, 6, 255, 7, 8, 9, 255, 10, 11, 12, 255,
 	]);
 	return {
-		key: "atlas-backed-compaction/test",
+		key: "baked-renderables/test",
 		compactableDrawUnitIds: ["draw-a"],
 		bypasses: [],
 		atlasEntryRecords: [

@@ -536,7 +536,7 @@ Exit criteria:
 
 ## Phase C2.5: Direct Family Draw Context Prep
 
-Status: Next.
+Status: Complete.
 
 Purpose: prepare C3 by extracting the draw-loop context and route decisions that family adapters will
 actually consume. This is an immediate interim phase because adding an unused context object in C2
@@ -570,6 +570,64 @@ Tasks:
   - terrain blend;
   - portal masks/debug.
 
+Progress:
+
+- Added typed direct draw route/context records in `webgl2-world-submit.ts`:
+  - `DirectFamilyDrawContext`;
+  - `DirectFamilyDrawTextureUnits`;
+  - `Webgl2DirectDrawPrograms`;
+  - `Webgl2DirectDrawRoute`;
+  - `Webgl2DirectProgramKind`.
+- Added `DIRECT_FAMILY_DRAW_TEXTURE_UNITS` as the first explicit texture-unit contract for direct
+  family drawing:
+  - RGBA base/detail use units 0/1;
+  - indexed texels/palette/detail use units 0/1/2;
+  - terrain keeps its existing 0-9 unit layout.
+- Added `planWebgl2DirectDrawRoute()` to construct the typed route record used by the central loop.
+  It carries the direct family submission, active program, indexed variant, texture-page binding,
+  active base texture, detail texture unit, and family booleans.
+- Replaced the central loop's local `useTerrainBlend` / `useIndexed` / `useTexture` / string
+  `programKind` route derivation with the typed route record.
+- Kept draw order, state-cache behavior, texture binding order, uniform upload counts, and metrics
+  unchanged.
+- Added route construction tests for flat, RGBA texture-page, indexed P8, indexed P16, terrain blend,
+  and portal-mask/debug routing.
+
+Decisions:
+
+- Keep route construction in `webgl2-world-submit.ts` for now. It is the current owner of direct draw
+  orchestration, and moving the helper to a new module before C3 would create a second submit-shaped
+  home without deleting anything.
+- Preserve the current behavior where portal masks use the flat program but classify as
+  `debug-pipeline` at the direct family view boundary.
+- Preserve texture-page binding resolution in the route record for C2.5. C3 should move RGBA
+  texture-page binding/use into the RGBA direct family adapter, then delete the central-loop duplicate
+  logic in the same phase.
+
+Course corrections:
+
+- The route record intentionally still exposes family booleans (`usesRgbaTexturePage`, `usesIndexed`,
+  `usesTerrainBlend`) because C3 needs a low-risk bridge from central-loop branches to adapter calls.
+  These should shrink once RGBA and indexed adapters own their material work.
+- `DirectFamilyDrawContext` currently carries state and texture-unit contracts but not a formal metric
+  recorder. C3 should introduce the narrow recorder only when adapter functions start incrementing
+  metrics; adding it earlier would be a passive shell.
+
+Legacy shims introduced:
+
+- `planWebgl2DirectDrawRoute()` is a migration route builder over `Webgl2WorldDrawUnit`. C7 should
+  delete it or reduce it to adapter-owned construction once `Webgl2WorldDrawUnit` is split.
+- `Webgl2DirectDrawRoute` still points at the old draw unit aggregate and current program resources.
+  This is acceptable for C3, but it must not become the final family pipeline plan shape.
+- Central-loop metric increments still live outside family adapters. C3 should move RGBA/indexed
+  increments with the behavior they measure, then leave only orchestration-level counters in the
+  central loop.
+
+Validation:
+
+- `npm exec tsc -- --noEmit`
+- `npm exec vitest -- src/lib/world-display/webgl2-direct-render-family.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-transition-portal-work.test.ts --run`
+
 Exit criteria:
 
 - C3 can move RGBA texture-page drawing behind a family adapter by consuming `DirectFamilyDrawContext`
@@ -580,7 +638,7 @@ Exit criteria:
 
 ## Phase C3: Direct Family Pipeline Draw Adapters
 
-Status: Planned.
+Status: Next.
 
 Purpose: move direct RGBA texture-page and indexed/paletted draw behavior behind family pipeline
 adapters after C2/C2.5 have established typed direct geometry submission views and typed direct draw
@@ -589,6 +647,23 @@ route/context records.
 Tasks:
 
 - Keep direct draw order, scene-domain routing, portal masking, and state-cache behavior unchanged.
+- Start with the RGBA texture-page adapter first. It is the simplest useful adapter because
+  `planWebgl2DirectDrawRoute()` already resolves the texture-page binding, active base texture, detail
+  unit, alpha program, and texture-page program.
+- In the same RGBA adapter change, remove central-loop duplicate ownership of:
+  - RGBA sampler uniform setup;
+  - base/detail texture binding;
+  - RGBA color and alpha-test upload;
+  - detail overlay upload;
+  - direct texture-page uniform upload;
+  - direct texture-page/staged atlas metrics.
+- Then move indexed/paletted direct drawing behind an indexed adapter, deleting central-loop duplicate
+  ownership of:
+  - indexed sampler uniform setup;
+  - index/palette/detail texture binding;
+  - indexed color and alpha-test upload;
+  - indexed material dynamic uniform upload;
+  - indexed detail overlay upload.
 - Move direct RGBA texture-page drawing behind an `rgba-texture-page` family pipeline adapter without
   changing behavior.
 - Move direct indexed drawing behind an `indexed-paletted` family pipeline adapter without changing

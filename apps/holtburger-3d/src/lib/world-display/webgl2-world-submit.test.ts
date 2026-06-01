@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import type { StagedWorldFrame } from "./staged-world-frame";
 import {
 	partitionWebgl2SceneDomainDrawUnits,
+	planWebgl2DirectDrawRoute,
 	planWebgl2FlatWorldSubmitOrder,
 	planWebgl2PortalMaskSubmitOrder,
 	submitWebgl2FlatWorldDrawUnits,
 	submitWebgl2FlatWorldFrame,
+	type Webgl2DirectDrawPrograms,
 	type Webgl2FlatWorldProgram,
 	type Webgl2IndexedP16WorldProgram,
 	type Webgl2IndexedP8WorldProgram,
@@ -106,6 +108,97 @@ describe("partitionWebgl2SceneDomainDrawUnits", () => {
 			"indoor-static",
 			"interior",
 		]);
+	});
+});
+
+describe("planWebgl2DirectDrawRoute", () => {
+	it("routes flat and portal-mask/debug draw units through the flat program", () => {
+		const programs = createDirectDrawPrograms();
+		const flat = planWebgl2DirectDrawRoute({
+			drawUnit: createDrawUnit({ id: "flat" }),
+			programs,
+		});
+		const mask = planWebgl2DirectDrawRoute({
+			drawUnit: createDrawUnit({ id: "mask", kind: "portal-mask" }),
+			programs,
+		});
+
+		expect(flat.programKind).toBe("flat");
+		expect(flat.activeProgram).toBe(programs.flat);
+		expect(flat.submission.material.family).toBe("flat-constant-color");
+		expect(mask.programKind).toBe("flat");
+		expect(mask.activeProgram).toBe(programs.flat);
+		expect(mask.submission.material.family).toBe("debug-pipeline");
+	});
+
+	it("routes RGBA texture-page draw units with resolved texture-page binding", () => {
+		const programs = createDirectDrawPrograms();
+		const standaloneTexture = {} as WebGLTexture;
+		const atlasTexture = {} as WebGLTexture;
+		const route = planWebgl2DirectDrawRoute({
+			drawUnit: createDrawUnit({
+				id: "texture",
+				materialKind: "direct-texture",
+				texture: createTextureResource(standaloneTexture),
+				baseTexturePageBinding: createPackedBaseTexturePageBinding(
+					createTextureResource(atlasTexture, 4, 4),
+				),
+			}),
+			programs,
+		});
+
+		expect(route.programKind).toBe("texture");
+		expect(route.activeProgram).toBe(programs.rgbaTexturePage);
+		expect(route.texturePageBinding?.pageKind).toBe("packed-atlas");
+		expect(route.activeBaseTexture).toBe(atlasTexture);
+		expect(route.detailTextureUnit).toBe(1);
+		expect(route.submission.material.family).toBe("rgba-texture-page");
+	});
+
+	it("routes indexed P8 and P16 draw units through distinct indexed programs", () => {
+		const programs = createDirectDrawPrograms();
+		const p8 = planWebgl2DirectDrawRoute({
+			drawUnit: createDrawUnit({
+				id: "indexed-p8",
+				materialKind: "indexed-paletted",
+				indexedMaterial: createIndexedMaterial("p8"),
+			}),
+			programs,
+		});
+		const p16 = planWebgl2DirectDrawRoute({
+			drawUnit: createDrawUnit({
+				id: "indexed-p16",
+				materialKind: "indexed-paletted",
+				indexedMaterial: createIndexedMaterial("index16"),
+			}),
+			programs,
+		});
+
+		expect(p8.programKind).toBe("indexed-p8");
+		expect(p8.activeProgram).toBe(programs.indexedP8);
+		expect(p8.detailTextureUnit).toBe(2);
+		expect(p8.submission.material.family).toBe("indexed-paletted");
+		expect(p16.programKind).toBe("indexed-p16");
+		expect(p16.activeProgram).toBe(programs.indexedP16);
+		expect(p16.submission.material.family).toBe("indexed-paletted");
+	});
+
+	it("routes terrain draw units through the terrain program", () => {
+		const programs = createDirectDrawPrograms();
+		const route = planWebgl2DirectDrawRoute({
+			drawUnit: createDrawUnit({
+				id: "terrain",
+				kind: "terrain",
+				materialKind: "terrain-blend",
+				terrainBlend: createTerrainBlendResources(),
+			}),
+			programs,
+		});
+
+		expect(route.programKind).toBe("terrain");
+		expect(route.activeProgram).toBe(programs.terrainBlend);
+		expect(route.colorProgram).toBeNull();
+		expect(route.submission.material.family).toBe("terrain-blend");
 	});
 });
 
@@ -791,7 +884,7 @@ function createDrawUnit({
 		detailOverlay: null,
 		terrainBlend,
 		texturePageBindings:
-			baseTexturePageBinding ?? defaultTexturePageBinding
+			(baseTexturePageBinding ?? defaultTexturePageBinding)
 				? [baseTexturePageBinding ?? defaultTexturePageBinding].filter(
 						(binding): binding is NonNullable<typeof binding> =>
 							binding !== null,
@@ -977,6 +1070,16 @@ function createTerrainBlendProgram(): Webgl2TerrainBlendWorldProgram {
 	};
 }
 
+function createDirectDrawPrograms(): Webgl2DirectDrawPrograms {
+	return {
+		flat: createFlatProgram(),
+		rgbaTexturePage: createTexturedProgram(),
+		terrainBlend: createTerrainBlendProgram(),
+		indexedP8: createIndexedP8Program(),
+		indexedP16: createIndexedP16Program(),
+	};
+}
+
 function createBakedGeometryProgram(): Webgl2BakedGeometryWorldProgram {
 	return {
 		program: {} as WebGLProgram,
@@ -1075,6 +1178,27 @@ function createTextureResource(
 		dispose() {
 			return;
 		},
+	};
+}
+
+function createIndexedMaterial(
+	indexFormat: NonNullable<
+		Webgl2WorldDrawUnit["indexedMaterial"]
+	>["indexFormat"],
+): NonNullable<Webgl2WorldDrawUnit["indexedMaterial"]> {
+	return {
+		key: `indexed-${indexFormat}`,
+		indexFormat,
+		indexTextureKey: "index",
+		paletteTextureKey: "palette",
+		indexTexture: createTextureResource({} as WebGLTexture),
+		paletteTexture: createTextureResource({} as WebGLTexture),
+		width: 2,
+		height: 1,
+		paletteColorCount: 2,
+		wrapS: "clamp",
+		wrapT: "repeat",
+		clipThreshold: -1,
 	};
 }
 

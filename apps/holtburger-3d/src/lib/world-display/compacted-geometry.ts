@@ -138,6 +138,11 @@ export function buildCompactedGeometryBatch<
 			modelMatrix: drawUnit.modelMatrix,
 			batchOrigin,
 		});
+		if (!drawUnit.geometry.uvs) {
+			throw new Error(
+				`Compacted geometry draw unit ${drawUnit.id} has no UV buffer.`,
+			);
+		}
 		uvs.set(drawUnit.geometry.uvs, vertexOffset * 2);
 		materialSlotIndices.fill(
 			materialSlot.index,

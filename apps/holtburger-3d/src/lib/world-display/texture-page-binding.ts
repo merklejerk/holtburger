@@ -5,6 +5,11 @@ import type {
 } from "./webgl2-texture-atlas-generation";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
 
+type TexturePageWrapDrawUnit = Pick<
+	Webgl2WorldDrawUnit,
+	"atlasEligibility" | "directTextureSamplingPolicy"
+>;
+
 export type TexturePageKind = "single-entry" | "packed-atlas";
 export type TexturePageUsageBucket =
 	| "base-color"
@@ -393,7 +398,7 @@ function appendTexturePageFallbackSample(
 	return [...fallbackSamples, sample].slice(0, 8);
 }
 
-function resolveTexturePageWrapMode(drawUnit: Webgl2WorldDrawUnit): {
+function resolveTexturePageWrapMode(drawUnit: TexturePageWrapDrawUnit): {
 	wrapS: TexturePageWrapMode;
 	wrapT: TexturePageWrapMode;
 } {

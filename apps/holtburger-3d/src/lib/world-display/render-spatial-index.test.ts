@@ -52,6 +52,25 @@ describe("createLinearRenderSpatialIndex", () => {
 		expect(pick?.item.id).toBe("debug-cell");
 	});
 
+	it("filters picks by an explicit item predicate", () => {
+		const index = createTestIndex();
+		index.replaceOwnerItems("mesh-owner", [
+			createTerrainItem("mesh-cell", "mesh-owner", 2, 4),
+		]);
+		index.replaceOwnerItems("debug-owner", [
+			createTerrainItem("debug-cell", "debug-owner", 6, 8),
+		]);
+
+		const pick = index.pickRay(
+			createForwardRay(),
+			new Set(["terrain"]),
+			new Set(["mesh-owner", "debug-owner"]),
+			(item) => item.ownerKey === "debug-owner",
+		);
+
+		expect(pick?.item.id).toBe("debug-cell");
+	});
+
 	it("returns the nearest matching pick", () => {
 		const index = createTestIndex();
 		index.replaceOwnerItems("owner", [

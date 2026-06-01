@@ -19,7 +19,13 @@
 	import { formatHex32, normalizeOutdoorLandblockId } from "../lib/landblocks";
 	import { countOutdoorSceneLodTiles } from "../lib/world-display/outdoor-scene-interest";
 
-	type BrowserPanelTabId = "navigate" | "lod" | "scene" | "debug";
+	type BrowserPanelTabId = "navigate" | "lod" | "scene" | "picker" | "debug";
+	type BrowserPickerFamily =
+		| "static"
+		| "structured"
+		| "terrain"
+		| "portal"
+		| "debug";
 
 	interface BrowserPanelRow {
 		label: string;
@@ -29,6 +35,15 @@
 	interface BrowserPanelSection {
 		title: string;
 		rows: BrowserPanelRow[];
+	}
+
+	interface BrowserPickerOptions {
+		pickableFamilies: Record<BrowserPickerFamily, boolean>;
+	}
+
+	interface BrowserPickerReport {
+		statusText: string;
+		sections: BrowserPanelSection[];
 	}
 
 	interface FocusedCellReference {
@@ -42,12 +57,22 @@
 		canResetCamera,
 		onResetCamera,
 		onGenerateDebugReport,
+		pickerOptions,
+		pickerReport,
+		pickerArmed,
+		onPickerOptionsChange,
+		onTogglePickerMode,
 	}: {
 		sceneStatusText: string;
 		sceneSummaryRows: BrowserPanelRow[];
 		canResetCamera: boolean;
 		onResetCamera: () => void;
 		onGenerateDebugReport: () => void;
+		pickerOptions: BrowserPickerOptions;
+		pickerReport: BrowserPickerReport;
+		pickerArmed: boolean;
+		onPickerOptionsChange: (options: BrowserPickerOptions) => void;
+		onTogglePickerMode: () => void;
 	} = $props();
 
 	let activeTab = $state<BrowserPanelTabId>("navigate");
@@ -191,6 +216,20 @@
 		isJsProfilerRunning = true;
 	}
 
+	function handlePickerFamilyToggle(
+		family: BrowserPickerFamily,
+		event: Event,
+	): void {
+		const input = event.currentTarget as HTMLInputElement;
+		onPickerOptionsChange({
+			...pickerOptions,
+			pickableFamilies: {
+				...pickerOptions.pickableFamilies,
+				[family]: input.checked,
+			},
+		});
+	}
+
 	function formatOptionalHex32(value: number | null): string {
 		return value === null ? "unavailable" : `0x${formatHex32(value)}`;
 	}
@@ -230,6 +269,15 @@
 					onclick={() => selectTab("scene")}
 				>
 					Scene
+				</button>
+				<button
+					type="button"
+					class:active={activeTab === "picker"}
+					role="tab"
+					aria-selected={activeTab === "picker"}
+					onclick={() => selectTab("picker")}
+				>
+					Picker
 				</button>
 				<button
 					type="button"
@@ -638,6 +686,78 @@
 					</div>
 				{/each}
 			</dl>
+		</div>
+	{:else if !isCollapsed && activeTab === "picker"}
+		<div class="browser-panel__body" role="tabpanel">
+			<p class="browser-panel__status">{pickerReport.statusText}</p>
+
+			<fieldset class="browser-form__fieldset">
+				<legend>Pickable renderables</legend>
+				<label class="browser-form__field browser-form__field--checkbox">
+					<span><strong>Static objects</strong></span>
+					<input
+						type="checkbox"
+						checked={pickerOptions.pickableFamilies.static}
+						onchange={(event) => handlePickerFamilyToggle("static", event)}
+					/>
+				</label>
+				<label class="browser-form__field browser-form__field--checkbox">
+					<span><strong>Structured interiors</strong></span>
+					<input
+						type="checkbox"
+						checked={pickerOptions.pickableFamilies.structured}
+						onchange={(event) => handlePickerFamilyToggle("structured", event)}
+					/>
+				</label>
+				<label class="browser-form__field browser-form__field--checkbox">
+					<span><strong>Terrain</strong></span>
+					<input
+						type="checkbox"
+						checked={pickerOptions.pickableFamilies.terrain}
+						onchange={(event) => handlePickerFamilyToggle("terrain", event)}
+					/>
+				</label>
+				<label class="browser-form__field browser-form__field--checkbox">
+					<span><strong>Portals</strong></span>
+					<input
+						type="checkbox"
+						checked={pickerOptions.pickableFamilies.portal}
+						onchange={(event) => handlePickerFamilyToggle("portal", event)}
+					/>
+				</label>
+				<label class="browser-form__field browser-form__field--checkbox">
+					<span><strong>Debug overlays</strong></span>
+					<input
+						type="checkbox"
+						checked={pickerOptions.pickableFamilies.debug}
+						onchange={(event) => handlePickerFamilyToggle("debug", event)}
+					/>
+				</label>
+			</fieldset>
+
+			<div class="browser-panel__debug-actions">
+				<button
+					type="button"
+					aria-pressed={pickerArmed}
+					onclick={onTogglePickerMode}
+				>
+					{pickerArmed ? "Cancel pick" : "Pick from scene"}
+				</button>
+			</div>
+
+			{#each pickerReport.sections as section}
+				<details class="browser-panel__details" open>
+					<summary>{section.title}</summary>
+					<dl class="data-list compact-data-list">
+						{#each section.rows as row}
+							<div>
+								<dt>{row.label}</dt>
+								<dd>{row.value}</dd>
+							</div>
+						{/each}
+					</dl>
+				</details>
+			{/each}
 		</div>
 	{:else if !isCollapsed}
 		<div class="browser-panel__body" role="tabpanel">

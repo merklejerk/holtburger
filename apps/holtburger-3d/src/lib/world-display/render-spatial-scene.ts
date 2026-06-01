@@ -1,5 +1,6 @@
 import { Box3, Matrix4, Vector3 } from "three";
 
+import type { AssetChannelState } from "../assets/types";
 import type { Vec3Dto } from "../host/contracts";
 import type {
 	PortalDebugOverlay,
@@ -13,10 +14,17 @@ import type {
 import {
 	debugCellSpatialItemId,
 	portalSpatialItemId,
+	staticRenderablePartSpatialItemId,
 	structuredCellSpatialItemId,
 	terrainSpatialItemId,
 } from "./render-spatial-ids";
 import { buildAcPlacementMatrix } from "./static-renderable-geometry";
+import { buildStaticRenderablePartMatrix } from "./staged-world-assembly";
+import {
+	isPreparedGfxObjAsset,
+	type StaticRenderablePart,
+	type StaticRenderableSceneModel,
+} from "./static-renderables";
 import type {
 	StructuredInteriorCell,
 	StructuredInteriorSceneModel,
@@ -27,6 +35,7 @@ export const TERRAIN_SPATIAL_OWNER_KEY = "terrain-scene";
 export const STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY =
 	"structured-interior-scene";
 export const DEBUG_OVERLAY_SPATIAL_OWNER_KEY = "debug-overlay-scene";
+export const STATIC_RENDERABLE_SPATIAL_OWNER_KEY = "static-renderable-scene";
 
 const PORTAL_PICK_THICKNESS = 0.35;
 const CELL_MARKER_PICK_RADIUS = 2.5;
@@ -41,6 +50,15 @@ export function deriveStructuredInteriorSpatialItems(
 	structuredInteriorScene: StructuredInteriorSceneModel,
 ): RenderSpatialItem[] {
 	return structuredInteriorScene.cells.map(deriveStructuredInteriorSpatialItem);
+}
+
+export function deriveStaticRenderableSpatialItems(
+	assetState: AssetChannelState,
+	staticRenderableScene: StaticRenderableSceneModel,
+): RenderSpatialItem[] {
+	return staticRenderableScene.parts.flatMap((part) =>
+		deriveStaticRenderablePartSpatialItem(assetState, part),
+	);
 }
 
 export function deriveDebugOverlaySpatialItems(
@@ -103,6 +121,61 @@ function deriveStructuredInteriorSpatialItem(
 			isFocus: cell.isFocus,
 		},
 	};
+}
+
+function deriveStaticRenderablePartSpatialItem(
+	assetState: AssetChannelState,
+	part: StaticRenderablePart,
+): RenderSpatialItem[] {
+	const asset = assetState.preparedByAssetId[part.gfxObjAssetId];
+	if (!isPreparedGfxObjAsset(asset) || !asset.payload.renderGeometry.bounds) {
+		return [];
+	}
+	const bounds = transformBoundsByRenderMat4(
+		asset.payload.renderGeometry.bounds,
+		buildStaticRenderablePartMatrix(part),
+	);
+
+	return [
+		{
+			id: staticRenderablePartSpatialItemId(part.renderKey),
+			kind: staticRenderablePartSpatialKind(part),
+			ownerKey: STATIC_RENDERABLE_SPATIAL_OWNER_KEY,
+			chunkKey: part.renderChunk.chunkKey,
+			broadphaseBounds: bounds,
+			pickShape: { kind: "box", bounds },
+			metadata: {
+				kind: "static-renderable",
+				renderKey: part.renderKey,
+				instanceId: part.instanceId,
+				staticKind: part.kind,
+				renderDomain: part.renderDomain,
+				owningLandblockId: part.owningLandblockId,
+				owningEnvCellId: part.owningEnvCellId,
+				sourceAssetId: part.sourceAssetId,
+				gfxObjAssetId: part.gfxObjAssetId,
+				gfxObjId: part.gfxObjId,
+				partIndex: part.partIndex,
+				materialSignature: part.materialSignature,
+				materialSlotCount: part.materialSlots.length,
+				detailRoleKind: part.detailRoleKind,
+				detailSignature: part.detailSignature,
+				textureVelocitySignature: part.textureVelocitySignature,
+			},
+		},
+	];
+}
+
+function staticRenderablePartSpatialKind(
+	part: StaticRenderablePart,
+): RenderSpatialItem["kind"] {
+	if (part.kind === "indoor-static") {
+		return "indoor-static";
+	}
+	if (part.kind === "building") {
+		return "building";
+	}
+	return "outdoor-static";
 }
 
 function deriveCellDebugOverlaySpatialItem(
@@ -204,6 +277,46 @@ function transformBounds(
 	return {
 		min: vectorToRenderVec3(box.min),
 		max: vectorToRenderVec3(box.max),
+	};
+}
+
+function transformBoundsByRenderMat4(
+	bounds: { min: Vec3Dto; max: Vec3Dto },
+	matrix: Float32Array,
+): RenderBounds {
+	const points = [
+		{ x: bounds.min.x, y: bounds.min.y, z: bounds.min.z },
+		{ x: bounds.min.x, y: bounds.min.y, z: bounds.max.z },
+		{ x: bounds.min.x, y: bounds.max.y, z: bounds.min.z },
+		{ x: bounds.min.x, y: bounds.max.y, z: bounds.max.z },
+		{ x: bounds.max.x, y: bounds.min.y, z: bounds.min.z },
+		{ x: bounds.max.x, y: bounds.min.y, z: bounds.max.z },
+		{ x: bounds.max.x, y: bounds.max.y, z: bounds.min.z },
+		{ x: bounds.max.x, y: bounds.max.y, z: bounds.max.z },
+	].map((point) => transformPointByRenderMat4(point, matrix));
+	return pointsToBounds(points);
+}
+
+function transformPointByRenderMat4(
+	point: Vec3Dto,
+	matrix: Float32Array,
+): RenderVec3 {
+	return {
+		x:
+			matrix[0] * point.x +
+			matrix[4] * point.y +
+			matrix[8] * point.z +
+			matrix[12],
+		y:
+			matrix[1] * point.x +
+			matrix[5] * point.y +
+			matrix[9] * point.z +
+			matrix[13],
+		z:
+			matrix[2] * point.x +
+			matrix[6] * point.y +
+			matrix[10] * point.z +
+			matrix[14],
 	};
 }
 

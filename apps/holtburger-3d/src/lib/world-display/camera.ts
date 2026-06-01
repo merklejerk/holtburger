@@ -10,6 +10,7 @@ import {
 	type RenderCameraFrame,
 	type RenderLandblockAnchor,
 } from "./render-chunks";
+import type { RenderRay } from "./render-spatial-math";
 
 export interface SceneCameraFrame {
 	position: Vec3Dto;
@@ -502,6 +503,16 @@ export function buildCameraHintFromSceneCameraFrame(
 		viewportNormalizedX: viewportPoint.normalizedX,
 		viewportNormalizedY: viewportPoint.normalizedY,
 		destinationLabel: browserDestination?.label ?? null,
+	};
+}
+
+export function buildSceneCameraRenderRay(
+	frame: SceneCameraFrame,
+	viewportPoint: NormalizedViewportPoint,
+): RenderRay {
+	return {
+		origin: frame.position,
+		direction: buildFrameRayDirection(frame, viewportPoint),
 	};
 }
 

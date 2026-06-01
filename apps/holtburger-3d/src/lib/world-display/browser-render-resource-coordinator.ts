@@ -40,9 +40,11 @@ import {
 } from "./render-spatial-index";
 import {
 	DEBUG_OVERLAY_SPATIAL_OWNER_KEY,
+	STATIC_RENDERABLE_SPATIAL_OWNER_KEY,
 	STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY,
 	TERRAIN_SPATIAL_OWNER_KEY,
 	deriveDebugOverlaySpatialItems,
+	deriveStaticRenderableSpatialItems,
 	deriveStructuredInteriorSpatialItems,
 	deriveTerrainSpatialItems,
 } from "./render-spatial-scene";
@@ -345,6 +347,13 @@ export class BrowserRenderResourceCoordinator {
 			deriveStructuredInteriorSpatialItems(structuredInteriorScene),
 		);
 		this.renderSpatialIndex.replaceOwnerItems(
+			STATIC_RENDERABLE_SPATIAL_OWNER_KEY,
+			deriveStaticRenderableSpatialItems(
+				input.assetState,
+				staticRenderableScene,
+			),
+		);
+		this.renderSpatialIndex.replaceOwnerItems(
 			DEBUG_OVERLAY_SPATIAL_OWNER_KEY,
 			deriveDebugOverlaySpatialItems(debugOverlayScene),
 		);
@@ -366,10 +375,8 @@ export class BrowserRenderResourceCoordinator {
 				renderChunkTransformsSignature,
 				() => surface.setRenderChunkTransforms(activeRenderChunkTransforms),
 			);
-			this.applySurfaceResource(
-				"terrain-scene",
-				terrainSceneSignature,
-				() => surface.setTerrainScene(terrainScene),
+			this.applySurfaceResource("terrain-scene", terrainSceneSignature, () =>
+				surface.setTerrainScene(terrainScene),
 			);
 			this.applySurfaceResource(
 				"static-renderable-scene",
@@ -395,6 +402,7 @@ export class BrowserRenderResourceCoordinator {
 				"render-spatial-query",
 				describeRenderSpatialIndexSignature({
 					terrainSceneSignature,
+					staticRenderableSceneSignature,
 					structuredInteriorSceneSignature,
 					debugOverlaySceneSignature,
 					renderChunkTransformsSignature,
@@ -731,12 +739,14 @@ function describeDebugOverlaySceneSignature(
 
 function describeRenderSpatialIndexSignature({
 	terrainSceneSignature,
+	staticRenderableSceneSignature,
 	structuredInteriorSceneSignature,
 	debugOverlaySceneSignature,
 	renderChunkTransformsSignature,
 	assetState,
 }: {
 	terrainSceneSignature: string;
+	staticRenderableSceneSignature: string;
 	structuredInteriorSceneSignature: string;
 	debugOverlaySceneSignature: string;
 	renderChunkTransformsSignature: string;
@@ -744,6 +754,7 @@ function describeRenderSpatialIndexSignature({
 }): string {
 	return [
 		terrainSceneSignature,
+		staticRenderableSceneSignature,
 		structuredInteriorSceneSignature,
 		debugOverlaySceneSignature,
 		renderChunkTransformsSignature,

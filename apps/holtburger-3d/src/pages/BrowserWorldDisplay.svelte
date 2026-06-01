@@ -15,6 +15,7 @@
 	} from "../lib/host/tauri";
 	import {
 		buildCameraHintFromSceneCameraFrame,
+		buildSceneCameraRenderRay,
 		buildBrowserFreeCameraFrame,
 		convertBrowserFreeCameraStateBetweenAnchors,
 		createBrowserFreeCameraState,
@@ -55,13 +56,22 @@
 		type RuntimeAppearanceInput,
 		type RuntimeAppearanceResolvedFacts as BaseRuntimeAppearanceResolvedFacts,
 	} from "../lib/assets/runtime-appearance-cache";
-	import type { RenderSpatialMetadata } from "../lib/world-display/render-spatial-index";
+	import type {
+		RenderSpatialItemKind,
+		RenderSpatialMetadata,
+		RenderSpatialPick,
+	} from "../lib/world-display/render-spatial-index";
 	import {
 		commitRenderAnchorCandidate,
 		deriveRenderAnchorCandidate,
 		type RenderAnchorSource,
 	} from "../lib/world-display/render-anchor";
-	import { DEBUG_OVERLAY_SPATIAL_OWNER_KEY } from "../lib/world-display/render-spatial-scene";
+	import {
+		DEBUG_OVERLAY_SPATIAL_OWNER_KEY,
+		STATIC_RENDERABLE_SPATIAL_OWNER_KEY,
+		STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY,
+		TERRAIN_SPATIAL_OWNER_KEY,
+	} from "../lib/world-display/render-spatial-scene";
 	import type { RendererResourceGraph } from "../lib/world-display/renderer-resource-graph";
 	import {
 		convertCameraFrameBetweenAnchors,
@@ -88,6 +98,27 @@
 	interface BrowserPanelSection {
 		title: string;
 		rows: BrowserPanelRow[];
+	}
+
+	type BrowserPickerFamily =
+		| "static"
+		| "structured"
+		| "terrain"
+		| "portal"
+		| "debug";
+
+	interface BrowserPickerOptions {
+		pickableFamilies: Record<BrowserPickerFamily, boolean>;
+	}
+
+	interface BrowserPickerReport {
+		statusText: string;
+		sections: BrowserPanelSection[];
+	}
+
+	interface BrowserRenderablePickResult {
+		pick: RenderSpatialPick;
+		viewportPoint: NormalizedViewportPoint;
 	}
 
 	interface BrowserInspectorModel {
@@ -172,6 +203,18 @@
 	let browserCameraFrame = $state<SceneCameraFrame | null>(null);
 	let cameraAck = $state<CameraHintAckDto | null>(null);
 	let diagnosticSelection = $state<RenderSpatialMetadata | null>(null);
+	let pickerOptions = $state<BrowserPickerOptions>({
+		pickableFamilies: {
+			static: true,
+			structured: true,
+			terrain: false,
+			portal: false,
+			debug: false,
+		},
+	});
+	let pickerArmed = $state(false);
+	let pickerResult = $state<BrowserRenderablePickResult | null>(null);
+	let pickerMissText = $state("No target picked yet.");
 	let lastCameraHintAt = $state<number | null>(null);
 	let trailingCameraHint = $state<CameraHintDto | null>(null);
 	let activePointerDrag = $state<{
@@ -306,7 +349,9 @@
 			debug.compactedGeometryFamilyResourceCounts,
 		);
 		const fallbackSamples = summarizeSamples(debug.fallbackReasonSamples);
-		const compactionBypassSamples = summarizeSamples(debug.compactionBypassSamples);
+		const compactionBypassSamples = summarizeSamples(
+			debug.compactionBypassSamples,
+		);
 		const compactedResourceFallbackSamples = summarizeSamples(
 			debug.compactedResourceFallbackSamples,
 		);
@@ -444,6 +489,9 @@
 	const cameraPipelineDebugText = $derived(describeCameraPipelineDebugState());
 	const diagnosticInspector = $derived(
 		deriveDiagnosticInspector(diagnosticSelection),
+	);
+	const pickerReport = $derived<BrowserPickerReport>(
+		derivePickerReport(pickerResult, pickerMissText),
 	);
 
 	onMount(() => {
@@ -608,6 +656,106 @@
 		debugReportCopied = true;
 	}
 
+	function handlePickerOptionsChange(options: BrowserPickerOptions): void {
+		pickerOptions = options;
+	}
+
+	function handleTogglePickerMode(): void {
+		pickerArmed = !pickerArmed;
+		pickerMissText = pickerArmed
+			? "Pick mode is active. Click a renderable in the scene."
+			: "Pick mode canceled.";
+	}
+
+	function resolvePickerClick(viewportPoint: NormalizedViewportPoint): void {
+		const pick = pickRenderableAtViewportPoint(viewportPoint);
+		pickerArmed = false;
+		if (!pick) {
+			return;
+		}
+		pickerResult = { pick, viewportPoint };
+		pickerMissText = "";
+	}
+
+	function pickRenderableAtViewportPoint(
+		viewportPoint: NormalizedViewportPoint,
+	): RenderSpatialPick | null {
+		const cameraFrame = getEffectiveBrowserCameraFrame();
+		if (!cameraFrame) {
+			pickerResult = null;
+			pickerMissText = "Camera frame is not ready.";
+			return null;
+		}
+		const query = buildPickerQuery(pickerOptions);
+		if (query.mask.size === 0) {
+			pickerResult = null;
+			pickerMissText = "No pickable renderable families are enabled.";
+			return null;
+		}
+		const pick = renderResourceSnapshot.renderSpatialQuery.pickRay(
+			buildSceneCameraRenderRay(cameraFrame, viewportPoint),
+			query.mask,
+			query.ownerKeys,
+			query.acceptItem,
+		);
+		if (!pick) {
+			pickerResult = null;
+			pickerMissText = `No pick hit at ${formatViewportPoint(viewportPoint)}.`;
+			return null;
+		}
+		return pick;
+	}
+
+	function buildPickerQuery(options: BrowserPickerOptions): {
+		mask: Set<RenderSpatialItemKind>;
+		ownerKeys: Set<string>;
+		acceptItem: (item: RenderSpatialPick["item"]) => boolean;
+	} {
+		const mask = new Set<RenderSpatialItemKind>();
+		const ownerKeys = new Set<string>();
+		const acceptedPairs = new Set<string>();
+		if (options.pickableFamilies.static) {
+			mask.add("outdoor-static");
+			mask.add("building");
+			mask.add("indoor-static");
+			ownerKeys.add(STATIC_RENDERABLE_SPATIAL_OWNER_KEY);
+			acceptedPairs.add(
+				`${STATIC_RENDERABLE_SPATIAL_OWNER_KEY}:outdoor-static`,
+			);
+			acceptedPairs.add(`${STATIC_RENDERABLE_SPATIAL_OWNER_KEY}:building`);
+			acceptedPairs.add(`${STATIC_RENDERABLE_SPATIAL_OWNER_KEY}:indoor-static`);
+		}
+		if (options.pickableFamilies.structured) {
+			mask.add("structured-cell");
+			ownerKeys.add(STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY);
+			acceptedPairs.add(
+				`${STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY}:structured-cell`,
+			);
+		}
+		if (options.pickableFamilies.terrain) {
+			mask.add("terrain");
+			ownerKeys.add(TERRAIN_SPATIAL_OWNER_KEY);
+			acceptedPairs.add(`${TERRAIN_SPATIAL_OWNER_KEY}:terrain`);
+		}
+		if (options.pickableFamilies.portal) {
+			mask.add("portal");
+			ownerKeys.add(DEBUG_OVERLAY_SPATIAL_OWNER_KEY);
+			acceptedPairs.add(`${DEBUG_OVERLAY_SPATIAL_OWNER_KEY}:portal`);
+		}
+		if (options.pickableFamilies.debug) {
+			mask.add("structured-cell");
+			mask.add("portal");
+			ownerKeys.add(DEBUG_OVERLAY_SPATIAL_OWNER_KEY);
+			acceptedPairs.add(`${DEBUG_OVERLAY_SPATIAL_OWNER_KEY}:structured-cell`);
+			acceptedPairs.add(`${DEBUG_OVERLAY_SPATIAL_OWNER_KEY}:portal`);
+		}
+		return {
+			mask,
+			ownerKeys,
+			acceptItem: (item) => acceptedPairs.has(`${item.ownerKey}:${item.kind}`),
+		};
+	}
+
 	function buildCurrentFrameDebugReport(): string {
 		const lines: string[] = [
 			"Holtburger 3D Debug Report",
@@ -618,6 +766,7 @@
 			formatReportSections("Scene Details", browserPanelSceneDetailSections),
 			formatReportRows("Debug Summary", browserPanelDebugRows),
 			formatReportSections("Debug Details", browserPanelDebugDetailSections),
+			formatReportSections("Picker", pickerReport.sections),
 			"Runtime Appearance",
 			runtimeAppearanceStatusText,
 			formatReportRows("Runtime Appearance Rows", runtimeAppearanceRows),
@@ -1290,18 +1439,28 @@
 			return;
 		}
 
-		if (!rootElement || !worldDisplaySurface) {
+		if (!rootElement) {
 			return;
 		}
 
 		const viewportPoint = getViewportPoint(event);
 
+		if (pickerArmed) {
+			resolvePickerClick(viewportPoint);
+			event.preventDefault();
+			event.stopPropagation();
+			return;
+		}
+
 		if (!event.ctrlKey) {
-			const diagnosticPick = worldDisplaySurface.pickAtViewportPoint(
-				viewportPoint,
-				new Set(["portal", "structured-cell"]),
-				new Set([DEBUG_OVERLAY_SPATIAL_OWNER_KEY]),
-			);
+			const cameraFrame = getEffectiveBrowserCameraFrame();
+			const diagnosticPick = cameraFrame
+				? renderResourceSnapshot.renderSpatialQuery.pickRay(
+						buildSceneCameraRenderRay(cameraFrame, viewportPoint),
+						new Set(["portal", "structured-cell"]),
+						new Set([DEBUG_OVERLAY_SPATIAL_OWNER_KEY]),
+					)
+				: null;
 			if (!diagnosticPick) {
 				diagnosticSelection = null;
 				scheduleCurrentSceneResourceUpdate();
@@ -1315,8 +1474,18 @@
 			return;
 		}
 
+		const cameraFrame = getEffectiveBrowserCameraFrame();
+		const terrainPick = cameraFrame
+			? renderResourceSnapshot.renderSpatialQuery.pickRay(
+					buildSceneCameraRenderRay(cameraFrame, viewportPoint),
+					new Set(["terrain"]),
+					new Set([TERRAIN_SPATIAL_OWNER_KEY]),
+				)
+			: null;
 		const landblockId =
-			worldDisplaySurface.pickTerrainLandblockAtViewportPoint(viewportPoint);
+			terrainPick?.item.metadata.kind === "terrain"
+				? terrainPick.item.metadata.landblockId
+				: null;
 
 		if (landblockId === null) {
 			return;
@@ -1330,6 +1499,137 @@
 	function closeDiagnosticInspector(): void {
 		diagnosticSelection = null;
 		scheduleCurrentSceneResourceUpdate();
+	}
+
+	function derivePickerReport(
+		result: BrowserRenderablePickResult | null,
+		missText: string,
+	): BrowserPickerReport {
+		if (!result) {
+			return {
+				statusText: missText,
+				sections: [
+					{
+						title: "Target",
+						rows: [{ label: "Status", value: missText }],
+					},
+				],
+			};
+		}
+
+		const { pick, viewportPoint } = result;
+		return {
+			statusText: `Picked ${describePickedMetadataTitle(pick.item.metadata)} at ${pick.distance.toFixed(2)}m.`,
+			sections: [
+				{
+					title: "Hit",
+					rows: [
+						{ label: "Item", value: pick.item.id },
+						{ label: "Kind", value: pick.item.kind },
+						{ label: "Owner", value: pick.item.ownerKey },
+						{ label: "Chunk", value: pick.item.chunkKey },
+						{ label: "Distance", value: pick.distance.toFixed(3) },
+						{ label: "Point", value: formatRenderPoint(pick.point) },
+						{ label: "Viewport", value: formatViewportPoint(viewportPoint) },
+					],
+				},
+				{
+					title: "Metadata",
+					rows: describePickedMetadataRows(pick.item.metadata),
+				},
+			],
+		};
+	}
+
+	function describePickedMetadataTitle(
+		metadata: RenderSpatialMetadata,
+	): string {
+		if (metadata.kind === "static-renderable") {
+			return metadata.renderKey;
+		}
+		if (metadata.kind === "structured-cell") {
+			return `structured cell 0x${formatHex32(metadata.envCellId)}`;
+		}
+		if (metadata.kind === "portal") {
+			return metadata.portalId;
+		}
+		return `terrain 0x${formatHex32(metadata.landblockId)}`;
+	}
+
+	function describePickedMetadataRows(
+		metadata: RenderSpatialMetadata,
+	): BrowserPanelRow[] {
+		if (metadata.kind === "static-renderable") {
+			return [
+				{ label: "Renderable", value: metadata.renderKey },
+				{ label: "Instance", value: metadata.instanceId },
+				{ label: "Static kind", value: metadata.staticKind },
+				{ label: "Domain", value: metadata.renderDomain },
+				{
+					label: "Landblock",
+					value: `0x${formatHex32(metadata.owningLandblockId)}`,
+				},
+				{
+					label: "Env cell",
+					value:
+						metadata.owningEnvCellId === null
+							? "none"
+							: `0x${formatHex32(metadata.owningEnvCellId)}`,
+				},
+				{ label: "Source", value: metadata.sourceAssetId },
+				{ label: "Gfx object", value: metadata.gfxObjAssetId },
+				{ label: "Gfx DID", value: `0x${formatHex32(metadata.gfxObjId)}` },
+				{ label: "Part", value: metadata.partIndex.toString() },
+				{
+					label: "Material slots",
+					value: metadata.materialSlotCount.toString(),
+				},
+				{ label: "Material", value: metadata.materialSignature },
+				{ label: "Detail role", value: metadata.detailRoleKind },
+				{ label: "Detail", value: metadata.detailSignature },
+				{ label: "Texture velocity", value: metadata.textureVelocitySignature },
+			];
+		}
+		if (metadata.kind === "structured-cell") {
+			return [
+				{ label: "Env cell", value: `0x${formatHex32(metadata.envCellId)}` },
+				{ label: "Render key", value: metadata.renderKey },
+				{ label: "Role", value: metadata.isFocus ? "Focus" : "Visible" },
+			];
+		}
+		if (metadata.kind === "portal") {
+			return [
+				{ label: "Portal", value: metadata.portalId },
+				{
+					label: "Source",
+					value: formatCellIdForInspector(metadata.sourceEnvCellId),
+				},
+				{
+					label: "Target",
+					value: formatPortalTargetForInspector(metadata.targetEnvCellId),
+				},
+				{
+					label: "Target status",
+					value: formatPortalTargetStatus(metadata.targetStatus),
+				},
+				{ label: "Polygon", value: metadata.polygonId.toString() },
+				{
+					label: "Other portal",
+					value: formatOtherPortalId(metadata.otherPortalId),
+				},
+				{ label: "Flags", value: formatPortalFlags(metadata.flags) },
+			];
+		}
+		return [
+			{ label: "Landblock", value: `0x${formatHex32(metadata.landblockId)}` },
+			{ label: "Asset", value: metadata.assetId },
+			{
+				label: "Terrain quad",
+				value: metadata.terrainQuad
+					? `${metadata.terrainQuad.row},${metadata.terrainQuad.col}`
+					: "bounds-level",
+			},
+		];
 	}
 
 	function deriveDiagnosticInspector(
@@ -1385,6 +1685,25 @@
 				],
 			};
 		}
+		if (metadata.kind === "static-renderable") {
+			return {
+				title: metadata.renderKey,
+				kicker: "Static renderable",
+				rows: [
+					{ label: "Instance", value: metadata.instanceId },
+					{ label: "Kind", value: metadata.staticKind },
+					{ label: "Domain", value: metadata.renderDomain },
+					{
+						label: "Landblock",
+						value: `0x${formatHex32(metadata.owningLandblockId)}`,
+					},
+					{ label: "Gfx object", value: metadata.gfxObjAssetId },
+					{ label: "Part", value: metadata.partIndex.toString() },
+					{ label: "Material", value: metadata.materialSignature },
+					...commonRows,
+				],
+			};
+		}
 		return {
 			title: formatHex32(metadata.landblockId),
 			kicker: "Terrain",
@@ -1398,6 +1717,18 @@
 
 	function formatCellIdForInspector(cellId: number): string {
 		return `0x${formatHex32(cellId)}`;
+	}
+
+	function formatRenderPoint(point: {
+		x: number;
+		y: number;
+		z: number;
+	}): string {
+		return `(${point.x.toFixed(2)}, ${point.y.toFixed(2)}, ${point.z.toFixed(2)})`;
+	}
+
+	function formatViewportPoint(point: NormalizedViewportPoint): string {
+		return `${point.normalizedX.toFixed(3)}, ${point.normalizedY.toFixed(3)}`;
 	}
 
 	function formatPortalTargetForInspector(
@@ -1897,6 +2228,11 @@
 			canResetCamera={Boolean(renderMetrics?.bounds)}
 			onResetCamera={resetBrowserCamera}
 			onGenerateDebugReport={handleGenerateDebugReport}
+			{pickerOptions}
+			{pickerReport}
+			{pickerArmed}
+			onPickerOptionsChange={handlePickerOptionsChange}
+			onTogglePickerMode={handleTogglePickerMode}
 		/>
 	</div>
 

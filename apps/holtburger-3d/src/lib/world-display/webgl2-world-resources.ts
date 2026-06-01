@@ -162,6 +162,10 @@ export interface Webgl2WorldResourceStore {
 	textureAtlasGenerationGraph: RendererResourceGraph | null;
 	textureAtlasGenerationGraphLease: RendererResourceGraphLease | null;
 	bakedGeometryBatches: Map<string, Webgl2BakedGeometryBatchResource>;
+	// Temporary migration debt: indexed compacted geometry must not grow as a
+	// durable sibling of the RGBA baked batch map. The replacement plan should
+	// collapse both into one compacted geometry resource lifecycle plus
+	// family-owned material payloads.
 	bakedIndexedGeometryBatches: Map<
 		string,
 		Webgl2BakedIndexedGeometryBatchResource

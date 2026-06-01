@@ -1,12 +1,23 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
-Status: Phase M7D.5b4 complete; next is the baked indexed shader submit variant.
+Status: Phase M7D.5b4 complete; compacted/baked material work is paused for the replacement detour in
+the compacted render family pipeline plan.
 
 Related plans:
 
 - [Holtburger 3D WebGL2 Renderer Pivot Plan](./holtburger-3d-webgl2-renderer-pivot-plan.md)
 - [Holtburger 3D Luma Renderer Swapout Plan](./holtburger-3d-luma-renderer-swapout-plan.md)
 - [Holtburger 3D Portal Depth Copy Postmortem](./holtburger-3d-portal-depth-copy-postmortem.md)
+- [Holtburger 3D Compacted Render Family Pipeline Replacement Plan](./holtburger-3d-compacted-render-family-pipeline-replacement-plan.md)
+
+## Current Detour
+
+The compacted/baked material phases after M7D.5b4 are paused. The current baked geometry architecture
+is too RGBA-atlas-shaped and has started accumulating parallel indexed paths before indexed material
+rendering can actually be implemented. Continue compacted material work in the
+[Holtburger 3D Compacted Render Family Pipeline Replacement Plan](./holtburger-3d-compacted-render-family-pipeline-replacement-plan.md),
+which is focused on replacing the current architecture rather than building a durable parallel
+pipeline.
 
 ## Purpose
 
@@ -4694,10 +4705,18 @@ Validation:
 
 ### Phase M7D.5b: Baked Indexed Submit Variant
 
-Status: Next.
+Status: Paused; superseded by the compacted render family pipeline replacement detour.
 
 Purpose: consume the indexed material-table records from M7D.5a and add the first actual baked indexed
 submit path for `indexed-paletted|alpha=opaque`.
+
+Pause note:
+
+- Do not implement this phase by extending `bakedIndexedGeometryBatches` or adding more parallel
+  baked indexed submit/resource paths. Continue in the
+  [Holtburger 3D Compacted Render Family Pipeline Replacement Plan](./holtburger-3d-compacted-render-family-pipeline-replacement-plan.md).
+  The replacement plan should first collapse compacted geometry and family pipeline boundaries, then
+  reintroduce indexed-paletted rendering through that new boundary.
 
 Tasks:
 

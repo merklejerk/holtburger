@@ -187,6 +187,10 @@ export interface BakedRenderableDetailEntry {
 
 export interface BakedRenderablePlan {
 	key: string;
+	// Temporary migration debt: submitFamilies is the old baked/RGBA-atlas-shaped
+	// planning boundary. New compacted material work should replace this with
+	// render family pipeline plans instead of adding more parallel submit-family
+	// fields.
 	submitFamilies: BakedRenderableSubmitFamilies;
 	compactableDrawUnitIds: readonly string[];
 	bypasses: readonly BakedRenderableBypass[];

@@ -4553,6 +4553,78 @@ Validation:
 - `npm exec tsc -- --noEmit`
 - `npm exec vitest -- src/lib/world-display/baked-renderable-planner.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/baked-geometry.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts --run`
 
+### Phase M7D.5b3: Indexed Submit-Family Planning
+
+Status: Complete.
+
+Purpose: make the indexed/paletted submit family more than a passive table-record bucket. Before
+adding WebGL shader submission, indexed opaque draw units need typed compactable IDs, explicit
+draw-unit-to-table-slot mappings, and indexed draw slices that cannot be confused with RGBA atlas
+slices.
+
+Tasks:
+
+- Admit table-ready `indexed-paletted|alpha=opaque` draw units into the indexed submit family.
+- Assign indexed material-table records with the same bounded material-table policy as RGBA atlas
+  material slots.
+- Create explicit indexed draw-unit material-slot mappings keyed by indexed material-table record key.
+- Create indexed draw slices that group by index format, index page, palette page, and indexed opaque
+  render state.
+- Keep indexed cutout/blend/opacity out of the indexed submit family with
+  `indexed-alpha-policy-unsupported`.
+- Add planner and resource tests proving real indexed draw units produce indexed family compactable IDs
+  and indexed draw slices.
+
+Progress:
+
+- `submitFamilies.indexedPaletted.compactableDrawUnitIds` is now populated for table-ready indexed
+  opaque draw units.
+- `submitFamilies.indexedPaletted.drawUnitMaterialSlots` now maps each indexed draw unit to its typed
+  indexed material-table record key.
+- Added `BakedIndexedRenderableDrawSlice`, carrying:
+  - P8/P16 index format;
+  - index page key;
+  - palette page key;
+  - `indexed-opaque` render state;
+  - material-table slot range;
+  - material table record keys;
+  - represented draw unit IDs.
+- Indexed material-table records are bounded by `maxMaterialSlotsPerDraw`; overflowed indexed draw
+  units receive `material-table-overflow`.
+- Added planner tests for indexed family compactable IDs, slot mappings, and draw slices.
+- Added WebGL2 resource integration assertions proving real P8 indexed draw units populate the indexed
+  submit family.
+
+Decisions:
+
+- Indexed draw slices are not `BakedRenderableDrawSlice` records. They have their own typed shape
+  because atlas texture indices and atlas rects are not meaningful for index/palette page submission.
+- Indexed table record array position is the material-table slot index for the first indexed shader
+  path.
+- This phase intentionally does not call `buildBakedGeometry()` for indexed draw units yet. M7D.5b
+  still needs the resource and submit path that turns indexed family slices into GPU batches.
+
+Course Corrections:
+
+- M7D.5b is now split into concrete substeps because the old single phase hid several architecture
+  prerequisites. The planner can now express indexed submit work accurately; shader and GPU resource
+  submission remain next.
+
+Cleanup Targets:
+
+- Indexed opaque draw units now appear in the indexed submit family but still carry the old
+  `missing-baked-indexed-paletted-family` material blocker/bypass because the submit shader is not
+  active yet. M7D.5b should remove or narrow that blocker when indexed replacement is actually
+  submitted.
+- The indexed family currently has table/slice planning but no per-landblock GPU batch resources.
+  M7D.5b must add indexed batch resource creation and replacement planning before it can affect draw
+  calls.
+
+Validation:
+
+- `npm exec tsc -- --noEmit`
+- `npm exec vitest -- src/lib/world-display/baked-renderable-planner.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/baked-geometry.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts --run`
+
 ### Phase M7D.5b: Baked Indexed Submit Variant
 
 Status: Next.

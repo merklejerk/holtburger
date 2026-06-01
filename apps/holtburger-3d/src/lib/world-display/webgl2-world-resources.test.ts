@@ -633,6 +633,19 @@ describe("webgl2 world resources", () => {
 			},
 		]);
 		expect(
+			store.bakedRenderablePlan.submitFamilies.indexedPaletted
+				.compactableDrawUnitIds,
+		).toEqual([store.drawUnits[0]?.id]);
+		expect(
+			store.bakedRenderablePlan.submitFamilies.indexedPaletted.drawSlices,
+		).toMatchObject([
+			{
+				indexFormat: "p8",
+				renderStateKey: "indexed-opaque",
+				drawUnitIds: [store.drawUnits[0]?.id],
+			},
+		]);
+		expect(
 			gl.textureUploads.map(({ width, height }) => ({ width, height })),
 		).toEqual([
 			{ width: 2, height: 1 },

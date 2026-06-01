@@ -145,6 +145,18 @@ export interface BakedIndexedMaterialTableRecord {
 	filteringMode: "shader-palette-linear";
 }
 
+export interface BakedIndexedRenderableDrawSlice {
+	key: string;
+	indexFormat: "p8" | "index16";
+	indexPageKey: string;
+	palettePageKey: string;
+	renderStateKey: "indexed-opaque";
+	materialTableSlotStart: number;
+	materialTableSlotCount: number;
+	materialSlotKeys: readonly string[];
+	drawUnitIds: readonly string[];
+}
+
 export interface BakedRenderableDrawSlice {
 	key: string;
 	atlasTextureIndex: number;
@@ -220,7 +232,7 @@ export interface BakedIndexedPalettedSubmitFamilyPlan {
 		drawUnitId: string;
 		materialSlotKey: string;
 	}[];
-	drawSlices: readonly BakedRenderableDrawSlice[];
+	drawSlices: readonly BakedIndexedRenderableDrawSlice[];
 }
 
 interface EligibleBakedRenderableCandidate {
@@ -351,8 +363,32 @@ export function planBakedRenderables(options: {
 		});
 	}
 
+	const indexedCandidates = collectBakedIndexedSubmitCandidates(options.drawUnits);
 	const indexedMaterialTableRecords =
-		collectBakedIndexedMaterialTableRecords(options.drawUnits);
+		assignBakedIndexedMaterialTableRecords(indexedCandidates, options.policy);
+	const indexedMaterialTableRecordByKey = new Map(
+		indexedMaterialTableRecords.map((record) => [record.key, record] as const),
+	);
+	const indexedCompactable = indexedCandidates.filter((candidate) => {
+		const record = candidate.indexedMaterialTableRecord;
+		if (record && indexedMaterialTableRecordByKey.has(record.key)) {
+			return true;
+		}
+		bypasses.push({
+			drawUnitId: candidate.id,
+			reason: "material-table-overflow",
+			detail: `indexed material table exceeded ${options.policy.maxMaterialSlotsPerDraw} slots`,
+		});
+		return false;
+	});
+	const indexedDrawUnitMaterialSlots = indexedCompactable.map((candidate) => ({
+		drawUnitId: candidate.id,
+		materialSlotKey: requireBakedIndexedMaterialTableRecord(candidate).key,
+	}));
+	const indexedDrawSlices = createBakedIndexedRenderableDrawSlices({
+		candidates: indexedCompactable,
+		materialTableRecords: indexedMaterialTableRecords,
+	});
 	const materialSlots = assignBakedRenderableMaterialSlots(
 		detailPlaced,
 		options.policy,
@@ -409,6 +445,11 @@ export function planBakedRenderables(options: {
 			compactableDrawUnitIds,
 			materialSlots,
 			indexedMaterialTableRecords,
+			indexedCompactableDrawUnitIds: indexedCompactable.map(
+				(candidate) => candidate.id,
+			),
+			indexedDrawUnitMaterialSlots,
+			indexedDrawSlices,
 			drawUnitMaterialSlots,
 			drawSlices,
 		}),
@@ -471,12 +512,21 @@ function createBakedRenderableSubmitFamilies({
 	compactableDrawUnitIds,
 	materialSlots,
 	indexedMaterialTableRecords,
+	indexedCompactableDrawUnitIds,
+	indexedDrawUnitMaterialSlots,
+	indexedDrawSlices,
 	drawUnitMaterialSlots,
 	drawSlices,
 }: {
 	compactableDrawUnitIds: readonly string[];
 	materialSlots: readonly BakedRenderableMaterialSlot[];
 	indexedMaterialTableRecords: readonly BakedIndexedMaterialTableRecord[];
+	indexedCompactableDrawUnitIds?: readonly string[];
+	indexedDrawUnitMaterialSlots?: readonly {
+		drawUnitId: string;
+		materialSlotKey: string;
+	}[];
+	indexedDrawSlices?: readonly BakedIndexedRenderableDrawSlice[];
 	drawUnitMaterialSlots: readonly {
 		drawUnitId: string;
 		materialSlotKey: string;
@@ -493,33 +543,108 @@ function createBakedRenderableSubmitFamilies({
 		},
 		indexedPaletted: {
 			kind: "indexed-paletted",
-			compactableDrawUnitIds: [],
+			compactableDrawUnitIds: indexedCompactableDrawUnitIds ?? [],
 			materialTableRecords: indexedMaterialTableRecords,
-			drawUnitMaterialSlots: [],
-			drawSlices: [],
+			drawUnitMaterialSlots: indexedDrawUnitMaterialSlots ?? [],
+			drawSlices: indexedDrawSlices ?? [],
 		},
 	};
 }
 
-function collectBakedIndexedMaterialTableRecords(
+function collectBakedIndexedSubmitCandidates(
 	drawUnits: readonly BakedRenderableCandidate[],
+): BakedRenderableCandidate[] {
+	return drawUnits.filter(isBakedIndexedMaterialTableReady);
+}
+
+function assignBakedIndexedMaterialTableRecords(
+	candidates: readonly BakedRenderableCandidate[],
+	policy: BakedRenderablePolicy,
 ): BakedIndexedMaterialTableRecord[] {
 	const recordsByKey = new Map<string, BakedIndexedMaterialTableRecord>();
-	for (const drawUnit of drawUnits) {
-		if (!isBakedIndexedMaterialTableReady(drawUnit)) {
-			continue;
-		}
-		const record = drawUnit.indexedMaterialTableRecord;
-		if (!record) {
-			throw new Error(
-				`Indexed material candidate ${drawUnit.id} is table-ready without a material-table record.`,
-			);
-		}
+	for (const drawUnit of candidates) {
+		const record = requireBakedIndexedMaterialTableRecord(drawUnit);
 		recordsByKey.set(record.key, record);
 	}
 	return [...recordsByKey.values()].sort((left, right) =>
 		left.key.localeCompare(right.key),
+	).slice(0, policy.maxMaterialSlotsPerDraw);
+}
+
+function requireBakedIndexedMaterialTableRecord(
+	drawUnit: BakedRenderableCandidate,
+): BakedIndexedMaterialTableRecord {
+	const record = drawUnit.indexedMaterialTableRecord;
+	if (!record) {
+		throw new Error(
+			`Indexed material candidate ${drawUnit.id} is table-ready without a material-table record.`,
+		);
+	}
+	return record;
+}
+
+function createBakedIndexedRenderableDrawSlices({
+	candidates,
+	materialTableRecords,
+}: {
+	candidates: readonly BakedRenderableCandidate[];
+	materialTableRecords: readonly BakedIndexedMaterialTableRecord[];
+}): BakedIndexedRenderableDrawSlice[] {
+	const materialTableIndexByKey = new Map(
+		materialTableRecords.map((record, index) => [record.key, index] as const),
 	);
+	const groups = new Map<
+		string,
+		{
+			record: BakedIndexedMaterialTableRecord;
+			slotIndex: number;
+			drawUnitIds: string[];
+		}
+	>();
+	for (const candidate of candidates) {
+		const record = requireBakedIndexedMaterialTableRecord(candidate);
+		const slotIndex = materialTableIndexByKey.get(record.key);
+		if (slotIndex === undefined) {
+			continue;
+		}
+		const key = [
+			record.indexFormat,
+			record.indexPageKey,
+			record.palettePageKey,
+			"indexed-opaque",
+		].join("|");
+		const group = groups.get(key) ?? {
+			record,
+			slotIndex,
+			drawUnitIds: [],
+		};
+		group.drawUnitIds.push(candidate.id);
+		groups.set(key, group);
+	}
+	return [...groups.values()]
+		.sort(
+			(left, right) =>
+				left.record.indexFormat.localeCompare(right.record.indexFormat) ||
+				left.record.indexPageKey.localeCompare(right.record.indexPageKey) ||
+				left.record.palettePageKey.localeCompare(right.record.palettePageKey),
+		)
+		.map((group) => ({
+			key: [
+				"baked-indexed-draw-slice",
+				group.record.indexFormat,
+				group.record.indexPageKey,
+				group.record.palettePageKey,
+				`table=${group.slotIndex}`,
+			].join("|"),
+			indexFormat: group.record.indexFormat,
+			indexPageKey: group.record.indexPageKey,
+			palettePageKey: group.record.palettePageKey,
+			renderStateKey: "indexed-opaque",
+			materialTableSlotStart: group.slotIndex,
+			materialTableSlotCount: 1,
+			materialSlotKeys: [group.record.key],
+			drawUnitIds: [...group.drawUnitIds].sort(),
+		}));
 }
 
 function isBakedIndexedMaterialTableReady(

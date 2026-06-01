@@ -240,22 +240,42 @@ vec2 resolveAtlasLocalUv(vec2 uv, int materialSlot) {
 	);
 }
 
+vec4 sampleAtlasRect(sampler2D atlasTexture, vec2 atlasSize, vec4 rect, vec2 localUv, vec2 gradX, vec2 gradY) {
+	vec2 atlasUv = (rect.xy + localUv * rect.zw) / atlasSize;
+	vec2 atlasGradX = gradX * rect.zw / atlasSize;
+	vec2 atlasGradY = gradY * rect.zw / atlasSize;
+	return textureGrad(atlasTexture, atlasUv, atlasGradX, atlasGradY);
+}
+
 vec3 applyDetailOverlay(vec3 baseColor, int materialSlot) {
 	if (uDetailMaterialEnabled[materialSlot] == 0) {
 		return baseColor;
 	}
 	vec4 detailRect = uDetailMaterialRects[materialSlot];
 	float tiling = uDetailMaterialTilings[materialSlot];
-	vec2 detailUv = (detailRect.xy + fract(vUv * tiling) * detailRect.zw) / uDetailAtlasSize;
-	vec4 detailColor = texture(uDetailAtlasTexture, detailUv);
+	vec2 tiledUv = vUv * tiling;
+	vec4 detailColor = sampleAtlasRect(
+		uDetailAtlasTexture,
+		uDetailAtlasSize,
+		detailRect,
+		fract(tiledUv),
+		dFdx(tiledUv),
+		dFdy(tiledUv)
+	);
 	float sourceAlpha = clamp(detailColor.a, 0.0, 1.0);
 	return clamp(baseColor * (detailColor.rgb + (1.0 - sourceAlpha)), 0.0, 1.0);
 }
 
 void main() {
 	vec4 rect = uMaterialRects[vMaterialSlot];
-	vec2 atlasUv = (rect.xy + resolveAtlasLocalUv(vUv, vMaterialSlot) * rect.zw) / uAtlasSize;
-	vec4 color = texture(uAtlasTexture, atlasUv);
+	vec4 color = sampleAtlasRect(
+		uAtlasTexture,
+		uAtlasSize,
+		rect,
+		resolveAtlasLocalUv(vUv, vMaterialSlot),
+		dFdx(vUv),
+		dFdy(vUv)
+	);
 	color.rgb = applyDetailOverlay(color.rgb, vMaterialSlot);
 	fragColor = color;
 }

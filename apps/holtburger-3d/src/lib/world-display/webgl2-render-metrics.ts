@@ -247,8 +247,15 @@ export function createWebgl2RenderMetrics(
 				input.worldStore?.bakedCoverageGeometryBlockerCounts ?? {},
 			bakedCoverageMaterialFamilyCounts:
 				input.worldStore?.bakedCoverageMaterialFamilyCounts ?? {},
+			bakedCoverageMaterialAlphaPolicyCounts:
+				input.worldStore?.bakedCoverageMaterialAlphaPolicyCounts ?? {},
+			bakedCoverageMaterialFamilyAlphaPolicyCounts:
+				input.worldStore?.bakedCoverageMaterialFamilyAlphaPolicyCounts ?? {},
 			bakedCoverageRetainedDirectMaterialFamilyCounts:
 				input.worldStore?.bakedCoverageRetainedDirectMaterialFamilyCounts ?? {},
+			bakedCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts:
+				input.worldStore
+					?.bakedCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts ?? {},
 			bakedCoverageVisibleRetainedDirectMaterialFamilyCounts:
 				input.submitMetrics
 					.visibleRetainedDirectDrawUnitCountsByBakeMaterialFamily,
@@ -376,9 +383,22 @@ export function createWebgl2RenderMetrics(
 							input.worldStore.bakedCoverageMaterialFamilyCounts,
 						),
 						...prefixCounts(
+							"webgl2-baked-alpha-policy-",
+							input.worldStore.bakedCoverageMaterialAlphaPolicyCounts,
+						),
+						...prefixCounts(
+							"webgl2-baked-family-alpha-policy-",
+							input.worldStore.bakedCoverageMaterialFamilyAlphaPolicyCounts,
+						),
+						...prefixCounts(
 							"webgl2-baked-retained-family-",
 							input.worldStore
 								.bakedCoverageRetainedDirectMaterialFamilyCounts,
+						),
+						...prefixCounts(
+							"webgl2-baked-retained-family-alpha-policy-",
+							input.worldStore
+								.bakedCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts,
 						),
 						...prefixCounts(
 							"webgl2-baked-visible-retained-family-",

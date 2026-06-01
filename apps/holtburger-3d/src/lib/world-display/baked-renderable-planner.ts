@@ -15,6 +15,8 @@ export type BakedRenderableBypassReason =
 	| "unsupported-opacity-translucent-material"
 	| "unsupported-constant-color-material"
 	| "unsupported-indexed-paletted-material"
+	| "unsupported-indexed-texture-page-policy"
+	| "indexed-alpha-policy-unsupported"
 	| "unsupported-terrain-material"
 	| "debug-pipeline-material"
 	| "unsupported-material-state"
@@ -42,11 +44,21 @@ export type BakeMaterialFamily =
 	| "debug-pipeline"
 	| "unknown-unsupported";
 
+export type BakeAlphaPolicy =
+	| "opaque"
+	| "cutout"
+	| "transparent-blend"
+	| "opacity-translucent"
+	| "unknown";
+
 export type BakeMaterialBlocker =
 	| "missing-base-texture-page"
+	| "missing-indexed-texel-page"
+	| "missing-indexed-palette-page"
 	| "missing-atlas-eligibility"
 	| "missing-baked-constant-color-family"
 	| "missing-baked-indexed-paletted-family"
+	| "indexed-alpha-policy-unsupported"
 	| "missing-baked-alpha-test-family"
 	| "missing-baked-transparent-blended-family"
 	| "missing-baked-opacity-translucent-family"
@@ -67,6 +79,7 @@ export interface BakeEligibility {
 		family: BakeMaterialFamily;
 		compatible: boolean;
 		blockers: readonly BakeMaterialBlocker[];
+		alphaPolicy: BakeAlphaPolicy;
 		atlasEligibility: StagedWorldMaterialAtlasEligibility | null;
 		detailAtlasEntry: BakedRenderableDetailEntry | null;
 	};
@@ -427,13 +440,28 @@ export function createBakeEligibility(options: {
 		materialKind: options.materialKind,
 		materialBehavior: options.materialBehavior,
 	});
+	const alphaPolicy = classifyBakeAlphaPolicy(options.materialBehavior);
 	const materialBlockers: BakeMaterialBlocker[] = [];
 	switch (materialFamily) {
 		case "flat-constant-color":
 			materialBlockers.push("missing-baked-constant-color-family");
 			break;
 		case "indexed-paletted":
+			if (!hasIndexedTexelTexturePage(options.texturePageBindings)) {
+				materialBlockers.push("missing-indexed-texel-page");
+			}
+			if (!hasIndexedPaletteTexturePage(options.texturePageBindings)) {
+				materialBlockers.push("missing-indexed-palette-page");
+			}
+			if (
+				!hasOnlySupportedIndexedTexturePageBehavior(options.texturePageBindings)
+			) {
+				materialBlockers.push("unsupported-texture-page-behavior");
+			}
 			materialBlockers.push("missing-baked-indexed-paletted-family");
+			if (alphaPolicy !== "opaque") {
+				materialBlockers.push("indexed-alpha-policy-unsupported");
+			}
 			break;
 		case "terrain-blend":
 			materialBlockers.push("missing-baked-terrain-family");
@@ -480,6 +508,7 @@ export function createBakeEligibility(options: {
 			family: materialFamily,
 			compatible: materialCompatible,
 			blockers: materialBlockers,
+			alphaPolicy,
 			atlasEligibility: options.atlasEligibility,
 			detailAtlasEntry: options.detailAtlasEntry,
 		},
@@ -532,6 +561,24 @@ function createMaterialBakeBypass(
 				drawUnitId: drawUnit.id,
 				reason: "unsupported-indexed-paletted-material",
 				detail: `indexed/paletted material ${drawUnit.materialKey} has no baked indexed material family`,
+			};
+		case "missing-indexed-texel-page":
+			return {
+				drawUnitId: drawUnit.id,
+				reason: "unsupported-indexed-texture-page-policy",
+				detail: `indexed/paletted material ${drawUnit.materialKey} has no indexed texel texture-page binding`,
+			};
+		case "missing-indexed-palette-page":
+			return {
+				drawUnitId: drawUnit.id,
+				reason: "unsupported-indexed-texture-page-policy",
+				detail: `indexed/paletted material ${drawUnit.materialKey} has no palette texture-page binding`,
+			};
+		case "indexed-alpha-policy-unsupported":
+			return {
+				drawUnitId: drawUnit.id,
+				reason: "indexed-alpha-policy-unsupported",
+				detail: `indexed/paletted material ${drawUnit.materialKey} has alpha policy that is not supported by the baked indexed path`,
 			};
 		case "missing-baked-alpha-test-family":
 			return {
@@ -621,19 +668,37 @@ export function classifyBakeMaterialFamily(options: {
 function classifyDirectTextureBakeMaterialFamily(
 	behavior: LegacyMaterialBehaviorDto | null,
 ): BakeMaterialFamily {
+	const alphaPolicy = classifyBakeAlphaPolicy(behavior);
+	switch (alphaPolicy) {
+		case "cutout":
+			return "alpha-test";
+		case "transparent-blend":
+			return "transparent-blended";
+		case "opacity-translucent":
+			return "opacity-translucent";
+		case "unknown":
+			return "unknown-unsupported";
+		case "opaque":
+			return "textured-opaque";
+	}
+}
+
+export function classifyBakeAlphaPolicy(
+	behavior: LegacyMaterialBehaviorDto | null,
+): BakeAlphaPolicy {
 	if (behavior === null) {
-		return "unknown-unsupported";
+		return "unknown";
 	}
 	if (behavior.alphaTest > 0) {
-		return "alpha-test";
+		return "cutout";
 	}
 	if (behavior.blend.enabled) {
-		return "transparent-blended";
+		return "transparent-blend";
 	}
 	if (behavior.transparent || behavior.opacity < 1) {
 		return "opacity-translucent";
 	}
-	return "textured-opaque";
+	return "opaque";
 }
 
 function hasCompatibleBakedBaseTexturePage(
@@ -645,6 +710,58 @@ function hasCompatibleBakedBaseTexturePage(
 			binding.sampleClass === "rgba-color" &&
 			binding.sampling.samplingDomain === "color" &&
 			binding.sampling.lookup === "color-filtered",
+	);
+}
+
+function hasIndexedTexelTexturePage(
+	texturePageBindings: readonly TexturePageBinding[],
+): boolean {
+	return texturePageBindings.some(
+		(binding) =>
+			binding.usageBucket === "indexed-texels" &&
+			binding.sampleClass === "indexed-data" &&
+			hasExactDataTexturePageSampling(binding),
+	);
+}
+
+function hasIndexedPaletteTexturePage(
+	texturePageBindings: readonly TexturePageBinding[],
+): boolean {
+	return texturePageBindings.some(
+		(binding) =>
+			binding.usageBucket === "palette-lookup" &&
+			binding.sampleClass === "palette-data" &&
+			hasExactDataTexturePageSampling(binding),
+	);
+}
+
+function hasOnlySupportedIndexedTexturePageBehavior(
+	texturePageBindings: readonly TexturePageBinding[],
+): boolean {
+	return texturePageBindings.every((binding) => {
+		if (
+			binding.usageBucket === "indexed-texels" &&
+			binding.sampleClass === "indexed-data"
+		) {
+			return hasExactDataTexturePageSampling(binding);
+		}
+		if (
+			binding.usageBucket === "palette-lookup" &&
+			binding.sampleClass === "palette-data"
+		) {
+			return hasExactDataTexturePageSampling(binding);
+		}
+		return false;
+	});
+}
+
+function hasExactDataTexturePageSampling(binding: TexturePageBinding): boolean {
+	return (
+		binding.sampling.samplingDomain === "data" &&
+		binding.sampling.lookup === "exact" &&
+		binding.sampling.minFilter === "nearest" &&
+		binding.sampling.magFilter === "nearest" &&
+		binding.sampling.mip === "none"
 	);
 }
 

@@ -268,8 +268,10 @@ function createPortalMaskDrawUnit(id: string): Webgl2WorldDrawUnit {
 		bakeEligibility: {
 			decision: "direct-draw",
 			material: {
+				family: "flat-constant-color",
 				compatible: false,
 				blockers: ["missing-base-texture-page"],
+				alphaPolicy: "unknown",
 				atlasEligibility: null,
 				detailAtlasEntry: null,
 			},

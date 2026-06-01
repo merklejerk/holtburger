@@ -8,6 +8,7 @@ import {
 } from "./baked-renderable-planner";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
 import type { StagedWorldMaterialAtlasEligibility } from "./staged-world-material-strategy";
+import type { TexturePageBinding } from "./texture-page-binding";
 
 type CandidateOptions = Partial<BakedRenderableCandidate> & {
 	entryKey?: string;
@@ -22,6 +23,7 @@ type CandidateOptions = Partial<BakedRenderableCandidate> & {
 	hasUvBuffer?: boolean;
 	hasDetailOverlay?: boolean;
 	atlasEligibility?: StagedWorldMaterialAtlasEligibility | null;
+	texturePageBindings?: readonly TexturePageBinding[];
 };
 
 describe("baked renderable planner", () => {
@@ -133,6 +135,42 @@ describe("baked renderable planner", () => {
 				reason: "missing-atlas-eligibility",
 			},
 		]);
+	});
+
+	it("keeps indexed texture-page readiness separate from baked indexed shader support", () => {
+		const indexed = createCandidate({ materialKind: "indexed-paletted" });
+
+		expect(indexed.bakeEligibility.material).toMatchObject({
+			family: "indexed-paletted",
+			alphaPolicy: "opaque",
+			blockers: ["missing-baked-indexed-paletted-family"],
+		});
+
+		const missingPalette = createCandidate({
+			materialKind: "indexed-paletted",
+			texturePageBindings: [createIndexedTexelTexturePageBinding()],
+		});
+
+		expect(missingPalette.bakeEligibility.material.blockers).toEqual([
+			"missing-indexed-palette-page",
+			"missing-baked-indexed-paletted-family",
+		]);
+	});
+
+	it("expresses indexed sampling and alpha policy as orthogonal bake facts", () => {
+		const cutoutIndexed = createCandidate({
+			materialKind: "indexed-paletted",
+			materialBehavior: { ...OPAQUE_BEHAVIOR, alphaTest: 0.5 },
+		});
+
+		expect(cutoutIndexed.bakeEligibility.material).toMatchObject({
+			family: "indexed-paletted",
+			alphaPolicy: "cutout",
+			blockers: [
+				"missing-baked-indexed-paletted-family",
+				"indexed-alpha-policy-unsupported",
+			],
+		});
 	});
 
 	it("keeps detail-overlay draw units compactable when an RGBA8 detail atlas entry is available", () => {
@@ -331,31 +369,13 @@ function createCandidate(
 	const hasDetailOverlay = options.hasDetailOverlay ?? false;
 	const detailAtlasEntry = options.detailAtlasEntry ?? null;
 	const texturePageBindings =
-		options.materialKind === "indexed-paletted" || !atlasEligibility
-			? []
-			: [
-					{
-						pageKind: "single-entry" as const,
-						usageBucket: "base-color" as const,
-						sampleClass: "rgba-color" as const,
-						texture: {} as never,
-						rect: [0, 0, options.width ?? 8, options.height ?? 8] as const,
-						width: options.width ?? 8,
-						height: options.height ?? 8,
-						wrapS: atlasEligibility.samplingPolicy.wrapS,
-						wrapT: atlasEligibility.samplingPolicy.wrapT,
-						sampling: {
-							wrapS: atlasEligibility.samplingPolicy.wrapS,
-							wrapT: atlasEligibility.samplingPolicy.wrapT,
-							minFilter: "linear" as const,
-							magFilter: "linear" as const,
-							mip: "material-policy" as const,
-							samplingDomain: "color" as const,
-							lookup: "color-filtered" as const,
-						},
-						source: "standalone-direct-texture" as const,
-					},
-				];
+		options.texturePageBindings ??
+		createTexturePageBindings({
+			materialKind: options.materialKind ?? "direct-texture",
+			atlasEligibility,
+			width: options.width ?? 8,
+			height: options.height ?? 8,
+		});
 	return {
 		id: options.id ?? "static",
 		kind: options.kind ?? "static",
@@ -384,6 +404,105 @@ function createCandidate(
 		triangleCount: options.triangleCount ?? 2,
 		staticPartCount: options.staticPartCount ?? 1,
 		staticObjectKeys: options.staticObjectKeys ?? [`object-${entryKey}`],
+	};
+}
+
+function createTexturePageBindings({
+	materialKind,
+	atlasEligibility,
+	width,
+	height,
+}: {
+	materialKind: NonNullable<CandidateOptions["materialKind"]>;
+	atlasEligibility: StagedWorldMaterialAtlasEligibility | null;
+	width: number;
+	height: number;
+}): readonly TexturePageBinding[] {
+	if (materialKind === "indexed-paletted") {
+		return [
+			createIndexedTexelTexturePageBinding({ width, height }),
+			createIndexedPaletteTexturePageBinding(),
+		];
+	}
+	if (!atlasEligibility) {
+		return [];
+	}
+	return [
+		{
+			pageKind: "single-entry",
+			usageBucket: "base-color",
+			sampleClass: "rgba-color",
+			texture: {} as never,
+			rect: [0, 0, width, height],
+			width,
+			height,
+			wrapS: atlasEligibility.samplingPolicy.wrapS,
+			wrapT: atlasEligibility.samplingPolicy.wrapT,
+			sampling: {
+				wrapS: atlasEligibility.samplingPolicy.wrapS,
+				wrapT: atlasEligibility.samplingPolicy.wrapT,
+				minFilter: "linear",
+				magFilter: "linear",
+				mip: "material-policy",
+				samplingDomain: "color",
+				lookup: "color-filtered",
+			},
+			source: "standalone-direct-texture",
+		},
+	];
+}
+
+function createIndexedTexelTexturePageBinding({
+	width = 8,
+	height = 8,
+}: {
+	width?: number;
+	height?: number;
+} = {}): TexturePageBinding {
+	return {
+		pageKind: "single-entry",
+		usageBucket: "indexed-texels",
+		sampleClass: "indexed-data",
+		texture: {} as never,
+		rect: [0, 0, width, height],
+		width,
+		height,
+		wrapS: "clamp",
+		wrapT: "clamp",
+		sampling: {
+			wrapS: "clamp",
+			wrapT: "clamp",
+			minFilter: "nearest",
+			magFilter: "nearest",
+			mip: "none",
+			samplingDomain: "data",
+			lookup: "exact",
+		},
+		source: "indexed-material",
+	};
+}
+
+function createIndexedPaletteTexturePageBinding(): TexturePageBinding {
+	return {
+		pageKind: "single-entry",
+		usageBucket: "palette-lookup",
+		sampleClass: "palette-data",
+		texture: {} as never,
+		rect: [0, 0, 256, 1],
+		width: 256,
+		height: 1,
+		wrapS: "clamp",
+		wrapT: "clamp",
+		sampling: {
+			wrapS: "clamp",
+			wrapT: "clamp",
+			minFilter: "nearest",
+			magFilter: "nearest",
+			mip: "none",
+			samplingDomain: "data",
+			lookup: "exact",
+		},
+		source: "indexed-material",
 	};
 }
 

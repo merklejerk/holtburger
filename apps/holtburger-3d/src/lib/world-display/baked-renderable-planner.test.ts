@@ -185,7 +185,7 @@ describe("baked renderable planner", () => {
 		});
 	});
 
-	it("builds indexed opaque material-table records without compacting them before submit support", () => {
+	it("plans indexed opaque material-table slots and draw slices in the indexed submit family", () => {
 		const plan = planBakedRenderables({
 			drawUnits: [
 				createCandidate({
@@ -217,10 +217,23 @@ describe("baked renderable planner", () => {
 		expect(plan.submitFamilies.rgbaAtlas.compactableDrawUnitIds).toEqual([]);
 		expect(plan.submitFamilies.indexedPaletted).toMatchObject({
 			kind: "indexed-paletted",
-			compactableDrawUnitIds: [],
+			compactableDrawUnitIds: ["indexed-a"],
 			materialTableRecords: [createIndexedMaterialTableRecord("a")],
-			drawUnitMaterialSlots: [],
-			drawSlices: [],
+			drawUnitMaterialSlots: [
+				{ drawUnitId: "indexed-a", materialSlotKey: "indexed-table-a" },
+			],
+			drawSlices: [
+				{
+					indexFormat: "p8",
+					indexPageKey: "index-page-a",
+					palettePageKey: "palette-page-a",
+					renderStateKey: "indexed-opaque",
+					materialTableSlotStart: 0,
+					materialTableSlotCount: 1,
+					materialSlotKeys: ["indexed-table-a"],
+					drawUnitIds: ["indexed-a"],
+				},
+			],
 		});
 		expect(plan.bypasses.map((bypass) => bypass.reason)).toEqual([
 			"unsupported-indexed-paletted-material",

@@ -249,6 +249,9 @@ export function createWebgl2RenderMetrics(
 				input.worldStore?.bakedCoverageMaterialFamilyCounts ?? {},
 			bakedCoverageRetainedDirectMaterialFamilyCounts:
 				input.worldStore?.bakedCoverageRetainedDirectMaterialFamilyCounts ?? {},
+			bakedCoverageVisibleRetainedDirectMaterialFamilyCounts:
+				input.submitMetrics
+					.visibleRetainedDirectDrawUnitCountsByBakeMaterialFamily,
 			textureAtlasGenerationTextureCount:
 				input.worldStore?.textureAtlasGenerationTextureCount ?? 0,
 			detailTextureAtlasGenerationTextureCount:
@@ -376,6 +379,11 @@ export function createWebgl2RenderMetrics(
 							"webgl2-baked-retained-family-",
 							input.worldStore
 								.bakedCoverageRetainedDirectMaterialFamilyCounts,
+						),
+						...prefixCounts(
+							"webgl2-baked-visible-retained-family-",
+							input.submitMetrics
+								.visibleRetainedDirectDrawUnitCountsByBakeMaterialFamily,
 						),
 						"webgl2-texture-atlas-generation-textures":
 							input.worldStore.textureAtlasGenerationTextureCount,

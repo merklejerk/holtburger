@@ -102,6 +102,9 @@ export interface Webgl2WorldSubmitMetrics {
 	stateChangeCount: number;
 	triangleCount: number;
 	visibleDrawUnitCountsByMaterialKind: Readonly<Record<string, number>>;
+	visibleRetainedDirectDrawUnitCountsByBakeMaterialFamily: Readonly<
+		Record<string, number>
+	>;
 	bakedShaderDrawCallCount: number;
 	bakedSubmittedBatchCount: number;
 	bakedSubmittedDrawSliceCount: number;
@@ -145,6 +148,7 @@ const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	stateChangeCount: 0,
 	triangleCount: 0,
 	visibleDrawUnitCountsByMaterialKind: {},
+	visibleRetainedDirectDrawUnitCountsByBakeMaterialFamily: {},
 	bakedShaderDrawCallCount: 0,
 	bakedSubmittedBatchCount: 0,
 	bakedSubmittedDrawSliceCount: 0,
@@ -283,6 +287,7 @@ export function submitWebgl2FlatWorldDrawUnits({
 		interiorDomainDrawUnitCount,
 		visibleDrawUnitCountsByMaterialKind:
 			countDrawUnitsByMaterialKind(drawUnits),
+		visibleRetainedDirectDrawUnitCountsByBakeMaterialFamily: {},
 		directPackedTexturePageTextureCount:
 			bakedGeometryResources.generation?.textures.length ?? 0,
 		stagedAtlasSharedTextureAtlasTextureCount:
@@ -303,6 +308,8 @@ export function submitWebgl2FlatWorldDrawUnits({
 						!atlasReplacement.replaceableDrawUnitIds.has(drawUnit.id),
 				);
 	const retainedDrawUnitCount = stagedDrawUnits.length;
+	metrics.visibleRetainedDirectDrawUnitCountsByBakeMaterialFamily =
+		countDrawUnitsByBakeMaterialFamily(stagedDrawUnits);
 	const replaceableDrawUnitTriangleCount = sumDrawUnitTriangles(
 		drawUnits,
 		atlasReplacement.replaceableDrawUnitIds,
@@ -1088,6 +1095,17 @@ function countDrawUnitsByMaterialKind(
 	const counts: Record<string, number> = {};
 	for (const drawUnit of drawUnits) {
 		counts[drawUnit.materialKind] = (counts[drawUnit.materialKind] ?? 0) + 1;
+	}
+	return counts;
+}
+
+function countDrawUnitsByBakeMaterialFamily(
+	drawUnits: readonly Webgl2WorldDrawUnit[],
+): Record<string, number> {
+	const counts: Record<string, number> = {};
+	for (const drawUnit of drawUnits) {
+		const family = drawUnit.bakeEligibility.material.family;
+		counts[family] = (counts[family] ?? 0) + 1;
 	}
 	return counts;
 }

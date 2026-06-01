@@ -4030,9 +4030,10 @@ Course correction from the follow-up capture:
   immediate focused phase to verify that indexed texture-page direct draw is complete enough for a
   baked material-table design and to separate visible indexed pressure from total retained indexed
   draw units.
-- The second largest family is `blended`. This bucket needs a material-policy split before shader
-  work: alpha-test/cutout, true blended transparency, opacity-only, and any AC-specific masked
-  behavior should not remain collapsed under one `blended` family if only some can bake safely.
+- The second largest production target is alpha material behavior. Alpha-test/cutout, explicit
+  transparency blending, opacity-only translucency, and AC-specific masked behavior should share one
+  alpha material-family/shader target where practical, while retaining separate render-policy facts
+  for discard, blending, depth writes, and ordering eligibility.
 
 Exit criteria:
 
@@ -4053,13 +4054,16 @@ Progress:
   - `bakedCoverageGeometryBlockerCounts`;
   - `bakedCoverageMaterialFamilyCounts`;
   - `bakedCoverageRetainedDirectMaterialFamilyCounts`.
-- Added a typed baked material-family classifier. Current families are `flat-constant-color`,
-  `textured-opaque`, `alpha-test`, `blended`, `indexed-paletted`, `terrain-blend`,
-  `debug-pipeline`, and `unknown-unsupported`.
+- Added a typed baked material-family classifier. Current diagnostic families include
+  `flat-constant-color`, `textured-opaque`, `alpha-test`, `transparent-blended`,
+  `opacity-translucent`, `indexed-paletted`, `terrain-blend`, `debug-pipeline`, and
+  `unknown-unsupported`. Future baked shader work should treat the alpha variants as one alpha
+  material-family target with internal render-policy modes.
 - Split stale baked bypass reporting:
   - `non-opaque-material` is replaced by family-specific blockers such as
-    `unsupported-alpha-test-material`, `unsupported-blended-material`,
-    `unsupported-indexed-paletted-material`, and `unsupported-material-state`;
+    `unsupported-alpha-test-material`, `unsupported-transparent-blended-material`,
+    `unsupported-opacity-translucent-material`, `unsupported-indexed-paletted-material`, and
+    `unsupported-material-state`;
   - flat/solid materials now report `unsupported-constant-color-material` instead of being hidden
     behind missing atlas eligibility;
   - portal/debug materials are counted as `debug-pipeline` in typed material-family/blocker metrics
@@ -4103,12 +4107,13 @@ Verification:
 
 ### Phase M7D.4a: Indexed/Blended Target Classification Prep
 
-Status: Next.
+Status: Implemented.
 
 Purpose: avoid jumping straight from typed blocker counts to a baked shader. The follow-up field
-capture shows indexed/paletted and blended materials dominate retained direct draw. This phase should
-verify indexed texture-page completeness, split blended policy into bakeable versus non-bakeable
-subfamilies, and choose the first material-family expansion with visible-count context.
+capture shows indexed/paletted and alpha-material behavior dominate retained direct draw. This phase
+should verify indexed texture-page completeness, expose alpha render-policy modes clearly, and choose
+the first material-family expansion with visible-count context. Indexed/paletted sampling and alpha
+render policy are orthogonal axes; an indexed material may also be cutout, blended, or translucent.
 
 Tasks:
 
@@ -4120,17 +4125,18 @@ Tasks:
   - page upload policy is no-mip/no-filter/data lookup;
   - palette dimensions, clip threshold, wrap policy, and shader-owned filtering facts are available
     at the boundary where a baked material-table record would be encoded.
-- Split `blended` into more precise material-policy families before baking:
-  - alpha-test/cutout;
-  - true blended transparency;
-  - opacity-only/translucent;
+- Expose alpha render-policy modes before baking:
+  - alpha-test/cutout discard behavior;
+  - explicit transparency blending;
+  - opacity-only/translucent behavior;
   - other unsupported material state.
 - Decide the first expansion:
   - if indexed/paletted visible pressure dominates and direct texture-page facts are complete, move to
     M7D.5 baked indexed design;
-  - if alpha-test/cutout is a large subset of `blended`, add a cutout baked material-family phase
-    before true blended transparency;
-  - if true blended transparency dominates, keep it direct until ordering/depth policy is designed.
+  - if alpha visible pressure dominates, add one alpha material-family phase with render-policy modes
+    instead of separate alpha-test and transparent shader families;
+  - keep alpha modes that require unsupported ordering/depth behavior direct even if they share the
+    same alpha family/shader target.
 - Keep flat/constant-color as a later opportunistic cleanup unless a different field capture shows it
   as meaningful retained-direct pressure.
 
@@ -4139,17 +4145,67 @@ Exit criteria:
 - The next implementation target is selected from visible retained-direct family pressure, not total
   retained counts alone.
 - Indexed/paletted direct texture-page readiness is proven or has named prep blockers.
-- `blended` is no longer a single blocker bucket for materially different alpha/ordering policies.
+- Alpha render-policy modes are visible without forcing separate baked shader-family targets.
 - Flat/constant-color is explicitly deprioritized unless future captures show real pressure.
+
+Progress:
+
+- Added visible retained-direct bake-family counts to submit metrics and the renderer debug DTO:
+  `bakedCoverageVisibleRetainedDirectMaterialFamilyCounts`.
+- Surfaced visible retained families in the browser render-pipeline diagnostics beside total retained
+  families.
+- Exposed alpha material policy with diagnostic subfamilies:
+  - `alpha-test` for cutout/discard behavior;
+  - `transparent-blended` for explicit blend-state materials;
+  - `opacity-translucent` for transparent/opacity materials without explicit blend state.
+- Split the corresponding blockers into `missing-baked-alpha-test-family`,
+  `missing-baked-transparent-blended-family`, and `missing-baked-opacity-translucent-family`.
+- Changed baked bypass samples to summarize by reason only. Material keys and texture keys are no
+  longer included in default bypass samples.
+
+Decisions and course corrections:
+
+- Follow-up capture `2026-06-01T17:17:31Z` confirmed indexed/paletted is the largest visible
+  retained family: `indexed-paletted 2068`, alpha material modes `alpha-test 933` plus
+  `transparent-blended 147`, and `terrain-blend 124`.
+- M7D.5 is the next implementation phase. It should target indexed/paletted readiness and baked
+  indexed design before alpha.
+- Alpha material support is now the second production target. It should be planned as one alpha
+  family/shader target with `cutout`, `blend`, and `opacity` policy modes, not separate alpha-test and
+  transparent shader-family phases.
+- Indexed/paletted and alpha must not be modeled as mutually exclusive baked families. Indexed is a
+  sampling/lookup family; alpha is render policy. Initial baked work may implement indexed opaque
+  first, but the material-table and eligibility model must leave room for indexed cutout/blend/opacity
+  combinations.
+- Alpha modes that require unsupported ordering/depth behavior remain direct until that policy is
+  designed, even if they share the alpha material family.
+- Flat/constant-color remains deprioritized because the typed captures did not show it as meaningful
+  retained-direct pressure.
+
+Cleanup targets and legacy shims:
+
+- The direct packed base-page fallback for `atlas-entry|06003789|...` remains unresolved and should
+  be classified before treating direct packed texture-page fallback samples as actionable performance
+  blockers.
+- The material-family names are now precise enough for diagnostics, but `materialTypeCounts` still
+  uses string-prefixed debug keys. Keep this at the DTO/debug boundary only.
+
+Verification:
+
+- `npm exec tsc -- --noEmit`
+- `npm exec vitest -- src/lib/world-display/baked-renderable-planner.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts --run`
 
 ### Phase M7D.5: Indexed and Palette Texture-Page Integration
 
-Status: Planned.
+Status: Next.
 
-Purpose: move indexed/paletted material resources into the shared texture-page model, then decide
-which indexed/paletted renderables can participate in baked geometry. Indexed texture pages and
+Purpose: indexed/paletted is the largest visible retained-direct sampling family in the M7D.4a
+capture (`2068` visible retained draw units; `5964` total retained draw units). Finish validating the
+indexed texture-page model and design the first baked indexed material path. Indexed texture pages and
 palette pages are data/lookup resources, not color pages, so they must preserve exact lookup
-semantics before any compaction/baking work consumes them.
+semantics before any compaction/baking work consumes them. Alpha policy is orthogonal: indexed
+materials may be opaque, cutout, blended, or opacity/translucent depending on material behavior and
+palette/output alpha.
 
 Tasks:
 
@@ -4163,9 +4219,13 @@ Tasks:
   direct submit, metrics, resource records, and tests.
 - Keep direct indexed rendering as the first proof path: direct draw should sample indexed texel and
   palette pages through explicit page bindings before baked indexed geometry is attempted.
-- Design a baked indexed material family only after direct texture-page behavior is correct. The
-  baked family must include material-table records for index page, palette page, palette dimensions,
-  clip threshold, wrap policy, and any shader-owned filtering mode.
+- Design a baked indexed sampling variant only after direct texture-page behavior is correct. The
+  baked material-table records must include index page, palette page, palette dimensions, clip
+  threshold, wrap policy, shader-owned filtering mode, and render-policy facts needed for opaque or
+  alpha modes.
+- Choose a first indexed baked eligibility slice explicitly, likely indexed opaque first. If indexed
+  alpha pressure is material, leave named blockers such as indexed-alpha-policy-unsupported rather
+  than collapsing them into generic indexed unsupported.
 - Decide whether indexed/paletted baked slices can share the existing baked static/interior geometry
   path with a shader variant or need a separate baked indexed submit path.
 - Add tests for direct indexed texture-page binding, palette page binding, no-mip/no-filter upload
@@ -4176,8 +4236,8 @@ Exit criteria:
 
 - Indexed and palette resources are represented as texture pages in direct draw.
 - Indexed/paletted renderables no longer bypass the texture-page model.
-- Baked planning has explicit indexed/paletted material-family eligibility instead of a generic
-  indexed bypass.
+- Baked planning has explicit indexed/paletted sampling eligibility instead of a generic indexed
+  bypass, and it can express indexed plus alpha-policy combinations.
 - If baked indexed submission remains deferred, the blocker is the baked indexed shader/material table
   rather than texture-page resource modeling.
 
@@ -4187,13 +4247,17 @@ Status: Planned.
 
 Purpose: keep alpha and blending semantics honest without inventing unnecessary texture-page buckets.
 RGBA color pages may carry alpha for opaque, alpha-tested/cutout, and blended materials. The
-important split is material/render policy: alpha-test thresholds, opacity, blend mode, depth writes,
-sorting, and visibility behavior. Separate alpha/control texture-page buckets are only needed for
-mask/control inputs whose sampling semantics differ from ordinary RGBA color pages.
+alpha path should be one baked material-family/shader target where practical, with internal
+render-policy modes for alpha-test thresholds, opacity, blend mode, depth writes, sorting, and
+visibility behavior. This render policy applies to RGBA-color and indexed/paletted sampling paths;
+for indexed materials, alpha may come from material state, palette alpha, or resolved output alpha.
+Separate alpha/control texture-page buckets are only needed for mask/control inputs whose sampling
+semantics differ from ordinary RGBA color pages.
 
 Tasks:
 
 - Define alpha/blend material policy facts separately from texture-page usage buckets:
+  - `alphaMode` such as cutout, blend, opacity, or unsupported;
   - alpha-test/cutout threshold and discard behavior;
   - opacity and blend mode;
   - depth write/test behavior;
@@ -4205,28 +4269,33 @@ Tasks:
 - Require alpha/control pages that are data-like to use no unintended mip/filter/color-space behavior.
   RGBA color pages with alpha may use color texture policy when the material recipe calls for it.
 - Route direct alpha-test and blended material color inputs through ordinary RGBA texture-page
-  bindings, plus separate data/control page bindings only when needed.
-- Promote alpha-test/cutout static and structured-interior materials into the baked opaque/cutout
-  family when their texture pages, sampler policy, render state, and material-table constants are
-  compatible.
-- Keep true blended transparency direct until a transparent baked family is designed. That design must
-  name sorting granularity, depth write/test behavior, portal/scene-domain ordering, and whether
-  whole-slice conservative submission is acceptable for transparent geometry.
-- Add metrics separating alpha-test baked candidates from true blended transparent retained direct
-  draws.
+  bindings, or through indexed texel/palette page bindings for indexed materials, plus separate
+  data/control page bindings only when needed.
+- Promote compatible static and structured-interior alpha materials into one baked alpha family when
+  their texture pages, sampler policy, render policy, and material-table constants are compatible.
+  The implementation may start with RGBA alpha, indexed alpha, or both, based on measured pressure,
+  but the model should allow both.
+- Keep alpha modes requiring unsupported ordering/depth behavior direct until that policy is
+  designed. This should be an eligibility blocker inside the alpha family, not a separate transparent
+  shader-family plan by default.
+- Add metrics separating alpha material policy modes while also reporting the combined alpha-family
+  pressure.
 - Add tests for RGBA color pages carrying alpha, separate alpha/control mask texture-page binding,
-  alpha-test baked eligibility, blended transparency retained-direct fallback, and explicit
-  transparent-bake blockers.
+  alpha-family baked eligibility, alpha-mode material-table encoding, blended transparency
+  retained-direct fallback when ordering is unsupported, and explicit alpha-policy blockers.
 
 Exit criteria:
 
 - Alpha-tested and blended color inputs use ordinary RGBA texture-page bindings in direct draw.
+- Indexed alpha inputs use indexed texel/palette page bindings plus the same alpha render-policy
+  facts.
 - Separate alpha/control mask inputs use data/control texture-page bindings only when they are
   separate sampled resources.
-- Alpha-test/cutout materials can enter baked static/interior geometry when compatible.
-- True blended transparency is either represented by a dedicated transparent baked design or remains
-  direct draw with sorting/depth blockers named in metrics.
-- The plan no longer treats all alpha/blended materials as a single generic non-opaque bypass.
+- Compatible alpha materials can enter baked static/interior geometry through one alpha
+  material-family target.
+- Alpha modes that cannot yet satisfy sorting/depth policy remain direct draw with named blockers.
+- The plan no longer treats all alpha materials as generic non-opaque bypasses or as necessarily
+  separate shader families.
 
 ### Phase M7E: Terrain Pipeline Design and First Bake Path
 

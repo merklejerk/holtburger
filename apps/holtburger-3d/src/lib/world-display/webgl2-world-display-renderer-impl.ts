@@ -1976,6 +1976,11 @@ function mergeSceneDomainSubmitMetrics({
 			exteriorMetrics.visibleDrawUnitCountsByMaterialKind,
 			interiorMetrics.visibleDrawUnitCountsByMaterialKind,
 		),
+		visibleRetainedDirectDrawUnitCountsByBakeMaterialFamily:
+			mergeMaterialKindCounts(
+				exteriorMetrics.visibleRetainedDirectDrawUnitCountsByBakeMaterialFamily,
+				interiorMetrics.visibleRetainedDirectDrawUnitCountsByBakeMaterialFamily,
+			),
 		bakedShaderDrawCallCount:
 			exteriorMetrics.bakedShaderDrawCallCount +
 			interiorMetrics.bakedShaderDrawCallCount,

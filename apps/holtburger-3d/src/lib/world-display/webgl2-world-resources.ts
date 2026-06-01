@@ -478,9 +478,7 @@ export function syncWebgl2WorldResources({
 	store.bakedBypassReasonCount =
 		store.bakedRenderablePlan.bypasses.length;
 	store.bakedBypassSamples = summarizeDiagnosticReasons(
-		store.bakedRenderablePlan.bypasses.map(
-			(bypass) => `${bypass.reason}: ${bypass.detail}`,
-		),
+		store.bakedRenderablePlan.bypasses.map((bypass) => bypass.reason),
 		8,
 	);
 	const bakedCoverageMetrics = collectBakedCoverageMetrics(store.drawUnits);

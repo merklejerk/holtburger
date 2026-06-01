@@ -149,6 +149,7 @@ export interface WorldRenderDebugMetrics {
 	bakedCoverageGeometryBlockerCounts: Record<string, number>;
 	bakedCoverageMaterialFamilyCounts: Record<string, number>;
 	bakedCoverageRetainedDirectMaterialFamilyCounts: Record<string, number>;
+	bakedCoverageVisibleRetainedDirectMaterialFamilyCounts: Record<string, number>;
 	textureAtlasGenerationTextureCount: number;
 	detailTextureAtlasGenerationTextureCount: number;
 	bakedGeometryBatchCount: number;

@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { StagedWorldDrawUnitAssembly } from "./staged-world-assembly";
-import type { StagedWorldDirectTextureMaterialPlan } from "./staged-world-materials";
+import type {
+	StagedWorldDirectTextureMaterialPlan,
+	StagedWorldIndexedPalettedMaterialPlan,
+} from "./staged-world-materials";
 import type { BakedRenderablePlan } from "./baked-renderable-planner";
 import { buildBakedGeometry } from "./baked-geometry";
 
@@ -124,6 +127,9 @@ describe("baked geometry geometry builder", () => {
 		const plan = {
 			...basePlan,
 			compactableDrawUnitIds: ["structured-a"],
+			drawUnitMaterialSlots: [
+				{ drawUnitId: "structured-a", materialSlotKey: "material-slot-a" },
+			],
 			drawSlices: [
 				{
 					...firstSlice,
@@ -151,6 +157,48 @@ describe("baked geometry geometry builder", () => {
 				drawUnitId: "structured-a",
 				firstIndex: 0,
 				indexCount: 3,
+				materialSlotIndex: 0,
+			},
+		]);
+	});
+
+	it("uses explicit material slot mappings for non-RGBA baked geometry families", () => {
+		const basePlan = createPlan();
+		const firstSlice = basePlan.drawSlices[0];
+		const firstSlot = basePlan.materialSlots[0];
+		if (!firstSlice || !firstSlot) {
+			throw new Error("Fixture plan is missing its first slice or slot.");
+		}
+		const plan: BakedRenderablePlan = {
+			...basePlan,
+			compactableDrawUnitIds: ["indexed-a"],
+			materialSlots: [{ ...firstSlot, key: "indexed-slot", index: 0 }],
+			drawUnitMaterialSlots: [
+				{ drawUnitId: "indexed-a", materialSlotKey: "indexed-slot" },
+			],
+			drawSlices: [
+				{
+					...firstSlice,
+					materialSlotKeys: ["indexed-slot"],
+					drawUnitIds: ["indexed-a"],
+				},
+			],
+		};
+
+		const geometry = buildBakedGeometry({
+			plan,
+			drawUnits: [
+				createDrawUnit("indexed-a", "ignored-atlas-slot", 10, {
+					materialKind: "indexed-paletted",
+				}),
+			],
+			batchOrigin: { x: 10, y: 0, z: 0 },
+		});
+
+		expect(geometry?.materialSlots).toEqual(Float32Array.from([0, 0, 0]));
+		expect(geometry?.drawRanges).toMatchObject([
+			{
+				drawUnitId: "indexed-a",
 				materialSlotIndex: 0,
 			},
 		]);
@@ -231,9 +279,11 @@ function createDrawUnit(
 	options: {
 		kind?: "static" | "structured-interior";
 		owningLandblockId?: number;
+		materialKind?: "direct-texture" | "indexed-paletted";
 	} = {},
 ): StagedWorldDrawUnitAssembly {
 	const kind = options.kind ?? "static";
+	const materialKind = options.materialKind ?? "direct-texture";
 	const base = {
 		id,
 		kind,
@@ -263,51 +313,10 @@ function createDrawUnit(
 			0,
 			1,
 		]),
-		material: {
-			kind: "direct-texture",
-			key: `material/${id}`,
-			color: new Float32Array([1, 1, 1, 1]),
-			textureKey: `texture/${id}`,
-			textureUpload:
-				{} as StagedWorldDirectTextureMaterialPlan["textureUpload"],
-			behavior: {
-				transparent: false,
-				opacity: 1,
-				alphaTest: 0,
-				blend: {
-					enabled: false,
-					mode: null,
-					srcFactor: null,
-					dstFactor: null,
-					depthWrite: true,
-				},
-			},
-			fallbackReason: null,
-			atlasEligibility: {
-				materialSlotKey,
-				atlasEntryKey: "entry-a",
-				renderStateKey: "opaque",
-				samplingKey: "sampling",
-				samplingPolicy: { wrapS: "clamp", wrapT: "clamp" },
-				atlasEntry: {
-					renderSurfaceId: 1,
-					preparedTextureAssetId: "prepared-texture/a",
-					sourceHash: "hash-a",
-					sourceFormatRaw: 0,
-					level: {
-						level: 0,
-						width: 1,
-						height: 1,
-						formatRaw: 0,
-						format: "rgba8",
-						byteLength: 4,
-						bytes: Uint8Array.from([0, 0, 0, 255]),
-					},
-				},
-			},
-			detailOverlay: null,
-			preparedAssetIds: [],
-		},
+		material:
+			materialKind === "indexed-paletted"
+				? createIndexedMaterial(id)
+				: createDirectTextureMaterial(id, materialSlotKey),
 		preparedAssetIds: [],
 		bvhBinding: {
 			itemKeys: [],
@@ -323,5 +332,74 @@ function createDrawUnit(
 		...base,
 		kind: "static",
 		renderDomain: "exterior-static",
+	};
+}
+
+function createDirectTextureMaterial(
+	id: string,
+	materialSlotKey: string,
+): StagedWorldDirectTextureMaterialPlan {
+	return {
+		kind: "direct-texture",
+		key: `material/${id}`,
+		color: new Float32Array([1, 1, 1, 1]),
+		textureKey: `texture/${id}`,
+		textureUpload: {} as StagedWorldDirectTextureMaterialPlan["textureUpload"],
+		behavior: createOpaqueBehavior(),
+		fallbackReason: null,
+		atlasEligibility: {
+			materialSlotKey,
+			atlasEntryKey: "entry-a",
+			renderStateKey: "opaque",
+			samplingKey: "sampling",
+			samplingPolicy: { wrapS: "clamp", wrapT: "clamp" },
+			atlasEntry: {
+				renderSurfaceId: 1,
+				preparedTextureAssetId: "prepared-texture/a",
+				sourceHash: "hash-a",
+				sourceFormatRaw: 0,
+				level: {
+					level: 0,
+					width: 1,
+					height: 1,
+					formatRaw: 0,
+					format: "rgba8",
+					byteLength: 4,
+					bytes: Uint8Array.from([0, 0, 0, 255]),
+				},
+			},
+		},
+		detailOverlay: null,
+		preparedAssetIds: [],
+	};
+}
+
+function createIndexedMaterial(
+	id: string,
+): StagedWorldIndexedPalettedMaterialPlan {
+	return {
+		kind: "indexed-paletted",
+		key: `indexed/${id}`,
+		color: new Float32Array([1, 1, 1, 1]),
+		indexedMaterial: {} as StagedWorldIndexedPalettedMaterialPlan["indexedMaterial"],
+		behavior: createOpaqueBehavior(),
+		fallbackReason: null,
+		detailOverlay: null,
+		preparedAssetIds: [],
+	};
+}
+
+function createOpaqueBehavior(): StagedWorldDirectTextureMaterialPlan["behavior"] {
+	return {
+		transparent: false,
+		opacity: 1,
+		alphaTest: 0,
+		blend: {
+			enabled: false,
+			mode: null,
+			srcFactor: null,
+			dstFactor: null,
+			depthWrite: true,
+		},
 	};
 }

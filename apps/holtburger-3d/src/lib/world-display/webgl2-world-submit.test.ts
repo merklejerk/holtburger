@@ -871,7 +871,7 @@ function createDrawUnit({
 					},
 				}
 			: null,
-		bakeEligibility: {
+		compactionEligibility: {
 			decision: "direct-draw",
 			material: {
 				family:

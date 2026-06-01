@@ -11,11 +11,11 @@ import type {
 } from "./compacted-geometry";
 import type { AtlasTexturePlacement } from "./atlas-layout-planner";
 import type {
-	BakedIndexedMaterialTableRecord,
-	BakedIndexedRenderableDrawSlice,
-	BakedRenderableDrawSlice,
-	BakedRenderableMaterialSlot,
-} from "./baked-renderable-planner";
+	IndexedPalettedFamilyMaterialTableRecord,
+	IndexedPalettedFamilyDrawSlice,
+	RgbaTexturePageFamilyDrawSlice,
+	RgbaTexturePageFamilyMaterialSlot,
+} from "./compaction-family-planner";
 
 export interface Webgl2RgbaTexturePageFamilyMaterialSlot {
 	key: string;
@@ -54,7 +54,7 @@ export interface Webgl2IndexedPalettedFamilyResource {
 	family: "indexed-paletted";
 	key: string;
 	geometryBatchKey: string;
-	materialTableRecords: readonly BakedIndexedMaterialTableRecord[];
+	materialTableRecords: readonly IndexedPalettedFamilyMaterialTableRecord[];
 	drawSlices: readonly Webgl2IndexedPalettedFamilyDrawSlice[];
 }
 
@@ -123,9 +123,9 @@ export function createWebgl2RgbaTexturePageFamilyResource({
 	placementsByEntryKey,
 	detailPlacementsByEntryKey,
 }: {
-	geometry: CompactedGeometryBatch<BakedRenderableDrawSlice>;
-	materialSlots: readonly BakedRenderableMaterialSlot[];
-	materialDrawSlices: readonly BakedRenderableDrawSlice[];
+	geometry: CompactedGeometryBatch<RgbaTexturePageFamilyDrawSlice>;
+	materialSlots: readonly RgbaTexturePageFamilyMaterialSlot[];
+	materialDrawSlices: readonly RgbaTexturePageFamilyDrawSlice[];
 	placementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>;
 	detailPlacementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>;
 }): Webgl2RgbaTexturePageFamilyResource {
@@ -154,9 +154,9 @@ export function createWebgl2IndexedPalettedFamilyResource({
 	materialTableRecords,
 	materialDrawSlices,
 }: {
-	geometry: CompactedGeometryBatch<BakedIndexedRenderableDrawSlice>;
-	materialTableRecords: readonly BakedIndexedMaterialTableRecord[];
-	materialDrawSlices: readonly BakedIndexedRenderableDrawSlice[];
+	geometry: CompactedGeometryBatch<IndexedPalettedFamilyDrawSlice>;
+	materialTableRecords: readonly IndexedPalettedFamilyMaterialTableRecord[];
+	materialDrawSlices: readonly IndexedPalettedFamilyDrawSlice[];
 }): Webgl2IndexedPalettedFamilyResource {
 	const materialDrawSliceByKey = new Map(
 		materialDrawSlices.map((slice) => [slice.key, slice] as const),
@@ -272,7 +272,7 @@ function disposeWebgl2CompactedGeometryBuffers({
 
 function toWebgl2RgbaTexturePageFamilyDrawSlice(
 	slice: CompactedGeometrySlice,
-	materialDrawSliceByKey: ReadonlyMap<string, BakedRenderableDrawSlice>,
+	materialDrawSliceByKey: ReadonlyMap<string, RgbaTexturePageFamilyDrawSlice>,
 ): Webgl2RgbaTexturePageFamilyDrawSlice {
 	const materialSlice = materialDrawSliceByKey.get(slice.key);
 	if (!materialSlice) {
@@ -289,7 +289,7 @@ function toWebgl2RgbaTexturePageFamilyDrawSlice(
 
 function toWebgl2IndexedPalettedFamilyDrawSlice(
 	slice: CompactedGeometrySlice,
-	materialDrawSliceByKey: ReadonlyMap<string, BakedIndexedRenderableDrawSlice>,
+	materialDrawSliceByKey: ReadonlyMap<string, IndexedPalettedFamilyDrawSlice>,
 ): Webgl2IndexedPalettedFamilyDrawSlice {
 	const materialSlice = materialDrawSliceByKey.get(slice.key);
 	if (!materialSlice) {
@@ -306,7 +306,7 @@ function toWebgl2IndexedPalettedFamilyDrawSlice(
 }
 
 function toWebgl2RgbaTexturePageFamilyMaterialSlot(
-	slot: BakedRenderableMaterialSlot,
+	slot: RgbaTexturePageFamilyMaterialSlot,
 	placementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>,
 	detailPlacementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>,
 ): Webgl2RgbaTexturePageFamilyMaterialSlot {

@@ -141,21 +141,21 @@ export interface WorldRenderDebugMetrics {
 	atlasEligibleMaterialCount: number;
 	atlasCandidateEntryCount: number;
 	atlasCandidateMaterialSlotCount: number;
-	bakedCandidateDrawUnitCount: number;
-	bakedBypassReasonCount: number;
-	bakedBypassSamples: string[];
-	bakedCoverageDrawUnitCounts: Record<string, number>;
-	bakedCoverageMaterialBlockerCounts: Record<string, number>;
-	bakedCoverageGeometryBlockerCounts: Record<string, number>;
-	bakedCoverageMaterialFamilyCounts: Record<string, number>;
-	bakedCoverageMaterialAlphaPolicyCounts: Record<string, number>;
-	bakedCoverageMaterialFamilyAlphaPolicyCounts: Record<string, number>;
-	bakedCoverageRetainedDirectMaterialFamilyCounts: Record<string, number>;
-	bakedCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts: Record<
+	compactionCandidateDrawUnitCount: number;
+	compactionBypassReasonCount: number;
+	compactionBypassSamples: string[];
+	compactionCoverageDrawUnitCounts: Record<string, number>;
+	compactionCoverageMaterialBlockerCounts: Record<string, number>;
+	compactionCoverageGeometryBlockerCounts: Record<string, number>;
+	compactionCoverageMaterialFamilyCounts: Record<string, number>;
+	compactionCoverageMaterialAlphaPolicyCounts: Record<string, number>;
+	compactionCoverageMaterialFamilyAlphaPolicyCounts: Record<string, number>;
+	compactionCoverageRetainedDirectMaterialFamilyCounts: Record<string, number>;
+	compactionCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts: Record<
 		string,
 		number
 	>;
-	bakedCoverageVisibleRetainedDirectMaterialFamilyCounts: Record<
+	compactionCoverageVisibleRetainedDirectMaterialFamilyCounts: Record<
 		string,
 		number
 	>;

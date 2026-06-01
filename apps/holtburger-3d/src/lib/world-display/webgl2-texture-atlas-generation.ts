@@ -3,9 +3,9 @@ import {
 	type Webgl2Texture2DResource,
 } from "./webgl2-gl";
 import type {
-	BakedRenderableEntry,
-	BakedRenderablePlan,
-} from "./baked-renderable-planner";
+	RgbaTexturePageAtlasEntryRecord,
+	CompactionFamilyPlan,
+} from "./compaction-family-planner";
 import type {
 	AtlasTexturePage,
 	AtlasTexturePlacement,
@@ -53,10 +53,10 @@ export function createWebgl2TextureAtlasGenerationResource({
 	plan,
 }: {
 	gl: WebGL2RenderingContext;
-	plan: BakedRenderablePlan;
+	plan: CompactionFamilyPlan;
 }): Webgl2TextureAtlasGenerationResource | null {
-	const rgbaAtlasFamily = plan.submitFamilies.rgbaAtlas;
-	if (rgbaAtlasFamily.compactableDrawUnitIds.length === 0) {
+	const rgbaTexturePageFamily = plan.renderFamilies.rgbaTexturePage;
+	if (rgbaTexturePageFamily.compactableDrawUnitIds.length === 0) {
 		return null;
 	}
 	const entriesByKey = new Map(
@@ -118,7 +118,7 @@ export function createWebgl2TextureAtlasGenerationResource({
 		detailTextures,
 		detailPlacements,
 		preparedTextureAssetIds: plan.preparedTextureAssetIds,
-		compactableDrawUnitIds: rgbaAtlasFamily.compactableDrawUnitIds,
+		compactableDrawUnitIds: rgbaTexturePageFamily.compactableDrawUnitIds,
 		dispose() {
 			for (const texture of textures) {
 				texture.texture.dispose();
@@ -139,7 +139,7 @@ function createWebgl2TextureAtlasTexture({
 	gl: WebGL2RenderingContext;
 	generationKey: string;
 	page: AtlasTexturePage;
-	entriesByKey: ReadonlyMap<string, BakedRenderableEntry>;
+	entriesByKey: ReadonlyMap<string, RgbaTexturePageAtlasEntryRecord>;
 }): Webgl2TextureAtlasTextureResource {
 	const pixels = new Uint8Array(page.width * page.height * 4);
 	for (const placement of page.placements) {
@@ -197,7 +197,7 @@ function createWebgl2DetailTextureAtlasTexture({
 	page: AtlasTexturePage;
 	entriesByKey: ReadonlyMap<
 		string,
-		BakedRenderablePlan["detailAtlasEntryRecords"][number]
+		CompactionFamilyPlan["detailAtlasEntryRecords"][number]
 	>;
 }): Webgl2DetailTextureAtlasTextureResource {
 	const pixels = new Uint8Array(page.width * page.height * 4);
@@ -256,7 +256,7 @@ function copyTextureAtlasPlacement({
 	atlasWidth: number;
 	atlasHeight: number;
 	placement: AtlasTexturePlacement;
-	entry: BakedRenderableEntry["entry"];
+	entry: RgbaTexturePageAtlasEntryRecord["entry"];
 }): void {
 	validateTextureAtlasSource(entry);
 	const source = entry.level.bytes;
@@ -297,7 +297,7 @@ function copyDetailTextureAtlasPlacement({
 	atlasWidth: number;
 	atlasHeight: number;
 	placement: AtlasTexturePlacement;
-	entry: BakedRenderablePlan["detailAtlasEntryRecords"][number];
+	entry: CompactionFamilyPlan["detailAtlasEntryRecords"][number];
 }): void {
 	validateDetailTextureAtlasSource(entry);
 	const gutter = placement.gutterPixels;
@@ -325,7 +325,7 @@ function copyDetailTextureAtlasPlacement({
 }
 
 function validateTextureAtlasSource(
-	entry: BakedRenderableEntry["entry"],
+	entry: RgbaTexturePageAtlasEntryRecord["entry"],
 ): void {
 	const level = entry.level;
 	if (level.width <= 0 || level.height <= 0) {
@@ -341,7 +341,7 @@ function validateTextureAtlasSource(
 }
 
 function validateDetailTextureAtlasSource(
-	entry: BakedRenderablePlan["detailAtlasEntryRecords"][number],
+	entry: CompactionFamilyPlan["detailAtlasEntryRecords"][number],
 ): void {
 	if (entry.width <= 0 || entry.height <= 0) {
 		throw new Error(

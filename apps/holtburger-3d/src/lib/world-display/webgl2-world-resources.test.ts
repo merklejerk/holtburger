@@ -484,8 +484,8 @@ describe("webgl2 world resources", () => {
 		});
 
 		expect(store.structuredInteriorDrawUnitCount).toBe(1);
-		expect(store.bakedCandidateDrawUnitCount).toBe(1);
-		expect(store.bakedRenderablePlan.compactableDrawUnitIds[0]).toContain(
+		expect(store.compactionCandidateDrawUnitCount).toBe(1);
+		expect(store.compactionFamilyPlan.compactableDrawUnitIds[0]).toContain(
 			"structured-interior",
 		);
 		const batch = sortAtlasBatchesByLandblock(store)[0];
@@ -501,8 +501,8 @@ describe("webgl2 world resources", () => {
 		expect(rgbaFamily?.drawSlices[0]?.drawUnitIds[0]).toContain(
 			"structured-interior",
 		);
-		expect(store.bakedBypassSamples).not.toContain(
-			"non-static: draw unit kind structured-interior is not baked geometry",
+		expect(store.compactionBypassSamples).not.toContain(
+			"non-static: draw unit kind structured-interior is not compacted geometry",
 		);
 	});
 
@@ -629,7 +629,7 @@ describe("webgl2 world resources", () => {
 		expect(store.textureCount).toBe(2);
 		expect(store.indexedTextureCount).toBe(1);
 		expect(store.paletteTextureCount).toBe(1);
-		expect(store.bakedRenderablePlan.indexedMaterialTableRecords).toMatchObject(
+		expect(store.compactionFamilyPlan.indexedMaterialTableRecords).toMatchObject(
 			[
 				{
 					sourceMaterialKey: expect.stringContaining("indexed-paletted"),
@@ -644,11 +644,11 @@ describe("webgl2 world resources", () => {
 			],
 		);
 		expect(
-			store.bakedRenderablePlan.submitFamilies.indexedPaletted
+			store.compactionFamilyPlan.renderFamilies.indexedPaletted
 				.compactableDrawUnitIds,
 		).toEqual([store.drawUnits[0]?.id]);
 		expect(
-			store.bakedRenderablePlan.submitFamilies.indexedPaletted.drawSlices,
+			store.compactionFamilyPlan.renderFamilies.indexedPaletted.drawSlices,
 		).toMatchObject([
 			{
 				indexFormat: "p8",

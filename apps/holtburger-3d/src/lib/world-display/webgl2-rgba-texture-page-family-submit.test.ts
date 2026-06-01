@@ -155,7 +155,7 @@ describe("planWebgl2RgbaTexturePageFamilyReplacement", () => {
 		expect(gl.uniformMatrix4fvLengths).toEqual([16, 16]);
 	});
 
-	it("binds a detail atlas page when the visible baked slice requires detail", () => {
+	it("binds a detail atlas page when the visible compacted slice requires detail", () => {
 		const gl = new FakeAtlasSubmitGl();
 		const batch = createBatch(["draw-a"], 0x0102ffff);
 

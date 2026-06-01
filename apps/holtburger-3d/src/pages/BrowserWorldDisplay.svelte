@@ -284,29 +284,29 @@
 		const texturePageBuckets = summarizeRecord(
 			debug.texturePageUsageBucketCounts,
 		);
-		const bakedMaterialFamilies = summarizeRecord(
-			debug.bakedCoverageMaterialFamilyCounts,
+		const compactionMaterialFamilies = summarizeRecord(
+			debug.compactionCoverageMaterialFamilyCounts,
 		);
-		const bakedRetainedFamilies = summarizeRecord(
-			debug.bakedCoverageRetainedDirectMaterialFamilyCounts,
+		const compactionRetainedFamilies = summarizeRecord(
+			debug.compactionCoverageRetainedDirectMaterialFamilyCounts,
 		);
-		const bakedVisibleRetainedFamilies = summarizeRecord(
-			debug.bakedCoverageVisibleRetainedDirectMaterialFamilyCounts,
+		const compactionVisibleRetainedFamilies = summarizeRecord(
+			debug.compactionCoverageVisibleRetainedDirectMaterialFamilyCounts,
 		);
-		const bakedRetainedFamilyAlphaPolicies = summarizeRecord(
-			debug.bakedCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts,
+		const compactionRetainedFamilyAlphaPolicies = summarizeRecord(
+			debug.compactionCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts,
 		);
-		const bakedMaterialBlockers = summarizeRecord(
-			debug.bakedCoverageMaterialBlockerCounts,
+		const compactionMaterialBlockers = summarizeRecord(
+			debug.compactionCoverageMaterialBlockerCounts,
 		);
-		const bakedGeometryBlockers = summarizeRecord(
-			debug.bakedCoverageGeometryBlockerCounts,
+		const compactionGeometryBlockers = summarizeRecord(
+			debug.compactionCoverageGeometryBlockerCounts,
 		);
 		const compactedFamilyResources = summarizeRecord(
 			debug.compactedGeometryFamilyResourceCounts,
 		);
 		const fallbackSamples = summarizeSamples(debug.fallbackReasonSamples);
-		const bakedBypassSamples = summarizeSamples(debug.bakedBypassSamples);
+		const compactionBypassSamples = summarizeSamples(debug.compactionBypassSamples);
 		const compactedResourceFallbackSamples = summarizeSamples(
 			debug.compactedResourceFallbackSamples,
 		);
@@ -320,7 +320,7 @@
 		const performanceText = renderMetrics?.performance
 			? `${renderMetrics.performance.fps.toFixed(1)} FPS, ${renderMetrics.performance.frameMs.toFixed(1)} ms/frame, ${renderMetrics.performance.renderMs.toFixed(1)} ms render`
 			: "waiting for performance sample";
-		return `Perf ${performanceText}. Diagnosis: ${diagnosis}. Draw pressure ${debug.renderCalls} visible draws from ${candidateBatchCount} candidate ${drawGroupTerm}; static candidates ${debug.staticBvhCandidateBatchCount}${staticCandidateRatio}; retained terrain ${debug.terrainRenderBatchCount}, static ${debug.staticRenderBatchCount}, interiors ${debug.structuredInteriorRenderBatchCount}; retained tris ${debug.renderTriangles}. Materials ${debug.materialCount}, textures ${debug.textureResourceCount}, indexed textures ${debug.indexedTextureResourceCount}, palettes ${debug.paletteResourceCount}; texture pages ${debug.texturePageBindingCount} bindings (${texturePageBuckets}); direct texture-page draws ${debug.directTexturePageDrawCount} (${debug.directPackedTexturePageDrawCount} packed, ${debug.directSingleEntryTexturePageDrawCount} single-entry)${directTexturePageFallbackSamples ? `, texture-page fallbacks ${directTexturePageFallbackSamples}` : ""}. Compaction coverage: candidates ${debug.bakedCandidateDrawUnitCount}, families ${bakedMaterialFamilies}, retained families ${bakedRetainedFamilies}, retained family/alpha ${bakedRetainedFamilyAlphaPolicies}, visible retained families ${bakedVisibleRetainedFamilies}, material blockers ${bakedMaterialBlockers}, geometry blockers ${bakedGeometryBlockers}; compacted batches ${debug.compactedGeometryBatchCount}, family resources ${compactedFamilyResources}, RGBA shader draws ${debug.rgbaTexturePageFamilyShaderDrawCallCount}, replaced ${debug.rgbaTexturePageFamilyReplacedDrawUnitCount}, retained ${debug.rgbaTexturePageFamilyRetainedDirectDrawUnitCount}, saved ${debug.rgbaTexturePageFamilyDrawCallSavingsCount}, overdraw ${debug.rgbaTexturePageFamilyConservativeOverdrawTriangleCount} tris (${debug.rgbaTexturePageFamilyConservativeOverdrawRatio.toFixed(2)}), no-visible routes ${debug.rgbaTexturePageFamilyNoVisibleRouteCount}; bypasses ${debug.bakedBypassReasonCount}${bakedBypassSamples ? ` (${bakedBypassSamples})` : ""}${compactedResourceFallbackSamples ? `, compacted resource fallbacks ${compactedResourceFallbackSamples}` : ""}${rgbaTexturePageFamilyFallbackSamples ? `, RGBA submit fallbacks ${rgbaTexturePageFamilyFallbackSamples}` : ""}. Fallbacks ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}. Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}, transition depth ${debug.transitionPortalMaxDepth}; canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
+		return `Perf ${performanceText}. Diagnosis: ${diagnosis}. Draw pressure ${debug.renderCalls} visible draws from ${candidateBatchCount} candidate ${drawGroupTerm}; static candidates ${debug.staticBvhCandidateBatchCount}${staticCandidateRatio}; retained terrain ${debug.terrainRenderBatchCount}, static ${debug.staticRenderBatchCount}, interiors ${debug.structuredInteriorRenderBatchCount}; retained tris ${debug.renderTriangles}. Materials ${debug.materialCount}, textures ${debug.textureResourceCount}, indexed textures ${debug.indexedTextureResourceCount}, palettes ${debug.paletteResourceCount}; texture pages ${debug.texturePageBindingCount} bindings (${texturePageBuckets}); direct texture-page draws ${debug.directTexturePageDrawCount} (${debug.directPackedTexturePageDrawCount} packed, ${debug.directSingleEntryTexturePageDrawCount} single-entry)${directTexturePageFallbackSamples ? `, texture-page fallbacks ${directTexturePageFallbackSamples}` : ""}. Compaction coverage: candidates ${debug.compactionCandidateDrawUnitCount}, families ${compactionMaterialFamilies}, retained families ${compactionRetainedFamilies}, retained family/alpha ${compactionRetainedFamilyAlphaPolicies}, visible retained families ${compactionVisibleRetainedFamilies}, material blockers ${compactionMaterialBlockers}, geometry blockers ${compactionGeometryBlockers}; compacted batches ${debug.compactedGeometryBatchCount}, family resources ${compactedFamilyResources}, RGBA shader draws ${debug.rgbaTexturePageFamilyShaderDrawCallCount}, replaced ${debug.rgbaTexturePageFamilyReplacedDrawUnitCount}, retained ${debug.rgbaTexturePageFamilyRetainedDirectDrawUnitCount}, saved ${debug.rgbaTexturePageFamilyDrawCallSavingsCount}, overdraw ${debug.rgbaTexturePageFamilyConservativeOverdrawTriangleCount} tris (${debug.rgbaTexturePageFamilyConservativeOverdrawRatio.toFixed(2)}), no-visible routes ${debug.rgbaTexturePageFamilyNoVisibleRouteCount}; bypasses ${debug.compactionBypassReasonCount}${compactionBypassSamples ? ` (${compactionBypassSamples})` : ""}${compactedResourceFallbackSamples ? `, compacted resource fallbacks ${compactedResourceFallbackSamples}` : ""}${rgbaTexturePageFamilyFallbackSamples ? `, RGBA submit fallbacks ${rgbaTexturePageFamilyFallbackSamples}` : ""}. Fallbacks ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}. Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}, transition depth ${debug.transitionPortalMaxDepth}; canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
 	});
 	const sceneContextText = $derived(renderResourceSnapshot.sceneContextText);
 	const cameraResidencyText = $derived.by(() => {

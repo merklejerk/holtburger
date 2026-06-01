@@ -144,7 +144,7 @@ function createDrawUnit({
 		directTextureSamplingPolicy: null,
 		textureUploadSample: null,
 		atlasEligibility: null,
-		bakeEligibility: {
+		compactionEligibility: {
 			decision: "direct-draw",
 			material: {
 				family:

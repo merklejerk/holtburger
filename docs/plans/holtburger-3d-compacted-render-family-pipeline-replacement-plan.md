@@ -1249,7 +1249,7 @@ Validation:
 
 ## Phase C7.5: Replace BakedRenderablePlan With a Compaction Family Plan
 
-Status: Planned.
+Status: Complete.
 
 Purpose: finish the old-pipeline cleanup before indexed compacted rendering. The rendered RGBA family
 path and compacted resource graph now use the replacement terminology, but the planner still exposes
@@ -1278,6 +1278,68 @@ Exit criteria:
 - C8 can add indexed family rendering by adding an indexed family pipeline, not by extending a
   baked-named planner compatibility shape.
 
+Progress:
+
+- Renamed `baked-renderable-planner.ts` to `compaction-family-planner.ts` without a reexport shim.
+- Renamed the planner test module to `compaction-family-planner.test.ts`.
+- Replaced planner surface types and functions with compaction/family names:
+  - `BakedRenderablePlan` -> `CompactionFamilyPlan`;
+  - `BakedRenderableCandidate` -> `CompactionFamilyCandidate`;
+  - `BakedRenderablePolicy` -> `CompactionFamilyPlanningPolicy`;
+  - `planBakedRenderables()` -> `planCompactionFamilies()`;
+  - `createEmptyBakedRenderablePlan()` -> `createEmptyCompactionFamilyPlan()`.
+- Replaced `submitFamilies` with `renderFamilies`.
+- Renamed the RGBA family subplan from `rgbaAtlas` to `rgbaTexturePage`.
+- Renamed indexed planner payloads to `IndexedPalettedFamily*` names.
+- Renamed planner diagnostics and renderer debug fields from `bakedCandidate*`, `bakedBypass*`, and
+  `bakedCoverage*` to `compactionCandidate*`, `compactionBypass*`, and `compactionCoverage*`.
+- Renamed blocker strings from `missing-baked-*` to `missing-compacted-*` and changed planner
+  compatibility decisions from `"baked"` to `"compacted"`.
+- Renamed `Webgl2WorldDrawUnit.bakeEligibility` to `compactionEligibility`.
+- Renamed remaining compacted resource helpers that still used baked geometry names:
+  - RGBA landblock batch planning now uses `createRgbaTexturePageCompactedLandblockBatch*`;
+  - indexed landblock batch planning now uses `createIndexedPalettedCompactedLandblockBatch*`;
+  - compacted batch graph/resource helpers now use compacted names.
+- Updated material type count keys from `webgl2-baked-*` to `webgl2-compacted-*`.
+
+Decisions:
+
+- `renderFamilies` is the new authoritative planner boundary. It is still intentionally simple:
+  `rgbaTexturePage` and `indexedPaletted` family plans are concrete records, not a registry or
+  generic plugin layer.
+- The root `CompactionFamilyPlan` still carries some RGBA atlas compatibility fields
+  (`atlasEntryRecords`, `materialSlots`, `drawSlices`, etc.) because atlas generation still consumes
+  them. This is now explicit cleanup debt rather than the shape C8 should extend.
+- Kept indexed compacted geometry resource creation in place as a planned-resource path, but C8 still
+  owns the actual indexed family renderer.
+
+Course corrections:
+
+- C7.5 removed the stale module/type names and the `submitFamilies` source-of-truth problem, but it
+  did not fully split RGBA atlas generation onto only `renderFamilies.rgbaTexturePage`. That split is
+  less urgent than C8 because no production code reads `submitFamilies` or `BakedRenderablePlan`
+  anymore.
+- C8 should use `renderFamilies.indexedPaletted` and existing indexed family resources directly
+  rather than adding any new root plan fields.
+
+Discovered cleanup targets:
+
+- `CompactionFamilyPlan` root RGBA fields should be deleted after atlas generation and resource
+  refresh helpers read only `renderFamilies.rgbaTexturePage` plus atlas texture layout records.
+- `atlasEligibility` is still exposed as a direct compaction carrier. Replace it with a typed
+  texture-page/family eligibility record later.
+- Direct draw still reads `drawUnit.compactionEligibility.material.family` for retained-family
+  diagnostics; long term this should come from direct family route planning.
+
+Legacy shims:
+
+- None added. The old `baked-renderable-planner.ts` import path was removed instead of preserved.
+
+Validation:
+
+- `npm exec tsc -- --noEmit`
+- `npm exec vitest -- src/lib/world-display/compaction-family-planner.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts src/lib/world-display/webgl2-rgba-texture-page-family-submit.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/compacted-geometry.test.ts --run`
+
 ## Phase C8: Reintroduce Indexed-Paletted Rendering Through the New Boundary
 
 Status: Planned.
@@ -1296,7 +1358,7 @@ Tasks:
   - no clip threshold when `clipThreshold = -1`;
   - shader-owned palette-aware linear filtering;
   - wrap flags from the family material slot.
-- Remove or narrow `missing-baked-indexed-paletted-family` for table-ready opaque indexed materials
+- Remove or narrow `missing-compacted-indexed-paletted-family` for table-ready opaque indexed materials
   only when the new family pipeline actually renders them.
 - Keep indexed alpha/cutout/blend retained direct with explicit blockers until their policy is
   modeled.
@@ -1324,11 +1386,7 @@ Exit criteria:
   pipeline adapters.
 - Move direct texture-page mutation in `resolveWebgl2DrawUnitTexturePageBindings()` into an explicit
   family/page-resolution step.
-- Delete root RGBA atlas compatibility fields from `BakedRenderablePlan`.
-- Rename `BakedRenderablePlan` if it remains; "baked" is now too overloaded.
-- Replace `submitFamilies` with `renderFamilyPipelines` or a shorter local equivalent.
-- Rename `BakedRenderablePolicy` / `DEFAULT_WEBGL2_BAKED_RENDERABLE_POLICY` to compacted/family
-  planning policy names after root RGBA fields are gone.
+- Delete root RGBA atlas compatibility fields from `CompactionFamilyPlan`.
 - Replace `atlasEligibility` as a direct compaction carrier with a texture-page/family eligibility
   record that is not RGBA-atlas-specific.
 - Remove color-space parameters from prepared texture IDs unless a real renderer color-space policy is

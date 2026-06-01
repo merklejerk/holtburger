@@ -144,6 +144,12 @@ export interface DirectFamilyDrawContext {
 	textureUnits: DirectFamilyDrawTextureUnits;
 }
 
+interface DirectFamilyUniformCache {
+	modelViewProjection: RenderMat4 | null;
+	color: Float32Array | null;
+	alphaTest: number | null;
+}
+
 export interface Webgl2DirectDrawPrograms {
 	flat: Webgl2FlatWorldProgram;
 	rgbaTexturePage: Webgl2TexturedWorldProgram;
@@ -461,9 +467,11 @@ export function submitWebgl2FlatWorldDrawUnits({
 		return metrics;
 	}
 
-	let previousModelViewProjection: RenderMat4 | null = null;
-	let previousColor: Float32Array | null = null;
-	let previousAlphaTest: number | null = null;
+	const uniformCache: DirectFamilyUniformCache = {
+		modelViewProjection: null,
+		color: null,
+		alphaTest: null,
+	};
 	let previousProgramKind: Webgl2DirectProgramKind | null = null;
 	const directContext: DirectFamilyDrawContext = {
 		gl,
@@ -486,35 +494,16 @@ export function submitWebgl2FlatWorldDrawUnits({
 		if (directContext.stateCache.useProgram(route.activeProgram.program)) {
 			metrics.programSwitchCount += 1;
 			metrics.stateChangeCount += 1;
-			previousModelViewProjection = null;
-			previousColor = null;
-			previousAlphaTest = null;
+			resetDirectFamilyUniformCache(uniformCache);
 			previousProgramKind = route.programKind;
-			if (route.usesRgbaTexturePage) {
-				directContext.gl.uniform1i(texturedProgram.uniforms.uTexture, 0);
-				directContext.gl.uniform1i(texturedProgram.uniforms.uDetailTexture, 1);
-				metrics.uniformUploadCount += 2;
-			}
-			if (route.usesIndexed) {
-				if (!route.indexedProgram) {
-					throw new Error(
-						`Indexed draw unit ${drawUnit.id} has no indexed program.`,
-					);
-				}
-				uploadIndexedSamplerUniforms(directContext.gl, route.indexedProgram);
-				metrics.uniformUploadCount += 3;
-			}
-			if (route.usesTerrainBlend) {
-				uploadTerrainBlendSamplerUniforms(
-					directContext.gl,
-					terrainBlendProgram,
-				);
-				metrics.uniformUploadCount += TERRAIN_BLEND_SAMPLER_UNIFORM_COUNT;
-			}
+			uploadDirectFamilySamplerUniforms({
+				context: directContext,
+				route,
+				terrainBlendProgram,
+				metrics,
+			});
 		} else if (previousProgramKind !== route.programKind) {
-			previousModelViewProjection = null;
-			previousColor = null;
-			previousAlphaTest = null;
+			resetDirectFamilyUniformCache(uniformCache);
 			previousProgramKind = route.programKind;
 		}
 		metrics.stateChangeCount += applyDrawUnitRenderState({
@@ -526,65 +515,24 @@ export function submitWebgl2FlatWorldDrawUnits({
 			enabled: terrainBackfaceCulling && route.usesTerrainBlend,
 			mode: gl.BACK,
 		});
-		metrics.directTexturePageFallbackSamples = appendSubmitFallbackSamples(
-			metrics.directTexturePageFallbackSamples,
-			drawUnit.texturePageBindingFallbackSamples,
-		);
-		metrics.stagedAtlasFallbackSamples =
-			metrics.directTexturePageFallbackSamples;
 		if (route.usesRgbaTexturePage) {
-			if (route.texturePageBinding) {
-				metrics.directTexturePageDrawCount += 1;
-				if (route.texturePageBinding.pageKind === "packed-atlas") {
-					metrics.directPackedTexturePageDrawCount += 1;
-					metrics.directPackedTexturePageEstimatedBindAvoidedCount += 1;
-				} else {
-					metrics.directSingleEntryTexturePageDrawCount += 1;
-				}
-				metrics.stagedAtlasDrawCount = metrics.directPackedTexturePageDrawCount;
-				metrics.stagedAtlasEstimatedTextureBindAvoidedCount =
-					metrics.directPackedTexturePageEstimatedBindAvoidedCount;
-				metrics.stagedAtlasStandaloneDirectDrawCount =
-					metrics.directSingleEntryTexturePageDrawCount;
-			} else {
-				metrics.stagedAtlasStandaloneDirectDrawCount += 1;
-			}
+			prepareDirectRgbaTexturePageDraw({
+				context: directContext,
+				route,
+				metrics,
+			});
 		}
-		if (
-			route.activeBaseTexture &&
-			directContext.stateCache.bindTexture2D(
-				directContext.textureUnits.rgbaTexture,
-				route.activeBaseTexture,
-			)
-		) {
-			metrics.stateChangeCount += 1;
-		}
-		if (drawUnit.detailOverlay) {
-			const unit = route.detailTextureUnit;
-			if (unit === null) {
-				throw new Error(
-					`Draw unit ${drawUnit.id} has detail overlay without a detail texture unit.`,
-				);
-			}
-			if (
-				directContext.stateCache.bindTexture2D(
-					unit,
-					drawUnit.detailOverlay.texture.texture,
-				)
-			) {
-				metrics.stateChangeCount += 1;
-			}
+		if (route.usesIndexed) {
+			prepareDirectIndexedPalettedDraw({
+				context: directContext,
+				route,
+				metrics,
+			});
 		}
 		if (drawUnit.terrainBlend) {
 			metrics.stateChangeCount += bindTerrainBlendTextures({
 				stateCache: directContext.stateCache,
 				terrainBlend: drawUnit.terrainBlend,
-			});
-		}
-		if (drawUnit.indexedMaterial) {
-			metrics.stateChangeCount += bindIndexedMaterialTextures({
-				stateCache: directContext.stateCache,
-				indexedMaterial: drawUnit.indexedMaterial,
 			});
 		}
 		if (
@@ -599,70 +547,38 @@ export function submitWebgl2FlatWorldDrawUnits({
 			drawUnit.modelMatrix,
 		);
 		if (
-			!previousModelViewProjection ||
-			!arraysEqual(previousModelViewProjection, modelViewProjection)
+			!uniformCache.modelViewProjection ||
+			!arraysEqual(uniformCache.modelViewProjection, modelViewProjection)
 		) {
 			directContext.gl.uniformMatrix4fv(
 				route.activeProgram.uniforms.uModelViewProjection,
 				false,
 				modelViewProjection,
 			);
-			previousModelViewProjection = modelViewProjection;
+			uniformCache.modelViewProjection = modelViewProjection;
 			metrics.uniformUploadCount += 1;
-		}
-		if (
-			!route.usesTerrainBlend &&
-			(!previousColor || !arraysEqual(previousColor, drawUnit.color))
-		) {
-			if (!route.colorProgram) {
-				throw new Error(`Draw unit ${drawUnit.id} has no color program.`);
-			}
-			directContext.gl.uniform4fv(
-				route.colorProgram.uniforms.uColor,
-				drawUnit.color,
-			);
-			previousColor = drawUnit.color;
-			metrics.uniformUploadCount += 1;
-		}
-		if (route.alphaProgram) {
-			const alphaTest = drawUnit.materialBehavior?.alphaTest ?? 0;
-			if (previousAlphaTest !== alphaTest) {
-				directContext.gl.uniform1f(
-					route.alphaProgram.uniforms.uAlphaTest,
-					alphaTest,
-				);
-				previousAlphaTest = alphaTest;
-				metrics.uniformUploadCount += 1;
-			}
-		}
-		if (drawUnit.indexedMaterial) {
-			if (!route.indexedProgram) {
-				throw new Error(
-					`Indexed draw unit ${drawUnit.id} has no indexed program.`,
-				);
-			}
-			uploadIndexedMaterialUniforms(
-				directContext.gl,
-				route.indexedProgram,
-				drawUnit.indexedMaterial,
-			);
-			metrics.uniformUploadCount += INDEXED_DYNAMIC_UNIFORM_COUNT;
-		}
-		if (route.detailProgram) {
-			uploadDetailOverlayUniforms(
-				directContext.gl,
-				route.detailProgram,
-				drawUnit.detailOverlay,
-			);
-			metrics.uniformUploadCount += DETAIL_DYNAMIC_UNIFORM_COUNT;
 		}
 		if (route.usesRgbaTexturePage) {
-			uploadDirectTexturePageUniforms(
-				directContext.gl,
-				texturedProgram,
-				route.texturePageBinding,
-			);
-			metrics.uniformUploadCount += DIRECT_TEXTURE_PAGE_DYNAMIC_UNIFORM_COUNT;
+			uploadDirectRgbaTexturePageUniforms({
+				context: directContext,
+				route,
+				uniformCache,
+				metrics,
+			});
+		} else if (route.usesIndexed) {
+			uploadDirectIndexedPalettedUniforms({
+				context: directContext,
+				route,
+				uniformCache,
+				metrics,
+			});
+		} else if (!route.usesTerrainBlend) {
+			uploadDirectColorUniforms({
+				context: directContext,
+				route,
+				uniformCache,
+				metrics,
+			});
 		}
 		if (drawUnit.terrainBlend) {
 			uploadTerrainBlendUniforms(
@@ -697,6 +613,265 @@ export function submitWebgl2FlatWorldDrawUnits({
 		planningFallbackSamples: atlasReplacement.fallbackSamples,
 	});
 	return metrics;
+}
+
+function resetDirectFamilyUniformCache(cache: DirectFamilyUniformCache): void {
+	cache.modelViewProjection = null;
+	cache.color = null;
+	cache.alphaTest = null;
+}
+
+function uploadDirectFamilySamplerUniforms({
+	context,
+	route,
+	terrainBlendProgram,
+	metrics,
+}: {
+	context: DirectFamilyDrawContext;
+	route: Webgl2DirectDrawRoute;
+	terrainBlendProgram: Webgl2TerrainBlendWorldProgram;
+	metrics: Webgl2WorldSubmitMetrics;
+}): void {
+	if (route.usesRgbaTexturePage) {
+		context.gl.uniform1i(
+			route.activeProgram.uniforms.uTexture,
+			context.textureUnits.rgbaTexture,
+		);
+		context.gl.uniform1i(
+			route.activeProgram.uniforms.uDetailTexture,
+			context.textureUnits.rgbaDetail,
+		);
+		metrics.uniformUploadCount += 2;
+		return;
+	}
+	if (route.usesIndexed) {
+		if (!route.indexedProgram) {
+			throw new Error(
+				`Indexed draw unit ${route.drawUnit.id} has no indexed program.`,
+			);
+		}
+		uploadIndexedSamplerUniforms(context.gl, route.indexedProgram);
+		metrics.uniformUploadCount += 3;
+		return;
+	}
+	if (route.usesTerrainBlend) {
+		uploadTerrainBlendSamplerUniforms(context.gl, terrainBlendProgram);
+		metrics.uniformUploadCount += TERRAIN_BLEND_SAMPLER_UNIFORM_COUNT;
+	}
+}
+
+function prepareDirectRgbaTexturePageDraw({
+	context,
+	route,
+	metrics,
+}: {
+	context: DirectFamilyDrawContext;
+	route: Webgl2DirectDrawRoute;
+	metrics: Webgl2WorldSubmitMetrics;
+}): void {
+	metrics.directTexturePageFallbackSamples = appendSubmitFallbackSamples(
+		metrics.directTexturePageFallbackSamples,
+		route.drawUnit.texturePageBindingFallbackSamples,
+	);
+	metrics.stagedAtlasFallbackSamples = metrics.directTexturePageFallbackSamples;
+	if (route.texturePageBinding) {
+		metrics.directTexturePageDrawCount += 1;
+		if (route.texturePageBinding.pageKind === "packed-atlas") {
+			metrics.directPackedTexturePageDrawCount += 1;
+			metrics.directPackedTexturePageEstimatedBindAvoidedCount += 1;
+		} else {
+			metrics.directSingleEntryTexturePageDrawCount += 1;
+		}
+		metrics.stagedAtlasDrawCount = metrics.directPackedTexturePageDrawCount;
+		metrics.stagedAtlasEstimatedTextureBindAvoidedCount =
+			metrics.directPackedTexturePageEstimatedBindAvoidedCount;
+		metrics.stagedAtlasStandaloneDirectDrawCount =
+			metrics.directSingleEntryTexturePageDrawCount;
+	} else {
+		metrics.stagedAtlasStandaloneDirectDrawCount += 1;
+	}
+	if (
+		route.activeBaseTexture &&
+		context.stateCache.bindTexture2D(
+			context.textureUnits.rgbaTexture,
+			route.activeBaseTexture,
+		)
+	) {
+		metrics.stateChangeCount += 1;
+	}
+	bindDirectDetailOverlayTexture({ context, route, metrics });
+}
+
+function uploadDirectRgbaTexturePageUniforms({
+	context,
+	route,
+	uniformCache,
+	metrics,
+}: {
+	context: DirectFamilyDrawContext;
+	route: Webgl2DirectDrawRoute;
+	uniformCache: DirectFamilyUniformCache;
+	metrics: Webgl2WorldSubmitMetrics;
+}): void {
+	uploadDirectColorUniforms({ context, route, uniformCache, metrics });
+	uploadDirectAlphaUniform({ context, route, uniformCache, metrics });
+	if (!route.detailProgram) {
+		throw new Error(
+			`RGBA texture-page draw unit ${route.drawUnit.id} has no detail program.`,
+		);
+	}
+	uploadDetailOverlayUniforms(
+		context.gl,
+		route.detailProgram,
+		route.drawUnit.detailOverlay,
+	);
+	metrics.uniformUploadCount += DETAIL_DYNAMIC_UNIFORM_COUNT;
+	if (route.activeProgram !== route.colorProgram) {
+		throw new Error(
+			`RGBA texture-page draw unit ${route.drawUnit.id} has inconsistent program routing.`,
+		);
+	}
+	uploadDirectTexturePageUniforms(
+		context.gl,
+		route.activeProgram,
+		route.texturePageBinding,
+	);
+	metrics.uniformUploadCount += DIRECT_TEXTURE_PAGE_DYNAMIC_UNIFORM_COUNT;
+}
+
+function prepareDirectIndexedPalettedDraw({
+	context,
+	route,
+	metrics,
+}: {
+	context: DirectFamilyDrawContext;
+	route: Webgl2DirectDrawRoute;
+	metrics: Webgl2WorldSubmitMetrics;
+}): void {
+	if (!route.drawUnit.indexedMaterial) {
+		throw new Error(
+			`Indexed draw unit ${route.drawUnit.id} has no indexed material.`,
+		);
+	}
+	metrics.stateChangeCount += bindIndexedMaterialTextures({
+		stateCache: context.stateCache,
+		indexedMaterial: route.drawUnit.indexedMaterial,
+	});
+	bindDirectDetailOverlayTexture({ context, route, metrics });
+}
+
+function uploadDirectIndexedPalettedUniforms({
+	context,
+	route,
+	uniformCache,
+	metrics,
+}: {
+	context: DirectFamilyDrawContext;
+	route: Webgl2DirectDrawRoute;
+	uniformCache: DirectFamilyUniformCache;
+	metrics: Webgl2WorldSubmitMetrics;
+}): void {
+	uploadDirectColorUniforms({ context, route, uniformCache, metrics });
+	uploadDirectAlphaUniform({ context, route, uniformCache, metrics });
+	if (!route.indexedProgram || !route.drawUnit.indexedMaterial) {
+		throw new Error(
+			`Indexed draw unit ${route.drawUnit.id} has incomplete indexed route data.`,
+		);
+	}
+	uploadIndexedMaterialUniforms(
+		context.gl,
+		route.indexedProgram,
+		route.drawUnit.indexedMaterial,
+	);
+	metrics.uniformUploadCount += INDEXED_DYNAMIC_UNIFORM_COUNT;
+	if (!route.detailProgram) {
+		throw new Error(
+			`Indexed draw unit ${route.drawUnit.id} has no detail program.`,
+		);
+	}
+	uploadDetailOverlayUniforms(
+		context.gl,
+		route.detailProgram,
+		route.drawUnit.detailOverlay,
+	);
+	metrics.uniformUploadCount += DETAIL_DYNAMIC_UNIFORM_COUNT;
+}
+
+function bindDirectDetailOverlayTexture({
+	context,
+	route,
+	metrics,
+}: {
+	context: DirectFamilyDrawContext;
+	route: Webgl2DirectDrawRoute;
+	metrics: Webgl2WorldSubmitMetrics;
+}): void {
+	if (!route.drawUnit.detailOverlay) {
+		return;
+	}
+	const unit = route.detailTextureUnit;
+	if (unit === null) {
+		throw new Error(
+			`Draw unit ${route.drawUnit.id} has detail overlay without a detail texture unit.`,
+		);
+	}
+	if (
+		context.stateCache.bindTexture2D(
+			unit,
+			route.drawUnit.detailOverlay.texture.texture,
+		)
+	) {
+		metrics.stateChangeCount += 1;
+	}
+}
+
+function uploadDirectColorUniforms({
+	context,
+	route,
+	uniformCache,
+	metrics,
+}: {
+	context: DirectFamilyDrawContext;
+	route: Webgl2DirectDrawRoute;
+	uniformCache: DirectFamilyUniformCache;
+	metrics: Webgl2WorldSubmitMetrics;
+}): void {
+	if (!route.colorProgram) {
+		throw new Error(`Draw unit ${route.drawUnit.id} has no color program.`);
+	}
+	if (
+		!uniformCache.color ||
+		!arraysEqual(uniformCache.color, route.drawUnit.color)
+	) {
+		context.gl.uniform4fv(
+			route.colorProgram.uniforms.uColor,
+			route.drawUnit.color,
+		);
+		uniformCache.color = route.drawUnit.color;
+		metrics.uniformUploadCount += 1;
+	}
+}
+
+function uploadDirectAlphaUniform({
+	context,
+	route,
+	uniformCache,
+	metrics,
+}: {
+	context: DirectFamilyDrawContext;
+	route: Webgl2DirectDrawRoute;
+	uniformCache: DirectFamilyUniformCache;
+	metrics: Webgl2WorldSubmitMetrics;
+}): void {
+	if (!route.alphaProgram) {
+		return;
+	}
+	const alphaTest = route.drawUnit.materialBehavior?.alphaTest ?? 0;
+	if (uniformCache.alphaTest !== alphaTest) {
+		context.gl.uniform1f(route.alphaProgram.uniforms.uAlphaTest, alphaTest);
+		uniformCache.alphaTest = alphaTest;
+		metrics.uniformUploadCount += 1;
+	}
 }
 
 export function planWebgl2DirectDrawRoute({

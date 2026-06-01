@@ -295,7 +295,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			frame: createFrame(["atlas"]),
 		});
 
-		expect(metrics.atlasBackedCompactedReplacedDrawUnitCount).toBe(1);
+		expect(metrics.bakedReplacedDrawUnitCount).toBe(1);
 		expect(metrics.directPackedTexturePageDrawCount).toBe(0);
 		expect(metrics.directSingleEntryTexturePageDrawCount).toBe(0);
 	});
@@ -410,22 +410,18 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		expect(metrics.visibleDrawUnitCount).toBe(2);
 		expect(metrics.drawCallCount).toBe(2);
 		expect(metrics.triangleCount).toBe(2);
-		expect(metrics.atlasBackedCompactedReplacedDrawUnitCount).toBe(1);
-		expect(metrics.atlasBackedCompactedReplacedDrawUnitTriangleCount).toBe(1);
-		expect(metrics.atlasBackedCompactedRetainedDrawUnitCount).toBe(1);
-		expect(metrics.atlasBackedCompactedShaderDrawCallCount).toBe(1);
-		expect(
-			metrics.atlasBackedCompactedSubmittedSliceRepresentedDrawUnitCount,
-		).toBe(1);
-		expect(metrics.atlasBackedCompactedSubmittedTriangleCount).toBe(1);
-		expect(metrics.atlasBackedCompactedConservativeOverdrawTriangleCount).toBe(
-			0,
-		);
-		expect(metrics.atlasBackedCompactedConservativeOverdrawRatio).toBe(0);
-		expect(metrics.atlasBackedCompactedOriginalDrawCallEstimateCount).toBe(2);
-		expect(metrics.atlasBackedCompactedSubmittedDrawCallEstimateCount).toBe(2);
-		expect(metrics.atlasBackedCompactedDrawCallSavingsCount).toBe(0);
-		expect(metrics.atlasBackedCompactedSubmitFallbackSamples).toEqual([]);
+		expect(metrics.bakedReplacedDrawUnitCount).toBe(1);
+		expect(metrics.bakedReplacedDrawUnitTriangleCount).toBe(1);
+		expect(metrics.bakedRetainedDirectDrawUnitCount).toBe(1);
+		expect(metrics.bakedShaderDrawCallCount).toBe(1);
+		expect(metrics.bakedSubmittedSliceRepresentedDrawUnitCount).toBe(1);
+		expect(metrics.bakedSubmittedTriangleCount).toBe(1);
+		expect(metrics.bakedConservativeOverdrawTriangleCount).toBe(0);
+		expect(metrics.bakedConservativeOverdrawRatio).toBe(0);
+		expect(metrics.bakedOriginalDrawCallEstimateCount).toBe(2);
+		expect(metrics.bakedSubmittedDrawCallEstimateCount).toBe(2);
+		expect(metrics.bakedDrawCallSavingsCount).toBe(0);
+		expect(metrics.bakedSubmitFallbackSamples).toEqual([]);
 	});
 
 	it("reports conservative whole-slice atlas overdraw", () => {
@@ -458,16 +454,12 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			frame: createFrame(["atlas", "staged"]),
 		});
 
-		expect(metrics.atlasBackedCompactedReplacedDrawUnitCount).toBe(1);
-		expect(metrics.atlasBackedCompactedReplacedDrawUnitTriangleCount).toBe(1);
-		expect(
-			metrics.atlasBackedCompactedSubmittedSliceRepresentedDrawUnitCount,
-		).toBe(2);
-		expect(metrics.atlasBackedCompactedSubmittedTriangleCount).toBe(2);
-		expect(metrics.atlasBackedCompactedConservativeOverdrawTriangleCount).toBe(
-			1,
-		);
-		expect(metrics.atlasBackedCompactedConservativeOverdrawRatio).toBe(0.5);
+		expect(metrics.bakedReplacedDrawUnitCount).toBe(1);
+		expect(metrics.bakedReplacedDrawUnitTriangleCount).toBe(1);
+		expect(metrics.bakedSubmittedSliceRepresentedDrawUnitCount).toBe(2);
+		expect(metrics.bakedSubmittedTriangleCount).toBe(2);
+		expect(metrics.bakedConservativeOverdrawTriangleCount).toBe(1);
+		expect(metrics.bakedConservativeOverdrawRatio).toBe(0.5);
 	});
 
 	it("attributes no-visible atlas route checks to the submit route", () => {
@@ -490,18 +482,14 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			},
 			viewProjectionMatrix: createIdentityMat4(),
 			drawUnits,
-			atlasBackedCompactedSubmitRoute: "scene-domain-interior",
+			bakedSubmitRoute: "scene-domain-interior",
 		});
 
-		expect(metrics.atlasBackedCompactedSubmitNoVisibleRouteCount).toBe(1);
-		expect(metrics.atlasBackedCompactedSubmitNoVisibleExteriorRouteCount).toBe(
-			0,
-		);
-		expect(metrics.atlasBackedCompactedSubmitNoVisibleInteriorRouteCount).toBe(
-			1,
-		);
-		expect(metrics.atlasBackedCompactedSubmitNoVisibleOtherRouteCount).toBe(0);
-		expect(metrics.atlasBackedCompactedSubmitFallbackSamples).toEqual([]);
+		expect(metrics.bakedSubmitNoVisibleRouteCount).toBe(1);
+		expect(metrics.bakedSubmitNoVisibleExteriorRouteCount).toBe(0);
+		expect(metrics.bakedSubmitNoVisibleInteriorRouteCount).toBe(1);
+		expect(metrics.bakedSubmitNoVisibleOtherRouteCount).toBe(0);
+		expect(metrics.bakedSubmitFallbackSamples).toEqual([]);
 	});
 
 	it("enables backface culling only for terrain when requested", () => {

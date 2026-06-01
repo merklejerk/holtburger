@@ -1057,7 +1057,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 					target: targets.exterior,
 					drawUnits: sceneDomainDrawUnits.exterior,
 					frame,
-					atlasBackedCompactedSubmitRoute: "scene-domain-exterior",
+					bakedSubmitRoute: "scene-domain-exterior",
 					terrainBackfaceCulling: baseScene === "interior",
 				}),
 		);
@@ -1068,7 +1068,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 					target: targets.interior,
 					drawUnits: sceneDomainDrawUnits.interior,
 					frame,
-					atlasBackedCompactedSubmitRoute: "scene-domain-interior",
+					bakedSubmitRoute: "scene-domain-interior",
 					terrainBackfaceCulling: false,
 				}),
 		);
@@ -1194,15 +1194,13 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		target,
 		drawUnits,
 		frame,
-		atlasBackedCompactedSubmitRoute,
+		bakedSubmitRoute,
 		terrainBackfaceCulling,
 	}: {
 		target: Webgl2SceneDomainTarget;
 		drawUnits: readonly Webgl2WorldDrawUnit[];
 		frame: ReturnType<typeof buildStagedWorldFrame>;
-		atlasBackedCompactedSubmitRoute:
-			| "scene-domain-exterior"
-			| "scene-domain-interior";
+		bakedSubmitRoute: "scene-domain-exterior" | "scene-domain-interior";
 		terrainBackfaceCulling: boolean;
 	}): Webgl2WorldSubmitMetrics {
 		if (!resources) {
@@ -1241,7 +1239,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			},
 			viewProjectionMatrix: frame.viewProjectionMatrix,
 			drawUnits,
-			atlasBackedCompactedSubmitRoute,
+			bakedSubmitRoute,
 			terrainBackfaceCulling,
 		});
 	}
@@ -1978,65 +1976,65 @@ function mergeSceneDomainSubmitMetrics({
 			exteriorMetrics.visibleDrawUnitCountsByMaterialKind,
 			interiorMetrics.visibleDrawUnitCountsByMaterialKind,
 		),
-		atlasBackedCompactedShaderDrawCallCount:
-			exteriorMetrics.atlasBackedCompactedShaderDrawCallCount +
-			interiorMetrics.atlasBackedCompactedShaderDrawCallCount,
-		atlasBackedCompactedSubmittedBatchCount:
-			exteriorMetrics.atlasBackedCompactedSubmittedBatchCount +
-			interiorMetrics.atlasBackedCompactedSubmittedBatchCount,
-		atlasBackedCompactedSubmittedDrawSliceCount:
-			exteriorMetrics.atlasBackedCompactedSubmittedDrawSliceCount +
-			interiorMetrics.atlasBackedCompactedSubmittedDrawSliceCount,
-		atlasBackedCompactedSubmittedSliceRepresentedDrawUnitCount:
-			exteriorMetrics.atlasBackedCompactedSubmittedSliceRepresentedDrawUnitCount +
-			interiorMetrics.atlasBackedCompactedSubmittedSliceRepresentedDrawUnitCount,
-		atlasBackedCompactedSubmittedTriangleCount:
-			exteriorMetrics.atlasBackedCompactedSubmittedTriangleCount +
-			interiorMetrics.atlasBackedCompactedSubmittedTriangleCount,
-		atlasBackedCompactedReplacedDrawUnitCount:
-			exteriorMetrics.atlasBackedCompactedReplacedDrawUnitCount +
-			interiorMetrics.atlasBackedCompactedReplacedDrawUnitCount,
-		atlasBackedCompactedReplacedDrawUnitTriangleCount:
-			exteriorMetrics.atlasBackedCompactedReplacedDrawUnitTriangleCount +
-			interiorMetrics.atlasBackedCompactedReplacedDrawUnitTriangleCount,
-		atlasBackedCompactedConservativeOverdrawTriangleCount:
-			exteriorMetrics.atlasBackedCompactedConservativeOverdrawTriangleCount +
-			interiorMetrics.atlasBackedCompactedConservativeOverdrawTriangleCount,
-		atlasBackedCompactedConservativeOverdrawRatio: calculateCombinedRatio({
+		bakedShaderDrawCallCount:
+			exteriorMetrics.bakedShaderDrawCallCount +
+			interiorMetrics.bakedShaderDrawCallCount,
+		bakedSubmittedBatchCount:
+			exteriorMetrics.bakedSubmittedBatchCount +
+			interiorMetrics.bakedSubmittedBatchCount,
+		bakedSubmittedDrawSliceCount:
+			exteriorMetrics.bakedSubmittedDrawSliceCount +
+			interiorMetrics.bakedSubmittedDrawSliceCount,
+		bakedSubmittedSliceRepresentedDrawUnitCount:
+			exteriorMetrics.bakedSubmittedSliceRepresentedDrawUnitCount +
+			interiorMetrics.bakedSubmittedSliceRepresentedDrawUnitCount,
+		bakedSubmittedTriangleCount:
+			exteriorMetrics.bakedSubmittedTriangleCount +
+			interiorMetrics.bakedSubmittedTriangleCount,
+		bakedReplacedDrawUnitCount:
+			exteriorMetrics.bakedReplacedDrawUnitCount +
+			interiorMetrics.bakedReplacedDrawUnitCount,
+		bakedReplacedDrawUnitTriangleCount:
+			exteriorMetrics.bakedReplacedDrawUnitTriangleCount +
+			interiorMetrics.bakedReplacedDrawUnitTriangleCount,
+		bakedConservativeOverdrawTriangleCount:
+			exteriorMetrics.bakedConservativeOverdrawTriangleCount +
+			interiorMetrics.bakedConservativeOverdrawTriangleCount,
+		bakedConservativeOverdrawRatio: calculateCombinedRatio({
 			numerator:
-				exteriorMetrics.atlasBackedCompactedConservativeOverdrawTriangleCount +
-				interiorMetrics.atlasBackedCompactedConservativeOverdrawTriangleCount,
+				exteriorMetrics.bakedConservativeOverdrawTriangleCount +
+				interiorMetrics.bakedConservativeOverdrawTriangleCount,
 			denominator:
-				exteriorMetrics.atlasBackedCompactedSubmittedTriangleCount +
-				interiorMetrics.atlasBackedCompactedSubmittedTriangleCount,
+				exteriorMetrics.bakedSubmittedTriangleCount +
+				interiorMetrics.bakedSubmittedTriangleCount,
 		}),
-		atlasBackedCompactedRetainedDrawUnitCount:
-			exteriorMetrics.atlasBackedCompactedRetainedDrawUnitCount +
-			interiorMetrics.atlasBackedCompactedRetainedDrawUnitCount,
-		atlasBackedCompactedOriginalDrawCallEstimateCount:
-			exteriorMetrics.atlasBackedCompactedOriginalDrawCallEstimateCount +
-			interiorMetrics.atlasBackedCompactedOriginalDrawCallEstimateCount,
-		atlasBackedCompactedSubmittedDrawCallEstimateCount:
-			exteriorMetrics.atlasBackedCompactedSubmittedDrawCallEstimateCount +
-			interiorMetrics.atlasBackedCompactedSubmittedDrawCallEstimateCount,
-		atlasBackedCompactedDrawCallSavingsCount:
-			exteriorMetrics.atlasBackedCompactedDrawCallSavingsCount +
-			interiorMetrics.atlasBackedCompactedDrawCallSavingsCount,
-		atlasBackedCompactedSubmitNoVisibleRouteCount:
-			exteriorMetrics.atlasBackedCompactedSubmitNoVisibleRouteCount +
-			interiorMetrics.atlasBackedCompactedSubmitNoVisibleRouteCount,
-		atlasBackedCompactedSubmitNoVisibleExteriorRouteCount:
-			exteriorMetrics.atlasBackedCompactedSubmitNoVisibleExteriorRouteCount +
-			interiorMetrics.atlasBackedCompactedSubmitNoVisibleExteriorRouteCount,
-		atlasBackedCompactedSubmitNoVisibleInteriorRouteCount:
-			exteriorMetrics.atlasBackedCompactedSubmitNoVisibleInteriorRouteCount +
-			interiorMetrics.atlasBackedCompactedSubmitNoVisibleInteriorRouteCount,
-		atlasBackedCompactedSubmitNoVisibleOtherRouteCount:
-			exteriorMetrics.atlasBackedCompactedSubmitNoVisibleOtherRouteCount +
-			interiorMetrics.atlasBackedCompactedSubmitNoVisibleOtherRouteCount,
-		atlasBackedCompactedSubmitFallbackSamples: [
-			...exteriorMetrics.atlasBackedCompactedSubmitFallbackSamples,
-			...interiorMetrics.atlasBackedCompactedSubmitFallbackSamples,
+		bakedRetainedDirectDrawUnitCount:
+			exteriorMetrics.bakedRetainedDirectDrawUnitCount +
+			interiorMetrics.bakedRetainedDirectDrawUnitCount,
+		bakedOriginalDrawCallEstimateCount:
+			exteriorMetrics.bakedOriginalDrawCallEstimateCount +
+			interiorMetrics.bakedOriginalDrawCallEstimateCount,
+		bakedSubmittedDrawCallEstimateCount:
+			exteriorMetrics.bakedSubmittedDrawCallEstimateCount +
+			interiorMetrics.bakedSubmittedDrawCallEstimateCount,
+		bakedDrawCallSavingsCount:
+			exteriorMetrics.bakedDrawCallSavingsCount +
+			interiorMetrics.bakedDrawCallSavingsCount,
+		bakedSubmitNoVisibleRouteCount:
+			exteriorMetrics.bakedSubmitNoVisibleRouteCount +
+			interiorMetrics.bakedSubmitNoVisibleRouteCount,
+		bakedSubmitNoVisibleExteriorRouteCount:
+			exteriorMetrics.bakedSubmitNoVisibleExteriorRouteCount +
+			interiorMetrics.bakedSubmitNoVisibleExteriorRouteCount,
+		bakedSubmitNoVisibleInteriorRouteCount:
+			exteriorMetrics.bakedSubmitNoVisibleInteriorRouteCount +
+			interiorMetrics.bakedSubmitNoVisibleInteriorRouteCount,
+		bakedSubmitNoVisibleOtherRouteCount:
+			exteriorMetrics.bakedSubmitNoVisibleOtherRouteCount +
+			interiorMetrics.bakedSubmitNoVisibleOtherRouteCount,
+		bakedSubmitFallbackSamples: [
+			...exteriorMetrics.bakedSubmitFallbackSamples,
+			...interiorMetrics.bakedSubmitFallbackSamples,
 		].slice(0, 8),
 		directTexturePageDrawCount:
 			exteriorMetrics.directTexturePageDrawCount +

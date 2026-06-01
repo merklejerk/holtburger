@@ -166,21 +166,21 @@ export interface Webgl2WorldResourceStore {
 		string,
 		RendererResourceGraphLease
 	>;
-	atlasBackedCompactionCompactableDrawUnitCount: number;
-	atlasBackedCompactionBypassReasonCount: number;
-	atlasBackedCompactionBypassSamples: readonly string[];
+	bakedCandidateDrawUnitCount: number;
+	bakedBypassReasonCount: number;
+	bakedBypassSamples: readonly string[];
 	textureAtlasGenerationTextureCount: number;
 	detailTextureAtlasGenerationTextureCount: number;
-	compactedGeometryBatchCount: number;
-	compactedGeometryDrawUnitCount: number;
-	compactedGeometryTriangleCount: number;
-	compactedGeometryVertexByteLength: number;
-	compactedGeometryIndexByteLength: number;
-	compactedGeometryTotalByteLength: number;
-	compactedGeometryDrawSliceCount: number;
-	compactedGeometryBatchOriginCount: number;
-	compactedGeometryTransformTableEntryCount: number;
-	compactedGeometryResourceFallbackSamples: readonly string[];
+	bakedGeometryBatchCount: number;
+	bakedGeometryDrawUnitCount: number;
+	bakedGeometryTriangleCount: number;
+	bakedGeometryVertexByteLength: number;
+	bakedGeometryIndexByteLength: number;
+	bakedGeometryTotalByteLength: number;
+	bakedGeometryDrawSliceCount: number;
+	bakedGeometryBatchOriginCount: number;
+	bakedGeometryTransformTableEntryCount: number;
+	bakedResourceFallbackSamples: readonly string[];
 	textureCount: number;
 	indexedTextureCount: number;
 	paletteTextureCount: number;
@@ -275,21 +275,21 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		atlasBackedCompactedBatches: new Map(),
 		atlasBackedCompactedBatchGraph: null,
 		atlasBackedCompactedBatchGraphLeasesByKey: new Map(),
-		atlasBackedCompactionCompactableDrawUnitCount: 0,
-		atlasBackedCompactionBypassReasonCount: 0,
-		atlasBackedCompactionBypassSamples: [],
+		bakedCandidateDrawUnitCount: 0,
+		bakedBypassReasonCount: 0,
+		bakedBypassSamples: [],
 		textureAtlasGenerationTextureCount: 0,
 		detailTextureAtlasGenerationTextureCount: 0,
-		compactedGeometryBatchCount: 0,
-		compactedGeometryDrawUnitCount: 0,
-		compactedGeometryTriangleCount: 0,
-		compactedGeometryVertexByteLength: 0,
-		compactedGeometryIndexByteLength: 0,
-		compactedGeometryTotalByteLength: 0,
-		compactedGeometryDrawSliceCount: 0,
-		compactedGeometryBatchOriginCount: 0,
-		compactedGeometryTransformTableEntryCount: 0,
-		compactedGeometryResourceFallbackSamples: [],
+		bakedGeometryBatchCount: 0,
+		bakedGeometryDrawUnitCount: 0,
+		bakedGeometryTriangleCount: 0,
+		bakedGeometryVertexByteLength: 0,
+		bakedGeometryIndexByteLength: 0,
+		bakedGeometryTotalByteLength: 0,
+		bakedGeometryDrawSliceCount: 0,
+		bakedGeometryBatchOriginCount: 0,
+		bakedGeometryTransformTableEntryCount: 0,
+		bakedResourceFallbackSamples: [],
 		textureCount: 0,
 		indexedTextureCount: 0,
 		paletteTextureCount: 0,
@@ -478,11 +478,11 @@ export function syncWebgl2WorldResources({
 				policy: DEFAULT_WEBGL2_ATLAS_BACKED_COMPACTED_COMPACTION_POLICY,
 			}),
 	);
-	store.atlasBackedCompactionCompactableDrawUnitCount =
+	store.bakedCandidateDrawUnitCount =
 		store.atlasBackedCompactionPlan.compactableDrawUnitIds.length;
-	store.atlasBackedCompactionBypassReasonCount =
+	store.bakedBypassReasonCount =
 		store.atlasBackedCompactionPlan.bypasses.length;
-	store.atlasBackedCompactionBypassSamples = summarizeDiagnosticReasons(
+	store.bakedBypassSamples = summarizeDiagnosticReasons(
 		store.atlasBackedCompactionPlan.bypasses.map(
 			(bypass) => `${bypass.reason}: ${bypass.detail}`,
 		),
@@ -593,21 +593,21 @@ export function destroyWebgl2WorldResources(
 		batch.dispose();
 	}
 	store.atlasBackedCompactedBatches.clear();
-	store.atlasBackedCompactionCompactableDrawUnitCount = 0;
-	store.atlasBackedCompactionBypassReasonCount = 0;
-	store.atlasBackedCompactionBypassSamples = [];
+	store.bakedCandidateDrawUnitCount = 0;
+	store.bakedBypassReasonCount = 0;
+	store.bakedBypassSamples = [];
 	store.textureAtlasGenerationTextureCount = 0;
 	store.detailTextureAtlasGenerationTextureCount = 0;
-	store.compactedGeometryBatchCount = 0;
-	store.compactedGeometryDrawUnitCount = 0;
-	store.compactedGeometryTriangleCount = 0;
-	store.compactedGeometryVertexByteLength = 0;
-	store.compactedGeometryIndexByteLength = 0;
-	store.compactedGeometryTotalByteLength = 0;
-	store.compactedGeometryDrawSliceCount = 0;
-	store.compactedGeometryBatchOriginCount = 0;
-	store.compactedGeometryTransformTableEntryCount = 0;
-	store.compactedGeometryResourceFallbackSamples = [];
+	store.bakedGeometryBatchCount = 0;
+	store.bakedGeometryDrawUnitCount = 0;
+	store.bakedGeometryTriangleCount = 0;
+	store.bakedGeometryVertexByteLength = 0;
+	store.bakedGeometryIndexByteLength = 0;
+	store.bakedGeometryTotalByteLength = 0;
+	store.bakedGeometryDrawSliceCount = 0;
+	store.bakedGeometryBatchOriginCount = 0;
+	store.bakedGeometryTransformTableEntryCount = 0;
+	store.bakedResourceFallbackSamples = [];
 	for (const texture of store.texturesByKey.values()) {
 		texture.dispose();
 	}
@@ -2061,13 +2061,13 @@ function syncWebgl2AtlasBackedCompactedBatch({
 	) {
 		releaseWebgl2AtlasBackedCompactedBatchGraphLeases(store);
 	}
-	store.compactedGeometryResourceFallbackSamples = [];
+	store.bakedResourceFallbackSamples = [];
 	if (plan.compactableDrawUnitIds.length === 0) {
 		disposeWebgl2AtlasBackedCompactedBatch(store);
 		return;
 	}
 	if (!store.textureAtlasGeneration) {
-		store.compactedGeometryResourceFallbackSamples = [
+		store.bakedResourceFallbackSamples = [
 			`baked batch ${plan.key} waiting for texture atlas generation`,
 		];
 		disposeWebgl2AtlasBackedCompactedBatch(store);
@@ -2079,7 +2079,7 @@ function syncWebgl2AtlasBackedCompactedBatch({
 		renderChunkTransforms,
 	});
 	if (batchPlans.length === 0) {
-		store.compactedGeometryResourceFallbackSamples = [
+		store.bakedResourceFallbackSamples = [
 			`baked batch ${plan.key} produced no compacted geometry`,
 		];
 		disposeWebgl2AtlasBackedCompactedBatch(store);
@@ -2135,37 +2135,36 @@ function syncWebgl2AtlasBackedCompactedBatch({
 			);
 		}
 	}
-	store.compactedGeometryBatchCount = store.atlasBackedCompactedBatches.size;
-	store.compactedGeometryDrawUnitCount = sumAtlasBackedCompactedBatches(
+	store.bakedGeometryBatchCount = store.atlasBackedCompactedBatches.size;
+	store.bakedGeometryDrawUnitCount = sumAtlasBackedCompactedBatches(
 		store,
 		(batch) => batch.drawUnitCount,
 	);
-	store.compactedGeometryTriangleCount = sumAtlasBackedCompactedBatches(
+	store.bakedGeometryTriangleCount = sumAtlasBackedCompactedBatches(
 		store,
 		(batch) => batch.triangleCount,
 	);
-	store.compactedGeometryVertexByteLength = sumAtlasBackedCompactedBatches(
+	store.bakedGeometryVertexByteLength = sumAtlasBackedCompactedBatches(
 		store,
 		(batch) =>
 			batch.positionByteLength +
 			batch.uvByteLength +
 			batch.materialSlotByteLength,
 	);
-	store.compactedGeometryIndexByteLength = sumAtlasBackedCompactedBatches(
+	store.bakedGeometryIndexByteLength = sumAtlasBackedCompactedBatches(
 		store,
 		(batch) => batch.indexByteLength,
 	);
-	store.compactedGeometryTotalByteLength = sumAtlasBackedCompactedBatches(
+	store.bakedGeometryTotalByteLength = sumAtlasBackedCompactedBatches(
 		store,
 		(batch) => batch.totalByteLength,
 	);
-	store.compactedGeometryDrawSliceCount = sumAtlasBackedCompactedBatches(
+	store.bakedGeometryDrawSliceCount = sumAtlasBackedCompactedBatches(
 		store,
 		(batch) => batch.drawSliceCount,
 	);
-	store.compactedGeometryBatchOriginCount =
-		store.atlasBackedCompactedBatches.size;
-	store.compactedGeometryTransformTableEntryCount = 0;
+	store.bakedGeometryBatchOriginCount = store.atlasBackedCompactedBatches.size;
+	store.bakedGeometryTransformTableEntryCount = 0;
 	if (!rendererResourceGraph || store.atlasBackedCompactedBatches.size === 0) {
 		releaseWebgl2AtlasBackedCompactedBatchGraphLeases(store);
 		return;
@@ -2449,15 +2448,15 @@ function disposeWebgl2AtlasBackedCompactedBatch(
 		batch.dispose();
 	}
 	store.atlasBackedCompactedBatches.clear();
-	store.compactedGeometryBatchCount = 0;
-	store.compactedGeometryDrawUnitCount = 0;
-	store.compactedGeometryTriangleCount = 0;
-	store.compactedGeometryVertexByteLength = 0;
-	store.compactedGeometryIndexByteLength = 0;
-	store.compactedGeometryTotalByteLength = 0;
-	store.compactedGeometryDrawSliceCount = 0;
-	store.compactedGeometryBatchOriginCount = 0;
-	store.compactedGeometryTransformTableEntryCount = 0;
+	store.bakedGeometryBatchCount = 0;
+	store.bakedGeometryDrawUnitCount = 0;
+	store.bakedGeometryTriangleCount = 0;
+	store.bakedGeometryVertexByteLength = 0;
+	store.bakedGeometryIndexByteLength = 0;
+	store.bakedGeometryTotalByteLength = 0;
+	store.bakedGeometryDrawSliceCount = 0;
+	store.bakedGeometryBatchOriginCount = 0;
+	store.bakedGeometryTransformTableEntryCount = 0;
 	releaseWebgl2AtlasBackedCompactedBatchGraphLeases(store);
 }
 

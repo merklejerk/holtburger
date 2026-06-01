@@ -242,78 +242,67 @@ export function createWebgl2RenderMetrics(
 			atlasCandidateSamples: [
 				...(input.worldStore?.atlasCandidateSamples ?? []),
 			],
-			atlasBackedCompactionCompactableDrawUnitCount:
-				input.worldStore?.atlasBackedCompactionCompactableDrawUnitCount ?? 0,
-			atlasBackedCompactionBypassReasonCount:
-				input.worldStore?.atlasBackedCompactionBypassReasonCount ?? 0,
-			atlasBackedCompactionBypassSamples: [
-				...(input.worldStore?.atlasBackedCompactionBypassSamples ?? []),
-			],
+			bakedCandidateDrawUnitCount:
+				input.worldStore?.bakedCandidateDrawUnitCount ?? 0,
+			bakedBypassReasonCount: input.worldStore?.bakedBypassReasonCount ?? 0,
+			bakedBypassSamples: [...(input.worldStore?.bakedBypassSamples ?? [])],
 			textureAtlasGenerationTextureCount:
 				input.worldStore?.textureAtlasGenerationTextureCount ?? 0,
 			detailTextureAtlasGenerationTextureCount:
 				input.worldStore?.detailTextureAtlasGenerationTextureCount ?? 0,
-			compactedGeometryBatchCount:
-				input.worldStore?.compactedGeometryBatchCount ?? 0,
-			compactedGeometryDrawUnitCount:
-				input.worldStore?.compactedGeometryDrawUnitCount ?? 0,
-			compactedGeometryTriangleCount:
-				input.worldStore?.compactedGeometryTriangleCount ?? 0,
-			compactedGeometryVertexByteLength:
-				input.worldStore?.compactedGeometryVertexByteLength ?? 0,
-			compactedGeometryIndexByteLength:
-				input.worldStore?.compactedGeometryIndexByteLength ?? 0,
-			compactedGeometryTotalByteLength:
-				input.worldStore?.compactedGeometryTotalByteLength ?? 0,
-			compactedGeometryDrawSliceCount:
-				input.worldStore?.compactedGeometryDrawSliceCount ?? 0,
-			compactedGeometryBatchOriginCount:
-				input.worldStore?.compactedGeometryBatchOriginCount ?? 0,
-			compactedGeometryTransformTableEntryCount:
-				input.worldStore?.compactedGeometryTransformTableEntryCount ?? 0,
-			compactedGeometryResourceFallbackSamples: [
-				...(input.worldStore?.compactedGeometryResourceFallbackSamples ?? []),
+			bakedGeometryBatchCount: input.worldStore?.bakedGeometryBatchCount ?? 0,
+			bakedGeometryDrawUnitCount:
+				input.worldStore?.bakedGeometryDrawUnitCount ?? 0,
+			bakedGeometryTriangleCount:
+				input.worldStore?.bakedGeometryTriangleCount ?? 0,
+			bakedGeometryVertexByteLength:
+				input.worldStore?.bakedGeometryVertexByteLength ?? 0,
+			bakedGeometryIndexByteLength:
+				input.worldStore?.bakedGeometryIndexByteLength ?? 0,
+			bakedGeometryTotalByteLength:
+				input.worldStore?.bakedGeometryTotalByteLength ?? 0,
+			bakedGeometryDrawSliceCount:
+				input.worldStore?.bakedGeometryDrawSliceCount ?? 0,
+			bakedGeometryBatchOriginCount:
+				input.worldStore?.bakedGeometryBatchOriginCount ?? 0,
+			bakedGeometryTransformTableEntryCount:
+				input.worldStore?.bakedGeometryTransformTableEntryCount ?? 0,
+			bakedResourceFallbackSamples: [
+				...(input.worldStore?.bakedResourceFallbackSamples ?? []),
 			],
-			atlasBackedCompactedShaderDrawCallCount:
-				input.submitMetrics.atlasBackedCompactedShaderDrawCallCount,
-			atlasBackedCompactedSubmittedBatchCount:
-				input.submitMetrics.atlasBackedCompactedSubmittedBatchCount,
-			atlasBackedCompactedSubmittedDrawSliceCount:
-				input.submitMetrics.atlasBackedCompactedSubmittedDrawSliceCount,
-			atlasBackedCompactedSubmittedSliceRepresentedDrawUnitCount:
-				input.submitMetrics
-					.atlasBackedCompactedSubmittedSliceRepresentedDrawUnitCount,
-			atlasBackedCompactedSubmittedTriangleCount:
-				input.submitMetrics.atlasBackedCompactedSubmittedTriangleCount,
-			atlasBackedCompactedReplacedDrawUnitCount:
-				input.submitMetrics.atlasBackedCompactedReplacedDrawUnitCount,
-			atlasBackedCompactedReplacedDrawUnitTriangleCount:
-				input.submitMetrics.atlasBackedCompactedReplacedDrawUnitTriangleCount,
-			atlasBackedCompactedConservativeOverdrawTriangleCount:
-				input.submitMetrics
-					.atlasBackedCompactedConservativeOverdrawTriangleCount,
-			atlasBackedCompactedConservativeOverdrawRatio:
-				input.submitMetrics.atlasBackedCompactedConservativeOverdrawRatio,
-			atlasBackedCompactedRetainedDrawUnitCount:
-				input.submitMetrics.atlasBackedCompactedRetainedDrawUnitCount,
-			atlasBackedCompactedOriginalDrawCallEstimateCount:
-				input.submitMetrics.atlasBackedCompactedOriginalDrawCallEstimateCount,
-			atlasBackedCompactedSubmittedDrawCallEstimateCount:
-				input.submitMetrics.atlasBackedCompactedSubmittedDrawCallEstimateCount,
-			atlasBackedCompactedDrawCallSavingsCount:
-				input.submitMetrics.atlasBackedCompactedDrawCallSavingsCount,
-			atlasBackedCompactedSubmitNoVisibleRouteCount:
-				input.submitMetrics.atlasBackedCompactedSubmitNoVisibleRouteCount,
-			atlasBackedCompactedSubmitNoVisibleExteriorRouteCount:
-				input.submitMetrics
-					.atlasBackedCompactedSubmitNoVisibleExteriorRouteCount,
-			atlasBackedCompactedSubmitNoVisibleInteriorRouteCount:
-				input.submitMetrics
-					.atlasBackedCompactedSubmitNoVisibleInteriorRouteCount,
-			atlasBackedCompactedSubmitNoVisibleOtherRouteCount:
-				input.submitMetrics.atlasBackedCompactedSubmitNoVisibleOtherRouteCount,
-			atlasBackedCompactedSubmitFallbackSamples: [
-				...input.submitMetrics.atlasBackedCompactedSubmitFallbackSamples,
+			bakedShaderDrawCallCount: input.submitMetrics.bakedShaderDrawCallCount,
+			bakedSubmittedBatchCount: input.submitMetrics.bakedSubmittedBatchCount,
+			bakedSubmittedDrawSliceCount:
+				input.submitMetrics.bakedSubmittedDrawSliceCount,
+			bakedSubmittedSliceRepresentedDrawUnitCount:
+				input.submitMetrics.bakedSubmittedSliceRepresentedDrawUnitCount,
+			bakedSubmittedTriangleCount:
+				input.submitMetrics.bakedSubmittedTriangleCount,
+			bakedReplacedDrawUnitCount:
+				input.submitMetrics.bakedReplacedDrawUnitCount,
+			bakedReplacedDrawUnitTriangleCount:
+				input.submitMetrics.bakedReplacedDrawUnitTriangleCount,
+			bakedConservativeOverdrawTriangleCount:
+				input.submitMetrics.bakedConservativeOverdrawTriangleCount,
+			bakedConservativeOverdrawRatio:
+				input.submitMetrics.bakedConservativeOverdrawRatio,
+			bakedRetainedDirectDrawUnitCount:
+				input.submitMetrics.bakedRetainedDirectDrawUnitCount,
+			bakedOriginalDrawCallEstimateCount:
+				input.submitMetrics.bakedOriginalDrawCallEstimateCount,
+			bakedSubmittedDrawCallEstimateCount:
+				input.submitMetrics.bakedSubmittedDrawCallEstimateCount,
+			bakedDrawCallSavingsCount: input.submitMetrics.bakedDrawCallSavingsCount,
+			bakedSubmitNoVisibleRouteCount:
+				input.submitMetrics.bakedSubmitNoVisibleRouteCount,
+			bakedSubmitNoVisibleExteriorRouteCount:
+				input.submitMetrics.bakedSubmitNoVisibleExteriorRouteCount,
+			bakedSubmitNoVisibleInteriorRouteCount:
+				input.submitMetrics.bakedSubmitNoVisibleInteriorRouteCount,
+			bakedSubmitNoVisibleOtherRouteCount:
+				input.submitMetrics.bakedSubmitNoVisibleOtherRouteCount,
+			bakedSubmitFallbackSamples: [
+				...input.submitMetrics.bakedSubmitFallbackSamples,
 			],
 			directTexturePageDrawCount:
 				input.submitMetrics.directTexturePageDrawCount,
@@ -362,46 +351,42 @@ export function createWebgl2RenderMetrics(
 						"webgl2-atlas-eligible":
 							input.worldStore.atlasEligibleMaterialCount,
 						"webgl2-baked-candidates":
-							input.worldStore.atlasBackedCompactionCompactableDrawUnitCount,
-						"webgl2-baked-bypasses":
-							input.worldStore.atlasBackedCompactionBypassReasonCount,
+							input.worldStore.bakedCandidateDrawUnitCount,
+						"webgl2-baked-bypasses": input.worldStore.bakedBypassReasonCount,
 						"webgl2-texture-atlas-generation-textures":
 							input.worldStore.textureAtlasGenerationTextureCount,
 						"webgl2-detail-texture-atlas-generation-textures":
 							input.worldStore.detailTextureAtlasGenerationTextureCount,
 						"webgl2-compacted-geometry-batches":
-							input.worldStore.compactedGeometryBatchCount,
+							input.worldStore.bakedGeometryBatchCount,
 						"webgl2-compacted-geometry-draw-units":
-							input.worldStore.compactedGeometryDrawUnitCount,
+							input.worldStore.bakedGeometryDrawUnitCount,
 						"webgl2-compacted-geometry-draw-slices":
-							input.worldStore.compactedGeometryDrawSliceCount,
+							input.worldStore.bakedGeometryDrawSliceCount,
 						"webgl2-compacted-geometry-batch-origins":
-							input.worldStore.compactedGeometryBatchOriginCount,
+							input.worldStore.bakedGeometryBatchOriginCount,
 						"webgl2-compacted-geometry-transform-table-entries":
-							input.worldStore.compactedGeometryTransformTableEntryCount,
+							input.worldStore.bakedGeometryTransformTableEntryCount,
 						"webgl2-baked-shader-draws":
-							input.submitMetrics.atlasBackedCompactedShaderDrawCallCount,
+							input.submitMetrics.bakedShaderDrawCallCount,
 						"webgl2-baked-submitted-batches":
-							input.submitMetrics.atlasBackedCompactedSubmittedBatchCount,
+							input.submitMetrics.bakedSubmittedBatchCount,
 						"webgl2-baked-submitted-slices":
-							input.submitMetrics.atlasBackedCompactedSubmittedDrawSliceCount,
+							input.submitMetrics.bakedSubmittedDrawSliceCount,
 						"webgl2-baked-submitted-slice-draw-units":
-							input.submitMetrics
-								.atlasBackedCompactedSubmittedSliceRepresentedDrawUnitCount,
+							input.submitMetrics.bakedSubmittedSliceRepresentedDrawUnitCount,
 						"webgl2-baked-submitted-triangles":
-							input.submitMetrics.atlasBackedCompactedSubmittedTriangleCount,
+							input.submitMetrics.bakedSubmittedTriangleCount,
 						"webgl2-baked-replaced-draw-units":
-							input.submitMetrics.atlasBackedCompactedReplacedDrawUnitCount,
+							input.submitMetrics.bakedReplacedDrawUnitCount,
 						"webgl2-baked-replaced-triangles":
-							input.submitMetrics
-								.atlasBackedCompactedReplacedDrawUnitTriangleCount,
+							input.submitMetrics.bakedReplacedDrawUnitTriangleCount,
 						"webgl2-baked-conservative-overdraw-triangles":
-							input.submitMetrics
-								.atlasBackedCompactedConservativeOverdrawTriangleCount,
+							input.submitMetrics.bakedConservativeOverdrawTriangleCount,
 						"webgl2-baked-draw-call-savings":
-							input.submitMetrics.atlasBackedCompactedDrawCallSavingsCount,
+							input.submitMetrics.bakedDrawCallSavingsCount,
 						"webgl2-baked-no-visible-routes":
-							input.submitMetrics.atlasBackedCompactedSubmitNoVisibleRouteCount,
+							input.submitMetrics.bakedSubmitNoVisibleRouteCount,
 						"webgl2-staged-atlas-draws":
 							input.submitMetrics.stagedAtlasDrawCount,
 						"webgl2-direct-packed-texture-page-draws":

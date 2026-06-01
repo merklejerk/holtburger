@@ -18,6 +18,8 @@ export interface CompactedGeometryDrawSliceInput {
 	drawUnitIds: readonly string[];
 }
 
+export type CompactedGeometryLayout = "position-uv-material-slot";
+
 export interface CompactedGeometryPlan<
 	TDrawSlice extends CompactedGeometryDrawSliceInput =
 		CompactedGeometryDrawSliceInput,
@@ -30,14 +32,14 @@ export interface CompactedGeometryPlan<
 	triangleCount: number;
 }
 
-export interface BakedGeometryDrawRange {
+export interface CompactedDrawRange {
 	drawUnitId: string;
 	firstIndex: number;
 	indexCount: number;
 	materialSlotIndex: number;
 }
 
-export interface BakedGeometryDrawSlice {
+export interface CompactedGeometrySlice {
 	key: string;
 	renderStateKey: string;
 	firstIndex: number;
@@ -46,25 +48,26 @@ export interface BakedGeometryDrawSlice {
 	materialSlotKeys: readonly string[];
 }
 
-export type BakedGeometryDrawSliceFor<
+export type CompactedGeometrySliceFor<
 	TDrawSlice extends CompactedGeometryDrawSliceInput,
-> = TDrawSlice & BakedGeometryDrawSlice;
+> = CompactedGeometrySlice;
 
-export interface BakedGeometry<
+export interface CompactedGeometryBatch<
 	TDrawSlice extends CompactedGeometryDrawSliceInput =
 		CompactedGeometryDrawSliceInput,
 > {
 	key: string;
+	layout: CompactedGeometryLayout;
 	positions: Float32Array;
 	uvs: Float32Array;
-	materialSlots: Float32Array;
+	materialSlotIndices: Float32Array;
 	batchModelMatrix: RenderMat4;
 	indices: Uint16Array | Uint32Array;
 	vertexCount: number;
 	indexCount: number;
 	triangleCount: number;
-	drawRanges: readonly BakedGeometryDrawRange[];
-	drawSlices: readonly BakedGeometryDrawSlice[];
+	drawRanges: readonly CompactedDrawRange[];
+	drawSlices: readonly CompactedGeometrySliceFor<TDrawSlice>[];
 	positionByteLength: number;
 	uvByteLength: number;
 	materialSlotByteLength: number;
@@ -72,7 +75,7 @@ export interface BakedGeometry<
 	totalByteLength: number;
 }
 
-export function buildBakedGeometry<
+export function buildCompactedGeometryBatch<
 	TDrawSlice extends CompactedGeometryDrawSliceInput,
 >({
 	plan,
@@ -82,7 +85,7 @@ export function buildBakedGeometry<
 	plan: CompactedGeometryPlan<TDrawSlice>;
 	drawUnits: readonly StagedWorldDrawUnitAssembly[];
 	batchOrigin: { x: number; y: number; z: number };
-}): BakedGeometry<TDrawSlice> | null {
+}): CompactedGeometryBatch<TDrawSlice> | null {
 	if (plan.compactableDrawUnitIds.length === 0) {
 		return null;
 	}
@@ -101,10 +104,10 @@ export function buildBakedGeometry<
 		const drawUnit = drawUnitById.get(drawUnitId);
 		if (!drawUnit) {
 			throw new Error(
-				`Baked geometry plan references missing draw unit ${drawUnitId}.`,
+				`Compacted geometry plan references missing draw unit ${drawUnitId}.`,
 			);
 		}
-		assertBakedGeometryDrawUnit(drawUnit);
+		assertCompactedGeometryDrawUnit(drawUnit);
 		return drawUnit;
 	});
 	const vertexCount = compactableDrawUnits.reduce(
@@ -117,24 +120,24 @@ export function buildBakedGeometry<
 	);
 	const positions = new Float32Array(vertexCount * 3);
 	const uvs = new Float32Array(vertexCount * 2);
-	const materialSlots = new Float32Array(vertexCount);
+	const materialSlotIndices = new Float32Array(vertexCount);
 	const indices = createCompactedIndexArray(vertexCount, indexCount);
-	const drawRanges: BakedGeometryDrawRange[] = [];
+	const drawRanges: CompactedDrawRange[] = [];
 	const batchModelMatrix = createTranslationMat4(batchOrigin);
 	let vertexOffset = 0;
 	let indexOffset = 0;
 	for (const drawUnit of compactableDrawUnits) {
-		const materialSlotKey = resolveBakedGeometryMaterialSlotKey({
+		const materialSlotKey = resolveCompactedGeometryMaterialSlotKey({
 			drawUnit,
 			materialSlotKeyByDrawUnitId,
 		});
 		const materialSlot = materialSlotByKey.get(materialSlotKey);
 		if (!materialSlot) {
 			throw new Error(
-				`Baked geometry draw unit ${drawUnit.id} references missing material slot ${materialSlotKey}.`,
+				`Compacted geometry draw unit ${drawUnit.id} references missing material slot ${materialSlotKey}.`,
 			);
 		}
-		bakeDrawUnitPositions({
+		compactDrawUnitPositions({
 			target: positions,
 			targetVertexOffset: vertexOffset,
 			source: drawUnit.geometry.positions,
@@ -142,7 +145,7 @@ export function buildBakedGeometry<
 			batchOrigin,
 		});
 		uvs.set(drawUnit.geometry.uvs, vertexOffset * 2);
-		materialSlots.fill(
+		materialSlotIndices.fill(
 			materialSlot.index,
 			vertexOffset,
 			vertexOffset + drawUnit.geometry.vertexCount,
@@ -172,7 +175,7 @@ export function buildBakedGeometry<
 	);
 	const positionByteLength = positions.byteLength;
 	const uvByteLength = uvs.byteLength;
-	const materialSlotByteLength = materialSlots.byteLength;
+	const materialSlotByteLength = materialSlotIndices.byteLength;
 	const indexByteLength = indices.byteLength;
 	return {
 		key: describeCompactedGeometryKey({
@@ -180,9 +183,10 @@ export function buildBakedGeometry<
 			drawUnits: compactableDrawUnits,
 			positions,
 		}),
+		layout: "position-uv-material-slot",
 		positions,
 		uvs,
-		materialSlots,
+		materialSlotIndices,
 		batchModelMatrix,
 		indices,
 		vertexCount,
@@ -202,7 +206,7 @@ export function buildBakedGeometry<
 	};
 }
 
-function bakeDrawUnitPositions({
+function compactDrawUnitPositions({
 	target,
 	targetVertexOffset,
 	source,
@@ -242,7 +246,7 @@ function bakeDrawUnitPositions({
 	}
 }
 
-function assertBakedGeometryDrawUnit(
+function assertCompactedGeometryDrawUnit(
 	drawUnit: StagedWorldDrawUnitAssembly,
 ): asserts drawUnit is StagedWorldDrawUnitAssembly & {
 	kind: "static" | "structured-interior";
@@ -250,15 +254,15 @@ function assertBakedGeometryDrawUnit(
 } {
 	if (drawUnit.kind !== "static" && drawUnit.kind !== "structured-interior") {
 		throw new Error(
-			`Baked geometry cannot bake ${drawUnit.kind} draw unit ${drawUnit.id}.`,
+			`Compacted geometry cannot compact ${drawUnit.kind} draw unit ${drawUnit.id}.`,
 		);
 	}
 	if (!drawUnit.geometry.uvs) {
-		throw new Error(`Baked geometry draw unit ${drawUnit.id} has no UVs.`);
+		throw new Error(`Compacted geometry draw unit ${drawUnit.id} has no UVs.`);
 	}
 }
 
-function resolveBakedGeometryMaterialSlotKey({
+function resolveCompactedGeometryMaterialSlotKey({
 	drawUnit,
 	materialSlotKeyByDrawUnitId,
 }: {
@@ -270,7 +274,7 @@ function resolveBakedGeometryMaterialSlotKey({
 		return explicitSlotKey;
 	}
 	throw new Error(
-		`Baked geometry draw unit ${drawUnit.id} has no explicit material slot for ${drawUnit.material.kind} material.`,
+		`Compacted geometry draw unit ${drawUnit.id} has no explicit material slot for ${drawUnit.material.kind} material.`,
 	);
 }
 
@@ -280,14 +284,14 @@ function compactDrawSlice({
 	materialSlotByKey,
 }: {
 	slice: CompactedGeometryDrawSliceInput;
-	rangeByDrawUnitId: ReadonlyMap<string, BakedGeometryDrawRange>;
+	rangeByDrawUnitId: ReadonlyMap<string, CompactedDrawRange>;
 	materialSlotByKey: ReadonlyMap<string, CompactedGeometryMaterialSlot>;
-}): BakedGeometryDrawSliceFor<typeof slice> {
+}): CompactedGeometrySliceFor<typeof slice> {
 	const ranges = slice.drawUnitIds.map((drawUnitId) => {
 		const range = rangeByDrawUnitId.get(drawUnitId);
 		if (!range) {
 			throw new Error(
-				`Baked geometry draw slice ${slice.key} references missing baked draw unit ${drawUnitId}.`,
+				`Compacted geometry draw slice ${slice.key} references missing compacted draw unit ${drawUnitId}.`,
 			);
 		}
 		return range;
@@ -303,12 +307,11 @@ function compactDrawSlice({
 	for (const materialSlotKey of slice.materialSlotKeys) {
 		if (!materialSlotByKey.has(materialSlotKey)) {
 			throw new Error(
-				`Baked geometry draw slice ${slice.key} references missing material slot ${materialSlotKey}.`,
+				`Compacted geometry draw slice ${slice.key} references missing material slot ${materialSlotKey}.`,
 			);
 		}
 	}
 	return {
-		...slice,
 		key: slice.key,
 		renderStateKey: slice.renderStateKey,
 		firstIndex,
@@ -337,7 +340,7 @@ function describeCompactedGeometryKey({
 	positions: Float32Array;
 }): string {
 	return [
-		"baked-geometry",
+		"compacted-geometry",
 		plan.key,
 		`bp${hashFloat32Array(positions)}`,
 		...drawUnits.map((drawUnit) =>

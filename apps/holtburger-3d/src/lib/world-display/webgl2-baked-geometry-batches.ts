@@ -5,7 +5,10 @@ import {
 	type Webgl2BufferResource,
 	type Webgl2VertexArrayResource,
 } from "./webgl2-gl";
-import type { BakedGeometry } from "./baked-geometry";
+import type {
+	CompactedGeometryBatch,
+	CompactedGeometrySlice,
+} from "./compacted-geometry";
 import type { AtlasTexturePlacement } from "./atlas-layout-planner";
 import type {
 	BakedIndexedMaterialTableRecord,
@@ -28,6 +31,17 @@ export interface Webgl2BakedGeometryMaterialSlot {
 	wrapT: "clamp" | "repeat";
 }
 
+export interface Webgl2BakedGeometryDrawSlice extends CompactedGeometrySlice {
+	atlasTextureIndex: number;
+	detailAtlasTextureIndex: number | null;
+}
+
+export interface Webgl2BakedIndexedGeometryDrawSlice extends CompactedGeometrySlice {
+	indexFormat: "p8" | "index16";
+	indexPageKey: string;
+	palettePageKey: string;
+}
+
 export interface Webgl2BakedGeometryBatchResource {
 	key: string;
 	landblockId: number;
@@ -38,8 +52,8 @@ export interface Webgl2BakedGeometryBatchResource {
 	indexBuffer: Webgl2BufferResource;
 	indexType: GLenum;
 	materialSlots: readonly Webgl2BakedGeometryMaterialSlot[];
-	batchModelMatrix: BakedGeometry["batchModelMatrix"];
-	drawSlices: BakedGeometry<BakedRenderableDrawSlice>["drawSlices"];
+	batchModelMatrix: CompactedGeometryBatch["batchModelMatrix"];
+	drawSlices: readonly Webgl2BakedGeometryDrawSlice[];
 	vertexCount: number;
 	indexCount: number;
 	triangleCount: number;
@@ -63,8 +77,8 @@ export interface Webgl2BakedIndexedGeometryBatchResource {
 	indexBuffer: Webgl2BufferResource;
 	indexType: GLenum;
 	materialTableRecords: readonly BakedIndexedMaterialTableRecord[];
-	batchModelMatrix: BakedGeometry["batchModelMatrix"];
-	drawSlices: BakedGeometry<BakedIndexedRenderableDrawSlice>["drawSlices"];
+	batchModelMatrix: CompactedGeometryBatch["batchModelMatrix"];
+	drawSlices: readonly Webgl2BakedIndexedGeometryDrawSlice[];
 	vertexCount: number;
 	indexCount: number;
 	triangleCount: number;
@@ -83,17 +97,22 @@ export function createWebgl2BakedGeometryBatchResource({
 	geometry,
 	landblockId,
 	materialSlots,
+	materialDrawSlices,
 	placementsByEntryKey,
 	detailPlacementsByEntryKey,
 }: {
 	gl: WebGL2RenderingContext;
-	geometry: BakedGeometry<BakedRenderableDrawSlice>;
+	geometry: CompactedGeometryBatch<BakedRenderableDrawSlice>;
 	landblockId: number;
 	materialSlots: readonly BakedRenderableMaterialSlot[];
+	materialDrawSlices: readonly BakedRenderableDrawSlice[];
 	placementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>;
 	detailPlacementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>;
 }): Webgl2BakedGeometryBatchResource {
 	const buffers = createWebgl2CompactedGeometryBuffers({ gl, geometry });
+	const materialDrawSliceByKey = new Map(
+		materialDrawSlices.map((slice) => [slice.key, slice] as const),
+	);
 	return {
 		key: geometry.key,
 		landblockId,
@@ -106,7 +125,9 @@ export function createWebgl2BakedGeometryBatchResource({
 			),
 		),
 		batchModelMatrix: geometry.batchModelMatrix,
-		drawSlices: geometry.drawSlices,
+		drawSlices: geometry.drawSlices.map((slice) =>
+			toWebgl2BakedGeometryDrawSlice(slice, materialDrawSliceByKey),
+		),
 		vertexCount: geometry.vertexCount,
 		indexCount: geometry.indexCount,
 		triangleCount: geometry.triangleCount,
@@ -128,20 +149,27 @@ export function createWebgl2BakedIndexedGeometryBatchResource({
 	geometry,
 	landblockId,
 	materialTableRecords,
+	materialDrawSlices,
 }: {
 	gl: WebGL2RenderingContext;
-	geometry: BakedGeometry<BakedIndexedRenderableDrawSlice>;
+	geometry: CompactedGeometryBatch<BakedIndexedRenderableDrawSlice>;
 	landblockId: number;
 	materialTableRecords: readonly BakedIndexedMaterialTableRecord[];
+	materialDrawSlices: readonly BakedIndexedRenderableDrawSlice[];
 }): Webgl2BakedIndexedGeometryBatchResource {
 	const buffers = createWebgl2CompactedGeometryBuffers({ gl, geometry });
+	const materialDrawSliceByKey = new Map(
+		materialDrawSlices.map((slice) => [slice.key, slice] as const),
+	);
 	return {
 		key: geometry.key,
 		landblockId,
 		...buffers,
 		materialTableRecords,
 		batchModelMatrix: geometry.batchModelMatrix,
-		drawSlices: geometry.drawSlices,
+		drawSlices: geometry.drawSlices.map((slice) =>
+			toWebgl2BakedIndexedGeometryDrawSlice(slice, materialDrawSliceByKey),
+		),
 		vertexCount: geometry.vertexCount,
 		indexCount: geometry.indexCount,
 		triangleCount: geometry.triangleCount,
@@ -162,7 +190,7 @@ export function updateWebgl2BakedGeometryBatchDynamicTables(
 	batch:
 		| Webgl2BakedGeometryBatchResource
 		| Webgl2BakedIndexedGeometryBatchResource,
-	geometry: BakedGeometry,
+	geometry: CompactedGeometryBatch,
 ): void {
 	if (batch.key !== geometry.key) {
 		throw new Error(
@@ -177,7 +205,7 @@ function createWebgl2CompactedGeometryBuffers({
 	geometry,
 }: {
 	gl: WebGL2RenderingContext;
-	geometry: BakedGeometry;
+	geometry: CompactedGeometryBatch;
 }): {
 	vertexArray: Webgl2VertexArrayResource;
 	positionBuffer: Webgl2BufferResource;
@@ -196,7 +224,7 @@ function createWebgl2CompactedGeometryBuffers({
 	});
 	const materialSlotBuffer = createWebgl2ArrayBuffer(gl, {
 		label: `${geometry.key}/material-slots`,
-		data: geometry.materialSlots,
+		data: geometry.materialSlotIndices,
 	});
 	const indexBuffer = createWebgl2ElementArrayBuffer(gl, {
 		label: `${geometry.key}/indices`,
@@ -251,6 +279,41 @@ function disposeWebgl2CompactedGeometryBuffers({
 	indexBuffer.dispose();
 }
 
+function toWebgl2BakedGeometryDrawSlice(
+	slice: CompactedGeometrySlice,
+	materialDrawSliceByKey: ReadonlyMap<string, BakedRenderableDrawSlice>,
+): Webgl2BakedGeometryDrawSlice {
+	const materialSlice = materialDrawSliceByKey.get(slice.key);
+	if (!materialSlice) {
+		throw new Error(
+			`Baked geometry draw slice ${slice.key} has no RGBA family payload.`,
+		);
+	}
+	return {
+		...slice,
+		atlasTextureIndex: materialSlice.atlasTextureIndex,
+		detailAtlasTextureIndex: materialSlice.detailAtlasTextureIndex,
+	};
+}
+
+function toWebgl2BakedIndexedGeometryDrawSlice(
+	slice: CompactedGeometrySlice,
+	materialDrawSliceByKey: ReadonlyMap<string, BakedIndexedRenderableDrawSlice>,
+): Webgl2BakedIndexedGeometryDrawSlice {
+	const materialSlice = materialDrawSliceByKey.get(slice.key);
+	if (!materialSlice) {
+		throw new Error(
+			`Baked indexed geometry draw slice ${slice.key} has no indexed family payload.`,
+		);
+	}
+	return {
+		...slice,
+		indexFormat: materialSlice.indexFormat,
+		indexPageKey: materialSlice.indexPageKey,
+		palettePageKey: materialSlice.palettePageKey,
+	};
+}
+
 function toWebgl2BakedGeometryMaterialSlot(
 	slot: BakedRenderableMaterialSlot,
 	placementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>,
@@ -259,7 +322,7 @@ function toWebgl2BakedGeometryMaterialSlot(
 	const placement = placementsByEntryKey.get(slot.atlasEntryKey);
 	if (!placement) {
 		throw new Error(
-			`Baked geometry material slot ${slot.key} references missing placement ${slot.atlasEntryKey}.`,
+			`Compacted geometry material slot ${slot.key} references missing placement ${slot.atlasEntryKey}.`,
 		);
 	}
 	const detailPlacement = slot.detailAtlasEntryKey
@@ -267,7 +330,7 @@ function toWebgl2BakedGeometryMaterialSlot(
 		: null;
 	if (slot.detailAtlasEntryKey && !detailPlacement) {
 		throw new Error(
-			`Baked geometry material slot ${slot.key} references missing detail placement ${slot.detailAtlasEntryKey}.`,
+			`Compacted geometry material slot ${slot.key} references missing detail placement ${slot.detailAtlasEntryKey}.`,
 		);
 	}
 	return {

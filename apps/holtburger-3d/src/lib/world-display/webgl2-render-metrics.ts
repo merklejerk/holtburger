@@ -229,6 +229,11 @@ export function createWebgl2RenderMetrics(
 				...(input.worldStore?.textureSamplingPolicySamples ?? []),
 			],
 			textureUploadSamples: [...(input.worldStore?.textureUploadSamples ?? [])],
+			texturePageBindingCount: input.worldStore?.texturePageBindingCount ?? 0,
+			texturePageUsageBucketCounts:
+				input.worldStore?.texturePageUsageBucketCounts ?? {},
+			texturePageSampleClassCounts:
+				input.worldStore?.texturePageSampleClassCounts ?? {},
 			atlasEligibleMaterialCount:
 				input.worldStore?.atlasEligibleMaterialCount ?? 0,
 			atlasCandidateEntryCount: input.worldStore?.atlasCandidateEntryCount ?? 0,

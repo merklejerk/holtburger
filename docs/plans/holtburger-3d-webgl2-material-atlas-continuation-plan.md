@@ -4390,6 +4390,62 @@ Validation:
 - `npm exec tsc -- --noEmit`
 - `npm exec vitest -- src/lib/world-display/baked-renderable-planner.test.ts src/lib/world-display/baked-geometry.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts --run`
 
+### Phase M7D.5b0: Compacted Geometry Family Split Prep
+
+Status: Complete.
+
+Purpose: remove the immediate direct-texture assumption from compacted geometry construction before
+attempting the baked indexed submit variant. M7D.5b needs indexed draw units to share compacted
+position/UV/index buffers, but the existing builder was still deriving material slots from direct RGBA
+atlas eligibility.
+
+Tasks:
+
+- Stop requiring compacted geometry draw units to be `direct-texture`.
+- Prefer explicit `drawUnitMaterialSlots` from the baked plan for material slot resolution.
+- Require explicit `drawUnitMaterialSlots` for current RGBA atlas batches and all future baked
+  material families.
+- Fail hard when non-direct material families are compacted without an explicit material slot mapping.
+- Add tests proving a non-RGBA material family can use the shared compacted geometry builder through
+  explicit plan material-slot mappings.
+
+Progress:
+
+- `buildBakedGeometry` now resolves material slot keys only from explicit plan mappings.
+- Removed the builder-level rejection of non-direct-texture material families. The geometry builder now
+  only enforces geometry constraints: static or structured-interior draw unit kind and UV presence.
+- Removed the direct-texture atlas material-slot fallback. A compacted geometry plan that omits an
+  explicit draw-unit-to-material-slot mapping now fails hard for every material family.
+- Added focused coverage proving an indexed/paletted draw unit can be compacted by the shared geometry
+  builder when the plan supplies an explicit material slot.
+
+Decisions:
+
+- Keep material-family compatibility decisions in the planner/submit layers, not in the low-level
+  compacted geometry builder. The builder should move vertices and assign slot indices; it should not
+  know whether a slot is RGBA atlas, indexed/palette, or a future terrain-like family.
+- Explicit draw-unit material-slot mappings are mandatory. The planner owns those mappings; compacted
+  geometry construction does not infer them from material payloads.
+
+Course Corrections:
+
+- M7D.5b was too broad as written for one step. The immediate blocker was not shader logic; it was the
+  geometry builder's hidden direct-texture material-slot assumption. That is now isolated and removed
+  before adding the indexed submit program.
+
+Cleanup Targets:
+
+- `BakedRenderablePlan.compactableDrawUnitIds` still currently means RGBA-atlas compactable in the
+  resource sync path. M7D.5b should split compactable submit groups by family before enabling indexed
+  replacement.
+- The shared `BakedRenderableMaterialSlot` type is still RGBA-atlas shaped. Indexed submit should not
+  overload `atlasEntryKey`; it should use a separate indexed slot/table type from M7D.5a.
+
+Validation:
+
+- `npm exec tsc -- --noEmit`
+- `npm exec vitest -- src/lib/world-display/baked-geometry.test.ts --run`
+
 ### Phase M7D.5b: Baked Indexed Submit Variant
 
 Status: Next.

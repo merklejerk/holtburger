@@ -61,7 +61,7 @@ export function buildBakedGeometry({
 		plan.materialSlots.map((slot) => [slot.key, slot] as const),
 	);
 	const materialSlotKeyByDrawUnitId = new Map(
-		(plan.drawUnitMaterialSlots ?? []).map(
+		plan.drawUnitMaterialSlots.map(
 			(record) => [record.drawUnitId, record.materialSlotKey] as const,
 		),
 	);
@@ -92,17 +92,10 @@ export function buildBakedGeometry({
 	let vertexOffset = 0;
 	let indexOffset = 0;
 	for (const drawUnit of compactableDrawUnits) {
-		const eligibility =
-			drawUnit.material.kind === "direct-texture"
-				? drawUnit.material.atlasEligibility
-				: null;
-		if (!eligibility) {
-			throw new Error(
-				`Baked geometry draw unit ${drawUnit.id} has no atlas eligibility.`,
-			);
-		}
-		const materialSlotKey =
-			materialSlotKeyByDrawUnitId.get(drawUnit.id) ?? eligibility.materialSlotKey;
+		const materialSlotKey = resolveBakedGeometryMaterialSlotKey({
+			drawUnit,
+			materialSlotKeyByDrawUnitId,
+		});
 		const materialSlot = materialSlotByKey.get(materialSlotKey);
 		if (!materialSlot) {
 			throw new Error(
@@ -228,16 +221,27 @@ function assertBakedGeometryDrawUnit(
 			`Baked geometry cannot bake ${drawUnit.kind} draw unit ${drawUnit.id}.`,
 		);
 	}
-	if (drawUnit.material.kind !== "direct-texture") {
-		throw new Error(
-			`Baked geometry cannot bake ${drawUnit.material.kind} draw unit ${drawUnit.id}.`,
-		);
-	}
 	if (!drawUnit.geometry.uvs) {
 		throw new Error(
 			`Baked geometry draw unit ${drawUnit.id} has no UVs.`,
 		);
 	}
+}
+
+function resolveBakedGeometryMaterialSlotKey({
+	drawUnit,
+	materialSlotKeyByDrawUnitId,
+}: {
+	drawUnit: StagedWorldDrawUnitAssembly;
+	materialSlotKeyByDrawUnitId: ReadonlyMap<string, string>;
+}): string {
+	const explicitSlotKey = materialSlotKeyByDrawUnitId.get(drawUnit.id);
+	if (explicitSlotKey) {
+		return explicitSlotKey;
+	}
+	throw new Error(
+		`Baked geometry draw unit ${drawUnit.id} has no explicit material slot for ${drawUnit.material.kind} material.`,
+	);
 }
 
 function compactDrawSlice({

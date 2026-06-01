@@ -15,6 +15,7 @@ export interface AtlasBackedCompactedDrawRange {
 export interface AtlasBackedCompactedDrawSlice {
 	key: string;
 	atlasTextureIndex: number;
+	detailAtlasTextureIndex: number | null;
 	renderStateKey: string;
 	firstIndex: number;
 	indexCount: number;
@@ -59,6 +60,11 @@ export function buildAtlasBackedCompactedGeometry({
 	const materialSlotByKey = new Map(
 		plan.materialSlots.map((slot) => [slot.key, slot] as const),
 	);
+	const materialSlotKeyByDrawUnitId = new Map(
+		(plan.drawUnitMaterialSlots ?? []).map(
+			(record) => [record.drawUnitId, record.materialSlotKey] as const,
+		),
+	);
 	const compactableDrawUnits = plan.compactableDrawUnitIds.map((drawUnitId) => {
 		const drawUnit = drawUnitById.get(drawUnitId);
 		if (!drawUnit) {
@@ -95,10 +101,12 @@ export function buildAtlasBackedCompactedGeometry({
 				`Atlas-backed compaction draw unit ${drawUnit.id} has no atlas eligibility.`,
 			);
 		}
-		const materialSlot = materialSlotByKey.get(eligibility.materialSlotKey);
+		const materialSlotKey =
+			materialSlotKeyByDrawUnitId.get(drawUnit.id) ?? eligibility.materialSlotKey;
+		const materialSlot = materialSlotByKey.get(materialSlotKey);
 		if (!materialSlot) {
 			throw new Error(
-				`Atlas-backed compaction draw unit ${drawUnit.id} references missing material slot ${eligibility.materialSlotKey}.`,
+				`Atlas-backed compaction draw unit ${drawUnit.id} references missing material slot ${materialSlotKey}.`,
 			);
 		}
 		bakeDrawUnitPositions({
@@ -268,6 +276,7 @@ function compactDrawSlice({
 	return {
 		key: slice.key,
 		atlasTextureIndex: slice.atlasTextureIndex,
+		detailAtlasTextureIndex: slice.detailAtlasTextureIndex,
 		renderStateKey: slice.renderStateKey,
 		firstIndex,
 		indexCount,

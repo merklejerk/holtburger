@@ -128,14 +128,39 @@ describe("planWebgl2AtlasBackedCompactedReplacement", () => {
 		expect(gl.calls).toContain("bindVertexArray");
 		expect(gl.calls).toContain("bindTexture");
 		expect(gl.calls).toContain("drawElements:4:3:5123:0");
-		expect(gl.uniform4fvLengths).toEqual([128 * 4]);
+		expect(gl.uniform4fvLengths).toEqual([128 * 4, 128 * 4]);
+		expect(gl.uniform1fvLengths).toEqual([128]);
+		expect(gl.uniform1ivLengths).toEqual([128]);
 		expect(gl.uniformMatrix4fvLengths).toEqual([16, 16]);
+	});
+
+	it("binds a detail atlas page when the visible compacted slice requires detail", () => {
+		const gl = new FakeAtlasSubmitGl();
+		const batch = createBatch(["draw-a"], 0x0102ffff, {
+			detailAtlasTextureIndex: 0,
+		});
+
+		const metrics = submitWebgl2AtlasBackedCompactedBatch({
+			gl: gl.asContext(),
+			stateCache: new Webgl2StateCache(gl),
+			program: createProgram(),
+			viewProjectionMatrix: new Float32Array(16),
+			resources: { batches: [batch], generation: createGeneration({ detail: true }) },
+			replaceableDrawUnitIds: new Set(["draw-a"]),
+			retainedDrawUnitCount: 0,
+		});
+
+		expect(metrics.fallbackSamples).toEqual([]);
+		expect(metrics.shaderDrawCallCount).toBe(1);
+		expect(gl.calls.filter((call) => call === "bindTexture")).toHaveLength(2);
+		expect(gl.uniform1ivLengths).toEqual([128]);
 	});
 });
 
 function createBatch(
 	drawUnitIds: readonly string[],
 	landblockId = 0x0102ffff,
+	options: { detailAtlasTextureIndex?: number | null } = {},
 ): Webgl2AtlasBackedCompactedBatchResource {
 	return {
 		key: "batch",
@@ -157,6 +182,9 @@ function createBatch(
 				index: 0,
 				atlasTextureIndex: 0,
 				atlasRect: [0, 0, 1, 1],
+				detailAtlasTextureIndex: options.detailAtlasTextureIndex ?? null,
+				detailAtlasRect: [0, 0, 1, 1],
+				detailTiling: 8,
 				renderStateKey: "opaque",
 				samplingKey: "sampling",
 			},
@@ -166,6 +194,7 @@ function createBatch(
 			{
 				key: "slice",
 				atlasTextureIndex: 0,
+				detailAtlasTextureIndex: options.detailAtlasTextureIndex ?? null,
 				renderStateKey: "opaque",
 				firstIndex: 0,
 				indexCount: 3,
@@ -189,7 +218,9 @@ function createBatch(
 	};
 }
 
-function createGeneration(): Webgl2TextureAtlasGenerationResource {
+function createGeneration(
+	options: { detail?: boolean } = {},
+): Webgl2TextureAtlasGenerationResource {
 	return {
 		key: "generation",
 		textures: [
@@ -210,6 +241,26 @@ function createGeneration(): Webgl2TextureAtlasGenerationResource {
 			},
 		],
 		placements: [],
+		detailTextures: options.detail
+			? [
+					{
+						key: "detail-texture",
+						textureIndex: 0,
+						texture: {
+							texture: {} as WebGLTexture,
+							width: 4,
+							height: 4,
+							dispose() {
+								return;
+							},
+						},
+						width: 4,
+						height: 4,
+						placementCount: 1,
+					},
+				]
+			: [],
+		detailPlacements: [],
 		preparedTextureAssetIds: [],
 		compactableDrawUnitIds: [],
 		dispose() {
@@ -231,7 +282,12 @@ function createProgram(): Webgl2AtlasBackedCompactedWorldProgram {
 			uBatchModel: {} as WebGLUniformLocation,
 			uAtlasTexture: {} as WebGLUniformLocation,
 			uAtlasSize: {} as WebGLUniformLocation,
+			uDetailAtlasTexture: {} as WebGLUniformLocation,
+			uDetailAtlasSize: {} as WebGLUniformLocation,
 			uMaterialRects: {} as WebGLUniformLocation,
+			uDetailMaterialRects: {} as WebGLUniformLocation,
+			uDetailMaterialTilings: {} as WebGLUniformLocation,
+			uDetailMaterialEnabled: {} as WebGLUniformLocation,
 		},
 		dispose() {
 			return;
@@ -257,6 +313,8 @@ class FakeAtlasSubmitGl {
 	readonly KEEP = 7680;
 	readonly calls: string[] = [];
 	readonly uniform4fvLengths: number[] = [];
+	readonly uniform1fvLengths: number[] = [];
+	readonly uniform1ivLengths: number[] = [];
 	readonly uniformMatrix4fvLengths: number[] = [];
 
 	asContext(): WebGL2RenderingContext {
@@ -289,6 +347,14 @@ class FakeAtlasSubmitGl {
 
 	uniform4fv(_location: WebGLUniformLocation, value: Float32Array): void {
 		this.uniform4fvLengths.push(value.length);
+	}
+
+	uniform1fv(_location: WebGLUniformLocation, value: Float32Array): void {
+		this.uniform1fvLengths.push(value.length);
+	}
+
+	uniform1iv(_location: WebGLUniformLocation, value: Int32Array): void {
+		this.uniform1ivLengths.push(value.length);
 	}
 
 	uniformMatrix4fv(

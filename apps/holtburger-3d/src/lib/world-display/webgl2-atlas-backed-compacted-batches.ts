@@ -14,6 +14,9 @@ export interface Webgl2AtlasBackedCompactedMaterialSlot {
 	index: number;
 	atlasTextureIndex: number;
 	atlasRect: readonly [number, number, number, number];
+	detailAtlasTextureIndex: number | null;
+	detailAtlasRect: readonly [number, number, number, number];
+	detailTiling: number;
 	renderStateKey: string;
 	samplingKey: string;
 }
@@ -49,12 +52,14 @@ export function createWebgl2AtlasBackedCompactedBatchResource({
 	landblockId,
 	materialSlots,
 	placementsByEntryKey,
+	detailPlacementsByEntryKey,
 }: {
 	gl: WebGL2RenderingContext;
 	geometry: AtlasBackedCompactedGeometry;
 	landblockId: number;
 	materialSlots: readonly AtlasBackedCompactionMaterialSlot[];
 	placementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>;
+	detailPlacementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>;
 }): Webgl2AtlasBackedCompactedBatchResource {
 	const positionBuffer = createWebgl2ArrayBuffer(gl, {
 		label: `${geometry.key}/positions`,
@@ -101,7 +106,11 @@ export function createWebgl2AtlasBackedCompactedBatchResource({
 				? gl.UNSIGNED_INT
 				: gl.UNSIGNED_SHORT,
 		materialSlots: materialSlots.map((slot) =>
-			toWebgl2AtlasBackedCompactedMaterialSlot(slot, placementsByEntryKey),
+			toWebgl2AtlasBackedCompactedMaterialSlot(
+				slot,
+				placementsByEntryKey,
+				detailPlacementsByEntryKey,
+			),
 		),
 		batchModelMatrix: geometry.batchModelMatrix,
 		drawSlices: geometry.drawSlices,
@@ -140,6 +149,7 @@ export function updateWebgl2AtlasBackedCompactedBatchDynamicTables(
 function toWebgl2AtlasBackedCompactedMaterialSlot(
 	slot: AtlasBackedCompactionMaterialSlot,
 	placementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>,
+	detailPlacementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>,
 ): Webgl2AtlasBackedCompactedMaterialSlot {
 	const placement = placementsByEntryKey.get(slot.atlasEntryKey);
 	if (!placement) {
@@ -147,11 +157,29 @@ function toWebgl2AtlasBackedCompactedMaterialSlot(
 			`Atlas-backed compacted material slot ${slot.key} references missing placement ${slot.atlasEntryKey}.`,
 		);
 	}
+	const detailPlacement = slot.detailAtlasEntryKey
+		? detailPlacementsByEntryKey.get(slot.detailAtlasEntryKey)
+		: null;
+	if (slot.detailAtlasEntryKey && !detailPlacement) {
+		throw new Error(
+			`Atlas-backed compacted material slot ${slot.key} references missing detail placement ${slot.detailAtlasEntryKey}.`,
+		);
+	}
 	return {
 		key: slot.key,
 		index: slot.index,
 		atlasTextureIndex: placement.textureIndex,
 		atlasRect: [placement.x, placement.y, placement.width, placement.height],
+		detailAtlasTextureIndex: detailPlacement?.textureIndex ?? null,
+		detailAtlasRect: detailPlacement
+			? [
+					detailPlacement.x,
+					detailPlacement.y,
+					detailPlacement.width,
+					detailPlacement.height,
+				]
+			: [0, 0, 1, 1],
+		detailTiling: slot.detailTiling,
 		renderStateKey: slot.renderStateKey,
 		samplingKey: slot.samplingKey,
 	};

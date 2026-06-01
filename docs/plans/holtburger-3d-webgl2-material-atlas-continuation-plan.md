@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
-Status: Phase M7C complete; Phase M7D detail-overlay atlas support next.
+Status: Phase M7D complete; Phase M7D.1 repeat/wrap staged atlas sampling next.
 
 Related plans:
 
@@ -3083,7 +3083,7 @@ Cleanup targets and legacy shims:
 
 ### Phase M7D: Detail-Overlay Support for Atlas-Backed Compacted Direct Geometry
 
-Status: Planned.
+Status: Complete.
 
 Purpose: allow draw units that already render correctly on the staged `direct-texture` path with a
 detail overlay to move into the atlas-backed compacted direct-geometry path without losing the
@@ -3103,7 +3103,8 @@ Tasks:
 - Add a compacted direct-geometry shader variant, or extend the existing compacted shader, to support:
   - base atlas texture lookup for the already-compacted base direct texture;
   - a separate detail-overlay atlas bucket. Do not pack detail textures into the base RGBA atlas;
-    detail textures may be R8/single-channel and need their own format-specific atlas pages;
+    detail textures use RGBA8 pages because retail detail surfaces can carry subtle RGB signal and
+    independent alpha even when they visually read as mostly grayscale;
   - detail-atlas rect lookup per compacted material slot;
   - detail tiling;
   - detail enable/blend behavior matching the staged direct-texture path.
@@ -3130,7 +3131,7 @@ Exit criteria:
 - Common static and structured-interior direct-texture draw units with detail overlays are submitted
   through atlas-backed compacted geometry instead of bypassing solely because
   `detailOverlay !== null`.
-- Detail overlays use a separate R8/single-channel-capable atlas bucket rather than standalone
+- Detail overlays use a separate RGBA8 atlas bucket rather than standalone
   per-slice texture binds or RGBA base-atlas entries.
 - Debug reports distinguish detail-overlay compacted coverage from remaining staged detail-overlay
   fallbacks.
@@ -3148,6 +3149,64 @@ Decisions:
   the base direct RGBA atlas.
 - Do not fold terrain into this phase. Terrain uses a different material family and needs its own
   batching/compaction design.
+- M7D implements the renderer's current staged detail behavior for `dst-color` overlays using RGBA8
+  detail atlas pages. Earlier R8 planning was corrected after inspecting retail detail surfaces:
+  `0x06006D58` is mostly grayscale-ish but not single-channel, and alpha is independent from RGB.
+  Other detail blend/fade modes remain on the staged path until there is an explicit shader/material
+  model for them.
+
+Progress:
+
+- Added detail-atlas metadata to atlas-backed compaction planning. Detail-overlay draw units now stay
+  compactable when they have a compactable RGBA8 detail atlas entry, and only fall back with
+  `missing-detail-atlas-entry` when the overlay cannot be represented.
+- Added separate detail atlas pages to WebGL2 texture atlas generation. Base textures remain RGBA
+  atlas pages; detail textures use independent RGBA8 pages with the same deterministic placement and
+  gutter extrusion lifecycle.
+- Threaded detail atlas rects, tiling, enable flags, and detail atlas texture indices through
+  compacted material slots, landblock-scoped compacted batches, and draw slices.
+- Split compacted material slots by base material plus detail-atlas entry, and added an explicit
+  draw-unit-to-compaction-slot table so a base material reused with and without detail cannot inherit
+  the wrong overlay.
+- Extended the atlas-backed compacted shader/submission path to bind a detail atlas page per slice
+  and apply the current `dst-color` detail overlay in the compacted shader.
+- Updated asset preparation requests and material dependencies so detail overlays can request
+  normalized `usage=detail&out=rgba8&mips=none&cs=linear` prepared textures instead of accidentally
+  using raw/base prepared textures for detail atlas eligibility.
+- Added debug metrics for base atlas texture count versus detail atlas texture count.
+- Corrected detail atlas generation and the compacted shader from R8/value-only sampling to RGBA8
+  sampling that matches the staged `dst-color` formula: `base * (detail.rgb + (1 - detail.a))`.
+
+Validation:
+
+- `npm exec vitest -- src/lib/assets/scene-asset-request-planner.test.ts src/lib/world-display/atlas-backed-compaction-planner.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts src/lib/world-display/webgl2-atlas-backed-compacted-submit.test.ts --run`
+- `npm run check`
+- `npm run lint:ts`
+
+Course corrections:
+
+- The old `detail-overlay` bypass label was too broad. M7D narrows the active fallback to
+  `missing-detail-atlas-entry`, which means "this draw unit has a detail overlay but not one the RGBA8
+  detail-atlas path can represent."
+- The first implementation avoided reusing `usage=raw` normalized prepared textures for detail
+  overlays. Detail atlas eligibility now asks for `usage=detail`, so base atlas preparation and
+  detail atlas preparation stay separate even though both currently decode to RGBA8.
+- R8 detail atlas planning was dropped. Runtime warnings for non-R8 detail textures correctly exposed
+  the retail surfaces, but the follow-up DAT inspection showed RGBA8 is the correct first parity target
+  rather than a rare fallback.
+- Compacted material-slot identity had to include detail state, not just the base material slot. This
+  avoids cross-contaminating plain and detailed draw units that share the same base material.
+
+Cleanup targets and legacy shims:
+
+- The `detail-overlay` bypass enum value remains as legacy metric vocabulary but should be removed
+  once runtime reports and tests no longer need to compare against older captures.
+- The compacted shader's detail overlay path intentionally mirrors the simplified WebGL2 staged
+  `dst-color` behavior. A future material parity pass should decide whether staged and compacted
+  detail should both restore distance fade/source-alpha behavior from the old Three path.
+- Detail atlas generation currently shares the base texture atlas generation resource object and graph
+  node. That is acceptable for M7D because they are generated and retired together, but M7E/M8 should
+  split lifecycle metrics further if terrain or independent detail-atlas reuse needs it.
 
 ### Phase M7D.1: Repeat/Wrap Staged Atlas Sampling
 

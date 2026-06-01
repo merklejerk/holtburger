@@ -67,6 +67,7 @@ import { type StagedWorldMaterialAtlasEligibility } from "./staged-world-materia
 import {
 	createEmptyAtlasBackedCompactionPlan,
 	planAtlasBackedCompaction,
+	type AtlasBackedCompactionDetailEntry,
 	type AtlasBackedCompactionPlan,
 	type AtlasBackedCompactionPolicy,
 } from "./atlas-backed-compaction-planner";
@@ -155,6 +156,7 @@ export interface Webgl2WorldResourceStore {
 	atlasBackedCompactionBypassReasonCount: number;
 	atlasBackedCompactionBypassSamples: readonly string[];
 	textureAtlasGenerationTextureCount: number;
+	detailTextureAtlasGenerationTextureCount: number;
 	compactedGeometryBatchCount: number;
 	compactedGeometryDrawUnitCount: number;
 	compactedGeometryTriangleCount: number;
@@ -197,6 +199,7 @@ export interface Webgl2DetailOverlayResources {
 	texture: Webgl2Texture2DResource;
 	tiling: number;
 	blendMode: ResolvedRegionDetailOverlayPlan["blendMode"];
+	atlasEntry: AtlasBackedCompactionDetailEntry | null;
 }
 
 export interface Webgl2IndexedMaterialResources {
@@ -213,6 +216,8 @@ export interface Webgl2IndexedMaterialResources {
 	wrapT: "clamp" | "repeat";
 	clipThreshold: number;
 }
+
+const warnedUnsupportedDetailAtlasTextureKeys = new Set<string>();
 
 export interface Webgl2TerrainTextureBinding {
 	key: string;
@@ -255,6 +260,7 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		atlasBackedCompactionBypassReasonCount: 0,
 		atlasBackedCompactionBypassSamples: [],
 		textureAtlasGenerationTextureCount: 0,
+		detailTextureAtlasGenerationTextureCount: 0,
 		compactedGeometryBatchCount: 0,
 		compactedGeometryDrawUnitCount: 0,
 		compactedGeometryTriangleCount: 0,
@@ -559,6 +565,7 @@ export function destroyWebgl2WorldResources(
 	store.atlasBackedCompactionBypassReasonCount = 0;
 	store.atlasBackedCompactionBypassSamples = [];
 	store.textureAtlasGenerationTextureCount = 0;
+	store.detailTextureAtlasGenerationTextureCount = 0;
 	store.compactedGeometryBatchCount = 0;
 	store.compactedGeometryDrawUnitCount = 0;
 	store.compactedGeometryTriangleCount = 0;
@@ -841,6 +848,7 @@ function toAtlasBackedCompactionCandidate(drawUnit: Webgl2WorldDrawUnit) {
 		materialBehavior: drawUnit.materialBehavior,
 		hasUvBuffer: drawUnit.uvBuffer !== null,
 		hasDetailOverlay: drawUnit.detailOverlay !== null,
+		detailAtlasEntry: drawUnit.detailOverlay?.atlasEntry ?? null,
 		atlasEligibility: drawUnit.atlasEligibility,
 		triangleCount: drawUnit.triangleCount,
 		staticPartCount: drawUnit.staticPartCount,
@@ -1165,6 +1173,38 @@ function resolveWebgl2DetailOverlayResources({
 		overlay.renderSurface,
 		samplingPolicy,
 	);
+	const upload = prepareRenderSurfaceTextureUploadData(
+		overlay.renderSurface,
+		samplingPolicy,
+		materialTextureCapabilities,
+		resolvePreparedTextureForRenderSurface(
+			assetState,
+			overlay.renderSurface,
+			"detail",
+		),
+	);
+	if (upload.status !== "ready" || upload.upload.kind !== "direct") {
+		if (upload.status === "ready") {
+			warnUnsupportedDetailAtlasTexture({
+				key,
+				overlay,
+				upload,
+			});
+		}
+		store.materialFallbackReasonSamples = [
+			...store.materialFallbackReasonSamples,
+			`detail-overlay ${overlay.signature} texture ${formatHex32(overlay.renderSurface.renderSurfaceId)} is ${upload.status === "ready" ? "compressed-direct-unsupported" : upload.reason}`,
+		].slice(0, 8);
+		return null;
+	}
+	const atlasEntry = resolveDetailAtlasEntry({ key, overlay, upload });
+	if (!atlasEntry) {
+		warnUnsupportedDetailAtlasTexture({
+			key,
+			overlay,
+			upload,
+		});
+	}
 	const cached = store.texturesByKey.get(key);
 	if (cached) {
 		return {
@@ -1172,20 +1212,8 @@ function resolveWebgl2DetailOverlayResources({
 			texture: cached,
 			tiling: overlay.role.tiling,
 			blendMode: overlay.blendMode,
+			atlasEntry,
 		};
-	}
-	const upload = prepareRenderSurfaceTextureUploadData(
-		overlay.renderSurface,
-		samplingPolicy,
-		materialTextureCapabilities,
-		resolvePreparedTextureForRenderSurface(assetState, overlay.renderSurface),
-	);
-	if (upload.status !== "ready" || upload.upload.kind !== "direct") {
-		store.materialFallbackReasonSamples = [
-			...store.materialFallbackReasonSamples,
-			`detail-overlay ${overlay.signature} texture ${formatHex32(overlay.renderSurface.renderSurfaceId)} is ${upload.status === "ready" ? "compressed-direct-unsupported" : upload.reason}`,
-		].slice(0, 8);
-		return null;
 	}
 	const texture = profileBrowserJsScope("webgl2.texture.upload.detail", () =>
 		createWebgl2Texture2D(gl, {
@@ -1200,6 +1228,80 @@ function resolveWebgl2DetailOverlayResources({
 		texture,
 		tiling: overlay.role.tiling,
 		blendMode: overlay.blendMode,
+		atlasEntry,
+	};
+}
+
+function warnUnsupportedDetailAtlasTexture({
+	key,
+	overlay,
+	upload,
+}: {
+	key: string;
+	overlay: ResolvedRegionDetailOverlayPlan;
+	upload: RenderSurfaceTextureUploadPreparation & { status: "ready" };
+}): void {
+	const texture = upload.upload;
+	if (
+		texture.kind === "direct" &&
+		texture.format === "rgba" &&
+		texture.dataType === "uint8" &&
+		texture.data instanceof Uint8Array
+	) {
+		return;
+	}
+	if (warnedUnsupportedDetailAtlasTextureKeys.has(key)) {
+		return;
+	}
+	warnedUnsupportedDetailAtlasTextureKeys.add(key);
+	const uploadShape =
+		texture.kind === "direct"
+			? `direct ${texture.format}/${texture.dataType}/${texture.internalFormat ?? "no-internal-format"}`
+			: `compressed ${texture.format}`;
+	console.warn(
+		[
+			"[Holtburger 3D] Detail overlay texture is not RGBA8 atlas-compatible; compacted atlas-backed geometry will stage it separately.",
+			`surface=${formatHex32(overlay.renderSurface.renderSurfaceId)}`,
+			`sourceFormat=${overlay.renderSurface.format}(${formatHex32(overlay.renderSurface.formatRaw)})`,
+			`upload=${uploadShape}`,
+			`size=${texture.width}x${texture.height}`,
+			`overlay=${overlay.signature}`,
+		].join(" "),
+	);
+}
+
+function resolveDetailAtlasEntry({
+	key,
+	overlay,
+	upload,
+}: {
+	key: string;
+	overlay: ResolvedRegionDetailOverlayPlan;
+	upload: (RenderSurfaceTextureUploadPreparation & { status: "ready" }) | null;
+}): AtlasBackedCompactionDetailEntry | null {
+	if (overlay.blendMode !== "dst-color") {
+		return null;
+	}
+	if (!upload || upload.upload.kind !== "direct") {
+		return null;
+	}
+	if (
+		upload.upload.format !== "rgba" ||
+		upload.upload.dataType !== "uint8" ||
+		!(upload.upload.data instanceof Uint8Array)
+	) {
+		return null;
+	}
+	return {
+		key: `detail-atlas-entry|${key}`,
+		renderSurfaceId: overlay.renderSurface.renderSurfaceId,
+		sourceFormatRaw: overlay.renderSurface.formatRaw,
+		width: upload.upload.width,
+		height: upload.upload.height,
+		bytes: upload.upload.data,
+		format: "rgba8",
+		tiling: overlay.role.tiling,
+		blendMode: "dst-color",
 	};
 }
 
@@ -1362,10 +1464,11 @@ function prepareTerrainTextureUpload(
 function resolvePreparedTextureForRenderSurface(
 	assetState: AssetChannelState,
 	renderSurface: TerrainBlendTextureRef["renderSurface"],
+	usage: "raw" | "detail" = "raw",
 ): PreparedTexturePayload | null {
 	for (const assetId of resolveNormalizedPreparedTextureAssetIds({
 		renderSurface,
-		usage: "raw",
+		usage,
 	})) {
 		const asset = assetState.preparedByAssetId[assetId];
 		if (asset?.payload.kind === "prepared-texture") {
@@ -1729,6 +1832,7 @@ function syncWebgl2TextureAtlasGeneration({
 		store.textureAtlasGeneration?.dispose();
 		store.textureAtlasGeneration = null;
 		store.textureAtlasGenerationTextureCount = 0;
+		store.detailTextureAtlasGenerationTextureCount = 0;
 		releaseWebgl2TextureAtlasGenerationGraphLease(store);
 		return;
 	}
@@ -1757,6 +1861,8 @@ function syncWebgl2TextureAtlasGeneration({
 	}
 	store.textureAtlasGenerationTextureCount =
 		store.textureAtlasGeneration?.textures.length ?? 0;
+	store.detailTextureAtlasGenerationTextureCount =
+		store.textureAtlasGeneration?.detailTextures.length ?? 0;
 	if (!rendererResourceGraph || !store.textureAtlasGeneration) {
 		releaseWebgl2TextureAtlasGenerationGraphLease(store);
 		return;
@@ -1920,6 +2026,8 @@ function syncWebgl2AtlasBackedCompactedBatch({
 	}
 	const retainedBatchKeys = new Set<string>();
 	const placementsByEntryKey = createTextureAtlasPlacementsByEntryKey(plan);
+	const detailPlacementsByEntryKey =
+		createDetailTextureAtlasPlacementsByEntryKey(plan);
 	for (const batchPlan of batchPlans) {
 		const geometry = profileBrowserJsScope(
 			"webgl2.resource.buildAtlasBackedCompactedGeometry",
@@ -1945,6 +2053,7 @@ function syncWebgl2AtlasBackedCompactedBatch({
 						landblockId: batchPlan.landblockId,
 						materialSlots: batchPlan.plan.materialSlots,
 						placementsByEntryKey,
+						detailPlacementsByEntryKey,
 					}),
 			);
 			store.atlasBackedCompactedBatches.set(nextBatch.key, nextBatch);
@@ -2067,6 +2176,18 @@ function createTextureAtlasPlacementsByEntryKey(
 	);
 }
 
+function createDetailTextureAtlasPlacementsByEntryKey(
+	plan: AtlasBackedCompactionPlan,
+) {
+	return new Map(
+		plan.detailAtlasTextures.flatMap((texture) =>
+			texture.placements.map(
+				(placement) => [placement.atlasEntryKey, placement] as const,
+			),
+		),
+	);
+}
+
 function createAtlasBackedCompactedLandblockBatchPlans({
 	plan,
 	drawUnits,
@@ -2155,6 +2276,11 @@ function createAtlasBackedCompactedLandblockBatchPlan({
 	const sourceMaterialSlotByKey = new Map(
 		sourcePlan.materialSlots.map((slot) => [slot.key, slot] as const),
 	);
+	const sourceMaterialSlotKeyByDrawUnitId = new Map(
+		sourcePlan.drawUnitMaterialSlots.map(
+			(record) => [record.drawUnitId, record.materialSlotKey] as const,
+		),
+	);
 	const batchMaterialSlotKeys = uniqueSortedStrings(
 		batchDrawUnits.map((drawUnit) => {
 			if (drawUnit.material.kind !== "direct-texture") {
@@ -2162,7 +2288,11 @@ function createAtlasBackedCompactedLandblockBatchPlan({
 					`Atlas-backed compacted landblock batch ${formatHex32(landblockId)} references non-direct material draw unit ${drawUnit.id}.`,
 				);
 			}
-			return drawUnit.material.atlasEligibility?.materialSlotKey ?? "";
+			return (
+				sourceMaterialSlotKeyByDrawUnitId.get(drawUnit.id) ??
+				drawUnit.material.atlasEligibility?.materialSlotKey ??
+				""
+			);
 		}),
 	);
 	const localMaterialSlots = batchMaterialSlotKeys.map((slotKey, index) => {
@@ -2216,6 +2346,12 @@ function createAtlasBackedCompactedLandblockBatchPlan({
 		key: `${sourcePlan.key}|landblock=${formatHex32(landblockId)}`,
 		compactableDrawUnitIds: drawUnitIds,
 		materialSlots: localMaterialSlots,
+		drawUnitMaterialSlots: sourcePlan.drawUnitMaterialSlots
+			.filter((record) => drawUnitIdSet.has(record.drawUnitId))
+			.map((record) => ({
+				drawUnitId: record.drawUnitId,
+				materialSlotKey: record.materialSlotKey,
+			})),
 		drawSlices: sourceSlices,
 		staticObjectKeys: uniqueSortedStrings(
 			batchDrawUnits.flatMap((drawUnit) => drawUnit.staticObjectKeys),

@@ -246,6 +246,8 @@ export function createWebgl2RenderMetrics(
 			],
 			textureAtlasGenerationTextureCount:
 				input.worldStore?.textureAtlasGenerationTextureCount ?? 0,
+			detailTextureAtlasGenerationTextureCount:
+				input.worldStore?.detailTextureAtlasGenerationTextureCount ?? 0,
 			compactedGeometryBatchCount:
 				input.worldStore?.compactedGeometryBatchCount ?? 0,
 			compactedGeometryDrawUnitCount:
@@ -344,6 +346,8 @@ export function createWebgl2RenderMetrics(
 							input.worldStore.atlasBackedCompactionBypassReasonCount,
 						"webgl2-texture-atlas-generation-textures":
 							input.worldStore.textureAtlasGenerationTextureCount,
+						"webgl2-detail-texture-atlas-generation-textures":
+							input.worldStore.detailTextureAtlasGenerationTextureCount,
 						"webgl2-compacted-geometry-batches":
 							input.worldStore.compactedGeometryBatchCount,
 						"webgl2-compacted-geometry-draw-units":

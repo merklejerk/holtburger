@@ -219,17 +219,36 @@ precision highp float;
 
 uniform sampler2D uAtlasTexture;
 uniform vec2 uAtlasSize;
+uniform sampler2D uDetailAtlasTexture;
+uniform vec2 uDetailAtlasSize;
 uniform vec4 uMaterialRects[MAX_MATERIAL_SLOTS];
+uniform vec4 uDetailMaterialRects[MAX_MATERIAL_SLOTS];
+uniform float uDetailMaterialTilings[MAX_MATERIAL_SLOTS];
+uniform int uDetailMaterialEnabled[MAX_MATERIAL_SLOTS];
 
 in vec2 vUv;
 flat in int vMaterialSlot;
 
 out vec4 fragColor;
 
+vec3 applyDetailOverlay(vec3 baseColor, int materialSlot) {
+	if (uDetailMaterialEnabled[materialSlot] == 0) {
+		return baseColor;
+	}
+	vec4 detailRect = uDetailMaterialRects[materialSlot];
+	float tiling = uDetailMaterialTilings[materialSlot];
+	vec2 detailUv = (detailRect.xy + fract(vUv * tiling) * detailRect.zw) / uDetailAtlasSize;
+	vec4 detailColor = texture(uDetailAtlasTexture, detailUv);
+	float sourceAlpha = clamp(detailColor.a, 0.0, 1.0);
+	return clamp(baseColor * (detailColor.rgb + (1.0 - sourceAlpha)), 0.0, 1.0);
+}
+
 void main() {
 	vec4 rect = uMaterialRects[vMaterialSlot];
 	vec2 atlasUv = (rect.xy + clamp(vUv, 0.0, 1.0) * rect.zw) / uAtlasSize;
-	fragColor = texture(uAtlasTexture, atlasUv);
+	vec4 color = texture(uAtlasTexture, atlasUv);
+	color.rgb = applyDetailOverlay(color.rgb, vMaterialSlot);
+	fragColor = color;
 }
 `;
 
@@ -2280,7 +2299,12 @@ function createAtlasBackedCompactedWorldProgram(
 			"uBatchModel",
 			"uAtlasTexture",
 			"uAtlasSize",
+			"uDetailAtlasTexture",
+			"uDetailAtlasSize",
 			"uMaterialRects",
+			"uDetailMaterialRects",
+			"uDetailMaterialTilings",
+			"uDetailMaterialEnabled",
 		],
 	});
 }

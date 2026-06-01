@@ -1,6 +1,6 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
-Status: Phase M7D.1a implemented; Phase M7D.1a.1 compacted wrap field validation next.
+Status: Phase M7D.1a.1 validated; Phase M7D.1b staged repeat/wrap atlas sampling next.
 
 Related plans:
 
@@ -3290,7 +3290,7 @@ Validation:
 
 ### Phase M7D.1a.1: Compacted Wrap Field Validation
 
-Status: Immediate validation phase before M7D.1b.
+Status: Complete.
 
 Purpose: verify the compacted repeat/wrap shader change against the Holtburger field scene before
 expanding staged atlas repeat/wrap. This is a visual/mipmap validation step, not a new architecture
@@ -3312,9 +3312,45 @@ Exit criteria:
   closely enough to proceed to staged atlas repeat/wrap.
 - Any remaining issue is recorded as derivative/gutter work with reproduction details.
 
+Progress:
+
+- Field validation found slight seams on wrapped atlassed textures after the initial `fract`-based
+  repeat fix.
+- Updated atlas-backed compacted base atlas sampling to use `textureGrad()` with gradients derived
+  from the unwrapped author UV, scaled into the atlas rect. This keeps mip selection continuous
+  across repeat boundaries instead of deriving from the discontinuous `fract` coordinate.
+- Updated detail-atlas sampling the same way: detail UVs still repeat with `fract(vUv * tiling)`,
+  but mip gradients come from the unwrapped tiled UV.
+- Field revalidation on 2026-06-01 confirmed the visible wrapped-atlas seams are gone.
+- The validation report still shows the expected post-M7D shape: 9 compacted batches, 15 compacted
+  slices, 17 atlas-backed compacted shader draws, 1 base atlas texture, 1 detail atlas texture,
+  1,816 replaced draw units, 1,799 estimated draw-call savings, and no atlas-backed compacted
+  submit fallbacks.
+- The remaining staged-atlas work is small in this scene: 25 staged atlas draws, 1,133 standalone
+  direct draws, and 8 staged-atlas missing-placement fallback samples for `06003789`.
+
+Decisions:
+
+- The seam is treated as a derivative/mipmap artifact, not as a reason to abandon compacted atlas
+  repeat support. The next validation should distinguish any remaining gutter/padding bleed from the
+  now-addressed derivative discontinuity.
+- The derivative fix is sufficient for the reported Holtburger wrapped-atlas seam. Do not add
+  repeat-specific gutter work unless another field capture shows residual mip/gutter bleed.
+
+Cleanup targets and legacy shims:
+
+- Repeat-specific gutter/mip extrusion remains a deferred cleanup target only if a future field
+  capture shows residual bleed after `textureGrad`.
+
+Validation:
+
+- `npm exec vitest -- src/lib/world-display/staged-world-material-strategy.test.ts src/lib/world-display/atlas-backed-compaction-planner.test.ts src/lib/world-display/atlas-backed-compacted-geometry.test.ts src/lib/world-display/webgl2-atlas-backed-compacted-submit.test.ts src/lib/world-display/webgl2-world-submit.test.ts --run`
+- `npm run check`
+- `npm run lint:ts`
+
 ### Phase M7D.1b: Repeat/Wrap Staged Atlas Sampling
 
-Status: Follow-up after M7D.1a.1 unless metrics force it earlier.
+Status: Next.
 
 Purpose: allow atlas-backed staged direct draw units with repeat/wrap sampler policy to use the base
 texture atlas without bleeding into neighboring atlas entries or breaking the authored UV behavior.

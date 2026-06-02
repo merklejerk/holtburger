@@ -7,7 +7,7 @@ import type { Webgl2StateCache } from "../../webgl2-state-cache";
 import type {
 	Webgl2CompactedGeometryBatchResource,
 	Webgl2IndexedPalettedFamilyResource,
-} from "../../webgl2-compacted-geometry-resources";
+} from "../resources/compacted-geometry-resources";
 import { applyOpaqueCompactedFamilyRenderState } from "./family-render-state";
 import type { Webgl2DetailTextureAtlasTextureResource } from "../resources/texture-atlas-generation";
 

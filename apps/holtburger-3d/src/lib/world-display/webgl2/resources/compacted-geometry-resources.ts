@@ -4,18 +4,18 @@ import {
 	createWebgl2VertexArray,
 	type Webgl2BufferResource,
 	type Webgl2VertexArrayResource,
-} from "./webgl2-gl";
+} from "../../webgl2-gl";
 import type {
 	CompactedGeometryBatch,
 	CompactedGeometrySlice,
-} from "./compaction/compacted-geometry";
-import type { AtlasTexturePlacement } from "./texture-pages/atlas-layout-planner";
+} from "../../compaction/compacted-geometry";
+import type { AtlasTexturePlacement } from "../../texture-pages/atlas-layout-planner";
 import type {
 	IndexedPalettedFamilyMaterialTableRecord,
 	IndexedPalettedFamilyDrawSlice,
 	RgbaTexturePageFamilyDrawSlice,
 	RgbaTexturePageFamilyMaterialSlot,
-} from "./compaction/compaction-family-planner";
+} from "../../compaction/compaction-family-planner";
 
 interface Webgl2RgbaTexturePageFamilyMaterialSlot {
 	key: string;

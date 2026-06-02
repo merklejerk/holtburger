@@ -1,7 +1,8 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
-Status: Phase M7D.5b4 complete; compacted/baked material work is paused for the replacement detour in
-the compacted render family pipeline plan.
+Status: Paused after M7D.5b4; superseded compacted/baked material work is being implemented through
+the compacted render family pipeline replacement plan. Latest detour progress: replacement plan C10.4
+complete.
 
 Related plans:
 
@@ -18,6 +19,41 @@ rendering can actually be implemented. Continue compacted material work in the
 [Holtburger 3D Compacted Render Family Pipeline Replacement Plan](./holtburger-3d-compacted-render-family-pipeline-replacement-plan.md),
 which is focused on replacing the current architecture rather than building a durable parallel
 pipeline.
+
+### Current Detour Progress
+
+The next phase in this plan, M7D.5b, is not being implemented in this file's original baked-indexed
+shape. Its intended behavior was completed through the replacement architecture instead:
+
+- Indexed-paletted compacted rendering was reintroduced through explicit render family pipelines in
+  the replacement plan C8 series.
+- RGBA alpha-test and indexed opaque detail-overlay compaction were completed in the replacement plan
+  C8.14 and C8.15 follow-ups.
+- Legacy baked/root planner terminology and compatibility mirrors were cleaned up through C9 and
+  C9.1.
+- The current implementation work is now module ownership cleanup. C10.4 moved compaction planning
+  and material-agnostic compacted geometry into `world-display/compaction/`.
+
+Decision:
+
+- Do not resume M7D.5b by adding `bakedIndexedGeometryBatches`, `BakedRenderablePlan` fields, or
+  baked submit variants. Those names no longer describe the production renderer shape.
+
+Course corrections and refinements for future steps:
+
+- Treat this plan as historical source material for material coverage and portal/atlas rationale.
+  New compacted material implementation phases should be added to the replacement plan unless the
+  work is unrelated to compacted/family pipeline architecture.
+- If terrain work resumes from M7E, first reconcile its wording with the current texture-page and
+  render-family vocabulary from the replacement plan.
+- Keep validation commands in this plan historical unless they reference current file paths. The C10.4
+  validation used the moved `src/lib/world-display/compaction/*` test paths.
+
+Cleanup targets and legacy shims:
+
+- The M7D.5b task list below intentionally contains obsolete baked-indexed terminology. Leave it as
+  historical context, but do not execute it as written.
+- No compatibility shims were added for the C10.4 detour progress update.
 
 ## Purpose
 
@@ -4705,7 +4741,8 @@ Validation:
 
 ### Phase M7D.5b: Baked Indexed Submit Variant
 
-Status: Paused; superseded by the compacted render family pipeline replacement detour.
+Status: Superseded; implemented through the compacted render family pipeline replacement detour
+instead of the baked-indexed shape described below.
 
 Purpose: consume the indexed material-table records from M7D.5a and add the first actual baked indexed
 submit path for `indexed-paletted|alpha=opaque`.
@@ -4717,6 +4754,10 @@ Pause note:
   [Holtburger 3D Compacted Render Family Pipeline Replacement Plan](./holtburger-3d-compacted-render-family-pipeline-replacement-plan.md).
   The replacement plan should first collapse compacted geometry and family pipeline boundaries, then
   reintroduce indexed-paletted rendering through that new boundary.
+- Replacement implementation disposition:
+  - indexed-paletted compacted rendering landed through replacement plan C8/C8.8-C8.15 phases;
+  - legacy baked planner/resource terminology cleanup landed through replacement plan C9/C9.1;
+  - current ownership cleanup continues through replacement plan C10, with C10.4 complete.
 
 Tasks:
 

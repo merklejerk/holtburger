@@ -1,5 +1,5 @@
-import type { StagedWorldDrawUnitAssembly } from "./staged-world-assembly";
-import { createTranslationMat4, type RenderMat4 } from "./render-math";
+import type { StagedWorldDrawUnitAssembly } from "../staged-world-assembly";
+import { createTranslationMat4, type RenderMat4 } from "../render-math";
 
 interface CompactedGeometryMaterialSlot {
 	key: string;

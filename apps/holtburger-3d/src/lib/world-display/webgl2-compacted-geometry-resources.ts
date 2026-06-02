@@ -8,14 +8,14 @@ import {
 import type {
 	CompactedGeometryBatch,
 	CompactedGeometrySlice,
-} from "./compacted-geometry";
+} from "./compaction/compacted-geometry";
 import type { AtlasTexturePlacement } from "./texture-pages/atlas-layout-planner";
 import type {
 	IndexedPalettedFamilyMaterialTableRecord,
 	IndexedPalettedFamilyDrawSlice,
 	RgbaTexturePageFamilyDrawSlice,
 	RgbaTexturePageFamilyMaterialSlot,
-} from "./compaction-family-planner";
+} from "./compaction/compaction-family-planner";
 
 interface Webgl2RgbaTexturePageFamilyMaterialSlot {
 	key: string;

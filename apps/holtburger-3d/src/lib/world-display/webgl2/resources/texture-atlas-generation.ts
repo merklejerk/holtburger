@@ -5,7 +5,7 @@ import {
 import type {
 	RgbaTexturePageAtlasEntryRecord,
 	RgbaTexturePageDetailAtlasEntry,
-} from "../../compaction-family-planner";
+} from "../../compaction/compaction-family-planner";
 import type {
 	AtlasTexturePage,
 	AtlasTexturePlacement,

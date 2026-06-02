@@ -3230,12 +3230,12 @@ C10 reading guide:
 
 - C10 is the parent planning phase. It records the target module boundaries and the intended execution
   order.
-- C10.1 through C10.3 are completed execution phases that implemented the first submit/family/texture
-  module refactors.
+- C10.1 through C10.4 are completed execution phases that implemented the first
+  submit/family/texture/compaction module refactors.
 - C10.3.1 is an interim quality gate added after C10.3 because knip exposed broad stale exported
   surface. It is intentionally cleanup-only and must complete before the next module move.
-- C10.4 is the next normal execution phase after the C10.3.1 gate. It should resume the original flow
-  with compaction planner and compacted geometry module ownership.
+- C10.4 resumed the original flow after the C10.3.1 gate and moved compaction planner plus compacted
+  geometry ownership into a dedicated module boundary.
 - The historical cleanup list after C10.3.1 is source material, not an executable phase. Future C10
   phases should pull from it, disposition items, and keep the standard phase structure:
   - status;
@@ -3255,7 +3255,7 @@ C10 execution status:
 - C10.2 WebGL2 family module move: complete.
 - C10.3 Texture-page planning and WebGL2 atlas resource move: complete.
 - C10.3.1 Knip export-debt cleanup gate: complete.
-- C10.4 Compaction planner and compacted geometry module move: next normal execution phase.
+- C10.4 Compaction planner and compacted geometry module move: complete.
 - C10.5 WebGL2 resource ownership split: planned after C10.4.
 - C10.6 Diagnostics presenter extraction: planned after resource ownership is clearer.
 
@@ -3910,6 +3910,78 @@ Validation completed:
 - `npm run test:ts -- src/lib/world-display/prepared-bvh-metrics.test.ts src/lib/world-display/render-batch-candidates.test.ts src/lib/world-display/compaction-family-planner.test.ts src/lib/world-display/staged-world-assembly.test.ts src/lib/world-display/staged-world-material-strategy.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-direct-render-family.test.ts src/lib/world-display/render-spatial-index.test.ts --run`
 - `npm run check`
 - `npm run lint`
+
+## Phase C10.4: Compaction Planner And Compacted Geometry Module Move
+
+Status: Complete.
+
+Purpose: resume the C10 module ownership sequence after the C10.3.1 export cleanup gate by moving the
+renderer-neutral compaction planner and compacted geometry builder under a dedicated
+`world-display/compaction/` boundary.
+
+Scope rules:
+
+- Keep this phase behavior-free.
+- Move only compaction planning and material-agnostic compacted geometry code/tests.
+- Keep WebGL2 compacted resource realization in the existing WebGL2 resource path until C10.5.
+- Do not add compatibility reexports for the old flat module paths.
+- Keep `npm run lint:dead` green as a required post-C10.3.1 gate.
+
+Progress ledger:
+
+- Added `apps/holtburger-3d/src/lib/world-display/compaction/`.
+- Moved `compaction-family-planner.ts` and `compaction-family-planner.test.ts` into the compaction
+  boundary.
+- Moved `compacted-geometry.ts` and `compacted-geometry.test.ts` into the compaction boundary.
+- Updated imports in WebGL2 world resources, compacted geometry resources, runtime diagnostics,
+  texture-page atlas planning, WebGL2 atlas generation, and moved tests.
+- Left `webgl2-compacted-geometry-resources.ts` in the flat WebGL2 display boundary for C10.5,
+  because it still owns GL buffers, VAOs, and family resource realization.
+
+Decisions:
+
+- Test files moved with their production modules in this phase. The C10 parent phase originally kept
+  tests flat until module moves began; C10.4 is the point where colocating these focused tests now
+  improves ownership rather than adding noise.
+- `webgl2/resources/texture-atlas-generation.ts` still imports compaction family atlas record types.
+  This was an expected C10.3 risk and did not create a circular import after the compaction move.
+- No interim C10.4a phase is needed before C10.5. Validation stayed green and no new export debt or
+  circular dependency appeared.
+
+Course corrections and refinements for future steps:
+
+- C10.5 should move or split `webgl2-compacted-geometry-resources.ts` after resource ownership is
+  narrowed, not during C10.4. It is material/family-adjacent but WebGL2-resource-owned.
+- C10.5 should decide whether family resource DTOs currently exported from
+  `webgl2-compacted-geometry-resources.ts` belong in `webgl2/resources/`, `webgl2/families/`, or a
+  small shared WebGL2 family-resource module.
+- C10.5 should continue to include `npm run lint:dead` in validation and should add an immediate
+  cleanup gate if resource splitting exposes another broad stale-export report.
+
+Cleanup targets introduced:
+
+- `webgl2-compacted-geometry-resources.ts` remains the next obvious ownership mismatch: it bridges
+  compacted geometry buffers, RGBA/indexed family payload resources, GL VAOs, and texture placement
+  DTOs. C10.5 owns that split.
+- `webgl2-world-resources.ts` still imports compaction planning and geometry building directly.
+  C10.5 should narrow this by extracting resource realization helpers before attempting to split
+  `Webgl2WorldDrawUnit`.
+- `texture-page-atlas-planner.ts` still imports compaction family entry/detail record types. If C10.5
+  or later material/resource moves make that dependency awkward, introduce renderer-neutral
+  texture-page atlas record DTOs instead of aliases.
+
+Legacy shims:
+
+- None introduced. Old flat module paths were removed directly, and no compatibility reexports or
+  alias modules were added.
+
+Validation completed:
+
+- `npm run test:ts -- src/lib/world-display/compaction/compaction-family-planner.test.ts src/lib/world-display/compaction/compacted-geometry.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-rgba-texture-page-family-submit.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts --run`
+- `npm run lint:dead`
+- `npm run lint:ts`
+- `npm run check`
+- `git diff --check`
 
 ## Historical Cleanup Source List
 

@@ -1,18 +1,18 @@
-import type { LegacyMaterialBehaviorDto } from "./material-behavior";
-import type { RenderVec4 } from "./render-math";
-import type { StagedWorldMaterialTexturePageReadiness } from "./staged-world-material-strategy";
+import type { LegacyMaterialBehaviorDto } from "../material-behavior";
+import type { RenderVec4 } from "../render-math";
+import type { StagedWorldMaterialTexturePageReadiness } from "../staged-world-material-strategy";
 import type {
 	TexturePageBinding,
 	TexturePageUsageBucket,
-} from "./texture-pages/texture-page-binding";
+} from "../texture-pages/texture-page-binding";
 import {
 	createEmptyTexturePageAtlasPlan,
 	createTexturePageAtlasPlacementsByEntryKey,
 	createTexturePageDetailAtlasPlacementsByEntryKey,
 	planTexturePageAtlas,
 	type TexturePageAtlasPlan,
-} from "./texture-pages/texture-page-atlas-planner";
-import type { Webgl2SceneDomain } from "./webgl2-scene-domain-targets";
+} from "../texture-pages/texture-page-atlas-planner";
+import type { Webgl2SceneDomain } from "../webgl2-scene-domain-targets";
 
 type CompactionFamilyBypassReason =
 	| "non-static"

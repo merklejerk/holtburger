@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import type { StagedWorldDrawUnitAssembly } from "./staged-world-assembly";
+import type { StagedWorldDrawUnitAssembly } from "../staged-world-assembly";
 import type {
 	StagedWorldDirectTextureMaterialPlan,
 	StagedWorldIndexedPalettedMaterialPlan,
-} from "./staged-world-materials";
+} from "../staged-world-materials";
 import {
 	buildCompactedGeometryBatch,
 	type CompactedGeometryPlan,

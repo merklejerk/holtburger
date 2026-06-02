@@ -120,9 +120,21 @@ describe("webgl2 world resources", () => {
 		expect(store.terrainTiles[0]?.bvhItemKeys).toEqual([
 			"terrain:landblock:12340000:quad:0",
 		]);
+		expect(store.terrainRenderCandidates).toEqual([
+			{
+				id: "terrain-tile/terrain/12340000",
+				terrainTileId: "terrain-tile/terrain/12340000",
+				landblockId: 0x12340000,
+				sceneDomain: "exterior",
+				bvhItemKeys: ["terrain:landblock:12340000:quad:0"],
+				bvhFallbackReason: null,
+				compatibilityDrawCount: 1,
+			},
+		]);
 		expect(graph.retainedPreparedAssetIds()).toEqual(["terrain/12340000"]);
 
 		const vertexBuffer = store.terrainTiles[0]?.vertexBuffer;
+		const firstCandidate = store.terrainRenderCandidates[0];
 		syncWebgl2WorldResources({
 			gl: gl.asContext(),
 			store,
@@ -142,6 +154,7 @@ describe("webgl2 world resources", () => {
 
 		expect(store.terrainTiles[0]?.vertexBuffer).toBe(vertexBuffer);
 		expect(store.terrainTiles[0]?.modelMatrix[12]).toBe(40);
+		expect(store.terrainRenderCandidates[0]).toEqual(firstCandidate);
 
 		syncWebgl2WorldResources({
 			gl: gl.asContext(),
@@ -158,6 +171,7 @@ describe("webgl2 world resources", () => {
 		});
 
 		expect(store.terrainTiles).toEqual([]);
+		expect(store.terrainRenderCandidates).toEqual([]);
 		expect(store.terrainTilesById.size).toBe(0);
 		expect(graph.retainedPreparedAssetIds()).toEqual([]);
 		expect(gl.deletedVertexArrays.length).toBeGreaterThan(0);

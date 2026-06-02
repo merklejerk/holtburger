@@ -1,6 +1,6 @@
 # Holtburger 3D Terrain Rendering Implementation Plan
 
-Status: Phase T3 resource boundary complete; immediate Phase T3B is next before Phase T4.
+Status: Phase T3B complete; Phase T4 is next.
 
 Dry-run status: reviewed against the current `apps/holtburger-3d/src/lib/world-display` module graph.
 The phase order below reflects that dry run.
@@ -627,6 +627,59 @@ Acceptance criteria:
 - No new compatibility re-export or terrain placement wrapper is introduced.
 - No submit behavior changes yet.
 
+Progress update, 2026-06-02:
+
+- Added `Webgl2TerrainTileRenderCandidate` in `webgl2/resources/terrain-tile-resources.ts`.
+- Added `deriveTerrainTileRenderCandidate(resource)`, which projects a terrain tile resource into a
+  frame-planning handoff shape containing:
+  - candidate id;
+  - terrain tile id;
+  - landblock id;
+  - exterior scene domain;
+  - quad-granular terrain BVH item keys;
+  - terrain BVH fallback reason;
+  - temporary compatibility draw count.
+- Added `Webgl2WorldResourceStore.terrainRenderCandidates`, derived from realized terrain tile
+  resources during `syncWebgl2WorldResources`.
+- Added tests proving terrain render candidates preserve terrain quad BVH keys, do not route through
+  `Webgl2WorldDrawUnit`, remain stable when the main terrain tile resource is reused across chunk
+  movement, and clear when terrain resources are released.
+
+Decisions:
+
+- Store the derived candidates in the resource store rather than deriving them ad hoc in the frame
+  planner. T4 should consume `worldStore.terrainRenderCandidates` as the resource-family handoff.
+- Keep the candidate id equal to the terrain tile resource id for now. The separate
+  `terrainTileId` field exists so T8 can add terrain draw-slice candidate ids without losing the
+  owning tile identity.
+- Keep `sceneDomain: "exterior"` on the candidate. Terrain is outdoor landblock render work and T4
+  can use this directly for scene-domain routing.
+- No compatibility re-export, placement wrapper, or submit behavior was added.
+
+Course corrections and refinements:
+
+- T4 should extend world-frame planning around a generic render-work candidate interface, then adapt
+  `Webgl2WorldDrawUnit` and `Webgl2TerrainTileRenderCandidate` into that interface. Avoid teaching
+  terrain candidates about draw-unit ids.
+- T4 should keep terrain candidate visibility quad-granular but submit the whole terrain tile
+  resource through the compatibility terrain-family route when any candidate quad is visible.
+- Terrain-specific submitted/visible metrics can now source candidate counts from
+  `terrainRenderCandidates` instead of raw scene tiles.
+
+Validation:
+
+- `npm run test:ts -- webgl2-world-resources`
+- `npm run check`
+- `npm run lint`
+
+Cleanup impact:
+
+- `Webgl2WorldResourceStore.terrainRenderCandidates` is expected to survive T4 as the terrain-family
+  handoff. Revisit the name in T11 if the final renderer vocabulary no longer includes WebGL2 in
+  resource-store types.
+- `compatibilityDrawCount` is temporary diagnostic/submit handoff data and should disappear with
+  `Webgl2TerrainTileResource.compatibilityDraws`.
+
 ## Phase T4: Render-Family Frame And Submit Orchestration
 
 Goal: loosen frame planning and submit scheduling from one universal draw-unit list.
@@ -646,7 +699,7 @@ Tasks:
   not only draw-unit candidates.
 - Update frame planning to consume:
   - non-terrain draw-unit candidates;
-  - terrain tile candidates;
+  - `Webgl2WorldResourceStore.terrainRenderCandidates`;
   - combined pass inputs.
 - Keep the existing candidate selection semantics: item-key match, explicit fallback, query fallback,
   stable category sorting, and per-category metrics.

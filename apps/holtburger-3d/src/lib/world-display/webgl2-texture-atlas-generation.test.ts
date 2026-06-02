@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import type { TexturePageAtlasPlan } from "./texture-page-atlas-planner";
-import { createWebgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
+import type { TexturePageAtlasPlan } from "./texture-pages/texture-page-atlas-planner";
+import { createWebgl2TextureAtlasGenerationResource } from "./webgl2/resources/texture-atlas-generation";
 
 describe("webgl2 texture atlas generation", () => {
 	it("packs atlas entries with gutter extrusion and uploads mipmapped rgba8 textures", () => {

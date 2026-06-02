@@ -26,7 +26,7 @@ import type {
 	MaterialTextureCapabilities,
 	RenderSurfaceTextureUploadPreparation,
 } from "./render-surface-texture-data";
-import type { TextureFilteringMode } from "./texture-sampling-policy";
+import type { TextureFilteringMode } from "./texture-pages/texture-sampling-policy";
 
 export type StagedWorldMaterialPlan =
 	| StagedWorldFlatMaterialPlan

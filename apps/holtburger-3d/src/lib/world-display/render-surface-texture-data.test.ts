@@ -5,7 +5,7 @@ import type {
 	PreparedTexturePayload,
 } from "../assets/types";
 import { prepareRenderSurfaceTextureUploadData } from "./render-surface-texture-data";
-import type { TextureSamplingPolicy } from "./texture-sampling-policy";
+import type { TextureSamplingPolicy } from "./texture-pages/texture-sampling-policy";
 
 describe("render surface texture upload data", () => {
 	it("decodes direct-color surfaces without creating Three textures", () => {

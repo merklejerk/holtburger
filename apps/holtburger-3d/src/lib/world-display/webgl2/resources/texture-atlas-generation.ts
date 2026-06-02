@@ -1,16 +1,16 @@
 import {
 	createWebgl2Texture2D,
 	type Webgl2Texture2DResource,
-} from "./webgl2-gl";
+} from "../../webgl2-gl";
 import type {
 	RgbaTexturePageAtlasEntryRecord,
 	RgbaTexturePageDetailAtlasEntry,
-} from "./compaction-family-planner";
+} from "../../compaction-family-planner";
 import type {
 	AtlasTexturePage,
 	AtlasTexturePlacement,
-} from "./atlas-layout-planner";
-import type { TexturePageAtlasPlan } from "./texture-page-atlas-planner";
+} from "../../texture-pages/atlas-layout-planner";
+import type { TexturePageAtlasPlan } from "../../texture-pages/texture-page-atlas-planner";
 
 export interface Webgl2TextureAtlasPlacementResource {
 	atlasEntryKey: string;

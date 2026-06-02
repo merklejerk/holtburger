@@ -45,7 +45,7 @@ import {
 	selectRenderSurfaceTextureSamplingPolicy,
 	type MaterialTextureSamplingPolicy,
 	type TextureSamplingPolicy,
-} from "./texture-sampling-policy";
+} from "./texture-pages/texture-sampling-policy";
 
 export type {
 	MaterialResourcePlan,

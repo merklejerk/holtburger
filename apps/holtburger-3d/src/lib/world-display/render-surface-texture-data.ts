@@ -3,7 +3,7 @@ import type {
 	PreparedTexturePayload,
 } from "../assets/types";
 import { formatHex32 } from "../landblocks";
-import type { TextureSamplingPolicy } from "./texture-sampling-policy";
+import type { TextureSamplingPolicy } from "./texture-pages/texture-sampling-policy";
 
 export interface MaterialTextureCapabilities {
 	supportsS3tc: boolean;

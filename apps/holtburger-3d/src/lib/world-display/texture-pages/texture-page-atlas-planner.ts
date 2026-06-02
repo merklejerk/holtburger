@@ -7,8 +7,8 @@ import type {
 	CompactionFamilyPlanningPolicy,
 	RgbaTexturePageAtlasEntryRecord,
 	RgbaTexturePageDetailAtlasEntry,
-} from "./compaction-family-planner";
-import type { StagedWorldMaterialTexturePageReadiness } from "./staged-world-material-strategy";
+} from "../compaction-family-planner";
+import type { StagedWorldMaterialTexturePageReadiness } from "../staged-world-material-strategy";
 
 export interface TexturePageAtlasRgbaCandidate {
 	drawUnitId: string;

@@ -16,13 +16,13 @@ import {
 	type Wrapping,
 } from "three";
 
-import type { PreparedRenderSurfacePayload } from "../assets/types";
-import { isIndexedTextureFormat } from "./indexed-texture-resources";
-import { parseLegacySamplerMaterialVariantSignature } from "./material-variants";
+import type { PreparedRenderSurfacePayload } from "../../assets/types";
+import { isIndexedTextureFormat } from "../indexed-texture-resources";
+import { parseLegacySamplerMaterialVariantSignature } from "../material-variants";
 import {
 	isSupportedCompressedFormat,
 	type MaterialTextureCapabilities,
-} from "./render-surface-texture-resources";
+} from "../render-surface-texture-resources";
 
 export type TextureWrapMode = "clamp" | "repeat";
 type TextureFilterMode = "nearest" | "linear";

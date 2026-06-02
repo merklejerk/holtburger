@@ -51,7 +51,7 @@ import { deriveStaticRenderablePartBvhItemKey } from "./static-renderable-bvh-bi
 import { staticRenderableObjectKey } from "./static-renderable-readiness";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
-import type { TextureFilteringMode } from "./texture-sampling-policy";
+import type { TextureFilteringMode } from "./texture-pages/texture-sampling-policy";
 import type {
 	TransitionPortalCandidate,
 	TransitionPortalCandidateModel,

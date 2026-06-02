@@ -9,7 +9,7 @@ import {
 } from "./compaction-family-planner";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
 import type { StagedWorldMaterialTexturePageReadiness } from "./staged-world-material-strategy";
-import type { TexturePageBinding } from "./texture-page-binding";
+import type { TexturePageBinding } from "./texture-pages/texture-page-binding";
 
 type CandidateOptions = Partial<CompactionFamilyCandidate> & {
 	entryKey?: string;

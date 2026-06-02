@@ -4,7 +4,7 @@ import {
 	type DirectRenderFamilySubmission,
 } from "./direct-render-family";
 import type { Webgl2StateCache } from "../../webgl2-state-cache";
-import type { TexturePageBinding } from "../../texture-page-binding";
+import type { TexturePageBinding } from "../../texture-pages/texture-page-binding";
 import type { Webgl2WorldDrawUnit } from "../../webgl2-world-resources";
 import type {
 	Webgl2FlatWorldProgram,
@@ -385,7 +385,6 @@ export function planWebgl2DirectDrawRoute({
 	const submission = mapWebgl2DrawUnitToDirectRenderFamilySubmission(drawUnit);
 	const indexedProgram = resolveIndexedProgram(drawUnit, programs);
 	const usesTerrainBlend = drawUnit.terrainBlend !== null;
-	const usesIndexed = drawUnit.indexedMaterial !== null;
 	const usesRgbaTexturePage = drawUnit.texture !== null && !usesTerrainBlend;
 	const texturePageBinding =
 		usesRgbaTexturePage && drawUnit.texture

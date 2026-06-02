@@ -6,7 +6,7 @@ import type {
 	Webgl2RgbaTexturePageFamilyResource,
 } from "../../webgl2-compacted-geometry-resources";
 import { applyOpaqueCompactedFamilyRenderState } from "./family-render-state";
-import type { Webgl2TextureAtlasGenerationResource } from "../../webgl2-texture-atlas-generation";
+import type { Webgl2TextureAtlasGenerationResource } from "../resources/texture-atlas-generation";
 
 export const WEBGL2_RGBA_TEXTURE_PAGE_MAX_MATERIAL_SLOTS = 128;
 

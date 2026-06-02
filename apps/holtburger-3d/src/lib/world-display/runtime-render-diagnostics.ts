@@ -1,5 +1,6 @@
 import type {
 	CompactionAlphaPolicy,
+	CompactionFamilyBypass,
 	CompactionGeometryBlocker,
 	CompactionMaterialBlocker,
 	CompactionMaterialFamily,
@@ -22,10 +23,23 @@ export interface DrawUnitRuntimeFacts {
 	materialKey: string;
 	triangleCount: number;
 	compactionDecision: "compacted" | "direct-draw";
+	finalCompactionPlan: DrawUnitFinalCompactionPlanDiagnostic;
 	compactionMaterialFamily: CompactionMaterialFamily;
 	compactionAlphaPolicy: CompactionAlphaPolicy;
 	compactionMaterialBlockers: readonly CompactionMaterialBlocker[];
 	compactionGeometryBlockers: readonly CompactionGeometryBlocker[];
+}
+
+export interface DrawUnitFinalCompactionPlanDiagnostic {
+	status:
+		| "planned-rgba-texture-page"
+		| "planned-indexed-paletted"
+		| "not-planned";
+	materialSlotKey: string | null;
+	bypasses: readonly {
+		reason: CompactionFamilyBypass["reason"];
+		detail: string;
+	}[];
 }
 
 export type DrawUnitCompactedRouteDiagnostic =

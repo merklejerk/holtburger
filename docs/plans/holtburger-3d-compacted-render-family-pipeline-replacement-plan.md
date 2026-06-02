@@ -1868,6 +1868,10 @@ Tasks:
   - Partially completed. Runtime diagnostics report `direct-retained` when no compacted family route
     exists for the staged draw unit, plus the draw unit's compaction decision, material family, alpha
     policy, material blockers, and geometry blockers.
+  - Refined after the first live trunk capture: the staged draw-unit `compactionDecision` is source
+    eligibility, not final plan membership. Runtime diagnostics now also report final planner status
+    (`planned-rgba-texture-page`, `planned-indexed-paletted`, or `not-planned`), final material slot
+    key, and exact planner bypass reasons/details for that draw unit.
 - Keep the Picker tab compact: show the closest picked part plus a short list of matching draw units,
   with long keys wrapped but no history.
   - Completed for current staged facts. The full report is copied to clipboard automatically; no
@@ -1910,12 +1914,19 @@ Progress completed:
   indicator follows camera movement and behaves like scene geometry.
 - Removed the earlier viewport-space picker marker. It was misleading because it stayed at the clicked
   canvas coordinate instead of showing which object the CPU picker resolved.
+- Fixed a selected-overlay WebGL state leak: the overlay disabled depth writes for its line pass and
+  left them disabled at the end of the frame, which could prevent the next frame from clearing depth
+  and turn the scene black when the camera moved. Frame setup now restores depth writes before
+  clearing, and the selection overlay restores depth writes after drawing.
 - Added renderer-owned runtime draw-unit diagnostics for picker reports. The browser now passes exact
   staged draw unit ids into the WebGL2 renderer and receives current resource-store facts instead of
   inferring compacted state from staged CPU data.
 - Added `runtimeRenderDiagnostics` to picker clipboard JSON and a compact Runtime Render Paths section
   in the Picker tab. This distinguishes `direct-retained`, `compacted-resource`, and
   `missing-draw-unit` for each picked staged static draw unit.
+- Added final compaction plan status to each runtime draw-unit diagnostic. This distinguishes
+  source-level compaction eligibility from final family-plan membership, which matters when atlas or
+  material-table pressure drops an otherwise eligible draw unit before WebGL resources are created.
 - Preserved source RGBA material slot keys on WebGL2 compacted family material slots so diagnostics can
   match a draw unit to its final atlas slot without string containment heuristics.
 - Added a focused unit test for UV diagnostic summaries.
@@ -1944,21 +1955,32 @@ Course correction:
   must be renderer-owned when the question is "which game object/renderable did this ray select?".
   The static selection overlay therefore bypasses the currently non-rendering debug-overlay model path
   and uses the existing WebGL2 flat world program directly.
+- Renderer-owned overlays must leave global WebGL state safe for the next frame. In particular,
+  `depthMask(false)` is not a harmless local detail: the following frame's `gl.clear` can observe that
+  write mask and leave stale depth behind.
 - The WebGL2 cell/portal debug overlay path remains a cleanup target: `setDebugOverlayScene()` still
   updates metrics rather than rendering those overlay models. Do not route picker object selection
   through that path until debug overlays are made real renderer submissions.
 - The runtime diagnostic intentionally uses exact staged draw unit ids from the picker report as the
   join key. It does not scan render keys inside renderer resources. This keeps object-pick UI text out
   of the renderer's resource matching rules.
+- The first picked problematic trunk (`setup-model/02000258`, part `2`, `gfx-obj/0100379f`,
+  `render-surface/06006bc2`) reported source eligibility as compacted (`textured-opaque`,
+  repeat/repeat, no blockers) but runtime submission as `direct-retained` with no compacted routes.
+  That means the visible currently-correct trunk was not proving the compacted RGBA repeat path; the
+  missing distinction was final planner membership versus source eligibility.
 
 Immediate next step:
 
-- Capture the problematic trunk again with the new picker report. If the draw unit reports
-  `direct-retained`, the artifact is not currently exercising the compacted path and the next step is
-  to inspect why it is not routed into an RGBA texture-page compacted resource. If it reports
-  `compacted-resource`, compare the final RGBA material slot `atlasRect`, `atlasTextureIndex`, and
-  slice material slot keys against the staged `atlasEligibility` entry for `render-surface/06006bc2`.
-  Do not add a fallback renderer path for the bark issue.
+- Capture the problematic trunk again with the refined picker report. If `submissionPath` is
+  `direct-retained` and `finalPlan=not-planned`, inspect `planBypasses` first. A
+  `material-table-overflow` bypass would mean the next architectural step is reducing RGBA material
+  slot pressure or splitting RGBA family batches deliberately, not touching shader UV math.
+- If `submissionPath` is `direct-retained` but `finalPlan=planned-rgba-texture-page`, fix resource
+  creation or runtime route diagnostics because the final plan and WebGL family resources disagree.
+- If `submissionPath` is `compacted-resource`, compare the final RGBA material slot `atlasRect`,
+  `atlasTextureIndex`, and slice material slot keys against the staged `atlasEligibility` entry for
+  `render-surface/06006bc2`. Do not add a fallback renderer path for the bark issue.
 - If `compacted-resource` is present and the object still looks wrong, add a focused regression test
   around RGBA repeat UVs whose span exceeds `1.0` in V and assert that the final compacted material slot
   maps to the source atlas member rect, not the whole atlas page.
@@ -1972,6 +1994,113 @@ Exit criteria:
 - We can name the exact mismatch causing the bark atlas-sheet pattern or identify the next missing
   diagnostic field.
 - The next renderer change is backed by a failing unit or diagnostic test.
+
+## Phase C8.10: Family-Wide Capacity Partitioning For Compacted Batches
+
+Status: Not started.
+
+Purpose: fix the naive material-table overflow behavior across all compacted render families. Shader
+material table capacity is a draw/batch partitioning constraint, not a reason to retain otherwise
+eligible static draw units on the direct path.
+
+Architectural constraint:
+
+- Do not create bespoke geometry compactors per material family. Geometry compaction stays shared:
+  family planning selects bounded partitions and assigns local material slot indices, then every family
+  feeds the same `buildCompactedGeometryBatch()` path.
+- Family-specific code may build material payloads, draw-slice payloads, resource bindings, and submit
+  behavior. It must not duplicate draw-unit geometry packing, compacted index/range construction, or
+  landblock-origin batch construction.
+- The intended shape is:
+  `shared candidate partitioning -> family-specific material/slice payloads -> shared
+  CompactedGeometryBatch -> family-specific resource binding/submission`.
+
+Terminology:
+
+- `CompactedGeometryBatch`: the compacted geometry object produced by `buildCompactedGeometryBatch()`.
+  It owns one compacted position/UV/material-slot/index buffer set and becomes one
+  `Webgl2CompactedGeometryBatchResource` with a WebGL VAO/VBO/EBO set.
+- Family resource: the material-family-specific resource tied to a `CompactedGeometryBatch`
+  (`Webgl2RgbaTexturePageFamilyResource`, `Webgl2IndexedPalettedFamilyResource`, future alpha/cutout
+  resources). It owns the family material table and draw slices for that compacted geometry batch.
+- Draw slice: the submit-time range inside a compacted batch that shares the family pipeline state
+  needed for one draw call, such as atlas page, render state, indexed page/palette page, detail page,
+  and visibility partition.
+
+Current problem:
+
+- The planner currently dedupes material table slots, sorts them, keeps only
+  `maxMaterialSlotsPerDraw` (`128` today), and marks all remaining otherwise eligible draw units as
+  `material-table-overflow`.
+- That behavior exists in both RGBA texture-page material slots and indexed-paletted material table
+  records. It is especially visible on `setup-model/02000258` / `gfx-obj/0100379f` /
+  `render-surface/06006bc2`: the trunk is source-eligible for `textured-opaque` compaction but final
+  planning reports `not-planned` with `material-table-overflow`, so it remains direct draw.
+- This is not an atlas overflow. The base/detail atlas planners already roll entries into up to
+  `maxAtlasTextureCount` atlas pages (`8` today) and only report `atlas-full`/`detail-atlas-full`
+  after those pages are exhausted.
+
+Tasks:
+
+- Audit and document every current compaction capacity limit:
+  - material table slots: bounded by shader uniform arrays in RGBA and indexed-paletted family
+    pipelines;
+  - base atlas pages: bounded by `maxAtlasTextureCount`;
+  - detail atlas pages: bounded by `maxAtlasTextureCount`;
+  - source texture dimensions: bounded by `maxAtlasTextureSize` plus gutters;
+  - compacted geometry index width: already rolls from `Uint16Array` to `Uint32Array`, so it is not a
+    current terminal batch-capacity blocker.
+- Add planner diagnostics for:
+  - unique RGBA atlas entries versus unique RGBA material slots;
+  - unique indexed material records;
+  - material slots per planned family partition;
+  - draw units retained because of true unsupported family features versus draw units retained because
+    of hard resource limits.
+- Replace terminal `material-table-overflow` for compacted families with shared partitioning:
+  - partition family candidates into as many bounded material-table partitions as needed;
+  - each partition produces its own family-local material slot table and draw-unit material slot map;
+  - each partition produces one or more `CompactedGeometryBatch` plans scoped by the existing
+    landblock/chunk origin requirement;
+  - draw slices remain family-specific and must not span incompatible atlas pages, indexed pages,
+    palette pages, detail pages, render states, alpha policies, or visibility partitions.
+- Make the partitioning helper family-agnostic:
+  - input: candidates, material table key selector, hard material table capacity, required slice state
+    key selector;
+  - output: bounded partitions with local material slot indices and source draw-unit ids;
+  - RGBA and indexed-paletted families should consume the same partitioning primitive.
+- Keep family-specific planning shallow:
+  - RGBA supplies its material slot payload and slice state keys (`atlasTextureIndex`, detail atlas
+    texture, render state, visibility partition);
+  - indexed-paletted supplies its material table record payload and slice state keys (`indexPageKey`,
+    `palettePageKey`, index format, detail atlas texture, visibility partition);
+  - future alpha/cutout/blended families supply their own payload/slice state keys without introducing
+    a new compaction subsystem.
+- Keep true atlas/resource failures explicit:
+  - `source-texture-too-large`, `atlas-full`, and `detail-atlas-full` can remain terminal until the
+    atlas allocator itself grows streaming or more page capacity;
+  - they should be reported separately from material table partitioning so they do not look like family
+    feature blockers.
+- Add tests before implementation changes:
+  - RGBA: with `maxMaterialSlotsPerDraw=1`, two eligible materials should produce two compacted
+    partitions/batches and zero `material-table-overflow` bypasses.
+  - Indexed-paletted: with `maxMaterialSlotsPerDraw=1`, two eligible indexed records should produce
+    two compacted partitions/batches and zero `material-table-overflow` bypasses.
+  - Atlas capacity: with `maxAtlasTextureCount=1` and insufficient space, overflow should still report
+    `atlas-full` and not be disguised as material-table overflow.
+  - Geometry: a partition with more than 65,535 vertices should still create `Uint32Array` indices
+    rather than splitting solely for index width.
+- Update runtime picker diagnostics to report the final partition/batch identity for planned draw
+  units, so a source-eligible trunk can show which bounded family partition owns it.
+
+Exit criteria:
+
+- The picked `06006bc2` trunk no longer reports `finalPlan=not-planned` solely because of
+  `material-table-overflow`.
+- Material-table overflow no longer appears as a terminal bypass for RGBA or indexed-paletted
+  compaction when additional bounded partitions can be created.
+- Existing atlas overflow reasons remain explicit and unchanged.
+- Diagnostics show material-table partition counts and per-partition slot counts.
+- The bark/repeat atlas-sampling investigation can continue against an actually compacted trunk.
 
 ## Cleanup Targets
 

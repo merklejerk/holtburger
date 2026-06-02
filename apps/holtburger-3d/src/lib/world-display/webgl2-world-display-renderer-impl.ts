@@ -1098,6 +1098,11 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			width: canvas.width,
 			height: canvas.height,
 		});
+		currentResources.stateCache.setDepthState({
+			enabled: true,
+			write: true,
+			func: gl.LEQUAL,
+		});
 		gl.clearColor(...WEBGL2_CLEAR_COLOR);
 		gl.clearDepth(1);
 		clearBoundFramebuffer({
@@ -1283,6 +1288,11 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			SELECTED_STATIC_RENDERABLE_BOUNDS_COLOR,
 		);
 		gl.drawArrays(gl.LINES, 0, overlay.vertexCount);
+		stateCache.setDepthState({
+			enabled: true,
+			write: true,
+			func: gl.LEQUAL,
+		});
 	}
 
 	function syncSelectedStaticRenderableOverlay(

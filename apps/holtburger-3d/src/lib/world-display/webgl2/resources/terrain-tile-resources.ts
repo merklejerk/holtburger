@@ -4,6 +4,7 @@ import type { RenderMat4 } from "../../render-math";
 import type { RenderBvhItemKey } from "../../prepared-bvh-visibility";
 import type { StagedWorldIndexedGeometry } from "../../staged-world-geometry";
 import type { TerrainSceneTile } from "../../terrain-scene";
+import type { Webgl2SceneDomain } from "../../webgl2-scene-domain-targets";
 import type {
 	Webgl2BufferResource,
 	Webgl2Texture2DResource,
@@ -80,8 +81,34 @@ export interface Webgl2TerrainTileResource {
 	compatibilityDraws: Webgl2TerrainTileCompatibilityDrawResource[];
 }
 
-export function terrainTileResourceId(tile: Pick<TerrainSceneTile, "assetId">): string {
+export interface Webgl2TerrainTileRenderCandidate {
+	id: string;
+	terrainTileId: string;
+	landblockId: number;
+	sceneDomain: Webgl2SceneDomain;
+	bvhItemKeys: readonly RenderBvhItemKey[];
+	bvhFallbackReason: string | null;
+	compatibilityDrawCount: number;
+}
+
+export function terrainTileResourceId(
+	tile: Pick<TerrainSceneTile, "assetId">,
+): string {
 	return `terrain-tile/${tile.assetId}`;
+}
+
+export function deriveTerrainTileRenderCandidate(
+	resource: Webgl2TerrainTileResource,
+): Webgl2TerrainTileRenderCandidate {
+	return {
+		id: resource.id,
+		terrainTileId: resource.id,
+		landblockId: resource.landblockId,
+		sceneDomain: "exterior",
+		bvhItemKeys: [...resource.bvhItemKeys],
+		bvhFallbackReason: resource.bvhFallbackReason,
+		compatibilityDrawCount: resource.compatibilityDraws.length,
+	};
 }
 
 export function describeTerrainTileGeometrySignature(

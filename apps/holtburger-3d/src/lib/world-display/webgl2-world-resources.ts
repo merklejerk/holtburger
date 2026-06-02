@@ -111,12 +111,14 @@ import {
 	collectTerrainTileCompatibilityTextureKeys,
 	describeTerrainTileGeometrySignature,
 	describeTerrainTileGraphSignature,
+	deriveTerrainTileRenderCandidate,
 	destroyWebgl2TerrainTileCompatibilityDraw,
 	destroyWebgl2TerrainTileResource,
 	terrainTileResourceId,
 	type Webgl2TerrainBlendResources,
 	type Webgl2TerrainTextureBinding,
 	type Webgl2TerrainTileCompatibilityDrawResource,
+	type Webgl2TerrainTileRenderCandidate,
 	type Webgl2TerrainTileResource,
 	type Webgl2TerrainTileReadiness,
 } from "./webgl2/resources/terrain-tile-resources";
@@ -164,6 +166,7 @@ export interface Webgl2WorldResourceStore {
 	drawUnitsById: Map<string, Webgl2WorldDrawUnit>;
 	terrainTiles: Webgl2TerrainTileResource[];
 	terrainTilesById: Map<string, Webgl2TerrainTileResource>;
+	terrainRenderCandidates: Webgl2TerrainTileRenderCandidate[];
 	graphLeasesByDrawUnitId: Map<string, RendererResourceGraphLease>;
 	graphSignaturesByDrawUnitId: Map<string, string>;
 	graphLeasesByTerrainTileId: Map<string, RendererResourceGraphLease>;
@@ -280,6 +283,7 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		drawUnitsById: new Map(),
 		terrainTiles: [],
 		terrainTilesById: new Map(),
+		terrainRenderCandidates: [],
 		graphLeasesByDrawUnitId: new Map(),
 		graphSignaturesByDrawUnitId: new Map(),
 		graphLeasesByTerrainTileId: new Map(),
@@ -484,6 +488,9 @@ export function syncWebgl2WorldResources({
 
 	store.drawUnits = nextDrawUnits;
 	store.terrainTiles = nextTerrainTiles;
+	store.terrainRenderCandidates = store.terrainTiles.map(
+		deriveTerrainTileRenderCandidate,
+	);
 	store.terrainTileCount = store.terrainTiles.length;
 	store.terrainTileCompatibilityDrawCount = store.terrainTiles.reduce(
 		(total, tile) => total + tile.compatibilityDraws.length,
@@ -701,6 +708,7 @@ export function destroyWebgl2WorldResources(
 	store.drawUnitsById.clear();
 	store.terrainTiles = [];
 	store.terrainTilesById.clear();
+	store.terrainRenderCandidates = [];
 	store.graphLeasesByDrawUnitId.clear();
 	store.graphSignaturesByDrawUnitId.clear();
 	store.graphLeasesByTerrainTileId.clear();

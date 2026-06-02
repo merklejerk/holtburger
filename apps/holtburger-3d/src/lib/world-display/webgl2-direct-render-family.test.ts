@@ -7,10 +7,10 @@ import {
 } from "./webgl2/families/direct-render-family";
 import type {
 	Webgl2IndexedMaterialResources,
-	Webgl2TerrainBlendResources,
 	Webgl2WorldDrawUnit,
 } from "./webgl2-world-resources";
 import type { Webgl2BufferResource, Webgl2Texture2DResource } from "./webgl2-gl";
+import type { Webgl2TerrainBlendResources } from "./webgl2/resources/terrain-tile-resources";
 
 describe("webgl2 direct render family views", () => {
 	it("derives direct geometry layout from the actual VAO inputs", () => {

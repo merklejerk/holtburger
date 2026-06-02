@@ -9,6 +9,7 @@ import {
 	partitionWebgl2SceneDomainDrawUnits,
 	planWebgl2FlatWorldSubmitOrder,
 	planWebgl2PortalMaskSubmitOrder,
+	planWebgl2TerrainTileSubmitOrder,
 	planWebgl2WorldSubmitPassSchedule,
 	submitWebgl2FlatWorldDrawUnits,
 	submitWebgl2FlatWorldFrame,
@@ -22,6 +23,7 @@ import type {
 	Webgl2IndexedPalettedFamilyResource,
 	Webgl2RgbaTexturePageFamilyResource,
 } from "./webgl2/resources/compacted-geometry-resources";
+import type { Webgl2TerrainTileResource } from "./webgl2/resources/terrain-tile-resources";
 import type { Webgl2TextureAtlasGenerationResource } from "./webgl2/resources/texture-atlas-generation";
 import type { Webgl2RgbaTexturePageFamilyWorldProgram } from "./webgl2/families/rgba-texture-page-family-submit";
 import type { Webgl2IndexedPalettedFamilyWorldProgram } from "./webgl2/families/indexed-paletted-family-submit";
@@ -85,6 +87,34 @@ describe("planWebgl2FlatWorldSubmitOrder", () => {
 				(drawUnit) => drawUnit.id,
 			),
 		).toEqual(["mask"]);
+	});
+
+	it("plans visible terrain tiles separately from draw units", () => {
+		const terrainTilesById = new Map<string, Webgl2TerrainTileResource>([
+			["terrain-tile/a", createTerrainTile({ id: "terrain-tile/a" })],
+		]);
+
+		expect(
+			planWebgl2TerrainTileSubmitOrder(
+				createFrameWithTerrainTiles(["terrain-tile/a"]),
+				terrainTilesById,
+			).map((tile) => tile.id),
+		).toEqual(["terrain-tile/a"]);
+		expect(
+			planWebgl2FlatWorldSubmitOrder(
+				createFrameWithTerrainTiles(["terrain-tile/a"]),
+				new Map(),
+			),
+		).toEqual([]);
+	});
+
+	it("fails when frame visibility references a missing terrain tile", () => {
+		expect(() =>
+			planWebgl2TerrainTileSubmitOrder(
+				createFrameWithTerrainTiles(["missing-terrain"]),
+				new Map(),
+			),
+		).toThrow("missing WebGL2 terrain tile missing-terrain");
 	});
 });
 
@@ -1111,11 +1141,13 @@ describe("submitWebgl2FlatWorldFrame", () => {
 
 function createFrame(drawUnitIds: readonly string[]): WorldRenderFrame {
 	return {
+		cameraFrame: createCameraFrame(),
 		viewProjectionMatrix: createIdentityMat4(),
 		passes: [
 			{
 				id: "world",
 				draws: drawUnitIds.map((drawUnitId) => ({
+					kind: "draw-unit" as const,
 					drawUnitId,
 					category: "static",
 				})),
@@ -1138,6 +1170,101 @@ function createFrame(drawUnitIds: readonly string[]): WorldRenderFrame {
 			fallbackCountsByCategory: createCategoryCounts(),
 			representedItemKeyCountsByCategory: createCategoryCounts(),
 		},
+	};
+}
+
+function createFrameWithTerrainTiles(
+	terrainTileIds: readonly string[],
+): WorldRenderFrame {
+	return {
+		cameraFrame: createCameraFrame(),
+		viewProjectionMatrix: createIdentityMat4(),
+		passes: [
+			{
+				id: "world",
+				draws: terrainTileIds.map((terrainTileId) => ({
+					kind: "terrain-tile" as const,
+					terrainTileId,
+					category: "terrain" as const,
+				})),
+			},
+		],
+		metrics: {
+			registeredBatchCount: terrainTileIds.length,
+			keyedBatchCount: 0,
+			representedItemKeyCount: 0,
+			visibleItemKeyCount: 0,
+			candidateBatchCount: terrainTileIds.length,
+			itemKeyMatchedBatchCount: 0,
+			unboundFallbackBatchCount: 0,
+			explicitFallbackBatchCount: 0,
+			queryFallbackBatchCount: 0,
+			fallbackReasonCount: 0,
+			fallbackReasonSamples: [],
+			candidateCountsByCategory: createCategoryCounts(),
+			visibleDrawCountsByCategory: createCategoryCounts(),
+			fallbackCountsByCategory: createCategoryCounts(),
+			representedItemKeyCountsByCategory: createCategoryCounts(),
+		},
+	};
+}
+
+function createCameraFrame(): WorldRenderFrame["cameraFrame"] {
+	return {
+		position: { x: 0, y: 0, z: 10 },
+		target: { x: 0, y: 0, z: 0 },
+		up: { x: 0, y: 1, z: 0 },
+		fovDegrees: 60,
+		aspect: 1,
+		near: 0.1,
+		far: 100,
+	};
+}
+
+function createTerrainTile({
+	id,
+}: {
+	id: string;
+}): Webgl2TerrainTileResource {
+	return {
+		id,
+		assetId: id.replace(/^terrain-tile\//, ""),
+		landblockId: 0x12340000,
+		label: "1234",
+		placementKey: "landblock/1234ffff",
+		geometrySignature: "terrain-geo",
+		vertexArray: createVertexArrayResource(),
+		vertexBuffer: createBufferResource(),
+		uvBuffer: null,
+		indexBuffer: createBufferResource(),
+		indexType: 0,
+		vertexCount: 0,
+		triangleCount: 0,
+		modelMatrix: createIdentityMat4(),
+		readiness: {
+			status: "fallback-debug",
+			reason: "test",
+		},
+		dataSource: "unknown",
+		bvhItemKeys: ["terrain:landblock:12340000:quad:0"],
+		bvhFallbackReason: null,
+		compatibilityDraws: [],
+	};
+}
+
+function createVertexArrayResource() {
+	return {
+		vertexArray: {} as WebGLVertexArrayObject,
+		dispose() {},
+	};
+}
+
+function createBufferResource() {
+	return {
+		buffer: {} as WebGLBuffer,
+		target: 0,
+		byteLength: 0,
+		dispose() {},
 	};
 }
 

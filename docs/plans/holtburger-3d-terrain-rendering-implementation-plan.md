@@ -1,6 +1,6 @@
 # Holtburger 3D Terrain Rendering Implementation Plan
 
-Status: Phase T3B complete; Phase T4 is next.
+Status: Phase T4 complete; Phase T5 is next.
 
 Dry-run status: reviewed against the current `apps/holtburger-3d/src/lib/world-display` module graph.
 The phase order below reflects that dry run.
@@ -720,6 +720,75 @@ Acceptance criteria:
 - Existing non-terrain draw-unit and compacted family behavior is unchanged.
 - Terrain resources can be visible and submitted without looking up a `Webgl2WorldDrawUnit`.
 
+Progress update, 2026-06-02:
+
+- Extended world frame planning so visible work emits discriminated draw refs:
+  - `kind: "draw-unit"` with `drawUnitId` for non-terrain draw-unit work;
+  - `kind: "terrain-tile"` with `terrainTileId` for terrain tile resources.
+- Added `terrain-tile` to the frame candidate vocabulary while preserving the existing terrain
+  category ordering, fallback behavior, visible item-key matching, query fallback behavior, and
+  per-category metrics.
+- Updated the WebGL2 renderer frame build to pass non-terrain draw units plus
+  `worldStore.terrainRenderCandidates`. Generic terrain draw units are no longer fed into the world
+  render frame.
+- Added `planWebgl2TerrainTileSubmitOrder(frame, terrainTilesById)` so terrain tile visibility is
+  resolved from frame draw refs without looking up `Webgl2WorldDrawUnit`.
+- Updated flat-world submit to accept visible `Webgl2TerrainTileResource` values and render their
+  `compatibilityDraws` through a terrain-family compatibility pass.
+- Updated scene-domain rendering to submit visible terrain tiles only through the exterior target.
+  Terrain remains in shared frustum/portal-aware frame planning, and the scene-domain renderer no
+  longer needs terrain to be partitioned as a draw unit.
+- Added terrain submit metrics:
+  - visible terrain tile count;
+  - visible terrain compatibility draw count;
+  - submitted terrain tile count;
+  - terrain compatibility draw-call count;
+  - terrain submitted triangle count.
+- Added debug-color compatibility material data for fallback-debug terrain resource draws so
+  unresolved terrain materials remain renderable after the old terrain draw-unit submit path is
+  bypassed.
+- Added tests for terrain tile frame refs, terrain tile submit planning, and frame helper behavior
+  around draw-unit versus terrain-tile refs.
+
+Decisions:
+
+- T4 excludes `Webgl2WorldDrawUnit.kind === "terrain"` from frame candidates but does not delete old
+  terrain draw-unit realization yet. Deletion stays in T9/T11 after the terrain page/layer work is in
+  place and parity is easier to validate.
+- The terrain compatibility submit pass intentionally lives in `webgl2-world-submit.ts` for now
+  because it reuses the current inline terrain blend shader program and direct submit state. Move it
+  to `webgl2/families/terrain-family-submit.ts` during T5-T7 when terrain page resources are added.
+- Scene-domain terrain is submitted to the exterior target only. This matches terrain's outdoor
+  landblock semantics and keeps portal compositing from duplicating terrain in interior targets.
+- `WorldRenderDraw` remains private to `world-render-frame.ts`; submit code consumes it through
+  `WorldRenderFrame`, so there is no new public type export.
+
+Course corrections and refinements:
+
+- T5 should build terrain color/mask/detail page resources around `Webgl2TerrainTileResource`, not
+  around old direct draw-unit texture-page bindings.
+- T5 should keep the compatibility submit route active while adding page-family resources; replacing
+  the shader payload belongs to T6/T7.
+- T9/T11 cleanup should now include the old generic terrain draw-unit emission and the temporary
+  terrain compatibility submit functions in `webgl2-world-submit.ts`.
+- No immediate interim phase is needed before T5. The remaining debt is expected migration debt and
+  has explicit deletion phases.
+
+Validation:
+
+- `npm run test:ts -- world-render-frame webgl2-world-submit`
+- `npm run test:ts -- world-render-frame webgl2-world-submit webgl2-world-resources`
+- `npm run check`
+- `npm run lint`
+
+Cleanup impact:
+
+- `submitWebgl2TerrainTileCompatibilityPass`, `uploadTerrainBlendSamplerUniforms`, and the terrain
+  compatibility metrics are temporary compatibility-path code until the terrain family submit module
+  owns final page/layer resources.
+- Old terrain `Webgl2WorldDrawUnit` realization still exists but is no longer used for world frame
+  submit. Delete it after terrain atlas/layer resources can fully replace the pcode draw-unit path.
+
 ## Phase T5: Isolated Terrain Texture Page Families
 
 Goal: add terrain-only atlas/page planning for color, mask, and detail inputs.
@@ -731,6 +800,7 @@ Primary targets:
 - `apps/holtburger-3d/src/lib/world-display/terrain-tile-plan.ts` or equivalent new module
 - WebGL2 texture/page resource modules
 - terrain resource realization modules added in Phase T3
+- terrain compatibility submit route added in Phase T4
 
 Tasks:
 
@@ -895,6 +965,9 @@ Tasks:
   page/layer resources directly.
 - Delete old terrain draw-unit resource creation from `createOrReuseWebgl2DrawUnit` once T4 routes
   terrain frame/submit through terrain tile resources.
+- Delete `submitWebgl2TerrainTileCompatibilityPass` and `uploadTerrainBlendSamplerUniforms` from
+  `webgl2-world-submit.ts` once final terrain-family submit lives under
+  `webgl2/families/terrain-family-submit.ts`.
 - Consolidate terrain diagnostics around terrain tile resources and terrain slices.
 
 Acceptance criteria:
@@ -987,6 +1060,8 @@ Delete or rewrite these terrain-specific old-path concepts by the end of Phase T
   a similar payload temporarily, it should be renamed to terrain-family vocabulary.
 - `Webgl2TerrainTileResource.compatibilityDraws` and
   `Webgl2TerrainTileCompatibilityDrawResource`, introduced in T3 as the temporary old-shader bridge.
+- `submitWebgl2TerrainTileCompatibilityPass` and `uploadTerrainBlendSamplerUniforms`, introduced in
+  T4 as the temporary world-submit bridge.
 - direct-family terrain routes and sampler units in `direct-render-family.ts` and
   `direct-family-adapters.ts`.
 - terrain blend binding collection in `texture-page-binding.ts`.

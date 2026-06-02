@@ -19,6 +19,7 @@ type WorldRenderCategory =
 
 type WorldRenderCandidateKind =
 	| "terrain"
+	| "terrain-tile"
 	| "structured-interior"
 	| "static"
 	| "portal-mask";
@@ -30,8 +31,21 @@ export interface WorldRenderCandidate {
 	bvhFallbackReason: string | null;
 }
 
-interface WorldRenderDraw {
-	drawUnitId: string;
+type WorldRenderDraw =
+	| {
+			kind: "draw-unit";
+			drawUnitId: string;
+			category: WorldRenderCategory;
+	  }
+	| {
+			kind: "terrain-tile";
+			terrainTileId: string;
+			category: "terrain";
+	  };
+
+interface SelectedWorldRenderDraw {
+	candidateId: string;
+	draw: WorldRenderDraw;
 	category: WorldRenderCategory;
 }
 
@@ -70,7 +84,7 @@ export interface WorldRenderFrame {
 }
 
 interface WorldRenderCandidateSelection {
-	draws: WorldRenderDraw[];
+	draws: SelectedWorldRenderDraw[];
 	metrics: WorldRenderFrameMetrics;
 }
 
@@ -112,7 +126,7 @@ export function buildWorldRenderFrame({
 	return {
 		cameraFrame,
 		viewProjectionMatrix,
-		passes: [{ id: "world", draws: selection.draws }],
+		passes: [{ id: "world", draws: selection.draws.map((draw) => draw.draw) }],
 		metrics: selection.metrics,
 	};
 }
@@ -196,7 +210,7 @@ function categorizeWorldRenderCandidate(candidate: {
 	if (candidate.id.startsWith("static-staged/")) {
 		return "static-staged";
 	}
-	if (candidate.kind === "terrain") {
+	if (candidate.kind === "terrain" || candidate.kind === "terrain-tile") {
 		return "terrain";
 	}
 	if (candidate.kind === "portal-mask") {
@@ -228,7 +242,7 @@ function selectWorldRenderCandidates(
 	let unboundFallbackBatchCount = 0;
 	let explicitFallbackBatchCount = 0;
 	let queryFallbackBatchCount = 0;
-	const draws: WorldRenderDraw[] = [];
+	const draws: SelectedWorldRenderDraw[] = [];
 
 	for (const candidate of candidates) {
 		const category = categorizeWorldRenderCandidate(candidate);
@@ -255,7 +269,11 @@ function selectWorldRenderCandidates(
 			continue;
 		}
 
-		draws.push({ drawUnitId: candidate.id, category });
+		draws.push({
+			candidateId: candidate.id,
+			draw: createWorldRenderDraw(candidate, category),
+			category,
+		});
 		visibleDrawCountsByCategory[category] += 1;
 		if (itemKeyMatched) {
 			itemKeyMatchedBatchCount += 1;
@@ -340,13 +358,31 @@ function resolveBatchFallbackReason({
 	return null;
 }
 
+function createWorldRenderDraw(
+	candidate: WorldRenderCandidate,
+	category: WorldRenderCategory,
+): WorldRenderDraw {
+	if (candidate.kind === "terrain-tile") {
+		return {
+			kind: "terrain-tile",
+			terrainTileId: candidate.id,
+			category: "terrain",
+		};
+	}
+	return {
+		kind: "draw-unit",
+		drawUnitId: candidate.id,
+		category,
+	};
+}
+
 function compareWorldRenderDraws(
-	left: WorldRenderDraw,
-	right: WorldRenderDraw,
+	left: SelectedWorldRenderDraw,
+	right: SelectedWorldRenderDraw,
 ): number {
 	return (
 		compareCategory(left.category, right.category) ||
-		compareStableAsciiStrings(left.drawUnitId, right.drawUnitId)
+		compareStableAsciiStrings(left.candidateId, right.candidateId)
 	);
 }
 

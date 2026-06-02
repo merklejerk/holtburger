@@ -1,6 +1,6 @@
 import { formatHex32 } from "../../../landblocks";
 import type { TerrainBlendPlan } from "../../terrain-blend-plan";
-import type { RenderMat4 } from "../../render-math";
+import type { RenderMat4, RenderVec4 } from "../../render-math";
 import type { RenderBvhItemKey } from "../../prepared-bvh-visibility";
 import type { StagedWorldIndexedGeometry } from "../../staged-world-geometry";
 import type { TerrainSceneTile } from "../../terrain-scene";
@@ -56,6 +56,7 @@ export interface Webgl2TerrainTileCompatibilityDrawResource {
 	vertexCount: number;
 	triangleCount: number;
 	blend: Webgl2TerrainBlendResources | null;
+	debugColor: RenderVec4 | null;
 	preparedAssetIds: readonly string[];
 }
 

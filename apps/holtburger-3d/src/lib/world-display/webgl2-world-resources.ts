@@ -29,7 +29,12 @@ import type {
 } from "./indexed-material-data";
 import type { StagedWorldMaterialPlanCache } from "./staged-world-materials";
 import type { ResolvedRegionDetailOverlayPlan } from "./region-detail-overlays";
-import { createTranslationMat4, type RenderMat4, type RenderVec4 } from "./render-math";
+import {
+	buildDebugColor,
+	createTranslationMat4,
+	type RenderMat4,
+	type RenderVec4,
+} from "./render-math";
 import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import type { RenderChunkTransform } from "./render-anchor";
 import { WORLD_RENDER_DOMAIN } from "./render-domains";
@@ -930,6 +935,7 @@ function createWebgl2TerrainTileCompatibilityDraws({
 				geometry,
 				pcode: null,
 				blend: null,
+				debugColor: buildDebugColor(`terrain/${tile.landblockId}`),
 				preparedAssetIds: [tile.assetId],
 			}),
 		];
@@ -958,6 +964,7 @@ function createWebgl2TerrainTileCompatibilityDraws({
 				geometry,
 				pcode: plan.pcode,
 				blend,
+				debugColor: null,
 				preparedAssetIds: [
 					tile.assetId,
 					tile.materialResources.terrainMaterialAssetId,
@@ -974,6 +981,7 @@ function createWebgl2TerrainTileCompatibilityDraw({
 	geometry,
 	pcode,
 	blend,
+	debugColor,
 	preparedAssetIds,
 }: {
 	gl: WebGL2RenderingContext;
@@ -981,6 +989,7 @@ function createWebgl2TerrainTileCompatibilityDraw({
 	geometry: ReturnType<typeof buildStagedTerrainGeometry>;
 	pcode: number | null;
 	blend: Webgl2TerrainBlendResources | null;
+	debugColor: RenderVec4 | null;
 	preparedAssetIds: readonly string[];
 }): Webgl2TerrainTileCompatibilityDrawResource {
 	const geometrySignature = describeTerrainTileGeometrySignature(geometry);
@@ -992,6 +1001,7 @@ function createWebgl2TerrainTileCompatibilityDraw({
 		vertexCount: geometry.indices.length,
 		triangleCount: geometry.triangleCount,
 		blend,
+		debugColor,
 		preparedAssetIds,
 	};
 }

@@ -524,9 +524,9 @@ export function syncWebgl2WorldResources({
 		store.texturePageAtlasPlan.rgbaAtlasReadyDrawUnitIds.length;
 	store.detailAtlasReadyDrawUnitCount =
 		store.texturePageAtlasPlan.detailAtlasReadyDrawUnitIds.length;
-	store.atlasFailureReasonCount = store.texturePageAtlasPlan.bypasses.length;
+	store.atlasFailureReasonCount = store.texturePageAtlasPlan.failures.length;
 	store.atlasFailureSamples = summarizeDiagnosticReasons(
-		store.texturePageAtlasPlan.bypasses.map((bypass) => bypass.reason),
+		store.texturePageAtlasPlan.failures.map((failure) => failure.reason),
 		8,
 	);
 	store.compactionCandidateDrawUnitCount =
@@ -806,15 +806,23 @@ function createOrReuseWebgl2DrawUnit({
 		previous.directGeometryLayout =
 			deriveDirectGeometrySubmissionLayout(previous);
 		previous.compactionEligibility = createCompactionEligibility({
-			kind: previous.kind,
-			owningLandblockId: previous.owningLandblockId,
-			materialKind: previous.materialKind,
-			hasUvBuffer: previous.uvBuffer !== null,
-			texturePageBindings: previous.texturePageBindings,
-			materialBehavior: previous.materialBehavior,
-			hasDetailOverlay: previous.detailOverlay !== null,
-			detailAtlasEntry: previous.detailOverlay?.atlasEntry ?? null,
-			texturePageReadiness: previous.texturePageReadiness,
+			geometry: {
+				kind: previous.kind,
+				owningLandblockId: previous.owningLandblockId,
+				hasUvBuffer: previous.uvBuffer !== null,
+			},
+			material: {
+				kind: previous.materialKind,
+				behavior: previous.materialBehavior,
+				texturePages: {
+					base: previous.texturePageReadiness,
+					bindings: previous.texturePageBindings,
+				},
+				detailOverlay: {
+					hasOverlay: previous.detailOverlay !== null,
+					atlasEntry: previous.detailOverlay?.atlasEntry ?? null,
+				},
+			},
 		});
 		previous.sceneDomain = deriveWebgl2DrawUnitSceneDomain(drawUnit);
 		previous.modelMatrix = drawUnit.modelMatrix;
@@ -924,15 +932,23 @@ function createOrReuseWebgl2DrawUnit({
 		textureUploadSample: resolveWebgl2DrawUnitTextureUploadSample(drawUnit),
 		texturePageReadiness,
 		compactionEligibility: createCompactionEligibility({
-			kind: drawUnit.kind,
-			owningLandblockId: resolveAtlasCompactionLandblockId(drawUnit),
-			materialKind: drawUnit.material.kind,
-			hasUvBuffer: uvBuffer !== null,
-			texturePageBindings,
-			materialBehavior: drawUnit.material.behavior,
-			hasDetailOverlay: detailOverlay !== null,
-			detailAtlasEntry: detailOverlay?.atlasEntry ?? null,
-			texturePageReadiness,
+			geometry: {
+				kind: drawUnit.kind,
+				owningLandblockId: resolveAtlasCompactionLandblockId(drawUnit),
+				hasUvBuffer: uvBuffer !== null,
+			},
+			material: {
+				kind: drawUnit.material.kind,
+				behavior: drawUnit.material.behavior,
+				texturePages: {
+					base: texturePageReadiness,
+					bindings: texturePageBindings,
+				},
+				detailOverlay: {
+					hasOverlay: detailOverlay !== null,
+					atlasEntry: detailOverlay?.atlasEntry ?? null,
+				},
+			},
 		}),
 		textureKey:
 			drawUnit.material.kind === "direct-texture"

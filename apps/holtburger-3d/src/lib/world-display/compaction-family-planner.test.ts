@@ -712,7 +712,8 @@ describe("compaction family planner", () => {
 		});
 
 		expect(plan.compactableDrawUnitIds).toEqual(["slot-a", "slot-b"]);
-		expect(plan.bypasses.map((bypass) => bypass.reason)).toEqual([
+		expect(plan.bypasses).toEqual([]);
+		expect(plan.texturePageAtlasPlan.failures.map((failure) => failure.reason)).toEqual([
 			"source-texture-too-large",
 		]);
 	});
@@ -820,7 +821,8 @@ describe("compaction family planner", () => {
 		});
 
 		expect(plan.compactableDrawUnitIds).toEqual(["slot-a"]);
-		expect(plan.bypasses.map((bypass) => bypass.reason)).toEqual([
+		expect(plan.bypasses).toEqual([]);
+		expect(plan.texturePageAtlasPlan.failures.map((failure) => failure.reason)).toEqual([
 			"atlas-full",
 		]);
 	});
@@ -971,18 +973,26 @@ function createCandidate(
 					: null
 				: options.indexedMaterialTableRecord,
 		compactionEligibility: createCompactionEligibility({
-			kind: options.kind ?? "static",
-			owningLandblockId:
-				options.owningLandblockId === undefined
-					? 0x0102ffff
-					: options.owningLandblockId,
-			materialKind: options.materialKind ?? "direct-texture",
-			hasUvBuffer: options.hasUvBuffer ?? true,
-			texturePageBindings,
-			materialBehavior: options.materialBehavior ?? OPAQUE_BEHAVIOR,
-			hasDetailOverlay,
-			detailAtlasEntry,
-			texturePageReadiness,
+			geometry: {
+				kind: options.kind ?? "static",
+				owningLandblockId:
+					options.owningLandblockId === undefined
+						? 0x0102ffff
+						: options.owningLandblockId,
+				hasUvBuffer: options.hasUvBuffer ?? true,
+			},
+			material: {
+				kind: options.materialKind ?? "direct-texture",
+				behavior: options.materialBehavior ?? OPAQUE_BEHAVIOR,
+				texturePages: {
+					base: texturePageReadiness,
+					bindings: texturePageBindings,
+				},
+				detailOverlay: {
+					hasOverlay: hasDetailOverlay,
+					atlasEntry: detailAtlasEntry,
+				},
+			},
 		}),
 		triangleCount: options.triangleCount ?? 2,
 		staticPartCount: options.staticPartCount ?? 1,

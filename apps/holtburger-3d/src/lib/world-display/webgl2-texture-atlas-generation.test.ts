@@ -99,7 +99,7 @@ function createPlan(): TexturePageAtlasPlan {
 		key: "texture-page-atlas/test",
 		rgbaAtlasReadyDrawUnitIds: ["draw-a"],
 		detailAtlasReadyDrawUnitIds: [],
-		bypasses: [],
+		failures: [],
 		atlasEntryRecords: [
 			{
 				key: "entry-a",

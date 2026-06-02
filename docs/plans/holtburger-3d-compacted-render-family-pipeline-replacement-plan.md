@@ -3088,7 +3088,7 @@ Validation completed in first C9 pass:
 
 ## Phase C9.1: Semantic Cleanup Gate Before Module Refactors
 
-Status: Planned immediate interim phase before C10.
+Status: Complete.
 
 Purpose: finish the semantic cleanup that is still too specific to leave for broad module refactors,
 without moving files or changing feature coverage. C9.1 should leave C10 free to focus on module
@@ -3148,7 +3148,64 @@ Validation:
 
 Progress ledger:
 
-- Pending.
+- Added typed readiness inputs for `createCompactionEligibility()`:
+  - `CompactionGeometryReadiness` owns draw-unit kind, landblock origin, and UV availability.
+  - `CompactionMaterialReadiness` owns material kind, behavior, texture-page readiness/bindings, and
+    detail overlay readiness.
+  - `CompactionTexturePageReadiness` and `CompactionDetailOverlayReadiness` make base texture-page and
+    detail atlas state explicit instead of passing a long scalar bag.
+- Updated WebGL2 resource realization and compaction tests to construct the typed readiness records at
+  the call boundary.
+- Changed indexed detail compatibility so the `detail` texture-page usage bucket is no longer the
+  source of truth for compacted indexed detail readiness.
+  - Indexed texel and palette bindings still validate their data texture sampling through typed
+    texture-page bindings.
+  - Detail overlay support now comes from `CompactionDetailOverlayReadiness.hasOverlay` and
+    `.atlasEntry`.
+- Split texture-page atlas failures from compaction bypasses:
+  - `TexturePageAtlasPlan.bypasses` was replaced with `TexturePageAtlasPlan.failures`.
+  - Added `TexturePageAtlasFailureReason` and `TexturePageAtlasFailure` for source-too-large,
+    base-atlas-full, and detail-atlas-full conditions.
+  - `planCompactionFamilies()` no longer appends atlas placement failures into
+    `CompactionFamilyPlan.bypasses`.
+  - World-resource metrics now compute `atlasFailureReasonCount` and `atlasFailureSamples` from
+    `texturePageAtlasPlan.failures`.
+  - Direct texture-page binding diagnostics now read atlas placement failures from the texture-page
+    plan instead of compaction bypasses.
+- Updated the browser render summary to report `atlas failures` in the texture-page section, before
+  compaction coverage and bypass details.
+- Audited `Webgl2WorldDrawUnit` for migration-era mirrors.
+  - No fields were deleted in C9.1. Fields that look mirror-like are still consumed by submit,
+    diagnostics, compaction planning, resource retention, or picker/runtime diagnostics.
+  - Broad ownership splitting remains a C10 task rather than a C9.1 deletion.
+
+Decisions:
+
+- Atlas placement and resource failures are not compaction bypasses. They describe texture-page layout
+  or resource availability and should stay under texture-page diagnostics.
+- `CompactionEligibility` remains stored on `Webgl2WorldDrawUnit` for now because it is consumed by
+  planning, submit diagnostics, and retained-direct coverage metrics. C10 should decide whether it
+  becomes part of a smaller material/readiness record.
+- Existing string keys remain for material keys, graph keys, texture-page entry keys, and diagnostic
+  text. C9.1 only replaced ambiguous string-based readiness inference where a typed readiness record
+  was already available.
+
+Course corrections and cleanup targets discovered:
+
+- `TexturePageAtlasFailure` currently carries only draw-unit id, reason, and detail. If C10 moves
+  texture-page planning into its own module, consider adding an optional physical entry key so
+  diagnostics do not need to rejoin against draw units for richer atlas-failure UI.
+- `createCompactionEligibility()` is now a cleaner boundary, but C10 should still decide whether
+  family-specific material readiness deserves separate constructors for RGBA texture-page and
+  indexed-paletted materials.
+- Direct texture-page fallback sample wording still uses "atlas placement unavailable" because that is
+  a physical packed-page condition. Keep that wording unless C10 renames physical atlas concepts.
+
+Validation completed:
+
+- `npm run test:ts -- src/lib/world-display/compaction-family-planner.test.ts src/lib/world-display/texture-page-binding.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-rgba-texture-page-family-submit.test.ts src/lib/world-display/webgl2-direct-render-family.test.ts src/lib/world-display/staged-world-material-strategy.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts --run`
+- `npm run check`
+- `git diff --check`
 
 Cleanup/refactor notes to feed C10:
 

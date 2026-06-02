@@ -1,4 +1,5 @@
 import type { DrawUnitRuntimeDiagnostic } from "./runtime-render-diagnostics";
+import type { CompactionFamilyPlan } from "./compaction-family-planner";
 import type {
 	Webgl2WorldDrawUnit,
 	Webgl2WorldResourceStore,
@@ -46,6 +47,10 @@ function describeDrawUnitRuntimeDiagnostic(
 			materialKey: drawUnit.materialKey,
 			triangleCount: drawUnit.triangleCount,
 			compactionDecision: drawUnit.compactionEligibility.decision,
+			finalCompactionPlan: describeFinalCompactionPlan(
+				store.compactionFamilyPlan,
+				drawUnit,
+			),
 			compactionMaterialFamily: drawUnit.compactionEligibility.material.family,
 			compactionAlphaPolicy:
 				drawUnit.compactionEligibility.material.alphaPolicy,
@@ -55,6 +60,52 @@ function describeDrawUnitRuntimeDiagnostic(
 				drawUnit.compactionEligibility.geometry.blockers,
 		},
 		compactedRoutes,
+	};
+}
+
+function describeFinalCompactionPlan(
+	plan: CompactionFamilyPlan,
+	drawUnit: Webgl2WorldDrawUnit,
+): NonNullable<DrawUnitRuntimeDiagnostic["drawUnit"]>["finalCompactionPlan"] {
+	const rgbaMaterialSlotKey =
+		plan.renderFamilies.rgbaTexturePage.drawUnitMaterialSlots.find(
+			(record) => record.drawUnitId === drawUnit.id,
+		)?.materialSlotKey ?? null;
+	if (
+		plan.renderFamilies.rgbaTexturePage.compactableDrawUnitIds.includes(
+			drawUnit.id,
+		)
+	) {
+		return {
+			status: "planned-rgba-texture-page",
+			materialSlotKey: rgbaMaterialSlotKey,
+			bypasses: [],
+		};
+	}
+	const indexedMaterialSlotKey =
+		plan.renderFamilies.indexedPaletted.drawUnitMaterialSlots.find(
+			(record) => record.drawUnitId === drawUnit.id,
+		)?.materialSlotKey ?? null;
+	if (
+		plan.renderFamilies.indexedPaletted.compactableDrawUnitIds.includes(
+			drawUnit.id,
+		)
+	) {
+		return {
+			status: "planned-indexed-paletted",
+			materialSlotKey: indexedMaterialSlotKey,
+			bypasses: [],
+		};
+	}
+	return {
+		status: "not-planned",
+		materialSlotKey: null,
+		bypasses: plan.bypasses
+			.filter((bypass) => bypass.drawUnitId === drawUnit.id)
+			.map((bypass) => ({
+				reason: bypass.reason,
+				detail: bypass.detail,
+			})),
 	};
 }
 

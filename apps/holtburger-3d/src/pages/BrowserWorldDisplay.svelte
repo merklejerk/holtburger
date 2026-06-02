@@ -1793,6 +1793,13 @@
 			`material=${diagnostic.drawUnit.materialKind}`,
 			`family=${diagnostic.drawUnit.compactionMaterialFamily}`,
 			`decision=${diagnostic.drawUnit.compactionDecision}`,
+			`finalPlan=${diagnostic.drawUnit.finalCompactionPlan.status}`,
+			`planSlot=${diagnostic.drawUnit.finalCompactionPlan.materialSlotKey ?? "none"}`,
+			`planBypasses=${
+				diagnostic.drawUnit.finalCompactionPlan.bypasses
+					.map((bypass) => bypass.reason)
+					.join(",") || "none"
+			}`,
 			`alpha=${diagnostic.drawUnit.compactionAlphaPolicy}`,
 			`materialBlockers=${diagnostic.drawUnit.compactionMaterialBlockers.join(",") || "none"}`,
 			`geometryBlockers=${diagnostic.drawUnit.compactionGeometryBlockers.join(",") || "none"}`,

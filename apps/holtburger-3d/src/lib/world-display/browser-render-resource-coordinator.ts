@@ -69,6 +69,7 @@ import {
 	type TerrainSceneTile,
 	type TerrainSceneModel,
 } from "./terrain-scene";
+import { deriveLandblockRenderChunkPlacement } from "./render-chunks";
 import { deriveTransitionPortalCandidates } from "./transition-portal-work-items";
 import { WORLD_RENDER_DOMAIN } from "./render-domains";
 import type { SceneCameraFrame } from "./camera";
@@ -741,7 +742,7 @@ function describeTerrainSceneSignature(scene: TerrainSceneModel): string {
 		`focus=${scene.focusLandblockId ?? "none"}`,
 		...scene.tiles.map(
 			(tile) =>
-				`${tile.assetId}:${tile.landblockId}:${tile.renderChunk.chunkKey}:${tile.dataSource}:${tile.materialResources.signature}`,
+				`${tile.assetId}:${tile.landblockId}:${deriveLandblockRenderChunkPlacement(tile.landblockId).chunkKey}:${tile.dataSource}:${tile.materialResources.signature}`,
 		),
 	].join("|");
 }
@@ -905,7 +906,9 @@ function collectActiveRenderChunkPlacements(
 ): RenderChunkPlacement[] {
 	const chunksByKey = new Map<string, RenderChunkPlacement>();
 	for (const chunk of [
-		...terrain.tiles.map((tile) => tile.renderChunk),
+		...terrain.tiles.map((tile) =>
+			deriveLandblockRenderChunkPlacement(tile.landblockId),
+		),
 		...structuredInterior.cells.map((cell) => cell.renderChunk),
 		...debugOverlay.cells.map((cell) => cell.renderChunk),
 		...debugOverlay.portals.map((portal) => portal.renderChunk),

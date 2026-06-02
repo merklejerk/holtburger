@@ -5,11 +5,11 @@ import {
 	convertCameraFrameBetweenAnchors,
 	deriveChunkRootOffset,
 	deriveDebugOverlayRenderChunk,
+	deriveLandblockRenderChunkPlacement,
 	deriveRenderChunkKeyFromEnvCellId,
 	deriveRenderChunkKeyFromLandblockId,
 	deriveStaticRenderablePartRenderChunk,
 	deriveStructuredCellRenderChunk,
-	deriveTerrainTileRenderChunk,
 	rendererLocalPointToChunkLocal,
 } from "./render-chunks";
 
@@ -24,7 +24,7 @@ describe("render chunk helpers", () => {
 	});
 
 	it("derives owning render chunks for current scene item sources", () => {
-		expect(deriveTerrainTileRenderChunk(0x01020304)).toEqual({
+		expect(deriveLandblockRenderChunkPlacement(0x01020304)).toEqual({
 			chunkKey: "landblock/0102ffff",
 			chunkLandblockId: 0x0102ffff,
 		});

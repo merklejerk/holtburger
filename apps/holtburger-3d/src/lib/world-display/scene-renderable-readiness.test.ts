@@ -201,10 +201,6 @@ function createTerrainTile({
 	return {
 		assetId: "landblock-outdoor/12340000",
 		landblockId: 0x12340000,
-		renderChunk: {
-			chunkKey: "landblock/12340000",
-			chunkLandblockId: 0x12340000,
-		},
 		label: "1234",
 		isFocus: true,
 		chunkLocalOffset: { x: 0, y: 0, z: 0 },

@@ -12,7 +12,7 @@ import {
 } from "../landblocks";
 import type { RenderChunkTransform } from "./render-anchor";
 import type { SceneBoundsFrame } from "./camera";
-import { deriveTerrainTileRenderChunk } from "./render-chunks";
+import { deriveLandblockRenderChunkPlacement } from "./render-chunks";
 import {
 	envPortalBvhItemKey,
 	envRenderGeometryBvhItemKey,
@@ -89,16 +89,17 @@ export function buildPortalCompositeRenderBvhSources(options: {
 			);
 			return [];
 		}
-		const transform = chunkTransformsByKey.get(tile.renderChunk.chunkKey);
+		const placement = deriveLandblockRenderChunkPlacement(tile.landblockId);
+		const transform = chunkTransformsByKey.get(placement.chunkKey);
 		if (!transform) {
 			fallbackReasons.push(
-				`missing portal render chunk transform ${tile.renderChunk.chunkKey}`,
+				`missing portal render chunk transform ${placement.chunkKey}`,
 			);
 			return [];
 		}
 		return [
 			buildRenderSpaceBvhSource({
-				sourceId: `terrain:${tile.renderChunk.chunkKey}`,
+				sourceId: `terrain:${placement.chunkKey}`,
 				nodes: payload.terrain.terrainBvh.nodes,
 				items: payload.terrain.terrainBvh.items,
 				expectedCoordinateSpace: "landblock-outdoor-terrain-local",
@@ -116,7 +117,7 @@ export function buildPortalCompositeRenderBvhSources(options: {
 		options.assetState,
 		options.staticRenderableScene,
 	).flatMap((payload) => {
-		const renderChunk = deriveTerrainTileRenderChunk(payload.landblockId);
+		const renderChunk = deriveLandblockRenderChunkPlacement(payload.landblockId);
 		const transform = chunkTransformsByKey.get(renderChunk.chunkKey);
 		if (!transform) {
 			fallbackReasons.push(

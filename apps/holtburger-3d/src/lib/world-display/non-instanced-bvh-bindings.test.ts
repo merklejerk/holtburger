@@ -138,10 +138,6 @@ function terrainTile(options: {
 	return {
 		assetId: options.assetId ?? "landblock/0203ffff/outdoor",
 		landblockId: options.landblockId ?? 0x0203ffff,
-		renderChunk: {
-			chunkKey: "landblock/0203ffff",
-			chunkLandblockId: 0x0203ffff,
-		},
 		label: "0203",
 		isFocus: false,
 		chunkLocalOffset: { x: 0, y: 0, z: 0 },

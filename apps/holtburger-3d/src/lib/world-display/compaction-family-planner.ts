@@ -88,6 +88,7 @@ export interface CompactionEligibility {
 		compatible: boolean;
 		blockers: readonly CompactionMaterialBlocker[];
 		alphaPolicy: CompactionAlphaPolicy;
+		alphaTest: number;
 		atlasEligibility: StagedWorldMaterialAtlasEligibility | null;
 		detailAtlasEntry: RgbaTexturePageDetailAtlasEntry | null;
 	};
@@ -134,6 +135,8 @@ export interface RgbaTexturePageFamilyMaterialSlot {
 	samplingKey: string;
 	samplingPolicy: StagedWorldMaterialAtlasEligibility["samplingPolicy"];
 	atlasEntryKey: string;
+	alphaPolicy: "opaque" | "cutout";
+	alphaTest: number;
 	detailAtlasEntryKey: string | null;
 	detailTiling: number;
 }
@@ -929,9 +932,6 @@ export function createCompactionEligibility(options: {
 		case "debug-pipeline":
 			materialBlockers.push("debug-pipeline-material");
 			break;
-		case "alpha-test":
-			materialBlockers.push("missing-compacted-alpha-test-family");
-			break;
 		case "transparent-blended":
 			materialBlockers.push("missing-compacted-transparent-blended-family");
 			break;
@@ -971,6 +971,7 @@ export function createCompactionEligibility(options: {
 			compatible: materialCompatible,
 			blockers: materialBlockers,
 			alphaPolicy,
+			alphaTest: options.materialBehavior?.alphaTest ?? 0,
 			atlasEligibility: options.atlasEligibility,
 			detailAtlasEntry: options.detailAtlasEntry,
 		},
@@ -1141,7 +1142,7 @@ function classifyDirectTextureCompactionMaterialFamily(
 	const alphaPolicy = classifyCompactionAlphaPolicy(behavior);
 	switch (alphaPolicy) {
 		case "cutout":
-			return "alpha-test";
+			return "textured-opaque";
 		case "transparent-blend":
 			return "transparent-blended";
 		case "opacity-translucent":
@@ -1288,6 +1289,7 @@ function assignRgbaTexturePageFamilyMaterialSlots(
 			samplingKey: eligibility.samplingKey,
 			samplingPolicy: eligibility.samplingPolicy,
 			atlasEntryKey: eligibility.atlasEntryKey,
+			...describeRgbaTexturePageAlphaSlot(candidates, key),
 			...describeRgbaTexturePageDetailSlot(candidates, key),
 		}));
 }
@@ -1322,6 +1324,7 @@ function createRgbaTexturePageFamilyPartitions({
 				samplingKey: eligibility.samplingKey,
 				samplingPolicy: eligibility.samplingPolicy,
 				atlasEntryKey: eligibility.atlasEntryKey,
+				...describeRgbaTexturePageAlphaSlot(partition.candidates, key),
 				...describeRgbaTexturePageDetailSlot(partition.candidates, key),
 			}),
 		);
@@ -1348,6 +1351,52 @@ function createRgbaTexturePageFamilyPartitions({
 			drawSlices,
 		};
 	});
+}
+
+function describeRgbaTexturePageAlphaSlot(
+	candidates: readonly EligibleCompactionFamilyCandidate[],
+	materialSlotKey: string,
+): Pick<RgbaTexturePageFamilyMaterialSlot, "alphaPolicy" | "alphaTest"> {
+	const alphaPolicies = [
+		...new Set(
+			candidates
+				.filter(
+					(candidate) =>
+						describeCompactionMaterialSlotKey(candidate) === materialSlotKey,
+				)
+				.map((candidate) => candidate.drawUnit.compactionEligibility.material.alphaPolicy),
+		),
+	];
+	if (alphaPolicies.length > 1) {
+		throw new Error(
+			`Compacted RGBA material slot ${materialSlotKey} has multiple alpha policies.`,
+		);
+	}
+	const alphaPolicy = alphaPolicies[0] ?? "opaque";
+	if (alphaPolicy !== "opaque" && alphaPolicy !== "cutout") {
+		throw new Error(
+			`Compacted RGBA material slot ${materialSlotKey} has unsupported alpha policy ${alphaPolicy}.`,
+		);
+	}
+	const alphaTests = [
+		...new Set(
+			candidates
+				.filter(
+					(candidate) =>
+						describeCompactionMaterialSlotKey(candidate) === materialSlotKey,
+				)
+				.map((candidate) => candidate.drawUnit.compactionEligibility.material.alphaTest),
+		),
+	];
+	if (alphaTests.length > 1) {
+		throw new Error(
+			`Compacted RGBA material slot ${materialSlotKey} has multiple alpha-test thresholds.`,
+		);
+	}
+	return {
+		alphaPolicy,
+		alphaTest: alphaTests[0] ?? 0,
+	};
 }
 
 function describeRgbaTexturePageDetailSlot(

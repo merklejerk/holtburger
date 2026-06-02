@@ -102,6 +102,8 @@ describe("planWebgl2RgbaTexturePageFamilyReplacement", () => {
 								detailTiling: 1,
 								renderStateKey: "opaque",
 								samplingKey: "sampling",
+								alphaPolicy: "opaque",
+								alphaTest: 0,
 								wrapS: "clamp",
 								wrapT: "clamp",
 							}),
@@ -149,7 +151,8 @@ describe("planWebgl2RgbaTexturePageFamilyReplacement", () => {
 		expect(gl.calls).toContain("bindTexture");
 		expect(gl.calls).toContain("drawElements:4:3:5123:0");
 		expect(gl.uniform4fvLengths).toEqual([128 * 4, 128 * 4]);
-		expect(gl.uniform1fvLengths).toEqual([128]);
+		expect(gl.uniform1fvLengths).toEqual([128, 128]);
+		expect(gl.uniform1fvValues[0]?.[0]).toBe(0.5);
 		expect(gl.uniform1ivLengths).toEqual([128]);
 		expect(gl.uniform2ivLengths).toEqual([128 * 2]);
 		expect(gl.uniformMatrix4fvLengths).toEqual([16, 16]);
@@ -238,6 +241,8 @@ function createFamily(
 				detailTiling: 8,
 				renderStateKey: "opaque",
 				samplingKey: "sampling",
+				alphaPolicy: "cutout",
+				alphaTest: 0.5,
 				wrapS: "repeat",
 				wrapT: "clamp",
 			},
@@ -325,6 +330,7 @@ function createProgram(): Webgl2RgbaTexturePageFamilyWorldProgram {
 			uDetailAtlasSize: {} as WebGLUniformLocation,
 			uMaterialRects: {} as WebGLUniformLocation,
 			uMaterialWrapModes: {} as WebGLUniformLocation,
+			uMaterialAlphaTests: {} as WebGLUniformLocation,
 			uDetailMaterialRects: {} as WebGLUniformLocation,
 			uDetailMaterialTilings: {} as WebGLUniformLocation,
 			uDetailMaterialEnabled: {} as WebGLUniformLocation,
@@ -354,6 +360,7 @@ class FakeAtlasSubmitGl {
 	readonly calls: string[] = [];
 	readonly uniform4fvLengths: number[] = [];
 	readonly uniform1fvLengths: number[] = [];
+	readonly uniform1fvValues: number[][] = [];
 	readonly uniform1ivLengths: number[] = [];
 	readonly uniform2ivLengths: number[] = [];
 	readonly uniformMatrix4fvLengths: number[] = [];
@@ -392,6 +399,7 @@ class FakeAtlasSubmitGl {
 
 	uniform1fv(_location: WebGLUniformLocation, value: Float32Array): void {
 		this.uniform1fvLengths.push(value.length);
+		this.uniform1fvValues.push([...value]);
 	}
 
 	uniform1iv(_location: WebGLUniformLocation, value: Int32Array): void {

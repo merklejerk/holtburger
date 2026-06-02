@@ -202,14 +202,20 @@ describe("compaction family planner", () => {
 			},
 		});
 
-		expect(plan.compactableDrawUnitIds).toEqual([]);
+		expect(plan.compactableDrawUnitIds).toEqual(["clip"]);
 		expect(plan.bypasses.map((bypass) => bypass.reason)).toEqual([
 			"non-static",
 			"missing-landblock-origin",
 			"indexed-alpha-policy-unsupported",
 			"missing-detail-atlas-entry",
-			"unsupported-alpha-test-material",
 			"missing-atlas-eligibility",
+		]);
+		expect(plan.renderFamilies.rgbaTexturePage.materialSlots).toMatchObject([
+			{
+				key: "slot-entry|wrap=clamp/clamp|detail=none",
+				alphaPolicy: "cutout",
+				alphaTest: 0.5,
+			},
 		]);
 	});
 

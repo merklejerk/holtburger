@@ -28,6 +28,8 @@ export interface Webgl2RgbaTexturePageFamilyMaterialSlot {
 	detailTiling: number;
 	renderStateKey: string;
 	samplingKey: string;
+	alphaPolicy: "opaque" | "cutout";
+	alphaTest: number;
 	wrapS: "clamp" | "repeat";
 	wrapT: "clamp" | "repeat";
 }
@@ -425,6 +427,8 @@ function toWebgl2RgbaTexturePageFamilyMaterialSlot(
 		detailTiling: slot.detailTiling,
 		renderStateKey: slot.renderStateKey,
 		samplingKey: slot.samplingKey,
+		alphaPolicy: slot.alphaPolicy,
+		alphaTest: slot.alphaTest,
 		wrapS: slot.samplingPolicy.wrapS,
 		wrapT: slot.samplingPolicy.wrapT,
 	};

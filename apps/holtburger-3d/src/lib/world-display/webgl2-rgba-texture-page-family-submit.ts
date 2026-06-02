@@ -20,6 +20,7 @@ export type Webgl2RgbaTexturePageFamilyWorldProgram = Webgl2ProgramResource<
 	| "uDetailAtlasSize"
 	| "uMaterialRects"
 	| "uMaterialWrapModes"
+	| "uMaterialAlphaTests"
 	| "uDetailMaterialRects"
 	| "uDetailMaterialTilings"
 	| "uDetailMaterialEnabled"
@@ -270,6 +271,9 @@ function uploadRgbaTexturePageFamilyMaterialRects(
 	const wrapModes = new Int32Array(
 		WEBGL2_RGBA_TEXTURE_PAGE_MAX_MATERIAL_SLOTS * 2,
 	);
+	const alphaTests = new Float32Array(
+		WEBGL2_RGBA_TEXTURE_PAGE_MAX_MATERIAL_SLOTS,
+	);
 	const detailTilings = new Float32Array(
 		WEBGL2_RGBA_TEXTURE_PAGE_MAX_MATERIAL_SLOTS,
 	);
@@ -282,12 +286,14 @@ function uploadRgbaTexturePageFamilyMaterialRects(
 			[slot.wrapS === "repeat" ? 1 : 0, slot.wrapT === "repeat" ? 1 : 0],
 			slot.index * 2,
 		);
+		alphaTests[slot.index] = slot.alphaTest;
 		detailRects.set(slot.detailAtlasRect ?? [0, 0, 1, 1], slot.index * 4);
 		detailTilings[slot.index] = slot.detailTiling ?? 1;
 		detailEnabled[slot.index] = slot.detailAtlasTextureIndex == null ? 0 : 1;
 	}
 	gl.uniform4fv(program.uniforms.uMaterialRects, rects);
 	gl.uniform2iv(program.uniforms.uMaterialWrapModes, wrapModes);
+	gl.uniform1fv(program.uniforms.uMaterialAlphaTests, alphaTests);
 	gl.uniform4fv(program.uniforms.uDetailMaterialRects, detailRects);
 	gl.uniform1fv(program.uniforms.uDetailMaterialTilings, detailTilings);
 	gl.uniform1iv(program.uniforms.uDetailMaterialEnabled, detailEnabled);

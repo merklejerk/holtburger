@@ -250,9 +250,6 @@ export function createWebgl2RenderMetrics(
 			compactionBypassBlockerSamples: [
 				...(input.worldStore?.compactionBypassBlockerSamples ?? []),
 			],
-			unsupportedTexturePageBypassSamples: [
-				...(input.worldStore?.unsupportedTexturePageBypassSamples ?? []),
-			],
 			compactionBypassDetailSamples: [
 				...(input.worldStore?.compactionBypassDetailSamples ?? []),
 			],

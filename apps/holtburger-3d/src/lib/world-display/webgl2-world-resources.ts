@@ -195,7 +195,6 @@ export interface Webgl2WorldResourceStore {
 	compactionBypassReasonCount: number;
 	compactionBypassSamples: readonly string[];
 	compactionBypassBlockerSamples: readonly string[];
-	unsupportedTexturePageBypassSamples: readonly string[];
 	compactionBypassDetailSamples: readonly string[];
 	compactionCoverageDrawUnitCounts: Record<string, number>;
 	compactionCoverageMaterialBlockerCounts: Record<string, number>;
@@ -323,7 +322,6 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		compactionBypassReasonCount: 0,
 		compactionBypassSamples: [],
 		compactionBypassBlockerSamples: [],
-		unsupportedTexturePageBypassSamples: [],
 		compactionBypassDetailSamples: [],
 		compactionCoverageDrawUnitCounts: {},
 		compactionCoverageMaterialBlockerCounts: {},
@@ -548,16 +546,6 @@ export function syncWebgl2WorldResources({
 		),
 		8,
 	);
-	store.unsupportedTexturePageBypassSamples = summarizeDiagnosticReasons(
-		store.compactionFamilyPlan.bypasses
-			.filter((bypass) =>
-				bypass.blocker.startsWith("unsupported-texture-page-"),
-			)
-			.map((bypass) =>
-				describeCompactionBypassBlockerSample(bypass, drawUnitById),
-			),
-		8,
-	);
 	store.compactionBypassDetailSamples = summarizeDiagnosticReasons(
 		store.compactionFamilyPlan.bypasses.map(
 			(bypass) => `${bypass.reason}: ${bypass.detail}`,
@@ -698,7 +686,6 @@ export function destroyWebgl2WorldResources(
 	store.compactionBypassReasonCount = 0;
 	store.compactionBypassSamples = [];
 	store.compactionBypassBlockerSamples = [];
-	store.unsupportedTexturePageBypassSamples = [];
 	store.compactionBypassDetailSamples = [];
 	store.compactionCoverageDrawUnitCounts = {};
 	store.compactionCoverageMaterialBlockerCounts = {};
@@ -1075,6 +1062,7 @@ function createIndexedPalettedFamilyMaterialTableRecord(
 			indexedMaterial.indexFormat,
 			`clip=${indexedMaterial.clipThreshold}`,
 			`wrap=${indexedMaterial.wrapS}/${indexedMaterial.wrapT}`,
+			`detail=${drawUnit.detailOverlay?.atlasEntry?.key ?? "none"}`,
 		].join("|"),
 		sourceMaterialKey: drawUnit.materialKey,
 		indexPageKey: indexedMaterial.indexTextureKey,

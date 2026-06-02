@@ -372,8 +372,16 @@ describe("compaction family planner", () => {
 			"missing-indexed-palette-page",
 		]);
 
+		const detailEntry = createDetailAtlasEntry("indexed-detail");
 		const withDetailOverlay = createCandidate({
 			materialKind: "indexed-paletted",
+			hasDetailOverlay: true,
+			detailAtlasEntry: detailEntry,
+			indexedMaterialTableRecord: {
+				...createIndexedMaterialTableRecord("detail"),
+				detailAtlasEntryKey: detailEntry.key,
+				detailTiling: detailEntry.tiling,
+			},
 			texturePageBindings: [
 				createIndexedTexelTexturePageBinding(),
 				createIndexedPaletteTexturePageBinding(),
@@ -385,7 +393,23 @@ describe("compaction family planner", () => {
 			],
 		});
 
-		expect(withDetailOverlay.compactionEligibility.material.blockers).toEqual([
+		expect(withDetailOverlay.compactionEligibility.material.blockers).toEqual([]);
+
+		const missingDetailAtlas = createCandidate({
+			materialKind: "indexed-paletted",
+			hasDetailOverlay: true,
+			texturePageBindings: [
+				createIndexedTexelTexturePageBinding(),
+				createIndexedPaletteTexturePageBinding(),
+				{
+					...createDirectTexturePageBinding(),
+					usageBucket: "detail",
+					source: "detail-overlay",
+				},
+			],
+		});
+
+		expect(missingDetailAtlas.compactionEligibility.material.blockers).toEqual([
 			"detail-overlay",
 		]);
 	});
@@ -477,6 +501,15 @@ describe("compaction family planner", () => {
 					hasDetailOverlay: true,
 					detailAtlasEntry: detailEntry,
 					indexedMaterialTableRecord: detailRecord,
+					texturePageBindings: [
+						createIndexedTexelTexturePageBinding(),
+						createIndexedPaletteTexturePageBinding(),
+						{
+							...createDirectTexturePageBinding(),
+							usageBucket: "detail",
+							source: "detail-overlay",
+						},
+					],
 				}),
 			],
 			policy: {

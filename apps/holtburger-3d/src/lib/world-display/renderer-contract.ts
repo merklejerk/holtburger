@@ -150,7 +150,6 @@ export interface WorldRenderDebugMetrics {
 	compactionBypassReasonCount: number;
 	compactionBypassSamples: string[];
 	compactionBypassBlockerSamples: string[];
-	unsupportedTexturePageBypassSamples: string[];
 	compactionBypassDetailSamples: string[];
 	compactionCoverageDrawUnitCounts: Record<string, number>;
 	compactionCoverageMaterialBlockerCounts: Record<string, number>;

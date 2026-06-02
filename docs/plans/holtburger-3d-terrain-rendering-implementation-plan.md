@@ -1,6 +1,6 @@
 # Holtburger 3D Terrain Rendering Implementation Plan
 
-Status: Draft implementation plan.
+Status: Phase T0 complete; Phase T1 is next.
 
 Dry-run status: reviewed against the current `apps/holtburger-3d/src/lib/world-display` module graph.
 The phase order below reflects that dry run.
@@ -202,6 +202,8 @@ placement.
 
 ## Phase T0: Legacy Backend Audit And Deletion
 
+Status: Complete on 2026-06-02.
+
 Goal: remove stale Three.js terrain/rendering backend code before adding the replacement terrain
 family.
 
@@ -226,6 +228,48 @@ Acceptance criteria:
 - No production terrain path depends on legacy Three.js material construction.
 - Useful terrain pcode/material behavior coverage remains in active modules.
 - The WebGL2 renderer is the only production terrain backend.
+
+Progress:
+
+- Deleted `apps/holtburger-3d/src/lib/world-display/terrain-blend-materials.ts`.
+- Deleted `apps/holtburger-3d/src/lib/world-display/terrain-blend-materials.test.ts`.
+- Confirmed `terrain-blend-materials.ts` had no production imports; its only code import was the
+  deleted legacy test.
+- Moved retained renderer-neutral coverage into `terrain-blend-plan.test.ts`:
+  - pcode-to-plan indexing;
+  - terrain alpha mask role/wrap handling;
+  - alpha selector rotation output;
+  - selected render-surface fallback from `PreparedSurfaceTexturePayload.renderSurfaceIds`;
+  - all-road pcode resolution to road terrain without overlay masks.
+- Ran full lint after the deletion. Knip identified
+  `resolveRegionDetailOverlay` in `region-detail-overlays.ts` as a newly unused export, so the
+  obsolete texture-producing overlay helper and its private texture upload helper were deleted.
+
+Decisions:
+
+- Dropped old assertions about Three.js `ShaderMaterial`, uniforms, and fragment shader strings
+  instead of preserving them through a shim. Those assertions described the deleted backend, not the
+  active WebGL2 path.
+- Kept region-detail overlay planning and material-application helpers. Only the cache-backed helper
+  that returned a fully resolved Three.js texture overlay was retired because its only consumer was
+  the deleted legacy terrain backend.
+- Did not classify remaining `three` imports as legacy terrain backend code. The surviving imports
+  are renderer math, resource, material construction, or test helpers and should be evaluated in the
+  phase that touches their owning module.
+
+Validation:
+
+- `npm run test:ts -- terrain-blend-plan`
+- `npm run check`
+- `npm run lint`
+
+Cleanup impact:
+
+- No compatibility shim was introduced.
+- The anticipated T11 cleanup target for `terrain-blend-materials.ts` and
+  `terrain-blend-materials.test.ts` is complete.
+- The lint-discovered `resolveRegionDetailOverlay` dead export was deleted in T0; no T11 follow-up is
+  needed for it.
 
 ## Phase T1: Renderer Placement Helper And Terrain `renderChunk` Removal
 
@@ -657,7 +701,6 @@ Initial anticipated cleanup targets:
 
 Delete or rewrite these terrain-specific old-path concepts by the end of Phase T11:
 
-- `terrain-blend-materials.ts` and `terrain-blend-materials.test.ts`.
 - `StagedTerrainDrawUnitAssembly`.
 - `buildStagedTerrainDrawUnitAssemblies`.
 - `createTerrainBlendStagedMaterial`.

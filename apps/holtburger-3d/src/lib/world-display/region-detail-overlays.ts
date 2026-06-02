@@ -7,7 +7,6 @@ import type {
 	PreparedSurfaceTexturePayload,
 } from "../assets/types";
 import { formatHex32 } from "../landblocks";
-import type { WorldMaterialResourceCache } from "./material-resources";
 
 export type RegionDetailRoleKind =
 	| "landscape"
@@ -45,37 +44,6 @@ interface DetailOverlayShader {
 }
 
 const REGION_DETAIL_PROGRAM_KEY = "holtburger-region-detail-overlay";
-
-export function resolveRegionDetailOverlay(options: {
-	assetState: AssetChannelState;
-	regionNumber: number;
-	roleKind: RegionDetailRoleKind;
-	materialResourceCache: WorldMaterialResourceCache;
-	reportDiagnostic: (message: string) => void;
-}): ResolvedRegionDetailOverlay | null {
-	const plan = resolveRegionDetailOverlayPlan(options);
-	if (!plan) {
-		return null;
-	}
-	const texture = resolveRegionDetailTexture({
-		roleKind: options.roleKind,
-		role: plan.role,
-		assetState: options.assetState,
-		materialResourceCache: options.materialResourceCache,
-		reportDiagnostic: options.reportDiagnostic,
-	});
-	return texture
-		? {
-				regionNumber: plan.regionNumber,
-				profileAssetId: plan.profileAssetId,
-				role: plan.role,
-				blendMode: plan.blendMode,
-				fadeMode: plan.fadeMode,
-				texture,
-				signature: plan.signature,
-			}
-		: null;
-}
 
 export function resolveRegionDetailOverlayPlan(options: {
 	assetState: AssetChannelState;
@@ -258,56 +226,6 @@ function createRegionDetailOverlayMaterial(
 		},
 	};
 	return clone;
-}
-
-function resolveRegionDetailTexture(options: {
-	roleKind: RegionDetailRoleKind;
-	role: PreparedRegionDetailRole;
-	assetState: AssetChannelState;
-	materialResourceCache: WorldMaterialResourceCache;
-	reportDiagnostic: (message: string) => void;
-}): Texture | null {
-	const surfaceTexture = getSurfaceTexture(
-		options.assetState,
-		options.role.textureAssetId,
-	);
-	if (!surfaceTexture) {
-		options.reportDiagnostic(
-			`Missing ${options.roleKind} detail surface texture ${options.role.textureAssetId}.`,
-		);
-		return null;
-	}
-	const renderSurface = getSelectedRenderSurface({
-		assetState: options.assetState,
-		surfaceTexture,
-	});
-	if (!renderSurface) {
-		options.reportDiagnostic(
-			`Missing selected render surface for ${options.roleKind} detail texture ${options.role.textureAssetId}.`,
-		);
-		return null;
-	}
-	const samplingPolicy =
-		options.materialResourceCache.getRenderSurfaceTextureSamplingPolicy(
-			renderSurface,
-		);
-	const texture = options.materialResourceCache.getTexture({
-		renderSurface,
-		samplingPolicy: {
-			...samplingPolicy,
-			wrapS: "repeat",
-			wrapT: "repeat",
-			colorSpace: "none",
-		},
-		preparedByAssetId: options.assetState.preparedByAssetId,
-		usage: "detail",
-	});
-	if (!texture) {
-		options.reportDiagnostic(
-			`Could not upload ${options.roleKind} detail render surface ${formatHex32(renderSurface.renderSurfaceId)} for ${options.role.textureAssetId}.`,
-		);
-	}
-	return texture;
 }
 
 function getSurfaceTexture(

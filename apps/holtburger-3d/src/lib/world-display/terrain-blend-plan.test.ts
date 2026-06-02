@@ -48,12 +48,69 @@ describe("buildTerrainBlendPlanSet", () => {
 		expect(plan?.base.textureAssetId).toBe("surface-texture/05000010");
 		expect(plan?.base.wrap).toBe("repeat");
 		expect(plan?.base.tiling).toBe(4);
+		expect(planSet?.planByPcode.get(plan?.pcode ?? 0)).toBe(plan);
 		expect(plan?.overlays).toHaveLength(1);
 		expect(plan?.overlays[0]?.terrain.textureAssetId).toBe(
 			"surface-texture/05000011",
 		);
 		expect(plan?.overlays[0]?.alpha.wrap).toBe("clamp");
 		expect(plan?.overlays[0]?.alpha.role).toBe("mask");
+		expect(plan?.overlays[0]?.rotation).toBe(0);
+		expect(planSet?.diagnostics).toEqual([]);
+	});
+
+	it("uses the selected render surface fallback list for terrain textures", () => {
+		const state = createAssetState([
+			createRecord("terrain-material/1", createTerrainMaterialPayload(false)),
+			createRecord(
+				"surface-texture/05000010",
+				createSurfaceTexturePayload(null, [0x06000010, 0x06000011]),
+			),
+			createRecord(
+				"render-surface/06000011",
+				createRenderSurfacePayload(0x06000011),
+			),
+		]);
+
+		const planSet = buildTerrainBlendPlanSet({
+			assetState: state,
+			regionNumber: 1,
+			pcodes: [terrainPcode([0, 0, 0, 0], [1, 1, 1, 1])],
+		});
+
+		expect(planSet?.plans[0]?.base.renderSurface.renderSurfaceId).toBe(0x06000011);
+		expect(planSet?.diagnostics).toEqual([]);
+	});
+
+	it("resolves all-road pcodes to road terrain without overlay masks", () => {
+		const state = createAssetState([
+			createRecord(
+				"terrain-material/1",
+				createTerrainMaterialPayload(true, {
+					includeRoadTerrain: true,
+				}),
+			),
+			createRecord(
+				"surface-texture/05000030",
+				createSurfaceTexturePayload(0x06000030),
+			),
+			createRecord(
+				"render-surface/06000030",
+				createRenderSurfacePayload(0x06000030),
+			),
+		]);
+
+		const planSet = buildTerrainBlendPlanSet({
+			assetState: state,
+			regionNumber: 1,
+			pcodes: [terrainPcode([1, 1, 1, 1], [1, 2, 1, 2])],
+		});
+
+		const plan = planSet?.plans[0];
+		expect(plan?.allRoad).toBe(true);
+		expect(plan?.base.textureAssetId).toBe("surface-texture/05000030");
+		expect(plan?.overlays).toEqual([]);
+		expect(plan?.roads).toEqual([]);
 		expect(planSet?.diagnostics).toEqual([]);
 	});
 
@@ -103,6 +160,9 @@ function createRecord(
 
 function createTerrainMaterialPayload(
 	includeOverlay: boolean,
+	options: {
+		includeRoadTerrain?: boolean;
+	} = {},
 ): PreparedAssetPayload {
 	return {
 		kind: "terrain-material",
@@ -126,6 +186,17 @@ function createTerrainMaterialPayload(
 							textureAssetId: "surface-texture/05000011",
 							textureDid: 0x05000011,
 							tiling: 4,
+							colorVariation: null,
+						},
+					]
+				: []),
+			...(options.includeRoadTerrain === true
+				? [
+						{
+							terrainType: 3,
+							textureAssetId: "surface-texture/05000030",
+							textureDid: 0x05000030,
+							tiling: 2,
 							colorVariation: null,
 						},
 					]
@@ -154,7 +225,9 @@ function createTerrainMaterialPayload(
 						"surface-texture/05000011",
 						"surface-texture/05000012",
 					]
-				: ["surface-texture/05000010"],
+				: options.includeRoadTerrain === true
+					? ["surface-texture/05000030"]
+					: ["surface-texture/05000010"],
 			renderSurfaceAssetIds: [],
 			paletteAssetIds: [],
 		},
@@ -162,7 +235,9 @@ function createTerrainMaterialPayload(
 }
 
 function createSurfaceTexturePayload(
-	selectedRenderSurfaceId: number,
+	selectedRenderSurfaceId: number | null,
+	renderSurfaceIds: readonly number[] =
+		selectedRenderSurfaceId === null ? [] : [selectedRenderSurfaceId],
 ): PreparedAssetPayload {
 	return {
 		kind: "surface-texture",
@@ -173,11 +248,12 @@ function createSurfaceTexturePayload(
 		textureType: 0,
 		unknown: 0,
 		selectedRenderSurfaceId,
-		renderSurfaceIds: [selectedRenderSurfaceId],
+		renderSurfaceIds: [...renderSurfaceIds],
 		dependencies: {
-			renderSurfaceAssetIds: [
-				`render-surface/${selectedRenderSurfaceId.toString(16).padStart(8, "0")}`,
-			],
+			renderSurfaceAssetIds: renderSurfaceIds.map(
+				(renderSurfaceId) =>
+					`render-surface/${renderSurfaceId.toString(16).padStart(8, "0")}`,
+			),
 		},
 	};
 }

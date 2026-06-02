@@ -213,6 +213,42 @@ describe("compaction family planner", () => {
 		]);
 	});
 
+	it("keeps blended RGBA atlas-ready draw units direct while planning their texture pages", () => {
+		const plan = planCompactionFamilies({
+			drawUnits: [
+				createCandidate({
+					id: "blended-rgba",
+					entryKey: "blended-rgba",
+					materialBehavior: BLENDED_BEHAVIOR,
+				}),
+				createCandidate({ id: "opaque-rgba", entryKey: "opaque-rgba" }),
+			],
+			policy: {
+				maxAtlasTextureSize: 64,
+				maxAtlasTextureCount: 1,
+				baseGutterPixels: 2,
+				maxMaterialSlotsPerDraw: 4,
+			},
+		});
+
+		expect(plan.compactableDrawUnitIds).toEqual(["opaque-rgba"]);
+		expect(plan.texturePageAtlasPlan.rgbaAtlasReadyDrawUnitIds).toEqual([
+			"blended-rgba",
+			"opaque-rgba",
+		]);
+		expect(
+			plan.texturePageAtlasPlan.atlasTextures[0]?.placements.map(
+				(placement) => placement.atlasEntryKey,
+			),
+		).toEqual(["blended-rgba", "opaque-rgba"]);
+		expect(plan.bypasses).toMatchObject([
+			{
+				drawUnitId: "blended-rgba",
+				reason: "unsupported-transparent-blended-material",
+			},
+		]);
+	});
+
 	it("keeps material-only and geometry-only eligibility on the direct path", () => {
 		const plan = planCompactionFamilies({
 			drawUnits: [
@@ -752,6 +788,18 @@ const OPAQUE_BEHAVIOR: LegacyMaterialBehaviorDto = {
 		depthWrite: true,
 	},
 	unsupportedSurfaceFlags: [],
+};
+
+const BLENDED_BEHAVIOR: LegacyMaterialBehaviorDto = {
+	...OPAQUE_BEHAVIOR,
+	transparent: true,
+	blend: {
+		mode: "alpha",
+		enabled: true,
+		srcFactor: "src-alpha",
+		dstFactor: "one-minus-src-alpha",
+		depthWrite: false,
+	},
 };
 
 function createCandidate(

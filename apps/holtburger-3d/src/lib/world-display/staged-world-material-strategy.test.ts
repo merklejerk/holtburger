@@ -79,6 +79,37 @@ describe("staged world material strategy", () => {
 		});
 	});
 
+	it("preserves RGBA atlas eligibility for blended direct textures", () => {
+		const state = createAssetState([
+			createMaterialRecipeRecord({
+				surfaceId: 0x08000001,
+				renderSurfaceId: 0x06000001,
+				surfaceType: SURFACE_TYPE_DIFFUSE | SURFACE_TYPE_ALPHA,
+			}),
+			createRenderSurfaceRecord({ renderSurfaceId: 0x06000001 }),
+			createAtlasPreparedTextureRecord({ renderSurfaceId: 0x06000001 }),
+		]);
+
+		const strategy = resolveStagedWorldMaterialStrategy({
+			assetState: state,
+			input: createRequirement("static", 0),
+		});
+
+		expect(strategy).toMatchObject({
+			kind: "direct-texture",
+			reason: "blended-transparency",
+			atlasEligibility: {
+				atlasEntryKey: expect.stringContaining("atlas-entry"),
+				renderStateKey:
+					"shader=atlas-color;blend=alpha;depth=read;alphaTest=0;side=front",
+				atlasEntry: {
+					preparedTextureAssetId:
+						"prepared-texture/06000001?usage=raw&out=rgba8&mips=none&cs=linear",
+				},
+			},
+		});
+	});
+
 	it("keeps atlas candidacy out of staged fallback reasons", () => {
 		const state = createAssetState([
 			createMaterialRecipeRecord({

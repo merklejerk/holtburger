@@ -358,6 +358,7 @@ function evaluateAtlasCandidate(options: {
 	});
 	if (
 		resolvedStrategy.kind !== "direct-texture" ||
+		resolvedStrategy.reason !== null ||
 		!resolvedStrategy.atlasEligibility
 	) {
 		return { kind: "strategy", requirement: resolvedStrategy };
@@ -566,30 +567,28 @@ export function resolveStagedWorldMaterialStrategy(options: {
 			options.textureCapabilities ??
 			defaultStagedWorldMaterialTextureCapabilities(),
 		textureFilteringMode: options.textureFilteringMode,
-		atlasEligibility: blendedTransparencyReason
-			? null
-			: {
-					materialSlotKey: describeMaterialSlotKey({
-						materialAssetId,
-						atlasEntryKey,
-						behavior: behaviorWithAlpha,
-						samplingKey,
-						renderStateKey,
-						materialVariantSignature:
-							options.input.slot.materialVariantSignature ?? null,
-					}),
-					atlasEntryKey,
-					renderStateKey,
-					samplingKey,
-					samplingPolicy: atlasSamplingPolicy,
-					atlasEntry: {
-						renderSurfaceId: surface.renderSurfaceId,
-						preparedTextureAssetId,
-						level,
-						sourceHash: preparedTexture.sourceHash,
-						sourceFormatRaw: preparedTexture.sourceFormatRaw,
-					},
-				},
+		atlasEligibility: {
+			materialSlotKey: describeMaterialSlotKey({
+				materialAssetId,
+				atlasEntryKey,
+				behavior: behaviorWithAlpha,
+				samplingKey,
+				renderStateKey,
+				materialVariantSignature:
+					options.input.slot.materialVariantSignature ?? null,
+			}),
+			atlasEntryKey,
+			renderStateKey,
+			samplingKey,
+			samplingPolicy: atlasSamplingPolicy,
+			atlasEntry: {
+				renderSurfaceId: surface.renderSurfaceId,
+				preparedTextureAssetId,
+				level,
+				sourceHash: preparedTexture.sourceHash,
+				sourceFormatRaw: preparedTexture.sourceFormatRaw,
+			},
+		},
 	});
 }
 

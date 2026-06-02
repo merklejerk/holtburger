@@ -2578,7 +2578,7 @@ Validation:
 
 ## Phase C8.13: Decouple RGBA Texture Atlas Eligibility From Compaction Eligibility
 
-Status: Planned.
+Status: Complete.
 
 Purpose: allow alpha-blended RGBA textures to share compatible RGBA8 atlas pages without implying that
 their draw units are compactable. The current material strategy intentionally sets `atlasEligibility`
@@ -2631,6 +2631,55 @@ Decisions:
   because render state lives in draw routing/slices, not in the atlas texture image.
 - Indexed alpha remains separate because indexed materials use indexed texel pages plus palette pages,
   not RGBA base atlas entries.
+- Kept the existing `atlasEligibility` field name for this phase rather than introducing a larger type
+  rename. Its meaning is now texture-page atlas readiness, not compacted RGBA geometry readiness.
+- Direct-texture strategies with a non-null direct-path reason, including `blended-transparency`, are
+  still excluded from the legacy staged geometry atlas planner. This prevents atlas-ready blended RGBA
+  materials from being promoted to old `atlas` layout decisions.
+
+Progress:
+
+- `resolveStagedWorldMaterialStrategy()` now preserves `atlasEligibility` for otherwise compatible
+  blended RGBA textures. The material still records `reason: "blended-transparency"` so diagnostics and
+  compaction blockers remain explicit.
+- `planCompactionFamilies()` now collects RGBA texture-page atlas candidates independently from
+  compactable RGBA geometry candidates. Blended RGBA direct-texture draw units can be present in
+  `texturePageAtlasPlan.rgbaAtlasReadyDrawUnitIds` while absent from `compactableDrawUnitIds`.
+- Direct RGBA submit already consumes resolved texture-page bindings, so no new shader path was needed.
+  Added a regression proving a blended retained-direct RGBA draw can bind a packed atlas page and still
+  submit through the final blended direct pass.
+
+Course corrections:
+
+- Preserving atlas eligibility initially caused `planStagedWorldMaterialStrategies()` to classify a
+  normalized blended compressed material as legacy `atlas` geometry work. The fix was to keep
+  `evaluateAtlasCandidate()` limited to direct-texture strategies with `reason === null`, while the newer
+  texture-page atlas plan consumes atlas eligibility separately through compaction family planning.
+- Did not introduce compacted transparent-family support. Blended RGBA continues to report
+  `unsupported-transparent-blended-material` as its compaction blocker.
+
+Refinements to future steps:
+
+- C8.14 can fold RGBA alpha-test into the RGBA texture-page compacted family without also solving
+  blended transparency. The atlas planner now already accepts cutout/blended RGBA as texture-page facts;
+  C8.14 should focus on shader/material-slot alpha-test support and opaque-pass compaction only.
+- The future rename from `atlasEligibility` to a clearer texture-page readiness name remains valuable.
+  Do it when removing the remaining legacy staged atlas vocabulary, not as a broad rename in the middle
+  of alpha-family work.
+
+Discovered cleanup targets and legacy shims:
+
+- `atlasEligibility` is now intentionally overloaded in name only: production semantics are texture-page
+  atlas readiness, while legacy staged atlas code must explicitly check `reason === null` before treating
+  it as geometry atlas eligibility. This naming shim should be retired after the old staged atlas plan is
+  fully replaced.
+- `StagedWorldMaterialStrategyFallbackReason` still includes `blended-transparency` even when the
+  material is texture-page atlas-ready. The reason now means "direct/transparent submit path", not
+  "texture cannot be atlased"; diagnostics should keep that distinction visible.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/staged-world-material-strategy.test.ts src/lib/world-display/compaction-family-planner.test.ts src/lib/world-display/texture-page-binding.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts --run`
 
 ## Phase C8.14: Fold RGBA Alpha-Test Into The RGBA Texture-Page Family
 

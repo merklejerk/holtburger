@@ -247,6 +247,15 @@ export function createWebgl2RenderMetrics(
 				input.worldStore?.compactionCandidateDrawUnitCount ?? 0,
 			compactionBypassReasonCount: input.worldStore?.compactionBypassReasonCount ?? 0,
 			compactionBypassSamples: [...(input.worldStore?.compactionBypassSamples ?? [])],
+			compactionBypassBlockerSamples: [
+				...(input.worldStore?.compactionBypassBlockerSamples ?? []),
+			],
+			unsupportedTexturePageBypassSamples: [
+				...(input.worldStore?.unsupportedTexturePageBypassSamples ?? []),
+			],
+			compactionBypassDetailSamples: [
+				...(input.worldStore?.compactionBypassDetailSamples ?? []),
+			],
 			compactionCoverageDrawUnitCounts:
 				input.worldStore?.compactionCoverageDrawUnitCounts ?? {},
 			compactionCoverageMaterialBlockerCounts:

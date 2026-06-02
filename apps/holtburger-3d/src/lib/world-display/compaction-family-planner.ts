@@ -1,7 +1,10 @@
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
 import type { RenderVec4 } from "./render-math";
 import type { StagedWorldMaterialAtlasEligibility } from "./staged-world-material-strategy";
-import type { TexturePageBinding } from "./texture-page-binding";
+import type {
+	TexturePageBinding,
+	TexturePageUsageBucket,
+} from "./texture-page-binding";
 import {
 	createEmptyTexturePageAtlasPlan,
 	createTexturePageAtlasPlacementsByEntryKey,
@@ -74,7 +77,9 @@ export type CompactionMaterialBlocker =
 	| "detail-overlay"
 	| "missing-detail-atlas-entry"
 	| "unsupported-material-state"
-	| "unsupported-texture-page-behavior";
+	| `unsupported-texture-page-usage:${TexturePageUsageBucket}`
+	| "unsupported-texture-page-sample-class"
+	| "unsupported-texture-page-sampling";
 
 export type CompactionGeometryBlocker =
 	| "non-static"
@@ -124,6 +129,8 @@ export interface CompactionFamilyCandidate {
 export interface CompactionFamilyBypass {
 	drawUnitId: string;
 	reason: CompactionFamilyBypassReason;
+	blockerKind: "geometry" | "material" | "atlas";
+	blocker: string;
 	detail: string;
 }
 
@@ -856,7 +863,9 @@ function isIndexedPalettedMaterialTableReady(
 		material.alphaPolicy === "opaque" &&
 		!material.blockers.includes("missing-indexed-texel-page") &&
 		!material.blockers.includes("missing-indexed-palette-page") &&
-		!material.blockers.includes("unsupported-texture-page-behavior") &&
+		!material.blockers.some(isUnsupportedTexturePageUsageBlocker) &&
+		!material.blockers.includes("unsupported-texture-page-sample-class") &&
+		!material.blockers.includes("unsupported-texture-page-sampling") &&
 		!material.blockers.includes("indexed-alpha-policy-unsupported")
 	);
 }
@@ -917,11 +926,11 @@ export function createCompactionEligibility(options: {
 			if (!hasIndexedPaletteTexturePage(options.texturePageBindings)) {
 				materialBlockers.push("missing-indexed-palette-page");
 			}
-			if (
-				!hasOnlySupportedIndexedTexturePageBehavior(options.texturePageBindings)
-			) {
-				materialBlockers.push("unsupported-texture-page-behavior");
-			}
+			materialBlockers.push(
+				...classifyUnsupportedIndexedTexturePageBlockers(
+					options.texturePageBindings,
+				),
+			);
 			if (alphaPolicy !== "opaque") {
 				materialBlockers.push("indexed-alpha-policy-unsupported");
 			}
@@ -951,13 +960,11 @@ export function createCompactionEligibility(options: {
 			if (options.hasDetailOverlay && !options.detailAtlasEntry) {
 				materialBlockers.push("missing-detail-atlas-entry");
 			}
-			if (
-				!hasOnlySupportedCompactedTexturePageBehavior(
+			materialBlockers.push(
+				...classifyUnsupportedCompactedTexturePageBlockers(
 					options.texturePageBindings,
-				)
-			) {
-				materialBlockers.push("unsupported-texture-page-behavior");
-			}
+				),
+			);
 			break;
 	}
 
@@ -991,18 +998,24 @@ function createGeometryCompactionBypass(
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "non-static",
+				blockerKind: "geometry",
+				blocker,
 				detail: `draw unit kind ${drawUnit.kind} is not compacted geometry`,
 			};
 		case "missing-landblock-origin":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "missing-landblock-origin",
+				blockerKind: "geometry",
+				blocker,
 				detail: "compacted geometry draw unit has no owning landblock",
 			};
 		case "missing-uv-buffer":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "missing-uv-buffer",
+				blockerKind: "geometry",
+				blocker,
 				detail: "compacted geometry draw unit has no UV buffer",
 			};
 	}
@@ -1012,83 +1025,119 @@ function createMaterialCompactionBypass(
 	drawUnit: CompactionFamilyCandidate,
 	blocker: CompactionMaterialBlocker,
 ): CompactionFamilyBypass {
+	if (isUnsupportedTexturePageUsageBlocker(blocker)) {
+		return {
+			drawUnitId: drawUnit.id,
+			reason: "unsupported-compacted-material-family",
+			blockerKind: "material",
+			blocker,
+			detail:
+				"texture-page bindings include a usage bucket that is not supported by the compacted shader family",
+		};
+	}
 	switch (blocker) {
 		case "missing-compacted-constant-color-family":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "unsupported-constant-color-material",
+				blockerKind: "material",
+				blocker,
 				detail: `flat/solid material ${drawUnit.materialKey} has no compacted constant-color material family`,
 			};
 		case "missing-compacted-indexed-paletted-family":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "unsupported-indexed-paletted-material",
+				blockerKind: "material",
+				blocker,
 				detail: `indexed/paletted material ${drawUnit.materialKey} has no compacted indexed material family`,
 			};
 		case "missing-indexed-texel-page":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "unsupported-indexed-texture-page-policy",
+				blockerKind: "material",
+				blocker,
 				detail: `indexed/paletted material ${drawUnit.materialKey} has no indexed texel texture-page binding`,
 			};
 		case "missing-indexed-palette-page":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "unsupported-indexed-texture-page-policy",
+				blockerKind: "material",
+				blocker,
 				detail: `indexed/paletted material ${drawUnit.materialKey} has no palette texture-page binding`,
 			};
 		case "indexed-alpha-policy-unsupported":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "indexed-alpha-policy-unsupported",
+				blockerKind: "material",
+				blocker,
 				detail: `indexed/paletted material ${drawUnit.materialKey} has alpha policy that is not supported by the compacted indexed path`,
 			};
 		case "detail-overlay":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "detail-overlay",
+				blockerKind: "material",
+				blocker,
 				detail: `indexed/paletted material ${drawUnit.materialKey} has a detail overlay not yet supported by the compacted indexed family`,
 			};
 		case "missing-compacted-alpha-test-family":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "unsupported-alpha-test-material",
+				blockerKind: "material",
+				blocker,
 				detail: `alpha-test material ${drawUnit.materialKey} has no compacted cutout material family`,
 			};
 		case "missing-compacted-transparent-blended-family":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "unsupported-transparent-blended-material",
+				blockerKind: "material",
+				blocker,
 				detail: `blended material ${drawUnit.materialKey} has no compacted transparent material family`,
 			};
 		case "missing-compacted-opacity-translucent-family":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "unsupported-opacity-translucent-material",
+				blockerKind: "material",
+				blocker,
 				detail: `opacity/translucent material ${drawUnit.materialKey} has no compacted translucent material family`,
 			};
 		case "missing-compacted-terrain-family":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "unsupported-terrain-material",
+				blockerKind: "material",
+				blocker,
 				detail: `terrain material ${drawUnit.materialKey} belongs to the terrain pipeline`,
 			};
 		case "debug-pipeline-material":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "debug-pipeline-material",
+				blockerKind: "material",
+				blocker,
 				detail: `debug/portal material ${drawUnit.materialKey} is outside the production compacted path`,
 			};
 		case "missing-base-texture-page":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "unsupported-compacted-material-family",
+				blockerKind: "material",
+				blocker,
 				detail: `draw unit material ${drawUnit.materialKey} has no compacted-compatible base texture page`,
 			};
 		case "missing-atlas-eligibility":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "missing-atlas-eligibility",
+				blockerKind: "material",
+				blocker,
 				detail:
 					"compacted geometry draw unit has no packed texture-page eligibility",
 			};
@@ -1096,22 +1145,38 @@ function createMaterialCompactionBypass(
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "missing-detail-atlas-entry",
+				blockerKind: "material",
+				blocker,
 				detail: "detail overlay has no compactable RGBA8 detail atlas entry",
 			};
 		case "unsupported-material-state":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "unsupported-material-state",
+				blockerKind: "material",
+				blocker,
 				detail: `material ${drawUnit.materialKey} is not supported by any current compacted material family`,
 			};
-		case "unsupported-texture-page-behavior":
+		case "unsupported-texture-page-sample-class":
 			return {
 				drawUnitId: drawUnit.id,
 				reason: "unsupported-compacted-material-family",
+				blockerKind: "material",
+				blocker,
 				detail:
-					"texture-page bindings require a compacted shader family that is not implemented",
+					"texture-page bindings include a sample class that is not supported by the compacted shader family",
+			};
+		case "unsupported-texture-page-sampling":
+			return {
+				drawUnitId: drawUnit.id,
+				reason: "unsupported-compacted-material-family",
+				blockerKind: "material",
+				blocker,
+				detail:
+					"texture-page bindings include sampling behavior that is not supported by the compacted shader family",
 			};
 	}
+	throw new Error(`Unhandled compaction material blocker ${blocker}`);
 }
 
 export function classifyCompactionMaterialFamily(options: {
@@ -1206,26 +1271,6 @@ function hasIndexedPaletteTexturePage(
 	);
 }
 
-function hasOnlySupportedIndexedTexturePageBehavior(
-	texturePageBindings: readonly TexturePageBinding[],
-): boolean {
-	return texturePageBindings.every((binding) => {
-		if (
-			binding.usageBucket === "indexed-texels" &&
-			binding.sampleClass === "indexed-data"
-		) {
-			return hasExactDataTexturePageSampling(binding);
-		}
-		if (
-			binding.usageBucket === "palette-lookup" &&
-			binding.sampleClass === "palette-data"
-		) {
-			return hasExactDataTexturePageSampling(binding);
-		}
-		return false;
-	});
-}
-
 function hasExactDataTexturePageSampling(binding: TexturePageBinding): boolean {
 	return (
 		binding.sampling.samplingDomain === "data" &&
@@ -1236,22 +1281,89 @@ function hasExactDataTexturePageSampling(binding: TexturePageBinding): boolean {
 	);
 }
 
-function hasOnlySupportedCompactedTexturePageBehavior(
+function classifyUnsupportedIndexedTexturePageBlockers(
 	texturePageBindings: readonly TexturePageBinding[],
+): CompactionMaterialBlocker[] {
+	return collectUniqueMaterialBlockers(
+		texturePageBindings.map((binding) => {
+			switch (binding.usageBucket) {
+				case "indexed-texels":
+					if (binding.sampleClass !== "indexed-data") {
+						return "unsupported-texture-page-sample-class";
+					}
+					return hasExactDataTexturePageSampling(binding)
+						? null
+						: "unsupported-texture-page-sampling";
+				case "palette-lookup":
+					if (binding.sampleClass !== "palette-data") {
+						return "unsupported-texture-page-sample-class";
+					}
+					return hasExactDataTexturePageSampling(binding)
+						? null
+						: "unsupported-texture-page-sampling";
+				case "detail":
+					return "detail-overlay";
+				default:
+					return formatUnsupportedTexturePageUsageBlocker(
+						binding.usageBucket,
+					);
+			}
+		}),
+	);
+}
+
+function classifyUnsupportedCompactedTexturePageBlockers(
+	texturePageBindings: readonly TexturePageBinding[],
+): CompactionMaterialBlocker[] {
+	return collectUniqueMaterialBlockers(
+		texturePageBindings.map((binding) => {
+			switch (binding.usageBucket) {
+				case "base-color":
+				case "detail":
+					if (binding.sampleClass !== "rgba-color") {
+						return "unsupported-texture-page-sample-class";
+					}
+					return hasColorFilteredTexturePageSampling(binding)
+						? null
+						: "unsupported-texture-page-sampling";
+				default:
+					return formatUnsupportedTexturePageUsageBlocker(
+						binding.usageBucket,
+					);
+			}
+		}),
+	);
+}
+
+function formatUnsupportedTexturePageUsageBlocker(
+	usageBucket: TexturePageUsageBucket,
+): CompactionMaterialBlocker {
+	return `unsupported-texture-page-usage:${usageBucket}`;
+}
+
+function isUnsupportedTexturePageUsageBlocker(
+	blocker: CompactionMaterialBlocker,
 ): boolean {
-	return texturePageBindings.every((binding) => {
-		if (
-			binding.usageBucket === "base-color" ||
-			binding.usageBucket === "detail"
-		) {
-			return (
-				binding.sampleClass === "rgba-color" &&
-				binding.sampling.samplingDomain === "color" &&
-				binding.sampling.lookup === "color-filtered"
-			);
+	return blocker.startsWith("unsupported-texture-page-usage:");
+}
+
+function hasColorFilteredTexturePageSampling(binding: TexturePageBinding): boolean {
+	return (
+		binding.sampling.samplingDomain === "color" &&
+		binding.sampling.lookup === "color-filtered"
+	);
+}
+
+function collectUniqueMaterialBlockers(
+	blockers: readonly (CompactionMaterialBlocker | null)[],
+): CompactionMaterialBlocker[] {
+	const unique: CompactionMaterialBlocker[] = [];
+	for (const blocker of blockers) {
+		if (blocker && !unique.includes(blocker)) {
+			unique.push(blocker);
 		}
-		return false;
-	});
+	}
+	return unique;
 }
 
 function isOpaqueStaticCompactionMaterial(

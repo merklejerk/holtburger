@@ -193,6 +193,10 @@ describe("webgl2 world resources", () => {
 		expect(
 			gl.textureUploads.map(({ width, height }) => ({ width, height })),
 		).toEqual([{ width: 1, height: 1 }]);
+		expect(store.compactionBypassBlockerSamples).toContain(
+			"missing-atlas-eligibility:material:missing-atlas-eligibility|family=textured-opaque|alpha=opaque|detailOverlay=no|detailAtlas=no|usageSources=base-color:standalone-direct-texture",
+		);
+		expect(store.unsupportedTexturePageBypassSamples).toEqual([]);
 		expect(gl.generatedMipmapCount).toBe(1);
 		expect(store.textureSamplingPolicyCounts).toEqual({
 			"wrap=clamp/clamp;filter=linear/linear/linear;color=srgb;aniso=1;mips=on;flipY=off": 1,

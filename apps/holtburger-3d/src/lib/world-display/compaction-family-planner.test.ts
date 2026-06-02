@@ -275,10 +275,81 @@ describe("compaction family planner", () => {
 			{
 				drawUnitId: "material-only",
 				reason: "missing-landblock-origin",
+				blockerKind: "geometry",
+				blocker: "missing-landblock-origin",
 			},
 			{
 				drawUnitId: "geometry-only",
 				reason: "missing-atlas-eligibility",
+				blockerKind: "material",
+				blocker: "missing-atlas-eligibility",
+			},
+		]);
+	});
+
+	it("classifies unsupported compacted texture-page behavior by blocker category", () => {
+		const baseBinding = createDirectTexturePageBinding();
+		const plan = planCompactionFamilies({
+			drawUnits: [
+				createCandidate({
+					id: "bad-usage",
+					texturePageBindings: [
+						baseBinding,
+						{
+							...baseBinding,
+							usageBucket: "indexed-texels",
+						},
+					],
+				}),
+				createCandidate({
+					id: "bad-sample-class",
+					texturePageBindings: [
+						baseBinding,
+						{
+							...baseBinding,
+							usageBucket: "detail",
+							sampleClass: "control-data",
+						},
+					],
+				}),
+				createCandidate({
+					id: "bad-sampling",
+					texturePageBindings: [
+						baseBinding,
+						{
+							...baseBinding,
+							usageBucket: "detail",
+							sampling: {
+								...baseBinding.sampling,
+								lookup: "control-filtered",
+							},
+						},
+					],
+				}),
+			],
+			policy: {
+				maxAtlasTextureSize: 32,
+				maxAtlasTextureCount: 1,
+				baseGutterPixels: 2,
+				maxMaterialSlotsPerDraw: 4,
+			},
+		});
+
+		expect(plan.bypasses).toMatchObject([
+			{
+				drawUnitId: "bad-usage",
+				reason: "unsupported-compacted-material-family",
+				blocker: "unsupported-texture-page-usage:indexed-texels",
+			},
+			{
+				drawUnitId: "bad-sample-class",
+				reason: "unsupported-compacted-material-family",
+				blocker: "unsupported-texture-page-sample-class",
+			},
+			{
+				drawUnitId: "bad-sampling",
+				reason: "unsupported-compacted-material-family",
+				blocker: "unsupported-texture-page-sampling",
 			},
 		]);
 	});
@@ -299,6 +370,23 @@ describe("compaction family planner", () => {
 
 		expect(missingPalette.compactionEligibility.material.blockers).toEqual([
 			"missing-indexed-palette-page",
+		]);
+
+		const withDetailOverlay = createCandidate({
+			materialKind: "indexed-paletted",
+			texturePageBindings: [
+				createIndexedTexelTexturePageBinding(),
+				createIndexedPaletteTexturePageBinding(),
+				{
+					...createDirectTexturePageBinding(),
+					usageBucket: "detail",
+					source: "detail-overlay",
+				},
+			],
+		});
+
+		expect(withDetailOverlay.compactionEligibility.material.blockers).toEqual([
+			"detail-overlay",
 		]);
 	});
 
@@ -935,6 +1023,20 @@ function createTexturePageBindings({
 			source: "standalone-direct-texture",
 		},
 	];
+}
+
+function createDirectTexturePageBinding(): TexturePageBinding {
+	const atlasEligibility = createAtlasEligibility({
+		entryKey: "direct-binding",
+		width: 8,
+		height: 8,
+	});
+	return createTexturePageBindings({
+		materialKind: "direct-texture",
+		atlasEligibility,
+		width: 8,
+		height: 8,
+	})[0] as TexturePageBinding;
 }
 
 function createIndexedTexelTexturePageBinding({

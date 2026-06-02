@@ -58,6 +58,8 @@ function createDeferredWorldDisplayRenderer<
 	let renderSceneContext = options.renderSceneContext;
 	let renderChunkTransforms = options.renderChunkTransforms;
 	let renderSpatialQuery = options.renderSpatialQuery;
+	let selectedStaticRenderableRenderKey =
+		options.selectedStaticRenderableRenderKey;
 	const rendererResourceGraph = options.rendererResourceGraph;
 	let controlledCameraFrame = options.controlledCameraFrame;
 	let transitionPortalMaxDepth = options.transitionPortalMaxDepth;
@@ -111,6 +113,10 @@ function createDeferredWorldDisplayRenderer<
 		setRenderSpatialQuery(query) {
 			renderSpatialQuery = query;
 			loadedRenderer?.setRenderSpatialQuery(query);
+		},
+		setSelectedStaticRenderableRenderKey(renderKey) {
+			selectedStaticRenderableRenderKey = renderKey;
+			loadedRenderer?.setSelectedStaticRenderableRenderKey(renderKey);
 		},
 		setControlledCameraFrame(frame) {
 			controlledCameraFrame = frame;
@@ -187,6 +193,7 @@ function createDeferredWorldDisplayRenderer<
 			renderSceneContext,
 			renderChunkTransforms,
 			renderSpatialQuery,
+			selectedStaticRenderableRenderKey,
 			rendererResourceGraph,
 			controlledCameraFrame,
 			transitionPortalMaxDepth,

@@ -10,10 +10,12 @@ import {
 	createFallbackSceneCameraFrame,
 	type SceneBoundsFrame,
 } from "./camera";
+import type { PreparedBounds } from "../assets/types";
 import { createWebgl2RenderMetrics } from "./webgl2-render-metrics";
 import { Webgl2StateCache } from "./webgl2-state-cache";
 import {
 	buildStagedWorldFrame,
+	type StagedWorldFrame,
 	type StagedWorldFrameMetrics,
 } from "./staged-world-frame";
 import {
@@ -58,7 +60,11 @@ import type {
 	WorldRenderMetrics,
 } from "./renderer-contract";
 import type { MaterialTextureCapabilities } from "./render-surface-texture-data";
-import { multiplyMat4 } from "./render-math";
+import {
+	createTranslationMat4,
+	multiplyMat4,
+	type RenderMat4,
+} from "./render-math";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
 import {
 	deriveTransitionPortalRenderLevels,
@@ -83,6 +89,11 @@ import {
 	type WorldResidencyIndex,
 	type WorldResidencyQueryDiagnostics,
 } from "./world-residency-index";
+import {
+	isPreparedGfxObjAsset,
+	type StaticRenderablePart,
+} from "./static-renderables";
+import { buildStaticRenderablePartMatrix } from "./staged-world-assembly";
 import type {
 	WorldDisplayRenderer,
 	WorldDisplayRendererOptions,
@@ -103,6 +114,10 @@ const TRIANGLE_VERTEX_COUNT = 3;
 const TRIANGLE_VERTICES = new Float32Array([
 	0, 0.58, -0.58, -0.46, 0.58, -0.46,
 ]);
+const SELECTED_STATIC_RENDERABLE_BOUNDS_COLOR = new Float32Array([
+	1, 0.82, 0.28, 1,
+]);
+const BOUNDS_LINE_VERTEX_COMPONENTS = 3;
 
 const TRIANGLE_VERTEX_SHADER = `#version 300 es
 layout(location = 0) in vec2 position;
@@ -807,10 +822,20 @@ interface Webgl2RenderResources {
 	sceneDomainCopyVertexArray: Webgl2VertexArrayResource;
 	sceneDomainTargets: Webgl2SceneDomainTargetSet | null;
 	portalCompositeTargets: Webgl2PortalCompositeTargetSet | null;
+	selectedStaticRenderableOverlay: Webgl2StaticRenderableSelectionOverlay | null;
 	sceneDomainFramebufferFailureCount: number;
 	sceneDomainFramebufferFailureSamples: string[];
 	worldStore: Webgl2WorldResourceStore;
 	materialTextureCapabilities: MaterialTextureCapabilities;
+}
+
+interface Webgl2StaticRenderableSelectionOverlay {
+	readonly signature: string;
+	readonly modelMatrix: RenderMat4;
+	readonly vertexBuffer: Webgl2BufferResource;
+	readonly vertexArray: Webgl2VertexArrayResource;
+	readonly vertexCount: number;
+	dispose(): void;
 }
 
 interface Webgl2SceneDomainFrameMetrics {
@@ -838,6 +863,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	let transitionPortalModel = options.transitionPortalModel;
 	let renderSceneContext = options.renderSceneContext;
 	let renderChunkTransforms = options.renderChunkTransforms;
+	let selectedStaticRenderableRenderKey =
+		options.selectedStaticRenderableRenderKey;
 	let controlledCameraFrame = options.controlledCameraFrame;
 	let transitionPortalMaxDepth = options.transitionPortalMaxDepth ?? 1;
 	let textureFilteringMode = options.textureFilteringMode ?? "anisotropic-4x";
@@ -938,6 +965,14 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			syncResidencyIndex();
 		},
 		setRenderSpatialQuery() {
+			reportMetrics();
+		},
+		setSelectedStaticRenderableRenderKey(renderKey) {
+			if (selectedStaticRenderableRenderKey === renderKey) {
+				return;
+			}
+			selectedStaticRenderableRenderKey = renderKey;
+			disposeSelectedStaticRenderableOverlay();
 			reportMetrics();
 		},
 		setControlledCameraFrame(frame) {
@@ -1127,7 +1162,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 							terrainBlendProgram: currentResources.terrainBlendWorldProgram,
 							indexedP8Program: currentResources.indexedP8WorldProgram,
 							indexedP16Program: currentResources.indexedP16WorldProgram,
-							rgbaTexturePageFamilyProgram: currentResources.rgbaTexturePageFamilyWorldProgram,
+							rgbaTexturePageFamilyProgram:
+								currentResources.rgbaTexturePageFamilyWorldProgram,
 							indexedPalettedFamilyP8Program:
 								currentResources.indexedPalettedFamilyP8WorldProgram,
 							indexedPalettedFamilyP16Program:
@@ -1160,6 +1196,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			}
 			drawCallCount += latestSubmitMetrics.drawCallCount;
 			lastFrameDrawCount = latestSubmitMetrics.drawCallCount;
+			profileBrowserJsScope("webgl2.frame.renderSelectedStatic", () =>
+				renderSelectedStaticRenderableOverlay(frame),
+			);
 		} else {
 			latestFrameMetrics = null;
 			latestSceneDomainFrameMetrics = null;
@@ -1179,6 +1218,163 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			renderMs: window.performance.now() - renderStartedAt,
 		});
 		profileBrowserJsScope("webgl2.frame.reportMetrics", reportMetrics);
+	}
+
+	function renderSelectedStaticRenderableOverlay(
+		frame: StagedWorldFrame,
+	): void {
+		if (!resources) {
+			return;
+		}
+		const overlay = syncSelectedStaticRenderableOverlay(resources);
+		if (!overlay) {
+			return;
+		}
+		const { gl, stateCache, flatWorldProgram } = resources;
+		stateCache.setDepthState({
+			enabled: true,
+			write: false,
+			func: gl.LEQUAL,
+		});
+		stateCache.setBlendState({
+			enabled: false,
+			srcRgb: gl.ONE,
+			dstRgb: gl.ZERO,
+			srcAlpha: gl.ONE,
+			dstAlpha: gl.ZERO,
+			equationRgb: gl.FUNC_ADD,
+			equationAlpha: gl.FUNC_ADD,
+		});
+		stateCache.setCullState({
+			enabled: false,
+			mode: gl.BACK,
+		});
+		stateCache.setStencilState({
+			enabled: false,
+			writeMask: 0xff,
+			func: gl.ALWAYS,
+			ref: 0,
+			readMask: 0xff,
+			fail: gl.KEEP,
+			zfail: gl.KEEP,
+			zpass: gl.KEEP,
+		});
+		stateCache.useProgram(flatWorldProgram.program);
+		stateCache.bindVertexArray(overlay.vertexArray.vertexArray);
+		gl.uniformMatrix4fv(
+			flatWorldProgram.uniforms.uModelViewProjection,
+			false,
+			multiplyMat4(frame.viewProjectionMatrix, overlay.modelMatrix),
+		);
+		gl.uniform4fv(
+			flatWorldProgram.uniforms.uColor,
+			SELECTED_STATIC_RENDERABLE_BOUNDS_COLOR,
+		);
+		gl.drawArrays(gl.LINES, 0, overlay.vertexCount);
+	}
+
+	function syncSelectedStaticRenderableOverlay(
+		currentResources: Webgl2RenderResources,
+	): Webgl2StaticRenderableSelectionOverlay | null {
+		if (selectedStaticRenderableRenderKey === null) {
+			disposeSelectedStaticRenderableOverlay();
+			return null;
+		}
+		const part = staticRenderableScene.parts.find(
+			(candidate) => candidate.renderKey === selectedStaticRenderableRenderKey,
+		);
+		if (!part) {
+			disposeSelectedStaticRenderableOverlay();
+			return null;
+		}
+		const overlayInput = buildSelectedStaticRenderableOverlayInput(part);
+		if (!overlayInput) {
+			disposeSelectedStaticRenderableOverlay();
+			return null;
+		}
+		const existing = currentResources.selectedStaticRenderableOverlay;
+		if (existing?.signature === overlayInput.signature) {
+			return existing;
+		}
+
+		existing?.dispose();
+		currentResources.selectedStaticRenderableOverlay = null;
+		const vertexBuffer = createWebgl2ArrayBuffer(currentResources.gl, {
+			label: `selected static renderable bounds ${part.renderKey}`,
+			data: overlayInput.positions,
+		});
+		const vertexArray = createWebgl2VertexArray(currentResources.gl, {
+			label: `selected static renderable bounds ${part.renderKey}`,
+			configure() {
+				currentResources.gl.bindBuffer(
+					currentResources.gl.ARRAY_BUFFER,
+					vertexBuffer.buffer,
+				);
+				currentResources.gl.enableVertexAttribArray(
+					currentResources.flatWorldProgram.attributes.position,
+				);
+				currentResources.gl.vertexAttribPointer(
+					currentResources.flatWorldProgram.attributes.position,
+					BOUNDS_LINE_VERTEX_COMPONENTS,
+					currentResources.gl.FLOAT,
+					false,
+					0,
+					0,
+				);
+				currentResources.gl.bindBuffer(currentResources.gl.ARRAY_BUFFER, null);
+			},
+		});
+		const overlay = {
+			signature: overlayInput.signature,
+			modelMatrix: overlayInput.modelMatrix,
+			vertexBuffer,
+			vertexArray,
+			vertexCount:
+				overlayInput.positions.length / BOUNDS_LINE_VERTEX_COMPONENTS,
+			dispose() {
+				vertexArray.dispose();
+				vertexBuffer.dispose();
+			},
+		};
+		currentResources.selectedStaticRenderableOverlay = overlay;
+		currentResources.stateCache.invalidate();
+		return overlay;
+	}
+
+	function buildSelectedStaticRenderableOverlayInput(
+		part: StaticRenderablePart,
+	): {
+		signature: string;
+		modelMatrix: RenderMat4;
+		positions: Float32Array;
+	} | null {
+		const asset = assetState.preparedByAssetId[part.gfxObjAssetId];
+		if (!isPreparedGfxObjAsset(asset) || !asset.payload.renderGeometry.bounds) {
+			return null;
+		}
+		const chunkOffset = renderChunkTransforms.find(
+			(transform) => transform.chunkKey === part.renderChunk.chunkKey,
+		)?.offset;
+		if (!chunkOffset) {
+			return null;
+		}
+		const partMatrix = buildStaticRenderablePartMatrix(part);
+		const modelMatrix = createTranslationMat4(chunkOffset);
+		const positions = buildSelectedStaticRenderableBoundsLinePositions(
+			asset.payload.renderGeometry.bounds,
+			partMatrix,
+		);
+		return {
+			signature: [
+				part.renderKey,
+				part.gfxObjAssetId,
+				describeMat4Signature(partMatrix),
+				`${chunkOffset.x},${chunkOffset.y},${chunkOffset.z}`,
+				describeBoundsSignature(asset.payload.renderGeometry.bounds),
+			].join("|"),
+			modelMatrix,
+			positions,
+		};
 	}
 
 	function syncCanvasSize(): void {
@@ -1420,7 +1616,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		target: Webgl2SceneDomainTarget;
 		drawUnits: readonly Webgl2WorldDrawUnit[];
 		frame: ReturnType<typeof buildStagedWorldFrame>;
-		rgbaTexturePageFamilySubmitRoute: "scene-domain-exterior" | "scene-domain-interior";
+		rgbaTexturePageFamilySubmitRoute:
+			| "scene-domain-exterior"
+			| "scene-domain-interior";
 		terrainBackfaceCulling: boolean;
 	}): Webgl2WorldSubmitMetrics {
 		if (!resources) {
@@ -1962,8 +2160,18 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		resources.sceneDomainCopyVertexArray.dispose();
 		resources.sceneDomainTargets?.dispose();
 		resources.portalCompositeTargets?.dispose();
+		resources.selectedStaticRenderableOverlay?.dispose();
 		destroyWebgl2WorldResources(resources.worldStore);
 		resources = null;
+	}
+
+	function disposeSelectedStaticRenderableOverlay(): void {
+		if (!resources?.selectedStaticRenderableOverlay) {
+			return;
+		}
+		resources.selectedStaticRenderableOverlay.dispose();
+		resources.selectedStaticRenderableOverlay = null;
+		resources.stateCache.invalidate();
 	}
 
 	function syncWorldResources(): void {
@@ -2378,6 +2586,78 @@ function mergeMaterialKindCounts(
 	return counts;
 }
 
+function buildSelectedStaticRenderableBoundsLinePositions(
+	bounds: PreparedBounds,
+	matrix: RenderMat4,
+): Float32Array {
+	const corners = [
+		{ x: bounds.min.x, y: bounds.min.y, z: bounds.min.z },
+		{ x: bounds.max.x, y: bounds.min.y, z: bounds.min.z },
+		{ x: bounds.min.x, y: bounds.max.y, z: bounds.min.z },
+		{ x: bounds.max.x, y: bounds.max.y, z: bounds.min.z },
+		{ x: bounds.min.x, y: bounds.min.y, z: bounds.max.z },
+		{ x: bounds.max.x, y: bounds.min.y, z: bounds.max.z },
+		{ x: bounds.min.x, y: bounds.max.y, z: bounds.max.z },
+		{ x: bounds.max.x, y: bounds.max.y, z: bounds.max.z },
+	].map((corner) => transformBoundsCorner(corner, matrix));
+	const edgeCornerIndices = [
+		0, 1, 1, 3, 3, 2, 2, 0, 4, 5, 5, 7, 7, 6, 6, 4, 0, 4, 1, 5, 2, 6, 3, 7,
+	];
+	const positions = new Float32Array(
+		edgeCornerIndices.length * BOUNDS_LINE_VERTEX_COMPONENTS,
+	);
+	for (
+		let edgeIndex = 0;
+		edgeIndex < edgeCornerIndices.length;
+		edgeIndex += 1
+	) {
+		const corner = corners[edgeCornerIndices[edgeIndex]];
+		const offset = edgeIndex * BOUNDS_LINE_VERTEX_COMPONENTS;
+		positions[offset] = corner.x;
+		positions[offset + 1] = corner.y;
+		positions[offset + 2] = corner.z;
+	}
+	return positions;
+}
+
+function transformBoundsCorner(
+	corner: PreparedBounds["min"],
+	matrix: RenderMat4,
+): PreparedBounds["min"] {
+	return {
+		x:
+			matrix[0] * corner.x +
+			matrix[4] * corner.y +
+			matrix[8] * corner.z +
+			matrix[12],
+		y:
+			matrix[1] * corner.x +
+			matrix[5] * corner.y +
+			matrix[9] * corner.z +
+			matrix[13],
+		z:
+			matrix[2] * corner.x +
+			matrix[6] * corner.y +
+			matrix[10] * corner.z +
+			matrix[14],
+	};
+}
+
+function describeBoundsSignature(bounds: PreparedBounds): string {
+	return [
+		bounds.min.x,
+		bounds.min.y,
+		bounds.min.z,
+		bounds.max.x,
+		bounds.max.y,
+		bounds.max.z,
+	].join(",");
+}
+
+function describeMat4Signature(matrix: RenderMat4): string {
+	return [...matrix].join(",");
+}
+
 function createTriangleResources(
 	gl: WebGL2RenderingContext,
 ): Webgl2RenderResources {
@@ -2417,7 +2697,8 @@ function createTriangleResources(
 		indexedP8WorldProgram: createIndexedP8WorldProgram(gl),
 		indexedP16WorldProgram: createIndexedP16WorldProgram(gl),
 		terrainBlendWorldProgram: createTerrainBlendWorldProgram(gl),
-		rgbaTexturePageFamilyWorldProgram: createRgbaTexturePageFamilyWorldProgram(gl),
+		rgbaTexturePageFamilyWorldProgram:
+			createRgbaTexturePageFamilyWorldProgram(gl),
 		indexedPalettedFamilyP8WorldProgram:
 			createIndexedPalettedFamilyWorldProgram(gl, {
 				label: "webgl2 indexed-paletted p8 family world",
@@ -2439,6 +2720,7 @@ function createTriangleResources(
 		}),
 		sceneDomainTargets: null,
 		portalCompositeTargets: null,
+		selectedStaticRenderableOverlay: null,
 		sceneDomainFramebufferFailureCount: 0,
 		sceneDomainFramebufferFailureSamples: [],
 		worldStore: createWebgl2WorldResourceStore(),

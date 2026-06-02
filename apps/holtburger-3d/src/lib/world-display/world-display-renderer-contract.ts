@@ -32,6 +32,7 @@ export interface WorldDisplayRendererOptions {
 	renderSceneContext: WorldRenderSceneContext;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	renderSpatialQuery: RenderSpatialIndexQuery | null;
+	selectedStaticRenderableRenderKey: string | null;
 	rendererResourceGraph?: RendererResourceGraph;
 	controlledCameraFrame: SceneCameraFrame | null;
 	transitionPortalMaxDepth?: number;
@@ -53,6 +54,7 @@ export interface WorldDisplayRenderer {
 	setRenderSceneContext(context: WorldRenderSceneContext): void;
 	setRenderChunkTransforms(transforms: readonly RenderChunkTransform[]): void;
 	setRenderSpatialQuery(query: RenderSpatialIndexQuery | null): void;
+	setSelectedStaticRenderableRenderKey(renderKey: string | null): void;
 	setControlledCameraFrame(frame: SceneCameraFrame | null): void;
 	setTransitionPortalMaxDepth(maxDepth: number): void;
 	setRenderStyle(renderStyle: WorldDisplayRenderStyle): void;

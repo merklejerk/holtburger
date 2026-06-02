@@ -89,6 +89,58 @@ describe("compaction family planner", () => {
 		]);
 	});
 
+	it("dedupes repeated RGBA candidates for the same draw unit before creating slices", () => {
+		const plan = planCompactionFamilies({
+			drawUnits: [
+				createCandidate({ id: "repeat-detail", entryKey: "repeat-detail" }),
+				createCandidate({ id: "repeat-detail", entryKey: "repeat-detail" }),
+			],
+			policy: {
+				maxAtlasTextureSize: 32,
+				maxAtlasTextureCount: 1,
+				baseGutterPixels: 2,
+				maxMaterialSlotsPerDraw: 4,
+			},
+		});
+
+		expect(plan.compactableDrawUnitIds).toEqual(["repeat-detail"]);
+		expect(plan.drawSlices).toHaveLength(1);
+		expect(plan.drawSlices[0]?.drawUnitIds).toEqual(["repeat-detail"]);
+		expect(plan.staticPartCount).toBe(1);
+		expect(plan.triangleCount).toBe(2);
+	});
+
+	it("dedupes repeated indexed candidates for the same draw unit before creating slices", () => {
+		const plan = planCompactionFamilies({
+			drawUnits: [
+				createCandidate({
+					id: "indexed-repeat",
+					entryKey: "indexed-repeat",
+					materialKind: "indexed-paletted",
+				}),
+				createCandidate({
+					id: "indexed-repeat",
+					entryKey: "indexed-repeat",
+					materialKind: "indexed-paletted",
+				}),
+			],
+			policy: {
+				maxAtlasTextureSize: 32,
+				maxAtlasTextureCount: 1,
+				baseGutterPixels: 2,
+				maxMaterialSlotsPerDraw: 4,
+			},
+		});
+
+		expect(plan.compactableDrawUnitIds).toEqual(["indexed-repeat"]);
+		expect(plan.renderFamilies.indexedPaletted.drawSlices).toHaveLength(1);
+		expect(
+			plan.renderFamilies.indexedPaletted.drawSlices[0]?.drawUnitIds,
+		).toEqual(["indexed-repeat"]);
+		expect(plan.staticPartCount).toBe(1);
+		expect(plan.triangleCount).toBe(2);
+	});
+
 	it("keeps unsupported first-slice materials on the staged path with reasons", () => {
 		const plan = planCompactionFamilies({
 			drawUnits: [
@@ -321,7 +373,7 @@ describe("compaction family planner", () => {
 		).toEqual([null, 0]);
 	});
 
-	it("retains repeated base-color materials with detail overlays on the direct path", () => {
+	it("keeps repeated base-color materials with detail overlays compactable for atlas diagnostics", () => {
 		const plan = planCompactionFamilies({
 			drawUnits: [
 				createCandidate({
@@ -346,13 +398,11 @@ describe("compaction family planner", () => {
 			},
 		});
 
-		expect(plan.compactableDrawUnitIds).toEqual([]);
-		expect(plan.bypasses).toMatchObject([
-			{
-				drawUnitId: "repeat-detail",
-				reason: "unsupported-compacted-material-family",
-			},
-		]);
+		expect(plan.compactableDrawUnitIds).toEqual(["repeat-detail"]);
+		expect(plan.bypasses).toEqual([]);
+		expect(plan.drawSlices).toHaveLength(1);
+		expect(plan.drawSlices[0]?.drawUnitIds).toEqual(["repeat-detail"]);
+		expect(plan.drawSlices[0]?.detailAtlasTextureIndex).toBe(0);
 	});
 
 	it("splits compaction material slots when the same base material has different detail state", () => {

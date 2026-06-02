@@ -39,6 +39,10 @@ import {
 	type RenderSpatialMetadata,
 } from "./render-spatial-index";
 import {
+	deriveBrowserStaticRenderablePickDiagnostic,
+	type BrowserStaticRenderablePickDiagnostic,
+} from "./browser-picker-diagnostics";
+import {
 	DEBUG_OVERLAY_SPATIAL_OWNER_KEY,
 	STATIC_RENDERABLE_SPATIAL_OWNER_KEY,
 	STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY,
@@ -91,6 +95,7 @@ export interface BrowserRenderResourceCoordinatorInput {
 	showCellIndicators: boolean;
 	highlightPortalTargets: boolean;
 	diagnosticSelection: RenderSpatialMetadata | null;
+	selectedStaticRenderableRenderKey: string | null;
 	activeRenderAnchor: RenderLandblockAnchor | null;
 	browserCameraFrame: SceneCameraFrame | null;
 	runtimeAppearancePreviews: readonly BrowserRuntimeAppearancePreview[];
@@ -137,6 +142,7 @@ export interface BrowserRenderResourceSurface {
 	): void;
 	setDebugOverlayScene(scene: WorldDebugOverlayModel): void;
 	setRenderSpatialQuery(query: RenderSpatialIndexQuery | null): void;
+	setSelectedStaticRenderableRenderKey(renderKey: string | null): void;
 	setControlledCameraFrame(frame: SceneCameraFrame | null): void;
 	setTransitionPortalMaxDepth(maxDepth: number): void;
 	setRenderStyle(renderStyle: WorldDisplayRenderStyle): void;
@@ -182,6 +188,20 @@ export class BrowserRenderResourceCoordinator {
 	private readonly renderSpatialIndex = createLinearRenderSpatialIndex();
 	private surface: BrowserRenderResourceSurface | null = null;
 	private snapshot = createEmptyBrowserRenderResourceSnapshot();
+	private staticPickDiagnosticInput: {
+		assetState: AssetChannelState;
+		staticRenderableScene: StaticRenderableSceneModel;
+		renderChunkTransforms: readonly RenderChunkTransform[];
+		detailTexturesEnabled: boolean;
+		signature: string;
+	} | null = null;
+	private staticPickDiagnosticCache: {
+		signature: string;
+		diagnosticsByRenderKey: Map<
+			string,
+			BrowserStaticRenderablePickDiagnostic | null
+		>;
+	} | null = null;
 	private appliedSurfaceSignatures: Partial<
 		Record<BrowserRenderResourceSurfaceKey, string>
 	> = {};
@@ -193,6 +213,31 @@ export class BrowserRenderResourceCoordinator {
 
 	getSnapshot(): BrowserRenderResourceSnapshot {
 		return this.snapshot;
+	}
+
+	getStaticRenderablePickDiagnostic(
+		renderKey: string,
+	): BrowserStaticRenderablePickDiagnostic | null {
+		const input = this.staticPickDiagnosticInput;
+		if (!input) {
+			return null;
+		}
+		if (this.staticPickDiagnosticCache?.signature !== input.signature) {
+			this.staticPickDiagnosticCache = {
+				signature: input.signature,
+				diagnosticsByRenderKey: new Map(),
+			};
+		}
+		if (!this.staticPickDiagnosticCache.diagnosticsByRenderKey.has(renderKey)) {
+			this.staticPickDiagnosticCache.diagnosticsByRenderKey.set(
+				renderKey,
+				deriveBrowserStaticRenderablePickDiagnostic({ ...input, renderKey }),
+			);
+		}
+		return (
+			this.staticPickDiagnosticCache.diagnosticsByRenderKey.get(renderKey) ??
+			null
+		);
 	}
 
 	updateControlledCameraFrame(frame: SceneCameraFrame | null): void {
@@ -357,6 +402,18 @@ export class BrowserRenderResourceCoordinator {
 			DEBUG_OVERLAY_SPATIAL_OWNER_KEY,
 			deriveDebugOverlaySpatialItems(debugOverlayScene),
 		);
+		this.staticPickDiagnosticInput = {
+			assetState: input.assetState,
+			staticRenderableScene,
+			renderChunkTransforms: activeRenderChunkTransforms,
+			detailTexturesEnabled: input.detailTexturesEnabled,
+			signature: [
+				describeAssetStateSignature(input.assetState),
+				staticRenderableSceneSignature,
+				renderChunkTransformsSignature,
+				String(input.detailTexturesEnabled),
+			].join("|"),
+		};
 		const surface = this.surface;
 		if (surface) {
 			reportTerrainMaterialDiagnostics(terrainScene);
@@ -409,6 +466,14 @@ export class BrowserRenderResourceCoordinator {
 					assetState: input.assetState,
 				}),
 				() => surface.setRenderSpatialQuery(this.renderSpatialIndex),
+			);
+			this.applySurfaceResource(
+				"selected-static-renderable",
+				input.selectedStaticRenderableRenderKey ?? "none",
+				() =>
+					surface.setSelectedStaticRenderableRenderKey(
+						input.selectedStaticRenderableRenderKey,
+					),
 			);
 			this.applySurfaceResource(
 				"controlled-camera-frame",
@@ -476,6 +541,7 @@ type BrowserRenderResourceSurfaceKey =
 	| "transition-portal-model"
 	| "debug-overlay-scene"
 	| "render-spatial-query"
+	| "selected-static-renderable"
 	| "controlled-camera-frame"
 	| "transition-portal-depth"
 	| "render-style"

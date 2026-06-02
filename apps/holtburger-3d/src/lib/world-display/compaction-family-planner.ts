@@ -67,7 +67,6 @@ export type CompactionMaterialBlocker =
 	| "debug-pipeline-material"
 	| "detail-overlay"
 	| "missing-detail-atlas-entry"
-	| "repeat-detail-atlas-unsupported"
 	| "unsupported-material-state"
 	| "unsupported-texture-page-behavior";
 
@@ -309,7 +308,8 @@ export function planCompactionFamilies(options: {
 		rgbaEligible.push({ drawUnit, eligibility: atlasEligibility });
 	}
 
-	const atlasEntries = dedupeRgbaTexturePageEntries(rgbaEligible);
+	const uniqueRgbaEligible = dedupeRgbaTexturePageCandidates(rgbaEligible);
+	const atlasEntries = dedupeRgbaTexturePageEntries(uniqueRgbaEligible);
 	const layout = planAtlasLayout({
 		entries: atlasEntries.map((record) => ({
 			key: record.key,
@@ -322,10 +322,10 @@ export function planCompactionFamilies(options: {
 			gutterPixels: options.policy.baseGutterPixels,
 		},
 	});
-	const placed = rgbaEligible.filter((candidate) =>
+	const placed = uniqueRgbaEligible.filter((candidate) =>
 		layout.placementsByEntryKey.has(candidate.eligibility.atlasEntryKey),
 	);
-	for (const candidate of rgbaEligible) {
+	for (const candidate of uniqueRgbaEligible) {
 		const overflow = layout.overflowsByEntryKey.get(
 			candidate.eligibility.atlasEntryKey,
 		);
@@ -345,9 +345,11 @@ export function planCompactionFamilies(options: {
 	const indexedCandidates = collectIndexedPalettedCompactionCandidates(
 		options.drawUnits,
 	);
+	const uniqueIndexedCandidates =
+		dedupeIndexedPalettedCandidates(indexedCandidates);
 	const detailEntries = dedupeCompactionFamilyDetailEntries([
 		...placed.map((candidate) => candidate.drawUnit),
-		...indexedCandidates,
+		...uniqueIndexedCandidates,
 	]);
 	const detailLayout = planAtlasLayout({
 		entries: detailEntries.map((entry) => ({
@@ -368,13 +370,15 @@ export function planCompactionFamilies(options: {
 			detailLayout.placementsByEntryKey.has(detailEntryKey)
 		);
 	});
-	const detailReadyIndexedCandidates = indexedCandidates.filter((candidate) => {
-		const detailEntryKey = candidate.detailAtlasEntry?.key ?? null;
-		return (
-			detailEntryKey === null ||
-			detailLayout.placementsByEntryKey.has(detailEntryKey)
-		);
-	});
+	const detailReadyIndexedCandidates = uniqueIndexedCandidates.filter(
+		(candidate) => {
+			const detailEntryKey = candidate.detailAtlasEntry?.key ?? null;
+			return (
+				detailEntryKey === null ||
+				detailLayout.placementsByEntryKey.has(detailEntryKey)
+			);
+		},
+	);
 	for (const candidate of placed) {
 		const detailEntryKey = candidate.drawUnit.detailAtlasEntry?.key ?? null;
 		if (detailEntryKey === null) {
@@ -390,7 +394,7 @@ export function planCompactionFamilies(options: {
 			detail: overflow.detail,
 		});
 	}
-	for (const candidate of indexedCandidates) {
+	for (const candidate of uniqueIndexedCandidates) {
 		const detailEntryKey = candidate.detailAtlasEntry?.key ?? null;
 		if (detailEntryKey === null) {
 			continue;
@@ -622,6 +626,41 @@ function collectIndexedPalettedCompactionCandidates(
 	return drawUnits.filter(isIndexedPalettedMaterialTableReady);
 }
 
+function dedupeIndexedPalettedCandidates(
+	candidates: readonly CompactionFamilyCandidate[],
+): CompactionFamilyCandidate[] {
+	const candidateByDrawUnitId = new Map<string, CompactionFamilyCandidate>();
+	for (const candidate of candidates) {
+		const previous = candidateByDrawUnitId.get(candidate.id);
+		if (!previous) {
+			candidateByDrawUnitId.set(candidate.id, candidate);
+			continue;
+		}
+		const previousSignature = describeIndexedCandidateSliceIdentity(previous);
+		const candidateSignature = describeIndexedCandidateSliceIdentity(candidate);
+		if (previousSignature !== candidateSignature) {
+			throw new Error(
+				`Indexed compaction candidate ${candidate.id} maps to multiple material slice identities: ${previousSignature} and ${candidateSignature}.`,
+			);
+		}
+	}
+	return [...candidateByDrawUnitId.values()];
+}
+
+function describeIndexedCandidateSliceIdentity(
+	candidate: CompactionFamilyCandidate,
+): string {
+	const record = requireIndexedPalettedFamilyMaterialTableRecord(candidate);
+	return [
+		record.indexFormat,
+		record.indexPageKey,
+		record.palettePageKey,
+		record.key,
+		candidate.visibilityPartitionKey,
+		"indexed-opaque",
+	].join("|");
+}
+
 function assignIndexedPalettedFamilyMaterialTableRecords(
 	candidates: readonly CompactionFamilyCandidate[],
 	policy: CompactionFamilyPlanningPolicy,
@@ -834,12 +873,6 @@ export function createCompactionEligibility(options: {
 				materialBlockers.push("missing-detail-atlas-entry");
 			}
 			if (
-				options.hasDetailOverlay &&
-				hasRepeatedBaseColorTexturePage(options.texturePageBindings)
-			) {
-				materialBlockers.push("repeat-detail-atlas-unsupported");
-			}
-			if (
 				!hasOnlySupportedCompactedTexturePageBehavior(
 					options.texturePageBindings,
 				)
@@ -985,13 +1018,6 @@ function createMaterialCompactionBypass(
 				reason: "missing-detail-atlas-entry",
 				detail: "detail overlay has no compactable RGBA8 detail atlas entry",
 			};
-		case "repeat-detail-atlas-unsupported":
-			return {
-				drawUnitId: drawUnit.id,
-				reason: "unsupported-compacted-material-family",
-				detail:
-					"repeated base-color material with detail overlay is retained direct until compacted atlas sampling supports this path",
-			};
 		case "unsupported-material-state":
 			return {
 				drawUnitId: drawUnit.id,
@@ -1075,17 +1101,6 @@ function hasCompatibleCompactedBaseTexturePage(
 			binding.sampleClass === "rgba-color" &&
 			binding.sampling.samplingDomain === "color" &&
 			binding.sampling.lookup === "color-filtered",
-	);
-}
-
-function hasRepeatedBaseColorTexturePage(
-	texturePageBindings: readonly TexturePageBinding[],
-): boolean {
-	return texturePageBindings.some(
-		(binding) =>
-			binding.usageBucket === "base-color" &&
-			binding.sampleClass === "rgba-color" &&
-			(binding.wrapS === "repeat" || binding.wrapT === "repeat"),
 	);
 }
 
@@ -1273,6 +1288,41 @@ function describeCompactionMaterialSlotKey(
 		candidate.eligibility.materialSlotKey,
 		`wrap=${candidate.eligibility.samplingPolicy.wrapS}/${candidate.eligibility.samplingPolicy.wrapT}`,
 		`detail=${candidate.drawUnit.detailAtlasEntry?.key ?? "none"}`,
+	].join("|");
+}
+
+function dedupeRgbaTexturePageCandidates(
+	candidates: readonly EligibleCompactionFamilyCandidate[],
+): EligibleCompactionFamilyCandidate[] {
+	const candidateByDrawUnitId = new Map<
+		string,
+		EligibleCompactionFamilyCandidate
+	>();
+	for (const candidate of candidates) {
+		const previous = candidateByDrawUnitId.get(candidate.drawUnit.id);
+		if (!previous) {
+			candidateByDrawUnitId.set(candidate.drawUnit.id, candidate);
+			continue;
+		}
+		const previousSignature = describeRgbaCandidateSliceIdentity(previous);
+		const candidateSignature = describeRgbaCandidateSliceIdentity(candidate);
+		if (previousSignature !== candidateSignature) {
+			throw new Error(
+				`RGBA compaction candidate ${candidate.drawUnit.id} maps to multiple material slice identities: ${previousSignature} and ${candidateSignature}.`,
+			);
+		}
+	}
+	return [...candidateByDrawUnitId.values()];
+}
+
+function describeRgbaCandidateSliceIdentity(
+	candidate: EligibleCompactionFamilyCandidate,
+): string {
+	return [
+		candidate.eligibility.atlasEntryKey,
+		candidate.eligibility.renderStateKey,
+		describeCompactionMaterialSlotKey(candidate),
+		candidate.drawUnit.visibilityPartitionKey,
 	].join("|");
 }
 

@@ -622,10 +622,14 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		expect(metrics.rgbaTexturePageFamilyFallbackSamples).toEqual([]);
 	});
 
-	it("resets opaque render state before compacted family draws after blended direct draws", () => {
+	it("submits blended retained direct draw units after compacted opaque family draws", () => {
 		const gl = new CapturingSubmitGl();
 		const stateCache = new Webgl2StateCache(gl);
 		const drawUnits = [
+			createDrawUnit({
+				id: "opaque-direct",
+				modelMatrix: createTranslationMat4({ z: 2 }),
+			}),
 			createDrawUnit({
 				id: "atlas",
 				materialKind: "direct-texture",
@@ -634,10 +638,11 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			createDrawUnit({
 				id: "blended-direct",
 				materialBehavior: createBlendedMaterialBehavior(),
+				modelMatrix: createTranslationMat4({ z: 6 }),
 			}),
 		];
 
-		submitWebgl2FlatWorldDrawUnits({
+		const metrics = submitWebgl2FlatWorldDrawUnits({
 			gl: gl.asContext(),
 			stateCache,
 			program: createFlatProgram(),
@@ -657,22 +662,66 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			drawUnits,
 		});
 
-		const directDrawIndex = gl.calls.findIndex(
-			(call) => call === "drawElements:4:3:5123:0",
+		const opaqueDirectDrawIndex = gl.calls.indexOf(
+			"drawElementsFor:opaque-direct",
 		);
 		const compactedDrawIndex = gl.calls.findIndex(
-			(call, index) =>
-				index > directDrawIndex && call === "drawElements:4:3:5123:0",
+			(call) => call === "drawElementsFor:atlas-batch",
+		);
+		const blendedDirectDrawIndex = gl.calls.indexOf(
+			"drawElementsFor:blended-direct",
 		);
 
-		expect(directDrawIndex).toBeGreaterThanOrEqual(0);
-		expect(compactedDrawIndex).toBeGreaterThan(directDrawIndex);
-		expect(gl.calls.slice(directDrawIndex, compactedDrawIndex)).toContain(
-			"depthMask:true",
+		expect(metrics.retainedDirectOpaqueDrawUnitCount).toBe(1);
+		expect(metrics.retainedDirectBlendedDrawUnitCount).toBe(1);
+		expect(opaqueDirectDrawIndex).toBeGreaterThanOrEqual(0);
+		expect(compactedDrawIndex).toBeGreaterThan(opaqueDirectDrawIndex);
+		expect(blendedDirectDrawIndex).toBeGreaterThan(compactedDrawIndex);
+		expect(gl.calls.slice(compactedDrawIndex, blendedDirectDrawIndex)).toContain(
+			"depthMask:false",
 		);
-		expect(gl.calls.slice(directDrawIndex, compactedDrawIndex)).toContain(
+		expect(gl.calls.slice(compactedDrawIndex, blendedDirectDrawIndex)).toContain(
+			`enable:${gl.BLEND}`,
+		);
+		expect(gl.calls.slice(blendedDirectDrawIndex)).toContain("depthMask:true");
+		expect(gl.calls.slice(blendedDirectDrawIndex)).toContain(
 			`disable:${gl.BLEND}`,
 		);
+	});
+
+	it("sorts blended retained direct draw units back to front", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+		const drawUnits = [
+			createDrawUnit({
+				id: "near-blended",
+				materialBehavior: createBlendedMaterialBehavior(),
+				modelMatrix: createTranslationMat4({ z: 1 }),
+			}),
+			createDrawUnit({
+				id: "far-blended",
+				materialBehavior: createBlendedMaterialBehavior(),
+				modelMatrix: createTranslationMat4({ z: 8 }),
+			}),
+		];
+
+		const metrics = submitWebgl2FlatWorldDrawUnits({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			terrainBlendProgram: createTerrainBlendProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			viewProjectionMatrix: createIdentityMat4(),
+			drawUnits,
+		});
+
+		expect(metrics.retainedDirectOpaqueDrawUnitCount).toBe(0);
+		expect(metrics.retainedDirectBlendedDrawUnitCount).toBe(2);
+		expect(
+			gl.calls.filter((call) => call.startsWith("drawElementsFor:")),
+		).toEqual(["drawElementsFor:far-blended", "drawElementsFor:near-blended"]);
 	});
 
 	it("enables backface culling only for terrain when requested", () => {
@@ -859,7 +908,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		expect(gl.boundTextures).toContain(indexTexture);
 		expect(gl.boundTextures).toContain(paletteTexture);
 		expect(
-			gl.calls.filter((call) => call.startsWith("drawElements")),
+			gl.calls.filter((call) => call.startsWith("drawElements:")),
 		).toHaveLength(2);
 	});
 
@@ -980,6 +1029,7 @@ function createDrawUnit({
 	kind = "static",
 	sceneDomain,
 	materialBehavior = null,
+	modelMatrix = createIdentityMat4(),
 }: {
 	id: string;
 	kind?: Webgl2WorldDrawUnit["kind"];
@@ -997,6 +1047,7 @@ function createDrawUnit({
 	baseTexturePageBinding?: Webgl2WorldDrawUnit["texturePageBindings"][number];
 	vertexArray?: WebGLVertexArrayObject;
 	materialBehavior?: LegacyMaterialBehaviorDto | null;
+	modelMatrix?: Float32Array;
 }): Webgl2WorldDrawUnit {
 	const defaultTexturePageBinding = texture
 		? createSingleEntryBaseTexturePageBinding(texture, atlasWrapS, atlasWrapT)
@@ -1015,7 +1066,7 @@ function createDrawUnit({
 			id,
 		].join("\0"),
 		vertexArray: {
-			vertexArray,
+			vertexArray: attachDebugLabel(vertexArray, id),
 			dispose() {
 				return;
 			},
@@ -1116,7 +1167,7 @@ function createDrawUnit({
 				? ["direct packed base page missing texture atlas generation"]
 				: [],
 		sceneDomain: sceneDomain ?? defaultSceneDomainForKind(kind),
-		modelMatrix: createIdentityMat4(),
+		modelMatrix,
 		bvhItemKeys: [],
 		bvhFallbackReason: null,
 		staticPartCount: 1,
@@ -1381,7 +1432,7 @@ function createRgbaTexturePageFamilyBatch(
 		key: "atlas-batch",
 		landblockId: 0x0102ffff,
 		vertexArray: {
-			vertexArray: {} as WebGLVertexArrayObject,
+			vertexArray: attachDebugLabel({} as WebGLVertexArrayObject, "atlas-batch"),
 			dispose() {
 				return;
 			},
@@ -1600,6 +1651,20 @@ function createIdentityMat4(): Float32Array {
 	return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 }
 
+function createTranslationMat4({ z }: { z: number }): Float32Array {
+	const matrix = createIdentityMat4();
+	matrix[14] = z;
+	return matrix;
+}
+
+function attachDebugLabel(
+	vertexArray: WebGLVertexArrayObject,
+	label: string,
+): WebGLVertexArrayObject {
+	(vertexArray as { debugLabel?: string }).debugLabel = label;
+	return vertexArray;
+}
+
 function createCategoryCounts() {
 	return {
 		terrain: 0,
@@ -1639,6 +1704,7 @@ class CapturingSubmitGl implements Webgl2StateCacheGl {
 	readonly uniform2fValues: number[][] = [];
 	readonly uniform1iValues: number[] = [];
 	readonly boundTextures: WebGLTexture[] = [];
+	private currentVertexArrayLabel: string | null = null;
 
 	asContext(): WebGL2RenderingContext {
 		return this as unknown as WebGL2RenderingContext;
@@ -1648,8 +1714,10 @@ class CapturingSubmitGl implements Webgl2StateCacheGl {
 		this.calls.push("useProgram");
 	}
 
-	bindVertexArray(): void {
+	bindVertexArray(vertexArray: WebGLVertexArrayObject | null): void {
 		this.calls.push("bindVertexArray");
+		this.currentVertexArrayLabel =
+			(vertexArray as { debugLabel?: string } | null)?.debugLabel ?? null;
 	}
 
 	activeTexture(): void {
@@ -1765,6 +1833,9 @@ class CapturingSubmitGl implements Webgl2StateCacheGl {
 		type: GLenum,
 		offset: number,
 	): void {
+		if (this.currentVertexArrayLabel) {
+			this.calls.push(`drawElementsFor:${this.currentVertexArrayLabel}`);
+		}
 		this.calls.push(`drawElements:${mode}:${count}:${type}:${offset}`);
 	}
 }

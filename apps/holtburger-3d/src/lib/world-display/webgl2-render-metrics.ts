@@ -347,6 +347,10 @@ export function createWebgl2RenderMetrics(
 				input.submitMetrics.indexedPalettedFamilyRetainedDirectDrawUnitCount,
 			indexedPalettedFamilyNoVisibleRouteCount:
 				input.submitMetrics.indexedPalettedFamilyNoVisibleRouteCount,
+			retainedDirectOpaqueDrawUnitCount:
+				input.submitMetrics.retainedDirectOpaqueDrawUnitCount,
+			retainedDirectBlendedDrawUnitCount:
+				input.submitMetrics.retainedDirectBlendedDrawUnitCount,
 			directTexturePageDrawCount:
 				input.submitMetrics.directTexturePageDrawCount,
 			directSingleEntryTexturePageDrawCount:
@@ -498,6 +502,10 @@ export function createWebgl2RenderMetrics(
 								.indexedPalettedFamilyReplacedDrawUnitTriangleCount,
 						"webgl2-indexed-family-no-visible-routes":
 							input.submitMetrics.indexedPalettedFamilyNoVisibleRouteCount,
+						"webgl2-retained-direct-opaque-draw-units":
+							input.submitMetrics.retainedDirectOpaqueDrawUnitCount,
+						"webgl2-retained-direct-blended-draw-units":
+							input.submitMetrics.retainedDirectBlendedDrawUnitCount,
 						"webgl2-staged-atlas-draws":
 							input.submitMetrics.stagedAtlasDrawCount,
 						"webgl2-direct-packed-texture-page-draws":

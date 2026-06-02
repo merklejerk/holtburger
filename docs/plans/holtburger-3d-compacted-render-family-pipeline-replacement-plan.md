@@ -2456,7 +2456,7 @@ Validation:
 
 ## Phase C8.12: Render Retained Blended Direct Draw Last
 
-Status: Planned.
+Status: Complete.
 
 Purpose: fix translucent retained-direct materials being overpainted by later compacted opaque family
 draws. The current submit path removes compacted-replaced draw units, renders the retained direct set,
@@ -2512,6 +2512,69 @@ Decisions:
   transparent family interleaving model for this phase.
 - This phase is a correctness fix. It should happen before atlas or compaction broadening so visual
   alpha failures are not misdiagnosed as texture decode, palette, or atlas bugs.
+- Completed the split with a retained-direct two-pass submit:
+  - retained direct opaque/cutout draw units submit first;
+  - current compacted opaque RGBA/indexed family batches submit next;
+  - retained direct blended draw units submit last.
+- The split key is `materialBehavior.blend.enabled === true`. Alpha-test/cutout remains opaque-pass
+  work because the shader discards and the material is still depth-writing opaque geometry.
+- The direct draw loop is now a reusable pass helper inside `webgl2-world-submit.ts`. This avoids
+  duplicating RGBA/indexed direct adapter behavior while allowing the same direct submit context and
+  uniform cache to survive across the opaque and blended retained-direct passes.
+- `submitWebgl2FlatWorldDrawUnits()` now restores the default world render state before returning:
+  depth enabled/write-on, blending disabled, culling disabled, and stencil disabled with write mask
+  restored. This prevents final blended direct draws from leaking `depthMask(false)` / blend state into
+  the next scene-domain target, copy, or composite pass.
+- Scene-domain target rendering also forces depth writes and stencil write mask back on before clearing
+  color/depth. Depth and stencil clears are mask-sensitive in WebGL, so this guards target clears even if
+  a future caller leaks state before the world submit boundary.
+- Added submit metrics for retained direct opaque and retained direct blended draw-unit counts. These
+  are surfaced through `WorldRenderMetrics.debug` and material type counts as:
+  - `webgl2-retained-direct-opaque-draw-units`;
+  - `webgl2-retained-direct-blended-draw-units`.
+- Blended retained direct sorting currently uses projected model-origin depth from the available
+  `viewProjectionMatrix` and draw-unit `modelMatrix`, with `submitOrderKey` as a stable tie-breaker.
+  This is intentionally scoped to the best depth signal available at submit time; it is not per-triangle
+  or bounds-center sorting.
+
+Progress:
+
+- Implemented `partitionRetainedDirectDrawUnits()` and the final blended retained-direct pass in
+  `webgl2-world-submit.ts`.
+- Added focused regressions proving:
+  - blended retained direct draw units submit after compacted opaque family batches;
+  - blended retained direct draw units are sorted back-to-front by projected origin depth.
+- Updated combined exterior/interior submit metrics so scene-domain rendering preserves the new pass
+  counters.
+
+Course corrections:
+
+- The old state-reset regression was replaced instead of preserved. Opaque state reset before compacted
+  family draws is still covered by compacted submit behavior, but the old test asserted the pre-C8.12
+  order where blended direct rendered before compacted family work.
+- After live testing, black/smeared scene-domain frames suggested a real render-state leak from the final
+  blended direct pass. The fix is not to rely on the following pass to clean up; world submit now exits
+  with a deterministic default render state, and scene-domain clears reset their mask-sensitive state
+  before clearing.
+- Did not introduce compacted transparent family support or blended family interleaving. That remains
+  intentionally deferred because every blended compacted strategy needs sortable transparent submissions.
+
+Discovered cleanup targets and legacy shims:
+
+- The projected-origin depth sort should be upgraded when draw-unit bounds or camera-space centers are
+  available at the submit boundary. The current sort is correct enough for the immediate retained-direct
+  overpaint bug, but large translucent meshes can still sort imperfectly.
+- `submitWebgl2FlatWorldDrawUnits()` still owns direct pass orchestration, compacted family submission,
+  and render-state setup in one module. The direct-pass helper reduces duplication, but C9 should move
+  pass planning into an explicit render-family/pass scheduler once compacted alpha-test and atlas-ready
+  blended RGBA are in place.
+- Test-only GL capture now labels vertex arrays to assert pass order. This is not a production shim, but
+  it is a useful harness pattern for future render-order tests.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/webgl2-world-submit.test.ts --run`
+- `npm run check`
 
 ## Phase C8.13: Decouple RGBA Texture Atlas Eligibility From Compaction Eligibility
 

@@ -4,7 +4,7 @@ import { createInitialAssetChannelState } from "../assets/types";
 import type { SceneCameraFrame } from "./camera";
 import {
 	buildRenderFrustumFromProjectionMatrix,
-	buildWorldRenderFrame,
+	buildWorldRenderFrame as buildWorldRenderFrameImpl,
 	type WorldRenderCandidate,
 } from "./world-render-frame";
 import { buildSceneCameraViewProjectionMatrix } from "./render-math";
@@ -14,7 +14,7 @@ import { createEmptyStructuredInteriorSceneModel } from "./structured-interior-s
 
 describe("buildWorldRenderFrame", () => {
 	it("culls keyed batches when no prepared BVH item is visible", () => {
-		const frame = buildWorldRenderFrame({
+		const frame = buildWorldRenderFrameImpl({
 			assetState: createInitialAssetChannelState(),
 			candidates: [
 				createBatch({
@@ -37,7 +37,7 @@ describe("buildWorldRenderFrame", () => {
 	});
 
 	it("keeps unkeyed fallback batches visible and sorts draw categories", () => {
-		const frame = buildWorldRenderFrame({
+		const frame = buildWorldRenderFrameImpl({
 			assetState: createInitialAssetChannelState(),
 			candidates: [
 				createBatch({
@@ -59,8 +59,13 @@ describe("buildWorldRenderFrame", () => {
 		});
 
 		expect(frame.passes[0]?.draws).toEqual([
-			{ drawUnitId: "terrain/fallback", category: "terrain" },
 			{
+				kind: "draw-unit",
+				drawUnitId: "terrain/fallback",
+				category: "terrain",
+			},
+			{
+				kind: "draw-unit",
 				drawUnitId:
 					"static-staged/world|landblock/0203ffff|debug-flat/object-b",
 				category: "static-staged",
@@ -70,6 +75,26 @@ describe("buildWorldRenderFrame", () => {
 		expect(frame.metrics.unboundFallbackBatchCount).toBe(2);
 		expect(frame.metrics.visibleDrawCountsByCategory.terrain).toBe(1);
 		expect(frame.metrics.visibleDrawCountsByCategory["static-staged"]).toBe(1);
+	});
+
+	it("keeps terrain tile resources visible without creating draw-unit refs", () => {
+		const frame = buildFrameWithFallbackCandidates([
+			createBatch({
+				id: "terrain-tile/terrain/0203ffff",
+				kind: "terrain-tile",
+				fallbackReason: "test terrain tile fallback",
+			}),
+		]);
+
+		expect(frame.passes[0]?.draws).toEqual([
+			{
+				kind: "terrain-tile",
+				terrainTileId: "terrain-tile/terrain/0203ffff",
+				category: "terrain",
+			},
+		]);
+		expect(frame.metrics.visibleDrawCountsByCategory.terrain).toBe(1);
+		expect(frame.metrics.candidateCountsByCategory.terrain).toBe(1);
 	});
 });
 
@@ -104,6 +129,24 @@ function createBatch({
 		bvhItemKeys: itemKeys,
 		bvhFallbackReason: fallbackReason,
 	};
+}
+
+function buildFrameWithFallbackCandidates(
+	candidates: readonly WorldRenderCandidate[],
+) {
+	return buildTestWorldRenderFrame(candidates);
+}
+
+function buildTestWorldRenderFrame(candidates: readonly WorldRenderCandidate[]) {
+	return buildWorldRenderFrameImpl({
+		assetState: createInitialAssetChannelState(),
+		candidates,
+		cameraFrame: createCameraFrame(),
+		renderChunkTransforms: [],
+		staticRenderableScene: createEmptyStaticRenderableSceneModel(),
+		structuredInteriorScene: createEmptyStructuredInteriorSceneModel(),
+		terrainScene: createTerrainScene(),
+	});
 }
 
 function createTerrainScene(): TerrainSceneModel {

@@ -23,6 +23,7 @@ import {
 	partitionWebgl2SceneDomainDrawUnits,
 	planWebgl2FlatWorldSubmitOrder,
 	planWebgl2PortalMaskSubmitOrder,
+	planWebgl2TerrainTileSubmitOrder,
 	submitWebgl2FlatWorldDrawUnits,
 	submitWebgl2FlatWorldFrame,
 	type Webgl2FlatWorldProgram,
@@ -55,6 +56,7 @@ import {
 	syncWebgl2WorldResources,
 	type Webgl2WorldResourceStore,
 } from "./webgl2-world-resources";
+import type { Webgl2TerrainTileResource } from "./webgl2/resources/terrain-tile-resources";
 import type {
 	BrowserCameraResidency,
 	WorldRenderMetrics,
@@ -1126,13 +1128,26 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			updateCameraResidency(cameraFrame.position);
 		});
 
-		if (currentResources.worldStore.drawUnits.length > 0) {
+		const frameDrawUnitCandidates =
+			currentResources.worldStore.drawUnits.filter(
+				(drawUnit) => drawUnit.kind !== "terrain",
+			);
+		const frameCandidates = [
+			...frameDrawUnitCandidates,
+			...currentResources.worldStore.terrainRenderCandidates.map((candidate) => ({
+				id: candidate.id,
+				kind: "terrain-tile" as const,
+				bvhItemKeys: candidate.bvhItemKeys,
+				bvhFallbackReason: candidate.bvhFallbackReason,
+			})),
+		];
+		if (frameCandidates.length > 0) {
 			const frame = profileBrowserJsScope(
 				"webgl2.frame.buildWorldRenderFrame",
 				() =>
 					buildWorldRenderFrame({
 						assetState,
-						candidates: currentResources.worldStore.drawUnits,
+						candidates: frameCandidates,
 						cameraFrame,
 						renderChunkTransforms,
 						staticRenderableScene,
@@ -1211,6 +1226,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 										?.detailTextures ?? [],
 							},
 							drawUnitsById: currentResources.worldStore.drawUnitsById,
+							terrainTilesById:
+								currentResources.worldStore.terrainTilesById,
 							frame,
 						}),
 				);
@@ -1467,6 +1484,14 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		);
 		const sceneDomainDrawUnits =
 			partitionWebgl2SceneDomainDrawUnits(visibleDrawUnits);
+		const visibleTerrainTiles = profileBrowserJsScope(
+			"webgl2.sceneDomain.planVisibleTerrainTiles",
+			() =>
+				planWebgl2TerrainTileSubmitOrder(
+					frame,
+					currentResources.worldStore.terrainTilesById,
+				),
+		);
 		const baseScene = deriveWebgl2BaseSceneDomainFromResidency(
 			latestCameraResidencyContext,
 		);
@@ -1498,6 +1523,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				renderSceneDomainTarget({
 					target: targets.exterior,
 					drawUnits: sceneDomainDrawUnits.exterior,
+					terrainTiles: visibleTerrainTiles,
 					frame,
 					rgbaTexturePageFamilySubmitRoute: "scene-domain-exterior",
 					terrainBackfaceCulling: baseScene === "interior",
@@ -1509,6 +1535,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				renderSceneDomainTarget({
 					target: targets.interior,
 					drawUnits: sceneDomainDrawUnits.interior,
+					terrainTiles: [],
 					frame,
 					rgbaTexturePageFamilySubmitRoute: "scene-domain-interior",
 					terrainBackfaceCulling: false,
@@ -1635,12 +1662,14 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	function renderSceneDomainTarget({
 		target,
 		drawUnits,
+		terrainTiles,
 		frame,
 		rgbaTexturePageFamilySubmitRoute,
 		terrainBackfaceCulling,
 	}: {
 		target: Webgl2SceneDomainTarget;
 		drawUnits: readonly Webgl2WorldDrawUnit[];
+		terrainTiles: readonly Webgl2TerrainTileResource[];
 		frame: ReturnType<typeof buildWorldRenderFrame>;
 		rgbaTexturePageFamilySubmitRoute:
 			| "scene-domain-exterior"
@@ -1714,6 +1743,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			},
 			viewProjectionMatrix: frame.viewProjectionMatrix,
 			drawUnits,
+			terrainTiles,
 			rgbaTexturePageFamilySubmitRoute,
 			terrainBackfaceCulling,
 		});
@@ -2438,9 +2468,24 @@ function mergeSceneDomainSubmitMetrics({
 		visibleDrawUnitCount:
 			exteriorMetrics.visibleDrawUnitCount +
 			interiorMetrics.visibleDrawUnitCount,
+		visibleTerrainTileCount:
+			exteriorMetrics.visibleTerrainTileCount +
+			interiorMetrics.visibleTerrainTileCount,
+		visibleTerrainCompatibilityDrawCount:
+			exteriorMetrics.visibleTerrainCompatibilityDrawCount +
+			interiorMetrics.visibleTerrainCompatibilityDrawCount,
 		portalMaskDrawUnitCount,
 		exteriorDomainDrawUnitCount,
 		interiorDomainDrawUnitCount,
+		submittedTerrainTileCount:
+			exteriorMetrics.submittedTerrainTileCount +
+			interiorMetrics.submittedTerrainTileCount,
+		terrainCompatibilityDrawCallCount:
+			exteriorMetrics.terrainCompatibilityDrawCallCount +
+			interiorMetrics.terrainCompatibilityDrawCallCount,
+		terrainSubmittedTriangleCount:
+			exteriorMetrics.terrainSubmittedTriangleCount +
+			interiorMetrics.terrainSubmittedTriangleCount,
 		retainedDirectOpaqueDrawUnitCount:
 			exteriorMetrics.retainedDirectOpaqueDrawUnitCount +
 			interiorMetrics.retainedDirectOpaqueDrawUnitCount,

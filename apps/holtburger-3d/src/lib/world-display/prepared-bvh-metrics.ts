@@ -9,7 +9,7 @@ import {
 } from "../landblocks";
 import type { RenderChunkTransform } from "./render-anchor";
 import {
-	deriveTerrainTileRenderChunk,
+	deriveLandblockRenderChunkPlacement,
 	type RenderChunkPlacement,
 } from "./render-chunks";
 import {
@@ -112,7 +112,7 @@ export function derivePreparedBvhVisibilitySnapshot(options: {
 		metrics.terrainBvhTotalItemCount += payload.terrain.terrainBvh.items.length;
 		const transform = findChunkTransform(
 			chunkTransformsByKey,
-			tile.renderChunk,
+			deriveLandblockRenderChunkPlacement(tile.landblockId),
 			fallbackReasons,
 		);
 		if (!transform) {
@@ -138,7 +138,7 @@ export function derivePreparedBvhVisibilitySnapshot(options: {
 			payload.outdoorBvh?.items.length ?? 0;
 		const transform = findChunkTransform(
 			chunkTransformsByKey,
-			deriveTerrainTileRenderChunk(payload.landblockId),
+			deriveLandblockRenderChunkPlacement(payload.landblockId),
 			fallbackReasons,
 		);
 		if (!transform) {

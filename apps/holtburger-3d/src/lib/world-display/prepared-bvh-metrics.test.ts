@@ -12,7 +12,7 @@ import {
 	formatEnvCellAssetId,
 	formatLandblockOutdoorAssetId,
 } from "../landblocks";
-import { deriveTerrainTileRenderChunk } from "./render-chunks";
+import { deriveLandblockRenderChunkPlacement } from "./render-chunks";
 import {
 	createEmptyStaticRenderableSceneModel,
 	type StaticRenderableSceneModel,
@@ -28,8 +28,8 @@ describe("derivePreparedBvhDebugMetrics", () => {
 		const envCellId = 0x02030100;
 		const outdoorPayload = createOutdoorPayload(landblockId);
 		const envCellPayload = createEnvCellPayload(envCellId);
-		const terrainRenderChunk = deriveTerrainTileRenderChunk(landblockId);
-		const envRenderChunk = deriveTerrainTileRenderChunk(envCellId);
+		const terrainRenderChunk = deriveLandblockRenderChunkPlacement(landblockId);
+		const envRenderChunk = deriveLandblockRenderChunkPlacement(envCellId);
 
 		const metrics = derivePreparedBvhDebugMetrics({
 			assetState: createAssetState([outdoorPayload, envCellPayload]),
@@ -175,7 +175,6 @@ function createTerrainTile(landblockId: number): TerrainSceneTile {
 	return {
 		assetId: formatLandblockOutdoorAssetId(landblockId),
 		landblockId,
-		renderChunk: deriveTerrainTileRenderChunk(landblockId),
 		label: `0x${landblockId.toString(16)}`,
 		isFocus: true,
 		chunkLocalOffset: { x: 0, y: 0, z: 0 },

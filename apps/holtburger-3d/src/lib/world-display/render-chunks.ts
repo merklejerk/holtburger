@@ -48,7 +48,7 @@ function deriveRenderChunkLandblockId(landblockId: number): number {
 	return normalizeOutdoorLandblockId(landblockId);
 }
 
-export function deriveTerrainTileRenderChunk(
+export function deriveLandblockRenderChunkPlacement(
 	landblockId: number,
 ): RenderChunkPlacement {
 	return buildRenderChunkPlacement(landblockId);

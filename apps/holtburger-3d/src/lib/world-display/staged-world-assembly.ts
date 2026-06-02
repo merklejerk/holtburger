@@ -28,6 +28,7 @@ import {
 import type { StaticRenderableRenderDomain } from "./render-domains";
 import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import type { RenderChunkTransform } from "./render-anchor";
+import { deriveLandblockRenderChunkPlacement } from "./render-chunks";
 import type { MaterialTextureCapabilities } from "./render-surface-texture-data";
 import {
 	buildTerrainBlendPlanSet,
@@ -327,7 +328,8 @@ function buildStagedTerrainDrawUnitAssemblies({
 	terrainScene: TerrainSceneModel;
 }): StagedTerrainDrawUnitAssembly[] {
 	return terrainScene.tiles.flatMap((tile) => {
-		const chunkOffset = chunkOffsetByKey.get(tile.renderChunk.chunkKey);
+		const placement = deriveLandblockRenderChunkPlacement(tile.landblockId);
+		const chunkOffset = chunkOffsetByKey.get(placement.chunkKey);
 		if (!chunkOffset) {
 			return [];
 		}

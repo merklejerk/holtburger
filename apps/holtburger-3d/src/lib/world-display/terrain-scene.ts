@@ -13,10 +13,6 @@ import {
 	getOutdoorLandblockCoords,
 } from "../landblocks";
 import {
-	deriveTerrainTileRenderChunk,
-	type RenderChunkPlacement,
-} from "./render-chunks";
-import {
 	buildTerrainMaterialResourcePlan,
 	type TerrainMaterialResourcePlan,
 } from "./terrain-materials";
@@ -24,7 +20,6 @@ import {
 export interface TerrainSceneTile {
 	assetId: string;
 	landblockId: number;
-	renderChunk: RenderChunkPlacement;
 	label: string;
 	isFocus: boolean;
 	chunkLocalOffset: { x: number; y: number; z: number };
@@ -95,12 +90,10 @@ export function deriveTerrainSceneModel(
 		})
 		.map(({ asset, payload, terrainMesh }) => {
 			const landblockId = terrainMesh.landblockId;
-			const renderChunk = deriveTerrainTileRenderChunk(landblockId);
 
 			return {
 				assetId: asset.request.assetId,
 				landblockId,
-				renderChunk,
 				label: formatLandblockLabel(landblockId),
 				isFocus: landblockId === focusLandblockId,
 				chunkLocalOffset: { x: 0, y: 0, z: 0 },

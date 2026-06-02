@@ -1,6 +1,6 @@
 # Holtburger 3D Terrain Rendering Implementation Plan
 
-Status: Phase T0 complete; Phase T1 is next.
+Status: Phase T1 complete; Phase T2A is next.
 
 Dry-run status: reviewed against the current `apps/holtburger-3d/src/lib/world-display` module graph.
 The phase order below reflects that dry run.
@@ -92,8 +92,6 @@ The initial sequencing mostly holds, but the codebase suggests a tighter split:
 
 Introduce terrain-specific modules instead of expanding the existing direct draw-unit files:
 
-- `terrain-placement.ts` or equivalent renderer-local placement helper for deriving chunk placement
-  from landblock/env-cell/source identities.
 - `terrain-tile-plan.ts` for terrain tile layer planning, pcode-to-layer-slot mapping, page-family
   requirements, and draw-slice fallback planning.
 - `webgl2/resources/terrain-tile-resources.ts` for terrain geometry buffers, VAOs, terrain page
@@ -118,7 +116,6 @@ sequenceDiagram
     autonumber
     participant AssetCache as Prepared asset cache
     participant TerrainScene as terrain-scene.ts
-    participant Placement as terrain-placement.ts
     participant TilePlan as terrain-tile-plan.ts
     participant PagePlanner as Texture page family planner
     participant TerrainRes as webgl2/resources/terrain-tile-resources.ts
@@ -129,8 +126,6 @@ sequenceDiagram
 
     AssetCache->>TerrainScene: landblock-outdoor payloads
     TerrainScene->>TerrainScene: create TerrainSceneTile per active landblock
-    TerrainScene->>Placement: derive placement from landblockId
-    Placement-->>TerrainScene: renderer-local chunk placement at boundary
 
     TerrainScene->>TilePlan: mesh quads, pcodes, region material readiness
     TilePlan->>TilePlan: decode pcodes through terrain-blend-plan baseline
@@ -150,6 +145,7 @@ sequenceDiagram
         TilePlan-->>TerrainRes: TerrainTilePlan with terrain draw slices
     end
 
+    TerrainRes->>TerrainRes: derive generic landblock placement from landblockId
     TerrainRes->>TerrainRes: create/reuse terrain VBA, VAO, layer table, page refs
     TerrainRes->>Frame: terrain render work candidates with BVH quad keys
     Frame->>Visibility: query prepared terrain BVH with shared frustum/portal context
@@ -195,6 +191,12 @@ Execute the phases in this order:
 T11 is the living cleanup phase. As each implementation phase discovers temporary adapters, renamed
 old concepts, stale tests, or dead diagnostics, add an explicit callout to T11 unless the same phase
 can delete it immediately.
+
+T11 should also audit for fake ceremony and hollow abstractions introduced while decomposing the old
+pipeline. Helpers, wrapper modules, and type aliases should survive only when they enforce a real
+boundary, hide real complexity, or match a stable local pattern. If a wrapper only restates a known
+identity relationship, such as terrain placement being exactly landblock placement, delete it and use
+the underlying primitive directly.
 
 T2 is intentionally after the terrain-specific cleanup sweep. It is architecturally related, but it is
 not required to prove the terrain batching path and it crosses more systems than terrain-only
@@ -273,6 +275,8 @@ Cleanup impact:
 
 ## Phase T1: Renderer Placement Helper And Terrain `renderChunk` Removal
 
+Status: Complete on 2026-06-02.
+
 Goal: stop storing renderer chunk placement for terrain scene models.
 
 Primary targets:
@@ -299,6 +303,55 @@ Acceptance criteria:
 - Terrain source scene models no longer store `renderChunk`.
 - Terrain still receives correct render-anchor-relative offsets.
 - Terrain BVH diagnostics and visibility remain aligned with the landblock terrain mesh.
+
+Progress:
+
+- Removed `renderChunk` from `TerrainSceneTile`.
+- Removed terrain chunk derivation from `terrain-scene.ts`; terrain source scene models now carry
+  `landblockId` and renderer boundaries derive generic landblock placement.
+- Replaced terrain `renderChunk` reads in:
+  - `staged-world-assembly.ts`;
+  - `prepared-bvh-metrics.ts`;
+  - `prepared-bvh-render-sources.ts`;
+  - `render-spatial-scene.ts`;
+  - `browser-render-resource-coordinator.ts`.
+- Replaced the terrain-named `deriveTerrainTileRenderChunk` helper with neutral
+  `deriveLandblockRenderChunkPlacement` in `render-chunks.ts`.
+- Updated terrain tile test fixtures so they no longer store chunk placement.
+
+Decisions:
+
+- Terrain placement is derived directly with `deriveLandblockRenderChunkPlacement(tile.landblockId)`
+  at renderer boundaries. A terrain-specific placement wrapper would only restate that terrain is
+  landblock-owned, so it was removed instead of kept as ceremony.
+- `deriveLandblockRenderChunkPlacement` is intentionally neutral. Prepared outdoor static BVH
+  conversion still needs landblock placement in this phase, but it should not call a terrain-named
+  helper.
+- No compatibility shim or re-export was kept for `deriveTerrainTileRenderChunk`; all callers were
+  migrated.
+
+Course corrections and refinements:
+
+- Outdoor static prepared-BVH code was using the old terrain-named helper. T1 changed that use to
+  neutral landblock placement, but did not remove stored `renderChunk` from static scene models. That
+  remains Phase T2 work.
+- Phase T2 should start with an inventory of remaining source-model `renderChunk` fields and classify
+  each as landblock-derived, env-cell-derived, portal-derived, or genuinely renderer-owned.
+
+Validation:
+
+- `npm run test:ts -- render-chunks prepared-bvh-metrics non-instanced-bvh-bindings scene-renderable-readiness staged-world-assembly webgl2-world-resources`
+- `npm run check`
+- `npm run lint`
+
+Cleanup impact:
+
+- Deleted the terrain-specific render-chunk helper name by replacing it with
+  `deriveLandblockRenderChunkPlacement`.
+- Deleted the short-lived `terrain-placement.ts` and `terrain-placement.test.ts` wrapper because it
+  added no behavior or meaningful ownership boundary.
+- No legacy shim was introduced.
+- No immediate interim phase is needed before Phase T2A.
 
 ## Phase T2: Landblock-Owned Descendant Placement Cleanup
 
@@ -717,6 +770,9 @@ Delete or rewrite these terrain-specific old-path concepts by the end of Phase T
 - compaction-family terrain blockers that only exist because terrain currently enters generic draw
   units.
 - WebGL2 submit tests that assert direct terrain-blend routing.
+- Any temporary wrapper, helper, type alias, or module that exists only as migration ceremony. T1
+  deleted the short-lived `terrain-placement.ts` wrapper for this reason; future phases should apply
+  the same standard to terrain tile resources, atlas family plumbing, and submit adapters.
 
 Keep or migrate these concepts:
 

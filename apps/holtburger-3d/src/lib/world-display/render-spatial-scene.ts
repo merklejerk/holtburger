@@ -30,6 +30,7 @@ import type {
 	StructuredInteriorSceneModel,
 } from "./structured-interior-scene";
 import type { TerrainSceneModel, TerrainSceneTile } from "./terrain-scene";
+import { deriveLandblockRenderChunkPlacement } from "./render-chunks";
 
 export const TERRAIN_SPATIAL_OWNER_KEY = "terrain-scene";
 export const STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY =
@@ -76,11 +77,12 @@ export function deriveDebugOverlaySpatialItems(
 
 function deriveTerrainSpatialItem(tile: TerrainSceneTile): RenderSpatialItem {
 	const bounds = deriveTerrainTileBounds(tile);
+	const placement = deriveLandblockRenderChunkPlacement(tile.landblockId);
 	return {
 		id: terrainSpatialItemId(tile.assetId),
 		kind: "terrain",
 		ownerKey: TERRAIN_SPATIAL_OWNER_KEY,
-		chunkKey: tile.renderChunk.chunkKey,
+		chunkKey: placement.chunkKey,
 		broadphaseBounds: bounds,
 		pickShape: { kind: "box", bounds },
 		metadata: {

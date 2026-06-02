@@ -1,8 +1,12 @@
-import { planAtlasLayout, type AtlasTexturePage } from "./atlas-layout-planner";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
 import type { RenderVec4 } from "./render-math";
 import type { StagedWorldMaterialAtlasEligibility } from "./staged-world-material-strategy";
 import type { TexturePageBinding } from "./texture-page-binding";
+import {
+	createEmptyTexturePageAtlasPlan,
+	planTexturePageAtlas,
+	type TexturePageAtlasPlan,
+} from "./texture-page-atlas-planner";
 import type { Webgl2SceneDomain } from "./webgl2-scene-domain-targets";
 
 export type CompactionFamilyBypassReason =
@@ -200,11 +204,12 @@ export interface CompactionFamilyPlan {
 	renderFamilies: CompactionRenderFamilies;
 	compactableDrawUnitIds: readonly string[];
 	bypasses: readonly CompactionFamilyBypass[];
+	texturePageAtlasPlan: TexturePageAtlasPlan;
 	atlasEntryRecords: readonly RgbaTexturePageAtlasEntryRecord[];
 	atlasEntries: readonly StagedWorldMaterialAtlasEligibility["atlasEntry"][];
-	atlasTextures: readonly AtlasTexturePage[];
+	atlasTextures: TexturePageAtlasPlan["atlasTextures"];
 	detailAtlasEntryRecords: readonly RgbaTexturePageDetailAtlasEntry[];
-	detailAtlasTextures: readonly AtlasTexturePage[];
+	detailAtlasTextures: TexturePageAtlasPlan["detailAtlasTextures"];
 	materialSlots: readonly RgbaTexturePageFamilyMaterialSlot[];
 	indexedMaterialTableRecords: readonly IndexedPalettedFamilyMaterialTableRecord[];
 	drawUnitMaterialSlots: readonly {
@@ -274,11 +279,6 @@ interface EligibleCompactionFamilyCandidate {
 	eligibility: StagedWorldMaterialAtlasEligibility;
 }
 
-interface RgbaTexturePageEntryRecord {
-	key: string;
-	entry: StagedWorldMaterialAtlasEligibility["atlasEntry"];
-}
-
 interface BoundedMaterialTablePartition<TCandidate, TMaterialRecord> {
 	partitionIndex: number;
 	materialRecords: readonly TMaterialRecord[];
@@ -297,6 +297,7 @@ export function createEmptyCompactionFamilyPlan(): CompactionFamilyPlan {
 		}),
 		compactableDrawUnitIds: [],
 		bypasses: [],
+		texturePageAtlasPlan: createEmptyTexturePageAtlasPlan(),
 		atlasEntryRecords: [],
 		atlasEntries: [],
 		atlasTextures: [],
@@ -339,106 +340,36 @@ export function planCompactionFamilies(options: {
 	}
 
 	const uniqueRgbaEligible = dedupeRgbaTexturePageCandidates(rgbaEligible);
-	const atlasEntries = dedupeRgbaTexturePageEntries(uniqueRgbaEligible);
-	const layout = planAtlasLayout({
-		entries: atlasEntries.map((record) => ({
-			key: record.key,
-			width: record.entry.level.width,
-			height: record.entry.level.height,
-		})),
-		policy: {
-			maxTextureSize: options.policy.maxAtlasTextureSize,
-			maxTextureCount: options.policy.maxAtlasTextureCount,
-			gutterPixels: options.policy.baseGutterPixels,
-		},
-	});
-	const placed = uniqueRgbaEligible.filter((candidate) =>
-		layout.placementsByEntryKey.has(candidate.eligibility.atlasEntryKey),
-	);
-	for (const candidate of uniqueRgbaEligible) {
-		const overflow = layout.overflowsByEntryKey.get(
-			candidate.eligibility.atlasEntryKey,
-		);
-		if (!overflow) {
-			continue;
-		}
-		bypasses.push({
-			drawUnitId: candidate.drawUnit.id,
-			reason:
-				overflow.reason === "source-too-large"
-					? "source-texture-too-large"
-					: "atlas-full",
-			detail: overflow.detail,
-		});
-	}
-
 	const indexedCandidates = collectIndexedPalettedCompactionCandidates(
 		options.drawUnits,
 	);
 	const uniqueIndexedCandidates =
 		dedupeIndexedPalettedCandidates(indexedCandidates);
-	const detailEntries = dedupeCompactionFamilyDetailEntries([
-		...placed.map((candidate) => candidate.drawUnit),
-		...uniqueIndexedCandidates,
-	]);
-	const detailLayout = planAtlasLayout({
-		entries: detailEntries.map((entry) => ({
-			key: entry.key,
-			width: entry.width,
-			height: entry.height,
-		})),
-		policy: {
-			maxTextureSize: options.policy.maxAtlasTextureSize,
-			maxTextureCount: options.policy.maxAtlasTextureCount,
-			gutterPixels: options.policy.baseGutterPixels,
-		},
-	});
-	const detailPlaced = placed.filter((candidate) => {
-		const detailEntryKey = candidate.drawUnit.detailAtlasEntry?.key ?? null;
-		return (
-			detailEntryKey === null ||
-			detailLayout.placementsByEntryKey.has(detailEntryKey)
-		);
-	});
-	const detailReadyIndexedCandidates = uniqueIndexedCandidates.filter(
-		(candidate) => {
-			const detailEntryKey = candidate.detailAtlasEntry?.key ?? null;
-			return (
-				detailEntryKey === null ||
-				detailLayout.placementsByEntryKey.has(detailEntryKey)
-			);
-		},
-	);
-	for (const candidate of placed) {
-		const detailEntryKey = candidate.drawUnit.detailAtlasEntry?.key ?? null;
-		if (detailEntryKey === null) {
-			continue;
-		}
-		const overflow = detailLayout.overflowsByEntryKey.get(detailEntryKey);
-		if (!overflow) {
-			continue;
-		}
-		bypasses.push({
+	const texturePageAtlasPlan = planTexturePageAtlas({
+		rgbaCandidates: uniqueRgbaEligible.map((candidate) => ({
 			drawUnitId: candidate.drawUnit.id,
-			reason: "detail-atlas-full",
-			detail: overflow.detail,
-		});
-	}
-	for (const candidate of uniqueIndexedCandidates) {
-		const detailEntryKey = candidate.detailAtlasEntry?.key ?? null;
-		if (detailEntryKey === null) {
-			continue;
-		}
-		const overflow = detailLayout.overflowsByEntryKey.get(detailEntryKey);
-		if (!overflow) {
-			continue;
-		}
-		bypasses.push({
+			atlasEligibility: candidate.eligibility,
+			detailAtlasEntry: candidate.drawUnit.detailAtlasEntry,
+		})),
+		detailCandidates: uniqueIndexedCandidates.map((candidate) => ({
 			drawUnitId: candidate.id,
-			reason: "detail-atlas-full",
-			detail: overflow.detail,
-		});
-	}
+			detailAtlasEntry: candidate.detailAtlasEntry,
+		})),
+		policy: options.policy,
+	});
+	bypasses.push(...texturePageAtlasPlan.bypasses);
+	const rgbaAtlasReadyDrawUnitIds = new Set(
+		texturePageAtlasPlan.rgbaAtlasReadyDrawUnitIds,
+	);
+	const detailAtlasReadyDrawUnitIds = new Set(
+		texturePageAtlasPlan.detailAtlasReadyDrawUnitIds,
+	);
+	const detailPlaced = uniqueRgbaEligible.filter((candidate) =>
+		rgbaAtlasReadyDrawUnitIds.has(candidate.drawUnit.id),
+	);
+	const detailReadyIndexedCandidates = uniqueIndexedCandidates.filter(
+		(candidate) => detailAtlasReadyDrawUnitIds.has(candidate.id),
+	);
 
 	const indexedCompactable = detailReadyIndexedCandidates;
 	const indexedMaterialTableRecords =
@@ -456,12 +387,16 @@ export function planCompactionFamilies(options: {
 		(partition) => partition.drawSlices,
 	);
 	const compactable = detailPlaced;
+	const placementsByEntryKey =
+		createTexturePageAtlasPlacementsByEntryKey(texturePageAtlasPlan);
+	const detailPlacementsByEntryKey =
+		createTexturePageAtlasDetailPlacementsByEntryKey(texturePageAtlasPlan);
 	const materialSlots = assignRgbaTexturePageFamilyMaterialSlots(compactable);
 	const rgbaPartitions = createRgbaTexturePageFamilyPartitions({
 		candidates: compactable,
 		policy: options.policy,
-		placementsByEntryKey: layout.placementsByEntryKey,
-		detailPlacementsByEntryKey: detailLayout.placementsByEntryKey,
+		placementsByEntryKey,
+		detailPlacementsByEntryKey,
 	});
 	const materialSlotByKey = new Map(
 		materialSlots.map((slot) => [slot.key, slot] as const),
@@ -469,8 +404,8 @@ export function planCompactionFamilies(options: {
 	const drawSlices = createRgbaTexturePageFamilyDrawSlices(
 		compactable,
 		materialSlotByKey,
-		layout.placementsByEntryKey,
-		detailLayout.placementsByEntryKey,
+		placementsByEntryKey,
+		detailPlacementsByEntryKey,
 	);
 	const compactableDrawUnitIds = compactable.map(
 		(candidate) => candidate.drawUnit.id,
@@ -486,26 +421,10 @@ export function planCompactionFamilies(options: {
 		drawUnitId: candidate.drawUnit.id,
 		materialSlotKey: describeCompactionMaterialSlotKey(candidate),
 	}));
-	const compactableEntryKeys = new Set(
-		compactable.map((candidate) => candidate.eligibility.atlasEntryKey),
-	);
-	const usedDetailEntryKeys = new Set(
-		[
-			...compactable.map(
-				(candidate) => candidate.drawUnit.detailAtlasEntry?.key ?? "",
-			),
-			...indexedCompactable.map(
-				(candidate) => candidate.detailAtlasEntry?.key ?? "",
-			),
-		].filter((key) => key.length > 0),
-	);
 	return {
 		key: describeCompactionFamilyPlanKey({
 			policy: options.policy,
-			atlasEntryKeys: [...compactableEntryKeys].sort(),
-			detailAtlasEntryKeys: detailEntries
-				.filter((entry) => usedDetailEntryKeys.has(entry.key))
-				.map((entry) => entry.key),
+			atlasPlanKey: texturePageAtlasPlan.key,
 			materialSlotKeys: materialSlots.map((slot) => slot.key),
 			indexedMaterialTableRecordKeys: indexedMaterialTableRecords.map(
 				(record) => record.key,
@@ -525,31 +444,12 @@ export function planCompactionFamilies(options: {
 			drawSlices,
 		}),
 		bypasses,
-		atlasEntryRecords: atlasEntries.filter((record) =>
-			compactableEntryKeys.has(record.key),
-		),
-		atlasEntries: atlasEntries
-			.filter((record) => compactableEntryKeys.has(record.key))
-			.map((record) => record.entry),
-		atlasTextures: layout.texturePages
-			.map((page) => ({
-				...page,
-				placements: page.placements.filter((placement) =>
-					compactableEntryKeys.has(placement.atlasEntryKey),
-				),
-			}))
-			.filter((page) => page.placements.length > 0),
-		detailAtlasEntryRecords: detailEntries.filter((entry) =>
-			usedDetailEntryKeys.has(entry.key),
-		),
-		detailAtlasTextures: detailLayout.texturePages
-			.map((page) => ({
-				...page,
-				placements: page.placements.filter((placement) =>
-					usedDetailEntryKeys.has(placement.atlasEntryKey),
-				),
-			}))
-			.filter((page) => page.placements.length > 0),
+		texturePageAtlasPlan,
+		atlasEntryRecords: texturePageAtlasPlan.atlasEntryRecords,
+		atlasEntries: texturePageAtlasPlan.atlasEntries,
+		atlasTextures: texturePageAtlasPlan.atlasTextures,
+		detailAtlasEntryRecords: texturePageAtlasPlan.detailAtlasEntryRecords,
+		detailAtlasTextures: texturePageAtlasPlan.detailAtlasTextures,
 		materialSlots,
 		indexedMaterialTableRecords,
 		drawUnitMaterialSlots,
@@ -579,9 +479,7 @@ export function planCompactionFamilies(options: {
 				0,
 			),
 		preparedTextureAssetIds: uniqueSortedStrings(
-			compactable.map(
-				(candidate) => candidate.eligibility.atlasEntry.preparedTextureAssetId,
-			),
+			texturePageAtlasPlan.preparedTextureAssetIds,
 		),
 	};
 }
@@ -1362,38 +1260,6 @@ function isOpaqueStaticCompactionMaterial(
 	);
 }
 
-function dedupeRgbaTexturePageEntries(
-	candidates: readonly EligibleCompactionFamilyCandidate[],
-): RgbaTexturePageEntryRecord[] {
-	const entriesByKey = new Map<string, RgbaTexturePageEntryRecord>();
-	for (const candidate of candidates) {
-		entriesByKey.set(candidate.eligibility.atlasEntryKey, {
-			key: candidate.eligibility.atlasEntryKey,
-			entry: candidate.eligibility.atlasEntry,
-		});
-	}
-	return [...entriesByKey.values()].sort((left, right) =>
-		left.key.localeCompare(right.key),
-	);
-}
-
-function dedupeCompactionFamilyDetailEntries(
-	candidates: readonly {
-		detailAtlasEntry: RgbaTexturePageDetailAtlasEntry | null;
-	}[],
-): RgbaTexturePageDetailAtlasEntry[] {
-	const entriesByKey = new Map<string, RgbaTexturePageDetailAtlasEntry>();
-	for (const candidate of candidates) {
-		const detailEntry = candidate.detailAtlasEntry;
-		if (detailEntry) {
-			entriesByKey.set(detailEntry.key, detailEntry);
-		}
-	}
-	return [...entriesByKey.values()].sort((left, right) =>
-		left.key.localeCompare(right.key),
-	);
-}
-
 function assignRgbaTexturePageFamilyMaterialSlots(
 	candidates: readonly EligibleCompactionFamilyCandidate[],
 ): RgbaTexturePageFamilyMaterialSlot[] {
@@ -1660,8 +1526,7 @@ function describeDrawSliceVisibilityPartition(
 
 function describeCompactionFamilyPlanKey(options: {
 	policy: CompactionFamilyPlanningPolicy;
-	atlasEntryKeys: readonly string[];
-	detailAtlasEntryKeys: readonly string[];
+	atlasPlanKey: string;
 	materialSlotKeys: readonly string[];
 	indexedMaterialTableRecordKeys: readonly string[];
 }): string {
@@ -1671,11 +1536,34 @@ function describeCompactionFamilyPlanKey(options: {
 		`textures=${options.policy.maxAtlasTextureCount}`,
 		`gutter=${options.policy.baseGutterPixels}`,
 		`slots=${options.policy.maxMaterialSlotsPerDraw}`,
-		...options.atlasEntryKeys,
-		...options.detailAtlasEntryKeys.map((key) => `detail=${key}`),
+		`atlas=${options.atlasPlanKey}`,
 		...options.materialSlotKeys,
 		...options.indexedMaterialTableRecordKeys.map((key) => `indexed=${key}`),
 	].join("|");
+}
+
+function createTexturePageAtlasPlacementsByEntryKey(
+	plan: TexturePageAtlasPlan,
+) {
+	return new Map(
+		plan.atlasTextures.flatMap((texture) =>
+			texture.placements.map(
+				(placement) => [placement.atlasEntryKey, placement] as const,
+			),
+		),
+	);
+}
+
+function createTexturePageAtlasDetailPlacementsByEntryKey(
+	plan: TexturePageAtlasPlan,
+) {
+	return new Map(
+		plan.detailAtlasTextures.flatMap((texture) =>
+			texture.placements.map(
+				(placement) => [placement.atlasEntryKey, placement] as const,
+			),
+		),
+	);
 }
 
 function uniqueSortedStrings(values: readonly string[]): string[] {

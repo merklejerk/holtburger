@@ -4,12 +4,13 @@ import {
 } from "./webgl2-gl";
 import type {
 	RgbaTexturePageAtlasEntryRecord,
-	CompactionFamilyPlan,
+	RgbaTexturePageDetailAtlasEntry,
 } from "./compaction-family-planner";
 import type {
 	AtlasTexturePage,
 	AtlasTexturePlacement,
 } from "./atlas-layout-planner";
+import type { TexturePageAtlasPlan } from "./texture-page-atlas-planner";
 
 export interface Webgl2TextureAtlasPlacementResource {
 	atlasEntryKey: string;
@@ -53,11 +54,10 @@ export function createWebgl2TextureAtlasGenerationResource({
 	plan,
 }: {
 	gl: WebGL2RenderingContext;
-	plan: CompactionFamilyPlan;
+	plan: TexturePageAtlasPlan;
 }): Webgl2TextureAtlasGenerationResource | null {
-	const rgbaTexturePageFamily = plan.renderFamilies.rgbaTexturePage;
 	if (
-		rgbaTexturePageFamily.compactableDrawUnitIds.length === 0 &&
+		plan.rgbaAtlasReadyDrawUnitIds.length === 0 &&
 		plan.detailAtlasTextures.length === 0
 	) {
 		return null;
@@ -121,7 +121,7 @@ export function createWebgl2TextureAtlasGenerationResource({
 		detailTextures,
 		detailPlacements,
 		preparedTextureAssetIds: plan.preparedTextureAssetIds,
-		compactableDrawUnitIds: rgbaTexturePageFamily.compactableDrawUnitIds,
+		compactableDrawUnitIds: plan.rgbaAtlasReadyDrawUnitIds,
 		dispose() {
 			for (const texture of textures) {
 				texture.texture.dispose();
@@ -200,7 +200,7 @@ function createWebgl2DetailTextureAtlasTexture({
 	page: AtlasTexturePage;
 	entriesByKey: ReadonlyMap<
 		string,
-		CompactionFamilyPlan["detailAtlasEntryRecords"][number]
+		RgbaTexturePageDetailAtlasEntry
 	>;
 }): Webgl2DetailTextureAtlasTextureResource {
 	const pixels = new Uint8Array(page.width * page.height * 4);
@@ -300,7 +300,7 @@ function copyDetailTextureAtlasPlacement({
 	atlasWidth: number;
 	atlasHeight: number;
 	placement: AtlasTexturePlacement;
-	entry: CompactionFamilyPlan["detailAtlasEntryRecords"][number];
+	entry: RgbaTexturePageDetailAtlasEntry;
 }): void {
 	validateDetailTextureAtlasSource(entry);
 	const gutter = placement.gutterPixels;
@@ -344,7 +344,7 @@ function validateTextureAtlasSource(
 }
 
 function validateDetailTextureAtlasSource(
-	entry: CompactionFamilyPlan["detailAtlasEntryRecords"][number],
+	entry: RgbaTexturePageDetailAtlasEntry,
 ): void {
 	if (entry.width <= 0 || entry.height <= 0) {
 		throw new Error(

@@ -1,6 +1,6 @@
 # Holtburger 3D Terrain Rendering Implementation Plan
 
-Status: Phase T4 complete; Phase T5 is next.
+Status: Phase T5A complete; immediate Phase T5B is next before Phase T6.
 
 Dry-run status: reviewed against the current `apps/holtburger-3d/src/lib/world-display` module graph.
 The phase order below reflects that dry run.
@@ -832,6 +832,93 @@ Acceptance criteria:
 - Terrain texture pages are isolated from non-terrain page families.
 - Terrain tile resources can resolve color, mask, and detail page bindings.
 - Missing terrain page resources produce explicit blockers rather than silent fallback.
+
+Progress update, 2026-06-02:
+
+- Completed the shared atlas-planner half of this phase as T5A.
+- Added `TexturePageFamily` with the initial families:
+  - `static-rgba`;
+  - `static-detail`;
+  - `terrain-color`;
+  - `terrain-mask`;
+  - `terrain-detail`.
+- Added an optional `family` discriminator to RGBA and detail texture-page atlas candidates.
+  Existing static callers default to `static-rgba` and `static-detail`, preserving current static
+  base/detail atlas behavior without migration churn.
+- Updated `planTexturePageAtlas` to group candidates by `TexturePageFamily` before calling
+  `planAtlasLayout`. The flattened legacy `atlasTextures` and `detailAtlasTextures` outputs remain
+  for current consumers, while `plan.families` records per-family page ownership for diagnostics and
+  future terrain resource binding.
+- Added tests in `texture-page-atlas-planner.test.ts` proving static and terrain RGBA/detail entries
+  cannot share atlas texture pages even when they would otherwise fit together.
+
+Decisions:
+
+- Use the shared planner for terrain page-family isolation. No one-off terrain atlas planner or
+  migration scaffold was introduced.
+- Keep `TexturePageFamilyPlan` private for now. The plan exposes family subplans through
+  `TexturePageAtlasPlan.families`; no separate public type is needed yet.
+- Preserve flattened atlas outputs so compaction, atlas generation, and existing direct-draw binding
+  paths remain unchanged during this isolation refactor.
+
+Course corrections and refinements:
+
+- T5 is split into T5A and T5B. T5A completed the shared hard-partition infrastructure. T5B must add
+  terrain-derived color/mask/detail candidates and terrain tile page binding/blocker state.
+- Do not start T6 until T5B is complete. The layer-table work needs terrain resource page bindings
+  as input, not only planner-level family isolation.
+- T5B should build terrain candidates from `Webgl2TerrainTileResource.compatibilityDraws` or a
+  tile-level terrain plan shape that still uses `terrain-blend-plan.ts` as the behavior decoder.
+
+Validation:
+
+- `npm run test:ts -- texture-page-atlas-planner`
+- `npm run test:ts -- texture-page-atlas-planner compaction-family-planner texture-page-binding webgl2-texture-atlas-generation`
+- `npm run check`
+- `npm run lint`
+
+Cleanup impact:
+
+- The flattened `atlasTextures` / `detailAtlasTextures` outputs are retained compatibility surface
+  for current consumers. Revisit in T11 after terrain-family submit and static compaction have stable
+  family-aware resource lookup.
+
+## Phase T5B: Terrain Page Candidate And Binding Handoff
+
+Goal: finish T5 by feeding terrain color, mask, and detail inputs into the isolated page families and
+recording terrain page binding/blocker state on terrain tile resources.
+
+Why this interim phase exists:
+
+- T5A proves hard atlas family partitioning in the shared planner, but terrain tile resources still
+  only carry direct compatibility texture bindings.
+- T6 needs terrain page refs and explicit blockers before it can replace pcode-sliced terrain draws
+  with a layer table.
+
+Primary targets:
+
+- `apps/holtburger-3d/src/lib/world-display/terrain-blend-plan.ts`
+- `apps/holtburger-3d/src/lib/world-display/webgl2/resources/terrain-tile-resources.ts`
+- `apps/holtburger-3d/src/lib/world-display/webgl2-world-resources.ts`
+- `apps/holtburger-3d/src/lib/world-display/texture-pages/`
+
+Tasks:
+
+- Build terrain color atlas candidates from terrain base, overlay, and road color refs.
+- Build terrain mask atlas candidates from terrain alpha and road alpha mask refs.
+- Decide and implement the first terrain detail binding shape. If detail data is not available at
+  this boundary yet, record an explicit blocker rather than silently omitting it.
+- Merge terrain candidates into `TexturePageAtlasPlan` with families `terrain-color`,
+  `terrain-mask`, and `terrain-detail`.
+- Add terrain tile resource fields for resolved page bindings and blocker samples.
+- Add tests proving terrain candidates do not share pages with static/object/indexed/palette
+  candidates and that missing terrain page resources produce blockers.
+
+Acceptance criteria:
+
+- Terrain tile resources can resolve color, mask, and detail page bindings or explicit blockers.
+- Terrain page candidates use the shared family-aware planner, not a separate terrain-only planner.
+- No shader behavior changes yet.
 
 ## Phase T6: Terrain Layer Table And Geometry Attributes
 

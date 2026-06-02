@@ -10,14 +10,23 @@ import type {
 } from "../compaction/compaction-family-planner";
 import type { StagedWorldMaterialTexturePageReadiness } from "../staged-world-material-strategy";
 
+export type TexturePageFamily =
+	| "static-rgba"
+	| "static-detail"
+	| "terrain-color"
+	| "terrain-mask"
+	| "terrain-detail";
+
 export interface TexturePageAtlasRgbaCandidate {
 	drawUnitId: string;
+	family?: TexturePageFamily;
 	texturePageReadiness: StagedWorldMaterialTexturePageReadiness;
 	detailAtlasEntry: RgbaTexturePageDetailAtlasEntry | null;
 }
 
 export interface TexturePageAtlasDetailCandidate {
 	drawUnitId: string;
+	family?: TexturePageFamily;
 	detailAtlasEntry: RgbaTexturePageDetailAtlasEntry | null;
 }
 
@@ -41,7 +50,16 @@ export interface TexturePageAtlasPlan {
 	atlasTextures: readonly AtlasTexturePage[];
 	detailAtlasEntryRecords: readonly RgbaTexturePageDetailAtlasEntry[];
 	detailAtlasTextures: readonly AtlasTexturePage[];
+	families: readonly TexturePageFamilyPlan[];
 	preparedTextureAssetIds: readonly string[];
+}
+
+interface TexturePageFamilyPlan {
+	family: TexturePageFamily;
+	atlasEntryRecords: readonly RgbaTexturePageAtlasEntryRecord[];
+	atlasTextures: readonly AtlasTexturePage[];
+	detailAtlasEntryRecords: readonly RgbaTexturePageDetailAtlasEntry[];
+	detailAtlasTextures: readonly AtlasTexturePage[];
 }
 
 export function createEmptyTexturePageAtlasPlan(): TexturePageAtlasPlan {
@@ -54,6 +72,7 @@ export function createEmptyTexturePageAtlasPlan(): TexturePageAtlasPlan {
 		atlasTextures: [],
 		detailAtlasEntryRecords: [],
 		detailAtlasTextures: [],
+		families: [],
 		preparedTextureAssetIds: [],
 	};
 }
@@ -88,7 +107,93 @@ export function planTexturePageAtlas(options: {
 	policy: CompactionFamilyPlanningPolicy;
 }): TexturePageAtlasPlan {
 	const failures: TexturePageAtlasFailure[] = [];
-	const atlasEntries = dedupeRgbaTexturePageEntries(options.rgbaCandidates);
+	const familyPlans: TexturePageFamilyPlan[] = [];
+	const rgbaReady: TexturePageAtlasRgbaCandidate[] = [];
+	const detailReady: TexturePageAtlasDetailCandidate[] = [];
+	const usedAtlasEntryKeys = new Set<string>();
+	const usedDetailEntryKeys = new Set<string>();
+	const rgbaCandidatesByFamily = groupRgbaCandidatesByFamily(
+		options.rgbaCandidates,
+	);
+	const detailCandidatesByFamily = groupDetailCandidatesByFamily(
+		options.detailCandidates,
+	);
+	const families = uniqueSortedFamilies([
+		...rgbaCandidatesByFamily.keys(),
+		...detailCandidatesByFamily.keys(),
+	]);
+	for (const family of families) {
+		const rgbaFamilyCandidates = rgbaCandidatesByFamily.get(family) ?? [];
+		const detailFamilyCandidates = detailCandidatesByFamily.get(family) ?? [];
+		const familyPlan = planTexturePageAtlasFamily({
+			family,
+			rgbaCandidates: rgbaFamilyCandidates,
+			detailCandidates: detailFamilyCandidates,
+			policy: options.policy,
+			failures,
+		});
+		familyPlans.push(familyPlan.familyPlan);
+		rgbaReady.push(...familyPlan.rgbaReady);
+		detailReady.push(...familyPlan.detailReady);
+		for (const key of familyPlan.usedAtlasEntryKeys) {
+			usedAtlasEntryKeys.add(key);
+		}
+		for (const key of familyPlan.usedDetailEntryKeys) {
+			usedDetailEntryKeys.add(key);
+		}
+	}
+	return {
+		key: describeTexturePageAtlasPlanKey({
+			policy: options.policy,
+			familyPlans,
+		}),
+		rgbaAtlasReadyDrawUnitIds: rgbaReady.map((candidate) => candidate.drawUnitId),
+		detailAtlasReadyDrawUnitIds: detailReady.map(
+			(candidate) => candidate.drawUnitId,
+		),
+		failures,
+		atlasEntryRecords: familyPlans.flatMap((plan) => plan.atlasEntryRecords),
+		atlasTextures: familyPlans.flatMap((plan) => plan.atlasTextures),
+		detailAtlasEntryRecords: familyPlans.flatMap(
+			(plan) => plan.detailAtlasEntryRecords,
+		),
+		detailAtlasTextures: familyPlans.flatMap(
+			(plan) => plan.detailAtlasTextures,
+		),
+		families: familyPlans.filter(
+			(plan) =>
+				plan.atlasEntryRecords.length > 0 ||
+				plan.detailAtlasEntryRecords.length > 0,
+		),
+		preparedTextureAssetIds: uniqueSortedStrings(
+			rgbaReady.map(
+				(candidate) =>
+					candidate.texturePageReadiness.atlasEntry.preparedTextureAssetId,
+			),
+		),
+	};
+}
+
+function planTexturePageAtlasFamily({
+	family,
+	rgbaCandidates,
+	detailCandidates,
+	policy,
+	failures,
+}: {
+	family: TexturePageFamily;
+	rgbaCandidates: readonly TexturePageAtlasRgbaCandidate[];
+	detailCandidates: readonly TexturePageAtlasDetailCandidate[];
+	policy: CompactionFamilyPlanningPolicy;
+	failures: TexturePageAtlasFailure[];
+}): {
+	familyPlan: TexturePageFamilyPlan;
+	rgbaReady: TexturePageAtlasRgbaCandidate[];
+	detailReady: TexturePageAtlasDetailCandidate[];
+	usedAtlasEntryKeys: ReadonlySet<string>;
+	usedDetailEntryKeys: ReadonlySet<string>;
+} {
+	const atlasEntries = dedupeRgbaTexturePageEntries(rgbaCandidates);
 	const layout = planAtlasLayout({
 		entries: atlasEntries.map((record) => ({
 			key: record.key,
@@ -96,15 +201,15 @@ export function planTexturePageAtlas(options: {
 			height: record.entry.level.height,
 		})),
 		policy: {
-			maxTextureSize: options.policy.maxAtlasTextureSize,
-			maxTextureCount: options.policy.maxAtlasTextureCount,
-			gutterPixels: options.policy.baseGutterPixels,
+			maxTextureSize: policy.maxAtlasTextureSize,
+			maxTextureCount: policy.maxAtlasTextureCount,
+			gutterPixels: policy.baseGutterPixels,
 		},
 	});
-	const basePlaced = options.rgbaCandidates.filter((candidate) =>
+	const basePlaced = rgbaCandidates.filter((candidate) =>
 		layout.placementsByEntryKey.has(candidate.texturePageReadiness.atlasEntryKey),
 	);
-	for (const candidate of options.rgbaCandidates) {
+	for (const candidate of rgbaCandidates) {
 		const overflow = layout.overflowsByEntryKey.get(
 			candidate.texturePageReadiness.atlasEntryKey,
 		);
@@ -123,7 +228,7 @@ export function planTexturePageAtlas(options: {
 
 	const detailEntries = dedupeDetailAtlasEntries([
 		...basePlaced,
-		...options.detailCandidates,
+		...detailCandidates,
 	]);
 	const detailLayout = planAtlasLayout({
 		entries: detailEntries.map((entry) => ({
@@ -132,18 +237,18 @@ export function planTexturePageAtlas(options: {
 			height: entry.height,
 		})),
 		policy: {
-			maxTextureSize: options.policy.maxAtlasTextureSize,
-			maxTextureCount: options.policy.maxAtlasTextureCount,
-			gutterPixels: options.policy.baseGutterPixels,
+			maxTextureSize: policy.maxAtlasTextureSize,
+			maxTextureCount: policy.maxAtlasTextureCount,
+			gutterPixels: policy.baseGutterPixels,
 		},
 	});
 	const rgbaReady = basePlaced.filter((candidate) =>
 		isDetailAtlasReady(candidate, detailLayout.placementsByEntryKey),
 	);
-	const detailReady = options.detailCandidates.filter((candidate) =>
+	const detailReady = detailCandidates.filter((candidate) =>
 		isDetailAtlasReady(candidate, detailLayout.placementsByEntryKey),
 	);
-	for (const candidate of [...basePlaced, ...options.detailCandidates]) {
+	for (const candidate of [...basePlaced, ...detailCandidates]) {
 		const detailEntryKey = candidate.detailAtlasEntry?.key ?? null;
 		if (detailEntryKey === null) {
 			continue;
@@ -168,38 +273,27 @@ export function planTexturePageAtlas(options: {
 			.filter((key) => key.length > 0),
 	);
 	return {
-		key: describeTexturePageAtlasPlanKey({
-			policy: options.policy,
-			atlasEntryKeys: [...usedAtlasEntryKeys].sort(),
-			detailAtlasEntryKeys: detailEntries
-				.filter((entry) => usedDetailEntryKeys.has(entry.key))
-				.map((entry) => entry.key),
-		}),
-		rgbaAtlasReadyDrawUnitIds: rgbaReady.map((candidate) => candidate.drawUnitId),
-		detailAtlasReadyDrawUnitIds: detailReady.map(
-			(candidate) => candidate.drawUnitId,
-		),
-		failures,
-		atlasEntryRecords: atlasEntries.filter((record) =>
-			usedAtlasEntryKeys.has(record.key),
-		),
-		atlasTextures: filterAtlasTexturePages({
-			pages: layout.texturePages,
-			usedEntryKeys: usedAtlasEntryKeys,
-		}),
-		detailAtlasEntryRecords: detailEntries.filter((entry) =>
-			usedDetailEntryKeys.has(entry.key),
-		),
-		detailAtlasTextures: filterAtlasTexturePages({
-			pages: detailLayout.texturePages,
-			usedEntryKeys: usedDetailEntryKeys,
-		}),
-		preparedTextureAssetIds: uniqueSortedStrings(
-			rgbaReady.map(
-				(candidate) =>
-					candidate.texturePageReadiness.atlasEntry.preparedTextureAssetId,
+		familyPlan: {
+			family,
+			atlasEntryRecords: atlasEntries.filter((record) =>
+				usedAtlasEntryKeys.has(record.key),
 			),
-		),
+			atlasTextures: filterAtlasTexturePages({
+				pages: layout.texturePages,
+				usedEntryKeys: usedAtlasEntryKeys,
+			}),
+			detailAtlasEntryRecords: detailEntries.filter((entry) =>
+				usedDetailEntryKeys.has(entry.key),
+			),
+			detailAtlasTextures: filterAtlasTexturePages({
+				pages: detailLayout.texturePages,
+				usedEntryKeys: usedDetailEntryKeys,
+			}),
+		},
+		rgbaReady,
+		detailReady,
+		usedAtlasEntryKeys,
+		usedDetailEntryKeys,
 	};
 }
 
@@ -241,6 +335,38 @@ function dedupeDetailAtlasEntries(
 	);
 }
 
+function groupRgbaCandidatesByFamily(
+	candidates: readonly TexturePageAtlasRgbaCandidate[],
+): Map<TexturePageFamily, TexturePageAtlasRgbaCandidate[]> {
+	const groups = new Map<TexturePageFamily, TexturePageAtlasRgbaCandidate[]>();
+	for (const candidate of candidates) {
+		const family = candidate.family ?? "static-rgba";
+		const group = groups.get(family) ?? [];
+		group.push(candidate);
+		groups.set(family, group);
+	}
+	return groups;
+}
+
+function groupDetailCandidatesByFamily(
+	candidates: readonly TexturePageAtlasDetailCandidate[],
+): Map<TexturePageFamily, TexturePageAtlasDetailCandidate[]> {
+	const groups = new Map<TexturePageFamily, TexturePageAtlasDetailCandidate[]>();
+	for (const candidate of candidates) {
+		const family = candidate.family ?? "static-detail";
+		const group = groups.get(family) ?? [];
+		group.push(candidate);
+		groups.set(family, group);
+	}
+	return groups;
+}
+
+function uniqueSortedFamilies(
+	families: Iterable<TexturePageFamily>,
+): TexturePageFamily[] {
+	return [...new Set(families)].sort();
+}
+
 function filterAtlasTexturePages({
 	pages,
 	usedEntryKeys,
@@ -260,16 +386,18 @@ function filterAtlasTexturePages({
 
 function describeTexturePageAtlasPlanKey(options: {
 	policy: CompactionFamilyPlanningPolicy;
-	atlasEntryKeys: readonly string[];
-	detailAtlasEntryKeys: readonly string[];
+	familyPlans: readonly TexturePageFamilyPlan[];
 }): string {
 	return [
 		"texture-page-atlas",
 		`size=${options.policy.maxAtlasTextureSize}`,
 		`textures=${options.policy.maxAtlasTextureCount}`,
 		`gutter=${options.policy.baseGutterPixels}`,
-		...options.atlasEntryKeys,
-		...options.detailAtlasEntryKeys.map((key) => `detail=${key}`),
+		...options.familyPlans.flatMap((plan) => [
+			`family=${plan.family}`,
+			...plan.atlasEntryRecords.map((record) => record.key),
+			...plan.detailAtlasEntryRecords.map((entry) => `detail=${entry.key}`),
+		]),
 	].join("|");
 }
 

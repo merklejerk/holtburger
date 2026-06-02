@@ -1,5 +1,5 @@
 import type { DrawUnitRuntimeDiagnostic } from "./runtime-render-diagnostics";
-import type { CompactionFamilyPlan } from "./compaction-family-planner";
+import type { CompactionFamilyPlan } from "./compaction/compaction-family-planner";
 import type {
 	Webgl2WorldDrawUnit,
 	Webgl2WorldResourceStore,

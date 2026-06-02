@@ -73,7 +73,7 @@ import {
 	type RgbaTexturePageDetailAtlasEntry,
 	type CompactionFamilyPlan,
 	type CompactionFamilyPlanningPolicy,
-} from "./compaction-family-planner";
+} from "./compaction/compaction-family-planner";
 import {
 	createEmptyTexturePageAtlasPlan,
 	createTexturePageAtlasPlacementsByEntryKey,
@@ -84,7 +84,7 @@ import {
 	deriveDirectGeometrySubmissionLayout,
 	type GeometrySubmissionLayout,
 } from "./webgl2/families/direct-render-family";
-import { buildCompactedGeometryBatch } from "./compacted-geometry";
+import { buildCompactedGeometryBatch } from "./compaction/compacted-geometry";
 import {
 	createWebgl2TextureAtlasGenerationResource,
 	type Webgl2TextureAtlasGenerationResource,

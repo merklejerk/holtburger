@@ -4,7 +4,7 @@ import type {
 	CompactionGeometryBlocker,
 	CompactionMaterialBlocker,
 	CompactionMaterialFamily,
-} from "./compaction-family-planner";
+} from "./compaction/compaction-family-planner";
 import type { StagedWorldDrawUnitAssembly } from "./staged-world-assembly";
 
 export interface DrawUnitRuntimeDiagnostic {

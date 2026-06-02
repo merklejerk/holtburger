@@ -204,6 +204,8 @@ export interface WorldRenderDebugMetrics {
 	indexedPalettedFamilyReplacedDrawUnitTriangleCount: number;
 	indexedPalettedFamilyRetainedDirectDrawUnitCount: number;
 	indexedPalettedFamilyNoVisibleRouteCount: number;
+	retainedDirectOpaqueDrawUnitCount: number;
+	retainedDirectBlendedDrawUnitCount: number;
 	directTexturePageDrawCount: number;
 	directSingleEntryTexturePageDrawCount: number;
 	directPackedTexturePageDrawCount: number;

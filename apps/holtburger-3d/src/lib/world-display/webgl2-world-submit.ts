@@ -116,6 +116,8 @@ export interface Webgl2WorldSubmitMetrics {
 	portalMaskDrawUnitCount: number;
 	exteriorDomainDrawUnitCount: number;
 	interiorDomainDrawUnitCount: number;
+	retainedDirectOpaqueDrawUnitCount: number;
+	retainedDirectBlendedDrawUnitCount: number;
 	drawCallCount: number;
 	programSwitchCount: number;
 	vertexArrayBindCount: number;
@@ -171,6 +173,8 @@ const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	portalMaskDrawUnitCount: 0,
 	exteriorDomainDrawUnitCount: 0,
 	interiorDomainDrawUnitCount: 0,
+	retainedDirectOpaqueDrawUnitCount: 0,
+	retainedDirectBlendedDrawUnitCount: 0,
 	drawCallCount: 0,
 	programSwitchCount: 0,
 	vertexArrayBindCount: 0,
@@ -388,6 +392,12 @@ export function submitWebgl2FlatWorldDrawUnits({
 						!compactedReplacementDrawUnitIds.has(drawUnit.id),
 				);
 	const retainedDrawUnitCount = stagedDrawUnits.length;
+	const directPasses = partitionRetainedDirectDrawUnits({
+		drawUnits: stagedDrawUnits,
+		viewProjectionMatrix,
+	});
+	metrics.retainedDirectOpaqueDrawUnitCount = directPasses.opaque.length;
+	metrics.retainedDirectBlendedDrawUnitCount = directPasses.blended.length;
 	metrics.visibleRetainedDirectDrawUnitCountsByCompactionFamily =
 		countDrawUnitsByCompactionFamily(stagedDrawUnits);
 	const replaceableDrawUnitTriangleCount = sumDrawUnitTriangles(
@@ -455,142 +465,29 @@ export function submitWebgl2FlatWorldDrawUnits({
 			metrics,
 			planningNoVisibleRouteCount: indexedReplacement.noVisibleRouteCount,
 		});
+		metrics.stateChangeCount += resetWorldSubmitExitRenderState({
+			gl,
+			stateCache,
+		});
 		return metrics;
 	}
 
-	const uniformCache = createDirectFamilyUniformCache();
-	let previousProgramKind: Webgl2DirectProgramKind | null = null;
-	const directContext: DirectFamilyDrawContext = {
+	const directSubmitContext = createWebgl2DirectSubmitContext({
 		gl,
 		stateCache,
 		viewProjectionMatrix,
-		textureUnits: DIRECT_FAMILY_DRAW_TEXTURE_UNITS,
-	};
-	const directPrograms: Webgl2DirectDrawPrograms = {
-		flat: program,
-		rgbaTexturePage: texturedProgram,
-		terrainBlend: terrainBlendProgram,
-		indexedP8: indexedP8Program,
-		indexedP16: indexedP16Program,
-	};
-	for (const drawUnit of stagedDrawUnits) {
-		const route = planWebgl2DirectDrawRoute({
-			drawUnit,
-			programs: directPrograms,
-		});
-		if (directContext.stateCache.useProgram(route.activeProgram.program)) {
-			metrics.programSwitchCount += 1;
-			metrics.stateChangeCount += 1;
-			resetDirectFamilyUniformCache(uniformCache);
-			previousProgramKind = route.programKind;
-			uploadDirectFamilySamplerUniforms({
-				context: directContext,
-				route,
-				terrainBlendProgram,
-				metrics,
-			});
-		} else if (previousProgramKind !== route.programKind) {
-			resetDirectFamilyUniformCache(uniformCache);
-			previousProgramKind = route.programKind;
-		}
-		metrics.stateChangeCount += applyDrawUnitRenderState({
-			gl,
-			stateCache: directContext.stateCache,
-			drawUnit,
-		});
-		metrics.stateChangeCount += directContext.stateCache.setCullState({
-			enabled: terrainBackfaceCulling && route.programKind === "terrain",
-			mode: gl.BACK,
-		});
-		if (route.programKind === "texture") {
-			prepareDirectRgbaTexturePageDraw({
-				context: directContext,
-				route,
-				metrics,
-			});
-		}
-		if (
-			route.programKind === "indexed-p8" ||
-			route.programKind === "indexed-p16"
-		) {
-			prepareDirectIndexedPalettedDraw({
-				context: directContext,
-				route,
-				metrics,
-			});
-		}
-		if (drawUnit.terrainBlend) {
-			metrics.stateChangeCount += bindTerrainBlendTextures({
-				stateCache: directContext.stateCache,
-				terrainBlend: drawUnit.terrainBlend,
-			});
-		}
-		if (
-			directContext.stateCache.bindVertexArray(drawUnit.vertexArray.vertexArray)
-		) {
-			metrics.vertexArrayBindCount += 1;
-			metrics.stateChangeCount += 1;
-		}
-
-		const modelViewProjection = multiplyMat4(
-			directContext.viewProjectionMatrix,
-			drawUnit.modelMatrix,
-		);
-		if (
-			!uniformCache.modelViewProjection ||
-			!arraysEqual(uniformCache.modelViewProjection, modelViewProjection)
-		) {
-			directContext.gl.uniformMatrix4fv(
-				route.activeProgram.uniforms.uModelViewProjection,
-				false,
-				modelViewProjection,
-			);
-			uniformCache.modelViewProjection = modelViewProjection;
-			metrics.uniformUploadCount += 1;
-		}
-		if (route.programKind === "texture") {
-			uploadDirectRgbaTexturePageUniforms({
-				context: directContext,
-				route,
-				uniformCache,
-				metrics,
-			});
-		} else if (
-			route.programKind === "indexed-p8" ||
-			route.programKind === "indexed-p16"
-		) {
-			uploadDirectIndexedPalettedUniforms({
-				context: directContext,
-				route,
-				uniformCache,
-				metrics,
-			});
-		} else if (route.programKind !== "terrain") {
-			uploadDirectColorUniforms({
-				context: directContext,
-				route,
-				uniformCache,
-				metrics,
-			});
-		}
-		if (drawUnit.terrainBlend) {
-			uploadTerrainBlendUniforms(
-				directContext.gl,
-				terrainBlendProgram,
-				drawUnit.terrainBlend,
-			);
-			metrics.uniformUploadCount += TERRAIN_BLEND_DYNAMIC_UNIFORM_COUNT;
-		}
-
-		directContext.gl.drawElements(
-			directContext.gl.TRIANGLES,
-			drawUnit.vertexCount,
-			drawUnit.indexType,
-			0,
-		);
-		metrics.drawCallCount += 1;
-		metrics.triangleCount += drawUnit.triangleCount;
-	}
+		program,
+		texturedProgram,
+		terrainBlendProgram,
+		indexedP8Program,
+		indexedP16Program,
+	});
+	submitWebgl2DirectDrawUnitPass({
+		context: directSubmitContext,
+		drawUnits: directPasses.opaque,
+		terrainBackfaceCulling,
+		metrics,
+	});
 	submitRgbaTexturePageFamilyDrawUnits({
 		gl,
 		stateCache,
@@ -618,7 +515,240 @@ export function submitWebgl2FlatWorldDrawUnits({
 		metrics,
 		planningNoVisibleRouteCount: indexedReplacement.noVisibleRouteCount,
 	});
+	submitWebgl2DirectDrawUnitPass({
+		context: directSubmitContext,
+		drawUnits: directPasses.blended,
+		terrainBackfaceCulling,
+		metrics,
+	});
+	metrics.stateChangeCount += resetWorldSubmitExitRenderState({
+		gl,
+		stateCache,
+	});
 	return metrics;
+}
+
+function resetWorldSubmitExitRenderState({
+	gl,
+	stateCache,
+}: {
+	gl: WebGL2RenderingContext;
+	stateCache: Webgl2StateCache;
+}): number {
+	let changeCount = stateCache.setDepthState({
+		enabled: true,
+		write: true,
+		func: gl.LEQUAL,
+	});
+	changeCount += stateCache.setBlendState({
+		enabled: false,
+		srcRgb: gl.ONE,
+		dstRgb: gl.ZERO,
+		srcAlpha: gl.ONE,
+		dstAlpha: gl.ZERO,
+		equationRgb: gl.FUNC_ADD,
+		equationAlpha: gl.FUNC_ADD,
+	});
+	changeCount += stateCache.setCullState({
+		enabled: false,
+		mode: gl.BACK,
+	});
+	changeCount += stateCache.setStencilState({
+		enabled: false,
+		writeMask: 0xff,
+		func: gl.ALWAYS,
+		ref: 0,
+		readMask: 0xff,
+		fail: gl.KEEP,
+		zfail: gl.KEEP,
+		zpass: gl.KEEP,
+	});
+	return changeCount;
+}
+
+interface Webgl2DirectSubmitContext {
+	directContext: DirectFamilyDrawContext;
+	directPrograms: Webgl2DirectDrawPrograms;
+	terrainBlendProgram: Webgl2TerrainBlendWorldProgram;
+	uniformCache: ReturnType<typeof createDirectFamilyUniformCache>;
+	previousProgramKind: Webgl2DirectProgramKind | null;
+}
+
+function createWebgl2DirectSubmitContext({
+	gl,
+	stateCache,
+	viewProjectionMatrix,
+	program,
+	texturedProgram,
+	terrainBlendProgram,
+	indexedP8Program,
+	indexedP16Program,
+}: {
+	gl: WebGL2RenderingContext;
+	stateCache: Webgl2StateCache;
+	viewProjectionMatrix: RenderMat4;
+	program: Webgl2FlatWorldProgram;
+	texturedProgram: Webgl2TexturedWorldProgram;
+	terrainBlendProgram: Webgl2TerrainBlendWorldProgram;
+	indexedP8Program: Webgl2IndexedP8WorldProgram;
+	indexedP16Program: Webgl2IndexedP16WorldProgram;
+}): Webgl2DirectSubmitContext {
+	const uniformCache = createDirectFamilyUniformCache();
+	const directContext: DirectFamilyDrawContext = {
+		gl,
+		stateCache,
+		viewProjectionMatrix,
+		textureUnits: DIRECT_FAMILY_DRAW_TEXTURE_UNITS,
+	};
+	const directPrograms: Webgl2DirectDrawPrograms = {
+		flat: program,
+		rgbaTexturePage: texturedProgram,
+		terrainBlend: terrainBlendProgram,
+		indexedP8: indexedP8Program,
+		indexedP16: indexedP16Program,
+	};
+	return {
+		directContext,
+		directPrograms,
+		terrainBlendProgram,
+		uniformCache,
+		previousProgramKind: null,
+	};
+}
+
+function submitWebgl2DirectDrawUnitPass({
+	context,
+	drawUnits,
+	terrainBackfaceCulling,
+	metrics,
+}: {
+	context: Webgl2DirectSubmitContext;
+	drawUnits: readonly Webgl2WorldDrawUnit[];
+	terrainBackfaceCulling: boolean;
+	metrics: Webgl2WorldSubmitMetrics;
+}): void {
+	for (const drawUnit of drawUnits) {
+		const route = planWebgl2DirectDrawRoute({
+			drawUnit,
+			programs: context.directPrograms,
+		});
+		if (
+			context.directContext.stateCache.useProgram(route.activeProgram.program)
+		) {
+			metrics.programSwitchCount += 1;
+			metrics.stateChangeCount += 1;
+			resetDirectFamilyUniformCache(context.uniformCache);
+			context.previousProgramKind = route.programKind;
+			uploadDirectFamilySamplerUniforms({
+				context: context.directContext,
+				route,
+				terrainBlendProgram: context.terrainBlendProgram,
+				metrics,
+			});
+		} else if (context.previousProgramKind !== route.programKind) {
+			resetDirectFamilyUniformCache(context.uniformCache);
+			context.previousProgramKind = route.programKind;
+		}
+		metrics.stateChangeCount += applyDrawUnitRenderState({
+			gl: context.directContext.gl,
+			stateCache: context.directContext.stateCache,
+			drawUnit,
+		});
+		metrics.stateChangeCount += context.directContext.stateCache.setCullState({
+			enabled: terrainBackfaceCulling && route.programKind === "terrain",
+			mode: context.directContext.gl.BACK,
+		});
+		if (route.programKind === "texture") {
+			prepareDirectRgbaTexturePageDraw({
+				context: context.directContext,
+				route,
+				metrics,
+			});
+		}
+		if (
+			route.programKind === "indexed-p8" ||
+			route.programKind === "indexed-p16"
+		) {
+			prepareDirectIndexedPalettedDraw({
+				context: context.directContext,
+				route,
+				metrics,
+			});
+		}
+		if (drawUnit.terrainBlend) {
+			metrics.stateChangeCount += bindTerrainBlendTextures({
+				stateCache: context.directContext.stateCache,
+				terrainBlend: drawUnit.terrainBlend,
+			});
+		}
+		if (
+			context.directContext.stateCache.bindVertexArray(
+				drawUnit.vertexArray.vertexArray,
+			)
+		) {
+			metrics.vertexArrayBindCount += 1;
+			metrics.stateChangeCount += 1;
+		}
+
+		const modelViewProjection = multiplyMat4(
+			context.directContext.viewProjectionMatrix,
+			drawUnit.modelMatrix,
+		);
+		if (
+			!context.uniformCache.modelViewProjection ||
+			!arraysEqual(context.uniformCache.modelViewProjection, modelViewProjection)
+		) {
+			context.directContext.gl.uniformMatrix4fv(
+				route.activeProgram.uniforms.uModelViewProjection,
+				false,
+				modelViewProjection,
+			);
+			context.uniformCache.modelViewProjection = modelViewProjection;
+			metrics.uniformUploadCount += 1;
+		}
+		if (route.programKind === "texture") {
+			uploadDirectRgbaTexturePageUniforms({
+				context: context.directContext,
+				route,
+				uniformCache: context.uniformCache,
+				metrics,
+			});
+		} else if (
+			route.programKind === "indexed-p8" ||
+			route.programKind === "indexed-p16"
+		) {
+			uploadDirectIndexedPalettedUniforms({
+				context: context.directContext,
+				route,
+				uniformCache: context.uniformCache,
+				metrics,
+			});
+		} else if (route.programKind !== "terrain") {
+			uploadDirectColorUniforms({
+				context: context.directContext,
+				route,
+				uniformCache: context.uniformCache,
+				metrics,
+			});
+		}
+		if (drawUnit.terrainBlend) {
+			uploadTerrainBlendUniforms(
+				context.directContext.gl,
+				context.terrainBlendProgram,
+				drawUnit.terrainBlend,
+			);
+			metrics.uniformUploadCount += TERRAIN_BLEND_DYNAMIC_UNIFORM_COUNT;
+		}
+
+		context.directContext.gl.drawElements(
+			context.directContext.gl.TRIANGLES,
+			drawUnit.vertexCount,
+			drawUnit.indexType,
+			0,
+		);
+		metrics.drawCallCount += 1;
+		metrics.triangleCount += drawUnit.triangleCount;
+	}
 }
 
 function submitIndexedPalettedFamilyDrawUnits({
@@ -1046,6 +1176,73 @@ function compareWebgl2FlatWorldDrawUnits(
 	right: Webgl2WorldDrawUnit,
 ): number {
 	return compareStableAsciiStrings(left.submitOrderKey, right.submitOrderKey);
+}
+
+interface RetainedDirectDrawUnitPasses {
+	opaque: readonly Webgl2WorldDrawUnit[];
+	blended: readonly Webgl2WorldDrawUnit[];
+}
+
+function partitionRetainedDirectDrawUnits({
+	drawUnits,
+	viewProjectionMatrix,
+}: {
+	drawUnits: readonly Webgl2WorldDrawUnit[];
+	viewProjectionMatrix: RenderMat4;
+}): RetainedDirectDrawUnitPasses {
+	const opaque: Webgl2WorldDrawUnit[] = [];
+	const blended: Webgl2WorldDrawUnit[] = [];
+	for (const drawUnit of drawUnits) {
+		if (isBlendedDrawUnit(drawUnit)) {
+			blended.push(drawUnit);
+		} else {
+			opaque.push(drawUnit);
+		}
+	}
+	blended.sort((left, right) =>
+		compareRetainedBlendedDrawUnits(left, right, viewProjectionMatrix),
+	);
+	return { opaque, blended };
+}
+
+function isBlendedDrawUnit(drawUnit: Webgl2WorldDrawUnit): boolean {
+	return drawUnit.materialBehavior?.blend.enabled === true;
+}
+
+function compareRetainedBlendedDrawUnits(
+	left: Webgl2WorldDrawUnit,
+	right: Webgl2WorldDrawUnit,
+	viewProjectionMatrix: RenderMat4,
+): number {
+	const depthDelta =
+		calculateProjectedOriginDepth(right, viewProjectionMatrix) -
+		calculateProjectedOriginDepth(left, viewProjectionMatrix);
+	if (Number.isFinite(depthDelta) && depthDelta !== 0) {
+		return depthDelta;
+	}
+	return compareStableAsciiStrings(left.submitOrderKey, right.submitOrderKey);
+}
+
+function calculateProjectedOriginDepth(
+	drawUnit: Webgl2WorldDrawUnit,
+	viewProjectionMatrix: RenderMat4,
+): number {
+	const modelMatrix = drawUnit.modelMatrix;
+	const worldX = modelMatrix[12] ?? 0;
+	const worldY = modelMatrix[13] ?? 0;
+	const worldZ = modelMatrix[14] ?? 0;
+	const clipZ =
+		(viewProjectionMatrix[2] ?? 0) * worldX +
+		(viewProjectionMatrix[6] ?? 0) * worldY +
+		(viewProjectionMatrix[10] ?? 0) * worldZ +
+		(viewProjectionMatrix[14] ?? 0);
+	const clipW =
+		(viewProjectionMatrix[3] ?? 0) * worldX +
+		(viewProjectionMatrix[7] ?? 0) * worldY +
+		(viewProjectionMatrix[11] ?? 0) * worldZ +
+		(viewProjectionMatrix[15] ?? 1);
+	const projectedDepth = clipW === 0 ? clipZ : clipZ / clipW;
+	return Number.isFinite(projectedDepth) ? projectedDepth : 0;
 }
 
 function compareStableAsciiStrings(left: string, right: string): number {

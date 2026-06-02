@@ -1654,6 +1654,21 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			width: target.width,
 			height: target.height,
 		});
+		stateCache.setDepthState({
+			enabled: true,
+			write: true,
+			func: gl.LEQUAL,
+		});
+		stateCache.setStencilState({
+			enabled: false,
+			writeMask: 0xff,
+			func: gl.ALWAYS,
+			ref: 0,
+			readMask: 0xff,
+			fail: gl.KEEP,
+			zfail: gl.KEEP,
+			zpass: gl.KEEP,
+		});
 		gl.clearColor(...WEBGL2_CLEAR_COLOR);
 		gl.clearDepth(1);
 		clearBoundFramebuffer({
@@ -2422,6 +2437,12 @@ function mergeSceneDomainSubmitMetrics({
 		portalMaskDrawUnitCount,
 		exteriorDomainDrawUnitCount,
 		interiorDomainDrawUnitCount,
+		retainedDirectOpaqueDrawUnitCount:
+			exteriorMetrics.retainedDirectOpaqueDrawUnitCount +
+			interiorMetrics.retainedDirectOpaqueDrawUnitCount,
+		retainedDirectBlendedDrawUnitCount:
+			exteriorMetrics.retainedDirectBlendedDrawUnitCount +
+			interiorMetrics.retainedDirectBlendedDrawUnitCount,
 		drawCallCount:
 			exteriorMetrics.drawCallCount + interiorMetrics.drawCallCount + 1,
 		programSwitchCount:

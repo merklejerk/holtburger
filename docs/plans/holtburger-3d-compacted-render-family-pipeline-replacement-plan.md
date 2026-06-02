@@ -2175,6 +2175,263 @@ Cleanup target introduced:
 - Remove or narrow legacy flattened family fields once resource creation, diagnostics, and metrics all
   consume partitioned family plans directly.
 
+## Phase C8.11: Split Texture-Page Atlas Planning From Compaction Planning
+
+Status: Planned.
+
+Purpose: separate RGBA texture-page atlas planning from compacted render-family planning before
+adding blended atlas support or broader alpha-test compaction. The current `CompactionFamilyPlan`
+still owns both atlas layout and compacted family membership. That coupling made sense during the
+opaque RGBA replacement, but it now forces atlas readiness to mean "candidate for compacted RGBA
+geometry." That is why alpha-blended RGBA materials currently lose atlas eligibility even though the
+atlas image format is RGBA8-compatible.
+
+This phase may change the whole resource pipeline in one pass if the tests and diagnostics stay
+strong. The target is not a cosmetic file split; the target is a real dependency direction:
+
+`staged draw-unit atlas inputs -> TexturePageAtlasPlan -> CompactionFamilyPlan -> compacted geometry/family resources`
+
+Tasks:
+
+- Add a renderer-neutral `TexturePageAtlasPlan` for RGBA texture-page resources:
+  - base atlas entry records;
+  - base atlas pages and placements;
+  - detail atlas entry records;
+  - detail atlas pages and placements;
+  - atlas overflows/failure reasons;
+  - stable plan key and prepared texture dependency ids.
+- Move base/detail atlas layout construction out of `planCompactionFamilies()` and into a dedicated
+  atlas planner.
+- Preserve the current atlas policy values:
+  - `maxAtlasTextureSize`;
+  - `maxAtlasTextureCount`;
+  - base/detail gutter pixels.
+- Update `createWebgl2TextureAtlasGenerationResource()` and atlas resource sync to consume
+  `TexturePageAtlasPlan` instead of `CompactionFamilyPlan`.
+- Update direct texture-page binding resolution to consume atlas generation that is keyed by
+  `TexturePageAtlasPlan`, not by compacted family plan identity.
+- Update `planCompactionFamilies()` to consume atlas placement/readiness from `TexturePageAtlasPlan`
+  rather than owning atlas placement. The compaction planner should decide:
+  - which atlas-ready RGBA draw units are allowed into compacted RGBA family planning;
+  - which indexed draw units are allowed into compacted indexed family planning;
+  - which draw units are retained direct due to material/pass/geometry policy.
+- Keep detail atlas placement available to both RGBA and indexed compacted families.
+- Keep all real atlas failures explicit and attached to the atlas plan:
+  - source texture too large;
+  - atlas full;
+  - detail atlas full.
+- Keep compaction failures explicit and attached to the compaction plan:
+  - unsupported family;
+  - unsupported alpha policy;
+  - missing landblock origin;
+  - missing UV buffer;
+  - non-static geometry.
+- Update diagnostics so the debug report can distinguish:
+  - atlas-compatible draw units;
+  - atlas-placed draw units;
+  - compacted draw units;
+  - atlas failures;
+  - compaction blockers.
+- Remove or narrow `CompactionFamilyPlan` root atlas fields after atlas resource creation and
+  compacted resource creation consume the new `TexturePageAtlasPlan`.
+- Add tests proving:
+  - atlas layout is identical for current opaque RGBA compacted scenes before and after the split;
+  - compacted RGBA resources still receive the same atlas rects and detail atlas rects;
+  - indexed compacted detail atlas use still works;
+  - atlas overflow remains an atlas failure, not a compaction blocker;
+  - compaction blockers no longer suppress atlas planning unless the material is not atlas-compatible;
+  - resource-store refresh keeps atlas generation stable when compaction membership changes but atlas
+    inputs do not.
+
+Exit criteria:
+
+- `TexturePageAtlasPlan` is the authoritative input to WebGL2 atlas generation.
+- `CompactionFamilyPlan` no longer owns base/detail atlas layout as root compatibility state.
+- Current opaque RGBA and indexed compacted rendering remains visually and diagnostically unchanged.
+- The debug report separates atlas coverage from compaction coverage.
+- The next phase can allow blended RGBA atlas readiness without making those draw units compacted.
+
+Decisions:
+
+- This is allowed to be an "all-at-once-ish" pipeline change, but it must preserve hard invariants:
+  atlas generation must be deterministic, compacted family resources must fail hard on missing required
+  placements, and direct draw must remain the correctness path when compaction does not apply.
+- Do not add blended RGBA atlas support inside this phase unless it falls out naturally after the
+  split and has focused tests. The primary target is the dependency boundary.
+- Do not split indexed texel/palette page planning into this RGBA atlas plan. Indexed pages remain
+  exact texture-page resources owned by indexed material/resource preparation.
+
+## Phase C8.12: Render Retained Blended Direct Draw Last
+
+Status: Planned.
+
+Purpose: fix translucent retained-direct materials being overpainted by later compacted opaque family
+draws. The current submit path removes compacted-replaced draw units, renders the retained direct set,
+then submits compacted RGBA/indexed family batches. That is incorrect for retained direct draw units
+whose material behavior is alpha blended or otherwise depth-read/translucent: later opaque compacted
+geometry can cover them even when the direct shader and blend state are otherwise correct.
+
+Concrete repro:
+
+- Picker report for `setup-model/02000118`, `gfx-obj/010005f9`, part `0`:
+  - slot 0 is `indexed-paletted`, `blend=translucent`, `depth=read`, `alphaTest=0`, retained direct
+    with `indexed-alpha-policy-unsupported`;
+  - slot 1 is opaque RGBA and replaced by compacted `rgba-texture-page`.
+- This shape proves the indexed alpha material reaches the direct indexed route, but it can still be
+  visually hidden because compacted opaque work submits after it.
+
+Tasks:
+
+- Split visible retained direct draw units into:
+  - opaque/cutout direct draw units;
+  - blended/translucent direct draw units.
+- Submit opaque/cutout direct draw units in the opaque pass.
+- Submit compacted opaque family batches in the same opaque phase after or alongside opaque direct
+  work. Current compacted RGBA texture-page and indexed-paletted families are opaque-only.
+- Submit blended/translucent retained direct draw units last.
+- Sort the blended direct pass back-to-front using the best currently available world-space/camera
+  distance signal. If exact per-triangle sorting is unavailable, sort by draw-unit bounds/center and
+  document the limitation.
+- Treat alpha-test/cutout as opaque-pass work when it writes depth and uses shader discard. Do not
+  group it with true alpha blending.
+- Add a focused regression test where:
+  - a translucent indexed or RGBA direct draw unit is retained direct;
+  - an opaque compacted family draw unit is also visible;
+  - the translucent draw call occurs after compacted opaque family submission.
+- Add debug counters for retained direct opaque/cutout versus retained direct blended counts.
+
+Exit criteria:
+
+- The `02000118` / `010005f9` translucent indexed slot renders through the final blended direct pass
+  instead of being submitted before compacted opaque geometry.
+- Direct indexed and direct RGBA alpha-blended materials render after all current compacted opaque
+  family work.
+- Current compacted opaque RGBA/indexed behavior and metrics remain intact.
+- The implementation does not introduce compacted transparent-family support or interleave family
+  pipelines for blended materials yet.
+
+Decisions:
+
+- The pass boundary is based on material behavior, not on direct versus compacted resource ownership.
+  Direct opaque and compacted opaque belong to the opaque phase; true blended/translucent materials
+  belong to the final blended phase.
+- Because no compacted alpha-blended family exists yet, the renderer does not need a generalized
+  transparent family interleaving model for this phase.
+- This phase is a correctness fix. It should happen before atlas or compaction broadening so visual
+  alpha failures are not misdiagnosed as texture decode, palette, or atlas bugs.
+
+## Phase C8.13: Decouple RGBA Texture Atlas Eligibility From Compaction Eligibility
+
+Status: Planned.
+
+Purpose: allow alpha-blended RGBA textures to share compatible RGBA8 atlas pages without implying that
+their draw units are compactable. The current material strategy intentionally sets `atlasEligibility`
+to `null` for `blended-transparency`, because `atlasEligibility` still acts as both texture-page atlas
+readiness and compacted RGBA family readiness. That coupling is now too narrow.
+
+Tasks:
+
+- Introduce a typed RGBA texture-page atlas eligibility/readiness record that can exist for:
+  - opaque RGBA direct-texture materials;
+  - alpha-test/cutout RGBA direct-texture materials;
+  - alpha-blended/translucent RGBA direct-texture materials.
+- Keep compaction eligibility separate from atlas eligibility:
+  - blended RGBA materials may use atlas texture-page resources in direct draw;
+  - blended RGBA materials remain outside compacted families until a transparent-family plan exists.
+- Update staged material strategy so `blended-transparency` no longer suppresses texture-page atlas
+  readiness for otherwise atlas-compatible RGBA8 textures.
+- Keep real atlas blockers explicit:
+  - animated UVs;
+  - unsupported surface flags;
+  - unsupported source texture format;
+  - source texture too large;
+  - atlas page exhaustion.
+- Update direct RGBA draw routing so alpha-blended direct draw units can bind packed atlas pages when
+  a compatible atlas placement exists.
+- Preserve direct fallback behavior when atlas generation is missing or an atlas placement is not
+  available. Do not make atlas usage required for blended direct correctness.
+- Add tests proving:
+  - blended RGBA materials can receive atlas texture-page eligibility;
+  - blended RGBA materials are not marked compactable solely because they are atlas-ready;
+  - direct blended RGBA submit can use an atlas binding while remaining in the final blended pass;
+  - opaque RGBA atlas and compacted behavior is unchanged.
+
+Exit criteria:
+
+- RGBA alpha-blended direct textures are eligible for RGBA8 atlas pages when their texture format,
+  sampling, size, and resource limits allow it.
+- `atlasEligibility` or its replacement no longer means "compacted RGBA family candidate" by itself.
+- Blended RGBA material diagnostics distinguish:
+  - texture-page atlas readiness;
+  - final submit path;
+  - compaction blockers.
+- No compacted alpha-blended family is introduced in this phase.
+
+Decisions:
+
+- The atlas resource is a texture binding optimization. Compaction is a geometry and material-table
+  submission optimization. These should be separate facts.
+- Sharing RGBA8 atlas pages between compatible opaque, cutout, and blended RGBA textures is acceptable
+  because render state lives in draw routing/slices, not in the atlas texture image.
+- Indexed alpha remains separate because indexed materials use indexed texel pages plus palette pages,
+  not RGBA base atlas entries.
+
+## Phase C8.14: Fold RGBA Alpha-Test Into The RGBA Texture-Page Family
+
+Status: Planned.
+
+Purpose: reduce the large `missing-compacted-alpha-test-family` retained-direct population by treating
+alpha-test/cutout RGBA materials as part of the existing RGBA texture-page render family. Alpha-test
+materials are depth-writing discard materials, not true transparent blending, so they are compatible
+with opaque-pass compaction when the material table and shader carry the alpha-test threshold.
+
+Current signal:
+
+- The live debug report shows `missing-compacted-alpha-test-family x2099`.
+- These draw units are currently retained direct even though their texture resources are often the
+  same shape as opaque RGBA texture-page materials.
+
+Tasks:
+
+- Extend `rgba-texture-page` family material slots/resources with alpha-test state:
+  - alpha-test threshold;
+  - render state key;
+  - any required alpha policy identifier for diagnostics.
+- Extend the compacted RGBA texture-page shader to discard pixels below the per-slot alpha-test
+  threshold.
+- Keep alpha-test/cutout draw slices separate from opaque slices when render-state keys differ.
+- Keep alpha-test/cutout in the opaque/depth-writing pass. Do not submit it in the blended pass.
+- Remove or narrow `missing-compacted-alpha-test-family` for RGBA texture-page materials only when the
+  compacted RGBA shader and material table actually support alpha-test.
+- Preserve true alpha-blended/translucent blockers:
+  - `missing-compacted-transparent-blended-family`;
+  - `missing-compacted-opacity-translucent-family`.
+- Add tests proving:
+  - RGBA alpha-test candidates are planned in the `rgba-texture-page` family;
+  - alpha-test material slots carry the threshold;
+  - draw slices include compatible alpha-test render state and do not merge with incompatible opaque
+    state;
+  - compacted RGBA submit uploads alpha-test material state and discards in shader;
+  - true blended RGBA remains retained direct and rendered in the final blended direct pass.
+
+Exit criteria:
+
+- The `missing-compacted-alpha-test-family` count drops for atlas-ready RGBA texture-page cutout
+  materials.
+- Current opaque RGBA compaction behavior is unchanged.
+- Alpha-test/cutout RGBA compacted draws render in the opaque pass with depth writing.
+- True blended/translucent materials remain direct-pass correctness work, not compacted draw-call
+  reduction work.
+
+Decisions:
+
+- This is a fold into the greater `rgba-texture-page` family, not a separate parallel texture family.
+  The material resources are the same shape; alpha-test is per-material state plus slice/render-state
+  compatibility.
+- True alpha-blended compaction remains deferred. It needs sortable transparent submissions and likely
+  gives limited draw-call benefit unless batches are split so finely that the compaction value is
+  mostly resource reuse rather than submission reduction.
+
 ## Cleanup Targets
 
 - Split `Webgl2WorldDrawUnit` into smaller owned records over time:

@@ -63,7 +63,9 @@ describe("compaction family planner", () => {
 		);
 		expect(plan.bypasses).toEqual([]);
 		expect(
-			plan.atlasTextures[0]?.placements.map((entry) => entry.atlasEntryKey),
+			plan.texturePageAtlasPlan.atlasTextures[0]?.placements.map(
+				(entry) => entry.atlasEntryKey,
+			),
 		).toEqual(["entry-a", "entry-b"]);
 		expect(plan.materialSlots.map((slot) => slot.key)).toEqual([
 			"slot-entry-a|wrap=clamp/clamp|detail=none",
@@ -83,7 +85,7 @@ describe("compaction family planner", () => {
 		]);
 		expect(plan.staticPartCount).toBe(1);
 		expect(plan.triangleCount).toBe(4);
-		expect(plan.preparedTextureAssetIds).toEqual([
+		expect(plan.texturePageAtlasPlan.preparedTextureAssetIds).toEqual([
 			"prepared-texture/entry-a",
 			"prepared-texture/entry-b",
 		]);
@@ -357,9 +359,11 @@ describe("compaction family planner", () => {
 
 		expect(plan.compactableDrawUnitIds).toEqual(["indexed-detail"]);
 		expect(plan.bypasses).toEqual([]);
-		expect(plan.detailAtlasEntryRecords.map((entry) => entry.key)).toEqual([
-			"indexed-detail",
-		]);
+		expect(
+			plan.texturePageAtlasPlan.detailAtlasEntryRecords.map(
+				(entry) => entry.key,
+			),
+		).toEqual(["indexed-detail"]);
 		expect(plan.renderFamilies.indexedPaletted.materialTableRecords).toEqual([
 			detailRecord,
 		]);
@@ -389,9 +393,11 @@ describe("compaction family planner", () => {
 
 		expect(plan.compactableDrawUnitIds).toEqual(["plain", "detailed"]);
 		expect(plan.bypasses).toEqual([]);
-		expect(plan.detailAtlasEntryRecords.map((entry) => entry.key)).toEqual([
-			"detail-b",
-		]);
+		expect(
+			plan.texturePageAtlasPlan.detailAtlasEntryRecords.map(
+				(entry) => entry.key,
+			),
+		).toEqual(["detail-b"]);
 		expect(plan.materialSlots).toMatchObject([
 			{
 				key: "slot-base-a|wrap=clamp/clamp|detail=none",
@@ -660,7 +666,9 @@ describe("compaction family planner", () => {
 		expect(createEmptyCompactionFamilyPlan()).toMatchObject({
 			key: "compaction-families/empty",
 			compactableDrawUnitIds: [],
-			atlasTextures: [],
+			texturePageAtlasPlan: {
+				atlasTextures: [],
+			},
 			drawSlices: [],
 		});
 	});

@@ -1,172 +1,153 @@
 import { describe, expect, it } from "vitest";
 
-import {
-	collectDirectDrawTexturePageBindings,
-	type TexturePageBinding,
-} from "./texture-page-binding";
+import type { TexturePageAtlasPlan } from "./texture-page-atlas-planner";
+import { resolveDirectDrawBaseTexturePageBinding } from "./texture-page-binding";
+import type { Webgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
 import type { Webgl2Texture2DResource } from "./webgl2-gl";
+import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
 
-describe("collectDirectDrawTexturePageBindings", () => {
-	it("records detail overlays as RGBA color texture pages", () => {
-		const texture = createTexture(8, 8);
-
-		const bindings = collectDirectDrawTexturePageBindings({
-			texture: null,
-			directTextureSamplingPolicy: null,
-			atlasEligibility: null,
-			detailOverlay: {
-				key: "detail",
-				texture,
-				tiling: 2,
-				blendMode: "dst-color",
-				atlasEntry: null,
-			},
-			indexedMaterial: null,
-			terrainBlend: null,
+describe("texture page binding", () => {
+	it("reports retained-direct atlas coverage gaps as not atlas-planned", () => {
+		const resolution = resolveDirectDrawBaseTexturePageBinding({
+			drawUnit: createDrawUnit("draw-a", "entry-a"),
+			generation: createGeneration(),
+			atlasPlan: createAtlasPlan(),
+			fallbackSamples: [],
 		});
 
-		expect(bindings).toMatchObject([
-			{
-				pageKind: "single-entry",
-				usageBucket: "detail",
-				sampleClass: "rgba-color",
-				width: 8,
-				height: 8,
-				wrapS: "repeat",
-				wrapT: "repeat",
-				sampling: {
-					samplingDomain: "color",
-					lookup: "color-filtered",
-				},
-			},
-		] satisfies Partial<TexturePageBinding>[]);
+		expect(resolution.binding?.pageKind).toBe("single-entry");
+		expect(resolution.fallbackSamples).toEqual([
+			"direct packed base page entry not atlas-planned for retained direct material entry-a",
+		]);
 	});
 
-	it("records indexed texels and palettes as exact data pages", () => {
-		const bindings = collectDirectDrawTexturePageBindings({
-			texture: null,
-			directTextureSamplingPolicy: null,
-			atlasEligibility: null,
-			detailOverlay: null,
-			indexedMaterial: {
-				key: "indexed",
-				indexFormat: "p8",
-				indexTextureKey: "index",
-				paletteTextureKey: "palette",
-				indexTexture: createTexture(16, 16),
-				paletteTexture: createTexture(256, 1),
-				width: 16,
-				height: 16,
-				paletteColorCount: 256,
-				wrapS: "repeat",
-				wrapT: "clamp",
-				clipThreshold: 8,
-			},
-			terrainBlend: null,
+	it("reports atlas placement failures separately from resource sync failures", () => {
+		const resolution = resolveDirectDrawBaseTexturePageBinding({
+			drawUnit: createDrawUnit("draw-a", "entry-a"),
+			generation: createGeneration(),
+			atlasPlan: createAtlasPlan({
+				bypasses: [
+					{
+						drawUnitId: "draw-a",
+						reason: "atlas-full",
+						detail: "atlas is full",
+					},
+				],
+			}),
+			fallbackSamples: [],
 		});
 
-		expect(bindings.map((binding) => binding.usageBucket)).toEqual([
-			"indexed-texels",
-			"palette-lookup",
+		expect(resolution.fallbackSamples).toEqual([
+			"direct packed base page atlas placement unavailable entry-a (atlas-full)",
 		]);
-		expect(bindings[0]).toMatchObject({
-			sampleClass: "indexed-data",
-			wrapS: "repeat",
-			wrapT: "clamp",
-			sampling: {
-				minFilter: "nearest",
-				magFilter: "nearest",
-				mip: "none",
-				samplingDomain: "data",
-				lookup: "exact",
-			},
-		} satisfies Partial<TexturePageBinding>);
-		expect(bindings[1]).toMatchObject({
-			sampleClass: "palette-data",
-			wrapS: "clamp",
-			wrapT: "clamp",
-			sampling: {
-				minFilter: "nearest",
-				magFilter: "nearest",
-				mip: "none",
-				samplingDomain: "data",
-				lookup: "exact",
-			},
-		} satisfies Partial<TexturePageBinding>);
 	});
 
-	it("records terrain color and mask inputs as separate page buckets", () => {
-		const bindings = collectDirectDrawTexturePageBindings({
-			texture: null,
-			directTextureSamplingPolicy: null,
-			atlasEligibility: null,
-			detailOverlay: null,
-			indexedMaterial: null,
-			terrainBlend: {
-				plan: {} as never,
-				base: createTerrainBinding("base", "repeat"),
-				overlays: [
+	it("reports missing realized placements when the atlas plan promised an entry", () => {
+		const resolution = resolveDirectDrawBaseTexturePageBinding({
+			drawUnit: createDrawUnit("draw-a", "entry-a"),
+			generation: createGeneration(),
+			atlasPlan: createAtlasPlan({
+				atlasEntryRecords: [
 					{
-						terrain: createTerrainBinding("overlay", "repeat"),
-						alpha: createTerrainBinding("overlay-alpha", "clamp"),
-						rotation: 0,
+						key: "entry-a",
+						entry: {
+							renderSurfaceId: 1,
+							preparedTextureAssetId: "prepared-texture/entry-a",
+							sourceHash: "hash-a",
+							sourceFormatRaw: 0x15,
+							level: {
+								level: 0,
+								width: 1,
+								height: 1,
+								formatRaw: 0x15,
+								format: "A8R8G8B8",
+								byteLength: 4,
+								bytes: Uint8Array.from([1, 2, 3, 4]),
+							},
+						},
 					},
 				],
-				roads: [
-					{
-						road: createTerrainBinding("road", "repeat"),
-						alpha: createTerrainBinding("road-alpha", "clamp"),
-						rotation: 0,
-					},
-				],
-			},
+			}),
+			fallbackSamples: [],
 		});
 
-		expect(bindings.map((binding) => binding.usageBucket)).toEqual([
-			"terrain",
-			"terrain",
-			"alpha-control",
-			"road",
-			"alpha-control",
-		]);
-		expect(
-			bindings.filter((binding) => binding.usageBucket === "alpha-control"),
-		).toEqual([
-			expect.objectContaining({
-				sampleClass: "control-data",
-				sampling: expect.objectContaining({
-					samplingDomain: "control",
-					lookup: "control-filtered",
-				}),
-			}),
-			expect.objectContaining({
-				sampleClass: "control-data",
-				sampling: expect.objectContaining({
-					samplingDomain: "control",
-					lookup: "control-filtered",
-				}),
-			}),
+		expect(resolution.fallbackSamples).toEqual([
+			"direct packed base page atlas generation missing promised placement entry-a",
 		]);
 	});
 });
 
-function createTexture(width: number, height: number): Webgl2Texture2DResource {
+function createDrawUnit(id: string, atlasEntryKey: string): Webgl2WorldDrawUnit {
+	return {
+		id,
+		texture: createTexture(),
+		atlasEligibility: {
+			materialSlotKey: `slot-${atlasEntryKey}`,
+			atlasEntryKey,
+			atlasEntry: {
+				renderSurfaceId: 1,
+				preparedTextureAssetId: `prepared-texture/${atlasEntryKey}`,
+				sourceHash: "hash",
+				sourceFormatRaw: 0x15,
+				level: {
+					level: 0,
+					width: 1,
+					height: 1,
+					formatRaw: 0x15,
+					format: "A8R8G8B8",
+					byteLength: 4,
+					bytes: Uint8Array.from([1, 2, 3, 4]),
+				},
+			},
+			samplingPolicy: { wrapS: "clamp", wrapT: "clamp" },
+			samplingKey: "sampling",
+			renderStateKey: "render-state",
+		},
+		detailOverlay: null,
+		directTextureSamplingPolicy: null,
+	} as Webgl2WorldDrawUnit;
+}
+
+function createTexture(): Webgl2Texture2DResource {
 	return {
 		texture: {} as WebGLTexture,
-		width,
-		height,
+		width: 4,
+		height: 4,
 		dispose() {
 			return;
 		},
 	};
 }
 
-function createTerrainBinding(key: string, wrap: "clamp" | "repeat") {
+function createGeneration(): Webgl2TextureAtlasGenerationResource {
 	return {
-		key,
-		texture: createTexture(4, 4),
-		tiling: 1,
-		wrapS: wrap,
-		wrapT: wrap,
+		key: "generation",
+		textures: [],
+		placements: [],
+		detailTextures: [],
+		detailPlacements: [],
+		preparedTextureAssetIds: [],
+		rgbaAtlasReadyDrawUnitIds: [],
+		dispose() {
+			return;
+		},
+	};
+}
+
+function createAtlasPlan(
+	overrides: Partial<TexturePageAtlasPlan> = {},
+): TexturePageAtlasPlan {
+	return {
+		key: "texture-page-atlas/test",
+		rgbaAtlasReadyDrawUnitIds: [],
+		detailAtlasReadyDrawUnitIds: [],
+		bypasses: [],
+		atlasEntryRecords: [],
+		atlasEntries: [],
+		atlasTextures: [],
+		detailAtlasEntryRecords: [],
+		detailAtlasTextures: [],
+		preparedTextureAssetIds: [],
+		...overrides,
 	};
 }

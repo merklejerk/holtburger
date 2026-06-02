@@ -297,11 +297,11 @@ function createGeneration(
 						height: 4,
 						placementCount: 1,
 					},
-				]
+		]
 			: [],
 		detailPlacements: [],
 		preparedTextureAssetIds: [],
-		compactableDrawUnitIds: [],
+		rgbaAtlasReadyDrawUnitIds: [],
 		dispose() {
 			return;
 		},

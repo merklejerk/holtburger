@@ -141,6 +141,11 @@ export interface WorldRenderDebugMetrics {
 	atlasEligibleMaterialCount: number;
 	atlasCandidateEntryCount: number;
 	atlasCandidateMaterialSlotCount: number;
+	atlasCompatibleDrawUnitCount: number;
+	atlasPlacedRgbaDrawUnitCount: number;
+	detailAtlasReadyDrawUnitCount: number;
+	atlasFailureReasonCount: number;
+	atlasFailureSamples: string[];
 	compactionCandidateDrawUnitCount: number;
 	compactionBypassReasonCount: number;
 	compactionBypassSamples: string[];

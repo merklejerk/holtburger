@@ -1,4 +1,8 @@
-import { planAtlasLayout, type AtlasTexturePage } from "./atlas-layout-planner";
+import {
+	planAtlasLayout,
+	type AtlasTexturePage,
+	type AtlasTexturePlacement,
+} from "./atlas-layout-planner";
 import type {
 	CompactionFamilyBypass,
 	CompactionFamilyPlanningPolicy,
@@ -44,6 +48,30 @@ export function createEmptyTexturePageAtlasPlan(): TexturePageAtlasPlan {
 		detailAtlasTextures: [],
 		preparedTextureAssetIds: [],
 	};
+}
+
+export function createTexturePageAtlasPlacementsByEntryKey(
+	plan: TexturePageAtlasPlan,
+): ReadonlyMap<string, AtlasTexturePlacement> {
+	return new Map(
+		plan.atlasTextures.flatMap((texture) =>
+			texture.placements.map(
+				(placement) => [placement.atlasEntryKey, placement] as const,
+			),
+		),
+	);
+}
+
+export function createTexturePageDetailAtlasPlacementsByEntryKey(
+	plan: TexturePageAtlasPlan,
+): ReadonlyMap<string, AtlasTexturePlacement> {
+	return new Map(
+		plan.detailAtlasTextures.flatMap((texture) =>
+			texture.placements.map(
+				(placement) => [placement.atlasEntryKey, placement] as const,
+			),
+		),
+	);
 }
 
 export function planTexturePageAtlas(options: {

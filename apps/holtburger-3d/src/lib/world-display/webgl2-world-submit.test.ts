@@ -1566,7 +1566,7 @@ function createTextureAtlasGeneration(
 			},
 		],
 		preparedTextureAssetIds: [],
-		compactableDrawUnitIds: [],
+		rgbaAtlasReadyDrawUnitIds: [],
 		dispose() {
 			return;
 		},

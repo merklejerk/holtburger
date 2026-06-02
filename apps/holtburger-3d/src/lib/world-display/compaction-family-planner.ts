@@ -4,6 +4,8 @@ import type { StagedWorldMaterialAtlasEligibility } from "./staged-world-materia
 import type { TexturePageBinding } from "./texture-page-binding";
 import {
 	createEmptyTexturePageAtlasPlan,
+	createTexturePageAtlasPlacementsByEntryKey,
+	createTexturePageDetailAtlasPlacementsByEntryKey,
 	planTexturePageAtlas,
 	type TexturePageAtlasPlan,
 } from "./texture-page-atlas-planner";
@@ -205,11 +207,6 @@ export interface CompactionFamilyPlan {
 	compactableDrawUnitIds: readonly string[];
 	bypasses: readonly CompactionFamilyBypass[];
 	texturePageAtlasPlan: TexturePageAtlasPlan;
-	atlasEntryRecords: readonly RgbaTexturePageAtlasEntryRecord[];
-	atlasEntries: readonly StagedWorldMaterialAtlasEligibility["atlasEntry"][];
-	atlasTextures: TexturePageAtlasPlan["atlasTextures"];
-	detailAtlasEntryRecords: readonly RgbaTexturePageDetailAtlasEntry[];
-	detailAtlasTextures: TexturePageAtlasPlan["detailAtlasTextures"];
 	materialSlots: readonly RgbaTexturePageFamilyMaterialSlot[];
 	indexedMaterialTableRecords: readonly IndexedPalettedFamilyMaterialTableRecord[];
 	drawUnitMaterialSlots: readonly {
@@ -220,7 +217,6 @@ export interface CompactionFamilyPlan {
 	staticObjectKeys: readonly string[];
 	staticPartCount: number;
 	triangleCount: number;
-	preparedTextureAssetIds: readonly string[];
 }
 
 export interface CompactionRenderFamilies {
@@ -298,11 +294,6 @@ export function createEmptyCompactionFamilyPlan(): CompactionFamilyPlan {
 		compactableDrawUnitIds: [],
 		bypasses: [],
 		texturePageAtlasPlan: createEmptyTexturePageAtlasPlan(),
-		atlasEntryRecords: [],
-		atlasEntries: [],
-		atlasTextures: [],
-		detailAtlasEntryRecords: [],
-		detailAtlasTextures: [],
 		materialSlots: [],
 		indexedMaterialTableRecords: [],
 		drawUnitMaterialSlots: [],
@@ -310,7 +301,6 @@ export function createEmptyCompactionFamilyPlan(): CompactionFamilyPlan {
 		staticObjectKeys: [],
 		staticPartCount: 0,
 		triangleCount: 0,
-		preparedTextureAssetIds: [],
 	};
 }
 
@@ -390,7 +380,7 @@ export function planCompactionFamilies(options: {
 	const placementsByEntryKey =
 		createTexturePageAtlasPlacementsByEntryKey(texturePageAtlasPlan);
 	const detailPlacementsByEntryKey =
-		createTexturePageAtlasDetailPlacementsByEntryKey(texturePageAtlasPlan);
+		createTexturePageDetailAtlasPlacementsByEntryKey(texturePageAtlasPlan);
 	const materialSlots = assignRgbaTexturePageFamilyMaterialSlots(compactable);
 	const rgbaPartitions = createRgbaTexturePageFamilyPartitions({
 		candidates: compactable,
@@ -445,11 +435,6 @@ export function planCompactionFamilies(options: {
 		}),
 		bypasses,
 		texturePageAtlasPlan,
-		atlasEntryRecords: texturePageAtlasPlan.atlasEntryRecords,
-		atlasEntries: texturePageAtlasPlan.atlasEntries,
-		atlasTextures: texturePageAtlasPlan.atlasTextures,
-		detailAtlasEntryRecords: texturePageAtlasPlan.detailAtlasEntryRecords,
-		detailAtlasTextures: texturePageAtlasPlan.detailAtlasTextures,
 		materialSlots,
 		indexedMaterialTableRecords,
 		drawUnitMaterialSlots,
@@ -478,9 +463,6 @@ export function planCompactionFamilies(options: {
 				(total, candidate) => total + candidate.triangleCount,
 				0,
 			),
-		preparedTextureAssetIds: uniqueSortedStrings(
-			texturePageAtlasPlan.preparedTextureAssetIds,
-		),
 	};
 }
 
@@ -1540,30 +1522,6 @@ function describeCompactionFamilyPlanKey(options: {
 		...options.materialSlotKeys,
 		...options.indexedMaterialTableRecordKeys.map((key) => `indexed=${key}`),
 	].join("|");
-}
-
-function createTexturePageAtlasPlacementsByEntryKey(
-	plan: TexturePageAtlasPlan,
-) {
-	return new Map(
-		plan.atlasTextures.flatMap((texture) =>
-			texture.placements.map(
-				(placement) => [placement.atlasEntryKey, placement] as const,
-			),
-		),
-	);
-}
-
-function createTexturePageAtlasDetailPlacementsByEntryKey(
-	plan: TexturePageAtlasPlan,
-) {
-	return new Map(
-		plan.detailAtlasTextures.flatMap((texture) =>
-			texture.placements.map(
-				(placement) => [placement.atlasEntryKey, placement] as const,
-			),
-		),
-	);
 }
 
 function uniqueSortedStrings(values: readonly string[]): string[] {

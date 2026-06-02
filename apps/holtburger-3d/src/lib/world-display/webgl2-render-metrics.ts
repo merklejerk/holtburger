@@ -235,6 +235,14 @@ export function createWebgl2RenderMetrics(
 			atlasCandidateEntryCount: input.worldStore?.atlasCandidateEntryCount ?? 0,
 			atlasCandidateMaterialSlotCount:
 				input.worldStore?.atlasCandidateMaterialSlotCount ?? 0,
+			atlasCompatibleDrawUnitCount:
+				input.worldStore?.atlasCompatibleDrawUnitCount ?? 0,
+			atlasPlacedRgbaDrawUnitCount:
+				input.worldStore?.atlasPlacedRgbaDrawUnitCount ?? 0,
+			detailAtlasReadyDrawUnitCount:
+				input.worldStore?.detailAtlasReadyDrawUnitCount ?? 0,
+			atlasFailureReasonCount: input.worldStore?.atlasFailureReasonCount ?? 0,
+			atlasFailureSamples: [...(input.worldStore?.atlasFailureSamples ?? [])],
 			compactionCandidateDrawUnitCount:
 				input.worldStore?.compactionCandidateDrawUnitCount ?? 0,
 			compactionBypassReasonCount: input.worldStore?.compactionBypassReasonCount ?? 0,
@@ -385,6 +393,14 @@ export function createWebgl2RenderMetrics(
 							input.worldStore.directTextureDrawUnitCount,
 						"webgl2-atlas-eligible":
 							input.worldStore.atlasEligibleMaterialCount,
+						"webgl2-atlas-compatible-draw-units":
+							input.worldStore.atlasCompatibleDrawUnitCount,
+						"webgl2-atlas-placed-rgba-draw-units":
+							input.worldStore.atlasPlacedRgbaDrawUnitCount,
+						"webgl2-detail-atlas-ready-draw-units":
+							input.worldStore.detailAtlasReadyDrawUnitCount,
+						"webgl2-atlas-failures":
+							input.worldStore.atlasFailureReasonCount,
 						"webgl2-compacted-candidates":
 							input.worldStore.compactionCandidateDrawUnitCount,
 						"webgl2-compacted-bypasses": input.worldStore.compactionBypassReasonCount,

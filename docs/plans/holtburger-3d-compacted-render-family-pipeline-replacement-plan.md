@@ -3230,7 +3230,7 @@ C10 reading guide:
 
 - C10 is the parent planning phase. It records the target module boundaries and the intended execution
   order.
-- C10.1 through C10.5a are completed execution phases that implemented the first
+- C10.1 through C10.5 are completed execution phases that implemented the first
   submit/family/texture/compaction/resource module refactors.
 - C10.3.1 is an interim quality gate added after C10.3 because knip exposed broad stale exported
   surface. It is intentionally cleanup-only and must complete before the next module move.
@@ -3239,6 +3239,9 @@ C10 reading guide:
 - C10.5a is an immediate prep phase before the full C10.5 sync/graph extraction. It moved compacted
   geometry and family resource realization under `webgl2/resources/` without changing lifecycle
   behavior.
+- C10.5 completed the compacted resource sync and graph lifecycle extraction. `webgl2-world-resources`
+  still owns direct draw-unit realization and assembly graph sync, but compacted resource ownership is
+  now in the WebGL2 resource boundary.
 - The historical cleanup list after C10.3.1 is source material, not an executable phase. Future C10
   phases should pull from it, disposition items, and keep the standard phase structure:
   - status;
@@ -3260,7 +3263,7 @@ C10 execution status:
 - C10.3.1 Knip export-debt cleanup gate: complete.
 - C10.4 Compaction planner and compacted geometry module move: complete.
 - C10.5a WebGL2 compacted resource module move: complete.
-- C10.5 WebGL2 resource sync and graph ownership split: planned after C10.5a.
+- C10.5 WebGL2 compacted resource sync and graph ownership split: complete.
 - C10.6 Diagnostics presenter extraction: planned after resource ownership is clearer.
 
 Candidate module boundaries evaluated:
@@ -4051,6 +4054,81 @@ Legacy shims:
 
 - None introduced. The old flat module path was removed directly, and no alias/reexport module was
   added.
+
+Validation completed:
+
+- `npm run test:ts -- src/lib/world-display/compaction/compaction-family-planner.test.ts src/lib/world-display/compaction/compacted-geometry.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-rgba-texture-page-family-submit.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts --run`
+- `npm run lint:dead`
+- `npm run lint:ts`
+- `npm run check`
+- `git diff --check`
+
+## Phase C10.5: WebGL2 Compacted Resource Sync And Graph Ownership Split
+
+Status: Complete.
+
+Purpose: finish the compacted-resource portion of the C10.5 resource ownership split by moving
+compacted resource synchronization, landblock batch partitioning, graph lease management, and compacted
+metrics out of `webgl2-world-resources.ts` and into the WebGL2 resource boundary.
+
+Scope rules:
+
+- Keep direct draw-unit resource realization in `webgl2-world-resources.ts` for now.
+- Keep `Webgl2WorldDrawUnit` unsplit in this phase.
+- Preserve compacted graph node keys, lease labels, dependency replacement shape, and metric names.
+- Do not add compatibility reexports or old-path aliases.
+- Keep `npm run lint:dead` green.
+
+Progress ledger:
+
+- Added `apps/holtburger-3d/src/lib/world-display/webgl2/resources/compacted-geometry-sync.ts`.
+- Moved compacted resource synchronization out of `webgl2-world-resources.ts`, including:
+  - RGBA texture-page and indexed-paletted compacted landblock batch planning;
+  - compacted geometry batch creation/reuse;
+  - family resource retention and stale family cleanup;
+  - stale compacted batch disposal;
+  - compacted resource metrics;
+  - compacted graph node upsert and graph lease release.
+- Left `webgl2-world-resources.ts` as the orchestration caller that passes store, compaction plan,
+  staged draw units, render chunk transforms, and optional renderer resource graph into the sync
+  module.
+- Kept compacted family resource DTOs in
+  `webgl2/resources/compacted-geometry-resources.ts`.
+
+Decisions:
+
+- The sync module currently imports `Webgl2WorldResourceStore` as a type. That is a deliberate
+  transitional boundary: C10.5 moved ownership of the compacted lifecycle code without prematurely
+  splitting the store shape.
+- Duplicated the small string hash helper locally in `compacted-geometry-sync.ts` instead of moving
+  the direct geometry hash helpers from `webgl2-world-resources.ts`. Direct draw geometry signatures
+  still own `hashFloat32Array()` and `hashIndexArray()`.
+- Kept landblock batch key generation beside the compacted sync loop. The keys are resource lifecycle
+  keys today, not renderer-neutral compaction planner output.
+
+Course corrections and refinements for future steps:
+
+- C10.6 can now focus on diagnostics presenter extraction with clearer compacted resource ownership.
+- A later resource-store split should replace the `Webgl2WorldResourceStore` type dependency in
+  `compacted-geometry-sync.ts` with a narrower compacted resource store interface.
+- If C10.6 exposes diagnostics coupling to compacted sync internals, prefer exported read-only
+  diagnostic DTOs over pulling formatting logic back into resource modules.
+
+Cleanup targets introduced:
+
+- `webgl2-world-resources.ts` still owns direct draw-unit realization, direct texture uploads,
+  terrain/indexed/detail resource realization, texture atlas sync, and assembly graph sync. Those are
+  now separate from compacted resource sync but still too much for one module.
+- `compacted-geometry-sync.ts` is intentionally cohesive but large. If future edits broaden it, split
+  landblock batch planning into a `compacted-geometry-batch-plans.ts` helper under the same
+  `webgl2/resources/` boundary.
+- The compacted sync module's `Webgl2WorldResourceStore` type dependency is a transitional coupling
+  and should be revisited when resource store records are split.
+
+Legacy shims:
+
+- None introduced. The extraction used direct imports and did not add alias modules, compatibility
+  reexports, or old path wrappers.
 
 Validation completed:
 

@@ -1,11 +1,16 @@
 # Holtburger 3D Compacted Render Family Pipeline Replacement Plan
 
-Status: Active detour; replaces the next compacted/baked material work in the WebGL2 material atlas
-continuation plan.
+Status: Active wrap-up; replaces and now absorbs the remaining relevant cleanup work from the WebGL2
+material atlas continuation plan.
 
 Related plans:
 
 - [Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan](./holtburger-3d-webgl2-material-atlas-continuation-plan.md)
+
+The material atlas continuation plan is now abandoned as an implementation plan. Do not resume its
+M7D/M7E phases directly. Validate any still-relevant cleanup item from that plan against the current
+family-pipeline code, then either perform it in this plan's cleanup phase or explicitly drop it as
+obsolete because the replacement work already removed or renamed the old path.
 
 ## Purpose
 
@@ -2786,7 +2791,7 @@ Validation:
 
 ## Phase C8.15: Add Indexed Opaque Detail Overlay Compaction
 
-Status: Implemented for planner/resource/submit support; live validation pending.
+Status: Complete.
 
 Purpose: compact the remaining opaque indexed/paletted static draw units that are currently retained
 direct only because they carry detail overlay texture-page bindings.
@@ -2882,7 +2887,354 @@ Validation:
 - `npm run test:ts -- src/lib/world-display/webgl2-world-submit.test.ts --run`
 - `npm run check`
 
-## Cleanup Targets
+## Phase C9: Final Legacy Cleanup And Terminology Removal
+
+Status: First legacy terminology and mirror-deletion pass complete; remaining semantic cleanup moved
+to C9.1 before C10.
+
+Purpose: finish the replacement rather than leave the codebase half old-plan and half
+family-pipeline. This phase must validate and inherit the cleanup items from both this plan and the
+abandoned WebGL2 material atlas continuation plan, understanding that many items shifted or were
+already resolved during C4-C8.15. The output should be one coherent renderer vocabulary:
+texture-page atlas planning, material-aware compaction planning, material-agnostic compacted geometry,
+and render-family submit paths.
+
+Scope rules:
+
+- Treat this as deletion and consolidation work, not new feature work.
+- Remove deprecated legacy paths and terminology completely where the new pattern exists.
+- Do not preserve compatibility shims, reexports, or aliases for old `baked`, staged-atlas, or
+  RGBA-atlas-shaped concepts.
+- Validate each inherited cleanup item against the current implementation before acting on it. Some
+  items from the abandoned plan are obsolete because this replacement plan already renamed or removed
+  the relevant path.
+- Do not delete the abandoned plan document. It remains historical context only.
+
+Progress:
+
+- Renamed the active renderer's direct material planning carrier from `atlasEligibility` /
+  `StagedWorldMaterialAtlasEligibility` to `texturePageReadiness` /
+  `StagedWorldMaterialTexturePageReadiness`.
+  - The old name was misleading after C8.12 because it carried texture-page readiness for direct,
+    cutout, and blended-compatible materials, not just compacted RGBA atlas eligibility.
+  - Picker diagnostics and browser debug formatting now expose `texturePageReadiness`.
+- Renamed the planner blocker from `missing-atlas-eligibility` to
+  `missing-texture-page-readiness`.
+  - The detail text now says the draw unit is missing a texture-page readiness record, not a packed
+    atlas eligibility fact.
+- Removed the dead `alpha-test` compaction family and the historical
+  `missing-compacted-alpha-test-family` / `unsupported-alpha-test-material` blocker path.
+  - Cutout RGBA materials remain represented as `family=textured-opaque` with `alphaPolicy=cutout`,
+    and continue through the `rgba-texture-page` family.
+  - `indexed-alpha-policy-unsupported` and `missing-compacted-transparent-blended-family` remain
+    because indexed alpha and true transparent compaction are still future feature work.
+- Removed the unused `TexturePageAtlasPlan.atlasEntries` mirror beside the keyed
+  `atlasEntryRecords`.
+  - The texture-page atlas planner now returns one authoritative keyed base-entry record list.
+- Removed duplicate `stagedAtlas*` submit/debug metric mirrors.
+  - Direct texture-page metrics now use `directTexturePage*`,
+    `directPackedTexturePage*`, and `directSingleEntryTexturePage*` as the sole active counters.
+  - Debug metric keys now use `webgl2-direct-packed-texture-page-*` wording.
+- Verified the active renderer code/tests with `rg` for:
+  - `atlasEligibility`;
+  - `StagedWorldMaterialAtlasEligibility`;
+  - `atlasEligibleMaterialCount`;
+  - `missing-atlas-eligibility`;
+  - `missing-compacted-alpha-test-family`;
+  - `unsupported-alpha-test-material`;
+  - `webgl2-staged-atlas` / `stagedAtlas`;
+  - active `baked*` submit/resource names.
+  No active `world-display` or `BrowserWorldDisplay.svelte` hits remain after this pass.
+
+Cleanup ledger:
+
+- Completed in C9:
+  - `atlasEligibility` rename to texture-page readiness;
+  - stale alpha-test family/blocker removal;
+  - texture-page atlas `atlasEntries` mirror deletion;
+  - staged-atlas submit/debug metric mirror deletion;
+  - stale tests and Svelte debug consumers updated to the new field names.
+- Already resolved by earlier phases:
+  - `baked-renderable-planner.ts`, `baked-geometry.ts`, `webgl2-baked-submit.ts`, and
+    `webgl2-baked-geometry-batches.ts` active module names;
+  - `bakedGeometryBatches` / `bakedIndexedGeometryBatches` root storage;
+  - root atlas mirror deletion from the old material atlas plan.
+- Moved to C9.1:
+  - replace looser `createCompactionEligibility()` scalar inputs with a typed material/family
+    readiness input where that reduces inference rather than just wrapping parameters;
+  - separate texture-page atlas failure diagnostics from compaction bypass aggregation where debug
+    consumers can read atlas failure samples directly;
+  - audit `Webgl2WorldDrawUnit` for migration-era mirrors that can be deleted without the broader
+    record split.
+- Moved to C10:
+  - broad `Webgl2WorldDrawUnit` record splitting;
+  - module directory moves;
+  - pass scheduler extraction from `webgl2-world-submit.ts`;
+  - diagnostics presenter extraction from `BrowserWorldDisplay.svelte`.
+- Deferred to future feature phases:
+  - indexed alpha policy support;
+  - transparent blended compaction;
+  - terrain compaction/family integration.
+
+Course corrections and cleanup targets discovered:
+
+- `atlas` remains valid terminology only for physical packed texture-page layout, placement, and
+  texture generation. Do not rename `atlasEntryKey`, `atlasTextures`, or `planAtlasLayout` until a
+  broader texture-page module refactor decides whether those names should stay as physical layout
+  terms.
+- `TexturePageAtlasPlan.atlasEntryRecords` is still a reasonable keyed physical-atlas placement record
+  name. It is not the old root mirror shape by itself.
+- The remaining `BatchCount` fields in renderer metrics are generic render-batch or compacted-batch
+  counters, not the abandoned atlas-static/baked terminology. Keep them until C10 evaluates metric
+  naming as part of module ownership.
+- The old material strategy `atlasSet.atlasEntries` is an internal staged material atlas layout plan,
+  not the active texture-page family mirror removed in this pass. Leave it unless a future texture-page
+  module refactor folds staged strategy planning into the newer texture-page planner.
+
+Inherited cleanup audit:
+
+- From this plan, validate every earlier "Discovered cleanup target" and "Legacy shim" note from
+  C1-C8.15. Mark each item as:
+  - completed in C9;
+  - already resolved by an earlier phase;
+  - moved to C10 module/refactor work;
+  - intentionally deferred to a future feature phase such as indexed alpha policy, transparent
+    compaction, or terrain.
+- From the abandoned material atlas continuation plan, inherit only items still meaningful after the
+  family-pipeline replacement:
+  - stale `BatchCount`, `baked geometry`, staged-atlas, and old atlas-static metric terminology;
+  - duplicate material feature detection between direct and compacted submit/resource setup;
+  - old `atlasEntries` / `atlasEntryRecords` mirror shapes if any survived C8.11a;
+  - string feature flags and string/regexp matching in material planning paths where typed records now
+    exist or can be introduced without a broader feature rewrite;
+  - direct/baked wording that should now be direct/compacted/render-family wording;
+  - stale Three/luma naming or adapter terminology in renderer-neutral material DTOs, if any remains.
+- Drop abandoned-plan items that are explicitly superseded:
+  - advice to continue on `baked-renderable-planner`, `baked-geometry`, or `webgl2-baked-*` naming;
+  - old root `bakedGeometryBatches` / `bakedIndexedGeometryBatches` storage cleanup already completed
+    by C5-C7.5;
+  - root atlas mirror deletion already completed by C8.11a.
+
+Tasks:
+
+- Search the active `apps/holtburger-3d` renderer code, tests, diagnostics, and docs for stale
+  vocabulary:
+  - `baked`;
+  - `atlas` where the intended concept is texture-page readiness rather than packed atlas layout;
+  - `atlasEligibility` where the intended concept is texture-page atlas readiness;
+  - `fallback` where the code really means an internal planning blocker or expected retained-direct
+    condition;
+  - old RGBA-atlas-shaped `compaction` names that no longer describe the family-pipeline boundary.
+- Rename `atlasEligibility` to a texture-page readiness name if the current call graph no longer needs
+  the old staged-geometry atlas meaning. Keep precise packed-atlas names only for physical atlas page
+  layout and placement.
+- Remove or narrow legacy blocker/material-family vocabulary:
+  - remove `alpha-test` as a separate compaction family if no production path emits it after C8.14;
+  - remove or narrow `missing-compacted-alpha-test-family` if it is now historical-only;
+  - keep `indexed-alpha-policy-unsupported` because indexed non-opaque support is still real future
+    work;
+  - keep `missing-compacted-transparent-blended-family` because true transparent compaction remains
+    unsupported by design.
+- Replace `createCompactionEligibility()`'s loose inputs with typed family readiness input where
+  practical:
+  - texture-page bindings;
+  - detail overlay state;
+  - detail atlas readiness;
+  - alpha policy;
+  - family-specific material state.
+  The cleanup must stop inferring indexed detail support from generic usage buckets where a typed
+  family fact is available.
+- Remove remaining temporary aggregate diagnostics that merge atlas failures into compaction bypasses
+  once debug consumers can read atlas failure samples directly.
+- Move direct texture-page binding mutation out of opportunistic draw-unit mutation paths where a
+  typed page-resolution step now exists. A direct draw unit should consume resolved page bindings, not
+  rediscover them during submit.
+- Audit `Webgl2WorldDrawUnit` and remove fields that only exist as migration-era mirrors or redundant
+  diagnostic snapshots. Do not perform the broad split in this phase unless it is needed to delete a
+  deprecated path; C10 owns large module/record reshaping.
+- Replace string feature checks in hot or near-hot material planning paths with typed enums/records.
+  Keep strings for stable cache keys, graph keys, and final diagnostic text only.
+- Remove stale tests that assert old terminology or compatibility behavior. Replace them with tests for
+  the new authoritative behavior instead of maintaining both names.
+- Update render debug report text so users can distinguish:
+  - texture-page atlas readiness/placement failures;
+  - compaction blockers;
+  - retained direct blended materials;
+  - true fallback/resource failures.
+- Update this plan with a completed cleanup ledger listing every inherited cleanup item and its final
+  disposition.
+
+Exit criteria:
+
+- `rg` over active renderer code and tests shows no stale `baked*` symbols except historical plan text
+  or deliberately retained external wording.
+- `atlasEligibility` is gone or renamed to a precise texture-page readiness concept.
+- No old root atlas compatibility fields or submit-family compatibility mirrors remain.
+- Direct and compacted paths consume the same resolved material/page facts where the current family
+  model supports that.
+- Diagnostics no longer use fallback language for expected retained-direct compaction blockers.
+- All cleanup decisions from both plans have a disposition in the C9 progress ledger.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/compaction-family-planner.test.ts src/lib/world-display/texture-page-binding.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-rgba-texture-page-family-submit.test.ts src/lib/world-display/webgl2-direct-render-family.test.ts --run`
+- `npm run check`
+- `git diff --check`
+
+Validation completed in first C9 pass:
+
+- `npm run test:ts -- src/lib/world-display/compaction-family-planner.test.ts src/lib/world-display/texture-page-binding.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-rgba-texture-page-family-submit.test.ts src/lib/world-display/webgl2-direct-render-family.test.ts src/lib/world-display/staged-world-material-strategy.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts --run`
+- `npm run check`
+
+## Phase C9.1: Semantic Cleanup Gate Before Module Refactors
+
+Status: Planned immediate interim phase before C10.
+
+Purpose: finish the semantic cleanup that is still too specific to leave for broad module refactors,
+without moving files or changing feature coverage. C9.1 should leave C10 free to focus on module
+ownership, record splitting, and pass scheduling rather than dragging old planning semantics through
+new directories.
+
+Scope rules:
+
+- Do not move modules or create new directory structures in C9.1.
+- Do not broaden material feature support. Indexed alpha, transparent compaction, and terrain family
+  integration remain future feature phases.
+- Prefer deleting redundant state and tightening typed inputs over adding wrapper DTOs that simply
+  rename the same loose scalar parameters.
+- Keep direct draw and compacted family output behavior unchanged except for diagnostic wording and
+  removal of obsolete aggregate/mirror fields.
+
+Tasks:
+
+- Replace `createCompactionEligibility()`'s loose scalar input bag with typed readiness records where
+  the current call graph has enough information:
+  - geometry readiness: draw-unit kind, landblock origin, UV availability;
+  - material family readiness: material kind, alpha policy, texture-page readiness, texture-page
+    binding summary, detail overlay readiness, indexed table readiness.
+- Stop deriving indexed detail compatibility from generic texture-page usage buckets when an indexed
+  family material record or detail atlas readiness fact can express the same decision directly.
+- Separate texture-page atlas placement/resource failures from compaction bypass aggregation where
+  debug consumers already have texture-page atlas failure samples.
+  - Compaction bypasses should describe why a draw unit cannot be compacted by a family.
+  - Texture-page atlas diagnostics should describe placement/resource failures such as source too
+    large, page full, missing placement, or missing prepared texture.
+- Audit `Webgl2WorldDrawUnit` for migration-era mirrors that can be deleted before broad record
+  splitting.
+  - Delete fields only when current consumers can use an authoritative material/page/geometry fact.
+  - Do not begin the broad `Webgl2WorldDrawUnit` split; that belongs to C10.
+- Replace remaining string/regexp feature checks in compaction readiness with typed enums or typed
+  records where doing so removes ambiguity.
+  - Keep strings for stable cache keys, graph keys, material keys, and final diagnostic text.
+- Update runtime and picker diagnostics so expected retained-direct compaction blockers are not
+  described as resource fallbacks.
+
+Exit criteria:
+
+- `createCompactionEligibility()` consumes typed readiness records rather than a long scalar bag, or
+  the plan explicitly records why a remaining scalar is still the cleanest current input.
+- Indexed opaque detail support decisions are represented by indexed/detail readiness facts, not by
+  generic usage-bucket inference.
+- Texture-page atlas failures and compaction bypasses are distinguishable in debug summaries and
+  runtime diagnostics.
+- Any deleted `Webgl2WorldDrawUnit` mirror fields are listed in the C9.1 progress ledger.
+- C10 can start with module/file ownership work without first resolving semantic cleanup debt.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/compaction-family-planner.test.ts src/lib/world-display/texture-page-binding.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-rgba-texture-page-family-submit.test.ts src/lib/world-display/webgl2-direct-render-family.test.ts src/lib/world-display/staged-world-material-strategy.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts --run`
+- `npm run check`
+- `git diff --check`
+
+Progress ledger:
+
+- Pending.
+
+Cleanup/refactor notes to feed C10:
+
+- Revisit `TexturePageAtlasPlan` placement and resource diagnostics after C9.1. If the atlas planner
+  now owns placement/resource failures cleanly, C10 can move it under the proposed
+  `world-display/texture-pages/` boundary without dragging compaction bypass terminology with it.
+- If `createCompactionEligibility()` becomes a clean typed boundary, C10 can move it under the
+  proposed `world-display/compaction/` boundary with lower risk.
+- If `Webgl2WorldDrawUnit` still has unavoidable mirrors after C9.1, C10 should split the record
+  around those remaining ownership seams instead of trying to delete them during the file move.
+
+## Phase C10: Renderer Module Structure And Family Pipeline Refactor Plan
+
+Status: Planned follow-up after C9.1.
+
+Purpose: use the C9 cleanup pass to identify a cleaner file structure and module ownership model, then
+itemize the refactor work separately instead of mixing broad module moves with deletion cleanup. C9
+should leave notes; C10 should turn those notes into executable refactor phases.
+
+Candidate module boundaries to evaluate during C9:
+
+- `world-display/material/`
+  - material behavior, alpha policy, variants, signatures, texture resolution, and family readiness
+    facts;
+  - renderer-neutral material DTOs and texture-page binding records.
+- `world-display/texture-pages/`
+  - texture-page binding;
+  - atlas layout/planning;
+  - texture sampling policy;
+  - packed atlas generation helpers.
+- `world-display/compaction/`
+  - compaction family planning;
+  - material-agnostic compacted geometry;
+  - compacted batch/slice planning helpers.
+- `world-display/webgl2/families/`
+  - direct family adapters;
+  - RGBA texture-page family submit/resources;
+  - indexed-paletted family submit/resources;
+  - family render-state helpers.
+- `world-display/webgl2/resources/`
+  - compacted geometry resources;
+  - texture atlas generation resources;
+  - direct draw-unit resource realization;
+  - resource graph leases and cleanup.
+- `world-display/webgl2/submit/`
+  - pass scheduling;
+  - retained direct opaque/blended pass orchestration;
+  - compacted family submission;
+  - scene-domain target state reset boundaries.
+- `world-display/diagnostics/`
+  - runtime render diagnostics;
+  - browser picker diagnostics;
+  - metrics summaries and sample formatting.
+
+Refactor candidates to itemize after C9:
+
+- Split `Webgl2WorldDrawUnit` into smaller owned records:
+  - geometry submission;
+  - family material payload;
+  - realized WebGL resources;
+  - diagnostics/readiness facts.
+- Move the central material-kind branch in `submitWebgl2FlatWorldDrawUnits()` into direct family
+  pipeline adapters and a pass scheduler.
+- Move retained direct pass planning out of `webgl2-world-submit.ts` so opaque/cutout direct,
+  compacted opaque families, and final blended direct are explicit scheduled passes.
+- Replace projected-origin transparent sorting with bounds/camera-space center sorting once draw-unit
+  bounds are available at the submit boundary.
+- Replace model-only WebGL2 debug overlays with real renderer submissions or remove their UI
+  affordances.
+- Decide whether `BrowserWorldDisplay.svelte` debug-report formatting should move to a typed
+  diagnostics presenter module to keep Svelte UI from owning renderer vocabulary.
+- Consider grouping tests alongside the new module families or preserving the current flat test layout
+  if moving tests would add noise without improving maintainability.
+
+Exit criteria:
+
+- C10 contains a concrete module move/refactor sequence based on C9 findings.
+- Each proposed move names the files affected, dependency direction, validation tests, and any
+  temporary migration risk.
+- Broad file moves do not begin until C9 has deleted deprecated paths and terminology, so the refactor
+  is not obscured by legacy cleanup.
+
+## Historical Cleanup Source List
+
+The following items were the loose cleanup targets before C9/C10 were introduced. C9 should resolve
+or disposition them; C10 should absorb the structural ones:
 
 - Split `Webgl2WorldDrawUnit` into smaller owned records over time:
   - geometry submission;

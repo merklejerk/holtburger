@@ -8,7 +8,7 @@ import {
 	type IndexedPalettedFamilyMaterialTableRecord,
 } from "./compaction-family-planner";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
-import type { StagedWorldMaterialAtlasEligibility } from "./staged-world-material-strategy";
+import type { StagedWorldMaterialTexturePageReadiness } from "./staged-world-material-strategy";
 import type { TexturePageBinding } from "./texture-page-binding";
 
 type CandidateOptions = Partial<CompactionFamilyCandidate> & {
@@ -23,7 +23,7 @@ type CandidateOptions = Partial<CompactionFamilyCandidate> & {
 	materialBehavior?: LegacyMaterialBehaviorDto | null;
 	hasUvBuffer?: boolean;
 	hasDetailOverlay?: boolean;
-	atlasEligibility?: StagedWorldMaterialAtlasEligibility | null;
+	texturePageReadiness?: StagedWorldMaterialTexturePageReadiness | null;
 	texturePageBindings?: readonly TexturePageBinding[];
 	indexedMaterialTableRecord?: IndexedPalettedFamilyMaterialTableRecord | null;
 };
@@ -192,7 +192,7 @@ describe("compaction family planner", () => {
 					id: "clip",
 					materialBehavior: { ...OPAQUE_BEHAVIOR, alphaTest: 0.5 },
 				}),
-				createCandidate({ id: "missing-entry", atlasEligibility: null }),
+				createCandidate({ id: "missing-entry", texturePageReadiness: null }),
 			],
 			policy: {
 				maxAtlasTextureSize: 32,
@@ -208,7 +208,7 @@ describe("compaction family planner", () => {
 			"missing-landblock-origin",
 			"indexed-alpha-policy-unsupported",
 			"missing-detail-atlas-entry",
-			"missing-atlas-eligibility",
+			"missing-texture-page-readiness",
 		]);
 		expect(plan.renderFamilies.rgbaTexturePage.materialSlots).toMatchObject([
 			{
@@ -259,7 +259,7 @@ describe("compaction family planner", () => {
 		const plan = planCompactionFamilies({
 			drawUnits: [
 				createCandidate({ id: "material-only", owningLandblockId: null }),
-				createCandidate({ id: "geometry-only", atlasEligibility: null }),
+				createCandidate({ id: "geometry-only", texturePageReadiness: null }),
 				createCandidate({ id: "fully-eligible" }),
 			],
 			policy: {
@@ -280,9 +280,9 @@ describe("compaction family planner", () => {
 			},
 			{
 				drawUnitId: "geometry-only",
-				reason: "missing-atlas-eligibility",
+				reason: "missing-texture-page-readiness",
 				blockerKind: "material",
-				blocker: "missing-atlas-eligibility",
+				blocker: "missing-texture-page-readiness",
 			},
 		]);
 	});
@@ -584,7 +584,7 @@ describe("compaction family planner", () => {
 					entryKey: "repeat-detail",
 					hasDetailOverlay: true,
 					detailAtlasEntry: createDetailAtlasEntry("detail-repeat"),
-					atlasEligibility: createAtlasEligibility({
+					texturePageReadiness: createTexturePageReadiness({
 						entryKey: "repeat-detail",
 						width: 8,
 						height: 8,
@@ -649,7 +649,7 @@ describe("compaction family planner", () => {
 				createCandidate({
 					id: "clamp",
 					entryKey: "shared",
-					atlasEligibility: createAtlasEligibility({
+					texturePageReadiness: createTexturePageReadiness({
 						entryKey: "shared",
 						width: 8,
 						height: 8,
@@ -661,7 +661,7 @@ describe("compaction family planner", () => {
 				createCandidate({
 					id: "repeat",
 					entryKey: "shared",
-					atlasEligibility: createAtlasEligibility({
+					texturePageReadiness: createTexturePageReadiness({
 						entryKey: "shared",
 						width: 8,
 						height: 8,
@@ -933,21 +933,21 @@ function createCandidate(
 	options: CandidateOptions = {},
 ): CompactionFamilyCandidate {
 	const entryKey = options.entryKey ?? "entry";
-	const atlasEligibility =
-		options.atlasEligibility === undefined
-			? createAtlasEligibility({
+	const texturePageReadiness =
+		options.texturePageReadiness === undefined
+			? createTexturePageReadiness({
 					entryKey,
 					width: options.width ?? 8,
 					height: options.height ?? 8,
 				})
-			: options.atlasEligibility;
+			: options.texturePageReadiness;
 	const hasDetailOverlay = options.hasDetailOverlay ?? false;
 	const detailAtlasEntry = options.detailAtlasEntry ?? null;
 	const texturePageBindings =
 		options.texturePageBindings ??
 		createTexturePageBindings({
 			materialKind: options.materialKind ?? "direct-texture",
-			atlasEligibility,
+			texturePageReadiness,
 			width: options.width ?? 8,
 			height: options.height ?? 8,
 		});
@@ -982,7 +982,7 @@ function createCandidate(
 			materialBehavior: options.materialBehavior ?? OPAQUE_BEHAVIOR,
 			hasDetailOverlay,
 			detailAtlasEntry,
-			atlasEligibility,
+			texturePageReadiness,
 		}),
 		triangleCount: options.triangleCount ?? 2,
 		staticPartCount: options.staticPartCount ?? 1,
@@ -1015,12 +1015,12 @@ function createIndexedMaterialTableRecord(
 
 function createTexturePageBindings({
 	materialKind,
-	atlasEligibility,
+	texturePageReadiness,
 	width,
 	height,
 }: {
 	materialKind: NonNullable<CandidateOptions["materialKind"]>;
-	atlasEligibility: StagedWorldMaterialAtlasEligibility | null;
+	texturePageReadiness: StagedWorldMaterialTexturePageReadiness | null;
 	width: number;
 	height: number;
 }): readonly TexturePageBinding[] {
@@ -1030,7 +1030,7 @@ function createTexturePageBindings({
 			createIndexedPaletteTexturePageBinding(),
 		];
 	}
-	if (!atlasEligibility) {
+	if (!texturePageReadiness) {
 		return [];
 	}
 	return [
@@ -1042,11 +1042,11 @@ function createTexturePageBindings({
 			rect: [0, 0, width, height],
 			width,
 			height,
-			wrapS: atlasEligibility.samplingPolicy.wrapS,
-			wrapT: atlasEligibility.samplingPolicy.wrapT,
+			wrapS: texturePageReadiness.samplingPolicy.wrapS,
+			wrapT: texturePageReadiness.samplingPolicy.wrapT,
 			sampling: {
-				wrapS: atlasEligibility.samplingPolicy.wrapS,
-				wrapT: atlasEligibility.samplingPolicy.wrapT,
+				wrapS: texturePageReadiness.samplingPolicy.wrapS,
+				wrapT: texturePageReadiness.samplingPolicy.wrapT,
 				minFilter: "linear",
 				magFilter: "linear",
 				mip: "material-policy",
@@ -1059,14 +1059,14 @@ function createTexturePageBindings({
 }
 
 function createDirectTexturePageBinding(): TexturePageBinding {
-	const atlasEligibility = createAtlasEligibility({
+	const texturePageReadiness = createTexturePageReadiness({
 		entryKey: "direct-binding",
 		width: 8,
 		height: 8,
 	});
 	return createTexturePageBindings({
 		materialKind: "direct-texture",
-		atlasEligibility,
+		texturePageReadiness,
 		width: 8,
 		height: 8,
 	})[0] as TexturePageBinding;
@@ -1140,14 +1140,14 @@ function createDetailAtlasEntry(key: string) {
 	};
 }
 
-function createAtlasEligibility(options: {
+function createTexturePageReadiness(options: {
 	entryKey: string;
 	width: number;
 	height: number;
 	materialSlotKey?: string;
 	wrapS?: "clamp" | "repeat";
 	wrapT?: "clamp" | "repeat";
-}): StagedWorldMaterialAtlasEligibility {
+}): StagedWorldMaterialTexturePageReadiness {
 	const wrapS = options.wrapS ?? "clamp";
 	const wrapT = options.wrapT ?? "clamp";
 	return {

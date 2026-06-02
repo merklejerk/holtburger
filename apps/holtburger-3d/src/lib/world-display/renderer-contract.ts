@@ -138,7 +138,7 @@ export interface WorldRenderDebugMetrics {
 	texturePageBindingCount: number;
 	texturePageUsageBucketCounts: Record<string, number>;
 	texturePageSampleClassCounts: Record<string, number>;
-	atlasEligibleMaterialCount: number;
+	texturePageReadyMaterialCount: number;
 	atlasCandidateEntryCount: number;
 	atlasCandidateMaterialSlotCount: number;
 	atlasCompatibleDrawUnitCount: number;
@@ -214,11 +214,6 @@ export interface WorldRenderDebugMetrics {
 	directPackedTexturePageEstimatedBindAvoidedCount: number;
 	directPackedTexturePageTextureCount: number;
 	directTexturePageFallbackSamples: string[];
-	stagedAtlasDrawCount: number;
-	stagedAtlasStandaloneDirectDrawCount: number;
-	stagedAtlasEstimatedTextureBindAvoidedCount: number;
-	stagedAtlasSharedTextureAtlasTextureCount: number;
-	stagedAtlasFallbackSamples: string[];
 	textureVelocityPartCount: number;
 	textureVelocityRenderGroupCount: number;
 	textureVelocityMaterialCount: number;

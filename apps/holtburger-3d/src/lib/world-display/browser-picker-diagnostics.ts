@@ -47,7 +47,7 @@ export type BrowserStagedMaterialDiagnostic =
 			hasSourceAlpha: boolean;
 			wrap: string;
 			filter: string;
-			atlasEligibility: BrowserAtlasEligibilityDiagnostic | null;
+			texturePageReadiness: BrowserTexturePageReadinessDiagnostic | null;
 			detailOverlay: BrowserDetailOverlayDiagnostic | null;
 	  }
 	| {
@@ -65,7 +65,7 @@ export type BrowserStagedMaterialDiagnostic =
 			fallbackReason: string | null;
 	  };
 
-export interface BrowserAtlasEligibilityDiagnostic {
+export interface BrowserTexturePageReadinessDiagnostic {
 	materialSlotKey: string;
 	atlasEntryKey: string;
 	renderStateKey: string;
@@ -204,24 +204,24 @@ function describeMaterial(
 			hasSourceAlpha: upload.hasSourceAlpha,
 			wrap: `${upload.samplingPolicy.wrapS}/${upload.samplingPolicy.wrapT}`,
 			filter: `${upload.samplingPolicy.minFilter}/${upload.samplingPolicy.magFilter}/${upload.samplingPolicy.mipFilter}`,
-			atlasEligibility: material.atlasEligibility
+			texturePageReadiness: material.texturePageReadiness
 				? {
-						materialSlotKey: material.atlasEligibility.materialSlotKey,
-						atlasEntryKey: material.atlasEligibility.atlasEntryKey,
-						renderStateKey: material.atlasEligibility.renderStateKey,
-						samplingKey: material.atlasEligibility.samplingKey,
-						wrap: `${material.atlasEligibility.samplingPolicy.wrapS}/${material.atlasEligibility.samplingPolicy.wrapT}`,
+						materialSlotKey: material.texturePageReadiness.materialSlotKey,
+						atlasEntryKey: material.texturePageReadiness.atlasEntryKey,
+						renderStateKey: material.texturePageReadiness.renderStateKey,
+						samplingKey: material.texturePageReadiness.samplingKey,
+						wrap: `${material.texturePageReadiness.samplingPolicy.wrapS}/${material.texturePageReadiness.samplingPolicy.wrapT}`,
 						entry: {
 							renderSurfaceId: formatRenderSurfaceId(
-								material.atlasEligibility.atlasEntry.renderSurfaceId,
+								material.texturePageReadiness.atlasEntry.renderSurfaceId,
 							),
 							preparedTextureAssetId:
-								material.atlasEligibility.atlasEntry.preparedTextureAssetId,
-							size: `${material.atlasEligibility.atlasEntry.level.width}x${material.atlasEligibility.atlasEntry.level.height}`,
+								material.texturePageReadiness.atlasEntry.preparedTextureAssetId,
+							size: `${material.texturePageReadiness.atlasEntry.level.width}x${material.texturePageReadiness.atlasEntry.level.height}`,
 							sourceFormatRaw: formatHex32(
-								material.atlasEligibility.atlasEntry.sourceFormatRaw,
+								material.texturePageReadiness.atlasEntry.sourceFormatRaw,
 							),
-							sourceHash: material.atlasEligibility.atlasEntry.sourceHash,
+							sourceHash: material.texturePageReadiness.atlasEntry.sourceHash,
 						},
 					}
 				: null,

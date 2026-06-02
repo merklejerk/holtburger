@@ -161,11 +161,6 @@ export interface Webgl2WorldSubmitMetrics {
 	directPackedTexturePageEstimatedBindAvoidedCount: number;
 	directPackedTexturePageTextureCount: number;
 	directTexturePageFallbackSamples: readonly string[];
-	stagedAtlasDrawCount: number;
-	stagedAtlasStandaloneDirectDrawCount: number;
-	stagedAtlasEstimatedTextureBindAvoidedCount: number;
-	stagedAtlasSharedTextureAtlasTextureCount: number;
-	stagedAtlasFallbackSamples: readonly string[];
 }
 
 const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
@@ -216,11 +211,6 @@ const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	directPackedTexturePageEstimatedBindAvoidedCount: 0,
 	directPackedTexturePageTextureCount: 0,
 	directTexturePageFallbackSamples: [],
-	stagedAtlasDrawCount: 0,
-	stagedAtlasStandaloneDirectDrawCount: 0,
-	stagedAtlasEstimatedTextureBindAvoidedCount: 0,
-	stagedAtlasSharedTextureAtlasTextureCount: 0,
-	stagedAtlasFallbackSamples: [],
 };
 
 export type Webgl2RgbaTexturePageFamilySubmitRoute =
@@ -234,7 +224,6 @@ export function createEmptyWebgl2WorldSubmitMetrics(): Webgl2WorldSubmitMetrics 
 		visibleDrawUnitCountsByMaterialKind: {},
 		rgbaTexturePageFamilyFallbackSamples: [],
 		directTexturePageFallbackSamples: [],
-		stagedAtlasFallbackSamples: [],
 	};
 }
 
@@ -365,8 +354,6 @@ export function submitWebgl2FlatWorldDrawUnits({
 			countDrawUnitsByMaterialKind(drawUnits),
 		visibleRetainedDirectDrawUnitCountsByCompactionFamily: {},
 		directPackedTexturePageTextureCount:
-			rgbaTexturePageFamilyResources.generation?.textures.length ?? 0,
-		stagedAtlasSharedTextureAtlasTextureCount:
 			rgbaTexturePageFamilyResources.generation?.textures.length ?? 0,
 	};
 	if (drawUnits.length === 0) {

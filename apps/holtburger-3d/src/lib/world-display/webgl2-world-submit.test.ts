@@ -1158,7 +1158,7 @@ function createDrawUnit({
 				}
 			: null,
 		textureUploadSample: null,
-		atlasEligibility: atlasEntryKey
+		texturePageReadiness: atlasEntryKey
 			? {
 					atlasEntryKey,
 					materialSlotKey: `${materialKey}|slot`,
@@ -1193,7 +1193,7 @@ function createDrawUnit({
 				compatible: false,
 				blockers: ["missing-base-texture-page"],
 				alphaPolicy: "opaque",
-				atlasEligibility: null,
+				texturePageReadiness: null,
 				detailAtlasEntry: null,
 			},
 			geometry: {

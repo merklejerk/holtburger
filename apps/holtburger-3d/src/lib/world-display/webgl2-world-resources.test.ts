@@ -194,7 +194,7 @@ describe("webgl2 world resources", () => {
 			gl.textureUploads.map(({ width, height }) => ({ width, height })),
 		).toEqual([{ width: 1, height: 1 }]);
 		expect(store.compactionBypassBlockerSamples).toContain(
-			"missing-atlas-eligibility:material:missing-atlas-eligibility|family=textured-opaque|alpha=opaque|detailOverlay=no|detailAtlas=no|usageSources=base-color:standalone-direct-texture",
+			"missing-texture-page-readiness:material:missing-texture-page-readiness|family=textured-opaque|alpha=opaque|detailOverlay=no|detailAtlas=no|usageSources=base-color:standalone-direct-texture",
 		);
 		expect(gl.generatedMipmapCount).toBe(1);
 		expect(store.textureSamplingPolicyCounts).toEqual({
@@ -358,7 +358,7 @@ describe("webgl2 world resources", () => {
 		});
 
 		expect(store.drawUnits[0]?.materialKind).toBe("direct-texture");
-		expect(store.atlasEligibleMaterialCount).toBe(1);
+		expect(store.texturePageReadyMaterialCount).toBe(1);
 		expect(store.atlasCandidateEntryCount).toBe(1);
 		expect(store.atlasCandidateMaterialSlotCount).toBe(1);
 	});

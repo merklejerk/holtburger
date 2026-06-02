@@ -63,7 +63,7 @@ import {
 	type TextureSamplingPolicy,
 	type TextureFilteringMode,
 } from "./texture-sampling-policy";
-import { type StagedWorldMaterialAtlasEligibility } from "./staged-world-material-strategy";
+import { type StagedWorldMaterialTexturePageReadiness } from "./staged-world-material-strategy";
 import {
 	createCompactionEligibility,
 	createEmptyCompactionFamilyPlan,
@@ -130,7 +130,7 @@ export interface Webgl2WorldDrawUnit {
 	materialBehavior: LegacyMaterialBehaviorDto | null;
 	directTextureSamplingPolicy: TextureSamplingPolicy | null;
 	textureUploadSample: string | null;
-	atlasEligibility: StagedWorldMaterialAtlasEligibility | null;
+	texturePageReadiness: StagedWorldMaterialTexturePageReadiness | null;
 	compactionEligibility: CompactionEligibility;
 	textureKey: string | null;
 	texture: Webgl2Texture2DResource | null;
@@ -167,7 +167,7 @@ export interface Webgl2WorldResourceStore {
 	texturePageBindingCount: number;
 	texturePageUsageBucketCounts: Record<string, number>;
 	texturePageSampleClassCounts: Record<string, number>;
-	atlasEligibleMaterialCount: number;
+	texturePageReadyMaterialCount: number;
 	atlasCandidateEntryCount: number;
 	atlasCandidateMaterialSlotCount: number;
 	atlasCompatibleDrawUnitCount: number;
@@ -300,7 +300,7 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		texturePageBindingCount: 0,
 		texturePageUsageBucketCounts: {},
 		texturePageSampleClassCounts: {},
-		atlasEligibleMaterialCount: 0,
+		texturePageReadyMaterialCount: 0,
 		atlasCandidateEntryCount: 0,
 		atlasCandidateMaterialSlotCount: 0,
 		atlasCompatibleDrawUnitCount: 0,
@@ -492,21 +492,21 @@ export function syncWebgl2WorldResources({
 	store.texturePageSampleClassCounts = countStringOccurrences(
 		texturePageBindings.map((binding) => binding.sampleClass),
 	);
-	const atlasEligibleDrawUnits = store.drawUnits.filter(
-		(drawUnit) => drawUnit.atlasEligibility !== null,
+	const texturePageReadyDrawUnits = store.drawUnits.filter(
+		(drawUnit) => drawUnit.texturePageReadiness !== null,
 	);
-	store.atlasEligibleMaterialCount = atlasEligibleDrawUnits.length;
+	store.texturePageReadyMaterialCount = texturePageReadyDrawUnits.length;
 	store.atlasCandidateEntryCount = new Set(
-		atlasEligibleDrawUnits.flatMap((drawUnit) =>
-			drawUnit.atlasEligibility
-				? [drawUnit.atlasEligibility.atlasEntryKey]
+		texturePageReadyDrawUnits.flatMap((drawUnit) =>
+			drawUnit.texturePageReadiness
+				? [drawUnit.texturePageReadiness.atlasEntryKey]
 				: [],
 		),
 	).size;
 	store.atlasCandidateMaterialSlotCount = new Set(
-		atlasEligibleDrawUnits.flatMap((drawUnit) =>
-			drawUnit.atlasEligibility
-				? [drawUnit.atlasEligibility.materialSlotKey]
+		texturePageReadyDrawUnits.flatMap((drawUnit) =>
+			drawUnit.texturePageReadiness
+				? [drawUnit.texturePageReadiness.materialSlotKey]
 				: [],
 		),
 	).size;
@@ -519,7 +519,7 @@ export function syncWebgl2WorldResources({
 			}),
 	);
 	store.texturePageAtlasPlan = store.compactionFamilyPlan.texturePageAtlasPlan;
-	store.atlasCompatibleDrawUnitCount = atlasEligibleDrawUnits.length;
+	store.atlasCompatibleDrawUnitCount = texturePageReadyDrawUnits.length;
 	store.atlasPlacedRgbaDrawUnitCount =
 		store.texturePageAtlasPlan.rgbaAtlasReadyDrawUnitIds.length;
 	store.detailAtlasReadyDrawUnitCount =
@@ -664,7 +664,7 @@ export function destroyWebgl2WorldResources(
 	store.texturePageBindingCount = 0;
 	store.texturePageUsageBucketCounts = {};
 	store.texturePageSampleClassCounts = {};
-	store.atlasEligibleMaterialCount = 0;
+	store.texturePageReadyMaterialCount = 0;
 	store.atlasCandidateEntryCount = 0;
 	store.atlasCandidateMaterialSlotCount = 0;
 	store.atlasCompatibleDrawUnitCount = 0;
@@ -765,7 +765,7 @@ function createOrReuseWebgl2DrawUnit({
 			resolveWebgl2DrawUnitDirectTextureSamplingPolicy(drawUnit);
 		previous.textureUploadSample =
 			resolveWebgl2DrawUnitTextureUploadSample(drawUnit);
-		previous.atlasEligibility = resolveWebgl2DrawUnitAtlasEligibility(drawUnit);
+		previous.texturePageReadiness = resolveWebgl2DrawUnitTexturePageReadiness(drawUnit);
 		previous.textureKey =
 			drawUnit.material.kind === "direct-texture"
 				? drawUnit.material.textureKey
@@ -800,7 +800,7 @@ function createOrReuseWebgl2DrawUnit({
 			detailOverlay: previous.detailOverlay,
 			terrainBlend: previous.terrainBlend,
 			directTextureSamplingPolicy: previous.directTextureSamplingPolicy,
-			atlasEligibility: previous.atlasEligibility,
+			texturePageReadiness: previous.texturePageReadiness,
 		});
 		previous.texturePageBindingFallbackSamples = [];
 		previous.directGeometryLayout =
@@ -814,7 +814,7 @@ function createOrReuseWebgl2DrawUnit({
 			materialBehavior: previous.materialBehavior,
 			hasDetailOverlay: previous.detailOverlay !== null,
 			detailAtlasEntry: previous.detailOverlay?.atlasEntry ?? null,
-			atlasEligibility: previous.atlasEligibility,
+			texturePageReadiness: previous.texturePageReadiness,
 		});
 		previous.sceneDomain = deriveWebgl2DrawUnitSceneDomain(drawUnit);
 		previous.modelMatrix = drawUnit.modelMatrix;
@@ -886,14 +886,14 @@ function createOrReuseWebgl2DrawUnit({
 	});
 	const directTextureSamplingPolicy =
 		resolveWebgl2DrawUnitDirectTextureSamplingPolicy(drawUnit);
-	const atlasEligibility = resolveWebgl2DrawUnitAtlasEligibility(drawUnit);
+	const texturePageReadiness = resolveWebgl2DrawUnitTexturePageReadiness(drawUnit);
 	const texturePageBindings = collectDirectDrawTexturePageBindings({
 		texture,
 		indexedMaterial,
 		detailOverlay,
 		terrainBlend,
 		directTextureSamplingPolicy,
-		atlasEligibility,
+		texturePageReadiness,
 	});
 	const webgl2DrawUnit = {
 		id: drawUnit.id,
@@ -922,7 +922,7 @@ function createOrReuseWebgl2DrawUnit({
 		materialBehavior: drawUnit.material.behavior,
 		directTextureSamplingPolicy,
 		textureUploadSample: resolveWebgl2DrawUnitTextureUploadSample(drawUnit),
-		atlasEligibility,
+		texturePageReadiness,
 		compactionEligibility: createCompactionEligibility({
 			kind: drawUnit.kind,
 			owningLandblockId: resolveAtlasCompactionLandblockId(drawUnit),
@@ -932,7 +932,7 @@ function createOrReuseWebgl2DrawUnit({
 			materialBehavior: drawUnit.material.behavior,
 			hasDetailOverlay: detailOverlay !== null,
 			detailAtlasEntry: detailOverlay?.atlasEntry ?? null,
-			atlasEligibility,
+			texturePageReadiness,
 		}),
 		textureKey:
 			drawUnit.material.kind === "direct-texture"
@@ -1289,11 +1289,11 @@ function describeIndexedPaletteTextureKey(
 	return ["indexed-palette", paletteKey].join("|");
 }
 
-function resolveWebgl2DrawUnitAtlasEligibility(
+function resolveWebgl2DrawUnitTexturePageReadiness(
 	drawUnit: StagedWorldDrawUnitAssembly,
-): StagedWorldMaterialAtlasEligibility | null {
+): StagedWorldMaterialTexturePageReadiness | null {
 	return drawUnit.material.kind === "direct-texture"
-		? drawUnit.material.atlasEligibility
+		? drawUnit.material.texturePageReadiness
 		: null;
 }
 

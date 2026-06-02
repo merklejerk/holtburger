@@ -265,7 +265,7 @@ function createPortalMaskDrawUnit(id: string): Webgl2WorldDrawUnit {
 		materialBehavior: null,
 		directTextureSamplingPolicy: null,
 		textureUploadSample: null,
-		atlasEligibility: null,
+		texturePageReadiness: null,
 		compactionEligibility: {
 			decision: "direct-draw",
 			material: {
@@ -273,7 +273,7 @@ function createPortalMaskDrawUnit(id: string): Webgl2WorldDrawUnit {
 				compatible: false,
 				blockers: ["missing-base-texture-page"],
 				alphaPolicy: "unknown",
-				atlasEligibility: null,
+				texturePageReadiness: null,
 				detailAtlasEntry: null,
 			},
 			geometry: {

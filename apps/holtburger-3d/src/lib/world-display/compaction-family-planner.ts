@@ -1,6 +1,6 @@
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
 import type { RenderVec4 } from "./render-math";
-import type { StagedWorldMaterialAtlasEligibility } from "./staged-world-material-strategy";
+import type { StagedWorldMaterialTexturePageReadiness } from "./staged-world-material-strategy";
 import type {
 	TexturePageBinding,
 	TexturePageUsageBucket,
@@ -19,8 +19,7 @@ export type CompactionFamilyBypassReason =
 	| "missing-landblock-origin"
 	| "unsupported-compacted-material-family"
 	| "missing-uv-buffer"
-	| "missing-atlas-eligibility"
-	| "unsupported-alpha-test-material"
+	| "missing-texture-page-readiness"
 	| "unsupported-transparent-blended-material"
 	| "unsupported-opacity-translucent-material"
 	| "unsupported-constant-color-material"
@@ -46,7 +45,6 @@ export type CompactionMaterialKind =
 export type CompactionMaterialFamily =
 	| "flat-constant-color"
 	| "textured-opaque"
-	| "alpha-test"
 	| "transparent-blended"
 	| "opacity-translucent"
 	| "indexed-paletted"
@@ -65,11 +63,10 @@ export type CompactionMaterialBlocker =
 	| "missing-base-texture-page"
 	| "missing-indexed-texel-page"
 	| "missing-indexed-palette-page"
-	| "missing-atlas-eligibility"
+	| "missing-texture-page-readiness"
 	| "missing-compacted-constant-color-family"
 	| "missing-compacted-indexed-paletted-family"
 	| "indexed-alpha-policy-unsupported"
-	| "missing-compacted-alpha-test-family"
 	| "missing-compacted-transparent-blended-family"
 	| "missing-compacted-opacity-translucent-family"
 	| "missing-compacted-terrain-family"
@@ -94,7 +91,7 @@ export interface CompactionEligibility {
 		blockers: readonly CompactionMaterialBlocker[];
 		alphaPolicy: CompactionAlphaPolicy;
 		alphaTest: number;
-		atlasEligibility: StagedWorldMaterialAtlasEligibility | null;
+		texturePageReadiness: StagedWorldMaterialTexturePageReadiness | null;
 		detailAtlasEntry: RgbaTexturePageDetailAtlasEntry | null;
 	};
 	geometry: {
@@ -140,7 +137,7 @@ export interface RgbaTexturePageFamilyMaterialSlot {
 	index: number;
 	renderStateKey: string;
 	samplingKey: string;
-	samplingPolicy: StagedWorldMaterialAtlasEligibility["samplingPolicy"];
+	samplingPolicy: StagedWorldMaterialTexturePageReadiness["samplingPolicy"];
 	atlasEntryKey: string;
 	alphaPolicy: "opaque" | "cutout";
 	alphaTest: number;
@@ -192,7 +189,7 @@ export interface RgbaTexturePageFamilyDrawSlice {
 
 export interface RgbaTexturePageAtlasEntryRecord {
 	key: string;
-	entry: StagedWorldMaterialAtlasEligibility["atlasEntry"];
+	entry: StagedWorldMaterialTexturePageReadiness["atlasEntry"];
 }
 
 export interface RgbaTexturePageDetailAtlasEntry {
@@ -282,7 +279,7 @@ export interface IndexedPalettedRenderFamilyPartition {
 
 interface EligibleCompactionFamilyCandidate {
 	drawUnit: CompactionFamilyCandidate;
-	eligibility: StagedWorldMaterialAtlasEligibility;
+	eligibility: StagedWorldMaterialTexturePageReadiness;
 }
 
 interface BoundedMaterialTablePartition<TCandidate, TMaterialRecord> {
@@ -332,14 +329,14 @@ export function planCompactionFamilies(options: {
 		if (drawUnit.compactionEligibility.material.family === "indexed-paletted") {
 			continue;
 		}
-		const atlasEligibility =
-			drawUnit.compactionEligibility.material.atlasEligibility;
-		if (!atlasEligibility) {
+		const texturePageReadiness =
+			drawUnit.compactionEligibility.material.texturePageReadiness;
+		if (!texturePageReadiness) {
 			throw new Error(
 				`Compacted geometry candidate ${drawUnit.id} was accepted without packed texture-page eligibility.`,
 			);
 		}
-		rgbaEligible.push({ drawUnit, eligibility: atlasEligibility });
+		rgbaEligible.push({ drawUnit, eligibility: texturePageReadiness });
 	}
 
 	const uniqueRgbaAtlasCandidates =
@@ -353,7 +350,7 @@ export function planCompactionFamilies(options: {
 	const texturePageAtlasPlan = planTexturePageAtlas({
 		rgbaCandidates: uniqueRgbaAtlasCandidates.map((candidate) => ({
 			drawUnitId: candidate.drawUnit.id,
-			atlasEligibility: candidate.eligibility,
+			texturePageReadiness: candidate.eligibility,
 			detailAtlasEntry: candidate.drawUnit.detailAtlasEntry,
 		})),
 		detailCandidates: uniqueIndexedCandidates.map((candidate) => ({
@@ -663,12 +660,12 @@ function collectRgbaTexturePageAtlasCandidates(
 		if (drawUnit.materialKind !== "direct-texture") {
 			continue;
 		}
-		const atlasEligibility =
-			drawUnit.compactionEligibility.material.atlasEligibility;
-		if (!atlasEligibility) {
+		const texturePageReadiness =
+			drawUnit.compactionEligibility.material.texturePageReadiness;
+		if (!texturePageReadiness) {
 			continue;
 		}
-		candidates.push({ drawUnit, eligibility: atlasEligibility });
+		candidates.push({ drawUnit, eligibility: texturePageReadiness });
 	}
 	return candidates;
 }
@@ -895,7 +892,7 @@ export function createCompactionEligibility(options: {
 	materialBehavior: LegacyMaterialBehaviorDto | null;
 	hasDetailOverlay: boolean;
 	detailAtlasEntry: RgbaTexturePageDetailAtlasEntry | null;
-	atlasEligibility: StagedWorldMaterialAtlasEligibility | null;
+	texturePageReadiness: StagedWorldMaterialTexturePageReadiness | null;
 }): CompactionEligibility {
 	const geometryBlockers: CompactionGeometryBlocker[] = [];
 	if (options.kind !== "static" && options.kind !== "structured-interior") {
@@ -952,8 +949,8 @@ export function createCompactionEligibility(options: {
 			materialBlockers.push("unsupported-material-state");
 			break;
 		case "textured-opaque":
-			if (!options.atlasEligibility) {
-				materialBlockers.push("missing-atlas-eligibility");
+			if (!options.texturePageReadiness) {
+				materialBlockers.push("missing-texture-page-readiness");
 			}
 			if (!hasCompatibleCompactedBaseTexturePage(options.texturePageBindings)) {
 				materialBlockers.push("missing-base-texture-page");
@@ -980,7 +977,7 @@ export function createCompactionEligibility(options: {
 			blockers: materialBlockers,
 			alphaPolicy,
 			alphaTest: options.materialBehavior?.alphaTest ?? 0,
-			atlasEligibility: options.atlasEligibility,
+			texturePageReadiness: options.texturePageReadiness,
 			detailAtlasEntry: options.detailAtlasEntry,
 		},
 		geometry: {
@@ -1085,14 +1082,6 @@ function createMaterialCompactionBypass(
 				blocker,
 				detail: `indexed/paletted material ${drawUnit.materialKey} has a detail overlay not yet supported by the compacted indexed family`,
 			};
-		case "missing-compacted-alpha-test-family":
-			return {
-				drawUnitId: drawUnit.id,
-				reason: "unsupported-alpha-test-material",
-				blockerKind: "material",
-				blocker,
-				detail: `alpha-test material ${drawUnit.materialKey} has no compacted cutout material family`,
-			};
 		case "missing-compacted-transparent-blended-family":
 			return {
 				drawUnitId: drawUnit.id,
@@ -1133,14 +1122,14 @@ function createMaterialCompactionBypass(
 				blocker,
 				detail: `draw unit material ${drawUnit.materialKey} has no compacted-compatible base texture page`,
 			};
-		case "missing-atlas-eligibility":
+		case "missing-texture-page-readiness":
 			return {
 				drawUnitId: drawUnit.id,
-				reason: "missing-atlas-eligibility",
+				reason: "missing-texture-page-readiness",
 				blockerKind: "material",
 				blocker,
 				detail:
-					"compacted geometry draw unit has no packed texture-page eligibility",
+					"compacted geometry draw unit has no texture-page readiness record",
 			};
 		case "missing-detail-atlas-entry":
 			return {

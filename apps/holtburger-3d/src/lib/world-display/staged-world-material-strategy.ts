@@ -117,7 +117,7 @@ interface StagedWorldAtlasCandidateStrategy extends StagedWorldAtlasMaterialStra
 	};
 }
 
-export interface StagedWorldMaterialAtlasEligibility {
+export interface StagedWorldMaterialTexturePageReadiness {
 	materialSlotKey: string;
 	atlasEntryKey: string;
 	renderStateKey: string;
@@ -144,7 +144,7 @@ export interface StagedWorldDirectTextureMaterialStrategy {
 	behavior: LegacyMaterialBehaviorDto;
 	reason: StagedWorldMaterialStrategyFallbackReason | null;
 	detail: string | null;
-	atlasEligibility: StagedWorldMaterialAtlasEligibility | null;
+	texturePageReadiness: StagedWorldMaterialTexturePageReadiness | null;
 }
 
 export interface StagedWorldIndexedPalettedMaterialStrategy {
@@ -359,31 +359,31 @@ function evaluateAtlasCandidate(options: {
 	if (
 		resolvedStrategy.kind !== "direct-texture" ||
 		resolvedStrategy.reason !== null ||
-		!resolvedStrategy.atlasEligibility
+		!resolvedStrategy.texturePageReadiness
 	) {
 		return { kind: "strategy", requirement: resolvedStrategy };
 	}
-	const atlasEligibility = resolvedStrategy.atlasEligibility;
-	const level = atlasEligibility.atlasEntry.level;
+	const texturePageReadiness = resolvedStrategy.texturePageReadiness;
+	const level = texturePageReadiness.atlasEntry.level;
 	return {
 		kind: "candidate",
 		candidate: {
 			input: options.input,
 			materialAssetId: resolvedStrategy.materialAssetId,
-			materialSlotKey: atlasEligibility.materialSlotKey,
-			atlasEntryKey: atlasEligibility.atlasEntryKey,
-			renderStateKey: atlasEligibility.renderStateKey,
-			samplingKey: atlasEligibility.samplingKey,
+			materialSlotKey: texturePageReadiness.materialSlotKey,
+			atlasEntryKey: texturePageReadiness.atlasEntryKey,
+			renderStateKey: texturePageReadiness.renderStateKey,
+			samplingKey: texturePageReadiness.samplingKey,
 			behavior: resolvedStrategy.behavior,
 			entry: {
-				key: atlasEligibility.atlasEntryKey,
-				renderSurfaceId: atlasEligibility.atlasEntry.renderSurfaceId,
+				key: texturePageReadiness.atlasEntryKey,
+				renderSurfaceId: texturePageReadiness.atlasEntry.renderSurfaceId,
 				preparedTextureAssetId:
-					atlasEligibility.atlasEntry.preparedTextureAssetId,
+					texturePageReadiness.atlasEntry.preparedTextureAssetId,
 				width: level.width,
 				height: level.height,
-				sourceHash: atlasEligibility.atlasEntry.sourceHash,
-				sourceFormatRaw: atlasEligibility.atlasEntry.sourceFormatRaw,
+				sourceHash: texturePageReadiness.atlasEntry.sourceHash,
+				sourceFormatRaw: texturePageReadiness.atlasEntry.sourceFormatRaw,
 				transfer: "linear",
 			},
 		},
@@ -567,7 +567,7 @@ export function resolveStagedWorldMaterialStrategy(options: {
 			options.textureCapabilities ??
 			defaultStagedWorldMaterialTextureCapabilities(),
 		textureFilteringMode: options.textureFilteringMode,
-		atlasEligibility: {
+		texturePageReadiness: {
 			materialSlotKey: describeMaterialSlotKey({
 				materialAssetId,
 				atlasEntryKey,
@@ -734,7 +734,7 @@ function resolveDirectTextureStrategy(options: {
 	recipe: PreparedMaterialRecipePayload;
 	textureCapabilities: MaterialTextureCapabilities;
 	textureFilteringMode?: TextureFilteringMode;
-	atlasEligibility?: StagedWorldMaterialAtlasEligibility | null;
+	texturePageReadiness?: StagedWorldMaterialTexturePageReadiness | null;
 }):
 	| StagedWorldDirectTextureMaterialStrategy
 	| StagedWorldMaterialFallbackStrategy {
@@ -827,7 +827,7 @@ function resolveDirectTextureStrategy(options: {
 		behavior,
 		reason: options.behaviorReason?.reason ?? null,
 		detail: options.behaviorReason?.detail ?? null,
-		atlasEligibility: options.atlasEligibility ?? null,
+		texturePageReadiness: options.texturePageReadiness ?? null,
 	};
 }
 

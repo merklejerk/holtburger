@@ -2581,23 +2581,6 @@ function mergeSceneDomainSubmitMetrics({
 			...exteriorMetrics.directTexturePageFallbackSamples,
 			...interiorMetrics.directTexturePageFallbackSamples,
 		].slice(0, 8),
-		stagedAtlasDrawCount:
-			exteriorMetrics.stagedAtlasDrawCount +
-			interiorMetrics.stagedAtlasDrawCount,
-		stagedAtlasStandaloneDirectDrawCount:
-			exteriorMetrics.stagedAtlasStandaloneDirectDrawCount +
-			interiorMetrics.stagedAtlasStandaloneDirectDrawCount,
-		stagedAtlasEstimatedTextureBindAvoidedCount:
-			exteriorMetrics.stagedAtlasEstimatedTextureBindAvoidedCount +
-			interiorMetrics.stagedAtlasEstimatedTextureBindAvoidedCount,
-		stagedAtlasSharedTextureAtlasTextureCount: Math.max(
-			exteriorMetrics.stagedAtlasSharedTextureAtlasTextureCount,
-			interiorMetrics.stagedAtlasSharedTextureAtlasTextureCount,
-		),
-		stagedAtlasFallbackSamples: [
-			...exteriorMetrics.stagedAtlasFallbackSamples,
-			...interiorMetrics.stagedAtlasFallbackSamples,
-		].slice(0, 8),
 	};
 }
 

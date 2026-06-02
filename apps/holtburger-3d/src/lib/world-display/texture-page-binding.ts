@@ -8,7 +8,7 @@ import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
 
 type TexturePageWrapDrawUnit = Pick<
 	Webgl2WorldDrawUnit,
-	"atlasEligibility" | "directTextureSamplingPolicy"
+	"texturePageReadiness" | "directTextureSamplingPolicy"
 >;
 
 export type TexturePageKind = "single-entry" | "packed-atlas";
@@ -82,7 +82,7 @@ export function resolveDirectDrawBaseTexturePageBinding({
 	if (!drawUnit.texture) {
 		return { binding: null, fallbackSamples };
 	}
-	if (drawUnit.atlasEligibility && !drawUnit.detailOverlay && generation) {
+	if (drawUnit.texturePageReadiness && !drawUnit.detailOverlay && generation) {
 		const packedBinding = resolvePackedBaseTexturePageBinding({
 			drawUnit,
 			generation,
@@ -93,12 +93,12 @@ export function resolveDirectDrawBaseTexturePageBinding({
 			return packedBinding;
 		}
 		fallbackSamples = packedBinding.fallbackSamples;
-	} else if (drawUnit.atlasEligibility && drawUnit.detailOverlay) {
+	} else if (drawUnit.texturePageReadiness && drawUnit.detailOverlay) {
 		fallbackSamples = appendTexturePageFallbackSample(
 			fallbackSamples,
 			"direct packed base page requires standalone detail overlay path",
 		);
-	} else if (drawUnit.atlasEligibility && !generation) {
+	} else if (drawUnit.texturePageReadiness && !generation) {
 		fallbackSamples = appendTexturePageFallbackSample(
 			fallbackSamples,
 			"direct packed base page missing texture atlas generation",
@@ -136,7 +136,7 @@ function resolvePackedBaseTexturePageBinding({
 }): TexturePageBindingResolution {
 	const placement = generation.placements.find(
 		(candidate) =>
-			candidate.atlasEntryKey === drawUnit.atlasEligibility?.atlasEntryKey,
+			candidate.atlasEntryKey === drawUnit.texturePageReadiness?.atlasEntryKey,
 	);
 	if (!placement) {
 		return fallback(
@@ -179,7 +179,7 @@ function describeMissingPackedBasePlacement({
 	drawUnit: Webgl2WorldDrawUnit;
 	atlasPlan: TexturePageAtlasPlan | null;
 }): string {
-	const atlasEntryKey = drawUnit.atlasEligibility?.atlasEntryKey ?? "unknown";
+	const atlasEntryKey = drawUnit.texturePageReadiness?.atlasEntryKey ?? "unknown";
 	const atlasBypass = atlasPlan?.bypasses.find(
 		(bypass) =>
 			bypass.drawUnitId === drawUnit.id &&
@@ -204,7 +204,7 @@ export function collectDirectDrawTexturePageBindings(
 		Webgl2WorldDrawUnit,
 		| "texture"
 		| "directTextureSamplingPolicy"
-		| "atlasEligibility"
+		| "texturePageReadiness"
 		| "detailOverlay"
 		| "indexedMaterial"
 		| "terrainBlend"
@@ -435,7 +435,7 @@ function resolveTexturePageWrapMode(drawUnit: TexturePageWrapDrawUnit): {
 	wrapS: TexturePageWrapMode;
 	wrapT: TexturePageWrapMode;
 } {
-	const samplingPolicy = drawUnit.atlasEligibility?.samplingPolicy;
+	const samplingPolicy = drawUnit.texturePageReadiness?.samplingPolicy;
 	if (samplingPolicy) {
 		return {
 			wrapS: samplingPolicy.wrapS,

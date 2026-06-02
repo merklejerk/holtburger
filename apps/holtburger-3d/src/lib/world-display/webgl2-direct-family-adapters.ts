@@ -229,7 +229,6 @@ export function prepareDirectRgbaTexturePageDraw({
 		metrics.directTexturePageFallbackSamples,
 		route.drawUnit.texturePageBindingFallbackSamples,
 	);
-	metrics.stagedAtlasFallbackSamples = metrics.directTexturePageFallbackSamples;
 	if (route.texturePageBinding) {
 		metrics.directTexturePageDrawCount += 1;
 		if (route.texturePageBinding.pageKind === "packed-atlas") {
@@ -238,13 +237,6 @@ export function prepareDirectRgbaTexturePageDraw({
 		} else {
 			metrics.directSingleEntryTexturePageDrawCount += 1;
 		}
-		metrics.stagedAtlasDrawCount = metrics.directPackedTexturePageDrawCount;
-		metrics.stagedAtlasEstimatedTextureBindAvoidedCount =
-			metrics.directPackedTexturePageEstimatedBindAvoidedCount;
-		metrics.stagedAtlasStandaloneDirectDrawCount =
-			metrics.directSingleEntryTexturePageDrawCount;
-	} else {
-		metrics.stagedAtlasStandaloneDirectDrawCount += 1;
 	}
 	if (
 		route.activeBaseTexture &&

@@ -83,7 +83,7 @@ function createDrawUnit(id: string, atlasEntryKey: string): Webgl2WorldDrawUnit 
 	return {
 		id,
 		texture: createTexture(),
-		atlasEligibility: {
+		texturePageReadiness: {
 			materialSlotKey: `slot-${atlasEntryKey}`,
 			atlasEntryKey,
 			atlasEntry: {
@@ -145,7 +145,6 @@ function createAtlasPlan(
 		detailAtlasReadyDrawUnitIds: [],
 		bypasses: [],
 		atlasEntryRecords: [],
-		atlasEntries: [],
 		atlasTextures: [],
 		detailAtlasEntryRecords: [],
 		detailAtlasTextures: [],

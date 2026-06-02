@@ -48,7 +48,7 @@ export interface PreparedBvhVisibilitySnapshot {
 	fallbackReasons: readonly string[];
 }
 
-export function createEmptyPreparedBvhDebugMetrics(): PreparedBvhDebugMetrics {
+function createEmptyPreparedBvhDebugMetrics(): PreparedBvhDebugMetrics {
 	return {
 		terrainBvhVisibleItemCount: 0,
 		terrainBvhTotalItemCount: 0,
@@ -62,14 +62,6 @@ export function createEmptyPreparedBvhDebugMetrics(): PreparedBvhDebugMetrics {
 		fallbackReasonCount: 0,
 		fallbackReasonSamples: [],
 		queryTimeMs: 0,
-	};
-}
-
-export function createEmptyPreparedBvhVisibilitySnapshot(): PreparedBvhVisibilitySnapshot {
-	return {
-		metrics: createEmptyPreparedBvhDebugMetrics(),
-		visibleItemKeys: new Set(),
-		fallbackReasons: [],
 	};
 }
 

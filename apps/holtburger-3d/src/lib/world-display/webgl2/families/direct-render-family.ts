@@ -14,14 +14,7 @@ export type GeometrySubmissionLayout =
 	| "position-uv"
 	| "position-uv-material-slot";
 
-export type DirectRenderFamilyKind =
-	| "flat-constant-color"
-	| "rgba-texture-page"
-	| "indexed-paletted"
-	| "terrain-blend"
-	| "debug-pipeline";
-
-export interface DirectGeometrySubmission {
+interface DirectGeometrySubmission {
 	mode: "direct";
 	drawUnitId: string;
 	drawUnitKind: Webgl2WorldDrawUnit["kind"];
@@ -36,21 +29,21 @@ export interface DirectGeometrySubmission {
 	triangleCount: number;
 }
 
-export type DirectFamilyMaterialPayload =
+type DirectFamilyMaterialPayload =
 	| DirectFlatConstantColorPayload
 	| DirectRgbaTexturePagePayload
 	| DirectIndexedPalettedPayload
 	| DirectTerrainBlendPayload
 	| DirectDebugPipelinePayload;
 
-export interface DirectFlatConstantColorPayload {
+interface DirectFlatConstantColorPayload {
 	family: "flat-constant-color";
 	materialKey: string;
 	color: RenderVec4;
 	materialBehavior: LegacyMaterialBehaviorDto | null;
 }
 
-export interface DirectRgbaTexturePagePayload {
+interface DirectRgbaTexturePagePayload {
 	family: "rgba-texture-page";
 	materialKey: string;
 	color: RenderVec4;
@@ -60,7 +53,7 @@ export interface DirectRgbaTexturePagePayload {
 	materialBehavior: LegacyMaterialBehaviorDto | null;
 }
 
-export interface DirectIndexedPalettedPayload {
+interface DirectIndexedPalettedPayload {
 	family: "indexed-paletted";
 	materialKey: string;
 	color: RenderVec4;
@@ -70,13 +63,13 @@ export interface DirectIndexedPalettedPayload {
 	materialBehavior: LegacyMaterialBehaviorDto | null;
 }
 
-export interface DirectTerrainBlendPayload {
+interface DirectTerrainBlendPayload {
 	family: "terrain-blend";
 	materialKey: string;
 	terrainBlend: Webgl2TerrainBlendResources;
 }
 
-export interface DirectDebugPipelinePayload {
+interface DirectDebugPipelinePayload {
 	family: "debug-pipeline";
 	materialKey: string;
 	color: RenderVec4;

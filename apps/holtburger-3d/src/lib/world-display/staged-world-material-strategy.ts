@@ -87,13 +87,13 @@ export interface StagedWorldMaterialStrategyInput {
 	textureVelocitySignature?: string | null;
 }
 
-export type StagedWorldMaterialStrategy =
+type StagedWorldMaterialStrategy =
 	| StagedWorldAtlasMaterialStrategy
 	| StagedWorldDirectTextureMaterialStrategy
 	| StagedWorldIndexedPalettedMaterialStrategy
 	| StagedWorldMaterialFallbackStrategy;
 
-export interface StagedWorldAtlasMaterialStrategy {
+interface StagedWorldAtlasMaterialStrategy {
 	kind: "atlas";
 	slot: ResolvedMaterialSlot;
 	renderableKind: StagedWorldMaterialRenderableKind;
@@ -126,7 +126,7 @@ export interface StagedWorldMaterialTexturePageReadiness {
 	atlasEntry: StagedWorldAtlasCandidateStrategy["atlasEntry"];
 }
 
-export interface StagedWorldAtlasSamplingPolicy {
+interface StagedWorldAtlasSamplingPolicy {
 	wrapS: TextureWrapMode;
 	wrapT: TextureWrapMode;
 }
@@ -702,7 +702,7 @@ export function defaultStagedWorldMaterialTextureCapabilities(): MaterialTexture
 	};
 }
 
-export function describeStagedWorldDirectTextureKey(
+function describeStagedWorldDirectTextureKey(
 	upload: Extract<
 		RenderSurfaceTextureUploadPreparation,
 		{ status: "ready" }

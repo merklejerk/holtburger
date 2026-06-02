@@ -34,7 +34,7 @@ export type StagedWorldMaterialPlan =
 	| StagedWorldIndexedPalettedMaterialPlan
 	| StagedWorldTerrainBlendMaterialPlan;
 
-export interface StagedWorldMaterialPlanCacheRecord {
+interface StagedWorldMaterialPlanCacheRecord {
 	plan: StagedWorldMaterialPlan;
 	dependencyAssetIds: readonly string[];
 	dependencyState: string;
@@ -80,7 +80,7 @@ export interface StagedWorldIndexedPalettedMaterialPlan {
 	preparedAssetIds: readonly string[];
 }
 
-export interface StagedWorldTerrainBlendMaterialPlan {
+interface StagedWorldTerrainBlendMaterialPlan {
 	kind: "terrain-blend";
 	key: string;
 	color: RenderVec4;

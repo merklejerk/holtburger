@@ -31,13 +31,13 @@ export interface TerrainBlendTextureRef {
 	role: "color" | "mask";
 }
 
-export interface TerrainTextureOverlay {
+interface TerrainTextureOverlay {
 	terrain: TerrainBlendTextureRef;
 	alpha: TerrainBlendTextureRef;
 	rotation: number;
 }
 
-export interface TerrainRoadOverlay {
+interface TerrainRoadOverlay {
 	road: TerrainBlendTextureRef;
 	alpha: TerrainBlendTextureRef;
 	rotation: number;

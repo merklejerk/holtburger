@@ -6,7 +6,7 @@ import { formatPreparedTextureAssetId, preparedDxtOutputFormat } from "./types";
 
 export type MaterialTextureUsage = PreparedTexturePayload["usage"];
 
-export interface MaterialTexturePreparationPolicyInput {
+interface MaterialTexturePreparationPolicyInput {
 	renderSurface: PreparedRenderSurfacePayload;
 	usage: MaterialTextureUsage;
 }
@@ -80,16 +80,6 @@ export function resolveNormalizedPreparedTextureAssetIds(input: {
 	usage?: MaterialTextureUsage;
 }): readonly string[] {
 	return NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY({
-		renderSurface: input.renderSurface,
-		usage: input.usage ?? "raw",
-	});
-}
-
-export function resolveDefaultPreparedTextureAssetIds(input: {
-	renderSurface: PreparedRenderSurfacePayload;
-	usage?: MaterialTextureUsage;
-}): readonly string[] {
-	return DEFAULT_MATERIAL_TEXTURE_PREPARATION_POLICY({
 		renderSurface: input.renderSurface,
 		usage: input.usage ?? "raw",
 	});

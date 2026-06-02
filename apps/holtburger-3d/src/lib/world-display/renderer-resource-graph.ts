@@ -36,7 +36,7 @@ export interface RendererResourceGraphDisposalCandidate {
 	dependentKeys: string[];
 }
 
-export interface RendererResourceGraphRetentionPath {
+interface RendererResourceGraphRetentionPath {
 	owner: string;
 	leaseId: string;
 	path: string[];

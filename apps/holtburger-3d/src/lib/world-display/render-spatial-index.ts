@@ -18,7 +18,6 @@ import {
 
 export type {
 	RenderBounds,
-	RenderFrustum,
 	RenderVec3,
 } from "./render-spatial-math";
 

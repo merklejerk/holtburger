@@ -29,7 +29,7 @@ export const PIXEL_FORMAT_P8 = 0x29;
 export const PIXEL_FORMAT_INDEX16 = 0x65;
 
 export type IndexedTextureFormat = "p8" | "index16";
-export type IndexedPaletteSelectionSource =
+type IndexedPaletteSelectionSource =
 	| "appearance-override"
 	| "material-recipe"
 	| "render-surface-default";
@@ -89,7 +89,7 @@ export interface IndexedMaterialDataCache {
 	clear(): void;
 }
 
-export interface IndexedMaterialDataDiagnostic {
+interface IndexedMaterialDataDiagnostic {
 	key: string;
 	message: string;
 	detail: Record<string, unknown>;

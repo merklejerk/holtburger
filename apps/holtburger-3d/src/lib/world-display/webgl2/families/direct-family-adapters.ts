@@ -125,7 +125,7 @@ export interface Webgl2IndexedDirectDrawRoute extends Webgl2DirectDrawRouteBase 
 	detailTextureUnit: typeof DIRECT_FAMILY_DRAW_TEXTURE_UNITS.indexedDetail;
 }
 
-export interface Webgl2TerrainDirectDrawRoute extends Webgl2DirectDrawRouteBase {
+interface Webgl2TerrainDirectDrawRoute extends Webgl2DirectDrawRouteBase {
 	programKind: "terrain";
 	activeProgram: Webgl2TerrainBlendWorldProgram;
 	indexedProgram: null;

@@ -3226,6 +3226,39 @@ Purpose: use the C9 cleanup pass to identify a cleaner file structure and module
 itemize the refactor work separately instead of mixing broad module moves with deletion cleanup. C9
 should leave notes; C10 should turn those notes into executable refactor phases.
 
+C10 reading guide:
+
+- C10 is the parent planning phase. It records the target module boundaries and the intended execution
+  order.
+- C10.1 through C10.3 are completed execution phases that implemented the first submit/family/texture
+  module refactors.
+- C10.3.1 is an interim quality gate added after C10.3 because knip exposed broad stale exported
+  surface. It is intentionally cleanup-only and must complete before the next module move.
+- C10.4 is the next normal execution phase after the C10.3.1 gate. It should resume the original flow
+  with compaction planner and compacted geometry module ownership.
+- The historical cleanup list after C10.3.1 is source material, not an executable phase. Future C10
+  phases should pull from it, disposition items, and keep the standard phase structure:
+  - status;
+  - purpose;
+  - scope rules;
+  - tasks;
+  - exit criteria;
+  - validation;
+  - progress ledger;
+  - decisions;
+  - course corrections and cleanup targets;
+  - legacy shims.
+
+C10 execution status:
+
+- C10.1 Submit pass scheduler preparation: complete.
+- C10.2 WebGL2 family module move: complete.
+- C10.3 Texture-page planning and WebGL2 atlas resource move: complete.
+- C10.3.1 Knip export-debt cleanup gate: complete.
+- C10.4 Compaction planner and compacted geometry module move: next normal execution phase.
+- C10.5 WebGL2 resource ownership split: planned after C10.4.
+- C10.6 Diagnostics presenter extraction: planned after resource ownership is clearer.
+
 Candidate module boundaries evaluated:
 
 - `world-display/material/`
@@ -3749,7 +3782,7 @@ Legacy shims:
 
 ## Phase C10.3.1: Knip Export-Debt Cleanup Gate
 
-Status: Planned immediate interim phase before C10.4.
+Status: Complete.
 
 Purpose: make `npm run lint:dead` / knip a green gate before the next module move. C10.1-C10.3
 exposed enough stale exported functions and exported types that continuing broad refactors without
@@ -3822,6 +3855,61 @@ Requirement for subsequent phases:
 - Every phase after C10.3.1 must include `npm run lint:dead` in validation and must not mark the phase
   complete while knip is failing, unless the phase explicitly adds an immediate follow-up cleanup gate
   before any further module move or behavior expansion.
+
+Progress completed:
+
+- Ran `npm run lint:dead` and confirmed the post-C10.3 report was broad exported-surface debt rather
+  than an isolated behavior regression.
+- Deleted genuinely stale exported helper functions:
+  - `resolveDefaultPreparedTextureAssetIds`;
+  - `fitSceneCameraFrameToBounds`;
+  - `createEmptyRenderBatchCandidateSelection`;
+  - `createEmptyWorldRenderWorkingModel`.
+- Internalized helper functions that are still active but only file-local:
+  - `createEmptyPreparedBvhDebugMetrics`;
+  - `classifyCompactionMaterialFamily`;
+  - `classifyCompactionAlphaPolicy`;
+  - staged terrain, portal-mask, and flat debug material assembly helpers;
+  - `describeStagedWorldDirectTextureKey`;
+  - `compactedFamilyResourceKey`;
+  - `applyWebgl2SamplerParameters`.
+- Removed stale internal declarations that `lint:ts` exposed after export tightening:
+  - `createEmptyPreparedBvhVisibilitySnapshot`;
+  - `DirectRenderFamilyKind`.
+- Removed obsolete broad type exports across browser picker diagnostics, compacted geometry,
+  compaction family planning, indexed material diagnostics, staged world assembly/frame/material
+  strategy, texture-page planning, WebGL2 family/resource DTOs, runtime diagnostics, renderer resource
+  ownership, and terrain blend planning.
+- Removed the convenience `RenderFrustum` reexport from `render-spatial-index`; callers should import
+  it from `render-spatial-math`, which owns that math DTO.
+
+Decisions and course corrections:
+
+- `StagedWorldMaterialStrategyFallbackReason` remains exported because `staged-world-materials`
+  consumes it as part of the material-plan contract. `svelte-check` caught this after the initial
+  visibility pass; the export was restored intentionally.
+- The cleanup did not add knip ignore configuration. Keeping the gate green by reducing visibility is
+  now the preferred pattern.
+- C10.3.1 stayed within cleanup/export-surface tightening. No renderer behavior, pass ordering, atlas
+  planning, or compaction eligibility changed.
+
+Future-step refinements:
+
+- Any C10.4/C10 cleanup/refactor phase must run `npm run lint:dead` alongside `npm run lint:ts`,
+  focused tests, `npm run check`, and `git diff --check`.
+- When a future module move creates a large unused-export list, add a narrow cleanup gate before the
+  next behavior phase rather than allowing stale exports to accumulate.
+- The retained `StagedWorldMaterialStrategyFallbackReason` export is a useful boundary marker for the
+  later material-strategy/material-plan file-structure pass; do not remove it unless that contract is
+  colocated or replaced.
+
+Validation completed:
+
+- `npm run lint:dead`
+- `npm run lint:ts`
+- `npm run test:ts -- src/lib/world-display/prepared-bvh-metrics.test.ts src/lib/world-display/render-batch-candidates.test.ts src/lib/world-display/compaction-family-planner.test.ts src/lib/world-display/staged-world-assembly.test.ts src/lib/world-display/staged-world-material-strategy.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-direct-render-family.test.ts src/lib/world-display/render-spatial-index.test.ts --run`
+- `npm run check`
+- `npm run lint`
 
 ## Historical Cleanup Source List
 

@@ -16,7 +16,7 @@ interface RenderBatchCandidateSelectionOptions {
 	queryFallbackReasons?: readonly string[];
 }
 
-export interface RenderBatchCandidateSelection {
+interface RenderBatchCandidateSelection {
 	candidateBatchIds: ReadonlySet<string>;
 	candidateObjects: readonly Object3D[];
 	counters: RenderBatchCandidateCounters;
@@ -45,26 +45,6 @@ export interface RenderBatchCandidateRegistry {
 	selectCandidates(
 		options: RenderBatchCandidateSelectionOptions,
 	): RenderBatchCandidateSelection;
-}
-
-export function createEmptyRenderBatchCandidateSelection(): RenderBatchCandidateSelection {
-	return {
-		candidateBatchIds: new Set(),
-		candidateObjects: [],
-		counters: {
-			registeredBatchCount: 0,
-			keyedBatchCount: 0,
-			representedItemKeyCount: 0,
-			visibleItemKeyCount: 0,
-			candidateBatchCount: 0,
-			itemKeyMatchedBatchCount: 0,
-			unboundFallbackBatchCount: 0,
-			explicitFallbackBatchCount: 0,
-			queryFallbackBatchCount: 0,
-			fallbackReasonCount: 0,
-		},
-		fallbackReasonSamples: [],
-	};
 }
 
 interface StoredRenderBatchCandidateBinding {

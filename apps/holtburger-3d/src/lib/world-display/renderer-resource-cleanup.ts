@@ -4,7 +4,7 @@ import type {
 	RendererResourceGraphNodeKind,
 } from "./renderer-resource-graph";
 
-export interface RendererResourceCleanupOwner {
+interface RendererResourceCleanupOwner {
 	disposeRendererResourceNode(
 		candidate: RendererResourceGraphDisposalCandidate,
 	): void;

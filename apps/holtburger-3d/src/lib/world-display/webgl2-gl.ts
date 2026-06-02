@@ -1,4 +1,4 @@
-export type Webgl2ShaderStage = "vertex" | "fragment";
+type Webgl2ShaderStage = "vertex" | "fragment";
 
 export interface Webgl2ProgramResource<
 	TAttributeName extends string = string,
@@ -202,7 +202,7 @@ export function createWebgl2Texture2D(
 	};
 }
 
-export function applyWebgl2SamplerParameters(
+function applyWebgl2SamplerParameters(
 	gl: WebGL2RenderingContext,
 	parameters: Webgl2SamplerParameters,
 ): void {

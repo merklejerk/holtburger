@@ -126,31 +126,6 @@ export function createBrowserFreeCameraState(
 	};
 }
 
-export function fitSceneCameraFrameToBounds(
-	bounds: SceneBoundsFrame,
-	aspect: number,
-	config = DEFAULT_BROWSER_FREE_CAMERA_CONFIG,
-): SceneCameraFrame {
-	const focusDistance = calculateSceneFocusDistance(bounds, aspect, config);
-	const axes = getCameraAxes({
-		yawRadians: config.defaultYawRadians,
-		pitchRadians: config.defaultPitchRadians,
-	});
-	const position = subtractVec3(
-		bounds.center,
-		scaleVec3(axes.forward, focusDistance),
-	);
-
-	return buildSceneCameraFrameFromPose({
-		position,
-		forward: axes.forward,
-		up: axes.up,
-		focusDistance,
-		aspect,
-		config,
-	});
-}
-
 export function createFallbackSceneCameraFrame(
 	aspect: number,
 	config = DEFAULT_BROWSER_FREE_CAMERA_CONFIG,

@@ -1,12 +1,12 @@
 import type { StagedWorldDrawUnitAssembly } from "./staged-world-assembly";
 import { createTranslationMat4, type RenderMat4 } from "./render-math";
 
-export interface CompactedGeometryMaterialSlot {
+interface CompactedGeometryMaterialSlot {
 	key: string;
 	index: number;
 }
 
-export interface CompactedGeometryDrawUnitMaterialSlot {
+interface CompactedGeometryDrawUnitMaterialSlot {
 	drawUnitId: string;
 	materialSlotKey: string;
 }
@@ -18,7 +18,7 @@ export interface CompactedGeometryDrawSliceInput {
 	drawUnitIds: readonly string[];
 }
 
-export type CompactedGeometryLayout = "position-uv-material-slot";
+type CompactedGeometryLayout = "position-uv-material-slot";
 
 export interface CompactedGeometryPlan<
 	TDrawSlice extends CompactedGeometryDrawSliceInput =
@@ -32,7 +32,7 @@ export interface CompactedGeometryPlan<
 	triangleCount: number;
 }
 
-export interface CompactedDrawRange {
+interface CompactedDrawRange {
 	drawUnitId: string;
 	firstIndex: number;
 	indexCount: number;

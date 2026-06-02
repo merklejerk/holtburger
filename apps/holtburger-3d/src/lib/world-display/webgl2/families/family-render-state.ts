@@ -1,4 +1,4 @@
-import type { Webgl2StateCache } from "./webgl2-state-cache";
+import type { Webgl2StateCache } from "../../webgl2-state-cache";
 
 export function applyOpaqueCompactedFamilyRenderState({
 	gl,

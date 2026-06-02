@@ -5,7 +5,7 @@ import {
 	planWebgl2RgbaTexturePageFamilyReplacement,
 	submitWebgl2RgbaTexturePageFamilyBatches,
 	type Webgl2RgbaTexturePageFamilyWorldProgram,
-} from "./webgl2-rgba-texture-page-family-submit";
+} from "./webgl2/families/rgba-texture-page-family-submit";
 import type {
 	Webgl2CompactedGeometryBatchResource,
 	Webgl2RgbaTexturePageFamilyResource,

@@ -1,15 +1,15 @@
-import type { RenderMat4 } from "./render-math";
+import type { RenderMat4 } from "../../render-math";
 import type {
 	Webgl2ProgramResource,
 	Webgl2Texture2DResource,
-} from "./webgl2-gl";
-import type { Webgl2StateCache } from "./webgl2-state-cache";
+} from "../../webgl2-gl";
+import type { Webgl2StateCache } from "../../webgl2-state-cache";
 import type {
 	Webgl2CompactedGeometryBatchResource,
 	Webgl2IndexedPalettedFamilyResource,
-} from "./webgl2-compacted-geometry-resources";
-import { applyOpaqueCompactedFamilyRenderState } from "./webgl2-family-render-state";
-import type { Webgl2DetailTextureAtlasTextureResource } from "./webgl2-texture-atlas-generation";
+} from "../../webgl2-compacted-geometry-resources";
+import { applyOpaqueCompactedFamilyRenderState } from "./family-render-state";
+import type { Webgl2DetailTextureAtlasTextureResource } from "../../webgl2-texture-atlas-generation";
 
 export const WEBGL2_INDEXED_PALETTED_MAX_MATERIAL_SLOTS = 128;
 

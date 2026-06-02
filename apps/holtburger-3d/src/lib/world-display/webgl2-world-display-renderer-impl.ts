@@ -35,11 +35,11 @@ import {
 import {
 	WEBGL2_RGBA_TEXTURE_PAGE_MAX_MATERIAL_SLOTS,
 	type Webgl2RgbaTexturePageFamilyWorldProgram,
-} from "./webgl2-rgba-texture-page-family-submit";
+} from "./webgl2/families/rgba-texture-page-family-submit";
 import {
 	WEBGL2_INDEXED_PALETTED_MAX_MATERIAL_SLOTS,
 	type Webgl2IndexedPalettedFamilyWorldProgram,
-} from "./webgl2-indexed-paletted-family-submit";
+} from "./webgl2/families/indexed-paletted-family-submit";
 import {
 	createWebgl2PortalCompositeTargetSet,
 	createWebgl2SceneDomainTargetSet,

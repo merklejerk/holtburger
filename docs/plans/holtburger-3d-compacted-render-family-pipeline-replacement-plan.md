@@ -2137,6 +2137,10 @@ Progress completed:
 - Cleaned per-landblock draw-slice keys to replace source-partition `table=` segments with the
   landblock-local material table range. Runtime picker diagnostics should now agree with the local
   material slot indices actually uploaded for RGBA and indexed-paletted compacted family resources.
+- Fixed compacted family render-state ownership after a regression where distant interior/static
+  structures could appear through walls. The RGBA and indexed-paletted compacted family submitters now
+  reset opaque depth/blend/cull state before drawing their slices instead of inheriting whatever state
+  the last retained direct draw left behind.
 - Added focused tests proving RGBA and indexed-paletted material-table overflow rolls into additional
   partitions, while real atlas capacity overflow remains `atlas-full`.
 
@@ -2154,6 +2158,9 @@ Course correction:
 - Source family partition slice keys may describe global planning ranges. Once a partition is split
   into landblock-local compacted batches, slice keys must be regenerated or normalized so diagnostic
   identity matches the local material table carried by that resource.
+- Render family submitters must own the WebGL state required by their family. Direct draw state is not
+  a valid precondition for compacted family drawing; otherwise alpha/blend/depth state from retained
+  direct draws can leak into compacted static/interior submissions.
 
 Immediate next step:
 

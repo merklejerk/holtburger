@@ -5,6 +5,7 @@ import type {
 	Webgl2CompactedGeometryBatchResource,
 	Webgl2RgbaTexturePageFamilyResource,
 } from "./webgl2-compacted-geometry-resources";
+import { applyOpaqueCompactedFamilyRenderState } from "./webgl2-family-render-state";
 import type { Webgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
 
 export const WEBGL2_RGBA_TEXTURE_PAGE_MAX_MATERIAL_SLOTS = 128;
@@ -166,6 +167,7 @@ export function submitWebgl2RgbaTexturePageFamilyBatches({
 		metrics.shaderDrawCallCount += 0;
 	}
 	metrics.shaderDrawCallCount += 0;
+	applyOpaqueCompactedFamilyRenderState({ gl, stateCache });
 	gl.uniform1i(program.uniforms.uAtlasTexture, 0);
 	gl.uniform1i(program.uniforms.uDetailAtlasTexture, 1);
 	gl.uniformMatrix4fv(

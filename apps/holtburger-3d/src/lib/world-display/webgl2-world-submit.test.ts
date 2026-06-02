@@ -24,6 +24,7 @@ import type {
 import type { Webgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
 import type { Webgl2RgbaTexturePageFamilyWorldProgram } from "./webgl2-rgba-texture-page-family-submit";
 import type { Webgl2IndexedPalettedFamilyWorldProgram } from "./webgl2-indexed-paletted-family-submit";
+import type { LegacyMaterialBehaviorDto } from "./material-behavior";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
 import {
 	Webgl2StateCache,
@@ -389,7 +390,9 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			rgbaTexturePageFamilyProgram: createRgbaTexturePageFamilyProgram(),
 			rgbaTexturePageFamilyResources: {
 				batches: [createRgbaTexturePageFamilyBatch(["atlas"])],
-				rgbaTexturePageFamilies: [createRgbaTexturePageFamilyResource(["atlas"])],
+				rgbaTexturePageFamilies: [
+					createRgbaTexturePageFamilyResource(["atlas"]),
+				],
 				generation: createTextureAtlasGeneration({ atlasEntryKey: "entry/a" }),
 			},
 			drawUnitsById,
@@ -504,7 +507,9 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			rgbaTexturePageFamilyProgram: createRgbaTexturePageFamilyProgram(),
 			rgbaTexturePageFamilyResources: {
 				batches: [createRgbaTexturePageFamilyBatch(["atlas"])],
-				rgbaTexturePageFamilies: [createRgbaTexturePageFamilyResource(["atlas"])],
+				rgbaTexturePageFamilies: [
+					createRgbaTexturePageFamilyResource(["atlas"]),
+				],
 				generation: createTextureAtlasGeneration(),
 			},
 			drawUnitsById,
@@ -518,9 +523,13 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		expect(metrics.rgbaTexturePageFamilyReplacedDrawUnitTriangleCount).toBe(1);
 		expect(metrics.rgbaTexturePageFamilyRetainedDirectDrawUnitCount).toBe(1);
 		expect(metrics.rgbaTexturePageFamilyShaderDrawCallCount).toBe(1);
-		expect(metrics.rgbaTexturePageFamilySubmittedSliceRepresentedDrawUnitCount).toBe(1);
+		expect(
+			metrics.rgbaTexturePageFamilySubmittedSliceRepresentedDrawUnitCount,
+		).toBe(1);
 		expect(metrics.rgbaTexturePageFamilySubmittedTriangleCount).toBe(1);
-		expect(metrics.rgbaTexturePageFamilyConservativeOverdrawTriangleCount).toBe(0);
+		expect(metrics.rgbaTexturePageFamilyConservativeOverdrawTriangleCount).toBe(
+			0,
+		);
 		expect(metrics.rgbaTexturePageFamilyConservativeOverdrawRatio).toBe(0);
 		expect(metrics.rgbaTexturePageFamilyOriginalDrawCallEstimateCount).toBe(2);
 		expect(metrics.rgbaTexturePageFamilySubmittedDrawCallEstimateCount).toBe(2);
@@ -570,9 +579,13 @@ describe("submitWebgl2FlatWorldFrame", () => {
 
 		expect(metrics.rgbaTexturePageFamilyReplacedDrawUnitCount).toBe(1);
 		expect(metrics.rgbaTexturePageFamilyReplacedDrawUnitTriangleCount).toBe(1);
-		expect(metrics.rgbaTexturePageFamilySubmittedSliceRepresentedDrawUnitCount).toBe(2);
+		expect(
+			metrics.rgbaTexturePageFamilySubmittedSliceRepresentedDrawUnitCount,
+		).toBe(2);
 		expect(metrics.rgbaTexturePageFamilySubmittedTriangleCount).toBe(2);
-		expect(metrics.rgbaTexturePageFamilyConservativeOverdrawTriangleCount).toBe(1);
+		expect(metrics.rgbaTexturePageFamilyConservativeOverdrawTriangleCount).toBe(
+			1,
+		);
 		expect(metrics.rgbaTexturePageFamilyConservativeOverdrawRatio).toBe(0.5);
 	});
 
@@ -592,7 +605,9 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			rgbaTexturePageFamilyProgram: createRgbaTexturePageFamilyProgram(),
 			rgbaTexturePageFamilyResources: {
 				batches: [createRgbaTexturePageFamilyBatch(["not-visible"])],
-				rgbaTexturePageFamilies: [createRgbaTexturePageFamilyResource(["not-visible"])],
+				rgbaTexturePageFamilies: [
+					createRgbaTexturePageFamilyResource(["not-visible"]),
+				],
 				generation: createTextureAtlasGeneration(),
 			},
 			viewProjectionMatrix: createIdentityMat4(),
@@ -605,6 +620,59 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		expect(metrics.rgbaTexturePageFamilyNoVisibleInteriorRouteCount).toBe(1);
 		expect(metrics.rgbaTexturePageFamilyNoVisibleOtherRouteCount).toBe(0);
 		expect(metrics.rgbaTexturePageFamilyFallbackSamples).toEqual([]);
+	});
+
+	it("resets opaque render state before compacted family draws after blended direct draws", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+		const drawUnits = [
+			createDrawUnit({
+				id: "atlas",
+				materialKind: "direct-texture",
+				materialKey: "atlas-material",
+			}),
+			createDrawUnit({
+				id: "blended-direct",
+				materialBehavior: createBlendedMaterialBehavior(),
+			}),
+		];
+
+		submitWebgl2FlatWorldDrawUnits({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			terrainBlendProgram: createTerrainBlendProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			rgbaTexturePageFamilyProgram: createRgbaTexturePageFamilyProgram(),
+			rgbaTexturePageFamilyResources: {
+				batches: [createRgbaTexturePageFamilyBatch(["atlas"])],
+				rgbaTexturePageFamilies: [
+					createRgbaTexturePageFamilyResource(["atlas"]),
+				],
+				generation: createTextureAtlasGeneration(),
+			},
+			viewProjectionMatrix: createIdentityMat4(),
+			drawUnits,
+		});
+
+		const directDrawIndex = gl.calls.findIndex(
+			(call) => call === "drawElements:4:3:5123:0",
+		);
+		const compactedDrawIndex = gl.calls.findIndex(
+			(call, index) =>
+				index > directDrawIndex && call === "drawElements:4:3:5123:0",
+		);
+
+		expect(directDrawIndex).toBeGreaterThanOrEqual(0);
+		expect(compactedDrawIndex).toBeGreaterThan(directDrawIndex);
+		expect(gl.calls.slice(directDrawIndex, compactedDrawIndex)).toContain(
+			"depthMask:true",
+		);
+		expect(gl.calls.slice(directDrawIndex, compactedDrawIndex)).toContain(
+			`disable:${gl.BLEND}`,
+		);
 	});
 
 	it("enables backface culling only for terrain when requested", () => {
@@ -783,12 +851,16 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		expect(metrics.indexedPalettedFamilyShaderDrawCallCount).toBe(1);
 		expect(metrics.indexedPalettedFamilySubmittedTriangleCount).toBe(1);
 		expect(metrics.indexedPalettedFamilyRetainedDirectDrawUnitCount).toBe(1);
-		expect(metrics.visibleRetainedDirectDrawUnitCountsByCompactionFamily).toEqual({
+		expect(
+			metrics.visibleRetainedDirectDrawUnitCountsByCompactionFamily,
+		).toEqual({
 			"flat-constant-color": 1,
 		});
 		expect(gl.boundTextures).toContain(indexTexture);
 		expect(gl.boundTextures).toContain(paletteTexture);
-		expect(gl.calls.filter((call) => call.startsWith("drawElements"))).toHaveLength(2);
+		expect(
+			gl.calls.filter((call) => call.startsWith("drawElements")),
+		).toHaveLength(2);
 	});
 
 	it("binds detail atlas pages for compacted indexed family draw slices", () => {
@@ -907,6 +979,7 @@ function createDrawUnit({
 	vertexArray = {} as WebGLVertexArrayObject,
 	kind = "static",
 	sceneDomain,
+	materialBehavior = null,
 }: {
 	id: string;
 	kind?: Webgl2WorldDrawUnit["kind"];
@@ -923,6 +996,7 @@ function createDrawUnit({
 	atlasWrapT?: "clamp" | "repeat";
 	baseTexturePageBinding?: Webgl2WorldDrawUnit["texturePageBindings"][number];
 	vertexArray?: WebGLVertexArrayObject;
+	materialBehavior?: LegacyMaterialBehaviorDto | null;
 }): Webgl2WorldDrawUnit {
 	const defaultTexturePageBinding = texture
 		? createSingleEntryBaseTexturePageBinding(texture, atlasWrapS, atlasWrapT)
@@ -967,7 +1041,7 @@ function createDrawUnit({
 		materialKind,
 		materialKey,
 		materialFallbackReason: null,
-		materialBehavior: null,
+		materialBehavior,
 		directTextureSamplingPolicy: texture
 			? {
 					wrapS: atlasWrapS,
@@ -1047,6 +1121,26 @@ function createDrawUnit({
 		bvhFallbackReason: null,
 		staticPartCount: 1,
 		staticObjectKeys: [id],
+	};
+}
+
+function createBlendedMaterialBehavior(): LegacyMaterialBehaviorDto {
+	return {
+		color: [1, 1, 1],
+		emissive: [0, 0, 0],
+		emissiveIntensity: 0,
+		opacity: 1,
+		transparent: true,
+		alphaTest: 0,
+		side: "front",
+		blend: {
+			mode: "alpha",
+			enabled: true,
+			srcFactor: "src-alpha",
+			dstFactor: "one-minus-src-alpha",
+			depthWrite: false,
+		},
+		unsupportedSurfaceFlags: [],
 	};
 }
 

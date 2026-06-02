@@ -21,6 +21,7 @@ import {
 	type StagedWorldAssemblyGraphRecord,
 	type StagedWorldDrawUnitAssembly,
 } from "./staged-world-assembly";
+import { buildStagedTerrainGeometry } from "./staged-world-geometry";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
 import type {
 	IndexedMaterialDataCache,
@@ -28,10 +29,11 @@ import type {
 } from "./indexed-material-data";
 import type { StagedWorldMaterialPlanCache } from "./staged-world-materials";
 import type { ResolvedRegionDetailOverlayPlan } from "./region-detail-overlays";
-import type { RenderMat4, RenderVec4 } from "./render-math";
+import { createTranslationMat4, type RenderMat4, type RenderVec4 } from "./render-math";
 import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import type { RenderChunkTransform } from "./render-anchor";
 import { WORLD_RENDER_DOMAIN } from "./render-domains";
+import { deriveLandblockRenderChunkPlacement } from "./render-chunks";
 import {
 	materialDecisionGraphNodeKey,
 	atlasGenerationGraphNodeKey,
@@ -93,9 +95,10 @@ import {
 	releaseWebgl2CompactedGeometryBatchGraphLeases,
 	syncWebgl2CompactedGeometryResources,
 } from "./webgl2/resources/compacted-geometry-sync";
-import type {
-	TerrainBlendPlan,
-	TerrainBlendTextureRef,
+import {
+	buildTerrainBlendPlanSet,
+	type TerrainBlendPlan,
+	type TerrainBlendTextureRef,
 } from "./terrain-blend-plan";
 import type { Webgl2SceneDomain } from "./webgl2-scene-domain-targets";
 import {
@@ -103,6 +106,20 @@ import {
 	resolveDirectDrawBaseTexturePageBinding,
 	type TexturePageBinding,
 } from "./texture-pages/texture-page-binding";
+import { deriveTerrainTileBatchBvhBinding } from "./non-instanced-bvh-bindings";
+import {
+	collectTerrainTileCompatibilityTextureKeys,
+	describeTerrainTileGeometrySignature,
+	describeTerrainTileGraphSignature,
+	destroyWebgl2TerrainTileCompatibilityDraw,
+	destroyWebgl2TerrainTileResource,
+	terrainTileResourceId,
+	type Webgl2TerrainBlendResources,
+	type Webgl2TerrainTextureBinding,
+	type Webgl2TerrainTileCompatibilityDrawResource,
+	type Webgl2TerrainTileResource,
+	type Webgl2TerrainTileReadiness,
+} from "./webgl2/resources/terrain-tile-resources";
 
 export interface Webgl2WorldDrawUnit {
 	id: string;
@@ -145,9 +162,15 @@ export interface Webgl2WorldDrawUnit {
 export interface Webgl2WorldResourceStore {
 	drawUnits: Webgl2WorldDrawUnit[];
 	drawUnitsById: Map<string, Webgl2WorldDrawUnit>;
+	terrainTiles: Webgl2TerrainTileResource[];
+	terrainTilesById: Map<string, Webgl2TerrainTileResource>;
 	graphLeasesByDrawUnitId: Map<string, RendererResourceGraphLease>;
 	graphSignaturesByDrawUnitId: Map<string, string>;
+	graphLeasesByTerrainTileId: Map<string, RendererResourceGraphLease>;
+	graphSignaturesByTerrainTileId: Map<string, string>;
 	boundGraph: RendererResourceGraph | null;
+	terrainTileCount: number;
+	terrainTileCompatibilityDrawCount: number;
 	terrainDrawUnitCount: number;
 	structuredInteriorDrawUnitCount: number;
 	staticDrawUnitCount: number;
@@ -226,21 +249,6 @@ export interface Webgl2WorldResourceStore {
 	materialPlanCache: StagedWorldMaterialPlanCache;
 }
 
-export interface Webgl2TerrainBlendResources {
-	plan: TerrainBlendPlan;
-	base: Webgl2TerrainTextureBinding;
-	overlays: readonly {
-		terrain: Webgl2TerrainTextureBinding;
-		alpha: Webgl2TerrainTextureBinding;
-		rotation: number;
-	}[];
-	roads: readonly {
-		road: Webgl2TerrainTextureBinding;
-		alpha: Webgl2TerrainTextureBinding;
-		rotation: number;
-	}[];
-}
-
 export interface Webgl2DetailOverlayResources {
 	key: string;
 	texture: Webgl2Texture2DResource;
@@ -266,21 +274,19 @@ export interface Webgl2IndexedMaterialResources {
 
 const warnedUnsupportedDetailAtlasTextureKeys = new Set<string>();
 
-interface Webgl2TerrainTextureBinding {
-	key: string;
-	texture: Webgl2Texture2DResource;
-	tiling: number;
-	wrapS: "clamp" | "repeat";
-	wrapT: "clamp" | "repeat";
-}
-
 export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 	return {
 		drawUnits: [],
 		drawUnitsById: new Map(),
+		terrainTiles: [],
+		terrainTilesById: new Map(),
 		graphLeasesByDrawUnitId: new Map(),
 		graphSignaturesByDrawUnitId: new Map(),
+		graphLeasesByTerrainTileId: new Map(),
+		graphSignaturesByTerrainTileId: new Map(),
 		boundGraph: null,
+		terrainTileCount: 0,
+		terrainTileCompatibilityDrawCount: 0,
 		terrainDrawUnitCount: 0,
 		structuredInteriorDrawUnitCount: 0,
 		staticDrawUnitCount: 0,
@@ -399,9 +405,40 @@ export function syncWebgl2WorldResources({
 				materialPlanCache: store.materialPlanCache,
 			}),
 	);
+	const chunkOffsetByKey = new Map(
+		renderChunkTransforms.map((transform) => [
+			transform.chunkKey,
+			transform.offset,
+		]),
+	);
 	const nextDrawUnits: Webgl2WorldDrawUnit[] = [];
+	const nextTerrainTiles: Webgl2TerrainTileResource[] = [];
 	const retainedDrawUnitIds = new Set<string>();
+	const retainedTerrainTileIds = new Set<string>();
 	const retainedTextureKeys = new Set<string>();
+	profileBrowserJsScope("webgl2.resource.createOrReuseTerrainTiles", () => {
+		for (const tile of terrainScene.tiles) {
+			const terrainTile = createOrReuseWebgl2TerrainTile({
+				assetState,
+				chunkOffsetByKey,
+				gl,
+				store,
+				tile,
+				retainedTerrainTileIds,
+				materialTextureCapabilities,
+				textureFilteringMode,
+			});
+			if (!terrainTile) {
+				continue;
+			}
+			nextTerrainTiles.push(terrainTile);
+			for (const textureKey of collectTerrainTileCompatibilityTextureKeys(
+				terrainTile,
+			)) {
+				retainedTextureKeys.add(textureKey);
+			}
+		}
+	});
 	profileBrowserJsScope("webgl2.resource.createOrReuseDrawUnits", () => {
 		for (const drawUnit of assembly.drawUnits) {
 			const webgl2DrawUnit = createOrReuseWebgl2DrawUnit({
@@ -431,6 +468,13 @@ export function syncWebgl2WorldResources({
 		}
 	});
 
+	for (const [terrainTileId, terrainTile] of store.terrainTilesById) {
+		if (!retainedTerrainTileIds.has(terrainTileId)) {
+			destroyWebgl2TerrainTileResource(terrainTile);
+			store.terrainTilesById.delete(terrainTileId);
+		}
+	}
+
 	for (const [drawUnitId, drawUnit] of store.drawUnitsById) {
 		if (!retainedDrawUnitIds.has(drawUnitId)) {
 			destroyWebgl2DrawUnit(drawUnit);
@@ -439,6 +483,12 @@ export function syncWebgl2WorldResources({
 	}
 
 	store.drawUnits = nextDrawUnits;
+	store.terrainTiles = nextTerrainTiles;
+	store.terrainTileCount = store.terrainTiles.length;
+	store.terrainTileCompatibilityDrawCount = store.terrainTiles.reduce(
+		(total, tile) => total + tile.compatibilityDraws.length,
+		0,
+	);
 	store.terrainDrawUnitCount = store.drawUnits.filter(
 		(drawUnit) => drawUnit.kind === "terrain",
 	).length;
@@ -613,6 +663,11 @@ export function syncWebgl2WorldResources({
 		records: assembly.graphRecords,
 		retainedDrawUnitIds,
 	});
+	syncWebgl2TerrainTileGraph({
+		graph: rendererResourceGraph,
+		store,
+		retainedTerrainTileIds,
+	});
 	syncWebgl2CompactedGeometryResources({
 		gl,
 		store,
@@ -630,21 +685,33 @@ export function destroyWebgl2WorldResources(
 		for (const lease of store.graphLeasesByDrawUnitId.values()) {
 			store.boundGraph.releaseLease(lease);
 		}
+		for (const lease of store.graphLeasesByTerrainTileId.values()) {
+			store.boundGraph.releaseLease(lease);
+		}
 	}
 	releaseWebgl2TextureAtlasGenerationGraphLease(store);
 	releaseWebgl2CompactedGeometryBatchGraphLeases(store);
 	for (const drawUnit of store.drawUnits) {
 		destroyWebgl2DrawUnit(drawUnit);
 	}
+	for (const terrainTile of store.terrainTiles) {
+		destroyWebgl2TerrainTileResource(terrainTile);
+	}
 	store.drawUnits = [];
 	store.drawUnitsById.clear();
+	store.terrainTiles = [];
+	store.terrainTilesById.clear();
 	store.graphLeasesByDrawUnitId.clear();
 	store.graphSignaturesByDrawUnitId.clear();
+	store.graphLeasesByTerrainTileId.clear();
+	store.graphSignaturesByTerrainTileId.clear();
 	store.textureAtlasGenerationGraph = null;
 	store.textureAtlasGenerationGraphLease = null;
 	store.compactedGeometryBatchGraph = null;
 	store.compactedGeometryBatchGraphLeasesByKey.clear();
 	store.boundGraph = null;
+	store.terrainTileCount = 0;
+	store.terrainTileCompatibilityDrawCount = 0;
 	store.terrainDrawUnitCount = 0;
 	store.structuredInteriorDrawUnitCount = 0;
 	store.staticDrawUnitCount = 0;
@@ -724,6 +791,279 @@ const DEFAULT_WEBGL2_COMPACTION_FAMILY_PLANNING_POLICY: CompactionFamilyPlanning
 		baseGutterPixels: 2,
 		maxMaterialSlotsPerDraw: 128,
 	};
+
+function createOrReuseWebgl2TerrainTile({
+	assetState,
+	chunkOffsetByKey,
+	gl,
+	store,
+	tile,
+	retainedTerrainTileIds,
+	materialTextureCapabilities,
+	textureFilteringMode,
+}: {
+	assetState: AssetChannelState;
+	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
+	gl: WebGL2RenderingContext;
+	store: Webgl2WorldResourceStore;
+	tile: TerrainSceneModel["tiles"][number];
+	retainedTerrainTileIds: Set<string>;
+	materialTextureCapabilities: MaterialTextureCapabilities;
+	textureFilteringMode: TextureFilteringMode;
+}): Webgl2TerrainTileResource | null {
+	const placement = deriveLandblockRenderChunkPlacement(tile.landblockId);
+	const chunkOffset = chunkOffsetByKey.get(placement.chunkKey);
+	if (!chunkOffset) {
+		return null;
+	}
+	const geometry = buildStagedTerrainGeometry(tile.mesh);
+	if (geometry.triangleCount === 0) {
+		return null;
+	}
+	const id = terrainTileResourceId(tile);
+	const readiness = deriveWebgl2TerrainTileReadiness(tile);
+	const bvhBinding = deriveTerrainTileBatchBvhBinding(tile);
+	const modelMatrix = createTranslationMat4({
+		x: chunkOffset.x + tile.chunkLocalOffset.x,
+		y: chunkOffset.y + tile.chunkLocalOffset.y,
+		z: chunkOffset.z + tile.chunkLocalOffset.z,
+	});
+	const compatibilityDraws = createWebgl2TerrainTileCompatibilityDraws({
+		assetState,
+		gl,
+		store,
+		tile,
+		materialTextureCapabilities,
+		textureFilteringMode,
+	});
+	const geometrySignature = describeTerrainTileGeometrySignature(geometry);
+	const previous = store.terrainTilesById.get(id);
+	if (
+		previous &&
+		previous.geometrySignature === geometrySignature &&
+		describeTerrainTileReadinessSignature(previous.readiness) ===
+			describeTerrainTileReadinessSignature(readiness)
+	) {
+		for (const draw of previous.compatibilityDraws) {
+			destroyWebgl2TerrainTileCompatibilityDraw(draw);
+		}
+		previous.label = tile.label;
+		previous.placementKey = placement.chunkKey;
+		previous.modelMatrix = modelMatrix;
+		previous.readiness = readiness;
+		previous.dataSource = tile.dataSource;
+		previous.bvhItemKeys = [...bvhBinding.itemKeys];
+		previous.bvhFallbackReason = bvhBinding.fallbackReason;
+		previous.compatibilityDraws = compatibilityDraws;
+		retainedTerrainTileIds.add(id);
+		return previous;
+	}
+	if (previous) {
+		destroyWebgl2TerrainTileResource(previous);
+	}
+	const buffers = createWebgl2IndexedGeometryBuffers(gl, {
+		id,
+		geometry,
+	});
+	const resource = {
+		id,
+		assetId: tile.assetId,
+		landblockId: tile.landblockId,
+		label: tile.label,
+		placementKey: placement.chunkKey,
+		geometrySignature,
+		...buffers,
+		vertexCount: geometry.indices.length,
+		triangleCount: geometry.triangleCount,
+		modelMatrix,
+		readiness,
+		dataSource: tile.dataSource,
+		bvhItemKeys: [...bvhBinding.itemKeys],
+		bvhFallbackReason: bvhBinding.fallbackReason,
+		compatibilityDraws,
+	} satisfies Webgl2TerrainTileResource;
+	store.terrainTilesById.set(id, resource);
+	retainedTerrainTileIds.add(id);
+	return resource;
+}
+
+function createWebgl2TerrainTileCompatibilityDraws({
+	assetState,
+	gl,
+	store,
+	tile,
+	materialTextureCapabilities,
+	textureFilteringMode,
+}: {
+	assetState: AssetChannelState;
+	gl: WebGL2RenderingContext;
+	store: Webgl2WorldResourceStore;
+	tile: TerrainSceneModel["tiles"][number];
+	materialTextureCapabilities: MaterialTextureCapabilities;
+	textureFilteringMode: TextureFilteringMode;
+}): Webgl2TerrainTileCompatibilityDrawResource[] {
+	const planSet =
+		tile.materialResources.status === "ready"
+			? buildTerrainBlendPlanSet({
+					assetState,
+					regionNumber: tile.materialResources.regionNumber,
+					pcodes: tile.mesh.quads.map((quad) => quad.pcode),
+				})
+			: null;
+	if (!planSet) {
+		const geometry = buildStagedTerrainGeometry(tile.mesh);
+		if (geometry.triangleCount === 0) {
+			return [];
+		}
+		return [
+			createWebgl2TerrainTileCompatibilityDraw({
+				gl,
+				id: `${terrainTileResourceId(tile)}/compatibility-debug`,
+				geometry,
+				pcode: null,
+				blend: null,
+				preparedAssetIds: [tile.assetId],
+			}),
+		];
+	}
+	return planSet.plans.flatMap((plan) => {
+		const geometry = buildStagedTerrainGeometry(tile.mesh, { pcode: plan.pcode });
+		if (geometry.triangleCount === 0) {
+			return [];
+		}
+		const blend = resolveWebgl2TerrainBlendPlanResources({
+			assetState,
+			gl,
+			store,
+			plan,
+			hasUvs: geometry.uvs !== null,
+			materialTextureCapabilities,
+			textureFilteringMode,
+		});
+		if (!blend) {
+			return [];
+		}
+		return [
+			createWebgl2TerrainTileCompatibilityDraw({
+				gl,
+				id: `${terrainTileResourceId(tile)}/compatibility-pcode/${plan.pcode}`,
+				geometry,
+				pcode: plan.pcode,
+				blend,
+				preparedAssetIds: [
+					tile.assetId,
+					tile.materialResources.terrainMaterialAssetId,
+					...collectTerrainBlendPlanPreparedAssetIds(plan),
+				],
+			}),
+		];
+	});
+}
+
+function createWebgl2TerrainTileCompatibilityDraw({
+	gl,
+	id,
+	geometry,
+	pcode,
+	blend,
+	preparedAssetIds,
+}: {
+	gl: WebGL2RenderingContext;
+	id: string;
+	geometry: ReturnType<typeof buildStagedTerrainGeometry>;
+	pcode: number | null;
+	blend: Webgl2TerrainBlendResources | null;
+	preparedAssetIds: readonly string[];
+}): Webgl2TerrainTileCompatibilityDrawResource {
+	const geometrySignature = describeTerrainTileGeometrySignature(geometry);
+	return {
+		id,
+		pcode,
+		geometrySignature,
+		...createWebgl2IndexedGeometryBuffers(gl, { id, geometry }),
+		vertexCount: geometry.indices.length,
+		triangleCount: geometry.triangleCount,
+		blend,
+		preparedAssetIds,
+	};
+}
+
+function createWebgl2IndexedGeometryBuffers(
+	gl: WebGL2RenderingContext,
+	{
+		id,
+		geometry,
+	}: {
+		id: string;
+		geometry: ReturnType<typeof buildStagedTerrainGeometry>;
+	},
+): Pick<
+	Webgl2TerrainTileResource,
+	"vertexArray" | "vertexBuffer" | "uvBuffer" | "indexBuffer" | "indexType"
+> {
+	const vertexBuffer = createWebgl2ArrayBuffer(gl, {
+		label: `${id}/positions`,
+		data: geometry.positions,
+	});
+	const indexBuffer = createWebgl2ElementArrayBuffer(gl, {
+		label: `${id}/indices`,
+		data: geometry.indices,
+	});
+	const uvBuffer = geometry.uvs
+		? createWebgl2ArrayBuffer(gl, {
+				label: `${id}/uvs`,
+				data: geometry.uvs,
+			})
+		: null;
+	const vertexArray = createWebgl2VertexArray(gl, {
+		label: `${id}/vertex-array`,
+		configure() {
+			gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer.buffer);
+			gl.enableVertexAttribArray(0);
+			gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+			if (uvBuffer) {
+				gl.bindBuffer(gl.ARRAY_BUFFER, uvBuffer.buffer);
+				gl.enableVertexAttribArray(1);
+				gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
+			}
+			gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer.buffer);
+			gl.bindBuffer(gl.ARRAY_BUFFER, null);
+		},
+	});
+	return {
+		vertexArray,
+		vertexBuffer,
+		uvBuffer,
+		indexBuffer,
+		indexType:
+			geometry.indices instanceof Uint32Array
+				? gl.UNSIGNED_INT
+				: gl.UNSIGNED_SHORT,
+	};
+}
+
+function deriveWebgl2TerrainTileReadiness(
+	tile: TerrainSceneModel["tiles"][number],
+): Webgl2TerrainTileReadiness {
+	if (tile.materialResources.status === "ready") {
+		return {
+			status: "ready",
+			terrainMaterialAssetId: tile.materialResources.terrainMaterialAssetId,
+		};
+	}
+	return {
+		status: "fallback-debug",
+		reason: "terrain material resources are unresolved",
+	};
+}
+
+function describeTerrainTileReadinessSignature(
+	readiness: Webgl2TerrainTileReadiness,
+): string {
+	return readiness.status === "ready"
+		? `${readiness.status}:${readiness.terrainMaterialAssetId}`
+		: `${readiness.status}:${readiness.reason}`;
+}
 
 function createOrReuseWebgl2DrawUnit({
 	assetState,
@@ -1537,7 +1877,37 @@ function resolveWebgl2TerrainBlendResources({
 	if (drawUnit.material.kind !== "terrain-blend" || !drawUnit.geometry.uvs) {
 		return null;
 	}
-	const plan = drawUnit.material.plan;
+	return resolveWebgl2TerrainBlendPlanResources({
+		assetState,
+		gl,
+		store,
+		plan: drawUnit.material.plan,
+		hasUvs: drawUnit.geometry.uvs !== null,
+		materialTextureCapabilities,
+		textureFilteringMode,
+	});
+}
+
+function resolveWebgl2TerrainBlendPlanResources({
+	assetState,
+	gl,
+	store,
+	plan,
+	hasUvs,
+	materialTextureCapabilities,
+	textureFilteringMode,
+}: {
+	assetState: AssetChannelState;
+	gl: WebGL2RenderingContext;
+	store: Webgl2WorldResourceStore;
+	plan: TerrainBlendPlan;
+	hasUvs: boolean;
+	materialTextureCapabilities: MaterialTextureCapabilities;
+	textureFilteringMode: TextureFilteringMode;
+}): Webgl2TerrainBlendResources | null {
+	if (!hasUvs) {
+		return null;
+	}
 	const base = resolveWebgl2TerrainTextureBinding({
 		assetState,
 		gl,
@@ -1595,6 +1965,31 @@ function resolveWebgl2TerrainBlendResources({
 				: [];
 		}),
 	};
+}
+
+function collectTerrainBlendPlanPreparedAssetIds(
+	plan: TerrainBlendPlan,
+): readonly string[] {
+	return uniqueSortedStrings([
+		...terrainTextureAssetIds(plan.base),
+		...plan.overlays.flatMap((overlay) => [
+			...terrainTextureAssetIds(overlay.terrain),
+			...terrainTextureAssetIds(overlay.alpha),
+		]),
+		...plan.roads.flatMap((road) => [
+			...terrainTextureAssetIds(road.road),
+			...terrainTextureAssetIds(road.alpha),
+		]),
+	]);
+}
+
+function terrainTextureAssetIds(
+	texture: TerrainBlendPlan["base"],
+): readonly string[] {
+	return [
+		texture.textureAssetId,
+		`render-surface/${formatHex32(texture.renderSurface.renderSurfaceId)}`,
+	];
 }
 
 function resolveWebgl2TerrainTextureBinding({
@@ -2341,7 +2736,6 @@ function releaseWebgl2TextureAtlasGenerationGraphLease(
 	store.textureAtlasGenerationGraph = null;
 }
 
-
 function syncWebgl2AssemblyGraph({
 	graph,
 	store,
@@ -2358,9 +2752,14 @@ function syncWebgl2AssemblyGraph({
 			for (const lease of store.graphLeasesByDrawUnitId.values()) {
 				store.boundGraph.releaseLease(lease);
 			}
+			for (const lease of store.graphLeasesByTerrainTileId.values()) {
+				store.boundGraph.releaseLease(lease);
+			}
 		}
 		store.graphLeasesByDrawUnitId.clear();
 		store.graphSignaturesByDrawUnitId.clear();
+		store.graphLeasesByTerrainTileId.clear();
+		store.graphSignaturesByTerrainTileId.clear();
 		store.boundGraph = null;
 		return;
 	}
@@ -2368,8 +2767,13 @@ function syncWebgl2AssemblyGraph({
 		for (const lease of store.graphLeasesByDrawUnitId.values()) {
 			store.boundGraph.releaseLease(lease);
 		}
+		for (const lease of store.graphLeasesByTerrainTileId.values()) {
+			store.boundGraph.releaseLease(lease);
+		}
 		store.graphLeasesByDrawUnitId.clear();
 		store.graphSignaturesByDrawUnitId.clear();
+		store.graphLeasesByTerrainTileId.clear();
+		store.graphSignaturesByTerrainTileId.clear();
 	}
 	store.boundGraph = graph;
 
@@ -2449,6 +2853,104 @@ function syncWebgl2AssemblyGraph({
 		graph.releaseLease(lease);
 		store.graphLeasesByDrawUnitId.delete(drawUnitId);
 		store.graphSignaturesByDrawUnitId.delete(drawUnitId);
+	}
+}
+
+function syncWebgl2TerrainTileGraph({
+	graph,
+	store,
+	retainedTerrainTileIds,
+}: {
+	graph: RendererResourceGraph | undefined;
+	store: Webgl2WorldResourceStore;
+	retainedTerrainTileIds: ReadonlySet<string>;
+}): void {
+	if (!graph) {
+		if (store.boundGraph) {
+			for (const lease of store.graphLeasesByTerrainTileId.values()) {
+				store.boundGraph.releaseLease(lease);
+			}
+		}
+		store.graphLeasesByTerrainTileId.clear();
+		store.graphSignaturesByTerrainTileId.clear();
+		return;
+	}
+	if (store.boundGraph && store.boundGraph !== graph) {
+		for (const lease of store.graphLeasesByTerrainTileId.values()) {
+			store.boundGraph.releaseLease(lease);
+		}
+		store.graphLeasesByTerrainTileId.clear();
+		store.graphSignaturesByTerrainTileId.clear();
+	}
+	store.boundGraph = graph;
+
+	const changedResources = store.terrainTiles.filter((resource) => {
+		const signature = describeTerrainTileGraphSignature(resource);
+		return store.graphSignaturesByTerrainTileId.get(resource.id) !== signature;
+	});
+	if (changedResources.length > 0) {
+		const nodes: RendererResourceGraphNode[] = [];
+		const dependencyReplacements: RendererResourceGraphDependencyReplacement[] =
+			[];
+		for (const resource of changedResources) {
+			const sceneNodeKey = sceneObjectGraphNodeKey(resource.id);
+			const assetIds = uniqueSortedStrings([
+				resource.assetId,
+				...resource.compatibilityDraws.flatMap(
+					(draw) => draw.preparedAssetIds,
+				),
+				...(resource.readiness.status === "ready"
+					? [resource.readiness.terrainMaterialAssetId]
+					: []),
+			]);
+			const preparedNodeKeys = assetIds.map(preparedAssetGraphNodeKey);
+			nodes.push(
+				{
+					key: sceneNodeKey,
+					kind: "scene-object",
+					label: `terrain tile ${resource.label}`,
+					metadata: {
+						resourceKind: "terrain-tile",
+						terrainTileId: resource.id,
+						landblockId: formatHex32(resource.landblockId),
+						readiness: resource.readiness.status,
+						compatibilityDrawCount: resource.compatibilityDraws.length,
+					},
+				},
+				...assetIds.map((assetId, index) => ({
+					key: preparedNodeKeys[index],
+					kind: "prepared-asset" as const,
+					label: assetId,
+				})),
+			);
+			dependencyReplacements.push({
+				nodeKey: sceneNodeKey,
+				dependencyKeys: preparedNodeKeys,
+			});
+		}
+		graph.applyBatchUpdate({ nodes, dependencyReplacements });
+		for (const resource of changedResources) {
+			const sceneNodeKey = sceneObjectGraphNodeKey(resource.id);
+			if (!store.graphLeasesByTerrainTileId.has(resource.id)) {
+				store.graphLeasesByTerrainTileId.set(
+					resource.id,
+					graph.leaseNode(sceneNodeKey, "webgl2 terrain tile resources"),
+				);
+			}
+			store.graphSignaturesByTerrainTileId.set(
+				resource.id,
+				describeTerrainTileGraphSignature(resource),
+			);
+		}
+	}
+
+	for (const [terrainTileId, lease] of store.graphLeasesByTerrainTileId) {
+		if (retainedTerrainTileIds.has(terrainTileId)) {
+			continue;
+		}
+		graph.releaseLease(lease);
+		store.graphLeasesByTerrainTileId.delete(terrainTileId);
+		store.graphSignaturesByTerrainTileId.delete(terrainTileId);
 	}
 }
 

@@ -6,6 +6,7 @@ import {
 	type AssetChannelState,
 	type PreparedMaterialRecipePayload,
 	type PreparedPalettePayload,
+	type PreparedTerrainMesh,
 	type PreparedPolygonSetRenderGeometry,
 	type PreparedRenderSurfacePayload,
 	type PreparedTexturePayload,
@@ -27,6 +28,7 @@ import {
 	type StructuredInteriorCell,
 	type StructuredInteriorSceneModel,
 } from "./structured-interior-scene";
+import type { TerrainSceneModel } from "./terrain-scene";
 import { createEmptyTransitionPortalCandidateModel } from "./transition-portal-work-items";
 import {
 	createWebgl2WorldResourceStore,
@@ -81,6 +83,84 @@ describe("webgl2 world resources", () => {
 		expect(store.drawUnits[0]?.vertexBuffer).toBe(vertexBuffer);
 		expect(store.drawUnits[0]?.modelMatrix[12]).toBe(40);
 		expect(gl.deletedBuffers).toHaveLength(0);
+	});
+
+	it("realizes terrain tile resources beside the temporary compatibility draw-unit path", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2WorldResourceStore();
+		const graph = new RendererResourceGraph();
+		const terrainScene = createTerrainScene([createTerrainTile()]);
+
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState(),
+			terrainScene,
+			staticRenderableScene: createStaticRenderableScene([]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [
+				createChunkTransform({ landblockId: 0x1234ffff }),
+			],
+			rendererResourceGraph: graph,
+		});
+
+		expect(store.terrainTiles).toHaveLength(1);
+		expect(store.terrainTileCount).toBe(1);
+		expect(store.terrainTileCompatibilityDrawCount).toBe(1);
+		expect(store.terrainTiles[0]).toMatchObject({
+			id: "terrain-tile/terrain/12340000",
+			landblockId: 0x12340000,
+			readiness: {
+				status: "fallback-debug",
+				reason: "terrain material resources are unresolved",
+			},
+			bvhFallbackReason: null,
+		});
+		expect(store.terrainTiles[0]?.bvhItemKeys).toEqual([
+			"terrain:landblock:12340000:quad:0",
+		]);
+		expect(graph.retainedPreparedAssetIds()).toEqual(["terrain/12340000"]);
+
+		const vertexBuffer = store.terrainTiles[0]?.vertexBuffer;
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState(),
+			terrainScene,
+			staticRenderableScene: createStaticRenderableScene([]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [
+				createChunkTransform({
+					landblockId: 0x1234ffff,
+					offset: { x: 40, y: 50, z: 60 },
+				}),
+			],
+			rendererResourceGraph: graph,
+		});
+
+		expect(store.terrainTiles[0]?.vertexBuffer).toBe(vertexBuffer);
+		expect(store.terrainTiles[0]?.modelMatrix[12]).toBe(40);
+
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState(),
+			terrainScene: createTerrainScene([]),
+			staticRenderableScene: createStaticRenderableScene([]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [
+				createChunkTransform({ landblockId: 0x1234ffff }),
+			],
+			rendererResourceGraph: graph,
+		});
+
+		expect(store.terrainTiles).toEqual([]);
+		expect(store.terrainTilesById.size).toBe(0);
+		expect(graph.retainedPreparedAssetIds()).toEqual([]);
+		expect(gl.deletedVertexArrays.length).toBeGreaterThan(0);
 	});
 
 	it("disposes orphaned draw units and graph leases", () => {
@@ -1386,13 +1466,102 @@ function sortAtlasBatchesByLandblock(store: Webgl2WorldResourceStore) {
 	);
 }
 
-function createTerrainScene() {
+function createTerrainScene(
+	tiles: TerrainSceneModel["tiles"] = [],
+): TerrainSceneModel {
 	return {
 		focusLandblockId: null,
 		statusText: "test",
 		cacheText: "test",
 		dataSourceText: "test",
-		tiles: [],
+		tiles,
+	};
+}
+
+function createTerrainTile(): TerrainSceneModel["tiles"][number] {
+	return {
+		assetId: "terrain/12340000",
+		landblockId: 0x12340000,
+		label: "1234",
+		isFocus: true,
+		chunkLocalOffset: { x: 0, y: 0, z: 0 },
+		mesh: createTerrainMesh(),
+		materialResources: {
+			kind: "terrain-material-resource-plan",
+			regionNumber: 1,
+			terrainMaterialAssetId: "terrain-material/1",
+			status: "missing-table",
+			signature: "terrain:1:missing-table:p=1",
+			terrainTypeCount: 0,
+			terrainAlphaMapCount: 0,
+			roadAlphaMapCount: 0,
+			uniquePcodeCount: 1,
+			referencedTerrainCodes: [1],
+			missingTerrainTypes: [1],
+			missingSurfaceTextureAssetIds: [],
+			missingRenderSurfaceAssetIds: [],
+			unsupportedRenderSurfaceAssetIds: [],
+			hasTerrainAlphaMaps: false,
+			hasRoadAlphaMaps: false,
+			diagnostics: ["Missing terrain material table terrain-material/1."],
+		},
+		dataSource: "repo-local-cell-landblock",
+	};
+}
+
+function createTerrainMesh(): PreparedTerrainMesh {
+	const bounds = {
+		min: { x: 0, y: 0, z: 0 },
+		max: { x: 16, y: 0, z: 16 },
+	};
+	return {
+		landblockId: 0x12340000,
+		gridSize: 2,
+		tileSize: 16,
+		vertices: [
+			{ x: 0, y: 0, z: 0 },
+			{ x: 16, y: 0, z: 0 },
+			{ x: 0, y: 16, z: 0 },
+			{ x: 16, y: 16, z: 0 },
+		],
+		triangles: [
+			{
+				a: 0,
+				b: 1,
+				c: 2,
+				quadIndex: 0,
+				triangleInQuad: 0,
+				debugTerrainPcode: 1,
+				averageHeight: 0,
+			},
+			{
+				a: 2,
+				b: 1,
+				c: 3,
+				quadIndex: 0,
+				triangleInQuad: 1,
+				debugTerrainPcode: 1,
+				averageHeight: 0,
+			},
+		],
+		quads: [
+			{
+				terrainQuadId: "terrain/12340000/quad/0",
+				row: 0,
+				col: 0,
+				quadIndex: 0,
+				sourceTerrainIndices: [0, 1, 2, 3],
+				vertexIndices: [0, 1, 2, 3],
+				triangleIndices: [0, 1],
+				diagonal: "southwest-northeast",
+				cornerTerrainCodes: [1, 1, 1, 1],
+				pcode: 1,
+				averageHeight: 0,
+				bounds,
+			},
+		],
+		minHeight: 0,
+		maxHeight: 0,
 	};
 }
 

@@ -4,10 +4,10 @@ import type { Webgl2SceneDomain } from "../../webgl2-scene-domain-targets";
 import type {
 	Webgl2DetailOverlayResources,
 	Webgl2IndexedMaterialResources,
-	Webgl2TerrainBlendResources,
 	Webgl2WorldDrawUnit,
 } from "../../webgl2-world-resources";
 import type { TexturePageBinding } from "../../texture-pages/texture-page-binding";
+import type { Webgl2TerrainBlendResources } from "../resources/terrain-tile-resources";
 
 export type GeometrySubmissionLayout =
 	| "position"

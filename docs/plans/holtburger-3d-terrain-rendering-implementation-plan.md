@@ -1,6 +1,6 @@
 # Holtburger 3D Terrain Rendering Implementation Plan
 
-Status: Phase T2A complete; Phase T3 is next.
+Status: Phase T3 resource boundary complete; immediate Phase T3B is next before Phase T4.
 
 Dry-run status: reviewed against the current `apps/holtburger-3d/src/lib/world-display` module graph.
 The phase order below reflects that dry run.
@@ -521,6 +521,112 @@ Acceptance criteria:
 - Existing terrain rendering behavior is preserved before the atlas/layer-table rewrite.
 - The temporary compatibility path is clearly named and has a deletion target in a later phase.
 
+Progress update, 2026-06-02:
+
+- Added `webgl2/resources/terrain-tile-resources.ts` with explicit terrain tile resource, terrain
+  readiness, terrain compatibility draw, terrain blend compatibility payload, lifecycle, texture-key
+  collection, resource id, geometry signature, and graph signature types/helpers.
+- Added `Webgl2WorldResourceStore.terrainTiles`, `terrainTilesById`,
+  `graphLeasesByTerrainTileId`, `graphSignaturesByTerrainTileId`, `terrainTileCount`, and
+  `terrainTileCompatibilityDrawCount` beside the existing non-terrain draw-unit store.
+- Added direct terrain tile realization in `syncWebgl2WorldResources` from `terrainScene.tiles`.
+  The tile resource is landblock scoped, owns the full terrain tile geometry VBA, records terrain
+  BVH quad keys, stores terrain readiness/provenance, and derives placement from the known
+  landblock id.
+- Added temporary `compatibilityDraws` under each terrain tile resource. These recreate the current
+  pcode-sliced terrain blend/debug payloads under terrain-family vocabulary so T4 can wire frame and
+  submit orchestration without changing shader behavior first.
+- Moved `Webgl2TerrainBlendResources` and `Webgl2TerrainTextureBinding` to the terrain resource
+  module instead of leaving terrain blend resource types owned by the generic world draw-unit module.
+- Added terrain tile resource graph leases as `scene-object` nodes with `resourceKind:
+  "terrain-tile"` metadata. The graph kind was not expanded; the existing graph taxonomy is enough
+  for T3 diagnostics without adding ceremony.
+- Added resource-store tests for fallback-debug terrain tile realization, retained main terrain VBA
+  reuse across chunk movement, graph retention, and disposal.
+
+Decisions:
+
+- Keep the old generic terrain draw-unit submit bridge alive for now. This is not a retained
+  fallback path; it is a named migration bridge until T4/T9 move frame/submit to terrain resources
+  and delete old pcode draw-unit emission.
+- Terrain tile resources refresh temporary compatibility draws during sync while reusing the main
+  tile geometry resource when the terrain geometry signature is unchanged. This keeps future
+  terrain-family geometry stable while allowing the old pcode payload to change independently.
+- Use `deriveLandblockRenderChunkPlacement(tile.landblockId)` directly at terrain resource sync.
+  No terrain-specific placement wrapper was introduced.
+- Use existing `scene-object` graph nodes for terrain tile resources with explicit terrain metadata.
+  A new graph node kind is deferred unless diagnostics need a distinct taxonomy.
+
+Course corrections and refinements:
+
+- T3 did not fully remove terrain from `StagedWorldDrawUnitAssembly`; doing so would require the T4
+  frame/submit changes in the same diff and would risk visual behavior. The old path is now clearly
+  classified as a compatibility bridge, not a fallback path.
+- Add an immediate T3B handoff before T4. T3B should define and lightly test terrain render work
+  candidate creation from `Webgl2TerrainTileResource` without changing frame/submit orchestration.
+- T4 no longer needs to split the resource store. It should consume the T3B terrain tile candidates
+  as first-class render work, route terrain through exterior pass sequencing, and submit terrain
+  through a terrain-family compatibility submit function.
+- T4 should keep the first submit path pcode-compatible by consuming
+  `Webgl2TerrainTileResource.compatibilityDraws`; T5-T7 can then replace that payload with terrain
+  page/layer-table data.
+- The readiness reason for non-ready terrain material resources is intentionally generic
+  (`terrain material resources are unresolved`) until terrain resource diagnostics need per-blocker
+  detail.
+
+Validation:
+
+- `npm run test:ts -- webgl2-world-resources`
+- `npm run test:ts -- webgl2-world-resources webgl2-direct-render-family`
+- `npm run check`
+- `npm run lint`
+
+Cleanup impact:
+
+- Added `Webgl2TerrainTileResource.compatibilityDraws` as a named temporary bridge. Delete it after
+  terrain-family submit consumes atlas/layer-table terrain resources.
+- Added terrain compatibility resource tests; collapse or rewrite them around final terrain tile
+  resource lifecycle and submit behavior after T9.
+- `Webgl2TerrainBlendResources` now lives in the terrain resource module but still represents the
+  old ten-sampler compatibility payload. Rename or replace it once terrain page/layer resources land.
+
+## Phase T3B: Terrain Render Candidate Handoff
+
+Goal: add the small missing handoff type between terrain tile resources and world render frame
+planning before changing frame/submit orchestration.
+
+Why this interim phase exists:
+
+- T3 created terrain tile resources and resource graph ownership, but frame planning still accepts
+  draw-unit candidates only.
+- Jumping straight to full T4 would combine candidate vocabulary, pass planning, submit routing, and
+  metrics in one large change.
+- A focused T3B lets T4 consume a proven terrain candidate shape rather than inventing it during
+  submit orchestration.
+
+Primary targets:
+
+- `apps/holtburger-3d/src/lib/world-display/webgl2/resources/terrain-tile-resources.ts`
+- `apps/holtburger-3d/src/lib/world-display/webgl2-world-resources.ts`
+- `apps/holtburger-3d/src/lib/world-display/webgl2-world-resources.test.ts`
+
+Tasks:
+
+- Define a terrain render work candidate derived from `Webgl2TerrainTileResource`.
+- Include terrain tile id, landblock id, exterior scene domain, terrain BVH quad keys, fallback
+  reason, and compatibility draw count in the candidate.
+- Store or derive terrain candidates from the terrain resource store without routing them through
+  `Webgl2WorldDrawUnit`.
+- Add tests proving terrain candidates retain quad-granular BVH keys and are stable across resource
+  sync.
+
+Acceptance criteria:
+
+- T4 can pass terrain candidates into frame planning without reaching back into raw terrain scene
+  tiles.
+- No new compatibility re-export or terrain placement wrapper is introduced.
+- No submit behavior changes yet.
+
 ## Phase T4: Render-Family Frame And Submit Orchestration
 
 Goal: loosen frame planning and submit scheduling from one universal draw-unit list.
@@ -538,9 +644,6 @@ Tasks:
 
 - Extend world render frame candidate vocabulary so the frame planner accepts render work candidates,
   not only draw-unit candidates.
-- Split world resource store contents into:
-  - non-terrain draw units;
-  - terrain tile resources.
 - Update frame planning to consume:
   - non-terrain draw-unit candidates;
   - terrain tile candidates;
@@ -550,8 +653,11 @@ Tasks:
 - Keep terrain in exterior pass sequencing and portal/frustum visibility orchestration.
 - Use quad-granular terrain BVH queries, but submit the whole terrain tile when any quad is visible
   in the single-draw path.
+- Add a terrain-family compatibility submit route that consumes
+  `Webgl2TerrainTileResource.compatibilityDraws` and preserves current terrain blend shader behavior.
 - Add terrain-specific metrics for visible terrain tiles, visible terrain quads, submitted terrain
   tiles, and terrain fallback slices.
+- Stop requiring terrain to appear in the world render frame as `WorldRenderDraw.drawUnitId`.
 
 Acceptance criteria:
 
@@ -559,6 +665,7 @@ Acceptance criteria:
   pretending to be a static-like draw unit.
 - Single-draw terrain visibility is conservative at the landblock tile level.
 - Existing non-terrain draw-unit and compacted family behavior is unchanged.
+- Terrain resources can be visible and submitted without looking up a `Webgl2WorldDrawUnit`.
 
 ## Phase T5: Isolated Terrain Texture Page Families
 
@@ -730,6 +837,11 @@ Tasks:
 - Remove terrain blend entries from direct draw texture-page binding collection once terrain page
   bindings are owned by terrain resources.
 - Remove temporary terrain compatibility payloads from terrain tile resources.
+- Delete `Webgl2TerrainTileResource.compatibilityDraws` and
+  `Webgl2TerrainTileCompatibilityDrawResource` after terrain-family submit consumes terrain
+  page/layer resources directly.
+- Delete old terrain draw-unit resource creation from `createOrReuseWebgl2DrawUnit` once T4 routes
+  terrain frame/submit through terrain tile resources.
 - Consolidate terrain diagnostics around terrain tile resources and terrain slices.
 
 Acceptance criteria:
@@ -820,6 +932,8 @@ Delete or rewrite these terrain-specific old-path concepts by the end of Phase T
 - `Webgl2WorldDrawUnit.terrainBlend`.
 - `Webgl2TerrainBlendResources` as a direct draw-unit resource type. If the new terrain family keeps
   a similar payload temporarily, it should be renamed to terrain-family vocabulary.
+- `Webgl2TerrainTileResource.compatibilityDraws` and
+  `Webgl2TerrainTileCompatibilityDrawResource`, introduced in T3 as the temporary old-shader bridge.
 - direct-family terrain routes and sampler units in `direct-render-family.ts` and
   `direct-family-adapters.ts`.
 - terrain blend binding collection in `texture-page-binding.ts`.

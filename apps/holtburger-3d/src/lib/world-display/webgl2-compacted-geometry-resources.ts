@@ -19,6 +19,7 @@ import type {
 
 export interface Webgl2RgbaTexturePageFamilyMaterialSlot {
 	key: string;
+	sourceMaterialSlotKey: string;
 	index: number;
 	atlasTextureIndex: number;
 	atlasRect: readonly [number, number, number, number];
@@ -43,8 +44,7 @@ export interface Webgl2IndexedPalettedFamilyDrawSlice extends CompactedGeometryS
 	detailAtlasTextureIndex: number | null;
 }
 
-export interface Webgl2IndexedPalettedFamilyMaterialTableRecord
-	extends IndexedPalettedFamilyMaterialTableRecord {
+export interface Webgl2IndexedPalettedFamilyMaterialTableRecord extends IndexedPalettedFamilyMaterialTableRecord {
 	detailAtlasTextureIndex: number | null;
 	detailAtlasRect: readonly [number, number, number, number];
 }
@@ -312,7 +312,10 @@ function toWebgl2RgbaTexturePageFamilyDrawSlice(
 function toWebgl2IndexedPalettedFamilyDrawSlice(
 	slice: CompactedGeometrySlice,
 	materialDrawSliceByKey: ReadonlyMap<string, IndexedPalettedFamilyDrawSlice>,
-	materialRecordsByKey: ReadonlyMap<string, IndexedPalettedFamilyMaterialTableRecord>,
+	materialRecordsByKey: ReadonlyMap<
+		string,
+		IndexedPalettedFamilyMaterialTableRecord
+	>,
 	detailPlacementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>,
 ): Webgl2IndexedPalettedFamilyDrawSlice {
 	const materialSlice = materialDrawSliceByKey.get(slice.key);
@@ -327,7 +330,9 @@ function toWebgl2IndexedPalettedFamilyDrawSlice(
 			if (!record?.detailAtlasEntryKey) {
 				return [];
 			}
-			const placement = detailPlacementsByEntryKey.get(record.detailAtlasEntryKey);
+			const placement = detailPlacementsByEntryKey.get(
+				record.detailAtlasEntryKey,
+			);
 			if (!placement) {
 				throw new Error(
 					`Indexed-paletted family draw slice ${slice.key} references missing detail placement ${record.detailAtlasEntryKey}.`,
@@ -404,6 +409,7 @@ function toWebgl2RgbaTexturePageFamilyMaterialSlot(
 	}
 	return {
 		key: slot.key,
+		sourceMaterialSlotKey: slot.sourceMaterialSlotKey,
 		index: slot.index,
 		atlasTextureIndex: placement.textureIndex,
 		atlasRect: [placement.x, placement.y, placement.width, placement.height],

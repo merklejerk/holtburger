@@ -16,6 +16,7 @@ import type {
 	WorldRenderCameraFrameChangeHandler,
 	WorldRenderMetricsChangeHandler,
 } from "./renderer-contract";
+import type { DrawUnitRuntimeDiagnostic } from "./runtime-render-diagnostics";
 import type { WorldRenderSceneContext } from "./render-scene-context";
 import type { StaticRenderableSceneModel } from "./static-renderables";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
@@ -77,5 +78,8 @@ export interface WorldDisplayRenderer {
 		mask: ReadonlySet<RenderSpatialItemKind>,
 		ownerKeys?: ReadonlySet<string>,
 	): RenderSpatialPick | null;
+	getDrawUnitRuntimeDiagnostics(
+		drawUnitIds: readonly string[],
+	): readonly DrawUnitRuntimeDiagnostic[];
 	dispose(): void;
 }

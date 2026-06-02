@@ -4,17 +4,17 @@ import { createInitialAssetChannelState } from "../assets/types";
 import type { SceneCameraFrame } from "./camera";
 import {
 	buildRenderFrustumFromProjectionMatrix,
-	buildStagedWorldFrame,
-	type StagedWorldFrameCandidate,
-} from "./staged-world-frame";
+	buildWorldRenderFrame,
+	type WorldRenderCandidate,
+} from "./world-render-frame";
 import { buildSceneCameraViewProjectionMatrix } from "./render-math";
 import type { TerrainSceneModel } from "./terrain-scene";
 import { createEmptyStaticRenderableSceneModel } from "./static-renderables";
 import { createEmptyStructuredInteriorSceneModel } from "./structured-interior-scene";
 
-describe("buildStagedWorldFrame", () => {
+describe("buildWorldRenderFrame", () => {
 	it("culls keyed batches when no prepared BVH item is visible", () => {
-		const frame = buildStagedWorldFrame({
+		const frame = buildWorldRenderFrame({
 			assetState: createInitialAssetChannelState(),
 			candidates: [
 				createBatch({
@@ -37,7 +37,7 @@ describe("buildStagedWorldFrame", () => {
 	});
 
 	it("keeps unkeyed fallback batches visible and sorts draw categories", () => {
-		const frame = buildStagedWorldFrame({
+		const frame = buildWorldRenderFrame({
 			assetState: createInitialAssetChannelState(),
 			candidates: [
 				createBatch({
@@ -94,10 +94,10 @@ function createBatch({
 	fallbackReason = null,
 }: {
 	id: string;
-	kind: StagedWorldFrameCandidate["kind"];
-	itemKeys?: StagedWorldFrameCandidate["bvhItemKeys"];
+	kind: WorldRenderCandidate["kind"];
+	itemKeys?: WorldRenderCandidate["bvhItemKeys"];
 	fallbackReason?: string | null;
-}): StagedWorldFrameCandidate {
+}): WorldRenderCandidate {
 	return {
 		id,
 		kind,

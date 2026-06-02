@@ -1,5 +1,5 @@
 import type { SceneBoundsFrame, SceneCameraFrame } from "./camera";
-import type { StagedWorldFrameMetrics } from "./staged-world-frame";
+import type { WorldRenderFrameMetrics } from "./world-render-frame";
 import type {
 	WorldDisplayTextureFilteringMode,
 	WorldRenderMetrics,
@@ -38,7 +38,7 @@ export interface Webgl2RenderMetricsInput {
 	lastFrameDrawCount: number;
 	initializationError: string | null;
 	worldStore: Webgl2WorldResourceStore | null;
-	frameMetrics: StagedWorldFrameMetrics | null;
+	frameMetrics: WorldRenderFrameMetrics | null;
 	submitMetrics: Webgl2WorldSubmitMetrics;
 	portalRenderWorkItemCandidateCount: number;
 	visiblePortalWorkItemCount: number;

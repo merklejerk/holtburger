@@ -1,6 +1,6 @@
 # Holtburger 3D Terrain Rendering Implementation Plan
 
-Status: Phase T1 complete; Phase T2A is next.
+Status: Phase T2A complete; Phase T3 is next.
 
 Dry-run status: reviewed against the current `apps/holtburger-3d/src/lib/world-display` module graph.
 The phase order below reflects that dry run.
@@ -391,6 +391,8 @@ Acceptance criteria:
 
 ## Phase T2A: World Render Frame Rename Prep
 
+Status: Complete on 2026-06-02.
+
 Goal: rename and generalize the per-frame render selection module before terrain starts using it as a
 first-class terrain-family boundary.
 
@@ -426,6 +428,60 @@ Acceptance criteria:
 - Existing static, structured-interior, portal-mask, debug, and terrain compatibility frame selection
   behavior is unchanged.
 - The next phases can add terrain tile candidates without extending staged draw-unit vocabulary.
+
+Progress:
+
+- Renamed `apps/holtburger-3d/src/lib/world-display/staged-world-frame.ts` to
+  `apps/holtburger-3d/src/lib/world-display/world-render-frame.ts`.
+- Renamed `apps/holtburger-3d/src/lib/world-display/staged-world-frame.test.ts` to
+  `apps/holtburger-3d/src/lib/world-display/world-render-frame.test.ts`.
+- Renamed the public frame API:
+  - `buildStagedWorldFrame` to `buildWorldRenderFrame`;
+  - `StagedWorldFrame` to `WorldRenderFrame`;
+  - `StagedWorldFrameCandidate` to `WorldRenderCandidate`;
+  - `StagedWorldFrameMetrics` to `WorldRenderFrameMetrics`.
+- Renamed internal frame-planner vocabulary:
+  - `StagedWorldDraw` to `WorldRenderDraw`;
+  - `StagedWorldPass` to `WorldRenderPass`;
+  - `StagedWorldDrawUnitCategory` to `WorldRenderCategory`;
+  - `StagedWorldDrawUnitKind` to `WorldRenderCandidateKind`;
+  - staged draw-unit fallback messages to world render candidate messages.
+- Updated imports and frame type usage in:
+  - `webgl2-world-display-renderer-impl.ts`;
+  - `webgl2-world-submit.ts`;
+  - `webgl2-world-submit.test.ts`;
+  - `webgl2-render-metrics.ts`.
+
+Decisions:
+
+- Kept `WorldRenderDraw.drawUnitId` for this phase because the current submit path still consumes
+  `Webgl2WorldDrawUnit` resources keyed by draw-unit id. Renaming that field before terrain resources
+  become first-class render work would be fake ceremony.
+- Left `StagedWorldDrawUnitAssembly`, staged material strategy, and compacted-geometry staging names
+  untouched. Those still describe the active generic draw-unit assembly path and are not part of the
+  world render frame terminology cleanup.
+- Renamed profile labels from `webgl2.frame.buildStagedWorldFrame` to
+  `webgl2.frame.buildWorldRenderFrame` so diagnostics match the new API.
+
+Course corrections and refinements:
+
+- T4 should be the phase that broadens frame draws beyond draw-unit-backed work. Until then, the
+  frame module is renamed but still has a compatibility field that points at current WebGL2 draw-unit
+  resources.
+- Add `WorldRenderDraw.drawUnitId` to the T11 cleanup watchlist. Once terrain tile resources submit
+  through their own family, evaluate whether frame draws should use a generic render-work id, a
+  family-specific payload, or separate typed submission arrays.
+
+Validation:
+
+- `npm run test:ts -- world-render-frame webgl2-world-submit`
+- `npm run check`
+- `npm run lint`
+
+Cleanup impact:
+
+- No compatibility re-export was introduced for `staged-world-frame.ts`.
+- No immediate interim phase is needed before Phase T3.
 
 ## Phase T3: Terrain Tile Resource Boundary
 
@@ -770,6 +826,8 @@ Delete or rewrite these terrain-specific old-path concepts by the end of Phase T
 - compaction-family terrain blockers that only exist because terrain currently enters generic draw
   units.
 - WebGL2 submit tests that assert direct terrain-blend routing.
+- `WorldRenderDraw.drawUnitId` in `world-render-frame.ts`, once the frame can submit terrain-family
+  render work without routing everything through `Webgl2WorldDrawUnit` ids.
 - Any temporary wrapper, helper, type alias, or module that exists only as migration ceremony. T1
   deleted the short-lived `terrain-placement.ts` wrapper for this reason; future phases should apply
   the same standard to terrain tile resources, atlas family plumbing, and submit adapters.

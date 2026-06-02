@@ -14,10 +14,10 @@ import type { PreparedBounds } from "../assets/types";
 import { createWebgl2RenderMetrics } from "./webgl2-render-metrics";
 import { Webgl2StateCache } from "./webgl2-state-cache";
 import {
-	buildStagedWorldFrame,
-	type StagedWorldFrame,
-	type StagedWorldFrameMetrics,
-} from "./staged-world-frame";
+	buildWorldRenderFrame,
+	type WorldRenderFrame,
+	type WorldRenderFrameMetrics,
+} from "./world-render-frame";
 import {
 	createEmptyWebgl2WorldSubmitMetrics,
 	partitionWebgl2SceneDomainDrawUnits,
@@ -892,7 +892,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	let latestPerformanceMetrics: WorldRenderMetrics["performance"] = null;
 	let latestSubmitMetrics: Webgl2WorldSubmitMetrics =
 		createEmptyWebgl2WorldSubmitMetrics();
-	let latestFrameMetrics: StagedWorldFrameMetrics | null = null;
+	let latestFrameMetrics: WorldRenderFrameMetrics | null = null;
 	let latestSceneDomainFrameMetrics: Webgl2SceneDomainFrameMetrics | null =
 		null;
 	let residencyIndex: WorldResidencyIndex = createEmptyWorldResidencyIndex();
@@ -1128,9 +1128,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 
 		if (currentResources.worldStore.drawUnits.length > 0) {
 			const frame = profileBrowserJsScope(
-				"webgl2.frame.buildStagedWorldFrame",
+				"webgl2.frame.buildWorldRenderFrame",
 				() =>
-					buildStagedWorldFrame({
+					buildWorldRenderFrame({
 						assetState,
 						candidates: currentResources.worldStore.drawUnits,
 						cameraFrame,
@@ -1242,7 +1242,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	}
 
 	function renderSelectedStaticRenderableOverlay(
-		frame: StagedWorldFrame,
+		frame: WorldRenderFrame,
 	): void {
 		if (!resources) {
 			return;
@@ -1442,7 +1442,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		frame,
 		portalMaskDrawUnits,
 	}: {
-		frame: ReturnType<typeof buildStagedWorldFrame>;
+		frame: ReturnType<typeof buildWorldRenderFrame>;
 		portalMaskDrawUnits: readonly Webgl2WorldDrawUnit[];
 	}): Webgl2WorldSubmitMetrics {
 		if (!resources) {
@@ -1641,7 +1641,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	}: {
 		target: Webgl2SceneDomainTarget;
 		drawUnits: readonly Webgl2WorldDrawUnit[];
-		frame: ReturnType<typeof buildStagedWorldFrame>;
+		frame: ReturnType<typeof buildWorldRenderFrame>;
 		rgbaTexturePageFamilySubmitRoute:
 			| "scene-domain-exterior"
 			| "scene-domain-interior";
@@ -1915,7 +1915,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		transitionLevels,
 		workPlan,
 	}: {
-		frame: ReturnType<typeof buildStagedWorldFrame>;
+		frame: ReturnType<typeof buildWorldRenderFrame>;
 		targets: Webgl2SceneDomainTargetSet;
 		compositeTargets: Webgl2PortalCompositeTargetSet;
 		transitionLevels: readonly TransitionPortalRenderLevel[];
@@ -1994,7 +1994,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		batch,
 		destinationTarget,
 	}: {
-		frame: ReturnType<typeof buildStagedWorldFrame>;
+		frame: ReturnType<typeof buildWorldRenderFrame>;
 		level: TransitionPortalRenderLevel;
 		batch: readonly Webgl2VisibleTransitionPortalWork[];
 		destinationTarget: Webgl2PortalCompositeTarget;

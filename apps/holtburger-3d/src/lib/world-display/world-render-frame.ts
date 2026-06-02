@@ -9,7 +9,7 @@ import type { StaticRenderableSceneModel } from "./static-renderables";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
 
-type StagedWorldDrawUnitCategory =
+type WorldRenderCategory =
 	| "terrain"
 	| "structured-interior"
 	| "static-staged"
@@ -17,30 +17,30 @@ type StagedWorldDrawUnitCategory =
 	| "portal-mask"
 	| "debug-overlay";
 
-type StagedWorldDrawUnitKind =
+type WorldRenderCandidateKind =
 	| "terrain"
 	| "structured-interior"
 	| "static"
 	| "portal-mask";
 
-export interface StagedWorldFrameCandidate {
+export interface WorldRenderCandidate {
 	id: string;
-	kind: StagedWorldDrawUnitKind;
+	kind: WorldRenderCandidateKind;
 	bvhItemKeys: readonly RenderBvhItemKey[];
 	bvhFallbackReason: string | null;
 }
 
-interface StagedWorldDraw {
+interface WorldRenderDraw {
 	drawUnitId: string;
-	category: StagedWorldDrawUnitCategory;
+	category: WorldRenderCategory;
 }
 
-interface StagedWorldPass {
+interface WorldRenderPass {
 	id: "world";
-	draws: StagedWorldDraw[];
+	draws: WorldRenderDraw[];
 }
 
-export interface StagedWorldFrameMetrics {
+export interface WorldRenderFrameMetrics {
 	registeredBatchCount: number;
 	keyedBatchCount: number;
 	representedItemKeyCount: number;
@@ -52,31 +52,31 @@ export interface StagedWorldFrameMetrics {
 	queryFallbackBatchCount: number;
 	fallbackReasonCount: number;
 	fallbackReasonSamples: readonly string[];
-	candidateCountsByCategory: Readonly<Record<StagedWorldDrawUnitCategory, number>>;
+	candidateCountsByCategory: Readonly<Record<WorldRenderCategory, number>>;
 	visibleDrawCountsByCategory: Readonly<
-		Record<StagedWorldDrawUnitCategory, number>
+		Record<WorldRenderCategory, number>
 	>;
-	fallbackCountsByCategory: Readonly<Record<StagedWorldDrawUnitCategory, number>>;
+	fallbackCountsByCategory: Readonly<Record<WorldRenderCategory, number>>;
 	representedItemKeyCountsByCategory: Readonly<
-		Record<StagedWorldDrawUnitCategory, number>
+		Record<WorldRenderCategory, number>
 	>;
 }
 
-export interface StagedWorldFrame {
+export interface WorldRenderFrame {
 	cameraFrame: SceneCameraFrame;
 	viewProjectionMatrix: RenderMat4;
-	passes: StagedWorldPass[];
-	metrics: StagedWorldFrameMetrics;
+	passes: WorldRenderPass[];
+	metrics: WorldRenderFrameMetrics;
 }
 
-interface StagedWorldCandidateSelection {
-	draws: StagedWorldDraw[];
-	metrics: StagedWorldFrameMetrics;
+interface WorldRenderCandidateSelection {
+	draws: WorldRenderDraw[];
+	metrics: WorldRenderFrameMetrics;
 }
 
 const FALLBACK_REASON_SAMPLE_LIMIT = 8;
 
-export function buildStagedWorldFrame({
+export function buildWorldRenderFrame({
 	assetState,
 	candidates,
 	cameraFrame,
@@ -86,13 +86,13 @@ export function buildStagedWorldFrame({
 	terrainScene,
 }: {
 	assetState: AssetChannelState;
-	candidates: readonly StagedWorldFrameCandidate[];
+	candidates: readonly WorldRenderCandidate[];
 	cameraFrame: SceneCameraFrame;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	staticRenderableScene: StaticRenderableSceneModel;
 	structuredInteriorScene: StructuredInteriorSceneModel;
 	terrainScene: TerrainSceneModel;
-}): StagedWorldFrame {
+}): WorldRenderFrame {
 	const viewProjectionMatrix = buildSceneCameraViewProjectionMatrix(cameraFrame);
 	const visibilitySnapshot = derivePreparedBvhVisibilitySnapshot({
 		assetState,
@@ -102,7 +102,7 @@ export function buildStagedWorldFrame({
 		renderChunkTransforms,
 		frustum: buildRenderFrustumFromProjectionMatrix(viewProjectionMatrix),
 	});
-	const selection = selectStagedWorldCandidates(
+	const selection = selectWorldRenderCandidates(
 		candidates,
 		{
 			visibleItemKeys: visibilitySnapshot.visibleItemKeys,
@@ -189,10 +189,10 @@ function normalizePlane(plane: RenderPlane): RenderPlane {
 	};
 }
 
-function categorizeStagedWorldCandidate(candidate: {
+function categorizeWorldRenderCandidate(candidate: {
 	id: string;
-	kind: StagedWorldDrawUnitKind;
-}): StagedWorldDrawUnitCategory {
+	kind: WorldRenderCandidateKind;
+}): WorldRenderCategory {
 	if (candidate.id.startsWith("static-staged/")) {
 		return "static-staged";
 	}
@@ -208,13 +208,13 @@ function categorizeStagedWorldCandidate(candidate: {
 	return "static";
 }
 
-function selectStagedWorldCandidates(
-	candidates: readonly StagedWorldFrameCandidate[],
+function selectWorldRenderCandidates(
+	candidates: readonly WorldRenderCandidate[],
 	options: {
 		visibleItemKeys: ReadonlySet<RenderBvhItemKey>;
 		queryFallbackReasons: readonly string[];
 	},
-): StagedWorldCandidateSelection {
+): WorldRenderCandidateSelection {
 	const queryFallbackReasons = options.queryFallbackReasons;
 	const hasQueryFallback = queryFallbackReasons.length > 0;
 	const representedItemKeys = new Set<RenderBvhItemKey>();
@@ -228,10 +228,10 @@ function selectStagedWorldCandidates(
 	let unboundFallbackBatchCount = 0;
 	let explicitFallbackBatchCount = 0;
 	let queryFallbackBatchCount = 0;
-	const draws: StagedWorldDraw[] = [];
+	const draws: WorldRenderDraw[] = [];
 
 	for (const candidate of candidates) {
-		const category = categorizeStagedWorldCandidate(candidate);
+		const category = categorizeWorldRenderCandidate(candidate);
 		const itemKeys = candidate.bvhItemKeys;
 		candidateCountsByCategory[category] += 1;
 		for (const itemKey of itemKeys) {
@@ -263,7 +263,7 @@ function selectStagedWorldCandidates(
 		}
 		if (fallbackReason === null) {
 			throw new Error(
-				`Staged draw unit ${candidate.id} had neither a visible item key nor a fallback reason.`,
+				`World render candidate ${candidate.id} had neither a visible item key nor a fallback reason.`,
 			);
 		}
 		fallbackReasons.push(fallbackReason);
@@ -277,7 +277,7 @@ function selectStagedWorldCandidates(
 		}
 	}
 
-	draws.sort(compareStagedWorldDraws);
+	draws.sort(compareWorldRenderDraws);
 	return {
 		draws,
 		metrics: {
@@ -328,21 +328,21 @@ function resolveBatchFallbackReason({
 }): string | null {
 	if (!hasItemKeys) {
 		return (
-			fallbackReason ?? `staged draw unit ${drawUnitId} has no BVH item keys`
+			fallbackReason ?? `world render candidate ${drawUnitId} has no BVH item keys`
 		);
 	}
 	if (fallbackReason) {
 		return fallbackReason;
 	}
 	if (hasQueryFallback) {
-		return `staged draw unit ${drawUnitId} included because BVH query reported fallback data`;
+		return `world render candidate ${drawUnitId} included because BVH query reported fallback data`;
 	}
 	return null;
 }
 
-function compareStagedWorldDraws(
-	left: StagedWorldDraw,
-	right: StagedWorldDraw,
+function compareWorldRenderDraws(
+	left: WorldRenderDraw,
+	right: WorldRenderDraw,
 ): number {
 	return (
 		compareCategory(left.category, right.category) ||
@@ -361,13 +361,13 @@ function compareStableAsciiStrings(left: string, right: string): number {
 }
 
 function compareCategory(
-	left: StagedWorldDrawUnitCategory,
-	right: StagedWorldDrawUnitCategory,
+	left: WorldRenderCategory,
+	right: WorldRenderCategory,
 ): number {
 	return categorySortRank(left) - categorySortRank(right);
 }
 
-function categorySortRank(category: StagedWorldDrawUnitCategory): number {
+function categorySortRank(category: WorldRenderCategory): number {
 	switch (category) {
 		case "terrain":
 			return 0;
@@ -384,7 +384,7 @@ function categorySortRank(category: StagedWorldDrawUnitCategory): number {
 	}
 }
 
-function createEmptyCategoryCounts(): Record<StagedWorldDrawUnitCategory, number> {
+function createEmptyCategoryCounts(): Record<WorldRenderCategory, number> {
 	return {
 		terrain: 0,
 		"structured-interior": 0,

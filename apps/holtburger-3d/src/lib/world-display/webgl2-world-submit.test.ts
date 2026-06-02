@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { StagedWorldFrame } from "./staged-world-frame";
+import type { WorldRenderFrame } from "./world-render-frame";
 import {
 	planWebgl2DirectDrawRoute,
 	type Webgl2DirectDrawPrograms,
@@ -1109,7 +1109,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 	});
 });
 
-function createFrame(drawUnitIds: readonly string[]): StagedWorldFrame {
+function createFrame(drawUnitIds: readonly string[]): WorldRenderFrame {
 	return {
 		viewProjectionMatrix: createIdentityMat4(),
 		passes: [

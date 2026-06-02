@@ -1,5 +1,5 @@
 import { multiplyMat4, type RenderMat4 } from "./render-math";
-import type { StagedWorldFrame } from "./staged-world-frame";
+import type { WorldRenderFrame } from "./world-render-frame";
 import type { Webgl2ProgramResource } from "./webgl2-gl";
 import type { Webgl2StateCache } from "./webgl2-state-cache";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
@@ -297,7 +297,7 @@ export function submitWebgl2FlatWorldFrame({
 	rgbaTexturePageFamilyResources?: Webgl2RgbaTexturePageFamilySubmitResources;
 	indexedPalettedFamilyResources?: Webgl2IndexedPalettedFamilySubmitResources;
 	drawUnitsById: ReadonlyMap<string, Webgl2WorldDrawUnit>;
-	frame: StagedWorldFrame;
+	frame: WorldRenderFrame;
 }): Webgl2WorldSubmitMetrics {
 	const drawUnits = planWebgl2FlatWorldSubmitOrder(frame, drawUnitsById);
 	const portalMaskDrawUnits = planWebgl2PortalMaskSubmitOrder(
@@ -1212,7 +1212,7 @@ function uploadTerrainBlendUniforms(
 }
 
 export function planWebgl2FlatWorldSubmitOrder(
-	frame: StagedWorldFrame,
+	frame: WorldRenderFrame,
 	drawUnitsById: ReadonlyMap<string, Webgl2WorldDrawUnit>,
 ): Webgl2WorldDrawUnit[] {
 	const visibleDrawUnits: Webgl2WorldDrawUnit[] = [];
@@ -1221,7 +1221,7 @@ export function planWebgl2FlatWorldSubmitOrder(
 			const drawUnit = drawUnitsById.get(draw.drawUnitId);
 			if (!drawUnit) {
 				throw new Error(
-					`Staged world frame referenced missing WebGL2 draw unit ${draw.drawUnitId}.`,
+					`World render frame referenced missing WebGL2 draw unit ${draw.drawUnitId}.`,
 				);
 			}
 			if (drawUnit.kind !== "portal-mask") {
@@ -1233,7 +1233,7 @@ export function planWebgl2FlatWorldSubmitOrder(
 }
 
 export function planWebgl2PortalMaskSubmitOrder(
-	frame: StagedWorldFrame,
+	frame: WorldRenderFrame,
 	drawUnitsById: ReadonlyMap<string, Webgl2WorldDrawUnit>,
 ): Webgl2WorldDrawUnit[] {
 	const maskDrawUnits: Webgl2WorldDrawUnit[] = [];
@@ -1242,7 +1242,7 @@ export function planWebgl2PortalMaskSubmitOrder(
 			const drawUnit = drawUnitsById.get(draw.drawUnitId);
 			if (!drawUnit) {
 				throw new Error(
-					`Staged world frame referenced missing WebGL2 draw unit ${draw.drawUnitId}.`,
+					`World render frame referenced missing WebGL2 draw unit ${draw.drawUnitId}.`,
 				);
 			}
 			if (drawUnit.kind === "portal-mask") {

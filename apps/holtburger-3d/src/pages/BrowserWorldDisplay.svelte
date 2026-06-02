@@ -85,6 +85,7 @@
 		type BrowserRenderResourceSnapshot,
 	} from "../lib/world-display/browser-render-resource-coordinator";
 	import type { BrowserStaticRenderablePickDiagnostic } from "../lib/world-display/browser-picker-diagnostics";
+	import { buildRenderDebugReport } from "../lib/world-display/diagnostics/render-debug-report";
 	import type {
 		RuntimeAppearanceRequestDto,
 		SetupAppearancePayloadDto,
@@ -791,20 +792,17 @@
 	}
 
 	function buildCurrentFrameDebugReport(): string {
-		const lines: string[] = [
-			"Holtburger 3D Debug Report",
-			`Generated: ${new Date().toISOString()}`,
-			`Destination: ${worldDisplay.destinationFocusLabel}`,
-			"",
-			formatReportRows("Scene Summary", browserPanelSceneRows),
-			formatReportSections("Scene Details", browserPanelSceneDetailSections),
-			formatReportRows("Debug Summary", browserPanelDebugRows),
-			formatReportSections("Debug Details", browserPanelDebugDetailSections),
-			formatReportSections("Picker", pickerReport.sections),
-			"Runtime Appearance",
+		return buildRenderDebugReport({
+			generatedAtIso: new Date().toISOString(),
+			destinationFocusLabel: worldDisplay.destinationFocusLabel,
+			sceneSummaryRows: browserPanelSceneRows,
+			sceneDetailSections: browserPanelSceneDetailSections,
+			debugSummaryRows: browserPanelDebugRows,
+			debugDetailSections: browserPanelDebugDetailSections,
+			pickerSections: pickerReport.sections,
 			runtimeAppearanceStatusText,
-			formatReportRows("Runtime Appearance Rows", runtimeAppearanceRows),
-			formatReportJson({
+			runtimeAppearanceRows,
+			runtimeAppearancePayload: {
 				pending: runtimeAppearancePending,
 				error: runtimeAppearanceError,
 				input: runtimeAppearanceInput,
@@ -813,36 +811,8 @@
 					setupModelId: preview.resolved.setupAppearance.setupModelId,
 					appearanceKey: preview.resolved.setupAppearance.appearanceKey,
 				})),
-			}),
-		];
-		return lines.join("\n");
-	}
-
-	function formatReportRows(
-		title: string,
-		rows: readonly BrowserPanelRow[],
-	): string {
-		return [title, ...rows.map((row) => `${row.label}: ${row.value}`), ""].join(
-			"\n",
-		);
-	}
-
-	function formatReportSections(
-		title: string,
-		sections: readonly BrowserPanelSection[],
-	): string {
-		return [
-			title,
-			...sections.flatMap((section) => [
-				`[${section.title}]`,
-				...section.rows.map((row) => `${row.label}: ${row.value}`),
-				"",
-			]),
-		].join("\n");
-	}
-
-	function formatReportJson(value: unknown): string {
-		return JSON.stringify(value, null, 2) ?? "null";
+			},
+		});
 	}
 
 	// Browser free-camera controls are a navigation policy, not the future client camera.

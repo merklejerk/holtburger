@@ -3230,8 +3230,8 @@ C10 reading guide:
 
 - C10 is the parent planning phase. It records the target module boundaries and the intended execution
   order.
-- C10.1 through C10.5 are completed execution phases that implemented the first
-  submit/family/texture/compaction/resource module refactors.
+- C10.1 through C10.6 are completed execution phases that implemented the first
+  submit/family/texture/compaction/resource/diagnostics module refactors.
 - C10.3.1 is an interim quality gate added after C10.3 because knip exposed broad stale exported
   surface. It is intentionally cleanup-only and must complete before the next module move.
 - C10.4 resumed the original flow after the C10.3.1 gate and moved compaction planner plus compacted
@@ -3242,6 +3242,8 @@ C10 reading guide:
 - C10.5 completed the compacted resource sync and graph lifecycle extraction. `webgl2-world-resources`
   still owns direct draw-unit realization and assembly graph sync, but compacted resource ownership is
   now in the WebGL2 resource boundary.
+- C10.6 extracted browser debug report formatting into a renderer diagnostics presenter while leaving
+  browser panel state, modal behavior, and copy controls in Svelte.
 - The historical cleanup list after C10.3.1 is source material, not an executable phase. Future C10
   phases should pull from it, disposition items, and keep the standard phase structure:
   - status;
@@ -3264,7 +3266,7 @@ C10 execution status:
 - C10.4 Compaction planner and compacted geometry module move: complete.
 - C10.5a WebGL2 compacted resource module move: complete.
 - C10.5 WebGL2 compacted resource sync and graph ownership split: complete.
-- C10.6 Diagnostics presenter extraction: planned after resource ownership is clearer.
+- C10.6 Diagnostics presenter extraction: complete.
 
 Candidate module boundaries evaluated:
 
@@ -4133,6 +4135,73 @@ Legacy shims:
 Validation completed:
 
 - `npm run test:ts -- src/lib/world-display/compaction/compaction-family-planner.test.ts src/lib/world-display/compaction/compacted-geometry.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-rgba-texture-page-family-submit.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts --run`
+- `npm run lint:dead`
+- `npm run lint:ts`
+- `npm run check`
+- `git diff --check`
+
+## Phase C10.6: Diagnostics Presenter Extraction
+
+Status: Complete.
+
+Purpose: move renderer debug report formatting out of Svelte/browser UI code and into a typed
+diagnostics presenter module. The browser page should own interaction state, report modal state, and
+clipboard behavior; renderer diagnostic prose should live in renderer diagnostics code.
+
+Scope rules:
+
+- Extract only pure debug report formatting.
+- Keep browser panel layout, tab state, modal visibility, and copy controls in Svelte.
+- Do not move picker interaction policy or browser camera controls into diagnostics.
+- Do not introduce compatibility reexports.
+- Keep `npm run lint:dead` green.
+
+Progress ledger:
+
+- Added `apps/holtburger-3d/src/lib/world-display/diagnostics/render-debug-report.ts`.
+- Added focused coverage in
+  `apps/holtburger-3d/src/lib/world-display/diagnostics/render-debug-report.test.ts`.
+- Replaced local report row/section/JSON formatting helpers in
+  `apps/holtburger-3d/src/pages/BrowserWorldDisplay.svelte` with a call to
+  `buildRenderDebugReport()`.
+- Kept `BrowserWorldDisplay.svelte` responsible for generating timestamps, collecting current UI and
+  renderer state, managing the report modal, and copying report text.
+
+Decisions:
+
+- The presenter accepts simple row/section DTOs instead of importing page-local browser panel types.
+  This keeps diagnostics independent of Svelte component internals.
+- The runtime appearance payload remains JSON-formatted by the presenter, but the page still assembles
+  the payload from current UI/runtime state. That keeps data collection in the browser page and
+  renderer vocabulary formatting in diagnostics.
+- No interim C10.6a phase is needed. The initial extraction stayed narrow, validation stayed green,
+  and no new dead-export cleanup appeared.
+
+Course corrections and refinements for future steps:
+
+- If more debug-report sections are added, add them through `buildRenderDebugReport()` rather than
+  restoring string formatting helpers in `BrowserWorldDisplay.svelte`.
+- If picker diagnostics grow, consider moving picker report formatting into the diagnostics boundary
+  while keeping pickable-family controls in `BrowserModePanel.svelte`.
+- Future diagnostics work can add structured report sections for compacted resources without touching
+  the browser modal controls.
+
+Cleanup targets introduced:
+
+- `BrowserWorldDisplay.svelte` still collects many diagnostics inputs before calling the presenter.
+  That is acceptable for C10.6, but future cleanup can extract data collection if the page keeps
+  growing.
+- `BrowserModePanel.svelte` still owns picker report display rows. That is UI layout today, but large
+  picker-specific formatting should move to diagnostics later.
+
+Legacy shims:
+
+- None introduced. The extraction used a new direct import and did not add alias modules,
+  compatibility wrappers, or old helper reexports.
+
+Validation completed:
+
+- `npm run test:ts -- src/lib/world-display/diagnostics/render-debug-report.test.ts src/lib/world-display/browser-picker-diagnostics.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts --run`
 - `npm run lint:dead`
 - `npm run lint:ts`
 - `npm run check`

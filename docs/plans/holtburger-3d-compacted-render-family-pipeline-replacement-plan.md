@@ -2683,7 +2683,7 @@ Validation:
 
 ## Phase C8.14: Fold RGBA Alpha-Test Into The RGBA Texture-Page Family
 
-Status: Planned.
+Status: Complete.
 
 Purpose: reduce the large `missing-compacted-alpha-test-family` retained-direct population by treating
 alpha-test/cutout RGBA materials as part of the existing RGBA texture-page render family. Alpha-test
@@ -2736,6 +2736,53 @@ Decisions:
 - True alpha-blended compaction remains deferred. It needs sortable transparent submissions and likely
   gives limited draw-call benefit unless batches are split so finely that the compaction value is
   mostly resource reuse rather than submission reduction.
+- Direct-texture cutout materials now classify as `textured-opaque` for compacted RGBA planning, while
+  retaining `alphaPolicy: "cutout"` and their numeric `alphaTest` threshold in compaction material
+  diagnostics.
+- The compacted RGBA shader samples base atlas color, discards below the per-slot alpha-test threshold,
+  and then applies detail overlay. This preserves cutout semantics before any detail modulation.
+
+Progress:
+
+- Added `alphaPolicy` and `alphaTest` to `RgbaTexturePageFamilyMaterialSlot` and the realized WebGL2
+  RGBA material slot resource.
+- Added `alphaTest` to `CompactionEligibility.material` so compacted material slots can carry the
+  resolved threshold without parsing render-state strings.
+- Updated compacted RGBA submit to upload `uMaterialAlphaTests[MAX_MATERIAL_SLOTS]`.
+- Updated the compacted RGBA fragment shader to discard when sampled alpha is below the per-slot
+  threshold.
+- Removed the alpha-test RGBA material blocker by folding direct-texture cutout materials into the
+  existing `rgba-texture-page` family.
+
+Course corrections:
+
+- Kept the legacy `missing-compacted-alpha-test-family` bypass enum/string in place even though
+  direct-texture cutout no longer emits it. Removing it globally would also affect historical
+  diagnostics and any non-RGBA alpha-test path that still reaches the older fallback vocabulary.
+- Did not add a separate alpha-test render family. The existing RGBA family draw-slice key already
+  includes render state, so opaque and cutout slices remain separated when their render-state keys differ.
+
+Refinements to future steps:
+
+- After a live report verifies the `missing-compacted-alpha-test-family` count drops for RGBA cutout,
+  inspect any remaining alpha-test blockers. Remaining cases may be indexed alpha policy, unsupported
+  texture-page behavior, missing UVs, or non-static geometry rather than missing RGBA shader support.
+- Transparent RGBA compaction remains deferred. C8.12’s final blended direct pass and C8.13’s atlas
+  readiness split are still the correct path for true blended materials.
+
+Discovered cleanup targets and legacy shims:
+
+- `CompactionMaterialFamily` still has an `alpha-test` value and
+  `missing-compacted-alpha-test-family` blocker for legacy diagnostics. Once live reports confirm no
+  production RGBA direct-texture path emits it, narrow or remove that vocabulary.
+- `RgbaTexturePageFamilyMaterialSlot.alphaPolicy` is diagnostic/state metadata while the shader only
+  needs `alphaTest`. Keep it for now because picker/runtime diagnostics need to distinguish cutout from
+  opaque in the compacted family.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/compaction-family-planner.test.ts src/lib/world-display/compacted-geometry.test.ts src/lib/world-display/webgl2-rgba-texture-page-family-submit.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-direct-render-family.test.ts --run`
+- `npm run check`
 
 ## Cleanup Targets
 

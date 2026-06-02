@@ -1436,7 +1436,14 @@ function createRgbaTexturePageFamilyProgram(): Webgl2RgbaTexturePageFamilyWorldP
 			uBatchModel: {} as WebGLUniformLocation,
 			uAtlasTexture: {} as WebGLUniformLocation,
 			uAtlasSize: {} as WebGLUniformLocation,
+			uDetailAtlasTexture: {} as WebGLUniformLocation,
+			uDetailAtlasSize: {} as WebGLUniformLocation,
 			uMaterialRects: {} as WebGLUniformLocation,
+			uMaterialWrapModes: {} as WebGLUniformLocation,
+			uMaterialAlphaTests: {} as WebGLUniformLocation,
+			uDetailMaterialRects: {} as WebGLUniformLocation,
+			uDetailMaterialTilings: {} as WebGLUniformLocation,
+			uDetailMaterialEnabled: {} as WebGLUniformLocation,
 		},
 		dispose() {
 			return;
@@ -1529,6 +1536,8 @@ function createRgbaTexturePageFamilyResource(
 				detailTiling: 1,
 				renderStateKey: "opaque",
 				samplingKey: "sampling",
+				alphaPolicy: "opaque",
+				alphaTest: 0,
 				wrapS: "clamp",
 				wrapT: "clamp",
 			},

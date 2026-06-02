@@ -249,6 +249,7 @@ uniform sampler2D uDetailAtlasTexture;
 uniform vec2 uDetailAtlasSize;
 uniform vec4 uMaterialRects[MAX_MATERIAL_SLOTS];
 uniform ivec2 uMaterialWrapModes[MAX_MATERIAL_SLOTS];
+uniform float uMaterialAlphaTests[MAX_MATERIAL_SLOTS];
 uniform vec4 uDetailMaterialRects[MAX_MATERIAL_SLOTS];
 uniform float uDetailMaterialTilings[MAX_MATERIAL_SLOTS];
 uniform int uDetailMaterialEnabled[MAX_MATERIAL_SLOTS];
@@ -302,6 +303,9 @@ void main() {
 		dFdx(vUv),
 		dFdy(vUv)
 	);
+	if (color.a < uMaterialAlphaTests[vMaterialSlot]) {
+		discard;
+	}
 	color.rgb = applyDetailOverlay(color.rgb, vMaterialSlot);
 	fragColor = color;
 }
@@ -2965,6 +2969,7 @@ function createRgbaTexturePageFamilyWorldProgram(
 			"uDetailAtlasSize",
 			"uMaterialRects",
 			"uMaterialWrapModes",
+			"uMaterialAlphaTests",
 			"uDetailMaterialRects",
 			"uDetailMaterialTilings",
 			"uDetailMaterialEnabled",

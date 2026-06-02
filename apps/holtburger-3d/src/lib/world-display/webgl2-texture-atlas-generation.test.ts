@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { CompactionFamilyPlan } from "./compaction-family-planner";
+import type { TexturePageAtlasPlan } from "./texture-page-atlas-planner";
 import { createWebgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
 
 describe("webgl2 texture atlas generation", () => {
@@ -11,7 +11,7 @@ describe("webgl2 texture atlas generation", () => {
 			plan: createPlan(),
 		});
 
-		expect(generation?.key).toBe("compaction-families/test");
+		expect(generation?.key).toBe("texture-page-atlas/test");
 		expect(generation?.textures).toHaveLength(1);
 		expect(generation?.detailTextures).toHaveLength(1);
 		expect(generation?.placements).toEqual([
@@ -79,14 +79,7 @@ describe("webgl2 texture atlas generation", () => {
 				gl: gl.asContext(),
 				plan: {
 					...plan,
-					compactableDrawUnitIds: [],
-					renderFamilies: {
-						...plan.renderFamilies,
-						rgbaTexturePage: {
-							...plan.renderFamilies.rgbaTexturePage,
-							compactableDrawUnitIds: [],
-						},
-					},
+					rgbaAtlasReadyDrawUnitIds: [],
 					atlasEntryRecords: [],
 					atlasTextures: [],
 					detailAtlasEntryRecords: [],
@@ -98,29 +91,14 @@ describe("webgl2 texture atlas generation", () => {
 	});
 });
 
-function createPlan(): CompactionFamilyPlan {
+function createPlan(): TexturePageAtlasPlan {
 	const levelBytes = Uint8Array.from([
 		1, 2, 3, 255, 4, 5, 6, 255, 7, 8, 9, 255, 10, 11, 12, 255,
 	]);
 	return {
-		key: "compaction-families/test",
-		renderFamilies: {
-			rgbaTexturePage: {
-				kind: "rgba-atlas",
-				compactableDrawUnitIds: ["draw-a"],
-				materialSlots: [],
-				drawUnitMaterialSlots: [],
-				drawSlices: [],
-			},
-			indexedPaletted: {
-				kind: "indexed-paletted",
-				compactableDrawUnitIds: [],
-				materialTableRecords: [],
-				drawUnitMaterialSlots: [],
-				drawSlices: [],
-			},
-		},
-		compactableDrawUnitIds: ["draw-a"],
+		key: "texture-page-atlas/test",
+		rgbaAtlasReadyDrawUnitIds: ["draw-a"],
+		detailAtlasReadyDrawUnitIds: [],
 		bypasses: [],
 		atlasEntryRecords: [
 			{
@@ -194,12 +172,6 @@ function createPlan(): CompactionFamilyPlan {
 				],
 			},
 		],
-		materialSlots: [],
-		drawUnitMaterialSlots: [],
-		drawSlices: [],
-		staticObjectKeys: ["object-a"],
-		staticPartCount: 1,
-		triangleCount: 2,
 		preparedTextureAssetIds: ["prepared-texture/entry-a"],
 	};
 }

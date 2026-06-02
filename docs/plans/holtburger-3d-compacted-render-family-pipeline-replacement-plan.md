@@ -2177,7 +2177,7 @@ Cleanup target introduced:
 
 ## Phase C8.11: Split Texture-Page Atlas Planning From Compaction Planning
 
-Status: Planned.
+Status: Complete for authoritative atlas planning; diagnostics/root-field cleanup deferred to C8.11a.
 
 Purpose: separate RGBA texture-page atlas planning from compacted render-family planning before
 adding blended atlas support or broader alpha-test compaction. The current `CompactionFamilyPlan`
@@ -2260,6 +2260,124 @@ Decisions:
   split and has focused tests. The primary target is the dependency boundary.
 - Do not split indexed texel/palette page planning into this RGBA atlas plan. Indexed pages remain
   exact texture-page resources owned by indexed material/resource preparation.
+
+Progress:
+
+- Added `texture-page-atlas-planner.ts` with an authoritative `TexturePageAtlasPlan`.
+- Moved base RGBA atlas layout and shared detail atlas layout out of `planCompactionFamilies()`.
+- Kept the existing atlas policy values intact:
+  - max atlas texture size;
+  - max atlas texture count;
+  - base/detail gutter pixels.
+- Modeled base RGBA atlas readiness separately from shared detail atlas readiness:
+  - `rgbaAtlasReadyDrawUnitIds` identifies RGBA draw units with placed base texture pages and placed
+    detail overlays, when present;
+  - `detailAtlasReadyDrawUnitIds` identifies non-RGBA family draw units, currently indexed/paletted,
+    whose optional detail overlays have placed detail atlas entries.
+- Moved atlas overflow bypass creation into the atlas planner for:
+  - source texture too large;
+  - base atlas full;
+  - detail atlas full.
+- Updated `planCompactionFamilies()` to consume the atlas plan rather than owning
+  `planAtlasLayout()` directly.
+- Updated `createWebgl2TextureAtlasGenerationResource()` to consume `TexturePageAtlasPlan` instead of
+  `CompactionFamilyPlan`.
+- Added `texturePageAtlasPlan` to `Webgl2WorldResourceStore` and made atlas resource sync use it as
+  the atlas generation identity.
+- Kept compacted geometry resource creation on `CompactionFamilyPlan` for this phase, but changed
+  placement lookup to read through `plan.texturePageAtlasPlan`.
+- Deleted the old private RGBA/detail atlas dedupe helpers from `compaction-family-planner.ts`.
+- Updated atlas generation tests to fabricate `TexturePageAtlasPlan` directly instead of a fake
+  compaction plan.
+- Added a regression test proving texture atlas planning stays stable when compaction material-slot
+  capacity changes.
+
+Course corrections:
+
+- Kept legacy flattened atlas fields on `CompactionFamilyPlan` for now:
+  - `atlasEntryRecords`;
+  - `atlasEntries`;
+  - `atlasTextures`;
+  - `detailAtlasEntryRecords`;
+  - `detailAtlasTextures`;
+  - `preparedTextureAssetIds`.
+  These are now mirrors of `texturePageAtlasPlan`, not the authoritative atlas layout owner. Deleting
+  them in the same pass would have spread this phase into diagnostics and runtime diagnostic helpers,
+  which is not needed before the blended direct-pass ordering fix.
+- Did not update the debug report to distinguish atlas-compatible, atlas-placed, and compacted counts
+  yet. The internal resource boundary is split; the diagnostics vocabulary still needs a focused
+  follow-up.
+- Did not add blended RGBA atlas support. The split is now in place so C8.13 can add that behavior
+  without redefining compaction eligibility.
+
+Discovered cleanup targets:
+
+- `CompactionFamilyPlan` still carries mirrored root atlas fields for compatibility. They should be
+  removed after compacted resource creation, runtime diagnostics, and tests consume
+  `TexturePageAtlasPlan` directly.
+- Placement lookup helpers now exist in both `compaction-family-planner.ts` and
+  `webgl2-world-resources.ts`. They are tiny and scoped, but C8.11a should either centralize them on
+  the atlas plan module or delete one copy when root atlas fields are removed.
+- `Webgl2TextureAtlasGenerationResource.compactableDrawUnitIds` still uses compaction vocabulary even
+  though it now means atlas-ready RGBA draw units. Rename it to an atlas-specific name once submit
+  metrics/debug consumers are adjusted.
+- `CompactionFamilyPlan.preparedTextureAssetIds` remains as a mirrored compatibility field. Consumers
+  should read `texturePageAtlasPlan.preparedTextureAssetIds`.
+
+Legacy shims:
+
+- Added `CompactionFamilyPlan.texturePageAtlasPlan` plus mirrored root atlas fields as a temporary
+  compatibility bridge. The atlas plan is authoritative; the root fields exist only for current
+  consumers that have not been moved yet.
+
+Validation:
+
+- `npm run check` from `apps/holtburger-3d`
+- `npm run test:ts -- src/lib/world-display/compaction-family-planner.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts --run`
+
+## Phase C8.11a: Retire Atlas Compatibility Mirrors And Split Atlas Diagnostics
+
+Status: Planned immediate cleanup.
+
+Purpose: finish the C8.11 boundary cleanup before broadening atlas eligibility. C8.11 made
+`TexturePageAtlasPlan` authoritative for WebGL atlas generation, but the root `CompactionFamilyPlan`
+still mirrors atlas fields and debug output still blends atlas coverage with compaction coverage.
+
+Tasks:
+
+- Move compacted resource placement lookup fully onto `TexturePageAtlasPlan` helper APIs.
+- Remove or narrow mirrored root atlas fields on `CompactionFamilyPlan`:
+  - `atlasEntryRecords`;
+  - `atlasEntries`;
+  - `atlasTextures`;
+  - `detailAtlasEntryRecords`;
+  - `detailAtlasTextures`;
+  - `preparedTextureAssetIds`.
+- Rename atlas-generation coverage fields that still say `compactableDrawUnitIds` when they now mean
+  atlas-ready RGBA draw units.
+- Update diagnostics to report atlas coverage separately from compaction coverage:
+  - atlas-compatible draw units;
+  - atlas-placed RGBA draw units;
+  - detail-atlas-ready draw units;
+  - atlas failure reasons;
+  - compacted family draw units;
+  - compaction blocker reasons.
+- Refine direct texture-page fallback diagnostics so packed-page misses distinguish:
+  - atlas entry was not planned because the material is outside current atlas coverage;
+  - atlas entry was planned but not placed due to source-too-large or atlas-full;
+  - atlas generation/resource sync failed to realize a placement promised by `TexturePageAtlasPlan`.
+  The first two are expected retained-direct conditions; only the last one should read like an
+  internal resource failure.
+- Keep current rendered behavior unchanged.
+
+Exit criteria:
+
+- WebGL atlas generation and compacted family resource creation no longer read mirrored root atlas
+  fields from `CompactionFamilyPlan`.
+- Debug output clearly separates atlas failures from compaction blockers.
+- Direct packed texture-page fallback samples no longer make expected retained-direct coverage gaps
+  look like missing promised atlas resources.
+- C8.13 can add blended RGBA atlas readiness without adding more compatibility fields.
 
 ## Phase C8.12: Render Retained Blended Direct Draw Last
 

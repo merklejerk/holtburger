@@ -141,6 +141,40 @@ describe("compaction family planner", () => {
 		expect(plan.triangleCount).toBe(2);
 	});
 
+	it("keeps texture atlas planning stable when compaction slot capacity changes", () => {
+		const drawUnits = [
+			createCandidate({ id: "static-a", entryKey: "entry-a" }),
+			createCandidate({ id: "static-b", entryKey: "entry-b" }),
+		];
+		const basePolicy = {
+			maxAtlasTextureSize: 32,
+			maxAtlasTextureCount: 1,
+			baseGutterPixels: 2,
+		};
+		const singleSlotPlan = planCompactionFamilies({
+			drawUnits,
+			policy: {
+				...basePolicy,
+				maxMaterialSlotsPerDraw: 1,
+			},
+		});
+		const multiSlotPlan = planCompactionFamilies({
+			drawUnits,
+			policy: {
+				...basePolicy,
+				maxMaterialSlotsPerDraw: 4,
+			},
+		});
+
+		expect(singleSlotPlan.key).not.toBe(multiSlotPlan.key);
+		expect(singleSlotPlan.texturePageAtlasPlan.key).toBe(
+			multiSlotPlan.texturePageAtlasPlan.key,
+		);
+		expect(singleSlotPlan.texturePageAtlasPlan.atlasTextures).toEqual(
+			multiSlotPlan.texturePageAtlasPlan.atlasTextures,
+		);
+	});
+
 	it("keeps unsupported first-slice materials on the staged path with reasons", () => {
 		const plan = planCompactionFamilies({
 			drawUnits: [

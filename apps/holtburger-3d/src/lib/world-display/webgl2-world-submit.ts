@@ -32,7 +32,6 @@ import {
 	type Webgl2DirectDrawPrograms,
 	type Webgl2DirectProgramKind,
 } from "./webgl2/families/direct-family-adapters";
-import type { Webgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
 
 export type Webgl2FlatWorldProgram = Webgl2ProgramResource<
 	"position",
@@ -1152,11 +1151,7 @@ function applyRgbaTexturePageFamilyNoVisibleRoute(
 	}
 }
 
-const TERRAIN_BLEND_SAMPLER_UNIFORM_COUNT = 10;
 const TERRAIN_BLEND_DYNAMIC_UNIFORM_COUNT = 13;
-const INDEXED_DYNAMIC_UNIFORM_COUNT = 6;
-const DETAIL_DYNAMIC_UNIFORM_COUNT = 2;
-const DIRECT_TEXTURE_PAGE_DYNAMIC_UNIFORM_COUNT = 4;
 
 function bindTerrainBlendTextures({
 	stateCache,

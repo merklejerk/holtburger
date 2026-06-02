@@ -62,7 +62,7 @@ import {
 	selectRenderSurfaceTextureSamplingPolicy,
 	type TextureSamplingPolicy,
 	type TextureFilteringMode,
-} from "./texture-sampling-policy";
+} from "./texture-pages/texture-sampling-policy";
 import { type StagedWorldMaterialTexturePageReadiness } from "./staged-world-material-strategy";
 import {
 	createCompactionEligibility,
@@ -79,7 +79,7 @@ import {
 	createTexturePageAtlasPlacementsByEntryKey,
 	createTexturePageDetailAtlasPlacementsByEntryKey,
 	type TexturePageAtlasPlan,
-} from "./texture-page-atlas-planner";
+} from "./texture-pages/texture-page-atlas-planner";
 import {
 	deriveDirectGeometrySubmissionLayout,
 	type GeometrySubmissionLayout,
@@ -88,9 +88,8 @@ import { buildCompactedGeometryBatch } from "./compacted-geometry";
 import {
 	createWebgl2TextureAtlasGenerationResource,
 	type Webgl2TextureAtlasGenerationResource,
-} from "./webgl2-texture-atlas-generation";
+} from "./webgl2/resources/texture-atlas-generation";
 import {
-	compactedFamilyResourceKey,
 	createWebgl2CompactedGeometryBatchResource,
 	createWebgl2IndexedPalettedFamilyResource,
 	createWebgl2RgbaTexturePageFamilyResource,
@@ -107,7 +106,7 @@ import {
 	collectDirectDrawTexturePageBindings,
 	resolveDirectDrawBaseTexturePageBinding,
 	type TexturePageBinding,
-} from "./texture-page-binding";
+} from "./texture-pages/texture-page-binding";
 
 export interface Webgl2WorldDrawUnit {
 	id: string;
@@ -3131,27 +3130,6 @@ function describeLandblockDrawSliceKey({
 		}`,
 		`landblock=${formatHex32(landblockId)}`,
 	].join("|");
-}
-
-function disposeWebgl2CompactedGeometryBatch(
-	store: Webgl2WorldResourceStore,
-): void {
-	for (const batch of store.compactedGeometryBatches.values()) {
-		batch.dispose();
-	}
-	store.compactedGeometryBatches.clear();
-	store.compactedGeometryFamilyResources.clear();
-	store.compactedGeometryFamilyResourceCounts = {};
-	store.compactedGeometryBatchCount = 0;
-	store.compactedGeometryDrawUnitCount = 0;
-	store.compactedGeometryTriangleCount = 0;
-	store.compactedGeometryVertexByteLength = 0;
-	store.compactedGeometryIndexByteLength = 0;
-	store.compactedGeometryTotalByteLength = 0;
-	store.compactedGeometryDrawSliceCount = 0;
-	store.compactedGeometryBatchOriginCount = 0;
-	store.compactedGeometryTransformTableEntryCount = 0;
-	releaseWebgl2CompactedGeometryBatchGraphLeases(store);
 }
 
 function releaseWebgl2CompactedGeometryBatchGraphLease(

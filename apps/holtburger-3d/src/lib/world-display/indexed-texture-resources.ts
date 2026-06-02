@@ -18,7 +18,7 @@ import {
 import {
 	applyTextureSamplingPolicy,
 	type TextureSamplingPolicy,
-} from "./texture-sampling-policy";
+} from "./texture-pages/texture-sampling-policy";
 
 export interface IndexedTextureResource {
 	texture: DataTexture;

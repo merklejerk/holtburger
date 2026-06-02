@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { planAtlasLayout } from "./atlas-layout-planner";
+import { planAtlasLayout } from "./texture-pages/atlas-layout-planner";
 
 describe("atlas layout planner", () => {
 	it("returns an empty layout without allocating pages", () => {

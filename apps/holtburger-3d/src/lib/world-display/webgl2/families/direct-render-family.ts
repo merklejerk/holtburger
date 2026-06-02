@@ -7,7 +7,7 @@ import type {
 	Webgl2TerrainBlendResources,
 	Webgl2WorldDrawUnit,
 } from "../../webgl2-world-resources";
-import type { TexturePageBinding } from "../../texture-page-binding";
+import type { TexturePageBinding } from "../../texture-pages/texture-page-binding";
 
 export type GeometrySubmissionLayout =
 	| "position"

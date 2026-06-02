@@ -9,7 +9,7 @@ import type {
 	Webgl2IndexedPalettedFamilyResource,
 } from "../../webgl2-compacted-geometry-resources";
 import { applyOpaqueCompactedFamilyRenderState } from "./family-render-state";
-import type { Webgl2DetailTextureAtlasTextureResource } from "../../webgl2-texture-atlas-generation";
+import type { Webgl2DetailTextureAtlasTextureResource } from "../resources/texture-atlas-generation";
 
 export const WEBGL2_INDEXED_PALETTED_MAX_MATERIAL_SLOTS = 128;
 

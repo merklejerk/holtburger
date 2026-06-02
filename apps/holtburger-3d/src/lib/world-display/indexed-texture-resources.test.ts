@@ -19,7 +19,7 @@ import {
 	scanMaxPaletteIndex,
 	selectIndexedPalette,
 } from "./indexed-texture-resources";
-import { createDefaultMaterialTextureSamplingPolicy } from "./texture-sampling-policy";
+import { createDefaultMaterialTextureSamplingPolicy } from "./texture-pages/texture-sampling-policy";
 
 describe("indexed texture resources", () => {
 	it("classifies AC indexed render surface formats", () => {

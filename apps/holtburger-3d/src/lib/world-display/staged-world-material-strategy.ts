@@ -39,8 +39,8 @@ import {
 	selectVariantTextureSamplingPolicy,
 	type TextureFilteringMode,
 	type TextureWrapMode,
-} from "./texture-sampling-policy";
-import { planAtlasLayout, type AtlasTexturePage } from "./atlas-layout-planner";
+} from "./texture-pages/texture-sampling-policy";
+import { planAtlasLayout, type AtlasTexturePage } from "./texture-pages/atlas-layout-planner";
 
 export type StagedWorldMaterialRenderableKind =
 	| "static"

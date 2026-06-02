@@ -24,7 +24,7 @@ import type {
 import {
 	applyTextureSamplingPolicy,
 	type TextureSamplingPolicy,
-} from "./texture-sampling-policy";
+} from "./texture-pages/texture-sampling-policy";
 import {
 	prepareRenderSurfaceTextureUploadData,
 	type CompressedRenderSurfaceUploadFormat,

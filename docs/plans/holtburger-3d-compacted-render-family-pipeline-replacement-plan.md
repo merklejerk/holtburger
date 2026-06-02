@@ -3648,10 +3648,180 @@ Validation completed:
 
 - `npm run test:ts -- src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-direct-render-family.test.ts src/lib/world-display/webgl2-rgba-texture-page-family-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts --run`
 - `npm run check`
+- `npm run lint:dead` was not run during this completed phase; C10.3.1 adds it as a required gate for
+  future phases.
 
 Legacy shims:
 
 - None introduced. Old module paths were removed rather than reexported.
+
+## Phase C10.3: Texture-Page Planning And WebGL2 Atlas Resource Move
+
+Status: Complete.
+
+Purpose: move texture-page planning, layout, binding, and sampling policy into an explicit
+texture-page boundary, while keeping WebGL2 texture atlas generation under WebGL2 resources because
+it creates GL texture resources.
+
+Scope rules:
+
+- Keep this phase behavior-free.
+- Move renderer-neutral texture-page modules under `world-display/texture-pages/`.
+- Move WebGL2 texture atlas generation under `world-display/webgl2/resources/`.
+- Update imports directly. Do not add compatibility reexports for old module paths.
+- Do not split `TexturePageBinding` or `Webgl2WorldDrawUnit` yet; record remaining coupling for the
+  later resource/draw-unit ownership phase.
+
+Tasks:
+
+- Create `world-display/texture-pages/`.
+- Move:
+  - `atlas-layout-planner.ts` to `texture-pages/atlas-layout-planner.ts`;
+  - `texture-page-atlas-planner.ts` to `texture-pages/texture-page-atlas-planner.ts`;
+  - `texture-page-binding.ts` to `texture-pages/texture-page-binding.ts`;
+  - `texture-sampling-policy.ts` to `texture-pages/texture-sampling-policy.ts`.
+- Create `world-display/webgl2/resources/`.
+- Move `webgl2-texture-atlas-generation.ts` to
+  `webgl2/resources/texture-atlas-generation.ts`.
+- Update production and test imports to the new paths.
+- Verify old module paths are gone except for stable debug metric strings and local imports inside
+  the new texture-page folder.
+
+Exit criteria:
+
+- Texture-page planning/layout/binding/sampling modules live under `world-display/texture-pages/`.
+  Complete.
+- WebGL2 texture atlas generation lives under `world-display/webgl2/resources/`. Complete.
+- No old-path reexport or alias modules exist. Complete.
+- Focused texture-page, compaction, WebGL2 submit, and resource tests pass. Complete.
+
+Progress ledger:
+
+- Added `apps/holtburger-3d/src/lib/world-display/texture-pages/`.
+- Added `apps/holtburger-3d/src/lib/world-display/webgl2/resources/`.
+- Moved texture-page layout, atlas planning, binding, and sampling policy modules into the
+  texture-page directory.
+- Moved WebGL2 texture atlas generation into the WebGL2 resources directory.
+- Updated imports across material resources, staged world material strategy, compaction planning,
+  WebGL2 world resources, submit, family modules, and tests.
+- Kept local imports between `texture-page-atlas-planner.ts` and `atlas-layout-planner.ts`, and
+  between `texture-page-binding.ts` and `texture-page-atlas-planner.ts`, because they are now within
+  the same texture-page boundary.
+
+Decisions:
+
+- `webgl2/resources/texture-atlas-generation.ts` is not renderer-neutral. It owns GL texture
+  creation/disposal and therefore belongs with WebGL2 resource modules, not under `texture-pages/`.
+- `texture-page-binding.ts` moved under `texture-pages/` even though it still references WebGL2
+  texture resource and draw-unit types. It is the correct API boundary, but C10.5 should split the
+  renderer-neutral binding record from WebGL2 direct binding resolution.
+- `texture-sampling-policy.ts` moved with texture pages even though it imports Three texture constants
+  for policy conversion. It remains the app-local texture sampling policy module; C10 did not attempt
+  to make it shared-crate-neutral.
+- The debug metric string `webgl2-texture-atlas-generation-textures` remains unchanged because it is
+  stable diagnostic vocabulary, not a module path.
+
+Course corrections and cleanup targets discovered:
+
+- `TexturePageBinding` currently contains `Webgl2Texture2DResource`, so it is not yet a pure
+  renderer-neutral DTO. C10.5 should consider splitting it into:
+  - a renderer-neutral texture-page binding description;
+  - a WebGL2 realized texture binding used by direct submit.
+- `resolveDirectDrawBaseTexturePageBinding()` still takes a full `Webgl2WorldDrawUnit`. C10.5 should
+  narrow it to explicit texture/page readiness inputs after the draw-unit/resource split starts.
+- `webgl2/resources/texture-atlas-generation.ts` still imports compaction family atlas record types.
+  C10.4 may reduce that coupling by moving compaction types under `compaction/`; if a circular import
+  appears, introduce a neutral texture-page atlas record type instead of a compatibility alias.
+- Test files remain flat by design. If C10.4/C10.5 moves enough production code that flat tests become
+  confusing, revisit colocated tests then.
+
+Validation completed:
+
+- `npm run test:ts -- src/lib/world-display/texture-page-binding.test.ts src/lib/world-display/atlas-layout-planner.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts src/lib/world-display/compaction-family-planner.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-rgba-texture-page-family-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts --run`
+- `npm run check`
+- `npm run lint:dead` was run after the phase and failed on broad unused export debt. C10.3.1 now owns
+  satisfying knip before the next module move.
+
+Legacy shims:
+
+- None introduced. Old texture-page and WebGL2 atlas generation module paths were removed rather than
+  reexported.
+
+## Phase C10.3.1: Knip Export-Debt Cleanup Gate
+
+Status: Planned immediate interim phase before C10.4.
+
+Purpose: make `npm run lint:dead` / knip a green gate before the next module move. C10.1-C10.3
+exposed enough stale exported functions and exported types that continuing broad refactors without
+knip would let dead module surfaces accumulate and hide real ownership mistakes.
+
+Scope rules:
+
+- Treat this as cleanup and export-surface tightening, not behavior work.
+- Prefer removing exports over adding knip ignores.
+- Keep exported DTOs/types only when they are intentionally consumed across module boundaries or are
+  part of a stable renderer/debug contract.
+- If a type is only useful internally, make it non-exported instead of deleting it.
+- Do not add compatibility reexports or alias modules.
+- Do not move major modules in C10.3.1 unless doing so is the smallest way to remove dead exported
+  surface.
+
+Known knip failures to resolve or explicitly justify:
+
+- Unused exported functions including:
+  - `resolveDefaultPreparedTextureAssetIds`;
+  - `fitSceneCameraFrameToBounds`;
+  - `classifyCompactionMaterialFamily`;
+  - `classifyCompactionAlphaPolicy`;
+  - `createEmptyPreparedBvhDebugMetrics`;
+  - `createEmptyPreparedBvhVisibilitySnapshot`;
+  - `createEmptyRenderBatchCandidateSelection`;
+  - staged assembly helper exports for terrain, portal masks, and flat debug materials;
+  - `describeStagedWorldDirectTextureKey`;
+  - `compactedFamilyResourceKey`;
+  - `applyWebgl2SamplerParameters`;
+  - `createEmptyWorldRenderWorkingModel`.
+- Unused exported types across diagnostics, staged world assembly/frame/material strategy, compaction,
+  texture pages, WebGL2 submit/resources, and direct-family DTOs.
+
+Tasks:
+
+- Run `npm run lint:dead` and capture the current knip report.
+- For each unused exported function:
+  - delete it if no active code or test needs it;
+  - otherwise make it internal if it is file-local helper behavior;
+  - keep it exported only with a specific contract reason documented in this phase.
+- For each unused exported type:
+  - remove `export` when it is internal;
+  - delete it when it represents stale DTO/API surface;
+  - keep it exported only when it represents a deliberate external/debug/runtime contract.
+- Re-run `npm run lint:dead` until clean.
+- Add `npm run lint:dead` to the validation section of every subsequent C10 phase.
+- Re-run focused tests for any touched modules plus `npm run check`, `npm run lint:ts`, and
+  `git diff --check`.
+
+Exit criteria:
+
+- `npm run lint:dead` passes for `apps/holtburger-3d`.
+- `npm run lint:ts` passes after export cleanup.
+- No new knip ignore configuration is added unless the phase records a concrete reason for each
+  ignored export.
+- The plan records which exported surfaces were deleted, internalized, or kept intentionally.
+- Future phase validation includes `npm run lint:dead`.
+
+Validation:
+
+- `npm run lint:dead`
+- `npm run lint:ts`
+- Focused `npm run test:ts -- ... --run` for touched modules.
+- `npm run check`
+- `git diff --check`
+
+Requirement for subsequent phases:
+
+- Every phase after C10.3.1 must include `npm run lint:dead` in validation and must not mark the phase
+  complete while knip is failing, unless the phase explicitly adds an immediate follow-up cleanup gate
+  before any further module move or behavior expansion.
 
 ## Historical Cleanup Source List
 

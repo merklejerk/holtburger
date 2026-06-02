@@ -11,7 +11,7 @@ import type {
 import { formatHex32 } from "../landblocks";
 import type { WorldMaterialResourceCache } from "./material-resources";
 import { resolveRegionDetailOverlay } from "./region-detail-overlays";
-import type { TextureSamplingPolicy } from "./texture-sampling-policy";
+import type { TextureSamplingPolicy } from "./texture-pages/texture-sampling-policy";
 
 export interface TerrainBlendMaterialSet {
 	materials: Material[];

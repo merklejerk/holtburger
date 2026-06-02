@@ -22,7 +22,7 @@ import type {
 	Webgl2IndexedPalettedFamilyResource,
 	Webgl2RgbaTexturePageFamilyResource,
 } from "./webgl2-compacted-geometry-resources";
-import type { Webgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
+import type { Webgl2TextureAtlasGenerationResource } from "./webgl2/resources/texture-atlas-generation";
 import type { Webgl2RgbaTexturePageFamilyWorldProgram } from "./webgl2/families/rgba-texture-page-family-submit";
 import type { Webgl2IndexedPalettedFamilyWorldProgram } from "./webgl2/families/indexed-paletted-family-submit";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";

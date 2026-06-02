@@ -23,7 +23,7 @@ import {
 	type PaletteData,
 	type PaletteDataDiagnosticHandler,
 } from "./palette-data";
-import type { TextureSamplingPolicy } from "./texture-sampling-policy";
+import type { TextureSamplingPolicy } from "./texture-pages/texture-sampling-policy";
 
 export const PIXEL_FORMAT_P8 = 0x29;
 export const PIXEL_FORMAT_INDEX16 = 0x65;

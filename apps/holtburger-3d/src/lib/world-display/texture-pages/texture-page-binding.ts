@@ -1,10 +1,10 @@
-import type { Webgl2Texture2DResource } from "./webgl2-gl";
+import type { Webgl2Texture2DResource } from "../webgl2-gl";
 import type {
 	Webgl2TextureAtlasGenerationResource,
 	Webgl2TextureAtlasTextureResource,
-} from "./webgl2-texture-atlas-generation";
+} from "../webgl2/resources/texture-atlas-generation";
 import type { TexturePageAtlasPlan } from "./texture-page-atlas-planner";
-import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
+import type { Webgl2WorldDrawUnit } from "../webgl2-world-resources";
 
 type TexturePageWrapDrawUnit = Pick<
 	Webgl2WorldDrawUnit,

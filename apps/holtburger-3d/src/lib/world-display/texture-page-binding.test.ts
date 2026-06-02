@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import type { TexturePageAtlasPlan } from "./texture-page-atlas-planner";
-import { resolveDirectDrawBaseTexturePageBinding } from "./texture-page-binding";
-import type { Webgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
+import type { TexturePageAtlasPlan } from "./texture-pages/texture-page-atlas-planner";
+import { resolveDirectDrawBaseTexturePageBinding } from "./texture-pages/texture-page-binding";
+import type { Webgl2TextureAtlasGenerationResource } from "./webgl2/resources/texture-atlas-generation";
 import type { Webgl2Texture2DResource } from "./webgl2-gl";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
 

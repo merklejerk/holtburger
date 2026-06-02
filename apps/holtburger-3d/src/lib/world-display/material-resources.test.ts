@@ -28,7 +28,7 @@ import { formatMaterialAssetId } from "./material-signatures";
 import {
 	createDefaultMaterialTextureSamplingPolicy,
 	type TextureSamplingPolicy,
-} from "./texture-sampling-policy";
+} from "./texture-pages/texture-sampling-policy";
 import { DIRECT_CLIP_MAP_ALPHA_TEST } from "./material-behavior";
 
 describe("world material resource cache", () => {

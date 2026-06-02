@@ -48,14 +48,7 @@ export interface CompactedGeometrySlice {
 	materialSlotKeys: readonly string[];
 }
 
-export type CompactedGeometrySliceFor<
-	TDrawSlice extends CompactedGeometryDrawSliceInput,
-> = CompactedGeometrySlice;
-
-export interface CompactedGeometryBatch<
-	TDrawSlice extends CompactedGeometryDrawSliceInput =
-		CompactedGeometryDrawSliceInput,
-> {
+export interface CompactedGeometryBatch {
 	key: string;
 	layout: CompactedGeometryLayout;
 	positions: Float32Array;
@@ -67,7 +60,7 @@ export interface CompactedGeometryBatch<
 	indexCount: number;
 	triangleCount: number;
 	drawRanges: readonly CompactedDrawRange[];
-	drawSlices: readonly CompactedGeometrySliceFor<TDrawSlice>[];
+	drawSlices: readonly CompactedGeometrySlice[];
 	positionByteLength: number;
 	uvByteLength: number;
 	materialSlotByteLength: number;
@@ -85,7 +78,7 @@ export function buildCompactedGeometryBatch<
 	plan: CompactedGeometryPlan<TDrawSlice>;
 	drawUnits: readonly StagedWorldDrawUnitAssembly[];
 	batchOrigin: { x: number; y: number; z: number };
-}): CompactedGeometryBatch<TDrawSlice> | null {
+}): CompactedGeometryBatch | null {
 	if (plan.compactableDrawUnitIds.length === 0) {
 		return null;
 	}
@@ -285,7 +278,7 @@ function compactDrawSlice({
 	slice: CompactedGeometryDrawSliceInput;
 	rangeByDrawUnitId: ReadonlyMap<string, CompactedDrawRange>;
 	materialSlotByKey: ReadonlyMap<string, CompactedGeometryMaterialSlot>;
-}): CompactedGeometrySliceFor<typeof slice> {
+}): CompactedGeometrySlice {
 	const ranges = slice.drawUnitIds.map((drawUnitId) => {
 		const range = rangeByDrawUnitId.get(drawUnitId);
 		if (!range) {

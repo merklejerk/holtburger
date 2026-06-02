@@ -4,14 +4,14 @@ import type { StagedWorldMaterialTexturePageReadiness } from "./staged-world-mat
 import type {
 	TexturePageBinding,
 	TexturePageUsageBucket,
-} from "./texture-page-binding";
+} from "./texture-pages/texture-page-binding";
 import {
 	createEmptyTexturePageAtlasPlan,
 	createTexturePageAtlasPlacementsByEntryKey,
 	createTexturePageDetailAtlasPlacementsByEntryKey,
 	planTexturePageAtlas,
 	type TexturePageAtlasPlan,
-} from "./texture-page-atlas-planner";
+} from "./texture-pages/texture-page-atlas-planner";
 import type { Webgl2SceneDomain } from "./webgl2-scene-domain-targets";
 
 export type CompactionFamilyBypassReason =
@@ -1381,18 +1381,6 @@ function collectUniqueMaterialBlockers(
 		}
 	}
 	return unique;
-}
-
-function isOpaqueStaticCompactionMaterial(
-	behavior: LegacyMaterialBehaviorDto | null,
-): boolean {
-	return (
-		behavior !== null &&
-		!behavior.transparent &&
-		!behavior.blend.enabled &&
-		behavior.alphaTest <= 0 &&
-		behavior.opacity >= 1
-	);
 }
 
 function assignRgbaTexturePageFamilyMaterialSlots(

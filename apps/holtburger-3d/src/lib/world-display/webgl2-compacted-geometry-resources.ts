@@ -9,7 +9,7 @@ import type {
 	CompactedGeometryBatch,
 	CompactedGeometrySlice,
 } from "./compacted-geometry";
-import type { AtlasTexturePlacement } from "./atlas-layout-planner";
+import type { AtlasTexturePlacement } from "./texture-pages/atlas-layout-planner";
 import type {
 	IndexedPalettedFamilyMaterialTableRecord,
 	IndexedPalettedFamilyDrawSlice,
@@ -132,7 +132,7 @@ export function createWebgl2RgbaTexturePageFamilyResource({
 	placementsByEntryKey,
 	detailPlacementsByEntryKey,
 }: {
-	geometry: CompactedGeometryBatch<RgbaTexturePageFamilyDrawSlice>;
+	geometry: CompactedGeometryBatch;
 	materialSlots: readonly RgbaTexturePageFamilyMaterialSlot[];
 	materialDrawSlices: readonly RgbaTexturePageFamilyDrawSlice[];
 	placementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>;
@@ -164,7 +164,7 @@ export function createWebgl2IndexedPalettedFamilyResource({
 	materialDrawSlices,
 	detailPlacementsByEntryKey,
 }: {
-	geometry: CompactedGeometryBatch<IndexedPalettedFamilyDrawSlice>;
+	geometry: CompactedGeometryBatch;
 	materialTableRecords: readonly IndexedPalettedFamilyMaterialTableRecord[];
 	materialDrawSlices: readonly IndexedPalettedFamilyDrawSlice[];
 	detailPlacementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>;

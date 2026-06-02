@@ -44,7 +44,7 @@ import {
 	selectVariantTextureSamplingPolicy,
 	type MaterialTextureSamplingPolicy,
 	type TextureSamplingPolicy,
-} from "./texture-sampling-policy";
+} from "./texture-pages/texture-sampling-policy";
 
 type MaterialResourceDiagnosticHandler = (
 	diagnostic: MaterialResourceDiagnostic,

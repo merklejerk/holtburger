@@ -16,7 +16,7 @@ import {
 	createDefaultMaterialTextureSamplingPolicy,
 	describeTextureSamplingPolicy,
 	selectRenderSurfaceTextureSamplingPolicy,
-} from "./texture-sampling-policy";
+} from "./texture-pages/texture-sampling-policy";
 
 describe("texture sampling policy", () => {
 	it("preserves current direct, compressed, and indexed defaults", () => {

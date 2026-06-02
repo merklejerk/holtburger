@@ -18,7 +18,7 @@ import {
 } from "./indexed-material-data";
 import type { MaterialAppearanceContext } from "./material-appearance";
 import { describeDerivedPaletteDataKey } from "./palette-data";
-import { createDefaultMaterialTextureSamplingPolicy } from "./texture-sampling-policy";
+import { createDefaultMaterialTextureSamplingPolicy } from "./texture-pages/texture-sampling-policy";
 
 describe("indexed material data", () => {
 	it("extracts indexed render surface DTOs without Three resources", () => {

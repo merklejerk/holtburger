@@ -1,8 +1,8 @@
 # Holtburger 3D WebGL2 Material, Portal, and Atlas Continuation Plan
 
 Status: Paused after M7D.5b4; superseded compacted/baked material work is being implemented through
-the compacted render family pipeline replacement plan. Latest detour progress: replacement plan C10.4
-complete.
+the compacted render family pipeline replacement plan. Latest detour progress: replacement plan
+C10.5a complete.
 
 Related plans:
 
@@ -33,6 +33,8 @@ shape. Its intended behavior was completed through the replacement architecture 
   C9.1.
 - The current implementation work is now module ownership cleanup. C10.4 moved compaction planning
   and material-agnostic compacted geometry into `world-display/compaction/`.
+- C10.5a moved WebGL2 compacted geometry and family resource realization into
+  `world-display/webgl2/resources/compacted-geometry-resources.ts`.
 
 Decision:
 
@@ -46,14 +48,20 @@ Course corrections and refinements for future steps:
   work is unrelated to compacted/family pipeline architecture.
 - If terrain work resumes from M7E, first reconcile its wording with the current texture-page and
   render-family vocabulary from the replacement plan.
-- Keep validation commands in this plan historical unless they reference current file paths. The C10.4
-  validation used the moved `src/lib/world-display/compaction/*` test paths.
+- Keep validation commands in this plan historical unless they reference current file paths. The C10.5a
+  validation used the moved `src/lib/world-display/compaction/*` test paths and the WebGL2 resource
+  path under `src/lib/world-display/webgl2/resources/`.
+- Continue the resource split in the replacement plan before resuming any terrain/material expansion
+  from this historical plan.
 
 Cleanup targets and legacy shims:
 
 - The M7D.5b task list below intentionally contains obsolete baked-indexed terminology. Leave it as
   historical context, but do not execute it as written.
-- No compatibility shims were added for the C10.4 detour progress update.
+- No compatibility shims were added for the C10.5a detour progress update.
+- Remaining resource ownership debt is in `webgl2-world-resources.ts`: compacted sync orchestration,
+  graph lease management, landblock partition builders, and compacted metrics should move through the
+  replacement plan C10.5 sequence.
 
 ## Purpose
 
@@ -4757,7 +4765,7 @@ Pause note:
 - Replacement implementation disposition:
   - indexed-paletted compacted rendering landed through replacement plan C8/C8.8-C8.15 phases;
   - legacy baked planner/resource terminology cleanup landed through replacement plan C9/C9.1;
-  - current ownership cleanup continues through replacement plan C10, with C10.4 complete.
+  - current ownership cleanup continues through replacement plan C10, with C10.5a complete.
 
 Tasks:
 

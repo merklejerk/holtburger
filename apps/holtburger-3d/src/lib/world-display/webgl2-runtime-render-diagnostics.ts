@@ -9,7 +9,7 @@ import type {
 	Webgl2CompactedGeometryFamilyResource,
 	Webgl2IndexedPalettedFamilyResource,
 	Webgl2RgbaTexturePageFamilyResource,
-} from "./webgl2-compacted-geometry-resources";
+} from "./webgl2/resources/compacted-geometry-resources";
 
 export function deriveWebgl2DrawUnitRuntimeDiagnostics({
 	store,

@@ -9,7 +9,7 @@ import {
 import type {
 	Webgl2CompactedGeometryBatchResource,
 	Webgl2RgbaTexturePageFamilyResource,
-} from "./webgl2-compacted-geometry-resources";
+} from "./webgl2/resources/compacted-geometry-resources";
 import type { Webgl2TextureAtlasGenerationResource } from "./webgl2/resources/texture-atlas-generation";
 import { Webgl2StateCache } from "./webgl2-state-cache";
 

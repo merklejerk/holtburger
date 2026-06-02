@@ -96,7 +96,7 @@ import {
 	updateWebgl2CompactedGeometryBatchDynamicTables,
 	type Webgl2CompactedGeometryFamilyResource,
 	type Webgl2CompactedGeometryBatchResource,
-} from "./webgl2-compacted-geometry-resources";
+} from "./webgl2/resources/compacted-geometry-resources";
 import type {
 	TerrainBlendPlan,
 	TerrainBlendTextureRef,

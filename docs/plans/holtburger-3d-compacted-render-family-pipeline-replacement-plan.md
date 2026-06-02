@@ -3219,13 +3219,14 @@ Cleanup/refactor notes to feed C10:
 
 ## Phase C10: Renderer Module Structure And Family Pipeline Refactor Plan
 
-Status: Planned follow-up after C9.1.
+Status: Complete. Concrete refactor sequence defined; C10.1 added as an immediate ownership
+preparation phase before broad directory moves.
 
 Purpose: use the C9 cleanup pass to identify a cleaner file structure and module ownership model, then
 itemize the refactor work separately instead of mixing broad module moves with deletion cleanup. C9
 should leave notes; C10 should turn those notes into executable refactor phases.
 
-Candidate module boundaries to evaluate during C9:
+Candidate module boundaries evaluated:
 
 - `world-display/material/`
   - material behavior, alpha policy, variants, signatures, texture resolution, and family readiness
@@ -3260,7 +3261,155 @@ Candidate module boundaries to evaluate during C9:
   - browser picker diagnostics;
   - metrics summaries and sample formatting.
 
-Refactor candidates to itemize after C9:
+Audit findings:
+
+- `webgl2-world-resources.ts` is the largest active renderer owner at roughly 3300 lines. It still
+  constructs direct WebGL draw resources, material/page facts, compaction eligibility, texture-page
+  atlas planning, compacted geometry resources, family resource payloads, graph leases, and metrics.
+  Moving files before splitting this ownership would mostly move coupling into new directories.
+- `webgl2-world-submit.ts` is roughly 1300 lines and already depends on family submit modules, direct
+  family adapters, pass/domain partitioning, retained direct sorting, metrics, and terrain/portal
+  direct paths. It is the right first extraction point because it can produce a pass scheduler without
+  changing resource lifecycles.
+- The current family modules are small and cohesive enough to move later:
+  - `webgl2-rgba-texture-page-family-submit.ts`;
+  - `webgl2-indexed-paletted-family-submit.ts`;
+  - `webgl2-direct-family-adapters.ts`;
+  - `webgl2-direct-render-family.ts`;
+  - `webgl2-family-render-state.ts`.
+  Their main debt is that the direct adapters still accept `Webgl2WorldDrawUnit`.
+- `compaction-family-planner.ts` is large, but C9.1 left a cleaner typed readiness boundary. It can
+  move under `compaction/` after the texture-page atlas plan and material readiness types have stable
+  homes.
+- `TexturePageAtlasPlan` now owns atlas failures separately from compaction bypasses. That makes
+  `texture-page-atlas-planner.ts`, `atlas-layout-planner.ts`, `texture-page-binding.ts`,
+  `texture-sampling-policy.ts`, and `webgl2-texture-atlas-generation.ts` a coherent future
+  `texture-pages/` boundary.
+- `BrowserWorldDisplay.svelte` still formats a large amount of renderer diagnostic prose. This should
+  move after resource/submit ownership is clearer, because diagnostics currently reference both
+  resource-store and submit metrics vocabulary.
+
+Decisions:
+
+- Do not start broad directory moves in C10. The first executable refactor must reduce the
+  `webgl2-world-submit.ts` and `webgl2-world-resources.ts` ownership knots so future file moves are
+  semantic rather than cosmetic.
+- Add C10.1 as an immediate interim phase to extract submit pass planning/scheduling boundaries while
+  keeping file locations stable.
+- Keep tests in the existing flat `world-display` test layout until the module move is underway.
+  Moving test files first would not improve ownership and would add review noise.
+- Keep `Webgl2WorldDrawUnit` unsplit until submit scheduling and resource planning have typed
+  seams. Splitting the record first would require temporary adapters that preserve the old aggregate
+  shape.
+- Use direct imports after every move. Do not add compatibility reexports for old module paths.
+
+Concrete refactor sequence:
+
+1. C10.1: Submit pass scheduler preparation.
+   - Affected files:
+     - `webgl2-world-submit.ts`;
+     - `webgl2-direct-family-adapters.ts`;
+     - `webgl2-world-submit.test.ts`;
+     - focused family submit tests as needed.
+   - Extract explicit pass records for:
+     - compacted opaque RGBA texture-page family;
+     - compacted opaque indexed-paletted family;
+     - retained direct opaque/cutout;
+     - retained direct blended;
+     - terrain and portal-mask direct passes.
+   - Preserve current rendering order and metrics. The output should be a scheduler boundary that
+     later moves under `webgl2/submit/`.
+   - Validation:
+     - `webgl2-world-submit.test.ts`;
+     - `webgl2-direct-render-family.test.ts`;
+     - `webgl2-rgba-texture-page-family-submit.test.ts`;
+     - `npm run check`.
+   - Migration risk:
+     - render-state leaks and blended ordering regressions. Tests should continue asserting pass
+       order and state reset behavior.
+2. C10.2: Move cohesive WebGL2 family modules.
+   - New target:
+     - `world-display/webgl2/families/`.
+   - Move:
+     - `webgl2-rgba-texture-page-family-submit.ts`;
+     - `webgl2-indexed-paletted-family-submit.ts`;
+     - `webgl2-direct-family-adapters.ts`;
+     - `webgl2-direct-render-family.ts`;
+     - `webgl2-family-render-state.ts`.
+   - Update imports directly with no reexports.
+   - Validation:
+     - all family submit/direct tests;
+     - `webgl2-world-submit.test.ts`;
+     - `npm run check`.
+   - Migration risk:
+     - relative import churn; keep this phase behavior-free.
+3. C10.3: Move texture-page planning and WebGL2 atlas generation into a texture-page boundary.
+   - New target:
+     - `world-display/texture-pages/` for renderer-neutral page planning/binding/sampling;
+     - `world-display/webgl2/resources/` for WebGL2 texture atlas generation if the resource type
+       still depends on `webgl2-gl`.
+   - Move/evaluate:
+     - `texture-page-atlas-planner.ts`;
+     - `texture-page-binding.ts`;
+     - `atlas-layout-planner.ts`;
+     - `texture-sampling-policy.ts`;
+     - `webgl2-texture-atlas-generation.ts`.
+   - Add the optional physical atlas entry key to `TexturePageAtlasFailure` only if diagnostics need
+     it after the move.
+   - Validation:
+     - texture page binding/atlas generation tests;
+     - compaction family planner tests;
+     - `npm run check`.
+   - Migration risk:
+     - accidentally mixing physical atlas terminology with texture-page readiness terminology. Keep
+       physical `atlas` names only for packed page placement/generation.
+4. C10.4: Move compaction planner and compacted geometry modules.
+   - New target:
+     - `world-display/compaction/`.
+   - Move:
+     - `compaction-family-planner.ts`;
+     - `compacted-geometry.ts`;
+     - compacted geometry tests.
+   - Keep family-specific material payloads out of compacted geometry.
+   - Validation:
+     - compaction planner tests;
+     - compacted geometry tests;
+     - world resource tests;
+     - `npm run check`.
+   - Migration risk:
+     - circular imports between compaction and WebGL2 resource construction. If this appears, move
+       only renderer-neutral types first and leave WebGL2 resource realization for C10.5.
+5. C10.5: Split WebGL2 resource ownership.
+   - New target:
+     - `world-display/webgl2/resources/`.
+   - Extract from `webgl2-world-resources.ts`:
+     - direct draw-unit resource realization;
+     - compacted geometry resource realization;
+     - family resource realization;
+     - graph lease/cleanup helpers.
+   - Start splitting `Webgl2WorldDrawUnit` only after these helpers consume narrower typed inputs.
+   - Validation:
+     - `webgl2-world-resources.test.ts`;
+     - runtime diagnostics tests;
+     - submit tests;
+     - `npm run check`.
+   - Migration risk:
+     - graph-retention leaks. Keep graph lease signatures stable and add focused tests before
+       deleting old helper surfaces.
+6. C10.6: Diagnostics presenter extraction.
+   - New target:
+     - `world-display/diagnostics/`.
+   - Move renderer report formatting away from `BrowserWorldDisplay.svelte` where the formatting is
+     renderer vocabulary rather than Svelte UI state.
+   - Keep browser interaction and panel layout in Svelte.
+   - Validation:
+     - `npm run check`;
+     - focused diagnostics tests if pure formatters are extracted.
+   - Migration risk:
+     - over-abstracting browser UX into renderer modules. Extract only data formatting and sample
+       summarization.
+
+Refactor candidates retained for later feature phases:
 
 - Split `Webgl2WorldDrawUnit` into smaller owned records:
   - geometry submission;
@@ -3282,11 +3431,79 @@ Refactor candidates to itemize after C9:
 
 Exit criteria:
 
-- C10 contains a concrete module move/refactor sequence based on C9 findings.
+- C10 contains a concrete module move/refactor sequence based on C9 findings. Complete.
 - Each proposed move names the files affected, dependency direction, validation tests, and any
-  temporary migration risk.
+  temporary migration risk. Complete.
 - Broad file moves do not begin until C9 has deleted deprecated paths and terminology, so the refactor
-  is not obscured by legacy cleanup.
+  is not obscured by legacy cleanup. Complete; broad moves are deferred until C10.2.
+
+Validation completed:
+
+- `rg` audit over active renderer imports and stale vocabulary.
+- `wc -l` sizing audit for the main renderer submit/resource/family modules.
+- `git diff --check`
+
+Course corrections and cleanup targets discovered:
+
+- C10.1 should keep file locations stable. The immediate risk is pass/order/state correctness, not
+  directory shape.
+- `webgl2-world-resources.ts` should not be split until C10.1 produces narrower submit/pass records.
+  Otherwise new resource modules would still depend on the full `Webgl2WorldDrawUnit` aggregate.
+- `texture-page-binding.ts` currently imports WebGL2 resource types and `Webgl2WorldDrawUnit`, so the
+  texture-page move may require a renderer-neutral binding formatter plus a WebGL2 direct-resolution
+  adapter.
+- `runtime-render-diagnostics.ts` and `webgl2-runtime-render-diagnostics.ts` straddle compaction,
+  WebGL2 resources, and UI-facing diagnostics. Leave them in place until C10.6.
+- Historical `baked` terms remain in this plan's older phase text only. Active code/module cleanup is
+  complete enough for C10.1.
+
+Legacy shims:
+
+- None introduced. C10 is a planning/refactor-sequencing phase and does not add compatibility
+  exports.
+
+## Phase C10.1: Submit Pass Scheduler Preparation
+
+Status: Planned immediate interim phase before directory moves.
+
+Purpose: reduce the central `webgl2-world-submit.ts` ownership knot before moving files. This phase
+should make render order and family/direct pass orchestration explicit while preserving current
+behavior.
+
+Scope rules:
+
+- Do not move modules in C10.1.
+- Do not broaden material coverage.
+- Preserve current opaque/cutout, compacted family, terrain, portal-mask, and blended ordering.
+- Preserve existing submit metrics names unless a small rename is required by the extracted pass
+  boundary.
+- Do not split `Webgl2WorldDrawUnit` yet.
+
+Tasks:
+
+- Extract typed pass descriptors for compacted family passes, retained direct passes, terrain direct
+  passes, and portal-mask passes.
+- Extract pass partitioning from the draw loop so `submitWebgl2FlatWorldDrawUnits()` can execute a
+  planned schedule instead of interleaving planning with drawing.
+- Keep direct family adapter calls as the draw implementation for retained direct passes.
+- Keep compacted family modules as the draw implementation for compacted passes.
+- Add focused tests for pass order, blended-last behavior, and state reset expectations if existing
+  tests do not already cover the extracted scheduler boundary.
+
+Exit criteria:
+
+- `webgl2-world-submit.ts` exposes or internally uses a typed pass schedule.
+- The main submit function no longer owns both pass partitioning and every pass draw loop in one
+  continuous control flow.
+- Existing visible draw counts, family replacement metrics, direct texture-page metrics, and blended
+  draw ordering are preserved.
+- C10.2 can move family modules without also changing pass scheduling behavior.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-direct-render-family.test.ts src/lib/world-display/webgl2-rgba-texture-page-family-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts --run`
+- `npm run check`
+- `git diff --check`
 
 ## Historical Cleanup Source List
 

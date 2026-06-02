@@ -2784,6 +2784,72 @@ Validation:
 - `npm run test:ts -- src/lib/world-display/compaction-family-planner.test.ts src/lib/world-display/compacted-geometry.test.ts src/lib/world-display/webgl2-rgba-texture-page-family-submit.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-direct-render-family.test.ts --run`
 - `npm run check`
 
+## Phase C8.15: Add Indexed Opaque Detail Overlay Compaction
+
+Status: Planned. Immediate diagnostic normalization implemented; render support remains next.
+
+Purpose: compact the remaining opaque indexed/paletted static draw units that are currently retained
+direct only because they carry detail overlay texture-page bindings.
+
+Scope:
+
+- Treat indexed `detail` texture-page usage as the semantic `detail-overlay` blocker instead of the
+  generic `unsupported-texture-page-usage:detail` blocker.
+- Extend indexed family planning to admit opaque indexed/paletted candidates with detail overlays when:
+  - indexed texel and palette pages are table-ready;
+  - the detail texture has a compacted detail atlas entry;
+  - geometry is static/structured, landblock-owned, and UV-ready;
+  - alpha policy remains opaque.
+- Extend `IndexedPalettedFamilyMaterialTableRecord` and realized indexed family resources with optional
+  detail atlas slot state:
+  - detail atlas texture index/rect;
+  - detail tiling;
+  - detail blend mode, starting with the existing supported `dst-color` overlay semantics.
+- Extend indexed family draw-slice keys/material table keys so detail and non-detail indexed materials
+  do not alias.
+- Extend the indexed compacted shader to apply detail overlay after palette lookup, matching the direct
+  indexed/detail path.
+- Keep indexed alpha-test and transparent indexed materials direct until a separate indexed alpha policy
+  phase exists.
+
+Exit criteria:
+
+- Live report moves the current `detail-overlay` indexed bypass bucket into the compacted indexed family
+  for opaque materials with ready detail atlas entries.
+- `unsupported texture-page` diagnostics no longer report the indexed detail overlay subset.
+- Indexed compacted family draw count/resource diagnostics show added replacements without increasing
+  fallback count.
+- Visual spot checks confirm indexed detail overlays render, not just compact.
+
+Progress:
+
+- Added diagnostic normalization so indexed `detail` usage now maps to `detail-overlay`, with a focused
+  planner regression test.
+- Added targeted unsupported texture-page diagnostics before this phase so future unsupported buckets do
+  not get buried behind terrain/debug bypasses.
+
+Decisions:
+
+- Indexed detail support belongs in the indexed/paletted family, not the RGBA family. The base sample is
+  still indexed texels plus palette lookup; detail is a post-palette color modulation.
+- Keep `detail-overlay` as the public blocker vocabulary until the indexed family actually supports the
+  overlay. This is more accurate than `unsupported-compacted-material-family` because the missing feature
+  is specific and actionable.
+
+Discovered cleanup targets and legacy shims:
+
+- The compacted planner still derives some family eligibility from direct texture-page bindings. For
+  indexed detail, that is useful for diagnostics but should eventually be represented as typed indexed
+  detail material state rather than inferred from generic usage buckets.
+- The one-line render report now has both general bypass blocker samples and targeted unsupported
+  texture-page samples. Once indexed detail support lands and the remaining unsupported buckets stabilize,
+  prune or move the targeted diagnostic into a detail panel to keep the summary readable.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/compaction-family-planner.test.ts --run`
+- `npm run check`
+
 ## Cleanup Targets
 
 - Split `Webgl2WorldDrawUnit` into smaller owned records over time:

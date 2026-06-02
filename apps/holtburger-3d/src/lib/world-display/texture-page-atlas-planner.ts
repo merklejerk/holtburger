@@ -109,6 +109,11 @@ export function planTexturePageAtlas(options: {
 				overflow.reason === "source-too-large"
 					? "source-texture-too-large"
 					: "atlas-full",
+			blockerKind: "atlas",
+			blocker:
+				overflow.reason === "source-too-large"
+					? "source-texture-too-large"
+					: "atlas-full",
 			detail: overflow.detail,
 		});
 	}
@@ -147,6 +152,8 @@ export function planTexturePageAtlas(options: {
 		bypasses.push({
 			drawUnitId: candidate.drawUnitId,
 			reason: "detail-atlas-full",
+			blockerKind: "atlas",
+			blocker: "detail-atlas-full",
 			detail: overflow.detail,
 		});
 	}

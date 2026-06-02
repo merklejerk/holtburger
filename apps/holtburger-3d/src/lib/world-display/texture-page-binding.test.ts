@@ -30,6 +30,8 @@ describe("texture page binding", () => {
 					{
 						drawUnitId: "draw-a",
 						reason: "atlas-full",
+						blockerKind: "atlas",
+						blocker: "atlas-full",
 						detail: "atlas is full",
 					},
 				],

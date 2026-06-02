@@ -194,6 +194,9 @@ export interface Webgl2WorldResourceStore {
 	compactionCandidateDrawUnitCount: number;
 	compactionBypassReasonCount: number;
 	compactionBypassSamples: readonly string[];
+	compactionBypassBlockerSamples: readonly string[];
+	unsupportedTexturePageBypassSamples: readonly string[];
+	compactionBypassDetailSamples: readonly string[];
 	compactionCoverageDrawUnitCounts: Record<string, number>;
 	compactionCoverageMaterialBlockerCounts: Record<string, number>;
 	compactionCoverageGeometryBlockerCounts: Record<string, number>;
@@ -319,6 +322,9 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		compactionCandidateDrawUnitCount: 0,
 		compactionBypassReasonCount: 0,
 		compactionBypassSamples: [],
+		compactionBypassBlockerSamples: [],
+		unsupportedTexturePageBypassSamples: [],
+		compactionBypassDetailSamples: [],
 		compactionCoverageDrawUnitCounts: {},
 		compactionCoverageMaterialBlockerCounts: {},
 		compactionCoverageGeometryBlockerCounts: {},
@@ -533,6 +539,31 @@ export function syncWebgl2WorldResources({
 		store.compactionFamilyPlan.bypasses.map((bypass) => bypass.reason),
 		8,
 	);
+	const drawUnitById = new Map(
+		store.drawUnits.map((drawUnit) => [drawUnit.id, drawUnit] as const),
+	);
+	store.compactionBypassBlockerSamples = summarizeDiagnosticReasons(
+		store.compactionFamilyPlan.bypasses.map(
+			(bypass) => describeCompactionBypassBlockerSample(bypass, drawUnitById),
+		),
+		8,
+	);
+	store.unsupportedTexturePageBypassSamples = summarizeDiagnosticReasons(
+		store.compactionFamilyPlan.bypasses
+			.filter((bypass) =>
+				bypass.blocker.startsWith("unsupported-texture-page-"),
+			)
+			.map((bypass) =>
+				describeCompactionBypassBlockerSample(bypass, drawUnitById),
+			),
+		8,
+	);
+	store.compactionBypassDetailSamples = summarizeDiagnosticReasons(
+		store.compactionFamilyPlan.bypasses.map(
+			(bypass) => `${bypass.reason}: ${bypass.detail}`,
+		),
+		8,
+	);
 	const compactionCoverageMetrics = collectCompactionCoverageMetrics(
 		store.drawUnits,
 	);
@@ -666,6 +697,9 @@ export function destroyWebgl2WorldResources(
 	store.compactionCandidateDrawUnitCount = 0;
 	store.compactionBypassReasonCount = 0;
 	store.compactionBypassSamples = [];
+	store.compactionBypassBlockerSamples = [];
+	store.unsupportedTexturePageBypassSamples = [];
+	store.compactionBypassDetailSamples = [];
 	store.compactionCoverageDrawUnitCounts = {};
 	store.compactionCoverageMaterialBlockerCounts = {};
 	store.compactionCoverageGeometryBlockerCounts = {};
@@ -1941,6 +1975,40 @@ function collectCompactionCoverageMetrics(
 
 function incrementCount(counts: Record<string, number>, key: string): void {
 	counts[key] = (counts[key] ?? 0) + 1;
+}
+
+function describeCompactionBypassBlockerSample(
+	bypass: { drawUnitId: string; reason: string; blockerKind: string; blocker: string },
+	drawUnitById: ReadonlyMap<string, Webgl2WorldDrawUnit>,
+): string {
+	const base = `${bypass.reason}:${bypass.blockerKind}:${bypass.blocker}`;
+	const drawUnit = drawUnitById.get(bypass.drawUnitId);
+	if (!drawUnit) {
+		return `${base}|drawUnit=missing`;
+	}
+	const material = drawUnit.compactionEligibility.material;
+	const detailOverlay = drawUnit.detailOverlay !== null ? "yes" : "no";
+	const detailAtlas = drawUnit.detailOverlay?.atlasEntry ? "yes" : "no";
+	const usageSources = summarizeTexturePageUsageSources(
+		drawUnit.texturePageBindings,
+	);
+	return [
+		base,
+		`family=${material.family}`,
+		`alpha=${material.alphaPolicy}`,
+		`detailOverlay=${detailOverlay}`,
+		`detailAtlas=${detailAtlas}`,
+		`usageSources=${usageSources}`,
+	].join("|");
+}
+
+function summarizeTexturePageUsageSources(
+	bindings: readonly TexturePageBinding[],
+): string {
+	const pairs = new Set(
+		bindings.map((binding) => `${binding.usageBucket}:${binding.source}`),
+	);
+	return [...pairs].sort().join("+") || "none";
 }
 
 function summarizeDiagnosticReasons(

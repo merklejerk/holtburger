@@ -3464,7 +3464,7 @@ Legacy shims:
 
 ## Phase C10.1: Submit Pass Scheduler Preparation
 
-Status: Planned immediate interim phase before directory moves.
+Status: Complete.
 
 Purpose: reduce the central `webgl2-world-submit.ts` ownership knot before moving files. This phase
 should make render order and family/direct pass orchestration explicit while preserving current
@@ -3492,18 +3492,166 @@ Tasks:
 
 Exit criteria:
 
-- `webgl2-world-submit.ts` exposes or internally uses a typed pass schedule.
+- `webgl2-world-submit.ts` exposes or internally uses a typed pass schedule. Complete.
 - The main submit function no longer owns both pass partitioning and every pass draw loop in one
-  continuous control flow.
+  continuous control flow. Complete.
 - Existing visible draw counts, family replacement metrics, direct texture-page metrics, and blended
-  draw ordering are preserved.
-- C10.2 can move family modules without also changing pass scheduling behavior.
+  draw ordering are preserved. Complete.
+- C10.2 can move family modules without also changing pass scheduling behavior. Complete.
 
 Validation:
 
 - `npm run test:ts -- src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-direct-render-family.test.ts src/lib/world-display/webgl2-rgba-texture-page-family-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts --run`
 - `npm run check`
 - `git diff --check`
+
+Progress ledger:
+
+- Added explicit submit pass records in `webgl2-world-submit.ts`:
+  - `Webgl2RetainedDirectSubmitPass`;
+  - `Webgl2RgbaTexturePageFamilySubmitPass`;
+  - `Webgl2IndexedPalettedFamilySubmitPass`;
+  - `Webgl2WorldSubmitPass`;
+  - `Webgl2WorldSubmitPassSchedule`.
+- Added `planWebgl2WorldSubmitPassSchedule()` as the typed schedule boundary.
+  - The schedule always includes both compacted family passes so family metrics and no-visible route
+    accounting are preserved even when a family has no replaceable visible draw units.
+  - Retained direct passes are conditional and split into `opaque-or-cutout` and `transparent-blend`.
+  - Blended retained direct sorting remains the existing projected-origin back-to-front sort.
+- Added `submitWebgl2WorldSubmitPassSchedule()` as the internal schedule executor.
+  - The executor lazily creates the direct submit context only when a retained direct pass is present.
+  - Compacted RGBA and indexed family submit behavior remains delegated to the existing family submit
+    helpers.
+  - Existing world-submit exit state reset remains after schedule execution.
+- Updated `submitWebgl2FlatWorldDrawUnits()` to build metrics from the schedule's retained draw-unit
+  facts instead of carrying the old inline retained/direct partition locals.
+- Added a focused scheduler unit test that asserts pass order:
+  - retained opaque/cutout direct;
+  - compacted RGBA texture-page family;
+  - compacted indexed-paletted family;
+  - retained blended direct.
+- Existing GL-capture tests continue to cover blended-last behavior, state reset, terrain culling,
+  compacted family replacement metrics, and direct texture-page metrics.
+
+Decisions:
+
+- The compacted family passes stay present even when they have zero replacements. This preserves the
+  old metric behavior and avoids making metrics depend on whether a pass happened to draw.
+- Terrain and portal-mask work remain represented by direct draw-unit routes in C10.1. The scheduler
+  boundary is now ready for future typed direct-pass subcategories, but this phase did not change
+  portal-mask ownership because normal world submit still excludes portal masks and counts them from
+  the frame plan.
+- `Webgl2WorldDrawUnit` remains the direct pass draw-unit shape. Splitting it before C10.2 would still
+  require temporary adapters and would not help the family module move.
+- The schedule function is exported for tests and future module moves. This is not a compatibility
+  shim because it is the new pass-planning boundary.
+
+Course corrections and cleanup targets discovered:
+
+- C10.2 can move the family submit modules, but `webgl2-direct-family-adapters.ts` still depends on
+  the full `Webgl2WorldDrawUnit`. Treat that as acceptable for the move, then narrow adapter inputs in
+  a later resource/draw-unit split phase.
+- The retained direct pass currently uses a broad `opaque-or-cutout` label. If future diagnostics need
+  separate opaque and cutout counters, add a scheduler subpartition before changing family module
+  ownership.
+- The schedule does not yet model portal-mask passes because portal-mask draw units are excluded from
+  `planWebgl2FlatWorldSubmitOrder()` and rendered through separate portal work. If a later submit
+  refactor pulls portal masks into this scheduler, it should use a dedicated pass kind rather than
+  mixing masks into retained direct.
+- `assertNeverWebgl2WorldSubmitPass()` currently exists only to enforce exhaustive schedule execution.
+  Keep it colocated with the executor until C10.2/C10.3 decide the submit module boundary.
+
+Validation completed:
+
+- `npm run test:ts -- src/lib/world-display/webgl2-world-submit.test.ts --run`
+- `npm run test:ts -- src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-direct-render-family.test.ts src/lib/world-display/webgl2-rgba-texture-page-family-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts --run`
+- `npm run check`
+
+Legacy shims:
+
+- None introduced. The exported scheduler is new active architecture, not an alias for an old submit
+  path.
+
+## Phase C10.2: WebGL2 Family Module Move
+
+Status: Complete.
+
+Purpose: move the cohesive WebGL2 family modules under an explicit family-pipeline directory now that
+C10.1 separated submit pass scheduling from family draw implementation.
+
+Scope rules:
+
+- Keep this phase behavior-free.
+- Move production family modules only; keep tests in the existing flat test layout until broader test
+  colocation is worth the churn.
+- Update imports directly. Do not add compatibility reexports for the old module paths.
+- Do not split `Webgl2WorldDrawUnit` or narrow direct adapter inputs in this phase.
+
+Tasks:
+
+- Create `world-display/webgl2/families/`.
+- Move:
+  - `webgl2-rgba-texture-page-family-submit.ts` to
+    `webgl2/families/rgba-texture-page-family-submit.ts`;
+  - `webgl2-indexed-paletted-family-submit.ts` to
+    `webgl2/families/indexed-paletted-family-submit.ts`;
+  - `webgl2-direct-family-adapters.ts` to `webgl2/families/direct-family-adapters.ts`;
+  - `webgl2-direct-render-family.ts` to `webgl2/families/direct-render-family.ts`;
+  - `webgl2-family-render-state.ts` to `webgl2/families/family-render-state.ts`.
+- Rewrite callers to import from `./webgl2/families/...`.
+- Rewrite moved modules to import renderer-neutral and WebGL2 shared dependencies from their new
+  relative paths.
+- Verify there are no active imports of the old `webgl2-*family*` module paths.
+
+Exit criteria:
+
+- Active production family submit/adapters live under `world-display/webgl2/families/`. Complete.
+- No compatibility reexports or old-path alias modules exist. Complete.
+- Tests continue to cover the moved modules through direct imports from the new paths. Complete.
+- C10.3 can move texture-page planning without also moving family draw modules. Complete.
+
+Progress ledger:
+
+- Added `apps/holtburger-3d/src/lib/world-display/webgl2/families/`.
+- Moved the RGBA texture-page compacted family submit module, indexed-paletted compacted family submit
+  module, direct family adapter module, direct render family DTO module, and family render-state
+  helper into the new directory.
+- Updated `webgl2-world-submit.ts`, `webgl2-world-display-renderer-impl.ts`,
+  `webgl2-world-resources.ts`, and the relevant tests to import from the new family module paths.
+- Updated internal family imports so only family-to-family dependencies use local `./...` paths.
+  Shared renderer modules are imported via `../../...`.
+- Verified `rg` has no active references to the old family module paths.
+
+Decisions:
+
+- Tests remain flat under `world-display` for now. This keeps the phase behavior-free and avoids
+  moving test fixtures while the production module structure is still changing.
+- File names inside `webgl2/families/` drop the redundant `webgl2-` prefix because the directory now
+  provides that namespace.
+- `direct-family-adapters.ts` still imports `Webgl2WorldDrawUnit` from the resource module. This is
+  known ownership debt, but narrowing it belongs with the later draw-unit/resource split, not a pure
+  module move.
+
+Course corrections and cleanup targets discovered:
+
+- `webgl2-world-submit.ts` now imports family modules from the nested directory but still owns the
+  program type aliases. If C10.5 splits resource/program ownership, consider whether direct/family
+  program type aliases should move closer to the family modules.
+- `direct-render-family.ts` is renderer/family DTO code but still references WebGL2 resource shapes.
+  C10.5 should decide whether to split renderer-neutral direct submissions from WebGL2 realized
+  resources.
+- `webgl2/families/rgba-texture-page-family-submit.ts` still depends on WebGL2 texture atlas
+  generation resources. C10.3 can move texture-page resources first, then adjust this import without
+  changing family submit behavior.
+
+Validation completed:
+
+- `npm run test:ts -- src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-direct-render-family.test.ts src/lib/world-display/webgl2-rgba-texture-page-family-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts --run`
+- `npm run check`
+
+Legacy shims:
+
+- None introduced. Old module paths were removed rather than reexported.
 
 ## Historical Cleanup Source List
 

@@ -1,12 +1,12 @@
-import type { RenderMat4 } from "./render-math";
-import type { Webgl2ProgramResource } from "./webgl2-gl";
-import type { Webgl2StateCache } from "./webgl2-state-cache";
+import type { RenderMat4 } from "../../render-math";
+import type { Webgl2ProgramResource } from "../../webgl2-gl";
+import type { Webgl2StateCache } from "../../webgl2-state-cache";
 import type {
 	Webgl2CompactedGeometryBatchResource,
 	Webgl2RgbaTexturePageFamilyResource,
-} from "./webgl2-compacted-geometry-resources";
-import { applyOpaqueCompactedFamilyRenderState } from "./webgl2-family-render-state";
-import type { Webgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
+} from "../../webgl2-compacted-geometry-resources";
+import { applyOpaqueCompactedFamilyRenderState } from "./family-render-state";
+import type { Webgl2TextureAtlasGenerationResource } from "../../webgl2-texture-atlas-generation";
 
 export const WEBGL2_RGBA_TEXTURE_PAGE_MAX_MATERIAL_SLOTS = 128;
 

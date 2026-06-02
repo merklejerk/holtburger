@@ -4,11 +4,12 @@ import type { StagedWorldFrame } from "./staged-world-frame";
 import {
 	planWebgl2DirectDrawRoute,
 	type Webgl2DirectDrawPrograms,
-} from "./webgl2-direct-family-adapters";
+} from "./webgl2/families/direct-family-adapters";
 import {
 	partitionWebgl2SceneDomainDrawUnits,
 	planWebgl2FlatWorldSubmitOrder,
 	planWebgl2PortalMaskSubmitOrder,
+	planWebgl2WorldSubmitPassSchedule,
 	submitWebgl2FlatWorldDrawUnits,
 	submitWebgl2FlatWorldFrame,
 	type Webgl2FlatWorldProgram,
@@ -22,8 +23,8 @@ import type {
 	Webgl2RgbaTexturePageFamilyResource,
 } from "./webgl2-compacted-geometry-resources";
 import type { Webgl2TextureAtlasGenerationResource } from "./webgl2-texture-atlas-generation";
-import type { Webgl2RgbaTexturePageFamilyWorldProgram } from "./webgl2-rgba-texture-page-family-submit";
-import type { Webgl2IndexedPalettedFamilyWorldProgram } from "./webgl2-indexed-paletted-family-submit";
+import type { Webgl2RgbaTexturePageFamilyWorldProgram } from "./webgl2/families/rgba-texture-page-family-submit";
+import type { Webgl2IndexedPalettedFamilyWorldProgram } from "./webgl2/families/indexed-paletted-family-submit";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
 import {
@@ -116,6 +117,83 @@ describe("partitionWebgl2SceneDomainDrawUnits", () => {
 			"indoor-static",
 			"interior",
 		]);
+	});
+});
+
+describe("planWebgl2WorldSubmitPassSchedule", () => {
+	it("keeps retained opaque, compacted families, and retained blended as explicit ordered passes", () => {
+		const indexedMaterial = createIndexedMaterial("p8");
+		const schedule = planWebgl2WorldSubmitPassSchedule({
+			drawUnits: [
+				createDrawUnit({ id: "opaque-direct" }),
+				createDrawUnit({
+					id: "rgba-compacted",
+					materialKind: "direct-texture",
+					materialKey: "rgba-material",
+				}),
+				createDrawUnit({
+					id: "indexed-compacted",
+					materialKind: "indexed-paletted",
+					indexedMaterial,
+				}),
+				createDrawUnit({
+					id: "blended-direct",
+					materialBehavior: createBlendedMaterialBehavior(),
+				}),
+			],
+			viewProjectionMatrix: createIdentityMat4(),
+			rgbaTexturePageFamilyResources: {
+				batches: [createRgbaTexturePageFamilyBatch(["rgba-compacted"])],
+				rgbaTexturePageFamilies: [
+					createRgbaTexturePageFamilyResource(["rgba-compacted"]),
+				],
+				generation: createTextureAtlasGeneration(),
+			},
+			indexedPalettedFamilyResources: {
+				batches: [createRgbaTexturePageFamilyBatch(["indexed-compacted"])],
+				indexedPalettedFamilies: [
+					createIndexedPalettedFamilyResource(["indexed-compacted"]),
+				],
+				detailTextures: [],
+				texturesByKey: new Map([
+					[
+						indexedMaterial.indexTextureKey,
+						createTextureResource({} as WebGLTexture),
+					],
+					[
+						indexedMaterial.paletteTextureKey,
+						createTextureResource({} as WebGLTexture),
+					],
+				]),
+			},
+		});
+
+		expect(
+			schedule.passes.map((pass) =>
+				pass.kind === "retained-direct"
+					? `${pass.kind}:${pass.alphaPolicy}`
+					: pass.kind,
+			),
+		).toEqual([
+			"retained-direct:opaque-or-cutout",
+			"compacted-rgba-texture-page-family",
+			"compacted-indexed-paletted-family",
+			"retained-direct:transparent-blend",
+		]);
+		expect(schedule.retainedDrawUnits.map((drawUnit) => drawUnit.id)).toEqual([
+			"opaque-direct",
+			"blended-direct",
+		]);
+		expect(schedule.retainedDirectOpaqueDrawUnitCount).toBe(1);
+		expect(schedule.retainedDirectBlendedDrawUnitCount).toBe(1);
+		expect(schedule.passes[1]).toMatchObject({
+			kind: "compacted-rgba-texture-page-family",
+			replaceableDrawUnitTriangleCount: 1,
+		});
+		expect(schedule.passes[2]).toMatchObject({
+			kind: "compacted-indexed-paletted-family",
+			replaceableDrawUnitTriangleCount: 1,
+		});
 	});
 });
 

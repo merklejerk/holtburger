@@ -1,11 +1,11 @@
-import type { RenderMat4 } from "./render-math";
+import type { RenderMat4 } from "../../render-math";
 import {
 	mapWebgl2DrawUnitToDirectRenderFamilySubmission,
 	type DirectRenderFamilySubmission,
-} from "./webgl2-direct-render-family";
-import type { Webgl2StateCache } from "./webgl2-state-cache";
-import type { TexturePageBinding } from "./texture-page-binding";
-import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
+} from "./direct-render-family";
+import type { Webgl2StateCache } from "../../webgl2-state-cache";
+import type { TexturePageBinding } from "../../texture-page-binding";
+import type { Webgl2WorldDrawUnit } from "../../webgl2-world-resources";
 import type {
 	Webgl2FlatWorldProgram,
 	Webgl2IndexedP16WorldProgram,
@@ -13,7 +13,7 @@ import type {
 	Webgl2TerrainBlendWorldProgram,
 	Webgl2TexturedWorldProgram,
 	Webgl2WorldSubmitMetrics,
-} from "./webgl2-world-submit";
+} from "../../webgl2-world-submit";
 
 type Webgl2DirectWorldProgram =
 	| Webgl2FlatWorldProgram

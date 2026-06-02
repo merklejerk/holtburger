@@ -83,7 +83,7 @@ import {
 import {
 	deriveDirectGeometrySubmissionLayout,
 	type GeometrySubmissionLayout,
-} from "./webgl2-direct-render-family";
+} from "./webgl2/families/direct-render-family";
 import { buildCompactedGeometryBatch } from "./compacted-geometry";
 import {
 	createWebgl2TextureAtlasGenerationResource,

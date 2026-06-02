@@ -26,12 +26,10 @@ describe("texture page binding", () => {
 			drawUnit: createDrawUnit("draw-a", "entry-a"),
 			generation: createGeneration(),
 			atlasPlan: createAtlasPlan({
-				bypasses: [
+				failures: [
 					{
 						drawUnitId: "draw-a",
 						reason: "atlas-full",
-						blockerKind: "atlas",
-						blocker: "atlas-full",
 						detail: "atlas is full",
 					},
 				],
@@ -143,7 +141,7 @@ function createAtlasPlan(
 		key: "texture-page-atlas/test",
 		rgbaAtlasReadyDrawUnitIds: [],
 		detailAtlasReadyDrawUnitIds: [],
-		bypasses: [],
+		failures: [],
 		atlasEntryRecords: [],
 		atlasTextures: [],
 		detailAtlasEntryRecords: [],

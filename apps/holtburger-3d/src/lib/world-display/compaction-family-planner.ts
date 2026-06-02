@@ -31,9 +31,6 @@ export type CompactionFamilyBypassReason =
 	| "unsupported-material-state"
 	| "detail-overlay"
 	| "missing-detail-atlas-entry"
-	| "source-texture-too-large"
-	| "atlas-full"
-	| "detail-atlas-full"
 	| "material-table-overflow";
 
 export type CompactionMaterialKind =
@@ -98,6 +95,29 @@ export interface CompactionEligibility {
 		compatible: boolean;
 		blockers: readonly CompactionGeometryBlocker[];
 	};
+}
+
+export interface CompactionGeometryReadiness {
+	kind: string;
+	owningLandblockId: number | null;
+	hasUvBuffer: boolean;
+}
+
+export interface CompactionTexturePageReadiness {
+	base: StagedWorldMaterialTexturePageReadiness | null;
+	bindings: readonly TexturePageBinding[];
+}
+
+export interface CompactionDetailOverlayReadiness {
+	hasOverlay: boolean;
+	atlasEntry: RgbaTexturePageDetailAtlasEntry | null;
+}
+
+export interface CompactionMaterialReadiness {
+	kind: CompactionMaterialKind;
+	behavior: LegacyMaterialBehaviorDto | null;
+	texturePages: CompactionTexturePageReadiness;
+	detailOverlay: CompactionDetailOverlayReadiness;
 }
 
 export interface CompactionFamilyPlanningPolicy {
@@ -359,7 +379,6 @@ export function planCompactionFamilies(options: {
 		})),
 		policy: options.policy,
 	});
-	bypasses.push(...texturePageAtlasPlan.bypasses);
 	const rgbaAtlasReadyDrawUnitIds = new Set(
 		texturePageAtlasPlan.rgbaAtlasReadyDrawUnitIds,
 	);
@@ -884,49 +903,45 @@ function classifyCompactionFamilyBypass(
 }
 
 export function createCompactionEligibility(options: {
-	kind: string;
-	owningLandblockId: number | null;
-	materialKind: CompactionMaterialKind;
-	hasUvBuffer: boolean;
-	texturePageBindings: readonly TexturePageBinding[];
-	materialBehavior: LegacyMaterialBehaviorDto | null;
-	hasDetailOverlay: boolean;
-	detailAtlasEntry: RgbaTexturePageDetailAtlasEntry | null;
-	texturePageReadiness: StagedWorldMaterialTexturePageReadiness | null;
+	geometry: CompactionGeometryReadiness;
+	material: CompactionMaterialReadiness;
 }): CompactionEligibility {
 	const geometryBlockers: CompactionGeometryBlocker[] = [];
-	if (options.kind !== "static" && options.kind !== "structured-interior") {
+	if (
+		options.geometry.kind !== "static" &&
+		options.geometry.kind !== "structured-interior"
+	) {
 		geometryBlockers.push("non-static");
 	}
-	if (options.owningLandblockId === null) {
+	if (options.geometry.owningLandblockId === null) {
 		geometryBlockers.push("missing-landblock-origin");
 	}
-	if (!options.hasUvBuffer) {
+	if (!options.geometry.hasUvBuffer) {
 		geometryBlockers.push("missing-uv-buffer");
 	}
 
 	const materialFamily = classifyCompactionMaterialFamily({
-		drawUnitKind: options.kind,
-		materialKind: options.materialKind,
-		materialBehavior: options.materialBehavior,
+		drawUnitKind: options.geometry.kind,
+		materialKind: options.material.kind,
+		materialBehavior: options.material.behavior,
 	});
-	const alphaPolicy = classifyCompactionAlphaPolicy(options.materialBehavior);
+	const alphaPolicy = classifyCompactionAlphaPolicy(options.material.behavior);
 	const materialBlockers: CompactionMaterialBlocker[] = [];
 	switch (materialFamily) {
 		case "flat-constant-color":
 			materialBlockers.push("missing-compacted-constant-color-family");
 			break;
 		case "indexed-paletted":
-			if (!hasIndexedTexelTexturePage(options.texturePageBindings)) {
+			if (!hasIndexedTexelTexturePage(options.material.texturePages.bindings)) {
 				materialBlockers.push("missing-indexed-texel-page");
 			}
-			if (!hasIndexedPaletteTexturePage(options.texturePageBindings)) {
+			if (!hasIndexedPaletteTexturePage(options.material.texturePages.bindings)) {
 				materialBlockers.push("missing-indexed-palette-page");
 			}
 			materialBlockers.push(
 				...classifyUnsupportedIndexedTexturePageBlockers(
-					options.texturePageBindings,
-					options.detailAtlasEntry,
+					options.material.texturePages.bindings,
+					options.material.detailOverlay,
 				),
 			);
 			if (alphaPolicy !== "opaque") {
@@ -949,18 +964,25 @@ export function createCompactionEligibility(options: {
 			materialBlockers.push("unsupported-material-state");
 			break;
 		case "textured-opaque":
-			if (!options.texturePageReadiness) {
+			if (!options.material.texturePages.base) {
 				materialBlockers.push("missing-texture-page-readiness");
 			}
-			if (!hasCompatibleCompactedBaseTexturePage(options.texturePageBindings)) {
+			if (
+				!hasCompatibleCompactedBaseTexturePage(
+					options.material.texturePages.bindings,
+				)
+			) {
 				materialBlockers.push("missing-base-texture-page");
 			}
-			if (options.hasDetailOverlay && !options.detailAtlasEntry) {
+			if (
+				options.material.detailOverlay.hasOverlay &&
+				!options.material.detailOverlay.atlasEntry
+			) {
 				materialBlockers.push("missing-detail-atlas-entry");
 			}
 			materialBlockers.push(
 				...classifyUnsupportedCompactedTexturePageBlockers(
-					options.texturePageBindings,
+					options.material.texturePages.bindings,
 				),
 			);
 			break;
@@ -976,9 +998,9 @@ export function createCompactionEligibility(options: {
 			compatible: materialCompatible,
 			blockers: materialBlockers,
 			alphaPolicy,
-			alphaTest: options.materialBehavior?.alphaTest ?? 0,
-			texturePageReadiness: options.texturePageReadiness,
-			detailAtlasEntry: options.detailAtlasEntry,
+			alphaTest: options.material.behavior?.alphaTest ?? 0,
+			texturePageReadiness: options.material.texturePages.base,
+			detailAtlasEntry: options.material.detailOverlay.atlasEntry,
 		},
 		geometry: {
 			compatible: geometryCompatible,
@@ -1273,10 +1295,11 @@ function hasExactDataTexturePageSampling(binding: TexturePageBinding): boolean {
 
 function classifyUnsupportedIndexedTexturePageBlockers(
 	texturePageBindings: readonly TexturePageBinding[],
-	detailAtlasEntry: RgbaTexturePageDetailAtlasEntry | null,
+	detailOverlay: CompactionDetailOverlayReadiness,
 ): CompactionMaterialBlocker[] {
-	return collectUniqueMaterialBlockers(
-		texturePageBindings.map((binding) => {
+	const texturePageBlockers = texturePageBindings
+		.filter((binding) => binding.usageBucket !== "detail")
+		.map((binding) => {
 			switch (binding.usageBucket) {
 				case "indexed-texels":
 					if (binding.sampleClass !== "indexed-data") {
@@ -1292,15 +1315,18 @@ function classifyUnsupportedIndexedTexturePageBlockers(
 					return hasExactDataTexturePageSampling(binding)
 						? null
 						: "unsupported-texture-page-sampling";
-				case "detail":
-					return detailAtlasEntry ? null : "detail-overlay";
 				default:
 					return formatUnsupportedTexturePageUsageBlocker(
 						binding.usageBucket,
 					);
 			}
-		}),
-	);
+		});
+	return collectUniqueMaterialBlockers([
+		...texturePageBlockers,
+		detailOverlay.hasOverlay && !detailOverlay.atlasEntry
+			? "detail-overlay"
+			: null,
+	]);
 }
 
 function classifyUnsupportedCompactedTexturePageBlockers(

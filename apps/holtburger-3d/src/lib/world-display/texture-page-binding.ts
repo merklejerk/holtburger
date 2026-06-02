@@ -180,15 +180,15 @@ function describeMissingPackedBasePlacement({
 	atlasPlan: TexturePageAtlasPlan | null;
 }): string {
 	const atlasEntryKey = drawUnit.texturePageReadiness?.atlasEntryKey ?? "unknown";
-	const atlasBypass = atlasPlan?.bypasses.find(
-		(bypass) =>
-			bypass.drawUnitId === drawUnit.id &&
-			(bypass.reason === "source-texture-too-large" ||
-				bypass.reason === "atlas-full" ||
-				bypass.reason === "detail-atlas-full"),
+	const atlasFailure = atlasPlan?.failures.find(
+		(failure) =>
+			failure.drawUnitId === drawUnit.id &&
+			(failure.reason === "source-texture-too-large" ||
+				failure.reason === "atlas-full" ||
+				failure.reason === "detail-atlas-full"),
 	);
-	if (atlasBypass) {
-		return `direct packed base page atlas placement unavailable ${atlasEntryKey} (${atlasBypass.reason})`;
+	if (atlasFailure) {
+		return `direct packed base page atlas placement unavailable ${atlasEntryKey} (${atlasFailure.reason})`;
 	}
 	const plannedEntry = atlasPlan?.atlasEntryRecords.some(
 		(record) => record.key === atlasEntryKey,

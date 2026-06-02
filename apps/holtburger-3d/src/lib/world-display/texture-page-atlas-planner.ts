@@ -4,7 +4,6 @@ import {
 	type AtlasTexturePlacement,
 } from "./atlas-layout-planner";
 import type {
-	CompactionFamilyBypass,
 	CompactionFamilyPlanningPolicy,
 	RgbaTexturePageAtlasEntryRecord,
 	RgbaTexturePageDetailAtlasEntry,
@@ -22,11 +21,22 @@ export interface TexturePageAtlasDetailCandidate {
 	detailAtlasEntry: RgbaTexturePageDetailAtlasEntry | null;
 }
 
+export type TexturePageAtlasFailureReason =
+	| "source-texture-too-large"
+	| "atlas-full"
+	| "detail-atlas-full";
+
+export interface TexturePageAtlasFailure {
+	drawUnitId: string;
+	reason: TexturePageAtlasFailureReason;
+	detail: string;
+}
+
 export interface TexturePageAtlasPlan {
 	key: string;
 	rgbaAtlasReadyDrawUnitIds: readonly string[];
 	detailAtlasReadyDrawUnitIds: readonly string[];
-	bypasses: readonly CompactionFamilyBypass[];
+	failures: readonly TexturePageAtlasFailure[];
 	atlasEntryRecords: readonly RgbaTexturePageAtlasEntryRecord[];
 	atlasTextures: readonly AtlasTexturePage[];
 	detailAtlasEntryRecords: readonly RgbaTexturePageDetailAtlasEntry[];
@@ -39,7 +49,7 @@ export function createEmptyTexturePageAtlasPlan(): TexturePageAtlasPlan {
 		key: "texture-page-atlas/empty",
 		rgbaAtlasReadyDrawUnitIds: [],
 		detailAtlasReadyDrawUnitIds: [],
-		bypasses: [],
+		failures: [],
 		atlasEntryRecords: [],
 		atlasTextures: [],
 		detailAtlasEntryRecords: [],
@@ -77,7 +87,7 @@ export function planTexturePageAtlas(options: {
 	detailCandidates: readonly TexturePageAtlasDetailCandidate[];
 	policy: CompactionFamilyPlanningPolicy;
 }): TexturePageAtlasPlan {
-	const bypasses: CompactionFamilyBypass[] = [];
+	const failures: TexturePageAtlasFailure[] = [];
 	const atlasEntries = dedupeRgbaTexturePageEntries(options.rgbaCandidates);
 	const layout = planAtlasLayout({
 		entries: atlasEntries.map((record) => ({
@@ -101,14 +111,9 @@ export function planTexturePageAtlas(options: {
 		if (!overflow) {
 			continue;
 		}
-		bypasses.push({
+		failures.push({
 			drawUnitId: candidate.drawUnitId,
 			reason:
-				overflow.reason === "source-too-large"
-					? "source-texture-too-large"
-					: "atlas-full",
-			blockerKind: "atlas",
-			blocker:
 				overflow.reason === "source-too-large"
 					? "source-texture-too-large"
 					: "atlas-full",
@@ -147,11 +152,9 @@ export function planTexturePageAtlas(options: {
 		if (!overflow) {
 			continue;
 		}
-		bypasses.push({
+		failures.push({
 			drawUnitId: candidate.drawUnitId,
 			reason: "detail-atlas-full",
-			blockerKind: "atlas",
-			blocker: "detail-atlas-full",
 			detail: overflow.detail,
 		});
 	}
@@ -176,7 +179,7 @@ export function planTexturePageAtlas(options: {
 		detailAtlasReadyDrawUnitIds: detailReady.map(
 			(candidate) => candidate.drawUnitId,
 		),
-		bypasses,
+		failures,
 		atlasEntryRecords: atlasEntries.filter((record) =>
 			usedAtlasEntryKeys.has(record.key),
 		),

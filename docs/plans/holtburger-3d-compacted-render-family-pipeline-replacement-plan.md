@@ -2337,7 +2337,7 @@ Validation:
 
 ## Phase C8.11a: Retire Atlas Compatibility Mirrors And Split Atlas Diagnostics
 
-Status: Planned immediate cleanup.
+Status: Complete.
 
 Purpose: finish the C8.11 boundary cleanup before broadening atlas eligibility. C8.11 made
 `TexturePageAtlasPlan` authoritative for WebGL atlas generation, but the root `CompactionFamilyPlan`
@@ -2378,6 +2378,81 @@ Exit criteria:
 - Direct packed texture-page fallback samples no longer make expected retained-direct coverage gaps
   look like missing promised atlas resources.
 - C8.13 can add blended RGBA atlas readiness without adding more compatibility fields.
+
+Progress:
+
+- Removed mirrored root atlas fields from `CompactionFamilyPlan`:
+  - `atlasEntryRecords`;
+  - `atlasEntries`;
+  - `atlasTextures`;
+  - `detailAtlasEntryRecords`;
+  - `detailAtlasTextures`;
+  - `preparedTextureAssetIds`.
+- Moved atlas placement lookup helpers onto `texture-page-atlas-planner.ts`:
+  - `createTexturePageAtlasPlacementsByEntryKey()`;
+  - `createTexturePageDetailAtlasPlacementsByEntryKey()`.
+- Updated compaction planning and compacted WebGL family resource sync to consume those shared
+  `TexturePageAtlasPlan` helpers instead of local placement lookup copies.
+- Renamed `Webgl2TextureAtlasGenerationResource.compactableDrawUnitIds` to
+  `rgbaAtlasReadyDrawUnitIds`.
+- Added atlas coverage diagnostics to the world resource store and render metrics:
+  - atlas-compatible draw units;
+  - atlas-placed RGBA draw units;
+  - detail-atlas-ready draw units;
+  - atlas failure count/samples.
+- Added material type count keys for atlas coverage so debug output can separate atlas coverage from
+  compaction coverage:
+  - `webgl2-atlas-compatible-draw-units`;
+  - `webgl2-atlas-placed-rgba-draw-units`;
+  - `webgl2-detail-atlas-ready-draw-units`;
+  - `webgl2-atlas-failures`.
+- Threaded `TexturePageAtlasPlan` into direct base texture-page binding resolution.
+- Refined direct packed texture-page fallback samples:
+  - not atlas-planned retained-direct material;
+  - atlas placement unavailable due to atlas failure;
+  - atlas generation missing a placement promised by `TexturePageAtlasPlan`.
+- Added `texture-page-binding.test.ts` coverage for the three fallback classifications.
+
+Decisions:
+
+- Keep `CompactionFamilyPlan.texturePageAtlasPlan` as the explicit dependency edge from compaction to
+  the authoritative atlas plan. This is not a mirror field; compaction and compacted resources need
+  the atlas plan for readiness and placement lookup.
+- Keep atlas failure bypasses in `TexturePageAtlasPlan.bypasses`, then include them in the aggregate
+  compaction bypass sample list for compatibility. The new atlas-specific counters make the
+  distinction visible without changing every existing debug consumer in this phase.
+- Do not add blended RGBA atlas eligibility in this cleanup phase. C8.13 owns that behavior after
+  C8.12 fixes transparent direct draw ordering.
+
+Course corrections:
+
+- Returning only `{ textureIndex }` from the shared placement helper was too narrow: compacted family
+  resource creation needs the full atlas placement rectangle. The helper now returns the complete
+  `AtlasTexturePlacement`.
+- The debug report split landed through renderer metrics/material type counts rather than a large
+  debug UI text rewrite. That keeps the phase focused and gives the next report enough data to
+  separate atlas failures from compaction blockers.
+
+Discovered cleanup targets:
+
+- `atlasEligibleMaterialCount` is still historically named even though it is effectively an
+  atlas-compatible draw-unit count in current resource sync. The new `atlasCompatibleDrawUnitCount`
+  is clearer; future diagnostics can retire or rename the older field after report consumers move.
+- `TexturePageAtlasPlan.bypasses` still gets merged into `CompactionFamilyPlan.bypasses` for legacy
+  aggregate bypass reporting. Once debug consumers read atlas failure samples directly, remove that
+  aggregate coupling.
+
+Legacy shims:
+
+- No mirrored atlas fields remain on `CompactionFamilyPlan`.
+- Legacy aggregate bypass reporting still includes atlas failures in `CompactionFamilyPlan.bypasses`
+  for existing diagnostics. This is an intentional short-term compatibility bridge and should be
+  removed after diagnostics consume `atlasFailureSamples` directly.
+
+Validation:
+
+- `npm run check` from `apps/holtburger-3d`
+- `npm run test:ts -- src/lib/world-display/compaction-family-planner.test.ts src/lib/world-display/texture-page-binding.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-rgba-texture-page-family-submit.test.ts --run`
 
 ## Phase C8.12: Render Retained Blended Direct Draw Last
 

@@ -76,6 +76,8 @@ import {
 } from "./compaction-family-planner";
 import {
 	createEmptyTexturePageAtlasPlan,
+	createTexturePageAtlasPlacementsByEntryKey,
+	createTexturePageDetailAtlasPlacementsByEntryKey,
 	type TexturePageAtlasPlan,
 } from "./texture-page-atlas-planner";
 import {
@@ -168,6 +170,11 @@ export interface Webgl2WorldResourceStore {
 	atlasEligibleMaterialCount: number;
 	atlasCandidateEntryCount: number;
 	atlasCandidateMaterialSlotCount: number;
+	atlasCompatibleDrawUnitCount: number;
+	atlasPlacedRgbaDrawUnitCount: number;
+	detailAtlasReadyDrawUnitCount: number;
+	atlasFailureReasonCount: number;
+	atlasFailureSamples: readonly string[];
 	compactionFamilyPlan: CompactionFamilyPlan;
 	texturePageAtlasPlan: TexturePageAtlasPlan;
 	textureAtlasGeneration: Webgl2TextureAtlasGenerationResource | null;
@@ -294,6 +301,11 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		atlasEligibleMaterialCount: 0,
 		atlasCandidateEntryCount: 0,
 		atlasCandidateMaterialSlotCount: 0,
+		atlasCompatibleDrawUnitCount: 0,
+		atlasPlacedRgbaDrawUnitCount: 0,
+		detailAtlasReadyDrawUnitCount: 0,
+		atlasFailureReasonCount: 0,
+		atlasFailureSamples: [],
 		compactionFamilyPlan: createEmptyCompactionFamilyPlan(),
 		texturePageAtlasPlan: createEmptyTexturePageAtlasPlan(),
 		textureAtlasGeneration: null,
@@ -503,6 +515,16 @@ export function syncWebgl2WorldResources({
 			}),
 	);
 	store.texturePageAtlasPlan = store.compactionFamilyPlan.texturePageAtlasPlan;
+	store.atlasCompatibleDrawUnitCount = atlasEligibleDrawUnits.length;
+	store.atlasPlacedRgbaDrawUnitCount =
+		store.texturePageAtlasPlan.rgbaAtlasReadyDrawUnitIds.length;
+	store.detailAtlasReadyDrawUnitCount =
+		store.texturePageAtlasPlan.detailAtlasReadyDrawUnitIds.length;
+	store.atlasFailureReasonCount = store.texturePageAtlasPlan.bypasses.length;
+	store.atlasFailureSamples = summarizeDiagnosticReasons(
+		store.texturePageAtlasPlan.bypasses.map((bypass) => bypass.reason),
+		8,
+	);
 	store.compactionCandidateDrawUnitCount =
 		store.compactionFamilyPlan.renderFamilies.rgbaTexturePage.compactableDrawUnitIds.length;
 	store.compactionBypassReasonCount =
@@ -626,7 +648,13 @@ export function destroyWebgl2WorldResources(
 	store.atlasEligibleMaterialCount = 0;
 	store.atlasCandidateEntryCount = 0;
 	store.atlasCandidateMaterialSlotCount = 0;
+	store.atlasCompatibleDrawUnitCount = 0;
+	store.atlasPlacedRgbaDrawUnitCount = 0;
+	store.detailAtlasReadyDrawUnitCount = 0;
+	store.atlasFailureReasonCount = 0;
+	store.atlasFailureSamples = [];
 	store.compactionFamilyPlan = createEmptyCompactionFamilyPlan();
+	store.texturePageAtlasPlan = createEmptyTexturePageAtlasPlan();
 	store.textureAtlasGeneration?.dispose();
 	store.textureAtlasGeneration = null;
 	for (const batch of store.compactedGeometryBatches.values()) {
@@ -2058,6 +2086,7 @@ function resolveWebgl2DrawUnitTexturePageBindings(
 		const baseResolution = resolveDirectDrawBaseTexturePageBinding({
 			drawUnit,
 			generation: store.textureAtlasGeneration,
+			atlasPlan: store.texturePageAtlasPlan,
 			fallbackSamples: [],
 		});
 		drawUnit.texturePageBindings = [
@@ -2160,7 +2189,7 @@ function refreshWebgl2TextureAtlasGenerationCoverage({
 }): Webgl2TextureAtlasGenerationResource {
 	if (
 		stringArraysEqual(
-			generation.compactableDrawUnitIds,
+			generation.rgbaAtlasReadyDrawUnitIds,
 			plan.rgbaAtlasReadyDrawUnitIds,
 		) &&
 		stringArraysEqual(
@@ -2172,7 +2201,7 @@ function refreshWebgl2TextureAtlasGenerationCoverage({
 	}
 	return {
 		...generation,
-		compactableDrawUnitIds: plan.rgbaAtlasReadyDrawUnitIds,
+		rgbaAtlasReadyDrawUnitIds: plan.rgbaAtlasReadyDrawUnitIds,
 		preparedTextureAssetIds: plan.preparedTextureAssetIds,
 	};
 }
@@ -2211,7 +2240,7 @@ function upsertWebgl2TextureAtlasGenerationGraph({
 				label: "outdoor static atlas",
 				metadata: {
 					textureCount: generation.textures.length,
-					drawUnitCount: generation.compactableDrawUnitIds.length,
+					drawUnitCount: generation.rgbaAtlasReadyDrawUnitIds.length,
 				},
 			},
 			...generation.preparedTextureAssetIds.map((assetId, index) => ({
@@ -2270,7 +2299,7 @@ function syncWebgl2CompactedGeometryResources({
 	const retainedGeometryBatchKeys = new Set<string>();
 	const retainedFamilyResourceKeys = new Set<string>();
 	const detailPlacementsByEntryKey =
-		createDetailTextureAtlasPlacementsByEntryKey(plan.texturePageAtlasPlan);
+		createTexturePageDetailAtlasPlacementsByEntryKey(plan.texturePageAtlasPlan);
 	if (
 		requiresTextureAtlasGeneration(plan.texturePageAtlasPlan) &&
 		!store.textureAtlasGeneration
@@ -2293,7 +2322,7 @@ function syncWebgl2CompactedGeometryResources({
 				`compacted batch ${plan.key} produced no RGBA texture-page geometry`,
 			];
 		}
-		const placementsByEntryKey = createTextureAtlasPlacementsByEntryKey(
+		const placementsByEntryKey = createTexturePageAtlasPlacementsByEntryKey(
 			plan.texturePageAtlasPlan,
 		);
 		for (const batchPlan of batchPlans) {
@@ -2738,28 +2767,6 @@ function createIndexedPalettedCompactedLandblockBatchPlan({
 			),
 		},
 	};
-}
-
-function createTextureAtlasPlacementsByEntryKey(plan: TexturePageAtlasPlan) {
-	return new Map(
-		plan.atlasTextures.flatMap((texture) =>
-			texture.placements.map(
-				(placement) => [placement.atlasEntryKey, placement] as const,
-			),
-		),
-	);
-}
-
-function createDetailTextureAtlasPlacementsByEntryKey(
-	plan: TexturePageAtlasPlan,
-) {
-	return new Map(
-		plan.detailAtlasTextures.flatMap((texture) =>
-			texture.placements.map(
-				(placement) => [placement.atlasEntryKey, placement] as const,
-			),
-		),
-	);
 }
 
 function createRgbaTexturePageCompactedLandblockBatchPlans({

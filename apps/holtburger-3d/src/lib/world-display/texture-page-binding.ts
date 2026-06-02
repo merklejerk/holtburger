@@ -3,6 +3,7 @@ import type {
 	Webgl2TextureAtlasGenerationResource,
 	Webgl2TextureAtlasTextureResource,
 } from "./webgl2-texture-atlas-generation";
+import type { TexturePageAtlasPlan } from "./texture-page-atlas-planner";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
 
 type TexturePageWrapDrawUnit = Pick<
@@ -70,10 +71,12 @@ export interface TexturePageBindingResolution {
 export function resolveDirectDrawBaseTexturePageBinding({
 	drawUnit,
 	generation,
+	atlasPlan,
 	fallbackSamples,
 }: {
 	drawUnit: Webgl2WorldDrawUnit;
 	generation: Webgl2TextureAtlasGenerationResource | null;
+	atlasPlan: TexturePageAtlasPlan | null;
 	fallbackSamples: readonly string[];
 }): TexturePageBindingResolution {
 	if (!drawUnit.texture) {
@@ -83,6 +86,7 @@ export function resolveDirectDrawBaseTexturePageBinding({
 		const packedBinding = resolvePackedBaseTexturePageBinding({
 			drawUnit,
 			generation,
+			atlasPlan,
 			fallbackSamples,
 		});
 		if (packedBinding.binding) {
@@ -122,10 +126,12 @@ export function resolveDirectDrawBaseTexturePageBinding({
 function resolvePackedBaseTexturePageBinding({
 	drawUnit,
 	generation,
+	atlasPlan,
 	fallbackSamples,
 }: {
 	drawUnit: Webgl2WorldDrawUnit;
 	generation: Webgl2TextureAtlasGenerationResource;
+	atlasPlan: TexturePageAtlasPlan | null;
 	fallbackSamples: readonly string[];
 }): TexturePageBindingResolution {
 	const placement = generation.placements.find(
@@ -135,7 +141,7 @@ function resolvePackedBaseTexturePageBinding({
 	if (!placement) {
 		return fallback(
 			fallbackSamples,
-			`direct packed base page missing placed entry ${drawUnit.atlasEligibility?.atlasEntryKey ?? "unknown"}`,
+			describeMissingPackedBasePlacement({ drawUnit, atlasPlan }),
 		);
 	}
 	const page = generation.textures.find(
@@ -164,6 +170,33 @@ function resolvePackedBaseTexturePageBinding({
 		},
 		fallbackSamples,
 	};
+}
+
+function describeMissingPackedBasePlacement({
+	drawUnit,
+	atlasPlan,
+}: {
+	drawUnit: Webgl2WorldDrawUnit;
+	atlasPlan: TexturePageAtlasPlan | null;
+}): string {
+	const atlasEntryKey = drawUnit.atlasEligibility?.atlasEntryKey ?? "unknown";
+	const atlasBypass = atlasPlan?.bypasses.find(
+		(bypass) =>
+			bypass.drawUnitId === drawUnit.id &&
+			(bypass.reason === "source-texture-too-large" ||
+				bypass.reason === "atlas-full" ||
+				bypass.reason === "detail-atlas-full"),
+	);
+	if (atlasBypass) {
+		return `direct packed base page atlas placement unavailable ${atlasEntryKey} (${atlasBypass.reason})`;
+	}
+	const plannedEntry = atlasPlan?.atlasEntryRecords.some(
+		(record) => record.key === atlasEntryKey,
+	);
+	if (plannedEntry) {
+		return `direct packed base page atlas generation missing promised placement ${atlasEntryKey}`;
+	}
+	return `direct packed base page entry not atlas-planned for retained direct material ${atlasEntryKey}`;
 }
 
 export function collectDirectDrawTexturePageBindings(

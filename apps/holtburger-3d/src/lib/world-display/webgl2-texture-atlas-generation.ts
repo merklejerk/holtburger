@@ -45,7 +45,7 @@ export interface Webgl2TextureAtlasGenerationResource {
 	detailTextures: readonly Webgl2DetailTextureAtlasTextureResource[];
 	detailPlacements: readonly Webgl2TextureAtlasPlacementResource[];
 	preparedTextureAssetIds: readonly string[];
-	compactableDrawUnitIds: readonly string[];
+	rgbaAtlasReadyDrawUnitIds: readonly string[];
 	dispose(): void;
 }
 
@@ -121,7 +121,7 @@ export function createWebgl2TextureAtlasGenerationResource({
 		detailTextures,
 		detailPlacements,
 		preparedTextureAssetIds: plan.preparedTextureAssetIds,
-		compactableDrawUnitIds: plan.rgbaAtlasReadyDrawUnitIds,
+		rgbaAtlasReadyDrawUnitIds: plan.rgbaAtlasReadyDrawUnitIds,
 		dispose() {
 			for (const texture of textures) {
 				texture.texture.dispose();

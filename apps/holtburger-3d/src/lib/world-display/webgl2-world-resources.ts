@@ -2546,52 +2546,61 @@ function createIndexedPalettedCompactedLandblockBatchPlans({
 		),
 	);
 	const drawUnitIdsByLandblockId = new Map<number, string[]>();
-	for (const drawUnitId of family.compactableDrawUnitIds) {
-		const drawUnit = drawUnitById.get(drawUnitId);
-		if (!drawUnit) {
-			throw new Error(
-				`Indexed-paletted family plan references missing draw unit ${drawUnitId}.`,
-			);
-		}
-		if (drawUnit.kind !== "static" && drawUnit.kind !== "structured-interior") {
-			throw new Error(
-				`Indexed-paletted family plan references unsupported draw unit ${drawUnit.id} of kind ${drawUnit.kind}.`,
-			);
-		}
-		const group =
-			drawUnitIdsByLandblockId.get(drawUnit.owningLandblockId) ?? [];
-		group.push(drawUnit.id);
-		drawUnitIdsByLandblockId.set(drawUnit.owningLandblockId, group);
-	}
-	return [...drawUnitIdsByLandblockId.entries()]
-		.sort(([left], [right]) => left - right)
-		.map(([landblockId, drawUnitIds]) => {
-			const batchOrigin = chunkOffsetByLandblockId.get(landblockId);
-			if (!batchOrigin) {
+	return family.partitions.flatMap((partition) => {
+		drawUnitIdsByLandblockId.clear();
+		for (const drawUnitId of partition.compactableDrawUnitIds) {
+			const drawUnit = drawUnitById.get(drawUnitId);
+			if (!drawUnit) {
 				throw new Error(
-					`Indexed-paletted family landblock batch ${formatHex32(landblockId)} has no render chunk origin.`,
+					`Indexed-paletted family plan references missing draw unit ${drawUnitId}.`,
 				);
 			}
-			return {
-				landblockId,
-				batchOrigin,
-				...createIndexedPalettedCompactedLandblockBatchPlan({
-					sourcePlan: plan,
+			if (
+				drawUnit.kind !== "static" &&
+				drawUnit.kind !== "structured-interior"
+			) {
+				throw new Error(
+					`Indexed-paletted family plan references unsupported draw unit ${drawUnit.id} of kind ${drawUnit.kind}.`,
+				);
+			}
+			const group =
+				drawUnitIdsByLandblockId.get(drawUnit.owningLandblockId) ?? [];
+			group.push(drawUnit.id);
+			drawUnitIdsByLandblockId.set(drawUnit.owningLandblockId, group);
+		}
+		return [...drawUnitIdsByLandblockId.entries()]
+			.sort(([left], [right]) => left - right)
+			.map(([landblockId, drawUnitIds]) => {
+				const batchOrigin = chunkOffsetByLandblockId.get(landblockId);
+				if (!batchOrigin) {
+					throw new Error(
+						`Indexed-paletted family landblock batch ${formatHex32(landblockId)} has no render chunk origin.`,
+					);
+				}
+				return {
 					landblockId,
-					drawUnitIds: drawUnitIds.sort(),
-					drawUnits,
-				}),
-			};
-		});
+					batchOrigin,
+					...createIndexedPalettedCompactedLandblockBatchPlan({
+						sourcePlan: plan,
+						sourcePartition: partition,
+						landblockId,
+						drawUnitIds: drawUnitIds.sort(),
+						drawUnits,
+					}),
+				};
+			});
+	});
 }
 
 function createIndexedPalettedCompactedLandblockBatchPlan({
 	sourcePlan,
+	sourcePartition,
 	landblockId,
 	drawUnitIds,
 	drawUnits,
 }: {
 	sourcePlan: CompactionFamilyPlan;
+	sourcePartition: CompactionFamilyPlan["renderFamilies"]["indexedPaletted"]["partitions"][number];
 	landblockId: number;
 	drawUnitIds: readonly string[];
 	drawUnits: readonly StagedWorldDrawUnitAssembly[];
@@ -2622,7 +2631,7 @@ function createIndexedPalettedCompactedLandblockBatchPlan({
 		}
 		return drawUnit;
 	});
-	const family = sourcePlan.renderFamilies.indexedPaletted;
+	const family = sourcePartition;
 	const sourceRecordByKey = new Map(
 		family.materialTableRecords.map((record) => [record.key, record] as const),
 	);
@@ -2677,7 +2686,13 @@ function createIndexedPalettedCompactedLandblockBatchPlan({
 				localSlotIndices.length === 0 ? 0 : Math.max(...localSlotIndices);
 			return {
 				...slice,
-				key: `${slice.key}|landblock=${formatHex32(landblockId)}`,
+				key: describeLandblockDrawSliceKey({
+					sourceSliceKey: slice.key,
+					landblockId,
+					materialTableSlotStart,
+					materialTableSlotEnd,
+					hasMaterialSlots: localSlotIndices.length > 0,
+				}),
 				materialTableSlotStart,
 				materialTableSlotCount:
 					localSlotIndices.length === 0
@@ -2691,7 +2706,12 @@ function createIndexedPalettedCompactedLandblockBatchPlan({
 	return {
 		materialTableRecords,
 		plan: {
-			key: `${sourcePlan.key}|indexed-paletted|landblock=${formatHex32(landblockId)}`,
+			key: describeCompactedFamilyLandblockPlanKey({
+				sourcePlan,
+				sourcePartitionKey: sourcePartition.key,
+				family: "indexed-paletted",
+				landblockId,
+			}),
 			compactableDrawUnitIds: drawUnitIds,
 			materialSlots: batchRecordKeys.map((key, index) => ({ key, index })),
 			drawUnitMaterialSlots: family.drawUnitMaterialSlots
@@ -2752,54 +2772,63 @@ function createRgbaTexturePageCompactedLandblockBatchPlans({
 			(transform) => [transform.chunkLandblockId, transform.offset] as const,
 		),
 	);
+	const family = plan.renderFamilies.rgbaTexturePage;
 	const drawUnitIdsByLandblockId = new Map<number, string[]>();
-	for (const drawUnitId of plan.renderFamilies.rgbaTexturePage
-		.compactableDrawUnitIds) {
-		const drawUnit = drawUnitById.get(drawUnitId);
-		if (!drawUnit) {
-			throw new Error(
-				`Compacted geometry plan references missing draw unit ${drawUnitId}.`,
-			);
-		}
-		if (drawUnit.kind !== "static" && drawUnit.kind !== "structured-interior") {
-			throw new Error(
-				`Compacted geometry plan references unsupported draw unit ${drawUnit.id} of kind ${drawUnit.kind}.`,
-			);
-		}
-		const owningLandblockId = drawUnit.owningLandblockId;
-		const group = drawUnitIdsByLandblockId.get(owningLandblockId) ?? [];
-		group.push(drawUnit.id);
-		drawUnitIdsByLandblockId.set(owningLandblockId, group);
-	}
-	return [...drawUnitIdsByLandblockId.entries()]
-		.sort(([left], [right]) => left - right)
-		.map(([landblockId, drawUnitIds]) => {
-			const batchOrigin = chunkOffsetByLandblockId.get(landblockId);
-			if (!batchOrigin) {
+	return family.partitions.flatMap((partition) => {
+		drawUnitIdsByLandblockId.clear();
+		for (const drawUnitId of partition.compactableDrawUnitIds) {
+			const drawUnit = drawUnitById.get(drawUnitId);
+			if (!drawUnit) {
 				throw new Error(
-					`Compacted geometry landblock batch ${formatHex32(landblockId)} has no render chunk origin.`,
+					`Compacted geometry plan references missing draw unit ${drawUnitId}.`,
 				);
 			}
-			return {
-				landblockId,
-				batchOrigin,
-				plan: createRgbaTexturePageCompactedLandblockBatchPlan({
-					sourcePlan: plan,
-					drawUnits,
+			if (
+				drawUnit.kind !== "static" &&
+				drawUnit.kind !== "structured-interior"
+			) {
+				throw new Error(
+					`Compacted geometry plan references unsupported draw unit ${drawUnit.id} of kind ${drawUnit.kind}.`,
+				);
+			}
+			const owningLandblockId = drawUnit.owningLandblockId;
+			const group = drawUnitIdsByLandblockId.get(owningLandblockId) ?? [];
+			group.push(drawUnit.id);
+			drawUnitIdsByLandblockId.set(owningLandblockId, group);
+		}
+		return [...drawUnitIdsByLandblockId.entries()]
+			.sort(([left], [right]) => left - right)
+			.map(([landblockId, drawUnitIds]) => {
+				const batchOrigin = chunkOffsetByLandblockId.get(landblockId);
+				if (!batchOrigin) {
+					throw new Error(
+						`Compacted geometry landblock batch ${formatHex32(landblockId)} has no render chunk origin.`,
+					);
+				}
+				return {
 					landblockId,
-					drawUnitIds: drawUnitIds.sort(),
-				}),
-			};
-		});
+					batchOrigin,
+					plan: createRgbaTexturePageCompactedLandblockBatchPlan({
+						sourcePlan: plan,
+						sourcePartition: partition,
+						drawUnits,
+						landblockId,
+						drawUnitIds: drawUnitIds.sort(),
+					}),
+				};
+			});
+	});
 }
 
 function createRgbaTexturePageCompactedLandblockBatchPlan({
 	sourcePlan,
+	sourcePartition,
 	drawUnits,
 	landblockId,
 	drawUnitIds,
 }: {
 	sourcePlan: CompactionFamilyPlan;
+	sourcePartition: CompactionFamilyPlan["renderFamilies"]["rgbaTexturePage"]["partitions"][number];
 	drawUnits: readonly StagedWorldDrawUnitAssembly[];
 	landblockId: number;
 	drawUnitIds: readonly string[];
@@ -2818,12 +2847,10 @@ function createRgbaTexturePageCompactedLandblockBatchPlan({
 		return drawUnit;
 	});
 	const sourceMaterialSlotByKey = new Map(
-		sourcePlan.renderFamilies.rgbaTexturePage.materialSlots.map(
-			(slot) => [slot.key, slot] as const,
-		),
+		sourcePartition.materialSlots.map((slot) => [slot.key, slot] as const),
 	);
 	const sourceMaterialSlotKeyByDrawUnitId = new Map(
-		sourcePlan.renderFamilies.rgbaTexturePage.drawUnitMaterialSlots.map(
+		sourcePartition.drawUnitMaterialSlots.map(
 			(record) => [record.drawUnitId, record.materialSlotKey] as const,
 		),
 	);
@@ -2850,7 +2877,7 @@ function createRgbaTexturePageCompactedLandblockBatchPlan({
 	const localMaterialSlotByKey = new Map(
 		localMaterialSlots.map((slot) => [slot.key, slot] as const),
 	);
-	const sourceSlices = sourcePlan.renderFamilies.rgbaTexturePage.drawSlices
+	const sourceSlices = sourcePartition.drawSlices
 		.map((slice) => {
 			const localDrawUnitIds = slice.drawUnitIds.filter((drawUnitId) =>
 				drawUnitIdSet.has(drawUnitId),
@@ -2873,7 +2900,13 @@ function createRgbaTexturePageCompactedLandblockBatchPlan({
 				localSlotIndices.length === 0 ? 0 : Math.max(...localSlotIndices);
 			return {
 				...slice,
-				key: `${slice.key}|landblock=${formatHex32(landblockId)}`,
+				key: describeLandblockDrawSliceKey({
+					sourceSliceKey: slice.key,
+					landblockId,
+					materialTableSlotStart,
+					materialTableSlotEnd,
+					hasMaterialSlots: localSlotIndices.length > 0,
+				}),
 				materialTableSlotStart,
 				materialTableSlotCount:
 					localSlotIndices.length === 0
@@ -2886,32 +2919,49 @@ function createRgbaTexturePageCompactedLandblockBatchPlan({
 		.filter((slice) => slice.drawUnitIds.length > 0);
 	return {
 		...sourcePlan,
-		key: `${sourcePlan.key}|landblock=${formatHex32(landblockId)}`,
+		key: describeCompactedFamilyLandblockPlanKey({
+			sourcePlan,
+			sourcePartitionKey: sourcePartition.key,
+			family: "rgba-texture-page",
+			landblockId,
+		}),
 		renderFamilies: {
 			...sourcePlan.renderFamilies,
 			rgbaTexturePage: {
 				kind: "rgba-atlas",
 				compactableDrawUnitIds: drawUnitIds,
 				materialSlots: localMaterialSlots,
-				drawUnitMaterialSlots:
-					sourcePlan.renderFamilies.rgbaTexturePage.drawUnitMaterialSlots
-						.filter((record) => drawUnitIdSet.has(record.drawUnitId))
-						.map((record) => ({
-							drawUnitId: record.drawUnitId,
-							materialSlotKey: record.materialSlotKey,
-						})),
+				drawUnitMaterialSlots: sourcePartition.drawUnitMaterialSlots
+					.filter((record) => drawUnitIdSet.has(record.drawUnitId))
+					.map((record) => ({
+						drawUnitId: record.drawUnitId,
+						materialSlotKey: record.materialSlotKey,
+					})),
 				drawSlices: sourceSlices,
+				partitions: [
+					{
+						key: `${sourcePartition.key}|landblock=${formatHex32(landblockId)}`,
+						compactableDrawUnitIds: drawUnitIds,
+						materialSlots: localMaterialSlots,
+						drawUnitMaterialSlots: sourcePartition.drawUnitMaterialSlots
+							.filter((record) => drawUnitIdSet.has(record.drawUnitId))
+							.map((record) => ({
+								drawUnitId: record.drawUnitId,
+								materialSlotKey: record.materialSlotKey,
+							})),
+						drawSlices: sourceSlices,
+					},
+				],
 			},
 		},
 		compactableDrawUnitIds: drawUnitIds,
 		materialSlots: localMaterialSlots,
-		drawUnitMaterialSlots:
-			sourcePlan.renderFamilies.rgbaTexturePage.drawUnitMaterialSlots
-				.filter((record) => drawUnitIdSet.has(record.drawUnitId))
-				.map((record) => ({
-					drawUnitId: record.drawUnitId,
-					materialSlotKey: record.materialSlotKey,
-				})),
+		drawUnitMaterialSlots: sourcePartition.drawUnitMaterialSlots
+			.filter((record) => drawUnitIdSet.has(record.drawUnitId))
+			.map((record) => ({
+				drawUnitId: record.drawUnitId,
+				materialSlotKey: record.materialSlotKey,
+			})),
 		drawSlices: sourceSlices,
 		staticObjectKeys: uniqueSortedStrings(
 			batchDrawUnits.flatMap((drawUnit) => drawUnit.staticObjectKeys),
@@ -2945,6 +2995,52 @@ function countCompactedFamilyResources(
 		counts[resource.family] = (counts[resource.family] ?? 0) + 1;
 	}
 	return counts;
+}
+
+function describeCompactedFamilyLandblockPlanKey({
+	sourcePlan,
+	sourcePartitionKey,
+	family,
+	landblockId,
+}: {
+	sourcePlan: CompactionFamilyPlan;
+	sourcePartitionKey: string;
+	family: "rgba-texture-page" | "indexed-paletted";
+	landblockId: number;
+}): string {
+	return [
+		"compacted-family-landblock-plan",
+		family,
+		`landblock=${formatHex32(landblockId)}`,
+		`plan=${hashString(sourcePlan.key)}`,
+		`partition=${hashString(sourcePartitionKey)}`,
+	].join("|");
+}
+
+function describeLandblockDrawSliceKey({
+	sourceSliceKey,
+	landblockId,
+	materialTableSlotStart,
+	materialTableSlotEnd,
+	hasMaterialSlots,
+}: {
+	sourceSliceKey: string;
+	landblockId: number;
+	materialTableSlotStart: number;
+	materialTableSlotEnd: number;
+	hasMaterialSlots: boolean;
+}): string {
+	return [
+		...sourceSliceKey
+			.split("|")
+			.filter((segment) => !segment.startsWith("table=")),
+		`table=${
+			hasMaterialSlots
+				? `${materialTableSlotStart}-${materialTableSlotEnd}`
+				: "none"
+		}`,
+		`landblock=${formatHex32(landblockId)}`,
+	].join("|");
 }
 
 function disposeWebgl2CompactedGeometryBatch(
@@ -3124,6 +3220,15 @@ function hashIndexArray(values: Uint16Array | Uint32Array): string {
 	let hash = 0x811c9dc5;
 	for (const value of values) {
 		hash ^= value;
+		hash = Math.imul(hash, 0x01000193);
+	}
+	return toUnsignedHex(hash);
+}
+
+function hashString(value: string): string {
+	let hash = 0x811c9dc5;
+	for (let index = 0; index < value.length; index += 1) {
+		hash ^= value.charCodeAt(index);
 		hash = Math.imul(hash, 0x01000193);
 	}
 	return toUnsignedHex(hash);

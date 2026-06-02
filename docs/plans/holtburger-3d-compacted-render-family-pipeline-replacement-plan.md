@@ -1997,7 +1997,11 @@ Exit criteria:
 
 ## Phase C8.10: Family-Wide Capacity Partitioning For Compacted Batches
 
-Status: Not started.
+Status: Partially implemented. The core material-table overflow behavior now partitions RGBA and
+indexed-paletted candidates into bounded family partitions instead of bypassing overflow draw units.
+Debug-report counters for partition counts and per-partition slot pressure remain pending.
+Per-landblock resource slice keys now report remapped local material-table ranges instead of carrying
+stale source-partition `table=` segments.
 
 Purpose: fix the naive material-table overflow behavior across all compacted render families. Shader
 material table capacity is a draw/batch partitioning constraint, not a reason to retain otherwise
@@ -2013,7 +2017,7 @@ Architectural constraint:
   landblock-origin batch construction.
 - The intended shape is:
   `shared candidate partitioning -> family-specific material/slice payloads -> shared
-  CompactedGeometryBatch -> family-specific resource binding/submission`.
+CompactedGeometryBatch -> family-specific resource binding/submission`.
 
 Terminology:
 
@@ -2032,10 +2036,12 @@ Current problem:
 - The planner currently dedupes material table slots, sorts them, keeps only
   `maxMaterialSlotsPerDraw` (`128` today), and marks all remaining otherwise eligible draw units as
   `material-table-overflow`.
-- That behavior exists in both RGBA texture-page material slots and indexed-paletted material table
-  records. It is especially visible on `setup-model/02000258` / `gfx-obj/0100379f` /
-  `render-surface/06006bc2`: the trunk is source-eligible for `textured-opaque` compaction but final
-  planning reports `not-planned` with `material-table-overflow`, so it remains direct draw.
+- That behavior existed in both RGBA texture-page material slots and indexed-paletted material table
+  records. It was especially visible on `setup-model/02000258` / `gfx-obj/0100379f` /
+  `render-surface/06006bc2`: the trunk was source-eligible for `textured-opaque` compaction but final
+  planning reported `not-planned` with `material-table-overflow`, so it remained direct draw. After
+  C8.10 partitioning, picker diagnostics show that trunk submitting through the compacted
+  `rgba-texture-page` route.
 - This is not an atlas overflow. The base/detail atlas planners already roll entries into up to
   `maxAtlasTextureCount` atlas pages (`8` today) and only report `atlas-full`/`detail-atlas-full`
   after those pages are exhausted.
@@ -2056,6 +2062,8 @@ Tasks:
   - material slots per planned family partition;
   - draw units retained because of true unsupported family features versus draw units retained because
     of hard resource limits.
+  - Pending as debug-report counters. Focused planner tests now assert partition creation and absence
+    of `material-table-overflow`, but the browser diagnostic summary does not yet report these counts.
 - Replace terminal `material-table-overflow` for compacted families with shared partitioning:
   - partition family candidates into as many bounded material-table partitions as needed;
   - each partition produces its own family-local material slot table and draw-unit material slot map;
@@ -2063,11 +2071,14 @@ Tasks:
     landblock/chunk origin requirement;
   - draw slices remain family-specific and must not span incompatible atlas pages, indexed pages,
     palette pages, detail pages, render states, alpha policies, or visibility partitions.
+  - Completed for the currently implemented RGBA texture-page and indexed-paletted families.
 - Make the partitioning helper family-agnostic:
   - input: candidates, material table key selector, hard material table capacity, required slice state
     key selector;
   - output: bounded partitions with local material slot indices and source draw-unit ids;
   - RGBA and indexed-paletted families should consume the same partitioning primitive.
+  - Completed with `createBoundedMaterialTablePartitions()`. RGBA and indexed-paletted adapters supply
+    family-specific record construction and draw-slice construction while sharing the capacity split.
 - Keep family-specific planning shallow:
   - RGBA supplies its material slot payload and slice state keys (`atlasTextureIndex`, detail atlas
     texture, render state, visibility partition);
@@ -2089,8 +2100,13 @@ Tasks:
     `atlas-full` and not be disguised as material-table overflow.
   - Geometry: a partition with more than 65,535 vertices should still create `Uint32Array` indices
     rather than splitting solely for index width.
+  - Completed for RGBA, indexed-paletted, and atlas capacity. The geometry index-width assertion is
+    already covered by existing compacted geometry behavior and remains worth pinning with an explicit
+    C8.10 regression if that code is touched.
 - Update runtime picker diagnostics to report the final partition/batch identity for planned draw
   units, so a source-eligible trunk can show which bounded family partition owns it.
+  - Partially covered by compacted route diagnostics once a draw unit reaches a WebGL family resource.
+    Planner-level partition identity in `finalCompactionPlan` remains pending.
 
 Exit criteria:
 
@@ -2101,6 +2117,56 @@ Exit criteria:
 - Existing atlas overflow reasons remain explicit and unchanged.
 - Diagnostics show material-table partition counts and per-partition slot counts.
 - The bark/repeat atlas-sampling investigation can continue against an actually compacted trunk.
+
+Progress completed:
+
+- Added family partition read models to `RgbaTexturePageRenderFamilyPlan` and
+  `IndexedPalettedRenderFamilyPlan`.
+- Added shared `createBoundedMaterialTablePartitions()` for bounded material-table capacity splitting.
+- Changed RGBA material slot assignment and indexed material record assignment to keep all unique
+  records, then split candidates into local bounded partitions instead of truncating to the first
+  `maxMaterialSlotsPerDraw` records.
+- Changed WebGL2 compacted resource planning to iterate `family partition -> landblock` for both RGBA
+  and indexed-paletted families. Each resulting `CompactedGeometryBatch` now receives a local bounded
+  material table and local material slot indices.
+- Shortened compacted geometry/resource keys introduced by partitioned planning. Per-landblock family
+  plan keys now use stable hashes for the global plan and partition identity, and
+  `CompactedGeometryBatch` keys hash draw-unit signatures instead of embedding every atlas/material
+  entry and draw-unit id. Runtime picker diagnostics should no longer emit resource keys containing
+  the entire atlas plan.
+- Cleaned per-landblock draw-slice keys to replace source-partition `table=` segments with the
+  landblock-local material table range. Runtime picker diagnostics should now agree with the local
+  material slot indices actually uploaded for RGBA and indexed-paletted compacted family resources.
+- Added focused tests proving RGBA and indexed-paletted material-table overflow rolls into additional
+  partitions, while real atlas capacity overflow remains `atlas-full`.
+
+Course correction:
+
+- `material-table-overflow` remains in the bypass enum for now because older staged/direct atlas
+  planning and diagnostics still know that term. The compacted family planner no longer emits it for
+  RGBA or indexed-paletted family capacity.
+- Existing flattened family fields (`materialSlots`, `drawSlices`, `drawUnitMaterialSlots`) now act as
+  compatibility/read-model fields over partitioned family plans. New compaction work should consume
+  `renderFamilies.*.partitions` when resource limits matter.
+- Resource/debug keys must remain compact identifiers. Large plan signatures can be hashed into keys
+  and exposed through structured diagnostics when needed; they should not be concatenated into runtime
+  resource ids.
+- Source family partition slice keys may describe global planning ranges. Once a partition is split
+  into landblock-local compacted batches, slice keys must be regenerated or normalized so diagnostic
+  identity matches the local material table carried by that resource.
+
+Immediate next step:
+
+- Add debug counters for partition counts and per-partition slot pressure before broadening this to
+  alpha/cutout/blended family work.
+- If the `06006bc2` trunk regresses visually while still reporting `submissionPath=compacted-resource`,
+  focus investigation on RGBA repeat atlas sampling, compacted material-slot attributes, and local
+  material rect uniform upload rather than asset decode or material-table overflow.
+
+Cleanup target introduced:
+
+- Remove or narrow legacy flattened family fields once resource creation, diagnostics, and metrics all
+  consume partitioned family plans directly.
 
 ## Cleanup Targets
 

@@ -724,6 +724,57 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		).toEqual(["drawElementsFor:far-blended", "drawElementsFor:near-blended"]);
 	});
 
+	it("submits blended retained direct RGBA draw units through packed atlas bindings", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+		const standaloneTexture = {} as WebGLTexture;
+		const atlasTexture = {} as WebGLTexture;
+		const drawUnits = [
+			createDrawUnit({
+				id: "blended-atlas-direct",
+				materialKind: "direct-texture",
+				texture: createTextureResource(standaloneTexture),
+				atlasEntryKey: "entry/blended",
+				baseTexturePageBinding: createPackedBaseTexturePageBinding(
+					createTextureResource(atlasTexture, 4, 4),
+				),
+				materialBehavior: createBlendedMaterialBehavior(),
+			}),
+		];
+
+		const metrics = submitWebgl2FlatWorldDrawUnits({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			terrainBlendProgram: createTerrainBlendProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			rgbaTexturePageFamilyResources: {
+				batches: [],
+				rgbaTexturePageFamilies: [],
+				generation: createTextureAtlasGeneration({
+					atlasEntryKey: "entry/blended",
+					texture: atlasTexture,
+				}),
+			},
+			viewProjectionMatrix: createIdentityMat4(),
+			drawUnits,
+		});
+
+		const drawIndex = gl.calls.indexOf("drawElementsFor:blended-atlas-direct");
+
+		expect(metrics.retainedDirectOpaqueDrawUnitCount).toBe(0);
+		expect(metrics.retainedDirectBlendedDrawUnitCount).toBe(1);
+		expect(metrics.directPackedTexturePageDrawCount).toBe(1);
+		expect(metrics.directSingleEntryTexturePageDrawCount).toBe(0);
+		expect(gl.boundTextures).toContain(atlasTexture);
+		expect(gl.boundTextures).not.toContain(standaloneTexture);
+		expect(drawIndex).toBeGreaterThanOrEqual(0);
+		expect(gl.calls.slice(0, drawIndex)).toContain(`enable:${gl.BLEND}`);
+		expect(gl.calls.slice(drawIndex)).toContain(`disable:${gl.BLEND}`);
+	});
+
 	it("enables backface culling only for terrain when requested", () => {
 		const gl = new CapturingSubmitGl();
 		const stateCache = new Webgl2StateCache(gl);

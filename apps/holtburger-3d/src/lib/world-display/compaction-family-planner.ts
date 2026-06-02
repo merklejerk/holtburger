@@ -308,6 +308,9 @@ export function planCompactionFamilies(options: {
 	drawUnits: readonly CompactionFamilyCandidate[];
 	policy: CompactionFamilyPlanningPolicy;
 }): CompactionFamilyPlan {
+	const rgbaAtlasCandidates = collectRgbaTexturePageAtlasCandidates(
+		options.drawUnits,
+	);
 	const rgbaEligible: EligibleCompactionFamilyCandidate[] = [];
 	const bypasses: CompactionFamilyBypass[] = [];
 	for (const drawUnit of options.drawUnits) {
@@ -329,6 +332,8 @@ export function planCompactionFamilies(options: {
 		rgbaEligible.push({ drawUnit, eligibility: atlasEligibility });
 	}
 
+	const uniqueRgbaAtlasCandidates =
+		dedupeRgbaTexturePageCandidates(rgbaAtlasCandidates);
 	const uniqueRgbaEligible = dedupeRgbaTexturePageCandidates(rgbaEligible);
 	const indexedCandidates = collectIndexedPalettedCompactionCandidates(
 		options.drawUnits,
@@ -336,7 +341,7 @@ export function planCompactionFamilies(options: {
 	const uniqueIndexedCandidates =
 		dedupeIndexedPalettedCandidates(indexedCandidates);
 	const texturePageAtlasPlan = planTexturePageAtlas({
-		rgbaCandidates: uniqueRgbaEligible.map((candidate) => ({
+		rgbaCandidates: uniqueRgbaAtlasCandidates.map((candidate) => ({
 			drawUnitId: candidate.drawUnit.id,
 			atlasEligibility: candidate.eligibility,
 			detailAtlasEntry: candidate.drawUnit.detailAtlasEntry,
@@ -638,6 +643,24 @@ function createBoundedMaterialTablePartitions<TCandidate, TMaterialRecord>({
 		});
 	}
 	return partitions;
+}
+
+function collectRgbaTexturePageAtlasCandidates(
+	drawUnits: readonly CompactionFamilyCandidate[],
+): EligibleCompactionFamilyCandidate[] {
+	const candidates: EligibleCompactionFamilyCandidate[] = [];
+	for (const drawUnit of drawUnits) {
+		if (drawUnit.materialKind !== "direct-texture") {
+			continue;
+		}
+		const atlasEligibility =
+			drawUnit.compactionEligibility.material.atlasEligibility;
+		if (!atlasEligibility) {
+			continue;
+		}
+		candidates.push({ drawUnit, eligibility: atlasEligibility });
+	}
+	return candidates;
 }
 
 function collectIndexedPalettedCompactionCandidates(

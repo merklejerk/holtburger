@@ -1857,9 +1857,17 @@ Tasks:
   - material slot key/index;
   - atlas entry key/texture index/rect;
   - detail atlas entry/rect when present.
-  - Not completed.
+  - Partially completed. The picker can now query current WebGL2 runtime resource-store facts by
+    staged draw unit id. For RGBA texture-page family routes it reports family resource key, geometry
+    batch key, batch readiness/landblock, slice key/index range, atlas texture index, material slot
+    key/index/source slot, final atlas rect, wrap, and detail atlas fields. For indexed-paletted
+    routes it reports family resource key, geometry batch key, slice key/index range, index/palette
+    page keys, index format, material record key, wrap, and detail atlas fields.
 - For retained direct draw units, add the blocker/reason and whether the material was intentionally
   outside the compacted family.
+  - Partially completed. Runtime diagnostics report `direct-retained` when no compacted family route
+    exists for the staged draw unit, plus the draw unit's compaction decision, material family, alpha
+    policy, material blockers, and geometry blockers.
 - Keep the Picker tab compact: show the closest picked part plus a short list of matching draw units,
   with long keys wrapped but no history.
   - Completed for current staged facts. The full report is copied to clipboard automatically; no
@@ -1902,6 +1910,14 @@ Progress completed:
   indicator follows camera movement and behaves like scene geometry.
 - Removed the earlier viewport-space picker marker. It was misleading because it stayed at the clicked
   canvas coordinate instead of showing which object the CPU picker resolved.
+- Added renderer-owned runtime draw-unit diagnostics for picker reports. The browser now passes exact
+  staged draw unit ids into the WebGL2 renderer and receives current resource-store facts instead of
+  inferring compacted state from staged CPU data.
+- Added `runtimeRenderDiagnostics` to picker clipboard JSON and a compact Runtime Render Paths section
+  in the Picker tab. This distinguishes `direct-retained`, `compacted-resource`, and
+  `missing-draw-unit` for each picked staged static draw unit.
+- Preserved source RGBA material slot keys on WebGL2 compacted family material slots so diagnostics can
+  match a draw unit to its final atlas slot without string containment heuristics.
 - Added a focused unit test for UV diagnostic summaries.
 - Moved staged static picker diagnostics out of the browser coordinator update hot path. The
   diagnostic now builds lazily for only the picked static render key instead of reconstructing the
@@ -1931,16 +1947,21 @@ Course correction:
 - The WebGL2 cell/portal debug overlay path remains a cleanup target: `setDebugOverlayScene()` still
   updates metrics rather than rendering those overlay models. Do not route picker object selection
   through that path until debug overlays are made real renderer submissions.
+- The runtime diagnostic intentionally uses exact staged draw unit ids from the picker report as the
+  join key. It does not scan render keys inside renderer resources. This keeps object-pick UI text out
+  of the renderer's resource matching rules.
 
 Immediate next step:
 
-- Expose a narrow renderer-owned compacted diagnostic lookup keyed by draw unit id/render key. It
-  should report final family resource key, compacted batch key, slice key, material slot key/index,
-  atlas texture index, atlas rect, and replacement/retained status. Do not add a fallback renderer path
-  for the bark issue.
-- Add selected-object compacted/direct replacement facts to the clipboard report after the
-  renderer-owned lookup exists. The world-space box solves target disambiguation; it does not yet
-  prove which family pipeline rendered the picked part.
+- Capture the problematic trunk again with the new picker report. If the draw unit reports
+  `direct-retained`, the artifact is not currently exercising the compacted path and the next step is
+  to inspect why it is not routed into an RGBA texture-page compacted resource. If it reports
+  `compacted-resource`, compare the final RGBA material slot `atlasRect`, `atlasTextureIndex`, and
+  slice material slot keys against the staged `atlasEligibility` entry for `render-surface/06006bc2`.
+  Do not add a fallback renderer path for the bark issue.
+- If `compacted-resource` is present and the object still looks wrong, add a focused regression test
+  around RGBA repeat UVs whose span exceeds `1.0` in V and assert that the final compacted material slot
+  maps to the source atlas member rect, not the whole atlas page.
 
 Exit criteria:
 

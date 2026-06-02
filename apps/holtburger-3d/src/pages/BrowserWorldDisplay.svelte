@@ -89,6 +89,7 @@
 		RuntimeAppearanceRequestDto,
 		SetupAppearancePayloadDto,
 	} from "../lib/host/contracts";
+	import type { DrawUnitRuntimeDiagnostic } from "../lib/world-display/runtime-render-diagnostics";
 	import BrowserModePanel from "./BrowserModePanel.svelte";
 
 	interface BrowserPanelRow {
@@ -1550,6 +1551,8 @@
 
 		const { pick, viewportPoint } = result;
 		const staticDiagnostic = getStaticPickDiagnostic(pick.item.metadata);
+		const runtimeDiagnostics =
+			getRuntimeDiagnosticsForStaticDiagnostic(staticDiagnostic);
 		return {
 			statusText: `Picked ${describePickedMetadataTitle(pick.item.metadata)} at ${pick.distance.toFixed(2)}m.`,
 			sections: [
@@ -1572,6 +1575,9 @@
 				},
 				...(staticDiagnostic
 					? describeStaticPickDiagnosticSections(staticDiagnostic)
+					: []),
+				...(runtimeDiagnostics.length > 0
+					? describeRuntimeDiagnosticSections(runtimeDiagnostics)
 					: []),
 			],
 		};
@@ -1755,10 +1761,81 @@
 		].join("; ");
 	}
 
+	function describeRuntimeDiagnosticSections(
+		diagnostics: readonly DrawUnitRuntimeDiagnostic[],
+	): BrowserPanelSection[] {
+		return [
+			{
+				title: "Runtime Render Paths",
+				rows: diagnostics.flatMap((diagnostic, index) => [
+					{
+						label: `Path ${index}`,
+						value: describeRuntimeDiagnosticSummary(diagnostic),
+					},
+					...diagnostic.compactedRoutes.map((route, routeIndex) => ({
+						label: `Route ${index}.${routeIndex}`,
+						value: describeRuntimeCompactedRoute(route),
+					})),
+				]),
+			},
+		];
+	}
+
+	function describeRuntimeDiagnosticSummary(
+		diagnostic: DrawUnitRuntimeDiagnostic,
+	): string {
+		if (!diagnostic.drawUnit) {
+			return `${diagnostic.submissionPath}; ${diagnostic.drawUnitId}`;
+		}
+		return [
+			diagnostic.submissionPath,
+			`kind=${diagnostic.drawUnit.kind}`,
+			`material=${diagnostic.drawUnit.materialKind}`,
+			`family=${diagnostic.drawUnit.compactionMaterialFamily}`,
+			`decision=${diagnostic.drawUnit.compactionDecision}`,
+			`alpha=${diagnostic.drawUnit.compactionAlphaPolicy}`,
+			`materialBlockers=${diagnostic.drawUnit.compactionMaterialBlockers.join(",") || "none"}`,
+			`geometryBlockers=${diagnostic.drawUnit.compactionGeometryBlockers.join(",") || "none"}`,
+		].join("; ");
+	}
+
+	function describeRuntimeCompactedRoute(
+		route: DrawUnitRuntimeDiagnostic["compactedRoutes"][number],
+	): string {
+		const common = [
+			route.family,
+			`batch=${route.geometryBatchKey}`,
+			`batchReady=${route.batchAvailable}`,
+			`slice=${route.sliceKey}`,
+			`indices=${route.sliceFirstIndex}+${route.sliceIndexCount}`,
+			`sliceDraws=${route.sliceDrawUnitCount}`,
+		];
+		if (route.family === "rgba-texture-page") {
+			return [
+				...common,
+				`atlasTexture=${route.atlasTextureIndex}`,
+				`slot=${route.materialSlot?.index ?? "none"}`,
+				`sourceSlot=${route.materialSlot?.sourceMaterialSlotKey ?? "none"}`,
+				`rect=${route.materialSlot ? formatNumberTuple(route.materialSlot.atlasRect) : "none"}`,
+				`wrap=${route.materialSlot?.wrap ?? "none"}`,
+			].join("; ");
+		}
+		return [
+			...common,
+			`indexFormat=${route.indexFormat}`,
+			`indexPage=${route.indexPageKey}`,
+			`palettePage=${route.palettePageKey}`,
+			`record=${route.materialRecord?.key ?? "none"}`,
+			`wrap=${route.materialRecord?.wrap ?? "none"}`,
+		].join("; ");
+	}
+
 	function buildPickerClipboardReport(
 		result: BrowserRenderablePickResult,
 	): string {
 		const staticDiagnostic = getStaticPickDiagnostic(result.pick.item.metadata);
+		const runtimeDiagnostics =
+			getRuntimeDiagnosticsForStaticDiagnostic(staticDiagnostic);
 		const report = {
 			generatedAt: new Date().toISOString(),
 			hit: {
@@ -1772,13 +1849,33 @@
 			},
 			metadata: result.pick.item.metadata,
 			staticRenderableDiagnostics: staticDiagnostic,
+			runtimeRenderDiagnostics: runtimeDiagnostics,
 			notes: staticDiagnostic
 				? [
-						"Static diagnostics are staged CPU facts. Exact WebGL compacted batch/slice/uniform facts are not exposed to the picker yet.",
+						runtimeDiagnostics.length === 0
+							? "Static diagnostics are staged CPU facts. Runtime WebGL draw-unit facts were unavailable, usually because the renderer had not finished loading resources."
+							: "Static diagnostics are staged CPU facts. Runtime render diagnostics are current WebGL2 resource-store facts for those staged draw unit ids.",
 					]
 				: [],
 		};
 		return JSON.stringify(report, null, 2);
+	}
+
+	function getRuntimeDiagnosticsForStaticDiagnostic(
+		staticDiagnostic: BrowserStaticRenderablePickDiagnostic | null,
+	): readonly DrawUnitRuntimeDiagnostic[] {
+		if (!staticDiagnostic) {
+			return [];
+		}
+		return (
+			worldDisplaySurface?.getDrawUnitRuntimeDiagnostics(
+				staticDiagnostic.drawUnits.map((drawUnit) => drawUnit.drawUnitId),
+			) ?? []
+		);
+	}
+
+	function formatNumberTuple(values: readonly number[]): string {
+		return values.map((value) => value.toFixed(3)).join(",");
 	}
 
 	function getStaticPickDiagnostic(

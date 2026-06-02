@@ -11,6 +11,7 @@
 		RenderSpatialItemKind,
 		RenderSpatialPick,
 	} from "./render-spatial-index";
+	import type { DrawUnitRuntimeDiagnostic } from "./runtime-render-diagnostics";
 	import type { RendererResourceGraph } from "./renderer-resource-graph";
 	import type { RenderChunkTransform } from "./render-anchor";
 	import type { SceneCameraFrame } from "./camera";
@@ -235,6 +236,12 @@
 			rendererController?.pickAtViewportPoint(viewportPoint, mask, ownerKeys) ??
 			null
 		);
+	}
+
+	export function getDrawUnitRuntimeDiagnostics(
+		drawUnitIds: readonly string[],
+	): readonly DrawUnitRuntimeDiagnostic[] {
+		return rendererController?.getDrawUnitRuntimeDiagnostics(drawUnitIds) ?? [];
 	}
 </script>
 

@@ -28,9 +28,9 @@ export interface AtlasTexturePage {
 	placements: AtlasTexturePlacement[];
 }
 
-export type AtlasLayoutOverflowReason = "source-too-large" | "atlas-full";
+type AtlasLayoutOverflowReason = "source-too-large" | "atlas-full";
 
-export interface AtlasLayoutOverflow {
+interface AtlasLayoutOverflow {
 	atlasEntryKey: string;
 	reason: AtlasLayoutOverflowReason;
 	detail: string;

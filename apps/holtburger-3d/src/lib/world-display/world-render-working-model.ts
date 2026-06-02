@@ -29,21 +29,6 @@ interface WorldInteriorRenderSceneSet {
 	cellShellMeshByEnvCellId: Map<number, Mesh>;
 }
 
-export function createEmptyWorldRenderWorkingModel(): WorldRenderWorkingModel {
-	return {
-		exterior: {
-			terrainMeshes: [],
-			staticRenderableMeshes: [],
-		},
-		interior: {
-			cellShellMeshes: [],
-			staticRenderableMeshes: [],
-			envCellIdByCellShellRenderKey: new Map(),
-			cellShellMeshByEnvCellId: new Map(),
-		},
-	};
-}
-
 export function deriveWorldRenderWorkingModel(
 	input: WorldRenderWorkingModelInput,
 ): WorldRenderWorkingModel {

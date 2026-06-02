@@ -30,7 +30,7 @@ interface WorldRenderPerformanceMetrics {
 	renderMs: number;
 }
 
-export interface WorldRenderPortalMetrics {
+interface WorldRenderPortalMetrics {
 	topologyOutdoorPortalCount: number;
 	apertureCandidateCount: number;
 	renderWorkItemCandidateCount: number;
@@ -51,7 +51,7 @@ export interface WorldRenderPortalMetrics {
 	maxVisibleScreenAreaPx: number | null;
 }
 
-export interface WorldRenderDebugMetrics {
+interface WorldRenderDebugMetrics {
 	rendererBackend: "webgl2";
 	canvasWidth: number;
 	canvasHeight: number;

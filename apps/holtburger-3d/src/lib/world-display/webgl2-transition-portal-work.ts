@@ -40,7 +40,7 @@ export interface Webgl2VisibleTransitionPortalWork {
 	screenAreaPx: number;
 }
 
-export interface Webgl2PortalScreenRect {
+interface Webgl2PortalScreenRect {
 	x: number;
 	y: number;
 	width: number;

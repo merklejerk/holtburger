@@ -57,8 +57,8 @@ import type {
 	TransitionPortalCandidateModel,
 } from "./transition-portal-work-items";
 
-export type StagedWorldDrawUnitGeometry = StagedWorldIndexedGeometry;
-export interface StagedWorldDrawUnitBvhBinding {
+type StagedWorldDrawUnitGeometry = StagedWorldIndexedGeometry;
+interface StagedWorldDrawUnitBvhBinding {
 	itemKeys: readonly RenderBvhItemKey[];
 	fallbackReason: string | null;
 }
@@ -77,7 +77,7 @@ export interface StagedStaticDrawUnitAssembly {
 	staticObjectKeys: readonly string[];
 }
 
-export interface StagedTerrainDrawUnitAssembly {
+interface StagedTerrainDrawUnitAssembly {
 	id: string;
 	kind: "terrain";
 	geometry: StagedWorldDrawUnitGeometry;
@@ -102,7 +102,7 @@ export interface StagedStructuredInteriorDrawUnitAssembly {
 	staticObjectKeys: readonly [];
 }
 
-export interface StagedPortalMaskDrawUnitAssembly {
+interface StagedPortalMaskDrawUnitAssembly {
 	id: string;
 	kind: "portal-mask";
 	geometry: StagedWorldDrawUnitGeometry;
@@ -243,7 +243,7 @@ export function buildStagedWorldSceneAssembly({
 	};
 }
 
-export function buildStagedPortalMaskDrawUnitAssemblies({
+function buildStagedPortalMaskDrawUnitAssemblies({
 	chunkOffsetByKey,
 	transitionPortalModel,
 }: {
@@ -317,7 +317,7 @@ function buildPortalMaskGeometry(
 	};
 }
 
-export function buildStagedTerrainDrawUnitAssemblies({
+function buildStagedTerrainDrawUnitAssemblies({
 	assetState,
 	chunkOffsetByKey,
 	terrainScene,
@@ -575,7 +575,7 @@ export function buildStagedStaticDrawUnitAssemblies({
 	);
 }
 
-export function createFlatDebugStagedMaterial(
+function createFlatDebugStagedMaterial(
 	colorKey: string,
 ): StagedWorldMaterialPlan {
 	return {

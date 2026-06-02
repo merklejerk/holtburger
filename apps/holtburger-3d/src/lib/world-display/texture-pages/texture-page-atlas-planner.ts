@@ -21,12 +21,12 @@ export interface TexturePageAtlasDetailCandidate {
 	detailAtlasEntry: RgbaTexturePageDetailAtlasEntry | null;
 }
 
-export type TexturePageAtlasFailureReason =
+type TexturePageAtlasFailureReason =
 	| "source-texture-too-large"
 	| "atlas-full"
 	| "detail-atlas-full";
 
-export interface TexturePageAtlasFailure {
+interface TexturePageAtlasFailure {
 	drawUnitId: string;
 	reason: TexturePageAtlasFailureReason;
 	detail: string;

@@ -9,7 +9,7 @@ import type { StaticRenderableSceneModel } from "./static-renderables";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
 
-export type StagedWorldDrawUnitCategory =
+type StagedWorldDrawUnitCategory =
 	| "terrain"
 	| "structured-interior"
 	| "static-staged"
@@ -17,7 +17,7 @@ export type StagedWorldDrawUnitCategory =
 	| "portal-mask"
 	| "debug-overlay";
 
-export type StagedWorldDrawUnitKind =
+type StagedWorldDrawUnitKind =
 	| "terrain"
 	| "structured-interior"
 	| "static"
@@ -30,12 +30,12 @@ export interface StagedWorldFrameCandidate {
 	bvhFallbackReason: string | null;
 }
 
-export interface StagedWorldDraw {
+interface StagedWorldDraw {
 	drawUnitId: string;
 	category: StagedWorldDrawUnitCategory;
 }
 
-export interface StagedWorldPass {
+interface StagedWorldPass {
 	id: "world";
 	draws: StagedWorldDraw[];
 }

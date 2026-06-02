@@ -14,7 +14,7 @@ import {
 } from "./texture-pages/texture-page-atlas-planner";
 import type { Webgl2SceneDomain } from "./webgl2-scene-domain-targets";
 
-export type CompactionFamilyBypassReason =
+type CompactionFamilyBypassReason =
 	| "non-static"
 	| "missing-landblock-origin"
 	| "unsupported-compacted-material-family"
@@ -33,7 +33,7 @@ export type CompactionFamilyBypassReason =
 	| "missing-detail-atlas-entry"
 	| "material-table-overflow";
 
-export type CompactionMaterialKind =
+type CompactionMaterialKind =
 	| "flat"
 	| "direct-texture"
 	| "indexed-paletted"
@@ -103,12 +103,12 @@ export interface CompactionGeometryReadiness {
 	hasUvBuffer: boolean;
 }
 
-export interface CompactionTexturePageReadiness {
+interface CompactionTexturePageReadiness {
 	base: StagedWorldMaterialTexturePageReadiness | null;
 	bindings: readonly TexturePageBinding[];
 }
 
-export interface CompactionDetailOverlayReadiness {
+interface CompactionDetailOverlayReadiness {
 	hasOverlay: boolean;
 	atlasEntry: RgbaTexturePageDetailAtlasEntry | null;
 }
@@ -246,12 +246,12 @@ export interface CompactionFamilyPlan {
 	triangleCount: number;
 }
 
-export interface CompactionRenderFamilies {
+interface CompactionRenderFamilies {
 	rgbaTexturePage: RgbaTexturePageRenderFamilyPlan;
 	indexedPaletted: IndexedPalettedRenderFamilyPlan;
 }
 
-export interface RgbaTexturePageRenderFamilyPlan {
+interface RgbaTexturePageRenderFamilyPlan {
 	kind: "rgba-atlas";
 	compactableDrawUnitIds: readonly string[];
 	materialSlots: readonly RgbaTexturePageFamilyMaterialSlot[];
@@ -263,7 +263,7 @@ export interface RgbaTexturePageRenderFamilyPlan {
 	partitions: readonly RgbaTexturePageRenderFamilyPartition[];
 }
 
-export interface IndexedPalettedRenderFamilyPlan {
+interface IndexedPalettedRenderFamilyPlan {
 	kind: "indexed-paletted";
 	compactableDrawUnitIds: readonly string[];
 	materialTableRecords: readonly IndexedPalettedFamilyMaterialTableRecord[];
@@ -275,7 +275,7 @@ export interface IndexedPalettedRenderFamilyPlan {
 	partitions: readonly IndexedPalettedRenderFamilyPartition[];
 }
 
-export interface RgbaTexturePageRenderFamilyPartition {
+interface RgbaTexturePageRenderFamilyPartition {
 	key: string;
 	compactableDrawUnitIds: readonly string[];
 	materialSlots: readonly RgbaTexturePageFamilyMaterialSlot[];
@@ -286,7 +286,7 @@ export interface RgbaTexturePageRenderFamilyPartition {
 	drawSlices: readonly RgbaTexturePageFamilyDrawSlice[];
 }
 
-export interface IndexedPalettedRenderFamilyPartition {
+interface IndexedPalettedRenderFamilyPartition {
 	key: string;
 	compactableDrawUnitIds: readonly string[];
 	materialTableRecords: readonly IndexedPalettedFamilyMaterialTableRecord[];
@@ -1191,7 +1191,7 @@ function createMaterialCompactionBypass(
 	throw new Error(`Unhandled compaction material blocker ${blocker}`);
 }
 
-export function classifyCompactionMaterialFamily(options: {
+function classifyCompactionMaterialFamily(options: {
 	drawUnitKind: string;
 	materialKind: CompactionMaterialKind;
 	materialBehavior: LegacyMaterialBehaviorDto | null;
@@ -1231,7 +1231,7 @@ function classifyDirectTextureCompactionMaterialFamily(
 	}
 }
 
-export function classifyCompactionAlphaPolicy(
+function classifyCompactionAlphaPolicy(
 	behavior: LegacyMaterialBehaviorDto | null,
 ): CompactionAlphaPolicy {
 	if (behavior === null) {

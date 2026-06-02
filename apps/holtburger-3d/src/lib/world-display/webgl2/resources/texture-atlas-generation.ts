@@ -12,7 +12,7 @@ import type {
 } from "../../texture-pages/atlas-layout-planner";
 import type { TexturePageAtlasPlan } from "../../texture-pages/texture-page-atlas-planner";
 
-export interface Webgl2TextureAtlasPlacementResource {
+interface Webgl2TextureAtlasPlacementResource {
 	atlasEntryKey: string;
 	textureIndex: number;
 	rect: readonly [number, number, number, number];

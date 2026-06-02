@@ -17,7 +17,7 @@ import type {
 	RgbaTexturePageFamilyMaterialSlot,
 } from "./compaction-family-planner";
 
-export interface Webgl2RgbaTexturePageFamilyMaterialSlot {
+interface Webgl2RgbaTexturePageFamilyMaterialSlot {
 	key: string;
 	sourceMaterialSlotKey: string;
 	index: number;
@@ -34,19 +34,19 @@ export interface Webgl2RgbaTexturePageFamilyMaterialSlot {
 	wrapT: "clamp" | "repeat";
 }
 
-export interface Webgl2RgbaTexturePageFamilyDrawSlice extends CompactedGeometrySlice {
+interface Webgl2RgbaTexturePageFamilyDrawSlice extends CompactedGeometrySlice {
 	atlasTextureIndex: number;
 	detailAtlasTextureIndex: number | null;
 }
 
-export interface Webgl2IndexedPalettedFamilyDrawSlice extends CompactedGeometrySlice {
+interface Webgl2IndexedPalettedFamilyDrawSlice extends CompactedGeometrySlice {
 	indexFormat: "p8" | "index16";
 	indexPageKey: string;
 	palettePageKey: string;
 	detailAtlasTextureIndex: number | null;
 }
 
-export interface Webgl2IndexedPalettedFamilyMaterialTableRecord extends IndexedPalettedFamilyMaterialTableRecord {
+interface Webgl2IndexedPalettedFamilyMaterialTableRecord extends IndexedPalettedFamilyMaterialTableRecord {
 	detailAtlasTextureIndex: number | null;
 	detailAtlasRect: readonly [number, number, number, number];
 }
@@ -208,7 +208,7 @@ export function updateWebgl2CompactedGeometryBatchDynamicTables(
 	batch.batchModelMatrix = geometry.batchModelMatrix;
 }
 
-export function compactedFamilyResourceKey(
+function compactedFamilyResourceKey(
 	family: Webgl2CompactedGeometryFamilyResource["family"],
 	geometryBatchKey: string,
 ): string {

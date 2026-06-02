@@ -17,7 +17,7 @@ export interface DrawUnitRuntimeDiagnostic {
 	compactedRoutes: readonly DrawUnitCompactedRouteDiagnostic[];
 }
 
-export interface DrawUnitRuntimeFacts {
+interface DrawUnitRuntimeFacts {
 	kind: StagedWorldDrawUnitAssembly["kind"];
 	materialKind: StagedWorldDrawUnitAssembly["material"]["kind"];
 	materialKey: string;
@@ -30,7 +30,7 @@ export interface DrawUnitRuntimeFacts {
 	compactionGeometryBlockers: readonly CompactionGeometryBlocker[];
 }
 
-export interface DrawUnitFinalCompactionPlanDiagnostic {
+interface DrawUnitFinalCompactionPlanDiagnostic {
 	status:
 		| "planned-rgba-texture-page"
 		| "planned-indexed-paletted"
@@ -42,11 +42,11 @@ export interface DrawUnitFinalCompactionPlanDiagnostic {
 	}[];
 }
 
-export type DrawUnitCompactedRouteDiagnostic =
+type DrawUnitCompactedRouteDiagnostic =
 	| RgbaTexturePageCompactedRouteDiagnostic
 	| IndexedPalettedCompactedRouteDiagnostic;
 
-export interface CompactedRouteBaseDiagnostic {
+interface CompactedRouteBaseDiagnostic {
 	family: "rgba-texture-page" | "indexed-paletted";
 	familyResourceKey: string;
 	geometryBatchKey: string;
@@ -59,14 +59,14 @@ export interface CompactedRouteBaseDiagnostic {
 	sliceMaterialSlotKeys: readonly string[];
 }
 
-export interface RgbaTexturePageCompactedRouteDiagnostic extends CompactedRouteBaseDiagnostic {
+interface RgbaTexturePageCompactedRouteDiagnostic extends CompactedRouteBaseDiagnostic {
 	family: "rgba-texture-page";
 	atlasTextureIndex: number;
 	detailAtlasTextureIndex: number | null;
 	materialSlot: RgbaTexturePageRuntimeMaterialSlotDiagnostic | null;
 }
 
-export interface RgbaTexturePageRuntimeMaterialSlotDiagnostic {
+interface RgbaTexturePageRuntimeMaterialSlotDiagnostic {
 	key: string;
 	sourceMaterialSlotKey: string;
 	index: number;
@@ -80,7 +80,7 @@ export interface RgbaTexturePageRuntimeMaterialSlotDiagnostic {
 	wrap: string;
 }
 
-export interface IndexedPalettedCompactedRouteDiagnostic extends CompactedRouteBaseDiagnostic {
+interface IndexedPalettedCompactedRouteDiagnostic extends CompactedRouteBaseDiagnostic {
 	family: "indexed-paletted";
 	indexFormat: "p8" | "index16";
 	indexPageKey: string;
@@ -89,7 +89,7 @@ export interface IndexedPalettedCompactedRouteDiagnostic extends CompactedRouteB
 	materialRecord: IndexedPalettedRuntimeMaterialRecordDiagnostic | null;
 }
 
-export interface IndexedPalettedRuntimeMaterialRecordDiagnostic {
+interface IndexedPalettedRuntimeMaterialRecordDiagnostic {
 	key: string;
 	sourceMaterialKey: string;
 	indexPageKey: string;

@@ -217,13 +217,13 @@ export type Webgl2RgbaTexturePageFamilySubmitRoute =
 	| "scene-domain-exterior"
 	| "scene-domain-interior";
 
-export interface Webgl2RetainedDirectSubmitPass {
+interface Webgl2RetainedDirectSubmitPass {
 	kind: "retained-direct";
 	alphaPolicy: "opaque-or-cutout" | "transparent-blend";
 	drawUnits: readonly Webgl2WorldDrawUnit[];
 }
 
-export interface Webgl2RgbaTexturePageFamilySubmitPass {
+interface Webgl2RgbaTexturePageFamilySubmitPass {
 	kind: "compacted-rgba-texture-page-family";
 	replaceableDrawUnitIds: ReadonlySet<string>;
 	replaceableDrawUnitTriangleCount: number;
@@ -231,14 +231,14 @@ export interface Webgl2RgbaTexturePageFamilySubmitPass {
 	planningFallbackSamples: readonly string[];
 }
 
-export interface Webgl2IndexedPalettedFamilySubmitPass {
+interface Webgl2IndexedPalettedFamilySubmitPass {
 	kind: "compacted-indexed-paletted-family";
 	replaceableDrawUnitIds: ReadonlySet<string>;
 	replaceableDrawUnitTriangleCount: number;
 	planningNoVisibleRouteCount: number;
 }
 
-export type Webgl2WorldSubmitPass =
+type Webgl2WorldSubmitPass =
 	| Webgl2RetainedDirectSubmitPass
 	| Webgl2RgbaTexturePageFamilySubmitPass
 	| Webgl2IndexedPalettedFamilySubmitPass;

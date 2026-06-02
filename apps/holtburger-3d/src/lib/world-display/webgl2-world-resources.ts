@@ -270,7 +270,7 @@ export interface Webgl2IndexedMaterialResources {
 
 const warnedUnsupportedDetailAtlasTextureKeys = new Set<string>();
 
-export interface Webgl2TerrainTextureBinding {
+interface Webgl2TerrainTextureBinding {
 	key: string;
 	texture: Webgl2Texture2DResource;
 	tiling: number;

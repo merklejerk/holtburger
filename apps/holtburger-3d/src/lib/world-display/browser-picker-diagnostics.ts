@@ -13,13 +13,13 @@ export interface BrowserStaticRenderablePickDiagnostic {
 	drawUnits: readonly BrowserStaticDrawUnitDiagnostic[];
 }
 
-export interface BrowserStaticDrawUnitDiagnostic {
+interface BrowserStaticDrawUnitDiagnostic {
 	drawUnitId: string;
 	material: BrowserStagedMaterialDiagnostic;
 	geometry: BrowserStagedGeometryDiagnostic;
 }
 
-export interface BrowserStagedGeometryDiagnostic {
+interface BrowserStagedGeometryDiagnostic {
 	vertexCount: number;
 	triangleCount: number;
 	uv: BrowserUvDiagnostic;
@@ -36,7 +36,7 @@ export interface BrowserUvDiagnostic {
 	outsideUnitSquare: boolean;
 }
 
-export type BrowserStagedMaterialDiagnostic =
+type BrowserStagedMaterialDiagnostic =
 	| {
 			kind: "direct-texture";
 			key: string;
@@ -65,7 +65,7 @@ export type BrowserStagedMaterialDiagnostic =
 			fallbackReason: string | null;
 	  };
 
-export interface BrowserTexturePageReadinessDiagnostic {
+interface BrowserTexturePageReadinessDiagnostic {
 	materialSlotKey: string;
 	atlasEntryKey: string;
 	renderStateKey: string;
@@ -80,7 +80,7 @@ export interface BrowserTexturePageReadinessDiagnostic {
 	};
 }
 
-export interface BrowserDetailOverlayDiagnostic {
+interface BrowserDetailOverlayDiagnostic {
 	renderSurfaceId: string;
 	textureAssetId: string;
 	tiling: number;

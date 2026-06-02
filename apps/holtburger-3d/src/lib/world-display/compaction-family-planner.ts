@@ -232,10 +232,34 @@ export interface RgbaTexturePageRenderFamilyPlan {
 		materialSlotKey: string;
 	}[];
 	drawSlices: readonly RgbaTexturePageFamilyDrawSlice[];
+	partitions: readonly RgbaTexturePageRenderFamilyPartition[];
 }
 
 export interface IndexedPalettedRenderFamilyPlan {
 	kind: "indexed-paletted";
+	compactableDrawUnitIds: readonly string[];
+	materialTableRecords: readonly IndexedPalettedFamilyMaterialTableRecord[];
+	drawUnitMaterialSlots: readonly {
+		drawUnitId: string;
+		materialSlotKey: string;
+	}[];
+	drawSlices: readonly IndexedPalettedFamilyDrawSlice[];
+	partitions: readonly IndexedPalettedRenderFamilyPartition[];
+}
+
+export interface RgbaTexturePageRenderFamilyPartition {
+	key: string;
+	compactableDrawUnitIds: readonly string[];
+	materialSlots: readonly RgbaTexturePageFamilyMaterialSlot[];
+	drawUnitMaterialSlots: readonly {
+		drawUnitId: string;
+		materialSlotKey: string;
+	}[];
+	drawSlices: readonly RgbaTexturePageFamilyDrawSlice[];
+}
+
+export interface IndexedPalettedRenderFamilyPartition {
+	key: string;
 	compactableDrawUnitIds: readonly string[];
 	materialTableRecords: readonly IndexedPalettedFamilyMaterialTableRecord[];
 	drawUnitMaterialSlots: readonly {
@@ -253,6 +277,12 @@ interface EligibleCompactionFamilyCandidate {
 interface RgbaTexturePageEntryRecord {
 	key: string;
 	entry: StagedWorldMaterialAtlasEligibility["atlasEntry"];
+}
+
+interface BoundedMaterialTablePartition<TCandidate, TMaterialRecord> {
+	partitionIndex: number;
+	materialRecords: readonly TMaterialRecord[];
+	candidates: readonly TCandidate[];
 }
 
 export function createEmptyCompactionFamilyPlan(): CompactionFamilyPlan {
@@ -410,55 +440,32 @@ export function planCompactionFamilies(options: {
 		});
 	}
 
+	const indexedCompactable = detailReadyIndexedCandidates;
 	const indexedMaterialTableRecords =
-		assignIndexedPalettedFamilyMaterialTableRecords(
-			detailReadyIndexedCandidates,
-			options.policy,
-		);
-	const indexedMaterialTableRecordByKey = new Map(
-		indexedMaterialTableRecords.map((record) => [record.key, record] as const),
-	);
-	const indexedCompactable = detailReadyIndexedCandidates.filter(
-		(candidate) => {
-			const record = candidate.indexedMaterialTableRecord;
-			if (record && indexedMaterialTableRecordByKey.has(record.key)) {
-				return true;
-			}
-			bypasses.push({
-				drawUnitId: candidate.id,
-				reason: "material-table-overflow",
-				detail: `indexed material table exceeded ${options.policy.maxMaterialSlotsPerDraw} slots`,
-			});
-			return false;
-		},
-	);
+		assignIndexedPalettedFamilyMaterialTableRecords(indexedCompactable);
+	const indexedPartitions = createIndexedPalettedFamilyPartitions({
+		candidates: indexedCompactable,
+		policy: options.policy,
+	});
 	const indexedDrawUnitMaterialSlots = indexedCompactable.map((candidate) => ({
 		drawUnitId: candidate.id,
 		materialSlotKey:
 			requireIndexedPalettedFamilyMaterialTableRecord(candidate).key,
 	}));
-	const indexedDrawSlices = createIndexedPalettedFamilyDrawSlices({
-		candidates: indexedCompactable,
-		materialTableRecords: indexedMaterialTableRecords,
-	});
-	const materialSlots = assignRgbaTexturePageFamilyMaterialSlots(
-		detailPlaced,
-		options.policy,
+	const indexedDrawSlices = indexedPartitions.flatMap(
+		(partition) => partition.drawSlices,
 	);
+	const compactable = detailPlaced;
+	const materialSlots = assignRgbaTexturePageFamilyMaterialSlots(compactable);
+	const rgbaPartitions = createRgbaTexturePageFamilyPartitions({
+		candidates: compactable,
+		policy: options.policy,
+		placementsByEntryKey: layout.placementsByEntryKey,
+		detailPlacementsByEntryKey: detailLayout.placementsByEntryKey,
+	});
 	const materialSlotByKey = new Map(
 		materialSlots.map((slot) => [slot.key, slot] as const),
 	);
-	const compactable = detailPlaced.filter((candidate) => {
-		if (materialSlotByKey.has(describeCompactionMaterialSlotKey(candidate))) {
-			return true;
-		}
-		bypasses.push({
-			drawUnitId: candidate.drawUnit.id,
-			reason: "material-table-overflow",
-			detail: `material table exceeded ${options.policy.maxMaterialSlotsPerDraw} slots`,
-		});
-		return false;
-	});
 	const drawSlices = createRgbaTexturePageFamilyDrawSlices(
 		compactable,
 		materialSlotByKey,
@@ -509,6 +516,8 @@ export function planCompactionFamilies(options: {
 			compactableDrawUnitIds,
 			materialSlots,
 			indexedMaterialTableRecords,
+			rgbaPartitions,
+			indexedPartitions,
 			indexedCompactableDrawUnitIds,
 			indexedDrawUnitMaterialSlots,
 			indexedDrawSlices,
@@ -581,6 +590,8 @@ function createCompactionRenderFamilies({
 	compactableDrawUnitIds,
 	materialSlots,
 	indexedMaterialTableRecords,
+	rgbaPartitions,
+	indexedPartitions,
 	indexedCompactableDrawUnitIds,
 	indexedDrawUnitMaterialSlots,
 	indexedDrawSlices,
@@ -590,6 +601,8 @@ function createCompactionRenderFamilies({
 	compactableDrawUnitIds: readonly string[];
 	materialSlots: readonly RgbaTexturePageFamilyMaterialSlot[];
 	indexedMaterialTableRecords: readonly IndexedPalettedFamilyMaterialTableRecord[];
+	rgbaPartitions?: readonly RgbaTexturePageRenderFamilyPartition[];
+	indexedPartitions?: readonly IndexedPalettedRenderFamilyPartition[];
 	indexedCompactableDrawUnitIds?: readonly string[];
 	indexedDrawUnitMaterialSlots?: readonly {
 		drawUnitId: string;
@@ -609,6 +622,14 @@ function createCompactionRenderFamilies({
 			materialSlots,
 			drawUnitMaterialSlots,
 			drawSlices,
+			partitions:
+				rgbaPartitions ??
+				createSingleRgbaTexturePageFamilyPartition({
+					materialSlots,
+					drawUnitMaterialSlots,
+					drawSlices,
+					compactableDrawUnitIds,
+				}),
 		},
 		indexedPaletted: {
 			kind: "indexed-paletted",
@@ -616,8 +637,127 @@ function createCompactionRenderFamilies({
 			materialTableRecords: indexedMaterialTableRecords,
 			drawUnitMaterialSlots: indexedDrawUnitMaterialSlots ?? [],
 			drawSlices: indexedDrawSlices ?? [],
+			partitions:
+				indexedPartitions ??
+				createSingleIndexedPalettedFamilyPartition({
+					materialTableRecords: indexedMaterialTableRecords,
+					drawUnitMaterialSlots: indexedDrawUnitMaterialSlots ?? [],
+					drawSlices: indexedDrawSlices ?? [],
+					compactableDrawUnitIds: indexedCompactableDrawUnitIds ?? [],
+				}),
 		},
 	};
+}
+
+function createSingleRgbaTexturePageFamilyPartition({
+	compactableDrawUnitIds,
+	materialSlots,
+	drawUnitMaterialSlots,
+	drawSlices,
+}: {
+	compactableDrawUnitIds: readonly string[];
+	materialSlots: readonly RgbaTexturePageFamilyMaterialSlot[];
+	drawUnitMaterialSlots: readonly {
+		drawUnitId: string;
+		materialSlotKey: string;
+	}[];
+	drawSlices: readonly RgbaTexturePageFamilyDrawSlice[];
+}): readonly RgbaTexturePageRenderFamilyPartition[] {
+	if (compactableDrawUnitIds.length === 0) {
+		return [];
+	}
+	return [
+		{
+			key: "rgba-texture-page-partition/0",
+			compactableDrawUnitIds,
+			materialSlots,
+			drawUnitMaterialSlots,
+			drawSlices,
+		},
+	];
+}
+
+function createSingleIndexedPalettedFamilyPartition({
+	compactableDrawUnitIds,
+	materialTableRecords,
+	drawUnitMaterialSlots,
+	drawSlices,
+}: {
+	compactableDrawUnitIds: readonly string[];
+	materialTableRecords: readonly IndexedPalettedFamilyMaterialTableRecord[];
+	drawUnitMaterialSlots: readonly {
+		drawUnitId: string;
+		materialSlotKey: string;
+	}[];
+	drawSlices: readonly IndexedPalettedFamilyDrawSlice[];
+}): readonly IndexedPalettedRenderFamilyPartition[] {
+	if (compactableDrawUnitIds.length === 0) {
+		return [];
+	}
+	return [
+		{
+			key: "indexed-paletted-partition/0",
+			compactableDrawUnitIds,
+			materialTableRecords,
+			drawUnitMaterialSlots,
+			drawSlices,
+		},
+	];
+}
+
+function createBoundedMaterialTablePartitions<TCandidate, TMaterialRecord>({
+	candidates,
+	maxMaterialSlots,
+	describeMaterialKey,
+	createMaterialRecord,
+}: {
+	candidates: readonly TCandidate[];
+	maxMaterialSlots: number;
+	describeMaterialKey: (candidate: TCandidate) => string;
+	createMaterialRecord: (candidate: TCandidate) => TMaterialRecord;
+}): BoundedMaterialTablePartition<TCandidate, TMaterialRecord>[] {
+	if (!Number.isInteger(maxMaterialSlots) || maxMaterialSlots <= 0) {
+		throw new Error(
+			`Compacted material table capacity must be positive, got ${maxMaterialSlots}.`,
+		);
+	}
+	const recordsByKey = new Map<string, TMaterialRecord>();
+	for (const candidate of candidates) {
+		const key = describeMaterialKey(candidate);
+		if (!recordsByKey.has(key)) {
+			recordsByKey.set(key, createMaterialRecord(candidate));
+		}
+	}
+	const sortedKeys = [...recordsByKey.keys()].sort();
+	const partitions: BoundedMaterialTablePartition<
+		TCandidate,
+		TMaterialRecord
+	>[] = [];
+	for (
+		let partitionStart = 0;
+		partitionStart < sortedKeys.length;
+		partitionStart += maxMaterialSlots
+	) {
+		const materialKeys = sortedKeys.slice(
+			partitionStart,
+			partitionStart + maxMaterialSlots,
+		);
+		const materialKeySet = new Set(materialKeys);
+		partitions.push({
+			partitionIndex: partitions.length,
+			materialRecords: materialKeys.map((key) => {
+				const record = recordsByKey.get(key);
+				if (record === undefined) {
+					throw new Error(`Compacted material partition lost record ${key}.`);
+				}
+				return record;
+			}),
+			candidates: candidates.filter((candidate) =>
+				materialKeySet.has(describeMaterialKey(candidate)),
+			),
+		});
+	}
+	return partitions;
 }
 
 function collectIndexedPalettedCompactionCandidates(
@@ -663,7 +803,6 @@ function describeIndexedCandidateSliceIdentity(
 
 function assignIndexedPalettedFamilyMaterialTableRecords(
 	candidates: readonly CompactionFamilyCandidate[],
-	policy: CompactionFamilyPlanningPolicy,
 ): IndexedPalettedFamilyMaterialTableRecord[] {
 	const recordsByKey = new Map<
 		string,
@@ -673,9 +812,46 @@ function assignIndexedPalettedFamilyMaterialTableRecords(
 		const record = requireIndexedPalettedFamilyMaterialTableRecord(drawUnit);
 		recordsByKey.set(record.key, record);
 	}
-	return [...recordsByKey.values()]
-		.sort((left, right) => left.key.localeCompare(right.key))
-		.slice(0, policy.maxMaterialSlotsPerDraw);
+	return [...recordsByKey.values()].sort((left, right) =>
+		left.key.localeCompare(right.key),
+	);
+}
+
+function createIndexedPalettedFamilyPartitions({
+	candidates,
+	policy,
+}: {
+	candidates: readonly CompactionFamilyCandidate[];
+	policy: CompactionFamilyPlanningPolicy;
+}): IndexedPalettedRenderFamilyPartition[] {
+	return createBoundedMaterialTablePartitions({
+		candidates,
+		maxMaterialSlots: policy.maxMaterialSlotsPerDraw,
+		describeMaterialKey: (candidate) =>
+			requireIndexedPalettedFamilyMaterialTableRecord(candidate).key,
+		createMaterialRecord: (candidate) =>
+			requireIndexedPalettedFamilyMaterialTableRecord(candidate),
+	}).map((partition) => {
+		const materialTableRecords = partition.materialRecords;
+		const drawUnitMaterialSlots = partition.candidates.map((candidate) => ({
+			drawUnitId: candidate.id,
+			materialSlotKey:
+				requireIndexedPalettedFamilyMaterialTableRecord(candidate).key,
+		}));
+		const drawSlices = createIndexedPalettedFamilyDrawSlices({
+			candidates: partition.candidates,
+			materialTableRecords,
+		});
+		return {
+			key: `indexed-paletted-partition/${partition.partitionIndex}`,
+			compactableDrawUnitIds: partition.candidates.map(
+				(candidate) => candidate.id,
+			),
+			materialTableRecords,
+			drawUnitMaterialSlots,
+			drawSlices,
+		};
+	});
 }
 
 function requireIndexedPalettedFamilyMaterialTableRecord(
@@ -1220,7 +1396,6 @@ function dedupeCompactionFamilyDetailEntries(
 
 function assignRgbaTexturePageFamilyMaterialSlots(
 	candidates: readonly EligibleCompactionFamilyCandidate[],
-	policy: CompactionFamilyPlanningPolicy,
 ): RgbaTexturePageFamilyMaterialSlot[] {
 	return [
 		...new Map(
@@ -1234,7 +1409,6 @@ function assignRgbaTexturePageFamilyMaterialSlots(
 		).entries(),
 	]
 		.sort(([left], [right]) => left.localeCompare(right))
-		.slice(0, policy.maxMaterialSlotsPerDraw)
 		.map(([key, eligibility], index) => ({
 			key,
 			sourceMaterialSlotKey: eligibility.materialSlotKey,
@@ -1245,6 +1419,64 @@ function assignRgbaTexturePageFamilyMaterialSlots(
 			atlasEntryKey: eligibility.atlasEntryKey,
 			...describeRgbaTexturePageDetailSlot(candidates, key),
 		}));
+}
+
+function createRgbaTexturePageFamilyPartitions({
+	candidates,
+	policy,
+	placementsByEntryKey,
+	detailPlacementsByEntryKey,
+}: {
+	candidates: readonly EligibleCompactionFamilyCandidate[];
+	policy: CompactionFamilyPlanningPolicy;
+	placementsByEntryKey: ReadonlyMap<string, { textureIndex: number }>;
+	detailPlacementsByEntryKey: ReadonlyMap<string, { textureIndex: number }>;
+}): RgbaTexturePageRenderFamilyPartition[] {
+	return createBoundedMaterialTablePartitions({
+		candidates,
+		maxMaterialSlots: policy.maxMaterialSlotsPerDraw,
+		describeMaterialKey: describeCompactionMaterialSlotKey,
+		createMaterialRecord: (candidate) =>
+			[
+				describeCompactionMaterialSlotKey(candidate),
+				candidate.eligibility,
+			] as const,
+	}).map((partition) => {
+		const materialSlots = partition.materialRecords.map(
+			([key, eligibility], index) => ({
+				key,
+				sourceMaterialSlotKey: eligibility.materialSlotKey,
+				index,
+				renderStateKey: eligibility.renderStateKey,
+				samplingKey: eligibility.samplingKey,
+				samplingPolicy: eligibility.samplingPolicy,
+				atlasEntryKey: eligibility.atlasEntryKey,
+				...describeRgbaTexturePageDetailSlot(partition.candidates, key),
+			}),
+		);
+		const materialSlotByKey = new Map(
+			materialSlots.map((slot) => [slot.key, slot] as const),
+		);
+		const drawUnitMaterialSlots = partition.candidates.map((candidate) => ({
+			drawUnitId: candidate.drawUnit.id,
+			materialSlotKey: describeCompactionMaterialSlotKey(candidate),
+		}));
+		const drawSlices = createRgbaTexturePageFamilyDrawSlices(
+			partition.candidates,
+			materialSlotByKey,
+			placementsByEntryKey,
+			detailPlacementsByEntryKey,
+		);
+		return {
+			key: `rgba-texture-page-partition/${partition.partitionIndex}`,
+			compactableDrawUnitIds: partition.candidates.map(
+				(candidate) => candidate.drawUnit.id,
+			),
+			materialSlots,
+			drawUnitMaterialSlots,
+			drawSlices,
+		};
+	});
 }
 
 function describeRgbaTexturePageDetailSlot(

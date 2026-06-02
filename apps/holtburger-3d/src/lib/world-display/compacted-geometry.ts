@@ -408,11 +408,8 @@ function describeCompactedGeometryKey({
 	drawUnits: readonly StagedWorldDrawUnitAssembly[];
 	positions: Float32Array;
 }): string {
-	return [
-		"compacted-geometry",
-		plan.key,
-		`bp${hashFloat32Array(positions)}`,
-		...drawUnits.map((drawUnit) =>
+	const drawUnitSignature = drawUnits
+		.map((drawUnit) =>
 			[
 				drawUnit.id,
 				`v${drawUnit.geometry.vertexCount}`,
@@ -420,8 +417,24 @@ function describeCompactedGeometryKey({
 				`u${hashFloat32Array(drawUnit.geometry.uvs ?? new Float32Array())}`,
 				`i${hashIndexArray(drawUnit.geometry.indices)}`,
 			].join(":"),
-		),
+		)
+		.join("|");
+	return [
+		"compacted-geometry",
+		`plan=${hashString(plan.key)}`,
+		`bp${hashFloat32Array(positions)}`,
+		`draws=${drawUnits.length}`,
+		`du=${hashString(drawUnitSignature)}`,
 	].join("|");
+}
+
+function hashString(value: string): string {
+	let hash = 0x811c9dc5;
+	for (let index = 0; index < value.length; index += 1) {
+		hash ^= value.charCodeAt(index);
+		hash = Math.imul(hash, 0x01000193) >>> 0;
+	}
+	return hash.toString(16).padStart(8, "0");
 }
 
 function hashFloat32Array(values: Float32Array): string {

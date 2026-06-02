@@ -508,10 +508,117 @@ describe("compaction family planner", () => {
 			},
 		});
 
-		expect(plan.compactableDrawUnitIds).toEqual(["slot-a"]);
+		expect(plan.compactableDrawUnitIds).toEqual(["slot-a", "slot-b"]);
 		expect(plan.bypasses.map((bypass) => bypass.reason)).toEqual([
 			"source-texture-too-large",
-			"material-table-overflow",
+		]);
+	});
+
+	it("partitions RGBA material tables instead of bypassing overflow candidates", () => {
+		const plan = planCompactionFamilies({
+			drawUnits: [
+				createCandidate({ id: "slot-a", entryKey: "slot-a" }),
+				createCandidate({ id: "slot-b", entryKey: "slot-b" }),
+			],
+			policy: {
+				maxAtlasTextureSize: 64,
+				maxAtlasTextureCount: 1,
+				baseGutterPixels: 2,
+				maxMaterialSlotsPerDraw: 1,
+			},
+		});
+
+		expect(plan.compactableDrawUnitIds).toEqual(["slot-a", "slot-b"]);
+		expect(plan.bypasses).toEqual([]);
+		expect(plan.renderFamilies.rgbaTexturePage.partitions).toMatchObject([
+			{
+				compactableDrawUnitIds: ["slot-a"],
+				materialSlots: [{ index: 0 }],
+				drawSlices: [{ drawUnitIds: ["slot-a"], materialTableSlotCount: 1 }],
+			},
+			{
+				compactableDrawUnitIds: ["slot-b"],
+				materialSlots: [{ index: 0 }],
+				drawSlices: [{ drawUnitIds: ["slot-b"], materialTableSlotCount: 1 }],
+			},
+		]);
+		expect(
+			plan.bypasses.some(
+				(bypass) => bypass.reason === "material-table-overflow",
+			),
+		).toBe(false);
+	});
+
+	it("partitions indexed material tables instead of bypassing overflow candidates", () => {
+		const plan = planCompactionFamilies({
+			drawUnits: [
+				createCandidate({
+					id: "indexed-a",
+					materialKind: "indexed-paletted",
+					indexedMaterialTableRecord: createIndexedMaterialTableRecord("a"),
+				}),
+				createCandidate({
+					id: "indexed-b",
+					materialKind: "indexed-paletted",
+					indexedMaterialTableRecord: createIndexedMaterialTableRecord("b"),
+				}),
+			],
+			policy: {
+				maxAtlasTextureSize: 64,
+				maxAtlasTextureCount: 1,
+				baseGutterPixels: 2,
+				maxMaterialSlotsPerDraw: 1,
+			},
+		});
+
+		expect(plan.compactableDrawUnitIds).toEqual(["indexed-a", "indexed-b"]);
+		expect(plan.bypasses).toEqual([]);
+		expect(plan.renderFamilies.indexedPaletted.partitions).toMatchObject([
+			{
+				compactableDrawUnitIds: ["indexed-a"],
+				materialTableRecords: [{ key: "indexed-table-a" }],
+				drawSlices: [{ drawUnitIds: ["indexed-a"], materialTableSlotCount: 1 }],
+			},
+			{
+				compactableDrawUnitIds: ["indexed-b"],
+				materialTableRecords: [{ key: "indexed-table-b" }],
+				drawSlices: [{ drawUnitIds: ["indexed-b"], materialTableSlotCount: 1 }],
+			},
+		]);
+		expect(
+			plan.bypasses.some(
+				(bypass) => bypass.reason === "material-table-overflow",
+			),
+		).toBe(false);
+	});
+
+	it("keeps atlas capacity overflow separate from material table partitioning", () => {
+		const plan = planCompactionFamilies({
+			drawUnits: [
+				createCandidate({
+					id: "slot-a",
+					entryKey: "slot-a",
+					width: 40,
+					height: 40,
+				}),
+				createCandidate({
+					id: "slot-b",
+					entryKey: "slot-b",
+					width: 40,
+					height: 40,
+				}),
+			],
+			policy: {
+				maxAtlasTextureSize: 48,
+				maxAtlasTextureCount: 1,
+				baseGutterPixels: 2,
+				maxMaterialSlotsPerDraw: 1,
+			},
+		});
+
+		expect(plan.compactableDrawUnitIds).toEqual(["slot-a"]);
+		expect(plan.bypasses.map((bypass) => bypass.reason)).toEqual([
+			"atlas-full",
 		]);
 	});
 

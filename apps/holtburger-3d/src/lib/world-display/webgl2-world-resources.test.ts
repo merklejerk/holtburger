@@ -501,6 +501,8 @@ describe("webgl2 world resources", () => {
 		expect(rgbaFamily?.drawSlices[0]?.drawUnitIds[0]).toContain(
 			"structured-interior",
 		);
+		expect(rgbaFamily?.drawSlices[0]?.key).toContain("|table=0-0|");
+		expect(rgbaFamily?.drawSlices[0]?.key.match(/\|table=/g)).toHaveLength(1);
 		expect(store.compactionBypassSamples).not.toContain(
 			"non-static: draw unit kind structured-interior is not compacted geometry",
 		);
@@ -629,20 +631,20 @@ describe("webgl2 world resources", () => {
 		expect(store.textureCount).toBe(2);
 		expect(store.indexedTextureCount).toBe(1);
 		expect(store.paletteTextureCount).toBe(1);
-		expect(store.compactionFamilyPlan.indexedMaterialTableRecords).toMatchObject(
-			[
-				{
-					sourceMaterialKey: expect.stringContaining("indexed-paletted"),
-					indexFormat: "p8",
-					indexPageWidth: 2,
-					indexPageHeight: 1,
-					paletteColorCount: 2,
-					clipThreshold: -1,
-					filteringMode: "shader-palette-linear",
-					alphaPolicy: "opaque",
-				},
-			],
-		);
+		expect(
+			store.compactionFamilyPlan.indexedMaterialTableRecords,
+		).toMatchObject([
+			{
+				sourceMaterialKey: expect.stringContaining("indexed-paletted"),
+				indexFormat: "p8",
+				indexPageWidth: 2,
+				indexPageHeight: 1,
+				paletteColorCount: 2,
+				clipThreshold: -1,
+				filteringMode: "shader-palette-linear",
+				alphaPolicy: "opaque",
+			},
+		]);
 		expect(
 			store.compactionFamilyPlan.renderFamilies.indexedPaletted
 				.compactableDrawUnitIds,
@@ -685,6 +687,10 @@ describe("webgl2 world resources", () => {
 				drawUnitIds: [store.drawUnits[0]?.id],
 			},
 		]);
+		expect(indexedFamily?.drawSlices[0]?.key).toContain("|table=0-0|");
+		expect(indexedFamily?.drawSlices[0]?.key.match(/\|table=/g)).toHaveLength(
+			1,
+		);
 		expect(
 			gl.textureUploads.map(({ width, height }) => ({ width, height })),
 		).toEqual([

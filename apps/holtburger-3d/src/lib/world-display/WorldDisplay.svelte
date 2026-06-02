@@ -74,6 +74,7 @@
 	};
 	let renderChunkTransforms: readonly RenderChunkTransform[] = [];
 	let renderSpatialQuery: RenderSpatialIndexQuery | null = null;
+	let selectedStaticRenderableRenderKey: string | null = null;
 	let controlledCameraFrame: SceneCameraFrame | null = null;
 	let transitionPortalMaxDepth = 1;
 	let renderStyle: WorldDisplayRenderStyle = "solid";
@@ -99,6 +100,7 @@
 				renderSceneContext,
 				renderChunkTransforms,
 				renderSpatialQuery,
+				selectedStaticRenderableRenderKey,
 				rendererResourceGraph,
 				controlledCameraFrame,
 				onCameraFrameChange,
@@ -175,6 +177,15 @@
 	): void {
 		renderSpatialQuery = nextQuery;
 		rendererController?.setRenderSpatialQuery(renderSpatialQuery);
+	}
+
+	export function setSelectedStaticRenderableRenderKey(
+		nextRenderKey: string | null,
+	): void {
+		selectedStaticRenderableRenderKey = nextRenderKey;
+		rendererController?.setSelectedStaticRenderableRenderKey(
+			selectedStaticRenderableRenderKey,
+		);
 	}
 
 	export function setControlledCameraFrame(

@@ -1682,10 +1682,10 @@ Course correction:
 - A repeat-atlas gradient clamp was tested and rejected. It preserved the tree trunk corruption and
   introduced additional UV issues on objects that had not previously exhibited the bug. The change was
   reverted.
-- `repeat-detail-atlas-unsupported` remains in place as containment for the known repeat+detail class,
-  but live evidence suggests the true bug may also affect repeated RGBA no-detail compacted materials.
-  Do not add another shader or planner fix until a targeted diagnostic identifies the failing input or
-  transform.
+- The temporary `repeat-detail-atlas-unsupported` containment was removed after the picker clipboard
+  diagnostic landed so the problematic repeat+detail class can reproduce under compaction again.
+  This is a diagnostic/repro-enabling step, not a shader fix. Do not add another shader or planner fix
+  until a targeted diagnostic identifies the failing input or transform.
 
 Cleanup target introduced:
 
@@ -1723,16 +1723,16 @@ Tasks:
 - Make static objects and structured interiors enabled by default for this phase; terrain and overlays
   can be available but disabled by default if they add noise.
   - Completed.
-- Add a target source control:
-  - last pointer position inside the canvas;
-  - screen center/crosshair.
-  - Completed as `Pointer`/`Center`.
+- Add a pick-mode action:
+  - arm the picker from the browser panel;
+  - resolve the next scene click against the CPU spatial index;
+  - cancel pick mode from the same control.
+  - Completed as click-to-pick mode. This replaced the earlier pointer/center target selector because
+    explicit scene clicks match expected picker UX better than resolving the camera center.
 - Add an action or live-toggle for picking. Prefer an explicit "Pick" action first so the picker does
   not add per-frame work while navigating.
-  - Completed with an explicit `Pick` action.
-- Add a CPU pick ray builder from the current camera frame and either:
-  - the last pointer position inside the canvas; or
-  - the screen center when no pointer position is available.
+  - Completed with an explicit `Pick from scene`/`Cancel pick` action.
+- Add a CPU pick ray builder from the current camera frame and the clicked viewport point.
   - Completed via `buildSceneCameraRenderRay()`.
 - Query existing render BVH sources for candidate draw units. Prefer the same candidate pools used for
   static and structured-interior visibility so the picker reports what the renderer could actually
@@ -1761,8 +1761,10 @@ Tasks:
   - material/direct draw;
   - compacted family/replacement;
   - UV and atlas facts.
-  - Partially completed. The tab shows hit and metadata sections. C8.9 must add material/direct,
-    compacted family/replacement, and UV/atlas sections.
+  - Partially completed. The tab shows hit, metadata, and staged static draw-unit sections. The
+    complete picker report is automatically copied to the clipboard on every successful pick so long
+    keys do not have to fit inside the side panel. C8.9 still must add compacted family/replacement
+    and GPU atlas rect sections.
 - Add the picked renderable record to the debug report as a small optional section. Keep it capped to
   the current target plus one or two recent failed-pick reasons; do not add successful path history.
   - Completed for the current target or current miss reason only. No history was added.
@@ -1781,8 +1783,11 @@ Progress completed:
   exact owner/kind pairs instead of leaking debug overlay kinds into structured picks.
 - Routed the legacy click inspector and Ctrl terrain-pick path through the CPU spatial query instead
   of the WebGL renderer's stubbed picker.
-- Added the browser `Picker` tab with family toggles, pointer/center target selection, an explicit
-  `Pick` action, compact current-target output, and debug-report output.
+- Added the browser `Picker` tab with family toggles, click-to-pick mode, compact current-target
+  output, and debug-report output.
+- Reworked the picker to arm click-to-pick mode instead of resolving a pointer/center target from the
+  panel action.
+- Added automatic clipboard export for the resolved picker report.
 - Fixed three blocking frontend type-safety debts encountered during validation:
   - narrowed texture-page wrap-mode helper input to the fields it actually reads;
   - made the compacted geometry UV invariant explicit with a hard failure for missing UV buffers;
@@ -1817,7 +1822,10 @@ Cleanup target introduced:
 
 ## Phase C8.9: Immediate Picker Material And Compaction Metadata Enrichment
 
-Status: Immediate next phase.
+Status: Partially implemented. The picker now resolves picked static parts to staged static draw
+units, staged material facts, and UV ranges, and auto-copies the structured report to the clipboard.
+Exact compacted WebGL family batch/slice/material-slot/atlas-rect facts are still missing and remain
+the immediate next step before changing atlas sampling.
 
 Purpose: turn the bounds-level picker into the diagnostic needed for the tree bark atlas-sheet bug by
 resolving a picked static part to the exact direct draw unit(s), texture-page bindings, UV range, and
@@ -1828,6 +1836,9 @@ Tasks:
 - Build a part-to-draw-unit diagnostic lookup during staged/WebGL resource realization, keyed by static
   part render key and static object key. Do not inspect WebGL buffers; use the typed staged draw-unit,
   family planner, and compacted geometry records.
+  - Partially completed at the browser coordinator boundary. The snapshot now includes a static
+    render-key lookup derived from typed staged static draw units. It intentionally does not fake
+    compacted WebGL facts from staged data.
 - For a picked static part, list matching material-surface draw units with:
   - draw unit id;
   - material family/kind;
@@ -1835,6 +1846,10 @@ Tasks:
   - texture-page binding source and wrap modes;
   - detail overlay presence and detail texture-page binding;
   - UV min/max/span from the staged geometry.
+  - Partially completed. The report lists draw unit id, staged material kind/key, direct texture
+    upload/render-surface facts, atlas eligibility key, detail overlay source when present, and UV
+    min/max/span. Texture-page binding source and final packed atlas placement are still renderer-side
+    facts and remain pending.
 - For compacted-replaced draw units, add:
   - compacted batch key;
   - family resource key;
@@ -1842,12 +1857,24 @@ Tasks:
   - material slot key/index;
   - atlas entry key/texture index/rect;
   - detail atlas entry/rect when present.
+  - Not completed.
 - For retained direct draw units, add the blocker/reason and whether the material was intentionally
   outside the compacted family.
 - Keep the Picker tab compact: show the closest picked part plus a short list of matching draw units,
   with long keys wrapped but no history.
+  - Completed for current staged facts. The full report is copied to clipboard automatically; no
+    successful-pick history was added.
 - Add a unit test for the diagnostic lookup using one static part that expands into multiple material
   surface draw units, one direct-retained route, and one compacted-replaced route.
+  - Partially completed with a focused UV-summary test. A full render-key diagnostic lookup test is
+    still pending.
+- Add an in-world picked-object indicator.
+  - Completed for static renderables. The picker now sends the selected static render key through the
+    browser resource coordinator into the WebGL2 renderer, which draws the selected part's prepared
+    render-geometry bounds as world-space lines using the same chunk-offset model split as staged
+    static draw units.
+  - The old viewport-space canvas marker was removed because it only marked the mouse ray location and
+    did not identify the selected game object.
 - After the first live trunk pick, add a focused direct-vs-compacted UV/atlas equivalence test before
   any shader or planner sampling changes.
 
@@ -1859,10 +1886,67 @@ Exit criteria:
   transform wrong".
 - No new fallback path is introduced for the bark issue.
 
+Progress completed:
+
+- Added `browser-picker-diagnostics.ts` to derive staged static draw-unit diagnostics for picked
+  static render keys without reading WebGL buffers.
+- Added UV range diagnostics that report coordinate count, min/max, span, and whether UVs leave the
+  unit square.
+- Added direct-texture staged material diagnostics for render surface id, upload size, source format,
+  wrap/filter policy, atlas eligibility key, and detail overlay facts.
+- Added indexed-paletted staged material diagnostics for source indexed texture size/format, palette
+  color count, wrap policy, and detail overlay facts.
+- Added automatic clipboard export of the structured picker report on every successful pick.
+- Added a renderer-owned world-space static selection overlay. It draws the selected part bounds in
+  WebGL2 after the normal scene frame, with depth testing enabled and depth writes disabled, so the
+  indicator follows camera movement and behaves like scene geometry.
+- Removed the earlier viewport-space picker marker. It was misleading because it stayed at the clicked
+  canvas coordinate instead of showing which object the CPU picker resolved.
+- Added a focused unit test for UV diagnostic summaries.
+- Moved staged static picker diagnostics out of the browser coordinator update hot path. The
+  diagnostic now builds lazily for only the picked static render key instead of reconstructing the
+  full static scene diagnostic map.
+- Removed the repeat+detail direct-retain blocker so those RGBA materials can compact and reproduce
+  the artifact under diagnostic capture.
+- Fixed the resulting planner footgun where duplicate same-id RGBA or indexed candidates could place
+  one draw unit into the same compacted slice more than once. The planner now dedupes identical
+  same-id RGBA/indexed candidates and still fails hard when the same draw unit maps to conflicting
+  material slice identities.
+
+Course correction:
+
+- The browser picker now exposes staged CPU facts, not final WebGL compacted resource facts. This is
+  deliberate: final compacted batch/slice/material-slot/atlas-rect state is owned by the WebGL
+  resource store, and mirroring that state from staged data would create a misleading diagnostic.
+- Re-enabling repeat+detail compaction exposed duplicate planner candidates that had been masked by
+  the old blocker. This was fixed at the planner boundary rather than weakening the compacted geometry
+  slice-contiguity invariant.
+- The first picker enrichment pass accidentally rebuilt staged static diagnostics during normal scene
+  updates. That made scene hydration materially worse. Picker diagnostics must stay lazy or explicitly
+  armed; normal render resource updates should not pay for diagnostic-only draw-unit reconstruction.
+- The first visual picker marker was screen-space UI, not a renderer diagnostic. Object identification
+  must be renderer-owned when the question is "which game object/renderable did this ray select?".
+  The static selection overlay therefore bypasses the currently non-rendering debug-overlay model path
+  and uses the existing WebGL2 flat world program directly.
+- The WebGL2 cell/portal debug overlay path remains a cleanup target: `setDebugOverlayScene()` still
+  updates metrics rather than rendering those overlay models. Do not route picker object selection
+  through that path until debug overlays are made real renderer submissions.
+
+Immediate next step:
+
+- Expose a narrow renderer-owned compacted diagnostic lookup keyed by draw unit id/render key. It
+  should report final family resource key, compacted batch key, slice key, material slot key/index,
+  atlas texture index, atlas rect, and replacement/retained status. Do not add a fallback renderer path
+  for the bark issue.
+- Add selected-object compacted/direct replacement facts to the clipboard report after the
+  renderer-owned lookup exists. The world-space box solves target disambiguation; it does not yet
+  prove which family pipeline rendered the picked part.
+
 Exit criteria:
 
 - A user can open the Picker tab, choose pickable renderable families, point at the corrupt trunk, and
-  see the exact draw unit/material plus compacted atlas data in the tab.
+  see the selected static object outlined in the world and the exact draw unit/material plus compacted
+  atlas data in the tab.
 - The same picked target appears in the debug report without adding noisy successful-path history.
 - We can name the exact mismatch causing the bark atlas-sheet pattern or identify the next missing
   diagnostic field.
@@ -1890,6 +1974,9 @@ Exit criteria:
   mapping to strings only when creating diagnostic output.
 - Keep fallback vocabulary for real external/resource failure, but avoid internal "maybe path"
   fallbacks where explicit planning requirements can fail hard.
+- Replace the model-only WebGL2 debug overlay path with real renderer submissions or remove its UI
+  affordances. The picker selection overlay now proves the useful pattern: renderer-owned world-space
+  diagnostics should draw from concrete selected resources, not screen-space UI markers.
 
 ## Notes
 

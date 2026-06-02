@@ -84,6 +84,7 @@
 		type BrowserRenderResourceCoordinatorInput,
 		type BrowserRenderResourceSnapshot,
 	} from "../lib/world-display/browser-render-resource-coordinator";
+	import type { BrowserStaticRenderablePickDiagnostic } from "../lib/world-display/browser-picker-diagnostics";
 	import type {
 		RuntimeAppearanceRequestDto,
 		SetupAppearancePayloadDto,
@@ -215,6 +216,9 @@
 	let pickerArmed = $state(false);
 	let pickerResult = $state<BrowserRenderablePickResult | null>(null);
 	let pickerMissText = $state("No target picked yet.");
+	let pickerClipboardText = $state(
+		"Picker reports copy to clipboard after a hit.",
+	);
 	let lastCameraHintAt = $state<number | null>(null);
 	let trailingCameraHint = $state<CameraHintDto | null>(null);
 	let activePointerDrag = $state<{
@@ -491,7 +495,10 @@
 		deriveDiagnosticInspector(diagnosticSelection),
 	);
 	const pickerReport = $derived<BrowserPickerReport>(
-		derivePickerReport(pickerResult, pickerMissText),
+		derivePickerReport(pickerResult, pickerMissText, pickerClipboardText),
+	);
+	const selectedStaticRenderableRenderKey = $derived(
+		deriveSelectedStaticRenderableRenderKey(pickerResult),
 	);
 
 	onMount(() => {
@@ -671,10 +678,26 @@
 		const pick = pickRenderableAtViewportPoint(viewportPoint);
 		pickerArmed = false;
 		if (!pick) {
+			pickerClipboardText = "No picker report copied.";
+			scheduleCurrentSceneResourceUpdate();
 			return;
 		}
 		pickerResult = { pick, viewportPoint };
 		pickerMissText = "";
+		scheduleCurrentSceneResourceUpdate();
+		void copyPickerReport({ pick, viewportPoint });
+	}
+
+	async function copyPickerReport(
+		result: BrowserRenderablePickResult,
+	): Promise<void> {
+		const reportText = buildPickerClipboardReport(result);
+		try {
+			await navigator.clipboard.writeText(reportText);
+			pickerClipboardText = "Picker report copied to clipboard.";
+		} catch (error) {
+			pickerClipboardText = `Clipboard copy failed: ${String(error)}`;
+		}
 	}
 
 	function pickRenderableAtViewportPoint(
@@ -684,12 +707,14 @@
 		if (!cameraFrame) {
 			pickerResult = null;
 			pickerMissText = "Camera frame is not ready.";
+			scheduleCurrentSceneResourceUpdate();
 			return null;
 		}
 		const query = buildPickerQuery(pickerOptions);
 		if (query.mask.size === 0) {
 			pickerResult = null;
 			pickerMissText = "No pickable renderable families are enabled.";
+			scheduleCurrentSceneResourceUpdate();
 			return null;
 		}
 		const pick = renderResourceSnapshot.renderSpatialQuery.pickRay(
@@ -701,6 +726,7 @@
 		if (!pick) {
 			pickerResult = null;
 			pickerMissText = `No pick hit at ${formatViewportPoint(viewportPoint)}.`;
+			scheduleCurrentSceneResourceUpdate();
 			return null;
 		}
 		return pick;
@@ -991,6 +1017,7 @@
 			showCellIndicators,
 			highlightPortalTargets,
 			diagnosticSelection,
+			selectedStaticRenderableRenderKey,
 			activeRenderAnchor,
 			browserCameraFrame: getEffectiveBrowserCameraFrame(),
 			runtimeAppearancePreviews,
@@ -1504,6 +1531,7 @@
 	function derivePickerReport(
 		result: BrowserRenderablePickResult | null,
 		missText: string,
+		clipboardText: string,
 	): BrowserPickerReport {
 		if (!result) {
 			return {
@@ -1511,19 +1539,24 @@
 				sections: [
 					{
 						title: "Target",
-						rows: [{ label: "Status", value: missText }],
+						rows: [
+							{ label: "Status", value: missText },
+							{ label: "Clipboard", value: clipboardText },
+						],
 					},
 				],
 			};
 		}
 
 		const { pick, viewportPoint } = result;
+		const staticDiagnostic = getStaticPickDiagnostic(pick.item.metadata);
 		return {
 			statusText: `Picked ${describePickedMetadataTitle(pick.item.metadata)} at ${pick.distance.toFixed(2)}m.`,
 			sections: [
 				{
 					title: "Hit",
 					rows: [
+						{ label: "Clipboard", value: clipboardText },
 						{ label: "Item", value: pick.item.id },
 						{ label: "Kind", value: pick.item.kind },
 						{ label: "Owner", value: pick.item.ownerKey },
@@ -1537,6 +1570,9 @@
 					title: "Metadata",
 					rows: describePickedMetadataRows(pick.item.metadata),
 				},
+				...(staticDiagnostic
+					? describeStaticPickDiagnosticSections(staticDiagnostic)
+					: []),
 			],
 		};
 	}
@@ -1554,6 +1590,13 @@
 			return metadata.portalId;
 		}
 		return `terrain 0x${formatHex32(metadata.landblockId)}`;
+	}
+
+	function deriveSelectedStaticRenderableRenderKey(
+		result: BrowserRenderablePickResult | null,
+	): string | null {
+		const metadata = result?.pick.item.metadata;
+		return metadata?.kind === "static-renderable" ? metadata.renderKey : null;
 	}
 
 	function describePickedMetadataRows(
@@ -1630,6 +1673,126 @@
 					: "bounds-level",
 			},
 		];
+	}
+
+	function describeStaticPickDiagnosticSections(
+		diagnostic: BrowserStaticRenderablePickDiagnostic,
+	): BrowserPanelSection[] {
+		return [
+			{
+				title: "Static Draw Units",
+				rows:
+					diagnostic.drawUnits.length === 0
+						? [
+								{
+									label: "Status",
+									value: "No staged static draw units matched this render key.",
+								},
+							]
+						: diagnostic.drawUnits.flatMap((drawUnit, index) => [
+								{
+									label: `Draw ${index}`,
+									value: drawUnit.drawUnitId,
+								},
+								{
+									label: `Material ${index}`,
+									value: describeStaticDiagnosticMaterial(drawUnit.material),
+								},
+								{
+									label: `UV ${index}`,
+									value: describeStaticDiagnosticUv(drawUnit.geometry.uv),
+								},
+							]),
+			},
+		];
+	}
+
+	function describeStaticDiagnosticMaterial(
+		material: BrowserStaticRenderablePickDiagnostic["drawUnits"][number]["material"],
+	): string {
+		if (material.kind === "direct-texture") {
+			return [
+				material.kind,
+				material.textureKey,
+				material.renderSurfaceId,
+				material.size,
+				`wrap=${material.wrap}`,
+				`filter=${material.filter}`,
+				`atlas=${material.atlasEligibility?.atlasEntryKey ?? "none"}`,
+				`detail=${material.detailOverlay ? `${material.detailOverlay.renderSurfaceId}@${material.detailOverlay.tiling}` : "none"}`,
+			].join("; ");
+		}
+		if (material.kind === "indexed-paletted") {
+			return [
+				material.kind,
+				material.key,
+				`format=${material.indexFormat}`,
+				`size=${material.indexSize}`,
+				`paletteColors=${material.paletteColorCount}`,
+				`wrap=${material.wrap}`,
+				`detail=${material.detailOverlay ? `${material.detailOverlay.renderSurfaceId}@${material.detailOverlay.tiling}` : "none"}`,
+			].join("; ");
+		}
+		return [
+			material.kind,
+			material.key,
+			`fallback=${material.fallbackReason ?? "none"}`,
+		].join("; ");
+	}
+
+	function describeStaticDiagnosticUv(
+		uv: BrowserStaticRenderablePickDiagnostic["drawUnits"][number]["geometry"]["uv"],
+	): string {
+		if (uv.coordinateCount === 0) {
+			return "none";
+		}
+		return [
+			`count=${uv.coordinateCount}`,
+			`u=${formatNullableNumber(uv.minU)}..${formatNullableNumber(uv.maxU)}`,
+			`v=${formatNullableNumber(uv.minV)}..${formatNullableNumber(uv.maxV)}`,
+			`span=${formatNullableNumber(uv.spanU)}x${formatNullableNumber(uv.spanV)}`,
+			`outside01=${uv.outsideUnitSquare}`,
+		].join("; ");
+	}
+
+	function buildPickerClipboardReport(
+		result: BrowserRenderablePickResult,
+	): string {
+		const staticDiagnostic = getStaticPickDiagnostic(result.pick.item.metadata);
+		const report = {
+			generatedAt: new Date().toISOString(),
+			hit: {
+				itemId: result.pick.item.id,
+				kind: result.pick.item.kind,
+				owner: result.pick.item.ownerKey,
+				chunk: result.pick.item.chunkKey,
+				distance: result.pick.distance,
+				point: result.pick.point,
+				viewport: result.viewportPoint,
+			},
+			metadata: result.pick.item.metadata,
+			staticRenderableDiagnostics: staticDiagnostic,
+			notes: staticDiagnostic
+				? [
+						"Static diagnostics are staged CPU facts. Exact WebGL compacted batch/slice/uniform facts are not exposed to the picker yet.",
+					]
+				: [],
+		};
+		return JSON.stringify(report, null, 2);
+	}
+
+	function getStaticPickDiagnostic(
+		metadata: RenderSpatialMetadata,
+	): BrowserStaticRenderablePickDiagnostic | null {
+		return metadata.kind === "static-renderable"
+			? renderResourceCoordinator.getStaticRenderablePickDiagnostic(
+					metadata.renderKey,
+				)
+			: null;
+	}
+
+	function formatNullableNumber(value: number | null): string {
+		return value === null ? "n/a" : value.toFixed(4);
 	}
 
 	function deriveDiagnosticInspector(

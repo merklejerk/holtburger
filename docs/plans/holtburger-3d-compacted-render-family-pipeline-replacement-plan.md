@@ -2786,7 +2786,7 @@ Validation:
 
 ## Phase C8.15: Add Indexed Opaque Detail Overlay Compaction
 
-Status: Planned. Immediate diagnostic normalization implemented; render support remains next.
+Status: Implemented for planner/resource/submit support; live validation pending.
 
 Purpose: compact the remaining opaque indexed/paletted static draw units that are currently retained
 direct only because they carry detail overlay texture-page bindings.
@@ -2827,6 +2827,26 @@ Progress:
   planner regression test.
 - Added targeted unsupported texture-page diagnostics before this phase so future unsupported buckets do
   not get buried behind terrain/debug bypasses.
+- Allowed indexed `detail` texture-page bindings to remain compactable when the draw unit has a ready
+  compacted detail atlas entry.
+- Kept indexed detail bindings blocked as `detail-overlay` when no compacted detail atlas entry exists.
+- Added detail identity to runtime indexed material table keys so indexed plain/detail variants cannot
+  alias.
+- Verified existing indexed submit/resource code already carried detail atlas texture index, detail rect,
+  and tiling through material table upload and shader submission.
+- Live validation after C8.15 showed `detail-overlay x79` dropped to zero and bypasses dropped from 1357
+  to 1278. The remaining bypasses are non-static terrain/debug, transparent blended direct materials,
+  and indexed alpha policy.
+- Removed the temporary targeted `unsupported texture-page` one-line diagnostic after live validation
+  showed it no longer produced actionable blockers.
+
+Course corrections:
+
+- C8.15 did not require a new indexed shader or submit path. Earlier phases had already added detail
+  uniforms, detail atlas binding, and indexed material-table detail fields. The live blocker was the
+  eligibility classifier rejecting detail texture-page bindings before those paths could run.
+- Kept detail overlay support limited to opaque indexed materials. Indexed alpha-test/transparency remains
+  direct because the indexed family still rejects non-opaque alpha policies.
 
 Decisions:
 
@@ -2835,19 +2855,31 @@ Decisions:
 - Keep `detail-overlay` as the public blocker vocabulary until the indexed family actually supports the
   overlay. This is more accurate than `unsupported-compacted-material-family` because the missing feature
   is specific and actionable.
+- Runtime indexed material keys include `detail=<detail-entry-key|none>` even though draw slices already
+  include material table keys. This is intentional redundancy to keep material table records unique before
+  later record-shape cleanup.
 
 Discovered cleanup targets and legacy shims:
 
 - The compacted planner still derives some family eligibility from direct texture-page bindings. For
   indexed detail, that is useful for diagnostics but should eventually be represented as typed indexed
   detail material state rather than inferred from generic usage buckets.
-- The one-line render report now has both general bypass blocker samples and targeted unsupported
-  texture-page samples. Once indexed detail support lands and the remaining unsupported buckets stabilize,
-  prune or move the targeted diagnostic into a detail panel to keep the summary readable.
+- The one-line render report still has general bypass blocker samples. The temporary targeted
+  unsupported texture-page samples were removed after C8.15 live validation to keep the summary readable.
+- `createCompactionEligibility()` still receives generic texture-page bindings, `hasDetailOverlay`, and
+  `detailAtlasEntry` separately. The indexed detail fix uses both. A later cleanup should replace this
+  with typed family readiness input so detail overlay support is not inferred from generic binding buckets.
+
+Refinements to future steps:
+
+- If any indexed detail blockers remain, split them by missing detail atlas entry vs detail atlas overflow
+  before adding new rendering behavior.
 
 Validation:
 
 - `npm run test:ts -- src/lib/world-display/compaction-family-planner.test.ts --run`
+- `npm run test:ts -- src/lib/world-display/webgl2-world-resources.test.ts --run`
+- `npm run test:ts -- src/lib/world-display/webgl2-world-submit.test.ts --run`
 - `npm run check`
 
 ## Cleanup Targets

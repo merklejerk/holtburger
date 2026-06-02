@@ -929,6 +929,7 @@ export function createCompactionEligibility(options: {
 			materialBlockers.push(
 				...classifyUnsupportedIndexedTexturePageBlockers(
 					options.texturePageBindings,
+					options.detailAtlasEntry,
 				),
 			);
 			if (alphaPolicy !== "opaque") {
@@ -1283,6 +1284,7 @@ function hasExactDataTexturePageSampling(binding: TexturePageBinding): boolean {
 
 function classifyUnsupportedIndexedTexturePageBlockers(
 	texturePageBindings: readonly TexturePageBinding[],
+	detailAtlasEntry: RgbaTexturePageDetailAtlasEntry | null,
 ): CompactionMaterialBlocker[] {
 	return collectUniqueMaterialBlockers(
 		texturePageBindings.map((binding) => {
@@ -1302,7 +1304,7 @@ function classifyUnsupportedIndexedTexturePageBlockers(
 						? null
 						: "unsupported-texture-page-sampling";
 				case "detail":
-					return "detail-overlay";
+					return detailAtlasEntry ? null : "detail-overlay";
 				default:
 					return formatUnsupportedTexturePageUsageBlocker(
 						binding.usageBucket,

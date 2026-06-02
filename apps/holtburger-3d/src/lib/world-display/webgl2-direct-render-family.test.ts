@@ -143,7 +143,7 @@ function createDrawUnit({
 		materialBehavior: null,
 		directTextureSamplingPolicy: null,
 		textureUploadSample: null,
-		atlasEligibility: null,
+		texturePageReadiness: null,
 		compactionEligibility: {
 			decision: "direct-draw",
 			material: {
@@ -158,7 +158,7 @@ function createDrawUnit({
 				compatible: false,
 				blockers: [],
 				alphaPolicy: "opaque",
-				atlasEligibility: null,
+				texturePageReadiness: null,
 				detailAtlasEntry: null,
 			},
 			geometry: {

@@ -120,7 +120,6 @@ function createPlan(): TexturePageAtlasPlan {
 				},
 			},
 		],
-		atlasEntries: [],
 		atlasTextures: [
 			{
 				textureIndex: 0,

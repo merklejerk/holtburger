@@ -44,7 +44,7 @@ describe("staged world material strategy", () => {
 			kind: "direct-texture",
 			reason: null,
 			detail: null,
-			atlasEligibility: {
+			texturePageReadiness: {
 				atlasEntryKey: expect.stringContaining("atlas-entry"),
 				atlasEntry: {
 					preparedTextureAssetId:
@@ -71,7 +71,7 @@ describe("staged world material strategy", () => {
 
 		expect(strategy).toMatchObject({
 			kind: "direct-texture",
-			atlasEligibility: {
+			texturePageReadiness: {
 				samplingKey:
 					"wrap=repeat/repeat;filter=linear/linear/linear;color=linear;mips=atlas",
 				samplingPolicy: { wrapS: "repeat", wrapT: "repeat" },
@@ -98,7 +98,7 @@ describe("staged world material strategy", () => {
 		expect(strategy).toMatchObject({
 			kind: "direct-texture",
 			reason: "blended-transparency",
-			atlasEligibility: {
+			texturePageReadiness: {
 				atlasEntryKey: expect.stringContaining("atlas-entry"),
 				renderStateKey:
 					"shader=atlas-color;blend=alpha;depth=read;alphaTest=0;side=front",
@@ -240,7 +240,7 @@ describe("staged world material strategy", () => {
 			kind: "direct-texture",
 			renderableKind: "structured-interior",
 			reason: null,
-			atlasEligibility: {
+			texturePageReadiness: {
 				atlasEntry: {
 					renderSurfaceId: 0x06000001,
 				},

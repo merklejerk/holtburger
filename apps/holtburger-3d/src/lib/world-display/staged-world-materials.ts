@@ -18,7 +18,7 @@ import type { TerrainBlendPlan } from "./terrain-blend-plan";
 import {
 	defaultStagedWorldMaterialTextureCapabilities,
 	resolveStagedWorldMaterialStrategy,
-	type StagedWorldMaterialAtlasEligibility,
+	type StagedWorldMaterialTexturePageReadiness,
 	type StagedWorldMaterialStrategyFallbackReason,
 	type StagedWorldMaterialRenderableKind,
 } from "./staged-world-material-strategy";
@@ -64,7 +64,7 @@ export interface StagedWorldDirectTextureMaterialPlan {
 	textureUpload: RenderSurfaceTextureUploadPreparation & { status: "ready" };
 	behavior: LegacyMaterialBehaviorDto;
 	fallbackReason: string | null;
-	atlasEligibility: StagedWorldMaterialAtlasEligibility | null;
+	texturePageReadiness: StagedWorldMaterialTexturePageReadiness | null;
 	detailOverlay: ResolvedRegionDetailOverlayPlan | null;
 	preparedAssetIds: readonly string[];
 }
@@ -232,7 +232,7 @@ export function resolveStagedWorldMaterialSlotPlan(options: {
 			textureUpload: strategy.textureUpload,
 			behavior: strategy.behavior,
 			fallbackReason: null,
-			atlasEligibility: strategy.atlasEligibility,
+			texturePageReadiness: strategy.texturePageReadiness,
 			detailOverlay: options.detailOverlay ?? null,
 			preparedAssetIds: collectStrategyPreparedAssetIds(
 				strategy,
@@ -402,8 +402,8 @@ function collectStrategyPreparedAssetIds(
 		assetIds.add(
 			`render-surface/${formatHex32(strategy.textureUpload.upload.renderSurfaceId)}`,
 		);
-		if (strategy.atlasEligibility) {
-			assetIds.add(strategy.atlasEligibility.atlasEntry.preparedTextureAssetId);
+		if (strategy.texturePageReadiness) {
+			assetIds.add(strategy.texturePageReadiness.atlasEntry.preparedTextureAssetId);
 		}
 	}
 	if (strategy.kind === "indexed-paletted") {

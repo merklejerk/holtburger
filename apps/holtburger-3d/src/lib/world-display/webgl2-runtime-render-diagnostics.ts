@@ -137,7 +137,7 @@ function collectRgbaFamilyRoutes(
 	drawUnit: Webgl2WorldDrawUnit,
 ): DrawUnitRuntimeDiagnostic["compactedRoutes"] {
 	const sourceMaterialSlotKey =
-		drawUnit.atlasEligibility?.materialSlotKey ?? null;
+		drawUnit.texturePageReadiness?.materialSlotKey ?? null;
 	return family.drawSlices
 		.filter((slice) => slice.drawUnitIds.includes(drawUnit.id))
 		.map((slice) => {

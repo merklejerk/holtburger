@@ -373,7 +373,7 @@ function createDirectTextureMaterial(
 		textureUpload: {} as StagedWorldDirectTextureMaterialPlan["textureUpload"],
 		behavior: createOpaqueBehavior(),
 		fallbackReason: null,
-		atlasEligibility: {
+		texturePageReadiness: {
 			materialSlotKey,
 			atlasEntryKey: "entry-a",
 			renderStateKey: "opaque",

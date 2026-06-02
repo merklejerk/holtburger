@@ -1730,7 +1730,7 @@
 				material.size,
 				`wrap=${material.wrap}`,
 				`filter=${material.filter}`,
-				`atlas=${material.atlasEligibility?.atlasEntryKey ?? "none"}`,
+				`page=${material.texturePageReadiness?.atlasEntryKey ?? "none"}`,
 				`detail=${material.detailOverlay ? `${material.detailOverlay.renderSurfaceId}@${material.detailOverlay.tiling}` : "none"}`,
 			].join("; ");
 		}

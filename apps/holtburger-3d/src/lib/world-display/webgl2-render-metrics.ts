@@ -230,8 +230,8 @@ export function createWebgl2RenderMetrics(
 				input.worldStore?.texturePageUsageBucketCounts ?? {},
 			texturePageSampleClassCounts:
 				input.worldStore?.texturePageSampleClassCounts ?? {},
-			atlasEligibleMaterialCount:
-				input.worldStore?.atlasEligibleMaterialCount ?? 0,
+			texturePageReadyMaterialCount:
+				input.worldStore?.texturePageReadyMaterialCount ?? 0,
 			atlasCandidateEntryCount: input.worldStore?.atlasCandidateEntryCount ?? 0,
 			atlasCandidateMaterialSlotCount:
 				input.worldStore?.atlasCandidateMaterialSlotCount ?? 0,
@@ -370,16 +370,6 @@ export function createWebgl2RenderMetrics(
 			directTexturePageFallbackSamples: [
 				...input.submitMetrics.directTexturePageFallbackSamples,
 			],
-			stagedAtlasDrawCount: input.submitMetrics.stagedAtlasDrawCount,
-			stagedAtlasStandaloneDirectDrawCount:
-				input.submitMetrics.stagedAtlasStandaloneDirectDrawCount,
-			stagedAtlasEstimatedTextureBindAvoidedCount:
-				input.submitMetrics.stagedAtlasEstimatedTextureBindAvoidedCount,
-			stagedAtlasSharedTextureAtlasTextureCount:
-				input.submitMetrics.stagedAtlasSharedTextureAtlasTextureCount,
-			stagedAtlasFallbackSamples: [
-				...input.submitMetrics.stagedAtlasFallbackSamples,
-			],
 			textureVelocityPartCount: 0,
 			textureVelocityRenderGroupCount: 0,
 			textureVelocityMaterialCount: 0,
@@ -402,7 +392,7 @@ export function createWebgl2RenderMetrics(
 						"webgl2-direct-texture":
 							input.worldStore.directTextureDrawUnitCount,
 						"webgl2-atlas-eligible":
-							input.worldStore.atlasEligibleMaterialCount,
+							input.worldStore.texturePageReadyMaterialCount,
 						"webgl2-atlas-compatible-draw-units":
 							input.worldStore.atlasCompatibleDrawUnitCount,
 						"webgl2-atlas-placed-rgba-draw-units":
@@ -512,18 +502,15 @@ export function createWebgl2RenderMetrics(
 							input.submitMetrics.retainedDirectOpaqueDrawUnitCount,
 						"webgl2-retained-direct-blended-draw-units":
 							input.submitMetrics.retainedDirectBlendedDrawUnitCount,
-						"webgl2-staged-atlas-draws":
-							input.submitMetrics.stagedAtlasDrawCount,
 						"webgl2-direct-packed-texture-page-draws":
 							input.submitMetrics.directPackedTexturePageDrawCount,
 						"webgl2-direct-single-entry-texture-page-draws":
 							input.submitMetrics.directSingleEntryTexturePageDrawCount,
-						"webgl2-staged-atlas-standalone-direct-draws":
-							input.submitMetrics.stagedAtlasStandaloneDirectDrawCount,
-						"webgl2-staged-atlas-estimated-texture-binds-avoided":
-							input.submitMetrics.stagedAtlasEstimatedTextureBindAvoidedCount,
-						"webgl2-staged-atlas-shared-texture-atlas-textures":
-							input.submitMetrics.stagedAtlasSharedTextureAtlasTextureCount,
+						"webgl2-direct-packed-texture-page-estimated-texture-binds-avoided":
+							input.submitMetrics
+								.directPackedTexturePageEstimatedBindAvoidedCount,
+						"webgl2-direct-packed-texture-page-textures":
+							input.submitMetrics.directPackedTexturePageTextureCount,
 						"webgl2-detail-overlay": input.worldStore.detailTextureCount,
 						...prefixCounts(
 							"webgl2-visible-",

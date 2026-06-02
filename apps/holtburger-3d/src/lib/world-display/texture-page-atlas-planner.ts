@@ -9,11 +9,11 @@ import type {
 	RgbaTexturePageAtlasEntryRecord,
 	RgbaTexturePageDetailAtlasEntry,
 } from "./compaction-family-planner";
-import type { StagedWorldMaterialAtlasEligibility } from "./staged-world-material-strategy";
+import type { StagedWorldMaterialTexturePageReadiness } from "./staged-world-material-strategy";
 
 export interface TexturePageAtlasRgbaCandidate {
 	drawUnitId: string;
-	atlasEligibility: StagedWorldMaterialAtlasEligibility;
+	texturePageReadiness: StagedWorldMaterialTexturePageReadiness;
 	detailAtlasEntry: RgbaTexturePageDetailAtlasEntry | null;
 }
 
@@ -28,7 +28,6 @@ export interface TexturePageAtlasPlan {
 	detailAtlasReadyDrawUnitIds: readonly string[];
 	bypasses: readonly CompactionFamilyBypass[];
 	atlasEntryRecords: readonly RgbaTexturePageAtlasEntryRecord[];
-	atlasEntries: readonly StagedWorldMaterialAtlasEligibility["atlasEntry"][];
 	atlasTextures: readonly AtlasTexturePage[];
 	detailAtlasEntryRecords: readonly RgbaTexturePageDetailAtlasEntry[];
 	detailAtlasTextures: readonly AtlasTexturePage[];
@@ -42,7 +41,6 @@ export function createEmptyTexturePageAtlasPlan(): TexturePageAtlasPlan {
 		detailAtlasReadyDrawUnitIds: [],
 		bypasses: [],
 		atlasEntryRecords: [],
-		atlasEntries: [],
 		atlasTextures: [],
 		detailAtlasEntryRecords: [],
 		detailAtlasTextures: [],
@@ -94,11 +92,11 @@ export function planTexturePageAtlas(options: {
 		},
 	});
 	const basePlaced = options.rgbaCandidates.filter((candidate) =>
-		layout.placementsByEntryKey.has(candidate.atlasEligibility.atlasEntryKey),
+		layout.placementsByEntryKey.has(candidate.texturePageReadiness.atlasEntryKey),
 	);
 	for (const candidate of options.rgbaCandidates) {
 		const overflow = layout.overflowsByEntryKey.get(
-			candidate.atlasEligibility.atlasEntryKey,
+			candidate.texturePageReadiness.atlasEntryKey,
 		);
 		if (!overflow) {
 			continue;
@@ -159,7 +157,7 @@ export function planTexturePageAtlas(options: {
 	}
 
 	const usedAtlasEntryKeys = new Set(
-		rgbaReady.map((candidate) => candidate.atlasEligibility.atlasEntryKey),
+		rgbaReady.map((candidate) => candidate.texturePageReadiness.atlasEntryKey),
 	);
 	const usedDetailEntryKeys = new Set(
 		[...rgbaReady, ...detailReady]
@@ -182,9 +180,6 @@ export function planTexturePageAtlas(options: {
 		atlasEntryRecords: atlasEntries.filter((record) =>
 			usedAtlasEntryKeys.has(record.key),
 		),
-		atlasEntries: atlasEntries
-			.filter((record) => usedAtlasEntryKeys.has(record.key))
-			.map((record) => record.entry),
 		atlasTextures: filterAtlasTexturePages({
 			pages: layout.texturePages,
 			usedEntryKeys: usedAtlasEntryKeys,
@@ -199,7 +194,7 @@ export function planTexturePageAtlas(options: {
 		preparedTextureAssetIds: uniqueSortedStrings(
 			rgbaReady.map(
 				(candidate) =>
-					candidate.atlasEligibility.atlasEntry.preparedTextureAssetId,
+					candidate.texturePageReadiness.atlasEntry.preparedTextureAssetId,
 			),
 		),
 	};
@@ -218,9 +213,9 @@ function dedupeRgbaTexturePageEntries(
 ): RgbaTexturePageAtlasEntryRecord[] {
 	const entriesByKey = new Map<string, RgbaTexturePageAtlasEntryRecord>();
 	for (const candidate of candidates) {
-		entriesByKey.set(candidate.atlasEligibility.atlasEntryKey, {
-			key: candidate.atlasEligibility.atlasEntryKey,
-			entry: candidate.atlasEligibility.atlasEntry,
+		entriesByKey.set(candidate.texturePageReadiness.atlasEntryKey, {
+			key: candidate.texturePageReadiness.atlasEntryKey,
+			entry: candidate.texturePageReadiness.atlasEntry,
 		});
 	}
 	return [...entriesByKey.values()].sort((left, right) =>

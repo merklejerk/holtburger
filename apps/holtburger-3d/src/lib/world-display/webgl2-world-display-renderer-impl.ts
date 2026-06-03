@@ -485,10 +485,13 @@ precision highp float;
 
 uniform sampler2D uIndexTexture;
 uniform sampler2D uPaletteTexture;
+uniform vec2 uPaletteAtlasSize;
 uniform sampler2D uDetailAtlasTexture;
 uniform vec2 uDetailAtlasSize;
 uniform vec4 uMaterialColors[MAX_MATERIAL_SLOTS];
 uniform vec4 uMaterialParams[MAX_MATERIAL_SLOTS];
+uniform vec4 uIndexMaterialRects[MAX_MATERIAL_SLOTS];
+uniform vec4 uPaletteMaterialRects[MAX_MATERIAL_SLOTS];
 uniform vec4 uDetailMaterialRects[MAX_MATERIAL_SLOTS];
 uniform vec4 uDetailMaterialParams[MAX_MATERIAL_SLOTS];
 
@@ -520,12 +523,15 @@ vec4 paletteColor(float index, int materialSlot) {
 	if (materialParams.w >= 0.0 && index < materialParams.w) {
 		return vec4(0.0);
 	}
-	float paletteU = (index + 0.5) / materialParams.z;
-	return texture(uPaletteTexture, vec2(paletteU, 0.5));
+	vec4 paletteRect = uPaletteMaterialRects[materialSlot];
+	float paletteU = (paletteRect.x + index + 0.5) / uPaletteAtlasSize.x;
+	float paletteV = (paletteRect.y + 0.5) / uPaletteAtlasSize.y;
+	return texture(uPaletteTexture, vec2(paletteU, paletteV));
 }
 
-float paletteIndexAt(ivec2 coord) {
-	vec4 packed = texelFetch(uIndexTexture, coord, 0) * 255.0;
+float paletteIndexAt(ivec2 coord, int materialSlot) {
+	ivec2 atlasCoord = ivec2(uIndexMaterialRects[materialSlot].xy) + coord;
+	vec4 packed = texelFetch(uIndexTexture, atlasCoord, 0) * 255.0;
 	return floor(packed.r + 0.5);
 }
 
@@ -558,13 +564,13 @@ void main() {
 	ivec2 baseCoord = ivec2(floor(texelPosition));
 	vec2 blend = fract(texelPosition);
 	vec4 top = mix(
-		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(0, 0), vMaterialSlot)), vMaterialSlot),
-		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(1, 0), vMaterialSlot)), vMaterialSlot),
+		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(0, 0), vMaterialSlot), vMaterialSlot), vMaterialSlot),
+		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(1, 0), vMaterialSlot), vMaterialSlot), vMaterialSlot),
 		blend.x
 	);
 	vec4 bottom = mix(
-		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(0, 1), vMaterialSlot)), vMaterialSlot),
-		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(1, 1), vMaterialSlot)), vMaterialSlot),
+		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(0, 1), vMaterialSlot), vMaterialSlot), vMaterialSlot),
+		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(1, 1), vMaterialSlot), vMaterialSlot), vMaterialSlot),
 		blend.x
 	);
 	vec4 color = mix(top, bottom, blend.y) * uMaterialColors[vMaterialSlot];
@@ -583,10 +589,13 @@ precision highp float;
 
 uniform sampler2D uIndexTexture;
 uniform sampler2D uPaletteTexture;
+uniform vec2 uPaletteAtlasSize;
 uniform sampler2D uDetailAtlasTexture;
 uniform vec2 uDetailAtlasSize;
 uniform vec4 uMaterialColors[MAX_MATERIAL_SLOTS];
 uniform vec4 uMaterialParams[MAX_MATERIAL_SLOTS];
+uniform vec4 uIndexMaterialRects[MAX_MATERIAL_SLOTS];
+uniform vec4 uPaletteMaterialRects[MAX_MATERIAL_SLOTS];
 uniform vec4 uDetailMaterialRects[MAX_MATERIAL_SLOTS];
 uniform vec4 uDetailMaterialParams[MAX_MATERIAL_SLOTS];
 
@@ -618,12 +627,15 @@ vec4 paletteColor(float index, int materialSlot) {
 	if (materialParams.w >= 0.0 && index < materialParams.w) {
 		return vec4(0.0);
 	}
-	float paletteU = (index + 0.5) / materialParams.z;
-	return texture(uPaletteTexture, vec2(paletteU, 0.5));
+	vec4 paletteRect = uPaletteMaterialRects[materialSlot];
+	float paletteU = (paletteRect.x + index + 0.5) / uPaletteAtlasSize.x;
+	float paletteV = (paletteRect.y + 0.5) / uPaletteAtlasSize.y;
+	return texture(uPaletteTexture, vec2(paletteU, paletteV));
 }
 
-float paletteIndexAt(ivec2 coord) {
-	vec4 packed = texelFetch(uIndexTexture, coord, 0) * 255.0;
+float paletteIndexAt(ivec2 coord, int materialSlot) {
+	ivec2 atlasCoord = ivec2(uIndexMaterialRects[materialSlot].xy) + coord;
+	vec4 packed = texelFetch(uIndexTexture, atlasCoord, 0) * 255.0;
 	return floor(packed.r + 0.5) + floor(packed.g + 0.5) * 256.0;
 }
 
@@ -656,13 +668,13 @@ void main() {
 	ivec2 baseCoord = ivec2(floor(texelPosition));
 	vec2 blend = fract(texelPosition);
 	vec4 top = mix(
-		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(0, 0), vMaterialSlot)), vMaterialSlot),
-		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(1, 0), vMaterialSlot)), vMaterialSlot),
+		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(0, 0), vMaterialSlot), vMaterialSlot), vMaterialSlot),
+		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(1, 0), vMaterialSlot), vMaterialSlot), vMaterialSlot),
 		blend.x
 	);
 	vec4 bottom = mix(
-		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(0, 1), vMaterialSlot)), vMaterialSlot),
-		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(1, 1), vMaterialSlot)), vMaterialSlot),
+		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(0, 1), vMaterialSlot), vMaterialSlot), vMaterialSlot),
+		paletteColor(paletteIndexAt(resolveIndexedSampleCoord(baseCoord, ivec2(1, 1), vMaterialSlot), vMaterialSlot), vMaterialSlot),
 		blend.x
 	);
 	vec4 color = mix(top, bottom, blend.y) * uMaterialColors[vMaterialSlot];
@@ -1126,7 +1138,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 								indexedPalettedFamilies: [
 									...currentResources.worldStore.compactedGeometryFamilyResources.values(),
 								].filter((resource) => resource.family === "indexed-paletted"),
-								texturesByKey: currentResources.worldStore.texturesByKey,
+								indexedResourceAtlasGeneration:
+									currentResources.worldStore.indexedResourceAtlasGeneration,
 								detailTextures:
 									currentResources.worldStore.textureAtlasGeneration
 										?.detailTextures ?? [],
@@ -1643,7 +1656,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				indexedPalettedFamilies: [
 					...resources.worldStore.compactedGeometryFamilyResources.values(),
 				].filter((resource) => resource.family === "indexed-paletted"),
-				texturesByKey: resources.worldStore.texturesByKey,
+				indexedResourceAtlasGeneration:
+					resources.worldStore.indexedResourceAtlasGeneration,
 				detailTextures:
 					resources.worldStore.textureAtlasGeneration?.detailTextures ?? [],
 			},
@@ -2922,10 +2936,13 @@ function createIndexedPalettedFamilyWorldProgram(
 			"uBatchModel",
 			"uIndexTexture",
 			"uPaletteTexture",
+			"uPaletteAtlasSize",
 			"uDetailAtlasTexture",
 			"uDetailAtlasSize",
 			"uMaterialColors",
 			"uMaterialParams",
+			"uIndexMaterialRects",
+			"uPaletteMaterialRects",
 			"uDetailMaterialRects",
 			"uDetailMaterialParams",
 		],

@@ -329,7 +329,7 @@ export function submitWebgl2WorldFrame({
 	indexedPalettedFamilyResources = {
 		batches: [],
 		indexedPalettedFamilies: [],
-		texturesByKey: new Map(),
+		indexedResourceAtlasGeneration: null,
 		detailTextures: [],
 	},
 	drawUnitsById,
@@ -401,7 +401,7 @@ export function submitWebgl2WorldDrawUnits({
 	indexedPalettedFamilyResources = {
 		batches: [],
 		indexedPalettedFamilies: [],
-		texturesByKey: new Map(),
+		indexedResourceAtlasGeneration: null,
 		detailTextures: [],
 	},
 	viewProjectionMatrix,
@@ -1044,14 +1044,14 @@ function filterIndexedPalettedFamilyResourcesByFormat(
 	return {
 		batches: resources.batches,
 		indexedPalettedFamilies: resources.indexedPalettedFamilies
-		.map((family) => ({
+			.map((family) => ({
 				...family,
 				drawSlices: family.drawSlices.filter(
 					(slice) => slice.indexFormat === indexFormat,
 				),
 			}))
 			.filter((family) => family.drawSlices.length > 0),
-		texturesByKey: resources.texturesByKey,
+		indexedResourceAtlasGeneration: resources.indexedResourceAtlasGeneration,
 		detailTextures: resources.detailTextures,
 	};
 }

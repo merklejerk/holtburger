@@ -3,6 +3,7 @@ import type { TerrainBlendPlan } from "../../terrain-blend-plan";
 import type { RenderMat4, RenderVec4 } from "../../render-math";
 import type { RenderBvhItemKey } from "../../prepared-bvh-visibility";
 import type { StagedWorldIndexedGeometry } from "../../staged-world-geometry";
+import type { TexturePageFamily } from "../../texture-pages/texture-page-atlas-planner";
 import type { TerrainSceneTile } from "../../terrain-scene";
 import type { Webgl2SceneDomain } from "../../webgl2-scene-domain-targets";
 import type {
@@ -80,6 +81,15 @@ export interface Webgl2TerrainTileResource {
 	bvhItemKeys: RenderBvhItemKey[];
 	bvhFallbackReason: string | null;
 	compatibilityDraws: Webgl2TerrainTileCompatibilityDrawResource[];
+	texturePageBindings: Webgl2TerrainTileTexturePageBinding[];
+	texturePageBlockers: readonly string[];
+}
+
+export interface Webgl2TerrainTileTexturePageBinding {
+	family: Extract<TexturePageFamily, "terrain-color" | "terrain-mask" | "terrain-detail">;
+	atlasEntryKey: string;
+	textureIndex: number | null;
+	rect: readonly [number, number, number, number] | null;
 }
 
 export interface Webgl2TerrainTileRenderCandidate {
@@ -139,6 +149,10 @@ export function describeTerrainTileGraphSignature(
 		`compat:${resource.compatibilityDraws
 			.map((draw) => `${draw.id}:${draw.geometrySignature}:${draw.blend ? "blend" : "debug"}`)
 			.join(",")}`,
+		`pages:${resource.texturePageBindings
+			.map((binding) => `${binding.family}:${binding.atlasEntryKey}`)
+			.join(",")}`,
+		`blockers:${resource.texturePageBlockers.join(",")}`,
 		`bvh:${resource.bvhItemKeys.join(",")}`,
 	].join("|");
 }

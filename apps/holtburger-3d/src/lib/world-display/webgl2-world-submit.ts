@@ -124,8 +124,10 @@ export interface Webgl2WorldSubmitMetrics {
 	visibleTerrainCompatibilityDrawCount: number;
 	visibleTerrainOneDrawReadyTileCount: number;
 	visibleTerrainOneDrawBlockedTileCount: number;
+	visibleTerrainDrawSliceReadyCount: number;
 	terrainOneDrawShaderDrawCallCount: number;
 	terrainOneDrawSubmittedTileCount: number;
+	terrainDrawSliceSubmittedCount: number;
 	terrainOneDrawSubmittedTriangleCount: number;
 	portalMaskDrawUnitCount: number;
 	exteriorDomainDrawUnitCount: number;
@@ -186,8 +188,10 @@ const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	visibleTerrainCompatibilityDrawCount: 0,
 	visibleTerrainOneDrawReadyTileCount: 0,
 	visibleTerrainOneDrawBlockedTileCount: 0,
+	visibleTerrainDrawSliceReadyCount: 0,
 	terrainOneDrawShaderDrawCallCount: 0,
 	terrainOneDrawSubmittedTileCount: 0,
+	terrainDrawSliceSubmittedCount: 0,
 	terrainOneDrawSubmittedTriangleCount: 0,
 	portalMaskDrawUnitCount: 0,
 	exteriorDomainDrawUnitCount: 0,
@@ -280,6 +284,7 @@ export interface Webgl2WorldSubmitPassSchedule {
 
 export interface Webgl2TerrainTileSubmitReadinessPlan {
 	oneDrawTiles: readonly Webgl2TerrainTileResource[];
+	oneDrawSlices: readonly Webgl2TerrainTileResource["drawSlices"][number][];
 	compatibilityTiles: readonly Webgl2TerrainTileResource[];
 	blockedTiles: readonly {
 		tile: Webgl2TerrainTileResource;
@@ -291,6 +296,7 @@ export function planWebgl2TerrainTileSubmitReadiness(
 	terrainTiles: readonly Webgl2TerrainTileResource[],
 ): Webgl2TerrainTileSubmitReadinessPlan {
 	const oneDrawTiles: Webgl2TerrainTileResource[] = [];
+	const oneDrawSlices: Webgl2TerrainTileResource["drawSlices"] = [];
 	const compatibilityTiles: Webgl2TerrainTileResource[] = [];
 	const blockedTiles: Array<{
 		tile: Webgl2TerrainTileResource;
@@ -300,15 +306,23 @@ export function planWebgl2TerrainTileSubmitReadiness(
 		if (tile.oneDrawReadiness.status === "ready") {
 			oneDrawTiles.push(tile);
 		} else {
-			blockedTiles.push({
-				tile,
-				blockers: tile.oneDrawReadiness.blockers,
-			});
+			const readySlices = tile.drawSlices.filter(
+				(slice) => slice.oneDrawReadiness.status === "ready",
+			);
+			if (readySlices.length > 0) {
+				oneDrawSlices.push(...readySlices);
+			} else {
+				blockedTiles.push({
+					tile,
+					blockers: tile.oneDrawReadiness.blockers,
+				});
+				compatibilityTiles.push(tile);
+			}
 		}
-		compatibilityTiles.push(tile);
 	}
 	return {
 		oneDrawTiles,
+		oneDrawSlices,
 		compatibilityTiles,
 		blockedTiles,
 	};
@@ -465,6 +479,8 @@ export function submitWebgl2FlatWorldDrawUnits({
 			terrainReadinessPlan.oneDrawTiles.length,
 		visibleTerrainOneDrawBlockedTileCount:
 			terrainReadinessPlan.blockedTiles.length,
+		visibleTerrainDrawSliceReadyCount:
+			terrainReadinessPlan.oneDrawSlices.length,
 		portalMaskDrawUnitCount,
 		exteriorDomainDrawUnitCount,
 		interiorDomainDrawUnitCount,
@@ -541,14 +557,18 @@ export function submitWebgl2FlatWorldDrawUnits({
 	if (
 		terrainFamilyProgram &&
 		rgbaTexturePageFamilyResources.generation &&
-		terrainReadinessPlan.oneDrawTiles.length > 0
+		(terrainReadinessPlan.oneDrawTiles.length > 0 ||
+			terrainReadinessPlan.oneDrawSlices.length > 0)
 	) {
 		const terrainFamilyMetrics = submitWebgl2TerrainFamilyTiles({
 			gl,
 			stateCache,
 			program: terrainFamilyProgram,
 			viewProjectionMatrix,
-			terrainTiles: terrainReadinessPlan.oneDrawTiles,
+			terrainTiles: [
+				...terrainReadinessPlan.oneDrawTiles,
+				...terrainReadinessPlan.oneDrawSlices,
+			],
 			generation: rgbaTexturePageFamilyResources.generation,
 			terrainBackfaceCulling,
 		});
@@ -557,7 +577,9 @@ export function submitWebgl2FlatWorldDrawUnits({
 		metrics.terrainOneDrawShaderDrawCallCount =
 			terrainFamilyMetrics.shaderDrawCallCount;
 		metrics.terrainOneDrawSubmittedTileCount =
-			terrainFamilyMetrics.submittedTileCount;
+			terrainReadinessPlan.oneDrawTiles.length;
+		metrics.terrainDrawSliceSubmittedCount =
+			terrainReadinessPlan.oneDrawSlices.length;
 		metrics.terrainOneDrawSubmittedTriangleCount =
 			terrainFamilyMetrics.submittedTriangleCount;
 	}

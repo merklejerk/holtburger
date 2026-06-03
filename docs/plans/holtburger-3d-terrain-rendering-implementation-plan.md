@@ -1,6 +1,6 @@
 # Holtburger 3D Terrain Rendering Implementation Plan
 
-Status: Phase T7 complete; Phase T8 terrain draw-slice fallback is next.
+Status: Phase T8A complete; Phase T8B page-overflow terrain draw-slice fallback is next.
 
 Dry-run status: reviewed against the current `apps/holtburger-3d/src/lib/world-display` module graph.
 The phase order below reflects that dry run.
@@ -184,11 +184,12 @@ Execute the phases in this order:
 8. T6B0: add explicit terrain one-draw readiness and blocker routing.
 9. T6B: consume terrain layer/page resources from terrain-family submit.
 10. T7: add explicit-gradient terrain atlas sampling.
-11. T8: add terrain draw-slice fallback.
-12. T9: delete temporary terrain compatibility paths and old pcode draw-unit paths.
-13. T10: measure and decide follow-up complexity.
-14. T11: run final cleanup and remove accumulated migration leftovers.
-15. T2: clean up broader landblock-owned descendant `renderChunk` storage.
+11. T8A: add terrain layer-overflow draw-slice fallback.
+12. T8B: add terrain page-overflow draw-slice fallback.
+13. T9: delete temporary terrain compatibility paths and old pcode draw-unit paths.
+14. T10: measure and decide follow-up complexity.
+15. T11: run final cleanup and remove accumulated migration leftovers.
+16. T2: clean up broader landblock-owned descendant `renderChunk` storage.
 
 T11 is the living cleanup phase. As each implementation phase discovers temporary adapters, renamed
 old concepts, stale tests, or dead diagnostics, add an explicit callout to T11 unless the same phase
@@ -1366,9 +1367,9 @@ Cleanup impact:
   intentional migration debt and should be deleted with compatibility rendering instead of receiving
   new sampling work.
 
-## Phase T8: Terrain Draw-Slice Fallback
+## Phase T8A: Terrain Layer-Overflow Draw-Slice Fallback
 
-Goal: support terrain tiles that exceed one-draw terrain limits.
+Goal: support terrain tiles that exceed the one-draw terrain layer-entry limit.
 
 Primary targets:
 
@@ -1379,10 +1380,8 @@ Primary targets:
 
 Tasks:
 
-- Detect overflow when a terrain tile needs more than one color page, one mask page, one detail
-  binding, or 8 layer entries.
-- Partition overflow tiles into terrain draw slices grouped by compatible color page, mask page,
-  detail binding, and layer table entries.
+- Detect overflow when a terrain tile needs more than 8 layer entries.
+- Partition layer-overflow tiles into terrain draw slices grouped by compatible layer table entries.
 - Start with one color page and one mask page per slice.
 - Bind each terrain slice only to the terrain quad keys represented by that slice.
 - Report slice fallback reasons in diagnostics.
@@ -1393,8 +1392,93 @@ Acceptance criteria:
 
 - Overflowing terrain tiles remain renderable without expanding the first shader design.
 - Slice fallback uses quad-granular visibility for represented quads.
-- Diagnostics clearly explain whether slicing was caused by page overflow, detail incompatibility,
-  or layer table overflow.
+- Diagnostics clearly explain when slicing was caused by layer table overflow.
+
+Progress update, 2026-06-02:
+
+- Added `TerrainTileDrawSlicePlan` and `buildTerrainTileDrawSlicePlans` to `terrain-tile-plan.ts`.
+- Layer-overflow tiles now partition sorted pcode blend plans into bounded layer-entry chunks.
+- Added `Webgl2TerrainTileDrawSliceResource` under terrain tile resources.
+- Terrain resource sync now creates WebGL2 geometry/VAO/buffers for layer-overflow slices using the
+  same layer-slot geometry shape as the one-draw tile path.
+- Slice resources carry their own:
+  - layer plan;
+  - terrain quad BVH keys;
+  - texture page bindings;
+  - one-draw readiness;
+  - fallback reason.
+- Terrain page binding resolution now filters parent tile bindings down to each slice's layer refs and
+  derives slice readiness independently.
+- Terrain-family submit now accepts either full terrain tile resources or draw-slice resources.
+- Submit readiness now routes:
+  - ready full tiles through the terrain-family shader;
+  - ready draw slices through the terrain-family shader;
+  - only tiles with no ready full-tile path and no ready slice path through compatibility rendering.
+- Added terrain draw-slice metrics for visible ready slices and submitted slices.
+- Added tests for layer-overflow slice planning and ready-slice submit routing.
+
+Decisions:
+
+- T8A handles layer-count overflow only. Page-overflow slicing needs grouping by resolved atlas page
+  placement, which happens after atlas generation, so it gets a dedicated T8B follow-up.
+- Slice resources are children of the terrain tile resource, not generic draw units. They reuse the
+  terrain-family shader and do not re-enter staged/static compaction.
+- Compatibility rendering is now narrower again: a blocked parent tile with ready draw slices does
+  not route through compatibility.
+- Slice BVH keys are derived from represented quads, preserving the quad-granular visibility contract
+  for future slice-specific frame planning.
+
+Course corrections and refinements:
+
+- Add T8B before T9. T9 should not delete compatibility rendering until page-overflow and detail
+  blocker cases have terrain-family slice handling or deliberate final diagnostics.
+- T8B should group slices by resolved terrain color/mask atlas texture index and rebuild slice layer
+  plans around those page-compatible groups.
+- T8B should replace the current tile-level frame visibility for slices with slice-specific frame
+  candidates if conservative tile visibility produces too much overdraw in real landblocks.
+
+Validation:
+
+- `npm run test:ts -- terrain-tile-plan webgl2-world-submit webgl2-world-resources terrain-family-submit`
+- `npm run check`
+- `npm run lint`
+
+Cleanup impact:
+
+- Added `Webgl2TerrainTileDrawSliceResource` as a real terrain-family resource. Keep it, but audit
+  field names in T11 after page-overflow slicing lands.
+- `planWebgl2TerrainTileSubmitReadiness(...).compatibilityTiles` remains migration-only. Delete it
+  when T9 removes compatibility rendering.
+- The compatibility route still covers page-overflow/detail-blocked terrain after T8A. This is now
+  explicitly assigned to T8B/T9 instead of hidden as generic blocked terrain.
+
+## Phase T8B: Terrain Page-Overflow Draw-Slice Fallback
+
+Goal: support terrain tiles that exceed the one-draw terrain page limits without expanding the first
+shader to bind multiple terrain color or mask atlas pages per draw.
+
+Primary targets:
+
+- terrain resource planning modules
+- WebGL2 terrain family submit path
+- terrain metrics and diagnostics
+
+Tasks:
+
+- Detect overflow when a terrain tile needs more than one terrain color page, one terrain mask page,
+  or one detail binding.
+- Partition overflow tiles into terrain draw slices grouped by resolved terrain color page, terrain
+  mask page, detail binding, and layer table entries.
+- Start with one color page and one mask page per slice.
+- Preserve slice-specific terrain quad keys.
+- Report page-overflow and detail-incompatibility slice reasons in diagnostics.
+
+Acceptance criteria:
+
+- Multi-page terrain tiles remain renderable through terrain-family slices.
+- No terrain-family draw binds more than one color page or one mask page.
+- Diagnostics clearly explain whether slicing was caused by color page, mask page, detail, or layer
+  table overflow.
 
 ## Phase T9: Remove Temporary Terrain Compatibility Paths
 

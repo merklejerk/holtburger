@@ -3,6 +3,7 @@ import { createWebgl2Program, type Webgl2ProgramResource } from "../../webgl2-gl
 import type { Webgl2StateCache } from "../../webgl2-state-cache";
 import {
 	describeTerrainBlendTextureAtlasEntryKey,
+	type Webgl2TerrainTileDrawSliceResource,
 	type Webgl2TerrainTileResource,
 	type Webgl2TerrainTileTexturePageBinding,
 } from "../resources/terrain-tile-resources";
@@ -40,6 +41,10 @@ export interface Webgl2TerrainFamilySubmitMetrics {
 	submittedTriangleCount: number;
 	fallbackSamples: readonly string[];
 }
+
+type Webgl2TerrainFamilyDrawableResource =
+	| Webgl2TerrainTileResource
+	| Webgl2TerrainTileDrawSliceResource;
 
 export function createWebgl2TerrainFamilyWorldProgram(
 	gl: WebGL2RenderingContext,
@@ -88,7 +93,7 @@ export function submitWebgl2TerrainFamilyTiles({
 	stateCache: Webgl2StateCache;
 	program: Webgl2TerrainFamilyWorldProgram;
 	viewProjectionMatrix: RenderMat4;
-	terrainTiles: readonly Webgl2TerrainTileResource[];
+	terrainTiles: readonly Webgl2TerrainFamilyDrawableResource[];
 	generation: Webgl2TextureAtlasGenerationResource;
 	terrainBackfaceCulling: boolean;
 }): Webgl2TerrainFamilySubmitMetrics {
@@ -152,7 +157,7 @@ export function submitWebgl2TerrainFamilyTiles({
 }
 
 function createTerrainTileFamilySubmitPlan(
-	tile: Webgl2TerrainTileResource,
+	tile: Webgl2TerrainFamilyDrawableResource,
 	generation: Webgl2TextureAtlasGenerationResource,
 ) {
 	const colorTextureIndex = singleTerrainTextureIndex(
@@ -201,7 +206,7 @@ function singleTerrainTextureIndex(
 function uploadTerrainLayerUniforms(
 	gl: WebGL2RenderingContext,
 	program: Webgl2TerrainFamilyWorldProgram,
-	tile: Webgl2TerrainTileResource,
+	tile: Webgl2TerrainFamilyDrawableResource,
 ): void {
 	if (!tile.layerPlan) {
 		throw new Error(`Terrain tile ${tile.id} has no terrain layer plan.`);
@@ -318,7 +323,7 @@ function uploadTerrainLayerUniforms(
 }
 
 function resolveTerrainBindingRect(
-	tile: Webgl2TerrainTileResource,
+	tile: Webgl2TerrainFamilyDrawableResource,
 	atlasEntryKey: string,
 ): readonly [number, number, number, number] {
 	const binding = tile.texturePageBindings.find(

@@ -10,6 +10,7 @@ import type {
 	TerrainBlendTextureRef,
 } from "./terrain-blend-plan";
 import {
+	buildTerrainTileDrawSlicePlans,
 	buildTerrainTileLayerGeometry,
 	buildTerrainTileLayerPlan,
 } from "./terrain-tile-plan";
@@ -38,6 +39,24 @@ describe("terrain tile plan", () => {
 		expect(plan?.layerEntries).toEqual([]);
 		expect(plan?.blockers).toEqual([
 			"terrain tile requires 2 layer entries; limit is 1",
+		]);
+	});
+
+	it("partitions overflowing terrain layers into draw slices", () => {
+		const slices = buildTerrainTileDrawSlicePlans({
+			planSet: createPlanSet([createBlendPlan(1), createBlendPlan(2)]),
+			maxLayerEntries: 1,
+		});
+
+		expect(slices.map((slice) => slice.pcodes)).toEqual([[1], [2]]);
+		expect(
+			slices.map((slice) =>
+				slice.layerPlan.layerEntries.map((entry) => [entry.slot, entry.pcode]),
+			),
+		).toEqual([[[0, 1]], [[0, 2]]]);
+		expect(slices.map((slice) => slice.reason)).toEqual([
+			"terrain tile layer overflow slice 1",
+			"terrain tile layer overflow slice 2",
 		]);
 	});
 

@@ -24,6 +24,13 @@ export interface TerrainTileLayerGeometry extends StagedWorldIndexedGeometry {
 	layerSlots: Float32Array;
 }
 
+export interface TerrainTileDrawSlicePlan {
+	id: string;
+	reason: string;
+	layerPlan: TerrainTileLayerPlan;
+	pcodes: readonly number[];
+}
+
 export function buildTerrainTileLayerPlan({
 	planSet,
 	maxLayerEntries = DEFAULT_TERRAIN_TILE_LAYER_LIMIT,
@@ -63,6 +70,60 @@ export function buildTerrainTileLayerPlan({
 			`layers:${layerEntries.map((entry) => `${entry.slot}:${entry.pcode}`).join(",")}`,
 		].join("|"),
 	};
+}
+
+export function buildTerrainTileDrawSlicePlans({
+	planSet,
+	maxLayerEntries = DEFAULT_TERRAIN_TILE_LAYER_LIMIT,
+}: {
+	planSet: TerrainBlendPlanSet | null;
+	maxLayerEntries?: number;
+}): TerrainTileDrawSlicePlan[] {
+	if (!planSet) {
+		return [];
+	}
+	const plans = [...planSet.plans].sort((left, right) => left.pcode - right.pcode);
+	if (plans.length <= maxLayerEntries) {
+		const layerPlan = buildTerrainTileLayerPlanFromPlans({
+			planSet,
+			plans,
+			signatureSuffix: "slice:single",
+		});
+		return layerPlan
+			? [
+					{
+						id: "slice/0",
+						reason: "terrain tile fits one-draw layer limit",
+						layerPlan,
+						pcodes: plans.map((plan) => plan.pcode),
+					},
+				]
+			: [];
+	}
+	const slices: TerrainTileDrawSlicePlan[] = [];
+	for (
+		let firstPlanIndex = 0;
+		firstPlanIndex < plans.length;
+		firstPlanIndex += maxLayerEntries
+	) {
+		const sliceIndex = slices.length;
+		const slicePlans = plans.slice(firstPlanIndex, firstPlanIndex + maxLayerEntries);
+		const layerPlan = buildTerrainTileLayerPlanFromPlans({
+			planSet,
+			plans: slicePlans,
+			signatureSuffix: `slice:${sliceIndex}`,
+		});
+		if (!layerPlan) {
+			continue;
+		}
+		slices.push({
+			id: `slice/${sliceIndex}`,
+			reason: `terrain tile layer overflow slice ${sliceIndex + 1}`,
+			layerPlan,
+			pcodes: slicePlans.map((plan) => plan.pcode),
+		});
+	}
+	return slices;
 }
 
 export function buildTerrainTileLayerGeometry({
@@ -129,6 +190,39 @@ function countTerrainLayerColorRefs(plan: TerrainBlendPlan): number {
 
 function countTerrainLayerMaskRefs(plan: TerrainBlendPlan): number {
 	return plan.overlays.length + plan.roads.length;
+}
+
+function buildTerrainTileLayerPlanFromPlans({
+	planSet,
+	plans,
+	signatureSuffix,
+}: {
+	planSet: TerrainBlendPlanSet;
+	plans: readonly TerrainBlendPlan[];
+	signatureSuffix: string;
+}): TerrainTileLayerPlan | null {
+	if (plans.length === 0) {
+		return null;
+	}
+	const layerEntries = plans.map((plan, slot): TerrainTileLayerEntry => ({
+		slot,
+		pcode: plan.pcode,
+		plan,
+		colorRefCount: countTerrainLayerColorRefs(plan),
+		maskRefCount: countTerrainLayerMaskRefs(plan),
+	}));
+	return {
+		layerEntries,
+		layerSlotByPcode: new Map(
+			layerEntries.map((entry) => [entry.pcode, entry.slot] as const),
+		),
+		blockers: [],
+		signature: [
+			planSet.signature,
+			signatureSuffix,
+			`layers:${layerEntries.map((entry) => `${entry.slot}:${entry.pcode}`).join(",")}`,
+		].join("|"),
+	};
 }
 
 function terrainQuadUv(

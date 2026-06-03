@@ -148,7 +148,6 @@ describe("planWebgl2FlatWorldSubmitOrder", () => {
 		]);
 		expect(plan.compatibilityTiles.map((tile) => tile.id)).toEqual([
 			"terrain-tile/blocked",
-			"terrain-tile/ready",
 		]);
 		expect(plan.blockedTiles).toEqual([
 			{
@@ -156,6 +155,41 @@ describe("planWebgl2FlatWorldSubmitOrder", () => {
 				blockers: ["missing terrain color page"],
 			},
 		]);
+	});
+
+	it("routes ready terrain draw slices instead of compatibility rendering", () => {
+		const slice = createTerrainDrawSlice({
+			id: "terrain-tile/blocked/slice/0",
+			parentTerrainTileId: "terrain-tile/blocked",
+			vertexArrayLabel: "terrain-slice",
+			layerPlan: createTerrainLayerPlan(),
+			texturePageBindings: [
+				{
+					family: "terrain-color",
+					atlasEntryKey: "terrain-page/color/00000001/21/1/1",
+					textureIndex: 0,
+					rect: [1, 2, 3, 4],
+				},
+			],
+			oneDrawReadiness: {
+				status: "ready",
+				layerEntryCount: 1,
+				texturePageBindingCount: 1,
+				colorPageBindingCount: 1,
+				maskPageBindingCount: 0,
+			},
+		});
+		const tile = createTerrainTile({
+			id: "terrain-tile/blocked",
+			drawSlices: [slice],
+		});
+
+		const plan = planWebgl2TerrainTileSubmitReadiness([tile]);
+
+		expect(plan.oneDrawTiles).toEqual([]);
+		expect(plan.oneDrawSlices).toEqual([slice]);
+		expect(plan.compatibilityTiles).toEqual([]);
+		expect(plan.blockedTiles).toEqual([]);
 	});
 });
 
@@ -1325,6 +1359,7 @@ function createTerrainTile({
 	triangleCount = 0,
 	layerPlan = null,
 	texturePageBindings = [],
+	drawSlices = [],
 	oneDrawReadiness = {
 		status: "blocked",
 		blockers: ["test terrain tile is not one-draw ready"],
@@ -1336,6 +1371,7 @@ function createTerrainTile({
 	triangleCount?: number;
 	layerPlan?: Webgl2TerrainTileResource["layerPlan"];
 	texturePageBindings?: Webgl2TerrainTileResource["texturePageBindings"];
+	drawSlices?: Webgl2TerrainTileResource["drawSlices"];
 	oneDrawReadiness?: Webgl2TerrainTileResource["oneDrawReadiness"];
 }): Webgl2TerrainTileResource {
 	return {
@@ -1364,6 +1400,44 @@ function createTerrainTile({
 		compatibilityDraws: [],
 		layerPlan,
 		layerPlanBlockers: [],
+		texturePageBindings,
+		texturePageBlockers: [],
+		oneDrawReadiness,
+		drawSlices,
+	};
+}
+
+function createTerrainDrawSlice({
+	id,
+	parentTerrainTileId,
+	vertexArrayLabel,
+	layerPlan,
+	texturePageBindings = [],
+	oneDrawReadiness,
+}: {
+	id: string;
+	parentTerrainTileId: string;
+	vertexArrayLabel?: string;
+	layerPlan: NonNullable<Webgl2TerrainTileResource["layerPlan"]>;
+	texturePageBindings?: Webgl2TerrainTileResource["texturePageBindings"];
+	oneDrawReadiness: Webgl2TerrainTileResource["oneDrawReadiness"];
+}): Webgl2TerrainTileResource["drawSlices"][number] {
+	return {
+		id,
+		parentTerrainTileId,
+		reason: "test slice",
+		geometrySignature: "slice-geo",
+		vertexArray: createVertexArrayResource(vertexArrayLabel),
+		vertexBuffer: createBufferResource(),
+		uvBuffer: createBufferResource(),
+		layerSlotBuffer: createBufferResource(),
+		indexBuffer: createBufferResource(),
+		indexType: 5123,
+		vertexCount: 6,
+		triangleCount: 2,
+		modelMatrix: createIdentityMat4(),
+		bvhItemKeys: ["terrain:landblock:12340000:quad:0"],
+		layerPlan,
 		texturePageBindings,
 		texturePageBlockers: [],
 		oneDrawReadiness,

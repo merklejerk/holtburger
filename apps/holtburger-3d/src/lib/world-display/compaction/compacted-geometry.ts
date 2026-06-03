@@ -173,7 +173,7 @@ export function buildCompactedGeometryBatch<
 		key: describeCompactedGeometryKey({
 			plan,
 			drawUnits: compactableDrawUnits,
-			positions,
+			batchOrigin,
 		}),
 		layout: "position-uv-material-slot",
 		positions,
@@ -395,27 +395,31 @@ function createCompactedIndexArray(
 function describeCompactedGeometryKey({
 	plan,
 	drawUnits,
-	positions,
+	batchOrigin,
 }: {
 	plan: CompactedGeometryPlan;
 	drawUnits: readonly StagedWorldDrawUnitAssembly[];
-	positions: Float32Array;
+	batchOrigin: { x: number; y: number; z: number };
 }): string {
 	const drawUnitSignature = drawUnits
 		.map((drawUnit) =>
 			[
 				drawUnit.id,
+				drawUnit.geometry.signature,
 				`v${drawUnit.geometry.vertexCount}`,
 				`t${drawUnit.geometry.triangleCount}`,
-				`u${hashFloat32Array(drawUnit.geometry.uvs ?? new Float32Array())}`,
-				`i${hashIndexArray(drawUnit.geometry.indices)}`,
+				`u${drawUnit.geometry.uvs ? drawUnit.geometry.uvs.length : "none"}`,
+				`i${drawUnit.geometry.indices.length}`,
+				`m${describeBatchRelativeMat4Signature(
+					drawUnit.modelMatrix,
+					batchOrigin,
+				)}`,
 			].join(":"),
 		)
 		.join("|");
 	return [
 		"compacted-geometry",
 		`plan=${hashString(plan.key)}`,
-		`bp${hashFloat32Array(positions)}`,
 		`draws=${drawUnits.length}`,
 		`du=${hashString(drawUnitSignature)}`,
 	].join("|");
@@ -430,25 +434,20 @@ function hashString(value: string): string {
 	return hash.toString(16).padStart(8, "0");
 }
 
-function hashFloat32Array(values: Float32Array): string {
-	let hash = 0x811c9dc5;
-	const view = new DataView(
-		values.buffer,
-		values.byteOffset,
-		values.byteLength,
-	);
-	for (let offset = 0; offset < view.byteLength; offset += 1) {
-		hash ^= view.getUint8(offset);
-		hash = Math.imul(hash, 0x01000193) >>> 0;
-	}
-	return hash.toString(16).padStart(8, "0");
-}
-
-function hashIndexArray(values: Uint16Array | Uint32Array): string {
-	let hash = 0x811c9dc5;
-	for (const value of values) {
-		hash ^= value;
-		hash = Math.imul(hash, 0x01000193) >>> 0;
-	}
-	return hash.toString(16).padStart(8, "0");
+function describeBatchRelativeMat4Signature(
+	matrix: RenderMat4,
+	batchOrigin: { x: number; y: number; z: number },
+): string {
+	return Array.from(matrix, (value, index) => {
+		switch (index) {
+			case 12:
+				return Number(value - batchOrigin.x).toPrecision(8);
+			case 13:
+				return Number(value - batchOrigin.y).toPrecision(8);
+			case 14:
+				return Number(value - batchOrigin.z).toPrecision(8);
+			default:
+				return Number(value).toPrecision(8);
+		}
+	}).join(",");
 }

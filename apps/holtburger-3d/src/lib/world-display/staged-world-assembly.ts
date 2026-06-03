@@ -7,6 +7,7 @@ import type { IndexedMaterialDataCache } from "./indexed-material-data";
 import { formatMaterialAssetId } from "./material-signatures";
 import {
 	buildStagedPolygonSetGeometry,
+	buildStagedPortalApertureGeometry,
 	type StagedWorldIndexedGeometry,
 } from "./staged-world-geometry";
 import {
@@ -268,27 +269,10 @@ function buildStagedPortalMaskDrawUnitAssemblies({
 function buildPortalMaskGeometry(
 	candidate: TransitionPortalCandidate,
 ): StagedWorldDrawUnitGeometry {
-	const positions = new Float32Array(
-		candidate.aperture.points.flatMap((point) => [point.x, point.y, point.z]),
+	return buildStagedPortalApertureGeometry(
+		candidate.aperture.points,
+		`portal-mask:${candidate.id}:points=${candidate.aperture.points.length}`,
 	);
-	const indices: number[] = [];
-	for (
-		let index = 1;
-		index < candidate.aperture.points.length - 1;
-		index += 1
-	) {
-		indices.push(0, index, index + 1);
-	}
-	return {
-		positions,
-		uvs: null,
-		indices:
-			candidate.aperture.points.length > 65535
-				? new Uint32Array(indices)
-				: new Uint16Array(indices),
-		vertexCount: candidate.aperture.points.length,
-		triangleCount: indices.length / 3,
-	};
 }
 
 export function buildStagedStructuredInteriorDrawUnitAssemblies({
@@ -333,6 +317,7 @@ export function buildStagedStructuredInteriorDrawUnitAssemblies({
 			const geometry = buildStagedPolygonSetGeometry(cell.renderGeometry, {
 				surfaceId: surfaceKey.geometrySurfaceId,
 				materialVariantSignature: surfaceKey.materialVariantSignature,
+				sourceSignature: `env-cell:${cell.renderKey}`,
 			});
 			if (geometry.triangleCount === 0) {
 				return [];
@@ -823,6 +808,7 @@ function buildStagedStaticPartGeometry(
 	const geometry = buildStagedPolygonSetGeometry(asset.payload.renderGeometry, {
 		surfaceId: surfaceKey.geometrySurfaceId,
 		materialVariantSignature: surfaceKey.materialVariantSignature,
+		sourceSignature: `gfx-obj:${part.gfxObjAssetId}`,
 	});
 	if (geometry.triangleCount === 0) {
 		return geometry;
@@ -845,12 +831,22 @@ function buildStagedStaticPartGeometry(
 	}
 	return {
 		...geometry,
+		signature: [
+			geometry.signature,
+			`part=${part.renderKey}`,
+			`material=${part.materialSignature}`,
+			`texture-velocity=${part.textureVelocitySignature}`,
+			`detail=${part.detailSignature}`,
+			`v=${geometry.vertexCount}`,
+			`t=${geometry.triangleCount}`,
+		].join("|"),
 		positions,
 	};
 }
 
 function createEmptyIndexedGeometry(): StagedWorldIndexedGeometry {
 	return {
+		signature: "empty",
 		positions: new Float32Array(),
 		uvs: new Float32Array(),
 		indices: new Uint16Array(),

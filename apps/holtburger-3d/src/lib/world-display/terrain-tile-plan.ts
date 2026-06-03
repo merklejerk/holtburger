@@ -1,5 +1,8 @@
 import type { PreparedTerrainMesh, PreparedTerrainQuad } from "../assets/types";
-import type { TerrainBlendPlan, TerrainBlendPlanSet } from "./terrain-blend-plan";
+import type {
+	TerrainBlendPlan,
+	TerrainBlendPlanSet,
+} from "./terrain-blend-plan";
 import type { StagedWorldIndexedGeometry } from "./staged-world-geometry";
 
 const DEFAULT_TERRAIN_TILE_LAYER_LIMIT = 8;
@@ -33,13 +36,17 @@ export interface TerrainTileDrawSlicePlan {
 
 export function buildTerrainTileFallbackGeometry(
 	mesh: PreparedTerrainMesh,
+	sourceSignature = `terrain:${mesh.landblockId}:fallback`,
 ): StagedWorldIndexedGeometry {
 	const positions = new Float32Array(mesh.vertices.length * 3);
 	for (const [vertexIndex, vertex] of mesh.vertices.entries()) {
 		writeVec3(positions, vertexIndex, vertex.x, vertex.z, -vertex.y);
 	}
 
-	const indices = createIndexArray(mesh.vertices.length, mesh.triangles.length * 3);
+	const indices = createIndexArray(
+		mesh.vertices.length,
+		mesh.triangles.length * 3,
+	);
 	for (const [triangleIndex, triangle] of mesh.triangles.entries()) {
 		const firstIndex = triangleIndex * 3;
 		indices[firstIndex] = triangle.a;
@@ -48,6 +55,11 @@ export function buildTerrainTileFallbackGeometry(
 	}
 
 	return {
+		signature: [
+			sourceSignature,
+			`v=${mesh.vertices.length}`,
+			`t=${mesh.triangles.length}`,
+		].join("|"),
 		positions,
 		uvs: null,
 		indices,
@@ -66,7 +78,9 @@ export function buildTerrainTileLayerPlan({
 	if (!planSet) {
 		return null;
 	}
-	const plans = [...planSet.plans].sort((left, right) => left.pcode - right.pcode);
+	const plans = [...planSet.plans].sort(
+		(left, right) => left.pcode - right.pcode,
+	);
 	if (plans.length > maxLayerEntries) {
 		return {
 			layerEntries: [],
@@ -77,13 +91,15 @@ export function buildTerrainTileLayerPlan({
 			signature: `${planSet.signature}|layer-overflow:${plans.length}/${maxLayerEntries}`,
 		};
 	}
-	const layerEntries = plans.map((plan, slot): TerrainTileLayerEntry => ({
-		slot,
-		pcode: plan.pcode,
-		plan,
-		colorRefCount: countTerrainLayerColorRefs(plan),
-		maskRefCount: countTerrainLayerMaskRefs(plan),
-	}));
+	const layerEntries = plans.map(
+		(plan, slot): TerrainTileLayerEntry => ({
+			slot,
+			pcode: plan.pcode,
+			plan,
+			colorRefCount: countTerrainLayerColorRefs(plan),
+			maskRefCount: countTerrainLayerMaskRefs(plan),
+		}),
+	);
 	return {
 		layerEntries,
 		layerSlotByPcode: new Map(
@@ -107,7 +123,9 @@ export function buildTerrainTileDrawSlicePlans({
 	if (!planSet) {
 		return [];
 	}
-	const plans = [...planSet.plans].sort((left, right) => left.pcode - right.pcode);
+	const plans = [...planSet.plans].sort(
+		(left, right) => left.pcode - right.pcode,
+	);
 	if (plans.length <= maxLayerEntries) {
 		const layerPlan = buildTerrainTileLayerPlanFromPlans({
 			planSet,
@@ -132,7 +150,10 @@ export function buildTerrainTileDrawSlicePlans({
 		firstPlanIndex += maxLayerEntries
 	) {
 		const sliceIndex = slices.length;
-		const slicePlans = plans.slice(firstPlanIndex, firstPlanIndex + maxLayerEntries);
+		const slicePlans = plans.slice(
+			firstPlanIndex,
+			firstPlanIndex + maxLayerEntries,
+		);
 		const layerPlan = buildTerrainTileLayerPlanFromPlans({
 			planSet,
 			plans: slicePlans,
@@ -154,9 +175,11 @@ export function buildTerrainTileDrawSlicePlans({
 export function buildTerrainTileLayerGeometry({
 	mesh,
 	plan,
+	sourceSignature = `terrain:${mesh.landblockId}:layer`,
 }: {
 	mesh: PreparedTerrainMesh;
 	plan: TerrainTileLayerPlan;
+	sourceSignature?: string;
 }): TerrainTileLayerGeometry {
 	const quadsByIndex = new Map(
 		mesh.quads.map((quad) => [quad.quadIndex, quad]),
@@ -196,6 +219,13 @@ export function buildTerrainTileLayerGeometry({
 	}
 
 	return {
+		signature: [
+			sourceSignature,
+			plan.signature,
+			`v=${mesh.vertices.length}`,
+			`source-t=${mesh.triangles.length}`,
+			`t=${triangles.length}`,
+		].join("|"),
 		positions,
 		uvs,
 		layerSlots,
@@ -206,11 +236,7 @@ export function buildTerrainTileLayerGeometry({
 }
 
 function countTerrainLayerColorRefs(plan: TerrainBlendPlan): number {
-	return (
-		1 +
-		plan.overlays.length +
-		(plan.roads.length > 0 ? 1 : 0)
-	);
+	return 1 + plan.overlays.length + (plan.roads.length > 0 ? 1 : 0);
 }
 
 function countTerrainLayerMaskRefs(plan: TerrainBlendPlan): number {
@@ -229,13 +255,15 @@ function buildTerrainTileLayerPlanFromPlans({
 	if (plans.length === 0) {
 		return null;
 	}
-	const layerEntries = plans.map((plan, slot): TerrainTileLayerEntry => ({
-		slot,
-		pcode: plan.pcode,
-		plan,
-		colorRefCount: countTerrainLayerColorRefs(plan),
-		maskRefCount: countTerrainLayerMaskRefs(plan),
-	}));
+	const layerEntries = plans.map(
+		(plan, slot): TerrainTileLayerEntry => ({
+			slot,
+			pcode: plan.pcode,
+			plan,
+			colorRefCount: countTerrainLayerColorRefs(plan),
+			maskRefCount: countTerrainLayerMaskRefs(plan),
+		}),
+	);
 	return {
 		layerEntries,
 		layerSlotByPcode: new Map(

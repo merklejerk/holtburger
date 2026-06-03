@@ -5,6 +5,7 @@ import type {
 import type { Vec3Dto } from "../host/contracts";
 
 export interface StagedWorldIndexedGeometry {
+	signature: string;
 	positions: Float32Array;
 	uvs: Float32Array | null;
 	indices: Uint16Array | Uint32Array;
@@ -17,6 +18,7 @@ export function buildStagedPolygonSetGeometry(
 	options: {
 		surfaceId?: number | null;
 		materialVariantSignature?: string | null;
+		sourceSignature?: string;
 	} = {},
 ): StagedWorldIndexedGeometry {
 	const sourcePositions = toFloat32Array(renderGeometry.positions);
@@ -39,13 +41,25 @@ export function buildStagedPolygonSetGeometry(
 		for (let triangleVertex = 0; triangleVertex < 3; triangleVertex += 1) {
 			const sourceVertexIndex = triangle.firstVertex + triangleVertex;
 			const targetVertexIndex = firstIndex + triangleVertex;
-			copyVec3(positions, targetVertexIndex, sourcePositions, sourceVertexIndex);
+			copyVec3(
+				positions,
+				targetVertexIndex,
+				sourcePositions,
+				sourceVertexIndex,
+			);
 			copyVec2(uvs, targetVertexIndex, sourceUvs, sourceVertexIndex);
 			indices[targetVertexIndex] = targetVertexIndex;
 		}
 	}
 
 	return {
+		signature: describeStagedPolygonSetGeometrySignature({
+			renderGeometry,
+			sourceSignature: options.sourceSignature,
+			surfaceId: options.surfaceId,
+			materialVariantSignature: options.materialVariantSignature,
+			triangleCount: triangles.length,
+		}),
 		positions,
 		uvs,
 		indices,
@@ -56,6 +70,7 @@ export function buildStagedPolygonSetGeometry(
 
 export function buildStagedPortalApertureGeometry(
 	points: readonly Vec3Dto[],
+	sourceSignature = `portal-aperture:points=${points.length}`,
 ): StagedWorldIndexedGeometry {
 	const positions = new Float32Array(points.length * 3);
 	for (const [pointIndex, point] of points.entries()) {
@@ -73,12 +88,36 @@ export function buildStagedPortalApertureGeometry(
 	}
 
 	return {
+		signature: sourceSignature,
 		positions,
 		uvs: null,
 		indices,
 		vertexCount: points.length,
 		triangleCount,
 	};
+}
+
+function describeStagedPolygonSetGeometrySignature({
+	renderGeometry,
+	sourceSignature,
+	surfaceId,
+	materialVariantSignature,
+	triangleCount,
+}: {
+	renderGeometry: PreparedPolygonSetRenderGeometry;
+	sourceSignature?: string;
+	surfaceId?: number | null;
+	materialVariantSignature?: string | null;
+	triangleCount: number;
+}): string {
+	return [
+		sourceSignature ?? "polygon-set",
+		`source-v=${renderGeometry.vertexCount}`,
+		`source-t=${renderGeometry.triangles.length}`,
+		`surface=${surfaceId === undefined ? "any" : (surfaceId ?? "none")}`,
+		`variant=${materialVariantSignature === undefined ? "any" : (materialVariantSignature ?? "base")}`,
+		`t=${triangleCount}`,
+	].join("|");
 }
 
 function writeVec3(target: Float32Array, vertexIndex: number, vertex: Vec3Dto) {

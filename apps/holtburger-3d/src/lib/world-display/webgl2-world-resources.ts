@@ -617,20 +617,19 @@ export function syncWebgl2WorldResources({
 	store.compactionFamilyPlan = profileBrowserJsScope(
 		"webgl2.resource.planCompactionFamilies",
 		() => {
-			const terrainPageCandidates =
-				collectTerrainTexturePageAtlasCandidates({
-					assetState,
-					terrainTiles: store.terrainTiles,
-					materialTextureCapabilities,
-					textureFilteringMode,
-					detailTexturesEnabled,
-					reportDiagnostic: (message) => {
-						store.materialFallbackReasonSamples = [
-							...store.materialFallbackReasonSamples,
-							message,
-						].slice(0, 8);
-					},
-				});
+			const terrainPageCandidates = collectTerrainTexturePageAtlasCandidates({
+				assetState,
+				terrainTiles: store.terrainTiles,
+				materialTextureCapabilities,
+				textureFilteringMode,
+				detailTexturesEnabled,
+				reportDiagnostic: (message) => {
+					store.materialFallbackReasonSamples = [
+						...store.materialFallbackReasonSamples,
+						message,
+					].slice(0, 8);
+				},
+			});
 			store.terrainAtlasRefCount = terrainPageCandidates.refCount;
 			store.terrainAtlasCandidateCount =
 				terrainPageCandidates.rgbaCandidates.length;
@@ -671,8 +670,8 @@ export function syncWebgl2WorldResources({
 		store.drawUnits.map((drawUnit) => [drawUnit.id, drawUnit] as const),
 	);
 	store.compactionBypassBlockerSamples = summarizeDiagnosticReasons(
-		store.compactionFamilyPlan.bypasses.map(
-			(bypass) => describeCompactionBypassBlockerSample(bypass, drawUnitById),
+		store.compactionFamilyPlan.bypasses.map((bypass) =>
+			describeCompactionBypassBlockerSample(bypass, drawUnitById),
 		),
 		8,
 	);
@@ -714,11 +713,12 @@ export function syncWebgl2WorldResources({
 				drawUnit.indexedMaterialDescriptor !== null &&
 				compactedIndexedDrawUnitIds.has(drawUnit.id),
 		).length;
-	store.indexedResourceAtlasPlan = planIndexedResourceAtlasForCompactedDrawUnits({
-		drawUnits: store.drawUnits,
-		compactedIndexedDrawUnitIds,
-		policy: DEFAULT_WEBGL2_COMPACTION_FAMILY_PLANNING_POLICY,
-	});
+	store.indexedResourceAtlasPlan =
+		planIndexedResourceAtlasForCompactedDrawUnits({
+			drawUnits: store.drawUnits,
+			compactedIndexedDrawUnitIds,
+			policy: DEFAULT_WEBGL2_COMPACTION_FAMILY_PLANNING_POLICY,
+		});
 	store.indexedResourceAtlasCandidateDrawUnitCount =
 		store.indexedMaterialDescriptorCompactionCandidateCount;
 	store.indexedResourceAtlasFailureReasonCount =
@@ -743,8 +743,9 @@ export function syncWebgl2WorldResources({
 			atlasPlacedCompactedIndexedDrawUnitIds,
 		}),
 	});
-	store.standaloneIndexedMaterialResourceDrawUnitCount =
-		store.drawUnits.filter((drawUnit) => drawUnit.directIndexedMaterialResources !== null).length;
+	store.standaloneIndexedMaterialResourceDrawUnitCount = store.drawUnits.filter(
+		(drawUnit) => drawUnit.directIndexedMaterialResources !== null,
+	).length;
 	store.compactedIndexedMaterialStandaloneResourceDrawUnitCount =
 		store.drawUnits.filter(
 			(drawUnit) =>
@@ -752,7 +753,9 @@ export function syncWebgl2WorldResources({
 				compactedIndexedDrawUnitIds.has(drawUnit.id),
 		).length;
 	for (const drawUnit of store.drawUnits) {
-		for (const textureKey of collectDirectIndexedMaterialTextureKeys(drawUnit)) {
+		for (const textureKey of collectDirectIndexedMaterialTextureKeys(
+			drawUnit,
+		)) {
 			retainedTextureKeys.add(textureKey);
 		}
 	}
@@ -988,9 +991,10 @@ function createOrReuseWebgl2TerrainTile({
 	const drawSlicePlans = buildTerrainTileDrawSlicePlans({ planSet }).filter(
 		(slice) => layerPlan?.blockers.length || slice.id !== "slice/0",
 	);
-	const layerGeometry = layerPlan && layerPlan.blockers.length === 0
-		? buildTerrainTileLayerGeometry({ mesh: tile.mesh, plan: layerPlan })
-		: null;
+	const layerGeometry =
+		layerPlan && layerPlan.blockers.length === 0
+			? buildTerrainTileLayerGeometry({ mesh: tile.mesh, plan: layerPlan })
+			: null;
 	const geometry = layerGeometry ?? buildTerrainTileFallbackGeometry(tile.mesh);
 	if (geometry.triangleCount === 0) {
 		return null;
@@ -1117,7 +1121,9 @@ function createWebgl2TerrainTileDrawSlice({
 		geometry,
 	});
 	if (!buffers.uvBuffer || !buffers.layerSlotBuffer) {
-		throw new Error(`Terrain draw slice ${id} was created without layer geometry buffers.`);
+		throw new Error(
+			`Terrain draw slice ${id} was created without layer geometry buffers.`,
+		);
 	}
 	const bvhItemKeys = mesh.quads
 		.filter((quad) => slicePlan.layerPlan.layerSlotByPcode.has(quad.pcode))
@@ -1195,7 +1201,7 @@ function createWebgl2IndexedGeometryBuffers(
 		geometry,
 	}: {
 		id: string;
-	geometry: StagedWorldIndexedGeometry | TerrainTileLayerGeometry;
+		geometry: StagedWorldIndexedGeometry | TerrainTileLayerGeometry;
 	},
 ): Pick<
 	Webgl2TerrainTileResource,
@@ -1349,7 +1355,12 @@ function collectTerrainTexturePageAtlasCandidates({
 			}
 		}
 	}
-	return { rgbaCandidates, detailCandidates, blockersByTerrainTileId, refCount };
+	return {
+		rgbaCandidates,
+		detailCandidates,
+		blockersByTerrainTileId,
+		refCount,
+	};
 }
 
 function resolveTerrainTileDetailPlan({
@@ -1419,17 +1430,19 @@ function prepareTerrainDetailTextureUpload({
 	materialTextureCapabilities: MaterialTextureCapabilities;
 	textureFilteringMode: TextureFilteringMode;
 	reportDiagnostic?: (message: string) => void;
-}): (RenderSurfaceTextureUploadPreparation & {
-	status: "ready";
-	upload: {
-		kind: "direct";
-		format: "rgba";
-		dataType: "uint8";
-		width: number;
-		height: number;
-		data: Uint8Array;
-	};
-}) | null {
+}):
+	| (RenderSurfaceTextureUploadPreparation & {
+			status: "ready";
+			upload: {
+				kind: "direct";
+				format: "rgba";
+				dataType: "uint8";
+				width: number;
+				height: number;
+				data: Uint8Array;
+			};
+	  })
+	| null {
 	const defaultPolicy = selectRenderSurfaceTextureSamplingPolicy(
 		overlay.renderSurface,
 		createDefaultMaterialTextureSamplingPolicy(
@@ -1505,7 +1518,9 @@ function collectTerrainTileTextureRefs(
 	tile: Webgl2TerrainTileResource,
 ): TerrainBlendTextureRef[] {
 	const refs = [
-		...(tile.layerPlan ? collectTerrainLayerPlanTextureRefs(tile.layerPlan) : []),
+		...(tile.layerPlan
+			? collectTerrainLayerPlanTextureRefs(tile.layerPlan)
+			: []),
 		...tile.drawSlices.flatMap((slice) =>
 			collectTerrainLayerPlanTextureRefs(slice.layerPlan),
 		),
@@ -1625,9 +1640,10 @@ function resolveWebgl2TerrainTileTexturePageBindings({
 	const placementsByEntryKey = createTexturePageAtlasPlacementsByEntryKey(
 		store.texturePageAtlasPlan,
 	);
-	const detailPlacementsByEntryKey = createTexturePageDetailAtlasPlacementsByEntryKey(
-		store.texturePageAtlasPlan,
-	);
+	const detailPlacementsByEntryKey =
+		createTexturePageDetailAtlasPlacementsByEntryKey(
+			store.texturePageAtlasPlan,
+		);
 	for (const tile of store.terrainTiles) {
 		const bindings: Webgl2TerrainTileTexturePageBinding[] = [];
 		const blockers = [...tile.texturePageBlockers];
@@ -1656,12 +1672,7 @@ function resolveWebgl2TerrainTileTexturePageBindings({
 					family: "terrain-detail",
 					atlasEntryKey: tile.detailPlan.atlasEntryKey,
 					textureIndex: placement.textureIndex,
-					rect: [
-						placement.x,
-						placement.y,
-						placement.width,
-						placement.height,
-					],
+					rect: [placement.x, placement.y, placement.width, placement.height],
 				});
 			} else {
 				store.materialFallbackReasonSamples = [
@@ -1737,7 +1748,9 @@ function isTerrainPageOverflowBlocker(blocker: string): boolean {
 	);
 }
 
-function groupTerrainLayerEntriesByPage(tile: Webgl2TerrainTileResource): Array<{
+function groupTerrainLayerEntriesByPage(
+	tile: Webgl2TerrainTileResource,
+): Array<{
 	entries: TerrainTileLayerEntry[];
 	reason: string;
 }> {
@@ -1871,7 +1884,9 @@ function resolveTerrainDrawSliceTexturePageBindings(
 			atlasEntryKeys.has(binding.atlasEntryKey),
 		);
 		slice.texturePageBlockers = tile.texturePageBlockers.filter((blocker) =>
-			[...atlasEntryKeys].some((atlasEntryKey) => blocker.includes(atlasEntryKey)),
+			[...atlasEntryKeys].some((atlasEntryKey) =>
+				blocker.includes(atlasEntryKey),
+			),
 		);
 		slice.oneDrawReadiness = deriveTerrainDrawSliceOneDrawReadiness(slice);
 	}
@@ -1889,10 +1904,13 @@ function collectTerrainLayerPlanTextureRefs(
 		...entry.plan.roads.flatMap((road) => [road.road, road.alpha]),
 	]);
 	const refsByKey = new Map(
-		refs.map((ref) => [
-			`${ref.role}/${describeTerrainBlendTextureAtlasEntryKey(ref)}`,
-			ref,
-		] as const),
+		refs.map(
+			(ref) =>
+				[
+					`${ref.role}/${describeTerrainBlendTextureAtlasEntryKey(ref)}`,
+					ref,
+				] as const,
+		),
 	);
 	return [...refsByKey.values()];
 }
@@ -1901,10 +1919,10 @@ function dedupeTerrainTexturePageBindings(
 	bindings: readonly Webgl2TerrainTileTexturePageBinding[],
 ): Webgl2TerrainTileTexturePageBinding[] {
 	const bindingByKey = new Map(
-		bindings.map((binding) => [
-			`${binding.family}/${binding.atlasEntryKey}`,
-			binding,
-		] as const),
+		bindings.map(
+			(binding) =>
+				[`${binding.family}/${binding.atlasEntryKey}`, binding] as const,
+		),
 	);
 	return [...bindingByKey.values()].sort((left, right) =>
 		`${left.family}/${left.atlasEntryKey}`.localeCompare(
@@ -1950,7 +1968,8 @@ function createOrReuseWebgl2DrawUnit({
 			resolveWebgl2DrawUnitDirectTextureSamplingPolicy(drawUnit);
 		previous.textureUploadSample =
 			resolveWebgl2DrawUnitTextureUploadSample(drawUnit);
-		previous.texturePageReadiness = resolveWebgl2DrawUnitTexturePageReadiness(drawUnit);
+		previous.texturePageReadiness =
+			resolveWebgl2DrawUnitTexturePageReadiness(drawUnit);
 		previous.textureKey =
 			drawUnit.material.kind === "direct-texture"
 				? drawUnit.material.textureKey
@@ -2072,7 +2091,8 @@ function createOrReuseWebgl2DrawUnit({
 	});
 	const directTextureSamplingPolicy =
 		resolveWebgl2DrawUnitDirectTextureSamplingPolicy(drawUnit);
-	const texturePageReadiness = resolveWebgl2DrawUnitTexturePageReadiness(drawUnit);
+	const texturePageReadiness =
+		resolveWebgl2DrawUnitTexturePageReadiness(drawUnit);
 	const texturePageBindings = collectDirectDrawTexturePageBindings({
 		texture,
 		directIndexedMaterialResources,
@@ -2195,11 +2215,11 @@ function resolveAtlasCompactionLandblockId(
 	drawUnit: StagedWorldDrawUnitAssembly,
 ): number | null {
 	switch (drawUnit.kind) {
-	case "static":
-	case "structured-interior":
-		return drawUnit.owningLandblockId;
-	case "portal-mask":
-		return null;
+		case "static":
+		case "structured-interior":
+			return drawUnit.owningLandblockId;
+		case "portal-mask":
+			return null;
 	}
 }
 
@@ -2389,14 +2409,15 @@ function syncWebgl2DirectIndexedMaterialResources({
 				`Cannot sync direct indexed resources for missing staged draw unit ${drawUnit.id}.`,
 			);
 		}
-		drawUnit.directIndexedMaterialResources = retainedDirectIndexedDrawUnitIds.has(drawUnit.id)
-			? resolveWebgl2DirectIndexedMaterialResources({
-					gl,
-					store,
-					drawUnit: stagedDrawUnit,
-					descriptor: drawUnit.indexedMaterialDescriptor,
-				})
-			: null;
+		drawUnit.directIndexedMaterialResources =
+			retainedDirectIndexedDrawUnitIds.has(drawUnit.id)
+				? resolveWebgl2DirectIndexedMaterialResources({
+						gl,
+						store,
+						drawUnit: stagedDrawUnit,
+						descriptor: drawUnit.indexedMaterialDescriptor,
+					})
+				: null;
 		drawUnit.texturePageBindings = collectDirectDrawTexturePageBindings({
 			texture: drawUnit.texture,
 			directIndexedMaterialResources: drawUnit.directIndexedMaterialResources,
@@ -2515,14 +2536,8 @@ function resolveWebgl2DirectIndexedMaterialResources({
 			key: descriptor.indexTextureKey,
 			upload: toWebgl2IndexedTextureUpload(gl, indexedMaterial.texture),
 			sampler: {
-				wrapS:
-					descriptor.wrapS === "repeat"
-						? gl.REPEAT
-						: gl.CLAMP_TO_EDGE,
-				wrapT:
-					descriptor.wrapT === "repeat"
-						? gl.REPEAT
-						: gl.CLAMP_TO_EDGE,
+				wrapS: descriptor.wrapS === "repeat" ? gl.REPEAT : gl.CLAMP_TO_EDGE,
+				wrapT: descriptor.wrapT === "repeat" ? gl.REPEAT : gl.CLAMP_TO_EDGE,
 				minFilter: gl.NEAREST,
 				magFilter: gl.NEAREST,
 			},
@@ -2606,7 +2621,9 @@ function toWebgl2IndexedTextureUpload(
 	};
 }
 
-function describeIndexedTextureKey(indexedMaterial: ResolvedIndexedMaterialData): string {
+function describeIndexedTextureKey(
+	indexedMaterial: ResolvedIndexedMaterialData,
+): string {
 	return [
 		"indexed-texture",
 		indexedMaterial.renderSurfaceAssetId,
@@ -3111,7 +3128,12 @@ function incrementCount(counts: Record<string, number>, key: string): void {
 }
 
 function describeCompactionBypassBlockerSample(
-	bypass: { drawUnitId: string; reason: string; blockerKind: string; blocker: string },
+	bypass: {
+		drawUnitId: string;
+		reason: string;
+		blockerKind: string;
+		blocker: string;
+	},
 	drawUnitById: ReadonlyMap<string, Webgl2WorldDrawUnit>,
 ): string {
 	const base = `${bypass.reason}:${bypass.blockerKind}:${bypass.blocker}`;
@@ -3221,11 +3243,12 @@ function createGeometrySignature(
 		drawUnit.kind,
 		drawUnit.material.kind,
 		drawUnit.material.key,
+		drawUnit.geometry.signature,
 		`v${drawUnit.geometry.vertexCount}`,
 		`t${drawUnit.geometry.triangleCount}`,
-		`p${hashFloat32Array(drawUnit.geometry.positions)}`,
-		`u${drawUnit.geometry.uvs ? hashFloat32Array(drawUnit.geometry.uvs) : "none"}`,
-		`i${hashIndexArray(drawUnit.geometry.indices)}`,
+		`p${drawUnit.geometry.positions.length}`,
+		`u${drawUnit.geometry.uvs ? drawUnit.geometry.uvs.length : "none"}`,
+		`i${drawUnit.geometry.indices.length}`,
 	].join(":");
 }
 
@@ -3587,8 +3610,7 @@ function upsertWebgl2IndexedResourceAtlasGenerationGraph({
 					indexTextureCount: generation.indexTextures.length,
 					paletteTextureCount: generation.paletteTextures.length,
 					indexReadyDrawUnitCount: generation.indexReadyDrawUnitIds.length,
-					paletteReadyDrawUnitCount:
-						generation.paletteReadyDrawUnitIds.length,
+					paletteReadyDrawUnitCount: generation.paletteReadyDrawUnitIds.length,
 				},
 			},
 		],
@@ -3831,31 +3853,4 @@ function syncWebgl2TerrainTileGraph({
 		store.graphLeasesByTerrainTileId.delete(terrainTileId);
 		store.graphSignaturesByTerrainTileId.delete(terrainTileId);
 	}
-}
-
-function hashFloat32Array(values: Float32Array): string {
-	let hash = 0x811c9dc5;
-	const view = new DataView(
-		values.buffer,
-		values.byteOffset,
-		values.byteLength,
-	);
-	for (let byteOffset = 0; byteOffset < view.byteLength; byteOffset += 1) {
-		hash ^= view.getUint8(byteOffset);
-		hash = Math.imul(hash, 0x01000193);
-	}
-	return toUnsignedHex(hash);
-}
-
-function hashIndexArray(values: Uint16Array | Uint32Array): string {
-	let hash = 0x811c9dc5;
-	for (const value of values) {
-		hash ^= value;
-		hash = Math.imul(hash, 0x01000193);
-	}
-	return toUnsignedHex(hash);
-}
-
-function toUnsignedHex(value: number): string {
-	return (value >>> 0).toString(16).padStart(8, "0");
 }

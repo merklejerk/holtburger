@@ -1,40 +1,36 @@
 import { describe, expect, it } from "vitest";
 
-import { planIndexedResourceAtlas } from "./texture-pages/indexed-resource-atlas-planner";
-import { createWebgl2IndexedResourceAtlasGenerationResource } from "./webgl2/resources/indexed-resource-atlas-generation";
+import {
+	planIndexedResourceAtlas,
+	type IndexedResourceAtlasPlan,
+} from "./texture-pages/indexed-resource-atlas-planner";
+import {
+	createIndexedResourceAtlasCpuGeneration,
+	createWebgl2IndexedResourceAtlasGenerationResource,
+} from "./webgl2/resources/indexed-resource-atlas-generation";
 
 describe("webgl2 indexed resource atlas generation", () => {
+	it("packs indexed and palette atlas bytes without creating WebGL textures", () => {
+		const plan = createIndexedPlan();
+		const generation = createIndexedResourceAtlasCpuGeneration(plan);
+
+		expect(generation?.key).toBe(`${plan.key};indexed-webgl2`);
+		expect(generation?.indexTextures).toHaveLength(2);
+		expect(generation?.paletteTextures).toHaveLength(1);
+		expect([
+			...(generation?.indexTextures[0]?.pixels.slice(0, 4) ?? []),
+		]).toEqual([1, 2, 0, 0]);
+		expect([
+			...(generation?.indexTextures[1]?.pixels.slice(0, 4) ?? []),
+		]).toEqual([5, 6, 7, 8]);
+		expect([...(generation?.paletteTextures[0]?.pixels ?? [])]).toEqual([
+			9, 10, 11, 12, 13, 14, 15, 16,
+		]);
+	});
+
 	it("uploads P8, Index16, and palette atlas pages as exact data textures", () => {
 		const gl = new FakeWebgl2();
-		const plan = planIndexedResourceAtlas({
-			indexCandidates: [
-				{
-					drawUnitId: "p8-draw",
-					indexTextureKey: "index/p8",
-					format: "p8",
-					width: 2,
-					height: 2,
-					sourceBytes: Uint8Array.from([1, 2, 3, 4]),
-				},
-				{
-					drawUnitId: "p16-draw",
-					indexTextureKey: "index/p16",
-					format: "index16",
-					width: 2,
-					height: 1,
-					sourceBytes: Uint8Array.from([5, 6, 7, 8]),
-				},
-			],
-			paletteCandidates: [
-				{
-					drawUnitId: "palette-draw",
-					paletteTextureKey: "palette/a",
-					colorCount: 2,
-					rgbaBytes: Uint8Array.from([9, 10, 11, 12, 13, 14, 15, 16]),
-				},
-			],
-			policy: { maxTextureSize: 8, maxTextureCount: 4 },
-		});
+		const plan = createIndexedPlan();
 		const generation = createWebgl2IndexedResourceAtlasGenerationResource({
 			gl: gl.asContext(),
 			plan,
@@ -66,12 +62,12 @@ describe("webgl2 indexed resource atlas generation", () => {
 			},
 		]);
 		expect(gl.textureUploads[0]?.data).toBeInstanceOf(Uint8Array);
-		expect([...(gl.textureUploads[0]?.data as Uint8Array).slice(0, 4)]).toEqual([
-			1, 2, 0, 0,
-		]);
-		expect([...(gl.textureUploads[1]?.data as Uint8Array).slice(0, 4)]).toEqual([
-			5, 6, 7, 8,
-		]);
+		expect([...(gl.textureUploads[0]?.data as Uint8Array).slice(0, 4)]).toEqual(
+			[1, 2, 0, 0],
+		);
+		expect([...(gl.textureUploads[1]?.data as Uint8Array).slice(0, 4)]).toEqual(
+			[5, 6, 7, 8],
+		);
 		expect([...(gl.textureUploads[2]?.data as Uint8Array)]).toEqual([
 			9, 10, 11, 12, 13, 14, 15, 16,
 		]);
@@ -112,6 +108,38 @@ describe("webgl2 indexed resource atlas generation", () => {
 		expect(gl.textureUploads).toHaveLength(0);
 	});
 });
+
+function createIndexedPlan(): IndexedResourceAtlasPlan {
+	return planIndexedResourceAtlas({
+		indexCandidates: [
+			{
+				drawUnitId: "p8-draw",
+				indexTextureKey: "index/p8",
+				format: "p8",
+				width: 2,
+				height: 2,
+				sourceBytes: Uint8Array.from([1, 2, 3, 4]),
+			},
+			{
+				drawUnitId: "p16-draw",
+				indexTextureKey: "index/p16",
+				format: "index16",
+				width: 2,
+				height: 1,
+				sourceBytes: Uint8Array.from([5, 6, 7, 8]),
+			},
+		],
+		paletteCandidates: [
+			{
+				drawUnitId: "palette-draw",
+				paletteTextureKey: "palette/a",
+				colorCount: 2,
+				rgbaBytes: Uint8Array.from([9, 10, 11, 12, 13, 14, 15, 16]),
+			},
+		],
+		policy: { maxTextureSize: 8, maxTextureCount: 4 },
+	});
+}
 
 class FakeWebgl2 {
 	readonly TEXTURE_2D = 1;

@@ -36,41 +36,50 @@ export interface Webgl2IndexedResourceAtlasGenerationResource {
 	dispose(): void;
 }
 
-export function createWebgl2IndexedResourceAtlasGenerationResource({
-	gl,
-	plan,
-}: {
-	gl: WebGL2RenderingContext;
-	plan: IndexedResourceAtlasPlan;
-}): Webgl2IndexedResourceAtlasGenerationResource | null {
+export interface IndexedResourceAtlasCpuTexture {
+	key: string;
+	kind: Webgl2IndexedAtlasTextureKind;
+	textureIndex: number;
+	width: number;
+	height: number;
+	placementCount: number;
+	pixels: Uint8Array;
+}
+
+export interface IndexedResourceAtlasCpuGeneration {
+	key: string;
+	indexTextures: readonly IndexedResourceAtlasCpuTexture[];
+	paletteTextures: readonly IndexedResourceAtlasCpuTexture[];
+	indexPlacements: readonly IndexedTexelAtlasPlacement[];
+	palettePlacements: readonly IndexedPaletteAtlasPlacement[];
+	indexReadyDrawUnitIds: readonly string[];
+	paletteReadyDrawUnitIds: readonly string[];
+}
+
+export function createIndexedResourceAtlasCpuGeneration(
+	plan: IndexedResourceAtlasPlan,
+): IndexedResourceAtlasCpuGeneration | null {
 	if (!requiresIndexedResourceAtlasGeneration(plan)) {
 		return null;
 	}
 	const p8Textures = plan.p8IndexAtlasTextures.map((page) =>
-		createWebgl2IndexAtlasTexture({
-			gl,
+		createIndexAtlasCpuTexture({
 			generationKey: plan.key,
 			kind: "p8-index-texels",
 			page,
 			bytesPerPixel: 1,
-			internalFormat: gl.R8,
-			format: gl.RED,
 		}),
 	);
 	const index16Textures = plan.index16AtlasTextures.map((page) =>
-		createWebgl2IndexAtlasTexture({
-			gl,
+		createIndexAtlasCpuTexture({
 			generationKey: plan.key,
 			kind: "index16-index-texels",
 			page,
 			bytesPerPixel: 2,
-			internalFormat: gl.RG8,
-			format: gl.RG,
 		}),
 	);
 	const paletteTextures = plan.paletteAtlasTextures.map((page) =>
-		createWebgl2PaletteAtlasTexture({
-			gl,
+		createPaletteAtlasCpuTexture({
 			generationKey: plan.key,
 			page,
 		}),
@@ -88,12 +97,49 @@ export function createWebgl2IndexedResourceAtlasGenerationResource({
 		),
 		indexReadyDrawUnitIds: plan.indexReadyDrawUnitIds,
 		paletteReadyDrawUnitIds: plan.paletteReadyDrawUnitIds,
+	};
+}
+
+export function createWebgl2IndexedResourceAtlasGenerationResource({
+	gl,
+	plan,
+}: {
+	gl: WebGL2RenderingContext;
+	plan: IndexedResourceAtlasPlan;
+}): Webgl2IndexedResourceAtlasGenerationResource | null {
+	const cpuGeneration = createIndexedResourceAtlasCpuGeneration(plan);
+	if (!cpuGeneration) {
+		return null;
+	}
+	return createWebgl2IndexedResourceAtlasGenerationResourceFromCpu({
+		gl,
+		cpuGeneration,
+	});
+}
+
+export function createWebgl2IndexedResourceAtlasGenerationResourceFromCpu({
+	gl,
+	cpuGeneration,
+}: {
+	gl: WebGL2RenderingContext;
+	cpuGeneration: IndexedResourceAtlasCpuGeneration;
+}): Webgl2IndexedResourceAtlasGenerationResource {
+	const indexTextures = cpuGeneration.indexTextures.map((texture) =>
+		createWebgl2IndexedAtlasTexture({ gl, cpuTexture: texture }),
+	);
+	const paletteTextures = cpuGeneration.paletteTextures.map((texture) =>
+		createWebgl2IndexedAtlasTexture({ gl, cpuTexture: texture }),
+	);
+	return {
+		key: cpuGeneration.key,
+		indexTextures,
+		paletteTextures,
+		indexPlacements: cpuGeneration.indexPlacements,
+		palettePlacements: cpuGeneration.palettePlacements,
+		indexReadyDrawUnitIds: cpuGeneration.indexReadyDrawUnitIds,
+		paletteReadyDrawUnitIds: cpuGeneration.paletteReadyDrawUnitIds,
 		dispose() {
-			for (const texture of [
-				...p8Textures,
-				...index16Textures,
-				...paletteTextures,
-			]) {
+			for (const texture of [...indexTextures, ...paletteTextures]) {
 				texture.texture.dispose();
 			}
 		},
@@ -116,23 +162,17 @@ function requiresIndexedResourceAtlasGeneration(
 	);
 }
 
-function createWebgl2IndexAtlasTexture({
-	gl,
+function createIndexAtlasCpuTexture({
 	generationKey,
 	kind,
 	page,
 	bytesPerPixel,
-	internalFormat,
-	format,
 }: {
-	gl: WebGL2RenderingContext;
 	generationKey: string;
 	kind: "p8-index-texels" | "index16-index-texels";
 	page: IndexedTexelAtlasPage;
 	bytesPerPixel: 1 | 2;
-	internalFormat: GLenum;
-	format: GLenum;
-}): Webgl2IndexedResourceAtlasTextureResource {
+}): IndexedResourceAtlasCpuTexture {
 	const pixels = new Uint8Array(page.width * page.height * bytesPerPixel);
 	for (const placement of page.placements) {
 		copyIndexPlacement({
@@ -143,39 +183,24 @@ function createWebgl2IndexAtlasTexture({
 		});
 	}
 	const key = `${generationKey}/${kind}/texture/${page.textureIndex}`;
-	const texture = createWebgl2Texture2D(gl, {
-		label: key,
-		upload: {
-			width: page.width,
-			height: page.height,
-			internalFormat,
-			format,
-			type: gl.UNSIGNED_BYTE,
-			data: pixels,
-			generateMipmaps: false,
-		},
-		sampler: createExactDataSampler(gl),
-	});
 	return {
 		key,
 		kind,
 		textureIndex: page.textureIndex,
-		texture,
 		width: page.width,
 		height: page.height,
 		placementCount: page.placements.length,
+		pixels,
 	};
 }
 
-function createWebgl2PaletteAtlasTexture({
-	gl,
+function createPaletteAtlasCpuTexture({
 	generationKey,
 	page,
 }: {
-	gl: WebGL2RenderingContext;
 	generationKey: string;
 	page: IndexedPaletteAtlasPage;
-}): Webgl2IndexedResourceAtlasTextureResource {
+}): IndexedResourceAtlasCpuTexture {
 	const pixels = new Uint8Array(page.width * page.height * 4);
 	for (const placement of page.placements) {
 		copyPalettePlacement({
@@ -185,28 +210,61 @@ function createWebgl2PaletteAtlasTexture({
 		});
 	}
 	const key = `${generationKey}/palette-lookup/texture/${page.textureIndex}`;
+	return {
+		key,
+		kind: "palette-lookup",
+		textureIndex: page.textureIndex,
+		width: page.width,
+		height: page.height,
+		placementCount: page.placements.length,
+		pixels,
+	};
+}
+
+function createWebgl2IndexedAtlasTexture({
+	gl,
+	cpuTexture,
+}: {
+	gl: WebGL2RenderingContext;
+	cpuTexture: IndexedResourceAtlasCpuTexture;
+}): Webgl2IndexedResourceAtlasTextureResource {
+	const formats = resolveIndexedAtlasTextureFormats(gl, cpuTexture.kind);
 	const texture = createWebgl2Texture2D(gl, {
-		label: key,
+		label: cpuTexture.key,
 		upload: {
-			width: page.width,
-			height: page.height,
-			internalFormat: gl.RGBA8,
-			format: gl.RGBA,
+			width: cpuTexture.width,
+			height: cpuTexture.height,
+			internalFormat: formats.internalFormat,
+			format: formats.format,
 			type: gl.UNSIGNED_BYTE,
-			data: pixels,
+			data: cpuTexture.pixels,
 			generateMipmaps: false,
 		},
 		sampler: createExactDataSampler(gl),
 	});
 	return {
-		key,
-		kind: "palette-lookup",
-		textureIndex: page.textureIndex,
+		key: cpuTexture.key,
+		kind: cpuTexture.kind,
+		textureIndex: cpuTexture.textureIndex,
 		texture,
-		width: page.width,
-		height: page.height,
-		placementCount: page.placements.length,
+		width: cpuTexture.width,
+		height: cpuTexture.height,
+		placementCount: cpuTexture.placementCount,
 	};
+}
+
+function resolveIndexedAtlasTextureFormats(
+	gl: WebGL2RenderingContext,
+	kind: Webgl2IndexedAtlasTextureKind,
+): { internalFormat: GLenum; format: GLenum } {
+	switch (kind) {
+		case "p8-index-texels":
+			return { internalFormat: gl.R8, format: gl.RED };
+		case "index16-index-texels":
+			return { internalFormat: gl.RG8, format: gl.RG };
+		case "palette-lookup":
+			return { internalFormat: gl.RGBA8, format: gl.RGBA };
+	}
 }
 
 function copyIndexPlacement({

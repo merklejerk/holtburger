@@ -1,9 +1,38 @@
 import { describe, expect, it } from "vitest";
 
 import type { TexturePageAtlasPlan } from "./texture-pages/texture-page-atlas-planner";
-import { createWebgl2TextureAtlasGenerationResource } from "./webgl2/resources/texture-atlas-generation";
+import {
+	createTextureAtlasCpuGeneration,
+	createWebgl2TextureAtlasGenerationResource,
+} from "./webgl2/resources/texture-atlas-generation";
 
 describe("webgl2 texture atlas generation", () => {
+	it("packs rgba and detail atlas bytes without creating WebGL textures", () => {
+		const generation = createTextureAtlasCpuGeneration({
+			plan: createPlan(),
+		});
+
+		expect(generation?.key).toBe(
+			"texture-page-atlas/test;filter=anisotropic-4x;aniso=1",
+		);
+		expect(generation?.textures).toHaveLength(1);
+		expect(generation?.detailTextures).toHaveLength(1);
+		expect(generation?.textures[0]?.key).toBe(
+			"texture-page-atlas/test/static-rgba/texture/0",
+		);
+		expect([...(generation?.textures[0]?.pixels.slice(0, 16) ?? [])]).toEqual([
+			1, 2, 3, 255, 1, 2, 3, 255, 4, 5, 6, 255, 4, 5, 6, 255,
+		]);
+		expect(generation?.detailTextures[0]?.key).toBe(
+			"texture-page-atlas/test/static-rgba/detail-texture/0",
+		);
+		expect([
+			...(generation?.detailTextures[0]?.pixels.slice(0, 16) ?? []),
+		]).toEqual([
+			11, 12, 13, 14, 11, 12, 13, 14, 15, 16, 17, 18, 15, 16, 17, 18,
+		]);
+	});
+
 	it("packs atlas entries with gutter extrusion and uploads mipmapped rgba8 textures", () => {
 		const gl = new FakeWebgl2();
 		const generation = createWebgl2TextureAtlasGenerationResource({
@@ -60,7 +89,9 @@ describe("webgl2 texture atlas generation", () => {
 			{ pname: gl.TEXTURE_MIN_FILTER, param: gl.LINEAR_MIPMAP_LINEAR },
 			{ pname: gl.TEXTURE_MAG_FILTER, param: gl.LINEAR },
 		]);
-		expect(gl.textureParameters.slice(4)).toEqual(gl.textureParameters.slice(0, 4));
+		expect(gl.textureParameters.slice(4)).toEqual(
+			gl.textureParameters.slice(0, 4),
+		);
 		const pixels = gl.textureUploads[0]?.data;
 		expect(pixels).toBeInstanceOf(Uint8Array);
 		expect([
@@ -106,7 +137,9 @@ describe("webgl2 texture atlas generation", () => {
 			maxAnisotropy: 8,
 		});
 
-		expect(generation?.key).toBe("texture-page-atlas/test;filter=nearest;aniso=1");
+		expect(generation?.key).toBe(
+			"texture-page-atlas/test;filter=nearest;aniso=1",
+		);
 		expect(gl.generatedMipmapCount).toBe(0);
 		expect(gl.textureParameters.slice(0, 4)).toEqual([
 			{ pname: gl.TEXTURE_WRAP_S, param: gl.CLAMP_TO_EDGE },
@@ -129,9 +162,7 @@ describe("webgl2 texture atlas generation", () => {
 		expect(pixels).toBeInstanceOf(Uint8Array);
 		expect([
 			...((pixels as Uint8Array) ?? new Uint8Array()).slice(0, 16),
-		]).toEqual([
-			10, 11, 12, 255, 7, 8, 9, 255, 10, 11, 12, 255, 7, 8, 9, 255,
-		]);
+		]).toEqual([10, 11, 12, 255, 7, 8, 9, 255, 10, 11, 12, 255, 7, 8, 9, 255]);
 
 		generation?.dispose();
 	});
@@ -176,9 +207,9 @@ describe("webgl2 texture atlas generation", () => {
 
 		const pixels = gl.textureUploads[0]?.data;
 		expect(pixels).toBeInstanceOf(Uint8Array);
-		expect([...((pixels as Uint8Array) ?? new Uint8Array()).slice(0, 4)]).toEqual(
-			[128, 128, 128, 255],
-		);
+		expect([
+			...((pixels as Uint8Array) ?? new Uint8Array()).slice(0, 4),
+		]).toEqual([128, 128, 128, 255]);
 
 		generation?.dispose();
 	});
@@ -331,8 +362,7 @@ function createPlan({
 						width: 2,
 						height: 2,
 						bytes: Uint8Array.from([
-							11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
-							25, 26,
+							11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
 						]),
 						format: "rgba8",
 						tiling: 12,

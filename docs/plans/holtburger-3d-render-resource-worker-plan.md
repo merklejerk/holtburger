@@ -1,6 +1,6 @@
 # Holtburger 3D Render Resource Worker Plan
 
-Status: Phase 1 implemented; Phase 2 is the next implementation phase.
+Status: Phase 2A implemented; Phase 2B is the next implementation phase.
 
 Related plans:
 
@@ -199,8 +199,60 @@ Introduced cleanup targets and temporary shims:
 - Scheduler metrics are not yet surfaced in a diagnostics panel. Keep them local until a real job
   family is wired, then expose per-family metrics rather than generic echo-worker metrics.
 
-No immediate interim phase is required before Phase 2. The next blocking work remains the CPU
-payload/WebGL realization split described below.
+Phase 2A is now complete. The next blocking work is Phase 2B: async-aware retention and disposal for
+atlas generations and compacted batches.
+
+### 2026-06-03: Phase 2A Implemented
+
+Implemented the first CPU-payload/WebGL-realization split:
+
+- split `createWebgl2TextureAtlasGenerationResource` into
+  `createTextureAtlasCpuGeneration` plus
+  `createWebgl2TextureAtlasGenerationResourceFromCpu`;
+- split `createWebgl2IndexedResourceAtlasGenerationResource` into
+  `createIndexedResourceAtlasCpuGeneration` plus
+  `createWebgl2IndexedResourceAtlasGenerationResourceFromCpu`;
+- kept the existing `createWebgl2*GenerationResource` functions as compatibility wrappers that still
+  run CPU packing synchronously on the main thread, then immediately realize WebGL resources;
+- exported compacted landblock batch plan DTOs and plan creation functions from
+  `compacted-geometry-sync.ts` so future worker payload construction does not depend on private sync
+  helpers;
+- added focused CPU-payload tests for RGBA/detail atlas packing and indexed/palette atlas packing.
+
+Validation completed:
+
+- `npm run test:ts -- webgl2-indexed-resource-atlas-generation webgl2-texture-atlas-generation`
+- `npm run check`
+- `npm run lint:ts`
+
+Course corrections:
+
+- Phase 2 is now split into Phase 2A and Phase 2B. The atlas CPU/GL split is done, but the current
+  sync functions still dispose old resources immediately when keys change. Worker scheduling should
+  not be wired until retention semantics are made async-aware.
+- The existing generation-resource functions remain as legacy compatibility wrappers for now. They
+  intentionally preserve the current synchronous behavior while giving the worker path a pure CPU
+  function to call later.
+- Compaction was not fully split in this phase because the CPU build is already pure
+  `buildCompactedGeometryBatch`, while the difficult part is retention/disposal and family-resource
+  commit semantics. The useful prep was making landblock batch plans explicit exported DTOs.
+
+Introduced cleanup targets and temporary shims:
+
+- Remove or narrow the synchronous atlas wrapper functions once the worker-backed scheduler is wired
+  and call sites can consume CPU results directly.
+- Move compacted landblock plan DTOs into a dedicated worker-payload/planning module if
+  `compacted-geometry-sync.ts` becomes too broad after Phase 2B.
+- Add transfer-list helpers for CPU atlas generations before posting them through the worker. The
+  CPU payloads now contain worker-owned `Uint8Array` buffers, but no reusable transferable collection
+  helper exists yet.
+
+Immediate interim phase:
+
+- Add Phase 2B before Phase 3. It should implement pending-replacement retention and commit helpers
+  for texture atlas generations, indexed atlas generations, and compacted geometry batches. This is
+  debt that should be paid before worker scheduling, because otherwise stale or pending worker work
+  could cause old resources to be disposed too early.
 
 ## Scheduling Model
 
@@ -441,9 +493,9 @@ Validation:
 - Passed `npm run check`.
 - Passed `npm run lint:ts`.
 
-## Phase 2: Split CPU Payloads From WebGL Realization
+## Phase 2A: Split CPU Payloads From WebGL Realization
 
-Status: next.
+Status: complete.
 
 Work:
 
@@ -452,24 +504,39 @@ Work:
     placements;
   - a WebGL realization function that creates `Webgl2TextureAtlasGenerationResource`.
 - Split `createWebgl2IndexedResourceAtlasGenerationResource` the same way.
-- Split compacted geometry sync into:
+- Move compacted landblock batch plan DTOs out of private sync helpers so they can be tested and
+  passed to a worker later.
+
+Validation:
+
+- Existing texture atlas and indexed atlas generation tests still pass.
+- Added tests for pure CPU payload generation without WebGL mocks.
+
+## Phase 2B: Async-Aware Retention And Commit Preparation
+
+Status: next.
+
+Work:
+
+- Split compacted geometry sync into clearer commit steps:
   - landblock batch plan creation;
   - CPU compacted geometry creation;
   - WebGL compacted batch realization;
   - family resource metadata creation;
   - retention/disposal.
-- Move compacted landblock batch plan DTOs out of private sync helpers so they can be tested and
-  passed to a worker later.
 - Add a "pending replacement" retention rule for compacted batches and atlas generations. Old
   resources remain committed until a replacement is fully realized or until no current draw units can
   reference them.
+- Add commit helpers that accept already-created CPU atlas generations and compacted geometry
+  payloads, realize them into WebGL resources, and only then replace committed store entries.
+- Keep graph lease updates after successful WebGL commit.
 
 Validation:
 
 - Existing atlas, indexed atlas, compacted geometry, and WebGL resource tests still pass.
 - Add tests that a pending replacement does not dispose the previous atlas generation or compacted
   batch.
-- Add tests for pure CPU payload generation without WebGL mocks where possible.
+- Add tests for commit helper behavior when CPU payloads are ready but not yet committed.
 
 ## Phase 3: Compacted Geometry Worker Preparation
 

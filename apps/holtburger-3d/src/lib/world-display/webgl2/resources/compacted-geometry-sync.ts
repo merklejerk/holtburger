@@ -38,6 +38,29 @@ function requiresTextureAtlasGeneration(plan: TexturePageAtlasPlan): boolean {
 	);
 }
 
+export interface RgbaTexturePageCompactedLandblockBatchPlan {
+	landblockId: number;
+	batchOrigin: RenderChunkTransform["offset"];
+	plan: CompactionFamilyPlan;
+}
+
+export interface IndexedPalettedCompactedLandblockBatchPlan {
+	landblockId: number;
+	batchOrigin: RenderChunkTransform["offset"];
+	materialTableRecords: readonly IndexedPalettedFamilyMaterialTableRecord[];
+	plan: {
+		key: string;
+		compactableDrawUnitIds: readonly string[];
+		materialSlots: readonly { key: string; index: number }[];
+		drawUnitMaterialSlots: readonly {
+			drawUnitId: string;
+			materialSlotKey: string;
+		}[];
+		drawSlices: CompactionFamilyPlan["renderFamilies"]["indexedPaletted"]["drawSlices"];
+		triangleCount: number;
+	};
+}
+
 export function syncWebgl2CompactedGeometryResources({
 	gl,
 	store,
@@ -335,7 +358,7 @@ function upsertWebgl2CompactedGeometryBatchGraph({
 	});
 }
 
-function createIndexedPalettedCompactedLandblockBatchPlans({
+export function createIndexedPalettedCompactedLandblockBatchPlans({
 	plan,
 	drawUnits,
 	renderChunkTransforms,
@@ -345,22 +368,7 @@ function createIndexedPalettedCompactedLandblockBatchPlans({
 	drawUnits: readonly StagedWorldDrawUnitAssembly[];
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	indexedResourceAtlasPlan: IndexedResourceAtlasPlan;
-}): {
-	landblockId: number;
-	batchOrigin: RenderChunkTransform["offset"];
-	materialTableRecords: readonly IndexedPalettedFamilyMaterialTableRecord[];
-	plan: {
-		key: string;
-		compactableDrawUnitIds: readonly string[];
-		materialSlots: readonly { key: string; index: number }[];
-		drawUnitMaterialSlots: readonly {
-			drawUnitId: string;
-			materialSlotKey: string;
-		}[];
-		drawSlices: CompactionFamilyPlan["renderFamilies"]["indexedPaletted"]["drawSlices"];
-		triangleCount: number;
-	};
-}[] {
+}): IndexedPalettedCompactedLandblockBatchPlan[] {
 	const family = plan.renderFamilies.indexedPaletted;
 	const drawUnitById = new Map(
 		drawUnits.map((drawUnit) => [drawUnit.id, drawUnit]),
@@ -493,51 +501,52 @@ function createIndexedPalettedCompactedLandblockBatchPlan({
 	);
 	const drawSlices = regroupIndexedPalettedLandblockDrawSlices(
 		family.drawSlices
-		.map((slice) => {
-			const localDrawUnitIds = slice.drawUnitIds.filter((drawUnitId) =>
-				drawUnitIdSet.has(drawUnitId),
-			);
-			const localMaterialSlotKeys = slice.materialSlotKeys.filter((slotKey) =>
-				localSlotIndexByKey.has(slotKey),
-			);
-			const localSlotIndices = localMaterialSlotKeys.map((slotKey) => {
-				const index = localSlotIndexByKey.get(slotKey);
-				if (index === undefined) {
-					throw new Error(
-						`Indexed-paletted family landblock batch ${formatHex32(landblockId)} could not remap material slot ${slotKey}.`,
-					);
-				}
-				return index;
-			});
-			const materialTableSlotStart =
-				localSlotIndices.length === 0 ? 0 : Math.min(...localSlotIndices);
-			const materialTableSlotEnd =
-				localSlotIndices.length === 0 ? 0 : Math.max(...localSlotIndices);
-			return {
-				...slice,
-				key: describeLandblockDrawSliceKey({
-					sourceSliceKey: slice.key,
-					landblockId,
+			.map((slice) => {
+				const localDrawUnitIds = slice.drawUnitIds.filter((drawUnitId) =>
+					drawUnitIdSet.has(drawUnitId),
+				);
+				const localMaterialSlotKeys = slice.materialSlotKeys.filter((slotKey) =>
+					localSlotIndexByKey.has(slotKey),
+				);
+				const localSlotIndices = localMaterialSlotKeys.map((slotKey) => {
+					const index = localSlotIndexByKey.get(slotKey);
+					if (index === undefined) {
+						throw new Error(
+							`Indexed-paletted family landblock batch ${formatHex32(landblockId)} could not remap material slot ${slotKey}.`,
+						);
+					}
+					return index;
+				});
+				const materialTableSlotStart =
+					localSlotIndices.length === 0 ? 0 : Math.min(...localSlotIndices);
+				const materialTableSlotEnd =
+					localSlotIndices.length === 0 ? 0 : Math.max(...localSlotIndices);
+				return {
+					...slice,
+					key: describeLandblockDrawSliceKey({
+						sourceSliceKey: slice.key,
+						landblockId,
+						materialTableSlotStart,
+						materialTableSlotEnd,
+						hasMaterialSlots: localSlotIndices.length > 0,
+					}),
 					materialTableSlotStart,
-					materialTableSlotEnd,
-					hasMaterialSlots: localSlotIndices.length > 0,
-				}),
-				materialTableSlotStart,
-				materialTableSlotCount:
-					localSlotIndices.length === 0
-						? 0
-						: materialTableSlotEnd - materialTableSlotStart + 1,
-				materialSlotKeys: localMaterialSlotKeys,
-				drawUnitIds: localDrawUnitIds,
-			};
-		})
-		.filter((slice) => slice.drawUnitIds.length > 0),
+					materialTableSlotCount:
+						localSlotIndices.length === 0
+							? 0
+							: materialTableSlotEnd - materialTableSlotStart + 1,
+					materialSlotKeys: localMaterialSlotKeys,
+					drawUnitIds: localDrawUnitIds,
+				};
+			})
+			.filter((slice) => slice.drawUnitIds.length > 0),
 		{
 			indexedResourceAtlasPlan,
 			materialRecordByKey: sourceRecordByKey,
-			detailPlacementsByEntryKey: createTexturePageDetailAtlasPlacementsByEntryKey(
-				sourcePlan.texturePageAtlasPlan,
-			),
+			detailPlacementsByEntryKey:
+				createTexturePageDetailAtlasPlacementsByEntryKey(
+					sourcePlan.texturePageAtlasPlan,
+				),
 		},
 	);
 	return {
@@ -705,7 +714,9 @@ function resolveIndexedPalettedSliceDetailAtlasTextureIndex(
 			if (!record?.detailAtlasEntryKey) {
 				return [];
 			}
-			const placement = detailPlacementsByEntryKey.get(record.detailAtlasEntryKey);
+			const placement = detailPlacementsByEntryKey.get(
+				record.detailAtlasEntryKey,
+			);
 			if (!placement) {
 				throw new Error(
 					`Indexed-paletted landblock draw slice ${slice.key} references missing detail placement ${record.detailAtlasEntryKey}.`,
@@ -733,7 +744,7 @@ function uniqueNumbers(values: readonly number[]): number[] {
 	return [...new Set(values)].sort((left, right) => left - right);
 }
 
-function createRgbaTexturePageCompactedLandblockBatchPlans({
+export function createRgbaTexturePageCompactedLandblockBatchPlans({
 	plan,
 	drawUnits,
 	renderChunkTransforms,
@@ -741,11 +752,7 @@ function createRgbaTexturePageCompactedLandblockBatchPlans({
 	plan: CompactionFamilyPlan;
 	drawUnits: readonly StagedWorldDrawUnitAssembly[];
 	renderChunkTransforms: readonly RenderChunkTransform[];
-}): {
-	landblockId: number;
-	batchOrigin: RenderChunkTransform["offset"];
-	plan: CompactionFamilyPlan;
-}[] {
+}): RgbaTexturePageCompactedLandblockBatchPlan[] {
 	const drawUnitById = new Map(
 		drawUnits.map((drawUnit) => [drawUnit.id, drawUnit]),
 	);

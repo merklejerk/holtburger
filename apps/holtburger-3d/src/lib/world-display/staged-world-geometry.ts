@@ -1,7 +1,6 @@
 import type {
 	PreparedFloat32Array,
 	PreparedPolygonSetRenderGeometry,
-	PreparedTerrainMesh,
 } from "../assets/types";
 import type { Vec3Dto } from "../host/contracts";
 
@@ -11,84 +10,6 @@ export interface StagedWorldIndexedGeometry {
 	indices: Uint16Array | Uint32Array;
 	vertexCount: number;
 	triangleCount: number;
-}
-
-export function buildStagedTerrainGeometry(
-	mesh: PreparedTerrainMesh,
-	options: { pcode?: number } = {},
-): StagedWorldIndexedGeometry {
-	const quadsByIndex = new Map(
-		mesh.quads.map((quad) => [quad.quadIndex, quad]),
-	);
-	const triangles = mesh.triangles.filter((triangle) => {
-		if (options.pcode === undefined) {
-			return true;
-		}
-		const quad = quadsByIndex.get(triangle.quadIndex);
-		return quad?.pcode === options.pcode;
-	});
-	const duplicateVertices = options.pcode !== undefined;
-	if (!duplicateVertices) {
-		const positions = new Float32Array(mesh.vertices.length * 3);
-		for (const [vertexIndex, vertex] of mesh.vertices.entries()) {
-			writeVec3(positions, vertexIndex, {
-				x: vertex.x,
-				y: vertex.z,
-				z: -vertex.y,
-			});
-		}
-
-		const indices = createIndexArray(mesh.vertices.length, triangles.length * 3);
-		for (const [triangleIndex, triangle] of triangles.entries()) {
-			const firstIndex = triangleIndex * 3;
-			indices[firstIndex] = triangle.a;
-			indices[firstIndex + 1] = triangle.b;
-			indices[firstIndex + 2] = triangle.c;
-		}
-
-		return {
-			positions,
-			uvs: null,
-			indices,
-			vertexCount: mesh.vertices.length,
-			triangleCount: triangles.length,
-		};
-	}
-
-	const vertexCount = triangles.length * 3;
-	const positions = new Float32Array(vertexCount * 3);
-	const uvs = new Float32Array(vertexCount * 2);
-	const indices = createIndexArray(vertexCount, vertexCount);
-	for (const [triangleIndex, triangle] of triangles.entries()) {
-		const quad = quadsByIndex.get(triangle.quadIndex) ?? null;
-		const firstVertex = triangleIndex * 3;
-		for (const [corner, sourceVertexIndex] of [
-			triangle.a,
-			triangle.b,
-			triangle.c,
-		].entries()) {
-			const targetVertexIndex = firstVertex + corner;
-			const vertex = mesh.vertices[sourceVertexIndex];
-			writeVec3(positions, targetVertexIndex, {
-				x: vertex.x,
-				y: vertex.z,
-				z: -vertex.y,
-			});
-			writeVec2(
-				uvs,
-				targetVertexIndex,
-				quad ? terrainQuadUv(quad, sourceVertexIndex) : [0, 0],
-			);
-			indices[targetVertexIndex] = targetVertexIndex;
-		}
-	}
-	return {
-		positions,
-		uvs,
-		indices,
-		vertexCount,
-		triangleCount: triangles.length,
-	};
 }
 
 export function buildStagedPolygonSetGeometry(
@@ -165,35 +86,6 @@ function writeVec3(target: Float32Array, vertexIndex: number, vertex: Vec3Dto) {
 	target[offset] = vertex.x;
 	target[offset + 1] = vertex.y;
 	target[offset + 2] = vertex.z;
-}
-
-function writeVec2(
-	target: Float32Array,
-	vertexIndex: number,
-	value: readonly [number, number],
-): void {
-	const offset = vertexIndex * 2;
-	target[offset] = value[0];
-	target[offset + 1] = value[1];
-}
-
-function terrainQuadUv(
-	quad: PreparedTerrainMesh["quads"][number],
-	vertexIndex: number,
-): [number, number] {
-	const cornerIndex = quad.vertexIndices.indexOf(vertexIndex);
-	switch (cornerIndex) {
-		case 0:
-			return [0, 0];
-		case 1:
-			return [1, 0];
-		case 2:
-			return [1, 1];
-		case 3:
-			return [0, 1];
-		default:
-			return [0, 0];
-	}
 }
 
 function copyVec3(

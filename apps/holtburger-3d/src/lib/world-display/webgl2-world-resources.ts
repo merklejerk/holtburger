@@ -21,10 +21,7 @@ import {
 	type StagedWorldAssemblyGraphRecord,
 	type StagedWorldDrawUnitAssembly,
 } from "./staged-world-assembly";
-import {
-	buildStagedTerrainGeometry,
-	type StagedWorldIndexedGeometry,
-} from "./staged-world-geometry";
+import type { StagedWorldIndexedGeometry } from "./staged-world-geometry";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
 import type {
 	IndexedMaterialDataCache,
@@ -111,6 +108,7 @@ import {
 } from "./terrain-blend-plan";
 import {
 	buildTerrainTileDrawSlicePlans,
+	buildTerrainTileFallbackGeometry,
 	buildTerrainTileLayerGeometry,
 	buildTerrainTileLayerPlan,
 	type TerrainTileDrawSlicePlan,
@@ -858,7 +856,7 @@ function createOrReuseWebgl2TerrainTile({
 	const layerGeometry = layerPlan && layerPlan.blockers.length === 0
 		? buildTerrainTileLayerGeometry({ mesh: tile.mesh, plan: layerPlan })
 		: null;
-	const geometry = layerGeometry ?? buildStagedTerrainGeometry(tile.mesh);
+	const geometry = layerGeometry ?? buildTerrainTileFallbackGeometry(tile.mesh);
 	if (geometry.triangleCount === 0) {
 		return null;
 	}

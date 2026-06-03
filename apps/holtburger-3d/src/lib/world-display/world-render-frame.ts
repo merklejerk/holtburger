@@ -257,7 +257,7 @@ function selectWorldRenderCandidates(
 		}
 
 		const fallbackReason = resolveBatchFallbackReason({
-			drawUnitId: candidate.id,
+			candidateId: candidate.id,
 			fallbackReason: candidate.bvhFallbackReason,
 			hasItemKeys: itemKeys.length > 0,
 			hasQueryFallback,
@@ -334,26 +334,26 @@ function hasVisibleItemKey(
 }
 
 function resolveBatchFallbackReason({
-	drawUnitId,
+	candidateId,
 	fallbackReason,
 	hasItemKeys,
 	hasQueryFallback,
 }: {
-	drawUnitId: string;
+	candidateId: string;
 	fallbackReason: string | null;
 	hasItemKeys: boolean;
 	hasQueryFallback: boolean;
 }): string | null {
 	if (!hasItemKeys) {
 		return (
-			fallbackReason ?? `world render candidate ${drawUnitId} has no BVH item keys`
+			fallbackReason ?? `world render candidate ${candidateId} has no BVH item keys`
 		);
 	}
 	if (fallbackReason) {
 		return fallbackReason;
 	}
 	if (hasQueryFallback) {
-		return `world render candidate ${drawUnitId} included because BVH query reported fallback data`;
+		return `world render candidate ${candidateId} included because BVH query reported fallback data`;
 	}
 	return null;
 }

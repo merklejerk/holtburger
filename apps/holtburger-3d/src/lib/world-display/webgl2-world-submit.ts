@@ -118,6 +118,8 @@ export interface Webgl2WorldSubmitMetrics {
 	visibleDrawUnitCount: number;
 	visibleTerrainTileCount: number;
 	visibleTerrainCompatibilityDrawCount: number;
+	visibleTerrainOneDrawReadyTileCount: number;
+	visibleTerrainOneDrawBlockedTileCount: number;
 	portalMaskDrawUnitCount: number;
 	exteriorDomainDrawUnitCount: number;
 	interiorDomainDrawUnitCount: number;
@@ -175,6 +177,8 @@ const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	visibleDrawUnitCount: 0,
 	visibleTerrainTileCount: 0,
 	visibleTerrainCompatibilityDrawCount: 0,
+	visibleTerrainOneDrawReadyTileCount: 0,
+	visibleTerrainOneDrawBlockedTileCount: 0,
 	portalMaskDrawUnitCount: 0,
 	exteriorDomainDrawUnitCount: 0,
 	interiorDomainDrawUnitCount: 0,
@@ -262,6 +266,42 @@ export interface Webgl2WorldSubmitPassSchedule {
 	retainedDrawUnits: readonly Webgl2WorldDrawUnit[];
 	retainedDirectOpaqueDrawUnitCount: number;
 	retainedDirectBlendedDrawUnitCount: number;
+}
+
+export interface Webgl2TerrainTileSubmitReadinessPlan {
+	oneDrawTiles: readonly Webgl2TerrainTileResource[];
+	compatibilityTiles: readonly Webgl2TerrainTileResource[];
+	blockedTiles: readonly {
+		tile: Webgl2TerrainTileResource;
+		blockers: readonly string[];
+	}[];
+}
+
+export function planWebgl2TerrainTileSubmitReadiness(
+	terrainTiles: readonly Webgl2TerrainTileResource[],
+): Webgl2TerrainTileSubmitReadinessPlan {
+	const oneDrawTiles: Webgl2TerrainTileResource[] = [];
+	const compatibilityTiles: Webgl2TerrainTileResource[] = [];
+	const blockedTiles: Array<{
+		tile: Webgl2TerrainTileResource;
+		blockers: readonly string[];
+	}> = [];
+	for (const tile of terrainTiles) {
+		if (tile.oneDrawReadiness.status === "ready") {
+			oneDrawTiles.push(tile);
+		} else {
+			blockedTiles.push({
+				tile,
+				blockers: tile.oneDrawReadiness.blockers,
+			});
+		}
+		compatibilityTiles.push(tile);
+	}
+	return {
+		oneDrawTiles,
+		compatibilityTiles,
+		blockedTiles,
+	};
 }
 
 export function createEmptyWebgl2WorldSubmitMetrics(): Webgl2WorldSubmitMetrics {
@@ -396,6 +436,8 @@ export function submitWebgl2FlatWorldDrawUnits({
 	rgbaTexturePageFamilySubmitRoute?: Webgl2RgbaTexturePageFamilySubmitRoute;
 	terrainBackfaceCulling?: boolean;
 }): Webgl2WorldSubmitMetrics {
+	const terrainReadinessPlan =
+		planWebgl2TerrainTileSubmitReadiness(terrainTiles);
 	const metrics: Webgl2WorldSubmitMetrics = {
 		...EMPTY_SUBMIT_METRICS,
 		visibleDrawUnitCount: drawUnits.length,
@@ -404,6 +446,10 @@ export function submitWebgl2FlatWorldDrawUnits({
 			(total, tile) => total + tile.compatibilityDraws.length,
 			0,
 		),
+		visibleTerrainOneDrawReadyTileCount:
+			terrainReadinessPlan.oneDrawTiles.length,
+		visibleTerrainOneDrawBlockedTileCount:
+			terrainReadinessPlan.blockedTiles.length,
 		portalMaskDrawUnitCount,
 		exteriorDomainDrawUnitCount,
 		interiorDomainDrawUnitCount,
@@ -483,7 +529,7 @@ export function submitWebgl2FlatWorldDrawUnits({
 		program,
 		terrainBlendProgram,
 		viewProjectionMatrix,
-		terrainTiles,
+		terrainTiles: terrainReadinessPlan.compatibilityTiles,
 		terrainBackfaceCulling,
 		metrics,
 	});

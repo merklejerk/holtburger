@@ -9,6 +9,7 @@ import {
 	partitionWebgl2SceneDomainDrawUnits,
 	planWebgl2FlatWorldSubmitOrder,
 	planWebgl2PortalMaskSubmitOrder,
+	planWebgl2TerrainTileSubmitReadiness,
 	planWebgl2TerrainTileSubmitOrder,
 	planWebgl2WorldSubmitPassSchedule,
 	submitWebgl2FlatWorldDrawUnits,
@@ -115,6 +116,45 @@ describe("planWebgl2FlatWorldSubmitOrder", () => {
 				new Map(),
 			),
 		).toThrow("missing WebGL2 terrain tile missing-terrain");
+	});
+
+	it("partitions terrain tiles by one-draw readiness while retaining compatibility routing", () => {
+		const readyTile = createTerrainTile({
+			id: "terrain-tile/ready",
+			oneDrawReadiness: {
+				status: "ready",
+				layerEntryCount: 1,
+				texturePageBindingCount: 1,
+				colorPageBindingCount: 1,
+				maskPageBindingCount: 0,
+			},
+		});
+		const blockedTile = createTerrainTile({
+			id: "terrain-tile/blocked",
+			oneDrawReadiness: {
+				status: "blocked",
+				blockers: ["missing terrain color page"],
+			},
+		});
+
+		const plan = planWebgl2TerrainTileSubmitReadiness([
+			blockedTile,
+			readyTile,
+		]);
+
+		expect(plan.oneDrawTiles.map((tile) => tile.id)).toEqual([
+			"terrain-tile/ready",
+		]);
+		expect(plan.compatibilityTiles.map((tile) => tile.id)).toEqual([
+			"terrain-tile/blocked",
+			"terrain-tile/ready",
+		]);
+		expect(plan.blockedTiles).toEqual([
+			{
+				tile: blockedTile,
+				blockers: ["missing terrain color page"],
+			},
+		]);
 	});
 });
 
@@ -1223,8 +1263,13 @@ function createCameraFrame(): WorldRenderFrame["cameraFrame"] {
 
 function createTerrainTile({
 	id,
+	oneDrawReadiness = {
+		status: "blocked",
+		blockers: ["test terrain tile is not one-draw ready"],
+	},
 }: {
 	id: string;
+	oneDrawReadiness?: Webgl2TerrainTileResource["oneDrawReadiness"];
 }): Webgl2TerrainTileResource {
 	return {
 		id,
@@ -1236,6 +1281,7 @@ function createTerrainTile({
 		vertexArray: createVertexArrayResource(),
 		vertexBuffer: createBufferResource(),
 		uvBuffer: null,
+		layerSlotBuffer: null,
 		indexBuffer: createBufferResource(),
 		indexType: 0,
 		vertexCount: 0,
@@ -1249,6 +1295,11 @@ function createTerrainTile({
 		bvhItemKeys: ["terrain:landblock:12340000:quad:0"],
 		bvhFallbackReason: null,
 		compatibilityDraws: [],
+		layerPlan: null,
+		layerPlanBlockers: [],
+		texturePageBindings: [],
+		texturePageBlockers: [],
+		oneDrawReadiness,
 	};
 }
 

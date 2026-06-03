@@ -2474,6 +2474,12 @@ function mergeSceneDomainSubmitMetrics({
 		visibleTerrainCompatibilityDrawCount:
 			exteriorMetrics.visibleTerrainCompatibilityDrawCount +
 			interiorMetrics.visibleTerrainCompatibilityDrawCount,
+		visibleTerrainOneDrawReadyTileCount:
+			exteriorMetrics.visibleTerrainOneDrawReadyTileCount +
+			interiorMetrics.visibleTerrainOneDrawReadyTileCount,
+		visibleTerrainOneDrawBlockedTileCount:
+			exteriorMetrics.visibleTerrainOneDrawBlockedTileCount +
+			interiorMetrics.visibleTerrainOneDrawBlockedTileCount,
 		portalMaskDrawUnitCount,
 		exteriorDomainDrawUnitCount,
 		interiorDomainDrawUnitCount,

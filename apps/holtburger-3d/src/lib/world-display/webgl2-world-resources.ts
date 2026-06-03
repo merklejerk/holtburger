@@ -126,6 +126,7 @@ import { deriveTerrainTileBatchBvhBinding } from "./non-instanced-bvh-bindings";
 import {
 	collectTerrainTileCompatibilityTextureKeys,
 	createBlockedTerrainTileOneDrawReadiness,
+	describeTerrainBlendTextureAtlasEntryKey,
 	describeTerrainTileGeometrySignature,
 	describeTerrainTileGraphSignature,
 	deriveTerrainTileRenderCandidate,
@@ -1281,7 +1282,7 @@ function createTerrainTexturePageReadiness({
 		);
 		return null;
 	}
-	const atlasEntryKey = describeTerrainTexturePageAtlasEntryKey(ref);
+	const atlasEntryKey = describeTerrainBlendTextureAtlasEntryKey(ref);
 	const samplingKey = [
 		"terrain",
 		ref.role,
@@ -1312,19 +1313,6 @@ function describePreparedTextureAssetId(
 	preparedTexture: PreparedTexturePayload,
 ): string {
 	return `prepared-texture/${formatHex32(preparedTexture.renderSurfaceId)}?usage=${preparedTexture.usage}&out=${preparedTexture.outputFormat}&mips=${preparedTexture.mipPolicy}&cs=${preparedTexture.colorSpace}`;
-}
-
-function describeTerrainTexturePageAtlasEntryKey(
-	ref: TerrainBlendTextureRef,
-): string {
-	return [
-		"terrain-page",
-		ref.role,
-		formatHex32(ref.renderSurface.renderSurfaceId),
-		ref.renderSurface.formatRaw,
-		ref.renderSurface.width,
-		ref.renderSurface.height,
-	].join("/");
 }
 
 function describeTerrainTexturePageRefKey(ref: TerrainBlendTextureRef): string {
@@ -1375,7 +1363,7 @@ function resolveWebgl2TerrainTileTexturePageBindings(
 		const blockers = [...tile.texturePageBlockers];
 		const refs = collectTerrainTileTextureRefs(tile);
 		for (const ref of refs) {
-			const atlasEntryKey = describeTerrainTexturePageAtlasEntryKey(ref);
+			const atlasEntryKey = describeTerrainBlendTextureAtlasEntryKey(ref);
 			const placement = placementsByEntryKey.get(atlasEntryKey) ?? null;
 			if (!placement) {
 				blockers.push(

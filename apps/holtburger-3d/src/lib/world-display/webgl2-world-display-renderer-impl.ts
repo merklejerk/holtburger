@@ -42,6 +42,10 @@ import {
 	type Webgl2IndexedPalettedFamilyWorldProgram,
 } from "./webgl2/families/indexed-paletted-family-submit";
 import {
+	createWebgl2TerrainFamilyWorldProgram,
+	type Webgl2TerrainFamilyWorldProgram,
+} from "./webgl2/families/terrain-family-submit";
+import {
 	createWebgl2PortalCompositeTargetSet,
 	createWebgl2SceneDomainTargetSet,
 	type Webgl2PortalCompositeTarget,
@@ -817,6 +821,7 @@ interface Webgl2RenderResources {
 	indexedP8WorldProgram: Webgl2IndexedP8WorldProgram;
 	indexedP16WorldProgram: Webgl2IndexedP16WorldProgram;
 	terrainBlendWorldProgram: Webgl2TerrainBlendWorldProgram;
+	terrainFamilyWorldProgram: Webgl2TerrainFamilyWorldProgram;
 	rgbaTexturePageFamilyWorldProgram: Webgl2RgbaTexturePageFamilyWorldProgram;
 	indexedPalettedFamilyP8WorldProgram: Webgl2IndexedPalettedFamilyWorldProgram;
 	indexedPalettedFamilyP16WorldProgram: Webgl2IndexedPalettedFamilyWorldProgram;
@@ -1196,6 +1201,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 							program: currentResources.flatWorldProgram,
 							texturedProgram: currentResources.texturedWorldProgram,
 							terrainBlendProgram: currentResources.terrainBlendWorldProgram,
+							terrainFamilyProgram: currentResources.terrainFamilyWorldProgram,
 							indexedP8Program: currentResources.indexedP8WorldProgram,
 							indexedP16Program: currentResources.indexedP16WorldProgram,
 							rgbaTexturePageFamilyProgram:
@@ -1718,6 +1724,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			program: resources.flatWorldProgram,
 			texturedProgram: resources.texturedWorldProgram,
 			terrainBlendProgram: resources.terrainBlendWorldProgram,
+			terrainFamilyProgram: resources.terrainFamilyWorldProgram,
 			indexedP8Program: resources.indexedP8WorldProgram,
 			indexedP16Program: resources.indexedP16WorldProgram,
 			rgbaTexturePageFamilyProgram: resources.rgbaTexturePageFamilyWorldProgram,
@@ -2224,6 +2231,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		resources.indexedP8WorldProgram.dispose();
 		resources.indexedP16WorldProgram.dispose();
 		resources.terrainBlendWorldProgram.dispose();
+		resources.terrainFamilyWorldProgram.dispose();
 		resources.rgbaTexturePageFamilyWorldProgram.dispose();
 		resources.indexedPalettedFamilyP8WorldProgram.dispose();
 		resources.indexedPalettedFamilyP16WorldProgram.dispose();
@@ -2480,6 +2488,15 @@ function mergeSceneDomainSubmitMetrics({
 		visibleTerrainOneDrawBlockedTileCount:
 			exteriorMetrics.visibleTerrainOneDrawBlockedTileCount +
 			interiorMetrics.visibleTerrainOneDrawBlockedTileCount,
+		terrainOneDrawShaderDrawCallCount:
+			exteriorMetrics.terrainOneDrawShaderDrawCallCount +
+			interiorMetrics.terrainOneDrawShaderDrawCallCount,
+		terrainOneDrawSubmittedTileCount:
+			exteriorMetrics.terrainOneDrawSubmittedTileCount +
+			interiorMetrics.terrainOneDrawSubmittedTileCount,
+		terrainOneDrawSubmittedTriangleCount:
+			exteriorMetrics.terrainOneDrawSubmittedTriangleCount +
+			interiorMetrics.terrainOneDrawSubmittedTriangleCount,
 		portalMaskDrawUnitCount,
 		exteriorDomainDrawUnitCount,
 		interiorDomainDrawUnitCount,
@@ -2778,6 +2795,7 @@ function createTriangleResources(
 		indexedP8WorldProgram: createIndexedP8WorldProgram(gl),
 		indexedP16WorldProgram: createIndexedP16WorldProgram(gl),
 		terrainBlendWorldProgram: createTerrainBlendWorldProgram(gl),
+		terrainFamilyWorldProgram: createWebgl2TerrainFamilyWorldProgram(gl),
 		rgbaTexturePageFamilyWorldProgram:
 			createRgbaTexturePageFamilyWorldProgram(gl),
 		indexedPalettedFamilyP8WorldProgram:

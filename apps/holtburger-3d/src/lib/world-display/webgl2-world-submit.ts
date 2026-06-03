@@ -36,6 +36,10 @@ import {
 	type Webgl2DirectDrawPrograms,
 	type Webgl2DirectProgramKind,
 } from "./webgl2/families/direct-family-adapters";
+import {
+	submitWebgl2TerrainFamilyTiles,
+	type Webgl2TerrainFamilyWorldProgram,
+} from "./webgl2/families/terrain-family-submit";
 
 export type Webgl2FlatWorldProgram = Webgl2ProgramResource<
 	"position",
@@ -120,6 +124,9 @@ export interface Webgl2WorldSubmitMetrics {
 	visibleTerrainCompatibilityDrawCount: number;
 	visibleTerrainOneDrawReadyTileCount: number;
 	visibleTerrainOneDrawBlockedTileCount: number;
+	terrainOneDrawShaderDrawCallCount: number;
+	terrainOneDrawSubmittedTileCount: number;
+	terrainOneDrawSubmittedTriangleCount: number;
 	portalMaskDrawUnitCount: number;
 	exteriorDomainDrawUnitCount: number;
 	interiorDomainDrawUnitCount: number;
@@ -179,6 +186,9 @@ const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	visibleTerrainCompatibilityDrawCount: 0,
 	visibleTerrainOneDrawReadyTileCount: 0,
 	visibleTerrainOneDrawBlockedTileCount: 0,
+	terrainOneDrawShaderDrawCallCount: 0,
+	terrainOneDrawSubmittedTileCount: 0,
+	terrainOneDrawSubmittedTriangleCount: 0,
 	portalMaskDrawUnitCount: 0,
 	exteriorDomainDrawUnitCount: 0,
 	interiorDomainDrawUnitCount: 0,
@@ -319,6 +329,7 @@ export function submitWebgl2FlatWorldFrame({
 	program,
 	texturedProgram,
 	terrainBlendProgram,
+	terrainFamilyProgram,
 	indexedP8Program,
 	indexedP16Program,
 	rgbaTexturePageFamilyProgram,
@@ -344,6 +355,7 @@ export function submitWebgl2FlatWorldFrame({
 	program: Webgl2FlatWorldProgram;
 	texturedProgram: Webgl2TexturedWorldProgram;
 	terrainBlendProgram: Webgl2TerrainBlendWorldProgram;
+	terrainFamilyProgram?: Webgl2TerrainFamilyWorldProgram;
 	indexedP8Program: Webgl2IndexedP8WorldProgram;
 	indexedP16Program: Webgl2IndexedP16WorldProgram;
 	rgbaTexturePageFamilyProgram?: Webgl2RgbaTexturePageFamilyWorldProgram;
@@ -368,6 +380,7 @@ export function submitWebgl2FlatWorldFrame({
 		program,
 		texturedProgram,
 		terrainBlendProgram,
+		terrainFamilyProgram,
 		indexedP8Program,
 		indexedP16Program,
 		rgbaTexturePageFamilyProgram,
@@ -390,6 +403,7 @@ export function submitWebgl2FlatWorldDrawUnits({
 	program,
 	texturedProgram,
 	terrainBlendProgram,
+	terrainFamilyProgram,
 	indexedP8Program,
 	indexedP16Program,
 	rgbaTexturePageFamilyProgram,
@@ -420,6 +434,7 @@ export function submitWebgl2FlatWorldDrawUnits({
 	program: Webgl2FlatWorldProgram;
 	texturedProgram: Webgl2TexturedWorldProgram;
 	terrainBlendProgram: Webgl2TerrainBlendWorldProgram;
+	terrainFamilyProgram?: Webgl2TerrainFamilyWorldProgram;
 	indexedP8Program: Webgl2IndexedP8WorldProgram;
 	indexedP16Program: Webgl2IndexedP16WorldProgram;
 	rgbaTexturePageFamilyProgram?: Webgl2RgbaTexturePageFamilyWorldProgram;
@@ -523,13 +538,36 @@ export function submitWebgl2FlatWorldDrawUnits({
 		schedule,
 		metrics,
 	});
+	if (
+		terrainFamilyProgram &&
+		rgbaTexturePageFamilyResources.generation &&
+		terrainReadinessPlan.oneDrawTiles.length > 0
+	) {
+		const terrainFamilyMetrics = submitWebgl2TerrainFamilyTiles({
+			gl,
+			stateCache,
+			program: terrainFamilyProgram,
+			viewProjectionMatrix,
+			terrainTiles: terrainReadinessPlan.oneDrawTiles,
+			generation: rgbaTexturePageFamilyResources.generation,
+			terrainBackfaceCulling,
+		});
+		metrics.drawCallCount += terrainFamilyMetrics.shaderDrawCallCount;
+		metrics.triangleCount += terrainFamilyMetrics.submittedTriangleCount;
+		metrics.terrainOneDrawShaderDrawCallCount =
+			terrainFamilyMetrics.shaderDrawCallCount;
+		metrics.terrainOneDrawSubmittedTileCount =
+			terrainFamilyMetrics.submittedTileCount;
+		metrics.terrainOneDrawSubmittedTriangleCount =
+			terrainFamilyMetrics.submittedTriangleCount;
+	}
 	submitWebgl2TerrainTileCompatibilityPass({
 		gl,
 		stateCache,
 		program,
 		terrainBlendProgram,
 		viewProjectionMatrix,
-		terrainTiles: terrainReadinessPlan.compatibilityTiles,
+		terrainTiles: terrainReadinessPlan.blockedTiles.map((entry) => entry.tile),
 		terrainBackfaceCulling,
 		metrics,
 	});

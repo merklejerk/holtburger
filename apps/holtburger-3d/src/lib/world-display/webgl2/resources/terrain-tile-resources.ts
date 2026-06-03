@@ -1,5 +1,8 @@
 import { formatHex32 } from "../../../landblocks";
-import type { TerrainBlendPlan } from "../../terrain-blend-plan";
+import type {
+	TerrainBlendPlan,
+	TerrainBlendTextureRef,
+} from "../../terrain-blend-plan";
 import type { TerrainTileLayerPlan } from "../../terrain-tile-plan";
 import type { RenderMat4, RenderVec4 } from "../../render-math";
 import type { RenderBvhItemKey } from "../../prepared-bvh-visibility";
@@ -197,6 +200,19 @@ export function collectTerrainTileCompatibilityTextureKeys(
 	});
 }
 
+export function describeTerrainBlendTextureAtlasEntryKey(
+	ref: TerrainBlendTextureRef,
+): string {
+	return [
+		"terrain-page",
+		ref.role,
+		formatHex32(ref.renderSurface.renderSurfaceId),
+		ref.renderSurface.formatRaw,
+		ref.renderSurface.width,
+		ref.renderSurface.height,
+	].join("/");
+}
+
 export function createBlockedTerrainTileOneDrawReadiness(
 	blockers: readonly string[],
 ): Webgl2TerrainTileOneDrawReadiness {
@@ -249,26 +265,92 @@ function collectTerrainTileOneDrawBlockers(
 	const requiresColorPages =
 		resource.layerPlan?.layerEntries.some((entry) => entry.colorRefCount > 0) ??
 		false;
+	const colorTextureIndices = collectTerrainPageTextureIndices(
+		resource.texturePageBindings.filter(
+			(binding) => binding.family === "terrain-color",
+		),
+	);
 	if (
 		requiresColorPages &&
-		!resource.texturePageBindings.some(
-			(binding) => binding.family === "terrain-color",
-		)
+		colorTextureIndices.length === 0
 	) {
 		blockers.push("terrain tile one-draw path has no terrain color page bindings");
+	}
+	if (colorTextureIndices.length > 1) {
+		blockers.push(
+			`terrain tile one-draw path requires ${colorTextureIndices.length} terrain color atlas textures`,
+		);
 	}
 	const requiresMaskPages =
 		resource.layerPlan?.layerEntries.some((entry) => entry.maskRefCount > 0) ??
 		false;
+	const maskTextureIndices = collectTerrainPageTextureIndices(
+		resource.texturePageBindings.filter(
+			(binding) => binding.family === "terrain-mask",
+		),
+	);
 	if (
 		requiresMaskPages &&
-		!resource.texturePageBindings.some(
-			(binding) => binding.family === "terrain-mask",
-		)
+		maskTextureIndices.length === 0
 	) {
 		blockers.push("terrain tile one-draw path has no terrain mask page bindings");
 	}
+	if (maskTextureIndices.length > 1) {
+		blockers.push(
+			`terrain tile one-draw path requires ${maskTextureIndices.length} terrain mask atlas textures`,
+		);
+	}
+	for (const ref of collectTerrainTileLayerTextureRefs(resource)) {
+		const atlasEntryKey = describeTerrainBlendTextureAtlasEntryKey(ref);
+		const expectedFamily = ref.role === "mask" ? "terrain-mask" : "terrain-color";
+		if (
+			!resource.texturePageBindings.some(
+				(binding) =>
+					binding.family === expectedFamily &&
+					binding.atlasEntryKey === atlasEntryKey &&
+					binding.textureIndex !== null &&
+					binding.rect !== null,
+			)
+		) {
+			blockers.push(
+				`terrain tile one-draw path is missing ${expectedFamily} binding ${atlasEntryKey}`,
+			);
+		}
+	}
 	return [...new Set(blockers)].sort();
+}
+
+function collectTerrainPageTextureIndices(
+	bindings: readonly Webgl2TerrainTileTexturePageBinding[],
+): number[] {
+	return [
+		...new Set(
+			bindings.flatMap((binding) =>
+				binding.textureIndex === null ? [] : [binding.textureIndex],
+			),
+		),
+	].sort((left, right) => left - right);
+}
+
+function collectTerrainTileLayerTextureRefs(
+	resource: Webgl2TerrainTileResource,
+): TerrainBlendTextureRef[] {
+	const refs =
+		resource.layerPlan?.layerEntries.flatMap((entry) => [
+			entry.plan.base,
+			...entry.plan.overlays.flatMap((overlay) => [
+				overlay.terrain,
+				overlay.alpha,
+			]),
+			...entry.plan.roads.flatMap((road) => [road.road, road.alpha]),
+		]) ?? [];
+	const refsByKey = new Map(
+		refs.map((ref) => [
+			`${ref.role}/${describeTerrainBlendTextureAtlasEntryKey(ref)}`,
+			ref,
+		] as const),
+	);
+	return [...refsByKey.values()];
 }
 
 function describeTerrainTileOneDrawReadiness(

@@ -385,23 +385,56 @@ Remaining Phase A work moved into immediate Phase A.5 below.
 
 ### Phase A.5: Descriptor Metrics and Indexed Atlas Planner Prep
 
+Status: complete as of `2026-06-03`.
+
 This is an immediate interim phase before Phase B. It exists because Phase A left two small but useful
 prep gaps that should be closed before adding WebGL atlas resources:
 
-- Add descriptor-backed indexed candidate metrics:
+- Added descriptor-backed indexed candidate metrics:
   - indexed descriptor draw unit count;
   - descriptor-backed compacted indexed candidate count;
   - standalone direct indexed resource count;
   - compacted indexed draw units still uploading standalone direct resources.
-- Add pure indexed resource atlas planner types and tests:
+- Added pure indexed resource atlas planner types and tests:
   - P8 index page placement is deterministic;
   - Index16 index page placement is deterministic;
   - palette row placement is deterministic and tight, not max-size square-page based;
   - duplicate index texture keys validate matching format/dimensions/source identity;
   - duplicate palette texture keys validate matching color count/source identity;
   - atlas failures are indexed-local and do not affect RGBA/detail atlas placement.
-- Replace test helper shims where practical with a small descriptor fixture builder and a direct
+- Replaced test helper shims where practical with a small descriptor fixture builder and a direct
   resource fixture builder that composes the descriptor.
+
+Validation:
+
+- `npm exec vitest -- src/lib/world-display/texture-pages/indexed-resource-atlas-planner.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-direct-render-family.test.ts --run`
+  from `apps/holtburger-3d`
+  - Result: 4 test files passed, 57 tests passed.
+- `npm run lint:ts` from `apps/holtburger-3d`
+  - Result: passed.
+
+Decisions and course corrections:
+
+- The indexed planner is separate from `TexturePageAtlasPlan`. This keeps data-texture atlas policy
+  separate from RGBA/detail atlas policy and avoids mixing sampler/filtering assumptions.
+- Index texel pages use the existing rectangle layout planner with zero gutter. That planner still
+  allocates max-size pages, so Phase B should measure index atlas memory before assuming this is the
+  final allocation shape.
+- Palette pages use a custom row planner. It creates tight `width x row-count` textures rather than
+  max-size square atlas pages.
+- The planner validates duplicate keys by comparing dimensions/format and byte contents. That is
+  stricter than object identity and should catch accidental key collisions before WebGL upload.
+- The descriptor metrics are first-class `WorldRenderMetrics` fields and also appear in
+  `materialTypeCounts` under `webgl2-indexed-*` keys for debug/report visibility.
+
+Remaining debt before Phase B:
+
+- `Webgl2IndexedMaterialResources extends Webgl2IndexedMaterialDescriptor` remains as the main legacy
+  shim. Phase B can proceed with it, but the direct resource type should eventually compose a
+  `descriptor` field instead of inheriting descriptor fields.
+- Phase B should decide whether indexed atlas resource lifecycle gets a deliberately separate
+  `indexedResourceAtlasGeneration` store field or a small shared lifecycle helper. Do not reuse the
+  RGBA/detail `textureAtlasGeneration` type directly.
 
 ### Phase B: Resource Lifecycle and WebGL Atlas Generation
 
@@ -411,6 +444,10 @@ prep gaps that should be closed before adding WebGL atlas resources:
 - Add lifecycle cleanup and resource-store metrics.
 - Keep direct indexed resources unchanged.
 - Add tests for upload format, sampler state, and retained resource counts.
+- Feed atlas candidates from `Webgl2IndexedMaterialDescriptor`, not from direct indexed WebGL texture
+  resources.
+- Keep the existing direct indexed resource upload path until Phase F removes avoidable standalone
+  uploads for compacted indexed draw units.
 
 ### Phase C: Material Table and Shader Addressing
 
@@ -490,8 +527,8 @@ Expected cleanup targets:
   interim shim while direct indexed submit and compacted indexed planning both coexist in the same
   draw unit. Once atlas planning is descriptor-first, direct resources should compose the descriptor
   instead of inheriting from it.
-- Test helpers that set `indexedMaterialDescriptor: indexedMaterial`: replace with explicit descriptor
-  fixtures before or during Phase A.5 so tests reflect the intended production split.
+- Test helpers that set `indexedMaterialDescriptor: indexedMaterial`: addressed in Phase A.5 for the
+  direct-render and world-submit helpers by composing explicit descriptor fixtures.
 - `collectIndexedMaterialTextureKeys`: make this retain only direct indexed textures after atlas submit
   can replace compacted indexed units.
 - `Webgl2TextureAtlasGenerationResource`: keep RGBA/detail-specific, or extract shared lifecycle

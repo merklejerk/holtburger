@@ -29,7 +29,10 @@ import type { Webgl2RgbaTexturePageFamilyWorldProgram } from "./webgl2/families/
 import type { Webgl2IndexedPalettedFamilyWorldProgram } from "./webgl2/families/indexed-paletted-family-submit";
 import type { Webgl2TerrainFamilyWorldProgram } from "./webgl2/families/terrain-family-submit";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
-import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
+import type {
+	Webgl2IndexedMaterialDescriptor,
+	Webgl2WorldDrawUnit,
+} from "./webgl2-world-resources";
 import {
 	Webgl2StateCache,
 	type Webgl2StateCacheGl,
@@ -1670,7 +1673,9 @@ function createDrawUnit({
 		},
 		textureKey: null,
 		texture,
-		indexedMaterialDescriptor: indexedMaterial,
+		indexedMaterialDescriptor: indexedMaterial
+			? createIndexedMaterialDescriptor(indexedMaterial)
+			: null,
 		indexedMaterial,
 		detailOverlay: null,
 		texturePageBindings:
@@ -2085,21 +2090,37 @@ function createIndexedMaterial(
 		Webgl2WorldDrawUnit["indexedMaterial"]
 	>["indexFormat"],
 ): NonNullable<Webgl2WorldDrawUnit["indexedMaterial"]> {
-	return {
+	const descriptor = createIndexedMaterialDescriptor({
 		key: `indexed-${indexFormat}`,
 		indexFormat,
 		indexTextureKey: "index",
 		paletteTextureKey: "palette",
+	});
+	return {
+		...descriptor,
 		indexTexture: createTextureResource({} as WebGLTexture),
 		paletteTexture: createTextureResource({} as WebGLTexture),
-		width: 2,
-		height: 1,
-		indexSourceBytes: Uint8Array.from([0, 1]),
-		paletteColorCount: 2,
-		paletteRgbaBytes: Uint8Array.from([0, 0, 0, 0, 255, 255, 255, 255]),
-		wrapS: "clamp",
-		wrapT: "repeat",
-		clipThreshold: -1,
+	};
+}
+
+function createIndexedMaterialDescriptor(
+	options: Partial<Webgl2IndexedMaterialDescriptor> = {},
+): Webgl2IndexedMaterialDescriptor {
+	return {
+		key: options.key ?? "indexed",
+		indexFormat: options.indexFormat ?? "p8",
+		indexTextureKey: options.indexTextureKey ?? "index",
+		paletteTextureKey: options.paletteTextureKey ?? "palette",
+		width: options.width ?? 2,
+		height: options.height ?? 1,
+		indexSourceBytes: options.indexSourceBytes ?? Uint8Array.from([0, 1]),
+		paletteColorCount: options.paletteColorCount ?? 2,
+		paletteRgbaBytes:
+			options.paletteRgbaBytes ??
+			Uint8Array.from([0, 0, 0, 0, 255, 255, 255, 255]),
+		wrapS: options.wrapS ?? "clamp",
+		wrapT: options.wrapT ?? "repeat",
+		clipThreshold: options.clipThreshold ?? -1,
 	};
 }
 

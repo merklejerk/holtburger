@@ -345,7 +345,7 @@ export function planWebgl2DirectDrawRoute({
 			? resolveDrawUnitBaseTexturePageBinding(drawUnit)
 			: null;
 	const activeBaseTexture =
-		texturePageBinding?.texture.texture ?? drawUnit.texture?.texture ?? null;
+		texturePageBinding?.texture?.texture ?? drawUnit.texture?.texture ?? null;
 	if (indexedProgram) {
 		return {
 			drawUnit,

@@ -785,17 +785,9 @@ describe("webgl2 world resources", () => {
 		expect(store.drawUnits).toHaveLength(1);
 		expect(store.drawUnits[0]?.materialKind).toBe("indexed-paletted");
 		expect(store.drawUnits[0]?.uvBuffer).not.toBeNull();
-		expect(store.drawUnits[0]?.indexedMaterial).toMatchObject({
-			indexFormat: "p8",
-			width: 2,
-			height: 1,
-			paletteColorCount: 2,
-		});
+		expect(store.drawUnits[0]?.indexedMaterial).toBeNull();
 		expect(store.drawUnits[0]?.indexedMaterialDescriptor).toMatchObject({
 			indexFormat: "p8",
-			indexTextureKey: store.drawUnits[0]?.indexedMaterial?.indexTextureKey,
-			paletteTextureKey:
-				store.drawUnits[0]?.indexedMaterial?.paletteTextureKey,
 			width: 2,
 			height: 1,
 			paletteColorCount: 2,
@@ -803,21 +795,21 @@ describe("webgl2 world resources", () => {
 		});
 		expect(
 			store.drawUnits[0]?.indexedMaterialDescriptor?.indexSourceBytes,
-		).toBe(gl.textureUploads[0]?.data);
+		).toEqual(Uint8Array.from([0, 1]));
 		expect(
 			store.drawUnits[0]?.indexedMaterialDescriptor?.paletteRgbaBytes,
-		).toBe(gl.textureUploads[1]?.data);
-		expect(store.textureCount).toBe(2);
-		expect(store.indexedTextureCount).toBe(1);
-		expect(store.paletteTextureCount).toBe(1);
+		).toHaveLength(8);
+		expect(store.textureCount).toBe(0);
+		expect(store.indexedTextureCount).toBe(0);
+		expect(store.paletteTextureCount).toBe(0);
 		expect(store.indexedMaterialDescriptorDrawUnitCount).toBe(1);
 		expect(
 			store.indexedMaterialDescriptorCompactionCandidateCount,
 		).toBe(1);
-		expect(store.standaloneIndexedMaterialResourceDrawUnitCount).toBe(1);
+		expect(store.standaloneIndexedMaterialResourceDrawUnitCount).toBe(0);
 		expect(
 			store.compactedIndexedMaterialStandaloneResourceDrawUnitCount,
-		).toBe(1);
+		).toBe(0);
 		expect(store.indexedResourceAtlasCandidateDrawUnitCount).toBe(1);
 		expect(store.indexedResourceAtlasIndexTextureCount).toBe(1);
 		expect(store.indexedResourceAtlasPaletteTextureCount).toBe(1);
@@ -886,8 +878,6 @@ describe("webgl2 world resources", () => {
 		expect(
 			gl.textureUploads.map(({ width, height }) => ({ width, height })),
 		).toEqual([
-			{ width: 2, height: 1 },
-			{ width: 2, height: 1 },
 			{ width: 4096, height: 4096 },
 			{ width: 2, height: 1 },
 		]);
@@ -920,22 +910,20 @@ describe("webgl2 world resources", () => {
 			renderChunkTransforms: [createChunkTransform()],
 		});
 
-		expect(store.drawUnits[0]?.indexedMaterial).toMatchObject({
+		expect(store.drawUnits[0]?.indexedMaterial).toBeNull();
+		expect(store.drawUnits[0]?.indexedMaterialDescriptor).toMatchObject({
 			indexFormat: "index16",
 			width: 2,
 			height: 1,
 			paletteColorCount: 258,
 		});
 		expect(gl.textureUploads[0]).toMatchObject({
-			width: 2,
-			height: 1,
+			width: 4096,
+			height: 4096,
 			internalFormat: gl.RG8,
 			format: gl.RG,
 			type: gl.UNSIGNED_BYTE,
 		});
-		expect(gl.textureUploads[0]?.data).toEqual(
-			Uint8Array.from([0x00, 0x00, 0x01, 0x01]),
-		);
 	});
 
 	it("merges compacted indexed slices across visibility partitions", () => {

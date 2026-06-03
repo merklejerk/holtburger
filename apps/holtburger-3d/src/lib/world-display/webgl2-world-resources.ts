@@ -518,15 +518,11 @@ export function syncWebgl2WorldResources({
 				retainedDrawUnitIds,
 				materialTextureCapabilities,
 				textureFilteringMode,
+				uploadIndexedMaterialResources: false,
 			});
 			nextDrawUnits.push(webgl2DrawUnit);
 			if (webgl2DrawUnit.textureKey) {
 				retainedTextureKeys.add(webgl2DrawUnit.textureKey);
-			}
-			for (const textureKey of collectIndexedMaterialTextureKeys(
-				webgl2DrawUnit,
-			)) {
-				retainedTextureKeys.add(textureKey);
 			}
 			if (webgl2DrawUnit.detailOverlay) {
 				retainedTextureKeys.add(webgl2DrawUnit.detailOverlay.key);
@@ -718,14 +714,6 @@ export function syncWebgl2WorldResources({
 				drawUnit.indexedMaterialDescriptor !== null &&
 				compactedIndexedDrawUnitIds.has(drawUnit.id),
 		).length;
-	store.standaloneIndexedMaterialResourceDrawUnitCount =
-		store.drawUnits.filter((drawUnit) => drawUnit.indexedMaterial !== null).length;
-	store.compactedIndexedMaterialStandaloneResourceDrawUnitCount =
-		store.drawUnits.filter(
-			(drawUnit) =>
-				drawUnit.indexedMaterial !== null &&
-				compactedIndexedDrawUnitIds.has(drawUnit.id),
-		).length;
 	store.indexedResourceAtlasPlan = planIndexedResourceAtlasForCompactedDrawUnits({
 		drawUnits: store.drawUnits,
 		compactedIndexedDrawUnitIds,
@@ -741,6 +729,33 @@ export function syncWebgl2WorldResources({
 		),
 		8,
 	);
+	const atlasPlacedCompactedIndexedDrawUnitIds =
+		collectAtlasPlacedCompactedIndexedDrawUnitIds({
+			compactedIndexedDrawUnitIds,
+			plan: store.indexedResourceAtlasPlan,
+		});
+	syncWebgl2DirectIndexedMaterialResources({
+		gl,
+		store,
+		stagedDrawUnits: assembly.drawUnits,
+		retainedDirectIndexedDrawUnitIds: collectRetainedDirectIndexedDrawUnitIds({
+			drawUnits: store.drawUnits,
+			atlasPlacedCompactedIndexedDrawUnitIds,
+		}),
+	});
+	store.standaloneIndexedMaterialResourceDrawUnitCount =
+		store.drawUnits.filter((drawUnit) => drawUnit.indexedMaterial !== null).length;
+	store.compactedIndexedMaterialStandaloneResourceDrawUnitCount =
+		store.drawUnits.filter(
+			(drawUnit) =>
+				drawUnit.indexedMaterial !== null &&
+				compactedIndexedDrawUnitIds.has(drawUnit.id),
+		).length;
+	for (const drawUnit of store.drawUnits) {
+		for (const textureKey of collectIndexedMaterialTextureKeys(drawUnit)) {
+			retainedTextureKeys.add(textureKey);
+		}
+	}
 	syncWebgl2TextureAtlasGeneration({
 		gl,
 		store,
@@ -1906,6 +1921,7 @@ function createOrReuseWebgl2DrawUnit({
 	retainedDrawUnitIds,
 	materialTextureCapabilities,
 	textureFilteringMode,
+	uploadIndexedMaterialResources,
 }: {
 	assetState: AssetChannelState;
 	gl: WebGL2RenderingContext;
@@ -1914,6 +1930,7 @@ function createOrReuseWebgl2DrawUnit({
 	retainedDrawUnitIds: Set<string>;
 	materialTextureCapabilities: MaterialTextureCapabilities;
 	textureFilteringMode: TextureFilteringMode;
+	uploadIndexedMaterialResources: boolean;
 }): Webgl2WorldDrawUnit {
 	const geometrySignature = createGeometrySignature(drawUnit);
 	const previous = store.drawUnitsById.get(drawUnit.id);
@@ -1943,12 +1960,14 @@ function createOrReuseWebgl2DrawUnit({
 		previous.texture = resolveWebgl2DrawUnitTexture({ gl, store, drawUnit });
 		previous.indexedMaterialDescriptor =
 			resolveWebgl2IndexedMaterialDescriptor(drawUnit);
-		previous.indexedMaterial = resolveWebgl2IndexedMaterialResources({
-			gl,
-			store,
-			drawUnit,
-			descriptor: previous.indexedMaterialDescriptor,
-		});
+		previous.indexedMaterial = uploadIndexedMaterialResources
+			? resolveWebgl2IndexedMaterialResources({
+					gl,
+					store,
+					drawUnit,
+					descriptor: previous.indexedMaterialDescriptor,
+				})
+			: null;
 		previous.detailOverlay = resolveWebgl2DetailOverlayResources({
 			assetState,
 			gl,
@@ -1960,6 +1979,7 @@ function createOrReuseWebgl2DrawUnit({
 		previous.texturePageBindings = collectDirectDrawTexturePageBindings({
 			texture: previous.texture,
 			indexedMaterial: previous.indexedMaterial,
+			indexedMaterialDescriptor: previous.indexedMaterialDescriptor,
 			detailOverlay: previous.detailOverlay,
 			directTextureSamplingPolicy: previous.directTextureSamplingPolicy,
 			texturePageReadiness: previous.texturePageReadiness,
@@ -2034,12 +2054,14 @@ function createOrReuseWebgl2DrawUnit({
 	const texture = resolveWebgl2DrawUnitTexture({ gl, store, drawUnit });
 	const indexedMaterialDescriptor =
 		resolveWebgl2IndexedMaterialDescriptor(drawUnit);
-	const indexedMaterial = resolveWebgl2IndexedMaterialResources({
-		gl,
-		store,
-		drawUnit,
-		descriptor: indexedMaterialDescriptor,
-	});
+	const indexedMaterial = uploadIndexedMaterialResources
+		? resolveWebgl2IndexedMaterialResources({
+				gl,
+				store,
+				drawUnit,
+				descriptor: indexedMaterialDescriptor,
+			})
+		: null;
 	const detailOverlay = resolveWebgl2DetailOverlayResources({
 		assetState,
 		gl,
@@ -2054,6 +2076,7 @@ function createOrReuseWebgl2DrawUnit({
 	const texturePageBindings = collectDirectDrawTexturePageBindings({
 		texture,
 		indexedMaterial,
+		indexedMaterialDescriptor,
 		detailOverlay,
 		directTextureSamplingPolicy,
 		texturePageReadiness,
@@ -2304,6 +2327,85 @@ function requireIndexedMaterialDescriptor(
 		throw new Error(`Indexed draw unit ${drawUnit.id} has no descriptor.`);
 	}
 	return descriptor;
+}
+
+function collectAtlasPlacedCompactedIndexedDrawUnitIds({
+	compactedIndexedDrawUnitIds,
+	plan,
+}: {
+	compactedIndexedDrawUnitIds: ReadonlySet<string>;
+	plan: IndexedResourceAtlasPlan;
+}): ReadonlySet<string> {
+	const indexReadyDrawUnitIds = new Set(plan.indexReadyDrawUnitIds);
+	const paletteReadyDrawUnitIds = new Set(plan.paletteReadyDrawUnitIds);
+	return new Set(
+		[...compactedIndexedDrawUnitIds].filter(
+			(drawUnitId) =>
+				indexReadyDrawUnitIds.has(drawUnitId) &&
+				paletteReadyDrawUnitIds.has(drawUnitId),
+		),
+	);
+}
+
+function collectRetainedDirectIndexedDrawUnitIds({
+	drawUnits,
+	atlasPlacedCompactedIndexedDrawUnitIds,
+}: {
+	drawUnits: readonly Webgl2WorldDrawUnit[];
+	atlasPlacedCompactedIndexedDrawUnitIds: ReadonlySet<string>;
+}): ReadonlySet<string> {
+	return new Set(
+		drawUnits.flatMap((drawUnit) =>
+			drawUnit.indexedMaterialDescriptor &&
+			!atlasPlacedCompactedIndexedDrawUnitIds.has(drawUnit.id)
+				? [drawUnit.id]
+				: [],
+		),
+	);
+}
+
+function syncWebgl2DirectIndexedMaterialResources({
+	gl,
+	store,
+	stagedDrawUnits,
+	retainedDirectIndexedDrawUnitIds,
+}: {
+	gl: WebGL2RenderingContext;
+	store: Webgl2WorldResourceStore;
+	stagedDrawUnits: readonly StagedWorldDrawUnitAssembly[];
+	retainedDirectIndexedDrawUnitIds: ReadonlySet<string>;
+}): void {
+	const stagedDrawUnitById = new Map(
+		stagedDrawUnits.map((drawUnit) => [drawUnit.id, drawUnit] as const),
+	);
+	for (const drawUnit of store.drawUnits) {
+		if (!drawUnit.indexedMaterialDescriptor) {
+			drawUnit.indexedMaterial = null;
+			continue;
+		}
+		const stagedDrawUnit = stagedDrawUnitById.get(drawUnit.id);
+		if (!stagedDrawUnit) {
+			throw new Error(
+				`Cannot sync direct indexed resources for missing staged draw unit ${drawUnit.id}.`,
+			);
+		}
+		drawUnit.indexedMaterial = retainedDirectIndexedDrawUnitIds.has(drawUnit.id)
+			? resolveWebgl2IndexedMaterialResources({
+					gl,
+					store,
+					drawUnit: stagedDrawUnit,
+					descriptor: drawUnit.indexedMaterialDescriptor,
+				})
+			: null;
+		drawUnit.texturePageBindings = collectDirectDrawTexturePageBindings({
+			texture: drawUnit.texture,
+			indexedMaterial: drawUnit.indexedMaterial,
+			indexedMaterialDescriptor: drawUnit.indexedMaterialDescriptor,
+			detailOverlay: drawUnit.detailOverlay,
+			directTextureSamplingPolicy: drawUnit.directTextureSamplingPolicy,
+			texturePageReadiness: drawUnit.texturePageReadiness,
+		});
+	}
 }
 
 function destroyWebgl2DrawUnit(drawUnit: Webgl2WorldDrawUnit): void {

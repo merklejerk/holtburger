@@ -691,17 +691,53 @@ Remaining Phase E caveat:
 
 ### Phase F: Remove Avoidable Standalone Indexed Uploads
 
+Status: complete as of `2026-06-03`.
+
 After atlas submit is stable, stop uploading standalone index/palette textures for indexed draw units
 that are planned and submitted through the compacted indexed atlas path.
 
-Expected cleanup targets:
+Completed:
 
-- Split direct indexed texture resources from indexed material descriptor metadata.
-- Retain standalone indexed textures only for retained direct indexed materials.
-- Revisit `collectIndexedMaterialTextureKeys` so compacted indexed units do not pin standalone direct
-  resources.
-- Update texture count metrics to report retained direct indexed textures separately from indexed atlas
-  textures.
+- Changed WebGL draw-unit sync so indexed draw units are first created with descriptor metadata only.
+- Added descriptor-backed indexed texture-page bindings. Compaction planning still sees
+  `indexed-texels` and `palette-lookup` bindings without requiring standalone WebGL textures.
+- Delayed standalone indexed texture upload until after compaction planning and indexed atlas
+  placement are known.
+- Retain/upload standalone indexed textures only for indexed draw units that are not atlas-placed
+  compacted indexed units.
+- Updated indexed resource tests so compacted indexed draw units assert:
+  - descriptor metadata is present;
+  - `indexedMaterial` direct WebGL resources are absent;
+  - standalone indexed texture counts are `0`;
+  - indexed atlas generation still uploads the P8/Index16 data atlas and palette atlas.
+
+Validation:
+
+- `npm exec vitest -- src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-direct-render-family.test.ts src/lib/world-display/texture-page-binding.test.ts src/lib/world-display/compaction/compaction-family-planner.test.ts --run`
+  from `apps/holtburger-3d`
+  - Result: 5 test files passed, 79 tests passed.
+- `npm run lint:ts` from `apps/holtburger-3d`
+  - Result: passed.
+
+Decisions and course corrections:
+
+- `TexturePageBinding.texture` is now nullable. Descriptor-backed indexed bindings intentionally carry
+  no WebGL texture; they exist so compaction/material coverage can reason from CPU metadata.
+- Direct RGBA binding code was adjusted to tolerate nullable binding textures. Retained direct indexed
+  submit still requires `drawUnit.indexedMaterial`; compacted indexed draw units intentionally keep it
+  `null`.
+- Phase F did not fully rename `Webgl2WorldDrawUnit.indexedMaterial`. It now more honestly represents
+  direct WebGL resources, while `indexedMaterialDescriptor` is the compaction/atlas source of truth.
+
+Remaining debt after Phase F:
+
+- Add an explicit retained-direct indexed resource test for a non-atlas-placed indexed material if a
+  compact local fixture becomes available. Current tests cover the compacted path and direct submit
+  helpers, but not a full world-resource retained-direct indexed scene.
+- Consider renaming `indexedMaterial` to `directIndexedMaterialResources` to remove the final naming
+  ambiguity.
+- Runtime metrics should continue reporting direct indexed texture counts separately from indexed atlas
+  texture counts.
 
 ## Acceptance Criteria
 
@@ -734,16 +770,18 @@ Expected cleanup targets:
 
 ## Cleanup Targets
 
-- `Webgl2WorldDrawUnit.indexedMaterial`: rename or split so it no longer conflates descriptor metadata
-  with direct WebGL textures.
+- `Webgl2WorldDrawUnit.indexedMaterial`: Phase F split behavior so this field now contains only direct
+  WebGL resources and can be `null` for compacted atlas-backed indexed draw units. Rename it to
+  `directIndexedMaterialResources` when doing the next naming cleanup.
 - `Webgl2IndexedMaterialResources extends Webgl2IndexedMaterialDescriptor`: keep this only as an
   interim shim while direct indexed submit and compacted indexed planning both coexist in the same
   draw unit. Once atlas planning is descriptor-first, direct resources should compose the descriptor
   instead of inheriting from it.
 - Test helpers that set `indexedMaterialDescriptor: indexedMaterial`: addressed in Phase A.5 for the
   direct-render and world-submit helpers by composing explicit descriptor fixtures.
-- `collectIndexedMaterialTextureKeys`: make this retain only direct indexed textures after atlas submit
-  can replace compacted indexed units.
+- `collectIndexedMaterialTextureKeys`: addressed in Phase F for compacted atlas-backed indexed draw
+  units. It now sees only retained direct indexed resources because compacted indexed draw units keep
+  `indexedMaterial` null.
 - `indexedResourceAtlasGeneration`: separate lifecycle is intentional for Phase B. After Phase C/D
   prove the final resource shape, consider extracting a small shared atlas-generation lifecycle helper
   if RGBA/detail and indexed resources still duplicate graph lease or dispose patterns.

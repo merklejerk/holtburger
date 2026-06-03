@@ -7,13 +7,13 @@ import {
 } from "./webgl2/families/direct-family-adapters";
 import {
 	partitionWebgl2SceneDomainDrawUnits,
-	planWebgl2FlatWorldSubmitOrder,
+	planWebgl2WorldSubmitOrder,
 	planWebgl2PortalMaskSubmitOrder,
 	planWebgl2TerrainTileSubmitReadiness,
 	planWebgl2TerrainTileSubmitOrder,
 	planWebgl2WorldSubmitPassSchedule,
-	submitWebgl2FlatWorldDrawUnits,
-	submitWebgl2FlatWorldFrame,
+	submitWebgl2WorldDrawUnits,
+	submitWebgl2WorldFrame,
 	type Webgl2FlatWorldProgram,
 	type Webgl2IndexedP16WorldProgram,
 	type Webgl2IndexedP8WorldProgram,
@@ -35,7 +35,13 @@ import {
 	type Webgl2StateCacheGl,
 } from "./webgl2-state-cache";
 
-describe("planWebgl2FlatWorldSubmitOrder", () => {
+const TEST_CAMERA_POSITION: WorldRenderFrame["cameraFrame"]["position"] = {
+	x: 0,
+	y: 0,
+	z: 0,
+};
+
+describe("planWebgl2WorldSubmitOrder", () => {
 	it("sorts visible draw units by material and geometry key", () => {
 		const drawUnitsById = new Map<string, Webgl2WorldDrawUnit>([
 			["z", createDrawUnit({ id: "z", materialKey: "mat-b" })],
@@ -51,7 +57,7 @@ describe("planWebgl2FlatWorldSubmitOrder", () => {
 		]);
 
 		expect(
-			planWebgl2FlatWorldSubmitOrder(
+			planWebgl2WorldSubmitOrder(
 				createFrame(["z", "b", "a"]),
 				drawUnitsById,
 			).map((drawUnit) => drawUnit.id),
@@ -60,7 +66,7 @@ describe("planWebgl2FlatWorldSubmitOrder", () => {
 
 	it("fails when frame visibility references a missing draw unit", () => {
 		expect(() =>
-			planWebgl2FlatWorldSubmitOrder(createFrame(["missing"]), new Map()),
+			planWebgl2WorldSubmitOrder(createFrame(["missing"]), new Map()),
 		).toThrow("missing WebGL2 draw unit missing");
 	});
 
@@ -79,7 +85,7 @@ describe("planWebgl2FlatWorldSubmitOrder", () => {
 		const frame = createFrame(["mask", "world"]);
 
 		expect(
-			planWebgl2FlatWorldSubmitOrder(frame, drawUnitsById).map(
+			planWebgl2WorldSubmitOrder(frame, drawUnitsById).map(
 				(drawUnit) => drawUnit.id,
 			),
 		).toEqual(["world"]);
@@ -102,7 +108,7 @@ describe("planWebgl2FlatWorldSubmitOrder", () => {
 			).map((tile) => tile.id),
 		).toEqual(["terrain-tile/a"]);
 		expect(
-			planWebgl2FlatWorldSubmitOrder(
+			planWebgl2WorldSubmitOrder(
 				createFrameWithTerrainTiles(["terrain-tile/a"]),
 				new Map(),
 			),
@@ -371,7 +377,7 @@ describe("planWebgl2DirectDrawRoute", () => {
 
 });
 
-describe("submitWebgl2FlatWorldFrame", () => {
+describe("submitWebgl2WorldFrame", () => {
 	it("submits visible draw units through the state cache", () => {
 		const gl = new CapturingSubmitGl();
 		const stateCache = new Webgl2StateCache(gl);
@@ -412,7 +418,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			},
 		};
 
-		const metrics = submitWebgl2FlatWorldFrame({
+		const metrics = submitWebgl2WorldFrame({
 			gl: gl.asContext(),
 			stateCache,
 			program,
@@ -456,7 +462,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			],
 		]);
 
-		submitWebgl2FlatWorldFrame({
+		submitWebgl2WorldFrame({
 			gl: gl.asContext(),
 			stateCache,
 			program: createFlatProgram(),
@@ -490,7 +496,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			],
 		]);
 
-		const metrics = submitWebgl2FlatWorldFrame({
+		const metrics = submitWebgl2WorldFrame({
 			gl: gl.asContext(),
 			stateCache,
 			program: createFlatProgram(),
@@ -537,7 +543,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			],
 		]);
 
-		const metrics = submitWebgl2FlatWorldFrame({
+		const metrics = submitWebgl2WorldFrame({
 			gl: gl.asContext(),
 			stateCache,
 			program: createFlatProgram(),
@@ -577,7 +583,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			],
 		]);
 
-		const metrics = submitWebgl2FlatWorldFrame({
+		const metrics = submitWebgl2WorldFrame({
 			gl: gl.asContext(),
 			stateCache,
 			program: createFlatProgram(),
@@ -620,7 +626,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			],
 		]);
 
-		const metrics = submitWebgl2FlatWorldFrame({
+		const metrics = submitWebgl2WorldFrame({
 			gl: gl.asContext(),
 			stateCache,
 			program: createFlatProgram(),
@@ -651,7 +657,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			["staged", createDrawUnit({ id: "staged" })],
 		]);
 
-		const metrics = submitWebgl2FlatWorldFrame({
+		const metrics = submitWebgl2WorldFrame({
 			gl: gl.asContext(),
 			stateCache,
 			program: createFlatProgram(),
@@ -704,7 +710,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			["staged", createDrawUnit({ id: "staged" })],
 		]);
 
-		const metrics = submitWebgl2FlatWorldFrame({
+		const metrics = submitWebgl2WorldFrame({
 			gl: gl.asContext(),
 			stateCache,
 			program: createFlatProgram(),
@@ -747,7 +753,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		const stateCache = new Webgl2StateCache(gl);
 		const drawUnits = [createDrawUnit({ id: "visible" })];
 
-		const metrics = submitWebgl2FlatWorldDrawUnits({
+		const metrics = submitWebgl2WorldDrawUnits({
 			gl: gl.asContext(),
 			stateCache,
 			program: createFlatProgram(),
@@ -763,6 +769,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 				generation: createTextureAtlasGeneration(),
 			},
 			viewProjectionMatrix: createIdentityMat4(),
+			cameraPosition: TEST_CAMERA_POSITION,
 			drawUnits,
 			rgbaTexturePageFamilySubmitRoute: "scene-domain-interior",
 		});
@@ -801,7 +808,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			},
 		});
 
-		const metrics = submitWebgl2FlatWorldDrawUnits({
+		const metrics = submitWebgl2WorldDrawUnits({
 			gl: gl.asContext(),
 			stateCache,
 			program: createFlatProgram(),
@@ -819,6 +826,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 				}),
 			},
 			viewProjectionMatrix: createIdentityMat4(),
+			cameraPosition: TEST_CAMERA_POSITION,
 			drawUnits: [],
 			terrainTiles: [terrainTile],
 		});
@@ -827,6 +835,57 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		expect(metrics.terrainOneDrawSubmittedTileCount).toBe(1);
 		expect(gl.calls).toContain("drawElementsFor:terrain-ready");
 		expect(gl.boundTextures).toContain(atlasTexture);
+	});
+
+	it("uploads explicit camera position for terrain family detail fade", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+		const terrainTile = createTerrainTile({
+			id: "terrain-tile/ready",
+			vertexArrayLabel: "terrain-ready",
+			vertexCount: 6,
+			triangleCount: 2,
+			layerPlan: createTerrainLayerPlan(),
+			texturePageBindings: [
+				{
+					family: "terrain-color",
+					atlasEntryKey: "terrain-page/color/00000001/21/1/1",
+					textureIndex: 0,
+					rect: [1, 2, 3, 4],
+				},
+			],
+			oneDrawReadiness: {
+				status: "ready",
+				layerEntryCount: 1,
+				texturePageBindingCount: 1,
+				colorPageBindingCount: 1,
+				maskPageBindingCount: 0,
+			},
+		});
+
+		submitWebgl2WorldDrawUnits({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			terrainFamilyProgram: createTerrainFamilyProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			rgbaTexturePageFamilyResources: {
+				batches: [],
+				rgbaTexturePageFamilies: [],
+				generation: createTextureAtlasGeneration({
+					atlasEntryKey: "terrain-page/color/00000001/21/1/1",
+					family: "terrain-color",
+				}),
+			},
+			viewProjectionMatrix: createIdentityMat4(),
+			cameraPosition: { x: 11, y: 22, z: 33 },
+			drawUnits: [],
+			terrainTiles: [terrainTile],
+		});
+
+		expect(gl.uniform3fValues).toContainEqual([11, 22, 33]);
 	});
 
 	it("submits blended retained direct draw units after compacted opaque family draws", () => {
@@ -849,7 +908,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			}),
 		];
 
-		const metrics = submitWebgl2FlatWorldDrawUnits({
+		const metrics = submitWebgl2WorldDrawUnits({
 			gl: gl.asContext(),
 			stateCache,
 			program: createFlatProgram(),
@@ -865,6 +924,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 				generation: createTextureAtlasGeneration(),
 			},
 			viewProjectionMatrix: createIdentityMat4(),
+			cameraPosition: TEST_CAMERA_POSITION,
 			drawUnits,
 		});
 
@@ -911,7 +971,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			}),
 		];
 
-		const metrics = submitWebgl2FlatWorldDrawUnits({
+		const metrics = submitWebgl2WorldDrawUnits({
 			gl: gl.asContext(),
 			stateCache,
 			program: createFlatProgram(),
@@ -919,6 +979,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
 			viewProjectionMatrix: createIdentityMat4(),
+			cameraPosition: TEST_CAMERA_POSITION,
 			drawUnits,
 		});
 
@@ -947,7 +1008,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			}),
 		];
 
-		const metrics = submitWebgl2FlatWorldDrawUnits({
+		const metrics = submitWebgl2WorldDrawUnits({
 			gl: gl.asContext(),
 			stateCache,
 			program: createFlatProgram(),
@@ -963,6 +1024,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 				}),
 			},
 			viewProjectionMatrix: createIdentityMat4(),
+			cameraPosition: TEST_CAMERA_POSITION,
 			drawUnits,
 		});
 
@@ -986,7 +1048,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			createDrawUnit({ id: "static", kind: "static" }),
 		];
 
-		submitWebgl2FlatWorldDrawUnits({
+		submitWebgl2WorldDrawUnits({
 			gl: gl.asContext(),
 			stateCache,
 			program: createFlatProgram(),
@@ -994,6 +1056,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
 			viewProjectionMatrix: createIdentityMat4(),
+			cameraPosition: TEST_CAMERA_POSITION,
 			drawUnits,
 			terrainBackfaceCulling: true,
 		});
@@ -1011,7 +1074,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		const gl = new CapturingSubmitGl();
 		const stateCache = new Webgl2StateCache(gl);
 
-		submitWebgl2FlatWorldDrawUnits({
+		submitWebgl2WorldDrawUnits({
 			gl: gl.asContext(),
 			stateCache,
 			program: createFlatProgram(),
@@ -1019,6 +1082,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
 			viewProjectionMatrix: createIdentityMat4(),
+			cameraPosition: TEST_CAMERA_POSITION,
 			drawUnits: [createDrawUnit({ id: "static", kind: "static" })],
 		});
 
@@ -1067,7 +1131,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			],
 		]);
 
-		submitWebgl2FlatWorldFrame({
+		submitWebgl2WorldFrame({
 			gl: gl.asContext(),
 			stateCache,
 			program: createFlatProgram(),
@@ -1108,7 +1172,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			["staged", createDrawUnit({ id: "staged" })],
 		]);
 
-		const metrics = submitWebgl2FlatWorldFrame({
+		const metrics = submitWebgl2WorldFrame({
 			gl: gl.asContext(),
 			stateCache,
 			program: createFlatProgram(),
@@ -1183,7 +1247,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			],
 		]);
 
-		const metrics = submitWebgl2FlatWorldFrame({
+		const metrics = submitWebgl2WorldFrame({
 			gl: gl.asContext(),
 			stateCache,
 			program: createFlatProgram(),
@@ -2137,6 +2201,7 @@ class CapturingSubmitGl implements Webgl2StateCacheGl {
 	readonly uniform4fvValues: number[][] = [];
 	readonly uniform4fValues: number[][] = [];
 	readonly uniform2fValues: number[][] = [];
+	readonly uniform3fValues: number[][] = [];
 	readonly uniform1iValues: number[] = [];
 	readonly boundTextures: WebGLTexture[] = [];
 	private currentVertexArrayLabel: string | null = null;
@@ -2228,6 +2293,16 @@ class CapturingSubmitGl implements Webgl2StateCacheGl {
 	uniform2f(_location: WebGLUniformLocation, x: number, y: number): void {
 		this.calls.push("uniform2f");
 		this.uniform2fValues.push([x, y]);
+	}
+
+	uniform3f(
+		_location: WebGLUniformLocation,
+		x: number,
+		y: number,
+		z: number,
+	): void {
+		this.calls.push("uniform3f");
+		this.uniform3fValues.push([x, y, z]);
 	}
 
 	uniform4f(

@@ -136,6 +136,24 @@ describe("webgl2 texture atlas generation", () => {
 		generation?.dispose();
 	});
 
+	it("extrudes terrain detail atlas gutters with repeat semantics", () => {
+		const gl = new FakeWebgl2();
+		const generation = createWebgl2TextureAtlasGenerationResource({
+			gl: gl.asContext(),
+			plan: createPlan({ family: "terrain-detail" }),
+		});
+
+		const pixels = gl.textureUploads[1]?.data;
+		expect(pixels).toBeInstanceOf(Uint8Array);
+		expect([
+			...((pixels as Uint8Array) ?? new Uint8Array()).slice(0, 16),
+		]).toEqual([
+			23, 24, 25, 26, 19, 20, 21, 22, 23, 24, 25, 26, 19, 20, 21, 22,
+		]);
+
+		generation?.dispose();
+	});
+
 	it("fills unused terrain color atlas pixels with neutral gray", () => {
 		const gl = new FakeWebgl2();
 		const generation = createWebgl2TextureAtlasGenerationResource({

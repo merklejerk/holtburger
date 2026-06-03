@@ -355,10 +355,15 @@ function regionDetailFragmentChunk(): string {
 			1.0
 		);
 	} else {
+		float holtburgerRegionDetailSourceAlpha = clamp(
+			holtburgerRegionDetailColor.a * holtburgerRegionDetailWeight,
+			0.0,
+			1.0
+		);
 		diffuseColor.rgb = mix(
 			diffuseColor.rgb,
 			holtburgerRegionDetailTarget,
-			clamp(holtburgerRegionDetailWeight, 0.0, 1.0)
+			holtburgerRegionDetailSourceAlpha
 		);
 	}
 #endif

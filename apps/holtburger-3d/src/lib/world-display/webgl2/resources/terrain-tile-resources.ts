@@ -7,6 +7,7 @@ import type { StagedWorldIndexedGeometry } from "../../staged-world-geometry";
 import type { TexturePageFamily } from "../../texture-pages/texture-page-atlas-planner";
 import type { TerrainSceneTile } from "../../terrain-scene";
 import type { PreparedTerrainMesh } from "../../../assets/types";
+import type { ResolvedRegionDetailOverlayPlan } from "../../region-detail-overlays";
 import type { Webgl2SceneDomain } from "../../webgl2-scene-domain-targets";
 import type {
 	Webgl2BufferResource,
@@ -27,6 +28,7 @@ export interface Webgl2TerrainTileResource {
 	id: string;
 	assetId: string;
 	landblockId: number;
+	regionNumber: number;
 	label: string;
 	placementKey: string;
 	geometrySignature: string;
@@ -46,6 +48,7 @@ export interface Webgl2TerrainTileResource {
 	bvhFallbackReason: string | null;
 	layerPlan: TerrainTileLayerPlan | null;
 	layerPlanBlockers: readonly string[];
+	detailPlan: Webgl2TerrainTileDetailPlan | null;
 	texturePageBindings: Webgl2TerrainTileTexturePageBinding[];
 	texturePageBlockers: readonly string[];
 	oneDrawReadiness: Webgl2TerrainTileOneDrawReadiness;
@@ -68,6 +71,7 @@ export interface Webgl2TerrainTileDrawSliceResource {
 	modelMatrix: RenderMat4;
 	bvhItemKeys: RenderBvhItemKey[];
 	layerPlan: TerrainTileLayerPlan;
+	detailPlan: Webgl2TerrainTileDetailPlan | null;
 	texturePageBindings: Webgl2TerrainTileTexturePageBinding[];
 	texturePageBlockers: readonly string[];
 	oneDrawReadiness: Webgl2TerrainTileOneDrawReadiness;
@@ -80,6 +84,11 @@ export interface Webgl2TerrainTileTexturePageBinding {
 	rect: readonly [number, number, number, number] | null;
 }
 
+export interface Webgl2TerrainTileDetailPlan {
+	overlay: ResolvedRegionDetailOverlayPlan;
+	atlasEntryKey: string;
+}
+
 export type Webgl2TerrainTileOneDrawReadiness =
 	| {
 			status: "ready";
@@ -87,6 +96,7 @@ export type Webgl2TerrainTileOneDrawReadiness =
 			texturePageBindingCount: number;
 			colorPageBindingCount: number;
 			maskPageBindingCount: number;
+			detailPageBindingCount: number;
 	  }
 	| {
 			status: "blocked";
@@ -139,6 +149,7 @@ export function describeTerrainTileGraphSignature(
 	return [
 		resource.id,
 		formatHex32(resource.landblockId),
+		`region:${resource.regionNumber}`,
 		resource.placementKey,
 		resource.geometrySignature,
 		resource.readiness.status,
@@ -147,6 +158,7 @@ export function describeTerrainTileGraphSignature(
 			: resource.readiness.reason,
 		`layer:${resource.layerPlan?.signature ?? "none"}`,
 		`layer-blockers:${resource.layerPlanBlockers.join(",")}`,
+		`detail:${resource.detailPlan?.atlasEntryKey ?? "none"}`,
 		`pages:${resource.texturePageBindings
 			.map((binding) => `${binding.family}:${binding.atlasEntryKey}`)
 			.join(",")}`,
@@ -197,12 +209,16 @@ export function deriveTerrainTileOneDrawReadiness(
 	const maskPageBindingCount = resource.texturePageBindings.filter(
 		(binding) => binding.family === "terrain-mask",
 	).length;
+	const detailPageBindingCount = resource.texturePageBindings.filter(
+		(binding) => binding.family === "terrain-detail",
+	).length;
 	return {
 		status: "ready",
 		layerEntryCount: resource.layerPlan?.layerEntries.length ?? 0,
 		texturePageBindingCount: resource.texturePageBindings.length,
 		colorPageBindingCount,
 		maskPageBindingCount,
+		detailPageBindingCount,
 	};
 }
 
@@ -227,12 +243,16 @@ export function deriveTerrainDrawSliceOneDrawReadiness(
 	const maskPageBindingCount = slice.texturePageBindings.filter(
 		(binding) => binding.family === "terrain-mask",
 	).length;
+	const detailPageBindingCount = slice.texturePageBindings.filter(
+		(binding) => binding.family === "terrain-detail",
+	).length;
 	return {
 		status: "ready",
 		layerEntryCount: slice.layerPlan.layerEntries.length,
 		texturePageBindingCount: slice.texturePageBindings.length,
 		colorPageBindingCount,
 		maskPageBindingCount,
+		detailPageBindingCount,
 	};
 }
 

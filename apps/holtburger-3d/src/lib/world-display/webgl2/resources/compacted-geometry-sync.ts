@@ -631,7 +631,6 @@ function regroupIndexedPalettedLandblockDrawSlices(
 			`paletteAtlas=${palettePlacement.atlasTextureIndex}`,
 			`detailAtlas=${detailAtlasTextureIndex ?? "none"}`,
 			slice.renderStateKey,
-			`visibility=${slice.visibilityPartitionKey}`,
 		].join("|");
 		const materialTableSlotEnd =
 			slice.materialTableSlotStart + slice.materialTableSlotCount - 1;
@@ -679,7 +678,6 @@ function regroupIndexedPalettedLandblockDrawSlices(
 				`indexAtlas=${group.indexAtlasTextureIndex}`,
 				`paletteAtlas=${group.paletteAtlasTextureIndex}`,
 				`detailAtlas=${group.detailAtlasTextureIndex ?? "none"}`,
-				`visibility=${group.representative.visibilityPartitionKey}`,
 				`table=${group.materialTableSlotStart}-${group.materialTableSlotEnd}`,
 				`draws=${uniqueSortedStrings(group.drawUnitIds).join(",")}`,
 			].join("|"),

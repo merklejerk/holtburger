@@ -111,8 +111,8 @@ Expected first-order impact:
 - Do not pre-bake indexed+palette output to RGBA as the primary path; that loses palette indirection
   and will multiply runtime appearance variants.
 - Do not move browser/WebGL-specific atlas resources into shared crates.
-- Do not collapse visibility partitions unless a separate visibility/overdraw analysis proves it is
-  worthwhile.
+- Visibility partitions may be collapsed for compacted static families when draw-call reduction is more
+  valuable than strict per-BVH-item culling.
 
 ## Dry-Run Findings
 
@@ -137,9 +137,9 @@ corrections:
   is unnecessary if the shader applies material-local wrap/clamp before adding atlas rect offsets.
 - Palette atlases do not need gutters either, but the shader must continue to enforce per-material
   `paletteColorCount` and clip-threshold behavior.
-- Slice grouping by visibility partition remains intentional. The atlas work should first remove
-  resource-bind fragmentation; visibility partition overdraw tradeoffs can be revisited with fresh
-  metrics afterward.
+- Initial atlas work should remove resource-bind fragmentation first. Follow-up batching may allow
+  overdraw by merging compacted static slices across visibility partitions when draw-call pressure
+  remains high.
 
 ## Cleaner Scheduling
 
@@ -292,7 +292,7 @@ Today slices include individual `indexPageKey` and `palettePageKey`. New slices 
 - palette atlas texture index;
 - detail atlas texture index, if present;
 - render state (`indexed-opaque`);
-- visibility partition;
+- visibility partition, until overdraw-tolerant static batching is enabled;
 - material-table partition.
 
 The material table, not the draw slice, should carry per-material index/palette rect data.
@@ -562,8 +562,7 @@ Completed:
   - index atlas texture index;
   - palette atlas texture index;
   - detail atlas texture index;
-  - render state;
-  - visibility partition.
+  - render state.
 - Moved compacted indexed submit away from source-key placement lookups. Submit now binds atlas
   textures by `slice.indexAtlasTextureIndex` and `slice.paletteAtlasTextureIndex`.
 - Moved index and palette atlas rects onto compacted indexed material records, so material-table upload
@@ -572,8 +571,8 @@ Completed:
   before `buildCompactedGeometryBatch`.
 - Added an incomplete-placement guard that skips indexed compacted resource creation and records a
   fallback sample instead of constructing a resource that would throw or submit incomplete atlas state.
-- Added a resource-store regression test proving compacted indexed slices are atlas-bound while still
-  preserving visibility partition separation.
+- Added resource-store regression coverage proving compacted indexed slices can merge across visibility
+  partitions when atlas state is compatible.
 
 Validation:
 
@@ -588,10 +587,9 @@ Decisions and course corrections:
 - The global compaction planner still emits source-key indexed slices with nullable atlas texture
   indices. WebGL compacted resource sync fills atlas texture indices after indexed atlas planning,
   because the planner runs before atlas placements exist.
-- Slice regrouping intentionally does not cross visibility partitions. A dry-run regression with two
-  separate static BVH keys produced two atlas-bound slices, not one. That is correct for the current
-  culling/overdraw contract and means Phase E metrics must distinguish resource fragmentation from
-  visibility partition fragmentation.
+- A follow-up change removed visibility partitioning from compacted RGBA and indexed slice grouping.
+  Compacted static batches are now explicitly overdraw-tolerant: if any represented draw unit is
+  visible, the merged slice can submit hidden draw units that share the same compacted slice.
 - Source `indexPageKey` and `palettePageKey` remain on WebGL indexed slices as diagnostics/source
   identity. They are no longer used for submit-time texture binding.
 - Missing placements are handled at compacted resource sync time rather than submit time. This avoids
@@ -599,41 +597,97 @@ Decisions and course corrections:
 
 Remaining debt before Phase E:
 
-- Add metrics that report indexed compacted slice grouping by reason: atlas texture pair, detail
-  texture, material-table partition, and visibility partition. Without that split, a post-Phase-D
-  draw-call count can still look disappointing even when resource atlas grouping is working.
-- Capture a runtime report at the original destination and compare indexed shader draws against the
-  baseline `1084` indexed shader draws and `1711 -> 1441` indexed estimate.
-- Consider an immediate Phase D.5 if metrics show most remaining indexed slices are visibility-bound
-  rather than resource-bound.
+- Runtime comparison now covers the original destination and the overdraw-tolerant static batching
+  behavior. Phase E is complete for the baseline scene.
+- Dedicated compacted slice limiter metrics are no longer immediate prep. Keep them as conditional
+  diagnostics if another scene shows unexplained compacted draw pressure.
 
 ### Phase D.5: Indexed Slice Reason Metrics (Immediate Prep If Needed)
 
-Add this interim phase before Phase E if the next runtime report cannot explain remaining indexed
-draw-call pressure.
+Status: superseded as immediate prep on `2026-06-03`.
+
+The runtime comparison after visibility-agnostic compacted batching explained the remaining draw-call
+pressure clearly enough for the baseline scene. Explicit limiter-reason metrics are still useful, but
+they are no longer a blocker before Phase E.
 
 - Count compacted indexed WebGL slices by grouping limiter:
   - atlas texture pair;
   - detail atlas texture;
-  - visibility partition;
   - material-table partition;
   - landblock batch boundary.
+- Count overdraw introduced by visibility-agnostic compacted static batching.
 - Include sample slice keys for the top limiter categories.
 - Keep this diagnostic local to `apps/holtburger-3d`; it is renderer-specific and should not move into
   shared crates.
 
 ### Phase E: Metrics and Runtime Verification
 
-- Extend render metrics and debug report text before relying on field testing.
-- Run the 3D debug destination from the original report.
-- Compare:
-  - visible draws;
-  - indexed family shader draws;
-  - indexed replaced/retained draw units;
-  - indexed atlas texture counts;
-  - texture binding counts;
-  - FPS/render time.
-- Inspect at least one palette-varied static and one Index16 material for visual parity.
+Status: complete for the baseline destination as of `2026-06-03`.
+
+Completed:
+
+- Re-ran the original debug destination after indexed atlas resource grouping.
+- Re-ran the original debug destination again after removing compacted static visibility partitioning.
+- Compared visible draws, indexed shader draws, RGBA shader draws, replaced/retained counts,
+  overdraw, FPS, and render time against the baseline report.
+
+Baseline report:
+
+- Generated: `2026-06-03T17:23:41.951Z`
+- Visible draws: `2327`
+- Render time: `26.0 ms`
+- FPS: `33.5`
+- Retained triangles: `115314`
+- RGBA shader draws: `866`
+- Indexed shader draws: `1084`
+- Indexed estimate: `1711 -> 1441`
+- Indexed saved: `270`
+- Overdraw: `0 tris (0.00)`
+
+After indexed resource atlasing and atlas-bound submit:
+
+- Generated: `2026-06-03T18:48:41.543Z`
+- Visible draws: `1801`
+- Render time: `25.7 ms`
+- FPS: `36.5`
+- Retained triangles: `115314`
+- RGBA shader draws: `866`
+- Indexed shader draws: `558`
+- Indexed estimate: `1711 -> 915`
+- Indexed saved: `796`
+- Overdraw: `0 tris (0.00)`
+
+After visibility-agnostic compacted static grouping:
+
+- Generated: `2026-06-03T18:55:07.788Z`
+- Visible draws: `434`
+- Render time: `25.1 ms`
+- FPS: `37.4`
+- Retained triangles: `254960`
+- RGBA shader draws: `44`
+- Indexed shader draws: `13`
+- RGBA estimate: `3154 -> 401`
+- Indexed estimate: `1711 -> 370`
+- RGBA saved: `2753`
+- Indexed saved: `1341`
+- Overdraw: `95202 tris (0.48)`
+
+Decisions and course corrections:
+
+- Indexed atlas resource grouping worked as intended: indexed shader draws dropped from `1084` to
+  `558` before any visibility-agnostic grouping.
+- Removing compacted static visibility partitioning was the larger draw-call reducer: RGBA shader
+  draws dropped from `866` to `44`, and indexed shader draws dropped from `558` to `13`.
+- The overdraw tradeoff is currently favorable for the baseline scene: retained/submitted triangles
+  increased from `115314` to `254960`, but render time improved from `26.0 ms` to `25.1 ms`.
+- Draw pressure is no longer the dominant reported signal for this scene. Further work should focus on
+  direct retained material families, portal masks/stencil cost, redundant standalone indexed uploads,
+  and visual parity checks rather than more opaque static draw-call batching.
+
+Remaining Phase E caveat:
+
+- Visual parity should still be spot-checked manually for palette-varied statics and at least one
+  Index16 material after the batching changes.
 
 ### Phase F: Remove Avoidable Standalone Indexed Uploads
 
@@ -671,8 +725,8 @@ Expected cleanup targets:
   use per-material `paletteColorCount`.
 - Uniform material-table pressure may remain a bottleneck. If 128 slots is still too small, consider
   texture-backed material tables after this work lands.
-- Visibility partitioning may still produce many slices. Treat that as a later culling/overdraw tradeoff
-  after resource-bind fragmentation is removed.
+- Visibility-agnostic compacted static batching can increase overdraw. Track represented hidden
+  draw units and triangles so draw-call wins do not hide a geometry-cost regression.
 - Descriptor/direct-resource split may temporarily increase code surface. Keep the names honest:
   descriptors are source metadata; direct resources are WebGL textures for retained direct submit.
 - Atlas generation can increase GPU memory if pages are always allocated at `maxAtlasTextureSize`.

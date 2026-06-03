@@ -48,7 +48,7 @@ export interface TexturePageBinding {
 	pageKind: TexturePageKind;
 	usageBucket: TexturePageUsageBucket;
 	sampleClass: TexturePageSampleClass;
-	texture: Webgl2Texture2DResource;
+	texture: Webgl2Texture2DResource | null;
 	rect: readonly [number, number, number, number];
 	width: number;
 	height: number;
@@ -59,7 +59,8 @@ export interface TexturePageBinding {
 		| "standalone-direct-texture"
 		| "shared-packed-page"
 		| "detail-overlay"
-		| "indexed-material";
+		| "indexed-material"
+		| "indexed-material-descriptor";
 }
 
 export interface TexturePageBindingResolution {
@@ -208,6 +209,7 @@ export function collectDirectDrawTexturePageBindings(
 		| "texturePageReadiness"
 		| "detailOverlay"
 		| "indexedMaterial"
+		| "indexedMaterialDescriptor"
 	>,
 ): readonly TexturePageBinding[] {
 	const baseWrap = resolveTexturePageWrapMode(drawUnit);
@@ -268,6 +270,33 @@ export function collectDirectDrawTexturePageBindings(
 						source: "indexed-material",
 					}),
 				]
+			: drawUnit.indexedMaterialDescriptor
+				? [
+						createDescriptorTexturePageBinding({
+							width: drawUnit.indexedMaterialDescriptor.width,
+							height: drawUnit.indexedMaterialDescriptor.height,
+							usageBucket: "indexed-texels",
+							sampleClass: "indexed-data",
+							wrapS: drawUnit.indexedMaterialDescriptor.wrapS,
+							wrapT: drawUnit.indexedMaterialDescriptor.wrapT,
+							sampling: exactDataTexturePageSamplingPolicy({
+								wrapS: drawUnit.indexedMaterialDescriptor.wrapS,
+								wrapT: drawUnit.indexedMaterialDescriptor.wrapT,
+							}),
+						}),
+						createDescriptorTexturePageBinding({
+							width: drawUnit.indexedMaterialDescriptor.paletteColorCount,
+							height: 1,
+							usageBucket: "palette-lookup",
+							sampleClass: "palette-data",
+							wrapS: "clamp",
+							wrapT: "clamp",
+							sampling: exactDataTexturePageSamplingPolicy({
+								wrapS: "clamp",
+								wrapT: "clamp",
+							}),
+						}),
+					]
 			: []),
 	];
 }
@@ -301,6 +330,38 @@ function createSingleEntryTexturePageBinding({
 		wrapT,
 		sampling,
 		source,
+	};
+}
+
+function createDescriptorTexturePageBinding({
+	width,
+	height,
+	usageBucket,
+	sampleClass,
+	wrapS,
+	wrapT,
+	sampling,
+}: {
+	width: number;
+	height: number;
+	usageBucket: TexturePageUsageBucket;
+	sampleClass: TexturePageSampleClass;
+	wrapS: TexturePageWrapMode;
+	wrapT: TexturePageWrapMode;
+	sampling: TexturePageSamplingPolicy;
+}): TexturePageBinding {
+	return {
+		pageKind: "single-entry",
+		usageBucket,
+		sampleClass,
+		texture: null,
+		rect: [0, 0, width, height],
+		width,
+		height,
+		wrapS,
+		wrapT,
+		sampling,
+		source: "indexed-material-descriptor",
 	};
 }
 

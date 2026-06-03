@@ -809,6 +809,7 @@ export function syncWebgl2WorldResources({
 		drawUnits: assembly.drawUnits,
 		renderChunkTransforms,
 		rendererResourceGraph,
+		indexedResourceAtlasPlan: store.indexedResourceAtlasPlan,
 	});
 }
 

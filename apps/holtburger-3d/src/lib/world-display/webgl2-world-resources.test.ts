@@ -937,6 +937,85 @@ describe("webgl2 world resources", () => {
 			Uint8Array.from([0x00, 0x00, 0x01, 0x01]),
 		);
 	});
+
+	it("keeps compacted indexed slices atlas-bound without crossing visibility partitions", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2WorldResourceStore();
+		const firstMaterialSurfaceId = 0x08000002;
+		const firstRenderSurfaceId = 0x06000002;
+		const secondMaterialSurfaceId = 0x08000003;
+		const secondRenderSurfaceId = 0x06000003;
+		const assetState = createAssetState({
+			materialSurfaceId: firstMaterialSurfaceId,
+			renderSurfaceId: firstRenderSurfaceId,
+			indexed: true,
+		});
+		assetState.preparedByAssetId[
+			`material/${secondMaterialSurfaceId.toString(16).padStart(8, "0")}`
+		] = {
+			payload: createTextureMaterialRecipe(
+				secondMaterialSurfaceId,
+				secondRenderSurfaceId,
+				0x04000001,
+			),
+		} as AssetChannelState["preparedAsset"];
+		assetState.preparedByAssetId[
+			`render-surface/${secondRenderSurfaceId.toString(16).padStart(8, "0")}`
+		] = {
+			payload: createRenderSurfacePayload({
+				renderSurfaceId: secondRenderSurfaceId,
+				indexed: true,
+			}),
+		} as AssetChannelState["preparedAsset"];
+
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState,
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: createStaticRenderableScene([
+				createStaticPart({
+					instanceId: "indexed-a",
+					materialSlots: [createMaterialSlot(0, firstMaterialSurfaceId)],
+				}),
+				createStaticPart({
+					instanceId: "indexed-b",
+					materialSlots: [createMaterialSlot(0, secondMaterialSurfaceId)],
+				}),
+			]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform()],
+		});
+
+		const indexedFamily = [
+			...store.compactedGeometryFamilyResources.values(),
+		].find((resource) => resource.family === "indexed-paletted");
+		const indexedGeometryBatch = [
+			...store.compactedGeometryBatches.values(),
+		][0];
+
+		expect(store.drawUnits).toHaveLength(2);
+		expect(
+			store.compactionFamilyPlan.renderFamilies.indexedPaletted.drawSlices,
+		).toHaveLength(2);
+		expect(indexedGeometryBatch).toMatchObject({
+			drawUnitCount: 2,
+			drawSliceCount: 2,
+		});
+		expect(indexedFamily?.materialTableRecords).toHaveLength(2);
+		expect(indexedFamily?.drawSlices).toHaveLength(2);
+		for (const slice of indexedFamily?.drawSlices ?? []) {
+			expect(slice).toMatchObject({
+				indexFormat: "p8",
+				indexAtlasTextureIndex: 0,
+				paletteAtlasTextureIndex: 0,
+				renderStateKey: "indexed-opaque",
+			});
+			expect(slice.drawUnitIds).toHaveLength(1);
+			expect(slice.materialSlotKeys).toHaveLength(1);
+		}
+	});
 });
 
 class FakeWebgl2 {

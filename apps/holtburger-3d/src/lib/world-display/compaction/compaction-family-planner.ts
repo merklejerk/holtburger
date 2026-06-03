@@ -187,7 +187,10 @@ export interface IndexedPalettedFamilyDrawSlice {
 	indexFormat: "p8" | "index16";
 	indexPageKey: string;
 	palettePageKey: string;
+	indexAtlasTextureIndex: number | null;
+	paletteAtlasTextureIndex: number | null;
 	renderStateKey: "indexed-opaque";
+	visibilityPartitionKey: string;
 	materialTableSlotStart: number;
 	materialTableSlotCount: number;
 	materialSlotKeys: readonly string[];
@@ -816,6 +819,7 @@ function createIndexedPalettedFamilyDrawSlices({
 		{
 			record: IndexedPalettedFamilyMaterialTableRecord;
 			slotIndex: number;
+			visibilityPartitionKey: string;
 			drawUnitIds: string[];
 		}
 	>();
@@ -836,6 +840,7 @@ function createIndexedPalettedFamilyDrawSlices({
 		const group = groups.get(key) ?? {
 			record,
 			slotIndex,
+			visibilityPartitionKey: candidate.visibilityPartitionKey,
 			drawUnitIds: [],
 		};
 		group.drawUnitIds.push(candidate.id);
@@ -862,7 +867,10 @@ function createIndexedPalettedFamilyDrawSlices({
 			indexFormat: group.record.indexFormat,
 			indexPageKey: group.record.indexPageKey,
 			palettePageKey: group.record.palettePageKey,
+			indexAtlasTextureIndex: null,
+			paletteAtlasTextureIndex: null,
 			renderStateKey: "indexed-opaque",
+			visibilityPartitionKey: group.visibilityPartitionKey,
 			materialTableSlotStart: group.slotIndex,
 			materialTableSlotCount: 1,
 			materialSlotKeys: [group.record.key],

@@ -11,6 +11,10 @@ import type {
 } from "../../compaction/compacted-geometry";
 import type { AtlasTexturePlacement } from "../../texture-pages/atlas-layout-planner";
 import type {
+	IndexedPaletteAtlasPlacement,
+	IndexedTexelAtlasPlacement,
+} from "../../texture-pages/indexed-resource-atlas-planner";
+import type {
 	IndexedPalettedFamilyMaterialTableRecord,
 	IndexedPalettedFamilyDrawSlice,
 	RgbaTexturePageFamilyDrawSlice,
@@ -43,10 +47,16 @@ interface Webgl2IndexedPalettedFamilyDrawSlice extends CompactedGeometrySlice {
 	indexFormat: "p8" | "index16";
 	indexPageKey: string;
 	palettePageKey: string;
+	indexAtlasTextureIndex: number;
+	paletteAtlasTextureIndex: number;
 	detailAtlasTextureIndex: number | null;
 }
 
 interface Webgl2IndexedPalettedFamilyMaterialTableRecord extends IndexedPalettedFamilyMaterialTableRecord {
+	indexAtlasTextureIndex: number;
+	indexAtlasRect: readonly [number, number, number, number];
+	paletteAtlasTextureIndex: number;
+	paletteAtlasRect: readonly [number, number, number, number];
 	detailAtlasTextureIndex: number | null;
 	detailAtlasRect: readonly [number, number, number, number];
 }
@@ -162,11 +172,18 @@ export function createWebgl2IndexedPalettedFamilyResource({
 	geometry,
 	materialTableRecords,
 	materialDrawSlices,
+	indexPlacementsByTextureKey,
+	palettePlacementsByTextureKey,
 	detailPlacementsByEntryKey,
 }: {
 	geometry: CompactedGeometryBatch;
 	materialTableRecords: readonly IndexedPalettedFamilyMaterialTableRecord[];
 	materialDrawSlices: readonly IndexedPalettedFamilyDrawSlice[];
+	indexPlacementsByTextureKey: ReadonlyMap<string, IndexedTexelAtlasPlacement>;
+	palettePlacementsByTextureKey: ReadonlyMap<
+		string,
+		IndexedPaletteAtlasPlacement
+	>;
 	detailPlacementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>;
 }): Webgl2IndexedPalettedFamilyResource {
 	const materialDrawSliceByKey = new Map(
@@ -182,6 +199,8 @@ export function createWebgl2IndexedPalettedFamilyResource({
 		materialTableRecords: materialTableRecords.map((record) =>
 			toWebgl2IndexedPalettedFamilyMaterialRecord(
 				record,
+				indexPlacementsByTextureKey,
+				palettePlacementsByTextureKey,
 				detailPlacementsByEntryKey,
 			),
 		),
@@ -190,6 +209,8 @@ export function createWebgl2IndexedPalettedFamilyResource({
 				slice,
 				materialDrawSliceByKey,
 				materialRecordsByKey,
+				indexPlacementsByTextureKey,
+				palettePlacementsByTextureKey,
 				detailPlacementsByEntryKey,
 			),
 		),
@@ -318,12 +339,33 @@ function toWebgl2IndexedPalettedFamilyDrawSlice(
 		string,
 		IndexedPalettedFamilyMaterialTableRecord
 	>,
+	indexPlacementsByTextureKey: ReadonlyMap<string, IndexedTexelAtlasPlacement>,
+	palettePlacementsByTextureKey: ReadonlyMap<
+		string,
+		IndexedPaletteAtlasPlacement
+	>,
 	detailPlacementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>,
 ): Webgl2IndexedPalettedFamilyDrawSlice {
 	const materialSlice = materialDrawSliceByKey.get(slice.key);
 	if (!materialSlice) {
 		throw new Error(
 			`Indexed-paletted family draw slice ${slice.key} has no indexed family payload.`,
+		);
+	}
+	const indexPlacement = indexPlacementsByTextureKey.get(
+		materialSlice.indexPageKey,
+	);
+	const palettePlacement = palettePlacementsByTextureKey.get(
+		materialSlice.palettePageKey,
+	);
+	if (
+		!indexPlacement ||
+		!palettePlacement ||
+		materialSlice.indexAtlasTextureIndex == null ||
+		materialSlice.paletteAtlasTextureIndex == null
+	) {
+		throw new Error(
+			`Indexed-paletted family draw slice ${slice.key} references missing indexed atlas placement.`,
 		);
 	}
 	const detailAtlasTextureIndices = uniqueNumbers(
@@ -353,17 +395,55 @@ function toWebgl2IndexedPalettedFamilyDrawSlice(
 		indexFormat: materialSlice.indexFormat,
 		indexPageKey: materialSlice.indexPageKey,
 		palettePageKey: materialSlice.palettePageKey,
+		indexAtlasTextureIndex: materialSlice.indexAtlasTextureIndex,
+		paletteAtlasTextureIndex: materialSlice.paletteAtlasTextureIndex,
 		detailAtlasTextureIndex: detailAtlasTextureIndices[0] ?? null,
 	};
 }
 
 function toWebgl2IndexedPalettedFamilyMaterialRecord(
 	record: IndexedPalettedFamilyMaterialTableRecord,
+	indexPlacementsByTextureKey: ReadonlyMap<string, IndexedTexelAtlasPlacement>,
+	palettePlacementsByTextureKey: ReadonlyMap<
+		string,
+		IndexedPaletteAtlasPlacement
+	>,
 	detailPlacementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>,
 ): Webgl2IndexedPalettedFamilyMaterialTableRecord {
+	const indexPlacement = indexPlacementsByTextureKey.get(record.indexPageKey);
+	const palettePlacement = palettePlacementsByTextureKey.get(
+		record.palettePageKey,
+	);
+	if (!indexPlacement || !palettePlacement) {
+		throw new Error(
+			`Indexed-paletted material record ${record.key} references missing indexed atlas placement.`,
+		);
+	}
+	const atlasRecord = {
+		...record,
+		indexAtlasTextureIndex: indexPlacement.atlasTextureIndex,
+		indexAtlasRect: [
+			indexPlacement.x,
+			indexPlacement.y,
+			indexPlacement.width,
+			indexPlacement.height,
+		],
+		paletteAtlasTextureIndex: palettePlacement.atlasTextureIndex,
+		paletteAtlasRect: [
+			palettePlacement.x,
+			palettePlacement.y,
+			palettePlacement.colorCount,
+			1,
+		],
+	} satisfies IndexedPalettedFamilyMaterialTableRecord & {
+		indexAtlasTextureIndex: number;
+		indexAtlasRect: readonly [number, number, number, number];
+		paletteAtlasTextureIndex: number;
+		paletteAtlasRect: readonly [number, number, number, number];
+	};
 	if (!record.detailAtlasEntryKey) {
 		return {
-			...record,
+			...atlasRecord,
 			detailAtlasTextureIndex: null,
 			detailAtlasRect: [0, 0, 1, 1],
 		};
@@ -375,7 +455,7 @@ function toWebgl2IndexedPalettedFamilyMaterialRecord(
 		);
 	}
 	return {
-		...record,
+		...atlasRecord,
 		detailAtlasTextureIndex: placement.textureIndex,
 		detailAtlasRect: [
 			placement.x,

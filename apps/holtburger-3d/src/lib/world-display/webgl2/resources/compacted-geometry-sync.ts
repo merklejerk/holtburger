@@ -3,6 +3,7 @@ import { formatHex32 } from "../../../landblocks";
 import { buildCompactedGeometryBatch } from "../../compaction/compacted-geometry";
 import type {
 	CompactionFamilyPlan,
+	IndexedPalettedFamilyDrawSlice,
 	IndexedPalettedFamilyMaterialTableRecord,
 } from "../../compaction/compaction-family-planner";
 import type { RenderChunkTransform } from "../../render-anchor";
@@ -19,6 +20,7 @@ import {
 	createTexturePageDetailAtlasPlacementsByEntryKey,
 	type TexturePageAtlasPlan,
 } from "../../texture-pages/texture-page-atlas-planner";
+import type { IndexedResourceAtlasPlan } from "../../texture-pages/indexed-resource-atlas-planner";
 import type { Webgl2WorldResourceStore } from "../../webgl2-world-resources";
 import {
 	createWebgl2CompactedGeometryBatchResource,
@@ -43,6 +45,7 @@ export function syncWebgl2CompactedGeometryResources({
 	drawUnits,
 	renderChunkTransforms,
 	rendererResourceGraph,
+	indexedResourceAtlasPlan,
 }: {
 	gl: WebGL2RenderingContext;
 	store: Webgl2WorldResourceStore;
@@ -50,6 +53,7 @@ export function syncWebgl2CompactedGeometryResources({
 	drawUnits: readonly StagedWorldDrawUnitAssembly[];
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	rendererResourceGraph?: RendererResourceGraph;
+	indexedResourceAtlasPlan: IndexedResourceAtlasPlan;
 }): void {
 	if (
 		store.compactedGeometryBatchGraph &&
@@ -122,42 +126,59 @@ export function syncWebgl2CompactedGeometryResources({
 		}
 	}
 	if (plan.renderFamilies.indexedPaletted.compactableDrawUnitIds.length > 0) {
-		const batchPlans = createIndexedPalettedCompactedLandblockBatchPlans({
-			plan,
-			drawUnits,
-			renderChunkTransforms,
-		});
-		for (const batchPlan of batchPlans) {
-			const geometry = profileBrowserJsScope(
-				"webgl2.resource.buildCompactedIndexedGeometryBatch",
-				() =>
-					buildCompactedGeometryBatch({
-						plan: batchPlan.plan,
-						drawUnits,
-						batchOrigin: batchPlan.batchOrigin,
-					}),
-			);
-			if (!geometry) {
-				continue;
+		if (
+			!indexedResourceAtlasPlanHasAllIndexedFamilyPlacements(
+				plan,
+				indexedResourceAtlasPlan,
+			)
+		) {
+			store.compactedResourceFallbackSamples = [
+				...store.compactedResourceFallbackSamples,
+				`compacted indexed batch ${plan.key} waiting for complete indexed resource atlas placements`,
+			].slice(0, 8);
+		} else {
+			const batchPlans = createIndexedPalettedCompactedLandblockBatchPlans({
+				plan,
+				drawUnits,
+				renderChunkTransforms,
+				indexedResourceAtlasPlan,
+			});
+			for (const batchPlan of batchPlans) {
+				const geometry = profileBrowserJsScope(
+					"webgl2.resource.buildCompactedIndexedGeometryBatch",
+					() =>
+						buildCompactedGeometryBatch({
+							plan: batchPlan.plan,
+							drawUnits,
+							batchOrigin: batchPlan.batchOrigin,
+						}),
+				);
+				if (!geometry) {
+					continue;
+				}
+				retainWebgl2CompactedGeometryBatch({
+					gl,
+					store,
+					geometry,
+					landblockId: batchPlan.landblockId,
+					retainedGeometryBatchKeys,
+				});
+				const familyResource = createWebgl2IndexedPalettedFamilyResource({
+					geometry,
+					materialTableRecords: batchPlan.materialTableRecords,
+					materialDrawSlices: batchPlan.plan.drawSlices,
+					indexPlacementsByTextureKey:
+						indexedResourceAtlasPlan.indexPlacementsByTextureKey,
+					palettePlacementsByTextureKey:
+						indexedResourceAtlasPlan.palettePlacementsByTextureKey,
+					detailPlacementsByEntryKey,
+				});
+				retainedFamilyResourceKeys.add(familyResource.key);
+				store.compactedGeometryFamilyResources.set(
+					familyResource.key,
+					familyResource,
+				);
 			}
-			retainWebgl2CompactedGeometryBatch({
-				gl,
-				store,
-				geometry,
-				landblockId: batchPlan.landblockId,
-				retainedGeometryBatchKeys,
-			});
-			const familyResource = createWebgl2IndexedPalettedFamilyResource({
-				geometry,
-				materialTableRecords: batchPlan.materialTableRecords,
-				materialDrawSlices: batchPlan.plan.drawSlices,
-				detailPlacementsByEntryKey,
-			});
-			retainedFamilyResourceKeys.add(familyResource.key);
-			store.compactedGeometryFamilyResources.set(
-				familyResource.key,
-				familyResource,
-			);
 		}
 	}
 	for (const familyKey of store.compactedGeometryFamilyResources.keys()) {
@@ -318,10 +339,12 @@ function createIndexedPalettedCompactedLandblockBatchPlans({
 	plan,
 	drawUnits,
 	renderChunkTransforms,
+	indexedResourceAtlasPlan,
 }: {
 	plan: CompactionFamilyPlan;
 	drawUnits: readonly StagedWorldDrawUnitAssembly[];
 	renderChunkTransforms: readonly RenderChunkTransform[];
+	indexedResourceAtlasPlan: IndexedResourceAtlasPlan;
 }): {
 	landblockId: number;
 	batchOrigin: RenderChunkTransform["offset"];
@@ -388,6 +411,7 @@ function createIndexedPalettedCompactedLandblockBatchPlans({
 						landblockId,
 						drawUnitIds: drawUnitIds.sort(),
 						drawUnits,
+						indexedResourceAtlasPlan,
 					}),
 				};
 			});
@@ -400,12 +424,14 @@ function createIndexedPalettedCompactedLandblockBatchPlan({
 	landblockId,
 	drawUnitIds,
 	drawUnits,
+	indexedResourceAtlasPlan,
 }: {
 	sourcePlan: CompactionFamilyPlan;
 	sourcePartition: CompactionFamilyPlan["renderFamilies"]["indexedPaletted"]["partitions"][number];
 	landblockId: number;
 	drawUnitIds: readonly string[];
 	drawUnits: readonly StagedWorldDrawUnitAssembly[];
+	indexedResourceAtlasPlan: IndexedResourceAtlasPlan;
 }): {
 	materialTableRecords: readonly IndexedPalettedFamilyMaterialTableRecord[];
 	plan: {
@@ -465,7 +491,8 @@ function createIndexedPalettedCompactedLandblockBatchPlan({
 	const localSlotIndexByKey = new Map(
 		batchRecordKeys.map((key, index) => [key, index] as const),
 	);
-	const drawSlices = family.drawSlices
+	const drawSlices = regroupIndexedPalettedLandblockDrawSlices(
+		family.drawSlices
 		.map((slice) => {
 			const localDrawUnitIds = slice.drawUnitIds.filter((drawUnitId) =>
 				drawUnitIdSet.has(drawUnitId),
@@ -504,7 +531,15 @@ function createIndexedPalettedCompactedLandblockBatchPlan({
 				drawUnitIds: localDrawUnitIds,
 			};
 		})
-		.filter((slice) => slice.drawUnitIds.length > 0);
+		.filter((slice) => slice.drawUnitIds.length > 0),
+		{
+			indexedResourceAtlasPlan,
+			materialRecordByKey: sourceRecordByKey,
+			detailPlacementsByEntryKey: createTexturePageDetailAtlasPlacementsByEntryKey(
+				sourcePlan.texturePageAtlasPlan,
+			),
+		},
+	);
 	return {
 		materialTableRecords,
 		plan: {
@@ -529,6 +564,175 @@ function createIndexedPalettedCompactedLandblockBatchPlan({
 			),
 		},
 	};
+}
+
+function indexedResourceAtlasPlanHasAllIndexedFamilyPlacements(
+	plan: CompactionFamilyPlan,
+	indexedResourceAtlasPlan: IndexedResourceAtlasPlan,
+): boolean {
+	return plan.renderFamilies.indexedPaletted.materialTableRecords.every(
+		(record) =>
+			indexedResourceAtlasPlan.indexPlacementsByTextureKey.has(
+				record.indexPageKey,
+			) &&
+			indexedResourceAtlasPlan.palettePlacementsByTextureKey.has(
+				record.palettePageKey,
+			),
+	);
+}
+
+function regroupIndexedPalettedLandblockDrawSlices(
+	drawSlices: readonly IndexedPalettedFamilyDrawSlice[],
+	options: {
+		indexedResourceAtlasPlan: IndexedResourceAtlasPlan;
+		materialRecordByKey: ReadonlyMap<
+			string,
+			IndexedPalettedFamilyMaterialTableRecord
+		>;
+		detailPlacementsByEntryKey: ReadonlyMap<string, { textureIndex: number }>;
+	},
+): IndexedPalettedFamilyDrawSlice[] {
+	const groups = new Map<
+		string,
+		{
+			representative: IndexedPalettedFamilyDrawSlice;
+			indexAtlasTextureIndex: number;
+			paletteAtlasTextureIndex: number;
+			detailAtlasTextureIndex: number | null;
+			materialTableSlotStart: number;
+			materialTableSlotEnd: number;
+			materialSlotKeys: Set<string>;
+			drawUnitIds: string[];
+		}
+	>();
+	for (const slice of drawSlices) {
+		const indexPlacement =
+			options.indexedResourceAtlasPlan.indexPlacementsByTextureKey.get(
+				slice.indexPageKey,
+			);
+		const palettePlacement =
+			options.indexedResourceAtlasPlan.palettePlacementsByTextureKey.get(
+				slice.palettePageKey,
+			);
+		if (!indexPlacement || !palettePlacement) {
+			throw new Error(
+				`Indexed-paletted landblock draw slice ${slice.key} has no indexed atlas placement.`,
+			);
+		}
+		const detailAtlasTextureIndex =
+			resolveIndexedPalettedSliceDetailAtlasTextureIndex(
+				slice,
+				options.materialRecordByKey,
+				options.detailPlacementsByEntryKey,
+			);
+		const groupKey = [
+			slice.indexFormat,
+			`indexAtlas=${indexPlacement.atlasTextureIndex}`,
+			`paletteAtlas=${palettePlacement.atlasTextureIndex}`,
+			`detailAtlas=${detailAtlasTextureIndex ?? "none"}`,
+			slice.renderStateKey,
+			`visibility=${slice.visibilityPartitionKey}`,
+		].join("|");
+		const materialTableSlotEnd =
+			slice.materialTableSlotStart + slice.materialTableSlotCount - 1;
+		const group = groups.get(groupKey) ?? {
+			representative: slice,
+			indexAtlasTextureIndex: indexPlacement.atlasTextureIndex,
+			paletteAtlasTextureIndex: palettePlacement.atlasTextureIndex,
+			detailAtlasTextureIndex,
+			materialTableSlotStart: slice.materialTableSlotStart,
+			materialTableSlotEnd,
+			materialSlotKeys: new Set<string>(),
+			drawUnitIds: [],
+		};
+		group.materialTableSlotStart = Math.min(
+			group.materialTableSlotStart,
+			slice.materialTableSlotStart,
+		);
+		group.materialTableSlotEnd = Math.max(
+			group.materialTableSlotEnd,
+			materialTableSlotEnd,
+		);
+		for (const materialSlotKey of slice.materialSlotKeys) {
+			group.materialSlotKeys.add(materialSlotKey);
+		}
+		group.drawUnitIds.push(...slice.drawUnitIds);
+		groups.set(groupKey, group);
+	}
+	return [...groups.values()]
+		.sort(
+			(left, right) =>
+				left.representative.indexFormat.localeCompare(
+					right.representative.indexFormat,
+				) ||
+				left.indexAtlasTextureIndex - right.indexAtlasTextureIndex ||
+				left.paletteAtlasTextureIndex - right.paletteAtlasTextureIndex ||
+				(left.detailAtlasTextureIndex ?? -1) -
+					(right.detailAtlasTextureIndex ?? -1) ||
+				compareFirstString(left.drawUnitIds, right.drawUnitIds),
+		)
+		.map((group) => ({
+			...group.representative,
+			key: [
+				"compacted-indexed-atlas-draw-slice",
+				group.representative.indexFormat,
+				`indexAtlas=${group.indexAtlasTextureIndex}`,
+				`paletteAtlas=${group.paletteAtlasTextureIndex}`,
+				`detailAtlas=${group.detailAtlasTextureIndex ?? "none"}`,
+				`visibility=${group.representative.visibilityPartitionKey}`,
+				`table=${group.materialTableSlotStart}-${group.materialTableSlotEnd}`,
+				`draws=${uniqueSortedStrings(group.drawUnitIds).join(",")}`,
+			].join("|"),
+			indexAtlasTextureIndex: group.indexAtlasTextureIndex,
+			paletteAtlasTextureIndex: group.paletteAtlasTextureIndex,
+			materialTableSlotStart: group.materialTableSlotStart,
+			materialTableSlotCount:
+				group.materialTableSlotEnd - group.materialTableSlotStart + 1,
+			materialSlotKeys: uniqueSortedStrings([...group.materialSlotKeys]),
+			drawUnitIds: uniqueSortedStrings(group.drawUnitIds),
+		}));
+}
+
+function resolveIndexedPalettedSliceDetailAtlasTextureIndex(
+	slice: IndexedPalettedFamilyDrawSlice,
+	materialRecordByKey: ReadonlyMap<
+		string,
+		IndexedPalettedFamilyMaterialTableRecord
+	>,
+	detailPlacementsByEntryKey: ReadonlyMap<string, { textureIndex: number }>,
+): number | null {
+	const textureIndices = uniqueNumbers(
+		slice.materialSlotKeys.flatMap((slotKey) => {
+			const record = materialRecordByKey.get(slotKey);
+			if (!record?.detailAtlasEntryKey) {
+				return [];
+			}
+			const placement = detailPlacementsByEntryKey.get(record.detailAtlasEntryKey);
+			if (!placement) {
+				throw new Error(
+					`Indexed-paletted landblock draw slice ${slice.key} references missing detail placement ${record.detailAtlasEntryKey}.`,
+				);
+			}
+			return [placement.textureIndex];
+		}),
+	);
+	if (textureIndices.length > 1) {
+		throw new Error(
+			`Indexed-paletted landblock draw slice ${slice.key} spans multiple detail atlas textures.`,
+		);
+	}
+	return textureIndices[0] ?? null;
+}
+
+function compareFirstString(
+	leftValues: readonly string[],
+	rightValues: readonly string[],
+): number {
+	return (leftValues[0] ?? "").localeCompare(rightValues[0] ?? "");
+}
+
+function uniqueNumbers(values: readonly number[]): number[] {
+	return [...new Set(values)].sort((left, right) => left - right);
 }
 
 function createRgbaTexturePageCompactedLandblockBatchPlans({

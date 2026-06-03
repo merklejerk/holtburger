@@ -56,7 +56,8 @@ export interface DirectFamilyDrawContext {
 }
 
 export interface DirectFamilyUniformCache {
-	modelViewProjection: RenderMat4 | null;
+	modelViewProjection: RenderMat4;
+	modelViewProjectionValid: boolean;
 	color: Float32Array | null;
 	alphaTest: number | null;
 }
@@ -133,7 +134,8 @@ const DIRECT_TEXTURE_PAGE_DYNAMIC_UNIFORM_COUNT = 4;
 
 export function createDirectFamilyUniformCache(): DirectFamilyUniformCache {
 	return {
-		modelViewProjection: null,
+		modelViewProjection: new Float32Array(16),
+		modelViewProjectionValid: false,
 		color: null,
 		alphaTest: null,
 	};
@@ -142,7 +144,7 @@ export function createDirectFamilyUniformCache(): DirectFamilyUniformCache {
 export function resetDirectFamilyUniformCache(
 	cache: DirectFamilyUniformCache,
 ): void {
-	cache.modelViewProjection = null;
+	cache.modelViewProjectionValid = false;
 	cache.color = null;
 	cache.alphaTest = null;
 }
@@ -261,7 +263,8 @@ export function prepareDirectIndexedPalettedDraw({
 	}
 	metrics.stateChangeCount += bindIndexedMaterialTextures({
 		stateCache: context.stateCache,
-		directIndexedMaterialResources: route.drawUnit.directIndexedMaterialResources,
+		directIndexedMaterialResources:
+			route.drawUnit.directIndexedMaterialResources,
 	});
 	bindDirectDetailOverlayTexture({ context, route, metrics });
 }
@@ -464,13 +467,25 @@ function bindIndexedMaterialTextures({
 	directIndexedMaterialResources,
 }: {
 	stateCache: Webgl2StateCache;
-	directIndexedMaterialResources: NonNullable<Webgl2WorldDrawUnit["directIndexedMaterialResources"]>;
+	directIndexedMaterialResources: NonNullable<
+		Webgl2WorldDrawUnit["directIndexedMaterialResources"]
+	>;
 }): number {
 	let changeCount = 0;
-	if (stateCache.bindTexture2D(0, directIndexedMaterialResources.indexTexture.texture)) {
+	if (
+		stateCache.bindTexture2D(
+			0,
+			directIndexedMaterialResources.indexTexture.texture,
+		)
+	) {
 		changeCount += 1;
 	}
-	if (stateCache.bindTexture2D(1, directIndexedMaterialResources.paletteTexture.texture)) {
+	if (
+		stateCache.bindTexture2D(
+			1,
+			directIndexedMaterialResources.paletteTexture.texture,
+		)
+	) {
 		changeCount += 1;
 	}
 	return changeCount;
@@ -499,7 +514,9 @@ function appendSubmitFallbackSamples(
 function uploadIndexedMaterialUniforms(
 	gl: WebGL2RenderingContext,
 	program: Webgl2IndexedP8WorldProgram | Webgl2IndexedP16WorldProgram,
-	directIndexedMaterialResources: NonNullable<Webgl2WorldDrawUnit["directIndexedMaterialResources"]>,
+	directIndexedMaterialResources: NonNullable<
+		Webgl2WorldDrawUnit["directIndexedMaterialResources"]
+	>,
 ): void {
 	const descriptor = directIndexedMaterialResources.descriptor;
 	gl.uniform2f(

@@ -67,7 +67,7 @@ import type {
 import type { MaterialTextureCapabilities } from "./render-surface-texture-data";
 import {
 	createTranslationMat4,
-	multiplyMat4,
+	multiplyMat4Into,
 	type RenderMat4,
 } from "./render-math";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
@@ -1052,12 +1052,14 @@ export function createWebgl2WorldDisplayRendererImplementation(
 
 		const frameCandidates = [
 			...currentResources.worldStore.drawUnits,
-			...currentResources.worldStore.terrainRenderCandidates.map((candidate) => ({
-				id: candidate.id,
-				kind: "terrain-tile" as const,
-				bvhItemKeys: candidate.bvhItemKeys,
-				bvhFallbackReason: candidate.bvhFallbackReason,
-			})),
+			...currentResources.worldStore.terrainRenderCandidates.map(
+				(candidate) => ({
+					id: candidate.id,
+					kind: "terrain-tile" as const,
+					bvhItemKeys: candidate.bvhItemKeys,
+					bvhFallbackReason: candidate.bvhFallbackReason,
+				}),
+			),
 		];
 		if (frameCandidates.length > 0) {
 			const frame = profileBrowserJsScope(
@@ -1145,8 +1147,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 										?.detailTextures ?? [],
 							},
 							drawUnitsById: currentResources.worldStore.drawUnitsById,
-							terrainTilesById:
-								currentResources.worldStore.terrainTilesById,
+							terrainTilesById: currentResources.worldStore.terrainTilesById,
 							frame,
 						}),
 				);
@@ -1176,6 +1177,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		});
 		profileBrowserJsScope("webgl2.frame.reportMetrics", reportMetrics);
 	}
+
+	const selectedOverlayModelViewProjection = new Float32Array(16);
 
 	function renderSelectedStaticRenderableOverlay(
 		frame: WorldRenderFrame,
@@ -1221,7 +1224,11 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		gl.uniformMatrix4fv(
 			flatWorldProgram.uniforms.uModelViewProjection,
 			false,
-			multiplyMat4(frame.viewProjectionMatrix, overlay.modelMatrix),
+			multiplyMat4Into(
+				selectedOverlayModelViewProjection,
+				frame.viewProjectionMatrix,
+				overlay.modelMatrix,
+			),
 		);
 		gl.uniform4fv(
 			flatWorldProgram.uniforms.uColor,
@@ -1996,6 +2003,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				resources.flatWorldProgram.uniforms.uColor,
 				new Float32Array([1, 1, 1, 1]),
 			);
+			const modelViewProjection = new Float32Array(16);
 			for (const work of batch) {
 				const drawUnit = resources.worldStore.drawUnitsById.get(
 					work.maskDrawUnitId,
@@ -2003,7 +2011,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				if (!drawUnit) {
 					continue;
 				}
-				const modelViewProjection = multiplyMat4(
+				multiplyMat4Into(
+					modelViewProjection,
 					frame.viewProjectionMatrix,
 					drawUnit.modelMatrix,
 				);

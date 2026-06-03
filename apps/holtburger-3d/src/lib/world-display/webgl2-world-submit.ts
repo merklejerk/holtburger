@@ -1,4 +1,4 @@
-import { multiplyMat4, type RenderMat4 } from "./render-math";
+import { multiplyMat4Into, type RenderMat4 } from "./render-math";
 import type { WorldRenderFrame } from "./world-render-frame";
 import type { Webgl2ProgramResource } from "./webgl2-gl";
 import type { Webgl2StateCache } from "./webgl2-state-cache";
@@ -353,7 +353,10 @@ export function submitWebgl2WorldFrame({
 	frame: WorldRenderFrame;
 }): Webgl2WorldSubmitMetrics {
 	const drawUnits = planWebgl2WorldSubmitOrder(frame, drawUnitsById);
-	const terrainTiles = planWebgl2TerrainTileSubmitOrder(frame, terrainTilesById);
+	const terrainTiles = planWebgl2TerrainTileSubmitOrder(
+		frame,
+		terrainTilesById,
+	);
 	const portalMaskDrawUnits = planWebgl2PortalMaskSubmitOrder(
 		frame,
 		drawUnitsById,
@@ -573,16 +576,18 @@ export function planWebgl2WorldSubmitPassSchedule({
 	indexedPalettedFamilyResources: Webgl2IndexedPalettedFamilySubmitResources;
 }): Webgl2WorldSubmitPassSchedule {
 	const visibleDrawUnitIds = drawUnits.map((drawUnit) => drawUnit.id);
-	const rgbaTexturePageReplacement =
-		planWebgl2RgbaTexturePageFamilyReplacement({
+	const rgbaTexturePageReplacement = planWebgl2RgbaTexturePageFamilyReplacement(
+		{
 			visibleDrawUnitIds,
 			resources: rgbaTexturePageFamilyResources,
-		});
-	const indexedPalettedReplacement =
-		planWebgl2IndexedPalettedFamilyReplacement({
+		},
+	);
+	const indexedPalettedReplacement = planWebgl2IndexedPalettedFamilyReplacement(
+		{
 			visibleDrawUnitIds,
 			resources: indexedPalettedFamilyResources,
-		});
+		},
+	);
 	const compactedReplacementDrawUnitIds = new Set([
 		...rgbaTexturePageReplacement.replaceableDrawUnitIds,
 		...indexedPalettedReplacement.replaceableDrawUnitIds,
@@ -591,8 +596,7 @@ export function planWebgl2WorldSubmitPassSchedule({
 		compactedReplacementDrawUnitIds.size === 0
 			? drawUnits
 			: drawUnits.filter(
-					(drawUnit) =>
-						!compactedReplacementDrawUnitIds.has(drawUnit.id),
+					(drawUnit) => !compactedReplacementDrawUnitIds.has(drawUnit.id),
 				);
 	const retainedDirectPasses = partitionRetainedDirectDrawUnits({
 		drawUnits: retainedDrawUnits,
@@ -613,8 +617,7 @@ export function planWebgl2WorldSubmitPassSchedule({
 			drawUnits,
 			rgbaTexturePageReplacement.replaceableDrawUnitIds,
 		),
-		planningNoVisibleRouteCount:
-			rgbaTexturePageReplacement.noVisibleRouteCount,
+		planningNoVisibleRouteCount: rgbaTexturePageReplacement.noVisibleRouteCount,
 		planningFallbackSamples: rgbaTexturePageReplacement.fallbackSamples,
 	});
 	passes.push({
@@ -624,8 +627,7 @@ export function planWebgl2WorldSubmitPassSchedule({
 			drawUnits,
 			indexedPalettedReplacement.replaceableDrawUnitIds,
 		),
-		planningNoVisibleRouteCount:
-			indexedPalettedReplacement.noVisibleRouteCount,
+		planningNoVisibleRouteCount: indexedPalettedReplacement.noVisibleRouteCount,
 	});
 	if (retainedDirectPasses.blended.length > 0) {
 		passes.push({
@@ -666,7 +668,9 @@ function submitWebgl2WorldSubmitPassSchedule({
 	texturedProgram: Webgl2TexturedWorldProgram;
 	indexedP8Program: Webgl2IndexedP8WorldProgram;
 	indexedP16Program: Webgl2IndexedP16WorldProgram;
-	rgbaTexturePageFamilyProgram: Webgl2RgbaTexturePageFamilyWorldProgram | undefined;
+	rgbaTexturePageFamilyProgram:
+		| Webgl2RgbaTexturePageFamilyWorldProgram
+		| undefined;
 	indexedPalettedFamilyP8Program:
 		| Webgl2IndexedPalettedFamilyWorldProgram
 		| undefined;
@@ -835,6 +839,7 @@ function submitWebgl2DirectDrawUnitPass({
 	drawUnits: readonly Webgl2WorldDrawUnit[];
 	metrics: Webgl2WorldSubmitMetrics;
 }): void {
+	const modelViewProjection = new Float32Array(16);
 	for (const drawUnit of drawUnits) {
 		const route = planWebgl2DirectDrawRoute({
 			drawUnit,
@@ -891,20 +896,25 @@ function submitWebgl2DirectDrawUnitPass({
 			metrics.stateChangeCount += 1;
 		}
 
-		const modelViewProjection = multiplyMat4(
+		multiplyMat4Into(
+			modelViewProjection,
 			context.directContext.viewProjectionMatrix,
 			drawUnit.modelMatrix,
 		);
 		if (
-			!context.uniformCache.modelViewProjection ||
-			!arraysEqual(context.uniformCache.modelViewProjection, modelViewProjection)
+			!context.uniformCache.modelViewProjectionValid ||
+			!arraysEqual(
+				context.uniformCache.modelViewProjection,
+				modelViewProjection,
+			)
 		) {
 			context.directContext.gl.uniformMatrix4fv(
 				route.activeProgram.uniforms.uModelViewProjection,
 				false,
 				modelViewProjection,
 			);
-			context.uniformCache.modelViewProjection = modelViewProjection;
+			context.uniformCache.modelViewProjection.set(modelViewProjection);
+			context.uniformCache.modelViewProjectionValid = true;
 			metrics.uniformUploadCount += 1;
 		}
 		if (route.programKind === "texture") {
@@ -969,8 +979,7 @@ function submitIndexedPalettedFamilyDrawUnits({
 	planningNoVisibleRouteCount: number;
 }): void {
 	if (replaceableDrawUnitIds.size === 0) {
-		const emptyMetrics =
-			createEmptyWebgl2IndexedPalettedFamilySubmitMetrics();
+		const emptyMetrics = createEmptyWebgl2IndexedPalettedFamilySubmitMetrics();
 		metrics.indexedPalettedFamilyRetainedDirectDrawUnitCount =
 			retainedDrawUnitCount;
 		metrics.indexedPalettedFamilyNoVisibleRouteCount =
@@ -1104,13 +1113,18 @@ function submitRgbaTexturePageFamilyDrawUnits({
 		});
 		metrics.drawCallCount += atlasMetrics.shaderDrawCallCount;
 		metrics.triangleCount += atlasMetrics.submittedTriangleCount;
-		metrics.rgbaTexturePageFamilyShaderDrawCallCount = atlasMetrics.shaderDrawCallCount;
-		metrics.rgbaTexturePageFamilySubmittedBatchCount = atlasMetrics.submittedBatchCount;
-		metrics.rgbaTexturePageFamilySubmittedDrawSliceCount = atlasMetrics.submittedDrawSliceCount;
+		metrics.rgbaTexturePageFamilyShaderDrawCallCount =
+			atlasMetrics.shaderDrawCallCount;
+		metrics.rgbaTexturePageFamilySubmittedBatchCount =
+			atlasMetrics.submittedBatchCount;
+		metrics.rgbaTexturePageFamilySubmittedDrawSliceCount =
+			atlasMetrics.submittedDrawSliceCount;
 		metrics.rgbaTexturePageFamilySubmittedSliceRepresentedDrawUnitCount =
 			atlasMetrics.submittedSliceRepresentedDrawUnitCount;
-		metrics.rgbaTexturePageFamilySubmittedTriangleCount = atlasMetrics.submittedTriangleCount;
-		metrics.rgbaTexturePageFamilyReplacedDrawUnitCount = atlasMetrics.replacedDrawUnitCount;
+		metrics.rgbaTexturePageFamilySubmittedTriangleCount =
+			atlasMetrics.submittedTriangleCount;
+		metrics.rgbaTexturePageFamilyReplacedDrawUnitCount =
+			atlasMetrics.replacedDrawUnitCount;
 		metrics.rgbaTexturePageFamilyReplacedDrawUnitTriangleCount =
 			replaceableDrawUnitTriangleCount;
 		applyRgbaTexturePageFamilyConservativeOverdraw(metrics);
@@ -1133,8 +1147,13 @@ function submitRgbaTexturePageFamilyDrawUnits({
 		return;
 	}
 	const fallbackSamples = [...planningFallbackSamples];
-	metrics.rgbaTexturePageFamilyNoVisibleRouteCount = planningNoVisibleRouteCount;
-	applyRgbaTexturePageFamilyNoVisibleRoute(metrics, route, planningNoVisibleRouteCount);
+	metrics.rgbaTexturePageFamilyNoVisibleRouteCount =
+		planningNoVisibleRouteCount;
+	applyRgbaTexturePageFamilyNoVisibleRoute(
+		metrics,
+		route,
+		planningNoVisibleRouteCount,
+	);
 	if (
 		!program &&
 		resources.batches.length > 0 &&
@@ -1147,8 +1166,10 @@ function submitRgbaTexturePageFamilyDrawUnits({
 	}
 	const emptyAtlasMetrics =
 		createEmptyWebgl2RgbaTexturePageFamilySubmitMetrics();
-	metrics.rgbaTexturePageFamilyRetainedDirectDrawUnitCount = retainedDrawUnitCount;
-	metrics.rgbaTexturePageFamilyReplacedDrawUnitTriangleCount = replaceableDrawUnitTriangleCount;
+	metrics.rgbaTexturePageFamilyRetainedDirectDrawUnitCount =
+		retainedDrawUnitCount;
+	metrics.rgbaTexturePageFamilyReplacedDrawUnitTriangleCount =
+		replaceableDrawUnitTriangleCount;
 	applyRgbaTexturePageFamilyConservativeOverdraw(metrics);
 	metrics.rgbaTexturePageFamilyNoVisibleRouteCount +=
 		emptyAtlasMetrics.noVisibleRouteCount;
@@ -1184,7 +1205,8 @@ function applyRgbaTexturePageFamilyDrawCallArithmetic(
 		metrics.rgbaTexturePageFamilyRetainedDirectDrawUnitCount +
 		metrics.rgbaTexturePageFamilyReplacedDrawUnitCount;
 	metrics.rgbaTexturePageFamilySubmittedDrawCallEstimateCount =
-		metrics.rgbaTexturePageFamilyRetainedDirectDrawUnitCount + metrics.rgbaTexturePageFamilyShaderDrawCallCount;
+		metrics.rgbaTexturePageFamilyRetainedDirectDrawUnitCount +
+		metrics.rgbaTexturePageFamilyShaderDrawCallCount;
 	metrics.rgbaTexturePageFamilyDrawCallSavingsCount =
 		metrics.rgbaTexturePageFamilyOriginalDrawCallEstimateCount -
 		metrics.rgbaTexturePageFamilySubmittedDrawCallEstimateCount;

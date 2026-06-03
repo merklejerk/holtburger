@@ -810,6 +810,14 @@ describe("webgl2 world resources", () => {
 		expect(store.textureCount).toBe(2);
 		expect(store.indexedTextureCount).toBe(1);
 		expect(store.paletteTextureCount).toBe(1);
+		expect(store.indexedMaterialDescriptorDrawUnitCount).toBe(1);
+		expect(
+			store.indexedMaterialDescriptorCompactionCandidateCount,
+		).toBe(1);
+		expect(store.standaloneIndexedMaterialResourceDrawUnitCount).toBe(1);
+		expect(
+			store.compactedIndexedMaterialStandaloneResourceDrawUnitCount,
+		).toBe(1);
 		expect(
 			store.compactionFamilyPlan.indexedMaterialTableRecords,
 		).toMatchObject([

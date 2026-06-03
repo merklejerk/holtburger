@@ -6,6 +6,7 @@ import {
 	type GeometrySubmissionLayout,
 } from "./webgl2/families/direct-render-family";
 import type {
+	Webgl2IndexedMaterialDescriptor,
 	Webgl2IndexedMaterialResources,
 	Webgl2WorldDrawUnit,
 } from "./webgl2-world-resources";
@@ -152,7 +153,9 @@ function createDrawUnit({
 		},
 		textureKey: texture ? `${id}/texture` : null,
 		texture,
-		indexedMaterialDescriptor: indexedMaterial,
+		indexedMaterialDescriptor: indexedMaterial
+			? createIndexedMaterialDescriptor(indexedMaterial)
+			: null,
 		indexedMaterial,
 		detailOverlay: null,
 		texturePageBindings: [],
@@ -189,21 +192,30 @@ function createTexture(): Webgl2Texture2DResource {
 function createIndexedMaterial(): Webgl2IndexedMaterialResources {
 	const indexTexture = createTexture();
 	const paletteTexture = createTexture();
+	const descriptor = createIndexedMaterialDescriptor();
 	return {
-		key: "indexed/material",
-		indexFormat: "index16",
-		indexTextureKey: "indexed/texels",
-		paletteTextureKey: "indexed/palette",
+		...descriptor,
 		indexTexture,
 		paletteTexture,
-		width: 1,
-		height: 1,
-		indexSourceBytes: Uint8Array.from([0, 1]),
-		paletteColorCount: 256,
-		paletteRgbaBytes: new Uint8Array(256 * 4),
-		wrapS: "repeat",
-		wrapT: "repeat",
-		clipThreshold: -1,
+	};
+}
+
+function createIndexedMaterialDescriptor(
+	material?: Webgl2IndexedMaterialResources,
+): Webgl2IndexedMaterialDescriptor {
+	return {
+		key: material?.key ?? "indexed/material",
+		indexFormat: material?.indexFormat ?? "index16",
+		indexTextureKey: material?.indexTextureKey ?? "indexed/texels",
+		paletteTextureKey: material?.paletteTextureKey ?? "indexed/palette",
+		width: material?.width ?? 1,
+		height: material?.height ?? 1,
+		indexSourceBytes: material?.indexSourceBytes ?? Uint8Array.from([0, 1]),
+		paletteColorCount: material?.paletteColorCount ?? 256,
+		paletteRgbaBytes: material?.paletteRgbaBytes ?? new Uint8Array(256 * 4),
+		wrapS: material?.wrapS ?? "repeat",
+		wrapT: material?.wrapT ?? "repeat",
+		clipThreshold: material?.clipThreshold ?? -1,
 	};
 }
 

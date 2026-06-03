@@ -256,6 +256,10 @@ export interface Webgl2WorldResourceStore {
 	>;
 	textureAtlasGenerationTextureCount: number;
 	detailTextureAtlasGenerationTextureCount: number;
+	indexedMaterialDescriptorDrawUnitCount: number;
+	indexedMaterialDescriptorCompactionCandidateCount: number;
+	standaloneIndexedMaterialResourceDrawUnitCount: number;
+	compactedIndexedMaterialStandaloneResourceDrawUnitCount: number;
 	compactedGeometryBatchCount: number;
 	compactedGeometryDrawUnitCount: number;
 	compactedGeometryTriangleCount: number;
@@ -372,6 +376,10 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		compactionCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts: {},
 		textureAtlasGenerationTextureCount: 0,
 		detailTextureAtlasGenerationTextureCount: 0,
+		indexedMaterialDescriptorDrawUnitCount: 0,
+		indexedMaterialDescriptorCompactionCandidateCount: 0,
+		standaloneIndexedMaterialResourceDrawUnitCount: 0,
+		compactedIndexedMaterialStandaloneResourceDrawUnitCount: 0,
 		compactedGeometryBatchCount: 0,
 		compactedGeometryDrawUnitCount: 0,
 		compactedGeometryTriangleCount: 0,
@@ -667,6 +675,27 @@ export function syncWebgl2WorldResources({
 		compactionCoverageMetrics.retainedDirectMaterialFamilyCounts;
 	store.compactionCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts =
 		compactionCoverageMetrics.retainedDirectMaterialFamilyAlphaPolicyCounts;
+	store.indexedMaterialDescriptorDrawUnitCount = store.drawUnits.filter(
+		(drawUnit) => drawUnit.indexedMaterialDescriptor !== null,
+	).length;
+	const compactedIndexedDrawUnitIds = new Set(
+		store.compactionFamilyPlan.renderFamilies.indexedPaletted
+			.compactableDrawUnitIds,
+	);
+	store.indexedMaterialDescriptorCompactionCandidateCount =
+		store.drawUnits.filter(
+			(drawUnit) =>
+				drawUnit.indexedMaterialDescriptor !== null &&
+				compactedIndexedDrawUnitIds.has(drawUnit.id),
+		).length;
+	store.standaloneIndexedMaterialResourceDrawUnitCount =
+		store.drawUnits.filter((drawUnit) => drawUnit.indexedMaterial !== null).length;
+	store.compactedIndexedMaterialStandaloneResourceDrawUnitCount =
+		store.drawUnits.filter(
+			(drawUnit) =>
+				drawUnit.indexedMaterial !== null &&
+				compactedIndexedDrawUnitIds.has(drawUnit.id),
+		).length;
 	syncWebgl2TextureAtlasGeneration({
 		gl,
 		store,
@@ -811,6 +840,10 @@ export function destroyWebgl2WorldResources(
 	store.compactionCoverageMaterialFamilyAlphaPolicyCounts = {};
 	store.compactionCoverageRetainedDirectMaterialFamilyCounts = {};
 	store.compactionCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts = {};
+	store.indexedMaterialDescriptorDrawUnitCount = 0;
+	store.indexedMaterialDescriptorCompactionCandidateCount = 0;
+	store.standaloneIndexedMaterialResourceDrawUnitCount = 0;
+	store.compactedIndexedMaterialStandaloneResourceDrawUnitCount = 0;
 	store.textureAtlasGenerationTextureCount = 0;
 	store.detailTextureAtlasGenerationTextureCount = 0;
 	store.compactedGeometryBatchCount = 0;

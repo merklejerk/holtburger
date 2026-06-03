@@ -412,6 +412,15 @@ export function createWebgl2RenderMetrics(
 			textureResourceCount: input.worldStore?.textureCount ?? 0,
 			indexedTextureResourceCount: input.worldStore?.indexedTextureCount ?? 0,
 			paletteResourceCount: input.worldStore?.paletteTextureCount ?? 0,
+			indexedMaterialDescriptorDrawUnitCount:
+				input.worldStore?.indexedMaterialDescriptorDrawUnitCount ?? 0,
+			indexedMaterialDescriptorCompactionCandidateCount:
+				input.worldStore?.indexedMaterialDescriptorCompactionCandidateCount ?? 0,
+			standaloneIndexedMaterialResourceDrawUnitCount:
+				input.worldStore?.standaloneIndexedMaterialResourceDrawUnitCount ?? 0,
+			compactedIndexedMaterialStandaloneResourceDrawUnitCount:
+				input.worldStore
+					?.compactedIndexedMaterialStandaloneResourceDrawUnitCount ?? 0,
 			staticGeometryGroupCount: input.worldStore?.staticDrawUnitCount ?? 0,
 			staticVisibleGeometryGroupCount:
 				(input.frameMetrics?.visibleDrawCountsByCategory["static-staged"] ??
@@ -546,6 +555,16 @@ export function createWebgl2RenderMetrics(
 							input.submitMetrics.indexedPalettedFamilyDrawCallSavingsCount,
 						"webgl2-indexed-family-no-visible-routes":
 							input.submitMetrics.indexedPalettedFamilyNoVisibleRouteCount,
+						"webgl2-indexed-descriptor-draw-units":
+							input.worldStore.indexedMaterialDescriptorDrawUnitCount,
+						"webgl2-indexed-descriptor-compaction-candidates":
+							input.worldStore
+								.indexedMaterialDescriptorCompactionCandidateCount,
+						"webgl2-standalone-indexed-resource-draw-units":
+							input.worldStore.standaloneIndexedMaterialResourceDrawUnitCount,
+						"webgl2-compacted-indexed-standalone-resource-draw-units":
+							input.worldStore
+								.compactedIndexedMaterialStandaloneResourceDrawUnitCount,
 						"webgl2-retained-direct-opaque-draw-units":
 							input.submitMetrics.retainedDirectOpaqueDrawUnitCount,
 						"webgl2-retained-direct-blended-draw-units":

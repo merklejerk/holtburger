@@ -78,7 +78,10 @@ export interface Webgl2TerrainTileDrawSliceResource {
 }
 
 export interface Webgl2TerrainTileTexturePageBinding {
-	family: Extract<TexturePageFamily, "terrain-color" | "terrain-mask" | "terrain-detail">;
+	family: Extract<
+		TexturePageFamily,
+		"terrain-color" | "terrain-mask" | "terrain-detail"
+	>;
 	atlasEntryKey: string;
 	textureIndex: number | null;
 	rect: readonly [number, number, number, number] | null;
@@ -135,11 +138,12 @@ export function describeTerrainTileGeometrySignature(
 	geometry: StagedWorldIndexedGeometry,
 ): string {
 	return [
+		geometry.signature,
 		`v:${geometry.vertexCount}`,
 		`t:${geometry.triangleCount}`,
-		`p:${geometry.positions.length}:${hashFloat32Array(geometry.positions)}`,
-		`u:${geometry.uvs ? `${geometry.uvs.length}:${hashFloat32Array(geometry.uvs)}` : "none"}`,
-		`i:${geometry.indices.length}:${hashIndexArray(geometry.indices)}`,
+		`p:${geometry.positions.length}`,
+		`u:${geometry.uvs ? geometry.uvs.length : "none"}`,
+		`i:${geometry.indices.length}`,
 	].join("|");
 }
 
@@ -297,21 +301,19 @@ function collectTerrainLayerRenderableBlockers({
 		blockers.push(`${resourceLabel} one-draw geometry has no uv buffer`);
 	}
 	if (!hasLayerSlotBuffer) {
-		blockers.push(`${resourceLabel} one-draw geometry has no layer-slot buffer`);
+		blockers.push(
+			`${resourceLabel} one-draw geometry has no layer-slot buffer`,
+		);
 	}
 	const requiresColorPages =
-		layerPlan?.layerEntries.some((entry) => entry.colorRefCount > 0) ??
-		false;
+		layerPlan?.layerEntries.some((entry) => entry.colorRefCount > 0) ?? false;
 	const colorTextureIndices = collectTerrainPageTextureIndices(
-		texturePageBindings.filter(
-			(binding) => binding.family === "terrain-color",
-		),
+		texturePageBindings.filter((binding) => binding.family === "terrain-color"),
 	);
-	if (
-		requiresColorPages &&
-		colorTextureIndices.length === 0
-	) {
-		blockers.push(`${resourceLabel} one-draw path has no terrain color page bindings`);
+	if (requiresColorPages && colorTextureIndices.length === 0) {
+		blockers.push(
+			`${resourceLabel} one-draw path has no terrain color page bindings`,
+		);
 	}
 	if (colorTextureIndices.length > 1) {
 		blockers.push(
@@ -319,18 +321,14 @@ function collectTerrainLayerRenderableBlockers({
 		);
 	}
 	const requiresMaskPages =
-		layerPlan?.layerEntries.some((entry) => entry.maskRefCount > 0) ??
-		false;
+		layerPlan?.layerEntries.some((entry) => entry.maskRefCount > 0) ?? false;
 	const maskTextureIndices = collectTerrainPageTextureIndices(
-		texturePageBindings.filter(
-			(binding) => binding.family === "terrain-mask",
-		),
+		texturePageBindings.filter((binding) => binding.family === "terrain-mask"),
 	);
-	if (
-		requiresMaskPages &&
-		maskTextureIndices.length === 0
-	) {
-		blockers.push(`${resourceLabel} one-draw path has no terrain mask page bindings`);
+	if (requiresMaskPages && maskTextureIndices.length === 0) {
+		blockers.push(
+			`${resourceLabel} one-draw path has no terrain mask page bindings`,
+		);
 	}
 	if (maskTextureIndices.length > 1) {
 		blockers.push(
@@ -339,7 +337,8 @@ function collectTerrainLayerRenderableBlockers({
 	}
 	for (const ref of collectTerrainLayerTextureRefs(layerPlan)) {
 		const atlasEntryKey = describeTerrainBlendTextureAtlasEntryKey(ref);
-		const expectedFamily = ref.role === "mask" ? "terrain-mask" : "terrain-color";
+		const expectedFamily =
+			ref.role === "mask" ? "terrain-mask" : "terrain-color";
 		if (
 			!texturePageBindings.some(
 				(binding) =>
@@ -382,10 +381,13 @@ function collectTerrainLayerTextureRefs(
 			...entry.plan.roads.flatMap((road) => [road.road, road.alpha]),
 		]) ?? [];
 	const refsByKey = new Map(
-		refs.map((ref) => [
-			`${ref.role}/${describeTerrainBlendTextureAtlasEntryKey(ref)}`,
-			ref,
-		] as const),
+		refs.map(
+			(ref) =>
+				[
+					`${ref.role}/${describeTerrainBlendTextureAtlasEntryKey(ref)}`,
+					ref,
+				] as const,
+		),
 	);
 	return [...refsByKey.values()];
 }
@@ -419,32 +421,4 @@ export function destroyWebgl2TerrainTileDrawSlice(
 	slice.uvBuffer.dispose();
 	slice.layerSlotBuffer.dispose();
 	slice.indexBuffer.dispose();
-}
-
-function hashFloat32Array(values: Float32Array): string {
-	let hash = 0x811c9dc5;
-	const view = new DataView(
-		values.buffer,
-		values.byteOffset,
-		values.byteLength,
-	);
-	for (let byteOffset = 0; byteOffset < view.byteLength; byteOffset += 1) {
-		hash ^= view.getUint8(byteOffset);
-		hash = Math.imul(hash, 0x01000193);
-	}
-	return (hash >>> 0).toString(16).padStart(8, "0");
-}
-
-function hashIndexArray(values: Uint16Array | Uint32Array): string {
-	let hash = 0x811c9dc5;
-	const view = new DataView(
-		values.buffer,
-		values.byteOffset,
-		values.byteLength,
-	);
-	for (let byteOffset = 0; byteOffset < view.byteLength; byteOffset += 1) {
-		hash ^= view.getUint8(byteOffset);
-		hash = Math.imul(hash, 0x01000193);
-	}
-	return (hash >>> 0).toString(16).padStart(8, "0");
 }

@@ -1,6 +1,6 @@
 # Holtburger 3D Terrain Rendering Implementation Plan
 
-Status: Phase T8A complete; Phase T8B page-overflow terrain draw-slice fallback is next.
+Status: Phase T8B complete; Phase T9 compatibility path removal is next.
 
 Dry-run status: reviewed against the current `apps/holtburger-3d/src/lib/world-display` module graph.
 The phase order below reflects that dry run.
@@ -1479,6 +1479,60 @@ Acceptance criteria:
 - No terrain-family draw binds more than one color page or one mask page.
 - Diagnostics clearly explain whether slicing was caused by color page, mask page, detail, or layer
   table overflow.
+
+Progress update, 2026-06-02:
+
+- Added page-overflow slice creation after terrain atlas placement resolution, where color/mask atlas
+  texture indices are known.
+- Page-overflow slices reuse `Webgl2TerrainTileDrawSliceResource` and the terrain-family shader path.
+- Terrain resource sync now groups layer entries by resolved terrain color atlas texture index and
+  terrain mask atlas texture index when the parent tile is blocked by multi-page readiness.
+- Each page-overflow slice gets:
+  - a slice-local layer table with remapped layer slots;
+  - real slice geometry and WebGL buffers;
+  - slice-local terrain page bindings;
+  - slice-specific one-draw readiness;
+  - a page-overflow reason naming the color/mask page group.
+- Submit readiness already routes ready slices through terrain-family submit, so page-overflow slices
+  do not need a separate submit path.
+
+Decisions:
+
+- Page-overflow slicing groups whole terrain layer entries. If a single pcode layer itself spans
+  multiple color or mask pages, T8B leaves that layer blocked instead of splitting one pcode's blend
+  semantics across multiple draws.
+- Page slices are created post-atlas, not during initial terrain tile realization. This keeps the
+  ownership honest because page texture indices do not exist until the shared atlas planner and
+  generation steps finish.
+- Retaining the source terrain mesh on `Webgl2TerrainTileResource` is now intentional. Post-atlas
+  slicing needs the original mesh to create real slice geometry after page placement is known.
+- Detail remains deferred. There is still no live terrain detail binding, so T8B does not invent a
+  detail slice axis.
+
+Course corrections and refinements:
+
+- T9 can start removing compatibility rendering, but should first audit for the remaining blocked
+  class: individual layer entries that span multiple atlas pages or need future detail handling.
+- If real content shows individual pcode layers spanning pages frequently, add an interim phase before
+  deleting compatibility rendering to either enforce atlas planning constraints for all refs in one
+  layer or introduce a source-proven multi-pass layer strategy.
+- Slice-specific frame candidates are still not implemented. Current submit routing conservatively
+  uses tile visibility, then submits ready slices. If overdraw becomes material, add slice candidates
+  before or during T10.
+
+Validation:
+
+- `npm run test:ts -- terrain-tile-plan webgl2-world-submit webgl2-world-resources terrain-family-submit`
+- `npm run check`
+- `npm run lint`
+
+Cleanup impact:
+
+- `Webgl2TerrainTileResource.mesh` was added for post-atlas slice generation. Keep it unless slice
+  planning moves earlier or stores precomputed geometry another way.
+- Compatibility rendering still covers unsliceable blocked terrain. T9 should delete the compatibility
+  route only after auditing whether those remaining blockers are acceptable diagnostics or need one
+  more targeted implementation pass.
 
 ## Phase T9: Remove Temporary Terrain Compatibility Paths
 

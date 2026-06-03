@@ -115,6 +115,7 @@ import {
 	buildTerrainTileLayerGeometry,
 	buildTerrainTileLayerPlan,
 	type TerrainTileDrawSlicePlan,
+	type TerrainTileLayerEntry,
 	type TerrainTileLayerGeometry,
 	type TerrainTileLayerPlan,
 } from "./terrain-tile-plan";
@@ -665,7 +666,7 @@ export function syncWebgl2WorldResources({
 		plan: store.texturePageAtlasPlan,
 		rendererResourceGraph,
 	});
-	resolveWebgl2TerrainTileTexturePageBindings(store);
+	resolveWebgl2TerrainTileTexturePageBindings({ gl, store });
 	resolveWebgl2DrawUnitTexturePageBindings(store);
 	for (const [textureKey, texture] of store.texturesByKey) {
 		if (!retainedTextureKeys.has(textureKey)) {
@@ -928,6 +929,7 @@ function createOrReuseWebgl2TerrainTile({
 		previous.modelMatrix = modelMatrix;
 		previous.readiness = readiness;
 		previous.dataSource = tile.dataSource;
+		previous.mesh = tile.mesh;
 		previous.bvhItemKeys = [...bvhBinding.itemKeys];
 		previous.bvhFallbackReason = bvhBinding.fallbackReason;
 		previous.compatibilityDraws = compatibilityDraws;
@@ -962,6 +964,7 @@ function createOrReuseWebgl2TerrainTile({
 		modelMatrix,
 		readiness,
 		dataSource: tile.dataSource,
+		mesh: tile.mesh,
 		bvhItemKeys: [...bvhBinding.itemKeys],
 		bvhFallbackReason: bvhBinding.fallbackReason,
 		compatibilityDraws,
@@ -1438,9 +1441,13 @@ function applyTerrainTexturePageBlockers({
 	}
 }
 
-function resolveWebgl2TerrainTileTexturePageBindings(
-	store: Webgl2WorldResourceStore,
-): void {
+function resolveWebgl2TerrainTileTexturePageBindings({
+	gl,
+	store,
+}: {
+	gl: WebGL2RenderingContext;
+	store: Webgl2WorldResourceStore;
+}): void {
 	const placementsByEntryKey = createTexturePageAtlasPlacementsByEntryKey(
 		store.texturePageAtlasPlan,
 	);
@@ -1468,7 +1475,184 @@ function resolveWebgl2TerrainTileTexturePageBindings(
 		tile.texturePageBlockers = [...new Set(blockers)];
 		tile.oneDrawReadiness = deriveTerrainTileOneDrawReadiness(tile);
 		resolveTerrainDrawSliceTexturePageBindings(tile);
+		if (tile.oneDrawReadiness.status === "blocked") {
+			tile.drawSlices.push(
+				...createWebgl2TerrainTilePageOverflowDrawSlices({
+					gl,
+					tile,
+				}),
+			);
+			resolveTerrainDrawSliceTexturePageBindings(tile);
+		}
 	}
+}
+
+function createWebgl2TerrainTilePageOverflowDrawSlices({
+	gl,
+	tile,
+}: {
+	gl: WebGL2RenderingContext;
+	tile: Webgl2TerrainTileResource;
+}): Webgl2TerrainTileDrawSliceResource[] {
+	if (!tile.layerPlan || tile.layerPlan.blockers.length > 0) {
+		return [];
+	}
+	const layerPlan = tile.layerPlan;
+	if (
+		tile.oneDrawReadiness.status !== "blocked" ||
+		!tile.oneDrawReadiness.blockers.some(isTerrainPageOverflowBlocker)
+	) {
+		return [];
+	}
+	const sliceGroups = groupTerrainLayerEntriesByPage(tile);
+	if (sliceGroups.length <= 1) {
+		return [];
+	}
+	return sliceGroups.flatMap((group, groupIndex) => {
+		const sliceLayerPlan = createTerrainPageOverflowSliceLayerPlan({
+			parentPlan: layerPlan,
+			entries: group.entries,
+			groupIndex,
+		});
+		return createWebgl2TerrainTileDrawSlice({
+			gl,
+			id: `${tile.id}/page-slice/${groupIndex}`,
+			modelMatrix: tile.modelMatrix,
+			parentTerrainTileId: tile.id,
+			reason: group.reason,
+			mesh: tile.mesh,
+			slicePlan: {
+				id: `page-slice/${groupIndex}`,
+				reason: group.reason,
+				layerPlan: sliceLayerPlan,
+				pcodes: group.entries.map((entry) => entry.pcode),
+			},
+		});
+	});
+}
+
+function isTerrainPageOverflowBlocker(blocker: string): boolean {
+	return (
+		blocker.includes("terrain color atlas textures") ||
+		blocker.includes("terrain mask atlas textures")
+	);
+}
+
+function groupTerrainLayerEntriesByPage(tile: Webgl2TerrainTileResource): Array<{
+	entries: TerrainTileLayerEntry[];
+	reason: string;
+}> {
+	const groupsByKey = new Map<
+		string,
+		{
+			entries: TerrainTileLayerEntry[];
+			colorTextureIndex: number | null;
+			maskTextureIndex: number | null;
+		}
+	>();
+	for (const entry of tile.layerPlan?.layerEntries ?? []) {
+		const textureIndices = collectTerrainLayerEntryTextureIndices({
+			entry,
+			bindings: tile.texturePageBindings,
+		});
+		if (
+			textureIndices.colorTextureIndices.length > 1 ||
+			textureIndices.maskTextureIndices.length > 1
+		) {
+			continue;
+		}
+		const colorTextureIndex = textureIndices.colorTextureIndices[0] ?? null;
+		const maskTextureIndex = textureIndices.maskTextureIndices[0] ?? null;
+		const key = `color:${colorTextureIndex ?? "none"}|mask:${maskTextureIndex ?? "none"}`;
+		const group = groupsByKey.get(key) ?? {
+			entries: [],
+			colorTextureIndex,
+			maskTextureIndex,
+		};
+		group.entries.push(entry);
+		groupsByKey.set(key, group);
+	}
+	return [...groupsByKey.values()]
+		.filter((group) => group.entries.length > 0)
+		.map((group) => ({
+			entries: group.entries,
+			reason: [
+				"terrain tile page overflow",
+				`color=${group.colorTextureIndex ?? "none"}`,
+				`mask=${group.maskTextureIndex ?? "none"}`,
+			].join(" "),
+		}));
+}
+
+function collectTerrainLayerEntryTextureIndices({
+	entry,
+	bindings,
+}: {
+	entry: TerrainTileLayerEntry;
+	bindings: readonly Webgl2TerrainTileTexturePageBinding[];
+}): {
+	colorTextureIndices: number[];
+	maskTextureIndices: number[];
+} {
+	const colorTextureIndices = collectTerrainRefsTextureIndices({
+		refs: [
+			entry.plan.base,
+			...entry.plan.overlays.map((overlay) => overlay.terrain),
+			...entry.plan.roads.map((road) => road.road),
+		],
+		bindings,
+	});
+	const maskTextureIndices = collectTerrainRefsTextureIndices({
+		refs: [
+			...entry.plan.overlays.map((overlay) => overlay.alpha),
+			...entry.plan.roads.map((road) => road.alpha),
+		],
+		bindings,
+	});
+	return { colorTextureIndices, maskTextureIndices };
+}
+
+function collectTerrainRefsTextureIndices({
+	refs,
+	bindings,
+}: {
+	refs: readonly TerrainBlendTextureRef[];
+	bindings: readonly Webgl2TerrainTileTexturePageBinding[];
+}): number[] {
+	return [
+		...new Set(
+			refs.flatMap((ref) => {
+				const atlasEntryKey = describeTerrainBlendTextureAtlasEntryKey(ref);
+				const binding = bindings.find(
+					(candidate) => candidate.atlasEntryKey === atlasEntryKey,
+				);
+				return binding?.textureIndex == null ? [] : [binding.textureIndex];
+			}),
+		),
+	].sort((left, right) => left - right);
+}
+
+function createTerrainPageOverflowSliceLayerPlan({
+	parentPlan,
+	entries,
+	groupIndex,
+}: {
+	parentPlan: TerrainTileLayerPlan;
+	entries: readonly TerrainTileLayerEntry[];
+	groupIndex: number;
+}): TerrainTileLayerPlan {
+	const layerEntries = entries.map((entry, slot) => ({
+		...entry,
+		slot,
+	}));
+	return {
+		layerEntries,
+		layerSlotByPcode: new Map(
+			layerEntries.map((entry) => [entry.pcode, entry.slot] as const),
+		),
+		blockers: [],
+		signature: `${parentPlan.signature}|page-slice:${groupIndex}|layers:${layerEntries.map((entry) => `${entry.slot}:${entry.pcode}`).join(",")}`,
+	};
 }
 
 function resolveTerrainDrawSliceTexturePageBindings(

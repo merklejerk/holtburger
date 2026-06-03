@@ -25,6 +25,7 @@ import type {
 } from "./webgl2/resources/compacted-geometry-resources";
 import type { Webgl2TerrainTileResource } from "./webgl2/resources/terrain-tile-resources";
 import type { Webgl2TextureAtlasGenerationResource } from "./webgl2/resources/texture-atlas-generation";
+import type { Webgl2IndexedResourceAtlasGenerationResource } from "./webgl2/resources/indexed-resource-atlas-generation";
 import type { Webgl2RgbaTexturePageFamilyWorldProgram } from "./webgl2/families/rgba-texture-page-family-submit";
 import type { Webgl2IndexedPalettedFamilyWorldProgram } from "./webgl2/families/indexed-paletted-family-submit";
 import type { Webgl2TerrainFamilyWorldProgram } from "./webgl2/families/terrain-family-submit";
@@ -264,16 +265,7 @@ describe("planWebgl2WorldSubmitPassSchedule", () => {
 					createIndexedPalettedFamilyResource(["indexed-compacted"]),
 				],
 				detailTextures: [],
-				texturesByKey: new Map([
-					[
-						indexedMaterial.indexTextureKey,
-						createTextureResource({} as WebGLTexture),
-					],
-					[
-						indexedMaterial.paletteTextureKey,
-						createTextureResource({} as WebGLTexture),
-					],
-				]),
+				indexedResourceAtlasGeneration: createIndexedResourceAtlasGeneration(),
 			},
 		});
 
@@ -1156,8 +1148,10 @@ describe("submitWebgl2WorldFrame", () => {
 	it("replaces opaque indexed draw units through the indexed-paletted family submit path", () => {
 		const gl = new CapturingSubmitGl();
 		const stateCache = new Webgl2StateCache(gl);
-		const indexTexture = {} as WebGLTexture;
-		const paletteTexture = {} as WebGLTexture;
+		const standaloneIndexTexture = {} as WebGLTexture;
+		const standalonePaletteTexture = {} as WebGLTexture;
+		const atlasIndexTexture = {} as WebGLTexture;
+		const atlasPaletteTexture = {} as WebGLTexture;
 		const indexedMaterial = createIndexedMaterial("p8");
 		const drawUnitsById = new Map<string, Webgl2WorldDrawUnit>([
 			[
@@ -1196,16 +1190,10 @@ describe("submitWebgl2WorldFrame", () => {
 					createIndexedPalettedFamilyResource(["indexed-a", "indexed-b"]),
 				],
 				detailTextures: [],
-				texturesByKey: new Map([
-					[
-						indexedMaterial.indexTextureKey,
-						createTextureResource(indexTexture),
-					],
-					[
-						indexedMaterial.paletteTextureKey,
-						createTextureResource(paletteTexture),
-					],
-				]),
+				indexedResourceAtlasGeneration: createIndexedResourceAtlasGeneration({
+					indexTexture: atlasIndexTexture,
+					paletteTexture: atlasPaletteTexture,
+				}),
 			},
 			drawUnitsById,
 			frame: createFrame(["indexed-a", "indexed-b", "staged"]),
@@ -1229,8 +1217,11 @@ describe("submitWebgl2WorldFrame", () => {
 		).toEqual({
 			"flat-constant-color": 1,
 		});
-		expect(gl.boundTextures).toContain(indexTexture);
-		expect(gl.boundTextures).toContain(paletteTexture);
+		expect(gl.boundTextures).toContain(atlasIndexTexture);
+		expect(gl.boundTextures).toContain(atlasPaletteTexture);
+		expect(gl.boundTextures).not.toContain(standaloneIndexTexture);
+		expect(gl.boundTextures).not.toContain(standalonePaletteTexture);
+		expect(gl.uniform2fValues).toContainEqual([2, 1]);
 		expect(
 			gl.calls.filter((call) => call.startsWith("drawElements:")),
 		).toHaveLength(2);
@@ -1239,8 +1230,8 @@ describe("submitWebgl2WorldFrame", () => {
 	it("binds detail atlas pages for compacted indexed family draw slices", () => {
 		const gl = new CapturingSubmitGl();
 		const stateCache = new Webgl2StateCache(gl);
-		const indexTexture = {} as WebGLTexture;
-		const paletteTexture = {} as WebGLTexture;
+		const atlasIndexTexture = {} as WebGLTexture;
+		const atlasPaletteTexture = {} as WebGLTexture;
 		const detailTexture = {} as WebGLTexture;
 		const indexedMaterial = createIndexedMaterial("p8");
 		const drawUnitsById = new Map<string, Webgl2WorldDrawUnit>([
@@ -1280,16 +1271,10 @@ describe("submitWebgl2WorldFrame", () => {
 						placementCount: 1,
 					},
 				],
-				texturesByKey: new Map([
-					[
-						indexedMaterial.indexTextureKey,
-						createTextureResource(indexTexture),
-					],
-					[
-						indexedMaterial.paletteTextureKey,
-						createTextureResource(paletteTexture),
-					],
-				]),
+				indexedResourceAtlasGeneration: createIndexedResourceAtlasGeneration({
+					indexTexture: atlasIndexTexture,
+					paletteTexture: atlasPaletteTexture,
+				}),
 			},
 			drawUnitsById,
 			frame: createFrame(["indexed-detail"]),
@@ -1303,9 +1288,10 @@ describe("submitWebgl2WorldFrame", () => {
 			metrics.indexedPalettedFamilySubmittedDrawCallEstimateCount,
 		).toBe(1);
 		expect(metrics.indexedPalettedFamilyDrawCallSavingsCount).toBe(0);
-		expect(gl.boundTextures).toContain(indexTexture);
-		expect(gl.boundTextures).toContain(paletteTexture);
+		expect(gl.boundTextures).toContain(atlasIndexTexture);
+		expect(gl.boundTextures).toContain(atlasPaletteTexture);
 		expect(gl.boundTextures).toContain(detailTexture);
+		expect(gl.uniform2fValues).toContainEqual([2, 1]);
 		expect(gl.uniform2fValues).toContainEqual([4, 4]);
 	});
 });
@@ -1929,10 +1915,13 @@ function createIndexedPalettedFamilyProgram(): Webgl2IndexedPalettedFamilyWorldP
 			uBatchModel: {} as WebGLUniformLocation,
 			uIndexTexture: {} as WebGLUniformLocation,
 			uPaletteTexture: {} as WebGLUniformLocation,
+			uPaletteAtlasSize: {} as WebGLUniformLocation,
 			uDetailAtlasTexture: {} as WebGLUniformLocation,
 			uDetailAtlasSize: {} as WebGLUniformLocation,
 			uMaterialColors: {} as WebGLUniformLocation,
 			uMaterialParams: {} as WebGLUniformLocation,
+			uIndexMaterialRects: {} as WebGLUniformLocation,
+			uPaletteMaterialRects: {} as WebGLUniformLocation,
 			uDetailMaterialRects: {} as WebGLUniformLocation,
 			uDetailMaterialParams: {} as WebGLUniformLocation,
 		},
@@ -2069,6 +2058,67 @@ function createIndexedPalettedFamilyResource(
 				materialSlotKeys: ["indexed-material-slot"],
 			},
 		],
+	};
+}
+
+function createIndexedResourceAtlasGeneration({
+	indexTexture = {} as WebGLTexture,
+	paletteTexture = {} as WebGLTexture,
+}: {
+	indexTexture?: WebGLTexture;
+	paletteTexture?: WebGLTexture;
+} = {}): Webgl2IndexedResourceAtlasGenerationResource {
+	return {
+		key: "indexed-resource-atlas/test",
+		indexTextures: [
+			{
+				key: "indexed-resource-atlas/test/p8-index-texels/texture/0",
+				kind: "p8-index-texels",
+				textureIndex: 0,
+				texture: createTextureResource(indexTexture),
+				width: 2,
+				height: 1,
+				placementCount: 1,
+			},
+		],
+		paletteTextures: [
+			{
+				key: "indexed-resource-atlas/test/palette-lookup/texture/0",
+				kind: "palette-lookup",
+				textureIndex: 0,
+				texture: createTextureResource(paletteTexture),
+				width: 2,
+				height: 1,
+				placementCount: 1,
+			},
+		],
+		indexPlacements: [
+			{
+				indexTextureKey: "index",
+				format: "p8",
+				atlasTextureIndex: 0,
+				x: 0,
+				y: 0,
+				width: 2,
+				height: 1,
+				sourceBytes: Uint8Array.from([0, 1]),
+			},
+		],
+		palettePlacements: [
+			{
+				paletteTextureKey: "palette",
+				atlasTextureIndex: 0,
+				x: 0,
+				y: 0,
+				colorCount: 2,
+				rgbaBytes: Uint8Array.from([0, 0, 0, 0, 255, 255, 255, 255]),
+			},
+		],
+		indexReadyDrawUnitIds: ["indexed-a", "indexed-b", "indexed-detail"],
+		paletteReadyDrawUnitIds: ["indexed-a", "indexed-b", "indexed-detail"],
+		dispose() {
+			return;
+		},
 	};
 }
 

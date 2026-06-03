@@ -505,14 +505,54 @@ Original Phase B checklist:
 
 ### Phase C: Material Table and Shader Addressing
 
-- Extend indexed material table records with index/palette atlas placement fields.
-- Update P8 and Index16 compacted shaders to sample atlas-local texels and palette rows.
-- Add shader-level unit tests where feasible through submit mocks and material table assertions.
+Status: complete as of `2026-06-03`.
+
+Completed:
+
+- Extended the compacted indexed submit material table with index and palette atlas rect uniforms.
+- Updated P8 and Index16 compacted shaders to sample atlas-local indexed texels with integer
+  `texelFetch` coordinates and palette rows through atlas-aware UVs.
+- Changed compacted indexed submit to bind indexed resource atlas textures instead of standalone
+  direct indexed textures.
+- Made indexed resource atlas generation required for compacted indexed replacement planning. Missing
+  atlas generation or placements now keep indexed draw units retained direct instead of submitting an
+  incomplete compacted path.
+- Added submit-test assertions proving compacted indexed draw units bind atlas textures and upload
+  palette atlas size uniforms.
+
+Validation:
+
+- `npm exec vitest -- src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-indexed-resource-atlas-generation.test.ts src/lib/world-display/texture-pages/indexed-resource-atlas-planner.test.ts --run`
+  from `apps/holtburger-3d`
+  - Result: 4 test files passed, 54 tests passed.
+- `npm run lint:ts` from `apps/holtburger-3d`
+  - Result: passed.
+
+Decisions and course corrections:
+
+- Binding indexed atlas textures moved from Phase D into Phase C. Shader addressing cannot be validated
+  without binding atlas textures, so keeping binding separate would have created an unusable halfway
+  state.
+- Phase C did not regroup draw slices. Slices are still keyed by standalone `indexPageKey` and
+  `palettePageKey`, so draw-call reduction is still expected in Phase D.
+- Material table records still carry source page keys. The submit path resolves those keys into atlas
+  placements through `indexedResourceAtlasGeneration`; Phase D can change slice keys once grouping is
+  atlas-resource based.
+
+Remaining debt before Phase D:
+
+- Compacted indexed family resources still expose `indexPageKey` and `palettePageKey` as source keys.
+  Phase D should add atlas texture indices to slice planning and split slices by atlas texture pair.
+- Missing indexed atlas placements currently disable compacted indexed replacement globally for the
+  visible submit. Phase D should convert this into explicit retained-direct fallback/blocker samples
+  per affected route where practical.
+- Standalone direct indexed resources remain uploaded and retained for compacted indexed draw units.
+  Keep this debt visible until Phase F.
 
 ### Phase D: Slice Regrouping and Submit
 
 - Change indexed draw slice keys from individual index/palette texture keys to atlas texture indices.
-- Bind atlas textures during compacted indexed submit.
+- Keep atlas texture binding through compacted indexed submit, now implemented in Phase C.
 - Keep missing atlas placements as retained direct with explicit blocker/fallback samples.
 - Add tests proving multiple indexed materials with different source textures/palettes collapse into
   fewer submitted slices when they share atlas resources.
@@ -588,6 +628,9 @@ Expected cleanup targets:
 - `indexedResourceAtlasGeneration`: separate lifecycle is intentional for Phase B. After Phase C/D
   prove the final resource shape, consider extracting a small shared atlas-generation lifecycle helper
   if RGBA/detail and indexed resources still duplicate graph lease or dispose patterns.
+- Compacted indexed submit currently resolves source `indexPageKey` / `palettePageKey` to atlas
+  placements at submit time. Phase D should move atlas texture indices into planned slices/resources
+  so submit binds concrete atlas texture pairs without source-key lookups.
 - Indexed texel atlas page sizing: replace max-size `planAtlasLayout` pages with a tighter indexed
   data-page planner if runtime metrics show memory waste.
 - `Webgl2TextureAtlasGenerationResource`: keep RGBA/detail-specific, or extract shared lifecycle

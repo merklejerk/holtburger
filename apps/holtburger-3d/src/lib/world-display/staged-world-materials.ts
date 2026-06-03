@@ -14,7 +14,6 @@ import type {
 	ResolvedIndexedMaterialData,
 } from "./indexed-material-data";
 import type { ResolvedRegionDetailOverlayPlan } from "./region-detail-overlays";
-import type { TerrainBlendPlan } from "./terrain-blend-plan";
 import {
 	defaultStagedWorldMaterialTextureCapabilities,
 	resolveStagedWorldMaterialStrategy,
@@ -31,8 +30,7 @@ import type { TextureFilteringMode } from "./texture-pages/texture-sampling-poli
 export type StagedWorldMaterialPlan =
 	| StagedWorldFlatMaterialPlan
 	| StagedWorldDirectTextureMaterialPlan
-	| StagedWorldIndexedPalettedMaterialPlan
-	| StagedWorldTerrainBlendMaterialPlan;
+	| StagedWorldIndexedPalettedMaterialPlan;
 
 interface StagedWorldMaterialPlanCacheRecord {
 	plan: StagedWorldMaterialPlan;
@@ -77,16 +75,6 @@ export interface StagedWorldIndexedPalettedMaterialPlan {
 	behavior: LegacyMaterialBehaviorDto;
 	fallbackReason: string | null;
 	detailOverlay: ResolvedRegionDetailOverlayPlan | null;
-	preparedAssetIds: readonly string[];
-}
-
-interface StagedWorldTerrainBlendMaterialPlan {
-	kind: "terrain-blend";
-	key: string;
-	color: RenderVec4;
-	plan: TerrainBlendPlan;
-	behavior: null;
-	fallbackReason: string | null;
 	preparedAssetIds: readonly string[];
 }
 

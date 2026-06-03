@@ -17,7 +17,6 @@ import {
 	type Webgl2FlatWorldProgram,
 	type Webgl2IndexedP16WorldProgram,
 	type Webgl2IndexedP8WorldProgram,
-	type Webgl2TerrainBlendWorldProgram,
 } from "./webgl2-world-submit";
 import type {
 	Webgl2CompactedGeometryBatchResource,
@@ -119,7 +118,7 @@ describe("planWebgl2FlatWorldSubmitOrder", () => {
 		).toThrow("missing WebGL2 terrain tile missing-terrain");
 	});
 
-	it("partitions terrain tiles by one-draw readiness while retaining compatibility routing", () => {
+	it("partitions terrain tiles by one-draw readiness and blocked diagnostics", () => {
 		const readyTile = createTerrainTile({
 			id: "terrain-tile/ready",
 			oneDrawReadiness: {
@@ -146,9 +145,6 @@ describe("planWebgl2FlatWorldSubmitOrder", () => {
 		expect(plan.oneDrawTiles.map((tile) => tile.id)).toEqual([
 			"terrain-tile/ready",
 		]);
-		expect(plan.compatibilityTiles.map((tile) => tile.id)).toEqual([
-			"terrain-tile/blocked",
-		]);
 		expect(plan.blockedTiles).toEqual([
 			{
 				tile: blockedTile,
@@ -157,7 +153,7 @@ describe("planWebgl2FlatWorldSubmitOrder", () => {
 		]);
 	});
 
-	it("routes ready terrain draw slices instead of compatibility rendering", () => {
+	it("routes ready terrain draw slices instead of blocking the parent tile", () => {
 		const slice = createTerrainDrawSlice({
 			id: "terrain-tile/blocked/slice/0",
 			parentTerrainTileId: "terrain-tile/blocked",
@@ -188,7 +184,6 @@ describe("planWebgl2FlatWorldSubmitOrder", () => {
 
 		expect(plan.oneDrawTiles).toEqual([]);
 		expect(plan.oneDrawSlices).toEqual([slice]);
-		expect(plan.compatibilityTiles).toEqual([]);
 		expect(plan.blockedTiles).toEqual([]);
 	});
 });
@@ -374,23 +369,6 @@ describe("planWebgl2DirectDrawRoute", () => {
 		expect(p16.submission.material.family).toBe("indexed-paletted");
 	});
 
-	it("routes terrain draw units through the terrain program", () => {
-		const programs = createDirectDrawPrograms();
-		const route = planWebgl2DirectDrawRoute({
-			drawUnit: createDrawUnit({
-				id: "terrain",
-				kind: "terrain",
-				materialKind: "terrain-blend",
-				terrainBlend: createTerrainBlendResources(),
-			}),
-			programs,
-		});
-
-		expect(route.programKind).toBe("terrain");
-		expect(route.activeProgram).toBe(programs.terrainBlend);
-		expect(route.colorProgram).toBeNull();
-		expect(route.submission.material.family).toBe("terrain-blend");
-	});
 });
 
 describe("submitWebgl2FlatWorldFrame", () => {
@@ -439,7 +417,6 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			stateCache,
 			program,
 			texturedProgram,
-			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
 			drawUnitsById,
@@ -484,7 +461,6 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			stateCache,
 			program: createFlatProgram(),
 			texturedProgram: createTexturedProgram(),
-			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
 			drawUnitsById,
@@ -519,7 +495,6 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			stateCache,
 			program: createFlatProgram(),
 			texturedProgram: createTexturedProgram(),
-			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
 			rgbaTexturePageFamilyResources: {
@@ -567,7 +542,6 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			stateCache,
 			program: createFlatProgram(),
 			texturedProgram: createTexturedProgram(),
-			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
 			rgbaTexturePageFamilyProgram: createRgbaTexturePageFamilyProgram(),
@@ -608,7 +582,6 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			stateCache,
 			program: createFlatProgram(),
 			texturedProgram: createTexturedProgram(),
-			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
 			drawUnitsById,
@@ -652,7 +625,6 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			stateCache,
 			program: createFlatProgram(),
 			texturedProgram: createTexturedProgram(),
-			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
 			rgbaTexturePageFamilyResources: {
@@ -684,7 +656,6 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			stateCache,
 			program: createFlatProgram(),
 			texturedProgram: createTexturedProgram(),
-			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
 			rgbaTexturePageFamilyProgram: createRgbaTexturePageFamilyProgram(),
@@ -738,7 +709,6 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			stateCache,
 			program: createFlatProgram(),
 			texturedProgram: createTexturedProgram(),
-			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
 			rgbaTexturePageFamilyProgram: createRgbaTexturePageFamilyProgram(),
@@ -782,7 +752,6 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			stateCache,
 			program: createFlatProgram(),
 			texturedProgram: createTexturedProgram(),
-			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
 			rgbaTexturePageFamilyProgram: createRgbaTexturePageFamilyProgram(),
@@ -837,7 +806,6 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			stateCache,
 			program: createFlatProgram(),
 			texturedProgram: createTexturedProgram(),
-			terrainBlendProgram: createTerrainBlendProgram(),
 			terrainFamilyProgram: createTerrainFamilyProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
@@ -856,7 +824,6 @@ describe("submitWebgl2FlatWorldFrame", () => {
 
 		expect(metrics.terrainOneDrawShaderDrawCallCount).toBe(1);
 		expect(metrics.terrainOneDrawSubmittedTileCount).toBe(1);
-		expect(metrics.terrainCompatibilityDrawCallCount).toBe(0);
 		expect(gl.calls).toContain("drawElementsFor:terrain-ready");
 		expect(gl.boundTextures).toContain(atlasTexture);
 	});
@@ -886,7 +853,6 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			stateCache,
 			program: createFlatProgram(),
 			texturedProgram: createTexturedProgram(),
-			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
 			rgbaTexturePageFamilyProgram: createRgbaTexturePageFamilyProgram(),
@@ -949,7 +915,6 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			stateCache,
 			program: createFlatProgram(),
 			texturedProgram: createTexturedProgram(),
-			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
 			viewProjectionMatrix: createIdentityMat4(),
@@ -986,7 +951,6 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			stateCache,
 			program: createFlatProgram(),
 			texturedProgram: createTexturedProgram(),
-			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
 			rgbaTexturePageFamilyResources: {
@@ -1014,16 +978,10 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		expect(gl.calls.slice(drawIndex)).toContain(`disable:${gl.BLEND}`);
 	});
 
-	it("enables backface culling only for terrain when requested", () => {
+	it("does not apply terrain backface culling to retained direct draws", () => {
 		const gl = new CapturingSubmitGl();
 		const stateCache = new Webgl2StateCache(gl);
 		const drawUnits = [
-			createDrawUnit({
-				id: "terrain",
-				kind: "terrain",
-				materialKind: "terrain-blend",
-				terrainBlend: createTerrainBlendResources(),
-			}),
 			createDrawUnit({ id: "static", kind: "static" }),
 		];
 
@@ -1032,7 +990,6 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			stateCache,
 			program: createFlatProgram(),
 			texturedProgram: createTexturedProgram(),
-			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
 			viewProjectionMatrix: createIdentityMat4(),
@@ -1046,12 +1003,10 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		);
 		expect(cullCalls).toEqual([
 			`disable:${gl.CULL_FACE}`,
-			`enable:${gl.CULL_FACE}`,
-			`disable:${gl.CULL_FACE}`,
 		]);
 	});
 
-	it("keeps terrain backface culling disabled by default", () => {
+	it("keeps retained direct backface culling disabled by default", () => {
 		const gl = new CapturingSubmitGl();
 		const stateCache = new Webgl2StateCache(gl);
 
@@ -1060,18 +1015,10 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			stateCache,
 			program: createFlatProgram(),
 			texturedProgram: createTexturedProgram(),
-			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
 			viewProjectionMatrix: createIdentityMat4(),
-			drawUnits: [
-				createDrawUnit({
-					id: "terrain",
-					kind: "terrain",
-					materialKind: "terrain-blend",
-					terrainBlend: createTerrainBlendResources(),
-				}),
-			],
+			drawUnits: [createDrawUnit({ id: "static", kind: "static" })],
 		});
 
 		expect(gl.calls).toContain(`disable:${gl.CULL_FACE}`);
@@ -1124,7 +1071,6 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			stateCache,
 			program: createFlatProgram(),
 			texturedProgram: createTexturedProgram(),
-			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
 			drawUnitsById,
@@ -1158,7 +1104,6 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			stateCache,
 			program: createFlatProgram(),
 			texturedProgram: createTexturedProgram(),
-			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
 			indexedPalettedFamilyP8Program: createIndexedPalettedFamilyProgram(),
@@ -1225,7 +1170,6 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			stateCache,
 			program: createFlatProgram(),
 			texturedProgram: createTexturedProgram(),
-			terrainBlendProgram: createTerrainBlendProgram(),
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
 			indexedPalettedFamilyP8Program: createIndexedPalettedFamilyProgram(),
@@ -1397,7 +1341,6 @@ function createTerrainTile({
 		dataSource: "unknown",
 		bvhItemKeys: ["terrain:landblock:12340000:quad:0"],
 		bvhFallbackReason: null,
-		compatibilityDraws: [],
 		layerPlan,
 		layerPlanBlockers: [],
 		texturePageBindings,
@@ -1506,7 +1449,6 @@ function createDrawUnit({
 	color = new Float32Array([1, 0, 0, 1]),
 	texture = null,
 	indexedMaterial = null,
-	terrainBlend = null,
 	atlasEntryKey = null,
 	atlasWrapS = "clamp",
 	atlasWrapT = "clamp",
@@ -1526,7 +1468,6 @@ function createDrawUnit({
 	color?: Float32Array;
 	texture?: Webgl2WorldDrawUnit["texture"];
 	indexedMaterial?: Webgl2WorldDrawUnit["indexedMaterial"];
-	terrainBlend?: Webgl2WorldDrawUnit["terrainBlend"];
 	atlasEntryKey?: string | null;
 	atlasWrapS?: "clamp" | "repeat";
 	atlasWrapT?: "clamp" | "repeat";
@@ -1620,9 +1561,7 @@ function createDrawUnit({
 				family:
 					materialKind === "indexed-paletted"
 						? "indexed-paletted"
-						: materialKind === "terrain-blend"
-							? "terrain-blend"
-							: materialKind === "direct-texture"
+						: materialKind === "direct-texture"
 								? "textured-opaque"
 								: "flat-constant-color",
 				compatible: false,
@@ -1640,7 +1579,6 @@ function createDrawUnit({
 		texture,
 		indexedMaterial,
 		detailOverlay: null,
-		terrainBlend,
 		texturePageBindings:
 			(baseTexturePageBinding ?? defaultTexturePageBinding)
 				? [baseTexturePageBinding ?? defaultTexturePageBinding].filter(
@@ -1811,43 +1749,6 @@ function createIndexedProgram() {
 	};
 }
 
-function createTerrainBlendProgram(): Webgl2TerrainBlendWorldProgram {
-	return {
-		program: {} as WebGLProgram,
-		attributes: { position: 0, uv: 1 },
-		uniforms: Object.fromEntries(
-			[
-				"uModelViewProjection",
-				"uBaseTexture",
-				"uBaseTiling",
-				"uOverlay0",
-				"uOverlay1",
-				"uOverlay2",
-				"uOverlayAlpha0",
-				"uOverlayAlpha1",
-				"uOverlayAlpha2",
-				"uOverlayTiling0",
-				"uOverlayTiling1",
-				"uOverlayTiling2",
-				"uOverlayRotation0",
-				"uOverlayRotation1",
-				"uOverlayRotation2",
-				"uOverlayCount",
-				"uRoadTexture",
-				"uRoadTiling",
-				"uRoadAlpha0",
-				"uRoadAlpha1",
-				"uRoadRotation0",
-				"uRoadRotation1",
-				"uRoadCount",
-			].map((name) => [name, {} as WebGLUniformLocation]),
-		) as Webgl2TerrainBlendWorldProgram["uniforms"],
-		dispose() {
-			return;
-		},
-	};
-}
-
 function createTerrainFamilyProgram(): Webgl2TerrainFamilyWorldProgram {
 	return {
 		program: {} as WebGLProgram,
@@ -1883,7 +1784,6 @@ function createDirectDrawPrograms(): Webgl2DirectDrawPrograms {
 	return {
 		flat: createFlatProgram(),
 		rgbaTexturePage: createTexturedProgram(),
-		terrainBlend: createTerrainBlendProgram(),
 		indexedP8: createIndexedP8Program(),
 		indexedP16: createIndexedP16Program(),
 	};
@@ -2150,28 +2050,6 @@ function createTextureAtlasGeneration(
 	};
 }
 
-function createTerrainBlendResources(): NonNullable<
-	Webgl2WorldDrawUnit["terrainBlend"]
-> {
-	const texture = {
-		texture: {} as WebGLTexture,
-		width: 1,
-		height: 1,
-		dispose() {
-			return;
-		},
-	};
-	return {
-		plan: {} as NonNullable<Webgl2WorldDrawUnit["terrainBlend"]>["plan"],
-		base: {
-			key: "terrain/base",
-			texture,
-			tiling: 1,
-		},
-		overlays: [],
-		roads: [],
-	};
-}
 
 function createIdentityMat4(): Float32Array {
 	return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);

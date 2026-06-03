@@ -1,6 +1,6 @@
 # Holtburger 3D Terrain Rendering Implementation Plan
 
-Status: Phase T8B complete; Phase T9 compatibility path removal is next.
+Status: Phase T9 complete; Phase T10 measurement and follow-up decisions are next.
 
 Dry-run status: reviewed against the current `apps/holtburger-3d/src/lib/world-display` module graph.
 The phase order below reflects that dry run.
@@ -66,13 +66,13 @@ The initial sequencing mostly holds, but the codebase suggests a tighter split:
   portal, and debug-overlay `renderChunk` cleanup should be deferred until after terrain rendering is
   stable because it touches compaction, transition portals, render-spatial diagnostics, and several
   scene-readiness tests.
-- `terrain-blend-materials.ts` is a legacy Three.js backend path. Current production terrain uses
-  `terrain-blend-plan.ts`, staged terrain draw units, `Webgl2TerrainBlendResources`, and the WebGL2
-  terrain program. The legacy module is only referenced by `terrain-blend-materials.test.ts`.
-- Terrain is currently present in the direct render family as `family: "terrain-blend"`. Removing the
-  generic draw-unit path means deleting terrain handling from `direct-render-family.ts`,
-  `direct-family-adapters.ts`, `webgl2-world-submit.ts`, WebGL2 submit tests, and compaction planner
-  blocker vocabulary.
+- `terrain-blend-materials.ts` was a legacy Three.js backend path. At dry-run time, production terrain
+  still used `terrain-blend-plan.ts`, staged terrain draw units, `Webgl2TerrainBlendResources`, and the
+  WebGL2 terrain program. T0 deleted the Three.js backend, and T9 deleted the staged/direct terrain
+  route.
+- At dry-run time, terrain was present in the direct render family as `family: "terrain-blend"`. T9
+  deleted that generic draw-unit route from `direct-render-family.ts`, `direct-family-adapters.ts`,
+  `webgl2-world-submit.ts`, WebGL2 submit tests, and compaction planner blocker vocabulary.
 - `buildStagedWorldFrame` already has a useful candidate abstraction with item keys, fallback
   reasons, category counts, and pass draws, but the `staged` name collides with staged draw-unit
   assembly. Rename it to `buildWorldRenderFrame` and generalize this module before introducing
@@ -1530,11 +1530,12 @@ Cleanup impact:
 
 - `Webgl2TerrainTileResource.mesh` was added for post-atlas slice generation. Keep it unless slice
   planning moves earlier or stores precomputed geometry another way.
-- Compatibility rendering still covers unsliceable blocked terrain. T9 should delete the compatibility
-  route only after auditing whether those remaining blockers are acceptable diagnostics or need one
-  more targeted implementation pass.
+- Compatibility rendering was deleted in T9. Unsliceable blocked terrain now remains a blocked terrain
+  tile diagnostic rather than drawing through the old pcode/direct fallback path.
 
 ## Phase T9: Remove Temporary Terrain Compatibility Paths
+
+Status: Complete on 2026-06-02.
 
 Goal: delete old pcode-sliced terrain draw-unit behavior and any temporary adapters introduced during
 the migration.
@@ -1581,6 +1582,71 @@ Acceptance criteria:
 - Terrain rendering is owned by the terrain family path.
 - No production terrain code emits one generic draw unit per pcode.
 - No compatibility shim remains without an explicit follow-up plan.
+
+Progress:
+
+- Removed terrain draw-unit emission from `staged-world-assembly.ts`. `buildStagedWorldSceneAssembly`
+  still consumes terrain scene readiness for the committed scene model, but terrain no longer becomes a
+  generic staged draw unit.
+- Removed `terrain-blend` from generic staged material plans and from direct render family payloads.
+- Deleted direct-family terrain routing:
+  - `DirectTerrainBlendPayload`;
+  - `programKind: "terrain"`;
+  - ten-sampler terrain texture-unit fields and sampler uploads;
+  - direct terrain route tests.
+- Deleted compatibility terrain resource payloads:
+  - `Webgl2TerrainTileResource.compatibilityDraws`;
+  - `Webgl2TerrainTileCompatibilityDrawResource`;
+  - `Webgl2TerrainBlendResources`;
+  - old per-terrain-texture direct upload helpers.
+- Changed terrain atlas candidate collection to read from the terrain tile layer plan directly instead
+  of from compatibility draws.
+- Removed compatibility submit:
+  - `submitWebgl2TerrainTileCompatibilityPass`;
+  - old terrain-blend sampler and dynamic uniform upload helpers;
+  - compatibility submit metrics.
+- Removed the retired inline WebGL2 terrain-blend shader/program and renderer resource lifetime
+  plumbing. The terrain-family shader is now the only production WebGL2 terrain shader path.
+- Removed terrain material blockers from generic compaction planning because terrain no longer enters
+  compaction candidates.
+- Removed direct draw texture-page binding support for terrain-blend resources. Terrain page bindings
+  are owned by terrain tile resources.
+- Updated tests away from compatibility/direct-terrain assertions toward terrain-family ready,
+  blocked-diagnostic, and no-generic-draw-unit behavior.
+- Removed stale picker diagnostic vocabulary that still allowed `terrain-blend` as a generic material
+  diagnostic kind.
+
+Decisions:
+
+- Blocked terrain tiles no longer render through a retained fallback. If a terrain tile or slice cannot
+  satisfy layer/page/geometry readiness, it remains visible in diagnostics as blocked work until the
+  underlying readiness issue is fixed.
+- Kept `terrain-blend-plan.ts` as the semantic pcode/material decoder. The deleted `terrain-blend`
+  vocabulary was direct/staged renderer plumbing, not the terrain behavior model.
+- Kept `buildStagedTerrainGeometry(mesh)` for whole-tile fallback geometry inside terrain resource
+  realization. The pcode-sliced staged draw-unit use is gone; the remaining whole-mesh helper should be
+  revisited in T11 only if it proves to be misleadingly named or poorly located.
+
+Validation:
+
+- `npm run test:ts -- terrain-tile-plan webgl2-world-submit webgl2-world-resources webgl2-direct-render-family compaction-family-planner`
+- `npm run check`
+- `npm run lint`
+
+Cleanup impact:
+
+- Completed several T11 anticipated cleanup targets during T9:
+  - `StagedTerrainDrawUnitAssembly`;
+  - `buildStagedTerrainDrawUnitAssemblies`;
+  - `createTerrainBlendStagedMaterial`;
+  - `Webgl2WorldDrawUnit.terrainBlend`;
+  - `Webgl2TerrainBlendResources`;
+  - old direct terrain-blend submit routes and tests;
+  - terrain compatibility draw resource types and metrics;
+  - generic compaction `terrain-blend` blocker vocabulary.
+- Remaining T11 cleanup should focus on naming and module placement, especially whether
+  `buildStagedTerrainGeometry(mesh)` should move or be renamed now that terrain no longer participates
+  in staged draw-unit assembly.
 
 ## Phase T10: Measurement And Follow-Up Decisions
 
@@ -1654,26 +1720,24 @@ Initial anticipated cleanup targets:
 
 Delete or rewrite these terrain-specific old-path concepts by the end of Phase T11:
 
-- `StagedTerrainDrawUnitAssembly`.
-- `buildStagedTerrainDrawUnitAssemblies`.
-- `createTerrainBlendStagedMaterial`.
-- `collectTerrainBlendPlanPreparedAssetIds` in staged draw-unit assembly, unless reused by the new
-  tile plan under a terrain-specific name.
+- Complete in T9: `StagedTerrainDrawUnitAssembly`.
+- Complete in T9: `buildStagedTerrainDrawUnitAssemblies`.
+- Complete in T9: `createTerrainBlendStagedMaterial`.
+- Complete in T9: `collectTerrainBlendPlanPreparedAssetIds` in staged draw-unit assembly.
 - `buildStagedTerrainGeometry(mesh, { pcode })` pcode filtering. A non-pcode terrain geometry helper
   may remain if renamed/moved for terrain-family use.
-- `Webgl2WorldDrawUnit.terrainBlend`.
-- `Webgl2TerrainBlendResources` as a direct draw-unit resource type. If the new terrain family keeps
-  a similar payload temporarily, it should be renamed to terrain-family vocabulary.
-- `Webgl2TerrainTileResource.compatibilityDraws` and
-  `Webgl2TerrainTileCompatibilityDrawResource`, introduced in T3 as the temporary old-shader bridge.
-- `submitWebgl2TerrainTileCompatibilityPass` and `uploadTerrainBlendSamplerUniforms`, introduced in
-  T4 as the temporary world-submit bridge.
-- direct-family terrain routes and sampler units in `direct-render-family.ts` and
+- Complete in T9: `Webgl2WorldDrawUnit.terrainBlend`.
+- Complete in T9: `Webgl2TerrainBlendResources` as a direct draw-unit resource type.
+- Complete in T9: `Webgl2TerrainTileResource.compatibilityDraws` and
+  `Webgl2TerrainTileCompatibilityDrawResource`.
+- Complete in T9: `submitWebgl2TerrainTileCompatibilityPass` and
+  `uploadTerrainBlendSamplerUniforms`.
+- Complete in T9: direct-family terrain routes and sampler units in `direct-render-family.ts` and
   `direct-family-adapters.ts`.
-- terrain blend binding collection in `texture-page-binding.ts`.
-- compaction-family terrain blockers that only exist because terrain currently enters generic draw
-  units.
-- WebGL2 submit tests that assert direct terrain-blend routing.
+- Complete in T9: terrain blend binding collection in `texture-page-binding.ts`.
+- Complete in T9: compaction-family terrain blockers that only existed because terrain entered
+  generic draw units.
+- Complete in T9: WebGL2 submit tests that asserted direct terrain-blend routing.
 - `WorldRenderDraw.drawUnitId` in `world-render-frame.ts`, once the frame can submit terrain-family
   render work without routing everything through `Webgl2WorldDrawUnit` ids.
 - Any temporary wrapper, helper, type alias, or module that exists only as migration ceremony. T1

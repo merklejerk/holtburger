@@ -60,7 +60,7 @@ type BrowserStagedMaterialDiagnostic =
 			detailOverlay: BrowserDetailOverlayDiagnostic | null;
 	  }
 	| {
-			kind: "flat" | "terrain-blend";
+			kind: "flat";
 			key: string;
 			fallbackReason: string | null;
 	  };

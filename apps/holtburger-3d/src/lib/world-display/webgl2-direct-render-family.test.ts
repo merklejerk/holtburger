@@ -10,7 +10,6 @@ import type {
 	Webgl2WorldDrawUnit,
 } from "./webgl2-world-resources";
 import type { Webgl2BufferResource, Webgl2Texture2DResource } from "./webgl2-gl";
-import type { Webgl2TerrainBlendResources } from "./webgl2/resources/terrain-tile-resources";
 
 describe("webgl2 direct render family views", () => {
 	it("derives direct geometry layout from the actual VAO inputs", () => {
@@ -79,22 +78,11 @@ describe("webgl2 direct render family views", () => {
 		expect(submission.material.indexedMaterial).toBe(indexedMaterial);
 	});
 
-	it("keeps terrain and portal masks as explicit families", () => {
-		const terrainBlend = createTerrainBlend();
-		const terrain = mapWebgl2DrawUnitToDirectRenderFamilySubmission(
-			createDrawUnit({
-				id: "terrain-a",
-				kind: "terrain",
-				materialKind: "terrain-blend",
-				terrainBlend,
-				layout: "position-uv",
-			}),
-		);
+	it("keeps portal masks in the debug direct family", () => {
 		const mask = mapWebgl2DrawUnitToDirectRenderFamilySubmission(
 			createDrawUnit({ id: "mask-a", kind: "portal-mask" }),
 		);
 
-		expect(terrain.material.family).toBe("terrain-blend");
 		expect(mask.material.family).toBe("debug-pipeline");
 	});
 });
@@ -105,7 +93,6 @@ function createDrawUnit({
 	materialKind = "flat",
 	texture = null,
 	indexedMaterial = null,
-	terrainBlend = null,
 	layout = "position",
 }: {
 	id: string;
@@ -113,7 +100,6 @@ function createDrawUnit({
 	materialKind?: Webgl2WorldDrawUnit["materialKind"];
 	texture?: Webgl2WorldDrawUnit["texture"];
 	indexedMaterial?: Webgl2WorldDrawUnit["indexedMaterial"];
-	terrainBlend?: Webgl2WorldDrawUnit["terrainBlend"];
 	layout?: GeometrySubmissionLayout;
 }): Webgl2WorldDrawUnit {
 	const uvBuffer = layout === "position" ? null : createBuffer();
@@ -150,9 +136,7 @@ function createDrawUnit({
 				family:
 					materialKind === "indexed-paletted"
 						? "indexed-paletted"
-						: materialKind === "terrain-blend"
-							? "terrain-blend"
-							: materialKind === "direct-texture"
+						: materialKind === "direct-texture"
 								? "textured-opaque"
 								: "flat-constant-color",
 				compatible: false,
@@ -170,7 +154,6 @@ function createDrawUnit({
 		texture,
 		indexedMaterial,
 		detailOverlay: null,
-		terrainBlend,
 		texturePageBindings: [],
 		texturePageBindingFallbackSamples: [],
 		sceneDomain: null,
@@ -218,25 +201,6 @@ function createIndexedMaterial(): Webgl2IndexedMaterialResources {
 		wrapS: "repeat",
 		wrapT: "repeat",
 		clipThreshold: -1,
-	};
-}
-
-function createTerrainBlend(): Webgl2TerrainBlendResources {
-	return {
-		plan: {} as Webgl2TerrainBlendResources["plan"],
-		base: createTerrainTextureBinding(),
-		overlays: [],
-		roads: [],
-	};
-}
-
-function createTerrainTextureBinding(): Webgl2TerrainBlendResources["base"] {
-	return {
-		key: "terrain/base",
-		texture: createTexture(),
-		tiling: 1,
-		wrapS: "repeat",
-		wrapT: "repeat",
 	};
 }
 

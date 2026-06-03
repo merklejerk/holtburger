@@ -3,10 +3,7 @@ import type { WorldRenderFrame } from "./world-render-frame";
 import type { Webgl2ProgramResource } from "./webgl2-gl";
 import type { Webgl2StateCache } from "./webgl2-state-cache";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
-import type {
-	Webgl2TerrainBlendResources,
-	Webgl2TerrainTileResource,
-} from "./webgl2/resources/terrain-tile-resources";
+import type { Webgl2TerrainTileResource } from "./webgl2/resources/terrain-tile-resources";
 import {
 	createEmptyWebgl2RgbaTexturePageFamilySubmitMetrics,
 	planWebgl2RgbaTexturePageFamilyReplacement,
@@ -59,32 +56,6 @@ export type Webgl2TexturedWorldProgram = Webgl2ProgramResource<
 	| "uDetailTiling"
 	| "uDetailEnabled"
 >;
-export type Webgl2TerrainBlendWorldProgram = Webgl2ProgramResource<
-	"position" | "uv",
-	| "uModelViewProjection"
-	| "uBaseTexture"
-	| "uBaseTiling"
-	| "uOverlay0"
-	| "uOverlay1"
-	| "uOverlay2"
-	| "uOverlayAlpha0"
-	| "uOverlayAlpha1"
-	| "uOverlayAlpha2"
-	| "uOverlayTiling0"
-	| "uOverlayTiling1"
-	| "uOverlayTiling2"
-	| "uOverlayRotation0"
-	| "uOverlayRotation1"
-	| "uOverlayRotation2"
-	| "uOverlayCount"
-	| "uRoadTexture"
-	| "uRoadTiling"
-	| "uRoadAlpha0"
-	| "uRoadAlpha1"
-	| "uRoadRotation0"
-	| "uRoadRotation1"
-	| "uRoadCount"
->;
 export type Webgl2IndexedP8WorldProgram = Webgl2ProgramResource<
 	"position" | "uv",
 	| "uModelViewProjection"
@@ -121,7 +92,6 @@ export type Webgl2IndexedP16WorldProgram = Webgl2ProgramResource<
 export interface Webgl2WorldSubmitMetrics {
 	visibleDrawUnitCount: number;
 	visibleTerrainTileCount: number;
-	visibleTerrainCompatibilityDrawCount: number;
 	visibleTerrainOneDrawReadyTileCount: number;
 	visibleTerrainOneDrawBlockedTileCount: number;
 	visibleTerrainDrawSliceReadyCount: number;
@@ -133,7 +103,6 @@ export interface Webgl2WorldSubmitMetrics {
 	exteriorDomainDrawUnitCount: number;
 	interiorDomainDrawUnitCount: number;
 	submittedTerrainTileCount: number;
-	terrainCompatibilityDrawCallCount: number;
 	terrainSubmittedTriangleCount: number;
 	retainedDirectOpaqueDrawUnitCount: number;
 	retainedDirectBlendedDrawUnitCount: number;
@@ -185,7 +154,6 @@ export interface Webgl2WorldSubmitMetrics {
 const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	visibleDrawUnitCount: 0,
 	visibleTerrainTileCount: 0,
-	visibleTerrainCompatibilityDrawCount: 0,
 	visibleTerrainOneDrawReadyTileCount: 0,
 	visibleTerrainOneDrawBlockedTileCount: 0,
 	visibleTerrainDrawSliceReadyCount: 0,
@@ -197,7 +165,6 @@ const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	exteriorDomainDrawUnitCount: 0,
 	interiorDomainDrawUnitCount: 0,
 	submittedTerrainTileCount: 0,
-	terrainCompatibilityDrawCallCount: 0,
 	terrainSubmittedTriangleCount: 0,
 	retainedDirectOpaqueDrawUnitCount: 0,
 	retainedDirectBlendedDrawUnitCount: 0,
@@ -285,7 +252,6 @@ export interface Webgl2WorldSubmitPassSchedule {
 export interface Webgl2TerrainTileSubmitReadinessPlan {
 	oneDrawTiles: readonly Webgl2TerrainTileResource[];
 	oneDrawSlices: readonly Webgl2TerrainTileResource["drawSlices"][number][];
-	compatibilityTiles: readonly Webgl2TerrainTileResource[];
 	blockedTiles: readonly {
 		tile: Webgl2TerrainTileResource;
 		blockers: readonly string[];
@@ -297,7 +263,6 @@ export function planWebgl2TerrainTileSubmitReadiness(
 ): Webgl2TerrainTileSubmitReadinessPlan {
 	const oneDrawTiles: Webgl2TerrainTileResource[] = [];
 	const oneDrawSlices: Webgl2TerrainTileResource["drawSlices"] = [];
-	const compatibilityTiles: Webgl2TerrainTileResource[] = [];
 	const blockedTiles: Array<{
 		tile: Webgl2TerrainTileResource;
 		blockers: readonly string[];
@@ -316,14 +281,12 @@ export function planWebgl2TerrainTileSubmitReadiness(
 					tile,
 					blockers: tile.oneDrawReadiness.blockers,
 				});
-				compatibilityTiles.push(tile);
 			}
 		}
 	}
 	return {
 		oneDrawTiles,
 		oneDrawSlices,
-		compatibilityTiles,
 		blockedTiles,
 	};
 }
@@ -342,7 +305,6 @@ export function submitWebgl2FlatWorldFrame({
 	stateCache,
 	program,
 	texturedProgram,
-	terrainBlendProgram,
 	terrainFamilyProgram,
 	indexedP8Program,
 	indexedP16Program,
@@ -368,7 +330,6 @@ export function submitWebgl2FlatWorldFrame({
 	stateCache: Webgl2StateCache;
 	program: Webgl2FlatWorldProgram;
 	texturedProgram: Webgl2TexturedWorldProgram;
-	terrainBlendProgram: Webgl2TerrainBlendWorldProgram;
 	terrainFamilyProgram?: Webgl2TerrainFamilyWorldProgram;
 	indexedP8Program: Webgl2IndexedP8WorldProgram;
 	indexedP16Program: Webgl2IndexedP16WorldProgram;
@@ -393,7 +354,6 @@ export function submitWebgl2FlatWorldFrame({
 		stateCache,
 		program,
 		texturedProgram,
-		terrainBlendProgram,
 		terrainFamilyProgram,
 		indexedP8Program,
 		indexedP16Program,
@@ -416,7 +376,6 @@ export function submitWebgl2FlatWorldDrawUnits({
 	stateCache,
 	program,
 	texturedProgram,
-	terrainBlendProgram,
 	terrainFamilyProgram,
 	indexedP8Program,
 	indexedP16Program,
@@ -447,7 +406,6 @@ export function submitWebgl2FlatWorldDrawUnits({
 	stateCache: Webgl2StateCache;
 	program: Webgl2FlatWorldProgram;
 	texturedProgram: Webgl2TexturedWorldProgram;
-	terrainBlendProgram: Webgl2TerrainBlendWorldProgram;
 	terrainFamilyProgram?: Webgl2TerrainFamilyWorldProgram;
 	indexedP8Program: Webgl2IndexedP8WorldProgram;
 	indexedP16Program: Webgl2IndexedP16WorldProgram;
@@ -471,10 +429,6 @@ export function submitWebgl2FlatWorldDrawUnits({
 		...EMPTY_SUBMIT_METRICS,
 		visibleDrawUnitCount: drawUnits.length,
 		visibleTerrainTileCount: terrainTiles.length,
-		visibleTerrainCompatibilityDrawCount: terrainTiles.reduce(
-			(total, tile) => total + tile.compatibilityDraws.length,
-			0,
-		),
 		visibleTerrainOneDrawReadyTileCount:
 			terrainReadinessPlan.oneDrawTiles.length,
 		visibleTerrainOneDrawBlockedTileCount:
@@ -539,7 +493,6 @@ export function submitWebgl2FlatWorldDrawUnits({
 		stateCache,
 		program,
 		texturedProgram,
-		terrainBlendProgram,
 		indexedP8Program,
 		indexedP16Program,
 		rgbaTexturePageFamilyProgram,
@@ -550,7 +503,6 @@ export function submitWebgl2FlatWorldDrawUnits({
 		viewProjectionMatrix,
 		retainedDrawUnitCount,
 		rgbaTexturePageFamilySubmitRoute,
-		terrainBackfaceCulling,
 		schedule,
 		metrics,
 	});
@@ -583,16 +535,6 @@ export function submitWebgl2FlatWorldDrawUnits({
 		metrics.terrainOneDrawSubmittedTriangleCount =
 			terrainFamilyMetrics.submittedTriangleCount;
 	}
-	submitWebgl2TerrainTileCompatibilityPass({
-		gl,
-		stateCache,
-		program,
-		terrainBlendProgram,
-		viewProjectionMatrix,
-		terrainTiles: terrainReadinessPlan.blockedTiles.map((entry) => entry.tile),
-		terrainBackfaceCulling,
-		metrics,
-	});
 	metrics.stateChangeCount += resetWorldSubmitExitRenderState({
 		gl,
 		stateCache,
@@ -686,7 +628,6 @@ function submitWebgl2WorldSubmitPassSchedule({
 	stateCache,
 	program,
 	texturedProgram,
-	terrainBlendProgram,
 	indexedP8Program,
 	indexedP16Program,
 	rgbaTexturePageFamilyProgram,
@@ -697,7 +638,6 @@ function submitWebgl2WorldSubmitPassSchedule({
 	viewProjectionMatrix,
 	retainedDrawUnitCount,
 	rgbaTexturePageFamilySubmitRoute,
-	terrainBackfaceCulling,
 	schedule,
 	metrics,
 }: {
@@ -705,7 +645,6 @@ function submitWebgl2WorldSubmitPassSchedule({
 	stateCache: Webgl2StateCache;
 	program: Webgl2FlatWorldProgram;
 	texturedProgram: Webgl2TexturedWorldProgram;
-	terrainBlendProgram: Webgl2TerrainBlendWorldProgram;
 	indexedP8Program: Webgl2IndexedP8WorldProgram;
 	indexedP16Program: Webgl2IndexedP16WorldProgram;
 	rgbaTexturePageFamilyProgram: Webgl2RgbaTexturePageFamilyWorldProgram | undefined;
@@ -720,7 +659,6 @@ function submitWebgl2WorldSubmitPassSchedule({
 	viewProjectionMatrix: RenderMat4;
 	retainedDrawUnitCount: number;
 	rgbaTexturePageFamilySubmitRoute: Webgl2RgbaTexturePageFamilySubmitRoute;
-	terrainBackfaceCulling: boolean;
 	schedule: Webgl2WorldSubmitPassSchedule;
 	metrics: Webgl2WorldSubmitMetrics;
 }): void {
@@ -734,14 +672,12 @@ function submitWebgl2WorldSubmitPassSchedule({
 					viewProjectionMatrix,
 					program,
 					texturedProgram,
-					terrainBlendProgram,
 					indexedP8Program,
 					indexedP16Program,
 				});
 				submitWebgl2DirectDrawUnitPass({
 					context: directSubmitContext,
 					drawUnits: pass.drawUnits,
-					terrainBackfaceCulling,
 					metrics,
 				});
 				break;
@@ -829,7 +765,6 @@ function resetWorldSubmitExitRenderState({
 interface Webgl2DirectSubmitContext {
 	directContext: DirectFamilyDrawContext;
 	directPrograms: Webgl2DirectDrawPrograms;
-	terrainBlendProgram: Webgl2TerrainBlendWorldProgram;
 	uniformCache: ReturnType<typeof createDirectFamilyUniformCache>;
 	previousProgramKind: Webgl2DirectProgramKind | null;
 }
@@ -840,7 +775,6 @@ function createWebgl2DirectSubmitContext({
 	viewProjectionMatrix,
 	program,
 	texturedProgram,
-	terrainBlendProgram,
 	indexedP8Program,
 	indexedP16Program,
 }: {
@@ -849,7 +783,6 @@ function createWebgl2DirectSubmitContext({
 	viewProjectionMatrix: RenderMat4;
 	program: Webgl2FlatWorldProgram;
 	texturedProgram: Webgl2TexturedWorldProgram;
-	terrainBlendProgram: Webgl2TerrainBlendWorldProgram;
 	indexedP8Program: Webgl2IndexedP8WorldProgram;
 	indexedP16Program: Webgl2IndexedP16WorldProgram;
 }): Webgl2DirectSubmitContext {
@@ -863,14 +796,12 @@ function createWebgl2DirectSubmitContext({
 	const directPrograms: Webgl2DirectDrawPrograms = {
 		flat: program,
 		rgbaTexturePage: texturedProgram,
-		terrainBlend: terrainBlendProgram,
 		indexedP8: indexedP8Program,
 		indexedP16: indexedP16Program,
 	};
 	return {
 		directContext,
 		directPrograms,
-		terrainBlendProgram,
 		uniformCache,
 		previousProgramKind: null,
 	};
@@ -879,12 +810,10 @@ function createWebgl2DirectSubmitContext({
 function submitWebgl2DirectDrawUnitPass({
 	context,
 	drawUnits,
-	terrainBackfaceCulling,
 	metrics,
 }: {
 	context: Webgl2DirectSubmitContext;
 	drawUnits: readonly Webgl2WorldDrawUnit[];
-	terrainBackfaceCulling: boolean;
 	metrics: Webgl2WorldSubmitMetrics;
 }): void {
 	for (const drawUnit of drawUnits) {
@@ -902,7 +831,6 @@ function submitWebgl2DirectDrawUnitPass({
 			uploadDirectFamilySamplerUniforms({
 				context: context.directContext,
 				route,
-				terrainBlendProgram: context.terrainBlendProgram,
 				metrics,
 			});
 		} else if (context.previousProgramKind !== route.programKind) {
@@ -915,7 +843,7 @@ function submitWebgl2DirectDrawUnitPass({
 			drawUnit,
 		});
 		metrics.stateChangeCount += context.directContext.stateCache.setCullState({
-			enabled: terrainBackfaceCulling && route.programKind === "terrain",
+			enabled: false,
 			mode: context.directContext.gl.BACK,
 		});
 		if (route.programKind === "texture") {
@@ -933,12 +861,6 @@ function submitWebgl2DirectDrawUnitPass({
 				context: context.directContext,
 				route,
 				metrics,
-			});
-		}
-		if (drawUnit.terrainBlend) {
-			metrics.stateChangeCount += bindTerrainBlendTextures({
-				stateCache: context.directContext.stateCache,
-				terrainBlend: drawUnit.terrainBlend,
 			});
 		}
 		if (
@@ -983,7 +905,7 @@ function submitWebgl2DirectDrawUnitPass({
 				uniformCache: context.uniformCache,
 				metrics,
 			});
-		} else if (route.programKind !== "terrain") {
+		} else {
 			uploadDirectColorUniforms({
 				context: context.directContext,
 				route,
@@ -991,15 +913,6 @@ function submitWebgl2DirectDrawUnitPass({
 				metrics,
 			});
 		}
-		if (drawUnit.terrainBlend) {
-			uploadTerrainBlendUniforms(
-				context.directContext.gl,
-				context.terrainBlendProgram,
-				drawUnit.terrainBlend,
-			);
-			metrics.uniformUploadCount += TERRAIN_BLEND_DYNAMIC_UNIFORM_COUNT;
-		}
-
 		context.directContext.gl.drawElements(
 			context.directContext.gl.TRIANGLES,
 			drawUnit.vertexCount,
@@ -1008,104 +921,6 @@ function submitWebgl2DirectDrawUnitPass({
 		);
 		metrics.drawCallCount += 1;
 		metrics.triangleCount += drawUnit.triangleCount;
-	}
-}
-
-function submitWebgl2TerrainTileCompatibilityPass({
-	gl,
-	stateCache,
-	program,
-	terrainBlendProgram,
-	viewProjectionMatrix,
-	terrainTiles,
-	terrainBackfaceCulling,
-	metrics,
-}: {
-	gl: WebGL2RenderingContext;
-	stateCache: Webgl2StateCache;
-	program: Webgl2FlatWorldProgram;
-	terrainBlendProgram: Webgl2TerrainBlendWorldProgram;
-	viewProjectionMatrix: RenderMat4;
-	terrainTiles: readonly Webgl2TerrainTileResource[];
-	terrainBackfaceCulling: boolean;
-	metrics: Webgl2WorldSubmitMetrics;
-}): void {
-	if (terrainTiles.length === 0) {
-		return;
-	}
-	let activeProgramKind: "flat" | "terrain" | null = null;
-	for (const tile of terrainTiles) {
-		let submittedTile = false;
-		for (const draw of tile.compatibilityDraws) {
-			const programKind = draw.blend ? "terrain" : "flat";
-			const activeProgram =
-				programKind === "terrain" ? terrainBlendProgram : program;
-			if (stateCache.useProgram(activeProgram.program)) {
-				metrics.programSwitchCount += 1;
-				metrics.stateChangeCount += 1;
-				activeProgramKind = null;
-			}
-			if (activeProgramKind !== programKind) {
-				if (programKind === "terrain") {
-					uploadTerrainBlendSamplerUniforms(gl, terrainBlendProgram);
-				}
-				activeProgramKind = programKind;
-			}
-			metrics.stateChangeCount += stateCache.setBlendState({
-				enabled: false,
-				srcRgb: gl.ONE,
-				dstRgb: gl.ZERO,
-				srcAlpha: gl.ONE,
-				dstAlpha: gl.ZERO,
-				equationRgb: gl.FUNC_ADD,
-				equationAlpha: gl.FUNC_ADD,
-			});
-			metrics.stateChangeCount += stateCache.setCullState({
-				enabled: terrainBackfaceCulling,
-				mode: gl.BACK,
-			});
-			if (draw.blend) {
-				metrics.stateChangeCount += bindTerrainBlendTextures({
-					stateCache,
-					terrainBlend: draw.blend,
-				});
-			}
-			if (stateCache.bindVertexArray(draw.vertexArray.vertexArray)) {
-				metrics.vertexArrayBindCount += 1;
-				metrics.stateChangeCount += 1;
-			}
-			const modelViewProjection = multiplyMat4(
-				viewProjectionMatrix,
-				tile.modelMatrix,
-			);
-			gl.uniformMatrix4fv(
-				activeProgram.uniforms.uModelViewProjection,
-				false,
-				modelViewProjection,
-			);
-			metrics.uniformUploadCount += 1;
-			if (draw.blend) {
-				uploadTerrainBlendUniforms(gl, terrainBlendProgram, draw.blend);
-				metrics.uniformUploadCount += TERRAIN_BLEND_DYNAMIC_UNIFORM_COUNT;
-			} else {
-				if (!draw.debugColor) {
-					throw new Error(
-						`Terrain compatibility draw ${draw.id} has no terrain blend or debug color.`,
-					);
-				}
-				gl.uniform4fv(program.uniforms.uColor, draw.debugColor);
-				metrics.uniformUploadCount += 1;
-			}
-			gl.drawElements(gl.TRIANGLES, draw.vertexCount, draw.indexType, 0);
-			metrics.drawCallCount += 1;
-			metrics.triangleCount += draw.triangleCount;
-			metrics.terrainCompatibilityDrawCallCount += 1;
-			metrics.terrainSubmittedTriangleCount += draw.triangleCount;
-			submittedTile = true;
-		}
-		if (submittedTile) {
-			metrics.submittedTerrainTileCount += 1;
-		}
 	}
 }
 
@@ -1388,82 +1203,6 @@ function applyRgbaTexturePageFamilyNoVisibleRoute(
 			metrics.rgbaTexturePageFamilyNoVisibleOtherRouteCount += count;
 			return;
 	}
-}
-
-const TERRAIN_BLEND_DYNAMIC_UNIFORM_COUNT = 13;
-
-function uploadTerrainBlendSamplerUniforms(
-	gl: WebGL2RenderingContext,
-	program: Webgl2TerrainBlendWorldProgram,
-): void {
-	gl.uniform1i(program.uniforms.uBaseTexture, 0);
-	gl.uniform1i(program.uniforms.uOverlay0, 1);
-	gl.uniform1i(program.uniforms.uOverlay1, 2);
-	gl.uniform1i(program.uniforms.uOverlay2, 3);
-	gl.uniform1i(program.uniforms.uOverlayAlpha0, 4);
-	gl.uniform1i(program.uniforms.uOverlayAlpha1, 5);
-	gl.uniform1i(program.uniforms.uOverlayAlpha2, 6);
-	gl.uniform1i(program.uniforms.uRoadTexture, 7);
-	gl.uniform1i(program.uniforms.uRoadAlpha0, 8);
-	gl.uniform1i(program.uniforms.uRoadAlpha1, 9);
-}
-
-function bindTerrainBlendTextures({
-	stateCache,
-	terrainBlend,
-}: {
-	stateCache: Webgl2StateCache;
-	terrainBlend: Webgl2TerrainBlendResources;
-}): number {
-	let changeCount = 0;
-	const base = terrainBlend.base.texture.texture;
-	const overlay0 = terrainBlend.overlays[0];
-	const overlay1 = terrainBlend.overlays[1];
-	const overlay2 = terrainBlend.overlays[2];
-	const road0 = terrainBlend.roads[0];
-	const road1 = terrainBlend.roads[1];
-	const bindings = [
-		terrainBlend.base.texture.texture,
-		overlay0?.terrain.texture.texture ?? base,
-		overlay1?.terrain.texture.texture ?? base,
-		overlay2?.terrain.texture.texture ?? base,
-		overlay0?.alpha.texture.texture ?? base,
-		overlay1?.alpha.texture.texture ?? base,
-		overlay2?.alpha.texture.texture ?? base,
-		road0?.road.texture.texture ?? base,
-		road0?.alpha.texture.texture ?? base,
-		road1?.alpha.texture.texture ?? base,
-	];
-	for (const [unit, texture] of bindings.entries()) {
-		if (stateCache.bindTexture2D(unit, texture)) {
-			changeCount += 1;
-		}
-	}
-	return changeCount;
-}
-
-function uploadTerrainBlendUniforms(
-	gl: WebGL2RenderingContext,
-	program: Webgl2TerrainBlendWorldProgram,
-	terrainBlend: Webgl2TerrainBlendResources,
-): void {
-	const overlay0 = terrainBlend.overlays[0];
-	const overlay1 = terrainBlend.overlays[1];
-	const overlay2 = terrainBlend.overlays[2];
-	const road0 = terrainBlend.roads[0];
-	const road1 = terrainBlend.roads[1];
-	gl.uniform1f(program.uniforms.uBaseTiling, terrainBlend.base.tiling);
-	gl.uniform1f(program.uniforms.uOverlayTiling0, overlay0?.terrain.tiling ?? 1);
-	gl.uniform1f(program.uniforms.uOverlayTiling1, overlay1?.terrain.tiling ?? 1);
-	gl.uniform1f(program.uniforms.uOverlayTiling2, overlay2?.terrain.tiling ?? 1);
-	gl.uniform1i(program.uniforms.uOverlayRotation0, overlay0?.rotation ?? 0);
-	gl.uniform1i(program.uniforms.uOverlayRotation1, overlay1?.rotation ?? 0);
-	gl.uniform1i(program.uniforms.uOverlayRotation2, overlay2?.rotation ?? 0);
-	gl.uniform1i(program.uniforms.uOverlayCount, terrainBlend.overlays.length);
-	gl.uniform1f(program.uniforms.uRoadTiling, road0?.road.tiling ?? 1);
-	gl.uniform1i(program.uniforms.uRoadRotation0, road0?.rotation ?? 0);
-	gl.uniform1i(program.uniforms.uRoadRotation1, road1?.rotation ?? 0);
-	gl.uniform1i(program.uniforms.uRoadCount, terrainBlend.roads.length);
 }
 
 export function planWebgl2FlatWorldSubmitOrder(

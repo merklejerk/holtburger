@@ -18,8 +18,7 @@ type CandidateOptions = Partial<CompactionFamilyCandidate> & {
 	materialKind?:
 		| "flat"
 		| "direct-texture"
-		| "indexed-paletted"
-		| "terrain-blend";
+		| "indexed-paletted";
 	materialBehavior?: LegacyMaterialBehaviorDto | null;
 	hasUvBuffer?: boolean;
 	hasDetailOverlay?: boolean;

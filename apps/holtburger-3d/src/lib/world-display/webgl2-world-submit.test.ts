@@ -28,6 +28,7 @@ import type { Webgl2TerrainTileResource } from "./webgl2/resources/terrain-tile-
 import type { Webgl2TextureAtlasGenerationResource } from "./webgl2/resources/texture-atlas-generation";
 import type { Webgl2RgbaTexturePageFamilyWorldProgram } from "./webgl2/families/rgba-texture-page-family-submit";
 import type { Webgl2IndexedPalettedFamilyWorldProgram } from "./webgl2/families/indexed-paletted-family-submit";
+import type { Webgl2TerrainFamilyWorldProgram } from "./webgl2/families/terrain-family-submit";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
 import {
@@ -770,6 +771,62 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		expect(metrics.rgbaTexturePageFamilyFallbackSamples).toEqual([]);
 	});
 
+	it("submits one-draw-ready terrain tiles through the terrain family shader", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+		const atlasTexture = { debugLabel: "terrain-atlas" } as WebGLTexture;
+		const terrainTile = createTerrainTile({
+			id: "terrain-tile/ready",
+			vertexArrayLabel: "terrain-ready",
+			vertexCount: 6,
+			triangleCount: 2,
+			layerPlan: createTerrainLayerPlan(),
+			texturePageBindings: [
+				{
+					family: "terrain-color",
+					atlasEntryKey: "terrain-page/color/00000001/21/1/1",
+					textureIndex: 0,
+					rect: [1, 2, 3, 4],
+				},
+			],
+			oneDrawReadiness: {
+				status: "ready",
+				layerEntryCount: 1,
+				texturePageBindingCount: 1,
+				colorPageBindingCount: 1,
+				maskPageBindingCount: 0,
+			},
+		});
+
+		const metrics = submitWebgl2FlatWorldDrawUnits({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			terrainBlendProgram: createTerrainBlendProgram(),
+			terrainFamilyProgram: createTerrainFamilyProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			rgbaTexturePageFamilyResources: {
+				batches: [],
+				rgbaTexturePageFamilies: [],
+				generation: createTextureAtlasGeneration({
+					atlasEntryKey: "terrain-page/color/00000001/21/1/1",
+					texture: atlasTexture,
+				}),
+			},
+			viewProjectionMatrix: createIdentityMat4(),
+			drawUnits: [],
+			terrainTiles: [terrainTile],
+		});
+
+		expect(metrics.terrainOneDrawShaderDrawCallCount).toBe(1);
+		expect(metrics.terrainOneDrawSubmittedTileCount).toBe(1);
+		expect(metrics.terrainCompatibilityDrawCallCount).toBe(0);
+		expect(gl.calls).toContain("drawElementsFor:terrain-ready");
+		expect(gl.boundTextures).toContain(atlasTexture);
+	});
+
 	it("submits blended retained direct draw units after compacted opaque family draws", () => {
 		const gl = new CapturingSubmitGl();
 		const stateCache = new Webgl2StateCache(gl);
@@ -1263,12 +1320,22 @@ function createCameraFrame(): WorldRenderFrame["cameraFrame"] {
 
 function createTerrainTile({
 	id,
+	vertexArrayLabel,
+	vertexCount = 0,
+	triangleCount = 0,
+	layerPlan = null,
+	texturePageBindings = [],
 	oneDrawReadiness = {
 		status: "blocked",
 		blockers: ["test terrain tile is not one-draw ready"],
 	},
 }: {
 	id: string;
+	vertexArrayLabel?: string;
+	vertexCount?: number;
+	triangleCount?: number;
+	layerPlan?: Webgl2TerrainTileResource["layerPlan"];
+	texturePageBindings?: Webgl2TerrainTileResource["texturePageBindings"];
 	oneDrawReadiness?: Webgl2TerrainTileResource["oneDrawReadiness"];
 }): Webgl2TerrainTileResource {
 	return {
@@ -1278,14 +1345,14 @@ function createTerrainTile({
 		label: "1234",
 		placementKey: "landblock/1234ffff",
 		geometrySignature: "terrain-geo",
-		vertexArray: createVertexArrayResource(),
+		vertexArray: createVertexArrayResource(vertexArrayLabel),
 		vertexBuffer: createBufferResource(),
-		uvBuffer: null,
-		layerSlotBuffer: null,
+		uvBuffer: createBufferResource(),
+		layerSlotBuffer: createBufferResource(),
 		indexBuffer: createBufferResource(),
-		indexType: 0,
-		vertexCount: 0,
-		triangleCount: 0,
+		indexType: 5123,
+		vertexCount,
+		triangleCount,
 		modelMatrix: createIdentityMat4(),
 		readiness: {
 			status: "fallback-debug",
@@ -1295,17 +1362,55 @@ function createTerrainTile({
 		bvhItemKeys: ["terrain:landblock:12340000:quad:0"],
 		bvhFallbackReason: null,
 		compatibilityDraws: [],
-		layerPlan: null,
+		layerPlan,
 		layerPlanBlockers: [],
-		texturePageBindings: [],
+		texturePageBindings,
 		texturePageBlockers: [],
 		oneDrawReadiness,
 	};
 }
 
-function createVertexArrayResource() {
+function createTerrainLayerPlan(): NonNullable<
+	Webgl2TerrainTileResource["layerPlan"]
+> {
+	const base = {
+		textureAssetId: "surface-texture/00000001",
+		renderSurface: {
+			renderSurfaceId: 1,
+			formatRaw: 0x15,
+			width: 1,
+			height: 1,
+		},
+		tiling: 4,
+		wrap: "repeat",
+		role: "color",
+	} as const;
+	const plan = {
+		pcode: 1,
+		base,
+		overlays: [],
+		roads: [],
+		allRoad: false,
+	};
 	return {
-		vertexArray: {} as WebGLVertexArrayObject,
+		layerEntries: [
+			{
+				slot: 0,
+				pcode: 1,
+				plan,
+				colorRefCount: 1,
+				maskRefCount: 0,
+			},
+		],
+		layerSlotByPcode: new Map([[1, 0]]),
+		blockers: [],
+		signature: "terrain-layer-plan/test",
+	};
+}
+
+function createVertexArrayResource(debugLabel?: string) {
+	return {
+		vertexArray: { debugLabel } as WebGLVertexArrayObject,
 		dispose() {},
 	};
 }
@@ -1663,6 +1768,37 @@ function createTerrainBlendProgram(): Webgl2TerrainBlendWorldProgram {
 				"uRoadCount",
 			].map((name) => [name, {} as WebGLUniformLocation]),
 		) as Webgl2TerrainBlendWorldProgram["uniforms"],
+		dispose() {
+			return;
+		},
+	};
+}
+
+function createTerrainFamilyProgram(): Webgl2TerrainFamilyWorldProgram {
+	return {
+		program: {} as WebGLProgram,
+		attributes: { position: 0, uv: 1, terrainLayerSlot: 2 },
+		uniforms: Object.fromEntries(
+			[
+				"uModelViewProjection",
+				"uColorAtlasTexture",
+				"uColorAtlasSize",
+				"uMaskAtlasTexture",
+				"uMaskAtlasSize",
+				"uLayerBaseColorRects",
+				"uLayerBaseTilings",
+				"uLayerOverlayColorRects",
+				"uLayerOverlayMaskRects",
+				"uLayerOverlayTilings",
+				"uLayerOverlayRotations",
+				"uLayerOverlayCounts",
+				"uLayerRoadColorRects",
+				"uLayerRoadMaskRects",
+				"uLayerRoadTilings",
+				"uLayerRoadRotations",
+				"uLayerRoadCounts",
+			].map((name) => [name, {} as WebGLUniformLocation]),
+		) as Webgl2TerrainFamilyWorldProgram["uniforms"],
 		dispose() {
 			return;
 		},

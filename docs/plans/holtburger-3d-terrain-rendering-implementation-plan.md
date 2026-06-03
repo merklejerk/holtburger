@@ -1,6 +1,6 @@
 # Holtburger 3D Terrain Rendering Implementation Plan
 
-Status: Phase T6B0 complete; Phase T6B shader consumption is next.
+Status: Phase T6B complete; Phase T7 explicit-gradient atlas sampling is next.
 
 Dry-run status: reviewed against the current `apps/holtburger-3d/src/lib/world-display` module graph.
 The phase order below reflects that dry run.
@@ -1226,6 +1226,73 @@ Acceptance criteria:
   resources.
 - Current compatibility rendering remains available only as named migration debt until draw slices
   and final cleanup land.
+
+Progress update, 2026-06-02:
+
+- Added `webgl2/families/terrain-family-submit.ts` with the first terrain-family WebGL2 program and
+  submit path.
+- The new terrain-family shader consumes:
+  - terrain tile position, UV, and per-vertex layer-slot attributes;
+  - one terrain color atlas sampler;
+  - one terrain mask atlas sampler;
+  - bounded uniform arrays for up to 8 terrain layer entries;
+  - pcode-derived base, overlay, road, mask rotation, and tiling data.
+- Wired the renderer to create, own, pass, and dispose `terrainFamilyWorldProgram`.
+- Updated world submit so one-draw-ready visible terrain tiles submit through the terrain-family
+  shader, while blocked terrain tiles continue through the named compatibility route.
+- Added terrain one-draw metrics:
+  - shader draw call count;
+  - submitted terrain tile count;
+  - submitted terrain triangle count.
+- Tightened one-draw readiness so a ready tile must have:
+  - a layer plan;
+  - UV and layer-slot buffers;
+  - complete terrain color/mask page bindings for every layer ref;
+  - at most one terrain color atlas texture and at most one terrain mask atlas texture.
+- Added a focused submit test proving a one-draw-ready terrain tile uses the terrain-family shader
+  and does not use compatibility draw calls.
+
+Decisions:
+
+- One-draw terrain is limited to one terrain color atlas texture and one terrain mask atlas texture
+  in T6B. Tiles spanning more pages are blocked for T8 draw slicing instead of adding multi-page
+  sampler complexity to the first shader path.
+- Terrain masks currently bind through the same generated RGBA atlas texture resource as terrain
+  color pages, preserving the T5B family distinction while deferring final mask/data upload semantics.
+- T6B starts with ordinary atlas-rect repeat sampling. T7 must immediately replace this with
+  explicit-gradient sampling to avoid bad mip derivatives at repeat boundaries.
+- Compatibility rendering is now narrowed: ready terrain tiles use the terrain-family shader, and
+  compatibility tiles are the blocked set reported by one-draw readiness.
+- The legacy terrain-blend shader/program remains inline in `webgl2-world-display-renderer-impl.ts`
+  for compatibility rendering. Moving or deleting it belongs to T9/T11 after blocked cases have
+  draw-slice or final diagnostic handling.
+
+Course corrections and refinements:
+
+- T7 should operate in `webgl2/families/terrain-family-submit.ts` first, because the active
+  terrain-family shader now lives there.
+- T8 should turn multi-page layer/page blockers into terrain draw slices. The current blocker text
+  already identifies when a tile requires multiple terrain color or mask atlas textures.
+- T9 should delete compatibility draw submission only after T8 handles page/layer overflow and after
+  terrain detail behavior has an explicit final decision.
+- T11 should audit whether the uniform-array layer table should become a texture-backed table if real
+  terrain content pushes uniform limits or shader complexity.
+
+Validation:
+
+- `npm run test:ts -- webgl2-world-submit webgl2-world-resources terrain-tile-plan`
+- `npm run check`
+- `npm run lint`
+
+Cleanup impact:
+
+- Added `terrainFamilyWorldProgram` as the final terrain-family program owner; keep it.
+- Added `webgl2/families/terrain-family-submit.ts`; keep it as the terrain-family submit home.
+- The old inline `TERRAIN_BLEND_WORLD_*` shader constants and `terrainBlendWorldProgram` are now
+  compatibility-only and should be deleted with the compatibility route in T9/T11.
+- `planWebgl2TerrainTileSubmitReadiness(...).compatibilityTiles` is no longer the active routing
+  list. The submit path uses `blockedTiles`; revisit or remove `compatibilityTiles` when the T9
+  cleanup deletes compatibility rendering.
 
 ## Phase T7: Terrain Atlas Sampling Shader
 

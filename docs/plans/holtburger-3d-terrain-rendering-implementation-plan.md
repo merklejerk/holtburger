@@ -1,6 +1,6 @@
 # Holtburger 3D Terrain Rendering Implementation Plan
 
-Status: Phase T6B complete; Phase T7 explicit-gradient atlas sampling is next.
+Status: Phase T7 complete; Phase T8 terrain draw-slice fallback is next.
 
 Dry-run status: reviewed against the current `apps/holtburger-3d/src/lib/world-display` module graph.
 The phase order below reflects that dry run.
@@ -1319,6 +1319,52 @@ Acceptance criteria:
 - Mipmap derivatives do not break at wrap boundaries.
 - Terrain color/detail inputs remain filtered and mipmapped.
 - Terrain masks keep their selected data/control sampling policy.
+
+Progress update, 2026-06-02:
+
+- Updated the terrain-family fragment shader in `webgl2/families/terrain-family-submit.ts`.
+- Repeated terrain color atlas sampling now derives gradients from unwrapped tiled UVs and then uses
+  `textureGrad` against the atlas rect.
+- Terrain color sampling still repeats with `fract(tiledUv)`, but mip derivatives no longer derive
+  from the discontinuous wrapped coordinate.
+- Terrain mask sampling remains a direct non-repeating data/control lookup through the mask atlas
+  rect. It intentionally does not use repeat wrapping or explicit repeat gradients.
+- Added shader-source tests proving the color path uses `textureGrad`, `dFdx(tiledUv)`,
+  `dFdy(tiledUv)`, and `fract(tiledUv)`, while the mask path keeps plain `texture` sampling.
+
+Decisions:
+
+- T7 only changes the terrain-family shader path. The old terrain-blend compatibility shader remains
+  untouched because it should be deleted rather than polished once T8/T9 remove compatibility
+  rendering.
+- Terrain detail remains deferred. There is no terrain detail atlas binding in the live terrain-family
+  path yet, so T7 did not add a detail sampler or fake detail policy.
+- Mask pages currently still bind via the generated RGBA atlas texture resource. The shader treats
+  them as control/data samples by avoiding repeat wrapping and repeat-gradient sampling.
+
+Course corrections and refinements:
+
+- T8 should keep terrain draw slices on the terrain-family shader path and inherit the explicit
+  gradient color sampling automatically.
+- If T8 introduces detail-backed terrain slices, it should apply the same explicit-gradient policy to
+  repeated detail sampling in this module.
+- T9/T11 should delete the test-only shader source accessor if shader tests move to a compile/link
+  harness or if the old compatibility shader deletion changes the module surface.
+
+Validation:
+
+- `npm run test:ts -- terrain-family-submit webgl2-world-submit webgl2-world-resources`
+- `npm run check`
+- `npm run lint`
+
+Cleanup impact:
+
+- Added `describeWebgl2TerrainFamilyFragmentShaderSource()` for focused shader-source regression
+  tests. Keep it while GLSL is embedded as a TypeScript string; revisit in T11 if shader source gets
+  extracted into loadable assets or a compile-test harness.
+- The compatibility terrain-blend shader still uses its old direct texture sampling. This is
+  intentional migration debt and should be deleted with compatibility rendering instead of receiving
+  new sampling work.
 
 ## Phase T8: Terrain Draw-Slice Fallback
 

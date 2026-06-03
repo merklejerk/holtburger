@@ -11,6 +11,7 @@ import type {
 } from "./terrain-blend-plan";
 import {
 	buildTerrainTileDrawSlicePlans,
+	buildTerrainTileFallbackGeometry,
 	buildTerrainTileLayerGeometry,
 	buildTerrainTileLayerPlan,
 } from "./terrain-tile-plan";
@@ -78,6 +79,39 @@ describe("terrain tile plan", () => {
 		expect([...geometry.indices]).toEqual([0, 1, 2, 3, 4, 5]);
 		expect([...geometry.layerSlots]).toEqual([0, 0, 0, 0, 0, 0]);
 		expect([...geometry.uvs]).toEqual([0, 0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1]);
+	});
+
+	it("builds fallback geometry from the full terrain tile mesh", () => {
+		const geometry = buildTerrainTileFallbackGeometry({
+			landblockId: 0x12340000,
+			gridSize: 2,
+			tileSize: 24,
+			vertices: [
+				{ x: 0, y: 0, z: 0 },
+				{ x: 1, y: 2, z: 3 },
+				{ x: 4, y: 5, z: 6 },
+			],
+			triangles: [
+				{
+					a: 0,
+					b: 1,
+					c: 2,
+					quadIndex: 0,
+					triangleInQuad: 0,
+					debugTerrainPcode: 0,
+					averageHeight: 0,
+				},
+			],
+			quads: [],
+			minHeight: 0,
+			maxHeight: 6,
+		});
+
+		expect([...geometry.positions]).toEqual([0, 0, -0, 1, 3, -2, 4, 6, -5]);
+		expect([...geometry.indices]).toEqual([0, 1, 2]);
+		expect(geometry.uvs).toBeNull();
+		expect(geometry.vertexCount).toBe(3);
+		expect(geometry.triangleCount).toBe(1);
 	});
 });
 

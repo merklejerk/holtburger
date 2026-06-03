@@ -1,6 +1,6 @@
 # Holtburger 3D Terrain Rendering Implementation Plan
 
-Status: Phase T10 initial measurement recorded; Phase T10 follow-up decisions and T11 cleanup are next.
+Status: Phase T11 cleanup complete; deferred Phase T2 broader render-chunk cleanup remains.
 
 Dry-run status: reviewed against the current `apps/holtburger-3d/src/lib/world-display` module graph.
 The phase order below reflects that dry run.
@@ -1092,9 +1092,9 @@ Cleanup impact:
 - `layerSlotBuffer` on compatibility draws is always `null` and exists only because the shared terrain
   buffer helper returns the same buffer set. Delete or split that field when compatibility draws are
   removed in T9/T11.
-- The old `buildStagedTerrainGeometry(tile.mesh)` whole-tile resource path remains only for
-  unresolved/blocked migration states. T8/T9 should replace this with draw slices or final diagnostic
-  behavior, then T11 should delete any hollow helper shape that only exists for the migration bridge.
+- Complete in T11: the old `buildStagedTerrainGeometry(tile.mesh)` whole-tile resource helper moved
+  to terrain tile planning as `buildTerrainTileFallbackGeometry(mesh)`, and the obsolete pcode-filtered
+  branch was deleted.
 
 ## Phase T6B0: Terrain One-Draw Readiness Gate
 
@@ -1623,9 +1623,9 @@ Decisions:
   underlying readiness issue is fixed.
 - Kept `terrain-blend-plan.ts` as the semantic pcode/material decoder. The deleted `terrain-blend`
   vocabulary was direct/staged renderer plumbing, not the terrain behavior model.
-- Kept `buildStagedTerrainGeometry(mesh)` for whole-tile fallback geometry inside terrain resource
-  realization. The pcode-sliced staged draw-unit use is gone; the remaining whole-mesh helper should be
-  revisited in T11 only if it proves to be misleadingly named or poorly located.
+- Complete in T11: `buildStagedTerrainGeometry(mesh)` was renamed and moved to
+  `buildTerrainTileFallbackGeometry(mesh)` in `terrain-tile-plan.ts`, colocating it with terrain tile
+  layer geometry and removing the stale pcode-filtered staged branch.
 
 Validation:
 
@@ -1644,9 +1644,8 @@ Cleanup impact:
   - old direct terrain-blend submit routes and tests;
   - terrain compatibility draw resource types and metrics;
   - generic compaction `terrain-blend` blocker vocabulary.
-- Remaining T11 cleanup should focus on naming and module placement, especially whether
-  `buildStagedTerrainGeometry(mesh)` should move or be renamed now that terrain no longer participates
-  in staged draw-unit assembly.
+- Complete in T11: `buildStagedTerrainGeometry(mesh)` moved to terrain tile planning as
+  `buildTerrainTileFallbackGeometry(mesh)`.
 
 Post-T9 correction:
 
@@ -1780,6 +1779,8 @@ Follow-up measurement needs:
 
 ## Phase T11: Final Cleanup Sweep
 
+Status: Complete on 2026-06-03.
+
 Goal: coalesce and complete cleanup discovered during the terrain rewrite so the final renderer shape
 does not retain migration vocabulary, stale tests, or compatibility leftovers.
 
@@ -1827,8 +1828,8 @@ Delete or rewrite these terrain-specific old-path concepts by the end of Phase T
 - Complete in T9: `buildStagedTerrainDrawUnitAssemblies`.
 - Complete in T9: `createTerrainBlendStagedMaterial`.
 - Complete in T9: `collectTerrainBlendPlanPreparedAssetIds` in staged draw-unit assembly.
-- `buildStagedTerrainGeometry(mesh, { pcode })` pcode filtering. A non-pcode terrain geometry helper
-  may remain if renamed/moved for terrain-family use.
+- Complete in T11: `buildStagedTerrainGeometry(mesh, { pcode })` pcode filtering. The remaining
+  full-tile fallback helper is `buildTerrainTileFallbackGeometry(mesh)` in `terrain-tile-plan.ts`.
 - Complete in T9: `Webgl2WorldDrawUnit.terrainBlend`.
 - Complete in T9: `Webgl2TerrainBlendResources` as a direct draw-unit resource type.
 - Complete in T9: `Webgl2TerrainTileResource.compatibilityDraws` and
@@ -1841,15 +1842,35 @@ Delete or rewrite these terrain-specific old-path concepts by the end of Phase T
 - Complete in T9: compaction-family terrain blockers that only existed because terrain entered
   generic draw units.
 - Complete in T9: WebGL2 submit tests that asserted direct terrain-blend routing.
-- `WorldRenderDraw.drawUnitId` in `world-render-frame.ts`, once the frame can submit terrain-family
-  render work without routing everything through `Webgl2WorldDrawUnit` ids.
-- Audit `createWebgl2TerrainTilePageOverflowDrawSlices` and
-  `groupTerrainLayerEntriesByPage` in `webgl2-world-resources.ts`. The layer-limit path now uses
-  precomputed draw slices, and page-overflow grouping from an empty blocked parent plan is hollow
-  abstraction unless a measured page-overflow case proves it is still the right shape.
+- Audited in T11: `WorldRenderDraw.drawUnitId` in `world-render-frame.ts` now applies only to the
+  `kind: "draw-unit"` branch for non-terrain draw units. Terrain submits use `kind: "terrain-tile"`
+  and `terrainTileId`, so no terrain compatibility path remains here.
+- Audited in T11: `createWebgl2TerrainTilePageOverflowDrawSlices` and
+  `groupTerrainLayerEntriesByPage` in `webgl2-world-resources.ts` are retained. They run after texture
+  page bindings are resolved and split a tile by actual color/mask atlas texture index when one-draw
+  readiness blocks on terrain page overflow.
 - Any temporary wrapper, helper, type alias, or module that exists only as migration ceremony. T1
   deleted the short-lived `terrain-placement.ts` wrapper for this reason; future phases should apply
   the same standard to terrain tile resources, atlas family plumbing, and submit adapters.
+
+T11 completion update, 2026-06-03:
+
+- Deleted dead legacy Three.js terrain geometry code and its stale self-contained test:
+  `terrain-geometry.ts` and `terrain-geometry.test.ts`.
+- Moved whole-tile fallback terrain geometry out of `staged-world-geometry.ts` into
+  `terrain-tile-plan.ts` as `buildTerrainTileFallbackGeometry(mesh)`.
+- Deleted the obsolete pcode-filtered staged terrain geometry branch; terrain pcode slicing now lives
+  in tile layer/slice planning.
+- Renamed local world-frame fallback plumbing from `drawUnitId` to `candidateId` where it may describe
+  either terrain tiles or non-terrain draw units.
+- Accepted remaining `terrain-blend-plan.ts` vocabulary as semantic terrain pcode/material decoding,
+  not renderer compatibility plumbing.
+
+Validation:
+
+- `npm run test:ts -- terrain-tile-plan staged-world-geometry webgl2-world-resources webgl2-world-submit`
+- `npm run check`
+- `npm run lint:ts`
 
 Keep or migrate these concepts:
 

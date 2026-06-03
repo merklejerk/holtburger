@@ -31,6 +31,31 @@ export interface TerrainTileDrawSlicePlan {
 	pcodes: readonly number[];
 }
 
+export function buildTerrainTileFallbackGeometry(
+	mesh: PreparedTerrainMesh,
+): StagedWorldIndexedGeometry {
+	const positions = new Float32Array(mesh.vertices.length * 3);
+	for (const [vertexIndex, vertex] of mesh.vertices.entries()) {
+		writeVec3(positions, vertexIndex, vertex.x, vertex.z, -vertex.y);
+	}
+
+	const indices = createIndexArray(mesh.vertices.length, mesh.triangles.length * 3);
+	for (const [triangleIndex, triangle] of mesh.triangles.entries()) {
+		const firstIndex = triangleIndex * 3;
+		indices[firstIndex] = triangle.a;
+		indices[firstIndex + 1] = triangle.b;
+		indices[firstIndex + 2] = triangle.c;
+	}
+
+	return {
+		positions,
+		uvs: null,
+		indices,
+		vertexCount: mesh.vertices.length,
+		triangleCount: mesh.triangles.length,
+	};
+}
+
 export function buildTerrainTileLayerPlan({
 	planSet,
 	maxLayerEntries = DEFAULT_TERRAIN_TILE_LAYER_LIMIT,

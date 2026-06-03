@@ -3,42 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
 	buildStagedPolygonSetGeometry,
 	buildStagedPortalApertureGeometry,
-	buildStagedTerrainGeometry,
 } from "./staged-world-geometry";
-
-describe("buildStagedTerrainGeometry", () => {
-	it("packs terrain vertices into renderer-space coordinates and triangle indices", () => {
-		const geometry = buildStagedTerrainGeometry({
-			landblockId: 0x12340000,
-			gridSize: 2,
-			tileSize: 24,
-			vertices: [
-				{ x: 0, y: 0, z: 0 },
-				{ x: 1, y: 2, z: 3 },
-				{ x: 4, y: 5, z: 6 },
-			],
-			triangles: [
-				{
-					a: 0,
-					b: 1,
-					c: 2,
-					quadIndex: 0,
-					triangleInQuad: 0,
-					debugTerrainPcode: 0,
-					averageHeight: 0,
-				},
-			],
-			quads: [],
-			minHeight: 0,
-			maxHeight: 6,
-		});
-
-		expect([...geometry.positions]).toEqual([0, 0, -0, 1, 3, -2, 4, 6, -5]);
-		expect([...geometry.indices]).toEqual([0, 1, 2]);
-		expect(geometry.vertexCount).toBe(3);
-		expect(geometry.triangleCount).toBe(1);
-	});
-});
 
 describe("buildStagedPolygonSetGeometry", () => {
 	it("uses render triangle first-vertex runs as indices", () => {

@@ -826,6 +826,48 @@ describe("compaction family planner", () => {
 		]);
 	});
 
+	it("retains extra terrain RGBA atlas candidates without generic draw units", () => {
+		const plan = planCompactionFamilies({
+			drawUnits: [],
+			extraRgbaAtlasCandidates: [
+				{
+					drawUnitId: "terrain-tile/a",
+					family: "terrain-color",
+					texturePageReadiness: createTexturePageReadiness({
+						entryKey: "terrain-page/color/06006d06/21/512/512",
+						width: 512,
+						height: 512,
+					}),
+					detailAtlasEntry: null,
+				},
+			],
+			policy: {
+				maxAtlasTextureSize: 4096,
+				maxAtlasTextureCount: 8,
+				baseGutterPixels: 2,
+				maxMaterialSlotsPerDraw: 1,
+			},
+		});
+
+		expect(plan.texturePageAtlasPlan.families).toMatchObject([
+			{
+				family: "terrain-color",
+				atlasEntryRecords: [
+					{ key: "terrain-page/color/06006d06/21/512/512" },
+				],
+				atlasTextures: [
+					{
+						placements: [
+							{
+								atlasEntryKey: "terrain-page/color/06006d06/21/512/512",
+							},
+						],
+					},
+				],
+			},
+		]);
+	});
+
 	it("creates an empty plan for store initialization", () => {
 		expect(createEmptyCompactionFamilyPlan()).toMatchObject({
 			key: "compaction-families/empty",

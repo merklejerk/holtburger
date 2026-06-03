@@ -11,6 +11,7 @@ import {
 	type PreparedRenderSurfacePayload,
 	type PreparedTexturePayload,
 } from "../assets/types";
+import { formatHex32 } from "../landblocks";
 import { createBaseMaterialAppearanceContext } from "./material-appearance";
 import type { ResolvedMaterialSlot } from "./material-plan";
 import { WORLD_RENDER_DOMAIN } from "./render-domains";
@@ -192,6 +193,54 @@ describe("webgl2 world resources", () => {
 		expect(store.terrainTilesById.size).toBe(0);
 		expect(graph.retainedPreparedAssetIds()).toEqual([]);
 		expect(gl.deletedVertexArrays.length).toBeGreaterThan(0);
+	});
+
+	it("keeps layer-limit terrain draw slices ready for atlas rendering", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2WorldResourceStore();
+		const graph = new RendererResourceGraph();
+		const terrainCodes = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+		const assetState = createAssetStateWithTerrainMaterials(terrainCodes);
+		const terrainScene = createTerrainScene([
+			createReadyTerrainTile({
+				pcodes: terrainCodes.map(encodeUniformTerrainPcode),
+			}),
+		]);
+
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState,
+			terrainScene,
+			staticRenderableScene: createStaticRenderableScene([]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [
+				createChunkTransform({ landblockId: 0x1234ffff }),
+			],
+			rendererResourceGraph: graph,
+		});
+
+		const tile = store.terrainTiles[0];
+		expect(tile?.layerPlan?.blockers).toEqual([
+			"terrain tile requires 9 layer entries; limit is 8",
+		]);
+		expect(tile?.oneDrawReadiness).toMatchObject({ status: "blocked" });
+		expect(tile?.drawSlices).toHaveLength(2);
+		expect(tile?.drawSlices.map((slice) => slice.oneDrawReadiness.status)).toEqual([
+			"ready",
+			"ready",
+		]);
+		expect(tile?.drawSlices.map((slice) => slice.texturePageBindings.length)).toEqual([
+			8,
+			1,
+		]);
+		expect(
+			tile?.texturePageBlockers.includes("terrain tile has no terrain blend page inputs"),
+		).toBe(false);
+		expect(store.texturePageAtlasPlan?.families.map((family) => family.family)).toContain(
+			"terrain-color",
+		);
 	});
 
 	it("disposes orphaned draw units and graph leases", () => {
@@ -1139,6 +1188,73 @@ function createAssetState({
 	return state;
 }
 
+function createAssetStateWithTerrainMaterials(
+	terrainCodes: readonly number[],
+): AssetChannelState {
+	const state = createAssetState();
+	const terrainTypes = terrainCodes.map((terrainCode) => {
+		const textureId = 0x05000000 + terrainCode;
+		const renderSurfaceId = 0x06000000 + terrainCode;
+		state.preparedByAssetId[`surface-texture/${formatHex32(textureId)}`] = {
+			payload: createSurfaceTexturePayload({ textureId, renderSurfaceId }),
+		} as AssetChannelState["preparedAsset"];
+		state.preparedByAssetId[`render-surface/${formatHex32(renderSurfaceId)}`] = {
+			payload: createRenderSurfacePayload({
+				renderSurfaceId,
+				compressed: false,
+			}),
+		} as AssetChannelState["preparedAsset"];
+		state.preparedByAssetId[
+			formatAtlasReadyPreparedTextureAssetId({
+				renderSurfaceId,
+				usage: "raw",
+			})
+		] = {
+			payload: createAtlasPreparedTexturePayload(renderSurfaceId),
+		} as AssetChannelState["preparedAsset"];
+		return {
+			terrainType: terrainCode,
+			textureAssetId: `surface-texture/${formatHex32(textureId)}`,
+			textureDid: textureId,
+			tiling: 4,
+			colorVariation: null,
+		};
+	});
+	state.preparedByAssetId["terrain-material/1"] = {
+		payload: {
+			kind: "terrain-material",
+			sourceAssetKind: "terrain-material",
+			residencyKind: "unknown",
+			provenance: {
+				source: "repo-local-hba",
+				sourceAssetKind: "terrain-material",
+				errorCode: null,
+				detail: null,
+			},
+			regionNumber: 1,
+			materialKind: "tex-merge-table",
+			terrainTypes,
+			terrainAlphaMaps: [],
+			roadAlphaMaps: [],
+			pcodeEncoding: {
+				terrainCodeBits: 5,
+				roadCodeBits: 2,
+				sizeBitMask: 1 << 28,
+			},
+			dependencies: {
+				surfaceTextureAssetIds: terrainTypes.map(
+					(terrain) => terrain.textureAssetId,
+				),
+				renderSurfaceAssetIds: terrainCodes.map(
+					(terrainCode) => `render-surface/${formatHex32(0x06000000 + terrainCode)}`,
+				),
+				paletteAssetIds: [],
+			},
+		},
+	} as AssetChannelState["preparedAsset"];
+	return state;
+}
+
 function createStaticGfxGeometry(): PreparedPolygonSetRenderGeometry {
 	return {
 		sourceId: 1,
@@ -1540,6 +1656,36 @@ function createTerrainTile(): TerrainSceneModel["tiles"][number] {
 	};
 }
 
+function createReadyTerrainTile({
+	pcodes,
+}: {
+	pcodes: readonly number[];
+}): TerrainSceneModel["tiles"][number] {
+	return {
+		...createTerrainTile(),
+		mesh: createTerrainMeshForPcodes(pcodes),
+		materialResources: {
+			kind: "terrain-material-resource-plan",
+			regionNumber: 1,
+			terrainMaterialAssetId: "terrain-material/1",
+			status: "ready",
+			signature: `terrain:1:ready:p=${pcodes.length}`,
+			terrainTypeCount: pcodes.length,
+			terrainAlphaMapCount: 0,
+			roadAlphaMapCount: 0,
+			uniquePcodeCount: pcodes.length,
+			referencedTerrainCodes: pcodes.map((pcode) => pcode & 0x1f),
+			missingTerrainTypes: [],
+			missingSurfaceTextureAssetIds: [],
+			missingRenderSurfaceAssetIds: [],
+			unsupportedRenderSurfaceAssetIds: [],
+			hasTerrainAlphaMaps: false,
+			hasRoadAlphaMaps: false,
+			diagnostics: [],
+		},
+	};
+}
+
 function createTerrainMesh(): PreparedTerrainMesh {
 	const bounds = {
 		min: { x: 0, y: 0, z: 0 },
@@ -1594,6 +1740,82 @@ function createTerrainMesh(): PreparedTerrainMesh {
 		minHeight: 0,
 		maxHeight: 0,
 	};
+}
+
+function createTerrainMeshForPcodes(
+	pcodes: readonly number[],
+): PreparedTerrainMesh {
+	const vertices: PreparedTerrainMesh["vertices"] = [];
+	const triangles: PreparedTerrainMesh["triangles"] = [];
+	const quads: PreparedTerrainMesh["quads"] = [];
+	for (const [quadIndex, pcode] of pcodes.entries()) {
+		const x = quadIndex * 16;
+		const firstVertex = vertices.length;
+		vertices.push(
+			{ x, y: 0, z: 0 },
+			{ x: x + 16, y: 0, z: 0 },
+			{ x, y: 16, z: 0 },
+			{ x: x + 16, y: 16, z: 0 },
+		);
+		const firstTriangle = triangles.length;
+		triangles.push(
+			{
+				a: firstVertex,
+				b: firstVertex + 1,
+				c: firstVertex + 2,
+				quadIndex,
+				triangleInQuad: 0,
+				debugTerrainPcode: pcode,
+				averageHeight: 0,
+			},
+			{
+				a: firstVertex + 2,
+				b: firstVertex + 1,
+				c: firstVertex + 3,
+				quadIndex,
+				triangleInQuad: 1,
+				debugTerrainPcode: pcode,
+				averageHeight: 0,
+			},
+		);
+		const terrainCode = pcode & 0x1f;
+		quads.push({
+			terrainQuadId: `terrain/12340000/quad/${quadIndex}`,
+			row: 0,
+			col: quadIndex,
+			quadIndex,
+			sourceTerrainIndices: [0, 1, 2, 3],
+			vertexIndices: [firstVertex, firstVertex + 1, firstVertex + 2, firstVertex + 3],
+			triangleIndices: [firstTriangle, firstTriangle + 1],
+			diagonal: "southwest-northeast",
+			cornerTerrainCodes: [terrainCode, terrainCode, terrainCode, terrainCode],
+			pcode,
+			averageHeight: 0,
+			bounds: {
+				min: { x, y: 0, z: 0 },
+				max: { x: x + 16, y: 0, z: 16 },
+			},
+		});
+	}
+	return {
+		landblockId: 0x12340000,
+		gridSize: pcodes.length,
+		tileSize: 16,
+		vertices,
+		triangles,
+		quads,
+		minHeight: 0,
+		maxHeight: 0,
+	};
+}
+
+function encodeUniformTerrainPcode(terrainCode: number): number {
+	return (
+		((terrainCode & 0x1f) << 15) |
+		((terrainCode & 0x1f) << 10) |
+		((terrainCode & 0x1f) << 5) |
+		(terrainCode & 0x1f)
+	);
 }
 
 function createStructuredInteriorScene(

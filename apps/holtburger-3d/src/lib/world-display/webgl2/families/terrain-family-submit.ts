@@ -167,18 +167,27 @@ function createTerrainTileFamilySubmitPlan(
 	if (colorTextureIndex === null) {
 		return null;
 	}
-	const maskTextureIndex =
-		singleTerrainTextureIndex(tile.texturePageBindings, "terrain-mask") ??
-		colorTextureIndex;
 	const colorAtlasTexture =
 		generation.textures.find(
-			(texture) => texture.textureIndex === colorTextureIndex,
+			(texture) =>
+				texture.family === "terrain-color" &&
+				texture.textureIndex === colorTextureIndex,
 		) ?? null;
-	const maskAtlasTexture =
-		generation.textures.find(
-			(texture) => texture.textureIndex === maskTextureIndex,
+	if (!colorAtlasTexture) {
+		return null;
+	}
+	const maskTextureIndex = singleTerrainTextureIndex(
+		tile.texturePageBindings,
+		"terrain-mask",
+	);
+	const maskAtlasTexture = maskTextureIndex === null
+		? colorAtlasTexture
+		: generation.textures.find(
+			(texture) =>
+				texture.family === "terrain-mask" &&
+				texture.textureIndex === maskTextureIndex,
 		) ?? null;
-	if (!colorAtlasTexture || !maskAtlasTexture) {
+	if (!maskAtlasTexture) {
 		return null;
 	}
 	return {

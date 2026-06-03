@@ -144,7 +144,9 @@ function resolvePackedBaseTexturePageBinding({
 		);
 	}
 	const page = generation.textures.find(
-		(candidate) => candidate.textureIndex === placement.textureIndex,
+		(candidate) =>
+			candidate.family === placement.family &&
+			candidate.textureIndex === placement.textureIndex,
 	);
 	if (!page) {
 		return fallback(

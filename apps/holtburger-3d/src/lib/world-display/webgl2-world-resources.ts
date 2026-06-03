@@ -208,6 +208,9 @@ export interface Webgl2WorldResourceStore {
 	texturePageReadyMaterialCount: number;
 	atlasCandidateEntryCount: number;
 	atlasCandidateMaterialSlotCount: number;
+	terrainAtlasRefCount: number;
+	terrainAtlasCandidateCount: number;
+	terrainAtlasBlockerTileCount: number;
 	atlasCompatibleDrawUnitCount: number;
 	atlasPlacedRgbaDrawUnitCount: number;
 	detailAtlasReadyDrawUnitCount: number;
@@ -324,6 +327,9 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		texturePageReadyMaterialCount: 0,
 		atlasCandidateEntryCount: 0,
 		atlasCandidateMaterialSlotCount: 0,
+		terrainAtlasRefCount: 0,
+		terrainAtlasCandidateCount: 0,
+		terrainAtlasBlockerTileCount: 0,
 		atlasCompatibleDrawUnitCount: 0,
 		atlasPlacedRgbaDrawUnitCount: 0,
 		detailAtlasReadyDrawUnitCount: 0,
@@ -570,6 +576,11 @@ export function syncWebgl2WorldResources({
 					assetState,
 					terrainTiles: store.terrainTiles,
 				});
+			store.terrainAtlasRefCount = terrainPageCandidates.refCount;
+			store.terrainAtlasCandidateCount =
+				terrainPageCandidates.rgbaCandidates.length;
+			store.terrainAtlasBlockerTileCount =
+				terrainPageCandidates.blockersByTerrainTileId.size;
 			applyTerrainTexturePageBlockers({
 				terrainTiles: store.terrainTiles,
 				blockersByTerrainTileId: terrainPageCandidates.blockersByTerrainTileId,
@@ -1140,11 +1151,14 @@ function collectTerrainTexturePageAtlasCandidates({
 }): {
 	rgbaCandidates: TexturePageAtlasRgbaCandidate[];
 	blockersByTerrainTileId: ReadonlyMap<string, readonly string[]>;
+	refCount: number;
 } {
 	const rgbaCandidates: TexturePageAtlasRgbaCandidate[] = [];
 	const blockersByTerrainTileId = new Map<string, string[]>();
+	let refCount = 0;
 	for (const tile of terrainTiles) {
 		const refs = collectTerrainTileTextureRefs(tile);
+		refCount += refs.length;
 		if (refs.length === 0) {
 			addTerrainTilePageBlocker(
 				blockersByTerrainTileId,
@@ -1170,15 +1184,18 @@ function collectTerrainTexturePageAtlasCandidates({
 			});
 		}
 	}
-	return { rgbaCandidates, blockersByTerrainTileId };
+	return { rgbaCandidates, blockersByTerrainTileId, refCount };
 }
 
 function collectTerrainTileTextureRefs(
 	tile: Webgl2TerrainTileResource,
 ): TerrainBlendTextureRef[] {
-	const refs = tile.layerPlan
-		? collectTerrainLayerPlanTextureRefs(tile.layerPlan)
-		: [];
+	const refs = [
+		...(tile.layerPlan ? collectTerrainLayerPlanTextureRefs(tile.layerPlan) : []),
+		...tile.drawSlices.flatMap((slice) =>
+			collectTerrainLayerPlanTextureRefs(slice.layerPlan),
+		),
+	];
 	const refsByKey = new Map(
 		refs.map((ref) => [describeTerrainTexturePageRefKey(ref), ref] as const),
 	);

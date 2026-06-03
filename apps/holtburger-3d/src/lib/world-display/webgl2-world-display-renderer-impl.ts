@@ -2488,12 +2488,18 @@ function mergeSceneDomainSubmitMetrics({
 		visibleTerrainOneDrawBlockedTileCount:
 			exteriorMetrics.visibleTerrainOneDrawBlockedTileCount +
 			interiorMetrics.visibleTerrainOneDrawBlockedTileCount,
+		visibleTerrainDrawSliceReadyCount:
+			exteriorMetrics.visibleTerrainDrawSliceReadyCount +
+			interiorMetrics.visibleTerrainDrawSliceReadyCount,
 		terrainOneDrawShaderDrawCallCount:
 			exteriorMetrics.terrainOneDrawShaderDrawCallCount +
 			interiorMetrics.terrainOneDrawShaderDrawCallCount,
 		terrainOneDrawSubmittedTileCount:
 			exteriorMetrics.terrainOneDrawSubmittedTileCount +
 			interiorMetrics.terrainOneDrawSubmittedTileCount,
+		terrainDrawSliceSubmittedCount:
+			exteriorMetrics.terrainDrawSliceSubmittedCount +
+			interiorMetrics.terrainDrawSliceSubmittedCount,
 		terrainOneDrawSubmittedTriangleCount:
 			exteriorMetrics.terrainOneDrawSubmittedTriangleCount +
 			interiorMetrics.terrainOneDrawSubmittedTriangleCount,

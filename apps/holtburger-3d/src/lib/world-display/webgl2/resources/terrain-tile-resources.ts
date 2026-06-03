@@ -92,6 +92,28 @@ export interface Webgl2TerrainTileResource {
 	texturePageBindings: Webgl2TerrainTileTexturePageBinding[];
 	texturePageBlockers: readonly string[];
 	oneDrawReadiness: Webgl2TerrainTileOneDrawReadiness;
+	drawSlices: Webgl2TerrainTileDrawSliceResource[];
+}
+
+export interface Webgl2TerrainTileDrawSliceResource {
+	id: string;
+	parentTerrainTileId: string;
+	reason: string;
+	geometrySignature: string;
+	vertexArray: Webgl2VertexArrayResource;
+	vertexBuffer: Webgl2BufferResource;
+	uvBuffer: Webgl2BufferResource;
+	layerSlotBuffer: Webgl2BufferResource;
+	indexBuffer: Webgl2BufferResource;
+	indexType: GLenum;
+	vertexCount: number;
+	triangleCount: number;
+	modelMatrix: RenderMat4;
+	bvhItemKeys: RenderBvhItemKey[];
+	layerPlan: TerrainTileLayerPlan;
+	texturePageBindings: Webgl2TerrainTileTexturePageBinding[];
+	texturePageBlockers: readonly string[];
+	oneDrawReadiness: Webgl2TerrainTileOneDrawReadiness;
 }
 
 export interface Webgl2TerrainTileTexturePageBinding {
@@ -178,6 +200,12 @@ export function describeTerrainTileGraphSignature(
 			.join(",")}`,
 		`blockers:${resource.texturePageBlockers.join(",")}`,
 		`one-draw:${describeTerrainTileOneDrawReadiness(resource.oneDrawReadiness)}`,
+		`slices:${resource.drawSlices
+			.map(
+				(slice) =>
+					`${slice.id}:${slice.geometrySignature}:${describeTerrainTileOneDrawReadiness(slice.oneDrawReadiness)}`,
+			)
+			.join(",")}`,
 		`bvh:${resource.bvhItemKeys.join(",")}`,
 	].join("|");
 }
@@ -244,29 +272,84 @@ export function deriveTerrainTileOneDrawReadiness(
 	};
 }
 
+export function deriveTerrainDrawSliceOneDrawReadiness(
+	slice: Webgl2TerrainTileDrawSliceResource,
+): Webgl2TerrainTileOneDrawReadiness {
+	const blockers = collectTerrainLayerRenderableBlockers({
+		layerPlan: slice.layerPlan,
+		layerPlanBlockers: [],
+		texturePageBindings: slice.texturePageBindings,
+		texturePageBlockers: slice.texturePageBlockers,
+		hasUvBuffer: true,
+		hasLayerSlotBuffer: true,
+		resourceLabel: "terrain draw slice",
+	});
+	if (blockers.length > 0) {
+		return createBlockedTerrainTileOneDrawReadiness(blockers);
+	}
+	const colorPageBindingCount = slice.texturePageBindings.filter(
+		(binding) => binding.family === "terrain-color",
+	).length;
+	const maskPageBindingCount = slice.texturePageBindings.filter(
+		(binding) => binding.family === "terrain-mask",
+	).length;
+	return {
+		status: "ready",
+		layerEntryCount: slice.layerPlan.layerEntries.length,
+		texturePageBindingCount: slice.texturePageBindings.length,
+		colorPageBindingCount,
+		maskPageBindingCount,
+	};
+}
+
 function collectTerrainTileOneDrawBlockers(
 	resource: Webgl2TerrainTileResource,
 ): string[] {
-	const blockers = [
-		...resource.layerPlanBlockers,
-		...resource.texturePageBlockers,
-	];
-	if (!resource.layerPlan) {
-		blockers.push("terrain tile has no layer plan");
-	} else if (resource.layerPlan.layerEntries.length === 0) {
-		blockers.push("terrain tile layer plan has no entries");
+	return collectTerrainLayerRenderableBlockers({
+		layerPlan: resource.layerPlan,
+		layerPlanBlockers: resource.layerPlanBlockers,
+		texturePageBindings: resource.texturePageBindings,
+		texturePageBlockers: resource.texturePageBlockers,
+		hasUvBuffer: resource.uvBuffer !== null,
+		hasLayerSlotBuffer: resource.layerSlotBuffer !== null,
+		resourceLabel: "terrain tile",
+	});
+}
+
+function collectTerrainLayerRenderableBlockers({
+	layerPlan,
+	layerPlanBlockers,
+	texturePageBindings,
+	texturePageBlockers,
+	hasUvBuffer,
+	hasLayerSlotBuffer,
+	resourceLabel,
+}: {
+	layerPlan: TerrainTileLayerPlan | null;
+	layerPlanBlockers: readonly string[];
+	texturePageBindings: readonly Webgl2TerrainTileTexturePageBinding[];
+	texturePageBlockers: readonly string[];
+	hasUvBuffer: boolean;
+	hasLayerSlotBuffer: boolean;
+	resourceLabel: string;
+}): string[] {
+	const blockers = [...layerPlanBlockers, ...texturePageBlockers];
+	if (!layerPlan) {
+		blockers.push(`${resourceLabel} has no layer plan`);
+	} else if (layerPlan.layerEntries.length === 0) {
+		blockers.push(`${resourceLabel} layer plan has no entries`);
 	}
-	if (!resource.uvBuffer) {
-		blockers.push("terrain tile one-draw geometry has no uv buffer");
+	if (!hasUvBuffer) {
+		blockers.push(`${resourceLabel} one-draw geometry has no uv buffer`);
 	}
-	if (!resource.layerSlotBuffer) {
-		blockers.push("terrain tile one-draw geometry has no layer-slot buffer");
+	if (!hasLayerSlotBuffer) {
+		blockers.push(`${resourceLabel} one-draw geometry has no layer-slot buffer`);
 	}
 	const requiresColorPages =
-		resource.layerPlan?.layerEntries.some((entry) => entry.colorRefCount > 0) ??
+		layerPlan?.layerEntries.some((entry) => entry.colorRefCount > 0) ??
 		false;
 	const colorTextureIndices = collectTerrainPageTextureIndices(
-		resource.texturePageBindings.filter(
+		texturePageBindings.filter(
 			(binding) => binding.family === "terrain-color",
 		),
 	);
@@ -274,18 +357,18 @@ function collectTerrainTileOneDrawBlockers(
 		requiresColorPages &&
 		colorTextureIndices.length === 0
 	) {
-		blockers.push("terrain tile one-draw path has no terrain color page bindings");
+		blockers.push(`${resourceLabel} one-draw path has no terrain color page bindings`);
 	}
 	if (colorTextureIndices.length > 1) {
 		blockers.push(
-			`terrain tile one-draw path requires ${colorTextureIndices.length} terrain color atlas textures`,
+			`${resourceLabel} one-draw path requires ${colorTextureIndices.length} terrain color atlas textures`,
 		);
 	}
 	const requiresMaskPages =
-		resource.layerPlan?.layerEntries.some((entry) => entry.maskRefCount > 0) ??
+		layerPlan?.layerEntries.some((entry) => entry.maskRefCount > 0) ??
 		false;
 	const maskTextureIndices = collectTerrainPageTextureIndices(
-		resource.texturePageBindings.filter(
+		texturePageBindings.filter(
 			(binding) => binding.family === "terrain-mask",
 		),
 	);
@@ -293,18 +376,18 @@ function collectTerrainTileOneDrawBlockers(
 		requiresMaskPages &&
 		maskTextureIndices.length === 0
 	) {
-		blockers.push("terrain tile one-draw path has no terrain mask page bindings");
+		blockers.push(`${resourceLabel} one-draw path has no terrain mask page bindings`);
 	}
 	if (maskTextureIndices.length > 1) {
 		blockers.push(
-			`terrain tile one-draw path requires ${maskTextureIndices.length} terrain mask atlas textures`,
+			`${resourceLabel} one-draw path requires ${maskTextureIndices.length} terrain mask atlas textures`,
 		);
 	}
-	for (const ref of collectTerrainTileLayerTextureRefs(resource)) {
+	for (const ref of collectTerrainLayerTextureRefs(layerPlan)) {
 		const atlasEntryKey = describeTerrainBlendTextureAtlasEntryKey(ref);
 		const expectedFamily = ref.role === "mask" ? "terrain-mask" : "terrain-color";
 		if (
-			!resource.texturePageBindings.some(
+			!texturePageBindings.some(
 				(binding) =>
 					binding.family === expectedFamily &&
 					binding.atlasEntryKey === atlasEntryKey &&
@@ -313,7 +396,7 @@ function collectTerrainTileOneDrawBlockers(
 			)
 		) {
 			blockers.push(
-				`terrain tile one-draw path is missing ${expectedFamily} binding ${atlasEntryKey}`,
+				`${resourceLabel} one-draw path is missing ${expectedFamily} binding ${atlasEntryKey}`,
 			);
 		}
 	}
@@ -332,11 +415,11 @@ function collectTerrainPageTextureIndices(
 	].sort((left, right) => left - right);
 }
 
-function collectTerrainTileLayerTextureRefs(
-	resource: Webgl2TerrainTileResource,
+function collectTerrainLayerTextureRefs(
+	layerPlan: TerrainTileLayerPlan | null,
 ): TerrainBlendTextureRef[] {
 	const refs =
-		resource.layerPlan?.layerEntries.flatMap((entry) => [
+		layerPlan?.layerEntries.flatMap((entry) => [
 			entry.plan.base,
 			...entry.plan.overlays.flatMap((overlay) => [
 				overlay.terrain,
@@ -369,9 +452,22 @@ export function destroyWebgl2TerrainTileResource(
 	resource.uvBuffer?.dispose();
 	resource.layerSlotBuffer?.dispose();
 	resource.indexBuffer.dispose();
+	for (const slice of resource.drawSlices) {
+		destroyWebgl2TerrainTileDrawSlice(slice);
+	}
 	for (const draw of resource.compatibilityDraws) {
 		destroyWebgl2TerrainTileCompatibilityDraw(draw);
 	}
+}
+
+export function destroyWebgl2TerrainTileDrawSlice(
+	slice: Webgl2TerrainTileDrawSliceResource,
+): void {
+	slice.vertexArray.dispose();
+	slice.vertexBuffer.dispose();
+	slice.uvBuffer.dispose();
+	slice.layerSlotBuffer.dispose();
+	slice.indexBuffer.dispose();
 }
 
 export function destroyWebgl2TerrainTileCompatibilityDraw(

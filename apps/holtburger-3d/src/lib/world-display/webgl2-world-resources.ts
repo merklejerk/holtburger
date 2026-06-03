@@ -111,8 +111,10 @@ import {
 	type TerrainBlendTextureRef,
 } from "./terrain-blend-plan";
 import {
+	buildTerrainTileDrawSlicePlans,
 	buildTerrainTileLayerGeometry,
 	buildTerrainTileLayerPlan,
+	type TerrainTileDrawSlicePlan,
 	type TerrainTileLayerGeometry,
 	type TerrainTileLayerPlan,
 } from "./terrain-tile-plan";
@@ -131,13 +133,16 @@ import {
 	describeTerrainTileGraphSignature,
 	deriveTerrainTileRenderCandidate,
 	deriveTerrainTileOneDrawReadiness,
+	deriveTerrainDrawSliceOneDrawReadiness,
 	destroyWebgl2TerrainTileCompatibilityDraw,
+	destroyWebgl2TerrainTileDrawSlice,
 	destroyWebgl2TerrainTileResource,
 	terrainTileResourceId,
 	type Webgl2TerrainBlendResources,
 	type Webgl2TerrainTextureBinding,
 	type Webgl2TerrainTileTexturePageBinding,
 	type Webgl2TerrainTileCompatibilityDrawResource,
+	type Webgl2TerrainTileDrawSliceResource,
 	type Webgl2TerrainTileRenderCandidate,
 	type Webgl2TerrainTileResource,
 	type Webgl2TerrainTileReadiness,
@@ -863,6 +868,9 @@ function createOrReuseWebgl2TerrainTile({
 		tile,
 	});
 	const layerPlan = buildTerrainTileLayerPlan({ planSet });
+	const drawSlicePlans = buildTerrainTileDrawSlicePlans({ planSet }).filter(
+		(slice) => layerPlan?.blockers.length || slice.id !== "slice/0",
+	);
 	const layerGeometry = layerPlan && layerPlan.blockers.length === 0
 		? buildTerrainTileLayerGeometry({ mesh: tile.mesh, plan: layerPlan })
 		: null;
@@ -890,6 +898,17 @@ function createOrReuseWebgl2TerrainTile({
 		materialTextureCapabilities,
 		textureFilteringMode,
 	});
+	const drawSlices = drawSlicePlans.flatMap((slicePlan) =>
+		createWebgl2TerrainTileDrawSlice({
+			gl,
+			id: `${id}/${slicePlan.id}`,
+			modelMatrix,
+			parentTerrainTileId: id,
+			reason: slicePlan.reason,
+			mesh: tile.mesh,
+			slicePlan,
+		}),
+	);
 	const geometrySignature = describeTerrainTileGeometrySignature(geometry);
 	const previous = store.terrainTilesById.get(id);
 	if (
@@ -901,6 +920,9 @@ function createOrReuseWebgl2TerrainTile({
 		for (const draw of previous.compatibilityDraws) {
 			destroyWebgl2TerrainTileCompatibilityDraw(draw);
 		}
+		for (const slice of previous.drawSlices) {
+			destroyWebgl2TerrainTileDrawSlice(slice);
+		}
 		previous.label = tile.label;
 		previous.placementKey = placement.chunkKey;
 		previous.modelMatrix = modelMatrix;
@@ -909,6 +931,7 @@ function createOrReuseWebgl2TerrainTile({
 		previous.bvhItemKeys = [...bvhBinding.itemKeys];
 		previous.bvhFallbackReason = bvhBinding.fallbackReason;
 		previous.compatibilityDraws = compatibilityDraws;
+		previous.drawSlices = drawSlices;
 		previous.layerPlan = layerPlan;
 		previous.layerPlanBlockers = layerPlanBlockers;
 		previous.texturePageBindings = [];
@@ -942,6 +965,7 @@ function createOrReuseWebgl2TerrainTile({
 		bvhItemKeys: [...bvhBinding.itemKeys],
 		bvhFallbackReason: bvhBinding.fallbackReason,
 		compatibilityDraws,
+		drawSlices,
 		layerPlan,
 		layerPlanBlockers,
 		texturePageBindings: [],
@@ -1022,6 +1046,68 @@ function createWebgl2TerrainTileCompatibilityDraws({
 			}),
 		];
 	});
+}
+
+function createWebgl2TerrainTileDrawSlice({
+	gl,
+	id,
+	modelMatrix,
+	parentTerrainTileId,
+	reason,
+	mesh,
+	slicePlan,
+}: {
+	gl: WebGL2RenderingContext;
+	id: string;
+	modelMatrix: RenderMat4;
+	parentTerrainTileId: string;
+	reason: string;
+	mesh: TerrainSceneModel["tiles"][number]["mesh"];
+	slicePlan: TerrainTileDrawSlicePlan;
+}): Webgl2TerrainTileDrawSliceResource[] {
+	const geometry = buildTerrainTileLayerGeometry({
+		mesh,
+		plan: slicePlan.layerPlan,
+	});
+	if (geometry.triangleCount === 0) {
+		return [];
+	}
+	const buffers = createWebgl2IndexedGeometryBuffers(gl, {
+		id,
+		geometry,
+	});
+	if (!buffers.uvBuffer || !buffers.layerSlotBuffer) {
+		throw new Error(`Terrain draw slice ${id} was created without layer geometry buffers.`);
+	}
+	const bvhItemKeys = mesh.quads
+		.filter((quad) => slicePlan.layerPlan.layerSlotByPcode.has(quad.pcode))
+		.map(
+			(quad): RenderBvhItemKey =>
+				quad.terrainQuadId
+					.replace(/^terrain\//, "terrain:landblock:")
+					.replace("/quad/", ":quad:") as RenderBvhItemKey,
+		);
+	return [
+		{
+			id,
+			parentTerrainTileId,
+			reason,
+			geometrySignature: describeTerrainTileGeometrySignature(geometry),
+			...buffers,
+			uvBuffer: buffers.uvBuffer,
+			layerSlotBuffer: buffers.layerSlotBuffer,
+			vertexCount: geometry.indices.length,
+			triangleCount: geometry.triangleCount,
+			modelMatrix,
+			bvhItemKeys,
+			layerPlan: slicePlan.layerPlan,
+			texturePageBindings: [],
+			texturePageBlockers: [],
+			oneDrawReadiness: createBlockedTerrainTileOneDrawReadiness([
+				"terrain draw slice texture page bindings are unresolved",
+			]),
+		},
+	];
 }
 
 function resolveTerrainBlendPlanSetForTile({
@@ -1381,7 +1467,47 @@ function resolveWebgl2TerrainTileTexturePageBindings(
 		tile.texturePageBindings = dedupeTerrainTexturePageBindings(bindings);
 		tile.texturePageBlockers = [...new Set(blockers)];
 		tile.oneDrawReadiness = deriveTerrainTileOneDrawReadiness(tile);
+		resolveTerrainDrawSliceTexturePageBindings(tile);
 	}
+}
+
+function resolveTerrainDrawSliceTexturePageBindings(
+	tile: Webgl2TerrainTileResource,
+): void {
+	for (const slice of tile.drawSlices) {
+		const atlasEntryKeys = new Set(
+			collectTerrainLayerPlanTextureRefs(slice.layerPlan).map((ref) =>
+				describeTerrainBlendTextureAtlasEntryKey(ref),
+			),
+		);
+		slice.texturePageBindings = tile.texturePageBindings.filter((binding) =>
+			atlasEntryKeys.has(binding.atlasEntryKey),
+		);
+		slice.texturePageBlockers = tile.texturePageBlockers.filter((blocker) =>
+			[...atlasEntryKeys].some((atlasEntryKey) => blocker.includes(atlasEntryKey)),
+		);
+		slice.oneDrawReadiness = deriveTerrainDrawSliceOneDrawReadiness(slice);
+	}
+}
+
+function collectTerrainLayerPlanTextureRefs(
+	layerPlan: TerrainTileLayerPlan,
+): TerrainBlendTextureRef[] {
+	const refs = layerPlan.layerEntries.flatMap((entry) => [
+		entry.plan.base,
+		...entry.plan.overlays.flatMap((overlay) => [
+			overlay.terrain,
+			overlay.alpha,
+		]),
+		...entry.plan.roads.flatMap((road) => [road.road, road.alpha]),
+	]);
+	const refsByKey = new Map(
+		refs.map((ref) => [
+			`${ref.role}/${describeTerrainBlendTextureAtlasEntryKey(ref)}`,
+			ref,
+		] as const),
+	);
+	return [...refsByKey.values()];
 }
 
 function dedupeTerrainTexturePageBindings(

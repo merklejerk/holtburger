@@ -938,7 +938,7 @@ describe("webgl2 world resources", () => {
 		);
 	});
 
-	it("keeps compacted indexed slices atlas-bound without crossing visibility partitions", () => {
+	it("merges compacted indexed slices across visibility partitions", () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
 		const firstMaterialSurfaceId = 0x08000002;
@@ -1001,20 +1001,19 @@ describe("webgl2 world resources", () => {
 		).toHaveLength(2);
 		expect(indexedGeometryBatch).toMatchObject({
 			drawUnitCount: 2,
-			drawSliceCount: 2,
+			drawSliceCount: 1,
 		});
 		expect(indexedFamily?.materialTableRecords).toHaveLength(2);
-		expect(indexedFamily?.drawSlices).toHaveLength(2);
-		for (const slice of indexedFamily?.drawSlices ?? []) {
-			expect(slice).toMatchObject({
+		expect(indexedFamily?.drawSlices).toMatchObject([
+			{
 				indexFormat: "p8",
 				indexAtlasTextureIndex: 0,
 				paletteAtlasTextureIndex: 0,
 				renderStateKey: "indexed-opaque",
-			});
-			expect(slice.drawUnitIds).toHaveLength(1);
-			expect(slice.materialSlotKeys).toHaveLength(1);
-		}
+			},
+		]);
+		expect(indexedFamily?.drawSlices[0]?.drawUnitIds).toHaveLength(2);
+		expect(indexedFamily?.drawSlices[0]?.materialSlotKeys).toHaveLength(2);
 	});
 });
 

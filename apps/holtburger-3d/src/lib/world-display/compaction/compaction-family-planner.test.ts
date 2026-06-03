@@ -879,7 +879,7 @@ describe("compaction family planner", () => {
 		});
 	});
 
-	it("splits RGBA texture-page slices by visibility partition", () => {
+	it("merges RGBA texture-page slices across visibility partitions", () => {
 		const plan = planCompactionFamilies({
 			drawUnits: [
 				createCandidate({
@@ -902,12 +902,11 @@ describe("compaction family planner", () => {
 		});
 
 		expect(plan.drawSlices.map((slice) => slice.drawUnitIds)).toEqual([
-			["cell-a"],
-			["cell-b"],
+			["cell-a", "cell-b"],
 		]);
 	});
 
-	it("splits indexed-paletted slices by visibility partition", () => {
+	it("merges indexed-paletted slices across visibility partitions", () => {
 		const indexedRecord = createIndexedMaterialTableRecord("shared");
 		const plan = planCompactionFamilies({
 			drawUnits: [
@@ -938,7 +937,7 @@ describe("compaction family planner", () => {
 			plan.renderFamilies.indexedPaletted.drawSlices.map(
 				(slice) => slice.drawUnitIds,
 			),
-		).toEqual([["indexed-a"], ["indexed-b"]]);
+		).toEqual([["indexed-a", "indexed-b"]]);
 	});
 });
 

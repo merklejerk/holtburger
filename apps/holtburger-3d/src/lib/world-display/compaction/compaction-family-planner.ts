@@ -190,7 +190,6 @@ export interface IndexedPalettedFamilyDrawSlice {
 	indexAtlasTextureIndex: number | null;
 	paletteAtlasTextureIndex: number | null;
 	renderStateKey: "indexed-opaque";
-	visibilityPartitionKey: string;
 	materialTableSlotStart: number;
 	materialTableSlotCount: number;
 	materialSlotKeys: readonly string[];
@@ -734,7 +733,6 @@ function describeIndexedCandidateSliceIdentity(
 		record.indexPageKey,
 		record.palettePageKey,
 		record.key,
-		candidate.visibilityPartitionKey,
 		"indexed-opaque",
 	].join("|");
 }
@@ -819,7 +817,6 @@ function createIndexedPalettedFamilyDrawSlices({
 		{
 			record: IndexedPalettedFamilyMaterialTableRecord;
 			slotIndex: number;
-			visibilityPartitionKey: string;
 			drawUnitIds: string[];
 		}
 	>();
@@ -834,13 +831,11 @@ function createIndexedPalettedFamilyDrawSlices({
 			record.indexPageKey,
 			record.palettePageKey,
 			record.key,
-			candidate.visibilityPartitionKey,
 			"indexed-opaque",
 		].join("|");
 		const group = groups.get(key) ?? {
 			record,
 			slotIndex,
-			visibilityPartitionKey: candidate.visibilityPartitionKey,
 			drawUnitIds: [],
 		};
 		group.drawUnitIds.push(candidate.id);
@@ -861,7 +856,6 @@ function createIndexedPalettedFamilyDrawSlices({
 				group.record.indexPageKey,
 				group.record.palettePageKey,
 				group.record.key,
-				`visibility=${describeDrawSliceVisibilityPartition(group.drawUnitIds)}`,
 				`table=${group.slotIndex}`,
 			].join("|"),
 			indexFormat: group.record.indexFormat,
@@ -870,7 +864,6 @@ function createIndexedPalettedFamilyDrawSlices({
 			indexAtlasTextureIndex: null,
 			paletteAtlasTextureIndex: null,
 			renderStateKey: "indexed-opaque",
-			visibilityPartitionKey: group.visibilityPartitionKey,
 			materialTableSlotStart: group.slotIndex,
 			materialTableSlotCount: 1,
 			materialSlotKeys: [group.record.key],
@@ -1592,7 +1585,6 @@ function describeRgbaCandidateSliceIdentity(
 		candidate.eligibility.atlasEntryKey,
 		candidate.eligibility.renderStateKey,
 		describeCompactionMaterialSlotKey(candidate),
-		candidate.drawUnit.visibilityPartitionKey,
 	].join("|");
 }
 
@@ -1631,7 +1623,6 @@ function createRgbaTexturePageFamilyDrawSlices(
 			atlasTextureIndex,
 			detailAtlasTextureIndex ?? "no-detail",
 			slot.renderStateKey,
-			candidate.drawUnit.visibilityPartitionKey,
 		].join("|");
 		const group = groups.get(key) ?? {
 			atlasTextureIndex,
@@ -1666,7 +1657,6 @@ function createRgbaTexturePageFamilyDrawSlices(
 					`texture=${group.atlasTextureIndex}`,
 					`detail=${group.detailAtlasTextureIndex ?? "none"}`,
 					group.renderStateKey,
-					`visibility=${describeDrawSliceVisibilityPartition(drawUnitIds)}`,
 					`table=${materialTableSlotStart}-${materialTableSlotEnd}`,
 				].join("|"),
 				atlasTextureIndex: group.atlasTextureIndex,
@@ -1686,14 +1676,6 @@ function compareFirstDrawUnitId(
 	right: readonly string[],
 ): number {
 	return (left[0] ?? "").localeCompare(right[0] ?? "");
-}
-
-function describeDrawSliceVisibilityPartition(
-	drawUnitIds: readonly string[],
-): string {
-	return drawUnitIds.length === 1
-		? drawUnitIds[0]
-		: `${drawUnitIds[0] ?? "empty"}..${drawUnitIds[drawUnitIds.length - 1] ?? "empty"}`;
 }
 
 function describeCompactionFamilyPlanKey(options: {

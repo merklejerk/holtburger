@@ -56,17 +56,35 @@ export interface Webgl2TextureAtlasGenerationResource {
 	dispose(): void;
 }
 
-export function createWebgl2TextureAtlasGenerationResource({
-	gl,
+export interface TextureAtlasCpuTexture {
+	key: string;
+	family: TexturePageFamily;
+	textureIndex: number;
+	width: number;
+	height: number;
+	placementCount: number;
+	pixels: Uint8Array;
+}
+
+export interface TextureAtlasCpuGeneration {
+	key: string;
+	textures: readonly TextureAtlasCpuTexture[];
+	placements: readonly Webgl2TextureAtlasPlacementResource[];
+	detailTextures: readonly TextureAtlasCpuTexture[];
+	detailPlacements: readonly Webgl2TextureAtlasPlacementResource[];
+	preparedTextureAssetIds: readonly string[];
+	rgbaAtlasReadyDrawUnitIds: readonly string[];
+}
+
+export function createTextureAtlasCpuGeneration({
 	plan,
 	textureFilteringMode = "anisotropic-4x",
 	maxAnisotropy = 1,
 }: {
-	gl: WebGL2RenderingContext;
 	plan: TexturePageAtlasPlan;
 	textureFilteringMode?: TextureFilteringMode;
 	maxAnisotropy?: number;
-}): Webgl2TextureAtlasGenerationResource | null {
+}): TextureAtlasCpuGeneration | null {
 	if (
 		plan.rgbaAtlasReadyDrawUnitIds.length === 0 &&
 		plan.detailAtlasTextures.length === 0
@@ -78,14 +96,11 @@ export function createWebgl2TextureAtlasGenerationResource({
 	);
 	const textures = plan.families.flatMap((familyPlan) =>
 		familyPlan.atlasTextures.map((page) =>
-			createWebgl2TextureAtlasTexture({
-				gl,
+			createTextureAtlasCpuTexture({
 				generationKey: plan.key,
 				family: familyPlan.family,
 				page,
 				entriesByKey,
-				textureFilteringMode,
-				maxAnisotropy,
 			}),
 		),
 	);
@@ -113,14 +128,11 @@ export function createWebgl2TextureAtlasGenerationResource({
 	);
 	const detailTextures = plan.families.flatMap((familyPlan) =>
 		familyPlan.detailAtlasTextures.map((page) =>
-			createWebgl2DetailTextureAtlasTexture({
-				gl,
+			createDetailTextureAtlasCpuTexture({
 				generationKey: plan.key,
 				family: familyPlan.family,
 				page,
 				entriesByKey: detailEntriesByKey,
-				textureFilteringMode,
-				maxAnisotropy,
 			}),
 		),
 	);
@@ -153,6 +165,71 @@ export function createWebgl2TextureAtlasGenerationResource({
 		detailPlacements,
 		preparedTextureAssetIds: plan.preparedTextureAssetIds,
 		rgbaAtlasReadyDrawUnitIds: plan.rgbaAtlasReadyDrawUnitIds,
+	};
+}
+
+export function createWebgl2TextureAtlasGenerationResource({
+	gl,
+	plan,
+	textureFilteringMode = "anisotropic-4x",
+	maxAnisotropy = 1,
+}: {
+	gl: WebGL2RenderingContext;
+	plan: TexturePageAtlasPlan;
+	textureFilteringMode?: TextureFilteringMode;
+	maxAnisotropy?: number;
+}): Webgl2TextureAtlasGenerationResource | null {
+	const cpuGeneration = createTextureAtlasCpuGeneration({
+		plan,
+		textureFilteringMode,
+		maxAnisotropy,
+	});
+	if (!cpuGeneration) {
+		return null;
+	}
+	return createWebgl2TextureAtlasGenerationResourceFromCpu({
+		gl,
+		cpuGeneration,
+		textureFilteringMode,
+		maxAnisotropy,
+	});
+}
+
+export function createWebgl2TextureAtlasGenerationResourceFromCpu({
+	gl,
+	cpuGeneration,
+	textureFilteringMode = "anisotropic-4x",
+	maxAnisotropy = 1,
+}: {
+	gl: WebGL2RenderingContext;
+	cpuGeneration: TextureAtlasCpuGeneration;
+	textureFilteringMode?: TextureFilteringMode;
+	maxAnisotropy?: number;
+}): Webgl2TextureAtlasGenerationResource {
+	const textures = cpuGeneration.textures.map((texture) =>
+		createWebgl2TextureAtlasTexture({
+			gl,
+			cpuTexture: texture,
+			textureFilteringMode,
+			maxAnisotropy,
+		}),
+	);
+	const detailTextures = cpuGeneration.detailTextures.map((texture) =>
+		createWebgl2TextureAtlasTexture({
+			gl,
+			cpuTexture: texture,
+			textureFilteringMode,
+			maxAnisotropy,
+		}),
+	);
+	return {
+		key: cpuGeneration.key,
+		textures,
+		placements: cpuGeneration.placements,
+		detailTextures,
+		detailPlacements: cpuGeneration.detailPlacements,
+		preparedTextureAssetIds: cpuGeneration.preparedTextureAssetIds,
+		rgbaAtlasReadyDrawUnitIds: cpuGeneration.rgbaAtlasReadyDrawUnitIds,
 		dispose() {
 			for (const texture of textures) {
 				texture.texture.dispose();
@@ -164,23 +241,17 @@ export function createWebgl2TextureAtlasGenerationResource({
 	};
 }
 
-function createWebgl2TextureAtlasTexture({
-	gl,
+function createTextureAtlasCpuTexture({
 	generationKey,
 	family,
 	page,
 	entriesByKey,
-	textureFilteringMode,
-	maxAnisotropy,
 }: {
-	gl: WebGL2RenderingContext;
 	generationKey: string;
 	family: TexturePageFamily;
 	page: AtlasTexturePage;
 	entriesByKey: ReadonlyMap<string, RgbaTexturePageAtlasEntryRecord>;
-	textureFilteringMode: TextureFilteringMode;
-	maxAnisotropy: number;
-}): Webgl2TextureAtlasTextureResource {
+}): TextureAtlasCpuTexture {
 	const pixels = new Uint8Array(page.width * page.height * 4);
 	if (family === "terrain-color") {
 		fillRgbaPixels(pixels, TERRAIN_COLOR_ATLAS_FILL_RGBA);
@@ -202,54 +273,28 @@ function createWebgl2TextureAtlasTexture({
 		});
 	}
 	const key = `${generationKey}/${family}/texture/${page.textureIndex}`;
-	const texture = createWebgl2Texture2D(gl, {
-		label: key,
-		upload: {
-			width: page.width,
-			height: page.height,
-			internalFormat: gl.RGBA8,
-			format: gl.RGBA,
-			type: gl.UNSIGNED_BYTE,
-			data: pixels,
-			generateMipmaps: textureFilteringMode !== "nearest",
-		},
-		sampler: createWebgl2TextureAtlasSampler({
-			gl,
-			textureFilteringMode,
-			maxAnisotropy,
-		}),
-	});
 	return {
 		key,
 		family,
 		textureIndex: page.textureIndex,
-		texture,
 		width: page.width,
 		height: page.height,
 		placementCount: page.placements.length,
+		pixels,
 	};
 }
 
-function createWebgl2DetailTextureAtlasTexture({
-	gl,
+function createDetailTextureAtlasCpuTexture({
 	generationKey,
 	family,
 	page,
 	entriesByKey,
-	textureFilteringMode,
-	maxAnisotropy,
 }: {
-	gl: WebGL2RenderingContext;
 	generationKey: string;
 	family: TexturePageFamily;
 	page: AtlasTexturePage;
-	entriesByKey: ReadonlyMap<
-		string,
-		RgbaTexturePageDetailAtlasEntry
-	>;
-	textureFilteringMode: TextureFilteringMode;
-	maxAnisotropy: number;
-}): Webgl2DetailTextureAtlasTextureResource {
+	entriesByKey: ReadonlyMap<string, RgbaTexturePageDetailAtlasEntry>;
+}): TextureAtlasCpuTexture {
 	const pixels = new Uint8Array(page.width * page.height * 4);
 	for (const placement of page.placements) {
 		const entry = entriesByKey.get(placement.atlasEntryKey);
@@ -268,15 +313,39 @@ function createWebgl2DetailTextureAtlasTexture({
 		});
 	}
 	const key = `${generationKey}/${family}/detail-texture/${page.textureIndex}`;
+	return {
+		key,
+		family,
+		textureIndex: page.textureIndex,
+		width: page.width,
+		height: page.height,
+		placementCount: page.placements.length,
+		pixels,
+	};
+}
+
+function createWebgl2TextureAtlasTexture({
+	gl,
+	cpuTexture,
+	textureFilteringMode,
+	maxAnisotropy,
+}: {
+	gl: WebGL2RenderingContext;
+	cpuTexture: TextureAtlasCpuTexture;
+	textureFilteringMode: TextureFilteringMode;
+	maxAnisotropy: number;
+}):
+	| Webgl2TextureAtlasTextureResource
+	| Webgl2DetailTextureAtlasTextureResource {
 	const texture = createWebgl2Texture2D(gl, {
-		label: key,
+		label: cpuTexture.key,
 		upload: {
-			width: page.width,
-			height: page.height,
+			width: cpuTexture.width,
+			height: cpuTexture.height,
 			internalFormat: gl.RGBA8,
 			format: gl.RGBA,
 			type: gl.UNSIGNED_BYTE,
-			data: pixels,
+			data: cpuTexture.pixels,
 			generateMipmaps: textureFilteringMode !== "nearest",
 		},
 		sampler: createWebgl2TextureAtlasSampler({
@@ -286,13 +355,13 @@ function createWebgl2DetailTextureAtlasTexture({
 		}),
 	});
 	return {
-		key,
-		family,
-		textureIndex: page.textureIndex,
+		key: cpuTexture.key,
+		family: cpuTexture.family,
+		textureIndex: cpuTexture.textureIndex,
 		texture,
-		width: page.width,
-		height: page.height,
-		placementCount: page.placements.length,
+		width: cpuTexture.width,
+		height: cpuTexture.height,
+		placementCount: cpuTexture.placementCount,
 	};
 }
 

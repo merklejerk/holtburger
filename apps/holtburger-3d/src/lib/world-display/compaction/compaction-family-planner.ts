@@ -10,6 +10,8 @@ import {
 	createTexturePageAtlasPlacementsByEntryKey,
 	createTexturePageDetailAtlasPlacementsByEntryKey,
 	planTexturePageAtlas,
+	type TexturePageAtlasDetailCandidate,
+	type TexturePageAtlasRgbaCandidate,
 	type TexturePageAtlasPlan,
 } from "../texture-pages/texture-page-atlas-planner";
 import type { Webgl2SceneDomain } from "../webgl2-scene-domain-targets";
@@ -334,6 +336,8 @@ export function createEmptyCompactionFamilyPlan(): CompactionFamilyPlan {
 export function planCompactionFamilies(options: {
 	drawUnits: readonly CompactionFamilyCandidate[];
 	policy: CompactionFamilyPlanningPolicy;
+	extraRgbaAtlasCandidates?: readonly TexturePageAtlasRgbaCandidate[];
+	extraDetailAtlasCandidates?: readonly TexturePageAtlasDetailCandidate[];
 }): CompactionFamilyPlan {
 	const rgbaAtlasCandidates = collectRgbaTexturePageAtlasCandidates(
 		options.drawUnits,
@@ -368,15 +372,21 @@ export function planCompactionFamilies(options: {
 	const uniqueIndexedCandidates =
 		dedupeIndexedPalettedCandidates(indexedCandidates);
 	const texturePageAtlasPlan = planTexturePageAtlas({
-		rgbaCandidates: uniqueRgbaAtlasCandidates.map((candidate) => ({
-			drawUnitId: candidate.drawUnit.id,
-			texturePageReadiness: candidate.eligibility,
-			detailAtlasEntry: candidate.drawUnit.detailAtlasEntry,
-		})),
-		detailCandidates: uniqueIndexedCandidates.map((candidate) => ({
-			drawUnitId: candidate.id,
-			detailAtlasEntry: candidate.detailAtlasEntry,
-		})),
+		rgbaCandidates: [
+			...uniqueRgbaAtlasCandidates.map((candidate) => ({
+				drawUnitId: candidate.drawUnit.id,
+				texturePageReadiness: candidate.eligibility,
+				detailAtlasEntry: candidate.drawUnit.detailAtlasEntry,
+			})),
+			...(options.extraRgbaAtlasCandidates ?? []),
+		],
+		detailCandidates: [
+			...uniqueIndexedCandidates.map((candidate) => ({
+				drawUnitId: candidate.id,
+				detailAtlasEntry: candidate.detailAtlasEntry,
+			})),
+			...(options.extraDetailAtlasCandidates ?? []),
+		],
 		policy: options.policy,
 	});
 	const rgbaAtlasReadyDrawUnitIds = new Set(

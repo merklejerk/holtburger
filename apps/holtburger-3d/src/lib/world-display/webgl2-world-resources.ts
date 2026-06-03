@@ -82,6 +82,8 @@ import {
 } from "./compaction/compaction-family-planner";
 import {
 	createEmptyTexturePageAtlasPlan,
+	createTexturePageAtlasPlacementsByEntryKey,
+	type TexturePageAtlasRgbaCandidate,
 	type TexturePageAtlasPlan,
 } from "./texture-pages/texture-page-atlas-planner";
 import {
@@ -122,6 +124,7 @@ import {
 	terrainTileResourceId,
 	type Webgl2TerrainBlendResources,
 	type Webgl2TerrainTextureBinding,
+	type Webgl2TerrainTileTexturePageBinding,
 	type Webgl2TerrainTileCompatibilityDrawResource,
 	type Webgl2TerrainTileRenderCandidate,
 	type Webgl2TerrainTileResource,
@@ -569,11 +572,22 @@ export function syncWebgl2WorldResources({
 	).size;
 	store.compactionFamilyPlan = profileBrowserJsScope(
 		"webgl2.resource.planCompactionFamilies",
-		() =>
-			planCompactionFamilies({
+		() => {
+			const terrainPageCandidates =
+				collectTerrainTexturePageAtlasCandidates({
+					assetState,
+					terrainTiles: store.terrainTiles,
+				});
+			applyTerrainTexturePageBlockers({
+				terrainTiles: store.terrainTiles,
+				blockersByTerrainTileId: terrainPageCandidates.blockersByTerrainTileId,
+			});
+			return planCompactionFamilies({
 				drawUnits: store.drawUnits.map(toCompactionFamilyCandidate),
 				policy: DEFAULT_WEBGL2_COMPACTION_FAMILY_PLANNING_POLICY,
-			}),
+				extraRgbaAtlasCandidates: terrainPageCandidates.rgbaCandidates,
+			});
+		},
 	);
 	store.texturePageAtlasPlan = store.compactionFamilyPlan.texturePageAtlasPlan;
 	store.atlasCompatibleDrawUnitCount = texturePageReadyDrawUnits.length;
@@ -634,6 +648,7 @@ export function syncWebgl2WorldResources({
 		plan: store.texturePageAtlasPlan,
 		rendererResourceGraph,
 	});
+	resolveWebgl2TerrainTileTexturePageBindings(store);
 	resolveWebgl2DrawUnitTexturePageBindings(store);
 	for (const [textureKey, texture] of store.texturesByKey) {
 		if (!retainedTextureKeys.has(textureKey)) {
@@ -868,6 +883,8 @@ function createOrReuseWebgl2TerrainTile({
 		previous.bvhItemKeys = [...bvhBinding.itemKeys];
 		previous.bvhFallbackReason = bvhBinding.fallbackReason;
 		previous.compatibilityDraws = compatibilityDraws;
+		previous.texturePageBindings = [];
+		previous.texturePageBlockers = [];
 		retainedTerrainTileIds.add(id);
 		return previous;
 	}
@@ -894,6 +911,8 @@ function createOrReuseWebgl2TerrainTile({
 		bvhItemKeys: [...bvhBinding.itemKeys],
 		bvhFallbackReason: bvhBinding.fallbackReason,
 		compatibilityDraws,
+		texturePageBindings: [],
+		texturePageBlockers: [],
 	} satisfies Webgl2TerrainTileResource;
 	store.terrainTilesById.set(id, resource);
 	retainedTerrainTileIds.add(id);
@@ -1081,6 +1100,236 @@ function describeTerrainTileReadinessSignature(
 	return readiness.status === "ready"
 		? `${readiness.status}:${readiness.terrainMaterialAssetId}`
 		: `${readiness.status}:${readiness.reason}`;
+}
+
+function collectTerrainTexturePageAtlasCandidates({
+	assetState,
+	terrainTiles,
+}: {
+	assetState: AssetChannelState;
+	terrainTiles: readonly Webgl2TerrainTileResource[];
+}): {
+	rgbaCandidates: TexturePageAtlasRgbaCandidate[];
+	blockersByTerrainTileId: ReadonlyMap<string, readonly string[]>;
+} {
+	const rgbaCandidates: TexturePageAtlasRgbaCandidate[] = [];
+	const blockersByTerrainTileId = new Map<string, string[]>();
+	for (const tile of terrainTiles) {
+		const refs = collectTerrainTileTextureRefs(tile);
+		if (refs.length === 0) {
+			addTerrainTilePageBlocker(
+				blockersByTerrainTileId,
+				tile.id,
+				"terrain tile has no terrain blend page inputs",
+			);
+		}
+		for (const ref of refs) {
+			const readiness = createTerrainTexturePageReadiness({
+				assetState,
+				ref,
+				tile,
+				blockersByTerrainTileId,
+			});
+			if (!readiness) {
+				continue;
+			}
+			rgbaCandidates.push({
+				drawUnitId: tile.id,
+				family: ref.role === "mask" ? "terrain-mask" : "terrain-color",
+				texturePageReadiness: readiness,
+				detailAtlasEntry: null,
+			});
+		}
+		addTerrainTilePageBlocker(
+			blockersByTerrainTileId,
+			tile.id,
+			"terrain detail page binding is not available before terrain layer planning",
+		);
+	}
+	return { rgbaCandidates, blockersByTerrainTileId };
+}
+
+function collectTerrainTileTextureRefs(
+	tile: Webgl2TerrainTileResource,
+): TerrainBlendTextureRef[] {
+	const refs: TerrainBlendTextureRef[] = [];
+	for (const draw of tile.compatibilityDraws) {
+		const plan = draw.blend?.plan ?? null;
+		if (!plan) {
+			continue;
+		}
+		refs.push(
+			plan.base,
+			...plan.overlays.flatMap((overlay) => [
+				overlay.terrain,
+				overlay.alpha,
+			]),
+			...plan.roads.flatMap((road) => [road.road, road.alpha]),
+		);
+	}
+	const refsByKey = new Map(
+		refs.map((ref) => [describeTerrainTexturePageRefKey(ref), ref] as const),
+	);
+	return [...refsByKey.values()].sort((left, right) =>
+		describeTerrainTexturePageRefKey(left).localeCompare(
+			describeTerrainTexturePageRefKey(right),
+		),
+	);
+}
+
+function createTerrainTexturePageReadiness({
+	assetState,
+	ref,
+	tile,
+	blockersByTerrainTileId,
+}: {
+	assetState: AssetChannelState;
+	ref: TerrainBlendTextureRef;
+	tile: Webgl2TerrainTileResource;
+	blockersByTerrainTileId: Map<string, string[]>;
+}): StagedWorldMaterialTexturePageReadiness | null {
+	const preparedTexture = resolvePreparedTextureForRenderSurface(
+		assetState,
+		ref.renderSurface,
+		"raw",
+	);
+	const level = preparedTexture?.levels[0] ?? null;
+	if (!preparedTexture || !level) {
+		addTerrainTilePageBlocker(
+			blockersByTerrainTileId,
+			tile.id,
+			`missing terrain ${ref.role} page texture ${formatHex32(ref.renderSurface.renderSurfaceId)}`,
+		);
+		return null;
+	}
+	const atlasEntryKey = describeTerrainTexturePageAtlasEntryKey(ref);
+	const samplingKey = [
+		"terrain",
+		ref.role,
+		`wrap=${ref.wrap}`,
+		`tiling=${ref.tiling}`,
+	].join("|");
+	const renderStateKey = `terrain-${ref.role}`;
+	return {
+		materialSlotKey: `${tile.id}/${atlasEntryKey}`,
+		atlasEntryKey,
+		renderStateKey,
+		samplingKey,
+		samplingPolicy: {
+			wrapS: ref.wrap,
+			wrapT: ref.wrap,
+		},
+		atlasEntry: {
+			renderSurfaceId: ref.renderSurface.renderSurfaceId,
+			preparedTextureAssetId: describePreparedTextureAssetId(preparedTexture),
+			level,
+			sourceHash: preparedTexture.sourceHash,
+			sourceFormatRaw: preparedTexture.sourceFormatRaw,
+		},
+	};
+}
+
+function describePreparedTextureAssetId(
+	preparedTexture: PreparedTexturePayload,
+): string {
+	return `prepared-texture/${formatHex32(preparedTexture.renderSurfaceId)}?usage=${preparedTexture.usage}&out=${preparedTexture.outputFormat}&mips=${preparedTexture.mipPolicy}&cs=${preparedTexture.colorSpace}`;
+}
+
+function describeTerrainTexturePageAtlasEntryKey(
+	ref: TerrainBlendTextureRef,
+): string {
+	return [
+		"terrain-page",
+		ref.role,
+		formatHex32(ref.renderSurface.renderSurfaceId),
+		ref.renderSurface.formatRaw,
+		ref.renderSurface.width,
+		ref.renderSurface.height,
+	].join("/");
+}
+
+function describeTerrainTexturePageRefKey(ref: TerrainBlendTextureRef): string {
+	return [
+		ref.role,
+		ref.textureAssetId,
+		formatHex32(ref.renderSurface.renderSurfaceId),
+		ref.wrap,
+		ref.tiling,
+	].join("|");
+}
+
+function addTerrainTilePageBlocker(
+	blockersByTerrainTileId: Map<string, string[]>,
+	terrainTileId: string,
+	blocker: string,
+): void {
+	const blockers = blockersByTerrainTileId.get(terrainTileId) ?? [];
+	if (!blockers.includes(blocker)) {
+		blockers.push(blocker);
+	}
+	blockersByTerrainTileId.set(terrainTileId, blockers);
+}
+
+function applyTerrainTexturePageBlockers({
+	terrainTiles,
+	blockersByTerrainTileId,
+}: {
+	terrainTiles: readonly Webgl2TerrainTileResource[];
+	blockersByTerrainTileId: ReadonlyMap<string, readonly string[]>;
+}): void {
+	for (const tile of terrainTiles) {
+		tile.texturePageBlockers = [
+			...(blockersByTerrainTileId.get(tile.id) ?? []),
+		];
+		tile.texturePageBindings = [];
+	}
+}
+
+function resolveWebgl2TerrainTileTexturePageBindings(
+	store: Webgl2WorldResourceStore,
+): void {
+	const placementsByEntryKey = createTexturePageAtlasPlacementsByEntryKey(
+		store.texturePageAtlasPlan,
+	);
+	for (const tile of store.terrainTiles) {
+		const bindings: Webgl2TerrainTileTexturePageBinding[] = [];
+		const blockers = [...tile.texturePageBlockers];
+		const refs = collectTerrainTileTextureRefs(tile);
+		for (const ref of refs) {
+			const atlasEntryKey = describeTerrainTexturePageAtlasEntryKey(ref);
+			const placement = placementsByEntryKey.get(atlasEntryKey) ?? null;
+			if (!placement) {
+				blockers.push(
+					`missing terrain ${ref.role} page placement ${atlasEntryKey}`,
+				);
+				continue;
+			}
+			bindings.push({
+				family: ref.role === "mask" ? "terrain-mask" : "terrain-color",
+				atlasEntryKey,
+				textureIndex: placement.textureIndex,
+				rect: [placement.x, placement.y, placement.width, placement.height],
+			});
+		}
+		tile.texturePageBindings = dedupeTerrainTexturePageBindings(bindings);
+		tile.texturePageBlockers = [...new Set(blockers)];
+	}
+}
+
+function dedupeTerrainTexturePageBindings(
+	bindings: readonly Webgl2TerrainTileTexturePageBinding[],
+): Webgl2TerrainTileTexturePageBinding[] {
+	const bindingByKey = new Map(
+		bindings.map((binding) => [
+			`${binding.family}/${binding.atlasEntryKey}`,
+			binding,
+		] as const),
+	);
+	return [...bindingByKey.values()].sort((left, right) =>
+		`${left.family}/${left.atlasEntryKey}`.localeCompare(
+			`${right.family}/${right.atlasEntryKey}`,
+		),
+	);
 }
 
 function createOrReuseWebgl2DrawUnit({

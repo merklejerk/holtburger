@@ -120,6 +120,11 @@ describe("webgl2 world resources", () => {
 		expect(store.terrainTiles[0]?.bvhItemKeys).toEqual([
 			"terrain:landblock:12340000:quad:0",
 		]);
+		expect(store.terrainTiles[0]?.texturePageBindings).toEqual([]);
+		expect(store.terrainTiles[0]?.texturePageBlockers).toEqual([
+			"terrain tile has no terrain blend page inputs",
+			"terrain detail page binding is not available before terrain layer planning",
+		]);
 		expect(store.terrainRenderCandidates).toEqual([
 			{
 				id: "terrain-tile/terrain/12340000",

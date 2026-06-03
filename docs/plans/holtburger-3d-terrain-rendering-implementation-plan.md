@@ -1,6 +1,6 @@
 # Holtburger 3D Terrain Rendering Implementation Plan
 
-Status: Phase T5A complete; immediate Phase T5B is next before Phase T6.
+Status: Phase T5B complete; Phase T6 is next.
 
 Dry-run status: reviewed against the current `apps/holtburger-3d/src/lib/world-display` module graph.
 The phase order below reflects that dry run.
@@ -919,6 +919,64 @@ Acceptance criteria:
 - Terrain tile resources can resolve color, mask, and detail page bindings or explicit blockers.
 - Terrain page candidates use the shared family-aware planner, not a separate terrain-only planner.
 - No shader behavior changes yet.
+
+Progress update, 2026-06-02:
+
+- Added optional extra RGBA/detail atlas candidates to `planCompactionFamilies`, so terrain page
+  candidates can enter the same shared family-aware `TexturePageAtlasPlan` as static candidates.
+- Added terrain tile resource page state:
+  - `texturePageBindings`;
+  - `texturePageBlockers`.
+- Added terrain color page candidates from terrain base, overlay, and road color refs carried by
+  terrain compatibility plans.
+- Added terrain mask page candidates from terrain alpha and road alpha mask refs carried by terrain
+  compatibility plans.
+- Merged terrain candidates into the shared atlas plan using `terrain-color` and `terrain-mask`
+  families. This uses the T5A family partition; no separate terrain-only atlas planner was added.
+- Added terrain tile page binding resolution from atlas placements after atlas generation. The
+  bindings currently record family, atlas entry key, texture index, and atlas rect.
+- Added explicit terrain page blockers when:
+  - a terrain tile has no terrain blend page inputs;
+  - a terrain color/mask prepared texture is missing;
+  - a terrain page placement is missing;
+  - terrain detail page binding is not available before terrain layer planning.
+- Added resource-store coverage proving fallback terrain resources expose explicit page blockers.
+
+Decisions:
+
+- Terrain detail is intentionally recorded as an explicit blocker in T5B. The current terrain
+  compatibility resources do not yet expose a tile-level terrain detail ref, and silently omitting it
+  would hide missing shader input work from T6/T7.
+- Terrain mask candidates use the shared RGBA atlas-generation path for this handoff phase while
+  retaining `terrain-mask` family identity. Final mask/data upload semantics should be handled in the
+  terrain-family resource/shader phases before the shader consumes these bindings.
+- Terrain page binding resolution stores page refs on `Webgl2TerrainTileResource`; shader behavior is
+  unchanged and still uses compatibility direct textures.
+
+Course corrections and refinements:
+
+- T6 should consume `texturePageBindings` and `texturePageBlockers` from terrain tile resources when
+  building the tile layer table.
+- T6/T7 must decide whether `terrain-mask` uses the current RGBA atlas generation path, a data
+  texture page path, or a terrain-specific page upload shape. That decision is now explicit instead
+  of hidden behind direct texture compatibility.
+- The old direct terrain blend texture bindings remain compatibility data only. They should not be
+  used as the source of final terrain shader binding once page/layer resources are available.
+
+Validation:
+
+- `npm run test:ts -- webgl2-world-resources texture-page-atlas-planner compaction-family-planner`
+- `npm run test:ts -- webgl2-world-resources texture-page-atlas-planner compaction-family-planner texture-page-binding webgl2-texture-atlas-generation`
+- `npm run check`
+- `npm run lint`
+
+Cleanup impact:
+
+- Terrain page bindings currently duplicate information derivable from compatibility plans. Delete or
+  rename this bridge data after T6/T7 introduce the final terrain tile plan/page resource shape.
+- `planCompactionFamilies` now accepts extra atlas candidates. Keep this shared extension; remove it
+  only if a later renderer-resource planner replaces compaction-family planning as the owner of
+  global texture-page atlas planning.
 
 ## Phase T6: Terrain Layer Table And Geometry Attributes
 

@@ -144,6 +144,9 @@ export interface Webgl2WorldSubmitMetrics {
 	indexedPalettedFamilyReplacedDrawUnitCount: number;
 	indexedPalettedFamilyReplacedDrawUnitTriangleCount: number;
 	indexedPalettedFamilyRetainedDirectDrawUnitCount: number;
+	indexedPalettedFamilyOriginalDrawCallEstimateCount: number;
+	indexedPalettedFamilySubmittedDrawCallEstimateCount: number;
+	indexedPalettedFamilyDrawCallSavingsCount: number;
 	indexedPalettedFamilyNoVisibleRouteCount: number;
 	directTexturePageDrawCount: number;
 	directSingleEntryTexturePageDrawCount: number;
@@ -206,6 +209,9 @@ const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	indexedPalettedFamilyReplacedDrawUnitCount: 0,
 	indexedPalettedFamilyReplacedDrawUnitTriangleCount: 0,
 	indexedPalettedFamilyRetainedDirectDrawUnitCount: 0,
+	indexedPalettedFamilyOriginalDrawCallEstimateCount: 0,
+	indexedPalettedFamilySubmittedDrawCallEstimateCount: 0,
+	indexedPalettedFamilyDrawCallSavingsCount: 0,
 	indexedPalettedFamilyNoVisibleRouteCount: 0,
 	directTexturePageDrawCount: 0,
 	directSingleEntryTexturePageDrawCount: 0,
@@ -965,6 +971,7 @@ function submitIndexedPalettedFamilyDrawUnits({
 			retainedDrawUnitCount;
 		metrics.indexedPalettedFamilyNoVisibleRouteCount =
 			planningNoVisibleRouteCount + emptyMetrics.noVisibleRouteCount;
+		applyIndexedPalettedFamilyDrawCallArithmetic(metrics);
 		return;
 	}
 	if (!p8Program || !p16Program) {
@@ -1023,6 +1030,7 @@ function submitIndexedPalettedFamilyDrawUnits({
 		planningNoVisibleRouteCount +
 		p8Metrics.noVisibleRouteCount +
 		p16Metrics.noVisibleRouteCount;
+	applyIndexedPalettedFamilyDrawCallArithmetic(metrics);
 }
 
 function filterIndexedPalettedFamilyResourcesByFormat(
@@ -1176,6 +1184,20 @@ function applyRgbaTexturePageFamilyDrawCallArithmetic(
 	metrics.rgbaTexturePageFamilyDrawCallSavingsCount =
 		metrics.rgbaTexturePageFamilyOriginalDrawCallEstimateCount -
 		metrics.rgbaTexturePageFamilySubmittedDrawCallEstimateCount;
+}
+
+function applyIndexedPalettedFamilyDrawCallArithmetic(
+	metrics: Webgl2WorldSubmitMetrics,
+): void {
+	metrics.indexedPalettedFamilyOriginalDrawCallEstimateCount =
+		metrics.indexedPalettedFamilyRetainedDirectDrawUnitCount +
+		metrics.indexedPalettedFamilyReplacedDrawUnitCount;
+	metrics.indexedPalettedFamilySubmittedDrawCallEstimateCount =
+		metrics.indexedPalettedFamilyRetainedDirectDrawUnitCount +
+		metrics.indexedPalettedFamilyShaderDrawCallCount;
+	metrics.indexedPalettedFamilyDrawCallSavingsCount =
+		metrics.indexedPalettedFamilyOriginalDrawCallEstimateCount -
+		metrics.indexedPalettedFamilySubmittedDrawCallEstimateCount;
 }
 
 function applyRgbaTexturePageFamilyConservativeOverdraw(

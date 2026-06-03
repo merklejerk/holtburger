@@ -218,6 +218,9 @@ interface WorldRenderDebugMetrics {
 	indexedPalettedFamilyReplacedDrawUnitCount: number;
 	indexedPalettedFamilyReplacedDrawUnitTriangleCount: number;
 	indexedPalettedFamilyRetainedDirectDrawUnitCount: number;
+	indexedPalettedFamilyOriginalDrawCallEstimateCount: number;
+	indexedPalettedFamilySubmittedDrawCallEstimateCount: number;
+	indexedPalettedFamilyDrawCallSavingsCount: number;
 	indexedPalettedFamilyNoVisibleRouteCount: number;
 	retainedDirectOpaqueDrawUnitCount: number;
 	retainedDirectBlendedDrawUnitCount: number;

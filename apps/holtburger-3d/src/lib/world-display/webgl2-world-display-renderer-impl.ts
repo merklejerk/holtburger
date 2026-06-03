@@ -2532,6 +2532,15 @@ function mergeSceneDomainSubmitMetrics({
 		indexedPalettedFamilyRetainedDirectDrawUnitCount:
 			exteriorMetrics.indexedPalettedFamilyRetainedDirectDrawUnitCount +
 			interiorMetrics.indexedPalettedFamilyRetainedDirectDrawUnitCount,
+		indexedPalettedFamilyOriginalDrawCallEstimateCount:
+			exteriorMetrics.indexedPalettedFamilyOriginalDrawCallEstimateCount +
+			interiorMetrics.indexedPalettedFamilyOriginalDrawCallEstimateCount,
+		indexedPalettedFamilySubmittedDrawCallEstimateCount:
+			exteriorMetrics.indexedPalettedFamilySubmittedDrawCallEstimateCount +
+			interiorMetrics.indexedPalettedFamilySubmittedDrawCallEstimateCount,
+		indexedPalettedFamilyDrawCallSavingsCount:
+			exteriorMetrics.indexedPalettedFamilyDrawCallSavingsCount +
+			interiorMetrics.indexedPalettedFamilyDrawCallSavingsCount,
 		indexedPalettedFamilyNoVisibleRouteCount:
 			exteriorMetrics.indexedPalettedFamilyNoVisibleRouteCount +
 			interiorMetrics.indexedPalettedFamilyNoVisibleRouteCount,

@@ -377,6 +377,14 @@ export function createWebgl2RenderMetrics(
 				input.submitMetrics.indexedPalettedFamilyReplacedDrawUnitTriangleCount,
 			indexedPalettedFamilyRetainedDirectDrawUnitCount:
 				input.submitMetrics.indexedPalettedFamilyRetainedDirectDrawUnitCount,
+			indexedPalettedFamilyOriginalDrawCallEstimateCount:
+				input.submitMetrics
+					.indexedPalettedFamilyOriginalDrawCallEstimateCount,
+			indexedPalettedFamilySubmittedDrawCallEstimateCount:
+				input.submitMetrics
+					.indexedPalettedFamilySubmittedDrawCallEstimateCount,
+			indexedPalettedFamilyDrawCallSavingsCount:
+				input.submitMetrics.indexedPalettedFamilyDrawCallSavingsCount,
 			indexedPalettedFamilyNoVisibleRouteCount:
 				input.submitMetrics.indexedPalettedFamilyNoVisibleRouteCount,
 			retainedDirectOpaqueDrawUnitCount:
@@ -500,6 +508,12 @@ export function createWebgl2RenderMetrics(
 							input.submitMetrics.rgbaTexturePageFamilyReplacedDrawUnitCount,
 						"webgl2-rgba-family-replaced-triangles":
 							input.submitMetrics.rgbaTexturePageFamilyReplacedDrawUnitTriangleCount,
+						"webgl2-rgba-family-original-draw-call-estimate":
+							input.submitMetrics
+								.rgbaTexturePageFamilyOriginalDrawCallEstimateCount,
+						"webgl2-rgba-family-submitted-draw-call-estimate":
+							input.submitMetrics
+								.rgbaTexturePageFamilySubmittedDrawCallEstimateCount,
 						"webgl2-rgba-family-conservative-overdraw-triangles":
 							input.submitMetrics.rgbaTexturePageFamilyConservativeOverdrawTriangleCount,
 						"webgl2-rgba-family-draw-call-savings":
@@ -522,6 +536,14 @@ export function createWebgl2RenderMetrics(
 						"webgl2-indexed-family-replaced-triangles":
 							input.submitMetrics
 								.indexedPalettedFamilyReplacedDrawUnitTriangleCount,
+						"webgl2-indexed-family-original-draw-call-estimate":
+							input.submitMetrics
+								.indexedPalettedFamilyOriginalDrawCallEstimateCount,
+						"webgl2-indexed-family-submitted-draw-call-estimate":
+							input.submitMetrics
+								.indexedPalettedFamilySubmittedDrawCallEstimateCount,
+						"webgl2-indexed-family-draw-call-savings":
+							input.submitMetrics.indexedPalettedFamilyDrawCallSavingsCount,
 						"webgl2-indexed-family-no-visible-routes":
 							input.submitMetrics.indexedPalettedFamilyNoVisibleRouteCount,
 						"webgl2-retained-direct-opaque-draw-units":

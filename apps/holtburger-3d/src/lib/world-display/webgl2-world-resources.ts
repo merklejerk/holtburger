@@ -172,6 +172,7 @@ export interface Webgl2WorldDrawUnit {
 	compactionEligibility: CompactionEligibility;
 	textureKey: string | null;
 	texture: Webgl2Texture2DResource | null;
+	indexedMaterialDescriptor: Webgl2IndexedMaterialDescriptor | null;
 	indexedMaterial: Webgl2IndexedMaterialResources | null;
 	detailOverlay: Webgl2DetailOverlayResources | null;
 	texturePageBindings: readonly TexturePageBinding[];
@@ -285,19 +286,25 @@ export interface Webgl2DetailOverlayResources {
 	atlasEntry: RgbaTexturePageDetailAtlasEntry | null;
 }
 
-export interface Webgl2IndexedMaterialResources {
+export interface Webgl2IndexedMaterialDescriptor {
 	key: string;
 	indexFormat: ResolvedIndexedMaterialData["texture"]["format"];
 	indexTextureKey: string;
 	paletteTextureKey: string;
-	indexTexture: Webgl2Texture2DResource;
-	paletteTexture: Webgl2Texture2DResource;
 	width: number;
 	height: number;
+	indexSourceBytes: Uint8Array;
 	paletteColorCount: number;
+	paletteRgbaBytes: Uint8Array;
 	wrapS: "clamp" | "repeat";
 	wrapT: "clamp" | "repeat";
 	clipThreshold: number;
+}
+
+export interface Webgl2IndexedMaterialResources
+	extends Webgl2IndexedMaterialDescriptor {
+	indexTexture: Webgl2Texture2DResource;
+	paletteTexture: Webgl2Texture2DResource;
 }
 
 const warnedUnsupportedDetailAtlasTextureKeys = new Set<string>();
@@ -1837,10 +1844,13 @@ function createOrReuseWebgl2DrawUnit({
 					? drawUnit.material.indexedMaterial.renderSurfaceAssetId
 					: null;
 		previous.texture = resolveWebgl2DrawUnitTexture({ gl, store, drawUnit });
+		previous.indexedMaterialDescriptor =
+			resolveWebgl2IndexedMaterialDescriptor(drawUnit);
 		previous.indexedMaterial = resolveWebgl2IndexedMaterialResources({
 			gl,
 			store,
 			drawUnit,
+			descriptor: previous.indexedMaterialDescriptor,
 		});
 		previous.detailOverlay = resolveWebgl2DetailOverlayResources({
 			assetState,
@@ -1925,10 +1935,13 @@ function createOrReuseWebgl2DrawUnit({
 		},
 	});
 	const texture = resolveWebgl2DrawUnitTexture({ gl, store, drawUnit });
+	const indexedMaterialDescriptor =
+		resolveWebgl2IndexedMaterialDescriptor(drawUnit);
 	const indexedMaterial = resolveWebgl2IndexedMaterialResources({
 		gl,
 		store,
 		drawUnit,
+		descriptor: indexedMaterialDescriptor,
 	});
 	const detailOverlay = resolveWebgl2DetailOverlayResources({
 		assetState,
@@ -2002,6 +2015,7 @@ function createOrReuseWebgl2DrawUnit({
 					? drawUnit.material.indexedMaterial.renderSurfaceAssetId
 					: null,
 		texture,
+		indexedMaterialDescriptor,
 		indexedMaterial,
 		detailOverlay,
 		texturePageBindings,
@@ -2103,9 +2117,9 @@ function describeCompactionVisibilityPartition(
 function createIndexedPalettedFamilyMaterialTableRecord(
 	drawUnit: Webgl2WorldDrawUnit,
 ): IndexedPalettedFamilyMaterialTableRecord | null {
-	const indexedMaterial = drawUnit.indexedMaterial;
+	const descriptor = drawUnit.indexedMaterialDescriptor;
 	if (
-		!indexedMaterial ||
+		!descriptor ||
 		drawUnit.compactionEligibility.material.alphaPolicy !== "opaque"
 	) {
 		return null;
@@ -2114,23 +2128,23 @@ function createIndexedPalettedFamilyMaterialTableRecord(
 		key: [
 			"compacted-indexed-material",
 			drawUnit.materialKey,
-			indexedMaterial.indexTextureKey,
-			indexedMaterial.paletteTextureKey,
-			indexedMaterial.indexFormat,
-			`clip=${indexedMaterial.clipThreshold}`,
-			`wrap=${indexedMaterial.wrapS}/${indexedMaterial.wrapT}`,
+			descriptor.indexTextureKey,
+			descriptor.paletteTextureKey,
+			descriptor.indexFormat,
+			`clip=${descriptor.clipThreshold}`,
+			`wrap=${descriptor.wrapS}/${descriptor.wrapT}`,
 			`detail=${drawUnit.detailOverlay?.atlasEntry?.key ?? "none"}`,
 		].join("|"),
 		sourceMaterialKey: drawUnit.materialKey,
-		indexPageKey: indexedMaterial.indexTextureKey,
-		palettePageKey: indexedMaterial.paletteTextureKey,
-		indexFormat: indexedMaterial.indexFormat,
-		indexPageWidth: indexedMaterial.width,
-		indexPageHeight: indexedMaterial.height,
-		paletteColorCount: indexedMaterial.paletteColorCount,
-		clipThreshold: indexedMaterial.clipThreshold,
-		wrapS: indexedMaterial.wrapS,
-		wrapT: indexedMaterial.wrapT,
+		indexPageKey: descriptor.indexTextureKey,
+		palettePageKey: descriptor.paletteTextureKey,
+		indexFormat: descriptor.indexFormat,
+		indexPageWidth: descriptor.width,
+		indexPageHeight: descriptor.height,
+		paletteColorCount: descriptor.paletteColorCount,
+		clipThreshold: descriptor.clipThreshold,
+		wrapS: descriptor.wrapS,
+		wrapT: descriptor.wrapT,
 		color: drawUnit.color,
 		detailAtlasEntryKey: drawUnit.detailOverlay?.atlasEntry?.key ?? null,
 		detailTiling: drawUnit.detailOverlay?.tiling ?? 1,
@@ -2196,35 +2210,62 @@ function resolveWebgl2DrawUnitTextureUploadSample(
 	].join(" ");
 }
 
-function resolveWebgl2IndexedMaterialResources({
-	gl,
-	store,
-	drawUnit,
-}: {
-	gl: WebGL2RenderingContext;
-	store: Webgl2WorldResourceStore;
-	drawUnit: StagedWorldDrawUnitAssembly;
-}): Webgl2IndexedMaterialResources | null {
+function resolveWebgl2IndexedMaterialDescriptor(
+	drawUnit: StagedWorldDrawUnitAssembly,
+): Webgl2IndexedMaterialDescriptor | null {
 	if (drawUnit.material.kind !== "indexed-paletted" || !drawUnit.geometry.uvs) {
 		return null;
 	}
 	const indexedMaterial = drawUnit.material.indexedMaterial;
 	const indexTextureKey = describeIndexedTextureKey(indexedMaterial);
 	const paletteTextureKey = describeIndexedPaletteTextureKey(indexedMaterial);
+	return {
+		key: drawUnit.material.key,
+		indexFormat: indexedMaterial.texture.format,
+		indexTextureKey,
+		paletteTextureKey,
+		width: indexedMaterial.texture.width,
+		height: indexedMaterial.texture.height,
+		indexSourceBytes: indexedMaterial.texture.sourceBytes,
+		paletteColorCount: indexedMaterial.palette.colorCount,
+		paletteRgbaBytes: indexedMaterial.palette.colorsRgba,
+		wrapS: indexedMaterial.samplingPolicy.wrapS,
+		wrapT: indexedMaterial.samplingPolicy.wrapT,
+		clipThreshold: isBase1ClipMapSurface(indexedMaterial.recipe.surfaceType)
+			? 8
+			: -1,
+	};
+}
+
+function resolveWebgl2IndexedMaterialResources({
+	gl,
+	store,
+	drawUnit,
+	descriptor,
+}: {
+	gl: WebGL2RenderingContext;
+	store: Webgl2WorldResourceStore;
+	drawUnit: StagedWorldDrawUnitAssembly;
+	descriptor: Webgl2IndexedMaterialDescriptor | null;
+}): Webgl2IndexedMaterialResources | null {
+	if (!descriptor || drawUnit.material.kind !== "indexed-paletted") {
+		return null;
+	}
+	const indexedMaterial = drawUnit.material.indexedMaterial;
 	const indexTexture =
-		store.texturesByKey.get(indexTextureKey) ??
+		store.texturesByKey.get(descriptor.indexTextureKey) ??
 		createAndStoreWebgl2Texture2D({
 			gl,
 			store,
-			key: indexTextureKey,
+			key: descriptor.indexTextureKey,
 			upload: toWebgl2IndexedTextureUpload(gl, indexedMaterial.texture),
 			sampler: {
 				wrapS:
-					indexedMaterial.samplingPolicy.wrapS === "repeat"
+					descriptor.wrapS === "repeat"
 						? gl.REPEAT
 						: gl.CLAMP_TO_EDGE,
 				wrapT:
-					indexedMaterial.samplingPolicy.wrapT === "repeat"
+					descriptor.wrapT === "repeat"
 						? gl.REPEAT
 						: gl.CLAMP_TO_EDGE,
 				minFilter: gl.NEAREST,
@@ -2232,18 +2273,18 @@ function resolveWebgl2IndexedMaterialResources({
 			},
 		});
 	const paletteTexture =
-		store.texturesByKey.get(paletteTextureKey) ??
+		store.texturesByKey.get(descriptor.paletteTextureKey) ??
 		createAndStoreWebgl2Texture2D({
 			gl,
 			store,
-			key: paletteTextureKey,
+			key: descriptor.paletteTextureKey,
 			upload: {
-				width: indexedMaterial.palette.colorCount,
+				width: descriptor.paletteColorCount,
 				height: 1,
 				internalFormat: gl.RGBA8,
 				format: gl.RGBA,
 				type: gl.UNSIGNED_BYTE,
-				data: indexedMaterial.palette.colorsRgba,
+				data: descriptor.paletteRgbaBytes,
 				generateMipmaps: false,
 			},
 			sampler: {
@@ -2254,20 +2295,9 @@ function resolveWebgl2IndexedMaterialResources({
 			},
 		});
 	return {
-		key: drawUnit.material.key,
-		indexFormat: indexedMaterial.texture.format,
-		indexTextureKey,
-		paletteTextureKey,
+		...descriptor,
 		indexTexture,
 		paletteTexture,
-		width: indexedMaterial.texture.width,
-		height: indexedMaterial.texture.height,
-		paletteColorCount: indexedMaterial.palette.colorCount,
-		wrapS: indexedMaterial.samplingPolicy.wrapS,
-		wrapT: indexedMaterial.samplingPolicy.wrapT,
-		clipThreshold: isBase1ClipMapSurface(indexedMaterial.recipe.surfaceType)
-			? 8
-			: -1,
 	};
 }
 

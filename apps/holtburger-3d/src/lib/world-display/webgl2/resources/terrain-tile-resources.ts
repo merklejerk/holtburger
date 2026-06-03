@@ -9,6 +9,7 @@ import type { RenderBvhItemKey } from "../../prepared-bvh-visibility";
 import type { StagedWorldIndexedGeometry } from "../../staged-world-geometry";
 import type { TexturePageFamily } from "../../texture-pages/texture-page-atlas-planner";
 import type { TerrainSceneTile } from "../../terrain-scene";
+import type { PreparedTerrainMesh } from "../../../assets/types";
 import type { Webgl2SceneDomain } from "../../webgl2-scene-domain-targets";
 import type {
 	Webgl2BufferResource,
@@ -84,6 +85,7 @@ export interface Webgl2TerrainTileResource {
 	modelMatrix: RenderMat4;
 	readiness: Webgl2TerrainTileReadiness;
 	dataSource: TerrainSceneTile["dataSource"];
+	mesh: PreparedTerrainMesh;
 	bvhItemKeys: RenderBvhItemKey[];
 	bvhFallbackReason: string | null;
 	compatibilityDraws: Webgl2TerrainTileCompatibilityDrawResource[];

@@ -11,7 +11,7 @@ export interface TerrainTileLayerPlan {
 	signature: string;
 }
 
-interface TerrainTileLayerEntry {
+export interface TerrainTileLayerEntry {
 	slot: number;
 	pcode: number;
 	plan: TerrainBlendPlan;

@@ -1,6 +1,6 @@
 # Holtburger 3D Render Resource Worker Plan
 
-Status: implementation plan draft.
+Status: Phase 1 implemented; Phase 2 is the next implementation phase.
 
 Related plans:
 
@@ -154,6 +154,54 @@ shape the phase order.
 These findings add a required preparation phase: separate CPU payload generation from WebGL
 realization and make retained-resource semantics async-aware before moving heavy work to the worker.
 
+## Implementation Progress
+
+### 2026-06-03: Phase 1 Implemented
+
+Implemented the render resource worker foundation:
+
+- added `apps/holtburger-3d/src/workers/render-resource-worker.ts` with typed worker request and
+  response contracts plus a minimal echo job;
+- added `apps/holtburger-3d/src/lib/world-display/render-resource-worker-client.ts` with request id
+  correlation, injectable worker construction, error handling, disposal, and late-response ignoring;
+- added `apps/holtburger-3d/src/lib/world-display/render-resource-job-scheduler.ts` with
+  latest-wins scheduling, in-flight dedupe, pending desired replacement, stale-result discard,
+  explicit commit notification, disposal handling, and metrics state;
+- added focused Vitest coverage in
+  `apps/holtburger-3d/src/lib/world-display/render-resource-worker-client.test.ts`.
+
+Validation completed:
+
+- `npm run test:ts -- render-resource-worker-client`
+- `npm run check`
+- `npm run lint:ts`
+
+Course corrections:
+
+- The scheduler now has `markCommitted(key)` instead of treating a ready worker result as committed.
+  WebGL realization can fail, and resource graph leases should only update after realization
+  succeeds. Future resource sync code should call `markCommitted` only after the corresponding GL
+  resource has been created and installed in the store.
+- The scheduler clears an older pending replacement if the latest desired key returns to the current
+  in-flight key. This handles transient frame-to-frame desired-state changes without submitting a
+  superseded replacement after the in-flight result lands.
+- The worker scope uses a small local TypeScript interface instead of `DedicatedWorkerGlobalScope`.
+  The app tsconfig currently does not expose worker-specific DOM globals, and changing global lib
+  settings is unnecessary for this phase.
+
+Introduced cleanup targets and temporary shims:
+
+- The echo job is a temporary worker bootstrap shim. Remove it once the first real render-resource
+  job contract is implemented, unless a lightweight health-check job is still useful for diagnostics.
+- `RenderResourceWorkerClient.runJob` currently supports only the echo union. Extend the union with
+  concrete compaction and atlas jobs as each worker phase lands; avoid adding broad `unknown` or
+  untyped payload channels.
+- Scheduler metrics are not yet surfaced in a diagnostics panel. Keep them local until a real job
+  family is wired, then expose per-family metrics rather than generic echo-worker metrics.
+
+No immediate interim phase is required before Phase 2. The next blocking work remains the CPU
+payload/WebGL realization split described below.
+
 ## Scheduling Model
 
 Use latest-wins scheduling with revision and key checks.
@@ -190,15 +238,19 @@ The renderer-facing API should stay simple:
 
 ```ts
 interface RenderResourceJobScheduler<TInput, TResult> {
-	scheduleDesired(input: TInput): void;
-	consumeReadyResults(): TResult[];
-	dispose(): void;
+  scheduleDesired(input: TInput): void;
+  consumeReadyResults(): TResult[];
+  markCommitted(key: string): void;
+  dispose(): void;
 }
 ```
 
-The scheduler owns:
+The worker client owns:
 
 - request id correlation;
+
+The scheduler owns:
+
 - `committedKey`, `inFlightKey`, and `pendingDesiredKey`;
 - revision assignment;
 - stale result rejection;
@@ -212,12 +264,15 @@ The WebGL resource sync code owns only:
 - asking the scheduler to submit if needed;
 - consuming ready results;
 - realizing accepted results into WebGL resources.
+- notifying the scheduler when the realized WebGL resources have been committed.
 
 Hard rules:
 
 - `renderFrame()` must not `await` worker work.
 - `syncWebgl2WorldResources()` should not become an async function.
 - Resource realization should happen from ready results already returned to the main thread.
+- `committedKey` must advance only through explicit commit notification after WebGL realization
+  succeeds.
 - Each resource family should use the same scheduler abstraction rather than open-coding its own
   in-flight state.
 - Worker result handlers must never directly mutate WebGL resources; they should enqueue accepted
@@ -368,21 +423,27 @@ Do not write tests for debug logging text. Test the metric state transitions and
 
 ## Phase 1: Worker Client And Latest-Wins Scheduler
 
+Status: complete.
+
 Work:
 
-- Add the render resource worker file with a minimal ping/echo job.
-- Add `RenderResourceWorkerClient` with request id correlation.
-- Add a latest-wins job controller that can be tested without WebGL.
-- Add typed message contracts for job submission, completion, and errors.
-- Add disposal behavior that rejects or ignores late worker responses after renderer disposal.
+- Added the render resource worker file with a minimal echo job.
+- Added `RenderResourceWorkerClient` with request id correlation.
+- Added a latest-wins job controller that can be tested without WebGL.
+- Added typed message contracts for job submission, completion, and errors.
+- Added disposal behavior that rejects or ignores late worker responses after renderer disposal.
 
 Validation:
 
-- Unit tests for dedupe, stale-result rejection, pending desired replacement, and disposal.
-- `npm run check`.
-- `npm run lint:ts`.
+- Added unit tests for dedupe, stale-result rejection, pending desired replacement, explicit commit
+  notification, pending replacement clearing, client request correlation, and disposal.
+- Passed `npm run test:ts -- render-resource-worker-client`.
+- Passed `npm run check`.
+- Passed `npm run lint:ts`.
 
 ## Phase 2: Split CPU Payloads From WebGL Realization
+
+Status: next.
 
 Work:
 

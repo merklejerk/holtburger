@@ -11,8 +11,10 @@ import type {
 	AtlasTexturePlacement,
 } from "../../texture-pages/atlas-layout-planner";
 import type { TexturePageAtlasPlan } from "../../texture-pages/texture-page-atlas-planner";
+import type { TexturePageFamily } from "../../texture-pages/texture-page-atlas-planner";
 
 interface Webgl2TextureAtlasPlacementResource {
+	family: TexturePageFamily;
 	atlasEntryKey: string;
 	textureIndex: number;
 	rect: readonly [number, number, number, number];
@@ -22,6 +24,7 @@ interface Webgl2TextureAtlasPlacementResource {
 
 export interface Webgl2TextureAtlasTextureResource {
 	key: string;
+	family: TexturePageFamily;
 	textureIndex: number;
 	texture: Webgl2Texture2DResource;
 	width: number;
@@ -31,6 +34,7 @@ export interface Webgl2TextureAtlasTextureResource {
 
 export interface Webgl2DetailTextureAtlasTextureResource {
 	key: string;
+	family: TexturePageFamily;
 	textureIndex: number;
 	texture: Webgl2Texture2DResource;
 	width: number;
@@ -65,54 +69,66 @@ export function createWebgl2TextureAtlasGenerationResource({
 	const entriesByKey = new Map(
 		plan.atlasEntryRecords.map((record) => [record.key, record] as const),
 	);
-	const textures = plan.atlasTextures.map((page) =>
-		createWebgl2TextureAtlasTexture({
-			gl,
-			generationKey: plan.key,
-			page,
-			entriesByKey,
-		}),
+	const textures = plan.families.flatMap((familyPlan) =>
+		familyPlan.atlasTextures.map((page) =>
+			createWebgl2TextureAtlasTexture({
+				gl,
+				generationKey: plan.key,
+				family: familyPlan.family,
+				page,
+				entriesByKey,
+			}),
+		),
 	);
-	const placements = plan.atlasTextures.flatMap((page) =>
-		page.placements.map((placement) => ({
-			atlasEntryKey: placement.atlasEntryKey,
-			textureIndex: page.textureIndex,
-			rect: [
-				placement.x,
-				placement.y,
-				placement.width,
-				placement.height,
-			] as const,
-			width: page.width,
-			height: page.height,
-		})),
+	const placements = plan.families.flatMap((familyPlan) =>
+		familyPlan.atlasTextures.flatMap((page) =>
+			page.placements.map((placement) => ({
+				family: familyPlan.family,
+				atlasEntryKey: placement.atlasEntryKey,
+				textureIndex: page.textureIndex,
+				rect: [
+					placement.x,
+					placement.y,
+					placement.width,
+					placement.height,
+				] as const,
+				width: page.width,
+				height: page.height,
+			})),
+		),
 	);
 	const detailEntriesByKey = new Map(
 		(plan.detailAtlasEntryRecords ?? []).map(
 			(entry) => [entry.key, entry] as const,
 		),
 	);
-	const detailTextures = (plan.detailAtlasTextures ?? []).map((page) =>
-		createWebgl2DetailTextureAtlasTexture({
-			gl,
-			generationKey: plan.key,
-			page,
-			entriesByKey: detailEntriesByKey,
-		}),
+	const detailTextures = plan.families.flatMap((familyPlan) =>
+		familyPlan.detailAtlasTextures.map((page) =>
+			createWebgl2DetailTextureAtlasTexture({
+				gl,
+				generationKey: plan.key,
+				family: familyPlan.family,
+				page,
+				entriesByKey: detailEntriesByKey,
+			}),
+		),
 	);
-	const detailPlacements = (plan.detailAtlasTextures ?? []).flatMap((page) =>
-		page.placements.map((placement) => ({
-			atlasEntryKey: placement.atlasEntryKey,
-			textureIndex: page.textureIndex,
-			rect: [
-				placement.x,
-				placement.y,
-				placement.width,
-				placement.height,
-			] as const,
-			width: page.width,
-			height: page.height,
-		})),
+	const detailPlacements = plan.families.flatMap((familyPlan) =>
+		familyPlan.detailAtlasTextures.flatMap((page) =>
+			page.placements.map((placement) => ({
+				family: familyPlan.family,
+				atlasEntryKey: placement.atlasEntryKey,
+				textureIndex: page.textureIndex,
+				rect: [
+					placement.x,
+					placement.y,
+					placement.width,
+					placement.height,
+				] as const,
+				width: page.width,
+				height: page.height,
+			})),
+		),
 	);
 	return {
 		key: plan.key,
@@ -136,11 +152,13 @@ export function createWebgl2TextureAtlasGenerationResource({
 function createWebgl2TextureAtlasTexture({
 	gl,
 	generationKey,
+	family,
 	page,
 	entriesByKey,
 }: {
 	gl: WebGL2RenderingContext;
 	generationKey: string;
+	family: TexturePageFamily;
 	page: AtlasTexturePage;
 	entriesByKey: ReadonlyMap<string, RgbaTexturePageAtlasEntryRecord>;
 }): Webgl2TextureAtlasTextureResource {
@@ -160,7 +178,7 @@ function createWebgl2TextureAtlasTexture({
 			entry: record.entry,
 		});
 	}
-	const key = `${generationKey}/texture/${page.textureIndex}`;
+	const key = `${generationKey}/${family}/texture/${page.textureIndex}`;
 	const texture = createWebgl2Texture2D(gl, {
 		label: key,
 		upload: {
@@ -181,6 +199,7 @@ function createWebgl2TextureAtlasTexture({
 	});
 	return {
 		key,
+		family,
 		textureIndex: page.textureIndex,
 		texture,
 		width: page.width,
@@ -192,11 +211,13 @@ function createWebgl2TextureAtlasTexture({
 function createWebgl2DetailTextureAtlasTexture({
 	gl,
 	generationKey,
+	family,
 	page,
 	entriesByKey,
 }: {
 	gl: WebGL2RenderingContext;
 	generationKey: string;
+	family: TexturePageFamily;
 	page: AtlasTexturePage;
 	entriesByKey: ReadonlyMap<
 		string,
@@ -219,7 +240,7 @@ function createWebgl2DetailTextureAtlasTexture({
 			entry,
 		});
 	}
-	const key = `${generationKey}/detail-texture/${page.textureIndex}`;
+	const key = `${generationKey}/${family}/detail-texture/${page.textureIndex}`;
 	const texture = createWebgl2Texture2D(gl, {
 		label: key,
 		upload: {
@@ -240,6 +261,7 @@ function createWebgl2DetailTextureAtlasTexture({
 	});
 	return {
 		key,
+		family,
 		textureIndex: page.textureIndex,
 		texture,
 		width: page.width,

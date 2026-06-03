@@ -116,9 +116,35 @@ export function createWebgl2RenderMetrics(
 			transitionPortalCandidateCount:
 				input.transitionPortalModel.candidates.length,
 			portalApertureMeshCount: 0,
-			terrainMeshCount: input.worldStore?.terrainDrawUnitCount ?? 0,
+			terrainMeshCount: input.worldStore?.terrainTileCount ?? 0,
 			visibleTerrainMeshCount:
 				input.frameMetrics?.visibleDrawCountsByCategory.terrain ?? 0,
+			visibleTerrainTileCount: input.submitMetrics.visibleTerrainTileCount,
+			visibleTerrainOneDrawReadyTileCount:
+				input.submitMetrics.visibleTerrainOneDrawReadyTileCount,
+			visibleTerrainOneDrawBlockedTileCount:
+				input.submitMetrics.visibleTerrainOneDrawBlockedTileCount,
+			visibleTerrainDrawSliceReadyCount:
+				input.submitMetrics.visibleTerrainDrawSliceReadyCount,
+			terrainOneDrawShaderDrawCallCount:
+				input.submitMetrics.terrainOneDrawShaderDrawCallCount,
+			terrainOneDrawSubmittedTileCount:
+				input.submitMetrics.terrainOneDrawSubmittedTileCount,
+			terrainDrawSliceSubmittedCount:
+				input.submitMetrics.terrainDrawSliceSubmittedCount,
+			terrainOneDrawSubmittedTriangleCount:
+				input.submitMetrics.terrainOneDrawSubmittedTriangleCount,
+			terrainOneDrawBlockerSamples: [
+				...input.submitMetrics.terrainOneDrawBlockerSamples,
+			],
+			terrainOneDrawSubmitFallbackSamples: [
+				...input.submitMetrics.terrainOneDrawSubmitFallbackSamples,
+			],
+			terrainAtlasRefCount: input.worldStore?.terrainAtlasRefCount ?? 0,
+			terrainAtlasCandidateCount:
+				input.worldStore?.terrainAtlasCandidateCount ?? 0,
+			terrainAtlasBlockerTileCount:
+				input.worldStore?.terrainAtlasBlockerTileCount ?? 0,
 			staticGroupMeshCount: input.worldStore?.staticDrawUnitCount ?? 0,
 			visibleStaticGroupMeshCount:
 				(input.frameMetrics?.visibleDrawCountsByCategory["static-staged"] ??
@@ -138,7 +164,7 @@ export function createWebgl2RenderMetrics(
 			staticBvhFallbackIncludedBatchCount:
 				(input.frameMetrics?.fallbackCountsByCategory["static-staged"] ?? 0) +
 				(input.frameMetrics?.fallbackCountsByCategory.static ?? 0),
-			terrainRenderBatchCount: input.worldStore?.terrainDrawUnitCount ?? 0,
+			terrainRenderBatchCount: input.worldStore?.terrainTileCount ?? 0,
 			terrainBvhCandidateBatchCount:
 				input.frameMetrics?.candidateCountsByCategory.terrain ?? 0,
 			structuredInteriorRenderBatchCount:

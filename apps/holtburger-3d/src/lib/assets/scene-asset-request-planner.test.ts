@@ -534,6 +534,54 @@ describe("scene asset request planner", () => {
 		);
 	});
 
+	it("requests normalized rgba8 textures for visible terrain material surfaces", () => {
+		const destination = parseBrowserLocationInput("da55", "manual", "outdoor");
+		expect(destination).not.toBeNull();
+
+		const preparedOutdoor = createPreparedOutdoorLandblock(0xda55ffff, 1);
+		const terrainMaterial = createPreparedTerrainMaterial(
+			"terrain-material/1",
+			"surface-texture/05006d06",
+		);
+		const terrainSurfaceTexture = createPreparedSurfaceTexture(
+			"surface-texture/05006d06",
+			"render-surface/06006d06",
+		);
+		const terrainRenderSurface = createPreparedRenderSurface(
+			"render-surface/06006d06",
+			0x06006d06,
+			0x15,
+			"A8R8G8B8",
+		);
+
+		const requests = createSceneCoverageRequests(
+			{
+				requestRevision: 12,
+				browserDestination: destination,
+				preparedByAssetId: {
+					[preparedOutdoor.request.assetId]: preparedOutdoor,
+					[terrainMaterial.request.assetId]: terrainMaterial,
+					[terrainSurfaceTexture.request.assetId]: terrainSurfaceTexture,
+					[terrainRenderSurface.request.assetId]: terrainRenderSurface,
+				},
+				pendingAssetIds: [],
+				options: {
+					terrainRadius: 0,
+					buildingRadius: 0,
+					detailRadius: 0,
+					envCellRadius: 0,
+					materialTexturePreparationPolicy:
+						NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY,
+				},
+			},
+			"streaming",
+		);
+
+		expect(requests.map((request) => request.assetId)).toContain(
+			"prepared-texture/06006d06?usage=raw&out=rgba8&mips=none&cs=linear",
+		);
+	});
+
 	it("retains visible prepared compressed textures as active coverage", () => {
 		const destination = parseBrowserLocationInput("016c0155");
 		expect(destination).not.toBeNull();
@@ -1051,6 +1099,115 @@ function createPreparedMaterialRecipe(
 			surfaceTextureAssetIds: [],
 			renderSurfaceAssetIds: [renderSurfaceAssetId],
 			paletteAssetIds: [],
+		},
+	};
+	return {
+		request,
+		response: {
+			requestId: request.requestId,
+			assetId,
+			payloadKind: "json",
+			payload,
+		},
+		payload,
+		preparedAt: "2026-05-23T00:00:00.000Z",
+	};
+}
+
+function createPreparedTerrainMaterial(
+	assetId: string,
+	textureAssetId: string,
+): PreparedAssetRecord {
+	const request = {
+		requestId: `fixture-${assetId}`,
+		assetId,
+		priority: "streaming" as const,
+	};
+	const textureId = Number.parseInt(
+		textureAssetId.slice("surface-texture/".length),
+		16,
+	);
+	const payload = {
+		kind: "terrain-material" as const,
+		sourceAssetKind: "terrain-material" as const,
+		residencyKind: "unknown" as const,
+		provenance: {
+			source: "repo-local-hba" as const,
+			sourceAssetKind: "terrain-material",
+			errorCode: null,
+			detail: null,
+		},
+		regionNumber: 1,
+		materialKind: "tex-merge-table" as const,
+		terrainTypes: [
+			{
+				terrainType: 1,
+				textureAssetId,
+				textureDid: textureId,
+				tiling: 4,
+				colorVariation: null,
+			},
+		],
+		terrainAlphaMaps: [],
+		roadAlphaMaps: [],
+		pcodeEncoding: {
+			terrainCodeBits: 5 as const,
+			roadCodeBits: 2 as const,
+			sizeBitMask: 1 << 28,
+		},
+		dependencies: {
+			surfaceTextureAssetIds: [textureAssetId],
+			renderSurfaceAssetIds: [],
+			paletteAssetIds: [],
+		},
+	};
+	return {
+		request,
+		response: {
+			requestId: request.requestId,
+			assetId,
+			payloadKind: "json",
+			payload,
+		},
+		payload,
+		preparedAt: "2026-05-23T00:00:00.000Z",
+	};
+}
+
+function createPreparedSurfaceTexture(
+	assetId: string,
+	renderSurfaceAssetId: string,
+): PreparedAssetRecord {
+	const request = {
+		requestId: `fixture-${assetId}`,
+		assetId,
+		priority: "streaming" as const,
+	};
+	const textureId = Number.parseInt(
+		assetId.slice("surface-texture/".length),
+		16,
+	);
+	const renderSurfaceId = Number.parseInt(
+		renderSurfaceAssetId.slice("render-surface/".length),
+		16,
+	);
+	const payload = {
+		kind: "surface-texture" as const,
+		sourceAssetKind: "surface-texture" as const,
+		residencyKind: "unknown" as const,
+		provenance: {
+			source: "repo-local-hba" as const,
+			sourceAssetKind: "surface-texture",
+			errorCode: null,
+			detail: null,
+		},
+		surfaceTextureId: textureId,
+		textureType: 0,
+		unknown: 0,
+		selectedRenderSurfaceId: renderSurfaceId,
+		renderSurfaceIds: [renderSurfaceId],
+		dependencies: {
+			renderSurfaceAssetIds: [renderSurfaceAssetId],
 		},
 	};
 	return {

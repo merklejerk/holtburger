@@ -843,8 +843,7 @@ function collectRenderSurfaceAssetIdsFromAssets(
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
 	assetIds: readonly string[],
 ): string[] {
-	return uniqueSortedAssetIds(
-		assetIds.flatMap((assetId) => {
+	const directRenderSurfaceAssetIds = assetIds.flatMap((assetId) => {
 			const payload = preparedByAssetId[assetId]?.payload;
 			if (
 				payload?.kind !== "material-recipe" &&
@@ -854,8 +853,30 @@ function collectRenderSurfaceAssetIdsFromAssets(
 				return [];
 			}
 			return payload.dependencies.renderSurfaceAssetIds;
-		}),
+		});
+	const surfaceTextureAssetIds = assetIds.flatMap((assetId) => {
+		const payload = preparedByAssetId[assetId]?.payload;
+		if (
+			payload?.kind !== "material-recipe" &&
+			payload?.kind !== "terrain-material" &&
+			payload?.kind !== "region-render-profile"
+		) {
+			return [];
+		}
+		return payload.dependencies.surfaceTextureAssetIds;
+	});
+	const surfaceTextureRenderSurfaceAssetIds = surfaceTextureAssetIds.flatMap(
+		(assetId) => {
+			const payload = preparedByAssetId[assetId]?.payload;
+			return payload?.kind === "surface-texture"
+				? payload.dependencies.renderSurfaceAssetIds
+				: [];
+		},
 	);
+	return uniqueSortedAssetIds([
+		...directRenderSurfaceAssetIds,
+		...surfaceTextureRenderSurfaceAssetIds,
+	]);
 }
 
 function collectStaticRenderableDependencyAssetIds(

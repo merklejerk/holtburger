@@ -16,6 +16,7 @@ describe("webgl2 texture atlas generation", () => {
 		expect(generation?.detailTextures).toHaveLength(1);
 		expect(generation?.placements).toEqual([
 			{
+				family: "static-rgba",
 				atlasEntryKey: "entry-a",
 				textureIndex: 0,
 				rect: [1, 1, 2, 2],
@@ -25,6 +26,7 @@ describe("webgl2 texture atlas generation", () => {
 		]);
 		expect(generation?.detailPlacements).toEqual([
 			{
+				family: "static-rgba",
 				atlasEntryKey: "detail-a",
 				textureIndex: 0,
 				rect: [1, 1, 2, 2],
@@ -84,6 +86,7 @@ describe("webgl2 texture atlas generation", () => {
 					atlasTextures: [],
 					detailAtlasEntryRecords: [],
 					detailAtlasTextures: [],
+					families: [],
 				},
 			}),
 		).toBeNull();
@@ -167,6 +170,83 @@ function createPlan(): TexturePageAtlasPlan {
 						width: 2,
 						height: 2,
 						gutterPixels: 1,
+					},
+				],
+			},
+		],
+		families: [
+			{
+				family: "static-rgba",
+				atlasEntryRecords: [
+					{
+						key: "entry-a",
+						entry: {
+							renderSurfaceId: 0x0600_0001,
+							preparedTextureAssetId: "prepared-texture/entry-a",
+							sourceHash: "hash-a",
+							sourceFormatRaw: 0x3154_5844,
+							level: {
+								level: 0,
+								width: 2,
+								height: 2,
+								formatRaw: 0x15,
+								format: "A8R8G8B8",
+								byteLength: levelBytes.byteLength,
+								bytes: levelBytes,
+							},
+						},
+					},
+				],
+				atlasTextures: [
+					{
+						textureIndex: 0,
+						width: 4,
+						height: 4,
+						placements: [
+							{
+								atlasEntryKey: "entry-a",
+								textureIndex: 0,
+								x: 1,
+								y: 1,
+								width: 2,
+								height: 2,
+								gutterPixels: 1,
+							},
+						],
+					},
+				],
+				detailAtlasEntryRecords: [
+					{
+						key: "detail-a",
+						renderSurfaceId: 0x0600_0002,
+						sourceFormatRaw: 0x15,
+						width: 2,
+						height: 2,
+						bytes: Uint8Array.from([
+							11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+							25, 26,
+						]),
+						format: "rgba8",
+						tiling: 12,
+						blendMode: "dst-color",
+					},
+				],
+				detailAtlasTextures: [
+					{
+						textureIndex: 0,
+						width: 4,
+						height: 4,
+						placements: [
+							{
+								atlasEntryKey: "detail-a",
+								textureIndex: 0,
+								x: 1,
+								y: 1,
+								width: 2,
+								height: 2,
+								gutterPixels: 1,
+							},
+						],
 					},
 				],
 			},

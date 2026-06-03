@@ -2398,6 +2398,14 @@ function mergeSceneDomainSubmitMetrics({
 		terrainOneDrawSubmittedTriangleCount:
 			exteriorMetrics.terrainOneDrawSubmittedTriangleCount +
 			interiorMetrics.terrainOneDrawSubmittedTriangleCount,
+		terrainOneDrawBlockerSamples: [
+			...exteriorMetrics.terrainOneDrawBlockerSamples,
+			...interiorMetrics.terrainOneDrawBlockerSamples,
+		].slice(0, 8),
+		terrainOneDrawSubmitFallbackSamples: [
+			...exteriorMetrics.terrainOneDrawSubmitFallbackSamples,
+			...interiorMetrics.terrainOneDrawSubmitFallbackSamples,
+		].slice(0, 8),
 		portalMaskDrawUnitCount,
 		exteriorDomainDrawUnitCount,
 		interiorDomainDrawUnitCount,

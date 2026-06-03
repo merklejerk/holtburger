@@ -99,6 +99,8 @@ export interface Webgl2WorldSubmitMetrics {
 	terrainOneDrawSubmittedTileCount: number;
 	terrainDrawSliceSubmittedCount: number;
 	terrainOneDrawSubmittedTriangleCount: number;
+	terrainOneDrawBlockerSamples: readonly string[];
+	terrainOneDrawSubmitFallbackSamples: readonly string[];
 	portalMaskDrawUnitCount: number;
 	exteriorDomainDrawUnitCount: number;
 	interiorDomainDrawUnitCount: number;
@@ -161,6 +163,8 @@ const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	terrainOneDrawSubmittedTileCount: 0,
 	terrainDrawSliceSubmittedCount: 0,
 	terrainOneDrawSubmittedTriangleCount: 0,
+	terrainOneDrawBlockerSamples: [],
+	terrainOneDrawSubmitFallbackSamples: [],
 	portalMaskDrawUnitCount: 0,
 	exteriorDomainDrawUnitCount: 0,
 	interiorDomainDrawUnitCount: 0,
@@ -435,6 +439,9 @@ export function submitWebgl2FlatWorldDrawUnits({
 			terrainReadinessPlan.blockedTiles.length,
 		visibleTerrainDrawSliceReadyCount:
 			terrainReadinessPlan.oneDrawSlices.length,
+		terrainOneDrawBlockerSamples: terrainReadinessPlan.blockedTiles
+			.flatMap((entry) => entry.blockers)
+			.slice(0, 8),
 		portalMaskDrawUnitCount,
 		exteriorDomainDrawUnitCount,
 		interiorDomainDrawUnitCount,
@@ -534,6 +541,8 @@ export function submitWebgl2FlatWorldDrawUnits({
 			terrainReadinessPlan.oneDrawSlices.length;
 		metrics.terrainOneDrawSubmittedTriangleCount =
 			terrainFamilyMetrics.submittedTriangleCount;
+		metrics.terrainOneDrawSubmitFallbackSamples =
+			terrainFamilyMetrics.fallbackSamples;
 	}
 	metrics.stateChangeCount += resetWorldSubmitExitRenderState({
 		gl,

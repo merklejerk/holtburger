@@ -814,6 +814,7 @@ describe("submitWebgl2FlatWorldFrame", () => {
 				rgbaTexturePageFamilies: [],
 				generation: createTextureAtlasGeneration({
 					atlasEntryKey: "terrain-page/color/00000001/21/1/1",
+					family: "terrain-color",
 					texture: atlasTexture,
 				}),
 			},
@@ -2010,15 +2011,18 @@ function createIndexedMaterial(
 function createTextureAtlasGeneration(
 	options: {
 		atlasEntryKey?: string;
+		family?: Webgl2TextureAtlasGenerationResource["textures"][number]["family"];
 		texture?: WebGLTexture;
 	} = {},
 ): Webgl2TextureAtlasGenerationResource {
 	const atlasEntryKey = options.atlasEntryKey ?? "entry/default";
+	const family = options.family ?? "static-rgba";
 	return {
 		key: "generation",
 		textures: [
 			{
 				key: "texture",
+				family,
 				textureIndex: 0,
 				texture: {
 					texture: options.texture ?? ({} as WebGLTexture),
@@ -2035,6 +2039,7 @@ function createTextureAtlasGeneration(
 		],
 		placements: [
 			{
+				family,
 				atlasEntryKey,
 				textureIndex: 0,
 				rect: [1, 2, 3, 4],
@@ -2042,6 +2047,8 @@ function createTextureAtlasGeneration(
 				height: 4,
 			},
 		],
+		detailTextures: [],
+		detailPlacements: [],
 		preparedTextureAssetIds: [],
 		rgbaAtlasReadyDrawUnitIds: [],
 		dispose() {

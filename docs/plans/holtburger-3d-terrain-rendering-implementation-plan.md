@@ -1648,6 +1648,38 @@ Cleanup impact:
   `buildStagedTerrainGeometry(mesh)` should move or be renamed now that terrain no longer participates
   in staged draw-unit assembly.
 
+Post-T9 correction:
+
+- Fixed terrain atlas texture resolution after a live scene showed black terrain. Atlas page
+  `textureIndex` values are family-local, so generated atlas texture resources now carry
+  `TexturePageFamily`, and terrain submit resolves atlas textures by `(family, textureIndex)` instead
+  of by `textureIndex` alone.
+- Base-only terrain tiles may not need a terrain mask page. Terrain submit now explicitly reuses the
+  terrain color atlas as the unused mask sampler when no terrain-mask binding is present.
+- Fixed layer-limit overflow readiness after a live scene reported 12 visible terrain tiles, 0 ready
+  tiles, and blockers for missing terrain blend page inputs, empty layer plans, and missing one-draw
+  UV/layer-slot buffers. The parent terrain tile is intentionally blocked when it exceeds the 8-layer
+  one-draw limit, but its precomputed draw slices must still participate in terrain atlas candidate
+  collection. Texture-page input collection now includes both the parent tile layer plan and all
+  draw-slice layer plans, so layer-limit slices can resolve page bindings and submit through the
+  terrain family.
+- Added a regression test for a 9-pcode terrain tile: the parent remains blocked by the layer limit,
+  while the two draw slices resolve terrain-color atlas bindings and become ready.
+- Fixed terrain prepared-texture request coverage after live diagnostics reported `atlas refs 225`,
+  `atlas candidates 0`, and all terrain tiles blocked. Terrain material tables can expose terrain
+  textures through `surfaceTextureAssetIds`, with render surfaces owned one dependency hop below the
+  prepared `surface-texture` payload. Visible prepared texture request planning now follows those
+  surface-texture dependencies when collecting visible render surfaces, so normalized terrain
+  `prepared-texture/...usage=raw&out=rgba8...` assets are requested before terrain atlas planning.
+
+Correction validation:
+
+- `npm run test:ts -- scene-asset-request-planner terrain-materials terrain-blend-plan webgl2-world-resources compaction-family-planner`
+- `npm run test:ts -- webgl2-world-resources terrain-tile-plan webgl2-world-submit`
+- `npm run test:ts -- terrain-tile-plan webgl2-world-submit webgl2-world-resources webgl2-direct-render-family compaction-family-planner webgl2-texture-atlas-generation terrain-family-submit texture-page-atlas-planner`
+- `npm run check`
+- `npm run lint`
+
 ## Phase T10: Measurement And Follow-Up Decisions
 
 Goal: measure whether the first implementation solved the intended cost shape and decide whether any
@@ -1740,6 +1772,10 @@ Delete or rewrite these terrain-specific old-path concepts by the end of Phase T
 - Complete in T9: WebGL2 submit tests that asserted direct terrain-blend routing.
 - `WorldRenderDraw.drawUnitId` in `world-render-frame.ts`, once the frame can submit terrain-family
   render work without routing everything through `Webgl2WorldDrawUnit` ids.
+- Audit `createWebgl2TerrainTilePageOverflowDrawSlices` and
+  `groupTerrainLayerEntriesByPage` in `webgl2-world-resources.ts`. The layer-limit path now uses
+  precomputed draw slices, and page-overflow grouping from an empty blocked parent plan is hollow
+  abstraction unless a measured page-overflow case proves it is still the right shape.
 - Any temporary wrapper, helper, type alias, or module that exists only as migration ceremony. T1
   deleted the short-lived `terrain-placement.ts` wrapper for this reason; future phases should apply
   the same standard to terrain tile resources, atlas family plumbing, and submit adapters.

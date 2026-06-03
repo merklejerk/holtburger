@@ -791,6 +791,22 @@ describe("webgl2 world resources", () => {
 			height: 1,
 			paletteColorCount: 2,
 		});
+		expect(store.drawUnits[0]?.indexedMaterialDescriptor).toMatchObject({
+			indexFormat: "p8",
+			indexTextureKey: store.drawUnits[0]?.indexedMaterial?.indexTextureKey,
+			paletteTextureKey:
+				store.drawUnits[0]?.indexedMaterial?.paletteTextureKey,
+			width: 2,
+			height: 1,
+			paletteColorCount: 2,
+			clipThreshold: -1,
+		});
+		expect(
+			store.drawUnits[0]?.indexedMaterialDescriptor?.indexSourceBytes,
+		).toBe(gl.textureUploads[0]?.data);
+		expect(
+			store.drawUnits[0]?.indexedMaterialDescriptor?.paletteRgbaBytes,
+		).toBe(gl.textureUploads[1]?.data);
 		expect(store.textureCount).toBe(2);
 		expect(store.indexedTextureCount).toBe(1);
 		expect(store.paletteTextureCount).toBe(1);

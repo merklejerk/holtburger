@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
 	planTexturePageAtlas,
+	TERRAIN_COLOR_ATLAS_GUTTER_PIXELS,
+	TERRAIN_MASK_ATLAS_GUTTER_PIXELS,
 	type TexturePageFamily,
 	type TexturePageAtlasRgbaCandidate,
 	type TexturePageAtlasDetailCandidate,
@@ -78,6 +80,50 @@ describe("planTexturePageAtlas", () => {
 			),
 		).toEqual([["static-detail-entry"], ["terrain-detail-entry"]]);
 	});
+
+	it("uses wider gutters for mipmapped terrain atlas families", () => {
+		const plan = planTexturePageAtlas({
+			rgbaCandidates: [
+				createRgbaCandidate({
+					drawUnitId: "terrain-color",
+					entryKey: "terrain-color-entry",
+					family: "terrain-color",
+				}),
+				createRgbaCandidate({
+					drawUnitId: "terrain-mask",
+					entryKey: "terrain-mask-entry",
+					family: "terrain-mask",
+				}),
+				createRgbaCandidate({
+					drawUnitId: "static",
+					entryKey: "static-entry",
+					family: "static-rgba",
+				}),
+			],
+			detailCandidates: [],
+			policy: createPolicy(),
+		});
+
+		const placements = new Map(
+			plan.families.flatMap((family) =>
+				family.atlasTextures.flatMap((texture) =>
+					texture.placements.map(
+						(placement) => [family.family, placement.gutterPixels] as const,
+					),
+				),
+			),
+		);
+
+		expect(TERRAIN_COLOR_ATLAS_GUTTER_PIXELS).toBe(96);
+		expect(TERRAIN_MASK_ATLAS_GUTTER_PIXELS).toBe(16);
+		expect(placements.get("terrain-color")).toBe(
+			TERRAIN_COLOR_ATLAS_GUTTER_PIXELS,
+		);
+		expect(placements.get("terrain-mask")).toBe(
+			TERRAIN_MASK_ATLAS_GUTTER_PIXELS,
+		);
+		expect(placements.get("static-rgba")).toBe(0);
+	});
 });
 
 function createRgbaCandidate({
@@ -149,7 +195,7 @@ function createDetailCandidate({
 
 function createPolicy(): CompactionFamilyPlanningPolicy {
 	return {
-		maxAtlasTextureSize: 64,
+		maxAtlasTextureSize: 512,
 		maxAtlasTextureCount: 8,
 		baseGutterPixels: 0,
 		maxMaterialSlotsPerDraw: 8,

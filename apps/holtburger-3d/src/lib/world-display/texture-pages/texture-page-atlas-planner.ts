@@ -17,6 +17,9 @@ export type TexturePageFamily =
 	| "terrain-mask"
 	| "terrain-detail";
 
+export const TERRAIN_COLOR_ATLAS_GUTTER_PIXELS = 96;
+export const TERRAIN_MASK_ATLAS_GUTTER_PIXELS = 16;
+
 export interface TexturePageAtlasRgbaCandidate {
 	drawUnitId: string;
 	family?: TexturePageFamily;
@@ -199,6 +202,7 @@ function planTexturePageAtlasFamily({
 			key: record.key,
 			width: record.entry.level.width,
 			height: record.entry.level.height,
+			gutterPixels: resolveTexturePageFamilyGutterPixels(family, policy),
 		})),
 		policy: {
 			maxTextureSize: policy.maxAtlasTextureSize,
@@ -235,6 +239,7 @@ function planTexturePageAtlasFamily({
 			key: entry.key,
 			width: entry.width,
 			height: entry.height,
+			gutterPixels: resolveTexturePageFamilyGutterPixels(family, policy),
 		})),
 		policy: {
 			maxTextureSize: policy.maxAtlasTextureSize,
@@ -295,6 +300,19 @@ function planTexturePageAtlasFamily({
 		usedAtlasEntryKeys,
 		usedDetailEntryKeys,
 	};
+}
+
+function resolveTexturePageFamilyGutterPixels(
+	family: TexturePageFamily,
+	policy: CompactionFamilyPlanningPolicy,
+): number {
+	if (family === "terrain-color") {
+		return Math.max(policy.baseGutterPixels, TERRAIN_COLOR_ATLAS_GUTTER_PIXELS);
+	}
+	if (family === "terrain-mask") {
+		return Math.max(policy.baseGutterPixels, TERRAIN_MASK_ATLAS_GUTTER_PIXELS);
+	}
+	return policy.baseGutterPixels;
 }
 
 function isDetailAtlasReady(

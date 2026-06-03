@@ -1,4 +1,3 @@
-import { Object3D } from "three";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -9,8 +8,6 @@ import {
 	deriveStructuredInteriorCellBatchBvhBinding,
 	deriveTerrainTileBatchBvhBinding,
 	deriveTransitionPortalMaskBatchBvhBinding,
-	readNonInstancedBatchId,
-	registerNonInstancedBatchId,
 	structuredInteriorCellBatchId,
 	terrainTileBatchId,
 	transitionPortalMaskBatchId,
@@ -48,7 +45,9 @@ describe("non-instanced BVH bindings", () => {
 					quadIndices: [],
 				}),
 			).fallbackReason,
-		).toBe("terrain batch landblock/0203ffff/outdoor contains no terrain quad keys");
+		).toBe(
+			"terrain batch landblock/0203ffff/outdoor contains no terrain quad keys",
+		);
 	});
 
 	it("binds structured cell render geometry batches by env cell", () => {
@@ -118,15 +117,6 @@ describe("non-instanced BVH bindings", () => {
 		expect(transitionPortalMaskBatchId("candidate/a")).toBe(
 			"transition-portal-mask:candidate/a",
 		);
-	});
-
-	it("stores non-instanced batch ids on Three.js objects", () => {
-		const object = new Object3D();
-		expect(readNonInstancedBatchId(object)).toBeNull();
-
-		registerNonInstancedBatchId(object, "batch/a");
-
-		expect(readNonInstancedBatchId(object)).toBe("batch/a");
 	});
 });
 

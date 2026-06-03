@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { Matrix4 } from "three";
 
 import type {
 	PreparedPolygonSetBspNode,
@@ -9,6 +8,7 @@ import type {
 import type { PlacementTransformDto } from "../host/contracts";
 import { makeOutdoorLandblockId } from "../landblocks";
 import type { RenderChunkTransform } from "./render-anchor";
+import { createTranslationMat4 } from "./render-math";
 import type { StructuredInteriorCell } from "./structured-interior-scene";
 import {
 	buildWorldResidencyIndex,
@@ -103,8 +103,8 @@ describe("world residency index", () => {
 			}),
 		);
 
-		expect(bounds?.min.toArray()).toEqual([11, 32, -17]);
-		expect(bounds?.max.toArray()).toEqual([14, 35, -14]);
+		expect(bounds?.min).toEqual({ x: 11, y: 32, z: -17 });
+		expect(bounds?.max).toEqual({ x: 14, y: 35, z: -14 });
 	});
 
 	it("derives conservative residency bounds from all source vertices", () => {
@@ -127,11 +127,11 @@ describe("world residency index", () => {
 					},
 				],
 			},
-			new Matrix4().makeTranslation(10, 20, 30),
+			createTranslationMat4({ x: 10, y: 20, z: 30 }),
 		);
 
-		expect(bounds?.min.toArray()).toEqual([9, 22, 25]);
-		expect(bounds?.max.toArray()).toEqual([14, 26, 33]);
+		expect(bounds?.min).toEqual({ x: 9, y: 22, z: 25 });
+		expect(bounds?.max).toEqual({ x: 14, y: 26, z: 33 });
 	});
 
 	it("queries an env cell when the camera point is inside a loaded cell AABB", () => {

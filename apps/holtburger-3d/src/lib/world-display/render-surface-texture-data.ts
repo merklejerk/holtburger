@@ -47,7 +47,7 @@ interface CompressedRenderSurfaceTextureUploadData {
 	levels: readonly CompressedRenderSurfaceTextureLevel[];
 }
 
-export type CompressedRenderSurfaceUploadFormat =
+type CompressedRenderSurfaceUploadFormat =
 	| "s3tc-dxt1-rgba"
 	| "s3tc-dxt3-rgba"
 	| "s3tc-dxt5-rgba";
@@ -244,18 +244,6 @@ export function hasSourceAlpha(formatRaw: number): boolean {
 		formatRaw === PIXEL_FORMAT_DXT3 ||
 		formatRaw === PIXEL_FORMAT_DXT5
 	);
-}
-
-export function describeRenderSurfaceDecodeKey(
-	renderSurface: PreparedRenderSurfacePayload,
-): string {
-	return [
-		renderSurface.renderSurfaceId,
-		renderSurface.formatRaw,
-		renderSurface.width,
-		renderSurface.height,
-		renderSurface.sourceByteLength,
-	].join(":");
 }
 
 function prepareCompressedTextureUploadData(

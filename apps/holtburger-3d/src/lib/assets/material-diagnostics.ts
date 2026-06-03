@@ -4,7 +4,7 @@ import {
 	scanMaxPaletteIndex,
 	selectIndexedPalette,
 	type IndexedTextureFormat,
-} from "../world-display/indexed-texture-resources";
+} from "../world-display/indexed-material-data";
 import type { PreparedMaterialRecipePayload } from "./types";
 import type { AssetChannelState, PreparedAssetRecord } from "./types";
 import {
@@ -185,7 +185,7 @@ function summarizeIndexedMaterialDiagnostics(
 			indexedMaterialAssetIds.add(materialAssetId);
 			indexedSurfaceAssetIdsByFormat[format].add(renderSurfaceAssetId);
 
-			const paletteSelection = selectIndexedPalette(recipe, renderSurface);
+			const paletteSelection = selectIndexedPalette({ recipe, renderSurface });
 			if (!paletteSelection) {
 				paletteSelectionCounts.missing += 1;
 				continue;

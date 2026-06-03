@@ -91,20 +91,6 @@ function describePreparedAssetSignature(
 	return baseSignature;
 }
 
-export function describePaletteResourceKey(
-	assetId: string,
-	asset: PreparedAssetRecord,
-): string {
-	if (asset.payload.kind !== "palette") {
-		return describePreparedAssetSignature(assetId, asset);
-	}
-	return [
-		describePreparedAssetSignature(assetId, asset),
-		asset.payload.paletteId,
-		asset.payload.colorCount,
-	].join(":");
-}
-
 function describeAppearancePalettePreparedStateSignature(
 	appearance: MaterialAppearanceContext,
 	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>,

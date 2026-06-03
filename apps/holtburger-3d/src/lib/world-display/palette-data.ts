@@ -165,7 +165,7 @@ export function describeDerivedPaletteDataKey(options: {
 	].join("|");
 }
 
-export function argbToRgbaBytes(colorsArgb: Uint32Array): Uint8Array {
+function argbToRgbaBytes(colorsArgb: Uint32Array): Uint8Array {
 	if (colorsArgb.length === 0) {
 		throw new Error("Palette textures require at least one color.");
 	}

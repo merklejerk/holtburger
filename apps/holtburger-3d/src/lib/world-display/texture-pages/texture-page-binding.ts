@@ -29,10 +29,7 @@ type TexturePageWrapMode = "clamp" | "repeat";
 type TexturePageFilterPolicy = "linear" | "nearest" | "material-policy";
 type TexturePageMipPolicy = "generated" | "none" | "material-policy";
 type TexturePageSamplingDomain = "color" | "data" | "control";
-type TexturePageLookupPolicy =
-	| "color-filtered"
-	| "exact"
-	| "control-filtered";
+type TexturePageLookupPolicy = "color-filtered" | "exact" | "control-filtered";
 
 interface TexturePageSamplingPolicy {
 	wrapS: TexturePageWrapMode;
@@ -44,7 +41,7 @@ interface TexturePageSamplingPolicy {
 	lookup: TexturePageLookupPolicy;
 }
 
-export type TexturePageBindingSource =
+type TexturePageBindingSource =
 	| "standalone-direct-texture"
 	| "shared-packed-page"
 	| "detail-overlay"
@@ -187,7 +184,8 @@ function describeMissingPackedBasePlacement({
 	drawUnit: Webgl2WorldDrawUnit;
 	atlasPlan: TexturePageAtlasPlan | null;
 }): string {
-	const atlasEntryKey = drawUnit.texturePageReadiness?.atlasEntryKey ?? "unknown";
+	const atlasEntryKey =
+		drawUnit.texturePageReadiness?.atlasEntryKey ?? "unknown";
 	const atlasFailure = atlasPlan?.failures.find(
 		(failure) =>
 			failure.drawUnitId === drawUnit.id &&
@@ -217,7 +215,7 @@ export function collectDirectDrawTexturePageBindings(
 		| "directIndexedMaterialResources"
 		| "indexedMaterialDescriptor"
 	>,
-	): readonly TexturePageDescriptor[] {
+): readonly TexturePageDescriptor[] {
 	const baseWrap = resolveTexturePageWrapMode(drawUnit);
 	return [
 		...(drawUnit.texture
@@ -303,7 +301,7 @@ export function collectDirectDrawTexturePageBindings(
 							}),
 						}),
 					]
-			: []),
+				: []),
 	];
 }
 
@@ -322,8 +320,8 @@ function createSingleEntryTexturePageBinding({
 	wrapS: TexturePageWrapMode;
 	wrapT: TexturePageWrapMode;
 	sampling: TexturePageSamplingPolicy;
-		source: TexturePageResourceBinding["source"];
-	}): TexturePageResourceBinding {
+	source: TexturePageResourceBinding["source"];
+}): TexturePageResourceBinding {
 	return {
 		pageKind: "single-entry",
 		usageBucket,
@@ -355,7 +353,7 @@ function createDescriptorTexturePageBinding({
 	wrapS: TexturePageWrapMode;
 	wrapT: TexturePageWrapMode;
 	sampling: TexturePageSamplingPolicy;
-	}): TexturePageDescriptor {
+}): TexturePageDescriptor {
 	return {
 		pageKind: "single-entry",
 		usageBucket,

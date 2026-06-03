@@ -1,18 +1,7 @@
-import {
-	ClampToEdgeWrapping,
-	DataTexture,
-	LinearFilter,
-	LinearMipMapLinearFilter,
-	RedFormat,
-	RepeatWrapping,
-	SRGBColorSpace,
-	UnsignedByteType,
-} from "three";
 import { describe, expect, it } from "vitest";
 
 import type { PreparedRenderSurfacePayload } from "../assets/types";
 import {
-	applyTextureSamplingPolicy,
 	createDefaultMaterialTextureSamplingPolicy,
 	describeTextureSamplingPolicy,
 	selectRenderSurfaceTextureSamplingPolicy,
@@ -151,37 +140,6 @@ describe("texture sampling policy", () => {
 				policy,
 			),
 		).toBe(policy.indexed);
-	});
-
-	it("applies wrap, filter, color-space, mipmap, and flipY settings", () => {
-		const texture = new DataTexture(
-			new Uint8Array([1]),
-			1,
-			1,
-			RedFormat,
-			UnsignedByteType,
-		);
-
-		applyTextureSamplingPolicy(texture, {
-			wrapS: "repeat",
-			wrapT: "clamp",
-			magFilter: "linear",
-			minFilter: "linear",
-			mipFilter: "linear",
-			colorSpace: "srgb",
-			anisotropy: 4,
-			generateMipmaps: true,
-			flipY: true,
-		});
-
-		expect(texture.wrapS).toBe(RepeatWrapping);
-		expect(texture.wrapT).toBe(ClampToEdgeWrapping);
-		expect(texture.magFilter).toBe(LinearFilter);
-		expect(texture.minFilter).toBe(LinearMipMapLinearFilter);
-		expect(texture.colorSpace).toBe(SRGBColorSpace);
-		expect(texture.anisotropy).toBe(4);
-		expect(texture.generateMipmaps).toBe(true);
-		expect(texture.flipY).toBe(true);
 	});
 
 	it("describes stable policy identities for cache keys", () => {

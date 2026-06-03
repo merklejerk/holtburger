@@ -1,5 +1,3 @@
-import { Box3, Matrix4, Vector3 } from "three";
-
 import type { AssetChannelState } from "../assets/types";
 import type { Vec3Dto } from "../host/contracts";
 import type {
@@ -18,7 +16,15 @@ import {
 	structuredCellSpatialItemId,
 	terrainSpatialItemId,
 } from "./render-spatial-ids";
-import { buildAcPlacementMatrix } from "./static-renderable-geometry";
+import {
+	buildAcPlacementMatrix,
+	transformPointByMat4,
+	type RenderMat4,
+} from "./render-math";
+import {
+	renderBoundsFromPoints,
+	transformRenderBounds,
+} from "./render-spatial-math";
 import { buildStaticRenderablePartMatrix } from "./staged-world-assembly";
 import {
 	isPreparedGfxObjAsset,
@@ -270,89 +276,28 @@ function deriveTerrainTileBounds(tile: TerrainSceneTile): RenderBounds {
 
 function transformBounds(
 	bounds: { min: Vec3Dto; max: Vec3Dto },
-	matrix: Matrix4,
+	matrix: RenderMat4,
 ): RenderBounds {
-	const box = new Box3(
-		new Vector3(bounds.min.x, bounds.min.y, bounds.min.z),
-		new Vector3(bounds.max.x, bounds.max.y, bounds.max.z),
-	).applyMatrix4(matrix);
-	return {
-		min: vectorToRenderVec3(box.min),
-		max: vectorToRenderVec3(box.max),
-	};
+	return transformRenderBounds(bounds, (point) =>
+		transformPointByMat4(point, matrix),
+	);
 }
 
 function transformBoundsByRenderMat4(
 	bounds: { min: Vec3Dto; max: Vec3Dto },
-	matrix: Float32Array,
+	matrix: RenderMat4,
 ): RenderBounds {
-	const points = [
-		{ x: bounds.min.x, y: bounds.min.y, z: bounds.min.z },
-		{ x: bounds.min.x, y: bounds.min.y, z: bounds.max.z },
-		{ x: bounds.min.x, y: bounds.max.y, z: bounds.min.z },
-		{ x: bounds.min.x, y: bounds.max.y, z: bounds.max.z },
-		{ x: bounds.max.x, y: bounds.min.y, z: bounds.min.z },
-		{ x: bounds.max.x, y: bounds.min.y, z: bounds.max.z },
-		{ x: bounds.max.x, y: bounds.max.y, z: bounds.min.z },
-		{ x: bounds.max.x, y: bounds.max.y, z: bounds.max.z },
-	].map((point) => transformPointByRenderMat4(point, matrix));
-	return pointsToBounds(points);
-}
-
-function transformPointByRenderMat4(
-	point: Vec3Dto,
-	matrix: Float32Array,
-): RenderVec3 {
-	return {
-		x:
-			matrix[0] * point.x +
-			matrix[4] * point.y +
-			matrix[8] * point.z +
-			matrix[12],
-		y:
-			matrix[1] * point.x +
-			matrix[5] * point.y +
-			matrix[9] * point.z +
-			matrix[13],
-		z:
-			matrix[2] * point.x +
-			matrix[6] * point.y +
-			matrix[10] * point.z +
-			matrix[14],
-	};
-}
-
-function transformPoint(point: Vec3Dto, matrix: Matrix4): RenderVec3 {
-	return vectorToRenderVec3(
-		new Vector3(point.x, point.y, point.z).applyMatrix4(matrix),
+	return transformRenderBounds(bounds, (point) =>
+		transformPointByMat4(point, matrix),
 	);
 }
 
+function transformPoint(point: Vec3Dto, matrix: RenderMat4): RenderVec3 {
+	return transformPointByMat4(point, matrix);
+}
+
 function pointsToBounds(points: RenderVec3[]): RenderBounds {
-	if (points.length === 0) {
-		throw new Error(
-			"Cannot derive render spatial bounds for an empty point set.",
-		);
-	}
-	const first = points[0];
-	if (!first) {
-		throw new Error(
-			"Cannot derive render spatial bounds without a first point.",
-		);
-	}
-	const bounds = {
-		min: { ...first },
-		max: { ...first },
-	};
-	for (const point of points.slice(1)) {
-		bounds.min.x = Math.min(bounds.min.x, point.x);
-		bounds.min.y = Math.min(bounds.min.y, point.y);
-		bounds.min.z = Math.min(bounds.min.z, point.z);
-		bounds.max.x = Math.max(bounds.max.x, point.x);
-		bounds.max.y = Math.max(bounds.max.y, point.y);
-		bounds.max.z = Math.max(bounds.max.z, point.z);
-	}
-	return bounds;
+	return renderBoundsFromPoints(points);
 }
 
 function expandPointBounds(point: RenderVec3, radius: number): RenderBounds {
@@ -375,8 +320,4 @@ function expandBounds(bounds: RenderBounds, amount: number): RenderBounds {
 			z: bounds.max.z + amount,
 		},
 	};
-}
-
-function vectorToRenderVec3(vector: Vector3): RenderVec3 {
-	return { x: vector.x, y: vector.y, z: vector.z };
 }

@@ -52,11 +52,124 @@ export function translateRenderBounds(
 	};
 }
 
+export function renderBoundsFromPoints(
+	points: readonly RenderVec3[],
+): RenderBounds {
+	if (points.length === 0) {
+		throw new Error("Cannot derive render bounds from an empty point set.");
+	}
+	const first = points[0];
+	if (!first) {
+		throw new Error("Cannot derive render bounds without a first point.");
+	}
+	const bounds: RenderBounds = {
+		min: { ...first },
+		max: { ...first },
+	};
+	for (const point of points.slice(1)) {
+		bounds.min.x = Math.min(bounds.min.x, point.x);
+		bounds.min.y = Math.min(bounds.min.y, point.y);
+		bounds.min.z = Math.min(bounds.min.z, point.z);
+		bounds.max.x = Math.max(bounds.max.x, point.x);
+		bounds.max.y = Math.max(bounds.max.y, point.y);
+		bounds.max.z = Math.max(bounds.max.z, point.z);
+	}
+	return bounds;
+}
+
+export function transformRenderBounds(
+	bounds: RenderBounds,
+	transformPoint: (point: RenderVec3) => RenderVec3,
+): RenderBounds {
+	return renderBoundsFromPoints(
+		renderBoundsCorners(bounds).map((corner) => transformPoint(corner)),
+	);
+}
+
+function renderBoundsCorners(bounds: RenderBounds): RenderVec3[] {
+	const { min, max } = bounds;
+	return [
+		{ x: min.x, y: min.y, z: min.z },
+		{ x: min.x, y: min.y, z: max.z },
+		{ x: min.x, y: max.y, z: min.z },
+		{ x: min.x, y: max.y, z: max.z },
+		{ x: max.x, y: min.y, z: min.z },
+		{ x: max.x, y: min.y, z: max.z },
+		{ x: max.x, y: max.y, z: min.z },
+		{ x: max.x, y: max.y, z: max.z },
+	];
+}
+
+export function renderBoundsContainsPoint(
+	bounds: RenderBounds,
+	point: RenderVec3,
+): boolean {
+	return (
+		point.x >= bounds.min.x &&
+		point.x <= bounds.max.x &&
+		point.y >= bounds.min.y &&
+		point.y <= bounds.max.y &&
+		point.z >= bounds.min.z &&
+		point.z <= bounds.max.z
+	);
+}
+
+export function unionRenderBounds(
+	bounds: readonly RenderBounds[],
+): RenderBounds {
+	if (bounds.length === 0) {
+		throw new Error("Cannot union an empty render-bounds set.");
+	}
+	const first = bounds[0];
+	if (!first) {
+		throw new Error("Cannot union render bounds without a first item.");
+	}
+	const union: RenderBounds = {
+		min: { ...first.min },
+		max: { ...first.max },
+	};
+	for (const next of bounds.slice(1)) {
+		union.min.x = Math.min(union.min.x, next.min.x);
+		union.min.y = Math.min(union.min.y, next.min.y);
+		union.min.z = Math.min(union.min.z, next.min.z);
+		union.max.x = Math.max(union.max.x, next.max.x);
+		union.max.y = Math.max(union.max.y, next.max.y);
+		union.max.z = Math.max(union.max.z, next.max.z);
+	}
+	return union;
+}
+
+export function renderBoundsCenter(bounds: RenderBounds): RenderVec3 {
+	return {
+		x: (bounds.min.x + bounds.max.x) / 2,
+		y: (bounds.min.y + bounds.max.y) / 2,
+		z: (bounds.min.z + bounds.max.z) / 2,
+	};
+}
+
+export function renderBoundsSize(bounds: RenderBounds): RenderVec3 {
+	return {
+		x: bounds.max.x - bounds.min.x,
+		y: bounds.max.y - bounds.min.y,
+		z: bounds.max.z - bounds.min.z,
+	};
+}
+
 export function distanceBetweenRenderVec3(
 	left: RenderVec3,
 	right: RenderVec3,
 ): number {
 	return Math.hypot(left.x - right.x, left.y - right.y, left.z - right.z);
+}
+
+export function distanceBetweenRenderVec3Squared(
+	left: RenderVec3,
+	right: RenderVec3,
+): number {
+	const dx = left.x - right.x;
+	const dy = left.y - right.y;
+	const dz = left.z - right.z;
+	return dx * dx + dy * dy + dz * dz;
 }
 
 export function renderBoundsIntersectsFrustum(

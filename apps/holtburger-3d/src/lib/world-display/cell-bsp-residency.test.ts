@@ -1,7 +1,7 @@
-import { Matrix4, Vector3 } from "three";
 import { describe, expect, it } from "vitest";
 
 import type { PreparedPolygonSetBspNode } from "../assets/types";
+import { createTranslationMat4, invertMat4 } from "./render-math";
 import {
 	landblockRenderPointToCellAcLocalPoint,
 	pointInsideCellBsp,
@@ -10,7 +10,7 @@ import {
 
 describe("cell BSP residency", () => {
 	it("converts render-local coordinates back to AC-local coordinates", () => {
-		expect(renderLocalPointToAcLocalPoint(new Vector3(1, 3, -2))).toEqual({
+		expect(renderLocalPointToAcLocalPoint({ x: 1, y: 3, z: -2 })).toEqual({
 			x: 1,
 			y: 2,
 			z: 3,
@@ -27,13 +27,13 @@ describe("cell BSP residency", () => {
 	});
 
 	it("transforms landblock render points through the inverse cell placement before CellBSP checks", () => {
-		const inversePlacement = new Matrix4()
-			.makeTranslation(10, 30, -20)
-			.invert();
+		const inversePlacement = invertMat4(
+			createTranslationMat4({ x: 10, y: 30, z: -20 }),
+		);
 
 		expect(
 			landblockRenderPointToCellAcLocalPoint(
-				new Vector3(11, 33, -22),
+				{ x: 11, y: 33, z: -22 },
 				inversePlacement,
 			),
 		).toEqual({

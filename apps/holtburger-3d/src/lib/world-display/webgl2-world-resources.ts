@@ -21,7 +21,10 @@ import {
 	type StagedWorldAssemblyGraphRecord,
 	type StagedWorldDrawUnitAssembly,
 } from "./staged-world-assembly";
-import { buildStagedTerrainGeometry } from "./staged-world-geometry";
+import {
+	buildStagedTerrainGeometry,
+	type StagedWorldIndexedGeometry,
+} from "./staged-world-geometry";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
 import type {
 	IndexedMaterialDataCache,
@@ -107,6 +110,12 @@ import {
 	type TerrainBlendPlan,
 	type TerrainBlendTextureRef,
 } from "./terrain-blend-plan";
+import {
+	buildTerrainTileLayerGeometry,
+	buildTerrainTileLayerPlan,
+	type TerrainTileLayerGeometry,
+	type TerrainTileLayerPlan,
+} from "./terrain-tile-plan";
 import type { Webgl2SceneDomain } from "./webgl2-scene-domain-targets";
 import {
 	collectDirectDrawTexturePageBindings,
@@ -844,12 +853,25 @@ function createOrReuseWebgl2TerrainTile({
 	if (!chunkOffset) {
 		return null;
 	}
-	const geometry = buildStagedTerrainGeometry(tile.mesh);
+	const id = terrainTileResourceId(tile);
+	const readiness = deriveWebgl2TerrainTileReadiness(tile);
+	const planSet = resolveTerrainBlendPlanSetForTile({
+		assetState,
+		tile,
+	});
+	const layerPlan = buildTerrainTileLayerPlan({ planSet });
+	const layerGeometry = layerPlan && layerPlan.blockers.length === 0
+		? buildTerrainTileLayerGeometry({ mesh: tile.mesh, plan: layerPlan })
+		: null;
+	const geometry = layerGeometry ?? buildStagedTerrainGeometry(tile.mesh);
 	if (geometry.triangleCount === 0) {
 		return null;
 	}
-	const id = terrainTileResourceId(tile);
-	const readiness = deriveWebgl2TerrainTileReadiness(tile);
+	const layerPlanBlockers = collectTerrainTileLayerPlanBlockers({
+		readiness,
+		planSet,
+		layerPlan,
+	});
 	const bvhBinding = deriveTerrainTileBatchBvhBinding(tile);
 	const modelMatrix = createTranslationMat4({
 		x: chunkOffset.x + tile.chunkLocalOffset.x,
@@ -859,6 +881,7 @@ function createOrReuseWebgl2TerrainTile({
 	const compatibilityDraws = createWebgl2TerrainTileCompatibilityDraws({
 		assetState,
 		gl,
+		planSet,
 		store,
 		tile,
 		materialTextureCapabilities,
@@ -883,6 +906,8 @@ function createOrReuseWebgl2TerrainTile({
 		previous.bvhItemKeys = [...bvhBinding.itemKeys];
 		previous.bvhFallbackReason = bvhBinding.fallbackReason;
 		previous.compatibilityDraws = compatibilityDraws;
+		previous.layerPlan = layerPlan;
+		previous.layerPlanBlockers = layerPlanBlockers;
 		previous.texturePageBindings = [];
 		previous.texturePageBlockers = [];
 		retainedTerrainTileIds.add(id);
@@ -911,6 +936,8 @@ function createOrReuseWebgl2TerrainTile({
 		bvhItemKeys: [...bvhBinding.itemKeys],
 		bvhFallbackReason: bvhBinding.fallbackReason,
 		compatibilityDraws,
+		layerPlan,
+		layerPlanBlockers,
 		texturePageBindings: [],
 		texturePageBlockers: [],
 	} satisfies Webgl2TerrainTileResource;
@@ -922,6 +949,7 @@ function createOrReuseWebgl2TerrainTile({
 function createWebgl2TerrainTileCompatibilityDraws({
 	assetState,
 	gl,
+	planSet,
 	store,
 	tile,
 	materialTextureCapabilities,
@@ -929,19 +957,12 @@ function createWebgl2TerrainTileCompatibilityDraws({
 }: {
 	assetState: AssetChannelState;
 	gl: WebGL2RenderingContext;
+	planSet: ReturnType<typeof resolveTerrainBlendPlanSetForTile>;
 	store: Webgl2WorldResourceStore;
 	tile: TerrainSceneModel["tiles"][number];
 	materialTextureCapabilities: MaterialTextureCapabilities;
 	textureFilteringMode: TextureFilteringMode;
 }): Webgl2TerrainTileCompatibilityDrawResource[] {
-	const planSet =
-		tile.materialResources.status === "ready"
-			? buildTerrainBlendPlanSet({
-					assetState,
-					regionNumber: tile.materialResources.regionNumber,
-					pcodes: tile.mesh.quads.map((quad) => quad.pcode),
-				})
-			: null;
 	if (!planSet) {
 		const geometry = buildStagedTerrainGeometry(tile.mesh);
 		if (geometry.triangleCount === 0) {
@@ -994,6 +1015,43 @@ function createWebgl2TerrainTileCompatibilityDraws({
 	});
 }
 
+function resolveTerrainBlendPlanSetForTile({
+	assetState,
+	tile,
+}: {
+	assetState: AssetChannelState;
+	tile: TerrainSceneModel["tiles"][number];
+}): ReturnType<typeof buildTerrainBlendPlanSet> {
+	return tile.materialResources.status === "ready"
+		? buildTerrainBlendPlanSet({
+				assetState,
+				regionNumber: tile.materialResources.regionNumber,
+				pcodes: tile.mesh.quads.map((quad) => quad.pcode),
+			})
+		: null;
+}
+
+function collectTerrainTileLayerPlanBlockers({
+	readiness,
+	planSet,
+	layerPlan,
+}: {
+	readiness: Webgl2TerrainTileReadiness;
+	planSet: ReturnType<typeof resolveTerrainBlendPlanSetForTile>;
+	layerPlan: TerrainTileLayerPlan | null;
+}): readonly string[] {
+	if (readiness.status !== "ready") {
+		return [readiness.reason];
+	}
+	if (!planSet) {
+		return ["terrain blend plan set is unavailable"];
+	}
+	if (!layerPlan) {
+		return ["terrain layer plan is unavailable"];
+	}
+	return layerPlan.blockers;
+}
+
 function createWebgl2TerrainTileCompatibilityDraw({
 	gl,
 	id,
@@ -1005,7 +1063,7 @@ function createWebgl2TerrainTileCompatibilityDraw({
 }: {
 	gl: WebGL2RenderingContext;
 	id: string;
-	geometry: ReturnType<typeof buildStagedTerrainGeometry>;
+	geometry: StagedWorldIndexedGeometry | TerrainTileLayerGeometry;
 	pcode: number | null;
 	blend: Webgl2TerrainBlendResources | null;
 	debugColor: RenderVec4 | null;
@@ -1032,11 +1090,16 @@ function createWebgl2IndexedGeometryBuffers(
 		geometry,
 	}: {
 		id: string;
-		geometry: ReturnType<typeof buildStagedTerrainGeometry>;
+	geometry: StagedWorldIndexedGeometry | TerrainTileLayerGeometry;
 	},
 ): Pick<
 	Webgl2TerrainTileResource,
-	"vertexArray" | "vertexBuffer" | "uvBuffer" | "indexBuffer" | "indexType"
+	| "vertexArray"
+	| "vertexBuffer"
+	| "uvBuffer"
+	| "layerSlotBuffer"
+	| "indexBuffer"
+	| "indexType"
 > {
 	const vertexBuffer = createWebgl2ArrayBuffer(gl, {
 		label: `${id}/positions`,
@@ -1052,6 +1115,13 @@ function createWebgl2IndexedGeometryBuffers(
 				data: geometry.uvs,
 			})
 		: null;
+	const layerSlotBuffer =
+		"layerSlots" in geometry
+			? createWebgl2ArrayBuffer(gl, {
+					label: `${id}/terrain-layer-slots`,
+					data: geometry.layerSlots,
+				})
+			: null;
 	const vertexArray = createWebgl2VertexArray(gl, {
 		label: `${id}/vertex-array`,
 		configure() {
@@ -1063,6 +1133,11 @@ function createWebgl2IndexedGeometryBuffers(
 				gl.enableVertexAttribArray(1);
 				gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
 			}
+			if (layerSlotBuffer) {
+				gl.bindBuffer(gl.ARRAY_BUFFER, layerSlotBuffer.buffer);
+				gl.enableVertexAttribArray(2);
+				gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0);
+			}
 			gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer.buffer);
 			gl.bindBuffer(gl.ARRAY_BUFFER, null);
 		},
@@ -1071,6 +1146,7 @@ function createWebgl2IndexedGeometryBuffers(
 		vertexArray,
 		vertexBuffer,
 		uvBuffer,
+		layerSlotBuffer,
 		indexBuffer,
 		indexType:
 			geometry.indices instanceof Uint32Array

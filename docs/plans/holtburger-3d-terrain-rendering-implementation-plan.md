@@ -1,6 +1,6 @@
 # Holtburger 3D Terrain Rendering Implementation Plan
 
-Status: Phase T5B complete; Phase T6 is next.
+Status: Phase T6A complete; Phase T6B/T7 shader consumption is next.
 
 Dry-run status: reviewed against the current `apps/holtburger-3d/src/lib/world-display` module graph.
 The phase order below reflects that dry run.
@@ -180,13 +180,14 @@ Execute the phases in this order:
 4. T3: introduce terrain tile resources and compatibility rendering.
 5. T4: generalize frame/submit orchestration for terrain render work.
 6. T5: add isolated terrain texture page families.
-7. T6: add terrain tile layer table and geometry attributes.
-8. T7: add explicit-gradient terrain atlas sampling.
-9. T8: add terrain draw-slice fallback.
-10. T9: delete temporary terrain compatibility paths and old pcode draw-unit paths.
-11. T10: measure and decide follow-up complexity.
-12. T11: run final cleanup and remove accumulated migration leftovers.
-13. T2: clean up broader landblock-owned descendant `renderChunk` storage.
+7. T6A: add terrain tile layer table and geometry attributes.
+8. T6B: consume terrain layer/page resources from terrain-family submit.
+9. T7: add explicit-gradient terrain atlas sampling.
+10. T8: add terrain draw-slice fallback.
+11. T9: delete temporary terrain compatibility paths and old pcode draw-unit paths.
+12. T10: measure and decide follow-up complexity.
+13. T11: run final cleanup and remove accumulated migration leftovers.
+14. T2: clean up broader landblock-owned descendant `renderChunk` storage.
 
 T11 is the living cleanup phase. As each implementation phase discovers temporary adapters, renamed
 old concepts, stale tests, or dead diagnostics, add an explicit callout to T11 unless the same phase
@@ -978,9 +979,10 @@ Cleanup impact:
   only if a later renderer-resource planner replaces compaction-family planning as the owner of
   global texture-page atlas planning.
 
-## Phase T6: Terrain Layer Table And Geometry Attributes
+## Phase T6A: Terrain Layer Table And Geometry Attributes
 
-Goal: replace pcode-split terrain draw units with one terrain layer table per terrain tile or slice.
+Goal: create the terrain tile layer-plan and geometry-resource shape needed to replace pcode-split
+terrain draw units.
 
 Primary targets:
 
@@ -1012,10 +1014,123 @@ Tasks:
 
 Acceptance criteria:
 
-- A compatible landblock terrain tile renders through one terrain draw.
-- Geometry duplication caused by one draw per pcode is removed from the happy path.
-- Terrain visual behavior matches the current WebGL2 baseline within expected atlas sampling
-  differences.
+- A compatible landblock terrain tile can be represented as one terrain-family geometry resource with
+  a layer table and per-vertex layer-slot attributes.
+- Geometry duplication caused by one draw per pcode is removable from the happy path once submit
+  consumes the new resource shape.
+- Terrain visual behavior is preserved by the temporary compatibility submit bridge until T6B/T7
+  consume the new shader inputs.
+
+Progress update, 2026-06-02:
+
+- Added `terrain-tile-plan.ts` as the first terrain-family layer planning module.
+- Added `TerrainTileLayerPlan`, `TerrainTileLayerEntry`, and `TerrainTileLayerGeometry`.
+- The initial layer table treats each resolved pcode `TerrainBlendPlan` as one terrain layer entry.
+  This preserves the current pcode blend semantics while giving the renderer a tile-level table shape
+  to consume.
+- Layer entries are assigned deterministic slots by sorted pcode and are capped at the agreed
+  8-entry limit.
+- Overflow now produces an explicit layer-plan blocker instead of silently preserving or inventing a
+  retained fallback path.
+- Added final terrain-family geometry construction that duplicates vertices per terrain triangle,
+  writes quad-local UVs, writes a per-vertex layer-slot attribute, and indexes linearly. This is the
+  expected geometry shape for the atlas/layer-table shader because terrain UVs and layer slots are
+  quad-local.
+- Wired terrain tile resource sync to build the tile layer plan once per tile, use layer geometry for
+  the main terrain tile resource when the plan fits, retain blockers when it does not, and keep the
+  compatibility pcode draws as the temporary submit bridge.
+- Added `layerPlan`, `layerPlanBlockers`, and `layerSlotBuffer` to terrain tile resources and graph
+  signatures.
+- Added focused planner tests for stable layer slot assignment, layer limit blockers, and duplicated
+  terrain-family geometry attributes.
+- Extended resource tests to assert fallback-debug terrain layer blockers.
+
+Decisions:
+
+- T6A does not flip terrain submit or shader sampling yet. The main terrain tile resource now carries
+  the final geometry/layer-plan shape, but rendering still uses compatibility draws until T6B/T7 can
+  bind layer tables and atlas pages in the terrain-family shader.
+- Use one pcode blend plan as one initial layer entry. That is the least speculative interpretation
+  of the current behavior and avoids prematurely decomposing pcode overlays/roads into a different
+  semantic table.
+- Keep blocked layer plans resident as terrain tile blockers and fall back to the old whole-tile
+  geometry for the main resource until T8 draw slicing exists. This is migration-state retention, not
+  a final fallback codepath.
+- The layer-slot attribute is currently uploaded as a float attribute. T6B may keep this for WebGL2
+  simplicity or switch to integer attributes if the shader/resource module benefits from stricter
+  typing.
+
+Course corrections and refinements:
+
+- Split T6 into T6A and T6B in practice. T6A introduced the layer-table and geometry resource shape;
+  T6B should add a terrain-family submit/shader path that actually consumes `layerPlan`,
+  `texturePageBindings`, and `layerSlotBuffer`.
+- T6B should move terrain program/shader construction out of
+  `webgl2-world-display-renderer-impl.ts` if practical before adding more terrain-specific uniforms.
+- T6B should define the concrete uniform/storage representation for up to 8 layer entries, including
+  color page indices, mask page indices, atlas rects, rotations, tiling, and per-layer road/overlay
+  counts.
+- T6B/T7 must resolve whether `terrain-mask` stays on the current RGBA atlas generation path or moves
+  to a terrain-specific data upload. The current T5B handoff deliberately kept family isolation while
+  deferring upload semantics.
+- T8 remains responsible for turning layer overflow blockers into draw slices. Until then, overflow
+  is reported and the compatibility submit bridge keeps current rendering behavior.
+
+Validation:
+
+- `npm run test:ts -- terrain-tile-plan webgl2-world-resources`
+- `npm run check`
+- `npm run lint`
+
+Cleanup impact:
+
+- `Webgl2TerrainTileResource.layerPlan` and `layerPlanBlockers` are expected to survive into the
+  final terrain-family path, but their exact table-entry payload should be audited in T11 after the
+  shader consumes them.
+- `layerSlotBuffer` on compatibility draws is always `null` and exists only because the shared terrain
+  buffer helper returns the same buffer set. Delete or split that field when compatibility draws are
+  removed in T9/T11.
+- The old `buildStagedTerrainGeometry(tile.mesh)` whole-tile resource path remains only for
+  unresolved/blocked migration states. T8/T9 should replace this with draw slices or final diagnostic
+  behavior, then T11 should delete any hollow helper shape that only exists for the migration bridge.
+
+## Phase T6B: Terrain Family Submit Consumes Layer And Page Resources
+
+Goal: make the terrain-family submit/shader path consume the T6A layer plan, layer-slot geometry, and
+T5B page bindings for the one-draw terrain tile happy path.
+
+Primary targets:
+
+- terrain WebGL2 shader/program source, moved out of
+  `webgl2-world-display-renderer-impl.ts` if practical
+- `apps/holtburger-3d/src/lib/world-display/webgl2/families/terrain-family-submit.ts`
+- `apps/holtburger-3d/src/lib/world-display/webgl2/resources/terrain-tile-resources.ts`
+- `apps/holtburger-3d/src/lib/world-display/webgl2-world-submit.ts`
+- `apps/holtburger-3d/src/lib/world-display/terrain-tile-plan.ts`
+
+Tasks:
+
+- Add a terrain-family submit path that binds terrain tile resources directly instead of iterating
+  `compatibilityDraws` for the one-draw happy path.
+- Define the concrete WebGL2 uniform/attribute representation for up to 8 layer entries, including:
+  - color page texture indices and atlas rects;
+  - mask page texture indices and atlas rects;
+  - pcode-derived base, overlay, road, mask rotation, tiling, and road/overlay count fields;
+  - detail binding placeholder or explicit blocker.
+- Bind and validate `layerSlotBuffer` as the shader's layer-entry selector.
+- Consume `texturePageBindings` and `texturePageBlockers` from `Webgl2TerrainTileResource`.
+- Keep compatibility submit only for unresolved/blocked migration states until T8/T9 remove it.
+- Add tests for one-draw terrain tile submit planning and blocker routing.
+
+Acceptance criteria:
+
+- A compatible landblock terrain tile submits through one terrain-family draw call using the T6A
+  layer geometry.
+- The one-draw path does not depend on pcode-filtered compatibility draws.
+- Terrain page blockers and layer blockers prevent the new path from silently binding incomplete
+  resources.
+- Current compatibility rendering remains available only as named migration debt until draw slices
+  and final cleanup land.
 
 ## Phase T7: Terrain Atlas Sampling Shader
 

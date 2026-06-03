@@ -1,5 +1,6 @@
 import { formatHex32 } from "../../../landblocks";
 import type { TerrainBlendPlan } from "../../terrain-blend-plan";
+import type { TerrainTileLayerPlan } from "../../terrain-tile-plan";
 import type { RenderMat4, RenderVec4 } from "../../render-math";
 import type { RenderBvhItemKey } from "../../prepared-bvh-visibility";
 import type { StagedWorldIndexedGeometry } from "../../staged-world-geometry";
@@ -52,6 +53,7 @@ export interface Webgl2TerrainTileCompatibilityDrawResource {
 	vertexArray: Webgl2VertexArrayResource;
 	vertexBuffer: Webgl2BufferResource;
 	uvBuffer: Webgl2BufferResource | null;
+	layerSlotBuffer: Webgl2BufferResource | null;
 	indexBuffer: Webgl2BufferResource;
 	indexType: GLenum;
 	vertexCount: number;
@@ -71,6 +73,7 @@ export interface Webgl2TerrainTileResource {
 	vertexArray: Webgl2VertexArrayResource;
 	vertexBuffer: Webgl2BufferResource;
 	uvBuffer: Webgl2BufferResource | null;
+	layerSlotBuffer: Webgl2BufferResource | null;
 	indexBuffer: Webgl2BufferResource;
 	indexType: GLenum;
 	vertexCount: number;
@@ -81,6 +84,8 @@ export interface Webgl2TerrainTileResource {
 	bvhItemKeys: RenderBvhItemKey[];
 	bvhFallbackReason: string | null;
 	compatibilityDraws: Webgl2TerrainTileCompatibilityDrawResource[];
+	layerPlan: TerrainTileLayerPlan | null;
+	layerPlanBlockers: readonly string[];
 	texturePageBindings: Webgl2TerrainTileTexturePageBinding[];
 	texturePageBlockers: readonly string[];
 }
@@ -149,6 +154,8 @@ export function describeTerrainTileGraphSignature(
 		`compat:${resource.compatibilityDraws
 			.map((draw) => `${draw.id}:${draw.geometrySignature}:${draw.blend ? "blend" : "debug"}`)
 			.join(",")}`,
+		`layer:${resource.layerPlan?.signature ?? "none"}`,
+		`layer-blockers:${resource.layerPlanBlockers.join(",")}`,
 		`pages:${resource.texturePageBindings
 			.map((binding) => `${binding.family}:${binding.atlasEntryKey}`)
 			.join(",")}`,
@@ -181,6 +188,7 @@ export function destroyWebgl2TerrainTileResource(
 	resource.vertexArray.dispose();
 	resource.vertexBuffer.dispose();
 	resource.uvBuffer?.dispose();
+	resource.layerSlotBuffer?.dispose();
 	resource.indexBuffer.dispose();
 	for (const draw of resource.compatibilityDraws) {
 		destroyWebgl2TerrainTileCompatibilityDraw(draw);
@@ -193,6 +201,7 @@ export function destroyWebgl2TerrainTileCompatibilityDraw(
 	draw.vertexArray.dispose();
 	draw.vertexBuffer.dispose();
 	draw.uvBuffer?.dispose();
+	draw.layerSlotBuffer?.dispose();
 	draw.indexBuffer.dispose();
 }
 

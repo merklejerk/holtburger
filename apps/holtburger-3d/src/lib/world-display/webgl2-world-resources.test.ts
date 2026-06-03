@@ -125,6 +125,10 @@ describe("webgl2 world resources", () => {
 			"terrain tile has no terrain blend page inputs",
 			"terrain detail page binding is not available before terrain layer planning",
 		]);
+		expect(store.terrainTiles[0]?.layerPlan).toBeNull();
+		expect(store.terrainTiles[0]?.layerPlanBlockers).toEqual([
+			"terrain material resources are unresolved",
+		]);
 		expect(store.terrainRenderCandidates).toEqual([
 			{
 				id: "terrain-tile/terrain/12340000",

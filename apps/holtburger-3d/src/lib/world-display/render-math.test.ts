@@ -5,6 +5,7 @@ import {
 	buildSceneCameraViewMatrix,
 	createTranslationMat4,
 	multiplyMat4,
+	multiplyMat4Into,
 } from "./render-math";
 
 describe("multiplyMat4", () => {
@@ -17,6 +18,32 @@ describe("multiplyMat4", () => {
 		expect(matrix[12]).toBe(11);
 		expect(matrix[13]).toBe(22);
 		expect(matrix[14]).toBe(33);
+	});
+
+	it("writes multiplication results into a caller-owned output matrix", () => {
+		const output = new Float32Array(16);
+		const returnedOutput = multiplyMat4Into(
+			output,
+			createTranslationMat4({ x: 10, y: 20, z: 30 }),
+			createTranslationMat4({ x: 1, y: 2, z: 3 }),
+		);
+
+		expect(returnedOutput).toBe(output);
+		expect(output[12]).toBe(11);
+		expect(output[13]).toBe(22);
+		expect(output[14]).toBe(33);
+	});
+
+	it("supports output aliasing an input matrix", () => {
+		const left = createTranslationMat4({ x: 10, y: 20, z: 30 });
+		const expected = multiplyMat4(
+			left,
+			createTranslationMat4({ x: 1, y: 2, z: 3 }),
+		);
+
+		multiplyMat4Into(left, left, createTranslationMat4({ x: 1, y: 2, z: 3 }));
+
+		expect(Array.from(left)).toEqual(Array.from(expected));
 	});
 });
 

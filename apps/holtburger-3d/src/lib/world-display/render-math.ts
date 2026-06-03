@@ -18,15 +18,81 @@ export function createTranslationMat4(offset: Vec3Dto): RenderMat4 {
 
 export function multiplyMat4(left: RenderMat4, right: RenderMat4): RenderMat4 {
 	const output = new Float32Array(16);
-	for (let column = 0; column < 4; column += 1) {
-		for (let row = 0; row < 4; row += 1) {
-			output[column * 4 + row] =
-				left[row] * right[column * 4] +
-				left[4 + row] * right[column * 4 + 1] +
-				left[8 + row] * right[column * 4 + 2] +
-				left[12 + row] * right[column * 4 + 3];
-		}
-	}
+	return multiplyMat4Into(output, left, right);
+}
+
+export function multiplyMat4Into(
+	output: RenderMat4,
+	left: RenderMat4,
+	right: RenderMat4,
+): RenderMat4 {
+	const left00 = left[0];
+	const left01 = left[1];
+	const left02 = left[2];
+	const left03 = left[3];
+	const left10 = left[4];
+	const left11 = left[5];
+	const left12 = left[6];
+	const left13 = left[7];
+	const left20 = left[8];
+	const left21 = left[9];
+	const left22 = left[10];
+	const left23 = left[11];
+	const left30 = left[12];
+	const left31 = left[13];
+	const left32 = left[14];
+	const left33 = left[15];
+
+	const right00 = right[0];
+	const right01 = right[1];
+	const right02 = right[2];
+	const right03 = right[3];
+	const right10 = right[4];
+	const right11 = right[5];
+	const right12 = right[6];
+	const right13 = right[7];
+	const right20 = right[8];
+	const right21 = right[9];
+	const right22 = right[10];
+	const right23 = right[11];
+	const right30 = right[12];
+	const right31 = right[13];
+	const right32 = right[14];
+	const right33 = right[15];
+
+	output[0] =
+		left00 * right00 + left10 * right01 + left20 * right02 + left30 * right03;
+	output[1] =
+		left01 * right00 + left11 * right01 + left21 * right02 + left31 * right03;
+	output[2] =
+		left02 * right00 + left12 * right01 + left22 * right02 + left32 * right03;
+	output[3] =
+		left03 * right00 + left13 * right01 + left23 * right02 + left33 * right03;
+	output[4] =
+		left00 * right10 + left10 * right11 + left20 * right12 + left30 * right13;
+	output[5] =
+		left01 * right10 + left11 * right11 + left21 * right12 + left31 * right13;
+	output[6] =
+		left02 * right10 + left12 * right11 + left22 * right12 + left32 * right13;
+	output[7] =
+		left03 * right10 + left13 * right11 + left23 * right12 + left33 * right13;
+	output[8] =
+		left00 * right20 + left10 * right21 + left20 * right22 + left30 * right23;
+	output[9] =
+		left01 * right20 + left11 * right21 + left21 * right22 + left31 * right23;
+	output[10] =
+		left02 * right20 + left12 * right21 + left22 * right22 + left32 * right23;
+	output[11] =
+		left03 * right20 + left13 * right21 + left23 * right22 + left33 * right23;
+	output[12] =
+		left00 * right30 + left10 * right31 + left20 * right32 + left30 * right33;
+	output[13] =
+		left01 * right30 + left11 * right31 + left21 * right32 + left31 * right33;
+	output[14] =
+		left02 * right30 + left12 * right31 + left22 * right32 + left32 * right33;
+	output[15] =
+		left03 * right30 + left13 * right31 + left23 * right32 + left33 * right33;
+
 	return output;
 }
 

@@ -1,6 +1,9 @@
-import { multiplyMat4, type RenderMat4 } from "../../render-math";
+import { multiplyMat4Into, type RenderMat4 } from "../../render-math";
 import type { Vec3Dto } from "../../../host/contracts";
-import { createWebgl2Program, type Webgl2ProgramResource } from "../../webgl2-gl";
+import {
+	createWebgl2Program,
+	type Webgl2ProgramResource,
+} from "../../webgl2-gl";
 import type { Webgl2StateCache } from "../../webgl2-state-cache";
 import {
 	describeTerrainBlendTextureAtlasEntryKey,
@@ -138,6 +141,7 @@ export function submitWebgl2TerrainFamilyTiles({
 		cameraPosition.y,
 		cameraPosition.z,
 	);
+	const modelViewProjection = new Float32Array(16);
 	for (const tile of terrainTiles) {
 		const submitPlan = createTerrainTileFamilySubmitPlan(tile, generation);
 		if (!submitPlan) {
@@ -147,10 +151,14 @@ export function submitWebgl2TerrainFamilyTiles({
 			].slice(0, 8);
 			continue;
 		}
-		if (stateCache.bindTexture2D(0, submitPlan.colorAtlasTexture.texture.texture)) {
+		if (
+			stateCache.bindTexture2D(0, submitPlan.colorAtlasTexture.texture.texture)
+		) {
 			// Counted in aggregate state metrics by the world submitter.
 		}
-		if (stateCache.bindTexture2D(1, submitPlan.maskAtlasTexture.texture.texture)) {
+		if (
+			stateCache.bindTexture2D(1, submitPlan.maskAtlasTexture.texture.texture)
+		) {
 			// Counted in aggregate state metrics by the world submitter.
 		}
 		if (
@@ -180,13 +188,13 @@ export function submitWebgl2TerrainFamilyTiles({
 		gl.uniformMatrix4fv(
 			program.uniforms.uModelViewProjection,
 			false,
-			multiplyMat4(viewProjectionMatrix, tile.modelMatrix),
+			multiplyMat4Into(
+				modelViewProjection,
+				viewProjectionMatrix,
+				tile.modelMatrix,
+			),
 		);
-		gl.uniformMatrix4fv(
-			program.uniforms.uModelMatrix,
-			false,
-			tile.modelMatrix,
-		);
+		gl.uniformMatrix4fv(program.uniforms.uModelMatrix, false, tile.modelMatrix);
 		gl.drawElements(gl.TRIANGLES, tile.vertexCount, tile.indexType, 0);
 	}
 	return metrics;
@@ -216,13 +224,14 @@ function createTerrainTileFamilySubmitPlan(
 		tile.texturePageBindings,
 		"terrain-mask",
 	);
-	const maskAtlasTexture = maskTextureIndex === null
-		? colorAtlasTexture
-		: generation.textures.find(
-			(texture) =>
-				texture.family === "terrain-mask" &&
-				texture.textureIndex === maskTextureIndex,
-		) ?? null;
+	const maskAtlasTexture =
+		maskTextureIndex === null
+			? colorAtlasTexture
+			: (generation.textures.find(
+					(texture) =>
+						texture.family === "terrain-mask" &&
+						texture.textureIndex === maskTextureIndex,
+				) ?? null);
 	if (!maskAtlasTexture) {
 		return null;
 	}
@@ -230,13 +239,14 @@ function createTerrainTileFamilySubmitPlan(
 		tile.texturePageBindings,
 		"terrain-detail",
 	);
-	const detailAtlasTexture = detailTextureIndex === null
-		? null
-		: generation.detailTextures.find(
-				(texture) =>
-					texture.family === "terrain-detail" &&
-					texture.textureIndex === detailTextureIndex,
-			) ?? null;
+	const detailAtlasTexture =
+		detailTextureIndex === null
+			? null
+			: (generation.detailTextures.find(
+					(texture) =>
+						texture.family === "terrain-detail" &&
+						texture.textureIndex === detailTextureIndex,
+				) ?? null);
 	if (detailTextureIndex !== null && !detailAtlasTexture) {
 		return null;
 	}
@@ -294,7 +304,9 @@ function uploadTerrainLayerUniforms(
 			TERRAIN_FAMILY_MAX_OVERLAYS_PER_LAYER,
 	);
 	const overlayCounts = new Int32Array(WEBGL2_TERRAIN_FAMILY_MAX_LAYER_ENTRIES);
-	const roadColorRects = new Float32Array(WEBGL2_TERRAIN_FAMILY_MAX_LAYER_ENTRIES * 4);
+	const roadColorRects = new Float32Array(
+		WEBGL2_TERRAIN_FAMILY_MAX_LAYER_ENTRIES * 4,
+	);
 	const roadMaskRects = new Float32Array(
 		WEBGL2_TERRAIN_FAMILY_MAX_LAYER_ENTRIES *
 			TERRAIN_FAMILY_MAX_ROADS_PER_LAYER *
@@ -309,7 +321,10 @@ function uploadTerrainLayerUniforms(
 
 	for (const layer of tile.layerPlan.layerEntries) {
 		baseColorRects.set(
-			resolveTerrainBindingRect(tile, describeTerrainBlendTextureAtlasEntryKey(layer.plan.base)),
+			resolveTerrainBindingRect(
+				tile,
+				describeTerrainBlendTextureAtlasEntryKey(layer.plan.base),
+			),
 			layer.slot * 4,
 		);
 		baseTilings[layer.slot] = layer.plan.base.tiling;
@@ -320,7 +335,8 @@ function uploadTerrainLayerUniforms(
 		for (const [overlayIndex, overlay] of layer.plan.overlays
 			.slice(0, TERRAIN_FAMILY_MAX_OVERLAYS_PER_LAYER)
 			.entries()) {
-			const index = layer.slot * TERRAIN_FAMILY_MAX_OVERLAYS_PER_LAYER + overlayIndex;
+			const index =
+				layer.slot * TERRAIN_FAMILY_MAX_OVERLAYS_PER_LAYER + overlayIndex;
 			overlayColorRects.set(
 				resolveTerrainBindingRect(
 					tile,
@@ -410,7 +426,10 @@ function uploadTerrainDetailUniforms(
 		submitPlan.detailAtlasTexture?.width ?? 1,
 		submitPlan.detailAtlasTexture?.height ?? 1,
 	);
-	gl.uniform1f(program.uniforms.uDetailTiling, tile.detailPlan?.overlay.role.tiling ?? 1);
+	gl.uniform1f(
+		program.uniforms.uDetailTiling,
+		tile.detailPlan?.overlay.role.tiling ?? 1,
+	);
 	gl.uniform1f(
 		program.uniforms.uDetailFadeNear,
 		tile.detailPlan?.overlay.role.fadeNear ?? 0,
@@ -420,7 +439,6 @@ function uploadTerrainDetailUniforms(
 		tile.detailPlan?.overlay.role.fadeFar ?? 1,
 	);
 }
-
 
 function resolveTerrainBindingRect(
 	tile: Webgl2TerrainFamilyDrawableResource,

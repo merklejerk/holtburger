@@ -1,10 +1,7 @@
 import { formatHex32 } from "../../../landblocks";
-import type {
-	TerrainBlendPlan,
-	TerrainBlendTextureRef,
-} from "../../terrain-blend-plan";
+import type { TerrainBlendTextureRef } from "../../terrain-blend-plan";
 import type { TerrainTileLayerPlan } from "../../terrain-tile-plan";
-import type { RenderMat4, RenderVec4 } from "../../render-math";
+import type { RenderMat4 } from "../../render-math";
 import type { RenderBvhItemKey } from "../../prepared-bvh-visibility";
 import type { StagedWorldIndexedGeometry } from "../../staged-world-geometry";
 import type { TexturePageFamily } from "../../texture-pages/texture-page-atlas-planner";
@@ -13,32 +10,8 @@ import type { PreparedTerrainMesh } from "../../../assets/types";
 import type { Webgl2SceneDomain } from "../../webgl2-scene-domain-targets";
 import type {
 	Webgl2BufferResource,
-	Webgl2Texture2DResource,
 	Webgl2VertexArrayResource,
 } from "../../webgl2-gl";
-
-export interface Webgl2TerrainTextureBinding {
-	key: string;
-	texture: Webgl2Texture2DResource;
-	tiling: number;
-	wrapS: "clamp" | "repeat";
-	wrapT: "clamp" | "repeat";
-}
-
-export interface Webgl2TerrainBlendResources {
-	plan: TerrainBlendPlan;
-	base: Webgl2TerrainTextureBinding;
-	overlays: readonly {
-		terrain: Webgl2TerrainTextureBinding;
-		alpha: Webgl2TerrainTextureBinding;
-		rotation: number;
-	}[];
-	roads: readonly {
-		road: Webgl2TerrainTextureBinding;
-		alpha: Webgl2TerrainTextureBinding;
-		rotation: number;
-	}[];
-}
 
 export type Webgl2TerrainTileReadiness =
 	| {
@@ -49,23 +22,6 @@ export type Webgl2TerrainTileReadiness =
 			status: "fallback-debug";
 			reason: string;
 	  };
-
-export interface Webgl2TerrainTileCompatibilityDrawResource {
-	id: string;
-	pcode: number | null;
-	geometrySignature: string;
-	vertexArray: Webgl2VertexArrayResource;
-	vertexBuffer: Webgl2BufferResource;
-	uvBuffer: Webgl2BufferResource | null;
-	layerSlotBuffer: Webgl2BufferResource | null;
-	indexBuffer: Webgl2BufferResource;
-	indexType: GLenum;
-	vertexCount: number;
-	triangleCount: number;
-	blend: Webgl2TerrainBlendResources | null;
-	debugColor: RenderVec4 | null;
-	preparedAssetIds: readonly string[];
-}
 
 export interface Webgl2TerrainTileResource {
 	id: string;
@@ -88,7 +44,6 @@ export interface Webgl2TerrainTileResource {
 	mesh: PreparedTerrainMesh;
 	bvhItemKeys: RenderBvhItemKey[];
 	bvhFallbackReason: string | null;
-	compatibilityDraws: Webgl2TerrainTileCompatibilityDrawResource[];
 	layerPlan: TerrainTileLayerPlan | null;
 	layerPlanBlockers: readonly string[];
 	texturePageBindings: Webgl2TerrainTileTexturePageBinding[];
@@ -145,7 +100,6 @@ export interface Webgl2TerrainTileRenderCandidate {
 	sceneDomain: Webgl2SceneDomain;
 	bvhItemKeys: readonly RenderBvhItemKey[];
 	bvhFallbackReason: string | null;
-	compatibilityDrawCount: number;
 }
 
 export function terrainTileResourceId(
@@ -164,7 +118,6 @@ export function deriveTerrainTileRenderCandidate(
 		sceneDomain: "exterior",
 		bvhItemKeys: [...resource.bvhItemKeys],
 		bvhFallbackReason: resource.bvhFallbackReason,
-		compatibilityDrawCount: resource.compatibilityDraws.length,
 	};
 }
 
@@ -192,9 +145,6 @@ export function describeTerrainTileGraphSignature(
 		resource.readiness.status === "ready"
 			? resource.readiness.terrainMaterialAssetId
 			: resource.readiness.reason,
-		`compat:${resource.compatibilityDraws
-			.map((draw) => `${draw.id}:${draw.geometrySignature}:${draw.blend ? "blend" : "debug"}`)
-			.join(",")}`,
 		`layer:${resource.layerPlan?.signature ?? "none"}`,
 		`layer-blockers:${resource.layerPlanBlockers.join(",")}`,
 		`pages:${resource.texturePageBindings
@@ -210,24 +160,6 @@ export function describeTerrainTileGraphSignature(
 			.join(",")}`,
 		`bvh:${resource.bvhItemKeys.join(",")}`,
 	].join("|");
-}
-
-export function collectTerrainTileCompatibilityTextureKeys(
-	resource: Webgl2TerrainTileResource,
-): readonly string[] {
-	return resource.compatibilityDraws.flatMap((draw) => {
-		if (!draw.blend) {
-			return [];
-		}
-		return [
-			draw.blend.base.key,
-			...draw.blend.overlays.flatMap((overlay) => [
-				overlay.terrain.key,
-				overlay.alpha.key,
-			]),
-			...draw.blend.roads.flatMap((road) => [road.road.key, road.alpha.key]),
-		];
-	});
 }
 
 export function describeTerrainBlendTextureAtlasEntryKey(
@@ -457,9 +389,6 @@ export function destroyWebgl2TerrainTileResource(
 	for (const slice of resource.drawSlices) {
 		destroyWebgl2TerrainTileDrawSlice(slice);
 	}
-	for (const draw of resource.compatibilityDraws) {
-		destroyWebgl2TerrainTileCompatibilityDraw(draw);
-	}
 }
 
 export function destroyWebgl2TerrainTileDrawSlice(
@@ -470,16 +399,6 @@ export function destroyWebgl2TerrainTileDrawSlice(
 	slice.uvBuffer.dispose();
 	slice.layerSlotBuffer.dispose();
 	slice.indexBuffer.dispose();
-}
-
-export function destroyWebgl2TerrainTileCompatibilityDraw(
-	draw: Webgl2TerrainTileCompatibilityDrawResource,
-): void {
-	draw.vertexArray.dispose();
-	draw.vertexBuffer.dispose();
-	draw.uvBuffer?.dispose();
-	draw.layerSlotBuffer?.dispose();
-	draw.indexBuffer.dispose();
 }
 
 function hashFloat32Array(values: Float32Array): string {

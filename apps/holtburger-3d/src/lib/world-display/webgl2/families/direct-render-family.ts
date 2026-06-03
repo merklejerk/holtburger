@@ -7,7 +7,6 @@ import type {
 	Webgl2WorldDrawUnit,
 } from "../../webgl2-world-resources";
 import type { TexturePageBinding } from "../../texture-pages/texture-page-binding";
-import type { Webgl2TerrainBlendResources } from "../resources/terrain-tile-resources";
 
 export type GeometrySubmissionLayout =
 	| "position"
@@ -33,7 +32,6 @@ type DirectFamilyMaterialPayload =
 	| DirectFlatConstantColorPayload
 	| DirectRgbaTexturePagePayload
 	| DirectIndexedPalettedPayload
-	| DirectTerrainBlendPayload
 	| DirectDebugPipelinePayload;
 
 interface DirectFlatConstantColorPayload {
@@ -61,12 +59,6 @@ interface DirectIndexedPalettedPayload {
 	detailOverlay: Webgl2DetailOverlayResources | null;
 	texturePageBindings: readonly TexturePageBinding[];
 	materialBehavior: LegacyMaterialBehaviorDto | null;
-}
-
-interface DirectTerrainBlendPayload {
-	family: "terrain-blend";
-	materialKey: string;
-	terrainBlend: Webgl2TerrainBlendResources;
 }
 
 interface DirectDebugPipelinePayload {
@@ -124,13 +116,6 @@ function mapDirectFamilyMaterialPayload(
 			color: drawUnit.color,
 			debugKind: drawUnit.kind,
 			materialBehavior: drawUnit.materialBehavior,
-		};
-	}
-	if (drawUnit.terrainBlend) {
-		return {
-			family: "terrain-blend",
-			materialKey: drawUnit.materialKey,
-			terrainBlend: drawUnit.terrainBlend,
 		};
 	}
 	if (drawUnit.indexedMaterial) {

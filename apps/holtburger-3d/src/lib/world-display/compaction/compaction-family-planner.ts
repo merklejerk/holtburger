@@ -28,7 +28,6 @@ type CompactionFamilyBypassReason =
 	| "unsupported-indexed-paletted-material"
 	| "unsupported-indexed-texture-page-policy"
 	| "indexed-alpha-policy-unsupported"
-	| "unsupported-terrain-material"
 	| "debug-pipeline-material"
 	| "unsupported-material-state"
 	| "detail-overlay"
@@ -38,8 +37,7 @@ type CompactionFamilyBypassReason =
 type CompactionMaterialKind =
 	| "flat"
 	| "direct-texture"
-	| "indexed-paletted"
-	| "terrain-blend";
+	| "indexed-paletted";
 
 export type CompactionMaterialFamily =
 	| "flat-constant-color"
@@ -47,7 +45,6 @@ export type CompactionMaterialFamily =
 	| "transparent-blended"
 	| "opacity-translucent"
 	| "indexed-paletted"
-	| "terrain-blend"
 	| "debug-pipeline"
 	| "unknown-unsupported";
 
@@ -68,7 +65,6 @@ export type CompactionMaterialBlocker =
 	| "indexed-alpha-policy-unsupported"
 	| "missing-compacted-transparent-blended-family"
 	| "missing-compacted-opacity-translucent-family"
-	| "missing-compacted-terrain-family"
 	| "debug-pipeline-material"
 	| "detail-overlay"
 	| "missing-detail-atlas-entry"
@@ -958,9 +954,6 @@ export function createCompactionEligibility(options: {
 				materialBlockers.push("indexed-alpha-policy-unsupported");
 			}
 			break;
-		case "terrain-blend":
-			materialBlockers.push("missing-compacted-terrain-family");
-			break;
 		case "debug-pipeline":
 			materialBlockers.push("debug-pipeline-material");
 			break;
@@ -1130,14 +1123,6 @@ function createMaterialCompactionBypass(
 				blocker,
 				detail: `opacity/translucent material ${drawUnit.materialKey} has no compacted translucent material family`,
 			};
-		case "missing-compacted-terrain-family":
-			return {
-				drawUnitId: drawUnit.id,
-				reason: "unsupported-terrain-material",
-				blockerKind: "material",
-				blocker,
-				detail: `terrain material ${drawUnit.materialKey} belongs to the terrain pipeline`,
-			};
 		case "debug-pipeline-material":
 			return {
 				drawUnitId: drawUnit.id,
@@ -1214,8 +1199,6 @@ function classifyCompactionMaterialFamily(options: {
 			return "flat-constant-color";
 		case "indexed-paletted":
 			return "indexed-paletted";
-		case "terrain-blend":
-			return "terrain-blend";
 		case "direct-texture":
 			return classifyDirectTextureCompactionMaterialFamily(
 				options.materialBehavior,

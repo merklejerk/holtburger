@@ -85,7 +85,7 @@ describe("webgl2 world resources", () => {
 		expect(gl.deletedBuffers).toHaveLength(0);
 	});
 
-	it("realizes terrain tile resources beside the temporary compatibility draw-unit path", () => {
+	it("realizes terrain tile resources without generic draw-unit compatibility output", () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
 		const graph = new RendererResourceGraph();
@@ -107,7 +107,7 @@ describe("webgl2 world resources", () => {
 
 		expect(store.terrainTiles).toHaveLength(1);
 		expect(store.terrainTileCount).toBe(1);
-		expect(store.terrainTileCompatibilityDrawCount).toBe(1);
+		expect(store.terrainDrawUnitCount).toBe(0);
 		expect(store.terrainTiles[0]).toMatchObject({
 			id: "terrain-tile/terrain/12340000",
 			landblockId: 0x12340000,
@@ -146,7 +146,6 @@ describe("webgl2 world resources", () => {
 				sceneDomain: "exterior",
 				bvhItemKeys: ["terrain:landblock:12340000:quad:0"],
 				bvhFallbackReason: null,
-				compatibilityDrawCount: 1,
 			},
 		]);
 		expect(graph.retainedPreparedAssetIds()).toEqual(["terrain/12340000"]);

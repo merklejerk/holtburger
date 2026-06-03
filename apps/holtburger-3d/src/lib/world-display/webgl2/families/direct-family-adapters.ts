@@ -10,7 +10,6 @@ import type {
 	Webgl2FlatWorldProgram,
 	Webgl2IndexedP16WorldProgram,
 	Webgl2IndexedP8WorldProgram,
-	Webgl2TerrainBlendWorldProgram,
 	Webgl2TexturedWorldProgram,
 	Webgl2WorldSubmitMetrics,
 } from "../../webgl2-world-submit";
@@ -18,7 +17,6 @@ import type {
 type Webgl2DirectWorldProgram =
 	| Webgl2FlatWorldProgram
 	| Webgl2TexturedWorldProgram
-	| Webgl2TerrainBlendWorldProgram
 	| Webgl2IndexedP8WorldProgram
 	| Webgl2IndexedP16WorldProgram;
 
@@ -37,8 +35,7 @@ export type Webgl2DirectProgramKind =
 	| "flat"
 	| "texture"
 	| "indexed-p8"
-	| "indexed-p16"
-	| "terrain";
+	| "indexed-p16";
 
 export interface DirectFamilyDrawTextureUnits {
 	rgbaTexture: 0;
@@ -46,16 +43,6 @@ export interface DirectFamilyDrawTextureUnits {
 	indexedTexels: 0;
 	indexedPalette: 1;
 	indexedDetail: 2;
-	terrainBase: 0;
-	terrainOverlay0: 1;
-	terrainOverlay1: 2;
-	terrainOverlay2: 3;
-	terrainOverlayAlpha0: 4;
-	terrainOverlayAlpha1: 5;
-	terrainOverlayAlpha2: 6;
-	terrainRoad: 7;
-	terrainRoadAlpha0: 8;
-	terrainRoadAlpha1: 9;
 }
 
 export interface DirectFamilyDrawContext {
@@ -74,7 +61,6 @@ export interface DirectFamilyUniformCache {
 export interface Webgl2DirectDrawPrograms {
 	flat: Webgl2FlatWorldProgram;
 	rgbaTexturePage: Webgl2TexturedWorldProgram;
-	terrainBlend: Webgl2TerrainBlendWorldProgram;
 	indexedP8: Webgl2IndexedP8WorldProgram;
 	indexedP16: Webgl2IndexedP16WorldProgram;
 }
@@ -125,23 +111,10 @@ export interface Webgl2IndexedDirectDrawRoute extends Webgl2DirectDrawRouteBase 
 	detailTextureUnit: typeof DIRECT_FAMILY_DRAW_TEXTURE_UNITS.indexedDetail;
 }
 
-interface Webgl2TerrainDirectDrawRoute extends Webgl2DirectDrawRouteBase {
-	programKind: "terrain";
-	activeProgram: Webgl2TerrainBlendWorldProgram;
-	indexedProgram: null;
-	colorProgram: null;
-	alphaProgram: null;
-	detailProgram: null;
-	texturePageBinding: null;
-	activeBaseTexture: null;
-	detailTextureUnit: null;
-}
-
 export type Webgl2DirectDrawRoute =
 	| Webgl2FlatDirectDrawRoute
 	| Webgl2RgbaTexturePageDirectDrawRoute
-	| Webgl2IndexedDirectDrawRoute
-	| Webgl2TerrainDirectDrawRoute;
+	| Webgl2IndexedDirectDrawRoute;
 
 export const DIRECT_FAMILY_DRAW_TEXTURE_UNITS: DirectFamilyDrawTextureUnits = {
 	rgbaTexture: 0,
@@ -149,22 +122,11 @@ export const DIRECT_FAMILY_DRAW_TEXTURE_UNITS: DirectFamilyDrawTextureUnits = {
 	indexedTexels: 0,
 	indexedPalette: 1,
 	indexedDetail: 2,
-	terrainBase: 0,
-	terrainOverlay0: 1,
-	terrainOverlay1: 2,
-	terrainOverlay2: 3,
-	terrainOverlayAlpha0: 4,
-	terrainOverlayAlpha1: 5,
-	terrainOverlayAlpha2: 6,
-	terrainRoad: 7,
-	terrainRoadAlpha0: 8,
-	terrainRoadAlpha1: 9,
 };
 
 const INDEXED_DYNAMIC_UNIFORM_COUNT = 6;
 const DETAIL_DYNAMIC_UNIFORM_COUNT = 2;
 const DIRECT_TEXTURE_PAGE_DYNAMIC_UNIFORM_COUNT = 4;
-const TERRAIN_BLEND_SAMPLER_UNIFORM_COUNT = 10;
 
 export function createDirectFamilyUniformCache(): DirectFamilyUniformCache {
 	return {
@@ -185,12 +147,10 @@ export function resetDirectFamilyUniformCache(
 export function uploadDirectFamilySamplerUniforms({
 	context,
 	route,
-	terrainBlendProgram,
 	metrics,
 }: {
 	context: DirectFamilyDrawContext;
 	route: Webgl2DirectDrawRoute;
-	terrainBlendProgram: Webgl2TerrainBlendWorldProgram;
 	metrics: Webgl2WorldSubmitMetrics;
 }): void {
 	if (route.programKind === "texture") {
@@ -208,11 +168,6 @@ export function uploadDirectFamilySamplerUniforms({
 	if (isIndexedRoute(route)) {
 		uploadIndexedSamplerUniforms(context.gl, route.indexedProgram);
 		metrics.uniformUploadCount += 3;
-		return;
-	}
-	if (route.programKind === "terrain") {
-		uploadTerrainBlendSamplerUniforms(context.gl, terrainBlendProgram);
-		metrics.uniformUploadCount += TERRAIN_BLEND_SAMPLER_UNIFORM_COUNT;
 	}
 }
 
@@ -384,29 +339,13 @@ export function planWebgl2DirectDrawRoute({
 }): Webgl2DirectDrawRoute {
 	const submission = mapWebgl2DrawUnitToDirectRenderFamilySubmission(drawUnit);
 	const indexedProgram = resolveIndexedProgram(drawUnit, programs);
-	const usesTerrainBlend = drawUnit.terrainBlend !== null;
-	const usesRgbaTexturePage = drawUnit.texture !== null && !usesTerrainBlend;
+	const usesRgbaTexturePage = drawUnit.texture !== null;
 	const texturePageBinding =
 		usesRgbaTexturePage && drawUnit.texture
 			? resolveDrawUnitBaseTexturePageBinding(drawUnit)
 			: null;
 	const activeBaseTexture =
 		texturePageBinding?.texture.texture ?? drawUnit.texture?.texture ?? null;
-	if (usesTerrainBlend) {
-		return {
-			drawUnit,
-			submission,
-			programKind: "terrain",
-			activeProgram: programs.terrainBlend,
-			indexedProgram: null,
-			colorProgram: null,
-			alphaProgram: null,
-			detailProgram: null,
-			texturePageBinding: null,
-			activeBaseTexture: null,
-			detailTextureUnit: null,
-		};
-	}
 	if (indexedProgram) {
 		return {
 			drawUnit,
@@ -506,22 +445,6 @@ function isIndexedRoute(
 	return (
 		route.programKind === "indexed-p8" || route.programKind === "indexed-p16"
 	);
-}
-
-function uploadTerrainBlendSamplerUniforms(
-	gl: WebGL2RenderingContext,
-	program: Webgl2TerrainBlendWorldProgram,
-): void {
-	gl.uniform1i(program.uniforms.uBaseTexture, 0);
-	gl.uniform1i(program.uniforms.uOverlay0, 1);
-	gl.uniform1i(program.uniforms.uOverlay1, 2);
-	gl.uniform1i(program.uniforms.uOverlay2, 3);
-	gl.uniform1i(program.uniforms.uOverlayAlpha0, 4);
-	gl.uniform1i(program.uniforms.uOverlayAlpha1, 5);
-	gl.uniform1i(program.uniforms.uOverlayAlpha2, 6);
-	gl.uniform1i(program.uniforms.uRoadTexture, 7);
-	gl.uniform1i(program.uniforms.uRoadAlpha0, 8);
-	gl.uniform1i(program.uniforms.uRoadAlpha1, 9);
 }
 
 function uploadIndexedSamplerUniforms(

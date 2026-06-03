@@ -9,7 +9,7 @@ import {
 } from "./compaction-family-planner";
 import type { LegacyMaterialBehaviorDto } from "../material-behavior";
 import type { StagedWorldMaterialTexturePageReadiness } from "../staged-world-material-strategy";
-import type { TexturePageBinding } from "../texture-pages/texture-page-binding";
+import type { TexturePageDescriptor } from "../texture-pages/texture-page-binding";
 
 type CandidateOptions = Partial<CompactionFamilyCandidate> & {
 	entryKey?: string;
@@ -23,7 +23,7 @@ type CandidateOptions = Partial<CompactionFamilyCandidate> & {
 	hasUvBuffer?: boolean;
 	hasDetailOverlay?: boolean;
 	texturePageReadiness?: StagedWorldMaterialTexturePageReadiness | null;
-	texturePageBindings?: readonly TexturePageBinding[];
+	texturePageBindings?: readonly TexturePageDescriptor[];
 	indexedMaterialTableRecord?: IndexedPalettedFamilyMaterialTableRecord | null;
 };
 
@@ -1073,7 +1073,7 @@ function createTexturePageBindings({
 	texturePageReadiness: StagedWorldMaterialTexturePageReadiness | null;
 	width: number;
 	height: number;
-}): readonly TexturePageBinding[] {
+}): readonly TexturePageDescriptor[] {
 	if (materialKind === "indexed-paletted") {
 		return [
 			createIndexedTexelTexturePageBinding({ width, height }),
@@ -1108,7 +1108,7 @@ function createTexturePageBindings({
 	];
 }
 
-function createDirectTexturePageBinding(): TexturePageBinding {
+function createDirectTexturePageBinding(): TexturePageDescriptor {
 	const texturePageReadiness = createTexturePageReadiness({
 		entryKey: "direct-binding",
 		width: 8,
@@ -1119,7 +1119,7 @@ function createDirectTexturePageBinding(): TexturePageBinding {
 		texturePageReadiness,
 		width: 8,
 		height: 8,
-	})[0] as TexturePageBinding;
+	})[0] as TexturePageDescriptor;
 }
 
 function createIndexedTexelTexturePageBinding({
@@ -1128,7 +1128,7 @@ function createIndexedTexelTexturePageBinding({
 }: {
 	width?: number;
 	height?: number;
-} = {}): TexturePageBinding {
+} = {}): TexturePageDescriptor {
 	return {
 		pageKind: "single-entry",
 		usageBucket: "indexed-texels",
@@ -1152,7 +1152,7 @@ function createIndexedTexelTexturePageBinding({
 	};
 }
 
-function createIndexedPaletteTexturePageBinding(): TexturePageBinding {
+function createIndexedPaletteTexturePageBinding(): TexturePageDescriptor {
 	return {
 		pageKind: "single-entry",
 		usageBucket: "palette-lookup",

@@ -44,27 +44,33 @@ interface TexturePageSamplingPolicy {
 	lookup: TexturePageLookupPolicy;
 }
 
-export interface TexturePageBinding {
+export type TexturePageBindingSource =
+	| "standalone-direct-texture"
+	| "shared-packed-page"
+	| "detail-overlay"
+	| "indexed-material"
+	| "indexed-material-descriptor";
+
+export interface TexturePageDescriptor {
 	pageKind: TexturePageKind;
 	usageBucket: TexturePageUsageBucket;
 	sampleClass: TexturePageSampleClass;
-	texture: Webgl2Texture2DResource | null;
 	rect: readonly [number, number, number, number];
 	width: number;
 	height: number;
 	wrapS: TexturePageWrapMode;
 	wrapT: TexturePageWrapMode;
 	sampling: TexturePageSamplingPolicy;
-	source:
-		| "standalone-direct-texture"
-		| "shared-packed-page"
-		| "detail-overlay"
-		| "indexed-material"
-		| "indexed-material-descriptor";
+	source: TexturePageBindingSource;
+}
+
+export interface TexturePageResourceBinding extends TexturePageDescriptor {
+	texture: Webgl2Texture2DResource;
+	source: Exclude<TexturePageBindingSource, "indexed-material-descriptor">;
 }
 
 export interface TexturePageBindingResolution {
-	binding: TexturePageBinding | null;
+	binding: TexturePageResourceBinding | null;
 	fallbackSamples: readonly string[];
 }
 
@@ -208,10 +214,10 @@ export function collectDirectDrawTexturePageBindings(
 		| "directTextureSamplingPolicy"
 		| "texturePageReadiness"
 		| "detailOverlay"
-		| "indexedMaterial"
+		| "directIndexedMaterialResources"
 		| "indexedMaterialDescriptor"
 	>,
-): readonly TexturePageBinding[] {
+	): readonly TexturePageDescriptor[] {
 	const baseWrap = resolveTexturePageWrapMode(drawUnit);
 	return [
 		...(drawUnit.texture
@@ -243,22 +249,22 @@ export function collectDirectDrawTexturePageBindings(
 					}),
 				]
 			: []),
-		...(drawUnit.indexedMaterial
+		...(drawUnit.directIndexedMaterialResources
 			? [
 					createSingleEntryTexturePageBinding({
-						texture: drawUnit.indexedMaterial.indexTexture,
+						texture: drawUnit.directIndexedMaterialResources.indexTexture,
 						usageBucket: "indexed-texels",
 						sampleClass: "indexed-data",
-						wrapS: drawUnit.indexedMaterial.wrapS,
-						wrapT: drawUnit.indexedMaterial.wrapT,
+						wrapS: drawUnit.directIndexedMaterialResources.descriptor.wrapS,
+						wrapT: drawUnit.directIndexedMaterialResources.descriptor.wrapT,
 						sampling: exactDataTexturePageSamplingPolicy({
-							wrapS: drawUnit.indexedMaterial.wrapS,
-							wrapT: drawUnit.indexedMaterial.wrapT,
+							wrapS: drawUnit.directIndexedMaterialResources.descriptor.wrapS,
+							wrapT: drawUnit.directIndexedMaterialResources.descriptor.wrapT,
 						}),
 						source: "indexed-material",
 					}),
 					createSingleEntryTexturePageBinding({
-						texture: drawUnit.indexedMaterial.paletteTexture,
+						texture: drawUnit.directIndexedMaterialResources.paletteTexture,
 						usageBucket: "palette-lookup",
 						sampleClass: "palette-data",
 						wrapS: "clamp",
@@ -316,8 +322,8 @@ function createSingleEntryTexturePageBinding({
 	wrapS: TexturePageWrapMode;
 	wrapT: TexturePageWrapMode;
 	sampling: TexturePageSamplingPolicy;
-	source: TexturePageBinding["source"];
-}): TexturePageBinding {
+		source: TexturePageResourceBinding["source"];
+	}): TexturePageResourceBinding {
 	return {
 		pageKind: "single-entry",
 		usageBucket,
@@ -349,12 +355,11 @@ function createDescriptorTexturePageBinding({
 	wrapS: TexturePageWrapMode;
 	wrapT: TexturePageWrapMode;
 	sampling: TexturePageSamplingPolicy;
-}): TexturePageBinding {
+	}): TexturePageDescriptor {
 	return {
 		pageKind: "single-entry",
 		usageBucket,
 		sampleClass,
-		texture: null,
 		rect: [0, 0, width, height],
 		width,
 		height,

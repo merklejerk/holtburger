@@ -2,7 +2,7 @@ import type { LegacyMaterialBehaviorDto } from "../material-behavior";
 import type { RenderVec4 } from "../render-math";
 import type { StagedWorldMaterialTexturePageReadiness } from "../staged-world-material-strategy";
 import type {
-	TexturePageBinding,
+	TexturePageDescriptor,
 	TexturePageUsageBucket,
 } from "../texture-pages/texture-page-binding";
 import {
@@ -103,7 +103,7 @@ export interface CompactionGeometryReadiness {
 
 interface CompactionTexturePageReadiness {
 	base: StagedWorldMaterialTexturePageReadiness | null;
-	bindings: readonly TexturePageBinding[];
+	bindings: readonly TexturePageDescriptor[];
 }
 
 interface CompactionDetailOverlayReadiness {
@@ -1244,7 +1244,7 @@ function classifyCompactionAlphaPolicy(
 }
 
 function hasCompatibleCompactedBaseTexturePage(
-	texturePageBindings: readonly TexturePageBinding[],
+	texturePageBindings: readonly TexturePageDescriptor[],
 ): boolean {
 	return texturePageBindings.some(
 		(binding) =>
@@ -1256,7 +1256,7 @@ function hasCompatibleCompactedBaseTexturePage(
 }
 
 function hasIndexedTexelTexturePage(
-	texturePageBindings: readonly TexturePageBinding[],
+	texturePageBindings: readonly TexturePageDescriptor[],
 ): boolean {
 	return texturePageBindings.some(
 		(binding) =>
@@ -1267,7 +1267,7 @@ function hasIndexedTexelTexturePage(
 }
 
 function hasIndexedPaletteTexturePage(
-	texturePageBindings: readonly TexturePageBinding[],
+	texturePageBindings: readonly TexturePageDescriptor[],
 ): boolean {
 	return texturePageBindings.some(
 		(binding) =>
@@ -1277,7 +1277,7 @@ function hasIndexedPaletteTexturePage(
 	);
 }
 
-function hasExactDataTexturePageSampling(binding: TexturePageBinding): boolean {
+function hasExactDataTexturePageSampling(binding: TexturePageDescriptor): boolean {
 	return (
 		binding.sampling.samplingDomain === "data" &&
 		binding.sampling.lookup === "exact" &&
@@ -1288,7 +1288,7 @@ function hasExactDataTexturePageSampling(binding: TexturePageBinding): boolean {
 }
 
 function classifyUnsupportedIndexedTexturePageBlockers(
-	texturePageBindings: readonly TexturePageBinding[],
+	texturePageBindings: readonly TexturePageDescriptor[],
 	detailOverlay: CompactionDetailOverlayReadiness,
 ): CompactionMaterialBlocker[] {
 	const texturePageBlockers = texturePageBindings
@@ -1324,7 +1324,7 @@ function classifyUnsupportedIndexedTexturePageBlockers(
 }
 
 function classifyUnsupportedCompactedTexturePageBlockers(
-	texturePageBindings: readonly TexturePageBinding[],
+	texturePageBindings: readonly TexturePageDescriptor[],
 ): CompactionMaterialBlocker[] {
 	return collectUniqueMaterialBlockers(
 		texturePageBindings.map((binding) => {
@@ -1358,7 +1358,7 @@ function isUnsupportedTexturePageUsageBlocker(
 	return blocker.startsWith("unsupported-texture-page-usage:");
 }
 
-function hasColorFilteredTexturePageSampling(binding: TexturePageBinding): boolean {
+function hasColorFilteredTexturePageSampling(binding: TexturePageDescriptor): boolean {
 	return (
 		binding.sampling.samplingDomain === "color" &&
 		binding.sampling.lookup === "color-filtered"

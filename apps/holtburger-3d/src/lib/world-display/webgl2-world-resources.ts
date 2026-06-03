@@ -137,7 +137,7 @@ import type { Webgl2SceneDomain } from "./webgl2-scene-domain-targets";
 import {
 	collectDirectDrawTexturePageBindings,
 	resolveDirectDrawBaseTexturePageBinding,
-	type TexturePageBinding,
+	type TexturePageDescriptor,
 } from "./texture-pages/texture-page-binding";
 import { deriveTerrainTileBatchBvhBinding } from "./non-instanced-bvh-bindings";
 import {
@@ -185,9 +185,9 @@ export interface Webgl2WorldDrawUnit {
 	textureKey: string | null;
 	texture: Webgl2Texture2DResource | null;
 	indexedMaterialDescriptor: Webgl2IndexedMaterialDescriptor | null;
-	indexedMaterial: Webgl2IndexedMaterialResources | null;
+	directIndexedMaterialResources: Webgl2DirectIndexedMaterialResources | null;
 	detailOverlay: Webgl2DetailOverlayResources | null;
-	texturePageBindings: readonly TexturePageBinding[];
+	texturePageBindings: readonly TexturePageDescriptor[];
 	texturePageBindingFallbackSamples: readonly string[];
 	sceneDomain: Webgl2SceneDomain | null;
 	modelMatrix: RenderMat4;
@@ -326,8 +326,8 @@ export interface Webgl2IndexedMaterialDescriptor {
 	clipThreshold: number;
 }
 
-export interface Webgl2IndexedMaterialResources
-	extends Webgl2IndexedMaterialDescriptor {
+export interface Webgl2DirectIndexedMaterialResources {
+	descriptor: Webgl2IndexedMaterialDescriptor;
 	indexTexture: Webgl2Texture2DResource;
 	paletteTexture: Webgl2Texture2DResource;
 }
@@ -744,15 +744,15 @@ export function syncWebgl2WorldResources({
 		}),
 	});
 	store.standaloneIndexedMaterialResourceDrawUnitCount =
-		store.drawUnits.filter((drawUnit) => drawUnit.indexedMaterial !== null).length;
+		store.drawUnits.filter((drawUnit) => drawUnit.directIndexedMaterialResources !== null).length;
 	store.compactedIndexedMaterialStandaloneResourceDrawUnitCount =
 		store.drawUnits.filter(
 			(drawUnit) =>
-				drawUnit.indexedMaterial !== null &&
+				drawUnit.directIndexedMaterialResources !== null &&
 				compactedIndexedDrawUnitIds.has(drawUnit.id),
 		).length;
 	for (const drawUnit of store.drawUnits) {
-		for (const textureKey of collectIndexedMaterialTextureKeys(drawUnit)) {
+		for (const textureKey of collectDirectIndexedMaterialTextureKeys(drawUnit)) {
 			retainedTextureKeys.add(textureKey);
 		}
 	}
@@ -781,15 +781,15 @@ export function syncWebgl2WorldResources({
 	store.textureCount = store.texturesByKey.size;
 	store.indexedTextureCount = new Set(
 		store.drawUnits.flatMap((drawUnit) =>
-			drawUnit.indexedMaterial
-				? [drawUnit.indexedMaterial.indexTextureKey]
+			drawUnit.directIndexedMaterialResources
+				? [drawUnit.directIndexedMaterialResources.descriptor.indexTextureKey]
 				: [],
 		),
 	).size;
 	store.paletteTextureCount = new Set(
 		store.drawUnits.flatMap((drawUnit) =>
-			drawUnit.indexedMaterial
-				? [drawUnit.indexedMaterial.paletteTextureKey]
+			drawUnit.directIndexedMaterialResources
+				? [drawUnit.directIndexedMaterialResources.descriptor.paletteTextureKey]
 				: [],
 		),
 	).size;
@@ -1960,8 +1960,8 @@ function createOrReuseWebgl2DrawUnit({
 		previous.texture = resolveWebgl2DrawUnitTexture({ gl, store, drawUnit });
 		previous.indexedMaterialDescriptor =
 			resolveWebgl2IndexedMaterialDescriptor(drawUnit);
-		previous.indexedMaterial = uploadIndexedMaterialResources
-			? resolveWebgl2IndexedMaterialResources({
+		previous.directIndexedMaterialResources = uploadIndexedMaterialResources
+			? resolveWebgl2DirectIndexedMaterialResources({
 					gl,
 					store,
 					drawUnit,
@@ -1978,7 +1978,7 @@ function createOrReuseWebgl2DrawUnit({
 		});
 		previous.texturePageBindings = collectDirectDrawTexturePageBindings({
 			texture: previous.texture,
-			indexedMaterial: previous.indexedMaterial,
+			directIndexedMaterialResources: previous.directIndexedMaterialResources,
 			indexedMaterialDescriptor: previous.indexedMaterialDescriptor,
 			detailOverlay: previous.detailOverlay,
 			directTextureSamplingPolicy: previous.directTextureSamplingPolicy,
@@ -2054,8 +2054,8 @@ function createOrReuseWebgl2DrawUnit({
 	const texture = resolveWebgl2DrawUnitTexture({ gl, store, drawUnit });
 	const indexedMaterialDescriptor =
 		resolveWebgl2IndexedMaterialDescriptor(drawUnit);
-	const indexedMaterial = uploadIndexedMaterialResources
-		? resolveWebgl2IndexedMaterialResources({
+	const directIndexedMaterialResources = uploadIndexedMaterialResources
+		? resolveWebgl2DirectIndexedMaterialResources({
 				gl,
 				store,
 				drawUnit,
@@ -2075,7 +2075,7 @@ function createOrReuseWebgl2DrawUnit({
 	const texturePageReadiness = resolveWebgl2DrawUnitTexturePageReadiness(drawUnit);
 	const texturePageBindings = collectDirectDrawTexturePageBindings({
 		texture,
-		indexedMaterial,
+		directIndexedMaterialResources,
 		indexedMaterialDescriptor,
 		detailOverlay,
 		directTextureSamplingPolicy,
@@ -2136,7 +2136,7 @@ function createOrReuseWebgl2DrawUnit({
 					: null,
 		texture,
 		indexedMaterialDescriptor,
-		indexedMaterial,
+		directIndexedMaterialResources,
 		detailOverlay,
 		texturePageBindings,
 		texturePageBindingFallbackSamples: [],
@@ -2380,7 +2380,7 @@ function syncWebgl2DirectIndexedMaterialResources({
 	);
 	for (const drawUnit of store.drawUnits) {
 		if (!drawUnit.indexedMaterialDescriptor) {
-			drawUnit.indexedMaterial = null;
+			drawUnit.directIndexedMaterialResources = null;
 			continue;
 		}
 		const stagedDrawUnit = stagedDrawUnitById.get(drawUnit.id);
@@ -2389,8 +2389,8 @@ function syncWebgl2DirectIndexedMaterialResources({
 				`Cannot sync direct indexed resources for missing staged draw unit ${drawUnit.id}.`,
 			);
 		}
-		drawUnit.indexedMaterial = retainedDirectIndexedDrawUnitIds.has(drawUnit.id)
-			? resolveWebgl2IndexedMaterialResources({
+		drawUnit.directIndexedMaterialResources = retainedDirectIndexedDrawUnitIds.has(drawUnit.id)
+			? resolveWebgl2DirectIndexedMaterialResources({
 					gl,
 					store,
 					drawUnit: stagedDrawUnit,
@@ -2399,7 +2399,7 @@ function syncWebgl2DirectIndexedMaterialResources({
 			: null;
 		drawUnit.texturePageBindings = collectDirectDrawTexturePageBindings({
 			texture: drawUnit.texture,
-			indexedMaterial: drawUnit.indexedMaterial,
+			directIndexedMaterialResources: drawUnit.directIndexedMaterialResources,
 			indexedMaterialDescriptor: drawUnit.indexedMaterialDescriptor,
 			detailOverlay: drawUnit.detailOverlay,
 			directTextureSamplingPolicy: drawUnit.directTextureSamplingPolicy,
@@ -2492,7 +2492,7 @@ function resolveWebgl2IndexedMaterialDescriptor(
 	};
 }
 
-function resolveWebgl2IndexedMaterialResources({
+function resolveWebgl2DirectIndexedMaterialResources({
 	gl,
 	store,
 	drawUnit,
@@ -2502,7 +2502,7 @@ function resolveWebgl2IndexedMaterialResources({
 	store: Webgl2WorldResourceStore;
 	drawUnit: StagedWorldDrawUnitAssembly;
 	descriptor: Webgl2IndexedMaterialDescriptor | null;
-}): Webgl2IndexedMaterialResources | null {
+}): Webgl2DirectIndexedMaterialResources | null {
 	if (!descriptor || drawUnit.material.kind !== "indexed-paletted") {
 		return null;
 	}
@@ -2550,7 +2550,7 @@ function resolveWebgl2IndexedMaterialResources({
 			},
 		});
 	return {
-		...descriptor,
+		descriptor,
 		indexTexture,
 		paletteTexture,
 	};
@@ -2606,9 +2606,7 @@ function toWebgl2IndexedTextureUpload(
 	};
 }
 
-function describeIndexedTextureKey(
-	indexedMaterial: ResolvedIndexedMaterialData,
-): string {
+function describeIndexedTextureKey(indexedMaterial: ResolvedIndexedMaterialData): string {
 	return [
 		"indexed-texture",
 		indexedMaterial.renderSurfaceAssetId,
@@ -2871,15 +2869,15 @@ function defaultWebgl2MaterialTextureCapabilities() {
 	};
 }
 
-function collectIndexedMaterialTextureKeys(
+function collectDirectIndexedMaterialTextureKeys(
 	drawUnit: Webgl2WorldDrawUnit,
 ): readonly string[] {
-	if (!drawUnit.indexedMaterial) {
+	if (!drawUnit.directIndexedMaterialResources) {
 		return [];
 	}
 	return [
-		drawUnit.indexedMaterial.indexTextureKey,
-		drawUnit.indexedMaterial.paletteTextureKey,
+		drawUnit.directIndexedMaterialResources.descriptor.indexTextureKey,
+		drawUnit.directIndexedMaterialResources.descriptor.paletteTextureKey,
 	];
 }
 
@@ -3022,11 +3020,11 @@ function countPreparedTextureUploads(
 			drawUnit.textureKey
 				? [
 						drawUnit.textureKey,
-						...collectIndexedMaterialTextureKeys(drawUnit),
+						...collectDirectIndexedMaterialTextureKeys(drawUnit),
 						...(drawUnit.detailOverlay ? [drawUnit.detailOverlay.key] : []),
 					]
 				: [
-						...collectIndexedMaterialTextureKeys(drawUnit),
+						...collectDirectIndexedMaterialTextureKeys(drawUnit),
 						...(drawUnit.detailOverlay ? [drawUnit.detailOverlay.key] : []),
 					],
 		),
@@ -3138,7 +3136,7 @@ function describeCompactionBypassBlockerSample(
 }
 
 function summarizeTexturePageUsageSources(
-	bindings: readonly TexturePageBinding[],
+	bindings: readonly TexturePageDescriptor[],
 ): string {
 	const pairs = new Set(
 		bindings.map((binding) => `${binding.usageBucket}:${binding.source}`),
@@ -3253,11 +3251,11 @@ function collectTextureSamplingPolicySamples(
 				describeTextureSamplingPolicy(drawUnit.directTextureSamplingPolicy),
 			];
 		}
-		if (drawUnit.indexedMaterial) {
+		if (drawUnit.directIndexedMaterialResources) {
 			return [
 				describeIndexedTexturePageSamplingPolicy(
-					drawUnit.indexedMaterial.wrapS,
-					drawUnit.indexedMaterial.wrapT,
+					drawUnit.directIndexedMaterialResources.descriptor.wrapS,
+					drawUnit.directIndexedMaterialResources.descriptor.wrapT,
 				),
 			];
 		}

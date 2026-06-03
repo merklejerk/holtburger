@@ -32,13 +32,104 @@ import {
 import type { TerrainSceneModel } from "./terrain-scene";
 import { createEmptyTransitionPortalCandidateModel } from "./transition-portal-work-items";
 import {
+	commitWebgl2IndexedResourceAtlasGeneration,
+	commitWebgl2TextureAtlasGeneration,
 	createWebgl2WorldResourceStore,
 	destroyWebgl2WorldResources,
+	markWebgl2CompactedGeometryBatchReplacementPending,
+	markWebgl2IndexedResourceAtlasGenerationReplacementPending,
+	markWebgl2TextureAtlasGenerationReplacementPending,
 	syncWebgl2WorldResources,
 	type Webgl2WorldResourceStore,
 } from "./webgl2-world-resources";
+import { shouldRetainWebgl2CompactedGeometryBatch } from "./webgl2/resources/compacted-geometry-sync";
+import type { Webgl2IndexedResourceAtlasGenerationResource } from "./webgl2/resources/indexed-resource-atlas-generation";
+import type { Webgl2TextureAtlasGenerationResource } from "./webgl2/resources/texture-atlas-generation";
 
 describe("webgl2 world resources", () => {
+	it("keeps committed texture atlas generation alive while a replacement is pending", () => {
+		const disposedKeys: string[] = [];
+		const store = createWebgl2WorldResourceStore();
+		const previous = createTextureAtlasGeneration(
+			"texture-atlas/previous",
+			disposedKeys,
+		);
+		const next = createTextureAtlasGeneration(
+			"texture-atlas/next",
+			disposedKeys,
+		);
+		store.textureAtlasGeneration = previous;
+
+		markWebgl2TextureAtlasGenerationReplacementPending({
+			store,
+			generationKey: next.key,
+		});
+
+		expect(store.textureAtlasGeneration).toBe(previous);
+		expect(store.pendingTextureAtlasGenerationKey).toBe(next.key);
+		expect(disposedKeys).toEqual([]);
+
+		commitWebgl2TextureAtlasGeneration({ store, generation: next });
+
+		expect(store.textureAtlasGeneration).toBe(next);
+		expect(store.pendingTextureAtlasGenerationKey).toBeNull();
+		expect(disposedKeys).toEqual([previous.key]);
+	});
+
+	it("keeps committed indexed atlas generation alive while a replacement is pending", () => {
+		const disposedKeys: string[] = [];
+		const store = createWebgl2WorldResourceStore();
+		const previous = createIndexedAtlasGeneration(
+			"indexed-atlas/previous",
+			disposedKeys,
+		);
+		const next = createIndexedAtlasGeneration(
+			"indexed-atlas/next",
+			disposedKeys,
+		);
+		store.indexedResourceAtlasGeneration = previous;
+
+		markWebgl2IndexedResourceAtlasGenerationReplacementPending({
+			store,
+			generationKey: next.key,
+		});
+
+		expect(store.indexedResourceAtlasGeneration).toBe(previous);
+		expect(store.pendingIndexedResourceAtlasGenerationKey).toBe(next.key);
+		expect(disposedKeys).toEqual([]);
+
+		commitWebgl2IndexedResourceAtlasGeneration({ store, generation: next });
+
+		expect(store.indexedResourceAtlasGeneration).toBe(next);
+		expect(store.pendingIndexedResourceAtlasGenerationKey).toBeNull();
+		expect(disposedKeys).toEqual([previous.key]);
+	});
+
+	it("retains compacted geometry batches protected by pending replacement work", () => {
+		const store = createWebgl2WorldResourceStore();
+
+		expect(
+			shouldRetainWebgl2CompactedGeometryBatch({
+				store,
+				batchKey: "batch/old",
+				retainedGeometryBatchKeys: new Set(),
+			}),
+		).toBe(false);
+
+		markWebgl2CompactedGeometryBatchReplacementPending({
+			store,
+			batchKey: "batch/old",
+		});
+
+		expect(
+			shouldRetainWebgl2CompactedGeometryBatch({
+				store,
+				batchKey: "batch/old",
+				retainedGeometryBatchKeys: new Set(),
+			}),
+		).toBe(true);
+	});
+
 	it("realizes staged static draw units as retained WebGL2 resources", () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
@@ -227,20 +318,20 @@ describe("webgl2 world resources", () => {
 		]);
 		expect(tile?.oneDrawReadiness).toMatchObject({ status: "blocked" });
 		expect(tile?.drawSlices).toHaveLength(2);
-		expect(tile?.drawSlices.map((slice) => slice.oneDrawReadiness.status)).toEqual([
-			"ready",
-			"ready",
-		]);
-		expect(tile?.drawSlices.map((slice) => slice.texturePageBindings.length)).toEqual([
-			8,
-			1,
-		]);
 		expect(
-			tile?.texturePageBlockers.includes("terrain tile has no terrain blend page inputs"),
+			tile?.drawSlices.map((slice) => slice.oneDrawReadiness.status),
+		).toEqual(["ready", "ready"]);
+		expect(
+			tile?.drawSlices.map((slice) => slice.texturePageBindings.length),
+		).toEqual([8, 1]);
+		expect(
+			tile?.texturePageBlockers.includes(
+				"terrain tile has no terrain blend page inputs",
+			),
 		).toBe(false);
-		expect(store.texturePageAtlasPlan?.families.map((family) => family.family)).toContain(
-			"terrain-color",
-		);
+		expect(
+			store.texturePageAtlasPlan?.families.map((family) => family.family),
+		).toContain("terrain-color");
 	});
 
 	it("disposes orphaned draw units and graph leases", () => {
@@ -803,13 +894,11 @@ describe("webgl2 world resources", () => {
 		expect(store.indexedTextureCount).toBe(0);
 		expect(store.paletteTextureCount).toBe(0);
 		expect(store.indexedMaterialDescriptorDrawUnitCount).toBe(1);
-		expect(
-			store.indexedMaterialDescriptorCompactionCandidateCount,
-		).toBe(1);
+		expect(store.indexedMaterialDescriptorCompactionCandidateCount).toBe(1);
 		expect(store.standaloneIndexedMaterialResourceDrawUnitCount).toBe(0);
-		expect(
-			store.compactedIndexedMaterialStandaloneResourceDrawUnitCount,
-		).toBe(0);
+		expect(store.compactedIndexedMaterialStandaloneResourceDrawUnitCount).toBe(
+			0,
+		);
 		expect(store.indexedResourceAtlasCandidateDrawUnitCount).toBe(1);
 		expect(store.indexedResourceAtlasIndexTextureCount).toBe(1);
 		expect(store.indexedResourceAtlasPaletteTextureCount).toBe(1);
@@ -1294,12 +1383,13 @@ function createAssetStateWithTerrainMaterials(
 		state.preparedByAssetId[`surface-texture/${formatHex32(textureId)}`] = {
 			payload: createSurfaceTexturePayload({ textureId, renderSurfaceId }),
 		} as AssetChannelState["preparedAsset"];
-		state.preparedByAssetId[`render-surface/${formatHex32(renderSurfaceId)}`] = {
-			payload: createRenderSurfacePayload({
-				renderSurfaceId,
-				compressed: false,
-			}),
-		} as AssetChannelState["preparedAsset"];
+		state.preparedByAssetId[`render-surface/${formatHex32(renderSurfaceId)}`] =
+			{
+				payload: createRenderSurfacePayload({
+					renderSurfaceId,
+					compressed: false,
+				}),
+			} as AssetChannelState["preparedAsset"];
 		state.preparedByAssetId[
 			formatAtlasReadyPreparedTextureAssetId({
 				renderSurfaceId,
@@ -1342,7 +1432,8 @@ function createAssetStateWithTerrainMaterials(
 					(terrain) => terrain.textureAssetId,
 				),
 				renderSurfaceAssetIds: terrainCodes.map(
-					(terrainCode) => `render-surface/${formatHex32(0x06000000 + terrainCode)}`,
+					(terrainCode) =>
+						`render-surface/${formatHex32(0x06000000 + terrainCode)}`,
 				),
 				paletteAssetIds: [],
 			},
@@ -1881,7 +1972,12 @@ function createTerrainMeshForPcodes(
 			col: quadIndex,
 			quadIndex,
 			sourceTerrainIndices: [0, 1, 2, 3],
-			vertexIndices: [firstVertex, firstVertex + 1, firstVertex + 2, firstVertex + 3],
+			vertexIndices: [
+				firstVertex,
+				firstVertex + 1,
+				firstVertex + 2,
+				firstVertex + 3,
+			],
 			triangleIndices: [firstTriangle, firstTriangle + 1],
 			diagonal: "southwest-northeast",
 			cornerTerrainCodes: [terrainCode, terrainCode, terrainCode, terrainCode],
@@ -1972,4 +2068,40 @@ function createStructuredInteriorCell({
 
 function createTransitionPortalModel() {
 	return createEmptyTransitionPortalCandidateModel();
+}
+
+function createTextureAtlasGeneration(
+	key: string,
+	disposedKeys: string[],
+): Webgl2TextureAtlasGenerationResource {
+	return {
+		key,
+		textures: [],
+		placements: [],
+		detailTextures: [],
+		detailPlacements: [],
+		preparedTextureAssetIds: [],
+		rgbaAtlasReadyDrawUnitIds: [],
+		dispose() {
+			disposedKeys.push(key);
+		},
+	};
+}
+
+function createIndexedAtlasGeneration(
+	key: string,
+	disposedKeys: string[],
+): Webgl2IndexedResourceAtlasGenerationResource {
+	return {
+		key,
+		indexTextures: [],
+		paletteTextures: [],
+		indexPlacements: [],
+		palettePlacements: [],
+		indexReadyDrawUnitIds: [],
+		paletteReadyDrawUnitIds: [],
+		dispose() {
+			disposedKeys.push(key);
+		},
+	};
 }

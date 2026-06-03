@@ -1,6 +1,6 @@
 # Holtburger 3D Render Resource Worker Plan
 
-Status: Phase 2A implemented; Phase 2B is the next implementation phase.
+Status: Phase 2B implemented; Phase 3 is the next implementation phase.
 
 Related plans:
 
@@ -199,8 +199,8 @@ Introduced cleanup targets and temporary shims:
 - Scheduler metrics are not yet surfaced in a diagnostics panel. Keep them local until a real job
   family is wired, then expose per-family metrics rather than generic echo-worker metrics.
 
-Phase 2A is now complete. The next blocking work is Phase 2B: async-aware retention and disposal for
-atlas generations and compacted batches.
+Phase 2B is now complete. The next implementation phase is Phase 3: compacted geometry worker
+preparation.
 
 ### 2026-06-03: Phase 2A Implemented
 
@@ -253,6 +253,50 @@ Immediate interim phase:
   for texture atlas generations, indexed atlas generations, and compacted geometry batches. This is
   debt that should be paid before worker scheduling, because otherwise stale or pending worker work
   could cause old resources to be disposed too early.
+
+### 2026-06-03: Phase 2B Implemented
+
+Implemented async-aware retention and commit preparation:
+
+- added pending replacement state to `Webgl2WorldResourceStore` for RGBA/detail atlas generations,
+  indexed atlas generations, and compacted geometry batches;
+- added mark/commit helpers for texture atlas generations and indexed atlas generations;
+- switched atlas sync code to mark replacements pending before creating replacement resources and to
+  commit through the new helpers only after WebGL realization succeeds;
+- added compacted geometry batch retention support for currently committed batch keys that are
+  protected by pending replacement work;
+- added focused tests proving pending atlas replacements do not dispose the committed generation and
+  proving compacted batch retention honors pending replacement protection.
+
+Validation completed:
+
+- `npm run test:ts -- webgl2-world-resources compacted-geometry`
+- `npm run check`
+- `npm run lint:ts`
+
+Course corrections:
+
+- For compacted geometry, pending replacement state protects the currently committed batch key, not
+  the future worker result key. A future worker scheduler must mark the old committed batch key while
+  replacement work is in flight, then clear that protection after the replacement commits or when the
+  source scene no longer wants that family.
+- Avoided adding a value import from `webgl2-world-resources.ts` back into
+  `compacted-geometry-sync.ts`, because that would create a runtime circular dependency. Compacted
+  sync mutates the store's pending batch-key set directly.
+- The atlas commit helpers still dispose the previous committed generation immediately after the new
+  WebGL generation has been realized. That is correct for synchronous sync and gives the worker path
+  the commit boundary it needs, but upload budgeting may later delay this commit.
+
+Introduced cleanup targets and temporary shims:
+
+- Pending atlas keys currently live directly on `Webgl2WorldResourceStore`. If Phase 3 adds multiple
+  scheduler-owned fields, consolidate these into a small `renderWorkerResources` or
+  `pendingRenderResources` sub-object instead of letting worker state sprawl across the store.
+- Compacted geometry still needs a clearer commit helper that realizes a prepared
+  `CompactedGeometryBatch`, creates family resources, updates graph leases, and clears pending batch
+  protection in one place.
+- The synchronous atlas generation wrappers remain legacy shims until worker-backed atlas jobs call
+  the CPU generation and WebGL realization functions separately.
 
 ## Scheduling Model
 
@@ -514,29 +558,34 @@ Validation:
 
 ## Phase 2B: Async-Aware Retention And Commit Preparation
 
-Status: next.
+Status: complete.
 
 Work:
 
-- Split compacted geometry sync into clearer commit steps:
+- Partially split compacted geometry sync into clearer retention/commit hooks:
   - landblock batch plan creation;
   - CPU compacted geometry creation;
   - WebGL compacted batch realization;
   - family resource metadata creation;
   - retention/disposal.
-- Add a "pending replacement" retention rule for compacted batches and atlas generations. Old
+- Added a "pending replacement" retention rule for compacted batches and atlas generations. Old
   resources remain committed until a replacement is fully realized or until no current draw units can
   reference them.
-- Add commit helpers that accept already-created CPU atlas generations and compacted geometry
-  payloads, realize them into WebGL resources, and only then replace committed store entries.
-- Keep graph lease updates after successful WebGL commit.
+- Added commit helpers for realized texture atlas generations and indexed atlas generations.
+- Kept graph lease updates after successful WebGL commit.
+
+Deferred to Phase 3:
+
+- Full compacted geometry commit helper extraction. The current retention predicate and pending-key
+  state are enough for worker scheduling prep, but family resource creation and graph lease updates
+  still need to become a single explicit commit step when compacted worker results are introduced.
 
 Validation:
 
 - Existing atlas, indexed atlas, compacted geometry, and WebGL resource tests still pass.
-- Add tests that a pending replacement does not dispose the previous atlas generation or compacted
+- Added tests that a pending replacement does not dispose the previous atlas generation or compacted
   batch.
-- Add tests for commit helper behavior when CPU payloads are ready but not yet committed.
+- Added tests for commit helper behavior when replacement resources are ready but not yet committed.
 
 ## Phase 3: Compacted Geometry Worker Preparation
 

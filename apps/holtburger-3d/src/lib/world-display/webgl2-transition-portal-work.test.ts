@@ -284,7 +284,7 @@ function createPortalMaskDrawUnit(id: string): Webgl2WorldDrawUnit {
 		textureKey: null,
 		texture: null,
 		indexedMaterialDescriptor: null,
-		indexedMaterial: null,
+		directIndexedMaterialResources: null,
 		detailOverlay: null,
 		terrainBlend: null,
 		texturePageBindings: [],

@@ -4,7 +4,10 @@ import {
 	type DirectRenderFamilySubmission,
 } from "./direct-render-family";
 import type { Webgl2StateCache } from "../../webgl2-state-cache";
-import type { TexturePageBinding } from "../../texture-pages/texture-page-binding";
+import type {
+	TexturePageDescriptor,
+	TexturePageResourceBinding,
+} from "../../texture-pages/texture-page-binding";
 import type { Webgl2WorldDrawUnit } from "../../webgl2-world-resources";
 import type {
 	Webgl2FlatWorldProgram,
@@ -82,7 +85,7 @@ export interface Webgl2FlatDirectDrawRoute extends Webgl2DirectDrawRouteBase {
 	colorProgram: Webgl2FlatWorldProgram;
 	alphaProgram: null;
 	detailProgram: null;
-	texturePageBinding: TexturePageBinding | null;
+	texturePageBinding: TexturePageResourceBinding | null;
 	activeBaseTexture: WebGLTexture | null;
 	detailTextureUnit: number | null;
 }
@@ -94,7 +97,7 @@ export interface Webgl2RgbaTexturePageDirectDrawRoute extends Webgl2DirectDrawRo
 	colorProgram: Webgl2TexturedWorldProgram;
 	alphaProgram: Webgl2TexturedWorldProgram;
 	detailProgram: Webgl2TexturedWorldProgram;
-	texturePageBinding: TexturePageBinding | null;
+	texturePageBinding: TexturePageResourceBinding | null;
 	activeBaseTexture: WebGLTexture | null;
 	detailTextureUnit: typeof DIRECT_FAMILY_DRAW_TEXTURE_UNITS.rgbaDetail;
 }
@@ -251,14 +254,14 @@ export function prepareDirectIndexedPalettedDraw({
 	route: Webgl2IndexedDirectDrawRoute;
 	metrics: Webgl2WorldSubmitMetrics;
 }): void {
-	if (!route.drawUnit.indexedMaterial) {
+	if (!route.drawUnit.directIndexedMaterialResources) {
 		throw new Error(
 			`Indexed draw unit ${route.drawUnit.id} has no indexed material.`,
 		);
 	}
 	metrics.stateChangeCount += bindIndexedMaterialTextures({
 		stateCache: context.stateCache,
-		indexedMaterial: route.drawUnit.indexedMaterial,
+		directIndexedMaterialResources: route.drawUnit.directIndexedMaterialResources,
 	});
 	bindDirectDetailOverlayTexture({ context, route, metrics });
 }
@@ -276,7 +279,7 @@ export function uploadDirectIndexedPalettedUniforms({
 }): void {
 	uploadDirectColorUniforms({ context, route, uniformCache, metrics });
 	uploadDirectAlphaUniform({ context, route, uniformCache, metrics });
-	if (!route.indexedProgram || !route.drawUnit.indexedMaterial) {
+	if (!route.indexedProgram || !route.drawUnit.directIndexedMaterialResources) {
 		throw new Error(
 			`Indexed draw unit ${route.drawUnit.id} has incomplete indexed route data.`,
 		);
@@ -284,7 +287,7 @@ export function uploadDirectIndexedPalettedUniforms({
 	uploadIndexedMaterialUniforms(
 		context.gl,
 		route.indexedProgram,
-		route.drawUnit.indexedMaterial,
+		route.drawUnit.directIndexedMaterialResources,
 	);
 	metrics.uniformUploadCount += INDEXED_DYNAMIC_UNIFORM_COUNT;
 	if (!route.detailProgram) {
@@ -345,13 +348,13 @@ export function planWebgl2DirectDrawRoute({
 			? resolveDrawUnitBaseTexturePageBinding(drawUnit)
 			: null;
 	const activeBaseTexture =
-		texturePageBinding?.texture?.texture ?? drawUnit.texture?.texture ?? null;
+		texturePageBinding?.texture.texture ?? drawUnit.texture?.texture ?? null;
 	if (indexedProgram) {
 		return {
 			drawUnit,
 			submission,
 			programKind:
-				drawUnit.indexedMaterial?.indexFormat === "p8"
+				drawUnit.directIndexedMaterialResources?.descriptor.indexFormat === "p8"
 					? "indexed-p8"
 					: "indexed-p16",
 			activeProgram: indexedProgram,
@@ -458,16 +461,16 @@ function uploadIndexedSamplerUniforms(
 
 function bindIndexedMaterialTextures({
 	stateCache,
-	indexedMaterial,
+	directIndexedMaterialResources,
 }: {
 	stateCache: Webgl2StateCache;
-	indexedMaterial: NonNullable<Webgl2WorldDrawUnit["indexedMaterial"]>;
+	directIndexedMaterialResources: NonNullable<Webgl2WorldDrawUnit["directIndexedMaterialResources"]>;
 }): number {
 	let changeCount = 0;
-	if (stateCache.bindTexture2D(0, indexedMaterial.indexTexture.texture)) {
+	if (stateCache.bindTexture2D(0, directIndexedMaterialResources.indexTexture.texture)) {
 		changeCount += 1;
 	}
-	if (stateCache.bindTexture2D(1, indexedMaterial.paletteTexture.texture)) {
+	if (stateCache.bindTexture2D(1, directIndexedMaterialResources.paletteTexture.texture)) {
 		changeCount += 1;
 	}
 	return changeCount;
@@ -475,12 +478,12 @@ function bindIndexedMaterialTextures({
 
 function resolveDrawUnitBaseTexturePageBinding(
 	drawUnit: Webgl2WorldDrawUnit,
-): TexturePageBinding | null {
-	return (
+): TexturePageResourceBinding | null {
+	const binding =
 		drawUnit.texturePageBindings.find(
-			(binding) => binding.usageBucket === "base-color",
-		) ?? null
-	);
+			(candidate) => candidate.usageBucket === "base-color",
+		) ?? null;
+	return binding && isTexturePageResourceBinding(binding) ? binding : null;
 }
 
 function appendSubmitFallbackSamples(
@@ -496,25 +499,26 @@ function appendSubmitFallbackSamples(
 function uploadIndexedMaterialUniforms(
 	gl: WebGL2RenderingContext,
 	program: Webgl2IndexedP8WorldProgram | Webgl2IndexedP16WorldProgram,
-	indexedMaterial: NonNullable<Webgl2WorldDrawUnit["indexedMaterial"]>,
+	directIndexedMaterialResources: NonNullable<Webgl2WorldDrawUnit["directIndexedMaterialResources"]>,
 ): void {
+	const descriptor = directIndexedMaterialResources.descriptor;
 	gl.uniform2f(
 		program.uniforms.uTextureSize,
-		indexedMaterial.width,
-		indexedMaterial.height,
+		descriptor.width,
+		descriptor.height,
 	);
 	gl.uniform1f(
 		program.uniforms.uPaletteColorCount,
-		indexedMaterial.paletteColorCount,
+		descriptor.paletteColorCount,
 	);
-	gl.uniform1i(program.uniforms.uClipThreshold, indexedMaterial.clipThreshold);
+	gl.uniform1i(program.uniforms.uClipThreshold, descriptor.clipThreshold);
 	gl.uniform1i(
 		program.uniforms.uRepeatS,
-		indexedMaterial.wrapS === "repeat" ? 1 : 0,
+		descriptor.wrapS === "repeat" ? 1 : 0,
 	);
 	gl.uniform1i(
 		program.uniforms.uRepeatT,
-		indexedMaterial.wrapT === "repeat" ? 1 : 0,
+		descriptor.wrapT === "repeat" ? 1 : 0,
 	);
 }
 
@@ -533,7 +537,7 @@ function uploadDetailOverlayUniforms(
 function uploadDirectTexturePageUniforms(
 	gl: WebGL2RenderingContext,
 	program: Webgl2TexturedWorldProgram,
-	binding: TexturePageBinding | null,
+	binding: TexturePageResourceBinding | null,
 ): void {
 	if (!binding) {
 		gl.uniform1i(program.uniforms.uAtlasEnabled, 0);
@@ -558,11 +562,17 @@ function uploadDirectTexturePageUniforms(
 	);
 }
 
+function isTexturePageResourceBinding(
+	binding: TexturePageDescriptor,
+): binding is TexturePageResourceBinding {
+	return "texture" in binding;
+}
+
 function resolveIndexedProgram(
 	drawUnit: Webgl2WorldDrawUnit,
 	programs: Webgl2DirectDrawPrograms,
 ): Webgl2IndexedP8WorldProgram | Webgl2IndexedP16WorldProgram | null {
-	switch (drawUnit.indexedMaterial?.indexFormat) {
+	switch (drawUnit.directIndexedMaterialResources?.descriptor.indexFormat) {
 		case "p8":
 			return programs.indexedP8;
 		case "index16":

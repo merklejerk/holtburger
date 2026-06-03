@@ -119,7 +119,7 @@ Expected first-order impact:
 Dry-running this plan against the current WebGL2 renderer surfaces these constraints and scheduling
 corrections:
 
-- `Webgl2WorldDrawUnit.indexedMaterial` currently means "direct draw WebGL textures plus metadata".
+- Before Phase G, `Webgl2WorldDrawUnit.indexedMaterial` meant "direct draw WebGL textures plus metadata".
   `createOrReuseWebgl2DrawUnit` uploads standalone index and palette textures before compaction
   planning, and `retainedTextureKeys` retains those keys for every indexed draw unit. If atlas submit
   lands without changing this, draw calls can drop while standalone indexed texture upload/memory
@@ -162,7 +162,7 @@ compacted paths without requiring standalone texture upload:
 - clip threshold;
 - color/detail metadata.
 
-Keep the existing `indexedMaterial` direct texture resource path working, but stop treating it as the
+Keep the existing direct indexed texture resource path working, but stop treating it as the
 source of truth for compaction planning. After this phase, `createIndexedPalettedFamilyMaterialTableRecord`
 should be able to build records from descriptor metadata rather than direct WebGL texture resources.
 
@@ -355,7 +355,8 @@ Completed:
 - Added `Webgl2IndexedMaterialDescriptor` to carry indexed source metadata separately from direct
   WebGL texture resources.
 - Added `Webgl2WorldDrawUnit.indexedMaterialDescriptor`.
-- Kept direct indexed draw behavior unchanged through `Webgl2IndexedMaterialResources`.
+- Kept direct indexed draw behavior unchanged through the then-current
+  `Webgl2IndexedMaterialResources` direct-resource type.
 - Changed compacted indexed material table creation to read descriptor metadata instead of
   `drawUnit.indexedMaterial` direct WebGL texture resources.
 - Added resource tests proving the descriptor carries the source index and palette byte buffers used
@@ -374,9 +375,8 @@ Course corrections:
 - The first descriptor step did not add indexed atlas planner types yet. Keeping this separate made
   the production behavior change smaller and confirmed the compaction planner no longer depends on
   direct texture resource presence.
-- `Webgl2IndexedMaterialResources` now extends `Webgl2IndexedMaterialDescriptor` as a deliberate
-  interim shim. This avoids duplicating metadata fields while direct rendering still needs standalone
-  WebGL textures.
+- At the end of Phase A, `Webgl2IndexedMaterialResources` extended
+  `Webgl2IndexedMaterialDescriptor` as a deliberate interim shim. Phase G later removed this shim.
 - Some test helpers set `indexedMaterialDescriptor: indexedMaterial`. This is acceptable for this
   interim phase because the direct resource extends the descriptor, but it should be cleaned up once
   atlas planning has a standalone descriptor fixture.
@@ -429,9 +429,8 @@ Decisions and course corrections:
 
 Remaining debt carried into Phase B:
 
-- `Webgl2IndexedMaterialResources extends Webgl2IndexedMaterialDescriptor` remains as the main legacy
-  shim. Phase B can proceed with it, but the direct resource type should eventually compose a
-  `descriptor` field instead of inheriting descriptor fields.
+- At this point, `Webgl2IndexedMaterialResources extends Webgl2IndexedMaterialDescriptor` remained as
+  the main legacy shim. Phase G later removed it by composing a `descriptor` field.
 - Phase B should decide whether indexed atlas resource lifecycle gets a deliberately separate
   `indexedResourceAtlasGeneration` store field or a small shared lifecycle helper. Do not reuse the
   RGBA/detail `textureAtlasGeneration` type directly.
@@ -480,8 +479,8 @@ Decisions and course corrections:
 
 Remaining debt before Phase C:
 
-- `Webgl2IndexedMaterialResources extends Webgl2IndexedMaterialDescriptor` remains as the main legacy
-  shim.
+- At this point, `Webgl2IndexedMaterialResources extends Webgl2IndexedMaterialDescriptor` still
+  remained as the main legacy shim. Phase G later removed it.
 - `indexedResourceAtlasGeneration` is generated but not consumed by compacted indexed submit yet.
   Phase C must wire material-table atlas placement fields and shader addressing before draw calls drop.
 - Compacted indexed draw units still upload and retain standalone index/palette textures. Keep this
@@ -707,7 +706,7 @@ Completed:
   compacted indexed units.
 - Updated indexed resource tests so compacted indexed draw units assert:
   - descriptor metadata is present;
-  - `indexedMaterial` direct WebGL resources are absent;
+  - `directIndexedMaterialResources` direct WebGL resources are absent;
   - standalone indexed texture counts are `0`;
   - indexed atlas generation still uploads the P8/Index16 data atlas and palette atlas.
 
@@ -721,23 +720,70 @@ Validation:
 
 Decisions and course corrections:
 
-- `TexturePageBinding.texture` is now nullable. Descriptor-backed indexed bindings intentionally carry
-  no WebGL texture; they exist so compaction/material coverage can reason from CPU metadata.
+- `TexturePageDescriptor` is now the metadata shape used by compaction/material coverage. Descriptor-
+  backed indexed entries intentionally carry no WebGL texture.
 - Direct RGBA binding code was adjusted to tolerate nullable binding textures. Retained direct indexed
-  submit still requires `drawUnit.indexedMaterial`; compacted indexed draw units intentionally keep it
-  `null`.
-- Phase F did not fully rename `Webgl2WorldDrawUnit.indexedMaterial`. It now more honestly represents
-  direct WebGL resources, while `indexedMaterialDescriptor` is the compaction/atlas source of truth.
+  submit still requires direct indexed WebGL resources; compacted indexed draw units intentionally keep
+  those resources `null`.
+- Phase F left final naming/type cleanup for Phase G. `indexedMaterialDescriptor` remained the
+  compaction/atlas source of truth.
 
 Remaining debt after Phase F:
 
 - Add an explicit retained-direct indexed resource test for a non-atlas-placed indexed material if a
   compact local fixture becomes available. Current tests cover the compacted path and direct submit
   helpers, but not a full world-resource retained-direct indexed scene.
-- Consider renaming `indexedMaterial` to `directIndexedMaterialResources` to remove the final naming
-  ambiguity.
+- Rename `indexedMaterial` to `directIndexedMaterialResources` to remove the final naming ambiguity.
 - Runtime metrics should continue reporting direct indexed texture counts separately from indexed atlas
   texture counts.
+
+### Phase G: Direct Indexed Resource Cleanup
+
+Status: complete as of `2026-06-03`.
+
+Clean up the descriptor/direct-resource split introduced by Phase F so future indexed-atlas work does
+not have to reason through ambiguous names or inheritance shims.
+
+Completed:
+
+- Renamed `Webgl2WorldDrawUnit.indexedMaterial` to `directIndexedMaterialResources`.
+- Renamed the direct resource type to `Webgl2DirectIndexedMaterialResources`.
+- Removed `Webgl2IndexedMaterialResources extends Webgl2IndexedMaterialDescriptor`; direct resources
+  now compose a `descriptor` plus direct WebGL index/palette textures.
+- Updated direct indexed submit, texture-page binding collection, texture retention metrics, and test
+  fixtures to read descriptor metadata through `directIndexedMaterialResources.descriptor`.
+- Split texture-page metadata from bindable GPU resources:
+  - `TexturePageDescriptor` carries usage/sampling/rect metadata for compaction and metrics;
+  - `TexturePageResourceBinding` carries a non-null WebGL texture for direct submit.
+- Renamed helper functions that only touch retained direct indexed resources:
+  `resolveWebgl2DirectIndexedMaterialResources` and `collectDirectIndexedMaterialTextureKeys`.
+- Left staged-world `indexedMaterial` names unchanged because they refer to source material data, not
+  retained WebGL resources.
+
+Validation:
+
+- `npm exec vitest -- src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-direct-render-family.test.ts src/lib/world-display/texture-page-binding.test.ts src/lib/world-display/compaction/compaction-family-planner.test.ts src/lib/world-display/webgl2-transition-portal-work.test.ts --run`
+  from `apps/holtburger-3d`
+  - Result: 6 test files passed, 84 tests passed.
+
+Decisions and course corrections:
+
+- Split texture-page metadata from bindable GPU resources. `TexturePageDescriptor` is used for
+  compaction planning, while `TexturePageResourceBinding` is used for direct submit.
+- The cleanup deliberately did not rename staged-world or material-strategy `indexedMaterial` fields.
+  Those names still represent decoded indexed-paletted material data and are not part of the retained
+  direct-resource ambiguity.
+
+Remaining debt after Phase G:
+
+- Add an explicit retained-direct indexed resource test for a non-atlas-placed indexed material if a
+  compact local fixture becomes available. Current focused tests cover the compacted path and direct
+  submit helpers, but not a full world-resource retained-direct indexed scene.
+- Runtime metrics should continue reporting direct indexed texture counts separately from indexed atlas
+  texture counts.
+- The nullable `TexturePageBinding.texture` cleanup has been addressed by the descriptor/resource
+  split. Future work should keep compaction planner inputs descriptor-only and direct submit inputs
+  resource-backed.
 
 ## Acceptance Criteria
 
@@ -750,7 +796,7 @@ Remaining debt after Phase F:
 - Palette override and derived palette behavior remains correct because palette indirection is
   preserved.
 - Debug metrics clearly show indexed resource atlas use and any placement failures.
-- After Phase F, compacted indexed draw units do not retain redundant standalone direct index/palette
+- After Phase F/G, compacted indexed draw units do not retain redundant standalone direct index/palette
   texture resources.
 
 ## Risks
@@ -770,18 +816,15 @@ Remaining debt after Phase F:
 
 ## Cleanup Targets
 
-- `Webgl2WorldDrawUnit.indexedMaterial`: Phase F split behavior so this field now contains only direct
-  WebGL resources and can be `null` for compacted atlas-backed indexed draw units. Rename it to
-  `directIndexedMaterialResources` when doing the next naming cleanup.
-- `Webgl2IndexedMaterialResources extends Webgl2IndexedMaterialDescriptor`: keep this only as an
-  interim shim while direct indexed submit and compacted indexed planning both coexist in the same
-  draw unit. Once atlas planning is descriptor-first, direct resources should compose the descriptor
-  instead of inheriting from it.
+- `Webgl2WorldDrawUnit.indexedMaterial`: addressed in Phase G by renaming the retained direct-resource
+  field to `directIndexedMaterialResources`.
+- `Webgl2IndexedMaterialResources extends Webgl2IndexedMaterialDescriptor`: addressed in Phase G.
+  Direct indexed resources now compose a descriptor instead of inheriting from it.
 - Test helpers that set `indexedMaterialDescriptor: indexedMaterial`: addressed in Phase A.5 for the
   direct-render and world-submit helpers by composing explicit descriptor fixtures.
-- `collectIndexedMaterialTextureKeys`: addressed in Phase F for compacted atlas-backed indexed draw
-  units. It now sees only retained direct indexed resources because compacted indexed draw units keep
-  `indexedMaterial` null.
+- `collectIndexedMaterialTextureKeys`: addressed in Phase F/G for compacted atlas-backed indexed draw
+  units. It now exists as `collectDirectIndexedMaterialTextureKeys` and sees only retained direct
+  indexed resources.
 - `indexedResourceAtlasGeneration`: separate lifecycle is intentional for Phase B. After Phase C/D
   prove the final resource shape, consider extracting a small shared atlas-generation lifecycle helper
   if RGBA/detail and indexed resources still duplicate graph lease or dispose patterns.

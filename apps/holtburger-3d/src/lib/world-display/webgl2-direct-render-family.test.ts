@@ -7,7 +7,7 @@ import {
 } from "./webgl2/families/direct-render-family";
 import type {
 	Webgl2IndexedMaterialDescriptor,
-	Webgl2IndexedMaterialResources,
+	Webgl2DirectIndexedMaterialResources,
 	Webgl2WorldDrawUnit,
 } from "./webgl2-world-resources";
 import type { Webgl2BufferResource, Webgl2Texture2DResource } from "./webgl2-gl";
@@ -62,11 +62,11 @@ describe("webgl2 direct render family views", () => {
 	});
 
 	it("maps indexed/paletted draw units to the indexed family", () => {
-		const indexedMaterial = createIndexedMaterial();
+		const directIndexedMaterialResources = createIndexedMaterial();
 		const drawUnit = createDrawUnit({
 			id: "indexed-a",
 			materialKind: "indexed-paletted",
-			indexedMaterial,
+			directIndexedMaterialResources,
 			layout: "position-uv",
 		});
 		const submission = mapWebgl2DrawUnitToDirectRenderFamilySubmission(drawUnit);
@@ -76,7 +76,7 @@ describe("webgl2 direct render family views", () => {
 		if (submission.material.family !== "indexed-paletted") {
 			throw new Error("Expected indexed/paletted payload.");
 		}
-		expect(submission.material.indexedMaterial).toBe(indexedMaterial);
+		expect(submission.material.directIndexedMaterialResources).toBe(directIndexedMaterialResources);
 	});
 
 	it("keeps portal masks in the debug direct family", () => {
@@ -93,14 +93,14 @@ function createDrawUnit({
 	kind = "static",
 	materialKind = "flat",
 	texture = null,
-	indexedMaterial = null,
+	directIndexedMaterialResources = null,
 	layout = "position",
 }: {
 	id: string;
 	kind?: Webgl2WorldDrawUnit["kind"];
 	materialKind?: Webgl2WorldDrawUnit["materialKind"];
 	texture?: Webgl2WorldDrawUnit["texture"];
-	indexedMaterial?: Webgl2WorldDrawUnit["indexedMaterial"];
+	directIndexedMaterialResources?: Webgl2WorldDrawUnit["directIndexedMaterialResources"];
 	layout?: GeometrySubmissionLayout;
 }): Webgl2WorldDrawUnit {
 	const uvBuffer = layout === "position" ? null : createBuffer();
@@ -153,10 +153,10 @@ function createDrawUnit({
 		},
 		textureKey: texture ? `${id}/texture` : null,
 		texture,
-		indexedMaterialDescriptor: indexedMaterial
-			? createIndexedMaterialDescriptor(indexedMaterial)
+		indexedMaterialDescriptor: directIndexedMaterialResources
+			? createIndexedMaterialDescriptor(directIndexedMaterialResources)
 			: null,
-		indexedMaterial,
+		directIndexedMaterialResources,
 		detailOverlay: null,
 		texturePageBindings: [],
 		texturePageBindingFallbackSamples: [],
@@ -189,33 +189,34 @@ function createTexture(): Webgl2Texture2DResource {
 	};
 }
 
-function createIndexedMaterial(): Webgl2IndexedMaterialResources {
+function createIndexedMaterial(): Webgl2DirectIndexedMaterialResources {
 	const indexTexture = createTexture();
 	const paletteTexture = createTexture();
 	const descriptor = createIndexedMaterialDescriptor();
 	return {
-		...descriptor,
+		descriptor,
 		indexTexture,
 		paletteTexture,
 	};
 }
 
 function createIndexedMaterialDescriptor(
-	material?: Webgl2IndexedMaterialResources,
+	material?: Webgl2DirectIndexedMaterialResources,
 ): Webgl2IndexedMaterialDescriptor {
+	const descriptor = material?.descriptor;
 	return {
-		key: material?.key ?? "indexed/material",
-		indexFormat: material?.indexFormat ?? "index16",
-		indexTextureKey: material?.indexTextureKey ?? "indexed/texels",
-		paletteTextureKey: material?.paletteTextureKey ?? "indexed/palette",
-		width: material?.width ?? 1,
-		height: material?.height ?? 1,
-		indexSourceBytes: material?.indexSourceBytes ?? Uint8Array.from([0, 1]),
-		paletteColorCount: material?.paletteColorCount ?? 256,
-		paletteRgbaBytes: material?.paletteRgbaBytes ?? new Uint8Array(256 * 4),
-		wrapS: material?.wrapS ?? "repeat",
-		wrapT: material?.wrapT ?? "repeat",
-		clipThreshold: material?.clipThreshold ?? -1,
+		key: descriptor?.key ?? "indexed/material",
+		indexFormat: descriptor?.indexFormat ?? "index16",
+		indexTextureKey: descriptor?.indexTextureKey ?? "indexed/texels",
+		paletteTextureKey: descriptor?.paletteTextureKey ?? "indexed/palette",
+		width: descriptor?.width ?? 1,
+		height: descriptor?.height ?? 1,
+		indexSourceBytes: descriptor?.indexSourceBytes ?? Uint8Array.from([0, 1]),
+		paletteColorCount: descriptor?.paletteColorCount ?? 256,
+		paletteRgbaBytes: descriptor?.paletteRgbaBytes ?? new Uint8Array(256 * 4),
+		wrapS: descriptor?.wrapS ?? "repeat",
+		wrapT: descriptor?.wrapT ?? "repeat",
+		clipThreshold: descriptor?.clipThreshold ?? -1,
 	};
 }
 

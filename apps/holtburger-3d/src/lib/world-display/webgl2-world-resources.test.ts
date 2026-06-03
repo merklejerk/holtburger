@@ -785,7 +785,7 @@ describe("webgl2 world resources", () => {
 		expect(store.drawUnits).toHaveLength(1);
 		expect(store.drawUnits[0]?.materialKind).toBe("indexed-paletted");
 		expect(store.drawUnits[0]?.uvBuffer).not.toBeNull();
-		expect(store.drawUnits[0]?.indexedMaterial).toBeNull();
+		expect(store.drawUnits[0]?.directIndexedMaterialResources).toBeNull();
 		expect(store.drawUnits[0]?.indexedMaterialDescriptor).toMatchObject({
 			indexFormat: "p8",
 			width: 2,
@@ -910,7 +910,7 @@ describe("webgl2 world resources", () => {
 			renderChunkTransforms: [createChunkTransform()],
 		});
 
-		expect(store.drawUnits[0]?.indexedMaterial).toBeNull();
+		expect(store.drawUnits[0]?.directIndexedMaterialResources).toBeNull();
 		expect(store.drawUnits[0]?.indexedMaterialDescriptor).toMatchObject({
 			indexFormat: "index16",
 			width: 2,

@@ -232,7 +232,7 @@ describe("partitionWebgl2SceneDomainDrawUnits", () => {
 
 describe("planWebgl2WorldSubmitPassSchedule", () => {
 	it("keeps retained opaque, compacted families, and retained blended as explicit ordered passes", () => {
-		const indexedMaterial = createIndexedMaterial("p8");
+		const directIndexedMaterialResources = createIndexedMaterial("p8");
 		const schedule = planWebgl2WorldSubmitPassSchedule({
 			drawUnits: [
 				createDrawUnit({ id: "opaque-direct" }),
@@ -244,7 +244,7 @@ describe("planWebgl2WorldSubmitPassSchedule", () => {
 				createDrawUnit({
 					id: "indexed-compacted",
 					materialKind: "indexed-paletted",
-					indexedMaterial,
+					directIndexedMaterialResources,
 				}),
 				createDrawUnit({
 					id: "blended-direct",
@@ -348,7 +348,7 @@ describe("planWebgl2DirectDrawRoute", () => {
 			drawUnit: createDrawUnit({
 				id: "indexed-p8",
 				materialKind: "indexed-paletted",
-				indexedMaterial: createIndexedMaterial("p8"),
+				directIndexedMaterialResources: createIndexedMaterial("p8"),
 			}),
 			programs,
 		});
@@ -356,7 +356,7 @@ describe("planWebgl2DirectDrawRoute", () => {
 			drawUnit: createDrawUnit({
 				id: "indexed-p16",
 				materialKind: "indexed-paletted",
-				indexedMaterial: createIndexedMaterial("index16"),
+				directIndexedMaterialResources: createIndexedMaterial("index16"),
 			}),
 			programs,
 		});
@@ -1094,11 +1094,23 @@ describe("submitWebgl2WorldFrame", () => {
 				createDrawUnit({
 					id: "indexed",
 					materialKind: "indexed-paletted",
-					indexedMaterial: {
-						key: "indexed",
-						indexFormat: "p8",
-						indexTextureKey: "index",
-						paletteTextureKey: "palette",
+					directIndexedMaterialResources: {
+						descriptor: {
+							key: "indexed",
+							indexFormat: "p8",
+							indexTextureKey: "index",
+							paletteTextureKey: "palette",
+							width: 2,
+							height: 1,
+							indexSourceBytes: Uint8Array.from([0, 1]),
+							paletteColorCount: 2,
+							paletteRgbaBytes: Uint8Array.from([
+								0, 0, 0, 0, 255, 255, 255, 255,
+							]),
+							wrapS: "clamp",
+							wrapT: "repeat",
+							clipThreshold: -1,
+						},
 						indexTexture: {
 							texture: {} as WebGLTexture,
 							width: 2,
@@ -1115,16 +1127,6 @@ describe("submitWebgl2WorldFrame", () => {
 								return;
 							},
 						},
-						width: 2,
-						height: 1,
-						indexSourceBytes: Uint8Array.from([0, 1]),
-						paletteColorCount: 2,
-						paletteRgbaBytes: Uint8Array.from([
-							0, 0, 0, 0, 255, 255, 255, 255,
-						]),
-						wrapS: "clamp",
-						wrapT: "repeat",
-						clipThreshold: -1,
 					},
 				}),
 			],
@@ -1152,14 +1154,14 @@ describe("submitWebgl2WorldFrame", () => {
 		const standalonePaletteTexture = {} as WebGLTexture;
 		const atlasIndexTexture = {} as WebGLTexture;
 		const atlasPaletteTexture = {} as WebGLTexture;
-		const indexedMaterial = createIndexedMaterial("p8");
+		const directIndexedMaterialResources = createIndexedMaterial("p8");
 		const drawUnitsById = new Map<string, Webgl2WorldDrawUnit>([
 			[
 				"indexed-a",
 				createDrawUnit({
 					id: "indexed-a",
 					materialKind: "indexed-paletted",
-					indexedMaterial,
+					directIndexedMaterialResources,
 				}),
 			],
 			[
@@ -1167,7 +1169,7 @@ describe("submitWebgl2WorldFrame", () => {
 				createDrawUnit({
 					id: "indexed-b",
 					materialKind: "indexed-paletted",
-					indexedMaterial,
+					directIndexedMaterialResources,
 				}),
 			],
 			["staged", createDrawUnit({ id: "staged" })],
@@ -1233,14 +1235,14 @@ describe("submitWebgl2WorldFrame", () => {
 		const atlasIndexTexture = {} as WebGLTexture;
 		const atlasPaletteTexture = {} as WebGLTexture;
 		const detailTexture = {} as WebGLTexture;
-		const indexedMaterial = createIndexedMaterial("p8");
+		const directIndexedMaterialResources = createIndexedMaterial("p8");
 		const drawUnitsById = new Map<string, Webgl2WorldDrawUnit>([
 			[
 				"indexed-detail",
 				createDrawUnit({
 					id: "indexed-detail",
 					materialKind: "indexed-paletted",
-					indexedMaterial,
+					directIndexedMaterialResources,
 				}),
 			],
 		]);
@@ -1530,7 +1532,7 @@ function createDrawUnit({
 	geometrySignature = "geo-a",
 	color = new Float32Array([1, 0, 0, 1]),
 	texture = null,
-	indexedMaterial = null,
+	directIndexedMaterialResources = null,
 	atlasEntryKey = null,
 	atlasWrapS = "clamp",
 	atlasWrapT = "clamp",
@@ -1549,7 +1551,7 @@ function createDrawUnit({
 	geometrySignature?: string;
 	color?: Float32Array;
 	texture?: Webgl2WorldDrawUnit["texture"];
-	indexedMaterial?: Webgl2WorldDrawUnit["indexedMaterial"];
+	directIndexedMaterialResources?: Webgl2WorldDrawUnit["directIndexedMaterialResources"];
 	atlasEntryKey?: string | null;
 	atlasWrapS?: "clamp" | "repeat";
 	atlasWrapT?: "clamp" | "repeat";
@@ -1659,10 +1661,10 @@ function createDrawUnit({
 		},
 		textureKey: null,
 		texture,
-		indexedMaterialDescriptor: indexedMaterial
-			? createIndexedMaterialDescriptor(indexedMaterial)
+		indexedMaterialDescriptor: directIndexedMaterialResources
+			? createIndexedMaterialDescriptor(directIndexedMaterialResources)
 			: null,
-		indexedMaterial,
+		directIndexedMaterialResources,
 		detailOverlay: null,
 		texturePageBindings:
 			(baseTexturePageBinding ?? defaultTexturePageBinding)
@@ -2142,10 +2144,8 @@ function createTextureResource(
 }
 
 function createIndexedMaterial(
-	indexFormat: NonNullable<
-		Webgl2WorldDrawUnit["indexedMaterial"]
-	>["indexFormat"],
-): NonNullable<Webgl2WorldDrawUnit["indexedMaterial"]> {
+	indexFormat: Webgl2IndexedMaterialDescriptor["indexFormat"],
+): NonNullable<Webgl2WorldDrawUnit["directIndexedMaterialResources"]> {
 	const descriptor = createIndexedMaterialDescriptor({
 		key: `indexed-${indexFormat}`,
 		indexFormat,
@@ -2153,7 +2153,7 @@ function createIndexedMaterial(
 		paletteTextureKey: "palette",
 	});
 	return {
-		...descriptor,
+		descriptor,
 		indexTexture: createTextureResource({} as WebGLTexture),
 		paletteTexture: createTextureResource({} as WebGLTexture),
 	};

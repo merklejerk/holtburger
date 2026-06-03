@@ -3,10 +3,10 @@ import type { RenderMat4, RenderVec4 } from "../../render-math";
 import type { Webgl2SceneDomain } from "../../webgl2-scene-domain-targets";
 import type {
 	Webgl2DetailOverlayResources,
-	Webgl2IndexedMaterialResources,
+	Webgl2DirectIndexedMaterialResources,
 	Webgl2WorldDrawUnit,
 } from "../../webgl2-world-resources";
-import type { TexturePageBinding } from "../../texture-pages/texture-page-binding";
+import type { TexturePageDescriptor } from "../../texture-pages/texture-page-binding";
 
 export type GeometrySubmissionLayout =
 	| "position"
@@ -47,7 +47,7 @@ interface DirectRgbaTexturePagePayload {
 	color: RenderVec4;
 	texture: NonNullable<Webgl2WorldDrawUnit["texture"]>;
 	detailOverlay: Webgl2DetailOverlayResources | null;
-	texturePageBindings: readonly TexturePageBinding[];
+	texturePageBindings: readonly TexturePageDescriptor[];
 	materialBehavior: LegacyMaterialBehaviorDto | null;
 }
 
@@ -55,9 +55,9 @@ interface DirectIndexedPalettedPayload {
 	family: "indexed-paletted";
 	materialKey: string;
 	color: RenderVec4;
-	indexedMaterial: Webgl2IndexedMaterialResources;
+	directIndexedMaterialResources: Webgl2DirectIndexedMaterialResources;
 	detailOverlay: Webgl2DetailOverlayResources | null;
-	texturePageBindings: readonly TexturePageBinding[];
+	texturePageBindings: readonly TexturePageDescriptor[];
 	materialBehavior: LegacyMaterialBehaviorDto | null;
 }
 
@@ -118,12 +118,12 @@ function mapDirectFamilyMaterialPayload(
 			materialBehavior: drawUnit.materialBehavior,
 		};
 	}
-	if (drawUnit.indexedMaterial) {
+	if (drawUnit.directIndexedMaterialResources) {
 		return {
 			family: "indexed-paletted",
 			materialKey: drawUnit.materialKey,
 			color: drawUnit.color,
-			indexedMaterial: drawUnit.indexedMaterial,
+			directIndexedMaterialResources: drawUnit.directIndexedMaterialResources,
 			detailOverlay: drawUnit.detailOverlay,
 			texturePageBindings: drawUnit.texturePageBindings,
 			materialBehavior: drawUnit.materialBehavior,

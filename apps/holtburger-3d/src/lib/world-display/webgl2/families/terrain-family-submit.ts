@@ -71,6 +71,10 @@ export function createWebgl2TerrainFamilyWorldProgram(
 	});
 }
 
+export function describeWebgl2TerrainFamilyFragmentShaderSource(): string {
+	return TERRAIN_FAMILY_WORLD_FRAGMENT_SHADER;
+}
+
 export function submitWebgl2TerrainFamilyTiles({
 	gl,
 	stateCache,
@@ -391,21 +395,31 @@ vec2 rotateLegacyAlphaUv(vec2 uv, int rotation) {
 	return uv;
 }
 
-vec4 sampleAtlasRect(sampler2D atlasTexture, vec2 atlasSize, vec4 rect, vec2 localUv) {
+vec4 sampleAtlasRect(sampler2D atlasTexture, vec2 atlasSize, vec4 rect, vec2 localUv, vec2 gradX, vec2 gradY) {
 	vec2 atlasUv = (rect.xy + localUv * rect.zw) / atlasSize;
-	return texture(atlasTexture, atlasUv);
+	vec2 atlasGradX = gradX * rect.zw / atlasSize;
+	vec2 atlasGradY = gradY * rect.zw / atlasSize;
+	return textureGrad(atlasTexture, atlasUv, atlasGradX, atlasGradY);
 }
 
 vec4 sampleRepeatingColor(vec4 rect, float tiling) {
-	return sampleAtlasRect(uColorAtlasTexture, uColorAtlasSize, rect, fract(vUv * tiling));
+	vec2 tiledUv = vUv * tiling;
+	return sampleAtlasRect(
+		uColorAtlasTexture,
+		uColorAtlasSize,
+		rect,
+		fract(tiledUv),
+		dFdx(tiledUv),
+		dFdy(tiledUv)
+	);
 }
 
 float sampleMask(vec4 rect, int rotation) {
-	return sampleAtlasRect(
+	vec2 maskUv = rotateLegacyAlphaUv(legacyAlphaUv(vUv), rotation);
+	vec2 atlasUv = (rect.xy + maskUv * rect.zw) / uMaskAtlasSize;
+	return texture(
 		uMaskAtlasTexture,
-		uMaskAtlasSize,
-		rect,
-		rotateLegacyAlphaUv(legacyAlphaUv(vUv), rotation)
+		atlasUv
 	).r;
 }
 

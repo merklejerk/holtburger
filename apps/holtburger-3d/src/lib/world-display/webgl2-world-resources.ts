@@ -94,6 +94,7 @@ import {
 } from "./webgl2/families/direct-render-family";
 import {
 	createWebgl2TextureAtlasGenerationResource,
+	describeWebgl2TextureAtlasGenerationKey,
 	type Webgl2TextureAtlasGenerationResource,
 } from "./webgl2/resources/texture-atlas-generation";
 import type {
@@ -649,6 +650,8 @@ export function syncWebgl2WorldResources({
 		gl,
 		store,
 		plan: store.texturePageAtlasPlan,
+		textureFilteringMode,
+		maxAnisotropy: materialTextureCapabilities.maxAnisotropy ?? 1,
 		rendererResourceGraph,
 	});
 	resolveWebgl2TerrainTileTexturePageBindings({ gl, store });
@@ -2800,11 +2803,15 @@ function syncWebgl2TextureAtlasGeneration({
 	gl,
 	store,
 	plan,
+	textureFilteringMode,
+	maxAnisotropy,
 	rendererResourceGraph,
 }: {
 	gl: WebGL2RenderingContext;
 	store: Webgl2WorldResourceStore;
 	plan: TexturePageAtlasPlan;
+	textureFilteringMode: TextureFilteringMode;
+	maxAnisotropy: number;
 	rendererResourceGraph?: RendererResourceGraph;
 }): void {
 	if (
@@ -2821,13 +2828,20 @@ function syncWebgl2TextureAtlasGeneration({
 		releaseWebgl2TextureAtlasGenerationGraphLease(store);
 		return;
 	}
-	if (store.textureAtlasGeneration?.key !== plan.key) {
+	const generationKey = describeWebgl2TextureAtlasGenerationKey({
+		planKey: plan.key,
+		textureFilteringMode,
+		maxAnisotropy,
+	});
+	if (store.textureAtlasGeneration?.key !== generationKey) {
 		const nextGeneration = profileBrowserJsScope(
 			"webgl2.resource.createTextureAtlasGeneration",
 			() =>
 				createWebgl2TextureAtlasGenerationResource({
 					gl,
 					plan,
+					textureFilteringMode,
+					maxAnisotropy,
 				}),
 		);
 		if (!nextGeneration) {

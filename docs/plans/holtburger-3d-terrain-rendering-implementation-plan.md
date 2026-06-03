@@ -1671,12 +1671,28 @@ Post-T9 correction:
   prepared `surface-texture` payload. Visible prepared texture request planning now follows those
   surface-texture dependencies when collecting visible render surfaces, so normalized terrain
   `prepared-texture/...usage=raw&out=rgba8...` assets are requested before terrain atlas planning.
+- Follow-up visual diagnostics showed terrain atlas edge artifacts at shallow horizon angles. The
+  filtering-mode control did not initially affect atlas resources because atlas sampler state was
+  hardcoded and atlas generation reused the raw atlas-plan key. Atlas generation now includes
+  filtering mode and anisotropy in its resource key and applies nearest/linear/anisotropic sampler
+  state to atlas textures. Nearest disables atlas mipmap generation, giving T10 a practical
+  diagnostic for mip bleed.
+- Rejected the first explicit CPU mip-chain experiment after user testing showed worse artifacts and
+  the cost profile was too high for 4096px atlas pages. Do not restore CPU-generated atlas mip chains
+  without a measured, correct design.
+- Terrain color pages now use wrapped gutter extrusion because terrain color textures repeat. The
+  terrain-color gutter is currently set to 96px after visual checks found 64px still produced
+  occasional artifacts, while 96px and 128px both looked acceptable. This is an empirical tradeoff,
+  not a power-of-two rule. Terrain-color atlas pages also initialize unused pixels to neutral gray so
+  extreme over-gutter samples do not expose black atlas background. Terrain-mask remains a smaller
+  clamped gutter because masks are blend controls rather than repeated color textures.
 
 Correction validation:
 
 - `npm run test:ts -- scene-asset-request-planner terrain-materials terrain-blend-plan webgl2-world-resources compaction-family-planner`
 - `npm run test:ts -- webgl2-world-resources terrain-tile-plan webgl2-world-submit`
 - `npm run test:ts -- terrain-tile-plan webgl2-world-submit webgl2-world-resources webgl2-direct-render-family compaction-family-planner webgl2-texture-atlas-generation terrain-family-submit texture-page-atlas-planner`
+- `npm run test:ts -- texture-page-atlas-planner webgl2-texture-atlas-generation terrain-family-submit webgl2-world-resources`
 - `npm run check`
 - `npm run lint`
 

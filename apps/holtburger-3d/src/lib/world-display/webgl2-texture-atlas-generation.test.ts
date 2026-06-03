@@ -11,7 +11,9 @@ describe("webgl2 texture atlas generation", () => {
 			plan: createPlan(),
 		});
 
-		expect(generation?.key).toBe("texture-page-atlas/test");
+		expect(generation?.key).toBe(
+			"texture-page-atlas/test;filter=anisotropic-4x;aniso=1",
+		);
 		expect(generation?.textures).toHaveLength(1);
 		expect(generation?.detailTextures).toHaveLength(1);
 		expect(generation?.placements).toEqual([
@@ -36,6 +38,7 @@ describe("webgl2 texture atlas generation", () => {
 		]);
 		expect(gl.textureUploads).toHaveLength(2);
 		expect(gl.textureUploads[0]).toMatchObject({
+			level: 0,
 			width: 4,
 			height: 4,
 			internalFormat: gl.RGBA8,
@@ -43,6 +46,7 @@ describe("webgl2 texture atlas generation", () => {
 			type: gl.UNSIGNED_BYTE,
 		});
 		expect(gl.textureUploads[1]).toMatchObject({
+			level: 0,
 			width: 4,
 			height: 4,
 			internalFormat: gl.RGBA8,
@@ -92,9 +96,103 @@ describe("webgl2 texture atlas generation", () => {
 		).toBeNull();
 		expect(gl.textureUploads).toHaveLength(0);
 	});
+
+	it("recreates atlas resources for nearest filtering without mipmaps", () => {
+		const gl = new FakeWebgl2();
+		const generation = createWebgl2TextureAtlasGenerationResource({
+			gl: gl.asContext(),
+			plan: createPlan(),
+			textureFilteringMode: "nearest",
+			maxAnisotropy: 8,
+		});
+
+		expect(generation?.key).toBe("texture-page-atlas/test;filter=nearest;aniso=1");
+		expect(gl.generatedMipmapCount).toBe(0);
+		expect(gl.textureParameters.slice(0, 4)).toEqual([
+			{ pname: gl.TEXTURE_WRAP_S, param: gl.CLAMP_TO_EDGE },
+			{ pname: gl.TEXTURE_WRAP_T, param: gl.CLAMP_TO_EDGE },
+			{ pname: gl.TEXTURE_MIN_FILTER, param: gl.NEAREST },
+			{ pname: gl.TEXTURE_MAG_FILTER, param: gl.NEAREST },
+		]);
+
+		generation?.dispose();
+	});
+
+	it("extrudes terrain color atlas gutters with repeat semantics", () => {
+		const gl = new FakeWebgl2();
+		const generation = createWebgl2TextureAtlasGenerationResource({
+			gl: gl.asContext(),
+			plan: createPlan({ family: "terrain-color" }),
+		});
+
+		const pixels = gl.textureUploads[0]?.data;
+		expect(pixels).toBeInstanceOf(Uint8Array);
+		expect([
+			...((pixels as Uint8Array) ?? new Uint8Array()).slice(0, 16),
+		]).toEqual([
+			10, 11, 12, 255, 7, 8, 9, 255, 10, 11, 12, 255, 7, 8, 9, 255,
+		]);
+
+		generation?.dispose();
+	});
+
+	it("fills unused terrain color atlas pixels with neutral gray", () => {
+		const gl = new FakeWebgl2();
+		const generation = createWebgl2TextureAtlasGenerationResource({
+			gl: gl.asContext(),
+			plan: createPlan({
+				family: "terrain-color",
+				atlasTexture: {
+					width: 8,
+					height: 8,
+					placement: {
+						x: 3,
+						y: 3,
+						width: 2,
+						height: 2,
+						gutterPixels: 1,
+					},
+				},
+			}),
+		});
+
+		const pixels = gl.textureUploads[0]?.data;
+		expect(pixels).toBeInstanceOf(Uint8Array);
+		expect([...((pixels as Uint8Array) ?? new Uint8Array()).slice(0, 4)]).toEqual(
+			[128, 128, 128, 255],
+		);
+
+		generation?.dispose();
+	});
 });
 
-function createPlan(): TexturePageAtlasPlan {
+function createPlan({
+	family = "static-rgba",
+	atlasTexture = {
+		width: 4,
+		height: 4,
+		placement: {
+			x: 1,
+			y: 1,
+			width: 2,
+			height: 2,
+			gutterPixels: 1,
+		},
+	},
+}: {
+	family?: TexturePageAtlasPlan["families"][number]["family"];
+	atlasTexture?: {
+		width: number;
+		height: number;
+		placement: {
+			x: number;
+			y: number;
+			width: number;
+			height: number;
+			gutterPixels: number;
+		};
+	};
+} = {}): TexturePageAtlasPlan {
 	const levelBytes = Uint8Array.from([
 		1, 2, 3, 255, 4, 5, 6, 255, 7, 8, 9, 255, 10, 11, 12, 255,
 	]);
@@ -126,17 +224,13 @@ function createPlan(): TexturePageAtlasPlan {
 		atlasTextures: [
 			{
 				textureIndex: 0,
-				width: 4,
-				height: 4,
+				width: atlasTexture.width,
+				height: atlasTexture.height,
 				placements: [
 					{
 						atlasEntryKey: "entry-a",
 						textureIndex: 0,
-						x: 1,
-						y: 1,
-						width: 2,
-						height: 2,
-						gutterPixels: 1,
+						...atlasTexture.placement,
 					},
 				],
 			},
@@ -176,7 +270,7 @@ function createPlan(): TexturePageAtlasPlan {
 		],
 		families: [
 			{
-				family: "static-rgba",
+				family,
 				atlasEntryRecords: [
 					{
 						key: "entry-a",
@@ -200,17 +294,13 @@ function createPlan(): TexturePageAtlasPlan {
 				atlasTextures: [
 					{
 						textureIndex: 0,
-						width: 4,
-						height: 4,
+						width: atlasTexture.width,
+						height: atlasTexture.height,
 						placements: [
 							{
 								atlasEntryKey: "entry-a",
 								textureIndex: 0,
-								x: 1,
-								y: 1,
-								width: 2,
-								height: 2,
-								gutterPixels: 1,
+								...atlasTexture.placement,
 							},
 						],
 					},
@@ -263,6 +353,7 @@ class FakeWebgl2 {
 	readonly CLAMP_TO_EDGE = 5;
 	readonly LINEAR = 6;
 	readonly LINEAR_MIPMAP_LINEAR = 7;
+	readonly NEAREST = 14;
 	readonly RED = 12;
 	readonly R8 = 13;
 	readonly TEXTURE_WRAP_S = 8;
@@ -272,6 +363,7 @@ class FakeWebgl2 {
 	readonly createdTextures: object[] = [];
 	readonly deletedTextures: object[] = [];
 	readonly textureUploads: {
+		level: number;
 		width: number;
 		height: number;
 		internalFormat: GLenum;
@@ -298,7 +390,7 @@ class FakeWebgl2 {
 
 	texImage2D(
 		_target: GLenum,
-		_level: number,
+		level: number,
 		internalFormat: GLenum,
 		width: GLenum,
 		height: GLenum,
@@ -308,6 +400,7 @@ class FakeWebgl2 {
 		data: TexImageSource | ArrayBufferView | null,
 	): void {
 		this.textureUploads.push({
+			level,
 			width,
 			height,
 			internalFormat,

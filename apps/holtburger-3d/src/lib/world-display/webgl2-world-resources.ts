@@ -91,6 +91,13 @@ import {
 	type TexturePageAtlasPlan,
 } from "./texture-pages/texture-page-atlas-planner";
 import {
+	createEmptyIndexedResourceAtlasPlan,
+	planIndexedResourceAtlas,
+	type IndexedResourceAtlasPlan,
+	type IndexedTexelAtlasCandidate,
+	type IndexedPaletteAtlasCandidate,
+} from "./texture-pages/indexed-resource-atlas-planner";
+import {
 	deriveDirectGeometrySubmissionLayout,
 	type GeometrySubmissionLayout,
 } from "./webgl2/families/direct-render-family";
@@ -99,6 +106,11 @@ import {
 	describeWebgl2TextureAtlasGenerationKey,
 	type Webgl2TextureAtlasGenerationResource,
 } from "./webgl2/resources/texture-atlas-generation";
+import {
+	createWebgl2IndexedResourceAtlasGenerationResource,
+	describeWebgl2IndexedResourceAtlasGenerationKey,
+	type Webgl2IndexedResourceAtlasGenerationResource,
+} from "./webgl2/resources/indexed-resource-atlas-generation";
 import type {
 	Webgl2CompactedGeometryBatchResource,
 	Webgl2CompactedGeometryFamilyResource,
@@ -254,12 +266,21 @@ export interface Webgl2WorldResourceStore {
 		string,
 		number
 	>;
+	indexedResourceAtlasPlan: IndexedResourceAtlasPlan;
+	indexedResourceAtlasGeneration: Webgl2IndexedResourceAtlasGenerationResource | null;
+	indexedResourceAtlasGenerationGraph: RendererResourceGraph | null;
+	indexedResourceAtlasGenerationGraphLease: RendererResourceGraphLease | null;
 	textureAtlasGenerationTextureCount: number;
 	detailTextureAtlasGenerationTextureCount: number;
 	indexedMaterialDescriptorDrawUnitCount: number;
 	indexedMaterialDescriptorCompactionCandidateCount: number;
 	standaloneIndexedMaterialResourceDrawUnitCount: number;
 	compactedIndexedMaterialStandaloneResourceDrawUnitCount: number;
+	indexedResourceAtlasCandidateDrawUnitCount: number;
+	indexedResourceAtlasIndexTextureCount: number;
+	indexedResourceAtlasPaletteTextureCount: number;
+	indexedResourceAtlasFailureReasonCount: number;
+	indexedResourceAtlasFailureSamples: readonly string[];
 	compactedGeometryBatchCount: number;
 	compactedGeometryDrawUnitCount: number;
 	compactedGeometryTriangleCount: number;
@@ -374,12 +395,21 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		compactionCoverageMaterialFamilyAlphaPolicyCounts: {},
 		compactionCoverageRetainedDirectMaterialFamilyCounts: {},
 		compactionCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts: {},
+		indexedResourceAtlasPlan: createEmptyIndexedResourceAtlasPlan(),
+		indexedResourceAtlasGeneration: null,
+		indexedResourceAtlasGenerationGraph: null,
+		indexedResourceAtlasGenerationGraphLease: null,
 		textureAtlasGenerationTextureCount: 0,
 		detailTextureAtlasGenerationTextureCount: 0,
 		indexedMaterialDescriptorDrawUnitCount: 0,
 		indexedMaterialDescriptorCompactionCandidateCount: 0,
 		standaloneIndexedMaterialResourceDrawUnitCount: 0,
 		compactedIndexedMaterialStandaloneResourceDrawUnitCount: 0,
+		indexedResourceAtlasCandidateDrawUnitCount: 0,
+		indexedResourceAtlasIndexTextureCount: 0,
+		indexedResourceAtlasPaletteTextureCount: 0,
+		indexedResourceAtlasFailureReasonCount: 0,
+		indexedResourceAtlasFailureSamples: [],
 		compactedGeometryBatchCount: 0,
 		compactedGeometryDrawUnitCount: 0,
 		compactedGeometryTriangleCount: 0,
@@ -696,12 +726,33 @@ export function syncWebgl2WorldResources({
 				drawUnit.indexedMaterial !== null &&
 				compactedIndexedDrawUnitIds.has(drawUnit.id),
 		).length;
+	store.indexedResourceAtlasPlan = planIndexedResourceAtlasForCompactedDrawUnits({
+		drawUnits: store.drawUnits,
+		compactedIndexedDrawUnitIds,
+		policy: DEFAULT_WEBGL2_COMPACTION_FAMILY_PLANNING_POLICY,
+	});
+	store.indexedResourceAtlasCandidateDrawUnitCount =
+		store.indexedMaterialDescriptorCompactionCandidateCount;
+	store.indexedResourceAtlasFailureReasonCount =
+		store.indexedResourceAtlasPlan.failures.length;
+	store.indexedResourceAtlasFailureSamples = summarizeDiagnosticReasons(
+		store.indexedResourceAtlasPlan.failures.map(
+			(failure) => `${failure.reason}:${failure.detail}`,
+		),
+		8,
+	);
 	syncWebgl2TextureAtlasGeneration({
 		gl,
 		store,
 		plan: store.texturePageAtlasPlan,
 		textureFilteringMode,
 		maxAnisotropy: materialTextureCapabilities.maxAnisotropy ?? 1,
+		rendererResourceGraph,
+	});
+	syncWebgl2IndexedResourceAtlasGeneration({
+		gl,
+		store,
+		plan: store.indexedResourceAtlasPlan,
 		rendererResourceGraph,
 	});
 	resolveWebgl2TerrainTileTexturePageBindings({ gl, store });
@@ -789,8 +840,12 @@ export function destroyWebgl2WorldResources(
 	store.graphSignaturesByDrawUnitId.clear();
 	store.graphLeasesByTerrainTileId.clear();
 	store.graphSignaturesByTerrainTileId.clear();
+	releaseWebgl2TextureAtlasGenerationGraphLease(store);
+	releaseWebgl2IndexedResourceAtlasGenerationGraphLease(store);
 	store.textureAtlasGenerationGraph = null;
 	store.textureAtlasGenerationGraphLease = null;
+	store.indexedResourceAtlasGenerationGraph = null;
+	store.indexedResourceAtlasGenerationGraphLease = null;
 	store.compactedGeometryBatchGraph = null;
 	store.compactedGeometryBatchGraphLeasesByKey.clear();
 	store.boundGraph = null;
@@ -840,10 +895,18 @@ export function destroyWebgl2WorldResources(
 	store.compactionCoverageMaterialFamilyAlphaPolicyCounts = {};
 	store.compactionCoverageRetainedDirectMaterialFamilyCounts = {};
 	store.compactionCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts = {};
+	store.indexedResourceAtlasPlan = createEmptyIndexedResourceAtlasPlan();
+	store.indexedResourceAtlasGeneration?.dispose();
+	store.indexedResourceAtlasGeneration = null;
 	store.indexedMaterialDescriptorDrawUnitCount = 0;
 	store.indexedMaterialDescriptorCompactionCandidateCount = 0;
 	store.standaloneIndexedMaterialResourceDrawUnitCount = 0;
 	store.compactedIndexedMaterialStandaloneResourceDrawUnitCount = 0;
+	store.indexedResourceAtlasCandidateDrawUnitCount = 0;
+	store.indexedResourceAtlasIndexTextureCount = 0;
+	store.indexedResourceAtlasPaletteTextureCount = 0;
+	store.indexedResourceAtlasFailureReasonCount = 0;
+	store.indexedResourceAtlasFailureSamples = [];
 	store.textureAtlasGenerationTextureCount = 0;
 	store.detailTextureAtlasGenerationTextureCount = 0;
 	store.compactedGeometryBatchCount = 0;
@@ -2186,6 +2249,62 @@ function createIndexedPalettedFamilyMaterialTableRecord(
 	};
 }
 
+function planIndexedResourceAtlasForCompactedDrawUnits({
+	drawUnits,
+	compactedIndexedDrawUnitIds,
+	policy,
+}: {
+	drawUnits: readonly Webgl2WorldDrawUnit[];
+	compactedIndexedDrawUnitIds: ReadonlySet<string>;
+	policy: CompactionFamilyPlanningPolicy;
+}): IndexedResourceAtlasPlan {
+	const compactedIndexedDrawUnits = drawUnits.filter(
+		(drawUnit) =>
+			compactedIndexedDrawUnitIds.has(drawUnit.id) &&
+			drawUnit.indexedMaterialDescriptor !== null,
+	);
+	const indexCandidates: IndexedTexelAtlasCandidate[] =
+		compactedIndexedDrawUnits.map((drawUnit) => {
+			const descriptor = requireIndexedMaterialDescriptor(drawUnit);
+			return {
+				drawUnitId: drawUnit.id,
+				indexTextureKey: descriptor.indexTextureKey,
+				format: descriptor.indexFormat,
+				width: descriptor.width,
+				height: descriptor.height,
+				sourceBytes: descriptor.indexSourceBytes,
+			};
+		});
+	const paletteCandidates: IndexedPaletteAtlasCandidate[] =
+		compactedIndexedDrawUnits.map((drawUnit) => {
+			const descriptor = requireIndexedMaterialDescriptor(drawUnit);
+			return {
+				drawUnitId: drawUnit.id,
+				paletteTextureKey: descriptor.paletteTextureKey,
+				colorCount: descriptor.paletteColorCount,
+				rgbaBytes: descriptor.paletteRgbaBytes,
+			};
+		});
+	return planIndexedResourceAtlas({
+		indexCandidates,
+		paletteCandidates,
+		policy: {
+			maxTextureSize: policy.maxAtlasTextureSize,
+			maxTextureCount: policy.maxAtlasTextureCount,
+		},
+	});
+}
+
+function requireIndexedMaterialDescriptor(
+	drawUnit: Webgl2WorldDrawUnit,
+): Webgl2IndexedMaterialDescriptor {
+	const descriptor = drawUnit.indexedMaterialDescriptor;
+	if (!descriptor) {
+		throw new Error(`Indexed draw unit ${drawUnit.id} has no descriptor.`);
+	}
+	return descriptor;
+}
+
 function destroyWebgl2DrawUnit(drawUnit: Webgl2WorldDrawUnit): void {
 	drawUnit.vertexArray.dispose();
 	drawUnit.vertexBuffer.dispose();
@@ -3264,6 +3383,139 @@ function releaseWebgl2TextureAtlasGenerationGraphLease(
 	);
 	store.textureAtlasGenerationGraphLease = null;
 	store.textureAtlasGenerationGraph = null;
+}
+
+function syncWebgl2IndexedResourceAtlasGeneration({
+	gl,
+	store,
+	plan,
+	rendererResourceGraph,
+}: {
+	gl: WebGL2RenderingContext;
+	store: Webgl2WorldResourceStore;
+	plan: IndexedResourceAtlasPlan;
+	rendererResourceGraph?: RendererResourceGraph;
+}): void {
+	if (
+		store.indexedResourceAtlasGenerationGraph &&
+		store.indexedResourceAtlasGenerationGraph !== rendererResourceGraph
+	) {
+		releaseWebgl2IndexedResourceAtlasGenerationGraphLease(store);
+	}
+	if (!requiresIndexedResourceAtlasGeneration(plan)) {
+		store.indexedResourceAtlasGeneration?.dispose();
+		store.indexedResourceAtlasGeneration = null;
+		store.indexedResourceAtlasIndexTextureCount = 0;
+		store.indexedResourceAtlasPaletteTextureCount = 0;
+		releaseWebgl2IndexedResourceAtlasGenerationGraphLease(store);
+		return;
+	}
+	const generationKey = describeWebgl2IndexedResourceAtlasGenerationKey(
+		plan.key,
+	);
+	if (store.indexedResourceAtlasGeneration?.key !== generationKey) {
+		const nextGeneration = profileBrowserJsScope(
+			"webgl2.resource.createIndexedResourceAtlasGeneration",
+			() =>
+				createWebgl2IndexedResourceAtlasGenerationResource({
+					gl,
+					plan,
+				}),
+		);
+		if (!nextGeneration) {
+			throw new Error(
+				`Indexed resource atlas plan ${plan.key} has atlas pages but produced no generation.`,
+			);
+		}
+		store.indexedResourceAtlasGeneration?.dispose();
+		store.indexedResourceAtlasGeneration = nextGeneration;
+		releaseWebgl2IndexedResourceAtlasGenerationGraphLease(store);
+	}
+	store.indexedResourceAtlasIndexTextureCount =
+		store.indexedResourceAtlasGeneration?.indexTextures.length ?? 0;
+	store.indexedResourceAtlasPaletteTextureCount =
+		store.indexedResourceAtlasGeneration?.paletteTextures.length ?? 0;
+	if (!rendererResourceGraph || !store.indexedResourceAtlasGeneration) {
+		releaseWebgl2IndexedResourceAtlasGenerationGraphLease(store);
+		return;
+	}
+	upsertWebgl2IndexedResourceAtlasGenerationGraph({
+		graph: rendererResourceGraph,
+		generation: store.indexedResourceAtlasGeneration,
+	});
+	if (
+		store.indexedResourceAtlasGenerationGraphLease?.nodeKey ===
+		atlasGenerationGraphNodeKey(store.indexedResourceAtlasGeneration.key)
+	) {
+		return;
+	}
+	releaseWebgl2IndexedResourceAtlasGenerationGraphLease(store);
+	store.indexedResourceAtlasGenerationGraphLease =
+		rendererResourceGraph.leaseNode(
+			atlasGenerationGraphNodeKey(store.indexedResourceAtlasGeneration.key),
+			"webgl2 indexed resource atlas generation",
+		);
+	store.indexedResourceAtlasGenerationGraph = rendererResourceGraph;
+}
+
+function requiresIndexedResourceAtlasGeneration(
+	plan: IndexedResourceAtlasPlan,
+): boolean {
+	return (
+		plan.p8IndexAtlasTextures.length > 0 ||
+		plan.index16AtlasTextures.length > 0 ||
+		plan.paletteAtlasTextures.length > 0
+	);
+}
+
+function upsertWebgl2IndexedResourceAtlasGenerationGraph({
+	graph,
+	generation,
+}: {
+	graph: RendererResourceGraph;
+	generation: Webgl2IndexedResourceAtlasGenerationResource;
+}): void {
+	const atlasNodeKey = atlasGenerationGraphNodeKey(generation.key);
+	graph.applyBatchUpdate({
+		nodes: [
+			{
+				key: atlasNodeKey,
+				kind: "atlas-generation",
+				label: "indexed resource atlas",
+				metadata: {
+					indexTextureCount: generation.indexTextures.length,
+					paletteTextureCount: generation.paletteTextures.length,
+					indexReadyDrawUnitCount: generation.indexReadyDrawUnitIds.length,
+					paletteReadyDrawUnitCount:
+						generation.paletteReadyDrawUnitIds.length,
+				},
+			},
+		],
+		dependencyReplacements: [
+			{
+				nodeKey: atlasNodeKey,
+				dependencyKeys: [],
+			},
+		],
+	});
+}
+
+function releaseWebgl2IndexedResourceAtlasGenerationGraphLease(
+	store: Webgl2WorldResourceStore,
+): void {
+	if (!store.indexedResourceAtlasGenerationGraphLease) {
+		return;
+	}
+	if (!store.indexedResourceAtlasGenerationGraph) {
+		throw new Error(
+			"Indexed resource atlas generation graph lease has no bound graph.",
+		);
+	}
+	store.indexedResourceAtlasGenerationGraph.releaseLease(
+		store.indexedResourceAtlasGenerationGraphLease,
+	);
+	store.indexedResourceAtlasGenerationGraphLease = null;
+	store.indexedResourceAtlasGenerationGraph = null;
 }
 
 function syncWebgl2AssemblyGraph({

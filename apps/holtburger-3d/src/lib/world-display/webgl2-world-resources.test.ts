@@ -818,6 +818,10 @@ describe("webgl2 world resources", () => {
 		expect(
 			store.compactedIndexedMaterialStandaloneResourceDrawUnitCount,
 		).toBe(1);
+		expect(store.indexedResourceAtlasCandidateDrawUnitCount).toBe(1);
+		expect(store.indexedResourceAtlasIndexTextureCount).toBe(1);
+		expect(store.indexedResourceAtlasPaletteTextureCount).toBe(1);
+		expect(store.indexedResourceAtlasFailureReasonCount).toBe(0);
 		expect(
 			store.compactionFamilyPlan.indexedMaterialTableRecords,
 		).toMatchObject([
@@ -883,6 +887,8 @@ describe("webgl2 world resources", () => {
 			gl.textureUploads.map(({ width, height }) => ({ width, height })),
 		).toEqual([
 			{ width: 2, height: 1 },
+			{ width: 2, height: 1 },
+			{ width: 4096, height: 4096 },
 			{ width: 2, height: 1 },
 		]);
 		expect(gl.generatedMipmapCount).toBe(0);

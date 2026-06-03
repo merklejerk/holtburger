@@ -39,6 +39,7 @@ export interface IndexedTexelAtlasPlacement {
 	y: number;
 	width: number;
 	height: number;
+	sourceBytes: Uint8Array;
 }
 
 export interface IndexedPaletteAtlasPlacement {
@@ -47,6 +48,7 @@ export interface IndexedPaletteAtlasPlacement {
 	x: number;
 	y: number;
 	colorCount: number;
+	rgbaBytes: Uint8Array;
 }
 
 export interface IndexedTexelAtlasPage {
@@ -77,6 +79,20 @@ export interface IndexedResourceAtlasPlan {
 		string,
 		IndexedPaletteAtlasPlacement
 	>;
+}
+
+export function createEmptyIndexedResourceAtlasPlan(): IndexedResourceAtlasPlan {
+	return {
+		key: "indexed-resource-atlas/empty",
+		indexReadyDrawUnitIds: [],
+		paletteReadyDrawUnitIds: [],
+		failures: [],
+		p8IndexAtlasTextures: [],
+		index16AtlasTextures: [],
+		paletteAtlasTextures: [],
+		indexPlacementsByTextureKey: new Map(),
+		palettePlacementsByTextureKey: new Map(),
+	};
 }
 
 export function planIndexedResourceAtlas(options: {
@@ -283,6 +299,7 @@ function planIndexFormatAtlasPages({
 				y: placement.y,
 				width: candidate.width,
 				height: candidate.height,
+				sourceBytes: candidate.sourceBytes,
 			};
 		}),
 	}));
@@ -341,6 +358,7 @@ function planPaletteAtlasPages({
 			x: 0,
 			y: page.height,
 			colorCount: candidate.colorCount,
+			rgbaBytes: candidate.rgbaBytes,
 		};
 		pages[page.textureIndex] = {
 			...page,

@@ -1,40 +1,15 @@
-import {
-	Color,
-	OneFactor,
-	OneMinusSrcAlphaFactor,
-	SrcAlphaFactor,
-} from "three";
 import { describe, expect, it } from "vitest";
 
 import type { PreparedMaterialRecipePayload } from "../assets/types";
 import {
 	DIRECT_CLIP_MAP_ALPHA_TEST,
 	INDEXED_CLIP_MAP_ALPHA_TEST,
-	deriveLegacyMaterialBehavior,
 	deriveLegacyMaterialBehaviorDto,
-	withLegacyMeshStandardSurfaceDefaults,
 } from "./material-behavior";
 
 describe("legacy material behavior", () => {
-	it("uses explicit non-metallic diffuse-biased defaults for legacy surface materials", () => {
-		expect(
-			withLegacyMeshStandardSurfaceDefaults({
-				color: new Color(1, 1, 1),
-				metalness: 0.5,
-				roughness: 0.25,
-				envMapIntensity: 2,
-				flatShading: false,
-			}),
-		).toMatchObject({
-			flatShading: true,
-			metalness: 0,
-			roughness: 1,
-			envMapIntensity: 0,
-		});
-	});
-
 	it("maps client translucency, diffuse, and luminosity scalars", () => {
-		const behavior = deriveLegacyMaterialBehavior({
+		const behavior = deriveLegacyMaterialBehaviorDto({
 			recipe: createMaterialRecipe({
 				surfaceType: 0x20 | 0x40,
 				translucency: 0.25,
@@ -45,14 +20,14 @@ describe("legacy material behavior", () => {
 
 		expect(behavior.opacity).toBe(0.75);
 		expect(behavior.transparent).toBe(true);
-		expect(behavior.color).toEqual(new Color(0.5, 0.5, 0.5));
+		expect(behavior.color).toEqual([0.5, 0.5, 0.5]);
 		expect(behavior.emissiveIntensity).toBe(0.75);
 		expect(behavior.blend.mode).toBe("translucent");
 		expect(behavior.blend.depthWrite).toBe(false);
 	});
 
 	it("uses retail DDS alpha test and clipmap blending for direct clipmaps", () => {
-		const behavior = deriveLegacyMaterialBehavior({
+		const behavior = deriveLegacyMaterialBehaviorDto({
 			recipe: createMaterialRecipe({ surfaceType: 0x4 }),
 			hasSourceAlpha: true,
 		});
@@ -62,14 +37,14 @@ describe("legacy material behavior", () => {
 		expect(behavior.blend).toMatchObject({
 			mode: "clipmap",
 			enabled: true,
-			srcFactor: OneFactor,
-			dstFactor: OneMinusSrcAlphaFactor,
+			srcFactor: "one",
+			dstFactor: "one-minus-src-alpha",
 			depthWrite: true,
 		});
 	});
 
 	it("keeps indexed clipmap index discard and adds retail 256-color alpha test", () => {
-		const behavior = deriveLegacyMaterialBehavior({
+		const behavior = deriveLegacyMaterialBehaviorDto({
 			recipe: createMaterialRecipe({ surfaceType: 0x4 }),
 			usesIndexedClipDiscard: true,
 		});
@@ -79,7 +54,7 @@ describe("legacy material behavior", () => {
 	});
 
 	it("lets translucent clipmaps use alpha blending without clipmap alpha test", () => {
-		const behavior = deriveLegacyMaterialBehavior({
+		const behavior = deriveLegacyMaterialBehaviorDto({
 			recipe: createMaterialRecipe({ surfaceType: 0x4 | 0x10 }),
 			hasSourceAlpha: true,
 		});
@@ -87,68 +62,67 @@ describe("legacy material behavior", () => {
 		expect(behavior.alphaTest).toBe(0);
 		expect(behavior.blend).toMatchObject({
 			mode: "translucent",
-			srcFactor: SrcAlphaFactor,
-			dstFactor: OneMinusSrcAlphaFactor,
+			srcFactor: "src-alpha",
+			dstFactor: "one-minus-src-alpha",
 			depthWrite: false,
 		});
 	});
 
-
 	it("maps retail alpha blend factors for legacy surface flags", () => {
 		expect(
-			deriveLegacyMaterialBehavior({
+			deriveLegacyMaterialBehaviorDto({
 				recipe: createMaterialRecipe({ surfaceType: 0x100 }),
 			}).blend,
 		).toMatchObject({
 			mode: "alpha",
-			srcFactor: SrcAlphaFactor,
-			dstFactor: OneMinusSrcAlphaFactor,
+			srcFactor: "src-alpha",
+			dstFactor: "one-minus-src-alpha",
 			depthWrite: false,
 		});
 		expect(
-			deriveLegacyMaterialBehavior({
+			deriveLegacyMaterialBehaviorDto({
 				recipe: createMaterialRecipe({ surfaceType: 0x100 | 0x10000 }),
 			}).blend,
 		).toMatchObject({
 			mode: "alpha-additive",
-			srcFactor: SrcAlphaFactor,
-			dstFactor: OneFactor,
+			srcFactor: "src-alpha",
+			dstFactor: "one",
 			depthWrite: false,
 		});
 		expect(
-			deriveLegacyMaterialBehavior({
+			deriveLegacyMaterialBehaviorDto({
 				recipe: createMaterialRecipe({ surfaceType: 0x200 }),
 			}).blend,
 		).toMatchObject({
 			mode: "inverse-alpha",
-			srcFactor: OneMinusSrcAlphaFactor,
-			dstFactor: SrcAlphaFactor,
+			srcFactor: "one-minus-src-alpha",
+			dstFactor: "src-alpha",
 			depthWrite: false,
 		});
 		expect(
-			deriveLegacyMaterialBehavior({
+			deriveLegacyMaterialBehaviorDto({
 				recipe: createMaterialRecipe({ surfaceType: 0x200 | 0x10000 }),
 			}).blend,
 		).toMatchObject({
 			mode: "inverse-alpha-additive",
-			srcFactor: OneMinusSrcAlphaFactor,
-			dstFactor: OneFactor,
+			srcFactor: "one-minus-src-alpha",
+			dstFactor: "one",
 			depthWrite: false,
 		});
 		expect(
-			deriveLegacyMaterialBehavior({
+			deriveLegacyMaterialBehaviorDto({
 				recipe: createMaterialRecipe({ surfaceType: 0x10000 }),
 			}).blend,
 		).toMatchObject({
 			mode: "additive",
-			srcFactor: OneFactor,
-			dstFactor: OneFactor,
+			srcFactor: "one",
+			dstFactor: "one",
 			depthWrite: false,
 		});
 	});
 
 	it("reports only legacy surface flags that still lack renderer support", () => {
-		const behavior = deriveLegacyMaterialBehavior({
+		const behavior = deriveLegacyMaterialBehaviorDto({
 			recipe: createMaterialRecipe({ surfaceType: 0x200 | 0x10000 | 0x20000 }),
 		});
 

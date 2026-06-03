@@ -1,15 +1,3 @@
-import {
-	AddEquation,
-	Color,
-	CustomBlending,
-	OneFactor,
-	OneMinusSrcAlphaFactor,
-	SrcAlphaFactor,
-	type BlendingDstFactor,
-	type BlendingSrcFactor,
-	type MeshStandardMaterialParameters,
-} from "three";
-
 import type { PreparedMaterialRecipePayload } from "../assets/types";
 
 const BYTE_MAX = 255;
@@ -29,17 +17,6 @@ export const INDEXED_CLIP_MAP_ALPHA_TEST =
 export const DIRECT_CLIP_MAP_ALPHA_TEST =
 	DIRECT_CLIP_MAP_ALPHA_TEST_REF / BYTE_MAX;
 
-export interface LegacyMaterialBehavior {
-	color: Color;
-	emissive: Color;
-	emissiveIntensity: number;
-	opacity: number;
-	transparent: boolean;
-	alphaTest: number;
-	blend: LegacyMaterialBlendBehavior;
-	unsupportedSurfaceFlags: string[];
-}
-
 export interface LegacyMaterialBehaviorDto {
 	color: readonly [number, number, number];
 	emissive: readonly [number, number, number];
@@ -50,14 +27,6 @@ export interface LegacyMaterialBehaviorDto {
 	side: "front";
 	blend: LegacyMaterialBlendBehaviorDto;
 	unsupportedSurfaceFlags: string[];
-}
-
-interface LegacyMaterialBlendBehavior {
-	mode: LegacyMaterialBlendMode;
-	enabled: boolean;
-	srcFactor: BlendingSrcFactor | null;
-	dstFactor: BlendingDstFactor | null;
-	depthWrite: boolean;
 }
 
 interface LegacyMaterialBlendBehaviorDto {
@@ -78,46 +47,7 @@ type LegacyMaterialBlendMode =
 	| "clipmap"
 	| "translucent";
 
-type LegacyMaterialBlendFactor =
-	| "one"
-	| "src-alpha"
-	| "one-minus-src-alpha";
-
-export function withLegacyMeshStandardSurfaceDefaults(
-	parameters: MeshStandardMaterialParameters,
-): MeshStandardMaterialParameters {
-	return {
-		...parameters,
-		flatShading: true,
-		metalness: 0,
-		roughness: 1,
-		envMapIntensity: 0,
-	};
-}
-
-export function deriveLegacyMaterialBehavior(options: {
-	recipe: PreparedMaterialRecipePayload;
-	hasSourceAlpha?: boolean;
-	usesIndexedClipDiscard?: boolean;
-}): LegacyMaterialBehavior {
-	const dto = deriveLegacyMaterialBehaviorDto(options);
-	return {
-		color: new Color(...dto.color),
-		emissive: new Color(...dto.emissive),
-		emissiveIntensity: dto.emissiveIntensity,
-		opacity: dto.opacity,
-		transparent: dto.transparent,
-		alphaTest: dto.alphaTest,
-		blend: {
-			mode: dto.blend.mode,
-			enabled: dto.blend.enabled,
-			srcFactor: toThreeBlendSrcFactor(dto.blend.srcFactor),
-			dstFactor: toThreeBlendDstFactor(dto.blend.dstFactor),
-			depthWrite: dto.blend.depthWrite,
-		},
-		unsupportedSurfaceFlags: dto.unsupportedSurfaceFlags,
-	};
-}
+type LegacyMaterialBlendFactor = "one" | "src-alpha" | "one-minus-src-alpha";
 
 export function deriveLegacyMaterialBehaviorDto(options: {
 	recipe: PreparedMaterialRecipePayload;
@@ -158,30 +88,6 @@ export function deriveLegacyMaterialBehaviorDto(options: {
 		side: "front",
 		blend,
 		unsupportedSurfaceFlags: unsupportedSurfaceFlags(recipe.surfaceType),
-	};
-}
-
-export function applyLegacyMaterialBehavior(
-	parameters: MeshStandardMaterialParameters,
-	behavior: LegacyMaterialBehavior,
-): MeshStandardMaterialParameters {
-	return {
-		...parameters,
-		color: parameters.color ?? behavior.color,
-		emissive: behavior.emissive,
-		emissiveIntensity: behavior.emissiveIntensity,
-		transparent: behavior.transparent,
-		opacity: behavior.opacity,
-		alphaTest: behavior.alphaTest,
-		depthWrite: behavior.blend.depthWrite,
-		...(behavior.blend.enabled
-			? {
-					blending: CustomBlending,
-					blendEquation: AddEquation,
-					blendSrc: behavior.blend.srcFactor ?? SrcAlphaFactor,
-					blendDst: behavior.blend.dstFactor ?? OneMinusSrcAlphaFactor,
-				}
-			: {}),
 	};
 }
 
@@ -279,36 +185,6 @@ function deriveLegacyBlendBehavior(options: {
 		dstFactor: null,
 		depthWrite: true,
 	};
-}
-
-function toThreeBlendSrcFactor(
-	factor: LegacyMaterialBlendFactor | null,
-): BlendingSrcFactor | null {
-	switch (factor) {
-		case null:
-			return null;
-		case "one":
-			return OneFactor;
-		case "src-alpha":
-			return SrcAlphaFactor;
-		case "one-minus-src-alpha":
-			return OneMinusSrcAlphaFactor;
-	}
-}
-
-function toThreeBlendDstFactor(
-	factor: LegacyMaterialBlendFactor | null,
-): BlendingDstFactor | null {
-	switch (factor) {
-		case null:
-			return null;
-		case "one":
-			return OneFactor;
-		case "src-alpha":
-			return SrcAlphaFactor;
-		case "one-minus-src-alpha":
-			return OneMinusSrcAlphaFactor;
-	}
 }
 
 function clipMapAlphaTest(options: {

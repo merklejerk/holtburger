@@ -1,5 +1,3 @@
-import { Box3, Matrix4, Vector3 } from "three";
-
 import type {
 	PreparedPolygonSetBspNode,
 	PreparedPolygonSetRenderGeometry,
@@ -12,11 +10,27 @@ import {
 	makeOutdoorLandblockId,
 	normalizeOutdoorLandblockId,
 } from "../landblocks";
-import { buildAcPlacementMatrix } from "./static-renderable-geometry";
 import {
 	landblockRenderPointToCellAcLocalPoint,
 	pointInsideCellBsp,
 } from "./cell-bsp-residency";
+import {
+	buildAcPlacementMatrix,
+	invertMat4,
+	transformPointByMat4,
+	type RenderMat4,
+} from "./render-math";
+import {
+	distanceBetweenRenderVec3Squared,
+	renderBoundsCenter,
+	renderBoundsContainsPoint,
+	renderBoundsFromPoints,
+	renderBoundsSize,
+	transformRenderBounds,
+	unionRenderBounds,
+	type RenderBounds,
+	type RenderVec3,
+} from "./render-spatial-math";
 import type { BrowserCameraResidency } from "./renderer-contract";
 import type { RenderChunkTransform } from "./render-anchor";
 import type { WorldRenderSceneContext } from "./render-scene-context";
@@ -59,13 +73,13 @@ export interface WorldResidencyQueryDiagnostics {
 
 interface ResidencyLandblockIndex {
 	landblockId: number;
-	chunkOffset: Vector3;
+	chunkOffset: RenderVec3;
 	root: ResidencyBvhNode | null;
 	items: ResidencyCellItem[];
 }
 
 interface ResidencyBvhNode {
-	bounds: Box3;
+	bounds: RenderBounds;
 	left: ResidencyBvhNode | null;
 	right: ResidencyBvhNode | null;
 	items: ResidencyCellItem[];
@@ -74,9 +88,9 @@ interface ResidencyBvhNode {
 interface ResidencyCellItem {
 	envCellId: number;
 	landblockId: number;
-	bounds: Box3;
-	center: Vector3;
-	inverseCellRenderMatrix: Matrix4;
+	bounds: RenderBounds;
+	center: RenderVec3;
+	inverseCellRenderMatrix: RenderMat4;
 	cellBsp: PreparedPolygonSetBspNode | null;
 }
 
@@ -130,8 +144,11 @@ export function buildWorldResidencyIndex(options: {
 		cellCount += items.length;
 		landblocks.set(landblockId, {
 			landblockId,
-			chunkOffset:
-				chunkOffsetByLandblockId.get(landblockId) ?? new Vector3(0, 0, 0),
+			chunkOffset: chunkOffsetByLandblockId.get(landblockId) ?? {
+				x: 0,
+				y: 0,
+				z: 0,
+			},
 			items,
 			root: buildResidencyBvh(items),
 		});
@@ -242,7 +259,7 @@ export function inferRenderAnchor(
 export function computeRendererPositionLandblockResidency(
 	position: Vec3Dto,
 	anchor: RenderAnchorInference,
-): { landblockId: number; landblockRelativePosition: Vector3 } | null {
+): { landblockId: number; landblockRelativePosition: RenderVec3 } | null {
 	const anchorCoords = getOutdoorLandblockCoords(anchor.landblockId);
 	const globalOutdoorX =
 		anchorCoords.x * OUTDOOR_LANDBLOCK_WORLD_SIZE + position.x;
@@ -263,17 +280,17 @@ export function computeRendererPositionLandblockResidency(
 	const landblockOriginY = landblockY * OUTDOOR_LANDBLOCK_WORLD_SIZE;
 	return {
 		landblockId: makeOutdoorLandblockId(landblockX, landblockY),
-		landblockRelativePosition: new Vector3(
-			globalOutdoorX - landblockOriginX,
-			position.y,
-			-(globalOutdoorY - landblockOriginY),
-		),
+		landblockRelativePosition: {
+			x: globalOutdoorX - landblockOriginX,
+			y: position.y,
+			z: -(globalOutdoorY - landblockOriginY),
+		},
 	};
 }
 
 export function deriveResidencyCellBounds(
 	cell: Pick<StructuredInteriorCell, "chunkLocalPlacement" | "renderGeometry">,
-): Box3 | null {
+): RenderBounds | null {
 	return transformRenderGeometryBounds(
 		cell.renderGeometry,
 		buildAcPlacementMatrix(
@@ -416,11 +433,11 @@ function queryDungeonResidencyIndex(
 		};
 	}
 
-	const landblockRelativePosition = new Vector3(
-		position.x - landblock.chunkOffset.x,
-		position.y - landblock.chunkOffset.y,
-		position.z - landblock.chunkOffset.z,
-	);
+	const landblockRelativePosition = {
+		x: position.x - landblock.chunkOffset.x,
+		y: position.y - landblock.chunkOffset.y,
+		z: position.z - landblock.chunkOffset.z,
+	};
 	const aabbCandidates = queryResidencyBvh(
 		landblock.root,
 		landblockRelativePosition,
@@ -503,39 +520,40 @@ function deriveResidencyCellItem(
 		return null;
 	}
 
-	const center = new Vector3();
-	bounds.getCenter(center);
 	return {
 		envCellId: cell.envCellId,
 		landblockId: normalizeOutdoorLandblockId(cell.envCellId),
 		bounds,
-		center,
-		inverseCellRenderMatrix: cellRenderMatrix.clone().invert(),
+		center: renderBoundsCenter(bounds),
+		inverseCellRenderMatrix: invertMat4(cellRenderMatrix),
 		cellBsp: cell.cellBsp,
 	};
 }
 
 export function deriveConservativeResidencyCellBounds(
 	vertexArray: PreparedPolygonSetVertexArray,
-	matrix: Matrix4,
-): Box3 | null {
+	matrix: RenderMat4,
+): RenderBounds | null {
 	if (vertexArray.vertices.length === 0) {
 		return null;
 	}
 
 	const points = vertexArray.vertices.map((vertex) =>
-		new Vector3(
-			vertex.origin.x,
-			vertex.origin.z,
-			-vertex.origin.y,
-		).applyMatrix4(matrix),
+		transformPointByMat4(
+			{
+				x: vertex.origin.x,
+				y: vertex.origin.z,
+				z: -vertex.origin.y,
+			},
+			matrix,
+		),
 	);
-	return new Box3().setFromPoints(points);
+	return renderBoundsFromPoints(points);
 }
 
 function filterCellBspMatches(
 	items: readonly ResidencyCellItem[],
-	landblockRelativePosition: Vector3,
+	landblockRelativePosition: RenderVec3,
 ): ResidencyCellItem[] {
 	return items.filter((item) => {
 		if (!item.cellBsp) {
@@ -557,25 +575,14 @@ function filterAabbFallbackCandidates(
 
 function transformRenderGeometryBounds(
 	renderGeometry: PreparedPolygonSetRenderGeometry,
-	matrix: Matrix4,
-): Box3 | null {
+	matrix: RenderMat4,
+): RenderBounds | null {
 	if (!renderGeometry.bounds) {
 		return null;
 	}
 
-	const { min, max } = renderGeometry.bounds;
-	const corners = [
-		new Vector3(min.x, min.y, min.z),
-		new Vector3(min.x, min.y, max.z),
-		new Vector3(min.x, max.y, min.z),
-		new Vector3(min.x, max.y, max.z),
-		new Vector3(max.x, min.y, min.z),
-		new Vector3(max.x, min.y, max.z),
-		new Vector3(max.x, max.y, min.z),
-		new Vector3(max.x, max.y, max.z),
-	];
-	return new Box3().setFromPoints(
-		corners.map((corner) => corner.applyMatrix4(matrix)),
+	return transformRenderBounds(renderGeometry.bounds, (point) =>
+		transformPointByMat4(point, matrix),
 	);
 }
 
@@ -599,7 +606,8 @@ function buildResidencyBvh(
 	const axis = longestBoxAxis(bounds);
 	const sorted = [...items].sort(
 		(left, right) =>
-			left.center.getComponent(axis) - right.center.getComponent(axis),
+			renderVec3AxisComponent(left.center, axis) -
+			renderVec3AxisComponent(right.center, axis),
 	);
 	const midpoint = Math.floor(sorted.length / 2);
 	return {
@@ -612,13 +620,15 @@ function buildResidencyBvh(
 
 function queryResidencyBvh(
 	node: ResidencyBvhNode | null,
-	position: Vector3,
+	position: RenderVec3,
 ): ResidencyCellItem[] {
-	if (!node || !node.bounds.containsPoint(position)) {
+	if (!node || !renderBoundsContainsPoint(node.bounds, position)) {
 		return [];
 	}
 	if (!node.left && !node.right) {
-		return node.items.filter((item) => item.bounds.containsPoint(position));
+		return node.items.filter((item) =>
+			renderBoundsContainsPoint(item.bounds, position),
+		);
 	}
 
 	return [
@@ -629,12 +639,12 @@ function queryResidencyBvh(
 
 function selectNearestResidencyCell(
 	items: readonly ResidencyCellItem[],
-	position: Vector3,
+	position: RenderVec3,
 ): ResidencyCellItem | null {
 	let nearest: ResidencyCellItem | null = null;
 	let nearestDistanceSq = Number.POSITIVE_INFINITY;
 	for (const item of items) {
-		const distanceSq = item.center.distanceToSquared(position);
+		const distanceSq = distanceBetweenRenderVec3Squared(item.center, position);
 		if (
 			distanceSq < nearestDistanceSq ||
 			(distanceSq === nearestDistanceSq &&
@@ -648,21 +658,20 @@ function selectNearestResidencyCell(
 	return nearest;
 }
 
-function unionItemBounds(items: readonly ResidencyCellItem[]): Box3 {
-	const bounds = new Box3();
-	for (const item of items) {
-		bounds.union(item.bounds);
-	}
-	return bounds;
+function unionItemBounds(items: readonly ResidencyCellItem[]): RenderBounds {
+	return unionRenderBounds(items.map((item) => item.bounds));
 }
 
-function longestBoxAxis(bounds: Box3): 0 | 1 | 2 {
-	const size = new Vector3();
-	bounds.getSize(size);
+function longestBoxAxis(bounds: RenderBounds): 0 | 1 | 2 {
+	const size = renderBoundsSize(bounds);
 	if (size.x >= size.y && size.x >= size.z) {
 		return 0;
 	}
 	return size.y >= size.z ? 1 : 2;
+}
+
+function renderVec3AxisComponent(vector: RenderVec3, axis: 0 | 1 | 2): number {
+	return axis === 0 ? vector.x : axis === 1 ? vector.y : vector.z;
 }
 
 function formatResidencyHex(value: number): string {
@@ -671,11 +680,11 @@ function formatResidencyHex(value: number): string {
 
 function deriveChunkOffsetByLandblockId(
 	transforms: readonly RenderChunkTransform[],
-): Map<number, Vector3> {
+): Map<number, RenderVec3> {
 	return new Map(
 		transforms.map((transform) => [
 			transform.chunkLandblockId,
-			new Vector3(transform.offset.x, transform.offset.y, transform.offset.z),
+			{ x: transform.offset.x, y: transform.offset.y, z: transform.offset.z },
 		]),
 	);
 }

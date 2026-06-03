@@ -46,8 +46,10 @@ import {
 	describeMaterialAppearanceSignature,
 	type MaterialAppearanceContext,
 } from "./material-appearance";
-import { applyRenderGeometryMaterialVariants } from "./material-plan";
-import type { ResolvedMaterialSlot } from "./material-resources";
+import {
+	applyRenderGeometryMaterialVariants,
+	type ResolvedMaterialSlot,
+} from "./material-plan";
 import { formatMaterialAssetId } from "./material-signatures";
 import { describeMaterialVariantSignature } from "./material-variants";
 import {

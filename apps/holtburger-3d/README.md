@@ -9,7 +9,7 @@ The app is frontend-owned. Browser-mode UX, panels, tabs, viewport HUDs, camera 
 - `src/`: Svelte and TypeScript app code.
 - `src/app/`: frontend mode state, browser-mode policy, and app-level view models.
 - `src/pages/`: browser-mode pages and app-specific composition around shared renderer pieces.
-- `src/lib/world-display/`: Three.js-backed renderer foundation and render-scene helpers. Keep renderer infrastructure reusable inside this app, but do not make it own browser workflow policy.
+- `src/lib/world-display/`: WebGL2 renderer foundation and render-scene helpers. Keep renderer infrastructure reusable inside this app, but do not make it own browser workflow policy.
 - `src/lib/assets/`: frontend asset request planning, worker coordination, dependency scheduling, and hydration policy.
 - `src/lib/host/`: typed frontend contracts for the Tauri host boundary.
 - `src/workers/`: browser workers for expensive frontend-side preparation.

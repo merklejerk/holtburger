@@ -1,28 +1,10 @@
-import {
-	ClampToEdgeWrapping,
-	LinearFilter,
-	LinearMipMapLinearFilter,
-	LinearMipMapNearestFilter,
-	NearestFilter,
-	NearestMipMapLinearFilter,
-	NearestMipMapNearestFilter,
-	NoColorSpace,
-	RepeatWrapping,
-	SRGBColorSpace,
-	type ColorSpace,
-	type MagnificationTextureFilter,
-	type MinificationTextureFilter,
-	type Texture,
-	type Wrapping,
-} from "three";
-
 import type { PreparedRenderSurfacePayload } from "../../assets/types";
-import { isIndexedTextureFormat } from "../indexed-texture-resources";
+import { isIndexedTextureFormat } from "../indexed-material-data";
 import { parseLegacySamplerMaterialVariantSignature } from "../material-variants";
 import {
 	isSupportedCompressedFormat,
 	type MaterialTextureCapabilities,
-} from "../render-surface-texture-resources";
+} from "../render-surface-texture-data";
 
 export type TextureWrapMode = "clamp" | "repeat";
 type TextureFilterMode = "nearest" | "linear";
@@ -139,23 +121,6 @@ export function selectVariantTextureSamplingPolicy(
 	};
 }
 
-export function applyTextureSamplingPolicy(
-	texture: Texture,
-	policy: TextureSamplingPolicy,
-): void {
-	texture.wrapS = toThreeWrapping(policy.wrapS);
-	texture.wrapT = toThreeWrapping(policy.wrapT);
-	texture.magFilter = toThreeMagnificationFilter(policy.magFilter);
-	texture.minFilter = toThreeMinificationFilter(
-		policy.minFilter,
-		policy.mipFilter,
-	);
-	texture.colorSpace = toThreeColorSpace(policy.colorSpace);
-	texture.anisotropy = policy.anisotropy;
-	texture.generateMipmaps = policy.generateMipmaps;
-	texture.flipY = policy.flipY;
-}
-
 export function describeTextureSamplingPolicy(
 	policy: TextureSamplingPolicy,
 ): string {
@@ -197,35 +162,4 @@ function selectAnisotropy(
 	}
 	const supported = Math.max(1, Math.floor(maxAnisotropy ?? 1));
 	return Math.min(4, supported);
-}
-
-function toThreeWrapping(mode: TextureWrapMode): Wrapping {
-	return mode === "repeat" ? RepeatWrapping : ClampToEdgeWrapping;
-}
-
-function toThreeMagnificationFilter(
-	mode: TextureFilterMode,
-): MagnificationTextureFilter {
-	return mode === "nearest" ? NearestFilter : LinearFilter;
-}
-
-function toThreeMinificationFilter(
-	minFilter: TextureFilterMode,
-	mipFilter: TextureMipFilterMode,
-): MinificationTextureFilter {
-	if (mipFilter === "none") {
-		return minFilter === "nearest" ? NearestFilter : LinearFilter;
-	}
-	if (minFilter === "nearest") {
-		return mipFilter === "nearest"
-			? NearestMipMapNearestFilter
-			: NearestMipMapLinearFilter;
-	}
-	return mipFilter === "nearest"
-		? LinearMipMapNearestFilter
-		: LinearMipMapLinearFilter;
-}
-
-function toThreeColorSpace(mode: TextureColorSpaceMode): ColorSpace {
-	return mode === "srgb" ? SRGBColorSpace : NoColorSpace;
 }

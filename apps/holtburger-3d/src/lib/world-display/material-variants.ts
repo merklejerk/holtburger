@@ -7,7 +7,7 @@ import {
 
 export type { LegacySamplerMaterialVariant } from "../assets/material-variants";
 
-export function normalizeMaterialVariantSignature(
+function normalizeMaterialVariantSignature(
 	signature: string | null | undefined,
 ): string {
 	return signature && signature.length > 0

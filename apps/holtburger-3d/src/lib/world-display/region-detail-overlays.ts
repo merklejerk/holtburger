@@ -1,5 +1,3 @@
-import { type Material, type Texture } from "three";
-
 import type {
 	AssetChannelState,
 	PreparedRegionDetailRole,
@@ -27,23 +25,6 @@ export interface ResolvedRegionDetailOverlayPlan {
 	renderSurface: PreparedRenderSurfacePayload;
 	signature: string;
 }
-
-export interface ResolvedRegionDetailOverlay {
-	regionNumber: number;
-	profileAssetId: string;
-	role: PreparedRegionDetailRole;
-	blendMode: RegionDetailBlendMode;
-	fadeMode: RegionDetailFadeMode;
-	texture: Texture;
-	signature: string;
-}
-
-interface DetailOverlayShader {
-	uniforms: Record<string, { value: unknown }>;
-	fragmentShader: string;
-}
-
-const REGION_DETAIL_PROGRAM_KEY = "holtburger-region-detail-overlay";
 
 export function resolveRegionDetailOverlayPlan(options: {
 	assetState: AssetChannelState;
@@ -157,77 +138,6 @@ export function describeRegionDetailRoleSignature(options: {
 		: `detail:${normalizedRegionNumber}:${options.roleKind}:none`;
 }
 
-export function applyRegionDetailOverlayToMaterials(options: {
-	materials: readonly Material[];
-	overlay: ResolvedRegionDetailOverlay | null;
-}): { materials: Material[]; ownedByResourceCache: boolean } {
-	if (!options.overlay) {
-		return { materials: [...options.materials], ownedByResourceCache: true };
-	}
-	const overlay = options.overlay;
-	return {
-		materials: options.materials.map((material) =>
-			createRegionDetailOverlayMaterial(material, overlay),
-		),
-		ownedByResourceCache: false,
-	};
-}
-
-function createRegionDetailOverlayMaterial(
-	material: Material,
-	overlay: ResolvedRegionDetailOverlay,
-): Material {
-	const clone = material.clone();
-	const previousOnBeforeCompile = material.onBeforeCompile.bind(clone);
-	const previousCustomProgramCacheKey =
-		material.customProgramCacheKey.bind(material);
-	clone.onBeforeCompile = (...args) => {
-		previousOnBeforeCompile(...args);
-		const shader = args[0] as DetailOverlayShader;
-		shader.uniforms.holtburgerRegionDetailMap = { value: overlay.texture };
-		shader.uniforms.holtburgerRegionDetailTiling = {
-			value: overlay.role.tiling,
-		};
-		shader.uniforms.holtburgerRegionDetailFadeNear = {
-			value: overlay.role.fadeNear,
-		};
-		shader.uniforms.holtburgerRegionDetailFadeFar = {
-			value: overlay.role.fadeFar,
-		};
-		shader.uniforms.holtburgerRegionDetailBlendMode = {
-			value: overlay.blendMode === "dst-color" ? 1 : 0,
-		};
-		shader.uniforms.holtburgerRegionDetailFadeMode = {
-			value: overlay.fadeMode === "distance" ? 1 : 0,
-		};
-		shader.fragmentShader = shader.fragmentShader.replace(
-			"void main() {",
-			`${regionDetailUniformDeclarations()}\nvoid main() {`,
-		);
-		shader.fragmentShader = shader.fragmentShader.replace(
-			"#include <color_fragment>",
-			`${regionDetailFragmentChunk()}\n#include <color_fragment>`,
-		);
-	};
-	clone.customProgramCacheKey = () =>
-		`${previousCustomProgramCacheKey()}|${REGION_DETAIL_PROGRAM_KEY}`;
-	clone.userData = {
-		...clone.userData,
-		holtburgerRegionDetailOverlay: {
-			regionNumber: overlay.regionNumber,
-			role: overlay.role.role,
-			textureAssetId: overlay.role.textureAssetId,
-			textureDid: overlay.role.textureDid,
-			tiling: overlay.role.tiling,
-			fadeNear: overlay.role.fadeNear,
-			fadeFar: overlay.role.fadeFar,
-			blendMode: overlay.blendMode,
-			fadeMode: overlay.fadeMode,
-		},
-	};
-	return clone;
-}
-
 function getSurfaceTexture(
 	assetState: AssetChannelState,
 	assetId: string,
@@ -310,62 +220,4 @@ function regionDetailFadeModeForRole(
 	roleKind: RegionDetailRoleKind,
 ): RegionDetailFadeMode {
 	return roleKind === "landscape" ? "distance" : "constant";
-}
-
-function regionDetailUniformDeclarations(): string {
-	return `
-uniform sampler2D holtburgerRegionDetailMap;
-uniform float holtburgerRegionDetailTiling;
-uniform float holtburgerRegionDetailFadeNear;
-uniform float holtburgerRegionDetailFadeFar;
-uniform int holtburgerRegionDetailBlendMode;
-uniform int holtburgerRegionDetailFadeMode;
-`;
-}
-
-function regionDetailFragmentChunk(): string {
-	return `
-#ifdef USE_MAP
-	float holtburgerRegionDetailDepth = length(vViewPosition);
-	float holtburgerRegionDetailFade = clamp(
-		(holtburgerRegionDetailFadeFar - holtburgerRegionDetailDepth) /
-			(holtburgerRegionDetailFadeFar - holtburgerRegionDetailFadeNear),
-		0.0,
-		1.0
-	);
-	if (holtburgerRegionDetailFadeMode == 0) {
-		holtburgerRegionDetailFade = 1.0;
-	}
-	vec4 holtburgerRegionDetailColor = texture2D(
-		holtburgerRegionDetailMap,
-		vMapUv * holtburgerRegionDetailTiling
-	);
-	float holtburgerRegionDetailWeight = holtburgerRegionDetailFade;
-	vec3 holtburgerRegionDetailTarget = holtburgerRegionDetailColor.rgb;
-	if (holtburgerRegionDetailBlendMode == 1) {
-		float holtburgerRegionDetailSourceAlpha = clamp(
-			holtburgerRegionDetailColor.a * holtburgerRegionDetailWeight,
-			0.0,
-			1.0
-		);
-		diffuseColor.rgb = clamp(
-			diffuseColor.rgb *
-				(holtburgerRegionDetailColor.rgb + (1.0 - holtburgerRegionDetailSourceAlpha)),
-			0.0,
-			1.0
-		);
-	} else {
-		float holtburgerRegionDetailSourceAlpha = clamp(
-			holtburgerRegionDetailColor.a * holtburgerRegionDetailWeight,
-			0.0,
-			1.0
-		);
-		diffuseColor.rgb = mix(
-			diffuseColor.rgb,
-			holtburgerRegionDetailTarget,
-			holtburgerRegionDetailSourceAlpha
-		);
-	}
-#endif
-`;
 }

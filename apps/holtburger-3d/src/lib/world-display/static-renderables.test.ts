@@ -1,4 +1,3 @@
-import { Vector3 } from "three";
 import { describe, expect, it } from "vitest";
 
 import type { BrowserLocationSelection } from "../../app/browser-mode";
@@ -16,7 +15,7 @@ import {
 	formatEnvCellAssetId,
 	formatLandblockOutdoorAssetId,
 } from "../landblocks";
-import { buildStaticRenderablePartMatrix } from "./static-renderable-geometry";
+import { buildStaticRenderablePartMatrix } from "./staged-world-assembly";
 import { deriveStaticRenderableSceneModel } from "./static-renderables";
 
 describe("static renderables", () => {
@@ -40,10 +39,11 @@ describe("static renderables", () => {
 
 		expect(part?.parentPlacements).toEqual([]);
 
-		const position = new Vector3().setFromMatrixPosition(
-			buildStaticRenderablePartMatrix(part!),
-		);
-		expect(position).toEqual(new Vector3(12, 6, -34));
+		expect(matrixTranslation(buildStaticRenderablePartMatrix(part!))).toEqual({
+			x: 12,
+			y: 6,
+			z: -34,
+		});
 	});
 
 	it("applies setup-model default placement frames to static parts", () => {
@@ -77,10 +77,11 @@ describe("static renderables", () => {
 			createPlacement({ x: 3, y: 4, z: 5 }),
 		]);
 
-		const position = new Vector3().setFromMatrixPosition(
-			buildStaticRenderablePartMatrix(part!),
-		);
-		expect(position).toEqual(new Vector3(13, 7, -24));
+		expect(matrixTranslation(buildStaticRenderablePartMatrix(part!))).toEqual({
+			x: 13,
+			y: 7,
+			z: -24,
+		});
 	});
 
 	it("prefers setup appearance selected parts and material slots", () => {
@@ -294,10 +295,11 @@ describe("static renderables", () => {
 			z: 2,
 		});
 
-		const position = new Vector3().setFromMatrixPosition(
-			buildStaticRenderablePartMatrix(part!),
-		);
-		expect(position).toEqual(new Vector3(200, 2, 5));
+		expect(matrixTranslation(buildStaticRenderablePartMatrix(part!))).toEqual({
+			x: 200,
+			y: 2,
+			z: 5,
+		});
 	});
 });
 
@@ -670,5 +672,17 @@ function createPlacement(origin: { x: number; y: number; z: number }) {
 	return {
 		origin,
 		orientation: { w: 1, x: 0, y: 0, z: 0 },
+	};
+}
+
+function matrixTranslation(matrix: Float32Array): {
+	x: number;
+	y: number;
+	z: number;
+} {
+	return {
+		x: matrix[12] as number,
+		y: matrix[13] as number,
+		z: matrix[14] as number,
 	};
 }

@@ -1,6 +1,6 @@
 import { planAtlasLayout } from "./atlas-layout-planner";
 
-export type IndexedResourceAtlasIndexFormat = "p8" | "index16";
+type IndexedResourceAtlasIndexFormat = "p8" | "index16";
 
 export interface IndexedTexelAtlasCandidate {
 	drawUnitId: string;
@@ -18,14 +18,14 @@ export interface IndexedPaletteAtlasCandidate {
 	rgbaBytes: Uint8Array;
 }
 
-export type IndexedResourceAtlasFailureReason =
+type IndexedResourceAtlasFailureReason =
 	| "duplicate-index-texture-mismatch"
 	| "duplicate-palette-mismatch"
 	| "source-texture-too-large"
 	| "index-atlas-full"
 	| "palette-atlas-full";
 
-export interface IndexedResourceAtlasFailure {
+interface IndexedResourceAtlasFailure {
 	drawUnitId: string;
 	reason: IndexedResourceAtlasFailureReason;
 	detail: string;
@@ -276,7 +276,7 @@ function planIndexFormatAtlasPages({
 				overflow.reason === "source-too-large"
 					? "source-texture-too-large"
 					: "index-atlas-full",
-			detail: `indexed texture ${candidate.indexTextureKey} ${overflow.width}x${overflow.height} could not be placed in ${format} atlas`,
+			detail: `indexed texture ${candidate.indexTextureKey} ${candidate.width}x${candidate.height} could not be placed in ${format} atlas`,
 		});
 	}
 	return layout.texturePages.map((texture) => ({
@@ -394,9 +394,7 @@ function describeIndexedResourceAtlasPlanKey({
 	].join("|");
 }
 
-function describeTexelPages(
-	pages: readonly IndexedTexelAtlasPage[],
-): string {
+function describeTexelPages(pages: readonly IndexedTexelAtlasPage[]): string {
 	return pages
 		.map(
 			(page) =>

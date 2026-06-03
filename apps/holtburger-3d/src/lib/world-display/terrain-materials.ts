@@ -5,11 +5,11 @@ import type {
 	PreparedTerrainQuad,
 } from "../assets/types";
 import { formatHex32, formatTerrainMaterialAssetId } from "../landblocks";
-import { isIndexedTextureFormat } from "./indexed-texture-resources";
+import { isIndexedTextureFormat } from "./indexed-material-data";
 import {
 	isSupportedCompressedFormat,
 	isSupportedDirectColorFormat,
-} from "./render-surface-texture-resources";
+} from "./render-surface-texture-data";
 
 type TerrainMaterialResourceStatus =
 	| "ready"

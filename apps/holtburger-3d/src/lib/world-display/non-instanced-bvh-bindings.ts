@@ -1,5 +1,3 @@
-import type { Object3D } from "three";
-
 import { formatHex32 } from "../landblocks";
 import type { PortalDebugOverlay, CellDebugOverlay } from "./debug-overlays";
 import {
@@ -83,10 +81,7 @@ export function deriveDebugPortalOverlayBatchBvhBinding(
 	portal: PortalDebugOverlay,
 ): NonInstancedBatchBvhBinding {
 	return {
-		batchId: debugPortalOverlayBatchId(
-			portal.sourceEnvCellId,
-			portal.portalId,
-		),
+		batchId: debugPortalOverlayBatchId(portal.sourceEnvCellId, portal.portalId),
 		itemKeys: [envPortalBvhItemKey(portal.sourceEnvCellId, portal.portalId)],
 		fallbackReason: null,
 	};
@@ -105,16 +100,4 @@ export function deriveTransitionPortalMaskBatchBvhBinding(
 		],
 		fallbackReason: null,
 	};
-}
-
-export function registerNonInstancedBatchId(
-	object: Object3D,
-	batchId: string,
-): void {
-	object.userData.bvhBatchId = batchId;
-}
-
-export function readNonInstancedBatchId(object: Object3D): string | null {
-	const batchId = object.userData.bvhBatchId;
-	return typeof batchId === "string" ? batchId : null;
 }

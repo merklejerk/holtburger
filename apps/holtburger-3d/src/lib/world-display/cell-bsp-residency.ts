@@ -1,11 +1,10 @@
-import { Matrix4, Vector3 } from "three";
-
 import type { PreparedPolygonSetBspNode } from "../assets/types";
 import type { Vec3Dto } from "../host/contracts";
+import { transformPointByMat4, type RenderMat4 } from "./render-math";
 
 const CELL_BSP_PLANE_EPSILON = 0.0002;
 
-export function renderLocalPointToAcLocalPoint(point: Vector3): Vec3Dto {
+export function renderLocalPointToAcLocalPoint(point: Vec3Dto): Vec3Dto {
 	return {
 		x: point.x,
 		y: -point.z,
@@ -14,11 +13,11 @@ export function renderLocalPointToAcLocalPoint(point: Vector3): Vec3Dto {
 }
 
 export function landblockRenderPointToCellAcLocalPoint(
-	point: Vector3,
-	inverseCellRenderMatrix: Matrix4,
+	point: Vec3Dto,
+	inverseCellRenderMatrix: RenderMat4,
 ): Vec3Dto {
 	return renderLocalPointToAcLocalPoint(
-		point.clone().applyMatrix4(inverseCellRenderMatrix),
+		transformPointByMat4(point, inverseCellRenderMatrix),
 	);
 }
 

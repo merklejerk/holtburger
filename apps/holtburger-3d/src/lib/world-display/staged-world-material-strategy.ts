@@ -28,7 +28,7 @@ import {
 	hasSourceAlpha,
 	isSupportedCompressedFormat,
 	isSupportedDirectColorFormat,
-} from "./render-surface-texture-resources";
+} from "./render-surface-texture-data";
 import {
 	prepareRenderSurfaceTextureUploadData,
 	type MaterialTextureCapabilities,
@@ -40,7 +40,10 @@ import {
 	type TextureFilteringMode,
 	type TextureWrapMode,
 } from "./texture-pages/texture-sampling-policy";
-import { planAtlasLayout, type AtlasTexturePage } from "./texture-pages/atlas-layout-planner";
+import {
+	planAtlasLayout,
+	type AtlasTexturePage,
+} from "./texture-pages/atlas-layout-planner";
 
 export type StagedWorldMaterialRenderableKind =
 	| "static"
@@ -975,7 +978,9 @@ function describeAtlasEntryKey(options: {
 	].join("|");
 }
 
-function describeAtlasSamplingKey(policy: StagedWorldAtlasSamplingPolicy): string {
+function describeAtlasSamplingKey(
+	policy: StagedWorldAtlasSamplingPolicy,
+): string {
 	return [
 		`wrap=${policy.wrapS}/${policy.wrapT}`,
 		"filter=linear/linear/linear",

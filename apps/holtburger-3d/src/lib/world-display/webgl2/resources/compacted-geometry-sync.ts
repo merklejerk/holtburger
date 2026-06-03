@@ -210,7 +210,13 @@ export function syncWebgl2CompactedGeometryResources({
 		}
 	}
 	for (const [batchKey, batch] of store.compactedGeometryBatches) {
-		if (!retainedGeometryBatchKeys.has(batchKey)) {
+		if (
+			!shouldRetainWebgl2CompactedGeometryBatch({
+				store,
+				batchKey,
+				retainedGeometryBatchKeys,
+			})
+		) {
 			batch.dispose();
 			store.compactedGeometryBatches.delete(batchKey);
 			releaseWebgl2CompactedGeometryBatchGraphLease(
@@ -280,6 +286,21 @@ export function syncWebgl2CompactedGeometryResources({
 	}
 }
 
+export function shouldRetainWebgl2CompactedGeometryBatch({
+	store,
+	batchKey,
+	retainedGeometryBatchKeys,
+}: {
+	store: Webgl2WorldResourceStore;
+	batchKey: string;
+	retainedGeometryBatchKeys: ReadonlySet<string>;
+}): boolean {
+	return (
+		retainedGeometryBatchKeys.has(batchKey) ||
+		store.pendingCompactedGeometryBatchKeys.has(batchKey)
+	);
+}
+
 function retainWebgl2CompactedGeometryBatch({
 	gl,
 	store,
@@ -294,6 +315,7 @@ function retainWebgl2CompactedGeometryBatch({
 	retainedGeometryBatchKeys: Set<string>;
 }): void {
 	retainedGeometryBatchKeys.add(geometry.key);
+	store.pendingCompactedGeometryBatchKeys.delete(geometry.key);
 	const previousBatch = store.compactedGeometryBatches.get(geometry.key);
 	if (!previousBatch) {
 		const nextBatch = profileBrowserJsScope(

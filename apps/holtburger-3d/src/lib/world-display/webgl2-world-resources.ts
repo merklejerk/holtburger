@@ -237,9 +237,11 @@ export interface Webgl2WorldResourceStore {
 	compactionFamilyPlan: CompactionFamilyPlan;
 	texturePageAtlasPlan: TexturePageAtlasPlan;
 	textureAtlasGeneration: Webgl2TextureAtlasGenerationResource | null;
+	pendingTextureAtlasGenerationKey: string | null;
 	textureAtlasGenerationGraph: RendererResourceGraph | null;
 	textureAtlasGenerationGraphLease: RendererResourceGraphLease | null;
 	compactedGeometryBatches: Map<string, Webgl2CompactedGeometryBatchResource>;
+	pendingCompactedGeometryBatchKeys: Set<string>;
 	compactedGeometryFamilyResources: Map<
 		string,
 		Webgl2CompactedGeometryFamilyResource
@@ -268,6 +270,7 @@ export interface Webgl2WorldResourceStore {
 	>;
 	indexedResourceAtlasPlan: IndexedResourceAtlasPlan;
 	indexedResourceAtlasGeneration: Webgl2IndexedResourceAtlasGenerationResource | null;
+	pendingIndexedResourceAtlasGenerationKey: string | null;
 	indexedResourceAtlasGenerationGraph: RendererResourceGraph | null;
 	indexedResourceAtlasGenerationGraphLease: RendererResourceGraphLease | null;
 	textureAtlasGenerationTextureCount: number;
@@ -375,9 +378,11 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		compactionFamilyPlan: createEmptyCompactionFamilyPlan(),
 		texturePageAtlasPlan: createEmptyTexturePageAtlasPlan(),
 		textureAtlasGeneration: null,
+		pendingTextureAtlasGenerationKey: null,
 		textureAtlasGenerationGraph: null,
 		textureAtlasGenerationGraphLease: null,
 		compactedGeometryBatches: new Map(),
+		pendingCompactedGeometryBatchKeys: new Set(),
 		compactedGeometryFamilyResources: new Map(),
 		compactedGeometryFamilyResourceCounts: {},
 		compactedGeometryBatchGraph: null,
@@ -397,6 +402,7 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		compactionCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts: {},
 		indexedResourceAtlasPlan: createEmptyIndexedResourceAtlasPlan(),
 		indexedResourceAtlasGeneration: null,
+		pendingIndexedResourceAtlasGenerationKey: null,
 		indexedResourceAtlasGenerationGraph: null,
 		indexedResourceAtlasGenerationGraphLease: null,
 		textureAtlasGenerationTextureCount: 0,
@@ -431,6 +437,74 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		indexedMaterialDataCache: new Map(),
 		materialPlanCache: new Map(),
 	};
+}
+
+export function markWebgl2TextureAtlasGenerationReplacementPending({
+	store,
+	generationKey,
+}: {
+	store: Webgl2WorldResourceStore;
+	generationKey: string;
+}): void {
+	if (store.textureAtlasGeneration?.key === generationKey) {
+		store.pendingTextureAtlasGenerationKey = null;
+		return;
+	}
+	store.pendingTextureAtlasGenerationKey = generationKey;
+}
+
+export function commitWebgl2TextureAtlasGeneration({
+	store,
+	generation,
+}: {
+	store: Webgl2WorldResourceStore;
+	generation: Webgl2TextureAtlasGenerationResource;
+}): void {
+	const previousGeneration = store.textureAtlasGeneration;
+	if (previousGeneration !== generation) {
+		previousGeneration?.dispose();
+	}
+	store.textureAtlasGeneration = generation;
+	store.pendingTextureAtlasGenerationKey = null;
+}
+
+export function markWebgl2IndexedResourceAtlasGenerationReplacementPending({
+	store,
+	generationKey,
+}: {
+	store: Webgl2WorldResourceStore;
+	generationKey: string;
+}): void {
+	if (store.indexedResourceAtlasGeneration?.key === generationKey) {
+		store.pendingIndexedResourceAtlasGenerationKey = null;
+		return;
+	}
+	store.pendingIndexedResourceAtlasGenerationKey = generationKey;
+}
+
+export function commitWebgl2IndexedResourceAtlasGeneration({
+	store,
+	generation,
+}: {
+	store: Webgl2WorldResourceStore;
+	generation: Webgl2IndexedResourceAtlasGenerationResource;
+}): void {
+	const previousGeneration = store.indexedResourceAtlasGeneration;
+	if (previousGeneration !== generation) {
+		previousGeneration?.dispose();
+	}
+	store.indexedResourceAtlasGeneration = generation;
+	store.pendingIndexedResourceAtlasGenerationKey = null;
+}
+
+export function markWebgl2CompactedGeometryBatchReplacementPending({
+	store,
+	batchKey,
+}: {
+	store: Webgl2WorldResourceStore;
+	batchKey: string;
+}): void {
+	store.pendingCompactedGeometryBatchKeys.add(batchKey);
 }
 
 export function syncWebgl2WorldResources({
@@ -895,10 +969,12 @@ export function destroyWebgl2WorldResources(
 	store.texturePageAtlasPlan = createEmptyTexturePageAtlasPlan();
 	store.textureAtlasGeneration?.dispose();
 	store.textureAtlasGeneration = null;
+	store.pendingTextureAtlasGenerationKey = null;
 	for (const batch of store.compactedGeometryBatches.values()) {
 		batch.dispose();
 	}
 	store.compactedGeometryBatches.clear();
+	store.pendingCompactedGeometryBatchKeys.clear();
 	store.compactedGeometryFamilyResources.clear();
 	store.compactedGeometryFamilyResourceCounts = {};
 	store.compactionCandidateDrawUnitCount = 0;
@@ -917,6 +993,7 @@ export function destroyWebgl2WorldResources(
 	store.indexedResourceAtlasPlan = createEmptyIndexedResourceAtlasPlan();
 	store.indexedResourceAtlasGeneration?.dispose();
 	store.indexedResourceAtlasGeneration = null;
+	store.pendingIndexedResourceAtlasGenerationKey = null;
 	store.indexedMaterialDescriptorDrawUnitCount = 0;
 	store.indexedMaterialDescriptorCompactionCandidateCount = 0;
 	store.standaloneIndexedMaterialResourceDrawUnitCount = 0;
@@ -3358,6 +3435,10 @@ function syncWebgl2TextureAtlasGeneration({
 		maxAnisotropy,
 	});
 	if (store.textureAtlasGeneration?.key !== generationKey) {
+		markWebgl2TextureAtlasGenerationReplacementPending({
+			store,
+			generationKey,
+		});
 		const nextGeneration = profileBrowserJsScope(
 			"webgl2.resource.createTextureAtlasGeneration",
 			() =>
@@ -3373,8 +3454,10 @@ function syncWebgl2TextureAtlasGeneration({
 				`Texture page atlas plan ${plan.key} has atlas-ready draw units but produced no generation.`,
 			);
 		}
-		store.textureAtlasGeneration?.dispose();
-		store.textureAtlasGeneration = nextGeneration;
+		commitWebgl2TextureAtlasGeneration({
+			store,
+			generation: nextGeneration,
+		});
 		releaseWebgl2TextureAtlasGenerationGraphLease(store);
 	} else if (store.textureAtlasGeneration) {
 		store.textureAtlasGeneration = refreshWebgl2TextureAtlasGenerationCoverage({
@@ -3538,6 +3621,10 @@ function syncWebgl2IndexedResourceAtlasGeneration({
 		plan.key,
 	);
 	if (store.indexedResourceAtlasGeneration?.key !== generationKey) {
+		markWebgl2IndexedResourceAtlasGenerationReplacementPending({
+			store,
+			generationKey,
+		});
 		const nextGeneration = profileBrowserJsScope(
 			"webgl2.resource.createIndexedResourceAtlasGeneration",
 			() =>
@@ -3551,8 +3638,10 @@ function syncWebgl2IndexedResourceAtlasGeneration({
 				`Indexed resource atlas plan ${plan.key} has atlas pages but produced no generation.`,
 			);
 		}
-		store.indexedResourceAtlasGeneration?.dispose();
-		store.indexedResourceAtlasGeneration = nextGeneration;
+		commitWebgl2IndexedResourceAtlasGeneration({
+			store,
+			generation: nextGeneration,
+		});
 		releaseWebgl2IndexedResourceAtlasGenerationGraphLease(store);
 	}
 	store.indexedResourceAtlasIndexTextureCount =

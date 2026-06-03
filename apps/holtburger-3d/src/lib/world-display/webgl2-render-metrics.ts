@@ -421,6 +421,17 @@ export function createWebgl2RenderMetrics(
 			compactedIndexedMaterialStandaloneResourceDrawUnitCount:
 				input.worldStore
 					?.compactedIndexedMaterialStandaloneResourceDrawUnitCount ?? 0,
+			indexedResourceAtlasCandidateDrawUnitCount:
+				input.worldStore?.indexedResourceAtlasCandidateDrawUnitCount ?? 0,
+			indexedResourceAtlasIndexTextureCount:
+				input.worldStore?.indexedResourceAtlasIndexTextureCount ?? 0,
+			indexedResourceAtlasPaletteTextureCount:
+				input.worldStore?.indexedResourceAtlasPaletteTextureCount ?? 0,
+			indexedResourceAtlasFailureReasonCount:
+				input.worldStore?.indexedResourceAtlasFailureReasonCount ?? 0,
+			indexedResourceAtlasFailureSamples: [
+				...(input.worldStore?.indexedResourceAtlasFailureSamples ?? []),
+			],
 			staticGeometryGroupCount: input.worldStore?.staticDrawUnitCount ?? 0,
 			staticVisibleGeometryGroupCount:
 				(input.frameMetrics?.visibleDrawCountsByCategory["static-staged"] ??
@@ -565,6 +576,14 @@ export function createWebgl2RenderMetrics(
 						"webgl2-compacted-indexed-standalone-resource-draw-units":
 							input.worldStore
 								.compactedIndexedMaterialStandaloneResourceDrawUnitCount,
+						"webgl2-indexed-resource-atlas-candidate-draw-units":
+							input.worldStore.indexedResourceAtlasCandidateDrawUnitCount,
+						"webgl2-indexed-resource-atlas-index-textures":
+							input.worldStore.indexedResourceAtlasIndexTextureCount,
+						"webgl2-indexed-resource-atlas-palette-textures":
+							input.worldStore.indexedResourceAtlasPaletteTextureCount,
+						"webgl2-indexed-resource-atlas-failures":
+							input.worldStore.indexedResourceAtlasFailureReasonCount,
 						"webgl2-retained-direct-opaque-draw-units":
 							input.submitMetrics.retainedDirectOpaqueDrawUnitCount,
 						"webgl2-retained-direct-blended-draw-units":

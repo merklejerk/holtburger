@@ -427,7 +427,7 @@ Decisions and course corrections:
 - The descriptor metrics are first-class `WorldRenderMetrics` fields and also appear in
   `materialTypeCounts` under `webgl2-indexed-*` keys for debug/report visibility.
 
-Remaining debt before Phase B:
+Remaining debt carried into Phase B:
 
 - `Webgl2IndexedMaterialResources extends Webgl2IndexedMaterialDescriptor` remains as the main legacy
   shim. Phase B can proceed with it, but the direct resource type should eventually compose a
@@ -437,6 +437,60 @@ Remaining debt before Phase B:
   RGBA/detail `textureAtlasGeneration` type directly.
 
 ### Phase B: Resource Lifecycle and WebGL Atlas Generation
+
+Status: complete as of `2026-06-03`.
+
+Completed:
+
+- Added `indexedResourceAtlasGeneration` to the WebGL2 world resource store as a deliberately separate
+  lifecycle from RGBA/detail `textureAtlasGeneration`.
+- Generated P8, Index16, and palette atlas textures from `IndexedResourceAtlasPlan`.
+- Added lifecycle cleanup and resource-store metrics.
+- Kept direct indexed resources unchanged.
+- Added tests for upload format, sampler state, packed byte contents, no-mipmap behavior, and dispose
+  behavior.
+- Fed atlas candidates from `Webgl2IndexedMaterialDescriptor`, not from direct indexed WebGL texture
+  resources.
+- Kept the existing direct indexed resource upload path until Phase F removes avoidable standalone
+  uploads for compacted indexed draw units.
+
+Validation:
+
+- `npm exec vitest -- src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-direct-render-family.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-indexed-resource-atlas-generation.test.ts src/lib/world-display/texture-pages/indexed-resource-atlas-planner.test.ts --run`
+  from `apps/holtburger-3d`
+  - Result: 5 test files passed, 59 tests passed.
+- `npm run lint:ts` from `apps/holtburger-3d`
+  - Result: passed.
+
+Decisions and course corrections:
+
+- Chose a deliberately separate `indexedResourceAtlasGeneration` store field instead of extracting a
+  shared atlas lifecycle helper. This keeps data-texture behavior isolated while the shader submit path
+  is still being built.
+- The indexed generation graph uses an `atlas-generation` graph node labeled `indexed resource atlas`
+  with index/palette texture counts. It currently has no prepared-asset dependencies because the atlas
+  is descriptor-backed, not prepared-texture-asset backed.
+- Indexed atlas candidates are limited to compacted indexed draw units. Retained-direct indexed
+  alpha/blend materials are not atlased in this phase because no submit path consumes those atlases.
+- The transitional resource-sync test now expects standalone direct index/palette uploads plus indexed
+  atlas uploads for compacted indexed units. That is intentional debt until Phase F.
+- Index atlas pages still use the max-size rectangle layout from the shared atlas planner. This can
+  allocate large data pages, so runtime metrics should watch GPU memory/texture dimensions before this
+  becomes the final allocator.
+
+Remaining debt before Phase C:
+
+- `Webgl2IndexedMaterialResources extends Webgl2IndexedMaterialDescriptor` remains as the main legacy
+  shim.
+- `indexedResourceAtlasGeneration` is generated but not consumed by compacted indexed submit yet.
+  Phase C must wire material-table atlas placement fields and shader addressing before draw calls drop.
+- Compacted indexed draw units still upload and retain standalone index/palette textures. Keep this
+  visible through `compactedIndexedMaterialStandaloneResourceDrawUnitCount`; do not remove standalone
+  uploads until atlas submit is stable.
+- If index atlas memory is high in runtime reports, add an immediate Phase B.5 to replace max-size
+  index pages with a tight data-page planner before Phase C.
+
+Original Phase B checklist:
 
 - Add `indexedResourceAtlasGeneration` to the WebGL2 world resource store, or extract a reusable atlas
   generation lifecycle helper before adding the field.
@@ -531,6 +585,11 @@ Expected cleanup targets:
   direct-render and world-submit helpers by composing explicit descriptor fixtures.
 - `collectIndexedMaterialTextureKeys`: make this retain only direct indexed textures after atlas submit
   can replace compacted indexed units.
+- `indexedResourceAtlasGeneration`: separate lifecycle is intentional for Phase B. After Phase C/D
+  prove the final resource shape, consider extracting a small shared atlas-generation lifecycle helper
+  if RGBA/detail and indexed resources still duplicate graph lease or dispose patterns.
+- Indexed texel atlas page sizing: replace max-size `planAtlasLayout` pages with a tighter indexed
+  data-page planner if runtime metrics show memory waste.
 - `Webgl2TextureAtlasGenerationResource`: keep RGBA/detail-specific, or extract shared lifecycle
   helpers without forcing indexed resources into this shape.
 - `compactionCandidateDrawUnitCount`: consider reporting all compactable family candidates, or split

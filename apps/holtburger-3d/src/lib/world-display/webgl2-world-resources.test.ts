@@ -123,12 +123,21 @@ describe("webgl2 world resources", () => {
 		expect(store.terrainTiles[0]?.texturePageBindings).toEqual([]);
 		expect(store.terrainTiles[0]?.texturePageBlockers).toEqual([
 			"terrain tile has no terrain blend page inputs",
-			"terrain detail page binding is not available before terrain layer planning",
 		]);
 		expect(store.terrainTiles[0]?.layerPlan).toBeNull();
 		expect(store.terrainTiles[0]?.layerPlanBlockers).toEqual([
 			"terrain material resources are unresolved",
 		]);
+		expect(store.terrainTiles[0]?.oneDrawReadiness).toEqual({
+			status: "blocked",
+			blockers: [
+				"terrain material resources are unresolved",
+				"terrain tile has no layer plan",
+				"terrain tile has no terrain blend page inputs",
+				"terrain tile one-draw geometry has no layer-slot buffer",
+				"terrain tile one-draw geometry has no uv buffer",
+			],
+		});
 		expect(store.terrainRenderCandidates).toEqual([
 			{
 				id: "terrain-tile/terrain/12340000",

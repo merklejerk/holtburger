@@ -1,6 +1,6 @@
 # Holtburger 3D Terrain Rendering Implementation Plan
 
-Status: Phase T6A complete; Phase T6B/T7 shader consumption is next.
+Status: Phase T6B0 complete; Phase T6B shader consumption is next.
 
 Dry-run status: reviewed against the current `apps/holtburger-3d/src/lib/world-display` module graph.
 The phase order below reflects that dry run.
@@ -181,13 +181,14 @@ Execute the phases in this order:
 5. T4: generalize frame/submit orchestration for terrain render work.
 6. T5: add isolated terrain texture page families.
 7. T6A: add terrain tile layer table and geometry attributes.
-8. T6B: consume terrain layer/page resources from terrain-family submit.
-9. T7: add explicit-gradient terrain atlas sampling.
-10. T8: add terrain draw-slice fallback.
-11. T9: delete temporary terrain compatibility paths and old pcode draw-unit paths.
-12. T10: measure and decide follow-up complexity.
-13. T11: run final cleanup and remove accumulated migration leftovers.
-14. T2: clean up broader landblock-owned descendant `renderChunk` storage.
+8. T6B0: add explicit terrain one-draw readiness and blocker routing.
+9. T6B: consume terrain layer/page resources from terrain-family submit.
+10. T7: add explicit-gradient terrain atlas sampling.
+11. T8: add terrain draw-slice fallback.
+12. T9: delete temporary terrain compatibility paths and old pcode draw-unit paths.
+13. T10: measure and decide follow-up complexity.
+14. T11: run final cleanup and remove accumulated migration leftovers.
+15. T2: clean up broader landblock-owned descendant `renderChunk` storage.
 
 T11 is the living cleanup phase. As each implementation phase discovers temporary adapters, renamed
 old concepts, stale tests, or dead diagnostics, add an explicit callout to T11 unless the same phase
@@ -1093,6 +1094,100 @@ Cleanup impact:
 - The old `buildStagedTerrainGeometry(tile.mesh)` whole-tile resource path remains only for
   unresolved/blocked migration states. T8/T9 should replace this with draw slices or final diagnostic
   behavior, then T11 should delete any hollow helper shape that only exists for the migration bridge.
+
+## Phase T6B0: Terrain One-Draw Readiness Gate
+
+Status: Complete on 2026-06-02.
+
+Goal: add an explicit readiness gate between T6A terrain layer/page resources and the T6B
+terrain-family shader submit path.
+
+Why this interim phase exists:
+
+- T6A created the layer-plan geometry shape, but the submit path still had no single place to ask
+  whether a terrain tile was actually ready for one-draw terrain-family rendering.
+- T5B still carried a universal detail-page blocker that would make every terrain tile look
+  page-blocked before the shader path could make a deliberate detail decision.
+- Jumping directly into the terrain-family shader would have mixed readiness policy, blocker
+  diagnostics, page/detail cleanup, and actual draw submission in one diff.
+
+Primary targets:
+
+- `apps/holtburger-3d/src/lib/world-display/webgl2/resources/terrain-tile-resources.ts`
+- `apps/holtburger-3d/src/lib/world-display/webgl2-world-resources.ts`
+- `apps/holtburger-3d/src/lib/world-display/webgl2-world-submit.ts`
+- `apps/holtburger-3d/src/lib/world-display/webgl2-world-submit.test.ts`
+- `apps/holtburger-3d/src/lib/world-display/webgl2-world-resources.test.ts`
+
+Tasks:
+
+- Add `Webgl2TerrainTileOneDrawReadiness` to terrain tile resources.
+- Derive readiness from:
+  - layer plan presence and layer blockers;
+  - one-draw geometry buffers, including UV and layer-slot buffers;
+  - terrain color/mask page bindings;
+  - terrain page blockers.
+- Remove the unconditional detail-page blocker from the terrain page planner. Detail remains a
+  shader/material design item, but it should not masquerade as a texture-page placement failure.
+- Add submit-side partitioning for one-draw-ready tiles versus compatibility-routed tiles.
+- Keep all visible terrain tiles routed through compatibility rendering until T6B adds the actual
+  terrain-family shader draw path.
+- Add metrics for visible one-draw-ready and one-draw-blocked terrain tiles.
+
+Acceptance criteria:
+
+- Terrain tile resources expose a single readiness field that T6B can consume without re-checking
+  scattered layer/page state.
+- Page blockers no longer include the old universal detail blocker.
+- Submit planning can identify one-draw-ready terrain tiles without changing visual behavior yet.
+- Compatibility routing remains active for every visible terrain tile until the shader path exists.
+
+Progress update, 2026-06-02:
+
+- Added `Webgl2TerrainTileOneDrawReadiness` with ready counts and sorted blocker lists.
+- Added `deriveTerrainTileOneDrawReadiness(resource)` and initialized terrain tiles to blocked until
+  page bindings are resolved.
+- Recompute one-draw readiness after terrain texture page placements are resolved.
+- Removed the unconditional `"terrain detail page binding is not available before terrain layer
+  planning"` page blocker.
+- Added `planWebgl2TerrainTileSubmitReadiness`, which partitions visible terrain tiles into
+  one-draw-ready, blocked, and compatibility-routed sets.
+- Added `visibleTerrainOneDrawReadyTileCount` and `visibleTerrainOneDrawBlockedTileCount` submit
+  metrics.
+- Updated terrain resource and submit tests for blocker routing.
+
+Decisions:
+
+- Detail texture absence is no longer a page-planning blocker. The current WebGL2 terrain baseline
+  does not consume detail textures, and the final terrain shader should make the detail decision
+  explicitly instead of inheriting a universal blocker from the migration bridge.
+- Submit readiness is diagnostic/routing state only in T6B0. Ready tiles still render through
+  compatibility draws until T6B introduces the real terrain-family shader draw.
+- The readiness gate intentionally requires both UV and layer-slot buffers. Whole-tile shared-grid
+  fallback geometry cannot enter the one-draw terrain-family path.
+
+Course corrections and refinements:
+
+- T6B should consume `planWebgl2TerrainTileSubmitReadiness(...).oneDrawTiles` for the new shader path
+  and route `blockedTiles` through compatibility only until T8/T9 remove the bridge.
+- T6B should expose blocker samples in renderer diagnostics if the aggregate ready/blocked counts are
+  not enough to debug real landblocks.
+- T7 should still own explicit-gradient atlas sampling; T6B can start with direct atlas-rect sampling
+  only if it is immediately followed by T7.
+
+Validation:
+
+- `npm run test:ts -- webgl2-world-resources webgl2-world-submit terrain-tile-plan`
+- `npm run check`
+- `npm run lint`
+
+Cleanup impact:
+
+- `planWebgl2TerrainTileSubmitReadiness(...).compatibilityTiles` deliberately contains all visible
+  terrain tiles until the shader draw path exists. T6B should narrow that list to blocked tiles, and
+  T9/T11 should delete the compatibility route.
+- The old detail blocker removal leaves detail as an explicit future shader/material task rather than
+  an implicit page-planner failure.
 
 ## Phase T6B: Terrain Family Submit Consumes Layer And Page Resources
 

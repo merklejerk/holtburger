@@ -125,9 +125,11 @@ import {
 import { deriveTerrainTileBatchBvhBinding } from "./non-instanced-bvh-bindings";
 import {
 	collectTerrainTileCompatibilityTextureKeys,
+	createBlockedTerrainTileOneDrawReadiness,
 	describeTerrainTileGeometrySignature,
 	describeTerrainTileGraphSignature,
 	deriveTerrainTileRenderCandidate,
+	deriveTerrainTileOneDrawReadiness,
 	destroyWebgl2TerrainTileCompatibilityDraw,
 	destroyWebgl2TerrainTileResource,
 	terrainTileResourceId,
@@ -910,6 +912,9 @@ function createOrReuseWebgl2TerrainTile({
 		previous.layerPlanBlockers = layerPlanBlockers;
 		previous.texturePageBindings = [];
 		previous.texturePageBlockers = [];
+		previous.oneDrawReadiness = createBlockedTerrainTileOneDrawReadiness([
+			"terrain texture page bindings are unresolved",
+		]);
 		retainedTerrainTileIds.add(id);
 		return previous;
 	}
@@ -940,6 +945,9 @@ function createOrReuseWebgl2TerrainTile({
 		layerPlanBlockers,
 		texturePageBindings: [],
 		texturePageBlockers: [],
+		oneDrawReadiness: createBlockedTerrainTileOneDrawReadiness([
+			"terrain texture page bindings are unresolved",
+		]),
 	} satisfies Webgl2TerrainTileResource;
 	store.terrainTilesById.set(id, resource);
 	retainedTerrainTileIds.add(id);
@@ -1216,11 +1224,6 @@ function collectTerrainTexturePageAtlasCandidates({
 				detailAtlasEntry: null,
 			});
 		}
-		addTerrainTilePageBlocker(
-			blockersByTerrainTileId,
-			tile.id,
-			"terrain detail page binding is not available before terrain layer planning",
-		);
 	}
 	return { rgbaCandidates, blockersByTerrainTileId };
 }
@@ -1389,6 +1392,7 @@ function resolveWebgl2TerrainTileTexturePageBindings(
 		}
 		tile.texturePageBindings = dedupeTerrainTexturePageBindings(bindings);
 		tile.texturePageBlockers = [...new Set(blockers)];
+		tile.oneDrawReadiness = deriveTerrainTileOneDrawReadiness(tile);
 	}
 }
 

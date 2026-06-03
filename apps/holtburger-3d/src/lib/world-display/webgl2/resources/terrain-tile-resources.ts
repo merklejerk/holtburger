@@ -88,6 +88,7 @@ export interface Webgl2TerrainTileResource {
 	layerPlanBlockers: readonly string[];
 	texturePageBindings: Webgl2TerrainTileTexturePageBinding[];
 	texturePageBlockers: readonly string[];
+	oneDrawReadiness: Webgl2TerrainTileOneDrawReadiness;
 }
 
 export interface Webgl2TerrainTileTexturePageBinding {
@@ -96,6 +97,19 @@ export interface Webgl2TerrainTileTexturePageBinding {
 	textureIndex: number | null;
 	rect: readonly [number, number, number, number] | null;
 }
+
+export type Webgl2TerrainTileOneDrawReadiness =
+	| {
+			status: "ready";
+			layerEntryCount: number;
+			texturePageBindingCount: number;
+			colorPageBindingCount: number;
+			maskPageBindingCount: number;
+	  }
+	| {
+			status: "blocked";
+			blockers: readonly string[];
+	  };
 
 export interface Webgl2TerrainTileRenderCandidate {
 	id: string;
@@ -160,6 +174,7 @@ export function describeTerrainTileGraphSignature(
 			.map((binding) => `${binding.family}:${binding.atlasEntryKey}`)
 			.join(",")}`,
 		`blockers:${resource.texturePageBlockers.join(",")}`,
+		`one-draw:${describeTerrainTileOneDrawReadiness(resource.oneDrawReadiness)}`,
 		`bvh:${resource.bvhItemKeys.join(",")}`,
 	].join("|");
 }
@@ -180,6 +195,88 @@ export function collectTerrainTileCompatibilityTextureKeys(
 			...draw.blend.roads.flatMap((road) => [road.road.key, road.alpha.key]),
 		];
 	});
+}
+
+export function createBlockedTerrainTileOneDrawReadiness(
+	blockers: readonly string[],
+): Webgl2TerrainTileOneDrawReadiness {
+	return {
+		status: "blocked",
+		blockers: [...new Set(blockers)].sort(),
+	};
+}
+
+export function deriveTerrainTileOneDrawReadiness(
+	resource: Webgl2TerrainTileResource,
+): Webgl2TerrainTileOneDrawReadiness {
+	const blockers = collectTerrainTileOneDrawBlockers(resource);
+	if (blockers.length > 0) {
+		return createBlockedTerrainTileOneDrawReadiness(blockers);
+	}
+	const colorPageBindingCount = resource.texturePageBindings.filter(
+		(binding) => binding.family === "terrain-color",
+	).length;
+	const maskPageBindingCount = resource.texturePageBindings.filter(
+		(binding) => binding.family === "terrain-mask",
+	).length;
+	return {
+		status: "ready",
+		layerEntryCount: resource.layerPlan?.layerEntries.length ?? 0,
+		texturePageBindingCount: resource.texturePageBindings.length,
+		colorPageBindingCount,
+		maskPageBindingCount,
+	};
+}
+
+function collectTerrainTileOneDrawBlockers(
+	resource: Webgl2TerrainTileResource,
+): string[] {
+	const blockers = [
+		...resource.layerPlanBlockers,
+		...resource.texturePageBlockers,
+	];
+	if (!resource.layerPlan) {
+		blockers.push("terrain tile has no layer plan");
+	} else if (resource.layerPlan.layerEntries.length === 0) {
+		blockers.push("terrain tile layer plan has no entries");
+	}
+	if (!resource.uvBuffer) {
+		blockers.push("terrain tile one-draw geometry has no uv buffer");
+	}
+	if (!resource.layerSlotBuffer) {
+		blockers.push("terrain tile one-draw geometry has no layer-slot buffer");
+	}
+	const requiresColorPages =
+		resource.layerPlan?.layerEntries.some((entry) => entry.colorRefCount > 0) ??
+		false;
+	if (
+		requiresColorPages &&
+		!resource.texturePageBindings.some(
+			(binding) => binding.family === "terrain-color",
+		)
+	) {
+		blockers.push("terrain tile one-draw path has no terrain color page bindings");
+	}
+	const requiresMaskPages =
+		resource.layerPlan?.layerEntries.some((entry) => entry.maskRefCount > 0) ??
+		false;
+	if (
+		requiresMaskPages &&
+		!resource.texturePageBindings.some(
+			(binding) => binding.family === "terrain-mask",
+		)
+	) {
+		blockers.push("terrain tile one-draw path has no terrain mask page bindings");
+	}
+	return [...new Set(blockers)].sort();
+}
+
+function describeTerrainTileOneDrawReadiness(
+	readiness: Webgl2TerrainTileOneDrawReadiness,
+): string {
+	return readiness.status === "ready"
+		? `ready:${readiness.layerEntryCount}:${readiness.texturePageBindingCount}:${readiness.colorPageBindingCount}:${readiness.maskPageBindingCount}`
+		: `blocked:${readiness.blockers.join(",")}`;
 }
 
 export function destroyWebgl2TerrainTileResource(

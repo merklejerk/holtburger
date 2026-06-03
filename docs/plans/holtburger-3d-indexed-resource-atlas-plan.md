@@ -542,20 +542,85 @@ Decisions and course corrections:
 Remaining debt before Phase D:
 
 - Compacted indexed family resources still expose `indexPageKey` and `palettePageKey` as source keys.
-  Phase D should add atlas texture indices to slice planning and split slices by atlas texture pair.
-- Missing indexed atlas placements currently disable compacted indexed replacement globally for the
-  visible submit. Phase D should convert this into explicit retained-direct fallback/blocker samples
-  per affected route where practical.
+  Addressed in Phase D for submit/resource binding. The source keys remain as diagnostics and material
+  source identity, but submit no longer resolves them into atlas placements.
+- Missing indexed atlas placements currently disable compacted indexed resource construction for the
+  affected resource sync pass and leave draw units retained direct. Phase D added a fallback sample,
+  but finer per-route blocker reporting remains future metrics work.
 - Standalone direct indexed resources remain uploaded and retained for compacted indexed draw units.
   Keep this debt visible until Phase F.
 
 ### Phase D: Slice Regrouping and Submit
 
-- Change indexed draw slice keys from individual index/palette texture keys to atlas texture indices.
-- Keep atlas texture binding through compacted indexed submit, now implemented in Phase C.
-- Keep missing atlas placements as retained direct with explicit blocker/fallback samples.
-- Add tests proving multiple indexed materials with different source textures/palettes collapse into
-  fewer submitted slices when they share atlas resources.
+Status: complete as of `2026-06-03`.
+
+Completed:
+
+- Added atlas texture indices to indexed draw slices during WebGL compacted resource sync.
+- Regrouped local indexed landblock slices by:
+  - index format;
+  - index atlas texture index;
+  - palette atlas texture index;
+  - detail atlas texture index;
+  - render state;
+  - visibility partition.
+- Moved compacted indexed submit away from source-key placement lookups. Submit now binds atlas
+  textures by `slice.indexAtlasTextureIndex` and `slice.paletteAtlasTextureIndex`.
+- Moved index and palette atlas rects onto compacted indexed material records, so material-table upload
+  no longer needs `indexedResourceAtlasGeneration` placement scans.
+- Threaded `indexedResourceAtlasPlan` into compacted geometry sync so atlas-aware slices are built
+  before `buildCompactedGeometryBatch`.
+- Added an incomplete-placement guard that skips indexed compacted resource creation and records a
+  fallback sample instead of constructing a resource that would throw or submit incomplete atlas state.
+- Added a resource-store regression test proving compacted indexed slices are atlas-bound while still
+  preserving visibility partition separation.
+
+Validation:
+
+- `npm exec vitest -- src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-indexed-resource-atlas-generation.test.ts src/lib/world-display/texture-pages/indexed-resource-atlas-planner.test.ts src/lib/world-display/compaction/compaction-family-planner.test.ts --run`
+  from `apps/holtburger-3d`
+  - Result: 5 test files passed, 79 tests passed.
+- `npm run lint:ts` from `apps/holtburger-3d`
+  - Result: passed.
+
+Decisions and course corrections:
+
+- The global compaction planner still emits source-key indexed slices with nullable atlas texture
+  indices. WebGL compacted resource sync fills atlas texture indices after indexed atlas planning,
+  because the planner runs before atlas placements exist.
+- Slice regrouping intentionally does not cross visibility partitions. A dry-run regression with two
+  separate static BVH keys produced two atlas-bound slices, not one. That is correct for the current
+  culling/overdraw contract and means Phase E metrics must distinguish resource fragmentation from
+  visibility partition fragmentation.
+- Source `indexPageKey` and `palettePageKey` remain on WebGL indexed slices as diagnostics/source
+  identity. They are no longer used for submit-time texture binding.
+- Missing placements are handled at compacted resource sync time rather than submit time. This avoids
+  late failures and keeps direct rendering responsible for affected draw units.
+
+Remaining debt before Phase E:
+
+- Add metrics that report indexed compacted slice grouping by reason: atlas texture pair, detail
+  texture, material-table partition, and visibility partition. Without that split, a post-Phase-D
+  draw-call count can still look disappointing even when resource atlas grouping is working.
+- Capture a runtime report at the original destination and compare indexed shader draws against the
+  baseline `1084` indexed shader draws and `1711 -> 1441` indexed estimate.
+- Consider an immediate Phase D.5 if metrics show most remaining indexed slices are visibility-bound
+  rather than resource-bound.
+
+### Phase D.5: Indexed Slice Reason Metrics (Immediate Prep If Needed)
+
+Add this interim phase before Phase E if the next runtime report cannot explain remaining indexed
+draw-call pressure.
+
+- Count compacted indexed WebGL slices by grouping limiter:
+  - atlas texture pair;
+  - detail atlas texture;
+  - visibility partition;
+  - material-table partition;
+  - landblock batch boundary.
+- Include sample slice keys for the top limiter categories.
+- Keep this diagnostic local to `apps/holtburger-3d`; it is renderer-specific and should not move into
+  shared crates.
 
 ### Phase E: Metrics and Runtime Verification
 
@@ -628,9 +693,9 @@ Expected cleanup targets:
 - `indexedResourceAtlasGeneration`: separate lifecycle is intentional for Phase B. After Phase C/D
   prove the final resource shape, consider extracting a small shared atlas-generation lifecycle helper
   if RGBA/detail and indexed resources still duplicate graph lease or dispose patterns.
-- Compacted indexed submit currently resolves source `indexPageKey` / `palettePageKey` to atlas
-  placements at submit time. Phase D should move atlas texture indices into planned slices/resources
-  so submit binds concrete atlas texture pairs without source-key lookups.
+- Compacted indexed WebGL slices still retain source `indexPageKey` / `palettePageKey` for diagnostics
+  and source identity. Submit now binds atlas texture indices directly; if diagnostics grow cleaner
+  atlas-resource fields, consider narrowing these source keys to material records only.
 - Indexed texel atlas page sizing: replace max-size `planAtlasLayout` pages with a tighter indexed
   data-page planner if runtime metrics show memory waste.
 - `Webgl2TextureAtlasGenerationResource`: keep RGBA/detail-specific, or extract shared lifecycle

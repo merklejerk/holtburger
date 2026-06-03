@@ -183,12 +183,7 @@ export function submitWebgl2IndexedPalettedFamilyBatches({
 				"Indexed-paletted family submit requires indexed resource atlas generation.",
 			);
 		}
-		uploadIndexedPalettedFamilyMaterialTable(
-			gl,
-			program,
-			family,
-			resources.indexedResourceAtlasGeneration,
-		);
+		uploadIndexedPalettedFamilyMaterialTable(gl, program, family);
 		stateCache.bindVertexArray(batch.vertexArray.vertexArray);
 		for (const slice of visibleSlices) {
 			const atlasTextures = resolveIndexedAtlasTexturesForSlice({
@@ -247,7 +242,6 @@ function uploadIndexedPalettedFamilyMaterialTable(
 	gl: WebGL2RenderingContext,
 	program: Webgl2IndexedPalettedFamilyWorldProgram,
 	family: Webgl2IndexedPalettedFamilyResource,
-	generation: Webgl2IndexedResourceAtlasGenerationResource,
 ): void {
 	const colors = new Float32Array(
 		WEBGL2_INDEXED_PALETTED_MAX_MATERIAL_SLOTS * 4,
@@ -268,17 +262,6 @@ function uploadIndexedPalettedFamilyMaterialTable(
 		WEBGL2_INDEXED_PALETTED_MAX_MATERIAL_SLOTS * 4,
 	);
 	for (const [index, record] of family.materialTableRecords.entries()) {
-		const indexPlacement = generation.indexPlacements.find(
-			(placement) => placement.indexTextureKey === record.indexPageKey,
-		);
-		const palettePlacement = generation.palettePlacements.find(
-			(placement) => placement.paletteTextureKey === record.palettePageKey,
-		);
-		if (!indexPlacement || !palettePlacement) {
-			throw new Error(
-				`Indexed-paletted material record ${record.key} references missing indexed atlas placement.`,
-			);
-		}
 		colors.set(record.color, index * 4);
 		materialParams.set(
 			[
@@ -289,24 +272,8 @@ function uploadIndexedPalettedFamilyMaterialTable(
 			],
 			index * 4,
 		);
-		indexRects.set(
-			[
-				indexPlacement.x,
-				indexPlacement.y,
-				indexPlacement.width,
-				indexPlacement.height,
-			],
-			index * 4,
-		);
-		paletteRects.set(
-			[
-				palettePlacement.x,
-				palettePlacement.y,
-				palettePlacement.colorCount,
-				1,
-			],
-			index * 4,
-		);
+		indexRects.set(record.indexAtlasRect, index * 4);
+		paletteRects.set(record.paletteAtlasRect, index * 4);
 		detailRects.set(record.detailAtlasRect, index * 4);
 		detailParams.set(
 			[
@@ -336,24 +303,15 @@ function resolveIndexedAtlasTexturesForSlice({
 	indexTexture: Webgl2IndexedResourceAtlasTextureResource;
 	paletteTexture: Webgl2IndexedResourceAtlasTextureResource;
 } | null {
-	const indexPlacement = generation.indexPlacements.find(
-		(placement) => placement.indexTextureKey === slice.indexPageKey,
-	);
-	const palettePlacement = generation.palettePlacements.find(
-		(placement) => placement.paletteTextureKey === slice.palettePageKey,
-	);
-	if (!indexPlacement || !palettePlacement) {
-		return null;
-	}
 	const indexKind =
 		slice.indexFormat === "p8" ? "p8-index-texels" : "index16-index-texels";
 	const indexTexture = generation.indexTextures.find(
 		(texture) =>
 			texture.kind === indexKind &&
-			texture.textureIndex === indexPlacement.atlasTextureIndex,
+			texture.textureIndex === slice.indexAtlasTextureIndex,
 	);
 	const paletteTexture = generation.paletteTextures.find(
-		(texture) => texture.textureIndex === palettePlacement.atlasTextureIndex,
+		(texture) => texture.textureIndex === slice.paletteAtlasTextureIndex,
 	);
 	if (!indexTexture || !paletteTexture) {
 		return null;

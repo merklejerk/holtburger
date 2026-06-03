@@ -1,6 +1,7 @@
 # Holtburger 3D Terrain Rendering Implementation Plan
 
-Status: Phase T11 cleanup complete; deferred Phase T2 broader render-chunk cleanup remains.
+Status: Phase T12 terrain detail rendering complete; deferred
+Phase T2 broader render-chunk cleanup remains.
 
 Dry-run status: reviewed against the current `apps/holtburger-3d/src/lib/world-display` module graph.
 The phase order below reflects that dry run.
@@ -1880,6 +1881,112 @@ Keep or migrate these concepts:
   blockers.
 - quad-granular terrain BVH item keys and terrain tile batch ids, extended for slice ids.
 - current WebGL2 terrain shader behavior as the visual baseline.
+
+## Phase T12: Terrain Family Landscape Detail Rendering
+
+Goal: land landscape terrain detail rendering in the WebGL2 terrain-family path without reviving the
+old terrain compatibility renderer.
+
+Source findings:
+
+- Retail `LScape::SetDetailTexturing` resolves landscape detail from role index `0` using
+  `LScape::GenerateDetailSurface(0)` and passes it to `Render::SetLandscapeDetailSurface`.
+- Retail terrain landblock draw sets `Render::curr_detail_surface`,
+  `Render::curr_detail_tiling`, `Render::curr_detail_src_blend = 5`, and
+  `Render::curr_detail_dst_blend = 6` for landscape detail.
+- Retail detail sampler state is wrapped, linear, mipmapped sampling.
+- Existing Holtburger region render profiles already expose the landscape detail role with texture
+  asset id, texture DID, tiling, and fade range.
+
+Primary targets:
+
+- `apps/holtburger-3d/src/lib/world-display/region-detail-overlays.ts`
+- `apps/holtburger-3d/src/lib/world-display/webgl2/resources/terrain-tile-resources.ts`
+- `apps/holtburger-3d/src/lib/world-display/webgl2-world-resources.ts`
+- `apps/holtburger-3d/src/lib/world-display/webgl2/families/terrain-family-submit.ts`
+- `apps/holtburger-3d/src/lib/world-display/webgl2/families/terrain-family-submit.test.ts`
+- `apps/holtburger-3d/src/lib/world-display/webgl2-world-resources.test.ts`
+- `apps/holtburger-3d/src/lib/world-display/texture-pages/texture-page-atlas-planner.test.ts`
+
+Tasks:
+
+- Add an app-local WebGL2 terrain detail plan sourced from
+  `resolveRegionDetailOverlayPlan({ roleKind: "landscape" })`.
+- Emit a `terrain-detail` detail-atlas candidate for the resolved landscape detail texture when
+  detail textures are enabled.
+- Resolve terrain detail page bindings from `textureAtlasGeneration.detailPlacements`, keeping
+  lookup family-aware so `terrain-detail` cannot collide with `static-detail`.
+- Extend terrain tile and draw-slice readiness to represent one detail binding separately from color
+  and mask page bindings.
+- Extend terrain page-overflow slicing to group by detail binding if content ever produces more than
+  one terrain detail binding for a tile.
+- Add terrain-family submit bindings for a detail atlas texture unit, detail atlas size, detail rect,
+  detail tiling, detail fade near/far, and an explicit enable flag.
+- Add view-space or world-space data to the terrain-family shader so landscape detail can fade by
+  camera distance rather than using a constant overlay.
+- Sample terrain detail with repeated atlas-rect sampling and explicit gradients, matching the color
+  atlas repeat policy.
+- Apply landscape detail after base/overlay/road color resolution using the existing
+  retail-derived landscape detail semantics rather than treating detail texture alpha as a terrain
+  blend mask.
+- Respect the browser detail-textures setting; disabled detail should not block base terrain
+  rendering.
+- Report diagnostics for missing region render profile, missing landscape detail surface texture,
+  missing selected render surface, missing prepared texture, missing detail atlas placement, and
+  multi-detail overflow.
+
+Acceptance criteria:
+
+- Terrain-family draws bind and consume one `terrain-detail` detail atlas texture when landscape
+  detail is available and enabled.
+- Base terrain remains renderable when landscape detail is unavailable or disabled.
+- Terrain detail texture sampling uses wrap/linear/mipmap behavior and explicit-gradient atlas-rect
+  repeat sampling.
+- Detail fade depends on camera distance and uses the region profile fade range.
+- Terrain detail atlas entries are isolated from static/object/building/environment detail entries.
+- One-draw and slice diagnostics distinguish color page, mask page, detail binding, and layer-table
+  blockers.
+- No old terrain compatibility draw path is reintroduced.
+
+Validation:
+
+- `npm run test:ts -- terrain-family-submit webgl2-world-resources texture-page-atlas-planner region-detail-overlays webgl2-texture-atlas-generation`
+- `npm run check`
+- `npm run lint:ts`
+
+T12 completion update, 2026-06-03:
+
+- Added WebGL2 terrain landscape detail planning from the region render profile landscape role.
+- Added `terrain-detail` detail-atlas candidates and family-aware detail binding resolution from
+  detail atlas placements.
+- Terrain tiles and page-overflow draw slices now carry the resolved detail plan and report detail
+  binding counts in one-draw readiness.
+- Extended terrain-family submit to bind detail atlas textures on a dedicated unit, upload detail
+  rect/tiling/fade uniforms, pass camera position, and provide world-space fragment position.
+- Extended the terrain-family shader to sample repeated terrain detail with explicit-gradient
+  atlas-rect sampling and apply distance-faded landscape detail after base/overlay/road color
+  resolution.
+- Terrain detail remains non-blocking: missing or disabled detail emits diagnostics where practical
+  but does not prevent base terrain rendering.
+- Terrain detail atlas gutter extrusion now uses repeat semantics; static detail atlas gutters remain
+  clamped.
+- Added shader and atlas-generation tests for repeated terrain detail behavior.
+
+Accepted scope:
+
+- No multi-detail terrain slice axis was added because the implemented source-proven path uses the
+  single region-global landscape detail role. If later content proves multiple terrain detail
+  bindings per tile, extend the existing page-overflow grouping at that point.
+
+Implementation notes:
+
+- Do not source landscape detail from the pcode-selected base terrain layer. Retail selects the
+  landscape detail role globally for the region.
+- Keep this phase terrain-only. Building, environment, and object detail rendering should remain in
+  their existing detail-overlay path unless a separate renderer-family migration requires changes.
+- If exact retail fixed-function blend math is ambiguous in WebGL2, preserve the existing
+  retail-derived Holtburger landscape detail helper behavior as the initial shader baseline and
+  document any visual tuning follow-up explicitly.
 
 ## Resolved Open Questions
 

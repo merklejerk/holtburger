@@ -21,11 +21,11 @@ import {
 import {
 	createEmptyWebgl2WorldSubmitMetrics,
 	partitionWebgl2SceneDomainDrawUnits,
-	planWebgl2FlatWorldSubmitOrder,
+	planWebgl2WorldSubmitOrder,
 	planWebgl2PortalMaskSubmitOrder,
 	planWebgl2TerrainTileSubmitOrder,
-	submitWebgl2FlatWorldDrawUnits,
-	submitWebgl2FlatWorldFrame,
+	submitWebgl2WorldDrawUnits,
+	submitWebgl2WorldFrame,
 	type Webgl2FlatWorldProgram,
 	type Webgl2IndexedP16WorldProgram,
 	type Webgl2IndexedP8WorldProgram,
@@ -1094,9 +1094,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				latestPortalWorkPlan = null;
 				latestBaseSceneDomain = baseSceneDomain;
 				latestSubmitMetrics = profileBrowserJsScope(
-					"webgl2.frame.submitFlatWorld",
+					"webgl2.frame.submitWorld",
 					() =>
-						submitWebgl2FlatWorldFrame({
+						submitWebgl2WorldFrame({
 							gl,
 							stateCache: currentResources.stateCache,
 							program: currentResources.flatWorldProgram,
@@ -1383,7 +1383,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		const visibleDrawUnits = profileBrowserJsScope(
 			"webgl2.sceneDomain.planVisibleSubmitOrder",
 			() =>
-				planWebgl2FlatWorldSubmitOrder(
+				planWebgl2WorldSubmitOrder(
 					frame,
 					currentResources.worldStore.drawUnitsById,
 				),
@@ -1618,7 +1618,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			hasDepth: target.hasDepth,
 			hasStencil: target.hasStencil,
 		});
-		return submitWebgl2FlatWorldDrawUnits({
+		return submitWebgl2WorldDrawUnits({
 			gl,
 			stateCache,
 			program: resources.flatWorldProgram,
@@ -1648,6 +1648,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 					resources.worldStore.textureAtlasGeneration?.detailTextures ?? [],
 			},
 			viewProjectionMatrix: frame.viewProjectionMatrix,
+			cameraPosition: frame.cameraFrame.position,
 			drawUnits,
 			terrainTiles,
 			rgbaTexturePageFamilySubmitRoute,

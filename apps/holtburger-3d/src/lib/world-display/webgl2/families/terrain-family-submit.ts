@@ -1,4 +1,5 @@
 import { multiplyMat4, type RenderMat4 } from "../../render-math";
+import type { Vec3Dto } from "../../../host/contracts";
 import { createWebgl2Program, type Webgl2ProgramResource } from "../../webgl2-gl";
 import type { Webgl2StateCache } from "../../webgl2-state-cache";
 import {
@@ -17,10 +18,19 @@ const TERRAIN_FAMILY_MAX_ROADS_PER_LAYER = 2;
 export type Webgl2TerrainFamilyWorldProgram = Webgl2ProgramResource<
 	"position" | "uv" | "terrainLayerSlot",
 	| "uModelViewProjection"
+	| "uModelMatrix"
+	| "uCameraPosition"
 	| "uColorAtlasTexture"
 	| "uColorAtlasSize"
 	| "uMaskAtlasTexture"
 	| "uMaskAtlasSize"
+	| "uDetailAtlasTexture"
+	| "uDetailAtlasSize"
+	| "uDetailAtlasRect"
+	| "uDetailTiling"
+	| "uDetailFadeNear"
+	| "uDetailFadeFar"
+	| "uDetailEnabled"
 	| "uLayerBaseColorRects"
 	| "uLayerBaseTilings"
 	| "uLayerOverlayColorRects"
@@ -56,10 +66,19 @@ export function createWebgl2TerrainFamilyWorldProgram(
 		attributes: ["position", "uv", "terrainLayerSlot"],
 		uniforms: [
 			"uModelViewProjection",
+			"uModelMatrix",
+			"uCameraPosition",
 			"uColorAtlasTexture",
 			"uColorAtlasSize",
 			"uMaskAtlasTexture",
 			"uMaskAtlasSize",
+			"uDetailAtlasTexture",
+			"uDetailAtlasSize",
+			"uDetailAtlasRect",
+			"uDetailTiling",
+			"uDetailFadeNear",
+			"uDetailFadeFar",
+			"uDetailEnabled",
 			"uLayerBaseColorRects",
 			"uLayerBaseTilings",
 			"uLayerOverlayColorRects",
@@ -76,15 +95,12 @@ export function createWebgl2TerrainFamilyWorldProgram(
 	});
 }
 
-export function describeWebgl2TerrainFamilyFragmentShaderSource(): string {
-	return TERRAIN_FAMILY_WORLD_FRAGMENT_SHADER;
-}
-
 export function submitWebgl2TerrainFamilyTiles({
 	gl,
 	stateCache,
 	program,
 	viewProjectionMatrix,
+	cameraPosition,
 	terrainTiles,
 	generation,
 	terrainBackfaceCulling,
@@ -93,6 +109,7 @@ export function submitWebgl2TerrainFamilyTiles({
 	stateCache: Webgl2StateCache;
 	program: Webgl2TerrainFamilyWorldProgram;
 	viewProjectionMatrix: RenderMat4;
+	cameraPosition: Vec3Dto;
 	terrainTiles: readonly Webgl2TerrainFamilyDrawableResource[];
 	generation: Webgl2TextureAtlasGenerationResource;
 	terrainBackfaceCulling: boolean;
@@ -114,6 +131,13 @@ export function submitWebgl2TerrainFamilyTiles({
 	});
 	gl.uniform1i(program.uniforms.uColorAtlasTexture, 0);
 	gl.uniform1i(program.uniforms.uMaskAtlasTexture, 1);
+	gl.uniform1i(program.uniforms.uDetailAtlasTexture, 2);
+	gl.uniform3f(
+		program.uniforms.uCameraPosition,
+		cameraPosition.x,
+		cameraPosition.y,
+		cameraPosition.z,
+	);
 	for (const tile of terrainTiles) {
 		const submitPlan = createTerrainTileFamilySubmitPlan(tile, generation);
 		if (!submitPlan) {
@@ -129,6 +153,12 @@ export function submitWebgl2TerrainFamilyTiles({
 		if (stateCache.bindTexture2D(1, submitPlan.maskAtlasTexture.texture.texture)) {
 			// Counted in aggregate state metrics by the world submitter.
 		}
+		if (
+			submitPlan.detailAtlasTexture &&
+			stateCache.bindTexture2D(2, submitPlan.detailAtlasTexture.texture.texture)
+		) {
+			// Counted in aggregate state metrics by the world submitter.
+		}
 		gl.uniform2f(
 			program.uniforms.uColorAtlasSize,
 			submitPlan.colorAtlasTexture.width,
@@ -139,6 +169,7 @@ export function submitWebgl2TerrainFamilyTiles({
 			submitPlan.maskAtlasTexture.width,
 			submitPlan.maskAtlasTexture.height,
 		);
+		uploadTerrainDetailUniforms(gl, program, tile, submitPlan);
 		uploadTerrainLayerUniforms(gl, program, tile);
 		if (stateCache.bindVertexArray(tile.vertexArray.vertexArray)) {
 			// Counted in aggregate state metrics by the world submitter.
@@ -150,6 +181,11 @@ export function submitWebgl2TerrainFamilyTiles({
 			program.uniforms.uModelViewProjection,
 			false,
 			multiplyMat4(viewProjectionMatrix, tile.modelMatrix),
+		);
+		gl.uniformMatrix4fv(
+			program.uniforms.uModelMatrix,
+			false,
+			tile.modelMatrix,
 		);
 		gl.drawElements(gl.TRIANGLES, tile.vertexCount, tile.indexType, 0);
 	}
@@ -190,9 +226,24 @@ function createTerrainTileFamilySubmitPlan(
 	if (!maskAtlasTexture) {
 		return null;
 	}
+	const detailTextureIndex = singleTerrainTextureIndex(
+		tile.texturePageBindings,
+		"terrain-detail",
+	);
+	const detailAtlasTexture = detailTextureIndex === null
+		? null
+		: generation.detailTextures.find(
+				(texture) =>
+					texture.family === "terrain-detail" &&
+					texture.textureIndex === detailTextureIndex,
+			) ?? null;
+	if (detailTextureIndex !== null && !detailAtlasTexture) {
+		return null;
+	}
 	return {
 		colorAtlasTexture,
 		maskAtlasTexture,
+		detailAtlasTexture,
 	};
 }
 
@@ -331,6 +382,46 @@ function uploadTerrainLayerUniforms(
 	gl.uniform1iv(program.uniforms.uLayerRoadCounts, roadCounts);
 }
 
+function uploadTerrainDetailUniforms(
+	gl: WebGL2RenderingContext,
+	program: Webgl2TerrainFamilyWorldProgram,
+	tile: Webgl2TerrainFamilyDrawableResource,
+	submitPlan: NonNullable<ReturnType<typeof createTerrainTileFamilySubmitPlan>>,
+): void {
+	const binding = tile.detailPlan
+		? tile.texturePageBindings.find(
+				(candidate) =>
+					candidate.family === "terrain-detail" &&
+					candidate.atlasEntryKey === tile.detailPlan?.atlasEntryKey,
+			)
+		: null;
+	const enabled =
+		tile.detailPlan !== null &&
+		binding?.rect !== null &&
+		binding?.rect !== undefined &&
+		submitPlan.detailAtlasTexture !== null;
+	gl.uniform1i(program.uniforms.uDetailEnabled, enabled ? 1 : 0);
+	gl.uniform4fv(
+		program.uniforms.uDetailAtlasRect,
+		binding?.rect ?? [0, 0, 1, 1],
+	);
+	gl.uniform2f(
+		program.uniforms.uDetailAtlasSize,
+		submitPlan.detailAtlasTexture?.width ?? 1,
+		submitPlan.detailAtlasTexture?.height ?? 1,
+	);
+	gl.uniform1f(program.uniforms.uDetailTiling, tile.detailPlan?.overlay.role.tiling ?? 1);
+	gl.uniform1f(
+		program.uniforms.uDetailFadeNear,
+		tile.detailPlan?.overlay.role.fadeNear ?? 0,
+	);
+	gl.uniform1f(
+		program.uniforms.uDetailFadeFar,
+		tile.detailPlan?.overlay.role.fadeFar ?? 1,
+	);
+}
+
+
 function resolveTerrainBindingRect(
 	tile: Webgl2TerrainFamilyDrawableResource,
 	atlasEntryKey: string,
@@ -352,12 +443,15 @@ layout(location = 1) in vec2 uv;
 layout(location = 2) in float terrainLayerSlot;
 
 uniform mat4 uModelViewProjection;
+uniform mat4 uModelMatrix;
 
 out vec2 vUv;
+out vec3 vWorldPosition;
 flat out int vLayerSlot;
 
 void main() {
 	vUv = uv;
+	vWorldPosition = (uModelMatrix * vec4(position, 1.0)).xyz;
 	vLayerSlot = int(floor(terrainLayerSlot + 0.5));
 	gl_Position = uModelViewProjection * vec4(position, 1.0);
 }
@@ -374,6 +468,14 @@ uniform sampler2D uColorAtlasTexture;
 uniform vec2 uColorAtlasSize;
 uniform sampler2D uMaskAtlasTexture;
 uniform vec2 uMaskAtlasSize;
+uniform sampler2D uDetailAtlasTexture;
+uniform vec2 uDetailAtlasSize;
+uniform vec4 uDetailAtlasRect;
+uniform float uDetailTiling;
+uniform float uDetailFadeNear;
+uniform float uDetailFadeFar;
+uniform int uDetailEnabled;
+uniform vec3 uCameraPosition;
 uniform vec4 uLayerBaseColorRects[MAX_LAYER_ENTRIES];
 uniform float uLayerBaseTilings[MAX_LAYER_ENTRIES];
 uniform vec4 uLayerOverlayColorRects[MAX_LAYER_ENTRIES * MAX_OVERLAYS_PER_LAYER];
@@ -388,6 +490,7 @@ uniform int uLayerRoadRotations[MAX_LAYER_ENTRIES * MAX_ROADS_PER_LAYER];
 uniform int uLayerRoadCounts[MAX_LAYER_ENTRIES];
 
 in vec2 vUv;
+in vec3 vWorldPosition;
 flat in int vLayerSlot;
 
 out vec4 fragColor;
@@ -425,6 +528,27 @@ vec4 sampleRepeatingColor(vec4 rect, float tiling) {
 		fract(tiledUv),
 		dFdx(tiledUv),
 		dFdy(tiledUv)
+	);
+}
+
+vec4 sampleRepeatingDetail() {
+	vec2 tiledUv = vUv * uDetailTiling;
+	return sampleAtlasRect(
+		uDetailAtlasTexture,
+		uDetailAtlasSize,
+		uDetailAtlasRect,
+		fract(tiledUv),
+		dFdx(tiledUv),
+		dFdy(tiledUv)
+	);
+}
+
+float terrainDetailFade() {
+	float cameraDistance = length(vWorldPosition - uCameraPosition);
+	return clamp(
+		(uDetailFadeFar - cameraDistance) / max(uDetailFadeFar - uDetailFadeNear, 0.0001),
+		0.0,
+		1.0
 	);
 }
 
@@ -469,6 +593,11 @@ void main() {
 			);
 		}
 		color = mix(color, roadColor, clamp(roadAlpha, 0.0, 1.0));
+	}
+	if (uDetailEnabled == 1) {
+		vec4 detailColor = sampleRepeatingDetail();
+		float detailWeight = clamp(detailColor.a * terrainDetailFade(), 0.0, 1.0);
+		color.rgb = mix(color.rgb, detailColor.rgb, detailWeight);
 	}
 	fragColor = vec4(color.rgb, 1.0);
 }

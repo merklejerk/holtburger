@@ -262,6 +262,7 @@ function createWebgl2DetailTextureAtlasTexture({
 			atlasPixels: pixels,
 			atlasWidth: page.width,
 			atlasHeight: page.height,
+			edgeMode: family === "terrain-detail" ? "repeat" : "clamp",
 			placement,
 			entry,
 		});
@@ -423,12 +424,14 @@ function copyDetailTextureAtlasPlacement({
 	atlasPixels,
 	atlasWidth,
 	atlasHeight,
+	edgeMode,
 	placement,
 	entry,
 }: {
 	atlasPixels: Uint8Array;
 	atlasWidth: number;
 	atlasHeight: number;
+	edgeMode: "clamp" | "repeat";
 	placement: AtlasTexturePlacement;
 	entry: RgbaTexturePageDetailAtlasEntry;
 }): void {
@@ -444,9 +447,17 @@ function copyDetailTextureAtlasPlacement({
 		);
 	}
 	for (let atlasY = minY; atlasY < maxY; atlasY += 1) {
-		const sourceY = clampInteger(atlasY - placement.y, 0, entry.height - 1);
+		const sourceY = resolveAtlasGutterSourceCoordinate({
+			value: atlasY - placement.y,
+			size: entry.height,
+			edgeMode,
+		});
 		for (let atlasX = minX; atlasX < maxX; atlasX += 1) {
-			const sourceX = clampInteger(atlasX - placement.x, 0, entry.width - 1);
+			const sourceX = resolveAtlasGutterSourceCoordinate({
+				value: atlasX - placement.x,
+				size: entry.width,
+				edgeMode,
+			});
 			const sourceOffset = (sourceY * entry.width + sourceX) * 4;
 			const atlasOffset = (atlasY * atlasWidth + atlasX) * 4;
 			atlasPixels[atlasOffset] = entry.bytes[sourceOffset] ?? 0;

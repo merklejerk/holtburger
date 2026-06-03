@@ -219,7 +219,7 @@ export interface RgbaTexturePageDetailAtlasEntry {
 	bytes: Uint8Array;
 	format: "rgba8";
 	tiling: number;
-	blendMode: "dst-color";
+	blendMode: "dst-color" | "src-alpha";
 }
 
 export interface CompactionFamilyPlan {

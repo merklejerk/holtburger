@@ -222,7 +222,7 @@ const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 };
 
 export type Webgl2RgbaTexturePageFamilySubmitRoute =
-	| "flat-world"
+	| "world-frame"
 	| "scene-domain-exterior"
 	| "scene-domain-interior";
 
@@ -310,7 +310,7 @@ export function createEmptyWebgl2WorldSubmitMetrics(): Webgl2WorldSubmitMetrics 
 	};
 }
 
-export function submitWebgl2FlatWorldFrame({
+export function submitWebgl2WorldFrame({
 	gl,
 	stateCache,
 	program,
@@ -352,14 +352,14 @@ export function submitWebgl2FlatWorldFrame({
 	terrainTilesById?: ReadonlyMap<string, Webgl2TerrainTileResource>;
 	frame: WorldRenderFrame;
 }): Webgl2WorldSubmitMetrics {
-	const drawUnits = planWebgl2FlatWorldSubmitOrder(frame, drawUnitsById);
+	const drawUnits = planWebgl2WorldSubmitOrder(frame, drawUnitsById);
 	const terrainTiles = planWebgl2TerrainTileSubmitOrder(frame, terrainTilesById);
 	const portalMaskDrawUnits = planWebgl2PortalMaskSubmitOrder(
 		frame,
 		drawUnitsById,
 	);
 	const sceneDomainDrawUnits = partitionWebgl2SceneDomainDrawUnits(drawUnits);
-	return submitWebgl2FlatWorldDrawUnits({
+	return submitWebgl2WorldDrawUnits({
 		gl,
 		stateCache,
 		program,
@@ -373,6 +373,7 @@ export function submitWebgl2FlatWorldFrame({
 		rgbaTexturePageFamilyResources,
 		indexedPalettedFamilyResources,
 		viewProjectionMatrix: frame.viewProjectionMatrix,
+		cameraPosition: frame.cameraFrame.position,
 		drawUnits,
 		terrainTiles,
 		portalMaskDrawUnitCount: portalMaskDrawUnits.length,
@@ -381,7 +382,7 @@ export function submitWebgl2FlatWorldFrame({
 	});
 }
 
-export function submitWebgl2FlatWorldDrawUnits({
+export function submitWebgl2WorldDrawUnits({
 	gl,
 	stateCache,
 	program,
@@ -404,12 +405,13 @@ export function submitWebgl2FlatWorldDrawUnits({
 		detailTextures: [],
 	},
 	viewProjectionMatrix,
+	cameraPosition,
 	drawUnits,
 	terrainTiles = [],
 	portalMaskDrawUnitCount = 0,
 	exteriorDomainDrawUnitCount = 0,
 	interiorDomainDrawUnitCount = 0,
-	rgbaTexturePageFamilySubmitRoute = "flat-world",
+	rgbaTexturePageFamilySubmitRoute = "world-frame",
 	terrainBackfaceCulling = false,
 }: {
 	gl: WebGL2RenderingContext;
@@ -425,6 +427,7 @@ export function submitWebgl2FlatWorldDrawUnits({
 	rgbaTexturePageFamilyResources?: Webgl2RgbaTexturePageFamilySubmitResources;
 	indexedPalettedFamilyResources?: Webgl2IndexedPalettedFamilySubmitResources;
 	viewProjectionMatrix: RenderMat4;
+	cameraPosition: WorldRenderFrame["cameraFrame"]["position"];
 	drawUnits: readonly Webgl2WorldDrawUnit[];
 	terrainTiles?: readonly Webgl2TerrainTileResource[];
 	portalMaskDrawUnitCount?: number;
@@ -530,6 +533,7 @@ export function submitWebgl2FlatWorldDrawUnits({
 			stateCache,
 			program: terrainFamilyProgram,
 			viewProjectionMatrix,
+			cameraPosition,
 			terrainTiles: [
 				...terrainReadinessPlan.oneDrawTiles,
 				...terrainReadinessPlan.oneDrawSlices,
@@ -1230,13 +1234,13 @@ function applyRgbaTexturePageFamilyNoVisibleRoute(
 		case "scene-domain-interior":
 			metrics.rgbaTexturePageFamilyNoVisibleInteriorRouteCount += count;
 			return;
-		case "flat-world":
+		case "world-frame":
 			metrics.rgbaTexturePageFamilyNoVisibleOtherRouteCount += count;
 			return;
 	}
 }
 
-export function planWebgl2FlatWorldSubmitOrder(
+export function planWebgl2WorldSubmitOrder(
 	frame: WorldRenderFrame,
 	drawUnitsById: ReadonlyMap<string, Webgl2WorldDrawUnit>,
 ): Webgl2WorldDrawUnit[] {
@@ -1257,7 +1261,7 @@ export function planWebgl2FlatWorldSubmitOrder(
 			}
 		}
 	}
-	return visibleDrawUnits.sort(compareWebgl2FlatWorldDrawUnits);
+	return visibleDrawUnits.sort(compareWebgl2WorldDrawUnits);
 }
 
 export function planWebgl2TerrainTileSubmitOrder(
@@ -1341,7 +1345,7 @@ function assertNeverWebgl2SceneDomain(domain: never): never {
 	throw new Error(`Unsupported WebGL2 scene domain ${domain}.`);
 }
 
-function compareWebgl2FlatWorldDrawUnits(
+function compareWebgl2WorldDrawUnits(
 	left: Webgl2WorldDrawUnit,
 	right: Webgl2WorldDrawUnit,
 ): number {

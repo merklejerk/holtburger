@@ -42,6 +42,7 @@ The ultimate goal of this project is to develop a third-party client for Asheron
 - Prefer extensible, lossless shared representations. A frontend can ignore detail it does not need; adding missing shared detail later is harder.
 - If a change weakens crate separation, call that out explicitly and choose a cleaner design or explain the tradeoff.
 - Use the per-crate architecture docs for details, but treat the code and ACE/ACViewer references as the final source of truth when docs lag. Use the retail client decompile as a secondary reference where appropriate.
+- Do not retain tests that depend on runtime assets which do not get checked in with the repo. It's fine to create them temporarily for debugging or investigation, but they should be removed afterwards.
 
 # Lint Rules
 - Treat clippy warnings as errors that must be addressed.

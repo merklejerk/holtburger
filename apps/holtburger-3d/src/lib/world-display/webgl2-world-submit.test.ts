@@ -1090,9 +1090,17 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		const indexedMaterial = createIndexedMaterial("p8");
 		const drawUnitsById = new Map<string, Webgl2WorldDrawUnit>([
 			[
-				"indexed",
+				"indexed-a",
 				createDrawUnit({
-					id: "indexed",
+					id: "indexed-a",
+					materialKind: "indexed-paletted",
+					indexedMaterial,
+				}),
+			],
+			[
+				"indexed-b",
+				createDrawUnit({
+					id: "indexed-b",
 					materialKind: "indexed-paletted",
 					indexedMaterial,
 				}),
@@ -1110,9 +1118,11 @@ describe("submitWebgl2FlatWorldFrame", () => {
 			indexedPalettedFamilyP8Program: createIndexedPalettedFamilyProgram(),
 			indexedPalettedFamilyP16Program: createIndexedPalettedFamilyProgram(),
 			indexedPalettedFamilyResources: {
-				batches: [createRgbaTexturePageFamilyBatch(["indexed"])],
+				batches: [
+					createRgbaTexturePageFamilyBatch(["indexed-a", "indexed-b"]),
+				],
 				indexedPalettedFamilies: [
-					createIndexedPalettedFamilyResource(["indexed"]),
+					createIndexedPalettedFamilyResource(["indexed-a", "indexed-b"]),
 				],
 				detailTextures: [],
 				texturesByKey: new Map([
@@ -1127,15 +1137,22 @@ describe("submitWebgl2FlatWorldFrame", () => {
 				]),
 			},
 			drawUnitsById,
-			frame: createFrame(["indexed", "staged"]),
+			frame: createFrame(["indexed-a", "indexed-b", "staged"]),
 		});
 
-		expect(metrics.visibleDrawUnitCount).toBe(2);
+		expect(metrics.visibleDrawUnitCount).toBe(3);
 		expect(metrics.drawCallCount).toBe(2);
-		expect(metrics.indexedPalettedFamilyReplacedDrawUnitCount).toBe(1);
+		expect(metrics.indexedPalettedFamilyReplacedDrawUnitCount).toBe(2);
 		expect(metrics.indexedPalettedFamilyShaderDrawCallCount).toBe(1);
 		expect(metrics.indexedPalettedFamilySubmittedTriangleCount).toBe(1);
 		expect(metrics.indexedPalettedFamilyRetainedDirectDrawUnitCount).toBe(1);
+		expect(
+			metrics.indexedPalettedFamilyOriginalDrawCallEstimateCount,
+		).toBe(3);
+		expect(
+			metrics.indexedPalettedFamilySubmittedDrawCallEstimateCount,
+		).toBe(2);
+		expect(metrics.indexedPalettedFamilyDrawCallSavingsCount).toBe(1);
 		expect(
 			metrics.visibleRetainedDirectDrawUnitCountsByCompactionFamily,
 		).toEqual({
@@ -1208,6 +1225,13 @@ describe("submitWebgl2FlatWorldFrame", () => {
 		});
 
 		expect(metrics.indexedPalettedFamilyReplacedDrawUnitCount).toBe(1);
+		expect(
+			metrics.indexedPalettedFamilyOriginalDrawCallEstimateCount,
+		).toBe(1);
+		expect(
+			metrics.indexedPalettedFamilySubmittedDrawCallEstimateCount,
+		).toBe(1);
+		expect(metrics.indexedPalettedFamilyDrawCallSavingsCount).toBe(0);
 		expect(gl.boundTextures).toContain(indexTexture);
 		expect(gl.boundTextures).toContain(paletteTexture);
 		expect(gl.boundTextures).toContain(detailTexture);

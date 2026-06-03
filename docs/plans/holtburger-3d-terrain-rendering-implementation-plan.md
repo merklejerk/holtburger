@@ -1,6 +1,6 @@
 # Holtburger 3D Terrain Rendering Implementation Plan
 
-Status: Phase T9 complete; Phase T10 measurement and follow-up decisions are next.
+Status: Phase T10 initial measurement recorded; Phase T10 follow-up decisions and T11 cleanup are next.
 
 Dry-run status: reviewed against the current `apps/holtburger-3d/src/lib/world-display` module graph.
 The phase order below reflects that dry run.
@@ -1722,6 +1722,61 @@ Acceptance criteria:
 - Terrain draw-call count no longer scales with unique pcode count in the happy path.
 - Texture binding churn is materially lower for outdoor terrain scenes.
 - Any remaining fallback or overdraw problem is backed by metrics before new complexity is added.
+
+Progress update, 2026-06-03:
+
+- Recorded a representative outdoor anchored scene at destination `33.50S, 72.80E, 0.0Z`, outdoor
+  landblock `0xda55ffff`, 25 active terrain tiles, 25 prepared landblock terrain payloads, and 25
+  retained terrain tile resources.
+- Renderer diagnosis for the captured frame is draw-call/state-change bound:
+  - 26.0 FPS;
+  - 33.8 ms render time;
+  - 2327 visible draws;
+  - 115314 retained triangles;
+  - 17420 static draw units;
+  - 811 interior draw units.
+- Terrain BVH and submit metrics for the captured frame:
+  - BVH visible terrain tiles: 8/25;
+  - terrain submit visible tiles: 8;
+  - ready full terrain tiles: 2;
+  - blocked terrain tiles: 0;
+  - ready terrain draw slices: 17;
+  - terrain-family shader draws: 19;
+  - submitted full terrain tiles: 2;
+  - submitted terrain slices: 17;
+  - submitted terrain triangles: 1024;
+  - terrain atlas refs: 225;
+  - terrain atlas candidates: 225;
+  - terrain atlas blocker tiles: 0.
+- The terrain path is no longer blocked by missing materials or atlas readiness in this sample:
+  terrain material prep reports 25 ready tiles, 0 missing surface textures, 0 missing render surfaces,
+  0 unsupported surfaces, and 0 terrain atlas blocker tiles.
+- The current bottleneck is not terrain-specific. Static candidates dominate retained draw-unit
+  pressure at 17420/18425 candidate draw units, and the renderer diagnosis points at static batching or
+  later compaction as the next meaningful reducer.
+
+Decisions from this sample:
+
+- Do not increase terrain layer limits from this sample. The scene submits 17 ready slices but has 0
+  blocked terrain tiles, so the current slice fallback keeps terrain renderable without expanding the
+  shader table.
+- Do not add multi-page terrain samplers from this sample. Atlas blocker tiles are 0, and page
+  overflow is already handled by ready terrain slices in the terrain-family path.
+- Do not introduce terrain patch-level rendering yet. The sample does not report terrain overdraw
+  separately, and total frame pressure is dominated by static draw-unit/state churn rather than terrain
+  draw count.
+- Keep T10 open for at least one more measurement if we want a stronger conclusion about terrain
+  layer distribution, slice fallback reasons, and conservative tile-level slice visibility. The
+  current debug report does not include per-slice fallback reason counts or terrain layer-count
+  distribution.
+
+Follow-up measurement needs:
+
+- Add or capture terrain layer-count distribution per tile and per submitted slice.
+- Add or capture terrain draw-slice fallback reason counts split by layer overflow, color page
+  overflow, mask page overflow, and unsliceable layer entries.
+- Add or capture terrain overdraw or represented-quad counts if conservative tile visibility remains a
+  concern.
 
 ## Phase T11: Final Cleanup Sweep
 

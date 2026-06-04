@@ -147,10 +147,7 @@ describe("planWebgl2WorldSubmitOrder", () => {
 			},
 		});
 
-		const plan = planWebgl2TerrainTileSubmitReadiness([
-			blockedTile,
-			readyTile,
-		]);
+		const plan = planWebgl2TerrainTileSubmitReadiness([blockedTile, readyTile]);
 
 		expect(plan.oneDrawTiles.map((tile) => tile.id)).toEqual([
 			"terrain-tile/ready",
@@ -265,6 +262,7 @@ describe("planWebgl2WorldSubmitPassSchedule", () => {
 					createIndexedPalettedFamilyResource(["indexed-compacted"]),
 				],
 				detailTextures: [],
+				detailTextureAtlasGenerationKey: "generation",
 				indexedResourceAtlasGeneration: createIndexedResourceAtlasGeneration(),
 			},
 		});
@@ -294,6 +292,49 @@ describe("planWebgl2WorldSubmitPassSchedule", () => {
 		expect(schedule.passes[2]).toMatchObject({
 			kind: "compacted-indexed-paletted-family",
 			replaceableDrawUnitTriangleCount: 1,
+		});
+	});
+
+	it("keeps indexed draw units direct when compacted family resources target old atlas generations", () => {
+		const directIndexedMaterialResources = createIndexedMaterial("p8");
+		const schedule = planWebgl2WorldSubmitPassSchedule({
+			drawUnits: [
+				createDrawUnit({
+					id: "indexed-compacted",
+					materialKind: "indexed-paletted",
+					directIndexedMaterialResources,
+				}),
+			],
+			viewProjectionMatrix: createIdentityMat4(),
+			rgbaTexturePageFamilyResources: {
+				batches: [],
+				rgbaTexturePageFamilies: [],
+				generation: null,
+			},
+			indexedPalettedFamilyResources: {
+				batches: [createRgbaTexturePageFamilyBatch(["indexed-compacted"])],
+				indexedPalettedFamilies: [
+					createIndexedPalettedFamilyResource(["indexed-compacted"], {
+						indexedResourceAtlasGenerationKey: "old-indexed-generation",
+						detailTextureAtlasGenerationKey: "old-detail-generation",
+					}),
+				],
+				detailTextures: [],
+				detailTextureAtlasGenerationKey: "generation",
+				indexedResourceAtlasGeneration: createIndexedResourceAtlasGeneration(),
+			},
+		});
+
+		expect(schedule.retainedDrawUnits.map((drawUnit) => drawUnit.id)).toEqual([
+			"indexed-compacted",
+		]);
+		expect(
+			schedule.passes.find(
+				(pass) => pass.kind === "compacted-indexed-paletted-family",
+			),
+		).toMatchObject({
+			kind: "compacted-indexed-paletted-family",
+			replaceableDrawUnitTriangleCount: 0,
 		});
 	});
 });
@@ -369,7 +410,6 @@ describe("planWebgl2DirectDrawRoute", () => {
 		expect(p16.activeProgram).toBe(programs.indexedP16);
 		expect(p16.submission.material.family).toBe("indexed-paletted");
 	});
-
 });
 
 describe("submitWebgl2WorldFrame", () => {
@@ -938,12 +978,12 @@ describe("submitWebgl2WorldFrame", () => {
 		expect(opaqueDirectDrawIndex).toBeGreaterThanOrEqual(0);
 		expect(compactedDrawIndex).toBeGreaterThan(opaqueDirectDrawIndex);
 		expect(blendedDirectDrawIndex).toBeGreaterThan(compactedDrawIndex);
-		expect(gl.calls.slice(compactedDrawIndex, blendedDirectDrawIndex)).toContain(
-			"depthMask:false",
-		);
-		expect(gl.calls.slice(compactedDrawIndex, blendedDirectDrawIndex)).toContain(
-			`enable:${gl.BLEND}`,
-		);
+		expect(
+			gl.calls.slice(compactedDrawIndex, blendedDirectDrawIndex),
+		).toContain("depthMask:false");
+		expect(
+			gl.calls.slice(compactedDrawIndex, blendedDirectDrawIndex),
+		).toContain(`enable:${gl.BLEND}`);
 		expect(gl.calls.slice(blendedDirectDrawIndex)).toContain("depthMask:true");
 		expect(gl.calls.slice(blendedDirectDrawIndex)).toContain(
 			`disable:${gl.BLEND}`,
@@ -1039,9 +1079,7 @@ describe("submitWebgl2WorldFrame", () => {
 	it("does not apply terrain backface culling to retained direct draws", () => {
 		const gl = new CapturingSubmitGl();
 		const stateCache = new Webgl2StateCache(gl);
-		const drawUnits = [
-			createDrawUnit({ id: "static", kind: "static" }),
-		];
+		const drawUnits = [createDrawUnit({ id: "static", kind: "static" })];
 
 		submitWebgl2WorldDrawUnits({
 			gl: gl.asContext(),
@@ -1060,9 +1098,7 @@ describe("submitWebgl2WorldFrame", () => {
 			(call) =>
 				call === `enable:${gl.CULL_FACE}` || call === `disable:${gl.CULL_FACE}`,
 		);
-		expect(cullCalls).toEqual([
-			`disable:${gl.CULL_FACE}`,
-		]);
+		expect(cullCalls).toEqual([`disable:${gl.CULL_FACE}`]);
 	});
 
 	it("keeps retained direct backface culling disabled by default", () => {
@@ -1185,13 +1221,12 @@ describe("submitWebgl2WorldFrame", () => {
 			indexedPalettedFamilyP8Program: createIndexedPalettedFamilyProgram(),
 			indexedPalettedFamilyP16Program: createIndexedPalettedFamilyProgram(),
 			indexedPalettedFamilyResources: {
-				batches: [
-					createRgbaTexturePageFamilyBatch(["indexed-a", "indexed-b"]),
-				],
+				batches: [createRgbaTexturePageFamilyBatch(["indexed-a", "indexed-b"])],
 				indexedPalettedFamilies: [
 					createIndexedPalettedFamilyResource(["indexed-a", "indexed-b"]),
 				],
 				detailTextures: [],
+				detailTextureAtlasGenerationKey: "generation",
 				indexedResourceAtlasGeneration: createIndexedResourceAtlasGeneration({
 					indexTexture: atlasIndexTexture,
 					paletteTexture: atlasPaletteTexture,
@@ -1207,12 +1242,8 @@ describe("submitWebgl2WorldFrame", () => {
 		expect(metrics.indexedPalettedFamilyShaderDrawCallCount).toBe(1);
 		expect(metrics.indexedPalettedFamilySubmittedTriangleCount).toBe(1);
 		expect(metrics.indexedPalettedFamilyRetainedDirectDrawUnitCount).toBe(1);
-		expect(
-			metrics.indexedPalettedFamilyOriginalDrawCallEstimateCount,
-		).toBe(3);
-		expect(
-			metrics.indexedPalettedFamilySubmittedDrawCallEstimateCount,
-		).toBe(2);
+		expect(metrics.indexedPalettedFamilyOriginalDrawCallEstimateCount).toBe(3);
+		expect(metrics.indexedPalettedFamilySubmittedDrawCallEstimateCount).toBe(2);
 		expect(metrics.indexedPalettedFamilyDrawCallSavingsCount).toBe(1);
 		expect(
 			metrics.visibleRetainedDirectDrawUnitCountsByCompactionFamily,
@@ -1273,6 +1304,7 @@ describe("submitWebgl2WorldFrame", () => {
 						placementCount: 1,
 					},
 				],
+				detailTextureAtlasGenerationKey: "generation",
 				indexedResourceAtlasGeneration: createIndexedResourceAtlasGeneration({
 					indexTexture: atlasIndexTexture,
 					paletteTexture: atlasPaletteTexture,
@@ -1283,12 +1315,8 @@ describe("submitWebgl2WorldFrame", () => {
 		});
 
 		expect(metrics.indexedPalettedFamilyReplacedDrawUnitCount).toBe(1);
-		expect(
-			metrics.indexedPalettedFamilyOriginalDrawCallEstimateCount,
-		).toBe(1);
-		expect(
-			metrics.indexedPalettedFamilySubmittedDrawCallEstimateCount,
-		).toBe(1);
+		expect(metrics.indexedPalettedFamilyOriginalDrawCallEstimateCount).toBe(1);
+		expect(metrics.indexedPalettedFamilySubmittedDrawCallEstimateCount).toBe(1);
 		expect(metrics.indexedPalettedFamilyDrawCallSavingsCount).toBe(0);
 		expect(gl.boundTextures).toContain(atlasIndexTexture);
 		expect(gl.boundTextures).toContain(atlasPaletteTexture);
@@ -1646,8 +1674,8 @@ function createDrawUnit({
 					materialKind === "indexed-paletted"
 						? "indexed-paletted"
 						: materialKind === "direct-texture"
-								? "textured-opaque"
-								: "flat-constant-color",
+							? "textured-opaque"
+							: "flat-constant-color",
 				compatible: false,
 				blockers: ["missing-base-texture-page"],
 				alphaPolicy: "opaque",
@@ -1946,7 +1974,10 @@ function createRgbaTexturePageFamilyBatch(
 		key: "atlas-batch",
 		landblockId: 0x0102ffff,
 		vertexArray: {
-			vertexArray: attachDebugLabel({} as WebGLVertexArrayObject, "atlas-batch"),
+			vertexArray: attachDebugLabel(
+				{} as WebGLVertexArrayObject,
+				"atlas-batch",
+			),
 			dispose() {
 				return;
 			},
@@ -1975,12 +2006,14 @@ function createRgbaTexturePageFamilyBatch(
 
 function createRgbaTexturePageFamilyResource(
 	drawUnitIds: readonly string[],
-	options: { indexCount?: number } = {},
+	options: { indexCount?: number; textureAtlasGenerationKey?: string } = {},
 ): Webgl2RgbaTexturePageFamilyResource {
 	return {
 		family: "rgba-texture-page",
 		key: "rgba-texture-page|atlas-batch",
 		geometryBatchKey: "atlas-batch",
+		textureAtlasGenerationKey:
+			options.textureAtlasGenerationKey ?? "generation",
 		materialSlots: [
 			{
 				key: "material-slot",
@@ -2015,13 +2048,22 @@ function createRgbaTexturePageFamilyResource(
 
 function createIndexedPalettedFamilyResource(
 	drawUnitIds: readonly string[],
-	options: { detailAtlasTextureIndex?: number | null } = {},
+	options: {
+		detailAtlasTextureIndex?: number | null;
+		indexedResourceAtlasGenerationKey?: string;
+		detailTextureAtlasGenerationKey?: string | null;
+	} = {},
 ): Webgl2IndexedPalettedFamilyResource {
 	const detailAtlasTextureIndex = options.detailAtlasTextureIndex ?? null;
 	return {
 		family: "indexed-paletted",
 		key: "indexed-paletted|atlas-batch",
 		geometryBatchKey: "atlas-batch",
+		indexedResourceAtlasGenerationKey:
+			options.indexedResourceAtlasGenerationKey ??
+			"indexed-resource-atlas/test",
+		detailTextureAtlasGenerationKey:
+			options.detailTextureAtlasGenerationKey ?? "generation",
 		materialTableRecords: [
 			{
 				key: "indexed-material-slot",
@@ -2228,7 +2270,6 @@ function createTextureAtlasGeneration(
 		},
 	};
 }
-
 
 function createIdentityMat4(): Float32Array {
 	return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);

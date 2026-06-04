@@ -1147,6 +1147,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 								].filter((resource) => resource.family === "indexed-paletted"),
 								indexedResourceAtlasGeneration:
 									currentResources.worldStore.indexedResourceAtlasGeneration,
+								detailTextureAtlasGenerationKey:
+									currentResources.worldStore.textureAtlasGeneration?.key ??
+									null,
 								detailTextures:
 									currentResources.worldStore.textureAtlasGeneration
 										?.detailTextures ?? [],
@@ -1670,6 +1673,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				].filter((resource) => resource.family === "indexed-paletted"),
 				indexedResourceAtlasGeneration:
 					resources.worldStore.indexedResourceAtlasGeneration,
+				detailTextureAtlasGenerationKey:
+					resources.worldStore.textureAtlasGeneration?.key ?? null,
 				detailTextures:
 					resources.worldStore.textureAtlasGeneration?.detailTextures ?? [],
 			},

@@ -632,6 +632,86 @@ Phase 4 is now the next implementation phase. Carry the compacted-worker lessons
 same scheduler abstraction, keep worker results as CPU payloads only, keep WebGL realization on the
 main thread, and surface atlas-worker metrics outside the renderer graph.
 
+### 2026-06-04: Indexed Atlas Identity Correction
+
+Fixed a post-Phase 3B-3 correctness issue found during scene loading: compacted indexed/paletted
+worker jobs were keyed by compacted geometry and material records, but not by the indexed atlas plan
+identity. During streaming, an older in-flight compacted worker result could still look current if
+the geometry and material records were stable while indexed atlas placement identity changed. That
+could briefly pair compacted material tables with the wrong indexed atlas context.
+
+Change made:
+
+- indexed/paletted compacted landblock plan keys now include the indexed resource atlas plan key, so
+  worker stale-result checks and committed compacted resource keys advance when indexed atlas
+  placement identity changes;
+- added focused coverage proving identical indexed source geometry and material records produce a
+  different compacted worker desired key when the indexed atlas plan identity changes.
+
+Validation completed:
+
+- `npm run test:ts -- webgl2-world-resources`
+- `npm run check`
+- `npm run lint:ts`
+
+Refinement for future atlas worker phases:
+
+- Treat atlas plan identity as part of any downstream worker job identity when the downstream result
+  bakes atlas texture indexes, placement rectangles, material-table records, or draw-slice grouping.
+  Geometry-only keys are not enough for resources that are realized through atlas-dependent family
+  metadata.
+
+### 2026-06-04: Compacted Family Atlas Compatibility Gate
+
+Fixed the stronger atlas coherency issue behind transient wrong textures during async compaction.
+Pending replacement retention kept old compacted family resources installed while newer worker jobs
+were in flight. That was correct for lifetime, but submit planning still treated those retained
+families as drawable against the current atlas generations. If an atlas generation changed first,
+an old compacted family could bind old atlas rectangles and texture indexes against the new atlas
+texture for a frame.
+
+Change made:
+
+- compacted RGBA family resources now record the texture atlas generation key they were baked
+  against;
+- compacted indexed/paletted family resources now record the indexed atlas generation key and detail
+  texture atlas generation key they were baked against;
+- RGBA and indexed/paletted replacement planning now ignores retained compacted family resources
+  whose baked generation keys do not match the currently bound atlas generations, leaving those draw
+  units on the direct path until a coherent compacted replacement commits;
+- added focused submit tests proving stale-generation compacted family resources do not replace
+  direct draw units.
+
+Validation completed:
+
+- `npm run test:ts -- webgl2-rgba-texture-page-family-submit webgl2-world-submit webgl2-world-resources`
+- `npm run check`
+- `npm run lint:ts`
+
+Refinement for future atlas worker phases:
+
+- Resource lifetime retention and draw replacement eligibility are separate concerns. It is valid to
+  retain old compacted resources while replacement work is pending, but submit planning must prove
+  that a retained resource is compatible with the WebGL atlas generations currently being bound.
+
+Diagnostic snapshot after this correction, captured at `2026-06-04T02:35:14.430Z` around
+`33.50S, 72.80E`:
+
+- settled renderer state remains healthy: assets ready, 2010 prepared assets, 0 evictions, 0 material
+  pending, 0 missing visible recipes, 0 missing texture/surface/palette dependencies;
+- compaction is still active after load: 4552 compaction candidates, 26 compacted batches, 18 RGBA
+  family resources, 8 indexed/paletted family resources, 26 worker groups;
+- worker lifecycle is settled: 111 submitted, 111 ready, 111 committed, 0 stale, 0 errors;
+- compacted submit is still replacing meaningful direct work: RGBA replaces 2797 draw units,
+  indexed/paletted replaces 1354 draw units, with estimates RGBA `3154->401` and indexed
+  `1711->370`;
+- direct texture-page fallback is not visible in the settled snapshot: 147 direct texture-page draws,
+  all packed, 0 single-entry, atlas failures 0, renderer fallbacks 0;
+- observed runtime behavior improved from wrong textures to load-time white texture flashes. Treat
+  those flashes as transitional visual debt from returning atlas-incompatible compacted candidates to
+  the direct path while atlas/compacted replacements converge. Do not add a large interim
+  multi-generation submit system before Phase 4/5 unless the flashes block evaluating the renderer.
+
 ## Scheduling Model
 
 Use latest-wins scheduling with revision and key checks.

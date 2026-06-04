@@ -46,6 +46,26 @@ describe("planWebgl2RgbaTexturePageFamilyReplacement", () => {
 		expect(plan.fallbackSamples).toEqual([]);
 	});
 
+	it("keeps staged draws when compacted family resources target an old atlas generation", () => {
+		const plan = planWebgl2RgbaTexturePageFamilyReplacement({
+			visibleDrawUnitIds: ["draw-a"],
+			resources: {
+				batches: [createBatch(["draw-a"])],
+				rgbaTexturePageFamilies: [
+					{
+						...createFamily(["draw-a"]),
+						textureAtlasGenerationKey: "old-generation",
+					},
+				],
+				generation: createGeneration(),
+			},
+		});
+
+		expect([...plan.replaceableDrawUnitIds]).toEqual([]);
+		expect(plan.noVisibleRouteCount).toBe(0);
+		expect(plan.fallbackSamples).toEqual([]);
+	});
+
 	it("counts no-visible route checks without reporting a fallback", () => {
 		const plan = planWebgl2RgbaTexturePageFamilyReplacement({
 			visibleDrawUnitIds: ["staged-only"],
@@ -230,6 +250,7 @@ function createFamily(
 		family: "rgba-texture-page",
 		key: "rgba-texture-page|batch",
 		geometryBatchKey: "batch",
+		textureAtlasGenerationKey: "generation",
 		materialSlots: [
 			{
 				key: "material-slot",
@@ -302,7 +323,7 @@ function createGeneration(
 						height: 4,
 						placementCount: 1,
 					},
-		]
+				]
 			: [],
 		detailPlacements: [],
 		preparedTextureAssetIds: [],

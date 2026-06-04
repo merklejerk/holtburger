@@ -65,6 +65,7 @@ export interface Webgl2RgbaTexturePageFamilyResource {
 	family: "rgba-texture-page";
 	key: string;
 	geometryBatchKey: string;
+	textureAtlasGenerationKey: string;
 	materialSlots: readonly Webgl2RgbaTexturePageFamilyMaterialSlot[];
 	drawSlices: readonly Webgl2RgbaTexturePageFamilyDrawSlice[];
 }
@@ -73,6 +74,8 @@ export interface Webgl2IndexedPalettedFamilyResource {
 	family: "indexed-paletted";
 	key: string;
 	geometryBatchKey: string;
+	indexedResourceAtlasGenerationKey: string;
+	detailTextureAtlasGenerationKey: string | null;
 	materialTableRecords: readonly Webgl2IndexedPalettedFamilyMaterialTableRecord[];
 	drawSlices: readonly Webgl2IndexedPalettedFamilyDrawSlice[];
 }
@@ -137,12 +140,14 @@ export function createWebgl2CompactedGeometryBatchResource({
 
 export function createWebgl2RgbaTexturePageFamilyResource({
 	geometry,
+	textureAtlasGenerationKey,
 	materialSlots,
 	materialDrawSlices,
 	placementsByEntryKey,
 	detailPlacementsByEntryKey,
 }: {
 	geometry: CompactedGeometryBatch;
+	textureAtlasGenerationKey: string;
 	materialSlots: readonly RgbaTexturePageFamilyMaterialSlot[];
 	materialDrawSlices: readonly RgbaTexturePageFamilyDrawSlice[];
 	placementsByEntryKey: ReadonlyMap<string, AtlasTexturePlacement>;
@@ -155,6 +160,7 @@ export function createWebgl2RgbaTexturePageFamilyResource({
 		family: "rgba-texture-page",
 		key: compactedFamilyResourceKey("rgba-texture-page", geometry.key),
 		geometryBatchKey: geometry.key,
+		textureAtlasGenerationKey,
 		materialSlots: materialSlots.map((slot) =>
 			toWebgl2RgbaTexturePageFamilyMaterialSlot(
 				slot,
@@ -170,6 +176,8 @@ export function createWebgl2RgbaTexturePageFamilyResource({
 
 export function createWebgl2IndexedPalettedFamilyResource({
 	geometry,
+	indexedResourceAtlasGenerationKey,
+	detailTextureAtlasGenerationKey,
 	materialTableRecords,
 	materialDrawSlices,
 	indexPlacementsByTextureKey,
@@ -177,6 +185,8 @@ export function createWebgl2IndexedPalettedFamilyResource({
 	detailPlacementsByEntryKey,
 }: {
 	geometry: CompactedGeometryBatch;
+	indexedResourceAtlasGenerationKey: string;
+	detailTextureAtlasGenerationKey: string | null;
 	materialTableRecords: readonly IndexedPalettedFamilyMaterialTableRecord[];
 	materialDrawSlices: readonly IndexedPalettedFamilyDrawSlice[];
 	indexPlacementsByTextureKey: ReadonlyMap<string, IndexedTexelAtlasPlacement>;
@@ -196,6 +206,8 @@ export function createWebgl2IndexedPalettedFamilyResource({
 		family: "indexed-paletted",
 		key: compactedFamilyResourceKey("indexed-paletted", geometry.key),
 		geometryBatchKey: geometry.key,
+		indexedResourceAtlasGenerationKey,
+		detailTextureAtlasGenerationKey,
 		materialTableRecords: materialTableRecords.map((record) =>
 			toWebgl2IndexedPalettedFamilyMaterialRecord(
 				record,

@@ -154,7 +154,8 @@ describe("deriveSceneRenderableReadinessModel", () => {
 			staticRenderableScene: createStaticRenderableScene(),
 			transitionPortalModel: createTransitionPortalModel(),
 		});
-		const secondAssetState: AssetChannelState = createInitialAssetChannelState();
+		const secondAssetState: AssetChannelState =
+			createInitialAssetChannelState();
 		secondAssetState.preparedByAssetId["unrelated/asset"] = {
 			request: { assetId: "unrelated/asset" },
 			payload: { kind: "unknown" },
@@ -227,6 +228,7 @@ function createTerrainTile({
 			hasRoadAlphaMaps: false,
 			diagnostics: [],
 		},
+		terrainArtifact: null,
 		dataSource: "unknown",
 	};
 }

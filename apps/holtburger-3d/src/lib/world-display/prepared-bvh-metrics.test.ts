@@ -198,6 +198,7 @@ function createTerrainTile(landblockId: number): TerrainSceneTile {
 			hasRoadAlphaMaps: false,
 			diagnostics: [],
 		},
+		terrainArtifact: null,
 		dataSource: "repo-local-cell-landblock",
 	};
 }

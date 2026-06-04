@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
 	createInitialAssetChannelState,
+	formatAtlasReadyPreparedTextureAssetId,
 	type AssetChannelState,
 	type PreparedAssetPayload,
 	type PreparedAssetRecord,
@@ -26,6 +27,13 @@ describe("terrain render artifact", () => {
 					"render-surface/06000010",
 					createRenderSurfacePayload(0x06000010),
 				),
+				createRecord(
+					formatAtlasReadyPreparedTextureAssetId({
+						renderSurfaceId: 0x06000010,
+						usage: "raw",
+					}),
+					createPreparedTexturePayload(0x06000010),
+				),
 			]),
 			outdoor,
 			policy: createPolicy(),
@@ -40,17 +48,22 @@ describe("terrain render artifact", () => {
 		expect(artifact.drawSlices[0]?.geometry.triangleCount).toBe(2);
 		expect(
 			artifact.texturePageRefs.map((ref) => [ref.role, ref.sourceAssetId]),
-		).toEqual([["color", "surface-texture/05000010"]]);
+		).toEqual([
+			[
+				"color",
+				"prepared-texture/06000010?usage=raw&out=rgba8&mips=none&cs=linear",
+			],
+		]);
 		expect(artifact.bvhItemKeys).toEqual(["terrain:landblock:da55ffff:quad:0"]);
 		expect(artifact.diagnosticRootAssetIds).toEqual([
 			formatLandblockOutdoorAssetId(landblockId),
 		]);
 		expect(artifact.diagnosticPreparedAssetIds).toContain("terrain-material/1");
 		expect(artifact.diagnosticPreparedAssetIds).toContain(
-			"surface-texture/05000010",
+			"render-surface/06000010",
 		);
 		expect(artifact.diagnosticPreparedAssetIds).toContain(
-			"render-surface/06000010",
+			"prepared-texture/06000010?usage=raw&out=rgba8&mips=none&cs=linear",
 		);
 	});
 
@@ -261,6 +274,52 @@ function createRenderSurfacePayload(
 		sourceBytes: new Uint8Array([255, 255, 255, 255]),
 		defaultPaletteId: null,
 		dependencies: { paletteAssetIds: [] },
+	};
+}
+
+function createPreparedTexturePayload(
+	renderSurfaceId: number,
+): PreparedAssetPayload {
+	return {
+		kind: "prepared-texture",
+		sourceAssetKind: "prepared-texture",
+		residencyKind: "unknown",
+		provenance: createProvenance("prepared-texture"),
+		renderSurfaceId,
+		usage: "raw",
+		outputFormat: "rgba8",
+		mipPolicy: "none",
+		colorSpace: "linear",
+		sourceFormatRaw: 0x15,
+		sourceFormat: "A8R8G8B8",
+		sourceWidth: 1,
+		sourceHeight: 1,
+		sourceByteLength: 4,
+		sourceHash: "prepared-texture-test",
+		levels: [
+			{
+				level: 0,
+				width: 1,
+				height: 1,
+				formatRaw: 0x15,
+				format: "rgba8",
+				byteLength: 4,
+				bytes: new Uint8Array([255, 255, 255, 255]),
+			},
+		],
+		dependencies: {
+			renderSurfaceAssetIds: [
+				`render-surface/${renderSurfaceId.toString(16).padStart(8, "0")}`,
+			],
+		},
+		diagnostics: {
+			generatedLevelCount: 1,
+			generatedByteLength: 4,
+			decodeMs: 0,
+			downsampleMs: 0,
+			encodeMs: 0,
+			totalMs: 0,
+		},
 	};
 }
 

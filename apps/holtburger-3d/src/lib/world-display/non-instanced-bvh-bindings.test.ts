@@ -148,6 +148,7 @@ function terrainTile(options: {
 			missingSurfaceIds: [],
 			dataSourceCounts: {},
 		},
+		terrainArtifact: null,
 		dataSource: "unknown",
 	} as TerrainSceneTile;
 }

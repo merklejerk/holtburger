@@ -1,10 +1,10 @@
 # Holtburger 3D Static Landblock Render Bundle Replacement Plan
 
-Status: Phase 1A through Phase 1G are implemented. Phase 1H indexed-paletted static material family
-wiring is the next implementation phase, followed by Phase 1I terrain first-class worker boundary
-hardening and Phase 1J landblock preset contract hardening before Phase 2 landblock worker
-orchestration. The plan has been redirected to worker-owned raw landblock closure loading,
-worker-built terrain artifacts, preset-based landblock requests, and layer-scoped texture pages.
+Status: Phase 1A through Phase 1H are implemented. Phase 1I terrain first-class worker boundary
+hardening is the next implementation phase, followed by Phase 1J landblock preset contract hardening
+before Phase 2 landblock worker orchestration. The plan has been redirected to worker-owned raw
+landblock closure loading, worker-built terrain artifacts, preset-based landblock requests, and
+layer-scoped texture pages.
 
 Progress:
 
@@ -90,6 +90,11 @@ Progress:
   direction is coherent; current routes are `landblock/<id>/outdoor`, `landblock/<id>/topology`,
   `env-cell/<id>`, terrain/material/profile/renderable dependencies, and prepared textures. A true
   `summary` preset should remain deferred until a cheap backend summary route/product exists.
+- 2026-06-04: Implemented Phase 1H. Static bundle material route collection now detects indexed
+  render surfaces, emits indexed texel and palette lookup virtual texture refs/pages from
+  worker-local render-surface/palette facts, keeps optional detail refs on the indexed-paletted
+  family, and feeds those descriptors into existing compaction eligibility. The phase also removed
+  the stale unused camera conversion helper that had been blocking full TypeScript lint.
 
 Validation:
 
@@ -147,8 +152,12 @@ Validation:
 - `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer-texture-pages.ts src/lib/world-display/static-bundle-layer-texture-pages.test.ts`
   passed after Phase 1G.
 - `npm run check`, `npm run lint:dead`, and `npm run lint:rust` passed after Phase 1G.
-- `npm run lint:ts` currently fails on existing unrelated debt:
-  `src/lib/world-display/camera.ts` defines unused `rendererPointToAcPosition`.
+- `npm exec vitest -- run src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer-texture-pages.test.ts`
+  passed after Phase 1H.
+- `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer-texture-pages.ts src/lib/world-display/static-bundle-layer-texture-pages.test.ts`
+  passed after Phase 1H.
+- `npm run check`, `npm run lint:dead`, `npm run lint:rust`, and `npm run lint:ts` passed after
+  Phase 1H.
 
 Related plans:
 
@@ -1101,9 +1110,8 @@ Legacy shims introduced:
 
 Legacy debt found before the next phase:
 
-- `npm run lint:ts` is blocked by existing unrelated dead code in
-  `src/lib/world-display/camera.ts`: `rendererPointToAcPosition` is defined but unused. Clean this
-  up before relying on full `npm run lint` as the phase gate.
+- Resolved during Phase 1H: the repeated `npm run lint:ts` blocker from unused camera conversion code
+  was deleted, and full TS lint now passes.
 
 Exit criteria:
 
@@ -1164,9 +1172,8 @@ Legacy shims introduced:
 
 Legacy debt found before the next phase:
 
-- `npm run lint:ts` remains blocked by existing unrelated dead code in
-  `src/lib/world-display/camera.ts`: `rendererPointToAcPosition` is defined but unused. This should
-  be cleaned before treating full TS lint as a reliable next-phase gate.
+- Resolved during Phase 1H: the repeated `npm run lint:ts` blocker from unused camera conversion code
+  was deleted, and full TS lint now passes.
 
 Exit criteria:
 
@@ -1237,8 +1244,8 @@ Legacy shims introduced:
 
 Legacy debt found before the next phase:
 
-- `npm run lint:ts` remains blocked by existing unrelated dead code in
-  `src/lib/world-display/camera.ts`: `rendererPointToAcPosition` is defined but unused.
+- The repeated `npm run lint:ts` blocker from unused camera conversion code was resolved during
+  Phase 1H.
 
 Exit criteria:
 
@@ -1335,8 +1342,8 @@ Legacy debt found before the next phase:
 
 - Phase 1E should run before Phase 2. The next immediate work is extracting real material, family
   selection, and compaction eligibility helpers from the staged pipeline into worker-safe modules.
-- `npm run lint:ts` remains blocked by existing unrelated dead code in
-  `src/lib/world-display/camera.ts`: `rendererPointToAcPosition` is defined but unused.
+- Resolved during Phase 1H: the repeated `npm run lint:ts` blocker from unused camera conversion code
+  was deleted, and full TS lint now passes.
 
 Exit criteria:
 
@@ -1406,9 +1413,8 @@ Exit criteria:
 - Unit tests cover mixed compactable/direct material families from synthetic worker-local closures.
 - No new compatibility shims, alternate staged/static modes, or render-resource worker payload
   adapters are introduced.
-- `npm run check`, `npm run lint:dead`, `npm run lint:rust`, focused tests, and changed-file ESLint
-  pass. Full `npm run lint:ts` may remain blocked only by the existing unrelated `camera.ts` debt
-  until that debt is cleaned.
+- `npm run check`, `npm run lint:dead`, `npm run lint:rust`, focused tests, changed-file ESLint, and
+  full `npm run lint:ts` pass.
 
 Cleanup targets:
 
@@ -1427,8 +1433,8 @@ Legacy debt found before the next phase:
 
 - Phase 1F should replace the remaining one-batch compacted DTO assembly with real
   material/family-grouped compaction geometry.
-- `npm run lint:ts` remains blocked by existing unrelated dead code in
-  `src/lib/world-display/camera.ts`: `rendererPointToAcPosition` is defined but unused.
+- Resolved during Phase 1H: the repeated `npm run lint:ts` blocker from unused camera conversion code
+  was deleted, and full TS lint now passes.
 
 ### Phase 1F: Worker-Safe Compaction Geometry Assembly
 
@@ -1502,8 +1508,8 @@ Legacy debt found before the next phase:
 
 - Phase 1G should finish texture/material-role hardening and clean up the builder-local texture page
   descriptor adapter before worker orchestration.
-- `npm run lint:ts` remains blocked by existing unrelated dead code in
-  `src/lib/world-display/camera.ts`: `rendererPointToAcPosition` is defined but unused.
+- Resolved during Phase 1H: the repeated `npm run lint:ts` blocker from unused camera conversion code
+  was deleted, and full TS lint now passes.
 
 ### Phase 1G: Texture Material Roles and Pre-Worker Cleanup
 
@@ -1547,13 +1553,13 @@ Decisions and course corrections:
 
 - Static compacted material families are RGBA texture-page and indexed-paletted. Phase 1G hardened
   the texture page artifact layer, but it did not complete indexed-paletted static bundle family
-  selection.
+  selection; Phase 1H completed that builder wiring.
 - Detail texture is an optional role for both RGBA and indexed-paletted families. Do not treat detail
   as a separate family.
 - The descriptor helper can represent data/control refs, but representation is not the same as route
-  selection. Indexed texel and palette lookup routes should be added by Phase 1H for
-  indexed-paletted materials. Mask/control routes should be selected later only if explicit material
-  semantics require that role.
+  selection. Phase 1H added indexed texel and palette lookup route selection for indexed-paletted
+  materials. Mask/control routes should be selected later only if explicit material semantics require
+  that role.
 - Phase 1A's transitional prepared-cache closure diagnostics are left in place until Phase 2 worker
   orchestration provides real worker-local closure diagnostics. Removing them now would reduce
   debugging signal without simplifying the worker path.
@@ -1581,18 +1587,18 @@ Legacy shims introduced:
 
 Legacy debt found before the next phase:
 
-- Phase 1H must add indexed-paletted static bundle family wiring before Phase 2 worker orchestration.
-  Phase 1G only made the artifact/descriptor layer capable of representing data/control roles.
+- Resolved by Phase 1H: indexed-paletted static bundle family wiring now exists before Phase 2 worker
+  orchestration.
 - Phase 2 should replace Phase 1A transitional prepared-cache closure diagnostics with worker-local
   closure/load diagnostics once the static worker exists.
 - Mask/control route selection remains deferred until explicit material-role semantics require that
   role; it is not a third compacted material family in the current model.
-- `npm run lint:ts` remains blocked by existing unrelated dead code in
-  `src/lib/world-display/camera.ts`: `rendererPointToAcPosition` is defined but unused.
+- Resolved during Phase 1H: the repeated `npm run lint:ts` blocker from unused camera conversion code
+  was deleted, and full TS lint now passes.
 
 ### Phase 1H: Indexed-Paletted Static Material Family Wiring
 
-Status: Next.
+Status: Implemented on 2026-06-04.
 
 Purpose:
 
@@ -1603,20 +1609,29 @@ Purpose:
 
 Implementation notes:
 
-- Detect indexed-paletted material semantics from worker-local prepared material/source facts rather
-  than by probing every material for every possible texture route.
-- Request and account for the indexed texel and palette lookup texture routes required by
-  indexed-paletted materials.
-- Preserve optional detail overlay/page routing for indexed-paletted materials. Indexed+detail is a
-  valid indexed-paletted material case, not a separate family.
-- Emit `indexed-texels`, `palette-lookup`, and optional `detail` `VirtualTexturePageRef` records for
-  indexed-paletted static materials.
-- Feed indexed-paletted texture page descriptors into `createCompactionEligibility` so
-  `indexed-paletted` family decisions match the existing compaction planner.
-- Keep mask/control as a role, not a family. Do not add mask/control route selection unless source
-  material semantics prove it is needed.
-- Keep this phase CPU-only and worker-safe. Do not import WebGL resources, render-resource worker
-  schedulers, or global atlas state.
+- Added worker-safe indexed material route collection to `static-bundle-layer-builder.ts`.
+- Indexed material detection uses prepared material render-surface facts and `isIndexedTextureFormat`
+  rather than probing every texture route.
+- Indexed texel refs are emitted from render-surface source bytes. Palette lookup refs are emitted
+  from prepared palette ARGB converted to RGBA bytes through the existing palette helper.
+- Indexed materials no longer request normalized `raw` prepared textures for indexed render
+  surfaces. If they have a non-indexed detail surface, only the `detail` prepared-texture route is
+  requested for that surface.
+- `createCompactionEligibility` receives `indexed-texels`, `palette-lookup`, and optional `detail`
+  descriptors, so indexed-paletted compactability is decided by the existing family planner.
+- The layer texture page packer now handles non-RGBA byte widths when packing page refs, so indexed
+  texel pages are not forced through a 4-byte-per-pixel assumption.
+- Mask/control stays a role, not a family. This phase did not add mask/control route selection.
+- The phase stayed CPU-only and did not import WebGL resources, render-resource worker schedulers, or
+  global atlas state.
+
+Course corrections:
+
+- Closure dependency collection had to become indexed-aware too. Otherwise indexed materials with a
+  detail surface caused the worker-prepared dependency walk to request a nonexistent `raw` normalized
+  prepared texture for the detail render surface.
+- The target texture-page model needs to tolerate page refs with different bytes-per-pixel across
+  buckets. The packer now validates a single byte width per packed page instead of assuming RGBA.
 
 Exit criteria:
 
@@ -1627,30 +1642,32 @@ Exit criteria:
 - RGBA static material tests continue to pass.
 - No compatibility shims, alternate staged/static modes, or render-resource worker job adapters are
   introduced.
-- Focused tests, changed-file ESLint, `npm run check`, `npm run lint:dead`, and `npm run lint:rust`
-  pass.
+- Focused tests, changed-file ESLint, `npm run check`, `npm run lint:dead`, `npm run lint:rust`, and
+  full `npm run lint:ts` pass.
 
 Cleanup targets:
 
-- Remove or narrow any staged-only indexed material helper duplication once the static builder owns a
-  worker-safe indexed-paletted path.
-- Update Phase 2 worker orchestration notes to assume the builder can produce both RGBA and
-  indexed-paletted compacted family artifacts.
+- Static builder now owns a worker-safe indexed-paletted route path. Staged indexed helper reuse
+  should be revisited during Phase 2/cleanup, but no staged helper was copied or shimmed into the
+  builder.
+- Phase 2 worker orchestration can assume the builder can produce both RGBA and indexed-paletted
+  compacted family artifacts.
+- The unused `rendererPointToAcPosition` / `threeVectorToAc` camera helper was deleted because it was
+  dead code and blocked full TypeScript lint.
 
 Legacy shims introduced:
 
-- None expected. Phase 1H should extend the static bundle builder directly, not add a compatibility
-  bridge to staged draw units.
+- None. Phase 1H extended the static bundle builder directly and did not add a compatibility bridge
+  to staged draw units.
 
 Legacy debt found before the next phase:
 
-- Phase 2 should not start until the indexed-paletted builder tests pass.
-- `npm run lint:ts` remains blocked by existing unrelated dead code in
-  `src/lib/world-display/camera.ts`: `rendererPointToAcPosition` is defined but unused.
+- No Phase 1H blocker remains. Phase 1I should start with the terrain DTO/contract work before Phase
+  2 worker orchestration.
 
 ### Phase 1I: Terrain Worker Artifact Contract
 
-Status: Pending Phase 1H.
+Status: Next.
 
 Purpose:
 
@@ -1718,8 +1735,6 @@ Legacy debt found before the next phase:
 
 - Phase 2 should not start until terrain worker artifact DTOs are explicit and tested or dry-run
   against current terrain code.
-- `npm run lint:ts` remains blocked by existing unrelated dead code in
-  `src/lib/world-display/camera.ts`: `rendererPointToAcPosition` is defined but unused.
 
 ### Phase 1J: Landblock Preset Contract Hardening
 
@@ -1780,8 +1795,6 @@ Legacy debt found before the next phase:
 
 - Phase 2 should not start until this preset contract is in place. Otherwise worker orchestration
   will likely preserve the old layer/root/source-revision surface.
-- `npm run lint:ts` remains blocked by existing unrelated dead code in
-  `src/lib/world-display/camera.ts`: `rendererPointToAcPosition` is defined but unused.
 
 ### Split Boundaries to Avoid
 

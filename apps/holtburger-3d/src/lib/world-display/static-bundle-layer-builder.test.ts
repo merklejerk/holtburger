@@ -147,6 +147,111 @@ describe("static bundle layer builder", () => {
 		);
 	});
 
+	it("builds indexed-paletted static material refs and compacted family records", () => {
+		const landblockId = 0xda55ffff;
+		const job = createBuildJob(landblockId);
+		const preparedAssets = [
+			createOutdoorLandblock(landblockId, [
+				createOutdoorMember("indexed-0", "gfx-obj/01000011"),
+			]),
+			createRegionRenderProfile(1),
+			createTerrainMaterial(1),
+			createGfxObj("gfx-obj/01000011", "material/08000011", 1),
+			createMaterial("material/08000011", "render-surface/06000011", {
+				paletteId: 0x04000011,
+			}),
+			createIndexedRenderSurface("render-surface/06000011", 0x04000011),
+			createPalette("palette/04000011"),
+		];
+
+		const layer = buildStaticLandblockRenderBundleLayer({
+			job,
+			preparedAssets,
+			policy: createPolicy(),
+		});
+
+		expect(
+			layer.texturePageRefs.map((ref) => [
+				ref.usageBucket,
+				ref.sampleClass,
+				ref.samplingDomain,
+				ref.lookup,
+			]),
+		).toEqual([
+			["palette-lookup", "palette-data", "data", "exact"],
+			["indexed-texels", "indexed-data", "data", "exact"],
+		]);
+		expect(
+			layer.texturePages.map((page) => [
+				page.usageBucket,
+				page.sampleClass,
+				page.bytes.byteLength,
+			]),
+		).toEqual([
+			["palette-lookup", "palette-data", 1024],
+			["indexed-texels", "indexed-data", 4],
+		]);
+		expect(layer.materialRecords).toEqual([
+			{
+				key: "material:material/08000011",
+				familyKey: "static:indexed-paletted:alpha=opaque",
+				texturePageRefKeys: [
+					"texture:material/08000011:palette/04000011:palette-lookup",
+					"texture:material/08000011:render-surface/06000011:indexed-texels",
+				],
+				isTransparent: false,
+			},
+		]);
+		expect(layer.compactedBatches).toHaveLength(1);
+		expect(layer.compactedBatches[0]?.familyKey).toBe(
+			"static:indexed-paletted:alpha=opaque",
+		);
+		expect(layer.directEntries).toEqual([]);
+	});
+
+	it("preserves indexed-paletted detail refs without creating a separate material family", () => {
+		const landblockId = 0xda55ffff;
+		const job = createBuildJob(landblockId);
+		const preparedAssets = [
+			createOutdoorLandblock(landblockId, [
+				createOutdoorMember("indexed-detail-0", "gfx-obj/01000012"),
+			]),
+			createRegionRenderProfile(1),
+			createTerrainMaterial(1),
+			createGfxObj("gfx-obj/01000012", "material/08000012", 1),
+			createMaterial("material/08000012", "render-surface/06000012", {
+				paletteId: 0x04000012,
+				renderSurfaceAssetIds: [
+					"render-surface/06000012",
+					"render-surface/06000013",
+				],
+			}),
+			createIndexedRenderSurface("render-surface/06000012", 0x04000012),
+			createRenderSurface("render-surface/06000013"),
+			createPalette("palette/04000012"),
+			createPreparedTexture(0x06000013, "detail", [255, 128, 64, 255]),
+		];
+
+		const layer = buildStaticLandblockRenderBundleLayer({
+			job,
+			preparedAssets,
+			policy: createPolicy(),
+		});
+
+		expect(
+			layer.texturePageRefs.map((ref) => [ref.usageBucket, ref.sampleClass]),
+		).toEqual([
+			["palette-lookup", "palette-data"],
+			["detail", "rgba-color"],
+			["indexed-texels", "indexed-data"],
+		]);
+		expect(layer.materialRecords[0]?.familyKey).toBe(
+			"static:indexed-paletted:alpha=opaque",
+		);
+		expect(layer.compactedBatches).toHaveLength(1);
+		expect(layer.directEntries).toEqual([]);
+	});
+
 	it("fails hard when the worker-local closure is internally inconsistent", () => {
 		const landblockId = 0xda55ffff;
 		const preparedAssets = [
@@ -236,7 +341,14 @@ function createRecord(
 	};
 }
 
-function createOutdoorLandblock(landblockId: number): PreparedAssetRecord {
+function createOutdoorLandblock(
+	landblockId: number,
+	statics = [
+		createOutdoorMember("compactable-0", "gfx-obj/01000001"),
+		createOutdoorMember("direct-0", "gfx-obj/01000002"),
+		createOutdoorMember("compactable-1", "gfx-obj/01000003"),
+	],
+): PreparedAssetRecord {
 	return createRecord(formatLandblockOutdoorAssetId(landblockId), {
 		kind: "landblock-outdoor",
 		sourceAssetKind: "landblock-outdoor",
@@ -261,11 +373,7 @@ function createOutdoorLandblock(landblockId: number): PreparedAssetRecord {
 			maxHeight: 0,
 			bounds: null,
 		},
-		statics: [
-			createOutdoorMember("compactable-0", "gfx-obj/01000001"),
-			createOutdoorMember("direct-0", "gfx-obj/01000002"),
-			createOutdoorMember("compactable-1", "gfx-obj/01000003"),
-		],
+		statics,
 		outdoorBvh: null,
 		dependencies: {
 			renderableSourceAssetIds: [
@@ -326,7 +434,12 @@ function createGfxObj(
 function createMaterial(
 	assetId: string,
 	renderSurfaceAssetId: string,
-	options: { surfaceType?: number; translucency?: number } = {},
+	options: {
+		surfaceType?: number;
+		translucency?: number;
+		paletteId?: number;
+		renderSurfaceAssetIds?: readonly string[];
+	} = {},
 ): PreparedAssetRecord {
 	const renderSurfaceId = Number.parseInt(
 		renderSurfaceAssetId.slice("render-surface/".length),
@@ -343,16 +456,22 @@ function createMaterial(
 			kind: "texture",
 			surfaceTextureId: renderSurfaceId,
 			selectedRenderSurfaceId: renderSurfaceId,
-			paletteId: null,
-			renderSurfaceDefaultPaletteIds: [],
+			paletteId: options.paletteId ?? null,
+			renderSurfaceDefaultPaletteIds: options.paletteId
+				? [options.paletteId]
+				: [],
 		},
 		translucency: options.translucency ?? 0,
 		luminosity: 0,
 		diffuse: 1,
 		dependencies: {
 			surfaceTextureAssetIds: [],
-			renderSurfaceAssetIds: [renderSurfaceAssetId],
-			paletteAssetIds: [],
+			renderSurfaceAssetIds: [
+				...(options.renderSurfaceAssetIds ?? [renderSurfaceAssetId]),
+			],
+			paletteAssetIds: options.paletteId
+				? [`palette/${options.paletteId.toString(16).padStart(8, "0")}`]
+				: [],
 		},
 	});
 }
@@ -376,6 +495,52 @@ function createRenderSurface(assetId: string): PreparedAssetRecord {
 		sourceBytes: new Uint8Array([255, 255, 255, 255]),
 		defaultPaletteId: null,
 		dependencies: { paletteAssetIds: [] },
+	});
+}
+
+function createIndexedRenderSurface(
+	assetId: string,
+	defaultPaletteId: number,
+): PreparedAssetRecord {
+	return createRecord(assetId, {
+		kind: "render-surface",
+		sourceAssetKind: "render-surface",
+		residencyKind: "unknown",
+		provenance: createProvenance("render-surface"),
+		renderSurfaceId: Number.parseInt(
+			assetId.slice("render-surface/".length),
+			16,
+		),
+		unknown: 0,
+		width: 2,
+		height: 2,
+		formatRaw: 0x29,
+		format: "p8",
+		sourceByteLength: 4,
+		sourceBytes: new Uint8Array([0, 1, 2, 3]),
+		defaultPaletteId,
+		dependencies: {
+			paletteAssetIds: [
+				`palette/${defaultPaletteId.toString(16).padStart(8, "0")}`,
+			],
+		},
+	});
+}
+
+function createPalette(assetId: string): PreparedAssetRecord {
+	return createRecord(assetId, {
+		kind: "palette",
+		sourceAssetKind: "palette",
+		residencyKind: "unknown",
+		provenance: createProvenance("palette"),
+		paletteId: Number.parseInt(assetId.slice("palette/".length), 16),
+		colorCount: 256,
+		colorsArgb: new Uint32Array(
+			Array.from(
+				{ length: 256 },
+				(_, index) => 0xff000000 | (index << 16) | (index << 8) | index,
+			),
+		),
 	});
 }
 

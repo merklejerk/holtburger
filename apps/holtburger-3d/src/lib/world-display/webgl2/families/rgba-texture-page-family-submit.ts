@@ -100,7 +100,11 @@ export function planWebgl2RgbaTexturePageFamilyReplacement(options: {
 	const visibleIds = new Set(options.visibleDrawUnitIds);
 	const replaceableDrawUnitIds = new Set<string>();
 	let noVisibleRouteCount = 0;
-	for (const family of options.resources.rgbaTexturePageFamilies) {
+	const compatibleFamilies = options.resources.rgbaTexturePageFamilies.filter(
+		(family) =>
+			family.textureAtlasGenerationKey === options.resources.generation?.key,
+	);
+	for (const family of compatibleFamilies) {
 		const batchVisibleDrawUnitIds = family.drawSlices.flatMap((slice) =>
 			slice.drawUnitIds.filter((drawUnitId) => visibleIds.has(drawUnitId)),
 		);

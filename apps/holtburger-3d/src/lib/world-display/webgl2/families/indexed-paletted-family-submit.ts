@@ -46,6 +46,7 @@ export interface Webgl2IndexedPalettedFamilySubmitResources {
 	batches: readonly Webgl2CompactedGeometryBatchResource[];
 	indexedPalettedFamilies: readonly Webgl2IndexedPalettedFamilyResource[];
 	indexedResourceAtlasGeneration: Webgl2IndexedResourceAtlasGenerationResource | null;
+	detailTextureAtlasGenerationKey: string | null;
 	detailTextures: readonly Webgl2DetailTextureAtlasTextureResource[];
 }
 
@@ -86,7 +87,14 @@ export function planWebgl2IndexedPalettedFamilyReplacement(options: {
 	const visibleIds = new Set(options.visibleDrawUnitIds);
 	const replaceableDrawUnitIds = new Set<string>();
 	let noVisibleRouteCount = 0;
-	for (const family of options.resources.indexedPalettedFamilies) {
+	const compatibleFamilies = options.resources.indexedPalettedFamilies.filter(
+		(family) =>
+			family.indexedResourceAtlasGenerationKey ===
+				options.resources.indexedResourceAtlasGeneration?.key &&
+			family.detailTextureAtlasGenerationKey ===
+				options.resources.detailTextureAtlasGenerationKey,
+	);
+	for (const family of compatibleFamilies) {
 		const batchVisibleDrawUnitIds = family.drawSlices.flatMap((slice) =>
 			slice.drawUnitIds.filter((drawUnitId) => visibleIds.has(drawUnitId)),
 		);

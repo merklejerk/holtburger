@@ -145,6 +145,7 @@ export function syncWebgl2CompactedGeometryResources({
 				}
 				const familyResource = createWebgl2RgbaTexturePageFamilyResource({
 					geometry: readyWorkerResult.result.geometry,
+					textureAtlasGenerationKey: store.textureAtlasGeneration.key,
 					materialSlots: batchPlan.plan.materialSlots,
 					materialDrawSlices: batchPlan.plan.drawSlices,
 					placementsByEntryKey,
@@ -194,6 +195,7 @@ export function syncWebgl2CompactedGeometryResources({
 			}
 			const familyResource = createWebgl2RgbaTexturePageFamilyResource({
 				geometry,
+				textureAtlasGenerationKey: store.textureAtlasGeneration.key,
 				materialSlots: batchPlan.plan.materialSlots,
 				materialDrawSlices: batchPlan.plan.drawSlices,
 				placementsByEntryKey,
@@ -215,6 +217,7 @@ export function syncWebgl2CompactedGeometryResources({
 	}
 	if (plan.renderFamilies.indexedPaletted.compactableDrawUnitIds.length > 0) {
 		if (
+			!store.indexedResourceAtlasGeneration ||
 			!indexedResourceAtlasPlanHasAllIndexedFamilyPlacements(
 				plan,
 				indexedResourceAtlasPlan,
@@ -245,6 +248,10 @@ export function syncWebgl2CompactedGeometryResources({
 					}
 					const familyResource = createWebgl2IndexedPalettedFamilyResource({
 						geometry: readyWorkerResult.result.geometry,
+						indexedResourceAtlasGenerationKey:
+							store.indexedResourceAtlasGeneration.key,
+						detailTextureAtlasGenerationKey:
+							store.textureAtlasGeneration?.key ?? null,
 						materialTableRecords: batchPlan.materialTableRecords,
 						materialDrawSlices: batchPlan.plan.drawSlices,
 						indexPlacementsByTextureKey:
@@ -297,6 +304,10 @@ export function syncWebgl2CompactedGeometryResources({
 				}
 				const familyResource = createWebgl2IndexedPalettedFamilyResource({
 					geometry,
+					indexedResourceAtlasGenerationKey:
+						store.indexedResourceAtlasGeneration.key,
+					detailTextureAtlasGenerationKey:
+						store.textureAtlasGeneration?.key ?? null,
 					materialTableRecords: batchPlan.materialTableRecords,
 					materialDrawSlices: batchPlan.plan.drawSlices,
 					indexPlacementsByTextureKey:
@@ -848,6 +859,7 @@ function createIndexedPalettedCompactedLandblockBatchPlan({
 				sourcePartitionKey: sourcePartition.key,
 				family: "indexed-paletted",
 				landblockId,
+				atlasPlanKey: indexedResourceAtlasPlan.key,
 			}),
 			compactableDrawUnitIds: drawUnitIds,
 			materialSlots: batchRecordKeys.map((key, index) => ({ key, index })),
@@ -1290,17 +1302,20 @@ function describeCompactedFamilyLandblockPlanKey({
 	sourcePartitionKey,
 	family,
 	landblockId,
+	atlasPlanKey = null,
 }: {
 	sourcePlan: CompactionFamilyPlan;
 	sourcePartitionKey: string;
 	family: "rgba-texture-page" | "indexed-paletted";
 	landblockId: number;
+	atlasPlanKey?: string | null;
 }): string {
 	return [
 		"compacted-family-landblock-plan",
 		family,
 		`landblock=${formatHex32(landblockId)}`,
 		`plan=${hashString(sourcePlan.key)}`,
+		...(atlasPlanKey ? [`atlas=${hashString(atlasPlanKey)}`] : []),
 		`partition=${hashString(sourcePartitionKey)}`,
 	].join("|");
 }

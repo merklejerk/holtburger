@@ -7,6 +7,7 @@ import type {
 } from "../staged-world-materials";
 import {
 	buildCompactedGeometryBatch,
+	describeCompactedGeometryJobKey,
 	type CompactedGeometryPlan,
 } from "./compacted-geometry";
 
@@ -151,6 +152,35 @@ describe("compacted geometry builder", () => {
 		});
 
 		expect(first?.key).toBe(second?.key);
+	});
+
+	it("describes the worker job key without packing output buffers", () => {
+		const basePlan = createPlan();
+		const firstSlice = basePlan.drawSlices[0];
+		if (!firstSlice) {
+			throw new Error("Fixture plan is missing its first draw slice.");
+		}
+		const plan = {
+			...basePlan,
+			compactableDrawUnitIds: ["draw-a"],
+			drawSlices: [firstSlice],
+		};
+		const drawUnit = createDrawUnit("draw-a", "material-slot-a", 10);
+		const unrelatedDrawUnit = createDrawUnit("draw-b", "material-slot-b", 500);
+		const batchOrigin = { x: 10, y: 0, z: 0 };
+		const geometry = buildCompactedGeometryBatch({
+			plan,
+			drawUnits: [drawUnit],
+			batchOrigin,
+		});
+
+		expect(
+			describeCompactedGeometryJobKey({
+				plan,
+				drawUnits: [unrelatedDrawUnit, drawUnit],
+				batchOrigin,
+			}),
+		).toBe(geometry?.key);
 	});
 
 	it("changes the resource key when relative static placement changes", () => {

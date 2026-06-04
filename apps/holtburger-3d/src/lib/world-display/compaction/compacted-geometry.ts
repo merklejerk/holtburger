@@ -180,7 +180,7 @@ export function buildCompactedGeometryBatch<
 	const materialSlotByteLength = materialSlotIndices.byteLength;
 	const indexByteLength = indices.byteLength;
 	return {
-		key: describeCompactedGeometryKey({
+		key: describeCompactedGeometryJobKey({
 			plan,
 			drawUnits: compactableDrawUnits,
 			batchOrigin,
@@ -402,7 +402,7 @@ function createCompactedIndexArray(
 		: new Uint16Array(indexCount);
 }
 
-function describeCompactedGeometryKey({
+export function describeCompactedGeometryJobKey({
 	plan,
 	drawUnits,
 	batchOrigin,
@@ -411,7 +411,14 @@ function describeCompactedGeometryKey({
 	drawUnits: readonly CompactedGeometryBuildDrawUnit[];
 	batchOrigin: { x: number; y: number; z: number };
 }): string {
-	const drawUnitSignature = drawUnits
+	const drawUnitById = new Map(
+		drawUnits.map((drawUnit) => [drawUnit.id, drawUnit]),
+	);
+	const compactableDrawUnits = orderCompactedDrawUnitsBySlice({
+		plan,
+		drawUnitById,
+	});
+	const drawUnitSignature = compactableDrawUnits
 		.map((drawUnit) =>
 			[
 				drawUnit.id,
@@ -430,7 +437,7 @@ function describeCompactedGeometryKey({
 	return [
 		"compacted-geometry",
 		`plan=${hashString(plan.key)}`,
-		`draws=${drawUnits.length}`,
+		`draws=${compactableDrawUnits.length}`,
 		`du=${hashString(drawUnitSignature)}`,
 	].join("|");
 }

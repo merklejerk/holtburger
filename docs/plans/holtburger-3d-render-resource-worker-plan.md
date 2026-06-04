@@ -1,6 +1,6 @@
 # Holtburger 3D Render Resource Worker Plan
 
-Status: Phase 3B-3 implemented; Phase 4 is the next implementation phase.
+Status: Phase 4A implemented; Phase 4B is the next implementation phase.
 
 Related plans:
 
@@ -712,6 +712,52 @@ Diagnostic snapshot after this correction, captured at `2026-06-04T02:35:14.430Z
   the direct path while atlas/compacted replacements converge. Do not add a large interim
   multi-generation submit system before Phase 4/5 unless the flashes block evaluating the renderer.
 
+### 2026-06-04: Phase 4A Implemented
+
+Implemented indexed resource atlas worker payload preparation:
+
+- added `worker-resources/indexed-atlas-worker-payloads.ts` with a typed
+  `build-indexed-resource-atlas` worker job contract;
+- widened `createIndexedResourceAtlasCpuGeneration` to accept the smaller CPU-generation plan shape
+  instead of requiring full planner-only fields such as failures and placement maps;
+- wired `build-indexed-resource-atlas` into `render-resource-worker.ts`;
+- added `RenderResourceWorkerClient.runBuildIndexedResourceAtlasJob` with input transferable
+  collection;
+- copied P8, index16, and palette source buffers before worker transfer so main-thread planner/source
+  state remains readable;
+- transferred worker-owned output atlas page buffers back from worker results.
+
+Validation completed:
+
+- `npm run test:ts -- indexed-atlas-worker-payloads render-resource-worker-client webgl2-indexed-resource-atlas-generation`
+- `npm run check`
+- `npm run lint:ts`
+
+Course corrections:
+
+- Phase 4 is now split into Phase 4A and Phase 4B. The indexed atlas worker can pack CPU payloads,
+  but live scheduling and WebGL commit wiring should land separately so atlas generation replacement,
+  stale-result rejection, and graph-independent metrics stay reviewable.
+- The CPU-generation helper now depends only on atlas pages plus ready draw-unit ids. This is cleaner
+  than requiring full `IndexedResourceAtlasPlan` objects in worker payload code, because placement
+  maps are used by compaction/family planning, not by page byte packing.
+- Result transferables currently include both packed atlas page buffers and the copied placement
+  source buffers that are carried through the CPU generation. The WebGL realization path does not
+  need those source buffers, so Phase 4B may strip source bytes from committed CPU generation
+  placement metadata if that removes unnecessary postMessage payload weight without disturbing
+  compaction planning.
+
+Introduced cleanup targets and legacy shims:
+
+- The synchronous indexed atlas generation wrapper remains active and is still the live path. Phase
+  4B should keep it as a narrow fallback while introducing scheduler-backed indexed atlas commits.
+- `IndexedResourceAtlasCpuGeneration.indexPlacements` and `palettePlacements` still expose placement
+  records with source bytes even though submit code resolves atlas textures by generated texture
+  resources. Consider introducing lightweight committed placement records before or during Phase 4B
+  if source-byte cloning shows up in worker transfer metrics.
+- Indexed atlas worker metrics are not yet surfaced because no live scheduler exists for this family.
+  Phase 4B should follow compacted worker metrics and keep them outside `RendererResourceGraph`.
+
 ## Scheduling Model
 
 Use latest-wins scheduling with revision and key checks.
@@ -1141,15 +1187,33 @@ Validation:
 - Renderer diagnostics remain graph-independent.
 - Async pending replacement and stale result behavior are covered by focused tests.
 
-## Phase 4: Indexed Resource Atlas Worker Preparation
+## Phase 4A: Indexed Resource Atlas Worker Payload Preparation
+
+Status: complete.
 
 Work:
 
 - Split indexed atlas generation into CPU page packing and WebGL texture realization.
 - Move P8, index16, and palette page packing to worker.
 - Preserve exact data texture semantics: no mipmaps, no filtering, no color-space conversion.
-- Commit returned page buffers into WebGL textures on the main thread.
 - Keep generation keys deterministic from plan keys.
+- Copy source buffers before posting worker input so the main-thread atlas plan and source resources
+  remain readable.
+
+Validation:
+
+- Existing indexed atlas generation tests still pass.
+- Added worker-payload tests for P8, index16, and palette page packing.
+- Added transfer-list/source-copy coverage proving source bytes remain readable after worker input
+  construction.
+
+## Phase 4B: Indexed Resource Atlas Scheduler And Commit Wiring
+
+Status: next.
+
+Work:
+
+- Commit returned page buffers into WebGL textures on the main thread.
 - Use the compacted worker scheduling model rather than adding a second async state machine:
   scheduler-owned stale-result checks, CPU result queues, main-thread WebGL realization, and
   store/debug metrics outside `RendererResourceGraph`.
@@ -1157,12 +1221,14 @@ Work:
   generation is stable.
 - Treat a desired indexed atlas worker result with missing CPU page data as invalid unless a future
   explicit empty-generation state is proven necessary.
+- Ensure indexed/paletted compacted family resources are only drawable against the committed indexed
+  atlas generation that matches their baked generation key.
 
 Validation:
 
-- Existing indexed atlas generation tests still pass.
-- Add worker-payload tests for P8, index16, and palette page packing.
 - Add stale-result tests where a newer indexed atlas plan supersedes an older one.
+- Add async retention tests proving the old committed indexed atlas generation remains installed
+  while a replacement worker job is pending.
 
 ## Phase 5: RGBA And Detail Atlas Worker Preparation
 

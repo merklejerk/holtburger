@@ -4,6 +4,7 @@ import { RenderResourceJobScheduler } from "./render-resource-job-scheduler";
 import type { RenderResourceWorkerLike } from "./render-resource-worker-client";
 import { RenderResourceWorkerClient } from "./render-resource-worker-client";
 import { CompactedGeometryWorkerScheduler } from "./worker-resources/compacted-geometry-worker-scheduler";
+import type { BuildIndexedResourceAtlasWorkerInput } from "./worker-resources/indexed-atlas-worker-payloads";
 import type {
 	RenderResourceWorkerRequestMessage,
 	RenderResourceWorkerResponseMessage,
@@ -73,6 +74,48 @@ describe("render resource worker client", () => {
 				payload: "hello",
 			},
 			durationMs: 1,
+		});
+	});
+
+	it("submits indexed atlas worker jobs with copied source buffers as transferables", async () => {
+		const worker = new FakeRenderResourceWorker();
+		const client = new RenderResourceWorkerClient(() => worker);
+		const input = createIndexedAtlasWorkerInput();
+
+		const resultPromise = client.runBuildIndexedResourceAtlasJob({
+			type: "build-indexed-resource-atlas",
+			key: input.key,
+			input,
+		});
+
+		expect(worker.messages).toEqual([
+			{
+				type: "run-job",
+				requestId: "render-resource-1",
+				job: {
+					type: "build-indexed-resource-atlas",
+					key: "indexed-plan:a",
+					input,
+				},
+			},
+		]);
+		expect(worker.transferLists[0]).toHaveLength(2);
+
+		worker.emit({
+			type: "job-complete",
+			requestId: "render-resource-1",
+			result: {
+				type: "build-indexed-resource-atlas",
+				key: "indexed-plan:a",
+				generation: null,
+			},
+			durationMs: 1,
+		});
+
+		await expect(resultPromise).resolves.toEqual({
+			type: "build-indexed-resource-atlas",
+			key: "indexed-plan:a",
+			generation: null,
 		});
 	});
 });
@@ -360,6 +403,52 @@ function createCompactedDesiredBatch(
 		},
 		drawUnits: [],
 		batchOrigin: { x: 0, y: 0, z: 0 },
+	};
+}
+
+function createIndexedAtlasWorkerInput(): BuildIndexedResourceAtlasWorkerInput {
+	return {
+		key: "indexed-plan:a",
+		indexReadyDrawUnitIds: ["index-draw"],
+		paletteReadyDrawUnitIds: ["palette-draw"],
+		p8IndexAtlasTextures: [
+			{
+				format: "p8",
+				textureIndex: 0,
+				width: 2,
+				height: 2,
+				placements: [
+					{
+						indexTextureKey: "index/a",
+						format: "p8",
+						atlasTextureIndex: 0,
+						x: 0,
+						y: 0,
+						width: 1,
+						height: 1,
+						sourceBytes: Uint8Array.from([1]),
+					},
+				],
+			},
+		],
+		index16AtlasTextures: [],
+		paletteAtlasTextures: [
+			{
+				textureIndex: 0,
+				width: 1,
+				height: 1,
+				placements: [
+					{
+						paletteTextureKey: "palette/a",
+						atlasTextureIndex: 0,
+						x: 0,
+						y: 0,
+						colorCount: 1,
+						rgbaBytes: Uint8Array.from([2, 3, 4, 5]),
+					},
+				],
+			},
+		],
 	};
 }
 

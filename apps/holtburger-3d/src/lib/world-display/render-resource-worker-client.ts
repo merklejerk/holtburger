@@ -11,6 +11,11 @@ import {
 	type BuildCompactedGeometryWorkerJob,
 	type BuildCompactedGeometryWorkerResult,
 } from "./worker-resources/compacted-geometry-worker-payloads";
+import {
+	collectBuildIndexedResourceAtlasInputTransferables,
+	type BuildIndexedResourceAtlasWorkerJob,
+	type BuildIndexedResourceAtlasWorkerResult,
+} from "./worker-resources/indexed-atlas-worker-payloads";
 
 export interface RenderResourceWorkerLike {
 	onmessage:
@@ -79,6 +84,22 @@ export class RenderResourceWorkerClient {
 			if (result.type !== "build-compacted-geometry") {
 				throw new Error(
 					`Render resource worker returned ${result.type} for compacted geometry job.`,
+				);
+			}
+			return result;
+		});
+	}
+
+	runBuildIndexedResourceAtlasJob(
+		job: BuildIndexedResourceAtlasWorkerJob,
+	): Promise<BuildIndexedResourceAtlasWorkerResult> {
+		return this.runJob(
+			job,
+			collectBuildIndexedResourceAtlasInputTransferables(job.input),
+		).then((result) => {
+			if (result.type !== "build-indexed-resource-atlas") {
+				throw new Error(
+					`Render resource worker returned ${result.type} for indexed resource atlas job.`,
 				);
 			}
 			return result;

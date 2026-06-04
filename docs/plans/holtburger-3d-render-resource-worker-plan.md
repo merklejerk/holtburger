@@ -1,6 +1,6 @@
 # Holtburger 3D Render Resource Worker Plan
 
-Status: Phase 3B-0 implemented; Phase 3B is the next implementation phase.
+Status: Phase 3B-1 implemented; Phase 3B-2 is the next implementation phase.
 
 Related plans:
 
@@ -473,6 +473,57 @@ Introduced cleanup targets and legacy shims:
 - The next phase should add explicit compacted commit/projection helpers before live worker
   scheduling so graph updates stay a post-commit projection.
 
+### 2026-06-03: Phase 3B-1 Implemented
+
+Implemented the compacted geometry commit seam and pre-build job identity prep:
+
+- exported `describeCompactedGeometryJobKey` from `compacted-geometry.ts`;
+- changed compacted geometry batch construction to use the same helper for final geometry keys;
+- made the job-key helper filter and order draw units through the same slice-order path as the
+  builder, so unrelated staged draw units do not perturb a batch job key;
+- added scheduler-facing compacted landblock batch metadata:
+  - `family: "rgbaAtlas"` for the current `rgbaTexturePage` family;
+  - `family: "indexedPaletteAtlas"` for the current `indexedPaletted` family;
+  - `sourcePartitionKey`;
+  - `desiredJobKey`;
+- extracted `commitWebgl2CompactedGeometryBatch` so WebGL batch realization/update, family resource
+  installation, pending-batch clearing, retained-key bookkeeping, and graph lifetime projection
+  advance together;
+- moved compacted batch graph projection into the commit helper as a post-commit projection;
+- kept the synchronous compacted build path active, but now it commits through the same seam that
+  worker results should use.
+
+Validation completed:
+
+- `npm run test:ts -- compacted-geometry webgl2-world-resources`
+- `npm run check`
+- `npm run lint:ts`
+
+Course corrections:
+
+- The pre-build desired key must be derived by the compaction module, not by ad hoc logic in
+  `compacted-geometry-sync.ts`. The compaction module already owns slice ordering and relative
+  transform identity, so duplicating that logic at scheduler call sites would be brittle.
+- This phase intentionally stopped short of live async scheduling. The remaining work needs a
+  renderer invalidation callback from worker result acceptance back into
+  `webgl2-world-display-renderer-impl.ts`; bolting that on without a focused phase would make the
+  renderer loop harder to reason about.
+- The current graph projection still leases static-batch nodes by final geometry key. That is fine
+  for lifetime tracking, but scheduler state should use `desiredJobKey` for stale-result checks and
+  then commit by the returned geometry key.
+
+Introduced cleanup targets and legacy shims:
+
+- `rgbaTexturePage` and `indexedPaletted` remain legacy planner/store names. New scheduler-facing
+  DTOs now expose `rgbaAtlas` and `indexedPaletteAtlas`; future worker code should prefer those.
+- `commitWebgl2CompactedGeometryBatch` currently accepts retained-key sets because the surrounding
+  sync loop still owns per-pass retention. Phase 3B-2 should revisit whether a compacted worker owner
+  can encapsulate those sets more cleanly.
+- The synchronous build path is now a deliberate legacy shim. Keep it during worker rollout, then
+  narrow it to debug/fallback once worker scheduling is stable.
+- The immediate next phase is Phase 3B-2 rather than continuing to label the whole scheduler rollout
+  as one phase. This keeps the renderer invalidation and worker-result queueing work isolated.
+
 ## Scheduling Model
 
 Use latest-wins scheduling with revision and key checks.
@@ -822,19 +873,36 @@ Validation:
 - Remove or rewrite tests that only validate graph diagnostic behavior and are no longer runtime
   requirements.
 
-## Phase 3B: Compacted Geometry Scheduler And Commit Wiring
+## Phase 3B-1: Compacted Geometry Commit Seam And Job Keys
+
+Status: complete.
+
+Work:
+
+- Added a cheap compacted desired-job key helper for `family + partition + landblock` batches using
+  source signatures, counts, and batch-relative transforms, not packed output buffers.
+- Added scheduler-facing family names and source partition metadata to compacted landblock batch
+  plans.
+- Added a compacted batch commit helper that installs the WebGL batch, family resource,
+  prepared-asset retention projection, pending-retention clearing, and retained-key bookkeeping.
+- Kept graph updates inside the compacted commit helper as a post-commit prepared-asset lifetime
+  projection. No graph labels, metadata, explanations, disposal candidates, or cleanup coordinator
+  integration were reintroduced.
+- Kept synchronous compacted geometry construction as the active path, but routed it through the new
+  commit helper.
+
+Validation:
+
+- Existing compacted geometry and WebGL resource tests pass.
+- Added coverage that the pre-build job key matches the final geometry key and ignores unrelated
+  staged draw units.
+
+## Phase 3B-2: Compacted Geometry Scheduler And Commit Wiring
 
 Status: next.
 
 Work:
 
-- Add a cheap compacted desired-job key helper for `family + partition + landblock` batches. It must
-  use source signatures and batch-relative transforms, not packed output buffers.
-- Add a compacted batch commit helper that atomically installs the WebGL batch, family resource,
-  prepared-asset retention update, pending-retention clearing, and scheduler commit notification.
-- Keep graph updates inside the compacted commit helper as a post-commit prepared-asset lifetime
-  projection. Do not add graph labels, metadata, explanations, disposal candidates, or cleanup
-  coordinator integration.
 - Add a renderer-owned compacted geometry job scheduler using `RenderResourceJobScheduler`.
 - Schedule compacted geometry jobs at the `family + partition + landblock` boundary, not as one
   whole-scene compaction generation and not as an unbounded per-frame backlog.

@@ -1,6 +1,10 @@
 import { profileBrowserJsScope } from "../../../diagnostics/browser-js-profiler";
 import { formatHex32 } from "../../../landblocks";
-import { buildCompactedGeometryBatch } from "../../compaction/compacted-geometry";
+import {
+	buildCompactedGeometryBatch,
+	describeCompactedGeometryJobKey,
+	type CompactedGeometryBatch,
+} from "../../compaction/compacted-geometry";
 import type {
 	CompactionFamilyPlan,
 	IndexedPalettedFamilyDrawSlice,
@@ -39,12 +43,18 @@ function requiresTextureAtlasGeneration(plan: TexturePageAtlasPlan): boolean {
 }
 
 export interface RgbaTexturePageCompactedLandblockBatchPlan {
+	family: "rgbaAtlas";
+	sourcePartitionKey: string;
+	desiredJobKey: string;
 	landblockId: number;
 	batchOrigin: RenderChunkTransform["offset"];
 	plan: CompactionFamilyPlan;
 }
 
 export interface IndexedPalettedCompactedLandblockBatchPlan {
+	family: "indexedPaletteAtlas";
+	sourcePartitionKey: string;
+	desiredJobKey: string;
 	landblockId: number;
 	batchOrigin: RenderChunkTransform["offset"];
 	materialTableRecords: readonly IndexedPalettedFamilyMaterialTableRecord[];
@@ -127,13 +137,6 @@ export function syncWebgl2CompactedGeometryResources({
 			if (!geometry) {
 				continue;
 			}
-			retainWebgl2CompactedGeometryBatch({
-				gl,
-				store,
-				geometry,
-				landblockId: batchPlan.landblockId,
-				retainedGeometryBatchKeys,
-			});
 			const familyResource = createWebgl2RgbaTexturePageFamilyResource({
 				geometry,
 				materialSlots: batchPlan.plan.materialSlots,
@@ -141,11 +144,17 @@ export function syncWebgl2CompactedGeometryResources({
 				placementsByEntryKey,
 				detailPlacementsByEntryKey,
 			});
-			retainedFamilyResourceKeys.add(familyResource.key);
-			store.compactedGeometryFamilyResources.set(
-				familyResource.key,
+			commitWebgl2CompactedGeometryBatch({
+				gl,
+				store,
+				geometry,
+				landblockId: batchPlan.landblockId,
 				familyResource,
-			);
+				retainedGeometryBatchKeys,
+				retainedFamilyResourceKeys,
+				rendererResourceGraph,
+				atlasGenerationKey: store.textureAtlasGeneration?.key ?? null,
+			});
 		}
 	}
 	if (plan.renderFamilies.indexedPaletted.compactableDrawUnitIds.length > 0) {
@@ -179,13 +188,6 @@ export function syncWebgl2CompactedGeometryResources({
 				if (!geometry) {
 					continue;
 				}
-				retainWebgl2CompactedGeometryBatch({
-					gl,
-					store,
-					geometry,
-					landblockId: batchPlan.landblockId,
-					retainedGeometryBatchKeys,
-				});
 				const familyResource = createWebgl2IndexedPalettedFamilyResource({
 					geometry,
 					materialTableRecords: batchPlan.materialTableRecords,
@@ -196,11 +198,17 @@ export function syncWebgl2CompactedGeometryResources({
 						indexedResourceAtlasPlan.palettePlacementsByTextureKey,
 					detailPlacementsByEntryKey,
 				});
-				retainedFamilyResourceKeys.add(familyResource.key);
-				store.compactedGeometryFamilyResources.set(
-					familyResource.key,
+				commitWebgl2CompactedGeometryBatch({
+					gl,
+					store,
+					geometry,
+					landblockId: batchPlan.landblockId,
 					familyResource,
-				);
+					retainedGeometryBatchKeys,
+					retainedFamilyResourceKeys,
+					rendererResourceGraph,
+					atlasGenerationKey: store.textureAtlasGeneration?.key ?? null,
+				});
 			}
 		}
 	}
@@ -260,29 +268,6 @@ export function syncWebgl2CompactedGeometryResources({
 	store.compactedGeometryTransformTableEntryCount = 0;
 	if (!rendererResourceGraph || store.compactedGeometryBatches.size === 0) {
 		releaseWebgl2CompactedGeometryBatchGraphLeases(store);
-		return;
-	}
-	store.compactedGeometryBatchGraph = rendererResourceGraph;
-	for (const batch of store.compactedGeometryBatches.values()) {
-		const batchNodeKey = staticBatchGraphNodeKey(batch.key);
-		if (store.compactedGeometryBatchGraphLeasesByKey.has(batchNodeKey)) {
-			continue;
-		}
-		upsertWebgl2CompactedGeometryBatchGraph({
-			graph: rendererResourceGraph,
-			batch,
-			familyResources: [
-				...store.compactedGeometryFamilyResources.values(),
-			].filter((resource) => resource.geometryBatchKey === batch.key),
-			atlasGenerationKey: store.textureAtlasGeneration?.key ?? null,
-		});
-		store.compactedGeometryBatchGraphLeasesByKey.set(
-			batchNodeKey,
-			rendererResourceGraph.leaseNode(
-				batchNodeKey,
-				"webgl2 compacted landblock batch",
-			),
-		);
 	}
 }
 
@@ -301,20 +286,34 @@ export function shouldRetainWebgl2CompactedGeometryBatch({
 	);
 }
 
-function retainWebgl2CompactedGeometryBatch({
+export function commitWebgl2CompactedGeometryBatch({
 	gl,
 	store,
 	geometry,
 	landblockId,
+	familyResource,
 	retainedGeometryBatchKeys,
+	retainedFamilyResourceKeys,
+	rendererResourceGraph,
+	atlasGenerationKey,
 }: {
 	gl: WebGL2RenderingContext;
 	store: Webgl2WorldResourceStore;
-	geometry: NonNullable<ReturnType<typeof buildCompactedGeometryBatch>>;
+	geometry: CompactedGeometryBatch;
 	landblockId: number;
+	familyResource: Webgl2CompactedGeometryFamilyResource;
 	retainedGeometryBatchKeys: Set<string>;
+	retainedFamilyResourceKeys: Set<string>;
+	rendererResourceGraph?: RendererResourceGraph;
+	atlasGenerationKey: string | null;
 }): void {
+	if (familyResource.geometryBatchKey !== geometry.key) {
+		throw new Error(
+			`Compacted family resource ${familyResource.key} references ${familyResource.geometryBatchKey}, not committed geometry ${geometry.key}.`,
+		);
+	}
 	retainedGeometryBatchKeys.add(geometry.key);
+	retainedFamilyResourceKeys.add(familyResource.key);
 	store.pendingCompactedGeometryBatchKeys.delete(geometry.key);
 	const previousBatch = store.compactedGeometryBatches.get(geometry.key);
 	if (!previousBatch) {
@@ -328,9 +327,62 @@ function retainWebgl2CompactedGeometryBatch({
 				}),
 		);
 		store.compactedGeometryBatches.set(nextBatch.key, nextBatch);
+	} else {
+		updateWebgl2CompactedGeometryBatchDynamicTables(previousBatch, geometry);
+	}
+	store.compactedGeometryFamilyResources.set(
+		familyResource.key,
+		familyResource,
+	);
+	const committedBatch = store.compactedGeometryBatches.get(geometry.key);
+	if (!committedBatch) {
+		throw new Error(
+			`Compacted geometry commit did not install batch ${geometry.key}.`,
+		);
+	}
+	commitWebgl2CompactedGeometryBatchGraphProjection({
+		store,
+		rendererResourceGraph,
+		batch: committedBatch,
+		familyResources: [familyResource],
+		atlasGenerationKey,
+	});
+}
+
+function commitWebgl2CompactedGeometryBatchGraphProjection({
+	store,
+	rendererResourceGraph,
+	batch,
+	familyResources,
+	atlasGenerationKey,
+}: {
+	store: Webgl2WorldResourceStore;
+	rendererResourceGraph?: RendererResourceGraph;
+	batch: Webgl2CompactedGeometryBatchResource;
+	familyResources: readonly Webgl2CompactedGeometryFamilyResource[];
+	atlasGenerationKey: string | null;
+}): void {
+	if (!rendererResourceGraph) {
 		return;
 	}
-	updateWebgl2CompactedGeometryBatchDynamicTables(previousBatch, geometry);
+	store.compactedGeometryBatchGraph = rendererResourceGraph;
+	const batchNodeKey = staticBatchGraphNodeKey(batch.key);
+	upsertWebgl2CompactedGeometryBatchGraph({
+		graph: rendererResourceGraph,
+		batch,
+		familyResources,
+		atlasGenerationKey,
+	});
+	if (store.compactedGeometryBatchGraphLeasesByKey.has(batchNodeKey)) {
+		return;
+	}
+	store.compactedGeometryBatchGraphLeasesByKey.set(
+		batchNodeKey,
+		rendererResourceGraph.leaseNode(
+			batchNodeKey,
+			"webgl2 compacted landblock batch",
+		),
+	);
 }
 
 function upsertWebgl2CompactedGeometryBatchGraph({
@@ -424,17 +476,25 @@ export function createIndexedPalettedCompactedLandblockBatchPlans({
 						`Indexed-paletted family landblock batch ${formatHex32(landblockId)} has no render chunk origin.`,
 					);
 				}
+				const batchPlan = createIndexedPalettedCompactedLandblockBatchPlan({
+					sourcePlan: plan,
+					sourcePartition: partition,
+					landblockId,
+					drawUnitIds: drawUnitIds.sort(),
+					drawUnits,
+					indexedResourceAtlasPlan,
+				});
 				return {
+					family: "indexedPaletteAtlas",
+					sourcePartitionKey: partition.key,
+					desiredJobKey: describeCompactedGeometryJobKey({
+						plan: batchPlan.plan,
+						drawUnits,
+						batchOrigin,
+					}),
 					landblockId,
 					batchOrigin,
-					...createIndexedPalettedCompactedLandblockBatchPlan({
-						sourcePlan: plan,
-						sourcePartition: partition,
-						landblockId,
-						drawUnitIds: drawUnitIds.sort(),
-						drawUnits,
-						indexedResourceAtlasPlan,
-					}),
+					...batchPlan,
 				};
 			});
 	});
@@ -808,16 +868,24 @@ export function createRgbaTexturePageCompactedLandblockBatchPlans({
 						`Compacted geometry landblock batch ${formatHex32(landblockId)} has no render chunk origin.`,
 					);
 				}
+				const batchPlan = createRgbaTexturePageCompactedLandblockBatchPlan({
+					sourcePlan: plan,
+					sourcePartition: partition,
+					drawUnits,
+					landblockId,
+					drawUnitIds: drawUnitIds.sort(),
+				});
 				return {
+					family: "rgbaAtlas",
+					sourcePartitionKey: partition.key,
+					desiredJobKey: describeCompactedGeometryJobKey({
+						plan: batchPlan,
+						drawUnits,
+						batchOrigin,
+					}),
 					landblockId,
 					batchOrigin,
-					plan: createRgbaTexturePageCompactedLandblockBatchPlan({
-						sourcePlan: plan,
-						sourcePartition: partition,
-						drawUnits,
-						landblockId,
-						drawUnitIds: drawUnitIds.sort(),
-					}),
+					plan: batchPlan,
 				};
 			});
 	});

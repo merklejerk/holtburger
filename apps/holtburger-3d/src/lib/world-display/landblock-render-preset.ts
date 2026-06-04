@@ -1,9 +1,15 @@
 import type { StaticLandblockRenderBundleLayer } from "./static-bundle-layer";
+import type { AtlasLayoutPolicy } from "./texture-pages/atlas-layout-planner";
 import type { LandblockTerrainRenderArtifact } from "./terrain-render-artifact";
 
 export type LandblockRenderLodPreset = "outdoor" | "outdoor-with-env-cells";
 
 export type LandblockRenderPresetPriority = "resident-now" | "prefetch";
+
+export interface LandblockRenderPresetBuildPolicy {
+	atlasLayout: AtlasLayoutPolicy;
+	terrainMaxLayerEntries: number;
+}
 
 export interface DesiredLandblockRenderPreset {
 	landblockId: number;
@@ -12,6 +18,7 @@ export interface DesiredLandblockRenderPreset {
 	requestId: string;
 	buildPolicyRevision: string;
 	texturePagePolicyRevision: string;
+	buildPolicy: LandblockRenderPresetBuildPolicy;
 }
 
 export interface LandblockRenderPresetWorkerJob {
@@ -22,6 +29,7 @@ export interface LandblockRenderPresetWorkerJob {
 	requestId: string;
 	buildPolicyRevision: string;
 	texturePagePolicyRevision: string;
+	buildPolicy: LandblockRenderPresetBuildPolicy;
 }
 
 export interface LandblockRenderPresetWorkerResult {
@@ -58,6 +66,7 @@ export function createLandblockRenderPresetWorkerJob(
 		requestId: desired.requestId,
 		buildPolicyRevision: desired.buildPolicyRevision,
 		texturePagePolicyRevision: desired.texturePagePolicyRevision,
+		buildPolicy: desired.buildPolicy,
 	};
 }
 

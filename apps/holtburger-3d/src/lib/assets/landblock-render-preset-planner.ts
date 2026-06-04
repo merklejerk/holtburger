@@ -12,6 +12,7 @@ import {
 	chooseMoreDetailedLandblockPreset,
 	compareDesiredLandblockRenderPresets,
 	type DesiredLandblockRenderPreset,
+	type LandblockRenderPresetBuildPolicy,
 	type LandblockRenderLodPreset,
 	type LandblockRenderPresetPriority,
 } from "../world-display/landblock-render-preset";
@@ -29,6 +30,7 @@ export interface LandblockRenderPresetPlanningInput {
 	requestId: string;
 	buildPolicyRevision: string;
 	texturePagePolicyRevision: string;
+	buildPolicy: LandblockRenderPresetBuildPolicy;
 	options?: OutdoorSceneRequestOptions;
 }
 
@@ -91,6 +93,7 @@ function createDesiredPreset(
 		requestId: input.requestId,
 		buildPolicyRevision: input.buildPolicyRevision,
 		texturePagePolicyRevision: input.texturePagePolicyRevision,
+		buildPolicy: input.buildPolicy,
 	};
 }
 

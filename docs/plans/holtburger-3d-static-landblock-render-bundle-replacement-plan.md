@@ -1895,38 +1895,130 @@ worker model instead of carrying them forward under new names:
 
 ### Phase 2: Landblock Worker Orchestration
 
+Status: Phase 2A implemented on 2026-06-04. Phase 2B is the immediate next
+interim phase before renderer integration.
+
 This is not a compatibility mode. It replaces the main-thread terrain/static closure prep assumption
 with a landblock render worker that can request raw assets through the worker host bridge and return
 complete terrain plus static object artifacts for the requested landblock LoD preset.
 
-- Add `static-landblock-render-worker.ts` using the extracted shared worker bridge libraries.
-- Add `static-landblock-render-worker-client.ts` to post landblock preset requests, track latest
-  request IDs/policy revisions, and consume transferable terrain/object artifacts.
-- Honor the Phase 1I terrain artifact contract. Static object workers must compose with terrain
-  residency and must not imply terrain fallback through direct static entries.
-- Move worker-local terrain and static closure loading/preparation into the worker job.
-- Sequence env-cell work inside the same worker call graph for `outdoor-with-env-cells`: load
-  topology, derive selected env-cell IDs, load selected env-cell payloads, then build
-  `env-cell-static` artifacts.
-- Add worker-local closure expansion for setup-appearance companions and normalized prepared texture
-  routes.
-- Run terrain artifact construction and the static bundle builder inside the worker.
-- Return transferable geometry buffers and texture page byte buffers to the main thread.
-- Coalesce desired landblock preset requests and reject stale worker results by latest request ID,
-  landblock, preset, and policy revisions.
-- Keep WebGL realization on the main thread.
+Implemented in Phase 2A:
+
+- Added `static-landblock-render-worker.ts` using the shared worker host bridge, shared raw closure
+  loader, and shared asset preparation code instead of delegating to or duplicating the asset worker.
+- Added `static-landblock-render-worker-client.ts` to post landblock preset jobs, forward worker host
+  binary lookups to the existing main-thread/Tauri lookup path, dedupe identical in-flight preset
+  requests, and reject stale results by latest landblock/preset/request/policy identity.
+- Extended `LandblockRenderPresetWorkerJob` with concrete CPU build policy:
+  - `atlasLayout`;
+  - `terrainMaxLayerEntries`.
+  Policy revisions remain the stale-result identity; concrete policy values are the worker's build
+  inputs.
+- Moved worker-local outdoor closure loading, topology loading, env-cell selection, env-cell closure
+  loading, setup-appearance companion expansion, and normalized prepared-texture expansion into the
+  worker runner.
+- Runs Phase 1I terrain artifact construction and static bundle layer construction inside the worker.
+- Returns complete preset results with sibling `terrainArtifact` and `staticBundleLayers`.
+- Collects transferable typed-array buffers from terrain geometry, static compacted geometry, and
+  layer-owned texture pages before posting results back to the main thread.
+- Keeps WebGL realization on the main thread; no GL objects are created in the worker.
+- Added focused tests for:
+  - planner/job policy propagation without legacy `rootAssetIds` or `sourceRevision`;
+  - worker client dedupe, stale-result rejection, and host lookup forwarding;
+  - worker-runner one-shot outdoor + topology loading for an `outdoor-with-env-cells` preset.
+
+Course corrections:
+
+- Concrete CPU build policy had to become part of the preset worker job. Revisions alone were enough
+  for identity but not enough to run atlas layout or terrain layer planning in the worker.
+- Raw asset dependency closure is not enough for static texture pages. Normalized prepared-texture
+  routes are derived only after material/render-surface preparation, so the worker now performs a
+  second worker-local expansion pass for those routes.
+- Setup-appearance companions are also worker-local expansion. The raw setup-model dependency list
+  does not include them, but static object rendering may prefer setup-appearance part/material
+  overrides when they exist.
+- `outdoor-with-env-cells` currently selects all topology env cells for the landblock. This matches
+  the coarse route/product-shaped preset model. Finer env-cell subset selection should wait until a
+  real streaming need appears and should still remain inside the landblock worker call graph.
+
+Phase 2A exit criteria:
+
+- A landblock preset worker can request raw assets through the worker host bridge and build a
+  renderer-shaped CPU artifact without main-thread prepared asset state.
+- Terrain CPU work, static bundle CPU work, closure loading, topology loading, env-cell hydration,
+  normalized texture route expansion, and layer texture-page packing are callable off the main
+  thread through one preset worker job.
+- Main-thread worker client receives complete worker artifacts only and rejects stale results.
+- No separate topology discovery worker job or main-thread topology cache lookup is needed to
+  schedule env-cell artifact construction in the worker path.
+- Focused tests, `npm run check`, full `npm run lint:ts`, and `npm run lint:dead` pass.
+
+Introduced cleanup targets:
+
+- The worker still builds static object layers through an internal `StaticBundleLayerWorkerJob`
+  adapter because `buildStaticLandblockRenderBundleLayer` has not yet been retargeted to a
+  landblock-preset build input. This is quarantined inside the worker and must not leak back into
+  scheduling or resident ownership.
+- `StaticBundleLayerWorkerJob.sourceRevision` is still populated internally from `job.jobId` because
+  the builder result schema requires it. Remove this once the builder accepts preset/layer build
+  context directly.
+- `StaticLandblockRenderWorkerClient` is not yet wired into `SceneAssetStreamingController` or WebGL
+  resource sync. The old static bundle layer planner and render-resource worker schedulers therefore
+  still exist for the live renderer until Phase 2B/Phase 3.
+- The worker result transferable collector is intentionally structural. If future artifacts contain
+  non-transferable object graphs or large non-buffer diagnostics, replace it with explicit artifact
+  collectors.
+
+Legacy shims introduced:
+
+- No public compatibility shim or alternate renderer mode was added.
+- One internal builder adapter remains inside `static-landblock-render-worker.ts` to call the
+  existing static bundle builder. It is a short-lived cleanup target, not a scheduling contract.
+
+Legacy debt found before the next phase:
+
+- Renderer integration should not start by wiring old `DesiredStaticBundleLayer` outputs into the
+  preset worker client. Add the Phase 2B resource-sync handoff first so the live renderer has one
+  place to commit complete preset artifacts.
+- Delete or quarantine the old layer/root/source-revision scheduling DTOs as soon as the `outdoor`
+  preset is committed through the worker path. Carrying both public scheduling systems longer than
+  Phase 3 will reintroduce the incremental compaction overhead this replacement is meant to remove.
+
+### Phase 2B: Worker Artifact Handoff Prep
+
+Status: Immediate next phase.
+
+Purpose:
+
+- Prepare main-thread resource ownership for complete preset artifacts before the Phase 3 rendering
+  vertical slice.
+- Keep the old static scheduling surface from expanding while worker-built artifacts start crossing
+  into live resource code.
+
+Tasks:
+
+- Add a resident CPU artifact store keyed by landblock, preset, build policy revision, and
+  texture-page policy revision.
+- Wire `planDesiredLandblockRenderPresets` to `StaticLandblockRenderWorkerClient` without invoking
+  `static-bundle-layer-planner` for those desired presets.
+- Commit worker results into the resident CPU artifact store only when latest request identity still
+  matches.
+- Keep old staged/static bundle scheduling active only for renderer paths not yet migrated, and label
+  those call sites as transitional.
+- Add resource-store tests proving stale worker results do not replace newer resident artifacts.
+- Do not add WebGL realization in this phase unless it is trivial and does not keep old static draw
+  units alive beside worker artifacts.
 
 Exit criteria:
 
-- Terrain CPU work, static bundle-layer CPU work, closure loading, topology/env-cell hydration, and
-  texture page packing run off the main thread.
-- Main thread resource sync for terrain/statics receives complete worker artifacts only.
-- Worker closure loading does not require full terrain/static prepared closure state in
-  `SceneAssetStreamingController`.
-- No separate topology discovery worker job or main-thread topology cache lookup is required to
-  schedule env-cell artifact construction.
-- Phase 1 transitional layer/root/source-revision scheduling DTOs are deleted or quarantined behind
-  the preset worker client.
+- Desired landblock presets are submitted to `StaticLandblockRenderWorkerClient` from the live
+  streaming/resource coordination path.
+- Complete worker results can be committed/evicted on the main thread without static layer root
+  manifests, prepared-cache closure IDs, or source revisions.
+- Old static bundle layer scheduling is clearly quarantined behind transitional call sites.
+- Tests plus `npm run check`, `npm run lint:ts`, and `npm run lint:dead` pass.
+
+The original Phase 2 exit criteria are now split across Phase 2A and Phase 2B above.
 
 ### Phase 3: Renderer Integration Vertical Slice
 

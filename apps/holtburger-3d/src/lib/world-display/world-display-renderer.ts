@@ -51,6 +51,7 @@ function createDeferredWorldDisplayRenderer<
 	const { options } = input;
 	let assetState = options.assetState;
 	let terrainScene = options.terrainScene;
+	let staticLandblockRenderArtifacts = options.staticLandblockRenderArtifacts;
 	let staticRenderableScene = options.staticRenderableScene;
 	let structuredInteriorScene = options.structuredInteriorScene;
 	let transitionPortalModel = options.transitionPortalModel;
@@ -89,6 +90,10 @@ function createDeferredWorldDisplayRenderer<
 		setStaticRenderableScene(scene) {
 			staticRenderableScene = scene;
 			loadedRenderer?.setStaticRenderableScene(scene);
+		},
+		setStaticLandblockRenderArtifacts(artifacts) {
+			staticLandblockRenderArtifacts = artifacts;
+			loadedRenderer?.setStaticLandblockRenderArtifacts(artifacts);
 		},
 		setStructuredInteriorScene(scene) {
 			structuredInteriorScene = scene;
@@ -189,6 +194,7 @@ function createDeferredWorldDisplayRenderer<
 		return {
 			assetState,
 			terrainScene,
+			staticLandblockRenderArtifacts,
 			staticRenderableScene,
 			structuredInteriorScene,
 			transitionPortalModel,

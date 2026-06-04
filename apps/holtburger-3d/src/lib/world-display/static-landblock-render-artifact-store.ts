@@ -16,6 +16,20 @@ export interface StaticLandblockRenderArtifactStoreSnapshot {
 	latestDesiredIdentityKeys: readonly string[];
 }
 
+export function createEmptyStaticLandblockRenderArtifactStoreSnapshot(): StaticLandblockRenderArtifactStoreSnapshot {
+	return {
+		artifacts: [],
+		desiredCount: 0,
+		residentCount: 0,
+		inFlightCount: 0,
+		staleResultCount: 0,
+		committedResultCount: 0,
+		evictedResultCount: 0,
+		errorCount: 0,
+		latestDesiredIdentityKeys: [],
+	};
+}
+
 export class StaticLandblockRenderArtifactStore {
 	private readonly artifactsByArtifactKey = new Map<
 		string,
@@ -28,7 +42,9 @@ export class StaticLandblockRenderArtifactStore {
 	private evictedResultCount = 0;
 	private errorCount = 0;
 
-	syncDesiredPresets(desiredPresets: readonly DesiredLandblockRenderPreset[]): void {
+	syncDesiredPresets(
+		desiredPresets: readonly DesiredLandblockRenderPreset[],
+	): void {
 		const desiredTargetKeys = new Set<string>();
 		for (const desired of desiredPresets) {
 			const targetKey = formatDesiredTargetKey(desired);
@@ -72,8 +88,9 @@ export class StaticLandblockRenderArtifactStore {
 		const identityKey = formatResultIdentityKey(result);
 		this.inFlightIdentityKeys.delete(identityKey);
 		if (
-			this.latestDesiredIdentityByTargetKey.get(formatResultTargetKey(result)) !==
-			identityKey
+			this.latestDesiredIdentityByTargetKey.get(
+				formatResultTargetKey(result),
+			) !== identityKey
 		) {
 			this.staleResultCount += 1;
 			return false;

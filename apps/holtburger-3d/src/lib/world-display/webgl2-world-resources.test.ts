@@ -53,9 +53,12 @@ import {
 	markWebgl2CompactedGeometryBatchReplacementPending,
 	markWebgl2IndexedResourceAtlasGenerationReplacementPending,
 	markWebgl2TextureAtlasGenerationReplacementPending,
+	syncWebgl2StaticLandblockRenderArtifactResources,
 	syncWebgl2WorldResources,
 	type Webgl2WorldResourceStore,
 } from "./webgl2-world-resources";
+import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
+import type { StaticLandblockRenderBundleLayer } from "./static-bundle-layer";
 import {
 	createIndexedPalettedCompactedLandblockBatchPlans,
 	shouldRetainWebgl2CompactedGeometryBatch,
@@ -157,6 +160,55 @@ describe("webgl2 world resources", () => {
 				retainedGeometryBatchKeys: new Set(),
 			}),
 		).toBe(true);
+	});
+
+	it("syncs resident outdoor static bundle layers into WebGL resources", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2WorldResourceStore();
+		const firstSnapshot = createStaticLandblockArtifactSnapshot([
+			createStaticBundleLayer("static-layer", "revision-a"),
+		]);
+
+		syncWebgl2StaticLandblockRenderArtifactResources({
+			gl: gl.asContext(),
+			store,
+			artifacts: firstSnapshot,
+		});
+
+		expect(store.staticBundleLayerResourceCount).toBe(1);
+		expect(store.staticBundleLayerCompactedBatchResourceCount).toBe(1);
+		expect(store.staticBundleLayerDirectEntryResourceCount).toBe(1);
+		expect(store.staticBundleLayerTexturePageResourceCount).toBe(1);
+		expect(gl.createdTextures).toHaveLength(1);
+
+		syncWebgl2StaticLandblockRenderArtifactResources({
+			gl: gl.asContext(),
+			store,
+			artifacts: firstSnapshot,
+		});
+
+		expect(gl.createdTextures).toHaveLength(1);
+
+		syncWebgl2StaticLandblockRenderArtifactResources({
+			gl: gl.asContext(),
+			store,
+			artifacts: createStaticLandblockArtifactSnapshot([
+				createStaticBundleLayer("static-layer", "revision-b"),
+			]),
+		});
+
+		expect(store.staticBundleLayerResourceCount).toBe(1);
+		expect(gl.createdTextures).toHaveLength(2);
+		expect(gl.deletedTextures).toHaveLength(1);
+
+		syncWebgl2StaticLandblockRenderArtifactResources({
+			gl: gl.asContext(),
+			store,
+			artifacts: createStaticLandblockArtifactSnapshot([]),
+		});
+
+		expect(store.staticBundleLayerResourceCount).toBe(0);
+		expect(gl.deletedTextures).toHaveLength(2);
 	});
 
 	it("realizes staged static draw units as retained WebGL2 resources", () => {
@@ -2671,6 +2723,139 @@ function sortAtlasBatchesByLandblock(store: Webgl2WorldResourceStore) {
 	return [...store.compactedGeometryBatches.values()].sort(
 		(left, right) => left.landblockId - right.landblockId,
 	);
+}
+
+function createStaticLandblockArtifactSnapshot(
+	layers: readonly StaticLandblockRenderBundleLayer[],
+): StaticLandblockRenderArtifactStoreSnapshot {
+	return {
+		artifacts: [
+			{
+				type: "landblock-render-preset-built",
+				jobId: "job",
+				landblockId: 0x1234,
+				preset: "outdoor",
+				requestId: "request",
+				buildPolicyRevision: "build:v1",
+				texturePagePolicyRevision: "pages:v1",
+				terrainArtifact: null,
+				staticBundleLayers: layers,
+				diagnostics: {
+					status: "ready",
+					messages: [],
+				},
+			},
+		],
+		desiredCount: layers.length > 0 ? 1 : 0,
+		residentCount: layers.length > 0 ? 1 : 0,
+		inFlightCount: 0,
+		staleResultCount: 0,
+		committedResultCount: layers.length > 0 ? 1 : 0,
+		evictedResultCount: 0,
+		errorCount: 0,
+		latestDesiredIdentityKeys: [],
+	};
+}
+
+function createStaticBundleLayer(
+	key: string,
+	sourceRevision: string,
+): StaticLandblockRenderBundleLayer {
+	return {
+		key,
+		scope: {
+			kind: "landblock",
+			landblockId: 0x1234,
+			layerKind: "outdoor-buildings",
+		},
+		landblockId: 0x1234,
+		layerKind: "outdoor-buildings",
+		sourceRevision,
+		rootAssetIds: ["landblock/00001234/outdoor"],
+		preparedAssetIds: [],
+		renderChunks: [
+			{
+				key: "chunk",
+				landblockId: 0x1234,
+				bounds: null,
+			},
+		],
+		compactedBatches: [
+			{
+				key: "compacted",
+				renderChunkKey: "chunk",
+				familyKey: "static:rgba-texture-page:alpha=opaque",
+				materialRecordKey: "material",
+				objectKeys: ["object-a"],
+				positions: createStaticTrianglePositions(),
+				normals: createStaticTriangleNormals(),
+				uvs: createStaticTriangleUvs(),
+				indices: new Uint16Array([0, 1, 2]),
+			},
+		],
+		directEntries: [
+			{
+				key: "direct",
+				renderChunkKey: "chunk",
+				materialRecordKey: "material",
+				objectKey: "object-b",
+				positions: createStaticTrianglePositions(),
+				normals: createStaticTriangleNormals(),
+				uvs: createStaticTriangleUvs(),
+				indices: new Uint32Array([0, 1, 2]),
+				bounds: null,
+			},
+		],
+		materialRecords: [
+			{
+				key: "material",
+				familyKey: "static:rgba-texture-page:alpha=opaque",
+				texturePageRefKeys: ["texture-ref"],
+				isTransparent: false,
+			},
+		],
+		texturePageRefs: [],
+		texturePages: [
+			{
+				key: "texture-page",
+				scopeKey: "landblock:4660:outdoor-buildings",
+				pageKind: "single-entry",
+				usageBucket: "base-color",
+				sampleClass: "rgba-color",
+				width: 1,
+				height: 1,
+				bytes: new Uint8Array([255, 255, 255, 255]),
+				entries: [
+					{
+						virtualRefKey: "texture-ref",
+						sourceAssetId: "prepared-texture/06000001/raw",
+						rect: [0, 0, 1, 1],
+					},
+				],
+			},
+		],
+		objectRecords: [],
+		diagnostics: {
+			sourceObjectCount: 2,
+			compactedSurfaceCount: 1,
+			directSurfaceCount: 1,
+			skippedSurfaceCount: 0,
+			missingAssetIds: [],
+			skippedReasons: [],
+		},
+	};
+}
+
+function createStaticTrianglePositions(): Float32Array {
+	return new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+}
+
+function createStaticTriangleNormals(): Float32Array {
+	return new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]);
+}
+
+function createStaticTriangleUvs(): Float32Array {
+	return new Float32Array([0, 0, 1, 0, 0, 1]);
 }
 
 function createTerrainScene(

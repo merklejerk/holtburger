@@ -19,6 +19,7 @@ import type {
 import type { DrawUnitRuntimeDiagnostic } from "./runtime-render-diagnostics";
 import type { WorldRenderSceneContext } from "./render-scene-context";
 import type { StaticRenderableSceneModel } from "./static-renderables";
+import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
 import type { TransitionPortalCandidateModel } from "./transition-portal-work-items";
@@ -26,6 +27,7 @@ import type { TransitionPortalCandidateModel } from "./transition-portal-work-it
 export interface WorldDisplayRendererOptions {
 	assetState: AssetChannelState;
 	terrainScene: TerrainSceneModel;
+	staticLandblockRenderArtifacts: StaticLandblockRenderArtifactStoreSnapshot;
 	staticRenderableScene: StaticRenderableSceneModel;
 	structuredInteriorScene: StructuredInteriorSceneModel;
 	transitionPortalModel: TransitionPortalCandidateModel;
@@ -49,6 +51,9 @@ export interface WorldDisplayRenderer {
 	setAssetState(assetState: AssetChannelState): void;
 	setTerrainScene(scene: TerrainSceneModel): void;
 	setStaticRenderableScene(scene: StaticRenderableSceneModel): void;
+	setStaticLandblockRenderArtifacts(
+		artifacts: StaticLandblockRenderArtifactStoreSnapshot,
+	): void;
 	setStructuredInteriorScene(scene: StructuredInteriorSceneModel): void;
 	setTransitionPortalModel(model: TransitionPortalCandidateModel): void;
 	setDebugOverlayScene(scene: WorldDebugOverlayModel): void;

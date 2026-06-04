@@ -56,6 +56,7 @@ import {
 import {
 	createWebgl2WorldResourceStore,
 	destroyWebgl2WorldResources,
+	syncWebgl2StaticLandblockRenderArtifactResources,
 	syncWebgl2WorldResources,
 	type Webgl2WorldResourceStore,
 } from "./webgl2-world-resources";
@@ -765,6 +766,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 ): WorldDisplayRenderer {
 	let assetState = options.assetState;
 	let terrainScene = options.terrainScene;
+	let staticLandblockRenderArtifacts = options.staticLandblockRenderArtifacts;
 	let staticRenderableScene = options.staticRenderableScene;
 	let structuredInteriorScene = options.structuredInteriorScene;
 	let transitionPortalModel = options.transitionPortalModel;
@@ -847,6 +849,10 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		},
 		setStaticRenderableScene(scene) {
 			staticRenderableScene = scene;
+			markWorldResourcesDirty();
+		},
+		setStaticLandblockRenderArtifacts(artifacts) {
+			staticLandblockRenderArtifacts = artifacts;
 			markWorldResourcesDirty();
 		},
 		setStructuredInteriorScene(scene) {
@@ -2168,6 +2174,11 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		worldResourcesDirty = false;
 		const currentResources = resources;
 		profileBrowserJsScope("webgl2.resource.syncWorldResources", () => {
+			syncWebgl2StaticLandblockRenderArtifactResources({
+				gl: currentResources.gl,
+				store: currentResources.worldStore,
+				artifacts: staticLandblockRenderArtifacts,
+			});
 			syncWebgl2WorldResources({
 				gl: currentResources.gl,
 				store: currentResources.worldStore,

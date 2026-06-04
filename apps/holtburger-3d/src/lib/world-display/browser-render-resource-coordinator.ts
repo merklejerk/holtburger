@@ -137,6 +137,9 @@ export interface BrowserRenderResourceSurface {
 	): void;
 	setRenderChunkTransforms(transforms: readonly RenderChunkTransform[]): void;
 	setTerrainScene(scene: TerrainSceneModel): void;
+	setStaticLandblockRenderArtifacts(
+		artifacts: StaticLandblockRenderArtifactStoreSnapshot,
+	): void;
 	setStaticRenderableScene(scene: StaticRenderableSceneModel): void;
 	setStructuredInteriorScene(scene: StructuredInteriorSceneModel): void;
 	setTransitionPortalModel(
@@ -448,6 +451,16 @@ export class BrowserRenderResourceCoordinator {
 				surface.setTerrainScene(terrainScene),
 			);
 			this.applySurfaceResource(
+				"static-landblock-render-artifacts",
+				describeStaticLandblockRenderArtifactSurfaceSignature(
+					input.staticLandblockRenderArtifacts,
+				),
+				() =>
+					surface.setStaticLandblockRenderArtifacts(
+						input.staticLandblockRenderArtifacts,
+					),
+			);
+			this.applySurfaceResource(
 				"static-renderable-scene",
 				staticRenderableSceneSignature,
 				() => surface.setStaticRenderableScene(staticRenderableScene),
@@ -549,6 +562,7 @@ type BrowserRenderResourceSurfaceKey =
 	| "render-scene-context"
 	| "render-chunk-transforms"
 	| "terrain-scene"
+	| "static-landblock-render-artifacts"
 	| "static-renderable-scene"
 	| "structured-interior-scene"
 	| "transition-portal-model"
@@ -1175,6 +1189,27 @@ function describeStaticLandblockRenderArtifacts(
 		`${snapshot.staleResultCount} stale`,
 		`${snapshot.errorCount} errors`,
 	].join("; ");
+}
+
+function describeStaticLandblockRenderArtifactSurfaceSignature(
+	snapshot: StaticLandblockRenderArtifactStoreSnapshot,
+): string {
+	return [
+		...snapshot.latestDesiredIdentityKeys,
+		...snapshot.artifacts.flatMap((artifact) =>
+			artifact.staticBundleLayers.map((layer) =>
+				[
+					artifact.landblockId,
+					artifact.preset,
+					artifact.requestId,
+					artifact.buildPolicyRevision,
+					artifact.texturePagePolicyRevision,
+					layer.key,
+					layer.sourceRevision,
+				].join(":"),
+			),
+		),
+	].join("|");
 }
 
 function describeStaticRenderableIdleState(

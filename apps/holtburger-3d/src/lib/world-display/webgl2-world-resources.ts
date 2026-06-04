@@ -52,6 +52,7 @@ import {
 	type RendererResourceGraphNode,
 } from "./renderer-resource-graph";
 import type { StaticRenderableSceneModel } from "./static-renderables";
+import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
 import type {
 	DirectRenderSurfaceUploadDataType,
 	DirectRenderSurfaceUploadFormat,
@@ -175,6 +176,12 @@ import {
 	type Webgl2TerrainTileResource,
 	type Webgl2TerrainTileReadiness,
 } from "./webgl2/resources/terrain-tile-resources";
+import {
+	createWebgl2StaticBundleLayerResourceStore,
+	destroyWebgl2StaticBundleLayerResources,
+	syncWebgl2StaticBundleLayerResources,
+	type Webgl2StaticBundleLayerResourceStore,
+} from "./webgl2/resources/static-bundle-layer-resources";
 
 export interface Webgl2WorldDrawUnit {
 	id: string;
@@ -220,6 +227,11 @@ export interface Webgl2WorldResourceStore {
 	terrainTiles: Webgl2TerrainTileResource[];
 	terrainTilesById: Map<string, Webgl2TerrainTileResource>;
 	terrainRenderCandidates: Webgl2TerrainTileRenderCandidate[];
+	staticBundleLayerResources: Webgl2StaticBundleLayerResourceStore;
+	staticBundleLayerResourceCount: number;
+	staticBundleLayerCompactedBatchResourceCount: number;
+	staticBundleLayerDirectEntryResourceCount: number;
+	staticBundleLayerTexturePageResourceCount: number;
 	graphLeasesByDrawUnitId: Map<string, RendererResourceGraphLease>;
 	graphSignaturesByDrawUnitId: Map<string, string>;
 	graphLeasesByTerrainTileId: Map<string, RendererResourceGraphLease>;
@@ -369,6 +381,11 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		terrainTiles: [],
 		terrainTilesById: new Map(),
 		terrainRenderCandidates: [],
+		staticBundleLayerResources: createWebgl2StaticBundleLayerResourceStore(),
+		staticBundleLayerResourceCount: 0,
+		staticBundleLayerCompactedBatchResourceCount: 0,
+		staticBundleLayerDirectEntryResourceCount: 0,
+		staticBundleLayerTexturePageResourceCount: 0,
 		graphLeasesByDrawUnitId: new Map(),
 		graphSignaturesByDrawUnitId: new Map(),
 		graphLeasesByTerrainTileId: new Map(),
@@ -472,6 +489,44 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		indexedMaterialDataCache: new Map(),
 		materialPlanCache: new Map(),
 	};
+}
+
+export function syncWebgl2StaticLandblockRenderArtifactResources({
+	gl,
+	store,
+	artifacts,
+}: {
+	gl: WebGL2RenderingContext;
+	store: Webgl2WorldResourceStore;
+	artifacts: StaticLandblockRenderArtifactStoreSnapshot;
+}): void {
+	const layers = artifacts.artifacts.flatMap((artifact) =>
+		artifact.staticBundleLayers.filter(
+			(layer) =>
+				artifact.preset === "outdoor" &&
+				(layer.layerKind === "outdoor-buildings" ||
+					layer.layerKind === "outdoor-detail"),
+		),
+	);
+	syncWebgl2StaticBundleLayerResources({
+		gl,
+		store: store.staticBundleLayerResources,
+		layers,
+	});
+	const resources = [...store.staticBundleLayerResources.layersByKey.values()];
+	store.staticBundleLayerResourceCount = resources.length;
+	store.staticBundleLayerCompactedBatchResourceCount = resources.reduce(
+		(total, resource) => total + resource.compactedBatches.length,
+		0,
+	);
+	store.staticBundleLayerDirectEntryResourceCount = resources.reduce(
+		(total, resource) => total + resource.directEntries.length,
+		0,
+	);
+	store.staticBundleLayerTexturePageResourceCount = resources.reduce(
+		(total, resource) => total + resource.texturePages.length,
+		0,
+	);
 }
 
 export function markWebgl2TextureAtlasGenerationReplacementPending({
@@ -959,11 +1014,16 @@ export function destroyWebgl2WorldResources(
 	for (const terrainTile of store.terrainTiles) {
 		destroyWebgl2TerrainTileResource(terrainTile);
 	}
+	destroyWebgl2StaticBundleLayerResources(store.staticBundleLayerResources);
 	store.drawUnits = [];
 	store.drawUnitsById.clear();
 	store.terrainTiles = [];
 	store.terrainTilesById.clear();
 	store.terrainRenderCandidates = [];
+	store.staticBundleLayerResourceCount = 0;
+	store.staticBundleLayerCompactedBatchResourceCount = 0;
+	store.staticBundleLayerDirectEntryResourceCount = 0;
+	store.staticBundleLayerTexturePageResourceCount = 0;
 	store.graphLeasesByDrawUnitId.clear();
 	store.graphSignaturesByDrawUnitId.clear();
 	store.graphLeasesByTerrainTileId.clear();

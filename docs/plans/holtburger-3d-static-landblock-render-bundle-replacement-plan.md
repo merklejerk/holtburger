@@ -1,8 +1,8 @@
 # Holtburger 3D Static Landblock Render Bundle Replacement Plan
 
-Status: Phase 1A implemented. Phase 1B is the next immediate implementation phase: shared worker
-asset loading foundation. The plan has been redirected to worker-owned raw static closure loading
-and layer-scoped texture pages.
+Status: Phase 1A and Phase 1B implemented. Phase 1C is the next implementation phase: static
+bundle contracts for worker-owned loading. The plan has been redirected to worker-owned raw static
+closure loading and layer-scoped texture pages.
 
 Progress:
 
@@ -28,6 +28,10 @@ Progress:
 - 2026-06-04: Split the next work into smaller phases: shared worker asset loading foundation,
   worker-owned static contracts, worker-safe builder, static worker orchestration, renderer vertical
   slice, and expansion/deletion.
+- 2026-06-04: Implemented Phase 1B. Extracted shared worker-side host asset lookup, asset
+  preparation, closure dependency loading, transferable normalization, and worker profiling modules
+  under `apps/holtburger-3d/src/workers/shared/`. `asset-worker.ts` now imports those helpers and
+  remains the prepared-asset-cache worker instead of becoming a cross-worker service.
 
 Validation:
 
@@ -38,6 +42,11 @@ Validation:
 - `npm exec eslint -- src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts`
   passed.
 - `npm run lint:rust` passed.
+- `npm run test:ts -- src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts`
+  passed after Phase 1B.
+- `npm exec eslint -- src/workers/asset-worker.ts src/workers/shared/asset-prepare.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/asset-closure-loader.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/host-asset-bridge.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/transferables.ts src/workers/shared/transferables.test.ts src/workers/shared/worker-profile.ts src/lib/assets/asset-channel.test.ts`
+  passed after Phase 1B.
+- `npm run check`, `npm run lint:dead`, and `npm run lint:rust` passed after Phase 1B.
 - `npm run lint:ts` currently fails on existing unrelated debt:
   `src/lib/world-display/camera.ts` defines unused `rendererPointToAcPosition`.
 
@@ -895,27 +904,60 @@ Exit criteria:
 
 ### Phase 1B: Shared Worker Asset Loading Foundation
 
-Status: Immediate next phase.
+Status: Implemented on 2026-06-04.
 
-- Extract shared worker-side asset loading libraries from the existing asset worker:
-  - host asset bridge;
-  - asset preparation;
-  - closure loading/dependency expansion;
-  - transferable normalization;
-  - worker profiling.
-- Keep `asset-worker.ts` as a consumer of those shared libraries. Do not turn it into a central
-  service that static workers call.
-- Preserve the current `AssetChannel` behavior while moving implementation details out of
-  `asset-worker.ts`.
-- Add unit tests with fake host lookup responses for:
-  - host lookup request/complete/error flow;
-  - binary envelope decoding;
-  - worker-local `prepareAssetPayload`;
-  - dependency expansion;
-  - transferable normalization.
-- Keep all shared modules domain-neutral. They should know about asset lookup, preparation,
-  dependency traversal, transferables, and profiling, but not about static landblocks, dynamic
-  entities, skyboxes, effects, or renderer resource ownership.
+Implemented:
+
+- Extracted shared worker-side asset loading libraries from the existing asset worker:
+  - `workers/shared/host-asset-bridge.ts`;
+  - `workers/shared/asset-prepare.ts`;
+  - `workers/shared/asset-closure-loader.ts`;
+  - `workers/shared/transferables.ts`;
+  - `workers/shared/worker-profile.ts`.
+- Kept `asset-worker.ts` as a consumer of those shared libraries. It still owns the current
+  prepared-asset-cache worker flow and does not become a central service that static workers call.
+- Preserved current `AssetChannel` behavior while moving lookup, preparation, transfer, and profile
+  implementation details out of `asset-worker.ts`.
+- Added focused tests with fake host lookup responses for host request/complete/error flow, binary
+  envelope decoding, worker-local `prepareAssetPayload`, dependency expansion, and transferable
+  normalization.
+- Kept the shared modules domain-neutral. They know about asset lookup, preparation, dependency
+  traversal, transferables, and profiling, but not static landblocks, dynamic entities, skyboxes,
+  effects, or renderer resource ownership.
+
+Decisions and course corrections:
+
+- Do not export unused convenience types/functions from the shared modules. Knip caught an early
+  over-export of a bridge message union, closure lookup interface, and response-summary helper; they
+  were made private instead of retained as future-facing API.
+- `asset-channel.test.ts` now stays scoped to channel behavior. Payload-preparation assertions live
+  with `workers/shared/asset-prepare.test.ts`, where the ownership is clearer.
+- `loadWorkerAssetClosure` intentionally returns raw lookup responses and a response map. It does
+  not prepare payloads itself because future domain workers may need domain-specific expansion,
+  retry, and failure policy before preparation.
+- The first closure-loader test uses schema-valid fixture payloads. Dependency traversal is
+  intentionally contract-driven through `getAssetResponseDependencies`; fake payload shortcuts can
+  hide broken loader behavior.
+
+Introduced cleanup targets:
+
+- `asset-worker.ts` still owns asset-worker-specific message contracts. Move or split those only
+  when the static worker contract exists in Phase 1C; doing it earlier would create generic message
+  abstractions with only one concrete worker.
+- Shared closure loading currently uses generic response dependencies only. Phase 1C/1D must add or
+  pass domain hooks for setup-appearance companions and normalized prepared-texture routes rather
+  than broadening `getAssetResponseDependencies` with static-only policy.
+
+Legacy shims introduced:
+
+- None. `asset-worker.ts` imports the shared modules directly, and payload-preparation tests import
+  the shared module instead of relying on a reexport through `asset-worker.ts`.
+
+Legacy debt found before the next phase:
+
+- `npm run lint:ts` remains blocked by existing unrelated dead code in
+  `src/lib/world-display/camera.ts`: `rendererPointToAcPosition` is defined but unused. This should
+  be cleaned before treating full TS lint as a reliable next-phase gate.
 
 Exit criteria:
 
@@ -928,7 +970,7 @@ Exit criteria:
 
 ### Phase 1C: Static Bundle Contracts for Worker-Owned Loading
 
-Status: After Phase 1B.
+Status: Immediate next phase.
 
 - Replace `DesiredStaticBundleLayer.closureAssetIds` / `missingAssetIds` as the target contract with
   root manifests and optional known-closure diagnostics.
@@ -952,6 +994,9 @@ Status: After Phase 1B.
   replaces it.
 - Define worker-local texture loading as: material/render-surface resolution, normalized prepared
   texture route derivation, worker host lookup for `prepared-texture/...`, then layer page packing.
+- Use the Phase 1B shared closure loader as the raw dependency traversal foundation, but keep
+  static-specific root manifests, topology discovery DTOs, setup-appearance companion discovery,
+  and prepared-texture route policy in static contracts or later static builder modules.
 
 Exit criteria:
 

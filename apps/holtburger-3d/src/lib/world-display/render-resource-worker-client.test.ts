@@ -276,7 +276,92 @@ describe("compacted geometry worker scheduler", () => {
 		scheduler.dispose();
 		expect(worker.wasTerminated).toBe(true);
 	});
+
+	it("aggregates compacted job metrics and discards stale results", async () => {
+		const worker = new FakeRenderResourceWorker();
+		const client = new RenderResourceWorkerClient(() => worker);
+		const scheduler = new CompactedGeometryWorkerScheduler({
+			client,
+			onReadyResult() {
+				return;
+			},
+		});
+
+		scheduler.scheduleDesired(createCompactedDesiredBatch("job:a"));
+		scheduler.scheduleDesired(createCompactedDesiredBatch("job:b"));
+
+		expect(scheduler.getMetrics()).toMatchObject({
+			activeSchedulerCount: 1,
+			submittedJobCount: 1,
+			coalescedDesiredJobCount: 1,
+		});
+
+		worker.emit({
+			type: "job-complete",
+			requestId: "render-resource-1",
+			result: {
+				type: "build-compacted-geometry",
+				key: "job:a",
+				geometry: null,
+			},
+			durationMs: 1,
+		});
+		await waitForMicrotasks();
+
+		expect(scheduler.consumeReadyResults()).toEqual([]);
+		expect(worker.messages).toHaveLength(2);
+		expect(worker.messages[1]?.job.key).toBe("job:b");
+		expect(scheduler.getMetrics()).toMatchObject({
+			submittedJobCount: 2,
+			staleResultCount: 1,
+		});
+
+		worker.emit({
+			type: "job-complete",
+			requestId: "render-resource-2",
+			result: {
+				type: "build-compacted-geometry",
+				key: "job:b",
+				geometry: null,
+			},
+			durationMs: 1,
+		});
+		await waitForMicrotasks();
+
+		expect(scheduler.consumeReadyResults()).toEqual([
+			{
+				groupKey: "rgbaAtlas|partition=abcd|landblock=12340000",
+				result: {
+					type: "build-compacted-geometry",
+					key: "job:b",
+					geometry: null,
+				},
+			},
+		]);
+		expect(scheduler.getMetrics()).toMatchObject({
+			readyResultCount: 1,
+		});
+	});
 });
+
+function createCompactedDesiredBatch(
+	desiredJobKey: string,
+): Parameters<CompactedGeometryWorkerScheduler["scheduleDesired"]>[0] {
+	return {
+		groupKey: "rgbaAtlas|partition=abcd|landblock=12340000",
+		desiredJobKey,
+		plan: {
+			key: "plan:a",
+			compactableDrawUnitIds: [],
+			materialSlots: [],
+			drawUnitMaterialSlots: [],
+			drawSlices: [],
+			triangleCount: 0,
+		},
+		drawUnits: [],
+		batchOrigin: { x: 0, y: 0, z: 0 },
+	};
+}
 
 interface TestSchedulerInput {
 	key: string;

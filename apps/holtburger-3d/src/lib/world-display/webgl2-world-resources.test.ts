@@ -19,6 +19,8 @@ import {
 	RendererResourceGraph,
 	staticBatchGraphNodeKey,
 } from "./renderer-resource-graph";
+import { RenderResourceWorkerClient } from "./render-resource-worker-client";
+import type { RenderResourceWorkerLike } from "./render-resource-worker-client";
 import type { RenderChunkTransform } from "./render-anchor";
 import {
 	createEmptyStaticRenderableSceneModel,
@@ -45,6 +47,12 @@ import {
 import { shouldRetainWebgl2CompactedGeometryBatch } from "./webgl2/resources/compacted-geometry-sync";
 import type { Webgl2IndexedResourceAtlasGenerationResource } from "./webgl2/resources/indexed-resource-atlas-generation";
 import type { Webgl2TextureAtlasGenerationResource } from "./webgl2/resources/texture-atlas-generation";
+import { CompactedGeometryWorkerScheduler } from "./worker-resources/compacted-geometry-worker-scheduler";
+import { buildCompactedGeometryWorkerResult } from "./worker-resources/compacted-geometry-worker-payloads";
+import type {
+	RenderResourceWorkerRequestMessage,
+	RenderResourceWorkerResponseMessage,
+} from "../../workers/render-resource-worker";
 
 describe("webgl2 world resources", () => {
 	it("keeps committed texture atlas generation alive while a replacement is pending", () => {
@@ -693,6 +701,102 @@ describe("webgl2 world resources", () => {
 		).toBe(true);
 	});
 
+	it("keeps committed compacted resources installed while worker replacement is pending", async () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2WorldResourceStore();
+		const graph = new RendererResourceGraph();
+		const materialSurfaceId = 0x08000002;
+		const renderSurfaceId = 0x06000002;
+		const assetState = createAssetState({
+			materialSurfaceId,
+			renderSurfaceId,
+			compressedAtlasReady: true,
+		});
+		const firstPart = createStaticPart({
+			instanceId: "instance-a",
+			landblockId: 0x12340000,
+			materialSlots: [createMaterialSlot(0, materialSurfaceId)],
+			chunkLocalOrigin: { x: 1, y: 2, z: 3 },
+		});
+
+		const worker = new FakeRenderResourceWorker();
+		store.compactedGeometryWorkerScheduler =
+			new CompactedGeometryWorkerScheduler({
+				client: new RenderResourceWorkerClient(() => worker),
+				onReadyResult() {
+					return;
+				},
+			});
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState,
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: createStaticRenderableScene([firstPart]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [
+				createChunkTransform({ landblockId: 0x12340000 }),
+			],
+			rendererResourceGraph: graph,
+		});
+		completeFirstCompactedGeometryWorkerJob(worker);
+		await waitForMicrotasks();
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState,
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: createStaticRenderableScene([firstPart]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [
+				createChunkTransform({ landblockId: 0x12340000 }),
+			],
+			rendererResourceGraph: graph,
+		});
+
+		const committedBatch = sortAtlasBatchesByLandblock(store)[0];
+		const committedFamilyResource = [
+			...store.compactedGeometryFamilyResources.values(),
+		][0];
+		expect(committedBatch).toBeDefined();
+		expect(committedFamilyResource).toBeDefined();
+		const movedPart = createStaticPart({
+			instanceId: "instance-b",
+			landblockId: 0x12340000,
+			materialSlots: [createMaterialSlot(0, materialSurfaceId)],
+			chunkLocalOrigin: { x: 8, y: 2, z: 3 },
+		});
+
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState,
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: createStaticRenderableScene([movedPart]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [
+				createChunkTransform({ landblockId: 0x12340000 }),
+			],
+			rendererResourceGraph: graph,
+		});
+
+		expect(worker.messages).toHaveLength(2);
+		expect(store.compactedGeometryBatches.has(committedBatch?.key ?? "")).toBe(
+			true,
+		);
+		expect(
+			store.compactedGeometryFamilyResources.has(
+				committedFamilyResource?.key ?? "",
+			),
+		).toBe(true);
+		expect(
+			store.pendingCompactedGeometryBatchKeys.has(committedBatch?.key ?? ""),
+		).toBe(true);
+	});
+
 	it("compacts structured-interior direct-texture draw units into landblock atlas batches", () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
@@ -1080,6 +1184,54 @@ describe("webgl2 world resources", () => {
 	});
 });
 
+class FakeRenderResourceWorker implements RenderResourceWorkerLike {
+	onmessage:
+		| ((event: MessageEvent<RenderResourceWorkerResponseMessage>) => void)
+		| null = null;
+	onerror: ((event: Event | ErrorEvent) => void) | null = null;
+	readonly messages: RenderResourceWorkerRequestMessage[] = [];
+	readonly transferLists: Transferable[][] = [];
+	wasTerminated = false;
+
+	postMessage(
+		message: RenderResourceWorkerRequestMessage,
+		transferables: Transferable[] = [],
+	): void {
+		this.messages.push(message);
+		this.transferLists.push(transferables);
+	}
+
+	terminate(): void {
+		this.wasTerminated = true;
+	}
+
+	emit(message: RenderResourceWorkerResponseMessage): void {
+		this.onmessage?.({
+			data: message,
+		} as MessageEvent<RenderResourceWorkerResponseMessage>);
+	}
+}
+
+function completeFirstCompactedGeometryWorkerJob(
+	worker: FakeRenderResourceWorker,
+): void {
+	const message = worker.messages[0];
+	if (!message || message.job.type !== "build-compacted-geometry") {
+		throw new Error("Expected a compacted geometry worker job.");
+	}
+	worker.emit({
+		type: "job-complete",
+		requestId: message.requestId,
+		result: buildCompactedGeometryWorkerResult(message.job.input),
+		durationMs: 1,
+	});
+}
+
+async function waitForMicrotasks(): Promise<void> {
+	await Promise.resolve();
+	await Promise.resolve();
+}
+
 class FakeWebgl2 {
 	readonly ARRAY_BUFFER = 1;
 	readonly ELEMENT_ARRAY_BUFFER = 2;
@@ -1464,12 +1616,14 @@ function createStaticPart({
 	instanceId = "instance-a",
 	landblockId = 0x12340000,
 	materialSlots = [],
+	chunkLocalOrigin = { x: 1, y: 2, z: 3 },
 }: {
 	kind?: StaticRenderablePart["kind"];
 	detailRoleKind?: StaticRenderablePart["detailRoleKind"];
 	instanceId?: string;
 	landblockId?: number;
 	materialSlots?: readonly ResolvedMaterialSlot[];
+	chunkLocalOrigin?: RenderChunkTransform["offset"];
 } = {}): StaticRenderablePart {
 	const landblockKey = `landblock/${landblockId.toString(16).padStart(8, "0")}`;
 	return {
@@ -1493,7 +1647,7 @@ function createStaticPart({
 		materialSlots,
 		materialSignature: materialSlots.length > 0 ? "textured" : "base",
 		parentPlacements: [],
-		chunkLocalInstancePlacement: createPlacement({ x: 1, y: 2, z: 3 }),
+		chunkLocalInstancePlacement: createPlacement(chunkLocalOrigin),
 		partPlacements: [],
 		scale: { x: 1, y: 1, z: 1 },
 		debugColorKey: instanceId,

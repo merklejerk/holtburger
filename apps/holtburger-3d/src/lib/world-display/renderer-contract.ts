@@ -192,6 +192,14 @@ interface WorldRenderDebugMetrics {
 	compactedGeometryBatchOriginCount: number;
 	compactedGeometryTransformTableEntryCount: number;
 	compactedResourceFallbackSamples: string[];
+	compactedGeometryWorkerActiveSchedulerCount: number;
+	compactedGeometryWorkerSubmittedJobCount: number;
+	compactedGeometryWorkerDedupedDesiredJobCount: number;
+	compactedGeometryWorkerCoalescedDesiredJobCount: number;
+	compactedGeometryWorkerStaleResultCount: number;
+	compactedGeometryWorkerReadyResultCount: number;
+	compactedGeometryWorkerCommittedResultCount: number;
+	compactedGeometryWorkerErrorCount: number;
 	rgbaTexturePageFamilyShaderDrawCallCount: number;
 	rgbaTexturePageFamilySubmittedBatchCount: number;
 	rgbaTexturePageFamilySubmittedDrawSliceCount: number;

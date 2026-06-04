@@ -1145,6 +1145,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 									currentResources.worldStore.textureAtlasGeneration
 										?.detailTextures ?? [],
 							},
+							staticBundleLayerResources:
+								currentResources.worldStore.staticBundleLayerResources,
 							drawUnitsById: currentResources.worldStore.drawUnitsById,
 							terrainTilesById: currentResources.worldStore.terrainTilesById,
 							frame,
@@ -2582,6 +2584,25 @@ function mergeSceneDomainSubmitMetrics({
 		directTexturePageFallbackSamples: [
 			...exteriorMetrics.directTexturePageFallbackSamples,
 			...interiorMetrics.directTexturePageFallbackSamples,
+		].slice(0, 8),
+		staticBundleLayerSubmittedCount:
+			exteriorMetrics.staticBundleLayerSubmittedCount +
+			interiorMetrics.staticBundleLayerSubmittedCount,
+		staticBundleGeometrySubmittedCount:
+			exteriorMetrics.staticBundleGeometrySubmittedCount +
+			interiorMetrics.staticBundleGeometrySubmittedCount,
+		staticBundleDrawCallCount:
+			exteriorMetrics.staticBundleDrawCallCount +
+			interiorMetrics.staticBundleDrawCallCount,
+		staticBundleTriangleCount:
+			exteriorMetrics.staticBundleTriangleCount +
+			interiorMetrics.staticBundleTriangleCount,
+		staticBundleSkippedGeometryCount:
+			exteriorMetrics.staticBundleSkippedGeometryCount +
+			interiorMetrics.staticBundleSkippedGeometryCount,
+		staticBundleSubmitFallbackSamples: [
+			...exteriorMetrics.staticBundleSubmitFallbackSamples,
+			...interiorMetrics.staticBundleSubmitFallbackSamples,
 		].slice(0, 8),
 	};
 }

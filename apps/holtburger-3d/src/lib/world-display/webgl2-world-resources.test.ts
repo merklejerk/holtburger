@@ -258,6 +258,57 @@ describe("webgl2 world resources", () => {
 		expect(gl.deletedBuffers).toHaveLength(0);
 	});
 
+	it("removes resident outdoor bundle landblocks from staged static resource sync", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2WorldResourceStore();
+		const part = createStaticPart();
+		const landblockId = part.owningLandblockId;
+
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState(),
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: createStaticRenderableScene([part]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform()],
+		});
+
+		expect(store.staticDrawUnitCount).toBe(1);
+		expect(store.stagedStaticPartCount).toBe(1);
+
+		syncWebgl2StaticLandblockRenderArtifactResources({
+			gl: gl.asContext(),
+			store,
+			artifacts: createStaticLandblockArtifactSnapshot([
+				createStaticBundleLayer("static-layer/buildings", "revision-a", {
+					landblockId,
+					layerKind: "outdoor-buildings",
+				}),
+				createStaticBundleLayer("static-layer/detail", "revision-a", {
+					landblockId,
+					layerKind: "outdoor-detail",
+				}),
+			]),
+		});
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState(),
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: createStaticRenderableScene([part]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform()],
+		});
+
+		expect(store.staticBundleLayerResourceCount).toBe(2);
+		expect(store.staticDrawUnitCount).toBe(0);
+		expect(store.stagedStaticPartCount).toBe(0);
+		expect(store.compactionCandidateDrawUnitCount).toBe(0);
+	});
+
 	it("realizes terrain tile resources without generic draw-unit compatibility output", () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
@@ -2728,12 +2779,13 @@ function sortAtlasBatchesByLandblock(store: Webgl2WorldResourceStore) {
 function createStaticLandblockArtifactSnapshot(
 	layers: readonly StaticLandblockRenderBundleLayer[],
 ): StaticLandblockRenderArtifactStoreSnapshot {
+	const landblockId = layers[0]?.landblockId ?? 0x1234;
 	return {
 		artifacts: [
 			{
 				type: "landblock-render-preset-built",
 				jobId: "job",
-				landblockId: 0x1234,
+				landblockId,
 				preset: "outdoor",
 				requestId: "request",
 				buildPolicyRevision: "build:v1",
@@ -2760,23 +2812,29 @@ function createStaticLandblockArtifactSnapshot(
 function createStaticBundleLayer(
 	key: string,
 	sourceRevision: string,
+	options: {
+		landblockId?: number;
+		layerKind?: StaticLandblockRenderBundleLayer["layerKind"];
+	} = {},
 ): StaticLandblockRenderBundleLayer {
+	const landblockId = options.landblockId ?? 0x1234;
+	const layerKind = options.layerKind ?? "outdoor-buildings";
 	return {
 		key,
 		scope: {
 			kind: "landblock",
-			landblockId: 0x1234,
-			layerKind: "outdoor-buildings",
+			landblockId,
+			layerKind,
 		},
-		landblockId: 0x1234,
-		layerKind: "outdoor-buildings",
+		landblockId,
+		layerKind,
 		sourceRevision,
 		rootAssetIds: ["landblock/00001234/outdoor"],
 		preparedAssetIds: [],
 		renderChunks: [
 			{
 				key: "chunk",
-				landblockId: 0x1234,
+				landblockId,
 				bounds: null,
 			},
 		],
@@ -2784,7 +2842,7 @@ function createStaticBundleLayer(
 			{
 				key: "compacted",
 				renderChunkKey: "chunk",
-				familyKey: "static:rgba-texture-page:alpha=opaque",
+				familyKey: "rgba-texture-page",
 				materialRecordKey: "material",
 				objectKeys: ["object-a"],
 				positions: createStaticTrianglePositions(),
@@ -2809,16 +2867,29 @@ function createStaticBundleLayer(
 		materialRecords: [
 			{
 				key: "material",
-				familyKey: "static:rgba-texture-page:alpha=opaque",
+				familyKey: "rgba-texture-page",
 				texturePageRefKeys: ["texture-ref"],
 				isTransparent: false,
 			},
 		],
-		texturePageRefs: [],
+		texturePageRefs: [
+			{
+				key: "texture-ref",
+				sourceAssetId: "prepared-texture/06000001/raw",
+				usageBucket: "base-color",
+				sampleClass: "rgba-color",
+				width: 1,
+				height: 1,
+				wrapS: "clamp",
+				wrapT: "clamp",
+				samplingDomain: "color",
+				lookup: "color-filtered",
+			},
+		],
 		texturePages: [
 			{
 				key: "texture-page",
-				scopeKey: "landblock:4660:outdoor-buildings",
+				scopeKey: `landblock:${landblockId}:${layerKind}`,
 				pageKind: "single-entry",
 				usageBucket: "base-color",
 				sampleClass: "rgba-color",

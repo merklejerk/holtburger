@@ -77,6 +77,10 @@
 		type BrowserRenderResourceCoordinatorInput,
 		type BrowserRenderResourceSnapshot,
 	} from "../lib/world-display/browser-render-resource-coordinator";
+	import {
+		StaticLandblockRenderArtifactCoordinator,
+		type StaticLandblockRenderArtifactCoordinatorInput,
+	} from "../lib/world-display/static-landblock-render-artifact-coordinator";
 	import type { BrowserStaticRenderablePickDiagnostic } from "../lib/world-display/browser-picker-diagnostics";
 	import { buildRenderDebugReport } from "../lib/world-display/diagnostics/render-debug-report";
 	import type {
@@ -186,6 +190,20 @@
 	let rootElement = $state<HTMLDivElement | null>(null);
 	let worldDisplaySurface = $state<WorldDisplay | null>(null);
 	const renderResourceCoordinator = new BrowserRenderResourceCoordinator();
+	const staticLandblockRenderCoordinator =
+		new StaticLandblockRenderArtifactCoordinator({
+			onStoreChanged: () => {
+				scheduleCurrentSceneResourceUpdate();
+			},
+			onError: (error, desired) => {
+				console.error("[holtburger-3d][static-landblock-render-worker]", {
+					landblockId: desired.landblockId,
+					preset: desired.preset,
+					requestId: desired.requestId,
+					message: error.message,
+				});
+			},
+		});
 	let renderResourceSnapshot = $state<BrowserRenderResourceSnapshot>(
 		createEmptyBrowserRenderResourceSnapshot(),
 	);
@@ -513,6 +531,10 @@
 		{ label: "Camera residency", value: cameraResidencyText },
 		{ label: "Base scene", value: renderGraphText },
 		{ label: "Landblocks", value: landblockVisibilityText },
+		{
+			label: "Worker artifacts",
+			value: renderResourceSnapshot.staticLandblockRenderArtifactText,
+		},
 		{ label: "Cells", value: cellVisibilityText },
 		{ label: "Renderer", value: rendererSummaryText },
 		{ label: "Materials", value: assetMaterialDebugText },
@@ -952,6 +974,9 @@
 	}
 
 	function scheduleCurrentSceneResourceUpdate(): void {
+		const staticLandblockRenderInput =
+			createStaticLandblockRenderCoordinatorInput();
+		staticLandblockRenderCoordinator.sync(staticLandblockRenderInput);
 		scheduleSceneResourceUpdate({
 			assetState,
 			browserDestination,
@@ -971,7 +996,19 @@
 			activeRenderAnchor,
 			browserCameraFrame: getEffectiveBrowserCameraFrame(),
 			runtimeAppearancePreviews,
+			staticLandblockRenderArtifacts:
+				staticLandblockRenderCoordinator.getSnapshot(),
 		});
+	}
+
+	function createStaticLandblockRenderCoordinatorInput(): StaticLandblockRenderArtifactCoordinatorInput {
+		return {
+			browserDestination,
+			terrainLodRadius,
+			buildingLodRadius,
+			detailLodRadius,
+			envCellLodRadius,
+		};
 	}
 
 	function handleRuntimeAppearanceSubmit(
@@ -2316,6 +2353,7 @@
 	}
 
 	onDestroy(() => {
+		staticLandblockRenderCoordinator.dispose();
 		if (debugSummaryTimer) {
 			clearTimeout(debugSummaryTimer);
 			debugSummaryTimer = null;

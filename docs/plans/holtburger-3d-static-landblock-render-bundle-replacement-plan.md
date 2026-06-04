@@ -1986,7 +1986,7 @@ Legacy debt found before the next phase:
 
 ### Phase 2B: Worker Artifact Handoff Prep
 
-Status: Immediate next phase.
+Status: Implemented on 2026-06-04.
 
 Purpose:
 
@@ -1995,28 +1995,77 @@ Purpose:
 - Keep the old static scheduling surface from expanding while worker-built artifacts start crossing
   into live resource code.
 
-Tasks:
+Implemented:
 
-- Add a resident CPU artifact store keyed by landblock, preset, build policy revision, and
-  texture-page policy revision.
-- Wire `planDesiredLandblockRenderPresets` to `StaticLandblockRenderWorkerClient` without invoking
-  `static-bundle-layer-planner` for those desired presets.
-- Commit worker results into the resident CPU artifact store only when latest request identity still
-  matches.
-- Keep old staged/static bundle scheduling active only for renderer paths not yet migrated, and label
-  those call sites as transitional.
-- Add resource-store tests proving stale worker results do not replace newer resident artifacts.
-- Do not add WebGL realization in this phase unless it is trivial and does not keep old static draw
-  units alive beside worker artifacts.
+- Added `static-landblock-render-artifact-store.ts`, a main-thread resident CPU artifact store keyed
+  by landblock, preset, build policy revision, and texture-page policy revision.
+- The store tracks latest desired identities separately from resident artifacts so stale worker
+  results cannot replace a newer desired target.
+- Added `static-landblock-render-artifact-coordinator.ts` to:
+  - plan desired presets through `planDesiredLandblockRenderPresets`;
+  - submit missing desired presets to `StaticLandblockRenderWorkerClient`;
+  - commit only latest worker results into the resident CPU artifact store;
+  - evict resident artifacts that fall out of the desired target set.
+- Wired `StaticLandblockRenderArtifactCoordinator` into `BrowserWorldDisplay` so live browser scene
+  interest now submits landblock preset worker jobs without invoking `static-bundle-layer-planner`
+  for those desired presets.
+- Threaded the store snapshot through `BrowserRenderResourceCoordinatorInput` and
+  `BrowserRenderResourceSnapshot` as low-fidelity diagnostics only.
+- Added a browser panel row for worker artifact handoff counts.
+- Kept WebGL realization out of this phase, so no old staged draw units coexist with worker artifacts
+  as renderer inputs yet.
+- Added tests for:
+  - stale result rejection and eviction in the resident store;
+  - worker-client submission and commit through the coordinator;
+  - stable request identity for unchanged scene interest.
+
+Decisions and course corrections:
+
+- Worker artifact residency belongs in the renderer domain, not the raw asset cache. The raw
+  `SceneAssetStreamingController` continues to own legacy prepared assets until Phase 3/4 migration,
+  but preset worker artifacts now have their own main-thread resident store.
+- Request IDs are stable for unchanged scene interest. Regenerating request IDs on every UI update
+  would make existing resident artifacts look stale without actually submitting replacement work.
+- The live worker build policy currently mirrors the existing renderer atlas defaults:
+  `4096` max texture size, `8` texture pages, `2` gutter pixels, and `8` terrain layer entries.
+  Future WebGL capability-specific policy can revise this, but the worker job now receives concrete
+  policy values rather than hidden defaults.
+- Worker artifact diagnostics remain aggregate counts. Picker/debug fidelity is intentionally not
+  improved in this phase.
+
+Cleanup targets:
+
+- The live renderer still derives terrain/static scenes from `AssetChannelState`. Phase 3 should
+  consume `StaticLandblockRenderArtifactStoreSnapshot` for the `outdoor` preset and stop deriving
+  migrated terrain/static objects from staged prepared assets.
+- The old static bundle layer planner remains available for non-migrated renderer paths. Once
+  `outdoor` renders from resident artifacts, quarantine or delete calls that produce
+  `DesiredStaticBundleLayer` for that preset.
+- The internal worker adapter to `StaticBundleLayerWorkerJob` remains from Phase 2A and should be
+  removed once the builder accepts preset/layer build context directly.
+
+Legacy shims introduced:
+
+- No public compatibility shim or alternate render mode was added.
+- `BrowserRenderResourceSnapshot.staticLandblockRenderArtifactText` is diagnostics-only and does not
+  emulate staged draw-unit identity.
+
+Legacy debt found before the next phase:
+
+- Phase 3 needs a WebGL realization layer for worker terrain artifacts and static bundle layers
+  before deleting old staged/static paths for `outdoor`.
+- Phase 3 should add explicit resource-store tests proving that `outdoor` WebGL upload/eviction uses
+  worker artifact keys and not old static source revisions.
 
 Exit criteria:
 
 - Desired landblock presets are submitted to `StaticLandblockRenderWorkerClient` from the live
-  streaming/resource coordination path.
+  browser render-resource coordination path.
 - Complete worker results can be committed/evicted on the main thread without static layer root
   manifests, prepared-cache closure IDs, or source revisions.
-- Old static bundle layer scheduling is clearly quarantined behind transitional call sites.
-- Tests plus `npm run check`, `npm run lint:ts`, and `npm run lint:dead` pass.
+- Old static bundle layer scheduling is not used for the new preset worker handoff path.
+- Focused tests, `npm run check`, full `npm run lint:ts`, `npm run lint:dead`, and
+  `npm run lint:rust` pass.
 
 The original Phase 2 exit criteria are now split across Phase 2A and Phase 2B above.
 
@@ -2024,8 +2073,12 @@ The original Phase 2 exit criteria are now split across Phase 2A and Phase 2B ab
 
 - Add WebGL layer resource realization for compacted batches, direct static entries, material tables,
   and layer-owned texture pages.
+- Add WebGL/CPU realization for `LandblockTerrainRenderArtifact`; terrain remains first-class and
+  must not route through static direct draw fallback.
 - Wire the `outdoor` preset first through planning, worker orchestration, WebGL realization, resident
   terrain/object ownership, and submit.
+- Consume resident worker artifacts from the Phase 2B store; do not re-plan
+  `DesiredStaticBundleLayer` or rehydrate prepared static closure for the migrated `outdoor` preset.
 - For that wired preset, replace static staged draw-unit assembly with resident terrain/object
   artifacts.
 - Keep structured interior and portal code separate unless a specific piece is intentionally moved.

@@ -19,6 +19,7 @@ import {
 	deriveBrowserWorldDisplayModel,
 	type BrowserWorldDisplayModel,
 } from "./model";
+import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
 import {
 	deriveWorldDebugOverlayModel,
 	type WorldDebugOverlayModel,
@@ -99,6 +100,7 @@ export interface BrowserRenderResourceCoordinatorInput {
 	activeRenderAnchor: RenderLandblockAnchor | null;
 	browserCameraFrame: SceneCameraFrame | null;
 	runtimeAppearancePreviews: readonly BrowserRuntimeAppearancePreview[];
+	staticLandblockRenderArtifacts: StaticLandblockRenderArtifactStoreSnapshot;
 }
 
 export interface BrowserRuntimeAppearancePreview {
@@ -124,6 +126,7 @@ export interface BrowserRenderResourceSnapshot {
 	portalDiagnosticsText: string;
 	landblockVisibilityText: string;
 	cellVisibilityFallbackText: string;
+	staticLandblockRenderArtifactText: string;
 }
 
 export interface BrowserRenderResourceSurface {
@@ -177,6 +180,8 @@ export function createEmptyBrowserRenderResourceSnapshot(): BrowserRenderResourc
 			"Outdoor landblock selection is waiting for focus.",
 		cellVisibilityFallbackText:
 			"0 loaded env cells; renderer visibility pending.",
+		staticLandblockRenderArtifactText:
+			"Static landblock render artifacts are idle.",
 	};
 }
 
@@ -509,6 +514,7 @@ export class BrowserRenderResourceCoordinator {
 			structuredInteriorCoverage,
 			activeRenderChunkTransforms,
 			renderSpatialQuery: this.renderSpatialIndex,
+			staticLandblockRenderArtifacts: input.staticLandblockRenderArtifacts,
 		});
 		return this.snapshot;
 	}
@@ -1034,6 +1040,7 @@ function deriveSnapshot({
 	structuredInteriorCoverage,
 	activeRenderChunkTransforms,
 	renderSpatialQuery,
+	staticLandblockRenderArtifacts,
 }: {
 	input: BrowserRenderResourceCoordinatorInput;
 	terrainScene: TerrainSceneModel;
@@ -1048,6 +1055,7 @@ function deriveSnapshot({
 	> | null;
 	activeRenderChunkTransforms: readonly RenderChunkTransform[];
 	renderSpatialQuery: RenderSpatialIndexQuery;
+	staticLandblockRenderArtifacts: StaticLandblockRenderArtifactStoreSnapshot;
 }): BrowserRenderResourceSnapshot {
 	const terrainVertexCount = terrainScene.tiles.reduce(
 		(total, tile) => total + tile.mesh.vertices.length,
@@ -1130,7 +1138,22 @@ function deriveSnapshot({
 					? "Outdoor landblock selection is waiting for focus."
 					: `Terrain ${terrainScene.tiles.length}/${outdoorSceneInterest.terrainLandblockIds.length}, buildings ${outdoorSceneInterest.buildingLandblockIds.length}, detail ${outdoorSceneInterest.detailLandblockIds.length}.`,
 		cellVisibilityFallbackText: `${structuredInteriorScene.cells.length} loaded env cell${structuredInteriorScene.cells.length === 1 ? "" : "s"}; renderer visibility pending.`,
+		staticLandblockRenderArtifactText: describeStaticLandblockRenderArtifacts(
+			staticLandblockRenderArtifacts,
+		),
 	};
+}
+
+function describeStaticLandblockRenderArtifacts(
+	snapshot: StaticLandblockRenderArtifactStoreSnapshot,
+): string {
+	return [
+		`${snapshot.residentCount}/${snapshot.desiredCount} resident`,
+		`${snapshot.inFlightCount} in flight`,
+		`${snapshot.committedResultCount} committed`,
+		`${snapshot.staleResultCount} stale`,
+		`${snapshot.errorCount} errors`,
+	].join("; ");
 }
 
 function describeStaticRenderableIdleState(

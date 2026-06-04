@@ -119,6 +119,7 @@ import {
 	releaseWebgl2CompactedGeometryBatchGraphLeases,
 	syncWebgl2CompactedGeometryResources,
 } from "./webgl2/resources/compacted-geometry-sync";
+import type { CompactedGeometryWorkerScheduler } from "./worker-resources/compacted-geometry-worker-scheduler";
 import {
 	buildTerrainBlendPlanSet,
 	type TerrainBlendTextureRef,
@@ -242,6 +243,9 @@ export interface Webgl2WorldResourceStore {
 	textureAtlasGenerationGraphLease: RendererResourceGraphLease | null;
 	compactedGeometryBatches: Map<string, Webgl2CompactedGeometryBatchResource>;
 	pendingCompactedGeometryBatchKeys: Set<string>;
+	compactedGeometryBatchKeyBySchedulerKey: Map<string, string>;
+	compactedGeometryFamilyResourceKeyBySchedulerKey: Map<string, string>;
+	compactedGeometryWorkerScheduler: CompactedGeometryWorkerScheduler | null;
 	compactedGeometryFamilyResources: Map<
 		string,
 		Webgl2CompactedGeometryFamilyResource
@@ -383,6 +387,9 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		textureAtlasGenerationGraphLease: null,
 		compactedGeometryBatches: new Map(),
 		pendingCompactedGeometryBatchKeys: new Set(),
+		compactedGeometryBatchKeyBySchedulerKey: new Map(),
+		compactedGeometryFamilyResourceKeyBySchedulerKey: new Map(),
+		compactedGeometryWorkerScheduler: null,
 		compactedGeometryFamilyResources: new Map(),
 		compactedGeometryFamilyResourceCounts: {},
 		compactedGeometryBatchGraph: null,
@@ -935,12 +942,17 @@ export function destroyWebgl2WorldResources(
 	store.graphSignaturesByTerrainTileId.clear();
 	releaseWebgl2TextureAtlasGenerationGraphLease(store);
 	releaseWebgl2IndexedResourceAtlasGenerationGraphLease(store);
+	store.compactedGeometryWorkerScheduler?.dispose();
+	store.compactedGeometryWorkerScheduler = null;
 	store.textureAtlasGenerationGraph = null;
 	store.textureAtlasGenerationGraphLease = null;
 	store.indexedResourceAtlasGenerationGraph = null;
 	store.indexedResourceAtlasGenerationGraphLease = null;
 	store.compactedGeometryBatchGraph = null;
 	store.compactedGeometryBatchGraphLeasesByKey.clear();
+	store.compactedGeometryBatchKeyBySchedulerKey.clear();
+	store.compactedGeometryFamilyResourceKeyBySchedulerKey.clear();
+	store.pendingCompactedGeometryBatchKeys.clear();
 	store.boundGraph = null;
 	store.terrainTileCount = 0;
 	store.terrainDrawUnitCount = 0;

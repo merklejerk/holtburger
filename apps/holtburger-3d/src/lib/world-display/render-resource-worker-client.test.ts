@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { RenderResourceJobScheduler } from "./render-resource-job-scheduler";
 import type { RenderResourceWorkerLike } from "./render-resource-worker-client";
 import { RenderResourceWorkerClient } from "./render-resource-worker-client";
+import { CompactedGeometryWorkerScheduler } from "./worker-resources/compacted-geometry-worker-scheduler";
 import type {
 	RenderResourceWorkerRequestMessage,
 	RenderResourceWorkerResponseMessage,
@@ -194,6 +195,86 @@ describe("render resource job scheduler", () => {
 			readyResultCount: 0,
 			staleResultCount: 0,
 		});
+	});
+});
+
+describe("compacted geometry worker scheduler", () => {
+	it("submits compacted jobs and reports ready results by group key", async () => {
+		const worker = new FakeRenderResourceWorker();
+		const client = new RenderResourceWorkerClient(() => worker);
+		let readyNotificationCount = 0;
+		const scheduler = new CompactedGeometryWorkerScheduler({
+			client,
+			onReadyResult() {
+				readyNotificationCount += 1;
+			},
+		});
+
+		scheduler.scheduleDesired({
+			groupKey: "rgbaAtlas|partition=abcd|landblock=12340000",
+			desiredJobKey: "compacted-geometry|job=a",
+			plan: {
+				key: "plan:a",
+				compactableDrawUnitIds: [],
+				materialSlots: [],
+				drawUnitMaterialSlots: [],
+				drawSlices: [],
+				triangleCount: 0,
+			},
+			drawUnits: [],
+			batchOrigin: { x: 0, y: 0, z: 0 },
+		});
+
+		expect(worker.messages).toEqual([
+			{
+				type: "run-job",
+				requestId: "render-resource-1",
+				job: {
+					type: "build-compacted-geometry",
+					key: "compacted-geometry|job=a",
+					input: {
+						key: "compacted-geometry|job=a",
+						plan: {
+							key: "plan:a",
+							compactableDrawUnitIds: [],
+							materialSlots: [],
+							drawUnitMaterialSlots: [],
+							drawSlices: [],
+							triangleCount: 0,
+						},
+						drawUnits: [],
+						batchOrigin: { x: 0, y: 0, z: 0 },
+					},
+				},
+			},
+		]);
+
+		worker.emit({
+			type: "job-complete",
+			requestId: "render-resource-1",
+			result: {
+				type: "build-compacted-geometry",
+				key: "compacted-geometry|job=a",
+				geometry: null,
+			},
+			durationMs: 1,
+		});
+		await waitForMicrotasks();
+
+		expect(readyNotificationCount).toBe(1);
+		expect(scheduler.consumeReadyResults()).toEqual([
+			{
+				groupKey: "rgbaAtlas|partition=abcd|landblock=12340000",
+				result: {
+					type: "build-compacted-geometry",
+					key: "compacted-geometry|job=a",
+					geometry: null,
+				},
+			},
+		]);
+
+		scheduler.dispose();
+		expect(worker.wasTerminated).toBe(true);
 	});
 });
 

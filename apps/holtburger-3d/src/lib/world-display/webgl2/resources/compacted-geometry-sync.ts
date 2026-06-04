@@ -26,6 +26,7 @@ import {
 } from "../../texture-pages/texture-page-atlas-planner";
 import type { IndexedResourceAtlasPlan } from "../../texture-pages/indexed-resource-atlas-planner";
 import type { Webgl2WorldResourceStore } from "../../webgl2-world-resources";
+import type { ReadyCompactedGeometryWorkerResult } from "../../worker-resources/compacted-geometry-worker-scheduler";
 import {
 	createWebgl2CompactedGeometryBatchResource,
 	createWebgl2IndexedPalettedFamilyResource,
@@ -97,6 +98,10 @@ export function syncWebgl2CompactedGeometryResources({
 	store.compactedResourceFallbackSamples = [];
 	const retainedGeometryBatchKeys = new Set<string>();
 	const retainedFamilyResourceKeys = new Set<string>();
+	const retainedSchedulerKeys = new Set<string>();
+	const readyWorkerResultsByGroupKey = groupReadyCompactedGeometryWorkerResults(
+		store.compactedGeometryWorkerScheduler?.consumeReadyResults() ?? [],
+	);
 	const detailPlacementsByEntryKey =
 		createTexturePageDetailAtlasPlacementsByEntryKey(plan.texturePageAtlasPlan);
 	if (
@@ -125,6 +130,50 @@ export function syncWebgl2CompactedGeometryResources({
 			plan.texturePageAtlasPlan,
 		);
 		for (const batchPlan of batchPlans) {
+			const schedulerKey =
+				describeCompactedGeometryBatchSchedulerKey(batchPlan);
+			retainedSchedulerKeys.add(schedulerKey);
+			const readyWorkerResult = readyWorkerResultsByGroupKey.get(schedulerKey);
+			if (readyWorkerResult?.result.key === batchPlan.desiredJobKey) {
+				if (readyWorkerResult.result.geometry) {
+					const familyResource = createWebgl2RgbaTexturePageFamilyResource({
+						geometry: readyWorkerResult.result.geometry,
+						materialSlots: batchPlan.plan.materialSlots,
+						materialDrawSlices: batchPlan.plan.drawSlices,
+						placementsByEntryKey,
+						detailPlacementsByEntryKey,
+					});
+					commitWebgl2CompactedGeometryBatch({
+						gl,
+						store,
+						geometry: readyWorkerResult.result.geometry,
+						landblockId: batchPlan.landblockId,
+						familyResource,
+						retainedGeometryBatchKeys,
+						retainedFamilyResourceKeys,
+						rendererResourceGraph,
+						atlasGenerationKey: store.textureAtlasGeneration?.key ?? null,
+						schedulerKey,
+					});
+					store.compactedGeometryWorkerScheduler?.markCommitted(
+						schedulerKey,
+						readyWorkerResult.result.key,
+					);
+				}
+				continue;
+			}
+			if (
+				scheduleWebgl2CompactedGeometryBatchWorkerJob({
+					store,
+					batchPlan,
+					drawUnits,
+					schedulerKey,
+					retainedGeometryBatchKeys,
+					retainedFamilyResourceKeys,
+				})
+			) {
+				continue;
+			}
 			const geometry = profileBrowserJsScope(
 				"webgl2.resource.buildCompactedGeometryBatch",
 				() =>
@@ -154,6 +203,7 @@ export function syncWebgl2CompactedGeometryResources({
 				retainedFamilyResourceKeys,
 				rendererResourceGraph,
 				atlasGenerationKey: store.textureAtlasGeneration?.key ?? null,
+				schedulerKey,
 			});
 		}
 	}
@@ -176,6 +226,54 @@ export function syncWebgl2CompactedGeometryResources({
 				indexedResourceAtlasPlan,
 			});
 			for (const batchPlan of batchPlans) {
+				const schedulerKey =
+					describeCompactedGeometryBatchSchedulerKey(batchPlan);
+				retainedSchedulerKeys.add(schedulerKey);
+				const readyWorkerResult =
+					readyWorkerResultsByGroupKey.get(schedulerKey);
+				if (readyWorkerResult?.result.key === batchPlan.desiredJobKey) {
+					if (readyWorkerResult.result.geometry) {
+						const familyResource = createWebgl2IndexedPalettedFamilyResource({
+							geometry: readyWorkerResult.result.geometry,
+							materialTableRecords: batchPlan.materialTableRecords,
+							materialDrawSlices: batchPlan.plan.drawSlices,
+							indexPlacementsByTextureKey:
+								indexedResourceAtlasPlan.indexPlacementsByTextureKey,
+							palettePlacementsByTextureKey:
+								indexedResourceAtlasPlan.palettePlacementsByTextureKey,
+							detailPlacementsByEntryKey,
+						});
+						commitWebgl2CompactedGeometryBatch({
+							gl,
+							store,
+							geometry: readyWorkerResult.result.geometry,
+							landblockId: batchPlan.landblockId,
+							familyResource,
+							retainedGeometryBatchKeys,
+							retainedFamilyResourceKeys,
+							rendererResourceGraph,
+							atlasGenerationKey: store.textureAtlasGeneration?.key ?? null,
+							schedulerKey,
+						});
+						store.compactedGeometryWorkerScheduler?.markCommitted(
+							schedulerKey,
+							readyWorkerResult.result.key,
+						);
+					}
+					continue;
+				}
+				if (
+					scheduleWebgl2CompactedGeometryBatchWorkerJob({
+						store,
+						batchPlan,
+						drawUnits,
+						schedulerKey,
+						retainedGeometryBatchKeys,
+						retainedFamilyResourceKeys,
+					})
+				) {
+					continue;
+				}
 				const geometry = profileBrowserJsScope(
 					"webgl2.resource.buildCompactedIndexedGeometryBatch",
 					() =>
@@ -208,10 +306,15 @@ export function syncWebgl2CompactedGeometryResources({
 					retainedFamilyResourceKeys,
 					rendererResourceGraph,
 					atlasGenerationKey: store.textureAtlasGeneration?.key ?? null,
+					schedulerKey,
 				});
 			}
 		}
 	}
+	releaseInactiveCompactedGeometrySchedulerGroups({
+		store,
+		retainedSchedulerKeys,
+	});
 	for (const familyKey of store.compactedGeometryFamilyResources.keys()) {
 		if (!retainedFamilyResourceKeys.has(familyKey)) {
 			store.compactedGeometryFamilyResources.delete(familyKey);
@@ -286,6 +389,91 @@ export function shouldRetainWebgl2CompactedGeometryBatch({
 	);
 }
 
+type CompactedLandblockBatchPlan =
+	| RgbaTexturePageCompactedLandblockBatchPlan
+	| IndexedPalettedCompactedLandblockBatchPlan;
+
+function groupReadyCompactedGeometryWorkerResults(
+	results: readonly ReadyCompactedGeometryWorkerResult[],
+): Map<string, ReadyCompactedGeometryWorkerResult> {
+	return new Map(results.map((result) => [result.groupKey, result] as const));
+}
+
+function scheduleWebgl2CompactedGeometryBatchWorkerJob({
+	store,
+	batchPlan,
+	drawUnits,
+	schedulerKey,
+	retainedGeometryBatchKeys,
+	retainedFamilyResourceKeys,
+}: {
+	store: Webgl2WorldResourceStore;
+	batchPlan: CompactedLandblockBatchPlan;
+	drawUnits: readonly StagedWorldDrawUnitAssembly[];
+	schedulerKey: string;
+	retainedGeometryBatchKeys: Set<string>;
+	retainedFamilyResourceKeys: Set<string>;
+}): boolean {
+	if (!store.compactedGeometryWorkerScheduler) {
+		return false;
+	}
+	const committedBatchKey =
+		store.compactedGeometryBatchKeyBySchedulerKey.get(schedulerKey);
+	const committedFamilyResourceKey =
+		store.compactedGeometryFamilyResourceKeyBySchedulerKey.get(schedulerKey);
+	if (committedBatchKey === batchPlan.desiredJobKey) {
+		retainedGeometryBatchKeys.add(committedBatchKey);
+		if (committedFamilyResourceKey) {
+			retainedFamilyResourceKeys.add(committedFamilyResourceKey);
+		}
+		return true;
+	}
+	if (committedBatchKey) {
+		store.pendingCompactedGeometryBatchKeys.add(committedBatchKey);
+		retainedGeometryBatchKeys.add(committedBatchKey);
+	}
+	if (committedFamilyResourceKey) {
+		retainedFamilyResourceKeys.add(committedFamilyResourceKey);
+	}
+	store.compactedGeometryWorkerScheduler.scheduleDesired({
+		groupKey: schedulerKey,
+		desiredJobKey: batchPlan.desiredJobKey,
+		plan: batchPlan.plan,
+		drawUnits,
+		batchOrigin: batchPlan.batchOrigin,
+	});
+	return true;
+}
+
+function releaseInactiveCompactedGeometrySchedulerGroups({
+	store,
+	retainedSchedulerKeys,
+}: {
+	store: Webgl2WorldResourceStore;
+	retainedSchedulerKeys: ReadonlySet<string>;
+}): void {
+	for (const [schedulerKey, batchKey] of [
+		...store.compactedGeometryBatchKeyBySchedulerKey.entries(),
+	]) {
+		if (retainedSchedulerKeys.has(schedulerKey)) {
+			continue;
+		}
+		store.pendingCompactedGeometryBatchKeys.delete(batchKey);
+		store.compactedGeometryBatchKeyBySchedulerKey.delete(schedulerKey);
+		store.compactedGeometryFamilyResourceKeyBySchedulerKey.delete(schedulerKey);
+	}
+}
+
+function describeCompactedGeometryBatchSchedulerKey(
+	batchPlan: CompactedLandblockBatchPlan,
+): string {
+	return [
+		batchPlan.family,
+		`partition=${hashString(batchPlan.sourcePartitionKey)}`,
+		`landblock=${formatHex32(batchPlan.landblockId)}`,
+	].join("|");
+}
+
 export function commitWebgl2CompactedGeometryBatch({
 	gl,
 	store,
@@ -296,6 +484,7 @@ export function commitWebgl2CompactedGeometryBatch({
 	retainedFamilyResourceKeys,
 	rendererResourceGraph,
 	atlasGenerationKey,
+	schedulerKey,
 }: {
 	gl: WebGL2RenderingContext;
 	store: Webgl2WorldResourceStore;
@@ -306,6 +495,7 @@ export function commitWebgl2CompactedGeometryBatch({
 	retainedFamilyResourceKeys: Set<string>;
 	rendererResourceGraph?: RendererResourceGraph;
 	atlasGenerationKey: string | null;
+	schedulerKey: string | null;
 }): void {
 	if (familyResource.geometryBatchKey !== geometry.key) {
 		throw new Error(
@@ -315,6 +505,21 @@ export function commitWebgl2CompactedGeometryBatch({
 	retainedGeometryBatchKeys.add(geometry.key);
 	retainedFamilyResourceKeys.add(familyResource.key);
 	store.pendingCompactedGeometryBatchKeys.delete(geometry.key);
+	if (schedulerKey) {
+		const previousBatchKey =
+			store.compactedGeometryBatchKeyBySchedulerKey.get(schedulerKey);
+		if (previousBatchKey && previousBatchKey !== geometry.key) {
+			store.pendingCompactedGeometryBatchKeys.delete(previousBatchKey);
+		}
+		store.compactedGeometryBatchKeyBySchedulerKey.set(
+			schedulerKey,
+			geometry.key,
+		);
+		store.compactedGeometryFamilyResourceKeyBySchedulerKey.set(
+			schedulerKey,
+			familyResource.key,
+		);
+	}
 	const previousBatch = store.compactedGeometryBatches.get(geometry.key);
 	if (!previousBatch) {
 		const nextBatch = profileBrowserJsScope(

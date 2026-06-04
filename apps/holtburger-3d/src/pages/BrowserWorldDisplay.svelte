@@ -8,13 +8,8 @@
 		type BrowserLocationSelection,
 	} from "../app/browser-mode";
 	import type { AssetChannelState } from "../lib/assets/types";
-	import type { CameraHintAckDto, CameraHintDto } from "../lib/host/contracts";
+	import { resolveRuntimeAppearance } from "../lib/host/tauri";
 	import {
-		resolveRuntimeAppearance,
-		submitCameraHint,
-	} from "../lib/host/tauri";
-	import {
-		buildCameraHintFromSceneCameraFrame,
 		buildSceneCameraRenderRay,
 		buildBrowserFreeCameraFrame,
 		convertBrowserFreeCameraStateBetweenAnchors,
@@ -35,9 +30,7 @@
 	} from "../lib/world-display/camera";
 	import WorldDisplay from "../lib/world-display/WorldDisplay.svelte";
 	import {
-		describeCameraHintAck,
 		normalizeViewportPoint,
-		shouldSendThrottledCameraHint,
 		type NormalizedViewportPoint,
 	} from "../lib/world-display/model";
 	import type {
@@ -204,7 +197,6 @@
 		createBrowserFreeCameraState(),
 	);
 	let browserCameraFrame = $state<SceneCameraFrame | null>(null);
-	let cameraAck = $state<CameraHintAckDto | null>(null);
 	let diagnosticSelection = $state<RenderSpatialMetadata | null>(null);
 	let pickerOptions = $state<BrowserPickerOptions>({
 		pickableFamilies: {
@@ -221,8 +213,6 @@
 	let pickerClipboardText = $state(
 		"Picker reports copy to clipboard after a hit.",
 	);
-	let lastCameraHintAt = $state<number | null>(null);
-	let trailingCameraHint = $state<CameraHintDto | null>(null);
 	let activePointerDrag = $state<{
 		pointerId: number;
 		lastX: number;
@@ -237,7 +227,6 @@
 	let pointerInputEventCount = $state(0);
 	let keyboardInputEventCount = $state(0);
 	let suppressNextBrowserClick = false;
-	let cameraHintTimer: ReturnType<typeof setTimeout> | null = null;
 	let renderResourceUpdateTimer: ReturnType<typeof setTimeout> | null = null;
 	let pendingRenderResourceInput: BrowserRenderResourceCoordinatorInput | null =
 		null;
@@ -267,9 +256,7 @@
 	let runtimeAppearanceRequestSequence = 0;
 	let runtimeAppearancePreviewSequence = 0;
 
-	const CAMERA_HINT_INTERVAL_MS = 250;
 	const DEBUG_SUMMARY_DEBOUNCE_MS = 500;
-	const pendingCameraHint = $derived(trailingCameraHint !== null);
 	const worldDisplay = $derived(renderResourceSnapshot.worldDisplay);
 	const sceneGeometryText = $derived(renderResourceSnapshot.sceneGeometryText);
 	const terrainHeightText = $derived(renderResourceSnapshot.terrainHeightText);
@@ -572,15 +559,7 @@
 	const browserPanelDebugDetailSections = $derived<BrowserPanelSection[]>([
 		{
 			title: "Input And Camera",
-			rows: [
-				{
-					label: "Camera hint",
-					value:
-						describeCameraHintAck(cameraAck) ??
-						"Waiting for the first world-display camera hint acknowledgement.",
-				},
-				{ label: "Events", value: cameraPipelineDebugText },
-			],
+			rows: [{ label: "Events", value: cameraPipelineDebugText }],
 		},
 		{
 			title: "Asset Pipeline",
@@ -836,7 +815,7 @@
 				fitKey,
 				{ force: false, aspect: metrics.cameraFrame?.aspect },
 			);
-			applyBrowserCameraFrame({ normalizedX: 0.5, normalizedY: 0.5 }, false);
+			applyBrowserCameraFrame();
 			return;
 		}
 
@@ -847,7 +826,6 @@
 				metrics.cameraFrame,
 			);
 			syncControlledCameraFrame();
-			scheduleRenderedCameraHint({ normalizedX: 0.5, normalizedY: 0.5 }, true);
 		}
 	}
 
@@ -861,7 +839,6 @@
 				cameraFrame,
 			);
 			syncControlledCameraFrame();
-			scheduleRenderedCameraHint({ normalizedX: 0.5, normalizedY: 0.5 }, true);
 		}
 	}
 
@@ -994,8 +971,6 @@
 			activeRenderAnchor,
 			browserCameraFrame: getEffectiveBrowserCameraFrame(),
 			runtimeAppearancePreviews,
-			cameraAck,
-			pendingCameraHint,
 		});
 	}
 
@@ -1317,7 +1292,7 @@
 				? rotateBrowserFreeCamera(browserCameraState, delta, speedMultiplier)
 				: panBrowserFreeCamera(browserCameraState, delta, speedMultiplier);
 		pointerInputEventCount += 1;
-		applyBrowserCameraFrame(getViewportPoint(event), false);
+		applyBrowserCameraFrame();
 		event.preventDefault();
 	}
 
@@ -1351,7 +1326,7 @@
 			getBrowserFreeCameraSpeedMultiplier(event.shiftKey),
 		);
 		pointerInputEventCount += 1;
-		applyBrowserCameraFrame(getViewportPoint(event), false);
+		applyBrowserCameraFrame();
 		event.preventDefault();
 	}
 
@@ -1391,7 +1366,7 @@
 			{ force: true, aspect: renderMetrics.cameraFrame?.aspect },
 		);
 		keyboardInputEventCount += 1;
-		applyBrowserCameraFrame({ normalizedX: 0.5, normalizedY: 0.5 }, true);
+		applyBrowserCameraFrame();
 	}
 
 	function handleBrowserKeyUpCapture(event: KeyboardEvent): void {
@@ -2038,10 +2013,7 @@
 		);
 	}
 
-	function applyBrowserCameraFrame(
-		viewportPoint: NormalizedViewportPoint,
-		immediate: boolean,
-	): void {
+	function applyBrowserCameraFrame(): void {
 		const nextFrame = {
 			...buildBrowserFreeCameraFrame(browserCameraState),
 			aspect:
@@ -2057,7 +2029,6 @@
 		browserCameraFrame = nextFrame;
 		cameraFrameApplyCount += 1;
 		syncControlledCameraFrame();
-		scheduleRenderedCameraHint(viewportPoint, immediate);
 	}
 
 	function rebaseBrowserCameraBetweenAnchors(
@@ -2177,7 +2148,7 @@
 			);
 		}
 		keyboardInputEventCount += 1;
-		applyBrowserCameraFrame({ normalizedX: 0.5, normalizedY: 0.5 }, false);
+		applyBrowserCameraFrame();
 	}
 
 	function deriveCameraMovementVector(): {
@@ -2244,81 +2215,6 @@
 			rect.width,
 			rect.height,
 		);
-	}
-
-	function scheduleRenderedCameraHint(
-		viewportPoint: NormalizedViewportPoint,
-		immediate: boolean,
-	): void {
-		const hint = buildRenderedCameraHint(viewportPoint);
-
-		if (!hint) {
-			return;
-		}
-
-		scheduleCameraHint(hint, immediate);
-	}
-
-	function buildRenderedCameraHint(
-		viewportPoint: NormalizedViewportPoint,
-	): CameraHintDto | null {
-		if (!browserCameraFrame) {
-			return null;
-		}
-
-		return buildCameraHintFromSceneCameraFrame(
-			browserDestination,
-			browserCameraFrame,
-			viewportPoint,
-			activeRenderAnchor,
-		);
-	}
-
-	function scheduleCameraHint(hint: CameraHintDto, immediate: boolean): void {
-		const now = Date.now();
-
-		if (
-			immediate ||
-			shouldSendThrottledCameraHint(
-				lastCameraHintAt,
-				now,
-				CAMERA_HINT_INTERVAL_MS,
-			)
-		) {
-			if (cameraHintTimer) {
-				clearTimeout(cameraHintTimer);
-				cameraHintTimer = null;
-			}
-			trailingCameraHint = null;
-			void flushCameraHint(hint);
-			return;
-		}
-
-		trailingCameraHint = hint;
-
-		if (cameraHintTimer) {
-			return;
-		}
-
-		const remainingDelay =
-			CAMERA_HINT_INTERVAL_MS - (now - (lastCameraHintAt ?? now));
-		cameraHintTimer = setTimeout(
-			() => {
-				cameraHintTimer = null;
-				const nextHint = trailingCameraHint;
-				trailingCameraHint = null;
-
-				if (nextHint) {
-					void flushCameraHint(nextHint);
-				}
-			},
-			Math.max(remainingDelay, 0),
-		);
-	}
-
-	async function flushCameraHint(hint: CameraHintDto): Promise<void> {
-		cameraAck = await submitCameraHint(hint);
-		lastCameraHintAt = Date.now();
 	}
 
 	function describeBrowserCameraControlMode(): string {
@@ -2427,9 +2323,6 @@
 		if (renderResourceUpdateTimer) {
 			clearTimeout(renderResourceUpdateTimer);
 			renderResourceUpdateTimer = null;
-		}
-		if (cameraHintTimer) {
-			clearTimeout(cameraHintTimer);
 		}
 		stopCameraMovement();
 	});

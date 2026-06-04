@@ -2,14 +2,11 @@ import type {
 	RuntimeAppearanceRequestDto,
 	AssetLookupRequestDto,
 	AssetLookupResponseDto,
-	CameraHintAckDto,
-	CameraHintDto,
 	DebugConfigDto,
 	SetupAppearancePayloadDto,
 } from "./contracts";
 import {
 	assetLookupResponseDtoSchema,
-	cameraHintAckDtoSchema,
 	debugConfigDtoSchema,
 	setupAppearancePayloadDtoSchema,
 } from "./contracts";
@@ -220,14 +217,6 @@ function usesBinaryAssetLookup(assetId: string): boolean {
 		assetId.startsWith("render-surface/") ||
 		assetId.startsWith("palette/")
 	);
-}
-
-export async function submitCameraHint(
-	hint: CameraHintDto,
-): Promise<CameraHintAckDto> {
-	requireTauriRuntime();
-
-	return invokeCommand("submit_camera_hint", cameraHintAckDtoSchema, { hint });
 }
 
 export async function resolveRuntimeAppearance(

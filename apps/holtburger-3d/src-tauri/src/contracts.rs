@@ -1,13 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Vec3Dto {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
-}
-
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AssetPriorityDto {
@@ -49,24 +41,6 @@ pub struct AssetLookupResponseDto {
 #[serde(rename_all = "camelCase")]
 pub struct DebugConfigDto {
     pub verbose: bool,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CameraHintDto {
-    pub source: String,
-    pub position: Vec3Dto,
-    pub forward: Vec3Dto,
-    pub viewport_normalized_x: f32,
-    pub viewport_normalized_y: f32,
-    pub destination_label: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CameraHintAckDto {
-    pub accepted: bool,
-    pub sequence: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

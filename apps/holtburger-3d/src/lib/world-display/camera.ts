@@ -1,5 +1,4 @@
-import type { BrowserLocationSelection } from "../../app/browser-mode";
-import type { CameraHintDto, Vec3Dto } from "../host/contracts";
+import type { Vec3Dto } from "../host/contracts";
 import {
 	getOutdoorLandblockCoords,
 	OUTDOOR_LANDBLOCK_WORLD_SIZE,
@@ -460,24 +459,6 @@ function getCameraAxes(
 		forward,
 		right,
 		up,
-	};
-}
-
-export function buildCameraHintFromSceneCameraFrame(
-	browserDestination: BrowserLocationSelection | null,
-	frame: SceneCameraFrame,
-	viewportPoint: NormalizedViewportPoint,
-	activeRenderAnchor: RenderLandblockAnchor | null = null,
-): CameraHintDto | null {
-	return {
-		source: "world-display",
-		position: rendererPointToAcPosition(frame.position, activeRenderAnchor),
-		forward: normalizeVec3(
-			threeVectorToAc(buildFrameRayDirection(frame, viewportPoint)),
-		),
-		viewportNormalizedX: viewportPoint.normalizedX,
-		viewportNormalizedY: viewportPoint.normalizedY,
-		destinationLabel: browserDestination?.label ?? null,
 	};
 }
 

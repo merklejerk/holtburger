@@ -13,8 +13,6 @@ describe("browser world display model", () => {
 			terrainLodRadius: 1,
 			buildingLodRadius: 0,
 			detailLodRadius: 0,
-			cameraAck: null,
-			pendingCameraHint: false,
 		});
 
 		expect(model.destinationFocusLabel).toBe(destination?.label);
@@ -32,8 +30,6 @@ describe("browser world display model", () => {
 			terrainLodRadius: 1,
 			buildingLodRadius: 0,
 			detailLodRadius: 0,
-			cameraAck: null,
-			pendingCameraHint: false,
 		});
 
 		expect(model.sceneContext.kind).toBe("indoor-env-cell-closure");

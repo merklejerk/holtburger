@@ -14,7 +14,6 @@ import type {
 	PreparedLandblockOutdoorPayload,
 } from "../assets/types";
 import { describePreparedAssetPayload } from "../assets/types";
-import type { CameraHintAckDto } from "../host/contracts";
 
 export interface NormalizedViewportPoint {
 	normalizedX: number;
@@ -82,11 +81,7 @@ interface BrowserWorldDisplayModelInput {
 	terrainLodRadius: number;
 	buildingLodRadius: number;
 	detailLodRadius: number;
-	cameraAck: CameraHintAckDto | null;
-	pendingCameraHint: boolean;
 }
-
-const MIN_CAMERA_HINT_INTERVAL_MS = 250;
 
 export function deriveBrowserWorldDisplayModel({
 	assetState,
@@ -94,8 +89,6 @@ export function deriveBrowserWorldDisplayModel({
 	terrainLodRadius,
 	buildingLodRadius,
 	detailLodRadius,
-	cameraAck,
-	pendingCameraHint,
 }: BrowserWorldDisplayModelInput): BrowserWorldDisplayModel {
 	if (!browserDestination) {
 		return {
@@ -104,7 +97,7 @@ export function deriveBrowserWorldDisplayModel({
 			destinationLabel: "No browser destination selected yet.",
 			renderCacheText:
 				"Browser asset cache is ready for destination-driven coverage.",
-			inputText: "Camera hints use rendered browser camera state only.",
+			inputText: "Viewport input is owned by browser-mode camera controls.",
 			assetText: describeAssetState(assetState),
 			sceneContext: createPendingSceneContext(browserDestination),
 			terrainContract: createTerrainContract(null),
@@ -126,10 +119,7 @@ export function deriveBrowserWorldDisplayModel({
 		destinationLabel: browserDestination.label,
 		renderCacheText:
 			"Scene coverage is selected from browser destination and frontend cache state.",
-		inputText: pendingCameraHint
-			? "Camera hints are being throttled through the browser diagnostics channel."
-			: (describeCameraHintAck(cameraAck) ??
-				"Viewport input is ready to send browser camera hints."),
+		inputText: "Viewport input is driving browser camera controls locally.",
 		assetText: describeAssetState(assetState),
 		sceneContext,
 		terrainContract: createTerrainContract(sceneContext),
@@ -351,18 +341,6 @@ function describeAssetState(assetState: AssetChannelState): string {
 	return "Asset worker ingress is waiting for the next demand-driven asset response.";
 }
 
-export function describeCameraHintAck(
-	cameraAck: CameraHintAckDto | null,
-): string | null {
-	if (!cameraAck) {
-		return null;
-	}
-
-	return cameraAck.accepted
-		? `Accepted camera hint #${cameraAck.sequence}.`
-		: `Rejected camera hint #${cameraAck.sequence}.`;
-}
-
 export function normalizeViewportPoint(
 	offsetX: number,
 	offsetY: number,
@@ -373,14 +351,6 @@ export function normalizeViewportPoint(
 		normalizedX: clamp(offsetX / Math.max(width, 1), 0, 1),
 		normalizedY: clamp(offsetY / Math.max(height, 1), 0, 1),
 	};
-}
-
-export function shouldSendThrottledCameraHint(
-	lastSentAt: number | null,
-	now: number,
-	minIntervalMs = MIN_CAMERA_HINT_INTERVAL_MS,
-): boolean {
-	return lastSentAt === null || now - lastSentAt >= minIntervalMs;
 }
 
 function clamp(value: number, min: number, max: number): number {

@@ -1,9 +1,9 @@
 # Holtburger 3D Static Landblock Render Bundle Replacement Plan
 
-Status: Phase 1A, Phase 1B, Phase 1C, and Phase 1D are implemented. The remaining pre-worker work
-has been split into Phase 1E material/family eligibility extraction, Phase 1F compaction geometry
-extraction, and Phase 1G texture/material-role hardening before Phase 2 worker orchestration. The
-plan has been redirected to worker-owned raw static closure loading and layer-scoped texture pages.
+Status: Phase 1A through Phase 1E are implemented. Phase 1F compaction geometry extraction is the
+next implementation phase, followed by Phase 1G texture/material-role hardening before Phase 2
+worker orchestration. The plan has been redirected to worker-owned raw static closure loading and
+layer-scoped texture pages.
 
 Progress:
 
@@ -53,6 +53,10 @@ Progress:
 - 2026-06-04: Closed Phase 1D as the worker-safe builder foundation and split its remaining broad
   extraction bucket into smaller executable phases: Phase 1E material/family eligibility, Phase 1F
   compaction geometry assembly, and Phase 1G texture/material-role hardening plus pre-worker cleanup.
+- 2026-06-04: Implemented Phase 1E. Static bundle surfaces now derive material behavior and
+  compacted/direct eligibility through the existing pure compaction eligibility planner instead of
+  material asset ID string conventions. Static material records now carry family keys and
+  transparency from those eligibility facts.
 
 Validation:
 
@@ -95,6 +99,11 @@ Validation:
   passed after the Phase 1D normalized material texture policy refinement.
 - `npm run check`, `npm run lint:dead`, and `npm run lint:rust` passed after the Phase 1D normalized
   material texture policy refinement.
+- `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts src/lib/world-display/compaction/compaction-family-planner.test.ts src/lib/world-display/material-behavior.test.ts`
+  passed after Phase 1E.
+- `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/compaction/compaction-family-planner.ts src/lib/world-display/compaction/compaction-family-planner.test.ts src/lib/world-display/material-behavior.ts src/lib/world-display/material-behavior.test.ts`
+  passed after Phase 1E.
+- `npm run check`, `npm run lint:dead`, and `npm run lint:rust` passed after Phase 1E.
 - `npm run lint:ts` currently fails on existing unrelated debt:
   `src/lib/world-display/camera.ts` defines unused `rendererPointToAcPosition`.
 
@@ -1190,7 +1199,7 @@ Exit criteria:
 
 ### Phase 1E: Worker-Safe Material and Family Eligibility
 
-Status: Next.
+Status: Implemented on 2026-06-04.
 
 Purpose:
 
@@ -1213,6 +1222,32 @@ Implementation notes:
   render output and do not affect layer identity, packing, compaction, or scheduling.
 - Rename concepts away from "staged" when they become layer-local builder concepts.
 
+Implemented:
+
+- The static bundle builder now derives `LegacyMaterialBehaviorDto` from worker-local prepared
+  material recipes.
+- Static bundle surfaces now call the existing pure `createCompactionEligibility` helper with
+  worker-local geometry readiness, material kind, material behavior, and layer-local texture page
+  descriptor facts.
+- Material records now receive family keys and transparency from compaction eligibility instead of
+  from hardcoded compact/direct placeholders.
+- Direct fallback no longer depends on material asset IDs containing strings such as `direct`.
+- Builder tests now use texture-backed material fixtures and a translucent material surface flag to
+  prove mixed compacted/direct output from material semantics.
+
+Decisions and course corrections:
+
+- Reused `createCompactionEligibility` rather than duplicating alpha/family blocker logic in the
+  static bundle builder. This keeps static bundle decisions aligned with the existing compaction
+  planner while staying CPU-only.
+- Synthesized minimal layer-local `TexturePageDescriptor` values from `VirtualTexturePageRef` so the
+  existing material eligibility helper can evaluate base-color/detail texture page compatibility.
+  This is acceptable for Phase 1E, but Phase 1G should extract or formalize this adapter instead of
+  growing more descriptor synthesis inside the builder.
+- Corrected the builder fixture material facts. The previous compactable fixture was a
+  `solid-color` material with render-surface dependencies, which made the old asset-ID string
+  shortcut hide unsupported flat-material behavior.
+
 Exit criteria:
 
 - Builder output no longer uses material ID string conventions such as `material/direct-*` to decide
@@ -1229,10 +1264,24 @@ Cleanup targets:
 - Narrow or delete staged-only material/family helpers once the worker-safe versions become the
   canonical static path.
 - Remove any temporary builder names that imply staged draw-unit ownership.
+- Phase 1G should move the layer-local texture page descriptor adapter out of the builder if texture
+  role handling grows beyond raw/detail base material refs.
+
+Legacy shims introduced:
+
+- None. Phase 1E reuses the existing pure eligibility helper directly and does not add a staged
+  compatibility adapter or alternate render path.
+
+Legacy debt found before the next phase:
+
+- Phase 1F should replace the remaining one-batch compacted DTO assembly with real
+  material/family-grouped compaction geometry.
+- `npm run lint:ts` remains blocked by existing unrelated dead code in
+  `src/lib/world-display/camera.ts`: `rendererPointToAcPosition` is defined but unused.
 
 ### Phase 1F: Worker-Safe Compaction Geometry Assembly
 
-Status: Pending Phase 1E.
+Status: Next.
 
 Purpose:
 

@@ -25,9 +25,11 @@ describe("static bundle layer builder", () => {
 			createRegionRenderProfile(1),
 			createTerrainMaterial(1),
 			createGfxObj("gfx-obj/01000001", "material/08000001", 1),
-			createGfxObj("gfx-obj/01000002", "material/direct-08000002", 1),
+			createGfxObj("gfx-obj/01000002", "material/08000002", 1),
 			createMaterial("material/08000001", "render-surface/06000001"),
-			createMaterial("material/direct-08000002", "render-surface/06000002"),
+			createMaterial("material/08000002", "render-surface/06000002", {
+				surfaceType: 0x10,
+			}),
 			createRenderSurface("render-surface/06000001"),
 			createRenderSurface("render-surface/06000002"),
 			createPreparedTexture(0x06000001, "raw", [255, 0, 0, 255]),
@@ -65,6 +67,12 @@ describe("static bundle layer builder", () => {
 		expect(layer.compactedBatches).toHaveLength(1);
 		expect(layer.compactedBatches[0]?.positions).toBeInstanceOf(Float32Array);
 		expect(layer.directEntries).toHaveLength(1);
+		expect(
+			layer.materialRecords.map((record) => [record.key, record.familyKey]),
+		).toContainEqual([
+			"material:material/08000002",
+			"static:direct:alpha=transparent-blend",
+		]);
 		expect(layer.texturePages.map((page) => page.pageKind).sort()).toEqual([
 			"packed-atlas",
 			"packed-atlas",
@@ -93,9 +101,11 @@ describe("static bundle layer builder", () => {
 			createRegionRenderProfile(1),
 			createTerrainMaterial(1),
 			createGfxObj("gfx-obj/01000001", "material/08000001", 1),
-			createGfxObj("gfx-obj/01000002", "material/direct-08000002", 1),
+			createGfxObj("gfx-obj/01000002", "material/08000002", 1),
 			createMaterial("material/08000001", "render-surface/06000001"),
-			createMaterial("material/direct-08000002", "render-surface/06000002"),
+			createMaterial("material/08000002", "render-surface/06000002", {
+				surfaceType: 0x10,
+			}),
 			createRenderSurface("render-surface/06000001"),
 			createRenderSurface("render-surface/06000002"),
 			createPreparedTexture(0x06000001, "raw", [255, 0, 0, 255]),
@@ -297,16 +307,27 @@ function createGfxObj(
 function createMaterial(
 	assetId: string,
 	renderSurfaceAssetId: string,
+	options: { surfaceType?: number; translucency?: number } = {},
 ): PreparedAssetRecord {
+	const renderSurfaceId = Number.parseInt(
+		renderSurfaceAssetId.slice("render-surface/".length),
+		16,
+	);
 	return createRecord(assetId, {
 		kind: "material-recipe",
 		sourceAssetKind: "material-recipe",
 		residencyKind: "unknown",
 		provenance: createProvenance("material-recipe"),
 		surfaceId: 1,
-		surfaceType: 2,
-		source: { kind: "solid-color", argb: 0xffff_ffff },
-		translucency: 1,
+		surfaceType: options.surfaceType ?? 0,
+		source: {
+			kind: "texture",
+			surfaceTextureId: renderSurfaceId,
+			selectedRenderSurfaceId: renderSurfaceId,
+			paletteId: null,
+			renderSurfaceDefaultPaletteIds: [],
+		},
+		translucency: options.translucency ?? 0,
 		luminosity: 0,
 		diffuse: 1,
 		dependencies: {

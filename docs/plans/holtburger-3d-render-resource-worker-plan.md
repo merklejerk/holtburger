@@ -1,6 +1,7 @@
 # Holtburger 3D Render Resource Worker Plan
 
-Status: Phase 5 implemented; Phase 6 is the next implementation phase if profiling shows upload jank.
+Status: cleanup phase implemented after Phase 5; Phase 6 remains optional if profiling shows upload
+jank.
 
 Related plans:
 
@@ -1453,6 +1454,41 @@ Introduced cleanup targets and legacy shims:
 - Phase 6 remains optional. Run browser profiling first; only add WebGL upload budgeting if
   main-thread texture/buffer realization is the remaining visible jank source.
 
+### 2026-06-04: Cleanup Phase Implemented
+
+Addressed the shims and vestigial paths called out during the worker migration:
+
+- removed the bootstrap `echo` worker job from the render resource worker contract;
+- removed `RenderResourceWorkerClient.runEchoJob` and made the generic `runJob` helper private, so
+  renderer code goes through typed production job methods only;
+- converted worker client request-correlation and disposal coverage to use a real indexed-atlas
+  worker job instead of a fake echo job;
+- removed the synchronous atlas generation convenience exports
+  `createWebgl2TextureAtlasGenerationResource` and
+  `createWebgl2IndexedResourceAtlasGenerationResource`;
+- updated atlas resource tests to use the real worker-era seam explicitly: CPU generation first,
+  then WebGL realization from CPU payloads;
+- narrowed committed indexed atlas placement metadata so CPU worker results no longer carry copied
+  source texel or palette byte arrays after packed atlas pages have been produced;
+- reduced indexed atlas worker result transferables to packed atlas page buffers only;
+- added render-pipeline debug summary text for texture-atlas and indexed-atlas worker scheduler
+  metrics, matching the compacted worker visibility;
+- decoupled `commitWebgl2CompactedGeometryBatch` from per-pass retention sets by returning the
+  committed geometry/family keys instead of mutating the sync loop's retained-key sets.
+
+Validation completed:
+
+- `npm run test:ts -- render-resource-worker-client indexed-atlas-worker-payloads webgl2-indexed-resource-atlas-generation webgl2-texture-atlas-generation webgl2-world-submit webgl2-world-resources compacted-geometry`
+
+Decisions:
+
+- Source input copies remain intentional. The worker still copies asset-owned source buffers before
+  transfer so main-thread renderer/asset state is never destructively neutered.
+- Resource-level tests may keep local helper functions that compose CPU generation plus WebGL
+  realization, but those helpers are no longer exported production shims.
+- Phase 6 remains optional and should be driven by profiling. The cleanup phase did not introduce
+  upload budgeting or a second scheduling model.
+
 ## Phase 6: Main-Thread Commit Budgeting
 
 Only do this if measurements still show visible jank after CPU preparation moves off-thread.
@@ -1512,9 +1548,10 @@ Decisions from the code dry run:
   lifetime is owned by committed resource stores/records; graph diagnostics and cleanup candidates
   are not required for this migration.
 
-Remaining open question:
+Diagnostics status:
 
-- Which diagnostics panel should expose render resource worker metrics?
+- Render resource worker metrics are exposed in the browser render-pipeline debug summary and the
+  WebGL2 debug counter map. No separate diagnostics panel is required for this cleanup phase.
 
 ## Success Criteria
 

@@ -1,4 +1,4 @@
-export type RendererResourceGraphNodeKind =
+type RendererResourceGraphNodeKind =
 	| "prepared-asset"
 	| "scene-object"
 	| "material-decision"

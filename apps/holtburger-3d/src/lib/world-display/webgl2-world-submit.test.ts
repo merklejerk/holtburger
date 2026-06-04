@@ -2151,7 +2151,6 @@ function createIndexedResourceAtlasGeneration({
 				y: 0,
 				width: 2,
 				height: 1,
-				sourceBytes: Uint8Array.from([0, 1]),
 			},
 		],
 		palettePlacements: [
@@ -2161,7 +2160,6 @@ function createIndexedResourceAtlasGeneration({
 				x: 0,
 				y: 0,
 				colorCount: 2,
-				rgbaBytes: Uint8Array.from([0, 0, 0, 0, 255, 255, 255, 255]),
 			},
 		],
 		indexReadyDrawUnitIds: ["indexed-a", "indexed-b", "indexed-detail"],

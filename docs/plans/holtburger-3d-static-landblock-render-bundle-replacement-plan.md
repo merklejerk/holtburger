@@ -1,9 +1,8 @@
 # Holtburger 3D Static Landblock Render Bundle Replacement Plan
 
-Status: Phase 1A through Phase 1E are implemented. Phase 1F compaction geometry extraction is the
-next implementation phase, followed by Phase 1G texture/material-role hardening before Phase 2
-worker orchestration. The plan has been redirected to worker-owned raw static closure loading and
-layer-scoped texture pages.
+Status: Phase 1A through Phase 1F are implemented. Phase 1G texture/material-role hardening is the
+next implementation phase before Phase 2 worker orchestration. The plan has been redirected to
+worker-owned raw static closure loading and layer-scoped texture pages.
 
 Progress:
 
@@ -57,6 +56,10 @@ Progress:
   compacted/direct eligibility through the existing pure compaction eligibility planner instead of
   material asset ID string conventions. Static material records now carry family keys and
   transparency from those eligibility facts.
+- 2026-06-04: Implemented Phase 1F. Static bundle compacted batches are now grouped by material
+  family and material record instead of being merged into one layer-wide compacted batch. Builder
+  tests now prove multiple compacted batches can coexist with direct entries without staged fallback
+  suppression.
 
 Validation:
 
@@ -104,6 +107,11 @@ Validation:
 - `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/compaction/compaction-family-planner.ts src/lib/world-display/compaction/compaction-family-planner.test.ts src/lib/world-display/material-behavior.ts src/lib/world-display/material-behavior.test.ts`
   passed after Phase 1E.
 - `npm run check`, `npm run lint:dead`, and `npm run lint:rust` passed after Phase 1E.
+- `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts src/lib/world-display/compaction/compaction-family-planner.test.ts src/lib/world-display/material-behavior.test.ts`
+  passed after Phase 1F.
+- `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts`
+  passed after Phase 1F.
+- `npm run check`, `npm run lint:dead`, and `npm run lint:rust` passed after Phase 1F.
 - `npm run lint:ts` currently fails on existing unrelated debt:
   `src/lib/world-display/camera.ts` defines unused `rendererPointToAcPosition`.
 
@@ -1281,7 +1289,7 @@ Legacy debt found before the next phase:
 
 ### Phase 1F: Worker-Safe Compaction Geometry Assembly
 
-Status: Next.
+Status: Implemented on 2026-06-04.
 
 Purpose:
 
@@ -1303,6 +1311,27 @@ Implementation notes:
   for compaction.
 - Keep the builder failure mode strict for internally inconsistent worker-local closures.
 
+Implemented:
+
+- Replaced the first builder slice's one-batch compacted DTO assembly with deterministic grouping by
+  material family key and material asset ID.
+- Each compacted batch now owns concatenated positions, normals, UVs, and offset indices for only
+  the surfaces in its material/family group.
+- Compacted batch keys include the render chunk, group index, family key, and material asset ID so
+  grouping changes are visible in the layer artifact identity.
+- Builder tests now include two compactable textured materials and one translucent direct material,
+  proving multiple compacted batches plus direct entries in one static bundle layer.
+
+Decisions and course corrections:
+
+- Phase 1F intentionally stops at material/family-grouped bundle DTO assembly. It does not recreate
+  old render-resource worker draw-slice planning, atlas generation accounting, pending replacement
+  state, or runtime direct fallback suppression.
+- The existing concatenation and index-offset helpers were already pure and worker-safe enough for
+  this phase. No new compaction scheduler abstraction was introduced.
+- Direct entries remain authoritative for noncompactable surfaces. They are not suppressed by, or
+  reconciled against, compacted batches at runtime.
+
 Exit criteria:
 
 - Builder tests prove multiple compacted batches can be emitted by family/material grouping.
@@ -1318,10 +1347,24 @@ Cleanup targets:
 - Delete or quarantine staged-only static compaction helpers once no target code depends on them.
 - Remove plan/code language that still describes static compaction as incremental or generation
   replacement based.
+- Phase 2/WebGL realization may still need render-family-specific draw slices or material-table
+  records, but those should be added to the bundle-layer artifact directly rather than reviving
+  render-resource worker compaction jobs.
+
+Legacy shims introduced:
+
+- None. Phase 1F changed the builder's DTO assembly in place and did not add a compatibility path.
+
+Legacy debt found before the next phase:
+
+- Phase 1G should finish texture/material-role hardening and clean up the builder-local texture page
+  descriptor adapter before worker orchestration.
+- `npm run lint:ts` remains blocked by existing unrelated dead code in
+  `src/lib/world-display/camera.ts`: `rendererPointToAcPosition` is defined but unused.
 
 ### Phase 1G: Texture Material Roles and Pre-Worker Cleanup
 
-Status: Pending Phase 1F.
+Status: Next.
 
 Purpose:
 

@@ -26,16 +26,21 @@ describe("static bundle layer builder", () => {
 			createTerrainMaterial(1),
 			createGfxObj("gfx-obj/01000001", "material/08000001", 1),
 			createGfxObj("gfx-obj/01000002", "material/08000002", 1),
+			createGfxObj("gfx-obj/01000003", "material/08000003", 2),
 			createMaterial("material/08000001", "render-surface/06000001"),
 			createMaterial("material/08000002", "render-surface/06000002", {
 				surfaceType: 0x10,
 			}),
+			createMaterial("material/08000003", "render-surface/06000003"),
 			createRenderSurface("render-surface/06000001"),
 			createRenderSurface("render-surface/06000002"),
+			createRenderSurface("render-surface/06000003"),
 			createPreparedTexture(0x06000001, "raw", [255, 0, 0, 255]),
 			createPreparedTexture(0x06000001, "detail", [255, 128, 0, 255]),
 			createPreparedTexture(0x06000002, "raw", [0, 255, 0, 255], 8),
 			createPreparedTexture(0x06000002, "detail", [0, 128, 255, 255], 8),
+			createPreparedTexture(0x06000003, "raw", [64, 64, 255, 255]),
+			createPreparedTexture(0x06000003, "detail", [64, 255, 255, 255]),
 		];
 
 		const layer = buildStaticLandblockRenderBundleLayer({
@@ -52,6 +57,7 @@ describe("static bundle layer builder", () => {
 		).toEqual([
 			"outdoor-static:landblock:da55ffff:instance:compactable-0",
 			"outdoor-static:landblock:da55ffff:instance:direct-0",
+			"outdoor-static:landblock:da55ffff:instance:compactable-1",
 		]);
 		expect(layer.preparedAssetIds).toContain("material/08000001");
 		expect(layer.preparedAssetIds).toContain("render-surface/06000001");
@@ -64,8 +70,11 @@ describe("static bundle layer builder", () => {
 				colorSpace: "linear",
 			}),
 		);
-		expect(layer.compactedBatches).toHaveLength(1);
+		expect(layer.compactedBatches).toHaveLength(2);
 		expect(layer.compactedBatches[0]?.positions).toBeInstanceOf(Float32Array);
+		expect(
+			layer.compactedBatches.map((batch) => batch.materialRecordKey),
+		).toEqual(["material:material/08000001", "material:material/08000003"]);
 		expect(layer.directEntries).toHaveLength(1);
 		expect(
 			layer.materialRecords.map((record) => [record.key, record.familyKey]),
@@ -86,8 +95,8 @@ describe("static bundle layer builder", () => {
 			layer.texturePages.filter((page) => page.pageKind === "single-entry"),
 		).toHaveLength(2);
 		expect(layer.diagnostics).toMatchObject({
-			sourceObjectCount: 2,
-			compactedSurfaceCount: 1,
+			sourceObjectCount: 3,
+			compactedSurfaceCount: 2,
 			directSurfaceCount: 1,
 			skippedSurfaceCount: 0,
 		});
@@ -102,16 +111,21 @@ describe("static bundle layer builder", () => {
 			createTerrainMaterial(1),
 			createGfxObj("gfx-obj/01000001", "material/08000001", 1),
 			createGfxObj("gfx-obj/01000002", "material/08000002", 1),
+			createGfxObj("gfx-obj/01000003", "material/08000003", 2),
 			createMaterial("material/08000001", "render-surface/06000001"),
 			createMaterial("material/08000002", "render-surface/06000002", {
 				surfaceType: 0x10,
 			}),
+			createMaterial("material/08000003", "render-surface/06000003"),
 			createRenderSurface("render-surface/06000001"),
 			createRenderSurface("render-surface/06000002"),
+			createRenderSurface("render-surface/06000003"),
 			createPreparedTexture(0x06000001, "raw", [255, 0, 0, 255]),
 			createPreparedTexture(0x06000001, "detail", [255, 128, 0, 255]),
 			createPreparedTexture(0x06000002, "raw", [0, 255, 0, 255]),
 			createPreparedTexture(0x06000002, "detail", [0, 128, 255, 255]),
+			createPreparedTexture(0x06000003, "raw", [64, 64, 255, 255]),
+			createPreparedTexture(0x06000003, "detail", [64, 255, 255, 255]),
 		];
 
 		const first = buildStaticLandblockRenderBundleLayer({
@@ -250,10 +264,15 @@ function createOutdoorLandblock(landblockId: number): PreparedAssetRecord {
 		statics: [
 			createOutdoorMember("compactable-0", "gfx-obj/01000001"),
 			createOutdoorMember("direct-0", "gfx-obj/01000002"),
+			createOutdoorMember("compactable-1", "gfx-obj/01000003"),
 		],
 		outdoorBvh: null,
 		dependencies: {
-			renderableSourceAssetIds: ["gfx-obj/01000001", "gfx-obj/01000002"],
+			renderableSourceAssetIds: [
+				"gfx-obj/01000001",
+				"gfx-obj/01000002",
+				"gfx-obj/01000003",
+			],
 			materialAssetIds: [],
 		},
 		diagnostics: { sourceRecords: [], errors: [], omissions: [] },

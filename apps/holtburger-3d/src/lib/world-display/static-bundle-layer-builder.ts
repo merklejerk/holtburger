@@ -394,39 +394,52 @@ function buildCompactedBatches(
 	renderChunkKey: string,
 	surfaces: readonly StaticBundleBuildSurface[],
 ): StaticBundleCompactedBatch[] {
-	const compactableSurfaces = surfaces.filter((surface) => surface.compactable);
-	if (compactableSurfaces.length === 0) {
-		return [];
+	return groupCompactedSurfacesByMaterial(surfaces)
+		.map((group, index): StaticBundleCompactedBatch => {
+			const firstSurface = group[0];
+			if (!firstSurface) {
+				throw new Error("Static compacted surface group was empty.");
+			}
+			return {
+				key: `${renderChunkKey}:compacted:${index}:${firstSurface.familyKey}:${firstSurface.materialAssetId}`,
+				renderChunkKey,
+				familyKey: firstSurface.familyKey,
+				materialRecordKey: `material:${firstSurface.materialAssetId}`,
+				objectKeys: uniqueSortedStrings(
+					group.map((surface) => surface.object.objectKey),
+				),
+				positions: concatFloat32Arrays(
+					group.map((surface) => surface.positions),
+				),
+				normals: concatFloat32Arrays(group.map((surface) => surface.normals)),
+				uvs: concatFloat32Arrays(group.map((surface) => surface.uvs)),
+				indices: concatOffsetIndices(group),
+			};
+		})
+		.sort((left, right) => left.key.localeCompare(right.key));
+}
+
+function groupCompactedSurfacesByMaterial(
+	surfaces: readonly StaticBundleBuildSurface[],
+): StaticBundleBuildSurface[][] {
+	const groupsByKey = new Map<string, StaticBundleBuildSurface[]>();
+	for (const surface of surfaces) {
+		if (!surface.compactable) {
+			continue;
+		}
+		const key = `${surface.familyKey}|${surface.materialAssetId}`;
+		const group = groupsByKey.get(key);
+		if (group) {
+			group.push(surface);
+		} else {
+			groupsByKey.set(key, [surface]);
+		}
 	}
-	const positions = concatFloat32Arrays(
-		compactableSurfaces.map((surface) => surface.positions),
-	);
-	const normals = concatFloat32Arrays(
-		compactableSurfaces.map((surface) => surface.normals),
-	);
-	const uvs = concatFloat32Arrays(
-		compactableSurfaces.map((surface) => surface.uvs),
-	);
-	const indices = concatOffsetIndices(compactableSurfaces);
-	const firstSurface = compactableSurfaces[0];
-	if (!firstSurface) {
-		return [];
-	}
-	return [
-		{
-			key: `${renderChunkKey}:compacted:0`,
-			renderChunkKey,
-			familyKey: firstSurface.familyKey,
-			materialRecordKey: `material:${firstSurface.materialAssetId}`,
-			objectKeys: uniqueSortedStrings(
-				compactableSurfaces.map((surface) => surface.object.objectKey),
-			),
-			positions,
-			normals,
-			uvs,
-			indices,
-		},
-	];
+	return [...groupsByKey.entries()]
+		.sort(([left], [right]) => left.localeCompare(right))
+		.map(([, group]) =>
+			[...group].sort((left, right) => left.key.localeCompare(right.key)),
+		);
 }
 
 function buildDirectEntries(

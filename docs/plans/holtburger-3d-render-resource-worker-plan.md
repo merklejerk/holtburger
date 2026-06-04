@@ -1,6 +1,6 @@
 # Holtburger 3D Render Resource Worker Plan
 
-Status: Phase 3B-1 implemented; Phase 3B-2 is the next implementation phase.
+Status: Phase 3B-2 implemented; Phase 3B-3 is the next implementation phase.
 
 Related plans:
 
@@ -524,6 +524,65 @@ Introduced cleanup targets and legacy shims:
 - The immediate next phase is Phase 3B-2 rather than continuing to label the whole scheduler rollout
   as one phase. This keeps the renderer invalidation and worker-result queueing work isolated.
 
+### 2026-06-03: Phase 3B-2 Implemented
+
+Implemented live compacted geometry worker scheduling:
+
+- added `CompactedGeometryWorkerScheduler`, a renderer-owned compacted worker owner with one
+  `RenderResourceJobScheduler` per compacted `family + partition + landblock` group;
+- added an `onReadyResult` hook to `RenderResourceJobScheduler` so accepted CPU results can request
+  a later resource sync without mutating WebGL resources from the worker callback;
+- installed the compacted worker scheduler in the WebGL2 renderer and wired accepted worker results
+  to `markWorldResourcesDirty`;
+- added committed compacted group maps to `Webgl2WorldResourceStore`:
+  - scheduler group key to committed geometry batch key;
+  - scheduler group key to committed family resource key;
+- changed `syncWebgl2CompactedGeometryResources` to:
+  - consume ready worker results at the start of resource sync;
+  - commit matching ready results through `commitWebgl2CompactedGeometryBatch`;
+  - schedule or coalesce worker jobs for desired groups;
+  - retain old committed batches and family resources while replacement work is pending;
+  - release stale group mappings when the source scene no longer wants a group;
+  - keep synchronous compacted construction as the no-worker fallback path;
+- disposed the compacted worker scheduler with the WebGL2 world resource store;
+- added focused scheduler-owner coverage proving compacted jobs are submitted, ready results request
+  invalidation, and ready results are returned by group key.
+
+Validation completed:
+
+- `npm run test:ts -- compacted-geometry webgl2-world-resources render-resource-worker-client`
+- `npm run check`
+- `npm run lint:ts`
+
+Course corrections:
+
+- The worker scheduler is per group, not one global compacted scheduler. A single scheduler would
+  serialize unrelated landblock/material-family groups and make stale-result checks depend on one
+  global desired key.
+- Worker callbacks still do not touch WebGL. They only move a CPU result into scheduler-ready state
+  and request another renderer sync through the existing dirty-frame path.
+- The first live worker pass keeps synchronous compaction as the fallback when no compacted worker
+  scheduler is installed. This preserves deterministic unit tests and gives a narrow debug fallback
+  while rollout stabilizes.
+- The committed group maps are now the source of truth for retaining old family resources while a
+  replacement worker job is pending. Geometry keys alone were not enough because family resources
+  are keyed separately.
+
+Introduced cleanup targets and legacy shims:
+
+- `RenderResourceJobScheduler.markCommitted` still increments commit metrics every call, so callers
+  should only call it after actual commit. Phase 3B-2 avoids calling it for already-committed steady
+  state, but a future metrics panel should make this invariant visible.
+- `syncWebgl2CompactedGeometryResources` now contains both worker and fallback paths. Keep the
+  fallback until worker rollout is stable, then consider extracting the worker path into a smaller
+  compacted resource owner to keep sync code easier to read.
+- Null worker geometries are currently discarded for desired groups. That should be hardened before
+  atlas worker phases so impossible "desired but null" jobs fail loudly or record explicit metrics
+  instead of silently doing no work.
+- Worker metrics are still local to schedulers and not exposed in renderer diagnostics. Add an
+  immediate Phase 3B-3 before atlas migration to harden metrics, null-result handling, and async
+  retention coverage.
+
 ## Scheduling Model
 
 Use latest-wins scheduling with revision and key checks.
@@ -899,7 +958,7 @@ Validation:
 
 ## Phase 3B-2: Compacted Geometry Scheduler And Commit Wiring
 
-Status: next.
+Status: complete.
 
 Work:
 
@@ -925,12 +984,31 @@ Work:
 
 Validation:
 
-- Existing compacted geometry and WebGL resource tests still pass.
-- Add scheduler tests showing common re-anchor shifts do not resubmit incompatible work.
-- Add WebGL resource tests showing old compacted resources continue rendering while newer worker
-  work is pending.
-- Compare metrics before and after: dirty sync should stop spending main-thread time in compacted
-  geometry building.
+- Existing compacted geometry and WebGL resource tests pass.
+- Added scheduler-owner tests for typed compacted job submission and ready-result invalidation.
+- Remaining metrics comparison is deferred to Phase 3B-3.
+
+## Phase 3B-3: Compacted Worker Hardening And Metrics
+
+Status: next.
+
+Work:
+
+- Surface compacted worker scheduler metrics in renderer diagnostics or a resource snapshot without
+  putting metrics into `RendererResourceGraph`.
+- Add an explicit null-result policy for desired compacted jobs. Prefer failing loudly for impossible
+  desired-but-null jobs unless a real empty-group case is proven.
+- Add async-path tests showing old compacted batches and family resources remain installed while a
+  replacement job is pending.
+- Add async-path tests showing stale ready worker results are discarded when the current desired group
+  key no longer matches.
+- Decide whether `commitWebgl2CompactedGeometryBatch` should keep accepting retained-key sets or
+  whether a compacted worker resource owner should own that bookkeeping.
+
+Validation:
+
+- Existing compacted geometry, WebGL resource, and worker scheduler tests pass.
+- Renderer diagnostics remain graph-independent.
 
 ## Phase 4: Indexed Resource Atlas Worker Preparation
 

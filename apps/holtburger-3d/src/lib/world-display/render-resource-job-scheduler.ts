@@ -14,6 +14,7 @@ export interface RenderResourceJobSchedulerOptions<TInput, TResult> {
 	getInputKey(input: TInput): string;
 	getResultKey(result: TResult): string;
 	submit(input: TInput): Promise<TResult>;
+	onReadyResult?: () => void;
 }
 
 interface InFlightJob {
@@ -145,6 +146,7 @@ export class RenderResourceJobScheduler<TInput, TResult> {
 
 		this.readyResults.push(result);
 		this.metricsState.readyResultCount += 1;
+		this.options.onReadyResult?.();
 		this.submitPendingDesired();
 	}
 

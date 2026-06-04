@@ -3,7 +3,6 @@ import { isIndoorBrowserDestination } from "../../app/browser-mode";
 import type {
 	AssetChannelState,
 	PreparedAssetRecord,
-	PreparedLandblockOutdoorPayload,
 	PreparedTerrainMesh,
 } from "../assets/types";
 import { deriveTerrainFocusLandblockId } from "../assets/scene-asset-request-planner";
@@ -16,6 +15,7 @@ import {
 	buildTerrainMaterialResourcePlan,
 	type TerrainMaterialResourcePlan,
 } from "./terrain-materials";
+import { createPreparedTerrainMeshFromOutdoorPayload } from "./terrain-render-artifact";
 
 export interface TerrainSceneTile {
 	assetId: string;
@@ -141,36 +141,10 @@ function getTerrainMeshFromPreparedAsset(
 	asset: PreparedAssetRecord,
 ): PreparedTerrainMesh | null {
 	if (asset.payload.kind === "landblock-outdoor") {
-		return convertPreparedOutdoorTerrainPayload(asset.payload);
+		return createPreparedTerrainMeshFromOutdoorPayload(asset.payload);
 	}
 
 	return null;
-}
-
-function convertPreparedOutdoorTerrainPayload(
-	payload: PreparedLandblockOutdoorPayload,
-): PreparedTerrainMesh {
-	return {
-		landblockId: payload.landblockId,
-		gridSize: payload.terrain.gridSize,
-		tileSize: payload.terrain.tileSize,
-		vertices: payload.terrain.vertices,
-		triangles: payload.terrain.triangles.map((triangle) => ({
-			a: triangle.vertexIndices[0],
-			b: triangle.vertexIndices[1],
-			c: triangle.vertexIndices[2],
-			quadIndex: triangle.quadIndex,
-			triangleInQuad: triangle.triangleInQuad,
-			debugTerrainPcode:
-				payload.terrain.quads.find(
-					(quad) => quad.quadIndex === triangle.quadIndex,
-				)?.pcode ?? 0,
-			averageHeight: triangle.averageHeight,
-		})),
-		quads: payload.terrain.quads,
-		minHeight: payload.terrain.minHeight,
-		maxHeight: payload.terrain.maxHeight,
-	};
 }
 
 function compareLandblockGridPosition(

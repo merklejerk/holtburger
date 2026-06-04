@@ -6,6 +6,11 @@ import type {
 	RenderResourceWorkerRequestMessage,
 	RenderResourceWorkerResponseMessage,
 } from "../../workers/render-resource-worker";
+import {
+	collectBuildCompactedGeometryInputTransferables,
+	type BuildCompactedGeometryWorkerJob,
+	type BuildCompactedGeometryWorkerResult,
+} from "./worker-resources/compacted-geometry-worker-payloads";
 
 export interface RenderResourceWorkerLike {
 	onmessage:
@@ -58,6 +63,22 @@ export class RenderResourceWorkerClient {
 			if (result.type !== "echo") {
 				throw new Error(
 					`Render resource worker returned ${result.type} for echo job.`,
+				);
+			}
+			return result;
+		});
+	}
+
+	runBuildCompactedGeometryJob(
+		job: BuildCompactedGeometryWorkerJob,
+	): Promise<BuildCompactedGeometryWorkerResult> {
+		return this.runJob(
+			job,
+			collectBuildCompactedGeometryInputTransferables(job.input),
+		).then((result) => {
+			if (result.type !== "build-compacted-geometry") {
+				throw new Error(
+					`Render resource worker returned ${result.type} for compacted geometry job.`,
 				);
 			}
 			return result;

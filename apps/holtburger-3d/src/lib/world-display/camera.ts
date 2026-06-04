@@ -1,13 +1,8 @@
 import type { Vec3Dto } from "../host/contracts";
-import {
-	getOutdoorLandblockCoords,
-	OUTDOOR_LANDBLOCK_WORLD_SIZE,
-} from "../landblocks";
 import type { NormalizedViewportPoint } from "./model";
 import {
 	convertCameraFrameBetweenAnchors,
 	type RenderCameraFrame,
-	type RenderLandblockAnchor,
 } from "./render-chunks";
 import type { RenderRay } from "./render-spatial-math";
 
@@ -496,33 +491,6 @@ function buildFrameRayDirection(
 			),
 		),
 	);
-}
-
-function threeVectorToAc(vector: Vec3Dto): Vec3Dto {
-	return {
-		x: vector.x,
-		y: -vector.z,
-		z: vector.y,
-	};
-}
-
-function rendererPointToAcPosition(
-	point: Vec3Dto,
-	activeRenderAnchor: RenderLandblockAnchor | null,
-): Vec3Dto {
-	const acPoint = threeVectorToAc(point);
-	if (activeRenderAnchor === null) {
-		return acPoint;
-	}
-
-	const anchorCoords = getOutdoorLandblockCoords(
-		activeRenderAnchor.landblockId,
-	);
-	return {
-		x: anchorCoords.x * OUTDOOR_LANDBLOCK_WORLD_SIZE + acPoint.x,
-		y: anchorCoords.y * OUTDOOR_LANDBLOCK_WORLD_SIZE + acPoint.y,
-		z: acPoint.z,
-	};
 }
 
 function createCameraStateRebaseFrame(position: Vec3Dto): RenderCameraFrame {

@@ -164,19 +164,50 @@ function packAtlasBytes(
 		ref: VirtualTexturePageRef;
 	}[],
 ): Uint8Array {
-	const bytes = new Uint8Array(width * height * 4);
+	const bytesPerPixel = resolveTextureRefBytesPerPixel(
+		placements.map(({ ref }) => ref),
+	);
+	const bytes = new Uint8Array(width * height * bytesPerPixel);
 	for (const { placement, ref } of placements) {
 		if (!ref.bytes) {
 			continue;
 		}
 		for (let row = 0; row < placement.height; row += 1) {
-			const sourceOffset = row * placement.width * 4;
-			const targetOffset = ((placement.y + row) * width + placement.x) * 4;
+			const sourceOffset = row * placement.width * bytesPerPixel;
+			const targetOffset =
+				((placement.y + row) * width + placement.x) * bytesPerPixel;
 			bytes.set(
-				ref.bytes.subarray(sourceOffset, sourceOffset + placement.width * 4),
+				ref.bytes.subarray(
+					sourceOffset,
+					sourceOffset + placement.width * bytesPerPixel,
+				),
 				targetOffset,
 			);
 		}
 	}
 	return bytes;
+}
+
+function resolveTextureRefBytesPerPixel(
+	refs: readonly VirtualTexturePageRef[],
+): number {
+	const byteSizes = new Set(
+		refs.map((ref) => {
+			const pixelCount = ref.width * ref.height;
+			if (!ref.bytes || pixelCount <= 0) {
+				return 4;
+			}
+			const bytesPerPixel = ref.bytes.byteLength / pixelCount;
+			if (!Number.isInteger(bytesPerPixel) || bytesPerPixel <= 0) {
+				throw new Error(
+					`Texture page ref ${ref.key} carries ${ref.bytes.byteLength} bytes for ${ref.width}x${ref.height}.`,
+				);
+			}
+			return bytesPerPixel;
+		}),
+	);
+	if (byteSizes.size > 1) {
+		throw new Error("Texture page atlas cannot mix byte widths in one page.");
+	}
+	return [...byteSizes][0] ?? 4;
 }

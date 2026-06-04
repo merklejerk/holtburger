@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type { PreparedAssetRecord } from "../assets/types";
+import type {
+	PreparedAssetRecord,
+	PreparedTexturePayload,
+} from "../assets/types";
 import { formatPreparedTextureAssetId } from "../assets/types";
 import {
 	formatLandblockOutdoorAssetId,
@@ -27,8 +30,10 @@ describe("static bundle layer builder", () => {
 			createMaterial("material/direct-08000002", "render-surface/06000002"),
 			createRenderSurface("render-surface/06000001"),
 			createRenderSurface("render-surface/06000002"),
-			createPreparedTexture(0x06000001, "color", [255, 0, 0, 255]),
-			createPreparedTexture(0x06000002, "color", [0, 255, 0, 255], 8),
+			createPreparedTexture(0x06000001, "raw", [255, 0, 0, 255]),
+			createPreparedTexture(0x06000001, "detail", [255, 128, 0, 255]),
+			createPreparedTexture(0x06000002, "raw", [0, 255, 0, 255], 8),
+			createPreparedTexture(0x06000002, "detail", [0, 128, 255, 255], 8),
 		];
 
 		const layer = buildStaticLandblockRenderBundleLayer({
@@ -51,7 +56,7 @@ describe("static bundle layer builder", () => {
 		expect(layer.preparedAssetIds).toContain(
 			formatPreparedTextureAssetId({
 				renderSurfaceId: 0x06000001,
-				usage: "color",
+				usage: "raw",
 				outputFormat: "rgba8",
 				mipPolicy: "none",
 				colorSpace: "linear",
@@ -62,16 +67,16 @@ describe("static bundle layer builder", () => {
 		expect(layer.directEntries).toHaveLength(1);
 		expect(layer.texturePages.map((page) => page.pageKind).sort()).toEqual([
 			"packed-atlas",
+			"packed-atlas",
+			"single-entry",
 			"single-entry",
 		]);
 		expect(
-			layer.texturePages.find((page) => page.pageKind === "packed-atlas")
-				?.entries,
-		).toHaveLength(1);
+			layer.texturePages.filter((page) => page.pageKind === "packed-atlas"),
+		).toHaveLength(2);
 		expect(
-			layer.texturePages.find((page) => page.pageKind === "single-entry")
-				?.entries,
-		).toHaveLength(1);
+			layer.texturePages.filter((page) => page.pageKind === "single-entry"),
+		).toHaveLength(2);
 		expect(layer.diagnostics).toMatchObject({
 			sourceObjectCount: 2,
 			compactedSurfaceCount: 1,
@@ -93,8 +98,10 @@ describe("static bundle layer builder", () => {
 			createMaterial("material/direct-08000002", "render-surface/06000002"),
 			createRenderSurface("render-surface/06000001"),
 			createRenderSurface("render-surface/06000002"),
-			createPreparedTexture(0x06000001, "color", [255, 0, 0, 255]),
-			createPreparedTexture(0x06000002, "color", [0, 255, 0, 255]),
+			createPreparedTexture(0x06000001, "raw", [255, 0, 0, 255]),
+			createPreparedTexture(0x06000001, "detail", [255, 128, 0, 255]),
+			createPreparedTexture(0x06000002, "raw", [0, 255, 0, 255]),
+			createPreparedTexture(0x06000002, "detail", [0, 128, 255, 255]),
 		];
 
 		const first = buildStaticLandblockRenderBundleLayer({
@@ -142,7 +149,8 @@ describe("static bundle layer builder", () => {
 				createGfxObj("gfx-obj/01000001", "material/08000001", 1),
 				createMaterial("material/08000001", "render-surface/06000001"),
 				createRenderSurface("render-surface/06000001"),
-				createPreparedTexture(0x06000001, "color", [255, 0, 0, 255]),
+				createPreparedTexture(0x06000001, "raw", [255, 0, 0, 255]),
+				createPreparedTexture(0x06000001, "detail", [255, 128, 0, 255]),
 			].map((asset) => [asset.request.assetId, asset] as const),
 		);
 
@@ -322,7 +330,7 @@ function createRenderSurface(assetId: string): PreparedAssetRecord {
 		unknown: 0,
 		width: 1,
 		height: 1,
-		formatRaw: 0,
+		formatRaw: 0x15,
 		format: "rgba8",
 		sourceByteLength: 4,
 		sourceBytes: new Uint8Array([255, 255, 255, 255]),
@@ -333,7 +341,7 @@ function createRenderSurface(assetId: string): PreparedAssetRecord {
 
 function createPreparedTexture(
 	renderSurfaceId: number,
-	usage: "color" | "detail",
+	usage: PreparedTexturePayload["usage"],
 	bytes: readonly number[],
 	size = 1,
 ): PreparedAssetRecord {

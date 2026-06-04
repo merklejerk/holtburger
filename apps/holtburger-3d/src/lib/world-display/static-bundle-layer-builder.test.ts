@@ -76,6 +76,10 @@ describe("static bundle layer builder", () => {
 			layer.compactedBatches.map((batch) => batch.materialRecordKey),
 		).toEqual(["material:material/08000001", "material:material/08000003"]);
 		expect(layer.directEntries).toHaveLength(1);
+		expect(layer.directEntries[0]?.positions).toBeInstanceOf(Float32Array);
+		expect(layer.directEntries[0]?.positions.length).toBeGreaterThan(0);
+		expect(layer.directEntries[0]?.uvs.length).toBeGreaterThan(0);
+		expect(layer.directEntries[0]?.indices.length).toBeGreaterThan(0);
 		expect(
 			layer.materialRecords.map((record) => [record.key, record.familyKey]),
 		).toContainEqual([

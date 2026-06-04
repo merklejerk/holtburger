@@ -484,6 +484,10 @@ function buildDirectEntries(
 			renderChunkKey,
 			materialRecordKey: `material:${surface.materialAssetId}`,
 			objectKey: surface.object.objectKey,
+			positions: surface.positions,
+			normals: surface.normals,
+			uvs: surface.uvs,
+			indices: surface.indices,
 			bounds: null,
 		}))
 		.sort((left, right) => left.key.localeCompare(right.key));

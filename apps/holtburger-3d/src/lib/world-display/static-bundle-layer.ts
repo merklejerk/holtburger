@@ -158,6 +158,10 @@ export interface StaticBundleDirectEntry {
 	renderChunkKey: string;
 	materialRecordKey: string;
 	objectKey: string;
+	positions: PreparedFloat32Array;
+	normals: PreparedFloat32Array;
+	uvs: PreparedFloat32Array;
+	indices: Uint16Array | Uint32Array;
 	bounds: RenderBounds | null;
 }
 

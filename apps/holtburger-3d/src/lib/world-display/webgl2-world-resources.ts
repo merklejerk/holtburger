@@ -643,6 +643,8 @@ export function syncWebgl2WorldResources({
 				detailTexturesEnabled,
 				indexedMaterialDataCache: store.indexedMaterialDataCache,
 				materialPlanCache: store.materialPlanCache,
+				excludedStaticLandblockIds:
+					deriveResidentOutdoorStaticBundleLandblockIds(store),
 			}),
 	);
 	const chunkOffsetByKey = new Map(
@@ -1142,6 +1144,39 @@ export function destroyWebgl2WorldResources(
 	store.preparedTextureUploadCount = 0;
 	store.preparedTextureGeneratedByteLength = 0;
 	store.triangleCount = 0;
+}
+
+function deriveResidentOutdoorStaticBundleLandblockIds(
+	store: Webgl2WorldResourceStore,
+): ReadonlySet<number> {
+	const layerKindsByLandblockId = new Map<number, Set<string>>();
+	for (const layer of store.staticBundleLayerResources.layersByKey.values()) {
+		if (
+			layer.layerKind !== "outdoor-buildings" &&
+			layer.layerKind !== "outdoor-detail"
+		) {
+			continue;
+		}
+		const layerKinds = layerKindsByLandblockId.get(layer.landblockId);
+		if (layerKinds) {
+			layerKinds.add(layer.layerKind);
+		} else {
+			layerKindsByLandblockId.set(
+				layer.landblockId,
+				new Set([layer.layerKind]),
+			);
+		}
+	}
+	const landblockIds = new Set<number>();
+	for (const [landblockId, layerKinds] of layerKindsByLandblockId) {
+		if (
+			layerKinds.has("outdoor-buildings") &&
+			layerKinds.has("outdoor-detail")
+		) {
+			landblockIds.add(landblockId);
+		}
+	}
+	return landblockIds;
 }
 
 function createEmptyCompactedGeometryWorkerSchedulerMetrics(): CompactedGeometryWorkerSchedulerMetrics {

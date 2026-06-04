@@ -1,4 +1,8 @@
-import { multiplyMat4Into, type RenderMat4 } from "./render-math";
+import {
+	createTranslationMat4,
+	multiplyMat4Into,
+	type RenderMat4,
+} from "./render-math";
 import type { WorldRenderFrame } from "./world-render-frame";
 import type { Webgl2ProgramResource } from "./webgl2-gl";
 import type { Webgl2StateCache } from "./webgl2-state-cache";
@@ -37,6 +41,13 @@ import {
 	submitWebgl2TerrainFamilyTiles,
 	type Webgl2TerrainFamilyWorldProgram,
 } from "./webgl2/families/terrain-family-submit";
+import type {
+	Webgl2StaticBundleGeometryResource,
+	Webgl2StaticBundleLayerResource,
+	Webgl2StaticBundleLayerResourceStore,
+	Webgl2StaticBundleMaterialResource,
+	Webgl2StaticBundleMaterialTextureBinding,
+} from "./webgl2/resources/static-bundle-layer-resources";
 
 export type Webgl2FlatWorldProgram = Webgl2ProgramResource<
 	"position",
@@ -154,6 +165,12 @@ export interface Webgl2WorldSubmitMetrics {
 	directPackedTexturePageEstimatedBindAvoidedCount: number;
 	directPackedTexturePageTextureCount: number;
 	directTexturePageFallbackSamples: readonly string[];
+	staticBundleLayerSubmittedCount: number;
+	staticBundleGeometrySubmittedCount: number;
+	staticBundleDrawCallCount: number;
+	staticBundleTriangleCount: number;
+	staticBundleSkippedGeometryCount: number;
+	staticBundleSubmitFallbackSamples: readonly string[];
 }
 
 const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
@@ -219,6 +236,12 @@ const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	directPackedTexturePageEstimatedBindAvoidedCount: 0,
 	directPackedTexturePageTextureCount: 0,
 	directTexturePageFallbackSamples: [],
+	staticBundleLayerSubmittedCount: 0,
+	staticBundleGeometrySubmittedCount: 0,
+	staticBundleDrawCallCount: 0,
+	staticBundleTriangleCount: 0,
+	staticBundleSkippedGeometryCount: 0,
+	staticBundleSubmitFallbackSamples: [],
 };
 
 export type Webgl2RgbaTexturePageFamilySubmitRoute =
@@ -333,6 +356,7 @@ export function submitWebgl2WorldFrame({
 		detailTextureAtlasGenerationKey: null,
 		detailTextures: [],
 	},
+	staticBundleLayerResources = null,
 	drawUnitsById,
 	terrainTilesById = new Map(),
 	frame,
@@ -349,6 +373,7 @@ export function submitWebgl2WorldFrame({
 	indexedPalettedFamilyP16Program?: Webgl2IndexedPalettedFamilyWorldProgram;
 	rgbaTexturePageFamilyResources?: Webgl2RgbaTexturePageFamilySubmitResources;
 	indexedPalettedFamilyResources?: Webgl2IndexedPalettedFamilySubmitResources;
+	staticBundleLayerResources?: Webgl2StaticBundleLayerResourceStore | null;
 	drawUnitsById: ReadonlyMap<string, Webgl2WorldDrawUnit>;
 	terrainTilesById?: ReadonlyMap<string, Webgl2TerrainTileResource>;
 	frame: WorldRenderFrame;
@@ -376,6 +401,7 @@ export function submitWebgl2WorldFrame({
 		indexedPalettedFamilyP16Program,
 		rgbaTexturePageFamilyResources,
 		indexedPalettedFamilyResources,
+		staticBundleLayerResources,
 		viewProjectionMatrix: frame.viewProjectionMatrix,
 		cameraPosition: frame.cameraFrame.position,
 		drawUnits,
@@ -409,6 +435,7 @@ export function submitWebgl2WorldDrawUnits({
 		detailTextureAtlasGenerationKey: null,
 		detailTextures: [],
 	},
+	staticBundleLayerResources = null,
 	viewProjectionMatrix,
 	cameraPosition,
 	drawUnits,
@@ -431,6 +458,7 @@ export function submitWebgl2WorldDrawUnits({
 	indexedPalettedFamilyP16Program?: Webgl2IndexedPalettedFamilyWorldProgram;
 	rgbaTexturePageFamilyResources?: Webgl2RgbaTexturePageFamilySubmitResources;
 	indexedPalettedFamilyResources?: Webgl2IndexedPalettedFamilySubmitResources;
+	staticBundleLayerResources?: Webgl2StaticBundleLayerResourceStore | null;
 	viewProjectionMatrix: RenderMat4;
 	cameraPosition: WorldRenderFrame["cameraFrame"]["position"];
 	drawUnits: readonly Webgl2WorldDrawUnit[];
@@ -466,7 +494,9 @@ export function submitWebgl2WorldDrawUnits({
 			rgbaTexturePageFamilyResources.generation?.textures.length ?? 0,
 	};
 	if (drawUnits.length === 0 && terrainTiles.length === 0) {
-		return metrics;
+		if (!staticBundleLayerResources?.layersByKey.size) {
+			return metrics;
+		}
 	}
 	const schedule = planWebgl2WorldSubmitPassSchedule({
 		drawUnits,
@@ -527,6 +557,14 @@ export function submitWebgl2WorldDrawUnits({
 		schedule,
 		metrics,
 	});
+	submitWebgl2StaticBundleLayers({
+		gl,
+		stateCache,
+		texturedProgram,
+		viewProjectionMatrix,
+		staticBundleLayerResources,
+		metrics,
+	});
 	if (
 		terrainFamilyProgram &&
 		rgbaTexturePageFamilyResources.generation &&
@@ -564,6 +602,197 @@ export function submitWebgl2WorldDrawUnits({
 		stateCache,
 	});
 	return metrics;
+}
+
+function submitWebgl2StaticBundleLayers({
+	gl,
+	stateCache,
+	texturedProgram,
+	viewProjectionMatrix,
+	staticBundleLayerResources,
+	metrics,
+}: {
+	gl: WebGL2RenderingContext;
+	stateCache: Webgl2StateCache;
+	texturedProgram: Webgl2TexturedWorldProgram;
+	viewProjectionMatrix: RenderMat4;
+	staticBundleLayerResources: Webgl2StaticBundleLayerResourceStore | null;
+	metrics: Webgl2WorldSubmitMetrics;
+}): void {
+	if (!staticBundleLayerResources) {
+		return;
+	}
+	const identityMatrix = createTranslationMat4({ x: 0, y: 0, z: 0 });
+	for (const layer of staticBundleLayerResources.layersByKey.values()) {
+		const materialByKey = new Map(
+			layer.materialRecords.map((material) => [material.key, material]),
+		);
+		const geometries = [...layer.compactedBatches, ...layer.directEntries].sort(
+			(left, right) => left.key.localeCompare(right.key),
+		);
+		let submittedLayer = false;
+		for (const transparent of [false, true]) {
+			metrics.stateChangeCount += stateCache.setBlendState({
+				enabled: transparent,
+				srcRgb: gl.SRC_ALPHA,
+				dstRgb: gl.ONE_MINUS_SRC_ALPHA,
+				srcAlpha: gl.ONE,
+				dstAlpha: gl.ONE_MINUS_SRC_ALPHA,
+				equationRgb: gl.FUNC_ADD,
+				equationAlpha: gl.FUNC_ADD,
+			});
+			for (const geometry of geometries) {
+				const material = materialByKey.get(geometry.materialRecordKey);
+				if (!material || material.isTransparent !== transparent) {
+					continue;
+				}
+				if (
+					submitWebgl2StaticBundleGeometry({
+						gl,
+						stateCache,
+						texturedProgram,
+						viewProjectionMatrix,
+						identityMatrix,
+						layer,
+						geometry,
+						material,
+						metrics,
+					})
+				) {
+					submittedLayer = true;
+				}
+			}
+		}
+		if (submittedLayer) {
+			metrics.staticBundleLayerSubmittedCount += 1;
+		}
+	}
+}
+
+function submitWebgl2StaticBundleGeometry({
+	gl,
+	stateCache,
+	texturedProgram,
+	viewProjectionMatrix,
+	identityMatrix,
+	layer,
+	geometry,
+	material,
+	metrics,
+}: {
+	gl: WebGL2RenderingContext;
+	stateCache: Webgl2StateCache;
+	texturedProgram: Webgl2TexturedWorldProgram;
+	viewProjectionMatrix: RenderMat4;
+	identityMatrix: RenderMat4;
+	layer: Webgl2StaticBundleLayerResource;
+	geometry: Webgl2StaticBundleGeometryResource;
+	material: Webgl2StaticBundleMaterialResource;
+	metrics: Webgl2WorldSubmitMetrics;
+}): boolean {
+	if (material.familyKey !== "rgba-texture-page") {
+		metrics.staticBundleSkippedGeometryCount += 1;
+		metrics.staticBundleSubmitFallbackSamples =
+			appendStaticBundleSubmitFallbackSamples(
+				metrics.staticBundleSubmitFallbackSamples,
+				[
+					`static bundle ${layer.layerKey} material ${material.key} family ${material.familyKey} is not submitted by the RGBA slice`,
+				],
+			);
+		return false;
+	}
+	const base = resolveStaticBundleTextureBinding(material, "base-color");
+	if (!base) {
+		metrics.staticBundleSkippedGeometryCount += 1;
+		metrics.staticBundleSubmitFallbackSamples =
+			appendStaticBundleSubmitFallbackSamples(
+				metrics.staticBundleSubmitFallbackSamples,
+				[
+					`static bundle ${layer.layerKey} material ${material.key} has no base-color texture binding`,
+				],
+			);
+		return false;
+	}
+	const detail = resolveStaticBundleTextureBinding(material, "detail");
+	if (stateCache.useProgram(texturedProgram.program)) {
+		metrics.programSwitchCount += 1;
+		metrics.stateChangeCount += 1;
+		gl.uniform1i(texturedProgram.uniforms.uTexture, 0);
+		gl.uniform1i(texturedProgram.uniforms.uDetailTexture, 1);
+		metrics.uniformUploadCount += 2;
+	}
+	metrics.stateChangeCount += stateCache.setDepthState({
+		enabled: true,
+		write: !material.isTransparent,
+		func: gl.LEQUAL,
+	});
+	metrics.stateChangeCount += stateCache.setCullState({
+		enabled: false,
+		mode: gl.BACK,
+	});
+	if (stateCache.bindTexture2D(0, base.texture.texture)) {
+		metrics.stateChangeCount += 1;
+	}
+	if (detail && stateCache.bindTexture2D(1, detail.texture.texture)) {
+		metrics.stateChangeCount += 1;
+	}
+	if (stateCache.bindVertexArray(geometry.vertexArray.vertexArray)) {
+		metrics.vertexArrayBindCount += 1;
+		metrics.stateChangeCount += 1;
+	}
+	gl.uniformMatrix4fv(
+		texturedProgram.uniforms.uModelViewProjection,
+		false,
+		multiplyMat4Into(
+			new Float32Array(16),
+			viewProjectionMatrix,
+			identityMatrix,
+		),
+	);
+	gl.uniform4fv(texturedProgram.uniforms.uColor, [1, 1, 1, 1]);
+	gl.uniform1f(texturedProgram.uniforms.uAlphaTest, 0);
+	gl.uniform1i(texturedProgram.uniforms.uAtlasEnabled, 1);
+	gl.uniform4f(
+		texturedProgram.uniforms.uAtlasRect,
+		base.rect[0],
+		base.rect[1],
+		base.rect[2],
+		base.rect[3],
+	);
+	gl.uniform2f(texturedProgram.uniforms.uAtlasSize, base.width, base.height);
+	gl.uniform2f(
+		texturedProgram.uniforms.uTexturePageWrapMode,
+		base.wrapS === "repeat" ? 1 : 0,
+		base.wrapT === "repeat" ? 1 : 0,
+	);
+	gl.uniform1f(texturedProgram.uniforms.uDetailTiling, 1);
+	gl.uniform1i(texturedProgram.uniforms.uDetailEnabled, detail ? 1 : 0);
+	metrics.uniformUploadCount += 9;
+	gl.drawElements(gl.TRIANGLES, geometry.indexCount, geometry.indexType, 0);
+	metrics.drawCallCount += 1;
+	metrics.triangleCount += geometry.triangleCount;
+	metrics.staticBundleDrawCallCount += 1;
+	metrics.staticBundleGeometrySubmittedCount += 1;
+	metrics.staticBundleTriangleCount += geometry.triangleCount;
+	return true;
+}
+
+function resolveStaticBundleTextureBinding(
+	material: Webgl2StaticBundleMaterialResource,
+	usageBucket: Webgl2StaticBundleMaterialTextureBinding["usageBucket"],
+): Webgl2StaticBundleMaterialTextureBinding | null {
+	return (
+		material.textureBindings.find(
+			(binding) => binding.usageBucket === usageBucket,
+		) ?? null
+	);
+}
+
+function appendStaticBundleSubmitFallbackSamples(
+	current: readonly string[],
+	next: readonly string[],
+): readonly string[] {
+	return [...current, ...next].slice(0, 8);
 }
 
 export function planWebgl2WorldSubmitPassSchedule({

@@ -22,7 +22,7 @@ export interface Webgl2StaticBundleLayerResourceStore {
 	layersByKey: Map<string, Webgl2StaticBundleLayerResource>;
 }
 
-interface Webgl2StaticBundleLayerResource {
+export interface Webgl2StaticBundleLayerResource {
 	key: string;
 	layerKey: string;
 	landblockId: number;
@@ -41,6 +41,7 @@ interface Webgl2StaticBundleTexturePageResource {
 	usageBucket: VirtualTexturePageUsageBucket;
 	sampleClass: VirtualTexturePageSampleClass;
 	pageKind: StaticBundleTexturePage["pageKind"];
+	indexedFormat: StaticBundleTexturePage["indexedFormat"];
 	texture: Webgl2Texture2DResource;
 	entries: readonly Webgl2StaticBundleTexturePageEntryResource[];
 }
@@ -51,23 +52,28 @@ interface Webgl2StaticBundleTexturePageEntryResource {
 	rect: readonly [number, number, number, number];
 }
 
-interface Webgl2StaticBundleMaterialResource {
+export interface Webgl2StaticBundleMaterialResource {
 	key: string;
 	familyKey: string;
 	isTransparent: boolean;
 	textureBindings: readonly Webgl2StaticBundleMaterialTextureBinding[];
 }
 
-interface Webgl2StaticBundleMaterialTextureBinding {
+export interface Webgl2StaticBundleMaterialTextureBinding {
 	virtualRefKey: string;
 	texturePageKey: string;
 	usageBucket: VirtualTexturePageUsageBucket;
 	sampleClass: VirtualTexturePageSampleClass;
+	indexedFormat: StaticBundleTexturePage["indexedFormat"];
 	rect: readonly [number, number, number, number];
+	width: number;
+	height: number;
+	wrapS: "clamp" | "repeat";
+	wrapT: "clamp" | "repeat";
 	texture: Webgl2Texture2DResource;
 }
 
-interface Webgl2StaticBundleGeometryResource {
+export interface Webgl2StaticBundleGeometryResource {
 	key: string;
 	renderChunkKey: string;
 	materialRecordKey: string;
@@ -144,11 +150,15 @@ function createWebgl2StaticBundleLayerResource({
 	const texturePagesByKey = new Map(
 		texturePages.map((page) => [page.key, page]),
 	);
+	const texturePageRefByKey = new Map(
+		layer.texturePageRefs.map((ref) => [ref.key, ref]),
+	);
 	const texturePageByVirtualRefKey =
 		createStaticBundleTexturePageByVirtualRefKey(texturePages);
 	const materialRecords = layer.materialRecords.map((record) =>
 		createWebgl2StaticBundleMaterialResource({
 			record,
+			texturePageRefByKey,
 			texturePageByVirtualRefKey,
 		}),
 	);
@@ -202,6 +212,7 @@ function createWebgl2StaticBundleTexturePageResource({
 		usageBucket: page.usageBucket,
 		sampleClass: page.sampleClass,
 		pageKind: page.pageKind,
+		indexedFormat: page.indexedFormat,
 		texture: createWebgl2Texture2D(gl, {
 			label: page.key,
 			upload,
@@ -312,9 +323,14 @@ function createStaticBundleTexturePageByVirtualRefKey(
 
 function createWebgl2StaticBundleMaterialResource({
 	record,
+	texturePageRefByKey,
 	texturePageByVirtualRefKey,
 }: {
 	record: StaticBundleMaterialRecord;
+	texturePageRefByKey: ReadonlyMap<
+		string,
+		StaticLandblockRenderBundleLayer["texturePageRefs"][number]
+	>;
 	texturePageByVirtualRefKey: ReadonlyMap<
 		string,
 		Webgl2StaticBundleTexturePageResource
@@ -327,6 +343,7 @@ function createWebgl2StaticBundleMaterialResource({
 		textureBindings: record.texturePageRefKeys.map((virtualRefKey) =>
 			resolveStaticBundleMaterialTextureBinding({
 				materialRecordKey: record.key,
+				texturePageRefByKey,
 				virtualRefKey,
 				texturePageByVirtualRefKey,
 			}),
@@ -336,16 +353,27 @@ function createWebgl2StaticBundleMaterialResource({
 
 function resolveStaticBundleMaterialTextureBinding({
 	materialRecordKey,
+	texturePageRefByKey,
 	virtualRefKey,
 	texturePageByVirtualRefKey,
 }: {
 	materialRecordKey: string;
+	texturePageRefByKey: ReadonlyMap<
+		string,
+		StaticLandblockRenderBundleLayer["texturePageRefs"][number]
+	>;
 	virtualRefKey: string;
 	texturePageByVirtualRefKey: ReadonlyMap<
 		string,
 		Webgl2StaticBundleTexturePageResource
 	>;
 }): Webgl2StaticBundleMaterialTextureBinding {
+	const ref = texturePageRefByKey.get(virtualRefKey);
+	if (!ref) {
+		throw new Error(
+			`Static bundle material ${materialRecordKey} references missing virtual texture ref ${virtualRefKey}.`,
+		);
+	}
 	const page = texturePageByVirtualRefKey.get(virtualRefKey);
 	if (!page) {
 		throw new Error(
@@ -365,7 +393,12 @@ function resolveStaticBundleMaterialTextureBinding({
 		texturePageKey: page.key,
 		usageBucket: page.usageBucket,
 		sampleClass: page.sampleClass,
+		indexedFormat: page.indexedFormat,
 		rect: entry.rect,
+		width: ref.width,
+		height: ref.height,
+		wrapS: ref.wrapS,
+		wrapT: ref.wrapT,
 		texture: page.texture,
 	};
 }

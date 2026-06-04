@@ -1,8 +1,8 @@
 # Holtburger 3D Static Landblock Render Bundle Replacement Plan
 
 Status: Phase 1A through Phase 1J, Phase 2A, Phase 2B, Phase 3A, Phase 3B, Phase
-3C1, Phase 3C2A, and Phase 3C2B1 are implemented. Phase 3C2B2 static bundle submit
-integration is the next implementation phase.
+3C1, Phase 3C2A, Phase 3C2B1, and Phase 3C2B2 are implemented. Phase 3C2B3 indexed
+static bundle submit completion is the next implementation phase.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, preset-based landblock requests, and layer-scoped texture pages.
 
@@ -148,6 +148,16 @@ Progress:
   `structured-interior` draw-unit assembly are in scope for the worker-artifact replacement. The
   plan must not preserve a second main-thread interior static path after outdoor/env-cell bundle
   migration.
+- 2026-06-04: Implemented Phase 3C2B2. Resident `outdoor` static bundle layer resources now submit
+  RGBA texture-page compacted/direct geometry through explicit static-bundle submit metrics, and
+  WebGL resource sync suppresses staged outdoor static draw-unit assembly for a landblock once both
+  resident outdoor bundle layers are present. The phase also exposed the resource metadata required
+  for draw-time virtual texture ref resolution.
+- 2026-06-04: Added Phase 3C2B3 as an immediate follow-up before detailed/env-cell expansion. The
+  RGBA submit slice proved resident bundle submit and staged suppression, but indexed-paletted static
+  bundle submit still needs material descriptor metadata for index format, palette size, clip
+  threshold, repeat policy, and optional indexed detail binding before the outdoor submit replacement
+  can be considered family-complete.
 
 Validation:
 
@@ -244,6 +254,10 @@ Validation:
 - `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run lint:rust` passed after
   Phase 3C2B1.
 - `git diff --check` passed after Phase 3C2B1.
+- `npm exec vitest -- run src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2/resources/static-bundle-layer-resources.test.ts`
+  passed after Phase 3C2B2.
+- `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run lint:rust` passed after
+  Phase 3C2B2.
 
 Related plans:
 
@@ -1033,9 +1047,10 @@ What fits:
   landblock is straightforward.
 - `WorkerHostAssetBridge`, `loadWorkerAssetClosure`, and `prepareAssetPayload` already support a
   worker imperatively loading raw route closures through the main-thread host bridge.
-- The current route set gives the worker enough roots for `outdoor` and `outdoor-with-env-cells`:
-  `landblock/<id>/outdoor`, `landblock/<id>/topology`, `env-cell/<id>`, terrain material,
-  region-profile, renderable, material, render-surface, palette, and prepared-texture routes.
+- The current route set gives the landblock render worker enough roots for `outdoor` and
+  `outdoor-with-env-cells`: `landblock/<id>/outdoor`, `landblock/<id>/topology`, `env-cell/<id>`,
+  terrain material, region-profile, renderable, material, render-surface, palette, and
+  prepared-texture routes.
 - `static-bundle-layer-builder.ts` already proves complete layer CPU artifacts can be built from
   worker-local prepared assets and synchronous texture page packing.
 - Terrain CPU helpers are mostly pure enough to extract: `terrain-scene.ts`,
@@ -2024,7 +2039,8 @@ Implemented in Phase 2A:
 - Added focused tests for:
   - planner/job policy propagation without legacy `rootAssetIds` or `sourceRevision`;
   - worker client dedupe, stale-result rejection, and host lookup forwarding;
-  - worker-runner one-shot outdoor + topology loading for an `outdoor-with-env-cells` preset.
+  - landblock render worker runner one-shot outdoor + topology loading for an
+    `outdoor-with-env-cells` preset job.
 
 Course corrections:
 
@@ -2437,7 +2453,8 @@ Exit criteria:
 ### Phase 3C2B: Static Bundle Renderer Integration Vertical Slice
 
 Status: Split on 2026-06-04. Phase 3C2B1 is implemented as the resident artifact WebGL ownership
-handoff. Phase 3C2B2 is the remaining static bundle submit replacement for the `outdoor` preset.
+handoff. Phase 3C2B2 implements the RGBA outdoor submit slice and staged suppression. Phase 3C2B3
+must complete indexed static bundle submit before detailed/env-cell expansion starts.
 
 ### Phase 3C2B1: Resident Static Bundle Resource Handoff
 
@@ -2511,53 +2528,114 @@ Exit criteria:
 - No main-thread static closure hydration, staged draw-unit assembly, or legacy compaction/atlas
   worker scheduling is used to create those static bundle resources.
 
-### Phase 3C2B2: Static Bundle Submit Replacement
+### Phase 3C2B2: RGBA Static Bundle Submit and Outdoor Staged Suppression
 
-- Submit resident `outdoor` static bundle layer resources from `Webgl2WorldResourceStore` using
-  layer-owned texture pages and material bindings from Phase 3C2A/3C2B1.
-- Wire the `outdoor` preset through planning, worker orchestration, WebGL resource ownership,
-  resident terrain/object ownership, and submit.
-- Consume resident worker artifacts from the Phase 2B store; do not re-plan
-  `DesiredStaticBundleLayer` or rehydrate prepared static closure for the migrated `outdoor` preset.
-- For that wired preset, remove outdoor static objects from staged draw-unit assembly, static
-  compaction planning, direct suppression, and visible submit. Do not only hide staged draw units at
-  submit time.
-- Keep dynamic transition-portal traversal policy separate, but do not keep structured-interior
-  render geometry on the main-thread staged path. Landblock-derived env-cell structure, portal
-  aperture facts, and interior shell/static geometry must come from resident worker artifacts before
-  old static staging is deleted.
-- Keep `outdoor-with-env-cells` and `env-cell-static` out of Phase 3C2B2 only to keep the first
-  submit replacement reviewable. Phase 4A through Phase 4E must migrate them next; do not ship the
-  outdoor slice as a stable parallel mode and do not introduce a separate topology discovery
-  scheduler when env cells are added.
-- Remove static draw units from compaction planning for the integrated preset.
-- Delete direct suppression logic for the integrated preset once no staged direct draw units coexist
-  with its compacted static replacements.
+Status: Implemented on 2026-06-04 as the first submit slice for resident `outdoor` bundle layers.
+This phase proves direct resident bundle submit and removes migrated outdoor statics from staged
+resource sync for fully resident outdoor landblocks, but Phase 3C2B3 must complete indexed-paletted
+bundle submit before Phase 4A starts.
+
+Implemented:
+
+- Added explicit resident static-bundle submit metrics to `Webgl2WorldSubmitMetrics`.
+- `submitWebgl2WorldFrame` now accepts resident static bundle layer resources and submits
+  `rgba-texture-page` compacted batches and direct entries from layer-owned texture pages.
+- The renderer submit callsite passes `Webgl2WorldResourceStore.staticBundleLayerResources` into
+  world submit.
+- Static bundle WebGL resources now carry draw-time virtual texture ref metadata: dimensions, wrap
+  modes, indexed page format, and page bindings.
+- `buildStagedWorldSceneAssembly` accepts excluded static landblock IDs so migrated outdoor statics
+  do not produce staged draw units, renderer graph records, or compaction candidates.
+- `syncWebgl2WorldResources` excludes a landblock from staged static assembly once both resident
+  `outdoor-buildings` and `outdoor-detail` bundle layers are present.
+- Added focused tests proving resident RGBA static bundle geometry draws without staged draw units
+  and resident outdoor bundle landblocks suppress staged static resource sync.
+
+Decisions and course corrections:
+
+- The submit path draws resident bundle resources directly. It does not adapt bundle geometry back
+  into `Webgl2WorldDrawUnit` or route through staged compacted replacement families.
+- Suppression waits for both outdoor static layers for a landblock. A partial resident artifact set
+  should not drop the still-unmigrated outdoor subset.
+- Indexed-paletted bundle resources remain uploaded and retained, but submit skips them with explicit
+  metrics until Phase 3C2B3 adds complete indexed material descriptors. The current resource
+  contract carries page format and virtual-ref data, but not yet all shader inputs needed for
+  indexed submit.
+- Static bundle submit is currently unculled. That matches the Phase 3C2B vertical slice requirement:
+  static selection and picking are not required for this slice. Required culling/portal sidecars
+  remain Phase 4 work.
+
+Cleanup targets:
+
+- Static bundle submit duplicates some direct-family RGBA uniform setup. Phase 3C2B3 should extract
+  a small shared texture-page uniform helper if indexed submit would otherwise duplicate more code.
+- `Webgl2WorldSubmitMetrics` is now broad enough that scene-domain metric merge must stay in sync
+  when new submit counters are added. Consider grouping static-bundle counters if metrics continue
+  expanding.
+- The staged assembly exclusion is landblock-level and outdoor-only. Phase 4E must delete the old
+  staged static path rather than adding more exclusions for detailed/env-cell coverage.
+
+Legacy shims introduced:
+
+- No staged draw-unit adapter, global atlas generation wrapper, render-resource worker bridge, or
+  compatibility renderer mode was added.
+- A default empty static-bundle resource argument remains on lower-level submit helpers only so
+  existing direct submit tests can exercise draw-unit paths without constructing an unrelated static
+  store. The live renderer passes resident static bundle resources explicitly.
 
 Exit criteria:
 
-- `outdoor` renders from resident terrain/object artifacts without the static staged path.
-- Layer-owned textures, compacted batches, direct static entries, material tables, and eviction work
-  for the integrated preset.
-- Existing static compaction scheduler is unused for the integrated preset.
-- Main thread resource sync for the integrated preset does only artifact commit, upload, and
-  eviction.
-- The `outdoor` preset no longer contributes landblock static objects to `StaticRenderableSceneModel`
-  or staged static draw-unit assembly.
-- Static selection and picking are not required for the vertical slice.
-- The phase is incomplete by design until Phase 4A through Phase 4E remove the
-  detailed/env-cell/structured-interior static paths from main-thread hydration.
+- Resident `outdoor` RGBA static bundle compacted/direct geometry submits from layer-owned texture
+  pages.
+- Fully resident outdoor landblocks no longer create staged outdoor static draw units, graph records,
+  or compaction candidates.
+- Existing static compaction scheduler is unused for resident outdoor static bundle geometry.
+- Main thread resource sync for resident outdoor statics does artifact commit, upload, staged
+  exclusion, and eviction; it does not rehydrate prepared static closure for those resident bundle
+  resources.
+
+### Phase 3C2B3: Indexed Static Bundle Submit Completion
+
+Immediate interim phase before Phase 4A.
+
+- Extend the static bundle artifact/resource material contract with the indexed shader inputs that
+  staged direct indexed draw units currently own: index format, texture size, palette color count,
+  clip threshold, repeat policy, and optional indexed detail binding/tiling.
+- Submit resident indexed-paletted static bundle compacted/direct geometry through the existing
+  indexed P8/P16 shader programs using layer-owned indexed texel, palette lookup, and optional
+  detail pages.
+- Keep indexed static bundle submit direct from resident bundle resources. Do not adapt indexed
+  bundle geometry into staged draw units and do not reuse global indexed atlas generations.
+- Add focused submit tests for P8, 16-bit indexed, palette binding, detail binding, skipped malformed
+  indexed materials, and staged suppression with indexed-only outdoor layers.
+- Update Phase 3C2B2 fallback metrics once indexed submit no longer skips supported indexed bundle
+  materials.
+
+Exit criteria:
+
+- Resident `outdoor` static bundle submit supports RGBA/detail, indexed-paletted P8, indexed-paletted
+  16-bit, and optional indexed detail pages.
+- Supported indexed static bundle materials no longer appear in static bundle submit fallback samples.
+- Outdoor staged static suppression remains enabled only after complete resident outdoor bundle
+  coverage for the landblock.
+- The `outdoor` preset renders resident terrain/object artifacts without the static staged path for
+  all currently supported static material families.
+- Static selection and picking remain non-blocking for this vertical slice.
+- Phase 4A may start only after this family-complete outdoor submit slice passes `check`, TS lint,
+  knip, Rust lint, and focused renderer submit/resource tests.
 
 ### Phase 4A: Detailed Preset Artifact Contract Expansion
 
-- Expand the `outdoor-with-env-cells` worker result contract before building more runtime behavior.
+- Expand the landblock render result DTO contract for the `outdoor-with-env-cells` preset before
+  building more runtime behavior.
 - Add DTOs for env-cell static bundle layers, structured interior render geometry, cell structure
   metadata, portal aperture/source/target sidecars, object/cell visibility records, and required
   static spatial sidecars.
 - Keep picker/debug diagnostics explicitly optional. Required render, culling, portal composite, and
   spatial sidecars are not optional diagnostics.
-- Keep the contract preset-shaped, not topology-discovery-shaped. The main thread requests
-  `outdoor-with-env-cells`; topology and selected env-cell discovery remain internal worker steps.
+- Keep the contract preset-shaped, not topology-discovery-shaped. The main thread requests an
+  `outdoor-with-env-cells` preset job from the landblock render worker; topology and selected
+  env-cell discovery remain internal steps of that job.
 - Ensure artifact identity and eviction keys can represent terrain, exterior object layers, env-cell
   layers, structured interior sidecars, and portal/spatial sidecars without global atlas generation
   identities.
@@ -2566,33 +2644,34 @@ Exit criteria:
 
 Exit criteria:
 
-- `outdoor-with-env-cells` has a typed worker output contract for all landblock-derived detailed
-  static render geometry and required portal/spatial facts.
+- The landblock render worker has a typed `outdoor-with-env-cells` preset output contract for all
+  landblock-derived detailed static render geometry and required portal/spatial facts.
 - Contract tests cover transferability, identity stability, layer-scoped texture refs, and required
   sidecar presence.
 - No DTO requires `AssetChannelState`, prepared-cache source revisions, topology discovery jobs, or
   main-thread atlas state as worker input.
 
-### Phase 4B: Detailed Preset Worker Build
+### Phase 4B: Landblock Worker Detailed Preset Build
 
-- Implement the worker-side `outdoor-with-env-cells` build as one imperative landblock worker call
+- Implement the `outdoor-with-env-cells` preset job as one imperative landblock render worker call
   graph: load outdoor payload, build terrain/exterior artifacts, load topology, derive selected env
   cells, hydrate env-cell payloads, then build env-cell static/interior artifacts and sidecars.
 - Reuse shared worker-side asset lookup/preparation libraries. Do not defer to the prepared asset
   worker and do not duplicate closure loading logic.
 - Build `env-cell-static` artifacts, structured interior geometry artifacts, cell structure metadata,
-  portal aperture/source/target sidecars, visibility keys, and static spatial sidecars in the worker.
+  portal aperture/source/target sidecars, visibility keys, and static spatial sidecars inside the
+  landblock render worker job.
 - Ensure indexed-paletted, indexed detail, RGBA/detail, and terrain artifacts remain first-class in
   the detailed preset path.
-- Fail the worker result for internally inconsistent required static dependencies instead of
-  emitting partial landblock layers.
-- Keep complete-preset semantics: the worker may reload outdoor/topology/env-cell raw assets, but it
-  must not consume resident outdoor artifacts as mutable build inputs.
+- Fail the landblock render worker result for internally inconsistent required static dependencies
+  instead of emitting partial landblock layers.
+- Keep complete-preset semantics: the landblock render worker may reload outdoor/topology/env-cell
+  raw assets, but it must not consume resident outdoor artifacts as mutable build inputs.
 
 Exit criteria:
 
-- The worker can produce complete `outdoor-with-env-cells` CPU artifacts from worker-local raw asset
-  closures.
+- The landblock render worker can produce complete `outdoor-with-env-cells` CPU artifacts from
+  worker-local raw asset closures.
 - Env-cell discovery and hydration do not require a separate topology worker, topology scheduler, or
   main-thread cache lookup phase.
 - Builder tests cover topology-derived env-cell selection, structured interior artifact output,
@@ -2739,7 +2818,8 @@ Exit criteria:
   unchanged.
 - Unit-test `outdoor` -> `outdoor-with-env-cells` promotion so resident artifacts are not passed
   back into worker jobs as mutable inputs.
-- Unit-test worker-local env-cell derivation from topology for `outdoor-with-env-cells`.
+- Unit-test landblock render worker-local env-cell derivation from topology for the
+  `outdoor-with-env-cells` preset job.
 - Unit-test runtime appearance previews staying out of landblock preset planning.
 - Unit-test worker request/result stale rejection and transferable geometry/texture buffers.
 - Add renderer resource tests for commit, eviction, and layer-owned texture lifetime.
@@ -2774,10 +2854,10 @@ Avoid permanent tests that require repo-local runtime DAT/HBA assets.
 ### LoD Preset Promotion and Layer Composition
 
 Do not rebuild or mutate resident landblock artifacts in place when a landblock promotes from
-`outdoor` to `outdoor-with-env-cells`. The worker should build a complete preset result, and the
-resident artifact store should compose or replace returned artifacts. Passing an existing compacted
-building layer into the worker as mutable input would recreate the synchronization problem this plan
-is removing.
+`outdoor` to `outdoor-with-env-cells`. The landblock render worker should build a complete preset
+result for the requested preset job, and the resident artifact store should compose or replace
+returned artifacts. Passing an existing compacted building layer into the worker as mutable input
+would recreate the synchronization problem this plan is removing.
 
 If a future cheap `summary` preset is added, the implementation may skip intermediate presets when
 interest jumps directly to `outdoor-with-env-cells`. That is an optimization of scheduling, not a

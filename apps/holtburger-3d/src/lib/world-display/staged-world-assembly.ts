@@ -142,6 +142,7 @@ export function buildStagedWorldSceneAssembly({
 	detailTexturesEnabled = true,
 	indexedMaterialDataCache,
 	materialPlanCache,
+	excludedStaticLandblockIds = new Set(),
 }: {
 	assetState: AssetChannelState;
 	terrainScene: TerrainSceneModel;
@@ -154,6 +155,7 @@ export function buildStagedWorldSceneAssembly({
 	detailTexturesEnabled?: boolean;
 	indexedMaterialDataCache?: IndexedMaterialDataCache;
 	materialPlanCache?: StagedWorldMaterialPlanCache;
+	excludedStaticLandblockIds?: ReadonlySet<number>;
 }): StagedWorldSceneAssembly {
 	const chunkOffsetByKey = new Map(
 		renderChunkTransforms.map((transform) => [
@@ -185,6 +187,7 @@ export function buildStagedWorldSceneAssembly({
 		assetState,
 		chunkOffsetByKey,
 		staticRenderableScene: fullyResolvedScenes.committedStaticRenderableScene,
+		excludedLandblockIds: excludedStaticLandblockIds,
 		materialTextureCapabilities,
 		textureFilteringMode,
 		detailTexturesEnabled,
@@ -374,6 +377,7 @@ export function buildStagedStaticDrawUnitAssemblies({
 	assetState,
 	chunkOffsetByKey,
 	staticRenderableScene,
+	excludedLandblockIds = new Set(),
 	materialTextureCapabilities,
 	textureFilteringMode,
 	detailTexturesEnabled = true,
@@ -383,6 +387,7 @@ export function buildStagedStaticDrawUnitAssemblies({
 	assetState: AssetChannelState;
 	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
 	staticRenderableScene: StaticRenderableSceneModel;
+	excludedLandblockIds?: ReadonlySet<number>;
 	materialTextureCapabilities?: MaterialTextureCapabilities;
 	textureFilteringMode?: TextureFilteringMode;
 	detailTexturesEnabled?: boolean;
@@ -392,6 +397,7 @@ export function buildStagedStaticDrawUnitAssemblies({
 	const objectsByBatchKey = groupCommittedStaticObjectsByBatchKey({
 		chunkOffsetByKey,
 		staticRenderableScene,
+		excludedLandblockIds,
 	});
 
 	return [...objectsByBatchKey.entries()].flatMap(([batchKey, objectGroups]) =>
@@ -444,15 +450,20 @@ export function uniqueSortedStrings(values: readonly string[]): string[] {
 function groupCommittedStaticObjectsByBatchKey({
 	chunkOffsetByKey,
 	staticRenderableScene,
+	excludedLandblockIds,
 }: {
 	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
 	staticRenderableScene: StaticRenderableSceneModel;
+	excludedLandblockIds: ReadonlySet<number>;
 }): Map<string, StaticRenderableObjectGroup[]> {
 	const objectGroupsByBatchKey = new Map<
 		string,
 		Map<string, StaticRenderablePart[]>
 	>();
 	for (const part of staticRenderableScene.parts) {
+		if (excludedLandblockIds.has(part.owningLandblockId)) {
+			continue;
+		}
 		const chunkOffset = chunkOffsetByKey.get(part.renderChunk.chunkKey);
 		if (!chunkOffset) {
 			continue;

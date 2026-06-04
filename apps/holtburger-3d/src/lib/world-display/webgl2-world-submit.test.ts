@@ -29,6 +29,10 @@ import type { Webgl2IndexedResourceAtlasGenerationResource } from "./webgl2/reso
 import type { Webgl2RgbaTexturePageFamilyWorldProgram } from "./webgl2/families/rgba-texture-page-family-submit";
 import type { Webgl2IndexedPalettedFamilyWorldProgram } from "./webgl2/families/indexed-paletted-family-submit";
 import type { Webgl2TerrainFamilyWorldProgram } from "./webgl2/families/terrain-family-submit";
+import type {
+	Webgl2StaticBundleLayerResource,
+	Webgl2StaticBundleLayerResourceStore,
+} from "./webgl2/resources/static-bundle-layer-resources";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
 import type {
 	Webgl2IndexedMaterialDescriptor,
@@ -1324,7 +1328,163 @@ describe("submitWebgl2WorldFrame", () => {
 		expect(gl.uniform2fValues).toContainEqual([2, 1]);
 		expect(gl.uniform2fValues).toContainEqual([4, 4]);
 	});
+
+	it("submits resident RGBA static bundle geometry without staged draw units", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+		const texture = {} as WebGLTexture;
+
+		const metrics = submitWebgl2WorldFrame({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			staticBundleLayerResources: createStaticBundleLayerResourceStore([
+				createStaticBundleLayerResource({ texture }),
+			]),
+			drawUnitsById: new Map(),
+			frame: createFrame([]),
+		});
+
+		expect(metrics.visibleDrawUnitCount).toBe(0);
+		expect(metrics.staticBundleLayerSubmittedCount).toBe(1);
+		expect(metrics.staticBundleGeometrySubmittedCount).toBe(1);
+		expect(metrics.staticBundleDrawCallCount).toBe(1);
+		expect(metrics.staticBundleTriangleCount).toBe(1);
+		expect(metrics.drawCallCount).toBe(1);
+		expect(metrics.triangleCount).toBe(1);
+		expect(metrics.staticBundleSubmitFallbackSamples).toEqual([]);
+		expect(gl.boundTextures).toContain(texture);
+		expect(gl.uniform1iValues).toContain(1);
+	});
+
+	it("skips non-RGBA static bundle materials until indexed bundle submit lands", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+
+		const metrics = submitWebgl2WorldFrame({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			staticBundleLayerResources: createStaticBundleLayerResourceStore([
+				createStaticBundleLayerResource({ familyKey: "indexed-paletted" }),
+			]),
+			drawUnitsById: new Map(),
+			frame: createFrame([]),
+		});
+
+		expect(metrics.staticBundleDrawCallCount).toBe(0);
+		expect(metrics.staticBundleSkippedGeometryCount).toBe(1);
+		expect(metrics.staticBundleSubmitFallbackSamples).toEqual([
+			"static bundle layer/a material material/a family indexed-paletted is not submitted by the RGBA slice",
+		]);
+	});
 });
+
+function createStaticBundleLayerResourceStore(
+	layers: readonly Webgl2StaticBundleLayerResource[],
+): Webgl2StaticBundleLayerResourceStore {
+	return {
+		layersByKey: new Map(layers.map((layer) => [layer.key, layer])),
+	};
+}
+
+function createStaticBundleLayerResource({
+	familyKey = "rgba-texture-page",
+	texture = {} as WebGLTexture,
+}: {
+	familyKey?: string;
+	texture?: WebGLTexture;
+} = {}): Webgl2StaticBundleLayerResource {
+	const textureResource = createTextureResource(texture);
+	return {
+		key: "layer/a:revision/a",
+		layerKey: "layer/a",
+		landblockId: 1,
+		layerKind: "outdoor-buildings",
+		sourceRevision: "revision/a",
+		texturePages: [],
+		texturePagesByKey: new Map(),
+		materialRecords: [
+			{
+				key: "material/a",
+				familyKey,
+				isTransparent: false,
+				textureBindings: [
+					{
+						virtualRefKey: "texture/a",
+						texturePageKey: "page/a",
+						usageBucket: "base-color",
+						sampleClass: "rgba-color",
+						indexedFormat: undefined,
+						rect: [0, 0, 1, 1],
+						width: 1,
+						height: 1,
+						wrapS: "clamp",
+						wrapT: "clamp",
+						texture: textureResource,
+					},
+				],
+			},
+		],
+		compactedBatches: [createStaticBundleGeometryResource()],
+		directEntries: [],
+		dispose() {
+			return;
+		},
+	};
+}
+
+function createStaticBundleGeometryResource(): Webgl2StaticBundleLayerResource["compactedBatches"][number] {
+	return {
+		key: "geometry/a",
+		renderChunkKey: "chunk/a",
+		materialRecordKey: "material/a",
+		objectKeys: ["object/a"],
+		vertexArray: {
+			vertexArray: attachDebugLabel({} as WebGLVertexArrayObject, "geometry/a"),
+			dispose() {
+				return;
+			},
+		},
+		positionBuffer: {
+			buffer: {} as WebGLBuffer,
+			dispose() {
+				return;
+			},
+		},
+		normalBuffer: {
+			buffer: {} as WebGLBuffer,
+			dispose() {
+				return;
+			},
+		},
+		uvBuffer: {
+			buffer: {} as WebGLBuffer,
+			dispose() {
+				return;
+			},
+		},
+		indexBuffer: {
+			buffer: {} as WebGLBuffer,
+			dispose() {
+				return;
+			},
+		},
+		indexType: 5123,
+		vertexCount: 3,
+		indexCount: 3,
+		triangleCount: 1,
+		dispose() {
+			return;
+		},
+	};
+}
 
 function createFrame(drawUnitIds: readonly string[]): WorldRenderFrame {
 	return {

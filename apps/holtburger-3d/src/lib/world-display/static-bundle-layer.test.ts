@@ -102,6 +102,10 @@ describe("static bundle layer contract", () => {
 			renderChunkKey: renderChunk.key,
 			materialRecordKey: materialRecord.key,
 			objectKey: "object:0",
+			positions: new Float32Array(),
+			normals: new Float32Array(),
+			uvs: new Float32Array(),
+			indices: new Uint16Array(),
 			bounds: null,
 		};
 		const partHint: StaticBundlePartHint = {

@@ -1,9 +1,9 @@
 # Holtburger 3D Static Landblock Render Bundle Replacement Plan
 
-Status: Phase 1A through Phase 1J, Phase 2A, Phase 2B, Phase 3A, and Phase 3B are
-implemented. Phase 3C static bundle renderer realization is the next implementation phase. The plan
-has been redirected to worker-owned raw landblock closure loading, worker-built terrain artifacts,
-preset-based landblock requests, and layer-scoped texture pages.
+Status: Phase 1A through Phase 1J, Phase 2A, Phase 2B, Phase 3A, Phase 3B, and Phase
+3C1 are implemented. Phase 3C2 static bundle renderer realization is the next implementation phase.
+The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
+artifacts, preset-based landblock requests, and layer-scoped texture pages.
 
 Progress:
 
@@ -120,6 +120,10 @@ Progress:
   draw-slice geometry, fallback geometry, artifact keys, and atlas-ready terrain page bytes instead
   of rebuilding terrain blend plans or resolving prepared terrain textures from `AssetChannelState`
   for worker-derived terrain.
+- 2026-06-04: Implemented Phase 3C1. Hardened the static bundle direct-entry artifact contract so
+  direct static entries carry positions, normals, UVs, and indices from worker-built surfaces. This
+  removes the main blocker that would have forced static direct draw realization to reach back into
+  prepared gfx assets or staged draw units.
 
 Validation:
 
@@ -202,6 +206,10 @@ Validation:
   passed after Phase 3B.
 - `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run lint:rust` passed after
   Phase 3B.
+- `npm exec vitest -- run src/lib/world-display/static-bundle-layer.test.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/workers/static-landblock-render-worker.test.ts`
+  passed after Phase 3C1.
+- `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run lint:rust` passed after
+  Phase 3C1.
 
 Related plans:
 
@@ -2224,7 +2232,61 @@ Exit criteria:
   `AssetChannelState` prepared texture records.
 - Focused terrain artifact/WebGL tests and `npm run check` pass.
 
-### Phase 3C: Static Bundle Renderer Integration Vertical Slice
+### Phase 3C1: Static Direct Entry Artifact Hardening
+
+Status: Implemented on 2026-06-04 as an immediate interim phase before static bundle WebGL resource
+realization.
+
+Purpose:
+
+- Close the static bundle contract gap discovered while dry-running Phase 3C against the codebase:
+  `StaticBundleDirectEntry` represented direct static surfaces as accounting records, not renderable
+  geometry.
+- Prevent the upcoming WebGL direct static path from reaching back into prepared gfx assets,
+  `AssetChannelState`, or staged draw-unit assembly to recover missing geometry.
+- Keep the static worker output as the complete resolved picture for compacted and non-compacted
+  static surfaces.
+
+Implemented:
+
+- `StaticBundleDirectEntry` now carries worker-built `positions`, `normals`, `uvs`, and `indices`.
+- `buildStaticLandblockRenderBundleLayer` populates direct entries from the same worker-local
+  surface buffers used for compaction eligibility and compacted batch assembly.
+- Static bundle contract tests now include direct-entry geometry fields.
+- Static bundle builder tests now assert direct entries carry non-empty renderable buffers.
+
+Decisions and course corrections:
+
+- Direct static entries are still part of the bundle-layer artifact, not a staged fallback. They are
+  surfaces that were intentionally not compacted by the worker.
+- This phase did not add WebGL resources. It was split out because adding a renderer over an
+  under-shaped direct-entry DTO would either drop non-compactable static surfaces or reintroduce the
+  old staged path.
+- Bounds remain `null` for direct entries until the builder has a proven bounds derivation for
+  individual static surfaces. Visibility/picking diagnostics remain lower priority than render
+  artifact completeness.
+
+Cleanup targets:
+
+- Direct entries still lack explicit per-entry bounds. Add them only if needed for culling or
+  diagnostics; do not block Phase 3C2 on picker fidelity.
+- `StaticBundleLayerWorkerJob` and its source-revision-shaped builder adapter still exist inside the
+  worker path. Remove that adapter after WebGL consumes preset-owned bundle layers.
+- `StaticBundleDirectEntry` currently duplicates geometry buffer fields with compacted batches. Phase
+  3C2 may introduce a small shared geometry-buffer DTO if it reduces renderer code without blurring
+  compacted vs direct ownership.
+
+Legacy shims introduced:
+
+- No public compatibility shim or alternate renderer mode was added.
+- No staged draw-unit recovery path was added for direct entries.
+
+Exit criteria:
+
+- Static direct-entry artifacts carry renderable geometry without main-thread asset lookups.
+- Focused static bundle contract/builder/worker tests pass.
+
+### Phase 3C2: Static Bundle Renderer Integration Vertical Slice
 
 - Add WebGL layer resource realization for compacted batches, direct static entries, material tables,
   and layer-owned texture pages.

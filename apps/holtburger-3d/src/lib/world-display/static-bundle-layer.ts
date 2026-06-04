@@ -25,9 +25,14 @@ export type StaticBundleLayerPriority = "resident-now" | "prefetch";
 export interface DesiredStaticBundleLayer {
 	scope: StaticBundleLayerScope;
 	priority: StaticBundleLayerPriority;
-	closureAssetIds: readonly string[];
-	missingAssetIds: readonly string[];
+	rootAssetIds: readonly string[];
 	sourceRevision: string;
+	diagnostics: DesiredStaticBundleLayerDiagnostics;
+}
+
+interface DesiredStaticBundleLayerDiagnostics {
+	knownClosureAssetIds: readonly string[];
+	knownMissingAssetIds: readonly string[];
 }
 
 export type VirtualTexturePageUsageBucket =
@@ -57,6 +62,70 @@ export interface VirtualTexturePageRef {
 	samplingDomain: "color" | "data" | "control";
 	lookup: "color-filtered" | "exact" | "control-filtered";
 	bytes?: Uint8Array;
+}
+
+type StaticBundleTexturePageKind = "single-entry" | "packed-atlas";
+
+interface StaticBundleTexturePageEntry {
+	virtualRefKey: string;
+	sourceAssetId: string;
+	rect: readonly [number, number, number, number];
+}
+
+export interface StaticBundleTexturePage {
+	key: string;
+	scopeKey: string;
+	pageKind: StaticBundleTexturePageKind;
+	usageBucket: VirtualTexturePageUsageBucket;
+	sampleClass: VirtualTexturePageSampleClass;
+	width: number;
+	height: number;
+	bytes: Uint8Array;
+	entries: readonly StaticBundleTexturePageEntry[];
+}
+
+export interface StaticBundleLayerWorkerJob {
+	type: "build-static-bundle-layer";
+	jobId: string;
+	scope: StaticBundleLayerScope;
+	rootAssetIds: readonly string[];
+	sourceRevision: string;
+	buildPolicyRevision: string;
+	cpuTexturePagePolicyRevision: string;
+}
+
+export interface StaticBundleEnvCellTopologyDiscoveryJob {
+	type: "discover-static-env-cell-layer-scopes";
+	jobId: string;
+	landblockId: number;
+	sourceRevision: string;
+	buildPolicyRevision: string;
+}
+
+interface DiscoveredStaticBundleEnvCellLayerScope {
+	scope: Extract<StaticBundleLayerScope, { kind: "env-cell" }>;
+	rootAssetIds: readonly string[];
+	topologyDependencyAssetIds: readonly string[];
+}
+
+export interface StaticBundleEnvCellTopologyDiscoveryResult {
+	type: "static-env-cell-layer-scopes-discovered";
+	jobId: string;
+	landblockId: number;
+	sourceRevision: string;
+	discoveredScopes: readonly DiscoveredStaticBundleEnvCellLayerScope[];
+	diagnostics: {
+		envCellCount: number;
+		missingAssetIds: readonly string[];
+	};
+}
+
+export interface StaticBundleLayerWorkerResult {
+	type: "static-bundle-layer-built";
+	jobId: string;
+	scope: StaticBundleLayerScope;
+	sourceRevision: string;
+	bundleLayer: StaticLandblockRenderBundleLayer;
 }
 
 export interface StaticBundleMaterialRecord {
@@ -130,12 +199,14 @@ export interface StaticLandblockRenderBundleLayer {
 	landblockId: number;
 	layerKind: StaticLandblockBundleLayerKind;
 	sourceRevision: string;
+	rootAssetIds: readonly string[];
 	preparedAssetIds: readonly string[];
 	renderChunks: readonly StaticBundleRenderChunk[];
 	compactedBatches: readonly StaticBundleCompactedBatch[];
 	directEntries: readonly StaticBundleDirectEntry[];
 	materialRecords: readonly StaticBundleMaterialRecord[];
 	texturePageRefs: readonly VirtualTexturePageRef[];
+	texturePages: readonly StaticBundleTexturePage[];
 	objectRecords: readonly StaticBundleObjectRecord[];
 	spatialHints?: readonly StaticBundleSpatialHint[];
 	diagnostics: StaticLandblockBundleLayerDiagnostics;

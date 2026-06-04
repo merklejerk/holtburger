@@ -78,7 +78,8 @@ function planOutdoorStaticBundleLayers(
 					layerKind: "outdoor-buildings",
 				},
 				priority: priorityForLandblock(interest.focusLandblockId, landblockId),
-				closureAssetIds: collectOutdoorLayerClosureAssetIds(
+				rootAssetIds: collectOutdoorLayerRootAssetIds(landblockId),
+				knownClosureAssetIds: collectOutdoorLayerClosureAssetIds(
 					preparedByAssetId,
 					landblockId,
 					"outdoor-buildings",
@@ -97,7 +98,8 @@ function planOutdoorStaticBundleLayers(
 					layerKind: "outdoor-detail",
 				},
 				priority: priorityForLandblock(interest.focusLandblockId, landblockId),
-				closureAssetIds: collectOutdoorLayerClosureAssetIds(
+				rootAssetIds: collectOutdoorLayerRootAssetIds(landblockId),
+				knownClosureAssetIds: collectOutdoorLayerClosureAssetIds(
 					preparedByAssetId,
 					landblockId,
 					"outdoor-detail",
@@ -130,7 +132,8 @@ function planOutdoorStaticBundleLayers(
 					layerKind: "env-cell-static",
 				},
 				priority: priorityForLandblock(interest.focusLandblockId, landblockId),
-				closureAssetIds: collectEnvCellLayerClosureAssetIds(
+				rootAssetIds: collectEnvCellLayerRootAssetIds(landblockId, envCellId),
+				knownClosureAssetIds: collectEnvCellLayerClosureAssetIds(
 					preparedByAssetId,
 					landblockId,
 					envCellId,
@@ -165,7 +168,13 @@ function planIndoorStaticBundleLayers(
 					layerKind: "env-cell-static",
 				},
 				priority: "resident-now",
-				closureAssetIds: collectEnvCellLayerClosureAssetIds(
+				rootAssetIds: collectEnvCellLayerRootAssetIds(
+					normalizeOutdoorLandblockId(
+						browserLocationToLandblockId(browserDestination),
+					),
+					envCellId,
+				),
+				knownClosureAssetIds: collectEnvCellLayerClosureAssetIds(
 					preparedByAssetId,
 					normalizeOutdoorLandblockId(
 						browserLocationToLandblockId(browserDestination),
@@ -181,24 +190,45 @@ function planIndoorStaticBundleLayers(
 function createDesiredLayer(options: {
 	scope: StaticBundleLayerScope;
 	priority: StaticBundleLayerPriority;
-	closureAssetIds: readonly string[];
+	rootAssetIds: readonly string[];
+	knownClosureAssetIds: readonly string[];
 	preparedByAssetId: Record<string, PreparedAssetRecord>;
 }): DesiredStaticBundleLayer {
-	const closureAssetIds = uniqueSortedAssetIds(options.closureAssetIds);
-	const missingAssetIds = closureAssetIds.filter(
+	const rootAssetIds = uniqueSortedAssetIds(options.rootAssetIds);
+	const knownClosureAssetIds = uniqueSortedAssetIds(
+		options.knownClosureAssetIds,
+	);
+	const knownMissingAssetIds = knownClosureAssetIds.filter(
 		(assetId) => !options.preparedByAssetId[assetId],
 	);
 	return {
 		scope: options.scope,
 		priority: options.priority,
-		closureAssetIds,
-		missingAssetIds,
+		rootAssetIds,
 		sourceRevision: deriveStaticBundleLayerSourceRevision({
 			scope: options.scope,
-			closureAssetIds,
+			rootAssetIds,
 			preparedByAssetId: options.preparedByAssetId,
 		}),
+		diagnostics: {
+			knownClosureAssetIds,
+			knownMissingAssetIds,
+		},
 	};
+}
+
+function collectOutdoorLayerRootAssetIds(landblockId: number): string[] {
+	return [formatLandblockOutdoorAssetId(landblockId)];
+}
+
+function collectEnvCellLayerRootAssetIds(
+	landblockId: number,
+	envCellId: number,
+): string[] {
+	return [
+		formatLandblockTopologyAssetId(landblockId),
+		formatEnvCellAssetId(envCellId),
+	];
 }
 
 function collectOutdoorLayerClosureAssetIds(
@@ -294,10 +324,10 @@ function collectSetupAppearanceAssetIds(assetId: string): string[] {
 
 function deriveStaticBundleLayerSourceRevision(options: {
 	scope: StaticBundleLayerScope;
-	closureAssetIds: readonly string[];
+	rootAssetIds: readonly string[];
 	preparedByAssetId: Record<string, PreparedAssetRecord>;
 }): string {
-	const parts = options.closureAssetIds.map((assetId) => {
+	const parts = options.rootAssetIds.map((assetId) => {
 		const asset = options.preparedByAssetId[assetId];
 		return asset
 			? `${assetId}@${asset.payload.kind}@${asset.preparedAt}`

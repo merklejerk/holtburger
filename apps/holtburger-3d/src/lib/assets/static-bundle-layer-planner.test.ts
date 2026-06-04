@@ -65,7 +65,10 @@ describe("static bundle layer planner", () => {
 			"landblock:3663069183:outdoor-detail",
 		]);
 		expect(layers[0]?.priority).toBe("resident-now");
-		expect(layers[0]?.closureAssetIds).toEqual([
+		expect(layers[0]?.rootAssetIds).toEqual([
+			formatLandblockOutdoorAssetId(0xda55ffff),
+		]);
+		expect(layers[0]?.diagnostics.knownClosureAssetIds).toEqual([
 			"gfx-obj/01000011",
 			formatLandblockOutdoorAssetId(0xda55ffff),
 			"material/08000011",
@@ -74,18 +77,23 @@ describe("static bundle layer planner", () => {
 			"setup-appearance/02000010",
 			"setup-model/02000010",
 		]);
-		expect(layers[0]?.missingAssetIds).toEqual(["setup-appearance/02000010"]);
-		expect(layers[1]?.closureAssetIds).toEqual([
+		expect(layers[0]?.diagnostics.knownMissingAssetIds).toEqual([
+			"setup-appearance/02000010",
+		]);
+		expect(layers[1]?.rootAssetIds).toEqual([
+			formatLandblockOutdoorAssetId(0xda55ffff),
+		]);
+		expect(layers[1]?.diagnostics.knownClosureAssetIds).toEqual([
 			"gfx-obj/01000020",
 			formatLandblockOutdoorAssetId(0xda55ffff),
 			"material/08000020",
 			formatRegionRenderProfileAssetId(1),
 			"render-surface/06000020",
 		]);
-		expect(layers[1]?.missingAssetIds).toEqual([]);
+		expect(layers[1]?.diagnostics.knownMissingAssetIds).toEqual([]);
 	});
 
-	it("reports shallow blockers when the outdoor root is not prepared yet", () => {
+	it("schedules from roots and reports shallow diagnostics when the outdoor root is not prepared yet", () => {
 		const destination = parseBrowserLocationInput("da55", "manual", "outdoor");
 		expect(destination).not.toBeNull();
 
@@ -100,7 +108,13 @@ describe("static bundle layer planner", () => {
 			},
 		});
 
-		expect(layers.map((layer) => layer.missingAssetIds)).toEqual([
+		expect(layers.map((layer) => layer.rootAssetIds)).toEqual([
+			[formatLandblockOutdoorAssetId(0xda55ffff)],
+			[formatLandblockOutdoorAssetId(0xda55ffff)],
+		]);
+		expect(
+			layers.map((layer) => layer.diagnostics.knownMissingAssetIds),
+		).toEqual([
 			[formatLandblockOutdoorAssetId(0xda55ffff)],
 			[formatLandblockOutdoorAssetId(0xda55ffff)],
 		]);
@@ -144,7 +158,11 @@ describe("static bundle layer planner", () => {
 		expect(formatStaticBundleLayerScopeKey(envCellLayer!.scope)).toBe(
 			"env-cell:3663069183:3663003989:env-cell-static",
 		);
-		expect(envCellLayer?.closureAssetIds).toEqual([
+		expect(envCellLayer?.rootAssetIds).toEqual([
+			formatEnvCellAssetId(0xda550155),
+			formatLandblockTopologyAssetId(0xda55ffff),
+		]);
+		expect(envCellLayer?.diagnostics.knownClosureAssetIds).toEqual([
 			formatEnvCellAssetId(0xda550155),
 			"gfx-obj/01000030",
 			formatLandblockTopologyAssetId(0xda55ffff),
@@ -152,10 +170,10 @@ describe("static bundle layer planner", () => {
 			formatRegionRenderProfileAssetId(2),
 			"render-surface/06000030",
 		]);
-		expect(envCellLayer?.missingAssetIds).toEqual([]);
+		expect(envCellLayer?.diagnostics.knownMissingAssetIds).toEqual([]);
 	});
 
-	it("keeps source revisions stable across prepared record insertion order", () => {
+	it("keeps source revisions stable across prepared record insertion order and closure diagnostics", () => {
 		const destination = parseBrowserLocationInput("da55", "manual", "outdoor");
 		expect(destination).not.toBeNull();
 		const assets = [
@@ -200,7 +218,77 @@ describe("static bundle layer planner", () => {
 		});
 
 		expect(first[0]?.sourceRevision).toBe(second[0]?.sourceRevision);
-		expect(first[0]?.closureAssetIds).toEqual(second[0]?.closureAssetIds);
+		expect(first[0]?.rootAssetIds).toEqual(second[0]?.rootAssetIds);
+		expect(first[0]?.diagnostics.knownClosureAssetIds).toEqual(
+			second[0]?.diagnostics.knownClosureAssetIds,
+		);
+	});
+
+	it("does not change source revision when only diagnostic closure assets change", () => {
+		const destination = parseBrowserLocationInput("da55", "manual", "outdoor");
+		expect(destination).not.toBeNull();
+		const root = createPreparedOutdoorLandblock({
+			landblockId: 0xda55ffff,
+			regionNumber: 1,
+			statics: [
+				createOutdoorStaticMember(
+					"scenery-0",
+					"explicit-object",
+					"gfx-obj/01000020",
+				),
+			],
+		});
+
+		const withoutClosure = planDesiredStaticBundleLayers({
+			browserDestination: destination,
+			preparedByAssetId: indexPreparedAssets([root]),
+			options: {
+				terrainRadius: 0,
+				buildingRadius: -1,
+				detailRadius: 0,
+				envCellRadius: -1,
+			},
+		});
+		const withClosure = planDesiredStaticBundleLayers({
+			browserDestination: destination,
+			preparedByAssetId: indexPreparedAssets([
+				root,
+				createPreparedGfxObj("gfx-obj/01000020", ["material/08000020"]),
+				createPreparedMaterialRecipe("material/08000020", [
+					"render-surface/06000020",
+				]),
+			]),
+			options: {
+				terrainRadius: 0,
+				buildingRadius: -1,
+				detailRadius: 0,
+				envCellRadius: -1,
+			},
+		});
+
+		const withoutClosureDetail = withoutClosure.find(
+			(layer) =>
+				layer.scope.kind === "landblock" &&
+				layer.scope.layerKind === "outdoor-detail",
+		);
+		const withClosureDetail = withClosure.find(
+			(layer) =>
+				layer.scope.kind === "landblock" &&
+				layer.scope.layerKind === "outdoor-detail",
+		);
+
+		expect(withoutClosureDetail?.rootAssetIds).toEqual([
+			formatLandblockOutdoorAssetId(0xda55ffff),
+		]);
+		expect(withoutClosureDetail?.sourceRevision).toBe(
+			withClosureDetail?.sourceRevision,
+		);
+		expect(withoutClosureDetail?.diagnostics.knownClosureAssetIds).not.toEqual(
+			withClosureDetail?.diagnostics.knownClosureAssetIds,
+		);
+		expect(withClosureDetail?.diagnostics.knownClosureAssetIds).toContain(
+			"render-surface/06000020",
+		);
 	});
 });
 

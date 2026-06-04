@@ -1,8 +1,8 @@
 # Holtburger 3D Static Landblock Render Bundle Replacement Plan
 
-Status: Phase 1A and Phase 1B implemented. Phase 1C is the next implementation phase: static
-bundle contracts for worker-owned loading. The plan has been redirected to worker-owned raw static
-closure loading and layer-scoped texture pages.
+Status: Phase 1A, Phase 1B, and Phase 1C implemented. Phase 1D is the next implementation phase:
+worker-safe static bundle builder extraction. The plan has been redirected to worker-owned raw
+static closure loading and layer-scoped texture pages.
 
 Progress:
 
@@ -32,6 +32,10 @@ Progress:
   preparation, closure dependency loading, transferable normalization, and worker profiling modules
   under `apps/holtburger-3d/src/workers/shared/`. `asset-worker.ts` now imports those helpers and
   remains the prepared-asset-cache worker instead of becoming a cross-worker service.
+- 2026-06-04: Implemented Phase 1C. `DesiredStaticBundleLayer` now schedules from `rootAssetIds`
+  and keeps prepared-cache closure data inside an explicit diagnostics object. Added static worker
+  job/result DTOs, env-cell topology discovery DTOs, and layer-owned texture page DTOs to the static
+  bundle contract.
 
 Validation:
 
@@ -47,6 +51,11 @@ Validation:
 - `npm exec eslint -- src/workers/asset-worker.ts src/workers/shared/asset-prepare.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/asset-closure-loader.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/host-asset-bridge.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/transferables.ts src/workers/shared/transferables.test.ts src/workers/shared/worker-profile.ts src/lib/assets/asset-channel.test.ts`
   passed after Phase 1B.
 - `npm run check`, `npm run lint:dead`, and `npm run lint:rust` passed after Phase 1B.
+- `npm run test:ts -- src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts`
+  passed after Phase 1C.
+- `npm exec eslint -- src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts src/workers/asset-worker.ts src/workers/shared/asset-prepare.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/asset-closure-loader.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/host-asset-bridge.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/transferables.ts src/workers/shared/transferables.test.ts src/workers/shared/worker-profile.ts src/lib/assets/asset-channel.test.ts`
+  passed after Phase 1C.
+- `npm run check`, `npm run lint:dead`, and `npm run lint:rust` passed after Phase 1C.
 - `npm run lint:ts` currently fails on existing unrelated debt:
   `src/lib/world-display/camera.ts` defines unused `rendererPointToAcPosition`.
 
@@ -220,9 +229,11 @@ interface DesiredStaticBundleLayer {
   scope: StaticBundleLayerScope;
   priority: "resident-now" | "prefetch";
   rootAssetIds: readonly string[];
-  knownClosureAssetIds?: readonly string[];
-  knownMissingAssetIds?: readonly string[];
   sourceRevision: string;
+  diagnostics: {
+    knownClosureAssetIds: readonly string[];
+    knownMissingAssetIds: readonly string[];
+  };
 }
 ```
 
@@ -236,8 +247,9 @@ Rules:
   - `landblock/topology` plus the selected `env-cell` root for `env-cell-static`;
   - selected source/renderable roots when already known from prepared route data.
 - Let the worker expand the full closure by loading raw assets and following dependencies locally.
-- `knownClosureAssetIds` and `knownMissingAssetIds` are transitional diagnostics only. They may help
-  validate the worker closure loader, but they are not the target scheduling gate.
+- `diagnostics.knownClosureAssetIds` and `diagnostics.knownMissingAssetIds` are transitional
+  diagnostics only. They may help validate the worker closure loader, but they are not the target
+  scheduling gate.
 - Derive `sourceRevision` from scope, ordered root asset IDs, source route revision if available,
   and CPU build policy revision. Do not use the global asset-state signature for static layer
   invalidation.
@@ -970,33 +982,66 @@ Exit criteria:
 
 ### Phase 1C: Static Bundle Contracts for Worker-Owned Loading
 
-Status: Immediate next phase.
+Status: Implemented on 2026-06-04.
 
-- Replace `DesiredStaticBundleLayer.closureAssetIds` / `missingAssetIds` as the target contract with
-  root manifests and optional known-closure diagnostics.
-- Add layer texture page DTOs to the implemented bundle contract:
+Implemented:
+
+- Replaced `DesiredStaticBundleLayer.closureAssetIds` / `missingAssetIds` as the scheduling
+  contract with `rootAssetIds`.
+- Kept prepared-cache closure data inside an explicit diagnostics object. These diagnostics do not
+  drive static worker scheduling.
+- Added layer texture page DTOs to the implemented bundle contract:
   - layer page key;
   - page kind;
   - usage/sample class;
   - dimensions;
   - packed/single-entry bytes;
   - virtual-ref-to-rect entries.
-- Add a static worker job DTO that contains scope, root asset IDs, source revision, build policy
-  revision, and CPU texture-page policy revision.
-- Add a topology discovery DTO for env-cell layer scope discovery:
+- Added `StaticBundleLayerWorkerJob`, including scope, root asset IDs, source revision, build
+  policy revision, and CPU texture-page policy revision.
+- Added env-cell topology discovery DTOs for worker-owned scope discovery:
   - input: landblock ID and source/build policy revision;
   - output: discovered `env-cell-static` scopes, env-cell root asset IDs, topology dependency IDs,
     and diagnostics.
-- Define the worker result DTO as the only static CPU artifact consumed by the main thread.
-- Update tests for key stability, root manifest planning, transitional known-closure diagnostics,
-  env-cell topology discovery output, and layer-scoped texture page shape.
-- Keep Phase 1A prepared-cache closure planning only as diagnostics until the worker closure loader
-  replaces it.
-- Define worker-local texture loading as: material/render-surface resolution, normalized prepared
-  texture route derivation, worker host lookup for `prepared-texture/...`, then layer page packing.
-- Use the Phase 1B shared closure loader as the raw dependency traversal foundation, but keep
-  static-specific root manifests, topology discovery DTOs, setup-appearance companion discovery,
-  and prepared-texture route policy in static contracts or later static builder modules.
+- Added `StaticBundleLayerWorkerResult` so the static worker result is a complete
+  `StaticLandblockRenderBundleLayer` CPU artifact.
+- Updated tests for key stability, root manifest planning, transitional known-closure diagnostics,
+  source revision independence from diagnostic closure changes, env-cell topology discovery output,
+  and layer-scoped texture page shape.
+
+Decisions and course corrections:
+
+- Root manifests are intentionally shallow. `outdoor-buildings` and `outdoor-detail` currently use
+  `landblock/outdoor` as the root; `env-cell-static` uses `landblock/topology` plus the selected
+  `env-cell` root. Selected source/renderable assets remain known-closure diagnostics until the
+  worker builder owns expansion.
+- Source revisions are now derived from scope and root asset prepared revisions only. Prepared-cache
+  diagnostic closure changes should not reschedule static worker jobs.
+- Layer texture page helper types are private nested contract details unless a real consumer needs
+  to import them. Knip caught early over-exporting, and the contract was narrowed.
+- Negative outdoor radii still clamp through existing scene-interest behavior. Tests that need a
+  specific layer must select by scope instead of relying on result order.
+
+Introduced cleanup targets:
+
+- Phase 1A's prepared-cache closure collector remains in
+  `static-bundle-layer-planner.ts` only to populate transitional diagnostics. Phase 1D/2 should
+  remove or quarantine it once worker-local closure loading and static builder diagnostics exist.
+- Static-specific setup-appearance companion expansion and prepared-texture route derivation are not
+  in the generic Phase 1B closure loader. Add them as static builder/worker policy instead of
+  widening generic asset dependency traversal.
+- The worker message contracts are now represented as DTOs but have no worker client yet. Phase 2
+  should avoid adding compatibility message wrappers around these shapes.
+
+Legacy shims introduced:
+
+- None. The planner contract changed in place from closure scheduling to root scheduling; no
+  alternate planner mode or compatibility reexport was added.
+
+Legacy debt found before the next phase:
+
+- `npm run lint:ts` remains blocked by existing unrelated dead code in
+  `src/lib/world-display/camera.ts`: `rendererPointToAcPosition` is defined but unused.
 
 Exit criteria:
 
@@ -1009,7 +1054,7 @@ Exit criteria:
 
 ### Phase 1D: Worker-Safe Static Bundle Builder
 
-Status: After Phase 1C.
+Status: Immediate next phase.
 
 - Extract pure CPU helpers from the current staged pipeline where useful:
   - static source expansion;
@@ -1023,6 +1068,8 @@ Status: After Phase 1C.
   - setup-appearance companion expansion for setup models;
   - selected outdoor building/detail source expansion from `landblock/outdoor`;
   - normalized prepared texture route derivation from render surfaces.
+- Start from the Phase 1C root-manifest contract. Do not reintroduce full main-thread closure
+  completeness as a builder precondition.
 - Extract worker-safe texture page packing helpers from current atlas layout / CPU generation code
   without importing WebGL resource modules.
 - Rename concepts away from "staged" where they become layer-local.

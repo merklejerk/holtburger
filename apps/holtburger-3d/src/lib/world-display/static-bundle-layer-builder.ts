@@ -29,6 +29,13 @@ import {
 } from "./static-bundle-layer";
 import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import {
+	createCompactionEligibility,
+	type CompactionEligibility,
+	type CompactionMaterialReadiness,
+} from "./compaction/compaction-family-planner";
+import { deriveLegacyMaterialBehaviorDto } from "./material-behavior";
+import type { TexturePageDescriptor } from "./texture-pages/texture-page-binding";
+import {
 	planAtlasLayout,
 	type AtlasLayoutPolicy,
 } from "./texture-pages/atlas-layout-planner";
@@ -64,6 +71,9 @@ interface StaticBundleBuildSurface {
 	textureRefKey: string | null;
 	compactable: boolean;
 	reason: string | null;
+	familyKey: string;
+	isTransparent: boolean;
+	compactionEligibility: CompactionEligibility;
 	positions: Float32Array;
 	normals: Float32Array;
 	uvs: Float32Array;
@@ -311,16 +321,31 @@ function buildObjectSurfaces(
 			texturePageRefs,
 			materialTextureRoutes,
 		);
+		const materialReadiness = resolveStaticBundleMaterialReadiness({
+			materialAssetId,
+			preparedByAssetId,
+			texturePageRefs,
+			materialTextureRoutes,
+		});
 		const geometry = gfxObj.renderGeometry;
 		const positions = toFloat32Array(geometry.positions);
 		const normals = toFloat32Array(geometry.normals);
 		const uvs = toFloat32Array(geometry.uvs);
 		const indices = createSequentialTriangleIndices(geometry.triangleCount);
-		const compactable =
+		const geometryCompatible =
 			geometry.triangleCount > 0 &&
 			positions.length >= geometry.triangleCount * 9 &&
-			uvs.length >= geometry.triangleCount * 6 &&
-			!materialAssetId.includes("direct");
+			uvs.length >= geometry.triangleCount * 6;
+		const compactionEligibility = createCompactionEligibility({
+			geometry: {
+				kind: "static",
+				owningLandblockId: object.owningLandblockId,
+				hasUvBuffer: geometryCompatible,
+			},
+			material: materialReadiness,
+		});
+		const compactable =
+			geometryCompatible && compactionEligibility.decision === "compacted";
 		return {
 			key: `${object.objectKey}:part:${index}:${gfxObjAssetId}`,
 			object,
@@ -328,7 +353,14 @@ function buildObjectSurfaces(
 			materialAssetId,
 			textureRefKey: textureRef?.key ?? null,
 			compactable,
-			reason: compactable ? null : "noncompactable-surface",
+			reason: compactable
+				? null
+				: describeStaticBundleCompactionBypass(compactionEligibility),
+			familyKey: formatStaticBundleMaterialFamilyKey(compactionEligibility),
+			isTransparent:
+				compactionEligibility.material.alphaPolicy === "transparent-blend" ||
+				compactionEligibility.material.alphaPolicy === "opacity-translucent",
+			compactionEligibility,
 			positions,
 			normals,
 			uvs,
@@ -348,9 +380,9 @@ function buildMaterialRecords(
 		}
 		recordsByKey.set(key, {
 			key,
-			familyKey: surface.compactable ? "static-compact-rgba" : "static-direct",
+			familyKey: surface.familyKey,
 			texturePageRefKeys: surface.textureRefKey ? [surface.textureRefKey] : [],
-			isTransparent: false,
+			isTransparent: surface.isTransparent,
 		});
 	}
 	return [...recordsByKey.values()].sort((left, right) =>
@@ -384,7 +416,7 @@ function buildCompactedBatches(
 		{
 			key: `${renderChunkKey}:compacted:0`,
 			renderChunkKey,
-			familyKey: "static-compact-rgba",
+			familyKey: firstSurface.familyKey,
 			materialRecordKey: `material:${firstSurface.materialAssetId}`,
 			objectKeys: uniqueSortedStrings(
 				compactableSurfaces.map((surface) => surface.object.objectKey),
@@ -506,6 +538,128 @@ function findMaterialTextureRef(
 			(ref) => ref.sourceAssetId === route.preparedTextureAssetId,
 		) ?? null
 	);
+}
+
+function resolveStaticBundleMaterialReadiness(options: {
+	materialAssetId: string;
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
+	texturePageRefs: readonly VirtualTexturePageRef[];
+	materialTextureRoutes: readonly StaticBundleMaterialTextureRoute[];
+}): CompactionMaterialReadiness {
+	const material = getPreparedPayload(
+		options.preparedByAssetId,
+		options.materialAssetId,
+		"material-recipe",
+	);
+	const behavior = deriveLegacyMaterialBehaviorDto({ recipe: material });
+	const materialRoutes = options.materialTextureRoutes.filter(
+		(route) => route.materialAssetId === options.materialAssetId,
+	);
+	const texturePageBindings = materialRoutes
+		.map((route) => {
+			const ref = options.texturePageRefs.find(
+				(candidate) => candidate.sourceAssetId === route.preparedTextureAssetId,
+			);
+			return ref ? createStaticBundleTexturePageDescriptor(ref) : null;
+		})
+		.filter((binding): binding is TexturePageDescriptor => binding !== null);
+	const baseRoute = materialRoutes.find((route) => route.usage === "raw");
+	const baseTexturePageRef = baseRoute
+		? (options.texturePageRefs.find(
+				(ref) => ref.sourceAssetId === baseRoute.preparedTextureAssetId,
+			) ?? null)
+		: null;
+	const baseTexture = baseRoute
+		? getPreparedPayload(
+				options.preparedByAssetId,
+				baseRoute.preparedTextureAssetId,
+				"prepared-texture",
+			)
+		: null;
+	const level = baseTexture?.levels[0] ?? null;
+	return {
+		kind: material.source.kind === "texture" ? "direct-texture" : "flat",
+		behavior,
+		texturePages: {
+			base:
+				baseRoute && baseTexturePageRef && baseTexture && level
+					? {
+							materialSlotKey: `static-material-slot:${options.materialAssetId}`,
+							atlasEntryKey: baseTexturePageRef.key,
+							renderStateKey: `static:${behavior.blend.mode}`,
+							samplingKey: `${baseTexturePageRef.wrapS}:${baseTexturePageRef.wrapT}:${baseTexturePageRef.lookup}`,
+							samplingPolicy: {
+								wrapS: baseTexturePageRef.wrapS,
+								wrapT: baseTexturePageRef.wrapT,
+							},
+							atlasEntry: {
+								renderSurfaceId: baseTexture.renderSurfaceId,
+								preparedTextureAssetId: baseRoute.preparedTextureAssetId,
+								level,
+								sourceHash: baseTexture.sourceHash,
+								sourceFormatRaw: baseTexture.sourceFormatRaw,
+							},
+						}
+					: null,
+			bindings: texturePageBindings,
+		},
+		detailOverlay: {
+			hasOverlay: false,
+			atlasEntry: null,
+		},
+	};
+}
+
+function createStaticBundleTexturePageDescriptor(
+	ref: VirtualTexturePageRef,
+): TexturePageDescriptor {
+	return {
+		pageKind: "single-entry",
+		usageBucket: ref.usageBucket,
+		sampleClass: ref.sampleClass,
+		rect: [0, 0, 1, 1],
+		width: ref.width,
+		height: ref.height,
+		wrapS: ref.wrapS,
+		wrapT: ref.wrapT,
+		sampling: {
+			wrapS: ref.wrapS,
+			wrapT: ref.wrapT,
+			minFilter: ref.samplingDomain === "data" ? "nearest" : "linear",
+			magFilter: ref.samplingDomain === "data" ? "nearest" : "linear",
+			mip: "none",
+			samplingDomain: ref.samplingDomain,
+			lookup: ref.lookup,
+		},
+		source:
+			ref.usageBucket === "detail"
+				? "detail-overlay"
+				: "standalone-direct-texture",
+	};
+}
+
+function formatStaticBundleMaterialFamilyKey(
+	eligibility: CompactionEligibility,
+): string {
+	const family =
+		eligibility.decision === "compacted"
+			? eligibility.material.family
+			: "direct";
+	return `static:${family}:alpha=${eligibility.material.alphaPolicy}`;
+}
+
+function describeStaticBundleCompactionBypass(
+	eligibility: CompactionEligibility,
+): string {
+	const geometryBlocker = eligibility.geometry.blockers[0];
+	if (geometryBlocker) {
+		return `geometry:${geometryBlocker}`;
+	}
+	const materialBlocker = eligibility.material.blockers[0];
+	if (materialBlocker) {
+		return `material:${materialBlocker}`;
+	}
+	return "noncompactable-surface";
 }
 
 function collectPreparedTextureRouteAssetIds(

@@ -43,6 +43,7 @@ import {
 } from "./static-bundle-layer-texture-pages";
 import {
 	createIndexedTextureData,
+	type IndexedTextureFormat,
 	isIndexedTextureFormat,
 	selectIndexedPalette,
 } from "./indexed-material-data";
@@ -105,6 +106,7 @@ interface StaticBundleMaterialIndexedTexelRoute {
 	kind: "indexed-texels";
 	materialAssetId: string;
 	renderSurfaceAssetId: string;
+	indexedFormat: IndexedTextureFormat;
 	bytes: Uint8Array;
 	width: number;
 	height: number;
@@ -505,6 +507,7 @@ function collectVirtualTexturePageRefs(
 					sourceAssetId: route.renderSurfaceAssetId,
 					usageBucket: "indexed-texels",
 					sampleClass: "indexed-data",
+					indexedFormat: route.indexedFormat,
 					width: route.width,
 					height: route.height,
 					wrapS: "clamp",
@@ -653,6 +656,7 @@ function collectIndexedMaterialTextureRoutes(options: {
 			kind: "indexed-texels",
 			materialAssetId: options.materialAssetId,
 			renderSurfaceAssetId: indexedRenderSurface.assetId,
+			indexedFormat: indexedTexture.format,
 			bytes: indexedTexture.sourceBytes,
 			width: indexedTexture.width,
 			height: indexedTexture.height,

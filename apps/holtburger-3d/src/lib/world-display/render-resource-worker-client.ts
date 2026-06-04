@@ -1,6 +1,4 @@
 import type {
-	RenderResourceWorkerEchoJob,
-	RenderResourceWorkerEchoResult,
 	RenderResourceWorkerJob,
 	RenderResourceWorkerJobResult,
 	RenderResourceWorkerRequestMessage,
@@ -65,20 +63,6 @@ export class RenderResourceWorkerClient {
 		};
 	}
 
-	runEchoJob(
-		job: RenderResourceWorkerEchoJob,
-		transferables: readonly Transferable[] = [],
-	): Promise<RenderResourceWorkerEchoResult> {
-		return this.runJob(job, transferables).then((result) => {
-			if (result.type !== "echo") {
-				throw new Error(
-					`Render resource worker returned ${result.type} for echo job.`,
-				);
-			}
-			return result;
-		});
-	}
-
 	runBuildCompactedGeometryJob(
 		job: BuildCompactedGeometryWorkerJob,
 	): Promise<BuildCompactedGeometryWorkerResult> {
@@ -127,7 +111,7 @@ export class RenderResourceWorkerClient {
 		});
 	}
 
-	runJob(
+	private runJob(
 		job: RenderResourceWorkerJob,
 		transferables: readonly Transferable[] = [],
 	): Promise<RenderResourceWorkerJobResult> {

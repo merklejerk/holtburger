@@ -43,7 +43,7 @@ function requiresTextureAtlasGeneration(plan: TexturePageAtlasPlan): boolean {
 	);
 }
 
-export interface RgbaTexturePageCompactedLandblockBatchPlan {
+interface RgbaTexturePageCompactedLandblockBatchPlan {
 	family: "rgbaAtlas";
 	sourcePartitionKey: string;
 	desiredJobKey: string;
@@ -151,18 +151,18 @@ export function syncWebgl2CompactedGeometryResources({
 					placementsByEntryKey,
 					detailPlacementsByEntryKey,
 				});
-				commitWebgl2CompactedGeometryBatch({
+				const committedKeys = commitWebgl2CompactedGeometryBatch({
 					gl,
 					store,
 					geometry: readyWorkerResult.result.geometry,
 					landblockId: batchPlan.landblockId,
 					familyResource,
-					retainedGeometryBatchKeys,
-					retainedFamilyResourceKeys,
 					rendererResourceGraph,
 					atlasGenerationKey: store.textureAtlasGeneration?.key ?? null,
 					schedulerKey,
 				});
+				retainedGeometryBatchKeys.add(committedKeys.geometryBatchKey);
+				retainedFamilyResourceKeys.add(committedKeys.familyResourceKey);
 				store.compactedGeometryWorkerScheduler?.markCommitted(
 					schedulerKey,
 					readyWorkerResult.result.key,
@@ -224,18 +224,18 @@ export function syncWebgl2CompactedGeometryResources({
 							indexedResourceAtlasPlan.palettePlacementsByTextureKey,
 						detailPlacementsByEntryKey,
 					});
-					commitWebgl2CompactedGeometryBatch({
+					const committedKeys = commitWebgl2CompactedGeometryBatch({
 						gl,
 						store,
 						geometry: readyWorkerResult.result.geometry,
 						landblockId: batchPlan.landblockId,
 						familyResource,
-						retainedGeometryBatchKeys,
-						retainedFamilyResourceKeys,
 						rendererResourceGraph,
 						atlasGenerationKey: store.textureAtlasGeneration?.key ?? null,
 						schedulerKey,
 					});
+					retainedGeometryBatchKeys.add(committedKeys.geometryBatchKey);
+					retainedFamilyResourceKeys.add(committedKeys.familyResourceKey);
 					store.compactedGeometryWorkerScheduler?.markCommitted(
 						schedulerKey,
 						readyWorkerResult.result.key,
@@ -337,6 +337,11 @@ export function shouldRetainWebgl2CompactedGeometryBatch({
 type CompactedLandblockBatchPlan =
 	| RgbaTexturePageCompactedLandblockBatchPlan
 	| IndexedPalettedCompactedLandblockBatchPlan;
+
+interface CommittedCompactedGeometryResourceKeys {
+	geometryBatchKey: string;
+	familyResourceKey: string;
+}
 
 function groupReadyCompactedGeometryWorkerResults(
 	results: readonly ReadyCompactedGeometryWorkerResult[],
@@ -443,14 +448,12 @@ function describeCompactedGeometryBatchSchedulerKey(
 	].join("|");
 }
 
-export function commitWebgl2CompactedGeometryBatch({
+function commitWebgl2CompactedGeometryBatch({
 	gl,
 	store,
 	geometry,
 	landblockId,
 	familyResource,
-	retainedGeometryBatchKeys,
-	retainedFamilyResourceKeys,
 	rendererResourceGraph,
 	atlasGenerationKey,
 	schedulerKey,
@@ -460,19 +463,15 @@ export function commitWebgl2CompactedGeometryBatch({
 	geometry: CompactedGeometryBatch;
 	landblockId: number;
 	familyResource: Webgl2CompactedGeometryFamilyResource;
-	retainedGeometryBatchKeys: Set<string>;
-	retainedFamilyResourceKeys: Set<string>;
 	rendererResourceGraph?: RendererResourceGraph;
 	atlasGenerationKey: string | null;
 	schedulerKey: string | null;
-}): void {
+}): CommittedCompactedGeometryResourceKeys {
 	if (familyResource.geometryBatchKey !== geometry.key) {
 		throw new Error(
 			`Compacted family resource ${familyResource.key} references ${familyResource.geometryBatchKey}, not committed geometry ${geometry.key}.`,
 		);
 	}
-	retainedGeometryBatchKeys.add(geometry.key);
-	retainedFamilyResourceKeys.add(familyResource.key);
 	store.pendingCompactedGeometryBatchKeys.delete(geometry.key);
 	if (schedulerKey) {
 		const previousBatchKey =
@@ -521,6 +520,10 @@ export function commitWebgl2CompactedGeometryBatch({
 		familyResources: [familyResource],
 		atlasGenerationKey,
 	});
+	return {
+		geometryBatchKey: geometry.key,
+		familyResourceKey: familyResource.key,
+	};
 }
 
 function commitWebgl2CompactedGeometryBatchGraphProjection({
@@ -993,7 +996,7 @@ function uniqueNumbers(values: readonly number[]): number[] {
 	return [...new Set(values)].sort((left, right) => left - right);
 }
 
-export function createRgbaTexturePageCompactedLandblockBatchPlans({
+function createRgbaTexturePageCompactedLandblockBatchPlans({
 	plan,
 	drawUnits,
 	renderChunkTransforms,

@@ -14,14 +14,15 @@ import type {
 } from "../../workers/render-resource-worker";
 
 describe("render resource worker client", () => {
-	it("correlates echo job responses by request id", async () => {
+	it("correlates typed job responses by request id", async () => {
 		const worker = new FakeRenderResourceWorker();
 		const client = new RenderResourceWorkerClient(() => worker);
+		const input = createIndexedAtlasWorkerInput();
 
-		const resultPromise = client.runEchoJob({
-			type: "echo",
-			key: "echo:a",
-			payload: "hello",
+		const resultPromise = client.runBuildIndexedResourceAtlasJob({
+			type: "build-indexed-resource-atlas",
+			key: input.key,
+			input,
 		});
 
 		expect(worker.messages).toEqual([
@@ -29,39 +30,40 @@ describe("render resource worker client", () => {
 				type: "run-job",
 				requestId: "render-resource-1",
 				job: {
-					type: "echo",
-					key: "echo:a",
-					payload: "hello",
+					type: "build-indexed-resource-atlas",
+					key: "indexed-plan:a",
+					input,
 				},
 			},
 		]);
-		expect(worker.transferLists).toEqual([[]]);
+		expect(worker.transferLists[0]).toHaveLength(2);
 
 		worker.emit({
 			type: "job-complete",
 			requestId: "render-resource-1",
 			result: {
-				type: "echo",
-				key: "echo:a",
-				payload: "hello",
+				type: "build-indexed-resource-atlas",
+				key: "indexed-plan:a",
+				generation: null,
 			},
 			durationMs: 1.5,
 		});
 
 		await expect(resultPromise).resolves.toEqual({
-			type: "echo",
-			key: "echo:a",
-			payload: "hello",
+			type: "build-indexed-resource-atlas",
+			key: "indexed-plan:a",
+			generation: null,
 		});
 	});
 
 	it("rejects pending work on dispose and ignores late responses", async () => {
 		const worker = new FakeRenderResourceWorker();
 		const client = new RenderResourceWorkerClient(() => worker);
-		const resultPromise = client.runEchoJob({
-			type: "echo",
-			key: "echo:a",
-			payload: "hello",
+		const input = createIndexedAtlasWorkerInput();
+		const resultPromise = client.runBuildIndexedResourceAtlasJob({
+			type: "build-indexed-resource-atlas",
+			key: input.key,
+			input,
 		});
 
 		client.dispose();
@@ -72,9 +74,9 @@ describe("render resource worker client", () => {
 			type: "job-complete",
 			requestId: "render-resource-1",
 			result: {
-				type: "echo",
-				key: "echo:a",
-				payload: "hello",
+				type: "build-indexed-resource-atlas",
+				key: "indexed-plan:a",
+				generation: null,
 			},
 			durationMs: 1,
 		});

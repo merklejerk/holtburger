@@ -80,12 +80,6 @@ export function collectBuildIndexedResourceAtlasResultTransferables(
 	return uniqueTransferables([
 		...generation.indexTextures.map((texture) => texture.pixels.buffer),
 		...generation.paletteTextures.map((texture) => texture.pixels.buffer),
-		...generation.indexPlacements.map(
-			(placement) => placement.sourceBytes.buffer,
-		),
-		...generation.palettePlacements.map(
-			(placement) => placement.rgbaBytes.buffer,
-		),
 	]);
 }
 

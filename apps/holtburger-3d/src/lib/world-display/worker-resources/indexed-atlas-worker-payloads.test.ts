@@ -39,6 +39,22 @@ describe("indexed atlas worker payloads", () => {
 		expect([...(result.generation?.paletteTextures[0]?.pixels ?? [])]).toEqual([
 			9, 10, 11, 12, 13, 14, 15, 16,
 		]);
+		expect(result.generation?.indexPlacements[0]).toEqual({
+			indexTextureKey: "index/p8",
+			format: "p8",
+			atlasTextureIndex: 0,
+			x: 0,
+			y: 0,
+			width: 2,
+			height: 2,
+		});
+		expect(result.generation?.palettePlacements[0]).toEqual({
+			paletteTextureKey: "palette/a",
+			atlasTextureIndex: 0,
+			x: 0,
+			y: 0,
+			colorCount: 2,
+		});
 	});
 
 	it("copies source bytes before transfer so the source plan remains readable", () => {
@@ -74,7 +90,7 @@ describe("indexed atlas worker payloads", () => {
 
 		expect(inputTransferables).toHaveLength(3);
 		expect(new Set(inputTransferables).size).toBe(inputTransferables.length);
-		expect(resultTransferables).toHaveLength(6);
+		expect(resultTransferables).toHaveLength(3);
 		expect(new Set(resultTransferables).size).toBe(resultTransferables.length);
 	});
 });

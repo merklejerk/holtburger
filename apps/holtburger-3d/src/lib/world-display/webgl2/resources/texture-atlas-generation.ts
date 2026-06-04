@@ -56,7 +56,7 @@ export interface Webgl2TextureAtlasGenerationResource {
 	dispose(): void;
 }
 
-export interface TextureAtlasCpuTexture {
+interface TextureAtlasCpuTexture {
 	key: string;
 	family: TexturePageFamily;
 	textureIndex: number;
@@ -176,33 +176,6 @@ export function createTextureAtlasCpuGeneration({
 		preparedTextureAssetIds: plan.preparedTextureAssetIds,
 		rgbaAtlasReadyDrawUnitIds: plan.rgbaAtlasReadyDrawUnitIds,
 	};
-}
-
-export function createWebgl2TextureAtlasGenerationResource({
-	gl,
-	plan,
-	textureFilteringMode = "anisotropic-4x",
-	maxAnisotropy = 1,
-}: {
-	gl: WebGL2RenderingContext;
-	plan: TexturePageAtlasPlan;
-	textureFilteringMode?: TextureFilteringMode;
-	maxAnisotropy?: number;
-}): Webgl2TextureAtlasGenerationResource | null {
-	const cpuGeneration = createTextureAtlasCpuGeneration({
-		plan,
-		textureFilteringMode,
-		maxAnisotropy,
-	});
-	if (!cpuGeneration) {
-		return null;
-	}
-	return createWebgl2TextureAtlasGenerationResourceFromCpu({
-		gl,
-		cpuGeneration,
-		textureFilteringMode,
-		maxAnisotropy,
-	});
 }
 
 export function createWebgl2TextureAtlasGenerationResourceFromCpu({

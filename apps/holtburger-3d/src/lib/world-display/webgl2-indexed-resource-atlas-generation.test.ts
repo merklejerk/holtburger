@@ -6,7 +6,7 @@ import {
 } from "./texture-pages/indexed-resource-atlas-planner";
 import {
 	createIndexedResourceAtlasCpuGeneration,
-	createWebgl2IndexedResourceAtlasGenerationResource,
+	createWebgl2IndexedResourceAtlasGenerationResourceFromCpu,
 } from "./webgl2/resources/indexed-resource-atlas-generation";
 
 describe("webgl2 indexed resource atlas generation", () => {
@@ -26,6 +26,8 @@ describe("webgl2 indexed resource atlas generation", () => {
 		expect([...(generation?.paletteTextures[0]?.pixels ?? [])]).toEqual([
 			9, 10, 11, 12, 13, 14, 15, 16,
 		]);
+		expect(generation?.indexPlacements[0]).not.toHaveProperty("sourceBytes");
+		expect(generation?.palettePlacements[0]).not.toHaveProperty("rgbaBytes");
 	});
 
 	it("uploads P8, Index16, and palette atlas pages as exact data textures", () => {
@@ -99,15 +101,27 @@ describe("webgl2 indexed resource atlas generation", () => {
 			policy: { maxTextureSize: 8, maxTextureCount: 4 },
 		});
 
-		expect(
-			createWebgl2IndexedResourceAtlasGenerationResource({
-				gl: gl.asContext(),
-				plan,
-			}),
-		).toBeNull();
+		expect(createIndexedResourceAtlasCpuGeneration(plan)).toBeNull();
 		expect(gl.textureUploads).toHaveLength(0);
 	});
 });
+
+function createWebgl2IndexedResourceAtlasGenerationResource({
+	gl,
+	plan,
+}: {
+	gl: WebGL2RenderingContext;
+	plan: IndexedResourceAtlasPlan;
+}) {
+	const cpuGeneration = createIndexedResourceAtlasCpuGeneration(plan);
+	if (!cpuGeneration) {
+		return null;
+	}
+	return createWebgl2IndexedResourceAtlasGenerationResourceFromCpu({
+		gl,
+		cpuGeneration,
+	});
+}
 
 function createIndexedPlan(): IndexedResourceAtlasPlan {
 	return planIndexedResourceAtlas({

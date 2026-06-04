@@ -3,8 +3,9 @@ import { describe, expect, it } from "vitest";
 import type { TexturePageAtlasPlan } from "./texture-pages/texture-page-atlas-planner";
 import {
 	createTextureAtlasCpuGeneration,
-	createWebgl2TextureAtlasGenerationResource,
+	createWebgl2TextureAtlasGenerationResourceFromCpu,
 } from "./webgl2/resources/texture-atlas-generation";
+import type { TextureFilteringMode } from "./texture-pages/texture-sampling-policy";
 
 describe("webgl2 texture atlas generation", () => {
 	it("packs rgba and detail atlas bytes without creating WebGL textures", () => {
@@ -112,8 +113,7 @@ describe("webgl2 texture atlas generation", () => {
 		const plan = createPlan();
 
 		expect(
-			createWebgl2TextureAtlasGenerationResource({
-				gl: gl.asContext(),
+			createTextureAtlasCpuGeneration({
 				plan: {
 					...plan,
 					rgbaAtlasReadyDrawUnitIds: [],
@@ -214,6 +214,33 @@ describe("webgl2 texture atlas generation", () => {
 		generation?.dispose();
 	});
 });
+
+function createWebgl2TextureAtlasGenerationResource({
+	gl,
+	plan,
+	textureFilteringMode = "anisotropic-4x",
+	maxAnisotropy = 1,
+}: {
+	gl: WebGL2RenderingContext;
+	plan: TexturePageAtlasPlan;
+	textureFilteringMode?: TextureFilteringMode;
+	maxAnisotropy?: number;
+}) {
+	const cpuGeneration = createTextureAtlasCpuGeneration({
+		plan,
+		textureFilteringMode,
+		maxAnisotropy,
+	});
+	if (!cpuGeneration) {
+		return null;
+	}
+	return createWebgl2TextureAtlasGenerationResourceFromCpu({
+		gl,
+		cpuGeneration,
+		textureFilteringMode,
+		maxAnisotropy,
+	});
+}
 
 function createPlan({
 	family = "static-rgba",

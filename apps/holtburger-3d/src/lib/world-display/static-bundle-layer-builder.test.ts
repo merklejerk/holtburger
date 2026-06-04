@@ -28,8 +28,7 @@ describe("static bundle layer builder", () => {
 			createRenderSurface("render-surface/06000001"),
 			createRenderSurface("render-surface/06000002"),
 			createPreparedTexture(0x06000001, "color", [255, 0, 0, 255]),
-			createPreparedTexture(0x06000002, "color", [0, 255, 0, 255]),
-			createPreparedTexture(0x06000003, "detail", [0, 0, 255, 255]),
+			createPreparedTexture(0x06000002, "color", [0, 255, 0, 255], 8),
 		];
 
 		const layer = buildStaticLandblockRenderBundleLayer({
@@ -49,6 +48,15 @@ describe("static bundle layer builder", () => {
 		]);
 		expect(layer.preparedAssetIds).toContain("material/08000001");
 		expect(layer.preparedAssetIds).toContain("render-surface/06000001");
+		expect(layer.preparedAssetIds).toContain(
+			formatPreparedTextureAssetId({
+				renderSurfaceId: 0x06000001,
+				usage: "color",
+				outputFormat: "rgba8",
+				mipPolicy: "none",
+				colorSpace: "linear",
+			}),
+		);
 		expect(layer.compactedBatches).toHaveLength(1);
 		expect(layer.compactedBatches[0]?.positions).toBeInstanceOf(Float32Array);
 		expect(layer.directEntries).toHaveLength(1);
@@ -59,7 +67,11 @@ describe("static bundle layer builder", () => {
 		expect(
 			layer.texturePages.find((page) => page.pageKind === "packed-atlas")
 				?.entries,
-		).toHaveLength(2);
+		).toHaveLength(1);
+		expect(
+			layer.texturePages.find((page) => page.pageKind === "single-entry")
+				?.entries,
+		).toHaveLength(1);
 		expect(layer.diagnostics).toMatchObject({
 			sourceObjectCount: 2,
 			compactedSurfaceCount: 1,
@@ -130,6 +142,7 @@ describe("static bundle layer builder", () => {
 				createGfxObj("gfx-obj/01000001", "material/08000001", 1),
 				createMaterial("material/08000001", "render-surface/06000001"),
 				createRenderSurface("render-surface/06000001"),
+				createPreparedTexture(0x06000001, "color", [255, 0, 0, 255]),
 			].map((asset) => [asset.request.assetId, asset] as const),
 		);
 
@@ -322,6 +335,7 @@ function createPreparedTexture(
 	renderSurfaceId: number,
 	usage: "color" | "detail",
 	bytes: readonly number[],
+	size = 1,
 ): PreparedAssetRecord {
 	const assetId = formatPreparedTextureAssetId({
 		renderSurfaceId,
@@ -342,25 +356,25 @@ function createPreparedTexture(
 		colorSpace: "linear",
 		sourceFormatRaw: 0,
 		sourceFormat: "rgba8",
-		sourceWidth: 1,
-		sourceHeight: 1,
-		sourceByteLength: 4,
+		sourceWidth: size,
+		sourceHeight: size,
+		sourceByteLength: size * size * 4,
 		sourceHash: assetId,
 		levels: [
 			{
 				level: 0,
-				width: 1,
-				height: 1,
+				width: size,
+				height: size,
 				formatRaw: 0,
 				format: "rgba8",
-				byteLength: 4,
-				bytes: new Uint8Array(bytes),
+				byteLength: size * size * 4,
+				bytes: repeatRgba(bytes, size * size),
 			},
 		],
 		dependencies: { renderSurfaceAssetIds: [] },
 		diagnostics: {
 			generatedLevelCount: 1,
-			generatedByteLength: 4,
+			generatedByteLength: size * size * 4,
 			decodeMs: 0,
 			downsampleMs: 0,
 			encodeMs: 0,
@@ -499,6 +513,14 @@ function createRenderGeometry(triangleCount: number) {
 		surfaceIds: [1],
 		bounds: null,
 	};
+}
+
+function repeatRgba(bytes: readonly number[], pixelCount: number): Uint8Array {
+	const result = new Uint8Array(pixelCount * 4);
+	for (let index = 0; index < pixelCount; index += 1) {
+		result.set(bytes, index * 4);
+	}
+	return result;
 }
 
 function identityPlacement() {

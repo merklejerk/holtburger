@@ -42,6 +42,9 @@ Progress:
   Phase 1C static layer worker job plus worker-local prepared assets, expands outdoor/env-cell source
   objects, validates closure consistency, emits compacted/direct bundle DTOs, derives object/cell
   visibility records, packs layer-owned texture pages synchronously, and stays CPU-only.
+- 2026-06-04: Refined the Phase 1D builder slice so material render-surface dependencies derive
+  normalized `prepared-texture/...` route IDs for worker-local closure accounting and layer texture
+  refs. Texture page generation no longer scans unrelated prepared texture records from the closure.
 
 Validation:
 
@@ -68,6 +71,12 @@ Validation:
   passed after the first Phase 1D builder slice.
 - `npm run check`, `npm run lint:dead`, and `npm run lint:rust` passed after the first Phase 1D
   builder slice.
+- `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts`
+  passed after the Phase 1D texture-route refinement.
+- `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts`
+  passed after the Phase 1D texture-route refinement.
+- `npm run check`, `npm run lint:dead`, and `npm run lint:rust` passed after the Phase 1D
+  texture-route refinement.
 - `npm run lint:ts` currently fails on existing unrelated debt:
   `src/lib/world-display/camera.ts` defines unused `rendererPointToAcPosition`.
 
@@ -1085,6 +1094,9 @@ Implemented in the first builder slice:
   - single-entry pages;
   - packed atlas pages;
   - virtual-ref-to-rect entries.
+- Added material-derived normalized prepared-texture route derivation for render-surface
+  dependencies. Worker-prepared dependency accounting now includes those `prepared-texture/...`
+  routes, and texture page refs are built from the material routes actually used by the layer.
 - Added fixture-based tests proving stable object/cell keys, worker-prepared dependency collection,
   hard failure for inconsistent closures, compacted/direct output, packed/single texture pages, and
   texture-page key independence from sampler/filtering policy.
@@ -1101,6 +1113,8 @@ Decisions and course corrections:
   builder extraction target.
 - A real bug was found and fixed in worker-prepared dependency collection: sorting an indexed queue
   while iterating could skip dependencies. The collector now uses a deterministic shift/sort loop.
+- Texture route derivation is now material-driven. Unrelated prepared textures in the worker-local
+  closure no longer produce layer texture pages.
 - Knip caught an unused prepared-texture helper export and an over-exported build policy interface;
   both were removed/narrowed rather than kept as speculative API.
 
@@ -1139,9 +1153,9 @@ Introduced cleanup targets:
 - The first compacted DTO assembly groups compactable surfaces into one conservative batch. Replace
   this with extracted compaction-family/material eligibility before Phase 2 depends on it for real
   outdoor rendering.
-- Texture page refs currently come from already prepared `prepared-texture/...` records present in
-  the worker-local closure. The static worker/builder still needs normalized prepared-texture route
-  derivation from materials/render surfaces before real worker orchestration.
+- Texture page refs now come from material-derived `prepared-texture/...` routes, but the route
+  policy is still intentionally narrow: color, rgba8, no mips, linear. Extend this with the existing
+  normalized material texture preparation policy before full worker orchestration.
 - Direct-entry bounds are currently null in the first builder slice. Add bounds only if they fall
   out of render output work; do not add picker/debug-only sidecars.
 

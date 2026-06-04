@@ -1,5 +1,6 @@
 import {
 	getPreparedAssetDependencies,
+	formatPreparedTextureAssetId,
 	type PreparedAssetRecord,
 } from "../assets/types";
 import {
@@ -65,6 +66,12 @@ interface StaticBundleBuildSurface {
 	indices: Uint16Array | Uint32Array;
 }
 
+interface StaticBundleMaterialTextureRoute {
+	materialAssetId: string;
+	preparedTextureAssetId: string;
+	renderSurfaceAssetId: string;
+}
+
 export function buildStaticLandblockRenderBundleLayer({
 	job,
 	preparedAssets,
@@ -94,14 +101,26 @@ export function buildStaticLandblockRenderBundleLayer({
 		job.rootAssetIds,
 		preparedByAssetId,
 	);
-	const texturePageRefs = collectVirtualTexturePageRefs(preparedByAssetId);
+	const materialTextureRoutes = collectMaterialTextureRoutes(
+		sourceObjects.flatMap((object) => object.materialAssetIds),
+		preparedByAssetId,
+	);
+	const texturePageRefs = collectVirtualTexturePageRefs(
+		materialTextureRoutes,
+		preparedByAssetId,
+	);
 	const texturePages = buildLayerTexturePages({
 		scopeKey: formatStaticBundleLayerScopeKey(job.scope),
 		texturePageRefs,
 		policy: policy.atlasLayout,
 	});
 	const surfaces = sourceObjects.flatMap((object) =>
-		buildObjectSurfaces(object, preparedByAssetId, texturePageRefs),
+		buildObjectSurfaces(
+			object,
+			preparedByAssetId,
+			texturePageRefs,
+			materialTextureRoutes,
+		),
 	);
 	const renderChunk = createRenderChunk(job);
 	const materialRecords = buildMaterialRecords(surfaces);
@@ -165,6 +184,14 @@ export function collectWorkerPreparedDependencyIds(
 		for (const dependency of getPreparedAssetDependencies(asset)) {
 			if (!visitedAssetIds.has(dependency.assetId)) {
 				queue.push(dependency.assetId);
+			}
+		}
+		for (const preparedTextureAssetId of collectPreparedTextureRouteAssetIds(
+			asset,
+			preparedByAssetId,
+		)) {
+			if (!visitedAssetIds.has(preparedTextureAssetId)) {
+				queue.push(preparedTextureAssetId);
 			}
 		}
 		for (const companionAssetId of collectSetupAppearanceCompanionAssetIds(
@@ -256,6 +283,7 @@ function buildObjectSurfaces(
 	object: StaticBundleSourceObject,
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>,
 	texturePageRefs: readonly VirtualTexturePageRef[],
+	materialTextureRoutes: readonly StaticBundleMaterialTextureRoute[],
 ): StaticBundleBuildSurface[] {
 	return object.partAssetIds.map((gfxObjAssetId, index) => {
 		const gfxObj = getPreparedPayload(
@@ -268,12 +296,11 @@ function buildObjectSurfaces(
 			object.materialAssetIds[0] ??
 			gfxObj.dependencies?.materialAssetIds[0] ??
 			"material:missing";
-		const textureRef =
-			texturePageRefs.find((ref) =>
-				ref.sourceAssetId.includes(materialAssetId),
-			) ??
-			texturePageRefs[index] ??
-			null;
+		const textureRef = findMaterialTextureRef(
+			materialAssetId,
+			texturePageRefs,
+			materialTextureRoutes,
+		);
 		const geometry = gfxObj.renderGeometry;
 		const positions = toFloat32Array(geometry.positions);
 		const normals = toFloat32Array(geometry.normals);
@@ -377,37 +404,122 @@ function buildDirectEntries(
 }
 
 function collectVirtualTexturePageRefs(
+	materialTextureRoutes: readonly StaticBundleMaterialTextureRoute[],
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>,
 ): VirtualTexturePageRef[] {
-	return [...preparedByAssetId.values()]
-		.flatMap((asset): VirtualTexturePageRef[] => {
-			if (asset.payload.kind !== "prepared-texture") {
-				return [];
-			}
-			const payload = asset.payload;
+	return materialTextureRoutes
+		.map((route): VirtualTexturePageRef => {
+			const payload = getPreparedPayload(
+				preparedByAssetId,
+				route.preparedTextureAssetId,
+				"prepared-texture",
+			);
 			const level = payload.levels[0];
 			if (!level) {
 				throw new Error(
-					`Prepared texture ${asset.request.assetId} has no mip level 0.`,
+					`Prepared texture ${route.preparedTextureAssetId} has no mip level 0.`,
 				);
 			}
-			return [
-				{
-					key: `texture:${asset.request.assetId}`,
-					sourceAssetId: asset.request.assetId,
-					usageBucket: payload.usage === "detail" ? "detail" : "base-color",
-					sampleClass: "rgba-color",
-					width: level.width,
-					height: level.height,
-					wrapS: "clamp",
-					wrapT: "clamp",
-					samplingDomain: payload.colorSpace === "data" ? "data" : "color",
-					lookup: payload.colorSpace === "data" ? "exact" : "color-filtered",
-					bytes: level.bytes,
-				},
-			];
+			return {
+				key: `texture:${route.materialAssetId}:${route.preparedTextureAssetId}`,
+				sourceAssetId: route.preparedTextureAssetId,
+				usageBucket: payload.usage === "detail" ? "detail" : "base-color",
+				sampleClass: "rgba-color",
+				width: level.width,
+				height: level.height,
+				wrapS: "clamp",
+				wrapT: "clamp",
+				samplingDomain: payload.colorSpace === "data" ? "data" : "color",
+				lookup: payload.colorSpace === "data" ? "exact" : "color-filtered",
+				bytes: level.bytes,
+			};
 		})
 		.sort((left, right) => left.key.localeCompare(right.key));
+}
+
+function collectMaterialTextureRoutes(
+	materialAssetIds: readonly string[],
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>,
+): StaticBundleMaterialTextureRoute[] {
+	const routesByKey = new Map<string, StaticBundleMaterialTextureRoute>();
+	for (const materialAssetId of uniqueSortedStrings(materialAssetIds)) {
+		const material = getPreparedPayload(
+			preparedByAssetId,
+			materialAssetId,
+			"material-recipe",
+		);
+		for (const renderSurfaceAssetId of material.dependencies
+			.renderSurfaceAssetIds) {
+			const renderSurface = getPreparedPayload(
+				preparedByAssetId,
+				renderSurfaceAssetId,
+				"render-surface",
+			);
+			const route = {
+				materialAssetId,
+				renderSurfaceAssetId,
+				preparedTextureAssetId: formatPreparedTextureAssetId({
+					renderSurfaceId: renderSurface.renderSurfaceId,
+					usage: "color",
+					outputFormat: "rgba8",
+					mipPolicy: "none",
+					colorSpace: "linear",
+				}),
+			};
+			routesByKey.set(
+				`${route.materialAssetId}|${route.preparedTextureAssetId}`,
+				route,
+			);
+		}
+	}
+	return [...routesByKey.values()].sort((left, right) =>
+		`${left.materialAssetId}|${left.preparedTextureAssetId}`.localeCompare(
+			`${right.materialAssetId}|${right.preparedTextureAssetId}`,
+		),
+	);
+}
+
+function findMaterialTextureRef(
+	materialAssetId: string,
+	texturePageRefs: readonly VirtualTexturePageRef[],
+	materialTextureRoutes: readonly StaticBundleMaterialTextureRoute[],
+): VirtualTexturePageRef | null {
+	const route = materialTextureRoutes.find(
+		(candidate) => candidate.materialAssetId === materialAssetId,
+	);
+	if (!route) {
+		return null;
+	}
+	return (
+		texturePageRefs.find(
+			(ref) => ref.sourceAssetId === route.preparedTextureAssetId,
+		) ?? null
+	);
+}
+
+function collectPreparedTextureRouteAssetIds(
+	asset: PreparedAssetRecord,
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>,
+): string[] {
+	if (asset.payload.kind !== "material-recipe") {
+		return [];
+	}
+	return asset.payload.dependencies.renderSurfaceAssetIds.map(
+		(renderSurfaceAssetId) => {
+			const renderSurface = getPreparedPayload(
+				preparedByAssetId,
+				renderSurfaceAssetId,
+				"render-surface",
+			);
+			return formatPreparedTextureAssetId({
+				renderSurfaceId: renderSurface.renderSurfaceId,
+				usage: "color",
+				outputFormat: "rgba8",
+				mipPolicy: "none",
+				colorSpace: "linear",
+			});
+		},
+	);
 }
 
 function buildLayerTexturePages(options: {

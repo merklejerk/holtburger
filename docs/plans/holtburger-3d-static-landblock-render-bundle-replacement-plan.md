@@ -1131,7 +1131,8 @@ Remaining Phase 1D work:
   - response dependency expansion via `getAssetResponseDependencies`;
   - setup-appearance companion expansion for setup models;
   - selected outdoor building/detail source expansion from `landblock/outdoor`;
-  - normalized prepared texture route derivation from render surfaces.
+  - full normalized material texture preparation policy support for prepared texture route
+    derivation.
 - Start from the Phase 1C root-manifest contract. Do not reintroduce full main-thread closure
   completeness as a builder precondition.
 - Extract worker-safe texture page packing helpers from current atlas layout / CPU generation code
@@ -1167,7 +1168,8 @@ Legacy shims introduced:
 Legacy debt found before the next phase:
 
 - Phase 1D should continue before Phase 2. The next immediate work is extracting real material,
-  texture-route, and compaction eligibility helpers from the staged pipeline into worker-safe modules.
+  texture-policy, and compaction eligibility helpers from the staged pipeline into worker-safe
+  modules.
 - `npm run lint:ts` remains blocked by existing unrelated dead code in
   `src/lib/world-display/camera.ts`: `rendererPointToAcPosition` is defined but unused.
 

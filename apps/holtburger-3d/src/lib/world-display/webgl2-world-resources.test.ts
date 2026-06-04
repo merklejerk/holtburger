@@ -691,20 +691,6 @@ describe("webgl2 world resources", () => {
 				staticBatchGraphNodeKey(retainedBatchKey ?? ""),
 			),
 		).toBe(true);
-		expect(
-			graph.explainRetention(staticBatchGraphNodeKey(retainedBatchKey ?? ""))
-				.retained,
-		).toBe(true);
-		expect(
-			graph.explainRetention(staticBatchGraphNodeKey(removedBatchKey ?? ""))
-				.retained,
-		).toBe(false);
-		expect(
-			graph
-				.disposalCandidates()
-				.map((candidate) => candidate.nodeKey)
-				.includes(staticBatchGraphNodeKey(removedBatchKey ?? "")),
-		).toBe(true);
 	});
 
 	it("compacts structured-interior direct-texture draw units into landblock atlas batches", () => {

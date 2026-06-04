@@ -23,38 +23,15 @@ describe("renderer resource graph", () => {
 		]);
 	});
 
-	it("reports derived nodes as disposal candidates once their leases are released", () => {
+	it("keeps prepared assets retained until every owner releases its lease", () => {
 		const graph = createFixtureGraph();
-		const lease = graph.leaseNode(sceneObjectGraphNodeKey("tree-1"), "scene");
-
-		expect(
-			graph.disposalCandidates().map((candidate) => candidate.nodeKey),
-		).toEqual([
-			atlasGenerationGraphNodeKey("atlas-1"),
-			staticBatchGraphNodeKey("batch-1"),
-		]);
-
-		graph.releaseLease(lease);
-
-		expect(
-			graph.disposalCandidates().map((candidate) => candidate.nodeKey),
-		).toEqual([
-			atlasGenerationGraphNodeKey("atlas-1"),
-			materialDecisionGraphNodeKey("mat-1"),
-			sceneObjectGraphNodeKey("tree-1"),
-			staticBatchGraphNodeKey("batch-1"),
-		]);
-	});
-
-	it("keeps multiple lease owners explicit without reference-count ambiguity", () => {
-		const graph = createFixtureGraph();
-		const first = graph.leaseNode(
+		const sceneLease = graph.leaseNode(
 			sceneObjectGraphNodeKey("tree-1"),
 			"visible scene",
 		);
 		graph.leaseNode(sceneObjectGraphNodeKey("tree-1"), "debug picker");
 
-		graph.releaseLease(first);
+		graph.releaseLease(sceneLease);
 
 		expect(graph.retainedPreparedAssetIds()).toEqual([
 			"gfx-obj/02000001",
@@ -62,11 +39,15 @@ describe("renderer resource graph", () => {
 			"prepared-texture/raw/05000001?format=rgba8&mips=none&cs=linear",
 			"setup-appearance/02000001",
 		]);
-		expect(
-			graph
-				.explainRetention("material/08000001")
-				.paths.map((path) => path.owner),
-		).toEqual(["debug picker"]);
+	});
+
+	it("releases prepared assets when their owner lease is released", () => {
+		const graph = createFixtureGraph();
+		const lease = graph.leaseNode(sceneObjectGraphNodeKey("tree-1"), "scene");
+
+		graph.releaseLease(lease);
+
+		expect(graph.retainedPreparedAssetIds()).toEqual([]);
 	});
 
 	it("leaves the graph unchanged when a transaction fails", () => {
@@ -185,7 +166,7 @@ describe("renderer resource graph", () => {
 		expect(graph.hasNode(sceneObjectGraphNodeKey("first"))).toBe(true);
 	});
 
-	it("returns deterministic retained ids, candidates, and explanations", () => {
+	it("returns deterministic retained prepared asset ids", () => {
 		const graph = new RendererResourceGraph();
 		graph.transaction((draft) => {
 			for (const node of [
@@ -213,86 +194,16 @@ describe("renderer resource graph", () => {
 		});
 
 		expect(graph.retainedPreparedAssetIds()).toEqual(["a", "z"]);
-		expect(graph.disposalCandidates()).toEqual([]);
-		expect(
-			graph
-				.explainRetention(preparedAssetGraphNodeKey("z"))
-				.paths.map((path) => ({
-					owner: path.owner,
-					path: path.path,
-				})),
-		).toEqual([
-			{
-				owner: "z-owner",
-				path: [sceneObjectGraphNodeKey("b"), preparedAssetGraphNodeKey("z")],
-			},
-		]);
 	});
 
 	it("uses canonical prepared-asset nodes rather than duplicate semantic texture nodes", () => {
 		const graph = createFixtureGraph();
 		graph.leaseNode(sceneObjectGraphNodeKey("tree-1"), "scene");
 
-		expect(
-			graph.explainRetention(
-				"prepared-texture/raw/05000001?format=rgba8&mips=none&cs=linear",
-			).targetKey,
-		).toBe(
-			preparedAssetGraphNodeKey(
-				"prepared-texture/raw/05000001?format=rgba8&mips=none&cs=linear",
-			),
+		expect(graph.retainedPreparedAssetIds()).toContain(
+			"prepared-texture/raw/05000001?format=rgba8&mips=none&cs=linear",
 		);
 		expect(graph.hasNode("render-surface/05000001")).toBe(false);
-	});
-
-	it("deletes only unleased, unreachable derived nodes without dependents", () => {
-		const graph = createFixtureGraph();
-
-		graph.deleteDerivedNode(staticBatchGraphNodeKey("batch-1"));
-
-		expect(graph.hasNode(staticBatchGraphNodeKey("batch-1"))).toBe(false);
-		expect(() =>
-			graph.deleteDerivedNode(materialDecisionGraphNodeKey("mat-1")),
-		).toThrow(/dependents/);
-	});
-
-	it("rejects deletion for leased, reachable, unknown, and prepared nodes", () => {
-		const graph = createFixtureGraph();
-		graph.leaseNode(staticBatchGraphNodeKey("batch-1"), "active batch store");
-
-		expect(() =>
-			graph.deleteDerivedNode(staticBatchGraphNodeKey("batch-1")),
-		).toThrow(/retained/);
-		expect(() =>
-			graph.deleteDerivedNode(materialDecisionGraphNodeKey("mat-1")),
-		).toThrow(/retained|dependents/);
-		expect(() => graph.deleteDerivedNode("scene-object/missing")).toThrow(
-			/unknown/,
-		);
-		expect(() =>
-			graph.deleteDerivedNode(preparedAssetGraphNodeKey("gfx-obj/02000001")),
-		).toThrow(/prepared asset/);
-		expect(() =>
-			graph.deleteUnreferencedPreparedAssetNode("gfx-obj/02000001"),
-		).toThrow(/retained|dependents/);
-	});
-
-	it("allows explicit prepared-asset graph node cleanup after derived references are gone", () => {
-		const graph = createFixtureGraph();
-		for (const nodeKey of [
-			staticBatchGraphNodeKey("batch-1"),
-			atlasGenerationGraphNodeKey("atlas-1"),
-			sceneObjectGraphNodeKey("tree-1"),
-			materialDecisionGraphNodeKey("mat-1"),
-		]) {
-			graph.deleteDerivedNode(nodeKey);
-		}
-
-		graph.deleteUnreferencedPreparedAssetNode("gfx-obj/02000001");
-
-		expect(graph.hasNode(preparedAssetGraphNodeKey("gfx-obj/02000001"))).toBe(
-			false,
-		);
 	});
 });
 

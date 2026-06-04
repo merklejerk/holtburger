@@ -256,6 +256,50 @@ describe("static bundle layer builder", () => {
 		expect(layer.directEntries).toEqual([]);
 	});
 
+	it("preserves 16-bit indexed texel format in static texture pages", () => {
+		const landblockId = 0xda55ffff;
+		const job = createBuildJob(landblockId);
+		const preparedAssets = [
+			createOutdoorLandblock(landblockId, [
+				createOutdoorMember("indexed-16", "gfx-obj/01000013"),
+			]),
+			createRegionRenderProfile(1),
+			createTerrainMaterial(1),
+			createGfxObj("gfx-obj/01000013", "material/08000013", 1),
+			createMaterial("material/08000013", "render-surface/06000014", {
+				paletteId: 0x04000013,
+			}),
+			createIndexedRenderSurface("render-surface/06000014", 0x04000013, {
+				format: "index16",
+			}),
+			createPalette("palette/04000013", 258),
+		];
+
+		const layer = buildStaticLandblockRenderBundleLayer({
+			job,
+			preparedAssets,
+			policy: createPolicy(),
+		});
+
+		expect(
+			layer.texturePageRefs.find((ref) => ref.usageBucket === "indexed-texels"),
+		).toMatchObject({
+			sampleClass: "indexed-data",
+			indexedFormat: "index16",
+			width: 2,
+			height: 2,
+		});
+		expect(
+			layer.texturePages.find((page) => page.usageBucket === "indexed-texels"),
+		).toMatchObject({
+			sampleClass: "indexed-data",
+			indexedFormat: "index16",
+			width: 2,
+			height: 2,
+			bytes: new Uint8Array([0, 0, 1, 0, 0, 1, 1, 1]),
+		});
+	});
+
 	it("fails hard when the worker-local closure is internally inconsistent", () => {
 		const landblockId = 0xda55ffff;
 		const preparedAssets = [
@@ -505,7 +549,13 @@ function createRenderSurface(assetId: string): PreparedAssetRecord {
 function createIndexedRenderSurface(
 	assetId: string,
 	defaultPaletteId: number,
+	options: { format?: "p8" | "index16" } = {},
 ): PreparedAssetRecord {
+	const format = options.format ?? "p8";
+	const sourceBytes =
+		format === "index16"
+			? new Uint8Array([0, 0, 1, 0, 0, 1, 1, 1])
+			: new Uint8Array([0, 1, 2, 3]);
 	return createRecord(assetId, {
 		kind: "render-surface",
 		sourceAssetKind: "render-surface",
@@ -518,10 +568,10 @@ function createIndexedRenderSurface(
 		unknown: 0,
 		width: 2,
 		height: 2,
-		formatRaw: 0x29,
-		format: "p8",
-		sourceByteLength: 4,
-		sourceBytes: new Uint8Array([0, 1, 2, 3]),
+		formatRaw: format === "index16" ? 0x65 : 0x29,
+		format,
+		sourceByteLength: sourceBytes.byteLength,
+		sourceBytes,
 		defaultPaletteId,
 		dependencies: {
 			paletteAssetIds: [
@@ -531,17 +581,17 @@ function createIndexedRenderSurface(
 	});
 }
 
-function createPalette(assetId: string): PreparedAssetRecord {
+function createPalette(assetId: string, colorCount = 256): PreparedAssetRecord {
 	return createRecord(assetId, {
 		kind: "palette",
 		sourceAssetKind: "palette",
 		residencyKind: "unknown",
 		provenance: createProvenance("palette"),
 		paletteId: Number.parseInt(assetId.slice("palette/".length), 16),
-		colorCount: 256,
+		colorCount,
 		colorsArgb: new Uint32Array(
 			Array.from(
-				{ length: 256 },
+				{ length: colorCount },
 				(_, index) => 0xff000000 | (index << 16) | (index << 8) | index,
 			),
 		),

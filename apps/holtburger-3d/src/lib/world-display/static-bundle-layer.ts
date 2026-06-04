@@ -50,11 +50,14 @@ export type VirtualTexturePageSampleClass =
 	| "palette-data"
 	| "control-data";
 
+type StaticBundleIndexedTextureFormat = "p8" | "index16";
+
 export interface VirtualTexturePageRef {
 	key: string;
 	sourceAssetId: string;
 	usageBucket: VirtualTexturePageUsageBucket;
 	sampleClass: VirtualTexturePageSampleClass;
+	indexedFormat?: StaticBundleIndexedTextureFormat;
 	width: number;
 	height: number;
 	wrapS: "clamp" | "repeat";
@@ -78,6 +81,7 @@ export interface StaticBundleTexturePage {
 	pageKind: StaticBundleTexturePageKind;
 	usageBucket: VirtualTexturePageUsageBucket;
 	sampleClass: VirtualTexturePageSampleClass;
+	indexedFormat?: StaticBundleIndexedTextureFormat;
 	width: number;
 	height: number;
 	bytes: Uint8Array;

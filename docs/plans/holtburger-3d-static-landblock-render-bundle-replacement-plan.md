@@ -1,7 +1,8 @@
 # Holtburger 3D Static Landblock Render Bundle Replacement Plan
 
-Status: Phase 1A through Phase 1J, Phase 2A, Phase 2B, Phase 3A, Phase 3B, and Phase
-3C1 are implemented. Phase 3C2 static bundle renderer realization is the next implementation phase.
+Status: Phase 1A through Phase 1J, Phase 2A, Phase 2B, Phase 3A, Phase 3B, Phase
+3C1, and Phase 3C2A are implemented. Phase 3C2B static bundle renderer integration
+is the next implementation phase.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, preset-based landblock requests, and layer-scoped texture pages.
 
@@ -124,6 +125,14 @@ Progress:
   direct static entries carry positions, normals, UVs, and indices from worker-built surfaces. This
   removes the main blocker that would have forced static direct draw realization to reach back into
   prepared gfx assets or staged draw units.
+- 2026-06-04: Implemented Phase 3C2A as an immediate renderer-resource foundation before the full
+  static vertical slice. Added WebGL resource ownership for static bundle layer-owned texture pages,
+  material texture bindings, compacted static geometry buffers, and direct static geometry buffers.
+  The resource layer validates texture page upload formats from static page sample classes and
+  replaces resources by immutable layer key plus source revision.
+- 2026-06-04: Corrected the Phase 3C2A indexed texture page contract so `indexed-data` pages carry
+  explicit `p8` or `index16` format metadata. Static bundle page packing now keeps P8 and 16-bit
+  index pages separate, and WebGL upload uses R8 for P8 pages and RG8 for 16-bit index pages.
 
 Validation:
 
@@ -210,6 +219,11 @@ Validation:
   passed after Phase 3C1.
 - `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run lint:rust` passed after
   Phase 3C1.
+- `npm exec vitest -- run src/lib/world-display/webgl2/resources/static-bundle-layer-resources.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/world-display/static-bundle-layer-builder.test.ts`
+  passed after Phase 3C2A.
+- `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run lint:rust` passed after
+  Phase 3C2A.
+- `git diff --check` passed after Phase 3C2A.
 
 Related plans:
 
@@ -575,9 +589,9 @@ interface StaticLandblockRenderBundleLayer {
   scope: StaticBundleLayerScope;
   landblockId: number;
   layerKind: StaticLandblockBundleLayerKind;
-  artifactRevision: string;
-  diagnosticRootAssetIds: readonly string[];
-  diagnosticPreparedAssetIds: readonly string[];
+  sourceRevision: string;
+  rootAssetIds: readonly string[];
+  preparedAssetIds: readonly string[];
   renderChunks: readonly StaticBundleRenderChunk[];
   compactedBatches: readonly StaticBundleCompactedBatch[];
   directEntries: readonly StaticBundleDirectEntry[];
@@ -2288,8 +2302,87 @@ Exit criteria:
 
 ### Phase 3C2: Static Bundle Renderer Integration Vertical Slice
 
+Status: Split on 2026-06-04. Phase 3C2A is implemented as a renderer-resource ownership foundation;
+Phase 3C2B is the remaining `outdoor` static rendering vertical slice.
+
+### Phase 3C2A: Static Bundle WebGL Resource Ownership Foundation
+
+Status: Implemented on 2026-06-04 as an immediate interim phase before replacing staged static
+submit.
+
+Purpose:
+
+- Give resident static bundle layers a WebGL-owned realization surface before wiring them into
+  `Webgl2WorldResourceStore` and submit.
+- Keep static page upload, material texture binding resolution, compacted geometry buffers, and
+  direct geometry buffers scoped to immutable worker artifacts instead of staged draw units,
+  prepared-cache textures, global atlas generations, or render-resource worker replacement
+  accounting.
+- Fail fast when a worker-emitted static texture page does not match the WebGL upload format implied
+  by its sample class.
+
+Implemented:
+
+- Added `webgl2/resources/static-bundle-layer-resources.ts` with:
+  - `Webgl2StaticBundleLayerResourceStore` for resident static bundle layer resources.
+  - `syncWebgl2StaticBundleLayerResources` and
+    `destroyWebgl2StaticBundleLayerResources` for deterministic resource retain/release.
+  - Layer resource keys based on immutable `layer.key` plus `sourceRevision`.
+  - Layer-owned texture page upload for `rgba-color`, `palette-data`, `indexed-data`, and
+    `control-data` pages.
+  - Material texture binding resolution from `StaticBundleMaterialRecord.texturePageRefKeys` to
+    layer-owned texture pages and entry rects.
+  - Shared static geometry buffer realization for compacted batches and direct entries, with
+    positions, normals, UVs, indices, VAO state, index type, counts, and object key ownership.
+- Added focused tests for page upload formats, material binding resolution, compacted/direct buffer
+  realization, resource reuse by unchanged revision, replacement by changed revision, disposal, and
+  byte-length validation.
+
+Decisions and course corrections:
+
+- The full Phase 3C vertical slice was too broad to land safely in one phase after Phase 3C1. The
+  renderer first needed an artifact-owned resource layer so submit wiring does not reach back into
+  staged draw-unit assembly.
+- Texture page upload format is derived from `StaticBundleTexturePage.sampleClass` plus explicit
+  indexed format metadata: `rgba-color` and `palette-data` upload as RGBA8, `indexed-data` P8 pages
+  upload as R8, `indexed-data` index16 pages upload as RG8, and `control-data` uploads as R8. If
+  future alpha/control material semantics need multi-channel control pages, the bundle contract
+  should add explicit control upload format metadata rather than guessing in submit.
+- Compacted and direct static geometry intentionally share the WebGL buffer realization helper, but
+  remain separate resource arrays because their draw grouping and submit rules will differ.
+- This phase does not introduce static picking or high-fidelity debug draw support. The resource
+  layer preserves object keys and material/page bindings only where needed for render submit.
+
+Cleanup targets:
+
+- `Webgl2StaticBundleLayerResourceStore` is not yet embedded in `Webgl2WorldResourceStore`; Phase
+  3C2B should wire it into the main resource store, renderer lifecycle, metrics, and eviction.
+- Static layer resources currently apply texture filtering through texture parameters at upload
+  time. Global filtering changes still need the planned sampler/material-binding update path so
+  changing filtering does not rebuild worker artifacts or geometry.
+- Submit shaders/family adapters still consume the legacy global texture atlas and compacted family
+  resources. Phase 3C2B must add static bundle submit from layer-owned pages instead of adapting
+  static bundle resources back into legacy atlas generation shapes.
+- The resource tests use a local fake WebGL context. If more static WebGL resource tests appear,
+  extract a shared app-local fake instead of copying another large fixture.
+
+Legacy shims introduced:
+
+- No public compatibility shim or alternate renderer mode was added.
+- No staged draw-unit, prepared-cache texture, global atlas generation, or render-resource worker
+  adapter was added for static bundle resources.
+
+Exit criteria:
+
+- Static bundle layer-owned textures, compacted geometry, direct geometry, and material page
+  bindings can be realized and disposed as WebGL resources without `AssetChannelState`.
+- Texture page sample classes map to explicit WebGL upload formats with byte-length validation.
+- Focused resource tests and lint/check/knip pass.
+
+### Phase 3C2B: Static Bundle Renderer Integration Vertical Slice
+
 - Add WebGL layer resource realization for compacted batches, direct static entries, material tables,
-  and layer-owned texture pages.
+  and layer-owned texture pages to `Webgl2WorldResourceStore` using the Phase 3C2A resource module.
 - Wire the `outdoor` preset first through planning, worker orchestration, WebGL realization, resident
   terrain/object ownership, and submit.
 - Consume resident worker artifacts from the Phase 2B store; do not re-plan

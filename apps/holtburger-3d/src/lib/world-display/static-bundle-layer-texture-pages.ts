@@ -47,6 +47,7 @@ export function buildStaticBundleLayerTexturePages(options: {
 				.sort((left, right) => left.ref.key.localeCompare(right.ref.key));
 			const usageBucket = placements[0]?.ref.usageBucket;
 			const sampleClass = placements[0]?.ref.sampleClass;
+			const indexedFormat = placements[0]?.ref.indexedFormat;
 			if (!usageBucket || !sampleClass) {
 				continue;
 			}
@@ -56,6 +57,7 @@ export function buildStaticBundleLayerTexturePages(options: {
 				pageKind: "packed-atlas",
 				usageBucket,
 				sampleClass,
+				indexedFormat,
 				width: texturePage.width,
 				height: texturePage.height,
 				bytes: packAtlasBytes(
@@ -120,7 +122,7 @@ function groupTextureRefsByBucket(
 ): Map<string, VirtualTexturePageRef[]> {
 	const refsByBucket = new Map<string, VirtualTexturePageRef[]>();
 	for (const ref of refs) {
-		const key = `${ref.usageBucket}:${ref.sampleClass}`;
+		const key = `${ref.usageBucket}:${ref.sampleClass}:${ref.indexedFormat ?? "none"}`;
 		const bucket = refsByBucket.get(key);
 		if (bucket) {
 			bucket.push(ref);
@@ -141,11 +143,14 @@ function createSingleEntryTexturePage(
 		pageKind: "single-entry",
 		usageBucket: ref.usageBucket,
 		sampleClass: ref.sampleClass,
+		indexedFormat: ref.indexedFormat,
 		width: ref.width,
 		height: ref.height,
 		bytes: ref.bytes
 			? new Uint8Array(ref.bytes)
-			: new Uint8Array(ref.width * ref.height * 4),
+			: new Uint8Array(
+					ref.width * ref.height * resolveTextureRefBytesPerPixel([ref]),
+				),
 		entries: [
 			{
 				virtualRefKey: ref.key,
@@ -193,14 +198,20 @@ function resolveTextureRefBytesPerPixel(
 ): number {
 	const byteSizes = new Set(
 		refs.map((ref) => {
+			const expectedBytesPerPixel = resolveExpectedTextureRefBytesPerPixel(ref);
 			const pixelCount = ref.width * ref.height;
 			if (!ref.bytes || pixelCount <= 0) {
-				return 4;
+				return expectedBytesPerPixel;
 			}
 			const bytesPerPixel = ref.bytes.byteLength / pixelCount;
 			if (!Number.isInteger(bytesPerPixel) || bytesPerPixel <= 0) {
 				throw new Error(
 					`Texture page ref ${ref.key} carries ${ref.bytes.byteLength} bytes for ${ref.width}x${ref.height}.`,
+				);
+			}
+			if (bytesPerPixel !== expectedBytesPerPixel) {
+				throw new Error(
+					`Texture page ref ${ref.key} expected ${expectedBytesPerPixel} bytes per pixel for ${ref.sampleClass}${ref.indexedFormat ? ` ${ref.indexedFormat}` : ""}, got ${bytesPerPixel}.`,
 				);
 			}
 			return bytesPerPixel;
@@ -210,4 +221,26 @@ function resolveTextureRefBytesPerPixel(
 		throw new Error("Texture page atlas cannot mix byte widths in one page.");
 	}
 	return [...byteSizes][0] ?? 4;
+}
+
+function resolveExpectedTextureRefBytesPerPixel(
+	ref: VirtualTexturePageRef,
+): number {
+	switch (ref.sampleClass) {
+		case "rgba-color":
+		case "palette-data":
+			return 4;
+		case "control-data":
+			return 1;
+		case "indexed-data":
+			if (ref.indexedFormat === "p8") {
+				return 1;
+			}
+			if (ref.indexedFormat === "index16") {
+				return 2;
+			}
+			throw new Error(
+				`Indexed texture page ref ${ref.key} is missing indexedFormat.`,
+			);
+	}
 }

@@ -18,6 +18,7 @@ describe("landblock render preset planner", () => {
 			requestId: "request:1",
 			buildPolicyRevision: "build:v1",
 			texturePagePolicyRevision: "texture-pages:v1",
+			buildPolicy: createBuildPolicy(),
 			options: {
 				terrainRadius: 1,
 				buildingRadius: 1,
@@ -34,6 +35,7 @@ describe("landblock render preset planner", () => {
 			requestId: "request:1",
 			buildPolicyRevision: "build:v1",
 			texturePagePolicyRevision: "texture-pages:v1",
+			buildPolicy: createBuildPolicy(),
 		});
 		expect(
 			presets.filter((preset) => preset.preset === "outdoor-with-env-cells"),
@@ -53,6 +55,7 @@ describe("landblock render preset planner", () => {
 			requestId: "request:detail",
 			buildPolicyRevision: "build:v2",
 			texturePagePolicyRevision: "texture-pages:v2",
+			buildPolicy: createBuildPolicy(),
 			options: {
 				terrainRadius: 0,
 				buildingRadius: 0,
@@ -69,6 +72,7 @@ describe("landblock render preset planner", () => {
 				requestId: "request:detail",
 				buildPolicyRevision: "build:v2",
 				texturePagePolicyRevision: "texture-pages:v2",
+				buildPolicy: createBuildPolicy(),
 			},
 		]);
 		expect(Object.keys(presets[0] ?? {})).not.toContain("rootAssetIds");
@@ -83,6 +87,7 @@ describe("landblock render preset planner", () => {
 			requestId: "request:outdoor",
 			buildPolicyRevision: "build:v1",
 			texturePagePolicyRevision: "texture-pages:v1",
+			buildPolicy: createBuildPolicy(),
 		};
 
 		const job = createLandblockRenderPresetWorkerJob(desired);
@@ -95,6 +100,7 @@ describe("landblock render preset planner", () => {
 			requestId: "request:outdoor",
 			buildPolicyRevision: "build:v1",
 			texturePagePolicyRevision: "texture-pages:v1",
+			buildPolicy: createBuildPolicy(),
 		});
 		expect(Object.keys(job)).not.toContain("rootAssetIds");
 		expect(Object.keys(job)).not.toContain("sourceRevision");
@@ -132,6 +138,7 @@ describe("landblock render preset planner", () => {
 			requestId: "request:terrain",
 			buildPolicyRevision: "build:v1",
 			texturePagePolicyRevision: "texture-pages:v1",
+			buildPolicy: createBuildPolicy(),
 			options: {
 				terrainRadius: 0,
 				buildingRadius: -1,
@@ -157,7 +164,19 @@ describe("landblock render preset planner", () => {
 				requestId: "request:indoor",
 				buildPolicyRevision: "build:v1",
 				texturePagePolicyRevision: "texture-pages:v1",
+				buildPolicy: createBuildPolicy(),
 			}),
 		).toEqual([]);
 	});
 });
+
+function createBuildPolicy() {
+	return {
+		atlasLayout: {
+			maxTextureSize: 64,
+			maxTextureCount: 4,
+			gutterPixels: 0,
+		},
+		terrainMaxLayerEntries: 8,
+	};
+}

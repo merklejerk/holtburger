@@ -1,8 +1,9 @@
 # Holtburger 3D Static Landblock Render Bundle Replacement Plan
 
-Status: Phase 1A, Phase 1B, and Phase 1C implemented. Phase 1D is the next implementation phase:
-worker-safe static bundle builder extraction. The plan has been redirected to worker-owned raw
-static closure loading and layer-scoped texture pages.
+Status: Phase 1A, Phase 1B, Phase 1C, and the first Phase 1D builder slice are implemented. Phase
+1D remains the active implementation phase for deeper staged-pipeline extraction before Phase 2
+worker orchestration. The plan has been redirected to worker-owned raw static closure loading and
+layer-scoped texture pages.
 
 Progress:
 
@@ -36,6 +37,11 @@ Progress:
   and keeps prepared-cache closure data inside an explicit diagnostics object. Added static worker
   job/result DTOs, env-cell topology discovery DTOs, and layer-owned texture page DTOs to the static
   bundle contract.
+- 2026-06-04: Implemented the first Phase 1D builder slice in
+  `apps/holtburger-3d/src/lib/world-display/static-bundle-layer-builder.ts`. The builder consumes a
+  Phase 1C static layer worker job plus worker-local prepared assets, expands outdoor/env-cell source
+  objects, validates closure consistency, emits compacted/direct bundle DTOs, derives object/cell
+  visibility records, packs layer-owned texture pages synchronously, and stays CPU-only.
 
 Validation:
 
@@ -56,6 +62,12 @@ Validation:
 - `npm exec eslint -- src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts src/workers/asset-worker.ts src/workers/shared/asset-prepare.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/asset-closure-loader.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/host-asset-bridge.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/transferables.ts src/workers/shared/transferables.test.ts src/workers/shared/worker-profile.ts src/lib/assets/asset-channel.test.ts`
   passed after Phase 1C.
 - `npm run check`, `npm run lint:dead`, and `npm run lint:rust` passed after Phase 1C.
+- `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts`
+  passed after the first Phase 1D builder slice.
+- `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts`
+  passed after the first Phase 1D builder slice.
+- `npm run check`, `npm run lint:dead`, and `npm run lint:rust` passed after the first Phase 1D
+  builder slice.
 - `npm run lint:ts` currently fails on existing unrelated debt:
   `src/lib/world-display/camera.ts` defines unused `rendererPointToAcPosition`.
 
@@ -1054,7 +1066,45 @@ Exit criteria:
 
 ### Phase 1D: Worker-Safe Static Bundle Builder
 
-Status: Immediate next phase.
+Status: Active. First builder slice implemented on 2026-06-04; deeper extraction remains before
+Phase 2.
+
+Implemented in the first builder slice:
+
+- Added `static-bundle-layer-builder.ts`, a pure CPU builder that consumes `StaticBundleLayerWorkerJob`
+  and worker-local `PreparedAssetRecord` values.
+- Added worker-local closure dependency accounting via `collectWorkerPreparedDependencyIds`,
+  including setup-appearance companion discovery for setup models.
+- Added source-object expansion for `outdoor-buildings`, `outdoor-detail`, and `env-cell-static`
+  scopes from worker-local prepared roots.
+- Added conservative compacted/direct classification and bundle DTO emission:
+  - compacted batch DTOs for compactable synthetic geometry;
+  - direct entry DTOs for noncompactable layer-local surfaces.
+- Added layer-local material records, object/cell visibility records, and diagnostics.
+- Added synchronous layer-owned texture page packing using the renderer-neutral atlas layout planner:
+  - single-entry pages;
+  - packed atlas pages;
+  - virtual-ref-to-rect entries.
+- Added fixture-based tests proving stable object/cell keys, worker-prepared dependency collection,
+  hard failure for inconsistent closures, compacted/direct output, packed/single texture pages, and
+  texture-page key independence from sampler/filtering policy.
+
+Decisions and course corrections:
+
+- The first builder slice intentionally does not reuse staged draw units or render-resource worker
+  payloads. It emits the Phase 1C bundle DTOs directly.
+- The compacted-batch assembly is a conservative layer-local DTO builder, not the final optimized
+  compaction-family extraction. Deeper Phase 1D work should extract real material/family
+  eligibility from the current compaction path without importing staged scheduling concepts.
+- Texture page packing reuses `planAtlasLayout`, which is already renderer-neutral. CPU pixel
+  assembly is simple RGBA placement for now; richer DXT/indexed/palette handling remains a later
+  builder extraction target.
+- A real bug was found and fixed in worker-prepared dependency collection: sorting an indexed queue
+  while iterating could skip dependencies. The collector now uses a deterministic shift/sort loop.
+- Knip caught an unused prepared-texture helper export and an over-exported build policy interface;
+  both were removed/narrowed rather than kept as speculative API.
+
+Remaining Phase 1D work:
 
 - Extract pure CPU helpers from the current staged pipeline where useful:
   - static source expansion;
@@ -1063,7 +1113,7 @@ Status: Immediate next phase.
   - compacted geometry assembly;
   - virtual texture ref construction;
   - layer-scoped texture page packing.
-- Extract worker-safe closure expansion helpers:
+- Extract worker-safe closure expansion helpers beyond the first builder slice:
   - response dependency expansion via `getAssetResponseDependencies`;
   - setup-appearance companion expansion for setup models;
   - selected outdoor building/detail source expansion from `landblock/outdoor`;
@@ -1080,6 +1130,32 @@ Status: Immediate next phase.
   work without affecting render output, layer identity, compaction, layer texture page packing, or
   scheduling.
 - Keep this phase pure. Do not add WebGL realization here.
+
+Introduced cleanup targets:
+
+- `static-bundle-layer-builder.ts` currently owns a small amount of static source expansion logic
+  that overlaps with `static-renderables.ts`. As the builder matures, keep the worker-safe version
+  and delete or narrow the staged-only duplicate instead of preserving both long term.
+- The first compacted DTO assembly groups compactable surfaces into one conservative batch. Replace
+  this with extracted compaction-family/material eligibility before Phase 2 depends on it for real
+  outdoor rendering.
+- Texture page refs currently come from already prepared `prepared-texture/...` records present in
+  the worker-local closure. The static worker/builder still needs normalized prepared-texture route
+  derivation from materials/render surfaces before real worker orchestration.
+- Direct-entry bounds are currently null in the first builder slice. Add bounds only if they fall
+  out of render output work; do not add picker/debug-only sidecars.
+
+Legacy shims introduced:
+
+- None. The builder is a new worker-safe CPU path that emits bundle DTOs directly and does not add
+  alternate staged/static compatibility modes.
+
+Legacy debt found before the next phase:
+
+- Phase 1D should continue before Phase 2. The next immediate work is extracting real material,
+  texture-route, and compaction eligibility helpers from the staged pipeline into worker-safe modules.
+- `npm run lint:ts` remains blocked by existing unrelated dead code in
+  `src/lib/world-display/camera.ts`: `rendererPointToAcPosition` is defined but unused.
 
 Exit criteria:
 

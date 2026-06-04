@@ -1,10 +1,9 @@
 # Holtburger 3D Static Landblock Render Bundle Replacement Plan
 
-Status: Phase 1A through Phase 1H are implemented. Phase 1I terrain first-class worker boundary
-hardening is the next implementation phase, followed by Phase 1J landblock preset contract hardening
-before Phase 2 landblock worker orchestration. The plan has been redirected to worker-owned raw
-landblock closure loading, worker-built terrain artifacts, preset-based landblock requests, and
-layer-scoped texture pages.
+Status: Phase 1A through Phase 1I are implemented. Phase 1J landblock preset contract hardening is
+the next implementation phase before Phase 2 landblock worker orchestration. The plan has been
+redirected to worker-owned raw landblock closure loading, worker-built terrain artifacts,
+preset-based landblock requests, and layer-scoped texture pages.
 
 Progress:
 
@@ -95,6 +94,11 @@ Progress:
   worker-local render-surface/palette facts, keeps optional detail refs on the indexed-paletted
   family, and feeds those descriptors into existing compaction eligibility. The phase also removed
   the stale unused camera conversion helper that had been blocking full TypeScript lint.
+- 2026-06-04: Implemented Phase 1I. Added a first-class landblock terrain render artifact contract
+  and builder that reuses existing terrain material, blend-plan, tile-slice, geometry, and BVH helper
+  code. Terrain artifacts now stand beside static object bundle layers as CPU renderer artifacts and
+  carry diagnostic roots/prepared IDs, color/mask page refs, draw-slice geometry, fallback geometry
+  diagnostics, and terrain BVH keys.
 
 Validation:
 
@@ -158,6 +162,12 @@ Validation:
   passed after Phase 1H.
 - `npm run check`, `npm run lint:dead`, `npm run lint:rust`, and `npm run lint:ts` passed after
   Phase 1H.
+- `npm exec vitest -- run src/lib/world-display/terrain-render-artifact.test.ts src/lib/world-display/terrain-tile-plan.test.ts src/lib/world-display/terrain-blend-plan.test.ts src/lib/world-display/terrain-materials.test.ts`
+  passed after Phase 1I.
+- `npm exec eslint -- src/lib/world-display/terrain-render-artifact.ts src/lib/world-display/terrain-render-artifact.test.ts src/lib/world-display/terrain-scene.ts`
+  passed after Phase 1I.
+- `npm run check`, `npm run lint:dead`, `npm run lint:rust`, and `npm run lint:ts` passed after
+  Phase 1I.
 
 Related plans:
 
@@ -1667,7 +1677,7 @@ Legacy debt found before the next phase:
 
 ### Phase 1I: Terrain Worker Artifact Contract
 
-Status: Next.
+Status: Implemented on 2026-06-04.
 
 Purpose:
 
@@ -1693,52 +1703,69 @@ Current terrain facts:
 
 Implementation notes:
 
-- Define a terrain artifact separate from `StaticLandblockRenderBundleLayer` that carries:
-  - terrain mesh/layer geometry;
-  - terrain blend/layer plans;
-  - terrain color/mask/detail page artifacts or page refs;
-  - terrain BVH/visibility keys;
-  - terrain diagnostics and worker-prepared asset IDs.
-- Move terrain blend/layer planning and terrain color/mask/detail page packing to worker-built CPU
-  artifacts. The main thread should only schedule terrain interest, reject stale worker results, and
-  realize returned terrain artifacts into WebGL resources.
-- Keep terrain texture ownership separate from object bundle layer texture pages unless a later
-  measured integration proves sharing is worth the complexity.
-- Terrain artifact construction must be driven by landblock preset interest and must not wait on a
-  separate building/detail/env-cell worker scheduler.
-- Keep the existing terrain WebGL realization and submit concepts where useful, but stop treating
-  main-thread terrain CPU planning/page packing as the target architecture.
+- Added `terrain-render-artifact.ts`, a CPU-only terrain artifact builder separate from
+  `StaticLandblockRenderBundleLayer`.
+- The artifact carries:
+  - terrain mesh data converted from `landblock/<id>/outdoor`;
+  - terrain material resource plan diagnostics;
+  - terrain blend-plan signature;
+  - color/mask texture page refs from terrain blend plans;
+  - layer draw-slice geometry from `terrain-tile-plan`;
+  - debug fallback geometry for incomplete material/texture resources;
+  - terrain BVH and terrain visibility keys;
+  - diagnostic root/prepared asset IDs.
+- Extracted `createPreparedTerrainMeshFromOutdoorPayload` from `terrain-scene.ts` into the terrain
+  artifact module so the existing scene model and the future worker artifact path share the same mesh
+  conversion.
+- Kept terrain texture refs separate from static object layer texture pages. This phase did not
+  introduce shared terrain/static atlases.
+- The artifact builder is driven by a single outdoor landblock payload and build/texture policy
+  revisions. It does not wait on or schedule building/detail/env-cell object layers.
+- Existing terrain WebGL realization and submit code remain in place; this phase defines the CPU
+  artifact boundary that Phase 2 can move into the landblock worker.
+
+Course corrections:
+
+- Terrain pcode fixtures must use encoded terrain pcodes, not raw terrain type IDs. The focused tests
+  caught a fixture that decoded to terrain type 0 and correctly produced fallback diagnostics.
+- Knip flagged exported helper DTOs before Phase 2 consumes them. Kept only the main terrain artifact
+  contract exported and narrowed nested helper interfaces until the worker client needs them.
 
 Exit criteria:
 
 - The plan and Phase 2 contract explicitly preserve terrain as first-class and non-fallback.
-- Tests or dry-run notes prove terrain-only residency can exist before building/detail layers and
-  remains composed with those layers when they arrive.
+- Focused tests prove terrain-only residency can exist before building/detail layers and still
+  returns a terrain artifact, even when material resources are incomplete.
 - Terrain worker artifact DTOs are defined clearly enough that Phase 2 can orchestrate terrain and
   static object artifacts as sibling resident landblock artifacts.
 - No static object bundle code is made responsible for terrain geometry, terrain color/mask/detail
   pages, or terrain LOD policy.
+- Focused tests, changed-file ESLint, `npm run check`, `npm run lint:dead`, `npm run lint:rust`, and
+  full `npm run lint:ts` pass.
 
 Cleanup targets:
 
-- Remove plan wording that treats terrain as merely a texture-manager side concern rather than a
-  resident landblock layer family.
-- Quarantine any existing terrain CPU planning/page packing code that stays in WebGL resource modules
-  during extraction; the long-term owner should be worker-safe terrain artifact construction.
+- Phase 2 should consume `LandblockTerrainRenderArtifact` as the terrain sibling output of an
+  `outdoor` preset job.
+- Terrain CPU planning/page packing that remains in WebGL resource modules should be quarantined
+  during Phase 2 extraction; the long-term owner is worker-safe terrain artifact construction.
+- Region detail overlay handling is still outside the terrain artifact page-ref contract. Phase 2 can
+  keep it out of the first terrain worker slice unless the `outdoor` vertical slice needs detail
+  parity immediately.
 
 Legacy shims introduced:
 
-- None expected. Terrain should get a real terrain artifact path; do not add static object direct
-  fallback or a long-lived main-thread terrain prep adapter as a shim.
+- None. Phase 1I added a real terrain artifact path and reused existing renderer-neutral terrain
+  helpers instead of adding a static object fallback or a long-lived main-thread terrain prep shim.
 
 Legacy debt found before the next phase:
 
-- Phase 2 should not start until terrain worker artifact DTOs are explicit and tested or dry-run
-  against current terrain code.
+- No Phase 1I blocker remains. Phase 1J should harden landblock preset request/result contracts so
+  `outdoor` can return this terrain artifact beside exterior static object artifacts.
 
 ### Phase 1J: Landblock Preset Contract Hardening
 
-Status: Pending Phase 1I.
+Status: Next.
 
 Purpose:
 

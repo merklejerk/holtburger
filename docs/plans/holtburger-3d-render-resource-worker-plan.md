@@ -1,6 +1,6 @@
 # Holtburger 3D Render Resource Worker Plan
 
-Status: Phase 2B implemented; Phase 3 is the next implementation phase.
+Status: Phase 3A implemented; Phase 3B-0 is the next implementation phase.
 
 Related plans:
 
@@ -56,7 +56,7 @@ worker dedupe practical because job keys can be computed before doing the expens
 - Reject stale worker results deterministically.
 - Keep WebGL resource creation, upload, and disposal on the WebGL-owning thread.
 - Use transferable buffers for worker results to avoid clone overhead.
-- Preserve current renderer resource graph semantics and cleanup correctness.
+- Preserve prepared asset retention correctness while simplifying renderer graph responsibility.
 - Add metrics that make worker savings and stale work visible.
 - Keep browser-mode policy inside `apps/holtburger-3d`; do not move this into shared crates.
 
@@ -89,7 +89,7 @@ main thread:
   material/atlas/compaction planning
   worker job key and revision decisions
   WebGL upload/VAO/texture/sampler creation
-  renderer resource graph leases
+  prepared asset retention projection
 
 render resource worker:
   compacted geometry typed-array assembly
@@ -135,15 +135,15 @@ shape the phase order.
 - Compacted family resources are cheap metadata derived from committed compacted geometry plus atlas
   placements. They should remain main-thread resources. The worker should not build family resources
   that reference current atlas generation objects.
-- Renderer graph leases should be updated only after WebGL commit. Scheduling a worker job should
-  not create or release graph leases because no concrete resource exists yet.
+- Renderer graph/retention state should be updated only after WebGL commit. Scheduling a worker job
+  should not create or release lifetime records because no concrete committed resource exists yet.
 - The current store has one committed resource slot for each atlas generation. Async migration needs
   additional scheduler state and possibly pending CPU result queues, but should avoid turning
   `Webgl2WorldResourceStore` into a worker-control object. Prefer a small `renderWorkerResources`
   field or injected scheduler owner over many loose store fields.
-- Resource cleanup coordinator exists but is not currently wired into WebGL2 resource ownership.
-  Do not depend on it for this migration. Keep explicit resource disposal in the existing stores,
-  then consider cleanup-coordinator integration as a later cleanup if ownership becomes clearer.
+- Resource cleanup coordinator exists but is not currently wired into WebGL2 resource ownership and
+  should not become part of this migration. Keep explicit resource disposal in committed stores and
+  treat graph cleanup candidates as deprecated diagnostic/cleanup scaffolding.
 - Source geometry buffers and prepared texture buffers are still used by renderer state after sync.
   The first worker pass should copy source inputs before posting to the worker and transfer only
   worker-owned output buffers back. Optimizing input transfer can wait until profiling proves copy
@@ -153,6 +153,36 @@ shape the phase order.
 
 These findings add a required preparation phase: separate CPU payload generation from WebGL
 realization and make retained-resource semantics async-aware before moving heavy work to the worker.
+
+## Renderer Graph Direction
+
+The renderer graph should be treated as a prepared-asset ownership/lifetime graph, not a diagnostics
+graph and not a WebGL resource lifetime owner.
+
+The only required runtime output is:
+
+```ts
+retainedPreparedAssetIds(): string[];
+```
+
+That output is functional because asset cache pruning uses it to avoid evicting prepared assets still
+referenced by committed renderer state. The async render-resource worker migration should preserve
+that behavior.
+
+The following graph diagnostic behaviors are no longer design constraints for this plan:
+
+- rich retention explanations;
+- graph disposal candidates;
+- graph-driven renderer resource cleanup;
+- static-batch/atlas diagnostic dependency visualization;
+- perfect graph metadata for compacted batches.
+
+WebGL resource ownership should live in explicit committed resource records and stores. The graph or
+its replacement should be a projection from committed renderer state to retained prepared asset IDs.
+
+This direction intentionally reduces graph responsibility before live async compaction wiring. It
+keeps worker scheduling, pending replacement state, WebGL commit, and prepared-asset lifetime as
+separate responsibilities instead of routing all of them through one diagnostic-heavy structure.
 
 ## Implementation Progress
 
@@ -179,7 +209,7 @@ Validation completed:
 Course corrections:
 
 - The scheduler now has `markCommitted(key)` instead of treating a ready worker result as committed.
-  WebGL realization can fail, and resource graph leases should only update after realization
+  WebGL realization can fail, and prepared-asset retention should only update after realization
   succeeds. Future resource sync code should call `markCommitted` only after the corresponding GL
   resource has been created and installed in the store.
 - The scheduler clears an older pending replacement if the latest desired key returns to the current
@@ -199,8 +229,8 @@ Introduced cleanup targets and temporary shims:
 - Scheduler metrics are not yet surfaced in a diagnostics panel. Keep them local until a real job
   family is wired, then expose per-family metrics rather than generic echo-worker metrics.
 
-Phase 2B is now complete. The next implementation phase is Phase 3: compacted geometry worker
-preparation.
+Phase 3A is now complete. The next implementation phase is Phase 3B-0: simplify renderer graph
+responsibility to prepared-asset ownership/lifetime only.
 
 ### 2026-06-03: Phase 2A Implemented
 
@@ -293,10 +323,110 @@ Introduced cleanup targets and temporary shims:
   scheduler-owned fields, consolidate these into a small `renderWorkerResources` or
   `pendingRenderResources` sub-object instead of letting worker state sprawl across the store.
 - Compacted geometry still needs a clearer commit helper that realizes a prepared
-  `CompactedGeometryBatch`, creates family resources, updates graph leases, and clears pending batch
-  protection in one place.
+  `CompactedGeometryBatch`, creates family resources, updates prepared-asset retention projection,
+  and clears pending batch protection in one place.
 - The synchronous atlas generation wrappers remain legacy shims until worker-backed atlas jobs call
   the CPU generation and WebGL realization functions separately.
+
+### Refined Phase 3B Dry-Run Findings
+
+Dry-running the refined `family + partition + landblock` model against the current code found these
+gaps and implementation constraints:
+
+- The existing batch-plan functions already produce the right scheduling shape:
+  - `createRgbaTexturePageCompactedLandblockBatchPlans` walks
+    `plan.renderFamilies.rgbaTexturePage.partitions`, then splits each partition by landblock.
+  - `createIndexedPalettedCompactedLandblockBatchPlans` walks
+    `plan.renderFamilies.indexedPaletted.partitions`, then splits each partition by landblock.
+- The returned batch-plan DTOs do not currently expose an explicit scheduler-facing family name or
+  source partition key. Phase 3B should add that metadata to new scheduler DTOs instead of inferring
+  it from legacy plan keys.
+- `BuildCompactedGeometryWorkerInput.key` is currently supplied by the caller. Phase 3B needs a
+  cheap pre-build desired key helper for compacted jobs. It should use the same inputs as the final
+  compacted geometry key: batch plan key, draw-unit source geometry signatures, counts, and
+  batch-relative transforms. Do not compute this key by building buffers or hashing buffers.
+- `buildCompactedGeometryBatch` already produces the final `geometry.key`; the scheduler can use the
+  caller-supplied desired job key for stale-result checks, but the WebGL store must still index
+  committed resources by the final `geometry.key`.
+- Family-resource retention needs the same async treatment as batch retention. The current sync loop
+  deletes any family resource key not recreated during that pass. If worker work is pending, the
+  old family resource for the protected committed batch must remain installed until replacement
+  commit or true scene removal.
+- The current graph lease/dependency model is more detailed than Phase 3B needs. Phase 3B-0 should
+  make prepared-asset retention the only graph responsibility before scheduler wiring.
+- Pending batch protection must be cleared when the source scene no longer wants that family or
+  landblock. Otherwise a stale pending key could retain an orphaned committed batch indefinitely.
+- New scheduler-facing names should make the family symmetry explicit:
+  - prefer `rgbaAtlas` for the current `rgbaTexturePage` family;
+  - prefer `indexedPaletteAtlas` for the current `indexedPaletted` family.
+
+Course correction from this dry run:
+
+- Do not start Phase 3B by replacing the full `syncWebgl2CompactedGeometryResources` body. First add
+  a small compacted batch commit helper and a desired-key helper, then wire scheduling around those
+  tested seams.
+- The refined model is still simpler than whole-generation recompaction because it avoids rebuilding
+  unrelated families/domains. It is also simpler than arbitrary partial commits because each worker
+  result replaces one complete family-partition-landblock batch plus its family metadata atomically.
+
+### 2026-06-03: Phase 3A Implemented
+
+Implemented compacted geometry worker payload preparation:
+
+- narrowed `buildCompactedGeometryBatch` to consume a small `CompactedGeometryBuildDrawUnit` input
+  instead of full staged draw-unit assemblies;
+- added `worker-resources/compacted-geometry-worker-payloads.ts` with compacted geometry worker
+  job/result DTOs, copy-on-submit input construction, CPU build execution, and input/result
+  transferable collection;
+- added a `build-compacted-geometry` render-resource worker job and transferred worker-owned output
+  buffers back to the main thread;
+- added `RenderResourceWorkerClient.runBuildCompactedGeometryJob` as the typed client entrypoint;
+- made `render-resource-worker.ts` import-safe in Vitest by installing the `self.onmessage` handler
+  only when running in a worker-like global;
+- added focused tests for compacted geometry worker payload construction, worker execution, and
+  transfer-list collection.
+
+Validation completed:
+
+- `npm run test:ts -- compacted-geometry compacted-geometry-worker-payloads render-resource-worker-client`
+- `npm run check`
+- `npm run lint:ts`
+
+Course corrections:
+
+- Phase 3 is now split into Phase 3A and Phase 3B. The worker can build compacted geometry, but live
+  `syncWebgl2CompactedGeometryResources` replacement still needs a renderer-owned scheduler and
+  frame/resource invalidation hook. Worker callbacks must enqueue results and request a later commit;
+  they must not mutate WebGL resources directly.
+- The compacted worker input copies source buffers before transfer. This intentionally avoids
+  neutering staged geometry buffers that may still be referenced by the renderer and keeps the first
+  worker migration correctness-first.
+- The worker module had to become import-safe outside a worker global so pure job execution can be
+  tested without a browser Worker harness.
+
+Introduced cleanup targets and temporary shims:
+
+- The echo worker job remains a temporary bootstrap shim until a real health-check use case is
+  justified or the first production worker job is fully wired.
+- `RenderResourceWorkerClient.runJob` still exposes the generic union internally. Keep adding typed
+  family-specific methods and avoid pushing untyped payloads through call sites.
+- Add a compacted geometry commit helper before live scheduling so family resources,
+  prepared-asset retention, pending-batch protection, and scheduler `markCommitted` advance together.
+- Add a small renderer worker-resource owner before Phase 3B if store-level pending/scheduler fields
+  begin to sprawl.
+
+Refinement for the next phase:
+
+- Use `family + partition + landblock` as the compacted geometry worker job boundary. This keeps work
+  bounded to dirty groups without introducing whole-scene recompaction, while still avoiding mixed
+  partial commits inside a single batch-family replacement.
+- Treat the current family names as legacy:
+  - `rgbaTexturePage` means the RGBA-atlas compacted family.
+  - `indexedPaletted` means the indexed/palette-atlas compacted family.
+- Sneak in a naming cleanup when Phase 3B touches scheduler/commit DTOs. Prefer names like
+  `rgbaAtlas` and `indexedPaletteAtlas`, or `rgbaTexturePageAtlas` and `indexedPaletteTextureAtlas`,
+  for new scheduler-facing types. Do not rename every existing planner field in the same patch unless
+  it becomes necessary; avoid a sprawling mechanical churn pass.
 
 ## Scheduling Model
 
@@ -390,7 +520,7 @@ Worker input:
 - source geometry buffers and source geometry signatures;
 - model matrices;
 - batch origin;
-- landblock/batch metadata needed for diagnostics.
+- landblock/batch metadata needed for scheduling, commit, and metrics.
 
 Worker output:
 
@@ -406,7 +536,7 @@ Main thread keeps:
 
 - `createWebgl2CompactedGeometryBatchResource`;
 - compacted family resource creation;
-- renderer resource graph lease creation;
+- prepared asset retention projection;
 - disposal of old WebGL resources.
 
 Important details:
@@ -417,6 +547,15 @@ Important details:
 - Transfer worker output buffers back to the main thread.
 - Preserve common re-anchor reuse. Compacted keys should remain based on batch-relative transforms,
   not absolute batch origin.
+- Use the existing compacted planning partitions as the first scheduling boundary. The intended job
+  key shape is `family + partition + landblock`, where the current legacy family names are
+  `rgbaTexturePage` and `indexedPaletted`.
+- Do not rebuild every compacted family across every domain for one dirty input. Rebuild only the
+  desired dirty family/partition/landblock groups, retain unrelated committed batches, and commit
+  each replacement atomically after WebGL realization.
+- Avoid partial "half committed" family state. A worker result should replace one committed
+  family-partition-landblock batch and its family resource metadata together, or be discarded as
+  stale.
 
 ### Indexed And Palette Atlases
 
@@ -443,7 +582,7 @@ Main thread keeps:
 
 - WebGL texture creation;
 - exact data samplers;
-- graph lease management.
+- prepared asset retention projection.
 
 This should be the second implementation target. The packing is byte-copy heavy, deterministic, and
 does not involve mip generation.
@@ -572,13 +711,14 @@ Work:
   resources remain committed until a replacement is fully realized or until no current draw units can
   reference them.
 - Added commit helpers for realized texture atlas generations and indexed atlas generations.
-- Kept graph lease updates after successful WebGL commit.
+- Kept retention updates after successful WebGL commit.
 
 Deferred to Phase 3:
 
 - Full compacted geometry commit helper extraction. The current retention predicate and pending-key
-  state are enough for worker scheduling prep, but family resource creation and graph lease updates
-  still need to become a single explicit commit step when compacted worker results are introduced.
+  state are enough for worker scheduling prep, but family resource creation, prepared-asset lifetime
+  projection, and pending-state clearing still need to become a single explicit commit step when
+  compacted worker results are introduced.
 
 Validation:
 
@@ -587,21 +727,89 @@ Validation:
   batch.
 - Added tests for commit helper behavior when replacement resources are ready but not yet committed.
 
-## Phase 3: Compacted Geometry Worker Preparation
+## Phase 3A: Compacted Geometry Worker Payload Preparation
+
+Status: complete.
 
 Work:
 
-- Extract compacted geometry input/output DTOs from current render-family resource sync code.
-- Move CPU compacted batch construction into worker-callable pure functions.
-- Keep direct synchronous compacted geometry construction available behind a narrow fallback helper
-  until worker rollout is stable.
-- Replace synchronous batch construction in `syncWebgl2CompactedGeometryResources` with worker
-  scheduling and last-committed resource reuse.
-- Commit returned compacted geometry buffers into WebGL resources on the main thread.
+- Extracted compacted geometry input/output DTOs from current render-family resource sync code.
+- Moved CPU compacted batch construction into worker-callable pure functions.
+- Added typed worker and client support for compacted geometry jobs.
+- Kept direct synchronous compacted geometry construction available as the active fallback path until
+  worker rollout is stable.
 
 Validation:
 
 - Existing compacted geometry tests still pass.
+- Added worker-payload tests for compacted geometry execution and transferables.
+
+## Phase 3B-0: Simplify Renderer Graph To Lifetime Only
+
+Status: next.
+
+Work:
+
+- Treat `RendererResourceGraph` as a prepared-asset ownership/lifetime graph only for this migration.
+- Keep `retainedPreparedAssetIds()` stable for asset cache pruning.
+- Stop making compacted async scheduling depend on graph leases, graph disposal candidates, or graph
+  diagnostic dependency explanations.
+- Remove graph diagnostic paths that are not used at runtime. If immediate removal is blocked by a
+  larger caller cleanup, mark the remaining path as a short-lived cleanup target and stop extending
+  it:
+  - `explainRetention`;
+  - `disposalCandidates`;
+  - `RendererResourceCleanupCoordinator`;
+  - static-batch/atlas diagnostic dependency metadata.
+- Do not carry graph diagnostic metadata into new worker DTOs or compacted commit helpers.
+- Keep worker performance metrics separate from graph state. Metrics can feed a debug panel later,
+  but they should not affect prepared-asset lifetime tracking.
+- Introduce or prepare an explicit committed renderer resource retention projection that can answer
+  which prepared assets are retained by committed draw units, terrain tiles, atlas generations, and
+  compacted batch records.
+- Update Phase 3B commit helper design so graph/retention updates are a projection from committed
+  resources, not a source of WebGL resource lifetime or scheduling decisions.
+
+Validation:
+
+- Asset cache pruning tests still pass.
+- Existing world resource tests that assert retained prepared asset IDs still pass.
+- Remove or rewrite tests that only validate graph diagnostic behavior and are no longer runtime
+  requirements.
+
+## Phase 3B: Compacted Geometry Scheduler And Commit Wiring
+
+Status: pending Phase 3B-0.
+
+Work:
+
+- Add a cheap compacted desired-job key helper for `family + partition + landblock` batches. It must
+  use source signatures and batch-relative transforms, not packed output buffers.
+- Add a compacted batch commit helper that atomically installs the WebGL batch, family resource,
+  prepared-asset retention update, pending-retention clearing, and scheduler commit notification.
+- Add a renderer-owned compacted geometry job scheduler using `RenderResourceJobScheduler`.
+- Schedule compacted geometry jobs at the `family + partition + landblock` boundary, not as one
+  whole-scene compaction generation and not as an unbounded per-frame backlog.
+- Rebuild only dirty or newly desired compacted groups. Keep unrelated committed compacted batches
+  and family resources installed.
+- Preserve old family resources while a replacement for their committed batch is pending.
+- Add a frame/resource invalidation callback so accepted worker results are committed from the next
+  resource sync, not from worker message handlers.
+- Replace synchronous batch construction in `syncWebgl2CompactedGeometryResources` with worker
+  scheduling and last-committed resource reuse.
+- Commit returned compacted geometry buffers into WebGL resources on the main thread.
+- Clear pending batch protection and call scheduler `markCommitted` only after WebGL batch and family
+  resources are installed successfully.
+- Update prepared-asset retention from committed compacted records; do not preserve static-batch
+  diagnostic dependency replacement behavior as a correctness requirement.
+- Keep synchronous compacted geometry construction behind a narrow fallback/debug path during rollout.
+- Introduce scheduler-facing names that clarify the compacted material families. Prefer
+  `rgbaAtlas`/`indexedPaletteAtlas` or similarly explicit names in new DTOs, while treating
+  `rgbaTexturePage`/`indexedPaletted` as legacy planner/store names until a focused rename is safe.
+
+Validation:
+
+- Existing compacted geometry and WebGL resource tests still pass.
 - Add scheduler tests showing common re-anchor shifts do not resubmit incompatible work.
 - Add WebGL resource tests showing old compacted resources continue rendering while newer worker
   work is pending.
@@ -664,8 +872,8 @@ Validation:
   buffers back to main.
 - **Async resources cause blank frames**: keep rendering last committed resources until replacements
   are complete.
-- **Graph leases retain wrong assets**: update graph leases only after WebGL commit, not when worker
-  work is merely scheduled.
+- **Prepared asset retention drops assets too early**: update retained prepared asset projection only
+  from committed renderer resources, not from scheduled worker work.
 - **Hidden main-thread upload jank remains**: measure commit time separately from worker time, then
   add upload budgeting if needed.
 - **Compaction keys become unstable**: keep keys based on source signatures and batch-relative
@@ -678,18 +886,26 @@ Decisions from the code dry run:
 - **Source input transfer**: copy source inputs for the first worker migration. Transfer only
   worker-owned output buffers back to the main thread. This avoids neutering staged geometry,
   prepared texture, and indexed material buffers that the renderer still references.
-- **Compaction job granularity**: use one landblock compacted batch per worker job. The current
-  sync code already partitions compacted work by landblock, resource graph nodes are static-batch
-  scoped, and one-batch jobs are easier to coalesce, discard, and eventually chunk.
+- **Compaction job granularity**: use one `family + partition + landblock` compacted batch per worker
+  job. The current sync code already partitions compacted work by material family and landblock, and
+  one-batch jobs are easier to coalesce, discard, and eventually chunk. This is intentionally not a
+  whole-scene or whole-generation rebuild.
 - **Atlas job granularity**: use one atlas generation per worker job for indexed atlases and one
   atlas generation per worker job for RGBA/detail atlases. Atlas generation keys already describe
   the whole generation, and page packing is naturally grouped by generation.
+- **Compacted family naming**: current planner/store names are legacy. `rgbaTexturePage` is the
+  RGBA-atlas compacted family, while `indexedPaletted` is the indexed/palette-atlas compacted family.
+  New worker/scheduler DTO names should make that symmetry visible instead of copying the confusing
+  naming forward.
 - **Commit timing**: enqueue accepted worker results and commit them during the next frame/resource
   sync, not directly from the worker message handler. This preserves the rule that worker callbacks
   do not mutate WebGL resources and makes later upload budgeting straightforward.
 - **Retention model**: keep old committed resources alive while replacements are pending. Release old
   resources only after the replacement commits or when the source scene no longer wants that resource
   family at all.
+- **Graph model**: treat the graph as prepared-asset ownership/lifetime only. WebGL resource
+  lifetime is owned by committed resource stores/records; graph diagnostics and cleanup candidates
+  are not required for this migration.
 
 Remaining open question:
 

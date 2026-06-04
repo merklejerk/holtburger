@@ -1,5 +1,15 @@
-import type { StagedWorldDrawUnitAssembly } from "../staged-world-assembly";
 import { createTranslationMat4, type RenderMat4 } from "../render-math";
+import type { StagedWorldIndexedGeometry } from "../staged-world-geometry";
+
+export interface CompactedGeometryBuildDrawUnit {
+	id: string;
+	kind: "static" | "structured-interior" | "portal-mask";
+	geometry: StagedWorldIndexedGeometry;
+	modelMatrix: RenderMat4;
+	material: {
+		kind: string;
+	};
+}
 
 interface CompactedGeometryMaterialSlot {
 	key: string;
@@ -76,7 +86,7 @@ export function buildCompactedGeometryBatch<
 	batchOrigin,
 }: {
 	plan: CompactedGeometryPlan<TDrawSlice>;
-	drawUnits: readonly StagedWorldDrawUnitAssembly[];
+	drawUnits: readonly CompactedGeometryBuildDrawUnit[];
 	batchOrigin: { x: number; y: number; z: number };
 }): CompactedGeometryBatch | null {
 	if (plan.compactableDrawUnitIds.length === 0) {
@@ -239,8 +249,8 @@ function compactDrawUnitPositions({
 }
 
 function assertCompactedGeometryDrawUnit(
-	drawUnit: StagedWorldDrawUnitAssembly,
-): asserts drawUnit is StagedWorldDrawUnitAssembly & {
+	drawUnit: CompactedGeometryBuildDrawUnit,
+): asserts drawUnit is CompactedGeometryBuildDrawUnit & {
 	kind: "static" | "structured-interior";
 	geometry: { uvs: Float32Array };
 } {
@@ -258,7 +268,7 @@ function resolveCompactedGeometryMaterialSlotKey({
 	drawUnit,
 	materialSlotKeyByDrawUnitId,
 }: {
-	drawUnit: StagedWorldDrawUnitAssembly;
+	drawUnit: CompactedGeometryBuildDrawUnit;
 	materialSlotKeyByDrawUnitId: ReadonlyMap<string, string>;
 }): string {
 	const explicitSlotKey = materialSlotKeyByDrawUnitId.get(drawUnit.id);
@@ -321,8 +331,8 @@ function orderCompactedDrawUnitsBySlice<
 	drawUnitById,
 }: {
 	plan: CompactedGeometryPlan<TDrawSlice>;
-	drawUnitById: ReadonlyMap<string, StagedWorldDrawUnitAssembly>;
-}): StagedWorldDrawUnitAssembly[] {
+	drawUnitById: ReadonlyMap<string, CompactedGeometryBuildDrawUnit>;
+}): CompactedGeometryBuildDrawUnit[] {
 	const sliceOrdinalByDrawUnitId = new Map<string, number>();
 	for (const [sliceOrdinal, slice] of plan.drawSlices.entries()) {
 		for (const drawUnitId of slice.drawUnitIds) {
@@ -398,7 +408,7 @@ function describeCompactedGeometryKey({
 	batchOrigin,
 }: {
 	plan: CompactedGeometryPlan;
-	drawUnits: readonly StagedWorldDrawUnitAssembly[];
+	drawUnits: readonly CompactedGeometryBuildDrawUnit[];
 	batchOrigin: { x: number; y: number; z: number };
 }): string {
 	const drawUnitSignature = drawUnits

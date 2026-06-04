@@ -1,4 +1,11 @@
-export type RenderResourceWorkerJobKind = "echo";
+import {
+	buildCompactedGeometryWorkerResult,
+	collectBuildCompactedGeometryResultTransferables,
+	type BuildCompactedGeometryWorkerJob,
+	type BuildCompactedGeometryWorkerResult,
+} from "../lib/world-display/worker-resources/compacted-geometry-worker-payloads";
+
+export type RenderResourceWorkerJobKind = "echo" | "build-compacted-geometry";
 
 export interface RenderResourceWorkerEchoJob {
 	type: "echo";
@@ -31,8 +38,12 @@ export interface RenderResourceWorkerJobErrorMessage {
 	message: string;
 }
 
-export type RenderResourceWorkerJob = RenderResourceWorkerEchoJob;
-export type RenderResourceWorkerJobResult = RenderResourceWorkerEchoResult;
+export type RenderResourceWorkerJob =
+	| RenderResourceWorkerEchoJob
+	| BuildCompactedGeometryWorkerJob;
+export type RenderResourceWorkerJobResult =
+	| RenderResourceWorkerEchoResult
+	| BuildCompactedGeometryWorkerResult;
 export type RenderResourceWorkerRequestMessage =
 	RenderResourceWorkerRunJobMessage;
 export type RenderResourceWorkerResponseMessage =
@@ -44,32 +55,43 @@ type RenderResourceWorkerRequestEvent =
 
 interface RenderResourceWorkerScope {
 	onmessage: ((event: RenderResourceWorkerRequestEvent) => void) | null;
-	postMessage(message: RenderResourceWorkerResponseMessage): void;
+	postMessage(
+		message: RenderResourceWorkerResponseMessage,
+		transferables?: Transferable[],
+	): void;
 }
 
-const workerScope = self as unknown as RenderResourceWorkerScope;
+const workerScope =
+	typeof self === "undefined"
+		? null
+		: (self as unknown as RenderResourceWorkerScope);
 
-workerScope.onmessage = (event: RenderResourceWorkerRequestEvent) => {
-	const message = event.data;
-	const startedAt = performance.now();
-	try {
-		const result = runRenderResourceWorkerJob(message.job);
-		const response = {
-			type: "job-complete",
-			requestId: message.requestId,
-			result,
-			durationMs: performance.now() - startedAt,
-		} satisfies RenderResourceWorkerResponseMessage;
-		workerScope.postMessage(response);
-	} catch (error) {
-		const response = {
-			type: "job-error",
-			requestId: message.requestId,
-			message: error instanceof Error ? error.message : String(error),
-		} satisfies RenderResourceWorkerResponseMessage;
-		workerScope.postMessage(response);
-	}
-};
+if (workerScope) {
+	workerScope.onmessage = (event: RenderResourceWorkerRequestEvent) => {
+		const message = event.data;
+		const startedAt = performance.now();
+		try {
+			const result = runRenderResourceWorkerJob(message.job);
+			const response = {
+				type: "job-complete",
+				requestId: message.requestId,
+				result,
+				durationMs: performance.now() - startedAt,
+			} satisfies RenderResourceWorkerResponseMessage;
+			workerScope.postMessage(
+				response,
+				collectRenderResourceWorkerResultTransferables(result),
+			);
+		} catch (error) {
+			const response = {
+				type: "job-error",
+				requestId: message.requestId,
+				message: error instanceof Error ? error.message : String(error),
+			} satisfies RenderResourceWorkerResponseMessage;
+			workerScope.postMessage(response);
+		}
+	};
+}
 
 export function runRenderResourceWorkerJob(
 	job: RenderResourceWorkerJob,
@@ -81,5 +103,18 @@ export function runRenderResourceWorkerJob(
 				key: job.key,
 				payload: job.payload,
 			};
+		case "build-compacted-geometry":
+			return buildCompactedGeometryWorkerResult(job.input);
+	}
+}
+
+function collectRenderResourceWorkerResultTransferables(
+	result: RenderResourceWorkerJobResult,
+): Transferable[] {
+	switch (result.type) {
+		case "echo":
+			return [];
+		case "build-compacted-geometry":
+			return collectBuildCompactedGeometryResultTransferables(result);
 	}
 }

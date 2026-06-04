@@ -76,12 +76,20 @@ export interface TextureAtlasCpuGeneration {
 	rgbaAtlasReadyDrawUnitIds: readonly string[];
 }
 
+export interface TextureAtlasCpuGenerationPlan {
+	key: string;
+	rgbaAtlasReadyDrawUnitIds: readonly string[];
+	detailAtlasTextures: readonly AtlasTexturePage[];
+	families: readonly TexturePageAtlasPlan["families"][number][];
+	preparedTextureAssetIds: readonly string[];
+}
+
 export function createTextureAtlasCpuGeneration({
 	plan,
 	textureFilteringMode = "anisotropic-4x",
 	maxAnisotropy = 1,
 }: {
-	plan: TexturePageAtlasPlan;
+	plan: TextureAtlasCpuGenerationPlan;
 	textureFilteringMode?: TextureFilteringMode;
 	maxAnisotropy?: number;
 }): TextureAtlasCpuGeneration | null {
@@ -91,18 +99,20 @@ export function createTextureAtlasCpuGeneration({
 	) {
 		return null;
 	}
-	const entriesByKey = new Map(
-		plan.atlasEntryRecords.map((record) => [record.key, record] as const),
-	);
 	const textures = plan.families.flatMap((familyPlan) =>
-		familyPlan.atlasTextures.map((page) =>
-			createTextureAtlasCpuTexture({
+		familyPlan.atlasTextures.map((page) => {
+			const entriesByKey = new Map(
+				familyPlan.atlasEntryRecords.map(
+					(record) => [record.key, record] as const,
+				),
+			);
+			return createTextureAtlasCpuTexture({
 				generationKey: plan.key,
 				family: familyPlan.family,
 				page,
 				entriesByKey,
-			}),
-		),
+			});
+		}),
 	);
 	const placements = plan.families.flatMap((familyPlan) =>
 		familyPlan.atlasTextures.flatMap((page) =>
@@ -121,20 +131,20 @@ export function createTextureAtlasCpuGeneration({
 			})),
 		),
 	);
-	const detailEntriesByKey = new Map(
-		(plan.detailAtlasEntryRecords ?? []).map(
-			(entry) => [entry.key, entry] as const,
-		),
-	);
 	const detailTextures = plan.families.flatMap((familyPlan) =>
-		familyPlan.detailAtlasTextures.map((page) =>
-			createDetailTextureAtlasCpuTexture({
+		familyPlan.detailAtlasTextures.map((page) => {
+			const detailEntriesByKey = new Map(
+				familyPlan.detailAtlasEntryRecords.map(
+					(entry) => [entry.key, entry] as const,
+				),
+			);
+			return createDetailTextureAtlasCpuTexture({
 				generationKey: plan.key,
 				family: familyPlan.family,
 				page,
 				entriesByKey: detailEntriesByKey,
-			}),
-		),
+			});
+		}),
 	);
 	const detailPlacements = plan.families.flatMap((familyPlan) =>
 		familyPlan.detailAtlasTextures.flatMap((page) =>

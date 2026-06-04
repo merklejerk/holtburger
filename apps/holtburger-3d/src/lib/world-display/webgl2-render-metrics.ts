@@ -439,6 +439,23 @@ export function createWebgl2RenderMetrics(
 			textureVelocitySignatureCount: 0,
 			textureVelocitySignatureSamples: [],
 			textureResourceCount: input.worldStore?.textureCount ?? 0,
+			textureAtlasWorkerActiveSchedulerCount:
+				input.worldStore?.textureAtlasWorkerMetrics.activeSchedulerCount ?? 0,
+			textureAtlasWorkerSubmittedJobCount:
+				input.worldStore?.textureAtlasWorkerMetrics.submittedJobCount ?? 0,
+			textureAtlasWorkerDedupedDesiredJobCount:
+				input.worldStore?.textureAtlasWorkerMetrics.dedupedDesiredJobCount ?? 0,
+			textureAtlasWorkerCoalescedDesiredJobCount:
+				input.worldStore?.textureAtlasWorkerMetrics.coalescedDesiredJobCount ??
+				0,
+			textureAtlasWorkerStaleResultCount:
+				input.worldStore?.textureAtlasWorkerMetrics.staleResultCount ?? 0,
+			textureAtlasWorkerReadyResultCount:
+				input.worldStore?.textureAtlasWorkerMetrics.readyResultCount ?? 0,
+			textureAtlasWorkerCommittedResultCount:
+				input.worldStore?.textureAtlasWorkerMetrics.committedResultCount ?? 0,
+			textureAtlasWorkerErrorCount:
+				input.worldStore?.textureAtlasWorkerMetrics.errorCount ?? 0,
 			indexedTextureResourceCount: input.worldStore?.indexedTextureCount ?? 0,
 			paletteResourceCount: input.worldStore?.paletteTextureCount ?? 0,
 			indexedMaterialDescriptorDrawUnitCount:
@@ -555,6 +572,18 @@ export function createWebgl2RenderMetrics(
 							input.worldStore.textureAtlasGenerationTextureCount,
 						"webgl2-detail-texture-atlas-generation-textures":
 							input.worldStore.detailTextureAtlasGenerationTextureCount,
+						"webgl2-texture-atlas-worker-active-schedulers":
+							input.worldStore.textureAtlasWorkerMetrics.activeSchedulerCount,
+						"webgl2-texture-atlas-worker-submitted-jobs":
+							input.worldStore.textureAtlasWorkerMetrics.submittedJobCount,
+						"webgl2-texture-atlas-worker-stale-results":
+							input.worldStore.textureAtlasWorkerMetrics.staleResultCount,
+						"webgl2-texture-atlas-worker-ready-results":
+							input.worldStore.textureAtlasWorkerMetrics.readyResultCount,
+						"webgl2-texture-atlas-worker-committed-results":
+							input.worldStore.textureAtlasWorkerMetrics.committedResultCount,
+						"webgl2-texture-atlas-worker-errors":
+							input.worldStore.textureAtlasWorkerMetrics.errorCount,
 						...prefixCounts(
 							"webgl2-compacted-family-resources-",
 							input.worldStore.compactedGeometryFamilyResourceCounts,

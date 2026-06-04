@@ -244,6 +244,14 @@ interface WorldRenderDebugMetrics {
 	textureVelocitySignatureCount: number;
 	textureVelocitySignatureSamples: string[];
 	textureResourceCount: number;
+	textureAtlasWorkerActiveSchedulerCount: number;
+	textureAtlasWorkerSubmittedJobCount: number;
+	textureAtlasWorkerDedupedDesiredJobCount: number;
+	textureAtlasWorkerCoalescedDesiredJobCount: number;
+	textureAtlasWorkerStaleResultCount: number;
+	textureAtlasWorkerReadyResultCount: number;
+	textureAtlasWorkerCommittedResultCount: number;
+	textureAtlasWorkerErrorCount: number;
 	indexedTextureResourceCount: number;
 	paletteResourceCount: number;
 	indexedMaterialDescriptorDrawUnitCount: number;

@@ -1,6 +1,6 @@
 # Holtburger 3D Render Resource Worker Plan
 
-Status: Phase 4C implemented; Phase 5 is the next implementation phase.
+Status: Phase 5 implemented; Phase 6 is the next implementation phase if profiling shows upload jank.
 
 Related plans:
 
@@ -1381,6 +1381,8 @@ Validation:
 
 ## Phase 5: RGBA And Detail Atlas Worker Preparation
 
+Status: complete.
+
 Work:
 
 - Split texture atlas generation into CPU page packing and WebGL texture realization.
@@ -1396,6 +1398,60 @@ Validation:
 - Existing texture atlas generation tests still pass.
 - Add worker-payload tests for RGBA placement, terrain fill, detail placement, and edge behavior.
 - Add a test proving source prepared texture bytes remain readable after worker submission.
+
+### 2026-06-04: Phase 5 Implemented
+
+Implemented live RGBA/detail texture atlas worker scheduling and commit wiring:
+
+- added `worker-resources/texture-atlas-worker-payloads.ts` with a typed `build-texture-atlas`
+  worker job contract;
+- added `TextureAtlasWorkerScheduler`, using the shared latest-wins scheduler for one coherent
+  texture atlas generation job at a time;
+- wired `build-texture-atlas` into `render-resource-worker.ts` and
+  `RenderResourceWorkerClient.runBuildTextureAtlasJob`;
+- narrowed `createTextureAtlasCpuGeneration` to accept a CPU-generation plan shape so worker payloads
+  only need fields used for page byte packing;
+- copied RGBA atlas entry bytes and detail atlas entry bytes before posting worker input, preserving
+  prepared texture/source buffers owned by main-thread asset state;
+- changed `syncWebgl2TextureAtlasGeneration` so texture atlas generation requires
+  `TextureAtlasWorkerScheduler` whenever a generation is desired;
+- committed worker CPU results through `createWebgl2TextureAtlasGenerationResourceFromCpu` on the
+  main thread, preserving mipmap generation, sampler setup, and anisotropy policy on the WebGL owner;
+- installed the texture atlas scheduler in the WebGL2 renderer and surfaced texture atlas worker
+  metrics through renderer metrics/debug counters;
+- converted world-resource tests that require texture atlas generation to install fake texture atlas
+  workers and complete worker jobs explicitly before compacted geometry work proceeds.
+
+Validation completed:
+
+- `npm run test:ts -- texture-atlas-worker-payloads render-resource-worker-client webgl2-world-resources webgl2-texture-atlas-generation`
+- `npm run check`
+- `npm run lint:ts`
+
+Course corrections:
+
+- Texture atlas worker jobs use the final WebGL texture atlas generation key, not just the atlas plan
+  key, because filtering mode and anisotropy are part of the committed WebGL generation identity.
+- The RGBA/detail atlas path follows the indexed atlas and compacted geometry direction: no
+  synchronous world-resource fallback. Resource-level convenience wrappers remain for focused WebGL
+  realization tests only.
+- Worker payload generation reads family-local atlas records instead of top-level plan records. This
+  makes the worker DTO smaller and avoids depending on planner-only diagnostic/failure fields.
+- Removing synchronous atlas realization from the first sync means tests that assert compacted
+  batches now model the real sequence: schedule texture atlas, commit texture atlas on the next sync,
+  schedule compaction, then commit compaction on a later sync.
+
+Introduced cleanup targets and legacy shims:
+
+- `createWebgl2TextureAtlasGenerationResource` remains as a resource-level convenience wrapper for
+  focused WebGL texture realization tests. The world-resource pipeline now calls only the worker CPU
+  result path when texture atlas generation is required.
+- Texture atlas worker result payloads transfer packed page buffers only; input source bytes are
+  copied and transferred to the worker. If profiling shows avoidable worker input overhead, consider
+  lighter committed placement DTOs or a copy-once source payload cache, but do not transfer
+  asset-owned buffers destructively.
+- Phase 6 remains optional. Run browser profiling first; only add WebGL upload budgeting if
+  main-thread texture/buffer realization is the remaining visible jank source.
 
 ## Phase 6: Main-Thread Commit Budgeting
 

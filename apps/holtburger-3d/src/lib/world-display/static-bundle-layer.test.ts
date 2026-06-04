@@ -8,6 +8,11 @@ import type {
 	StaticBundlePartHint,
 	StaticBundleRenderChunk,
 	StaticBundleSpatialHint,
+	StaticBundleTexturePage,
+	StaticBundleLayerWorkerJob,
+	StaticBundleEnvCellTopologyDiscoveryJob,
+	StaticBundleEnvCellTopologyDiscoveryResult,
+	StaticBundleLayerWorkerResult,
 	StaticLandblockBundleLayerDiagnostics,
 	StaticLandblockBundleLayerKind,
 	StaticLandblockRenderBundleLayer,
@@ -58,6 +63,23 @@ describe("static bundle layer contract", () => {
 			familyKey: "rgba-texture-page",
 			texturePageRefKeys: [texturePageRef.key],
 			isTransparent: false,
+		};
+		const texturePage: StaticBundleTexturePage = {
+			key: "page:base-color:0",
+			scopeKey: "landblock:3663069183:outdoor-detail",
+			pageKind: "single-entry",
+			usageBucket,
+			sampleClass,
+			width: 1,
+			height: 1,
+			bytes: new Uint8Array([255, 255, 255, 255]),
+			entries: [
+				{
+					virtualRefKey: texturePageRef.key,
+					sourceAssetId: texturePageRef.sourceAssetId,
+					rect: [0, 0, 1, 1],
+				},
+			],
 		};
 		const renderChunk: StaticBundleRenderChunk = {
 			key: "chunk:da55ffff",
@@ -122,12 +144,14 @@ describe("static bundle layer contract", () => {
 			landblockId: 0xda55ffff,
 			layerKind,
 			sourceRevision: "revision:0",
+			rootAssetIds: ["landblock/da55ffff/outdoor"],
 			preparedAssetIds: ["landblock/da55ffff/outdoor"],
 			renderChunks: [renderChunk],
 			compactedBatches: [compactedBatch],
 			directEntries: [directEntry],
 			materialRecords: [materialRecord],
 			texturePageRefs: [texturePageRef],
+			texturePages: [texturePage],
 			objectRecords: [objectRecord],
 			spatialHints: [spatialHint],
 			diagnostics,
@@ -136,5 +160,89 @@ describe("static bundle layer contract", () => {
 		expect(layer.compactedBatches).toHaveLength(1);
 		expect(layer.directEntries).toHaveLength(1);
 		expect(layer.texturePageRefs[0]?.lookup).toBe("color-filtered");
+		expect(layer.texturePages[0]?.entries[0]?.rect).toEqual([0, 0, 1, 1]);
+	});
+
+	it("represents worker build jobs, topology discovery, and worker results", () => {
+		const buildJob: StaticBundleLayerWorkerJob = {
+			type: "build-static-bundle-layer",
+			jobId: "job:buildings",
+			scope: {
+				kind: "landblock",
+				landblockId: 0xda55ffff,
+				layerKind: "outdoor-buildings",
+			},
+			rootAssetIds: ["landblock/da55ffff/outdoor"],
+			sourceRevision: "revision:roots",
+			buildPolicyRevision: "build:v1",
+			cpuTexturePagePolicyRevision: "texture-pages:v1",
+		};
+		const topologyJob: StaticBundleEnvCellTopologyDiscoveryJob = {
+			type: "discover-static-env-cell-layer-scopes",
+			jobId: "job:topology",
+			landblockId: 0xda55ffff,
+			sourceRevision: "revision:topology",
+			buildPolicyRevision: "build:v1",
+		};
+		const topologyResult: StaticBundleEnvCellTopologyDiscoveryResult = {
+			type: "static-env-cell-layer-scopes-discovered",
+			jobId: topologyJob.jobId,
+			landblockId: topologyJob.landblockId,
+			sourceRevision: topologyJob.sourceRevision,
+			discoveredScopes: [
+				{
+					scope: {
+						kind: "env-cell",
+						landblockId: 0xda55ffff,
+						envCellId: 0xda550155,
+						layerKind: "env-cell-static",
+					},
+					rootAssetIds: ["env-cell/da550155", "landblock/da55ffff/topology"],
+					topologyDependencyAssetIds: ["landblock/da55ffff/topology"],
+				},
+			],
+			diagnostics: {
+				envCellCount: 1,
+				missingAssetIds: [],
+			},
+		};
+		const workerResult: StaticBundleLayerWorkerResult = {
+			type: "static-bundle-layer-built",
+			jobId: buildJob.jobId,
+			scope: buildJob.scope,
+			sourceRevision: buildJob.sourceRevision,
+			bundleLayer: {
+				key: "layer:buildings",
+				scope: buildJob.scope,
+				landblockId: 0xda55ffff,
+				layerKind: "outdoor-buildings",
+				sourceRevision: buildJob.sourceRevision,
+				rootAssetIds: buildJob.rootAssetIds,
+				preparedAssetIds: buildJob.rootAssetIds,
+				renderChunks: [],
+				compactedBatches: [],
+				directEntries: [],
+				materialRecords: [],
+				texturePageRefs: [],
+				texturePages: [],
+				objectRecords: [],
+				diagnostics: {
+					sourceObjectCount: 0,
+					compactedSurfaceCount: 0,
+					directSurfaceCount: 0,
+					skippedSurfaceCount: 0,
+					missingAssetIds: [],
+					skippedReasons: [],
+				},
+			},
+		};
+
+		expect(buildJob.rootAssetIds).toEqual(["landblock/da55ffff/outdoor"]);
+		expect(topologyResult.discoveredScopes[0]?.scope.layerKind).toBe(
+			"env-cell-static",
+		);
+		expect(workerResult.bundleLayer.rootAssetIds).toEqual(
+			buildJob.rootAssetIds,
+		);
 	});
 });

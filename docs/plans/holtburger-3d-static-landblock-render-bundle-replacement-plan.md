@@ -1,9 +1,9 @@
 # Holtburger 3D Static Landblock Render Bundle Replacement Plan
 
-Status: Phase 1A through Phase 1J, Phase 2A, Phase 2B, and Phase 3A are implemented. Phase
-3B renderer resource realization is the next implementation phase. The plan has been redirected to
-worker-owned raw landblock closure loading, worker-built terrain artifacts, preset-based landblock
-requests, and layer-scoped texture pages.
+Status: Phase 1A through Phase 1J, Phase 2A, Phase 2B, Phase 3A, and Phase 3B are
+implemented. Phase 3C static bundle renderer realization is the next implementation phase. The plan
+has been redirected to worker-owned raw landblock closure loading, worker-built terrain artifacts,
+preset-based landblock requests, and layer-scoped texture pages.
 
 Progress:
 
@@ -115,6 +115,11 @@ Progress:
   `LandblockTerrainRenderArtifact` results from the worker artifact store whenever the landblock
   artifact pipeline is active, so migrated outdoor terrain no longer falls back to main-thread
   prepared outdoor asset selection while worker artifacts are desired or in flight.
+- 2026-06-04: Implemented Phase 3B. Worker-derived terrain tiles now carry the resident
+  `LandblockTerrainRenderArtifact` into WebGL resource sync. WebGL terrain upload consumes artifact
+  draw-slice geometry, fallback geometry, artifact keys, and atlas-ready terrain page bytes instead
+  of rebuilding terrain blend plans or resolving prepared terrain textures from `AssetChannelState`
+  for worker-derived terrain.
 
 Validation:
 
@@ -193,6 +198,10 @@ Validation:
 - `npm exec vitest -- run src/lib/world-display/terrain-scene.test.ts` passed after Phase 3A.
 - `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run lint:rust` passed after
   Phase 3A.
+- `npm exec vitest -- run src/lib/world-display/terrain-render-artifact.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/terrain-scene.test.ts`
+  passed after Phase 3B.
+- `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run lint:rust` passed after
+  Phase 3B.
 
 Related plans:
 
@@ -2144,11 +2153,79 @@ Exit criteria:
 - Active worker terrain requests wait for worker artifacts instead of drawing prepared-cache terrain.
 - Focused tests and `npm run check` pass.
 
-### Phase 3B: Renderer Integration Vertical Slice
+### Phase 3B: Terrain Artifact WebGL Realization
 
-- Add WebGL terrain resource realization that consumes `LandblockTerrainRenderArtifact` draw slices,
-  fallback geometry, texture page refs, and artifact keys directly instead of rebuilding terrain CPU
-  plans from `AssetChannelState`.
+Status: Implemented on 2026-06-04 as the terrain half of renderer resource realization.
+
+Purpose:
+
+- Stop worker-derived terrain from rebuilding terrain blend plans, terrain slice geometry, or
+  prepared terrain texture readiness on the main thread.
+- Preserve the existing terrain submit path while changing the data source for migrated landblock
+  terrain resources from prepared-cache facts to resident terrain artifacts.
+- Keep the static bundle resource work separate so the next phase can focus on compacted/direct
+  static object resources without terrain artifact ambiguity.
+
+Implemented:
+
+- `TerrainSceneTile` now carries a nullable `terrainArtifact`; worker-derived terrain tiles set it to
+  the resident `LandblockTerrainRenderArtifact`, while legacy prepared-cache terrain tiles keep it
+  `null`.
+- `LandblockTerrainRenderArtifact.texturePageRefs` now stores atlas-ready prepared RGBA page bytes
+  and prepared texture route IDs. The artifact builder no longer emits raw render-surface bytes as
+  atlas page payloads.
+- `createOrReuseWebgl2TerrainTile` branches on `tile.terrainArtifact`:
+  - worker-derived terrain consumes artifact draw-slice geometry, fallback geometry, layer plans,
+    page refs, and artifact keys;
+  - legacy prepared-cache terrain keeps the old terrain blend-plan rebuild path.
+- WebGL terrain atlas candidate planning now builds readiness records from artifact page bytes when
+  a terrain artifact is present. It does not resolve prepared terrain textures from `AssetChannelState`
+  for worker-derived terrain.
+- Focused tests now prove terrain artifacts emit prepared page refs and WebGL resource sync can plan
+  terrain atlas candidates from artifact geometry/page refs without prepared texture records in
+  `assetState`.
+
+Decisions and course corrections:
+
+- Terrain artifact page refs must be atlas-ready prepared textures, not raw render-surface bytes.
+  The old artifact DTO was too optimistic and would fail the atlas uploader for compressed terrain
+  surfaces.
+- The existing global terrain atlas generation scheduler is still used after candidate planning. This
+  phase removes main-thread terrain blend/texture dependency resolution for worker terrain, but it
+  does not yet replace the global atlas generation ownership model.
+- Region detail overlay texture refs remain on the legacy prepared-cache path. The terrain artifact
+  contract currently covers terrain blend color/mask pages; region detail overlays need an explicit
+  artifact role before they can be moved cleanly.
+
+Cleanup targets:
+
+- `TerrainSceneTile.assetId` still doubles as the WebGL terrain resource key. Replace this with an
+  explicit terrain resource/artifact key before adding static bundle resources that need their own
+  identity scheme.
+- Worker-derived terrain still flows through `TerrainSceneModel` as a bridge into WebGL sync. Do not
+  add static bundle concepts to this scene model; static bundle resources should get their own
+  resident resource path.
+- Terrain atlas generation still uses `TextureAtlasWorkerScheduler` and global atlas generation
+  replacement accounting. It is acceptable for this terrain slice but remains a cleanup target for a
+  fully layer/preset-scoped texture ownership model.
+- Region detail overlay handling should become an explicit terrain artifact role or a separate
+  renderer policy decision before static cleanup removes prepared-cache texture assumptions.
+
+Legacy shims introduced:
+
+- No public compatibility shim or alternate renderer mode was added.
+- The old prepared-cache terrain upload path remains only for non-worker terrain tiles.
+
+Exit criteria:
+
+- Worker-derived terrain resources consume artifact-owned terrain slices/page refs without
+  main-thread terrain blend-plan reconstruction.
+- Worker-derived terrain atlas candidates can be planned from artifact page bytes without
+  `AssetChannelState` prepared texture records.
+- Focused terrain artifact/WebGL tests and `npm run check` pass.
+
+### Phase 3C: Static Bundle Renderer Integration Vertical Slice
+
 - Add WebGL layer resource realization for compacted batches, direct static entries, material tables,
   and layer-owned texture pages.
 - Wire the `outdoor` preset first through planning, worker orchestration, WebGL realization, resident
@@ -2168,8 +2245,6 @@ Exit criteria:
 Exit criteria:
 
 - `outdoor` renders from resident terrain/object artifacts without the static staged path.
-- Worker-derived terrain resources consume artifact-owned terrain slices/page refs without
-  main-thread terrain blend-plan reconstruction.
 - Layer-owned textures, compacted batches, direct static entries, material tables, and eviction work
   for the integrated preset.
 - Existing static compaction scheduler is unused for the integrated preset.

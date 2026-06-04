@@ -38,7 +38,12 @@ import {
 } from "./structured-interior-scene";
 import type { IndexedResourceAtlasPlan } from "./texture-pages/indexed-resource-atlas-planner";
 import { createEmptyTexturePageAtlasPlan } from "./texture-pages/texture-page-atlas-planner";
+import type { LandblockTerrainRenderArtifact } from "./terrain-render-artifact";
 import type { TerrainSceneModel } from "./terrain-scene";
+import {
+	buildTerrainTileLayerGeometry,
+	type TerrainTileLayerPlan,
+} from "./terrain-tile-plan";
 import { createEmptyTransitionPortalCandidateModel } from "./transition-portal-work-items";
 import {
 	commitWebgl2IndexedResourceAtlasGeneration,
@@ -357,6 +362,54 @@ describe("webgl2 world resources", () => {
 		expect(
 			store.texturePageAtlasPlan?.families.map((family) => family.family),
 		).toContain("terrain-color");
+	});
+
+	it("realizes worker terrain artifacts from artifact geometry and page refs", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2WorldResourceStore();
+		installTextureAtlasWorkerScheduler(store);
+		const graph = new RendererResourceGraph();
+		const renderSurfaceId = 0x06000010;
+		const terrainTile = createWorkerArtifactTerrainTile({
+			pcode: encodeUniformTerrainPcode(1),
+			renderSurfaceId,
+		});
+
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState(),
+			terrainScene: createTerrainScene([terrainTile]),
+			staticRenderableScene: createStaticRenderableScene([]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [
+				createChunkTransform({ landblockId: 0x1234ffff }),
+			],
+			rendererResourceGraph: graph,
+		});
+
+		const tile = store.terrainTiles[0];
+		expect(tile?.id).toBe("terrain-tile/terrain-artifact/12340000");
+		expect(tile?.geometrySignature).toContain(
+			"terrain-artifact/12340000/slice/0",
+		);
+		expect(tile?.terrainArtifactTexturePageRefs).toHaveLength(1);
+		expect(tile?.drawSlices).toEqual([]);
+		expect(tile?.layerPlanBlockers).toEqual([]);
+		expect(store.terrainAtlasRefCount).toBe(1);
+		expect(store.terrainAtlasCandidateCount).toBe(1);
+		expect(store.texturePageAtlasPlan.preparedTextureAssetIds).toEqual([
+			"terrain-artifact-texture/terrain-artifact/12340000/terrain-page:color:surface-texture/05000010:100663312:21",
+		]);
+		expect(
+			store.texturePageAtlasPlan.families.map((family) => family.family),
+		).toContain("terrain-color");
+		expect(
+			tile?.texturePageBlockers.includes(
+				"terrain tile has no terrain blend page inputs",
+			),
+		).toBe(false);
 	});
 
 	it("disposes orphaned draw units and graph leases", () => {
@@ -2659,6 +2712,7 @@ function createTerrainTile(): TerrainSceneModel["tiles"][number] {
 			hasRoadAlphaMaps: false,
 			diagnostics: ["Missing terrain material table terrain-material/1."],
 		},
+		terrainArtifact: null,
 		dataSource: "repo-local-cell-landblock",
 	};
 }
@@ -2689,6 +2743,184 @@ function createReadyTerrainTile({
 			hasTerrainAlphaMaps: false,
 			hasRoadAlphaMaps: false,
 			diagnostics: [],
+		},
+	};
+}
+
+function createWorkerArtifactTerrainTile({
+	pcode,
+	renderSurfaceId,
+}: {
+	pcode: number;
+	renderSurfaceId: number;
+}): TerrainSceneModel["tiles"][number] {
+	const mesh = createTerrainMeshForPcodes([pcode]);
+	const materialResources = {
+		kind: "terrain-material-resource-plan" as const,
+		regionNumber: 1,
+		terrainMaterialAssetId: "terrain-material/1",
+		status: "ready" as const,
+		signature: "terrain-artifact:ready",
+		terrainTypeCount: 1,
+		terrainAlphaMapCount: 0,
+		roadAlphaMapCount: 0,
+		uniquePcodeCount: 1,
+		referencedTerrainCodes: [pcode & 0x1f],
+		missingTerrainTypes: [],
+		missingSurfaceTextureAssetIds: [],
+		missingRenderSurfaceAssetIds: [],
+		unsupportedRenderSurfaceAssetIds: [],
+		hasTerrainAlphaMaps: false,
+		hasRoadAlphaMaps: false,
+		diagnostics: [],
+	};
+	const artifact = createTerrainArtifactFixture({
+		mesh,
+		materialResources,
+		pcode,
+		renderSurfaceId,
+	});
+	return {
+		assetId: artifact.key,
+		landblockId: artifact.landblockId,
+		label: "1234",
+		isFocus: true,
+		chunkLocalOffset: { x: 0, y: 0, z: 0 },
+		mesh,
+		materialResources,
+		terrainArtifact: artifact,
+		dataSource: "worker-landblock-render-artifact",
+	};
+}
+
+function createTerrainArtifactFixture({
+	mesh,
+	materialResources,
+	pcode,
+	renderSurfaceId,
+}: {
+	mesh: PreparedTerrainMesh;
+	materialResources: TerrainSceneModel["tiles"][number]["materialResources"];
+	pcode: number;
+	renderSurfaceId: number;
+}): LandblockTerrainRenderArtifact {
+	const renderSurface = createRenderSurfacePayload({
+		renderSurfaceId,
+		compressed: false,
+	});
+	const terrainRef = {
+		textureAssetId: "surface-texture/05000010",
+		renderSurface,
+		tiling: 4,
+		wrap: "repeat" as const,
+		role: "color" as const,
+	};
+	const layerPlan: TerrainTileLayerPlan = {
+		layerEntries: [
+			{
+				slot: 0,
+				pcode,
+				plan: {
+					pcode,
+					base: terrainRef,
+					overlays: [],
+					roads: [],
+					allRoad: false,
+				},
+				colorRefCount: 1,
+				maskRefCount: 0,
+			},
+		],
+		layerSlotByPcode: new Map([[pcode, 0]]),
+		blockers: [],
+		signature: "terrain-artifact-layer",
+	};
+	const geometry = buildTerrainTileLayerGeometry({
+		mesh,
+		plan: layerPlan,
+		sourceSignature: "terrain-artifact/12340000/slice/0",
+	});
+	const preparedTexture = createAtlasPreparedTexturePayload(renderSurfaceId);
+	const level = preparedTexture.levels[0];
+	if (!level) {
+		throw new Error("Prepared texture fixture must include a base mip level.");
+	}
+	return {
+		type: "landblock-terrain-render-artifact",
+		key: "terrain-artifact/12340000",
+		requestId: "request",
+		landblockId: 0x12340000,
+		regionNumber: 1,
+		assetId: "landblock/12340000/outdoor",
+		artifactRevision: "terrain-artifact-revision",
+		buildPolicyRevision: "build:v1",
+		cpuTexturePagePolicyRevision: "pages:v1",
+		diagnosticRootAssetIds: [],
+		diagnosticPreparedAssetIds: [],
+		mesh,
+		materialResources,
+		blendPlanSignature: "blend:artifact",
+		texturePageRefs: [
+			{
+				key: [
+					"terrain-page",
+					"color",
+					terrainRef.textureAssetId,
+					renderSurfaceId,
+					renderSurface.formatRaw,
+				].join(":"),
+				sourceAssetId: formatAtlasReadyPreparedTextureAssetId({
+					renderSurfaceId,
+					usage: "raw",
+				}),
+				renderSurfaceId,
+				role: "color",
+				width: level.width,
+				height: level.height,
+				formatRaw: level.formatRaw,
+				format: level.format,
+				wrapS: "repeat",
+				wrapT: "repeat",
+				tiling: 4,
+				bytes: level.bytes,
+			},
+		],
+		layerPlan,
+		drawSlices: [
+			{
+				key: "terrain-artifact/12340000/slice/0",
+				slicePlan: {
+					id: "slice/0",
+					reason: "artifact fixture",
+					layerPlan,
+					pcodes: [pcode],
+				},
+				geometry,
+			},
+		],
+		debugFallbackGeometry: {
+			signature: "terrain-artifact/12340000/fallback",
+			positions: new Float32Array(),
+			uvs: null,
+			indices: new Uint16Array(),
+			vertexCount: 0,
+			triangleCount: 0,
+		},
+		bvh: {
+			coordinateSpace: "landblock-outdoor-terrain-local",
+			nodes: [],
+			items: [],
+		},
+		bvhItemKeys: [],
+		diagnostics: {
+			status: "ready",
+			quadCount: mesh.quads.length,
+			triangleCount: mesh.triangles.length,
+			texturePageRefCount: 1,
+			drawSliceCount: 1,
+			materialDiagnostics: [],
+			blendDiagnostics: [],
+			fallbackReasons: [],
 		},
 	};
 }

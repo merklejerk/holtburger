@@ -1,5 +1,6 @@
 import { formatHex32 } from "../../../landblocks";
 import type { TerrainBlendTextureRef } from "../../terrain-blend-plan";
+import type { TerrainRenderTexturePageRef } from "../../terrain-render-artifact";
 import type { TerrainTileLayerPlan } from "../../terrain-tile-plan";
 import type { RenderMat4 } from "../../render-math";
 import type { RenderBvhItemKey } from "../../prepared-bvh-visibility";
@@ -48,6 +49,7 @@ export interface Webgl2TerrainTileResource {
 	bvhFallbackReason: string | null;
 	layerPlan: TerrainTileLayerPlan | null;
 	layerPlanBlockers: readonly string[];
+	terrainArtifactTexturePageRefs: readonly TerrainRenderTexturePageRef[];
 	detailPlan: Webgl2TerrainTileDetailPlan | null;
 	texturePageBindings: Webgl2TerrainTileTexturePageBinding[];
 	texturePageBlockers: readonly string[];

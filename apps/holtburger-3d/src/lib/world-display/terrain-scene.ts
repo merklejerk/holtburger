@@ -15,7 +15,10 @@ import {
 	buildTerrainMaterialResourcePlan,
 	type TerrainMaterialResourcePlan,
 } from "./terrain-materials";
-import { createPreparedTerrainMeshFromOutdoorPayload } from "./terrain-render-artifact";
+import {
+	createPreparedTerrainMeshFromOutdoorPayload,
+	type LandblockTerrainRenderArtifact,
+} from "./terrain-render-artifact";
 import type { LandblockRenderPresetWorkerResult } from "./landblock-render-preset";
 import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
 
@@ -27,6 +30,7 @@ export interface TerrainSceneTile {
 	chunkLocalOffset: { x: number; y: number; z: number };
 	mesh: PreparedTerrainMesh;
 	materialResources: TerrainMaterialResourcePlan;
+	terrainArtifact: LandblockTerrainRenderArtifact | null;
 	dataSource:
 		| "repo-local-cell-landblock"
 		| "worker-landblock-render-artifact"
@@ -109,6 +113,7 @@ export function deriveTerrainSceneModel(
 					regionNumber: payload.regionNumber,
 					quads: terrainMesh.quads,
 				}),
+				terrainArtifact: null,
 				dataSource: inferTerrainDataSource(asset),
 			};
 		})
@@ -201,6 +206,7 @@ export function deriveTerrainSceneModelFromLandblockArtifacts({
 				chunkLocalOffset: { x: 0, y: 0, z: 0 },
 				mesh: artifact.mesh,
 				materialResources: artifact.materialResources,
+				terrainArtifact: artifact,
 				dataSource: "worker-landblock-render-artifact",
 			};
 		})

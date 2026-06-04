@@ -4,8 +4,17 @@ import {
 	type BuildCompactedGeometryWorkerJob,
 	type BuildCompactedGeometryWorkerResult,
 } from "../lib/world-display/worker-resources/compacted-geometry-worker-payloads";
+import {
+	buildIndexedResourceAtlasWorkerResult,
+	collectBuildIndexedResourceAtlasResultTransferables,
+	type BuildIndexedResourceAtlasWorkerJob,
+	type BuildIndexedResourceAtlasWorkerResult,
+} from "../lib/world-display/worker-resources/indexed-atlas-worker-payloads";
 
-export type RenderResourceWorkerJobKind = "echo" | "build-compacted-geometry";
+export type RenderResourceWorkerJobKind =
+	| "echo"
+	| "build-compacted-geometry"
+	| "build-indexed-resource-atlas";
 
 export interface RenderResourceWorkerEchoJob {
 	type: "echo";
@@ -40,10 +49,12 @@ export interface RenderResourceWorkerJobErrorMessage {
 
 export type RenderResourceWorkerJob =
 	| RenderResourceWorkerEchoJob
-	| BuildCompactedGeometryWorkerJob;
+	| BuildCompactedGeometryWorkerJob
+	| BuildIndexedResourceAtlasWorkerJob;
 export type RenderResourceWorkerJobResult =
 	| RenderResourceWorkerEchoResult
-	| BuildCompactedGeometryWorkerResult;
+	| BuildCompactedGeometryWorkerResult
+	| BuildIndexedResourceAtlasWorkerResult;
 export type RenderResourceWorkerRequestMessage =
 	RenderResourceWorkerRunJobMessage;
 export type RenderResourceWorkerResponseMessage =
@@ -105,6 +116,8 @@ export function runRenderResourceWorkerJob(
 			};
 		case "build-compacted-geometry":
 			return buildCompactedGeometryWorkerResult(job.input);
+		case "build-indexed-resource-atlas":
+			return buildIndexedResourceAtlasWorkerResult(job.input);
 	}
 }
 
@@ -116,5 +129,7 @@ function collectRenderResourceWorkerResultTransferables(
 			return [];
 		case "build-compacted-geometry":
 			return collectBuildCompactedGeometryResultTransferables(result);
+		case "build-indexed-resource-atlas":
+			return collectBuildIndexedResourceAtlasResultTransferables(result);
 	}
 }

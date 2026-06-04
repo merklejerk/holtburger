@@ -56,8 +56,17 @@ export interface IndexedResourceAtlasCpuGeneration {
 	paletteReadyDrawUnitIds: readonly string[];
 }
 
+export interface IndexedResourceAtlasCpuGenerationPlan {
+	key: string;
+	indexReadyDrawUnitIds: readonly string[];
+	paletteReadyDrawUnitIds: readonly string[];
+	p8IndexAtlasTextures: readonly IndexedTexelAtlasPage[];
+	index16AtlasTextures: readonly IndexedTexelAtlasPage[];
+	paletteAtlasTextures: readonly IndexedPaletteAtlasPage[];
+}
+
 export function createIndexedResourceAtlasCpuGeneration(
-	plan: IndexedResourceAtlasPlan,
+	plan: IndexedResourceAtlasCpuGenerationPlan,
 ): IndexedResourceAtlasCpuGeneration | null {
 	if (!requiresIndexedResourceAtlasGeneration(plan)) {
 		return null;
@@ -153,7 +162,7 @@ export function describeWebgl2IndexedResourceAtlasGenerationKey(
 }
 
 function requiresIndexedResourceAtlasGeneration(
-	plan: IndexedResourceAtlasPlan,
+	plan: IndexedResourceAtlasCpuGenerationPlan,
 ): boolean {
 	return (
 		plan.p8IndexAtlasTextures.length > 0 ||

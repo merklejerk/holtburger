@@ -3555,16 +3555,10 @@ function upsertWebgl2TextureAtlasGenerationGraph({
 			{
 				key: atlasNodeKey,
 				kind: "atlas-generation",
-				label: "outdoor static atlas",
-				metadata: {
-					textureCount: generation.textures.length,
-					drawUnitCount: generation.rgbaAtlasReadyDrawUnitIds.length,
-				},
 			},
 			...generation.preparedTextureAssetIds.map((assetId, index) => ({
 				key: preparedNodeKeys[index],
 				kind: "prepared-asset" as const,
-				label: assetId,
 			})),
 		],
 		dependencyReplacements: [
@@ -3694,13 +3688,6 @@ function upsertWebgl2IndexedResourceAtlasGenerationGraph({
 			{
 				key: atlasNodeKey,
 				kind: "atlas-generation",
-				label: "indexed resource atlas",
-				metadata: {
-					indexTextureCount: generation.indexTextures.length,
-					paletteTextureCount: generation.paletteTextures.length,
-					indexReadyDrawUnitCount: generation.indexReadyDrawUnitIds.length,
-					paletteReadyDrawUnitCount: generation.paletteReadyDrawUnitIds.length,
-				},
 			},
 		],
 		dependencyReplacements: [
@@ -3792,25 +3779,14 @@ function syncWebgl2AssemblyGraph({
 				{
 					key: sceneNodeKey,
 					kind: "scene-object",
-					label: record.label,
-					metadata: {
-						drawUnitId: record.drawUnitId,
-						materialKind: record.material.kind,
-					},
 				},
 				{
 					key: materialNodeKey,
 					kind: "material-decision",
-					label: record.material.key,
-					metadata: {
-						materialKind: record.material.kind,
-						fallback: record.material.fallbackReason ?? null,
-					},
 				},
 				...assetIds.map((assetId, index) => ({
 					key: preparedNodeKeys[index],
 					kind: "prepared-asset" as const,
-					label: assetId,
 				})),
 			);
 			dependencyReplacements.push(
@@ -3899,18 +3875,10 @@ function syncWebgl2TerrainTileGraph({
 				{
 					key: sceneNodeKey,
 					kind: "scene-object",
-					label: `terrain tile ${resource.label}`,
-					metadata: {
-						resourceKind: "terrain-tile",
-						terrainTileId: resource.id,
-						landblockId: formatHex32(resource.landblockId),
-						readiness: resource.readiness.status,
-					},
 				},
 				...assetIds.map((assetId, index) => ({
 					key: preparedNodeKeys[index],
 					kind: "prepared-asset" as const,
-					label: assetId,
 				})),
 			);
 			dependencyReplacements.push({

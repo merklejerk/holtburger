@@ -1,6 +1,6 @@
 # Holtburger 3D Render Resource Worker Plan
 
-Status: Phase 3A implemented; Phase 3B-0 is the next implementation phase.
+Status: Phase 3B-0 implemented; Phase 3B is the next implementation phase.
 
 Related plans:
 
@@ -428,6 +428,51 @@ Refinement for the next phase:
   for new scheduler-facing types. Do not rename every existing planner field in the same patch unless
   it becomes necessary; avoid a sprawling mechanical churn pass.
 
+### 2026-06-03: Phase 3B-0 Implemented
+
+Simplified the renderer graph to prepared-asset lifetime tracking only:
+
+- removed `RendererResourceGraph.explainRetention`;
+- removed `RendererResourceGraph.disposalCandidates`;
+- removed graph-owned node deletion APIs that were only needed by cleanup candidate handling;
+- deleted the unused `RendererResourceCleanupCoordinator` and its diagnostic tests;
+- removed diagnostic `label` and `metadata` payloads from `RendererResourceGraphNode`;
+- stopped feeding atlas, draw-unit, terrain, and compacted-batch diagnostic metadata into graph
+  updates;
+- rewrote graph tests around the runtime contract: transitive prepared-asset retention, lease
+  release, transaction rollback, cycle rejection, deterministic retained asset IDs, and canonical
+  prepared texture nodes;
+- removed WebGL resource tests that asserted graph diagnostic explanation/disposal behavior while
+  keeping resource/lease retention assertions.
+
+Validation completed:
+
+- `npm run test:ts -- renderer-resource-graph webgl2-world-resources compacted-geometry`
+- `npm run check`
+- `npm run lint:ts`
+
+Course corrections:
+
+- Removing graph diagnostic metadata was safe, but `formatHex32` in
+  `compacted-geometry-sync.ts` still participates in compacted landblock batch key construction.
+  Keep that import and treat key formatting as runtime behavior, not diagnostics.
+- The graph still has derived node kinds (`scene-object`, `material-decision`, `atlas-generation`,
+  `static-batch`) because current prepared-asset lifetime is computed by traversing committed
+  renderer-state dependencies. Phase 3B should project committed resources into those dependencies,
+  but should not add explanation paths, disposal candidates, labels, or metadata back.
+- Runtime WebGL resource disposal remains owned by explicit resource stores. Do not reintroduce a
+  graph cleanup coordinator for worker scheduling.
+
+Introduced cleanup targets and legacy shims:
+
+- `RendererResourceGraphNodeKind` still names derived renderer nodes. That is acceptable as a
+  lifetime projection, but if Phase 3B exposes clearer committed-resource projection helpers, prefer
+  those helpers over direct graph-node construction at call sites.
+- The store still carries `*GraphLease` fields. Keep them for now because they bind committed
+  renderer resources to prepared-asset lifetime, but avoid treating them as WebGL lifetime owners.
+- The next phase should add explicit compacted commit/projection helpers before live worker
+  scheduling so graph updates stay a post-commit projection.
+
 ## Scheduling Model
 
 Use latest-wins scheduling with revision and key checks.
@@ -746,7 +791,7 @@ Validation:
 
 ## Phase 3B-0: Simplify Renderer Graph To Lifetime Only
 
-Status: next.
+Status: complete.
 
 Work:
 
@@ -779,7 +824,7 @@ Validation:
 
 ## Phase 3B: Compacted Geometry Scheduler And Commit Wiring
 
-Status: pending Phase 3B-0.
+Status: next.
 
 Work:
 
@@ -787,6 +832,9 @@ Work:
   use source signatures and batch-relative transforms, not packed output buffers.
 - Add a compacted batch commit helper that atomically installs the WebGL batch, family resource,
   prepared-asset retention update, pending-retention clearing, and scheduler commit notification.
+- Keep graph updates inside the compacted commit helper as a post-commit prepared-asset lifetime
+  projection. Do not add graph labels, metadata, explanations, disposal candidates, or cleanup
+  coordinator integration.
 - Add a renderer-owned compacted geometry job scheduler using `RenderResourceJobScheduler`.
 - Schedule compacted geometry jobs at the `family + partition + landblock` boundary, not as one
   whole-scene compaction generation and not as an unbounded per-frame backlog.

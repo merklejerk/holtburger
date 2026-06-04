@@ -358,14 +358,6 @@ function upsertWebgl2CompactedGeometryBatchGraph({
 			{
 				key: batchNodeKey,
 				kind: "static-batch",
-				label: `outdoor static atlas batch ${formatHex32(batch.landblockId)}`,
-				metadata: {
-					landblockId: formatHex32(batch.landblockId),
-					drawUnitCount: batch.drawUnitCount,
-					drawSliceCount: batch.drawSliceCount,
-					triangleCount: batch.triangleCount,
-					totalByteLength: batch.totalByteLength,
-				},
 			},
 		],
 		dependencyReplacements: [

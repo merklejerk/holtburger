@@ -1,6 +1,6 @@
 # Holtburger 3D Render Resource Worker Plan
 
-Status: Phase 4B implemented; Phase 4C is the next implementation phase.
+Status: Phase 4C implemented; Phase 5 is the next implementation phase.
 
 Related plans:
 
@@ -837,6 +837,48 @@ Reasoning:
 - Removing the compacted fallback before Phase 5 keeps the next atlas migration cleaner: scheduler
   required for live pipeline work, helper functions retained only for focused unit tests.
 
+### 2026-06-04: Phase 4C Implemented
+
+Removed the compacted geometry synchronous world-resource fallback:
+
+- removed direct `buildCompactedGeometryBatch` calls from `syncWebgl2CompactedGeometryResources`;
+- made compacted geometry sync fail loudly when desired compaction work has no
+  `CompactedGeometryWorkerScheduler`;
+- converted world-resource tests that relied on implicit synchronous compaction to install a fake
+  compacted worker scheduler, complete worker jobs explicitly, and then run a follow-up resource
+  sync for WebGL commit;
+- kept pure compaction CPU builder tests intact; only the world-resource renderer pipeline lost the
+  alternate synchronous path;
+- kept replacement retention behavior for committed compacted batches and family resources while
+  worker jobs are pending.
+
+Validation completed:
+
+- `npm run test:ts -- webgl2-world-resources compacted-geometry render-resource-worker-client`
+- `npm run check`
+- `npm run lint:ts`
+
+Course corrections:
+
+- Removing the synchronous fallback exposed one legitimate non-build update: common re-anchor shifts
+  can keep the same compacted geometry job key while the committed batch origin changes. The sync
+  path now updates the committed batch model matrix directly from the desired batch origin when the
+  scheduler group is already committed. This preserves re-anchor reuse without doing CPU geometry
+  compaction on the main thread.
+- Compacted geometry now matches indexed atlas generation: scheduler required for live pipeline work,
+  pure CPU helpers retained only for focused tests.
+
+Introduced cleanup targets and legacy shims:
+
+- `CompactedGeometryWorkerScheduler` remains installed by the WebGL2 renderer, but tests now install
+  fake schedulers explicitly. Future world-resource tests should follow that pattern instead of
+  depending on `createWebgl2WorldResourceStore` to create live workers.
+- `commitWebgl2CompactedGeometryBatch` still accepts retained-key sets from the surrounding sync
+  loop. That is not new debt from Phase 4C, but it remains a cleanup target if Phase 5 would
+  otherwise spread similar retention-set plumbing into atlas sync.
+- The browser debug report still emphasizes compacted worker metrics more than indexed atlas worker
+  metrics. Consider a concise atlas-worker summary during Phase 5 if profiling needs it.
+
 ## Scheduling Model
 
 Use latest-wins scheduling with revision and key checks.
@@ -1313,7 +1355,7 @@ Validation:
 
 ## Phase 4C: Remove Compacted Geometry Sync Fallback
 
-Status: next.
+Status: complete.
 
 Work:
 

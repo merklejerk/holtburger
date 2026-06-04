@@ -608,6 +608,7 @@ describe("webgl2 world resources", () => {
 	it("reports atlas-eligible direct materials without changing staged rendering", () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
+		installCompactedGeometryWorkerScheduler(store);
 		const materialSurfaceId = 0x08000002;
 		const renderSurfaceId = 0x06000002;
 
@@ -636,9 +637,10 @@ describe("webgl2 world resources", () => {
 		expect(store.atlasCandidateMaterialSlotCount).toBe(1);
 	});
 
-	it("retains and releases landblock-scoped compacted batches through the renderer graph", () => {
+	it("retains and releases landblock-scoped compacted batches through the renderer graph", async () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
+		const worker = installCompactedGeometryWorkerScheduler(store);
 		const graph = new RendererResourceGraph();
 		const materialSurfaceId = 0x08000002;
 		const renderSurfaceId = 0x06000002;
@@ -653,6 +655,29 @@ describe("webgl2 world resources", () => {
 			materialSlots: [createMaterialSlot(0, materialSurfaceId)],
 		});
 
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState({
+				materialSurfaceId,
+				renderSurfaceId,
+				compressedAtlasReady: true,
+			}),
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: createStaticRenderableScene([
+				retainedPart,
+				removedPart,
+			]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [
+				createChunkTransform({ landblockId: 0x12340000 }),
+				createChunkTransform({ landblockId: 0x12350000 }),
+			],
+			rendererResourceGraph: graph,
+		});
+		completePendingCompactedGeometryWorkerJobs(worker);
+		await waitForMicrotasks();
 		syncWebgl2WorldResources({
 			gl: gl.asContext(),
 			store,
@@ -811,13 +836,38 @@ describe("webgl2 world resources", () => {
 		).toBe(true);
 	});
 
-	it("compacts structured-interior direct-texture draw units into landblock atlas batches", () => {
+	it("compacts structured-interior direct-texture draw units into landblock atlas batches", async () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
+		const worker = installCompactedGeometryWorkerScheduler(store);
 		const graph = new RendererResourceGraph();
 		const materialSurfaceId = 0x08000002;
 		const renderSurfaceId = 0x06000002;
 
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState({
+				materialSurfaceId,
+				renderSurfaceId,
+				compressedAtlasReady: true,
+			}),
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: createStaticRenderableScene([]),
+			structuredInteriorScene: createStructuredInteriorScene([
+				createStructuredInteriorCell({
+					landblockId: 0x12340000,
+					materialSlots: [createMaterialSlot(0, materialSurfaceId)],
+				}),
+			]),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [
+				createChunkTransform({ landblockId: 0x12340000 }),
+			],
+			rendererResourceGraph: graph,
+		});
+		completePendingCompactedGeometryWorkerJobs(worker);
+		await waitForMicrotasks();
 		syncWebgl2WorldResources({
 			gl: gl.asContext(),
 			store,
@@ -866,9 +916,10 @@ describe("webgl2 world resources", () => {
 		);
 	});
 
-	it("reuses atlas textures and compacted batch buffers across common re-anchor shifts", () => {
+	it("reuses atlas textures and compacted batch buffers across common re-anchor shifts", async () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
+		const worker = installCompactedGeometryWorkerScheduler(store);
 		const graph = new RendererResourceGraph();
 		const materialSurfaceId = 0x08000002;
 		const renderSurfaceId = 0x06000002;
@@ -890,6 +941,24 @@ describe("webgl2 world resources", () => {
 			compressedAtlasReady: true,
 		});
 
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState,
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: scene,
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [
+				createChunkTransform({
+					landblockId: 0x12340000,
+					offset: { x: 10, y: 20, z: 30 },
+				}),
+			],
+			rendererResourceGraph: graph,
+		});
+		completePendingCompactedGeometryWorkerJobs(worker);
+		await waitForMicrotasks();
 		syncWebgl2WorldResources({
 			gl: gl.asContext(),
 			store,
@@ -957,7 +1026,8 @@ describe("webgl2 world resources", () => {
 		const store = createWebgl2WorldResourceStore();
 		const materialSurfaceId = 0x08000002;
 		const renderSurfaceId = 0x06000002;
-		const worker = installIndexedAtlasWorkerScheduler(store);
+		const indexedWorker = installIndexedAtlasWorkerScheduler(store);
+		const compactedWorker = installCompactedGeometryWorkerScheduler(store);
 
 		syncWebgl2WorldResources({
 			gl: gl.asContext(),
@@ -977,7 +1047,27 @@ describe("webgl2 world resources", () => {
 			transitionPortalModel: createTransitionPortalModel(),
 			renderChunkTransforms: [createChunkTransform()],
 		});
-		completeFirstIndexedAtlasWorkerJob(worker);
+		completeFirstIndexedAtlasWorkerJob(indexedWorker);
+		await waitForMicrotasks();
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState({
+				materialSurfaceId,
+				renderSurfaceId,
+				indexed: true,
+			}),
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: createStaticRenderableScene([
+				createStaticPart({
+					materialSlots: [createMaterialSlot(0, materialSurfaceId)],
+				}),
+			]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform()],
+		});
+		completePendingCompactedGeometryWorkerJobs(compactedWorker);
 		await waitForMicrotasks();
 		syncWebgl2WorldResources({
 			gl: gl.asContext(),
@@ -1103,7 +1193,8 @@ describe("webgl2 world resources", () => {
 		const store = createWebgl2WorldResourceStore();
 		const materialSurfaceId = 0x08000002;
 		const renderSurfaceId = 0x06000002;
-		const worker = installIndexedAtlasWorkerScheduler(store);
+		const indexedWorker = installIndexedAtlasWorkerScheduler(store);
+		installCompactedGeometryWorkerScheduler(store);
 
 		syncWebgl2WorldResources({
 			gl: gl.asContext(),
@@ -1124,7 +1215,7 @@ describe("webgl2 world resources", () => {
 			transitionPortalModel: createTransitionPortalModel(),
 			renderChunkTransforms: [createChunkTransform()],
 		});
-		completeFirstIndexedAtlasWorkerJob(worker);
+		completeFirstIndexedAtlasWorkerJob(indexedWorker);
 		await waitForMicrotasks();
 		syncWebgl2WorldResources({
 			gl: gl.asContext(),
@@ -1209,6 +1300,7 @@ describe("webgl2 world resources", () => {
 					return;
 				},
 			});
+		installCompactedGeometryWorkerScheduler(store);
 
 		syncWebgl2WorldResources({
 			gl: gl.asContext(),
@@ -1306,7 +1398,8 @@ describe("webgl2 world resources", () => {
 	it("merges compacted indexed slices across visibility partitions", async () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
-		const worker = installIndexedAtlasWorkerScheduler(store);
+		const indexedWorker = installIndexedAtlasWorkerScheduler(store);
+		const compactedWorker = installCompactedGeometryWorkerScheduler(store);
 		const firstMaterialSurfaceId = 0x08000002;
 		const firstRenderSurfaceId = 0x06000002;
 		const secondMaterialSurfaceId = 0x08000003;
@@ -1353,7 +1446,28 @@ describe("webgl2 world resources", () => {
 			transitionPortalModel: createTransitionPortalModel(),
 			renderChunkTransforms: [createChunkTransform()],
 		});
-		completeFirstIndexedAtlasWorkerJob(worker);
+		completeFirstIndexedAtlasWorkerJob(indexedWorker);
+		await waitForMicrotasks();
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState,
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: createStaticRenderableScene([
+				createStaticPart({
+					instanceId: "indexed-a",
+					materialSlots: [createMaterialSlot(0, firstMaterialSurfaceId)],
+				}),
+				createStaticPart({
+					instanceId: "indexed-b",
+					materialSlots: [createMaterialSlot(0, secondMaterialSurfaceId)],
+				}),
+			]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform()],
+		});
+		completePendingCompactedGeometryWorkerJobs(compactedWorker);
 		await waitForMicrotasks();
 		syncWebgl2WorldResources({
 			gl: gl.asContext(),
@@ -1411,6 +1525,7 @@ class FakeRenderResourceWorker implements RenderResourceWorkerLike {
 	onerror: ((event: Event | ErrorEvent) => void) | null = null;
 	readonly messages: RenderResourceWorkerRequestMessage[] = [];
 	readonly transferLists: Transferable[][] = [];
+	readonly completedRequestIds = new Set<string>();
 	wasTerminated = false;
 
 	postMessage(
@@ -1445,6 +1560,27 @@ function completeFirstCompactedGeometryWorkerJob(
 		result: buildCompactedGeometryWorkerResult(message.job.input),
 		durationMs: 1,
 	});
+	worker.completedRequestIds.add(message.requestId);
+}
+
+function completePendingCompactedGeometryWorkerJobs(
+	worker: FakeRenderResourceWorker,
+): void {
+	for (const message of worker.messages) {
+		if (
+			message.job.type !== "build-compacted-geometry" ||
+			worker.completedRequestIds.has(message.requestId)
+		) {
+			continue;
+		}
+		worker.emit({
+			type: "job-complete",
+			requestId: message.requestId,
+			result: buildCompactedGeometryWorkerResult(message.job.input),
+			durationMs: 1,
+		});
+		worker.completedRequestIds.add(message.requestId);
+	}
 }
 
 function completeFirstIndexedAtlasWorkerJob(
@@ -1460,6 +1596,7 @@ function completeFirstIndexedAtlasWorkerJob(
 		result: buildIndexedResourceAtlasWorkerResult(message.job.input),
 		durationMs: 1,
 	});
+	worker.completedRequestIds.add(message.requestId);
 }
 
 function installIndexedAtlasWorkerScheduler(
@@ -1473,6 +1610,21 @@ function installIndexedAtlasWorkerScheduler(
 				return;
 			},
 		});
+	return worker;
+}
+
+function installCompactedGeometryWorkerScheduler(
+	store: Webgl2WorldResourceStore,
+): FakeRenderResourceWorker {
+	const worker = new FakeRenderResourceWorker();
+	store.compactedGeometryWorkerScheduler = new CompactedGeometryWorkerScheduler(
+		{
+			client: new RenderResourceWorkerClient(() => worker),
+			onReadyResult() {
+				return;
+			},
+		},
+	);
 	return worker;
 }
 

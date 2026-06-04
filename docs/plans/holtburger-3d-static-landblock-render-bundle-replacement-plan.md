@@ -1,9 +1,9 @@
 # Holtburger 3D Static Landblock Render Bundle Replacement Plan
 
-Status: Phase 1A through Phase 1J are implemented. Phase 2 landblock worker orchestration is the
-next implementation phase. The plan has been redirected to worker-owned raw landblock closure
-loading, worker-built terrain artifacts, preset-based landblock requests, and layer-scoped texture
-pages.
+Status: Phase 1A through Phase 1J, Phase 2A, Phase 2B, and Phase 3A are implemented. Phase
+3B renderer resource realization is the next implementation phase. The plan has been redirected to
+worker-owned raw landblock closure loading, worker-built terrain artifacts, preset-based landblock
+requests, and layer-scoped texture pages.
 
 Progress:
 
@@ -104,6 +104,17 @@ Progress:
   monotonic `outdoor` or `outdoor-with-env-cells` request per landblock. The target contract does not
   carry root manifests, topology discovery DTOs, prepared-record source revisions, or summary preset
   shims.
+- 2026-06-04: Implemented Phase 2A. Added a landblock preset worker and client that load raw
+  landblock/topology/env-cell closures through the worker host bridge, run worker-local asset
+  preparation, build terrain plus static bundle artifacts, and return complete preset results without
+  main-thread prepared asset state.
+- 2026-06-04: Implemented Phase 2B. Added the resident CPU artifact store/coordinator, wired live
+  browser scene interest to submit desired preset worker jobs, committed only latest worker results,
+  and surfaced low-fidelity worker artifact diagnostics.
+- 2026-06-04: Implemented Phase 3A. Browser terrain scene selection now consumes resident
+  `LandblockTerrainRenderArtifact` results from the worker artifact store whenever the landblock
+  artifact pipeline is active, so migrated outdoor terrain no longer falls back to main-thread
+  prepared outdoor asset selection while worker artifacts are desired or in flight.
 
 Validation:
 
@@ -179,6 +190,9 @@ Validation:
   passed after Phase 1J.
 - `npm run check`, `npm run lint:dead`, `npm run lint:rust`, and `npm run lint:ts` passed after
   Phase 1J.
+- `npm exec vitest -- run src/lib/world-display/terrain-scene.test.ts` passed after Phase 3A.
+- `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run lint:rust` passed after
+  Phase 3A.
 
 Related plans:
 
@@ -1895,8 +1909,7 @@ worker model instead of carrying them forward under new names:
 
 ### Phase 2: Landblock Worker Orchestration
 
-Status: Phase 2A implemented on 2026-06-04. Phase 2B is the immediate next
-interim phase before renderer integration.
+Status: Implemented on 2026-06-04 across Phase 2A and Phase 2B.
 
 This is not a compatibility mode. It replaces the main-thread terrain/static closure prep assumption
 with a landblock render worker that can request raw assets through the worker host bridge and return
@@ -1912,8 +1925,8 @@ Implemented in Phase 2A:
 - Extended `LandblockRenderPresetWorkerJob` with concrete CPU build policy:
   - `atlasLayout`;
   - `terrainMaxLayerEntries`.
-  Policy revisions remain the stale-result identity; concrete policy values are the worker's build
-  inputs.
+    Policy revisions remain the stale-result identity; concrete policy values are the worker's build
+    inputs.
 - Moved worker-local outdoor closure loading, topology loading, env-cell selection, env-cell closure
   loading, setup-appearance companion expansion, and normalized prepared-texture expansion into the
   worker runner.
@@ -2069,12 +2082,75 @@ Exit criteria:
 
 The original Phase 2 exit criteria are now split across Phase 2A and Phase 2B above.
 
-### Phase 3: Renderer Integration Vertical Slice
+### Phase 3A: Worker Terrain Scene Handoff
 
+Status: Implemented on 2026-06-04 as an immediate interim phase before full WebGL bundle-layer
+resource realization.
+
+Purpose:
+
+- Move the first live renderer consumer from main-thread prepared outdoor asset selection to
+  resident landblock worker artifacts.
+- Keep the migration honest by preventing the active worker path from silently falling back to
+  `AssetChannelState` terrain selection while desired worker artifacts are in flight.
+- Establish the terrain side of the `outdoor` preset handoff before adding static bundle WebGL
+  resources.
+
+Implemented:
+
+- Added `deriveTerrainSceneModelFromLandblockArtifacts`, which projects resident
+  `LandblockTerrainRenderArtifact` results into the existing `TerrainSceneModel` surface.
+- `BrowserRenderResourceCoordinator` now uses worker terrain artifacts whenever the artifact store
+  has desired, in-flight, or resident preset work. The legacy `AssetChannelState` terrain selector is
+  only used when the landblock artifact pipeline is inactive.
+- The artifact projection filters by active terrain landblocks, sorts focus tiles first, reports
+  worker artifact provenance, and chooses the most detailed resident preset when both `outdoor` and
+  `outdoor-with-env-cells` artifacts are resident for the same landblock.
+- Added focused tests for active-landblock filtering, preset-detail preference, and waiting on
+  worker artifacts instead of prepared-cache fallback.
+
+Decisions and course corrections:
+
+- This phase deliberately stops at the CPU scene handoff. The existing WebGL terrain uploader still
+  recreates some blend-plan and draw-slice state from `TerrainSceneTile`; that is now explicit debt
+  for Phase 3B rather than hidden inside the scene selector.
+- The switch predicate is artifact-store activity, not resident artifact count alone. If the worker
+  path has desired or in-flight outdoor terrain, the renderer should wait for worker output instead
+  of drawing stale main-thread prepared outdoor payloads.
+- Worker artifact diagnostics remain aggregate and low fidelity. Picker/debug consumers are not
+  upgraded in this phase.
+
+Cleanup targets:
+
+- `TerrainSceneTile.assetId` now carries the terrain artifact key for worker-derived tiles. Phase 3B
+  should introduce explicit artifact/resource keys in the WebGL resource layer instead of relying on
+  the legacy asset-id field name.
+- `createOrReuseWebgl2TerrainTile` still rebuilds terrain blend plans and draw-slice geometry from
+  scene tile facts. Phase 3B should consume artifact `drawSlices`, `texturePageRefs`, and
+  `debugFallbackGeometry` directly for worker-derived terrain tiles.
+- Main-thread terrain texture atlas planning still considers terrain page candidates through the old
+  atlas generation path. Phase 3B should upload/bind worker-owned terrain page refs directly for the
+  integrated preset and avoid atlas generation replacement accounting.
+
+Legacy shims introduced:
+
+- No public compatibility shim or alternate renderer mode was added.
+- The existing `TerrainSceneModel` shape is reused as a short-lived bridge into WebGL resource sync.
+  It should not grow new static bundle concepts.
+
+Exit criteria:
+
+- Live browser terrain scene selection can be derived from resident worker terrain artifacts.
+- Active worker terrain requests wait for worker artifacts instead of drawing prepared-cache terrain.
+- Focused tests and `npm run check` pass.
+
+### Phase 3B: Renderer Integration Vertical Slice
+
+- Add WebGL terrain resource realization that consumes `LandblockTerrainRenderArtifact` draw slices,
+  fallback geometry, texture page refs, and artifact keys directly instead of rebuilding terrain CPU
+  plans from `AssetChannelState`.
 - Add WebGL layer resource realization for compacted batches, direct static entries, material tables,
   and layer-owned texture pages.
-- Add WebGL/CPU realization for `LandblockTerrainRenderArtifact`; terrain remains first-class and
-  must not route through static direct draw fallback.
 - Wire the `outdoor` preset first through planning, worker orchestration, WebGL realization, resident
   terrain/object ownership, and submit.
 - Consume resident worker artifacts from the Phase 2B store; do not re-plan
@@ -2082,9 +2158,9 @@ The original Phase 2 exit criteria are now split across Phase 2A and Phase 2B ab
 - For that wired preset, replace static staged draw-unit assembly with resident terrain/object
   artifacts.
 - Keep structured interior and portal code separate unless a specific piece is intentionally moved.
-- Keep `outdoor-with-env-cells` and `env-cell-static` out of the first integration until the vertical
-  slice proves the ownership model, but do not introduce a separate topology discovery scheduler when
-  `env-cell-static` is added.
+- Keep `outdoor-with-env-cells` and `env-cell-static` out of the first full static integration until
+  the vertical slice proves the ownership model, but do not introduce a separate topology discovery
+  scheduler when env cells are added.
 - Remove static draw units from compaction planning for the integrated preset.
 - Delete direct suppression logic for the integrated preset once no staged direct draw units coexist
   with its compacted static replacements.
@@ -2092,6 +2168,8 @@ The original Phase 2 exit criteria are now split across Phase 2A and Phase 2B ab
 Exit criteria:
 
 - `outdoor` renders from resident terrain/object artifacts without the static staged path.
+- Worker-derived terrain resources consume artifact-owned terrain slices/page refs without
+  main-thread terrain blend-plan reconstruction.
 - Layer-owned textures, compacted batches, direct static entries, material tables, and eviction work
   for the integrated preset.
 - Existing static compaction scheduler is unused for the integrated preset.

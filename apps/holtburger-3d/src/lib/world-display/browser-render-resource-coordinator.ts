@@ -66,6 +66,7 @@ import {
 } from "./structured-interior-scene";
 import {
 	deriveTerrainSceneModel,
+	deriveTerrainSceneModelFromLandblockArtifacts,
 	type TerrainSceneTile,
 	type TerrainSceneModel,
 } from "./terrain-scene";
@@ -262,12 +263,22 @@ export class BrowserRenderResourceCoordinator {
 						detailRadius: input.detailLodRadius,
 						envCellRadius: input.envCellLodRadius,
 					});
-		const terrainScene = deriveTerrainSceneModel(
-			input.assetState,
-			input.browserDestination,
-			input.terrainLodRadius,
-			outdoorSceneInterest?.terrainLandblockIds ?? null,
-		);
+		const terrainScene = shouldUseStaticLandblockTerrainArtifacts(
+			input.staticLandblockRenderArtifacts,
+		)
+			? deriveTerrainSceneModelFromLandblockArtifacts({
+					artifacts: input.staticLandblockRenderArtifacts,
+					browserDestination: input.browserDestination,
+					terrainLodRadius: input.terrainLodRadius,
+					terrainLandblockIds:
+						outdoorSceneInterest?.terrainLandblockIds ?? null,
+				})
+			: deriveTerrainSceneModel(
+					input.assetState,
+					input.browserDestination,
+					input.terrainLodRadius,
+					outdoorSceneInterest?.terrainLandblockIds ?? null,
+				);
 		const linkedOutdoorEnvCellIds =
 			outdoorSceneInterest === null
 				? []
@@ -1025,6 +1036,16 @@ function countPreparedAssetsByKind(
 	}
 	return Object.fromEntries(
 		Object.entries(counts).sort(([left], [right]) => left.localeCompare(right)),
+	);
+}
+
+function shouldUseStaticLandblockTerrainArtifacts(
+	snapshot: StaticLandblockRenderArtifactStoreSnapshot,
+): boolean {
+	return (
+		snapshot.desiredCount > 0 ||
+		snapshot.inFlightCount > 0 ||
+		snapshot.residentCount > 0
 	);
 }
 

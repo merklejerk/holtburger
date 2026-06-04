@@ -16,6 +16,8 @@ import {
 	type TerrainMaterialResourcePlan,
 } from "./terrain-materials";
 import { createPreparedTerrainMeshFromOutdoorPayload } from "./terrain-render-artifact";
+import type { LandblockRenderPresetWorkerResult } from "./landblock-render-preset";
+import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
 
 export interface TerrainSceneTile {
 	assetId: string;
@@ -25,7 +27,11 @@ export interface TerrainSceneTile {
 	chunkLocalOffset: { x: number; y: number; z: number };
 	mesh: PreparedTerrainMesh;
 	materialResources: TerrainMaterialResourcePlan;
-	dataSource: "repo-local-cell-landblock" | "generated-fallback" | "unknown";
+	dataSource:
+		| "repo-local-cell-landblock"
+		| "worker-landblock-render-artifact"
+		| "generated-fallback"
+		| "unknown";
 }
 
 export interface TerrainSceneModel {
@@ -137,6 +143,96 @@ export function deriveTerrainSceneModel(
 	};
 }
 
+export function deriveTerrainSceneModelFromLandblockArtifacts({
+	artifacts,
+	browserDestination = null,
+	terrainLodRadius = 1,
+	terrainLandblockIds = null,
+}: {
+	artifacts: StaticLandblockRenderArtifactStoreSnapshot;
+	browserDestination?: BrowserLocationSelection | null;
+	terrainLodRadius?: number;
+	terrainLandblockIds?: readonly number[] | null;
+}): TerrainSceneModel {
+	if (!browserDestination) {
+		return {
+			focusLandblockId: null,
+			statusText:
+				"Waiting for a browser destination before worker terrain artifact selection can start.",
+			cacheText: describeWorkerArtifactTerrainCache(artifacts),
+			dataSourceText: "No terrain provenance available yet.",
+			tiles: [],
+		};
+	}
+
+	if (isIndoorBrowserDestination(browserDestination)) {
+		return {
+			focusLandblockId: null,
+			statusText:
+				"Browser mode is focused on an indoor env cell, so outdoor terrain artifact rendering is dormant.",
+			cacheText: describeWorkerArtifactTerrainCache(artifacts),
+			dataSourceText: describeTerrainDataSources([]),
+			tiles: [],
+		};
+	}
+
+	const focusLandblockId = deriveTerrainFocusLandblockId(browserDestination);
+	const activeLandblockIds = new Set(
+		terrainLandblockIds ??
+			buildOutdoorCoverageLandblockIds(focusLandblockId, terrainLodRadius),
+	);
+	const focusCoords = getOutdoorLandblockCoords(focusLandblockId);
+	const tiles = selectResidentTerrainArtifactResults(
+		artifacts,
+		activeLandblockIds,
+	)
+		.map((result): TerrainSceneTile => {
+			const artifact = result.terrainArtifact;
+			if (!artifact) {
+				throw new Error(
+					`Landblock render result ${result.jobId} was selected without a terrain artifact.`,
+				);
+			}
+			return {
+				assetId: artifact.key,
+				landblockId: artifact.landblockId,
+				label: formatLandblockLabel(artifact.landblockId),
+				isFocus: artifact.landblockId === focusLandblockId,
+				chunkLocalOffset: { x: 0, y: 0, z: 0 },
+				mesh: artifact.mesh,
+				materialResources: artifact.materialResources,
+				dataSource: "worker-landblock-render-artifact",
+			};
+		})
+		.sort((left, right) => {
+			if (left.isFocus !== right.isFocus) {
+				return left.isFocus ? -1 : 1;
+			}
+			return compareLandblockGridPosition(
+				left.landblockId,
+				right.landblockId,
+				focusCoords,
+			);
+		});
+
+	const focusTile = tiles.find((tile) => tile.isFocus) ?? null;
+	const materialText = describeTerrainMaterialResources(
+		tiles.map((tile) => tile.materialResources),
+	);
+
+	return {
+		focusLandblockId,
+		statusText: focusTile
+			? `Renderer has ${tiles.length} worker terrain artifact${tiles.length === 1 ? "" : "s"} ready around focus ${focusTile.label}.`
+			: `Renderer is waiting for worker terrain artifact ${formatLandblockLabel(focusLandblockId)} while ${tiles.length} neighbor artifact${tiles.length === 1 ? " is" : "s are"} resident.`,
+		cacheText: `${describeWorkerArtifactTerrainCache(artifacts)}; ${materialText}`,
+		dataSourceText: describeTerrainDataSources(
+			tiles.map((tile) => tile.dataSource),
+		),
+		tiles,
+	};
+}
+
 function getTerrainMeshFromPreparedAsset(
 	asset: PreparedAssetRecord,
 ): PreparedTerrainMesh | null {
@@ -173,6 +269,10 @@ function countPreparedTerrainAssets(
 function describeTerrainDataSources(
 	dataSources: Array<TerrainSceneTile["dataSource"]>,
 ): string {
+	if (dataSources.includes("worker-landblock-render-artifact")) {
+		return "Worker-built landblock render artifacts are present in the terrain scene.";
+	}
+
 	if (dataSources.includes("repo-local-cell-landblock")) {
 		return "Live repo-local CellLandblock payloads are present in the terrain cache.";
 	}
@@ -182,6 +282,56 @@ function describeTerrainDataSources(
 	}
 
 	return "No terrain provenance is available yet.";
+}
+
+function selectResidentTerrainArtifactResults(
+	artifacts: StaticLandblockRenderArtifactStoreSnapshot,
+	activeLandblockIds: ReadonlySet<number>,
+): LandblockRenderPresetWorkerResult[] {
+	const resultByLandblockId = new Map<
+		number,
+		LandblockRenderPresetWorkerResult
+	>();
+	for (const result of artifacts.artifacts) {
+		if (
+			!result.terrainArtifact ||
+			!activeLandblockIds.has(result.landblockId)
+		) {
+			continue;
+		}
+		const existing = resultByLandblockId.get(result.landblockId);
+		if (!existing || compareArtifactResultDetail(result, existing) > 0) {
+			resultByLandblockId.set(result.landblockId, result);
+		}
+	}
+	return [...resultByLandblockId.values()];
+}
+
+function compareArtifactResultDetail(
+	left: LandblockRenderPresetWorkerResult,
+	right: LandblockRenderPresetWorkerResult,
+): number {
+	return artifactResultPresetRank(left) - artifactResultPresetRank(right);
+}
+
+function artifactResultPresetRank(
+	result: LandblockRenderPresetWorkerResult,
+): number {
+	switch (result.preset) {
+		case "outdoor":
+			return 0;
+		case "outdoor-with-env-cells":
+			return 1;
+	}
+}
+
+function describeWorkerArtifactTerrainCache(
+	artifacts: StaticLandblockRenderArtifactStoreSnapshot,
+): string {
+	const terrainArtifactCount = artifacts.artifacts.filter(
+		(result) => result.terrainArtifact !== null,
+	).length;
+	return `Worker artifact cache has ${terrainArtifactCount} terrain artifact${terrainArtifactCount === 1 ? "" : "s"} resident across ${artifacts.residentCount} landblock preset result${artifacts.residentCount === 1 ? "" : "s"}; ${artifacts.inFlightCount} in flight.`;
 }
 
 function describeTerrainMaterialResources(

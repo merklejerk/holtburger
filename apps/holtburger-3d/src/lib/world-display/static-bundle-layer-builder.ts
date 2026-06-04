@@ -1,8 +1,12 @@
 import {
 	getPreparedAssetDependencies,
-	formatPreparedTextureAssetId,
 	type PreparedAssetRecord,
+	type PreparedTexturePayload,
 } from "../assets/types";
+import {
+	resolveNormalizedPreparedTextureAssetIds,
+	type MaterialTextureUsage,
+} from "../assets/material-texture-preparation-policy";
 import {
 	formatEnvCellAssetId,
 	formatHex32,
@@ -70,7 +74,13 @@ interface StaticBundleMaterialTextureRoute {
 	materialAssetId: string;
 	preparedTextureAssetId: string;
 	renderSurfaceAssetId: string;
+	usage: MaterialTextureUsage;
 }
+
+const STATIC_BUNDLE_MATERIAL_TEXTURE_USAGES: readonly MaterialTextureUsage[] = [
+	"raw",
+	"detail",
+];
 
 export function buildStaticLandblockRenderBundleLayer({
 	job,
@@ -423,14 +433,14 @@ function collectVirtualTexturePageRefs(
 			return {
 				key: `texture:${route.materialAssetId}:${route.preparedTextureAssetId}`,
 				sourceAssetId: route.preparedTextureAssetId,
-				usageBucket: payload.usage === "detail" ? "detail" : "base-color",
-				sampleClass: "rgba-color",
+				usageBucket: mapPreparedTextureUsageBucket(payload),
+				sampleClass: mapPreparedTextureSampleClass(payload),
 				width: level.width,
 				height: level.height,
 				wrapS: "clamp",
 				wrapT: "clamp",
-				samplingDomain: payload.colorSpace === "data" ? "data" : "color",
-				lookup: payload.colorSpace === "data" ? "exact" : "color-filtered",
+				samplingDomain: mapPreparedTextureSamplingDomain(payload),
+				lookup: mapPreparedTextureLookup(payload),
 				bytes: level.bytes,
 			};
 		})
@@ -455,21 +465,22 @@ function collectMaterialTextureRoutes(
 				renderSurfaceAssetId,
 				"render-surface",
 			);
-			const route = {
-				materialAssetId,
-				renderSurfaceAssetId,
-				preparedTextureAssetId: formatPreparedTextureAssetId({
-					renderSurfaceId: renderSurface.renderSurfaceId,
-					usage: "color",
-					outputFormat: "rgba8",
-					mipPolicy: "none",
-					colorSpace: "linear",
-				}),
-			};
-			routesByKey.set(
-				`${route.materialAssetId}|${route.preparedTextureAssetId}`,
-				route,
-			);
+			for (const usage of STATIC_BUNDLE_MATERIAL_TEXTURE_USAGES) {
+				for (const preparedTextureAssetId of resolveNormalizedPreparedTextureAssetIds(
+					{ renderSurface, usage },
+				)) {
+					const route = {
+						materialAssetId,
+						preparedTextureAssetId,
+						renderSurfaceAssetId,
+						usage,
+					};
+					routesByKey.set(
+						`${route.materialAssetId}|${route.preparedTextureAssetId}`,
+						route,
+					);
+				}
+			}
 		}
 	}
 	return [...routesByKey.values()].sort((left, right) =>
@@ -504,22 +515,57 @@ function collectPreparedTextureRouteAssetIds(
 	if (asset.payload.kind !== "material-recipe") {
 		return [];
 	}
-	return asset.payload.dependencies.renderSurfaceAssetIds.map(
-		(renderSurfaceAssetId) => {
+	return asset.payload.dependencies.renderSurfaceAssetIds
+		.map((renderSurfaceAssetId) => {
 			const renderSurface = getPreparedPayload(
 				preparedByAssetId,
 				renderSurfaceAssetId,
 				"render-surface",
 			);
-			return formatPreparedTextureAssetId({
-				renderSurfaceId: renderSurface.renderSurfaceId,
-				usage: "color",
-				outputFormat: "rgba8",
-				mipPolicy: "none",
-				colorSpace: "linear",
-			});
-		},
-	);
+			return STATIC_BUNDLE_MATERIAL_TEXTURE_USAGES.flatMap((usage) =>
+				resolveNormalizedPreparedTextureAssetIds({ renderSurface, usage }),
+			);
+		})
+		.flat();
+}
+
+function mapPreparedTextureUsageBucket(
+	payload: PreparedTexturePayload,
+): VirtualTexturePageRef["usageBucket"] {
+	if (payload.usage === "detail") {
+		return "detail";
+	}
+	if (payload.usage === "mask") {
+		return "alpha-control";
+	}
+	return "base-color";
+}
+
+function mapPreparedTextureSampleClass(
+	payload: PreparedTexturePayload,
+): VirtualTexturePageRef["sampleClass"] {
+	if (payload.usage === "mask") {
+		return "control-data";
+	}
+	return payload.colorSpace === "data" ? "indexed-data" : "rgba-color";
+}
+
+function mapPreparedTextureSamplingDomain(
+	payload: PreparedTexturePayload,
+): VirtualTexturePageRef["samplingDomain"] {
+	if (payload.usage === "mask") {
+		return "control";
+	}
+	return payload.colorSpace === "data" ? "data" : "color";
+}
+
+function mapPreparedTextureLookup(
+	payload: PreparedTexturePayload,
+): VirtualTexturePageRef["lookup"] {
+	if (payload.usage === "mask") {
+		return "control-filtered";
+	}
+	return payload.colorSpace === "data" ? "exact" : "color-filtered";
 }
 
 function buildLayerTexturePages(options: {

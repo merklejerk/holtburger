@@ -1,9 +1,9 @@
 # Holtburger 3D Static Landblock Render Bundle Replacement Plan
 
-Status: Phase 1A, Phase 1B, Phase 1C, and the first Phase 1D builder slice are implemented. Phase
-1D remains the active implementation phase for deeper staged-pipeline extraction before Phase 2
-worker orchestration. The plan has been redirected to worker-owned raw static closure loading and
-layer-scoped texture pages.
+Status: Phase 1A, Phase 1B, Phase 1C, and Phase 1D are implemented. The remaining pre-worker work
+has been split into Phase 1E material/family eligibility extraction, Phase 1F compaction geometry
+extraction, and Phase 1G texture/material-role hardening before Phase 2 worker orchestration. The
+plan has been redirected to worker-owned raw static closure loading and layer-scoped texture pages.
 
 Progress:
 
@@ -45,6 +45,14 @@ Progress:
 - 2026-06-04: Refined the Phase 1D builder slice so material render-surface dependencies derive
   normalized `prepared-texture/...` route IDs for worker-local closure accounting and layer texture
   refs. Texture page generation no longer scans unrelated prepared texture records from the closure.
+- 2026-06-04: Completed the Phase 1D normalized material texture policy refinement. The static
+  bundle builder now mirrors the material texture preparation policy for raw/detail static material
+  routes, validates policy-supported render-surface formats through the fixture coverage, and maps
+  prepared texture payload metadata into virtual texture page usage/sample/lookup fields instead of
+  assuming color RGBA pages.
+- 2026-06-04: Closed Phase 1D as the worker-safe builder foundation and split its remaining broad
+  extraction bucket into smaller executable phases: Phase 1E material/family eligibility, Phase 1F
+  compaction geometry assembly, and Phase 1G texture/material-role hardening plus pre-worker cleanup.
 
 Validation:
 
@@ -77,6 +85,16 @@ Validation:
   passed after the Phase 1D texture-route refinement.
 - `npm run check`, `npm run lint:dead`, and `npm run lint:rust` passed after the Phase 1D
   texture-route refinement.
+- `npm exec prettier -- --write src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts`
+  passed from `apps/holtburger-3d` after the Phase 1D normalized material texture policy
+  refinement. The same command failed from the repo root because `prettier-plugin-svelte` is not
+  resolvable from that package context.
+- `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts`
+  passed after the Phase 1D normalized material texture policy refinement.
+- `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts`
+  passed after the Phase 1D normalized material texture policy refinement.
+- `npm run check`, `npm run lint:dead`, and `npm run lint:rust` passed after the Phase 1D normalized
+  material texture policy refinement.
 - `npm run lint:ts` currently fails on existing unrelated debt:
   `src/lib/world-display/camera.ts` defines unused `rendererPointToAcPosition`.
 
@@ -1075,8 +1093,9 @@ Exit criteria:
 
 ### Phase 1D: Worker-Safe Static Bundle Builder
 
-Status: Active. First builder slice implemented on 2026-06-04; deeper extraction remains before
-Phase 2.
+Status: Implemented on 2026-06-04. This phase established the worker-safe builder foundation and
+normalized material texture route policy support. Remaining work that was previously grouped under
+Phase 1D is now split into Phase 1E, Phase 1F, and Phase 1G.
 
 Implemented in the first builder slice:
 
@@ -1095,19 +1114,26 @@ Implemented in the first builder slice:
   - packed atlas pages;
   - virtual-ref-to-rect entries.
 - Added material-derived normalized prepared-texture route derivation for render-surface
-  dependencies. Worker-prepared dependency accounting now includes those `prepared-texture/...`
-  routes, and texture page refs are built from the material routes actually used by the layer.
+  dependencies. Worker-prepared dependency accounting now includes the policy-derived
+  `prepared-texture/...` routes for raw/detail static material usages, and texture page refs are
+  built from the material routes actually used by the layer.
+- Added virtual texture page classification from prepared texture payload metadata. Base color,
+  detail, mask/control, data, and color-filtered lookup shapes can now be represented without
+  hardcoding all material refs as color RGBA.
 - Added fixture-based tests proving stable object/cell keys, worker-prepared dependency collection,
   hard failure for inconsistent closures, compacted/direct output, packed/single texture pages, and
-  texture-page key independence from sampler/filtering policy.
+  texture-page key independence from sampler/filtering policy. The render-surface fixture now uses a
+  policy-supported RGBA source format so the tests exercise the normalized policy rather than
+  bypassing it.
 
 Decisions and course corrections:
 
 - The first builder slice intentionally does not reuse staged draw units or render-resource worker
   payloads. It emits the Phase 1C bundle DTOs directly.
 - The compacted-batch assembly is a conservative layer-local DTO builder, not the final optimized
-  compaction-family extraction. Deeper Phase 1D work should extract real material/family
-  eligibility from the current compaction path without importing staged scheduling concepts.
+  compaction-family extraction. Phase 1E and Phase 1F should extract real material/family
+  eligibility and compaction assembly from the current compaction path without importing staged
+  scheduling concepts.
 - Texture page packing reuses `planAtlasLayout`, which is already renderer-neutral. CPU pixel
   assembly is simple RGBA placement for now; richer DXT/indexed/palette handling remains a later
   builder extraction target.
@@ -1115,36 +1141,15 @@ Decisions and course corrections:
   while iterating could skip dependencies. The collector now uses a deterministic shift/sort loop.
 - Texture route derivation is now material-driven. Unrelated prepared textures in the worker-local
   closure no longer produce layer texture pages.
+- Texture route derivation now goes through `resolveNormalizedPreparedTextureAssetIds` instead of
+  reconstructing `prepared-texture/...` IDs locally. This keeps the builder aligned with the scene
+  asset request planner and avoids another policy fork.
+- The builder currently asks the normalized policy for raw/detail material routes. Mask/control
+  classification is represented at the virtual texture page layer, but selecting alpha-control routes
+  still needs explicit material-role semantics before it should be scheduled for ordinary static
+  objects.
 - Knip caught an unused prepared-texture helper export and an over-exported build policy interface;
   both were removed/narrowed rather than kept as speculative API.
-
-Remaining Phase 1D work:
-
-- Extract pure CPU helpers from the current staged pipeline where useful:
-  - static source expansion;
-  - part transform construction;
-  - material record resolution;
-  - compacted geometry assembly;
-  - virtual texture ref construction;
-  - layer-scoped texture page packing.
-- Extract worker-safe closure expansion helpers beyond the first builder slice:
-  - response dependency expansion via `getAssetResponseDependencies`;
-  - setup-appearance companion expansion for setup models;
-  - selected outdoor building/detail source expansion from `landblock/outdoor`;
-  - full normalized material texture preparation policy support for prepared texture route
-    derivation.
-- Start from the Phase 1C root-manifest contract. Do not reintroduce full main-thread closure
-  completeness as a builder precondition.
-- Extract worker-safe texture page packing helpers from current atlas layout / CPU generation code
-  without importing WebGL resource modules.
-- Rename concepts away from "staged" where they become layer-local.
-- Add fixture-based tests with small synthetic landblock closures.
-- Use worker-local prepared assets as builder input. The builder should fail hard if the worker
-  closure loader supplies an internally inconsistent closure.
-- Keep picker/debug metadata optional. Do not add per-part sidecars unless they fall out of builder
-  work without affecting render output, layer identity, compaction, layer texture page packing, or
-  scheduling.
-- Keep this phase pure. Do not add WebGL realization here.
 
 Introduced cleanup targets:
 
@@ -1154,9 +1159,10 @@ Introduced cleanup targets:
 - The first compacted DTO assembly groups compactable surfaces into one conservative batch. Replace
   this with extracted compaction-family/material eligibility before Phase 2 depends on it for real
   outdoor rendering.
-- Texture page refs now come from material-derived `prepared-texture/...` routes, but the route
-  policy is still intentionally narrow: color, rgba8, no mips, linear. Extend this with the existing
-  normalized material texture preparation policy before full worker orchestration.
+- Texture page refs now come from material-derived `prepared-texture/...` routes through the
+  normalized material texture preparation policy for raw/detail static material usages. The next
+  cleanup target is not another route shim; it is extracting material-role semantics so alpha/control
+  or indexed/palette routes can be selected only when the source material actually calls for them.
 - Direct-entry bounds are currently null in the first builder slice. Add bounds only if they fall
   out of render output work; do not add picker/debug-only sidecars.
 
@@ -1167,9 +1173,8 @@ Legacy shims introduced:
 
 Legacy debt found before the next phase:
 
-- Phase 1D should continue before Phase 2. The next immediate work is extracting real material,
-  texture-policy, and compaction eligibility helpers from the staged pipeline into worker-safe
-  modules.
+- Phase 1E should run before Phase 2. The next immediate work is extracting real material, family
+  selection, and compaction eligibility helpers from the staged pipeline into worker-safe modules.
 - `npm run lint:ts` remains blocked by existing unrelated dead code in
   `src/lib/world-display/camera.ts`: `rendererPointToAcPosition` is defined but unused.
 
@@ -1183,6 +1188,128 @@ Exit criteria:
 - Builder tests prove filtering/sampler policy does not change CPU texture page artifact keys.
 - The old staged static path remains present but is not extended with new static accounting.
 
+### Phase 1E: Worker-Safe Material and Family Eligibility
+
+Status: Next.
+
+Purpose:
+
+- Replace the builder's conservative material/family placeholders with worker-safe extraction from
+  the existing staged material and compaction-family logic.
+- Keep the extraction pure and CPU-only. Do not import WebGL resource stores, staged draw-unit
+  schedulers, render-resource worker payloads, or browser debug state.
+
+Implementation notes:
+
+- Extract or recreate the smallest worker-safe helpers needed for:
+  - material record resolution;
+  - material transparency and direct/compact family selection;
+  - part transform and material-slot association;
+  - stable material/family keys;
+  - compactable vs direct-entry eligibility.
+- Start from worker-local prepared assets and the Phase 1C root-manifest contract. Do not require a
+  complete main-thread prepared closure.
+- Keep picker/debug metadata optional. Do not add part sidecars unless they are free byproducts of
+  render output and do not affect layer identity, packing, compaction, or scheduling.
+- Rename concepts away from "staged" when they become layer-local builder concepts.
+
+Exit criteria:
+
+- Builder output no longer uses material ID string conventions such as `material/direct-*` to decide
+  direct vs compacted output.
+- Unit tests cover mixed compactable/direct material families from synthetic worker-local closures.
+- No new compatibility shims, alternate staged/static modes, or render-resource worker payload
+  adapters are introduced.
+- `npm run check`, `npm run lint:dead`, `npm run lint:rust`, focused tests, and changed-file ESLint
+  pass. Full `npm run lint:ts` may remain blocked only by the existing unrelated `camera.ts` debt
+  until that debt is cleaned.
+
+Cleanup targets:
+
+- Narrow or delete staged-only material/family helpers once the worker-safe versions become the
+  canonical static path.
+- Remove any temporary builder names that imply staged draw-unit ownership.
+
+### Phase 1F: Worker-Safe Compaction Geometry Assembly
+
+Status: Pending Phase 1E.
+
+Purpose:
+
+- Replace the first builder slice's one-batch synthetic compaction DTO assembly with real
+  worker-safe compacted geometry assembly.
+- Preserve the architectural decision that static layers emit complete compacted/direct artifacts;
+  do not reintroduce incremental compaction accounting, pending replacement state, or runtime direct
+  fallback suppression.
+
+Implementation notes:
+
+- Extract pure CPU compaction helpers from the current static compaction path where useful:
+  - vertex/index buffer concatenation;
+  - surface/group ordering;
+  - material/family grouping;
+  - object key aggregation;
+  - bounds or spatial hints only if they fall out of render assembly.
+- Keep direct static entries as the authoritative representation for surfaces that are not eligible
+  for compaction.
+- Keep the builder failure mode strict for internally inconsistent worker-local closures.
+
+Exit criteria:
+
+- Builder tests prove multiple compacted batches can be emitted by family/material grouping.
+- Builder tests prove noncompactable surfaces remain direct entries without staged direct fallback
+  suppression.
+- The compacted DTO layout is close enough to the eventual WebGL realizer that Phase 2 can run the
+  builder inside the worker without another builder contract rewrite.
+- Focused tests, changed-file ESLint, `npm run check`, `npm run lint:dead`, and `npm run lint:rust`
+  pass.
+
+Cleanup targets:
+
+- Delete or quarantine staged-only static compaction helpers once no target code depends on them.
+- Remove plan/code language that still describes static compaction as incremental or generation
+  replacement based.
+
+### Phase 1G: Texture Material Roles and Pre-Worker Cleanup
+
+Status: Pending Phase 1F.
+
+Purpose:
+
+- Finish the pre-worker hardening needed before Phase 2 by resolving texture/material role blind
+  spots and deleting avoidable transitional surface area.
+- Keep layer-scoped texture pages as the target. Do not add global atlas state handoff to the
+  worker.
+
+Implementation notes:
+
+- Decide whether static material semantics require alpha/control, indexed, or palette routes beyond
+  the current raw/detail normalized material routes.
+- If additional routes are needed, select them from explicit material-role semantics rather than
+  asking every static material for every possible prepared texture usage.
+- Extract worker-safe texture page packing helpers from current atlas layout / CPU generation code
+  without importing WebGL resource modules.
+- Quarantine or remove Phase 1A transitional prepared-cache closure diagnostics if worker-local
+  closure diagnostics now cover the needed debugging surface.
+- Clean naming and comments that imply staged ownership where the code now owns layer-local
+  artifacts.
+
+Exit criteria:
+
+- Texture page refs and texture pages cover the material roles Phase 2 needs, with tests for
+  base-color/detail and any newly selected alpha/control or indexed/palette routes.
+- Global filtering/sampler policy changes remain outside static bundle rebuild keys.
+- Phase 2 can focus on worker orchestration instead of builder contract churn.
+- Focused tests, changed-file ESLint, `npm run check`, `npm run lint:dead`, and `npm run lint:rust`
+  pass.
+
+Cleanup targets:
+
+- Remove legacy or duplicated static texture helper code that exists only for staged render-resource
+  worker scheduling.
+- Keep diagnostics low-fidelity where needed; picker/debug consumers must not force richer static
+  artifact accounting into the core render path.
+
 ### Phase 2: Static Worker Orchestration
 
 This is not a compatibility mode. It replaces the main-thread static closure prep assumption with a
@@ -1193,7 +1320,7 @@ static layer worker that can request raw assets through the worker host bridge.
 - Move worker-local static closure loading and preparation into the worker job.
 - Add worker-local closure expansion for setup-appearance companions and normalized prepared texture
   routes.
-- Run the Phase 1D builder inside the worker.
+- Run the static bundle builder inside the worker.
 - Return transferable geometry buffers and texture page byte buffers to the main thread.
 - Coalesce desired scopes and reject stale worker results by scope/source revision.
 - Keep WebGL realization on the main thread.

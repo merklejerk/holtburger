@@ -6,6 +6,8 @@ import { RenderResourceWorkerClient } from "./render-resource-worker-client";
 import { CompactedGeometryWorkerScheduler } from "./worker-resources/compacted-geometry-worker-scheduler";
 import { IndexedResourceAtlasWorkerScheduler } from "./worker-resources/indexed-atlas-worker-scheduler";
 import type { BuildIndexedResourceAtlasWorkerInput } from "./worker-resources/indexed-atlas-worker-payloads";
+import { TextureAtlasWorkerScheduler } from "./worker-resources/texture-atlas-worker-scheduler";
+import type { BuildTextureAtlasWorkerInput } from "./worker-resources/texture-atlas-worker-payloads";
 import type {
 	RenderResourceWorkerRequestMessage,
 	RenderResourceWorkerResponseMessage,
@@ -499,6 +501,126 @@ describe("indexed resource atlas worker scheduler", () => {
 	});
 });
 
+describe("texture atlas worker scheduler", () => {
+	it("submits texture atlas jobs and reports ready results", async () => {
+		const worker = new FakeRenderResourceWorker();
+		const client = new RenderResourceWorkerClient(() => worker);
+		let readyNotificationCount = 0;
+		const scheduler = new TextureAtlasWorkerScheduler({
+			client,
+			onReadyResult() {
+				readyNotificationCount += 1;
+			},
+		});
+
+		scheduler.scheduleDesired({
+			plan: createTextureAtlasPlan(createTextureAtlasWorkerInput()),
+			textureFilteringMode: "anisotropic-4x",
+			maxAnisotropy: 1,
+		});
+
+		expect(worker.messages).toHaveLength(1);
+		expect(worker.messages[0]?.job).toMatchObject({
+			type: "build-texture-atlas",
+			key: "texture-page-atlas/a;filter=anisotropic-4x;aniso=1",
+		});
+
+		worker.emit({
+			type: "job-complete",
+			requestId: "render-resource-1",
+			result: {
+				type: "build-texture-atlas",
+				key: "texture-page-atlas/a;filter=anisotropic-4x;aniso=1",
+				generation: null,
+			},
+			durationMs: 1,
+		});
+		await waitForMicrotasks();
+
+		expect(readyNotificationCount).toBe(1);
+		expect(scheduler.consumeReadyResults()).toEqual([
+			{
+				type: "build-texture-atlas",
+				key: "texture-page-atlas/a;filter=anisotropic-4x;aniso=1",
+				generation: null,
+			},
+		]);
+		expect(scheduler.getMetrics()).toMatchObject({
+			activeSchedulerCount: 1,
+			submittedJobCount: 1,
+			readyResultCount: 1,
+		});
+	});
+
+	it("coalesces stale texture atlas jobs and can reset in-flight work", async () => {
+		const worker = new FakeRenderResourceWorker();
+		const client = new RenderResourceWorkerClient(() => worker);
+		const scheduler = new TextureAtlasWorkerScheduler({
+			client,
+			onReadyResult() {
+				return;
+			},
+		});
+
+		scheduler.scheduleDesired({
+			plan: createTextureAtlasPlan(createTextureAtlasWorkerInput("a")),
+			textureFilteringMode: "anisotropic-4x",
+			maxAnisotropy: 1,
+		});
+		scheduler.scheduleDesired({
+			plan: createTextureAtlasPlan(createTextureAtlasWorkerInput("b")),
+			textureFilteringMode: "anisotropic-4x",
+			maxAnisotropy: 1,
+		});
+
+		expect(scheduler.getMetrics()).toMatchObject({
+			submittedJobCount: 1,
+			coalescedDesiredJobCount: 1,
+		});
+
+		worker.emit({
+			type: "job-complete",
+			requestId: "render-resource-1",
+			result: {
+				type: "build-texture-atlas",
+				key: "texture-page-atlas/a;filter=anisotropic-4x;aniso=1",
+				generation: null,
+			},
+			durationMs: 1,
+		});
+		await waitForMicrotasks();
+
+		expect(scheduler.consumeReadyResults()).toEqual([]);
+		expect(worker.messages).toHaveLength(2);
+		expect(worker.messages[1]?.job.key).toBe(
+			"texture-page-atlas/b;filter=anisotropic-4x;aniso=1",
+		);
+		expect(scheduler.getMetrics()).toMatchObject({
+			submittedJobCount: 2,
+			staleResultCount: 1,
+		});
+
+		scheduler.reset();
+		worker.emit({
+			type: "job-complete",
+			requestId: "render-resource-2",
+			result: {
+				type: "build-texture-atlas",
+				key: "texture-page-atlas/b;filter=anisotropic-4x;aniso=1",
+				generation: null,
+			},
+			durationMs: 1,
+		});
+		await waitForMicrotasks();
+
+		expect(scheduler.consumeReadyResults()).toEqual([]);
+		expect(scheduler.getMetrics()).toMatchObject({
+			activeSchedulerCount: 0,
+			submittedJobCount: 0,
+		});
+	});
+});
+
 function createCompactedDesiredBatch(
 	desiredJobKey: string,
 ): Parameters<CompactedGeometryWorkerScheduler["scheduleDesired"]>[0] {
@@ -577,6 +699,35 @@ function createIndexedAtlasPlan(input: BuildIndexedResourceAtlasWorkerInput) {
 		paletteAtlasTextures: input.paletteAtlasTextures,
 		indexPlacementsByTextureKey: new Map(),
 		palettePlacementsByTextureKey: new Map(),
+	};
+}
+
+function createTextureAtlasWorkerInput(
+	suffix = "a",
+): BuildTextureAtlasWorkerInput {
+	return {
+		key: `texture-page-atlas/${suffix}`,
+		textureFilteringMode: "anisotropic-4x",
+		maxAnisotropy: 1,
+		rgbaAtlasReadyDrawUnitIds: ["draw-a"],
+		detailAtlasTextures: [],
+		families: [],
+		preparedTextureAssetIds: [],
+	};
+}
+
+function createTextureAtlasPlan(input: BuildTextureAtlasWorkerInput) {
+	return {
+		key: input.key,
+		rgbaAtlasReadyDrawUnitIds: input.rgbaAtlasReadyDrawUnitIds,
+		detailAtlasReadyDrawUnitIds: [],
+		failures: [],
+		atlasEntryRecords: [],
+		atlasTextures: [],
+		detailAtlasEntryRecords: [],
+		detailAtlasTextures: input.detailAtlasTextures,
+		families: input.families,
+		preparedTextureAssetIds: input.preparedTextureAssetIds,
 	};
 }
 

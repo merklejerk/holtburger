@@ -16,6 +16,11 @@ import {
 	type BuildIndexedResourceAtlasWorkerJob,
 	type BuildIndexedResourceAtlasWorkerResult,
 } from "./worker-resources/indexed-atlas-worker-payloads";
+import {
+	collectBuildTextureAtlasInputTransferables,
+	type BuildTextureAtlasWorkerJob,
+	type BuildTextureAtlasWorkerResult,
+} from "./worker-resources/texture-atlas-worker-payloads";
 
 export interface RenderResourceWorkerLike {
 	onmessage:
@@ -100,6 +105,22 @@ export class RenderResourceWorkerClient {
 			if (result.type !== "build-indexed-resource-atlas") {
 				throw new Error(
 					`Render resource worker returned ${result.type} for indexed resource atlas job.`,
+				);
+			}
+			return result;
+		});
+	}
+
+	runBuildTextureAtlasJob(
+		job: BuildTextureAtlasWorkerJob,
+	): Promise<BuildTextureAtlasWorkerResult> {
+		return this.runJob(
+			job,
+			collectBuildTextureAtlasInputTransferables(job.input),
+		).then((result) => {
+			if (result.type !== "build-texture-atlas") {
+				throw new Error(
+					`Render resource worker returned ${result.type} for texture atlas job.`,
 				);
 			}
 			return result;

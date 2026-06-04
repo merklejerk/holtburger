@@ -1,8 +1,10 @@
 # Holtburger 3D Static Landblock Render Bundle Replacement Plan
 
-Status: Phase 1A through Phase 1F are implemented. Phase 1G texture/material-role hardening is the
-next implementation phase before Phase 2 worker orchestration. The plan has been redirected to
-worker-owned raw static closure loading and layer-scoped texture pages.
+Status: Phase 1A through Phase 1G are implemented. Phase 1H indexed-paletted static material family
+wiring is the next implementation phase, followed by Phase 1I terrain first-class worker boundary
+hardening and Phase 1J landblock preset contract hardening before Phase 2 landblock worker
+orchestration. The plan has been redirected to worker-owned raw landblock closure loading,
+worker-built terrain artifacts, preset-based landblock requests, and layer-scoped texture pages.
 
 Progress:
 
@@ -19,12 +21,13 @@ Progress:
 - 2026-06-04: Dry-ran the worker-owned loading and layer-scoped page direction against the codebase.
   The asset worker already has a host binary lookup bridge and worker-local preparation path, but
   the bridge is private to `asset-worker.ts` and must be extracted before a static layer worker can
-  reuse it. Env-cell layer scope discovery needs an explicit topology discovery step if the main
-  thread stops hydrating topology.
+  reuse it. Env-cell layer scope discovery was initially modeled as a separate worker discovery
+  step, but later phases should fold topology loading and env-cell scope derivation into the
+  landblock worker call graph.
 - 2026-06-04: Chose shared worker-side asset loading/preparation libraries over worker-to-worker
-  delegation. `asset-worker.ts`, `static-bundle-layer-worker.ts`, and future domain workers should
-  import shared closure loading helpers instead of copying code or routing through a central asset
-  worker service.
+  delegation. `asset-worker.ts`, `static-landblock-render-worker.ts`, and future domain workers
+  should import shared closure loading helpers instead of copying code or routing through a central
+  asset worker service.
 - 2026-06-04: Split the next work into smaller phases: shared worker asset loading foundation,
   worker-owned static contracts, worker-safe builder, static worker orchestration, renderer vertical
   slice, and expansion/deletion.
@@ -60,6 +63,33 @@ Progress:
   family and material record instead of being merged into one layer-wide compacted batch. Builder
   tests now prove multiple compacted batches can coexist with direct entries without staged fallback
   suppression.
+- 2026-06-04: Implemented Phase 1G. Layer texture page packing and virtual-ref descriptor conversion
+  are now worker-safe helpers outside the static bundle builder. Focused tests cover packed vs
+  single-entry layer pages and base/detail/data/control descriptor semantics.
+- 2026-06-04: Added Phase 1H before worker orchestration after identifying that the new static bundle
+  builder is not yet family-complete relative to the existing compaction planner. Compacted static
+  material families are RGBA texture-page and indexed-paletted; detail is an optional texture role
+  for both families, not a separate family. Indexed-paletted static bundle wiring must land before
+  Phase 2.
+- 2026-06-04: Added Phase 1I before worker orchestration after rechecking terrain. Terrain is not
+  part of the static object bundle builder and has no acceptable direct-draw fallback. The existing
+  renderer already has terrain tile resources, terrain blend plans, terrain color/mask/detail texture
+  page families, and terrain submit code; Phase 1I must preserve that as a first-class streaming
+  artifact when static worker orchestration begins.
+- 2026-06-04: Redirected Phase 2 from separate topology discovery plus per-layer worker scheduling
+  toward a single landblock render worker call graph. The worker should load the outdoor payload,
+  build terrain, derive requested object layers, load topology when env-cell interest requires it,
+  hydrate selected env cells, and return the complete set of terrain/object artifacts for the
+  request.
+- 2026-06-04: Refined the landblock worker request model from arbitrary artifact masks/scopes to
+  monotonic landblock LoD presets that match current backend product boundaries: `outdoor` and
+  `outdoor-with-env-cells`. Prepared-cache root manifests, closure diagnostics, source revisions,
+  topology discovery jobs, and per-layer worker scheduling are legacy-shaped transition details, not
+  the target contract.
+- 2026-06-04: Dry-ran the preset model against the current codebase. The route-shaped preset
+  direction is coherent; current routes are `landblock/<id>/outdoor`, `landblock/<id>/topology`,
+  `env-cell/<id>`, terrain/material/profile/renderable dependencies, and prepared textures. A true
+  `summary` preset should remain deferred until a cheap backend summary route/product exists.
 
 Validation:
 
@@ -112,6 +142,11 @@ Validation:
 - `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts`
   passed after Phase 1F.
 - `npm run check`, `npm run lint:dead`, and `npm run lint:rust` passed after Phase 1F.
+- `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer-texture-pages.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts src/lib/world-display/compaction/compaction-family-planner.test.ts src/lib/world-display/material-behavior.test.ts`
+  passed after Phase 1G.
+- `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer-texture-pages.ts src/lib/world-display/static-bundle-layer-texture-pages.test.ts`
+  passed after Phase 1G.
+- `npm run check`, `npm run lint:dead`, and `npm run lint:rust` passed after Phase 1G.
 - `npm run lint:ts` currently fails on existing unrelated debt:
   `src/lib/world-display/camera.ts` defines unused `rendererPointToAcPosition`.
 
@@ -125,7 +160,7 @@ Related plans:
 This plan supersedes the render-resource worker plan for static landblock compaction and texture
 packing. Do not preserve the current staged-static-to-render-resource-worker path as a compatibility
 mode. The goal is to replace that pipeline, delete the old scheduling/accounting surface, and keep
-only the pure CPU algorithms that are still useful inside the new static layer worker.
+only the pure CPU algorithms that are still useful inside the new landblock render worker.
 
 ## Purpose
 
@@ -140,21 +175,23 @@ worker-scheduled packing/compaction -> pending replacement accounting -> WebGL c
 with an authoritative static landblock bundle-layer pipeline:
 
 ```text
-static layer closure -> static layer worker builds complete static render bundle layer ->
-renderer uploads layer resources -> renderer draws resident layers
+landblock render request -> landblock worker builds terrain + static bundle artifacts ->
+renderer uploads artifact resources -> renderer draws resident artifacts
 ```
 
-Static landblock content should not pass through the staged dynamic-style renderer. A static layer
-worker should produce the complete, resolved static scene for the requested layer:
-compacted batches, direct static entries, layer-scoped texture pages, object/cell visibility
-metadata, renderer diagnostics, and raw/prepared asset dependency lists.
+Static landblock content should not pass through the staged dynamic-style renderer. A landblock
+preset request should contain the complete, resolved static scene for the requested backend route
+shape: terrain artifacts, static object bundle layers, compacted batches, direct static entries,
+layer-scoped texture pages, object/cell visibility metadata, renderer diagnostics, and raw/prepared
+asset dependency diagnostics. Terrain artifacts should be built by the same landblock worker request
+path, not by main-thread terrain CPU prep.
 
 ## Non-Goals
 
 - Do not keep the current static staged draw-unit pipeline as a fallback or alternate mode.
 - Do not retain standalone render-resource worker job scheduling for static landblock compaction or
   texture packing.
-- Do not make static workers resolve against main-thread global atlas state.
+- Do not make landblock/static workers resolve against main-thread global atlas state.
 - Do not require global or shared static atlases for the first replacement.
 - Do not move WebGL buffer, texture, sampler, VAO, or program ownership off the WebGL-owning thread.
 - Do not move browser-mode policy into shared crates.
@@ -180,8 +217,8 @@ Major costs and complexity sources:
 - direct draw suppression because old direct draw units coexist with compacted replacements.
 
 The replacement pipeline should eliminate the need for direct suppression. The worker emits the
-complete static answer for each requested layer scope. A surface is either represented in a
-compacted batch or in the bundle layer's direct static entries.
+complete static answer for each requested landblock preset. Within each emitted static object layer,
+a surface is either represented in a compacted batch or in the bundle layer's direct static entries.
 
 ## Target Architecture
 
@@ -189,44 +226,47 @@ compacted batch or in the bundle layer's direct static entries.
 
 ```mermaid
 flowchart LR
-    A[Scene Interest<br/>desired terrain/layer scopes] --> K[Static Layer Coordinator<br/>main renderer thread]
-    K --> B[Static Layer Worker]
+    A[Scene Interest<br/>desired landblock presets] --> K[Landblock Preset Coordinator<br/>main renderer thread]
+    K --> B[Landblock Render Worker]
     B <--> C[Worker Host Bridge<br/>raw asset lookup]
     C <--> H[Rust Backend<br/>DAT/HBA asset access]
-    B --> D[StaticLandblockRenderBundleLayer<br/>CPU renderer artifact]
+    B --> D[Terrain + Static Bundle Artifacts<br/>CPU renderer artifacts]
     D --> K
-    K --> E[WebGL Layer Realizer<br/>main renderer thread]
-    E --> F[Resident Static Layer Store]
+    K --> E[WebGL Artifact Realizer<br/>main renderer thread]
+    E --> F[Resident Landblock Artifact Store]
     F --> G[World Submit]
-    F --> I[Layer Texture Pages]
+    F --> I[Layer / Terrain Texture Pages]
     I --> G
     F --> J[Picking / Spatial Index]
 ```
 
 Responsibilities:
 
-- Scene interest decides which terrain resources and static layer scopes are desired.
-- The static layer coordinator schedules desired static layer scopes and rejects stale worker
+- Scene interest decides which landblock render presets are desired.
+- The landblock preset coordinator schedules desired landblock preset requests and rejects stale worker
   results.
-- The static layer worker loads and prepares the raw static closure it needs through the existing
-  worker host bridge to the Rust backend. Duplicating raw asset loads in the worker is acceptable in
-  the first replacement if it keeps ownership simple and moves CPU work off the main thread.
-- The static layer worker builds complete static render bundle layers synchronously inside one async
-  worker job.
-- The static layer worker emits layer-owned texture page CPU artifacts, including packed page bytes
-  and virtual-ref-to-rect tables.
+- The landblock render worker loads and prepares the raw closure it needs through the existing worker
+  host bridge to the Rust backend. Duplicating raw asset loads in the worker is acceptable in the
+  first replacement if it keeps ownership simple and moves CPU work off the main thread.
+- The landblock render worker sequences terrain, outdoor static layer, topology, and env-cell
+  hydration imperatively inside one async worker job. It may emit multiple independently resident
+  artifacts for one request.
+- Static object artifacts still own layer-scoped texture page CPU artifacts, including packed page
+  bytes and virtual-ref-to-rect tables. Terrain artifacts own their terrain page artifacts.
 - The WebGL renderer realizes CPU artifacts into buffers, textures, samplers, material tables, and
   VAOs.
-- Resident layer records own WebGL lifetime, layer texture page lifetime, and raw/prepared asset
+- Resident artifact records own WebGL lifetime, layer texture page lifetime, and raw/prepared asset
   dependency diagnostics.
-- Dynamic direct renderables and terrain may continue to use main-thread texture resource managers;
-  they do not feed static layer texture pages.
+- Dynamic direct renderables may continue to use main-thread texture resource managers. Terrain is
+  a separate first-class landblock artifact and should follow the worker-built CPU artifact model
+  before object worker orchestration lands; it does not feed static object layer texture pages.
 
 ### Worker Asset Loading Reuse
 
-Do not make the static layer worker post work to `asset-worker.ts`, and do not copy asset-worker
-logic into the static worker. Use shared worker-side libraries for lookup, preparation, dependency
-expansion, transferables, and profiling, then let each domain worker own its own orchestration.
+Do not make the landblock render worker post work to `asset-worker.ts`, and do not copy asset-worker
+logic into the landblock worker. Use shared worker-side libraries for lookup, preparation,
+dependency expansion, transferables, and profiling, then let each domain worker own its own
+orchestration.
 
 Target shape:
 
@@ -241,9 +281,9 @@ src/workers/asset-worker.ts
   imports shared lookup/prep helpers
   serves general main-thread prepared asset cache hydration
 
-src/workers/static-bundle-layer-worker.ts
+src/workers/static-landblock-render-worker.ts
   imports shared lookup/prep/closure helpers
-  owns static landblock layer closure loading, compaction, and layer texture page packing
+  owns terrain, topology/env-cell, static object layer closure loading, compaction, and page packing
 
 future domain workers
   import shared lookup/prep/closure helpers
@@ -259,15 +299,30 @@ Reasons:
   routing, stale-result rejection, and transferable ownership between workers. Avoid that until a
   measured need proves it is worth the coordination cost.
 - Domain workers should perform one complete domain transaction: load the closure they need, build
-  the artifact they own, and return that artifact to the main thread.
+  the artifacts they own, and return those artifacts to the main thread.
 
-### Desired Layer Planning
+### Desired Landblock Preset Planning
 
-Do not let worker scheduling infer desired layers from the whole prepared asset cache. Add a pure
-planner that turns renderer interest into explicit desired layer scopes and root closure manifests.
+Do not let worker scheduling infer desired landblock artifacts from the whole prepared asset cache,
+and do not expose an arbitrary artifact mask that recreates per-layer planner complexity. Use a pure
+planner that turns renderer interest into one monotonic landblock LoD preset per landblock. Presets
+should coarsely match backend route/product shapes, not every UI slider.
+
+Target presets:
+
+- `outdoor`: current outdoor landblock product. Backed by `landblock/<id>/outdoor`; build terrain
+  plus outdoor building/detail static object artifacts and all required terrain/static page artifacts
+  for exterior rendering.
+- `outdoor-with-env-cells`: detailed landblock product. Backed by `landblock/<id>/outdoor`,
+  `landblock/<id>/topology`, and selected `env-cell/<id>` routes; build the outdoor artifacts plus
+  topology-derived env-cell static/interior artifacts.
+- Future `summary`: deferred. Add only when a real cheap backend summary route/product exists. Do
+  not model it as a target preset while the worker would have to load the full `landblock/<id>/outdoor`
+  product anyway.
+
 The planner may use already-prepared main-thread assets as a bootstrap source during the transition,
-but the target worker contract must not require the main thread to hydrate the full static closure
-before scheduling a static layer job.
+but the target worker contract must not require the main thread to hydrate the full static closure,
+topology, env-cell roots, or per-layer root manifests before scheduling a landblock worker job.
 
 Current code already has most of the inputs:
 
@@ -278,42 +333,42 @@ Current code already has most of the inputs:
   into env-cell coverage.
 - `collectSelectedOutdoorSourceAssetIds` already applies the building/detail static split.
 
-The new planner should make those relationships first-class:
+The target planner should make the preset relationship first-class:
 
 ```ts
-interface DesiredStaticBundleLayer {
-  scope: StaticBundleLayerScope;
+type LandblockRenderLodPreset = "outdoor" | "outdoor-with-env-cells";
+
+interface DesiredLandblockRenderPreset {
+  landblockId: number;
+  preset: LandblockRenderLodPreset;
   priority: "resident-now" | "prefetch";
-  rootAssetIds: readonly string[];
-  sourceRevision: string;
-  diagnostics: {
-    knownClosureAssetIds: readonly string[];
-    knownMissingAssetIds: readonly string[];
-  };
+  requestId: number;
+  buildPolicyRevision: string;
+  texturePagePolicyRevision: string;
 }
 ```
 
 Rules:
 
-- Schedule a worker job when the layer roots are known. Do not block worker scheduling on the main
-  thread having every source, geometry, material, texture, region-profile, topology, and env-cell
-  dependency prepared.
-- Include root assets that identify the layer load:
-  - `landblock/outdoor` for `outdoor-buildings` and `outdoor-detail`;
-  - `landblock/topology` plus the selected `env-cell` root for `env-cell-static`;
-  - selected source/renderable roots when already known from prepared route data.
-- Let the worker expand the full closure by loading raw assets and following dependencies locally.
-- `diagnostics.knownClosureAssetIds` and `diagnostics.knownMissingAssetIds` are transitional
-  diagnostics only. They may help validate the worker closure loader, but they are not the target
-  scheduling gate.
-- Derive `sourceRevision` from scope, ordered root asset IDs, source route revision if available,
-  and CPU build policy revision. Do not use the global asset-state signature for static layer
-  invalidation.
-- Reject worker results whose `scope` or `sourceRevision` no longer matches the desired layer.
+- Schedule one worker job per desired landblock preset, not one job per layer/root/scope.
+- Preset promotion is monotonic: `outdoor` -> `outdoor-with-env-cells`. A future cheap `summary`
+  preset may be inserted before `outdoor` only after a backend product exists.
+- The worker decides which raw roots are needed for the requested preset. `landblock/outdoor`,
+  `landblock/topology`, env-cell roots, terrain-material routes, static source routes, material
+  routes, and prepared-texture routes are worker-local closure details.
+- Let the worker expand the full preset closure by loading raw assets and following dependencies
+  locally. For `outdoor-with-env-cells`, topology loading and selected env-cell discovery are
+  internal worker steps, not a separate main-thread discovery/cache/scheduling round trip.
+- `DesiredStaticBundleLayer`, `rootAssetIds`, `knownClosureAssetIds`, `knownMissingAssetIds`, and
+  topology-discovery DTOs are transitional Phase 1 surfaces. Phase 2 should replace or quarantine
+  them behind the landblock preset worker client.
+- Do not derive target job identity from prepared-record revisions. Static DAT-derived landblock
+  assets are effectively immutable during a session; stale rejection should use latest request ID,
+  landblock ID, requested preset, and build/texture policy revisions.
 - Keep appearance previews and other non-landblock-owned debug/editor objects out of static bundle
   layers; they should remain staged or direct dynamic entries.
 
-### Static Bundle Layers and Outdoor LOD
+### Static Bundle Layers and Outdoor LoD Presets
 
 The current asset routes are additive in practice, but not as separate `landblock/detail` payloads.
 `landblock/outdoor` provides terrain plus outdoor static member references. Renderer interest then
@@ -324,9 +379,16 @@ selects which outdoor statics should be hydrated and rendered:
 - detail radius selects the remaining outdoor static instances;
 - env-cell radius selects topology/env-cell content for structured and interior statics.
 
-The replacement should model that directly. Terrain stays in the terrain bucket. Static object
-render bundle layers are scoped so LOD promotion can add detail without rebuilding or mutating the
-already resident building layer.
+The replacement should model those radii as landblock preset selection, not as arbitrary worker
+artifact masks. The current browser exposes four policy radii, but the worker contract should target
+the backend product boundaries:
+
+- `outdoor` for terrain plus exterior outdoor statics from `landblock/<id>/outdoor`;
+- `outdoor-with-env-cells` for `outdoor` plus topology/env-cell static/interior content.
+
+Terrain stays in the terrain bucket, and static object render bundle layers remain independently
+resident outputs. LoD promotion can add or replace resident artifacts without passing old resident
+artifacts back into the worker.
 
 ```mermaid
 flowchart LR
@@ -360,14 +422,16 @@ type StaticBundleLayerScope =
     };
 ```
 
-Layer rules:
+Layer/preset rules:
 
-- A worker result is complete for one `StaticBundleLayerScope`.
+- A worker result is complete for one requested `LandblockRenderLodPreset`. It may contain terrain,
+  outdoor building/detail object layers, and env-cell static layers depending on the preset.
 - `outdoor-buildings` contains only building-classified outdoor static instances selected by the
-  building radius.
+  `outdoor` or `outdoor-with-env-cells` preset policy.
 - `outdoor-detail` contains non-building outdoor static instances selected by the detail radius.
-- `env-cell-static` contains one selected env cell's static/interior content and keeps cell
-  visibility metadata explicit.
+- `env-cell-static` contains selected env cell static/interior content for
+  `outdoor-with-env-cells` and keeps cell visibility metadata explicit. The worker derives selected
+  env cells from topology inside the preset job.
 - Existing resident layers are not passed back into the worker as mutable input.
 - The resident layer store composes terrain plus zero or more static bundle layers at submit time.
 
@@ -376,39 +440,38 @@ Promotion from distant to detailed landblock residency should be additive:
 ```mermaid
 sequenceDiagram
     participant Interest as Outdoor Scene Interest
-    participant Coord as Static Layer Coordinator
-    participant Store as Resident Layer Store
-    participant Worker as Static Layer Worker
+    participant Coord as Landblock Artifact Coordinator
+    participant Store as Resident Artifact Store
+    participant Worker as Landblock Render Worker
     participant GL as WebGL Realizer
 
-    Interest->>Coord: landblock enters terrain ring
-    Coord->>GL: keep/create terrain resource
-    GL-->>Store: commit terrain resource
-    Interest->>Coord: landblock enters building ring
-    Coord->>Worker: build scope outdoor-buildings
-    Worker-->>Coord: complete building layer artifact
-    Coord->>GL: realize building layer resources
-    GL-->>Store: commit building layer
-    Interest->>Coord: landblock enters detail ring
-    Coord->>Worker: build scope outdoor-detail
-    Worker-->>Coord: complete detail layer artifact
-    Coord->>GL: realize detail layer resources
-    GL-->>Store: commit detail layer
+    Interest->>Coord: landblock enters outdoor ring
+    Coord->>Worker: build preset outdoor
+    Worker-->>Coord: terrain + exterior artifacts
+    Coord->>GL: realize terrain/building/detail resources
+    GL-->>Store: commit outdoor artifacts
+    Interest->>Coord: landblock enters env-cell/detail ring
+    Coord->>Worker: build preset outdoor-with-env-cells
+    Worker-->>Coord: outdoor + env-cell artifacts
+    Coord->>GL: realize detail/env-cell resources
+    GL-->>Store: commit detailed artifacts
 ```
 
 This supports both complete and additive loading without a build-on-top protocol. If interest asks
-for both building and detail at once, the main thread may schedule both layer jobs independently
-from the same root layer scope information. Each worker job loads/prepares its own closure and emits
-its own geometry and texture page artifacts. If detail becomes visible later, the detail layer is
-built as a new complete layer and composed beside the existing building layer.
+for the detailed preset immediately, the main thread schedules one `outdoor-with-env-cells` request
+and the worker emits the full preset artifacts. If a landblock promotes from `outdoor` to
+`outdoor-with-env-cells` later, the later request may reload raw outdoor/topology/env-cell assets
+internally, but it returns a complete preset result and never consumes resident terrain/building/detail
+artifacts as mutable input. The main thread may commit returned terrain, exterior, and env-cell
+artifacts independently.
 
 ### Static vs Dynamic Boundary
 
 ```mermaid
 flowchart TB
     subgraph Static Landblock Pipeline
-        S1[Layer scope + raw root asset manifest]
-        S2[Static layer worker]
+        S1[Landblock LoD preset request]
+        S2[Landblock render worker]
         S6[Worker-local asset closure loading/prep]
         S3[Compacted static batches]
         S4[Direct static entries]
@@ -451,9 +514,9 @@ interface StaticLandblockRenderBundleLayer {
   scope: StaticBundleLayerScope;
   landblockId: number;
   layerKind: StaticLandblockBundleLayerKind;
-  sourceRevision: string;
-  rootAssetIds: readonly string[];
-  preparedAssetIds: readonly string[];
+  artifactRevision: string;
+  diagnosticRootAssetIds: readonly string[];
+  diagnosticPreparedAssetIds: readonly string[];
   renderChunks: readonly StaticBundleRenderChunk[];
   compactedBatches: readonly StaticBundleCompactedBatch[];
   directEntries: readonly StaticBundleDirectEntry[];
@@ -470,14 +533,15 @@ interface StaticLandblockRenderBundleLayer {
 
 Required properties:
 
-- Complete for layer: all currently renderable static content for the requested layer scope is
+- Complete for layer: all currently renderable static content assigned to the emitted bundle layer is
   represented or explained in diagnostics.
 - Authoritative: there is no runtime direct fallback suppression for static content.
 - CPU-only: no WebGL handles, no live texture objects, no renderer-thread-only state.
 - Stable: IDs are derived from source landblock/object/part/material facts, not from transient
   staging order.
-- Dependency-owned: the bundle layer reports the roots and worker-prepared asset IDs it used for
-  diagnostics, cache policy, and stale-result rejection.
+- Dependency-diagnostic: the bundle layer may report the roots and worker-prepared asset IDs it used
+  for diagnostics and cache hints, but those lists do not drive worker scheduling, invalidation, or
+  stale-result rejection in the target preset model.
 
 ### Object and Part Metadata
 
@@ -529,7 +593,7 @@ artifacts: single-entry pages or packed atlas pages owned by that layer.
 ```mermaid
 flowchart LR
     A[Worker material resolution] --> B[VirtualTexturePageRef]
-    B --> C[Layer texture page packer<br/>inside static worker]
+    B --> C[Layer texture page packer<br/>inside landblock worker]
     C --> D[StaticBundleTexturePage<br/>bytes + rect table]
     D --> E[WebGL Layer Realizer]
     E --> F[Layer-owned WebGL textures]
@@ -609,7 +673,7 @@ Main-thread texture responsibilities:
 - Bind material records to layer-owned page textures and rects.
 - Rebuild sampler state or material binding tables when global filtering changes.
 
-Static layer workers do not schedule standalone atlas-packing jobs. They call extracted packing
+Landblock preset workers do not schedule standalone atlas-packing jobs. They call extracted packing
 helpers synchronously inside the layer build and emit immutable texture page artifacts. There are no
 static atlas generations in the renderer resource store for this path.
 
@@ -634,81 +698,92 @@ sequenceDiagram
 
 ## Worker Pipeline
 
-The static layer worker job is asynchronous at the job boundary and synchronous internally. Do not
-schedule nested render-resource worker jobs for compaction or packing.
+The landblock render worker job is asynchronous at the job boundary and synchronous internally. Do
+not schedule nested render-resource worker jobs for compaction, texture packing, terrain prep, or
+topology/env-cell discovery.
 
 ```mermaid
 sequenceDiagram
     participant Main as Main Renderer Thread
-    participant Worker as Static Layer Worker
+    participant Worker as Landblock Render Worker
     participant Bridge as Worker Host Bridge
     participant Rust as Rust Backend
     participant GL as WebGL Realizer
-    participant Store as Resident Layer Store
+    participant Store as Resident Artifact Store
 
-    Main->>Worker: buildStaticLandblockBundleLayer(scope, rootAssetIds, policyRevision)
-    Worker->>Bridge: request raw closure assets as needed
+    Main->>Worker: buildLandblockRenderPreset(landblockId, preset, policyRevision)
+    Worker->>Bridge: request raw roots for preset
     Bridge->>Rust: lookup binary assets
     Rust-->>Bridge: binary envelopes
     Bridge-->>Worker: raw asset envelopes
-    Worker->>Worker: decode and prepare closure
-    Worker->>Worker: expand selected layer objects and parts
-    Worker->>Worker: resolve material records
-    Worker->>Worker: decode/prepare texture inputs
-    Worker->>Worker: pack layer-scoped texture pages
-    Worker->>Worker: classify compacted vs direct
-    Worker->>Worker: build compacted CPU buffers
-    Worker->>Worker: build metadata sidecars
-    Worker-->>Main: StaticLandblockRenderBundleLayer
-    Main->>GL: upload layer buffers, texture pages, material tables
-    GL-->>Store: commit resident static layer
+    Worker->>Worker: decode and prepare outdoor payload
+    Worker->>Worker: build terrain/exterior artifacts for outdoor preset
+    Worker->>Bridge: request topology only for outdoor-with-env-cells
+    Bridge-->>Worker: topology envelope
+    Worker->>Worker: derive selected env-cell IDs
+    Worker->>Bridge: request selected env-cell closures
+    Bridge-->>Worker: env-cell envelopes
+    Worker->>Worker: build detail env-cell object layer artifacts
+    Worker-->>Main: preset-complete terrain + static layer CPU artifacts
+    Main->>GL: upload terrain/layer buffers, texture pages, material tables
+    GL-->>Store: commit resident artifacts
 ```
 
 Internal worker steps:
 
-1. Validate the layer scope, root asset IDs, and CPU build policy.
-2. Load raw assets through the worker host bridge and prepare the worker-local closure.
-3. Expand only the selected layer:
-   - building outdoor statics for `outdoor-buildings`;
-   - non-building outdoor statics and generated scenery for `outdoor-detail`;
-   - one env cell's static/interior content for `env-cell-static`.
-4. Expand setup-model and setup-appearance parts.
-5. Resolve material records into render families and virtual texture refs.
-6. Decode/prepare texture inputs required by static materials.
-7. Build layer-scoped single-entry or packed texture pages and virtual-ref rect bindings.
-8. Classify surfaces as compacted or direct.
-9. Build compacted geometry batches with material-slot indices.
-10. Build direct static entries for surfaces that cannot be compacted.
-11. Emit object/cell visibility metadata and optional diagnostics.
-12. Emit root asset IDs, worker-prepared dependency IDs, texture page diagnostics, and skipped
+1. Validate the landblock ID, requested preset, request ID, and CPU build policy.
+2. Load the raw roots required by the preset through the worker host bridge and prepare them locally.
+3. Build the terrain artifact first because terrain has no static direct fallback.
+4. For `outdoor` and `outdoor-with-env-cells`, expand outdoor object layers:
+   - building outdoor statics;
+   - non-building outdoor statics and generated scenery.
+5. For `outdoor-with-env-cells`, load `landblock/topology`, derive selected env-cell IDs, then load
+   only those env-cell roots and closures.
+6. Expand requested env-cell static/interior content.
+7. Expand setup-model and setup-appearance parts for each object artifact.
+8. Resolve material records into render families and virtual texture refs.
+9. Decode/prepare texture inputs required by terrain and static materials.
+10. Build terrain-scoped and layer-scoped single-entry or packed texture pages plus virtual-ref rect
+    bindings.
+11. Classify static object surfaces as compacted or direct.
+12. Build compacted geometry batches with material-slot indices.
+13. Build direct static entries for surfaces that cannot be compacted.
+14. Emit object/cell visibility metadata and optional diagnostics.
+15. Emit root asset IDs, worker-prepared dependency IDs, texture page diagnostics, and skipped
     content diagnostics.
 
 ### Scheduling Model
 
-Use one scheduler for static bundle layers, not separate schedulers for compaction, RGBA atlas
-packing, indexed atlas packing, and renderer replacement groups.
+Use one scheduler for landblock render preset jobs, not separate schedulers for topology discovery,
+env-cell hydration, per-layer roots, compaction, RGBA atlas packing, indexed atlas packing, and
+renderer replacement groups.
 
 Scheduler keys should be based on:
 
-- `scope`;
-- `sourceRevision`;
+- `landblockId`;
+- requested `preset`;
+- latest `requestId`;
 - renderer build policy revision;
 - CPU texture-page policy revision only when it changes worker output bytes or placement.
 
-Do not include sampler policy or WebGL texture object identity in the static layer job key. Static
-layer page placement is worker output and should be represented by the layer artifact revision, not
-by a separate renderer atlas generation.
+Do not include prepared-record revisions, sampler policy, or WebGL texture object identity in the
+landblock worker job key. Static DAT-derived landblock source assets are effectively immutable
+during a session; stale-result rejection should be latest-request based, not prepared-cache revision
+based. Static layer page placement is worker output and should be represented by the preset artifact
+policy revision, not by a separate renderer atlas generation.
 
 Scheduling behavior:
 
-- Coalesce duplicate desired scopes before posting worker jobs.
-- Limit concurrent static layer worker jobs so nearby terrain and camera interaction stay
+- Coalesce duplicate desired landblock preset requests before posting worker jobs.
+- Limit concurrent landblock worker jobs so nearby terrain and camera interaction stay
   responsive.
-- Prefer nearer resident scopes over prefetch scopes.
-- Cancel or ignore queued jobs for scopes that leave interest before they start.
-- Commit ready layers in deterministic scope order when several finish in the same frame.
+- Prefer higher-priority nearby presets over prefetch presets.
+- Cancel or ignore queued jobs for landblocks whose desired preset changed before they start.
+- Commit ready terrain/layer artifacts in deterministic scope order when several finish in the same
+  frame.
 - Do not block terrain upload or dynamic direct draws on static layer completion.
-- Treat worker closure loading as part of the static layer job for scheduling and cancellation.
+- Treat worker closure loading, topology discovery, env-cell hydration, terrain CPU prep, and object
+  bundle building as part of the landblock job for scheduling and cancellation.
 
 The first implementation can reuse the existing worker-client shape, but it should not reuse
 `render-resource-job-scheduler.ts` as a general abstraction unless that name and ownership still fit
@@ -747,21 +822,22 @@ worker host bridge.
 
 ```mermaid
 flowchart LR
-    A[Resident static bundle layer] --> B[rootAssetIds + workerPreparedAssetIds]
-    C[Terrain resources] --> D[main-thread preparedAssetIds]
+    A[Resident static object bundle layer] --> B[diagnosticRootAssetIds + diagnosticPreparedAssetIds]
+    C[Resident terrain bundle] --> D[diagnosticRootAssetIds + diagnosticPreparedAssetIds]
     E[Dynamic direct resources] --> F[main-thread preparedAssetIds]
-    B --> G[Static layer diagnostics / cache hints]
+    B --> G[Layer diagnostics / cache hints]
     D --> G
     F --> G
 ```
 
-Bundle-layer commit installs layer ownership records for WebGL buffers, layer-owned textures, root
-asset IDs, and worker-prepared dependency IDs. Bundle-layer eviction releases WebGL resources and
-diagnostic retention state. No diagnostic graph node is required to explain static retention.
+Bundle-layer commit installs ownership records for WebGL buffers and layer-owned textures. Root and
+dependency asset IDs are diagnostics/cache hints only, not ownership or scheduling inputs.
+Bundle-layer eviction releases WebGL resources and diagnostic retention state. No diagnostic graph
+node is required to explain static retention.
 
-The main prepared-asset cache may still retain terrain, dynamic direct resources, appearance
-previews, and transitional debug assets. It should not be the authority for static layer closure
-completeness once worker-owned loading is in place.
+The main prepared-asset cache may still retain dynamic direct resources, appearance previews, and
+transitional debug assets. It should not be the authority for static object or terrain landblock
+closure completeness once worker-owned loading is in place.
 
 ## Implementation Phases
 
@@ -793,17 +869,17 @@ Gaps and refinements:
 
 - `AssetWorkerHostBridge`, host lookup message types, transferable normalization helpers, and
   profiling helpers are currently coupled to `asset-worker.ts`. Extract shared worker-side
-  lookup/prep/closure libraries before implementing `static-bundle-layer-worker.ts`; do not
-  copy/paste a second bridge or make the static worker delegate to the asset worker.
-- Outdoor `outdoor-buildings` and `outdoor-detail` jobs are schedulable from landblock IDs because
-  the worker can load `landblock/outdoor` and select members locally. Env-cell static layers are not
-  fully schedulable from landblock IDs alone because the main thread needs topology to know
-  individual env-cell IDs.
-- Add a topology discovery path before full env-cell layer scheduling. Preferred shape:
-  `discoverStaticEnvCellLayerScopes(landblockId)` runs in the static worker, loads
-  `landblock/topology`, and returns desired `env-cell-static` scopes and root asset IDs. The main
-  thread then schedules normal per-env-cell layer jobs. This preserves independent env-cell layer
-  ownership without keeping full topology hydration on the main thread.
+  lookup/prep/closure libraries before implementing `static-landblock-render-worker.ts`; do not
+  copy/paste a second bridge or make the landblock worker delegate to the asset worker.
+- Outdoor `outdoor-buildings` and `outdoor-detail` artifacts are schedulable from landblock IDs
+  because the worker can load `landblock/outdoor` and select members locally. Env-cell static
+  artifacts should also be scheduled from landblock-level interest, with topology lookup and selected
+  env-cell ID derivation sequenced inside the landblock render worker call graph.
+- Do not add a separate topology discovery worker job before full env-cell layer scheduling unless
+  measurement proves the single landblock worker transaction is too coarse. The preferred shape is:
+  the main thread requests env-cell artifacts for a landblock interest band; the worker loads
+  `landblock/topology`, derives selected env cells, loads those env-cell payloads, and returns
+  independently commit-ready `env-cell-static` artifacts beside terrain/building/detail artifacts.
 - Worker closure loading must explicitly add `setup-appearance/<setup-model-id>` companion assets
   for setup models. Setup appearance is not discovered through generic response dependencies.
 - Worker texture loading should use `NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY` after resolving
@@ -819,6 +895,68 @@ Gaps and refinements:
   but their candidate IDs still say `drawUnitId`; rename or wrap them before using them in static
   layer builders.
 
+### Preset Model Dry-Run Findings
+
+Dry run date: 2026-06-04.
+
+The preset model is directionally cleaner than artifact masks, but the current codebase still has
+several Phase 1-shaped contracts that must be replaced before Phase 2.
+
+What fits:
+
+- `deriveOutdoorSceneInterest` already derives deterministic terrain/building/detail/env-cell
+  interest sets from one focus landblock. Mapping those sets to a single desired preset per
+  landblock is straightforward.
+- `WorkerHostAssetBridge`, `loadWorkerAssetClosure`, and `prepareAssetPayload` already support a
+  worker imperatively loading raw route closures through the main-thread host bridge.
+- The current route set gives the worker enough roots for `outdoor` and `outdoor-with-env-cells`:
+  `landblock/<id>/outdoor`, `landblock/<id>/topology`, `env-cell/<id>`, terrain material,
+  region-profile, renderable, material, render-surface, palette, and prepared-texture routes.
+- `static-bundle-layer-builder.ts` already proves complete layer CPU artifacts can be built from
+  worker-local prepared assets and synchronous texture page packing.
+- Terrain CPU helpers are mostly pure enough to extract: `terrain-scene.ts`,
+  `terrain-blend-plan.ts`, `terrain-materials.ts`, and `terrain-tile-plan.ts` are main-thread
+  callers today but not inherently WebGL-owned.
+
+Gaps and course corrections:
+
+- A true `summary` preset is not backed by a live route in this checkout. The Tauri route parser and
+  host DTOs recognize `landblock/<id>/outdoor`, `landblock/<id>/topology`, `env-cell/<id>`, and
+  related dependency routes, but not `landblock-summary/*`. Defer `summary` until a cheap backend
+  product exists.
+- `landblock/<id>/outdoor` currently includes terrain, outdoor static members, prepared static mesh
+  facts, dependencies, and outdoor BVH. The Rust assembler builds prepared outdoor static instances
+  and meshes while assembling this payload. Treat this as the `outdoor` preset, not a cheap summary
+  preset.
+- `static-bundle-layer.ts` still exposes `DesiredStaticBundleLayer`,
+  `StaticBundleLayerWorkerJob`, `StaticBundleEnvCellTopologyDiscoveryJob`, `sourceRevision`,
+  `rootAssetIds`, and discovered env-cell scope DTOs. These are now transitional surfaces. Phase 2
+  should not build a landblock worker around them.
+- `static-bundle-layer-planner.ts` still derives env-cell layer scopes by reading prepared topology
+  from the main-thread cache. Under the preset model this should be deleted or quarantined as
+  transition-only diagnostics; env-cell derivation belongs inside the `outdoor-with-env-cells`
+  worker job.
+- `scene-asset-request-planner.ts` still requests topology, env cells, renderable dependencies,
+  material dependencies, and prepared textures on the main thread for static landblock rendering.
+  Dynamic/direct and debug paths may keep using it, but static landblock preset jobs should own that
+  dependency chase.
+- Terrain still crosses the renderer as a main-thread `TerrainSceneModel` derived from
+  `assetState.preparedByAssetId`, then WebGL resources realize terrain tile resources from that
+  scene. Phase 1I must define a terrain artifact DTO before the `outdoor` vertical slice can
+  honestly move terrain and exterior statics over the worker boundary together.
+- `webgl2-world-resources.ts` still builds staged world assembly, terrain resources, draw units,
+  atlas generation state, graph leases, and pending compacted replacement state in one sync path.
+  The preset model should add a resident artifact realization path beside this temporarily, then
+  delete the staged/static pieces as presets migrate.
+
+Immediate refinement:
+
+- Add an interim preset-contract hardening phase before Phase 2. It should introduce target
+  `LandblockRenderLodPreset`, `DesiredLandblockRenderPreset`, and `LandblockRenderPresetWorkerJob`
+  DTOs, map current LoD radii to route-shaped presets, explicitly defer `summary` until a cheap
+  backend route exists, and mark the Phase 1 layer/topology/source-revision DTOs as
+  transitional-only.
+
 ### Codebase Impact Map
 
 The dry-run target is to move behavior, not preserve current file boundaries.
@@ -826,11 +964,13 @@ The dry-run target is to move behavior, not preserve current file boundaries.
 Likely new or renamed modules:
 
 - `static-bundle-layer-planner.ts`: derives `DesiredStaticBundleLayer` records from scene interest
-  and root route facts. Its Phase 1A prepared-cache closure mode is transitional.
-- `static-bundle-layer-worker-client.ts`: posts layer jobs, tracks scope/source revisions, consumes
-  transferable layer results.
-- `static-bundle-layer-worker.ts`: loads raw static closures through the worker host bridge, prepares
-  assets, expands layer objects, packs layer-scoped texture pages, and builds CPU geometry artifacts.
+  and root route facts. Its Phase 1A prepared-cache closure mode is transitional; Phase 2 should
+  replace target scheduling use with preset planning.
+- `static-landblock-render-worker-client.ts`: posts landblock preset jobs, tracks latest request IDs
+  and policy revisions, consumes transferable terrain and static layer results.
+- `static-landblock-render-worker.ts`: loads raw landblock closures through the worker host bridge,
+  prepares assets, sequences terrain/topology/env-cell/object artifact building, packs scoped texture
+  pages, and builds CPU geometry artifacts.
 - `static-bundle-layer-builder.ts`: pure CPU expansion/classification/compaction/page-pack builder
   used inside the worker and tests.
 - `workers/shared/host-asset-bridge.ts`: shared worker-side host lookup bridge and message helpers
@@ -851,7 +991,8 @@ Likely modules to split or heavily edit:
 - `scene-asset-request-planner.ts`: keep terrain, dynamic, preview, and transitional asset lookup
   policy. Stop treating full static landblock closure hydration as a main-thread prerequisite.
 - `browser-render-resource-coordinator.ts`: stop deriving full `StaticRenderableSceneModel` for
-  landblock statics every update; derive desired layer scopes and keep runtime previews separate.
+  landblock statics every update; derive desired landblock presets and keep runtime previews
+  separate.
 - `static-renderables.ts`: extract reusable source expansion, setup-model/setup-appearance part
   expansion, material-context creation, and stable key helpers into worker-safe builder inputs.
 - `render-spatial-scene.ts`: stop importing `buildStaticRenderablePartMatrix` from
@@ -1102,8 +1243,10 @@ Legacy debt found before the next phase:
 Exit criteria:
 
 - Static layer scheduling can be expressed without a complete main-thread prepared closure.
-- Env-cell layer scheduling has an explicit topology discovery contract and does not require full
-  main-thread topology hydration.
+- Env-cell layer scheduling no longer requires full main-thread topology hydration. The Phase 1C
+  explicit topology discovery DTO is transitional and should be replaced or quarantined by the Phase
+  2 landblock worker call graph, where topology loading and env-cell selection happen inside the
+  worker job.
 - Bundle-layer DTOs can represent compacted output, direct output, and layer-owned texture pages.
 - Tests prove scope keys, source revisions, root manifests, and layer page records are stable.
 - The plan and code no longer imply that global atlas state must be passed into static workers.
@@ -1364,7 +1507,7 @@ Legacy debt found before the next phase:
 
 ### Phase 1G: Texture Material Roles and Pre-Worker Cleanup
 
-Status: Next.
+Status: Implemented on 2026-06-04.
 
 Purpose:
 
@@ -1386,6 +1529,35 @@ Implementation notes:
 - Clean naming and comments that imply staged ownership where the code now owns layer-local
   artifacts.
 
+Implemented:
+
+- Added `static-bundle-layer-texture-pages.ts`, a worker-safe module for layer texture page packing
+  and virtual texture page descriptor conversion.
+- Moved layer-scoped packed/single-entry texture page construction out of
+  `static-bundle-layer-builder.ts`.
+- Moved the Phase 1E builder-local `VirtualTexturePageRef` to `TexturePageDescriptor` adapter out
+  of the builder.
+- Added focused tests for:
+  - packed vs single-entry static bundle layer texture pages;
+  - base-color and detail descriptor sources;
+  - exact data sampling for indexed-style refs;
+  - control-domain descriptor facts for future alpha/control refs.
+
+Decisions and course corrections:
+
+- Static compacted material families are RGBA texture-page and indexed-paletted. Phase 1G hardened
+  the texture page artifact layer, but it did not complete indexed-paletted static bundle family
+  selection.
+- Detail texture is an optional role for both RGBA and indexed-paletted families. Do not treat detail
+  as a separate family.
+- The descriptor helper can represent data/control refs, but representation is not the same as route
+  selection. Indexed texel and palette lookup routes should be added by Phase 1H for
+  indexed-paletted materials. Mask/control routes should be selected later only if explicit material
+  semantics require that role.
+- Phase 1A's transitional prepared-cache closure diagnostics are left in place until Phase 2 worker
+  orchestration provides real worker-local closure diagnostics. Removing them now would reduce
+  debugging signal without simplifying the worker path.
+
 Exit criteria:
 
 - Texture page refs and texture pages cover the material roles Phase 2 needs, with tests for
@@ -1402,65 +1574,335 @@ Cleanup targets:
 - Keep diagnostics low-fidelity where needed; picker/debug consumers must not force richer static
   artifact accounting into the core render path.
 
-### Phase 2: Static Worker Orchestration
+Legacy shims introduced:
 
-This is not a compatibility mode. It replaces the main-thread static closure prep assumption with a
-static layer worker that can request raw assets through the worker host bridge.
+- None. Phase 1G extracted worker-safe helpers and did not add compatibility adapters for the old
+  render-resource worker path.
 
-- Add `static-bundle-layer-worker.ts` using the extracted shared worker bridge libraries.
-- Add static topology discovery worker handling for env-cell layer scopes.
-- Move worker-local static closure loading and preparation into the worker job.
+Legacy debt found before the next phase:
+
+- Phase 1H must add indexed-paletted static bundle family wiring before Phase 2 worker orchestration.
+  Phase 1G only made the artifact/descriptor layer capable of representing data/control roles.
+- Phase 2 should replace Phase 1A transitional prepared-cache closure diagnostics with worker-local
+  closure/load diagnostics once the static worker exists.
+- Mask/control route selection remains deferred until explicit material-role semantics require that
+  role; it is not a third compacted material family in the current model.
+- `npm run lint:ts` remains blocked by existing unrelated dead code in
+  `src/lib/world-display/camera.ts`: `rendererPointToAcPosition` is defined but unused.
+
+### Phase 1H: Indexed-Paletted Static Material Family Wiring
+
+Status: Next.
+
+Purpose:
+
+- Make the static bundle builder family-complete relative to the existing compacted static material
+  model before moving the build into a worker.
+- Add indexed-paletted static material support alongside the RGBA texture-page family.
+- Preserve optional detail texture handling for indexed-paletted materials.
+
+Implementation notes:
+
+- Detect indexed-paletted material semantics from worker-local prepared material/source facts rather
+  than by probing every material for every possible texture route.
+- Request and account for the indexed texel and palette lookup texture routes required by
+  indexed-paletted materials.
+- Preserve optional detail overlay/page routing for indexed-paletted materials. Indexed+detail is a
+  valid indexed-paletted material case, not a separate family.
+- Emit `indexed-texels`, `palette-lookup`, and optional `detail` `VirtualTexturePageRef` records for
+  indexed-paletted static materials.
+- Feed indexed-paletted texture page descriptors into `createCompactionEligibility` so
+  `indexed-paletted` family decisions match the existing compaction planner.
+- Keep mask/control as a role, not a family. Do not add mask/control route selection unless source
+  material semantics prove it is needed.
+- Keep this phase CPU-only and worker-safe. Do not import WebGL resources, render-resource worker
+  schedulers, or global atlas state.
+
+Exit criteria:
+
+- Builder tests prove an indexed-paletted static material emits indexed texel and palette lookup
+  refs/pages and is classified as the indexed-paletted family.
+- Builder tests prove indexed-paletted with detail keeps an optional detail page/ref without
+  reclassifying it as a separate family.
+- RGBA static material tests continue to pass.
+- No compatibility shims, alternate staged/static modes, or render-resource worker job adapters are
+  introduced.
+- Focused tests, changed-file ESLint, `npm run check`, `npm run lint:dead`, and `npm run lint:rust`
+  pass.
+
+Cleanup targets:
+
+- Remove or narrow any staged-only indexed material helper duplication once the static builder owns a
+  worker-safe indexed-paletted path.
+- Update Phase 2 worker orchestration notes to assume the builder can produce both RGBA and
+  indexed-paletted compacted family artifacts.
+
+Legacy shims introduced:
+
+- None expected. Phase 1H should extend the static bundle builder directly, not add a compatibility
+  bridge to staged draw units.
+
+Legacy debt found before the next phase:
+
+- Phase 2 should not start until the indexed-paletted builder tests pass.
+- `npm run lint:ts` remains blocked by existing unrelated dead code in
+  `src/lib/world-display/camera.ts`: `rendererPointToAcPosition` is defined but unused.
+
+### Phase 1I: Terrain Worker Artifact Contract
+
+Status: Pending Phase 1H.
+
+Purpose:
+
+- Make terrain explicit in the replacement architecture before moving static landblock prep into
+  workers.
+- Preserve terrain as a first-class streaming artifact. Terrain is separate from static object
+  bundle layers, but it is not optional and does not have an acceptable static direct-draw fallback.
+- Prevent Phase 2 from only solving object bundle workers while leaving terrain CPU prep dependent
+  on main-thread resource sync in a way that blocks open-world movement.
+
+Current terrain facts:
+
+- Terrain is already a separate renderer bucket with real WebGL resources and submit code:
+  - `terrain-scene` / terrain tile scene models;
+  - terrain tile resources and draw slices;
+  - terrain blend plans and terrain tile layer plans;
+  - terrain color, terrain mask, and terrain detail texture page families;
+  - terrain family submit.
+- Terrain texture roles are color, mask, and optional detail. These are terrain-specific page
+  families, not static object material families.
+- Terrain is first-class inside the outdoor preset, then building/detail/env-cell object layers are
+  composed additively beside it as route-shaped presets request more backend artifacts.
+
+Implementation notes:
+
+- Define a terrain artifact separate from `StaticLandblockRenderBundleLayer` that carries:
+  - terrain mesh/layer geometry;
+  - terrain blend/layer plans;
+  - terrain color/mask/detail page artifacts or page refs;
+  - terrain BVH/visibility keys;
+  - terrain diagnostics and worker-prepared asset IDs.
+- Move terrain blend/layer planning and terrain color/mask/detail page packing to worker-built CPU
+  artifacts. The main thread should only schedule terrain interest, reject stale worker results, and
+  realize returned terrain artifacts into WebGL resources.
+- Keep terrain texture ownership separate from object bundle layer texture pages unless a later
+  measured integration proves sharing is worth the complexity.
+- Terrain artifact construction must be driven by landblock preset interest and must not wait on a
+  separate building/detail/env-cell worker scheduler.
+- Keep the existing terrain WebGL realization and submit concepts where useful, but stop treating
+  main-thread terrain CPU planning/page packing as the target architecture.
+
+Exit criteria:
+
+- The plan and Phase 2 contract explicitly preserve terrain as first-class and non-fallback.
+- Tests or dry-run notes prove terrain-only residency can exist before building/detail layers and
+  remains composed with those layers when they arrive.
+- Terrain worker artifact DTOs are defined clearly enough that Phase 2 can orchestrate terrain and
+  static object artifacts as sibling resident landblock artifacts.
+- No static object bundle code is made responsible for terrain geometry, terrain color/mask/detail
+  pages, or terrain LOD policy.
+
+Cleanup targets:
+
+- Remove plan wording that treats terrain as merely a texture-manager side concern rather than a
+  resident landblock layer family.
+- Quarantine any existing terrain CPU planning/page packing code that stays in WebGL resource modules
+  during extraction; the long-term owner should be worker-safe terrain artifact construction.
+
+Legacy shims introduced:
+
+- None expected. Terrain should get a real terrain artifact path; do not add static object direct
+  fallback or a long-lived main-thread terrain prep adapter as a shim.
+
+Legacy debt found before the next phase:
+
+- Phase 2 should not start until terrain worker artifact DTOs are explicit and tested or dry-run
+  against current terrain code.
+- `npm run lint:ts` remains blocked by existing unrelated dead code in
+  `src/lib/world-display/camera.ts`: `rendererPointToAcPosition` is defined but unused.
+
+### Phase 1J: Landblock Preset Contract Hardening
+
+Status: Pending Phase 1I.
+
+Purpose:
+
+- Convert the target worker contract from transitional layer jobs to landblock preset jobs before
+  implementing worker orchestration.
+- Shape landblock LoD presets around current backend artifact routes and products.
+- Prevent Phase 2 from accidentally wrapping `DesiredStaticBundleLayer`,
+  `StaticBundleLayerWorkerJob`, source revisions, root manifests, or topology discovery DTOs in a
+  new worker client.
+
+Implementation notes:
+
+- Add or draft the target DTOs:
+  - `LandblockRenderLodPreset = "outdoor" | "outdoor-with-env-cells"`;
+  - `DesiredLandblockRenderPreset`;
+  - `LandblockRenderPresetWorkerJob`;
+  - `LandblockRenderPresetWorkerResult`.
+- Map current `OutdoorSceneInterest` radii to one desired preset per landblock:
+  - terrain/building/detail outdoor ring -> `outdoor`;
+  - env-cell/interior-linked ring -> `outdoor-with-env-cells`.
+- Explicitly defer `summary` as a future preset until a cheap backend route/product exists. Do not
+  model a summary preset by loading the full `landblock/<id>/outdoor` route and filtering output,
+  because that would imply CPU savings the current route cannot provide.
+- Keep `DesiredStaticBundleLayer`, `StaticBundleLayerWorkerJob`,
+  `StaticBundleEnvCellTopologyDiscoveryJob`, `rootAssetIds`, `knownClosureAssetIds`,
+  `knownMissingAssetIds`, and `sourceRevision` out of target worker scheduling. They may remain only
+  as transitional tests/diagnostics until Phase 2 deletes or quarantines them.
+- Define how preset worker results contain independently resident artifacts: terrain artifact,
+  exterior static object layer artifacts, detail/env-cell static artifacts, texture page artifacts,
+  and low-fidelity diagnostics.
+- Keep this phase CPU/DTO-only. Do not add WebGL realization or a second long-lived renderer path.
+
+Exit criteria:
+
+- Tests prove LoD radii collapse to one monotonic desired preset per landblock.
+- Target preset job/result DTOs exist or are documented precisely enough for Phase 2 implementation.
+- Target presets match current route/product boundaries, and `summary` is explicitly deferred.
+- No target code path requires main-thread topology discovery, prepared-cache root manifests, or
+  prepared-record source revisions to schedule a landblock preset job.
+
+Cleanup targets:
+
+- Rename or quarantine tests that currently assert desired layer planning from main-thread topology.
+- Remove target-plan wording that treats `summary` as an existing preset unless a cheap backend route
+  is added.
+- Keep historical Phase 1 DTOs clearly marked as transitional.
+
+Legacy shims introduced:
+
+- None expected. Do not add a fake summary shim over `landblock/<id>/outdoor`; use the `outdoor`
+  preset until a real summary product exists.
+
+Legacy debt found before the next phase:
+
+- Phase 2 should not start until this preset contract is in place. Otherwise worker orchestration
+  will likely preserve the old layer/root/source-revision surface.
+- `npm run lint:ts` remains blocked by existing unrelated dead code in
+  `src/lib/world-display/camera.ts`: `rendererPointToAcPosition` is defined but unused.
+
+### Split Boundaries to Avoid
+
+The replacement gets harder when one landblock concept is split between old main-thread prepared
+cache/resource-sync ownership and new worker-built artifact ownership. Avoid these split boundaries
+before or during Phase 2:
+
+- Terrain CPU prep on the main thread while static object CPU prep moves to workers. Terrain is the
+  first visible residency layer and has no static direct fallback, so it needs a worker artifact
+  contract before object worker orchestration.
+- Static object closure completeness in `SceneAssetStreamingController` while workers also load raw
+  closures. The prepared-cache closure facts should become diagnostics only.
+- Texture page ownership split between global atlas generations for some landblock-static content
+  and layer/terrain-scoped pages for other landblock-static content. Static object pages and terrain
+  pages can be separate, but both should be worker-built CPU artifacts.
+- Env-cell topology hydration on the main thread just to discover worker jobs. Topology loading and
+  env-cell selection should be an internal landblock worker step, not a separate discovery round trip
+  followed by cache lookups and later worker scheduling.
+- Render-resource worker compaction/packing jobs surviving beside static bundle/terrain worker
+  artifacts. Reuse pure algorithms, not old scheduling ownership.
+- Picker/debug graph detail forcing staged draw-unit identity back into static object or terrain
+  artifacts. Keep those consumers lower fidelity unless the data falls out of render artifacts.
+
+### One-Shot Simplification Targets
+
+Phase 2 should collapse transitional Phase 1 planning/accounting surfaces into the landblock preset
+worker model instead of carrying them forward under new names:
+
+- Replace `DesiredStaticBundleLayer` / `StaticBundleLayerWorkerJob` as target scheduling contracts
+  with `DesiredLandblockRenderPreset` / `LandblockRenderPresetWorkerJob`.
+- Replace arbitrary requested artifact masks with route-shaped monotonic presets: `outdoor` and
+  `outdoor-with-env-cells`. Defer `summary` until a cheap backend product exists.
+- Treat `rootAssetIds`, topology/env-cell root manifests, prepared-cache closure IDs, missing closure
+  IDs, and worker-prepared dependency IDs as worker-local diagnostics. They must not schedule,
+  invalidate, or retain landblock render artifacts.
+- Remove `sourceRevision` from target worker identity. Use latest `requestId`, `landblockId`, preset,
+  build policy revision, and CPU texture-page policy revision for stale-result rejection.
+- Do not add separate outdoor/topology/env-cell worker schedulers. A landblock preset job may emit
+  multiple artifacts, and the resident store may commit them independently.
+- Keep texture page packing as a synchronous local helper inside the preset job. Do not reintroduce
+  atlas generations, pending replacement records, or standalone packing jobs.
+- Keep picker, debug, and graph diagnostics lower fidelity. Do not retain staged draw-unit identity
+  or per-part graph accounting for those consumers.
+- Make the Phase 3 vertical slice prove the `outdoor` preset rather than a standalone
+  `outdoor-buildings` layer. Terrain and exterior statics should cross the worker boundary together
+  in that slice.
+
+### Phase 2: Landblock Worker Orchestration
+
+This is not a compatibility mode. It replaces the main-thread terrain/static closure prep assumption
+with a landblock render worker that can request raw assets through the worker host bridge and return
+complete terrain plus static object artifacts for the requested landblock LoD preset.
+
+- Add `static-landblock-render-worker.ts` using the extracted shared worker bridge libraries.
+- Add `static-landblock-render-worker-client.ts` to post landblock preset requests, track latest
+  request IDs/policy revisions, and consume transferable terrain/object artifacts.
+- Honor the Phase 1I terrain artifact contract. Static object workers must compose with terrain
+  residency and must not imply terrain fallback through direct static entries.
+- Move worker-local terrain and static closure loading/preparation into the worker job.
+- Sequence env-cell work inside the same worker call graph for `outdoor-with-env-cells`: load
+  topology, derive selected env-cell IDs, load selected env-cell payloads, then build
+  `env-cell-static` artifacts.
 - Add worker-local closure expansion for setup-appearance companions and normalized prepared texture
   routes.
-- Run the static bundle builder inside the worker.
+- Run terrain artifact construction and the static bundle builder inside the worker.
 - Return transferable geometry buffers and texture page byte buffers to the main thread.
-- Coalesce desired scopes and reject stale worker results by scope/source revision.
+- Coalesce desired landblock preset requests and reject stale worker results by latest request ID,
+  landblock, preset, and policy revisions.
 - Keep WebGL realization on the main thread.
 
 Exit criteria:
 
-- Static bundle-layer CPU work, closure loading, and texture page packing run off the main thread.
-- Main thread resource sync for statics receives complete worker artifacts only.
-- Worker closure loading does not require full static prepared closure state in
+- Terrain CPU work, static bundle-layer CPU work, closure loading, topology/env-cell hydration, and
+  texture page packing run off the main thread.
+- Main thread resource sync for terrain/statics receives complete worker artifacts only.
+- Worker closure loading does not require full terrain/static prepared closure state in
   `SceneAssetStreamingController`.
+- No separate topology discovery worker job or main-thread topology cache lookup is required to
+  schedule env-cell artifact construction.
+- Phase 1 transitional layer/root/source-revision scheduling DTOs are deleted or quarantined behind
+  the preset worker client.
 
 ### Phase 3: Renderer Integration Vertical Slice
 
 - Add WebGL layer resource realization for compacted batches, direct static entries, material tables,
   and layer-owned texture pages.
-- Wire one static layer type first, preferably `outdoor-buildings`, through planning, worker
-  orchestration, WebGL realization, resident layer ownership, and submit.
-- For that wired layer type, replace static staged draw-unit assembly with resident bundle layers.
+- Wire the `outdoor` preset first through planning, worker orchestration, WebGL realization, resident
+  terrain/object ownership, and submit.
+- For that wired preset, replace static staged draw-unit assembly with resident terrain/object
+  artifacts.
 - Keep structured interior and portal code separate unless a specific piece is intentionally moved.
-- Keep `outdoor-detail` and `env-cell-static` out of the integration until the vertical slice proves
-  the ownership model.
-- Remove static draw units from compaction planning for the integrated layer type.
-- Delete direct suppression logic only for the integrated layer type once no staged direct draw units
-  coexist with its compacted static replacements.
+- Keep `outdoor-with-env-cells` and `env-cell-static` out of the first integration until the vertical
+  slice proves the ownership model, but do not introduce a separate topology discovery scheduler when
+  `env-cell-static` is added.
+- Remove static draw units from compaction planning for the integrated preset.
+- Delete direct suppression logic for the integrated preset once no staged direct draw units coexist
+  with its compacted static replacements.
 
 Exit criteria:
 
-- `outdoor-buildings` renders from resident bundle layers without the static staged path.
+- `outdoor` renders from resident terrain/object artifacts without the static staged path.
 - Layer-owned textures, compacted batches, direct static entries, material tables, and eviction work
-  for the integrated layer type.
-- Existing static compaction scheduler is unused for the integrated layer type.
-- Main thread resource sync for the integrated layer type does only layer commit, upload, and
+  for the integrated preset.
+- Existing static compaction scheduler is unused for the integrated preset.
+- Main thread resource sync for the integrated preset does only artifact commit, upload, and
   eviction.
 - Static selection and picking are not required for the vertical slice.
 
 ### Phase 4: Expand Layer Coverage and Delete Old Static Scheduling
 
-- Extend the Phase 3 path to `outdoor-detail`.
-- Add topology discovery and per-env-cell `env-cell-static` layer scheduling if it was not fully
-  exercised in Phase 3.
-- Commit terrain-only, building, detail, and env-cell scopes independently.
-- Remove static draw units from compaction planning for all migrated static layer types.
-- Delete static direct suppression logic for all migrated static layer types.
+- Extend the Phase 3 path to `outdoor-with-env-cells`.
+- Add `env-cell-static` artifact construction through the landblock worker's internal topology and
+  env-cell hydration sequence if it was not fully exercised in Phase 3.
+- Commit outdoor and env-cell artifacts independently as outputs of preset jobs.
+- Remove static draw units from compaction planning for all migrated presets.
+- Delete static direct suppression logic for all migrated presets.
 - Delete standalone static compaction render-resource worker scheduling once static callers are gone.
 - Delete standalone static texture atlas worker scheduling once static callers are gone.
 - Remove global/static texture atlas generation identity from static compacted geometry keys.
-- Ensure static worker output owns layer-scoped single-entry or packed pages for every static layer
-  type.
+- Ensure static worker output owns layer-scoped single-entry or packed pages for every static object
+  artifact emitted by a preset.
 - Move global filtering changes to sampler/material binding updates.
 - Update compacted material tables from layer-owned page bindings instead of rebuilding geometry.
 - Keep dynamic direct draw units on a separate direct texture path unless/until a measured need
@@ -1470,7 +1912,7 @@ Exit criteria:
 Exit criteria:
 
 - Static outdoor landblocks and env-cell statics render from resident bundle layers.
-- Terrain-only, building, detail, and env-cell scopes can be committed independently.
+- Outdoor and env-cell artifacts can be committed independently.
 - Changing global texture filtering does not rebuild static landblock bundle layers.
 - Static compacted geometry is independent of renderer atlas generations.
 - No static layer worker needs main-thread atlas state as input.
@@ -1492,7 +1934,7 @@ Exit criteria:
 
 - No static landblock render path depends on staged draw-unit assembly.
 - No static landblock render path depends on render-resource worker job scheduling.
-- Static cache diagnostics and resident layer ownership no longer depend on staged renderer graph
+- Static cache diagnostics and resident artifact ownership no longer depend on staged renderer graph
   projection.
 
 ### Phase 6: Cleanup and Consolidation
@@ -1511,7 +1953,7 @@ renamed old concepts scattered through the renderer.
   layer page packer.
 - Remove stale comments and plan references that suggest the old render-resource worker path is
   still a valid implementation route.
-- Rebaseline focused tests around layer ownership, layer texture pages, and WebGL realization;
+- Rebaseline focused tests around preset artifact ownership, layer texture pages, and WebGL realization;
   delete tests that assert old scheduler, pending replacement, or runtime suppression behavior.
 - Remove or rewrite tests for `static-staged` render-frame categories once no live code can emit
   that category.
@@ -1531,7 +1973,7 @@ Exit criteria:
 ## Test Strategy
 
 - Unit-test bundle-layer builders with synthetic worker-local prepared closures.
-- Unit-test desired-layer planning against root manifests and transitional known-closure diagnostics.
+- Unit-test desired landblock preset planning from terrain/building/detail/env-cell radii.
 - Unit-test worker closure loading against a fake host bridge.
 - Unit-test object/cell visibility keys. Do not require picker/debug sidecar coverage.
 - Unit-test direct vs compacted classification with mixed-material objects.
@@ -1539,10 +1981,10 @@ Exit criteria:
 - Unit-test layer-scoped texture page outputs for single-entry and packed-atlas pages.
 - Unit-test global filtering changes to prove bundle layers and compacted geometry keys are
   unchanged.
-- Unit-test terrain-to-building-to-detail promotion so the building layer remains resident while the
-  detail layer is built and committed additively.
-- Unit-test env-cell scope planning from topology and structured-interior coverage.
-- Unit-test runtime appearance previews staying out of static bundle-layer planning.
+- Unit-test `outdoor` -> `outdoor-with-env-cells` promotion so resident artifacts are not passed
+  back into worker jobs as mutable inputs.
+- Unit-test worker-local env-cell derivation from topology for `outdoor-with-env-cells`.
+- Unit-test runtime appearance previews staying out of landblock preset planning.
 - Unit-test worker request/result stale rejection and transferable geometry/texture buffers.
 - Add renderer resource tests for commit, eviction, and layer-owned texture lifetime.
 
@@ -1554,8 +1996,9 @@ Avoid permanent tests that require repo-local runtime DAT/HBA assets.
 
 - Distant outdoor-to-detail promotion should not rebuild resident building layers. Build complete
   additive layers and compose them.
-- Do not pass compacted outdoor state back into workers. Worker inputs are layer scope, root asset
-  IDs, and build policy. Worker outputs are complete layer artifacts.
+- Do not pass compacted outdoor state back into workers. Worker inputs are landblock ID, requested
+  preset, latest request ID, and build/texture policy revisions. Worker outputs are preset-complete
+  terrain and static artifacts.
 - Static workers should load/prepare their own raw static closures through the worker host bridge.
   The main thread should not be responsible for hydrating every static dependency before a worker
   job starts.
@@ -1569,16 +2012,18 @@ Avoid permanent tests that require repo-local runtime DAT/HBA assets.
 - Structured interior render geometry, portals, portal masks, and cell indicators are not the same
   thing as env-cell static object layers. Share visibility and transform helpers, not ownership.
 
-### LOD Promotion and Layer Composition
+### LoD Preset Promotion and Layer Composition
 
-Do not rebuild an entire landblock when a distant landblock promotes from terrain-only to buildings
-or from buildings to full outdoor detail. The worker should build complete layers, and the resident
-layer store should compose those complete layers. Passing an existing compacted building layer into
-the worker as mutable input would recreate the synchronization problem this plan is removing.
+Do not rebuild or mutate resident landblock artifacts in place when a landblock promotes from
+`outdoor` to `outdoor-with-env-cells`. The worker should build a complete preset result, and the
+resident artifact store should compose or replace returned artifacts. Passing an existing compacted
+building layer into the worker as mutable input would recreate the synchronization problem this plan
+is removing.
 
-The implementation may schedule building and detail layers together when both are desired. That is
-an optimization of scheduling, not a different bundle contract. Each layer job still owns its own
-closure loading, geometry build, and layer texture pages.
+If a future cheap `summary` preset is added, the implementation may skip intermediate presets when
+interest jumps directly to `outdoor-with-env-cells`. That is an optimization of scheduling, not a
+different contract. Each preset job owns its own closure loading, geometry build, terrain/static page
+packing, and diagnostics.
 
 ### Layer-Scoped vs Shared Texture Pages
 
@@ -1588,9 +2033,8 @@ simple.
 
 Layer-scoped first policy:
 
-- `outdoor-buildings` owns its own pages.
-- `outdoor-detail` owns its own pages.
-- each `env-cell-static` layer owns its own pages.
+- exterior object artifacts own their own pages.
+- detail/env-cell object artifacts own their own pages.
 - terrain remains separate.
 - dynamic direct textures remain separate and do not contribute packable static refs.
 

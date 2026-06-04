@@ -110,6 +110,7 @@ import {
 import { profileBrowserJsScope } from "../diagnostics/browser-js-profiler";
 import { deriveWebgl2DrawUnitRuntimeDiagnostics } from "./webgl2-runtime-render-diagnostics";
 import { CompactedGeometryWorkerScheduler } from "./worker-resources/compacted-geometry-worker-scheduler";
+import { IndexedResourceAtlasWorkerScheduler } from "./worker-resources/indexed-atlas-worker-scheduler";
 
 const WEBGL2_CANVAS_CLASS_NAME = "world-display__webgl2-canvas";
 const WEBGL2_ERROR_CLASS_NAME = "world-display__webgl2-error";
@@ -986,6 +987,10 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			resources = createTriangleResources(gl);
 			resources.worldStore.compactedGeometryWorkerScheduler =
 				new CompactedGeometryWorkerScheduler({
+					onReadyResult: markWorldResourcesDirty,
+				});
+			resources.worldStore.indexedResourceAtlasWorkerScheduler =
+				new IndexedResourceAtlasWorkerScheduler({
 					onReadyResult: markWorldResourcesDirty,
 				});
 			syncCanvasSize();

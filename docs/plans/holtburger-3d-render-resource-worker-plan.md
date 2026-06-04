@@ -1,6 +1,6 @@
 # Holtburger 3D Render Resource Worker Plan
 
-Status: Phase 4A implemented; Phase 4B is the next implementation phase.
+Status: Phase 4B implemented; Phase 4C is the next implementation phase.
 
 Related plans:
 
@@ -520,7 +520,8 @@ Introduced cleanup targets and legacy shims:
   sync loop still owns per-pass retention. Phase 3B-2 should revisit whether a compacted worker owner
   can encapsulate those sets more cleanly.
 - The synchronous build path is now a deliberate legacy shim. Keep it during worker rollout, then
-  narrow it to debug/fallback once worker scheduling is stable.
+  remove it from the world-resource pipeline once worker scheduling is stable. Phase 4C now owns
+  that cleanup.
 - The immediate next phase is Phase 3B-2 rather than continuing to label the whole scheduler rollout
   as one phase. This keeps the renderer invalidation and worker-result queueing work isolated.
 
@@ -563,7 +564,8 @@ Course corrections:
   and request another renderer sync through the existing dirty-frame path.
 - The first live worker pass keeps synchronous compaction as the fallback when no compacted worker
   scheduler is installed. This preserves deterministic unit tests and gives a narrow debug fallback
-  while rollout stabilizes.
+  while rollout stabilizes. This was a rollout compromise; Phase 4C now removes it from the live
+  world-resource pipeline.
 - The committed group maps are now the source of truth for retaining old family resources while a
   replacement worker job is pending. Geometry keys alone were not enough because family resources
   are keyed separately.
@@ -573,9 +575,8 @@ Introduced cleanup targets and legacy shims:
 - `RenderResourceJobScheduler.markCommitted` still increments commit metrics every call, so callers
   should only call it after actual commit. Phase 3B-2 avoids calling it for already-committed steady
   state, but a future metrics panel should make this invariant visible.
-- `syncWebgl2CompactedGeometryResources` now contains both worker and fallback paths. Keep the
-  fallback until worker rollout is stable, then consider extracting the worker path into a smaller
-  compacted resource owner to keep sync code easier to read.
+- `syncWebgl2CompactedGeometryResources` now contains both worker and fallback paths. Phase 4C should
+  remove the fallback and keep worker-required sync as the only world-resource pipeline.
 - Null worker geometries are currently discarded for desired groups. That should be hardened before
   atlas worker phases so impossible "desired but null" jobs fail loudly or record explicit metrics
   instead of silently doing no work.
@@ -619,7 +620,8 @@ Course corrections:
 Introduced cleanup targets and legacy shims:
 
 - `syncWebgl2CompactedGeometryResources` still carries both worker and synchronous fallback paths.
-  Keep the fallback during rollout, then extract or narrow it once the worker path is stable.
+  Phase 4C should remove this fallback now that indexed atlas generation has set the worker-required
+  pattern.
 - `commitWebgl2CompactedGeometryBatch` still accepts retained-key sets from the surrounding sync
   loop. This is acceptable for the current code shape, but if Phase 4 starts adding similar
   bookkeeping for atlases, introduce a small resource owner instead of spreading set mutation across
@@ -749,14 +751,91 @@ Course corrections:
 
 Introduced cleanup targets and legacy shims:
 
-- The synchronous indexed atlas generation wrapper remains active and is still the live path. Phase
-  4B should keep it as a narrow fallback while introducing scheduler-backed indexed atlas commits.
+- The synchronous indexed atlas generation wrapper remains available as a resource-level unit-test
+  helper, but should not remain a pipeline fallback once Phase 4B replaces live indexed atlas sync.
 - `IndexedResourceAtlasCpuGeneration.indexPlacements` and `palettePlacements` still expose placement
   records with source bytes even though submit code resolves atlas textures by generated texture
   resources. Consider introducing lightweight committed placement records before or during Phase 4B
   if source-byte cloning shows up in worker transfer metrics.
 - Indexed atlas worker metrics are not yet surfaced because no live scheduler exists for this family.
   Phase 4B should follow compacted worker metrics and keep them outside `RendererResourceGraph`.
+
+### 2026-06-04: Phase 4B Implemented
+
+Implemented live indexed resource atlas worker scheduling and commit wiring:
+
+- added `IndexedResourceAtlasWorkerScheduler`, using the shared `RenderResourceJobScheduler` latest-
+  wins state machine for one indexed atlas generation job at a time;
+- installed the indexed atlas scheduler in the WebGL2 renderer with the same worker-ready
+  invalidation callback pattern used by compacted geometry;
+- changed indexed atlas resource sync so worker-backed mode:
+  - consumes accepted CPU atlas results at the start of sync;
+  - realizes WebGL textures from CPU page buffers on the main thread;
+  - commits through `commitWebgl2IndexedResourceAtlasGeneration`;
+  - marks scheduler commits only after WebGL realization succeeds;
+  - retains the previous committed atlas generation while a replacement worker job is pending;
+  - fails loudly if indexed atlas generation is required without an indexed atlas scheduler;
+- surfaced indexed atlas worker metrics through the world store, renderer metrics, and debug counter
+  map without adding graph responsibilities;
+- reset the indexed atlas scheduler when no indexed atlas generation is currently required, so
+  in-flight results for a disappeared plan cannot become drawable later.
+
+Validation completed:
+
+- `npm run test:ts -- render-resource-worker-client webgl2-world-resources indexed-atlas-worker-payloads webgl2-indexed-resource-atlas-generation`
+- `npm run check`
+- `npm run lint:ts`
+
+Course corrections:
+
+- The indexed atlas scheduler is generation-scoped rather than page-scoped. Page-level commits would
+  add partial-generation texture binding states, while the current atlas plan key already describes a
+  coherent generation.
+- No explicit empty-generation worker result was introduced. When a plan no longer needs indexed
+  atlas textures, sync resets the scheduler and disposes the committed generation directly. This
+  keeps "desired but null worker generation" invalid for real indexed atlas plans.
+- Graph projection remains tied to committed WebGL atlas generations only. Scheduling indexed atlas
+  worker work does not create graph nodes or leases.
+- The first async indexed atlas commit still happens during regular resource sync. Upload budgeting
+  remains deferred to Phase 6 unless main-thread texture realization becomes the next dominant jank
+  source.
+
+Introduced cleanup targets and legacy shims:
+
+- `createWebgl2IndexedResourceAtlasGenerationResource` remains only as a resource-level convenience
+  wrapper for focused WebGL realization tests. The world-resource pipeline no longer calls it as a
+  fallback when indexed atlas generation is required.
+- `IndexedResourceAtlasCpuGeneration` still carries placement records with copied source bytes. The
+  committed WebGL atlas resource does not need those source bytes, so Phase 5 or a small prep phase
+  can introduce lightweight committed placement DTOs if transfer metrics show avoidable payload
+  weight.
+- Indexed atlas worker metrics now exist, but the browser debug report text still emphasizes
+  compacted worker metrics. If atlas worker behavior needs manual profiling visibility, add concise
+  indexed-atlas worker counters to the render pipeline summary.
+- The compacted geometry world-resource pipeline still has a synchronous fallback when no compacted
+  worker scheduler is installed. That is now inconsistent with the indexed atlas direction and should
+  be removed before Phase 5 adds another worker-backed atlas family.
+
+### 2026-06-04: Phase 4C Added
+
+Added an immediate cleanup phase before RGBA/detail atlas worker migration.
+
+Decision:
+
+- The renderer resource pipeline should have one live implementation path per worker-backed resource
+  family. Pure CPU builders and WebGL realization helpers can still be tested directly, but
+  `syncWebgl2WorldResources` should not maintain alternate synchronous renderer pipelines for the
+  same resource family.
+
+Reasoning:
+
+- Indexed atlas generation now requires `IndexedResourceAtlasWorkerScheduler` whenever an indexed
+  atlas generation is desired.
+- Compacted geometry still has a synchronous no-scheduler fallback. Keeping that branch would make
+  compaction the odd worker family and would encourage Phase 5 to copy the same two-mode pattern for
+  RGBA/detail atlases.
+- Removing the compacted fallback before Phase 5 keeps the next atlas migration cleaner: scheduler
+  required for live pipeline work, helper functions retained only for focused unit tests.
 
 ## Scheduling Model
 
@@ -1209,7 +1288,7 @@ Validation:
 
 ## Phase 4B: Indexed Resource Atlas Scheduler And Commit Wiring
 
-Status: next.
+Status: complete.
 
 Work:
 
@@ -1217,8 +1296,8 @@ Work:
 - Use the compacted worker scheduling model rather than adding a second async state machine:
   scheduler-owned stale-result checks, CPU result queues, main-thread WebGL realization, and
   store/debug metrics outside `RendererResourceGraph`.
-- Keep the synchronous indexed atlas generation path as a narrow fallback until worker-backed atlas
-  generation is stable.
+- Require an indexed atlas worker scheduler whenever indexed atlas generation is required. Do not keep
+  a synchronous world-resource fallback path.
 - Treat a desired indexed atlas worker result with missing CPU page data as invalid unless a future
   explicit empty-generation state is proven necessary.
 - Ensure indexed/paletted compacted family resources are only drawable against the committed indexed
@@ -1229,6 +1308,34 @@ Validation:
 - Add stale-result tests where a newer indexed atlas plan supersedes an older one.
 - Add async retention tests proving the old committed indexed atlas generation remains installed
   while a replacement worker job is pending.
+- Add reset coverage proving in-flight indexed atlas jobs are ignored after the desired plan no
+  longer needs an indexed atlas generation.
+
+## Phase 4C: Remove Compacted Geometry Sync Fallback
+
+Status: next.
+
+Work:
+
+- Require `CompactedGeometryWorkerScheduler` whenever compacted geometry work is desired. Do not keep
+  a synchronous world-resource fallback path.
+- Convert world-resource compaction tests that currently rely on implicit synchronous compaction to
+  install the compacted worker scheduler and complete worker jobs explicitly.
+- Keep pure compacted CPU builder tests and compacted WebGL realization tests, but stop routing
+  `syncWebgl2CompactedGeometryResources` through the synchronous builder as an alternate pipeline.
+- Preserve the current fail-loud policy for desired compacted worker results that return null
+  geometry.
+- Keep committed compacted batches and family resources retained while replacement worker work is
+  pending.
+- Update compaction diagnostics only if counters currently assume the synchronous path can exist.
+
+Validation:
+
+- Existing compacted geometry, world resource, and render worker scheduler tests pass.
+- Add or update coverage proving compacted geometry sync fails loudly when desired compaction work has
+  no compacted worker scheduler.
+- Add or update coverage proving indexed/paletted compaction still commits through the worker path
+  after the fallback is removed.
 
 ## Phase 5: RGBA And Detail Atlas Worker Preparation
 
@@ -1239,6 +1346,8 @@ Work:
 - Preserve main-thread mipmap generation and sampler policy.
 - Ensure source prepared texture buffers are not neutered from asset state.
 - Commit returned page buffers into WebGL textures on the main thread.
+- Require a texture atlas worker scheduler whenever RGBA/detail atlas generation is required. Do not
+  introduce a synchronous world-resource fallback path.
 
 Validation:
 

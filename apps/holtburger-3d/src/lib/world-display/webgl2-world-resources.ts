@@ -107,7 +107,7 @@ import {
 	type Webgl2TextureAtlasGenerationResource,
 } from "./webgl2/resources/texture-atlas-generation";
 import {
-	createWebgl2IndexedResourceAtlasGenerationResource,
+	createWebgl2IndexedResourceAtlasGenerationResourceFromCpu,
 	describeWebgl2IndexedResourceAtlasGenerationKey,
 	type Webgl2IndexedResourceAtlasGenerationResource,
 } from "./webgl2/resources/indexed-resource-atlas-generation";
@@ -123,6 +123,10 @@ import type {
 	CompactedGeometryWorkerScheduler,
 	CompactedGeometryWorkerSchedulerMetrics,
 } from "./worker-resources/compacted-geometry-worker-scheduler";
+import type {
+	IndexedResourceAtlasWorkerScheduler,
+	IndexedResourceAtlasWorkerSchedulerMetrics,
+} from "./worker-resources/indexed-atlas-worker-scheduler";
 import {
 	buildTerrainBlendPlanSet,
 	type TerrainBlendTextureRef,
@@ -279,6 +283,8 @@ export interface Webgl2WorldResourceStore {
 	indexedResourceAtlasPlan: IndexedResourceAtlasPlan;
 	indexedResourceAtlasGeneration: Webgl2IndexedResourceAtlasGenerationResource | null;
 	pendingIndexedResourceAtlasGenerationKey: string | null;
+	indexedResourceAtlasWorkerScheduler: IndexedResourceAtlasWorkerScheduler | null;
+	indexedResourceAtlasWorkerMetrics: IndexedResourceAtlasWorkerSchedulerMetrics;
 	indexedResourceAtlasGenerationGraph: RendererResourceGraph | null;
 	indexedResourceAtlasGenerationGraphLease: RendererResourceGraphLease | null;
 	textureAtlasGenerationTextureCount: number;
@@ -416,6 +422,9 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		indexedResourceAtlasPlan: createEmptyIndexedResourceAtlasPlan(),
 		indexedResourceAtlasGeneration: null,
 		pendingIndexedResourceAtlasGenerationKey: null,
+		indexedResourceAtlasWorkerScheduler: null,
+		indexedResourceAtlasWorkerMetrics:
+			createEmptyIndexedResourceAtlasWorkerSchedulerMetrics(),
 		indexedResourceAtlasGenerationGraph: null,
 		indexedResourceAtlasGenerationGraphLease: null,
 		textureAtlasGenerationTextureCount: 0,
@@ -952,6 +961,10 @@ export function destroyWebgl2WorldResources(
 	store.compactedGeometryWorkerScheduler = null;
 	store.compactedGeometryWorkerMetrics =
 		createEmptyCompactedGeometryWorkerSchedulerMetrics();
+	store.indexedResourceAtlasWorkerScheduler?.dispose();
+	store.indexedResourceAtlasWorkerScheduler = null;
+	store.indexedResourceAtlasWorkerMetrics =
+		createEmptyIndexedResourceAtlasWorkerSchedulerMetrics();
 	store.textureAtlasGenerationGraph = null;
 	store.textureAtlasGenerationGraphLease = null;
 	store.indexedResourceAtlasGenerationGraph = null;
@@ -1014,6 +1027,8 @@ export function destroyWebgl2WorldResources(
 	store.indexedResourceAtlasGeneration?.dispose();
 	store.indexedResourceAtlasGeneration = null;
 	store.pendingIndexedResourceAtlasGenerationKey = null;
+	store.indexedResourceAtlasWorkerMetrics =
+		createEmptyIndexedResourceAtlasWorkerSchedulerMetrics();
 	store.indexedMaterialDescriptorDrawUnitCount = 0;
 	store.indexedMaterialDescriptorCompactionCandidateCount = 0;
 	store.standaloneIndexedMaterialResourceDrawUnitCount = 0;
@@ -1051,6 +1066,21 @@ export function destroyWebgl2WorldResources(
 }
 
 function createEmptyCompactedGeometryWorkerSchedulerMetrics(): CompactedGeometryWorkerSchedulerMetrics {
+	return {
+		activeSchedulerCount: 0,
+		submittedJobCount: 0,
+		dedupedDesiredJobCount: 0,
+		coalescedDesiredJobCount: 0,
+		staleResultCount: 0,
+		readyResultCount: 0,
+		committedResultCount: 0,
+		errorCount: 0,
+		lastStaleDiscardReason: null,
+		lastErrorMessage: null,
+	};
+}
+
+function createEmptyIndexedResourceAtlasWorkerSchedulerMetrics(): IndexedResourceAtlasWorkerSchedulerMetrics {
 	return {
 		activeSchedulerCount: 0,
 		submittedJobCount: 0,
@@ -3639,8 +3669,13 @@ function syncWebgl2IndexedResourceAtlasGeneration({
 		releaseWebgl2IndexedResourceAtlasGenerationGraphLease(store);
 	}
 	if (!requiresIndexedResourceAtlasGeneration(plan)) {
+		store.indexedResourceAtlasWorkerScheduler?.reset();
+		store.indexedResourceAtlasWorkerMetrics =
+			store.indexedResourceAtlasWorkerScheduler?.getMetrics() ??
+			store.indexedResourceAtlasWorkerMetrics;
 		store.indexedResourceAtlasGeneration?.dispose();
 		store.indexedResourceAtlasGeneration = null;
+		store.pendingIndexedResourceAtlasGenerationKey = null;
 		store.indexedResourceAtlasIndexTextureCount = 0;
 		store.indexedResourceAtlasPaletteTextureCount = 0;
 		releaseWebgl2IndexedResourceAtlasGenerationGraphLease(store);
@@ -3649,30 +3684,51 @@ function syncWebgl2IndexedResourceAtlasGeneration({
 	const generationKey = describeWebgl2IndexedResourceAtlasGenerationKey(
 		plan.key,
 	);
+	const indexedAtlasWorkerScheduler = store.indexedResourceAtlasWorkerScheduler;
+	if (!indexedAtlasWorkerScheduler) {
+		throw new Error(
+			"Indexed resource atlas generation requires an indexed atlas worker scheduler.",
+		);
+	}
+	for (const result of indexedAtlasWorkerScheduler.consumeReadyResults()) {
+		if (result.key !== plan.key) {
+			continue;
+		}
+		if (!result.generation) {
+			throw new Error(
+				`Indexed resource atlas worker result ${result.key} produced no generation for a desired atlas plan.`,
+			);
+		}
+		const cpuGeneration = result.generation;
+		if (cpuGeneration.key !== generationKey) {
+			throw new Error(
+				`Indexed resource atlas worker result ${result.key} produced generation ${cpuGeneration.key}, expected ${generationKey}.`,
+			);
+		}
+		const nextGeneration = profileBrowserJsScope(
+			"webgl2.resource.commitIndexedResourceAtlasGeneration",
+			() =>
+				createWebgl2IndexedResourceAtlasGenerationResourceFromCpu({
+					gl,
+					cpuGeneration,
+				}),
+		);
+		commitWebgl2IndexedResourceAtlasGeneration({
+			store,
+			generation: nextGeneration,
+		});
+		indexedAtlasWorkerScheduler.markCommitted(result.key);
+		releaseWebgl2IndexedResourceAtlasGenerationGraphLease(store);
+	}
 	if (store.indexedResourceAtlasGeneration?.key !== generationKey) {
 		markWebgl2IndexedResourceAtlasGenerationReplacementPending({
 			store,
 			generationKey,
 		});
-		const nextGeneration = profileBrowserJsScope(
-			"webgl2.resource.createIndexedResourceAtlasGeneration",
-			() =>
-				createWebgl2IndexedResourceAtlasGenerationResource({
-					gl,
-					plan,
-				}),
-		);
-		if (!nextGeneration) {
-			throw new Error(
-				`Indexed resource atlas plan ${plan.key} has atlas pages but produced no generation.`,
-			);
-		}
-		commitWebgl2IndexedResourceAtlasGeneration({
-			store,
-			generation: nextGeneration,
-		});
-		releaseWebgl2IndexedResourceAtlasGenerationGraphLease(store);
+		indexedAtlasWorkerScheduler.scheduleDesired(plan);
 	}
+	store.indexedResourceAtlasWorkerMetrics =
+		indexedAtlasWorkerScheduler.getMetrics();
 	store.indexedResourceAtlasIndexTextureCount =
 		store.indexedResourceAtlasGeneration?.indexTextures.length ?? 0;
 	store.indexedResourceAtlasPaletteTextureCount =

@@ -4,6 +4,7 @@ import { RenderResourceJobScheduler } from "./render-resource-job-scheduler";
 import type { RenderResourceWorkerLike } from "./render-resource-worker-client";
 import { RenderResourceWorkerClient } from "./render-resource-worker-client";
 import { CompactedGeometryWorkerScheduler } from "./worker-resources/compacted-geometry-worker-scheduler";
+import { IndexedResourceAtlasWorkerScheduler } from "./worker-resources/indexed-atlas-worker-scheduler";
 import type { BuildIndexedResourceAtlasWorkerInput } from "./worker-resources/indexed-atlas-worker-payloads";
 import type {
 	RenderResourceWorkerRequestMessage,
@@ -387,6 +388,117 @@ describe("compacted geometry worker scheduler", () => {
 	});
 });
 
+describe("indexed resource atlas worker scheduler", () => {
+	it("submits indexed atlas jobs and reports ready results", async () => {
+		const worker = new FakeRenderResourceWorker();
+		const client = new RenderResourceWorkerClient(() => worker);
+		let readyNotificationCount = 0;
+		const scheduler = new IndexedResourceAtlasWorkerScheduler({
+			client,
+			onReadyResult() {
+				readyNotificationCount += 1;
+			},
+		});
+		const input = createIndexedAtlasWorkerInput();
+
+		scheduler.scheduleDesired(createIndexedAtlasPlan(input));
+
+		expect(worker.messages).toHaveLength(1);
+		expect(worker.messages[0]?.job).toMatchObject({
+			type: "build-indexed-resource-atlas",
+			key: "indexed-plan:a",
+		});
+
+		worker.emit({
+			type: "job-complete",
+			requestId: "render-resource-1",
+			result: {
+				type: "build-indexed-resource-atlas",
+				key: "indexed-plan:a",
+				generation: null,
+			},
+			durationMs: 1,
+		});
+		await waitForMicrotasks();
+
+		expect(readyNotificationCount).toBe(1);
+		expect(scheduler.consumeReadyResults()).toEqual([
+			{
+				type: "build-indexed-resource-atlas",
+				key: "indexed-plan:a",
+				generation: null,
+			},
+		]);
+		expect(scheduler.getMetrics()).toMatchObject({
+			activeSchedulerCount: 1,
+			submittedJobCount: 1,
+			readyResultCount: 1,
+		});
+	});
+
+	it("coalesces stale indexed atlas jobs and can reset in-flight work", async () => {
+		const worker = new FakeRenderResourceWorker();
+		const client = new RenderResourceWorkerClient(() => worker);
+		const scheduler = new IndexedResourceAtlasWorkerScheduler({
+			client,
+			onReadyResult() {
+				return;
+			},
+		});
+
+		scheduler.scheduleDesired(
+			createIndexedAtlasPlan(createIndexedAtlasWorkerInput("indexed-plan:a")),
+		);
+		scheduler.scheduleDesired(
+			createIndexedAtlasPlan(createIndexedAtlasWorkerInput("indexed-plan:b")),
+		);
+
+		expect(scheduler.getMetrics()).toMatchObject({
+			submittedJobCount: 1,
+			coalescedDesiredJobCount: 1,
+		});
+
+		worker.emit({
+			type: "job-complete",
+			requestId: "render-resource-1",
+			result: {
+				type: "build-indexed-resource-atlas",
+				key: "indexed-plan:a",
+				generation: null,
+			},
+			durationMs: 1,
+		});
+		await waitForMicrotasks();
+
+		expect(scheduler.consumeReadyResults()).toEqual([]);
+		expect(worker.messages).toHaveLength(2);
+		expect(worker.messages[1]?.job.key).toBe("indexed-plan:b");
+		expect(scheduler.getMetrics()).toMatchObject({
+			submittedJobCount: 2,
+			staleResultCount: 1,
+		});
+
+		scheduler.reset();
+		worker.emit({
+			type: "job-complete",
+			requestId: "render-resource-2",
+			result: {
+				type: "build-indexed-resource-atlas",
+				key: "indexed-plan:b",
+				generation: null,
+			},
+			durationMs: 1,
+		});
+		await waitForMicrotasks();
+
+		expect(scheduler.consumeReadyResults()).toEqual([]);
+		expect(scheduler.getMetrics()).toMatchObject({
+			activeSchedulerCount: 0,
+			submittedJobCount: 0,
+		});
+	});
+});
+
 function createCompactedDesiredBatch(
 	desiredJobKey: string,
 ): Parameters<CompactedGeometryWorkerScheduler["scheduleDesired"]>[0] {
@@ -406,9 +518,11 @@ function createCompactedDesiredBatch(
 	};
 }
 
-function createIndexedAtlasWorkerInput(): BuildIndexedResourceAtlasWorkerInput {
+function createIndexedAtlasWorkerInput(
+	key = "indexed-plan:a",
+): BuildIndexedResourceAtlasWorkerInput {
 	return {
-		key: "indexed-plan:a",
+		key,
 		indexReadyDrawUnitIds: ["index-draw"],
 		paletteReadyDrawUnitIds: ["palette-draw"],
 		p8IndexAtlasTextures: [
@@ -449,6 +563,20 @@ function createIndexedAtlasWorkerInput(): BuildIndexedResourceAtlasWorkerInput {
 				],
 			},
 		],
+	};
+}
+
+function createIndexedAtlasPlan(input: BuildIndexedResourceAtlasWorkerInput) {
+	return {
+		key: input.key,
+		indexReadyDrawUnitIds: input.indexReadyDrawUnitIds,
+		paletteReadyDrawUnitIds: input.paletteReadyDrawUnitIds,
+		failures: [],
+		p8IndexAtlasTextures: input.p8IndexAtlasTextures,
+		index16AtlasTextures: input.index16AtlasTextures,
+		paletteAtlasTextures: input.paletteAtlasTextures,
+		indexPlacementsByTextureKey: new Map(),
+		palettePlacementsByTextureKey: new Map(),
 	};
 }
 

@@ -255,6 +255,14 @@ interface WorldRenderDebugMetrics {
 	indexedResourceAtlasPaletteTextureCount: number;
 	indexedResourceAtlasFailureReasonCount: number;
 	indexedResourceAtlasFailureSamples: string[];
+	indexedResourceAtlasWorkerActiveSchedulerCount: number;
+	indexedResourceAtlasWorkerSubmittedJobCount: number;
+	indexedResourceAtlasWorkerDedupedDesiredJobCount: number;
+	indexedResourceAtlasWorkerCoalescedDesiredJobCount: number;
+	indexedResourceAtlasWorkerStaleResultCount: number;
+	indexedResourceAtlasWorkerReadyResultCount: number;
+	indexedResourceAtlasWorkerCommittedResultCount: number;
+	indexedResourceAtlasWorkerErrorCount: number;
 	staticGeometryGroupCount: number;
 	staticVisibleGeometryGroupCount: number;
 	structuredInteriorGeometryGroupCount: number;

@@ -59,6 +59,8 @@ import type { Webgl2IndexedResourceAtlasGenerationResource } from "./webgl2/reso
 import type { Webgl2TextureAtlasGenerationResource } from "./webgl2/resources/texture-atlas-generation";
 import { CompactedGeometryWorkerScheduler } from "./worker-resources/compacted-geometry-worker-scheduler";
 import { buildCompactedGeometryWorkerResult } from "./worker-resources/compacted-geometry-worker-payloads";
+import { IndexedResourceAtlasWorkerScheduler } from "./worker-resources/indexed-atlas-worker-scheduler";
+import { buildIndexedResourceAtlasWorkerResult } from "./worker-resources/indexed-atlas-worker-payloads";
 import type {
 	RenderResourceWorkerRequestMessage,
 	RenderResourceWorkerResponseMessage,
@@ -950,12 +952,33 @@ describe("webgl2 world resources", () => {
 		expect(firstBatchModelX).toBe(10);
 	});
 
-	it("realizes indexed/paletted draw units with separate index and palette textures", () => {
+	it("realizes indexed/paletted draw units with separate index and palette textures", async () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
 		const materialSurfaceId = 0x08000002;
 		const renderSurfaceId = 0x06000002;
+		const worker = installIndexedAtlasWorkerScheduler(store);
 
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState({
+				materialSurfaceId,
+				renderSurfaceId,
+				indexed: true,
+			}),
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: createStaticRenderableScene([
+				createStaticPart({
+					materialSlots: [createMaterialSlot(0, materialSurfaceId)],
+				}),
+			]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform()],
+		});
+		completeFirstIndexedAtlasWorkerJob(worker);
+		await waitForMicrotasks();
 		syncWebgl2WorldResources({
 			gl: gl.asContext(),
 			store,
@@ -1075,12 +1098,34 @@ describe("webgl2 world resources", () => {
 		expect(gl.generatedMipmapCount).toBe(0);
 	});
 
-	it("uploads Index16 draw units as RG byte-pair textures matching the Three indexed shader", () => {
+	it("uploads Index16 draw units as RG byte-pair textures matching the Three indexed shader", async () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
 		const materialSurfaceId = 0x08000002;
 		const renderSurfaceId = 0x06000002;
+		const worker = installIndexedAtlasWorkerScheduler(store);
 
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState({
+				materialSurfaceId,
+				renderSurfaceId,
+				indexed: true,
+				indexedFormat: "index16",
+			}),
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: createStaticRenderableScene([
+				createStaticPart({
+					materialSlots: [createMaterialSlot(0, materialSurfaceId)],
+				}),
+			]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform()],
+		});
+		completeFirstIndexedAtlasWorkerJob(worker);
+		await waitForMicrotasks();
 		syncWebgl2WorldResources({
 			gl: gl.asContext(),
 			store,
@@ -1117,6 +1162,119 @@ describe("webgl2 world resources", () => {
 		});
 	});
 
+	it("requires the indexed atlas worker scheduler for indexed atlas generation", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2WorldResourceStore();
+		const materialSurfaceId = 0x08000002;
+		const renderSurfaceId = 0x06000002;
+
+		expect(() =>
+			syncWebgl2WorldResources({
+				gl: gl.asContext(),
+				store,
+				assetState: createAssetState({
+					materialSurfaceId,
+					renderSurfaceId,
+					indexed: true,
+				}),
+				terrainScene: createTerrainScene(),
+				staticRenderableScene: createStaticRenderableScene([
+					createStaticPart({
+						materialSlots: [createMaterialSlot(0, materialSurfaceId)],
+					}),
+				]),
+				structuredInteriorScene: createStructuredInteriorScene(),
+				transitionPortalModel: createTransitionPortalModel(),
+				renderChunkTransforms: [createChunkTransform()],
+			}),
+		).toThrow(/indexed atlas worker scheduler/);
+	});
+
+	it("commits indexed atlas worker results on resource sync and keeps the old generation while pending", async () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2WorldResourceStore();
+		const disposedKeys: string[] = [];
+		const previousGeneration = createIndexedAtlasGeneration(
+			"indexed-resource-atlas/previous;indexed-webgl2",
+			disposedKeys,
+		);
+		store.indexedResourceAtlasGeneration = previousGeneration;
+		const materialSurfaceId = 0x08000002;
+		const renderSurfaceId = 0x06000002;
+		const worker = new FakeRenderResourceWorker();
+		store.indexedResourceAtlasWorkerScheduler =
+			new IndexedResourceAtlasWorkerScheduler({
+				client: new RenderResourceWorkerClient(() => worker),
+				onReadyResult() {
+					return;
+				},
+			});
+
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState({
+				materialSurfaceId,
+				renderSurfaceId,
+				indexed: true,
+			}),
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: createStaticRenderableScene([
+				createStaticPart({
+					materialSlots: [createMaterialSlot(0, materialSurfaceId)],
+				}),
+			]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform()],
+		});
+
+		expect(worker.messages).toHaveLength(1);
+		expect(worker.messages[0]?.job.type).toBe("build-indexed-resource-atlas");
+		expect(store.indexedResourceAtlasGeneration).toBe(previousGeneration);
+		expect(store.pendingIndexedResourceAtlasGenerationKey).toBe(
+			`${store.indexedResourceAtlasPlan.key};indexed-webgl2`,
+		);
+		expect(disposedKeys).toEqual([]);
+		expect(gl.textureUploads).toHaveLength(0);
+
+		completeFirstIndexedAtlasWorkerJob(worker);
+		await waitForMicrotasks();
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState({
+				materialSurfaceId,
+				renderSurfaceId,
+				indexed: true,
+			}),
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: createStaticRenderableScene([
+				createStaticPart({
+					materialSlots: [createMaterialSlot(0, materialSurfaceId)],
+				}),
+			]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform()],
+		});
+
+		expect(store.indexedResourceAtlasGeneration).not.toBe(previousGeneration);
+		expect(store.pendingIndexedResourceAtlasGenerationKey).toBeNull();
+		expect(disposedKeys).toEqual([previousGeneration.key]);
+		expect(
+			gl.textureUploads.map(({ width, height }) => ({ width, height })),
+		).toEqual([
+			{ width: 4096, height: 4096 },
+			{ width: 2, height: 1 },
+		]);
+		expect(store.indexedResourceAtlasWorkerMetrics).toMatchObject({
+			submittedJobCount: 1,
+			readyResultCount: 1,
+			committedResultCount: 1,
+		});
+	});
+
 	it("keys compacted indexed worker jobs by indexed atlas plan identity", () => {
 		const plan = createIndexedCompactionPlanFixture();
 		const drawUnits = [createIndexedStagedDrawUnitFixture()];
@@ -1145,9 +1303,10 @@ describe("webgl2 world resources", () => {
 		);
 	});
 
-	it("merges compacted indexed slices across visibility partitions", () => {
+	it("merges compacted indexed slices across visibility partitions", async () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
+		const worker = installIndexedAtlasWorkerScheduler(store);
 		const firstMaterialSurfaceId = 0x08000002;
 		const firstRenderSurfaceId = 0x06000002;
 		const secondMaterialSurfaceId = 0x08000003;
@@ -1175,6 +1334,27 @@ describe("webgl2 world resources", () => {
 			}),
 		} as AssetChannelState["preparedAsset"];
 
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState,
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: createStaticRenderableScene([
+				createStaticPart({
+					instanceId: "indexed-a",
+					materialSlots: [createMaterialSlot(0, firstMaterialSurfaceId)],
+				}),
+				createStaticPart({
+					instanceId: "indexed-b",
+					materialSlots: [createMaterialSlot(0, secondMaterialSurfaceId)],
+				}),
+			]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform()],
+		});
+		completeFirstIndexedAtlasWorkerJob(worker);
+		await waitForMicrotasks();
 		syncWebgl2WorldResources({
 			gl: gl.asContext(),
 			store,
@@ -1265,6 +1445,35 @@ function completeFirstCompactedGeometryWorkerJob(
 		result: buildCompactedGeometryWorkerResult(message.job.input),
 		durationMs: 1,
 	});
+}
+
+function completeFirstIndexedAtlasWorkerJob(
+	worker: FakeRenderResourceWorker,
+): void {
+	const message = worker.messages[0];
+	if (!message || message.job.type !== "build-indexed-resource-atlas") {
+		throw new Error("Expected an indexed atlas worker job.");
+	}
+	worker.emit({
+		type: "job-complete",
+		requestId: message.requestId,
+		result: buildIndexedResourceAtlasWorkerResult(message.job.input),
+		durationMs: 1,
+	});
+}
+
+function installIndexedAtlasWorkerScheduler(
+	store: Webgl2WorldResourceStore,
+): FakeRenderResourceWorker {
+	const worker = new FakeRenderResourceWorker();
+	store.indexedResourceAtlasWorkerScheduler =
+		new IndexedResourceAtlasWorkerScheduler({
+			client: new RenderResourceWorkerClient(() => worker),
+			onReadyResult() {
+				return;
+			},
+		});
+	return worker;
 }
 
 async function waitForMicrotasks(): Promise<void> {

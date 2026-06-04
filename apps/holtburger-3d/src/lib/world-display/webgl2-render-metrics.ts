@@ -462,6 +462,29 @@ export function createWebgl2RenderMetrics(
 			indexedResourceAtlasFailureSamples: [
 				...(input.worldStore?.indexedResourceAtlasFailureSamples ?? []),
 			],
+			indexedResourceAtlasWorkerActiveSchedulerCount:
+				input.worldStore?.indexedResourceAtlasWorkerMetrics
+					.activeSchedulerCount ?? 0,
+			indexedResourceAtlasWorkerSubmittedJobCount:
+				input.worldStore?.indexedResourceAtlasWorkerMetrics.submittedJobCount ??
+				0,
+			indexedResourceAtlasWorkerDedupedDesiredJobCount:
+				input.worldStore?.indexedResourceAtlasWorkerMetrics
+					.dedupedDesiredJobCount ?? 0,
+			indexedResourceAtlasWorkerCoalescedDesiredJobCount:
+				input.worldStore?.indexedResourceAtlasWorkerMetrics
+					.coalescedDesiredJobCount ?? 0,
+			indexedResourceAtlasWorkerStaleResultCount:
+				input.worldStore?.indexedResourceAtlasWorkerMetrics.staleResultCount ??
+				0,
+			indexedResourceAtlasWorkerReadyResultCount:
+				input.worldStore?.indexedResourceAtlasWorkerMetrics.readyResultCount ??
+				0,
+			indexedResourceAtlasWorkerCommittedResultCount:
+				input.worldStore?.indexedResourceAtlasWorkerMetrics
+					.committedResultCount ?? 0,
+			indexedResourceAtlasWorkerErrorCount:
+				input.worldStore?.indexedResourceAtlasWorkerMetrics.errorCount ?? 0,
 			staticGeometryGroupCount: input.worldStore?.staticDrawUnitCount ?? 0,
 			staticVisibleGeometryGroupCount:
 				(input.frameMetrics?.visibleDrawCountsByCategory["static-staged"] ??
@@ -633,6 +656,23 @@ export function createWebgl2RenderMetrics(
 							input.worldStore.indexedResourceAtlasPaletteTextureCount,
 						"webgl2-indexed-resource-atlas-failures":
 							input.worldStore.indexedResourceAtlasFailureReasonCount,
+						"webgl2-indexed-atlas-worker-active-schedulers":
+							input.worldStore.indexedResourceAtlasWorkerMetrics
+								.activeSchedulerCount,
+						"webgl2-indexed-atlas-worker-submitted-jobs":
+							input.worldStore.indexedResourceAtlasWorkerMetrics
+								.submittedJobCount,
+						"webgl2-indexed-atlas-worker-stale-results":
+							input.worldStore.indexedResourceAtlasWorkerMetrics
+								.staleResultCount,
+						"webgl2-indexed-atlas-worker-ready-results":
+							input.worldStore.indexedResourceAtlasWorkerMetrics
+								.readyResultCount,
+						"webgl2-indexed-atlas-worker-committed-results":
+							input.worldStore.indexedResourceAtlasWorkerMetrics
+								.committedResultCount,
+						"webgl2-indexed-atlas-worker-errors":
+							input.worldStore.indexedResourceAtlasWorkerMetrics.errorCount,
 						"webgl2-retained-direct-opaque-draw-units":
 							input.submitMetrics.retainedDirectOpaqueDrawUnitCount,
 						"webgl2-retained-direct-blended-draw-units":

@@ -3,8 +3,8 @@ mod contracts;
 
 use adapter::HostRuntimeService;
 use contracts::{
-    AssetLookupBatchRequestDto, AssetLookupRequestDto, AssetLookupResponseDto, CameraHintAckDto,
-    CameraHintDto, DebugConfigDto, RuntimeAppearanceRequestDto,
+    AssetLookupBatchRequestDto, AssetLookupRequestDto, AssetLookupResponseDto, DebugConfigDto,
+    RuntimeAppearanceRequestDto,
 };
 
 #[tauri::command]
@@ -38,14 +38,6 @@ fn get_debug_config(runtime: tauri::State<'_, HostRuntimeService>) -> DebugConfi
 }
 
 #[tauri::command]
-fn submit_camera_hint(
-    runtime: tauri::State<'_, HostRuntimeService>,
-    hint: CameraHintDto,
-) -> CameraHintAckDto {
-    runtime.submit_camera_hint(hint)
-}
-
-#[tauri::command]
 async fn resolve_runtime_appearance(
     runtime: tauri::State<'_, HostRuntimeService>,
     request: RuntimeAppearanceRequestDto,
@@ -71,7 +63,6 @@ fn main() {
             lookup_asset,
             lookup_assets_binary,
             get_debug_config,
-            submit_camera_hint,
             resolve_runtime_appearance,
         ])
         .run(tauri::generate_context!())

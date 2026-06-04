@@ -15,7 +15,6 @@ import {
 	type PreparedSetupAppearancePayload,
 } from "../assets/types";
 import { formatHex32, formatLandblockOutdoorAssetId } from "../landblocks";
-import type { CameraHintAckDto } from "../host/contracts";
 import {
 	deriveBrowserWorldDisplayModel,
 	type BrowserWorldDisplayModel,
@@ -100,8 +99,6 @@ export interface BrowserRenderResourceCoordinatorInput {
 	activeRenderAnchor: RenderLandblockAnchor | null;
 	browserCameraFrame: SceneCameraFrame | null;
 	runtimeAppearancePreviews: readonly BrowserRuntimeAppearancePreview[];
-	cameraAck: CameraHintAckDto | null;
-	pendingCameraHint: boolean;
 }
 
 export interface BrowserRuntimeAppearancePreview {
@@ -159,8 +156,6 @@ export function createEmptyBrowserRenderResourceSnapshot(): BrowserRenderResourc
 			terrainLodRadius: 0,
 			buildingLodRadius: 0,
 			detailLodRadius: 0,
-			cameraAck: null,
-			pendingCameraHint: false,
 		}),
 		renderSpatialQuery: createLinearRenderSpatialIndex(),
 		activeRenderChunkCount: 0,
@@ -1081,8 +1076,6 @@ function deriveSnapshot({
 			terrainLodRadius: input.terrainLodRadius,
 			buildingLodRadius: input.buildingLodRadius,
 			detailLodRadius: input.detailLodRadius,
-			cameraAck: input.cameraAck,
-			pendingCameraHint: input.pendingCameraHint,
 		}),
 		renderSpatialQuery,
 		activeRenderChunkCount: activeRenderChunkTransforms.length,

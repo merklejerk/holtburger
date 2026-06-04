@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::adapter::binary::*;
 use crate::adapter::ids::*;
@@ -8,25 +8,17 @@ use crate::adapter::prepared_texture::{
     PreparedTexturePayload, PreparedTextureRequest, parse_prepared_texture_asset_id,
     prepare_texture,
 };
-use holtburger_content::{
-    ContentDecodeCache, ContentRepository, MaterialAppearanceInput, SoulEmoteCatalog,
-};
+use holtburger_content::{ContentDecodeCache, ContentRepository, MaterialAppearanceInput};
 use holtburger_core::{
     ContentAsset, ContentAssetRequest, ContentAssetRuntime, ContentAssetService,
     SetupAppearanceRequest,
 };
-use holtburger_dat::file_type::{
-    AnimationPartChange, MotionKinematics, ObjDesc, SkillTable, SpellTable, SubPalette,
-    TextureMapChange, XpTable,
-};
+use holtburger_dat::file_type::{AnimationPartChange, ObjDesc, SubPalette, TextureMapChange};
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
-use holtburger_world::WorldBootstrap;
 
-#[cfg(test)]
-use crate::contracts::Vec3Dto;
 use crate::contracts::{
-    AssetLookupRequestDto, AssetLookupResponseDto, AssetPayloadKindDto, CameraHintAckDto,
-    CameraHintDto, DebugConfigDto, RuntimeAppearanceObjDescDto, RuntimeAppearanceRequestDto,
+    AssetLookupRequestDto, AssetLookupResponseDto, AssetPayloadKindDto, DebugConfigDto,
+    RuntimeAppearanceObjDescDto, RuntimeAppearanceRequestDto,
 };
 use tokio::sync::Semaphore;
 
@@ -44,26 +36,13 @@ pub struct HostBoundaryAdapter {
 
 #[derive(Clone)]
 pub struct HostRuntimeService {
-    state: Arc<Mutex<HostRuntimeState>>,
     adapter: Arc<HostBoundaryAdapter>,
-}
-
-struct HostRuntimeState {
-    camera_hint_sequence: u64,
 }
 
 impl HostRuntimeService {
     pub fn new(verbose: bool) -> Self {
         let adapter = Arc::new(HostBoundaryAdapter::new(verbose));
-        Self {
-            state: Arc::new(Mutex::new(HostRuntimeState::new())),
-            adapter,
-        }
-    }
-
-    pub fn submit_camera_hint(&self, hint: CameraHintDto) -> CameraHintAckDto {
-        let mut state = self.state.lock().expect("host runtime state lock poisoned");
-        self.adapter.accept_camera_hint(&mut state, hint)
+        Self { adapter }
     }
 
     pub async fn asset_lookup(
@@ -97,26 +76,6 @@ impl HostRuntimeService {
     pub fn debug_config(&self) -> DebugConfigDto {
         DebugConfigDto {
             verbose: self.adapter.verbose,
-        }
-    }
-}
-
-impl HostRuntimeState {
-    fn new() -> Self {
-        let _bootstrap = Arc::new(WorldBootstrap::new(
-            SkillTable::default(),
-            SpellTable {
-                id: SpellTable::FILE_ID,
-                spells: Default::default(),
-                spell_sets: Default::default(),
-            },
-            XpTable::default(),
-            MotionKinematics::default(),
-            SoulEmoteCatalog::default(),
-        ));
-
-        Self {
-            camera_hint_sequence: 0,
         }
     }
 }
@@ -368,20 +327,6 @@ impl HostBoundaryAdapter {
                 unreachable!("binary-routed content request passed direct JSON rejection")
             }
         })
-    }
-
-    fn accept_camera_hint(
-        &self,
-        state: &mut HostRuntimeState,
-        _hint: CameraHintDto,
-    ) -> CameraHintAckDto {
-        state.camera_hint_sequence += 1;
-        let sequence = state.camera_hint_sequence;
-
-        CameraHintAckDto {
-            accepted: true,
-            sequence,
-        }
     }
 }
 
@@ -641,30 +586,6 @@ pub fn asset_cache_error_code(error: &anyhow::Error) -> &'static str {
 
 fn repo_assets_hba_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../dats/assets.hba")
-}
-
-#[cfg(test)]
-fn normalize_vec3(vector: Vec3Dto) -> Vec3Dto {
-    let length = vec3_length(&vector);
-
-    if length <= f32::EPSILON {
-        return Vec3Dto {
-            x: 0.0,
-            y: 1.0,
-            z: 0.0,
-        };
-    }
-
-    Vec3Dto {
-        x: vector.x / length,
-        y: vector.y / length,
-        z: vector.z / length,
-    }
-}
-
-#[cfg(test)]
-fn vec3_length(vector: &Vec3Dto) -> f32 {
-    (vector.x.powi(2) + vector.y.powi(2) + vector.z.powi(2)).sqrt()
 }
 
 #[cfg(test)]
@@ -1211,31 +1132,5 @@ mod tests {
                 .expect("appearance key should be present")
                 .contains("setup:")
         );
-    }
-
-    #[test]
-    fn camera_hints_are_accepted_without_runtime_residency() {
-        let runtime = HostRuntimeService::new(false);
-        let position = Vec3Dto {
-            x: 96.0,
-            y: 96.0,
-            z: 24.0,
-        };
-        let direction = normalize_vec3(Vec3Dto {
-            x: 1.0,
-            y: 0.0,
-            z: 0.0,
-        });
-
-        let ack = runtime.submit_camera_hint(CameraHintDto {
-            source: "world-display".to_string(),
-            position: position.clone(),
-            forward: direction.clone(),
-            viewport_normalized_x: 0.75,
-            viewport_normalized_y: 0.5,
-            destination_label: Some("33.50S, 72.80E, 0.0Z".to_string()),
-        });
-        assert!(ack.accepted);
-        assert_eq!(ack.sequence, 1);
     }
 }

@@ -984,18 +984,3 @@ export const debugConfigDtoSchema = z.object({
 	verbose: z.boolean(),
 });
 export type DebugConfigDto = z.infer<typeof debugConfigDtoSchema>;
-
-export interface CameraHintDto {
-	source: string;
-	position: Vec3Dto;
-	forward: Vec3Dto;
-	viewportNormalizedX: number;
-	viewportNormalizedY: number;
-	destinationLabel: string | null;
-}
-
-export const cameraHintAckDtoSchema = z.object({
-	accepted: z.boolean(),
-	sequence: z.number().int().nonnegative(),
-});
-export type CameraHintAckDto = z.infer<typeof cameraHintAckDtoSchema>;

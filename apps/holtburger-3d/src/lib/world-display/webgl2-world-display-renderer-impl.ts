@@ -119,32 +119,10 @@ const WEBGL2_CLEAR_COLOR: readonly [number, number, number, number] = [
 	0.015, 0.055, 0.085, 1,
 ];
 const PERFORMANCE_REPORT_INTERVAL_MS = 500;
-const TRIANGLE_VERTEX_COUNT = 3;
-const TRIANGLE_VERTICES = new Float32Array([
-	0, 0.58, -0.58, -0.46, 0.58, -0.46,
-]);
 const SELECTED_STATIC_RENDERABLE_BOUNDS_COLOR = new Float32Array([
 	1, 0.82, 0.28, 1,
 ]);
 const BOUNDS_LINE_VERTEX_COMPONENTS = 3;
-
-const TRIANGLE_VERTEX_SHADER = `#version 300 es
-layout(location = 0) in vec2 position;
-
-void main() {
-	gl_Position = vec4(position, 0.0, 1.0);
-}
-`;
-
-const TRIANGLE_FRAGMENT_SHADER = `#version 300 es
-precision highp float;
-
-out vec4 fragColor;
-
-void main() {
-	fragColor = vec4(0.98, 0.74, 0.34, 1.0);
-}
-`;
 
 const FLAT_WORLD_VERTEX_SHADER = `#version 300 es
 layout(location = 0) in vec3 position;
@@ -736,7 +714,6 @@ interface Webgl2ColorDepthTarget {
 interface Webgl2RenderResources {
 	gl: WebGL2RenderingContext;
 	stateCache: Webgl2StateCache;
-	triangleProgram: Webgl2ProgramResource<"position", never>;
 	flatWorldProgram: Webgl2FlatWorldProgram;
 	texturedWorldProgram: Webgl2TexturedWorldProgram;
 	indexedP8WorldProgram: Webgl2IndexedP8WorldProgram;
@@ -749,8 +726,6 @@ interface Webgl2RenderResources {
 		never,
 		"uColorTexture" | "uDepthTexture"
 	>;
-	vertexBuffer: Webgl2BufferResource;
-	vertexArray: Webgl2VertexArrayResource;
 	sceneDomainCopyVertexArray: Webgl2VertexArrayResource;
 	sceneDomainTargets: Webgl2SceneDomainTargetSet | null;
 	portalCompositeTargets: Webgl2PortalCompositeTargetSet | null;
@@ -985,7 +960,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				throw new Error("Browser did not provide a WebGL2 rendering context.");
 			}
 
-			resources = createTriangleResources(gl);
+			resources = createWebgl2RenderResources(gl);
 			resources.worldStore.compactedGeometryWorkerScheduler =
 				new CompactedGeometryWorkerScheduler({
 					onReadyResult: markWorldResourcesDirty,
@@ -1179,15 +1154,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			latestFrameMetrics = null;
 			latestSceneDomainFrameMetrics = null;
 			latestSubmitMetrics = createEmptyWebgl2WorldSubmitMetrics();
-			currentResources.stateCache.useProgram(
-				currentResources.triangleProgram.program,
-			);
-			currentResources.stateCache.bindVertexArray(
-				currentResources.vertexArray.vertexArray,
-			);
-			gl.drawArrays(gl.TRIANGLES, 0, TRIANGLE_VERTEX_COUNT);
-			drawCallCount += 1;
-			lastFrameDrawCount = 1;
+			lastFrameDrawCount = 0;
 		}
 		recordPerformanceSample({
 			frameAt,
@@ -2166,9 +2133,6 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		}
 		resources.stateCache.bindVertexArray(null);
 		resources.stateCache.useProgram(null);
-		resources.vertexArray.dispose();
-		resources.vertexBuffer.dispose();
-		resources.triangleProgram.dispose();
 		resources.flatWorldProgram.dispose();
 		resources.texturedWorldProgram.dispose();
 		resources.indexedP8WorldProgram.dispose();
@@ -2715,40 +2679,12 @@ function describeMat4Signature(matrix: RenderMat4): string {
 	return [...matrix].join(",");
 }
 
-function createTriangleResources(
+function createWebgl2RenderResources(
 	gl: WebGL2RenderingContext,
 ): Webgl2RenderResources {
-	const triangleProgram = createWebgl2Program(gl, {
-		label: "webgl2 test triangle",
-		vertexSource: TRIANGLE_VERTEX_SHADER,
-		fragmentSource: TRIANGLE_FRAGMENT_SHADER,
-		attributes: ["position"],
-	});
-	const vertexBuffer = createWebgl2ArrayBuffer(gl, {
-		label: "webgl2 test triangle vertices",
-		data: TRIANGLE_VERTICES,
-	});
-	const vertexArray = createWebgl2VertexArray(gl, {
-		label: "webgl2 test triangle vertex array",
-		configure() {
-			gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer.buffer);
-			gl.enableVertexAttribArray(triangleProgram.attributes.position);
-			gl.vertexAttribPointer(
-				triangleProgram.attributes.position,
-				2,
-				gl.FLOAT,
-				false,
-				0,
-				0,
-			);
-			gl.bindBuffer(gl.ARRAY_BUFFER, null);
-		},
-	});
-
 	return {
 		gl,
 		stateCache: new Webgl2StateCache(gl),
-		triangleProgram,
 		flatWorldProgram: createFlatWorldProgram(gl),
 		texturedWorldProgram: createTexturedWorldProgram(gl),
 		indexedP8WorldProgram: createIndexedP8WorldProgram(gl),
@@ -2767,8 +2703,6 @@ function createTriangleResources(
 				fragmentSource: INDEXED_PALETTED_FAMILY_P16_FRAGMENT_SHADER,
 			}),
 		sceneDomainCopyProgram: createSceneDomainCopyProgram(gl),
-		vertexBuffer,
-		vertexArray,
 		sceneDomainCopyVertexArray: createWebgl2VertexArray(gl, {
 			label: "webgl2 scene-domain copy vertex array",
 			configure() {

@@ -1,9 +1,9 @@
 # Holtburger 3D Static Landblock Render Bundle Replacement Plan
 
-Status: Phase 1A through Phase 1I are implemented. Phase 1J landblock preset contract hardening is
-the next implementation phase before Phase 2 landblock worker orchestration. The plan has been
-redirected to worker-owned raw landblock closure loading, worker-built terrain artifacts,
-preset-based landblock requests, and layer-scoped texture pages.
+Status: Phase 1A through Phase 1J are implemented. Phase 2 landblock worker orchestration is the
+next implementation phase. The plan has been redirected to worker-owned raw landblock closure
+loading, worker-built terrain artifacts, preset-based landblock requests, and layer-scoped texture
+pages.
 
 Progress:
 
@@ -99,6 +99,11 @@ Progress:
   code. Terrain artifacts now stand beside static object bundle layers as CPU renderer artifacts and
   carry diagnostic roots/prepared IDs, color/mask page refs, draw-slice geometry, fallback geometry
   diagnostics, and terrain BVH keys.
+- 2026-06-04: Implemented Phase 1J. Added route-shaped landblock render preset DTOs, worker job/result
+  contracts, and a pure prepared-cache-free preset planner that maps current outdoor radii to one
+  monotonic `outdoor` or `outdoor-with-env-cells` request per landblock. The target contract does not
+  carry root manifests, topology discovery DTOs, prepared-record source revisions, or summary preset
+  shims.
 
 Validation:
 
@@ -168,6 +173,12 @@ Validation:
   passed after Phase 1I.
 - `npm run check`, `npm run lint:dead`, `npm run lint:rust`, and `npm run lint:ts` passed after
   Phase 1I.
+- `npm exec vitest -- run src/lib/assets/landblock-render-preset-planner.test.ts` passed after Phase
+  1J.
+- `npm exec eslint -- src/lib/assets/landblock-render-preset-planner.ts src/lib/assets/landblock-render-preset-planner.test.ts src/lib/world-display/landblock-render-preset.ts`
+  passed after Phase 1J.
+- `npm run check`, `npm run lint:dead`, `npm run lint:rust`, and `npm run lint:ts` passed after
+  Phase 1J.
 
 Related plans:
 
@@ -1765,7 +1776,7 @@ Legacy debt found before the next phase:
 
 ### Phase 1J: Landblock Preset Contract Hardening
 
-Status: Next.
+Status: Implemented on 2026-06-04.
 
 Purpose:
 
@@ -1778,50 +1789,63 @@ Purpose:
 
 Implementation notes:
 
-- Add or draft the target DTOs:
+- Added `landblock-render-preset.ts` with:
   - `LandblockRenderLodPreset = "outdoor" | "outdoor-with-env-cells"`;
   - `DesiredLandblockRenderPreset`;
   - `LandblockRenderPresetWorkerJob`;
-  - `LandblockRenderPresetWorkerResult`.
-- Map current `OutdoorSceneInterest` radii to one desired preset per landblock:
-  - terrain/building/detail outdoor ring -> `outdoor`;
-  - env-cell/interior-linked ring -> `outdoor-with-env-cells`.
-- Explicitly defer `summary` as a future preset until a cheap backend route/product exists. Do not
-  model a summary preset by loading the full `landblock/<id>/outdoor` route and filtering output,
-  because that would imply CPU savings the current route cannot provide.
-- Keep `DesiredStaticBundleLayer`, `StaticBundleLayerWorkerJob`,
-  `StaticBundleEnvCellTopologyDiscoveryJob`, `rootAssetIds`, `knownClosureAssetIds`,
-  `knownMissingAssetIds`, and `sourceRevision` out of target worker scheduling. They may remain only
-  as transitional tests/diagnostics until Phase 2 deletes or quarantines them.
-- Define how preset worker results contain independently resident artifacts: terrain artifact,
-  exterior static object layer artifacts, detail/env-cell static artifacts, texture page artifacts,
-  and low-fidelity diagnostics.
-- Keep this phase CPU/DTO-only. Do not add WebGL realization or a second long-lived renderer path.
+  - `LandblockRenderPresetWorkerResult`;
+  - helper functions for worker job creation, preset specificity, and stable desired-preset sorting.
+- Added `landblock-render-preset-planner.ts`, a pure planner that maps current outdoor scene radii to
+  one desired preset per landblock without prepared assets.
+- Current radius mapping is:
+  - terrain/building/detail outdoor rings -> `outdoor`;
+  - env-cell/interior-linked ring -> `outdoor-with-env-cells`;
+  - coalescing chooses the most detailed requested preset per landblock.
+- `summary` remains explicitly deferred. The planner never emits a summary/fallback preset over
+  `landblock/<id>/outdoor`.
+- Target worker scheduling no longer includes `DesiredStaticBundleLayer`,
+  `StaticBundleLayerWorkerJob`, `StaticBundleEnvCellTopologyDiscoveryJob`, `rootAssetIds`,
+  `knownClosureAssetIds`, `knownMissingAssetIds`, or `sourceRevision`.
+- Preset worker results explicitly contain sibling `terrainArtifact` and `staticBundleLayers`
+  outputs plus low-fidelity diagnostics.
+- The phase stayed CPU/DTO-only and did not add WebGL realization or a second renderer path.
+
+Course corrections:
+
+- Negative `envCellRadius` is treated as disabled for the preset planner before normalized outdoor
+  interest clamps radii. This preserves the existing transitional test convention where `-1` means
+  "do not request this ring" and prevents terrain-only/outdoor-only interest from silently promoting
+  to `outdoor-with-env-cells`.
+- Knip flagged the nested diagnostics DTO export as premature. The result contract remains exported,
+  but the diagnostics helper interface is internal until a Phase 2 consumer needs it by name.
 
 Exit criteria:
 
 - Tests prove LoD radii collapse to one monotonic desired preset per landblock.
-- Target preset job/result DTOs exist or are documented precisely enough for Phase 2 implementation.
+- Target preset job/result DTOs exist for Phase 2 implementation.
 - Target presets match current route/product boundaries, and `summary` is explicitly deferred.
 - No target code path requires main-thread topology discovery, prepared-cache root manifests, or
   prepared-record source revisions to schedule a landblock preset job.
+- Focused tests, changed-file ESLint, `npm run check`, `npm run lint:dead`, `npm run lint:rust`, and
+  full `npm run lint:ts` pass.
 
 Cleanup targets:
 
-- Rename or quarantine tests that currently assert desired layer planning from main-thread topology.
-- Remove target-plan wording that treats `summary` as an existing preset unless a cheap backend route
-  is added.
+- Phase 2 should switch new worker orchestration to `DesiredLandblockRenderPreset` /
+  `LandblockRenderPresetWorkerJob` instead of wrapping the transitional static bundle layer planner.
+- Existing `static-bundle-layer-planner` tests may stay as transitional coverage until Phase 2 deletes
+  or quarantines the old layer/root/source-revision scheduler.
 - Keep historical Phase 1 DTOs clearly marked as transitional.
 
 Legacy shims introduced:
 
-- None expected. Do not add a fake summary shim over `landblock/<id>/outdoor`; use the `outdoor`
-  preset until a real summary product exists.
+- None. No fake summary shim over `landblock/<id>/outdoor` was added.
 
 Legacy debt found before the next phase:
 
-- Phase 2 should not start until this preset contract is in place. Otherwise worker orchestration
-  will likely preserve the old layer/root/source-revision surface.
+- No Phase 1J blocker remains. Phase 2 should begin from the preset contract and terrain artifact
+  contract, then quarantine/delete the old layer/root/source-revision scheduling surface as the
+  worker path takes over.
 
 ### Split Boundaries to Avoid
 

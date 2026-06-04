@@ -119,7 +119,10 @@ import {
 	releaseWebgl2CompactedGeometryBatchGraphLeases,
 	syncWebgl2CompactedGeometryResources,
 } from "./webgl2/resources/compacted-geometry-sync";
-import type { CompactedGeometryWorkerScheduler } from "./worker-resources/compacted-geometry-worker-scheduler";
+import type {
+	CompactedGeometryWorkerScheduler,
+	CompactedGeometryWorkerSchedulerMetrics,
+} from "./worker-resources/compacted-geometry-worker-scheduler";
 import {
 	buildTerrainBlendPlanSet,
 	type TerrainBlendTextureRef,
@@ -246,6 +249,7 @@ export interface Webgl2WorldResourceStore {
 	compactedGeometryBatchKeyBySchedulerKey: Map<string, string>;
 	compactedGeometryFamilyResourceKeyBySchedulerKey: Map<string, string>;
 	compactedGeometryWorkerScheduler: CompactedGeometryWorkerScheduler | null;
+	compactedGeometryWorkerMetrics: CompactedGeometryWorkerSchedulerMetrics;
 	compactedGeometryFamilyResources: Map<
 		string,
 		Webgl2CompactedGeometryFamilyResource
@@ -390,6 +394,8 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		compactedGeometryBatchKeyBySchedulerKey: new Map(),
 		compactedGeometryFamilyResourceKeyBySchedulerKey: new Map(),
 		compactedGeometryWorkerScheduler: null,
+		compactedGeometryWorkerMetrics:
+			createEmptyCompactedGeometryWorkerSchedulerMetrics(),
 		compactedGeometryFamilyResources: new Map(),
 		compactedGeometryFamilyResourceCounts: {},
 		compactedGeometryBatchGraph: null,
@@ -944,6 +950,8 @@ export function destroyWebgl2WorldResources(
 	releaseWebgl2IndexedResourceAtlasGenerationGraphLease(store);
 	store.compactedGeometryWorkerScheduler?.dispose();
 	store.compactedGeometryWorkerScheduler = null;
+	store.compactedGeometryWorkerMetrics =
+		createEmptyCompactedGeometryWorkerSchedulerMetrics();
 	store.textureAtlasGenerationGraph = null;
 	store.textureAtlasGenerationGraphLease = null;
 	store.indexedResourceAtlasGenerationGraph = null;
@@ -1040,6 +1048,21 @@ export function destroyWebgl2WorldResources(
 	store.preparedTextureUploadCount = 0;
 	store.preparedTextureGeneratedByteLength = 0;
 	store.triangleCount = 0;
+}
+
+function createEmptyCompactedGeometryWorkerSchedulerMetrics(): CompactedGeometryWorkerSchedulerMetrics {
+	return {
+		activeSchedulerCount: 0,
+		submittedJobCount: 0,
+		dedupedDesiredJobCount: 0,
+		coalescedDesiredJobCount: 0,
+		staleResultCount: 0,
+		readyResultCount: 0,
+		committedResultCount: 0,
+		errorCount: 0,
+		lastStaleDiscardReason: null,
+		lastErrorMessage: null,
+	};
 }
 
 const DEFAULT_WEBGL2_COMPACTION_FAMILY_PLANNING_POLICY: CompactionFamilyPlanningPolicy =

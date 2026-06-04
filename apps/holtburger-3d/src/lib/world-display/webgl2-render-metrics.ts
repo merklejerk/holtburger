@@ -271,8 +271,11 @@ export function createWebgl2RenderMetrics(
 			atlasFailureSamples: [...(input.worldStore?.atlasFailureSamples ?? [])],
 			compactionCandidateDrawUnitCount:
 				input.worldStore?.compactionCandidateDrawUnitCount ?? 0,
-			compactionBypassReasonCount: input.worldStore?.compactionBypassReasonCount ?? 0,
-			compactionBypassSamples: [...(input.worldStore?.compactionBypassSamples ?? [])],
+			compactionBypassReasonCount:
+				input.worldStore?.compactionBypassReasonCount ?? 0,
+			compactionBypassSamples: [
+				...(input.worldStore?.compactionBypassSamples ?? []),
+			],
 			compactionBypassBlockerSamples: [
 				...(input.worldStore?.compactionBypassBlockerSamples ?? []),
 			],
@@ -290,12 +293,15 @@ export function createWebgl2RenderMetrics(
 			compactionCoverageMaterialAlphaPolicyCounts:
 				input.worldStore?.compactionCoverageMaterialAlphaPolicyCounts ?? {},
 			compactionCoverageMaterialFamilyAlphaPolicyCounts:
-				input.worldStore?.compactionCoverageMaterialFamilyAlphaPolicyCounts ?? {},
+				input.worldStore?.compactionCoverageMaterialFamilyAlphaPolicyCounts ??
+				{},
 			compactionCoverageRetainedDirectMaterialFamilyCounts:
-				input.worldStore?.compactionCoverageRetainedDirectMaterialFamilyCounts ?? {},
+				input.worldStore
+					?.compactionCoverageRetainedDirectMaterialFamilyCounts ?? {},
 			compactionCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts:
 				input.worldStore
-					?.compactionCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts ?? {},
+					?.compactionCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts ??
+				{},
 			compactionCoverageVisibleRetainedDirectMaterialFamilyCounts:
 				input.submitMetrics
 					.visibleRetainedDirectDrawUnitCountsByCompactionFamily,
@@ -326,12 +332,35 @@ export function createWebgl2RenderMetrics(
 			compactedResourceFallbackSamples: [
 				...(input.worldStore?.compactedResourceFallbackSamples ?? []),
 			],
-			rgbaTexturePageFamilyShaderDrawCallCount: input.submitMetrics.rgbaTexturePageFamilyShaderDrawCallCount,
-			rgbaTexturePageFamilySubmittedBatchCount: input.submitMetrics.rgbaTexturePageFamilySubmittedBatchCount,
+			compactedGeometryWorkerActiveSchedulerCount:
+				input.worldStore?.compactedGeometryWorkerMetrics.activeSchedulerCount ??
+				0,
+			compactedGeometryWorkerSubmittedJobCount:
+				input.worldStore?.compactedGeometryWorkerMetrics.submittedJobCount ?? 0,
+			compactedGeometryWorkerDedupedDesiredJobCount:
+				input.worldStore?.compactedGeometryWorkerMetrics
+					.dedupedDesiredJobCount ?? 0,
+			compactedGeometryWorkerCoalescedDesiredJobCount:
+				input.worldStore?.compactedGeometryWorkerMetrics
+					.coalescedDesiredJobCount ?? 0,
+			compactedGeometryWorkerStaleResultCount:
+				input.worldStore?.compactedGeometryWorkerMetrics.staleResultCount ?? 0,
+			compactedGeometryWorkerReadyResultCount:
+				input.worldStore?.compactedGeometryWorkerMetrics.readyResultCount ?? 0,
+			compactedGeometryWorkerCommittedResultCount:
+				input.worldStore?.compactedGeometryWorkerMetrics.committedResultCount ??
+				0,
+			compactedGeometryWorkerErrorCount:
+				input.worldStore?.compactedGeometryWorkerMetrics.errorCount ?? 0,
+			rgbaTexturePageFamilyShaderDrawCallCount:
+				input.submitMetrics.rgbaTexturePageFamilyShaderDrawCallCount,
+			rgbaTexturePageFamilySubmittedBatchCount:
+				input.submitMetrics.rgbaTexturePageFamilySubmittedBatchCount,
 			rgbaTexturePageFamilySubmittedDrawSliceCount:
 				input.submitMetrics.rgbaTexturePageFamilySubmittedDrawSliceCount,
 			rgbaTexturePageFamilySubmittedSliceRepresentedDrawUnitCount:
-				input.submitMetrics.rgbaTexturePageFamilySubmittedSliceRepresentedDrawUnitCount,
+				input.submitMetrics
+					.rgbaTexturePageFamilySubmittedSliceRepresentedDrawUnitCount,
 			rgbaTexturePageFamilySubmittedTriangleCount:
 				input.submitMetrics.rgbaTexturePageFamilySubmittedTriangleCount,
 			rgbaTexturePageFamilyReplacedDrawUnitCount:
@@ -339,7 +368,8 @@ export function createWebgl2RenderMetrics(
 			rgbaTexturePageFamilyReplacedDrawUnitTriangleCount:
 				input.submitMetrics.rgbaTexturePageFamilyReplacedDrawUnitTriangleCount,
 			rgbaTexturePageFamilyConservativeOverdrawTriangleCount:
-				input.submitMetrics.rgbaTexturePageFamilyConservativeOverdrawTriangleCount,
+				input.submitMetrics
+					.rgbaTexturePageFamilyConservativeOverdrawTriangleCount,
 			rgbaTexturePageFamilyConservativeOverdrawRatio:
 				input.submitMetrics.rgbaTexturePageFamilyConservativeOverdrawRatio,
 			rgbaTexturePageFamilyRetainedDirectDrawUnitCount:
@@ -348,7 +378,8 @@ export function createWebgl2RenderMetrics(
 				input.submitMetrics.rgbaTexturePageFamilyOriginalDrawCallEstimateCount,
 			rgbaTexturePageFamilySubmittedDrawCallEstimateCount:
 				input.submitMetrics.rgbaTexturePageFamilySubmittedDrawCallEstimateCount,
-			rgbaTexturePageFamilyDrawCallSavingsCount: input.submitMetrics.rgbaTexturePageFamilyDrawCallSavingsCount,
+			rgbaTexturePageFamilyDrawCallSavingsCount:
+				input.submitMetrics.rgbaTexturePageFamilyDrawCallSavingsCount,
 			rgbaTexturePageFamilyNoVisibleRouteCount:
 				input.submitMetrics.rgbaTexturePageFamilyNoVisibleRouteCount,
 			rgbaTexturePageFamilyNoVisibleExteriorRouteCount:
@@ -378,11 +409,9 @@ export function createWebgl2RenderMetrics(
 			indexedPalettedFamilyRetainedDirectDrawUnitCount:
 				input.submitMetrics.indexedPalettedFamilyRetainedDirectDrawUnitCount,
 			indexedPalettedFamilyOriginalDrawCallEstimateCount:
-				input.submitMetrics
-					.indexedPalettedFamilyOriginalDrawCallEstimateCount,
+				input.submitMetrics.indexedPalettedFamilyOriginalDrawCallEstimateCount,
 			indexedPalettedFamilySubmittedDrawCallEstimateCount:
-				input.submitMetrics
-					.indexedPalettedFamilySubmittedDrawCallEstimateCount,
+				input.submitMetrics.indexedPalettedFamilySubmittedDrawCallEstimateCount,
 			indexedPalettedFamilyDrawCallSavingsCount:
 				input.submitMetrics.indexedPalettedFamilyDrawCallSavingsCount,
 			indexedPalettedFamilyNoVisibleRouteCount:
@@ -415,7 +444,8 @@ export function createWebgl2RenderMetrics(
 			indexedMaterialDescriptorDrawUnitCount:
 				input.worldStore?.indexedMaterialDescriptorDrawUnitCount ?? 0,
 			indexedMaterialDescriptorCompactionCandidateCount:
-				input.worldStore?.indexedMaterialDescriptorCompactionCandidateCount ?? 0,
+				input.worldStore?.indexedMaterialDescriptorCompactionCandidateCount ??
+				0,
 			standaloneIndexedMaterialResourceDrawUnitCount:
 				input.worldStore?.standaloneIndexedMaterialResourceDrawUnitCount ?? 0,
 			compactedIndexedMaterialStandaloneResourceDrawUnitCount:
@@ -453,11 +483,11 @@ export function createWebgl2RenderMetrics(
 							input.worldStore.atlasPlacedRgbaDrawUnitCount,
 						"webgl2-detail-atlas-ready-draw-units":
 							input.worldStore.detailAtlasReadyDrawUnitCount,
-						"webgl2-atlas-failures":
-							input.worldStore.atlasFailureReasonCount,
+						"webgl2-atlas-failures": input.worldStore.atlasFailureReasonCount,
 						"webgl2-compacted-candidates":
 							input.worldStore.compactionCandidateDrawUnitCount,
-						"webgl2-compacted-bypasses": input.worldStore.compactionBypassReasonCount,
+						"webgl2-compacted-bypasses":
+							input.worldStore.compactionBypassReasonCount,
 						...prefixCounts(
 							"webgl2-compacted-coverage-",
 							input.worldStore.compactionCoverageDrawUnitCounts,
@@ -480,11 +510,13 @@ export function createWebgl2RenderMetrics(
 						),
 						...prefixCounts(
 							"webgl2-compacted-family-alpha-policy-",
-							input.worldStore.compactionCoverageMaterialFamilyAlphaPolicyCounts,
+							input.worldStore
+								.compactionCoverageMaterialFamilyAlphaPolicyCounts,
 						),
 						...prefixCounts(
 							"webgl2-compacted-retained-family-",
-							input.worldStore.compactionCoverageRetainedDirectMaterialFamilyCounts,
+							input.worldStore
+								.compactionCoverageRetainedDirectMaterialFamilyCounts,
 						),
 						...prefixCounts(
 							"webgl2-compacted-retained-family-alpha-policy-",
@@ -514,6 +546,20 @@ export function createWebgl2RenderMetrics(
 							input.worldStore.compactedGeometryBatchOriginCount,
 						"webgl2-compacted-geometry-transform-table-entries":
 							input.worldStore.compactedGeometryTransformTableEntryCount,
+						"webgl2-compacted-worker-active-schedulers":
+							input.worldStore.compactedGeometryWorkerMetrics
+								.activeSchedulerCount,
+						"webgl2-compacted-worker-submitted-jobs":
+							input.worldStore.compactedGeometryWorkerMetrics.submittedJobCount,
+						"webgl2-compacted-worker-stale-results":
+							input.worldStore.compactedGeometryWorkerMetrics.staleResultCount,
+						"webgl2-compacted-worker-ready-results":
+							input.worldStore.compactedGeometryWorkerMetrics.readyResultCount,
+						"webgl2-compacted-worker-committed-results":
+							input.worldStore.compactedGeometryWorkerMetrics
+								.committedResultCount,
+						"webgl2-compacted-worker-errors":
+							input.worldStore.compactedGeometryWorkerMetrics.errorCount,
 						"webgl2-rgba-family-shader-draws":
 							input.submitMetrics.rgbaTexturePageFamilyShaderDrawCallCount,
 						"webgl2-rgba-family-submitted-batches":
@@ -521,13 +567,15 @@ export function createWebgl2RenderMetrics(
 						"webgl2-rgba-family-submitted-slices":
 							input.submitMetrics.rgbaTexturePageFamilySubmittedDrawSliceCount,
 						"webgl2-rgba-family-submitted-slice-draw-units":
-							input.submitMetrics.rgbaTexturePageFamilySubmittedSliceRepresentedDrawUnitCount,
+							input.submitMetrics
+								.rgbaTexturePageFamilySubmittedSliceRepresentedDrawUnitCount,
 						"webgl2-rgba-family-submitted-triangles":
 							input.submitMetrics.rgbaTexturePageFamilySubmittedTriangleCount,
 						"webgl2-rgba-family-replaced-draw-units":
 							input.submitMetrics.rgbaTexturePageFamilyReplacedDrawUnitCount,
 						"webgl2-rgba-family-replaced-triangles":
-							input.submitMetrics.rgbaTexturePageFamilyReplacedDrawUnitTriangleCount,
+							input.submitMetrics
+								.rgbaTexturePageFamilyReplacedDrawUnitTriangleCount,
 						"webgl2-rgba-family-original-draw-call-estimate":
 							input.submitMetrics
 								.rgbaTexturePageFamilyOriginalDrawCallEstimateCount,
@@ -535,7 +583,8 @@ export function createWebgl2RenderMetrics(
 							input.submitMetrics
 								.rgbaTexturePageFamilySubmittedDrawCallEstimateCount,
 						"webgl2-rgba-family-conservative-overdraw-triangles":
-							input.submitMetrics.rgbaTexturePageFamilyConservativeOverdrawTriangleCount,
+							input.submitMetrics
+								.rgbaTexturePageFamilyConservativeOverdrawTriangleCount,
 						"webgl2-rgba-family-draw-call-savings":
 							input.submitMetrics.rgbaTexturePageFamilyDrawCallSavingsCount,
 						"webgl2-rgba-family-no-visible-routes":

@@ -1,4 +1,5 @@
 import { RenderResourceJobScheduler } from "../render-resource-job-scheduler";
+import type { RenderResourceJobSchedulerMetrics } from "../render-resource-job-scheduler";
 import { RenderResourceWorkerClient } from "../render-resource-worker-client";
 import {
 	createBuildCompactedGeometryWorkerInput,
@@ -29,6 +30,10 @@ interface ScheduledCompactedGeometryWorkerInput {
 export interface ReadyCompactedGeometryWorkerResult {
 	groupKey: string;
 	result: BuildCompactedGeometryWorkerResult;
+}
+
+export interface CompactedGeometryWorkerSchedulerMetrics extends RenderResourceJobSchedulerMetrics {
+	activeSchedulerCount: number;
 }
 
 export class CompactedGeometryWorkerScheduler {
@@ -70,6 +75,38 @@ export class CompactedGeometryWorkerScheduler {
 			results.push(...scheduler.consumeReadyResults());
 		}
 		return results;
+	}
+
+	getMetrics(): CompactedGeometryWorkerSchedulerMetrics {
+		const metrics: CompactedGeometryWorkerSchedulerMetrics = {
+			activeSchedulerCount: this.schedulersByGroupKey.size,
+			submittedJobCount: 0,
+			dedupedDesiredJobCount: 0,
+			coalescedDesiredJobCount: 0,
+			staleResultCount: 0,
+			readyResultCount: 0,
+			committedResultCount: 0,
+			errorCount: 0,
+			lastStaleDiscardReason: null,
+			lastErrorMessage: null,
+		};
+		for (const scheduler of this.schedulersByGroupKey.values()) {
+			const schedulerMetrics = scheduler.getMetrics();
+			metrics.submittedJobCount += schedulerMetrics.submittedJobCount;
+			metrics.dedupedDesiredJobCount += schedulerMetrics.dedupedDesiredJobCount;
+			metrics.coalescedDesiredJobCount +=
+				schedulerMetrics.coalescedDesiredJobCount;
+			metrics.staleResultCount += schedulerMetrics.staleResultCount;
+			metrics.readyResultCount += schedulerMetrics.readyResultCount;
+			metrics.committedResultCount += schedulerMetrics.committedResultCount;
+			metrics.errorCount += schedulerMetrics.errorCount;
+			metrics.lastStaleDiscardReason =
+				schedulerMetrics.lastStaleDiscardReason ??
+				metrics.lastStaleDiscardReason;
+			metrics.lastErrorMessage =
+				schedulerMetrics.lastErrorMessage ?? metrics.lastErrorMessage;
+		}
+		return metrics;
 	}
 
 	markCommitted(groupKey: string, key: string): void {

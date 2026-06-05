@@ -4,7 +4,7 @@ import {
 	buildPortalClippedRenderFrustum,
 	derivePortalClippedBvhVisibility,
 } from "./portal-clipped-bvh-candidates";
-import type { PortalCompositeRenderBvhSources } from "./prepared-bvh-render-sources";
+import type { PortalCompositeRenderBvhSources } from "./render-bvh-sources";
 import { envRenderGeometryBvhItemKey } from "./prepared-bvh-visibility";
 import { renderBoundsIntersectsFrustum } from "./render-spatial-math";
 import type { RenderFrustum } from "./render-spatial-math";

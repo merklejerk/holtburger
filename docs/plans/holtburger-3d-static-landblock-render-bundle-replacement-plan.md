@@ -18,7 +18,8 @@ split further; Phase 4C3D3A artifact-backed env-cell local BVH culling and Phase
 artifact-backed structured spatial index items are implemented. Phase 4C3D3B2 static bundle
 spatial hints and artifact-backed static spatial index items are implemented. Phase 4C3D3B3
 selected static overlay artifact fallback is implemented. Phase 4C3D3B4 render BVH visibility
-naming cleanup is implemented.
+naming cleanup is implemented. Phase 4D1 artifact-backed portal composite BVH sources are
+implemented.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -307,6 +308,11 @@ Progress:
   the neutral snapshot builder. The lower-level `prepared-bvh-visibility.ts` query module remains
   intentionally named because it still describes the prepared BVH record/query format consumed by
   both prepared-payload and artifact-backed callers.
+- 2026-06-05: Implemented Phase 4D1. Renamed the mixed portal composite source module from
+  `prepared-bvh-render-sources.ts` to `render-bvh-sources.ts`, added resident detailed artifact
+  env-cell local BVH source derivation for portal composite/interior clipped visibility, and wired
+  WebGL scene-bounds source construction to pass the resident static landblock artifact snapshot.
+  Prepared env-cell payload sources remain only as the existing absence fallback.
 
 Validation:
 
@@ -348,6 +354,9 @@ Validation:
 - `npm exec vitest -- run src/lib/world-display/render-bvh-visibility-snapshot.test.ts src/lib/world-display/world-render-frame.test.ts`,
   `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
   `git diff --check` passed after Phase 4C3D3B4.
+- `npm exec vitest -- run src/lib/world-display/render-bvh-sources.test.ts src/lib/world-display/portal-clipped-bvh-candidates.test.ts`,
+  `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
+  `git diff --check` passed after Phase 4D1.
 - `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts`
   passed after the first Phase 1D builder slice.
 - `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts`
@@ -3938,9 +3947,8 @@ Decisions and course corrections:
 
 Cleanup targets discovered:
 
-- `prepared-bvh-render-sources.ts` still carries prepared naming while it builds portal composite
-  source bounds for render/debug consumers. Phase 4D should either move that consumer fully onto
-  resident artifact bounds or rename the helper if a neutral bounds-source utility remains useful.
+- The former `prepared-bvh-render-sources.ts` naming was resolved in Phase 4D1 by renaming the
+  mixed portal composite source helper to `render-bvh-sources.ts`.
 - `scene-renderable-readiness.ts` still accounts over `StaticRenderableSceneModel` and
   `StructuredInteriorSceneModel`. Phase 4E/5 should delete or shrink that accounting once staged
   static/interior hydration is removed from the render-critical path.
@@ -3972,6 +3980,73 @@ Exit criteria:
   hydration or staged geometry just to keep those diagnostics high fidelity.
 - Remove static spatial item generation from the critical render path once required spatial artifacts
   are resident.
+
+Status: Split during implementation. Phase 4D1 is implemented on 2026-06-05.
+
+#### Phase 4D1: Artifact-Backed Portal Composite BVH Sources
+
+- Move portal composite env-cell BVH source construction from prepared env-cell payloads to resident
+  detailed artifact local BVH facts when available.
+- Rename the mixed source helper away from `prepared-bvh-render-sources.ts` because it now combines
+  artifact-backed and transitional prepared fallback sources.
+- Keep exterior terrain/outdoor static portal composite sources on the existing prepared/outdoor
+  route for this slice; those are not the env-cell/interior hard-cutover blocker.
+- Keep portal traversal policy and clipped-frustum query logic unchanged.
+
+Decisions and course corrections:
+
+- Implemented. `render-bvh-sources.ts` now builds env-cell render-space BVH sources from resident
+  `detailed-landblock.spatial.envCellLocalBvhs` plus the matching structured-interior cell artifact
+  render chunk.
+- Implemented. Artifact local BVH bounds use `transformEnvCellLocalBoundsByPlacement`, so portal
+  composite source bounds no longer need a prepared env-cell payload when detailed artifacts are
+  resident.
+- Implemented. `webgl2-world-display-renderer-impl.ts` passes the resident static landblock render
+  artifact snapshot into portal composite scene-bounds source construction.
+- Course correction: the detailed local BVH sidecar does not carry its own render chunk, so the
+  artifact source builder indexes `structuredInteriorCells` from the same detailed artifact by env
+  cell ID. This keeps the source artifact-owned without reaching back to
+  `StructuredInteriorSceneModel`.
+- Course correction: the prepared env-cell payload branch remains as an absence fallback for
+  nonresident detailed artifacts. It was not broadened into a compatibility mode.
+
+Cleanup targets discovered:
+
+- Portal composite exterior sources still read prepared outdoor payload terrain/outdoor BVHs. Phase
+  4D2 should decide whether to move those to resident terrain/static object bundle artifact BVH keys
+  before Phase 4E hard cutover or leave them temporarily as outdoor-only diagnostics if not
+  render-critical.
+- `buildPortalCompositeRenderBvhSources` still accepts `StructuredInteriorSceneModel` only for the
+  prepared env-cell fallback branch. Phase 4E should delete that parameter once artifact coverage is
+  mandatory.
+- `PortalCompositeRenderBvhSources` remains the right neutral model for clipped portal visibility,
+  but the implementation still consumes low-level prepared BVH node/item shapes. Rename only if the
+  low-level BVH DTO itself changes.
+
+Legacy shims introduced:
+
+- None. The old `prepared-bvh-render-sources.ts` module/export path was removed instead of
+  re-exported.
+
+Exit criteria:
+
+- Implemented. Resident detailed artifact env-cell local BVHs can feed portal composite render-space
+  sources without prepared env-cell payloads or `StructuredInteriorSceneModel` cells.
+- Implemented. Portal clipped visibility consumes the neutral `render-bvh-sources.ts` module.
+- Implemented. Focused tests cover artifact env-cell source derivation with an empty prepared asset
+  state and empty structured scene.
+- Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
+
+#### Phase 4D2: Remaining Portal/Culling Consumer Cutover
+
+- Move any remaining render-critical portal composite, culling, cell visibility, or portal traversal
+  source facts that still read `StructuredInteriorSceneModel` or prepared env-cell payloads onto
+  resident detailed artifacts.
+- Decide whether exterior portal composite BVH sources need resident terrain/static artifact input
+  before hard cutover, or whether portal composite exterior source culling can be simplified without
+  preserving the prepared outdoor BVH path.
+- Keep picker/debug diagnostics expendable and do not restore part-level or prepared-payload
+  fidelity for them.
 
 Exit criteria:
 

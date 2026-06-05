@@ -60,6 +60,9 @@ import {
 	syncWebgl2WorldResources,
 	type Webgl2WorldResourceStore,
 } from "./webgl2-world-resources";
+import { deriveLandblockRenderChunkPlacement } from "./render-chunks";
+import { getStaticObjectBundleArtifacts } from "./landblock-render-product";
+import type { StaticBundleSpatialHint } from "./static-bundle-layer";
 import type { Webgl2TerrainTileResource } from "./webgl2/resources/terrain-tile-resources";
 import type {
 	BrowserCameraResidency,
@@ -124,6 +127,12 @@ const SELECTED_STATIC_RENDERABLE_BOUNDS_COLOR = new Float32Array([
 	1, 0.82, 0.28, 1,
 ]);
 const BOUNDS_LINE_VERTEX_COMPONENTS = 3;
+const IDENTITY_BOUNDS_MATRIX = new Float32Array([
+	1, 0, 0, 0,
+	0, 1, 0, 0,
+	0, 0, 1, 0,
+	0, 0, 0, 1,
+]) satisfies RenderMat4;
 
 const FLAT_WORLD_VERTEX_SHADER = `#version 300 es
 layout(location = 0) in vec3 position;
@@ -1248,11 +1257,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		const part = staticRenderableScene.parts.find(
 			(candidate) => candidate.renderKey === selectedStaticRenderableRenderKey,
 		);
-		if (!part) {
-			disposeSelectedStaticRenderableOverlay();
-			return null;
-		}
-		const overlayInput = buildSelectedStaticRenderableOverlayInput(part);
+		const overlayInput =
+			buildSelectedStaticArtifactOverlayInput(selectedStaticRenderableRenderKey) ??
+			(part ? buildSelectedStaticRenderableOverlayInput(part) : null);
 		if (!overlayInput) {
 			disposeSelectedStaticRenderableOverlay();
 			return null;
@@ -1265,11 +1272,11 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		existing?.dispose();
 		currentResources.selectedStaticRenderableOverlay = null;
 		const vertexBuffer = createWebgl2ArrayBuffer(currentResources.gl, {
-			label: `selected static renderable bounds ${part.renderKey}`,
+			label: `selected static renderable bounds ${overlayInput.label}`,
 			data: overlayInput.positions,
 		});
 		const vertexArray = createWebgl2VertexArray(currentResources.gl, {
-			label: `selected static renderable bounds ${part.renderKey}`,
+			label: `selected static renderable bounds ${overlayInput.label}`,
 			configure() {
 				currentResources.gl.bindBuffer(
 					currentResources.gl.ARRAY_BUFFER,
@@ -1309,6 +1316,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	function buildSelectedStaticRenderableOverlayInput(
 		part: StaticRenderablePart,
 	): {
+		label: string;
 		signature: string;
 		modelMatrix: RenderMat4;
 		positions: Float32Array;
@@ -1330,6 +1338,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			partMatrix,
 		);
 		return {
+			label: part.renderKey,
 			signature: [
 				part.renderKey,
 				part.gfxObjAssetId,
@@ -1340,6 +1349,73 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			modelMatrix,
 			positions,
 		};
+	}
+
+	function buildSelectedStaticArtifactOverlayInput(
+		renderKey: string,
+	): {
+		label: string;
+		signature: string;
+		modelMatrix: RenderMat4;
+		positions: Float32Array;
+	} | null {
+		const hint = findSelectedStaticBundleSpatialHint(renderKey);
+		if (!hint) {
+			return null;
+		}
+		const chunkOffset = renderChunkTransforms.find(
+			(transform) => transform.chunkKey === hint.chunkKey,
+		)?.offset;
+		if (!chunkOffset) {
+			return null;
+		}
+		const modelMatrix = createTranslationMat4(chunkOffset);
+		return {
+			label: renderKey,
+			signature: [
+				renderKey,
+				hint.bundleKey,
+				hint.sourceRevision,
+				hint.bundleKind,
+				hint.chunkKey,
+				`${chunkOffset.x},${chunkOffset.y},${chunkOffset.z}`,
+				describeBoundsSignature(hint.bounds),
+			].join("|"),
+			modelMatrix,
+			positions: buildSelectedStaticRenderableBoundsLinePositions(
+				hint.bounds,
+				IDENTITY_BOUNDS_MATRIX,
+			),
+		};
+	}
+
+	function findSelectedStaticBundleSpatialHint(renderKey: string): {
+		bundleKey: string;
+		bundleKind: string;
+		chunkKey: string;
+		sourceRevision: string;
+		bounds: StaticBundleSpatialHint["bounds"];
+	} | null {
+		for (const result of staticLandblockRenderArtifacts.artifacts) {
+			for (const bundle of getStaticObjectBundleArtifacts(result)) {
+				const renderChunk = deriveLandblockRenderChunkPlacement(
+					bundle.landblockId,
+				);
+				for (const hint of bundle.spatialHints ?? []) {
+					if (hint.key !== renderKey) {
+						continue;
+					}
+					return {
+						bundleKey: bundle.key,
+						bundleKind: bundle.bundleKind,
+						chunkKey: renderChunk.chunkKey,
+						sourceRevision: bundle.sourceRevision,
+						bounds: hint.bounds,
+					};
+				}
+			}
+		}
+		return null;
 	}
 
 	function syncCanvasSize(): void {

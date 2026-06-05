@@ -503,7 +503,7 @@ export function syncWebgl2StaticLandblockRenderArtifactResources({
 	const layers = artifacts.artifacts.flatMap((artifact) =>
 		artifact.staticBundleLayers.filter(
 			(layer) =>
-				artifact.preset === "outdoor" &&
+				artifact.product === "outdoor" &&
 				(layer.layerKind === "outdoor-buildings" ||
 					layer.layerKind === "outdoor-detail"),
 		),

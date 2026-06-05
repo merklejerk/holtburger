@@ -12,38 +12,41 @@ import type { StaticLandblockRenderBundleLayer } from "./static-bundle-layer";
 import type { AtlasLayoutPolicy } from "./texture-pages/atlas-layout-planner";
 import type { LandblockTerrainRenderArtifact } from "./terrain-render-artifact";
 
-export type LandblockRenderLodPreset = "outdoor" | "outdoor-with-env-cells";
+export type LandblockRenderProduct =
+	| "outdoor"
+	| "outdoor-env-cells"
+	| "dungeon-env-cells";
 
-export type LandblockRenderPresetPriority = "resident-now" | "prefetch";
+export type LandblockRenderProductPriority = "resident-now" | "prefetch";
 
-export interface LandblockRenderPresetBuildPolicy {
+export interface LandblockRenderProductBuildPolicy {
 	atlasLayout: AtlasLayoutPolicy;
 	terrainMaxLayerEntries: number;
 }
 
-export interface DesiredLandblockRenderPreset {
+export interface DesiredLandblockRenderProduct {
 	landblockId: number;
-	preset: LandblockRenderLodPreset;
-	priority: LandblockRenderPresetPriority;
+	product: LandblockRenderProduct;
+	priority: LandblockRenderProductPriority;
 	requestId: string;
 	buildPolicyRevision: string;
 	texturePagePolicyRevision: string;
-	buildPolicy: LandblockRenderPresetBuildPolicy;
+	buildPolicy: LandblockRenderProductBuildPolicy;
 }
 
-export interface LandblockRenderPresetWorkerJob {
-	type: "build-landblock-render-preset";
+export interface LandblockRenderProductWorkerJob {
+	type: "build-landblock-render-product";
 	jobId: string;
 	landblockId: number;
-	preset: LandblockRenderLodPreset;
+	product: LandblockRenderProduct;
 	requestId: string;
 	buildPolicyRevision: string;
 	texturePagePolicyRevision: string;
-	buildPolicy: LandblockRenderPresetBuildPolicy;
+	buildPolicy: LandblockRenderProductBuildPolicy;
 }
 
-interface LandblockRenderPresetWorkerResultBase {
-	type: "landblock-render-preset-built";
+interface LandblockRenderProductWorkerResultBase {
+	type: "landblock-render-product-built";
 	jobId: string;
 	landblockId: number;
 	requestId: string;
@@ -51,25 +54,24 @@ interface LandblockRenderPresetWorkerResultBase {
 	texturePagePolicyRevision: string;
 	terrainArtifact: LandblockTerrainRenderArtifact | null;
 	staticBundleLayers: readonly StaticLandblockRenderBundleLayer[];
-	diagnostics: LandblockRenderPresetWorkerDiagnostics;
+	diagnostics: LandblockRenderProductWorkerDiagnostics;
 }
 
-interface OutdoorLandblockRenderPresetWorkerResult
-	extends LandblockRenderPresetWorkerResultBase {
-	preset: "outdoor";
+interface OutdoorLandblockRenderProductWorkerResult extends LandblockRenderProductWorkerResultBase {
+	product: "outdoor";
+	detailedArtifacts?: never;
 }
 
-interface DetailedLandblockRenderPresetWorkerResult
-	extends LandblockRenderPresetWorkerResultBase {
-	preset: "outdoor-with-env-cells";
+interface TopologyLandblockRenderProductWorkerResult extends LandblockRenderProductWorkerResultBase {
+	product: "outdoor-env-cells" | "dungeon-env-cells";
 	detailedArtifacts: DetailedLandblockRenderArtifacts;
 }
 
-export type LandblockRenderPresetWorkerResult =
-	| OutdoorLandblockRenderPresetWorkerResult
-	| DetailedLandblockRenderPresetWorkerResult;
+export type LandblockRenderProductWorkerResult =
+	| OutdoorLandblockRenderProductWorkerResult
+	| TopologyLandblockRenderProductWorkerResult;
 
-interface LandblockRenderPresetWorkerDiagnostics {
+interface LandblockRenderProductWorkerDiagnostics {
 	status: "ready" | "partial" | "failed";
 	messages: readonly string[];
 }
@@ -85,7 +87,7 @@ type EnvCellLocalBvh = PreparedEnvCellPayload["localBvh"];
 export interface DetailedLandblockRenderArtifacts {
 	key: string;
 	landblockId: number;
-	preset: "outdoor-with-env-cells";
+	product: "outdoor-env-cells" | "dungeon-env-cells";
 	requestId: string;
 	buildPolicyRevision: string;
 	texturePagePolicyRevision: string;
@@ -196,19 +198,19 @@ interface DetailedLandblockDebugDiagnostics {
 	messages: readonly string[];
 }
 
-export function createLandblockRenderPresetWorkerJob(
-	desired: DesiredLandblockRenderPreset,
-): LandblockRenderPresetWorkerJob {
+export function createLandblockRenderProductWorkerJob(
+	desired: DesiredLandblockRenderProduct,
+): LandblockRenderProductWorkerJob {
 	return {
-		type: "build-landblock-render-preset",
+		type: "build-landblock-render-product",
 		jobId: [
-			"landblock-render-preset",
+			"landblock-render-product",
 			desired.landblockId,
-			desired.preset,
+			desired.product,
 			desired.requestId,
 		].join(":"),
 		landblockId: desired.landblockId,
-		preset: desired.preset,
+		product: desired.product,
 		requestId: desired.requestId,
 		buildPolicyRevision: desired.buildPolicyRevision,
 		texturePagePolicyRevision: desired.texturePagePolicyRevision,
@@ -216,30 +218,23 @@ export function createLandblockRenderPresetWorkerJob(
 	};
 }
 
-export function compareDesiredLandblockRenderPresets(
-	left: DesiredLandblockRenderPreset,
-	right: DesiredLandblockRenderPreset,
+export function compareDesiredLandblockRenderProducts(
+	left: DesiredLandblockRenderProduct,
+	right: DesiredLandblockRenderProduct,
 ): number {
-	const priority = comparePresetPriority(left.priority, right.priority);
+	const priority = compareProductPriority(left.priority, right.priority);
 	if (priority !== 0) {
 		return priority;
 	}
 	if (left.landblockId !== right.landblockId) {
 		return left.landblockId - right.landblockId;
 	}
-	return comparePresetSpecificity(left.preset, right.preset);
+	return compareProductOrder(left.product, right.product);
 }
 
-export function chooseMoreDetailedLandblockPreset(
-	left: LandblockRenderLodPreset,
-	right: LandblockRenderLodPreset,
-): LandblockRenderLodPreset {
-	return presetRank(left) >= presetRank(right) ? left : right;
-}
-
-function comparePresetPriority(
-	left: LandblockRenderPresetPriority,
-	right: LandblockRenderPresetPriority,
+function compareProductPriority(
+	left: LandblockRenderProductPriority,
+	right: LandblockRenderProductPriority,
 ): number {
 	if (left === right) {
 		return 0;
@@ -247,18 +242,20 @@ function comparePresetPriority(
 	return left === "resident-now" ? -1 : 1;
 }
 
-function comparePresetSpecificity(
-	left: LandblockRenderLodPreset,
-	right: LandblockRenderLodPreset,
+function compareProductOrder(
+	left: LandblockRenderProduct,
+	right: LandblockRenderProduct,
 ): number {
-	return presetRank(right) - presetRank(left);
+	return productRank(left) - productRank(right);
 }
 
-function presetRank(preset: LandblockRenderLodPreset): number {
-	switch (preset) {
+function productRank(product: LandblockRenderProduct): number {
+	switch (product) {
 		case "outdoor":
 			return 0;
-		case "outdoor-with-env-cells":
+		case "outdoor-env-cells":
 			return 1;
+		case "dungeon-env-cells":
+			return 2;
 	}
 }

@@ -198,7 +198,7 @@
 			onError: (error, desired) => {
 				console.error("[holtburger-3d][static-landblock-render-worker]", {
 					landblockId: desired.landblockId,
-					preset: desired.preset,
+					product: desired.product,
 					requestId: desired.requestId,
 					message: error.message,
 				});

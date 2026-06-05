@@ -1200,7 +1200,7 @@ function describeStaticLandblockRenderArtifactSurfaceSignature(
 			artifact.staticBundleLayers.map((layer) =>
 				[
 					artifact.landblockId,
-					artifact.preset,
+					artifact.product,
 					artifact.requestId,
 					artifact.buildPolicyRevision,
 					artifact.texturePagePolicyRevision,

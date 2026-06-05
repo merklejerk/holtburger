@@ -2,8 +2,8 @@
 
 Status: Phase 1A through Phase 1J, Phase 2A, Phase 2B, Phase 3A, Phase 3B, Phase
 3C1, Phase 3C2A, Phase 3C2B1, Phase 3C2B2, Phase 3C2B3, and Phase 4A are
-implemented. Phase 4B additive topology/env-cell worker product build is the next implementation
-phase.
+implemented. Phase 4B additive topology/env-cell worker product build is implemented. Phase 4C
+detailed product WebGL resource and submit is the next implementation phase.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and layer-scoped texture pages.
 
@@ -179,6 +179,14 @@ Progress:
   worker products are now additive: `outdoor` emits terrain/exterior layers, `outdoor-env-cells`
   emits only topology/env-cell/structured/portal/spatial outputs for outdoor landblocks, and
   `dungeon-env-cells` emits the same topology/env-cell output family without `landblock/<id>/outdoor`.
+- 2026-06-04: Implemented Phase 4B. Renamed the active landblock render DTO surface from preset to
+  product (`landblock-render-product.ts`, `landblock-render-product-planner.ts`), changed desired
+  planning to emit additive products by `landblockId + product`, and split the worker build path so
+  `outdoor` loads `landblock/<id>/outdoor` while `outdoor-env-cells` and `dungeon-env-cells` load
+  only topology/env-cell roots. Topology products now return `terrainArtifact: null`, no
+  `outdoor-buildings`/`outdoor-detail` layers, and detailed sidecars keyed by product. Browser
+  terrain selection now ignores topology products because terrain ownership belongs only to
+  `outdoor`.
 
 Validation:
 
@@ -288,6 +296,10 @@ Validation:
 - `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run lint:rust` passed after
   Phase 4A.
 - `git diff --check` passed after Phase 4A.
+- `npm exec vitest -- run src/workers/static-landblock-render-worker.test.ts src/lib/assets/landblock-render-product-planner.test.ts src/lib/world-display/static-landblock-render-artifact-store.test.ts src/lib/world-display/static-landblock-render-worker-client.test.ts src/lib/world-display/static-landblock-render-artifact-coordinator.test.ts src/lib/world-display/terrain-scene.test.ts`
+  passed after Phase 4B.
+- `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run lint:rust` passed after
+  Phase 4B.
 
 Related plans:
 
@@ -2037,7 +2049,7 @@ Exit criteria:
 Cleanup targets:
 
 - Phase 2 originally switched new worker orchestration to `DesiredLandblockRenderPreset` /
-  `LandblockRenderPresetWorkerJob`; Phase 4B should rename/reshape this to additive product
+  `LandblockRenderPresetWorkerJob`; Phase 4B renamed/reshaped the active path to additive product
   scheduling instead of wrapping the transitional static bundle layer planner.
 - Existing `static-bundle-layer-planner` tests may stay as transitional coverage until Phase 2 deletes
   or quarantines the old layer/root/source-revision scheduler.
@@ -2077,9 +2089,9 @@ before or during Phase 2:
 
 ### One-Shot Simplification Targets
 
-Phase 2 collapsed transitional Phase 1 planning/accounting surfaces into the landblock preset worker
-model. Phase 4B should now refine that model into additive product worker requests instead of
-carrying the one-most-detailed-preset rule forward:
+Phase 2 collapsed transitional Phase 1 planning/accounting surfaces into the landblock worker model.
+Phase 4B refined that model into additive product worker requests instead of carrying the
+one-most-detailed-preset rule forward:
 
 - Replace `DesiredStaticBundleLayer` / `StaticBundleLayerWorkerJob` as target scheduling contracts
   with additive `DesiredLandblockRenderProduct` / `LandblockRenderProductWorkerJob` contracts.
@@ -2092,11 +2104,11 @@ carrying the one-most-detailed-preset rule forward:
   build policy revision, and CPU texture-page policy revision for stale-result rejection.
 - Do not add separate outdoor/topology/env-cell worker schedulers. A landblock product job may emit
   multiple layered artifacts, and the resident store may commit them independently.
-- Keep texture page packing as a synchronous local helper inside the preset job. Do not reintroduce
+- Keep texture page packing as a synchronous local helper inside the product job. Do not reintroduce
   atlas generations, pending replacement records, or standalone packing jobs.
 - Keep picker, debug, and graph diagnostics lower fidelity. Do not retain staged draw-unit identity
   or per-part graph accounting for those consumers.
-- Make the Phase 3 vertical slice prove the `outdoor` preset rather than a standalone
+- Make the Phase 3 vertical slice prove the `outdoor` product rather than a standalone
   `outdoor-buildings` layer. Terrain and exterior statics should cross the worker boundary together
   in that slice.
 
@@ -2106,9 +2118,8 @@ Status: Implemented on 2026-06-04 across Phase 2A and Phase 2B.
 
 This is not a compatibility mode. It replaces the main-thread terrain/static closure prep assumption
 with a landblock render worker that can request raw assets through the worker host bridge and return
-complete layered static artifacts for the requested landblock product. The implemented Phase 2 names
-still say "preset"; Phase 4B should correct that naming and remove the one-most-detailed-output
-assumption.
+complete layered static artifacts for the requested landblock product. Phase 4B corrected the active
+contract names and removed the one-most-detailed-output assumption.
 
 Implemented in Phase 2A:
 
@@ -2148,10 +2159,9 @@ Course corrections:
 - Setup-appearance companions are also worker-local expansion. The raw setup-model dependency list
   does not include them, but static object rendering may prefer setup-appearance part/material
   overrides when they exist.
-- The current implemented `outdoor-with-env-cells` preset selects all topology env cells for the
-  landblock. Phase 4B should rename this to `outdoor-env-cells`, stop loading/returning outdoor
-  outputs for it, and keep finer env-cell subset selection deferred until a real streaming need
-  appears.
+- The Phase 2 implementation selected all topology env cells through `outdoor-with-env-cells`.
+  Phase 4B replaced that shape with `outdoor-env-cells`, stopped loading/returning outdoor outputs
+  for it, and kept finer env-cell subset selection deferred until a real streaming need appears.
 
 Phase 2A exit criteria:
 
@@ -2302,14 +2312,12 @@ Implemented:
 - `BrowserRenderResourceCoordinator` now uses worker terrain artifacts whenever the artifact store
   has desired, in-flight, or resident preset work. The legacy `AssetChannelState` terrain selector is
   only used when the landblock artifact pipeline is inactive.
-- The artifact projection filters by active terrain landblocks, sorts focus tiles first, reports
-  worker artifact provenance, and chooses the most detailed resident preset when both `outdoor` and
-  `outdoor-with-env-cells` artifacts are resident for the same landblock.
-- Phase 4B should remove the "most detailed resident preset" terrain selection rule. Terrain belongs
-  to the `outdoor` product only; topology/env-cell products should not participate in terrain
-  artifact selection.
-- Added focused tests for active-landblock filtering, preset-detail preference, and waiting on
-  worker artifacts instead of prepared-cache fallback.
+- The artifact projection filters by active terrain landblocks, sorts focus tiles first, and reports
+  worker artifact provenance. Phase 4B removed the old "most detailed resident preset" terrain
+  selection rule; terrain belongs to the `outdoor` product only, and topology/env-cell products do
+  not participate in terrain artifact selection.
+- Added focused tests for active-landblock filtering, topology-product terrain exclusion, and waiting
+  on worker artifacts instead of prepared-cache fallback.
 
 Decisions and course corrections:
 
@@ -2592,11 +2600,10 @@ Decisions and course corrections:
 - This phase does not add an optional `syncWebgl2WorldResources` parameter. Static artifact sync is
   an explicit renderer resource step so tests and non-migrated staged assembly are not silently
   defaulting around the new pipeline.
-- The first live sync filters to the `outdoor` preset and landblock-scoped `outdoor-buildings` /
-  `outdoor-detail` layers. `outdoor-with-env-cells` remains deferred until submit proves the
-  exterior ownership model.
-- Phase 4B should preserve this exterior ownership split by replacing `outdoor-with-env-cells` with
-  `outdoor-env-cells`, which does not sync or submit outdoor building/detail layers.
+- The first live sync filters to the `outdoor` product and landblock-scoped `outdoor-buildings` /
+  `outdoor-detail` layers. Phase 4B preserved this exterior ownership split by replacing
+  `outdoor-with-env-cells` with `outdoor-env-cells`, which does not sync or submit outdoor
+  building/detail layers.
 - The resource handoff deliberately does not adapt static bundle layers into legacy global atlas
   generation or compacted geometry family resource shapes. Phase 3C2B2 should submit from
   layer-owned pages/resources directly.
@@ -2774,21 +2781,18 @@ Implemented 2026-06-04.
 
 Implemented shape:
 
-- `LandblockRenderPresetWorkerResult` is currently a discriminated union from the pre-additive
-  naming. Phase 4B should replace it with an additive product result contract where `outdoor`
-  contains terrain/exterior static bundle layers and topology/env-cell products contain
-  `DetailedLandblockRenderArtifacts` without duplicating outdoor outputs.
+- Phase 4A initially added the detailed sidecar container behind the pre-additive preset result
+  union. Phase 4B replaced that public union with additive `LandblockRenderProductWorkerResult`
+  contracts where `outdoor` contains terrain/exterior static bundle layers and topology/env-cell
+  products contain `DetailedLandblockRenderArtifacts` without duplicating outdoor outputs.
 - `DetailedLandblockRenderArtifacts` carries selected env-cell IDs, structured interior shell
   artifacts, cell structure metadata, topology portal links, env-cell portal apertures, object/cell
   visibility records, and required env-cell residency/local BVH sidecars.
-- The static landblock render worker builds the detailed sidecar container from the same
-  worker-local topology/env-cell payloads it already loads for the current detailed preset. This keeps
-  topology discovery internal to the product job and avoids a separate main-thread topology worker
-  contract.
-- The current public contract is the detailed artifact container plus preset result union. Phase 4B
-  should replace the union naming with additive product results. Leaf sidecar DTO names remain
-  module-local until renderer/spatial consumers need named imports; this keeps knip from approving
-  unused public API.
+- The static landblock render worker builds the detailed sidecar container from worker-local
+  topology/env-cell payloads loaded by the topology product job. This keeps topology discovery
+  internal to the product job and avoids a separate main-thread topology worker contract.
+- Leaf sidecar DTO names remain module-local until renderer/spatial consumers need named imports;
+  this keeps knip from approving unused public API.
 
 Decisions and course corrections:
 
@@ -2828,39 +2832,69 @@ Exit criteria:
 
 ### Phase 4B: Additive Topology/Env-Cell Worker Product Build
 
-- Implement the additive product jobs as one imperative landblock render worker call graph with a
-  shared topology/env-cell artifact builder:
-  - `outdoor`: load outdoor payload, then build terrain/exterior artifacts.
-  - `outdoor-env-cells`: load topology, derive selected env cells, hydrate env-cell payloads, then
-    build env-cell static/interior artifacts and sidecars without loading `landblock/<id>/outdoor`.
-  - `dungeon-env-cells`: load topology, derive selected env cells, hydrate env-cell payloads, then
-    build the same env-cell static/interior artifacts and sidecars without loading
-    `landblock/<id>/outdoor`.
-- Reuse shared worker-side asset lookup/preparation libraries. Do not defer to the prepared asset
-  worker and do not duplicate closure loading logic.
-- Build `env-cell-static` artifacts, structured interior geometry artifacts, cell structure metadata,
-  portal aperture/source/target sidecars, visibility keys, and static spatial sidecars inside the
-  landblock render worker job.
-- Ensure indexed-paletted, indexed detail, and RGBA/detail static materials remain first-class in the
-  topology/env-cell products. Terrain remains first-class in `outdoor` and is explicitly absent from
-  `outdoor-env-cells` and `dungeon-env-cells`.
-- Fail the landblock render worker result for internally inconsistent required static dependencies
-  instead of emitting partial landblock layers.
-- Keep complete-product semantics: the landblock render worker may reload the raw roots required by
-  each product, but it must not consume resident artifacts as mutable build inputs and must not emit
-  duplicate layers owned by another product.
+Status: Implemented on 2026-06-04.
+
+Implementation notes:
+
+- Replaced the active preset DTO surface with additive product contracts:
+  - `apps/holtburger-3d/src/lib/world-display/landblock-render-product.ts`;
+  - `apps/holtburger-3d/src/lib/assets/landblock-render-product-planner.ts`.
+- `DesiredLandblockRenderProduct` planning now coalesces by `landblockId + product`, so the same
+  landblock can have resident `outdoor` and `outdoor-env-cells` products without treating one as the
+  more detailed replacement for the other.
+- `StaticLandblockRenderWorkerClient`, `StaticLandblockRenderArtifactStore`, and the artifact
+  coordinator now key stale-result rejection, residency, and in-flight tracking by product identity.
+- `static-landblock-render-worker.ts` now splits the imperative worker call graph by product:
+  - `outdoor` loads `landblock/<id>/outdoor`, builds terrain, and emits `outdoor-buildings` plus
+    `outdoor-detail`.
+  - `outdoor-env-cells` loads topology, derives topology env-cell roots, hydrates env cells, emits
+    `env-cell-static` layers plus detailed sidecars, and never loads `landblock/<id>/outdoor`.
+  - `dungeon-env-cells` uses the same topology/env-cell path as `outdoor-env-cells`, also without
+    outdoor or terrain output.
+- Topology products return `terrainArtifact: null` and must not emit `outdoor-buildings` or
+  `outdoor-detail`.
+- Browser terrain selection no longer ranks resident products by detail. Only products carrying a
+  terrain artifact participate, which means terrain currently belongs to `outdoor`.
+
+Decisions and course corrections:
+
+- Region render profile remains part of topology/env-cell closure hydration. The worker requests it
+  through the same raw asset bridge; this is not main-thread dependency resolution.
+- The detailed sidecar builder now receives the narrowed topology product explicitly. This keeps the
+  result union strict without casts or compatibility overloads.
+- Worker transport message strings were renamed from preset to product alongside DTOs. No legacy
+  message labels or re-export shims were retained.
+- Historical Phase 1J/2 prose still mentions the former preset path as history. Active target and
+  implementation sections now use product terminology.
+
+Cleanup targets discovered:
+
+- The internal adapter from `LandblockRenderProductWorkerJob` to `StaticBundleLayerWorkerJob`
+  remains, including the builder-required `sourceRevision` value derived from `job.jobId`. This
+  adapter is still quarantined inside the worker and should be removed when the static bundle builder
+  accepts product/layer build context directly.
+- `StaticBundleEnvCellTopologyDiscoveryJob` and other Phase 1 topology-discovery DTOs are now
+  unused by the active product worker path and remain deletion targets for cleanup.
+- Phase 4C/4D should decide whether detailed sidecars need smaller render-only DTOs before WebGL and
+  spatial consumers start depending directly on prepared payload subtree shapes.
+
+Legacy shims introduced:
+
+- None. Phase 4B replaced the active preset names/contracts instead of preserving compatibility
+  aliases, and topology products do not consume resident `outdoor` artifacts as mutable build input.
 
 Exit criteria:
 
-- The landblock render worker can produce complete `outdoor`, `outdoor-env-cells`, and
-  `dungeon-env-cells` CPU artifacts from worker-local raw asset closures.
+- Implemented. Focused worker tests cover outdoor product terrain/exterior output,
+  `outdoor-env-cells` no-outdoor/no-terrain output, `dungeon-env-cells` no-outdoor/no-terrain output,
+  topology-derived env-cell selection, structured interior artifact output, portal/spatial sidecar
+  output, transferability, and worker-local closure dependencies.
 - Env-cell discovery and hydration do not require a separate topology worker, topology scheduler, or
-  main-thread cache lookup phase.
-- Builder tests cover topology-derived env-cell selection, structured interior artifact output,
-  portal/spatial sidecar output, outdoor-env-cells no-outdoor-output behavior, dungeon
-  no-outdoor/no-terrain behavior, and topology/env-cell product closure failure behavior.
+  main-thread cache lookup phase in the active worker path.
+- `npm exec vitest`, `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and
+  `npm run lint:rust` passed after implementation.
 
-### Phase 4C: Detailed Preset WebGL Resource and Submit
+### Phase 4C: Detailed Product WebGL Resource and Submit
 
 - Realize `outdoor-env-cells` and `dungeon-env-cells` env-cell static layers, structured interior
   geometry, portal resource inputs, and sidecar-backed submit data from resident worker artifacts.

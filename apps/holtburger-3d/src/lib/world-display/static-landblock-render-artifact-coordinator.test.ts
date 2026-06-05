@@ -2,14 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import { parseBrowserLocationInput } from "../../app/browser-mode";
 import type {
-	DesiredLandblockRenderPreset,
-	LandblockRenderPresetWorkerResult,
-} from "./landblock-render-preset";
+	DesiredLandblockRenderProduct,
+	LandblockRenderProductWorkerResult,
+} from "./landblock-render-product";
 import { StaticLandblockRenderArtifactCoordinator } from "./static-landblock-render-artifact-coordinator";
 
 describe("static landblock render artifact coordinator", () => {
-	it("submits desired presets through the worker client and commits completed artifacts", async () => {
-		const client = new MockLandblockPresetClient();
+	it("submits desired products through the worker client and commits completed artifacts", async () => {
+		const client = new MockLandblockProductClient();
 		const snapshots: number[] = [];
 		const destination = parseBrowserLocationInput("da55", "manual", "outdoor");
 		expect(destination).not.toBeNull();
@@ -29,7 +29,7 @@ describe("static landblock render artifact coordinator", () => {
 		expect(client.requests).toHaveLength(1);
 		expect(client.requests[0]).toMatchObject({
 			landblockId: 0xda55ffff,
-			preset: "outdoor",
+			product: "outdoor",
 			buildPolicyRevision: "static-landblock-render:v1",
 			texturePagePolicyRevision: "static-landblock-texture-pages:v1",
 		});
@@ -46,7 +46,7 @@ describe("static landblock render artifact coordinator", () => {
 	});
 
 	it("reuses request identity for unchanged interest instead of resubmitting resident artifacts", async () => {
-		const client = new MockLandblockPresetClient();
+		const client = new MockLandblockProductClient();
 		const destination = parseBrowserLocationInput("da55", "manual", "outdoor");
 		expect(destination).not.toBeNull();
 		const coordinator = new StaticLandblockRenderArtifactCoordinator({
@@ -72,24 +72,24 @@ describe("static landblock render artifact coordinator", () => {
 	});
 });
 
-class MockLandblockPresetClient {
-	readonly requests: DesiredLandblockRenderPreset[] = [];
+class MockLandblockProductClient {
+	readonly requests: DesiredLandblockRenderProduct[] = [];
 	private readonly pending: Array<{
-		resolve: (result: LandblockRenderPresetWorkerResult) => void;
+		resolve: (result: LandblockRenderProductWorkerResult) => void;
 		reject: (error: Error) => void;
 	}> = [];
 	disposed = false;
 
-	requestPreset(
-		desired: DesiredLandblockRenderPreset,
-	): Promise<LandblockRenderPresetWorkerResult> {
+	requestProduct(
+		desired: DesiredLandblockRenderProduct,
+	): Promise<LandblockRenderProductWorkerResult> {
 		this.requests.push(desired);
 		return new Promise((resolve, reject) => {
 			this.pending.push({ resolve, reject });
 		});
 	}
 
-	resolveNext(result: LandblockRenderPresetWorkerResult): void {
+	resolveNext(result: LandblockRenderProductWorkerResult): void {
 		const pending = this.pending.shift();
 		if (!pending) {
 			throw new Error("No pending worker request.");
@@ -106,13 +106,13 @@ class MockLandblockPresetClient {
 }
 
 function createResult(
-	desired: DesiredLandblockRenderPreset,
-): LandblockRenderPresetWorkerResult {
+	desired: DesiredLandblockRenderProduct,
+): LandblockRenderProductWorkerResult {
 	return {
-		type: "landblock-render-preset-built",
+		type: "landblock-render-product-built",
 		jobId: `job:${desired.requestId}`,
 		landblockId: desired.landblockId,
-		preset: desired.preset,
+		product: desired.product,
 		requestId: desired.requestId,
 		buildPolicyRevision: desired.buildPolicyRevision,
 		texturePagePolicyRevision: desired.texturePagePolicyRevision,

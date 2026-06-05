@@ -19,7 +19,7 @@ import {
 	createPreparedTerrainMeshFromOutdoorPayload,
 	type LandblockTerrainRenderArtifact,
 } from "./terrain-render-artifact";
-import type { LandblockRenderPresetWorkerResult } from "./landblock-render-preset";
+import type { LandblockRenderProductWorkerResult } from "./landblock-render-product";
 import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
 
 export interface TerrainSceneTile {
@@ -293,10 +293,10 @@ function describeTerrainDataSources(
 function selectResidentTerrainArtifactResults(
 	artifacts: StaticLandblockRenderArtifactStoreSnapshot,
 	activeLandblockIds: ReadonlySet<number>,
-): LandblockRenderPresetWorkerResult[] {
+): LandblockRenderProductWorkerResult[] {
 	const resultByLandblockId = new Map<
 		number,
-		LandblockRenderPresetWorkerResult
+		LandblockRenderProductWorkerResult
 	>();
 	for (const result of artifacts.artifacts) {
 		if (
@@ -306,29 +306,11 @@ function selectResidentTerrainArtifactResults(
 			continue;
 		}
 		const existing = resultByLandblockId.get(result.landblockId);
-		if (!existing || compareArtifactResultDetail(result, existing) > 0) {
+		if (!existing) {
 			resultByLandblockId.set(result.landblockId, result);
 		}
 	}
 	return [...resultByLandblockId.values()];
-}
-
-function compareArtifactResultDetail(
-	left: LandblockRenderPresetWorkerResult,
-	right: LandblockRenderPresetWorkerResult,
-): number {
-	return artifactResultPresetRank(left) - artifactResultPresetRank(right);
-}
-
-function artifactResultPresetRank(
-	result: LandblockRenderPresetWorkerResult,
-): number {
-	switch (result.preset) {
-		case "outdoor":
-			return 0;
-		case "outdoor-with-env-cells":
-			return 1;
-	}
 }
 
 function describeWorkerArtifactTerrainCache(
@@ -337,7 +319,7 @@ function describeWorkerArtifactTerrainCache(
 	const terrainArtifactCount = artifacts.artifacts.filter(
 		(result) => result.terrainArtifact !== null,
 	).length;
-	return `Worker artifact cache has ${terrainArtifactCount} terrain artifact${terrainArtifactCount === 1 ? "" : "s"} resident across ${artifacts.residentCount} landblock preset result${artifacts.residentCount === 1 ? "" : "s"}; ${artifacts.inFlightCount} in flight.`;
+	return `Worker artifact cache has ${terrainArtifactCount} terrain artifact${terrainArtifactCount === 1 ? "" : "s"} resident across ${artifacts.residentCount} landblock product result${artifacts.residentCount === 1 ? "" : "s"}; ${artifacts.inFlightCount} in flight.`;
 }
 
 function describeTerrainMaterialResources(

@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import type { DesiredLandblockRenderPreset } from "./landblock-render-preset";
+import type { DesiredLandblockRenderProduct } from "./landblock-render-product";
 import { StaticLandblockRenderArtifactStore } from "./static-landblock-render-artifact-store";
 
 describe("static landblock render artifact store", () => {
-	it("commits only latest desired preset results", () => {
+	it("commits only latest desired product results", () => {
 		const store = new StaticLandblockRenderArtifactStore();
 		const oldDesired = createDesired("request:old");
 		const newDesired = createDesired("request:new");
 
-		store.syncDesiredPresets([oldDesired]);
+		store.syncDesiredProducts([oldDesired]);
 		expect(store.markInFlight(oldDesired)).toBe(true);
-		store.syncDesiredPresets([newDesired]);
+		store.syncDesiredProducts([newDesired]);
 		expect(store.markInFlight(newDesired)).toBe(true);
 
 		expect(store.commitResult(createResult("request:old"))).toBe(false);
@@ -28,10 +28,10 @@ describe("static landblock render artifact store", () => {
 		const store = new StaticLandblockRenderArtifactStore();
 		const desired = createDesired("request:one");
 
-		store.syncDesiredPresets([desired]);
+		store.syncDesiredProducts([desired]);
 		store.markInFlight(desired);
 		expect(store.commitResult(createResult("request:one"))).toBe(true);
-		store.syncDesiredPresets([]);
+		store.syncDesiredProducts([]);
 
 		const snapshot = store.snapshot();
 		expect(snapshot.residentCount).toBe(0);
@@ -40,10 +40,10 @@ describe("static landblock render artifact store", () => {
 	});
 });
 
-function createDesired(requestId: string): DesiredLandblockRenderPreset {
+function createDesired(requestId: string): DesiredLandblockRenderProduct {
 	return {
 		landblockId: 0xda55ffff,
-		preset: "outdoor",
+		product: "outdoor",
 		priority: "resident-now",
 		requestId,
 		buildPolicyRevision: "build:v1",
@@ -61,10 +61,10 @@ function createDesired(requestId: string): DesiredLandblockRenderPreset {
 
 function createResult(requestId: string) {
 	return {
-		type: "landblock-render-preset-built" as const,
+		type: "landblock-render-product-built" as const,
 		jobId: `job:${requestId}`,
 		landblockId: 0xda55ffff,
-		preset: "outdoor" as const,
+		product: "outdoor" as const,
 		requestId,
 		buildPolicyRevision: "build:v1",
 		texturePagePolicyRevision: "texture-pages:v1",

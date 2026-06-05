@@ -11,14 +11,14 @@ import {
 	formatRegionRenderProfileAssetId,
 	formatTerrainMaterialAssetId,
 } from "../lib/landblocks";
-import type { LandblockRenderPresetWorkerJob } from "../lib/world-display/landblock-render-preset";
+import type { LandblockRenderProductWorkerJob } from "../lib/world-display/landblock-render-product";
 import {
 	collectStaticLandblockRenderWorkerResultTransferables,
 	runStaticLandblockRenderWorkerJob,
 } from "./static-landblock-render-worker";
 
 describe("static landblock render worker", () => {
-	it("builds a complete outdoor-with-env-cells preset from worker-local asset lookups", async () => {
+	it("builds an outdoor product with terrain and exterior layers", async () => {
 		const landblockId = 0xda55ffff;
 		const lookup = new Map<string, AssetLookupResponseDto>(
 			[
@@ -26,11 +26,54 @@ describe("static landblock render worker", () => {
 					formatLandblockOutdoorAssetId(landblockId),
 					createOutdoorPayload(landblockId),
 				),
-				createResponse(formatTerrainMaterialAssetId(1), createTerrainMaterial()),
+				createResponse(
+					formatTerrainMaterialAssetId(1),
+					createTerrainMaterial(),
+				),
 				createResponse(
 					formatRegionRenderProfileAssetId(1),
 					createRegionRenderProfile(),
 				),
+			].map((response) => [response.assetId, response] as const),
+		);
+		const requestedAssetIds: string[] = [];
+
+		const result = await runStaticLandblockRenderWorkerJob(
+			createJob("outdoor"),
+			{
+				async lookupBinaryAssets(requests: readonly AssetLookupRequestDto[]) {
+					requestedAssetIds.push(...requests.map((request) => request.assetId));
+					return {
+						responses: requests.map((request) => {
+							const response = lookup.get(request.assetId);
+							if (!response) {
+								throw new Error(`Missing test response ${request.assetId}.`);
+							}
+							return response;
+						}),
+					};
+				},
+			},
+		);
+
+		expect(requestedAssetIds).toContain(
+			formatLandblockOutdoorAssetId(landblockId),
+		);
+		expect(requestedAssetIds).not.toContain(
+			formatLandblockTopologyAssetId(landblockId),
+		);
+		expect(result.product).toBe("outdoor");
+		expect(result.terrainArtifact?.landblockId).toBe(landblockId);
+		expect(result.staticBundleLayers.map((layer) => layer.layerKind)).toEqual([
+			"outdoor-buildings",
+			"outdoor-detail",
+		]);
+	});
+
+	it("builds an outdoor-env-cells product without loading outdoor roots", async () => {
+		const landblockId = 0xda55ffff;
+		const lookup = new Map<string, AssetLookupResponseDto>(
+			[
 				createResponse(
 					formatLandblockTopologyAssetId(landblockId),
 					createTopologyPayload(landblockId),
@@ -38,6 +81,10 @@ describe("static landblock render worker", () => {
 				createResponse(
 					formatEnvCellAssetId(0xda550100),
 					createEnvCellPayload(0xda550100),
+				),
+				createResponse(
+					formatRegionRenderProfileAssetId(1),
+					createRegionRenderProfile(),
 				),
 			].map((response) => [response.assetId, response] as const),
 		);
@@ -58,20 +105,22 @@ describe("static landblock render worker", () => {
 			},
 		});
 
-		expect(requestedAssetIds).toContain(formatLandblockOutdoorAssetId(landblockId));
-		expect(requestedAssetIds).toContain(formatLandblockTopologyAssetId(landblockId));
+		expect(requestedAssetIds).not.toContain(
+			formatLandblockOutdoorAssetId(landblockId),
+		);
+		expect(requestedAssetIds).toContain(
+			formatLandblockTopologyAssetId(landblockId),
+		);
 		expect(result).toMatchObject({
-			type: "landblock-render-preset-built",
+			type: "landblock-render-product-built",
 			landblockId,
-			preset: "outdoor-with-env-cells",
+			product: "outdoor-env-cells",
 			requestId: "request:worker",
 			buildPolicyRevision: "build:v1",
 			texturePagePolicyRevision: "texture-pages:v1",
 		});
-		expect(result.terrainArtifact?.landblockId).toBe(landblockId);
+		expect(result.terrainArtifact).toBeNull();
 		expect(result.staticBundleLayers.map((layer) => layer.layerKind)).toEqual([
-			"outdoor-buildings",
-			"outdoor-detail",
 			"env-cell-static",
 		]);
 		expect(result.detailedArtifacts.selectedEnvCellIds).toEqual([0xda550100]);
@@ -95,16 +144,70 @@ describe("static landblock render worker", () => {
 		).toBe(true);
 		expect(
 			collectStaticLandblockRenderWorkerResultTransferables(result),
-		).toContain(result.detailedArtifacts.structuredInteriorCells[0]?.renderGeometry.positions.buffer);
+		).toContain(
+			result.detailedArtifacts.structuredInteriorCells[0]?.renderGeometry
+				.positions.buffer,
+		);
+	});
+
+	it("builds a dungeon-env-cells product through the topology/env-cell path", async () => {
+		const landblockId = 0xda55ffff;
+		const lookup = new Map<string, AssetLookupResponseDto>(
+			[
+				createResponse(
+					formatLandblockTopologyAssetId(landblockId),
+					createTopologyPayload(landblockId, "dungeon"),
+				),
+				createResponse(
+					formatEnvCellAssetId(0xda550100),
+					createEnvCellPayload(0xda550100),
+				),
+				createResponse(
+					formatRegionRenderProfileAssetId(1),
+					createRegionRenderProfile(),
+				),
+			].map((response) => [response.assetId, response] as const),
+		);
+		const requestedAssetIds: string[] = [];
+
+		const result = await runStaticLandblockRenderWorkerJob(
+			createJob("dungeon-env-cells"),
+			{
+				async lookupBinaryAssets(requests: readonly AssetLookupRequestDto[]) {
+					requestedAssetIds.push(...requests.map((request) => request.assetId));
+					return {
+						responses: requests.map((request) => {
+							const response = lookup.get(request.assetId);
+							if (!response) {
+								throw new Error(`Missing test response ${request.assetId}.`);
+							}
+							return response;
+						}),
+					};
+				},
+			},
+		);
+
+		expect(requestedAssetIds).not.toContain(
+			formatLandblockOutdoorAssetId(landblockId),
+		);
+		expect(result.product).toBe("dungeon-env-cells");
+		expect(result.terrainArtifact).toBeNull();
+		expect(result.staticBundleLayers.map((layer) => layer.layerKind)).toEqual([
+			"env-cell-static",
+		]);
+		expect(result.detailedArtifacts.product).toBe("dungeon-env-cells");
 	});
 });
 
-function createJob(): LandblockRenderPresetWorkerJob {
+function createJob(
+	product: LandblockRenderProductWorkerJob["product"] = "outdoor-env-cells",
+): LandblockRenderProductWorkerJob {
 	return {
-		type: "build-landblock-render-preset",
-		jobId: "landblock-render-preset:3663069183:outdoor-with-env-cells:request:worker",
+		type: "build-landblock-render-product",
+		jobId: `landblock-render-product:3663069183:${product}:request:worker`,
 		landblockId: 0xda55ffff,
-		preset: "outdoor-with-env-cells",
+		product,
 		requestId: "request:worker",
 		buildPolicyRevision: "build:v1",
 		texturePagePolicyRevision: "texture-pages:v1",
@@ -207,7 +310,10 @@ function createOutdoorPayload(landblockId: number): Record<string, unknown> {
 	};
 }
 
-function createTopologyPayload(landblockId: number): Record<string, unknown> {
+function createTopologyPayload(
+	landblockId: number,
+	classification = "outdoor",
+): Record<string, unknown> {
 	return {
 		kind: "landblock-topology",
 		sourceAssetKind: "landblock-topology",
@@ -215,7 +321,7 @@ function createTopologyPayload(landblockId: number): Record<string, unknown> {
 		provenance: createProvenance("landblock-topology"),
 		landblockId,
 		landblockInfoId: landblockId,
-		classification: "outdoor",
+		classification,
 		envCells: [
 			{
 				memberId: "env-cell-member/da550100",

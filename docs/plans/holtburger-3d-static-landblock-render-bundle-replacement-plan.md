@@ -14,7 +14,8 @@ policy resource control is implemented. Phase 4C3C2C artifact texture mipmap/ani
 implemented. Phase 4C3D portal/spatial artifact resource handoff is split into smaller slices;
 Phase 4C3D1 artifact-native transition portal candidate handoff and Phase 4C3D2 portal mask
 artifact input handoff are implemented. Phase 4C3D3 spatial/culling artifact input handoff is
-split further; Phase 4C3D3A artifact-backed env-cell local BVH culling is implemented.
+split further; Phase 4C3D3A artifact-backed env-cell local BVH culling and Phase 4C3D3B1
+artifact-backed structured spatial index items are implemented.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -283,6 +284,10 @@ Progress:
   prefers `detailed-landblock.spatial.envCellLocalBvhs` and only falls back to prepared env-cell
   payload BVHs when no resident detailed artifact BVH exists for the cell. The lower-level BVH query
   helper now accepts artifact-local BVH facts without fabricating prepared env-cell payloads.
+- 2026-06-05: Implemented Phase 4C3D3B1. The browser render spatial index now prefers coarse
+  structured-cell spatial items derived from resident `detailed-landblock` artifacts. This moves
+  structured-interior picker/debug spatial ownership off the bridge-derived scene when detailed
+  artifacts are resident while intentionally preserving only coarse cell-level fidelity.
 
 Validation:
 
@@ -312,6 +317,9 @@ Validation:
 - `npm exec vitest -- run src/lib/world-display/prepared-bvh-metrics.test.ts`, `npm run check`,
   `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and `git diff --check` passed after
   Phase 4C3D3A.
+- `npm exec vitest -- run src/lib/world-display/render-spatial-scene.test.ts src/lib/world-display/prepared-bvh-metrics.test.ts`,
+  `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
+  `git diff --check` passed after Phase 4C3D3B1.
 - `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts`
   passed after the first Phase 1D builder slice.
 - `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts`
@@ -3731,8 +3739,57 @@ Exit criteria:
 
 #### Phase 4C3D3B: Remaining Spatial Diagnostics and Fallback Cleanup
 
+#### Phase 4C3D3B1: Artifact-Backed Structured Spatial Index Items
+
 - Keep browser debug overlays lower priority; they may continue to consume a reduced bridge or lose
   fidelity while render-critical portal/spatial consumers migrate.
+- Derive coarse structured-cell spatial items directly from resident detailed landblock artifacts.
+- Prefer artifact-derived structured spatial items in the browser render spatial index when detailed
+  artifacts are resident.
+- Preserve only cell-level picker/debug fidelity. Do not rebuild part-level static or portal debug
+  detail just to keep the old diagnostics visually identical.
+
+Decisions and course corrections:
+
+- Implemented. `deriveStructuredInteriorSpatialItemsFromLandblockArtifacts` builds structured-cell
+  spatial items from detailed artifact cell render chunks, local placements, and render geometry
+  bounds.
+- Implemented. `BrowserRenderResourceCoordinator` prefers those artifact-derived structured spatial
+  items and falls back to bridge-derived `StructuredInteriorSceneModel` items only when no resident
+  detailed artifacts are available.
+- Course correction: artifact-backed structured spatial items are intentionally coarse. The
+  replacement architecture does not preserve higher-fidelity picker/debug surfaces at the cost of
+  keeping main-thread env-cell hydration alive.
+
+Cleanup targets discovered:
+
+- `render-spatial-scene.ts` still imports `buildStaticRenderablePartMatrix` from
+  `staged-world-assembly.ts` for legacy static picker items. This should be deleted with staged
+  static picker diagnostics or moved to a neutral transform helper only if static picking survives
+  hard cutover.
+- `deriveStructuredInteriorSpatialItems` remains as the transitional fallback for absent detailed
+  artifacts. Phase 4E should remove that bridge-derived route with the rest of
+  `StructuredInteriorSceneModel` static geometry ownership.
+- Artifact-derived structured spatial items currently mark every selected artifact cell as focus for
+  metadata purposes. That metadata is debug-only and should not drive rendering. If browser UX needs
+  exact focus semantics after cutover, pass the browser destination into the artifact spatial helper
+  rather than restoring bridge-derived scene ownership.
+
+Legacy shims introduced:
+
+- None. This phase added an artifact-preferred spatial item derivation path and kept the old
+  structured scene spatial items only as the existing absence fallback.
+
+Exit criteria:
+
+- Implemented. Browser structured spatial index items come from resident detailed artifacts when
+  available.
+- Implemented. Focused tests cover artifact-derived structured spatial item shape and explicit null
+  fallback when no detailed artifacts are resident.
+- Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
+
+#### Phase 4C3D3B2: Remaining Spatial Diagnostic Cleanup
+
 - Revisit `prepared-bvh-metrics.ts`, `render-spatial-scene.ts`,
   `scene-renderable-readiness.ts`, and WebGL frame candidate assembly together. These still carry
   legacy structured-interior/spatial assumptions and should move to artifact-backed spatial facts as
@@ -3741,6 +3798,9 @@ Exit criteria:
   artifacts or allowed to lose fidelity during hard cutover.
 - Remove or rename "prepared BVH" diagnostics once artifact-backed BVH facts are the only
   render-critical static source.
+- Decide whether static renderable picker diagnostics survive hard cutover. If they do, derive
+  coarse object-level bounds from resident static bundle artifacts; if not, delete
+  `deriveStaticRenderableSpatialItems` with the staged static path.
 
 Exit criteria:
 

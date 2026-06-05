@@ -51,6 +51,7 @@ import {
 	deriveDebugOverlaySpatialItems,
 	deriveStaticRenderableSpatialItems,
 	deriveStructuredInteriorSpatialItems,
+	deriveStructuredInteriorSpatialItemsFromLandblockArtifacts,
 	deriveTerrainSpatialItems,
 } from "./render-spatial-scene";
 import { deriveWorldRenderSceneContext } from "./render-scene-context";
@@ -422,7 +423,9 @@ export class BrowserRenderResourceCoordinator {
 		);
 		this.renderSpatialIndex.replaceOwnerItems(
 			STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY,
-			deriveStructuredInteriorSpatialItems(structuredInteriorScene),
+			deriveStructuredInteriorSpatialItemsFromLandblockArtifacts(
+				input.staticLandblockRenderArtifacts,
+			) ?? deriveStructuredInteriorSpatialItems(structuredInteriorScene),
 		);
 		this.renderSpatialIndex.replaceOwnerItems(
 			STATIC_RENDERABLE_SPATIAL_OWNER_KEY,

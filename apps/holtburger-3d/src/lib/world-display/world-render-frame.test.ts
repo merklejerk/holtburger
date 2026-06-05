@@ -9,11 +9,12 @@ import {
 } from "./world-render-frame";
 import { buildSceneCameraViewProjectionMatrix } from "./render-math";
 import type { TerrainSceneModel } from "./terrain-scene";
+import { createEmptyStaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
 import { createEmptyStaticRenderableSceneModel } from "./static-renderables";
 import { createEmptyStructuredInteriorSceneModel } from "./structured-interior-scene";
 
 describe("buildWorldRenderFrame", () => {
-	it("culls keyed batches when no prepared BVH item is visible", () => {
+	it("culls keyed batches when no render BVH item is visible", () => {
 		const frame = buildWorldRenderFrameImpl({
 			assetState: createInitialAssetChannelState(),
 			candidates: [
@@ -26,6 +27,8 @@ describe("buildWorldRenderFrame", () => {
 			cameraFrame: createCameraFrame(),
 			renderChunkTransforms: [],
 			staticRenderableScene: createEmptyStaticRenderableSceneModel(),
+			staticLandblockRenderArtifacts:
+				createEmptyStaticLandblockRenderArtifactStoreSnapshot(),
 			structuredInteriorScene: createEmptyStructuredInteriorSceneModel(),
 			terrainScene: createTerrainScene(),
 		});
@@ -54,6 +57,8 @@ describe("buildWorldRenderFrame", () => {
 			cameraFrame: createCameraFrame(),
 			renderChunkTransforms: [],
 			staticRenderableScene: createEmptyStaticRenderableSceneModel(),
+			staticLandblockRenderArtifacts:
+				createEmptyStaticLandblockRenderArtifactStoreSnapshot(),
 			structuredInteriorScene: createEmptyStructuredInteriorSceneModel(),
 			terrainScene: createTerrainScene(),
 		});
@@ -144,6 +149,8 @@ function buildTestWorldRenderFrame(candidates: readonly WorldRenderCandidate[]) 
 		cameraFrame: createCameraFrame(),
 		renderChunkTransforms: [],
 		staticRenderableScene: createEmptyStaticRenderableSceneModel(),
+		staticLandblockRenderArtifacts:
+			createEmptyStaticLandblockRenderArtifactStoreSnapshot(),
 		structuredInteriorScene: createEmptyStructuredInteriorSceneModel(),
 		terrainScene: createTerrainScene(),
 	});

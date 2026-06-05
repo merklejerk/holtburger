@@ -1,7 +1,7 @@
 import type { AssetChannelState } from "../assets/types";
 import type { SceneCameraFrame } from "./camera";
 import { buildSceneCameraViewProjectionMatrix, type RenderMat4 } from "./render-math";
-import { derivePreparedBvhVisibilitySnapshot } from "./prepared-bvh-metrics";
+import { deriveRenderBvhVisibilitySnapshot } from "./render-bvh-visibility-snapshot";
 import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import type { RenderChunkTransform } from "./render-anchor";
 import type { RenderFrustum, RenderPlane } from "./render-spatial-math";
@@ -111,7 +111,7 @@ export function buildWorldRenderFrame({
 	terrainScene: TerrainSceneModel;
 }): WorldRenderFrame {
 	const viewProjectionMatrix = buildSceneCameraViewProjectionMatrix(cameraFrame);
-	const visibilitySnapshot = derivePreparedBvhVisibilitySnapshot({
+	const visibilitySnapshot = deriveRenderBvhVisibilitySnapshot({
 		assetState,
 		terrainScene,
 		staticRenderableScene,

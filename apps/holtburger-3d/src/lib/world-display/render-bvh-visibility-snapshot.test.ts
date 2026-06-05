@@ -21,11 +21,11 @@ import {
 } from "./static-renderables";
 import { createEmptyStructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel, TerrainSceneTile } from "./terrain-scene";
-import { derivePreparedBvhDebugMetrics } from "./prepared-bvh-metrics";
+import { deriveRenderBvhVisibilityMetrics } from "./render-bvh-visibility-snapshot";
 import type { RenderFrustum } from "./render-spatial-math";
 
-describe("derivePreparedBvhDebugMetrics", () => {
-	it("reports visible prepared BVH item counts without changing render state", () => {
+describe("deriveRenderBvhVisibilityMetrics", () => {
+	it("reports visible render BVH item counts without changing render state", () => {
 		const landblockId = 0x0203ffff;
 		const envCellId = 0x02030100;
 		const outdoorPayload = createOutdoorPayload(landblockId);
@@ -33,7 +33,7 @@ describe("derivePreparedBvhDebugMetrics", () => {
 		const terrainRenderChunk = deriveLandblockRenderChunkPlacement(landblockId);
 		const envRenderChunk = deriveLandblockRenderChunkPlacement(envCellId);
 
-		const metrics = derivePreparedBvhDebugMetrics({
+		const metrics = deriveRenderBvhVisibilityMetrics({
 			assetState: createAssetState([outdoorPayload, envCellPayload]),
 			terrainScene: createTerrainScene([createTerrainTile(landblockId)]),
 			staticRenderableScene: createStaticRenderableScene(landblockId),
@@ -72,7 +72,7 @@ describe("derivePreparedBvhDebugMetrics", () => {
 		const landblockId = 0x0203ffff;
 		const outdoorPayload = createOutdoorPayload(landblockId);
 
-		const metrics = derivePreparedBvhDebugMetrics({
+		const metrics = deriveRenderBvhVisibilityMetrics({
 			assetState: createAssetState([outdoorPayload]),
 			terrainScene: createTerrainScene([createTerrainTile(0x0204ffff)]),
 			staticRenderableScene: createStaticRenderableScene(landblockId),
@@ -94,7 +94,7 @@ describe("derivePreparedBvhDebugMetrics", () => {
 		const envCellId = 0x02030100;
 		const envRenderChunk = deriveLandblockRenderChunkPlacement(envCellId);
 
-		const metrics = derivePreparedBvhDebugMetrics({
+		const metrics = deriveRenderBvhVisibilityMetrics({
 			assetState: createAssetState([]),
 			terrainScene: createTerrainScene([]),
 			staticRenderableScene: createEmptyStaticRenderableSceneModel(),

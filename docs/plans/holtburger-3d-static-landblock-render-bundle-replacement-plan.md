@@ -17,7 +17,8 @@ artifact input handoff are implemented. Phase 4C3D3 spatial/culling artifact inp
 split further; Phase 4C3D3A artifact-backed env-cell local BVH culling and Phase 4C3D3B1
 artifact-backed structured spatial index items are implemented. Phase 4C3D3B2 static bundle
 spatial hints and artifact-backed static spatial index items are implemented. Phase 4C3D3B3
-selected static overlay artifact fallback is implemented.
+selected static overlay artifact fallback is implemented. Phase 4C3D3B4 render BVH visibility
+naming cleanup is implemented.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -282,7 +283,7 @@ Progress:
   resident instead of being owned by the staged static/interior assembly path. The staged assembly
   helper no longer accepts or scans transition portal candidates.
 - 2026-06-05: Implemented Phase 4C3D3A. WebGL frame visibility now passes the resident static
-  landblock artifact snapshot into prepared BVH visibility derivation. Env-cell local BVH culling
+  landblock artifact snapshot into render BVH visibility derivation. Env-cell local BVH culling
   prefers `detailed-landblock.spatial.envCellLocalBvhs` and only falls back to prepared env-cell
   payload BVHs when no resident detailed artifact BVH exists for the cell. The lower-level BVH query
   helper now accepts artifact-local BVH facts without fabricating prepared env-cell payloads.
@@ -299,6 +300,13 @@ Progress:
   selected static keys against resident static bundle `spatialHints` first and renders coarse
   artifact object bounds when available. The old prepared gfx object/part transform overlay path
   remains only as an absence fallback for non-migrated or hintless static selections.
+- 2026-06-05: Implemented Phase 4C3D3B4. Renamed the higher-level BVH visibility snapshot module
+  from `prepared-bvh-metrics.ts` to `render-bvh-visibility-snapshot.ts` and replaced the exported
+  `PreparedBvhDebugMetrics`/`PreparedBvhVisibilitySnapshot` API with
+  `RenderBvhVisibilityMetrics`/`RenderBvhVisibilitySnapshot`. `world-render-frame.ts` now imports
+  the neutral snapshot builder. The lower-level `prepared-bvh-visibility.ts` query module remains
+  intentionally named because it still describes the prepared BVH record/query format consumed by
+  both prepared-payload and artifact-backed callers.
 
 Validation:
 
@@ -325,10 +333,10 @@ Validation:
 - `npm exec vitest -- run src/lib/world-display/transition-portal-mask-draw-units.test.ts src/lib/world-display/transition-portal-work-items.test.ts src/lib/world-display/webgl2-world-resources.test.ts`,
   `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
   `git diff --check` passed after Phase 4C3D2.
-- `npm exec vitest -- run src/lib/world-display/prepared-bvh-metrics.test.ts`, `npm run check`,
+- `npm exec vitest -- run src/lib/world-display/render-bvh-visibility-snapshot.test.ts`, `npm run check`,
   `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and `git diff --check` passed after
   Phase 4C3D3A.
-- `npm exec vitest -- run src/lib/world-display/render-spatial-scene.test.ts src/lib/world-display/prepared-bvh-metrics.test.ts`,
+- `npm exec vitest -- run src/lib/world-display/render-spatial-scene.test.ts src/lib/world-display/render-bvh-visibility-snapshot.test.ts`,
   `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
   `git diff --check` passed after Phase 4C3D3B1.
 - `npm exec vitest -- run src/lib/world-display/render-spatial-scene.test.ts src/lib/world-display/static-bundle-layer-builder.test.ts`,
@@ -337,6 +345,9 @@ Validation:
 - `npm exec vitest -- run src/lib/world-display/render-spatial-scene.test.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/webgl2-world-resources.test.ts`,
   `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
   `git diff --check` passed after Phase 4C3D3B3.
+- `npm exec vitest -- run src/lib/world-display/render-bvh-visibility-snapshot.test.ts src/lib/world-display/world-render-frame.test.ts`,
+  `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
+  `git diff --check` passed after Phase 4C3D3B4.
 - `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts`
   passed after the first Phase 1D builder slice.
 - `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts`
@@ -3716,8 +3727,8 @@ diagnostic metrics have different correctness requirements. Render-frame culling
 Decisions and course corrections:
 
 - Implemented. `buildWorldRenderFrame` now requires a `StaticLandblockRenderArtifactStoreSnapshot`
-  and passes it into `derivePreparedBvhVisibilitySnapshot`.
-- Implemented. `derivePreparedBvhVisibilitySnapshot` indexes resident detailed artifact env-cell
+  and passes it into `deriveRenderBvhVisibilitySnapshot`.
+- Implemented. `deriveRenderBvhVisibilitySnapshot` indexes resident detailed artifact env-cell
   local BVHs by env cell and uses them for visible render item key derivation when present.
 - Implemented. `queryEnvCellLocalBvhVisibilityByBvh` accepts `envCellId`, local BVH facts, and a
   bounds transform directly. The prepared-payload query now delegates to the same helper.
@@ -3729,9 +3740,9 @@ Decisions and course corrections:
 
 Cleanup targets discovered:
 
-- `prepared-bvh-metrics.ts` still carries "prepared" terminology even when the env-cell local BVHs
-  come from resident worker artifacts. Rename or split it once terrain/outdoor/static BVH inputs are
-  also artifact-native.
+- The higher-level visibility snapshot naming cleanup landed in Phase 4C3D3B4. The low-level
+  `prepared-bvh-visibility.ts` query module still carries prepared naming because it describes the
+  prepared BVH record/query format rather than ownership of all visibility inputs.
 - Env-cell local BVH fallback to prepared env-cell payloads remains transitional while artifact
   coverage can be absent. Phase 4E should delete that fallback with the rest of the main-thread
   env-cell hydration path.
@@ -3897,22 +3908,58 @@ Exit criteria:
 
 #### Phase 4C3D3B4: Remaining Spatial Naming Cleanup
 
-- Revisit `prepared-bvh-metrics.ts`, `render-spatial-scene.ts`,
+- Revisit `render-bvh-visibility-snapshot.ts`, `render-spatial-scene.ts`,
   `scene-renderable-readiness.ts`, and WebGL frame candidate assembly together. These still carry
   legacy structured-interior/spatial assumptions and should move to artifact-backed spatial facts as
   one coherent slice instead of scattering small fallback checks.
 - Decide whether picker/debug spatial items for structured interiors should be rebuilt from detailed
   artifacts or allowed to lose fidelity during hard cutover.
-- Remove or rename "prepared BVH" diagnostics once artifact-backed BVH facts are the only
-  render-critical static source.
+- Rename higher-level "prepared BVH" diagnostics that now mix prepared-payload and artifact-backed
+  BVH sources.
 - Delete or rename remaining static picker/debug helpers that still imply part-level staged static
   ownership once artifact object-level bounds are the supported diagnostic surface.
 
+Decisions and course corrections:
+
+- Implemented. The higher-level visibility snapshot module was renamed from `prepared-bvh-metrics.ts`
+  to `render-bvh-visibility-snapshot.ts`.
+- Implemented. The exported snapshot API is now `RenderBvhVisibilityMetrics`,
+  `RenderBvhVisibilitySnapshot`, `deriveRenderBvhVisibilityMetrics`, and
+  `deriveRenderBvhVisibilitySnapshot`.
+- Implemented. `world-render-frame.ts` now imports the neutral snapshot builder, and tests now
+  cover the renamed module plus the render-frame call contract.
+- Course correction: `prepared-bvh-visibility.ts`, `PreparedBvhVisibilityResult`, and
+  `RenderBvhItemKey` were not renamed in this slice. That module is the low-level prepared BVH
+  record/query format, while the renamed snapshot module is the higher-level renderer visibility
+  source that can mix artifact-backed and prepared-fallback facts.
+- Course correction: older `world-render-frame` tests now pass an explicit empty
+  `StaticLandblockRenderArtifactStoreSnapshot`, matching the current renderer contract instead of
+  restoring optional artifact arguments.
+
+Cleanup targets discovered:
+
+- `prepared-bvh-render-sources.ts` still carries prepared naming while it builds portal composite
+  source bounds for render/debug consumers. Phase 4D should either move that consumer fully onto
+  resident artifact bounds or rename the helper if a neutral bounds-source utility remains useful.
+- `scene-renderable-readiness.ts` still accounts over `StaticRenderableSceneModel` and
+  `StructuredInteriorSceneModel`. Phase 4E/5 should delete or shrink that accounting once staged
+  static/interior hydration is removed from the render-critical path.
+- The lower-level prepared env-cell payload fallback inside `render-bvh-visibility-snapshot.ts`
+  remains transitional. Hard cutover should delete it with the old main-thread env-cell hydration
+  route rather than improving it.
+
+Legacy shims introduced:
+
+- None. The old module/export names were removed instead of re-exported.
+
 Exit criteria:
 
-- Required render-critical spatial/culling facts come from resident detailed artifacts.
-- No render-critical portal/spatial consumer requires main-thread prepared env-cell geometry.
-- Remaining `StructuredInteriorSceneModel` usage is debug/diagnostic or transitional fallback only.
+- Implemented. The higher-level render visibility snapshot no longer carries misleading prepared
+  metrics names.
+- Implemented. No compatibility aliases or re-export shims were introduced for the renamed module.
+- Implemented. Required render-critical env-cell BVH facts prefer resident detailed artifacts.
+- Remaining `StructuredInteriorSceneModel` usage is debug/diagnostic or transitional fallback only
+  until the Phase 4D/4E hard cutover slices delete those routes.
 
 ### Phase 4D: Portal, Culling, and Spatial Consumer Migration
 

@@ -12,7 +12,8 @@ material artifact contract preparation is implemented. Phase 4C3C2 textured WebG
 split; Phase 4C3C2A material-slice WebGL resource/submit is implemented and Phase 4C3C2B sampler
 policy resource control is implemented. Phase 4C3C2C artifact texture mipmap/anisotropy policy is
 implemented. Phase 4C3D portal/spatial artifact resource handoff is split into smaller slices;
-Phase 4C3D1 artifact-native transition portal candidate handoff is implemented.
+Phase 4C3D1 artifact-native transition portal candidate handoff and Phase 4C3D2 portal mask
+artifact input handoff are implemented.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -270,6 +271,12 @@ Progress:
   coordinator uses artifact-native candidates when detailed artifacts are resident and only falls
   back to the legacy `AssetChannelState` plus `StructuredInteriorSceneModel` derivation while the
   detailed artifact is absent.
+- 2026-06-05: Implemented Phase 4C3D2. Portal mask draw-unit assembly moved out of
+  `staged-world-assembly.ts` into a transition-portal-specific resource input builder. WebGL
+  resource sync now appends portal mask draw units from the `TransitionPortalCandidateModel`, so
+  portal masks consume artifact-backed candidate aperture facts when detailed artifacts are
+  resident instead of being owned by the staged static/interior assembly path. The staged assembly
+  helper no longer accepts or scans transition portal candidates.
 
 Validation:
 
@@ -293,6 +300,9 @@ Validation:
 - `npm exec vitest -- run src/lib/world-display/transition-portal-work-items.test.ts`,
   `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run lint:rust` passed after
   Phase 4C3D1.
+- `npm exec vitest -- run src/lib/world-display/transition-portal-mask-draw-units.test.ts src/lib/world-display/transition-portal-work-items.test.ts src/lib/world-display/webgl2-world-resources.test.ts`,
+  `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
+  `git diff --check` passed after Phase 4C3D2.
 - `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts`
   passed after the first Phase 1D builder slice.
 - `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts`
@@ -3607,12 +3617,52 @@ Exit criteria:
 - Keep browser-mode portal traversal policy and mask pass ordering renderer-owned; only the static
   source facts move to artifacts.
 
+Decisions and course corrections:
+
+- Implemented. Portal mask draw-unit construction now lives in
+  `transition-portal-mask-draw-units.ts` instead of `staged-world-assembly.ts`.
+- Implemented. `syncWebgl2WorldResources` builds portal mask draw units directly from the
+  `TransitionPortalCandidateModel` and render chunk offsets, then appends them to the generic WebGL
+  draw-unit upload/reuse path.
+- Implemented. `buildStagedWorldSceneAssembly` no longer accepts `TransitionPortalCandidateModel`
+  and no longer performs portal readiness scans for masks it does not emit.
+- Course correction: this phase did not create a separate WebGL portal-mask resource store. The
+  source facts and ownership boundary moved out of staged assembly, while the existing generic
+  WebGL draw-unit upload path is retained for buffer/VAO reuse. A dedicated portal mask resource
+  store is optional cleanup only if the generic direct draw-unit path becomes a measurable source of
+  confusion or overhead.
+- Course correction: portal composites already consume visible portal mask draw units plus
+  `TransitionPortalCandidateModel`; no separate composite source-fact migration was needed beyond
+  ensuring those masks now come from the portal candidate/artifact path.
+
+Cleanup targets discovered:
+
+- `Webgl2WorldDrawUnit` now explicitly includes `portal-mask`, but compaction planning and runtime
+  diagnostics still share a broad retained draw-unit diagnostic surface. Phase 5 cleanup should
+  separate static/interior compaction diagnostics from portal-mask direct resources if this keeps
+  leaking static terminology into portal paths.
+- `transition-portal-mask-draw-units.ts` still returns the generic draw-unit assembly shape to reuse
+  the current WebGL upload path. If Phase 4D/5 creates dedicated portal resources, delete this
+  generic assembly adapter instead of preserving both routes.
+- Portal masks still depend on `TransitionPortalCandidateModel`. That is acceptable because Phase
+  4C3D1 made candidates artifact-native when detailed artifacts are resident, but Phase 4E must
+  delete the old main-thread candidate derivation fallback.
+
+Legacy shims introduced:
+
+- None. The phase moved portal mask ownership out of staged assembly and did not add a
+  compatibility mode. Reusing the existing WebGL draw-unit upload path is a resource implementation
+  detail, not a second portal source path.
+
 Exit criteria:
 
-- Portal mask/composite source facts come from resident detailed artifacts.
-- Portal traversal policy and pass scheduling remain renderer-owned.
-- `StructuredInteriorSceneModel` is no longer needed for render-critical portal mask/composite
-  source facts.
+- Implemented. Portal mask source facts come from `TransitionPortalCandidateModel`, which is
+  artifact-backed when resident detailed artifacts exist.
+- Implemented. Portal mask construction no longer lives in `staged-world-assembly.ts`.
+- Implemented. Portal traversal policy and pass scheduling remain renderer-owned.
+- Implemented. `StructuredInteriorSceneModel` is no longer needed for render-critical portal mask
+  source facts once artifact-backed candidates are resident.
+- Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
 
 #### Phase 4C3D3: Spatial and Culling Artifact Inputs
 
@@ -3620,6 +3670,10 @@ Exit criteria:
   resident detailed artifacts.
 - Keep browser debug overlays lower priority; they may continue to consume a reduced bridge or lose
   fidelity while render-critical portal/spatial consumers migrate.
+- Revisit `prepared-bvh-metrics.ts`, `render-spatial-scene.ts`,
+  `scene-renderable-readiness.ts`, and WebGL frame candidate assembly together. These still carry
+  legacy structured-interior/spatial assumptions and should move to artifact-backed spatial facts as
+  one coherent slice instead of scattering small fallback checks.
 
 Exit criteria:
 

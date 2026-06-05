@@ -631,14 +631,6 @@ export function createIndexedPalettedCompactedLandblockBatchPlans({
 					`Indexed-paletted family plan references missing draw unit ${drawUnitId}.`,
 				);
 			}
-			if (
-				drawUnit.kind !== "static" &&
-				drawUnit.kind !== "structured-interior"
-			) {
-				throw new Error(
-					`Indexed-paletted family plan references unsupported draw unit ${drawUnit.id} of kind ${drawUnit.kind}.`,
-				);
-			}
 			const group =
 				drawUnitIdsByLandblockId.get(drawUnit.owningLandblockId) ?? [];
 			group.push(drawUnit.id);
@@ -1022,14 +1014,6 @@ function createRgbaTexturePageCompactedLandblockBatchPlans({
 			if (!drawUnit) {
 				throw new Error(
 					`Compacted geometry plan references missing draw unit ${drawUnitId}.`,
-				);
-			}
-			if (
-				drawUnit.kind !== "static" &&
-				drawUnit.kind !== "structured-interior"
-			) {
-				throw new Error(
-					`Compacted geometry plan references unsupported draw unit ${drawUnit.id} of kind ${drawUnit.kind}.`,
 				);
 			}
 			const owningLandblockId = drawUnit.owningLandblockId;

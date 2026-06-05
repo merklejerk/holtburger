@@ -50,6 +50,7 @@ import {
 	TERRAIN_SPATIAL_OWNER_KEY,
 	deriveDebugOverlaySpatialItems,
 	deriveStaticRenderableSpatialItems,
+	deriveStaticRenderableSpatialItemsFromLandblockArtifacts,
 	deriveStructuredInteriorSpatialItems,
 	deriveStructuredInteriorSpatialItemsFromLandblockArtifacts,
 	deriveTerrainSpatialItems,
@@ -429,10 +430,13 @@ export class BrowserRenderResourceCoordinator {
 		);
 		this.renderSpatialIndex.replaceOwnerItems(
 			STATIC_RENDERABLE_SPATIAL_OWNER_KEY,
-			deriveStaticRenderableSpatialItems(
-				input.assetState,
-				staticRenderableScene,
-			),
+			deriveStaticRenderableSpatialItemsFromLandblockArtifacts(
+				input.staticLandblockRenderArtifacts,
+			) ??
+				deriveStaticRenderableSpatialItems(
+					input.assetState,
+					staticRenderableScene,
+				),
 		);
 		this.renderSpatialIndex.replaceOwnerItems(
 			DEBUG_OVERLAY_SPATIAL_OWNER_KEY,

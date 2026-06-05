@@ -17,6 +17,7 @@ import {
 	type StaticBundleMaterialRecord,
 	type StaticBundleObjectRecord,
 	type StaticBundleRenderChunk,
+	type StaticBundleSpatialHint,
 	type StaticLandblockBundleLayerDiagnostics,
 	type StaticObjectBundleArtifact,
 	type VirtualTexturePageRef,
@@ -58,6 +59,7 @@ interface StaticBundleSourceObject {
 	owningLandblockId: number;
 	owningEnvCellId: number | null;
 	kind: StaticBundleObjectRecord["kind"];
+	bounds: StaticBundleSpatialHint["bounds"] | null;
 	partAssetIds: readonly string[];
 	materialAssetIds: readonly string[];
 }
@@ -147,6 +149,7 @@ export function buildStaticObjectBundleArtifact({
 			kind: object.kind,
 		}),
 	);
+	const spatialHints = buildSpatialHints(sourceObjects);
 	const diagnostics = buildDiagnostics({
 		sourceObjectCount: sourceObjects.length,
 		surfaces,
@@ -168,6 +171,7 @@ export function buildStaticObjectBundleArtifact({
 		texturePageRefs,
 		texturePages,
 		objectRecords,
+		spatialHints,
 		diagnostics,
 	};
 }
@@ -249,6 +253,7 @@ function collectStaticBundleSourceObjects(
 							: member.kind === "generated-scenery"
 								? "generated-scenery"
 								: "scenery",
+					bounds: member.instanceBounds,
 					partAssetIds: collectRenderablePartAssetIds(
 						member.sourceAssetId,
 						preparedByAssetId,
@@ -279,6 +284,7 @@ function collectStaticBundleSourceObjects(
 			owningLandblockId: normalizeOutdoorLandblockId(job.scope.landblockId),
 			owningEnvCellId: envCellScope.envCellId,
 			kind: "indoor-static",
+			bounds: member.instanceBounds,
 			partAssetIds: collectRenderablePartAssetIds(
 				member.sourceAssetId,
 				preparedByAssetId,
@@ -289,6 +295,23 @@ function collectStaticBundleSourceObjects(
 			),
 		}),
 	);
+}
+
+function buildSpatialHints(
+	sourceObjects: readonly StaticBundleSourceObject[],
+): StaticBundleSpatialHint[] {
+	return sourceObjects
+		.filter(
+			(object): object is StaticBundleSourceObject & {
+				bounds: NonNullable<StaticBundleSourceObject["bounds"]>;
+			} => object.bounds !== null,
+		)
+		.map((object) => ({
+			key: object.objectKey,
+			visibilityKeys: [object.visibilityKey],
+			bounds: object.bounds,
+		}))
+		.sort((left, right) => left.key.localeCompare(right.key));
 }
 
 function buildObjectSurfaces(

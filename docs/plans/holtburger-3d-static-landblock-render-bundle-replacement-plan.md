@@ -15,7 +15,8 @@ implemented. Phase 4C3D portal/spatial artifact resource handoff is split into s
 Phase 4C3D1 artifact-native transition portal candidate handoff and Phase 4C3D2 portal mask
 artifact input handoff are implemented. Phase 4C3D3 spatial/culling artifact input handoff is
 split further; Phase 4C3D3A artifact-backed env-cell local BVH culling and Phase 4C3D3B1
-artifact-backed structured spatial index items are implemented.
+artifact-backed structured spatial index items are implemented. Phase 4C3D3B2 static bundle
+spatial hints and artifact-backed static spatial index items are implemented.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -288,6 +289,11 @@ Progress:
   structured-cell spatial items derived from resident `detailed-landblock` artifacts. This moves
   structured-interior picker/debug spatial ownership off the bridge-derived scene when detailed
   artifacts are resident while intentionally preserving only coarse cell-level fidelity.
+- 2026-06-05: Implemented Phase 4C3D3B2. Static object bundle artifacts now carry coarse
+  object-level `spatialHints` from prepared instance bounds when the worker builder has them, and
+  the browser render spatial index prefers those artifact hints over main-thread static renderable
+  part spatial items. This keeps static picking/debug spatial coverage object-level and artifact
+  owned instead of part-level and staged-geometry owned.
 
 Validation:
 
@@ -320,6 +326,9 @@ Validation:
 - `npm exec vitest -- run src/lib/world-display/render-spatial-scene.test.ts src/lib/world-display/prepared-bvh-metrics.test.ts`,
   `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
   `git diff --check` passed after Phase 4C3D3B1.
+- `npm exec vitest -- run src/lib/world-display/render-spatial-scene.test.ts src/lib/world-display/static-bundle-layer-builder.test.ts`,
+  `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
+  `git diff --check` passed after Phase 4C3D3B2.
 - `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts`
   passed after the first Phase 1D builder slice.
 - `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts`
@@ -3788,7 +3797,56 @@ Exit criteria:
   fallback when no detailed artifacts are resident.
 - Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
 
-#### Phase 4C3D3B2: Remaining Spatial Diagnostic Cleanup
+#### Phase 4C3D3B2: Static Bundle Spatial Hints and Static Spatial Index Items
+
+- Emit coarse object-level spatial hints from static object bundle artifacts when prepared instance
+  bounds exist.
+- Prefer artifact-derived static spatial index items over bridge-derived static renderable part
+  spatial items when resident artifact hints exist.
+- Keep static picker/debug fidelity object-level. Do not preserve part-level picking by keeping
+  staged static geometry hydrated.
+
+Decisions and course corrections:
+
+- Implemented. `buildStaticObjectBundleArtifact` now emits sorted `spatialHints` for source objects
+  with prepared instance bounds. The hints carry object keys, visibility keys, and coarse bounds.
+- Implemented. `deriveStaticRenderableSpatialItemsFromLandblockArtifacts` maps static bundle
+  spatial hints into coarse static render spatial items and fills legacy static metadata with
+  explicit artifact/coarse placeholders where part-level facts no longer exist.
+- Implemented. `BrowserRenderResourceCoordinator` prefers artifact-derived static spatial items and
+  falls back to bridge-derived part spatial items only when no resident static bundle hints exist.
+- Course correction: static picker/debug coverage is intentionally object-level. The architecture
+  should not keep `StaticRenderableSceneModel.parts`, prepared gfx object bounds, or staged part
+  transforms alive solely for higher-fidelity diagnostics.
+
+Cleanup targets discovered:
+
+- `deriveStaticRenderableSpatialItems` and `buildStaticRenderablePartMatrix` remain as fallback
+  dependencies for absent static bundle hints. Phase 4E/5 should delete them with staged static
+  geometry unless a non-static consumer still proves it needs them.
+- Selected static renderable bounds overlay in `webgl2-world-display-renderer-impl.ts` still reads
+  `staticRenderableScene.parts` and prepared gfx object bounds. It is debug-oriented and should be
+  dropped or rebuilt from artifact object hints before hard cutover.
+- Static bundle `spatialHints` are absent when prepared instance bounds are absent. That is
+  acceptable for low-priority picker/debug coverage; do not introduce main-thread fallback work just
+  to backfill those bounds.
+
+Legacy shims introduced:
+
+- None. The artifact path is preferred and object-level. The old part-level static spatial path
+  remains only as the existing absence fallback until hard cutover.
+
+Exit criteria:
+
+- Implemented. Static object bundle artifacts carry coarse object-level spatial hints when source
+  instance bounds are available.
+- Implemented. Browser static spatial index items come from resident static object bundle hints when
+  available.
+- Implemented. Focused tests cover builder-emitted spatial hints, artifact-derived static spatial
+  item shape, and explicit null fallback when resident bundle artifacts do not contain hints.
+- Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
+
+#### Phase 4C3D3B3: Remaining Spatial Naming and Debug Overlay Cleanup
 
 - Revisit `prepared-bvh-metrics.ts`, `render-spatial-scene.ts`,
   `scene-renderable-readiness.ts`, and WebGL frame candidate assembly together. These still carry
@@ -3801,6 +3859,8 @@ Exit criteria:
 - Decide whether static renderable picker diagnostics survive hard cutover. If they do, derive
   coarse object-level bounds from resident static bundle artifacts; if not, delete
   `deriveStaticRenderableSpatialItems` with the staged static path.
+- Remove selected static bounds overlay dependency on prepared gfx object bounds or explicitly
+  downgrade it to artifact object-level bounds.
 
 Exit criteria:
 

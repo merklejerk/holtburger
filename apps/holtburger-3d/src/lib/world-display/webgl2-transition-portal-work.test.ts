@@ -130,23 +130,15 @@ describe("planWebgl2TransitionPortalWork", () => {
 });
 
 describe("deriveWebgl2BaseSceneDomain", () => {
-	it("selects interior only for dungeon contexts with loaded interior cells", () => {
+	it("selects the initial fallback scene from the render scene context", () => {
 		expect(
 			deriveWebgl2BaseSceneDomain({
 				renderSceneContext: { kind: "dungeon", anchorLandblockId: null },
-				structuredInteriorScene: createStructuredInteriorScene(0x01020100),
 			}),
 		).toBe("interior");
 		expect(
 			deriveWebgl2BaseSceneDomain({
-				renderSceneContext: { kind: "dungeon", anchorLandblockId: null },
-				structuredInteriorScene: createStructuredInteriorScene(null),
-			}),
-		).toBe("exterior");
-		expect(
-			deriveWebgl2BaseSceneDomain({
 				renderSceneContext: { kind: "outdoor", anchorLandblockId: null },
-				structuredInteriorScene: createStructuredInteriorScene(0x01020100),
 			}),
 		).toBe("exterior");
 	});
@@ -311,26 +303,6 @@ function createEmptyBuffer() {
 
 function createIdentityMat4(): Float32Array {
 	return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
-}
-
-function createStructuredInteriorScene(focusEnvCellId: number | null) {
-	return {
-		focusEnvCellId,
-		activeEnvCellIds: focusEnvCellId === null ? [] : [focusEnvCellId],
-		cells:
-			focusEnvCellId === null
-				? []
-				: [
-						{
-							envCellId: focusEnvCellId,
-						},
-					],
-		missingEnvCellAssetIds: [],
-		missingInteriorGeometryAssetIds: [],
-		missingCellStructureKeys: [],
-		statusText: "",
-		cacheText: "",
-	} as unknown as Parameters<typeof deriveWebgl2BaseSceneDomain>[0]["structuredInteriorScene"];
 }
 
 function createCandidateDiagnostics(workItemCandidateCount: number) {

@@ -16,7 +16,6 @@ import {
 } from "./transition-portal-work-items";
 import type { WorldRenderSceneContext } from "./render-scene-context";
 import type { CameraViewResidencyContext } from "./world-residency-index";
-import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
 
 type ClipPlane = "left" | "right" | "bottom" | "top" | "near" | "far";
@@ -54,12 +53,8 @@ export interface Webgl2TransitionPortalWorkPlan
 
 export function deriveWebgl2BaseSceneDomain(options: {
 	renderSceneContext: WorldRenderSceneContext;
-	structuredInteriorScene: StructuredInteriorSceneModel;
 }): TransitionPortalScene {
-	return options.renderSceneContext.kind === "dungeon" &&
-		options.structuredInteriorScene.cells.length > 0
-		? "interior"
-		: "exterior";
+	return options.renderSceneContext.kind === "dungeon" ? "interior" : "exterior";
 }
 
 export function deriveWebgl2BaseSceneDomainFromResidency(

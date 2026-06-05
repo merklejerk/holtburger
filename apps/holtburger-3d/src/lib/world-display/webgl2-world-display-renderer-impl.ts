@@ -825,7 +825,6 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	let latestBaseSceneDomain: TransitionPortalScene =
 		deriveWebgl2BaseSceneDomain({
 			renderSceneContext,
-			structuredInteriorScene,
 		});
 	let latestPortalWorkPlan: Webgl2TransitionPortalWorkPlan | null = null;
 	let latestSceneBounds: SceneBoundsFrame | null = null;

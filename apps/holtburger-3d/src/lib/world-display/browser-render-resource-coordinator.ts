@@ -63,6 +63,7 @@ import {
 } from "./static-renderables";
 import {
 	deriveStructuredInteriorSceneModel,
+	deriveStructuredInteriorSceneModelFromLandblockArtifacts,
 	type StructuredInteriorSceneModel,
 } from "./structured-interior-scene";
 import {
@@ -330,16 +331,24 @@ export class BrowserRenderResourceCoordinator {
 			baseStaticRenderableScene,
 			appearancePreviewScene,
 		);
-		const structuredInteriorScene = deriveStructuredInteriorSceneModel(
-			input.assetState,
-			input.browserDestination,
-			outdoorFocusLandblockId === null
-				? null
-				: {
-						envCellIds: linkedOutdoorEnvCellIds,
-					},
-			structuredInteriorCoverage,
-		);
+		const artifactStructuredInteriorScene =
+			deriveStructuredInteriorSceneModelFromLandblockArtifacts(
+				input.staticLandblockRenderArtifacts,
+				input.browserDestination,
+				structuredInteriorCoverage,
+			);
+		const structuredInteriorScene =
+			artifactStructuredInteriorScene ??
+			deriveStructuredInteriorSceneModel(
+				input.assetState,
+				input.browserDestination,
+				outdoorFocusLandblockId === null
+					? null
+					: {
+							envCellIds: linkedOutdoorEnvCellIds,
+						},
+				structuredInteriorCoverage,
+			);
 		const selectedDiagnosticPortalId =
 			input.diagnosticSelection?.kind === "portal"
 				? input.diagnosticSelection.portalId

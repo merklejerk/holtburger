@@ -27,6 +27,7 @@ implemented. Phase 4E1 latent portal-clipped BVH debt removal and Phase 4E2 scop
 static suppression are implemented. Phase 4E3 artifact-active outdoor static scene derivation
 cutover is implemented. Phase 4E4 indoor/dungeon env-cell product scheduling is implemented.
 Phase 4E5 artifact-active structured-interior fallback cutover is implemented.
+Phase 4E6 artifact-active structured coverage cutover is implemented.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -369,6 +370,10 @@ Progress:
 - 2026-06-05: Added and implemented Phase 4E5 before the broad hard cutover. Artifact-active
   coordinator updates now stop falling back to prepared env-cell structured-interior scene derivation
   while detailed landblock artifacts are desired, in flight, or resident.
+- 2026-06-05: Added and implemented Phase 4E6 before the broad hard cutover. Artifact-active
+  coordinator updates now avoid prepared topology/env-cell closure expansion for structured-interior
+  coverage; resident detailed artifacts provide selected env-cell coverage, and in-flight indoor
+  products use the focused env cell only until artifacts arrive.
 
 Validation:
 
@@ -443,6 +448,9 @@ Validation:
 - `npm exec vitest -- run src/lib/world-display/browser-render-resource-coordinator.test.ts src/lib/world-display/structured-interior-scene.test.ts src/lib/world-display/static-landblock-render-artifact-coordinator.test.ts src/lib/assets/landblock-render-product-planner.test.ts`,
   `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
   `git diff --check` passed after Phase 4E5.
+- `npm exec vitest -- run src/lib/world-display/browser-render-resource-coordinator.test.ts src/lib/world-display/structured-interior-scene.test.ts src/lib/world-display/static-landblock-render-artifact-coordinator.test.ts src/lib/assets/landblock-render-product-planner.test.ts`,
+  `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
+  `git diff --check` passed after Phase 4E6.
 - `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts`
   passed after the first Phase 1D builder slice.
 - `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts`
@@ -4657,14 +4665,68 @@ Exit criteria:
 - Implemented. Focused coordinator and structured-interior tests cover the cutover boundary.
 - Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
 
+#### Phase 4E6: Artifact-Active Structured Coverage Cutover
+
+Added as an immediate hard-cutover phase after Phase 4E5. Structured-interior scene fallback was cut
+off while artifacts were active, but the coordinator still computed linked outdoor env cells and
+structured-interior coverage by reading topology/env-cell facts from
+`AssetChannelState.preparedByAssetId` before reaching the artifact gate.
+
+- Move static landblock artifact ownership detection before linked env-cell and structured coverage
+  calculation.
+- Do not call `deriveTopologyEnvCellIdsForLandblocks` while static landblock artifacts are active.
+- For artifact-active indoor destinations, derive structured coverage from resident detailed
+  artifact `selectedEnvCellIds` for the focused landblock when available, otherwise use the focused
+  env cell while the worker product is pending.
+- For artifact-active outdoor destinations, let resident detailed artifacts define their own
+  structured coverage instead of expanding prepared topology closures on the main thread.
+
+Decisions and course corrections:
+
+- Implemented. `BrowserRenderResourceCoordinator.update` now computes
+  `useStaticLandblockArtifacts` before linked env-cell discovery and routes artifact-active frames
+  away from prepared topology/env-cell coverage expansion.
+- Implemented. `deriveArtifactStructuredInteriorCoverageForInput` uses only browser destination data
+  and resident detailed artifact selected env-cell IDs.
+- Implemented. Focused indoor artifact coverage now includes all resident selected env cells for the
+  focused landblock without requiring prepared topology records.
+- Course correction: in-flight indoor products intentionally expose only the focused env cell as
+  coverage until resident detailed artifacts arrive. This avoids reintroducing main-thread topology
+  closure loading just to predict the worker output.
+
+Cleanup targets discovered:
+
+- The legacy `deriveStructuredInteriorCoverageForInput` helper remains only for non-artifact-active
+  transition states. Once remaining prepared static/interior producers are deleted, remove it with
+  the prepared structured scene path.
+- `deriveTopologyEnvCellIdsForLandblocks` is no longer used by the artifact-active coordinator path,
+  but other legacy planners still import it. Delete or quarantine those callers as staged static
+  planning is removed.
+- Snapshot/debug copy still reports `linkedOutdoorEnvCellIds` and coverage using old wording. It is
+  now empty/null in artifact-active outdoor frames unless resident structured artifacts produce cells;
+  future diagnostics should report artifact selected env-cell counts instead.
+
+Legacy shims introduced:
+
+- None. This phase removes prepared topology coverage from artifact-active frames and keeps the
+  existing legacy helper only for non-artifact-active transition states.
+
+Exit criteria:
+
+- Implemented. Artifact-active coordinator updates do not call prepared topology linked-env-cell
+  discovery.
+- Implemented. Resident detailed artifact selected env-cell IDs can define focused indoor structured
+  coverage with an empty prepared asset cache.
+- Implemented. Focused coordinator and structured-interior tests cover the cutover boundary.
+- Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
+
 ### Phase 4E: Hard Cutover From Main-Thread Static Hydration
 
 - Stop using `scene-asset-request-planner.ts` and `AssetChannelState.preparedByAssetId` as the
   source of topology/env-cell/static/interior renderable hydration for migrated topology/env-cell
   products.
-- Move structured-interior coverage calculation away from `AssetChannelState.preparedByAssetId` so
-  topology/env-cell closure accounting follows destination/product interest and resident artifact
-  facts instead of prepared asset cache contents.
+- Delete or isolate the remaining non-artifact-active prepared static/structured scene producers once
+  the artifact path is mandatory for browser landblock rendering.
 - Remove outdoor static objects, env-cell statics, and structured interior geometry from
   `StaticRenderableSceneModel`, `StructuredInteriorSceneModel`, staged draw-unit assembly, static
   compaction planning, direct suppression, and visible submit.

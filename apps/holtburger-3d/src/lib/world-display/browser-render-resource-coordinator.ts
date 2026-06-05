@@ -7,7 +7,10 @@ import {
 	deriveTopologyEnvCellIdsForLandblocks,
 	deriveTerrainFocusLandblockId,
 } from "../assets/scene-asset-request-planner";
-import { deriveStructuredInteriorCoverage } from "../assets/structured-interior-coverage";
+import {
+	deriveStructuredInteriorCoverage,
+	type StructuredInteriorCoverage,
+} from "../assets/structured-interior-coverage";
 import {
 	createInitialAssetChannelState,
 	type AssetChannelState,
@@ -19,7 +22,10 @@ import {
 	deriveBrowserWorldDisplayModel,
 	type BrowserWorldDisplayModel,
 } from "./model";
-import { getStaticObjectBundleArtifacts } from "./landblock-render-product";
+import {
+	getDetailedLandblockRenderArtifacts,
+	getStaticObjectBundleArtifacts,
+} from "./landblock-render-product";
 import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
 import {
 	deriveWorldDebugOverlayModel,
@@ -290,8 +296,12 @@ export class BrowserRenderResourceCoordinator {
 					input.terrainLodRadius,
 					outdoorSceneInterest?.terrainLandblockIds ?? null,
 				);
+		const useStaticLandblockArtifacts = shouldUseStaticLandblockArtifacts({
+			browserDestination: input.browserDestination,
+			snapshot: input.staticLandblockRenderArtifacts,
+		});
 		const linkedOutdoorEnvCellIds =
-			outdoorSceneInterest === null
+			useStaticLandblockArtifacts || outdoorSceneInterest === null
 				? []
 				: [
 						...deriveTopologyEnvCellIdsForLandblocks(
@@ -299,14 +309,15 @@ export class BrowserRenderResourceCoordinator {
 							new Set(outdoorSceneInterest.envCellLandblockIds),
 						),
 					].sort((left, right) => left - right);
-		const structuredInteriorCoverage = deriveStructuredInteriorCoverageForInput(
-			input,
-			linkedOutdoorEnvCellIds,
-		);
-		const useStaticLandblockArtifacts = shouldUseStaticLandblockArtifacts({
-			browserDestination: input.browserDestination,
-			snapshot: input.staticLandblockRenderArtifacts,
-		});
+		const structuredInteriorCoverage = useStaticLandblockArtifacts
+			? deriveArtifactStructuredInteriorCoverageForInput(
+					input.staticLandblockRenderArtifacts,
+					input.browserDestination,
+				)
+			: deriveStructuredInteriorCoverageForInput(
+					input,
+					linkedOutdoorEnvCellIds,
+				);
 		const baseStaticRenderableScene = useStaticLandblockArtifacts
 			? createEmptyStaticRenderableSceneModel()
 			: deriveStaticRenderableSceneModel(
@@ -801,6 +812,10 @@ function uniqueSortedStrings(values: readonly string[]): string[] {
 	return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 
+function uniqueSortedNumbers(values: readonly number[]): number[] {
+	return [...new Set(values)].sort((left, right) => left - right);
+}
+
 function describeTerrainSceneSignature(scene: TerrainSceneModel): string {
 	return [
 		`focus=${scene.focusLandblockId ?? "none"}`,
@@ -935,7 +950,7 @@ function formatVectorSignature(vector: {
 function deriveStructuredInteriorCoverageForInput(
 	input: BrowserRenderResourceCoordinatorInput,
 	linkedOutdoorEnvCellIds: readonly number[],
-) {
+): StructuredInteriorCoverage | null {
 	const browserFocusEnvCellId = browserDestinationToInteriorCellId(
 		input.browserDestination,
 	);
@@ -960,6 +975,38 @@ function deriveStructuredInteriorCoverageForInput(
 	}
 
 	return null;
+}
+
+function deriveArtifactStructuredInteriorCoverageForInput(
+	artifacts: StaticLandblockRenderArtifactStoreSnapshot,
+	browserDestination: BrowserLocationSelection | null,
+): StructuredInteriorCoverage | null {
+	const browserFocusEnvCellId =
+		browserDestinationToInteriorCellId(browserDestination);
+	if (browserFocusEnvCellId === null) {
+		return null;
+	}
+
+	const focusLandblockPrefix = browserFocusEnvCellId & 0xffff0000;
+	const residentEnvCellIds = uniqueSortedNumbers(
+		artifacts.artifacts
+			.map(getDetailedLandblockRenderArtifacts)
+			.filter((artifact): artifact is NonNullable<typeof artifact> =>
+				Boolean(artifact),
+			)
+			.flatMap((artifact) => artifact.selectedEnvCellIds)
+			.filter(
+				(envCellId) => (envCellId & 0xffff0000) === focusLandblockPrefix,
+			),
+	);
+
+	return {
+		envCellIds:
+			residentEnvCellIds.length > 0
+				? residentEnvCellIds
+				: [browserFocusEnvCellId],
+		truncated: false,
+	};
 }
 
 function collectActiveRenderChunkPlacements(

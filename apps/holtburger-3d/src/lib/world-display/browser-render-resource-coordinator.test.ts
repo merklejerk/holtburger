@@ -19,6 +19,7 @@ import {
 	type BrowserRenderResourceCoordinatorInput,
 	type BrowserRenderResourceSurface,
 } from "./browser-render-resource-coordinator";
+import type { LandblockRenderProductWorkerResult } from "./landblock-render-product";
 import { createEmptyStaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
 import type { StaticRenderableSceneModel } from "./static-renderables";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
@@ -144,6 +145,34 @@ describe("browser render resource coordinator", () => {
 
 		expect(surface.structuredInteriorScenes.at(-1)?.cells).toHaveLength(0);
 	});
+
+	it("uses resident detailed artifact coverage without prepared topology expansion", () => {
+		const firstEnvCellId = 0x02030100;
+		const secondEnvCellId = 0x02030101;
+		const landblockId = 0x0203ffff;
+		const surface = createCapturingSurface();
+		const coordinator = new BrowserRenderResourceCoordinator();
+		coordinator.setSurface(surface);
+
+		coordinator.update(
+			createCoordinatorInput({
+				assetState: createAssetState([]),
+				browserDestination: createInteriorDestination(firstEnvCellId),
+				staticLandblockRenderArtifacts: createArtifactSnapshot([
+					createDetailedProductResult(landblockId, [
+						firstEnvCellId,
+						secondEnvCellId,
+					]),
+				]),
+			}),
+		);
+
+		expect(
+			surface.structuredInteriorScenes
+				.at(-1)
+				?.cells.map((cell) => cell.envCellId),
+		).toEqual([firstEnvCellId, secondEnvCellId]);
+	});
 });
 
 const PROVENANCE: PreparedAssetProvenance = {
@@ -220,6 +249,18 @@ function createAssetState(records: PreparedAssetRecord[]): AssetChannelState {
 		records.map((record) => [record.request.assetId, record]),
 	);
 	return state;
+}
+
+function createArtifactSnapshot(
+	artifacts: readonly LandblockRenderProductWorkerResult[],
+) {
+	return {
+		...createEmptyStaticLandblockRenderArtifactStoreSnapshot(),
+		artifacts,
+		desiredCount: artifacts.length,
+		residentCount: artifacts.length,
+		committedResultCount: artifacts.length,
+	};
 }
 
 function createOutdoorDestination(
@@ -394,6 +435,73 @@ function createEnvCellRecord(options: {
 				nodes: [],
 				items: [],
 			},
+		},
+	};
+}
+
+function createDetailedProductResult(
+	landblockId: number,
+	envCellIds: readonly number[],
+): LandblockRenderProductWorkerResult {
+	return {
+		type: "landblock-render-product-built",
+		jobId: `job:${landblockId}:dungeon-env-cells`,
+		landblockId,
+		product: "dungeon-env-cells",
+		requestId: "request:test",
+		buildPolicyRevision: "build:test",
+		texturePagePolicyRevision: "texture:test",
+		artifacts: [
+			{
+				artifactKind: "detailed-landblock",
+				key: `detailed:${landblockId}:dungeon-env-cells`,
+				landblockId,
+				product: "dungeon-env-cells",
+				requestId: "request:test",
+				buildPolicyRevision: "build:test",
+				texturePagePolicyRevision: "texture:test",
+				selectedEnvCellIds: [...envCellIds],
+				structuredInteriorMaterialRecords: [],
+				structuredInteriorTexturePageRefs: [],
+				structuredInteriorTexturePages: [],
+				structuredInteriorCells: envCellIds.map((envCellId) => ({
+					key: `structured-interior-cell:${envCellId}`,
+					envCellId,
+					landblockId,
+					regionNumber: 0,
+					environmentId: 0x0d000001,
+					cellStructureId: 0x0001,
+					renderChunk: {
+						chunkKey: `structured-cell:${envCellId}`,
+						chunkLandblockId: landblockId,
+						chunkLocalOffset: { x: 0, y: 0, z: 0 },
+					},
+					localPlacement: createPlacement({ x: 0, y: 0, z: 0 }),
+					surfaceIds: [],
+					materialSlices: [],
+					portals: [],
+					portalApertureKeys: [],
+					staticObjectCount: 0,
+					cellBsp: null,
+					renderGeometry: createEmptyRenderGeometry(),
+				})),
+				cellStructureMetadata: [],
+				portalLinks: [],
+				portalApertures: [],
+				visibility: {
+					objectVisibilityRecords: [],
+					cellVisibilityRecords: [],
+				},
+				spatial: {
+					localBvhByEnvCellId: [],
+					staticSpatialItems: [],
+					structuredInteriorSpatialItems: [],
+				},
+			},
+		],
+		diagnostics: {
+			status: "ready",
+			messages: [],
 		},
 	};
 }

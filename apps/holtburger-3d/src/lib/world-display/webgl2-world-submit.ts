@@ -561,6 +561,8 @@ export function submitWebgl2WorldDrawUnits({
 		gl,
 		stateCache,
 		texturedProgram,
+		indexedP8Program,
+		indexedP16Program,
 		viewProjectionMatrix,
 		staticBundleLayerResources,
 		metrics,
@@ -608,6 +610,8 @@ function submitWebgl2StaticBundleLayers({
 	gl,
 	stateCache,
 	texturedProgram,
+	indexedP8Program,
+	indexedP16Program,
 	viewProjectionMatrix,
 	staticBundleLayerResources,
 	metrics,
@@ -615,6 +619,8 @@ function submitWebgl2StaticBundleLayers({
 	gl: WebGL2RenderingContext;
 	stateCache: Webgl2StateCache;
 	texturedProgram: Webgl2TexturedWorldProgram;
+	indexedP8Program: Webgl2IndexedP8WorldProgram;
+	indexedP16Program: Webgl2IndexedP16WorldProgram;
 	viewProjectionMatrix: RenderMat4;
 	staticBundleLayerResources: Webgl2StaticBundleLayerResourceStore | null;
 	metrics: Webgl2WorldSubmitMetrics;
@@ -651,6 +657,8 @@ function submitWebgl2StaticBundleLayers({
 						gl,
 						stateCache,
 						texturedProgram,
+						indexedP8Program,
+						indexedP16Program,
 						viewProjectionMatrix,
 						identityMatrix,
 						layer,
@@ -673,6 +681,8 @@ function submitWebgl2StaticBundleGeometry({
 	gl,
 	stateCache,
 	texturedProgram,
+	indexedP8Program,
+	indexedP16Program,
 	viewProjectionMatrix,
 	identityMatrix,
 	layer,
@@ -683,6 +693,8 @@ function submitWebgl2StaticBundleGeometry({
 	gl: WebGL2RenderingContext;
 	stateCache: Webgl2StateCache;
 	texturedProgram: Webgl2TexturedWorldProgram;
+	indexedP8Program: Webgl2IndexedP8WorldProgram;
+	indexedP16Program: Webgl2IndexedP16WorldProgram;
 	viewProjectionMatrix: RenderMat4;
 	identityMatrix: RenderMat4;
 	layer: Webgl2StaticBundleLayerResource;
@@ -690,6 +702,20 @@ function submitWebgl2StaticBundleGeometry({
 	material: Webgl2StaticBundleMaterialResource;
 	metrics: Webgl2WorldSubmitMetrics;
 }): boolean {
+	if (material.familyKey === "indexed-paletted") {
+		return submitWebgl2IndexedStaticBundleGeometry({
+			gl,
+			stateCache,
+			indexedP8Program,
+			indexedP16Program,
+			viewProjectionMatrix,
+			identityMatrix,
+			layer,
+			geometry,
+			material,
+			metrics,
+		});
+	}
 	if (material.familyKey !== "rgba-texture-page") {
 		metrics.staticBundleSkippedGeometryCount += 1;
 		metrics.staticBundleSubmitFallbackSamples =
@@ -768,6 +794,128 @@ function submitWebgl2StaticBundleGeometry({
 	gl.uniform1f(texturedProgram.uniforms.uDetailTiling, 1);
 	gl.uniform1i(texturedProgram.uniforms.uDetailEnabled, detail ? 1 : 0);
 	metrics.uniformUploadCount += 9;
+	gl.drawElements(gl.TRIANGLES, geometry.indexCount, geometry.indexType, 0);
+	metrics.drawCallCount += 1;
+	metrics.triangleCount += geometry.triangleCount;
+	metrics.staticBundleDrawCallCount += 1;
+	metrics.staticBundleGeometrySubmittedCount += 1;
+	metrics.staticBundleTriangleCount += geometry.triangleCount;
+	return true;
+}
+
+function submitWebgl2IndexedStaticBundleGeometry({
+	gl,
+	stateCache,
+	indexedP8Program,
+	indexedP16Program,
+	viewProjectionMatrix,
+	identityMatrix,
+	layer,
+	geometry,
+	material,
+	metrics,
+}: {
+	gl: WebGL2RenderingContext;
+	stateCache: Webgl2StateCache;
+	indexedP8Program: Webgl2IndexedP8WorldProgram;
+	indexedP16Program: Webgl2IndexedP16WorldProgram;
+	viewProjectionMatrix: RenderMat4;
+	identityMatrix: RenderMat4;
+	layer: Webgl2StaticBundleLayerResource;
+	geometry: Webgl2StaticBundleGeometryResource;
+	material: Webgl2StaticBundleMaterialResource;
+	metrics: Webgl2WorldSubmitMetrics;
+}): boolean {
+	const descriptor = material.indexedMaterial;
+	const index = resolveStaticBundleTextureBinding(material, "indexed-texels");
+	const palette = resolveStaticBundleTextureBinding(material, "palette-lookup");
+	if (!descriptor || !index || !palette) {
+		metrics.staticBundleSkippedGeometryCount += 1;
+		metrics.staticBundleSubmitFallbackSamples =
+			appendStaticBundleSubmitFallbackSamples(
+				metrics.staticBundleSubmitFallbackSamples,
+				[
+					`static bundle ${layer.layerKey} material ${material.key} has incomplete indexed material bindings`,
+				],
+			);
+		return false;
+	}
+	if (index.indexedFormat !== descriptor.indexFormat) {
+		metrics.staticBundleSkippedGeometryCount += 1;
+		metrics.staticBundleSubmitFallbackSamples =
+			appendStaticBundleSubmitFallbackSamples(
+				metrics.staticBundleSubmitFallbackSamples,
+				[
+					`static bundle ${layer.layerKey} material ${material.key} indexed format ${index.indexedFormat ?? "missing"} does not match descriptor ${descriptor.indexFormat}`,
+				],
+			);
+		return false;
+	}
+	const detail = resolveStaticBundleTextureBinding(material, "detail");
+	const program =
+		descriptor.indexFormat === "p8" ? indexedP8Program : indexedP16Program;
+	if (stateCache.useProgram(program.program)) {
+		metrics.programSwitchCount += 1;
+		metrics.stateChangeCount += 1;
+		gl.uniform1i(program.uniforms.uIndexTexture, 0);
+		gl.uniform1i(program.uniforms.uPaletteTexture, 1);
+		gl.uniform1i(program.uniforms.uDetailTexture, 2);
+		metrics.uniformUploadCount += 3;
+	}
+	metrics.stateChangeCount += stateCache.setDepthState({
+		enabled: true,
+		write: !material.isTransparent,
+		func: gl.LEQUAL,
+	});
+	metrics.stateChangeCount += stateCache.setCullState({
+		enabled: false,
+		mode: gl.BACK,
+	});
+	if (stateCache.bindTexture2D(0, index.texture.texture)) {
+		metrics.stateChangeCount += 1;
+	}
+	if (stateCache.bindTexture2D(1, palette.texture.texture)) {
+		metrics.stateChangeCount += 1;
+	}
+	if (detail && stateCache.bindTexture2D(2, detail.texture.texture)) {
+		metrics.stateChangeCount += 1;
+	}
+	if (stateCache.bindVertexArray(geometry.vertexArray.vertexArray)) {
+		metrics.vertexArrayBindCount += 1;
+		metrics.stateChangeCount += 1;
+	}
+	gl.uniformMatrix4fv(
+		program.uniforms.uModelViewProjection,
+		false,
+		multiplyMat4Into(
+			new Float32Array(16),
+			viewProjectionMatrix,
+			identityMatrix,
+		),
+	);
+	gl.uniform4fv(program.uniforms.uColor, [1, 1, 1, 1]);
+	gl.uniform1f(program.uniforms.uAlphaTest, 0);
+	gl.uniform2f(
+		program.uniforms.uTextureSize,
+		descriptor.width,
+		descriptor.height,
+	);
+	gl.uniform1f(
+		program.uniforms.uPaletteColorCount,
+		descriptor.paletteColorCount,
+	);
+	gl.uniform1i(program.uniforms.uClipThreshold, descriptor.clipThreshold);
+	gl.uniform1i(
+		program.uniforms.uRepeatS,
+		descriptor.wrapS === "repeat" ? 1 : 0,
+	);
+	gl.uniform1i(
+		program.uniforms.uRepeatT,
+		descriptor.wrapT === "repeat" ? 1 : 0,
+	);
+	gl.uniform1f(program.uniforms.uDetailTiling, 1);
+	gl.uniform1i(program.uniforms.uDetailEnabled, detail ? 1 : 0);
+	metrics.uniformUploadCount += 10;
 	gl.drawElements(gl.TRIANGLES, geometry.indexCount, geometry.indexType, 0);
 	metrics.drawCallCount += 1;
 	metrics.triangleCount += geometry.triangleCount;

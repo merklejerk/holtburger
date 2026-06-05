@@ -34,7 +34,10 @@ import {
 	type CompactionEligibility,
 	type CompactionMaterialReadiness,
 } from "./compaction/compaction-family-planner";
-import { deriveLegacyMaterialBehaviorDto } from "./material-behavior";
+import {
+	deriveLegacyMaterialBehaviorDto,
+	isBase1ClipMapSurface,
+} from "./material-behavior";
 import type { TexturePageDescriptor } from "./texture-pages/texture-page-binding";
 import type { AtlasLayoutPolicy } from "./texture-pages/atlas-layout-planner";
 import {
@@ -176,7 +179,11 @@ export function buildStaticLandblockRenderBundleLayer({
 		),
 	);
 	const renderChunk = createRenderChunk(job);
-	const materialRecords = buildMaterialRecords(surfaces);
+	const materialRecords = buildMaterialRecords({
+		surfaces,
+		materialTextureRoutes,
+		preparedByAssetId,
+	});
 	const compactedBatches = buildCompactedBatches(renderChunk.key, surfaces);
 	const directEntries = buildDirectEntries(renderChunk.key, surfaces);
 	const objectRecords = sourceObjects.map(
@@ -402,9 +409,15 @@ function buildObjectSurfaces(
 	});
 }
 
-function buildMaterialRecords(
-	surfaces: readonly StaticBundleBuildSurface[],
-): StaticBundleMaterialRecord[] {
+function buildMaterialRecords({
+	surfaces,
+	materialTextureRoutes,
+	preparedByAssetId,
+}: {
+	surfaces: readonly StaticBundleBuildSurface[];
+	materialTextureRoutes: readonly StaticBundleMaterialTextureRoute[];
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
+}): StaticBundleMaterialRecord[] {
 	const recordsByKey = new Map<string, StaticBundleMaterialRecord>();
 	for (const surface of surfaces) {
 		const key = `material:${surface.materialAssetId}`;
@@ -416,11 +429,59 @@ function buildMaterialRecords(
 			familyKey: surface.familyKey,
 			texturePageRefKeys: surface.textureRefKeys,
 			isTransparent: surface.isTransparent,
+			indexedMaterial: resolveStaticBundleIndexedMaterialRecord({
+				materialAssetId: surface.materialAssetId,
+				materialTextureRoutes,
+				preparedByAssetId,
+			}),
 		});
 	}
 	return [...recordsByKey.values()].sort((left, right) =>
 		left.key.localeCompare(right.key),
 	);
+}
+
+function resolveStaticBundleIndexedMaterialRecord({
+	materialAssetId,
+	materialTextureRoutes,
+	preparedByAssetId,
+}: {
+	materialAssetId: string;
+	materialTextureRoutes: readonly StaticBundleMaterialTextureRoute[];
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
+}): StaticBundleMaterialRecord["indexedMaterial"] {
+	const indexRoute = materialTextureRoutes.find(
+		(route): route is StaticBundleMaterialIndexedTexelRoute =>
+			route.kind === "indexed-texels" &&
+			route.materialAssetId === materialAssetId,
+	);
+	if (!indexRoute) {
+		return undefined;
+	}
+	const paletteRoute = materialTextureRoutes.find(
+		(route): route is StaticBundleMaterialPaletteRoute =>
+			route.kind === "palette-lookup" &&
+			route.materialAssetId === materialAssetId,
+	);
+	if (!paletteRoute) {
+		throw new Error(
+			`Static bundle indexed material ${materialAssetId} has index texels but no palette lookup route.`,
+		);
+	}
+	const material = getPreparedPayload(
+		preparedByAssetId,
+		materialAssetId,
+		"material-recipe",
+	);
+	return {
+		indexFormat: indexRoute.indexedFormat,
+		width: indexRoute.width,
+		height: indexRoute.height,
+		paletteColorCount: paletteRoute.colorCount,
+		wrapS: "clamp",
+		wrapT: "clamp",
+		clipThreshold: isBase1ClipMapSurface(material.surfaceType) ? 8 : -1,
+	};
 }
 
 function buildCompactedBatches(

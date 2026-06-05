@@ -2616,6 +2616,13 @@ function mergeSceneDomainSubmitMetrics({
 		structuredInteriorResourceTriangleCount:
 			exteriorMetrics.structuredInteriorResourceTriangleCount +
 			interiorMetrics.structuredInteriorResourceTriangleCount,
+		structuredInteriorResourceSkippedGeometryCount:
+			exteriorMetrics.structuredInteriorResourceSkippedGeometryCount +
+			interiorMetrics.structuredInteriorResourceSkippedGeometryCount,
+		structuredInteriorResourceFallbackSamples: [
+			...exteriorMetrics.structuredInteriorResourceFallbackSamples,
+			...interiorMetrics.structuredInteriorResourceFallbackSamples,
+		].slice(0, 8),
 	};
 }
 

@@ -1517,6 +1517,64 @@ describe("submitWebgl2WorldFrame", () => {
 		expect(metrics.drawCallCount).toBe(1);
 		expect(gl.calls).toContain("drawElementsFor:structured-interior");
 	});
+
+	it("submits resident structured interior material slices through texture pages", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+
+		const metrics = submitWebgl2WorldFrame({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			structuredInteriorResources: createStructuredInteriorResourceStore([
+				createTexturedStructuredInteriorCellResource(),
+			]),
+			drawUnitsById: new Map(),
+			frame: createFrame([]),
+		});
+
+		expect(metrics.structuredInteriorResourceSubmittedCount).toBe(1);
+		expect(metrics.structuredInteriorResourceDrawCallCount).toBe(1);
+		expect(metrics.structuredInteriorResourceTriangleCount).toBe(1);
+		expect(metrics.structuredInteriorResourceSkippedGeometryCount).toBe(0);
+		expect(gl.calls).toContain(
+			"drawElementsFor:structured-interior-material",
+		);
+		expect(gl.calls).not.toContain("drawElementsFor:structured-interior");
+		expect(gl.uniform4fValues).toContainEqual([0, 0, 1, 1]);
+		expect(gl.uniform2fValues).toContainEqual([1, 1]);
+	});
+
+	it("submits resident indexed structured interior material slices", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+
+		const metrics = submitWebgl2WorldFrame({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			structuredInteriorResources: createStructuredInteriorResourceStore([
+				createIndexedStructuredInteriorCellResource(),
+			]),
+			drawUnitsById: new Map(),
+			frame: createFrame([]),
+		});
+
+		expect(metrics.structuredInteriorResourceSubmittedCount).toBe(1);
+		expect(metrics.structuredInteriorResourceSkippedGeometryCount).toBe(0);
+		expect(gl.calls).toContain(
+			"drawElementsFor:structured-interior-indexed-material",
+		);
+		expect(gl.uniform2fValues).toContainEqual([2, 1]);
+		expect(gl.uniform1iValues).toContain(-1);
+		expect(gl.uniform1iValues).toContain(1);
+	});
 });
 
 function createStaticBundleLayerResourceStore(
@@ -1543,12 +1601,157 @@ function createStructuredInteriorCellResource(): Webgl2StructuredInteriorCellRes
 		envCellId: 0x01000100,
 		geometrySignature: "structured-interior-geometry/a",
 		modelMatrix: createIdentityMat4(),
-		color: new Float32Array([0.5, 0.6, 0.7, 1]),
-		vertexArray: createVertexArrayResource("structured-interior"),
-		positionBuffer: createBufferResource(),
-		indexBuffer: createBufferResource(),
-		indexType: 5123,
-		indexCount: 3,
+		texturePages: [],
+		texturePagesByKey: new Map(),
+		materialRecords: [],
+		materialSlices: [],
+		fallbackShell: {
+			color: new Float32Array([0.5, 0.6, 0.7, 1]),
+			vertexArray: createVertexArrayResource("structured-interior"),
+			positionBuffer: createBufferResource(),
+			indexBuffer: createBufferResource(),
+			indexType: 5123,
+			indexCount: 3,
+			triangleCount: 1,
+			dispose() {},
+		},
+		triangleCount: 1,
+		dispose() {},
+	};
+}
+
+function createTexturedStructuredInteriorCellResource(): Webgl2StructuredInteriorCellResource {
+	const texture = createTextureResource({} as WebGLTexture);
+	return {
+		key: "structured-interior:cell/textured",
+		artifactKey: "detailed/a",
+		landblockId: 1,
+		envCellId: 0x01000100,
+		geometrySignature: "structured-interior-geometry/textured",
+		modelMatrix: createIdentityMat4(),
+		texturePages: [],
+		texturePagesByKey: new Map(),
+		materialRecords: [
+			{
+				key: "material/textured",
+				familyKey: "rgba-texture-page",
+				isTransparent: false,
+				textureBindings: [
+					{
+						virtualRefKey: "texture/base",
+						texturePageKey: "page/base",
+						usageBucket: "base-color",
+						sampleClass: "rgba-color",
+						indexedFormat: undefined,
+						rect: [0, 0, 1, 1],
+						width: 1,
+						height: 1,
+						wrapS: "clamp",
+						wrapT: "clamp",
+						texture,
+					},
+				],
+			},
+		],
+		materialSlices: [
+			{
+				key: "structured-interior-material",
+				cellKey: "structured-interior:cell/textured",
+				envCellId: 0x01000100,
+				materialRecordKey: "material/textured",
+				materialVariantSignature: null,
+				vertexArray: createVertexArrayResource("structured-interior-material"),
+				positionBuffer: createBufferResource(),
+				uvBuffer: createBufferResource(),
+				indexBuffer: createBufferResource(),
+				indexType: 5123,
+				indexCount: 3,
+				triangleCount: 1,
+				dispose() {},
+			},
+		],
+		fallbackShell: null,
+		triangleCount: 1,
+		dispose() {},
+	};
+}
+
+function createIndexedStructuredInteriorCellResource(): Webgl2StructuredInteriorCellResource {
+	const indexTexture = createTextureResource({} as WebGLTexture);
+	const paletteTexture = createTextureResource({} as WebGLTexture);
+	return {
+		key: "structured-interior:cell/indexed",
+		artifactKey: "detailed/a",
+		landblockId: 1,
+		envCellId: 0x01000100,
+		geometrySignature: "structured-interior-geometry/indexed",
+		modelMatrix: createIdentityMat4(),
+		texturePages: [],
+		texturePagesByKey: new Map(),
+		materialRecords: [
+			{
+				key: "material/indexed",
+				familyKey: "indexed-paletted",
+				isTransparent: false,
+				indexedMaterial: {
+					indexFormat: "p8",
+					width: 2,
+					height: 1,
+					paletteColorCount: 2,
+					wrapS: "clamp",
+					wrapT: "repeat",
+					clipThreshold: -1,
+				},
+				textureBindings: [
+					{
+						virtualRefKey: "texture/index",
+						texturePageKey: "page/index",
+						usageBucket: "indexed-texels",
+						sampleClass: "indexed-data",
+						indexedFormat: "p8",
+						rect: [0, 0, 1, 1],
+						width: 2,
+						height: 1,
+						wrapS: "clamp",
+						wrapT: "repeat",
+						texture: indexTexture,
+					},
+					{
+						virtualRefKey: "texture/palette",
+						texturePageKey: "page/palette",
+						usageBucket: "palette-lookup",
+						sampleClass: "palette-data",
+						indexedFormat: undefined,
+						rect: [0, 0, 1, 1],
+						width: 2,
+						height: 1,
+						wrapS: "clamp",
+						wrapT: "clamp",
+						texture: paletteTexture,
+					},
+				],
+			},
+		],
+		materialSlices: [
+			{
+				key: "structured-interior-indexed-material",
+				cellKey: "structured-interior:cell/indexed",
+				envCellId: 0x01000100,
+				materialRecordKey: "material/indexed",
+				materialVariantSignature: null,
+				vertexArray: createVertexArrayResource(
+					"structured-interior-indexed-material",
+				),
+				positionBuffer: createBufferResource(),
+				uvBuffer: createBufferResource(),
+				indexBuffer: createBufferResource(),
+				indexType: 5123,
+				indexCount: 3,
+				triangleCount: 1,
+				dispose() {},
+			},
+		],
+		fallbackShell: null,
 		triangleCount: 1,
 		dispose() {},
 	};

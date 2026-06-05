@@ -5,6 +5,7 @@ import type {
 	StaticBundleMaterialRecord,
 	StaticBundleTexturePage,
 	StaticObjectBundleArtifact,
+	VirtualTexturePageRef,
 	VirtualTexturePageSampleClass,
 	VirtualTexturePageUsageBucket,
 } from "../../static-bundle-layer";
@@ -37,7 +38,7 @@ export interface Webgl2StaticBundleLayerResource {
 	dispose(): void;
 }
 
-interface Webgl2StaticBundleTexturePageResource {
+export interface Webgl2StaticBundleTexturePageResource {
 	key: string;
 	usageBucket: VirtualTexturePageUsageBucket;
 	sampleClass: VirtualTexturePageSampleClass;
@@ -201,7 +202,7 @@ function describeStaticBundleLayerResourceKey(
 	return `${layer.key}:${layer.sourceRevision}`;
 }
 
-function createWebgl2StaticBundleTexturePageResource({
+export function createWebgl2StaticBundleTexturePageResource({
 	gl,
 	page,
 }: {
@@ -308,7 +309,7 @@ function isExactSampleClass(
 	return sampleClass === "indexed-data" || sampleClass === "palette-data";
 }
 
-function createStaticBundleTexturePageByVirtualRefKey(
+export function createStaticBundleTexturePageByVirtualRefKey(
 	texturePages: readonly Webgl2StaticBundleTexturePageResource[],
 ): Map<string, Webgl2StaticBundleTexturePageResource> {
 	const pagesByVirtualRefKey = new Map<
@@ -323,16 +324,13 @@ function createStaticBundleTexturePageByVirtualRefKey(
 	return pagesByVirtualRefKey;
 }
 
-function createWebgl2StaticBundleMaterialResource({
+export function createWebgl2StaticBundleMaterialResource({
 	record,
 	texturePageRefByKey,
 	texturePageByVirtualRefKey,
 }: {
 	record: StaticBundleMaterialRecord;
-	texturePageRefByKey: ReadonlyMap<
-		string,
-		StaticObjectBundleArtifact["texturePageRefs"][number]
-	>;
+	texturePageRefByKey: ReadonlyMap<string, VirtualTexturePageRef>;
 	texturePageByVirtualRefKey: ReadonlyMap<
 		string,
 		Webgl2StaticBundleTexturePageResource
@@ -361,10 +359,7 @@ function resolveStaticBundleMaterialTextureBinding({
 	texturePageByVirtualRefKey,
 }: {
 	materialRecordKey: string;
-	texturePageRefByKey: ReadonlyMap<
-		string,
-		StaticObjectBundleArtifact["texturePageRefs"][number]
-	>;
+	texturePageRefByKey: ReadonlyMap<string, VirtualTexturePageRef>;
 	virtualRefKey: string;
 	texturePageByVirtualRefKey: ReadonlyMap<
 		string,

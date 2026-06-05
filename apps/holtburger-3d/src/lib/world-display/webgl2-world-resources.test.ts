@@ -301,8 +301,9 @@ describe("webgl2 world resources", () => {
 		expect(store.structuredInteriorResourceCount).toBe(1);
 		expect(store.structuredInteriorResourceTriangleCount).toBe(1);
 		expect(store.structuredInteriorResources.cellsByKey.size).toBe(1);
-		expect(gl.createdBuffers).toHaveLength(2);
+		expect(gl.createdBuffers).toHaveLength(3);
 		expect(gl.createdVertexArrays).toHaveLength(1);
+		expect(gl.createdTextures).toHaveLength(1);
 
 		syncWebgl2WorldResources({
 			gl: gl.asContext(),
@@ -2941,6 +2942,9 @@ function createStaticLandblockProductArtifact({
 						buildPolicyRevision: "build:v1",
 						texturePagePolicyRevision: "pages:v1",
 						selectedEnvCellIds: [],
+						structuredInteriorMaterialRecords: [],
+						structuredInteriorTexturePageRefs: [],
+						structuredInteriorTexturePages: [],
 						structuredInteriorCells: [],
 						cellStructureMetadata: [],
 						portalLinks: [],
@@ -2997,6 +3001,47 @@ function createDetailedLandblockProductArtifact(
 				buildPolicyRevision: "build:v1",
 				texturePagePolicyRevision: "pages:v1",
 				selectedEnvCellIds: [cell.envCellId],
+				structuredInteriorMaterialRecords: [
+					{
+						key: "interior-material",
+						familyKey: "rgba-texture-page",
+						texturePageRefKeys: ["interior-texture-ref"],
+						isTransparent: false,
+					},
+				],
+				structuredInteriorTexturePageRefs: [
+					{
+						key: "interior-texture-ref",
+						sourceAssetId: "prepared-texture/06000001/raw",
+						usageBucket: "base-color",
+						sampleClass: "rgba-color",
+						width: 1,
+						height: 1,
+						wrapS: "clamp",
+						wrapT: "clamp",
+						samplingDomain: "color",
+						lookup: "color-filtered",
+					},
+				],
+				structuredInteriorTexturePages: [
+					{
+						key: "interior-texture-page",
+						scopeKey: `detailed:${landblockId}:outdoor-env-cells`,
+						pageKind: "single-entry",
+						usageBucket: "base-color",
+						sampleClass: "rgba-color",
+						width: 1,
+						height: 1,
+						bytes: new Uint8Array([255, 255, 255, 255]),
+						entries: [
+							{
+								virtualRefKey: "interior-texture-ref",
+								sourceAssetId: "prepared-texture/06000001/raw",
+								rect: [0, 0, 1, 1],
+							},
+						],
+					},
+				],
 				structuredInteriorCells: [
 					{
 						key: `structured-interior-cell:${cell.envCellId}`,
@@ -3013,6 +3058,22 @@ function createDetailedLandblockProductArtifact(
 						staticObjectCount: cell.staticObjectCount,
 						cellBsp: cell.cellBsp ?? createLeafBspNode(),
 						renderGeometry: cell.renderGeometry,
+						materialSlices: [
+							{
+								key: `structured-interior-cell:${cell.envCellId}:material:0`,
+								cellKey: `structured-interior-cell:${cell.envCellId}`,
+								envCellId: cell.envCellId,
+								materialSlotIndex: 0,
+								surfaceId: cell.surfaceIds[0] ?? 0,
+								geometrySurfaceId: cell.surfaceIds[0] ?? 0,
+								materialRecordKey: "interior-material",
+								materialVariantSignature: null,
+								positions: createStaticTrianglePositions(),
+								uvs: createStaticTriangleUvs(),
+								indices: new Uint16Array([0, 1, 2]),
+								triangleCount: 1,
+							},
+						],
 					},
 				],
 				cellStructureMetadata: [],

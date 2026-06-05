@@ -50,7 +50,9 @@ import type {
 } from "./webgl2/resources/static-bundle-layer-resources";
 import type {
 	Webgl2StructuredInteriorCellResource,
+	Webgl2StructuredInteriorMaterialSliceResource,
 	Webgl2StructuredInteriorResourceStore,
+	Webgl2StructuredInteriorShellResource,
 } from "./webgl2/resources/structured-interior-resources";
 
 export type Webgl2FlatWorldProgram = Webgl2ProgramResource<
@@ -178,6 +180,8 @@ export interface Webgl2WorldSubmitMetrics {
 	structuredInteriorResourceSubmittedCount: number;
 	structuredInteriorResourceDrawCallCount: number;
 	structuredInteriorResourceTriangleCount: number;
+	structuredInteriorResourceSkippedGeometryCount: number;
+	structuredInteriorResourceFallbackSamples: readonly string[];
 }
 
 const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
@@ -252,6 +256,8 @@ const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	structuredInteriorResourceSubmittedCount: 0,
 	structuredInteriorResourceDrawCallCount: 0,
 	structuredInteriorResourceTriangleCount: 0,
+	structuredInteriorResourceSkippedGeometryCount: 0,
+	structuredInteriorResourceFallbackSamples: [],
 };
 
 export type Webgl2RgbaTexturePageFamilySubmitRoute =
@@ -589,6 +595,9 @@ export function submitWebgl2WorldDrawUnits({
 		gl,
 		stateCache,
 		program,
+		texturedProgram,
+		indexedP8Program,
+		indexedP16Program,
 		viewProjectionMatrix,
 		resources: structuredInteriorResources,
 		metrics,
@@ -707,6 +716,9 @@ function submitWebgl2StructuredInteriorResources({
 	gl,
 	stateCache,
 	program,
+	texturedProgram,
+	indexedP8Program,
+	indexedP16Program,
 	viewProjectionMatrix,
 	resources,
 	metrics,
@@ -714,6 +726,9 @@ function submitWebgl2StructuredInteriorResources({
 	gl: WebGL2RenderingContext;
 	stateCache: Webgl2StateCache;
 	program: Webgl2FlatWorldProgram;
+	texturedProgram: Webgl2TexturedWorldProgram;
+	indexedP8Program: Webgl2IndexedP8WorldProgram;
+	indexedP16Program: Webgl2IndexedP16WorldProgram;
 	viewProjectionMatrix: RenderMat4;
 	resources: Webgl2StructuredInteriorResourceStore | null | undefined;
 	metrics: Webgl2WorldSubmitMetrics;
@@ -727,10 +742,6 @@ function submitWebgl2StructuredInteriorResources({
 	if (cells.length === 0) {
 		return;
 	}
-	if (stateCache.useProgram(program.program)) {
-		metrics.programSwitchCount += 1;
-		metrics.stateChangeCount += 1;
-	}
 	metrics.stateChangeCount += stateCache.setDepthState({
 		enabled: true,
 		write: true,
@@ -740,24 +751,63 @@ function submitWebgl2StructuredInteriorResources({
 		enabled: false,
 		mode: gl.BACK,
 	});
-	for (const cell of cells) {
-		submitWebgl2StructuredInteriorCell({
-			gl,
-			stateCache,
-			program,
-			viewProjectionMatrix,
-			cell,
-			metrics,
+	for (const transparent of [false, true]) {
+		metrics.stateChangeCount += stateCache.setBlendState({
+			enabled: transparent,
+			srcRgb: gl.SRC_ALPHA,
+			dstRgb: gl.ONE_MINUS_SRC_ALPHA,
+			srcAlpha: gl.ONE,
+			dstAlpha: gl.ONE_MINUS_SRC_ALPHA,
+			equationRgb: gl.FUNC_ADD,
+			equationAlpha: gl.FUNC_ADD,
 		});
+		for (const cell of cells) {
+			if (cell.materialSlices.length === 0) {
+				if (!transparent && cell.fallbackShell) {
+					submitWebgl2StructuredInteriorShell({
+						gl,
+						stateCache,
+						program,
+						viewProjectionMatrix,
+						cell,
+						shell: cell.fallbackShell,
+						metrics,
+					});
+				}
+				continue;
+			}
+			const materialByKey = new Map(
+				cell.materialRecords.map((material) => [material.key, material]),
+			);
+			for (const slice of cell.materialSlices) {
+				const material = materialByKey.get(slice.materialRecordKey);
+				if (!material || material.isTransparent !== transparent) {
+					continue;
+				}
+				submitWebgl2StructuredInteriorMaterialSlice({
+					gl,
+					stateCache,
+					texturedProgram,
+					indexedP8Program,
+					indexedP16Program,
+					viewProjectionMatrix,
+					cell,
+					slice,
+					material,
+					metrics,
+				});
+			}
+		}
 	}
 }
 
-function submitWebgl2StructuredInteriorCell({
+function submitWebgl2StructuredInteriorShell({
 	gl,
 	stateCache,
 	program,
 	viewProjectionMatrix,
 	cell,
+	shell,
 	metrics,
 }: {
 	gl: WebGL2RenderingContext;
@@ -765,9 +815,14 @@ function submitWebgl2StructuredInteriorCell({
 	program: Webgl2FlatWorldProgram;
 	viewProjectionMatrix: RenderMat4;
 	cell: Webgl2StructuredInteriorCellResource;
+	shell: Webgl2StructuredInteriorShellResource;
 	metrics: Webgl2WorldSubmitMetrics;
 }): void {
-	if (stateCache.bindVertexArray(cell.vertexArray.vertexArray)) {
+	if (stateCache.useProgram(program.program)) {
+		metrics.programSwitchCount += 1;
+		metrics.stateChangeCount += 1;
+	}
+	if (stateCache.bindVertexArray(shell.vertexArray.vertexArray)) {
 		metrics.vertexArrayBindCount += 1;
 		metrics.stateChangeCount += 1;
 	}
@@ -780,14 +835,262 @@ function submitWebgl2StructuredInteriorCell({
 			cell.modelMatrix,
 		),
 	);
-	gl.uniform4fv(program.uniforms.uColor, cell.color);
+	gl.uniform4fv(program.uniforms.uColor, shell.color);
 	metrics.uniformUploadCount += 2;
-	gl.drawElements(gl.TRIANGLES, cell.indexCount, cell.indexType, 0);
+	gl.drawElements(gl.TRIANGLES, shell.indexCount, shell.indexType, 0);
 	metrics.drawCallCount += 1;
-	metrics.triangleCount += cell.triangleCount;
+	metrics.triangleCount += shell.triangleCount;
 	metrics.structuredInteriorResourceSubmittedCount += 1;
 	metrics.structuredInteriorResourceDrawCallCount += 1;
-	metrics.structuredInteriorResourceTriangleCount += cell.triangleCount;
+	metrics.structuredInteriorResourceTriangleCount += shell.triangleCount;
+}
+
+function submitWebgl2StructuredInteriorMaterialSlice({
+	gl,
+	stateCache,
+	texturedProgram,
+	indexedP8Program,
+	indexedP16Program,
+	viewProjectionMatrix,
+	cell,
+	slice,
+	material,
+	metrics,
+}: {
+	gl: WebGL2RenderingContext;
+	stateCache: Webgl2StateCache;
+	texturedProgram: Webgl2TexturedWorldProgram;
+	indexedP8Program: Webgl2IndexedP8WorldProgram;
+	indexedP16Program: Webgl2IndexedP16WorldProgram;
+	viewProjectionMatrix: RenderMat4;
+	cell: Webgl2StructuredInteriorCellResource;
+	slice: Webgl2StructuredInteriorMaterialSliceResource;
+	material: Webgl2StaticBundleMaterialResource;
+	metrics: Webgl2WorldSubmitMetrics;
+}): void {
+	if (material.familyKey === "indexed-paletted") {
+		submitWebgl2IndexedStructuredInteriorMaterialSlice({
+			gl,
+			stateCache,
+			indexedP8Program,
+			indexedP16Program,
+			viewProjectionMatrix,
+			cell,
+			slice,
+			material,
+			metrics,
+		});
+		return;
+	}
+	if (material.familyKey !== "rgba-texture-page") {
+		skipStructuredInteriorMaterialSlice({
+			metrics,
+			cell,
+			slice,
+			reason: `structured interior cell ${cell.envCellId} material ${material.key} family ${material.familyKey} is unsupported`,
+		});
+		return;
+	}
+	const base = resolveMaterialTextureBinding(material, "base-color");
+	if (!base) {
+		skipStructuredInteriorMaterialSlice({
+			metrics,
+			cell,
+			slice,
+			reason: `structured interior cell ${cell.envCellId} material ${material.key} has no base-color texture binding`,
+		});
+		return;
+	}
+	const detail = resolveMaterialTextureBinding(material, "detail");
+	if (stateCache.useProgram(texturedProgram.program)) {
+		metrics.programSwitchCount += 1;
+		metrics.stateChangeCount += 1;
+		gl.uniform1i(texturedProgram.uniforms.uTexture, 0);
+		gl.uniform1i(texturedProgram.uniforms.uDetailTexture, 1);
+		metrics.uniformUploadCount += 2;
+	}
+	metrics.stateChangeCount += stateCache.setDepthState({
+		enabled: true,
+		write: !material.isTransparent,
+		func: gl.LEQUAL,
+	});
+	if (stateCache.bindTexture2D(0, base.texture.texture)) {
+		metrics.stateChangeCount += 1;
+	}
+	if (detail && stateCache.bindTexture2D(1, detail.texture.texture)) {
+		metrics.stateChangeCount += 1;
+	}
+	if (stateCache.bindVertexArray(slice.vertexArray.vertexArray)) {
+		metrics.vertexArrayBindCount += 1;
+		metrics.stateChangeCount += 1;
+	}
+	gl.uniformMatrix4fv(
+		texturedProgram.uniforms.uModelViewProjection,
+		false,
+		multiplyMat4Into(
+			new Float32Array(16),
+			viewProjectionMatrix,
+			cell.modelMatrix,
+		),
+	);
+	gl.uniform4fv(texturedProgram.uniforms.uColor, [1, 1, 1, 1]);
+	gl.uniform1f(texturedProgram.uniforms.uAlphaTest, 0);
+	gl.uniform1i(texturedProgram.uniforms.uAtlasEnabled, 1);
+	gl.uniform4f(
+		texturedProgram.uniforms.uAtlasRect,
+		base.rect[0],
+		base.rect[1],
+		base.rect[2],
+		base.rect[3],
+	);
+	gl.uniform2f(texturedProgram.uniforms.uAtlasSize, base.width, base.height);
+	gl.uniform2f(
+		texturedProgram.uniforms.uTexturePageWrapMode,
+		base.wrapS === "repeat" ? 1 : 0,
+		base.wrapT === "repeat" ? 1 : 0,
+	);
+	gl.uniform1f(texturedProgram.uniforms.uDetailTiling, 1);
+	gl.uniform1i(texturedProgram.uniforms.uDetailEnabled, detail ? 1 : 0);
+	metrics.uniformUploadCount += 9;
+	gl.drawElements(gl.TRIANGLES, slice.indexCount, slice.indexType, 0);
+	recordStructuredInteriorMaterialSliceSubmitted(metrics, slice);
+}
+
+function submitWebgl2IndexedStructuredInteriorMaterialSlice({
+	gl,
+	stateCache,
+	indexedP8Program,
+	indexedP16Program,
+	viewProjectionMatrix,
+	cell,
+	slice,
+	material,
+	metrics,
+}: {
+	gl: WebGL2RenderingContext;
+	stateCache: Webgl2StateCache;
+	indexedP8Program: Webgl2IndexedP8WorldProgram;
+	indexedP16Program: Webgl2IndexedP16WorldProgram;
+	viewProjectionMatrix: RenderMat4;
+	cell: Webgl2StructuredInteriorCellResource;
+	slice: Webgl2StructuredInteriorMaterialSliceResource;
+	material: Webgl2StaticBundleMaterialResource;
+	metrics: Webgl2WorldSubmitMetrics;
+}): void {
+	const descriptor = material.indexedMaterial;
+	const index = resolveMaterialTextureBinding(material, "indexed-texels");
+	const palette = resolveMaterialTextureBinding(material, "palette-lookup");
+	if (!descriptor || !index || !palette) {
+		skipStructuredInteriorMaterialSlice({
+			metrics,
+			cell,
+			slice,
+			reason: `structured interior cell ${cell.envCellId} material ${material.key} has incomplete indexed material bindings`,
+		});
+		return;
+	}
+	if (index.indexedFormat !== descriptor.indexFormat) {
+		skipStructuredInteriorMaterialSlice({
+			metrics,
+			cell,
+			slice,
+			reason: `structured interior cell ${cell.envCellId} material ${material.key} indexed format ${index.indexedFormat ?? "missing"} does not match descriptor ${descriptor.indexFormat}`,
+		});
+		return;
+	}
+	const detail = resolveMaterialTextureBinding(material, "detail");
+	const program =
+		descriptor.indexFormat === "p8" ? indexedP8Program : indexedP16Program;
+	if (stateCache.useProgram(program.program)) {
+		metrics.programSwitchCount += 1;
+		metrics.stateChangeCount += 1;
+		gl.uniform1i(program.uniforms.uIndexTexture, 0);
+		gl.uniform1i(program.uniforms.uPaletteTexture, 1);
+		gl.uniform1i(program.uniforms.uDetailTexture, 2);
+		metrics.uniformUploadCount += 3;
+	}
+	metrics.stateChangeCount += stateCache.setDepthState({
+		enabled: true,
+		write: !material.isTransparent,
+		func: gl.LEQUAL,
+	});
+	if (stateCache.bindTexture2D(0, index.texture.texture)) {
+		metrics.stateChangeCount += 1;
+	}
+	if (stateCache.bindTexture2D(1, palette.texture.texture)) {
+		metrics.stateChangeCount += 1;
+	}
+	if (detail && stateCache.bindTexture2D(2, detail.texture.texture)) {
+		metrics.stateChangeCount += 1;
+	}
+	if (stateCache.bindVertexArray(slice.vertexArray.vertexArray)) {
+		metrics.vertexArrayBindCount += 1;
+		metrics.stateChangeCount += 1;
+	}
+	gl.uniformMatrix4fv(
+		program.uniforms.uModelViewProjection,
+		false,
+		multiplyMat4Into(
+			new Float32Array(16),
+			viewProjectionMatrix,
+			cell.modelMatrix,
+		),
+	);
+	gl.uniform4fv(program.uniforms.uColor, [1, 1, 1, 1]);
+	gl.uniform1f(program.uniforms.uAlphaTest, 0);
+	gl.uniform2f(
+		program.uniforms.uTextureSize,
+		descriptor.width,
+		descriptor.height,
+	);
+	gl.uniform1f(
+		program.uniforms.uPaletteColorCount,
+		descriptor.paletteColorCount,
+	);
+	gl.uniform1i(program.uniforms.uClipThreshold, descriptor.clipThreshold);
+	gl.uniform1i(
+		program.uniforms.uRepeatS,
+		descriptor.wrapS === "repeat" ? 1 : 0,
+	);
+	gl.uniform1i(
+		program.uniforms.uRepeatT,
+		descriptor.wrapT === "repeat" ? 1 : 0,
+	);
+	gl.uniform1f(program.uniforms.uDetailTiling, 1);
+	gl.uniform1i(program.uniforms.uDetailEnabled, detail ? 1 : 0);
+	metrics.uniformUploadCount += 10;
+	gl.drawElements(gl.TRIANGLES, slice.indexCount, slice.indexType, 0);
+	recordStructuredInteriorMaterialSliceSubmitted(metrics, slice);
+}
+
+function recordStructuredInteriorMaterialSliceSubmitted(
+	metrics: Webgl2WorldSubmitMetrics,
+	slice: Webgl2StructuredInteriorMaterialSliceResource,
+): void {
+	metrics.drawCallCount += 1;
+	metrics.triangleCount += slice.triangleCount;
+	metrics.structuredInteriorResourceSubmittedCount += 1;
+	metrics.structuredInteriorResourceDrawCallCount += 1;
+	metrics.structuredInteriorResourceTriangleCount += slice.triangleCount;
+}
+
+function skipStructuredInteriorMaterialSlice({
+	metrics,
+	cell,
+	slice,
+	reason,
+}: {
+	metrics: Webgl2WorldSubmitMetrics;
+	cell: Webgl2StructuredInteriorCellResource;
+	slice: Webgl2StructuredInteriorMaterialSliceResource;
+	reason: string;
+}): void {
+	metrics.structuredInteriorResourceSkippedGeometryCount += 1;
+	metrics.structuredInteriorResourceFallbackSamples =
+		appendStaticBundleSubmitFallbackSamples(
+			metrics.structuredInteriorResourceFallbackSamples,
+			[`${reason} for slice ${slice.key} in artifact ${cell.artifactKey}`],
+		);
 }
 
 function submitWebgl2StaticBundleGeometry({
@@ -840,7 +1143,7 @@ function submitWebgl2StaticBundleGeometry({
 			);
 		return false;
 	}
-	const base = resolveStaticBundleTextureBinding(material, "base-color");
+	const base = resolveMaterialTextureBinding(material, "base-color");
 	if (!base) {
 		metrics.staticBundleSkippedGeometryCount += 1;
 		metrics.staticBundleSubmitFallbackSamples =
@@ -852,7 +1155,7 @@ function submitWebgl2StaticBundleGeometry({
 			);
 		return false;
 	}
-	const detail = resolveStaticBundleTextureBinding(material, "detail");
+	const detail = resolveMaterialTextureBinding(material, "detail");
 	if (stateCache.useProgram(texturedProgram.program)) {
 		metrics.programSwitchCount += 1;
 		metrics.stateChangeCount += 1;
@@ -940,8 +1243,8 @@ function submitWebgl2IndexedStaticBundleGeometry({
 	metrics: Webgl2WorldSubmitMetrics;
 }): boolean {
 	const descriptor = material.indexedMaterial;
-	const index = resolveStaticBundleTextureBinding(material, "indexed-texels");
-	const palette = resolveStaticBundleTextureBinding(material, "palette-lookup");
+	const index = resolveMaterialTextureBinding(material, "indexed-texels");
+	const palette = resolveMaterialTextureBinding(material, "palette-lookup");
 	if (!descriptor || !index || !palette) {
 		metrics.staticBundleSkippedGeometryCount += 1;
 		metrics.staticBundleSubmitFallbackSamples =
@@ -964,7 +1267,7 @@ function submitWebgl2IndexedStaticBundleGeometry({
 			);
 		return false;
 	}
-	const detail = resolveStaticBundleTextureBinding(material, "detail");
+	const detail = resolveMaterialTextureBinding(material, "detail");
 	const program =
 		descriptor.indexFormat === "p8" ? indexedP8Program : indexedP16Program;
 	if (stateCache.useProgram(program.program)) {
@@ -1038,7 +1341,7 @@ function submitWebgl2IndexedStaticBundleGeometry({
 	return true;
 }
 
-function resolveStaticBundleTextureBinding(
+function resolveMaterialTextureBinding(
 	material: Webgl2StaticBundleMaterialResource,
 	usageBucket: Webgl2StaticBundleMaterialTextureBinding["usageBucket"],
 ): Webgl2StaticBundleMaterialTextureBinding | null {

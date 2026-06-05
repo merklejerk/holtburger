@@ -8,6 +8,7 @@ import {
 } from "../../render-math";
 import type { RenderChunkTransform } from "../../render-anchor";
 import { buildStagedPolygonSetGeometry } from "../../staged-world-geometry";
+import type { StaticBundleTexturePage } from "../../static-bundle-layer";
 import {
 	createWebgl2ArrayBuffer,
 	createWebgl2ElementArrayBuffer,
@@ -15,9 +16,18 @@ import {
 	type Webgl2BufferResource,
 	type Webgl2VertexArrayResource,
 } from "../../webgl2-gl";
+import {
+	createStaticBundleTexturePageByVirtualRefKey,
+	createWebgl2StaticBundleMaterialResource,
+	createWebgl2StaticBundleTexturePageResource,
+	type Webgl2StaticBundleMaterialResource,
+	type Webgl2StaticBundleTexturePageResource,
+} from "./static-bundle-layer-resources";
 
 type DetailedStructuredInteriorCellArtifact =
 	DetailedLandblockRenderArtifacts["structuredInteriorCells"][number];
+type DetailedStructuredInteriorMaterialSlice =
+	DetailedStructuredInteriorCellArtifact["materialSlices"][number];
 
 export interface Webgl2StructuredInteriorResourceStore {
 	cellsByKey: Map<string, Webgl2StructuredInteriorCellResource>;
@@ -30,9 +40,35 @@ export interface Webgl2StructuredInteriorCellResource {
 	envCellId: number;
 	geometrySignature: string;
 	modelMatrix: RenderMat4;
+	texturePages: readonly Webgl2StaticBundleTexturePageResource[];
+	texturePagesByKey: ReadonlyMap<string, Webgl2StaticBundleTexturePageResource>;
+	materialRecords: readonly Webgl2StaticBundleMaterialResource[];
+	materialSlices: readonly Webgl2StructuredInteriorMaterialSliceResource[];
+	fallbackShell: Webgl2StructuredInteriorShellResource | null;
+	triangleCount: number;
+	dispose(): void;
+}
+
+export interface Webgl2StructuredInteriorShellResource {
 	color: RenderVec4;
 	vertexArray: Webgl2VertexArrayResource;
 	positionBuffer: Webgl2BufferResource;
+	indexBuffer: Webgl2BufferResource;
+	indexType: GLenum;
+	indexCount: number;
+	triangleCount: number;
+	dispose(): void;
+}
+
+export interface Webgl2StructuredInteriorMaterialSliceResource {
+	key: string;
+	cellKey: string;
+	envCellId: number;
+	materialRecordKey: string;
+	materialVariantSignature: string | null;
+	vertexArray: Webgl2VertexArrayResource;
+	positionBuffer: Webgl2BufferResource;
+	uvBuffer: Webgl2BufferResource;
 	indexBuffer: Webgl2BufferResource;
 	indexType: GLenum;
 	indexCount: number;
@@ -123,6 +159,74 @@ function createWebgl2StructuredInteriorCellResource({
 	cell: DetailedStructuredInteriorCellArtifact;
 	modelMatrix: RenderMat4;
 }): Webgl2StructuredInteriorCellResource {
+	const texturePages = artifact.structuredInteriorTexturePages.map((page) =>
+		createWebgl2StaticBundleTexturePageResource({ gl, page }),
+	);
+	const texturePagesByKey = new Map(
+		texturePages.map((page) => [page.key, page]),
+	);
+	const texturePageRefByKey = new Map(
+		artifact.structuredInteriorTexturePageRefs.map((ref) => [ref.key, ref]),
+	);
+	const texturePageByVirtualRefKey =
+		createStaticBundleTexturePageByVirtualRefKey(texturePages);
+	const materialRecords = artifact.structuredInteriorMaterialRecords.map(
+		(record) =>
+			createWebgl2StaticBundleMaterialResource({
+				record,
+				texturePageRefByKey,
+				texturePageByVirtualRefKey,
+			}),
+	);
+	const materialSlices = cell.materialSlices.map((slice) =>
+		createWebgl2StructuredInteriorMaterialSliceResource({ gl, slice }),
+	);
+	const fallbackShell =
+		materialSlices.length === 0
+			? createWebgl2StructuredInteriorShellResource({ gl, cell })
+			: null;
+	const triangleCount =
+		materialSlices.length > 0
+			? materialSlices.reduce(
+					(total, slice) => total + slice.triangleCount,
+					0,
+				)
+			: (fallbackShell?.triangleCount ?? 0);
+	return {
+		key: describeStructuredInteriorResourceKey(artifact, cell),
+		artifactKey: artifact.key,
+		landblockId: cell.landblockId,
+		envCellId: cell.envCellId,
+		geometrySignature: describeStructuredInteriorGeometrySignature(
+			artifact,
+			cell,
+		),
+		modelMatrix,
+		texturePages,
+		texturePagesByKey,
+		materialRecords,
+		materialSlices,
+		fallbackShell,
+		triangleCount,
+		dispose() {
+			for (const slice of materialSlices) {
+				slice.dispose();
+			}
+			fallbackShell?.dispose();
+			for (const page of texturePages) {
+				page.texture.dispose();
+			}
+		},
+	};
+}
+
+function createWebgl2StructuredInteriorShellResource({
+	gl,
+	cell,
+}: {
+	gl: WebGL2RenderingContext;
+	cell: DetailedStructuredInteriorCellArtifact;
+}): Webgl2StructuredInteriorShellResource {
 	const geometry = buildStagedPolygonSetGeometry(cell.renderGeometry, {
 		sourceSignature: cell.key,
 	});
@@ -145,15 +249,6 @@ function createWebgl2StructuredInteriorCellResource({
 		},
 	});
 	return {
-		key: describeStructuredInteriorResourceKey(artifact, cell),
-		artifactKey: artifact.key,
-		landblockId: cell.landblockId,
-		envCellId: cell.envCellId,
-		geometrySignature: describeStructuredInteriorGeometrySignature(
-			artifact,
-			cell,
-		),
-		modelMatrix,
 		color: createStructuredInteriorCellColor(cell),
 		vertexArray,
 		positionBuffer,
@@ -167,6 +262,63 @@ function createWebgl2StructuredInteriorCellResource({
 		dispose() {
 			vertexArray.dispose();
 			positionBuffer.dispose();
+			indexBuffer.dispose();
+		},
+	};
+}
+
+function createWebgl2StructuredInteriorMaterialSliceResource({
+	gl,
+	slice,
+}: {
+	gl: WebGL2RenderingContext;
+	slice: DetailedStructuredInteriorMaterialSlice;
+}): Webgl2StructuredInteriorMaterialSliceResource {
+	const positionBuffer = createWebgl2ArrayBuffer(gl, {
+		label: `${slice.key}/positions`,
+		data: toFloat32Array(slice.positions),
+	});
+	const uvBuffer = createWebgl2ArrayBuffer(gl, {
+		label: `${slice.key}/uvs`,
+		data: toFloat32Array(slice.uvs),
+	});
+	const indexBuffer = createWebgl2ElementArrayBuffer(gl, {
+		label: `${slice.key}/indices`,
+		data: slice.indices,
+	});
+	const vertexArray = createWebgl2VertexArray(gl, {
+		label: `${slice.key}/vertex-array`,
+		configure() {
+			gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer.buffer);
+			gl.enableVertexAttribArray(0);
+			gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+			gl.bindBuffer(gl.ARRAY_BUFFER, uvBuffer.buffer);
+			gl.enableVertexAttribArray(2);
+			gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 0, 0);
+			gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer.buffer);
+			gl.bindBuffer(gl.ARRAY_BUFFER, null);
+		},
+	});
+	return {
+		key: slice.key,
+		cellKey: slice.cellKey,
+		envCellId: slice.envCellId,
+		materialRecordKey: slice.materialRecordKey,
+		materialVariantSignature: slice.materialVariantSignature,
+		vertexArray,
+		positionBuffer,
+		uvBuffer,
+		indexBuffer,
+		indexType:
+			slice.indices instanceof Uint32Array
+				? gl.UNSIGNED_INT
+				: gl.UNSIGNED_SHORT,
+		indexCount: slice.indices.length,
+		triangleCount: slice.triangleCount,
+		dispose() {
+			vertexArray.dispose();
+			positionBuffer.dispose();
+			uvBuffer.dispose();
 			indexBuffer.dispose();
 		},
 	};
@@ -222,6 +374,8 @@ function describeStructuredInteriorGeometrySignature(
 		cell.renderGeometry.vertexCount,
 		cell.renderGeometry.triangleCount,
 		cell.renderGeometry.skippedPolygonCount ?? 0,
+		cell.materialSlices.length,
+		artifact.structuredInteriorTexturePages.map(describeTexturePageKey).join(","),
 	].join(":");
 }
 
@@ -230,4 +384,14 @@ function createStructuredInteriorCellColor(
 ): RenderVec4 {
 	const hue = (cell.envCellId & 0xff) / 255;
 	return new Float32Array([0.45 + hue * 0.25, 0.58, 0.72 - hue * 0.2, 1]);
+}
+
+function describeTexturePageKey(page: StaticBundleTexturePage): string {
+	return page.key;
+}
+
+function toFloat32Array(
+	values: Float32Array | readonly number[],
+): Float32Array {
+	return values instanceof Float32Array ? values : new Float32Array(values);
 }

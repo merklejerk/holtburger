@@ -90,12 +90,14 @@ export function syncWebgl2StructuredInteriorResources({
 	artifacts,
 	renderChunkTransforms,
 	textureFilteringMode = "anisotropic-4x",
+	maxAnisotropy = 1,
 }: {
 	gl: WebGL2RenderingContext;
 	store: Webgl2StructuredInteriorResourceStore;
 	artifacts: readonly DetailedLandblockRenderArtifacts[];
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	textureFilteringMode?: TextureFilteringMode;
+	maxAnisotropy?: number;
 }): void {
 	const chunkOffsetByKey = new Map(
 		renderChunkTransforms.map((transform) => [
@@ -123,6 +125,7 @@ export function syncWebgl2StructuredInteriorResources({
 					gl,
 					cell: previous,
 					textureFilteringMode,
+					maxAnisotropy,
 				});
 				continue;
 			}
@@ -137,6 +140,7 @@ export function syncWebgl2StructuredInteriorResources({
 					cell,
 					modelMatrix,
 					textureFilteringMode,
+					maxAnisotropy,
 				}),
 			);
 		}
@@ -164,18 +168,21 @@ function createWebgl2StructuredInteriorCellResource({
 	cell,
 	modelMatrix,
 	textureFilteringMode,
+	maxAnisotropy,
 }: {
 	gl: WebGL2RenderingContext;
 	artifact: DetailedLandblockRenderArtifacts;
 	cell: DetailedStructuredInteriorCellArtifact;
 	modelMatrix: RenderMat4;
 	textureFilteringMode: TextureFilteringMode;
+	maxAnisotropy: number;
 }): Webgl2StructuredInteriorCellResource {
 	const texturePages = artifact.structuredInteriorTexturePages.map((page) =>
 		createWebgl2StaticBundleTexturePageResource({
 			gl,
 			page,
 			textureFilteringMode,
+			maxAnisotropy,
 		}),
 	);
 	const texturePagesByKey = new Map(
@@ -240,16 +247,19 @@ function updateWebgl2StructuredInteriorTexturePageSamplerPolicy({
 	gl,
 	cell,
 	textureFilteringMode,
+	maxAnisotropy,
 }: {
 	gl: WebGL2RenderingContext;
 	cell: Webgl2StructuredInteriorCellResource;
 	textureFilteringMode: TextureFilteringMode;
+	maxAnisotropy: number;
 }): void {
 	for (const page of cell.texturePages) {
 		updateWebgl2StaticBundleTexturePageResourceSamplerPolicy({
 			gl,
 			page,
 			textureFilteringMode,
+			maxAnisotropy,
 		});
 	}
 }

@@ -308,6 +308,7 @@ describe("webgl2 world resources", () => {
 		expect(gl.createdBuffers).toHaveLength(3);
 		expect(gl.createdVertexArrays).toHaveLength(1);
 		expect(gl.createdTextures).toHaveLength(1);
+		expect(gl.generatedMipmapCount).toBe(1);
 
 		syncWebgl2StaticLandblockRenderArtifactResources({
 			gl: gl.asContext(),
@@ -324,6 +325,7 @@ describe("webgl2 world resources", () => {
 		);
 		expect(gl.createdBuffers).toHaveLength(3);
 		expect(gl.createdTextures).toHaveLength(1);
+		expect(gl.generatedMipmapCount).toBe(1);
 		expect(gl.textureParameters).toContainEqual({
 			pname: gl.TEXTURE_MIN_FILTER,
 			param: gl.NEAREST,

@@ -16,12 +16,12 @@ import {
 	unionRenderBounds,
 	type RenderBounds,
 } from "./render-spatial-math";
-import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
+import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
 
 const ARTIFACT_SCENE_MINIMUM_SPAN = 180;
 
 export function calculateStaticLandblockArtifactSceneBoundsFrame(options: {
-	artifacts: StaticLandblockRenderArtifactStoreSnapshot;
+	artifacts: StaticLandblockRenderProductSet;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 }): SceneBoundsFrame | null {
 	const chunkTransformsByKey = new Map(
@@ -49,7 +49,7 @@ function collectStaticLandblockArtifactSceneBounds({
 	artifacts,
 	chunkTransformsByKey,
 }: {
-	artifacts: StaticLandblockRenderArtifactStoreSnapshot;
+	artifacts: StaticLandblockRenderProductSet;
 	chunkTransformsByKey: ReadonlyMap<string, RenderChunkTransform>;
 }): RenderBounds[] {
 	const bounds: RenderBounds[] = [];

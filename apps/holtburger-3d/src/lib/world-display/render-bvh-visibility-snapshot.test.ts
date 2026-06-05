@@ -14,7 +14,7 @@ import {
 } from "../landblocks";
 import type { LandblockRenderProductWorkerResult } from "./landblock-render-product";
 import { deriveLandblockRenderChunkPlacement } from "./render-chunks";
-import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
+import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
 import {
 	createEmptyStaticRenderableSceneModel,
 	type StaticRenderableSceneModel,
@@ -38,7 +38,7 @@ describe("deriveRenderBvhVisibilityMetrics", () => {
 			terrainScene: createTerrainScene([createTerrainTile(landblockId)]),
 			staticRenderableScene: createStaticRenderableScene(landblockId),
 			structuredInteriorScene: createStructuredInteriorScene(envCellId),
-			staticLandblockRenderArtifacts: createStaticLandblockArtifactSnapshot([]),
+			staticLandblockRenderProducts: createStaticLandblockProductSet([]),
 			renderChunkTransforms: [
 				{
 					chunkKey: terrainRenderChunk.chunkKey,
@@ -77,7 +77,7 @@ describe("deriveRenderBvhVisibilityMetrics", () => {
 			terrainScene: createTerrainScene([createTerrainTile(0x0204ffff)]),
 			staticRenderableScene: createStaticRenderableScene(landblockId),
 			structuredInteriorScene: createEmptyStructuredInteriorSceneModel(),
-			staticLandblockRenderArtifacts: createStaticLandblockArtifactSnapshot([]),
+			staticLandblockRenderProducts: createStaticLandblockProductSet([]),
 			renderChunkTransforms: [],
 			frustum: zFrustum(0, 10),
 			now: steppingClock(),
@@ -99,7 +99,7 @@ describe("deriveRenderBvhVisibilityMetrics", () => {
 			terrainScene: createTerrainScene([]),
 			staticRenderableScene: createEmptyStaticRenderableSceneModel(),
 			structuredInteriorScene: createStructuredInteriorScene(envCellId),
-			staticLandblockRenderArtifacts: createStaticLandblockArtifactSnapshot([
+			staticLandblockRenderProducts: createStaticLandblockProductSet([
 				createDetailedLandblockProductArtifact({
 					landblockId: 0x0203ffff,
 					envCellId,
@@ -133,7 +133,7 @@ describe("deriveRenderBvhVisibilityMetrics", () => {
 			terrainScene: createTerrainScene([]),
 			staticRenderableScene: createEmptyStaticRenderableSceneModel(),
 			structuredInteriorScene: createEmptyStructuredInteriorSceneModel(),
-			staticLandblockRenderArtifacts: createStaticLandblockArtifactSnapshot([
+			staticLandblockRenderProducts: createStaticLandblockProductSet([
 				createDetailedLandblockProductArtifact({
 					landblockId: 0x0203ffff,
 					envCellId,
@@ -159,9 +159,9 @@ describe("deriveRenderBvhVisibilityMetrics", () => {
 	});
 });
 
-function createStaticLandblockArtifactSnapshot(
+function createStaticLandblockProductSet(
 	artifacts: readonly LandblockRenderProductWorkerResult[],
-): StaticLandblockRenderArtifactStoreSnapshot {
+): StaticLandblockRenderProductSet {
 	return {
 		artifacts,
 		desiredCount: artifacts.length,

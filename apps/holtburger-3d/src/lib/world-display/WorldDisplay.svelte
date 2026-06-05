@@ -27,8 +27,8 @@
 		type StaticRenderableSceneModel,
 	} from "./static-renderables";
 	import {
-		createEmptyStaticLandblockRenderArtifactStoreSnapshot,
-		type StaticLandblockRenderArtifactStoreSnapshot,
+		createEmptyStaticLandblockRenderProductSet,
+		type StaticLandblockRenderProductSet,
 	} from "./static-landblock-render-artifact-store";
 	import {
 		createEmptyStructuredInteriorSceneModel,
@@ -69,8 +69,8 @@
 
 	let assetState = createInitialAssetChannelState();
 	let terrainScene = createEmptyTerrainSceneModel();
-	let staticLandblockRenderArtifacts =
-		createEmptyStaticLandblockRenderArtifactStoreSnapshot();
+	let staticLandblockRenderProducts =
+		createEmptyStaticLandblockRenderProductSet();
 	let staticRenderableScene = createEmptyStaticRenderableSceneModel();
 	let structuredInteriorScene = createEmptyStructuredInteriorSceneModel();
 	let transitionPortalModel = createEmptyTransitionPortalCandidateModel();
@@ -99,7 +99,7 @@
 			const controller = createWorldDisplayRenderer(viewportHost, {
 				assetState,
 				terrainScene,
-				staticLandblockRenderArtifacts,
+				staticLandblockRenderProducts,
 				staticRenderableScene,
 				structuredInteriorScene,
 				transitionPortalModel,
@@ -145,12 +145,12 @@
 		rendererController?.setStaticRenderableScene(staticRenderableScene);
 	}
 
-	export function setStaticLandblockRenderArtifacts(
-		nextArtifacts: StaticLandblockRenderArtifactStoreSnapshot,
+	export function replaceStaticLandblockProducts(
+		nextArtifacts: StaticLandblockRenderProductSet,
 	): void {
-		staticLandblockRenderArtifacts = nextArtifacts;
-		rendererController?.setStaticLandblockRenderArtifacts(
-			staticLandblockRenderArtifacts,
+		staticLandblockRenderProducts = nextArtifacts;
+		rendererController?.replaceStaticLandblockProducts(
+			staticLandblockRenderProducts,
 		);
 	}
 

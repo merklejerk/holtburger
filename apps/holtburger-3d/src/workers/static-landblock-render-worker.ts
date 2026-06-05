@@ -135,10 +135,7 @@ export async function runStaticLandblockRenderWorkerJob(
 		job.product === "outdoor"
 			? buildOutdoorTerrainArtifact(job, preparedByAssetId, assetState)
 			: null;
-	const staticObjectBundles = buildProductStaticBundleLayers(
-		job,
-		preparedByAssetId,
-	);
+	const staticObjectBundles = buildProductStaticBundleLayers(job, preparedByAssetId);
 	const artifacts: LandblockRenderArtifact[] = [
 		...(terrainArtifact ? [terrainArtifact] : []),
 		...staticObjectBundles,
@@ -259,6 +256,16 @@ async function loadClosureRoots(options: {
 	for (const response of closure.responses) {
 		options.responseByAssetId.set(response.assetId, response);
 	}
+	const stillMissingRootAssetIds = missingRootAssetIds.filter(
+		(assetId) => !options.responseByAssetId.has(assetId),
+	);
+	if (stillMissingRootAssetIds.length > 0) {
+		throw new Error(
+			`Landblock product worker did not receive ${stillMissingRootAssetIds.length} requested closure root response(s): ${formatAssetIdSample(
+				stillMissingRootAssetIds,
+			)}.`,
+		);
+	}
 }
 
 function prepareResponses(
@@ -289,6 +296,7 @@ async function loadPreparedCompanionClosure(options: {
 	>;
 	preparedByAssetId: Map<string, PreparedAssetRecord>;
 }): Promise<void> {
+	let pass = 1;
 	while (true) {
 		const companionAssetIds = uniqueSortedStrings([
 			...collectSetupAppearanceCompanionAssetIds(options.preparedByAssetId),
@@ -297,17 +305,34 @@ async function loadPreparedCompanionClosure(options: {
 		if (companionAssetIds.length === 0) {
 			return;
 		}
+		const responseCountBefore = options.responseByAssetId.size;
 		await loadClosureRoots({
 			rootAssetIds: companionAssetIds,
 			job: options.job,
 			lookup: options.lookup,
 			responseByAssetId: options.responseByAssetId,
 		});
+		const unresolvedCompanionAssetIds = companionAssetIds.filter(
+			(assetId) => !options.responseByAssetId.has(assetId),
+		);
+		if (
+			unresolvedCompanionAssetIds.length > 0 ||
+			options.responseByAssetId.size === responseCountBefore
+		) {
+			throw new Error(
+				`Landblock product worker companion closure pass ${pass} made no usable progress; missing ${unresolvedCompanionAssetIds.length} companion response(s): ${formatAssetIdSample(
+					unresolvedCompanionAssetIds.length > 0
+						? unresolvedCompanionAssetIds
+						: companionAssetIds,
+				)}.`,
+			);
+		}
 		prepareResponses(
 			options.job,
 			options.responseByAssetId,
 			options.preparedByAssetId,
 		);
+		pass += 1;
 	}
 }
 
@@ -396,11 +421,24 @@ function buildProductStaticBundleLayers(
 			)}.`,
 		);
 	}
-	return topology.payload.envCells.map((envCell) =>
-		buildStaticObjectBundle(job, preparedByAssetId, "env-cell-static", {
-			envCellId: envCell.envCellId,
-		}),
-	);
+	const bundles: StaticObjectBundleArtifact[] = [];
+	for (const envCell of topology.payload.envCells) {
+		const asset = preparedByAssetId.get(envCell.assetId);
+		if (asset?.payload.kind !== "env-cell") {
+			throw new Error(
+				`Landblock product worker cannot build env-cell static bundles without ${envCell.assetId}.`,
+			);
+		}
+		if (asset.payload.statics.length === 0) {
+			continue;
+		}
+		bundles.push(
+			buildStaticObjectBundle(job, preparedByAssetId, "env-cell-static", {
+				envCellId: envCell.envCellId,
+			}),
+		);
+	}
+	return bundles;
 }
 
 function buildDetailedLandblockRenderArtifacts(options: {
@@ -869,6 +907,16 @@ function uniqueSortedStrings(values: readonly string[]): string[] {
 	return [...new Set(values)].sort();
 }
 
+function formatAssetIdSample(assetIds: readonly string[]): string {
+	if (assetIds.length === 0) {
+		return "none";
+	}
+	const sample = assetIds.slice(0, 8).join(", ");
+	return assetIds.length > 8
+		? `${sample}, ... +${assetIds.length - 8} more`
+		: sample;
+}
+
 function collectTransferableArrayBuffers(
 	value: unknown,
 	transferables: Transferable[],
@@ -951,13 +999,15 @@ if (
 		}
 		void runStaticLandblockRenderWorkerJob(message.job, hostBridge)
 			.then((result) => {
+				const transferables =
+					collectStaticLandblockRenderWorkerResultTransferables(result);
 				workerScope.postMessage(
 					{
 						type: "landblock-render-product-job-complete",
 						requestId: message.requestId,
 						result,
 					},
-					collectStaticLandblockRenderWorkerResultTransferables(result),
+					transferables,
 				);
 			})
 			.catch((error) => {

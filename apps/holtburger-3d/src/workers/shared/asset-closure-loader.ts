@@ -42,6 +42,19 @@ export async function loadWorkerAssetClosure({
 		const lookupResult = await lookup.lookupBinaryAssets(
 			batchAssetIds.map(createRequest),
 		);
+		const returnedAssetIds = new Set(
+			lookupResult.responses.map((response) => response.assetId),
+		);
+		const missingAssetIds = batchAssetIds.filter(
+			(assetId) => !returnedAssetIds.has(assetId),
+		);
+		if (missingAssetIds.length > 0) {
+			throw new Error(
+				`Worker asset closure lookup returned no response for ${missingAssetIds.length} requested asset(s): ${formatAssetIdSample(
+					missingAssetIds,
+				)}.`,
+			);
+		}
 
 		for (const response of lookupResult.responses) {
 			responseByAssetId.set(response.assetId, response);
@@ -81,4 +94,11 @@ export async function loadWorkerAssetClosure({
 
 function uniqueSortedAssetIds(assetIds: readonly string[]): string[] {
 	return [...new Set(assetIds)].sort();
+}
+
+function formatAssetIdSample(assetIds: readonly string[]): string {
+	const sample = assetIds.slice(0, 8).join(", ");
+	return assetIds.length > 8
+		? `${sample}, ... +${assetIds.length - 8} more`
+		: sample;
 }

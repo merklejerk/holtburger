@@ -8,6 +8,7 @@ import {
 } from "../diagnostics/browser-js-profiler";
 import type { AssetLookupRequestDto } from "../host/contracts";
 import {
+	compareDesiredLandblockRenderProducts,
 	createLandblockRenderProductWorkerJob,
 	type DesiredLandblockRenderProduct,
 	type LandblockRenderProductWorkerJob,
@@ -27,6 +28,7 @@ export interface StaticLandblockRenderWorkerLike {
 		  ) => void)
 		| null;
 	onerror: ((event: Event | ErrorEvent) => void) | null;
+	onmessageerror?: ((event: MessageEvent) => void) | null;
 	postMessage(
 		message: StaticLandblockRenderWorkerRequestMessage,
 		transferables?: Transferable[],
@@ -38,7 +40,15 @@ type BinaryAssetLookupFn = (
 	requests: readonly AssetLookupRequestDto[],
 ) => Promise<BinaryAssetLookupEnvelopeDto[]>;
 
+export interface StaticLandblockRenderWorkerClientOptions {
+	lookupAssetsFn?: BinaryAssetLookupFn;
+	workerFactory?: () => StaticLandblockRenderWorkerLike;
+	maxConcurrentJobs?: number;
+}
+
 interface PendingLandblockRenderRequest {
+	desired: DesiredLandblockRenderProduct;
+	requestId: string;
 	job: LandblockRenderProductWorkerJob;
 	identityKey: string;
 	resolve: (result: LandblockRenderProductWorkerResult) => void;
@@ -51,6 +61,7 @@ export class StaticLandblockRenderWorkerClient {
 		string,
 		PendingLandblockRenderRequest
 	>();
+	private readonly queuedRequests: PendingLandblockRenderRequest[] = [];
 	private readonly latestIdentityByArtifactKey = new Map<string, string>();
 	private readonly pendingRequestByIdentity = new Map<
 		string,
@@ -58,11 +69,18 @@ export class StaticLandblockRenderWorkerClient {
 	>();
 	private nextRequestSequence = 1;
 	private disposed = false;
+	private readonly lookupAssetsFn: BinaryAssetLookupFn;
+	private readonly maxConcurrentJobs: number;
 
-	constructor(
-		private readonly lookupAssetsFn: BinaryAssetLookupFn = lookupBinaryAssetEnvelopes,
-		workerFactory: () => StaticLandblockRenderWorkerLike = createWorker,
-	) {
+	constructor(options: StaticLandblockRenderWorkerClientOptions = {}) {
+		this.lookupAssetsFn = options.lookupAssetsFn ?? lookupBinaryAssetEnvelopes;
+		this.maxConcurrentJobs = options.maxConcurrentJobs ?? 2;
+		if (!Number.isInteger(this.maxConcurrentJobs) || this.maxConcurrentJobs < 1) {
+			throw new Error(
+				"Static landblock render worker client requires maxConcurrentJobs >= 1.",
+			);
+		}
+		const workerFactory = options.workerFactory ?? createWorker;
 		this.worker = workerFactory();
 		this.worker.onmessage = (event) => {
 			const message = event.data;
@@ -79,6 +97,13 @@ export class StaticLandblockRenderWorkerClient {
 					: "Static landblock render worker failed before work completed.";
 			this.rejectAllPending(new Error(errorMessage));
 		};
+		this.worker.onmessageerror = () => {
+			this.rejectAllPending(
+				new Error(
+					"Static landblock render worker posted an unreadable message.",
+				),
+			);
+		};
 	}
 
 	requestProduct(
@@ -93,7 +118,7 @@ export class StaticLandblockRenderWorkerClient {
 		const artifactKey = formatArtifactKey(job);
 		this.latestIdentityByArtifactKey.set(artifactKey, identityKey);
 		const requestId = `static-landblock-render-${this.nextRequestSequence++}`;
-		const promise = this.postJob(requestId, job, identityKey);
+		const promise = this.enqueueJob(requestId, desired, job, identityKey);
 		this.pendingRequestByIdentity.set(identityKey, promise);
 		promise.then(
 			() => {
@@ -123,26 +148,58 @@ export class StaticLandblockRenderWorkerClient {
 		requestId: string,
 		job: LandblockRenderProductWorkerJob,
 		identityKey: string,
+		pending: PendingLandblockRenderRequest,
+	): void {
+		this.throwIfDisposed();
+		this.pendingRequests.set(requestId, pending);
+		try {
+			this.worker.postMessage({
+				type: "run-landblock-render-product-job",
+				requestId,
+				job,
+			});
+		} catch (error) {
+			this.pendingRequests.delete(requestId);
+			pending.reject(toError(error));
+			this.pumpQueuedRequests();
+		}
+	}
+
+	private enqueueJob(
+		requestId: string,
+		desired: DesiredLandblockRenderProduct,
+		job: LandblockRenderProductWorkerJob,
+		identityKey: string,
 	): Promise<LandblockRenderProductWorkerResult> {
 		this.throwIfDisposed();
 		return new Promise((resolve, reject) => {
-			this.pendingRequests.set(requestId, {
+			this.queuedRequests.push({
+				desired,
+				requestId,
 				job,
 				identityKey,
 				resolve,
 				reject,
 			});
-			try {
-				this.worker.postMessage({
-					type: "run-landblock-render-product-job",
-					requestId,
-					job,
-				});
-			} catch (error) {
-				this.pendingRequests.delete(requestId);
-				reject(toError(error));
-			}
+			this.queuedRequests.sort(comparePendingLandblockRenderRequests);
+			this.pumpQueuedRequests();
 		});
+	}
+
+	private pumpQueuedRequests(): void {
+		if (this.disposed) {
+			return;
+		}
+		while (
+			this.pendingRequests.size < this.maxConcurrentJobs &&
+			this.queuedRequests.length > 0
+		) {
+			const pending = this.queuedRequests.shift();
+			if (!pending) {
+				return;
+			}
+			this.postJob(pending.requestId, pending.job, pending.identityKey, pending);
+		}
 	}
 
 	private handleWorkerResult(
@@ -158,6 +215,7 @@ export class StaticLandblockRenderWorkerClient {
 		this.pendingRequests.delete(message.requestId);
 		if (message.type === "landblock-render-product-job-error") {
 			pending.reject(new Error(message.message));
+			this.pumpQueuedRequests();
 			return;
 		}
 		if (
@@ -168,9 +226,11 @@ export class StaticLandblockRenderWorkerClient {
 					`Ignored stale landblock render product result ${message.result.jobId}.`,
 				),
 			);
+			this.pumpQueuedRequests();
 			return;
 		}
 		pending.resolve(message.result);
+		this.pumpQueuedRequests();
 	}
 
 	private isLatestResult(
@@ -225,6 +285,9 @@ export class StaticLandblockRenderWorkerClient {
 		for (const pending of this.pendingRequests.values()) {
 			pending.reject(error);
 		}
+		for (const pending of this.queuedRequests.splice(0)) {
+			pending.reject(error);
+		}
 		this.pendingRequests.clear();
 		this.pendingRequestByIdentity.clear();
 	}
@@ -247,6 +310,19 @@ function formatJobIdentityKey(job: LandblockRenderProductWorkerJob): string {
 		job.buildPolicyRevision,
 		job.texturePagePolicyRevision,
 	].join(":");
+}
+
+function comparePendingLandblockRenderRequests(
+	left: PendingLandblockRenderRequest,
+	right: PendingLandblockRenderRequest,
+): number {
+	const desiredOrder = compareDesiredLandblockRenderProducts(
+		left.desired,
+		right.desired,
+	);
+	return desiredOrder !== 0
+		? desiredOrder
+		: left.requestId.localeCompare(right.requestId);
 }
 
 function createWorker(): StaticLandblockRenderWorkerLike {

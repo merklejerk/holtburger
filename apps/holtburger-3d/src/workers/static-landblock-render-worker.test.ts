@@ -130,7 +130,7 @@ describe("static landblock render worker", () => {
 		expect(getLandblockTerrainRenderArtifact(result)).toBeNull();
 		expect(
 			getStaticObjectBundleArtifacts(result).map((layer) => layer.bundleKind),
-		).toEqual(["env-cell-static"]);
+		).toEqual([]);
 		expect(detailedArtifacts?.selectedEnvCellIds).toEqual([0xda550100]);
 		expect(detailedArtifacts?.structuredInteriorCells).toHaveLength(1);
 		expect(detailedArtifacts?.portalApertures).toHaveLength(1);
@@ -312,7 +312,7 @@ describe("static landblock render worker", () => {
 		expect(getLandblockTerrainRenderArtifact(result)).toBeNull();
 		expect(
 			getStaticObjectBundleArtifacts(result).map((layer) => layer.bundleKind),
-		).toEqual(["env-cell-static"]);
+		).toEqual([]);
 		expect(getDetailedLandblockRenderArtifacts(result)?.product).toBe(
 			"dungeon-env-cells",
 		);

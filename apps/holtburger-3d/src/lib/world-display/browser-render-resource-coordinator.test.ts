@@ -22,7 +22,7 @@ import {
 	type BrowserRenderResourceSurface,
 } from "./browser-render-resource-coordinator";
 import type { LandblockRenderProductWorkerResult } from "./landblock-render-product";
-import { createEmptyStaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
+import { createEmptyStaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
 import type { StaticRenderableSceneModel } from "./static-renderables";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 
@@ -44,8 +44,8 @@ describe("browser render resource coordinator", () => {
 					createGfxObjRecord(0x01000001),
 				]),
 				browserDestination: createOutdoorDestination(landblockId),
-				staticLandblockRenderArtifacts:
-					createEmptyStaticLandblockRenderArtifactStoreSnapshot(),
+				staticLandblockRenderProducts:
+					createEmptyStaticLandblockRenderProductSet(),
 			}),
 		);
 
@@ -71,8 +71,8 @@ describe("browser render resource coordinator", () => {
 					createGfxObjRecord(gfxObjId),
 				]),
 				browserDestination: createOutdoorDestination(landblockId),
-				staticLandblockRenderArtifacts:
-					createEmptyStaticLandblockRenderArtifactStoreSnapshot(),
+				staticLandblockRenderProducts:
+					createEmptyStaticLandblockRenderProductSet(),
 				runtimeAppearancePreviews: [
 					{
 						id: "preview",
@@ -115,8 +115,8 @@ describe("browser render resource coordinator", () => {
 					createGfxObjRecord(0x01000001),
 				]),
 				browserDestination: createOutdoorDestination(landblockId),
-				staticLandblockRenderArtifacts: {
-					...createEmptyStaticLandblockRenderArtifactStoreSnapshot(),
+				staticLandblockRenderProducts: {
+					...createEmptyStaticLandblockRenderProductSet(),
 					desiredCount: 1,
 					inFlightCount: 1,
 					latestDesiredIdentityKeys: [
@@ -148,8 +148,8 @@ describe("browser render resource coordinator", () => {
 					createGfxObjRecord(0x01000001),
 				]),
 				browserDestination: createInteriorDestination(envCellId),
-				staticLandblockRenderArtifacts: {
-					...createEmptyStaticLandblockRenderArtifactStoreSnapshot(),
+				staticLandblockRenderProducts: {
+					...createEmptyStaticLandblockRenderProductSet(),
 					desiredCount: 1,
 					inFlightCount: 1,
 					latestDesiredIdentityKeys: [
@@ -180,8 +180,8 @@ describe("browser render resource coordinator", () => {
 					}),
 				]),
 				browserDestination: createInteriorDestination(envCellId),
-				staticLandblockRenderArtifacts: {
-					...createEmptyStaticLandblockRenderArtifactStoreSnapshot(),
+				staticLandblockRenderProducts: {
+					...createEmptyStaticLandblockRenderProductSet(),
 					desiredCount: 1,
 					inFlightCount: 1,
 					latestDesiredIdentityKeys: [
@@ -206,7 +206,7 @@ describe("browser render resource coordinator", () => {
 			createCoordinatorInput({
 				assetState: createAssetState([]),
 				browserDestination: createInteriorDestination(firstEnvCellId),
-				staticLandblockRenderArtifacts: createArtifactSnapshot([
+				staticLandblockRenderProducts: createProductSet([
 					createDetailedProductResult(landblockId, [
 						firstEnvCellId,
 						secondEnvCellId,
@@ -243,7 +243,7 @@ function createCapturingSurface(): BrowserRenderResourceSurface & {
 		setRenderSceneContext() {},
 		setRenderChunkTransforms() {},
 		setTerrainScene() {},
-		setStaticLandblockRenderArtifacts() {},
+		replaceStaticLandblockProducts() {},
 		setStaticRenderableScene(scene) {
 			staticRenderableScenes.push(scene);
 		},
@@ -266,7 +266,7 @@ function createCoordinatorInput(
 	overrides: Partial<BrowserRenderResourceCoordinatorInput> &
 		Pick<
 			BrowserRenderResourceCoordinatorInput,
-			"assetState" | "browserDestination" | "staticLandblockRenderArtifacts"
+			"assetState" | "browserDestination" | "staticLandblockRenderProducts"
 		>,
 ): BrowserRenderResourceCoordinatorInput {
 	return {
@@ -288,7 +288,7 @@ function createCoordinatorInput(
 		activeRenderAnchor: null,
 		browserCameraFrame: null,
 		runtimeAppearancePreviews: [],
-		staticLandblockRenderArtifacts: overrides.staticLandblockRenderArtifacts,
+		staticLandblockRenderProducts: overrides.staticLandblockRenderProducts,
 		...overrides,
 	};
 }
@@ -301,11 +301,11 @@ function createAssetState(records: PreparedAssetRecord[]): AssetChannelState {
 	return state;
 }
 
-function createArtifactSnapshot(
+function createProductSet(
 	artifacts: readonly LandblockRenderProductWorkerResult[],
 ) {
 	return {
-		...createEmptyStaticLandblockRenderArtifactStoreSnapshot(),
+		...createEmptyStaticLandblockRenderProductSet(),
 		artifacts,
 		desiredCount: artifacts.length,
 		residentCount: artifacts.length,

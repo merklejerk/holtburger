@@ -39,7 +39,7 @@ import {
 	getDetailedLandblockRenderArtifacts,
 	type DetailedLandblockRenderArtifacts,
 } from "./landblock-render-product";
-import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
+import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
 
 export type CameraViewResidencyContext =
 	| {
@@ -140,7 +140,7 @@ export function buildWorldResidencyIndex(options: {
 }
 
 export function buildWorldResidencyIndexFromLandblockArtifacts(options: {
-	artifacts: StaticLandblockRenderArtifactStoreSnapshot;
+	artifacts: StaticLandblockRenderProductSet;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	sceneContext?: WorldRenderSceneContext;
 }): WorldResidencyIndex | null {
@@ -600,7 +600,7 @@ function structuredInteriorCellToResidencySource(
 }
 
 function collectArtifactResidencyCellSources(
-	artifacts: StaticLandblockRenderArtifactStoreSnapshot,
+	artifacts: StaticLandblockRenderProductSet,
 ): ResidencyCellSource[] {
 	const sources: ResidencyCellSource[] = [];
 	for (const result of artifacts.artifacts) {

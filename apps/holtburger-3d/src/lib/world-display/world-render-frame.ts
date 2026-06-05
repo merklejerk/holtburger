@@ -6,7 +6,7 @@ import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import type { RenderChunkTransform } from "./render-anchor";
 import type { RenderFrustum, RenderPlane } from "./render-spatial-math";
 import type { StaticRenderableSceneModel } from "./static-renderables";
-import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
+import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
 
@@ -98,7 +98,7 @@ export function buildWorldRenderFrame({
 	cameraFrame,
 	renderChunkTransforms,
 	staticRenderableScene,
-	staticLandblockRenderArtifacts,
+	staticLandblockRenderProducts,
 	structuredInteriorScene,
 	terrainScene,
 }: {
@@ -107,7 +107,7 @@ export function buildWorldRenderFrame({
 	cameraFrame: SceneCameraFrame;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	staticRenderableScene: StaticRenderableSceneModel;
-	staticLandblockRenderArtifacts: StaticLandblockRenderArtifactStoreSnapshot;
+	staticLandblockRenderProducts: StaticLandblockRenderProductSet;
 	structuredInteriorScene: StructuredInteriorSceneModel;
 	terrainScene: TerrainSceneModel;
 }): WorldRenderFrame {
@@ -117,7 +117,7 @@ export function buildWorldRenderFrame({
 		terrainScene,
 		staticRenderableScene,
 		structuredInteriorScene,
-		staticLandblockRenderArtifacts,
+		staticLandblockRenderProducts,
 		renderChunkTransforms,
 		frustum: buildRenderFrustumFromProjectionMatrix(viewProjectionMatrix),
 	});

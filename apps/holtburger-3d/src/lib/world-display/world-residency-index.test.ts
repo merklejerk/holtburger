@@ -10,7 +10,7 @@ import { makeOutdoorLandblockId } from "../landblocks";
 import type { LandblockRenderProductWorkerResult } from "./landblock-render-product";
 import type { RenderChunkTransform } from "./render-anchor";
 import { createTranslationMat4 } from "./render-math";
-import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
+import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
 import type { StructuredInteriorCell } from "./structured-interior-scene";
 import {
 	buildWorldResidencyIndex,
@@ -222,7 +222,7 @@ describe("world residency index", () => {
 		const envCellId = 0x01020001;
 		const index = buildWorldResidencyIndexFromLandblockArtifacts({
 			renderChunkTransforms: [createChunkTransform(landblockId, landblockId)],
-			artifacts: createStaticLandblockArtifactSnapshot([
+			artifacts: createStaticLandblockProductSet([
 				createDetailedLandblockProductArtifact({
 					landblockId,
 					envCellId,
@@ -477,9 +477,9 @@ function createRenderGeometry(
 	};
 }
 
-function createStaticLandblockArtifactSnapshot(
+function createStaticLandblockProductSet(
 	artifacts: readonly LandblockRenderProductWorkerResult[],
-): StaticLandblockRenderArtifactStoreSnapshot {
+): StaticLandblockRenderProductSet {
 	return {
 		artifacts,
 		desiredCount: artifacts.length,

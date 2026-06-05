@@ -13,7 +13,7 @@ import {
 	formatLandblockTopologyAssetId,
 } from "../landblocks";
 import type { LandblockRenderProductWorkerResult } from "./landblock-render-product";
-import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
+import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
 import {
 	deriveStructuredInteriorSceneModel,
 	deriveStructuredInteriorSceneModelFromLandblockArtifacts,
@@ -57,7 +57,7 @@ describe("structured interior scene", () => {
 		const envCell = createPreparedEnvCellAsset(0x016c0155, 0x0d000001)
 			.payload as PreparedEnvCellPayload;
 		const scene = deriveStructuredInteriorSceneModelFromLandblockArtifacts(
-			createArtifactSnapshot([
+			createProductSet([
 				createDetailedProductResult(0x016cffff, "outdoor-env-cells", envCell),
 			]),
 			destination,
@@ -214,9 +214,9 @@ function createLeafBspNode(): PreparedPolygonSetBspNode {
 	};
 }
 
-function createArtifactSnapshot(
+function createProductSet(
 	artifacts: readonly LandblockRenderProductWorkerResult[],
-): StaticLandblockRenderArtifactStoreSnapshot {
+): StaticLandblockRenderProductSet {
 	return {
 		artifacts,
 		desiredCount: artifacts.length,

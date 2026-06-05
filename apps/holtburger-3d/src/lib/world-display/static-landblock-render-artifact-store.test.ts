@@ -17,11 +17,11 @@ describe("static landblock render artifact store", () => {
 		expect(store.commitResult(createResult("request:old"))).toBe(false);
 		expect(store.commitResult(createResult("request:new"))).toBe(true);
 
-		const snapshot = store.snapshot();
-		expect(snapshot.residentCount).toBe(1);
-		expect(snapshot.staleResultCount).toBe(1);
-		expect(snapshot.committedResultCount).toBe(1);
-		expect(snapshot.artifacts[0]?.requestId).toBe("request:new");
+		const productSet = store.productSet();
+		expect(productSet.residentCount).toBe(1);
+		expect(productSet.staleResultCount).toBe(1);
+		expect(productSet.committedResultCount).toBe(1);
+		expect(productSet.artifacts[0]?.requestId).toBe("request:new");
 	});
 
 	it("evicts resident artifacts outside the desired target set", () => {
@@ -33,10 +33,10 @@ describe("static landblock render artifact store", () => {
 		expect(store.commitResult(createResult("request:one"))).toBe(true);
 		store.syncDesiredProducts([]);
 
-		const snapshot = store.snapshot();
-		expect(snapshot.residentCount).toBe(0);
-		expect(snapshot.desiredCount).toBe(0);
-		expect(snapshot.evictedResultCount).toBe(1);
+		const productSet = store.productSet();
+		expect(productSet.residentCount).toBe(0);
+		expect(productSet.desiredCount).toBe(0);
+		expect(productSet.evictedResultCount).toBe(1);
 	});
 });
 

@@ -72,10 +72,10 @@
 	} from "../lib/world-display/render-chunks";
 	import {
 		BrowserRenderResourceCoordinator,
-		createEmptyBrowserRenderResourceSnapshot,
+		createEmptyBrowserRenderResourceReport,
 		type BrowserRuntimeAppearancePreview,
 		type BrowserRenderResourceCoordinatorInput,
-		type BrowserRenderResourceSnapshot,
+		type BrowserRenderResourceReport,
 	} from "../lib/world-display/browser-render-resource-coordinator";
 	import {
 		StaticLandblockRenderArtifactCoordinator,
@@ -204,8 +204,8 @@
 				});
 			},
 		});
-	let renderResourceSnapshot = $state<BrowserRenderResourceSnapshot>(
-		createEmptyBrowserRenderResourceSnapshot(),
+	let renderResourceReport = $state<BrowserRenderResourceReport>(
+		createEmptyBrowserRenderResourceReport(),
 	);
 	let renderMetrics = $state<WorldRenderMetrics | null>(null);
 	let rendererCameraResidency = $state<BrowserCameraResidency | null>(null);
@@ -275,18 +275,18 @@
 	let runtimeAppearancePreviewSequence = 0;
 
 	const DEBUG_SUMMARY_DEBOUNCE_MS = 500;
-	const worldDisplay = $derived(renderResourceSnapshot.worldDisplay);
-	const sceneGeometryText = $derived(renderResourceSnapshot.sceneGeometryText);
-	const terrainHeightText = $derived(renderResourceSnapshot.terrainHeightText);
+	const worldDisplay = $derived(renderResourceReport.worldDisplay);
+	const sceneGeometryText = $derived(renderResourceReport.sceneGeometryText);
+	const terrainHeightText = $derived(renderResourceReport.terrainHeightText);
 	const staticRenderableText = $derived(
-		renderResourceSnapshot.staticRenderableText,
+		renderResourceReport.staticRenderableText,
 	);
 	const structuredInteriorText = $derived(
-		renderResourceSnapshot.structuredInteriorText,
+		renderResourceReport.structuredInteriorText,
 	);
-	const cellIndicatorText = $derived(renderResourceSnapshot.cellIndicatorText);
+	const cellIndicatorText = $derived(renderResourceReport.cellIndicatorText);
 	const portalDiagnosticsText = $derived(
-		renderResourceSnapshot.portalDiagnosticsText,
+		renderResourceReport.portalDiagnosticsText,
 	);
 	const portalRenderText = $derived.by(() => {
 		const metrics = renderMetrics?.portal;
@@ -370,7 +370,7 @@
 			: "waiting for performance sample";
 		return `Perf ${performanceText}. Diagnosis: ${diagnosis}. Draw pressure ${debug.renderCalls} visible draws from ${candidateBatchCount} candidate ${drawGroupTerm}; static candidates ${debug.staticBvhCandidateBatchCount}${staticCandidateRatio}; retained terrain ${debug.terrainRenderBatchCount}, static ${debug.staticRenderBatchCount}, interiors ${debug.structuredInteriorRenderBatchCount}; retained tris ${debug.renderTriangles}. Terrain family: visible ${debug.visibleTerrainTileCount}, ready ${debug.visibleTerrainOneDrawReadyTileCount}, blocked ${debug.visibleTerrainOneDrawBlockedTileCount}, ready slices ${debug.visibleTerrainDrawSliceReadyCount}, shader draws ${debug.terrainOneDrawShaderDrawCallCount}, submitted tiles ${debug.terrainOneDrawSubmittedTileCount}, submitted slices ${debug.terrainDrawSliceSubmittedCount}, tris ${debug.terrainOneDrawSubmittedTriangleCount}, atlas refs ${debug.terrainAtlasRefCount}, atlas candidates ${debug.terrainAtlasCandidateCount}, atlas blocker tiles ${debug.terrainAtlasBlockerTileCount}${terrainOneDrawBlockerSamples ? `, blockers ${terrainOneDrawBlockerSamples}` : ""}${terrainOneDrawSubmitFallbackSamples ? `, submit fallbacks ${terrainOneDrawSubmitFallbackSamples}` : ""}. Materials ${debug.materialCount}, textures ${debug.textureResourceCount}, indexed textures ${debug.indexedTextureResourceCount}, palettes ${debug.paletteResourceCount}; texture pages ${debug.texturePageBindingCount} bindings (${texturePageBuckets}), atlas failures ${debug.atlasFailureReasonCount}${atlasFailureSamples ? ` (${atlasFailureSamples})` : ""}; direct texture-page draws ${debug.directTexturePageDrawCount} (${debug.directPackedTexturePageDrawCount} packed, ${debug.directSingleEntryTexturePageDrawCount} single-entry)${directTexturePageFallbackSamples ? `, texture-page fallbacks ${directTexturePageFallbackSamples}` : ""}. Static eligibility: candidates ${debug.compactionCandidateDrawUnitCount}, families ${compactionMaterialFamilies}, retained direct families ${compactionRetainedFamilies}, material blockers ${compactionMaterialBlockers}, geometry blockers ${compactionGeometryBlockers}, bypasses ${debug.compactionBypassReasonCount}${compactionBypassSamples ? ` (${compactionBypassSamples})` : ""}. Fallbacks ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}. Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}, transition depth ${debug.transitionPortalMaxDepth}; canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
 	});
-	const sceneContextText = $derived(renderResourceSnapshot.sceneContextText);
+	const sceneContextText = $derived(renderResourceReport.sceneContextText);
 	const cameraResidencyText = $derived.by(() => {
 		if (!rendererCameraResidency) {
 			return "Waiting for renderer residency.";
@@ -391,14 +391,14 @@
 		return `${debug.renderGraphBaseScene} base, transition depth ${debug.transitionPortalMaxDepth}`;
 	});
 	const landblockVisibilityText = $derived(
-		renderResourceSnapshot.landblockVisibilityText,
+		renderResourceReport.landblockVisibilityText,
 	);
 	const cellVisibilityText = $derived.by(() => {
 		const debug = renderMetrics?.debug;
 		if (!debug) {
-			return renderResourceSnapshot.cellVisibilityFallbackText;
+			return renderResourceReport.cellVisibilityFallbackText;
 		}
-		return `${debug.visibleStructuredInteriorMeshCount}/${debug.structuredInteriorMeshCount} rendered mesh${debug.structuredInteriorMeshCount === 1 ? "" : "es"}; ${renderResourceSnapshot.cellVisibilityFallbackText}`;
+		return `${debug.visibleStructuredInteriorMeshCount}/${debug.structuredInteriorMeshCount} rendered mesh${debug.structuredInteriorMeshCount === 1 ? "" : "es"}; ${renderResourceReport.cellVisibilityFallbackText}`;
 	});
 	const portalRenderSummaryText = $derived.by(() => {
 		const metrics = renderMetrics?.portal;
@@ -513,7 +513,7 @@
 			renderResourceCoordinator.setSurface(null);
 		};
 	});
-	const sceneStatusText = $derived(renderResourceSnapshot.sceneStatusText);
+	const sceneStatusText = $derived(renderResourceReport.sceneStatusText);
 	const browserPanelSceneRows = $derived<BrowserPanelRow[]>([
 		{ label: "Mode", value: sceneContextText },
 		{ label: "Navigation", value: navigationFocusText },
@@ -523,7 +523,7 @@
 		{ label: "Landblocks", value: landblockVisibilityText },
 		{
 			label: "Worker artifacts",
-			value: renderResourceSnapshot.staticLandblockRenderArtifactText,
+			value: renderResourceReport.staticLandblockRenderArtifactText,
 		},
 		{ label: "Cells", value: cellVisibilityText },
 		{ label: "Renderer", value: rendererSummaryText },
@@ -534,10 +534,10 @@
 		{
 			title: "Geometry",
 			rows: [
-				{ label: "Terrain", value: renderResourceSnapshot.terrainCacheText },
+				{ label: "Terrain", value: renderResourceReport.terrainCacheText },
 				{
 					label: "Source",
-					value: renderResourceSnapshot.terrainDataSourceText,
+					value: renderResourceReport.terrainDataSourceText,
 				},
 				{ label: "Meshes", value: sceneGeometryText },
 				{ label: "Statics", value: staticRenderableText },
@@ -582,7 +582,7 @@
 				{ label: "Cache", value: assetCacheDebugText },
 				{
 					label: "Layers",
-					value: renderResourceSnapshot.staticRenderableLayerText,
+					value: renderResourceReport.staticRenderableLayerText,
 				},
 			],
 		},
@@ -712,7 +712,7 @@
 			scheduleCurrentSceneResourceUpdate();
 			return null;
 		}
-		const pick = renderResourceSnapshot.renderSpatialQuery.pickRay(
+		const pick = renderResourceReport.renderSpatialQuery.pickRay(
 			buildSceneCameraRenderRay(cameraFrame, viewportPoint),
 			query.mask,
 			query.ownerKeys,
@@ -986,8 +986,8 @@
 			activeRenderAnchor,
 			browserCameraFrame: getEffectiveBrowserCameraFrame(),
 			runtimeAppearancePreviews,
-			staticLandblockRenderArtifacts:
-				staticLandblockRenderCoordinator.getSnapshot(),
+			staticLandblockRenderProducts:
+				staticLandblockRenderCoordinator.getProductSet(),
 		});
 	}
 
@@ -1205,7 +1205,7 @@
 			const nextInput = pendingRenderResourceInput;
 			pendingRenderResourceInput = null;
 			if (nextInput) {
-				renderResourceSnapshot = renderResourceCoordinator.update(nextInput);
+				renderResourceReport = renderResourceCoordinator.update(nextInput);
 			}
 		}, 0);
 	}
@@ -1457,7 +1457,7 @@
 		if (!event.ctrlKey) {
 			const cameraFrame = getEffectiveBrowserCameraFrame();
 			const diagnosticPick = cameraFrame
-				? renderResourceSnapshot.renderSpatialQuery.pickRay(
+				? renderResourceReport.renderSpatialQuery.pickRay(
 						buildSceneCameraRenderRay(cameraFrame, viewportPoint),
 						new Set(["portal", "structured-cell"]),
 						new Set([DEBUG_OVERLAY_SPATIAL_OWNER_KEY]),
@@ -1478,7 +1478,7 @@
 
 		const cameraFrame = getEffectiveBrowserCameraFrame();
 		const terrainPick = cameraFrame
-			? renderResourceSnapshot.renderSpatialQuery.pickRay(
+			? renderResourceReport.renderSpatialQuery.pickRay(
 					buildSceneCameraRenderRay(cameraFrame, viewportPoint),
 					new Set(["terrain"]),
 					new Set([TERRAIN_SPATIAL_OWNER_KEY]),
@@ -2213,7 +2213,7 @@
 		const renderAnchorText =
 			activeRenderAnchor === null
 				? "none"
-				: `${formatHex32(activeRenderAnchor.landblockId)} via ${activeRenderAnchorSource ?? "unknown"}; chunks ${renderResourceSnapshot.activeRenderChunkCount}`;
+				: `${formatHex32(activeRenderAnchor.landblockId)} via ${activeRenderAnchorSource ?? "unknown"}; chunks ${renderResourceReport.activeRenderChunkCount}`;
 		return `metrics ${renderMetricsEventCount}; frames ${cameraFrameApplyCount}; pointer ${pointerInputEventCount}; keys ${keyboardInputEventCount}; anchor ${renderAnchorText}; focus ${document.activeElement?.tagName.toLowerCase() ?? "none"}.`;
 	}
 

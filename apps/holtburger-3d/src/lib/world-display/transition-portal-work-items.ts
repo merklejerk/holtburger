@@ -16,7 +16,7 @@ import {
 	type PortalApertureVisibleSide,
 } from "./portal-apertures";
 import type { RenderChunkPlacement } from "./render-chunks";
-import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
+import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 
 type TransitionPortalSource = "browser-free-camera" | "walkabout" | "runtime";
@@ -183,7 +183,7 @@ export function deriveTransitionPortalCandidatesFromLandblockArtifacts({
 	activeLandblockIds,
 	source = "browser-free-camera",
 }: {
-	artifacts: StaticLandblockRenderArtifactStoreSnapshot;
+	artifacts: StaticLandblockRenderProductSet;
 	activeLandblockIds: readonly number[];
 	source?: TransitionPortalSource;
 }): TransitionPortalCandidateModel | null {

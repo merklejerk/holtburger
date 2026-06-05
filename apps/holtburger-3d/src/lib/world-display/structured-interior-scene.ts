@@ -33,7 +33,7 @@ import {
 	getDetailedLandblockRenderArtifacts,
 	type DetailedLandblockRenderArtifacts,
 } from "./landblock-render-product";
-import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
+import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
 
 export interface LinkedOutdoorInteriorSelection {
 	envCellIds: number[];
@@ -120,7 +120,7 @@ export function deriveStructuredInteriorSceneModel(
 }
 
 export function deriveStructuredInteriorSceneModelFromLandblockArtifacts(
-	artifacts: StaticLandblockRenderArtifactStoreSnapshot,
+	artifacts: StaticLandblockRenderProductSet,
 	browserDestination: BrowserLocationSelection | null = null,
 	structuredInteriorCoverage: StructuredInteriorCoverage | null = null,
 ): StructuredInteriorSceneModel | null {

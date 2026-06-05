@@ -37,21 +37,21 @@ import {
 	syncWebgl2StaticLandblockRenderArtifactResources,
 	syncWebgl2WorldResources,
 } from "./webgl2-world-resources";
-import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
+import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
 import type { StaticObjectBundleArtifact } from "./static-bundle-layer";
 
 describe("webgl2 world resources", () => {
 	it("syncs resident outdoor static bundle layers into WebGL resources", () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
-		const firstSnapshot = createStaticLandblockArtifactSnapshot([
+		const firstProductSet = createStaticLandblockProductSet([
 			createStaticBundleLayer("static-layer", "revision-a"),
 		]);
 
 		syncWebgl2StaticLandblockRenderArtifactResources({
 			gl: gl.asContext(),
 			store,
-			artifacts: firstSnapshot,
+			artifacts: firstProductSet,
 		});
 
 		expect(store.staticBundleLayerResourceCount).toBe(1);
@@ -63,7 +63,7 @@ describe("webgl2 world resources", () => {
 		syncWebgl2StaticLandblockRenderArtifactResources({
 			gl: gl.asContext(),
 			store,
-			artifacts: firstSnapshot,
+			artifacts: firstProductSet,
 		});
 
 		expect(gl.createdTextures).toHaveLength(1);
@@ -71,7 +71,7 @@ describe("webgl2 world resources", () => {
 		syncWebgl2StaticLandblockRenderArtifactResources({
 			gl: gl.asContext(),
 			store,
-			artifacts: createStaticLandblockArtifactSnapshot([
+			artifacts: createStaticLandblockProductSet([
 				createStaticBundleLayer("static-layer", "revision-b"),
 			]),
 		});
@@ -83,7 +83,7 @@ describe("webgl2 world resources", () => {
 		syncWebgl2StaticLandblockRenderArtifactResources({
 			gl: gl.asContext(),
 			store,
-			artifacts: createStaticLandblockArtifactSnapshot([]),
+			artifacts: createStaticLandblockProductSet([]),
 		});
 
 		expect(store.staticBundleLayerResourceCount).toBe(0);
@@ -98,7 +98,7 @@ describe("webgl2 world resources", () => {
 		syncWebgl2StaticLandblockRenderArtifactResources({
 			gl: gl.asContext(),
 			store,
-			artifacts: createStaticLandblockProductArtifactSnapshot([
+			artifacts: createStaticLandblockProductSet([
 				createStaticLandblockProductArtifact({
 					landblockId,
 					product: "outdoor",
@@ -140,7 +140,7 @@ describe("webgl2 world resources", () => {
 		syncWebgl2StaticLandblockRenderArtifactResources({
 			gl: gl.asContext(),
 			store,
-			artifacts: createStaticLandblockProductArtifactSnapshot([
+			artifacts: createStaticLandblockProductSet([
 				createStaticLandblockProductArtifact({
 					landblockId,
 					product: "dungeon-env-cells",
@@ -169,7 +169,7 @@ describe("webgl2 world resources", () => {
 		syncWebgl2StaticLandblockRenderArtifactResources({
 			gl: gl.asContext(),
 			store,
-			artifacts: createStaticLandblockProductArtifactSnapshot([
+			artifacts: createStaticLandblockProductSet([
 				createDetailedLandblockProductArtifact(cell),
 			]),
 			renderChunkTransforms: [createChunkTransform()],
@@ -190,7 +190,7 @@ describe("webgl2 world resources", () => {
 		syncWebgl2StaticLandblockRenderArtifactResources({
 			gl: gl.asContext(),
 			store,
-			artifacts: createStaticLandblockProductArtifactSnapshot([
+			artifacts: createStaticLandblockProductSet([
 				createDetailedLandblockProductArtifact(cell),
 			]),
 			renderChunkTransforms: [createChunkTransform()],
@@ -1445,12 +1445,12 @@ function createChunkTransform({
 	};
 }
 
-function createStaticLandblockArtifactSnapshot(
+function createStaticLandblockProductSet(
 	layers: readonly StaticObjectBundleArtifact[],
 	product: LandblockRenderProductWorkerResult["product"] = "outdoor",
-): StaticLandblockRenderArtifactStoreSnapshot {
+): StaticLandblockRenderProductSet {
 	const landblockId = layers[0]?.landblockId ?? 0x1234;
-	return createStaticLandblockProductArtifactSnapshot([
+	return createStaticLandblockProductSet([
 		createStaticLandblockProductArtifact({
 			landblockId,
 			product,
@@ -1459,9 +1459,9 @@ function createStaticLandblockArtifactSnapshot(
 	]);
 }
 
-function createStaticLandblockProductArtifactSnapshot(
+function createStaticLandblockProductSet(
 	artifacts: readonly LandblockRenderProductWorkerResult[],
-): StaticLandblockRenderArtifactStoreSnapshot {
+): StaticLandblockRenderProductSet {
 	const residentCount = artifacts.length;
 	return {
 		artifacts,

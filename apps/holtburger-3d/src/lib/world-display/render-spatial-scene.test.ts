@@ -9,7 +9,7 @@ import {
 	STATIC_RENDERABLE_SPATIAL_OWNER_KEY,
 	STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY,
 } from "./render-spatial-scene";
-import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
+import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
 
 const IDENTITY_PLACEMENT = {
 	origin: { x: 0, y: 0, z: 0 },
@@ -20,7 +20,7 @@ describe("render spatial scene", () => {
 	it("derives coarse structured-cell spatial items from detailed landblock artifacts", () => {
 		const envCellId = 0x016c0155;
 		const items = deriveStructuredInteriorSpatialItemsFromLandblockArtifacts(
-			createStaticLandblockArtifactSnapshot([
+			createStaticLandblockProductSet([
 				createDetailedLandblockProductArtifact({ envCellId }),
 			]),
 		);
@@ -54,14 +54,14 @@ describe("render spatial scene", () => {
 	it("returns null when no resident detailed artifacts are available", () => {
 		expect(
 			deriveStructuredInteriorSpatialItemsFromLandblockArtifacts(
-				createStaticLandblockArtifactSnapshot([]),
+				createStaticLandblockProductSet([]),
 			),
 		).toBeNull();
 	});
 
 	it("derives coarse static spatial items from static bundle artifact hints", () => {
 		const items = deriveStaticRenderableSpatialItemsFromLandblockArtifacts(
-			createStaticLandblockArtifactSnapshot([
+			createStaticLandblockProductSet([
 				createStaticBundleProductArtifact(),
 			]),
 		);
@@ -105,7 +105,7 @@ describe("render spatial scene", () => {
 
 		expect(
 			deriveStaticRenderableSpatialItemsFromLandblockArtifacts(
-				createStaticLandblockArtifactSnapshot([
+				createStaticLandblockProductSet([
 					{
 						...artifact,
 						artifacts: [{ ...bundle, spatialHints: [] }],
@@ -116,9 +116,9 @@ describe("render spatial scene", () => {
 	});
 });
 
-function createStaticLandblockArtifactSnapshot(
+function createStaticLandblockProductSet(
 	artifacts: readonly LandblockRenderProductWorkerResult[],
-): StaticLandblockRenderArtifactStoreSnapshot {
+): StaticLandblockRenderProductSet {
 	return {
 		artifacts,
 		desiredCount: artifacts.length,

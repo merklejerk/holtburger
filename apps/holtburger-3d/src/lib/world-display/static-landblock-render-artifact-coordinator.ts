@@ -5,7 +5,7 @@ import {
 import { planDesiredLandblockRenderProducts } from "../assets/landblock-render-product-planner";
 import {
 	StaticLandblockRenderArtifactStore,
-	type StaticLandblockRenderArtifactStoreSnapshot,
+	type StaticLandblockRenderProductSet,
 } from "./static-landblock-render-artifact-store";
 import { StaticLandblockRenderWorkerClient } from "./static-landblock-render-worker-client";
 import type {
@@ -51,7 +51,7 @@ interface StaticLandblockRenderArtifactCoordinatorOptions {
 	buildPolicyRevision?: string;
 	texturePagePolicyRevision?: string;
 	onStoreChanged?: (
-		snapshot: StaticLandblockRenderArtifactStoreSnapshot,
+		productSet: StaticLandblockRenderProductSet,
 	) => void;
 	onError?: (error: Error, desired: DesiredLandblockRenderProduct) => void;
 }
@@ -63,7 +63,7 @@ export class StaticLandblockRenderArtifactCoordinator {
 	private readonly buildPolicyRevision: string;
 	private readonly texturePagePolicyRevision: string;
 	private readonly onStoreChanged:
-		| ((snapshot: StaticLandblockRenderArtifactStoreSnapshot) => void)
+		| ((productSet: StaticLandblockRenderProductSet) => void)
 		| undefined;
 	private readonly onError:
 		| ((error: Error, desired: DesiredLandblockRenderProduct) => void)
@@ -121,21 +121,22 @@ export class StaticLandblockRenderArtifactCoordinator {
 					if (this.disposed) {
 						return;
 					}
-					if (this.store.commitResult(result)) {
-						this.onStoreChanged?.(this.store.snapshot());
+					const committed = this.store.commitResult(result);
+					if (committed) {
+						this.onStoreChanged?.(this.store.productSet());
 					}
 				})
 				.catch((error) => {
 					const normalized = toError(error);
 					this.store.markError(desired);
 					this.onError?.(normalized, desired);
-					this.onStoreChanged?.(this.store.snapshot());
+					this.onStoreChanged?.(this.store.productSet());
 				});
 		}
 	}
 
-	getSnapshot(): StaticLandblockRenderArtifactStoreSnapshot {
-		return this.store.snapshot();
+	getProductSet(): StaticLandblockRenderProductSet {
+		return this.store.productSet();
 	}
 
 	dispose(): void {

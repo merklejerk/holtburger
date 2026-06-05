@@ -50,7 +50,7 @@ import {
 	formatRenderDomainKey,
 	WORLD_RENDER_DOMAIN,
 } from "./render-domains";
-import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
+import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
 import type {
 	StaticBundleSpatialHint,
 	StaticObjectBundleArtifact,
@@ -78,7 +78,7 @@ export function deriveStructuredInteriorSpatialItems(
 }
 
 export function deriveStructuredInteriorSpatialItemsFromLandblockArtifacts(
-	artifacts: StaticLandblockRenderArtifactStoreSnapshot,
+	artifacts: StaticLandblockRenderProductSet,
 ): RenderSpatialItem[] | null {
 	const detailedArtifacts = artifacts.artifacts
 		.map(getDetailedLandblockRenderArtifacts)
@@ -110,7 +110,7 @@ export function deriveStaticRenderableSpatialItems(
 }
 
 export function deriveStaticRenderableSpatialItemsFromLandblockArtifacts(
-	artifacts: StaticLandblockRenderArtifactStoreSnapshot,
+	artifacts: StaticLandblockRenderProductSet,
 ): RenderSpatialItem[] | null {
 	const bundleArtifacts = artifacts.artifacts.flatMap((result) =>
 		getStaticObjectBundleArtifacts(result),

@@ -39,6 +39,7 @@ import {
 import type { IndexedResourceAtlasPlan } from "./texture-pages/indexed-resource-atlas-planner";
 import { createEmptyTexturePageAtlasPlan } from "./texture-pages/texture-page-atlas-planner";
 import type { LandblockTerrainRenderArtifact } from "./terrain-render-artifact";
+import type { LandblockRenderProductWorkerResult } from "./landblock-render-product";
 import type { TerrainSceneModel } from "./terrain-scene";
 import {
 	buildTerrainTileLayerGeometry,
@@ -209,6 +210,77 @@ describe("webgl2 world resources", () => {
 
 		expect(store.staticBundleLayerResourceCount).toBe(0);
 		expect(gl.deletedTextures).toHaveLength(2);
+	});
+
+	it("syncs additive outdoor and env-cell static bundle products independently", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2WorldResourceStore();
+		const landblockId = 0xda55ffff;
+
+		syncWebgl2StaticLandblockRenderArtifactResources({
+			gl: gl.asContext(),
+			store,
+			artifacts: createStaticLandblockProductArtifactSnapshot([
+				createStaticLandblockProductArtifact({
+					landblockId,
+					product: "outdoor",
+					layers: [
+						createStaticBundleLayer("static-layer/buildings", "revision-a", {
+							landblockId,
+							layerKind: "outdoor-buildings",
+						}),
+					],
+				}),
+				createStaticLandblockProductArtifact({
+					landblockId,
+					product: "outdoor-env-cells",
+					layers: [
+						createStaticBundleLayer("static-layer/env-cell", "revision-a", {
+							landblockId,
+							layerKind: "env-cell-static",
+						}),
+					],
+				}),
+			]),
+		});
+
+		expect(store.staticBundleLayerResourceCount).toBe(2);
+		expect(
+			[...store.staticBundleLayerResources.layersByKey.keys()].sort(),
+		).toEqual([
+			"static-layer/buildings:revision-a",
+			"static-layer/env-cell:revision-a",
+		]);
+		expect(gl.createdTextures).toHaveLength(2);
+	});
+
+	it("syncs dungeon env-cell static bundle products without outdoor resources", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2WorldResourceStore();
+		const landblockId = 0xda55ffff;
+
+		syncWebgl2StaticLandblockRenderArtifactResources({
+			gl: gl.asContext(),
+			store,
+			artifacts: createStaticLandblockProductArtifactSnapshot([
+				createStaticLandblockProductArtifact({
+					landblockId,
+					product: "dungeon-env-cells",
+					layers: [
+						createStaticBundleLayer("static-layer/dungeon-env", "revision-a", {
+							landblockId,
+							layerKind: "env-cell-static",
+						}),
+					],
+				}),
+			]),
+		});
+
+		expect(store.staticBundleLayerResourceCount).toBe(1);
+		expect([...store.staticBundleLayerResources.layersByKey.keys()]).toEqual([
+			"static-layer/dungeon-env:revision-a",
+		]);
+		expect(gl.createdTextures).toHaveLength(1);
 	});
 
 	it("realizes staged static draw units as retained WebGL2 resources", () => {
@@ -2780,32 +2852,87 @@ function createStaticLandblockArtifactSnapshot(
 	layers: readonly StaticLandblockRenderBundleLayer[],
 ): StaticLandblockRenderArtifactStoreSnapshot {
 	const landblockId = layers[0]?.landblockId ?? 0x1234;
+	return createStaticLandblockProductArtifactSnapshot([
+		createStaticLandblockProductArtifact({
+			landblockId,
+			product: "outdoor",
+			layers,
+		}),
+	]);
+}
+
+function createStaticLandblockProductArtifactSnapshot(
+	artifacts: readonly LandblockRenderProductWorkerResult[],
+): StaticLandblockRenderArtifactStoreSnapshot {
+	const residentCount = artifacts.length;
 	return {
-		artifacts: [
-			{
-				type: "landblock-render-product-built",
-				jobId: "job",
-				landblockId,
-				product: "outdoor",
-				requestId: "request",
-				buildPolicyRevision: "build:v1",
-				texturePagePolicyRevision: "pages:v1",
-				terrainArtifact: null,
-				staticBundleLayers: layers,
-				diagnostics: {
-					status: "ready",
-					messages: [],
-				},
-			},
-		],
-		desiredCount: layers.length > 0 ? 1 : 0,
-		residentCount: layers.length > 0 ? 1 : 0,
+		artifacts,
+		desiredCount: residentCount,
+		residentCount,
 		inFlightCount: 0,
 		staleResultCount: 0,
-		committedResultCount: layers.length > 0 ? 1 : 0,
+		committedResultCount: residentCount,
 		evictedResultCount: 0,
 		errorCount: 0,
 		latestDesiredIdentityKeys: [],
+	};
+}
+
+function createStaticLandblockProductArtifact({
+	landblockId,
+	product,
+	layers,
+}: {
+	landblockId: number;
+	product: LandblockRenderProductWorkerResult["product"];
+	layers: readonly StaticLandblockRenderBundleLayer[];
+}): LandblockRenderProductWorkerResult {
+	const base = {
+		type: "landblock-render-product-built" as const,
+		jobId: `job:${landblockId}:${product}`,
+		landblockId,
+		product,
+		requestId: "request",
+		buildPolicyRevision: "build:v1",
+		texturePagePolicyRevision: "pages:v1",
+		terrainArtifact: null,
+		staticBundleLayers: layers,
+		diagnostics: {
+			status: "ready" as const,
+			messages: [],
+		},
+	};
+	if (product === "outdoor") {
+		return base;
+	}
+	return {
+		...base,
+		product,
+		detailedArtifacts: {
+			key: `detailed:${landblockId}:${product}`,
+			landblockId,
+			product,
+			requestId: "request",
+			buildPolicyRevision: "build:v1",
+			texturePagePolicyRevision: "pages:v1",
+			selectedEnvCellIds: [],
+			structuredInteriorCells: [],
+			cellStructureMetadata: [],
+			portalLinks: [],
+			portalApertures: [],
+			visibility: {
+				objectVisibilityRecords: [],
+				cellVisibilityRecords: [],
+			},
+			spatial: {
+				envCellResidencyBvh: {
+					coordinateSpace: "landblock-topology-residency",
+					nodes: [],
+					items: [],
+				},
+				envCellLocalBvhs: [],
+			},
+		},
 	};
 }
 

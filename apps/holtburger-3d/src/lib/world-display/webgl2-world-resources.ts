@@ -53,6 +53,7 @@ import {
 } from "./renderer-resource-graph";
 import type { StaticRenderableSceneModel } from "./static-renderables";
 import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
+import type { StaticLandblockRenderBundleLayer } from "./static-bundle-layer";
 import type {
 	DirectRenderSurfaceUploadDataType,
 	DirectRenderSurfaceUploadFormat,
@@ -501,11 +502,11 @@ export function syncWebgl2StaticLandblockRenderArtifactResources({
 	artifacts: StaticLandblockRenderArtifactStoreSnapshot;
 }): void {
 	const layers = artifacts.artifacts.flatMap((artifact) =>
-		artifact.staticBundleLayers.filter(
-			(layer) =>
-				artifact.product === "outdoor" &&
-				(layer.layerKind === "outdoor-buildings" ||
-					layer.layerKind === "outdoor-detail"),
+		artifact.staticBundleLayers.filter((layer) =>
+			isRenderableStaticLandblockArtifactLayer(
+				artifact.product,
+				layer.layerKind,
+			),
 		),
 	);
 	syncWebgl2StaticBundleLayerResources({
@@ -527,6 +528,21 @@ export function syncWebgl2StaticLandblockRenderArtifactResources({
 		(total, resource) => total + resource.texturePages.length,
 		0,
 	);
+}
+
+function isRenderableStaticLandblockArtifactLayer(
+	product: StaticLandblockRenderArtifactStoreSnapshot["artifacts"][number]["product"],
+	layerKind: StaticLandblockRenderBundleLayer["layerKind"],
+): boolean {
+	switch (product) {
+		case "outdoor":
+			return (
+				layerKind === "outdoor-buildings" || layerKind === "outdoor-detail"
+			);
+		case "outdoor-env-cells":
+		case "dungeon-env-cells":
+			return layerKind === "env-cell-static";
+	}
 }
 
 export function markWebgl2TextureAtlasGenerationReplacementPending({

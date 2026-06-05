@@ -36,7 +36,7 @@ import type { TerrainSceneModel } from "./terrain-scene";
 
 const FALLBACK_REASON_SAMPLE_LIMIT = 8;
 
-export interface PreparedBvhDebugMetrics {
+export interface RenderBvhVisibilityMetrics {
 	terrainBvhVisibleItemCount: number;
 	terrainBvhTotalItemCount: number;
 	outdoorStaticBvhVisibleItemCount: number;
@@ -51,13 +51,13 @@ export interface PreparedBvhDebugMetrics {
 	queryTimeMs: number;
 }
 
-export interface PreparedBvhVisibilitySnapshot {
-	metrics: PreparedBvhDebugMetrics;
+export interface RenderBvhVisibilitySnapshot {
+	metrics: RenderBvhVisibilityMetrics;
 	visibleItemKeys: ReadonlySet<RenderBvhItemKey>;
 	fallbackReasons: readonly string[];
 }
 
-function createEmptyPreparedBvhDebugMetrics(): PreparedBvhDebugMetrics {
+function createEmptyRenderBvhVisibilityMetrics(): RenderBvhVisibilityMetrics {
 	return {
 		terrainBvhVisibleItemCount: 0,
 		terrainBvhTotalItemCount: 0,
@@ -74,7 +74,7 @@ function createEmptyPreparedBvhDebugMetrics(): PreparedBvhDebugMetrics {
 	};
 }
 
-export function derivePreparedBvhDebugMetrics(options: {
+export function deriveRenderBvhVisibilityMetrics(options: {
 	assetState: AssetChannelState;
 	terrainScene: TerrainSceneModel;
 	staticRenderableScene: StaticRenderableSceneModel;
@@ -83,11 +83,11 @@ export function derivePreparedBvhDebugMetrics(options: {
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	frustum: RenderFrustum;
 	now?: () => number;
-}): PreparedBvhDebugMetrics {
-	return derivePreparedBvhVisibilitySnapshot(options).metrics;
+}): RenderBvhVisibilityMetrics {
+	return deriveRenderBvhVisibilitySnapshot(options).metrics;
 }
 
-export function derivePreparedBvhVisibilitySnapshot(options: {
+export function deriveRenderBvhVisibilitySnapshot(options: {
 	assetState: AssetChannelState;
 	terrainScene: TerrainSceneModel;
 	staticRenderableScene: StaticRenderableSceneModel;
@@ -96,10 +96,10 @@ export function derivePreparedBvhVisibilitySnapshot(options: {
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	frustum: RenderFrustum;
 	now?: () => number;
-}): PreparedBvhVisibilitySnapshot {
+}): RenderBvhVisibilitySnapshot {
 	const now = options.now ?? defaultNow;
 	const startedAt = now();
-	const metrics = createEmptyPreparedBvhDebugMetrics();
+	const metrics = createEmptyRenderBvhVisibilityMetrics();
 	const visibleItemKeys = new Set<RenderBvhItemKey>();
 	const fallbackReasons: string[] = [];
 	const chunkTransformsByKey = new Map(

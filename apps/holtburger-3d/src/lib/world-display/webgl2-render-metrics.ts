@@ -307,70 +307,6 @@ export function createWebgl2RenderMetrics(
 				input.worldStore?.terrainTexturePageCount ?? 0,
 			terrainDetailTexturePageCount:
 				input.worldStore?.terrainDetailTexturePageCount ?? 0,
-			rgbaTexturePageFamilyShaderDrawCallCount:
-				input.submitMetrics.rgbaTexturePageFamilyShaderDrawCallCount,
-			rgbaTexturePageFamilySubmittedBatchCount:
-				input.submitMetrics.rgbaTexturePageFamilySubmittedBatchCount,
-			rgbaTexturePageFamilySubmittedDrawSliceCount:
-				input.submitMetrics.rgbaTexturePageFamilySubmittedDrawSliceCount,
-			rgbaTexturePageFamilySubmittedSliceRepresentedDrawUnitCount:
-				input.submitMetrics
-					.rgbaTexturePageFamilySubmittedSliceRepresentedDrawUnitCount,
-			rgbaTexturePageFamilySubmittedTriangleCount:
-				input.submitMetrics.rgbaTexturePageFamilySubmittedTriangleCount,
-			rgbaTexturePageFamilyReplacedDrawUnitCount:
-				input.submitMetrics.rgbaTexturePageFamilyReplacedDrawUnitCount,
-			rgbaTexturePageFamilyReplacedDrawUnitTriangleCount:
-				input.submitMetrics.rgbaTexturePageFamilyReplacedDrawUnitTriangleCount,
-			rgbaTexturePageFamilyConservativeOverdrawTriangleCount:
-				input.submitMetrics
-					.rgbaTexturePageFamilyConservativeOverdrawTriangleCount,
-			rgbaTexturePageFamilyConservativeOverdrawRatio:
-				input.submitMetrics.rgbaTexturePageFamilyConservativeOverdrawRatio,
-			rgbaTexturePageFamilyRetainedDirectDrawUnitCount:
-				input.submitMetrics.rgbaTexturePageFamilyRetainedDirectDrawUnitCount,
-			rgbaTexturePageFamilyOriginalDrawCallEstimateCount:
-				input.submitMetrics.rgbaTexturePageFamilyOriginalDrawCallEstimateCount,
-			rgbaTexturePageFamilySubmittedDrawCallEstimateCount:
-				input.submitMetrics.rgbaTexturePageFamilySubmittedDrawCallEstimateCount,
-			rgbaTexturePageFamilyDrawCallSavingsCount:
-				input.submitMetrics.rgbaTexturePageFamilyDrawCallSavingsCount,
-			rgbaTexturePageFamilyNoVisibleRouteCount:
-				input.submitMetrics.rgbaTexturePageFamilyNoVisibleRouteCount,
-			rgbaTexturePageFamilyNoVisibleExteriorRouteCount:
-				input.submitMetrics.rgbaTexturePageFamilyNoVisibleExteriorRouteCount,
-			rgbaTexturePageFamilyNoVisibleInteriorRouteCount:
-				input.submitMetrics.rgbaTexturePageFamilyNoVisibleInteriorRouteCount,
-			rgbaTexturePageFamilyNoVisibleOtherRouteCount:
-				input.submitMetrics.rgbaTexturePageFamilyNoVisibleOtherRouteCount,
-			rgbaTexturePageFamilyFallbackSamples: [
-				...input.submitMetrics.rgbaTexturePageFamilyFallbackSamples,
-			],
-			indexedPalettedFamilyShaderDrawCallCount:
-				input.submitMetrics.indexedPalettedFamilyShaderDrawCallCount,
-			indexedPalettedFamilySubmittedBatchCount:
-				input.submitMetrics.indexedPalettedFamilySubmittedBatchCount,
-			indexedPalettedFamilySubmittedDrawSliceCount:
-				input.submitMetrics.indexedPalettedFamilySubmittedDrawSliceCount,
-			indexedPalettedFamilySubmittedSliceRepresentedDrawUnitCount:
-				input.submitMetrics
-					.indexedPalettedFamilySubmittedSliceRepresentedDrawUnitCount,
-			indexedPalettedFamilySubmittedTriangleCount:
-				input.submitMetrics.indexedPalettedFamilySubmittedTriangleCount,
-			indexedPalettedFamilyReplacedDrawUnitCount:
-				input.submitMetrics.indexedPalettedFamilyReplacedDrawUnitCount,
-			indexedPalettedFamilyReplacedDrawUnitTriangleCount:
-				input.submitMetrics.indexedPalettedFamilyReplacedDrawUnitTriangleCount,
-			indexedPalettedFamilyRetainedDirectDrawUnitCount:
-				input.submitMetrics.indexedPalettedFamilyRetainedDirectDrawUnitCount,
-			indexedPalettedFamilyOriginalDrawCallEstimateCount:
-				input.submitMetrics.indexedPalettedFamilyOriginalDrawCallEstimateCount,
-			indexedPalettedFamilySubmittedDrawCallEstimateCount:
-				input.submitMetrics.indexedPalettedFamilySubmittedDrawCallEstimateCount,
-			indexedPalettedFamilyDrawCallSavingsCount:
-				input.submitMetrics.indexedPalettedFamilyDrawCallSavingsCount,
-			indexedPalettedFamilyNoVisibleRouteCount:
-				input.submitMetrics.indexedPalettedFamilyNoVisibleRouteCount,
 			retainedDirectOpaqueDrawUnitCount:
 				input.submitMetrics.retainedDirectOpaqueDrawUnitCount,
 			retainedDirectBlendedDrawUnitCount:
@@ -383,8 +319,6 @@ export function createWebgl2RenderMetrics(
 				input.submitMetrics.directPackedTexturePageDrawCount,
 			directPackedTexturePageEstimatedBindAvoidedCount:
 				input.submitMetrics.directPackedTexturePageEstimatedBindAvoidedCount,
-			directPackedTexturePageTextureCount:
-				input.submitMetrics.directPackedTexturePageTextureCount,
 			directTexturePageFallbackSamples: [
 				...input.submitMetrics.directTexturePageFallbackSamples,
 			],
@@ -487,61 +421,6 @@ export function createWebgl2RenderMetrics(
 							input.worldStore.terrainTexturePageCount,
 						"webgl2-terrain-detail-texture-pages":
 							input.worldStore.terrainDetailTexturePageCount,
-						"webgl2-rgba-family-shader-draws":
-							input.submitMetrics.rgbaTexturePageFamilyShaderDrawCallCount,
-						"webgl2-rgba-family-submitted-batches":
-							input.submitMetrics.rgbaTexturePageFamilySubmittedBatchCount,
-						"webgl2-rgba-family-submitted-slices":
-							input.submitMetrics.rgbaTexturePageFamilySubmittedDrawSliceCount,
-						"webgl2-rgba-family-submitted-slice-draw-units":
-							input.submitMetrics
-								.rgbaTexturePageFamilySubmittedSliceRepresentedDrawUnitCount,
-						"webgl2-rgba-family-submitted-triangles":
-							input.submitMetrics.rgbaTexturePageFamilySubmittedTriangleCount,
-						"webgl2-rgba-family-replaced-draw-units":
-							input.submitMetrics.rgbaTexturePageFamilyReplacedDrawUnitCount,
-						"webgl2-rgba-family-replaced-triangles":
-							input.submitMetrics
-								.rgbaTexturePageFamilyReplacedDrawUnitTriangleCount,
-						"webgl2-rgba-family-original-draw-call-estimate":
-							input.submitMetrics
-								.rgbaTexturePageFamilyOriginalDrawCallEstimateCount,
-						"webgl2-rgba-family-submitted-draw-call-estimate":
-							input.submitMetrics
-								.rgbaTexturePageFamilySubmittedDrawCallEstimateCount,
-						"webgl2-rgba-family-conservative-overdraw-triangles":
-							input.submitMetrics
-								.rgbaTexturePageFamilyConservativeOverdrawTriangleCount,
-						"webgl2-rgba-family-draw-call-savings":
-							input.submitMetrics.rgbaTexturePageFamilyDrawCallSavingsCount,
-						"webgl2-rgba-family-no-visible-routes":
-							input.submitMetrics.rgbaTexturePageFamilyNoVisibleRouteCount,
-						"webgl2-indexed-family-shader-draws":
-							input.submitMetrics.indexedPalettedFamilyShaderDrawCallCount,
-						"webgl2-indexed-family-submitted-batches":
-							input.submitMetrics.indexedPalettedFamilySubmittedBatchCount,
-						"webgl2-indexed-family-submitted-slices":
-							input.submitMetrics.indexedPalettedFamilySubmittedDrawSliceCount,
-						"webgl2-indexed-family-submitted-slice-draw-units":
-							input.submitMetrics
-								.indexedPalettedFamilySubmittedSliceRepresentedDrawUnitCount,
-						"webgl2-indexed-family-submitted-triangles":
-							input.submitMetrics.indexedPalettedFamilySubmittedTriangleCount,
-						"webgl2-indexed-family-replaced-draw-units":
-							input.submitMetrics.indexedPalettedFamilyReplacedDrawUnitCount,
-						"webgl2-indexed-family-replaced-triangles":
-							input.submitMetrics
-								.indexedPalettedFamilyReplacedDrawUnitTriangleCount,
-						"webgl2-indexed-family-original-draw-call-estimate":
-							input.submitMetrics
-								.indexedPalettedFamilyOriginalDrawCallEstimateCount,
-						"webgl2-indexed-family-submitted-draw-call-estimate":
-							input.submitMetrics
-								.indexedPalettedFamilySubmittedDrawCallEstimateCount,
-						"webgl2-indexed-family-draw-call-savings":
-							input.submitMetrics.indexedPalettedFamilyDrawCallSavingsCount,
-						"webgl2-indexed-family-no-visible-routes":
-							input.submitMetrics.indexedPalettedFamilyNoVisibleRouteCount,
 						"webgl2-indexed-descriptor-draw-units":
 							input.worldStore.indexedMaterialDescriptorDrawUnitCount,
 						"webgl2-indexed-descriptor-compaction-candidates":
@@ -571,8 +450,6 @@ export function createWebgl2RenderMetrics(
 						"webgl2-direct-packed-texture-page-estimated-texture-binds-avoided":
 							input.submitMetrics
 								.directPackedTexturePageEstimatedBindAvoidedCount,
-						"webgl2-direct-packed-texture-page-textures":
-							input.submitMetrics.directPackedTexturePageTextureCount,
 						"webgl2-detail-overlay": input.worldStore.detailTextureCount,
 						...prefixCounts(
 							"webgl2-visible-",

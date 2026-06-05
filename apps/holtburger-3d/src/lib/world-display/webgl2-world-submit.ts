@@ -121,41 +121,10 @@ export interface Webgl2WorldSubmitMetrics {
 	visibleRetainedDirectDrawUnitCountsByCompactionFamily: Readonly<
 		Record<string, number>
 	>;
-	rgbaTexturePageFamilyShaderDrawCallCount: number;
-	rgbaTexturePageFamilySubmittedBatchCount: number;
-	rgbaTexturePageFamilySubmittedDrawSliceCount: number;
-	rgbaTexturePageFamilySubmittedSliceRepresentedDrawUnitCount: number;
-	rgbaTexturePageFamilySubmittedTriangleCount: number;
-	rgbaTexturePageFamilyReplacedDrawUnitCount: number;
-	rgbaTexturePageFamilyReplacedDrawUnitTriangleCount: number;
-	rgbaTexturePageFamilyConservativeOverdrawTriangleCount: number;
-	rgbaTexturePageFamilyConservativeOverdrawRatio: number;
-	rgbaTexturePageFamilyRetainedDirectDrawUnitCount: number;
-	rgbaTexturePageFamilyOriginalDrawCallEstimateCount: number;
-	rgbaTexturePageFamilySubmittedDrawCallEstimateCount: number;
-	rgbaTexturePageFamilyDrawCallSavingsCount: number;
-	rgbaTexturePageFamilyNoVisibleRouteCount: number;
-	rgbaTexturePageFamilyNoVisibleExteriorRouteCount: number;
-	rgbaTexturePageFamilyNoVisibleInteriorRouteCount: number;
-	rgbaTexturePageFamilyNoVisibleOtherRouteCount: number;
-	rgbaTexturePageFamilyFallbackSamples: readonly string[];
-	indexedPalettedFamilyShaderDrawCallCount: number;
-	indexedPalettedFamilySubmittedBatchCount: number;
-	indexedPalettedFamilySubmittedDrawSliceCount: number;
-	indexedPalettedFamilySubmittedSliceRepresentedDrawUnitCount: number;
-	indexedPalettedFamilySubmittedTriangleCount: number;
-	indexedPalettedFamilyReplacedDrawUnitCount: number;
-	indexedPalettedFamilyReplacedDrawUnitTriangleCount: number;
-	indexedPalettedFamilyRetainedDirectDrawUnitCount: number;
-	indexedPalettedFamilyOriginalDrawCallEstimateCount: number;
-	indexedPalettedFamilySubmittedDrawCallEstimateCount: number;
-	indexedPalettedFamilyDrawCallSavingsCount: number;
-	indexedPalettedFamilyNoVisibleRouteCount: number;
 	directTexturePageDrawCount: number;
 	directSingleEntryTexturePageDrawCount: number;
 	directPackedTexturePageDrawCount: number;
 	directPackedTexturePageEstimatedBindAvoidedCount: number;
-	directPackedTexturePageTextureCount: number;
 	directTexturePageFallbackSamples: readonly string[];
 	staticBundleLayerSubmittedCount: number;
 	staticBundleGeometrySubmittedCount: number;
@@ -197,41 +166,10 @@ const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	triangleCount: 0,
 	visibleDrawUnitCountsByMaterialKind: {},
 	visibleRetainedDirectDrawUnitCountsByCompactionFamily: {},
-	rgbaTexturePageFamilyShaderDrawCallCount: 0,
-	rgbaTexturePageFamilySubmittedBatchCount: 0,
-	rgbaTexturePageFamilySubmittedDrawSliceCount: 0,
-	rgbaTexturePageFamilySubmittedSliceRepresentedDrawUnitCount: 0,
-	rgbaTexturePageFamilySubmittedTriangleCount: 0,
-	rgbaTexturePageFamilyReplacedDrawUnitCount: 0,
-	rgbaTexturePageFamilyReplacedDrawUnitTriangleCount: 0,
-	rgbaTexturePageFamilyConservativeOverdrawTriangleCount: 0,
-	rgbaTexturePageFamilyConservativeOverdrawRatio: 0,
-	rgbaTexturePageFamilyRetainedDirectDrawUnitCount: 0,
-	rgbaTexturePageFamilyOriginalDrawCallEstimateCount: 0,
-	rgbaTexturePageFamilySubmittedDrawCallEstimateCount: 0,
-	rgbaTexturePageFamilyDrawCallSavingsCount: 0,
-	rgbaTexturePageFamilyNoVisibleRouteCount: 0,
-	rgbaTexturePageFamilyNoVisibleExteriorRouteCount: 0,
-	rgbaTexturePageFamilyNoVisibleInteriorRouteCount: 0,
-	rgbaTexturePageFamilyNoVisibleOtherRouteCount: 0,
-	rgbaTexturePageFamilyFallbackSamples: [],
-	indexedPalettedFamilyShaderDrawCallCount: 0,
-	indexedPalettedFamilySubmittedBatchCount: 0,
-	indexedPalettedFamilySubmittedDrawSliceCount: 0,
-	indexedPalettedFamilySubmittedSliceRepresentedDrawUnitCount: 0,
-	indexedPalettedFamilySubmittedTriangleCount: 0,
-	indexedPalettedFamilyReplacedDrawUnitCount: 0,
-	indexedPalettedFamilyReplacedDrawUnitTriangleCount: 0,
-	indexedPalettedFamilyRetainedDirectDrawUnitCount: 0,
-	indexedPalettedFamilyOriginalDrawCallEstimateCount: 0,
-	indexedPalettedFamilySubmittedDrawCallEstimateCount: 0,
-	indexedPalettedFamilyDrawCallSavingsCount: 0,
-	indexedPalettedFamilyNoVisibleRouteCount: 0,
 	directTexturePageDrawCount: 0,
 	directSingleEntryTexturePageDrawCount: 0,
 	directPackedTexturePageDrawCount: 0,
 	directPackedTexturePageEstimatedBindAvoidedCount: 0,
-	directPackedTexturePageTextureCount: 0,
 	directTexturePageFallbackSamples: [],
 	staticBundleLayerSubmittedCount: 0,
 	staticBundleGeometrySubmittedCount: 0,
@@ -307,7 +245,6 @@ export function createEmptyWebgl2WorldSubmitMetrics(): Webgl2WorldSubmitMetrics 
 	return {
 		...EMPTY_SUBMIT_METRICS,
 		visibleDrawUnitCountsByMaterialKind: {},
-		rgbaTexturePageFamilyFallbackSamples: [],
 		directTexturePageFallbackSamples: [],
 	};
 }

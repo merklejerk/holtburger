@@ -33,9 +33,9 @@ Phase 4E8 staged structured-interior draw path removal is implemented.
 Phase 4E9 staged static renderable draw path removal is implemented.
 Phase 4E10 static compaction render-resource worker deletion is implemented.
 Phase 4E11 artifact-native diagnostics/metrics cleanup is implemented.
-Phase 4E12 atlas render-resource worker deletion and Phase 4E13 global atlas generation resource
-model cleanup are implemented. Phase 4E14 removed family metrics and diagnostics cleanup is added
-as an immediate follow-up before broader Phase 6 cleanup.
+Phase 4E12 atlas render-resource worker deletion, Phase 4E13 global atlas generation resource
+model cleanup, and Phase 4E14 removed family metrics and diagnostics cleanup are implemented.
+Phase 6 cleanup and consolidation is next.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -417,6 +417,11 @@ Progress:
   resolving retained direct draw texture pages against global atlas generation state. Phase 4E14 is
   added before Phase 6 because the old submit-family metrics and browser diagnostics text now lag
   the deleted submit/resource model.
+- 2026-06-05: Implemented Phase 4E14. Removed the stale `rgbaTexturePageFamily*` and
+  `indexedPalettedFamily*` submit/debug metrics from the submit contract, renderer debug contract,
+  metric assembly, scene-domain metric merge, and browser diagnostics text. Also deleted the
+  always-zero `directPackedTexturePageTextureCount` metric and renamed retained direct texture-page
+  fallback fixtures away from global atlas generation terminology.
 
 Validation:
 
@@ -5298,9 +5303,9 @@ Exit criteria:
   generation replacement/state keys.
 - Implemented. Preview indexed rendering is direct/local to preview draw units; no global indexed
   atlas generation resource remains.
-- Implemented with follow-up. Metrics no longer expose global atlas generation texture counts for
-  landblock rendering, but stale submit-family counters and browser labels remain. Phase 4E14 owns
-  that diagnostic cleanup before broader Phase 6 consolidation.
+- Implemented. Metrics no longer expose global atlas generation texture counts for landblock
+  rendering. Phase 4E14 removed the stale submit-family counters and browser labels before broader
+  Phase 6 consolidation.
 
 ### Phase 4E14: Removed Family Metrics and Diagnostics Cleanup
 
@@ -5319,14 +5324,59 @@ broader cleanup so diagnostics do not preserve deleted architecture.
 - Decide whether remaining compaction/indexed atlas planning metrics are useful preview diagnostics
   or stale static landblock residue. Keep only metrics with an active owner.
 
+Decisions and course corrections:
+
+- Implemented. Removed all `rgbaTexturePageFamily*` and `indexedPalettedFamily*` fields from
+  `Webgl2WorldSubmitMetrics`, `WorldRenderDebugMetrics`, WebGL metric assembly, scene-domain submit
+  metric combination, material-type debug metrics, and browser diagnostics text.
+- Implemented. Deleted the always-zero `directPackedTexturePageTextureCount` metric instead of
+  redefining it. Direct draw already reports packed draw count, single-entry draw count, and
+  estimated texture binds avoided; a texture-count metric without a global atlas owner had no honest
+  producer.
+- Implemented. Renamed retained direct fallback fixture samples from "direct packed base page
+  missing texture atlas generation" to "direct packed base page binding missing" so tests no longer
+  assert deleted global-generation vocabulary.
+- Course correction: `webgl2/resources/texture-atlas-generation.ts` still uses "texture atlas
+  generation" terminology for the terrain CPU/upload helper. That is not a public family metric, but
+  the file name and error text still overstate the remaining ownership model. Keep it as Phase 6
+  cleanup unless it blocks another phase.
+- Course correction: the remaining compaction and indexed atlas planning metrics still have active
+  inputs from the direct draw-unit/resource planning surface, but their names are legacy-shaped. Keep
+  them until Phase 6 can rename or delete them with a focused diagnostic rebaseline.
+
+Cleanup targets discovered:
+
+- Rename or split `webgl2/resources/texture-atlas-generation.ts` so terrain page CPU/upload helpers
+  are not presented as global atlas generation ownership.
+- Rebaseline `webgl2-*compacted*` and `webgl2-indexed-resource-atlas-*` material-type metric names.
+  Delete any metric that cannot be tied to an active diagnostic owner after static bundle artifact
+  ownership is the only landblock static path.
+- Consider renaming direct draw-unit texture-page fallback sample fields if "fallback" remains too
+  broad after the old global generation fallback path is gone.
+
+Legacy shims introduced:
+
+- None. This phase deleted stale metric fields and browser diagnostic text outright; no compatibility
+  aliases or duplicate metric names were retained.
+
+Validation:
+
+- `npm exec vitest -- run src/lib/world-display/webgl2-world-submit.test.ts` passed.
+- `npm run check` passed.
+- `npm run lint:ts` passed.
+- `npm run lint:dead` passed.
+- `npm run lint:rust` passed from `apps/holtburger-3d`.
+- `git diff --check` passed.
+
 Exit criteria:
 
-- Public debug text and metrics no longer reference deleted submit-family routes, compacted family
-  submit resources, or global atlas generation ownership.
-- Retained direct draw diagnostics name direct texture binding problems rather than deleted global
-  generation resources.
-- Any remaining atlas/page metric has an explicit active owner: terrain page resources, static
-  artifact-owned pages, structured-interior artifact-owned pages, or preview/direct draw bindings.
+- Implemented. Public debug text and metrics no longer reference deleted submit-family routes,
+  compacted family submit resources, or global atlas generation ownership.
+- Implemented. Retained direct draw diagnostics name direct texture binding problems rather than
+  deleted global generation resources.
+- Implemented with cleanup follow-up. Remaining atlas/page metrics have explicit active owners:
+  terrain page resources, static artifact-owned pages, structured-interior artifact-owned pages, or
+  preview/direct draw bindings. Some legacy-shaped metric names remain for Phase 6.
 
 ### Phase 6: Cleanup and Consolidation
 

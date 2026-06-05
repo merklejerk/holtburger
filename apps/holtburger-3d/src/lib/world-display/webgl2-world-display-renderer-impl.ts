@@ -108,10 +108,7 @@ import type {
 	WorldDisplayRenderer,
 	WorldDisplayRendererOptions,
 } from "./world-display-renderer-contract";
-import {
-	buildPortalCompositeRenderBvhSources,
-	calculateRenderSpaceBvhSourcesBoundsFrame,
-} from "./render-bvh-sources";
+import { calculateStaticLandblockArtifactSceneBoundsFrame } from "./artifact-scene-bounds";
 import { profileBrowserJsScope } from "../diagnostics/browser-js-profiler";
 import { deriveWebgl2DrawUnitRuntimeDiagnostics } from "./webgl2-runtime-render-diagnostics";
 import { CompactedGeometryWorkerScheduler } from "./worker-resources/compacted-geometry-worker-scheduler";
@@ -2284,15 +2281,10 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		latestSceneBounds = profileBrowserJsScope(
 			"webgl2.resource.calculateSceneBounds",
 			() =>
-				calculateRenderSpaceBvhSourcesBoundsFrame(
-					buildPortalCompositeRenderBvhSources({
-						assetState,
-						terrainScene,
-						staticRenderableScene,
-						staticLandblockRenderArtifacts,
-						renderChunkTransforms,
-					}),
-				),
+				calculateStaticLandblockArtifactSceneBoundsFrame({
+					artifacts: staticLandblockRenderArtifacts,
+					renderChunkTransforms,
+				}),
 		);
 		resources.stateCache.invalidate();
 	}

@@ -18,7 +18,7 @@ export interface DrawUnitRuntimeDiagnostic {
 }
 
 interface DrawUnitRuntimeFacts {
-	kind: StagedWorldDrawUnitAssembly["kind"];
+	kind: StagedWorldDrawUnitAssembly["kind"] | "portal-mask";
 	materialKind: StagedWorldDrawUnitAssembly["material"]["kind"];
 	materialKey: string;
 	triangleCount: number;

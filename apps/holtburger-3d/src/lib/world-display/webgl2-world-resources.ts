@@ -74,6 +74,10 @@ import {
 import type { TerrainSceneModel } from "./terrain-scene";
 import type { TransitionPortalCandidateModel } from "./transition-portal-work-items";
 import {
+	buildTransitionPortalMaskDrawUnitAssemblies,
+	type TransitionPortalMaskDrawUnitAssembly,
+} from "./transition-portal-mask-draw-units";
+import {
 	createDefaultMaterialTextureSamplingPolicy,
 	describeTextureSamplingPolicy,
 	selectRenderSurfaceTextureSamplingPolicy,
@@ -197,9 +201,13 @@ import {
 	type Webgl2StructuredInteriorResourceStore,
 } from "./webgl2/resources/structured-interior-resources";
 
+type Webgl2DrawUnitAssembly =
+	| StagedWorldDrawUnitAssembly
+	| TransitionPortalMaskDrawUnitAssembly;
+
 export interface Webgl2WorldDrawUnit {
 	id: string;
-	kind: StagedWorldDrawUnitAssembly["kind"];
+	kind: Webgl2DrawUnitAssembly["kind"];
 	owningLandblockId: number | null;
 	geometrySignature: string;
 	submitOrderKey: string;
@@ -212,7 +220,7 @@ export interface Webgl2WorldDrawUnit {
 	vertexCount: number;
 	triangleCount: number;
 	color: RenderVec4;
-	materialKind: StagedWorldDrawUnitAssembly["material"]["kind"];
+	materialKind: Webgl2DrawUnitAssembly["material"]["kind"];
 	materialKey: string;
 	materialFallbackReason: string | null;
 	materialBehavior: LegacyMaterialBehaviorDto | null;
@@ -704,7 +712,6 @@ export function syncWebgl2WorldResources({
 					store.structuredInteriorResourceCount > 0
 						? createEmptyStructuredInteriorSceneModel()
 						: structuredInteriorScene,
-				transitionPortalModel,
 				renderChunkTransforms,
 				materialTextureCapabilities,
 				textureFilteringMode,
@@ -720,6 +727,14 @@ export function syncWebgl2WorldResources({
 			transform.chunkKey,
 			transform.offset,
 		]),
+	);
+	const portalMaskDrawUnits = profileBrowserJsScope(
+		"webgl2.resource.buildTransitionPortalMaskDrawUnits",
+		() =>
+			buildTransitionPortalMaskDrawUnitAssemblies({
+				chunkOffsetByKey,
+				transitionPortalModel,
+			}),
 	);
 	const nextDrawUnits: Webgl2WorldDrawUnit[] = [];
 	const nextTerrainTiles: Webgl2TerrainTileResource[] = [];
@@ -743,7 +758,7 @@ export function syncWebgl2WorldResources({
 		}
 	});
 	profileBrowserJsScope("webgl2.resource.createOrReuseDrawUnits", () => {
-		for (const drawUnit of assembly.drawUnits) {
+		for (const drawUnit of [...assembly.drawUnits, ...portalMaskDrawUnits]) {
 			const webgl2DrawUnit = createOrReuseWebgl2DrawUnit({
 				assetState,
 				gl,
@@ -2525,7 +2540,7 @@ function createOrReuseWebgl2DrawUnit({
 	assetState: AssetChannelState;
 	gl: WebGL2RenderingContext;
 	store: Webgl2WorldResourceStore;
-	drawUnit: StagedWorldDrawUnitAssembly;
+	drawUnit: Webgl2DrawUnitAssembly;
 	retainedDrawUnitIds: Set<string>;
 	materialTextureCapabilities: MaterialTextureCapabilities;
 	textureFilteringMode: TextureFilteringMode;
@@ -2754,7 +2769,7 @@ function createOrReuseWebgl2DrawUnit({
 }
 
 function describeWebgl2DrawUnitSubmitOrderKey(
-	drawUnit: StagedWorldDrawUnitAssembly,
+	drawUnit: Webgl2DrawUnitAssembly,
 	geometrySignature: string,
 ): string {
 	const textureKey =
@@ -2778,7 +2793,7 @@ function describeWebgl2DrawUnitSubmitOrderKey(
 }
 
 function deriveWebgl2DrawUnitSceneDomain(
-	drawUnit: StagedWorldDrawUnitAssembly,
+	drawUnit: Webgl2DrawUnitAssembly,
 ): Webgl2SceneDomain | null {
 	switch (drawUnit.kind) {
 		case "structured-interior":
@@ -2793,7 +2808,7 @@ function deriveWebgl2DrawUnitSceneDomain(
 }
 
 function resolveAtlasCompactionLandblockId(
-	drawUnit: StagedWorldDrawUnitAssembly,
+	drawUnit: Webgl2DrawUnitAssembly,
 ): number | null {
 	switch (drawUnit.kind) {
 		case "static":
@@ -3018,7 +3033,7 @@ function destroyWebgl2DrawUnit(drawUnit: Webgl2WorldDrawUnit): void {
 }
 
 function resolveWebgl2MaterialFallbackReason(
-	drawUnit: StagedWorldDrawUnitAssembly,
+	drawUnit: Webgl2DrawUnitAssembly,
 ): string | null {
 	if (drawUnit.material.kind === "direct-texture") {
 		if (!drawUnit.geometry.uvs) {
@@ -3036,7 +3051,7 @@ function resolveWebgl2MaterialFallbackReason(
 }
 
 function resolveWebgl2DrawUnitDirectTextureSamplingPolicy(
-	drawUnit: StagedWorldDrawUnitAssembly,
+	drawUnit: Webgl2DrawUnitAssembly,
 ): TextureSamplingPolicy | null {
 	return drawUnit.material.kind === "direct-texture"
 		? drawUnit.material.textureUpload.upload.samplingPolicy
@@ -3044,7 +3059,7 @@ function resolveWebgl2DrawUnitDirectTextureSamplingPolicy(
 }
 
 function resolveWebgl2DrawUnitTextureUploadSample(
-	drawUnit: StagedWorldDrawUnitAssembly,
+	drawUnit: Webgl2DrawUnitAssembly,
 ): string | null {
 	if (drawUnit.material.kind !== "direct-texture") {
 		return null;
@@ -3068,7 +3083,7 @@ function resolveWebgl2DrawUnitTextureUploadSample(
 }
 
 function resolveWebgl2IndexedMaterialDescriptor(
-	drawUnit: StagedWorldDrawUnitAssembly,
+	drawUnit: Webgl2DrawUnitAssembly,
 ): Webgl2IndexedMaterialDescriptor | null {
 	if (drawUnit.material.kind !== "indexed-paletted" || !drawUnit.geometry.uvs) {
 		return null;
@@ -3102,7 +3117,7 @@ function resolveWebgl2DirectIndexedMaterialResources({
 }: {
 	gl: WebGL2RenderingContext;
 	store: Webgl2WorldResourceStore;
-	drawUnit: StagedWorldDrawUnitAssembly;
+	drawUnit: Webgl2DrawUnitAssembly;
 	descriptor: Webgl2IndexedMaterialDescriptor | null;
 }): Webgl2DirectIndexedMaterialResources | null {
 	if (!descriptor || drawUnit.material.kind !== "indexed-paletted") {
@@ -3225,7 +3240,7 @@ function describeIndexedPaletteTextureKey(
 }
 
 function resolveWebgl2DrawUnitTexturePageReadiness(
-	drawUnit: StagedWorldDrawUnitAssembly,
+	drawUnit: Webgl2DrawUnitAssembly,
 ): StagedWorldMaterialTexturePageReadiness | null {
 	return drawUnit.material.kind === "direct-texture"
 		? drawUnit.material.texturePageReadiness
@@ -3239,7 +3254,7 @@ function resolveWebgl2DrawUnitTexture({
 }: {
 	gl: WebGL2RenderingContext;
 	store: Webgl2WorldResourceStore;
-	drawUnit: StagedWorldDrawUnitAssembly;
+	drawUnit: Webgl2DrawUnitAssembly;
 }): Webgl2Texture2DResource | null {
 	if (drawUnit.material.kind !== "direct-texture" || !drawUnit.geometry.uvs) {
 		return null;
@@ -3282,7 +3297,7 @@ function resolveWebgl2DetailOverlayResources({
 	assetState: AssetChannelState;
 	gl: WebGL2RenderingContext;
 	store: Webgl2WorldResourceStore;
-	drawUnit: StagedWorldDrawUnitAssembly;
+	drawUnit: Webgl2DrawUnitAssembly;
 	materialTextureCapabilities: MaterialTextureCapabilities;
 	textureFilteringMode: TextureFilteringMode;
 }): Webgl2DetailOverlayResources | null {
@@ -3818,7 +3833,7 @@ function sampleDirectTextureBytes(
 }
 
 function createGeometrySignature(
-	drawUnit: StagedWorldDrawUnitAssembly,
+	drawUnit: Webgl2DrawUnitAssembly,
 ): string {
 	return [
 		drawUnit.kind,

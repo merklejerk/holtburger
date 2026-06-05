@@ -7,7 +7,6 @@ import type { IndexedMaterialDataCache } from "./indexed-material-data";
 import { formatMaterialAssetId } from "./material-signatures";
 import {
 	buildStagedPolygonSetGeometry,
-	buildStagedPortalApertureGeometry,
 	type StagedWorldIndexedGeometry,
 } from "./staged-world-geometry";
 import {
@@ -34,7 +33,6 @@ import {
 } from "./region-detail-overlays";
 import {
 	deriveStructuredInteriorCellBatchBvhBinding,
-	deriveTransitionPortalMaskBatchBvhBinding,
 } from "./non-instanced-bvh-bindings";
 import { deriveSceneRenderableReadinessModel } from "./scene-renderable-readiness";
 import {
@@ -46,10 +44,7 @@ import { staticRenderableObjectKey } from "./static-renderable-readiness";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
 import type { TextureFilteringMode } from "./texture-pages/texture-sampling-policy";
-import type {
-	TransitionPortalCandidate,
-	TransitionPortalCandidateModel,
-} from "./transition-portal-work-items";
+import { createEmptyTransitionPortalCandidateModel } from "./transition-portal-work-items";
 
 type StagedWorldDrawUnitGeometry = StagedWorldIndexedGeometry;
 interface StagedWorldDrawUnitBvhBinding {
@@ -84,23 +79,9 @@ export interface StagedStructuredInteriorDrawUnitAssembly {
 	staticObjectKeys: readonly [];
 }
 
-interface StagedPortalMaskDrawUnitAssembly {
-	id: string;
-	kind: "portal-mask";
-	geometry: StagedWorldDrawUnitGeometry;
-	modelMatrix: RenderMat4;
-	material: StagedWorldMaterialPlan;
-	preparedAssetIds: readonly string[];
-	bvhBinding: StagedWorldDrawUnitBvhBinding;
-	staticPartCount: 0;
-	staticObjectKeys: readonly [];
-	portalCandidate: TransitionPortalCandidate;
-}
-
 export type StagedWorldDrawUnitAssembly =
 	| StagedStaticDrawUnitAssembly
-	| StagedStructuredInteriorDrawUnitAssembly
-	| StagedPortalMaskDrawUnitAssembly;
+	| StagedStructuredInteriorDrawUnitAssembly;
 
 export interface StagedWorldSceneAssembly {
 	drawUnits: StagedWorldDrawUnitAssembly[];
@@ -135,7 +116,6 @@ export function buildStagedWorldSceneAssembly({
 	terrainScene,
 	staticRenderableScene,
 	structuredInteriorScene,
-	transitionPortalModel,
 	renderChunkTransforms,
 	materialTextureCapabilities,
 	textureFilteringMode,
@@ -148,7 +128,6 @@ export function buildStagedWorldSceneAssembly({
 	terrainScene: TerrainSceneModel;
 	staticRenderableScene: StaticRenderableSceneModel;
 	structuredInteriorScene: StructuredInteriorSceneModel;
-	transitionPortalModel: TransitionPortalCandidateModel;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	materialTextureCapabilities?: MaterialTextureCapabilities;
 	textureFilteringMode?: TextureFilteringMode;
@@ -169,7 +148,7 @@ export function buildStagedWorldSceneAssembly({
 		terrainScene,
 		structuredInteriorScene,
 		staticRenderableScene,
-		transitionPortalModel,
+		transitionPortalModel: createEmptyTransitionPortalCandidateModel(),
 	});
 	const structuredInteriorDrawUnits =
 		buildStagedStructuredInteriorDrawUnitAssemblies({
@@ -194,15 +173,10 @@ export function buildStagedWorldSceneAssembly({
 		indexedMaterialDataCache,
 		materialPlanCache,
 	});
-	const portalMaskDrawUnits = buildStagedPortalMaskDrawUnitAssemblies({
-		chunkOffsetByKey,
-		transitionPortalModel: fullyResolvedScenes.committedTransitionPortalModel,
-	});
 	return {
 		drawUnits: [
 			...structuredInteriorDrawUnits,
 			...staticDrawUnits,
-			...portalMaskDrawUnits,
 		],
 		graphRecords: [
 			...structuredInteriorDrawUnits.map((drawUnit) => ({
@@ -219,63 +193,6 @@ export function buildStagedWorldSceneAssembly({
 			})),
 		],
 	};
-}
-
-function buildStagedPortalMaskDrawUnitAssemblies({
-	chunkOffsetByKey,
-	transitionPortalModel,
-}: {
-	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
-	transitionPortalModel: TransitionPortalCandidateModel;
-}): StagedPortalMaskDrawUnitAssembly[] {
-	return transitionPortalModel.candidates.flatMap((candidate) => {
-		const chunkOffset = chunkOffsetByKey.get(candidate.renderChunk.chunkKey);
-		if (!chunkOffset || candidate.aperture.points.length < 3) {
-			return [];
-		}
-		const bvhBinding = deriveTransitionPortalMaskBatchBvhBinding(candidate);
-		return [
-			{
-				id: `portal-mask/${candidate.id}`,
-				kind: "portal-mask",
-				geometry: buildPortalMaskGeometry(candidate),
-				modelMatrix: multiplyMat4(
-					createTranslationMat4(chunkOffset),
-					buildAcPlacementMatrix(
-						candidate.aperture.chunkLocalPlacement,
-						{ x: 0, y: 0, z: 0 },
-						{ x: 1, y: 1, z: 1 },
-					),
-				),
-				material: {
-					kind: "flat",
-					key: `portal-mask/${candidate.id}`,
-					color: new Float32Array([0, 0, 0, 0]),
-					behavior: null,
-					fallbackReason: null,
-					fallbackReasonCode: null,
-					preparedAssetIds: [],
-				},
-				preparedAssetIds: [],
-				bvhBinding: {
-					itemKeys: bvhBinding.itemKeys,
-					fallbackReason: bvhBinding.fallbackReason,
-				},
-				staticPartCount: 0,
-				staticObjectKeys: [],
-				portalCandidate: candidate,
-			},
-		];
-	});
-}
-
-function buildPortalMaskGeometry(
-	candidate: TransitionPortalCandidate,
-): StagedWorldDrawUnitGeometry {
-	return buildStagedPortalApertureGeometry(
-		candidate.aperture.points,
-		`portal-mask:${candidate.id}:points=${candidate.aperture.points.length}`,
-	);
 }
 
 export function buildStagedStructuredInteriorDrawUnitAssemblies({

@@ -3,14 +3,8 @@ import type {
 	BrowserTextureFilteringMode,
 } from "../../app/browser-mode";
 import { browserDestinationToInteriorCellId } from "../../app/browser-mode";
-import {
-	deriveTopologyEnvCellIdsForLandblocks,
-	deriveTerrainFocusLandblockId,
-} from "../assets/scene-asset-request-planner";
-import {
-	deriveStructuredInteriorCoverage,
-	type StructuredInteriorCoverage,
-} from "../assets/structured-interior-coverage";
+import { deriveTerrainFocusLandblockId } from "../assets/scene-asset-request-planner";
+import type { StructuredInteriorCoverage } from "../assets/structured-interior-coverage";
 import {
 	createInitialAssetChannelState,
 	type AssetChannelState,
@@ -65,13 +59,11 @@ import { deriveWorldRenderSceneContext } from "./render-scene-context";
 import {
 	createEmptyStaticRenderableSceneModel,
 	deriveAppearancePreviewStaticRenderableSceneModel,
-	deriveStaticRenderableSceneModel,
 	mergeStaticRenderableSceneModels,
 	type StaticRenderableSceneModel,
 } from "./static-renderables";
 import {
 	createEmptyStructuredInteriorSceneModel,
-	deriveStructuredInteriorSceneModel,
 	deriveStructuredInteriorSceneModelFromLandblockArtifacts,
 	type StructuredInteriorSceneModel,
 } from "./structured-interior-scene";
@@ -83,8 +75,9 @@ import {
 } from "./terrain-scene";
 import { deriveLandblockRenderChunkPlacement } from "./render-chunks";
 import {
-	deriveTransitionPortalCandidates,
+	createEmptyTransitionPortalCandidateModel,
 	deriveTransitionPortalCandidatesFromLandblockArtifacts,
+	type TransitionPortalCandidateModel,
 } from "./transition-portal-work-items";
 import { WORLD_RENDER_DOMAIN } from "./render-domains";
 import type { SceneCameraFrame } from "./camera";
@@ -157,7 +150,7 @@ export interface BrowserRenderResourceSurface {
 	setStaticRenderableScene(scene: StaticRenderableSceneModel): void;
 	setStructuredInteriorScene(scene: StructuredInteriorSceneModel): void;
 	setTransitionPortalModel(
-		model: ReturnType<typeof deriveTransitionPortalCandidates>,
+		model: TransitionPortalCandidateModel,
 	): void;
 	setDebugOverlayScene(scene: WorldDebugOverlayModel): void;
 	setRenderSpatialQuery(query: RenderSpatialIndexQuery | null): void;
@@ -300,42 +293,12 @@ export class BrowserRenderResourceCoordinator {
 			browserDestination: input.browserDestination,
 			snapshot: input.staticLandblockRenderArtifacts,
 		});
-		const linkedOutdoorEnvCellIds =
-			useStaticLandblockArtifacts || outdoorSceneInterest === null
-				? []
-				: [
-						...deriveTopologyEnvCellIdsForLandblocks(
-							input.assetState.preparedByAssetId,
-							new Set(outdoorSceneInterest.envCellLandblockIds),
-						),
-					].sort((left, right) => left - right);
-		const structuredInteriorCoverage = useStaticLandblockArtifacts
-			? deriveArtifactStructuredInteriorCoverageForInput(
-					input.staticLandblockRenderArtifacts,
-					input.browserDestination,
-				)
-			: deriveStructuredInteriorCoverageForInput(
-					input,
-					linkedOutdoorEnvCellIds,
-				);
-		const baseStaticRenderableScene = useStaticLandblockArtifacts
-			? createEmptyStaticRenderableSceneModel()
-			: deriveStaticRenderableSceneModel(
-					input.assetState,
-					input.browserDestination,
-					input.detailLodRadius,
-					structuredInteriorCoverage,
-					outdoorSceneInterest === null
-						? null
-						: {
-								buildingLandblockIds:
-									outdoorSceneInterest.buildingLandblockIds,
-								detailLandblockIds:
-									outdoorSceneInterest.detailLandblockIds,
-								envCellLandblockIds:
-									outdoorSceneInterest.envCellLandblockIds,
-							},
-				);
+		const linkedOutdoorEnvCellIds: number[] = [];
+		const structuredInteriorCoverage =
+			deriveArtifactStructuredInteriorCoverageForInput(
+				input.staticLandblockRenderArtifacts,
+				input.browserDestination,
+			);
 		const appearancePreviewScene = input.runtimeAppearancePreviews.reduce(
 			(scene, preview) =>
 				mergeStaticRenderableSceneModels(
@@ -350,13 +313,10 @@ export class BrowserRenderResourceCoordinator {
 							browserDestinationToInteriorCellId(input.browserDestination) !==
 							null,
 					}),
-				),
+			),
 			createEmptyStaticRenderableSceneModel(),
 		);
-		const staticRenderableScene = mergeStaticRenderableSceneModels(
-			baseStaticRenderableScene,
-			appearancePreviewScene,
-		);
+		const staticRenderableScene = appearancePreviewScene;
 		const artifactStructuredInteriorScene =
 			deriveStructuredInteriorSceneModelFromLandblockArtifacts(
 				input.staticLandblockRenderArtifacts,
@@ -365,18 +325,7 @@ export class BrowserRenderResourceCoordinator {
 			);
 		const structuredInteriorScene =
 			artifactStructuredInteriorScene ??
-			(useStaticLandblockArtifacts
-				? createEmptyStructuredInteriorSceneModel()
-				: deriveStructuredInteriorSceneModel(
-						input.assetState,
-						input.browserDestination,
-						outdoorFocusLandblockId === null
-							? null
-							: {
-									envCellIds: linkedOutdoorEnvCellIds,
-								},
-						structuredInteriorCoverage,
-					));
+			createEmptyStructuredInteriorSceneModel();
 		const selectedDiagnosticPortalId =
 			input.diagnosticSelection?.kind === "portal"
 				? input.diagnosticSelection.portalId
@@ -401,12 +350,7 @@ export class BrowserRenderResourceCoordinator {
 			deriveTransitionPortalCandidatesFromLandblockArtifacts({
 				artifacts: input.staticLandblockRenderArtifacts,
 				activeLandblockIds: outdoorSceneInterest?.buildingLandblockIds ?? [],
-			}) ??
-			deriveTransitionPortalCandidates({
-				assetState: input.assetState,
-				structuredInteriorScene,
-				activeLandblockIds: outdoorSceneInterest?.buildingLandblockIds ?? [],
-			});
+			}) ?? createEmptyTransitionPortalCandidateModel();
 		const activeRenderChunkPlacements = collectActiveRenderChunkPlacements(
 			terrainScene,
 			structuredInteriorScene,
@@ -858,7 +802,7 @@ function describeStructuredInteriorSceneSignature(
 }
 
 function describeTransitionPortalModelSignature(
-	model: ReturnType<typeof deriveTransitionPortalCandidates>,
+	model: TransitionPortalCandidateModel,
 ): string {
 	return [
 		...model.candidates.map(
@@ -945,36 +889,6 @@ function formatVectorSignature(vector: {
 	z: number;
 }): string {
 	return `${vector.x.toFixed(5)},${vector.y.toFixed(5)},${vector.z.toFixed(5)}`;
-}
-
-function deriveStructuredInteriorCoverageForInput(
-	input: BrowserRenderResourceCoordinatorInput,
-	linkedOutdoorEnvCellIds: readonly number[],
-): StructuredInteriorCoverage | null {
-	const browserFocusEnvCellId = browserDestinationToInteriorCellId(
-		input.browserDestination,
-	);
-	if (browserFocusEnvCellId !== null) {
-		return deriveStructuredInteriorCoverage(
-			{
-				kind: "landblock-closure",
-				seedEnvCellIds: [browserFocusEnvCellId],
-			},
-			input.assetState.preparedByAssetId,
-		);
-	}
-
-	if (linkedOutdoorEnvCellIds.length > 0) {
-		return deriveStructuredInteriorCoverage(
-			{
-				kind: "landblock-closure",
-				seedEnvCellIds: [...linkedOutdoorEnvCellIds],
-			},
-			input.assetState.preparedByAssetId,
-		);
-	}
-
-	return null;
 }
 
 function deriveArtifactStructuredInteriorCoverageForInput(
@@ -1188,9 +1102,7 @@ function deriveSnapshot({
 	renderSceneContext: ReturnType<typeof deriveWorldRenderSceneContext>;
 	outdoorSceneInterest: ReturnType<typeof deriveOutdoorSceneInterest> | null;
 	linkedOutdoorEnvCellIds: readonly number[];
-	structuredInteriorCoverage: ReturnType<
-		typeof deriveStructuredInteriorCoverage
-	> | null;
+	structuredInteriorCoverage: StructuredInteriorCoverage | null;
 	activeRenderChunkTransforms: readonly RenderChunkTransform[];
 	renderSpatialQuery: RenderSpatialIndexQuery;
 	staticLandblockRenderArtifacts: StaticLandblockRenderArtifactStoreSnapshot;

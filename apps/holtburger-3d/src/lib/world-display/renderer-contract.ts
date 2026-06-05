@@ -197,14 +197,7 @@ interface WorldRenderDebugMetrics {
 	indexedTextureResourceCount: number;
 	paletteResourceCount: number;
 	indexedMaterialDescriptorDrawUnitCount: number;
-	indexedMaterialDescriptorCompactionCandidateCount: number;
 	standaloneIndexedMaterialResourceDrawUnitCount: number;
-	compactedIndexedMaterialStandaloneResourceDrawUnitCount: number;
-	indexedResourceAtlasCandidateDrawUnitCount: number;
-	indexedResourceAtlasIndexTextureCount: number;
-	indexedResourceAtlasPaletteTextureCount: number;
-	indexedResourceAtlasFailureReasonCount: number;
-	indexedResourceAtlasFailureSamples: string[];
 	staticGeometryGroupCount: number;
 	staticVisibleGeometryGroupCount: number;
 	structuredInteriorGeometryGroupCount: number;

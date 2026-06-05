@@ -99,13 +99,6 @@ import {
 	type TexturePageAtlasPlan,
 } from "./texture-pages/texture-page-atlas-planner";
 import {
-	createEmptyIndexedResourceAtlasPlan,
-	planIndexedResourceAtlas,
-	type IndexedResourceAtlasPlan,
-	type IndexedTexelAtlasCandidate,
-	type IndexedPaletteAtlasCandidate,
-} from "./texture-pages/indexed-resource-atlas-planner";
-import {
 	deriveDirectGeometrySubmissionLayout,
 	type GeometrySubmissionLayout,
 } from "./webgl2/families/direct-render-family";
@@ -276,19 +269,11 @@ export interface Webgl2WorldResourceStore {
 		string,
 		number
 	>;
-	indexedResourceAtlasPlan: IndexedResourceAtlasPlan;
 	terrainTexturePagesByKey: Map<string, Webgl2TerrainTexturePageResource>;
 	terrainTexturePageCount: number;
 	terrainDetailTexturePageCount: number;
 	indexedMaterialDescriptorDrawUnitCount: number;
-	indexedMaterialDescriptorCompactionCandidateCount: number;
 	standaloneIndexedMaterialResourceDrawUnitCount: number;
-	compactedIndexedMaterialStandaloneResourceDrawUnitCount: number;
-	indexedResourceAtlasCandidateDrawUnitCount: number;
-	indexedResourceAtlasIndexTextureCount: number;
-	indexedResourceAtlasPaletteTextureCount: number;
-	indexedResourceAtlasFailureReasonCount: number;
-	indexedResourceAtlasFailureSamples: readonly string[];
 	textureCount: number;
 	indexedTextureCount: number;
 	paletteTextureCount: number;
@@ -392,19 +377,11 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		compactionCoverageMaterialFamilyAlphaPolicyCounts: {},
 		compactionCoverageRetainedDirectMaterialFamilyCounts: {},
 		compactionCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts: {},
-		indexedResourceAtlasPlan: createEmptyIndexedResourceAtlasPlan(),
 		terrainTexturePagesByKey: new Map(),
 		terrainTexturePageCount: 0,
 		terrainDetailTexturePageCount: 0,
 		indexedMaterialDescriptorDrawUnitCount: 0,
-		indexedMaterialDescriptorCompactionCandidateCount: 0,
 		standaloneIndexedMaterialResourceDrawUnitCount: 0,
-		compactedIndexedMaterialStandaloneResourceDrawUnitCount: 0,
-		indexedResourceAtlasCandidateDrawUnitCount: 0,
-		indexedResourceAtlasIndexTextureCount: 0,
-		indexedResourceAtlasPaletteTextureCount: 0,
-		indexedResourceAtlasFailureReasonCount: 0,
-		indexedResourceAtlasFailureSamples: [],
 		textureCount: 0,
 		indexedTextureCount: 0,
 		paletteTextureCount: 0,
@@ -772,55 +749,17 @@ export function syncWebgl2WorldResources({
 	store.indexedMaterialDescriptorDrawUnitCount = store.drawUnits.filter(
 		(drawUnit) => drawUnit.indexedMaterialDescriptor !== null,
 	).length;
-	const compactedIndexedDrawUnitIds = new Set(
-		store.compactionFamilyPlan.renderFamilies.indexedPaletted
-			.compactableDrawUnitIds,
-	);
-	store.indexedMaterialDescriptorCompactionCandidateCount =
-		store.drawUnits.filter(
-			(drawUnit) =>
-				drawUnit.indexedMaterialDescriptor !== null &&
-				compactedIndexedDrawUnitIds.has(drawUnit.id),
-		).length;
-	store.indexedResourceAtlasPlan =
-		planIndexedResourceAtlasForCompactedDrawUnits({
-			drawUnits: store.drawUnits,
-			compactedIndexedDrawUnitIds,
-			policy: DEFAULT_WEBGL2_COMPACTION_FAMILY_PLANNING_POLICY,
-		});
-	store.indexedResourceAtlasCandidateDrawUnitCount =
-		store.indexedMaterialDescriptorCompactionCandidateCount;
-	store.indexedResourceAtlasFailureReasonCount =
-		store.indexedResourceAtlasPlan.failures.length;
-	store.indexedResourceAtlasFailureSamples = summarizeDiagnosticReasons(
-		store.indexedResourceAtlasPlan.failures.map(
-			(failure) => `${failure.reason}:${failure.detail}`,
-		),
-		8,
-	);
-	const atlasPlacedCompactedIndexedDrawUnitIds =
-		collectAtlasPlacedCompactedIndexedDrawUnitIds({
-			compactedIndexedDrawUnitIds,
-			plan: store.indexedResourceAtlasPlan,
-		});
 	syncWebgl2DirectIndexedMaterialResources({
 		gl,
 		store,
 		stagedDrawUnits: assembly.drawUnits,
 		retainedDirectIndexedDrawUnitIds: collectRetainedDirectIndexedDrawUnitIds({
 			drawUnits: store.drawUnits,
-			atlasPlacedCompactedIndexedDrawUnitIds,
 		}),
 	});
 	store.standaloneIndexedMaterialResourceDrawUnitCount = store.drawUnits.filter(
 		(drawUnit) => drawUnit.directIndexedMaterialResources !== null,
 	).length;
-	store.compactedIndexedMaterialStandaloneResourceDrawUnitCount =
-		store.drawUnits.filter(
-			(drawUnit) =>
-				drawUnit.directIndexedMaterialResources !== null &&
-				compactedIndexedDrawUnitIds.has(drawUnit.id),
-		).length;
 	for (const drawUnit of store.drawUnits) {
 		for (const textureKey of collectDirectIndexedMaterialTextureKeys(
 			drawUnit,
@@ -955,7 +894,6 @@ export function destroyWebgl2WorldResources(
 	store.compactionCoverageMaterialFamilyAlphaPolicyCounts = {};
 	store.compactionCoverageRetainedDirectMaterialFamilyCounts = {};
 	store.compactionCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts = {};
-	store.indexedResourceAtlasPlan = createEmptyIndexedResourceAtlasPlan();
 	for (const terrainTexturePage of store.terrainTexturePagesByKey.values()) {
 		terrainTexturePage.texture.dispose();
 	}
@@ -963,14 +901,7 @@ export function destroyWebgl2WorldResources(
 	store.terrainTexturePageCount = 0;
 	store.terrainDetailTexturePageCount = 0;
 	store.indexedMaterialDescriptorDrawUnitCount = 0;
-	store.indexedMaterialDescriptorCompactionCandidateCount = 0;
 	store.standaloneIndexedMaterialResourceDrawUnitCount = 0;
-	store.compactedIndexedMaterialStandaloneResourceDrawUnitCount = 0;
-	store.indexedResourceAtlasCandidateDrawUnitCount = 0;
-	store.indexedResourceAtlasIndexTextureCount = 0;
-	store.indexedResourceAtlasPaletteTextureCount = 0;
-	store.indexedResourceAtlasFailureReasonCount = 0;
-	store.indexedResourceAtlasFailureSamples = [];
 	for (const texture of store.texturesByKey.values()) {
 		texture.dispose();
 	}
@@ -2605,93 +2536,14 @@ function createIndexedPalettedFamilyMaterialTableRecord(
 	};
 }
 
-function planIndexedResourceAtlasForCompactedDrawUnits({
-	drawUnits,
-	compactedIndexedDrawUnitIds,
-	policy,
-}: {
-	drawUnits: readonly Webgl2WorldDrawUnit[];
-	compactedIndexedDrawUnitIds: ReadonlySet<string>;
-	policy: CompactionFamilyPlanningPolicy;
-}): IndexedResourceAtlasPlan {
-	const compactedIndexedDrawUnits = drawUnits.filter(
-		(drawUnit) =>
-			compactedIndexedDrawUnitIds.has(drawUnit.id) &&
-			drawUnit.indexedMaterialDescriptor !== null,
-	);
-	const indexCandidates: IndexedTexelAtlasCandidate[] =
-		compactedIndexedDrawUnits.map((drawUnit) => {
-			const descriptor = requireIndexedMaterialDescriptor(drawUnit);
-			return {
-				drawUnitId: drawUnit.id,
-				indexTextureKey: descriptor.indexTextureKey,
-				format: descriptor.indexFormat,
-				width: descriptor.width,
-				height: descriptor.height,
-				sourceBytes: descriptor.indexSourceBytes,
-			};
-		});
-	const paletteCandidates: IndexedPaletteAtlasCandidate[] =
-		compactedIndexedDrawUnits.map((drawUnit) => {
-			const descriptor = requireIndexedMaterialDescriptor(drawUnit);
-			return {
-				drawUnitId: drawUnit.id,
-				paletteTextureKey: descriptor.paletteTextureKey,
-				colorCount: descriptor.paletteColorCount,
-				rgbaBytes: descriptor.paletteRgbaBytes,
-			};
-		});
-	return planIndexedResourceAtlas({
-		indexCandidates,
-		paletteCandidates,
-		policy: {
-			maxTextureSize: policy.maxAtlasTextureSize,
-			maxTextureCount: policy.maxAtlasTextureCount,
-		},
-	});
-}
-
-function requireIndexedMaterialDescriptor(
-	drawUnit: Webgl2WorldDrawUnit,
-): Webgl2IndexedMaterialDescriptor {
-	const descriptor = drawUnit.indexedMaterialDescriptor;
-	if (!descriptor) {
-		throw new Error(`Indexed draw unit ${drawUnit.id} has no descriptor.`);
-	}
-	return descriptor;
-}
-
-function collectAtlasPlacedCompactedIndexedDrawUnitIds({
-	compactedIndexedDrawUnitIds,
-	plan,
-}: {
-	compactedIndexedDrawUnitIds: ReadonlySet<string>;
-	plan: IndexedResourceAtlasPlan;
-}): ReadonlySet<string> {
-	const indexReadyDrawUnitIds = new Set(plan.indexReadyDrawUnitIds);
-	const paletteReadyDrawUnitIds = new Set(plan.paletteReadyDrawUnitIds);
-	return new Set(
-		[...compactedIndexedDrawUnitIds].filter(
-			(drawUnitId) =>
-				indexReadyDrawUnitIds.has(drawUnitId) &&
-				paletteReadyDrawUnitIds.has(drawUnitId),
-		),
-	);
-}
-
 function collectRetainedDirectIndexedDrawUnitIds({
 	drawUnits,
-	atlasPlacedCompactedIndexedDrawUnitIds,
 }: {
 	drawUnits: readonly Webgl2WorldDrawUnit[];
-	atlasPlacedCompactedIndexedDrawUnitIds: ReadonlySet<string>;
 }): ReadonlySet<string> {
 	return new Set(
 		drawUnits.flatMap((drawUnit) =>
-			drawUnit.indexedMaterialDescriptor &&
-			!atlasPlacedCompactedIndexedDrawUnitIds.has(drawUnit.id)
-				? [drawUnit.id]
-				: [],
+			drawUnit.indexedMaterialDescriptor ? [drawUnit.id] : [],
 		),
 	);
 }

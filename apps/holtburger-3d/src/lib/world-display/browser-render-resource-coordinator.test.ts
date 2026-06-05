@@ -1,0 +1,289 @@
+import { describe, expect, it } from "vitest";
+
+import type { BrowserLocationSelection } from "../../app/browser-mode";
+import {
+	createInitialAssetChannelState,
+	type AssetChannelState,
+	type PreparedAssetProvenance,
+	type PreparedAssetRecord,
+	type PreparedLandblockOutdoorPayload,
+	type PreparedPolygonSetRenderGeometry,
+} from "../assets/types";
+import { formatLandblockOutdoorAssetId } from "../landblocks";
+import {
+	BrowserRenderResourceCoordinator,
+	type BrowserRenderResourceCoordinatorInput,
+	type BrowserRenderResourceSurface,
+} from "./browser-render-resource-coordinator";
+import { createEmptyStaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
+import type { StaticRenderableSceneModel } from "./static-renderables";
+
+describe("browser render resource coordinator", () => {
+	it("keeps prepared outdoor statics on the legacy path before static artifacts are active", () => {
+		const landblockId = 0x02030000;
+		const surface = createCapturingSurface();
+		const coordinator = new BrowserRenderResourceCoordinator();
+		coordinator.setSurface(surface);
+
+		coordinator.update(
+			createCoordinatorInput({
+				assetState: createAssetState([
+					createLandblockOutdoorRecord({
+						landblockId,
+						sourceDid: 0x01000001,
+						localPlacement: createPlacement({ x: 1, y: 2, z: 3 }),
+					}),
+					createGfxObjRecord(0x01000001),
+				]),
+				browserDestination: createOutdoorDestination(landblockId),
+				staticLandblockRenderArtifacts:
+					createEmptyStaticLandblockRenderArtifactStoreSnapshot(),
+			}),
+		);
+
+		expect(surface.staticRenderableScenes.at(-1)?.parts).toHaveLength(1);
+	});
+
+	it("does not derive prepared outdoor statics once static artifact ownership is active", () => {
+		const landblockId = 0x02030000;
+		const surface = createCapturingSurface();
+		const coordinator = new BrowserRenderResourceCoordinator();
+		coordinator.setSurface(surface);
+
+		coordinator.update(
+			createCoordinatorInput({
+				assetState: createAssetState([
+					createLandblockOutdoorRecord({
+						landblockId,
+						sourceDid: 0x01000001,
+						localPlacement: createPlacement({ x: 1, y: 2, z: 3 }),
+					}),
+					createGfxObjRecord(0x01000001),
+				]),
+				browserDestination: createOutdoorDestination(landblockId),
+				staticLandblockRenderArtifacts: {
+					...createEmptyStaticLandblockRenderArtifactStoreSnapshot(),
+					desiredCount: 1,
+					inFlightCount: 1,
+					latestDesiredIdentityKeys: [
+						`${landblockId}:outdoor:request:test:build:test:texture:test`,
+					],
+				},
+			}),
+		);
+
+		expect(surface.staticRenderableScenes.at(-1)?.parts).toHaveLength(0);
+	});
+});
+
+const PROVENANCE: PreparedAssetProvenance = {
+	source: "repo-local-hba",
+	sourceAssetKind: null,
+	errorCode: null,
+	detail: null,
+};
+
+function createCapturingSurface(): BrowserRenderResourceSurface & {
+	staticRenderableScenes: StaticRenderableSceneModel[];
+} {
+	const staticRenderableScenes: StaticRenderableSceneModel[] = [];
+	return {
+		staticRenderableScenes,
+		setAssetState() {},
+		setRenderSceneContext() {},
+		setRenderChunkTransforms() {},
+		setTerrainScene() {},
+		setStaticLandblockRenderArtifacts() {},
+		setStaticRenderableScene(scene) {
+			staticRenderableScenes.push(scene);
+		},
+		setStructuredInteriorScene() {},
+		setTransitionPortalModel() {},
+		setDebugOverlayScene() {},
+		setRenderSpatialQuery() {},
+		setSelectedStaticRenderableRenderKey() {},
+		setControlledCameraFrame() {},
+		setTransitionPortalMaxDepth() {},
+		setRenderStyle() {},
+		setTextureFilteringMode() {},
+		setDetailTexturesEnabled() {},
+	};
+}
+
+function createCoordinatorInput(
+	overrides: Pick<
+		BrowserRenderResourceCoordinatorInput,
+		"assetState" | "browserDestination" | "staticLandblockRenderArtifacts"
+	>,
+): BrowserRenderResourceCoordinatorInput {
+	return {
+		assetState: overrides.assetState,
+		browserDestination: overrides.browserDestination,
+		terrainLodRadius: 0,
+		buildingLodRadius: 0,
+		detailLodRadius: 0,
+		envCellLodRadius: 0,
+		transitionPortalMaxDepth: 0,
+		renderStyle: "solid",
+		textureFilteringMode: "nearest",
+		detailTexturesEnabled: true,
+		showPortalPolygons: false,
+		showCellIndicators: false,
+		highlightPortalTargets: false,
+		diagnosticSelection: null,
+		selectedStaticRenderableRenderKey: null,
+		activeRenderAnchor: null,
+		browserCameraFrame: null,
+		runtimeAppearancePreviews: [],
+		staticLandblockRenderArtifacts: overrides.staticLandblockRenderArtifacts,
+	};
+}
+
+function createAssetState(records: PreparedAssetRecord[]): AssetChannelState {
+	const state = createInitialAssetChannelState();
+	state.preparedByAssetId = Object.fromEntries(
+		records.map((record) => [record.request.assetId, record]),
+	);
+	return state;
+}
+
+function createOutdoorDestination(
+	landblockId: number,
+): BrowserLocationSelection {
+	return {
+		kind: "outdoor-location",
+		label: "24.00N, 36.00E, 0.0Z",
+		source: "manual",
+		northSouth: 24,
+		northSouthHemisphere: "N",
+		eastWest: 36,
+		eastWestHemisphere: "E",
+		elevation: 0,
+		landblockId,
+	};
+}
+
+function createLandblockOutdoorRecord(options: {
+	landblockId: number;
+	sourceDid: number;
+	localPlacement: PreparedLandblockOutdoorPayload["statics"][number]["localPlacement"];
+}): PreparedAssetRecord {
+	const assetId = formatLandblockOutdoorAssetId(options.landblockId);
+	return {
+		request: { requestId: assetId, assetId, priority: "bootstrap" },
+		response: {
+			requestId: assetId,
+			assetId,
+			payloadKind: "json",
+			payload: null,
+		},
+		preparedAt: "test",
+		payload: {
+			kind: "landblock-outdoor",
+			sourceAssetKind: "landblock-outdoor",
+			residencyKind: "outdoor-landblock",
+			provenance: PROVENANCE,
+			landblockId: options.landblockId,
+			regionId: 0,
+			regionNumber: 0,
+			classification: "outdoor",
+			terrain: {
+				gridSize: 0,
+				tileSize: 24,
+				vertices: [],
+				triangles: [],
+				quads: [],
+				terrainBvh: {
+					coordinateSpace: "landblock-render-local",
+					nodes: [],
+					items: [],
+				},
+				minHeight: 0,
+				maxHeight: 0,
+				bounds: null,
+			},
+			statics: [
+				{
+					kind: "explicit-object",
+					instanceId: "outdoor-static",
+					sourceDid: options.sourceDid,
+					sourceAssetId: formatGfxObjAssetId(options.sourceDid),
+					sourceIndex: 0,
+					localPlacement: options.localPlacement,
+					sourceScale: { x: 1, y: 1, z: 1 },
+					sourceBounds: null,
+					instanceBounds: null,
+					building: null,
+					generated: null,
+				},
+			],
+			outdoorBvh: null,
+			dependencies: {
+				renderableSourceAssetIds: [formatGfxObjAssetId(options.sourceDid)],
+				materialAssetIds: [],
+			},
+			diagnostics: {
+				sourceRecords: [],
+				omissions: [],
+				errors: [],
+			},
+		},
+	};
+}
+
+function createGfxObjRecord(gfxObjId: number): PreparedAssetRecord {
+	const assetId = formatGfxObjAssetId(gfxObjId);
+	return {
+		request: { requestId: assetId, assetId, priority: "bootstrap" },
+		response: {
+			requestId: assetId,
+			assetId,
+			payloadKind: "json",
+			payload: null,
+		},
+		preparedAt: "test",
+		payload: {
+			kind: "gfx-obj",
+			sourceAssetKind: "gfx-obj",
+			residencyKind: "unknown",
+			provenance: PROVENANCE,
+			gfxObjId,
+			flags: null,
+			surfaceIds: [],
+			vertexArray: { vertexType: null, vertexCount: 0, vertices: [] },
+			drawingPolygons: [],
+			drawingBsp: null,
+			physicsWitness: { polygonCount: 0, hasBsp: false },
+			renderGeometry: createEmptyRenderGeometry(),
+			sortCenter: null,
+			didDegrade: null,
+		},
+	};
+}
+
+function createEmptyRenderGeometry(): PreparedPolygonSetRenderGeometry {
+	return {
+		sourceId: 0,
+		vertexCount: 0,
+		triangleCount: 0,
+		positions: new Float32Array(),
+		normals: new Float32Array(),
+		uvs: new Float32Array(),
+		triangles: [],
+		surfaceIds: [],
+		invalidPolygons: [],
+		skippedPolygonCount: 0,
+		bounds: null,
+	};
+}
+
+function createPlacement(origin: { x: number; y: number; z: number }) {
+	return {
+		origin,
+		orientation: { w: 1, x: 0, y: 0, z: 0 },
+	};
+}
+
+function formatGfxObjAssetId(gfxObjId: number): string {
+	return `gfx-obj/${gfxObjId.toString(16).padStart(8, "0")}`;
+}

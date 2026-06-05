@@ -24,7 +24,8 @@ render-frame env-cell BVH visibility are implemented. Phase 4D2B2 scene-domain b
 cleanup, Phase 4D2B3 portal composite env-cell fallback removal, and Phase 4D2B4 exterior
 portal/culling source quarantine are implemented. Phase 4E0 artifact scene-bounds cutover is
 implemented. Phase 4E1 latent portal-clipped BVH debt removal and Phase 4E2 scope-aware staged
-static suppression are implemented.
+static suppression are implemented. Phase 4E3 artifact-active outdoor static scene derivation
+cutover is implemented.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -355,6 +356,11 @@ Progress:
   outdoor statics for their landblock, and resident env-cell static object bundle resources suppress
   only staged indoor statics for their env cell. The previous landblock-only suppression was too
   blunt and could hide indoor staged statics merely because outdoor bundles were resident.
+- 2026-06-05: Added and implemented Phase 4E3 before the broad hard cutover. When outdoor static
+  landblock render artifacts are desired, in flight, or resident, the browser render coordinator no
+  longer derives the outdoor base `StaticRenderableSceneModel` from prepared landblock/env-cell
+  assets. Runtime appearance previews still merge through the static scene because they are not
+  landblock-derived static world content.
 
 Validation:
 
@@ -420,6 +426,9 @@ Validation:
 - `npm exec vitest -- run src/lib/world-display/staged-world-assembly.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2/resources/static-bundle-layer-resources.test.ts`,
   `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
   `git diff --check` passed after Phase 4E2.
+- `npm exec vitest -- run src/lib/world-display/browser-render-resource-coordinator.test.ts src/lib/world-display/staged-world-assembly.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/static-renderables.test.ts`,
+  `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
+  `git diff --check` passed after Phase 4E3.
 - `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts`
   passed after the first Phase 1D builder slice.
 - `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts`
@@ -4464,19 +4473,86 @@ Exit criteria:
 - Implemented. Focused staged assembly and WebGL resource sync tests cover both cases.
 - Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
 
+#### Phase 4E3: Artifact-Active Outdoor Static Scene Derivation Cutover
+
+Added as an immediate hard-cutover phase after Phase 4E2. Scope-aware suppression was still too late
+in the pipeline: `BrowserRenderResourceCoordinator` derived landblock outdoor/env-cell statics from
+prepared assets, then resource sync suppressed staged output after the CPU-heavy source expansion,
+readiness, material accounting, and staged grouping work had already happened.
+
+- Stop deriving the outdoor base `StaticRenderableSceneModel` from prepared assets when static
+  landblock render artifacts are desired, in flight, or resident for an outdoor browser destination.
+- Keep runtime appearance preview statics in `StaticRenderableSceneModel` because they are
+  user/debug-created scene elements, not landblock-derived static world content.
+- Keep the old prepared-asset static scene derivation only for contexts that the artifact product
+  scheduler does not yet cover, notably indoor/dungeon destinations.
+- Suppress the old prepared-outdoor-not-rendered diagnostic while the artifact-owned outdoor static
+  path is active; in-flight artifacts legitimately produce no prepared static scene.
+
+Decisions and course corrections:
+
+- Implemented. `BrowserRenderResourceCoordinator.update` now uses an empty outdoor base static scene
+  whenever the static landblock render artifact snapshot has desired, in-flight, or resident work for
+  an outdoor destination.
+- Implemented. The public coordinator surface is covered by a focused test that proves prepared
+  outdoor statics still flow before artifact ownership is active and stop flowing once artifact
+  ownership is active.
+- Course correction: this phase cuts outdoor landblock static derivation at the coordinator instead
+  of waiting until WebGL resource sync. That removes the most obvious avoidable CPU work while
+  preserving the remaining explicitly scheduled transition debt.
+- Course correction: indoor/dungeon destinations still do not produce desired
+  `dungeon-env-cells`/detail product requests in the current planner. Do not delete indoor static
+  prepared-asset derivation until the next phase gives those destinations an artifact product
+  request path.
+
+Cleanup targets discovered:
+
+- `planDesiredLandblockRenderProducts` still returns no products for indoor destinations. The next
+  phase should schedule `dungeon-env-cells` or the appropriate topology/env-cell product for indoor
+  browsing before deleting indoor/env-cell prepared static derivation.
+- `deriveStructuredInteriorCoverageForInput` and `linkedOutdoorEnvCellIds` still read topology facts
+  from `AssetChannelState.preparedByAssetId`. The next cutover phase should move coordinator
+  topology/env-cell coverage to product interest/artifact facts instead of preserving prepared-state
+  closure discovery.
+- `StaticRenderableSceneModel` remains a mixed-purpose type for runtime appearance previews and
+  legacy landblock statics. Once indoor/dungeon artifact scheduling lands, split or delete the
+  landblock-derived static branch so the model no longer suggests static world ownership.
+- `reportPreparedOutdoorAssetsNotRendered` remains a legacy diagnostic for the non-artifact path.
+  Delete or rewrite it around artifact coordinator status once prepared outdoor rendering is gone.
+
+Legacy shims introduced:
+
+- None. This phase does not add a fallback path; it cuts the outdoor static prepared-asset derivation
+  when artifact ownership is active. The remaining indoor/dungeon prepared-asset route is existing
+  unmigrated debt, not a new compatibility mode.
+
+Exit criteria:
+
+- Implemented. Outdoor artifact-active coordinator updates send an empty base landblock static scene
+  to the renderer even when prepared outdoor static source assets are present.
+- Implemented. Runtime appearance preview support is preserved outside the landblock-derived base
+  static scene.
+- Implemented. Focused coordinator/resource/static-renderable tests cover the cutover boundary.
+- Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
+
 ### Phase 4E: Hard Cutover From Main-Thread Static Hydration
 
 - Stop using `scene-asset-request-planner.ts` and `AssetChannelState.preparedByAssetId` as the
   source of topology/env-cell/static/interior renderable hydration for migrated topology/env-cell
   products.
+- Add artifact product scheduling for indoor/dungeon destinations before deleting the remaining
+  indoor/env-cell prepared static derivation path. Dungeon landblocks should request the
+  topology/env-cell product directly; they must not require outdoor terrain/static artifacts.
 - Remove outdoor static objects, env-cell statics, and structured interior geometry from
   `StaticRenderableSceneModel`, `StructuredInteriorSceneModel`, staged draw-unit assembly, static
   compaction planning, direct suppression, and visible submit.
 - Delete standalone static compaction render-resource worker scheduling once static callers are gone.
 - Delete standalone static texture atlas worker scheduling once static callers are gone.
 - Remove global/static texture atlas generation identity from static compacted geometry keys.
-- Do not start broad cleanup until no landblock-derived static/interior geometry remains in the
-  staged/main-thread hydration path. Partial deletion would freeze a dual-mode architecture.
+- Do not delete the remaining staged/main-thread static modules until indoor/dungeon env-cell product
+  scheduling and structured-interior artifact handoff make those modules unreachable for
+  landblock-derived static/interior geometry. Partial deletion would freeze a dual-mode
+  architecture.
 
 Exit criteria:
 

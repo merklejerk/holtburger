@@ -4,12 +4,16 @@ import type { BrowserLocationSelection } from "../../app/browser-mode";
 import {
 	createInitialAssetChannelState,
 	type AssetChannelState,
+	type PreparedEnvCellPayload,
 	type PreparedAssetProvenance,
 	type PreparedAssetRecord,
 	type PreparedLandblockOutdoorPayload,
 	type PreparedPolygonSetRenderGeometry,
 } from "../assets/types";
-import { formatLandblockOutdoorAssetId } from "../landblocks";
+import {
+	formatEnvCellAssetId,
+	formatLandblockOutdoorAssetId,
+} from "../landblocks";
 import {
 	BrowserRenderResourceCoordinator,
 	type BrowserRenderResourceCoordinatorInput,
@@ -67,6 +71,39 @@ describe("browser render resource coordinator", () => {
 					inFlightCount: 1,
 					latestDesiredIdentityKeys: [
 						`${landblockId}:outdoor:request:test:build:test:texture:test`,
+					],
+				},
+			}),
+		);
+
+		expect(surface.staticRenderableScenes.at(-1)?.parts).toHaveLength(0);
+	});
+
+	it("does not derive prepared indoor statics once static artifact ownership is active", () => {
+		const envCellId = 0x02030100;
+		const landblockId = 0x0203ffff;
+		const surface = createCapturingSurface();
+		const coordinator = new BrowserRenderResourceCoordinator();
+		coordinator.setSurface(surface);
+
+		coordinator.update(
+			createCoordinatorInput({
+				assetState: createAssetState([
+					createEnvCellRecord({
+						envCellId,
+						sourceDid: 0x01000001,
+						localPlacement: createPlacement({ x: 0, y: 0, z: 0 }),
+						staticPlacement: createPlacement({ x: 1, y: 2, z: 3 }),
+					}),
+					createGfxObjRecord(0x01000001),
+				]),
+				browserDestination: createInteriorDestination(envCellId),
+				staticLandblockRenderArtifacts: {
+					...createEmptyStaticLandblockRenderArtifactStoreSnapshot(),
+					desiredCount: 1,
+					inFlightCount: 1,
+					latestDesiredIdentityKeys: [
+						`${landblockId}:dungeon-env-cells:request:test:build:test:texture:test`,
 					],
 				},
 			}),
@@ -160,6 +197,16 @@ function createOutdoorDestination(
 		eastWestHemisphere: "E",
 		elevation: 0,
 		landblockId,
+	};
+}
+
+function createInteriorDestination(envCellId: number): BrowserLocationSelection {
+	return {
+		kind: "interior-cell",
+		label: `Env cell 0x${envCellId.toString(16).padStart(8, "0")}`,
+		source: "manual",
+		envCellId,
+		landblockId: (envCellId & 0xffff0000) | 0xffff,
 	};
 }
 
@@ -257,6 +304,58 @@ function createGfxObjRecord(gfxObjId: number): PreparedAssetRecord {
 			renderGeometry: createEmptyRenderGeometry(),
 			sortCenter: null,
 			didDegrade: null,
+		},
+	};
+}
+
+function createEnvCellRecord(options: {
+	envCellId: number;
+	sourceDid: number;
+	localPlacement: PreparedEnvCellPayload["localPlacement"];
+	staticPlacement: PreparedEnvCellPayload["localPlacement"];
+}): PreparedAssetRecord {
+	const assetId = formatEnvCellAssetId(options.envCellId);
+	return {
+		request: { requestId: assetId, assetId, priority: "bootstrap" },
+		response: {
+			requestId: assetId,
+			assetId,
+			payloadKind: "json",
+			payload: null,
+		},
+		preparedAt: "test",
+		payload: {
+			kind: "env-cell",
+			sourceAssetKind: "env-cell",
+			residencyKind: "interior-cell",
+			provenance: PROVENANCE,
+			envCellId: options.envCellId,
+			environmentId: 0x0d000001,
+			cellStructureId: 0x0001,
+			localPlacement: options.localPlacement,
+			surfaces: [],
+			portals: [],
+			visibleEnvCellIds: [],
+			portalApertures: [],
+			statics: [
+				{
+					instanceId: "indoor-static",
+					sourceDid: options.sourceDid,
+					sourceAssetId: formatGfxObjAssetId(options.sourceDid),
+					sourceIndex: 0,
+					localPlacement: options.staticPlacement,
+					sourceScale: { x: 1, y: 1, z: 1 },
+					sourceBounds: null,
+					instanceBounds: null,
+				},
+			],
+			renderGeometry: createEmptyRenderGeometry(),
+			cellBsp: null,
+			localBvh: {
+				coordinateSpace: "env-cell-local",
+				nodes: [],
+				items: [],
+			},
 		},
 	};
 }

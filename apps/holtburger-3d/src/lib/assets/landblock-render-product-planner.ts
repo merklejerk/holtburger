@@ -4,10 +4,7 @@ import {
 	type BrowserLocationSelection,
 } from "../../app/browser-mode";
 import { normalizeOutdoorLandblockId } from "../landblocks";
-import {
-	deriveOutdoorSceneInterest,
-	type NormalizedOutdoorSceneInterest,
-} from "../world-display/outdoor-scene-interest";
+import { deriveOutdoorSceneInterest } from "../world-display/outdoor-scene-interest";
 import {
 	compareDesiredLandblockRenderProducts,
 	type DesiredLandblockRenderProduct,
@@ -40,7 +37,17 @@ export function planDesiredLandblockRenderProducts(
 		return [];
 	}
 	if (isIndoorBrowserDestination(input.browserDestination)) {
-		return [];
+		const landblockId = normalizeOutdoorLandblockId(
+			input.browserDestination.landblockId,
+		);
+		return [
+			createDesiredProduct(
+				input,
+				landblockId,
+				landblockId,
+				"dungeon-env-cells",
+			),
+		];
 	}
 	const options = input.options ?? DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS;
 	const envCellRadius =
@@ -60,30 +67,50 @@ export function planDesiredLandblockRenderProducts(
 
 	return coalesceDesiredProducts([
 		...interest.terrainLandblockIds.map((landblockId) =>
-			createDesiredProduct(input, interest, landblockId, "outdoor"),
+			createDesiredProduct(
+				input,
+				interest.focusLandblockId,
+				landblockId,
+				"outdoor",
+			),
 		),
 		...interest.buildingLandblockIds.map((landblockId) =>
-			createDesiredProduct(input, interest, landblockId, "outdoor"),
+			createDesiredProduct(
+				input,
+				interest.focusLandblockId,
+				landblockId,
+				"outdoor",
+			),
 		),
 		...interest.detailLandblockIds.map((landblockId) =>
-			createDesiredProduct(input, interest, landblockId, "outdoor"),
+			createDesiredProduct(
+				input,
+				interest.focusLandblockId,
+				landblockId,
+				"outdoor",
+			),
 		),
 		...envCellLandblockIds.map((landblockId) =>
-			createDesiredProduct(input, interest, landblockId, "outdoor-env-cells"),
+			createDesiredProduct(
+				input,
+				interest.focusLandblockId,
+				landblockId,
+				"outdoor-env-cells",
+			),
 		),
 	]).sort(compareDesiredLandblockRenderProducts);
 }
 
 function createDesiredProduct(
 	input: LandblockRenderProductPlanningInput,
-	interest: NormalizedOutdoorSceneInterest,
+	focusLandblockId: number,
 	landblockId: number,
 	product: LandblockRenderProduct,
 ): DesiredLandblockRenderProduct {
 	return {
 		landblockId,
 		product,
-		priority: priorityForLandblock(interest.focusLandblockId, landblockId),
+		priority: priorityForLandblock(focusLandblockId, landblockId),
 		requestId: input.requestId,
 		buildPolicyRevision: input.buildPolicyRevision,
 		texturePagePolicyRevision: input.texturePagePolicyRevision,

@@ -98,10 +98,11 @@ describe("static bundle layer WebGL2 resources", () => {
 		const resource = [...store.layersByKey.values()][0];
 		expect(resource?.texturePages.map((page) => page.samplerPolicyKey)).toEqual(
 			[
-				"sample=rgba-color;filter=linear",
-				"sample=indexed-data;filter=exact",
+				"sample=rgba-color;filter=linear;mips=on;aniso=1",
+				"sample=indexed-data;filter=exact;mips=off;aniso=1",
 			],
 		);
+		expect(gl.generatedMipmapCount).toBe(1);
 
 		syncWebgl2StaticBundleLayerResources({
 			gl: gl.asContext(),
@@ -119,10 +120,63 @@ describe("static bundle layer WebGL2 resources", () => {
 		});
 		expect(resource?.texturePages.map((page) => page.samplerPolicyKey)).toEqual(
 			[
-				"sample=rgba-color;filter=nearest",
-				"sample=indexed-data;filter=exact",
+				"sample=rgba-color;filter=nearest;mips=off;aniso=1",
+				"sample=indexed-data;filter=exact;mips=off;aniso=1",
 			],
 		);
+	});
+
+	it("applies anisotropy to color page samplers", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2StaticBundleLayerResourceStore();
+		const layer = createLayer();
+
+		syncWebgl2StaticBundleLayerResources({
+			gl: gl.asContext(),
+			store,
+			layers: [layer],
+			textureFilteringMode: "anisotropic-4x",
+			maxAnisotropy: 8,
+		});
+
+		expect(gl.generatedMipmapCount).toBe(1);
+		expect(gl.textureFloatParameters).toEqual([
+			{ pname: gl.TEXTURE_MAX_ANISOTROPY_EXT, param: 4 },
+		]);
+		expect(
+			[...store.layersByKey.values()][0]?.texturePages.map(
+				(page) => page.samplerPolicyKey,
+			),
+		).toEqual([
+			"sample=rgba-color;filter=anisotropic-4x;mips=on;aniso=4",
+			"sample=indexed-data;filter=exact;mips=off;aniso=1",
+		]);
+	});
+
+	it("keeps nearest color page uploads non-mipped", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2StaticBundleLayerResourceStore();
+
+		syncWebgl2StaticBundleLayerResources({
+			gl: gl.asContext(),
+			store,
+			layers: [createLayer()],
+			textureFilteringMode: "nearest",
+			maxAnisotropy: 8,
+		});
+
+		expect(gl.generatedMipmapCount).toBe(0);
+		expect(gl.textureFloatParameters).toEqual([
+			{ pname: gl.TEXTURE_MAX_ANISOTROPY_EXT, param: 1 },
+		]);
+		expect(
+			[...store.layersByKey.values()][0]?.texturePages.map(
+				(page) => page.samplerPolicyKey,
+			),
+		).toEqual([
+			"sample=rgba-color;filter=nearest;mips=off;aniso=1",
+			"sample=indexed-data;filter=exact;mips=off;aniso=1",
+		]);
 	});
 
 	it("keeps exact page samplers exact under filtering changes", () => {
@@ -506,6 +560,8 @@ class FakeWebgl2 {
 	readonly CLAMP_TO_EDGE = 0x812f;
 	readonly NEAREST = 0x2600;
 	readonly LINEAR = 0x2601;
+	readonly LINEAR_MIPMAP_LINEAR = 0x2703;
+	readonly TEXTURE_MAX_ANISOTROPY_EXT = 0x84fe;
 	readonly RGBA = 0x1908;
 	readonly RED = 0x1903;
 	readonly RG = 0x8227;
@@ -526,8 +582,10 @@ class FakeWebgl2 {
 		data: TexImageSource | ArrayBufferView | null;
 	}[] = [];
 	readonly textureParameters: { pname: GLenum; param: GLenum }[] = [];
+	readonly textureFloatParameters: { pname: GLenum; param: number }[] = [];
 	readonly bufferUploads: { target: GLenum; byteLength: number }[] = [];
 	readonly enabledAttributes: number[] = [];
+	generatedMipmapCount = 0;
 
 	asContext(): WebGL2RenderingContext {
 		return this as unknown as WebGL2RenderingContext;
@@ -565,6 +623,20 @@ class FakeWebgl2 {
 
 	texParameteri(_target: GLenum, pname: GLenum, param: GLenum): void {
 		this.textureParameters.push({ pname, param });
+	}
+
+	texParameterf(_target: GLenum, pname: GLenum, param: number): void {
+		this.textureFloatParameters.push({ pname, param });
+	}
+
+	generateMipmap(): void {
+		this.generatedMipmapCount += 1;
+	}
+
+	getExtension(name: string): { TEXTURE_MAX_ANISOTROPY_EXT: GLenum } | null {
+		return name === "EXT_texture_filter_anisotropic"
+			? { TEXTURE_MAX_ANISOTROPY_EXT: this.TEXTURE_MAX_ANISOTROPY_EXT }
+			: null;
 	}
 
 	deleteTexture(texture: WebGLTexture): void {

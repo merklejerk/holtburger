@@ -215,6 +215,18 @@ export function updateWebgl2Texture2DSamplerParameters(
 	}
 }
 
+export function generateWebgl2Texture2DMipmaps(
+	gl: WebGL2RenderingContext,
+	texture: Webgl2Texture2DResource,
+): void {
+	gl.bindTexture(gl.TEXTURE_2D, texture.texture);
+	try {
+		gl.generateMipmap(gl.TEXTURE_2D);
+	} finally {
+		gl.bindTexture(gl.TEXTURE_2D, null);
+	}
+}
+
 function applyWebgl2SamplerParameters(
 	gl: WebGL2RenderingContext,
 	parameters: Webgl2SamplerParameters,

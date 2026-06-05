@@ -14,6 +14,7 @@ import {
 	createWebgl2ElementArrayBuffer,
 	createWebgl2Texture2D,
 	createWebgl2VertexArray,
+	generateWebgl2Texture2DMipmaps,
 	updateWebgl2Texture2DSamplerParameters,
 	type Webgl2BufferResource,
 	type Webgl2SamplerParameters,
@@ -48,6 +49,7 @@ export interface Webgl2StaticBundleTexturePageResource {
 	pageKind: StaticBundleTexturePage["pageKind"];
 	indexedFormat: StaticBundleTexturePage["indexedFormat"];
 	samplerPolicyKey: string;
+	mipmapsGenerated: boolean;
 	texture: Webgl2Texture2DResource;
 	entries: readonly Webgl2StaticBundleTexturePageEntryResource[];
 }
@@ -112,11 +114,13 @@ export function syncWebgl2StaticBundleLayerResources({
 	store,
 	layers,
 	textureFilteringMode = "anisotropic-4x",
+	maxAnisotropy = 1,
 }: {
 	gl: WebGL2RenderingContext;
 	store: Webgl2StaticBundleLayerResourceStore;
 	layers: readonly StaticObjectBundleArtifact[];
 	textureFilteringMode?: TextureFilteringMode;
+	maxAnisotropy?: number;
 }): void {
 	const retainedResourceKeys = new Set<string>();
 	for (const layer of layers) {
@@ -128,6 +132,7 @@ export function syncWebgl2StaticBundleLayerResources({
 				gl,
 				layer: previous,
 				textureFilteringMode,
+				maxAnisotropy,
 			});
 		} else {
 			store.layersByKey.set(
@@ -136,6 +141,7 @@ export function syncWebgl2StaticBundleLayerResources({
 					gl,
 					layer,
 					textureFilteringMode,
+					maxAnisotropy,
 				}),
 			);
 		}
@@ -161,16 +167,19 @@ function createWebgl2StaticBundleLayerResource({
 	gl,
 	layer,
 	textureFilteringMode,
+	maxAnisotropy,
 }: {
 	gl: WebGL2RenderingContext;
 	layer: StaticObjectBundleArtifact;
 	textureFilteringMode: TextureFilteringMode;
+	maxAnisotropy: number;
 }): Webgl2StaticBundleLayerResource {
 	const texturePages = layer.texturePages.map((page) =>
 		createWebgl2StaticBundleTexturePageResource({
 			gl,
 			page,
 			textureFilteringMode,
+			maxAnisotropy,
 		}),
 	);
 	const texturePagesByKey = new Map(
@@ -229,16 +238,25 @@ export function createWebgl2StaticBundleTexturePageResource({
 	gl,
 	page,
 	textureFilteringMode = "anisotropic-4x",
+	maxAnisotropy = 1,
 }: {
 	gl: WebGL2RenderingContext;
 	page: StaticBundleTexturePage;
 	textureFilteringMode?: TextureFilteringMode;
+	maxAnisotropy?: number;
 }): Webgl2StaticBundleTexturePageResource {
-	const upload = createStaticBundleTexturePageUpload(gl, page);
+	const generateMipmaps = shouldGenerateStaticBundleTexturePageMipmaps({
+		page,
+		textureFilteringMode,
+	});
+	const upload = createStaticBundleTexturePageUpload(gl, page, {
+		generateMipmaps,
+	});
 	const sampler = createStaticBundleTexturePageSampler({
 		gl,
 		page,
 		textureFilteringMode,
+		maxAnisotropy,
 	});
 	return {
 		key: page.key,
@@ -249,7 +267,9 @@ export function createWebgl2StaticBundleTexturePageResource({
 		samplerPolicyKey: describeStaticBundleTexturePageSamplerPolicy({
 			page,
 			textureFilteringMode,
+			maxAnisotropy,
 		}),
+		mipmapsGenerated: generateMipmaps,
 		texture: createWebgl2Texture2D(gl, {
 			label: page.key,
 			upload,
@@ -267,17 +287,28 @@ export function updateWebgl2StaticBundleTexturePageResourceSamplerPolicy({
 	gl,
 	page,
 	textureFilteringMode,
+	maxAnisotropy = 1,
 }: {
 	gl: WebGL2RenderingContext;
 	page: Webgl2StaticBundleTexturePageResource;
 	textureFilteringMode: TextureFilteringMode;
+	maxAnisotropy?: number;
 }): void {
 	const nextSamplerPolicyKey = describeStaticBundleTexturePageResourceSamplerPolicy({
 		page,
 		textureFilteringMode,
+		maxAnisotropy,
 	});
 	if (page.samplerPolicyKey === nextSamplerPolicyKey) {
 		return;
+	}
+	const shouldGenerateMipmaps = shouldGenerateStaticBundleTexturePageMipmaps({
+		page,
+		textureFilteringMode,
+	});
+	if (shouldGenerateMipmaps && !page.mipmapsGenerated) {
+		generateWebgl2Texture2DMipmaps(gl, page.texture);
+		page.mipmapsGenerated = true;
 	}
 	updateWebgl2Texture2DSamplerParameters(
 		gl,
@@ -286,6 +317,7 @@ export function updateWebgl2StaticBundleTexturePageResourceSamplerPolicy({
 			gl,
 			page,
 			textureFilteringMode,
+			maxAnisotropy,
 		}),
 	);
 	page.samplerPolicyKey = nextSamplerPolicyKey;
@@ -295,16 +327,19 @@ function updateWebgl2StaticBundleLayerTexturePageSamplerPolicy({
 	gl,
 	layer,
 	textureFilteringMode,
+	maxAnisotropy,
 }: {
 	gl: WebGL2RenderingContext;
 	layer: Webgl2StaticBundleLayerResource;
 	textureFilteringMode: TextureFilteringMode;
+	maxAnisotropy: number;
 }): void {
 	for (const page of layer.texturePages) {
 		updateWebgl2StaticBundleTexturePageResourceSamplerPolicy({
 			gl,
 			page,
 			textureFilteringMode,
+			maxAnisotropy,
 		});
 	}
 }
@@ -312,6 +347,9 @@ function updateWebgl2StaticBundleLayerTexturePageSamplerPolicy({
 function createStaticBundleTexturePageUpload(
 	gl: WebGL2RenderingContext,
 	page: StaticBundleTexturePage,
+	options: {
+		generateMipmaps: boolean;
+	},
 ): Webgl2Texture2DUpload {
 	const format = resolveStaticBundleTexturePageUploadFormat(gl, page);
 	const expectedByteLength = page.width * page.height * format.bytesPerPixel;
@@ -327,7 +365,7 @@ function createStaticBundleTexturePageUpload(
 		format: format.format,
 		type: gl.UNSIGNED_BYTE,
 		data: page.bytes,
-		generateMipmaps: false,
+		generateMipmaps: options.generateMipmaps,
 	};
 }
 
@@ -384,19 +422,40 @@ function createStaticBundleTexturePageSampler({
 	gl,
 	page,
 	textureFilteringMode,
+	maxAnisotropy,
 }: {
 	gl: WebGL2RenderingContext;
 	page: Pick<Webgl2StaticBundleTexturePageResource, "sampleClass">;
 	textureFilteringMode: TextureFilteringMode;
+	maxAnisotropy: number;
 }): Webgl2SamplerParameters {
 	const isExact = isExactSampleClass(page.sampleClass);
-	const filter =
-		isExact || textureFilteringMode === "nearest" ? gl.NEAREST : gl.LINEAR;
+	if (isExact) {
+		return {
+			wrapS: gl.CLAMP_TO_EDGE,
+			wrapT: gl.CLAMP_TO_EDGE,
+			minFilter: gl.NEAREST,
+			magFilter: gl.NEAREST,
+		};
+	}
+	if (textureFilteringMode === "nearest") {
+		return {
+			wrapS: gl.CLAMP_TO_EDGE,
+			wrapT: gl.CLAMP_TO_EDGE,
+			minFilter: gl.NEAREST,
+			magFilter: gl.NEAREST,
+			maxAnisotropy: 1,
+		};
+	}
 	return {
 		wrapS: gl.CLAMP_TO_EDGE,
 		wrapT: gl.CLAMP_TO_EDGE,
-		minFilter: filter,
-		magFilter: filter,
+		minFilter: gl.LINEAR_MIPMAP_LINEAR,
+		magFilter: gl.LINEAR,
+		maxAnisotropy: selectArtifactTexturePageAnisotropy({
+			textureFilteringMode,
+			maxAnisotropy,
+		}),
 	};
 }
 
@@ -404,53 +463,95 @@ function createStaticBundleTexturePageResourceSampler({
 	gl,
 	page,
 	textureFilteringMode,
+	maxAnisotropy,
 }: {
 	gl: WebGL2RenderingContext;
 	page: Webgl2StaticBundleTexturePageResource;
 	textureFilteringMode: TextureFilteringMode;
+	maxAnisotropy: number;
 }): Webgl2SamplerParameters {
 	return createStaticBundleTexturePageSampler({
 		gl,
 		page,
 		textureFilteringMode,
+		maxAnisotropy,
 	});
 }
 
 function describeStaticBundleTexturePageSamplerPolicy({
 	page,
 	textureFilteringMode,
+	maxAnisotropy,
 }: {
 	page: Pick<StaticBundleTexturePage, "sampleClass">;
 	textureFilteringMode: TextureFilteringMode;
+	maxAnisotropy: number;
 }): string {
 	return describeArtifactTexturePageSamplerPolicy({
 		sampleClass: page.sampleClass,
 		textureFilteringMode,
+		maxAnisotropy,
 	});
 }
 
 function describeStaticBundleTexturePageResourceSamplerPolicy({
 	page,
 	textureFilteringMode,
+	maxAnisotropy,
 }: {
 	page: Pick<Webgl2StaticBundleTexturePageResource, "sampleClass">;
 	textureFilteringMode: TextureFilteringMode;
+	maxAnisotropy: number;
 }): string {
 	return describeArtifactTexturePageSamplerPolicy({
 		sampleClass: page.sampleClass,
 		textureFilteringMode,
+		maxAnisotropy,
 	});
 }
 
 function describeArtifactTexturePageSamplerPolicy({
 	sampleClass,
 	textureFilteringMode,
+	maxAnisotropy,
 }: {
 	sampleClass: VirtualTexturePageSampleClass;
 	textureFilteringMode: TextureFilteringMode;
+	maxAnisotropy: number;
 }): string {
-	const filter = isExactSampleClass(sampleClass) ? "exact" : textureFilteringMode;
-	return `sample=${sampleClass};filter=${filter}`;
+	if (isExactSampleClass(sampleClass)) {
+		return `sample=${sampleClass};filter=exact;mips=off;aniso=1`;
+	}
+	const generateMipmaps = textureFilteringMode !== "nearest";
+	const anisotropy = selectArtifactTexturePageAnisotropy({
+		textureFilteringMode,
+		maxAnisotropy,
+	});
+	return `sample=${sampleClass};filter=${textureFilteringMode};mips=${generateMipmaps ? "on" : "off"};aniso=${anisotropy}`;
+}
+
+function shouldGenerateStaticBundleTexturePageMipmaps({
+	page,
+	textureFilteringMode,
+}: {
+	page: Pick<Webgl2StaticBundleTexturePageResource, "sampleClass">;
+	textureFilteringMode: TextureFilteringMode;
+}): boolean {
+	return !isExactSampleClass(page.sampleClass) && textureFilteringMode !== "nearest";
+}
+
+function selectArtifactTexturePageAnisotropy({
+	textureFilteringMode,
+	maxAnisotropy,
+}: {
+	textureFilteringMode: TextureFilteringMode;
+	maxAnisotropy: number;
+}): number {
+	if (textureFilteringMode !== "anisotropic-4x") {
+		return 1;
+	}
+	const supported = Math.max(1, Math.floor(maxAnisotropy));
+	return Math.min(4, supported);
 }
 
 export function createStaticBundleTexturePageByVirtualRefKey(

@@ -2184,6 +2184,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				artifacts: staticLandblockRenderArtifacts,
 				renderChunkTransforms,
 				textureFilteringMode,
+				maxAnisotropy:
+					currentResources.materialTextureCapabilities.maxAnisotropy,
 			});
 			syncWebgl2WorldResources({
 				gl: currentResources.gl,

@@ -11,7 +11,7 @@ structured-interior material artifact realization is split into smaller slices; 
 material artifact contract preparation is implemented. Phase 4C3C2 textured WebGL realization is
 split; Phase 4C3C2A material-slice WebGL resource/submit is implemented and Phase 4C3C2B sampler
 policy resource control is implemented. Phase 4C3C2C artifact texture mipmap/anisotropy policy is
-next, followed by portal/spatial artifact resource handoff.
+implemented. Portal/spatial artifact resource handoff is next.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -257,6 +257,12 @@ Progress:
   anisotropy behavior is renderer-side upload/resource policy, not worker output policy, and should
   be scheduled explicitly so `anisotropic-4x` does not silently behave like plain linear filtering
   for static object bundle or structured-interior color/detail pages.
+- 2026-06-04: Implemented Phase 4C3C2C. Artifact-owned static object bundle and structured-interior
+  color/detail pages now generate renderer-side mipmaps for non-nearest filtering, use
+  `LINEAR_MIPMAP_LINEAR` minification, and apply clamped anisotropy for `anisotropic-4x`. Indexed
+  texel and palette lookup pages remain exact sampled, non-mipped, and do not receive anisotropy.
+  Filtering policy changes still avoid rebuilding CPU artifacts, material records, and geometry
+  buffers.
 
 Validation:
 
@@ -408,6 +414,13 @@ Validation:
 - `npm run check` passed after Phase 4C3C2B.
 - `npm run lint:ts`, `npm run lint:dead`, and `npm run lint:rust` passed after Phase 4C3C2B.
 - `git diff --check` passed after Phase 4C3C2B.
+- `npm exec vitest -- run src/lib/world-display/webgl2/resources/static-bundle-layer-resources.test.ts src/lib/world-display/webgl2-world-resources.test.ts`
+  passed after Phase 4C3C2C.
+- `npm exec vitest -- run src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2/resources/static-bundle-layer-resources.test.ts src/workers/static-landblock-render-worker.test.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer-texture-pages.test.ts`
+  passed after Phase 4C3C2C.
+- `npm run check` passed after Phase 4C3C2C.
+- `npm run lint:ts`, `npm run lint:dead`, and `npm run lint:rust` passed after Phase 4C3C2C.
+- `git diff --check` passed after Phase 4C3C2C.
 
 Related plans:
 
@@ -3459,6 +3472,8 @@ Exit criteria:
 
 #### Phase 4C3C2C: Artifact Texture Mipmap and Anisotropy Policy
 
+Status: Implemented on 2026-06-04.
+
 - Extend artifact-owned texture page upload/resource policy so renderer-side color/detail pages can
   generate mipmaps when the selected filtering mode requires mip filtering.
 - Apply anisotropy to artifact-owned color/detail pages when `textureFilteringMode` is
@@ -3471,17 +3486,49 @@ Exit criteria:
   records. If mipmap generation requires texture upload replacement, keep it scoped to page texture
   resources and document the texture-object churn explicitly.
 
+Decisions and course corrections:
+
+- Artifact-owned page mipmaps are generated on the renderer/WebGL side from worker-provided page
+  pixels. The worker artifact contract remains unchanged.
+- Color/detail artifact pages generate mipmaps at initial texture upload when the selected filtering
+  mode is not `nearest`. If a page starts in `nearest` and later switches to a mip-filtered mode, the
+  renderer generates mipmaps on the existing WebGL texture object in place.
+- Switching a texture object back to `nearest` updates the sampler to non-mip nearest filtering and
+  resets color-page anisotropy to 1 without rebuilding the texture object. Any mip levels already
+  generated on that texture object remain allocated but are inactive under the nearest sampler. This
+  preserves the no-geometry/no-artifact-rebuild guarantee and avoids texture-object churn for a
+  cosmetic policy toggle.
+- Exact pages do not receive mipmaps or anisotropy parameters. Indexed texel and palette lookup pages
+  remain nearest sampled regardless of global filtering mode.
+- Static object bundle and structured-interior artifact pages share the same mipmap/anisotropy
+  helper path, so future artifact page consumers should reuse that path rather than adding a
+  family-local sampler policy.
+
+Cleanup targets discovered:
+
+- `Webgl2StaticBundleTexturePageResource` is now a shared artifact texture page resource, but the
+  type name still carries static-bundle terminology. Rename it during a cleanup phase if another
+  artifact family starts consuming the same helper.
+- If memory pressure from retained inactive mip levels becomes measurable after frequent filtering
+  toggles, revisit whether color/detail page texture objects should be recreated when switching from
+  mip-filtered modes back to nearest. Do not add that churn preemptively.
+
+Legacy shims introduced:
+
+- None. No worker contract fields, compatibility mode, staged draw-unit adapter, main-thread material
+  lookup fallback, or global atlas state input was added.
+
 Exit criteria:
 
-- `anisotropic-4x` no longer behaves like plain linear filtering for artifact-owned color/detail
+- Implemented. `anisotropic-4x` no longer behaves like plain linear filtering for artifact-owned color/detail
   pages when anisotropy is supported.
-- Artifact-owned color/detail pages generate mipmaps for modes that use mip filtering, while nearest
-  mode remains non-mipped.
-- Indexed texel and palette lookup pages remain exact sampled and non-mipped under every filtering
+- Implemented. Artifact-owned color/detail pages generate mipmaps for modes that use mip filtering,
+  while initial nearest-mode uploads remain non-mipped and nearest samplers do not use mip filtering.
+- Implemented. Indexed texel and palette lookup pages remain exact sampled and non-mipped under every filtering
   mode.
-- Focused resource tests cover static object bundle and structured-interior artifact page mipmap and
+- Implemented. Focused resource tests cover static object bundle and structured-interior artifact page mipmap and
   anisotropy behavior.
-- `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
+- Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
 
 ### Phase 4C3D: Portal and Spatial Artifact Resource Handoff
 

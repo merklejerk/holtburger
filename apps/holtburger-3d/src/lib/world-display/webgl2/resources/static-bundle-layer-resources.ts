@@ -5,6 +5,7 @@ import type {
 	StaticBundleMaterialRecord,
 	StaticBundleTexturePage,
 	StaticObjectBundleArtifact,
+	StaticObjectBundleScope,
 	VirtualTexturePageRef,
 	VirtualTexturePageSampleClass,
 	VirtualTexturePageUsageBucket,
@@ -31,6 +32,7 @@ export interface Webgl2StaticBundleLayerResourceStore {
 export interface Webgl2StaticBundleLayerResource {
 	key: string;
 	layerKey: string;
+	scope: StaticObjectBundleScope;
 	landblockId: number;
 	bundleKind: StaticObjectBundleArtifact["bundleKind"];
 	sourceRevision: string;
@@ -206,6 +208,7 @@ function createWebgl2StaticBundleLayerResource({
 	return {
 		key: describeStaticBundleLayerResourceKey(layer),
 		layerKey: layer.key,
+		scope: layer.scope,
 		landblockId: layer.landblockId,
 		bundleKind: layer.bundleKind,
 		sourceRevision: layer.sourceRevision,

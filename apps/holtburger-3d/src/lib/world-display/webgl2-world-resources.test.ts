@@ -448,6 +448,58 @@ describe("webgl2 world resources", () => {
 		expect(store.compactionCandidateDrawUnitCount).toBe(0);
 	});
 
+	it("removes resident env-cell bundle scopes from staged indoor static resource sync", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2WorldResourceStore();
+		const envCellId = 0x12340100;
+		const retainedEnvCellId = 0x12340200;
+		const suppressedPart = createStaticPart({
+			instanceId: "indoor-a",
+			owningEnvCellId: envCellId,
+			renderDomain: WORLD_RENDER_DOMAIN.interiorStatic,
+			kind: "indoor-static",
+		});
+		const retainedPart = createStaticPart({
+			instanceId: "indoor-b",
+			owningEnvCellId: retainedEnvCellId,
+			renderDomain: WORLD_RENDER_DOMAIN.interiorStatic,
+			kind: "indoor-static",
+		});
+
+		syncWebgl2StaticLandblockRenderArtifactResources({
+			gl: gl.asContext(),
+			store,
+			artifacts: createStaticLandblockArtifactSnapshot(
+				[
+					createStaticBundleLayer("static-layer/env-cell", "revision-a", {
+						landblockId: suppressedPart.owningLandblockId,
+						bundleKind: "env-cell-static",
+						envCellId,
+					}),
+				],
+				"outdoor-env-cells",
+			),
+		});
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState(),
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: createStaticRenderableScene([
+				suppressedPart,
+				retainedPart,
+			]),
+			structuredInteriorScene: createStructuredInteriorScene(),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform()],
+		});
+
+		expect(store.staticBundleLayerResourceCount).toBe(1);
+		expect(store.staticDrawUnitCount).toBe(1);
+		expect(store.stagedStaticPartCount).toBe(1);
+		expect(store.drawUnits[0]?.staticObjectKeys[0]).toContain("indoor-b");
+	});
+
 	it("realizes terrain tile resources without generic draw-unit compatibility output", () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
@@ -2590,6 +2642,8 @@ function createStaticPart({
 	detailRoleKind = "object",
 	instanceId = "instance-a",
 	landblockId = 0x12340000,
+	owningEnvCellId = null,
+	renderDomain = WORLD_RENDER_DOMAIN.exteriorStatic,
 	materialSlots = [],
 	chunkLocalOrigin = { x: 1, y: 2, z: 3 },
 }: {
@@ -2597,19 +2651,21 @@ function createStaticPart({
 	detailRoleKind?: StaticRenderablePart["detailRoleKind"];
 	instanceId?: string;
 	landblockId?: number;
+	owningEnvCellId?: StaticRenderablePart["owningEnvCellId"];
+	renderDomain?: StaticRenderablePart["renderDomain"];
 	materialSlots?: readonly ResolvedMaterialSlot[];
 	chunkLocalOrigin?: RenderChunkTransform["offset"];
 } = {}): StaticRenderablePart {
 	const landblockKey = `landblock/${landblockId.toString(16).padStart(8, "0")}`;
 	return {
 		renderKey: `static/${instanceId}`,
-		renderDomain: WORLD_RENDER_DOMAIN.exteriorStatic,
+		renderDomain,
 		instanceId,
 		sourceAssetId: "gfx-obj/01000001",
 		sourceDid: 0x01000001,
 		owningLandblockId: landblockId,
 		regionNumber: 1,
-		owningEnvCellId: null,
+		owningEnvCellId,
 		renderChunk: {
 			chunkKey: landblockKey,
 			chunkLandblockId: landblockId,
@@ -2917,12 +2973,13 @@ function sortAtlasBatchesByLandblock(store: Webgl2WorldResourceStore) {
 
 function createStaticLandblockArtifactSnapshot(
 	layers: readonly StaticObjectBundleArtifact[],
+	product: LandblockRenderProductWorkerResult["product"] = "outdoor",
 ): StaticLandblockRenderArtifactStoreSnapshot {
 	const landblockId = layers[0]?.landblockId ?? 0x1234;
 	return createStaticLandblockProductArtifactSnapshot([
 		createStaticLandblockProductArtifact({
 			landblockId,
-			product: "outdoor",
+			product,
 			layers,
 		}),
 	]);
@@ -3132,18 +3189,28 @@ function createStaticBundleLayer(
 	options: {
 		landblockId?: number;
 		bundleKind?: StaticObjectBundleArtifact["bundleKind"];
+		envCellId?: number;
 	} = {},
 ): StaticObjectBundleArtifact {
 	const landblockId = options.landblockId ?? 0x1234;
 	const bundleKind = options.bundleKind ?? "outdoor-buildings";
+	const scope =
+		options.envCellId === undefined
+			? {
+					kind: "landblock" as const,
+					landblockId,
+					bundleKind,
+				}
+			: {
+					kind: "env-cell" as const,
+					landblockId,
+					envCellId: options.envCellId,
+					bundleKind,
+				};
 	return {
 		artifactKind: "static-object-bundle",
 		key,
-		scope: {
-			kind: "landblock",
-			landblockId,
-			bundleKind,
-		},
+		scope,
 		landblockId,
 		bundleKind,
 		sourceRevision,

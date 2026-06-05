@@ -167,6 +167,69 @@ describe("staged world assembly", () => {
 		}
 	});
 
+	it("does not suppress indoor static parts for resident outdoor bundles in the same landblock", () => {
+		const drawUnits = buildStagedStaticDrawUnitAssemblies({
+			assetState: createAssetState(createStaticGfxGeometry()),
+			chunkOffsetByKey: new Map([
+				["landblock/12340000", { x: 10, y: 20, z: 30 }],
+			]),
+			staticRenderableScene: {
+				partsByRenderGroupKey: new Map(),
+				parts: [
+					createStaticPart({ instanceId: "outdoor-a" }),
+					createStaticPart({
+						instanceId: "indoor-a",
+						owningEnvCellId: 0x12340100,
+						renderDomain: WORLD_RENDER_DOMAIN.interiorStatic,
+						kind: "indoor-static",
+					}),
+				],
+			},
+			excludedRenderScope: {
+				outdoorLandblockIds: new Set([0x12340000]),
+				envCellIds: new Set(),
+			},
+		});
+
+		expect(drawUnits).toHaveLength(1);
+		expect(drawUnits[0]?.staticObjectKeys[0]).toContain("indoor-a");
+		expect(drawUnits[0]?.staticObjectKeys[0]).toContain("305398016");
+	});
+
+	it("suppresses indoor static parts only for resident env-cell bundle scopes", () => {
+		const drawUnits = buildStagedStaticDrawUnitAssemblies({
+			assetState: createAssetState(createStaticGfxGeometry()),
+			chunkOffsetByKey: new Map([
+				["landblock/12340000", { x: 10, y: 20, z: 30 }],
+			]),
+			staticRenderableScene: {
+				partsByRenderGroupKey: new Map(),
+				parts: [
+					createStaticPart({
+						instanceId: "indoor-a",
+						owningEnvCellId: 0x12340100,
+						renderDomain: WORLD_RENDER_DOMAIN.interiorStatic,
+						kind: "indoor-static",
+					}),
+					createStaticPart({
+						instanceId: "indoor-b",
+						owningEnvCellId: 0x12340200,
+						renderDomain: WORLD_RENDER_DOMAIN.interiorStatic,
+						kind: "indoor-static",
+					}),
+				],
+			},
+			excludedRenderScope: {
+				outdoorLandblockIds: new Set(),
+				envCellIds: new Set([0x12340100]),
+			},
+		});
+
+		expect(drawUnits).toHaveLength(1);
+		expect(drawUnits[0]?.staticObjectKeys[0]).toContain("indoor-b");
+		expect(drawUnits[0]?.staticObjectKeys[0]).toContain("305398272");
+	});
+
 	it("creates stable graph signatures from sorted prepared dependencies", () => {
 		const signature = describeStagedWorldAssemblyGraphRecordSignature({
 			drawUnitId: "static-staged/test",
@@ -295,24 +358,32 @@ function createStructuredInteriorCell(): StructuredInteriorCell {
 }
 
 function createStaticPart({
+	instanceId = "instance-a",
+	owningEnvCellId = null,
+	renderDomain = WORLD_RENDER_DOMAIN.exteriorStatic,
+	kind = "scenery",
 	materialSlots = [],
 }: {
+	instanceId?: string;
+	owningEnvCellId?: StaticRenderablePart["owningEnvCellId"];
+	renderDomain?: StaticRenderablePart["renderDomain"];
+	kind?: StaticRenderablePart["kind"];
 	materialSlots?: StaticRenderablePart["materialSlots"];
 } = {}): StaticRenderablePart {
 	return {
 		renderKey: "static/group",
-		renderDomain: WORLD_RENDER_DOMAIN.exteriorStatic,
-		instanceId: "instance-a",
+		renderDomain,
+		instanceId,
 		sourceAssetId: "gfx-obj/01000001",
 		sourceDid: 0x01000001,
 		owningLandblockId: 0x12340000,
 		regionNumber: 1,
-		owningEnvCellId: null,
+		owningEnvCellId,
 		renderChunk: {
 			chunkKey: "landblock/12340000",
 			chunkLandblockId: 0x12340000,
 		},
-		kind: "scenery",
+		kind,
 		partIndex: 0,
 		gfxObjId: 0x01000001,
 		gfxObjAssetId: "gfx-obj/01000001",

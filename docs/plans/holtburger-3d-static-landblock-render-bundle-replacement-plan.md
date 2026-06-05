@@ -22,7 +22,8 @@ naming cleanup is implemented. Phase 4D1 artifact-backed portal composite BVH so
 implemented. Phase 4D2A artifact-backed camera residency index and Phase 4D2B1 artifact-owned
 render-frame env-cell BVH visibility are implemented. Phase 4D2B2 scene-domain base fallback
 cleanup, Phase 4D2B3 portal composite env-cell fallback removal, and Phase 4D2B4 exterior
-portal/culling source quarantine are implemented.
+portal/culling source quarantine are implemented. Phase 4E0 artifact scene-bounds cutover is
+implemented.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -339,6 +340,11 @@ Progress:
   on the active draw-submission path. Exterior terrain/outdoor prepared BVH source construction in
   `render-bvh-sources.ts` is quarantined as legacy debt instead of being preserved as part of the
   static landblock replacement architecture.
+- 2026-06-05: Added and implemented Phase 4E0 before the broad hard cutover. Scene-bounds
+  calculation now consumes resident terrain, static object bundle, and detailed env-cell artifact
+  bounds through `artifact-scene-bounds.ts` instead of calling the portal composite BVH source model
+  from the renderer. This removes the last active renderer call site that needed
+  `render-bvh-sources.ts` to read prepared outdoor terrain/static BVHs for scene-bounds accounting.
 
 Validation:
 
@@ -395,6 +401,9 @@ Validation:
 - `npm exec vitest -- run src/lib/world-display/render-bvh-sources.test.ts src/lib/world-display/portal-clipped-bvh-candidates.test.ts`,
   `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
   `git diff --check` passed after Phase 4D2B3.
+- `npm exec vitest -- run src/lib/world-display/artifact-scene-bounds.test.ts src/lib/world-display/render-bvh-sources.test.ts src/lib/world-display/portal-clipped-bvh-candidates.test.ts`,
+  `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
+  `git diff --check` passed after Phase 4E0.
 - `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts`
   passed after the first Phase 1D builder slice.
 - `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts`
@@ -3697,7 +3706,7 @@ Exit criteria:
   detailed artifacts exist for the active landblock.
 - Implemented. Focused tests cover artifact-backed portal derivation and the explicit null result
   that lets the old derivation remain a temporary absence fallback.
-- Implemented. `check`, TypeScript lint, knip, and Rust lint pass.
+- Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
 
 #### Phase 4C3D2: Portal Mask/Composite Artifact Inputs
 
@@ -4297,6 +4306,56 @@ Exit criteria:
   debt, not target architecture.
 - Implemented. Future hard-cutover work is directed to delete the latent exterior clipped-BVH path
   or rebuild it from resident artifacts only if a real renderer consumer appears.
+
+#### Phase 4E0: Artifact Scene-Bounds Cutover
+
+Added as an immediate prep phase before the broad Phase 4E hard cutover. The previous scene-bounds
+path was the last active renderer call site that used `buildPortalCompositeRenderBvhSources`, which
+kept prepared outdoor terrain/static BVH inputs relevant even after exterior portal-clipped culling
+was quarantined as debt.
+
+- Add a resident-artifact scene-bounds helper that derives bounds from terrain artifacts, static
+  object bundle spatial hints, and detailed env-cell local BVHs.
+- Change `webgl2-world-display-renderer-impl.ts` so `latestSceneBounds` no longer depends on
+  `AssetChannelState`, `TerrainSceneModel`, `StaticRenderableSceneModel`, or portal composite BVH
+  source construction.
+- Keep the latent portal-clipped BVH query modules isolated until Phase 4E/5 deletes them or a real
+  clipped-draw consumer justifies rebuilding them from resident artifacts.
+
+Decisions and course corrections:
+
+- Implemented. `artifact-scene-bounds.ts` now calculates `SceneBoundsFrame` from resident landblock
+  render artifacts without main-thread prepared asset state.
+- Implemented. The WebGL renderer now calls
+  `calculateStaticLandblockArtifactSceneBoundsFrame` during resource sync instead of building portal
+  composite render BVH sources.
+- Course correction: terrain artifact BVH root bounds remain terrain-local and must use the existing
+  terrain-local bounds transform. Static bundle spatial hints continue to be consumed as authored by
+  the worker artifact because debug/picker spatial code already treats them that way.
+- Course correction: Phase 4E is still too broad to land as one phase without freezing the codebase
+  in a half-deleted state. This prep phase removes a blocking mixed-source dependency first.
+
+Cleanup targets discovered:
+
+- `render-bvh-sources.ts` still contains prepared outdoor terrain/static source construction, but the
+  renderer no longer calls it for scene bounds. It is now latent portal-clipped/debug debt and should
+  be deleted during Phase 4E or Phase 5 unless clipped portal draw culling becomes a real feature.
+- `portal-clipped-bvh-candidates.ts` remains test-only infrastructure. Do not route hard-cutover work
+  through it as a compatibility path.
+- Static bundle spatial hint coordinate ownership should be clarified during cleanup. This phase
+  preserves the current artifact/debug interpretation instead of broadening the scope.
+
+Legacy shims introduced:
+
+- None. Scene bounds moved to resident artifacts; no prepared-state fallback was added.
+
+Exit criteria:
+
+- Implemented. `latestSceneBounds` is derived from resident artifact data instead of the mixed
+  portal/prepared BVH source model.
+- Implemented. Focused tests cover empty artifact snapshots and resident terrain/static/detailed
+  bounds unioning.
+- Implemented. `check`, TypeScript lint, knip, and Rust lint pass.
 
 ### Phase 4E: Hard Cutover From Main-Thread Static Hydration
 

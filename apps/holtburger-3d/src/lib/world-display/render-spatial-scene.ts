@@ -37,9 +37,13 @@ import type {
 	StructuredInteriorSceneModel,
 } from "./structured-interior-scene";
 import type { TerrainSceneModel, TerrainSceneTile } from "./terrain-scene";
-import { deriveLandblockRenderChunkPlacement } from "./render-chunks";
+import {
+	deriveLandblockRenderChunkPlacement,
+	type RenderChunkKey,
+} from "./render-chunks";
 import {
 	getDetailedLandblockRenderArtifacts,
+	getStaticObjectBundleArtifacts,
 	type DetailedLandblockRenderArtifacts,
 } from "./landblock-render-product";
 import {
@@ -47,6 +51,10 @@ import {
 	WORLD_RENDER_DOMAIN,
 } from "./render-domains";
 import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
+import type {
+	StaticBundleSpatialHint,
+	StaticObjectBundleArtifact,
+} from "./static-bundle-layer";
 
 export const TERRAIN_SPATIAL_OWNER_KEY = "terrain-scene";
 export const STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY =
@@ -99,6 +107,23 @@ export function deriveStaticRenderableSpatialItems(
 	return staticRenderableScene.parts.flatMap((part) =>
 		deriveStaticRenderablePartSpatialItem(assetState, part),
 	);
+}
+
+export function deriveStaticRenderableSpatialItemsFromLandblockArtifacts(
+	artifacts: StaticLandblockRenderArtifactStoreSnapshot,
+): RenderSpatialItem[] | null {
+	const bundleArtifacts = artifacts.artifacts.flatMap((result) =>
+		getStaticObjectBundleArtifacts(result),
+	);
+	if (bundleArtifacts.length === 0) {
+		return null;
+	}
+	const items = bundleArtifacts.flatMap((bundle) =>
+		deriveStaticBundleSpatialItems(bundle),
+	);
+	return items.length > 0
+		? items.sort((left, right) => left.id.localeCompare(right.id))
+		: null;
 }
 
 export function deriveDebugOverlaySpatialItems(
@@ -240,6 +265,76 @@ function deriveStaticRenderablePartSpatialItem(
 			},
 		},
 	];
+}
+
+function deriveStaticBundleSpatialItems(
+	bundle: StaticObjectBundleArtifact,
+): RenderSpatialItem[] {
+	const objectRecordByVisibilityKey = new Map(
+		bundle.objectRecords.flatMap((record) =>
+			record.visibilityKeys.map((visibilityKey) => [visibilityKey, record] as const),
+		),
+	);
+	const renderChunk = deriveLandblockRenderChunkPlacement(bundle.landblockId);
+	return (bundle.spatialHints ?? []).flatMap((hint) => {
+		const objectRecord = hint.visibilityKeys
+			.map((visibilityKey) => objectRecordByVisibilityKey.get(visibilityKey))
+			.find((record): record is NonNullable<typeof record> => Boolean(record));
+		if (!objectRecord) {
+			return [];
+		}
+		return [deriveStaticBundleSpatialItem(bundle, hint, objectRecord, renderChunk.chunkKey)];
+	});
+}
+
+function deriveStaticBundleSpatialItem(
+	bundle: StaticObjectBundleArtifact,
+	hint: StaticBundleSpatialHint,
+	objectRecord: StaticObjectBundleArtifact["objectRecords"][number],
+	chunkKey: RenderChunkKey,
+): RenderSpatialItem {
+	const kind = staticBundleSpatialKind(objectRecord.kind);
+	return {
+		id: staticRenderablePartSpatialItemId(hint.key),
+		kind,
+		ownerKey: STATIC_RENDERABLE_SPATIAL_OWNER_KEY,
+		chunkKey,
+		broadphaseBounds: hint.bounds,
+		pickShape: { kind: "box", bounds: hint.bounds },
+		metadata: {
+			kind: "static-renderable",
+			renderKey: hint.key,
+			instanceId: objectRecord.objectKey,
+			staticKind: objectRecord.kind,
+			renderDomain:
+				objectRecord.owningEnvCellId === null
+					? WORLD_RENDER_DOMAIN.exteriorStatic
+					: WORLD_RENDER_DOMAIN.interiorStatic,
+			owningLandblockId: objectRecord.owningLandblockId,
+			owningEnvCellId: objectRecord.owningEnvCellId,
+			sourceAssetId: objectRecord.sourceAssetId,
+			gfxObjAssetId: objectRecord.sourceAssetId,
+			gfxObjId: 0,
+			partIndex: 0,
+			materialSignature: `artifact-static:${bundle.key}:${objectRecord.objectKey}`,
+			materialSlotCount: 0,
+			detailRoleKind: "artifact-static",
+			detailSignature: `artifact-static:${bundle.bundleKind}`,
+			textureVelocitySignature: "artifact-static:none",
+		},
+	};
+}
+
+function staticBundleSpatialKind(
+	kind: StaticObjectBundleArtifact["objectRecords"][number]["kind"],
+): RenderSpatialItem["kind"] {
+	if (kind === "indoor-static") {
+		return "indoor-static";
+	}
+	if (kind === "building") {
+		return "building";
+	}
+	return "outdoor-static";
 }
 
 function staticRenderablePartSpatialKind(

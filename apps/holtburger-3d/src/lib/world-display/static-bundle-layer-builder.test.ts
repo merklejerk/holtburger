@@ -59,6 +59,38 @@ describe("static bundle layer builder", () => {
 			"outdoor-static:landblock:da55ffff:instance:direct-0",
 			"outdoor-static:landblock:da55ffff:instance:compactable-1",
 		]);
+		expect(layer.spatialHints).toEqual([
+			{
+				key: "outdoor-static:da55ffff:compactable-0",
+				visibilityKeys: [
+					"outdoor-static:landblock:da55ffff:instance:compactable-0",
+				],
+				bounds: {
+					min: { x: 0, y: 0, z: 0 },
+					max: { x: 1, y: 1, z: 1 },
+				},
+			},
+			{
+				key: "outdoor-static:da55ffff:compactable-1",
+				visibilityKeys: [
+					"outdoor-static:landblock:da55ffff:instance:compactable-1",
+				],
+				bounds: {
+					min: { x: 2, y: 0, z: 0 },
+					max: { x: 3, y: 1, z: 1 },
+				},
+			},
+			{
+				key: "outdoor-static:da55ffff:direct-0",
+				visibilityKeys: [
+					"outdoor-static:landblock:da55ffff:instance:direct-0",
+				],
+				bounds: {
+					min: { x: 1, y: 0, z: 0 },
+					max: { x: 2, y: 1, z: 1 },
+				},
+			},
+		]);
 		expect(layer.preparedAssetIds).toContain("material/08000001");
 		expect(layer.preparedAssetIds).toContain("render-surface/06000001");
 		expect(layer.preparedAssetIds).toContain(
@@ -445,6 +477,7 @@ function createOutdoorLandblock(
 }
 
 function createOutdoorMember(instanceId: string, sourceAssetId: string) {
+	const x = instanceId === "compactable-0" ? 0 : instanceId === "direct-0" ? 1 : 2;
 	return {
 		kind: "explicit-object" as const,
 		instanceId,
@@ -454,7 +487,10 @@ function createOutdoorMember(instanceId: string, sourceAssetId: string) {
 		localPlacement: identityPlacement(),
 		sourceScale: { x: 1, y: 1, z: 1 },
 		sourceBounds: null,
-		instanceBounds: null,
+		instanceBounds: {
+			min: { x, y: 0, z: 0 },
+			max: { x: x + 1, y: 1, z: 1 },
+		},
 		building: null,
 		generated: null,
 	};

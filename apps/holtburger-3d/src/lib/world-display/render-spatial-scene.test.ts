@@ -4,7 +4,9 @@ import type { PreparedPolygonSetBspNode } from "../assets/types";
 import type { LandblockRenderProductWorkerResult } from "./landblock-render-product";
 import { deriveStructuredCellRenderChunk } from "./render-chunks";
 import {
+	deriveStaticRenderableSpatialItemsFromLandblockArtifacts,
 	deriveStructuredInteriorSpatialItemsFromLandblockArtifacts,
+	STATIC_RENDERABLE_SPATIAL_OWNER_KEY,
 	STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY,
 } from "./render-spatial-scene";
 import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
@@ -53,6 +55,62 @@ describe("render spatial scene", () => {
 		expect(
 			deriveStructuredInteriorSpatialItemsFromLandblockArtifacts(
 				createStaticLandblockArtifactSnapshot([]),
+			),
+		).toBeNull();
+	});
+
+	it("derives coarse static spatial items from static bundle artifact hints", () => {
+		const items = deriveStaticRenderableSpatialItemsFromLandblockArtifacts(
+			createStaticLandblockArtifactSnapshot([
+				createStaticBundleProductArtifact(),
+			]),
+		);
+
+		expect(items).toHaveLength(1);
+		expect(items?.[0]).toMatchObject({
+			id: "static-renderable:outdoor-static:016cffff:tree",
+			kind: "outdoor-static",
+			ownerKey: STATIC_RENDERABLE_SPATIAL_OWNER_KEY,
+			chunkKey: "landblock/016cffff",
+			broadphaseBounds: {
+				min: { x: 1, y: 2, z: 3 },
+				max: { x: 4, y: 5, z: 6 },
+			},
+			metadata: {
+				kind: "static-renderable",
+				renderKey: "outdoor-static:016cffff:tree",
+				instanceId: "outdoor-static:016cffff:tree",
+				staticKind: "scenery",
+				renderDomain: "exterior-static",
+				owningLandblockId: 0x016cffff,
+				owningEnvCellId: null,
+				sourceAssetId: "setup-model/02000001",
+				gfxObjAssetId: "setup-model/02000001",
+				gfxObjId: 0,
+				partIndex: 0,
+				materialSlotCount: 0,
+				detailRoleKind: "artifact-static",
+				detailSignature: "artifact-static:outdoor-detail",
+				textureVelocitySignature: "artifact-static:none",
+			},
+		});
+	});
+
+	it("returns null for static bundle artifacts without spatial hints", () => {
+		const artifact = createStaticBundleProductArtifact();
+		const bundle = artifact.artifacts[0];
+		if (bundle?.artifactKind !== "static-object-bundle") {
+			throw new Error("test fixture should produce a static object bundle");
+		}
+
+		expect(
+			deriveStaticRenderableSpatialItemsFromLandblockArtifacts(
+				createStaticLandblockArtifactSnapshot([
+					{
+						...artifact,
+						artifacts: [{ ...bundle, spatialHints: [] }],
+					},
+				]),
 			),
 		).toBeNull();
 	});
@@ -147,6 +205,76 @@ function createDetailedLandblockProductArtifact({
 						items: [],
 					},
 					envCellLocalBvhs: [],
+				},
+			},
+		],
+		diagnostics: {
+			status: "ready",
+			messages: [],
+		},
+	};
+}
+
+function createStaticBundleProductArtifact(): LandblockRenderProductWorkerResult {
+	const landblockId = 0x016cffff;
+	const objectKey = "outdoor-static:016cffff:tree";
+	const visibilityKey =
+		"outdoor-static:landblock:016cffff:instance:tree" as const;
+	return {
+		type: "landblock-render-product-built",
+		jobId: "job:static:test",
+		landblockId,
+		product: "outdoor",
+		requestId: "request:static:test",
+		buildPolicyRevision: "build:v1",
+		texturePagePolicyRevision: "pages:v1",
+		artifacts: [
+			{
+				artifactKind: "static-object-bundle",
+				key: "static-bundle:test",
+				scope: {
+					kind: "landblock",
+					landblockId,
+					bundleKind: "outdoor-detail",
+				},
+				landblockId,
+				bundleKind: "outdoor-detail",
+				sourceRevision: "revision:test",
+				rootAssetIds: ["landblock/016cffff/outdoor"],
+				preparedAssetIds: ["landblock/016cffff/outdoor"],
+				renderChunks: [],
+				compactedBatches: [],
+				directEntries: [],
+				materialRecords: [],
+				texturePageRefs: [],
+				texturePages: [],
+				objectRecords: [
+					{
+						objectKey,
+						visibilityKeys: [visibilityKey],
+						sourceAssetId: "setup-model/02000001",
+						owningLandblockId: landblockId,
+						owningEnvCellId: null,
+						kind: "scenery",
+					},
+				],
+				spatialHints: [
+					{
+						key: objectKey,
+						visibilityKeys: [visibilityKey],
+						bounds: {
+							min: { x: 1, y: 2, z: 3 },
+							max: { x: 4, y: 5, z: 6 },
+						},
+					},
+				],
+				diagnostics: {
+					sourceObjectCount: 1,
+					compactedSurfaceCount: 0,
+					directSurfaceCount: 0,
+					skippedSurfaceCount: 0,
+					missingAssetIds: [],
+					skippedReasons: [],
 				},
 			},
 		],

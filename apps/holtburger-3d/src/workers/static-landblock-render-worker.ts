@@ -16,6 +16,11 @@ import {
 } from "../lib/landblocks";
 import type { AssetLookupRequestDto } from "../lib/host/contracts";
 import {
+	envRenderGeometryBvhItemKey,
+	residencyCellBvhItemKey,
+} from "../lib/world-display/prepared-bvh-visibility";
+import { deriveStructuredCellRenderChunk } from "../lib/world-display/render-chunks";
+import {
 	buildStaticLandblockRenderBundleLayer,
 } from "../lib/world-display/static-bundle-layer-builder";
 import type { StaticBundleLayerWorkerJob } from "../lib/world-display/static-bundle-layer";
@@ -23,6 +28,7 @@ import {
 	buildLandblockTerrainRenderArtifact,
 } from "../lib/world-display/terrain-render-artifact";
 import type {
+	DetailedLandblockRenderArtifacts,
 	LandblockRenderPresetWorkerJob,
 	LandblockRenderPresetWorkerResult,
 } from "../lib/world-display/landblock-render-preset";
@@ -195,11 +201,10 @@ export async function runStaticLandblockRenderWorkerJob(
 		}
 	}
 
-	return {
+	const baseResult = {
 		type: "landblock-render-preset-built",
 		jobId: job.jobId,
 		landblockId: job.landblockId,
-		preset: job.preset,
 		requestId: job.requestId,
 		buildPolicyRevision: job.buildPolicyRevision,
 		texturePagePolicyRevision: job.texturePagePolicyRevision,
@@ -213,6 +218,23 @@ export async function runStaticLandblockRenderWorkerJob(
 				)} ${job.preset}`,
 			],
 		},
+	} satisfies Omit<LandblockRenderPresetWorkerResult, "preset" | "detailedArtifacts">;
+
+	if (job.preset === "outdoor-with-env-cells") {
+		return {
+			...baseResult,
+			preset: job.preset,
+			detailedArtifacts: buildDetailedLandblockRenderArtifacts({
+				job,
+				preparedByAssetId,
+				staticBundleLayers,
+			}),
+		};
+	}
+
+	return {
+		...baseResult,
+		preset: job.preset,
 	};
 }
 
@@ -350,6 +372,149 @@ function buildStaticBundleLayer(
 			atlasLayout: job.buildPolicy.atlasLayout,
 		},
 	});
+}
+
+function buildDetailedLandblockRenderArtifacts(options: {
+	job: LandblockRenderPresetWorkerJob;
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
+	staticBundleLayers: readonly ReturnType<typeof buildStaticBundleLayer>[];
+}): DetailedLandblockRenderArtifacts {
+	const topologyAssetId = formatLandblockTopologyAssetId(options.job.landblockId);
+	const topology = options.preparedByAssetId.get(topologyAssetId);
+	if (topology?.payload.kind !== "landblock-topology") {
+		throw new Error(
+			`Landblock preset worker cannot build detailed artifacts without ${topologyAssetId}.`,
+		);
+	}
+	const topologyPayload = topology.payload;
+
+	const envCells = topologyPayload.envCells
+		.map((member) => {
+			const asset = options.preparedByAssetId.get(member.assetId);
+			if (asset?.payload.kind !== "env-cell") {
+				throw new Error(
+					`Landblock preset worker cannot build detailed artifacts without ${member.assetId}.`,
+				);
+			}
+			return asset.payload;
+		})
+		.sort((left, right) => left.envCellId - right.envCellId);
+
+	return {
+		key: [
+			"detailed-landblock",
+			formatHex32(options.job.landblockId),
+			options.job.requestId,
+			options.job.buildPolicyRevision,
+			options.job.texturePagePolicyRevision,
+		].join(":"),
+		landblockId: options.job.landblockId,
+		preset: "outdoor-with-env-cells",
+		requestId: options.job.requestId,
+		buildPolicyRevision: options.job.buildPolicyRevision,
+		texturePagePolicyRevision: options.job.texturePagePolicyRevision,
+		selectedEnvCellIds: envCells.map((envCell) => envCell.envCellId),
+		structuredInteriorCells: envCells.map((envCell) =>
+			createStructuredInteriorCellArtifact(options.job.landblockId, envCell),
+		),
+		cellStructureMetadata: envCells.map((envCell) => ({
+			key: `cell-structure:${formatHex32(envCell.envCellId)}:${formatHex32(
+				envCell.cellStructureId,
+			)}`,
+			envCellId: envCell.envCellId,
+			cellStructureId: envCell.cellStructureId,
+			environmentId: envCell.environmentId,
+			regionNumber: envCell.regionNumber,
+			surfaceIds: envCell.surfaces.map((surface) => surface.surfaceId),
+			portalIds: envCell.portals.map((portal) => portal.portalId),
+			localPlacement: envCell.localPlacement,
+		})),
+		portalLinks: topologyPayload.portalLinks.map((portalLink) => ({
+			key: portalLink.linkId,
+			landblockId: topologyPayload.landblockId,
+			source: portalLink.source,
+			target: portalLink.target,
+			flags: portalLink.flags,
+			otherCellId: portalLink.otherCellId,
+			otherPortalId: portalLink.otherPortalId,
+			polygonId: portalLink.polygonId,
+			sourceIndex: portalLink.sourceIndex,
+		})),
+		portalApertures: envCells.flatMap((envCell) =>
+			envCell.portalApertures.map((aperture) => ({
+				key: `portal-aperture:${formatHex32(envCell.envCellId)}:${aperture.portalId}`,
+				envCellId: envCell.envCellId,
+				portalId: aperture.portalId,
+				sourceIndex: aperture.sourceIndex,
+				polygonId: aperture.polygonId,
+				points: aperture.points,
+				plane: aperture.plane,
+			})),
+		),
+		visibility: {
+			objectVisibilityRecords: options.staticBundleLayers.flatMap((layer) =>
+				layer.objectRecords.map((objectRecord) => ({
+					objectKey: objectRecord.objectKey,
+					owningLandblockId: objectRecord.owningLandblockId,
+					owningEnvCellId: objectRecord.owningEnvCellId,
+					visibilityKeys: objectRecord.visibilityKeys,
+				})),
+			),
+			cellVisibilityRecords: envCells.map((envCell) => ({
+				envCellId: envCell.envCellId,
+				visibilityKeys: [
+					residencyCellBvhItemKey(envCell.envCellId),
+					envRenderGeometryBvhItemKey(envCell.envCellId),
+				],
+				visibleEnvCellIds: envCell.visibleEnvCellIds,
+			})),
+		},
+		spatial: {
+			envCellResidencyBvh: topologyPayload.envCellResidencyBvh,
+			envCellLocalBvhs: envCells.map((envCell) => ({
+				key: `env-cell-local-bvh:${formatHex32(envCell.envCellId)}`,
+				envCellId: envCell.envCellId,
+				localPlacement: envCell.localPlacement,
+				localBvh: envCell.localBvh,
+			})),
+		},
+	};
+}
+
+function createStructuredInteriorCellArtifact(
+	landblockId: number,
+	envCell: Extract<PreparedAssetRecord["payload"], { kind: "env-cell" }>,
+): DetailedLandblockRenderArtifacts["structuredInteriorCells"][number] {
+	return {
+		key: `structured-interior-cell:${formatHex32(envCell.envCellId)}`,
+		envCellId: envCell.envCellId,
+		landblockId,
+		regionNumber: envCell.regionNumber,
+		environmentId: envCell.environmentId,
+		cellStructureId: envCell.cellStructureId,
+		renderChunk: deriveStructuredCellRenderChunk(envCell.envCellId),
+		localPlacement: envCell.localPlacement,
+		surfaceIds: envCell.surfaces.map((surface) => surface.surfaceId),
+		portals: envCell.portals.map((portal) => ({
+			key: `env-cell-portal:${formatHex32(envCell.envCellId)}:${portal.portalId}`,
+			envCellId: envCell.envCellId,
+			portalId: portal.portalId,
+			sourceIndex: portal.sourceIndex,
+			flags: portal.flags,
+			polygonId: portal.polygonId,
+			otherCellId: portal.otherCellId,
+			otherPortalId: portal.otherPortalId,
+			targetEnvCellId: portal.targetEnvCellId,
+			isOutsideTransition: portal.isOutsideTransition,
+		})),
+		portalApertureKeys: envCell.portalApertures.map(
+			(aperture) =>
+				`portal-aperture:${formatHex32(envCell.envCellId)}:${aperture.portalId}`,
+		),
+		staticObjectCount: envCell.statics.length,
+		cellBsp: envCell.cellBsp,
+		renderGeometry: envCell.renderGeometry,
+	};
 }
 
 function createStaticBundleLayerWorkerJob(

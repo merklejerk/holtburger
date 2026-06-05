@@ -5,13 +5,17 @@ import type {
 	AssetLookupResponseDto,
 } from "../lib/host/contracts";
 import {
+	formatEnvCellAssetId,
 	formatLandblockOutdoorAssetId,
 	formatLandblockTopologyAssetId,
 	formatRegionRenderProfileAssetId,
 	formatTerrainMaterialAssetId,
 } from "../lib/landblocks";
 import type { LandblockRenderPresetWorkerJob } from "../lib/world-display/landblock-render-preset";
-import { runStaticLandblockRenderWorkerJob } from "./static-landblock-render-worker";
+import {
+	collectStaticLandblockRenderWorkerResultTransferables,
+	runStaticLandblockRenderWorkerJob,
+} from "./static-landblock-render-worker";
 
 describe("static landblock render worker", () => {
 	it("builds a complete outdoor-with-env-cells preset from worker-local asset lookups", async () => {
@@ -30,6 +34,10 @@ describe("static landblock render worker", () => {
 				createResponse(
 					formatLandblockTopologyAssetId(landblockId),
 					createTopologyPayload(landblockId),
+				),
+				createResponse(
+					formatEnvCellAssetId(0xda550100),
+					createEnvCellPayload(0xda550100),
 				),
 			].map((response) => [response.assetId, response] as const),
 		);
@@ -64,10 +72,30 @@ describe("static landblock render worker", () => {
 		expect(result.staticBundleLayers.map((layer) => layer.layerKind)).toEqual([
 			"outdoor-buildings",
 			"outdoor-detail",
+			"env-cell-static",
 		]);
+		expect(result.detailedArtifacts.selectedEnvCellIds).toEqual([0xda550100]);
+		expect(result.detailedArtifacts.structuredInteriorCells).toHaveLength(1);
+		expect(result.detailedArtifacts.portalApertures).toHaveLength(1);
+		expect(result.detailedArtifacts.visibility.cellVisibilityRecords).toEqual([
+			{
+				envCellId: 0xda550100,
+				visibilityKeys: [
+					"residency-cell:cell:da550100",
+					"env-render-geometry:cell:da550100",
+				],
+				visibleEnvCellIds: [0xda550101],
+			},
+		]);
+		expect(
+			result.detailedArtifacts.spatial.envCellResidencyBvh.coordinateSpace,
+		).toBe("landblock-topology-residency");
 		expect(
 			result.staticBundleLayers.every((layer) => layer.rootAssetIds.length > 0),
 		).toBe(true);
+		expect(
+			collectStaticLandblockRenderWorkerResultTransferables(result),
+		).toContain(result.detailedArtifacts.structuredInteriorCells[0]?.renderGeometry.positions.buffer);
 	});
 });
 
@@ -188,14 +216,139 @@ function createTopologyPayload(landblockId: number): Record<string, unknown> {
 		landblockId,
 		landblockInfoId: landblockId,
 		classification: "outdoor",
-		envCells: [],
+		envCells: [
+			{
+				memberId: "env-cell-member/da550100",
+				envCellId: 0xda550100,
+				assetId: formatEnvCellAssetId(0xda550100),
+				localPlacement: createPlacement(),
+				visibleEnvCellIds: [0xda550101],
+				restrictionObjectId: null,
+				seenOutside: true,
+			},
+		],
 		portalLinks: [],
 		envCellResidencyBvh: {
 			coordinateSpace: "landblock-topology-residency",
-			nodes: [],
-			items: [],
+			nodes: [createBvhNode()],
+			items: [
+				{
+					memberId: "env-cell-member/da550100",
+					envCellId: 0xda550100,
+					assetId: formatEnvCellAssetId(0xda550100),
+					bounds: createBounds(),
+					source: "env-cell-placement",
+				},
+			],
 		},
 		diagnostics: { sourceRecords: [], errors: [], omissions: [] },
+	};
+}
+
+function createEnvCellPayload(envCellId: number): Record<string, unknown> {
+	return {
+		kind: "env-cell",
+		sourceAssetKind: "env-cell",
+		residencyKind: "interior-cell",
+		provenance: createProvenance("env-cell"),
+		envCellId,
+		regionId: 0x13000000,
+		regionNumber: 1,
+		environmentId: 0x01000001,
+		cellStructureId: 0x02000002,
+		localPlacement: createPlacement(),
+		surfaces: [],
+		portals: [
+			{
+				portalId: "portal/0",
+				sourceIndex: 0,
+				flags: 1,
+				polygonId: 7,
+				otherCellId: 0x0101,
+				otherPortalId: 2,
+				targetEnvCellId: 0xda550101,
+				isOutsideTransition: true,
+			},
+		],
+		visibleEnvCellIds: [0xda550101],
+		portalApertures: [
+			{
+				portalId: "portal/0",
+				sourceIndex: 0,
+				polygonId: 7,
+				points: [
+					{ x: 0, y: 0, z: 0 },
+					{ x: 1, y: 0, z: 0 },
+					{ x: 0, y: 1, z: 0 },
+				],
+				plane: {
+					normal: { x: 0, y: 0, z: 1 },
+					constant: 0,
+					source: "derived-from-render-points",
+				},
+			},
+		],
+		statics: [],
+		renderGeometry: {
+			sourceId: 0x02000002,
+			vertexCount: 3,
+			triangleCount: 1,
+			positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+			normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+			uvs: new Float32Array([0, 0, 1, 0, 0, 1]),
+			triangles: [{ polygonId: 7, surfaceId: null, firstVertex: 0 }],
+			surfaceIds: [],
+			invalidPolygons: [],
+			skippedPolygonCount: 0,
+			bounds: createBounds(),
+		},
+		cellBsp: {
+			kind: "leaf",
+			index: 0,
+			solid: 0,
+			sphere: null,
+			polyIds: [7],
+		},
+		localBvh: {
+			coordinateSpace: "env-cell-local",
+			nodes: [createBvhNode()],
+			items: [
+				{
+					kind: "render-geometry",
+					polygonId: 7,
+					triangleRange: [0, 1],
+				},
+				{ kind: "portal", portalId: "portal/0" },
+			],
+		},
+		dependencies: {
+			renderableSourceAssetIds: [],
+			materialAssetIds: [],
+		},
+	};
+}
+
+function createPlacement(): Record<string, unknown> {
+	return {
+		origin: { x: 0, y: 0, z: 0 },
+		orientation: { w: 1, x: 0, y: 0, z: 0 },
+	};
+}
+
+function createBounds(): Record<string, unknown> {
+	return {
+		min: { x: 0, y: 0, z: 0 },
+		max: { x: 1, y: 1, z: 1 },
+	};
+}
+
+function createBvhNode(): Record<string, unknown> {
+	return {
+		bounds: createBounds(),
+		left: null,
+		right: null,
+		itemIndices: [0],
+		kindMask: 1,
 	};
 }
 

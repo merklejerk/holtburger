@@ -4720,61 +4720,140 @@ Exit criteria:
 - Implemented. Focused coordinator and structured-interior tests cover the cutover boundary.
 - Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
 
-### Phase 4E: Hard Cutover From Main-Thread Static Hydration
+### Remaining Phase Schedule
 
-- Stop using `scene-asset-request-planner.ts` and `AssetChannelState.preparedByAssetId` as the
-  source of topology/env-cell/static/interior renderable hydration for migrated topology/env-cell
-  products.
-- Delete or isolate the remaining non-artifact-active prepared static/structured scene producers once
-  the artifact path is mandatory for browser landblock rendering.
-- Remove outdoor static objects, env-cell statics, and structured interior geometry from
-  `StaticRenderableSceneModel`, `StructuredInteriorSceneModel`, staged draw-unit assembly, static
-  compaction planning, direct suppression, and visible submit.
-- Delete standalone static compaction render-resource worker scheduling once static callers are gone.
-- Delete standalone static texture atlas worker scheduling once static callers are gone.
-- Remove global/static texture atlas generation identity from static compacted geometry keys.
-- Do not delete the remaining staged/main-thread static modules until indoor/dungeon env-cell product
-  scheduling and structured-interior artifact handoff make those modules unreachable for
-  landblock-derived static/interior geometry. Partial deletion would freeze a dual-mode
-  architecture.
+Phases 4E0 through 4E6 were split reactively because the original hard-cutover phase covered too
+many ownership boundaries at once. The remaining work is now explicit so future implementation turns
+can choose the next listed phase instead of adding another unscheduled interim phase by default. Add
+new immediate phases only when a phase below proves unsafe to land as written or when newly
+discovered debt blocks the next scheduled phase.
+
+### Phase 4E7: Browser Coordinator Contract Hard Cutover
+
+The remaining coordinator contract still carries `StaticRenderableSceneModel` and
+`StructuredInteriorSceneModel` as if they were normal landblock render inputs. Phases 4E3 through
+4E6 made those models empty for artifact-active landblock rendering, leaving them as transitional
+surfaces for runtime appearance previews, non-artifact states, diagnostics, and tests.
+
+- Split or rename the coordinator-facing static scene so runtime appearance previews are explicit and
+  landblock-derived statics are not represented as a normal browser render input.
+- Stop sending landblock-derived static or structured-interior scene models through
+  `BrowserRenderResourceSurface` for artifact-active browser landblock rendering.
+- Remove or quarantine the non-artifact-active prepared static/structured producers from the browser
+  landblock render path; if a producer remains for tests or diagnostics, label it as legacy and keep
+  it out of `BrowserRenderResourceCoordinator.update`.
+- Keep artifact-backed terrain, static bundle, detailed structured interior, portal, spatial, and
+  visibility data flowing through the artifact snapshot.
+- Preserve runtime appearance previews as non-landblock scene elements until a separate dynamic/pinned
+  object worker owns them.
 
 Exit criteria:
 
-- No static landblock render path depends on render-resource worker job scheduling.
-- No landblock-derived static renderable, structured-interior shell, portal aperture artifact, or
-  required static spatial record is derived from main-thread prepared asset state on the critical
-  render path.
-- `StaticRenderableSceneModel` and `StructuredInteriorSceneModel` no longer own landblock-derived
-  renderable geometry for migrated products.
-- `staged-world-assembly.ts` no longer emits landblock-derived static or structured-interior draw
-  units.
+- Browser landblock rendering no longer calls `deriveStaticRenderableSceneModel` or
+  `deriveStructuredInteriorSceneModel`.
+- Runtime appearance previews remain functional without using landblock-derived static scene
+  derivation.
+- `BrowserRenderResourceSurface` no longer implies `StaticRenderableSceneModel` or
+  `StructuredInteriorSceneModel` are authoritative landblock geometry sources for browser
+  landblocks.
+- Focused coordinator tests cover outdoor, indoor/dungeon, resident detailed artifacts, and runtime
+  appearance preview preservation.
 
-### Phase 5: Retire Legacy Static Staging and Renderer Graph Accounting
+### Phase 4E8: Staged Structured-Interior Draw Path Removal
 
-- Delete static paths from `staged-world-assembly.ts` or split the file so only non-static staged
-  paths remain.
-- Delete structured-interior draw-unit assembly from `staged-world-assembly.ts`; any remaining portal
-  mask/debug draw units must consume resident artifacts and must not retain env-cell static
-  geometry hydration logic.
-- Remove static compaction worker scheduler ownership and tests.
-- Remove static graph projection and static staged resource metrics.
-- Replace asset pruning inputs with resident artifact dependency reports.
+Once Phase 4E7 makes prepared structured-interior scenes unreachable from browser landblock
+rendering, delete the renderer resource path that turns `StructuredInteriorSceneModel.cells` into
+staged draw units.
+
+- Remove structured-interior draw-unit assembly from `staged-world-assembly.ts`.
+- Remove WebGL resource sync calls, readiness accounting, and staged resource metrics that exist only
+  for structured-interior shell draw units.
+- Ensure portal masks, debug overlays, scene-domain selection, and spatial diagnostics consume
+  resident detailed artifacts or explicit debug overlay models, not prepared structured shell
+  geometry.
+- Delete tests that assert prepared structured-interior staged draw-unit output. Keep or rewrite tests
+  that assert artifact-backed structured material resources and submit.
+
+Exit criteria:
+
+- `staged-world-assembly.ts` cannot emit structured-interior shell draw units.
+- No WebGL resource store field or sync helper retains structured-interior staged resource ownership.
+- Portal/debug consumers have artifact-native or explicit debug inputs.
+- Knip reports no structured-interior staged draw helpers with live production callers.
+
+### Phase 4E9: Staged Static Renderable Draw Path Removal
+
+After Phase 4E7 removes landblock-derived static scene production from the browser coordinator,
+delete the staged static renderable path instead of relying on scope suppression.
+
+- Remove landblock static draw-unit assembly from `staged-world-assembly.ts`.
+- Delete scope-aware staged static suppression introduced for the transition.
+- Remove static renderable readiness, staged static resource metrics, direct fallback suppression, and
+  visible submit inputs that exist only for landblock-derived static renderables.
+- Preserve non-landblock runtime appearance previews by moving them to an explicit preview/pinned
+  render path or by keeping a narrowly named preview-only staged path.
+- Delete or rewrite tests that assert staged static landblock output, pending replacement behavior, or
+  direct suppression.
+
+Exit criteria:
+
+- `staged-world-assembly.ts` cannot emit landblock-derived static draw units.
+- No render path depends on `StaticRenderableSceneModel.parts` for landblock static objects.
+- Runtime appearance previews still render through a path that is not described as landblock static
+  hydration.
+- Knip reports no staged static landblock draw helpers with live production callers.
+
+### Phase 4E10: Static Compaction and Atlas Worker Scheduler Deletion
+
+Once staged structured and staged static draw paths are gone, the standalone render-resource worker
+pipeline for static compaction and static texture atlas generation should have no static landblock
+callers.
+
+- Delete static compaction render-resource worker scheduling, payloads, and tests that only served the
+  staged-static pipeline.
+- Delete static texture atlas worker scheduling and pending replacement accounting for static
+  landblock draw units.
+- Remove global/static texture atlas generation identity from compacted geometry keys and any
+  remaining static material binding path.
+- Keep pure compaction and texture page packing algorithms only where the landblock render worker or
+  artifact builders still use them.
+
+Exit criteria:
+
+- No static landblock render path depends on `render-resource-worker-client.ts` compaction or texture
+  atlas job scheduling.
+- Static object bundle artifacts own their CPU texture pages and compacted/direct surfaces.
+- Dead-code tooling reports no static compaction or atlas render-resource worker scheduler exports
+  with live static callers.
+- Tests cover worker-built artifact pages/geometry instead of staged resource-worker jobs.
+
+### Phase 4E11: Artifact-Native Diagnostics, Metrics, and Picker Cleanup
+
+After the render path no longer consumes staged static/structured scenes, clean up low-priority
+consumers so they no longer keep legacy models alive.
+
+- Replace static cache diagnostics and render metrics with artifact counts, static object bundle
+  counts, compacted surfaces, direct surfaces, texture page counts, texture byte counts, and worker
+  load/build/pack timings.
 - Remove static spatial item generation from the critical render path. Reintroduce optional
-  picker/debug spatial hints later only if they do not affect render artifacts or scheduling.
-- Update diagnostics to report artifact counts, static object bundle counts, compacted surfaces,
-  direct surfaces, texture page counts, texture byte counts, and worker load/build/pack timings.
+  picker/debug spatial hints later only if they consume resident artifact facts and do not affect
+  scheduling.
+- Replace asset pruning inputs with resident artifact dependency reports.
+- Remove or rewrite picker/debug diagnostics that require `StaticRenderableSceneModel` or
+  `StructuredInteriorSceneModel` fidelity. These consumers may lose fidelity rather than preserving
+  legacy hydration.
+- Remove `static-staged` render-frame categories and tests once no live code can emit that category.
 
 Exit criteria:
 
-- No static landblock render path depends on staged draw-unit assembly.
-- No static landblock render path depends on render-resource worker job scheduling.
 - Static cache diagnostics and resident artifact ownership no longer depend on staged renderer graph
   projection.
 - No landblock-derived static or structured-interior route is kept alive as a compatibility fallback
   through `AssetChannelState`, `StaticRenderableSceneModel`, `StructuredInteriorSceneModel`, or
   `staged-world-assembly.ts`.
-- Dead-code tooling reports no static compaction or atlas render-resource worker scheduler exports
-  with live static callers.
+- Picker/debug diagnostics consume resident artifacts or explicitly report unavailable data.
+- Metrics describe resident artifacts and artifact texture pages, not removed staged or replacement
+  machinery.
 
 ### Phase 6: Cleanup and Consolidation
 

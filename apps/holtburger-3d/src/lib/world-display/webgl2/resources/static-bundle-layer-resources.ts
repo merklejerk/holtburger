@@ -4,7 +4,7 @@ import type {
 	StaticBundleIndexedMaterialRecord,
 	StaticBundleMaterialRecord,
 	StaticBundleTexturePage,
-	StaticLandblockRenderBundleLayer,
+	StaticObjectBundleArtifact,
 	VirtualTexturePageSampleClass,
 	VirtualTexturePageUsageBucket,
 } from "../../static-bundle-layer";
@@ -27,7 +27,7 @@ export interface Webgl2StaticBundleLayerResource {
 	key: string;
 	layerKey: string;
 	landblockId: number;
-	layerKind: StaticLandblockRenderBundleLayer["layerKind"];
+	bundleKind: StaticObjectBundleArtifact["bundleKind"];
 	sourceRevision: string;
 	texturePages: readonly Webgl2StaticBundleTexturePageResource[];
 	texturePagesByKey: ReadonlyMap<string, Webgl2StaticBundleTexturePageResource>;
@@ -109,7 +109,7 @@ export function syncWebgl2StaticBundleLayerResources({
 }: {
 	gl: WebGL2RenderingContext;
 	store: Webgl2StaticBundleLayerResourceStore;
-	layers: readonly StaticLandblockRenderBundleLayer[];
+	layers: readonly StaticObjectBundleArtifact[];
 }): void {
 	const retainedResourceKeys = new Set<string>();
 	for (const layer of layers) {
@@ -144,7 +144,7 @@ function createWebgl2StaticBundleLayerResource({
 	layer,
 }: {
 	gl: WebGL2RenderingContext;
-	layer: StaticLandblockRenderBundleLayer;
+	layer: StaticObjectBundleArtifact;
 }): Webgl2StaticBundleLayerResource {
 	const texturePages = layer.texturePages.map((page) =>
 		createWebgl2StaticBundleTexturePageResource({ gl, page }),
@@ -174,7 +174,7 @@ function createWebgl2StaticBundleLayerResource({
 		key: describeStaticBundleLayerResourceKey(layer),
 		layerKey: layer.key,
 		landblockId: layer.landblockId,
-		layerKind: layer.layerKind,
+		bundleKind: layer.bundleKind,
 		sourceRevision: layer.sourceRevision,
 		texturePages,
 		texturePagesByKey,
@@ -196,7 +196,7 @@ function createWebgl2StaticBundleLayerResource({
 }
 
 function describeStaticBundleLayerResourceKey(
-	layer: StaticLandblockRenderBundleLayer,
+	layer: StaticObjectBundleArtifact,
 ): string {
 	return `${layer.key}:${layer.sourceRevision}`;
 }
@@ -331,7 +331,7 @@ function createWebgl2StaticBundleMaterialResource({
 	record: StaticBundleMaterialRecord;
 	texturePageRefByKey: ReadonlyMap<
 		string,
-		StaticLandblockRenderBundleLayer["texturePageRefs"][number]
+		StaticObjectBundleArtifact["texturePageRefs"][number]
 	>;
 	texturePageByVirtualRefKey: ReadonlyMap<
 		string,
@@ -363,7 +363,7 @@ function resolveStaticBundleMaterialTextureBinding({
 	materialRecordKey: string;
 	texturePageRefByKey: ReadonlyMap<
 		string,
-		StaticLandblockRenderBundleLayer["texturePageRefs"][number]
+		StaticObjectBundleArtifact["texturePageRefs"][number]
 	>;
 	virtualRefKey: string;
 	texturePageByVirtualRefKey: ReadonlyMap<

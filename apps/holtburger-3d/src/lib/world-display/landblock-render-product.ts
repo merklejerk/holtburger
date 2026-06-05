@@ -8,7 +8,7 @@ import type {
 import type { PlacementTransformDto, Vec3Dto } from "../host/contracts";
 import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import type { RenderChunkPlacement } from "./render-chunks";
-import type { StaticLandblockRenderBundleLayer } from "./static-bundle-layer";
+import type { StaticObjectBundleArtifact } from "./static-bundle-layer";
 import type { AtlasLayoutPolicy } from "./texture-pages/atlas-layout-planner";
 import type { LandblockTerrainRenderArtifact } from "./terrain-render-artifact";
 
@@ -45,31 +45,22 @@ export interface LandblockRenderProductWorkerJob {
 	buildPolicy: LandblockRenderProductBuildPolicy;
 }
 
-interface LandblockRenderProductWorkerResultBase {
+export type LandblockRenderArtifact =
+	| LandblockTerrainRenderArtifact
+	| StaticObjectBundleArtifact
+	| DetailedLandblockRenderArtifacts;
+
+export interface LandblockRenderProductWorkerResult {
 	type: "landblock-render-product-built";
 	jobId: string;
 	landblockId: number;
+	product: LandblockRenderProduct;
 	requestId: string;
 	buildPolicyRevision: string;
 	texturePagePolicyRevision: string;
-	terrainArtifact: LandblockTerrainRenderArtifact | null;
-	staticBundleLayers: readonly StaticLandblockRenderBundleLayer[];
+	artifacts: readonly LandblockRenderArtifact[];
 	diagnostics: LandblockRenderProductWorkerDiagnostics;
 }
-
-interface OutdoorLandblockRenderProductWorkerResult extends LandblockRenderProductWorkerResultBase {
-	product: "outdoor";
-	detailedArtifacts?: never;
-}
-
-interface TopologyLandblockRenderProductWorkerResult extends LandblockRenderProductWorkerResultBase {
-	product: "outdoor-env-cells" | "dungeon-env-cells";
-	detailedArtifacts: DetailedLandblockRenderArtifacts;
-}
-
-export type LandblockRenderProductWorkerResult =
-	| OutdoorLandblockRenderProductWorkerResult
-	| TopologyLandblockRenderProductWorkerResult;
 
 interface LandblockRenderProductWorkerDiagnostics {
 	status: "ready" | "partial" | "failed";
@@ -85,6 +76,7 @@ type LandblockTopologyEnvCellResidencyBvh =
 type EnvCellLocalBvh = PreparedEnvCellPayload["localBvh"];
 
 export interface DetailedLandblockRenderArtifacts {
+	artifactKind: "detailed-landblock";
 	key: string;
 	landblockId: number;
 	product: "outdoor-env-cells" | "dungeon-env-cells";
@@ -99,6 +91,42 @@ export interface DetailedLandblockRenderArtifacts {
 	visibility: DetailedLandblockVisibilitySidecars;
 	spatial: DetailedLandblockSpatialSidecars;
 	diagnostics?: DetailedLandblockDebugDiagnostics;
+}
+
+export function getLandblockTerrainRenderArtifact(
+	result: LandblockRenderProductWorkerResult,
+): LandblockTerrainRenderArtifact | null {
+	return result.artifacts.find(isLandblockTerrainRenderArtifact) ?? null;
+}
+
+export function getStaticObjectBundleArtifacts(
+	result: LandblockRenderProductWorkerResult,
+): readonly StaticObjectBundleArtifact[] {
+	return result.artifacts.filter(isStaticObjectBundleArtifact);
+}
+
+export function getDetailedLandblockRenderArtifacts(
+	result: LandblockRenderProductWorkerResult,
+): DetailedLandblockRenderArtifacts | null {
+	return result.artifacts.find(isDetailedLandblockRenderArtifacts) ?? null;
+}
+
+function isLandblockTerrainRenderArtifact(
+	artifact: LandblockRenderArtifact,
+): artifact is LandblockTerrainRenderArtifact {
+	return artifact.artifactKind === "terrain";
+}
+
+function isStaticObjectBundleArtifact(
+	artifact: LandblockRenderArtifact,
+): artifact is StaticObjectBundleArtifact {
+	return artifact.artifactKind === "static-object-bundle";
+}
+
+function isDetailedLandblockRenderArtifacts(
+	artifact: LandblockRenderArtifact,
+): artifact is DetailedLandblockRenderArtifacts {
+	return artifact.artifactKind === "detailed-landblock";
 }
 
 interface DetailedStructuredInteriorCellArtifact {

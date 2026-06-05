@@ -4,8 +4,8 @@ Status: Phase 1A through Phase 1J, Phase 2A, Phase 2B, Phase 3A, Phase 3B, Phase
 3C1, Phase 3C2A, Phase 3C2B1, Phase 3C2B2, Phase 3C2B3, and Phase 4A are
 implemented. Phase 4B additive topology/env-cell worker product build is implemented. Phase 4C
 detailed product WebGL resource and submit is split into smaller phases; Phase 4C1 env-cell static
-bundle resource/submit is implemented and Phase 4C2 product artifact contract normalization is next.
-Structured interior and portal resource realization moves to Phase 4C3.
+bundle resource/submit is implemented and Phase 4C2 product artifact contract normalization is
+implemented. Structured interior and portal resource realization is next in Phase 4C3.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -202,6 +202,15 @@ Progress:
   `terrainArtifact`, `staticBundleLayers`, and detailed sidecar fields. Static object bundles become
   artifact records with scope and owned texture pages; terrain, structured interior, portal, spatial,
   and visibility outputs are peer artifact kinds.
+- 2026-06-04: Implemented Phase 4C2. `LandblockRenderProductWorkerResult` now exposes
+  `artifacts: readonly LandblockRenderArtifact[]` instead of `terrainArtifact`,
+  `staticBundleLayers`, or `detailedArtifacts` sibling fields. Terrain artifacts carry
+  `artifactKind: "terrain"`, static object bundles carry `artifactKind: "static-object-bundle"`, and
+  topology/env-cell detailed sidecars carry `artifactKind: "detailed-landblock"` as a transitional
+  aggregate until Phase 4C3 splits structured interior, portal, spatial, and visibility resources by
+  consumer need. Active product-boundary type names were renamed to `StaticObjectBundleArtifact`,
+  `StaticObjectBundleKind`, `StaticObjectBundleScope`, and `formatStaticObjectBundleScopeKey`
+  without compatibility aliases.
 
 Validation:
 
@@ -319,6 +328,11 @@ Validation:
   passed after Phase 4C1.
 - `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run lint:rust` passed after
   Phase 4C1.
+- `npm exec vitest -- run src/workers/static-landblock-render-worker.test.ts src/lib/assets/landblock-render-product-planner.test.ts src/lib/world-display/static-landblock-render-artifact-store.test.ts src/lib/world-display/static-landblock-render-artifact-coordinator.test.ts src/lib/world-display/terrain-scene.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2/resources/static-bundle-layer-resources.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/world-display/static-bundle-layer-builder.test.ts`
+  passed after Phase 4C2.
+- `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run lint:rust` passed after
+  Phase 4C2.
+- `git diff --check` passed after Phase 4C2.
 
 Related plans:
 
@@ -2986,7 +3000,7 @@ Exit criteria:
 
 ### Phase 4C2: Product Artifact Contract Normalization
 
-Status: Planned as an immediate interim phase before structured-interior WebGL realization.
+Status: Implemented on 2026-06-04.
 
 Purpose:
 
@@ -3004,8 +3018,10 @@ Implementation tasks:
   - `terrain` artifact entries carry the current `LandblockTerrainRenderArtifact` payload.
   - `static-object-bundle` artifact entries carry the current compacted/direct static bundle payload
     plus a `StaticObjectBundleScope`.
-  - `structured-interior`, `portal-sidecars`, `spatial-sidecars`, and `visibility-sidecars` are
-    artifact kinds even if Phase 4C3 is where their WebGL resources become first-class.
+  - `detailed-landblock` artifact entries carry the current topology/env-cell detailed sidecar
+    payload as a transitional aggregate. Phase 4C3 owns the split into structured-interior,
+    portal-sidecar, spatial-sidecar, and visibility-sidecar resource artifacts when those consumers
+    migrate.
 - Rename active product-boundary types instead of aliasing them:
   - `StaticLandblockRenderBundleLayer` -> `StaticObjectBundleArtifact`;
   - `StaticLandblockBundleLayerKind` -> `StaticObjectBundleKind`;
@@ -3024,6 +3040,10 @@ Course corrections:
 - Do not realize structured interior resources in this phase. First normalize the product boundary
   so structured interior does not have to choose between becoming a faux static bundle layer or a
   sidecar sibling outside the artifact list.
+- Keep detailed sidecars as one `detailed-landblock` artifact in Phase 4C2. Splitting them into
+  several artifact kinds before WebGL/spatial consumers are migrated would only create unused DTO
+  churn. Phase 4C3 should split them at the resource boundary where the required submit, portal, and
+  spatial ownership shapes are clear.
 - Do not broaden this into a global renderer-resource rename unless required by the contract change.
   Internal WebGL stores may still use static-bundle resource terminology until cleanup, but product
   DTOs, artifact-store APIs, and worker contracts should no longer expose `staticBundleLayers`.
@@ -3033,6 +3053,9 @@ Cleanup targets discovered:
 - The worker-side `StaticBundleLayerWorkerJob` adapter becomes more obviously historical after this
   phase because it only exists to feed the current builder. Remove it when the builder accepts static
   object bundle build context directly.
+- `static-bundle-layer.ts`, `static-bundle-layer-builder.ts`, and their tests now expose static
+  object bundle names from files that still use the older file/module names. Rename those files
+  during cleanup or when the worker builder adapter is removed.
 - WebGL static bundle resource/store names should be normalized during cleanup if they still imply
   product-level layers rather than static object bundle resources.
 - Tests and diagnostics that print resident "layers" should be renamed to resident artifacts or
@@ -3044,15 +3067,16 @@ Legacy shims allowed:
 
 Exit criteria:
 
-- Worker product results expose one `artifacts` collection.
-- Terrain, static object bundles, structured interior, portal, spatial, and visibility outputs are
-  represented as artifact kinds or planned artifact kinds.
-- Existing Phase 4C1 env-cell static bundle resource/submit behavior still passes through artifact
-  selection.
-- No active product-boundary imports expose `staticBundleLayers`,
+- Implemented. Worker product results expose one `artifacts` collection.
+- Implemented. Terrain and static object bundles are first-class artifact kinds; detailed
+  topology/env-cell sidecars are represented by the transitional `detailed-landblock` artifact until
+  Phase 4C3 splits resource ownership.
+- Implemented. Existing Phase 4C1 env-cell static bundle resource/submit behavior passes through
+  artifact selection.
+- Implemented. No active product-boundary imports expose `staticBundleLayers`,
   `StaticLandblockRenderBundleLayer`, or `StaticBundleLayerScope`.
 - `check`, TS lint, knip, Rust lint, focused worker/resource/submit tests, and `git diff --check`
-  pass.
+  pass after implementation.
 
 ### Phase 4C3: Structured Interior and Portal Resource Realization
 

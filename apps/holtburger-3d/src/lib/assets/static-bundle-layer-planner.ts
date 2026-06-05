@@ -19,10 +19,10 @@ import {
 	type OutdoorSceneInterest,
 } from "../world-display/outdoor-scene-interest";
 import {
-	formatStaticBundleLayerScopeKey,
+	formatStaticObjectBundleScopeKey,
 	type DesiredStaticBundleLayer,
 	type StaticBundleLayerPriority,
-	type StaticBundleLayerScope,
+	type StaticObjectBundleScope,
 } from "../world-display/static-bundle-layer";
 import {
 	deriveBrowserFocusedStructuredInteriorMembershipPolicy,
@@ -75,7 +75,7 @@ function planOutdoorStaticBundleLayers(
 				scope: {
 					kind: "landblock",
 					landblockId,
-					layerKind: "outdoor-buildings",
+					bundleKind: "outdoor-buildings",
 				},
 				priority: priorityForLandblock(interest.focusLandblockId, landblockId),
 				rootAssetIds: collectOutdoorLayerRootAssetIds(landblockId),
@@ -95,7 +95,7 @@ function planOutdoorStaticBundleLayers(
 				scope: {
 					kind: "landblock",
 					landblockId,
-					layerKind: "outdoor-detail",
+					bundleKind: "outdoor-detail",
 				},
 				priority: priorityForLandblock(interest.focusLandblockId, landblockId),
 				rootAssetIds: collectOutdoorLayerRootAssetIds(landblockId),
@@ -129,7 +129,7 @@ function planOutdoorStaticBundleLayers(
 					kind: "env-cell",
 					landblockId,
 					envCellId,
-					layerKind: "env-cell-static",
+					bundleKind: "env-cell-static",
 				},
 				priority: priorityForLandblock(interest.focusLandblockId, landblockId),
 				rootAssetIds: collectEnvCellLayerRootAssetIds(landblockId, envCellId),
@@ -165,7 +165,7 @@ function planIndoorStaticBundleLayers(
 						browserLocationToLandblockId(browserDestination),
 					),
 					envCellId,
-					layerKind: "env-cell-static",
+					bundleKind: "env-cell-static",
 				},
 				priority: "resident-now",
 				rootAssetIds: collectEnvCellLayerRootAssetIds(
@@ -188,7 +188,7 @@ function planIndoorStaticBundleLayers(
 }
 
 function createDesiredLayer(options: {
-	scope: StaticBundleLayerScope;
+	scope: StaticObjectBundleScope;
 	priority: StaticBundleLayerPriority;
 	rootAssetIds: readonly string[];
 	knownClosureAssetIds: readonly string[];
@@ -234,7 +234,7 @@ function collectEnvCellLayerRootAssetIds(
 function collectOutdoorLayerClosureAssetIds(
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
 	landblockId: number,
-	layerKind: "outdoor-buildings" | "outdoor-detail",
+	bundleKind: "outdoor-buildings" | "outdoor-detail",
 ): string[] {
 	const outdoorAssetId = formatLandblockOutdoorAssetId(landblockId);
 	const outdoorPayload = preparedByAssetId[outdoorAssetId]?.payload;
@@ -244,7 +244,7 @@ function collectOutdoorLayerClosureAssetIds(
 
 	const selectedSourceAssetIds = outdoorPayload.statics
 		.filter((member) =>
-			layerKind === "outdoor-buildings"
+			bundleKind === "outdoor-buildings"
 				? member.kind === "building"
 				: member.kind !== "building",
 		)
@@ -323,7 +323,7 @@ function collectSetupAppearanceAssetIds(assetId: string): string[] {
 }
 
 function deriveStaticBundleLayerSourceRevision(options: {
-	scope: StaticBundleLayerScope;
+	scope: StaticObjectBundleScope;
 	rootAssetIds: readonly string[];
 	preparedByAssetId: Record<string, PreparedAssetRecord>;
 }): string {
@@ -335,7 +335,7 @@ function deriveStaticBundleLayerSourceRevision(options: {
 	});
 	return [
 		STATIC_BUNDLE_LAYER_REVISION_PREFIX,
-		formatStaticBundleLayerScopeKey(options.scope),
+		formatStaticObjectBundleScopeKey(options.scope),
 		...parts,
 	].join("|");
 }
@@ -369,8 +369,8 @@ function compareDesiredStaticBundleLayers(
 	left: DesiredStaticBundleLayer,
 	right: DesiredStaticBundleLayer,
 ): number {
-	return formatStaticBundleLayerScopeKey(left.scope).localeCompare(
-		formatStaticBundleLayerScopeKey(right.scope),
+	return formatStaticObjectBundleScopeKey(left.scope).localeCompare(
+		formatStaticObjectBundleScopeKey(right.scope),
 	);
 }
 

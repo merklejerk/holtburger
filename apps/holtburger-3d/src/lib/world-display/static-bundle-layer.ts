@@ -2,28 +2,28 @@ import type { PreparedFloat32Array } from "../assets/types";
 import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import type { RenderBounds } from "./render-spatial-math";
 
-export type StaticLandblockBundleLayerKind =
+export type StaticObjectBundleKind =
 	| "outdoor-buildings"
 	| "outdoor-detail"
 	| "env-cell-static";
 
-export type StaticBundleLayerScope =
+export type StaticObjectBundleScope =
 	| {
 			kind: "landblock";
 			landblockId: number;
-			layerKind: "outdoor-buildings" | "outdoor-detail";
+			bundleKind: "outdoor-buildings" | "outdoor-detail";
 	  }
 	| {
 			kind: "env-cell";
 			landblockId: number;
 			envCellId: number;
-			layerKind: "env-cell-static";
+			bundleKind: "env-cell-static";
 	  };
 
 export type StaticBundleLayerPriority = "resident-now" | "prefetch";
 
 export interface DesiredStaticBundleLayer {
-	scope: StaticBundleLayerScope;
+	scope: StaticObjectBundleScope;
 	priority: StaticBundleLayerPriority;
 	rootAssetIds: readonly string[];
 	sourceRevision: string;
@@ -91,7 +91,7 @@ export interface StaticBundleTexturePage {
 export interface StaticBundleLayerWorkerJob {
 	type: "build-static-bundle-layer";
 	jobId: string;
-	scope: StaticBundleLayerScope;
+	scope: StaticObjectBundleScope;
 	rootAssetIds: readonly string[];
 	sourceRevision: string;
 	buildPolicyRevision: string;
@@ -107,7 +107,7 @@ export interface StaticBundleEnvCellTopologyDiscoveryJob {
 }
 
 interface DiscoveredStaticBundleEnvCellLayerScope {
-	scope: Extract<StaticBundleLayerScope, { kind: "env-cell" }>;
+	scope: Extract<StaticObjectBundleScope, { kind: "env-cell" }>;
 	rootAssetIds: readonly string[];
 	topologyDependencyAssetIds: readonly string[];
 }
@@ -127,9 +127,9 @@ export interface StaticBundleEnvCellTopologyDiscoveryResult {
 export interface StaticBundleLayerWorkerResult {
 	type: "static-bundle-layer-built";
 	jobId: string;
-	scope: StaticBundleLayerScope;
+	scope: StaticObjectBundleScope;
 	sourceRevision: string;
-	bundleLayer: StaticLandblockRenderBundleLayer;
+	bundleLayer: StaticObjectBundleArtifact;
 }
 
 export interface StaticBundleMaterialRecord {
@@ -212,11 +212,12 @@ export interface StaticLandblockBundleLayerDiagnostics {
 	skippedReasons: readonly string[];
 }
 
-export interface StaticLandblockRenderBundleLayer {
+export interface StaticObjectBundleArtifact {
+	artifactKind: "static-object-bundle";
 	key: string;
-	scope: StaticBundleLayerScope;
+	scope: StaticObjectBundleScope;
 	landblockId: number;
-	layerKind: StaticLandblockBundleLayerKind;
+	bundleKind: StaticObjectBundleKind;
 	sourceRevision: string;
 	rootAssetIds: readonly string[];
 	preparedAssetIds: readonly string[];
@@ -231,11 +232,11 @@ export interface StaticLandblockRenderBundleLayer {
 	diagnostics: StaticLandblockBundleLayerDiagnostics;
 }
 
-export function formatStaticBundleLayerScopeKey(
-	scope: StaticBundleLayerScope,
+export function formatStaticObjectBundleScopeKey(
+	scope: StaticObjectBundleScope,
 ): string {
 	if (scope.kind === "landblock") {
-		return `landblock:${scope.landblockId}:${scope.layerKind}`;
+		return `landblock:${scope.landblockId}:${scope.bundleKind}`;
 	}
-	return `env-cell:${scope.landblockId}:${scope.envCellId}:${scope.layerKind}`;
+	return `env-cell:${scope.landblockId}:${scope.envCellId}:${scope.bundleKind}`;
 }

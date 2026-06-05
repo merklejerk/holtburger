@@ -116,8 +116,7 @@ function createResult(
 		requestId: desired.requestId,
 		buildPolicyRevision: desired.buildPolicyRevision,
 		texturePagePolicyRevision: desired.texturePagePolicyRevision,
-		terrainArtifact: null,
-		staticBundleLayers: [],
+		artifacts: [],
 		diagnostics: {
 			status: "ready",
 			messages: [],

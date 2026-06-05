@@ -53,7 +53,8 @@ import {
 } from "./renderer-resource-graph";
 import type { StaticRenderableSceneModel } from "./static-renderables";
 import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
-import type { StaticLandblockRenderBundleLayer } from "./static-bundle-layer";
+import { getStaticObjectBundleArtifacts } from "./landblock-render-product";
+import type { StaticObjectBundleArtifact } from "./static-bundle-layer";
 import type {
 	DirectRenderSurfaceUploadDataType,
 	DirectRenderSurfaceUploadFormat,
@@ -502,10 +503,10 @@ export function syncWebgl2StaticLandblockRenderArtifactResources({
 	artifacts: StaticLandblockRenderArtifactStoreSnapshot;
 }): void {
 	const layers = artifacts.artifacts.flatMap((artifact) =>
-		artifact.staticBundleLayers.filter((layer) =>
+		getStaticObjectBundleArtifacts(artifact).filter((bundle) =>
 			isRenderableStaticLandblockArtifactLayer(
 				artifact.product,
-				layer.layerKind,
+				bundle.bundleKind,
 			),
 		),
 	);
@@ -532,16 +533,16 @@ export function syncWebgl2StaticLandblockRenderArtifactResources({
 
 function isRenderableStaticLandblockArtifactLayer(
 	product: StaticLandblockRenderArtifactStoreSnapshot["artifacts"][number]["product"],
-	layerKind: StaticLandblockRenderBundleLayer["layerKind"],
+	bundleKind: StaticObjectBundleArtifact["bundleKind"],
 ): boolean {
 	switch (product) {
 		case "outdoor":
 			return (
-				layerKind === "outdoor-buildings" || layerKind === "outdoor-detail"
+				bundleKind === "outdoor-buildings" || bundleKind === "outdoor-detail"
 			);
 		case "outdoor-env-cells":
 		case "dungeon-env-cells":
-			return layerKind === "env-cell-static";
+			return bundleKind === "env-cell-static";
 	}
 }
 
@@ -1165,29 +1166,29 @@ export function destroyWebgl2WorldResources(
 function deriveResidentOutdoorStaticBundleLandblockIds(
 	store: Webgl2WorldResourceStore,
 ): ReadonlySet<number> {
-	const layerKindsByLandblockId = new Map<number, Set<string>>();
+	const bundleKindsByLandblockId = new Map<number, Set<string>>();
 	for (const layer of store.staticBundleLayerResources.layersByKey.values()) {
 		if (
-			layer.layerKind !== "outdoor-buildings" &&
-			layer.layerKind !== "outdoor-detail"
+			layer.bundleKind !== "outdoor-buildings" &&
+			layer.bundleKind !== "outdoor-detail"
 		) {
 			continue;
 		}
-		const layerKinds = layerKindsByLandblockId.get(layer.landblockId);
-		if (layerKinds) {
-			layerKinds.add(layer.layerKind);
+		const bundleKinds = bundleKindsByLandblockId.get(layer.landblockId);
+		if (bundleKinds) {
+			bundleKinds.add(layer.bundleKind);
 		} else {
-			layerKindsByLandblockId.set(
+			bundleKindsByLandblockId.set(
 				layer.landblockId,
-				new Set([layer.layerKind]),
+				new Set([layer.bundleKind]),
 			);
 		}
 	}
 	const landblockIds = new Set<number>();
-	for (const [landblockId, layerKinds] of layerKindsByLandblockId) {
+	for (const [landblockId, bundleKinds] of bundleKindsByLandblockId) {
 		if (
-			layerKinds.has("outdoor-buildings") &&
-			layerKinds.has("outdoor-detail")
+			bundleKinds.has("outdoor-buildings") &&
+			bundleKinds.has("outdoor-detail")
 		) {
 			landblockIds.add(landblockId);
 		}

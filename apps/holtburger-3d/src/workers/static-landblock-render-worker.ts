@@ -20,11 +20,15 @@ import {
 	residencyCellBvhItemKey,
 } from "../lib/world-display/prepared-bvh-visibility";
 import { deriveStructuredCellRenderChunk } from "../lib/world-display/render-chunks";
-import { buildStaticLandblockRenderBundleLayer } from "../lib/world-display/static-bundle-layer-builder";
-import type { StaticBundleLayerWorkerJob } from "../lib/world-display/static-bundle-layer";
+import { buildStaticObjectBundleArtifact } from "../lib/world-display/static-bundle-layer-builder";
+import type {
+	StaticBundleLayerWorkerJob,
+	StaticObjectBundleArtifact,
+} from "../lib/world-display/static-bundle-layer";
 import { buildLandblockTerrainRenderArtifact } from "../lib/world-display/terrain-render-artifact";
 import type {
 	DetailedLandblockRenderArtifacts,
+	LandblockRenderArtifact,
 	LandblockRenderProductWorkerJob,
 	LandblockRenderProductWorkerResult,
 } from "../lib/world-display/landblock-render-product";
@@ -125,20 +129,38 @@ export async function runStaticLandblockRenderWorkerJob(
 		job.product === "outdoor"
 			? buildOutdoorTerrainArtifact(job, preparedByAssetId, assetState)
 			: null;
-	const staticBundleLayers = buildProductStaticBundleLayers(
+	const staticObjectBundles = buildProductStaticBundleLayers(
 		job,
 		preparedByAssetId,
 	);
+	const artifacts: LandblockRenderArtifact[] = [
+		...(terrainArtifact ? [terrainArtifact] : []),
+		...staticObjectBundles,
+	];
 
-	const baseResult = {
+	if (
+		job.product === "outdoor-env-cells" ||
+		job.product === "dungeon-env-cells"
+	) {
+		artifacts.push(
+			buildDetailedLandblockRenderArtifacts({
+				job,
+				product: job.product,
+				preparedByAssetId,
+				staticObjectBundles,
+			}),
+		);
+	}
+
+	return {
 		type: "landblock-render-product-built",
 		jobId: job.jobId,
 		landblockId: job.landblockId,
+		product: job.product,
 		requestId: job.requestId,
 		buildPolicyRevision: job.buildPolicyRevision,
 		texturePagePolicyRevision: job.texturePagePolicyRevision,
-		terrainArtifact,
-		staticBundleLayers,
+		artifacts,
 		diagnostics: {
 			status: "ready",
 			messages: [
@@ -147,32 +169,7 @@ export async function runStaticLandblockRenderWorkerJob(
 				)} ${job.product}`,
 			],
 		},
-	} satisfies Omit<
-		LandblockRenderProductWorkerResult,
-		"product" | "detailedArtifacts"
-	>;
-
-	switch (job.product) {
-		case "outdoor":
-			return {
-				...baseResult,
-				product: job.product,
-			};
-		case "outdoor-env-cells":
-		case "dungeon-env-cells":
-			return {
-				...baseResult,
-				product: job.product,
-				detailedArtifacts: buildDetailedLandblockRenderArtifacts({
-					job,
-					product: job.product,
-					preparedByAssetId,
-					staticBundleLayers,
-				}),
-			};
-		default:
-			return unreachableProduct(job.product);
-	}
+	};
 }
 
 async function loadProductRoots(options: {
@@ -343,18 +340,18 @@ function collectNormalizedPreparedTextureAssetIds(
 	});
 }
 
-function buildStaticBundleLayer(
+function buildStaticObjectBundle(
 	job: LandblockRenderProductWorkerJob,
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>,
-	layerKind: "outdoor-buildings" | "outdoor-detail" | "env-cell-static",
+	bundleKind: "outdoor-buildings" | "outdoor-detail" | "env-cell-static",
 	envCellScope?: { envCellId: number },
-) {
+): StaticObjectBundleArtifact {
 	const layerJob = createStaticBundleLayerWorkerJob(
 		job,
-		layerKind,
+		bundleKind,
 		envCellScope,
 	);
-	return buildStaticLandblockRenderBundleLayer({
+	return buildStaticObjectBundleArtifact({
 		job: layerJob,
 		preparedAssets: [...preparedByAssetId.values()],
 		policy: {
@@ -392,11 +389,11 @@ function buildOutdoorTerrainArtifact(
 function buildProductStaticBundleLayers(
 	job: LandblockRenderProductWorkerJob,
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>,
-): ReturnType<typeof buildStaticBundleLayer>[] {
+): StaticObjectBundleArtifact[] {
 	if (job.product === "outdoor") {
 		return [
-			buildStaticBundleLayer(job, preparedByAssetId, "outdoor-buildings"),
-			buildStaticBundleLayer(job, preparedByAssetId, "outdoor-detail"),
+			buildStaticObjectBundle(job, preparedByAssetId, "outdoor-buildings"),
+			buildStaticObjectBundle(job, preparedByAssetId, "outdoor-detail"),
 		];
 	}
 
@@ -411,7 +408,7 @@ function buildProductStaticBundleLayers(
 		);
 	}
 	return topology.payload.envCells.map((envCell) =>
-		buildStaticBundleLayer(job, preparedByAssetId, "env-cell-static", {
+		buildStaticObjectBundle(job, preparedByAssetId, "env-cell-static", {
 			envCellId: envCell.envCellId,
 		}),
 	);
@@ -421,7 +418,7 @@ function buildDetailedLandblockRenderArtifacts(options: {
 	job: LandblockRenderProductWorkerJob;
 	product: "outdoor-env-cells" | "dungeon-env-cells";
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
-	staticBundleLayers: readonly ReturnType<typeof buildStaticBundleLayer>[];
+	staticObjectBundles: readonly StaticObjectBundleArtifact[];
 }): DetailedLandblockRenderArtifacts {
 	const topologyAssetId = formatLandblockTopologyAssetId(
 		options.job.landblockId,
@@ -447,6 +444,7 @@ function buildDetailedLandblockRenderArtifacts(options: {
 		.sort((left, right) => left.envCellId - right.envCellId);
 
 	return {
+		artifactKind: "detailed-landblock",
 		key: [
 			"detailed-landblock",
 			formatHex32(options.job.landblockId),
@@ -498,7 +496,7 @@ function buildDetailedLandblockRenderArtifacts(options: {
 			})),
 		),
 		visibility: {
-			objectVisibilityRecords: options.staticBundleLayers.flatMap((layer) =>
+			objectVisibilityRecords: options.staticObjectBundles.flatMap((layer) =>
 				layer.objectRecords.map((objectRecord) => ({
 					objectKey: objectRecord.objectKey,
 					owningLandblockId: objectRecord.owningLandblockId,
@@ -525,10 +523,6 @@ function buildDetailedLandblockRenderArtifacts(options: {
 			})),
 		},
 	};
-}
-
-function unreachableProduct(product: never): never {
-	throw new Error(`Unhandled landblock render product ${product}.`);
 }
 
 function createStructuredInteriorCellArtifact(
@@ -569,30 +563,30 @@ function createStructuredInteriorCellArtifact(
 
 function createStaticBundleLayerWorkerJob(
 	job: LandblockRenderProductWorkerJob,
-	layerKind: "outdoor-buildings" | "outdoor-detail" | "env-cell-static",
+	bundleKind: "outdoor-buildings" | "outdoor-detail" | "env-cell-static",
 	envCellScope?: { envCellId: number },
 ): StaticBundleLayerWorkerJob {
 	const scope =
-		layerKind === "env-cell-static"
+		bundleKind === "env-cell-static"
 			? {
 					kind: "env-cell" as const,
 					landblockId: job.landblockId,
 					envCellId: requiredEnvCellId(envCellScope),
-					layerKind,
+					bundleKind,
 				}
 			: {
 					kind: "landblock" as const,
 					landblockId: job.landblockId,
-					layerKind,
+					bundleKind,
 				};
 	return {
 		type: "build-static-bundle-layer",
-		jobId: `${job.jobId}:${layerKind}${
+		jobId: `${job.jobId}:${bundleKind}${
 			envCellScope ? `:${formatHex32(envCellScope.envCellId)}` : ""
 		}`,
 		scope,
 		rootAssetIds:
-			layerKind === "env-cell-static"
+			bundleKind === "env-cell-static"
 				? [
 						formatLandblockTopologyAssetId(job.landblockId),
 						formatEnvCellAssetId(requiredEnvCellId(envCellScope)),

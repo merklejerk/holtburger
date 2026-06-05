@@ -9,7 +9,7 @@ import {
 } from "../landblocks";
 import type { PreparedAssetRecord } from "./types";
 import { planDesiredStaticBundleLayers } from "./static-bundle-layer-planner";
-import { formatStaticBundleLayerScopeKey } from "../world-display/static-bundle-layer";
+import { formatStaticObjectBundleScopeKey } from "../world-display/static-bundle-layer";
 
 describe("static bundle layer planner", () => {
 	it("plans additive outdoor building and detail layers with separate closures", () => {
@@ -59,7 +59,7 @@ describe("static bundle layer planner", () => {
 		});
 
 		expect(
-			layers.map((layer) => formatStaticBundleLayerScopeKey(layer.scope)),
+			layers.map((layer) => formatStaticObjectBundleScopeKey(layer.scope)),
 		).toEqual([
 			"landblock:3663069183:outdoor-buildings",
 			"landblock:3663069183:outdoor-detail",
@@ -155,7 +155,7 @@ describe("static bundle layer planner", () => {
 		);
 
 		expect(envCellLayer).toBeDefined();
-		expect(formatStaticBundleLayerScopeKey(envCellLayer!.scope)).toBe(
+		expect(formatStaticObjectBundleScopeKey(envCellLayer!.scope)).toBe(
 			"env-cell:3663069183:3663003989:env-cell-static",
 		);
 		expect(envCellLayer?.rootAssetIds).toEqual([
@@ -269,12 +269,12 @@ describe("static bundle layer planner", () => {
 		const withoutClosureDetail = withoutClosure.find(
 			(layer) =>
 				layer.scope.kind === "landblock" &&
-				layer.scope.layerKind === "outdoor-detail",
+				layer.scope.bundleKind === "outdoor-detail",
 		);
 		const withClosureDetail = withClosure.find(
 			(layer) =>
 				layer.scope.kind === "landblock" &&
-				layer.scope.layerKind === "outdoor-detail",
+				layer.scope.bundleKind === "outdoor-detail",
 		);
 
 		expect(withoutClosureDetail?.rootAssetIds).toEqual([

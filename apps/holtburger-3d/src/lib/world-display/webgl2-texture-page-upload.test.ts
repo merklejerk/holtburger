@@ -2,33 +2,33 @@ import { describe, expect, it } from "vitest";
 
 import type { TexturePageAtlasPlan } from "./texture-pages/texture-page-atlas-planner";
 import {
-	createTextureAtlasCpuGeneration,
-	createWebgl2TextureAtlasGenerationResourceFromCpu,
-} from "./webgl2/resources/texture-atlas-generation";
+	createTexturePageCpuSet,
+	createWebgl2TexturePageTextureResourceFromCpu,
+} from "./webgl2/resources/texture-page-upload";
 import type { TextureFilteringMode } from "./texture-pages/texture-sampling-policy";
 
-describe("webgl2 texture atlas generation", () => {
+describe("webgl2 texture page upload", () => {
 	it("packs rgba and detail atlas bytes without creating WebGL textures", () => {
-		const generation = createTextureAtlasCpuGeneration({
+		const pageSet = createTexturePageCpuSet({
 			plan: createPlan(),
 		});
 
-		expect(generation?.key).toBe(
+		expect(pageSet?.key).toBe(
 			"texture-page-atlas/test;filter=anisotropic-4x;aniso=1",
 		);
-		expect(generation?.textures).toHaveLength(1);
-		expect(generation?.detailTextures).toHaveLength(1);
-		expect(generation?.textures[0]?.key).toBe(
+		expect(pageSet?.textures).toHaveLength(1);
+		expect(pageSet?.detailTextures).toHaveLength(1);
+		expect(pageSet?.textures[0]?.key).toBe(
 			"texture-page-atlas/test/static-rgba/texture/0",
 		);
-		expect([...(generation?.textures[0]?.pixels.slice(0, 16) ?? [])]).toEqual([
+		expect([...(pageSet?.textures[0]?.pixels.slice(0, 16) ?? [])]).toEqual([
 			1, 2, 3, 255, 1, 2, 3, 255, 4, 5, 6, 255, 4, 5, 6, 255,
 		]);
-		expect(generation?.detailTextures[0]?.key).toBe(
+		expect(pageSet?.detailTextures[0]?.key).toBe(
 			"texture-page-atlas/test/static-rgba/detail-texture/0",
 		);
 		expect([
-			...(generation?.detailTextures[0]?.pixels.slice(0, 16) ?? []),
+			...(pageSet?.detailTextures[0]?.pixels.slice(0, 16) ?? []),
 		]).toEqual([
 			11, 12, 13, 14, 11, 12, 13, 14, 15, 16, 17, 18, 15, 16, 17, 18,
 		]);
@@ -36,17 +36,21 @@ describe("webgl2 texture atlas generation", () => {
 
 	it("packs atlas entries with gutter extrusion and uploads mipmapped rgba8 textures", () => {
 		const gl = new FakeWebgl2();
-		const generation = createWebgl2TextureAtlasGenerationResource({
-			gl: gl.asContext(),
+		const pageSet = createTexturePageCpuSet({
 			plan: createPlan(),
 		});
+		expect(pageSet).not.toBeNull();
+		const resources = uploadTexturePageCpuSet({
+			gl: gl.asContext(),
+			pageSet: pageSet!,
+		});
 
-		expect(generation?.key).toBe(
+		expect(pageSet?.key).toBe(
 			"texture-page-atlas/test;filter=anisotropic-4x;aniso=1",
 		);
-		expect(generation?.textures).toHaveLength(1);
-		expect(generation?.detailTextures).toHaveLength(1);
-		expect(generation?.placements).toEqual([
+		expect(resources.textures).toHaveLength(1);
+		expect(resources.detailTextures).toHaveLength(1);
+		expect(pageSet?.placements).toEqual([
 			{
 				family: "static-rgba",
 				atlasEntryKey: "entry-a",
@@ -56,7 +60,7 @@ describe("webgl2 texture atlas generation", () => {
 				height: 4,
 			},
 		]);
-		expect(generation?.detailPlacements).toEqual([
+		expect(pageSet?.detailPlacements).toEqual([
 			{
 				family: "static-rgba",
 				atlasEntryKey: "detail-a",
@@ -104,16 +108,16 @@ describe("webgl2 texture atlas generation", () => {
 			11, 12, 255,
 		]);
 
-		generation?.dispose();
+		disposeTexturePageResources(resources);
 		expect(gl.deletedTextures).toHaveLength(2);
 	});
 
-	it("returns no generation for an empty compaction plan", () => {
+	it("returns no page set for an empty compaction plan", () => {
 		const gl = new FakeWebgl2();
 		const plan = createPlan();
 
 		expect(
-			createTextureAtlasCpuGeneration({
+			createTexturePageCpuSet({
 				plan: {
 					...plan,
 					rgbaAtlasReadyDrawUnitIds: [],
@@ -130,14 +134,20 @@ describe("webgl2 texture atlas generation", () => {
 
 	it("recreates atlas resources for nearest filtering without mipmaps", () => {
 		const gl = new FakeWebgl2();
-		const generation = createWebgl2TextureAtlasGenerationResource({
-			gl: gl.asContext(),
+		const pageSet = createTexturePageCpuSet({
 			plan: createPlan(),
 			textureFilteringMode: "nearest",
 			maxAnisotropy: 8,
 		});
+		expect(pageSet).not.toBeNull();
+		const resources = uploadTexturePageCpuSet({
+			gl: gl.asContext(),
+			pageSet: pageSet!,
+			textureFilteringMode: "nearest",
+			maxAnisotropy: 8,
+		});
 
-		expect(generation?.key).toBe(
+		expect(pageSet?.key).toBe(
 			"texture-page-atlas/test;filter=nearest;aniso=1",
 		);
 		expect(gl.generatedMipmapCount).toBe(0);
@@ -148,14 +158,18 @@ describe("webgl2 texture atlas generation", () => {
 			{ pname: gl.TEXTURE_MAG_FILTER, param: gl.NEAREST },
 		]);
 
-		generation?.dispose();
+		disposeTexturePageResources(resources);
 	});
 
 	it("extrudes terrain color atlas gutters with repeat semantics", () => {
 		const gl = new FakeWebgl2();
-		const generation = createWebgl2TextureAtlasGenerationResource({
-			gl: gl.asContext(),
+		const pageSet = createTexturePageCpuSet({
 			plan: createPlan({ family: "terrain-color" }),
+		});
+		expect(pageSet).not.toBeNull();
+		const resources = uploadTexturePageCpuSet({
+			gl: gl.asContext(),
+			pageSet: pageSet!,
 		});
 
 		const pixels = gl.textureUploads[0]?.data;
@@ -164,14 +178,18 @@ describe("webgl2 texture atlas generation", () => {
 			...((pixels as Uint8Array) ?? new Uint8Array()).slice(0, 16),
 		]).toEqual([10, 11, 12, 255, 7, 8, 9, 255, 10, 11, 12, 255, 7, 8, 9, 255]);
 
-		generation?.dispose();
+		disposeTexturePageResources(resources);
 	});
 
 	it("extrudes terrain detail atlas gutters with repeat semantics", () => {
 		const gl = new FakeWebgl2();
-		const generation = createWebgl2TextureAtlasGenerationResource({
-			gl: gl.asContext(),
+		const pageSet = createTexturePageCpuSet({
 			plan: createPlan({ family: "terrain-detail" }),
+		});
+		expect(pageSet).not.toBeNull();
+		const resources = uploadTexturePageCpuSet({
+			gl: gl.asContext(),
+			pageSet: pageSet!,
 		});
 
 		const pixels = gl.textureUploads[1]?.data;
@@ -182,13 +200,12 @@ describe("webgl2 texture atlas generation", () => {
 			23, 24, 25, 26, 19, 20, 21, 22, 23, 24, 25, 26, 19, 20, 21, 22,
 		]);
 
-		generation?.dispose();
+		disposeTexturePageResources(resources);
 	});
 
 	it("fills unused terrain color atlas pixels with neutral gray", () => {
 		const gl = new FakeWebgl2();
-		const generation = createWebgl2TextureAtlasGenerationResource({
-			gl: gl.asContext(),
+		const pageSet = createTexturePageCpuSet({
 			plan: createPlan({
 				family: "terrain-color",
 				atlasTexture: {
@@ -204,6 +221,11 @@ describe("webgl2 texture atlas generation", () => {
 				},
 			}),
 		});
+		expect(pageSet).not.toBeNull();
+		const resources = uploadTexturePageCpuSet({
+			gl: gl.asContext(),
+			pageSet: pageSet!,
+		});
 
 		const pixels = gl.textureUploads[0]?.data;
 		expect(pixels).toBeInstanceOf(Uint8Array);
@@ -211,35 +233,51 @@ describe("webgl2 texture atlas generation", () => {
 			...((pixels as Uint8Array) ?? new Uint8Array()).slice(0, 4),
 		]).toEqual([128, 128, 128, 255]);
 
-		generation?.dispose();
+		disposeTexturePageResources(resources);
 	});
 });
 
-function createWebgl2TextureAtlasGenerationResource({
+function uploadTexturePageCpuSet({
 	gl,
-	plan,
+	pageSet,
 	textureFilteringMode = "anisotropic-4x",
 	maxAnisotropy = 1,
 }: {
 	gl: WebGL2RenderingContext;
-	plan: TexturePageAtlasPlan;
+	pageSet: NonNullable<ReturnType<typeof createTexturePageCpuSet>>;
 	textureFilteringMode?: TextureFilteringMode;
 	maxAnisotropy?: number;
 }) {
-	const cpuGeneration = createTextureAtlasCpuGeneration({
-		plan,
-		textureFilteringMode,
-		maxAnisotropy,
-	});
-	if (!cpuGeneration) {
-		return null;
+	return {
+		textures: pageSet.textures.map((cpuTexture) =>
+			createWebgl2TexturePageTextureResourceFromCpu({
+				gl,
+				cpuTexture,
+				textureFilteringMode,
+				maxAnisotropy,
+			}),
+		),
+		detailTextures: pageSet.detailTextures.map((cpuTexture) =>
+			createWebgl2TexturePageTextureResourceFromCpu({
+				gl,
+				cpuTexture,
+				textureFilteringMode,
+				maxAnisotropy,
+			}),
+		),
+	};
+}
+
+function disposeTexturePageResources({
+	textures,
+	detailTextures,
+}: ReturnType<typeof uploadTexturePageCpuSet>): void {
+	for (const texture of textures) {
+		texture.texture.dispose();
 	}
-	return createWebgl2TextureAtlasGenerationResourceFromCpu({
-		gl,
-		cpuGeneration,
-		textureFilteringMode,
-		maxAnisotropy,
-	});
+	for (const texture of detailTextures) {
+		texture.texture.dispose();
+	}
 }
 
 function createPlan({

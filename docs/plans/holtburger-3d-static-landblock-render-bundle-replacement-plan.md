@@ -34,8 +34,8 @@ Phase 4E9 staged static renderable draw path removal is implemented.
 Phase 4E10 static compaction render-resource worker deletion is implemented.
 Phase 4E11 artifact-native diagnostics/metrics cleanup is implemented.
 Phase 4E12 atlas render-resource worker deletion, Phase 4E13 global atlas generation resource
-model cleanup, and Phase 4E14 removed family metrics and diagnostics cleanup are implemented.
-Phase 6 cleanup and consolidation is next.
+model cleanup, Phase 4E14 removed family metrics and diagnostics cleanup, and Phase 6A terrain
+texture page upload naming cleanup are implemented. Phase 6B diagnostics metric rebaseline is next.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -422,6 +422,12 @@ Progress:
   metric assembly, scene-domain metric merge, and browser diagnostics text. Also deleted the
   always-zero `directPackedTexturePageTextureCount` metric and renamed retained direct texture-page
   fallback fixtures away from global atlas generation terminology.
+- 2026-06-05: Collected the cleanup targets called out through the replacement plan and split Phase
+  6 into executable cleanup slices. Implemented Phase 6A by renaming
+  `webgl2/resources/texture-atlas-generation.ts` to `webgl2/resources/texture-page-upload.ts`,
+  deleting the dead `Webgl2TextureAtlasGenerationResource` wrapper, renaming CPU page-build helpers
+  away from "generation", and updating terrain page resource sync plus tests to use page-set/page
+  upload terminology.
 
 Validation:
 
@@ -5383,13 +5389,25 @@ Exit criteria:
 After the replacement is functionally complete, do a dedicated cleanup pass instead of leaving
 renamed old concepts scattered through the renderer.
 
-- Delete obsolete worker payload files, scheduler owners, and tests that survived Phase 4E10 or
-  Phase 4E12 but no longer have named production owners.
+Collected cleanup targets:
+
+- Delete obsolete worker payload files, scheduler owners, graph leases, pending replacement fields,
+  and tests that survived Phase 4E10 or Phase 4E12 but no longer have named production owners.
 - Remove dead static-related fields from `Webgl2WorldResourceStore`, render metrics, diagnostics,
   and browser debug reports.
 - Rename remaining renderer concepts away from `staged`, `replacement`, `generation`, and
   `drawUnitId` where those names now describe historical implementation details instead of current
   behavior.
+- Rename or split `webgl2/resources/texture-atlas-generation.ts` so terrain page CPU/upload helpers
+  are not presented as global atlas generation ownership.
+- Rebaseline `webgl2-*compacted*` and `webgl2-indexed-resource-atlas-*` material-type metric names.
+  Delete any metric that cannot be tied to an active diagnostic owner after static bundle artifact
+  ownership is the only landblock static path.
+- Revisit `IndexedResourceAtlasPlan` and indexed atlas planning metrics after the global indexed
+  generation resource deletion. If they only describe the deleted global indexed path, delete them;
+  if they still serve preview diagnostics, rename them to that explicit owner.
+- Consider renaming direct draw-unit texture-page fallback sample fields if "fallback" remains too
+  broad after the old global generation fallback path is gone.
 - Collapse duplicated static material/texture helper functions into the static object bundle builder
   or texture page packer.
 - Remove stale comments and plan references that suggest the old render-resource worker path is
@@ -5397,11 +5415,82 @@ renamed old concepts scattered through the renderer.
 - Rebaseline focused tests around product artifact ownership, artifact texture pages, and WebGL
   realization; delete tests that assert old scheduler, pending replacement, or runtime suppression
   behavior.
-- Remove or rewrite tests for `static-staged` render-frame categories once no live code can emit
-  that category.
+- Remove or rewrite tests for `static-staged` and `appearance-preview-staged` render-frame
+  categories once no live code can emit those categories or once preview assembly has a neutral
+  category name.
 - Remove static-only imports from `staged-world-assembly.ts` consumers before deleting static staged
-  helpers.
-- Run broad TypeScript checks and targeted renderer tests after the deletion pass.
+  helpers or renaming the preview-only assembly boundary.
+- Rename browser picker/debug text that still presents static diagnostics as staged CPU facts.
+
+#### Phase 6A: Terrain Texture Page Upload Naming Cleanup
+
+Split out of Phase 6 because Phase 4E13/4E14 left one concrete ownership mismatch: terrain texture
+page CPU/upload helpers still lived in a file named `texture-atlas-generation.ts` and exported a dead
+global generation wrapper even though `Webgl2WorldResourceStore` no longer owns atlas generations.
+
+- Rename `webgl2/resources/texture-atlas-generation.ts` to a terrain/page upload helper module.
+- Rename CPU helper types and functions away from "generation" terminology.
+- Delete `Webgl2TextureAtlasGenerationResource` and
+  `createWebgl2TextureAtlasGenerationResourceFromCpu` if no production caller owns a generation
+  wrapper.
+- Update terrain page resource sync and focused tests to use page-set/page-upload terminology.
+
+Decisions and course corrections:
+
+- Implemented. The helper file is now `webgl2/resources/texture-page-upload.ts`.
+- Implemented. `createTextureAtlasCpuGeneration`,
+  `describeWebgl2TextureAtlasGenerationKey`, `TextureAtlasCpuGeneration`, and related exported
+  names were replaced with `createTexturePageCpuSet`, `describeWebgl2TexturePageSetKey`,
+  `TexturePageCpuSet`, and page upload resource names.
+- Implemented. The dead `Webgl2TextureAtlasGenerationResource` wrapper and its upload-from-CPU
+  helper were deleted instead of being renamed. Terrain resource sync uploads individual CPU page
+  textures directly.
+- Implemented. The focused test file is now `webgl2-texture-page-upload.test.ts` and tests CPU page
+  packing plus per-page WebGL uploads without reconstructing a generation resource.
+- Course correction: some internal helper names still say `TextureAtlas` where they describe atlas
+  layout placement/copy semantics inside a texture page set. That terminology is still accurate for
+  layout mechanics and is not the deleted global generation owner.
+
+Cleanup targets discovered:
+
+- None new. This phase closed the texture page upload naming target without introducing aliases.
+
+Legacy shims introduced:
+
+- None. The old module path and generation wrapper were removed outright.
+
+Validation:
+
+- `npm exec vitest -- run src/lib/world-display/webgl2-texture-page-upload.test.ts src/lib/world-display/webgl2-world-resources.test.ts`
+  passed.
+- `npm run check` passed.
+- `npm run lint:ts` passed.
+- `npm run lint:dead` passed.
+- `npm run lint:rust` passed from `apps/holtburger-3d`.
+- `git diff --check` passed.
+
+Exit criteria:
+
+- Implemented. No app source imports `webgl2/resources/texture-atlas-generation.ts`.
+- Implemented. No app source references `Webgl2TextureAtlasGenerationResource`,
+  `createTextureAtlasCpuGeneration`, or `describeWebgl2TextureAtlasGenerationKey`.
+- Implemented. Terrain texture page resource sync uses page-set/page-upload terminology.
+
+#### Phase 6B: Diagnostics Metric Rebaseline
+
+Next cleanup slice. Remove or rename legacy-shaped diagnostics that still say compacted/indexed atlas
+when their current owner is direct preview planning, artifact page ownership, or static bundle
+eligibility rather than the deleted runtime compaction/atlas generation path.
+
+- Rebaseline `webgl2-*compacted*` material-type metric keys into static bundle eligibility,
+  retained-direct material family, or delete them if the key only reports deleted compacted submit
+  ownership.
+- Rebaseline `webgl2-indexed-resource-atlas-*` metric keys and
+  `indexedResourceAtlas*` debug fields. Keep only preview/direct-owned diagnostics with explicit
+  names, or delete the planner and metrics if they have no active consumer after Phase 4E13.
+- Update browser diagnostics text so static/picker facts are not presented as staged CPU facts when
+  they are artifact-owned or runtime direct facts.
+- Re-run focused render metrics and browser diagnostics checks plus the broad lint/knip pass.
 
 Exit criteria:
 

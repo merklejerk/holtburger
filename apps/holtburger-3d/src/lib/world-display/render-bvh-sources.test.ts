@@ -12,7 +12,6 @@ import {
 import type { RenderBounds, RenderFrustum } from "./render-spatial-math";
 import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
 import { createEmptyStaticRenderableSceneModel } from "./static-renderables";
-import { createEmptyStructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
 
 describe("queryRenderSpaceBvhSources", () => {
@@ -54,7 +53,6 @@ describe("buildPortalCompositeRenderBvhSources", () => {
 			staticLandblockRenderArtifacts: createStaticLandblockArtifactSnapshot([
 				createDetailedLandblockProductArtifact({ envCellId }),
 			]),
-			structuredInteriorScene: createEmptyStructuredInteriorSceneModel(),
 			renderChunkTransforms: [
 				{
 					chunkKey: renderChunk.chunkKey,

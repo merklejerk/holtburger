@@ -21,7 +21,8 @@ selected static overlay artifact fallback is implemented. Phase 4C3D3B4 render B
 naming cleanup is implemented. Phase 4D1 artifact-backed portal composite BVH sources are
 implemented. Phase 4D2A artifact-backed camera residency index and Phase 4D2B1 artifact-owned
 render-frame env-cell BVH visibility are implemented. Phase 4D2B2 scene-domain base fallback
-cleanup is implemented.
+cleanup, Phase 4D2B3 portal composite env-cell fallback removal, and Phase 4D2B4 exterior
+portal/culling source quarantine are implemented.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -329,6 +330,15 @@ Progress:
   depends on `StructuredInteriorSceneModel.cells`. `deriveWebgl2BaseSceneDomain` now derives only
   from `WorldRenderSceneContext`, while the actual per-frame base scene and initial portal env-cell
   continue to come from artifact-backed camera residency.
+- 2026-06-05: Implemented Phase 4D2B3. `buildPortalCompositeRenderBvhSources` no longer accepts
+  `StructuredInteriorSceneModel` and no longer rebuilds env-cell portal composite sources from
+  prepared env-cell payloads. Interior portal composite source facts now come from resident detailed
+  artifact local BVHs or are absent.
+- 2026-06-05: Implemented Phase 4D2B4 as a decision/quarantine phase. The current renderer performs
+  portal aperture masking and scene-domain compositing, but `derivePortalClippedBvhVisibility` is not
+  on the active draw-submission path. Exterior terrain/outdoor prepared BVH source construction in
+  `render-bvh-sources.ts` is quarantined as legacy debt instead of being preserved as part of the
+  static landblock replacement architecture.
 
 Validation:
 
@@ -382,6 +392,9 @@ Validation:
 - `npm exec vitest -- run src/lib/world-display/webgl2-transition-portal-work.test.ts`,
   `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
   `git diff --check` passed after Phase 4D2B2.
+- `npm exec vitest -- run src/lib/world-display/render-bvh-sources.test.ts src/lib/world-display/portal-clipped-bvh-candidates.test.ts`,
+  `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
+  `git diff --check` passed after Phase 4D2B3.
 - `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts`
   passed after the first Phase 1D builder slice.
 - `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts`
@@ -4196,25 +4209,94 @@ Exit criteria:
 - Implemented. Focused tests cover the context-only fallback behavior.
 - Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
 
-#### Phase 4D2B3: Remaining Portal/Culling Consumer Cutover
+#### Phase 4D2B3: Portal Composite Env-Cell Fallback Removal
 
-- Move any remaining render-critical portal composite, culling, cell visibility, or portal traversal
-  source facts that still read `StructuredInteriorSceneModel` or prepared env-cell payloads onto
-  resident detailed artifacts.
-- Decide whether exterior portal composite BVH sources need resident terrain/static artifact input
-  before hard cutover, or whether portal composite exterior source culling can be simplified without
-  preserving the prepared outdoor BVH path.
-- Keep picker/debug diagnostics expendable and do not restore part-level or prepared-payload
-  fidelity for them.
+- Remove the prepared env-cell payload fallback from portal composite render-space BVH source
+  construction.
+- Remove `StructuredInteriorSceneModel` from `buildPortalCompositeRenderBvhSources`.
+- Keep interior portal composite source facts artifact-owned: resident detailed artifact local BVHs
+  provide sources, otherwise the portal clipped query sees no loaded interior source to query.
+
+Decisions and course corrections:
+
+- Implemented. `buildPortalCompositeRenderBvhSources` now builds env-cell sources only from resident
+  `detailed-landblock.spatial.envCellLocalBvhs` plus matching artifact structured cells.
+- Implemented. `webgl2-world-display-renderer-impl.ts` no longer passes `structuredInteriorScene`
+  to portal composite source construction.
+- Course correction: this phase intentionally did not port exterior terrain/outdoor static portal
+  composite sources away from prepared outdoor payloads. Exterior portal composite culling is tied
+  to terrain/outdoor static visibility, which Phase 4E hard cutover must resolve alongside removal
+  of the old outdoor prepared static hydration path.
+
+Cleanup targets discovered:
+
+- `render-bvh-sources.ts` still reads prepared outdoor payloads for terrain and outdoor static
+  portal composite sources. Phase 4E should either replace those with resident terrain/static
+  artifact source facts or simplify exterior portal composite culling so it does not preserve
+  prepared outdoor BVH inputs.
+- Artifact local BVH records still require matching artifact structured cells for render chunks. If
+  worker output omits that matching cell, the source builder reports a fallback reason; do not
+  rebuild it from prepared env-cell state.
+- `StructuredInteriorSceneModel` remains in renderer resource sync and diagnostics, but portal
+  composite source construction no longer consumes it.
+
+Legacy shims introduced:
+
+- None. The structured-scene parameter and prepared env-cell fallback were removed.
 
 Exit criteria:
 
-- Portal traversal/composite inputs, required culling facts, cell visibility facts, and required
-  static spatial records come from resident artifacts.
-- No render-critical portal/spatial consumer requires `StructuredInteriorSceneModel` or
-  main-thread-prepared env-cell geometry.
-- Picker/debug output may be missing or lower fidelity without blocking the static pipeline
-  migration.
+- Implemented. Interior portal composite env-cell sources come from resident detailed artifacts.
+- Implemented. Portal composite source construction no longer requires `StructuredInteriorSceneModel`
+  or prepared env-cell payloads.
+- Implemented. Focused tests cover artifact env-cell portal composite sources with an empty prepared
+  asset state.
+- Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
+
+#### Phase 4D2B4: Exterior Portal/Culling Source Decision
+
+- Decide whether exterior portal composite BVH sources need resident terrain/static artifact input
+  before Phase 4E hard cutover, or whether exterior portal composite culling can be simplified
+  without preserving the prepared outdoor BVH path.
+- Keep picker/debug diagnostics expendable and do not restore part-level or prepared-payload
+  fidelity for them.
+
+Decisions and course corrections:
+
+- Implemented as a decision phase. The active render path does portal aperture masking and
+  scene-domain compositing, but current draw submission does not consume
+  `derivePortalClippedBvhVisibility` or its exterior clipped-BVH query results.
+- Course correction: exterior portal composite BVH source construction should not be ported forward
+  just because it exists. Since the only active renderer use of `buildPortalCompositeRenderBvhSources`
+  is scene-bounds calculation/debug-adjacent accounting, the prepared outdoor terrain/static BVH
+  inputs are quarantined as legacy debt.
+- Phase 4E must not preserve prepared outdoor BVH source inputs as a compatibility path. It should
+  either delete the exterior portal-clipped BVH query path, or rebuild any required exterior source
+  facts from resident terrain/static artifacts only after a concrete render-path consumer exists.
+
+Debt intentionally quarantined:
+
+- `render-bvh-sources.ts` still builds `terrainSources` and `outdoorStaticSources` from prepared
+  outdoor payloads. This is not part of the target architecture and must be removed during Phase 4E
+  or Phase 5 cleanup.
+- `portal-clipped-bvh-candidates.ts` remains latent/test-only portal clipped BVH infrastructure. Keep
+  it isolated; do not route new landblock replacement work through it unless clipped portal draw
+  culling becomes an active renderer feature.
+- `calculateRenderSpaceBvhSourcesBoundsFrame` currently shares the portal composite source model for
+  scene-bounds accounting. If scene bounds remain useful after hard cutover, replace this with a
+  resident-artifact bounds helper instead of keeping prepared outdoor BVH inputs alive.
+
+Legacy shims introduced:
+
+- None. No new compatibility path was added; the existing prepared outdoor source usage was labeled
+  as debt to remove.
+
+Exit criteria:
+
+- Implemented. The plan explicitly treats exterior prepared portal/culling BVH inputs as quarantined
+  debt, not target architecture.
+- Implemented. Future hard-cutover work is directed to delete the latent exterior clipped-BVH path
+  or rebuild it from resident artifacts only if a real renderer consumer appears.
 
 ### Phase 4E: Hard Cutover From Main-Thread Static Hydration
 

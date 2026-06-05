@@ -67,10 +67,6 @@ import type {
 } from "./render-surface-texture-data";
 import { prepareRenderSurfaceTextureUploadData } from "./render-surface-texture-data";
 import { isBase1ClipMapSurface } from "./material-behavior";
-import {
-	createEmptyStructuredInteriorSceneModel,
-	type StructuredInteriorSceneModel,
-} from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
 import type { TransitionPortalCandidateModel } from "./transition-portal-work-items";
 import {
@@ -264,7 +260,6 @@ export interface Webgl2WorldResourceStore {
 	boundGraph: RendererResourceGraph | null;
 	terrainTileCount: number;
 	terrainDrawUnitCount: number;
-	structuredInteriorDrawUnitCount: number;
 	staticDrawUnitCount: number;
 	stagedStaticObjectCount: number;
 	stagedStaticPartCount: number;
@@ -421,7 +416,6 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		boundGraph: null,
 		terrainTileCount: 0,
 		terrainDrawUnitCount: 0,
-		structuredInteriorDrawUnitCount: 0,
 		staticDrawUnitCount: 0,
 		stagedStaticObjectCount: 0,
 		stagedStaticPartCount: 0,
@@ -676,7 +670,6 @@ export function syncWebgl2WorldResources({
 	assetState,
 	terrainScene,
 	staticRenderableScene,
-	structuredInteriorScene,
 	transitionPortalModel,
 	renderChunkTransforms,
 	rendererResourceGraph,
@@ -689,7 +682,6 @@ export function syncWebgl2WorldResources({
 	assetState: AssetChannelState;
 	terrainScene: TerrainSceneModel;
 	staticRenderableScene: StaticRenderableSceneModel;
-	structuredInteriorScene: StructuredInteriorSceneModel;
 	transitionPortalModel: TransitionPortalCandidateModel;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	rendererResourceGraph?: RendererResourceGraph;
@@ -708,10 +700,6 @@ export function syncWebgl2WorldResources({
 				assetState,
 				terrainScene,
 				staticRenderableScene,
-				structuredInteriorScene:
-					store.structuredInteriorResourceCount > 0
-						? createEmptyStructuredInteriorSceneModel()
-						: structuredInteriorScene,
 				renderChunkTransforms,
 				materialTextureCapabilities,
 				textureFilteringMode,
@@ -799,9 +787,6 @@ export function syncWebgl2WorldResources({
 	);
 	store.terrainTileCount = store.terrainTiles.length;
 	store.terrainDrawUnitCount = 0;
-	store.structuredInteriorDrawUnitCount = store.drawUnits.filter(
-		(drawUnit) => drawUnit.kind === "structured-interior",
-	).length;
 	store.staticDrawUnitCount = store.drawUnits.filter(
 		(drawUnit) => drawUnit.kind === "static",
 	).length;
@@ -1141,7 +1126,6 @@ export function destroyWebgl2WorldResources(
 	store.boundGraph = null;
 	store.terrainTileCount = 0;
 	store.terrainDrawUnitCount = 0;
-	store.structuredInteriorDrawUnitCount = 0;
 	store.staticDrawUnitCount = 0;
 	store.stagedStaticObjectCount = 0;
 	store.stagedStaticPartCount = 0;
@@ -2806,8 +2790,6 @@ function deriveWebgl2DrawUnitSceneDomain(
 	drawUnit: Webgl2DrawUnitAssembly,
 ): Webgl2SceneDomain | null {
 	switch (drawUnit.kind) {
-		case "structured-interior":
-			return "interior";
 		case "static":
 			return drawUnit.renderDomain === WORLD_RENDER_DOMAIN.interiorStatic
 				? "interior"
@@ -2822,7 +2804,6 @@ function resolveAtlasCompactionLandblockId(
 ): number | null {
 	switch (drawUnit.kind) {
 		case "static":
-		case "structured-interior":
 			return drawUnit.owningLandblockId;
 		case "portal-mask":
 			return null;
@@ -3689,18 +3670,15 @@ function collectCompactionCoverageMetrics(
 		const alphaPolicy = drawUnit.compactionEligibility.material.alphaPolicy;
 		const materialFamilyAlphaPolicy = `${materialFamily}|alpha=${alphaPolicy}`;
 		incrementCount(drawUnitCounts, "total");
-		if (drawUnit.kind === "static" || drawUnit.kind === "structured-interior") {
-			incrementCount(drawUnitCounts, "static-or-structured-total");
+		if (drawUnit.kind === "static") {
+			incrementCount(drawUnitCounts, "static-total");
 		}
 		if (drawUnit.compactionEligibility.decision === "compacted") {
 			incrementCount(drawUnitCounts, "compacted-compatible");
 		} else {
 			incrementCount(drawUnitCounts, "retained-direct");
-			if (
-				drawUnit.kind === "static" ||
-				drawUnit.kind === "structured-interior"
-			) {
-				incrementCount(drawUnitCounts, "static-or-structured-retained-direct");
+			if (drawUnit.kind === "static") {
+				incrementCount(drawUnitCounts, "static-retained-direct");
 			}
 			retainedDirectMaterialFamilies.push(materialFamily);
 			retainedDirectMaterialFamilyAlphaPolicies.push(materialFamilyAlphaPolicy);

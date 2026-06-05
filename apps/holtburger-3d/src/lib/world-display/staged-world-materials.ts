@@ -78,43 +78,6 @@ export interface StagedWorldIndexedPalettedMaterialPlan {
 	preparedAssetIds: readonly string[];
 }
 
-export function resolveStagedWorldSurfaceMaterialPlan(options: {
-	assetState: AssetChannelState;
-	surfaceId: number | null;
-	fallbackColorKey: string;
-	textureCapabilities?: MaterialTextureCapabilities;
-	textureFilteringMode?: TextureFilteringMode;
-	appearance?: MaterialAppearanceContext | null;
-	indexedMaterialDataCache?: IndexedMaterialDataCache;
-	materialPlanCache?: StagedWorldMaterialPlanCache;
-}): StagedWorldMaterialPlan {
-	if (options.surfaceId === null) {
-		return createFallbackMaterialPlan({
-			key: `missing-surface/${options.fallbackColorKey}`,
-			colorKey: options.fallbackColorKey,
-			reason: "missing surface id",
-			preparedAssetIds: [],
-		});
-	}
-	const materialAssetId = `material/${formatHex32(options.surfaceId)}`;
-	return resolveStagedWorldMaterialSlotPlan({
-		assetState: options.assetState,
-		slot: {
-			slotIndex: 0,
-			surfaceId: options.surfaceId,
-			materialAssetId,
-			materialVariantSignature: null,
-		},
-		fallbackColorKey: options.fallbackColorKey,
-		renderableKind: "unknown",
-		textureCapabilities: options.textureCapabilities,
-		textureFilteringMode: options.textureFilteringMode,
-		appearance: options.appearance,
-		indexedMaterialDataCache: options.indexedMaterialDataCache,
-		materialPlanCache: options.materialPlanCache,
-	});
-}
-
 export function resolveStagedWorldMaterialSlotPlan(options: {
 	assetState: AssetChannelState;
 	slot: ResolvedMaterialSlot;

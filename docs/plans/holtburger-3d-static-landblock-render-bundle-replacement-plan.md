@@ -23,7 +23,7 @@ implemented. Phase 4D2A artifact-backed camera residency index and Phase 4D2B1 a
 render-frame env-cell BVH visibility are implemented. Phase 4D2B2 scene-domain base fallback
 cleanup, Phase 4D2B3 portal composite env-cell fallback removal, and Phase 4D2B4 exterior
 portal/culling source quarantine are implemented. Phase 4E0 artifact scene-bounds cutover is
-implemented.
+implemented. Phase 4E1 latent portal-clipped BVH debt removal is implemented.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -345,6 +345,10 @@ Progress:
   bounds through `artifact-scene-bounds.ts` instead of calling the portal composite BVH source model
   from the renderer. This removes the last active renderer call site that needed
   `render-bvh-sources.ts` to read prepared outdoor terrain/static BVHs for scene-bounds accounting.
+- 2026-06-05: Added and implemented Phase 4E1 before the broad hard cutover. Deleted the production
+  dead `render-bvh-sources.ts` and `portal-clipped-bvh-candidates.ts` modules plus their tests after
+  Phase 4E0 removed the final active renderer call site. This removes the quarantined prepared
+  outdoor portal/composite BVH source debt instead of carrying it into Phase 4E.
 
 Validation:
 
@@ -404,6 +408,9 @@ Validation:
 - `npm exec vitest -- run src/lib/world-display/artifact-scene-bounds.test.ts src/lib/world-display/render-bvh-sources.test.ts src/lib/world-display/portal-clipped-bvh-candidates.test.ts`,
   `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
   `git diff --check` passed after Phase 4E0.
+- `npm exec vitest -- run src/lib/world-display/artifact-scene-bounds.test.ts src/lib/world-display/render-bvh-visibility-snapshot.test.ts src/lib/world-display/world-residency-index.test.ts`,
+  `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
+  `git diff --check` passed after Phase 4E1.
 - `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts`
   passed after the first Phase 1D builder slice.
 - `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts`
@@ -4337,11 +4344,11 @@ Decisions and course corrections:
 
 Cleanup targets discovered:
 
-- `render-bvh-sources.ts` still contains prepared outdoor terrain/static source construction, but the
-  renderer no longer calls it for scene bounds. It is now latent portal-clipped/debug debt and should
-  be deleted during Phase 4E or Phase 5 unless clipped portal draw culling becomes a real feature.
-- `portal-clipped-bvh-candidates.ts` remains test-only infrastructure. Do not route hard-cutover work
-  through it as a compatibility path.
+- `render-bvh-sources.ts` still contains prepared outdoor terrain/static source construction after
+  Phase 4E0, but the renderer no longer calls it for scene bounds. Delete it before broad hard
+  cutover unless clipped portal draw culling becomes a real feature. Phase 4E1 later removed it.
+- `portal-clipped-bvh-candidates.ts` remains test-only infrastructure after Phase 4E0. Do not route
+  hard-cutover work through it as a compatibility path. Phase 4E1 later removed it.
 - Static bundle spatial hint coordinate ownership should be clarified during cleanup. This phase
   preserves the current artifact/debug interpretation instead of broadening the scope.
 
@@ -4356,6 +4363,46 @@ Exit criteria:
 - Implemented. Focused tests cover empty artifact snapshots and resident terrain/static/detailed
   bounds unioning.
 - Implemented. `check`, TypeScript lint, knip, and Rust lint pass.
+
+#### Phase 4E1: Latent Portal-Clipped BVH Debt Removal
+
+Added as an immediate debt deletion phase before the broad Phase 4E hard cutover. Phase 4E0 removed
+the final active renderer call site for the mixed portal composite BVH source model, leaving the
+portal-clipped BVH helpers as test-only infrastructure that still contained prepared outdoor
+terrain/static source construction.
+
+- Delete the latent portal-clipped BVH query module.
+- Delete the mixed portal composite render-space BVH source module.
+- Delete their focused tests because no production code consumes the feature and keeping tests would
+  preserve a dead architecture surface.
+
+Decisions and course corrections:
+
+- Implemented. `portal-clipped-bvh-candidates.ts` and `render-bvh-sources.ts` were removed instead of
+  being ported to resident artifacts.
+- Course correction: current portal behavior remains aperture masking plus scene-domain compositing.
+  We should not keep clipped portal draw culling infrastructure unless the renderer actually starts
+  using clipped portal visibility to drive draw submission.
+- Course correction: this narrows Phase 4E. The hard cutover no longer needs to account for prepared
+  outdoor BVH source facts in the portal/composite path.
+
+Cleanup targets discovered:
+
+- Historical plan text still describes Phase 4D1/4D2B as having introduced `render-bvh-sources.ts`.
+  Keep those historical entries for context, but do not use them as current implementation guidance.
+- Remaining hard-cutover work should focus on staged static/structured-interior draw-unit ownership,
+  render-resource worker scheduling, and global atlas generation state.
+
+Legacy shims introduced:
+
+- None. The dead modules and tests were deleted.
+
+Exit criteria:
+
+- Implemented. No source code references `render-bvh-sources.ts` or
+  `portal-clipped-bvh-candidates.ts`.
+- Implemented. Focused residency/BVH/artifact-bounds tests pass without the deleted modules.
+- Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
 
 ### Phase 4E: Hard Cutover From Main-Thread Static Hydration
 

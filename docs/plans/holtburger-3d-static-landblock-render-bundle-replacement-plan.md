@@ -5,7 +5,8 @@ Status: Phase 1A through Phase 1J, Phase 2A, Phase 2B, Phase 3A, Phase 3B, Phase
 implemented. Phase 4B additive topology/env-cell worker product build is implemented. Phase 4C
 detailed product WebGL resource and submit is split into smaller phases; Phase 4C1 env-cell static
 bundle resource/submit is implemented and Phase 4C2 product artifact contract normalization is
-implemented. Structured interior and portal resource realization is next in Phase 4C3.
+implemented. Phase 4C3A worker detailed artifact structured-interior scene handoff is implemented;
+direct WebGL structured-interior resources and portal/spatial consumer migration are next.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -211,6 +212,13 @@ Progress:
   consumer need. Active product-boundary type names were renamed to `StaticObjectBundleArtifact`,
   `StaticObjectBundleKind`, `StaticObjectBundleScope`, and `formatStaticObjectBundleScopeKey`
   without compatibility aliases.
+- 2026-06-04: Implemented Phase 4C3A as the first structured-interior migration slice.
+  `deriveStructuredInteriorSceneModelFromLandblockArtifacts` now derives renderable structured
+  interior cells from resident `detailed-landblock` artifacts, and browser render-resource
+  coordination prefers that worker-owned scene when available. This removes the main-thread
+  prepared env-cell dependency for structured-interior render-critical geometry once topology/env-cell
+  worker artifacts are resident, while intentionally leaving the final direct WebGL resource/submit
+  replacement for Phase 4C3B.
 
 Validation:
 
@@ -333,6 +341,10 @@ Validation:
 - `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run lint:rust` passed after
   Phase 4C2.
 - `git diff --check` passed after Phase 4C2.
+- `npm exec vitest -- run src/lib/world-display/structured-interior-scene.test.ts src/lib/world-display/webgl2-world-resources.test.ts`
+  passed after Phase 4C3A.
+- `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run lint:rust` passed after
+  Phase 4C3A.
 
 Related plans:
 
@@ -3078,7 +3090,49 @@ Exit criteria:
 - `check`, TS lint, knip, Rust lint, focused worker/resource/submit tests, and `git diff --check`
   pass after implementation.
 
-### Phase 4C3: Structured Interior and Portal Resource Realization
+### Phase 4C3A: Worker Detailed Artifact Structured-Interior Scene Handoff
+
+Status: Implemented on 2026-06-04.
+
+- Add a structured-interior scene derivation path from resident `detailed-landblock` artifacts.
+- Prefer worker-derived structured-interior cells in browser render-resource coordination when
+  matching worker artifacts are resident.
+- Preserve the old prepared-cache derivation only as an in-flight fallback while worker artifacts are
+  absent; do not add compatibility fields to `LandblockRenderProductWorkerResult`.
+- Keep portal/debug/spatial consumers wired through the existing `StructuredInteriorSceneModel`
+  bridge until the direct resource phase replaces their inputs.
+
+Decisions and course corrections:
+
+- This is an explicit interim slice because `StructuredInteriorSceneModel` currently feeds
+  structured shell draw units, transition portal candidates, debug overlays, render spatial items,
+  render chunk transforms, and metrics. Replacing all of those with direct artifact resources in one
+  phase would mix DTO splitting, WebGL resource ownership, portal composition, and diagnostics.
+- The scene handoff still lets existing staged `structured-interior` draw-unit submit render the
+  worker-owned geometry. That is temporary debt, not the final architecture.
+
+Cleanup targets discovered:
+
+- `StructuredInteriorSceneModel` is now a bridge type for worker artifacts as well as legacy
+  prepared-cache scenes. Phase 4C3B should move render/portal/spatial consumers to resource-specific
+  artifact inputs and then reduce or delete this bridge.
+- Portal aperture lookup from detailed artifacts should become a pre-indexed sidecar/resource shape
+  when portal consumers migrate.
+
+Legacy shims introduced:
+
+- No product-contract compatibility fields or reexports were added. The remaining bridge is the
+  existing `StructuredInteriorSceneModel` consumer path.
+
+Exit criteria:
+
+- Implemented. Resident `detailed-landblock` artifacts can produce structured interior cells without
+  main-thread prepared env-cell payloads.
+- Implemented. Browser render-resource coordination prefers worker-derived structured interiors when
+  available and falls back only while worker artifacts are absent.
+- Focused structured-interior/coordinator/resource tests and `check` pass.
+
+### Phase 4C3B: Direct Structured Interior and Portal Resource Realization
 
 - Realize `outdoor-env-cells` and `dungeon-env-cells` structured interior shell geometry, portal
   resource inputs, and sidecar-backed submit data from resident worker artifacts.
@@ -3098,8 +3152,8 @@ Exit criteria:
   artifacts beside, not instead of, resident `outdoor` artifacts.
 - `dungeon-env-cells` structured interior geometry and portal/spatial sidecars render from resident
   artifacts without terrain or exterior static resources.
-- Structured interior render-critical geometry no longer requires main-thread prepared
-  `StructuredInteriorSceneModel` data.
+- Structured interior render-critical geometry no longer passes through staged
+  `structured-interior` draw units.
 - Changing global texture filtering does not rebuild static landblock bundle layers or structured
   interior resources.
 

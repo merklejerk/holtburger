@@ -2160,102 +2160,6 @@ function mergeSceneDomainSubmitMetrics({
 				exteriorMetrics.visibleRetainedDirectDrawUnitCountsByCompactionFamily,
 				interiorMetrics.visibleRetainedDirectDrawUnitCountsByCompactionFamily,
 			),
-		rgbaTexturePageFamilyShaderDrawCallCount:
-			exteriorMetrics.rgbaTexturePageFamilyShaderDrawCallCount +
-			interiorMetrics.rgbaTexturePageFamilyShaderDrawCallCount,
-		rgbaTexturePageFamilySubmittedBatchCount:
-			exteriorMetrics.rgbaTexturePageFamilySubmittedBatchCount +
-			interiorMetrics.rgbaTexturePageFamilySubmittedBatchCount,
-		rgbaTexturePageFamilySubmittedDrawSliceCount:
-			exteriorMetrics.rgbaTexturePageFamilySubmittedDrawSliceCount +
-			interiorMetrics.rgbaTexturePageFamilySubmittedDrawSliceCount,
-		rgbaTexturePageFamilySubmittedSliceRepresentedDrawUnitCount:
-			exteriorMetrics.rgbaTexturePageFamilySubmittedSliceRepresentedDrawUnitCount +
-			interiorMetrics.rgbaTexturePageFamilySubmittedSliceRepresentedDrawUnitCount,
-		rgbaTexturePageFamilySubmittedTriangleCount:
-			exteriorMetrics.rgbaTexturePageFamilySubmittedTriangleCount +
-			interiorMetrics.rgbaTexturePageFamilySubmittedTriangleCount,
-		rgbaTexturePageFamilyReplacedDrawUnitCount:
-			exteriorMetrics.rgbaTexturePageFamilyReplacedDrawUnitCount +
-			interiorMetrics.rgbaTexturePageFamilyReplacedDrawUnitCount,
-		rgbaTexturePageFamilyReplacedDrawUnitTriangleCount:
-			exteriorMetrics.rgbaTexturePageFamilyReplacedDrawUnitTriangleCount +
-			interiorMetrics.rgbaTexturePageFamilyReplacedDrawUnitTriangleCount,
-		rgbaTexturePageFamilyConservativeOverdrawTriangleCount:
-			exteriorMetrics.rgbaTexturePageFamilyConservativeOverdrawTriangleCount +
-			interiorMetrics.rgbaTexturePageFamilyConservativeOverdrawTriangleCount,
-		rgbaTexturePageFamilyConservativeOverdrawRatio: calculateCombinedRatio({
-			numerator:
-				exteriorMetrics.rgbaTexturePageFamilyConservativeOverdrawTriangleCount +
-				interiorMetrics.rgbaTexturePageFamilyConservativeOverdrawTriangleCount,
-			denominator:
-				exteriorMetrics.rgbaTexturePageFamilySubmittedTriangleCount +
-				interiorMetrics.rgbaTexturePageFamilySubmittedTriangleCount,
-		}),
-		rgbaTexturePageFamilyRetainedDirectDrawUnitCount:
-			exteriorMetrics.rgbaTexturePageFamilyRetainedDirectDrawUnitCount +
-			interiorMetrics.rgbaTexturePageFamilyRetainedDirectDrawUnitCount,
-		rgbaTexturePageFamilyOriginalDrawCallEstimateCount:
-			exteriorMetrics.rgbaTexturePageFamilyOriginalDrawCallEstimateCount +
-			interiorMetrics.rgbaTexturePageFamilyOriginalDrawCallEstimateCount,
-		rgbaTexturePageFamilySubmittedDrawCallEstimateCount:
-			exteriorMetrics.rgbaTexturePageFamilySubmittedDrawCallEstimateCount +
-			interiorMetrics.rgbaTexturePageFamilySubmittedDrawCallEstimateCount,
-		rgbaTexturePageFamilyDrawCallSavingsCount:
-			exteriorMetrics.rgbaTexturePageFamilyDrawCallSavingsCount +
-			interiorMetrics.rgbaTexturePageFamilyDrawCallSavingsCount,
-		rgbaTexturePageFamilyNoVisibleRouteCount:
-			exteriorMetrics.rgbaTexturePageFamilyNoVisibleRouteCount +
-			interiorMetrics.rgbaTexturePageFamilyNoVisibleRouteCount,
-		rgbaTexturePageFamilyNoVisibleExteriorRouteCount:
-			exteriorMetrics.rgbaTexturePageFamilyNoVisibleExteriorRouteCount +
-			interiorMetrics.rgbaTexturePageFamilyNoVisibleExteriorRouteCount,
-		rgbaTexturePageFamilyNoVisibleInteriorRouteCount:
-			exteriorMetrics.rgbaTexturePageFamilyNoVisibleInteriorRouteCount +
-			interiorMetrics.rgbaTexturePageFamilyNoVisibleInteriorRouteCount,
-		rgbaTexturePageFamilyNoVisibleOtherRouteCount:
-			exteriorMetrics.rgbaTexturePageFamilyNoVisibleOtherRouteCount +
-			interiorMetrics.rgbaTexturePageFamilyNoVisibleOtherRouteCount,
-		rgbaTexturePageFamilyFallbackSamples: [
-			...exteriorMetrics.rgbaTexturePageFamilyFallbackSamples,
-			...interiorMetrics.rgbaTexturePageFamilyFallbackSamples,
-		].slice(0, 8),
-		indexedPalettedFamilyShaderDrawCallCount:
-			exteriorMetrics.indexedPalettedFamilyShaderDrawCallCount +
-			interiorMetrics.indexedPalettedFamilyShaderDrawCallCount,
-		indexedPalettedFamilySubmittedBatchCount:
-			exteriorMetrics.indexedPalettedFamilySubmittedBatchCount +
-			interiorMetrics.indexedPalettedFamilySubmittedBatchCount,
-		indexedPalettedFamilySubmittedDrawSliceCount:
-			exteriorMetrics.indexedPalettedFamilySubmittedDrawSliceCount +
-			interiorMetrics.indexedPalettedFamilySubmittedDrawSliceCount,
-		indexedPalettedFamilySubmittedSliceRepresentedDrawUnitCount:
-			exteriorMetrics.indexedPalettedFamilySubmittedSliceRepresentedDrawUnitCount +
-			interiorMetrics.indexedPalettedFamilySubmittedSliceRepresentedDrawUnitCount,
-		indexedPalettedFamilySubmittedTriangleCount:
-			exteriorMetrics.indexedPalettedFamilySubmittedTriangleCount +
-			interiorMetrics.indexedPalettedFamilySubmittedTriangleCount,
-		indexedPalettedFamilyReplacedDrawUnitCount:
-			exteriorMetrics.indexedPalettedFamilyReplacedDrawUnitCount +
-			interiorMetrics.indexedPalettedFamilyReplacedDrawUnitCount,
-		indexedPalettedFamilyReplacedDrawUnitTriangleCount:
-			exteriorMetrics.indexedPalettedFamilyReplacedDrawUnitTriangleCount +
-			interiorMetrics.indexedPalettedFamilyReplacedDrawUnitTriangleCount,
-		indexedPalettedFamilyRetainedDirectDrawUnitCount:
-			exteriorMetrics.indexedPalettedFamilyRetainedDirectDrawUnitCount +
-			interiorMetrics.indexedPalettedFamilyRetainedDirectDrawUnitCount,
-		indexedPalettedFamilyOriginalDrawCallEstimateCount:
-			exteriorMetrics.indexedPalettedFamilyOriginalDrawCallEstimateCount +
-			interiorMetrics.indexedPalettedFamilyOriginalDrawCallEstimateCount,
-		indexedPalettedFamilySubmittedDrawCallEstimateCount:
-			exteriorMetrics.indexedPalettedFamilySubmittedDrawCallEstimateCount +
-			interiorMetrics.indexedPalettedFamilySubmittedDrawCallEstimateCount,
-		indexedPalettedFamilyDrawCallSavingsCount:
-			exteriorMetrics.indexedPalettedFamilyDrawCallSavingsCount +
-			interiorMetrics.indexedPalettedFamilyDrawCallSavingsCount,
-		indexedPalettedFamilyNoVisibleRouteCount:
-			exteriorMetrics.indexedPalettedFamilyNoVisibleRouteCount +
-			interiorMetrics.indexedPalettedFamilyNoVisibleRouteCount,
 		directTexturePageDrawCount:
 			exteriorMetrics.directTexturePageDrawCount +
 			interiorMetrics.directTexturePageDrawCount,
@@ -2268,10 +2172,6 @@ function mergeSceneDomainSubmitMetrics({
 		directPackedTexturePageEstimatedBindAvoidedCount:
 			exteriorMetrics.directPackedTexturePageEstimatedBindAvoidedCount +
 			interiorMetrics.directPackedTexturePageEstimatedBindAvoidedCount,
-		directPackedTexturePageTextureCount: Math.max(
-			exteriorMetrics.directPackedTexturePageTextureCount,
-			interiorMetrics.directPackedTexturePageTextureCount,
-		),
 		directTexturePageFallbackSamples: [
 			...exteriorMetrics.directTexturePageFallbackSamples,
 			...interiorMetrics.directTexturePageFallbackSamples,
@@ -2312,16 +2212,6 @@ function mergeSceneDomainSubmitMetrics({
 			...interiorMetrics.structuredInteriorResourceFallbackSamples,
 		].slice(0, 8),
 	};
-}
-
-function calculateCombinedRatio({
-	numerator,
-	denominator,
-}: {
-	numerator: number;
-	denominator: number;
-}): number {
-	return denominator === 0 ? 0 : numerator / denominator;
 }
 
 function describeWebgl2BrowserCameraResidencyKey(

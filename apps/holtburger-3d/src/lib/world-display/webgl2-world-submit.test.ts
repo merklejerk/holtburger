@@ -458,7 +458,6 @@ describe("submitWebgl2WorldFrame", () => {
 		expect(metrics.directPackedTexturePageDrawCount).toBe(1);
 		expect(metrics.directSingleEntryTexturePageDrawCount).toBe(0);
 		expect(metrics.directPackedTexturePageEstimatedBindAvoidedCount).toBe(1);
-		expect(metrics.directPackedTexturePageTextureCount).toBe(0);
 		expect(metrics.directTexturePageFallbackSamples).toEqual([]);
 		expect(gl.boundTextures).toContain(atlasTexture);
 		expect(gl.boundTextures).not.toContain(standaloneTexture);
@@ -497,7 +496,7 @@ describe("submitWebgl2WorldFrame", () => {
 		expect(metrics.directPackedTexturePageDrawCount).toBe(0);
 		expect(metrics.directSingleEntryTexturePageDrawCount).toBe(1);
 		expect(metrics.directTexturePageFallbackSamples).toContain(
-			"direct packed base page missing texture atlas generation",
+			"direct packed base page binding missing",
 		);
 		expect(gl.boundTextures).toContain(standaloneTexture);
 		expect(gl.uniform1iValues).toContain(1);
@@ -1807,7 +1806,7 @@ function createDrawUnit({
 				: [],
 		texturePageBindingFallbackSamples:
 			texture && atlasEntryKey && !baseTexturePageBinding
-				? ["direct packed base page missing texture atlas generation"]
+				? ["direct packed base page binding missing"]
 				: [],
 		sceneDomain: sceneDomain ?? defaultSceneDomainForKind(kind),
 		modelMatrix,

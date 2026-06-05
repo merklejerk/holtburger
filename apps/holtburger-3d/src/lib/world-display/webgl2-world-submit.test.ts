@@ -33,6 +33,10 @@ import type {
 	Webgl2StaticBundleLayerResource,
 	Webgl2StaticBundleLayerResourceStore,
 } from "./webgl2/resources/static-bundle-layer-resources";
+import type {
+	Webgl2StructuredInteriorCellResource,
+	Webgl2StructuredInteriorResourceStore,
+} from "./webgl2/resources/structured-interior-resources";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
 import type {
 	Webgl2IndexedMaterialDescriptor,
@@ -1487,6 +1491,32 @@ describe("submitWebgl2WorldFrame", () => {
 			"static bundle layer/a material material/a has incomplete indexed material bindings",
 		]);
 	});
+
+	it("submits resident structured interior resources without staged draw units", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+
+		const metrics = submitWebgl2WorldFrame({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			structuredInteriorResources: createStructuredInteriorResourceStore([
+				createStructuredInteriorCellResource(),
+			]),
+			drawUnitsById: new Map(),
+			frame: createFrame([]),
+		});
+
+		expect(metrics.visibleDrawUnitCount).toBe(0);
+		expect(metrics.structuredInteriorResourceSubmittedCount).toBe(1);
+		expect(metrics.structuredInteriorResourceDrawCallCount).toBe(1);
+		expect(metrics.structuredInteriorResourceTriangleCount).toBe(1);
+		expect(metrics.drawCallCount).toBe(1);
+		expect(gl.calls).toContain("drawElementsFor:structured-interior");
+	});
 });
 
 function createStaticBundleLayerResourceStore(
@@ -1494,6 +1524,33 @@ function createStaticBundleLayerResourceStore(
 ): Webgl2StaticBundleLayerResourceStore {
 	return {
 		layersByKey: new Map(layers.map((layer) => [layer.key, layer])),
+	};
+}
+
+function createStructuredInteriorResourceStore(
+	cells: readonly Webgl2StructuredInteriorCellResource[],
+): Webgl2StructuredInteriorResourceStore {
+	return {
+		cellsByKey: new Map(cells.map((cell) => [cell.key, cell])),
+	};
+}
+
+function createStructuredInteriorCellResource(): Webgl2StructuredInteriorCellResource {
+	return {
+		key: "structured-interior:cell/a",
+		artifactKey: "detailed/a",
+		landblockId: 1,
+		envCellId: 0x01000100,
+		geometrySignature: "structured-interior-geometry/a",
+		modelMatrix: createIdentityMat4(),
+		color: new Float32Array([0.5, 0.6, 0.7, 1]),
+		vertexArray: createVertexArrayResource("structured-interior"),
+		positionBuffer: createBufferResource(),
+		indexBuffer: createBufferResource(),
+		indexType: 5123,
+		indexCount: 3,
+		triangleCount: 1,
+		dispose() {},
 	};
 }
 

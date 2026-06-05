@@ -6,6 +6,7 @@ import {
 	type AssetChannelState,
 	type PreparedMaterialRecipePayload,
 	type PreparedPalettePayload,
+	type PreparedPolygonSetBspNode,
 	type PreparedTerrainMesh,
 	type PreparedPolygonSetRenderGeometry,
 	type PreparedRenderSurfacePayload,
@@ -281,6 +282,45 @@ describe("webgl2 world resources", () => {
 			"static-layer/dungeon-env:revision-a",
 		]);
 		expect(gl.createdTextures).toHaveLength(1);
+	});
+
+	it("syncs worker detailed structured interiors as direct WebGL resources", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2WorldResourceStore();
+		const cell = createStructuredInteriorCell();
+
+		syncWebgl2StaticLandblockRenderArtifactResources({
+			gl: gl.asContext(),
+			store,
+			artifacts: createStaticLandblockProductArtifactSnapshot([
+				createDetailedLandblockProductArtifact(cell),
+			]),
+			renderChunkTransforms: [createChunkTransform()],
+		});
+
+		expect(store.structuredInteriorResourceCount).toBe(1);
+		expect(store.structuredInteriorResourceTriangleCount).toBe(1);
+		expect(store.structuredInteriorResources.cellsByKey.size).toBe(1);
+		expect(gl.createdBuffers).toHaveLength(2);
+		expect(gl.createdVertexArrays).toHaveLength(1);
+
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState(),
+			terrainScene: createTerrainScene(),
+			staticRenderableScene: createStaticRenderableScene([]),
+			structuredInteriorScene: createStructuredInteriorScene([cell]),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [createChunkTransform()],
+		});
+
+		expect(store.structuredInteriorDrawUnitCount).toBe(0);
+		expect(
+			store.drawUnits.some(
+				(drawUnit) => drawUnit.kind === "structured-interior",
+			),
+		).toBe(false);
 	});
 
 	it("realizes staged static draw units as retained WebGL2 resources", () => {
@@ -2935,6 +2975,70 @@ function createStaticLandblockProductArtifact({
 	};
 }
 
+function createDetailedLandblockProductArtifact(
+	cell: StructuredInteriorCell,
+): LandblockRenderProductWorkerResult {
+	const landblockId = cell.renderChunk.chunkLandblockId;
+	return {
+		type: "landblock-render-product-built",
+		jobId: `job:${landblockId}:outdoor-env-cells`,
+		landblockId,
+		product: "outdoor-env-cells",
+		requestId: "request",
+		buildPolicyRevision: "build:v1",
+		texturePagePolicyRevision: "pages:v1",
+		artifacts: [
+			{
+				artifactKind: "detailed-landblock",
+				key: `detailed:${landblockId}:outdoor-env-cells`,
+				landblockId,
+				product: "outdoor-env-cells",
+				requestId: "request",
+				buildPolicyRevision: "build:v1",
+				texturePagePolicyRevision: "pages:v1",
+				selectedEnvCellIds: [cell.envCellId],
+				structuredInteriorCells: [
+					{
+						key: `structured-interior-cell:${cell.envCellId}`,
+						envCellId: cell.envCellId,
+						landblockId,
+						regionNumber: cell.regionNumber,
+						environmentId: cell.environmentId,
+						cellStructureId: cell.cellStructureId,
+						renderChunk: cell.renderChunk,
+						localPlacement: cell.chunkLocalPlacement,
+						surfaceIds: cell.surfaceIds,
+						portals: [],
+						portalApertureKeys: [],
+						staticObjectCount: cell.staticObjectCount,
+						cellBsp: cell.cellBsp ?? createLeafBspNode(),
+						renderGeometry: cell.renderGeometry,
+					},
+				],
+				cellStructureMetadata: [],
+				portalLinks: [],
+				portalApertures: [],
+				visibility: {
+					objectVisibilityRecords: [],
+					cellVisibilityRecords: [],
+				},
+				spatial: {
+					envCellResidencyBvh: {
+						coordinateSpace: "landblock-topology-residency",
+						nodes: [],
+						items: [],
+					},
+					envCellLocalBvhs: [],
+				},
+			},
+		],
+		diagnostics: {
+			status: "ready",
+			messages: [],
+		},
+	};
+}
+
 function createStaticBundleLayer(
 	key: string,
 	sourceRevision: string,
@@ -3499,6 +3603,16 @@ function createStructuredInteriorCell({
 				: createStaticGfxGeometry(),
 		debugColorKey: "interior-test",
 		detailSignature: "detail:none",
+	};
+}
+
+function createLeafBspNode(): PreparedPolygonSetBspNode {
+	return {
+		kind: "leaf",
+		index: 0,
+		solid: 0,
+		sphere: null,
+		polyIds: [],
 	};
 }
 

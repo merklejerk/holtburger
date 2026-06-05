@@ -53,7 +53,10 @@ import {
 } from "./renderer-resource-graph";
 import type { StaticRenderableSceneModel } from "./static-renderables";
 import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
-import { getStaticObjectBundleArtifacts } from "./landblock-render-product";
+import {
+	getDetailedLandblockRenderArtifacts,
+	getStaticObjectBundleArtifacts,
+} from "./landblock-render-product";
 import type { StaticObjectBundleArtifact } from "./static-bundle-layer";
 import type {
 	DirectRenderSurfaceUploadDataType,
@@ -64,7 +67,10 @@ import type {
 } from "./render-surface-texture-data";
 import { prepareRenderSurfaceTextureUploadData } from "./render-surface-texture-data";
 import { isBase1ClipMapSurface } from "./material-behavior";
-import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
+import {
+	createEmptyStructuredInteriorSceneModel,
+	type StructuredInteriorSceneModel,
+} from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
 import type { TransitionPortalCandidateModel } from "./transition-portal-work-items";
 import {
@@ -184,6 +190,12 @@ import {
 	syncWebgl2StaticBundleLayerResources,
 	type Webgl2StaticBundleLayerResourceStore,
 } from "./webgl2/resources/static-bundle-layer-resources";
+import {
+	createWebgl2StructuredInteriorResourceStore,
+	destroyWebgl2StructuredInteriorResources,
+	syncWebgl2StructuredInteriorResources,
+	type Webgl2StructuredInteriorResourceStore,
+} from "./webgl2/resources/structured-interior-resources";
 
 export interface Webgl2WorldDrawUnit {
 	id: string;
@@ -230,7 +242,10 @@ export interface Webgl2WorldResourceStore {
 	terrainTilesById: Map<string, Webgl2TerrainTileResource>;
 	terrainRenderCandidates: Webgl2TerrainTileRenderCandidate[];
 	staticBundleLayerResources: Webgl2StaticBundleLayerResourceStore;
+	structuredInteriorResources: Webgl2StructuredInteriorResourceStore;
 	staticBundleLayerResourceCount: number;
+	structuredInteriorResourceCount: number;
+	structuredInteriorResourceTriangleCount: number;
 	staticBundleLayerCompactedBatchResourceCount: number;
 	staticBundleLayerDirectEntryResourceCount: number;
 	staticBundleLayerTexturePageResourceCount: number;
@@ -384,7 +399,10 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		terrainTilesById: new Map(),
 		terrainRenderCandidates: [],
 		staticBundleLayerResources: createWebgl2StaticBundleLayerResourceStore(),
+		structuredInteriorResources: createWebgl2StructuredInteriorResourceStore(),
 		staticBundleLayerResourceCount: 0,
+		structuredInteriorResourceCount: 0,
+		structuredInteriorResourceTriangleCount: 0,
 		staticBundleLayerCompactedBatchResourceCount: 0,
 		staticBundleLayerDirectEntryResourceCount: 0,
 		staticBundleLayerTexturePageResourceCount: 0,
@@ -497,10 +515,12 @@ export function syncWebgl2StaticLandblockRenderArtifactResources({
 	gl,
 	store,
 	artifacts,
+	renderChunkTransforms = [],
 }: {
 	gl: WebGL2RenderingContext;
 	store: Webgl2WorldResourceStore;
 	artifacts: StaticLandblockRenderArtifactStoreSnapshot;
+	renderChunkTransforms?: readonly RenderChunkTransform[];
 }): void {
 	const layers = artifacts.artifacts.flatMap((artifact) =>
 		getStaticObjectBundleArtifacts(artifact).filter((bundle) =>
@@ -515,8 +535,28 @@ export function syncWebgl2StaticLandblockRenderArtifactResources({
 		store: store.staticBundleLayerResources,
 		layers,
 	});
+	const detailedArtifacts = artifacts.artifacts
+		.map(getDetailedLandblockRenderArtifacts)
+		.filter((artifact): artifact is NonNullable<typeof artifact> =>
+			Boolean(artifact),
+		);
+	syncWebgl2StructuredInteriorResources({
+		gl,
+		store: store.structuredInteriorResources,
+		artifacts: detailedArtifacts,
+		renderChunkTransforms,
+	});
 	const resources = [...store.staticBundleLayerResources.layersByKey.values()];
 	store.staticBundleLayerResourceCount = resources.length;
+	const structuredInteriorResources = [
+		...store.structuredInteriorResources.cellsByKey.values(),
+	];
+	store.structuredInteriorResourceCount = structuredInteriorResources.length;
+	store.structuredInteriorResourceTriangleCount =
+		structuredInteriorResources.reduce(
+			(total, resource) => total + resource.triangleCount,
+			0,
+		);
 	store.staticBundleLayerCompactedBatchResourceCount = resources.reduce(
 		(total, resource) => total + resource.compactedBatches.length,
 		0,
@@ -652,7 +692,10 @@ export function syncWebgl2WorldResources({
 				assetState,
 				terrainScene,
 				staticRenderableScene,
-				structuredInteriorScene,
+				structuredInteriorScene:
+					store.structuredInteriorResourceCount > 0
+						? createEmptyStructuredInteriorSceneModel()
+						: structuredInteriorScene,
 				transitionPortalModel,
 				renderChunkTransforms,
 				materialTextureCapabilities,
@@ -1034,12 +1077,15 @@ export function destroyWebgl2WorldResources(
 		destroyWebgl2TerrainTileResource(terrainTile);
 	}
 	destroyWebgl2StaticBundleLayerResources(store.staticBundleLayerResources);
+	destroyWebgl2StructuredInteriorResources(store.structuredInteriorResources);
 	store.drawUnits = [];
 	store.drawUnitsById.clear();
 	store.terrainTiles = [];
 	store.terrainTilesById.clear();
 	store.terrainRenderCandidates = [];
 	store.staticBundleLayerResourceCount = 0;
+	store.structuredInteriorResourceCount = 0;
+	store.structuredInteriorResourceTriangleCount = 0;
 	store.staticBundleLayerCompactedBatchResourceCount = 0;
 	store.staticBundleLayerDirectEntryResourceCount = 0;
 	store.staticBundleLayerTexturePageResourceCount = 0;

@@ -168,7 +168,7 @@ export function createWebgl2RenderMetrics(
 			terrainBvhCandidateBatchCount:
 				input.frameMetrics?.candidateCountsByCategory.terrain ?? 0,
 			structuredInteriorRenderBatchCount:
-				input.worldStore?.structuredInteriorDrawUnitCount ?? 0,
+				input.submitMetrics.structuredInteriorResourceSubmittedCount,
 			structuredInteriorBvhCandidateBatchCount:
 				input.frameMetrics?.candidateCountsByCategory["structured-interior"] ??
 				0,
@@ -210,11 +210,9 @@ export function createWebgl2RenderMetrics(
 				input.portalCompositeEstimatedPixelArea,
 			portalCompositeMaxDepth: input.portalCompositeMaxDepth,
 			structuredInteriorMeshCount:
-				input.worldStore?.structuredInteriorDrawUnitCount ?? 0,
+				input.worldStore?.structuredInteriorResourceCount ?? 0,
 			visibleStructuredInteriorMeshCount:
-				input.frameMetrics?.visibleDrawCountsByCategory[
-					"structured-interior"
-				] ?? 0,
+				input.submitMetrics.structuredInteriorResourceSubmittedCount,
 			terrainBvhVisibleItemCount:
 				input.frameMetrics?.visibleDrawCountsByCategory.terrain ?? 0,
 			terrainBvhTotalItemCount:
@@ -507,7 +505,7 @@ export function createWebgl2RenderMetrics(
 				(input.frameMetrics?.visibleDrawCountsByCategory["static-staged"] ??
 					0) + (input.frameMetrics?.visibleDrawCountsByCategory.static ?? 0),
 			structuredInteriorGeometryGroupCount:
-				input.worldStore?.structuredInteriorDrawUnitCount ?? 0,
+				input.worldStore?.structuredInteriorResourceCount ?? 0,
 			materialTypeCounts: input.worldStore
 				? {
 						"webgl2-flat-resource":

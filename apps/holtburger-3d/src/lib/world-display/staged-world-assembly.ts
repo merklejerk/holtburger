@@ -4,14 +4,12 @@ import type {
 } from "../assets/types";
 import type { ResolvedMaterialSlot } from "./material-plan";
 import type { IndexedMaterialDataCache } from "./indexed-material-data";
-import { formatMaterialAssetId } from "./material-signatures";
 import {
 	buildStagedPolygonSetGeometry,
 	type StagedWorldIndexedGeometry,
 } from "./staged-world-geometry";
 import {
 	isTransientStagedMaterialPlan,
-	resolveStagedWorldSurfaceMaterialPlan,
 	resolveStagedWorldMaterialSlotPlan,
 	type StagedWorldMaterialPlanCache,
 	type StagedWorldMaterialPlan,
@@ -31,9 +29,6 @@ import {
 	resolveRegionDetailOverlayPlan,
 	type ResolvedRegionDetailOverlayPlan,
 } from "./region-detail-overlays";
-import {
-	deriveStructuredInteriorCellBatchBvhBinding,
-} from "./non-instanced-bvh-bindings";
 import { deriveSceneRenderableReadinessModel } from "./scene-renderable-readiness";
 import {
 	type StaticRenderablePart,
@@ -41,7 +36,7 @@ import {
 } from "./static-renderables";
 import { deriveStaticRenderablePartBvhItemKey } from "./static-renderable-bvh-bindings";
 import { staticRenderableObjectKey } from "./static-renderable-readiness";
-import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
+import { createEmptyStructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
 import type { TextureFilteringMode } from "./texture-pages/texture-sampling-policy";
 import { createEmptyTransitionPortalCandidateModel } from "./transition-portal-work-items";
@@ -66,22 +61,7 @@ export interface StagedStaticDrawUnitAssembly {
 	staticObjectKeys: readonly string[];
 }
 
-export interface StagedStructuredInteriorDrawUnitAssembly {
-	id: string;
-	kind: "structured-interior";
-	owningLandblockId: number;
-	geometry: StagedWorldDrawUnitGeometry;
-	modelMatrix: RenderMat4;
-	material: StagedWorldMaterialPlan;
-	preparedAssetIds: readonly string[];
-	bvhBinding: StagedWorldDrawUnitBvhBinding;
-	staticPartCount: 0;
-	staticObjectKeys: readonly [];
-}
-
-export type StagedWorldDrawUnitAssembly =
-	| StagedStaticDrawUnitAssembly
-	| StagedStructuredInteriorDrawUnitAssembly;
+export type StagedWorldDrawUnitAssembly = StagedStaticDrawUnitAssembly;
 
 export interface StagedWorldSceneAssembly {
 	drawUnits: StagedWorldDrawUnitAssembly[];
@@ -109,13 +89,11 @@ interface StagedMaterialSurfaceKey {
 }
 
 type StagedStaticSurfaceKey = StagedMaterialSurfaceKey;
-type StagedStructuredInteriorSurfaceKey = StagedMaterialSurfaceKey;
 
 export function buildStagedWorldSceneAssembly({
 	assetState,
 	terrainScene,
 	staticRenderableScene,
-	structuredInteriorScene,
 	renderChunkTransforms,
 	materialTextureCapabilities,
 	textureFilteringMode,
@@ -127,7 +105,6 @@ export function buildStagedWorldSceneAssembly({
 	assetState: AssetChannelState;
 	terrainScene: TerrainSceneModel;
 	staticRenderableScene: StaticRenderableSceneModel;
-	structuredInteriorScene: StructuredInteriorSceneModel;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	materialTextureCapabilities?: MaterialTextureCapabilities;
 	textureFilteringMode?: TextureFilteringMode;
@@ -146,22 +123,10 @@ export function buildStagedWorldSceneAssembly({
 		assetState,
 		commitPolicy: "resolved-only",
 		terrainScene,
-		structuredInteriorScene,
+		structuredInteriorScene: createEmptyStructuredInteriorSceneModel(),
 		staticRenderableScene,
 		transitionPortalModel: createEmptyTransitionPortalCandidateModel(),
 	});
-	const structuredInteriorDrawUnits =
-		buildStagedStructuredInteriorDrawUnitAssemblies({
-			assetState,
-			chunkOffsetByKey,
-			structuredInteriorScene:
-				fullyResolvedScenes.committedStructuredInteriorScene,
-			materialTextureCapabilities,
-			textureFilteringMode,
-			detailTexturesEnabled,
-			indexedMaterialDataCache,
-			materialPlanCache,
-		});
 	const staticDrawUnits = buildStagedStaticDrawUnitAssemblies({
 		assetState,
 		chunkOffsetByKey,
@@ -174,17 +139,8 @@ export function buildStagedWorldSceneAssembly({
 		materialPlanCache,
 	});
 	return {
-		drawUnits: [
-			...structuredInteriorDrawUnits,
-			...staticDrawUnits,
-		],
+		drawUnits: staticDrawUnits,
 		graphRecords: [
-			...structuredInteriorDrawUnits.map((drawUnit) => ({
-				drawUnitId: drawUnit.id,
-				label: `structured interior ${drawUnit.id}`,
-				material: drawUnit.material,
-				preparedAssetIds: drawUnit.preparedAssetIds,
-			})),
 			...staticDrawUnits.map((drawUnit) => ({
 				drawUnitId: drawUnit.id,
 				label: `staged static ${drawUnit.staticObjectKeys.join(", ")}`,
@@ -204,101 +160,6 @@ const EMPTY_STATIC_RENDER_SCOPE_EXCLUSION: StaticRenderScopeExclusion = {
 	outdoorLandblockIds: new Set(),
 	envCellIds: new Set(),
 };
-
-export function buildStagedStructuredInteriorDrawUnitAssemblies({
-	assetState,
-	chunkOffsetByKey,
-	structuredInteriorScene,
-	materialTextureCapabilities,
-	textureFilteringMode,
-	detailTexturesEnabled = true,
-	indexedMaterialDataCache,
-	materialPlanCache,
-}: {
-	assetState: AssetChannelState;
-	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
-	structuredInteriorScene: StructuredInteriorSceneModel;
-	materialTextureCapabilities?: MaterialTextureCapabilities;
-	textureFilteringMode?: TextureFilteringMode;
-	detailTexturesEnabled?: boolean;
-	indexedMaterialDataCache?: IndexedMaterialDataCache;
-	materialPlanCache?: StagedWorldMaterialPlanCache;
-}): StagedStructuredInteriorDrawUnitAssembly[] {
-	return structuredInteriorScene.cells.flatMap((cell) => {
-		const chunkOffset = chunkOffsetByKey.get(cell.renderChunk.chunkKey);
-		if (!chunkOffset) {
-			return [];
-		}
-		const chunkMatrix = createTranslationMat4(chunkOffset);
-		const placementMatrix = buildAcPlacementMatrix(
-			cell.chunkLocalPlacement,
-			{ x: 0, y: 0, z: 0 },
-			{ x: 1, y: 1, z: 1 },
-		);
-		const modelMatrix = multiplyMat4(chunkMatrix, placementMatrix);
-		const detailOverlay = detailTexturesEnabled
-			? resolveRegionDetailOverlayPlan({
-					assetState,
-					regionNumber: cell.regionNumber,
-					roleKind: "environment",
-				})
-			: null;
-		return structuredInteriorSurfaceKeys(cell).flatMap((surfaceKey) => {
-			const geometry = buildStagedPolygonSetGeometry(cell.renderGeometry, {
-				surfaceId: surfaceKey.geometrySurfaceId,
-				materialVariantSignature: surfaceKey.materialVariantSignature,
-				sourceSignature: `env-cell:${cell.renderKey}`,
-			});
-			if (geometry.triangleCount === 0) {
-				return [];
-			}
-			const material = surfaceKey.materialSlot
-				? resolveStagedWorldMaterialSlotPlan({
-						assetState,
-						slot: surfaceKey.materialSlot,
-						fallbackColorKey: `${cell.debugColorKey}:${formatStructuredInteriorSurfaceKey(surfaceKey)}`,
-						renderableKind: "structured-interior",
-						textureCapabilities: materialTextureCapabilities,
-						textureFilteringMode,
-						detailOverlay,
-						indexedMaterialDataCache,
-						materialPlanCache,
-					})
-				: resolveStagedWorldSurfaceMaterialPlan({
-						assetState,
-						surfaceId: surfaceKey.surfaceId,
-						fallbackColorKey: `${cell.debugColorKey}:${formatStructuredInteriorSurfaceKey(surfaceKey)}`,
-						textureCapabilities: materialTextureCapabilities,
-						textureFilteringMode,
-						indexedMaterialDataCache,
-						materialPlanCache,
-					});
-			if (shouldDeferStagedMaterialPlan(material)) {
-				return [];
-			}
-			const drawUnitId = [
-				"structured-interior",
-				cell.renderKey,
-				formatStructuredInteriorSurfaceKey(surfaceKey),
-				`variant=${surfaceKey.materialVariantSignature ?? "base"}`,
-			].join("/");
-			return [
-				{
-					id: drawUnitId,
-					kind: "structured-interior",
-					owningLandblockId: cell.renderChunk.chunkLandblockId,
-					geometry,
-					modelMatrix,
-					material,
-					preparedAssetIds: material.preparedAssetIds,
-					bvhBinding: deriveStructuredInteriorCellBatchBvhBinding(cell),
-					staticPartCount: 0,
-					staticObjectKeys: [],
-				},
-			];
-		});
-	});
-}
 
 export function buildStagedStaticDrawUnitAssemblies({
 	assetState,
@@ -574,36 +435,6 @@ function resolveStaticPartDetailOverlayPlan({
 	});
 }
 
-function structuredInteriorSurfaceKeys(
-	cell: StructuredInteriorSceneModel["cells"][number],
-): StagedStructuredInteriorSurfaceKey[] {
-	const keys = expandGeometryMaterialSurfaceKeys(
-		cell.renderGeometry,
-		cell.surfaceIds.map((surfaceId, slotIndex) => ({
-			slotIndex,
-			surfaceId,
-			materialAssetId: formatMaterialAssetId(surfaceId),
-			materialVariantSignature: null,
-		})),
-	);
-	return [...keys.values()].sort((left, right) => {
-		const leftSlot = left.slotIndex ?? -1;
-		const rightSlot = right.slotIndex ?? -1;
-		const leftGeometrySurface = left.geometrySurfaceId ?? -1;
-		const rightGeometrySurface = right.geometrySurfaceId ?? -1;
-		const leftMaterialSurface = left.surfaceId ?? -1;
-		const rightMaterialSurface = right.surfaceId ?? -1;
-		return (
-			leftSlot - rightSlot ||
-			leftGeometrySurface - rightGeometrySurface ||
-			leftMaterialSurface - rightMaterialSurface ||
-			(left.materialVariantSignature ?? "").localeCompare(
-				right.materialVariantSignature ?? "",
-			)
-		);
-	});
-}
-
 function deriveStagedStaticSurfaceKeys(
 	assetState: AssetChannelState,
 	part: StaticRenderablePart,
@@ -727,16 +558,6 @@ function formatStagedStaticSurfaceBatchKey(
 		`surface-${surfaceKey.surfaceId ?? "none"}`,
 		`geometry-surface-${surfaceKey.geometrySurfaceId ?? "none"}`,
 		`variant-${surfaceKey.materialVariantSignature ?? "base"}`,
-	].join("|");
-}
-
-function formatStructuredInteriorSurfaceKey(
-	surfaceKey: StagedStructuredInteriorSurfaceKey,
-): string {
-	return [
-		`slot=${surfaceKey.slotIndex ?? "none"}`,
-		`surface=${surfaceKey.surfaceId ?? "none"}`,
-		`geometry-surface=${surfaceKey.geometrySurfaceId ?? "none"}`,
 	].join("|");
 }
 

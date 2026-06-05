@@ -29,6 +29,7 @@ cutover is implemented. Phase 4E4 indoor/dungeon env-cell product scheduling is 
 Phase 4E5 artifact-active structured-interior fallback cutover is implemented.
 Phase 4E6 artifact-active structured coverage cutover is implemented.
 Phase 4E7 browser coordinator contract hard cutover is implemented.
+Phase 4E8 staged structured-interior draw path removal is implemented.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -379,6 +380,11 @@ Progress:
   prepared static renderable, prepared structured-interior, prepared topology, or prepared transition
   portal derivation paths. Static scene content is now limited to runtime appearance previews, and
   structured interior scene content comes from resident detailed artifacts or an empty scene.
+- 2026-06-05: Implemented Phase 4E8. `staged-world-assembly.ts` no longer has a structured-interior
+  draw-unit type, helper, graph record path, or `StructuredInteriorSceneModel` input. WebGL staged
+  resource sync no longer accepts structured-interior scene models, and the old
+  `structuredInteriorDrawUnitCount` resource-store metric was removed in favor of artifact-backed
+  structured resource/submit metrics.
 
 Validation:
 
@@ -459,6 +465,9 @@ Validation:
 - `npm exec vitest -- run src/lib/world-display/browser-render-resource-coordinator.test.ts src/lib/world-display/structured-interior-scene.test.ts src/lib/world-display/transition-portal-work-items.test.ts src/lib/world-display/static-landblock-render-artifact-coordinator.test.ts src/lib/assets/landblock-render-product-planner.test.ts`,
   `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
   `git diff --check` passed after Phase 4E7.
+- `npm exec vitest -- run src/lib/world-display/staged-world-assembly.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-render-metrics.test.ts src/lib/world-display/webgl2-world-submit.test.ts`,
+  `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
+  `git diff --check` passed after Phase 4E8.
 - `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts`
   passed after the first Phase 1D builder slice.
 - `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts`
@@ -4818,12 +4827,50 @@ staged draw units.
 - Delete tests that assert prepared structured-interior staged draw-unit output. Keep or rewrite tests
   that assert artifact-backed structured material resources and submit.
 
+Decisions and course corrections:
+
+- Implemented. `staged-world-assembly.ts` now emits only staged static draw units. The
+  `StagedStructuredInteriorDrawUnitAssembly` type, structured draw-unit helper, structured surface
+  key expansion, structured graph records, and `StructuredInteriorSceneModel` input were deleted.
+- Implemented. `syncWebgl2WorldResources` no longer accepts a `structuredInteriorScene` argument.
+  Artifact-backed structured interior WebGL resources continue to sync through
+  `syncWebgl2StaticLandblockRenderArtifactResources`, using resident detailed landblock artifacts.
+- Implemented. The `structuredInteriorDrawUnitCount` resource-store field was removed. Renderer
+  metrics that still expose structured-interior totals now read from artifact-backed structured
+  resource counts or structured resource submit metrics instead of the deleted staged draw-unit
+  counter.
+- Course correction: the renderer-contract metric names still say "mesh" or "geometry group" in a
+  few places. They are now artifact/resource backed, but their names should be cleaned up in the
+  diagnostics cleanup phase rather than widened during this draw-path deletion.
+- Course correction: `deriveSceneRenderableReadinessModel` still has structured-interior readiness
+  support because pure helper tests and non-browser diagnostic surfaces still reference it. It no
+  longer feeds staged world assembly for structured interiors. Delete or quarantine it when knip shows
+  no non-legacy production caller.
+
+Cleanup targets discovered:
+
+- Rename or split renderer-contract structured-interior metric fields so artifact cell resources,
+  submitted structured resources, and legacy staged draw-unit names are not conflated.
+- Revisit `scene-renderable-readiness.ts` after staged static removal. The structured-interior branch
+  is now outside browser artifact rendering and should not survive Phase 6 unless a named diagnostic
+  consumer owns it.
+- `StructuredInteriorSceneModel` still crosses renderer/debug surfaces as an artifact-shaped model.
+  Phase 4E11 should narrow that handoff or rename it so it is not confused with prepared
+  main-thread structured hydration.
+
+Legacy shims introduced:
+
+- None. The structured staged helper and WebGL sync argument were deleted instead of hidden behind an
+  optional compatibility flag.
+
 Exit criteria:
 
-- `staged-world-assembly.ts` cannot emit structured-interior shell draw units.
-- No WebGL resource store field or sync helper retains structured-interior staged resource ownership.
-- Portal/debug consumers have artifact-native or explicit debug inputs.
-- Knip reports no structured-interior staged draw helpers with live production callers.
+- Implemented. `staged-world-assembly.ts` cannot emit structured-interior shell draw units.
+- Implemented. No WebGL resource store field or sync helper retains structured-interior staged
+  resource ownership.
+- Implemented. Portal/debug consumers were left on artifact-native or explicit debug inputs; this
+  phase did not reintroduce prepared structured shell geometry.
+- Implemented. Knip reports no structured-interior staged draw helpers with live production callers.
 
 ### Phase 4E9: Staged Static Renderable Draw Path Removal
 

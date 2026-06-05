@@ -2268,7 +2268,6 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				assetState,
 				terrainScene,
 				staticRenderableScene,
-				structuredInteriorScene,
 				transitionPortalModel,
 				renderChunkTransforms,
 				rendererResourceGraph: options.rendererResourceGraph,

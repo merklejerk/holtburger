@@ -5001,8 +5001,9 @@ Cleanup targets discovered:
   submit/runtime diagnostics no longer accept legacy compacted family collections.
 - Audit `compactionFamilyPlan` and related compaction coverage metrics in `webgl2-world-resources.ts`.
   They now describe appearance-preview/direct diagnostics, not a live static compaction pipeline.
-- Schedule terrain atlas ownership cleanup separately. Terrain still uses the RGBA texture atlas
-  worker/global generation path, which is outside this compacted-static worker deletion.
+- Complete Phase 4E12 before final cleanup. Terrain still uses the RGBA texture atlas worker/global
+  generation path, and non-static indexed atlas generation still uses the indexed atlas worker.
+  Those schedulers should not survive the replacement plan as unnamed cleanup debt.
 
 Legacy shims introduced:
 
@@ -5050,13 +5051,62 @@ Exit criteria:
 - Metrics describe resident artifacts and artifact texture pages, not removed staged or replacement
   machinery.
 
+### Phase 4E12: Terrain and Non-Static Atlas Worker Ownership Cleanup
+
+After Phase 4E10 deletes the compacted static worker path and Phase 4E11 removes diagnostics that
+kept legacy compacted concepts visible, delete the remaining atlas render-resource worker schedulers
+or narrow them behind a clearly non-landblock renderer feature boundary.
+
+- Move terrain atlas ownership off `TextureAtlasWorkerScheduler` and global texture atlas generation
+  replacement accounting. Prefer terrain artifact-owned page resources or synchronous CPU atlas page
+  assembly from resident terrain artifacts, with WebGL upload/sampler policy handled by the renderer.
+- Move indexed atlas ownership off `IndexedResourceAtlasWorkerScheduler` for landblock-derived
+  static and preview paths. Prefer artifact-owned indexed page resources for landblock products and
+  direct/non-atlased indexed resources for appearance previews unless a measured generic renderer
+  need justifies a retained non-landblock scheduler.
+- Remove `TextureAtlasWorkerScheduler` and `IndexedResourceAtlasWorkerScheduler` once no live terrain
+  or non-static path schedules render-resource worker atlas jobs.
+- Remove `build-texture-atlas` and `build-indexed-resource-atlas` from `render-resource-worker.ts`
+  only after the last live caller is gone. If a future non-landblock renderer feature still needs a
+  worker-backed atlas service, rename that service so it is not presented as part of static
+  landblock replacement.
+- Delete pending atlas generation replacement metrics, graph leases, tests, and debug report fields
+  that only describe the old global atlas worker model.
+
+Decisions and course corrections:
+
+- Pending. Phase 4E10 proved the atlas schedulers are not static-only today: terrain still uses the
+  RGBA atlas worker, and non-static/preview indexed-family atlas generation still uses the indexed
+  atlas worker. This phase owns the follow-up deletion path explicitly.
+
+Cleanup targets to carry into this phase:
+
+- `syncWebgl2TextureAtlasGeneration` and `syncWebgl2IndexedResourceAtlasGeneration` still encode
+  global generation replacement state. Replace or delete them when terrain/non-static atlas ownership
+  is artifact-native or explicitly non-landblock.
+- `TextureAtlasWorkerScheduler`, `IndexedResourceAtlasWorkerScheduler`, their payload modules, and
+  render-resource worker job kinds should be deleted if no named non-landblock feature claims them.
+- Terrain atlas metrics should report terrain artifact page ownership rather than global atlas
+  generation jobs.
+
+Exit criteria:
+
+- `TextureAtlasWorkerScheduler` and `IndexedResourceAtlasWorkerScheduler` have no landblock-derived
+  static, terrain, or preview callers.
+- If no separate non-landblock renderer feature owns them, both atlas scheduler classes, payloads,
+  tests, and render-resource worker job kinds are deleted.
+- Renderer metrics and debug text no longer expose global atlas worker job counters for landblock
+  rendering.
+- Terrain and indexed texture page ownership is represented through artifact/direct resource
+  ownership rather than mutable global atlas generation replacement state.
+
 ### Phase 6: Cleanup and Consolidation
 
 After the replacement is functionally complete, do a dedicated cleanup pass instead of leaving
 renamed old concepts scattered through the renderer.
 
-- Delete obsolete worker payload files, scheduler owners, and tests that only supported static
-  render-resource jobs.
+- Delete obsolete worker payload files, scheduler owners, and tests that survived Phase 4E10 or
+  Phase 4E12 but no longer have named production owners.
 - Remove dead static-related fields from `Webgl2WorldResourceStore`, render metrics, diagnostics,
   and browser debug reports.
 - Rename remaining renderer concepts away from `staged`, `replacement`, `generation`, and

@@ -64,6 +64,7 @@ import {
 	type StaticRenderableSceneModel,
 } from "./static-renderables";
 import {
+	createEmptyStructuredInteriorSceneModel,
 	deriveStructuredInteriorSceneModel,
 	deriveStructuredInteriorSceneModelFromLandblockArtifacts,
 	type StructuredInteriorSceneModel,
@@ -302,11 +303,11 @@ export class BrowserRenderResourceCoordinator {
 			input,
 			linkedOutdoorEnvCellIds,
 		);
-		const useStaticLandblockStaticArtifacts = shouldUseStaticLandblockArtifacts({
+		const useStaticLandblockArtifacts = shouldUseStaticLandblockArtifacts({
 			browserDestination: input.browserDestination,
 			snapshot: input.staticLandblockRenderArtifacts,
 		});
-		const baseStaticRenderableScene = useStaticLandblockStaticArtifacts
+		const baseStaticRenderableScene = useStaticLandblockArtifacts
 			? createEmptyStaticRenderableSceneModel()
 			: deriveStaticRenderableSceneModel(
 					input.assetState,
@@ -353,16 +354,18 @@ export class BrowserRenderResourceCoordinator {
 			);
 		const structuredInteriorScene =
 			artifactStructuredInteriorScene ??
-			deriveStructuredInteriorSceneModel(
-				input.assetState,
-				input.browserDestination,
-				outdoorFocusLandblockId === null
-					? null
-					: {
-							envCellIds: linkedOutdoorEnvCellIds,
-						},
-				structuredInteriorCoverage,
-			);
+			(useStaticLandblockArtifacts
+				? createEmptyStructuredInteriorSceneModel()
+				: deriveStructuredInteriorSceneModel(
+						input.assetState,
+						input.browserDestination,
+						outdoorFocusLandblockId === null
+							? null
+							: {
+									envCellIds: linkedOutdoorEnvCellIds,
+								},
+						structuredInteriorCoverage,
+					));
 		const selectedDiagnosticPortalId =
 			input.diagnosticSelection?.kind === "portal"
 				? input.diagnosticSelection.portalId
@@ -424,7 +427,7 @@ export class BrowserRenderResourceCoordinator {
 			structuredInteriorScene,
 			activeRenderChunkTransforms,
 			renderSceneContext,
-			usingStaticLandblockStaticArtifacts: useStaticLandblockStaticArtifacts,
+			usingStaticLandblockArtifacts: useStaticLandblockArtifacts,
 		});
 
 		this.renderSpatialIndex.replaceChunkTransforms(activeRenderChunkTransforms);
@@ -991,7 +994,7 @@ function reportPreparedOutdoorAssetsNotRendered({
 	structuredInteriorScene,
 	activeRenderChunkTransforms,
 	renderSceneContext,
-	usingStaticLandblockStaticArtifacts,
+	usingStaticLandblockArtifacts,
 }: {
 	input: BrowserRenderResourceCoordinatorInput;
 	outdoorSceneInterest: ReturnType<typeof deriveOutdoorSceneInterest> | null;
@@ -1000,12 +1003,12 @@ function reportPreparedOutdoorAssetsNotRendered({
 	structuredInteriorScene: StructuredInteriorSceneModel;
 	activeRenderChunkTransforms: readonly RenderChunkTransform[];
 	renderSceneContext: ReturnType<typeof deriveWorldRenderSceneContext>;
-	usingStaticLandblockStaticArtifacts: boolean;
+	usingStaticLandblockArtifacts: boolean;
 }): void {
 	if (
 		input.browserDestination?.kind !== "outdoor-location" ||
 		outdoorSceneInterest === null ||
-		usingStaticLandblockStaticArtifacts ||
+		usingStaticLandblockArtifacts ||
 		terrainScene.tiles.length > 0 ||
 		staticRenderableScene.parts.length > 0
 	) {

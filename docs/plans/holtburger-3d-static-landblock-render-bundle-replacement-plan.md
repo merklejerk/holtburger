@@ -26,6 +26,7 @@ portal/culling source quarantine are implemented. Phase 4E0 artifact scene-bound
 implemented. Phase 4E1 latent portal-clipped BVH debt removal and Phase 4E2 scope-aware staged
 static suppression are implemented. Phase 4E3 artifact-active outdoor static scene derivation
 cutover is implemented. Phase 4E4 indoor/dungeon env-cell product scheduling is implemented.
+Phase 4E5 artifact-active structured-interior fallback cutover is implemented.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -365,6 +366,9 @@ Progress:
   destinations now schedule `dungeon-env-cells` worker products through the artifact coordinator, and
   artifact-active coordinator updates stop deriving landblock static renderables for indoor
   destinations as well as outdoor destinations.
+- 2026-06-05: Added and implemented Phase 4E5 before the broad hard cutover. Artifact-active
+  coordinator updates now stop falling back to prepared env-cell structured-interior scene derivation
+  while detailed landblock artifacts are desired, in flight, or resident.
 
 Validation:
 
@@ -436,6 +440,9 @@ Validation:
 - `npm exec vitest -- run src/lib/assets/landblock-render-product-planner.test.ts src/lib/world-display/static-landblock-render-artifact-coordinator.test.ts src/lib/world-display/browser-render-resource-coordinator.test.ts`,
   `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
   `git diff --check` passed after Phase 4E4.
+- `npm exec vitest -- run src/lib/world-display/browser-render-resource-coordinator.test.ts src/lib/world-display/structured-interior-scene.test.ts src/lib/world-display/static-landblock-render-artifact-coordinator.test.ts src/lib/assets/landblock-render-product-planner.test.ts`,
+  `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
+  `git diff --check` passed after Phase 4E5.
 - `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts`
   passed after the first Phase 1D builder slice.
 - `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts`
@@ -4596,14 +4603,68 @@ Exit criteria:
   new scheduling and cutover behavior.
 - Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
 
+#### Phase 4E5: Artifact-Active Structured-Interior Fallback Cutover
+
+Added as an immediate hard-cutover phase after Phase 4E4. Indoor/dungeon destinations could request
+worker detailed artifacts, but `BrowserRenderResourceCoordinator` still fell back to
+`deriveStructuredInteriorSceneModel` when resident detailed artifacts were absent. That fallback
+expanded prepared env-cell shell geometry on the main thread while the worker product was merely
+desired or in flight.
+
+- Keep resident detailed artifacts as the authoritative structured-interior scene source.
+- While static landblock artifacts are desired, in flight, or resident, return an empty structured
+  interior scene instead of falling back to prepared env-cell payloads.
+- Preserve the old prepared structured-interior derivation only for non-artifact-active states during
+  the remaining transition.
+- Add focused coordinator coverage proving prepared env-cell geometry is not surfaced as structured
+  interior cells while artifact ownership is active.
+
+Decisions and course corrections:
+
+- Implemented. `BrowserRenderResourceCoordinator.update` now chooses
+  `createEmptyStructuredInteriorSceneModel()` when detailed artifacts are absent but static landblock
+  artifacts are active.
+- Implemented. The existing artifact-backed structured scene handoff still wins when resident
+  detailed artifacts are present.
+- Course correction: this phase intentionally accepts an empty structured scene while the worker
+  product is in flight. That is simpler than keeping prepared shell geometry as a visual fallback and
+  avoids preserving the dual-mode hydration path.
+- Course correction: the local artifact-ownership variable was renamed away from the static-only
+  wording because it now gates both static renderable and structured-interior prepared fallbacks.
+
+Cleanup targets discovered:
+
+- `deriveStructuredInteriorCoverageForInput` still expands closure coverage through
+  `AssetChannelState.preparedByAssetId`. The next phase should move that coverage input to
+  product/destination interest plus resident artifact selected env-cell IDs.
+- `deriveStructuredInteriorSceneModel` is now a non-artifact transition fallback. Once coverage and
+  spatial/debug consumers no longer need it, delete the landblock-derived prepared env-cell branch or
+  isolate it outside the critical render path.
+- `staged-world-assembly.ts` still accepts structured interior scenes and can still build structured
+  interior draw units in non-artifact-active states. Delete that path once the remaining prepared
+  scene producers are unreachable.
+
+Legacy shims introduced:
+
+- None. This phase removes a fallback while artifacts are active; it does not add an alternate
+  compatibility route.
+
+Exit criteria:
+
+- Implemented. Artifact-active coordinator updates do not derive prepared env-cell shell geometry
+  into `StructuredInteriorSceneModel`.
+- Implemented. Resident detailed artifacts remain the structured-interior scene source when present.
+- Implemented. Focused coordinator and structured-interior tests cover the cutover boundary.
+- Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
+
 ### Phase 4E: Hard Cutover From Main-Thread Static Hydration
 
 - Stop using `scene-asset-request-planner.ts` and `AssetChannelState.preparedByAssetId` as the
   source of topology/env-cell/static/interior renderable hydration for migrated topology/env-cell
   products.
-- Cut `StructuredInteriorSceneModel` fallback over for artifact-active indoor/dungeon destinations so
-  prepared env-cell shell geometry is not derived while worker detailed artifacts are desired or in
-  flight.
+- Move structured-interior coverage calculation away from `AssetChannelState.preparedByAssetId` so
+  topology/env-cell closure accounting follows destination/product interest and resident artifact
+  facts instead of prepared asset cache contents.
 - Remove outdoor static objects, env-cell statics, and structured interior geometry from
   `StaticRenderableSceneModel`, `StructuredInteriorSceneModel`, staged draw-unit assembly, static
   compaction planning, direct suppression, and visible submit.

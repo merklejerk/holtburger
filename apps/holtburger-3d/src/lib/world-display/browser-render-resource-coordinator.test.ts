@@ -21,6 +21,7 @@ import {
 } from "./browser-render-resource-coordinator";
 import { createEmptyStaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
 import type { StaticRenderableSceneModel } from "./static-renderables";
+import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 
 describe("browser render resource coordinator", () => {
 	it("keeps prepared outdoor statics on the legacy path before static artifacts are active", () => {
@@ -111,6 +112,38 @@ describe("browser render resource coordinator", () => {
 
 		expect(surface.staticRenderableScenes.at(-1)?.parts).toHaveLength(0);
 	});
+
+	it("does not derive prepared structured interiors once static artifact ownership is active", () => {
+		const envCellId = 0x02030100;
+		const landblockId = 0x0203ffff;
+		const surface = createCapturingSurface();
+		const coordinator = new BrowserRenderResourceCoordinator();
+		coordinator.setSurface(surface);
+
+		coordinator.update(
+			createCoordinatorInput({
+				assetState: createAssetState([
+					createEnvCellRecord({
+						envCellId,
+						sourceDid: 0x01000001,
+						localPlacement: createPlacement({ x: 0, y: 0, z: 0 }),
+						staticPlacement: createPlacement({ x: 1, y: 2, z: 3 }),
+					}),
+				]),
+				browserDestination: createInteriorDestination(envCellId),
+				staticLandblockRenderArtifacts: {
+					...createEmptyStaticLandblockRenderArtifactStoreSnapshot(),
+					desiredCount: 1,
+					inFlightCount: 1,
+					latestDesiredIdentityKeys: [
+						`${landblockId}:dungeon-env-cells:request:test:build:test:texture:test`,
+					],
+				},
+			}),
+		);
+
+		expect(surface.structuredInteriorScenes.at(-1)?.cells).toHaveLength(0);
+	});
 });
 
 const PROVENANCE: PreparedAssetProvenance = {
@@ -122,10 +155,13 @@ const PROVENANCE: PreparedAssetProvenance = {
 
 function createCapturingSurface(): BrowserRenderResourceSurface & {
 	staticRenderableScenes: StaticRenderableSceneModel[];
+	structuredInteriorScenes: StructuredInteriorSceneModel[];
 } {
 	const staticRenderableScenes: StaticRenderableSceneModel[] = [];
+	const structuredInteriorScenes: StructuredInteriorSceneModel[] = [];
 	return {
 		staticRenderableScenes,
+		structuredInteriorScenes,
 		setAssetState() {},
 		setRenderSceneContext() {},
 		setRenderChunkTransforms() {},
@@ -134,7 +170,9 @@ function createCapturingSurface(): BrowserRenderResourceSurface & {
 		setStaticRenderableScene(scene) {
 			staticRenderableScenes.push(scene);
 		},
-		setStructuredInteriorScene() {},
+		setStructuredInteriorScene(scene) {
+			structuredInteriorScenes.push(scene);
+		},
 		setTransitionPortalModel() {},
 		setDebugOverlayScene() {},
 		setRenderSpatialQuery() {},

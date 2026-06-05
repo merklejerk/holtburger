@@ -23,7 +23,8 @@ implemented. Phase 4D2A artifact-backed camera residency index and Phase 4D2B1 a
 render-frame env-cell BVH visibility are implemented. Phase 4D2B2 scene-domain base fallback
 cleanup, Phase 4D2B3 portal composite env-cell fallback removal, and Phase 4D2B4 exterior
 portal/culling source quarantine are implemented. Phase 4E0 artifact scene-bounds cutover is
-implemented. Phase 4E1 latent portal-clipped BVH debt removal is implemented.
+implemented. Phase 4E1 latent portal-clipped BVH debt removal and Phase 4E2 scope-aware staged
+static suppression are implemented.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -349,6 +350,11 @@ Progress:
   dead `render-bvh-sources.ts` and `portal-clipped-bvh-candidates.ts` modules plus their tests after
   Phase 4E0 removed the final active renderer call site. This removes the quarantined prepared
   outdoor portal/composite BVH source debt instead of carrying it into Phase 4E.
+- 2026-06-05: Added and implemented Phase 4E2 before the broad hard cutover. Staged static
+  suppression is now scope-aware: resident outdoor static object bundle resources suppress only
+  outdoor statics for their landblock, and resident env-cell static object bundle resources suppress
+  only staged indoor statics for their env cell. The previous landblock-only suppression was too
+  blunt and could hide indoor staged statics merely because outdoor bundles were resident.
 
 Validation:
 
@@ -411,6 +417,9 @@ Validation:
 - `npm exec vitest -- run src/lib/world-display/artifact-scene-bounds.test.ts src/lib/world-display/render-bvh-visibility-snapshot.test.ts src/lib/world-display/world-residency-index.test.ts`,
   `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
   `git diff --check` passed after Phase 4E1.
+- `npm exec vitest -- run src/lib/world-display/staged-world-assembly.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2/resources/static-bundle-layer-resources.test.ts`,
+  `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
+  `git diff --check` passed after Phase 4E2.
 - `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts`
   passed after the first Phase 1D builder slice.
 - `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts`
@@ -4402,6 +4411,57 @@ Exit criteria:
 - Implemented. No source code references `render-bvh-sources.ts` or
   `portal-clipped-bvh-candidates.ts`.
 - Implemented. Focused residency/BVH/artifact-bounds tests pass without the deleted modules.
+- Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
+
+#### Phase 4E2: Scope-Aware Staged Static Suppression
+
+Added as an immediate hard-cutover prep phase. The previous staged static suppression key was only
+`landblockId`, which was too blunt for the additive product model: resident outdoor bundles and
+resident env-cell bundles have different ownership scopes even when they belong to the same
+landblock.
+
+- Replace landblock-only staged static exclusion with a static render scope exclusion containing
+  outdoor landblock IDs and env-cell IDs.
+- Preserve staged indoor statics for a landblock when only outdoor static object bundle resources are
+  resident.
+- Suppress staged indoor statics only when the matching env-cell static object bundle resource is
+  resident.
+- Carry static object bundle artifact `scope` into WebGL static bundle resources so resource sync can
+  make this decision from resident artifact metadata instead of inferring it from bundle kind alone.
+
+Decisions and course corrections:
+
+- Implemented. `buildStagedWorldSceneAssembly` and `buildStagedStaticDrawUnitAssemblies` now accept
+  `excludedStaticRenderScope` instead of `excludedStaticLandblockIds`.
+- Implemented. `syncWebgl2WorldResources` derives outdoor exclusions only after both
+  `outdoor-buildings` and `outdoor-detail` resources are resident for a landblock, and derives
+  env-cell exclusions from resident `env-cell-static` resource scopes.
+- Course correction: landblock-only suppression could suppress staged indoor statics for an outdoor
+  landblock before the corresponding env-cell artifact was resident. This was a transition bug and
+  would make hard cutover harder to reason about.
+
+Cleanup targets discovered:
+
+- `StaticRenderableSceneModel` still derives landblock outdoor/env-cell statics on the main thread.
+  The next hard-cutover slices should stop deriving those model entries once corresponding artifact
+  products are desired/resident instead of relying on suppression after staged readiness work.
+- Render-resource worker scheduling still remains for staged static draw units. This phase reduces
+  the staged draw-unit surface but does not yet delete compaction/atlas schedulers.
+- Static bundle resource metadata now retains artifact scope; future cleanup should prefer that
+  scope over duplicated `landblockId`/`bundleKind` checks where possible.
+
+Legacy shims introduced:
+
+- None. The old landblock-only exclusion parameter was replaced rather than kept as an alternate
+  mode.
+
+Exit criteria:
+
+- Implemented. Outdoor resident bundle suppression no longer suppresses indoor staged statics for
+  the same landblock.
+- Implemented. Resident env-cell static bundle resources suppress staged indoor statics only for the
+  matching env cell.
+- Implemented. Focused staged assembly and WebGL resource sync tests cover both cases.
 - Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
 
 ### Phase 4E: Hard Cutover From Main-Thread Static Hydration

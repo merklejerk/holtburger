@@ -718,8 +718,7 @@ export function syncWebgl2WorldResources({
 				detailTexturesEnabled,
 				indexedMaterialDataCache: store.indexedMaterialDataCache,
 				materialPlanCache: store.materialPlanCache,
-				excludedStaticLandblockIds:
-					deriveResidentOutdoorStaticBundleLandblockIds(store),
+				excludedStaticRenderScope: deriveResidentStaticRenderScopeExclusion(store),
 			}),
 	);
 	const chunkOffsetByKey = new Map(
@@ -1232,11 +1231,19 @@ export function destroyWebgl2WorldResources(
 	store.triangleCount = 0;
 }
 
-function deriveResidentOutdoorStaticBundleLandblockIds(
+function deriveResidentStaticRenderScopeExclusion(
 	store: Webgl2WorldResourceStore,
-): ReadonlySet<number> {
+): {
+	outdoorLandblockIds: ReadonlySet<number>;
+	envCellIds: ReadonlySet<number>;
+} {
 	const bundleKindsByLandblockId = new Map<number, Set<string>>();
+	const envCellIds = new Set<number>();
 	for (const layer of store.staticBundleLayerResources.layersByKey.values()) {
+		if (layer.scope.kind === "env-cell") {
+			envCellIds.add(layer.scope.envCellId);
+			continue;
+		}
 		if (
 			layer.bundleKind !== "outdoor-buildings" &&
 			layer.bundleKind !== "outdoor-detail"
@@ -1262,7 +1269,10 @@ function deriveResidentOutdoorStaticBundleLandblockIds(
 			landblockIds.add(landblockId);
 		}
 	}
-	return landblockIds;
+	return {
+		outdoorLandblockIds: landblockIds,
+		envCellIds,
+	};
 }
 
 function createEmptyCompactedGeometryWorkerSchedulerMetrics(): CompactedGeometryWorkerSchedulerMetrics {

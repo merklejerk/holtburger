@@ -217,6 +217,9 @@ export interface Webgl2WorldResourceStore {
 	structuredInteriorResources: Webgl2StructuredInteriorResourceStore;
 	staticBundleLayerResourceCount: number;
 	structuredInteriorResourceCount: number;
+	structuredInteriorProductResourceCount: number;
+	structuredInteriorTexturePageResourceCount: number;
+	structuredInteriorMaterialRecordResourceCount: number;
 	structuredInteriorResourceTriangleCount: number;
 	staticBundleLayerCompactedBatchResourceCount: number;
 	staticBundleLayerDirectEntryResourceCount: number;
@@ -328,6 +331,9 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		structuredInteriorResources: createWebgl2StructuredInteriorResourceStore(),
 		staticBundleLayerResourceCount: 0,
 		structuredInteriorResourceCount: 0,
+		structuredInteriorProductResourceCount: 0,
+		structuredInteriorTexturePageResourceCount: 0,
+		structuredInteriorMaterialRecordResourceCount: 0,
 		structuredInteriorResourceTriangleCount: 0,
 		staticBundleLayerCompactedBatchResourceCount: 0,
 		staticBundleLayerDirectEntryResourceCount: 0,
@@ -443,7 +449,22 @@ export function syncWebgl2StaticLandblockRenderArtifactResources({
 	const structuredInteriorResources = [
 		...store.structuredInteriorResources.cellsByKey.values(),
 	];
+	const structuredInteriorProductResources = [
+		...store.structuredInteriorResources.productsByKey.values(),
+	];
 	store.structuredInteriorResourceCount = structuredInteriorResources.length;
+	store.structuredInteriorProductResourceCount =
+		structuredInteriorProductResources.length;
+	store.structuredInteriorTexturePageResourceCount =
+		structuredInteriorProductResources.reduce(
+			(total, resource) => total + resource.texturePages.length,
+			0,
+		);
+	store.structuredInteriorMaterialRecordResourceCount =
+		structuredInteriorProductResources.reduce(
+			(total, resource) => total + resource.materialRecords.length,
+			0,
+		);
 	store.structuredInteriorResourceTriangleCount =
 		structuredInteriorResources.reduce(
 			(total, resource) => total + resource.triangleCount,
@@ -848,6 +869,9 @@ export function destroyWebgl2WorldResources(
 	store.terrainRenderCandidates = [];
 	store.staticBundleLayerResourceCount = 0;
 	store.structuredInteriorResourceCount = 0;
+	store.structuredInteriorProductResourceCount = 0;
+	store.structuredInteriorTexturePageResourceCount = 0;
+	store.structuredInteriorMaterialRecordResourceCount = 0;
 	store.structuredInteriorResourceTriangleCount = 0;
 	store.staticBundleLayerCompactedBatchResourceCount = 0;
 	store.staticBundleLayerDirectEntryResourceCount = 0;

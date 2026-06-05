@@ -23,6 +23,13 @@ export type LandblockRenderProduct =
 	| "outdoor-env-cells"
 	| "dungeon-env-cells";
 
+export interface StaticLandblockProductKey {
+	landblockId: number;
+	product: LandblockRenderProduct;
+	buildPolicyRevision: string;
+	texturePagePolicyRevision: string;
+}
+
 export type LandblockRenderProductPriority = "resident-now" | "prefetch";
 
 export interface LandblockRenderProductBuildPolicy {
@@ -256,12 +263,9 @@ export function createLandblockRenderProductWorkerJob(
 ): LandblockRenderProductWorkerJob {
 	return {
 		type: "build-landblock-render-product",
-		jobId: [
-			"landblock-render-product",
-			desired.landblockId,
-			desired.product,
-			desired.requestId,
-		].join(":"),
+		jobId: formatStaticLandblockProductKey(
+			createStaticLandblockProductKey(desired),
+		),
 		landblockId: desired.landblockId,
 		product: desired.product,
 		requestId: desired.requestId,
@@ -269,6 +273,57 @@ export function createLandblockRenderProductWorkerJob(
 		texturePagePolicyRevision: desired.texturePagePolicyRevision,
 		buildPolicy: desired.buildPolicy,
 	};
+}
+
+export function createStaticLandblockProductKey(
+	input: StaticLandblockProductKey,
+): StaticLandblockProductKey {
+	return {
+		landblockId: input.landblockId,
+		product: input.product,
+		buildPolicyRevision: input.buildPolicyRevision,
+		texturePagePolicyRevision: input.texturePagePolicyRevision,
+	};
+}
+
+export function createStaticLandblockProductKeyFromResult(
+	result: LandblockRenderProductWorkerResult,
+): StaticLandblockProductKey {
+	return createStaticLandblockProductKey(result);
+}
+
+export function formatStaticLandblockProductKey(
+	key: StaticLandblockProductKey,
+): string {
+	return [
+		"landblock-render-product",
+		key.landblockId,
+		key.product,
+		key.buildPolicyRevision,
+		key.texturePagePolicyRevision,
+	].join(":");
+}
+
+export function compareStaticLandblockProductKeys(
+	left: StaticLandblockProductKey,
+	right: StaticLandblockProductKey,
+): number {
+	if (left.landblockId !== right.landblockId) {
+		return left.landblockId - right.landblockId;
+	}
+	const productOrder = compareProductOrder(left.product, right.product);
+	if (productOrder !== 0) {
+		return productOrder;
+	}
+	const buildPolicyOrder = left.buildPolicyRevision.localeCompare(
+		right.buildPolicyRevision,
+	);
+	if (buildPolicyOrder !== 0) {
+		return buildPolicyOrder;
+	}
+	return left.texturePagePolicyRevision.localeCompare(
+		right.texturePagePolicyRevision,
+	);
 }
 
 export function compareDesiredLandblockRenderProducts(

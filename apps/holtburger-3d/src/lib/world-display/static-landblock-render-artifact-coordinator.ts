@@ -5,6 +5,7 @@ import {
 import { planDesiredLandblockRenderProducts } from "../assets/landblock-render-product-planner";
 import {
 	StaticLandblockRenderArtifactStore,
+	type StaticLandblockProductKey,
 	type StaticLandblockRenderProductSet,
 } from "./static-landblock-render-artifact-store";
 import { StaticLandblockRenderWorkerClient } from "./static-landblock-render-worker-client";
@@ -53,6 +54,9 @@ interface StaticLandblockRenderArtifactCoordinatorOptions {
 	onStoreChanged?: (
 		productSet: StaticLandblockRenderProductSet,
 	) => void;
+	onProductCommitted?: (result: LandblockRenderProductWorkerResult) => void;
+	onProductEvicted?: (key: StaticLandblockProductKey) => void;
+	onProductsCleared?: () => void;
 	onError?: (error: Error, desired: DesiredLandblockRenderProduct) => void;
 }
 
@@ -65,6 +69,13 @@ export class StaticLandblockRenderArtifactCoordinator {
 	private readonly onStoreChanged:
 		| ((productSet: StaticLandblockRenderProductSet) => void)
 		| undefined;
+	private readonly onProductCommitted:
+		| ((result: LandblockRenderProductWorkerResult) => void)
+		| undefined;
+	private readonly onProductEvicted:
+		| ((key: StaticLandblockProductKey) => void)
+		| undefined;
+	private readonly onProductsCleared: (() => void) | undefined;
 	private readonly onError:
 		| ((error: Error, desired: DesiredLandblockRenderProduct) => void)
 		| undefined;
@@ -85,6 +96,9 @@ export class StaticLandblockRenderArtifactCoordinator {
 			options.texturePagePolicyRevision ??
 			STATIC_LANDBLOCK_RENDER_TEXTURE_PAGE_POLICY_REVISION;
 		this.onStoreChanged = options.onStoreChanged;
+		this.onProductCommitted = options.onProductCommitted;
+		this.onProductEvicted = options.onProductEvicted;
+		this.onProductsCleared = options.onProductsCleared;
 		this.onError = options.onError;
 	}
 
@@ -107,7 +121,18 @@ export class StaticLandblockRenderArtifactCoordinator {
 			},
 		});
 
-		this.store.syncDesiredProducts(desiredProducts);
+		const evictedProductKeys = this.store.syncDesiredProducts(desiredProducts);
+		if (
+			desiredProducts.length === 0 &&
+			evictedProductKeys.length > 0 &&
+			this.onProductsCleared
+		) {
+			this.onProductsCleared?.();
+		} else {
+			for (const key of evictedProductKeys) {
+				this.onProductEvicted?.(key);
+			}
+		}
 		for (const desired of desiredProducts) {
 			if (this.store.hasCurrentArtifact(desired)) {
 				continue;
@@ -123,6 +148,7 @@ export class StaticLandblockRenderArtifactCoordinator {
 					}
 					const committed = this.store.commitResult(result);
 					if (committed) {
+						this.onProductCommitted?.(result);
 						this.onStoreChanged?.(this.store.productSet());
 					}
 				})

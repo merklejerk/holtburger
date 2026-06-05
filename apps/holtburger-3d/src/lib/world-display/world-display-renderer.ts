@@ -2,6 +2,16 @@ import type {
 	WorldDisplayRenderer,
 	WorldDisplayRendererOptions,
 } from "./world-display-renderer-contract";
+import {
+	createEmptyStaticLandblockRenderProductSet,
+	type StaticLandblockProductKey,
+	type StaticLandblockRenderProductSet,
+} from "./static-landblock-render-artifact-store";
+import type { LandblockRenderProductWorkerResult } from "./landblock-render-product";
+import {
+	createStaticLandblockProductKeyFromResult,
+	formatStaticLandblockProductKey,
+} from "./landblock-render-product";
 
 export type {
 	WorldDisplayRenderer,
@@ -90,6 +100,25 @@ function createDeferredWorldDisplayRenderer<
 		setStaticRenderableScene(scene) {
 			staticRenderableScene = scene;
 			loadedRenderer?.setStaticRenderableScene(scene);
+		},
+		commitStaticLandblockProduct(result) {
+			staticLandblockRenderProducts = commitProductToSet(
+				staticLandblockRenderProducts,
+				result,
+			);
+			loadedRenderer?.commitStaticLandblockProduct(result);
+		},
+		evictStaticLandblockProduct(key) {
+			staticLandblockRenderProducts = evictProductFromSet(
+				staticLandblockRenderProducts,
+				key,
+			);
+			loadedRenderer?.evictStaticLandblockProduct(key);
+		},
+		clearStaticLandblockProducts() {
+			staticLandblockRenderProducts =
+				createEmptyStaticLandblockRenderProductSet();
+			loadedRenderer?.clearStaticLandblockProducts();
 		},
 		replaceStaticLandblockProducts(artifacts) {
 			staticLandblockRenderProducts = artifacts;
@@ -214,4 +243,47 @@ function createDeferredWorldDisplayRenderer<
 			onCameraResidencyChange,
 		};
 	}
+}
+
+function commitProductToSet(
+	productSet: StaticLandblockRenderProductSet,
+	result: LandblockRenderProductWorkerResult,
+): StaticLandblockRenderProductSet {
+	const nextProductKey = formatStaticLandblockProductKey(
+		createStaticLandblockProductKeyFromResult(result),
+	);
+	const artifacts = productSet.artifacts.filter(
+		(artifact) =>
+			formatStaticLandblockProductKey(
+				createStaticLandblockProductKeyFromResult(artifact),
+			) !== nextProductKey,
+	);
+	return {
+		...productSet,
+		artifacts: [...artifacts, result],
+		residentCount: artifacts.length + 1,
+		committedResultCount: productSet.committedResultCount + 1,
+	};
+}
+
+function evictProductFromSet(
+	productSet: StaticLandblockRenderProductSet,
+	key: StaticLandblockProductKey,
+): StaticLandblockRenderProductSet {
+	const productKey = formatStaticLandblockProductKey(key);
+	const artifacts = productSet.artifacts.filter(
+		(artifact) =>
+			formatStaticLandblockProductKey(
+				createStaticLandblockProductKeyFromResult(artifact),
+			) !== productKey,
+	);
+	return {
+		...productSet,
+		artifacts,
+		residentCount: artifacts.length,
+		evictedResultCount:
+			artifacts.length === productSet.artifacts.length
+				? productSet.evictedResultCount
+				: productSet.evictedResultCount + 1,
+	};
 }

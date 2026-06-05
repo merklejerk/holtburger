@@ -67,6 +67,11 @@ export interface StaticLandblockRenderWorkerRunJobMessage {
 	job: LandblockRenderProductWorkerJob;
 }
 
+export interface StaticLandblockRenderWorkerCancelJobMessage {
+	type: "cancel-landblock-render-product-job";
+	requestId: string;
+}
+
 export interface StaticLandblockRenderWorkerJobCompleteMessage {
 	type: "landblock-render-product-job-complete";
 	requestId: string;
@@ -81,6 +86,7 @@ export interface StaticLandblockRenderWorkerJobErrorMessage {
 
 export type StaticLandblockRenderWorkerRequestMessage =
 	| StaticLandblockRenderWorkerRunJobMessage
+	| StaticLandblockRenderWorkerCancelJobMessage
 	| WorkerHostLookupBinaryCompleteMessage
 	| WorkerHostLookupBinaryErrorMessage;
 
@@ -106,6 +112,15 @@ interface StaticLandblockRenderWorkerLookup {
 	}>;
 }
 
+interface StaticLandblockRenderWorkerRunOptions {
+	isCanceled?: () => boolean;
+}
+
+interface QueuedStaticLandblockRenderWorkerJob {
+	requestId: string;
+	job: LandblockRenderProductWorkerJob;
+}
+
 const workerScope = globalThis as unknown as StaticLandblockRenderWorkerScope;
 const STATIC_LANDBLOCK_RENDER_WORKER_DIAGNOSTIC_BUILD =
 	"static-landblock-render-worker-2026-06-04a";
@@ -113,6 +128,7 @@ const STATIC_LANDBLOCK_RENDER_WORKER_DIAGNOSTIC_BUILD =
 export async function runStaticLandblockRenderWorkerJob(
 	job: LandblockRenderProductWorkerJob,
 	lookup: StaticLandblockRenderWorkerLookup,
+	options: StaticLandblockRenderWorkerRunOptions = {},
 ): Promise<LandblockRenderProductWorkerResult> {
 	const responseByAssetId = new Map<
 		string,
@@ -120,8 +136,10 @@ export async function runStaticLandblockRenderWorkerJob(
 	>();
 	const preparedByAssetId = new Map<string, PreparedAssetRecord>();
 
+	throwIfWorkerJobCanceled(options);
 	await loadProductRoots({ job, lookup, responseByAssetId });
 
+	throwIfWorkerJobCanceled(options);
 	prepareResponses(job, responseByAssetId, preparedByAssetId);
 	await loadPreparedCompanionClosure({
 		job,
@@ -130,6 +148,7 @@ export async function runStaticLandblockRenderWorkerJob(
 		preparedByAssetId,
 	});
 
+	throwIfWorkerJobCanceled(options);
 	const assetState = createWorkerAssetState(preparedByAssetId);
 	const terrainArtifact =
 		job.product === "outdoor"
@@ -141,6 +160,7 @@ export async function runStaticLandblockRenderWorkerJob(
 		...staticObjectBundles,
 	];
 
+	throwIfWorkerJobCanceled(options);
 	if (
 		job.product === "outdoor-env-cells" ||
 		job.product === "dungeon-env-cells"
@@ -155,6 +175,7 @@ export async function runStaticLandblockRenderWorkerJob(
 		);
 	}
 
+	throwIfWorkerJobCanceled(options);
 	return {
 		type: "landblock-render-product-built",
 		jobId: job.jobId,
@@ -480,7 +501,7 @@ function buildDetailedLandblockRenderArtifacts(options: {
 		key: [
 			"detailed-landblock",
 			formatHex32(options.job.landblockId),
-			options.job.requestId,
+			options.product,
 			options.job.buildPolicyRevision,
 			options.job.texturePagePolicyRevision,
 		].join(":"),
@@ -979,6 +1000,14 @@ function formatWorkerDiagnosticError(error: unknown): string {
 	return `[${STATIC_LANDBLOCK_RENDER_WORKER_DIAGNOSTIC_BUILD}] ${message}`;
 }
 
+function throwIfWorkerJobCanceled(
+	options: StaticLandblockRenderWorkerRunOptions,
+): void {
+	if (options.isCanceled?.() === true) {
+		throw new Error("Static landblock render product job was canceled.");
+	}
+}
+
 if (
 	typeof workerScope.postMessage === "function" &&
 	typeof workerScope.document === "undefined"
@@ -987,6 +1016,57 @@ if (
 		requestIdPrefix: "static-landblock-render-worker-host",
 		profileLabelPrefix: "static-landblock-render-worker",
 	});
+	const queuedJobs: QueuedStaticLandblockRenderWorkerJob[] = [];
+	const canceledRequestIds = new Set<string>();
+	let activeJob: QueuedStaticLandblockRenderWorkerJob | null = null;
+
+	function pumpQueuedWorkerJobs(): void {
+		if (activeJob !== null) {
+			return;
+		}
+		while (queuedJobs.length > 0) {
+			const nextJob = queuedJobs.shift();
+			if (!nextJob || canceledRequestIds.has(nextJob.requestId)) {
+				continue;
+			}
+			activeJob = nextJob;
+			void runStaticLandblockRenderWorkerJob(nextJob.job, hostBridge, {
+				isCanceled: () => canceledRequestIds.has(nextJob.requestId),
+			})
+				.then((result) => {
+					if (canceledRequestIds.has(nextJob.requestId)) {
+						return;
+					}
+					const transferables =
+						collectStaticLandblockRenderWorkerResultTransferables(result);
+					workerScope.postMessage(
+						{
+							type: "landblock-render-product-job-complete",
+							requestId: nextJob.requestId,
+							result,
+						},
+						transferables,
+					);
+				})
+				.catch((error) => {
+					if (canceledRequestIds.has(nextJob.requestId)) {
+						return;
+					}
+					workerScope.postMessage({
+						type: "landblock-render-product-job-error",
+						requestId: nextJob.requestId,
+						message: formatWorkerDiagnosticError(error),
+					});
+				})
+				.finally(() => {
+					activeJob = null;
+					canceledRequestIds.delete(nextJob.requestId);
+					pumpQueuedWorkerJobs();
+				});
+			return;
+		}
+	}
+
 	workerScope.onmessage = (event) => {
 		const message = event.data;
 		if (message.type === "host-lookup-assets-binary-complete") {
@@ -997,25 +1077,21 @@ if (
 			hostBridge.reject(message);
 			return;
 		}
-		void runStaticLandblockRenderWorkerJob(message.job, hostBridge)
-			.then((result) => {
-				const transferables =
-					collectStaticLandblockRenderWorkerResultTransferables(result);
-				workerScope.postMessage(
-					{
-						type: "landblock-render-product-job-complete",
-						requestId: message.requestId,
-						result,
-					},
-					transferables,
-				);
-			})
-			.catch((error) => {
-				workerScope.postMessage({
-					type: "landblock-render-product-job-error",
-					requestId: message.requestId,
-					message: formatWorkerDiagnosticError(error),
-				});
-			});
+		if (message.type === "cancel-landblock-render-product-job") {
+			canceledRequestIds.add(message.requestId);
+			const queuedIndex = queuedJobs.findIndex(
+				(job) => job.requestId === message.requestId,
+			);
+			if (queuedIndex >= 0) {
+				queuedJobs.splice(queuedIndex, 1);
+				canceledRequestIds.delete(message.requestId);
+			}
+			return;
+		}
+		queuedJobs.push({
+			requestId: message.requestId,
+			job: message.job,
+		});
+		pumpQueuedWorkerJobs();
 	};
 }

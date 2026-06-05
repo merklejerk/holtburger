@@ -50,6 +50,7 @@ interface PendingLandblockRenderRequest {
 	desired: DesiredLandblockRenderProduct;
 	requestId: string;
 	job: LandblockRenderProductWorkerJob;
+	artifactKey: string;
 	identityKey: string;
 	resolve: (result: LandblockRenderProductWorkerResult) => void;
 	reject: (error: Error) => void;
@@ -74,7 +75,7 @@ export class StaticLandblockRenderWorkerClient {
 
 	constructor(options: StaticLandblockRenderWorkerClientOptions = {}) {
 		this.lookupAssetsFn = options.lookupAssetsFn ?? lookupBinaryAssetEnvelopes;
-		this.maxConcurrentJobs = options.maxConcurrentJobs ?? 2;
+		this.maxConcurrentJobs = options.maxConcurrentJobs ?? 1;
 		if (!Number.isInteger(this.maxConcurrentJobs) || this.maxConcurrentJobs < 1) {
 			throw new Error(
 				"Static landblock render worker client requires maxConcurrentJobs >= 1.",
@@ -117,8 +118,15 @@ export class StaticLandblockRenderWorkerClient {
 		}
 		const artifactKey = formatArtifactKey(job);
 		this.latestIdentityByArtifactKey.set(artifactKey, identityKey);
+		this.cancelSupersededRequests(artifactKey, identityKey);
 		const requestId = `static-landblock-render-${this.nextRequestSequence++}`;
-		const promise = this.enqueueJob(requestId, desired, job, identityKey);
+		const promise = this.enqueueJob(
+			requestId,
+			desired,
+			job,
+			artifactKey,
+			identityKey,
+		);
 		this.pendingRequestByIdentity.set(identityKey, promise);
 		promise.then(
 			() => {
@@ -147,7 +155,6 @@ export class StaticLandblockRenderWorkerClient {
 	private postJob(
 		requestId: string,
 		job: LandblockRenderProductWorkerJob,
-		identityKey: string,
 		pending: PendingLandblockRenderRequest,
 	): void {
 		this.throwIfDisposed();
@@ -169,6 +176,7 @@ export class StaticLandblockRenderWorkerClient {
 		requestId: string,
 		desired: DesiredLandblockRenderProduct,
 		job: LandblockRenderProductWorkerJob,
+		artifactKey: string,
 		identityKey: string,
 	): Promise<LandblockRenderProductWorkerResult> {
 		this.throwIfDisposed();
@@ -177,6 +185,7 @@ export class StaticLandblockRenderWorkerClient {
 				desired,
 				requestId,
 				job,
+				artifactKey,
 				identityKey,
 				resolve,
 				reject,
@@ -184,6 +193,42 @@ export class StaticLandblockRenderWorkerClient {
 			this.queuedRequests.sort(comparePendingLandblockRenderRequests);
 			this.pumpQueuedRequests();
 		});
+	}
+
+	private cancelSupersededRequests(
+		artifactKey: string,
+		latestIdentityKey: string,
+	): void {
+		const supersededError = new Error(
+			"Static landblock render product request was superseded before completion.",
+		);
+		for (let index = this.queuedRequests.length - 1; index >= 0; index -= 1) {
+			const pending = this.queuedRequests[index];
+			if (
+				pending?.artifactKey !== artifactKey ||
+				pending.identityKey === latestIdentityKey
+			) {
+				continue;
+			}
+			this.queuedRequests.splice(index, 1);
+			this.pendingRequestByIdentity.delete(pending.identityKey);
+			pending.reject(supersededError);
+		}
+		for (const [requestId, pending] of [...this.pendingRequests.entries()]) {
+			if (
+				pending.artifactKey !== artifactKey ||
+				pending.identityKey === latestIdentityKey
+			) {
+				continue;
+			}
+			this.pendingRequests.delete(requestId);
+			this.pendingRequestByIdentity.delete(pending.identityKey);
+			this.worker.postMessage({
+				type: "cancel-landblock-render-product-job",
+				requestId,
+			});
+			pending.reject(supersededError);
+		}
 	}
 
 	private pumpQueuedRequests(): void {
@@ -198,7 +243,7 @@ export class StaticLandblockRenderWorkerClient {
 			if (!pending) {
 				return;
 			}
-			this.postJob(pending.requestId, pending.job, pending.identityKey, pending);
+			this.postJob(pending.requestId, pending.job, pending);
 		}
 	}
 

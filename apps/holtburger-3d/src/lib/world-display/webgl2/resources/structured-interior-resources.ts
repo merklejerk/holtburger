@@ -32,7 +32,18 @@ type DetailedStructuredInteriorMaterialSlice =
 	DetailedStructuredInteriorCellArtifact["materialSlices"][number];
 
 export interface Webgl2StructuredInteriorResourceStore {
+	productsByKey: Map<string, Webgl2StructuredInteriorProductResource>;
 	cellsByKey: Map<string, Webgl2StructuredInteriorCellResource>;
+}
+
+export interface Webgl2StructuredInteriorProductResource {
+	key: string;
+	artifactKey: string;
+	resourceSignature: string;
+	texturePages: readonly Webgl2StaticBundleTexturePageResource[];
+	texturePagesByKey: ReadonlyMap<string, Webgl2StaticBundleTexturePageResource>;
+	materialRecords: readonly Webgl2StaticBundleMaterialResource[];
+	dispose(): void;
 }
 
 export interface Webgl2StructuredInteriorCellResource {
@@ -80,6 +91,7 @@ export interface Webgl2StructuredInteriorMaterialSliceResource {
 
 export function createWebgl2StructuredInteriorResourceStore(): Webgl2StructuredInteriorResourceStore {
 	return {
+		productsByKey: new Map(),
 		cellsByKey: new Map(),
 	};
 }
@@ -106,7 +118,16 @@ export function syncWebgl2StructuredInteriorResources({
 		]),
 	);
 	const retainedKeys = new Set<string>();
+	const retainedProductKeys = new Set<string>();
 	for (const artifact of artifacts) {
+		const productResource = createOrReuseStructuredInteriorProductResource({
+			gl,
+			store,
+			artifact,
+			textureFilteringMode,
+			maxAnisotropy,
+		});
+		retainedProductKeys.add(productResource.key);
 		for (const cell of artifact.structuredInteriorCells) {
 			const resourceKey = describeStructuredInteriorResourceKey(artifact, cell);
 			retainedKeys.add(resourceKey);
@@ -121,12 +142,6 @@ export function syncWebgl2StructuredInteriorResources({
 					describeStructuredInteriorGeometrySignature(artifact, cell)
 			) {
 				previous.modelMatrix = modelMatrix;
-				updateWebgl2StructuredInteriorTexturePageSamplerPolicy({
-					gl,
-					cell: previous,
-					textureFilteringMode,
-					maxAnisotropy,
-				});
 				continue;
 			}
 			if (previous) {
@@ -138,9 +153,8 @@ export function syncWebgl2StructuredInteriorResources({
 					gl,
 					artifact,
 					cell,
+					productResource,
 					modelMatrix,
-					textureFilteringMode,
-					maxAnisotropy,
 				}),
 			);
 		}
@@ -151,6 +165,12 @@ export function syncWebgl2StructuredInteriorResources({
 			store.cellsByKey.delete(key);
 		}
 	}
+	for (const [key, resource] of store.productsByKey) {
+		if (!retainedProductKeys.has(key)) {
+			resource.dispose();
+			store.productsByKey.delete(key);
+		}
+	}
 }
 
 export function destroyWebgl2StructuredInteriorResources(
@@ -159,24 +179,63 @@ export function destroyWebgl2StructuredInteriorResources(
 	for (const resource of store.cellsByKey.values()) {
 		resource.dispose();
 	}
+	for (const resource of store.productsByKey.values()) {
+		resource.dispose();
+	}
 	store.cellsByKey.clear();
+	store.productsByKey.clear();
 }
 
-function createWebgl2StructuredInteriorCellResource({
+function createOrReuseStructuredInteriorProductResource({
+	gl,
+	store,
+	artifact,
+	textureFilteringMode,
+	maxAnisotropy,
+}: {
+	gl: WebGL2RenderingContext;
+	store: Webgl2StructuredInteriorResourceStore;
+	artifact: DetailedLandblockRenderArtifacts;
+	textureFilteringMode: TextureFilteringMode;
+	maxAnisotropy: number;
+}): Webgl2StructuredInteriorProductResource {
+	const key = describeStructuredInteriorProductResourceKey(artifact);
+	const resourceSignature =
+		describeStructuredInteriorProductResourceSignature(artifact);
+	const previous = store.productsByKey.get(key);
+	if (previous && previous.resourceSignature === resourceSignature) {
+		updateWebgl2StructuredInteriorProductTexturePageSamplerPolicy({
+			gl,
+			product: previous,
+			textureFilteringMode,
+			maxAnisotropy,
+		});
+		return previous;
+	}
+	if (previous) {
+		previous.dispose();
+	}
+	const product = createWebgl2StructuredInteriorProductResource({
+		gl,
+		artifact,
+		textureFilteringMode,
+		maxAnisotropy,
+	});
+	store.productsByKey.set(key, product);
+	return product;
+}
+
+function createWebgl2StructuredInteriorProductResource({
 	gl,
 	artifact,
-	cell,
-	modelMatrix,
 	textureFilteringMode,
 	maxAnisotropy,
 }: {
 	gl: WebGL2RenderingContext;
 	artifact: DetailedLandblockRenderArtifacts;
-	cell: DetailedStructuredInteriorCellArtifact;
-	modelMatrix: RenderMat4;
 	textureFilteringMode: TextureFilteringMode;
 	maxAnisotropy: number;
-}): Webgl2StructuredInteriorCellResource {
+}): Webgl2StructuredInteriorProductResource {
 	const texturePages = artifact.structuredInteriorTexturePages.map((page) =>
 		createWebgl2StaticBundleTexturePageResource({
 			gl,
@@ -201,6 +260,35 @@ function createWebgl2StructuredInteriorCellResource({
 				texturePageByVirtualRefKey,
 			}),
 	);
+	return {
+		key: describeStructuredInteriorProductResourceKey(artifact),
+		artifactKey: artifact.key,
+		resourceSignature:
+			describeStructuredInteriorProductResourceSignature(artifact),
+		texturePages,
+		texturePagesByKey,
+		materialRecords,
+		dispose() {
+			for (const page of texturePages) {
+				page.texture.dispose();
+			}
+		},
+	};
+}
+
+function createWebgl2StructuredInteriorCellResource({
+	gl,
+	artifact,
+	cell,
+	productResource,
+	modelMatrix,
+}: {
+	gl: WebGL2RenderingContext;
+	artifact: DetailedLandblockRenderArtifacts;
+	cell: DetailedStructuredInteriorCellArtifact;
+	productResource: Webgl2StructuredInteriorProductResource;
+	modelMatrix: RenderMat4;
+}): Webgl2StructuredInteriorCellResource {
 	const materialSlices = cell.materialSlices.map((slice) =>
 		createWebgl2StructuredInteriorMaterialSliceResource({ gl, slice }),
 	);
@@ -225,9 +313,9 @@ function createWebgl2StructuredInteriorCellResource({
 			cell,
 		),
 		modelMatrix,
-		texturePages,
-		texturePagesByKey,
-		materialRecords,
+		texturePages: productResource.texturePages,
+		texturePagesByKey: productResource.texturePagesByKey,
+		materialRecords: productResource.materialRecords,
 		materialSlices,
 		fallbackShell,
 		triangleCount,
@@ -236,25 +324,22 @@ function createWebgl2StructuredInteriorCellResource({
 				slice.dispose();
 			}
 			fallbackShell?.dispose();
-			for (const page of texturePages) {
-				page.texture.dispose();
-			}
 		},
 	};
 }
 
-function updateWebgl2StructuredInteriorTexturePageSamplerPolicy({
+function updateWebgl2StructuredInteriorProductTexturePageSamplerPolicy({
 	gl,
-	cell,
+	product,
 	textureFilteringMode,
 	maxAnisotropy,
 }: {
 	gl: WebGL2RenderingContext;
-	cell: Webgl2StructuredInteriorCellResource;
+	product: Webgl2StructuredInteriorProductResource;
 	textureFilteringMode: TextureFilteringMode;
 	maxAnisotropy: number;
 }): void {
-	for (const page of cell.texturePages) {
+	for (const page of product.texturePages) {
 		updateWebgl2StaticBundleTexturePageResourceSamplerPolicy({
 			gl,
 			page,
@@ -407,6 +492,33 @@ function describeStructuredInteriorResourceKey(
 	].join(":");
 }
 
+function describeStructuredInteriorProductResourceKey(
+	artifact: DetailedLandblockRenderArtifacts,
+): string {
+	return [
+		"structured-interior-product",
+		artifact.product,
+		artifact.landblockId,
+		artifact.buildPolicyRevision,
+		artifact.texturePagePolicyRevision,
+	].join(":");
+}
+
+function describeStructuredInteriorProductResourceSignature(
+	artifact: DetailedLandblockRenderArtifacts,
+): string {
+	return [
+		artifact.key,
+		artifact.structuredInteriorTexturePages.map(describeTexturePageKey).join(","),
+		artifact.structuredInteriorTexturePageRefs
+			.map((ref) => ref.key)
+			.join(","),
+		artifact.structuredInteriorMaterialRecords
+			.map((record) => record.key)
+			.join(","),
+	].join(":");
+}
+
 function describeStructuredInteriorGeometrySignature(
 	artifact: DetailedLandblockRenderArtifacts,
 	cell: DetailedStructuredInteriorCellArtifact,
@@ -419,7 +531,6 @@ function describeStructuredInteriorGeometrySignature(
 		cell.renderGeometry.triangleCount,
 		cell.renderGeometry.skippedPolygonCount ?? 0,
 		cell.materialSlices.length,
-		artifact.structuredInteriorTexturePages.map(describeTexturePageKey).join(","),
 	].join(":");
 }
 

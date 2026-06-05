@@ -19,7 +19,11 @@ import type {
 import type { DrawUnitRuntimeDiagnostic } from "./runtime-render-diagnostics";
 import type { WorldRenderSceneContext } from "./render-scene-context";
 import type { StaticRenderableSceneModel } from "./static-renderables";
-import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
+import type {
+	StaticLandblockProductKey,
+	StaticLandblockRenderProductSet,
+} from "./static-landblock-render-artifact-store";
+import type { LandblockRenderProductWorkerResult } from "./landblock-render-product";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
 import type { TransitionPortalCandidateModel } from "./transition-portal-work-items";
@@ -51,6 +55,11 @@ export interface WorldDisplayRenderer {
 	setAssetState(assetState: AssetChannelState): void;
 	setTerrainScene(scene: TerrainSceneModel): void;
 	setStaticRenderableScene(scene: StaticRenderableSceneModel): void;
+	commitStaticLandblockProduct(
+		result: LandblockRenderProductWorkerResult,
+	): void;
+	evictStaticLandblockProduct(key: StaticLandblockProductKey): void;
+	clearStaticLandblockProducts(): void;
 	replaceStaticLandblockProducts(
 		artifacts: StaticLandblockRenderProductSet,
 	): void;

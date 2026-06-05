@@ -192,6 +192,18 @@
 	const renderResourceCoordinator = new BrowserRenderResourceCoordinator();
 	const staticLandblockRenderCoordinator =
 		new StaticLandblockRenderArtifactCoordinator({
+			onProductCommitted: (result) => {
+				worldDisplaySurface?.commitStaticLandblockProduct(result);
+				scheduleCurrentSceneResourceUpdate();
+			},
+			onProductEvicted: (key) => {
+				worldDisplaySurface?.evictStaticLandblockProduct(key);
+				scheduleCurrentSceneResourceUpdate();
+			},
+			onProductsCleared: () => {
+				worldDisplaySurface?.clearStaticLandblockProducts();
+				scheduleCurrentSceneResourceUpdate();
+			},
 			onStoreChanged: () => {
 				scheduleCurrentSceneResourceUpdate();
 			},

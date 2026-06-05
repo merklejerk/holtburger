@@ -317,6 +317,24 @@ describe("static landblock render worker", () => {
 			"dungeon-env-cells",
 		);
 	});
+
+	it("cancels before loading product roots", async () => {
+		let lookupCount = 0;
+
+		await expect(
+			runStaticLandblockRenderWorkerJob(
+				createJob("outdoor"),
+				{
+					async lookupBinaryAssets() {
+						lookupCount += 1;
+						return { responses: [] };
+					},
+				},
+				{ isCanceled: () => true },
+			),
+		).rejects.toThrow("canceled");
+		expect(lookupCount).toBe(0);
+	});
 });
 
 function createJob(
@@ -324,7 +342,7 @@ function createJob(
 ): LandblockRenderProductWorkerJob {
 	return {
 		type: "build-landblock-render-product",
-		jobId: `landblock-render-product:3663069183:${product}:request:worker`,
+		jobId: `landblock-render-product:3663069183:${product}:build:v1:texture-pages:v1`,
 		landblockId: 0xda55ffff,
 		product,
 		requestId: "request:worker",

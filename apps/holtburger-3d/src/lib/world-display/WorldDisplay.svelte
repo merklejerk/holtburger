@@ -28,8 +28,10 @@
 	} from "./static-renderables";
 	import {
 		createEmptyStaticLandblockRenderProductSet,
+		type StaticLandblockProductKey,
 		type StaticLandblockRenderProductSet,
 	} from "./static-landblock-render-artifact-store";
+	import type { LandblockRenderProductWorkerResult } from "./landblock-render-product";
 	import {
 		createEmptyStructuredInteriorSceneModel,
 		type StructuredInteriorSceneModel,
@@ -152,6 +154,23 @@
 		rendererController?.replaceStaticLandblockProducts(
 			staticLandblockRenderProducts,
 		);
+	}
+
+	export function commitStaticLandblockProduct(
+		result: LandblockRenderProductWorkerResult,
+	): void {
+		rendererController?.commitStaticLandblockProduct(result);
+	}
+
+	export function evictStaticLandblockProduct(
+		key: StaticLandblockProductKey,
+	): void {
+		rendererController?.evictStaticLandblockProduct(key);
+	}
+
+	export function clearStaticLandblockProducts(): void {
+		staticLandblockRenderProducts = createEmptyStaticLandblockRenderProductSet();
+		rendererController?.clearStaticLandblockProducts();
 	}
 
 	export function setStructuredInteriorScene(

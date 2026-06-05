@@ -11,10 +11,14 @@ describe("static landblock render artifact coordinator", () => {
 	it("submits desired products through the worker client and commits completed artifacts", async () => {
 		const client = new MockLandblockProductClient();
 		const productSets: number[] = [];
+		const committedRequestIds: string[] = [];
 		const destination = parseBrowserLocationInput("da55", "manual", "outdoor");
 		expect(destination).not.toBeNull();
 		const coordinator = new StaticLandblockRenderArtifactCoordinator({
 			client,
+			onProductCommitted: (result) => {
+				committedRequestIds.push(result.requestId);
+			},
 			onStoreChanged: (productSet) => productSets.push(productSet.residentCount),
 		});
 
@@ -41,7 +45,41 @@ describe("static landblock render artifact coordinator", () => {
 			residentCount: 1,
 			committedResultCount: 1,
 		});
+		expect(committedRequestIds).toEqual([client.requests[0]!.requestId]);
 		expect(productSets).toEqual([1]);
+		coordinator.dispose();
+	});
+
+	it("emits product eviction callbacks when desired targets leave residency", async () => {
+		const client = new MockLandblockProductClient();
+		const evictedKeys: string[] = [];
+		const destination = parseBrowserLocationInput("da55", "manual", "outdoor");
+		expect(destination).not.toBeNull();
+		const coordinator = new StaticLandblockRenderArtifactCoordinator({
+			client,
+			onProductEvicted: (key) => {
+				evictedKeys.push(`${key.landblockId}:${key.product}`);
+			},
+		});
+
+		coordinator.sync({
+			browserDestination: destination,
+			terrainLodRadius: 0,
+			buildingLodRadius: -1,
+			detailLodRadius: -1,
+			envCellLodRadius: -1,
+		});
+		client.resolveNext(createResult(client.requests[0]!));
+		await Promise.resolve();
+		coordinator.sync({
+			browserDestination: null,
+			terrainLodRadius: 0,
+			buildingLodRadius: -1,
+			detailLodRadius: -1,
+			envCellLodRadius: -1,
+		});
+
+		expect(evictedKeys).toEqual(["3663069183:outdoor"]);
 		coordinator.dispose();
 	});
 

@@ -2,7 +2,6 @@ import type {
 	AssetChannelState,
 	PreparedBounds,
 	PreparedEnvCellBvhItem,
-	PreparedEnvCellPayload,
 	PreparedLandblockBvhNode,
 	PreparedLandblockOutdoorPayload,
 } from "../assets/types";
@@ -22,7 +21,6 @@ import {
 	type RenderBvhItemKey,
 } from "./prepared-bvh-visibility";
 import {
-	transformEnvCellLocalBounds,
 	transformEnvCellLocalBoundsByPlacement,
 	transformTerrainLocalBounds,
 } from "./prepared-bvh-bounds";
@@ -39,7 +37,6 @@ import {
 } from "./render-spatial-math";
 import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
 import type { StaticRenderableSceneModel } from "./static-renderables";
-import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
 
 export interface RenderSpaceBvhSource {
@@ -74,7 +71,6 @@ export function buildPortalCompositeRenderBvhSources(options: {
 	terrainScene: TerrainSceneModel;
 	staticRenderableScene: StaticRenderableSceneModel;
 	staticLandblockRenderArtifacts: StaticLandblockRenderArtifactStoreSnapshot;
-	structuredInteriorScene: StructuredInteriorSceneModel;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 }): PortalCompositeRenderBvhSources {
 	const fallbackReasons: string[] = [];
@@ -159,42 +155,6 @@ export function buildPortalCompositeRenderBvhSources(options: {
 		chunkTransformsByKey,
 		fallbackReasons,
 	});
-	for (const cell of options.structuredInteriorScene.cells) {
-		if (envCellSourcesById.has(cell.envCellId)) {
-			continue;
-		}
-		const payload = findPreparedEnvCellPayload(
-			options.assetState,
-			cell.envCellId,
-		);
-		if (!payload) {
-			fallbackReasons.push(
-				`missing portal env-cell payload ${formatEnvCellAssetId(cell.envCellId)}`,
-			);
-			continue;
-		}
-		const transform = chunkTransformsByKey.get(cell.renderChunk.chunkKey);
-		if (!transform) {
-			fallbackReasons.push(
-				`missing portal render chunk transform ${cell.renderChunk.chunkKey}`,
-			);
-			continue;
-		}
-		envCellSourcesById.set(
-			cell.envCellId,
-			buildRenderSpaceBvhSource({
-				sourceId: `env-cell:${cell.renderKey}`,
-				nodes: payload.localBvh.nodes,
-				items: payload.localBvh.items,
-				expectedCoordinateSpace: "env-cell-local",
-				coordinateSpace: payload.localBvh.coordinateSpace,
-				itemKey: (item) => envCellLocalItemKey(payload.envCellId, item),
-				boundsToRendererBounds: (bounds) =>
-					transformEnvCellLocalBounds(bounds, payload, transform),
-				fallbackReasons,
-			}),
-		);
-	}
 
 	return {
 		terrainSources,
@@ -531,15 +491,4 @@ function findPreparedOutdoorPayload(
 	const asset =
 		assetState.preparedByAssetId[formatLandblockOutdoorAssetId(landblockId)];
 	return asset?.payload.kind === "landblock-outdoor" ? asset.payload : null;
-}
-
-function findPreparedEnvCellPayload(
-	assetState: AssetChannelState,
-	envCellId: number,
-): PreparedEnvCellPayload | null {
-	const asset = assetState.preparedByAssetId[formatEnvCellAssetId(envCellId)];
-	return asset?.payload.kind === "env-cell" &&
-		asset.payload.envCellId === envCellId
-		? asset.payload
-		: null;
 }

@@ -2290,7 +2290,6 @@ export function createWebgl2WorldDisplayRendererImplementation(
 						terrainScene,
 						staticRenderableScene,
 						staticLandblockRenderArtifacts,
-						structuredInteriorScene,
 						renderChunkTransforms,
 					}),
 				),

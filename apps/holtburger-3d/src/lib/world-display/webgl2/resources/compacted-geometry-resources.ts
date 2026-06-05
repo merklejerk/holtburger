@@ -68,10 +68,6 @@ export interface Webgl2IndexedPalettedFamilyResource {
 	drawSlices: readonly Webgl2IndexedPalettedFamilyDrawSlice[];
 }
 
-export type Webgl2CompactedGeometryFamilyResource =
-	| Webgl2RgbaTexturePageFamilyResource
-	| Webgl2IndexedPalettedFamilyResource;
-
 export interface Webgl2CompactedGeometryBatchResource {
 	key: string;
 	landblockId: number;

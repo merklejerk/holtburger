@@ -43,7 +43,6 @@ import { WORLD_RENDER_DOMAIN } from "./render-domains";
 import { deriveLandblockRenderChunkPlacement } from "./render-chunks";
 import {
 	materialDecisionGraphNodeKey,
-	atlasGenerationGraphNodeKey,
 	preparedAssetGraphNodeKey,
 	sceneObjectGraphNodeKey,
 	type RendererResourceGraph,
@@ -112,16 +111,10 @@ import {
 } from "./webgl2/families/direct-render-family";
 import {
 	createTextureAtlasCpuGeneration,
-	createWebgl2TextureAtlasGenerationResourceFromCpu,
+	createWebgl2TextureAtlasTextureResourceFromCpu,
 	describeWebgl2TextureAtlasGenerationKey,
-	type Webgl2TextureAtlasGenerationResource,
+	type TextureAtlasCpuGeneration,
 } from "./webgl2/resources/texture-atlas-generation";
-import {
-	createIndexedResourceAtlasCpuGeneration,
-	createWebgl2IndexedResourceAtlasGenerationResourceFromCpu,
-	describeWebgl2IndexedResourceAtlasGenerationKey,
-	type Webgl2IndexedResourceAtlasGenerationResource,
-} from "./webgl2/resources/indexed-resource-atlas-generation";
 import {
 	buildTerrainBlendPlanSet,
 	type TerrainBlendTextureRef,
@@ -144,7 +137,6 @@ import {
 import type { Webgl2SceneDomain } from "./webgl2-scene-domain-targets";
 import {
 	collectDirectDrawTexturePageBindings,
-	resolveDirectDrawBaseTexturePageBinding,
 	type TexturePageDescriptor,
 } from "./texture-pages/texture-page-binding";
 import { deriveTerrainTileBatchBvhBinding } from "./non-instanced-bvh-bindings";
@@ -160,6 +152,7 @@ import {
 	destroyWebgl2TerrainTileResource,
 	terrainTileResourceId,
 	type Webgl2TerrainTileTexturePageBinding,
+	type Webgl2TerrainTexturePageResource,
 	type Webgl2TerrainTileDetailPlan,
 	type Webgl2TerrainTileDrawSliceResource,
 	type Webgl2TerrainTileRenderCandidate,
@@ -267,9 +260,6 @@ export interface Webgl2WorldResourceStore {
 	atlasFailureSamples: readonly string[];
 	compactionFamilyPlan: CompactionFamilyPlan;
 	texturePageAtlasPlan: TexturePageAtlasPlan;
-	textureAtlasGeneration: Webgl2TextureAtlasGenerationResource | null;
-	textureAtlasGenerationGraph: RendererResourceGraph | null;
-	textureAtlasGenerationGraphLease: RendererResourceGraphLease | null;
 	compactionCandidateDrawUnitCount: number;
 	compactionBypassReasonCount: number;
 	compactionBypassSamples: readonly string[];
@@ -287,11 +277,9 @@ export interface Webgl2WorldResourceStore {
 		number
 	>;
 	indexedResourceAtlasPlan: IndexedResourceAtlasPlan;
-	indexedResourceAtlasGeneration: Webgl2IndexedResourceAtlasGenerationResource | null;
-	indexedResourceAtlasGenerationGraph: RendererResourceGraph | null;
-	indexedResourceAtlasGenerationGraphLease: RendererResourceGraphLease | null;
-	textureAtlasGenerationTextureCount: number;
-	detailTextureAtlasGenerationTextureCount: number;
+	terrainTexturePagesByKey: Map<string, Webgl2TerrainTexturePageResource>;
+	terrainTexturePageCount: number;
+	terrainDetailTexturePageCount: number;
 	indexedMaterialDescriptorDrawUnitCount: number;
 	indexedMaterialDescriptorCompactionCandidateCount: number;
 	standaloneIndexedMaterialResourceDrawUnitCount: number;
@@ -391,9 +379,6 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		atlasFailureSamples: [],
 		compactionFamilyPlan: createEmptyCompactionFamilyPlan(),
 		texturePageAtlasPlan: createEmptyTexturePageAtlasPlan(),
-		textureAtlasGeneration: null,
-		textureAtlasGenerationGraph: null,
-		textureAtlasGenerationGraphLease: null,
 		compactionCandidateDrawUnitCount: 0,
 		compactionBypassReasonCount: 0,
 		compactionBypassSamples: [],
@@ -408,11 +393,9 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		compactionCoverageRetainedDirectMaterialFamilyCounts: {},
 		compactionCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts: {},
 		indexedResourceAtlasPlan: createEmptyIndexedResourceAtlasPlan(),
-		indexedResourceAtlasGeneration: null,
-		indexedResourceAtlasGenerationGraph: null,
-		indexedResourceAtlasGenerationGraphLease: null,
-		textureAtlasGenerationTextureCount: 0,
-		detailTextureAtlasGenerationTextureCount: 0,
+		terrainTexturePagesByKey: new Map(),
+		terrainTexturePageCount: 0,
+		terrainDetailTexturePageCount: 0,
 		indexedMaterialDescriptorDrawUnitCount: 0,
 		indexedMaterialDescriptorCompactionCandidateCount: 0,
 		standaloneIndexedMaterialResourceDrawUnitCount: 0,
@@ -516,34 +499,6 @@ function isRenderableStaticLandblockArtifactLayer(
 		case "dungeon-env-cells":
 			return bundleKind === "env-cell-static";
 	}
-}
-
-export function commitWebgl2TextureAtlasGeneration({
-	store,
-	generation,
-}: {
-	store: Webgl2WorldResourceStore;
-	generation: Webgl2TextureAtlasGenerationResource;
-}): void {
-	const previousGeneration = store.textureAtlasGeneration;
-	if (previousGeneration !== generation) {
-		previousGeneration?.dispose();
-	}
-	store.textureAtlasGeneration = generation;
-}
-
-export function commitWebgl2IndexedResourceAtlasGeneration({
-	store,
-	generation,
-}: {
-	store: Webgl2WorldResourceStore;
-	generation: Webgl2IndexedResourceAtlasGenerationResource;
-}): void {
-	const previousGeneration = store.indexedResourceAtlasGeneration;
-	if (previousGeneration !== generation) {
-		previousGeneration?.dispose();
-	}
-	store.indexedResourceAtlasGeneration = generation;
 }
 
 export function syncWebgl2WorldResources({
@@ -873,22 +828,14 @@ export function syncWebgl2WorldResources({
 			retainedTextureKeys.add(textureKey);
 		}
 	}
-	syncWebgl2TextureAtlasGeneration({
+	syncWebgl2TerrainTexturePageResources({
 		gl,
 		store,
 		plan: store.texturePageAtlasPlan,
 		textureFilteringMode,
 		maxAnisotropy: materialTextureCapabilities.maxAnisotropy ?? 1,
-		rendererResourceGraph,
-	});
-	syncWebgl2IndexedResourceAtlasGeneration({
-		gl,
-		store,
-		plan: store.indexedResourceAtlasPlan,
-		rendererResourceGraph,
 	});
 	resolveWebgl2TerrainTileTexturePageBindings({ gl, store });
-	resolveWebgl2DrawUnitTexturePageBindings(store);
 	for (const [textureKey, texture] of store.texturesByKey) {
 		if (!retainedTextureKeys.has(textureKey)) {
 			texture.dispose();
@@ -947,7 +894,6 @@ export function destroyWebgl2WorldResources(
 			store.boundGraph.releaseLease(lease);
 		}
 	}
-	releaseWebgl2TextureAtlasGenerationGraphLease(store);
 	for (const drawUnit of store.drawUnits) {
 		destroyWebgl2DrawUnit(drawUnit);
 	}
@@ -971,12 +917,6 @@ export function destroyWebgl2WorldResources(
 	store.graphSignaturesByDrawUnitId.clear();
 	store.graphLeasesByTerrainTileId.clear();
 	store.graphSignaturesByTerrainTileId.clear();
-	releaseWebgl2TextureAtlasGenerationGraphLease(store);
-	releaseWebgl2IndexedResourceAtlasGenerationGraphLease(store);
-	store.textureAtlasGenerationGraph = null;
-	store.textureAtlasGenerationGraphLease = null;
-	store.indexedResourceAtlasGenerationGraph = null;
-	store.indexedResourceAtlasGenerationGraphLease = null;
 	store.boundGraph = null;
 	store.terrainTileCount = 0;
 	store.terrainDrawUnitCount = 0;
@@ -1002,8 +942,6 @@ export function destroyWebgl2WorldResources(
 	store.atlasFailureSamples = [];
 	store.compactionFamilyPlan = createEmptyCompactionFamilyPlan();
 	store.texturePageAtlasPlan = createEmptyTexturePageAtlasPlan();
-	store.textureAtlasGeneration?.dispose();
-	store.textureAtlasGeneration = null;
 	store.compactionCandidateDrawUnitCount = 0;
 	store.compactionBypassReasonCount = 0;
 	store.compactionBypassSamples = [];
@@ -1018,8 +956,12 @@ export function destroyWebgl2WorldResources(
 	store.compactionCoverageRetainedDirectMaterialFamilyCounts = {};
 	store.compactionCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts = {};
 	store.indexedResourceAtlasPlan = createEmptyIndexedResourceAtlasPlan();
-	store.indexedResourceAtlasGeneration?.dispose();
-	store.indexedResourceAtlasGeneration = null;
+	for (const terrainTexturePage of store.terrainTexturePagesByKey.values()) {
+		terrainTexturePage.texture.dispose();
+	}
+	store.terrainTexturePagesByKey.clear();
+	store.terrainTexturePageCount = 0;
+	store.terrainDetailTexturePageCount = 0;
 	store.indexedMaterialDescriptorDrawUnitCount = 0;
 	store.indexedMaterialDescriptorCompactionCandidateCount = 0;
 	store.standaloneIndexedMaterialResourceDrawUnitCount = 0;
@@ -1029,8 +971,6 @@ export function destroyWebgl2WorldResources(
 	store.indexedResourceAtlasPaletteTextureCount = 0;
 	store.indexedResourceAtlasFailureReasonCount = 0;
 	store.indexedResourceAtlasFailureSamples = [];
-	store.textureAtlasGenerationTextureCount = 0;
-	store.detailTextureAtlasGenerationTextureCount = 0;
 	for (const texture of store.texturesByKey.values()) {
 		texture.dispose();
 	}
@@ -1989,23 +1929,49 @@ function resolveWebgl2TerrainTileTexturePageBindings({
 				);
 				continue;
 			}
+			const family = ref.role === "mask" ? "terrain-mask" : "terrain-color";
+			const texturePage = resolveTerrainTexturePageResource({
+				store,
+				family,
+				textureIndex: placement.textureIndex,
+			});
+			if (!texturePage) {
+				blockers.push(
+					`missing terrain ${ref.role} page texture ${placement.textureIndex} for ${atlasEntryKey}`,
+				);
+				continue;
+			}
 			bindings.push({
-				family: ref.role === "mask" ? "terrain-mask" : "terrain-color",
+				family,
 				atlasEntryKey,
 				textureIndex: placement.textureIndex,
 				rect: [placement.x, placement.y, placement.width, placement.height],
+				texturePage,
 			});
 		}
 		if (tile.detailPlan) {
 			const placement =
 				detailPlacementsByEntryKey.get(tile.detailPlan.atlasEntryKey) ?? null;
 			if (placement) {
-				bindings.push({
+				const texturePage = resolveTerrainTexturePageResource({
+					store,
 					family: "terrain-detail",
-					atlasEntryKey: tile.detailPlan.atlasEntryKey,
 					textureIndex: placement.textureIndex,
-					rect: [placement.x, placement.y, placement.width, placement.height],
 				});
+				if (texturePage) {
+					bindings.push({
+						family: "terrain-detail",
+						atlasEntryKey: tile.detailPlan.atlasEntryKey,
+						textureIndex: placement.textureIndex,
+						rect: [placement.x, placement.y, placement.width, placement.height],
+						texturePage,
+					});
+				} else {
+					store.materialFallbackReasonSamples = [
+						...store.materialFallbackReasonSamples,
+						`missing terrain detail texture page ${placement.textureIndex} for ${tile.detailPlan.atlasEntryKey}`,
+					].slice(0, 8);
+				}
 			} else {
 				store.materialFallbackReasonSamples = [
 					...store.materialFallbackReasonSamples,
@@ -2027,6 +1993,24 @@ function resolveWebgl2TerrainTileTexturePageBindings({
 			resolveTerrainDrawSliceTexturePageBindings(tile);
 		}
 	}
+}
+
+function resolveTerrainTexturePageResource({
+	store,
+	family,
+	textureIndex,
+}: {
+	store: Webgl2WorldResourceStore;
+	family: Webgl2TerrainTexturePageResource["family"];
+	textureIndex: number;
+}): Webgl2TerrainTexturePageResource | null {
+	return (
+		[...store.terrainTexturePagesByKey.values()].find(
+			(texturePage) =>
+				texturePage.family === family &&
+				texturePage.textureIndex === textureIndex,
+		) ?? null
+	);
 }
 
 function createWebgl2TerrainTilePageOverflowDrawSlices({
@@ -3628,356 +3612,143 @@ function describeIndexedTexturePageSamplingPolicy(
 	});
 }
 
-function resolveWebgl2DrawUnitTexturePageBindings(
-	store: Webgl2WorldResourceStore,
-): void {
-	for (const drawUnit of store.drawUnits) {
-		const baseResolution = resolveDirectDrawBaseTexturePageBinding({
-			drawUnit,
-			generation: store.textureAtlasGeneration,
-			atlasPlan: store.texturePageAtlasPlan,
-			fallbackSamples: [],
-		});
-		drawUnit.texturePageBindings = [
-			...(baseResolution.binding ? [baseResolution.binding] : []),
-			...drawUnit.texturePageBindings.filter(
-				(binding) => binding.usageBucket !== "base-color",
-			),
-		];
-		drawUnit.texturePageBindingFallbackSamples = baseResolution.fallbackSamples;
-	}
-}
-
-function syncWebgl2TextureAtlasGeneration({
+function syncWebgl2TerrainTexturePageResources({
 	gl,
 	store,
 	plan,
 	textureFilteringMode,
 	maxAnisotropy,
-	rendererResourceGraph,
 }: {
 	gl: WebGL2RenderingContext;
 	store: Webgl2WorldResourceStore;
 	plan: TexturePageAtlasPlan;
 	textureFilteringMode: TextureFilteringMode;
 	maxAnisotropy: number;
-	rendererResourceGraph?: RendererResourceGraph;
 }): void {
-	if (
-		store.textureAtlasGenerationGraph &&
-		store.textureAtlasGenerationGraph !== rendererResourceGraph
-	) {
-		releaseWebgl2TextureAtlasGenerationGraphLease(store);
-	}
-	if (!requiresTextureAtlasGeneration(plan)) {
-		store.textureAtlasGeneration?.dispose();
-		store.textureAtlasGeneration = null;
-		store.textureAtlasGenerationTextureCount = 0;
-		store.detailTextureAtlasGenerationTextureCount = 0;
-		releaseWebgl2TextureAtlasGenerationGraphLease(store);
-		return;
-	}
-	const generationKey = describeWebgl2TextureAtlasGenerationKey({
-		planKey: plan.key,
+	const terrainPlan = createTerrainTexturePageGenerationPlan({
+		plan,
 		textureFilteringMode,
 		maxAnisotropy,
 	});
-	if (store.textureAtlasGeneration?.key !== generationKey) {
-		const cpuGeneration = profileBrowserJsScope(
-			"webgl2.resource.buildTextureAtlasGenerationCpu",
-			() =>
-				createTextureAtlasCpuGeneration({
-					plan,
-					textureFilteringMode,
-					maxAnisotropy,
-				}),
-		);
-		if (!cpuGeneration) {
-			throw new Error(
-				`Texture atlas generation ${generationKey} produced no CPU generation for a required atlas plan.`,
-			);
-		}
-		if (cpuGeneration.key !== generationKey) {
-			throw new Error(
-				`Texture atlas generation produced ${cpuGeneration.key}, expected ${generationKey}.`,
-			);
-		}
-		const nextGeneration = profileBrowserJsScope(
-			"webgl2.resource.commitTextureAtlasGeneration",
-			() =>
-				createWebgl2TextureAtlasGenerationResourceFromCpu({
-					gl,
-					cpuGeneration,
-					textureFilteringMode,
-					maxAnisotropy,
-				}),
-		);
-		commitWebgl2TextureAtlasGeneration({
-			store,
-			generation: nextGeneration,
-		});
-		releaseWebgl2TextureAtlasGenerationGraphLease(store);
-	} else if (store.textureAtlasGeneration) {
-		store.textureAtlasGeneration = refreshWebgl2TextureAtlasGenerationCoverage({
-			generation: store.textureAtlasGeneration,
-			plan,
-		});
-	}
-	store.textureAtlasGenerationTextureCount =
-		store.textureAtlasGeneration?.textures.length ?? 0;
-	store.detailTextureAtlasGenerationTextureCount =
-		store.textureAtlasGeneration?.detailTextures.length ?? 0;
-	if (!rendererResourceGraph || !store.textureAtlasGeneration) {
-		releaseWebgl2TextureAtlasGenerationGraphLease(store);
+	if (!terrainPlan) {
+		clearWebgl2TerrainTexturePageResources(store);
 		return;
 	}
-	upsertWebgl2TextureAtlasGenerationGraph({
-		graph: rendererResourceGraph,
-		generation: store.textureAtlasGeneration,
-	});
-	if (
-		store.textureAtlasGenerationGraphLease?.nodeKey ===
-		atlasGenerationGraphNodeKey(store.textureAtlasGeneration.key)
-	) {
-		return;
+	const retainedKeys = new Set<string>();
+	for (const cpuTexture of [
+		...terrainPlan.cpuGeneration.textures,
+		...terrainPlan.cpuGeneration.detailTextures,
+	]) {
+		retainedKeys.add(cpuTexture.key);
+		if (store.terrainTexturePagesByKey.has(cpuTexture.key)) {
+			continue;
+		}
+		const texturePage = createWebgl2TextureAtlasTextureResourceFromCpu({
+			gl,
+			cpuTexture,
+			textureFilteringMode,
+			maxAnisotropy,
+		});
+		store.terrainTexturePagesByKey.set(cpuTexture.key, {
+			key: texturePage.key,
+			family: texturePage.family as Webgl2TerrainTexturePageResource["family"],
+			textureIndex: texturePage.textureIndex,
+			texture: texturePage.texture,
+			width: texturePage.width,
+			height: texturePage.height,
+			placementCount: texturePage.placementCount,
+		});
 	}
-	releaseWebgl2TextureAtlasGenerationGraphLease(store);
-	store.textureAtlasGenerationGraphLease = rendererResourceGraph.leaseNode(
-		atlasGenerationGraphNodeKey(store.textureAtlasGeneration.key),
-		"webgl2 texture atlas generation",
-	);
-	store.textureAtlasGenerationGraph = rendererResourceGraph;
+	for (const [key, texturePage] of store.terrainTexturePagesByKey) {
+		if (!retainedKeys.has(key)) {
+			texturePage.texture.dispose();
+			store.terrainTexturePagesByKey.delete(key);
+		}
+	}
+	store.terrainTexturePageCount = store.terrainTexturePagesByKey.size;
+	store.terrainDetailTexturePageCount = [
+		...store.terrainTexturePagesByKey.values(),
+	].filter((texturePage) => texturePage.family === "terrain-detail").length;
 }
 
-function requiresTextureAtlasGeneration(plan: TexturePageAtlasPlan): boolean {
-	return (
-		plan.rgbaAtlasReadyDrawUnitIds.length > 0 ||
-		plan.detailAtlasTextures.length > 0
-	);
-}
-
-function refreshWebgl2TextureAtlasGenerationCoverage({
-	generation,
+function createTerrainTexturePageGenerationPlan({
 	plan,
+	textureFilteringMode,
+	maxAnisotropy,
 }: {
-	generation: Webgl2TextureAtlasGenerationResource;
 	plan: TexturePageAtlasPlan;
-}): Webgl2TextureAtlasGenerationResource {
-	if (
-		stringArraysEqual(
-			generation.rgbaAtlasReadyDrawUnitIds,
-			plan.rgbaAtlasReadyDrawUnitIds,
-		) &&
-		stringArraysEqual(
-			generation.preparedTextureAssetIds,
-			plan.preparedTextureAssetIds,
-		)
-	) {
-		return generation;
-	}
-	return {
-		...generation,
-		rgbaAtlasReadyDrawUnitIds: plan.rgbaAtlasReadyDrawUnitIds,
-		preparedTextureAssetIds: plan.preparedTextureAssetIds,
-	};
-}
-
-function stringArraysEqual(
-	left: readonly string[],
-	right: readonly string[],
-): boolean {
-	if (left.length !== right.length) {
-		return false;
-	}
-	for (let index = 0; index < left.length; index += 1) {
-		if (left[index] !== right[index]) {
-			return false;
-		}
-	}
-	return true;
-}
-
-function upsertWebgl2TextureAtlasGenerationGraph({
-	graph,
-	generation,
-}: {
-	graph: RendererResourceGraph;
-	generation: Webgl2TextureAtlasGenerationResource;
-}): void {
-	const atlasNodeKey = atlasGenerationGraphNodeKey(generation.key);
-	const preparedNodeKeys = generation.preparedTextureAssetIds.map(
-		preparedAssetGraphNodeKey,
-	);
-	graph.applyBatchUpdate({
-		nodes: [
-			{
-				key: atlasNodeKey,
-				kind: "atlas-generation",
-			},
-			...generation.preparedTextureAssetIds.map((assetId, index) => ({
-				key: preparedNodeKeys[index],
-				kind: "prepared-asset" as const,
-			})),
-		],
-		dependencyReplacements: [
-			{
-				nodeKey: atlasNodeKey,
-				dependencyKeys: preparedNodeKeys,
-			},
-		],
-	});
-}
-
-function releaseWebgl2TextureAtlasGenerationGraphLease(
-	store: Webgl2WorldResourceStore,
-): void {
-	if (!store.textureAtlasGenerationGraphLease) {
-		return;
-	}
-	if (!store.textureAtlasGenerationGraph) {
-		throw new Error("Texture atlas generation graph lease has no bound graph.");
-	}
-	store.textureAtlasGenerationGraph.releaseLease(
-		store.textureAtlasGenerationGraphLease,
-	);
-	store.textureAtlasGenerationGraphLease = null;
-	store.textureAtlasGenerationGraph = null;
-}
-
-function syncWebgl2IndexedResourceAtlasGeneration({
-	gl,
-	store,
-	plan,
-	rendererResourceGraph,
-}: {
-	gl: WebGL2RenderingContext;
-	store: Webgl2WorldResourceStore;
-	plan: IndexedResourceAtlasPlan;
-	rendererResourceGraph?: RendererResourceGraph;
-}): void {
-	if (
-		store.indexedResourceAtlasGenerationGraph &&
-		store.indexedResourceAtlasGenerationGraph !== rendererResourceGraph
-	) {
-		releaseWebgl2IndexedResourceAtlasGenerationGraphLease(store);
-	}
-	if (!requiresIndexedResourceAtlasGeneration(plan)) {
-		store.indexedResourceAtlasGeneration?.dispose();
-		store.indexedResourceAtlasGeneration = null;
-		store.indexedResourceAtlasIndexTextureCount = 0;
-		store.indexedResourceAtlasPaletteTextureCount = 0;
-		releaseWebgl2IndexedResourceAtlasGenerationGraphLease(store);
-		return;
-	}
-	const generationKey = describeWebgl2IndexedResourceAtlasGenerationKey(
-		plan.key,
-	);
-	if (store.indexedResourceAtlasGeneration?.key !== generationKey) {
-		const cpuGeneration = profileBrowserJsScope(
-			"webgl2.resource.buildIndexedResourceAtlasGenerationCpu",
-			() => createIndexedResourceAtlasCpuGeneration(plan),
+	textureFilteringMode: TextureFilteringMode;
+	maxAnisotropy: number;
+}): { cpuGeneration: TextureAtlasCpuGeneration } | null {
+	const terrainFamilies = plan.families
+		.map((familyPlan) => ({
+			...familyPlan,
+			atlasEntryRecords: familyPlan.atlasEntryRecords.filter((record) =>
+				record.key.startsWith("terrain-page/"),
+			),
+			atlasTextures: familyPlan.atlasTextures
+				.map((page) => ({
+					...page,
+					placements: page.placements.filter((placement) =>
+						placement.atlasEntryKey.startsWith("terrain-page/"),
+					),
+				}))
+				.filter((page) => page.placements.length > 0),
+			detailAtlasTextures:
+				familyPlan.family === "terrain-detail"
+					? familyPlan.detailAtlasTextures
+					: [],
+			detailAtlasEntryRecords:
+				familyPlan.family === "terrain-detail"
+					? familyPlan.detailAtlasEntryRecords
+					: [],
+		}))
+		.filter(
+			(familyPlan) =>
+				familyPlan.atlasTextures.length > 0 ||
+				familyPlan.detailAtlasTextures.length > 0,
 		);
-		if (!cpuGeneration) {
-			throw new Error(
-				`Indexed resource atlas generation ${generationKey} produced no CPU generation for a required atlas plan.`,
-			);
-		}
-		if (cpuGeneration.key !== generationKey) {
-			throw new Error(
-				`Indexed resource atlas generation produced ${cpuGeneration.key}, expected ${generationKey}.`,
-			);
-		}
-		const nextGeneration = profileBrowserJsScope(
-			"webgl2.resource.commitIndexedResourceAtlasGeneration",
-			() =>
-				createWebgl2IndexedResourceAtlasGenerationResourceFromCpu({
-					gl,
-					cpuGeneration,
-				}),
-		);
-		commitWebgl2IndexedResourceAtlasGeneration({
-			store,
-			generation: nextGeneration,
-		});
-		releaseWebgl2IndexedResourceAtlasGenerationGraphLease(store);
+	if (terrainFamilies.length === 0) {
+		return null;
 	}
-	store.indexedResourceAtlasIndexTextureCount =
-		store.indexedResourceAtlasGeneration?.indexTextures.length ?? 0;
-	store.indexedResourceAtlasPaletteTextureCount =
-		store.indexedResourceAtlasGeneration?.paletteTextures.length ?? 0;
-	if (!rendererResourceGraph || !store.indexedResourceAtlasGeneration) {
-		releaseWebgl2IndexedResourceAtlasGenerationGraphLease(store);
-		return;
-	}
-	upsertWebgl2IndexedResourceAtlasGenerationGraph({
-		graph: rendererResourceGraph,
-		generation: store.indexedResourceAtlasGeneration,
-	});
-	if (
-		store.indexedResourceAtlasGenerationGraphLease?.nodeKey ===
-		atlasGenerationGraphNodeKey(store.indexedResourceAtlasGeneration.key)
-	) {
-		return;
-	}
-	releaseWebgl2IndexedResourceAtlasGenerationGraphLease(store);
-	store.indexedResourceAtlasGenerationGraphLease =
-		rendererResourceGraph.leaseNode(
-			atlasGenerationGraphNodeKey(store.indexedResourceAtlasGeneration.key),
-			"webgl2 indexed resource atlas generation",
-		);
-	store.indexedResourceAtlasGenerationGraph = rendererResourceGraph;
-}
-
-function requiresIndexedResourceAtlasGeneration(
-	plan: IndexedResourceAtlasPlan,
-): boolean {
-	return (
-		plan.p8IndexAtlasTextures.length > 0 ||
-		plan.index16AtlasTextures.length > 0 ||
-		plan.paletteAtlasTextures.length > 0
+	const cpuGeneration = profileBrowserJsScope(
+		"webgl2.resource.buildTerrainTexturePagesCpu",
+		() =>
+			createTextureAtlasCpuGeneration({
+				plan: {
+					key: describeWebgl2TextureAtlasGenerationKey({
+						planKey: `${plan.key}/terrain-pages`,
+						textureFilteringMode,
+						maxAnisotropy,
+					}),
+					rgbaAtlasReadyDrawUnitIds: ["terrain-texture-pages"],
+					detailAtlasTextures: terrainFamilies.flatMap(
+						(familyPlan) => familyPlan.detailAtlasTextures,
+					),
+					families: terrainFamilies,
+					preparedTextureAssetIds: [],
+				},
+				textureFilteringMode,
+				maxAnisotropy,
+			}),
 	);
-}
-
-function upsertWebgl2IndexedResourceAtlasGenerationGraph({
-	graph,
-	generation,
-}: {
-	graph: RendererResourceGraph;
-	generation: Webgl2IndexedResourceAtlasGenerationResource;
-}): void {
-	const atlasNodeKey = atlasGenerationGraphNodeKey(generation.key);
-	graph.applyBatchUpdate({
-		nodes: [
-			{
-				key: atlasNodeKey,
-				kind: "atlas-generation",
-			},
-		],
-		dependencyReplacements: [
-			{
-				nodeKey: atlasNodeKey,
-				dependencyKeys: [],
-			},
-		],
-	});
-}
-
-function releaseWebgl2IndexedResourceAtlasGenerationGraphLease(
-	store: Webgl2WorldResourceStore,
-): void {
-	if (!store.indexedResourceAtlasGenerationGraphLease) {
-		return;
-	}
-	if (!store.indexedResourceAtlasGenerationGraph) {
+	if (!cpuGeneration) {
 		throw new Error(
-			"Indexed resource atlas generation graph lease has no bound graph.",
+			`Terrain texture page generation ${plan.key} produced no CPU generation for terrain page families.`,
 		);
 	}
-	store.indexedResourceAtlasGenerationGraph.releaseLease(
-		store.indexedResourceAtlasGenerationGraphLease,
-	);
-	store.indexedResourceAtlasGenerationGraphLease = null;
-	store.indexedResourceAtlasGenerationGraph = null;
+	return { cpuGeneration };
+}
+
+function clearWebgl2TerrainTexturePageResources(
+	store: Webgl2WorldResourceStore,
+): void {
+	for (const texturePage of store.terrainTexturePagesByKey.values()) {
+		texturePage.texture.dispose();
+	}
+	store.terrainTexturePagesByKey.clear();
+	store.terrainTexturePageCount = 0;
+	store.terrainDetailTexturePageCount = 0;
 }
 
 function syncWebgl2AssemblyGraph({

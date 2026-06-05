@@ -1,9 +1,4 @@
 import type { Webgl2Texture2DResource } from "../webgl2-gl";
-import type {
-	Webgl2TextureAtlasGenerationResource,
-	Webgl2TextureAtlasTextureResource,
-} from "../webgl2/resources/texture-atlas-generation";
-import type { TexturePageAtlasPlan } from "./texture-page-atlas-planner";
 import type { Webgl2WorldDrawUnit } from "../webgl2-world-resources";
 
 type TexturePageWrapDrawUnit = Pick<
@@ -64,145 +59,6 @@ export interface TexturePageDescriptor {
 export interface TexturePageResourceBinding extends TexturePageDescriptor {
 	texture: Webgl2Texture2DResource;
 	source: Exclude<TexturePageBindingSource, "indexed-material-descriptor">;
-}
-
-export interface TexturePageBindingResolution {
-	binding: TexturePageResourceBinding | null;
-	fallbackSamples: readonly string[];
-}
-
-export function resolveDirectDrawBaseTexturePageBinding({
-	drawUnit,
-	generation,
-	atlasPlan,
-	fallbackSamples,
-}: {
-	drawUnit: Webgl2WorldDrawUnit;
-	generation: Webgl2TextureAtlasGenerationResource | null;
-	atlasPlan: TexturePageAtlasPlan | null;
-	fallbackSamples: readonly string[];
-}): TexturePageBindingResolution {
-	if (!drawUnit.texture) {
-		return { binding: null, fallbackSamples };
-	}
-	if (drawUnit.texturePageReadiness && !drawUnit.detailOverlay && generation) {
-		const packedBinding = resolvePackedBaseTexturePageBinding({
-			drawUnit,
-			generation,
-			atlasPlan,
-			fallbackSamples,
-		});
-		if (packedBinding.binding) {
-			return packedBinding;
-		}
-		fallbackSamples = packedBinding.fallbackSamples;
-	} else if (drawUnit.texturePageReadiness && drawUnit.detailOverlay) {
-		fallbackSamples = appendTexturePageFallbackSample(
-			fallbackSamples,
-			"direct packed base page requires standalone detail overlay path",
-		);
-	} else if (drawUnit.texturePageReadiness && !generation) {
-		fallbackSamples = appendTexturePageFallbackSample(
-			fallbackSamples,
-			"direct packed base page missing texture atlas generation",
-		);
-	}
-	const wrapMode = resolveTexturePageWrapMode(drawUnit);
-	return {
-		binding: {
-			pageKind: "single-entry",
-			usageBucket: "base-color",
-			sampleClass: "rgba-color",
-			texture: drawUnit.texture,
-			rect: [0, 0, drawUnit.texture.width, drawUnit.texture.height],
-			width: drawUnit.texture.width,
-			height: drawUnit.texture.height,
-			wrapS: wrapMode.wrapS,
-			wrapT: wrapMode.wrapT,
-			sampling: colorTexturePageSamplingPolicy(wrapMode),
-			source: "standalone-direct-texture",
-		},
-		fallbackSamples,
-	};
-}
-
-function resolvePackedBaseTexturePageBinding({
-	drawUnit,
-	generation,
-	atlasPlan,
-	fallbackSamples,
-}: {
-	drawUnit: Webgl2WorldDrawUnit;
-	generation: Webgl2TextureAtlasGenerationResource;
-	atlasPlan: TexturePageAtlasPlan | null;
-	fallbackSamples: readonly string[];
-}): TexturePageBindingResolution {
-	const placement = generation.placements.find(
-		(candidate) =>
-			candidate.atlasEntryKey === drawUnit.texturePageReadiness?.atlasEntryKey,
-	);
-	if (!placement) {
-		return fallback(
-			fallbackSamples,
-			describeMissingPackedBasePlacement({ drawUnit, atlasPlan }),
-		);
-	}
-	const page = generation.textures.find(
-		(candidate) =>
-			candidate.family === placement.family &&
-			candidate.textureIndex === placement.textureIndex,
-	);
-	if (!page) {
-		return fallback(
-			fallbackSamples,
-			`direct packed base page missing texture ${placement.textureIndex} for ${placement.atlasEntryKey}`,
-		);
-	}
-	const wrapMode = resolveTexturePageWrapMode(drawUnit);
-	return {
-		binding: {
-			pageKind: "packed-atlas",
-			usageBucket: "base-color",
-			sampleClass: "rgba-color",
-			texture: pageTexture(page),
-			rect: placement.rect,
-			width: placement.width,
-			height: placement.height,
-			wrapS: wrapMode.wrapS,
-			wrapT: wrapMode.wrapT,
-			sampling: colorTexturePageSamplingPolicy(wrapMode),
-			source: "shared-packed-page",
-		},
-		fallbackSamples,
-	};
-}
-
-function describeMissingPackedBasePlacement({
-	drawUnit,
-	atlasPlan,
-}: {
-	drawUnit: Webgl2WorldDrawUnit;
-	atlasPlan: TexturePageAtlasPlan | null;
-}): string {
-	const atlasEntryKey =
-		drawUnit.texturePageReadiness?.atlasEntryKey ?? "unknown";
-	const atlasFailure = atlasPlan?.failures.find(
-		(failure) =>
-			failure.drawUnitId === drawUnit.id &&
-			(failure.reason === "source-texture-too-large" ||
-				failure.reason === "atlas-full" ||
-				failure.reason === "detail-atlas-full"),
-	);
-	if (atlasFailure) {
-		return `direct packed base page atlas placement unavailable ${atlasEntryKey} (${atlasFailure.reason})`;
-	}
-	const plannedEntry = atlasPlan?.atlasEntryRecords.some(
-		(record) => record.key === atlasEntryKey,
-	);
-	if (plannedEntry) {
-		return `direct packed base page atlas generation missing promised placement ${atlasEntryKey}`;
-	}
-	return `direct packed base page entry not atlas-planned for retained direct material ${atlasEntryKey}`;
 }
 
 export function collectDirectDrawTexturePageBindings(
@@ -402,29 +258,6 @@ function exactDataTexturePageSamplingPolicy({
 		samplingDomain: "data",
 		lookup: "exact",
 	};
-}
-
-function pageTexture(
-	page: Webgl2TextureAtlasTextureResource,
-): Webgl2Texture2DResource {
-	return page.texture;
-}
-
-function fallback(
-	fallbackSamples: readonly string[],
-	sample: string,
-): TexturePageBindingResolution {
-	return {
-		binding: null,
-		fallbackSamples: appendTexturePageFallbackSample(fallbackSamples, sample),
-	};
-}
-
-function appendTexturePageFallbackSample(
-	fallbackSamples: readonly string[],
-	sample: string,
-): readonly string[] {
-	return [...fallbackSamples, sample].slice(0, 8);
 }
 
 function resolveTexturePageWrapMode(drawUnit: TexturePageWrapDrawUnit): {

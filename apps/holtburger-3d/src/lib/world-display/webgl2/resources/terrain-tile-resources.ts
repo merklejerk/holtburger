@@ -12,6 +12,7 @@ import type { ResolvedRegionDetailOverlayPlan } from "../../region-detail-overla
 import type { Webgl2SceneDomain } from "../../webgl2-scene-domain-targets";
 import type {
 	Webgl2BufferResource,
+	Webgl2Texture2DResource,
 	Webgl2VertexArrayResource,
 } from "../../webgl2-gl";
 
@@ -87,6 +88,17 @@ export interface Webgl2TerrainTileTexturePageBinding {
 	atlasEntryKey: string;
 	textureIndex: number | null;
 	rect: readonly [number, number, number, number] | null;
+	texturePage?: Webgl2TerrainTexturePageResource | null;
+}
+
+export interface Webgl2TerrainTexturePageResource {
+	key: string;
+	family: Webgl2TerrainTileTexturePageBinding["family"];
+	textureIndex: number;
+	texture: Webgl2Texture2DResource;
+	width: number;
+	height: number;
+	placementCount: number;
 }
 
 export interface Webgl2TerrainTileDetailPlan {

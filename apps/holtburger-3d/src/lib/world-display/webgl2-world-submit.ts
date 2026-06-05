@@ -9,20 +9,6 @@ import type { Webgl2StateCache } from "./webgl2-state-cache";
 import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
 import type { Webgl2TerrainTileResource } from "./webgl2/resources/terrain-tile-resources";
 import {
-	createEmptyWebgl2RgbaTexturePageFamilySubmitMetrics,
-	planWebgl2RgbaTexturePageFamilyReplacement,
-	submitWebgl2RgbaTexturePageFamilyBatches,
-	type Webgl2RgbaTexturePageFamilySubmitResources,
-	type Webgl2RgbaTexturePageFamilyWorldProgram,
-} from "./webgl2/families/rgba-texture-page-family-submit";
-import {
-	createEmptyWebgl2IndexedPalettedFamilySubmitMetrics,
-	planWebgl2IndexedPalettedFamilyReplacement,
-	submitWebgl2IndexedPalettedFamilyBatches,
-	type Webgl2IndexedPalettedFamilySubmitResources,
-	type Webgl2IndexedPalettedFamilyWorldProgram,
-} from "./webgl2/families/indexed-paletted-family-submit";
-import {
 	createDirectFamilyUniformCache,
 	DIRECT_FAMILY_DRAW_TEXTURE_UNITS,
 	planWebgl2DirectDrawRoute,
@@ -260,36 +246,13 @@ const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	structuredInteriorResourceFallbackSamples: [],
 };
 
-export type Webgl2RgbaTexturePageFamilySubmitRoute =
-	| "world-frame"
-	| "scene-domain-exterior"
-	| "scene-domain-interior";
-
 interface Webgl2RetainedDirectSubmitPass {
 	kind: "retained-direct";
 	alphaPolicy: "opaque-or-cutout" | "transparent-blend";
 	drawUnits: readonly Webgl2WorldDrawUnit[];
 }
 
-interface Webgl2RgbaTexturePageFamilySubmitPass {
-	kind: "compacted-rgba-texture-page-family";
-	replaceableDrawUnitIds: ReadonlySet<string>;
-	replaceableDrawUnitTriangleCount: number;
-	planningNoVisibleRouteCount: number;
-	planningFallbackSamples: readonly string[];
-}
-
-interface Webgl2IndexedPalettedFamilySubmitPass {
-	kind: "compacted-indexed-paletted-family";
-	replaceableDrawUnitIds: ReadonlySet<string>;
-	replaceableDrawUnitTriangleCount: number;
-	planningNoVisibleRouteCount: number;
-}
-
-type Webgl2WorldSubmitPass =
-	| Webgl2RetainedDirectSubmitPass
-	| Webgl2RgbaTexturePageFamilySubmitPass
-	| Webgl2IndexedPalettedFamilySubmitPass;
+type Webgl2WorldSubmitPass = Webgl2RetainedDirectSubmitPass;
 
 export interface Webgl2WorldSubmitPassSchedule {
 	passes: readonly Webgl2WorldSubmitPass[];
@@ -357,21 +320,6 @@ export function submitWebgl2WorldFrame({
 	terrainFamilyProgram,
 	indexedP8Program,
 	indexedP16Program,
-	rgbaTexturePageFamilyProgram,
-	indexedPalettedFamilyP8Program,
-	indexedPalettedFamilyP16Program,
-	rgbaTexturePageFamilyResources = {
-		batches: [],
-		rgbaTexturePageFamilies: [],
-		generation: null,
-	},
-	indexedPalettedFamilyResources = {
-		batches: [],
-		indexedPalettedFamilies: [],
-		indexedResourceAtlasGeneration: null,
-		detailTextureAtlasGenerationKey: null,
-		detailTextures: [],
-	},
 	staticBundleLayerResources = null,
 	structuredInteriorResources = null,
 	drawUnitsById,
@@ -385,11 +333,6 @@ export function submitWebgl2WorldFrame({
 	terrainFamilyProgram?: Webgl2TerrainFamilyWorldProgram;
 	indexedP8Program: Webgl2IndexedP8WorldProgram;
 	indexedP16Program: Webgl2IndexedP16WorldProgram;
-	rgbaTexturePageFamilyProgram?: Webgl2RgbaTexturePageFamilyWorldProgram;
-	indexedPalettedFamilyP8Program?: Webgl2IndexedPalettedFamilyWorldProgram;
-	indexedPalettedFamilyP16Program?: Webgl2IndexedPalettedFamilyWorldProgram;
-	rgbaTexturePageFamilyResources?: Webgl2RgbaTexturePageFamilySubmitResources;
-	indexedPalettedFamilyResources?: Webgl2IndexedPalettedFamilySubmitResources;
 	staticBundleLayerResources?: Webgl2StaticBundleLayerResourceStore | null;
 	structuredInteriorResources?: Webgl2StructuredInteriorResourceStore | null;
 	drawUnitsById: ReadonlyMap<string, Webgl2WorldDrawUnit>;
@@ -414,11 +357,6 @@ export function submitWebgl2WorldFrame({
 		terrainFamilyProgram,
 		indexedP8Program,
 		indexedP16Program,
-		rgbaTexturePageFamilyProgram,
-		indexedPalettedFamilyP8Program,
-		indexedPalettedFamilyP16Program,
-		rgbaTexturePageFamilyResources,
-		indexedPalettedFamilyResources,
 		staticBundleLayerResources,
 		structuredInteriorResources,
 		viewProjectionMatrix: frame.viewProjectionMatrix,
@@ -439,21 +377,6 @@ export function submitWebgl2WorldDrawUnits({
 	terrainFamilyProgram,
 	indexedP8Program,
 	indexedP16Program,
-	rgbaTexturePageFamilyProgram,
-	indexedPalettedFamilyP8Program,
-	indexedPalettedFamilyP16Program,
-	rgbaTexturePageFamilyResources = {
-		batches: [],
-		rgbaTexturePageFamilies: [],
-		generation: null,
-	},
-	indexedPalettedFamilyResources = {
-		batches: [],
-		indexedPalettedFamilies: [],
-		indexedResourceAtlasGeneration: null,
-		detailTextureAtlasGenerationKey: null,
-		detailTextures: [],
-	},
 	staticBundleLayerResources = null,
 	structuredInteriorResources = null,
 	viewProjectionMatrix,
@@ -463,7 +386,6 @@ export function submitWebgl2WorldDrawUnits({
 	portalMaskDrawUnitCount = 0,
 	exteriorDomainDrawUnitCount = 0,
 	interiorDomainDrawUnitCount = 0,
-	rgbaTexturePageFamilySubmitRoute = "world-frame",
 	terrainBackfaceCulling = false,
 }: {
 	gl: WebGL2RenderingContext;
@@ -473,11 +395,6 @@ export function submitWebgl2WorldDrawUnits({
 	terrainFamilyProgram?: Webgl2TerrainFamilyWorldProgram;
 	indexedP8Program: Webgl2IndexedP8WorldProgram;
 	indexedP16Program: Webgl2IndexedP16WorldProgram;
-	rgbaTexturePageFamilyProgram?: Webgl2RgbaTexturePageFamilyWorldProgram;
-	indexedPalettedFamilyP8Program?: Webgl2IndexedPalettedFamilyWorldProgram;
-	indexedPalettedFamilyP16Program?: Webgl2IndexedPalettedFamilyWorldProgram;
-	rgbaTexturePageFamilyResources?: Webgl2RgbaTexturePageFamilySubmitResources;
-	indexedPalettedFamilyResources?: Webgl2IndexedPalettedFamilySubmitResources;
 	staticBundleLayerResources?: Webgl2StaticBundleLayerResourceStore | null;
 	structuredInteriorResources?: Webgl2StructuredInteriorResourceStore | null;
 	viewProjectionMatrix: RenderMat4;
@@ -487,7 +404,6 @@ export function submitWebgl2WorldDrawUnits({
 	portalMaskDrawUnitCount?: number;
 	exteriorDomainDrawUnitCount?: number;
 	interiorDomainDrawUnitCount?: number;
-	rgbaTexturePageFamilySubmitRoute?: Webgl2RgbaTexturePageFamilySubmitRoute;
 	terrainBackfaceCulling?: boolean;
 }): Webgl2WorldSubmitMetrics {
 	const terrainReadinessPlan =
@@ -511,8 +427,6 @@ export function submitWebgl2WorldDrawUnits({
 		visibleDrawUnitCountsByMaterialKind:
 			countDrawUnitsByMaterialKind(drawUnits),
 		visibleRetainedDirectDrawUnitCountsByCompactionFamily: {},
-		directPackedTexturePageTextureCount:
-			rgbaTexturePageFamilyResources.generation?.textures.length ?? 0,
 	};
 	if (drawUnits.length === 0 && terrainTiles.length === 0) {
 		if (
@@ -525,10 +439,7 @@ export function submitWebgl2WorldDrawUnits({
 	const schedule = planWebgl2WorldSubmitPassSchedule({
 		drawUnits,
 		viewProjectionMatrix,
-		rgbaTexturePageFamilyResources,
-		indexedPalettedFamilyResources,
 	});
-	const retainedDrawUnitCount = schedule.retainedDrawUnits.length;
 	metrics.retainedDirectOpaqueDrawUnitCount =
 		schedule.retainedDirectOpaqueDrawUnitCount;
 	metrics.retainedDirectBlendedDrawUnitCount =
@@ -570,14 +481,7 @@ export function submitWebgl2WorldDrawUnits({
 		texturedProgram,
 		indexedP8Program,
 		indexedP16Program,
-		rgbaTexturePageFamilyProgram,
-		indexedPalettedFamilyP8Program,
-		indexedPalettedFamilyP16Program,
-		rgbaTexturePageFamilyResources,
-		indexedPalettedFamilyResources,
 		viewProjectionMatrix,
-		retainedDrawUnitCount,
-		rgbaTexturePageFamilySubmitRoute,
 		schedule,
 		metrics,
 	});
@@ -604,7 +508,6 @@ export function submitWebgl2WorldDrawUnits({
 	});
 	if (
 		terrainFamilyProgram &&
-		rgbaTexturePageFamilyResources.generation &&
 		(terrainReadinessPlan.oneDrawTiles.length > 0 ||
 			terrainReadinessPlan.oneDrawSlices.length > 0)
 	) {
@@ -618,7 +521,6 @@ export function submitWebgl2WorldDrawUnits({
 				...terrainReadinessPlan.oneDrawTiles,
 				...terrainReadinessPlan.oneDrawSlices,
 			],
-			generation: rgbaTexturePageFamilyResources.generation,
 			terrainBackfaceCulling,
 		});
 		metrics.drawCallCount += terrainFamilyMetrics.shaderDrawCallCount;
@@ -1362,39 +1264,12 @@ function appendStaticBundleSubmitFallbackSamples(
 export function planWebgl2WorldSubmitPassSchedule({
 	drawUnits,
 	viewProjectionMatrix,
-	rgbaTexturePageFamilyResources,
-	indexedPalettedFamilyResources,
 }: {
 	drawUnits: readonly Webgl2WorldDrawUnit[];
 	viewProjectionMatrix: RenderMat4;
-	rgbaTexturePageFamilyResources: Webgl2RgbaTexturePageFamilySubmitResources;
-	indexedPalettedFamilyResources: Webgl2IndexedPalettedFamilySubmitResources;
 }): Webgl2WorldSubmitPassSchedule {
-	const visibleDrawUnitIds = drawUnits.map((drawUnit) => drawUnit.id);
-	const rgbaTexturePageReplacement = planWebgl2RgbaTexturePageFamilyReplacement(
-		{
-			visibleDrawUnitIds,
-			resources: rgbaTexturePageFamilyResources,
-		},
-	);
-	const indexedPalettedReplacement = planWebgl2IndexedPalettedFamilyReplacement(
-		{
-			visibleDrawUnitIds,
-			resources: indexedPalettedFamilyResources,
-		},
-	);
-	const compactedReplacementDrawUnitIds = new Set([
-		...rgbaTexturePageReplacement.replaceableDrawUnitIds,
-		...indexedPalettedReplacement.replaceableDrawUnitIds,
-	]);
-	const retainedDrawUnits =
-		compactedReplacementDrawUnitIds.size === 0
-			? drawUnits
-			: drawUnits.filter(
-					(drawUnit) => !compactedReplacementDrawUnitIds.has(drawUnit.id),
-				);
 	const retainedDirectPasses = partitionRetainedDirectDrawUnits({
-		drawUnits: retainedDrawUnits,
+		drawUnits,
 		viewProjectionMatrix,
 	});
 	const passes: Webgl2WorldSubmitPass[] = [];
@@ -1405,25 +1280,6 @@ export function planWebgl2WorldSubmitPassSchedule({
 			drawUnits: retainedDirectPasses.opaque,
 		});
 	}
-	passes.push({
-		kind: "compacted-rgba-texture-page-family",
-		replaceableDrawUnitIds: rgbaTexturePageReplacement.replaceableDrawUnitIds,
-		replaceableDrawUnitTriangleCount: sumDrawUnitTriangles(
-			drawUnits,
-			rgbaTexturePageReplacement.replaceableDrawUnitIds,
-		),
-		planningNoVisibleRouteCount: rgbaTexturePageReplacement.noVisibleRouteCount,
-		planningFallbackSamples: rgbaTexturePageReplacement.fallbackSamples,
-	});
-	passes.push({
-		kind: "compacted-indexed-paletted-family",
-		replaceableDrawUnitIds: indexedPalettedReplacement.replaceableDrawUnitIds,
-		replaceableDrawUnitTriangleCount: sumDrawUnitTriangles(
-			drawUnits,
-			indexedPalettedReplacement.replaceableDrawUnitIds,
-		),
-		planningNoVisibleRouteCount: indexedPalettedReplacement.noVisibleRouteCount,
-	});
 	if (retainedDirectPasses.blended.length > 0) {
 		passes.push({
 			kind: "retained-direct",
@@ -1433,7 +1289,7 @@ export function planWebgl2WorldSubmitPassSchedule({
 	}
 	return {
 		passes,
-		retainedDrawUnits,
+		retainedDrawUnits: drawUnits,
 		retainedDirectOpaqueDrawUnitCount: retainedDirectPasses.opaque.length,
 		retainedDirectBlendedDrawUnitCount: retainedDirectPasses.blended.length,
 	};
@@ -1446,14 +1302,7 @@ function submitWebgl2WorldSubmitPassSchedule({
 	texturedProgram,
 	indexedP8Program,
 	indexedP16Program,
-	rgbaTexturePageFamilyProgram,
-	indexedPalettedFamilyP8Program,
-	indexedPalettedFamilyP16Program,
-	rgbaTexturePageFamilyResources,
-	indexedPalettedFamilyResources,
 	viewProjectionMatrix,
-	retainedDrawUnitCount,
-	rgbaTexturePageFamilySubmitRoute,
 	schedule,
 	metrics,
 }: {
@@ -1463,20 +1312,7 @@ function submitWebgl2WorldSubmitPassSchedule({
 	texturedProgram: Webgl2TexturedWorldProgram;
 	indexedP8Program: Webgl2IndexedP8WorldProgram;
 	indexedP16Program: Webgl2IndexedP16WorldProgram;
-	rgbaTexturePageFamilyProgram:
-		| Webgl2RgbaTexturePageFamilyWorldProgram
-		| undefined;
-	indexedPalettedFamilyP8Program:
-		| Webgl2IndexedPalettedFamilyWorldProgram
-		| undefined;
-	indexedPalettedFamilyP16Program:
-		| Webgl2IndexedPalettedFamilyWorldProgram
-		| undefined;
-	rgbaTexturePageFamilyResources: Webgl2RgbaTexturePageFamilySubmitResources;
-	indexedPalettedFamilyResources: Webgl2IndexedPalettedFamilySubmitResources;
 	viewProjectionMatrix: RenderMat4;
-	retainedDrawUnitCount: number;
-	rgbaTexturePageFamilySubmitRoute: Webgl2RgbaTexturePageFamilySubmitRoute;
 	schedule: Webgl2WorldSubmitPassSchedule;
 	metrics: Webgl2WorldSubmitMetrics;
 }): void {
@@ -1499,47 +1335,8 @@ function submitWebgl2WorldSubmitPassSchedule({
 					metrics,
 				});
 				break;
-			case "compacted-rgba-texture-page-family":
-				submitRgbaTexturePageFamilyDrawUnits({
-					gl,
-					stateCache,
-					program: rgbaTexturePageFamilyProgram,
-					viewProjectionMatrix,
-					resources: rgbaTexturePageFamilyResources,
-					replaceableDrawUnitIds: pass.replaceableDrawUnitIds,
-					retainedDrawUnitCount,
-					replaceableDrawUnitTriangleCount:
-						pass.replaceableDrawUnitTriangleCount,
-					route: rgbaTexturePageFamilySubmitRoute,
-					metrics,
-					planningNoVisibleRouteCount: pass.planningNoVisibleRouteCount,
-					planningFallbackSamples: pass.planningFallbackSamples,
-				});
-				break;
-			case "compacted-indexed-paletted-family":
-				submitIndexedPalettedFamilyDrawUnits({
-					gl,
-					stateCache,
-					p8Program: indexedPalettedFamilyP8Program,
-					p16Program: indexedPalettedFamilyP16Program,
-					viewProjectionMatrix,
-					resources: indexedPalettedFamilyResources,
-					replaceableDrawUnitIds: pass.replaceableDrawUnitIds,
-					retainedDrawUnitCount,
-					replaceableDrawUnitTriangleCount:
-						pass.replaceableDrawUnitTriangleCount,
-					metrics,
-					planningNoVisibleRouteCount: pass.planningNoVisibleRouteCount,
-				});
-				break;
-			default:
-				assertNeverWebgl2WorldSubmitPass(pass);
 		}
 	}
-}
-
-function assertNeverWebgl2WorldSubmitPass(pass: never): never {
-	throw new Error(`Unsupported WebGL2 world submit pass ${pass}.`);
 }
 
 function resetWorldSubmitExitRenderState({
@@ -1745,316 +1542,6 @@ function submitWebgl2DirectDrawUnitPass({
 		);
 		metrics.drawCallCount += 1;
 		metrics.triangleCount += drawUnit.triangleCount;
-	}
-}
-
-function submitIndexedPalettedFamilyDrawUnits({
-	gl,
-	stateCache,
-	p8Program,
-	p16Program,
-	viewProjectionMatrix,
-	resources,
-	replaceableDrawUnitIds,
-	retainedDrawUnitCount,
-	replaceableDrawUnitTriangleCount,
-	metrics,
-	planningNoVisibleRouteCount,
-}: {
-	gl: WebGL2RenderingContext;
-	stateCache: Webgl2StateCache;
-	p8Program: Webgl2IndexedPalettedFamilyWorldProgram | undefined;
-	p16Program: Webgl2IndexedPalettedFamilyWorldProgram | undefined;
-	viewProjectionMatrix: RenderMat4;
-	resources: Webgl2IndexedPalettedFamilySubmitResources;
-	replaceableDrawUnitIds: ReadonlySet<string>;
-	retainedDrawUnitCount: number;
-	replaceableDrawUnitTriangleCount: number;
-	metrics: Webgl2WorldSubmitMetrics;
-	planningNoVisibleRouteCount: number;
-}): void {
-	if (replaceableDrawUnitIds.size === 0) {
-		const emptyMetrics = createEmptyWebgl2IndexedPalettedFamilySubmitMetrics();
-		metrics.indexedPalettedFamilyRetainedDirectDrawUnitCount =
-			retainedDrawUnitCount;
-		metrics.indexedPalettedFamilyNoVisibleRouteCount =
-			planningNoVisibleRouteCount + emptyMetrics.noVisibleRouteCount;
-		applyIndexedPalettedFamilyDrawCallArithmetic(metrics);
-		return;
-	}
-	if (!p8Program || !p16Program) {
-		throw new Error(
-			"Indexed-paletted family replacement was planned without compacted indexed shader programs.",
-		);
-	}
-	const p8Resources = filterIndexedPalettedFamilyResourcesByFormat(
-		resources,
-		"p8",
-	);
-	const p16Resources = filterIndexedPalettedFamilyResourcesByFormat(
-		resources,
-		"index16",
-	);
-	const p8Metrics = submitWebgl2IndexedPalettedFamilyBatches({
-		gl,
-		stateCache,
-		program: p8Program,
-		viewProjectionMatrix,
-		resources: p8Resources,
-		replaceableDrawUnitIds,
-		retainedDrawUnitCount,
-	});
-	const p16Metrics = submitWebgl2IndexedPalettedFamilyBatches({
-		gl,
-		stateCache,
-		program: p16Program,
-		viewProjectionMatrix,
-		resources: p16Resources,
-		replaceableDrawUnitIds,
-		retainedDrawUnitCount,
-	});
-	metrics.drawCallCount +=
-		p8Metrics.shaderDrawCallCount + p16Metrics.shaderDrawCallCount;
-	metrics.triangleCount +=
-		p8Metrics.submittedTriangleCount + p16Metrics.submittedTriangleCount;
-	metrics.indexedPalettedFamilyShaderDrawCallCount =
-		p8Metrics.shaderDrawCallCount + p16Metrics.shaderDrawCallCount;
-	metrics.indexedPalettedFamilySubmittedBatchCount =
-		p8Metrics.submittedBatchCount + p16Metrics.submittedBatchCount;
-	metrics.indexedPalettedFamilySubmittedDrawSliceCount =
-		p8Metrics.submittedDrawSliceCount + p16Metrics.submittedDrawSliceCount;
-	metrics.indexedPalettedFamilySubmittedSliceRepresentedDrawUnitCount =
-		p8Metrics.submittedSliceRepresentedDrawUnitCount +
-		p16Metrics.submittedSliceRepresentedDrawUnitCount;
-	metrics.indexedPalettedFamilySubmittedTriangleCount =
-		p8Metrics.submittedTriangleCount + p16Metrics.submittedTriangleCount;
-	metrics.indexedPalettedFamilyReplacedDrawUnitCount =
-		replaceableDrawUnitIds.size;
-	metrics.indexedPalettedFamilyReplacedDrawUnitTriangleCount =
-		replaceableDrawUnitTriangleCount;
-	metrics.indexedPalettedFamilyRetainedDirectDrawUnitCount =
-		retainedDrawUnitCount;
-	metrics.indexedPalettedFamilyNoVisibleRouteCount =
-		planningNoVisibleRouteCount +
-		p8Metrics.noVisibleRouteCount +
-		p16Metrics.noVisibleRouteCount;
-	applyIndexedPalettedFamilyDrawCallArithmetic(metrics);
-}
-
-function filterIndexedPalettedFamilyResourcesByFormat(
-	resources: Webgl2IndexedPalettedFamilySubmitResources,
-	indexFormat: "p8" | "index16",
-): Webgl2IndexedPalettedFamilySubmitResources {
-	return {
-		batches: resources.batches,
-		indexedPalettedFamilies: resources.indexedPalettedFamilies
-			.map((family) => ({
-				...family,
-				drawSlices: family.drawSlices.filter(
-					(slice) => slice.indexFormat === indexFormat,
-				),
-			}))
-			.filter((family) => family.drawSlices.length > 0),
-		indexedResourceAtlasGeneration: resources.indexedResourceAtlasGeneration,
-		detailTextureAtlasGenerationKey: resources.detailTextureAtlasGenerationKey,
-		detailTextures: resources.detailTextures,
-	};
-}
-
-function submitRgbaTexturePageFamilyDrawUnits({
-	gl,
-	stateCache,
-	program,
-	viewProjectionMatrix,
-	resources,
-	replaceableDrawUnitIds,
-	retainedDrawUnitCount,
-	replaceableDrawUnitTriangleCount,
-	route,
-	metrics,
-	planningNoVisibleRouteCount,
-	planningFallbackSamples,
-}: {
-	gl: WebGL2RenderingContext;
-	stateCache: Webgl2StateCache;
-	program: Webgl2RgbaTexturePageFamilyWorldProgram | undefined;
-	viewProjectionMatrix: RenderMat4;
-	resources: Webgl2RgbaTexturePageFamilySubmitResources;
-	replaceableDrawUnitIds: ReadonlySet<string>;
-	retainedDrawUnitCount: number;
-	replaceableDrawUnitTriangleCount: number;
-	route: Webgl2RgbaTexturePageFamilySubmitRoute;
-	metrics: Webgl2WorldSubmitMetrics;
-	planningNoVisibleRouteCount: number;
-	planningFallbackSamples: readonly string[];
-}): void {
-	if (
-		program &&
-		resources.batches.length > 0 &&
-		resources.generation &&
-		replaceableDrawUnitIds.size > 0
-	) {
-		const atlasMetrics = submitWebgl2RgbaTexturePageFamilyBatches({
-			gl,
-			stateCache,
-			program,
-			viewProjectionMatrix,
-			resources: {
-				batches: resources.batches,
-				rgbaTexturePageFamilies: resources.rgbaTexturePageFamilies,
-				generation: resources.generation,
-			},
-			replaceableDrawUnitIds,
-			retainedDrawUnitCount,
-		});
-		metrics.drawCallCount += atlasMetrics.shaderDrawCallCount;
-		metrics.triangleCount += atlasMetrics.submittedTriangleCount;
-		metrics.rgbaTexturePageFamilyShaderDrawCallCount =
-			atlasMetrics.shaderDrawCallCount;
-		metrics.rgbaTexturePageFamilySubmittedBatchCount =
-			atlasMetrics.submittedBatchCount;
-		metrics.rgbaTexturePageFamilySubmittedDrawSliceCount =
-			atlasMetrics.submittedDrawSliceCount;
-		metrics.rgbaTexturePageFamilySubmittedSliceRepresentedDrawUnitCount =
-			atlasMetrics.submittedSliceRepresentedDrawUnitCount;
-		metrics.rgbaTexturePageFamilySubmittedTriangleCount =
-			atlasMetrics.submittedTriangleCount;
-		metrics.rgbaTexturePageFamilyReplacedDrawUnitCount =
-			atlasMetrics.replacedDrawUnitCount;
-		metrics.rgbaTexturePageFamilyReplacedDrawUnitTriangleCount =
-			replaceableDrawUnitTriangleCount;
-		applyRgbaTexturePageFamilyConservativeOverdraw(metrics);
-		metrics.rgbaTexturePageFamilyRetainedDirectDrawUnitCount =
-			atlasMetrics.retainedDrawUnitCount;
-		metrics.rgbaTexturePageFamilyNoVisibleRouteCount =
-			planningNoVisibleRouteCount + atlasMetrics.noVisibleRouteCount;
-		applyRgbaTexturePageFamilyNoVisibleRoute(
-			metrics,
-			route,
-			planningNoVisibleRouteCount,
-		);
-		applyRgbaTexturePageFamilyNoVisibleRoute(
-			metrics,
-			route,
-			atlasMetrics.noVisibleRouteCount,
-		);
-		metrics.rgbaTexturePageFamilyFallbackSamples = atlasMetrics.fallbackSamples;
-		applyRgbaTexturePageFamilyDrawCallArithmetic(metrics);
-		return;
-	}
-	const fallbackSamples = [...planningFallbackSamples];
-	metrics.rgbaTexturePageFamilyNoVisibleRouteCount =
-		planningNoVisibleRouteCount;
-	applyRgbaTexturePageFamilyNoVisibleRoute(
-		metrics,
-		route,
-		planningNoVisibleRouteCount,
-	);
-	if (
-		!program &&
-		resources.batches.length > 0 &&
-		resources.generation &&
-		replaceableDrawUnitIds.size > 0
-	) {
-		fallbackSamples.push(
-			"RGBA texture-page family submit missing shader program",
-		);
-	}
-	const emptyAtlasMetrics =
-		createEmptyWebgl2RgbaTexturePageFamilySubmitMetrics();
-	metrics.rgbaTexturePageFamilyRetainedDirectDrawUnitCount =
-		retainedDrawUnitCount;
-	metrics.rgbaTexturePageFamilyReplacedDrawUnitTriangleCount =
-		replaceableDrawUnitTriangleCount;
-	applyRgbaTexturePageFamilyConservativeOverdraw(metrics);
-	metrics.rgbaTexturePageFamilyNoVisibleRouteCount +=
-		emptyAtlasMetrics.noVisibleRouteCount;
-	applyRgbaTexturePageFamilyNoVisibleRoute(
-		metrics,
-		route,
-		emptyAtlasMetrics.noVisibleRouteCount,
-	);
-	metrics.rgbaTexturePageFamilyFallbackSamples = [
-		...fallbackSamples,
-		...emptyAtlasMetrics.fallbackSamples,
-	].slice(0, 8);
-	applyRgbaTexturePageFamilyDrawCallArithmetic(metrics);
-}
-
-function sumDrawUnitTriangles(
-	drawUnits: readonly Webgl2WorldDrawUnit[],
-	drawUnitIds: ReadonlySet<string>,
-): number {
-	let triangleCount = 0;
-	for (const drawUnit of drawUnits) {
-		if (drawUnitIds.has(drawUnit.id)) {
-			triangleCount += drawUnit.triangleCount;
-		}
-	}
-	return triangleCount;
-}
-
-function applyRgbaTexturePageFamilyDrawCallArithmetic(
-	metrics: Webgl2WorldSubmitMetrics,
-): void {
-	metrics.rgbaTexturePageFamilyOriginalDrawCallEstimateCount =
-		metrics.rgbaTexturePageFamilyRetainedDirectDrawUnitCount +
-		metrics.rgbaTexturePageFamilyReplacedDrawUnitCount;
-	metrics.rgbaTexturePageFamilySubmittedDrawCallEstimateCount =
-		metrics.rgbaTexturePageFamilyRetainedDirectDrawUnitCount +
-		metrics.rgbaTexturePageFamilyShaderDrawCallCount;
-	metrics.rgbaTexturePageFamilyDrawCallSavingsCount =
-		metrics.rgbaTexturePageFamilyOriginalDrawCallEstimateCount -
-		metrics.rgbaTexturePageFamilySubmittedDrawCallEstimateCount;
-}
-
-function applyIndexedPalettedFamilyDrawCallArithmetic(
-	metrics: Webgl2WorldSubmitMetrics,
-): void {
-	metrics.indexedPalettedFamilyOriginalDrawCallEstimateCount =
-		metrics.indexedPalettedFamilyRetainedDirectDrawUnitCount +
-		metrics.indexedPalettedFamilyReplacedDrawUnitCount;
-	metrics.indexedPalettedFamilySubmittedDrawCallEstimateCount =
-		metrics.indexedPalettedFamilyRetainedDirectDrawUnitCount +
-		metrics.indexedPalettedFamilyShaderDrawCallCount;
-	metrics.indexedPalettedFamilyDrawCallSavingsCount =
-		metrics.indexedPalettedFamilyOriginalDrawCallEstimateCount -
-		metrics.indexedPalettedFamilySubmittedDrawCallEstimateCount;
-}
-
-function applyRgbaTexturePageFamilyConservativeOverdraw(
-	metrics: Webgl2WorldSubmitMetrics,
-): void {
-	metrics.rgbaTexturePageFamilyConservativeOverdrawTriangleCount = Math.max(
-		0,
-		metrics.rgbaTexturePageFamilySubmittedTriangleCount -
-			metrics.rgbaTexturePageFamilyReplacedDrawUnitTriangleCount,
-	);
-	metrics.rgbaTexturePageFamilyConservativeOverdrawRatio =
-		metrics.rgbaTexturePageFamilySubmittedTriangleCount === 0
-			? 0
-			: metrics.rgbaTexturePageFamilyConservativeOverdrawTriangleCount /
-				metrics.rgbaTexturePageFamilySubmittedTriangleCount;
-}
-
-function applyRgbaTexturePageFamilyNoVisibleRoute(
-	metrics: Webgl2WorldSubmitMetrics,
-	route: Webgl2RgbaTexturePageFamilySubmitRoute,
-	count: number,
-): void {
-	if (count <= 0) {
-		return;
-	}
-	switch (route) {
-		case "scene-domain-exterior":
-			metrics.rgbaTexturePageFamilyNoVisibleExteriorRouteCount += count;
-			return;
-		case "scene-domain-interior":
-			metrics.rgbaTexturePageFamilyNoVisibleInteriorRouteCount += count;
-			return;
-		case "world-frame":
-			metrics.rgbaTexturePageFamilyNoVisibleOtherRouteCount += count;
-			return;
 	}
 }
 

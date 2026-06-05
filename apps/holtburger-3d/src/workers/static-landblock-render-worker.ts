@@ -20,18 +20,14 @@ import {
 	residencyCellBvhItemKey,
 } from "../lib/world-display/prepared-bvh-visibility";
 import { deriveStructuredCellRenderChunk } from "../lib/world-display/render-chunks";
-import {
-	buildStaticLandblockRenderBundleLayer,
-} from "../lib/world-display/static-bundle-layer-builder";
+import { buildStaticLandblockRenderBundleLayer } from "../lib/world-display/static-bundle-layer-builder";
 import type { StaticBundleLayerWorkerJob } from "../lib/world-display/static-bundle-layer";
-import {
-	buildLandblockTerrainRenderArtifact,
-} from "../lib/world-display/terrain-render-artifact";
+import { buildLandblockTerrainRenderArtifact } from "../lib/world-display/terrain-render-artifact";
 import type {
 	DetailedLandblockRenderArtifacts,
-	LandblockRenderPresetWorkerJob,
-	LandblockRenderPresetWorkerResult,
-} from "../lib/world-display/landblock-render-preset";
+	LandblockRenderProductWorkerJob,
+	LandblockRenderProductWorkerResult,
+} from "../lib/world-display/landblock-render-product";
 import { loadWorkerAssetClosure } from "./shared/asset-closure-loader";
 import { prepareAssetPayload } from "./shared/asset-prepare";
 import type {
@@ -52,19 +48,19 @@ export type StaticLandblockRenderWorkerHostLookupBinaryErrorMessage =
 	WorkerHostLookupBinaryErrorMessage;
 
 export interface StaticLandblockRenderWorkerRunJobMessage {
-	type: "run-landblock-render-preset-job";
+	type: "run-landblock-render-product-job";
 	requestId: string;
-	job: LandblockRenderPresetWorkerJob;
+	job: LandblockRenderProductWorkerJob;
 }
 
 export interface StaticLandblockRenderWorkerJobCompleteMessage {
-	type: "landblock-render-preset-job-complete";
+	type: "landblock-render-product-job-complete";
 	requestId: string;
-	result: LandblockRenderPresetWorkerResult;
+	result: LandblockRenderProductWorkerResult;
 }
 
 export interface StaticLandblockRenderWorkerJobErrorMessage {
-	type: "landblock-render-preset-job-error";
+	type: "landblock-render-product-job-error";
 	requestId: string;
 	message: string;
 }
@@ -81,9 +77,7 @@ export type StaticLandblockRenderWorkerResponseMessage =
 
 interface StaticLandblockRenderWorkerScope {
 	onmessage:
-		| ((
-				event: MessageEvent<StaticLandblockRenderWorkerRequestMessage>,
-		  ) => void)
+		| ((event: MessageEvent<StaticLandblockRenderWorkerRequestMessage>) => void)
 		| null;
 	postMessage(
 		message: StaticLandblockRenderWorkerResponseMessage,
@@ -107,48 +101,16 @@ const STATIC_MATERIAL_TEXTURE_USAGES: readonly MaterialTextureUsage[] = [
 ];
 
 export async function runStaticLandblockRenderWorkerJob(
-	job: LandblockRenderPresetWorkerJob,
+	job: LandblockRenderProductWorkerJob,
 	lookup: StaticLandblockRenderWorkerLookup,
-): Promise<LandblockRenderPresetWorkerResult> {
+): Promise<LandblockRenderProductWorkerResult> {
 	const responseByAssetId = new Map<
 		string,
 		import("../lib/host/contracts").AssetLookupResponseDto
 	>();
 	const preparedByAssetId = new Map<string, PreparedAssetRecord>();
-	const outdoorAssetId = formatLandblockOutdoorAssetId(job.landblockId);
 
-	await loadClosureRoots({
-		rootAssetIds: [outdoorAssetId],
-		job,
-		lookup,
-		responseByAssetId,
-	});
-
-	if (job.preset === "outdoor-with-env-cells") {
-		const topologyAssetId = formatLandblockTopologyAssetId(job.landblockId);
-		await loadClosureRoots({
-			rootAssetIds: [topologyAssetId],
-			job,
-			lookup,
-			responseByAssetId,
-			shouldExpandResponse: (response) => response.assetId !== topologyAssetId,
-		});
-		const topology = prepareAssetPayload(
-			createAssetRequest(job, topologyAssetId),
-			getResponse(responseByAssetId, topologyAssetId),
-		);
-		if (topology.payload.kind !== "landblock-topology") {
-			throw new Error(
-				`Landblock preset worker expected ${topologyAssetId} to prepare as landblock-topology.`,
-			);
-		}
-		await loadClosureRoots({
-			rootAssetIds: topology.payload.envCells.map((envCell) => envCell.assetId),
-			job,
-			lookup,
-			responseByAssetId,
-		});
-	}
+	await loadProductRoots({ job, lookup, responseByAssetId });
 
 	prepareResponses(job, responseByAssetId, preparedByAssetId);
 	await loadPreparedCompanionClosure({
@@ -159,50 +121,17 @@ export async function runStaticLandblockRenderWorkerJob(
 	});
 
 	const assetState = createWorkerAssetState(preparedByAssetId);
-	const outdoor = preparedByAssetId.get(outdoorAssetId);
-	if (outdoor?.payload.kind !== "landblock-outdoor") {
-		throw new Error(
-			`Landblock preset worker expected ${outdoorAssetId} to prepare as landblock-outdoor.`,
-		);
-	}
-
-	const terrainArtifact = buildLandblockTerrainRenderArtifact({
-		assetState,
-		outdoor: outdoor.payload,
-		policy: {
-			buildPolicyRevision: job.buildPolicyRevision,
-			cpuTexturePagePolicyRevision: job.texturePagePolicyRevision,
-			maxLayerEntries: job.buildPolicy.terrainMaxLayerEntries,
-		},
-		requestId: job.requestId,
-	});
-	const staticBundleLayers = [
-		buildStaticBundleLayer(job, preparedByAssetId, "outdoor-buildings"),
-		buildStaticBundleLayer(job, preparedByAssetId, "outdoor-detail"),
-	];
-
-	if (job.preset === "outdoor-with-env-cells") {
-		const topology = preparedByAssetId.get(
-			formatLandblockTopologyAssetId(job.landblockId),
-		);
-		if (topology?.payload.kind !== "landblock-topology") {
-			throw new Error(
-				`Landblock preset worker missing prepared topology for ${formatHex32(
-					job.landblockId,
-				)}.`,
-			);
-		}
-		for (const envCell of topology.payload.envCells) {
-			staticBundleLayers.push(
-				buildStaticBundleLayer(job, preparedByAssetId, "env-cell-static", {
-					envCellId: envCell.envCellId,
-				}),
-			);
-		}
-	}
+	const terrainArtifact =
+		job.product === "outdoor"
+			? buildOutdoorTerrainArtifact(job, preparedByAssetId, assetState)
+			: null;
+	const staticBundleLayers = buildProductStaticBundleLayers(
+		job,
+		preparedByAssetId,
+	);
 
 	const baseResult = {
-		type: "landblock-render-preset-built",
+		type: "landblock-render-product-built",
 		jobId: job.jobId,
 		landblockId: job.landblockId,
 		requestId: job.requestId,
@@ -215,31 +144,84 @@ export async function runStaticLandblockRenderWorkerJob(
 			messages: [
 				`prepared ${preparedByAssetId.size} assets for ${formatHex32(
 					job.landblockId,
-				)} ${job.preset}`,
+				)} ${job.product}`,
 			],
 		},
-	} satisfies Omit<LandblockRenderPresetWorkerResult, "preset" | "detailedArtifacts">;
+	} satisfies Omit<
+		LandblockRenderProductWorkerResult,
+		"product" | "detailedArtifacts"
+	>;
 
-	if (job.preset === "outdoor-with-env-cells") {
-		return {
-			...baseResult,
-			preset: job.preset,
-			detailedArtifacts: buildDetailedLandblockRenderArtifacts({
-				job,
-				preparedByAssetId,
-				staticBundleLayers,
-			}),
-		};
+	switch (job.product) {
+		case "outdoor":
+			return {
+				...baseResult,
+				product: job.product,
+			};
+		case "outdoor-env-cells":
+		case "dungeon-env-cells":
+			return {
+				...baseResult,
+				product: job.product,
+				detailedArtifacts: buildDetailedLandblockRenderArtifacts({
+					job,
+					product: job.product,
+					preparedByAssetId,
+					staticBundleLayers,
+				}),
+			};
+		default:
+			return unreachableProduct(job.product);
+	}
+}
+
+async function loadProductRoots(options: {
+	job: LandblockRenderProductWorkerJob;
+	lookup: StaticLandblockRenderWorkerLookup;
+	responseByAssetId: Map<
+		string,
+		import("../lib/host/contracts").AssetLookupResponseDto
+	>;
+}): Promise<void> {
+	if (options.job.product === "outdoor") {
+		await loadClosureRoots({
+			rootAssetIds: [formatLandblockOutdoorAssetId(options.job.landblockId)],
+			job: options.job,
+			lookup: options.lookup,
+			responseByAssetId: options.responseByAssetId,
+		});
+		return;
 	}
 
-	return {
-		...baseResult,
-		preset: job.preset,
-	};
+	const topologyAssetId = formatLandblockTopologyAssetId(
+		options.job.landblockId,
+	);
+	await loadClosureRoots({
+		rootAssetIds: [topologyAssetId],
+		job: options.job,
+		lookup: options.lookup,
+		responseByAssetId: options.responseByAssetId,
+		shouldExpandResponse: (response) => response.assetId !== topologyAssetId,
+	});
+	const topology = prepareAssetPayload(
+		createAssetRequest(options.job, topologyAssetId),
+		getResponse(options.responseByAssetId, topologyAssetId),
+	);
+	if (topology.payload.kind !== "landblock-topology") {
+		throw new Error(
+			`Landblock product worker expected ${topologyAssetId} to prepare as landblock-topology.`,
+		);
+	}
+	await loadClosureRoots({
+		rootAssetIds: topology.payload.envCells.map((envCell) => envCell.assetId),
+		job: options.job,
+		lookup: options.lookup,
+		responseByAssetId: options.responseByAssetId,
+	});
 }
 
 export function collectStaticLandblockRenderWorkerResultTransferables(
-	result: LandblockRenderPresetWorkerResult,
+	result: LandblockRenderProductWorkerResult,
 ): Transferable[] {
 	const transferables: Transferable[] = [];
 	const transferredBuffers = new Set<ArrayBuffer>();
@@ -249,7 +231,7 @@ export function collectStaticLandblockRenderWorkerResultTransferables(
 
 async function loadClosureRoots(options: {
 	rootAssetIds: readonly string[];
-	job: LandblockRenderPresetWorkerJob;
+	job: LandblockRenderProductWorkerJob;
 	lookup: StaticLandblockRenderWorkerLookup;
 	responseByAssetId: Map<
 		string,
@@ -277,7 +259,7 @@ async function loadClosureRoots(options: {
 }
 
 function prepareResponses(
-	job: LandblockRenderPresetWorkerJob,
+	job: LandblockRenderProductWorkerJob,
 	responseByAssetId: ReadonlyMap<
 		string,
 		import("../lib/host/contracts").AssetLookupResponseDto
@@ -296,7 +278,7 @@ function prepareResponses(
 }
 
 async function loadPreparedCompanionClosure(options: {
-	job: LandblockRenderPresetWorkerJob;
+	job: LandblockRenderProductWorkerJob;
 	lookup: StaticLandblockRenderWorkerLookup;
 	responseByAssetId: Map<
 		string,
@@ -318,7 +300,11 @@ async function loadPreparedCompanionClosure(options: {
 			lookup: options.lookup,
 			responseByAssetId: options.responseByAssetId,
 		});
-		prepareResponses(options.job, options.responseByAssetId, options.preparedByAssetId);
+		prepareResponses(
+			options.job,
+			options.responseByAssetId,
+			options.preparedByAssetId,
+		);
 	}
 }
 
@@ -347,7 +333,8 @@ function collectNormalizedPreparedTextureAssetIds(
 				}
 				return STATIC_MATERIAL_TEXTURE_USAGES.flatMap((usage) =>
 					resolveNormalizedPreparedTextureAssetIds({
-						renderSurface: renderSurface.payload as PreparedRenderSurfacePayload,
+						renderSurface:
+							renderSurface.payload as PreparedRenderSurfacePayload,
 						usage,
 					}),
 				);
@@ -357,12 +344,16 @@ function collectNormalizedPreparedTextureAssetIds(
 }
 
 function buildStaticBundleLayer(
-	job: LandblockRenderPresetWorkerJob,
+	job: LandblockRenderProductWorkerJob,
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>,
 	layerKind: "outdoor-buildings" | "outdoor-detail" | "env-cell-static",
 	envCellScope?: { envCellId: number },
 ) {
-	const layerJob = createStaticBundleLayerWorkerJob(job, layerKind, envCellScope);
+	const layerJob = createStaticBundleLayerWorkerJob(
+		job,
+		layerKind,
+		envCellScope,
+	);
 	return buildStaticLandblockRenderBundleLayer({
 		job: layerJob,
 		preparedAssets: [...preparedByAssetId.values()],
@@ -374,16 +365,71 @@ function buildStaticBundleLayer(
 	});
 }
 
+function buildOutdoorTerrainArtifact(
+	job: LandblockRenderProductWorkerJob,
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>,
+	assetState: AssetChannelState,
+) {
+	const outdoorAssetId = formatLandblockOutdoorAssetId(job.landblockId);
+	const outdoor = preparedByAssetId.get(outdoorAssetId);
+	if (outdoor?.payload.kind !== "landblock-outdoor") {
+		throw new Error(
+			`Landblock product worker expected ${outdoorAssetId} to prepare as landblock-outdoor.`,
+		);
+	}
+	return buildLandblockTerrainRenderArtifact({
+		assetState,
+		outdoor: outdoor.payload,
+		policy: {
+			buildPolicyRevision: job.buildPolicyRevision,
+			cpuTexturePagePolicyRevision: job.texturePagePolicyRevision,
+			maxLayerEntries: job.buildPolicy.terrainMaxLayerEntries,
+		},
+		requestId: job.requestId,
+	});
+}
+
+function buildProductStaticBundleLayers(
+	job: LandblockRenderProductWorkerJob,
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>,
+): ReturnType<typeof buildStaticBundleLayer>[] {
+	if (job.product === "outdoor") {
+		return [
+			buildStaticBundleLayer(job, preparedByAssetId, "outdoor-buildings"),
+			buildStaticBundleLayer(job, preparedByAssetId, "outdoor-detail"),
+		];
+	}
+
+	const topology = preparedByAssetId.get(
+		formatLandblockTopologyAssetId(job.landblockId),
+	);
+	if (topology?.payload.kind !== "landblock-topology") {
+		throw new Error(
+			`Landblock product worker missing prepared topology for ${formatHex32(
+				job.landblockId,
+			)}.`,
+		);
+	}
+	return topology.payload.envCells.map((envCell) =>
+		buildStaticBundleLayer(job, preparedByAssetId, "env-cell-static", {
+			envCellId: envCell.envCellId,
+		}),
+	);
+}
+
 function buildDetailedLandblockRenderArtifacts(options: {
-	job: LandblockRenderPresetWorkerJob;
+	job: LandblockRenderProductWorkerJob;
+	product: "outdoor-env-cells" | "dungeon-env-cells";
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
 	staticBundleLayers: readonly ReturnType<typeof buildStaticBundleLayer>[];
 }): DetailedLandblockRenderArtifacts {
-	const topologyAssetId = formatLandblockTopologyAssetId(options.job.landblockId);
+	const topologyAssetId = formatLandblockTopologyAssetId(
+		options.job.landblockId,
+	);
 	const topology = options.preparedByAssetId.get(topologyAssetId);
 	if (topology?.payload.kind !== "landblock-topology") {
 		throw new Error(
-			`Landblock preset worker cannot build detailed artifacts without ${topologyAssetId}.`,
+			`Landblock product worker cannot build detailed artifacts without ${topologyAssetId}.`,
 		);
 	}
 	const topologyPayload = topology.payload;
@@ -393,7 +439,7 @@ function buildDetailedLandblockRenderArtifacts(options: {
 			const asset = options.preparedByAssetId.get(member.assetId);
 			if (asset?.payload.kind !== "env-cell") {
 				throw new Error(
-					`Landblock preset worker cannot build detailed artifacts without ${member.assetId}.`,
+					`Landblock product worker cannot build detailed artifacts without ${member.assetId}.`,
 				);
 			}
 			return asset.payload;
@@ -409,7 +455,7 @@ function buildDetailedLandblockRenderArtifacts(options: {
 			options.job.texturePagePolicyRevision,
 		].join(":"),
 		landblockId: options.job.landblockId,
-		preset: "outdoor-with-env-cells",
+		product: options.product,
 		requestId: options.job.requestId,
 		buildPolicyRevision: options.job.buildPolicyRevision,
 		texturePagePolicyRevision: options.job.texturePagePolicyRevision,
@@ -481,6 +527,10 @@ function buildDetailedLandblockRenderArtifacts(options: {
 	};
 }
 
+function unreachableProduct(product: never): never {
+	throw new Error(`Unhandled landblock render product ${product}.`);
+}
+
 function createStructuredInteriorCellArtifact(
 	landblockId: number,
 	envCell: Extract<PreparedAssetRecord["payload"], { kind: "env-cell" }>,
@@ -518,7 +568,7 @@ function createStructuredInteriorCellArtifact(
 }
 
 function createStaticBundleLayerWorkerJob(
-	job: LandblockRenderPresetWorkerJob,
+	job: LandblockRenderProductWorkerJob,
 	layerKind: "outdoor-buildings" | "outdoor-detail" | "env-cell-static",
 	envCellScope?: { envCellId: number },
 ): StaticBundleLayerWorkerJob {
@@ -564,13 +614,15 @@ function requiredEnvCellId(envCellScope?: { envCellId: number }): number {
 function createWorkerAssetState(
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>,
 ): AssetChannelState {
-	const state = createInitialAssetChannelState("static-landblock-render-worker");
+	const state = createInitialAssetChannelState(
+		"static-landblock-render-worker",
+	);
 	state.preparedByAssetId = Object.fromEntries(preparedByAssetId);
 	return state;
 }
 
 function createAssetRequest(
-	job: LandblockRenderPresetWorkerJob,
+	job: LandblockRenderProductWorkerJob,
 	assetId: string,
 ): AssetLookupRequestDto {
 	return {
@@ -589,7 +641,7 @@ function getResponse(
 ): import("../lib/host/contracts").AssetLookupResponseDto {
 	const response = responseByAssetId.get(assetId);
 	if (!response) {
-		throw new Error(`Landblock preset worker missing response ${assetId}.`);
+		throw new Error(`Landblock product worker missing response ${assetId}.`);
 	}
 	return response;
 }
@@ -682,7 +734,7 @@ if (
 			.then((result) => {
 				workerScope.postMessage(
 					{
-						type: "landblock-render-preset-job-complete",
+						type: "landblock-render-product-job-complete",
 						requestId: message.requestId,
 						result,
 					},
@@ -691,7 +743,7 @@ if (
 			})
 			.catch((error) => {
 				workerScope.postMessage({
-					type: "landblock-render-preset-job-error",
+					type: "landblock-render-product-job-error",
 					requestId: message.requestId,
 					message: formatWorkerDiagnosticError(error),
 				});

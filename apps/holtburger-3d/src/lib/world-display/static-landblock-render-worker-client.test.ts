@@ -4,31 +4,31 @@ import type {
 	StaticLandblockRenderWorkerRequestMessage,
 	StaticLandblockRenderWorkerResponseMessage,
 } from "../../workers/static-landblock-render-worker";
-import type { DesiredLandblockRenderPreset } from "./landblock-render-preset";
+import type { DesiredLandblockRenderProduct } from "./landblock-render-product";
 import {
 	StaticLandblockRenderWorkerClient,
 	type StaticLandblockRenderWorkerLike,
 } from "./static-landblock-render-worker-client";
 
 describe("static landblock render worker client", () => {
-	it("posts preset jobs with renderer build policy and no legacy layer roots", async () => {
+	it("posts product jobs with renderer build policy and no legacy layer roots", async () => {
 		const worker = new MockStaticLandblockRenderWorker();
 		const client = new StaticLandblockRenderWorkerClient(
 			async () => [],
 			() => worker,
 		);
 
-		const promise = client.requestPreset(createDesiredPreset("request:1"));
+		const promise = client.requestProduct(createDesiredProduct("request:1"));
 
 		expect(worker.postedMessages).toHaveLength(1);
 		expect(worker.postedMessages[0]).toMatchObject({
-			type: "run-landblock-render-preset-job",
+			type: "run-landblock-render-product-job",
 			requestId: "static-landblock-render-1",
 			job: {
-				type: "build-landblock-render-preset",
-				jobId: "landblock-render-preset:3663069183:outdoor:request:1",
+				type: "build-landblock-render-product",
+				jobId: "landblock-render-product:3663069183:outdoor:request:1",
 				landblockId: 0xda55ffff,
-				preset: "outdoor",
+				product: "outdoor",
 				requestId: "request:1",
 				buildPolicyRevision: "build:v1",
 				texturePagePolicyRevision: "texture-pages:v1",
@@ -36,9 +36,11 @@ describe("static landblock render worker client", () => {
 			},
 		});
 		expect(Object.keys(extractPostedJob(worker))).not.toContain("rootAssetIds");
-		expect(Object.keys(extractPostedJob(worker))).not.toContain("sourceRevision");
+		expect(Object.keys(extractPostedJob(worker))).not.toContain(
+			"sourceRevision",
+		);
 		worker.emit({
-			type: "landblock-render-preset-job-complete",
+			type: "landblock-render-product-job-complete",
 			requestId: "static-landblock-render-1",
 			result: createResult("request:1"),
 		});
@@ -46,21 +48,21 @@ describe("static landblock render worker client", () => {
 		client.dispose();
 	});
 
-	it("dedupes identical in-flight preset jobs", async () => {
+	it("dedupes identical in-flight product jobs", async () => {
 		const worker = new MockStaticLandblockRenderWorker();
 		const client = new StaticLandblockRenderWorkerClient(
 			async () => [],
 			() => worker,
 		);
-		const desired = createDesiredPreset("request:dedupe");
+		const desired = createDesiredProduct("request:dedupe");
 
-		const first = client.requestPreset(desired);
-		const second = client.requestPreset(desired);
+		const first = client.requestProduct(desired);
+		const second = client.requestProduct(desired);
 
 		expect(second).toBe(first);
 		expect(worker.postedMessages).toHaveLength(1);
 		worker.emit({
-			type: "landblock-render-preset-job-complete",
+			type: "landblock-render-product-job-complete",
 			requestId: "static-landblock-render-1",
 			result: createResult("request:dedupe"),
 		});
@@ -68,25 +70,25 @@ describe("static landblock render worker client", () => {
 		client.dispose();
 	});
 
-	it("rejects stale results after a newer request targets the same preset", async () => {
+	it("rejects stale results after a newer request targets the same product", async () => {
 		const worker = new MockStaticLandblockRenderWorker();
 		const client = new StaticLandblockRenderWorkerClient(
 			async () => [],
 			() => worker,
 		);
-		const stale = client.requestPreset(createDesiredPreset("request:old"));
-		const latest = client.requestPreset(createDesiredPreset("request:new"));
+		const stale = client.requestProduct(createDesiredProduct("request:old"));
+		const latest = client.requestProduct(createDesiredProduct("request:new"));
 		const staleExpectation = expect(stale).rejects.toThrow(
 			"Ignored stale landblock",
 		);
 
 		worker.emit({
-			type: "landblock-render-preset-job-complete",
+			type: "landblock-render-product-job-complete",
 			requestId: "static-landblock-render-1",
 			result: createResult("request:old"),
 		});
 		worker.emit({
-			type: "landblock-render-preset-job-complete",
+			type: "landblock-render-product-job-complete",
 			requestId: "static-landblock-render-2",
 			result: createResult("request:new"),
 		});
@@ -95,7 +97,7 @@ describe("static landblock render worker client", () => {
 		await expect(latest).resolves.toMatchObject({
 			requestId: "request:new",
 			landblockId: 0xda55ffff,
-			preset: "outdoor",
+			product: "outdoor",
 		});
 		client.dispose();
 	});
@@ -146,7 +148,9 @@ describe("static landblock render worker client", () => {
 
 class MockStaticLandblockRenderWorker implements StaticLandblockRenderWorkerLike {
 	onmessage:
-		| ((event: MessageEvent<StaticLandblockRenderWorkerResponseMessage>) => void)
+		| ((
+				event: MessageEvent<StaticLandblockRenderWorkerResponseMessage>,
+		  ) => void)
 		| null = null;
 	onerror: ((event: Event | ErrorEvent) => void) | null = null;
 	postedMessages: StaticLandblockRenderWorkerRequestMessage[] = [];
@@ -174,16 +178,18 @@ class MockStaticLandblockRenderWorker implements StaticLandblockRenderWorkerLike
 
 function extractPostedJob(worker: MockStaticLandblockRenderWorker) {
 	const message = worker.postedMessages[0];
-	if (message?.type !== "run-landblock-render-preset-job") {
+	if (message?.type !== "run-landblock-render-product-job") {
 		throw new Error("Expected posted worker job.");
 	}
 	return message.job;
 }
 
-function createDesiredPreset(requestId: string): DesiredLandblockRenderPreset {
+function createDesiredProduct(
+	requestId: string,
+): DesiredLandblockRenderProduct {
 	return {
 		landblockId: 0xda55ffff,
-		preset: "outdoor",
+		product: "outdoor",
 		priority: "resident-now",
 		requestId,
 		buildPolicyRevision: "build:v1",
@@ -194,10 +200,10 @@ function createDesiredPreset(requestId: string): DesiredLandblockRenderPreset {
 
 function createResult(requestId: string) {
 	return {
-		type: "landblock-render-preset-built" as const,
-		jobId: `landblock-render-preset:3663069183:outdoor:${requestId}`,
+		type: "landblock-render-product-built" as const,
+		jobId: `landblock-render-product:3663069183:outdoor:${requestId}`,
 		landblockId: 0xda55ffff,
-		preset: "outdoor" as const,
+		product: "outdoor" as const,
 		requestId,
 		buildPolicyRevision: "build:v1",
 		texturePagePolicyRevision: "texture-pages:v1",

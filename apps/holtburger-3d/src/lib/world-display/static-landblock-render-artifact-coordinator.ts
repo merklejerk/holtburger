@@ -2,26 +2,24 @@ import {
 	describeBrowserDestinationIdentity,
 	type BrowserLocationSelection,
 } from "../../app/browser-mode";
-import { planDesiredLandblockRenderPresets } from "../assets/landblock-render-preset-planner";
+import { planDesiredLandblockRenderProducts } from "../assets/landblock-render-product-planner";
 import {
 	StaticLandblockRenderArtifactStore,
 	type StaticLandblockRenderArtifactStoreSnapshot,
 } from "./static-landblock-render-artifact-store";
-import {
-	StaticLandblockRenderWorkerClient,
-} from "./static-landblock-render-worker-client";
+import { StaticLandblockRenderWorkerClient } from "./static-landblock-render-worker-client";
 import type {
-	DesiredLandblockRenderPreset,
-	LandblockRenderPresetBuildPolicy,
-	LandblockRenderPresetWorkerResult,
-} from "./landblock-render-preset";
+	DesiredLandblockRenderProduct,
+	LandblockRenderProductBuildPolicy,
+	LandblockRenderProductWorkerResult,
+} from "./landblock-render-product";
 
 const STATIC_LANDBLOCK_RENDER_BUILD_POLICY_REVISION =
 	"static-landblock-render:v1";
 const STATIC_LANDBLOCK_RENDER_TEXTURE_PAGE_POLICY_REVISION =
 	"static-landblock-texture-pages:v1";
 
-const DEFAULT_STATIC_LANDBLOCK_RENDER_BUILD_POLICY: LandblockRenderPresetBuildPolicy =
+const DEFAULT_STATIC_LANDBLOCK_RENDER_BUILD_POLICY: LandblockRenderProductBuildPolicy =
 	{
 		atlasLayout: {
 			maxTextureSize: 4096,
@@ -39,36 +37,36 @@ export interface StaticLandblockRenderArtifactCoordinatorInput {
 	envCellLodRadius: number;
 }
 
-interface StaticLandblockRenderPresetClient {
-	requestPreset(
-		desired: DesiredLandblockRenderPreset,
-	): Promise<LandblockRenderPresetWorkerResult>;
+interface StaticLandblockRenderProductClient {
+	requestProduct(
+		desired: DesiredLandblockRenderProduct,
+	): Promise<LandblockRenderProductWorkerResult>;
 	dispose(): void;
 }
 
 interface StaticLandblockRenderArtifactCoordinatorOptions {
-	client?: StaticLandblockRenderPresetClient;
+	client?: StaticLandblockRenderProductClient;
 	store?: StaticLandblockRenderArtifactStore;
-	buildPolicy?: LandblockRenderPresetBuildPolicy;
+	buildPolicy?: LandblockRenderProductBuildPolicy;
 	buildPolicyRevision?: string;
 	texturePagePolicyRevision?: string;
 	onStoreChanged?: (
 		snapshot: StaticLandblockRenderArtifactStoreSnapshot,
 	) => void;
-	onError?: (error: Error, desired: DesiredLandblockRenderPreset) => void;
+	onError?: (error: Error, desired: DesiredLandblockRenderProduct) => void;
 }
 
 export class StaticLandblockRenderArtifactCoordinator {
-	private readonly client: StaticLandblockRenderPresetClient;
+	private readonly client: StaticLandblockRenderProductClient;
 	private readonly store: StaticLandblockRenderArtifactStore;
-	private readonly buildPolicy: LandblockRenderPresetBuildPolicy;
+	private readonly buildPolicy: LandblockRenderProductBuildPolicy;
 	private readonly buildPolicyRevision: string;
 	private readonly texturePagePolicyRevision: string;
 	private readonly onStoreChanged:
 		| ((snapshot: StaticLandblockRenderArtifactStoreSnapshot) => void)
 		| undefined;
 	private readonly onError:
-		| ((error: Error, desired: DesiredLandblockRenderPreset) => void)
+		| ((error: Error, desired: DesiredLandblockRenderProduct) => void)
 		| undefined;
 	private nextRequestSequence = 1;
 	private lastInputSignature: string | null = null;
@@ -95,7 +93,7 @@ export class StaticLandblockRenderArtifactCoordinator {
 			return;
 		}
 		const requestId = this.resolveRequestId(input);
-		const desiredPresets = planDesiredLandblockRenderPresets({
+		const desiredProducts = planDesiredLandblockRenderProducts({
 			browserDestination: input.browserDestination,
 			requestId,
 			buildPolicyRevision: this.buildPolicyRevision,
@@ -109,8 +107,8 @@ export class StaticLandblockRenderArtifactCoordinator {
 			},
 		});
 
-		this.store.syncDesiredPresets(desiredPresets);
-		for (const desired of desiredPresets) {
+		this.store.syncDesiredProducts(desiredProducts);
+		for (const desired of desiredProducts) {
 			if (this.store.hasCurrentArtifact(desired)) {
 				continue;
 			}
@@ -118,7 +116,7 @@ export class StaticLandblockRenderArtifactCoordinator {
 				continue;
 			}
 			void this.client
-				.requestPreset(desired)
+				.requestProduct(desired)
 				.then((result) => {
 					if (this.disposed) {
 						return;

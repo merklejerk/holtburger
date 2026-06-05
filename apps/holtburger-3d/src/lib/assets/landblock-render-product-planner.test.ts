@@ -2,18 +2,18 @@ import { describe, expect, it } from "vitest";
 
 import { parseBrowserLocationInput } from "../../app/browser-mode";
 import {
-	createLandblockRenderPresetWorkerJob,
-	type DesiredLandblockRenderPreset,
-	type LandblockRenderPresetWorkerResult,
-} from "../world-display/landblock-render-preset";
-import { planDesiredLandblockRenderPresets } from "./landblock-render-preset-planner";
+	createLandblockRenderProductWorkerJob,
+	type DesiredLandblockRenderProduct,
+	type LandblockRenderProductWorkerResult,
+} from "../world-display/landblock-render-product";
+import { planDesiredLandblockRenderProducts } from "./landblock-render-product-planner";
 
-describe("landblock render preset planner", () => {
-	it("collapses outdoor radii to one monotonic preset per landblock", () => {
+describe("landblock render product planner", () => {
+	it("plans additive outdoor and env-cell products by route boundary", () => {
 		const destination = parseBrowserLocationInput("da55", "manual", "outdoor");
 		expect(destination).not.toBeNull();
 
-		const presets = planDesiredLandblockRenderPresets({
+		const products = planDesiredLandblockRenderProducts({
 			browserDestination: destination,
 			requestId: "request:1",
 			buildPolicyRevision: "build:v1",
@@ -27,10 +27,19 @@ describe("landblock render preset planner", () => {
 			},
 		});
 
-		expect(presets).toHaveLength(9);
-		expect(presets[0]).toEqual({
+		expect(products).toHaveLength(10);
+		expect(products[0]).toEqual({
 			landblockId: 0xda55ffff,
-			preset: "outdoor-with-env-cells",
+			product: "outdoor",
+			priority: "resident-now",
+			requestId: "request:1",
+			buildPolicyRevision: "build:v1",
+			texturePagePolicyRevision: "texture-pages:v1",
+			buildPolicy: createBuildPolicy(),
+		});
+		expect(products[1]).toEqual({
+			landblockId: 0xda55ffff,
+			product: "outdoor-env-cells",
 			priority: "resident-now",
 			requestId: "request:1",
 			buildPolicyRevision: "build:v1",
@@ -38,19 +47,21 @@ describe("landblock render preset planner", () => {
 			buildPolicy: createBuildPolicy(),
 		});
 		expect(
-			presets.filter((preset) => preset.preset === "outdoor-with-env-cells"),
+			products.filter((product) => product.product === "outdoor-env-cells"),
 		).toHaveLength(1);
 		expect(
-			presets.filter((preset) => preset.preset === "outdoor"),
-		).toHaveLength(8);
-		expect(new Set(presets.map((preset) => preset.landblockId)).size).toBe(9);
+			products.filter((product) => product.product === "outdoor"),
+		).toHaveLength(9);
+		expect(new Set(products.map((product) => product.landblockId)).size).toBe(
+			9,
+		);
 	});
 
-	it("does not require topology, env-cell roots, or source revisions to schedule detailed presets", () => {
+	it("does not require topology, env-cell roots, or source revisions to schedule topology products", () => {
 		const destination = parseBrowserLocationInput("da55", "manual", "outdoor");
 		expect(destination).not.toBeNull();
 
-		const presets = planDesiredLandblockRenderPresets({
+		const products = planDesiredLandblockRenderProducts({
 			browserDestination: destination,
 			requestId: "request:detail",
 			buildPolicyRevision: "build:v2",
@@ -64,10 +75,19 @@ describe("landblock render preset planner", () => {
 			},
 		});
 
-		expect(presets).toEqual([
+		expect(products).toEqual([
 			{
 				landblockId: 0xda55ffff,
-				preset: "outdoor-with-env-cells",
+				product: "outdoor",
+				priority: "resident-now",
+				requestId: "request:detail",
+				buildPolicyRevision: "build:v2",
+				texturePagePolicyRevision: "texture-pages:v2",
+				buildPolicy: createBuildPolicy(),
+			},
+			{
+				landblockId: 0xda55ffff,
+				product: "outdoor-env-cells",
 				priority: "resident-now",
 				requestId: "request:detail",
 				buildPolicyRevision: "build:v2",
@@ -75,14 +95,16 @@ describe("landblock render preset planner", () => {
 				buildPolicy: createBuildPolicy(),
 			},
 		]);
-		expect(Object.keys(presets[0] ?? {})).not.toContain("rootAssetIds");
-		expect(Object.keys(presets[0] ?? {})).not.toContain("sourceRevision");
+		for (const product of products) {
+			expect(Object.keys(product)).not.toContain("rootAssetIds");
+			expect(Object.keys(product)).not.toContain("sourceRevision");
+		}
 	});
 
-	it("creates worker jobs from preset identity without legacy layer scheduling fields", () => {
-		const desired: DesiredLandblockRenderPreset = {
+	it("creates worker jobs from product identity without legacy layer scheduling fields", () => {
+		const desired: DesiredLandblockRenderProduct = {
 			landblockId: 0xda55ffff,
-			preset: "outdoor",
+			product: "outdoor",
 			priority: "resident-now",
 			requestId: "request:outdoor",
 			buildPolicyRevision: "build:v1",
@@ -90,13 +112,13 @@ describe("landblock render preset planner", () => {
 			buildPolicy: createBuildPolicy(),
 		};
 
-		const job = createLandblockRenderPresetWorkerJob(desired);
+		const job = createLandblockRenderProductWorkerJob(desired);
 
 		expect(job).toEqual({
-			type: "build-landblock-render-preset",
-			jobId: "landblock-render-preset:3663069183:outdoor:request:outdoor",
+			type: "build-landblock-render-product",
+			jobId: "landblock-render-product:3663069183:outdoor:request:outdoor",
 			landblockId: 0xda55ffff,
-			preset: "outdoor",
+			product: "outdoor",
 			requestId: "request:outdoor",
 			buildPolicyRevision: "build:v1",
 			texturePagePolicyRevision: "texture-pages:v1",
@@ -106,12 +128,12 @@ describe("landblock render preset planner", () => {
 		expect(Object.keys(job)).not.toContain("sourceRevision");
 	});
 
-	it("defines preset worker results as sibling terrain and static object artifacts", () => {
+	it("defines product worker results as sibling terrain and static object artifacts", () => {
 		const result = {
-			type: "landblock-render-preset-built",
+			type: "landblock-render-product-built",
 			jobId: "job:outdoor",
 			landblockId: 0xda55ffff,
-			preset: "outdoor",
+			product: "outdoor",
 			requestId: "request:outdoor",
 			buildPolicyRevision: "build:v1",
 			texturePagePolicyRevision: "texture-pages:v1",
@@ -121,7 +143,7 @@ describe("landblock render preset planner", () => {
 				status: "partial",
 				messages: ["terrain artifact pending"],
 			},
-		} satisfies LandblockRenderPresetWorkerResult;
+		} satisfies LandblockRenderProductWorkerResult;
 
 		expect(result.terrainArtifact).toBeNull();
 		expect(result.staticBundleLayers).toEqual([]);
@@ -129,11 +151,11 @@ describe("landblock render preset planner", () => {
 		expect(Object.keys(result)).not.toContain("sourceRevision");
 	});
 
-	it("does not invent a summary preset for distant terrain-only interest", () => {
+	it("does not invent a summary product for distant terrain-only interest", () => {
 		const destination = parseBrowserLocationInput("da55", "manual", "outdoor");
 		expect(destination).not.toBeNull();
 
-		const presets = planDesiredLandblockRenderPresets({
+		const products = planDesiredLandblockRenderProducts({
 			browserDestination: destination,
 			requestId: "request:terrain",
 			buildPolicyRevision: "build:v1",
@@ -147,10 +169,10 @@ describe("landblock render preset planner", () => {
 			},
 		});
 
-		expect(presets.map((preset) => preset.preset)).toEqual(["outdoor"]);
+		expect(products.map((product) => product.product)).toEqual(["outdoor"]);
 	});
 
-	it("does not plan outdoor landblock presets while focused indoors", () => {
+	it("does not plan outdoor landblock products while focused indoors", () => {
 		const destination = parseBrowserLocationInput(
 			"da550155",
 			"manual",
@@ -159,7 +181,7 @@ describe("landblock render preset planner", () => {
 		expect(destination).not.toBeNull();
 
 		expect(
-			planDesiredLandblockRenderPresets({
+			planDesiredLandblockRenderProducts({
 				browserDestination: destination,
 				requestId: "request:indoor",
 				buildPolicyRevision: "build:v1",

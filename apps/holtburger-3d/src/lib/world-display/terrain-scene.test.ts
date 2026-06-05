@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { BrowserLocationSelection } from "../../app/browser-mode";
 import type { PreparedTerrainMesh, PreparedTerrainQuad } from "../assets/types";
-import type { LandblockRenderPresetWorkerResult } from "./landblock-render-preset";
+import type { LandblockRenderProductWorkerResult } from "./landblock-render-product";
 import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
 import { deriveTerrainSceneModelFromLandblockArtifacts } from "./terrain-scene";
 import type { LandblockTerrainRenderArtifact } from "./terrain-render-artifact";
@@ -36,23 +36,19 @@ describe("deriveTerrainSceneModelFromLandblockArtifacts", () => {
 		expect(scene.dataSourceText).toContain("Worker-built");
 	});
 
-	it("uses the most detailed resident preset for a landblock", () => {
+	it("uses outdoor products for terrain and ignores topology products", () => {
 		const landblockId = 0xda55ffff;
 		const scene = deriveTerrainSceneModelFromLandblockArtifacts({
 			artifacts: createSnapshot([
 				createResult(landblockId, "outdoor", "outdoor-key"),
-				createResult(
-					landblockId,
-					"outdoor-with-env-cells",
-					"outdoor-with-env-cells-key",
-				),
+				createTopologyResult(landblockId),
 			]),
 			browserDestination: createOutdoorDestination(landblockId),
 			terrainLandblockIds: [landblockId],
 		});
 
 		expect(scene.tiles).toHaveLength(1);
-		expect(scene.tiles[0]?.assetId).toBe("outdoor-with-env-cells-key");
+		expect(scene.tiles[0]?.assetId).toBe("outdoor-key");
 	});
 
 	it("waits on worker artifacts instead of falling back to prepared outdoor cache", () => {
@@ -80,7 +76,7 @@ describe("deriveTerrainSceneModelFromLandblockArtifacts", () => {
 });
 
 function createSnapshot(
-	results: readonly LandblockRenderPresetWorkerResult[],
+	results: readonly LandblockRenderProductWorkerResult[],
 ): StaticLandblockRenderArtifactStoreSnapshot {
 	return {
 		artifacts: results,
@@ -97,19 +93,64 @@ function createSnapshot(
 
 function createResult(
 	landblockId: number,
-	preset: LandblockRenderPresetWorkerResult["preset"],
-	artifactKey = `terrain-artifact:${landblockId}:${preset}`,
-): LandblockRenderPresetWorkerResult {
+	product: LandblockRenderProductWorkerResult["product"],
+	artifactKey = `terrain-artifact:${landblockId}:${product}`,
+): LandblockRenderProductWorkerResult {
 	return {
-		type: "landblock-render-preset-built",
-		jobId: `job:${landblockId}:${preset}`,
+		type: "landblock-render-product-built",
+		jobId: `job:${landblockId}:${product}`,
 		landblockId,
-		preset,
+		product,
 		requestId: "request",
 		buildPolicyRevision: "build:v1",
 		texturePagePolicyRevision: "pages:v1",
 		terrainArtifact: createTerrainArtifact(landblockId, artifactKey),
 		staticBundleLayers: [],
+		diagnostics: {
+			status: "ready",
+			messages: [],
+		},
+	};
+}
+
+function createTopologyResult(
+	landblockId: number,
+): LandblockRenderProductWorkerResult {
+	return {
+		type: "landblock-render-product-built",
+		jobId: `job:${landblockId}:outdoor-env-cells`,
+		landblockId,
+		product: "outdoor-env-cells",
+		requestId: "request",
+		buildPolicyRevision: "build:v1",
+		texturePagePolicyRevision: "pages:v1",
+		terrainArtifact: null,
+		staticBundleLayers: [],
+		detailedArtifacts: {
+			key: `detailed:${landblockId}`,
+			landblockId,
+			product: "outdoor-env-cells",
+			requestId: "request",
+			buildPolicyRevision: "build:v1",
+			texturePagePolicyRevision: "pages:v1",
+			selectedEnvCellIds: [],
+			structuredInteriorCells: [],
+			cellStructureMetadata: [],
+			portalLinks: [],
+			portalApertures: [],
+			visibility: {
+				objectVisibilityRecords: [],
+				cellVisibilityRecords: [],
+			},
+			spatial: {
+				envCellResidencyBvh: {
+					coordinateSpace: "landblock-topology-residency",
+					nodes: [],
+					items: [],
+				},
+				envCellLocalBvhs: [],
+			},
+		},
 		diagnostics: {
 			status: "ready",
 			messages: [],

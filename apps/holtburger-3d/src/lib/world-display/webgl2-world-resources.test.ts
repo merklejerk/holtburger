@@ -2783,10 +2783,10 @@ function createStaticLandblockArtifactSnapshot(
 	return {
 		artifacts: [
 			{
-				type: "landblock-render-preset-built",
+				type: "landblock-render-product-built",
 				jobId: "job",
 				landblockId,
-				preset: "outdoor",
+				product: "outdoor",
 				requestId: "request",
 				buildPolicyRevision: "build:v1",
 				texturePagePolicyRevision: "pages:v1",

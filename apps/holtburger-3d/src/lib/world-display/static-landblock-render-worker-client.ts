@@ -8,11 +8,11 @@ import {
 } from "../diagnostics/browser-js-profiler";
 import type { AssetLookupRequestDto } from "../host/contracts";
 import {
-	createLandblockRenderPresetWorkerJob,
-	type DesiredLandblockRenderPreset,
-	type LandblockRenderPresetWorkerJob,
-	type LandblockRenderPresetWorkerResult,
-} from "./landblock-render-preset";
+	createLandblockRenderProductWorkerJob,
+	type DesiredLandblockRenderProduct,
+	type LandblockRenderProductWorkerJob,
+	type LandblockRenderProductWorkerResult,
+} from "./landblock-render-product";
 import type {
 	StaticLandblockRenderWorkerHostBinaryEnvelope,
 	StaticLandblockRenderWorkerHostLookupBinaryRequestMessage,
@@ -39,9 +39,9 @@ type BinaryAssetLookupFn = (
 ) => Promise<BinaryAssetLookupEnvelopeDto[]>;
 
 interface PendingLandblockRenderRequest {
-	job: LandblockRenderPresetWorkerJob;
+	job: LandblockRenderProductWorkerJob;
 	identityKey: string;
-	resolve: (result: LandblockRenderPresetWorkerResult) => void;
+	resolve: (result: LandblockRenderProductWorkerResult) => void;
 	reject: (error: Error) => void;
 }
 
@@ -54,7 +54,7 @@ export class StaticLandblockRenderWorkerClient {
 	private readonly latestIdentityByArtifactKey = new Map<string, string>();
 	private readonly pendingRequestByIdentity = new Map<
 		string,
-		Promise<LandblockRenderPresetWorkerResult>
+		Promise<LandblockRenderProductWorkerResult>
 	>();
 	private nextRequestSequence = 1;
 	private disposed = false;
@@ -81,10 +81,10 @@ export class StaticLandblockRenderWorkerClient {
 		};
 	}
 
-	requestPreset(
-		desired: DesiredLandblockRenderPreset,
-	): Promise<LandblockRenderPresetWorkerResult> {
-		const job = createLandblockRenderPresetWorkerJob(desired);
+	requestProduct(
+		desired: DesiredLandblockRenderProduct,
+	): Promise<LandblockRenderProductWorkerResult> {
+		const job = createLandblockRenderProductWorkerJob(desired);
 		const identityKey = formatJobIdentityKey(job);
 		const existing = this.pendingRequestByIdentity.get(identityKey);
 		if (existing) {
@@ -121,9 +121,9 @@ export class StaticLandblockRenderWorkerClient {
 
 	private postJob(
 		requestId: string,
-		job: LandblockRenderPresetWorkerJob,
+		job: LandblockRenderProductWorkerJob,
 		identityKey: string,
-	): Promise<LandblockRenderPresetWorkerResult> {
+	): Promise<LandblockRenderProductWorkerResult> {
 		this.throwIfDisposed();
 		return new Promise((resolve, reject) => {
 			this.pendingRequests.set(requestId, {
@@ -134,7 +134,7 @@ export class StaticLandblockRenderWorkerClient {
 			});
 			try {
 				this.worker.postMessage({
-					type: "run-landblock-render-preset-job",
+					type: "run-landblock-render-product-job",
 					requestId,
 					job,
 				});
@@ -156,14 +156,16 @@ export class StaticLandblockRenderWorkerClient {
 			return;
 		}
 		this.pendingRequests.delete(message.requestId);
-		if (message.type === "landblock-render-preset-job-error") {
+		if (message.type === "landblock-render-product-job-error") {
 			pending.reject(new Error(message.message));
 			return;
 		}
-		if (!this.isLatestResult(pending.job, pending.identityKey, message.result)) {
+		if (
+			!this.isLatestResult(pending.job, pending.identityKey, message.result)
+		) {
 			pending.reject(
 				new Error(
-					`Ignored stale landblock render preset result ${message.result.jobId}.`,
+					`Ignored stale landblock render product result ${message.result.jobId}.`,
 				),
 			);
 			return;
@@ -172,13 +174,13 @@ export class StaticLandblockRenderWorkerClient {
 	}
 
 	private isLatestResult(
-		job: LandblockRenderPresetWorkerJob,
+		job: LandblockRenderProductWorkerJob,
 		identityKey: string,
-		result: LandblockRenderPresetWorkerResult,
+		result: LandblockRenderProductWorkerResult,
 	): boolean {
 		return (
 			result.landblockId === job.landblockId &&
-			result.preset === job.preset &&
+			result.product === job.product &&
 			result.requestId === job.requestId &&
 			result.buildPolicyRevision === job.buildPolicyRevision &&
 			result.texturePagePolicyRevision === job.texturePagePolicyRevision &&
@@ -234,11 +236,11 @@ export class StaticLandblockRenderWorkerClient {
 	}
 }
 
-function formatArtifactKey(job: LandblockRenderPresetWorkerJob): string {
-	return `${job.landblockId}:${job.preset}`;
+function formatArtifactKey(job: LandblockRenderProductWorkerJob): string {
+	return `${job.landblockId}:${job.product}`;
 }
 
-function formatJobIdentityKey(job: LandblockRenderPresetWorkerJob): string {
+function formatJobIdentityKey(job: LandblockRenderProductWorkerJob): string {
 	return [
 		formatArtifactKey(job),
 		job.requestId,

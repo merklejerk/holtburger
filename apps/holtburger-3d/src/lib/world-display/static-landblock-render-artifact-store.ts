@@ -1,11 +1,11 @@
 import type {
-	DesiredLandblockRenderPreset,
-	LandblockRenderLodPreset,
-	LandblockRenderPresetWorkerResult,
-} from "./landblock-render-preset";
+	DesiredLandblockRenderProduct,
+	LandblockRenderProduct,
+	LandblockRenderProductWorkerResult,
+} from "./landblock-render-product";
 
 export interface StaticLandblockRenderArtifactStoreSnapshot {
-	artifacts: readonly LandblockRenderPresetWorkerResult[];
+	artifacts: readonly LandblockRenderProductWorkerResult[];
 	desiredCount: number;
 	residentCount: number;
 	inFlightCount: number;
@@ -33,7 +33,7 @@ export function createEmptyStaticLandblockRenderArtifactStoreSnapshot(): StaticL
 export class StaticLandblockRenderArtifactStore {
 	private readonly artifactsByArtifactKey = new Map<
 		string,
-		LandblockRenderPresetWorkerResult
+		LandblockRenderProductWorkerResult
 	>();
 	private readonly latestDesiredIdentityByTargetKey = new Map<string, string>();
 	private readonly inFlightIdentityKeys = new Set<string>();
@@ -42,11 +42,11 @@ export class StaticLandblockRenderArtifactStore {
 	private evictedResultCount = 0;
 	private errorCount = 0;
 
-	syncDesiredPresets(
-		desiredPresets: readonly DesiredLandblockRenderPreset[],
+	syncDesiredProducts(
+		desiredProducts: readonly DesiredLandblockRenderProduct[],
 	): void {
 		const desiredTargetKeys = new Set<string>();
-		for (const desired of desiredPresets) {
+		for (const desired of desiredProducts) {
 			const targetKey = formatDesiredTargetKey(desired);
 			desiredTargetKeys.add(targetKey);
 			this.latestDesiredIdentityByTargetKey.set(
@@ -75,7 +75,7 @@ export class StaticLandblockRenderArtifactStore {
 		}
 	}
 
-	markInFlight(desired: DesiredLandblockRenderPreset): boolean {
+	markInFlight(desired: DesiredLandblockRenderProduct): boolean {
 		const identityKey = formatDesiredIdentityKey(desired);
 		if (this.inFlightIdentityKeys.has(identityKey)) {
 			return false;
@@ -84,7 +84,7 @@ export class StaticLandblockRenderArtifactStore {
 		return true;
 	}
 
-	commitResult(result: LandblockRenderPresetWorkerResult): boolean {
+	commitResult(result: LandblockRenderProductWorkerResult): boolean {
 		const identityKey = formatResultIdentityKey(result);
 		this.inFlightIdentityKeys.delete(identityKey);
 		if (
@@ -100,12 +100,12 @@ export class StaticLandblockRenderArtifactStore {
 		return true;
 	}
 
-	markError(desired: DesiredLandblockRenderPreset): void {
+	markError(desired: DesiredLandblockRenderProduct): void {
 		this.inFlightIdentityKeys.delete(formatDesiredIdentityKey(desired));
 		this.errorCount += 1;
 	}
 
-	hasCurrentArtifact(desired: DesiredLandblockRenderPreset): boolean {
+	hasCurrentArtifact(desired: DesiredLandblockRenderProduct): boolean {
 		return this.artifactsByArtifactKey.has(formatDesiredArtifactKey(desired));
 	}
 
@@ -130,48 +130,50 @@ export class StaticLandblockRenderArtifactStore {
 }
 
 function formatDesiredArtifactKey(
-	desired: DesiredLandblockRenderPreset,
+	desired: DesiredLandblockRenderProduct,
 ): string {
 	return formatArtifactKey({
 		landblockId: desired.landblockId,
-		preset: desired.preset,
+		product: desired.product,
 		buildPolicyRevision: desired.buildPolicyRevision,
 		texturePagePolicyRevision: desired.texturePagePolicyRevision,
 	});
 }
 
 function formatResultArtifactKey(
-	result: LandblockRenderPresetWorkerResult,
+	result: LandblockRenderProductWorkerResult,
 ): string {
 	return formatArtifactKey(result);
 }
 
 function formatArtifactKey(input: {
 	landblockId: number;
-	preset: LandblockRenderLodPreset;
+	product: LandblockRenderProduct;
 	buildPolicyRevision: string;
 	texturePagePolicyRevision: string;
 }): string {
 	return [
 		input.landblockId,
-		input.preset,
+		input.product,
 		input.buildPolicyRevision,
 		input.texturePagePolicyRevision,
 	].join(":");
 }
 
-function formatDesiredTargetKey(desired: DesiredLandblockRenderPreset): string {
-	return `${desired.landblockId}:${desired.preset}`;
+function formatDesiredTargetKey(
+	desired: DesiredLandblockRenderProduct,
+): string {
+	return `${desired.landblockId}:${desired.product}`;
 }
 
 function formatResultTargetKey(
-	result: LandblockRenderPresetWorkerResult,
+	result: LandblockRenderProductWorkerResult,
 ): string {
-	return `${result.landblockId}:${result.preset}`;
+	return `${result.landblockId}:${result.product}`;
 }
 
 function formatDesiredIdentityKey(
-	desired: DesiredLandblockRenderPreset,
+	desired: DesiredLandblockRenderProduct,
 ): string {
 	return [
 		formatDesiredTargetKey(desired),
@@ -182,7 +184,7 @@ function formatDesiredIdentityKey(
 }
 
 function formatResultIdentityKey(
-	result: LandblockRenderPresetWorkerResult,
+	result: LandblockRenderProductWorkerResult,
 ): string {
 	return [
 		formatResultTargetKey(result),
@@ -193,16 +195,16 @@ function formatResultIdentityKey(
 }
 
 function formatIdentityTargetKey(identityKey: string): string {
-	const [landblockId, preset] = identityKey.split(":");
-	return `${landblockId ?? ""}:${preset ?? ""}`;
+	const [landblockId, product] = identityKey.split(":");
+	return `${landblockId ?? ""}:${product ?? ""}`;
 }
 
 function compareResults(
-	left: LandblockRenderPresetWorkerResult,
-	right: LandblockRenderPresetWorkerResult,
+	left: LandblockRenderProductWorkerResult,
+	right: LandblockRenderProductWorkerResult,
 ): number {
 	if (left.landblockId !== right.landblockId) {
 		return left.landblockId - right.landblockId;
 	}
-	return left.preset.localeCompare(right.preset);
+	return left.product.localeCompare(right.product);
 }

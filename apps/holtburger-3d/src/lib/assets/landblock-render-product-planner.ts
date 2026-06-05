@@ -9,13 +9,12 @@ import {
 	type NormalizedOutdoorSceneInterest,
 } from "../world-display/outdoor-scene-interest";
 import {
-	chooseMoreDetailedLandblockPreset,
-	compareDesiredLandblockRenderPresets,
-	type DesiredLandblockRenderPreset,
-	type LandblockRenderPresetBuildPolicy,
-	type LandblockRenderLodPreset,
-	type LandblockRenderPresetPriority,
-} from "../world-display/landblock-render-preset";
+	compareDesiredLandblockRenderProducts,
+	type DesiredLandblockRenderProduct,
+	type LandblockRenderProduct,
+	type LandblockRenderProductBuildPolicy,
+	type LandblockRenderProductPriority,
+} from "../world-display/landblock-render-product";
 import type { OutdoorSceneRequestOptions } from "./scene-asset-request-planner";
 
 const DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS: OutdoorSceneRequestOptions = {
@@ -25,18 +24,18 @@ const DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS: OutdoorSceneRequestOptions = {
 	envCellRadius: 1,
 };
 
-export interface LandblockRenderPresetPlanningInput {
+export interface LandblockRenderProductPlanningInput {
 	browserDestination: BrowserLocationSelection | null;
 	requestId: string;
 	buildPolicyRevision: string;
 	texturePagePolicyRevision: string;
-	buildPolicy: LandblockRenderPresetBuildPolicy;
+	buildPolicy: LandblockRenderProductBuildPolicy;
 	options?: OutdoorSceneRequestOptions;
 }
 
-export function planDesiredLandblockRenderPresets(
-	input: LandblockRenderPresetPlanningInput,
-): DesiredLandblockRenderPreset[] {
+export function planDesiredLandblockRenderProducts(
+	input: LandblockRenderProductPlanningInput,
+): DesiredLandblockRenderProduct[] {
 	if (!input.browserDestination) {
 		return [];
 	}
@@ -59,36 +58,31 @@ export function planDesiredLandblockRenderPresets(
 	const envCellLandblockIds =
 		envCellRadius < 0 ? [] : interest.envCellLandblockIds;
 
-	return coalesceDesiredPresets([
+	return coalesceDesiredProducts([
 		...interest.terrainLandblockIds.map((landblockId) =>
-			createDesiredPreset(input, interest, landblockId, "outdoor"),
+			createDesiredProduct(input, interest, landblockId, "outdoor"),
 		),
 		...interest.buildingLandblockIds.map((landblockId) =>
-			createDesiredPreset(input, interest, landblockId, "outdoor"),
+			createDesiredProduct(input, interest, landblockId, "outdoor"),
 		),
 		...interest.detailLandblockIds.map((landblockId) =>
-			createDesiredPreset(input, interest, landblockId, "outdoor"),
+			createDesiredProduct(input, interest, landblockId, "outdoor"),
 		),
 		...envCellLandblockIds.map((landblockId) =>
-			createDesiredPreset(
-				input,
-				interest,
-				landblockId,
-				"outdoor-with-env-cells",
-			),
+			createDesiredProduct(input, interest, landblockId, "outdoor-env-cells"),
 		),
-	]).sort(compareDesiredLandblockRenderPresets);
+	]).sort(compareDesiredLandblockRenderProducts);
 }
 
-function createDesiredPreset(
-	input: LandblockRenderPresetPlanningInput,
+function createDesiredProduct(
+	input: LandblockRenderProductPlanningInput,
 	interest: NormalizedOutdoorSceneInterest,
 	landblockId: number,
-	preset: LandblockRenderLodPreset,
-): DesiredLandblockRenderPreset {
+	product: LandblockRenderProduct,
+): DesiredLandblockRenderProduct {
 	return {
 		landblockId,
-		preset,
+		product,
 		priority: priorityForLandblock(interest.focusLandblockId, landblockId),
 		requestId: input.requestId,
 		buildPolicyRevision: input.buildPolicyRevision,
@@ -97,36 +91,36 @@ function createDesiredPreset(
 	};
 }
 
-function coalesceDesiredPresets(
-	presets: readonly DesiredLandblockRenderPreset[],
-): DesiredLandblockRenderPreset[] {
-	const byLandblockId = new Map<number, DesiredLandblockRenderPreset>();
-	for (const preset of presets) {
-		const existing = byLandblockId.get(preset.landblockId);
+function coalesceDesiredProducts(
+	products: readonly DesiredLandblockRenderProduct[],
+): DesiredLandblockRenderProduct[] {
+	const byTargetKey = new Map<string, DesiredLandblockRenderProduct>();
+	for (const product of products) {
+		const targetKey = `${product.landblockId}:${product.product}`;
+		const existing = byTargetKey.get(targetKey);
 		if (!existing) {
-			byLandblockId.set(preset.landblockId, preset);
+			byTargetKey.set(targetKey, product);
 			continue;
 		}
-		byLandblockId.set(preset.landblockId, {
+		byTargetKey.set(targetKey, {
 			...existing,
-			preset: chooseMoreDetailedLandblockPreset(existing.preset, preset.preset),
-			priority: chooseHigherPriority(existing.priority, preset.priority),
+			priority: chooseHigherPriority(existing.priority, product.priority),
 		});
 	}
-	return [...byLandblockId.values()];
+	return [...byTargetKey.values()];
 }
 
 function priorityForLandblock(
 	focusLandblockId: number,
 	landblockId: number,
-): LandblockRenderPresetPriority {
+): LandblockRenderProductPriority {
 	return landblockId === focusLandblockId ? "resident-now" : "prefetch";
 }
 
 function chooseHigherPriority(
-	left: LandblockRenderPresetPriority,
-	right: LandblockRenderPresetPriority,
-): LandblockRenderPresetPriority {
+	left: LandblockRenderProductPriority,
+	right: LandblockRenderProductPriority,
+): LandblockRenderProductPriority {
 	return left === "resident-now" || right === "resident-now"
 		? "resident-now"
 		: "prefetch";

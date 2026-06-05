@@ -1,5 +1,6 @@
 import type { AssetChannelState } from "../assets/types";
 import type { Vec3Dto } from "../host/contracts";
+import { formatHex32 } from "../landblocks";
 import type {
 	PortalDebugOverlay,
 	WorldDebugOverlayModel,
@@ -37,6 +38,15 @@ import type {
 } from "./structured-interior-scene";
 import type { TerrainSceneModel, TerrainSceneTile } from "./terrain-scene";
 import { deriveLandblockRenderChunkPlacement } from "./render-chunks";
+import {
+	getDetailedLandblockRenderArtifacts,
+	type DetailedLandblockRenderArtifacts,
+} from "./landblock-render-product";
+import {
+	formatRenderDomainKey,
+	WORLD_RENDER_DOMAIN,
+} from "./render-domains";
+import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
 
 export const TERRAIN_SPATIAL_OWNER_KEY = "terrain-scene";
 export const STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY =
@@ -57,6 +67,29 @@ export function deriveStructuredInteriorSpatialItems(
 	structuredInteriorScene: StructuredInteriorSceneModel,
 ): RenderSpatialItem[] {
 	return structuredInteriorScene.cells.map(deriveStructuredInteriorSpatialItem);
+}
+
+export function deriveStructuredInteriorSpatialItemsFromLandblockArtifacts(
+	artifacts: StaticLandblockRenderArtifactStoreSnapshot,
+): RenderSpatialItem[] | null {
+	const detailedArtifacts = artifacts.artifacts
+		.map(getDetailedLandblockRenderArtifacts)
+		.filter((artifact): artifact is DetailedLandblockRenderArtifacts =>
+			Boolean(artifact),
+		);
+	if (detailedArtifacts.length === 0) {
+		return null;
+	}
+	const selectedEnvCellIds = new Set(
+		detailedArtifacts.flatMap((artifact) => artifact.selectedEnvCellIds),
+	);
+	return detailedArtifacts
+		.flatMap((artifact) => artifact.structuredInteriorCells)
+		.filter((cell) => selectedEnvCellIds.has(cell.envCellId))
+		.map((cell) =>
+			deriveDetailedStructuredInteriorSpatialItem(cell, selectedEnvCellIds),
+		)
+		.sort((left, right) => left.id.localeCompare(right.id));
 }
 
 export function deriveStaticRenderableSpatialItems(
@@ -127,6 +160,41 @@ function deriveStructuredInteriorSpatialItem(
 			envCellId: cell.envCellId,
 			renderKey: cell.renderKey,
 			isFocus: cell.isFocus,
+		},
+	};
+}
+
+function deriveDetailedStructuredInteriorSpatialItem(
+	cell: DetailedLandblockRenderArtifacts["structuredInteriorCells"][number],
+	selectedEnvCellIds: ReadonlySet<number>,
+): RenderSpatialItem {
+	const transform = buildAcPlacementMatrix(
+		cell.localPlacement,
+		{ x: 0, y: 0, z: 0 },
+		{ x: 1, y: 1, z: 1 },
+	);
+	const center = transformPoint({ x: 0, y: 0, z: 0 }, transform);
+	const bounds = cell.renderGeometry.bounds
+		? transformBounds(cell.renderGeometry.bounds, transform)
+		: expandPointBounds(center, CELL_MARKER_PICK_RADIUS);
+	const renderKey = formatRenderDomainKey(
+		WORLD_RENDER_DOMAIN.interiorCellShell,
+		`env-cell/${formatHex32(cell.envCellId)}`,
+	);
+	return {
+		id: structuredCellSpatialItemId(renderKey),
+		kind: "structured-cell",
+		ownerKey: STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY,
+		chunkKey: cell.renderChunk.chunkKey,
+		broadphaseBounds: bounds,
+		pickShape: cell.renderGeometry.bounds
+			? { kind: "box", bounds }
+			: { kind: "sphere", center, radius: CELL_MARKER_PICK_RADIUS },
+		metadata: {
+			kind: "structured-cell",
+			envCellId: cell.envCellId,
+			renderKey,
+			isFocus: selectedEnvCellIds.has(cell.envCellId),
 		},
 	};
 }

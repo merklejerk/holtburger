@@ -16,7 +16,8 @@ Phase 4C3D1 artifact-native transition portal candidate handoff and Phase 4C3D2 
 artifact input handoff are implemented. Phase 4C3D3 spatial/culling artifact input handoff is
 split further; Phase 4C3D3A artifact-backed env-cell local BVH culling and Phase 4C3D3B1
 artifact-backed structured spatial index items are implemented. Phase 4C3D3B2 static bundle
-spatial hints and artifact-backed static spatial index items are implemented.
+spatial hints and artifact-backed static spatial index items are implemented. Phase 4C3D3B3
+selected static overlay artifact fallback is implemented.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -294,6 +295,10 @@ Progress:
   the browser render spatial index prefers those artifact hints over main-thread static renderable
   part spatial items. This keeps static picking/debug spatial coverage object-level and artifact
   owned instead of part-level and staged-geometry owned.
+- 2026-06-05: Implemented Phase 4C3D3B3. The selected static renderable bounds overlay now resolves
+  selected static keys against resident static bundle `spatialHints` first and renders coarse
+  artifact object bounds when available. The old prepared gfx object/part transform overlay path
+  remains only as an absence fallback for non-migrated or hintless static selections.
 
 Validation:
 
@@ -329,6 +334,9 @@ Validation:
 - `npm exec vitest -- run src/lib/world-display/render-spatial-scene.test.ts src/lib/world-display/static-bundle-layer-builder.test.ts`,
   `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
   `git diff --check` passed after Phase 4C3D3B2.
+- `npm exec vitest -- run src/lib/world-display/render-spatial-scene.test.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/webgl2-world-resources.test.ts`,
+  `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
+  `git diff --check` passed after Phase 4C3D3B3.
 - `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts`
   passed after the first Phase 1D builder slice.
 - `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts`
@@ -3846,7 +3854,48 @@ Exit criteria:
   item shape, and explicit null fallback when resident bundle artifacts do not contain hints.
 - Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
 
-#### Phase 4C3D3B3: Remaining Spatial Naming and Debug Overlay Cleanup
+#### Phase 4C3D3B3: Selected Static Overlay Artifact Fallback
+
+- Remove selected static bounds overlay dependency on prepared gfx object bounds or explicitly
+  downgrade it to artifact object-level bounds.
+- Resolve selected static keys against resident static bundle `spatialHints` before looking at
+  `StaticRenderableSceneModel.parts`.
+- Keep artifact overlay fidelity coarse and object-level.
+
+Decisions and course corrections:
+
+- Implemented. `syncSelectedStaticRenderableOverlay` now builds overlay geometry from resident
+  static bundle `spatialHints` first, using the selected render key as the artifact object key.
+- Implemented. Artifact-backed selected static overlay geometry uses coarse object bounds and the
+  landblock render chunk offset. It does not reconstruct prepared gfx object part transforms.
+- Course correction: the old prepared gfx object overlay path remains only as an absence fallback
+  while non-migrated or hintless static selections can still exist. This fallback should be deleted
+  during hard cutover rather than improved.
+
+Cleanup targets discovered:
+
+- The fallback path still imports `isPreparedGfxObjAsset`, `StaticRenderablePart`, and
+  `buildStaticRenderablePartMatrix` in `webgl2-world-display-renderer-impl.ts`. Phase 4E/5 should
+  delete that import chain when static bundle hints are the only supported static selection overlay
+  source.
+- Artifact selected overlay lookup currently scans resident static bundle artifacts. If selected
+  overlay becomes more than debug affordance, pre-index spatial hints in the static bundle resource
+  store instead of adding more per-frame scans.
+
+Legacy shims introduced:
+
+- None. The artifact overlay path is preferred. The old prepared-gfx overlay remains the existing
+  absence fallback and is explicitly scheduled for deletion.
+
+Exit criteria:
+
+- Implemented. Selected static bounds overlay can render from resident static bundle object-level
+  spatial hints.
+- Implemented. The selected static overlay no longer requires prepared gfx object bounds when an
+  artifact spatial hint exists for the selected key.
+- Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
+
+#### Phase 4C3D3B4: Remaining Spatial Naming Cleanup
 
 - Revisit `prepared-bvh-metrics.ts`, `render-spatial-scene.ts`,
   `scene-renderable-readiness.ts`, and WebGL frame candidate assembly together. These still carry
@@ -3856,11 +3905,8 @@ Exit criteria:
   artifacts or allowed to lose fidelity during hard cutover.
 - Remove or rename "prepared BVH" diagnostics once artifact-backed BVH facts are the only
   render-critical static source.
-- Decide whether static renderable picker diagnostics survive hard cutover. If they do, derive
-  coarse object-level bounds from resident static bundle artifacts; if not, delete
-  `deriveStaticRenderableSpatialItems` with the staged static path.
-- Remove selected static bounds overlay dependency on prepared gfx object bounds or explicitly
-  downgrade it to artifact object-level bounds.
+- Delete or rename remaining static picker/debug helpers that still imply part-level staged static
+  ownership once artifact object-level bounds are the supported diagnostic surface.
 
 Exit criteria:
 

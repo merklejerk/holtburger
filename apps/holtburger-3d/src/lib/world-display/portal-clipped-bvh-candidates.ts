@@ -3,7 +3,7 @@ import {
 	queryRenderSpaceBvhSources,
 	type PortalCompositeRenderBvhSources,
 	type RenderSpaceBvhSource,
-} from "./prepared-bvh-render-sources";
+} from "./render-bvh-sources";
 import {
 	crossRenderVec3,
 	dotRenderVec3,

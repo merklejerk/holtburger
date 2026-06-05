@@ -23,8 +23,13 @@ import {
 } from "./prepared-bvh-visibility";
 import {
 	transformEnvCellLocalBounds,
+	transformEnvCellLocalBoundsByPlacement,
 	transformTerrainLocalBounds,
 } from "./prepared-bvh-bounds";
+import {
+	getDetailedLandblockRenderArtifacts,
+	type DetailedLandblockRenderArtifacts,
+} from "./landblock-render-product";
 import {
 	renderBoundsContainedByFrustum,
 	renderBoundsIntersectsFrustum,
@@ -32,6 +37,7 @@ import {
 	type RenderBounds,
 	type RenderFrustum,
 } from "./render-spatial-math";
+import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
 import type { StaticRenderableSceneModel } from "./static-renderables";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
@@ -67,6 +73,7 @@ export function buildPortalCompositeRenderBvhSources(options: {
 	assetState: AssetChannelState;
 	terrainScene: TerrainSceneModel;
 	staticRenderableScene: StaticRenderableSceneModel;
+	staticLandblockRenderArtifacts: StaticLandblockRenderArtifactStoreSnapshot;
 	structuredInteriorScene: StructuredInteriorSceneModel;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 }): PortalCompositeRenderBvhSources {
@@ -147,8 +154,15 @@ export function buildPortalCompositeRenderBvhSources(options: {
 		];
 	});
 
-	const envCellSourcesById = new Map<number, RenderSpaceBvhSource>();
+	const envCellSourcesById = collectDetailedArtifactEnvCellSourcesById({
+		artifacts: options.staticLandblockRenderArtifacts,
+		chunkTransformsByKey,
+		fallbackReasons,
+	});
 	for (const cell of options.structuredInteriorScene.cells) {
+		if (envCellSourcesById.has(cell.envCellId)) {
+			continue;
+		}
 		const payload = findPreparedEnvCellPayload(
 			options.assetState,
 			cell.envCellId,
@@ -188,6 +202,84 @@ export function buildPortalCompositeRenderBvhSources(options: {
 		envCellSourcesById,
 		fallbackReasons,
 	};
+}
+
+function collectDetailedArtifactEnvCellSourcesById({
+	artifacts,
+	chunkTransformsByKey,
+	fallbackReasons,
+}: {
+	artifacts: StaticLandblockRenderArtifactStoreSnapshot;
+	chunkTransformsByKey: ReadonlyMap<string, RenderChunkTransform>;
+	fallbackReasons: string[];
+}): Map<number, RenderSpaceBvhSource> {
+	const sourcesByEnvCellId = new Map<number, RenderSpaceBvhSource>();
+	for (const result of artifacts.artifacts) {
+		const detailed = getDetailedLandblockRenderArtifacts(result);
+		if (!detailed) {
+			continue;
+		}
+		const cellsByEnvCellId = new Map(
+			detailed.structuredInteriorCells.map((cell) => [cell.envCellId, cell]),
+		);
+		for (const bvh of detailed.spatial.envCellLocalBvhs) {
+			if (sourcesByEnvCellId.has(bvh.envCellId)) {
+				continue;
+			}
+			const cell = cellsByEnvCellId.get(bvh.envCellId);
+			if (!cell) {
+				fallbackReasons.push(
+					`missing portal artifact structured cell ${formatEnvCellAssetId(bvh.envCellId)}`,
+				);
+				continue;
+			}
+			const transform = chunkTransformsByKey.get(cell.renderChunk.chunkKey);
+			if (!transform) {
+				fallbackReasons.push(
+					`missing portal render chunk transform ${cell.renderChunk.chunkKey}`,
+				);
+				continue;
+			}
+			sourcesByEnvCellId.set(
+				bvh.envCellId,
+				buildDetailedArtifactEnvCellSource({
+					detailed,
+					bvh,
+					transform,
+					fallbackReasons,
+				}),
+			);
+		}
+	}
+	return sourcesByEnvCellId;
+}
+
+function buildDetailedArtifactEnvCellSource({
+	detailed,
+	bvh,
+	transform,
+	fallbackReasons,
+}: {
+	detailed: DetailedLandblockRenderArtifacts;
+	bvh: DetailedLandblockRenderArtifacts["spatial"]["envCellLocalBvhs"][number];
+	transform: RenderChunkTransform;
+	fallbackReasons: string[];
+}): RenderSpaceBvhSource {
+	return buildRenderSpaceBvhSource({
+		sourceId: `artifact-env-cell:${detailed.key}:${bvh.envCellId.toString(16)}`,
+		nodes: bvh.localBvh.nodes,
+		items: bvh.localBvh.items,
+		expectedCoordinateSpace: "env-cell-local",
+		coordinateSpace: bvh.localBvh.coordinateSpace,
+		itemKey: (item) => envCellLocalItemKey(bvh.envCellId, item),
+		boundsToRendererBounds: (bounds) =>
+			transformEnvCellLocalBoundsByPlacement(
+				bounds,
+				bvh.localPlacement,
+				transform,
+			),
+		fallbackReasons,
+	});
 }
 
 export function calculateRenderSpaceBvhSourcesBoundsFrame(

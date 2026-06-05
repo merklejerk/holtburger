@@ -110,7 +110,7 @@ import type {
 import {
 	buildPortalCompositeRenderBvhSources,
 	calculateRenderSpaceBvhSourcesBoundsFrame,
-} from "./prepared-bvh-render-sources";
+} from "./render-bvh-sources";
 import { profileBrowserJsScope } from "../diagnostics/browser-js-profiler";
 import { deriveWebgl2DrawUnitRuntimeDiagnostics } from "./webgl2-runtime-render-diagnostics";
 import { CompactedGeometryWorkerScheduler } from "./worker-resources/compacted-geometry-worker-scheduler";
@@ -2288,6 +2288,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 						assetState,
 						terrainScene,
 						staticRenderableScene,
+						staticLandblockRenderArtifacts,
 						structuredInteriorScene,
 						renderChunkTransforms,
 					}),

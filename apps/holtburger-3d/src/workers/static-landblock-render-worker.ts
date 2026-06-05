@@ -1,12 +1,7 @@
 import {
-	resolveNormalizedPreparedTextureAssetIds,
-	type MaterialTextureUsage,
-} from "../lib/assets/material-texture-preparation-policy";
-import {
 	createInitialAssetChannelState,
 	type AssetChannelState,
 	type PreparedAssetRecord,
-	type PreparedRenderSurfacePayload,
 } from "../lib/assets/types";
 import {
 	formatEnvCellAssetId,
@@ -21,10 +16,25 @@ import {
 } from "../lib/world-display/prepared-bvh-visibility";
 import { deriveStructuredCellRenderChunk } from "../lib/world-display/render-chunks";
 import { buildStaticObjectBundleArtifact } from "../lib/world-display/static-bundle-layer-builder";
+import { buildStaticBundleLayerTexturePages } from "../lib/world-display/static-bundle-layer-texture-pages";
+import {
+	collectStaticMaterialTexturePageRefs,
+	collectStaticMaterialTextureRoutes,
+	collectStaticPreparedTextureRouteAssetIds,
+	findStaticMaterialTextureRefs,
+	formatStaticMaterialFamilyKey,
+	resolveStaticIndexedMaterialRecord,
+	resolveStaticMaterialReadiness,
+	type StaticMaterialTextureRoute,
+} from "../lib/world-display/static-material-artifacts";
 import type {
 	StaticBundleLayerWorkerJob,
+	StaticBundleMaterialRecord,
 	StaticObjectBundleArtifact,
+	VirtualTexturePageRef,
 } from "../lib/world-display/static-bundle-layer";
+import { createCompactionEligibility } from "../lib/world-display/compaction/compaction-family-planner";
+import { buildStagedPolygonSetGeometry } from "../lib/world-display/staged-world-geometry";
 import { buildLandblockTerrainRenderArtifact } from "../lib/world-display/terrain-render-artifact";
 import type {
 	DetailedLandblockRenderArtifacts,
@@ -99,10 +109,6 @@ interface StaticLandblockRenderWorkerLookup {
 const workerScope = globalThis as unknown as StaticLandblockRenderWorkerScope;
 const STATIC_LANDBLOCK_RENDER_WORKER_DIAGNOSTIC_BUILD =
 	"static-landblock-render-worker-2026-06-04a";
-const STATIC_MATERIAL_TEXTURE_USAGES: readonly MaterialTextureUsage[] = [
-	"raw",
-	"detail",
-];
 
 export async function runStaticLandblockRenderWorkerJob(
 	job: LandblockRenderProductWorkerJob,
@@ -286,7 +292,7 @@ async function loadPreparedCompanionClosure(options: {
 	while (true) {
 		const companionAssetIds = uniqueSortedStrings([
 			...collectSetupAppearanceCompanionAssetIds(options.preparedByAssetId),
-			...collectNormalizedPreparedTextureAssetIds(options.preparedByAssetId),
+			...collectStaticPreparedTextureAssetIds(options.preparedByAssetId),
 		]).filter((assetId) => !options.responseByAssetId.has(assetId));
 		if (companionAssetIds.length === 0) {
 			return;
@@ -315,29 +321,12 @@ function collectSetupAppearanceCompanionAssetIds(
 	);
 }
 
-function collectNormalizedPreparedTextureAssetIds(
+function collectStaticPreparedTextureAssetIds(
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>,
 ): string[] {
-	return [...preparedByAssetId.values()].flatMap((asset) => {
-		if (asset.payload.kind !== "material-recipe") {
-			return [];
-		}
-		return asset.payload.dependencies.renderSurfaceAssetIds.flatMap(
-			(renderSurfaceAssetId: string) => {
-				const renderSurface = preparedByAssetId.get(renderSurfaceAssetId);
-				if (renderSurface?.payload.kind !== "render-surface") {
-					return [];
-				}
-				return STATIC_MATERIAL_TEXTURE_USAGES.flatMap((usage) =>
-					resolveNormalizedPreparedTextureAssetIds({
-						renderSurface:
-							renderSurface.payload as PreparedRenderSurfacePayload,
-						usage,
-					}),
-				);
-			},
-		);
-	});
+	return [...preparedByAssetId.values()].flatMap((asset) =>
+		collectStaticPreparedTextureRouteAssetIds(asset, preparedByAssetId),
+	);
 }
 
 function buildStaticObjectBundle(
@@ -442,6 +431,11 @@ function buildDetailedLandblockRenderArtifacts(options: {
 			return asset.payload;
 		})
 		.sort((left, right) => left.envCellId - right.envCellId);
+	const materialContext = buildStructuredInteriorMaterialContext({
+		job: options.job,
+		envCells,
+		preparedByAssetId: options.preparedByAssetId,
+	});
 
 	return {
 		artifactKind: "detailed-landblock",
@@ -458,8 +452,15 @@ function buildDetailedLandblockRenderArtifacts(options: {
 		buildPolicyRevision: options.job.buildPolicyRevision,
 		texturePagePolicyRevision: options.job.texturePagePolicyRevision,
 		selectedEnvCellIds: envCells.map((envCell) => envCell.envCellId),
+		structuredInteriorMaterialRecords: materialContext.materialRecords,
+		structuredInteriorTexturePageRefs: materialContext.texturePageRefs,
+		structuredInteriorTexturePages: materialContext.texturePages,
 		structuredInteriorCells: envCells.map((envCell) =>
-			createStructuredInteriorCellArtifact(options.job.landblockId, envCell),
+			createStructuredInteriorCellArtifact(
+				options.job.landblockId,
+				envCell,
+				materialContext.slicesByEnvCellId.get(envCell.envCellId) ?? [],
+			),
 		),
 		cellStructureMetadata: envCells.map((envCell) => ({
 			key: `cell-structure:${formatHex32(envCell.envCellId)}:${formatHex32(
@@ -525,9 +526,232 @@ function buildDetailedLandblockRenderArtifacts(options: {
 	};
 }
 
+type PreparedEnvCellPayload = Extract<
+	PreparedAssetRecord["payload"],
+	{ kind: "env-cell" }
+>;
+
+type DetailedStructuredInteriorMaterialSlice =
+	DetailedLandblockRenderArtifacts["structuredInteriorCells"][number]["materialSlices"][number];
+
+interface StructuredInteriorMaterialContext {
+	materialRecords: readonly StaticBundleMaterialRecord[];
+	texturePageRefs: readonly VirtualTexturePageRef[];
+	texturePages: DetailedLandblockRenderArtifacts["structuredInteriorTexturePages"];
+	slicesByEnvCellId: ReadonlyMap<
+		number,
+		readonly DetailedStructuredInteriorMaterialSlice[]
+	>;
+}
+
+function buildStructuredInteriorMaterialContext(options: {
+	job: LandblockRenderProductWorkerJob;
+	envCells: readonly PreparedEnvCellPayload[];
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
+}): StructuredInteriorMaterialContext {
+	const materialTextureRoutes = collectStaticMaterialTextureRoutes(
+		options.envCells.flatMap((envCell) =>
+			envCell.surfaces.map((surface) => surface.materialAssetId),
+		),
+		options.preparedByAssetId,
+	);
+	const texturePageRefs = collectStaticMaterialTexturePageRefs(
+		materialTextureRoutes,
+		options.preparedByAssetId,
+	);
+	const scopeKey = [
+		"structured-interior",
+		formatHex32(options.job.landblockId),
+		options.job.product,
+		options.job.requestId,
+		options.job.texturePagePolicyRevision,
+	].join(":");
+	const texturePages = buildStaticBundleLayerTexturePages({
+		scopeKey,
+		texturePageRefs,
+		policy: options.job.buildPolicy.atlasLayout,
+	});
+	const materialRecords = buildStructuredInteriorMaterialRecords({
+		envCells: options.envCells,
+		materialTextureRoutes,
+		preparedByAssetId: options.preparedByAssetId,
+		texturePageRefs,
+		landblockId: options.job.landblockId,
+	});
+	const materialRecordByAssetId = new Map(
+		materialRecords.map((record) => [
+			record.key.replace(/^material:/, ""),
+			record,
+		]),
+	);
+	const slicesByEnvCellId = new Map<
+		number,
+		readonly DetailedStructuredInteriorMaterialSlice[]
+	>();
+	for (const envCell of options.envCells) {
+		slicesByEnvCellId.set(
+			envCell.envCellId,
+			buildStructuredInteriorMaterialSlices({
+				envCell,
+				materialRecordByAssetId,
+			}),
+		);
+	}
+	return {
+		materialRecords,
+		texturePageRefs,
+		texturePages,
+		slicesByEnvCellId,
+	};
+}
+
+function buildStructuredInteriorMaterialRecords(options: {
+	envCells: readonly PreparedEnvCellPayload[];
+	materialTextureRoutes: readonly StaticMaterialTextureRoute[];
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
+	texturePageRefs: readonly VirtualTexturePageRef[];
+	landblockId: number;
+}): StaticBundleMaterialRecord[] {
+	const recordsByKey = new Map<string, StaticBundleMaterialRecord>();
+	for (const materialAssetId of uniqueSortedStrings(
+		options.envCells.flatMap((envCell) =>
+			envCell.surfaces.map((surface) => surface.materialAssetId),
+		),
+	)) {
+		const materialReadiness = resolveStaticMaterialReadiness({
+			materialAssetId,
+			preparedByAssetId: options.preparedByAssetId,
+			texturePageRefs: options.texturePageRefs,
+			materialTextureRoutes: options.materialTextureRoutes,
+		});
+		const compactionEligibility = createCompactionEligibility({
+			geometry: {
+				kind: "static",
+				owningLandblockId: options.landblockId,
+				hasUvBuffer: true,
+			},
+			material: materialReadiness,
+		});
+		const textureRefKeys = findStaticMaterialTextureRefs(
+			materialAssetId,
+			options.texturePageRefs,
+			options.materialTextureRoutes,
+		).map((ref) => ref.key);
+		const key = `material:${materialAssetId}`;
+		recordsByKey.set(key, {
+			key,
+			familyKey: formatStaticMaterialFamilyKey(compactionEligibility),
+			texturePageRefKeys: textureRefKeys,
+			isTransparent:
+				compactionEligibility.material.alphaPolicy === "transparent-blend" ||
+				compactionEligibility.material.alphaPolicy === "opacity-translucent",
+			indexedMaterial: resolveStaticIndexedMaterialRecord({
+				materialAssetId,
+				materialTextureRoutes: options.materialTextureRoutes,
+				preparedByAssetId: options.preparedByAssetId,
+			}),
+		});
+	}
+	return [...recordsByKey.values()].sort((left, right) =>
+		left.key.localeCompare(right.key),
+	);
+}
+
+function buildStructuredInteriorMaterialSlices(options: {
+	envCell: PreparedEnvCellPayload;
+	materialRecordByAssetId: ReadonlyMap<string, StaticBundleMaterialRecord>;
+}): readonly DetailedStructuredInteriorMaterialSlice[] {
+	const surfaceById = new Map(
+		options.envCell.surfaces.map((surface) => [surface.surfaceId, surface]),
+	);
+	const keys = new Map<
+		string,
+		{
+			geometrySurfaceId: number;
+			materialVariantSignature: string | null;
+			materialAssetId: string;
+			materialSlotIndex: number;
+			surfaceId: number;
+		}
+	>();
+	for (const triangle of options.envCell.renderGeometry.triangles) {
+		if (triangle.surfaceId === null) {
+			continue;
+		}
+		const surface = surfaceById.get(triangle.surfaceId);
+		if (!surface) {
+			continue;
+		}
+		const materialVariantSignature =
+			triangle.materialVariantSignature ?? null;
+		const key = [
+			surface.slotId,
+			surface.surfaceId,
+			triangle.surfaceId,
+			materialVariantSignature ?? "base",
+		].join("|");
+		keys.set(key, {
+			geometrySurfaceId: triangle.surfaceId,
+			materialVariantSignature,
+			materialAssetId: surface.materialAssetId,
+			materialSlotIndex: surface.slotId,
+			surfaceId: surface.surfaceId,
+		});
+	}
+	return [...keys.values()]
+		.map((surfaceKey): DetailedStructuredInteriorMaterialSlice | null => {
+			const materialRecord = options.materialRecordByAssetId.get(
+				surfaceKey.materialAssetId,
+			);
+			if (!materialRecord) {
+				return null;
+			}
+			const geometry = buildStagedPolygonSetGeometry(
+				options.envCell.renderGeometry,
+				{
+					surfaceId: surfaceKey.geometrySurfaceId,
+					materialVariantSignature: surfaceKey.materialVariantSignature,
+					sourceSignature: `env-cell:${formatHex32(options.envCell.envCellId)}`,
+				},
+			);
+			if (geometry.triangleCount === 0) {
+				return null;
+			}
+			const cellKey = `structured-interior-cell:${formatHex32(
+				options.envCell.envCellId,
+			)}`;
+			return {
+				key: [
+					cellKey,
+					`slot=${surfaceKey.materialSlotIndex}`,
+					`surface=${surfaceKey.surfaceId}`,
+					`geometry-surface=${surfaceKey.geometrySurfaceId}`,
+					`variant=${surfaceKey.materialVariantSignature ?? "base"}`,
+				].join(":"),
+				cellKey,
+				envCellId: options.envCell.envCellId,
+				materialSlotIndex: surfaceKey.materialSlotIndex,
+				surfaceId: surfaceKey.surfaceId,
+				geometrySurfaceId: surfaceKey.geometrySurfaceId,
+				materialRecordKey: materialRecord.key,
+				materialVariantSignature: surfaceKey.materialVariantSignature,
+				positions: geometry.positions,
+				uvs: geometry.uvs ?? new Float32Array(),
+				indices: geometry.indices,
+				triangleCount: geometry.triangleCount,
+			};
+		})
+		.filter(
+			(slice): slice is DetailedStructuredInteriorMaterialSlice =>
+				slice !== null,
+		)
+		.sort((left, right) => left.key.localeCompare(right.key));
+}
+
 function createStructuredInteriorCellArtifact(
 	landblockId: number,
-	envCell: Extract<PreparedAssetRecord["payload"], { kind: "env-cell" }>,
+	envCell: PreparedEnvCellPayload,
+	materialSlices: DetailedLandblockRenderArtifacts["structuredInteriorCells"][number]["materialSlices"],
 ): DetailedLandblockRenderArtifacts["structuredInteriorCells"][number] {
 	return {
 		key: `structured-interior-cell:${formatHex32(envCell.envCellId)}`,
@@ -539,6 +763,7 @@ function createStructuredInteriorCellArtifact(
 		renderChunk: deriveStructuredCellRenderChunk(envCell.envCellId),
 		localPlacement: envCell.localPlacement,
 		surfaceIds: envCell.surfaces.map((surface) => surface.surfaceId),
+		materialSlices,
 		portals: envCell.portals.map((portal) => ({
 			key: `env-cell-portal:${formatHex32(envCell.envCellId)}:${portal.portalId}`,
 			envCellId: envCell.envCellId,

@@ -6,9 +6,10 @@ implemented. Phase 4B additive topology/env-cell worker product build is impleme
 detailed product WebGL resource and submit is split into smaller phases; Phase 4C1 env-cell static
 bundle resource/submit is implemented and Phase 4C2 product artifact contract normalization is
 implemented. Phase 4C3A worker detailed artifact structured-interior scene handoff is implemented;
-Phase 4C3B direct WebGL structured-interior shell resource/submit is implemented.
-Structured-interior material artifact realization is next, followed by portal/spatial artifact
-resource handoff.
+Phase 4C3B direct WebGL structured-interior shell resource/submit is implemented. Phase 4C3C
+structured-interior material artifact realization is split into smaller slices; Phase 4C3C1 worker
+material artifact contract preparation is implemented. Phase 4C3C2 textured WebGL realization is
+next, followed by portal/spatial artifact resource handoff.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -233,6 +234,11 @@ Progress:
   main-thread structured-interior path until worker detailed artifacts carry material records,
   artifact-owned texture pages, and render-family metadata for the currently supported interior
   material families.
+- 2026-06-04: Implemented Phase 4C3C1 as an immediate material-artifact preparation slice. Shared
+  static material route/page helper logic now feeds both static object bundles and structured
+  interiors. Detailed-landblock artifacts now carry structured-interior material records,
+  texture-page refs, owned texture pages, and per-cell material slices for RGBA prepared texture
+  materials with optional detail. Textured WebGL structured-interior submit remains Phase 4C3C2.
 
 Validation:
 
@@ -363,6 +369,13 @@ Validation:
   passed after Phase 4C3B.
 - `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run lint:rust` passed after
   Phase 4C3B.
+- `npm exec vitest -- run src/workers/static-landblock-render-worker.test.ts` passed after Phase
+  4C3C1.
+- `npm exec vitest -- run src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer-texture-pages.test.ts`
+  passed after Phase 4C3C1.
+- `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run lint:rust` passed after
+  Phase 4C3C1.
+- `git diff --check` passed after Phase 4C3C1.
 
 Related plans:
 
@@ -3203,6 +3216,12 @@ Exit criteria:
 
 ### Phase 4C3C: Structured Interior Material Artifact Realization
 
+Status: Split after Phase 4C3B. Phase 4C3C1 is implemented on 2026-06-04; Phase 4C3C2 is next.
+
+#### Phase 4C3C1: Worker Material Artifact Contract Preparation
+
+Status: Implemented on 2026-06-04.
+
 - Promote detailed interior material and texture facts into worker-owned detailed artifacts instead
   of resolving them from `AssetChannelState.preparedByAssetId` during WebGL resource sync or submit.
 - Extend the detailed artifact contract so structured interior shell/render geometry can reference
@@ -3213,6 +3232,57 @@ Exit criteria:
 - Reuse worker-safe material-route, texture-page, and virtual-ref helpers where they match the
   interior material facts; extract shared helpers only when they remove real duplication from
   static object bundle and structured-interior builders.
+
+Decisions and course corrections:
+
+- Split material realization before touching WebGL submit. The current direct structured-interior
+  resources upload whole-cell position-only geometry through the flat shader. Material-correct submit
+  needs worker-built surface slices, material records, texture refs, and texture pages first; doing
+  artifact contract and shader/resource submit in one phase would mix DTO changes with WebGL
+  realization and make regressions harder to isolate.
+- Extracted static material route/page helpers into a shared worker-safe module instead of copying
+  the private static object bundle logic. Static object bundles and structured interiors now share
+  the same raw/detail RGBA, indexed texel, palette, and optional detail route policy.
+- Detailed-landblock artifacts now carry structured-interior material records, texture-page refs,
+  owned texture pages, and per-cell material slices. The slices use env-cell surface/material facts
+  and preserve material variant signatures from the prepared render geometry.
+- Worker companion-closure loading now uses the shared static material prepared-texture route helper,
+  so indexed-aware route selection is shared between closure loading and artifact construction.
+
+Cleanup targets discovered:
+
+- Code still uses `DetailedPortalLinkSidecar`, `DetailedPortalApertureSidecar`, and related
+  sidecar-named TypeScript interfaces even though the plan has moved to artifact terminology. Rename
+  those active DTO interfaces during the portal/spatial artifact handoff or cleanup, not in the
+  material slice.
+- `buildStagedPolygonSetGeometry` is now used by the worker-side structured-interior material slice
+  builder. If more worker builders need polygon-set slicing, rename or move it to a neutral
+  polygon-set geometry module so the worker path is not described as staged.
+- Structured-interior material slices currently carry positions, UVs, and indices, while the legacy
+  whole-cell resource still owns flat position/index buffers. Phase 4C3C2 should replace or narrow
+  the flat resource path so both representations do not stay live longer than necessary.
+
+Legacy shims introduced:
+
+- No main-thread material lookup fallback, product-contract compatibility field, staged draw-unit
+  adapter, or global atlas state input was added.
+- The flat structured-interior resource path remains as the current renderer submit path until Phase
+  4C3C2 consumes the material artifacts.
+
+Exit criteria:
+
+- Implemented. Detailed-landblock artifacts carry structured-interior material records,
+  material-slice geometry, texture-page refs, and artifact-owned texture pages.
+- Implemented. Static object bundles and structured-interior material artifacts share worker-safe
+  static material route/page helpers.
+- Implemented. Focused worker tests cover RGBA structured-interior material records, raw/detail
+  texture refs, owned texture pages, material slices, and transferred slice buffers.
+- Implemented. Focused static object bundle builder/page tests continue to pass after the helper
+  extraction.
+- Implemented. `npm run check` passes after implementation.
+
+#### Phase 4C3C2: Textured Structured Interior WebGL Resource Realization
+
 - Update `Webgl2StructuredInteriorResourceStore` and structured-interior submit so resident detailed
   artifacts render through material/texture bindings rather than the flat per-cell shader path.
 - Keep flat per-cell color only as an unsupported-material diagnostic fallback. It must not be the
@@ -3235,6 +3305,8 @@ Decisions and course corrections:
 - Do not broaden this phase into portal traversal policy. Portal/spatial consumers need artifacts
   next, but material-correct structured-interior submit can be implemented before their
   resource handoff.
+- WebGL realization should consume the 4C3C1 material slices directly instead of rebuilding
+  surface/material slices from whole-cell render geometry on the main thread.
 
 Cleanup targets to track:
 

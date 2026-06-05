@@ -73,7 +73,10 @@ import {
 	type TerrainSceneModel,
 } from "./terrain-scene";
 import { deriveLandblockRenderChunkPlacement } from "./render-chunks";
-import { deriveTransitionPortalCandidates } from "./transition-portal-work-items";
+import {
+	deriveTransitionPortalCandidates,
+	deriveTransitionPortalCandidatesFromLandblockArtifacts,
+} from "./transition-portal-work-items";
 import { WORLD_RENDER_DOMAIN } from "./render-domains";
 import type { SceneCameraFrame } from "./camera";
 import type { WorldDisplayRenderStyle } from "./renderer-contract";
@@ -369,11 +372,16 @@ export class BrowserRenderResourceCoordinator {
 				selectedEnvCellId: selectedDiagnosticEnvCellId,
 			},
 		);
-		const transitionPortalModel = deriveTransitionPortalCandidates({
-			assetState: input.assetState,
-			structuredInteriorScene,
-			activeLandblockIds: outdoorSceneInterest?.buildingLandblockIds ?? [],
-		});
+		const transitionPortalModel =
+			deriveTransitionPortalCandidatesFromLandblockArtifacts({
+				artifacts: input.staticLandblockRenderArtifacts,
+				activeLandblockIds: outdoorSceneInterest?.buildingLandblockIds ?? [],
+			}) ??
+			deriveTransitionPortalCandidates({
+				assetState: input.assetState,
+				structuredInteriorScene,
+				activeLandblockIds: outdoorSceneInterest?.buildingLandblockIds ?? [],
+			});
 		const activeRenderChunkPlacements = collectActiveRenderChunkPlacements(
 			terrainScene,
 			structuredInteriorScene,

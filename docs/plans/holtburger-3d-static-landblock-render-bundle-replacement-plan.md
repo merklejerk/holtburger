@@ -28,6 +28,7 @@ static suppression are implemented. Phase 4E3 artifact-active outdoor static sce
 cutover is implemented. Phase 4E4 indoor/dungeon env-cell product scheduling is implemented.
 Phase 4E5 artifact-active structured-interior fallback cutover is implemented.
 Phase 4E6 artifact-active structured coverage cutover is implemented.
+Phase 4E7 browser coordinator contract hard cutover is implemented.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -374,6 +375,10 @@ Progress:
   coordinator updates now avoid prepared topology/env-cell closure expansion for structured-interior
   coverage; resident detailed artifacts provide selected env-cell coverage, and in-flight indoor
   products use the focused env cell only until artifacts arrive.
+- 2026-06-05: Implemented Phase 4E7. `BrowserRenderResourceCoordinator.update` no longer calls the
+  prepared static renderable, prepared structured-interior, prepared topology, or prepared transition
+  portal derivation paths. Static scene content is now limited to runtime appearance previews, and
+  structured interior scene content comes from resident detailed artifacts or an empty scene.
 
 Validation:
 
@@ -451,6 +456,9 @@ Validation:
 - `npm exec vitest -- run src/lib/world-display/browser-render-resource-coordinator.test.ts src/lib/world-display/structured-interior-scene.test.ts src/lib/world-display/static-landblock-render-artifact-coordinator.test.ts src/lib/assets/landblock-render-product-planner.test.ts`,
   `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
   `git diff --check` passed after Phase 4E6.
+- `npm exec vitest -- run src/lib/world-display/browser-render-resource-coordinator.test.ts src/lib/world-display/structured-interior-scene.test.ts src/lib/world-display/transition-portal-work-items.test.ts src/lib/world-display/static-landblock-render-artifact-coordinator.test.ts src/lib/assets/landblock-render-product-planner.test.ts`,
+  `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
+  `git diff --check` passed after Phase 4E7.
 - `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts`
   passed after the first Phase 1D builder slice.
 - `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts`
@@ -4747,17 +4755,53 @@ surfaces for runtime appearance previews, non-artifact states, diagnostics, and 
 - Preserve runtime appearance previews as non-landblock scene elements until a separate dynamic/pinned
   object worker owns them.
 
+Decisions and course corrections:
+
+- Implemented. `BrowserRenderResourceCoordinator.update` no longer imports or calls
+  `deriveStaticRenderableSceneModel`, `deriveStructuredInteriorSceneModel`,
+  `deriveTopologyEnvCellIdsForLandblocks`, or the prepared-state
+  `deriveTransitionPortalCandidates` fallback.
+- Implemented. The coordinator static scene is now runtime appearance preview content only. Prepared
+  outdoor/env-cell static facts do not enter the coordinator scene even when no artifact work is
+  resident yet.
+- Implemented. The coordinator structured-interior scene now comes from resident detailed artifacts
+  or `createEmptyStructuredInteriorSceneModel()`.
+- Course correction: this phase did not remove `setStaticRenderableScene` or
+  `setStructuredInteriorScene` from renderer contracts. Those model-shaped handoffs still carry
+  preview-only static content and artifact-backed structured content until Phase 4E8 and Phase 4E9
+  delete the staged consumers.
+- Course correction: the prepared transition portal fallback was removed from the coordinator at the
+  same boundary. Transition portal candidates are now artifact-native or empty; preserving the
+  prepared fallback would keep topology/env-cell prepared-state coupling alive.
+
+Cleanup targets discovered:
+
+- `StaticRenderableSceneModel` now acts as a preview-only coordinator payload in browser landblock
+  rendering. Phase 4E9 should rename or split this path so staged static deletion does not confuse
+  runtime preview support with landblock static hydration.
+- `StructuredInteriorSceneModel` still crosses the renderer surface because artifact-backed
+  structured cells reuse that model shape. Phase 4E8 should either replace the staged structured
+  consumer with artifact resources directly or narrow this model to artifact/debug handoff only.
+- Tests for prepared static/structured derivation still exist around the pure helper modules. Keep
+  them only while those helpers have non-browser callers; delete them when knip shows no production
+  usage.
+
+Legacy shims introduced:
+
+- None. The prepared producers were removed from the browser coordinator instead of retained behind
+  another fallback switch.
+
 Exit criteria:
 
-- Browser landblock rendering no longer calls `deriveStaticRenderableSceneModel` or
+- Implemented. Browser landblock rendering no longer calls `deriveStaticRenderableSceneModel` or
   `deriveStructuredInteriorSceneModel`.
-- Runtime appearance previews remain functional without using landblock-derived static scene
+- Implemented. Runtime appearance previews remain functional without using landblock-derived static scene
   derivation.
-- `BrowserRenderResourceSurface` no longer implies `StaticRenderableSceneModel` or
-  `StructuredInteriorSceneModel` are authoritative landblock geometry sources for browser
-  landblocks.
-- Focused coordinator tests cover outdoor, indoor/dungeon, resident detailed artifacts, and runtime
-  appearance preview preservation.
+- Partially implemented. `BrowserRenderResourceSurface` still has model-shaped setters, but the
+  coordinator no longer feeds them prepared landblock geometry. Phase 4E8/4E9 own the remaining
+  contract deletion once staged consumers are gone.
+- Implemented. Focused coordinator tests cover outdoor, indoor/dungeon, resident detailed artifacts,
+  and runtime appearance preview preservation.
 
 ### Phase 4E8: Staged Structured-Interior Draw Path Removal
 

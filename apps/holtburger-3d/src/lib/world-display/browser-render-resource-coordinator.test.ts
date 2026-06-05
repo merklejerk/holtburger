@@ -9,6 +9,8 @@ import {
 	type PreparedAssetRecord,
 	type PreparedLandblockOutdoorPayload,
 	type PreparedPolygonSetRenderGeometry,
+	type PreparedSetupAppearancePayload,
+	type PreparedSetupModelPayload,
 } from "../assets/types";
 import {
 	formatEnvCellAssetId,
@@ -25,7 +27,7 @@ import type { StaticRenderableSceneModel } from "./static-renderables";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 
 describe("browser render resource coordinator", () => {
-	it("keeps prepared outdoor statics on the legacy path before static artifacts are active", () => {
+	it("does not derive prepared outdoor statics without artifact ownership", () => {
 		const landblockId = 0x02030000;
 		const surface = createCapturingSurface();
 		const coordinator = new BrowserRenderResourceCoordinator();
@@ -44,6 +46,52 @@ describe("browser render resource coordinator", () => {
 				browserDestination: createOutdoorDestination(landblockId),
 				staticLandblockRenderArtifacts:
 					createEmptyStaticLandblockRenderArtifactStoreSnapshot(),
+			}),
+		);
+
+		expect(surface.staticRenderableScenes.at(-1)?.parts).toHaveLength(0);
+	});
+
+	it("preserves runtime appearance previews without landblock static derivation", () => {
+		const landblockId = 0x02030000;
+		const setupModelId = 0x02000001;
+		const gfxObjId = 0x01000001;
+		const surface = createCapturingSurface();
+		const coordinator = new BrowserRenderResourceCoordinator();
+		coordinator.setSurface(surface);
+
+		coordinator.update(
+			createCoordinatorInput({
+				assetState: createAssetState([
+					createSetupModelRecord({
+						setupModelId,
+						gfxObjId,
+						partPlacement: createPlacement({ x: 0, y: 0, z: 0 }),
+					}),
+					createGfxObjRecord(gfxObjId),
+				]),
+				browserDestination: createOutdoorDestination(landblockId),
+				staticLandblockRenderArtifacts:
+					createEmptyStaticLandblockRenderArtifactStoreSnapshot(),
+				runtimeAppearancePreviews: [
+					{
+						id: "preview",
+						spawnCameraFrame: {
+							position: { x: 0, y: 0, z: 0 },
+							target: { x: 1, y: 0, z: 0 },
+							up: { x: 0, y: 0, z: 1 },
+							aspect: 1,
+							fovDegrees: 70,
+							near: 0.1,
+							far: 1000,
+						},
+						setupAppearance: createSetupAppearancePayload({
+							setupModelId,
+							gfxObjId,
+						}),
+					},
+				],
+				activeRenderAnchor: { landblockId },
 			}),
 		);
 
@@ -215,10 +263,11 @@ function createCapturingSurface(): BrowserRenderResourceSurface & {
 }
 
 function createCoordinatorInput(
-	overrides: Pick<
-		BrowserRenderResourceCoordinatorInput,
-		"assetState" | "browserDestination" | "staticLandblockRenderArtifacts"
-	>,
+	overrides: Partial<BrowserRenderResourceCoordinatorInput> &
+		Pick<
+			BrowserRenderResourceCoordinatorInput,
+			"assetState" | "browserDestination" | "staticLandblockRenderArtifacts"
+		>,
 ): BrowserRenderResourceCoordinatorInput {
 	return {
 		assetState: overrides.assetState,
@@ -240,6 +289,7 @@ function createCoordinatorInput(
 		browserCameraFrame: null,
 		runtimeAppearancePreviews: [],
 		staticLandblockRenderArtifacts: overrides.staticLandblockRenderArtifacts,
+		...overrides,
 	};
 }
 
@@ -383,6 +433,100 @@ function createGfxObjRecord(gfxObjId: number): PreparedAssetRecord {
 			renderGeometry: createEmptyRenderGeometry(),
 			sortCenter: null,
 			didDegrade: null,
+		},
+	};
+}
+
+function createSetupModelRecord(options: {
+	setupModelId: number;
+	gfxObjId: number;
+	partPlacement: PreparedSetupModelPayload["placementSets"][number]["localPlacements"][number];
+}): PreparedAssetRecord {
+	const assetId = formatSetupModelAssetId(options.setupModelId);
+	return {
+		request: { requestId: assetId, assetId, priority: "bootstrap" },
+		response: {
+			requestId: assetId,
+			assetId,
+			payloadKind: "json",
+			payload: null,
+		},
+		preparedAt: "test",
+		payload: {
+			kind: "setup-model",
+			sourceAssetKind: "setup-model",
+			residencyKind: "unknown",
+			provenance: PROVENANCE,
+			setupModelId: options.setupModelId,
+			flags: null,
+			parts: [
+				{
+					partIndex: 0,
+					gfxObjId: options.gfxObjId,
+					gfxObjAssetId: formatGfxObjAssetId(options.gfxObjId),
+					parentIndex: null,
+					scale: null,
+				},
+			],
+			holdingLocations: [],
+			connectionPoints: [],
+			placementSets: [
+				{
+					key: 0x65,
+					localPlacements: [options.partPlacement],
+					hookCount: 0,
+					textureVelocities: [],
+				},
+			],
+			collisionWitness: {
+				cylSphereCount: 0,
+				sphereCount: 0,
+			},
+			height: null,
+			radius: null,
+			stepUp: null,
+			stepDown: null,
+			sortingSphere: null,
+			selectionSphere: null,
+			lights: [],
+			defaultAnimation: null,
+			defaultScript: null,
+			defaultMotionTable: null,
+			defaultSoundTable: null,
+			defaultScriptTable: null,
+			dependencies: {
+				gfxObjAssetIds: [formatGfxObjAssetId(options.gfxObjId)],
+			},
+		},
+	};
+}
+
+function createSetupAppearancePayload(options: {
+	setupModelId: number;
+	gfxObjId: number;
+}): PreparedSetupAppearancePayload {
+	return {
+		kind: "setup-appearance",
+		sourceAssetKind: "setup-appearance",
+		residencyKind: "unknown",
+		provenance: PROVENANCE,
+		setupModelId: options.setupModelId,
+		appearanceKey: formatSetupAppearanceAssetId(options.setupModelId),
+		parts: [
+			{
+				partIndex: 0,
+				gfxObjId: options.gfxObjId,
+				gfxObjAssetId: formatGfxObjAssetId(options.gfxObjId),
+				materialSlots: [],
+			},
+		],
+		textureChanges: [],
+		animPartChanges: [],
+		paletteId: null,
+		subPalettes: [],
+		dependencies: {
+			materialAssetIds: [],
+			paletteAssetIds: [],
 		},
 	};
 }
@@ -531,4 +675,12 @@ function createPlacement(origin: { x: number; y: number; z: number }) {
 
 function formatGfxObjAssetId(gfxObjId: number): string {
 	return `gfx-obj/${gfxObjId.toString(16).padStart(8, "0")}`;
+}
+
+function formatSetupModelAssetId(setupModelId: number): string {
+	return `setup-model/${setupModelId.toString(16).padStart(8, "0")}`;
+}
+
+function formatSetupAppearanceAssetId(setupModelId: number): string {
+	return `setup-appearance/${setupModelId.toString(16).padStart(8, "0")}`;
 }

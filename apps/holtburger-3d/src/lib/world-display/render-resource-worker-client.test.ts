@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { RenderResourceJobScheduler } from "./render-resource-job-scheduler";
 import type { RenderResourceWorkerLike } from "./render-resource-worker-client";
 import { RenderResourceWorkerClient } from "./render-resource-worker-client";
-import { CompactedGeometryWorkerScheduler } from "./worker-resources/compacted-geometry-worker-scheduler";
 import { IndexedResourceAtlasWorkerScheduler } from "./worker-resources/indexed-atlas-worker-scheduler";
 import type { BuildIndexedResourceAtlasWorkerInput } from "./worker-resources/indexed-atlas-worker-payloads";
 import { TextureAtlasWorkerScheduler } from "./worker-resources/texture-atlas-worker-scheduler";
@@ -246,152 +245,6 @@ describe("render resource job scheduler", () => {
 	});
 });
 
-describe("compacted geometry worker scheduler", () => {
-	it("submits compacted jobs and reports ready results by group key", async () => {
-		const worker = new FakeRenderResourceWorker();
-		const client = new RenderResourceWorkerClient(() => worker);
-		let readyNotificationCount = 0;
-		const scheduler = new CompactedGeometryWorkerScheduler({
-			client,
-			onReadyResult() {
-				readyNotificationCount += 1;
-			},
-		});
-
-		scheduler.scheduleDesired({
-			groupKey: "rgbaAtlas|partition=abcd|landblock=12340000",
-			desiredJobKey: "compacted-geometry|job=a",
-			plan: {
-				key: "plan:a",
-				compactableDrawUnitIds: [],
-				materialSlots: [],
-				drawUnitMaterialSlots: [],
-				drawSlices: [],
-				triangleCount: 0,
-			},
-			drawUnits: [],
-			batchOrigin: { x: 0, y: 0, z: 0 },
-		});
-
-		expect(worker.messages).toEqual([
-			{
-				type: "run-job",
-				requestId: "render-resource-1",
-				job: {
-					type: "build-compacted-geometry",
-					key: "compacted-geometry|job=a",
-					input: {
-						key: "compacted-geometry|job=a",
-						plan: {
-							key: "plan:a",
-							compactableDrawUnitIds: [],
-							materialSlots: [],
-							drawUnitMaterialSlots: [],
-							drawSlices: [],
-							triangleCount: 0,
-						},
-						drawUnits: [],
-						batchOrigin: { x: 0, y: 0, z: 0 },
-					},
-				},
-			},
-		]);
-
-		worker.emit({
-			type: "job-complete",
-			requestId: "render-resource-1",
-			result: {
-				type: "build-compacted-geometry",
-				key: "compacted-geometry|job=a",
-				geometry: null,
-			},
-			durationMs: 1,
-		});
-		await waitForMicrotasks();
-
-		expect(readyNotificationCount).toBe(1);
-		expect(scheduler.consumeReadyResults()).toEqual([
-			{
-				groupKey: "rgbaAtlas|partition=abcd|landblock=12340000",
-				result: {
-					type: "build-compacted-geometry",
-					key: "compacted-geometry|job=a",
-					geometry: null,
-				},
-			},
-		]);
-
-		scheduler.dispose();
-		expect(worker.wasTerminated).toBe(true);
-	});
-
-	it("aggregates compacted job metrics and discards stale results", async () => {
-		const worker = new FakeRenderResourceWorker();
-		const client = new RenderResourceWorkerClient(() => worker);
-		const scheduler = new CompactedGeometryWorkerScheduler({
-			client,
-			onReadyResult() {
-				return;
-			},
-		});
-
-		scheduler.scheduleDesired(createCompactedDesiredBatch("job:a"));
-		scheduler.scheduleDesired(createCompactedDesiredBatch("job:b"));
-
-		expect(scheduler.getMetrics()).toMatchObject({
-			activeSchedulerCount: 1,
-			submittedJobCount: 1,
-			coalescedDesiredJobCount: 1,
-		});
-
-		worker.emit({
-			type: "job-complete",
-			requestId: "render-resource-1",
-			result: {
-				type: "build-compacted-geometry",
-				key: "job:a",
-				geometry: null,
-			},
-			durationMs: 1,
-		});
-		await waitForMicrotasks();
-
-		expect(scheduler.consumeReadyResults()).toEqual([]);
-		expect(worker.messages).toHaveLength(2);
-		expect(worker.messages[1]?.job.key).toBe("job:b");
-		expect(scheduler.getMetrics()).toMatchObject({
-			submittedJobCount: 2,
-			staleResultCount: 1,
-		});
-
-		worker.emit({
-			type: "job-complete",
-			requestId: "render-resource-2",
-			result: {
-				type: "build-compacted-geometry",
-				key: "job:b",
-				geometry: null,
-			},
-			durationMs: 1,
-		});
-		await waitForMicrotasks();
-
-		expect(scheduler.consumeReadyResults()).toEqual([
-			{
-				groupKey: "rgbaAtlas|partition=abcd|landblock=12340000",
-				result: {
-					type: "build-compacted-geometry",
-					key: "job:b",
-					geometry: null,
-				},
-			},
-		]);
-		expect(scheduler.getMetrics()).toMatchObject({
-			readyResultCount: 1,
-		});
-	});
-});
-
 describe("indexed resource atlas worker scheduler", () => {
 	it("submits indexed atlas jobs and reports ready results", async () => {
 		const worker = new FakeRenderResourceWorker();
@@ -622,25 +475,6 @@ describe("texture atlas worker scheduler", () => {
 		});
 	});
 });
-
-function createCompactedDesiredBatch(
-	desiredJobKey: string,
-): Parameters<CompactedGeometryWorkerScheduler["scheduleDesired"]>[0] {
-	return {
-		groupKey: "rgbaAtlas|partition=abcd|landblock=12340000",
-		desiredJobKey,
-		plan: {
-			key: "plan:a",
-			compactableDrawUnitIds: [],
-			materialSlots: [],
-			drawUnitMaterialSlots: [],
-			drawSlices: [],
-			triangleCount: 0,
-		},
-		drawUnits: [],
-		batchOrigin: { x: 0, y: 0, z: 0 },
-	};
-}
 
 function createIndexedAtlasWorkerInput(
 	key = "indexed-plan:a",

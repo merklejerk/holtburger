@@ -13,11 +13,6 @@ import {
 	type PreparedTexturePayload,
 } from "../assets/types";
 import { formatHex32 } from "../landblocks";
-import {
-	createEmptyCompactionFamilyPlan,
-	type CompactionFamilyPlan,
-	type IndexedPalettedFamilyMaterialTableRecord,
-} from "./compaction/compaction-family-planner";
 import { createBaseMaterialAppearanceContext } from "./material-appearance";
 import type { ResolvedMaterialSlot } from "./material-plan";
 import { WORLD_RENDER_DOMAIN } from "./render-domains";
@@ -30,8 +25,6 @@ import {
 	type StaticRenderablePart,
 } from "./static-renderables";
 import type { StructuredInteriorCell } from "./structured-interior-scene";
-import type { IndexedResourceAtlasPlan } from "./texture-pages/indexed-resource-atlas-planner";
-import { createEmptyTexturePageAtlasPlan } from "./texture-pages/texture-page-atlas-planner";
 import type { LandblockTerrainRenderArtifact } from "./terrain-render-artifact";
 import type { LandblockRenderProductWorkerResult } from "./landblock-render-product";
 import type { TerrainSceneModel } from "./terrain-scene";
@@ -45,7 +38,6 @@ import {
 	commitWebgl2TextureAtlasGeneration,
 	createWebgl2WorldResourceStore,
 	destroyWebgl2WorldResources,
-	markWebgl2CompactedGeometryBatchReplacementPending,
 	markWebgl2IndexedResourceAtlasGenerationReplacementPending,
 	markWebgl2TextureAtlasGenerationReplacementPending,
 	syncWebgl2StaticLandblockRenderArtifactResources,
@@ -54,19 +46,12 @@ import {
 } from "./webgl2-world-resources";
 import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
 import type { StaticObjectBundleArtifact } from "./static-bundle-layer";
-import {
-	createIndexedPalettedCompactedLandblockBatchPlans,
-	shouldRetainWebgl2CompactedGeometryBatch,
-} from "./webgl2/resources/compacted-geometry-sync";
 import type { Webgl2IndexedResourceAtlasGenerationResource } from "./webgl2/resources/indexed-resource-atlas-generation";
 import type { Webgl2TextureAtlasGenerationResource } from "./webgl2/resources/texture-atlas-generation";
-import { CompactedGeometryWorkerScheduler } from "./worker-resources/compacted-geometry-worker-scheduler";
 import { TextureAtlasWorkerScheduler } from "./worker-resources/texture-atlas-worker-scheduler";
 import type {
 	RenderResourceWorkerRequestMessage,
 } from "../../workers/render-resource-worker";
-import type { RenderMat4 } from "./render-math";
-import type { StagedWorldDrawUnitAssembly } from "./staged-world-assembly";
 
 describe("webgl2 world resources", () => {
 	it("keeps committed texture atlas generation alive while a replacement is pending", () => {
@@ -125,31 +110,6 @@ describe("webgl2 world resources", () => {
 		expect(store.indexedResourceAtlasGeneration).toBe(next);
 		expect(store.pendingIndexedResourceAtlasGenerationKey).toBeNull();
 		expect(disposedKeys).toEqual([previous.key]);
-	});
-
-	it("retains compacted geometry batches protected by pending replacement work", () => {
-		const store = createWebgl2WorldResourceStore();
-
-		expect(
-			shouldRetainWebgl2CompactedGeometryBatch({
-				store,
-				batchKey: "batch/old",
-				retainedGeometryBatchKeys: new Set(),
-			}),
-		).toBe(false);
-
-		markWebgl2CompactedGeometryBatchReplacementPending({
-			store,
-			batchKey: "batch/old",
-		});
-
-		expect(
-			shouldRetainWebgl2CompactedGeometryBatch({
-				store,
-				batchKey: "batch/old",
-				retainedGeometryBatchKeys: new Set(),
-			}),
-		).toBe(true);
 	});
 
 	it("syncs resident outdoor static bundle layers into WebGL resources", () => {
@@ -824,7 +784,6 @@ describe("webgl2 world resources", () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
 		installTextureAtlasWorkerScheduler(store);
-		installCompactedGeometryWorkerScheduler(store);
 		const materialSurfaceId = 0x08000002;
 		const renderSurfaceId = 0x06000002;
 
@@ -850,34 +809,6 @@ describe("webgl2 world resources", () => {
 		expect(store.texturePageReadyMaterialCount).toBe(1);
 		expect(store.atlasCandidateEntryCount).toBe(1);
 		expect(store.atlasCandidateMaterialSlotCount).toBe(1);
-	});
-
-	it("keys compacted indexed worker jobs by indexed atlas plan identity", () => {
-		const plan = createIndexedCompactionPlanFixture();
-		const drawUnits = [createIndexedStagedDrawUnitFixture()];
-		const renderChunkTransforms = [createChunkTransform()];
-		const firstBatchPlan = createIndexedPalettedCompactedLandblockBatchPlans({
-			plan,
-			drawUnits,
-			renderChunkTransforms,
-			indexedResourceAtlasPlan: createIndexedResourceAtlasPlanFixture(
-				"indexed-atlas-plan/a",
-			),
-		})[0];
-		const secondBatchPlan = createIndexedPalettedCompactedLandblockBatchPlans({
-			plan,
-			drawUnits,
-			renderChunkTransforms,
-			indexedResourceAtlasPlan: createIndexedResourceAtlasPlanFixture(
-				"indexed-atlas-plan/b",
-			),
-		})[0];
-
-		expect(firstBatchPlan?.desiredJobKey).toBeDefined();
-		expect(secondBatchPlan?.desiredJobKey).toBeDefined();
-		expect(firstBatchPlan?.desiredJobKey).not.toBe(
-			secondBatchPlan?.desiredJobKey,
-		);
 	});
 
 });
@@ -917,183 +848,6 @@ function installTextureAtlasWorkerScheduler(
 		},
 	});
 	return worker;
-}
-
-function installCompactedGeometryWorkerScheduler(
-	store: Webgl2WorldResourceStore,
-): FakeRenderResourceWorker {
-	const worker = new FakeRenderResourceWorker();
-	store.compactedGeometryWorkerScheduler = new CompactedGeometryWorkerScheduler(
-		{
-			client: new RenderResourceWorkerClient(() => worker),
-			onReadyResult() {
-				return;
-			},
-		},
-	);
-	return worker;
-}
-
-function createIndexedCompactionPlanFixture(): CompactionFamilyPlan {
-	const emptyPlan = createEmptyCompactionFamilyPlan();
-	const materialRecord = createIndexedMaterialTableRecordFixture();
-	const drawSlice = {
-		key: "indexed-slice/stable",
-		indexFormat: "p8",
-		indexPageKey: materialRecord.indexPageKey,
-		palettePageKey: materialRecord.palettePageKey,
-		indexAtlasTextureIndex: 0,
-		paletteAtlasTextureIndex: 0,
-		renderStateKey: "indexed-opaque",
-		materialTableSlotStart: 0,
-		materialTableSlotCount: 1,
-		materialSlotKeys: [materialRecord.key],
-		drawUnitIds: ["indexed-draw-unit"],
-	} as const;
-	const indexedFamily = {
-		kind: "indexed-paletted",
-		compactableDrawUnitIds: ["indexed-draw-unit"],
-		materialTableRecords: [materialRecord],
-		drawUnitMaterialSlots: [
-			{
-				drawUnitId: "indexed-draw-unit",
-				materialSlotKey: materialRecord.key,
-			},
-		],
-		drawSlices: [drawSlice],
-		partitions: [
-			{
-				key: "indexed-partition/stable",
-				compactableDrawUnitIds: ["indexed-draw-unit"],
-				materialTableRecords: [materialRecord],
-				drawUnitMaterialSlots: [
-					{
-						drawUnitId: "indexed-draw-unit",
-						materialSlotKey: materialRecord.key,
-					},
-				],
-				drawSlices: [drawSlice],
-			},
-		],
-	} satisfies CompactionFamilyPlan["renderFamilies"]["indexedPaletted"];
-	return {
-		...emptyPlan,
-		key: "compaction-plan/stable",
-		renderFamilies: {
-			...emptyPlan.renderFamilies,
-			indexedPaletted: indexedFamily,
-		},
-		compactableDrawUnitIds: ["indexed-draw-unit"],
-		texturePageAtlasPlan: createEmptyTexturePageAtlasPlan(),
-		indexedMaterialTableRecords: [materialRecord],
-		triangleCount: 1,
-	};
-}
-
-function createIndexedMaterialTableRecordFixture(): IndexedPalettedFamilyMaterialTableRecord {
-	return {
-		key: "indexed-material/stable",
-		sourceMaterialKey: "material/indexed",
-		indexPageKey: "index-texture/stable",
-		palettePageKey: "palette/stable",
-		indexFormat: "p8",
-		indexPageWidth: 2,
-		indexPageHeight: 1,
-		paletteColorCount: 2,
-		clipThreshold: 0,
-		wrapS: "clamp",
-		wrapT: "clamp",
-		color: [1, 1, 1, 1],
-		detailAtlasEntryKey: null,
-		detailTiling: 1,
-		alphaPolicy: "opaque",
-		filteringMode: "shader-palette-linear",
-	};
-}
-
-function createIndexedStagedDrawUnitFixture(): StagedWorldDrawUnitAssembly {
-	return {
-		id: "indexed-draw-unit",
-		kind: "static",
-		renderDomain: WORLD_RENDER_DOMAIN.exteriorStatic,
-		owningLandblockId: 0x12340000,
-		geometry: {
-			signature: "geometry/stable",
-			positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
-			uvs: new Float32Array([0, 0, 1, 0, 0, 1]),
-			indices: new Uint16Array([0, 1, 2]),
-			vertexCount: 3,
-			triangleCount: 1,
-		},
-		modelMatrix: createIdentityMat4(),
-		material: {
-			kind: "indexed-paletted",
-		} as StagedWorldDrawUnitAssembly["material"],
-		preparedAssetIds: [],
-		bvhBinding: {
-			itemKeys: [],
-			fallbackReason: null,
-		},
-		staticPartCount: 1,
-		staticObjectKeys: ["static-object/stable"],
-	};
-}
-
-function createIndexedResourceAtlasPlanFixture(
-	key: string,
-): IndexedResourceAtlasPlan {
-	const indexPlacement = {
-		indexTextureKey: "index-texture/stable",
-		format: "p8",
-		atlasTextureIndex: 0,
-		x: 0,
-		y: 0,
-		width: 2,
-		height: 1,
-		sourceBytes: new Uint8Array([0, 1]),
-	} as const;
-	const palettePlacement = {
-		paletteTextureKey: "palette/stable",
-		atlasTextureIndex: 0,
-		x: 0,
-		y: 0,
-		colorCount: 2,
-		rgbaBytes: new Uint8Array([0, 0, 0, 255, 255, 255, 255, 255]),
-	} as const;
-	return {
-		key,
-		indexReadyDrawUnitIds: ["indexed-draw-unit"],
-		paletteReadyDrawUnitIds: ["indexed-draw-unit"],
-		failures: [],
-		p8IndexAtlasTextures: [
-			{
-				format: "p8",
-				textureIndex: 0,
-				width: 2,
-				height: 1,
-				placements: [indexPlacement],
-			},
-		],
-		index16AtlasTextures: [],
-		paletteAtlasTextures: [
-			{
-				textureIndex: 0,
-				width: 2,
-				height: 1,
-				placements: [palettePlacement],
-			},
-		],
-		indexPlacementsByTextureKey: new Map([
-			[indexPlacement.indexTextureKey, indexPlacement],
-		]),
-		palettePlacementsByTextureKey: new Map([
-			[palettePlacement.paletteTextureKey, palettePlacement],
-		]),
-	};
-}
-
-function createIdentityMat4(): RenderMat4 {
-	return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 }
 
 class FakeWebgl2 {

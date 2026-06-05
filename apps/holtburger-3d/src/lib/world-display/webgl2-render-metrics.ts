@@ -330,26 +330,14 @@ export function createWebgl2RenderMetrics(
 			compactedResourceFallbackSamples: [
 				...(input.worldStore?.compactedResourceFallbackSamples ?? []),
 			],
-			compactedGeometryWorkerActiveSchedulerCount:
-				input.worldStore?.compactedGeometryWorkerMetrics.activeSchedulerCount ??
-				0,
-			compactedGeometryWorkerSubmittedJobCount:
-				input.worldStore?.compactedGeometryWorkerMetrics.submittedJobCount ?? 0,
-			compactedGeometryWorkerDedupedDesiredJobCount:
-				input.worldStore?.compactedGeometryWorkerMetrics
-					.dedupedDesiredJobCount ?? 0,
-			compactedGeometryWorkerCoalescedDesiredJobCount:
-				input.worldStore?.compactedGeometryWorkerMetrics
-					.coalescedDesiredJobCount ?? 0,
-			compactedGeometryWorkerStaleResultCount:
-				input.worldStore?.compactedGeometryWorkerMetrics.staleResultCount ?? 0,
-			compactedGeometryWorkerReadyResultCount:
-				input.worldStore?.compactedGeometryWorkerMetrics.readyResultCount ?? 0,
-			compactedGeometryWorkerCommittedResultCount:
-				input.worldStore?.compactedGeometryWorkerMetrics.committedResultCount ??
-				0,
-			compactedGeometryWorkerErrorCount:
-				input.worldStore?.compactedGeometryWorkerMetrics.errorCount ?? 0,
+			compactedGeometryWorkerActiveSchedulerCount: 0,
+			compactedGeometryWorkerSubmittedJobCount: 0,
+			compactedGeometryWorkerDedupedDesiredJobCount: 0,
+			compactedGeometryWorkerCoalescedDesiredJobCount: 0,
+			compactedGeometryWorkerStaleResultCount: 0,
+			compactedGeometryWorkerReadyResultCount: 0,
+			compactedGeometryWorkerCommittedResultCount: 0,
+			compactedGeometryWorkerErrorCount: 0,
 			rgbaTexturePageFamilyShaderDrawCallCount:
 				input.submitMetrics.rgbaTexturePageFamilyShaderDrawCallCount,
 			rgbaTexturePageFamilySubmittedBatchCount:
@@ -596,20 +584,12 @@ export function createWebgl2RenderMetrics(
 							input.worldStore.compactedGeometryBatchOriginCount,
 						"webgl2-compacted-geometry-transform-table-entries":
 							input.worldStore.compactedGeometryTransformTableEntryCount,
-						"webgl2-compacted-worker-active-schedulers":
-							input.worldStore.compactedGeometryWorkerMetrics
-								.activeSchedulerCount,
-						"webgl2-compacted-worker-submitted-jobs":
-							input.worldStore.compactedGeometryWorkerMetrics.submittedJobCount,
-						"webgl2-compacted-worker-stale-results":
-							input.worldStore.compactedGeometryWorkerMetrics.staleResultCount,
-						"webgl2-compacted-worker-ready-results":
-							input.worldStore.compactedGeometryWorkerMetrics.readyResultCount,
-						"webgl2-compacted-worker-committed-results":
-							input.worldStore.compactedGeometryWorkerMetrics
-								.committedResultCount,
-						"webgl2-compacted-worker-errors":
-							input.worldStore.compactedGeometryWorkerMetrics.errorCount,
+						"webgl2-compacted-worker-active-schedulers": 0,
+						"webgl2-compacted-worker-submitted-jobs": 0,
+						"webgl2-compacted-worker-stale-results": 0,
+						"webgl2-compacted-worker-ready-results": 0,
+						"webgl2-compacted-worker-committed-results": 0,
+						"webgl2-compacted-worker-errors": 0,
 						"webgl2-rgba-family-shader-draws":
 							input.submitMetrics.rgbaTexturePageFamilyShaderDrawCallCount,
 						"webgl2-rgba-family-submitted-batches":

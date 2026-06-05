@@ -149,7 +149,7 @@ export interface CompactionFamilyBypass {
 	detail: string;
 }
 
-export interface RgbaTexturePageFamilyMaterialSlot {
+interface RgbaTexturePageFamilyMaterialSlot {
 	key: string;
 	sourceMaterialSlotKey: string;
 	index: number;
@@ -182,7 +182,7 @@ export interface IndexedPalettedFamilyMaterialTableRecord {
 	filteringMode: "shader-palette-linear";
 }
 
-export interface IndexedPalettedFamilyDrawSlice {
+interface IndexedPalettedFamilyDrawSlice {
 	key: string;
 	indexFormat: "p8" | "index16";
 	indexPageKey: string;
@@ -196,7 +196,7 @@ export interface IndexedPalettedFamilyDrawSlice {
 	drawUnitIds: readonly string[];
 }
 
-export interface RgbaTexturePageFamilyDrawSlice {
+interface RgbaTexturePageFamilyDrawSlice {
 	key: string;
 	atlasTextureIndex: number;
 	detailAtlasTextureIndex: number | null;

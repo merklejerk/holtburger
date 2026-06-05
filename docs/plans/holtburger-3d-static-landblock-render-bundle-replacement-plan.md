@@ -31,6 +31,7 @@ Phase 4E6 artifact-active structured coverage cutover is implemented.
 Phase 4E7 browser coordinator contract hard cutover is implemented.
 Phase 4E8 staged structured-interior draw path removal is implemented.
 Phase 4E9 staged static renderable draw path removal is implemented.
+Phase 4E10 static compaction render-resource worker deletion is implemented.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -391,6 +392,10 @@ Progress:
   `appearance-preview-staged/` IDs, ignores ordinary landblock static parts, and no longer accepts
   resident static bundle suppression scopes. WebGL preview resources are direct-only and the legacy
   static compaction sync receives no staged draw units from this path.
+- 2026-06-05: Implemented Phase 4E10. Deleted the compacted-geometry render-resource worker job,
+  worker scheduler, worker payloads, WebGL compacted-geometry sync path, and staged-static
+  compaction scheduler tests. The remaining compacted family resource module is now a submit-time
+  type surface only; resident static object bundle artifacts own their CPU compaction/page outputs.
 
 Validation:
 
@@ -477,6 +482,9 @@ Validation:
 - `npm exec vitest -- run src/lib/world-display/staged-world-assembly.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/world-render-frame.test.ts src/lib/world-display/webgl2-render-metrics.test.ts src/lib/world-display/browser-render-resource-coordinator.test.ts`,
   `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
   `git diff --check` passed after Phase 4E9.
+- `npm exec vitest -- run src/lib/world-display/render-resource-worker-client.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/static-bundle-layer-builder.test.ts`,
+  `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
+  `git diff --check` passed after Phase 4E10.
 - `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts`
   passed after the first Phase 1D builder slice.
 - `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts`
@@ -4956,14 +4964,63 @@ callers.
 - Keep pure compaction and texture page packing algorithms only where the landblock render worker or
   artifact builders still use them.
 
+Decisions and course corrections:
+
+- Implemented. The compacted-geometry render-resource worker job was removed from
+  `render-resource-worker.ts` and `RenderResourceWorkerClient`. The deleted path no longer has a
+  worker job kind, client method, payload module, scheduler module, WebGL sync module, or scheduler
+  tests.
+- Implemented. `webgl2-world-resources.ts` no longer owns compacted-geometry worker scheduler state,
+  pending compacted replacement keys, compacted scheduler-key maps, or compacted batch graph leases.
+  The world-resource sync no longer calls `syncWebgl2CompactedGeometryResources`.
+- Implemented. `webgl2/resources/compacted-geometry-resources.ts` was reduced to the remaining
+  submit-time resource interfaces. Its old GPU resource factories and dynamic table update helper
+  were deleted because the staged-static sync path was their only production caller.
+- Implemented. `compacted-geometry.ts` no longer exports the staged-source draw-unit wrapper type
+  that only existed for the deleted scheduler handoff.
+- Course correction: the texture atlas and indexed atlas render-resource worker schedulers are not
+  deleted in this phase. The RGBA texture atlas worker remains live for terrain atlas generation and
+  the indexed atlas worker remains live for non-static/preview indexed-family atlas generation.
+  Deleting those schedulers requires either artifact-native terrain atlas upload or a broader
+  non-static material path replacement; treating them as static-only would break live renderer
+  behavior.
+- Course correction: public renderer diagnostics still include compacted worker fields for UI
+  contract stability. They are now reported as zeroes because no compacted worker exists. Phase 4E11
+  should remove or rename these diagnostics with the rest of the artifact-native metrics cleanup.
+- Course correction: the legacy compacted batch/family maps remain on `Webgl2WorldResourceStore` as
+  empty submit/runtime-diagnostic inputs. They no longer have a producer. Phase 4E11 should either
+  remove those legacy submit inputs or explicitly replace them with resident artifact family
+  collections.
+
+Cleanup targets discovered:
+
+- Delete or rename compacted-worker renderer-contract fields and BrowserWorldDisplay diagnostic text
+  in Phase 4E11. They now intentionally report zero and should not survive the final diagnostics
+  contract.
+- Remove the inert `compactedGeometryBatches` and `compactedGeometryFamilyResources` store maps once
+  submit/runtime diagnostics no longer accept legacy compacted family collections.
+- Audit `compactionFamilyPlan` and related compaction coverage metrics in `webgl2-world-resources.ts`.
+  They now describe appearance-preview/direct diagnostics, not a live static compaction pipeline.
+- Schedule terrain atlas ownership cleanup separately. Terrain still uses the RGBA texture atlas
+  worker/global generation path, which is outside this compacted-static worker deletion.
+
+Legacy shims introduced:
+
+- None. The compacted-geometry render-resource worker API was deleted rather than hidden behind a
+  compatibility adapter. The remaining zero-valued renderer diagnostic fields are existing public UI
+  contract debt scheduled for Phase 4E11, not a runtime compatibility mode.
+
 Exit criteria:
 
-- No static landblock render path depends on `render-resource-worker-client.ts` compaction or texture
-  atlas job scheduling.
-- Static object bundle artifacts own their CPU texture pages and compacted/direct surfaces.
-- Dead-code tooling reports no static compaction or atlas render-resource worker scheduler exports
-  with live static callers.
-- Tests cover worker-built artifact pages/geometry instead of staged resource-worker jobs.
+- Implemented. No static landblock render path depends on `render-resource-worker-client.ts`
+  compacted-geometry job scheduling; the compaction job kind and client method were removed.
+- Implemented with scope correction. Static object bundle artifacts own their CPU texture pages and
+  compacted/direct surfaces. Texture atlas worker scheduling remains only for live terrain and
+  non-static atlas generation paths.
+- Implemented. Dead-code tooling reports no static compaction render-resource worker scheduler,
+  payload, or WebGL sync exports.
+- Implemented. The remaining focused tests cover worker-built artifact resources and live atlas
+  worker scheduling; tests that asserted staged compacted worker jobs were deleted.
 
 ### Phase 4E11: Artifact-Native Diagnostics, Metrics, and Picker Cleanup
 

@@ -5,11 +5,6 @@ import type {
 	RenderResourceWorkerResponseMessage,
 } from "../../workers/render-resource-worker";
 import {
-	collectBuildCompactedGeometryInputTransferables,
-	type BuildCompactedGeometryWorkerJob,
-	type BuildCompactedGeometryWorkerResult,
-} from "./worker-resources/compacted-geometry-worker-payloads";
-import {
 	collectBuildIndexedResourceAtlasInputTransferables,
 	type BuildIndexedResourceAtlasWorkerJob,
 	type BuildIndexedResourceAtlasWorkerResult,
@@ -61,22 +56,6 @@ export class RenderResourceWorkerClient {
 					: "Render resource worker failed before work completed.";
 			this.rejectAllPending(new Error(errorMessage));
 		};
-	}
-
-	runBuildCompactedGeometryJob(
-		job: BuildCompactedGeometryWorkerJob,
-	): Promise<BuildCompactedGeometryWorkerResult> {
-		return this.runJob(
-			job,
-			collectBuildCompactedGeometryInputTransferables(job.input),
-		).then((result) => {
-			if (result.type !== "build-compacted-geometry") {
-				throw new Error(
-					`Render resource worker returned ${result.type} for compacted geometry job.`,
-				);
-			}
-			return result;
-		});
 	}
 
 	runBuildIndexedResourceAtlasJob(

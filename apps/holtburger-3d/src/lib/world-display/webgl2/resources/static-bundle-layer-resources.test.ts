@@ -84,6 +84,107 @@ describe("static bundle layer WebGL2 resources", () => {
 		expect(gl.deletedTextures).toHaveLength(2);
 	});
 
+	it("updates color page samplers on filtering changes without rebuilding geometry", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2StaticBundleLayerResourceStore();
+		const layer = createLayer();
+
+		syncWebgl2StaticBundleLayerResources({
+			gl: gl.asContext(),
+			store,
+			layers: [layer],
+			textureFilteringMode: "linear",
+		});
+		const resource = [...store.layersByKey.values()][0];
+		expect(resource?.texturePages.map((page) => page.samplerPolicyKey)).toEqual(
+			[
+				"sample=rgba-color;filter=linear",
+				"sample=indexed-data;filter=exact",
+			],
+		);
+
+		syncWebgl2StaticBundleLayerResources({
+			gl: gl.asContext(),
+			store,
+			layers: [layer],
+			textureFilteringMode: "nearest",
+		});
+
+		expect([...store.layersByKey.values()][0]).toBe(resource);
+		expect(gl.createdTextures).toHaveLength(2);
+		expect(gl.createdBuffers).toHaveLength(8);
+		expect(gl.textureParameters).toContainEqual({
+			pname: gl.TEXTURE_MIN_FILTER,
+			param: gl.NEAREST,
+		});
+		expect(resource?.texturePages.map((page) => page.samplerPolicyKey)).toEqual(
+			[
+				"sample=rgba-color;filter=nearest",
+				"sample=indexed-data;filter=exact",
+			],
+		);
+	});
+
+	it("keeps exact page samplers exact under filtering changes", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2StaticBundleLayerResourceStore();
+		const layer = createLayer({
+			materialRecords: [
+				{
+					key: "material",
+					familyKey: "indexed-paletted",
+					texturePageRefKeys: ["index-ref"],
+					isTransparent: false,
+				},
+			],
+			texturePages: [
+				{
+					key: "index-page",
+					scopeKey: "scope",
+					pageKind: "single-entry",
+					usageBucket: "indexed-texels",
+					sampleClass: "indexed-data",
+					indexedFormat: "p8",
+					width: 4,
+					height: 1,
+					bytes: new Uint8Array([0, 1, 2, 3]),
+					entries: [
+						{
+							virtualRefKey: "index-ref",
+							sourceAssetId: "surface",
+							rect: [0, 0, 1, 1],
+						},
+					],
+				},
+			],
+		});
+
+		syncWebgl2StaticBundleLayerResources({
+			gl: gl.asContext(),
+			store,
+			layers: [layer],
+			textureFilteringMode: "linear",
+		});
+		const parameterCount = gl.textureParameters.length;
+
+		syncWebgl2StaticBundleLayerResources({
+			gl: gl.asContext(),
+			store,
+			layers: [layer],
+			textureFilteringMode: "nearest",
+		});
+
+		expect(gl.textureParameters).toHaveLength(parameterCount);
+		expect(gl.textureParameters).toContainEqual({
+			pname: gl.TEXTURE_MIN_FILTER,
+			param: gl.NEAREST,
+		});
+		expect(gl.textureParameters).toContainEqual({
+			pname: gl.TEXTURE_MAG_FILTER,
+			param: gl.NEAREST,
+		});
+	});
+
 	it("releases all resident layer resources on destroy", () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2StaticBundleLayerResourceStore();
@@ -424,6 +525,7 @@ class FakeWebgl2 {
 		height: number;
 		data: TexImageSource | ArrayBufferView | null;
 	}[] = [];
+	readonly textureParameters: { pname: GLenum; param: GLenum }[] = [];
 	readonly bufferUploads: { target: GLenum; byteLength: number }[] = [];
 	readonly enabledAttributes: number[] = [];
 
@@ -461,8 +563,8 @@ class FakeWebgl2 {
 		});
 	}
 
-	texParameteri(): void {
-		return;
+	texParameteri(_target: GLenum, pname: GLenum, param: GLenum): void {
+		this.textureParameters.push({ pname, param });
 	}
 
 	deleteTexture(texture: WebGLTexture): void {

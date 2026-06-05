@@ -10,7 +10,7 @@ Phase 4C3B direct WebGL structured-interior shell resource/submit is implemented
 structured-interior material artifact realization is split into smaller slices; Phase 4C3C1 worker
 material artifact contract preparation is implemented. Phase 4C3C2 textured WebGL realization is
 split; Phase 4C3C2A material-slice WebGL resource/submit is implemented and Phase 4C3C2B sampler
-policy resource control is next, followed by portal/spatial artifact resource handoff.
+policy resource control is implemented. Portal/spatial artifact resource handoff is next.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -247,6 +247,11 @@ Progress:
   structured-interior slices through artifact-owned texture bindings without `AssetChannelState`
   material or texture lookup. The old flat whole-cell shell path is now a narrow no-material-slice
   fallback instead of the normal path for supported material families.
+- 2026-06-04: Implemented Phase 4C3C2B. Artifact-owned texture pages now accept renderer-owned
+  texture filtering policy in both static object bundle and structured-interior resource sync. Color
+  and detail pages update sampler parameters in place when filtering changes, while indexed texel and
+  palette lookup pages remain exact sampled. Filtering changes do not rebuild CPU artifacts, static
+  bundle geometry buffers, structured-interior material slice buffers, or texture objects.
 
 Validation:
 
@@ -391,6 +396,13 @@ Validation:
 - `npm run check` passed after Phase 4C3C2A.
 - `npm run lint:ts`, `npm run lint:dead`, and `npm run lint:rust` passed after Phase 4C3C2A.
 - `git diff --check` passed after Phase 4C3C2A.
+- `npm exec vitest -- run src/lib/world-display/webgl2/resources/static-bundle-layer-resources.test.ts src/lib/world-display/webgl2-world-resources.test.ts`
+  passed after Phase 4C3C2B.
+- `npm exec vitest -- run src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2/resources/static-bundle-layer-resources.test.ts src/workers/static-landblock-render-worker.test.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer-texture-pages.test.ts`
+  passed after Phase 4C3C2B.
+- `npm run check` passed after Phase 4C3C2B.
+- `npm run lint:ts`, `npm run lint:dead`, and `npm run lint:rust` passed after Phase 4C3C2B.
+- `git diff --check` passed after Phase 4C3C2B.
 
 Related plans:
 
@@ -3232,8 +3244,7 @@ Exit criteria:
 ### Phase 4C3C: Structured Interior Material Artifact Realization
 
 Status: Split after Phase 4C3B. Phase 4C3C1 is implemented on 2026-06-04. Phase
-4C3C2 is split; Phase 4C3C2A is implemented on 2026-06-04 and Phase 4C3C2B is
-next.
+4C3C2 is split; Phase 4C3C2A and Phase 4C3C2B are implemented on 2026-06-04.
 
 #### Phase 4C3C1: Worker Material Artifact Contract Preparation
 
@@ -3300,8 +3311,8 @@ Exit criteria:
 
 #### Phase 4C3C2: Textured Structured Interior WebGL Resource Realization
 
-Status: Split during implementation. Phase 4C3C2A is implemented on 2026-06-04;
-Phase 4C3C2B is next.
+Status: Split during implementation. Phase 4C3C2A and Phase 4C3C2B are
+implemented on 2026-06-04.
 
 #### Phase 4C3C2A: Material-Slice Resource and Submit Realization
 
@@ -3388,6 +3399,8 @@ Legacy shims introduced:
 
 #### Phase 4C3C2B: Artifact Texture Sampler Policy Control
 
+Status: Implemented on 2026-06-04.
+
 - Add renderer-owned sampler/filtering policy inputs for artifact-owned texture pages shared by
   static object bundles and structured interiors.
 - Ensure global filtering changes can update sampler state/material bindings without rebuilding
@@ -3398,15 +3411,47 @@ Legacy shims introduced:
 - Add focused tests for artifact texture page resource sync under filtering policy changes for both
   static object bundles and structured interiors.
 
+Decisions and course corrections:
+
+- Artifact-owned texture pages now update sampler parameters on the existing WebGL texture object
+  instead of creating a new page texture or replacing the owning layer/cell resource. This keeps CPU
+  artifacts and geometry buffers stable when global filtering changes.
+- Static object bundles and structured interiors share the same artifact page sampler helper in
+  `webgl2/resources/static-bundle-layer-resources.ts`. Structured interiors call the same update path
+  for their artifact-owned pages instead of carrying a separate sampler policy implementation.
+- The renderer now passes `textureFilteringMode` into static-landblock artifact resource sync before
+  staged world resources are rebuilt. This keeps artifact-owned static landblock resources aligned
+  with the existing renderer setting.
+- Exact sampled artifact pages are keyed as exact regardless of global filtering mode. Indexed texel
+  and palette lookup pages remain nearest sampled and are not touched when switching between linear
+  and nearest modes.
+
+Cleanup targets discovered:
+
+- Artifact-owned color/detail pages currently switch between nearest and linear filtering but do not
+  generate mipmaps or apply anisotropy. That is acceptable for this phase because page pixels and
+  geometry remain stable, but a later visual-quality pass should decide whether artifact pages should
+  support mipmapped/anisotropic sampling or intentionally stay non-mipped.
+- `Webgl2StaticBundleTexturePageResource` is now the shared artifact page resource type for both
+  static object bundles and structured interiors. If more artifact families use it, rename the type
+  to remove the static-bundle-specific prefix during cleanup.
+
+Legacy shims introduced:
+
+- None. No compatibility mode, material lookup fallback, staged draw-unit adapter, or global atlas
+  state input was added.
+- The existing no-material-slice flat structured-interior fallback is unchanged from Phase 4C3C2A.
+
 Exit criteria:
 
-- Changing renderer texture filtering policy refreshes artifact-owned page sampler state without
+- Implemented. Changing renderer texture filtering policy refreshes artifact-owned page sampler state without
   replacing CPU artifacts or geometry resources.
-- Static object bundle and structured-interior resource paths share the same artifact texture page
+- Implemented. Static object bundle and structured-interior resource paths share the same artifact texture page
   sampler policy helper.
-- Indexed texel/palette page sampling remains exact under every global filtering mode.
-- Focused resource tests cover policy changes; `check`, TypeScript lint, knip, Rust lint, and `git
-  diff --check` pass.
+- Implemented. Indexed texel/palette page sampling remains exact under every global filtering mode.
+- Implemented. Focused resource tests cover policy changes for static object bundles and structured
+  interiors.
+- Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
 
 ### Phase 4C3D: Portal and Spatial Artifact Resource Handoff
 

@@ -1067,6 +1067,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 						cameraFrame,
 						renderChunkTransforms,
 						staticRenderableScene,
+						staticLandblockRenderArtifacts,
 						structuredInteriorScene,
 						terrainScene,
 					}),

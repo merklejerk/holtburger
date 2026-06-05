@@ -13,7 +13,8 @@ split; Phase 4C3C2A material-slice WebGL resource/submit is implemented and Phas
 policy resource control is implemented. Phase 4C3C2C artifact texture mipmap/anisotropy policy is
 implemented. Phase 4C3D portal/spatial artifact resource handoff is split into smaller slices;
 Phase 4C3D1 artifact-native transition portal candidate handoff and Phase 4C3D2 portal mask
-artifact input handoff are implemented.
+artifact input handoff are implemented. Phase 4C3D3 spatial/culling artifact input handoff is
+split further; Phase 4C3D3A artifact-backed env-cell local BVH culling is implemented.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -277,6 +278,11 @@ Progress:
   portal masks consume artifact-backed candidate aperture facts when detailed artifacts are
   resident instead of being owned by the staged static/interior assembly path. The staged assembly
   helper no longer accepts or scans transition portal candidates.
+- 2026-06-05: Implemented Phase 4C3D3A. WebGL frame visibility now passes the resident static
+  landblock artifact snapshot into prepared BVH visibility derivation. Env-cell local BVH culling
+  prefers `detailed-landblock.spatial.envCellLocalBvhs` and only falls back to prepared env-cell
+  payload BVHs when no resident detailed artifact BVH exists for the cell. The lower-level BVH query
+  helper now accepts artifact-local BVH facts without fabricating prepared env-cell payloads.
 
 Validation:
 
@@ -303,6 +309,9 @@ Validation:
 - `npm exec vitest -- run src/lib/world-display/transition-portal-mask-draw-units.test.ts src/lib/world-display/transition-portal-work-items.test.ts src/lib/world-display/webgl2-world-resources.test.ts`,
   `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
   `git diff --check` passed after Phase 4C3D2.
+- `npm exec vitest -- run src/lib/world-display/prepared-bvh-metrics.test.ts`, `npm run check`,
+  `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and `git diff --check` passed after
+  Phase 4C3D3A.
 - `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts`
   passed after the first Phase 1D builder slice.
 - `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts`
@@ -3666,18 +3675,76 @@ Exit criteria:
 
 #### Phase 4C3D3: Spatial and Culling Artifact Inputs
 
+Phase 4C3D3 is split because WebGL frame culling, picker/debug spatial indexes, and static
+diagnostic metrics have different correctness requirements. Render-frame culling is first.
+
+#### Phase 4C3D3A: Artifact-Backed Env-Cell Local BVH Culling
+
 - Move render-critical spatial/culling inputs from bridge-derived structured-interior scenes to
   resident detailed artifacts.
+- Pass resident static landblock render artifacts into WebGL frame visibility derivation.
+- Query env-cell local BVHs from `detailed-landblock.spatial.envCellLocalBvhs` before falling back
+  to prepared env-cell payloads.
+- Keep the BVH query helper artifact-shaped; do not fabricate `PreparedEnvCellPayload` objects just
+  to reuse the old query path.
+
+Decisions and course corrections:
+
+- Implemented. `buildWorldRenderFrame` now requires a `StaticLandblockRenderArtifactStoreSnapshot`
+  and passes it into `derivePreparedBvhVisibilitySnapshot`.
+- Implemented. `derivePreparedBvhVisibilitySnapshot` indexes resident detailed artifact env-cell
+  local BVHs by env cell and uses them for visible render item key derivation when present.
+- Implemented. `queryEnvCellLocalBvhVisibilityByBvh` accepts `envCellId`, local BVH facts, and a
+  bounds transform directly. The prepared-payload query now delegates to the same helper.
+- Implemented. Artifact local placements use `transformEnvCellLocalBoundsByPlacement`, so artifact
+  culling does not need a prepared env-cell payload.
+- Course correction: `render-spatial-scene.ts` remains a picker/debug spatial-index producer. It is
+  not render-critical culling for submit, so it stays scheduled for the remaining spatial/debug
+  cleanup rather than being forced into this slice.
+
+Cleanup targets discovered:
+
+- `prepared-bvh-metrics.ts` still carries "prepared" terminology even when the env-cell local BVHs
+  come from resident worker artifacts. Rename or split it once terrain/outdoor/static BVH inputs are
+  also artifact-native.
+- Env-cell local BVH fallback to prepared env-cell payloads remains transitional while artifact
+  coverage can be absent. Phase 4E should delete that fallback with the rest of the main-thread
+  env-cell hydration path.
+- Outdoor static BVH and terrain BVH visibility still read prepared outdoor payloads in this module.
+  Terrain artifact and static bundle resources already carry render candidates, but the debug
+  metrics/visibility snapshot terminology still reflects the old prepared payload source. Revisit
+  this before deleting main-thread outdoor hydration.
+
+Legacy shims introduced:
+
+- None. The artifact BVH path is the preferred path. The existing prepared env-cell payload lookup
+  remains as a transitional absence fallback and was not widened into a second target mode.
+
+Exit criteria:
+
+- Implemented. WebGL frame culling receives resident static landblock render artifacts.
+- Implemented. Env-cell local BVH visibility queries use detailed artifact spatial facts when those
+  facts are resident.
+- Implemented. Artifact-backed env-cell local BVH tests cover culling without a prepared env-cell
+  payload.
+- Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
+
+#### Phase 4C3D3B: Remaining Spatial Diagnostics and Fallback Cleanup
+
 - Keep browser debug overlays lower priority; they may continue to consume a reduced bridge or lose
   fidelity while render-critical portal/spatial consumers migrate.
 - Revisit `prepared-bvh-metrics.ts`, `render-spatial-scene.ts`,
   `scene-renderable-readiness.ts`, and WebGL frame candidate assembly together. These still carry
   legacy structured-interior/spatial assumptions and should move to artifact-backed spatial facts as
   one coherent slice instead of scattering small fallback checks.
+- Decide whether picker/debug spatial items for structured interiors should be rebuilt from detailed
+  artifacts or allowed to lose fidelity during hard cutover.
+- Remove or rename "prepared BVH" diagnostics once artifact-backed BVH facts are the only
+  render-critical static source.
 
 Exit criteria:
 
-- Required spatial/culling facts come from resident detailed artifacts.
+- Required render-critical spatial/culling facts come from resident detailed artifacts.
 - No render-critical portal/spatial consumer requires main-thread prepared env-cell geometry.
 - Remaining `StructuredInteriorSceneModel` usage is debug/diagnostic or transitional fallback only.
 

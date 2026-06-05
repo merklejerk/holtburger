@@ -170,11 +170,25 @@ export function queryEnvCellLocalBvhVisibility(options: {
 	frustum: RenderFrustum;
 	boundsToRendererBounds: (bounds: PreparedBounds) => RenderBounds;
 }): PreparedBvhVisibilityResult {
+	return queryEnvCellLocalBvhVisibilityByBvh({
+		envCellId: options.payload.envCellId,
+		localBvh: options.payload.localBvh,
+		frustum: options.frustum,
+		boundsToRendererBounds: options.boundsToRendererBounds,
+	});
+}
+
+export function queryEnvCellLocalBvhVisibilityByBvh(options: {
+	envCellId: number;
+	localBvh: PreparedBvhLike<PreparedEnvCellBvhItem>;
+	frustum: RenderFrustum;
+	boundsToRendererBounds: (bounds: PreparedBounds) => RenderBounds;
+}): PreparedBvhVisibilityResult {
 	return queryPreparedBvh<PreparedEnvCellBvhItem>({
-		bvh: options.payload.localBvh,
+		bvh: options.localBvh,
 		expectedCoordinateSpace: "env-cell-local",
 		frustum: options.frustum,
-		itemKey: (item) => envCellLocalItemKey(options.payload.envCellId, item),
+		itemKey: (item) => envCellLocalItemKey(options.envCellId, item),
 		boundsToRendererBounds: options.boundsToRendererBounds,
 		missingBvhReason: "missing env-cell local BVH",
 	});

@@ -14,13 +14,22 @@ import {
 } from "./render-chunks";
 import {
 	queryEnvCellLocalBvhVisibility,
+	queryEnvCellLocalBvhVisibilityByBvh,
 	queryOutdoorBvhVisibility,
 	queryTerrainBvhVisibility,
 	type PreparedBvhVisibilityResult,
 	type RenderBvhItemKey,
 } from "./prepared-bvh-visibility";
-import { transformEnvCellLocalBounds } from "./prepared-bvh-bounds";
+import {
+	transformEnvCellLocalBounds,
+	transformEnvCellLocalBoundsByPlacement,
+} from "./prepared-bvh-bounds";
+import {
+	getDetailedLandblockRenderArtifacts,
+	type DetailedLandblockRenderArtifacts,
+} from "./landblock-render-product";
 import type { RenderFrustum } from "./render-spatial-math";
+import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
 import type { StaticRenderableSceneModel } from "./static-renderables";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
@@ -70,6 +79,7 @@ export function derivePreparedBvhDebugMetrics(options: {
 	terrainScene: TerrainSceneModel;
 	staticRenderableScene: StaticRenderableSceneModel;
 	structuredInteriorScene: StructuredInteriorSceneModel;
+	staticLandblockRenderArtifacts: StaticLandblockRenderArtifactStoreSnapshot;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	frustum: RenderFrustum;
 	now?: () => number;
@@ -82,6 +92,7 @@ export function derivePreparedBvhVisibilitySnapshot(options: {
 	terrainScene: TerrainSceneModel;
 	staticRenderableScene: StaticRenderableSceneModel;
 	structuredInteriorScene: StructuredInteriorSceneModel;
+	staticLandblockRenderArtifacts: StaticLandblockRenderArtifactStoreSnapshot;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	frustum: RenderFrustum;
 	now?: () => number;
@@ -96,6 +107,9 @@ export function derivePreparedBvhVisibilitySnapshot(options: {
 			transform.chunkKey,
 			transform,
 		]),
+	);
+	const artifactEnvCellBvhsById = collectDetailedArtifactEnvCellBvhsById(
+		options.staticLandblockRenderArtifacts,
 	);
 
 	for (const tile of options.terrainScene.tiles) {
@@ -156,6 +170,36 @@ export function derivePreparedBvhVisibilitySnapshot(options: {
 	}
 
 	for (const cell of options.structuredInteriorScene.cells) {
+		metrics.envCellBvhConsideredCount += 1;
+		const transform = findChunkTransform(
+			chunkTransformsByKey,
+			cell.renderChunk,
+			fallbackReasons,
+		);
+		if (!transform) {
+			continue;
+		}
+		const artifactBvh = artifactEnvCellBvhsById.get(cell.envCellId);
+		if (artifactBvh) {
+			metrics.envCellLocalBvhTotalItemCount += artifactBvh.localBvh.items.length;
+			mergeVisibilityResult(
+				queryEnvCellLocalBvhVisibilityByBvh({
+					envCellId: artifactBvh.envCellId,
+					localBvh: artifactBvh.localBvh,
+					frustum: options.frustum,
+					boundsToRendererBounds: (bounds) =>
+						transformEnvCellLocalBoundsByPlacement(
+							bounds,
+							artifactBvh.localPlacement,
+							transform,
+						),
+				}),
+				visibleItemKeys,
+				fallbackReasons,
+			);
+			continue;
+		}
+
 		const payload = findPreparedEnvCellPayload(
 			options.assetState,
 			cell.envCellId,
@@ -166,16 +210,7 @@ export function derivePreparedBvhVisibilitySnapshot(options: {
 			);
 			continue;
 		}
-		metrics.envCellBvhConsideredCount += 1;
 		metrics.envCellLocalBvhTotalItemCount += payload.localBvh.items.length;
-		const transform = findChunkTransform(
-			chunkTransformsByKey,
-			cell.renderChunk,
-			fallbackReasons,
-		);
-		if (!transform) {
-			continue;
-		}
 		mergeVisibilityResult(
 			queryEnvCellLocalBvhVisibility({
 				payload,
@@ -218,6 +253,28 @@ export function derivePreparedBvhVisibilitySnapshot(options: {
 		visibleItemKeys,
 		fallbackReasons,
 	};
+}
+
+function collectDetailedArtifactEnvCellBvhsById(
+	artifacts: StaticLandblockRenderArtifactStoreSnapshot,
+): Map<
+	number,
+	DetailedLandblockRenderArtifacts["spatial"]["envCellLocalBvhs"][number]
+> {
+	const bvhsByEnvCellId = new Map<
+		number,
+		DetailedLandblockRenderArtifacts["spatial"]["envCellLocalBvhs"][number]
+	>();
+	for (const result of artifacts.artifacts) {
+		const detailed = getDetailedLandblockRenderArtifacts(result);
+		if (!detailed) {
+			continue;
+		}
+		for (const bvh of detailed.spatial.envCellLocalBvhs) {
+			bvhsByEnvCellId.set(bvh.envCellId, bvh);
+		}
+	}
+	return bvhsByEnvCellId;
 }
 
 function findActiveOutdoorPayloads(

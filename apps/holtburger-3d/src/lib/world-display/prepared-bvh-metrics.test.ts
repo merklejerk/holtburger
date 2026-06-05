@@ -12,7 +12,9 @@ import {
 	formatEnvCellAssetId,
 	formatLandblockOutdoorAssetId,
 } from "../landblocks";
+import type { LandblockRenderProductWorkerResult } from "./landblock-render-product";
 import { deriveLandblockRenderChunkPlacement } from "./render-chunks";
+import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
 import {
 	createEmptyStaticRenderableSceneModel,
 	type StaticRenderableSceneModel,
@@ -35,42 +37,8 @@ describe("derivePreparedBvhDebugMetrics", () => {
 			assetState: createAssetState([outdoorPayload, envCellPayload]),
 			terrainScene: createTerrainScene([createTerrainTile(landblockId)]),
 			staticRenderableScene: createStaticRenderableScene(landblockId),
-			structuredInteriorScene: {
-				...createEmptyStructuredInteriorSceneModel(),
-				activeEnvCellIds: [envCellId],
-				cells: [
-					{
-						renderKey: "env-cell/02030100",
-						envCellId,
-						regionNumber: 0,
-						renderChunk: envRenderChunk,
-						environmentId: 0,
-						cellStructureId: 0,
-						isFocus: true,
-						chunkLocalPlacement: identityPlacement(),
-						surfaceIds: [],
-						portalCount: 0,
-						portals: [],
-						portalApertures: [],
-						staticObjectCount: 0,
-						cellStructure: null,
-						cellBsp: null,
-						renderGeometry: {
-							sourceId: 0,
-							vertexCount: 0,
-							triangleCount: 0,
-							positions: [],
-							normals: [],
-							uvs: [],
-							triangles: [],
-							surfaceIds: [],
-							bounds: null,
-						},
-						debugColorKey: "env-cell/02030100",
-						detailSignature: "detail:none",
-					},
-				],
-			},
+			structuredInteriorScene: createStructuredInteriorScene(envCellId),
+			staticLandblockRenderArtifacts: createStaticLandblockArtifactSnapshot([]),
 			renderChunkTransforms: [
 				{
 					chunkKey: terrainRenderChunk.chunkKey,
@@ -109,6 +77,7 @@ describe("derivePreparedBvhDebugMetrics", () => {
 			terrainScene: createTerrainScene([createTerrainTile(0x0204ffff)]),
 			staticRenderableScene: createStaticRenderableScene(landblockId),
 			structuredInteriorScene: createEmptyStructuredInteriorSceneModel(),
+			staticLandblockRenderArtifacts: createStaticLandblockArtifactSnapshot([]),
 			renderChunkTransforms: [],
 			frustum: zFrustum(0, 10),
 			now: steppingClock(),
@@ -120,7 +89,117 @@ describe("derivePreparedBvhDebugMetrics", () => {
 			"missing render chunk transform landblock/0203ffff",
 		]);
 	});
+
+	it("prefers resident detailed artifact env-cell BVHs over prepared env-cell payloads", () => {
+		const envCellId = 0x02030100;
+		const envRenderChunk = deriveLandblockRenderChunkPlacement(envCellId);
+
+		const metrics = derivePreparedBvhDebugMetrics({
+			assetState: createAssetState([]),
+			terrainScene: createTerrainScene([]),
+			staticRenderableScene: createEmptyStaticRenderableSceneModel(),
+			structuredInteriorScene: createStructuredInteriorScene(envCellId),
+			staticLandblockRenderArtifacts: createStaticLandblockArtifactSnapshot([
+				createDetailedLandblockProductArtifact({
+					landblockId: 0x0203ffff,
+					envCellId,
+				}),
+			]),
+			renderChunkTransforms: [
+				{
+					chunkKey: envRenderChunk.chunkKey,
+					chunkLandblockId: envRenderChunk.chunkLandblockId,
+					offset: { x: 0, y: 0, z: 0 },
+				},
+			],
+			frustum: zFrustum(0, 10),
+			now: steppingClock(),
+		});
+
+		expect(metrics.envCellLocalBvhVisibleItemCount).toBe(3);
+		expect(metrics.envCellLocalBvhTotalItemCount).toBe(3);
+		expect(metrics.visibleStaticInstanceKeyCount).toBe(1);
+		expect(metrics.visiblePortalKeyCount).toBe(1);
+		expect(metrics.envCellBvhConsideredCount).toBe(1);
+		expect(metrics.fallbackReasonCount).toBe(0);
+	});
 });
+
+function createStaticLandblockArtifactSnapshot(
+	artifacts: readonly LandblockRenderProductWorkerResult[],
+): StaticLandblockRenderArtifactStoreSnapshot {
+	return {
+		artifacts,
+		desiredCount: artifacts.length,
+		residentCount: artifacts.length,
+		inFlightCount: 0,
+		staleResultCount: 0,
+		committedResultCount: artifacts.length,
+		evictedResultCount: 0,
+		errorCount: 0,
+		latestDesiredIdentityKeys: [],
+	};
+}
+
+function createDetailedLandblockProductArtifact({
+	landblockId,
+	envCellId,
+}: {
+	landblockId: number;
+	envCellId: number;
+}): LandblockRenderProductWorkerResult {
+	return {
+		type: "landblock-render-product-built",
+		jobId: "job:test",
+		landblockId,
+		product: "outdoor-env-cells",
+		requestId: "request:test",
+		buildPolicyRevision: "build:v1",
+		texturePagePolicyRevision: "pages:v1",
+		artifacts: [
+			{
+				artifactKind: "detailed-landblock",
+				key: "detailed:test",
+				landblockId,
+				product: "outdoor-env-cells",
+				requestId: "request:test",
+				buildPolicyRevision: "build:v1",
+				texturePagePolicyRevision: "pages:v1",
+				selectedEnvCellIds: [envCellId],
+				structuredInteriorMaterialRecords: [],
+				structuredInteriorTexturePageRefs: [],
+				structuredInteriorTexturePages: [],
+				structuredInteriorCells: [],
+				cellStructureMetadata: [],
+				portalLinks: [],
+				portalApertures: [],
+				visibility: {
+					objectVisibilityRecords: [],
+					cellVisibilityRecords: [],
+				},
+				spatial: {
+					envCellResidencyBvh: {
+						coordinateSpace: "landblock-topology-residency",
+						nodes: [],
+						items: [],
+					},
+					envCellLocalBvhs: [
+						{
+							key: "env-cell-local-bvh:test",
+							envCellId,
+							localPlacement: identityPlacement(),
+							localBvh: createEnvCellPayload(envCellId).localBvh,
+						},
+					],
+				},
+			},
+		],
+		diagnostics: {
+			status: "ready",
+			messages: [],
+		},
+	};
+}
 
 function createAssetState(payloads: PreparedAssetPayload[]): AssetChannelState {
 	return {
@@ -224,6 +303,46 @@ function createStaticRenderableScene(
 		},
 	];
 	return scene;
+}
+
+function createStructuredInteriorScene(envCellId: number) {
+	const envRenderChunk = deriveLandblockRenderChunkPlacement(envCellId);
+	return {
+		...createEmptyStructuredInteriorSceneModel(),
+		activeEnvCellIds: [envCellId],
+		cells: [
+			{
+				renderKey: "env-cell/02030100",
+				envCellId,
+				regionNumber: 0,
+				renderChunk: envRenderChunk,
+				environmentId: 0,
+				cellStructureId: 0,
+				isFocus: true,
+				chunkLocalPlacement: identityPlacement(),
+				surfaceIds: [],
+				portalCount: 0,
+				portals: [],
+				portalApertures: [],
+				staticObjectCount: 0,
+				cellStructure: null,
+				cellBsp: null,
+				renderGeometry: {
+					sourceId: 0,
+					vertexCount: 0,
+					triangleCount: 0,
+					positions: [],
+					normals: [],
+					uvs: [],
+					triangles: [],
+					surfaceIds: [],
+					bounds: null,
+				},
+				debugColorKey: "env-cell/02030100",
+				detailSignature: "detail:none",
+			},
+		],
+	};
 }
 
 function createOutdoorPayload(

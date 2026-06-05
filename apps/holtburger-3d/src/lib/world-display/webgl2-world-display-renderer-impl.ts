@@ -1147,6 +1147,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 							},
 							staticBundleLayerResources:
 								currentResources.worldStore.staticBundleLayerResources,
+							structuredInteriorResources:
+								currentResources.worldStore.structuredInteriorResources,
 							drawUnitsById: currentResources.worldStore.drawUnitsById,
 							terrainTilesById: currentResources.worldStore.terrainTilesById,
 							frame,
@@ -2180,6 +2182,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				gl: currentResources.gl,
 				store: currentResources.worldStore,
 				artifacts: staticLandblockRenderArtifacts,
+				renderChunkTransforms,
 			});
 			syncWebgl2WorldResources({
 				gl: currentResources.gl,
@@ -2604,6 +2607,15 @@ function mergeSceneDomainSubmitMetrics({
 			...exteriorMetrics.staticBundleSubmitFallbackSamples,
 			...interiorMetrics.staticBundleSubmitFallbackSamples,
 		].slice(0, 8),
+		structuredInteriorResourceSubmittedCount:
+			exteriorMetrics.structuredInteriorResourceSubmittedCount +
+			interiorMetrics.structuredInteriorResourceSubmittedCount,
+		structuredInteriorResourceDrawCallCount:
+			exteriorMetrics.structuredInteriorResourceDrawCallCount +
+			interiorMetrics.structuredInteriorResourceDrawCallCount,
+		structuredInteriorResourceTriangleCount:
+			exteriorMetrics.structuredInteriorResourceTriangleCount +
+			interiorMetrics.structuredInteriorResourceTriangleCount,
 	};
 }
 

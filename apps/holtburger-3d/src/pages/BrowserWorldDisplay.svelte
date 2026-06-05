@@ -350,15 +350,9 @@
 		const compactionGeometryBlockers = summarizeRecord(
 			debug.compactionCoverageGeometryBlockerCounts,
 		);
-		const compactedFamilyResources = summarizeRecord(
-			debug.compactedGeometryFamilyResourceCounts,
-		);
 		const fallbackSamples = summarizeSamples(debug.fallbackReasonSamples);
 		const compactionBypassSamples = summarizeSamples(
 			debug.compactionBypassSamples,
-		);
-		const compactedResourceFallbackSamples = summarizeSamples(
-			debug.compactedResourceFallbackSamples,
 		);
 		const rgbaTexturePageFamilyFallbackSamples = summarizeSamples(
 			debug.rgbaTexturePageFamilyFallbackSamples,
@@ -378,7 +372,7 @@
 		const performanceText = renderMetrics?.performance
 			? `${renderMetrics.performance.fps.toFixed(1)} FPS, ${renderMetrics.performance.frameMs.toFixed(1)} ms/frame, ${renderMetrics.performance.renderMs.toFixed(1)} ms render`
 			: "waiting for performance sample";
-		return `Perf ${performanceText}. Diagnosis: ${diagnosis}. Draw pressure ${debug.renderCalls} visible draws from ${candidateBatchCount} candidate ${drawGroupTerm}; static candidates ${debug.staticBvhCandidateBatchCount}${staticCandidateRatio}; retained terrain ${debug.terrainRenderBatchCount}, static ${debug.staticRenderBatchCount}, interiors ${debug.structuredInteriorRenderBatchCount}; retained tris ${debug.renderTriangles}. Terrain family: visible ${debug.visibleTerrainTileCount}, ready ${debug.visibleTerrainOneDrawReadyTileCount}, blocked ${debug.visibleTerrainOneDrawBlockedTileCount}, ready slices ${debug.visibleTerrainDrawSliceReadyCount}, shader draws ${debug.terrainOneDrawShaderDrawCallCount}, submitted tiles ${debug.terrainOneDrawSubmittedTileCount}, submitted slices ${debug.terrainDrawSliceSubmittedCount}, tris ${debug.terrainOneDrawSubmittedTriangleCount}, atlas refs ${debug.terrainAtlasRefCount}, atlas candidates ${debug.terrainAtlasCandidateCount}, atlas blocker tiles ${debug.terrainAtlasBlockerTileCount}${terrainOneDrawBlockerSamples ? `, blockers ${terrainOneDrawBlockerSamples}` : ""}${terrainOneDrawSubmitFallbackSamples ? `, submit fallbacks ${terrainOneDrawSubmitFallbackSamples}` : ""}. Materials ${debug.materialCount}, textures ${debug.textureResourceCount}, indexed textures ${debug.indexedTextureResourceCount}, palettes ${debug.paletteResourceCount}; texture pages ${debug.texturePageBindingCount} bindings (${texturePageBuckets}), atlas failures ${debug.atlasFailureReasonCount}${atlasFailureSamples ? ` (${atlasFailureSamples})` : ""}; direct texture-page draws ${debug.directTexturePageDrawCount} (${debug.directPackedTexturePageDrawCount} packed, ${debug.directSingleEntryTexturePageDrawCount} single-entry)${directTexturePageFallbackSamples ? `, texture-page fallbacks ${directTexturePageFallbackSamples}` : ""}. ${atlasWorkerText}. Compaction: candidates ${debug.compactionCandidateDrawUnitCount}, families ${compactionMaterialFamilies}, retained families ${compactionRetainedFamilies}, material blockers ${compactionMaterialBlockers}, geometry blockers ${compactionGeometryBlockers}; compacted batches ${debug.compactedGeometryBatchCount}, family resources ${compactedFamilyResources}, worker groups ${debug.compactedGeometryWorkerActiveSchedulerCount}, jobs submitted ${debug.compactedGeometryWorkerSubmittedJobCount}, deduped ${debug.compactedGeometryWorkerDedupedDesiredJobCount}, coalesced ${debug.compactedGeometryWorkerCoalescedDesiredJobCount}, stale ${debug.compactedGeometryWorkerStaleResultCount}, ready ${debug.compactedGeometryWorkerReadyResultCount}, committed ${debug.compactedGeometryWorkerCommittedResultCount}, errors ${debug.compactedGeometryWorkerErrorCount}, shader draws rgba ${debug.rgbaTexturePageFamilyShaderDrawCallCount}, indexed ${debug.indexedPalettedFamilyShaderDrawCallCount}, replaced rgba ${debug.rgbaTexturePageFamilyReplacedDrawUnitCount}, indexed ${debug.indexedPalettedFamilyReplacedDrawUnitCount}, retained rgba ${debug.rgbaTexturePageFamilyRetainedDirectDrawUnitCount}, indexed ${debug.indexedPalettedFamilyRetainedDirectDrawUnitCount}, estimates rgba ${debug.rgbaTexturePageFamilyOriginalDrawCallEstimateCount}->${debug.rgbaTexturePageFamilySubmittedDrawCallEstimateCount}, indexed ${debug.indexedPalettedFamilyOriginalDrawCallEstimateCount}->${debug.indexedPalettedFamilySubmittedDrawCallEstimateCount}, saved rgba ${debug.rgbaTexturePageFamilyDrawCallSavingsCount}, indexed ${debug.indexedPalettedFamilyDrawCallSavingsCount}, overdraw ${debug.rgbaTexturePageFamilyConservativeOverdrawTriangleCount} tris (${debug.rgbaTexturePageFamilyConservativeOverdrawRatio.toFixed(2)}), no-visible routes rgba ${debug.rgbaTexturePageFamilyNoVisibleRouteCount}, indexed ${debug.indexedPalettedFamilyNoVisibleRouteCount}; bypasses ${debug.compactionBypassReasonCount}${compactionBypassSamples ? ` (${compactionBypassSamples})` : ""}${compactedResourceFallbackSamples ? `, compacted resource fallbacks ${compactedResourceFallbackSamples}` : ""}${rgbaTexturePageFamilyFallbackSamples ? `, RGBA submit fallbacks ${rgbaTexturePageFamilyFallbackSamples}` : ""}. Fallbacks ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}. Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}, transition depth ${debug.transitionPortalMaxDepth}; canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
+		return `Perf ${performanceText}. Diagnosis: ${diagnosis}. Draw pressure ${debug.renderCalls} visible draws from ${candidateBatchCount} candidate ${drawGroupTerm}; static candidates ${debug.staticBvhCandidateBatchCount}${staticCandidateRatio}; retained terrain ${debug.terrainRenderBatchCount}, static ${debug.staticRenderBatchCount}, interiors ${debug.structuredInteriorRenderBatchCount}; retained tris ${debug.renderTriangles}. Terrain family: visible ${debug.visibleTerrainTileCount}, ready ${debug.visibleTerrainOneDrawReadyTileCount}, blocked ${debug.visibleTerrainOneDrawBlockedTileCount}, ready slices ${debug.visibleTerrainDrawSliceReadyCount}, shader draws ${debug.terrainOneDrawShaderDrawCallCount}, submitted tiles ${debug.terrainOneDrawSubmittedTileCount}, submitted slices ${debug.terrainDrawSliceSubmittedCount}, tris ${debug.terrainOneDrawSubmittedTriangleCount}, atlas refs ${debug.terrainAtlasRefCount}, atlas candidates ${debug.terrainAtlasCandidateCount}, atlas blocker tiles ${debug.terrainAtlasBlockerTileCount}${terrainOneDrawBlockerSamples ? `, blockers ${terrainOneDrawBlockerSamples}` : ""}${terrainOneDrawSubmitFallbackSamples ? `, submit fallbacks ${terrainOneDrawSubmitFallbackSamples}` : ""}. Materials ${debug.materialCount}, textures ${debug.textureResourceCount}, indexed textures ${debug.indexedTextureResourceCount}, palettes ${debug.paletteResourceCount}; texture pages ${debug.texturePageBindingCount} bindings (${texturePageBuckets}), atlas failures ${debug.atlasFailureReasonCount}${atlasFailureSamples ? ` (${atlasFailureSamples})` : ""}; direct texture-page draws ${debug.directTexturePageDrawCount} (${debug.directPackedTexturePageDrawCount} packed, ${debug.directSingleEntryTexturePageDrawCount} single-entry)${directTexturePageFallbackSamples ? `, texture-page fallbacks ${directTexturePageFallbackSamples}` : ""}. ${atlasWorkerText}. Compaction planning: candidates ${debug.compactionCandidateDrawUnitCount}, families ${compactionMaterialFamilies}, retained families ${compactionRetainedFamilies}, material blockers ${compactionMaterialBlockers}, geometry blockers ${compactionGeometryBlockers}; submit families shader draws rgba ${debug.rgbaTexturePageFamilyShaderDrawCallCount}, indexed ${debug.indexedPalettedFamilyShaderDrawCallCount}, replaced rgba ${debug.rgbaTexturePageFamilyReplacedDrawUnitCount}, indexed ${debug.indexedPalettedFamilyReplacedDrawUnitCount}, retained rgba ${debug.rgbaTexturePageFamilyRetainedDirectDrawUnitCount}, indexed ${debug.indexedPalettedFamilyRetainedDirectDrawUnitCount}, estimates rgba ${debug.rgbaTexturePageFamilyOriginalDrawCallEstimateCount}->${debug.rgbaTexturePageFamilySubmittedDrawCallEstimateCount}, indexed ${debug.indexedPalettedFamilyOriginalDrawCallEstimateCount}->${debug.indexedPalettedFamilySubmittedDrawCallEstimateCount}, saved rgba ${debug.rgbaTexturePageFamilyDrawCallSavingsCount}, indexed ${debug.indexedPalettedFamilyDrawCallSavingsCount}, overdraw ${debug.rgbaTexturePageFamilyConservativeOverdrawTriangleCount} tris (${debug.rgbaTexturePageFamilyConservativeOverdrawRatio.toFixed(2)}), no-visible routes rgba ${debug.rgbaTexturePageFamilyNoVisibleRouteCount}, indexed ${debug.indexedPalettedFamilyNoVisibleRouteCount}; bypasses ${debug.compactionBypassReasonCount}${compactionBypassSamples ? ` (${compactionBypassSamples})` : ""}${rgbaTexturePageFamilyFallbackSamples ? `, RGBA submit fallbacks ${rgbaTexturePageFamilyFallbackSamples}` : ""}. Fallbacks ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}. Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}, transition depth ${debug.transitionPortalMaxDepth}; canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
 	});
 	const sceneContextText = $derived(renderResourceSnapshot.sceneContextText);
 	const cameraResidencyText = $derived.by(() => {
@@ -1751,16 +1745,10 @@
 		return [
 			{
 				title: "Runtime Render Paths",
-				rows: diagnostics.flatMap((diagnostic, index) => [
-					{
-						label: `Path ${index}`,
-						value: describeRuntimeDiagnosticSummary(diagnostic),
-					},
-					...diagnostic.compactedRoutes.map((route, routeIndex) => ({
-						label: `Route ${index}.${routeIndex}`,
-						value: describeRuntimeCompactedRoute(route),
-					})),
-				]),
+				rows: diagnostics.map((diagnostic, index) => ({
+					label: `Path ${index}`,
+					value: describeRuntimeDiagnosticSummary(diagnostic),
+				})),
 			},
 		];
 	}
@@ -1787,37 +1775,6 @@
 			`alpha=${diagnostic.drawUnit.compactionAlphaPolicy}`,
 			`materialBlockers=${diagnostic.drawUnit.compactionMaterialBlockers.join(",") || "none"}`,
 			`geometryBlockers=${diagnostic.drawUnit.compactionGeometryBlockers.join(",") || "none"}`,
-		].join("; ");
-	}
-
-	function describeRuntimeCompactedRoute(
-		route: DrawUnitRuntimeDiagnostic["compactedRoutes"][number],
-	): string {
-		const common = [
-			route.family,
-			`batch=${route.geometryBatchKey}`,
-			`batchReady=${route.batchAvailable}`,
-			`slice=${route.sliceKey}`,
-			`indices=${route.sliceFirstIndex}+${route.sliceIndexCount}`,
-			`sliceDraws=${route.sliceDrawUnitCount}`,
-		];
-		if (route.family === "rgba-texture-page") {
-			return [
-				...common,
-				`atlasTexture=${route.atlasTextureIndex}`,
-				`slot=${route.materialSlot?.index ?? "none"}`,
-				`sourceSlot=${route.materialSlot?.sourceMaterialSlotKey ?? "none"}`,
-				`rect=${route.materialSlot ? formatNumberTuple(route.materialSlot.atlasRect) : "none"}`,
-				`wrap=${route.materialSlot?.wrap ?? "none"}`,
-			].join("; ");
-		}
-		return [
-			...common,
-			`indexFormat=${route.indexFormat}`,
-			`indexPage=${route.indexPageKey}`,
-			`palettePage=${route.palettePageKey}`,
-			`record=${route.materialRecord?.key ?? "none"}`,
-			`wrap=${route.materialRecord?.wrap ?? "none"}`,
 		].join("; ");
 	}
 
@@ -1863,10 +1820,6 @@
 				staticDiagnostic.drawUnits.map((drawUnit) => drawUnit.drawUnitId),
 			) ?? []
 		);
-	}
-
-	function formatNumberTuple(values: readonly number[]): string {
-		return values.map((value) => value.toFixed(3)).join(",");
 	}
 
 	function getStaticPickDiagnostic(

@@ -32,6 +32,7 @@ Phase 4E7 browser coordinator contract hard cutover is implemented.
 Phase 4E8 staged structured-interior draw path removal is implemented.
 Phase 4E9 staged static renderable draw path removal is implemented.
 Phase 4E10 static compaction render-resource worker deletion is implemented.
+Phase 4E11 artifact-native diagnostics/metrics cleanup is implemented.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -396,6 +397,11 @@ Progress:
   worker scheduler, worker payloads, WebGL compacted-geometry sync path, and staged-static
   compaction scheduler tests. The remaining compacted family resource module is now a submit-time
   type surface only; resident static object bundle artifacts own their CPU compaction/page outputs.
+- 2026-06-05: Implemented Phase 4E11. Removed compacted-geometry worker/resource counters from the
+  public renderer debug contract, WebGL metric assembly, browser diagnostics text, and renderer
+  material-type metrics. Deleted the inert compacted batch/family maps from `Webgl2WorldResourceStore`
+  and reduced selected draw-unit runtime diagnostics to direct/missing path facts instead of
+  reporting deleted compacted route resources.
 
 Validation:
 
@@ -4794,7 +4800,8 @@ Decisions and course corrections:
   or `createEmptyStructuredInteriorSceneModel()`.
 - Course correction: this phase did not remove `setStaticRenderableScene` or
   `setStructuredInteriorScene` from renderer contracts. Phase 4E8 and Phase 4E9 deleted the staged
-  structured/static consumers; Phase 4E11 still owns the model-shaped renderer contract cleanup.
+  structured/static consumers; Phase 4E11 narrowed the compacted/runtime diagnostics that these
+  model-shaped surfaces had been keeping visible.
 - Course correction: the prepared transition portal fallback was removed from the coordinator at the
   same boundary. Transition portal candidates are now artifact-native or empty; preserving the
   prepared fallback would keep topology/env-cell prepared-state coupling alive.
@@ -4803,10 +4810,12 @@ Cleanup targets discovered:
 
 - `StaticRenderableSceneModel` now acts as a preview-only coordinator payload in browser landblock
   rendering. Phase 4E9 narrowed the staged renderer consumer to appearance previews; Phase 4E11
-  should clean up the remaining model-shaped renderer contract naming.
+  cleaned up compacted runtime diagnostics around that handoff. Neutral preview-oriented naming is
+  still Phase 6 cleanup.
 - `StructuredInteriorSceneModel` still crosses the renderer surface because artifact-backed
   structured cells reuse that model shape. Phase 4E8 removed the staged structured consumer; Phase
-  4E11 should narrow or rename the remaining artifact/debug handoff.
+  4E11 removed compacted-route/runtime diagnostics that were tied to the old staged static resource
+  model. Full handoff renaming remains Phase 6 cleanup.
 - Tests for prepared static/structured derivation still exist around the pure helper modules. Keep
   them only while those helpers have non-browser callers; delete them when knip shows no production
   usage.
@@ -4871,8 +4880,8 @@ Cleanup targets discovered:
   is now outside browser artifact rendering and should not survive Phase 6 unless a named diagnostic
   consumer owns it.
 - `StructuredInteriorSceneModel` still crosses renderer/debug surfaces as an artifact-shaped model.
-  Phase 4E11 should narrow that handoff or rename it so it is not confused with prepared
-  main-thread structured hydration.
+  Phase 4E11 removed the compacted-route diagnostics tied to the deleted resource path, but neutral
+  model naming remains Phase 6 cleanup.
 
 Legacy shims introduced:
 
@@ -4921,7 +4930,8 @@ Decisions and course corrections:
   the inert scheduler/payload/resource-sync surface rather than continue adapting it.
 - Course correction: public renderer diagnostic fields still include static-oriented names such as
   `staticGroupMeshCount`. For this phase they are fed by preview counts to avoid a UI contract fanout;
-  Phase 4E11 should rename or split those diagnostics.
+  Phase 4E11 removed the compacted worker/resource fields. The remaining static/preview naming split
+  is Phase 6 cleanup.
 
 Cleanup targets discovered:
 
@@ -4984,21 +4994,19 @@ Decisions and course corrections:
   Deleting those schedulers requires either artifact-native terrain atlas upload or a broader
   non-static material path replacement; treating them as static-only would break live renderer
   behavior.
-- Course correction: public renderer diagnostics still include compacted worker fields for UI
-  contract stability. They are now reported as zeroes because no compacted worker exists. Phase 4E11
-  should remove or rename these diagnostics with the rest of the artifact-native metrics cleanup.
-- Course correction: the legacy compacted batch/family maps remain on `Webgl2WorldResourceStore` as
-  empty submit/runtime-diagnostic inputs. They no longer have a producer. Phase 4E11 should either
-  remove those legacy submit inputs or explicitly replace them with resident artifact family
-  collections.
+- Course correction resolved by Phase 4E11: public renderer diagnostics no longer expose compacted
+  worker fields, zero-valued compacted worker lifecycle metrics, compacted resource counters, or
+  compacted route fallback samples.
+- Course correction resolved by Phase 4E11: the legacy compacted batch/family maps were removed from
+  `Webgl2WorldResourceStore`. The world display implementation now passes explicit empty legacy
+  family inputs to the remaining submit-family hooks until Phase 4E12 re-owns or deletes them.
 
 Cleanup targets discovered:
 
-- Delete or rename compacted-worker renderer-contract fields and BrowserWorldDisplay diagnostic text
-  in Phase 4E11. They now intentionally report zero and should not survive the final diagnostics
-  contract.
-- Remove the inert `compactedGeometryBatches` and `compactedGeometryFamilyResources` store maps once
-  submit/runtime diagnostics no longer accept legacy compacted family collections.
+- Completed in Phase 4E11: compacted-worker renderer-contract fields and BrowserWorldDisplay
+  diagnostic text were removed.
+- Completed in Phase 4E11: inert `compactedGeometryBatches` and
+  `compactedGeometryFamilyResources` store maps were removed.
 - Audit `compactionFamilyPlan` and related compaction coverage metrics in `webgl2-world-resources.ts`.
   They now describe appearance-preview/direct diagnostics, not a live static compaction pipeline.
 - Complete Phase 4E12 before final cleanup. Terrain still uses the RGBA texture atlas worker/global
@@ -5008,8 +5016,8 @@ Cleanup targets discovered:
 Legacy shims introduced:
 
 - None. The compacted-geometry render-resource worker API was deleted rather than hidden behind a
-  compatibility adapter. The remaining zero-valued renderer diagnostic fields are existing public UI
-  contract debt scheduled for Phase 4E11, not a runtime compatibility mode.
+  compatibility adapter. Phase 4E11 then removed the temporary zero-valued renderer diagnostic
+  fields instead of preserving them as a public UI compatibility mode.
 
 Exit criteria:
 
@@ -5050,6 +5058,55 @@ Exit criteria:
 - Picker/debug diagnostics consume resident artifacts or explicitly report unavailable data.
 - Metrics describe resident artifacts and artifact texture pages, not removed staged or replacement
   machinery.
+
+Decisions and course corrections:
+
+- Implemented. `WorldRenderDebugMetrics` no longer exposes compacted-geometry worker counters,
+  compacted batch/resource counts, compacted buffer byte totals, compacted route fallback samples, or
+  zero-valued compacted worker lifecycle metrics. `BrowserWorldDisplay.svelte` now describes
+  compaction planning and submit-family draw metrics without implying a live compacted worker path.
+- Implemented. `Webgl2WorldResourceStore` no longer carries inert `compactedGeometryBatches`,
+  `compactedGeometryFamilyResources`, compacted resource count fields, or compacted resource fallback
+  samples. Destroy/reset logic no longer clears resources that cannot be produced.
+- Implemented. `deriveWebgl2DrawUnitRuntimeDiagnostics` no longer walks compacted family resources or
+  reports `compacted-resource` submission paths. Selected draw-unit diagnostics now report only
+  missing/direct-retained path facts plus low-fidelity compaction planning facts.
+- Course correction: the reusable RGBA and indexed compacted-family submit inputs still exist on
+  `submitWebgl2WorldFrame` and `submitWebgl2WorldDrawUnits` because Phase 4E12 still owns terrain
+  and non-static atlas worker ownership cleanup. The WebGL renderer now passes explicit empty
+  compacted-family resource arrays from the world display implementation, so no renderer store state
+  or landblock static path keeps those inputs alive.
+- Course correction: `StaticRenderableSceneModel`, `StructuredInteriorSceneModel`, and
+  `staged-world-assembly.ts` still exist for appearance previews, transition/debug helpers, and
+  renderer contract compatibility. They no longer preserve landblock-derived static or structured
+  render-resource fallback paths. Full deletion/renaming belongs to Phase 6 after Phase 4E12 removes
+  the remaining atlas-worker ownership.
+
+Cleanup targets discovered:
+
+- Delete or re-own `Webgl2RgbaTexturePageFamilyResource`,
+  `Webgl2IndexedPalettedFamilyResource`, `Webgl2CompactedGeometryBatchResource`, and the compacted
+  family submit functions once Phase 4E12 removes the last global atlas worker dependency or assigns
+  those families to a named non-landblock renderer feature.
+- Rename remaining compaction-planning debug keys such as `webgl2-compacted-*` after Phase 4E12 if
+  they describe preview/direct planning rather than resident static object bundle artifacts.
+- Remove or rename remaining `StaticRenderableSceneModel` and `staged-world-assembly.ts` browser
+  contract surfaces during Phase 6 once appearance-preview ownership has a neutral name.
+
+Legacy shims introduced:
+
+- None. Removed public compacted metrics and runtime route diagnostics instead of keeping
+  zero-valued fields or empty route arrays.
+
+Validation:
+
+- `npm exec vitest -- run src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/render-resource-worker-client.test.ts`
+  passed.
+- `npm run check` passed.
+- `npm run lint:ts` passed.
+- `npm run lint:dead` passed after deleting the now-unused
+  `Webgl2CompactedGeometryFamilyResource` export.
+- `npm run lint:rust` passed.
 
 ### Phase 4E12: Terrain and Non-Static Atlas Worker Ownership Cleanup
 

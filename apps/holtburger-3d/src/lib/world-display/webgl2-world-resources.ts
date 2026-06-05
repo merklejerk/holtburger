@@ -121,10 +121,6 @@ import {
 	type Webgl2IndexedResourceAtlasGenerationResource,
 } from "./webgl2/resources/indexed-resource-atlas-generation";
 import type {
-	Webgl2CompactedGeometryBatchResource,
-	Webgl2CompactedGeometryFamilyResource,
-} from "./webgl2/resources/compacted-geometry-resources";
-import type {
 	IndexedResourceAtlasWorkerScheduler,
 	IndexedResourceAtlasWorkerSchedulerMetrics,
 } from "./worker-resources/indexed-atlas-worker-scheduler";
@@ -283,12 +279,6 @@ export interface Webgl2WorldResourceStore {
 	textureAtlasWorkerMetrics: TextureAtlasWorkerSchedulerMetrics;
 	textureAtlasGenerationGraph: RendererResourceGraph | null;
 	textureAtlasGenerationGraphLease: RendererResourceGraphLease | null;
-	compactedGeometryBatches: Map<string, Webgl2CompactedGeometryBatchResource>;
-	compactedGeometryFamilyResources: Map<
-		string,
-		Webgl2CompactedGeometryFamilyResource
-	>;
-	compactedGeometryFamilyResourceCounts: Record<string, number>;
 	compactionCandidateDrawUnitCount: number;
 	compactionBypassReasonCount: number;
 	compactionBypassSamples: readonly string[];
@@ -323,16 +313,6 @@ export interface Webgl2WorldResourceStore {
 	indexedResourceAtlasPaletteTextureCount: number;
 	indexedResourceAtlasFailureReasonCount: number;
 	indexedResourceAtlasFailureSamples: readonly string[];
-	compactedGeometryBatchCount: number;
-	compactedGeometryDrawUnitCount: number;
-	compactedGeometryTriangleCount: number;
-	compactedGeometryVertexByteLength: number;
-	compactedGeometryIndexByteLength: number;
-	compactedGeometryTotalByteLength: number;
-	compactedGeometryDrawSliceCount: number;
-	compactedGeometryBatchOriginCount: number;
-	compactedGeometryTransformTableEntryCount: number;
-	compactedResourceFallbackSamples: readonly string[];
 	textureCount: number;
 	indexedTextureCount: number;
 	paletteTextureCount: number;
@@ -429,9 +409,6 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		textureAtlasWorkerMetrics: createEmptyTextureAtlasWorkerSchedulerMetrics(),
 		textureAtlasGenerationGraph: null,
 		textureAtlasGenerationGraphLease: null,
-		compactedGeometryBatches: new Map(),
-		compactedGeometryFamilyResources: new Map(),
-		compactedGeometryFamilyResourceCounts: {},
 		compactionCandidateDrawUnitCount: 0,
 		compactionBypassReasonCount: 0,
 		compactionBypassSamples: [],
@@ -464,16 +441,6 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		indexedResourceAtlasPaletteTextureCount: 0,
 		indexedResourceAtlasFailureReasonCount: 0,
 		indexedResourceAtlasFailureSamples: [],
-		compactedGeometryBatchCount: 0,
-		compactedGeometryDrawUnitCount: 0,
-		compactedGeometryTriangleCount: 0,
-		compactedGeometryVertexByteLength: 0,
-		compactedGeometryIndexByteLength: 0,
-		compactedGeometryTotalByteLength: 0,
-		compactedGeometryDrawSliceCount: 0,
-		compactedGeometryBatchOriginCount: 0,
-		compactedGeometryTransformTableEntryCount: 0,
-		compactedResourceFallbackSamples: [],
 		textureCount: 0,
 		indexedTextureCount: 0,
 		paletteTextureCount: 0,
@@ -1097,12 +1064,6 @@ export function destroyWebgl2WorldResources(
 	store.pendingTextureAtlasGenerationKey = null;
 	store.textureAtlasWorkerMetrics =
 		createEmptyTextureAtlasWorkerSchedulerMetrics();
-	for (const batch of store.compactedGeometryBatches.values()) {
-		batch.dispose();
-	}
-	store.compactedGeometryBatches.clear();
-	store.compactedGeometryFamilyResources.clear();
-	store.compactedGeometryFamilyResourceCounts = {};
 	store.compactionCandidateDrawUnitCount = 0;
 	store.compactionBypassReasonCount = 0;
 	store.compactionBypassSamples = [];
@@ -1133,16 +1094,6 @@ export function destroyWebgl2WorldResources(
 	store.indexedResourceAtlasFailureSamples = [];
 	store.textureAtlasGenerationTextureCount = 0;
 	store.detailTextureAtlasGenerationTextureCount = 0;
-	store.compactedGeometryBatchCount = 0;
-	store.compactedGeometryDrawUnitCount = 0;
-	store.compactedGeometryTriangleCount = 0;
-	store.compactedGeometryVertexByteLength = 0;
-	store.compactedGeometryIndexByteLength = 0;
-	store.compactedGeometryTotalByteLength = 0;
-	store.compactedGeometryDrawSliceCount = 0;
-	store.compactedGeometryBatchOriginCount = 0;
-	store.compactedGeometryTransformTableEntryCount = 0;
-	store.compactedResourceFallbackSamples = [];
 	for (const texture of store.texturesByKey.values()) {
 		texture.dispose();
 	}

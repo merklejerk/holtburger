@@ -307,37 +307,6 @@ export function createWebgl2RenderMetrics(
 				input.worldStore?.textureAtlasGenerationTextureCount ?? 0,
 			detailTextureAtlasGenerationTextureCount:
 				input.worldStore?.detailTextureAtlasGenerationTextureCount ?? 0,
-			compactedGeometryFamilyResourceCounts:
-				input.worldStore?.compactedGeometryFamilyResourceCounts ?? {},
-			compactedGeometryBatchCount:
-				input.worldStore?.compactedGeometryBatchCount ?? 0,
-			compactedGeometryDrawUnitCount:
-				input.worldStore?.compactedGeometryDrawUnitCount ?? 0,
-			compactedGeometryTriangleCount:
-				input.worldStore?.compactedGeometryTriangleCount ?? 0,
-			compactedGeometryVertexByteLength:
-				input.worldStore?.compactedGeometryVertexByteLength ?? 0,
-			compactedGeometryIndexByteLength:
-				input.worldStore?.compactedGeometryIndexByteLength ?? 0,
-			compactedGeometryTotalByteLength:
-				input.worldStore?.compactedGeometryTotalByteLength ?? 0,
-			compactedGeometryDrawSliceCount:
-				input.worldStore?.compactedGeometryDrawSliceCount ?? 0,
-			compactedGeometryBatchOriginCount:
-				input.worldStore?.compactedGeometryBatchOriginCount ?? 0,
-			compactedGeometryTransformTableEntryCount:
-				input.worldStore?.compactedGeometryTransformTableEntryCount ?? 0,
-			compactedResourceFallbackSamples: [
-				...(input.worldStore?.compactedResourceFallbackSamples ?? []),
-			],
-			compactedGeometryWorkerActiveSchedulerCount: 0,
-			compactedGeometryWorkerSubmittedJobCount: 0,
-			compactedGeometryWorkerDedupedDesiredJobCount: 0,
-			compactedGeometryWorkerCoalescedDesiredJobCount: 0,
-			compactedGeometryWorkerStaleResultCount: 0,
-			compactedGeometryWorkerReadyResultCount: 0,
-			compactedGeometryWorkerCommittedResultCount: 0,
-			compactedGeometryWorkerErrorCount: 0,
 			rgbaTexturePageFamilyShaderDrawCallCount:
 				input.submitMetrics.rgbaTexturePageFamilyShaderDrawCallCount,
 			rgbaTexturePageFamilySubmittedBatchCount:
@@ -570,26 +539,6 @@ export function createWebgl2RenderMetrics(
 							input.worldStore.textureAtlasWorkerMetrics.committedResultCount,
 						"webgl2-texture-atlas-worker-errors":
 							input.worldStore.textureAtlasWorkerMetrics.errorCount,
-						...prefixCounts(
-							"webgl2-compacted-family-resources-",
-							input.worldStore.compactedGeometryFamilyResourceCounts,
-						),
-						"webgl2-compacted-geometry-batches":
-							input.worldStore.compactedGeometryBatchCount,
-						"webgl2-compacted-geometry-draw-units":
-							input.worldStore.compactedGeometryDrawUnitCount,
-						"webgl2-compacted-geometry-draw-slices":
-							input.worldStore.compactedGeometryDrawSliceCount,
-						"webgl2-compacted-geometry-batch-origins":
-							input.worldStore.compactedGeometryBatchOriginCount,
-						"webgl2-compacted-geometry-transform-table-entries":
-							input.worldStore.compactedGeometryTransformTableEntryCount,
-						"webgl2-compacted-worker-active-schedulers": 0,
-						"webgl2-compacted-worker-submitted-jobs": 0,
-						"webgl2-compacted-worker-stale-results": 0,
-						"webgl2-compacted-worker-ready-results": 0,
-						"webgl2-compacted-worker-committed-results": 0,
-						"webgl2-compacted-worker-errors": 0,
 						"webgl2-rgba-family-shader-draws":
 							input.submitMetrics.rgbaTexturePageFamilyShaderDrawCallCount,
 						"webgl2-rgba-family-submitted-batches":

@@ -1124,21 +1124,13 @@ export function createWebgl2WorldDisplayRendererImplementation(
 							indexedPalettedFamilyP16Program:
 								currentResources.indexedPalettedFamilyP16WorldProgram,
 							rgbaTexturePageFamilyResources: {
-								batches: [
-									...currentResources.worldStore.compactedGeometryBatches.values(),
-								],
-								rgbaTexturePageFamilies: [
-									...currentResources.worldStore.compactedGeometryFamilyResources.values(),
-								].filter((resource) => resource.family === "rgba-texture-page"),
+								batches: [],
+								rgbaTexturePageFamilies: [],
 								generation: currentResources.worldStore.textureAtlasGeneration,
 							},
 							indexedPalettedFamilyResources: {
-								batches: [
-									...currentResources.worldStore.compactedGeometryBatches.values(),
-								],
-								indexedPalettedFamilies: [
-									...currentResources.worldStore.compactedGeometryFamilyResources.values(),
-								].filter((resource) => resource.family === "indexed-paletted"),
+								batches: [],
+								indexedPalettedFamilies: [],
 								indexedResourceAtlasGeneration:
 									currentResources.worldStore.indexedResourceAtlasGeneration,
 								detailTextureAtlasGenerationKey:
@@ -1717,17 +1709,13 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			indexedPalettedFamilyP16Program:
 				resources.indexedPalettedFamilyP16WorldProgram,
 			rgbaTexturePageFamilyResources: {
-				batches: [...resources.worldStore.compactedGeometryBatches.values()],
-				rgbaTexturePageFamilies: [
-					...resources.worldStore.compactedGeometryFamilyResources.values(),
-				].filter((resource) => resource.family === "rgba-texture-page"),
+				batches: [],
+				rgbaTexturePageFamilies: [],
 				generation: resources.worldStore.textureAtlasGeneration,
 			},
 			indexedPalettedFamilyResources: {
-				batches: [...resources.worldStore.compactedGeometryBatches.values()],
-				indexedPalettedFamilies: [
-					...resources.worldStore.compactedGeometryFamilyResources.values(),
-				].filter((resource) => resource.family === "indexed-paletted"),
+				batches: [],
+				indexedPalettedFamilies: [],
 				indexedResourceAtlasGeneration:
 					resources.worldStore.indexedResourceAtlasGeneration,
 				detailTextureAtlasGenerationKey:

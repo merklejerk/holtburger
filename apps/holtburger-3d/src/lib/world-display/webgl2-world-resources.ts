@@ -110,11 +110,11 @@ import {
 	type GeometrySubmissionLayout,
 } from "./webgl2/families/direct-render-family";
 import {
-	createTextureAtlasCpuGeneration,
-	createWebgl2TextureAtlasTextureResourceFromCpu,
-	describeWebgl2TextureAtlasGenerationKey,
-	type TextureAtlasCpuGeneration,
-} from "./webgl2/resources/texture-atlas-generation";
+	createTexturePageCpuSet,
+	createWebgl2TexturePageTextureResourceFromCpu,
+	describeWebgl2TexturePageSetKey,
+	type TexturePageCpuSet,
+} from "./webgl2/resources/texture-page-upload";
 import {
 	buildTerrainBlendPlanSet,
 	type TerrainBlendTextureRef,
@@ -3636,14 +3636,14 @@ function syncWebgl2TerrainTexturePageResources({
 	}
 	const retainedKeys = new Set<string>();
 	for (const cpuTexture of [
-		...terrainPlan.cpuGeneration.textures,
-		...terrainPlan.cpuGeneration.detailTextures,
+		...terrainPlan.cpuSet.textures,
+		...terrainPlan.cpuSet.detailTextures,
 	]) {
 		retainedKeys.add(cpuTexture.key);
 		if (store.terrainTexturePagesByKey.has(cpuTexture.key)) {
 			continue;
 		}
-		const texturePage = createWebgl2TextureAtlasTextureResourceFromCpu({
+		const texturePage = createWebgl2TexturePageTextureResourceFromCpu({
 			gl,
 			cpuTexture,
 			textureFilteringMode,
@@ -3679,7 +3679,7 @@ function createTerrainTexturePageGenerationPlan({
 	plan: TexturePageAtlasPlan;
 	textureFilteringMode: TextureFilteringMode;
 	maxAnisotropy: number;
-}): { cpuGeneration: TextureAtlasCpuGeneration } | null {
+}): { cpuSet: TexturePageCpuSet } | null {
 	const terrainFamilies = plan.families
 		.map((familyPlan) => ({
 			...familyPlan,
@@ -3711,12 +3711,12 @@ function createTerrainTexturePageGenerationPlan({
 	if (terrainFamilies.length === 0) {
 		return null;
 	}
-	const cpuGeneration = profileBrowserJsScope(
+	const cpuSet = profileBrowserJsScope(
 		"webgl2.resource.buildTerrainTexturePagesCpu",
 		() =>
-			createTextureAtlasCpuGeneration({
+			createTexturePageCpuSet({
 				plan: {
-					key: describeWebgl2TextureAtlasGenerationKey({
+					key: describeWebgl2TexturePageSetKey({
 						planKey: `${plan.key}/terrain-pages`,
 						textureFilteringMode,
 						maxAnisotropy,
@@ -3732,12 +3732,12 @@ function createTerrainTexturePageGenerationPlan({
 				maxAnisotropy,
 			}),
 	);
-	if (!cpuGeneration) {
+	if (!cpuSet) {
 		throw new Error(
-			`Terrain texture page generation ${plan.key} produced no CPU generation for terrain page families.`,
+			`Terrain texture page build ${plan.key} produced no CPU page set for terrain page families.`,
 		);
 	}
-	return { cpuGeneration };
+	return { cpuSet };
 }
 
 function clearWebgl2TerrainTexturePageResources(

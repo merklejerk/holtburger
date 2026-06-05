@@ -16,7 +16,7 @@ import type { TextureFilteringMode } from "../../texture-pages/texture-sampling-
 
 const TERRAIN_COLOR_ATLAS_FILL_RGBA = [128, 128, 128, 255] as const;
 
-interface Webgl2TextureAtlasPlacementResource {
+interface Webgl2TexturePagePlacementResource {
 	family: TexturePageFamily;
 	atlasEntryKey: string;
 	textureIndex: number;
@@ -25,7 +25,7 @@ interface Webgl2TextureAtlasPlacementResource {
 	height: number;
 }
 
-export interface Webgl2TextureAtlasTextureResource {
+export interface Webgl2TexturePageTextureResource {
 	key: string;
 	family: TexturePageFamily;
 	textureIndex: number;
@@ -35,7 +35,7 @@ export interface Webgl2TextureAtlasTextureResource {
 	placementCount: number;
 }
 
-export interface Webgl2DetailTextureAtlasTextureResource {
+export interface Webgl2DetailTexturePageTextureResource {
 	key: string;
 	family: TexturePageFamily;
 	textureIndex: number;
@@ -45,18 +45,7 @@ export interface Webgl2DetailTextureAtlasTextureResource {
 	placementCount: number;
 }
 
-export interface Webgl2TextureAtlasGenerationResource {
-	key: string;
-	textures: readonly Webgl2TextureAtlasTextureResource[];
-	placements: readonly Webgl2TextureAtlasPlacementResource[];
-	detailTextures: readonly Webgl2DetailTextureAtlasTextureResource[];
-	detailPlacements: readonly Webgl2TextureAtlasPlacementResource[];
-	preparedTextureAssetIds: readonly string[];
-	rgbaAtlasReadyDrawUnitIds: readonly string[];
-	dispose(): void;
-}
-
-export interface TextureAtlasCpuTexture {
+export interface TexturePageCpuTexture {
 	key: string;
 	family: TexturePageFamily;
 	textureIndex: number;
@@ -66,17 +55,17 @@ export interface TextureAtlasCpuTexture {
 	pixels: Uint8Array;
 }
 
-export interface TextureAtlasCpuGeneration {
+export interface TexturePageCpuSet {
 	key: string;
-	textures: readonly TextureAtlasCpuTexture[];
-	placements: readonly Webgl2TextureAtlasPlacementResource[];
-	detailTextures: readonly TextureAtlasCpuTexture[];
-	detailPlacements: readonly Webgl2TextureAtlasPlacementResource[];
+	textures: readonly TexturePageCpuTexture[];
+	placements: readonly Webgl2TexturePagePlacementResource[];
+	detailTextures: readonly TexturePageCpuTexture[];
+	detailPlacements: readonly Webgl2TexturePagePlacementResource[];
 	preparedTextureAssetIds: readonly string[];
 	rgbaAtlasReadyDrawUnitIds: readonly string[];
 }
 
-export interface TextureAtlasCpuGenerationPlan {
+export interface TexturePageCpuSetPlan {
 	key: string;
 	rgbaAtlasReadyDrawUnitIds: readonly string[];
 	detailAtlasTextures: readonly AtlasTexturePage[];
@@ -84,15 +73,15 @@ export interface TextureAtlasCpuGenerationPlan {
 	preparedTextureAssetIds: readonly string[];
 }
 
-export function createTextureAtlasCpuGeneration({
+export function createTexturePageCpuSet({
 	plan,
 	textureFilteringMode = "anisotropic-4x",
 	maxAnisotropy = 1,
 }: {
-	plan: TextureAtlasCpuGenerationPlan;
+	plan: TexturePageCpuSetPlan;
 	textureFilteringMode?: TextureFilteringMode;
 	maxAnisotropy?: number;
-}): TextureAtlasCpuGeneration | null {
+}): TexturePageCpuSet | null {
 	if (
 		plan.rgbaAtlasReadyDrawUnitIds.length === 0 &&
 		plan.detailAtlasTextures.length === 0
@@ -106,8 +95,8 @@ export function createTextureAtlasCpuGeneration({
 					(record) => [record.key, record] as const,
 				),
 			);
-			return createTextureAtlasCpuTexture({
-				generationKey: plan.key,
+			return createTexturePageCpuTexture({
+				pageSetKey: plan.key,
 				family: familyPlan.family,
 				page,
 				entriesByKey,
@@ -138,8 +127,8 @@ export function createTextureAtlasCpuGeneration({
 					(entry) => [entry.key, entry] as const,
 				),
 			);
-			return createDetailTextureAtlasCpuTexture({
-				generationKey: plan.key,
+			return createDetailTexturePageCpuTexture({
+				pageSetKey: plan.key,
 				family: familyPlan.family,
 				page,
 				entriesByKey: detailEntriesByKey,
@@ -164,7 +153,7 @@ export function createTextureAtlasCpuGeneration({
 		),
 	);
 	return {
-		key: describeWebgl2TextureAtlasGenerationKey({
+		key: describeWebgl2TexturePageSetKey({
 			planKey: plan.key,
 			textureFilteringMode,
 			maxAnisotropy,
@@ -178,63 +167,17 @@ export function createTextureAtlasCpuGeneration({
 	};
 }
 
-export function createWebgl2TextureAtlasGenerationResourceFromCpu({
-	gl,
-	cpuGeneration,
-	textureFilteringMode = "anisotropic-4x",
-	maxAnisotropy = 1,
-}: {
-	gl: WebGL2RenderingContext;
-	cpuGeneration: TextureAtlasCpuGeneration;
-	textureFilteringMode?: TextureFilteringMode;
-	maxAnisotropy?: number;
-}): Webgl2TextureAtlasGenerationResource {
-	const textures = cpuGeneration.textures.map((texture) =>
-		createWebgl2TextureAtlasTextureResourceFromCpu({
-			gl,
-			cpuTexture: texture,
-			textureFilteringMode,
-			maxAnisotropy,
-		}),
-	);
-	const detailTextures = cpuGeneration.detailTextures.map((texture) =>
-		createWebgl2TextureAtlasTextureResourceFromCpu({
-			gl,
-			cpuTexture: texture,
-			textureFilteringMode,
-			maxAnisotropy,
-		}),
-	);
-	return {
-		key: cpuGeneration.key,
-		textures,
-		placements: cpuGeneration.placements,
-		detailTextures,
-		detailPlacements: cpuGeneration.detailPlacements,
-		preparedTextureAssetIds: cpuGeneration.preparedTextureAssetIds,
-		rgbaAtlasReadyDrawUnitIds: cpuGeneration.rgbaAtlasReadyDrawUnitIds,
-		dispose() {
-			for (const texture of textures) {
-				texture.texture.dispose();
-			}
-			for (const texture of detailTextures) {
-				texture.texture.dispose();
-			}
-		},
-	};
-}
-
-function createTextureAtlasCpuTexture({
-	generationKey,
+function createTexturePageCpuTexture({
+	pageSetKey,
 	family,
 	page,
 	entriesByKey,
 }: {
-	generationKey: string;
+	pageSetKey: string;
 	family: TexturePageFamily;
 	page: AtlasTexturePage;
 	entriesByKey: ReadonlyMap<string, RgbaTexturePageAtlasEntryRecord>;
-}): TextureAtlasCpuTexture {
+}): TexturePageCpuTexture {
 	const pixels = new Uint8Array(page.width * page.height * 4);
 	if (family === "terrain-color") {
 		fillRgbaPixels(pixels, TERRAIN_COLOR_ATLAS_FILL_RGBA);
@@ -243,7 +186,7 @@ function createTextureAtlasCpuTexture({
 		const record = entriesByKey.get(placement.atlasEntryKey);
 		if (!record) {
 			throw new Error(
-				`Texture atlas generation ${generationKey} references missing entry ${placement.atlasEntryKey}.`,
+				`Texture page set ${pageSetKey} references missing entry ${placement.atlasEntryKey}.`,
 			);
 		}
 		copyTextureAtlasPlacement({
@@ -255,7 +198,7 @@ function createTextureAtlasCpuTexture({
 			entry: record.entry,
 		});
 	}
-	const key = `${generationKey}/${family}/texture/${page.textureIndex}`;
+	const key = `${pageSetKey}/${family}/texture/${page.textureIndex}`;
 	return {
 		key,
 		family,
@@ -267,23 +210,23 @@ function createTextureAtlasCpuTexture({
 	};
 }
 
-function createDetailTextureAtlasCpuTexture({
-	generationKey,
+function createDetailTexturePageCpuTexture({
+	pageSetKey,
 	family,
 	page,
 	entriesByKey,
 }: {
-	generationKey: string;
+	pageSetKey: string;
 	family: TexturePageFamily;
 	page: AtlasTexturePage;
 	entriesByKey: ReadonlyMap<string, RgbaTexturePageDetailAtlasEntry>;
-}): TextureAtlasCpuTexture {
+}): TexturePageCpuTexture {
 	const pixels = new Uint8Array(page.width * page.height * 4);
 	for (const placement of page.placements) {
 		const entry = entriesByKey.get(placement.atlasEntryKey);
 		if (!entry) {
 			throw new Error(
-				`Detail texture atlas generation ${generationKey} references missing entry ${placement.atlasEntryKey}.`,
+				`Detail texture page set ${pageSetKey} references missing entry ${placement.atlasEntryKey}.`,
 			);
 		}
 		copyDetailTextureAtlasPlacement({
@@ -295,7 +238,7 @@ function createDetailTextureAtlasCpuTexture({
 			entry,
 		});
 	}
-	const key = `${generationKey}/${family}/detail-texture/${page.textureIndex}`;
+	const key = `${pageSetKey}/${family}/detail-texture/${page.textureIndex}`;
 	return {
 		key,
 		family,
@@ -307,19 +250,19 @@ function createDetailTextureAtlasCpuTexture({
 	};
 }
 
-export function createWebgl2TextureAtlasTextureResourceFromCpu({
+export function createWebgl2TexturePageTextureResourceFromCpu({
 	gl,
 	cpuTexture,
 	textureFilteringMode,
 	maxAnisotropy,
 }: {
 	gl: WebGL2RenderingContext;
-	cpuTexture: TextureAtlasCpuTexture;
+	cpuTexture: TexturePageCpuTexture;
 	textureFilteringMode: TextureFilteringMode;
 	maxAnisotropy: number;
 }):
-	| Webgl2TextureAtlasTextureResource
-	| Webgl2DetailTextureAtlasTextureResource {
+	| Webgl2TexturePageTextureResource
+	| Webgl2DetailTexturePageTextureResource {
 	const texture = createWebgl2Texture2D(gl, {
 		label: cpuTexture.key,
 		upload: {
@@ -348,7 +291,7 @@ export function createWebgl2TextureAtlasTextureResourceFromCpu({
 	};
 }
 
-export function describeWebgl2TextureAtlasGenerationKey({
+export function describeWebgl2TexturePageSetKey({
 	planKey,
 	textureFilteringMode,
 	maxAnisotropy,

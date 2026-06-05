@@ -7,11 +7,14 @@ import type {
 } from "../assets/types";
 import type { PlacementTransformDto } from "../host/contracts";
 import { makeOutdoorLandblockId } from "../landblocks";
+import type { LandblockRenderProductWorkerResult } from "./landblock-render-product";
 import type { RenderChunkTransform } from "./render-anchor";
 import { createTranslationMat4 } from "./render-math";
+import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
 import type { StructuredInteriorCell } from "./structured-interior-scene";
 import {
 	buildWorldResidencyIndex,
+	buildWorldResidencyIndexFromLandblockArtifacts,
 	computeRendererPositionLandblockResidency,
 	deriveBrowserCameraResidency,
 	deriveConservativeResidencyCellBounds,
@@ -207,6 +210,36 @@ describe("world residency index", () => {
 			envCellId: 0x01020001,
 		});
 		expect(result.diagnostics).toMatchObject({
+			aabbCandidateCount: 1,
+			cellBspMatchCount: 1,
+			aabbFallbackCount: 0,
+			source: "cell-bsp",
+		});
+	});
+
+	it("queries env-cell residency from detailed landblock artifacts without structured scene cells", () => {
+		const landblockId = makeOutdoorLandblockId(1, 2);
+		const envCellId = 0x01020001;
+		const index = buildWorldResidencyIndexFromLandblockArtifacts({
+			renderChunkTransforms: [createChunkTransform(landblockId, landblockId)],
+			artifacts: createStaticLandblockArtifactSnapshot([
+				createDetailedLandblockProductArtifact({
+					landblockId,
+					envCellId,
+					origin: { x: 10, y: 20, z: 30 },
+					boundsMin: { x: 0, y: 0, z: 0 },
+					boundsMax: { x: 10, y: 10, z: 10 },
+				}),
+			]),
+		});
+
+		const result = index?.queryDetailed({ x: 15, y: 35, z: -15 });
+		expect(result?.context).toEqual({
+			kind: "env-cell",
+			landblockId,
+			envCellId,
+		});
+		expect(result?.diagnostics).toMatchObject({
 			aabbCandidateCount: 1,
 			cellBspMatchCount: 1,
 			aabbFallbackCount: 0,
@@ -441,6 +474,99 @@ function createRenderGeometry(
 		triangles: [],
 		surfaceIds: [],
 		bounds: { min, max },
+	};
+}
+
+function createStaticLandblockArtifactSnapshot(
+	artifacts: readonly LandblockRenderProductWorkerResult[],
+): StaticLandblockRenderArtifactStoreSnapshot {
+	return {
+		artifacts,
+		desiredCount: artifacts.length,
+		residentCount: artifacts.length,
+		inFlightCount: 0,
+		staleResultCount: 0,
+		committedResultCount: artifacts.length,
+		evictedResultCount: 0,
+		errorCount: 0,
+		latestDesiredIdentityKeys: [],
+	};
+}
+
+function createDetailedLandblockProductArtifact(options: {
+	landblockId: number;
+	envCellId: number;
+	origin: { x: number; y: number; z: number };
+	boundsMin: { x: number; y: number; z: number };
+	boundsMax: { x: number; y: number; z: number };
+}): LandblockRenderProductWorkerResult {
+	return {
+		type: "landblock-render-product-built",
+		jobId: "job:test",
+		landblockId: options.landblockId,
+		product: "outdoor-env-cells",
+		requestId: "request:test",
+		buildPolicyRevision: "build:v1",
+		texturePagePolicyRevision: "pages:v1",
+		artifacts: [
+			{
+				artifactKind: "detailed-landblock",
+				key: "detailed:test",
+				landblockId: options.landblockId,
+				product: "outdoor-env-cells",
+				requestId: "request:test",
+				buildPolicyRevision: "build:v1",
+				texturePagePolicyRevision: "pages:v1",
+				selectedEnvCellIds: [options.envCellId],
+				structuredInteriorMaterialRecords: [],
+				structuredInteriorTexturePageRefs: [],
+				structuredInteriorTexturePages: [],
+				structuredInteriorCells: [
+					{
+						key: "structured-interior-cell:test",
+						envCellId: options.envCellId,
+						landblockId: options.landblockId,
+						regionNumber: 0,
+						environmentId: 0,
+						cellStructureId: 0,
+						renderChunk: {
+							chunkKey: `landblock/${options.landblockId.toString(16).padStart(8, "0")}`,
+							chunkLandblockId: options.landblockId,
+						},
+						localPlacement: createPlacement(options.origin),
+						surfaceIds: [],
+						materialSlices: [],
+						portals: [],
+						portalApertureKeys: [],
+						staticObjectCount: 0,
+						cellBsp: createCellBsp(options.boundsMin.x),
+						renderGeometry: createRenderGeometry(
+							options.boundsMin,
+							options.boundsMax,
+						),
+					},
+				],
+				cellStructureMetadata: [],
+				portalLinks: [],
+				portalApertures: [],
+				visibility: {
+					objectVisibilityRecords: [],
+					cellVisibilityRecords: [],
+				},
+				spatial: {
+					envCellResidencyBvh: {
+						coordinateSpace: "landblock-topology-residency",
+						nodes: [],
+						items: [],
+					},
+					envCellLocalBvhs: [],
+				},
+			},
+		],
+		diagnostics: {
+			status: "ready",
+			messages: [],
+		},
 	};
 }
 

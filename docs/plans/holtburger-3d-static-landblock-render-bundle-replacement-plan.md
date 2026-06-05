@@ -19,7 +19,7 @@ artifact-backed structured spatial index items are implemented. Phase 4C3D3B2 st
 spatial hints and artifact-backed static spatial index items are implemented. Phase 4C3D3B3
 selected static overlay artifact fallback is implemented. Phase 4C3D3B4 render BVH visibility
 naming cleanup is implemented. Phase 4D1 artifact-backed portal composite BVH sources are
-implemented.
+implemented. Phase 4D2A artifact-backed camera residency index is implemented.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -313,6 +313,12 @@ Progress:
   env-cell local BVH source derivation for portal composite/interior clipped visibility, and wired
   WebGL scene-bounds source construction to pass the resident static landblock artifact snapshot.
   Prepared env-cell payload sources remain only as the existing absence fallback.
+- 2026-06-05: Implemented Phase 4D2A. `world-residency-index.ts` can now build camera residency
+  indexes directly from resident `detailed-landblock.structuredInteriorCells`, and the WebGL
+  renderer prefers that artifact-backed index before falling back to `StructuredInteriorSceneModel`.
+  Artifact-backed residency uses structured interior artifact render-geometry bounds plus cell BSP;
+  the legacy conservative cell-structure vertex-array bounds remain available only for structured
+  scene fallback cells.
 
 Validation:
 
@@ -357,6 +363,9 @@ Validation:
 - `npm exec vitest -- run src/lib/world-display/render-bvh-sources.test.ts src/lib/world-display/portal-clipped-bvh-candidates.test.ts`,
   `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
   `git diff --check` passed after Phase 4D1.
+- `npm exec vitest -- run src/lib/world-display/world-residency-index.test.ts`, `npm run check`,
+  `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and `git diff --check` passed after
+  Phase 4D2A.
 - `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts`
   passed after the first Phase 1D builder slice.
 - `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts`
@@ -4038,6 +4047,57 @@ Exit criteria:
 - Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
 
 #### Phase 4D2: Remaining Portal/Culling Consumer Cutover
+
+Status: Split during implementation. Phase 4D2A is implemented on 2026-06-05.
+
+#### Phase 4D2A: Artifact-Backed Camera Residency Index
+
+- Move camera residency and scene-domain portal traversal context from bridge-derived structured
+  scene cells to resident detailed artifact cells when detailed artifacts are available.
+- Keep browser-mode residency query policy in the renderer. The worker emits cell geometry/BSP
+  facts; the renderer still owns current camera position, active scene context, and fallback
+  classification.
+- Preserve the old `StructuredInteriorSceneModel` residency route only as the existing absence
+  fallback until hard cutover.
+
+Decisions and course corrections:
+
+- Implemented. `buildWorldResidencyIndexFromLandblockArtifacts` collects
+  `detailed-landblock.structuredInteriorCells` and builds the same query index shape used by the
+  existing renderer camera residency path.
+- Implemented. `webgl2-world-display-renderer-impl.ts` now prefers the artifact-backed residency
+  index and resyncs camera residency when static landblock artifact snapshots change.
+- Course correction: detailed artifact cells do not carry the legacy cell-structure vertex array
+  used for conservative residency bounds. Artifact-backed residency uses structured-interior
+  render-geometry bounds transformed by artifact local placement plus the artifact cell BSP. The
+  old conservative vertex-array bounds remain only for structured-scene fallback cells.
+
+Cleanup targets discovered:
+
+- `StructuredInteriorSceneModel` is still accepted by the WebGL renderer and residency index for
+  absence fallback. Phase 4E should delete that route once detailed artifact coverage is mandatory.
+- Residency diagnostics do not yet report whether the index source was artifact-backed or structured
+  scene fallback. Add that only if it helps hard-cutover validation; do not keep dual-mode
+  diagnostics long term.
+- Active render chunk placement collection still receives the structured scene model from the
+  coordinator. That is currently okay because the coordinator already derives that model from
+  artifacts when resident, but Phase 4E should collapse the remaining structured scene adapter.
+
+Legacy shims introduced:
+
+- None. The artifact residency builder is a direct entry point and the old builder remains the
+  existing absence fallback, not a new compatibility layer.
+
+Exit criteria:
+
+- Implemented. Camera residency can be queried from resident detailed artifacts without structured
+  scene cells.
+- Implemented. WebGL scene-domain base scene and initial portal env-cell decisions prefer resident
+  artifact-derived residency.
+- Implemented. Focused tests cover artifact-backed residency with an empty structured scene route.
+- Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
+
+#### Phase 4D2B: Remaining Portal/Culling Consumer Cutover
 
 - Move any remaining render-critical portal composite, culling, cell visibility, or portal traversal
   source facts that still read `StructuredInteriorSceneModel` or prepared env-cell payloads onto

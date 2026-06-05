@@ -35,6 +35,11 @@ import type { BrowserCameraResidency } from "./renderer-contract";
 import type { RenderChunkTransform } from "./render-anchor";
 import type { WorldRenderSceneContext } from "./render-scene-context";
 import type { StructuredInteriorCell } from "./structured-interior-scene";
+import {
+	getDetailedLandblockRenderArtifacts,
+	type DetailedLandblockRenderArtifacts,
+} from "./landblock-render-product";
+import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
 
 export type CameraViewResidencyContext =
 	| {
@@ -98,6 +103,15 @@ interface RenderAnchorInference {
 	landblockId: number;
 }
 
+interface ResidencyCellSource {
+	envCellId: number;
+	landblockId: number;
+	localPlacement: StructuredInteriorCell["chunkLocalPlacement"];
+	renderGeometry: PreparedPolygonSetRenderGeometry;
+	cellBsp: PreparedPolygonSetBspNode | null;
+	cellStructureVertexArray: PreparedPolygonSetVertexArray | null;
+}
+
 export function createEmptyWorldResidencyIndex(): WorldResidencyIndex {
 	return {
 		cellCount: 0,
@@ -118,6 +132,34 @@ export function buildWorldResidencyIndex(options: {
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	sceneContext?: WorldRenderSceneContext;
 }): WorldResidencyIndex {
+	return buildWorldResidencyIndexFromCellSources({
+		sources: options.cells.map(structuredInteriorCellToResidencySource),
+		renderChunkTransforms: options.renderChunkTransforms,
+		sceneContext: options.sceneContext,
+	});
+}
+
+export function buildWorldResidencyIndexFromLandblockArtifacts(options: {
+	artifacts: StaticLandblockRenderArtifactStoreSnapshot;
+	renderChunkTransforms: readonly RenderChunkTransform[];
+	sceneContext?: WorldRenderSceneContext;
+}): WorldResidencyIndex | null {
+	const sources = collectArtifactResidencyCellSources(options.artifacts);
+	if (sources.length === 0) {
+		return null;
+	}
+	return buildWorldResidencyIndexFromCellSources({
+		sources,
+		renderChunkTransforms: options.renderChunkTransforms,
+		sceneContext: options.sceneContext,
+	});
+}
+
+function buildWorldResidencyIndexFromCellSources(options: {
+	sources: readonly ResidencyCellSource[];
+	renderChunkTransforms: readonly RenderChunkTransform[];
+	sceneContext?: WorldRenderSceneContext;
+}): WorldResidencyIndex {
 	const anchor = inferRenderAnchor(options.renderChunkTransforms);
 	if (!anchor) {
 		return createEmptyWorldResidencyIndex();
@@ -127,8 +169,8 @@ export function buildWorldResidencyIndex(options: {
 		options.renderChunkTransforms,
 	);
 	const itemsByLandblockId = new Map<number, ResidencyCellItem[]>();
-	for (const cell of options.cells) {
-		const item = deriveResidencyCellItem(cell);
+	for (const source of options.sources) {
+		const item = deriveResidencyCellItem(source);
 		if (!item) {
 			continue;
 		}
@@ -291,10 +333,20 @@ export function computeRendererPositionLandblockResidency(
 export function deriveResidencyCellBounds(
 	cell: Pick<StructuredInteriorCell, "chunkLocalPlacement" | "renderGeometry">,
 ): RenderBounds | null {
-	return transformRenderGeometryBounds(
+	return deriveResidencyCellBoundsFromPlacement(
 		cell.renderGeometry,
+		cell.chunkLocalPlacement,
+	);
+}
+
+function deriveResidencyCellBoundsFromPlacement(
+	renderGeometry: PreparedPolygonSetRenderGeometry,
+	localPlacement: ResidencyCellSource["localPlacement"],
+): RenderBounds | null {
+	return transformRenderGeometryBounds(
+		renderGeometry,
 		buildAcPlacementMatrix(
-			cell.chunkLocalPlacement,
+			localPlacement,
 			{ x: 0, y: 0, z: 0 },
 			{ x: 1, y: 1, z: 1 },
 		),
@@ -502,31 +554,75 @@ function queryDungeonResidencyIndex(
 }
 
 function deriveResidencyCellItem(
-	cell: StructuredInteriorCell,
+	cell: ResidencyCellSource,
 ): ResidencyCellItem | null {
 	const cellRenderMatrix = buildAcPlacementMatrix(
-		cell.chunkLocalPlacement,
+		cell.localPlacement,
 		{ x: 0, y: 0, z: 0 },
 		{ x: 1, y: 1, z: 1 },
 	);
 	const bounds =
-		(cell.cellStructure
+		(cell.cellStructureVertexArray
 			? deriveConservativeResidencyCellBounds(
-					cell.cellStructure.vertexArray,
+					cell.cellStructureVertexArray,
 					cellRenderMatrix,
 				)
-			: null) ?? deriveResidencyCellBounds(cell);
+			: null) ??
+		deriveResidencyCellBoundsFromPlacement(
+			cell.renderGeometry,
+			cell.localPlacement,
+		);
 	if (!bounds) {
 		return null;
 	}
 
 	return {
 		envCellId: cell.envCellId,
-		landblockId: normalizeOutdoorLandblockId(cell.envCellId),
+		landblockId: normalizeOutdoorLandblockId(cell.landblockId),
 		bounds,
 		center: renderBoundsCenter(bounds),
 		inverseCellRenderMatrix: invertMat4(cellRenderMatrix),
 		cellBsp: cell.cellBsp,
+	};
+}
+
+function structuredInteriorCellToResidencySource(
+	cell: StructuredInteriorCell,
+): ResidencyCellSource {
+	return {
+		envCellId: cell.envCellId,
+		landblockId: cell.renderChunk.chunkLandblockId,
+		localPlacement: cell.chunkLocalPlacement,
+		renderGeometry: cell.renderGeometry,
+		cellBsp: cell.cellBsp,
+		cellStructureVertexArray: cell.cellStructure?.vertexArray ?? null,
+	};
+}
+
+function collectArtifactResidencyCellSources(
+	artifacts: StaticLandblockRenderArtifactStoreSnapshot,
+): ResidencyCellSource[] {
+	const sources: ResidencyCellSource[] = [];
+	for (const result of artifacts.artifacts) {
+		const detailed = getDetailedLandblockRenderArtifacts(result);
+		if (!detailed) {
+			continue;
+		}
+		sources.push(...detailed.structuredInteriorCells.map(artifactCellToResidencySource));
+	}
+	return sources;
+}
+
+function artifactCellToResidencySource(
+	cell: DetailedLandblockRenderArtifacts["structuredInteriorCells"][number],
+): ResidencyCellSource {
+	return {
+		envCellId: cell.envCellId,
+		landblockId: cell.landblockId,
+		localPlacement: cell.localPlacement,
+		renderGeometry: cell.renderGeometry,
+		cellBsp: cell.cellBsp,
+		cellStructureVertexArray: null,
 	};
 }
 

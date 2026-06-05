@@ -4,6 +4,7 @@ import type {
 	AssetLookupRequestDto,
 	AssetLookupResponseDto,
 } from "../lib/host/contracts";
+import { formatPreparedTextureAssetId } from "../lib/assets/types";
 import {
 	formatEnvCellAssetId,
 	formatLandblockOutdoorAssetId,
@@ -157,6 +158,112 @@ describe("static landblock render worker", () => {
 		).toContain(
 			detailedArtifacts!.structuredInteriorCells[0]?.renderGeometry.positions
 				.buffer,
+		);
+	});
+
+	it("emits structured-interior material records and owned texture pages", async () => {
+		const landblockId = 0xda55ffff;
+		const materialAssetId = "material/08000001";
+		const renderSurfaceAssetId = "render-surface/06000001";
+		const rawPreparedTextureAssetId = formatPreparedTextureAssetId({
+			renderSurfaceId: 0x06000001,
+			usage: "raw",
+			outputFormat: "rgba8",
+			mipPolicy: "none",
+			colorSpace: "linear",
+		});
+		const detailPreparedTextureAssetId = formatPreparedTextureAssetId({
+			renderSurfaceId: 0x06000001,
+			usage: "detail",
+			outputFormat: "rgba8",
+			mipPolicy: "none",
+			colorSpace: "linear",
+		});
+		const lookup = new Map<string, AssetLookupResponseDto>(
+			[
+				createResponse(
+					formatLandblockTopologyAssetId(landblockId),
+					createTopologyPayload(landblockId),
+				),
+				createResponse(
+					formatEnvCellAssetId(0xda550100),
+					createEnvCellPayload(0xda550100, {
+						materialAssetId,
+						surfaceId: 0x08000001,
+					}),
+				),
+				createResponse(materialAssetId, createMaterialPayload()),
+				createResponse(renderSurfaceAssetId, createRenderSurfacePayload()),
+				createResponse(
+					rawPreparedTextureAssetId,
+					createPreparedTexturePayload({
+						assetId: rawPreparedTextureAssetId,
+						usage: "raw",
+					}),
+				),
+				createResponse(
+					detailPreparedTextureAssetId,
+					createPreparedTexturePayload({
+						assetId: detailPreparedTextureAssetId,
+						usage: "detail",
+					}),
+				),
+				createResponse(
+					formatRegionRenderProfileAssetId(1),
+					createRegionRenderProfile(),
+				),
+			].map((response) => [response.assetId, response] as const),
+		);
+
+		const result = await runStaticLandblockRenderWorkerJob(createJob(), {
+			async lookupBinaryAssets(requests: readonly AssetLookupRequestDto[]) {
+				return {
+					responses: requests.map((request) => {
+						const response = lookup.get(request.assetId);
+						if (!response) {
+							throw new Error(`Missing test response ${request.assetId}.`);
+						}
+						return response;
+					}),
+				};
+			},
+		});
+
+		const detailedArtifacts = getDetailedLandblockRenderArtifacts(result);
+		expect(detailedArtifacts).not.toBeNull();
+		expect(detailedArtifacts!.structuredInteriorMaterialRecords).toHaveLength(1);
+		expect(
+			detailedArtifacts!.structuredInteriorMaterialRecords[0],
+		).toMatchObject({
+			key: `material:${materialAssetId}`,
+			texturePageRefKeys: expect.arrayContaining([
+				`texture:${materialAssetId}:${rawPreparedTextureAssetId}`,
+				`texture:${materialAssetId}:${detailPreparedTextureAssetId}`,
+			]),
+		});
+		expect(
+			detailedArtifacts!.structuredInteriorTexturePageRefs.map(
+				(ref) => ref.sourceAssetId,
+			),
+		).toEqual([detailPreparedTextureAssetId, rawPreparedTextureAssetId]);
+		expect(detailedArtifacts!.structuredInteriorTexturePages).toHaveLength(2);
+		expect(
+			detailedArtifacts!.structuredInteriorCells[0]?.materialSlices[0],
+		).toMatchObject({
+			envCellId: 0xda550100,
+			surfaceId: 0x08000001,
+			geometrySurfaceId: 0x08000001,
+			materialRecordKey: `material:${materialAssetId}`,
+			triangleCount: 1,
+		});
+		expect(
+			collectStaticLandblockRenderWorkerResultTransferables(result),
+		).toContain(
+			detailedArtifacts!.structuredInteriorCells[0]?.materialSlices[0]
+				?.positions instanceof Float32Array
+				? detailedArtifacts!.structuredInteriorCells[0].materialSlices[0]
+						.positions.buffer
+				: undefined,
 		);
 	});
 
@@ -363,7 +470,10 @@ function createTopologyPayload(
 	};
 }
 
-function createEnvCellPayload(envCellId: number): Record<string, unknown> {
+function createEnvCellPayload(
+	envCellId: number,
+	material?: { materialAssetId: string; surfaceId: number },
+): Record<string, unknown> {
 	return {
 		kind: "env-cell",
 		sourceAssetKind: "env-cell",
@@ -375,7 +485,15 @@ function createEnvCellPayload(envCellId: number): Record<string, unknown> {
 		environmentId: 0x01000001,
 		cellStructureId: 0x02000002,
 		localPlacement: createPlacement(),
-		surfaces: [],
+		surfaces: material
+			? [
+					{
+						slotId: material.surfaceId,
+						surfaceId: material.surfaceId,
+						materialAssetId: material.materialAssetId,
+					},
+				]
+			: [],
 		portals: [
 			{
 				portalId: "portal/0",
@@ -414,8 +532,14 @@ function createEnvCellPayload(envCellId: number): Record<string, unknown> {
 			positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
 			normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
 			uvs: new Float32Array([0, 0, 1, 0, 0, 1]),
-			triangles: [{ polygonId: 7, surfaceId: null, firstVertex: 0 }],
-			surfaceIds: [],
+			triangles: [
+				{
+					polygonId: 7,
+					surfaceId: material?.surfaceId ?? null,
+					firstVertex: 0,
+				},
+			],
+			surfaceIds: material ? [material.surfaceId] : [],
 			invalidPolygons: [],
 			skippedPolygonCount: 0,
 			bounds: createBounds(),
@@ -441,7 +565,101 @@ function createEnvCellPayload(envCellId: number): Record<string, unknown> {
 		},
 		dependencies: {
 			renderableSourceAssetIds: [],
-			materialAssetIds: [],
+			materialAssetIds: material ? [material.materialAssetId] : [],
+		},
+	};
+}
+
+function createMaterialPayload(): Record<string, unknown> {
+	return {
+		kind: "material-recipe",
+		sourceAssetKind: "material-recipe",
+		residencyKind: "unknown",
+		provenance: createProvenance("material-recipe"),
+		surfaceId: 0x08000001,
+		surfaceType: 0,
+		source: {
+			kind: "texture",
+			surfaceTextureId: 0x05000001,
+			selectedRenderSurfaceId: 0x06000001,
+			paletteId: null,
+			renderSurfaceDefaultPaletteIds: [],
+		},
+		translucency: 0,
+		luminosity: 0,
+		diffuse: 0,
+		dependencies: {
+			surfaceTextureAssetIds: [],
+			renderSurfaceAssetIds: ["render-surface/06000001"],
+			paletteAssetIds: [],
+		},
+	};
+}
+
+function createRenderSurfacePayload(): Record<string, unknown> {
+	return {
+		kind: "render-surface",
+		sourceAssetKind: "render-surface",
+		residencyKind: "unknown",
+		provenance: createProvenance("render-surface"),
+		renderSurfaceId: 0x06000001,
+		unknown: 0,
+		width: 1,
+		height: 1,
+		formatRaw: 0x15,
+		format: "a8r8g8b8",
+		sourceByteLength: 4,
+		sourceBytes: new Uint8Array([255, 0, 0, 255]),
+		defaultPaletteId: null,
+		dependencies: {
+			paletteAssetIds: [],
+		},
+	};
+}
+
+function createPreparedTexturePayload(options: {
+	assetId: string;
+	usage: "raw" | "detail";
+}): Record<string, unknown> {
+	return {
+		kind: "prepared-texture",
+		sourceAssetKind: "prepared-texture",
+		residencyKind: "unknown",
+		provenance: createProvenance("prepared-texture"),
+		renderSurfaceId: 0x06000001,
+		usage: options.usage,
+		outputFormat: "rgba8",
+		mipPolicy: "none",
+		colorSpace: "linear",
+		sourceFormatRaw: 0x15,
+		sourceFormat: "a8r8g8b8",
+		sourceWidth: 1,
+		sourceHeight: 1,
+		sourceByteLength: 4,
+		sourceHash: options.assetId,
+		levels: [
+			{
+				level: 0,
+				width: 1,
+				height: 1,
+				formatRaw: 0x15,
+				format: "rgba8",
+				byteLength: 4,
+				bytes: new Uint8Array(
+					options.usage === "raw" ? [255, 0, 0, 255] : [0, 255, 0, 255],
+				),
+			},
+		],
+		dependencies: {
+			renderSurfaceAssetIds: ["render-surface/06000001"],
+		},
+		diagnostics: {
+			generatedLevelCount: 1,
+			generatedByteLength: 4,
+			decodeMs: 0,
+			downsampleMs: 0,
+			encodeMs: 0,
+			totalMs: 0,
 		},
 	};
 }

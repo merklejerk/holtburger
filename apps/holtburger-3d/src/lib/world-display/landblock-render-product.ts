@@ -1,5 +1,6 @@
 import type {
 	PreparedEnvCellPayload,
+	PreparedFloat32Array,
 	PreparedLandblockTopologyPayload,
 	PreparedPolygonSetBspNode,
 	PreparedPolygonSetRenderGeometry,
@@ -8,7 +9,12 @@ import type {
 import type { PlacementTransformDto, Vec3Dto } from "../host/contracts";
 import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import type { RenderChunkPlacement } from "./render-chunks";
-import type { StaticObjectBundleArtifact } from "./static-bundle-layer";
+import type {
+	StaticBundleMaterialRecord,
+	StaticBundleTexturePage,
+	StaticObjectBundleArtifact,
+	VirtualTexturePageRef,
+} from "./static-bundle-layer";
 import type { AtlasLayoutPolicy } from "./texture-pages/atlas-layout-planner";
 import type { LandblockTerrainRenderArtifact } from "./terrain-render-artifact";
 
@@ -84,6 +90,9 @@ export interface DetailedLandblockRenderArtifacts {
 	buildPolicyRevision: string;
 	texturePagePolicyRevision: string;
 	selectedEnvCellIds: readonly number[];
+	structuredInteriorMaterialRecords: readonly StaticBundleMaterialRecord[];
+	structuredInteriorTexturePageRefs: readonly VirtualTexturePageRef[];
+	structuredInteriorTexturePages: readonly StaticBundleTexturePage[];
 	structuredInteriorCells: readonly DetailedStructuredInteriorCellArtifact[];
 	cellStructureMetadata: readonly DetailedCellStructureMetadata[];
 	portalLinks: readonly DetailedPortalLinkSidecar[];
@@ -139,11 +148,27 @@ interface DetailedStructuredInteriorCellArtifact {
 	renderChunk: RenderChunkPlacement;
 	localPlacement: PlacementTransformDto;
 	surfaceIds: readonly number[];
+	materialSlices: readonly DetailedStructuredInteriorMaterialSlice[];
 	portals: readonly DetailedEnvCellPortalSidecar[];
 	portalApertureKeys: readonly string[];
 	staticObjectCount: number;
 	cellBsp: PreparedPolygonSetBspNode;
 	renderGeometry: PreparedPolygonSetRenderGeometry;
+}
+
+interface DetailedStructuredInteriorMaterialSlice {
+	key: string;
+	cellKey: string;
+	envCellId: number;
+	materialSlotIndex: number;
+	surfaceId: number;
+	geometrySurfaceId: number;
+	materialRecordKey: string;
+	materialVariantSignature: string | null;
+	positions: PreparedFloat32Array;
+	uvs: PreparedFloat32Array;
+	indices: Uint16Array | Uint32Array;
+	triangleCount: number;
 }
 
 interface DetailedCellStructureMetadata {

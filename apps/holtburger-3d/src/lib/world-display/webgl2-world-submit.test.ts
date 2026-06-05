@@ -1360,6 +1360,35 @@ describe("submitWebgl2WorldFrame", () => {
 		expect(gl.uniform1iValues).toContain(1);
 	});
 
+	it("submits resident env-cell static bundle geometry from topology products", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+		const texture = {} as WebGLTexture;
+
+		const metrics = submitWebgl2WorldFrame({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			staticBundleLayerResources: createStaticBundleLayerResourceStore([
+				createStaticBundleLayerResource({
+					layerKind: "env-cell-static",
+					texture,
+				}),
+			]),
+			drawUnitsById: new Map(),
+			frame: createFrame([]),
+		});
+
+		expect(metrics.visibleDrawUnitCount).toBe(0);
+		expect(metrics.staticBundleLayerSubmittedCount).toBe(1);
+		expect(metrics.staticBundleGeometrySubmittedCount).toBe(1);
+		expect(metrics.drawCallCount).toBe(1);
+		expect(gl.boundTextures).toContain(texture);
+	});
+
 	it("submits resident P8 indexed static bundle geometry", () => {
 		const gl = new CapturingSubmitGl();
 		const stateCache = new Webgl2StateCache(gl);
@@ -1470,6 +1499,7 @@ function createStaticBundleLayerResourceStore(
 
 function createStaticBundleLayerResource({
 	familyKey = "rgba-texture-page",
+	layerKind = "outdoor-buildings",
 	texture = {} as WebGLTexture,
 	indexedFormat = "p8",
 	indexTexture = {} as WebGLTexture,
@@ -1478,6 +1508,7 @@ function createStaticBundleLayerResource({
 	omitIndexedMaterial = false,
 }: {
 	familyKey?: string;
+	layerKind?: Webgl2StaticBundleLayerResource["layerKind"];
 	texture?: WebGLTexture;
 	indexedFormat?: "p8" | "index16";
 	indexTexture?: WebGLTexture;
@@ -1495,7 +1526,7 @@ function createStaticBundleLayerResource({
 		key: "layer/a:revision/a",
 		layerKey: "layer/a",
 		landblockId: 1,
-		layerKind: "outdoor-buildings",
+		layerKind,
 		sourceRevision: "revision/a",
 		texturePages: [],
 		texturePagesByKey: new Map(),

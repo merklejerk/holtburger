@@ -302,19 +302,29 @@ export class BrowserRenderResourceCoordinator {
 			input,
 			linkedOutdoorEnvCellIds,
 		);
-		const baseStaticRenderableScene = deriveStaticRenderableSceneModel(
-			input.assetState,
-			input.browserDestination,
-			input.detailLodRadius,
-			structuredInteriorCoverage,
-			outdoorSceneInterest === null
-				? null
-				: {
-						buildingLandblockIds: outdoorSceneInterest.buildingLandblockIds,
-						detailLandblockIds: outdoorSceneInterest.detailLandblockIds,
-						envCellLandblockIds: outdoorSceneInterest.envCellLandblockIds,
-					},
-		);
+		const useStaticLandblockStaticArtifacts =
+			shouldUseStaticLandblockStaticArtifacts({
+				browserDestination: input.browserDestination,
+				snapshot: input.staticLandblockRenderArtifacts,
+			});
+		const baseStaticRenderableScene = useStaticLandblockStaticArtifacts
+			? createEmptyStaticRenderableSceneModel()
+			: deriveStaticRenderableSceneModel(
+					input.assetState,
+					input.browserDestination,
+					input.detailLodRadius,
+					structuredInteriorCoverage,
+					outdoorSceneInterest === null
+						? null
+						: {
+								buildingLandblockIds:
+									outdoorSceneInterest.buildingLandblockIds,
+								detailLandblockIds:
+									outdoorSceneInterest.detailLandblockIds,
+								envCellLandblockIds:
+									outdoorSceneInterest.envCellLandblockIds,
+							},
+				);
 		const appearancePreviewScene = input.runtimeAppearancePreviews.reduce(
 			(scene, preview) =>
 				mergeStaticRenderableSceneModels(
@@ -415,6 +425,7 @@ export class BrowserRenderResourceCoordinator {
 			structuredInteriorScene,
 			activeRenderChunkTransforms,
 			renderSceneContext,
+			usingStaticLandblockStaticArtifacts: useStaticLandblockStaticArtifacts,
 		});
 
 		this.renderSpatialIndex.replaceChunkTransforms(activeRenderChunkTransforms);
@@ -981,6 +992,7 @@ function reportPreparedOutdoorAssetsNotRendered({
 	structuredInteriorScene,
 	activeRenderChunkTransforms,
 	renderSceneContext,
+	usingStaticLandblockStaticArtifacts,
 }: {
 	input: BrowserRenderResourceCoordinatorInput;
 	outdoorSceneInterest: ReturnType<typeof deriveOutdoorSceneInterest> | null;
@@ -989,10 +1001,12 @@ function reportPreparedOutdoorAssetsNotRendered({
 	structuredInteriorScene: StructuredInteriorSceneModel;
 	activeRenderChunkTransforms: readonly RenderChunkTransform[];
 	renderSceneContext: ReturnType<typeof deriveWorldRenderSceneContext>;
+	usingStaticLandblockStaticArtifacts: boolean;
 }): void {
 	if (
 		input.browserDestination?.kind !== "outdoor-location" ||
 		outdoorSceneInterest === null ||
+		usingStaticLandblockStaticArtifacts ||
 		terrainScene.tiles.length > 0 ||
 		staticRenderableScene.parts.length > 0
 	) {
@@ -1085,6 +1099,21 @@ function shouldUseStaticLandblockTerrainArtifacts(
 		snapshot.desiredCount > 0 ||
 		snapshot.inFlightCount > 0 ||
 		snapshot.residentCount > 0
+	);
+}
+
+function shouldUseStaticLandblockStaticArtifacts({
+	browserDestination,
+	snapshot,
+}: {
+	browserDestination: BrowserLocationSelection | null;
+	snapshot: StaticLandblockRenderArtifactStoreSnapshot;
+}): boolean {
+	return (
+		browserDestination?.kind === "outdoor-location" &&
+		(snapshot.desiredCount > 0 ||
+			snapshot.inFlightCount > 0 ||
+			snapshot.residentCount > 0)
 	);
 }
 

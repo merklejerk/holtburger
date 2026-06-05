@@ -4,7 +4,7 @@ import type {
 	LandblockRenderProductWorkerResult,
 } from "./landblock-render-product";
 
-export interface StaticLandblockRenderArtifactStoreSnapshot {
+export interface StaticLandblockRenderProductSet {
 	artifacts: readonly LandblockRenderProductWorkerResult[];
 	desiredCount: number;
 	residentCount: number;
@@ -16,7 +16,7 @@ export interface StaticLandblockRenderArtifactStoreSnapshot {
 	latestDesiredIdentityKeys: readonly string[];
 }
 
-export function createEmptyStaticLandblockRenderArtifactStoreSnapshot(): StaticLandblockRenderArtifactStoreSnapshot {
+export function createEmptyStaticLandblockRenderProductSet(): StaticLandblockRenderProductSet {
 	return {
 		artifacts: [],
 		desiredCount: 0,
@@ -109,7 +109,7 @@ export class StaticLandblockRenderArtifactStore {
 		return this.artifactsByArtifactKey.has(formatDesiredArtifactKey(desired));
 	}
 
-	snapshot(): StaticLandblockRenderArtifactStoreSnapshot {
+	productSet(): StaticLandblockRenderProductSet {
 		const artifacts = [...this.artifactsByArtifactKey.values()].sort(
 			compareResults,
 		);

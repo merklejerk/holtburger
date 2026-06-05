@@ -51,7 +51,7 @@ import {
 	type RendererResourceGraphNode,
 } from "./renderer-resource-graph";
 import type { StaticRenderableSceneModel } from "./static-renderables";
-import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
+import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
 import {
 	getDetailedLandblockRenderArtifacts,
 	getStaticObjectBundleArtifacts,
@@ -405,7 +405,7 @@ export function syncWebgl2StaticLandblockRenderArtifactResources({
 }: {
 	gl: WebGL2RenderingContext;
 	store: Webgl2WorldResourceStore;
-	artifacts: StaticLandblockRenderArtifactStoreSnapshot;
+	artifacts: StaticLandblockRenderProductSet;
 	renderChunkTransforms?: readonly RenderChunkTransform[];
 	textureFilteringMode?: TextureFilteringMode;
 	maxAnisotropy?: number;
@@ -464,7 +464,7 @@ export function syncWebgl2StaticLandblockRenderArtifactResources({
 }
 
 function isRenderableStaticLandblockArtifactLayer(
-	product: StaticLandblockRenderArtifactStoreSnapshot["artifacts"][number]["product"],
+	product: StaticLandblockRenderProductSet["artifacts"][number]["product"],
 	bundleKind: StaticObjectBundleArtifact["bundleKind"],
 ): boolean {
 	switch (product) {

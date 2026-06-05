@@ -100,6 +100,26 @@ describe("worker asset closure loader", () => {
 			"surface-texture/02000002",
 		]);
 	});
+
+	it("fails when a lookup batch omits a requested asset response", async () => {
+		await expect(
+			loadWorkerAssetClosure({
+				rootAssetIds: ["material/01000001"],
+				createRequest: (assetId) => ({
+					requestId: `request:${assetId}`,
+					assetId,
+					priority: "streaming",
+				}),
+				lookup: {
+					async lookupBinaryAssets() {
+						return { responses: [] };
+					},
+				},
+			}),
+		).rejects.toThrow(
+			"Worker asset closure lookup returned no response for 1 requested asset",
+		);
+	});
 });
 
 class FakeClosureLookup {

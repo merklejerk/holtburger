@@ -29,7 +29,7 @@ import {
 	type DetailedLandblockRenderArtifacts,
 } from "./landblock-render-product";
 import type { RenderFrustum } from "./render-spatial-math";
-import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
+import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
 import type { StaticRenderableSceneModel } from "./static-renderables";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
@@ -79,7 +79,7 @@ export function deriveRenderBvhVisibilityMetrics(options: {
 	terrainScene: TerrainSceneModel;
 	staticRenderableScene: StaticRenderableSceneModel;
 	structuredInteriorScene: StructuredInteriorSceneModel;
-	staticLandblockRenderArtifacts: StaticLandblockRenderArtifactStoreSnapshot;
+	staticLandblockRenderProducts: StaticLandblockRenderProductSet;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	frustum: RenderFrustum;
 	now?: () => number;
@@ -92,7 +92,7 @@ export function deriveRenderBvhVisibilitySnapshot(options: {
 	terrainScene: TerrainSceneModel;
 	staticRenderableScene: StaticRenderableSceneModel;
 	structuredInteriorScene: StructuredInteriorSceneModel;
-	staticLandblockRenderArtifacts: StaticLandblockRenderArtifactStoreSnapshot;
+	staticLandblockRenderProducts: StaticLandblockRenderProductSet;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	frustum: RenderFrustum;
 	now?: () => number;
@@ -109,7 +109,7 @@ export function deriveRenderBvhVisibilitySnapshot(options: {
 		]),
 	);
 	const artifactEnvCellBvhEntriesById = collectDetailedArtifactEnvCellBvhEntriesById(
-		options.staticLandblockRenderArtifacts,
+		options.staticLandblockRenderProducts,
 		fallbackReasons,
 	);
 
@@ -273,7 +273,7 @@ interface DetailedArtifactEnvCellBvhEntry {
 }
 
 function collectDetailedArtifactEnvCellBvhEntriesById(
-	artifacts: StaticLandblockRenderArtifactStoreSnapshot,
+	artifacts: StaticLandblockRenderProductSet,
 	fallbackReasons: string[],
 ): Map<number, DetailedArtifactEnvCellBvhEntry> {
 	const entriesByEnvCellId = new Map<number, DetailedArtifactEnvCellBvhEntry>();

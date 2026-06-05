@@ -460,7 +460,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 ): WorldDisplayRenderer {
 	let assetState = options.assetState;
 	let terrainScene = options.terrainScene;
-	let staticLandblockRenderArtifacts = options.staticLandblockRenderArtifacts;
+	let staticLandblockRenderProducts = options.staticLandblockRenderProducts;
 	let staticRenderableScene = options.staticRenderableScene;
 	let structuredInteriorScene = options.structuredInteriorScene;
 	let transitionPortalModel = options.transitionPortalModel;
@@ -544,8 +544,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			staticRenderableScene = scene;
 			markWorldResourcesDirty();
 		},
-		setStaticLandblockRenderArtifacts(artifacts) {
-			staticLandblockRenderArtifacts = artifacts;
+		replaceStaticLandblockProducts(artifacts) {
+			staticLandblockRenderProducts = artifacts;
 			markWorldResourcesDirty();
 			syncResidencyIndex();
 		},
@@ -749,7 +749,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 						cameraFrame,
 						renderChunkTransforms,
 						staticRenderableScene,
-						staticLandblockRenderArtifacts,
+						staticLandblockRenderProducts,
 						structuredInteriorScene,
 						terrainScene,
 					}),
@@ -1038,7 +1038,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		sourceRevision: string;
 		bounds: StaticBundleSpatialHint["bounds"];
 	} | null {
-		for (const result of staticLandblockRenderArtifacts.artifacts) {
+		for (const result of staticLandblockRenderProducts.artifacts) {
 			for (const bundle of getStaticObjectBundleArtifacts(result)) {
 				const renderChunk = deriveLandblockRenderChunkPlacement(
 					bundle.landblockId,
@@ -1866,7 +1866,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			syncWebgl2StaticLandblockRenderArtifactResources({
 				gl: currentResources.gl,
 				store: currentResources.worldStore,
-				artifacts: staticLandblockRenderArtifacts,
+				artifacts: staticLandblockRenderProducts,
 				renderChunkTransforms,
 				textureFilteringMode,
 				maxAnisotropy:
@@ -1891,7 +1891,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			"webgl2.resource.calculateSceneBounds",
 			() =>
 				calculateStaticLandblockArtifactSceneBoundsFrame({
-					artifacts: staticLandblockRenderArtifacts,
+					artifacts: staticLandblockRenderProducts,
 					renderChunkTransforms,
 				}),
 		);
@@ -1906,7 +1906,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	function syncResidencyIndex(): void {
 		residencyIndex =
 			buildWorldResidencyIndexFromLandblockArtifacts({
-				artifacts: staticLandblockRenderArtifacts,
+				artifacts: staticLandblockRenderProducts,
 				renderChunkTransforms,
 				sceneContext: renderSceneContext,
 			}) ??

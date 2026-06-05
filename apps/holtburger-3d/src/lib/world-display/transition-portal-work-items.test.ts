@@ -15,7 +15,7 @@ import {
 } from "./transition-portal-work-items";
 import type { LandblockRenderProductWorkerResult } from "./landblock-render-product";
 import { deriveStructuredCellRenderChunk } from "./render-chunks";
-import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
+import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
 import type {
 	StructuredInteriorCell,
 	StructuredInteriorSceneModel,
@@ -111,7 +111,7 @@ describe("transition portal work items", () => {
 
 	it("derives transition portals from resident detailed landblock artifacts", () => {
 		const model = deriveTransitionPortalCandidatesFromLandblockArtifacts({
-			artifacts: createStaticLandblockArtifactSnapshot([
+			artifacts: createStaticLandblockProductSet([
 				createDetailedLandblockProductArtifact(),
 			]),
 			activeLandblockIds: [0x016cffff],
@@ -141,7 +141,7 @@ describe("transition portal work items", () => {
 	it("returns null when no resident detailed artifact can feed portal candidates", () => {
 		expect(
 			deriveTransitionPortalCandidatesFromLandblockArtifacts({
-				artifacts: createStaticLandblockArtifactSnapshot([]),
+				artifacts: createStaticLandblockProductSet([]),
 				activeLandblockIds: [0x016cffff],
 			}),
 		).toBeNull();
@@ -300,9 +300,9 @@ function deriveModel(
 	});
 }
 
-function createStaticLandblockArtifactSnapshot(
+function createStaticLandblockProductSet(
 	artifacts: readonly LandblockRenderProductWorkerResult[],
-): StaticLandblockRenderArtifactStoreSnapshot {
+): StaticLandblockRenderProductSet {
 	return {
 		artifacts,
 		desiredCount: artifacts.length,

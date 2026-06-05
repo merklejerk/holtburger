@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { BrowserLocationSelection } from "../../app/browser-mode";
 import type { PreparedTerrainMesh, PreparedTerrainQuad } from "../assets/types";
 import type { LandblockRenderProductWorkerResult } from "./landblock-render-product";
-import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
+import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
 import { deriveTerrainSceneModelFromLandblockArtifacts } from "./terrain-scene";
 import type { LandblockTerrainRenderArtifact } from "./terrain-render-artifact";
 import type { TerrainMaterialResourcePlan } from "./terrain-materials";
@@ -14,7 +14,7 @@ describe("deriveTerrainSceneModelFromLandblockArtifacts", () => {
 		const neighborLandblockId = 0xda56ffff;
 		const inactiveLandblockId = 0xdb55ffff;
 		const scene = deriveTerrainSceneModelFromLandblockArtifacts({
-			artifacts: createSnapshot([
+			artifacts: createProductSet([
 				createResult(focusLandblockId, "outdoor"),
 				createResult(neighborLandblockId, "outdoor"),
 				createResult(inactiveLandblockId, "outdoor"),
@@ -39,7 +39,7 @@ describe("deriveTerrainSceneModelFromLandblockArtifacts", () => {
 	it("uses outdoor products for terrain and ignores topology products", () => {
 		const landblockId = 0xda55ffff;
 		const scene = deriveTerrainSceneModelFromLandblockArtifacts({
-			artifacts: createSnapshot([
+			artifacts: createProductSet([
 				createResult(landblockId, "outdoor", "outdoor-key"),
 				createTopologyResult(landblockId),
 			]),
@@ -75,9 +75,9 @@ describe("deriveTerrainSceneModelFromLandblockArtifacts", () => {
 	});
 });
 
-function createSnapshot(
+function createProductSet(
 	results: readonly LandblockRenderProductWorkerResult[],
-): StaticLandblockRenderArtifactStoreSnapshot {
+): StaticLandblockRenderProductSet {
 	return {
 		artifacts: results,
 		desiredCount: results.length,

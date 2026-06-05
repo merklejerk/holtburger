@@ -23,7 +23,7 @@ import {
 	getLandblockTerrainRenderArtifact,
 	type LandblockRenderProductWorkerResult,
 } from "./landblock-render-product";
-import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
+import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
 
 export interface TerrainSceneTile {
 	assetId: string;
@@ -157,7 +157,7 @@ export function deriveTerrainSceneModelFromLandblockArtifacts({
 	terrainLodRadius = 1,
 	terrainLandblockIds = null,
 }: {
-	artifacts: StaticLandblockRenderArtifactStoreSnapshot;
+	artifacts: StaticLandblockRenderProductSet;
 	browserDestination?: BrowserLocationSelection | null;
 	terrainLodRadius?: number;
 	terrainLandblockIds?: readonly number[] | null;
@@ -294,7 +294,7 @@ function describeTerrainDataSources(
 }
 
 function selectResidentTerrainArtifactResults(
-	artifacts: StaticLandblockRenderArtifactStoreSnapshot,
+	artifacts: StaticLandblockRenderProductSet,
 	activeLandblockIds: ReadonlySet<number>,
 ): LandblockRenderProductWorkerResult[] {
 	const resultByLandblockId = new Map<
@@ -317,7 +317,7 @@ function selectResidentTerrainArtifactResults(
 }
 
 function describeWorkerArtifactTerrainCache(
-	artifacts: StaticLandblockRenderArtifactStoreSnapshot,
+	artifacts: StaticLandblockRenderProductSet,
 ): string {
 	const terrainArtifactCount = artifacts.artifacts.filter(
 		(result) => getLandblockTerrainRenderArtifact(result) !== null,

@@ -4,13 +4,13 @@ import { calculateStaticLandblockArtifactSceneBoundsFrame } from "./artifact-sce
 import type { LandblockRenderProductWorkerResult } from "./landblock-render-product";
 import { deriveStructuredCellRenderChunk } from "./render-chunks";
 import type { RenderBounds } from "./render-spatial-math";
-import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
+import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
 
 describe("calculateStaticLandblockArtifactSceneBoundsFrame", () => {
 	it("returns null when resident artifacts have no usable bounds", () => {
 		expect(
 			calculateStaticLandblockArtifactSceneBoundsFrame({
-				artifacts: createSnapshot([]),
+				artifacts: createProductSet([]),
 				renderChunkTransforms: [],
 			}),
 		).toBeNull();
@@ -22,7 +22,7 @@ describe("calculateStaticLandblockArtifactSceneBoundsFrame", () => {
 		const envCellChunk = deriveStructuredCellRenderChunk(envCellId);
 
 		const frame = calculateStaticLandblockArtifactSceneBoundsFrame({
-			artifacts: createSnapshot([
+			artifacts: createProductSet([
 				createOutdoorProduct({
 					landblockId,
 					terrainBounds: acBounds(0, 10, 0, 4, 2, 6),
@@ -51,9 +51,9 @@ describe("calculateStaticLandblockArtifactSceneBoundsFrame", () => {
 	});
 });
 
-function createSnapshot(
+function createProductSet(
 	artifacts: readonly LandblockRenderProductWorkerResult[],
-): StaticLandblockRenderArtifactStoreSnapshot {
+): StaticLandblockRenderProductSet {
 	return {
 		artifacts,
 		desiredCount: artifacts.length,

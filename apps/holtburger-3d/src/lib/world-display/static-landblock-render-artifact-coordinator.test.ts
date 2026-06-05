@@ -10,12 +10,12 @@ import { StaticLandblockRenderArtifactCoordinator } from "./static-landblock-ren
 describe("static landblock render artifact coordinator", () => {
 	it("submits desired products through the worker client and commits completed artifacts", async () => {
 		const client = new MockLandblockProductClient();
-		const snapshots: number[] = [];
+		const productSets: number[] = [];
 		const destination = parseBrowserLocationInput("da55", "manual", "outdoor");
 		expect(destination).not.toBeNull();
 		const coordinator = new StaticLandblockRenderArtifactCoordinator({
 			client,
-			onStoreChanged: (snapshot) => snapshots.push(snapshot.residentCount),
+			onStoreChanged: (productSet) => productSets.push(productSet.residentCount),
 		});
 
 		coordinator.sync({
@@ -36,12 +36,12 @@ describe("static landblock render artifact coordinator", () => {
 		client.resolveNext(createResult(client.requests[0]!));
 		await Promise.resolve();
 
-		expect(coordinator.getSnapshot()).toMatchObject({
+		expect(coordinator.getProductSet()).toMatchObject({
 			desiredCount: 1,
 			residentCount: 1,
 			committedResultCount: 1,
 		});
-		expect(snapshots).toEqual([1]);
+		expect(productSets).toEqual([1]);
 		coordinator.dispose();
 	});
 

@@ -20,7 +20,7 @@ import {
 	getDetailedLandblockRenderArtifacts,
 	getStaticObjectBundleArtifacts,
 } from "./landblock-render-product";
-import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
+import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
 import {
 	deriveWorldDebugOverlayModel,
 	type WorldDebugOverlayModel,
@@ -108,7 +108,7 @@ export interface BrowserRenderResourceCoordinatorInput {
 	activeRenderAnchor: RenderLandblockAnchor | null;
 	browserCameraFrame: SceneCameraFrame | null;
 	runtimeAppearancePreviews: readonly BrowserRuntimeAppearancePreview[];
-	staticLandblockRenderArtifacts: StaticLandblockRenderArtifactStoreSnapshot;
+	staticLandblockRenderProducts: StaticLandblockRenderProductSet;
 }
 
 export interface BrowserRuntimeAppearancePreview {
@@ -117,7 +117,7 @@ export interface BrowserRuntimeAppearancePreview {
 	setupAppearance: PreparedSetupAppearancePayload;
 }
 
-export interface BrowserRenderResourceSnapshot {
+export interface BrowserRenderResourceReport {
 	worldDisplay: BrowserWorldDisplayModel;
 	renderSpatialQuery: RenderSpatialIndexQuery;
 	activeRenderChunkCount: number;
@@ -144,8 +144,8 @@ export interface BrowserRenderResourceSurface {
 	): void;
 	setRenderChunkTransforms(transforms: readonly RenderChunkTransform[]): void;
 	setTerrainScene(scene: TerrainSceneModel): void;
-	setStaticLandblockRenderArtifacts(
-		artifacts: StaticLandblockRenderArtifactStoreSnapshot,
+	replaceStaticLandblockProducts(
+		artifacts: StaticLandblockRenderProductSet,
 	): void;
 	setStaticRenderableScene(scene: StaticRenderableSceneModel): void;
 	setStructuredInteriorScene(scene: StructuredInteriorSceneModel): void;
@@ -162,7 +162,7 @@ export interface BrowserRenderResourceSurface {
 	setDetailTexturesEnabled(enabled: boolean): void;
 }
 
-export function createEmptyBrowserRenderResourceSnapshot(): BrowserRenderResourceSnapshot {
+export function createEmptyBrowserRenderResourceReport(): BrowserRenderResourceReport {
 	return {
 		worldDisplay: deriveBrowserWorldDisplayModel({
 			assetState: createInitialAssetChannelState(),
@@ -199,7 +199,7 @@ export function createEmptyBrowserRenderResourceSnapshot(): BrowserRenderResourc
 export class BrowserRenderResourceCoordinator {
 	private readonly renderSpatialIndex = createLinearRenderSpatialIndex();
 	private surface: BrowserRenderResourceSurface | null = null;
-	private snapshot = createEmptyBrowserRenderResourceSnapshot();
+	private report = createEmptyBrowserRenderResourceReport();
 	private staticPickDiagnosticInput: {
 		assetState: AssetChannelState;
 		staticRenderableScene: StaticRenderableSceneModel;
@@ -223,8 +223,8 @@ export class BrowserRenderResourceCoordinator {
 		this.appliedSurfaceSignatures = {};
 	}
 
-	getSnapshot(): BrowserRenderResourceSnapshot {
-		return this.snapshot;
+	getReport(): BrowserRenderResourceReport {
+		return this.report;
 	}
 
 	getStaticRenderablePickDiagnostic(
@@ -258,7 +258,7 @@ export class BrowserRenderResourceCoordinator {
 
 	update(
 		input: BrowserRenderResourceCoordinatorInput,
-	): BrowserRenderResourceSnapshot {
+	): BrowserRenderResourceReport {
 		const outdoorFocusLandblockId =
 			input.browserDestination?.kind === "outdoor-location"
 				? deriveTerrainFocusLandblockId(input.browserDestination)
@@ -274,10 +274,10 @@ export class BrowserRenderResourceCoordinator {
 						envCellRadius: input.envCellLodRadius,
 					});
 		const terrainScene = shouldUseStaticLandblockTerrainArtifacts(
-			input.staticLandblockRenderArtifacts,
+			input.staticLandblockRenderProducts,
 		)
 			? deriveTerrainSceneModelFromLandblockArtifacts({
-					artifacts: input.staticLandblockRenderArtifacts,
+					artifacts: input.staticLandblockRenderProducts,
 					browserDestination: input.browserDestination,
 					terrainLodRadius: input.terrainLodRadius,
 					terrainLandblockIds:
@@ -291,12 +291,12 @@ export class BrowserRenderResourceCoordinator {
 				);
 		const useStaticLandblockArtifacts = shouldUseStaticLandblockArtifacts({
 			browserDestination: input.browserDestination,
-			snapshot: input.staticLandblockRenderArtifacts,
+			productSet: input.staticLandblockRenderProducts,
 		});
 		const linkedOutdoorEnvCellIds: number[] = [];
 		const structuredInteriorCoverage =
 			deriveArtifactStructuredInteriorCoverageForInput(
-				input.staticLandblockRenderArtifacts,
+				input.staticLandblockRenderProducts,
 				input.browserDestination,
 			);
 		const appearancePreviewScene = input.runtimeAppearancePreviews.reduce(
@@ -319,7 +319,7 @@ export class BrowserRenderResourceCoordinator {
 		const staticRenderableScene = appearancePreviewScene;
 		const artifactStructuredInteriorScene =
 			deriveStructuredInteriorSceneModelFromLandblockArtifacts(
-				input.staticLandblockRenderArtifacts,
+				input.staticLandblockRenderProducts,
 				input.browserDestination,
 				structuredInteriorCoverage,
 			);
@@ -348,7 +348,7 @@ export class BrowserRenderResourceCoordinator {
 		);
 		const transitionPortalModel =
 			deriveTransitionPortalCandidatesFromLandblockArtifacts({
-				artifacts: input.staticLandblockRenderArtifacts,
+				artifacts: input.staticLandblockRenderProducts,
 				activeLandblockIds: outdoorSceneInterest?.buildingLandblockIds ?? [],
 			}) ?? createEmptyTransitionPortalCandidateModel();
 		const activeRenderChunkPlacements = collectActiveRenderChunkPlacements(
@@ -365,6 +365,15 @@ export class BrowserRenderResourceCoordinator {
 			activeRenderAnchor: input.activeRenderAnchor,
 			browserDestination: input.browserDestination,
 		});
+		const useArtifactOwnedSurfaceAssets =
+			useStaticLandblockArtifacts && input.runtimeAppearancePreviews.length === 0;
+		const surfaceAssetState = useArtifactOwnedSurfaceAssets
+			? createInitialAssetChannelState()
+			: input.assetState;
+		const surfaceAssetStateSignature =
+			useArtifactOwnedSurfaceAssets
+				? "artifact-owned-static-landblock-assets"
+				: describeAssetStateSignature(surfaceAssetState);
 		const terrainSceneSignature = describeTerrainSceneSignature(terrainScene);
 		const staticRenderableSceneSignature =
 			describeStaticRenderableSceneSignature(staticRenderableScene);
@@ -393,13 +402,13 @@ export class BrowserRenderResourceCoordinator {
 		this.renderSpatialIndex.replaceOwnerItems(
 			STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY,
 			deriveStructuredInteriorSpatialItemsFromLandblockArtifacts(
-				input.staticLandblockRenderArtifacts,
+				input.staticLandblockRenderProducts,
 			) ?? deriveStructuredInteriorSpatialItems(structuredInteriorScene),
 		);
 		this.renderSpatialIndex.replaceOwnerItems(
 			STATIC_RENDERABLE_SPATIAL_OWNER_KEY,
 			deriveStaticRenderableSpatialItemsFromLandblockArtifacts(
-				input.staticLandblockRenderArtifacts,
+				input.staticLandblockRenderProducts,
 			) ??
 				deriveStaticRenderableSpatialItems(
 					input.assetState,
@@ -427,8 +436,8 @@ export class BrowserRenderResourceCoordinator {
 			reportTerrainMaterialDiagnostics(terrainScene);
 			this.applySurfaceResource(
 				"asset-state",
-				describeAssetStateSignature(input.assetState),
-				() => surface.setAssetState(input.assetState),
+				surfaceAssetStateSignature,
+				() => surface.setAssetState(surfaceAssetState),
 			);
 			this.applySurfaceResource(
 				"render-scene-context",
@@ -446,11 +455,11 @@ export class BrowserRenderResourceCoordinator {
 			this.applySurfaceResource(
 				"static-landblock-render-artifacts",
 				describeStaticLandblockRenderArtifactSurfaceSignature(
-					input.staticLandblockRenderArtifacts,
+					input.staticLandblockRenderProducts,
 				),
 				() =>
-					surface.setStaticLandblockRenderArtifacts(
-						input.staticLandblockRenderArtifacts,
+					surface.replaceStaticLandblockProducts(
+						input.staticLandblockRenderProducts,
 					),
 			);
 			this.applySurfaceResource(
@@ -519,7 +528,7 @@ export class BrowserRenderResourceCoordinator {
 			);
 		}
 
-		this.snapshot = deriveSnapshot({
+		this.report = deriveReport({
 			input,
 			terrainScene,
 			staticRenderableScene,
@@ -531,9 +540,9 @@ export class BrowserRenderResourceCoordinator {
 			structuredInteriorCoverage,
 			activeRenderChunkTransforms,
 			renderSpatialQuery: this.renderSpatialIndex,
-			staticLandblockRenderArtifacts: input.staticLandblockRenderArtifacts,
+			staticLandblockRenderProducts: input.staticLandblockRenderProducts,
 		});
-		return this.snapshot;
+		return this.report;
 	}
 
 	private applySurfaceResource(
@@ -892,7 +901,7 @@ function formatVectorSignature(vector: {
 }
 
 function deriveArtifactStructuredInteriorCoverageForInput(
-	artifacts: StaticLandblockRenderArtifactStoreSnapshot,
+	artifacts: StaticLandblockRenderProductSet,
 	browserDestination: BrowserLocationSelection | null,
 ): StructuredInteriorCoverage | null {
 	const browserFocusEnvCellId =
@@ -1056,31 +1065,31 @@ function countPreparedAssetsByKind(
 }
 
 function shouldUseStaticLandblockTerrainArtifacts(
-	snapshot: StaticLandblockRenderArtifactStoreSnapshot,
+	productSet: StaticLandblockRenderProductSet,
 ): boolean {
 	return (
-		snapshot.desiredCount > 0 ||
-		snapshot.inFlightCount > 0 ||
-		snapshot.residentCount > 0
+		productSet.desiredCount > 0 ||
+		productSet.inFlightCount > 0 ||
+		productSet.residentCount > 0
 	);
 }
 
 function shouldUseStaticLandblockArtifacts({
 	browserDestination,
-	snapshot,
+	productSet,
 }: {
 	browserDestination: BrowserLocationSelection | null;
-	snapshot: StaticLandblockRenderArtifactStoreSnapshot;
+	productSet: StaticLandblockRenderProductSet;
 }): boolean {
 	return (
 		browserDestination !== null &&
-		(snapshot.desiredCount > 0 ||
-			snapshot.inFlightCount > 0 ||
-			snapshot.residentCount > 0)
+		(productSet.desiredCount > 0 ||
+			productSet.inFlightCount > 0 ||
+			productSet.residentCount > 0)
 	);
 }
 
-function deriveSnapshot({
+function deriveReport({
 	input,
 	terrainScene,
 	staticRenderableScene,
@@ -1092,7 +1101,7 @@ function deriveSnapshot({
 	structuredInteriorCoverage,
 	activeRenderChunkTransforms,
 	renderSpatialQuery,
-	staticLandblockRenderArtifacts,
+	staticLandblockRenderProducts,
 }: {
 	input: BrowserRenderResourceCoordinatorInput;
 	terrainScene: TerrainSceneModel;
@@ -1105,8 +1114,8 @@ function deriveSnapshot({
 	structuredInteriorCoverage: StructuredInteriorCoverage | null;
 	activeRenderChunkTransforms: readonly RenderChunkTransform[];
 	renderSpatialQuery: RenderSpatialIndexQuery;
-	staticLandblockRenderArtifacts: StaticLandblockRenderArtifactStoreSnapshot;
-}): BrowserRenderResourceSnapshot {
+	staticLandblockRenderProducts: StaticLandblockRenderProductSet;
+}): BrowserRenderResourceReport {
 	const terrainVertexCount = terrainScene.tiles.reduce(
 		(total, tile) => total + tile.mesh.vertices.length,
 		0,
@@ -1189,41 +1198,59 @@ function deriveSnapshot({
 					: `Terrain ${terrainScene.tiles.length}/${outdoorSceneInterest.terrainLandblockIds.length}, buildings ${outdoorSceneInterest.buildingLandblockIds.length}, detail ${outdoorSceneInterest.detailLandblockIds.length}.`,
 		cellVisibilityFallbackText: `${structuredInteriorScene.cells.length} loaded env cell${structuredInteriorScene.cells.length === 1 ? "" : "s"}; renderer visibility pending.`,
 		staticLandblockRenderArtifactText: describeStaticLandblockRenderArtifacts(
-			staticLandblockRenderArtifacts,
+			staticLandblockRenderProducts,
 		),
 	};
 }
 
 function describeStaticLandblockRenderArtifacts(
-	snapshot: StaticLandblockRenderArtifactStoreSnapshot,
+	productSet: StaticLandblockRenderProductSet,
 ): string {
 	return [
-		`${snapshot.residentCount}/${snapshot.desiredCount} resident`,
-		`${snapshot.inFlightCount} in flight`,
-		`${snapshot.committedResultCount} committed`,
-		`${snapshot.staleResultCount} stale`,
-		`${snapshot.errorCount} errors`,
+		`${productSet.residentCount}/${productSet.desiredCount} resident`,
+		`${productSet.inFlightCount} in flight`,
+		`${productSet.committedResultCount} committed`,
+		`${productSet.staleResultCount} stale`,
+		`${productSet.errorCount} errors`,
 	].join("; ");
 }
 
 function describeStaticLandblockRenderArtifactSurfaceSignature(
-	snapshot: StaticLandblockRenderArtifactStoreSnapshot,
+	productSet: StaticLandblockRenderProductSet,
 ): string {
 	return [
-		...snapshot.latestDesiredIdentityKeys,
-		...snapshot.artifacts.flatMap((artifact) =>
-			getStaticObjectBundleArtifacts(artifact).map((layer) =>
-				[
-					artifact.landblockId,
-					artifact.product,
-					artifact.requestId,
-					artifact.buildPolicyRevision,
-					artifact.texturePagePolicyRevision,
-					layer.key,
-					layer.sourceRevision,
-				].join(":"),
-			),
-		),
+		...productSet.latestDesiredIdentityKeys,
+		...productSet.artifacts.flatMap((artifact) => {
+			const detailed = getDetailedLandblockRenderArtifacts(artifact);
+			return [
+				...getStaticObjectBundleArtifacts(artifact).map((layer) =>
+					[
+						artifact.landblockId,
+						artifact.product,
+						artifact.requestId,
+						artifact.buildPolicyRevision,
+						artifact.texturePagePolicyRevision,
+						"static",
+						layer.key,
+						layer.sourceRevision,
+					].join(":"),
+				),
+				...(detailed
+					? [
+							[
+								artifact.landblockId,
+								artifact.product,
+								artifact.requestId,
+								artifact.buildPolicyRevision,
+								artifact.texturePagePolicyRevision,
+								"detailed",
+								detailed.landblockId,
+								detailed.structuredInteriorCells.length,
+							].join(":"),
+						]
+					: []),
+			];
+		}),
 	].join("|");
 }
 

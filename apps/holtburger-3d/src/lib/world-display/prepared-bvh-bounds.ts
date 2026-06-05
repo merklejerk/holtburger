@@ -1,4 +1,5 @@
 import type { PreparedBounds, PreparedEnvCellPayload } from "../assets/types";
+import type { PlacementTransformDto } from "../host/contracts";
 import type { RenderChunkTransform } from "./render-anchor";
 import { buildAcPlacementMatrix, transformPointByMat4 } from "./render-math";
 import {
@@ -13,8 +14,20 @@ export function transformEnvCellLocalBounds(
 	payload: PreparedEnvCellPayload,
 	transform: RenderChunkTransform,
 ): RenderBounds {
-	const matrix = buildAcPlacementMatrix(
+	return transformEnvCellLocalBoundsByPlacement(
+		bounds,
 		payload.localPlacement,
+		transform,
+	);
+}
+
+export function transformEnvCellLocalBoundsByPlacement(
+	bounds: PreparedBounds,
+	localPlacement: PlacementTransformDto,
+	transform: RenderChunkTransform,
+): RenderBounds {
+	const matrix = buildAcPlacementMatrix(
+		localPlacement,
 		{ x: 0, y: 0, z: 0 },
 		{ x: 1, y: 1, z: 1 },
 	);

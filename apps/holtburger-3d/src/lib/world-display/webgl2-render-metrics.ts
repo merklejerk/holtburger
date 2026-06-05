@@ -332,25 +332,8 @@ export function createWebgl2RenderMetrics(
 			paletteResourceCount: input.worldStore?.paletteTextureCount ?? 0,
 			indexedMaterialDescriptorDrawUnitCount:
 				input.worldStore?.indexedMaterialDescriptorDrawUnitCount ?? 0,
-			indexedMaterialDescriptorCompactionCandidateCount:
-				input.worldStore?.indexedMaterialDescriptorCompactionCandidateCount ??
-				0,
 			standaloneIndexedMaterialResourceDrawUnitCount:
 				input.worldStore?.standaloneIndexedMaterialResourceDrawUnitCount ?? 0,
-			compactedIndexedMaterialStandaloneResourceDrawUnitCount:
-				input.worldStore
-					?.compactedIndexedMaterialStandaloneResourceDrawUnitCount ?? 0,
-			indexedResourceAtlasCandidateDrawUnitCount:
-				input.worldStore?.indexedResourceAtlasCandidateDrawUnitCount ?? 0,
-			indexedResourceAtlasIndexTextureCount:
-				input.worldStore?.indexedResourceAtlasIndexTextureCount ?? 0,
-			indexedResourceAtlasPaletteTextureCount:
-				input.worldStore?.indexedResourceAtlasPaletteTextureCount ?? 0,
-			indexedResourceAtlasFailureReasonCount:
-				input.worldStore?.indexedResourceAtlasFailureReasonCount ?? 0,
-			indexedResourceAtlasFailureSamples: [
-				...(input.worldStore?.indexedResourceAtlasFailureSamples ?? []),
-			],
 			staticGeometryGroupCount: input.worldStore?.appearancePreviewDrawUnitCount ?? 0,
 			staticVisibleGeometryGroupCount:
 				(input.frameMetrics?.visibleDrawCountsByCategory["appearance-preview-staged"] ??
@@ -373,47 +356,47 @@ export function createWebgl2RenderMetrics(
 						"webgl2-detail-atlas-ready-draw-units":
 							input.worldStore.detailAtlasReadyDrawUnitCount,
 						"webgl2-atlas-failures": input.worldStore.atlasFailureReasonCount,
-						"webgl2-compacted-candidates":
+						"webgl2-static-eligibility-candidates":
 							input.worldStore.compactionCandidateDrawUnitCount,
-						"webgl2-compacted-bypasses":
+						"webgl2-static-eligibility-bypasses":
 							input.worldStore.compactionBypassReasonCount,
 						...prefixCounts(
-							"webgl2-compacted-coverage-",
+							"webgl2-static-eligibility-coverage-",
 							input.worldStore.compactionCoverageDrawUnitCounts,
 						),
 						...prefixCounts(
-							"webgl2-compacted-material-blocker-",
+							"webgl2-static-eligibility-material-blocker-",
 							input.worldStore.compactionCoverageMaterialBlockerCounts,
 						),
 						...prefixCounts(
-							"webgl2-compacted-geometry-blocker-",
+							"webgl2-static-eligibility-geometry-blocker-",
 							input.worldStore.compactionCoverageGeometryBlockerCounts,
 						),
 						...prefixCounts(
-							"webgl2-compacted-material-family-",
+							"webgl2-static-eligibility-material-family-",
 							input.worldStore.compactionCoverageMaterialFamilyCounts,
 						),
 						...prefixCounts(
-							"webgl2-compacted-alpha-policy-",
+							"webgl2-static-eligibility-alpha-policy-",
 							input.worldStore.compactionCoverageMaterialAlphaPolicyCounts,
 						),
 						...prefixCounts(
-							"webgl2-compacted-family-alpha-policy-",
+							"webgl2-static-eligibility-family-alpha-policy-",
 							input.worldStore
 								.compactionCoverageMaterialFamilyAlphaPolicyCounts,
 						),
 						...prefixCounts(
-							"webgl2-compacted-retained-family-",
+							"webgl2-retained-direct-material-family-",
 							input.worldStore
 								.compactionCoverageRetainedDirectMaterialFamilyCounts,
 						),
 						...prefixCounts(
-							"webgl2-compacted-retained-family-alpha-policy-",
+							"webgl2-retained-direct-material-family-alpha-policy-",
 							input.worldStore
 								.compactionCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts,
 						),
 						...prefixCounts(
-							"webgl2-compacted-visible-retained-family-",
+							"webgl2-visible-retained-direct-material-family-",
 							input.submitMetrics
 								.visibleRetainedDirectDrawUnitCountsByCompactionFamily,
 						),
@@ -423,22 +406,8 @@ export function createWebgl2RenderMetrics(
 							input.worldStore.terrainDetailTexturePageCount,
 						"webgl2-indexed-descriptor-draw-units":
 							input.worldStore.indexedMaterialDescriptorDrawUnitCount,
-						"webgl2-indexed-descriptor-compaction-candidates":
-							input.worldStore
-								.indexedMaterialDescriptorCompactionCandidateCount,
 						"webgl2-standalone-indexed-resource-draw-units":
 							input.worldStore.standaloneIndexedMaterialResourceDrawUnitCount,
-						"webgl2-compacted-indexed-standalone-resource-draw-units":
-							input.worldStore
-								.compactedIndexedMaterialStandaloneResourceDrawUnitCount,
-						"webgl2-indexed-resource-atlas-candidate-draw-units":
-							input.worldStore.indexedResourceAtlasCandidateDrawUnitCount,
-						"webgl2-indexed-resource-atlas-index-textures":
-							input.worldStore.indexedResourceAtlasIndexTextureCount,
-						"webgl2-indexed-resource-atlas-palette-textures":
-							input.worldStore.indexedResourceAtlasPaletteTextureCount,
-						"webgl2-indexed-resource-atlas-failures":
-							input.worldStore.indexedResourceAtlasFailureReasonCount,
 						"webgl2-retained-direct-opaque-draw-units":
 							input.submitMetrics.retainedDirectOpaqueDrawUnitCount,
 						"webgl2-retained-direct-blended-draw-units":

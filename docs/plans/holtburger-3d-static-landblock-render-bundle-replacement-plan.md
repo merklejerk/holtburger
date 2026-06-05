@@ -34,8 +34,9 @@ Phase 4E9 staged static renderable draw path removal is implemented.
 Phase 4E10 static compaction render-resource worker deletion is implemented.
 Phase 4E11 artifact-native diagnostics/metrics cleanup is implemented.
 Phase 4E12 atlas render-resource worker deletion, Phase 4E13 global atlas generation resource
-model cleanup, Phase 4E14 removed family metrics and diagnostics cleanup, and Phase 6A terrain
-texture page upload naming cleanup are implemented. Phase 6B diagnostics metric rebaseline is next.
+model cleanup, Phase 4E14 removed family metrics and diagnostics cleanup, Phase 6A terrain texture
+page upload naming cleanup, and Phase 6B diagnostics metric rebaseline are implemented. Phase 6C
+preview/staged terminology cleanup is next.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -428,6 +429,11 @@ Progress:
   deleting the dead `Webgl2TextureAtlasGenerationResource` wrapper, renaming CPU page-build helpers
   away from "generation", and updating terrain page resource sync plus tests to use page-set/page
   upload terminology.
+- 2026-06-05: Implemented Phase 6B. Removed the live indexed resource atlas planning path from
+  WebGL world resource sync, deleted the unowned indexed atlas planner module/tests, always retained
+  direct indexed resources for preview draw units, removed indexed atlas/compacted-indexed debug
+  fields, renamed `webgl2-*compacted*` material-type metrics to static eligibility or retained-direct
+  family keys, and updated browser diagnostics text away from compaction/staged CPU wording.
 
 Validation:
 
@@ -5398,14 +5404,16 @@ Collected cleanup targets:
 - Rename remaining renderer concepts away from `staged`, `replacement`, `generation`, and
   `drawUnitId` where those names now describe historical implementation details instead of current
   behavior.
-- Rename or split `webgl2/resources/texture-atlas-generation.ts` so terrain page CPU/upload helpers
-  are not presented as global atlas generation ownership.
-- Rebaseline `webgl2-*compacted*` and `webgl2-indexed-resource-atlas-*` material-type metric names.
-  Delete any metric that cannot be tied to an active diagnostic owner after static bundle artifact
-  ownership is the only landblock static path.
-- Revisit `IndexedResourceAtlasPlan` and indexed atlas planning metrics after the global indexed
-  generation resource deletion. If they only describe the deleted global indexed path, delete them;
-  if they still serve preview diagnostics, rename them to that explicit owner.
+- Completed in Phase 6A: rename or split `webgl2/resources/texture-atlas-generation.ts` so terrain
+  page CPU/upload helpers are not presented as global atlas generation ownership.
+- Completed in Phase 6B: rebaseline `webgl2-*compacted*` and
+  `webgl2-indexed-resource-atlas-*` material-type metric names. Delete any metric that cannot be
+  tied to an active diagnostic owner after static bundle artifact ownership is the only landblock
+  static path.
+- Completed in Phase 6B: revisit `IndexedResourceAtlasPlan` and indexed atlas planning metrics
+  after the global indexed generation resource deletion. If they only describe the deleted global
+  indexed path, delete them; if they still serve preview diagnostics, rename them to that explicit
+  owner.
 - Consider renaming direct draw-unit texture-page fallback sample fields if "fallback" remains too
   broad after the old global generation fallback path is gone.
 - Collapse duplicated static material/texture helper functions into the static object bundle builder
@@ -5478,7 +5486,7 @@ Exit criteria:
 
 #### Phase 6B: Diagnostics Metric Rebaseline
 
-Next cleanup slice. Remove or rename legacy-shaped diagnostics that still say compacted/indexed atlas
+Cleanup slice. Remove or rename legacy-shaped diagnostics that still say compacted/indexed atlas
 when their current owner is direct preview planning, artifact page ownership, or static bundle
 eligibility rather than the deleted runtime compaction/atlas generation path.
 
@@ -5491,6 +5499,77 @@ eligibility rather than the deleted runtime compaction/atlas generation path.
 - Update browser diagnostics text so static/picker facts are not presented as staged CPU facts when
   they are artifact-owned or runtime direct facts.
 - Re-run focused render metrics and browser diagnostics checks plus the broad lint/knip pass.
+
+Decisions and course corrections:
+
+- Implemented. Removed `indexedResourceAtlas*`, `indexedMaterialDescriptorCompactionCandidateCount`,
+  and `compactedIndexedMaterialStandaloneResourceDrawUnitCount` from `Webgl2WorldResourceStore`,
+  `WorldRenderDebugMetrics`, WebGL metric assembly, and material-type metrics.
+- Implemented. Deleted `texture-pages/indexed-resource-atlas-planner.ts` and its focused tests
+  because no production caller owns indexed atlas packing after the global indexed generation
+  resource deletion.
+- Implemented. `syncWebgl2DirectIndexedMaterialResources` now retains direct indexed resources for
+  every preview draw unit with an indexed material descriptor. It no longer suppresses direct indexed
+  uploads based on a deleted compacted-indexed atlas placement plan.
+- Implemented. Material-type metric keys that described deleted compacted submit ownership were
+  renamed to `webgl2-static-eligibility-*`, `webgl2-retained-direct-material-family-*`, and
+  `webgl2-visible-retained-direct-material-family-*`.
+- Implemented. Browser diagnostics text now says "Static eligibility" rather than "Compaction
+  planning", and picker clipboard notes describe renderer CPU facts rather than staged CPU facts.
+- Course correction: 6B found a behavior footgun, not just stale diagnostics. The indexed atlas plan
+  could prevent direct indexed resources from being created for compactable preview draw units even
+  though no indexed atlas submit/resource path remained. Deleting the planner from resource sync
+  makes direct preview behavior match the replacement architecture.
+
+Cleanup targets discovered:
+
+- The public debug contract still uses `compaction*` field names for static eligibility facts. That
+  is tolerable for this phase because those fields are backed by the pure eligibility planner, but a
+  later naming cleanup should rename the contract once browser consumers are less churn-heavy.
+- `texture-pages/texture-page-atlas-planner.ts` still exposes atlas-shaped names for page packing.
+  This is layout terminology, not generation ownership, but it should be revisited if Phase 6C
+  renames preview/staged paths.
+
+Legacy shims introduced:
+
+- None. Stale indexed atlas fields, metrics, planner module, and tests were deleted rather than
+  reexported or aliased.
+
+Validation:
+
+- `npm exec vitest -- run src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts`
+  passed.
+- `npm run check` passed.
+- `npm run lint:ts` passed.
+- `npm run lint:dead` passed.
+- `npm run lint:rust` passed from `apps/holtburger-3d`.
+- `git diff --check` passed.
+
+Exit criteria:
+
+- Implemented. No app source references `indexedResourceAtlas*`,
+  `IndexedResourceAtlas*`, `webgl2-indexed-resource-atlas-*`, or
+  `webgl2-*compacted*` material-type metric keys.
+- Implemented. Indexed preview draw units no longer depend on a compacted-indexed atlas plan to
+  decide whether direct indexed resources should exist.
+- Implemented with follow-up. Browser diagnostics no longer show "Compaction planning" or "staged CPU
+  facts" for static diagnostics. Public debug-contract `compaction*` field names remain as a later
+  naming cleanup target.
+
+#### Phase 6C: Preview and Staged Terminology Cleanup
+
+Next cleanup slice. The remaining `staged` terminology mostly describes runtime appearance previews
+and low-fidelity debug/picker paths rather than landblock static hydration. Rename or quarantine that
+surface so it cannot be mistaken for the deleted main-thread static landblock path.
+
+- Rename the preview-only `staged-world-assembly.ts` boundary or split out an
+  appearance-preview-specific assembly module.
+- Replace `appearance-preview-staged` render-frame category names with neutral preview names if no
+  live code needs the staged distinction.
+- Remove or rename browser debug text such as "No staged static draw units matched this render key."
+- Revisit `StaticRenderableSceneModel` browser contract surfaces that are now preview/debug-only.
+- Run focused world-render-frame, staged-world-assembly, browser diagnostics, and renderer resource
+  tests plus the broad lint/knip pass.
 
 Exit criteria:
 

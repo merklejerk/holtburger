@@ -2183,6 +2183,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				store: currentResources.worldStore,
 				artifacts: staticLandblockRenderArtifacts,
 				renderChunkTransforms,
+				textureFilteringMode,
 			});
 			syncWebgl2WorldResources({
 				gl: currentResources.gl,

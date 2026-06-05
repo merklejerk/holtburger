@@ -202,6 +202,19 @@ export function createWebgl2Texture2D(
 	};
 }
 
+export function updateWebgl2Texture2DSamplerParameters(
+	gl: WebGL2RenderingContext,
+	texture: Webgl2Texture2DResource,
+	parameters: Webgl2SamplerParameters,
+): void {
+	gl.bindTexture(gl.TEXTURE_2D, texture.texture);
+	try {
+		applyWebgl2SamplerParameters(gl, parameters);
+	} finally {
+		gl.bindTexture(gl.TEXTURE_2D, null);
+	}
+}
+
 function applyWebgl2SamplerParameters(
 	gl: WebGL2RenderingContext,
 	parameters: Webgl2SamplerParameters,

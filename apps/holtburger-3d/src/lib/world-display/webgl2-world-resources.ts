@@ -516,11 +516,13 @@ export function syncWebgl2StaticLandblockRenderArtifactResources({
 	store,
 	artifacts,
 	renderChunkTransforms = [],
+	textureFilteringMode = "anisotropic-4x",
 }: {
 	gl: WebGL2RenderingContext;
 	store: Webgl2WorldResourceStore;
 	artifacts: StaticLandblockRenderArtifactStoreSnapshot;
 	renderChunkTransforms?: readonly RenderChunkTransform[];
+	textureFilteringMode?: TextureFilteringMode;
 }): void {
 	const layers = artifacts.artifacts.flatMap((artifact) =>
 		getStaticObjectBundleArtifacts(artifact).filter((bundle) =>
@@ -534,6 +536,7 @@ export function syncWebgl2StaticLandblockRenderArtifactResources({
 		gl,
 		store: store.staticBundleLayerResources,
 		layers,
+		textureFilteringMode,
 	});
 	const detailedArtifacts = artifacts.artifacts
 		.map(getDetailedLandblockRenderArtifacts)
@@ -545,6 +548,7 @@ export function syncWebgl2StaticLandblockRenderArtifactResources({
 		store: store.structuredInteriorResources,
 		artifacts: detailedArtifacts,
 		renderChunkTransforms,
+		textureFilteringMode,
 	});
 	const resources = [...store.staticBundleLayerResources.layersByKey.values()];
 	store.staticBundleLayerResourceCount = resources.length;

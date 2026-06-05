@@ -20,9 +20,11 @@ import {
 	createStaticBundleTexturePageByVirtualRefKey,
 	createWebgl2StaticBundleMaterialResource,
 	createWebgl2StaticBundleTexturePageResource,
+	updateWebgl2StaticBundleTexturePageResourceSamplerPolicy,
 	type Webgl2StaticBundleMaterialResource,
 	type Webgl2StaticBundleTexturePageResource,
 } from "./static-bundle-layer-resources";
+import type { TextureFilteringMode } from "../../texture-pages/texture-sampling-policy";
 
 type DetailedStructuredInteriorCellArtifact =
 	DetailedLandblockRenderArtifacts["structuredInteriorCells"][number];
@@ -87,11 +89,13 @@ export function syncWebgl2StructuredInteriorResources({
 	store,
 	artifacts,
 	renderChunkTransforms,
+	textureFilteringMode = "anisotropic-4x",
 }: {
 	gl: WebGL2RenderingContext;
 	store: Webgl2StructuredInteriorResourceStore;
 	artifacts: readonly DetailedLandblockRenderArtifacts[];
 	renderChunkTransforms: readonly RenderChunkTransform[];
+	textureFilteringMode?: TextureFilteringMode;
 }): void {
 	const chunkOffsetByKey = new Map(
 		renderChunkTransforms.map((transform) => [
@@ -115,6 +119,11 @@ export function syncWebgl2StructuredInteriorResources({
 					describeStructuredInteriorGeometrySignature(artifact, cell)
 			) {
 				previous.modelMatrix = modelMatrix;
+				updateWebgl2StructuredInteriorTexturePageSamplerPolicy({
+					gl,
+					cell: previous,
+					textureFilteringMode,
+				});
 				continue;
 			}
 			if (previous) {
@@ -127,6 +136,7 @@ export function syncWebgl2StructuredInteriorResources({
 					artifact,
 					cell,
 					modelMatrix,
+					textureFilteringMode,
 				}),
 			);
 		}
@@ -153,14 +163,20 @@ function createWebgl2StructuredInteriorCellResource({
 	artifact,
 	cell,
 	modelMatrix,
+	textureFilteringMode,
 }: {
 	gl: WebGL2RenderingContext;
 	artifact: DetailedLandblockRenderArtifacts;
 	cell: DetailedStructuredInteriorCellArtifact;
 	modelMatrix: RenderMat4;
+	textureFilteringMode: TextureFilteringMode;
 }): Webgl2StructuredInteriorCellResource {
 	const texturePages = artifact.structuredInteriorTexturePages.map((page) =>
-		createWebgl2StaticBundleTexturePageResource({ gl, page }),
+		createWebgl2StaticBundleTexturePageResource({
+			gl,
+			page,
+			textureFilteringMode,
+		}),
 	);
 	const texturePagesByKey = new Map(
 		texturePages.map((page) => [page.key, page]),
@@ -218,6 +234,24 @@ function createWebgl2StructuredInteriorCellResource({
 			}
 		},
 	};
+}
+
+function updateWebgl2StructuredInteriorTexturePageSamplerPolicy({
+	gl,
+	cell,
+	textureFilteringMode,
+}: {
+	gl: WebGL2RenderingContext;
+	cell: Webgl2StructuredInteriorCellResource;
+	textureFilteringMode: TextureFilteringMode;
+}): void {
+	for (const page of cell.texturePages) {
+		updateWebgl2StaticBundleTexturePageResourceSamplerPolicy({
+			gl,
+			page,
+			textureFilteringMode,
+		});
+	}
 }
 
 function createWebgl2StructuredInteriorShellResource({

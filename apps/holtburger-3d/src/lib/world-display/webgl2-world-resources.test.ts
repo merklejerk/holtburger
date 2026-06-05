@@ -296,7 +296,11 @@ describe("webgl2 world resources", () => {
 				createDetailedLandblockProductArtifact(cell),
 			]),
 			renderChunkTransforms: [createChunkTransform()],
+			textureFilteringMode: "linear",
 		});
+		const resource = [
+			...store.structuredInteriorResources.cellsByKey.values(),
+		][0];
 
 		expect(store.structuredInteriorResourceCount).toBe(1);
 		expect(store.structuredInteriorResourceTriangleCount).toBe(1);
@@ -304,6 +308,26 @@ describe("webgl2 world resources", () => {
 		expect(gl.createdBuffers).toHaveLength(3);
 		expect(gl.createdVertexArrays).toHaveLength(1);
 		expect(gl.createdTextures).toHaveLength(1);
+
+		syncWebgl2StaticLandblockRenderArtifactResources({
+			gl: gl.asContext(),
+			store,
+			artifacts: createStaticLandblockProductArtifactSnapshot([
+				createDetailedLandblockProductArtifact(cell),
+			]),
+			renderChunkTransforms: [createChunkTransform()],
+			textureFilteringMode: "nearest",
+		});
+
+		expect([...store.structuredInteriorResources.cellsByKey.values()][0]).toBe(
+			resource,
+		);
+		expect(gl.createdBuffers).toHaveLength(3);
+		expect(gl.createdTextures).toHaveLength(1);
+		expect(gl.textureParameters).toContainEqual({
+			pname: gl.TEXTURE_MIN_FILTER,
+			param: gl.NEAREST,
+		});
 
 		syncWebgl2WorldResources({
 			gl: gl.asContext(),

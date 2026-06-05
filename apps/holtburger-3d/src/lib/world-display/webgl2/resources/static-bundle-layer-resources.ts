@@ -14,11 +14,14 @@ import {
 	createWebgl2ElementArrayBuffer,
 	createWebgl2Texture2D,
 	createWebgl2VertexArray,
+	updateWebgl2Texture2DSamplerParameters,
 	type Webgl2BufferResource,
+	type Webgl2SamplerParameters,
 	type Webgl2Texture2DResource,
 	type Webgl2Texture2DUpload,
 	type Webgl2VertexArrayResource,
 } from "../../webgl2-gl";
+import type { TextureFilteringMode } from "../../texture-pages/texture-sampling-policy";
 
 export interface Webgl2StaticBundleLayerResourceStore {
 	layersByKey: Map<string, Webgl2StaticBundleLayerResource>;
@@ -44,6 +47,7 @@ export interface Webgl2StaticBundleTexturePageResource {
 	sampleClass: VirtualTexturePageSampleClass;
 	pageKind: StaticBundleTexturePage["pageKind"];
 	indexedFormat: StaticBundleTexturePage["indexedFormat"];
+	samplerPolicyKey: string;
 	texture: Webgl2Texture2DResource;
 	entries: readonly Webgl2StaticBundleTexturePageEntryResource[];
 }
@@ -107,19 +111,32 @@ export function syncWebgl2StaticBundleLayerResources({
 	gl,
 	store,
 	layers,
+	textureFilteringMode = "anisotropic-4x",
 }: {
 	gl: WebGL2RenderingContext;
 	store: Webgl2StaticBundleLayerResourceStore;
 	layers: readonly StaticObjectBundleArtifact[];
+	textureFilteringMode?: TextureFilteringMode;
 }): void {
 	const retainedResourceKeys = new Set<string>();
 	for (const layer of layers) {
 		const resourceKey = describeStaticBundleLayerResourceKey(layer);
 		retainedResourceKeys.add(resourceKey);
-		if (!store.layersByKey.has(resourceKey)) {
+		const previous = store.layersByKey.get(resourceKey);
+		if (previous) {
+			updateWebgl2StaticBundleLayerTexturePageSamplerPolicy({
+				gl,
+				layer: previous,
+				textureFilteringMode,
+			});
+		} else {
 			store.layersByKey.set(
 				resourceKey,
-				createWebgl2StaticBundleLayerResource({ gl, layer }),
+				createWebgl2StaticBundleLayerResource({
+					gl,
+					layer,
+					textureFilteringMode,
+				}),
 			);
 		}
 	}
@@ -143,12 +160,18 @@ export function destroyWebgl2StaticBundleLayerResources(
 function createWebgl2StaticBundleLayerResource({
 	gl,
 	layer,
+	textureFilteringMode,
 }: {
 	gl: WebGL2RenderingContext;
 	layer: StaticObjectBundleArtifact;
+	textureFilteringMode: TextureFilteringMode;
 }): Webgl2StaticBundleLayerResource {
 	const texturePages = layer.texturePages.map((page) =>
-		createWebgl2StaticBundleTexturePageResource({ gl, page }),
+		createWebgl2StaticBundleTexturePageResource({
+			gl,
+			page,
+			textureFilteringMode,
+		}),
 	);
 	const texturePagesByKey = new Map(
 		texturePages.map((page) => [page.key, page]),
@@ -205,30 +228,32 @@ function describeStaticBundleLayerResourceKey(
 export function createWebgl2StaticBundleTexturePageResource({
 	gl,
 	page,
+	textureFilteringMode = "anisotropic-4x",
 }: {
 	gl: WebGL2RenderingContext;
 	page: StaticBundleTexturePage;
+	textureFilteringMode?: TextureFilteringMode;
 }): Webgl2StaticBundleTexturePageResource {
 	const upload = createStaticBundleTexturePageUpload(gl, page);
+	const sampler = createStaticBundleTexturePageSampler({
+		gl,
+		page,
+		textureFilteringMode,
+	});
 	return {
 		key: page.key,
 		usageBucket: page.usageBucket,
 		sampleClass: page.sampleClass,
 		pageKind: page.pageKind,
 		indexedFormat: page.indexedFormat,
+		samplerPolicyKey: describeStaticBundleTexturePageSamplerPolicy({
+			page,
+			textureFilteringMode,
+		}),
 		texture: createWebgl2Texture2D(gl, {
 			label: page.key,
 			upload,
-			sampler: {
-				wrapS: gl.CLAMP_TO_EDGE,
-				wrapT: gl.CLAMP_TO_EDGE,
-				minFilter: isExactSampleClass(page.sampleClass)
-					? gl.NEAREST
-					: gl.LINEAR,
-				magFilter: isExactSampleClass(page.sampleClass)
-					? gl.NEAREST
-					: gl.LINEAR,
-			},
+			sampler,
 		}),
 		entries: page.entries.map((entry) => ({
 			virtualRefKey: entry.virtualRefKey,
@@ -236,6 +261,52 @@ export function createWebgl2StaticBundleTexturePageResource({
 			rect: entry.rect,
 		})),
 	};
+}
+
+export function updateWebgl2StaticBundleTexturePageResourceSamplerPolicy({
+	gl,
+	page,
+	textureFilteringMode,
+}: {
+	gl: WebGL2RenderingContext;
+	page: Webgl2StaticBundleTexturePageResource;
+	textureFilteringMode: TextureFilteringMode;
+}): void {
+	const nextSamplerPolicyKey = describeStaticBundleTexturePageResourceSamplerPolicy({
+		page,
+		textureFilteringMode,
+	});
+	if (page.samplerPolicyKey === nextSamplerPolicyKey) {
+		return;
+	}
+	updateWebgl2Texture2DSamplerParameters(
+		gl,
+		page.texture,
+		createStaticBundleTexturePageResourceSampler({
+			gl,
+			page,
+			textureFilteringMode,
+		}),
+	);
+	page.samplerPolicyKey = nextSamplerPolicyKey;
+}
+
+function updateWebgl2StaticBundleLayerTexturePageSamplerPolicy({
+	gl,
+	layer,
+	textureFilteringMode,
+}: {
+	gl: WebGL2RenderingContext;
+	layer: Webgl2StaticBundleLayerResource;
+	textureFilteringMode: TextureFilteringMode;
+}): void {
+	for (const page of layer.texturePages) {
+		updateWebgl2StaticBundleTexturePageResourceSamplerPolicy({
+			gl,
+			page,
+			textureFilteringMode,
+		});
+	}
 }
 
 function createStaticBundleTexturePageUpload(
@@ -307,6 +378,79 @@ function isExactSampleClass(
 	sampleClass: VirtualTexturePageSampleClass,
 ): boolean {
 	return sampleClass === "indexed-data" || sampleClass === "palette-data";
+}
+
+function createStaticBundleTexturePageSampler({
+	gl,
+	page,
+	textureFilteringMode,
+}: {
+	gl: WebGL2RenderingContext;
+	page: Pick<Webgl2StaticBundleTexturePageResource, "sampleClass">;
+	textureFilteringMode: TextureFilteringMode;
+}): Webgl2SamplerParameters {
+	const isExact = isExactSampleClass(page.sampleClass);
+	const filter =
+		isExact || textureFilteringMode === "nearest" ? gl.NEAREST : gl.LINEAR;
+	return {
+		wrapS: gl.CLAMP_TO_EDGE,
+		wrapT: gl.CLAMP_TO_EDGE,
+		minFilter: filter,
+		magFilter: filter,
+	};
+}
+
+function createStaticBundleTexturePageResourceSampler({
+	gl,
+	page,
+	textureFilteringMode,
+}: {
+	gl: WebGL2RenderingContext;
+	page: Webgl2StaticBundleTexturePageResource;
+	textureFilteringMode: TextureFilteringMode;
+}): Webgl2SamplerParameters {
+	return createStaticBundleTexturePageSampler({
+		gl,
+		page,
+		textureFilteringMode,
+	});
+}
+
+function describeStaticBundleTexturePageSamplerPolicy({
+	page,
+	textureFilteringMode,
+}: {
+	page: Pick<StaticBundleTexturePage, "sampleClass">;
+	textureFilteringMode: TextureFilteringMode;
+}): string {
+	return describeArtifactTexturePageSamplerPolicy({
+		sampleClass: page.sampleClass,
+		textureFilteringMode,
+	});
+}
+
+function describeStaticBundleTexturePageResourceSamplerPolicy({
+	page,
+	textureFilteringMode,
+}: {
+	page: Pick<Webgl2StaticBundleTexturePageResource, "sampleClass">;
+	textureFilteringMode: TextureFilteringMode;
+}): string {
+	return describeArtifactTexturePageSamplerPolicy({
+		sampleClass: page.sampleClass,
+		textureFilteringMode,
+	});
+}
+
+function describeArtifactTexturePageSamplerPolicy({
+	sampleClass,
+	textureFilteringMode,
+}: {
+	sampleClass: VirtualTexturePageSampleClass;
+	textureFilteringMode: TextureFilteringMode;
+}): string {
+	const filter = isExactSampleClass(sampleClass) ? "exact" : textureFilteringMode;
+	return `sample=${sampleClass};filter=${filter}`;
 }
 
 export function createStaticBundleTexturePageByVirtualRefKey(

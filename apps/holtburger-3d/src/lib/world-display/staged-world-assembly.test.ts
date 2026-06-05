@@ -14,7 +14,7 @@ import { createBaseMaterialAppearanceContext } from "./material-appearance";
 import { LEGACY_SAMPLER_REPEAT_MATERIAL_VARIANT_SIGNATURE } from "../assets/material-variants";
 import { WORLD_RENDER_DOMAIN } from "./render-domains";
 import {
-	buildStagedStaticDrawUnitAssemblies,
+	buildStagedAppearancePreviewDrawUnitAssemblies,
 	describeStagedWorldAssemblyGraphRecordSignature,
 } from "./staged-world-assembly";
 import type { RenderChunkTransform } from "./render-anchor";
@@ -25,8 +25,8 @@ const PIXEL_FORMAT_A8R8G8B8 = 0x15;
 const SURFACE_TYPE_DIFFUSE = 0x20;
 
 describe("staged world assembly", () => {
-	it("splits static draw units by material slot and keeps chunk-local geometry", () => {
-		const drawUnits = buildStagedStaticDrawUnitAssemblies({
+	it("splits appearance-preview draw units by material slot and keeps chunk-local geometry", () => {
+		const drawUnits = buildStagedAppearancePreviewDrawUnitAssemblies({
 			assetState: createAssetState(createTwoSlotGfxGeometry(), [
 				createMaterialRecipeRecord({
 					surfaceId: 0x08000001,
@@ -79,8 +79,8 @@ describe("staged world assembly", () => {
 		]);
 	});
 
-	it("preserves static sampler variants from material-slot geometry", () => {
-		const drawUnits = buildStagedStaticDrawUnitAssemblies({
+	it("preserves appearance-preview sampler variants from material-slot geometry", () => {
+		const drawUnits = buildStagedAppearancePreviewDrawUnitAssemblies({
 			assetState: createAssetState(createRepeatSlotGfxGeometry(), [
 				createMaterialRecipeRecord({
 					surfaceId: 0x08000001,
@@ -114,9 +114,9 @@ describe("staged world assembly", () => {
 		);
 	});
 
-	it("normalizes duplicate static BVH keys during draw-unit assembly", () => {
+	it("normalizes duplicate appearance-preview BVH keys during draw-unit assembly", () => {
 		const part = createStaticPart();
-		const drawUnits = buildStagedStaticDrawUnitAssemblies({
+		const drawUnits = buildStagedAppearancePreviewDrawUnitAssemblies({
 			assetState: createAssetState(createStaticGfxGeometry()),
 			chunkOffsetByKey: new Map([
 				["landblock/12340000", { x: 10, y: 20, z: 30 }],
@@ -134,8 +134,8 @@ describe("staged world assembly", () => {
 		}
 	});
 
-	it("does not suppress indoor static parts for resident outdoor bundles in the same landblock", () => {
-		const drawUnits = buildStagedStaticDrawUnitAssemblies({
+	it("ignores non-preview landblock static parts", () => {
+		const drawUnits = buildStagedAppearancePreviewDrawUnitAssemblies({
 			assetState: createAssetState(createStaticGfxGeometry()),
 			chunkOffsetByKey: new Map([
 				["landblock/12340000", { x: 10, y: 20, z: 30 }],
@@ -152,54 +152,14 @@ describe("staged world assembly", () => {
 					}),
 				],
 			},
-			excludedRenderScope: {
-				outdoorLandblockIds: new Set([0x12340000]),
-				envCellIds: new Set(),
-			},
 		});
 
-		expect(drawUnits).toHaveLength(1);
-		expect(drawUnits[0]?.staticObjectKeys[0]).toContain("indoor-a");
-		expect(drawUnits[0]?.staticObjectKeys[0]).toContain("305398016");
-	});
-
-	it("suppresses indoor static parts only for resident env-cell bundle scopes", () => {
-		const drawUnits = buildStagedStaticDrawUnitAssemblies({
-			assetState: createAssetState(createStaticGfxGeometry()),
-			chunkOffsetByKey: new Map([
-				["landblock/12340000", { x: 10, y: 20, z: 30 }],
-			]),
-			staticRenderableScene: {
-				partsByRenderGroupKey: new Map(),
-				parts: [
-					createStaticPart({
-						instanceId: "indoor-a",
-						owningEnvCellId: 0x12340100,
-						renderDomain: WORLD_RENDER_DOMAIN.interiorStatic,
-						kind: "indoor-static",
-					}),
-					createStaticPart({
-						instanceId: "indoor-b",
-						owningEnvCellId: 0x12340200,
-						renderDomain: WORLD_RENDER_DOMAIN.interiorStatic,
-						kind: "indoor-static",
-					}),
-				],
-			},
-			excludedRenderScope: {
-				outdoorLandblockIds: new Set(),
-				envCellIds: new Set([0x12340100]),
-			},
-		});
-
-		expect(drawUnits).toHaveLength(1);
-		expect(drawUnits[0]?.staticObjectKeys[0]).toContain("indoor-b");
-		expect(drawUnits[0]?.staticObjectKeys[0]).toContain("305398272");
+		expect(drawUnits).toHaveLength(0);
 	});
 
 	it("creates stable graph signatures from sorted prepared dependencies", () => {
 		const signature = describeStagedWorldAssemblyGraphRecordSignature({
-			drawUnitId: "static-staged/test",
+			drawUnitId: "appearance-preview-staged/test",
 			label: "test",
 			material: {
 				kind: "flat",
@@ -286,7 +246,7 @@ function createRepeatSlotGfxGeometry(): PreparedPolygonSetRenderGeometry {
 }
 
 function createStaticPart({
-	instanceId = "instance-a",
+	instanceId = "appearance-preview/instance-a",
 	owningEnvCellId = null,
 	renderDomain = WORLD_RENDER_DOMAIN.exteriorStatic,
 	kind = "scenery",

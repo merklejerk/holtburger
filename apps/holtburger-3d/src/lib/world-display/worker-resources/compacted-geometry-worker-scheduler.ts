@@ -6,8 +6,10 @@ import {
 	type BuildCompactedGeometryWorkerInput,
 	type BuildCompactedGeometryWorkerResult,
 } from "./compacted-geometry-worker-payloads";
-import type { CompactedGeometryPlan } from "../compaction/compacted-geometry";
-import type { StagedWorldDrawUnitAssembly } from "../staged-world-assembly";
+import type {
+	CompactedGeometryPlan,
+	CompactedGeometrySourceDrawUnit,
+} from "../compaction/compacted-geometry";
 
 interface CompactedGeometryWorkerSchedulerOptions {
 	client?: RenderResourceWorkerClient;
@@ -18,7 +20,7 @@ export interface CompactedGeometryWorkerDesiredBatch {
 	groupKey: string;
 	desiredJobKey: string;
 	plan: CompactedGeometryPlan;
-	drawUnits: readonly StagedWorldDrawUnitAssembly[];
+	drawUnits: readonly CompactedGeometrySourceDrawUnit[];
 	batchOrigin: { x: number; y: number; z: number };
 }
 

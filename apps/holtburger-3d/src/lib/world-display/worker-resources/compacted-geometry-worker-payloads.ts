@@ -5,7 +5,6 @@ import {
 	type CompactedGeometryPlan,
 } from "../compaction/compacted-geometry";
 import type { RenderMat4 } from "../render-math";
-import type { StagedWorldDrawUnitAssembly } from "../staged-world-assembly";
 
 export interface BuildCompactedGeometryWorkerJob {
 	type: "build-compacted-geometry";
@@ -34,7 +33,7 @@ export function createBuildCompactedGeometryWorkerInput({
 }: {
 	key: string;
 	plan: CompactedGeometryPlan;
-	drawUnits: readonly StagedWorldDrawUnitAssembly[];
+	drawUnits: readonly CompactedGeometryBuildDrawUnit[];
 	batchOrigin: { x: number; y: number; z: number };
 }): BuildCompactedGeometryWorkerInput {
 	const compactableDrawUnitIds = new Set(plan.compactableDrawUnitIds);
@@ -92,7 +91,7 @@ export function collectBuildCompactedGeometryResultTransferables(
 }
 
 function copyCompactedGeometryBuildDrawUnit(
-	drawUnit: StagedWorldDrawUnitAssembly,
+	drawUnit: CompactedGeometryBuildDrawUnit,
 ): CompactedGeometryBuildDrawUnit {
 	return {
 		id: drawUnit.id,

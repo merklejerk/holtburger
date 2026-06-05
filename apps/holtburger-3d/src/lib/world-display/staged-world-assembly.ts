@@ -47,9 +47,9 @@ interface StagedWorldDrawUnitBvhBinding {
 	fallbackReason: string | null;
 }
 
-export interface StagedStaticDrawUnitAssembly {
+export interface StagedAppearancePreviewDrawUnitAssembly {
 	id: string;
-	kind: "static";
+	kind: "appearance-preview";
 	renderDomain: StaticRenderableRenderDomain;
 	owningLandblockId: number;
 	geometry: StagedWorldDrawUnitGeometry;
@@ -61,7 +61,8 @@ export interface StagedStaticDrawUnitAssembly {
 	staticObjectKeys: readonly string[];
 }
 
-export type StagedWorldDrawUnitAssembly = StagedStaticDrawUnitAssembly;
+export type StagedWorldDrawUnitAssembly =
+	StagedAppearancePreviewDrawUnitAssembly;
 
 export interface StagedWorldSceneAssembly {
 	drawUnits: StagedWorldDrawUnitAssembly[];
@@ -90,7 +91,7 @@ interface StagedMaterialSurfaceKey {
 
 type StagedStaticSurfaceKey = StagedMaterialSurfaceKey;
 
-export function buildStagedWorldSceneAssembly({
+export function buildStagedAppearancePreviewSceneAssembly({
 	assetState,
 	terrainScene,
 	staticRenderableScene,
@@ -100,7 +101,6 @@ export function buildStagedWorldSceneAssembly({
 	detailTexturesEnabled = true,
 	indexedMaterialDataCache,
 	materialPlanCache,
-	excludedStaticRenderScope = EMPTY_STATIC_RENDER_SCOPE_EXCLUSION,
 }: {
 	assetState: AssetChannelState;
 	terrainScene: TerrainSceneModel;
@@ -111,7 +111,6 @@ export function buildStagedWorldSceneAssembly({
 	detailTexturesEnabled?: boolean;
 	indexedMaterialDataCache?: IndexedMaterialDataCache;
 	materialPlanCache?: StagedWorldMaterialPlanCache;
-	excludedStaticRenderScope?: StaticRenderScopeExclusion;
 }): StagedWorldSceneAssembly {
 	const chunkOffsetByKey = new Map(
 		renderChunkTransforms.map((transform) => [
@@ -127,11 +126,10 @@ export function buildStagedWorldSceneAssembly({
 		staticRenderableScene,
 		transitionPortalModel: createEmptyTransitionPortalCandidateModel(),
 	});
-	const staticDrawUnits = buildStagedStaticDrawUnitAssemblies({
+	const drawUnits = buildStagedAppearancePreviewDrawUnitAssemblies({
 		assetState,
 		chunkOffsetByKey,
 		staticRenderableScene: fullyResolvedScenes.committedStaticRenderableScene,
-		excludedRenderScope: excludedStaticRenderScope,
 		materialTextureCapabilities,
 		textureFilteringMode,
 		detailTexturesEnabled,
@@ -139,11 +137,11 @@ export function buildStagedWorldSceneAssembly({
 		materialPlanCache,
 	});
 	return {
-		drawUnits: staticDrawUnits,
+		drawUnits,
 		graphRecords: [
-			...staticDrawUnits.map((drawUnit) => ({
+			...drawUnits.map((drawUnit) => ({
 				drawUnitId: drawUnit.id,
-				label: `staged static ${drawUnit.staticObjectKeys.join(", ")}`,
+				label: `appearance preview ${drawUnit.staticObjectKeys.join(", ")}`,
 				material: drawUnit.material,
 				preparedAssetIds: drawUnit.preparedAssetIds,
 			})),
@@ -151,21 +149,10 @@ export function buildStagedWorldSceneAssembly({
 	};
 }
 
-export interface StaticRenderScopeExclusion {
-	outdoorLandblockIds: ReadonlySet<number>;
-	envCellIds: ReadonlySet<number>;
-}
-
-const EMPTY_STATIC_RENDER_SCOPE_EXCLUSION: StaticRenderScopeExclusion = {
-	outdoorLandblockIds: new Set(),
-	envCellIds: new Set(),
-};
-
-export function buildStagedStaticDrawUnitAssemblies({
+export function buildStagedAppearancePreviewDrawUnitAssemblies({
 	assetState,
 	chunkOffsetByKey,
 	staticRenderableScene,
-	excludedRenderScope = EMPTY_STATIC_RENDER_SCOPE_EXCLUSION,
 	materialTextureCapabilities,
 	textureFilteringMode,
 	detailTexturesEnabled = true,
@@ -175,17 +162,15 @@ export function buildStagedStaticDrawUnitAssemblies({
 	assetState: AssetChannelState;
 	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
 	staticRenderableScene: StaticRenderableSceneModel;
-	excludedRenderScope?: StaticRenderScopeExclusion;
 	materialTextureCapabilities?: MaterialTextureCapabilities;
 	textureFilteringMode?: TextureFilteringMode;
 	detailTexturesEnabled?: boolean;
 	indexedMaterialDataCache?: IndexedMaterialDataCache;
 	materialPlanCache?: StagedWorldMaterialPlanCache;
-}): StagedStaticDrawUnitAssembly[] {
+}): StagedAppearancePreviewDrawUnitAssembly[] {
 	const objectsByBatchKey = groupCommittedStaticObjectsByBatchKey({
 		chunkOffsetByKey,
 		staticRenderableScene,
-		excludedRenderScope,
 	});
 
 	return [...objectsByBatchKey.entries()].flatMap(([batchKey, objectGroups]) =>
@@ -238,18 +223,16 @@ export function uniqueSortedStrings(values: readonly string[]): string[] {
 function groupCommittedStaticObjectsByBatchKey({
 	chunkOffsetByKey,
 	staticRenderableScene,
-	excludedRenderScope,
 }: {
 	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
 	staticRenderableScene: StaticRenderableSceneModel;
-	excludedRenderScope: StaticRenderScopeExclusion;
 }): Map<string, StaticRenderableObjectGroup[]> {
 	const objectGroupsByBatchKey = new Map<
 		string,
 		Map<string, StaticRenderablePart[]>
 	>();
 	for (const part of staticRenderableScene.parts) {
-		if (isStaticRenderablePartExcluded(part, excludedRenderScope)) {
+		if (!isAppearancePreviewPart(part)) {
 			continue;
 		}
 		const chunkOffset = chunkOffsetByKey.get(part.renderChunk.chunkKey);
@@ -281,14 +264,8 @@ function groupCommittedStaticObjectsByBatchKey({
 	);
 }
 
-function isStaticRenderablePartExcluded(
-	part: StaticRenderablePart,
-	excludedRenderScope: StaticRenderScopeExclusion,
-): boolean {
-	if (part.owningEnvCellId !== null) {
-		return excludedRenderScope.envCellIds.has(part.owningEnvCellId);
-	}
-	return excludedRenderScope.outdoorLandblockIds.has(part.owningLandblockId);
+function isAppearancePreviewPart(part: StaticRenderablePart): boolean {
+	return part.instanceId.startsWith("appearance-preview/");
 }
 
 function buildStagedStaticObjectDrawUnits({
@@ -311,7 +288,7 @@ function buildStagedStaticObjectDrawUnits({
 	detailTexturesEnabled: boolean;
 	indexedMaterialDataCache?: IndexedMaterialDataCache;
 	materialPlanCache?: StagedWorldMaterialPlanCache;
-}): StagedStaticDrawUnitAssembly[] {
+}): StagedAppearancePreviewDrawUnitAssembly[] {
 	return objectGroup.parts.flatMap((part) =>
 		deriveStagedStaticSurfaceKeys(assetState, part).flatMap((surfaceKey) =>
 			buildStagedStaticSurfaceDrawUnit({
@@ -355,7 +332,7 @@ function buildStagedStaticSurfaceDrawUnit({
 	detailTexturesEnabled: boolean;
 	indexedMaterialDataCache?: IndexedMaterialDataCache;
 	materialPlanCache?: StagedWorldMaterialPlanCache;
-}): StagedStaticDrawUnitAssembly[] {
+}): StagedAppearancePreviewDrawUnitAssembly[] {
 	const chunkOffset = chunkOffsetByKey.get(part.renderChunk.chunkKey);
 	if (!chunkOffset) {
 		return [];
@@ -381,8 +358,8 @@ function buildStagedStaticSurfaceDrawUnit({
 				indexedMaterialDataCache,
 				materialPlanCache,
 			})
-		: createFlatDebugStagedMaterial(
-				`static-staged/${batchKey}/${surfaceBatchKey}`,
+			: createFlatDebugStagedMaterial(
+				`appearance-preview-staged/${batchKey}/${surfaceBatchKey}`,
 			);
 	if (shouldDeferStagedMaterialPlan(material)) {
 		return [];
@@ -390,7 +367,7 @@ function buildStagedStaticSurfaceDrawUnit({
 	const materialKey =
 		material.kind === "direct-texture" ? material.textureKey : material.key;
 	const drawUnitId = [
-		"static-staged",
+		"appearance-preview-staged",
 		batchKey,
 		objectKey,
 		part.renderKey,
@@ -401,7 +378,7 @@ function buildStagedStaticSurfaceDrawUnit({
 	return [
 		{
 			id: drawUnitId,
-			kind: "static",
+			kind: "appearance-preview",
 			renderDomain: part.renderDomain,
 			owningLandblockId: part.owningLandblockId,
 			geometry,
@@ -634,7 +611,7 @@ function deriveStaticDrawUnitBvhBinding(
 		if (!itemKey) {
 			return {
 				itemKeys: [],
-				fallbackReason: `staged static draw unit ${drawUnitId} contains an unkeyed ${part.kind} part`,
+				fallbackReason: `appearance preview draw unit ${drawUnitId} contains an unkeyed ${part.kind} part`,
 			};
 		}
 		itemKeys.add(itemKey);
@@ -643,7 +620,7 @@ function deriveStaticDrawUnitBvhBinding(
 		itemKeys: [...itemKeys],
 		fallbackReason:
 			itemKeys.size === 0
-				? `staged static draw unit ${drawUnitId} contains no BVH item keys`
+				? `appearance preview draw unit ${drawUnitId} contains no BVH item keys`
 				: null,
 	};
 }

@@ -3,6 +3,7 @@ import { formatHex32 } from "../../../landblocks";
 import {
 	describeCompactedGeometryJobKey,
 	type CompactedGeometryBatch,
+	type CompactedGeometrySourceDrawUnit,
 } from "../../compaction/compacted-geometry";
 import type {
 	CompactionFamilyPlan,
@@ -17,7 +18,6 @@ import {
 	staticBatchGraphNodeKey,
 	type RendererResourceGraph,
 } from "../../renderer-resource-graph";
-import type { StagedWorldDrawUnitAssembly } from "../../staged-world-assembly";
 import { uniqueSortedStrings } from "../../staged-world-assembly";
 import {
 	createTexturePageAtlasPlacementsByEntryKey,
@@ -84,7 +84,7 @@ export function syncWebgl2CompactedGeometryResources({
 	gl: WebGL2RenderingContext;
 	store: Webgl2WorldResourceStore;
 	plan: CompactionFamilyPlan;
-	drawUnits: readonly StagedWorldDrawUnitAssembly[];
+	drawUnits: readonly CompactedGeometrySourceDrawUnit[];
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	rendererResourceGraph?: RendererResourceGraph;
 	indexedResourceAtlasPlan: IndexedResourceAtlasPlan;
@@ -359,7 +359,7 @@ function scheduleWebgl2CompactedGeometryBatchWorkerJob({
 }: {
 	store: Webgl2WorldResourceStore;
 	batchPlan: CompactedLandblockBatchPlan;
-	drawUnits: readonly StagedWorldDrawUnitAssembly[];
+	drawUnits: readonly CompactedGeometrySourceDrawUnit[];
 	schedulerKey: string;
 	retainedGeometryBatchKeys: Set<string>;
 	retainedFamilyResourceKeys: Set<string>;
@@ -608,7 +608,7 @@ export function createIndexedPalettedCompactedLandblockBatchPlans({
 	indexedResourceAtlasPlan,
 }: {
 	plan: CompactionFamilyPlan;
-	drawUnits: readonly StagedWorldDrawUnitAssembly[];
+	drawUnits: readonly CompactedGeometrySourceDrawUnit[];
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	indexedResourceAtlasPlan: IndexedResourceAtlasPlan;
 }): IndexedPalettedCompactedLandblockBatchPlan[] {
@@ -681,7 +681,7 @@ function createIndexedPalettedCompactedLandblockBatchPlan({
 	sourcePartition: CompactionFamilyPlan["renderFamilies"]["indexedPaletted"]["partitions"][number];
 	landblockId: number;
 	drawUnitIds: readonly string[];
-	drawUnits: readonly StagedWorldDrawUnitAssembly[];
+	drawUnits: readonly CompactedGeometrySourceDrawUnit[];
 	indexedResourceAtlasPlan: IndexedResourceAtlasPlan;
 }): {
 	materialTableRecords: readonly IndexedPalettedFamilyMaterialTableRecord[];
@@ -994,7 +994,7 @@ function createRgbaTexturePageCompactedLandblockBatchPlans({
 	renderChunkTransforms,
 }: {
 	plan: CompactionFamilyPlan;
-	drawUnits: readonly StagedWorldDrawUnitAssembly[];
+	drawUnits: readonly CompactedGeometrySourceDrawUnit[];
 	renderChunkTransforms: readonly RenderChunkTransform[];
 }): RgbaTexturePageCompactedLandblockBatchPlan[] {
 	const drawUnitById = new Map(
@@ -1062,7 +1062,7 @@ function createRgbaTexturePageCompactedLandblockBatchPlan({
 }: {
 	sourcePlan: CompactionFamilyPlan;
 	sourcePartition: CompactionFamilyPlan["renderFamilies"]["rgbaTexturePage"]["partitions"][number];
-	drawUnits: readonly StagedWorldDrawUnitAssembly[];
+	drawUnits: readonly CompactedGeometrySourceDrawUnit[];
 	landblockId: number;
 	drawUnitIds: readonly string[];
 }): CompactionFamilyPlan {

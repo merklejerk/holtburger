@@ -15,7 +15,7 @@ import {
 	type Webgl2VertexArrayResource,
 } from "./webgl2-gl";
 import {
-	buildStagedWorldSceneAssembly,
+	buildStagedAppearancePreviewSceneAssembly,
 	describeStagedWorldAssemblyGraphRecordSignature,
 	uniqueSortedStrings,
 	type StagedWorldAssemblyGraphRecord,
@@ -91,6 +91,7 @@ import {
 	type CompactionFamilyPlan,
 	type CompactionFamilyPlanningPolicy,
 } from "./compaction/compaction-family-planner";
+import type { CompactedGeometrySourceDrawUnit } from "./compaction/compacted-geometry";
 import {
 	createEmptyTexturePageAtlasPlan,
 	createTexturePageDetailAtlasPlacementsByEntryKey,
@@ -260,10 +261,10 @@ export interface Webgl2WorldResourceStore {
 	boundGraph: RendererResourceGraph | null;
 	terrainTileCount: number;
 	terrainDrawUnitCount: number;
-	staticDrawUnitCount: number;
-	stagedStaticObjectCount: number;
-	stagedStaticPartCount: number;
-	staticInstanceCount: number;
+	appearancePreviewDrawUnitCount: number;
+	appearancePreviewObjectCount: number;
+	appearancePreviewPartCount: number;
+	appearancePreviewInstanceCount: number;
 	materialCount: number;
 	directTextureDrawUnitCount: number;
 	materialFallbackReasonCount: number;
@@ -416,10 +417,10 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		boundGraph: null,
 		terrainTileCount: 0,
 		terrainDrawUnitCount: 0,
-		staticDrawUnitCount: 0,
-		stagedStaticObjectCount: 0,
-		stagedStaticPartCount: 0,
-		staticInstanceCount: 0,
+		appearancePreviewDrawUnitCount: 0,
+		appearancePreviewObjectCount: 0,
+		appearancePreviewPartCount: 0,
+		appearancePreviewInstanceCount: 0,
 		materialCount: 0,
 		directTextureDrawUnitCount: 0,
 		materialFallbackReasonCount: 0,
@@ -694,9 +695,9 @@ export function syncWebgl2WorldResources({
 	// the index buffer from whichever draw-unit VAO the previous frame left bound.
 	gl.bindVertexArray(null);
 	const assembly = profileBrowserJsScope(
-		"webgl2.resource.buildStagedWorldSceneAssembly",
+		"webgl2.resource.buildStagedAppearancePreviewSceneAssembly",
 		() =>
-			buildStagedWorldSceneAssembly({
+			buildStagedAppearancePreviewSceneAssembly({
 				assetState,
 				terrainScene,
 				staticRenderableScene,
@@ -706,7 +707,6 @@ export function syncWebgl2WorldResources({
 				detailTexturesEnabled,
 				indexedMaterialDataCache: store.indexedMaterialDataCache,
 				materialPlanCache: store.materialPlanCache,
-				excludedStaticRenderScope: deriveResidentStaticRenderScopeExclusion(store),
 			}),
 	);
 	const chunkOffsetByKey = new Map(
@@ -787,17 +787,17 @@ export function syncWebgl2WorldResources({
 	);
 	store.terrainTileCount = store.terrainTiles.length;
 	store.terrainDrawUnitCount = 0;
-	store.staticDrawUnitCount = store.drawUnits.filter(
-		(drawUnit) => drawUnit.kind === "static",
+	store.appearancePreviewDrawUnitCount = store.drawUnits.filter(
+		(drawUnit) => drawUnit.kind === "appearance-preview",
 	).length;
-	store.stagedStaticObjectCount = countUniqueStaticObjectKeys(store.drawUnits);
-	store.stagedStaticPartCount = countUniqueBvhItemKeys(
+	store.appearancePreviewObjectCount = countUniqueStaticObjectKeys(store.drawUnits);
+	store.appearancePreviewPartCount = countUniqueBvhItemKeys(
 		store.drawUnits.filter((drawUnit) =>
-			drawUnit.id.startsWith("static-staged/"),
+			drawUnit.id.startsWith("appearance-preview-staged/"),
 		),
 	);
-	store.staticInstanceCount = countUniqueBvhItemKeys(
-		store.drawUnits.filter((drawUnit) => drawUnit.kind === "static"),
+	store.appearancePreviewInstanceCount = countUniqueBvhItemKeys(
+		store.drawUnits.filter((drawUnit) => drawUnit.kind === "appearance-preview"),
 	);
 	store.materialCount = new Set(
 		store.drawUnits.map((drawUnit) => drawUnit.materialKey),
@@ -1057,12 +1057,15 @@ export function syncWebgl2WorldResources({
 		gl,
 		store,
 		plan: store.compactionFamilyPlan,
-		drawUnits: assembly.drawUnits,
+		drawUnits: EMPTY_COMPACTED_GEOMETRY_DRAW_UNITS,
 		renderChunkTransforms,
 		rendererResourceGraph,
 		indexedResourceAtlasPlan: store.indexedResourceAtlasPlan,
 	});
 }
+
+const EMPTY_COMPACTED_GEOMETRY_DRAW_UNITS: readonly CompactedGeometrySourceDrawUnit[] =
+	[];
 
 export function destroyWebgl2WorldResources(
 	store: Webgl2WorldResourceStore,
@@ -1126,10 +1129,10 @@ export function destroyWebgl2WorldResources(
 	store.boundGraph = null;
 	store.terrainTileCount = 0;
 	store.terrainDrawUnitCount = 0;
-	store.staticDrawUnitCount = 0;
-	store.stagedStaticObjectCount = 0;
-	store.stagedStaticPartCount = 0;
-	store.staticInstanceCount = 0;
+	store.appearancePreviewDrawUnitCount = 0;
+	store.appearancePreviewObjectCount = 0;
+	store.appearancePreviewPartCount = 0;
+	store.appearancePreviewInstanceCount = 0;
 	store.materialCount = 0;
 	store.directTextureDrawUnitCount = 0;
 	store.materialFallbackReasonCount = 0;
@@ -1213,50 +1216,6 @@ export function destroyWebgl2WorldResources(
 	store.preparedTextureUploadCount = 0;
 	store.preparedTextureGeneratedByteLength = 0;
 	store.triangleCount = 0;
-}
-
-function deriveResidentStaticRenderScopeExclusion(
-	store: Webgl2WorldResourceStore,
-): {
-	outdoorLandblockIds: ReadonlySet<number>;
-	envCellIds: ReadonlySet<number>;
-} {
-	const bundleKindsByLandblockId = new Map<number, Set<string>>();
-	const envCellIds = new Set<number>();
-	for (const layer of store.staticBundleLayerResources.layersByKey.values()) {
-		if (layer.scope.kind === "env-cell") {
-			envCellIds.add(layer.scope.envCellId);
-			continue;
-		}
-		if (
-			layer.bundleKind !== "outdoor-buildings" &&
-			layer.bundleKind !== "outdoor-detail"
-		) {
-			continue;
-		}
-		const bundleKinds = bundleKindsByLandblockId.get(layer.landblockId);
-		if (bundleKinds) {
-			bundleKinds.add(layer.bundleKind);
-		} else {
-			bundleKindsByLandblockId.set(
-				layer.landblockId,
-				new Set([layer.bundleKind]),
-			);
-		}
-	}
-	const landblockIds = new Set<number>();
-	for (const [landblockId, bundleKinds] of bundleKindsByLandblockId) {
-		if (
-			bundleKinds.has("outdoor-buildings") &&
-			bundleKinds.has("outdoor-detail")
-		) {
-			landblockIds.add(landblockId);
-		}
-	}
-	return {
-		outdoorLandblockIds: landblockIds,
-		envCellIds,
-	};
 }
 
 function createEmptyCompactedGeometryWorkerSchedulerMetrics(): CompactedGeometryWorkerSchedulerMetrics {
@@ -2790,7 +2749,7 @@ function deriveWebgl2DrawUnitSceneDomain(
 	drawUnit: Webgl2DrawUnitAssembly,
 ): Webgl2SceneDomain | null {
 	switch (drawUnit.kind) {
-		case "static":
+		case "appearance-preview":
 			return drawUnit.renderDomain === WORLD_RENDER_DOMAIN.interiorStatic
 				? "interior"
 				: "exterior";
@@ -2803,8 +2762,7 @@ function resolveAtlasCompactionLandblockId(
 	drawUnit: Webgl2DrawUnitAssembly,
 ): number | null {
 	switch (drawUnit.kind) {
-		case "static":
-			return drawUnit.owningLandblockId;
+		case "appearance-preview":
 		case "portal-mask":
 			return null;
 	}
@@ -3670,15 +3628,15 @@ function collectCompactionCoverageMetrics(
 		const alphaPolicy = drawUnit.compactionEligibility.material.alphaPolicy;
 		const materialFamilyAlphaPolicy = `${materialFamily}|alpha=${alphaPolicy}`;
 		incrementCount(drawUnitCounts, "total");
-		if (drawUnit.kind === "static") {
-			incrementCount(drawUnitCounts, "static-total");
+		if (drawUnit.kind === "appearance-preview") {
+			incrementCount(drawUnitCounts, "appearance-preview-total");
 		}
 		if (drawUnit.compactionEligibility.decision === "compacted") {
 			incrementCount(drawUnitCounts, "compacted-compatible");
 		} else {
 			incrementCount(drawUnitCounts, "retained-direct");
-			if (drawUnit.kind === "static") {
-				incrementCount(drawUnitCounts, "static-retained-direct");
+			if (drawUnit.kind === "appearance-preview") {
+				incrementCount(drawUnitCounts, "appearance-preview-retained-direct");
 			}
 			retainedDirectMaterialFamilies.push(materialFamily);
 			retainedDirectMaterialFamilyAlphaPolicies.push(materialFamilyAlphaPolicy);

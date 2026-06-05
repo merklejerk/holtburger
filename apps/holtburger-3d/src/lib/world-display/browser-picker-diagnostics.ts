@@ -3,8 +3,8 @@ import { formatHex32 } from "../landblocks";
 import type { RenderChunkTransform } from "./render-anchor";
 import type { StaticRenderableSceneModel } from "./static-renderables";
 import {
-	buildStagedStaticDrawUnitAssemblies,
-	type StagedStaticDrawUnitAssembly,
+	buildStagedAppearancePreviewDrawUnitAssemblies,
+	type StagedAppearancePreviewDrawUnitAssembly,
 } from "./staged-world-assembly";
 import type { StagedWorldMaterialPlan } from "./staged-world-materials";
 
@@ -107,7 +107,7 @@ export function deriveBrowserStaticRenderablePickDiagnostic(options: {
 			transform.offset,
 		]),
 	);
-	const drawUnits = buildStagedStaticDrawUnitAssemblies({
+	const drawUnits = buildStagedAppearancePreviewDrawUnitAssemblies({
 		assetState: options.assetState,
 		chunkOffsetByKey,
 		staticRenderableScene: {
@@ -176,7 +176,7 @@ export function summarizeUvBuffer(
 }
 
 function describeStaticDrawUnit(
-	drawUnit: StagedStaticDrawUnitAssembly,
+	drawUnit: StagedAppearancePreviewDrawUnitAssembly,
 ): BrowserStaticDrawUnitDiagnostic {
 	return {
 		drawUnitId: drawUnit.id,

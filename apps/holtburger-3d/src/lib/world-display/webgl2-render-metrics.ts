@@ -145,24 +145,24 @@ export function createWebgl2RenderMetrics(
 				input.worldStore?.terrainAtlasCandidateCount ?? 0,
 			terrainAtlasBlockerTileCount:
 				input.worldStore?.terrainAtlasBlockerTileCount ?? 0,
-			staticGroupMeshCount: input.worldStore?.staticDrawUnitCount ?? 0,
+			staticGroupMeshCount: input.worldStore?.appearancePreviewDrawUnitCount ?? 0,
 			visibleStaticGroupMeshCount:
-				(input.frameMetrics?.visibleDrawCountsByCategory["static-staged"] ??
+				(input.frameMetrics?.visibleDrawCountsByCategory["appearance-preview-staged"] ??
 					0) + (input.frameMetrics?.visibleDrawCountsByCategory.static ?? 0),
-			staticRenderBatchCount: input.worldStore?.staticDrawUnitCount ?? 0,
+			staticRenderBatchCount: input.worldStore?.appearancePreviewDrawUnitCount ?? 0,
 			staticBvhCandidateBatchCount:
-				(input.frameMetrics?.candidateCountsByCategory["static-staged"] ?? 0) +
+				(input.frameMetrics?.candidateCountsByCategory["appearance-preview-staged"] ?? 0) +
 				(input.frameMetrics?.candidateCountsByCategory.static ?? 0),
 			staticBvhRepresentedInstanceKeyCount:
 				(input.frameMetrics?.representedItemKeyCountsByCategory[
-					"static-staged"
+					"appearance-preview-staged"
 				] ?? 0) +
 				(input.frameMetrics?.representedItemKeyCountsByCategory.static ?? 0),
 			staticBvhVisibleInstanceKeyCount:
-				(input.frameMetrics?.visibleDrawCountsByCategory["static-staged"] ??
+				(input.frameMetrics?.visibleDrawCountsByCategory["appearance-preview-staged"] ??
 					0) + (input.frameMetrics?.visibleDrawCountsByCategory.static ?? 0),
 			staticBvhFallbackIncludedBatchCount:
-				(input.frameMetrics?.fallbackCountsByCategory["static-staged"] ?? 0) +
+				(input.frameMetrics?.fallbackCountsByCategory["appearance-preview-staged"] ?? 0) +
 				(input.frameMetrics?.fallbackCountsByCategory.static ?? 0),
 			terrainRenderBatchCount: input.worldStore?.terrainTileCount ?? 0,
 			terrainBvhCandidateBatchCount:
@@ -218,14 +218,14 @@ export function createWebgl2RenderMetrics(
 			terrainBvhTotalItemCount:
 				input.frameMetrics?.candidateCountsByCategory.terrain ?? 0,
 			outdoorStaticBvhVisibleItemCount:
-				input.frameMetrics?.visibleDrawCountsByCategory["static-staged"] ?? 0,
+				input.frameMetrics?.visibleDrawCountsByCategory["appearance-preview-staged"] ?? 0,
 			outdoorStaticBvhTotalItemCount:
-				input.frameMetrics?.candidateCountsByCategory["static-staged"] ?? 0,
+				input.frameMetrics?.candidateCountsByCategory["appearance-preview-staged"] ?? 0,
 			envCellLocalBvhVisibleItemCount:
 				input.frameMetrics?.visibleItemKeyCount ?? 0,
 			envCellLocalBvhTotalItemCount:
 				input.frameMetrics?.representedItemKeyCount ?? 0,
-			visibleStaticInstanceKeyCount: input.worldStore?.staticInstanceCount ?? 0,
+			visibleStaticInstanceKeyCount: input.worldStore?.appearancePreviewInstanceCount ?? 0,
 			visiblePortalKeyCount: 0,
 			envCellBvhConsideredCount: 0,
 			fallbackReasonCount:
@@ -500,9 +500,9 @@ export function createWebgl2RenderMetrics(
 					.committedResultCount ?? 0,
 			indexedResourceAtlasWorkerErrorCount:
 				input.worldStore?.indexedResourceAtlasWorkerMetrics.errorCount ?? 0,
-			staticGeometryGroupCount: input.worldStore?.staticDrawUnitCount ?? 0,
+			staticGeometryGroupCount: input.worldStore?.appearancePreviewDrawUnitCount ?? 0,
 			staticVisibleGeometryGroupCount:
-				(input.frameMetrics?.visibleDrawCountsByCategory["static-staged"] ??
+				(input.frameMetrics?.visibleDrawCountsByCategory["appearance-preview-staged"] ??
 					0) + (input.frameMetrics?.visibleDrawCountsByCategory.static ?? 0),
 			structuredInteriorGeometryGroupCount:
 				input.worldStore?.structuredInteriorResourceCount ?? 0,

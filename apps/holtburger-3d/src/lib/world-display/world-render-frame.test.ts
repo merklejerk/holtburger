@@ -44,9 +44,9 @@ describe("buildWorldRenderFrame", () => {
 			assetState: createInitialAssetChannelState(),
 			candidates: [
 				createBatch({
-					id: "static-staged/world|landblock/0203ffff|debug-flat/object-b",
-					kind: "static",
-					fallbackReason: "test staged static fallback",
+					id: "appearance-preview-staged/world|landblock/0203ffff|debug-flat/object-b",
+					kind: "appearance-preview",
+					fallbackReason: "test appearance preview fallback",
 				}),
 				createBatch({
 					id: "terrain/fallback",
@@ -72,14 +72,14 @@ describe("buildWorldRenderFrame", () => {
 			{
 				kind: "draw-unit",
 				drawUnitId:
-					"static-staged/world|landblock/0203ffff|debug-flat/object-b",
-				category: "static-staged",
+					"appearance-preview-staged/world|landblock/0203ffff|debug-flat/object-b",
+				category: "appearance-preview-staged",
 			},
 		]);
 		expect(frame.metrics.candidateBatchCount).toBe(2);
 		expect(frame.metrics.unboundFallbackBatchCount).toBe(2);
 		expect(frame.metrics.visibleDrawCountsByCategory.terrain).toBe(1);
-		expect(frame.metrics.visibleDrawCountsByCategory["static-staged"]).toBe(1);
+		expect(frame.metrics.visibleDrawCountsByCategory["appearance-preview-staged"]).toBe(1);
 	});
 
 	it("keeps terrain tile resources visible without creating draw-unit refs", () => {

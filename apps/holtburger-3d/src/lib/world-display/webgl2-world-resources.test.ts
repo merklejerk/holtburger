@@ -59,7 +59,7 @@ import {
 	type Webgl2WorldResourceStore,
 } from "./webgl2-world-resources";
 import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
-import type { StaticLandblockRenderBundleLayer } from "./static-bundle-layer";
+import type { StaticObjectBundleArtifact } from "./static-bundle-layer";
 import {
 	createIndexedPalettedCompactedLandblockBatchPlans,
 	shouldRetainWebgl2CompactedGeometryBatch,
@@ -227,7 +227,7 @@ describe("webgl2 world resources", () => {
 					layers: [
 						createStaticBundleLayer("static-layer/buildings", "revision-a", {
 							landblockId,
-							layerKind: "outdoor-buildings",
+							bundleKind: "outdoor-buildings",
 						}),
 					],
 				}),
@@ -237,7 +237,7 @@ describe("webgl2 world resources", () => {
 					layers: [
 						createStaticBundleLayer("static-layer/env-cell", "revision-a", {
 							landblockId,
-							layerKind: "env-cell-static",
+							bundleKind: "env-cell-static",
 						}),
 					],
 				}),
@@ -269,7 +269,7 @@ describe("webgl2 world resources", () => {
 					layers: [
 						createStaticBundleLayer("static-layer/dungeon-env", "revision-a", {
 							landblockId,
-							layerKind: "env-cell-static",
+							bundleKind: "env-cell-static",
 						}),
 					],
 				}),
@@ -356,11 +356,11 @@ describe("webgl2 world resources", () => {
 			artifacts: createStaticLandblockArtifactSnapshot([
 				createStaticBundleLayer("static-layer/buildings", "revision-a", {
 					landblockId,
-					layerKind: "outdoor-buildings",
+					bundleKind: "outdoor-buildings",
 				}),
 				createStaticBundleLayer("static-layer/detail", "revision-a", {
 					landblockId,
-					layerKind: "outdoor-detail",
+					bundleKind: "outdoor-detail",
 				}),
 			]),
 		});
@@ -2849,7 +2849,7 @@ function sortAtlasBatchesByLandblock(store: Webgl2WorldResourceStore) {
 }
 
 function createStaticLandblockArtifactSnapshot(
-	layers: readonly StaticLandblockRenderBundleLayer[],
+	layers: readonly StaticObjectBundleArtifact[],
 ): StaticLandblockRenderArtifactStoreSnapshot {
 	const landblockId = layers[0]?.landblockId ?? 0x1234;
 	return createStaticLandblockProductArtifactSnapshot([
@@ -2885,9 +2885,41 @@ function createStaticLandblockProductArtifact({
 }: {
 	landblockId: number;
 	product: LandblockRenderProductWorkerResult["product"];
-	layers: readonly StaticLandblockRenderBundleLayer[];
+	layers: readonly StaticObjectBundleArtifact[];
 }): LandblockRenderProductWorkerResult {
-	const base = {
+	const artifacts: LandblockRenderProductWorkerResult["artifacts"] =
+		product === "outdoor"
+			? layers
+			: [
+					...layers,
+					{
+						artifactKind: "detailed-landblock",
+						key: `detailed:${landblockId}:${product}`,
+						landblockId,
+						product,
+						requestId: "request",
+						buildPolicyRevision: "build:v1",
+						texturePagePolicyRevision: "pages:v1",
+						selectedEnvCellIds: [],
+						structuredInteriorCells: [],
+						cellStructureMetadata: [],
+						portalLinks: [],
+						portalApertures: [],
+						visibility: {
+							objectVisibilityRecords: [],
+							cellVisibilityRecords: [],
+						},
+						spatial: {
+							envCellResidencyBvh: {
+								coordinateSpace: "landblock-topology-residency",
+								nodes: [],
+								items: [],
+							},
+							envCellLocalBvhs: [],
+						},
+					},
+				];
+	return {
 		type: "landblock-render-product-built" as const,
 		jobId: `job:${landblockId}:${product}`,
 		landblockId,
@@ -2895,43 +2927,10 @@ function createStaticLandblockProductArtifact({
 		requestId: "request",
 		buildPolicyRevision: "build:v1",
 		texturePagePolicyRevision: "pages:v1",
-		terrainArtifact: null,
-		staticBundleLayers: layers,
+		artifacts,
 		diagnostics: {
 			status: "ready" as const,
 			messages: [],
-		},
-	};
-	if (product === "outdoor") {
-		return base;
-	}
-	return {
-		...base,
-		product,
-		detailedArtifacts: {
-			key: `detailed:${landblockId}:${product}`,
-			landblockId,
-			product,
-			requestId: "request",
-			buildPolicyRevision: "build:v1",
-			texturePagePolicyRevision: "pages:v1",
-			selectedEnvCellIds: [],
-			structuredInteriorCells: [],
-			cellStructureMetadata: [],
-			portalLinks: [],
-			portalApertures: [],
-			visibility: {
-				objectVisibilityRecords: [],
-				cellVisibilityRecords: [],
-			},
-			spatial: {
-				envCellResidencyBvh: {
-					coordinateSpace: "landblock-topology-residency",
-					nodes: [],
-					items: [],
-				},
-				envCellLocalBvhs: [],
-			},
 		},
 	};
 }
@@ -2941,20 +2940,21 @@ function createStaticBundleLayer(
 	sourceRevision: string,
 	options: {
 		landblockId?: number;
-		layerKind?: StaticLandblockRenderBundleLayer["layerKind"];
+		bundleKind?: StaticObjectBundleArtifact["bundleKind"];
 	} = {},
-): StaticLandblockRenderBundleLayer {
+): StaticObjectBundleArtifact {
 	const landblockId = options.landblockId ?? 0x1234;
-	const layerKind = options.layerKind ?? "outdoor-buildings";
+	const bundleKind = options.bundleKind ?? "outdoor-buildings";
 	return {
+		artifactKind: "static-object-bundle",
 		key,
 		scope: {
 			kind: "landblock",
 			landblockId,
-			layerKind,
+			bundleKind,
 		},
 		landblockId,
-		layerKind,
+		bundleKind,
 		sourceRevision,
 		rootAssetIds: ["landblock/00001234/outdoor"],
 		preparedAssetIds: [],
@@ -3016,7 +3016,7 @@ function createStaticBundleLayer(
 		texturePages: [
 			{
 				key: "texture-page",
-				scopeKey: `landblock:${landblockId}:${layerKind}`,
+				scopeKey: `landblock:${landblockId}:${bundleKind}`,
 				pageKind: "single-entry",
 				usageBucket: "base-color",
 				sampleClass: "rgba-color",
@@ -3230,6 +3230,7 @@ function createTerrainArtifactFixture({
 	}
 	return {
 		type: "landblock-terrain-render-artifact",
+		artifactKind: "terrain",
 		key: "terrain-artifact/12340000",
 		requestId: "request",
 		landblockId: 0x12340000,

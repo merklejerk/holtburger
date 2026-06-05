@@ -19,6 +19,7 @@ import {
 	deriveBrowserWorldDisplayModel,
 	type BrowserWorldDisplayModel,
 } from "./model";
+import { getStaticObjectBundleArtifacts } from "./landblock-render-product";
 import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
 import {
 	deriveWorldDebugOverlayModel,
@@ -1197,7 +1198,7 @@ function describeStaticLandblockRenderArtifactSurfaceSignature(
 	return [
 		...snapshot.latestDesiredIdentityKeys,
 		...snapshot.artifacts.flatMap((artifact) =>
-			artifact.staticBundleLayers.map((layer) =>
+			getStaticObjectBundleArtifacts(artifact).map((layer) =>
 				[
 					artifact.landblockId,
 					artifact.product,

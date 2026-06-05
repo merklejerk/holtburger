@@ -12,7 +12,7 @@ import {
 } from "../landblocks";
 import type { StaticBundleLayerWorkerJob } from "./static-bundle-layer";
 import {
-	buildStaticLandblockRenderBundleLayer,
+	buildStaticObjectBundleArtifact,
 	collectWorkerPreparedDependencyIds,
 } from "./static-bundle-layer-builder";
 
@@ -43,7 +43,7 @@ describe("static bundle layer builder", () => {
 			createPreparedTexture(0x06000003, "detail", [64, 255, 255, 255]),
 		];
 
-		const layer = buildStaticLandblockRenderBundleLayer({
+		const layer = buildStaticObjectBundleArtifact({
 			job,
 			preparedAssets,
 			policy: createPolicy(),
@@ -132,12 +132,12 @@ describe("static bundle layer builder", () => {
 			createPreparedTexture(0x06000003, "detail", [64, 255, 255, 255]),
 		];
 
-		const first = buildStaticLandblockRenderBundleLayer({
+		const first = buildStaticObjectBundleArtifact({
 			job,
 			preparedAssets,
 			policy: createPolicy("texture-pages:v1"),
 		});
-		const second = buildStaticLandblockRenderBundleLayer({
+		const second = buildStaticObjectBundleArtifact({
 			job: {
 				...job,
 				cpuTexturePagePolicyRevision: "texture-pages:v1",
@@ -168,7 +168,7 @@ describe("static bundle layer builder", () => {
 			createPalette("palette/04000011"),
 		];
 
-		const layer = buildStaticLandblockRenderBundleLayer({
+		const layer = buildStaticObjectBundleArtifact({
 			job,
 			preparedAssets,
 			policy: createPolicy(),
@@ -245,7 +245,7 @@ describe("static bundle layer builder", () => {
 			createPreparedTexture(0x06000013, "detail", [255, 128, 64, 255]),
 		];
 
-		const layer = buildStaticLandblockRenderBundleLayer({
+		const layer = buildStaticObjectBundleArtifact({
 			job,
 			preparedAssets,
 			policy: createPolicy(),
@@ -284,7 +284,7 @@ describe("static bundle layer builder", () => {
 			createPalette("palette/04000013", 258),
 		];
 
-		const layer = buildStaticLandblockRenderBundleLayer({
+		const layer = buildStaticObjectBundleArtifact({
 			job,
 			preparedAssets,
 			policy: createPolicy(),
@@ -318,7 +318,7 @@ describe("static bundle layer builder", () => {
 		];
 
 		expect(() =>
-			buildStaticLandblockRenderBundleLayer({
+			buildStaticObjectBundleArtifact({
 				job: createBuildJob(landblockId),
 				preparedAssets,
 				policy: createPolicy(),
@@ -356,7 +356,7 @@ function createBuildJob(landblockId: number): StaticBundleLayerWorkerJob {
 		scope: {
 			kind: "landblock",
 			landblockId,
-			layerKind: "outdoor-detail",
+			bundleKind: "outdoor-detail",
 		},
 		rootAssetIds: [formatLandblockOutdoorAssetId(landblockId)],
 		sourceRevision: "revision:roots",

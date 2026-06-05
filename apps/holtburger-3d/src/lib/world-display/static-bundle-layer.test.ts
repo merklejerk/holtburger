@@ -14,29 +14,29 @@ import type {
 	StaticBundleEnvCellTopologyDiscoveryResult,
 	StaticBundleLayerWorkerResult,
 	StaticLandblockBundleLayerDiagnostics,
-	StaticLandblockBundleLayerKind,
-	StaticLandblockRenderBundleLayer,
+	StaticObjectBundleKind,
+	StaticObjectBundleArtifact,
 	VirtualTexturePageRef,
 	VirtualTexturePageSampleClass,
 	VirtualTexturePageUsageBucket,
 } from "./static-bundle-layer";
-import { formatStaticBundleLayerScopeKey } from "./static-bundle-layer";
+import { formatStaticObjectBundleScopeKey } from "./static-bundle-layer";
 
 describe("static bundle layer contract", () => {
 	it("formats stable layer scope keys for landblock and env-cell layers", () => {
 		expect(
-			formatStaticBundleLayerScopeKey({
+			formatStaticObjectBundleScopeKey({
 				kind: "landblock",
 				landblockId: 0xda55ffff,
-				layerKind: "outdoor-buildings",
+				bundleKind: "outdoor-buildings",
 			}),
 		).toBe("landblock:3663069183:outdoor-buildings");
 		expect(
-			formatStaticBundleLayerScopeKey({
+			formatStaticObjectBundleScopeKey({
 				kind: "env-cell",
 				landblockId: 0xda55ffff,
 				envCellId: 0xda550155,
-				layerKind: "env-cell-static",
+				bundleKind: "env-cell-static",
 			}),
 		).toBe("env-cell:3663069183:3663003989:env-cell-static");
 	});
@@ -44,7 +44,7 @@ describe("static bundle layer contract", () => {
 	it("represents compacted, direct, texture, and optional metadata outputs", () => {
 		const usageBucket: VirtualTexturePageUsageBucket = "base-color";
 		const sampleClass: VirtualTexturePageSampleClass = "rgba-color";
-		const layerKind: StaticLandblockBundleLayerKind = "outdoor-detail";
+		const bundleKind: StaticObjectBundleKind = "outdoor-detail";
 		const texturePageRef: VirtualTexturePageRef = {
 			key: "texture:06000001",
 			sourceAssetId: "prepared-texture/06000001?usage=raw",
@@ -138,15 +138,16 @@ describe("static bundle layer contract", () => {
 			missingAssetIds: [],
 			skippedReasons: [],
 		};
-		const layer: StaticLandblockRenderBundleLayer = {
+		const layer: StaticObjectBundleArtifact = {
+			artifactKind: "static-object-bundle",
 			key: "layer:detail",
 			scope: {
 				kind: "landblock",
 				landblockId: 0xda55ffff,
-				layerKind,
+				bundleKind,
 			},
 			landblockId: 0xda55ffff,
-			layerKind,
+			bundleKind,
 			sourceRevision: "revision:0",
 			rootAssetIds: ["landblock/da55ffff/outdoor"],
 			preparedAssetIds: ["landblock/da55ffff/outdoor"],
@@ -174,7 +175,7 @@ describe("static bundle layer contract", () => {
 			scope: {
 				kind: "landblock",
 				landblockId: 0xda55ffff,
-				layerKind: "outdoor-buildings",
+				bundleKind: "outdoor-buildings",
 			},
 			rootAssetIds: ["landblock/da55ffff/outdoor"],
 			sourceRevision: "revision:roots",
@@ -199,7 +200,7 @@ describe("static bundle layer contract", () => {
 						kind: "env-cell",
 						landblockId: 0xda55ffff,
 						envCellId: 0xda550155,
-						layerKind: "env-cell-static",
+						bundleKind: "env-cell-static",
 					},
 					rootAssetIds: ["env-cell/da550155", "landblock/da55ffff/topology"],
 					topologyDependencyAssetIds: ["landblock/da55ffff/topology"],
@@ -219,7 +220,7 @@ describe("static bundle layer contract", () => {
 				key: "layer:buildings",
 				scope: buildJob.scope,
 				landblockId: 0xda55ffff,
-				layerKind: "outdoor-buildings",
+				bundleKind: "outdoor-buildings",
 				sourceRevision: buildJob.sourceRevision,
 				rootAssetIds: buildJob.rootAssetIds,
 				preparedAssetIds: buildJob.rootAssetIds,
@@ -242,7 +243,7 @@ describe("static bundle layer contract", () => {
 		};
 
 		expect(buildJob.rootAssetIds).toEqual(["landblock/da55ffff/outdoor"]);
-		expect(topologyResult.discoveredScopes[0]?.scope.layerKind).toBe(
+		expect(topologyResult.discoveredScopes[0]?.scope.bundleKind).toBe(
 			"env-cell-static",
 		);
 		expect(workerResult.bundleLayer.rootAssetIds).toEqual(

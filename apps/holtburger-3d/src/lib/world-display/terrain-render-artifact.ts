@@ -44,6 +44,7 @@ export interface BuildTerrainRenderArtifactOptions {
 
 export interface LandblockTerrainRenderArtifact {
 	type: "landblock-terrain-render-artifact";
+	artifactKind: "terrain";
 	key: string;
 	requestId: string;
 	landblockId: number;
@@ -147,6 +148,7 @@ export function buildLandblockTerrainRenderArtifact({
 
 	return {
 		type: "landblock-terrain-render-artifact",
+		artifactKind: "terrain",
 		key: [
 			"terrain-artifact",
 			outdoor.landblockId,

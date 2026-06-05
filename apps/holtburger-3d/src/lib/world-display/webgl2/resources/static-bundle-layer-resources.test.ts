@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { StaticLandblockRenderBundleLayer } from "../../static-bundle-layer";
+import type { StaticObjectBundleArtifact } from "../../static-bundle-layer";
 import {
 	createWebgl2StaticBundleLayerResourceStore,
 	destroyWebgl2StaticBundleLayerResources,
@@ -227,17 +227,18 @@ describe("static bundle layer WebGL2 resources", () => {
 });
 
 function createLayer(
-	overrides: Partial<StaticLandblockRenderBundleLayer> = {},
-): StaticLandblockRenderBundleLayer {
+	overrides: Partial<StaticObjectBundleArtifact> = {},
+): StaticObjectBundleArtifact {
 	return {
+		artifactKind: "static-object-bundle",
 		key: "static-layer",
 		scope: {
 			kind: "landblock",
 			landblockId: 0x1234,
-			layerKind: "outdoor-buildings",
+			bundleKind: "outdoor-buildings",
 		},
 		landblockId: 0x1234,
-		layerKind: "outdoor-buildings",
+		bundleKind: "outdoor-buildings",
 		sourceRevision: "revision-a",
 		rootAssetIds: ["landblock/00001234/outdoor"],
 		preparedAssetIds: [],

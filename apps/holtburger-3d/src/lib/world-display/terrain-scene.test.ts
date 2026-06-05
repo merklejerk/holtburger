@@ -104,8 +104,7 @@ function createResult(
 		requestId: "request",
 		buildPolicyRevision: "build:v1",
 		texturePagePolicyRevision: "pages:v1",
-		terrainArtifact: createTerrainArtifact(landblockId, artifactKey),
-		staticBundleLayers: [],
+		artifacts: [createTerrainArtifact(landblockId, artifactKey)],
 		diagnostics: {
 			status: "ready",
 			messages: [],
@@ -124,33 +123,34 @@ function createTopologyResult(
 		requestId: "request",
 		buildPolicyRevision: "build:v1",
 		texturePagePolicyRevision: "pages:v1",
-		terrainArtifact: null,
-		staticBundleLayers: [],
-		detailedArtifacts: {
-			key: `detailed:${landblockId}`,
-			landblockId,
-			product: "outdoor-env-cells",
-			requestId: "request",
-			buildPolicyRevision: "build:v1",
-			texturePagePolicyRevision: "pages:v1",
-			selectedEnvCellIds: [],
-			structuredInteriorCells: [],
-			cellStructureMetadata: [],
-			portalLinks: [],
-			portalApertures: [],
-			visibility: {
-				objectVisibilityRecords: [],
-				cellVisibilityRecords: [],
-			},
-			spatial: {
-				envCellResidencyBvh: {
-					coordinateSpace: "landblock-topology-residency",
-					nodes: [],
-					items: [],
+		artifacts: [
+			{
+				artifactKind: "detailed-landblock",
+				key: `detailed:${landblockId}`,
+				landblockId,
+				product: "outdoor-env-cells",
+				requestId: "request",
+				buildPolicyRevision: "build:v1",
+				texturePagePolicyRevision: "pages:v1",
+				selectedEnvCellIds: [],
+				structuredInteriorCells: [],
+				cellStructureMetadata: [],
+				portalLinks: [],
+				portalApertures: [],
+				visibility: {
+					objectVisibilityRecords: [],
+					cellVisibilityRecords: [],
 				},
-				envCellLocalBvhs: [],
+				spatial: {
+					envCellResidencyBvh: {
+						coordinateSpace: "landblock-topology-residency",
+						nodes: [],
+						items: [],
+					},
+					envCellLocalBvhs: [],
+				},
 			},
-		},
+		],
 		diagnostics: {
 			status: "ready",
 			messages: [],
@@ -165,6 +165,7 @@ function createTerrainArtifact(
 	const mesh = createMesh(landblockId);
 	return {
 		type: "landblock-terrain-render-artifact",
+		artifactKind: "terrain",
 		key,
 		requestId: "request",
 		landblockId,

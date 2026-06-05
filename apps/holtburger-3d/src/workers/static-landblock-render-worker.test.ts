@@ -11,7 +11,12 @@ import {
 	formatRegionRenderProfileAssetId,
 	formatTerrainMaterialAssetId,
 } from "../lib/landblocks";
-import type { LandblockRenderProductWorkerJob } from "../lib/world-display/landblock-render-product";
+import {
+	getDetailedLandblockRenderArtifacts,
+	getLandblockTerrainRenderArtifact,
+	getStaticObjectBundleArtifacts,
+	type LandblockRenderProductWorkerJob,
+} from "../lib/world-display/landblock-render-product";
 import {
 	collectStaticLandblockRenderWorkerResultTransferables,
 	runStaticLandblockRenderWorkerJob,
@@ -63,11 +68,12 @@ describe("static landblock render worker", () => {
 			formatLandblockTopologyAssetId(landblockId),
 		);
 		expect(result.product).toBe("outdoor");
-		expect(result.terrainArtifact?.landblockId).toBe(landblockId);
-		expect(result.staticBundleLayers.map((layer) => layer.layerKind)).toEqual([
-			"outdoor-buildings",
-			"outdoor-detail",
-		]);
+		expect(getLandblockTerrainRenderArtifact(result)?.landblockId).toBe(
+			landblockId,
+		);
+		expect(
+			getStaticObjectBundleArtifacts(result).map((layer) => layer.bundleKind),
+		).toEqual(["outdoor-buildings", "outdoor-detail"]);
 	});
 
 	it("builds an outdoor-env-cells product without loading outdoor roots", async () => {
@@ -119,14 +125,15 @@ describe("static landblock render worker", () => {
 			buildPolicyRevision: "build:v1",
 			texturePagePolicyRevision: "texture-pages:v1",
 		});
-		expect(result.terrainArtifact).toBeNull();
-		expect(result.staticBundleLayers.map((layer) => layer.layerKind)).toEqual([
-			"env-cell-static",
-		]);
-		expect(result.detailedArtifacts.selectedEnvCellIds).toEqual([0xda550100]);
-		expect(result.detailedArtifacts.structuredInteriorCells).toHaveLength(1);
-		expect(result.detailedArtifacts.portalApertures).toHaveLength(1);
-		expect(result.detailedArtifacts.visibility.cellVisibilityRecords).toEqual([
+		const detailedArtifacts = getDetailedLandblockRenderArtifacts(result);
+		expect(getLandblockTerrainRenderArtifact(result)).toBeNull();
+		expect(
+			getStaticObjectBundleArtifacts(result).map((layer) => layer.bundleKind),
+		).toEqual(["env-cell-static"]);
+		expect(detailedArtifacts?.selectedEnvCellIds).toEqual([0xda550100]);
+		expect(detailedArtifacts?.structuredInteriorCells).toHaveLength(1);
+		expect(detailedArtifacts?.portalApertures).toHaveLength(1);
+		expect(detailedArtifacts?.visibility.cellVisibilityRecords).toEqual([
 			{
 				envCellId: 0xda550100,
 				visibilityKeys: [
@@ -136,17 +143,20 @@ describe("static landblock render worker", () => {
 				visibleEnvCellIds: [0xda550101],
 			},
 		]);
+		expect(detailedArtifacts?.spatial.envCellResidencyBvh.coordinateSpace).toBe(
+			"landblock-topology-residency",
+		);
 		expect(
-			result.detailedArtifacts.spatial.envCellResidencyBvh.coordinateSpace,
-		).toBe("landblock-topology-residency");
-		expect(
-			result.staticBundleLayers.every((layer) => layer.rootAssetIds.length > 0),
+			getStaticObjectBundleArtifacts(result).every(
+				(layer) => layer.rootAssetIds.length > 0,
+			),
 		).toBe(true);
+		expect(detailedArtifacts).not.toBeNull();
 		expect(
 			collectStaticLandblockRenderWorkerResultTransferables(result),
 		).toContain(
-			result.detailedArtifacts.structuredInteriorCells[0]?.renderGeometry
-				.positions.buffer,
+			detailedArtifacts!.structuredInteriorCells[0]?.renderGeometry.positions
+				.buffer,
 		);
 	});
 
@@ -192,11 +202,13 @@ describe("static landblock render worker", () => {
 			formatLandblockOutdoorAssetId(landblockId),
 		);
 		expect(result.product).toBe("dungeon-env-cells");
-		expect(result.terrainArtifact).toBeNull();
-		expect(result.staticBundleLayers.map((layer) => layer.layerKind)).toEqual([
-			"env-cell-static",
-		]);
-		expect(result.detailedArtifacts.product).toBe("dungeon-env-cells");
+		expect(getLandblockTerrainRenderArtifact(result)).toBeNull();
+		expect(
+			getStaticObjectBundleArtifacts(result).map((layer) => layer.bundleKind),
+		).toEqual(["env-cell-static"]);
+		expect(getDetailedLandblockRenderArtifacts(result)?.product).toBe(
+			"dungeon-env-cells",
+		);
 	});
 });
 

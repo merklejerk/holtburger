@@ -128,7 +128,7 @@ describe("landblock render product planner", () => {
 		expect(Object.keys(job)).not.toContain("sourceRevision");
 	});
 
-	it("defines product worker results as sibling terrain and static object artifacts", () => {
+	it("defines product worker results as product artifact collections", () => {
 		const result = {
 			type: "landblock-render-product-built",
 			jobId: "job:outdoor",
@@ -137,18 +137,18 @@ describe("landblock render product planner", () => {
 			requestId: "request:outdoor",
 			buildPolicyRevision: "build:v1",
 			texturePagePolicyRevision: "texture-pages:v1",
-			terrainArtifact: null,
-			staticBundleLayers: [],
+			artifacts: [],
 			diagnostics: {
 				status: "partial",
 				messages: ["terrain artifact pending"],
 			},
 		} satisfies LandblockRenderProductWorkerResult;
 
-		expect(result.terrainArtifact).toBeNull();
-		expect(result.staticBundleLayers).toEqual([]);
+		expect(result.artifacts).toEqual([]);
 		expect(Object.keys(result)).not.toContain("rootAssetIds");
 		expect(Object.keys(result)).not.toContain("sourceRevision");
+		expect(Object.keys(result)).not.toContain("terrainArtifact");
+		expect(Object.keys(result)).not.toContain("staticBundleLayers");
 	});
 
 	it("does not invent a summary product for distant terrain-only interest", () => {

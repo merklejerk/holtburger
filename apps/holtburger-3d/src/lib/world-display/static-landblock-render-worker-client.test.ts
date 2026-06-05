@@ -207,8 +207,7 @@ function createResult(requestId: string) {
 		requestId,
 		buildPolicyRevision: "build:v1",
 		texturePagePolicyRevision: "texture-pages:v1",
-		terrainArtifact: null,
-		staticBundleLayers: [],
+		artifacts: [],
 		diagnostics: {
 			status: "ready" as const,
 			messages: [],

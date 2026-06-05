@@ -19,7 +19,10 @@ import {
 	createPreparedTerrainMeshFromOutdoorPayload,
 	type LandblockTerrainRenderArtifact,
 } from "./terrain-render-artifact";
-import type { LandblockRenderProductWorkerResult } from "./landblock-render-product";
+import {
+	getLandblockTerrainRenderArtifact,
+	type LandblockRenderProductWorkerResult,
+} from "./landblock-render-product";
 import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
 
 export interface TerrainSceneTile {
@@ -192,7 +195,7 @@ export function deriveTerrainSceneModelFromLandblockArtifacts({
 		activeLandblockIds,
 	)
 		.map((result): TerrainSceneTile => {
-			const artifact = result.terrainArtifact;
+			const artifact = getLandblockTerrainRenderArtifact(result);
 			if (!artifact) {
 				throw new Error(
 					`Landblock render result ${result.jobId} was selected without a terrain artifact.`,
@@ -300,7 +303,7 @@ function selectResidentTerrainArtifactResults(
 	>();
 	for (const result of artifacts.artifacts) {
 		if (
-			!result.terrainArtifact ||
+			!getLandblockTerrainRenderArtifact(result) ||
 			!activeLandblockIds.has(result.landblockId)
 		) {
 			continue;
@@ -317,7 +320,7 @@ function describeWorkerArtifactTerrainCache(
 	artifacts: StaticLandblockRenderArtifactStoreSnapshot,
 ): string {
 	const terrainArtifactCount = artifacts.artifacts.filter(
-		(result) => result.terrainArtifact !== null,
+		(result) => getLandblockTerrainRenderArtifact(result) !== null,
 	).length;
 	return `Worker artifact cache has ${terrainArtifactCount} terrain artifact${terrainArtifactCount === 1 ? "" : "s"} resident across ${artifacts.residentCount} landblock product result${artifacts.residentCount === 1 ? "" : "s"}; ${artifacts.inFlightCount} in flight.`;
 }

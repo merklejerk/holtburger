@@ -17,7 +17,7 @@ import {
 	normalizeOutdoorLandblockId,
 } from "../landblocks";
 import {
-	formatStaticBundleLayerScopeKey,
+	formatStaticObjectBundleScopeKey,
 	type StaticBundleCompactedBatch,
 	type StaticBundleDirectEntry,
 	type StaticBundleLayerWorkerJob,
@@ -25,7 +25,7 @@ import {
 	type StaticBundleObjectRecord,
 	type StaticBundleRenderChunk,
 	type StaticLandblockBundleLayerDiagnostics,
-	type StaticLandblockRenderBundleLayer,
+	type StaticObjectBundleArtifact,
 	type VirtualTexturePageRef,
 } from "./static-bundle-layer";
 import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
@@ -128,11 +128,11 @@ const STATIC_BUNDLE_MATERIAL_TEXTURE_USAGES: readonly MaterialTextureUsage[] = [
 	"detail",
 ];
 
-export function buildStaticLandblockRenderBundleLayer({
+export function buildStaticObjectBundleArtifact({
 	job,
 	preparedAssets,
 	policy,
-}: BuildStaticBundleLayerOptions): StaticLandblockRenderBundleLayer {
+}: BuildStaticBundleLayerOptions): StaticObjectBundleArtifact {
 	if (job.buildPolicyRevision !== policy.buildPolicyRevision) {
 		throw new Error(
 			`Static bundle job build policy ${job.buildPolicyRevision} does not match builder policy ${policy.buildPolicyRevision}.`,
@@ -166,7 +166,7 @@ export function buildStaticLandblockRenderBundleLayer({
 		preparedByAssetId,
 	);
 	const texturePages = buildStaticBundleLayerTexturePages({
-		scopeKey: formatStaticBundleLayerScopeKey(job.scope),
+		scopeKey: formatStaticObjectBundleScopeKey(job.scope),
 		texturePageRefs,
 		policy: policy.atlasLayout,
 	});
@@ -202,10 +202,11 @@ export function buildStaticLandblockRenderBundleLayer({
 	});
 
 	return {
-		key: `static-bundle-layer:${formatStaticBundleLayerScopeKey(job.scope)}:${job.sourceRevision}`,
+		artifactKind: "static-object-bundle",
+		key: `static-bundle-layer:${formatStaticObjectBundleScopeKey(job.scope)}:${job.sourceRevision}`,
 		scope: job.scope,
 		landblockId: job.scope.landblockId,
-		layerKind: job.scope.layerKind,
+		bundleKind: job.scope.bundleKind,
 		sourceRevision: job.sourceRevision,
 		rootAssetIds: [...job.rootAssetIds].sort(),
 		preparedAssetIds: workerPreparedAssetIds,
@@ -280,7 +281,7 @@ function collectStaticBundleSourceObjects(
 		);
 		return outdoor.statics
 			.filter((member) =>
-				job.scope.layerKind === "outdoor-buildings"
+				job.scope.bundleKind === "outdoor-buildings"
 					? member.kind === "building"
 					: member.kind !== "building",
 			)
@@ -974,7 +975,7 @@ function createRenderChunk(
 	job: StaticBundleLayerWorkerJob,
 ): StaticBundleRenderChunk {
 	return {
-		key: `${formatStaticBundleLayerScopeKey(job.scope)}:chunk`,
+		key: `${formatStaticObjectBundleScopeKey(job.scope)}:chunk`,
 		landblockId: job.scope.landblockId,
 		bounds: null,
 	};

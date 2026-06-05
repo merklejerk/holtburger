@@ -123,6 +123,40 @@ describe("deriveRenderBvhVisibilityMetrics", () => {
 		expect(metrics.envCellBvhConsideredCount).toBe(1);
 		expect(metrics.fallbackReasonCount).toBe(0);
 	});
+
+	it("derives env-cell BVH visibility from detailed artifacts without structured scene cells", () => {
+		const envCellId = 0x02030100;
+		const envRenderChunk = deriveLandblockRenderChunkPlacement(envCellId);
+
+		const metrics = deriveRenderBvhVisibilityMetrics({
+			assetState: createAssetState([]),
+			terrainScene: createTerrainScene([]),
+			staticRenderableScene: createEmptyStaticRenderableSceneModel(),
+			structuredInteriorScene: createEmptyStructuredInteriorSceneModel(),
+			staticLandblockRenderArtifacts: createStaticLandblockArtifactSnapshot([
+				createDetailedLandblockProductArtifact({
+					landblockId: 0x0203ffff,
+					envCellId,
+				}),
+			]),
+			renderChunkTransforms: [
+				{
+					chunkKey: envRenderChunk.chunkKey,
+					chunkLandblockId: envRenderChunk.chunkLandblockId,
+					offset: { x: 0, y: 0, z: 0 },
+				},
+			],
+			frustum: zFrustum(0, 10),
+			now: steppingClock(),
+		});
+
+		expect(metrics.envCellLocalBvhVisibleItemCount).toBe(3);
+		expect(metrics.envCellLocalBvhTotalItemCount).toBe(3);
+		expect(metrics.visibleStaticInstanceKeyCount).toBe(1);
+		expect(metrics.visiblePortalKeyCount).toBe(1);
+		expect(metrics.envCellBvhConsideredCount).toBe(1);
+		expect(metrics.fallbackReasonCount).toBe(0);
+	});
 });
 
 function createStaticLandblockArtifactSnapshot(
@@ -169,7 +203,39 @@ function createDetailedLandblockProductArtifact({
 				structuredInteriorMaterialRecords: [],
 				structuredInteriorTexturePageRefs: [],
 				structuredInteriorTexturePages: [],
-				structuredInteriorCells: [],
+				structuredInteriorCells: [
+					{
+						key: "structured-interior-cell:test",
+						envCellId,
+						landblockId,
+						regionNumber: 0,
+						environmentId: 0,
+						cellStructureId: 0,
+						renderChunk: deriveLandblockRenderChunkPlacement(envCellId),
+						localPlacement: identityPlacement(),
+						surfaceIds: [],
+						materialSlices: [],
+						portals: [],
+						portalApertureKeys: [],
+						staticObjectCount: 0,
+						cellBsp: {
+							kind: "leaf",
+							polygonIds: [],
+							bounds: null,
+						},
+						renderGeometry: {
+							sourceId: 0,
+							vertexCount: 0,
+							triangleCount: 0,
+							positions: [],
+							normals: [],
+							uvs: [],
+							triangles: [],
+							surfaceIds: [],
+							bounds: null,
+						},
+					},
+				],
 				cellStructureMetadata: [],
 				portalLinks: [],
 				portalApertures: [],

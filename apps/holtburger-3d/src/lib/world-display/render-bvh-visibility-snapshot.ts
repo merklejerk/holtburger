@@ -108,8 +108,9 @@ export function deriveRenderBvhVisibilitySnapshot(options: {
 			transform,
 		]),
 	);
-	const artifactEnvCellBvhsById = collectDetailedArtifactEnvCellBvhsById(
+	const artifactEnvCellBvhEntriesById = collectDetailedArtifactEnvCellBvhEntriesById(
 		options.staticLandblockRenderArtifacts,
+		fallbackReasons,
 	);
 
 	for (const tile of options.terrainScene.tiles) {
@@ -169,7 +170,38 @@ export function deriveRenderBvhVisibilitySnapshot(options: {
 		);
 	}
 
+	for (const entry of artifactEnvCellBvhEntriesById.values()) {
+		metrics.envCellBvhConsideredCount += 1;
+		const transform = findChunkTransform(
+			chunkTransformsByKey,
+			entry.renderChunk,
+			fallbackReasons,
+		);
+		if (!transform) {
+			continue;
+		}
+		metrics.envCellLocalBvhTotalItemCount += entry.bvh.localBvh.items.length;
+		mergeVisibilityResult(
+			queryEnvCellLocalBvhVisibilityByBvh({
+				envCellId: entry.bvh.envCellId,
+				localBvh: entry.bvh.localBvh,
+				frustum: options.frustum,
+				boundsToRendererBounds: (bounds) =>
+					transformEnvCellLocalBoundsByPlacement(
+						bounds,
+						entry.bvh.localPlacement,
+						transform,
+					),
+			}),
+			visibleItemKeys,
+			fallbackReasons,
+		);
+	}
+
 	for (const cell of options.structuredInteriorScene.cells) {
+		if (artifactEnvCellBvhEntriesById.has(cell.envCellId)) {
+			continue;
+		}
 		metrics.envCellBvhConsideredCount += 1;
 		const transform = findChunkTransform(
 			chunkTransformsByKey,
@@ -177,26 +209,6 @@ export function deriveRenderBvhVisibilitySnapshot(options: {
 			fallbackReasons,
 		);
 		if (!transform) {
-			continue;
-		}
-		const artifactBvh = artifactEnvCellBvhsById.get(cell.envCellId);
-		if (artifactBvh) {
-			metrics.envCellLocalBvhTotalItemCount += artifactBvh.localBvh.items.length;
-			mergeVisibilityResult(
-				queryEnvCellLocalBvhVisibilityByBvh({
-					envCellId: artifactBvh.envCellId,
-					localBvh: artifactBvh.localBvh,
-					frustum: options.frustum,
-					boundsToRendererBounds: (bounds) =>
-						transformEnvCellLocalBoundsByPlacement(
-							bounds,
-							artifactBvh.localPlacement,
-							transform,
-						),
-				}),
-				visibleItemKeys,
-				fallbackReasons,
-			);
 			continue;
 		}
 
@@ -255,26 +267,42 @@ export function deriveRenderBvhVisibilitySnapshot(options: {
 	};
 }
 
-function collectDetailedArtifactEnvCellBvhsById(
+interface DetailedArtifactEnvCellBvhEntry {
+	bvh: DetailedLandblockRenderArtifacts["spatial"]["envCellLocalBvhs"][number];
+	renderChunk: RenderChunkPlacement;
+}
+
+function collectDetailedArtifactEnvCellBvhEntriesById(
 	artifacts: StaticLandblockRenderArtifactStoreSnapshot,
-): Map<
-	number,
-	DetailedLandblockRenderArtifacts["spatial"]["envCellLocalBvhs"][number]
-> {
-	const bvhsByEnvCellId = new Map<
-		number,
-		DetailedLandblockRenderArtifacts["spatial"]["envCellLocalBvhs"][number]
-	>();
+	fallbackReasons: string[],
+): Map<number, DetailedArtifactEnvCellBvhEntry> {
+	const entriesByEnvCellId = new Map<number, DetailedArtifactEnvCellBvhEntry>();
 	for (const result of artifacts.artifacts) {
 		const detailed = getDetailedLandblockRenderArtifacts(result);
 		if (!detailed) {
 			continue;
 		}
+		const cellsByEnvCellId = new Map(
+			detailed.structuredInteriorCells.map((cell) => [cell.envCellId, cell]),
+		);
 		for (const bvh of detailed.spatial.envCellLocalBvhs) {
-			bvhsByEnvCellId.set(bvh.envCellId, bvh);
+			if (entriesByEnvCellId.has(bvh.envCellId)) {
+				continue;
+			}
+			const cell = cellsByEnvCellId.get(bvh.envCellId);
+			if (!cell) {
+				fallbackReasons.push(
+					`missing artifact structured cell ${formatEnvCellAssetId(bvh.envCellId)}`,
+				);
+				continue;
+			}
+			entriesByEnvCellId.set(bvh.envCellId, {
+				bvh,
+				renderChunk: cell.renderChunk,
+			});
 		}
 	}
-	return bvhsByEnvCellId;
+	return entriesByEnvCellId;
 }
 
 function findActiveOutdoorPayloads(

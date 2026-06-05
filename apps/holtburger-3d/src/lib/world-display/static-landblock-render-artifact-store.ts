@@ -1,7 +1,13 @@
 import type {
 	DesiredLandblockRenderProduct,
-	LandblockRenderProduct,
 	LandblockRenderProductWorkerResult,
+} from "./landblock-render-product";
+import {
+	compareStaticLandblockProductKeys,
+	createStaticLandblockProductKey,
+	createStaticLandblockProductKeyFromResult,
+	formatStaticLandblockProductKey,
+	type StaticLandblockProductKey,
 } from "./landblock-render-product";
 
 export interface StaticLandblockRenderProductSet {
@@ -44,7 +50,8 @@ export class StaticLandblockRenderArtifactStore {
 
 	syncDesiredProducts(
 		desiredProducts: readonly DesiredLandblockRenderProduct[],
-	): void {
+	): StaticLandblockProductKey[] {
+		const evictedProductKeys: StaticLandblockProductKey[] = [];
 		const desiredTargetKeys = new Set<string>();
 		for (const desired of desiredProducts) {
 			const targetKey = formatDesiredTargetKey(desired);
@@ -66,6 +73,9 @@ export class StaticLandblockRenderArtifactStore {
 			if (!desiredTargetKeys.has(formatResultTargetKey(artifact))) {
 				this.artifactsByArtifactKey.delete(artifactKey);
 				this.evictedResultCount += 1;
+				evictedProductKeys.push(
+					createStaticLandblockProductKeyFromResult(artifact),
+				);
 			}
 		}
 		for (const identityKey of [...this.inFlightIdentityKeys]) {
@@ -73,6 +83,7 @@ export class StaticLandblockRenderArtifactStore {
 				this.inFlightIdentityKeys.delete(identityKey);
 			}
 		}
+		return evictedProductKeys.sort(compareStaticLandblockProductKeys);
 	}
 
 	markInFlight(desired: DesiredLandblockRenderProduct): boolean {
@@ -132,32 +143,17 @@ export class StaticLandblockRenderArtifactStore {
 function formatDesiredArtifactKey(
 	desired: DesiredLandblockRenderProduct,
 ): string {
-	return formatArtifactKey({
-		landblockId: desired.landblockId,
-		product: desired.product,
-		buildPolicyRevision: desired.buildPolicyRevision,
-		texturePagePolicyRevision: desired.texturePagePolicyRevision,
-	});
+	return formatStaticLandblockProductKey(
+		createStaticLandblockProductKey(desired),
+	);
 }
 
 function formatResultArtifactKey(
 	result: LandblockRenderProductWorkerResult,
 ): string {
-	return formatArtifactKey(result);
-}
-
-function formatArtifactKey(input: {
-	landblockId: number;
-	product: LandblockRenderProduct;
-	buildPolicyRevision: string;
-	texturePagePolicyRevision: string;
-}): string {
-	return [
-		input.landblockId,
-		input.product,
-		input.buildPolicyRevision,
-		input.texturePagePolicyRevision,
-	].join(":");
+	return formatStaticLandblockProductKey(
+		createStaticLandblockProductKeyFromResult(result),
+	);
 }
 
 function formatDesiredTargetKey(
@@ -203,8 +199,10 @@ function compareResults(
 	left: LandblockRenderProductWorkerResult,
 	right: LandblockRenderProductWorkerResult,
 ): number {
-	if (left.landblockId !== right.landblockId) {
-		return left.landblockId - right.landblockId;
-	}
-	return left.product.localeCompare(right.product);
+	return compareStaticLandblockProductKeys(
+		createStaticLandblockProductKeyFromResult(left),
+		createStaticLandblockProductKeyFromResult(right),
+	);
 }
+
+export type { StaticLandblockProductKey };

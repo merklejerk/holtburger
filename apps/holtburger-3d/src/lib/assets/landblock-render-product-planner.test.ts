@@ -116,7 +116,8 @@ describe("landblock render product planner", () => {
 
 		expect(job).toEqual({
 			type: "build-landblock-render-product",
-			jobId: "landblock-render-product:3663069183:outdoor:request:outdoor",
+			jobId:
+				"landblock-render-product:3663069183:outdoor:build:v1:texture-pages:v1",
 			landblockId: 0xda55ffff,
 			product: "outdoor",
 			requestId: "request:outdoor",

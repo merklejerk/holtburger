@@ -16,10 +16,7 @@ import {
 	deriveBrowserWorldDisplayModel,
 	type BrowserWorldDisplayModel,
 } from "./model";
-import {
-	getDetailedLandblockRenderArtifacts,
-	getStaticObjectBundleArtifacts,
-} from "./landblock-render-product";
+import { getDetailedLandblockRenderArtifacts } from "./landblock-render-product";
 import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
 import {
 	deriveWorldDebugOverlayModel,
@@ -81,6 +78,10 @@ import {
 } from "./transition-portal-work-items";
 import { WORLD_RENDER_DOMAIN } from "./render-domains";
 import type { SceneCameraFrame } from "./camera";
+import type {
+	LandblockRenderProductWorkerResult,
+	StaticLandblockProductKey,
+} from "./landblock-render-product";
 import type { WorldDisplayRenderStyle } from "./renderer-contract";
 
 let lastPreparedOutdoorAssetsNotRenderedSignature: string | null = null;
@@ -144,9 +145,11 @@ export interface BrowserRenderResourceSurface {
 	): void;
 	setRenderChunkTransforms(transforms: readonly RenderChunkTransform[]): void;
 	setTerrainScene(scene: TerrainSceneModel): void;
-	replaceStaticLandblockProducts(
-		artifacts: StaticLandblockRenderProductSet,
+	commitStaticLandblockProduct(
+		result: LandblockRenderProductWorkerResult,
 	): void;
+	evictStaticLandblockProduct(key: StaticLandblockProductKey): void;
+	clearStaticLandblockProducts(): void;
 	setStaticRenderableScene(scene: StaticRenderableSceneModel): void;
 	setStructuredInteriorScene(scene: StructuredInteriorSceneModel): void;
 	setTransitionPortalModel(
@@ -451,16 +454,6 @@ export class BrowserRenderResourceCoordinator {
 			);
 			this.applySurfaceResource("terrain-scene", terrainSceneSignature, () =>
 				surface.setTerrainScene(terrainScene),
-			);
-			this.applySurfaceResource(
-				"static-landblock-render-artifacts",
-				describeStaticLandblockRenderArtifactSurfaceSignature(
-					input.staticLandblockRenderProducts,
-				),
-				() =>
-					surface.replaceStaticLandblockProducts(
-						input.staticLandblockRenderProducts,
-					),
 			);
 			this.applySurfaceResource(
 				"static-renderable-scene",
@@ -1213,45 +1206,6 @@ function describeStaticLandblockRenderArtifacts(
 		`${productSet.staleResultCount} stale`,
 		`${productSet.errorCount} errors`,
 	].join("; ");
-}
-
-function describeStaticLandblockRenderArtifactSurfaceSignature(
-	productSet: StaticLandblockRenderProductSet,
-): string {
-	return [
-		...productSet.latestDesiredIdentityKeys,
-		...productSet.artifacts.flatMap((artifact) => {
-			const detailed = getDetailedLandblockRenderArtifacts(artifact);
-			return [
-				...getStaticObjectBundleArtifacts(artifact).map((layer) =>
-					[
-						artifact.landblockId,
-						artifact.product,
-						artifact.requestId,
-						artifact.buildPolicyRevision,
-						artifact.texturePagePolicyRevision,
-						"static",
-						layer.key,
-						layer.sourceRevision,
-					].join(":"),
-				),
-				...(detailed
-					? [
-							[
-								artifact.landblockId,
-								artifact.product,
-								artifact.requestId,
-								artifact.buildPolicyRevision,
-								artifact.texturePagePolicyRevision,
-								"detailed",
-								detailed.landblockId,
-								detailed.structuredInteriorCells.length,
-							].join(":"),
-						]
-					: []),
-			];
-		}),
-	].join("|");
 }
 
 function describeStaticRenderableIdleState(

@@ -165,12 +165,13 @@ describe("webgl2 world resources", () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
 		const cell = createStructuredInteriorCell();
+		const secondCell = createStructuredInteriorCell({ envCellId: 0xda550101 });
 
 		syncWebgl2StaticLandblockRenderArtifactResources({
 			gl: gl.asContext(),
 			store,
 			artifacts: createStaticLandblockProductSet([
-				createDetailedLandblockProductArtifact(cell),
+				createDetailedLandblockProductArtifact([cell, secondCell]),
 			]),
 			renderChunkTransforms: [createChunkTransform()],
 			textureFilteringMode: "linear",
@@ -179,11 +180,15 @@ describe("webgl2 world resources", () => {
 			...store.structuredInteriorResources.cellsByKey.values(),
 		][0];
 
-		expect(store.structuredInteriorResourceCount).toBe(1);
-		expect(store.structuredInteriorResourceTriangleCount).toBe(1);
-		expect(store.structuredInteriorResources.cellsByKey.size).toBe(1);
-		expect(gl.createdBuffers).toHaveLength(3);
-		expect(gl.createdVertexArrays).toHaveLength(1);
+		expect(store.structuredInteriorResourceCount).toBe(2);
+		expect(store.structuredInteriorProductResourceCount).toBe(1);
+		expect(store.structuredInteriorTexturePageResourceCount).toBe(1);
+		expect(store.structuredInteriorMaterialRecordResourceCount).toBe(1);
+		expect(store.structuredInteriorResourceTriangleCount).toBe(2);
+		expect(store.structuredInteriorResources.productsByKey.size).toBe(1);
+		expect(store.structuredInteriorResources.cellsByKey.size).toBe(2);
+		expect(gl.createdBuffers).toHaveLength(6);
+		expect(gl.createdVertexArrays).toHaveLength(2);
 		expect(gl.createdTextures).toHaveLength(1);
 		expect(gl.generatedMipmapCount).toBe(1);
 
@@ -191,7 +196,7 @@ describe("webgl2 world resources", () => {
 			gl: gl.asContext(),
 			store,
 			artifacts: createStaticLandblockProductSet([
-				createDetailedLandblockProductArtifact(cell),
+				createDetailedLandblockProductArtifact([cell, secondCell]),
 			]),
 			renderChunkTransforms: [createChunkTransform()],
 			textureFilteringMode: "nearest",
@@ -200,7 +205,7 @@ describe("webgl2 world resources", () => {
 		expect([...store.structuredInteriorResources.cellsByKey.values()][0]).toBe(
 			resource,
 		);
-		expect(gl.createdBuffers).toHaveLength(3);
+		expect(gl.createdBuffers).toHaveLength(6);
 		expect(gl.createdTextures).toHaveLength(1);
 		expect(gl.generatedMipmapCount).toBe(1);
 		expect(gl.textureParameters).toContainEqual({
@@ -1446,22 +1451,18 @@ function createChunkTransform({
 }
 
 function createStaticLandblockProductSet(
-	layers: readonly StaticObjectBundleArtifact[],
+	input: readonly (LandblockRenderProductWorkerResult | StaticObjectBundleArtifact)[],
 	product: LandblockRenderProductWorkerResult["product"] = "outdoor",
 ): StaticLandblockRenderProductSet {
-	const landblockId = layers[0]?.landblockId ?? 0x1234;
-	return createStaticLandblockProductSet([
-		createStaticLandblockProductArtifact({
-			landblockId,
-			product,
-			layers,
-		}),
-	]);
-}
-
-function createStaticLandblockProductSet(
-	artifacts: readonly LandblockRenderProductWorkerResult[],
-): StaticLandblockRenderProductSet {
+	const artifacts = isStaticBundleLayerArray(input)
+		? [
+				createStaticLandblockProductArtifact({
+					landblockId: input[0]?.landblockId ?? 0x1234,
+					product,
+					layers: input,
+				}),
+			]
+		: input;
 	const residentCount = artifacts.length;
 	return {
 		artifacts,
@@ -1474,6 +1475,12 @@ function createStaticLandblockProductSet(
 		errorCount: 0,
 		latestDesiredIdentityKeys: [],
 	};
+}
+
+function isStaticBundleLayerArray(
+	input: readonly (LandblockRenderProductWorkerResult | StaticObjectBundleArtifact)[],
+): input is readonly StaticObjectBundleArtifact[] {
+	return input.every((item) => item.type !== "landblock-render-product-built");
 }
 
 function createStaticLandblockProductArtifact({
@@ -1537,9 +1544,14 @@ function createStaticLandblockProductArtifact({
 }
 
 function createDetailedLandblockProductArtifact(
-	cell: StructuredInteriorCell,
+	input: StructuredInteriorCell | readonly StructuredInteriorCell[],
 ): LandblockRenderProductWorkerResult {
-	const landblockId = cell.renderChunk.chunkLandblockId;
+	const cells = Array.isArray(input) ? input : [input];
+	const firstCell = cells[0];
+	if (!firstCell) {
+		throw new Error("Detailed landblock product fixture requires a cell.");
+	}
+	const landblockId = firstCell.renderChunk.chunkLandblockId;
 	return {
 		type: "landblock-render-product-built",
 		jobId: `job:${landblockId}:outdoor-env-cells`,
@@ -1557,7 +1569,7 @@ function createDetailedLandblockProductArtifact(
 				requestId: "request",
 				buildPolicyRevision: "build:v1",
 				texturePagePolicyRevision: "pages:v1",
-				selectedEnvCellIds: [cell.envCellId],
+				selectedEnvCellIds: cells.map((cell) => cell.envCellId),
 				structuredInteriorMaterialRecords: [
 					{
 						key: "interior-material",
@@ -1599,8 +1611,7 @@ function createDetailedLandblockProductArtifact(
 						],
 					},
 				],
-				structuredInteriorCells: [
-					{
+				structuredInteriorCells: cells.map((cell) => ({
 						key: `structured-interior-cell:${cell.envCellId}`,
 						envCellId: cell.envCellId,
 						landblockId,
@@ -1631,8 +1642,7 @@ function createDetailedLandblockProductArtifact(
 								triangleCount: 1,
 							},
 						],
-					},
-				],
+					})),
 				cellStructureMetadata: [],
 				portalLinks: [],
 				portalApertures: [],

@@ -4,7 +4,10 @@ import type {
 	StaticLandblockRenderWorkerRequestMessage,
 	StaticLandblockRenderWorkerResponseMessage,
 } from "../../workers/static-landblock-render-worker";
-import type { DesiredLandblockRenderProduct } from "./landblock-render-product";
+import {
+	createLandblockRenderProductWorkerJob,
+	type DesiredLandblockRenderProduct,
+} from "./landblock-render-product";
 import {
 	StaticLandblockRenderWorkerClient,
 	type StaticLandblockRenderWorkerLike,
@@ -16,6 +19,7 @@ describe("static landblock render worker client", () => {
 		const client = new StaticLandblockRenderWorkerClient({
 			lookupAssetsFn: async () => [],
 			workerFactory: () => worker,
+			maxConcurrentJobs: 2,
 		});
 
 		const promise = client.requestProduct(createDesiredProduct("request:1"));
@@ -26,7 +30,8 @@ describe("static landblock render worker client", () => {
 			requestId: "static-landblock-render-1",
 			job: {
 				type: "build-landblock-render-product",
-				jobId: "landblock-render-product:3663069183:outdoor:request:1",
+				jobId:
+					"landblock-render-product:3663069183:outdoor:build:v1:texture-pages:v1",
 				landblockId: 0xda55ffff,
 				product: "outdoor",
 				requestId: "request:1",
@@ -46,6 +51,105 @@ describe("static landblock render worker client", () => {
 		});
 		await expect(promise).resolves.toMatchObject({ requestId: "request:1" });
 		client.dispose();
+	});
+
+	it("defaults to one active posted worker job", () => {
+		const worker = new MockStaticLandblockRenderWorker();
+		const client = new StaticLandblockRenderWorkerClient({
+			lookupAssetsFn: async () => [],
+			workerFactory: () => worker,
+		});
+
+		void client.requestProduct(createDesiredProduct("request:one"));
+		void client.requestProduct(
+			createDesiredProduct("request:two", { product: "outdoor-env-cells" }),
+		);
+
+		expect(
+			worker.postedMessages.filter(
+				(message) => message.type === "run-landblock-render-product-job",
+			),
+		).toHaveLength(1);
+		client.dispose();
+	});
+
+	it("drops stale queued products before posting them to the worker", async () => {
+		const worker = new MockStaticLandblockRenderWorker();
+		const client = new StaticLandblockRenderWorkerClient({
+			lookupAssetsFn: async () => [],
+			workerFactory: () => worker,
+		});
+		const active = client.requestProduct(
+			createDesiredProduct("request:active", {
+				product: "outdoor-env-cells",
+			}),
+		);
+		const staleQueued = client.requestProduct(
+			createDesiredProduct("request:old"),
+		);
+		const staleExpectation = expect(staleQueued).rejects.toThrow(
+			"superseded",
+		);
+		const latestQueued = client.requestProduct(
+			createDesiredProduct("request:new"),
+		);
+
+		expect(
+			worker.postedMessages.filter(
+				(message) => message.type === "run-landblock-render-product-job",
+			),
+		).toHaveLength(1);
+		await staleExpectation;
+		worker.emit({
+			type: "landblock-render-product-job-complete",
+			requestId: "static-landblock-render-1",
+			result: createResult("request:active", {
+				product: "outdoor-env-cells",
+			}),
+		});
+		await expect(active).resolves.toMatchObject({
+			requestId: "request:active",
+		});
+		expect(worker.postedMessages.at(-1)).toMatchObject({
+			type: "run-landblock-render-product-job",
+			requestId: "static-landblock-render-3",
+		});
+		worker.emit({
+			type: "landblock-render-product-job-complete",
+			requestId: "static-landblock-render-3",
+			result: createResult("request:new"),
+		});
+		await expect(latestQueued).resolves.toMatchObject({
+			requestId: "request:new",
+		});
+		client.dispose();
+	});
+
+	it("cancels superseded posted products by worker request id", async () => {
+		const worker = new MockStaticLandblockRenderWorker();
+		const client = new StaticLandblockRenderWorkerClient({
+			lookupAssetsFn: async () => [],
+			workerFactory: () => worker,
+			maxConcurrentJobs: 2,
+		});
+		const stale = client.requestProduct(createDesiredProduct("request:old"));
+		const staleExpectation = expect(stale).rejects.toThrow("superseded");
+
+		void client.requestProduct(createDesiredProduct("request:new"));
+
+		await staleExpectation;
+		expect(worker.postedMessages).toContainEqual({
+			type: "cancel-landblock-render-product-job",
+			requestId: "static-landblock-render-1",
+		});
+		client.dispose();
+	});
+
+	it("keeps product job identity stable across request-only replans", () => {
+		const first = createDesiredProduct("request:first");
+		const second = createDesiredProduct("request:second");
+
+		expect(extractProductJobId(first)).toBe(extractProductJobId(second));
 	});
 
 	it("dedupes identical in-flight product jobs", async () => {
@@ -70,34 +174,60 @@ describe("static landblock render worker client", () => {
 		client.dispose();
 	});
 
-	it("rejects stale results after a newer request targets the same product", async () => {
+	it("rejects worker results that do not match the pending request identity", async () => {
 		const worker = new MockStaticLandblockRenderWorker();
 		const client = new StaticLandblockRenderWorkerClient({
 			lookupAssetsFn: async () => [],
 			workerFactory: () => worker,
 		});
-		const stale = client.requestProduct(createDesiredProduct("request:old"));
-		const latest = client.requestProduct(createDesiredProduct("request:new"));
-		const staleExpectation = expect(stale).rejects.toThrow(
-			"Ignored stale landblock",
-		);
+		const stale = client.requestProduct(createDesiredProduct("request:current"));
 
 		worker.emit({
 			type: "landblock-render-product-job-complete",
 			requestId: "static-landblock-render-1",
 			result: createResult("request:old"),
 		});
+
+		await expect(stale).rejects.toThrow(
+			"Ignored stale landblock",
+		);
+		client.dispose();
+	});
+
+	it("posts queued work after the active worker request completes", async () => {
+		const worker = new MockStaticLandblockRenderWorker();
+		const client = new StaticLandblockRenderWorkerClient({
+			lookupAssetsFn: async () => [],
+			workerFactory: () => worker,
+		});
+		const first = client.requestProduct(createDesiredProduct("request:first"));
+		const second = client.requestProduct(
+			createDesiredProduct("request:second", {
+				product: "outdoor-env-cells",
+			}),
+		);
+		worker.emit({
+			type: "landblock-render-product-job-complete",
+			requestId: "static-landblock-render-1",
+			result: createResult("request:first"),
+		});
+		await expect(first).resolves.toMatchObject({
+			requestId: "request:first",
+		});
+		expect(worker.postedMessages.at(-1)).toMatchObject({
+			type: "run-landblock-render-product-job",
+			requestId: "static-landblock-render-2",
+		});
 		worker.emit({
 			type: "landblock-render-product-job-complete",
 			requestId: "static-landblock-render-2",
-			result: createResult("request:new"),
+			result: createResult("request:second", {
+				product: "outdoor-env-cells",
+			}),
 		});
-
-		await staleExpectation;
-		await expect(latest).resolves.toMatchObject({
-			requestId: "request:new",
-			landblockId: 0xda55ffff,
-			product: "outdoor",
+		await expect(second).resolves.toMatchObject({
+			requestId: "request:second",
+			product: "outdoor-env-cells",
 		});
 		client.dispose();
 	});
@@ -245,6 +375,10 @@ function createDesiredProduct(
 		buildPolicy: createBuildPolicy(),
 		...overrides,
 	};
+}
+
+function extractProductJobId(desired: DesiredLandblockRenderProduct): string {
+	return createLandblockRenderProductWorkerJob(desired).jobId;
 }
 
 function createResult(

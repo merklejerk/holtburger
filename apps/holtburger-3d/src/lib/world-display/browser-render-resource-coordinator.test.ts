@@ -243,7 +243,9 @@ function createCapturingSurface(): BrowserRenderResourceSurface & {
 		setRenderSceneContext() {},
 		setRenderChunkTransforms() {},
 		setTerrainScene() {},
-		replaceStaticLandblockProducts() {},
+		commitStaticLandblockProduct() {},
+		evictStaticLandblockProduct() {},
+		clearStaticLandblockProducts() {},
 		setStaticRenderableScene(scene) {
 			staticRenderableScenes.push(scene);
 		},

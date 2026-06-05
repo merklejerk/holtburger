@@ -234,8 +234,14 @@ Progress:
 - Renamed the browser UI return object away from `BrowserRenderResourceSnapshot`/`renderResourceSnapshot` to `BrowserRenderResourceReport`/`renderResourceReport`.
 - Renamed renderer replacement API from `setStaticLandblockRenderArtifacts` to `replaceStaticLandblockProducts`.
 - Left the actual renderer handoff as a full-set replacement pending the explicit commit/evict contract. This is transitional debt and must be removed in this phase, not deferred past the commit surface work.
+- Added `StaticLandblockProductKey` helpers with stable product/policy identity and routed store artifact keys through them.
+- Changed worker product job IDs and static bundle `sourceRevision` inputs to use product/policy identity rather than request IDs.
+- Added `commitStaticLandblockProduct`, `evictStaticLandblockProduct`, and `clearStaticLandblockProducts` to the renderer contract, deferred renderer wrapper, Svelte surface, and WebGL implementation. The WebGL implementation still forwards through the transitional full-set resource dirty path until Phase 3B-5 deletes the broad sync.
+- Added focused tests proving request-only replans keep the same product job identity and stale request results are still rejected before commit.
 
 ### Phase 1A: Worker Single-Active-Build Guard
+
+Status: complete.
 
 Deliverables:
 
@@ -252,7 +258,18 @@ Acceptance criteria:
 - Superseded worker-queued products do not start hydration/building.
 - Product assembly failure rejects the job and does not partially commit.
 
+Progress:
+
+- Defaulted `StaticLandblockRenderWorkerClient` to one active posted job.
+- Added stale queued-work dropping in the client before superseded products are posted to the worker.
+- Added a worker cancellation message and client-side cancellation for superseded posted products.
+- Serialized the worker message loop so only one product build executes at a time, even when multiple job messages arrive.
+- Added cancellation checks before product root lookup, before/after companion closure work, before detailed artifact assembly, and before posting a completed result.
+- Added focused tests for default single-active posting, stale queue dropping, posted cancellation, queued pumping, stale result rejection, and worker cancellation before root lookup.
+
 ### Phase 2: Product Coordinator Cutover
+
+Status: complete with transitional report dependencies.
 
 Deliverables:
 
@@ -278,7 +295,18 @@ Acceptance criteria:
 - No product callback is named around stores, snapshots, or artifact layers.
 - Replanning the same product with a new request ID does not evict/recreate resident renderer resources.
 
+Progress:
+
+- Added coordinator lifecycle callbacks for `onProductCommitted`, `onProductEvicted`, and `onProductsCleared`.
+- Made `StaticLandblockRenderArtifactStore.syncDesiredProducts()` return stable product keys for evicted resident products.
+- Wired `BrowserWorldDisplay.svelte` to call `commitStaticLandblockProduct`, `evictStaticLandblockProduct`, and `clearStaticLandblockProducts` directly on the `WorldDisplay` surface from coordinator callbacks.
+- Removed `BrowserRenderResourceCoordinator`'s static product surface application; it no longer calls whole-set replacement on the renderer.
+- Kept `getProductSet()` and `BrowserRenderResourceCoordinatorInput.staticLandblockRenderProducts` as transitional report/scene-derivation inputs. This is Phase 4 debt, not renderer product application.
+- Added focused coordinator tests for direct commit and product eviction callbacks.
+
 ### Phase 2A: Product Granularity And LoD Preset Audit
+
+Status: complete.
 
 Deliverables:
 
@@ -293,7 +321,16 @@ Acceptance criteria:
 - LoD controls map clearly to worker product residency choices.
 - No phase assumes terrain/building/detail can be independently committed unless the worker product contract actually separates them.
 
+Progress:
+
+- Audited `landblock-render-product-planner.ts`: terrain, building, and detail interests all coalesce into the same `outdoor` product; env-cell detail remains `outdoor-env-cells`; indoor/dungeon destinations use `dungeon-env-cells`.
+- Decision: keep `outdoor` as one coarse product containing terrain, outdoor buildings, and outdoor detail because the worker/backend product route currently loads those artifact families together.
+- Decision: do not introduce renderer-side terrain/building/detail filtering to mimic independent products. LoD controls may request different landblock radii, but once any outdoor interest selects a landblock, the committed worker product is the full `outdoor` product for that landblock.
+- Decision: dungeon behavior stays on the same detailed env-cell product path and does not request an outdoor product.
+
 ### Phase 3A: Detailed Interior Product Resource Hoist
+
+Status: complete.
 
 Deliverables:
 
@@ -311,42 +348,141 @@ Acceptance criteria:
 - Sampler-policy updates touch each product texture page once.
 - Existing structured interior rendering tests cover shared material binding lookup from cell slices to product materials.
 
-### Phase 3B: Renderer Product Store
+Progress:
+
+- Added product-scoped detailed interior resources inside `Webgl2StructuredInteriorResourceStore`.
+- Uploaded `structuredInteriorTexturePages` once per detailed product resource instead of once per cell.
+- Built `structuredInteriorMaterialRecords` once per detailed product resource and shared those bindings with all cell resources.
+- Changed structured interior cells to dispose only local slice/shell geometry; product resources own texture page disposal.
+- Moved sampler-policy updates to product resources so each product page is touched once per sync.
+- Removed request IDs from detailed artifact keys.
+- Added product/page/material counters for detailed interior resources.
+- Extended WebGL resource tests to build one detailed product with two cells and one texture page, asserting one product resource, one texture page resource, two cell resources, and one texture upload.
+
+### Phase 3B-0: Renderer-Owned Product Placement And Spatial Facts
+
+Status: next.
+
+Why this phase exists:
+
+- The previous Phase 3B attempt exposed a real dependency inversion: product resources cannot be committed honestly by product key while `BrowserRenderResourceCoordinator` still derives render chunk transforms, terrain scene tiles, transition portal candidates, and browser picking spatial facts from product sets and scene-model adapters.
+- Wrapping `syncWebgl2StaticLandblockRenderArtifactResources()` or `syncWebgl2WorldResources()` in product-keyed methods would preserve the broad scan/diff architecture under better names. That is fake progress, bestie.
 
 Deliverables:
 
-- Introduce a WebGL static landblock product store keyed by product key.
-- Move resource replacement from broad full-set sync into product-keyed commit/evict functions.
-- Product commit creates/replaces terrain, static bundle, detailed interior, portal, and spatial resources for that product.
-- Eviction deletes all resources owned by the product key.
-- `replaceStaticLandblockProducts` is deleted rather than kept as a reset/initialization compatibility path.
-- Static bundle, structured interior, and terrain resource stores gain product-keyed commit/evict APIs instead of retained-key scan sync APIs.
-- Terrain product resources are committed from `LandblockTerrainRenderArtifact` directly, not through `TerrainSceneModel`.
-- Product stores separate immutable GPU uploads from placement/anchor transforms. Render chunk transform changes update product placement state without rebuilding product textures or geometry.
-- Product stores expose render candidates, scene bounds, residency/spatial facts, and resource counters without converting back through scene models.
-- Product stores expose sampler-policy updates for resident texture pages without rebuilding geometry or re-uploading page pixels.
+- Add renderer-owned static product placement state keyed by `StaticLandblockProductKey`.
+- Move the render chunk transform application needed by static products behind renderer/product APIs.
+- Add low-fidelity renderer/product spatial facts for terrain, static bundle entries, detailed interior cells, portals, and product scene bounds.
+- Add a renderer-owned spatial query or product metadata query that browser picking can consume without requiring `BrowserRenderResourceCoordinator` to rebuild a product-derived spatial index.
+- Move transition portal candidate facts for landblock products out of browser report generation and into renderer/product-owned metadata.
+- Keep browser report text as an observer of product metadata; it must not be a renderer input.
+- Define the direct terrain artifact commit payload shape needed by Phase 3B-4, including placement and texture-page facts that do not require `TerrainSceneModel`.
+
+Acceptance criteria:
+
+- Static product placement can update when the render anchor/chunk transforms change without recommitting products.
+- Browser picking can query product-owned spatial facts, even if fidelity is lower than the old staged diagnostics.
+- Product portal facts are available without deriving `TransitionPortalCandidateModel` from the browser report path.
+- No new product path depends on `StaticRenderableSceneModel`, `StructuredInteriorSceneModel`, or `TerrainSceneModel` for placement/spatial facts.
+- `BrowserRenderResourceCoordinator` can be disabled for static product report generation without changing committed product resources.
+
+### Phase 3B-1: Static Product Store Shell
+
+Deliverables:
+
+- Introduce a WebGL static landblock product store keyed by `StaticLandblockProductKey`.
+- The store tracks resident product keys, product generation/signature, family resource ownership, placement state, spatial facts, resource counters, and sampler policy.
+- Add product-keyed `commit`, `evict`, `clear`, `updatePlacement`, and `updateSamplerPolicy` methods.
+- Keep family-specific resource creation delegated to existing helpers until later subphases.
+- Keep full-set static sync alive only as a transitional fallback outside the product-store path; new tests must target product-store commit/evict APIs directly.
+
+Acceptance criteria:
+
+- Product replacement is idempotent for the same product key and generation.
+- Eviction releases all resources registered under one product key.
+- `clear` releases every product resource exactly once.
+- Placement and sampler updates do not call product commit.
+- Product-store tests do not invoke `replaceStaticLandblockProducts`.
+
+### Phase 3B-2: Static Bundle Product Commit/Evict
+
+Deliverables:
+
+- Replace `syncWebgl2StaticBundleLayerResources()` retained-key scanning for product commits with product-keyed static bundle commit/evict APIs.
+- Static bundle texture pages, materials, compacted batches, direct entries, render candidates, and spatial facts are owned under the product key.
+- Static bundle sampler-policy updates touch each resident product texture page once.
+- Preserve current static bundle rendering behavior while deleting whole-store retained-key scans for committed products.
+
+Acceptance criteria:
+
+- Committing one product creates or replaces only that product's static bundle resources.
+- Evicting one product does not scan or mutate unrelated product bundle resources.
+- Texture filtering changes update resident static bundle texture pages without rebuilding geometry.
+- Static bundle resource counters are product-derived, not global retained-set-derived.
+
+### Phase 3B-3: Detailed Interior Product Commit/Evict
+
+Deliverables:
+
+- Move the Phase 3A product-scoped detailed interior resources behind product-keyed commit/evict APIs.
+- Delete retained-key scanning for detailed interior product cells on the product-store path.
+- Detailed product eviction disposes shared product texture pages/materials after local cell resources are disposed.
+- Placement updates refresh detailed cell model matrices without rebuilding texture pages, materials, or geometry.
+
+Acceptance criteria:
+
+- A detailed product with `N` cells and `P` pages still creates `P` page resources after moving to product commits.
+- Evicting one detailed product leaves other detailed products' shared page/material resources alive.
+- Changing render anchor updates detailed cell placement state without recommit.
+- The product-store detailed path does not consume `StructuredInteriorSceneModel`.
+
+### Phase 3B-4: Terrain Product Commit/Evict
+
+Deliverables:
+
+- Commit `LandblockTerrainRenderArtifact` directly into terrain product resources without deriving a `TerrainSceneModel`.
+- Separate immutable terrain geometry/draw-slice uploads from placement, texture-page binding, and sampler updates.
+- Move worker-built terrain texture-page planning/binding out of broad `syncWebgl2WorldResources()`.
+- Fix the current terrain draw-slice reuse bug where draw-slice buffers are created before the previous tile reuse decision.
+- Expose terrain render candidates, scene bounds, BVH keys, and resource counters from product-owned terrain resources.
+
+Acceptance criteria:
+
+- Terrain product commit does not call `deriveTerrainSceneModelFromLandblockArtifacts`.
+- Recommitting an unchanged terrain product does not recreate terrain geometry or draw-slice buffers.
+- Moving the render anchor updates terrain model matrices/placement without rebuilding terrain uploads.
+- Changing texture filtering updates terrain product texture pages/samplers without recommit.
+- Product terrain resources do not depend on broad `retainedTextureKeys` cleanup in `syncWebgl2WorldResources()`.
+
+### Phase 3B-5: Static Product Store Cutover
+
+Deliverables:
+
+- Route renderer `commitStaticLandblockProduct`, `evictStaticLandblockProduct`, and `clearStaticLandblockProducts` to the product store only.
+- Delete `replaceStaticLandblockProducts` from the renderer contract, deferred renderer wrapper, Svelte surface, WebGL implementation, tests, and BRC surface types.
+- Delete `syncWebgl2StaticLandblockRenderArtifactResources()` as a render-critical path.
+- Ensure static product commits do not mark broad world resources dirty.
+- Keep coarse resets as `clear` followed by normal commits, never as whole-set replacement.
 
 Acceptance criteria:
 
 - No static landblock WebGL resources are synchronized by scanning a global product set.
-- Product replacement is idempotent for the same product key.
-- Product eviction releases terrain/static/interior/portal/spatial resources in one call.
-- Static landblock product resources are not built through `StaticRenderableSceneModel`, `StructuredInteriorSceneModel`, or `TerrainSceneModel` adapter derivation.
-- Moving the render anchor updates product model matrices/placements without recommitting products.
-- Changing texture filtering updates resident product samplers without committing or evicting products.
+- Static landblock-derived terrain, static bundles, detailed interiors, portals, and spatial facts enter the renderer through product commit/evict/clear only.
+- Static product rendering works without `StaticRenderableSceneModel`, `StructuredInteriorSceneModel`, or `TerrainSceneModel` adapter derivation.
+- `replaceStaticLandblockProducts` and its tests are gone.
+- Runtime appearance preview updates do not trigger static product reconciliation.
 
 ### Phase 4: Browser Resource Coordinator Decomposition
 
 Deliverables:
 
-- Remove static landblock product application from `BrowserRenderResourceCoordinator`.
-- Split remaining browser UI/debug facts into a report builder that does not drive renderer state.
+- Finish removing static landblock product application and product-derived facts from `BrowserRenderResourceCoordinator`.
+- Split remaining browser UI/debug facts into a report builder that does not drive renderer state and can be disabled without changing rendering.
 - Move runtime appearance preview updates into a small preview-only updater that may still use staged scene assembly.
-- Move render chunk transform derivation needed by product resources into the renderer/product store boundary or product commit payloads.
-- Move transition portal candidate derivation for landblock products out of browser report generation and into product-owned renderer resources.
-- Move spatial index population for product terrain/static/interior items out of `BrowserRenderResourceCoordinator`; browser picking should consume a renderer/product spatial query or low-fidelity product metadata.
+- Delete transitional `BrowserRenderResourceCoordinatorInput.staticLandblockRenderProducts` and `getProductSet()` report plumbing once Phase 3B-0 provides renderer-owned metadata queries.
+- Move any remaining browser spatial index population for product terrain/static/interior items to renderer/product metadata queries.
 - Delete `BrowserRenderResourceReport` if it continues to couple renderer updates and UI text; otherwise keep it report-only with no surface application.
-- Make `BrowserWorldDisplay.svelte` call renderer product commits directly from product coordinator callbacks.
+- Rename or split `BrowserRenderResourceCoordinator` once its remaining role is runtime preview/report-only.
 
 Acceptance criteria:
 
@@ -356,17 +492,17 @@ Acceptance criteria:
 - Runtime appearance preview resource updates remain isolated from landblock static product commits.
 - UI report generation can be disabled without changing renderer state.
 - Browser picking/debug overlays cannot force landblock products through scene-model adapters.
+- Static product report generation has no authority over product resource residency, placement, or eviction.
 
 ### Phase 5: Broad WebGL Sync Split
 
 Deliverables:
 
-- Split static product resource commit/evict from `syncWebgl2WorldResources`.
-- Restrict `syncWebgl2WorldResources` to non-product resources, especially runtime appearance previews and portal masks until they have product-owned inputs.
+- Restrict `syncWebgl2WorldResources` to non-product resources, especially runtime appearance previews and any remaining non-product portal masks.
 - Delete or rename staged resource assembly that only exists for static landblock products.
 - Keep `RenderBvhVisibilitySnapshot` only as frame-local visibility output; it must consume renderer product resources or product metadata, not product residency sets.
 - Remove `deriveSceneRenderableReadinessModel` / `deriveStaticRenderableReadinessModel` from landblock product rendering. Keep them only if runtime appearance previews still need them; otherwise delete them.
-- Terrain texture-page planning for worker-built terrain moves to product artifacts or product-resource commit. It must not run inside broad `syncWebgl2WorldResources`.
+- Delete broad terrain texture-page planning for worker-built terrain once Phase 3B-4 owns terrain product texture-page resources.
 
 Acceptance criteria:
 
@@ -450,13 +586,13 @@ Acceptance criteria:
   Mitigation: move UI facts to coordinator counters or renderer metrics; drop fidelity where keeping it would preserve legacy renderer ownership.
 
 - Risk: renderer product store initially duplicates some WebGL resource sync helpers.
-  Mitigation: extract product-keyed helper functions first, then delete the global snapshot sync once all artifact families commit through the store.
+  Mitigation: Phase 3B is now split by prerequisite and artifact family: product placement/spatial facts first, then store shell, then static bundles, detailed interiors, terrain, and final cutover. Product-keyed helpers are acceptable only when they do not call whole-set retained-key scans.
 
 - Risk: detailed interior product commits duplicate product texture pages per env cell.
   Mitigation: Phase 3A requires product-scoped texture page/material ownership for detailed interiors; cells own geometry and material bindings, not duplicate page uploads.
 
 - Risk: terrain resource sync recreates draw-slice buffers during reuse checks.
-  Mitigation: Phase 3B commits terrain artifacts through product-owned terrain resources that separate immutable geometry uploads from placement and texture-binding updates.
+  Mitigation: Phase 3B-4 commits terrain artifacts through product-owned terrain resources that separate immutable geometry uploads from placement and texture-binding updates.
 
 - Risk: runtime appearance previews still need prepared asset resource sync.
   Mitigation: keep preview resource sync separate from static landblock products; do not route static landblock artifacts through preview surfaces.
@@ -477,17 +613,21 @@ Acceptance criteria:
   Mitigation: Phase 2A audits product granularity and aligns UI presets to actual product shapes before building product stores or deleting legacy fallback paths.
 
 - Risk: texture filtering changes accidentally force product recommit or full resource sync.
-  Mitigation: Phase 3B adds an explicit product-store sampler-policy update path.
+  Mitigation: Phase 3B-1 adds a product-store sampler-policy API; Phase 3B-2 through Phase 3B-4 implement family-specific sampler updates.
 
 - Risk: one worker runs multiple async product jobs concurrently because host lookups yield to the worker event loop.
   Mitigation: Phase 1A serializes product builds inside the worker and adds stale queued-work cancellation. This is primarily a state-space and memory-lifetime simplification, not an IPC throughput workaround.
 
 - Risk: render chunk transforms are still derived outside the product store and some resources bake placement into GPU resource objects.
-  Mitigation: Phase 3B separates product uploads from placement state so anchor/chunk changes update model matrices and spatial facts without product recommit.
+  Mitigation: Phase 3B-0 moves product placement/spatial facts behind renderer-owned APIs before product resource commits are cut over. Phase 3B-2 through Phase 3B-4 then separate product uploads from placement state.
+
+- Risk: Phase 3B-0 becomes a second browser coordinator by another name.
+  Mitigation: the renderer/product metadata query should expose only product-owned placement, spatial, portal, and bounds facts. UI text, filters, and browser workflow policy stay in the browser app and cannot drive renderer state.
 
 ## Cleanup Targets
 
 - Full-set `replaceStaticLandblockProducts` replacement handoff
+- `replaceStaticLandblockProducts` compatibility API after Phase 3B-5
 - `StaticLandblockRenderArtifactStore` naming once the coordinator becomes product-native
 - `StaticLandblockRenderArtifactCoordinator` naming once callbacks become product commit/evict events
 - `syncWebgl2StaticLandblockRenderArtifactResources` snapshot input shape
@@ -533,7 +673,7 @@ Acceptance criteria:
 
 ## Dry Run Findings
 
-- `BrowserRenderResourceCoordinator.update()` still does too much: product-set scene derivation, runtime preview staging, render chunk transform calculation, spatial index replacement, transition portal model derivation, debug overlay derivation, surface application, picker diagnostic cache, and report generation all happen in one call. Phase 4 must decompose this before later phases can be considered complete.
+- `BrowserRenderResourceCoordinator.update()` still does too much: product-set scene derivation, runtime preview staging, render chunk transform calculation, spatial index replacement, transition portal model derivation, debug overlay derivation, surface application, picker diagnostic cache, and report generation all happen in one call. Phase 3B-0 must move product placement/spatial authority out first; Phase 4 finishes decomposing the remaining report/preview responsibilities.
 - `WorldDisplayRendererOptions` and `WorldDisplay.svelte` still require legacy scene-model inputs at renderer construction. A new commit method alone is not enough; the renderer needs empty/default preview inputs plus product commit/evict methods so product rendering can initialize without a product set.
 - The current renderer contract still has a full-set `replaceStaticLandblockProducts` method. Keeping that as a reset path would preserve snapshot reconciliation. The target contract should use explicit commit/evict/clear only.
 - `syncWorldResources()` in `webgl2-world-display-renderer-impl.ts` still invokes both static product sync and broad world sync in one dirty-frame pass. Product commits must not mark broad world resources dirty.
@@ -562,3 +702,4 @@ Acceptance criteria:
 - 2026-06-05: Second dry run moved worker serialization earlier, moved LoD/product granularity before renderer product-store work, removed full-set replacement from the target commit surface, and made product-scoped detailed interior texture ownership explicit. The most concrete renderer-side footgun found was detailed interior texture page upload duplication per cell.
 - 2026-06-05: Resource multiplication audit promoted detailed interior texture/material hoisting into Phase 3A. Other similar issues found: terrain draw-slice buffers are allocated during reuse checks, broad terrain texture-page resources still depend on full-world sync retention, and browser spatial/report updates still rebuild full-set CPU structures.
 - 2026-06-05: Reframed the plan around structural simplification as the primary fix. Future implementation phases should delete ownership layers and broad reconciliation paths before adding more scheduling, diagnostics, or compatibility behavior.
+- 2026-06-05: Phase 3B was revised after implementation reached a real blocker: product-keyed WebGL commits depend on renderer-owned placement, portal, spatial, and terrain artifact facts that were still derived by `BrowserRenderResourceCoordinator` and scene-model adapters. The revised sequence adds Phase 3B-0 as a prerequisite and splits the product store into shell, static bundle, detailed interior, terrain, and final cutover phases. This avoids a fake product store that merely wraps the old full-set sync.

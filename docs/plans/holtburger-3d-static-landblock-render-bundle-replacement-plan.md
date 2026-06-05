@@ -25,7 +25,7 @@ cleanup, Phase 4D2B3 portal composite env-cell fallback removal, and Phase 4D2B4
 portal/culling source quarantine are implemented. Phase 4E0 artifact scene-bounds cutover is
 implemented. Phase 4E1 latent portal-clipped BVH debt removal and Phase 4E2 scope-aware staged
 static suppression are implemented. Phase 4E3 artifact-active outdoor static scene derivation
-cutover is implemented.
+cutover is implemented. Phase 4E4 indoor/dungeon env-cell product scheduling is implemented.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -361,6 +361,10 @@ Progress:
   longer derives the outdoor base `StaticRenderableSceneModel` from prepared landblock/env-cell
   assets. Runtime appearance previews still merge through the static scene because they are not
   landblock-derived static world content.
+- 2026-06-05: Added and implemented Phase 4E4 before the broad hard cutover. Indoor browser
+  destinations now schedule `dungeon-env-cells` worker products through the artifact coordinator, and
+  artifact-active coordinator updates stop deriving landblock static renderables for indoor
+  destinations as well as outdoor destinations.
 
 Validation:
 
@@ -429,6 +433,9 @@ Validation:
 - `npm exec vitest -- run src/lib/world-display/browser-render-resource-coordinator.test.ts src/lib/world-display/staged-world-assembly.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/static-renderables.test.ts`,
   `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
   `git diff --check` passed after Phase 4E3.
+- `npm exec vitest -- run src/lib/assets/landblock-render-product-planner.test.ts src/lib/world-display/static-landblock-render-artifact-coordinator.test.ts src/lib/world-display/browser-render-resource-coordinator.test.ts`,
+  `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
+  `git diff --check` passed after Phase 4E4.
 - `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts`
   passed after the first Phase 1D builder slice.
 - `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts`
@@ -4535,14 +4542,68 @@ Exit criteria:
 - Implemented. Focused coordinator/resource/static-renderable tests cover the cutover boundary.
 - Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
 
+#### Phase 4E4: Indoor/Dungeon Env-Cell Product Scheduling
+
+Added as an immediate hard-cutover phase after Phase 4E3. The plan required indoor/dungeon artifact
+coverage before deleting the remaining indoor/env-cell prepared static derivation path, but
+`planDesiredLandblockRenderProducts` still returned no products for indoor destinations.
+
+- Schedule `dungeon-env-cells` for indoor browser destinations using the destination landblock ID.
+- Keep outdoor destinations on the existing additive `outdoor` plus `outdoor-env-cells` scheduling
+  model.
+- Route the new indoor product requests through `StaticLandblockRenderArtifactCoordinator` without
+  adding separate indoor-specific coordinator state.
+- Expand the artifact-active static-scene cutover so indoor destinations stop deriving prepared
+  env-cell static renderables once artifact ownership is desired, in flight, or resident.
+
+Decisions and course corrections:
+
+- Implemented. The desired product planner now emits one `dungeon-env-cells` request for indoor
+  destinations and does not require `landblock/<id>/outdoor`.
+- Implemented. `StaticLandblockRenderArtifactCoordinator` submits the indoor/dungeon product through
+  the same request/store/stale-result path as outdoor products.
+- Implemented. `BrowserRenderResourceCoordinator` uses an empty base static renderable scene for any
+  non-null destination while static landblock artifacts are active. Runtime appearance previews still
+  merge separately.
+- Course correction: this phase deliberately uses `dungeon-env-cells` for indoor destinations because
+  an indoor destination does not prove outdoor-landblock ownership on the main thread. The worker
+  topology/env-cell path is the same artifact builder and avoids accidentally requiring outdoor
+  terrain/static roots.
+
+Cleanup targets discovered:
+
+- `deriveStructuredInteriorSceneModel` still falls back to prepared env-cell payloads while detailed
+  artifacts are absent. The next hard-cutover phase should make structured-interior scene handoff
+  artifact-active for indoor/dungeon destinations instead of preserving that prepared-state fallback.
+- `deriveStructuredInteriorCoverageForInput` still uses `AssetChannelState.preparedByAssetId` for
+  closure expansion. Once detailed artifacts are the mandatory env-cell source, coverage should come
+  from destination/product interest and resident artifact selected env-cell IDs.
+- `StaticRenderableSceneModel` still contains landblock-derived static branches for the non-artifact
+  path. After structured-interior fallback is cut over, delete or split those branches so the model is
+  only used for runtime appearance previews or other non-landblock scene elements.
+
+Legacy shims introduced:
+
+- None. The planner now schedules the target worker product for indoor destinations; no alternate
+  main-thread hydration mode was added.
+
+Exit criteria:
+
+- Implemented. Indoor destinations plan and submit `dungeon-env-cells` product requests.
+- Implemented. Artifact-active indoor coordinator updates no longer derive prepared env-cell static
+  renderables into `StaticRenderableSceneModel`.
+- Implemented. Focused planner, artifact coordinator, and browser render coordinator tests cover the
+  new scheduling and cutover behavior.
+- Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
+
 ### Phase 4E: Hard Cutover From Main-Thread Static Hydration
 
 - Stop using `scene-asset-request-planner.ts` and `AssetChannelState.preparedByAssetId` as the
   source of topology/env-cell/static/interior renderable hydration for migrated topology/env-cell
   products.
-- Add artifact product scheduling for indoor/dungeon destinations before deleting the remaining
-  indoor/env-cell prepared static derivation path. Dungeon landblocks should request the
-  topology/env-cell product directly; they must not require outdoor terrain/static artifacts.
+- Cut `StructuredInteriorSceneModel` fallback over for artifact-active indoor/dungeon destinations so
+  prepared env-cell shell geometry is not derived while worker detailed artifacts are desired or in
+  flight.
 - Remove outdoor static objects, env-cell statics, and structured interior geometry from
   `StaticRenderableSceneModel`, `StructuredInteriorSceneModel`, staged draw-unit assembly, static
   compaction planning, direct suppression, and visible submit.

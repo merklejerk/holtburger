@@ -302,11 +302,10 @@ export class BrowserRenderResourceCoordinator {
 			input,
 			linkedOutdoorEnvCellIds,
 		);
-		const useStaticLandblockStaticArtifacts =
-			shouldUseStaticLandblockStaticArtifacts({
-				browserDestination: input.browserDestination,
-				snapshot: input.staticLandblockRenderArtifacts,
-			});
+		const useStaticLandblockStaticArtifacts = shouldUseStaticLandblockArtifacts({
+			browserDestination: input.browserDestination,
+			snapshot: input.staticLandblockRenderArtifacts,
+		});
 		const baseStaticRenderableScene = useStaticLandblockStaticArtifacts
 			? createEmptyStaticRenderableSceneModel()
 			: deriveStaticRenderableSceneModel(
@@ -1102,7 +1101,7 @@ function shouldUseStaticLandblockTerrainArtifacts(
 	);
 }
 
-function shouldUseStaticLandblockStaticArtifacts({
+function shouldUseStaticLandblockArtifacts({
 	browserDestination,
 	snapshot,
 }: {
@@ -1110,7 +1109,7 @@ function shouldUseStaticLandblockStaticArtifacts({
 	snapshot: StaticLandblockRenderArtifactStoreSnapshot;
 }): boolean {
 	return (
-		browserDestination?.kind === "outdoor-location" &&
+		browserDestination !== null &&
 		(snapshot.desiredCount > 0 ||
 			snapshot.inFlightCount > 0 ||
 			snapshot.residentCount > 0)

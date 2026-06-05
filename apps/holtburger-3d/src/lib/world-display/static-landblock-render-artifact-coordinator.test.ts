@@ -70,6 +70,33 @@ describe("static landblock render artifact coordinator", () => {
 		expect(firstRequestId).toBe("static-landblock-render:1");
 		coordinator.dispose();
 	});
+
+	it("submits dungeon env-cell products for indoor destinations", () => {
+		const client = new MockLandblockProductClient();
+		const destination = parseBrowserLocationInput("da550100", "manual", "dungeon");
+		expect(destination).not.toBeNull();
+		const coordinator = new StaticLandblockRenderArtifactCoordinator({
+			client,
+		});
+
+		coordinator.sync({
+			browserDestination: destination,
+			terrainLodRadius: 0,
+			buildingLodRadius: 0,
+			detailLodRadius: 0,
+			envCellLodRadius: 0,
+		});
+
+		expect(client.requests).toHaveLength(1);
+		expect(client.requests[0]).toMatchObject({
+			landblockId: 0xda55ffff,
+			product: "dungeon-env-cells",
+			priority: "resident-now",
+			buildPolicyRevision: "static-landblock-render:v1",
+			texturePagePolicyRevision: "static-landblock-texture-pages:v1",
+		});
+		coordinator.dispose();
+	});
 });
 
 class MockLandblockProductClient {

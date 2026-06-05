@@ -172,11 +172,11 @@ describe("landblock render product planner", () => {
 		expect(products.map((product) => product.product)).toEqual(["outdoor"]);
 	});
 
-	it("does not plan outdoor landblock products while focused indoors", () => {
+	it("plans dungeon env-cell products while focused indoors", () => {
 		const destination = parseBrowserLocationInput(
 			"da550155",
 			"manual",
-			"indoor",
+			"dungeon",
 		);
 		expect(destination).not.toBeNull();
 
@@ -188,7 +188,17 @@ describe("landblock render product planner", () => {
 				texturePagePolicyRevision: "texture-pages:v1",
 				buildPolicy: createBuildPolicy(),
 			}),
-		).toEqual([]);
+		).toEqual([
+			{
+				landblockId: 0xda55ffff,
+				product: "dungeon-env-cells",
+				priority: "resident-now",
+				requestId: "request:indoor",
+				buildPolicyRevision: "build:v1",
+				texturePagePolicyRevision: "texture-pages:v1",
+				buildPolicy: createBuildPolicy(),
+			},
+		]);
 	});
 });
 

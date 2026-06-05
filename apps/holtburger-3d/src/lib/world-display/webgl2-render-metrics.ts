@@ -303,10 +303,10 @@ export function createWebgl2RenderMetrics(
 			compactionCoverageVisibleRetainedDirectMaterialFamilyCounts:
 				input.submitMetrics
 					.visibleRetainedDirectDrawUnitCountsByCompactionFamily,
-			textureAtlasGenerationTextureCount:
-				input.worldStore?.textureAtlasGenerationTextureCount ?? 0,
-			detailTextureAtlasGenerationTextureCount:
-				input.worldStore?.detailTextureAtlasGenerationTextureCount ?? 0,
+			terrainTexturePageCount:
+				input.worldStore?.terrainTexturePageCount ?? 0,
+			terrainDetailTexturePageCount:
+				input.worldStore?.terrainDetailTexturePageCount ?? 0,
 			rgbaTexturePageFamilyShaderDrawCallCount:
 				input.submitMetrics.rgbaTexturePageFamilyShaderDrawCallCount,
 			rgbaTexturePageFamilySubmittedBatchCount:
@@ -483,10 +483,10 @@ export function createWebgl2RenderMetrics(
 							input.submitMetrics
 								.visibleRetainedDirectDrawUnitCountsByCompactionFamily,
 						),
-						"webgl2-texture-atlas-generation-textures":
-							input.worldStore.textureAtlasGenerationTextureCount,
-						"webgl2-detail-texture-atlas-generation-textures":
-							input.worldStore.detailTextureAtlasGenerationTextureCount,
+						"webgl2-terrain-texture-pages":
+							input.worldStore.terrainTexturePageCount,
+						"webgl2-terrain-detail-texture-pages":
+							input.worldStore.terrainDetailTexturePageCount,
 						"webgl2-rgba-family-shader-draws":
 							input.submitMetrics.rgbaTexturePageFamilyShaderDrawCallCount,
 						"webgl2-rgba-family-submitted-batches":

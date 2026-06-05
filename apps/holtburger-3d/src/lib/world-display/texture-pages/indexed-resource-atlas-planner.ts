@@ -31,7 +31,7 @@ interface IndexedResourceAtlasFailure {
 	detail: string;
 }
 
-export interface IndexedTexelAtlasPlacement {
+interface IndexedTexelAtlasPlacement {
 	indexTextureKey: string;
 	format: IndexedResourceAtlasIndexFormat;
 	atlasTextureIndex: number;
@@ -42,7 +42,7 @@ export interface IndexedTexelAtlasPlacement {
 	sourceBytes: Uint8Array;
 }
 
-export interface IndexedPaletteAtlasPlacement {
+interface IndexedPaletteAtlasPlacement {
 	paletteTextureKey: string;
 	atlasTextureIndex: number;
 	x: number;
@@ -51,7 +51,7 @@ export interface IndexedPaletteAtlasPlacement {
 	rgbaBytes: Uint8Array;
 }
 
-export interface IndexedTexelAtlasPage {
+interface IndexedTexelAtlasPage {
 	format: IndexedResourceAtlasIndexFormat;
 	textureIndex: number;
 	width: number;
@@ -59,7 +59,7 @@ export interface IndexedTexelAtlasPage {
 	placements: readonly IndexedTexelAtlasPlacement[];
 }
 
-export interface IndexedPaletteAtlasPage {
+interface IndexedPaletteAtlasPage {
 	textureIndex: number;
 	width: number;
 	height: number;

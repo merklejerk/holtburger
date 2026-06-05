@@ -179,8 +179,8 @@ interface WorldRenderDebugMetrics {
 		string,
 		number
 	>;
-	textureAtlasGenerationTextureCount: number;
-	detailTextureAtlasGenerationTextureCount: number;
+	terrainTexturePageCount: number;
+	terrainDetailTexturePageCount: number;
 	rgbaTexturePageFamilyShaderDrawCallCount: number;
 	rgbaTexturePageFamilySubmittedBatchCount: number;
 	rgbaTexturePageFamilySubmittedDrawSliceCount: number;

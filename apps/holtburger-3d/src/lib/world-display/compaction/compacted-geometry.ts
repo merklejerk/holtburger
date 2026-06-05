@@ -49,7 +49,7 @@ interface CompactedDrawRange {
 	materialSlotIndex: number;
 }
 
-export interface CompactedGeometrySlice {
+interface CompactedGeometrySlice {
 	key: string;
 	renderStateKey: string;
 	firstIndex: number;

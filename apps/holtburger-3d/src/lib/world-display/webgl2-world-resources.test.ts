@@ -32,8 +32,6 @@ import {
 } from "./terrain-tile-plan";
 import { createEmptyTransitionPortalCandidateModel } from "./transition-portal-work-items";
 import {
-	commitWebgl2IndexedResourceAtlasGeneration,
-	commitWebgl2TextureAtlasGeneration,
 	createWebgl2WorldResourceStore,
 	destroyWebgl2WorldResources,
 	syncWebgl2StaticLandblockRenderArtifactResources,
@@ -41,48 +39,8 @@ import {
 } from "./webgl2-world-resources";
 import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
 import type { StaticObjectBundleArtifact } from "./static-bundle-layer";
-import type { Webgl2IndexedResourceAtlasGenerationResource } from "./webgl2/resources/indexed-resource-atlas-generation";
-import type { Webgl2TextureAtlasGenerationResource } from "./webgl2/resources/texture-atlas-generation";
 
 describe("webgl2 world resources", () => {
-	it("disposes the previous texture atlas generation on commit", () => {
-		const disposedKeys: string[] = [];
-		const store = createWebgl2WorldResourceStore();
-		const previous = createTextureAtlasGeneration(
-			"texture-atlas/previous",
-			disposedKeys,
-		);
-		const next = createTextureAtlasGeneration(
-			"texture-atlas/next",
-			disposedKeys,
-		);
-		store.textureAtlasGeneration = previous;
-
-		commitWebgl2TextureAtlasGeneration({ store, generation: next });
-
-		expect(store.textureAtlasGeneration).toBe(next);
-		expect(disposedKeys).toEqual([previous.key]);
-	});
-
-	it("disposes the previous indexed atlas generation on commit", () => {
-		const disposedKeys: string[] = [];
-		const store = createWebgl2WorldResourceStore();
-		const previous = createIndexedAtlasGeneration(
-			"indexed-atlas/previous",
-			disposedKeys,
-		);
-		const next = createIndexedAtlasGeneration(
-			"indexed-atlas/next",
-			disposedKeys,
-		);
-		store.indexedResourceAtlasGeneration = previous;
-
-		commitWebgl2IndexedResourceAtlasGeneration({ store, generation: next });
-
-		expect(store.indexedResourceAtlasGeneration).toBe(next);
-		expect(disposedKeys).toEqual([previous.key]);
-	});
-
 	it("syncs resident outdoor static bundle layers into WebGL resources", () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
@@ -2270,40 +2228,4 @@ function createLeafBspNode(): PreparedPolygonSetBspNode {
 
 function createTransitionPortalModel() {
 	return createEmptyTransitionPortalCandidateModel();
-}
-
-function createTextureAtlasGeneration(
-	key: string,
-	disposedKeys: string[],
-): Webgl2TextureAtlasGenerationResource {
-	return {
-		key,
-		textures: [],
-		placements: [],
-		detailTextures: [],
-		detailPlacements: [],
-		preparedTextureAssetIds: [],
-		rgbaAtlasReadyDrawUnitIds: [],
-		dispose() {
-			disposedKeys.push(key);
-		},
-	};
-}
-
-function createIndexedAtlasGeneration(
-	key: string,
-	disposedKeys: string[],
-): Webgl2IndexedResourceAtlasGenerationResource {
-	return {
-		key,
-		indexTextures: [],
-		paletteTextures: [],
-		indexPlacements: [],
-		palettePlacements: [],
-		indexReadyDrawUnitIds: [],
-		paletteReadyDrawUnitIds: [],
-		dispose() {
-			disposedKeys.push(key);
-		},
-	};
 }

@@ -33,8 +33,9 @@ Phase 4E8 staged structured-interior draw path removal is implemented.
 Phase 4E9 staged static renderable draw path removal is implemented.
 Phase 4E10 static compaction render-resource worker deletion is implemented.
 Phase 4E11 artifact-native diagnostics/metrics cleanup is implemented.
-Phase 4E12 atlas render-resource worker deletion is implemented, with Phase 4E13 added for the
-remaining global atlas generation resource model cleanup.
+Phase 4E12 atlas render-resource worker deletion and Phase 4E13 global atlas generation resource
+model cleanup are implemented. Phase 4E14 removed family metrics and diagnostics cleanup is added
+as an immediate follow-up before broader Phase 6 cleanup.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -410,6 +411,12 @@ Progress:
   preview atlas generation now build CPU atlas generations synchronously inside WebGL resource sync
   and immediately upload the matching WebGL resources, so there is no pending replacement or stale
   worker-result accounting left.
+- 2026-06-05: Implemented Phase 4E13. Deleted the remaining global atlas generation ownership from
+  `Webgl2WorldResourceStore`, removed the old compacted family submit modules/programs/resource
+  types, moved terrain texture page WebGL resources under terrain resource ownership, and stopped
+  resolving retained direct draw texture pages against global atlas generation state. Phase 4E14 is
+  added before Phase 6 because the old submit-family metrics and browser diagnostics text now lag
+  the deleted submit/resource model.
 
 Validation:
 
@@ -5230,15 +5237,96 @@ survive the static landblock replacement cleanup.
 - Update metrics from atlas generation texture counts to terrain/preview page texture ownership
   counts.
 
+Decisions and course corrections:
+
+- Implemented. `Webgl2WorldResourceStore` no longer owns `textureAtlasGeneration`,
+  `indexedResourceAtlasGeneration`, their graph leases, or global generation texture-count metrics.
+- Implemented. Terrain texture pages are now owned directly by the terrain resource path. Terrain
+  bindings carry `texturePage` resources, and terrain submit resolves color, mask, and detail
+  textures from those bindings instead of consulting global atlas generation resources.
+- Implemented. The old compacted submit-family modules, indexed resource atlas generation resource
+  module, compacted geometry resource type module, and their now-obsolete tests were deleted. Static
+  object bundles already own their artifact texture pages and geometry resources, so keeping these
+  submit-family adapters would only preserve a parallel renderer mode.
+- Implemented. Retained direct draw units no longer resolve packed base pages from a global atlas
+  generation. Manual/direct texture page bindings remain local draw-unit data; missing packed
+  bindings now stay a direct-draw readiness diagnostic instead of triggering a global generation
+  lookup.
+- Course correction: `webgl2/resources/texture-atlas-generation.ts` remains as a CPU atlas-page
+  upload helper for terrain page generation, not as a world-store generation owner. Its name and
+  wrapper resource type now overstate the active ownership model and should be renamed or split in a
+  cleanup phase.
+- Course correction: terrain page generation currently passes a sentinel
+  `rgbaAtlasReadyDrawUnitIds` value into `createTextureAtlasCpuGeneration` because that helper still
+  has the old global-generation nullability contract. This is internal helper debt, not a
+  compatibility shim, and should be removed when the terrain/page upload helper is renamed.
+
+Cleanup targets discovered:
+
+- Rename or split `webgl2/resources/texture-atlas-generation.ts` into a terrain/page CPU upload
+  helper and delete `Webgl2TextureAtlasGenerationResource` if no production caller needs that wrapper
+  after the rename.
+- Remove stale `rgbaTexturePageFamily*` and `indexedPalettedFamily*` metrics/debug fields now that
+  the family submit modules and programs are gone.
+- Revisit `IndexedResourceAtlasPlan` and indexed atlas planning metrics after the global indexed
+  generation resource deletion. If they only describe the deleted global indexed path, delete them;
+  if they still serve preview diagnostics, rename them to that explicit owner.
+- Rename direct packed fallback diagnostics that still say "texture atlas generation"; retained
+  direct draw no longer has a global generation to wait on.
+
+Legacy shims introduced:
+
+- None. The global generation store fields, commit/sync helpers, compacted submit-family modules,
+  and indexed generation resource module were deleted outright. The temporary terrain sentinel is an
+  internal helper-contract cleanup target, not a public compatibility mode.
+
+Validation:
+
+- `npm exec vitest -- run src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts`
+  passed.
+- `npm run check` passed.
+- `npm run lint:ts` passed.
+- `npm run lint:dead` passed.
+- `npm run lint:rust` passed.
+- `git diff --check` passed.
+
 Exit criteria:
 
-- `Webgl2WorldResourceStore` no longer stores `textureAtlasGeneration`,
+- Implemented. `Webgl2WorldResourceStore` no longer stores `textureAtlasGeneration`,
   `indexedResourceAtlasGeneration`, or atlas generation graph leases for landblock rendering.
-- Terrain rendering binds terrain-owned texture page resources without global atlas generation
-  replacement/state keys.
-- Preview indexed rendering is direct or owned by a clearly named preview-only renderer feature.
-- Metrics and debug text no longer expose global atlas generation texture counts for landblock
-  rendering.
+- Implemented. Terrain rendering binds terrain-owned texture page resources without global atlas
+  generation replacement/state keys.
+- Implemented. Preview indexed rendering is direct/local to preview draw units; no global indexed
+  atlas generation resource remains.
+- Implemented with follow-up. Metrics no longer expose global atlas generation texture counts for
+  landblock rendering, but stale submit-family counters and browser labels remain. Phase 4E14 owns
+  that diagnostic cleanup before broader Phase 6 consolidation.
+
+### Phase 4E14: Removed Family Metrics and Diagnostics Cleanup
+
+Added immediately after Phase 4E13 because the deleted compacted submit-family modules left
+zero-valued counters and browser diagnostics that still describe `rgbaTexturePageFamily` and
+`indexedPalettedFamily` submit routes. This is smaller than Phase 6 and should land before the
+broader cleanup so diagnostics do not preserve deleted architecture.
+
+- Remove stale `rgbaTexturePageFamily*` and `indexedPalettedFamily*` fields from
+  `Webgl2WorldSubmitMetrics`, `WorldRenderDebugMetrics`, WebGL metric assembly, browser debug
+  panels, and scene-domain metric combination.
+- Remove or redefine `directPackedTexturePageTextureCount`. If retained, it should count concrete
+  direct draw texture page bindings, not old global atlas generation resources.
+- Rename direct fallback samples that still say "texture atlas generation" so they describe missing
+  direct packed bindings or missing terrain page resources.
+- Decide whether remaining compaction/indexed atlas planning metrics are useful preview diagnostics
+  or stale static landblock residue. Keep only metrics with an active owner.
+
+Exit criteria:
+
+- Public debug text and metrics no longer reference deleted submit-family routes, compacted family
+  submit resources, or global atlas generation ownership.
+- Retained direct draw diagnostics name direct texture binding problems rather than deleted global
+  generation resources.
+- Any remaining atlas/page metric has an explicit active owner: terrain page resources, static
+  artifact-owned pages, structured-interior artifact-owned pages, or preview/direct draw bindings.
 
 ### Phase 6: Cleanup and Consolidation
 

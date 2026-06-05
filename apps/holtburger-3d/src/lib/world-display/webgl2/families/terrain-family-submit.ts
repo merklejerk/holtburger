@@ -9,9 +9,9 @@ import {
 	describeTerrainBlendTextureAtlasEntryKey,
 	type Webgl2TerrainTileDrawSliceResource,
 	type Webgl2TerrainTileResource,
+	type Webgl2TerrainTexturePageResource,
 	type Webgl2TerrainTileTexturePageBinding,
 } from "../resources/terrain-tile-resources";
-import type { Webgl2TextureAtlasGenerationResource } from "../resources/texture-atlas-generation";
 import { applyOpaqueCompactedFamilyRenderState } from "./family-render-state";
 
 const WEBGL2_TERRAIN_FAMILY_MAX_LAYER_ENTRIES = 8;
@@ -105,7 +105,6 @@ export function submitWebgl2TerrainFamilyTiles({
 	viewProjectionMatrix,
 	cameraPosition,
 	terrainTiles,
-	generation,
 	terrainBackfaceCulling,
 }: {
 	gl: WebGL2RenderingContext;
@@ -114,7 +113,6 @@ export function submitWebgl2TerrainFamilyTiles({
 	viewProjectionMatrix: RenderMat4;
 	cameraPosition: Vec3Dto;
 	terrainTiles: readonly Webgl2TerrainFamilyDrawableResource[];
-	generation: Webgl2TextureAtlasGenerationResource;
 	terrainBackfaceCulling: boolean;
 }): Webgl2TerrainFamilySubmitMetrics {
 	const metrics: Webgl2TerrainFamilySubmitMetrics = {
@@ -143,7 +141,7 @@ export function submitWebgl2TerrainFamilyTiles({
 	);
 	const modelViewProjection = new Float32Array(16);
 	for (const tile of terrainTiles) {
-		const submitPlan = createTerrainTileFamilySubmitPlan(tile, generation);
+		const submitPlan = createTerrainTileFamilySubmitPlan(tile);
 		if (!submitPlan) {
 			metrics.fallbackSamples = [
 				...metrics.fallbackSamples,
@@ -202,54 +200,23 @@ export function submitWebgl2TerrainFamilyTiles({
 
 function createTerrainTileFamilySubmitPlan(
 	tile: Webgl2TerrainFamilyDrawableResource,
-	generation: Webgl2TextureAtlasGenerationResource,
 ) {
-	const colorTextureIndex = singleTerrainTextureIndex(
+	const colorAtlasTexture = singleTerrainTexturePage(
 		tile.texturePageBindings,
 		"terrain-color",
 	);
-	if (colorTextureIndex === null) {
-		return null;
-	}
-	const colorAtlasTexture =
-		generation.textures.find(
-			(texture) =>
-				texture.family === "terrain-color" &&
-				texture.textureIndex === colorTextureIndex,
-		) ?? null;
 	if (!colorAtlasTexture) {
 		return null;
 	}
-	const maskTextureIndex = singleTerrainTextureIndex(
-		tile.texturePageBindings,
-		"terrain-mask",
-	);
 	const maskAtlasTexture =
-		maskTextureIndex === null
-			? colorAtlasTexture
-			: (generation.textures.find(
-					(texture) =>
-						texture.family === "terrain-mask" &&
-						texture.textureIndex === maskTextureIndex,
-				) ?? null);
-	if (!maskAtlasTexture) {
-		return null;
-	}
-	const detailTextureIndex = singleTerrainTextureIndex(
+		singleTerrainTexturePage(
+			tile.texturePageBindings,
+			"terrain-mask",
+		) ?? colorAtlasTexture;
+	const detailAtlasTexture = singleTerrainTexturePage(
 		tile.texturePageBindings,
 		"terrain-detail",
 	);
-	const detailAtlasTexture =
-		detailTextureIndex === null
-			? null
-			: (generation.detailTextures.find(
-					(texture) =>
-						texture.family === "terrain-detail" &&
-						texture.textureIndex === detailTextureIndex,
-				) ?? null);
-	if (detailTextureIndex !== null && !detailAtlasTexture) {
-		return null;
-	}
 	return {
 		colorAtlasTexture,
 		maskAtlasTexture,
@@ -257,20 +224,20 @@ function createTerrainTileFamilySubmitPlan(
 	};
 }
 
-function singleTerrainTextureIndex(
+function singleTerrainTexturePage(
 	bindings: readonly Webgl2TerrainTileTexturePageBinding[],
 	family: Webgl2TerrainTileTexturePageBinding["family"],
-): number | null {
-	const indices = [
+): Webgl2TerrainTexturePageResource | null {
+	const pages = [
 		...new Set(
 			bindings.flatMap((binding) =>
-				binding.family === family && binding.textureIndex !== null
-					? [binding.textureIndex]
+				binding.family === family && binding.texturePage
+					? [binding.texturePage]
 					: [],
 			),
 		),
 	];
-	return indices.length === 1 ? (indices[0] ?? null) : null;
+	return pages.length === 1 ? (pages[0] ?? null) : null;
 }
 
 function uploadTerrainLayerUniforms(

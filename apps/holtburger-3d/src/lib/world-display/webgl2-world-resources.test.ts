@@ -17,8 +17,6 @@ import { createBaseMaterialAppearanceContext } from "./material-appearance";
 import type { ResolvedMaterialSlot } from "./material-plan";
 import { WORLD_RENDER_DOMAIN } from "./render-domains";
 import { RendererResourceGraph } from "./renderer-resource-graph";
-import { RenderResourceWorkerClient } from "./render-resource-worker-client";
-import type { RenderResourceWorkerLike } from "./render-resource-worker-client";
 import type { RenderChunkTransform } from "./render-anchor";
 import {
 	createEmptyStaticRenderableSceneModel,
@@ -38,23 +36,16 @@ import {
 	commitWebgl2TextureAtlasGeneration,
 	createWebgl2WorldResourceStore,
 	destroyWebgl2WorldResources,
-	markWebgl2IndexedResourceAtlasGenerationReplacementPending,
-	markWebgl2TextureAtlasGenerationReplacementPending,
 	syncWebgl2StaticLandblockRenderArtifactResources,
 	syncWebgl2WorldResources,
-	type Webgl2WorldResourceStore,
 } from "./webgl2-world-resources";
 import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
 import type { StaticObjectBundleArtifact } from "./static-bundle-layer";
 import type { Webgl2IndexedResourceAtlasGenerationResource } from "./webgl2/resources/indexed-resource-atlas-generation";
 import type { Webgl2TextureAtlasGenerationResource } from "./webgl2/resources/texture-atlas-generation";
-import { TextureAtlasWorkerScheduler } from "./worker-resources/texture-atlas-worker-scheduler";
-import type {
-	RenderResourceWorkerRequestMessage,
-} from "../../workers/render-resource-worker";
 
 describe("webgl2 world resources", () => {
-	it("keeps committed texture atlas generation alive while a replacement is pending", () => {
+	it("disposes the previous texture atlas generation on commit", () => {
 		const disposedKeys: string[] = [];
 		const store = createWebgl2WorldResourceStore();
 		const previous = createTextureAtlasGeneration(
@@ -67,23 +58,13 @@ describe("webgl2 world resources", () => {
 		);
 		store.textureAtlasGeneration = previous;
 
-		markWebgl2TextureAtlasGenerationReplacementPending({
-			store,
-			generationKey: next.key,
-		});
-
-		expect(store.textureAtlasGeneration).toBe(previous);
-		expect(store.pendingTextureAtlasGenerationKey).toBe(next.key);
-		expect(disposedKeys).toEqual([]);
-
 		commitWebgl2TextureAtlasGeneration({ store, generation: next });
 
 		expect(store.textureAtlasGeneration).toBe(next);
-		expect(store.pendingTextureAtlasGenerationKey).toBeNull();
 		expect(disposedKeys).toEqual([previous.key]);
 	});
 
-	it("keeps committed indexed atlas generation alive while a replacement is pending", () => {
+	it("disposes the previous indexed atlas generation on commit", () => {
 		const disposedKeys: string[] = [];
 		const store = createWebgl2WorldResourceStore();
 		const previous = createIndexedAtlasGeneration(
@@ -96,19 +77,9 @@ describe("webgl2 world resources", () => {
 		);
 		store.indexedResourceAtlasGeneration = previous;
 
-		markWebgl2IndexedResourceAtlasGenerationReplacementPending({
-			store,
-			generationKey: next.key,
-		});
-
-		expect(store.indexedResourceAtlasGeneration).toBe(previous);
-		expect(store.pendingIndexedResourceAtlasGenerationKey).toBe(next.key);
-		expect(disposedKeys).toEqual([]);
-
 		commitWebgl2IndexedResourceAtlasGeneration({ store, generation: next });
 
 		expect(store.indexedResourceAtlasGeneration).toBe(next);
-		expect(store.pendingIndexedResourceAtlasGenerationKey).toBeNull();
 		expect(disposedKeys).toEqual([previous.key]);
 	});
 
@@ -450,7 +421,6 @@ describe("webgl2 world resources", () => {
 	it("keeps layer-limit terrain draw slices ready for atlas rendering", () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
-		installTextureAtlasWorkerScheduler(store);
 		const graph = new RendererResourceGraph();
 		const terrainCodes = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 		const assetState = createAssetStateWithTerrainMaterials(terrainCodes);
@@ -498,7 +468,6 @@ describe("webgl2 world resources", () => {
 	it("realizes worker terrain artifacts from artifact geometry and page refs", () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
-		installTextureAtlasWorkerScheduler(store);
 		const graph = new RendererResourceGraph();
 		const renderSurfaceId = 0x06000010;
 		const terrainTile = createWorkerArtifactTerrainTile({
@@ -783,7 +752,6 @@ describe("webgl2 world resources", () => {
 	it("reports atlas-eligible direct materials without changing preview direct rendering", () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
-		installTextureAtlasWorkerScheduler(store);
 		const materialSurfaceId = 0x08000002;
 		const renderSurfaceId = 0x06000002;
 
@@ -812,43 +780,6 @@ describe("webgl2 world resources", () => {
 	});
 
 });
-
-class FakeRenderResourceWorker implements RenderResourceWorkerLike {
-	onmessage:
-		| ((event: MessageEvent<RenderResourceWorkerResponseMessage>) => void)
-		| null = null;
-	onerror: ((event: Event | ErrorEvent) => void) | null = null;
-	readonly messages: RenderResourceWorkerRequestMessage[] = [];
-	readonly transferLists: Transferable[][] = [];
-	readonly completedRequestIds = new Set<string>();
-	wasTerminated = false;
-
-	postMessage(
-		message: RenderResourceWorkerRequestMessage,
-		transferables: Transferable[] = [],
-	): void {
-		this.messages.push(message);
-		this.transferLists.push(transferables);
-	}
-
-	terminate(): void {
-		this.wasTerminated = true;
-	}
-
-}
-
-function installTextureAtlasWorkerScheduler(
-	store: Webgl2WorldResourceStore,
-): FakeRenderResourceWorker {
-	const worker = new FakeRenderResourceWorker();
-	store.textureAtlasWorkerScheduler = new TextureAtlasWorkerScheduler({
-		client: new RenderResourceWorkerClient(() => worker),
-		onReadyResult() {
-			return;
-		},
-	});
-	return worker;
-}
 
 class FakeWebgl2 {
 	readonly ARRAY_BUFFER = 1;

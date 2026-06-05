@@ -33,6 +33,8 @@ Phase 4E8 staged structured-interior draw path removal is implemented.
 Phase 4E9 staged static renderable draw path removal is implemented.
 Phase 4E10 static compaction render-resource worker deletion is implemented.
 Phase 4E11 artifact-native diagnostics/metrics cleanup is implemented.
+Phase 4E12 atlas render-resource worker deletion is implemented, with Phase 4E13 added for the
+remaining global atlas generation resource model cleanup.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -402,6 +404,12 @@ Progress:
   material-type metrics. Deleted the inert compacted batch/family maps from `Webgl2WorldResourceStore`
   and reduced selected draw-unit runtime diagnostics to direct/missing path facts instead of
   reporting deleted compacted route resources.
+- 2026-06-05: Implemented Phase 4E12 with a scope correction. Deleted the remaining
+  render-resource-worker stack: atlas scheduler classes, worker payload modules, worker client,
+  generic scheduler, worker entrypoint, worker job kinds, and worker/payload tests. Terrain and
+  preview atlas generation now build CPU atlas generations synchronously inside WebGL resource sync
+  and immediately upload the matching WebGL resources, so there is no pending replacement or stale
+  worker-result accounting left.
 
 Validation:
 
@@ -5132,30 +5140,105 @@ or narrow them behind a clearly non-landblock renderer feature boundary.
 
 Decisions and course corrections:
 
-- Pending. Phase 4E10 proved the atlas schedulers are not static-only today: terrain still uses the
-  RGBA atlas worker, and non-static/preview indexed-family atlas generation still uses the indexed
-  atlas worker. This phase owns the follow-up deletion path explicitly.
+- Implemented. `TextureAtlasWorkerScheduler`, `IndexedResourceAtlasWorkerScheduler`, their payload
+  modules/tests, `RenderResourceWorkerClient`, `RenderResourceJobScheduler`, and
+  `render-resource-worker.ts` were deleted. No render-resource worker job kind remains for
+  `build-texture-atlas` or `build-indexed-resource-atlas`.
+- Implemented. `webgl2-world-display-renderer-impl.ts` no longer constructs atlas worker schedulers
+  during WebGL initialization.
+- Implemented. `syncWebgl2TextureAtlasGeneration` and
+  `syncWebgl2IndexedResourceAtlasGeneration` no longer schedule desired worker jobs, consume ready
+  results, mark committed results, or preserve old generations while replacements are pending. They
+  build CPU atlas generations synchronously for the current plan and immediately create the WebGL
+  generation resource.
+- Implemented. Public renderer debug metrics and `BrowserWorldDisplay.svelte` no longer expose
+  texture/indexed atlas worker lifecycle counters.
+- Course correction: this phase removes the render-resource worker and pending replacement model, but
+  it does not yet eliminate the global atlas generation resource model itself. Terrain, retained
+  preview direct texture pages, and the old compacted-family submit helper inputs still reference
+  `Webgl2TextureAtlasGenerationResource` / `Webgl2IndexedResourceAtlasGenerationResource`. Phase
+  4E13 is added immediately before final cleanup to replace or explicitly re-own those generation
+  resources.
 
 Cleanup targets to carry into this phase:
 
-- `syncWebgl2TextureAtlasGeneration` and `syncWebgl2IndexedResourceAtlasGeneration` still encode
-  global generation replacement state. Replace or delete them when terrain/non-static atlas ownership
-  is artifact-native or explicitly non-landblock.
-- `TextureAtlasWorkerScheduler`, `IndexedResourceAtlasWorkerScheduler`, their payload modules, and
-  render-resource worker job kinds should be deleted if no named non-landblock feature claims them.
-- Terrain atlas metrics should report terrain artifact page ownership rather than global atlas
-  generation jobs.
+- Completed. `syncWebgl2TextureAtlasGeneration` and
+  `syncWebgl2IndexedResourceAtlasGeneration` no longer encode pending replacement state, but their
+  remaining global generation resource ownership is carried into Phase 4E13.
+- Completed. `TextureAtlasWorkerScheduler`, `IndexedResourceAtlasWorkerScheduler`, their payload
+  modules, and render-resource worker job kinds were deleted because no named non-landblock feature
+  claimed them.
+- Terrain atlas metrics still report global atlas generation texture counts. Phase 4E13 should move
+  those metrics to terrain artifact/direct texture page ownership or delete them with the generation
+  resources.
+
+Cleanup targets discovered:
+
+- Delete or re-own `Webgl2TextureAtlasGenerationResource`,
+  `Webgl2IndexedResourceAtlasGenerationResource`, `syncWebgl2TextureAtlasGeneration`, and
+  `syncWebgl2IndexedResourceAtlasGeneration` in Phase 4E13.
+- Delete or rewrite compacted-family submit helper tests that still use global atlas generation
+  fixtures after Phase 4E13 replaces the last caller.
+- Rename remaining material-type debug keys that say `webgl2-texture-atlas-generation-*` once the
+  generation resource model is gone.
+
+Legacy shims introduced:
+
+- None. The render-resource worker API, schedulers, payload modules, and job kinds were deleted
+  outright. The synchronous CPU atlas build is a temporary ownership simplification, documented as
+  Phase 4E13 debt, not a compatibility mode.
+
+Validation:
+
+- `npm exec vitest -- run src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-texture-atlas-generation.test.ts src/lib/world-display/webgl2-indexed-resource-atlas-generation.test.ts`
+  passed.
+- `npm run check` passed.
+- `npm run lint:ts` passed.
+- `npm run lint:dead` passed.
+- `npm run lint:rust` passed.
 
 Exit criteria:
 
-- `TextureAtlasWorkerScheduler` and `IndexedResourceAtlasWorkerScheduler` have no landblock-derived
+- Implemented. `TextureAtlasWorkerScheduler` and `IndexedResourceAtlasWorkerScheduler` have no
+  landblock-derived
   static, terrain, or preview callers.
-- If no separate non-landblock renderer feature owns them, both atlas scheduler classes, payloads,
-  tests, and render-resource worker job kinds are deleted.
-- Renderer metrics and debug text no longer expose global atlas worker job counters for landblock
+- Implemented. No separate non-landblock renderer feature owns them, so both atlas scheduler classes,
+  payloads, tests, the render-resource worker client, the generic render-resource scheduler, and
+  render-resource worker job kinds were deleted.
+- Implemented. Renderer metrics and debug text no longer expose global atlas worker job counters for
+  landblock rendering.
+- Partially implemented with course correction. Terrain and indexed texture page ownership no longer
+  uses mutable async replacement state, but it still uses global atlas generation resources. Phase
+  4E13 owns the remaining artifact/direct ownership cutover before final cleanup.
+
+### Phase 4E13: Global Atlas Generation Resource Model Cleanup
+
+Added immediately after Phase 4E12 because deleting the workers exposed a narrower remaining debt:
+global atlas generation resources still sit between terrain/preview texture page plans and submit.
+This is no longer async worker debt, but it is still a global generation model that should not
+survive the static landblock replacement cleanup.
+
+- Replace terrain atlas generation resources with terrain artifact-owned or terrain-resource-owned
+  page textures whose keys derive from resident terrain artifact/product/page identity and sampler
+  policy.
+- Replace preview/direct indexed atlas generation resources with direct indexed resources or a
+  clearly named non-landblock preview atlas owner. Do not reintroduce worker scheduling.
+- Remove `textureAtlasGenerationGraph` and `indexedResourceAtlasGenerationGraph` lease ownership if
+  generation nodes no longer represent live renderer ownership.
+- Delete or rename compacted-family submit helpers that still require global atlas generation
+  resources once no production caller uses them.
+- Update metrics from atlas generation texture counts to terrain/preview page texture ownership
+  counts.
+
+Exit criteria:
+
+- `Webgl2WorldResourceStore` no longer stores `textureAtlasGeneration`,
+  `indexedResourceAtlasGeneration`, or atlas generation graph leases for landblock rendering.
+- Terrain rendering binds terrain-owned texture page resources without global atlas generation
+  replacement/state keys.
+- Preview indexed rendering is direct or owned by a clearly named preview-only renderer feature.
+- Metrics and debug text no longer expose global atlas generation texture counts for landblock
   rendering.
-- Terrain and indexed texture page ownership is represented through artifact/direct resource
-  ownership rather than mutable global atlas generation replacement state.
 
 ### Phase 6: Cleanup and Consolidation
 

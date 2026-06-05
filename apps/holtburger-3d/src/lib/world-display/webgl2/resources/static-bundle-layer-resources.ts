@@ -1,6 +1,7 @@
 import type {
 	StaticBundleCompactedBatch,
 	StaticBundleDirectEntry,
+	StaticBundleIndexedMaterialRecord,
 	StaticBundleMaterialRecord,
 	StaticBundleTexturePage,
 	StaticLandblockRenderBundleLayer,
@@ -56,6 +57,7 @@ export interface Webgl2StaticBundleMaterialResource {
 	key: string;
 	familyKey: string;
 	isTransparent: boolean;
+	indexedMaterial?: StaticBundleIndexedMaterialRecord;
 	textureBindings: readonly Webgl2StaticBundleMaterialTextureBinding[];
 }
 
@@ -340,6 +342,7 @@ function createWebgl2StaticBundleMaterialResource({
 		key: record.key,
 		familyKey: record.familyKey,
 		isTransparent: record.isTransparent,
+		indexedMaterial: record.indexedMaterial,
 		textureBindings: record.texturePageRefKeys.map((virtualRefKey) =>
 			resolveStaticBundleMaterialTextureBinding({
 				materialRecordKey: record.key,

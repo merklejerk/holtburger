@@ -1360,7 +1360,78 @@ describe("submitWebgl2WorldFrame", () => {
 		expect(gl.uniform1iValues).toContain(1);
 	});
 
-	it("skips non-RGBA static bundle materials until indexed bundle submit lands", () => {
+	it("submits resident P8 indexed static bundle geometry", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+		const indexTexture = {} as WebGLTexture;
+		const paletteTexture = {} as WebGLTexture;
+
+		const metrics = submitWebgl2WorldFrame({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			staticBundleLayerResources: createStaticBundleLayerResourceStore([
+				createStaticBundleLayerResource({
+					familyKey: "indexed-paletted",
+					indexedFormat: "p8",
+					indexTexture,
+					paletteTexture,
+				}),
+			]),
+			drawUnitsById: new Map(),
+			frame: createFrame([]),
+		});
+
+		expect(metrics.staticBundleDrawCallCount).toBe(1);
+		expect(metrics.staticBundleGeometrySubmittedCount).toBe(1);
+		expect(metrics.staticBundleSkippedGeometryCount).toBe(0);
+		expect(metrics.staticBundleSubmitFallbackSamples).toEqual([]);
+		expect(gl.boundTextures).toContain(indexTexture);
+		expect(gl.boundTextures).toContain(paletteTexture);
+		expect(gl.uniform2fValues).toContainEqual([2, 1]);
+		expect(gl.uniform1iValues).toContain(-1);
+	});
+
+	it("submits resident 16-bit indexed static bundle geometry with detail", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+		const indexTexture = {} as WebGLTexture;
+		const paletteTexture = {} as WebGLTexture;
+		const detailTexture = {} as WebGLTexture;
+
+		const metrics = submitWebgl2WorldFrame({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			staticBundleLayerResources: createStaticBundleLayerResourceStore([
+				createStaticBundleLayerResource({
+					familyKey: "indexed-paletted",
+					indexedFormat: "index16",
+					indexTexture,
+					paletteTexture,
+					detailTexture,
+				}),
+			]),
+			drawUnitsById: new Map(),
+			frame: createFrame([]),
+		});
+
+		expect(metrics.staticBundleDrawCallCount).toBe(1);
+		expect(metrics.staticBundleSkippedGeometryCount).toBe(0);
+		expect(gl.boundTextures).toContain(indexTexture);
+		expect(gl.boundTextures).toContain(paletteTexture);
+		expect(gl.boundTextures).toContain(detailTexture);
+		expect(gl.uniform2fValues).toContainEqual([2, 1]);
+		expect(gl.uniform1iValues).toContain(1);
+	});
+
+	it("skips malformed indexed static bundle materials", () => {
 		const gl = new CapturingSubmitGl();
 		const stateCache = new Webgl2StateCache(gl);
 
@@ -1372,7 +1443,10 @@ describe("submitWebgl2WorldFrame", () => {
 			indexedP8Program: createIndexedP8Program(),
 			indexedP16Program: createIndexedP16Program(),
 			staticBundleLayerResources: createStaticBundleLayerResourceStore([
-				createStaticBundleLayerResource({ familyKey: "indexed-paletted" }),
+				createStaticBundleLayerResource({
+					familyKey: "indexed-paletted",
+					omitIndexedMaterial: true,
+				}),
 			]),
 			drawUnitsById: new Map(),
 			frame: createFrame([]),
@@ -1381,7 +1455,7 @@ describe("submitWebgl2WorldFrame", () => {
 		expect(metrics.staticBundleDrawCallCount).toBe(0);
 		expect(metrics.staticBundleSkippedGeometryCount).toBe(1);
 		expect(metrics.staticBundleSubmitFallbackSamples).toEqual([
-			"static bundle layer/a material material/a family indexed-paletted is not submitted by the RGBA slice",
+			"static bundle layer/a material material/a has incomplete indexed material bindings",
 		]);
 	});
 });
@@ -1397,11 +1471,26 @@ function createStaticBundleLayerResourceStore(
 function createStaticBundleLayerResource({
 	familyKey = "rgba-texture-page",
 	texture = {} as WebGLTexture,
+	indexedFormat = "p8",
+	indexTexture = {} as WebGLTexture,
+	paletteTexture = {} as WebGLTexture,
+	detailTexture = null,
+	omitIndexedMaterial = false,
 }: {
 	familyKey?: string;
 	texture?: WebGLTexture;
+	indexedFormat?: "p8" | "index16";
+	indexTexture?: WebGLTexture;
+	paletteTexture?: WebGLTexture;
+	detailTexture?: WebGLTexture | null;
+	omitIndexedMaterial?: boolean;
 } = {}): Webgl2StaticBundleLayerResource {
 	const textureResource = createTextureResource(texture);
+	const indexTextureResource = createTextureResource(indexTexture);
+	const paletteTextureResource = createTextureResource(paletteTexture);
+	const detailTextureResource = detailTexture
+		? createTextureResource(detailTexture)
+		: null;
 	return {
 		key: "layer/a:revision/a",
 		layerKey: "layer/a",
@@ -1415,21 +1504,80 @@ function createStaticBundleLayerResource({
 				key: "material/a",
 				familyKey,
 				isTransparent: false,
-				textureBindings: [
-					{
-						virtualRefKey: "texture/a",
-						texturePageKey: "page/a",
-						usageBucket: "base-color",
-						sampleClass: "rgba-color",
-						indexedFormat: undefined,
-						rect: [0, 0, 1, 1],
-						width: 1,
-						height: 1,
-						wrapS: "clamp",
-						wrapT: "clamp",
-						texture: textureResource,
-					},
-				],
+				indexedMaterial:
+					familyKey === "indexed-paletted" && !omitIndexedMaterial
+						? {
+								indexFormat: indexedFormat,
+								width: 2,
+								height: 1,
+								paletteColorCount: 2,
+								wrapS: "clamp",
+								wrapT: "repeat",
+								clipThreshold: -1,
+							}
+						: undefined,
+				textureBindings:
+					familyKey === "indexed-paletted"
+						? [
+								{
+									virtualRefKey: "texture/index",
+									texturePageKey: "page/index",
+									usageBucket: "indexed-texels",
+									sampleClass: "indexed-data",
+									indexedFormat,
+									rect: [0, 0, 1, 1],
+									width: 2,
+									height: 1,
+									wrapS: "clamp",
+									wrapT: "repeat",
+									texture: indexTextureResource,
+								},
+								{
+									virtualRefKey: "texture/palette",
+									texturePageKey: "page/palette",
+									usageBucket: "palette-lookup",
+									sampleClass: "palette-data",
+									indexedFormat: undefined,
+									rect: [0, 0, 1, 1],
+									width: 2,
+									height: 1,
+									wrapS: "clamp",
+									wrapT: "clamp",
+									texture: paletteTextureResource,
+								},
+								...(detailTextureResource
+									? [
+											{
+												virtualRefKey: "texture/detail",
+												texturePageKey: "page/detail",
+												usageBucket: "detail" as const,
+												sampleClass: "rgba-color" as const,
+												indexedFormat: undefined,
+												rect: [0, 0, 1, 1] as const,
+												width: 1,
+												height: 1,
+												wrapS: "clamp" as const,
+												wrapT: "clamp" as const,
+												texture: detailTextureResource,
+											},
+										]
+									: []),
+							]
+						: [
+								{
+									virtualRefKey: "texture/a",
+									texturePageKey: "page/a",
+									usageBucket: "base-color",
+									sampleClass: "rgba-color",
+									indexedFormat: undefined,
+									rect: [0, 0, 1, 1],
+									width: 1,
+									height: 1,
+									wrapS: "clamp",
+									wrapT: "clamp",
+									texture: textureResource,
+								},
+							],
 			},
 		],
 		compactedBatches: [createStaticBundleGeometryResource()],

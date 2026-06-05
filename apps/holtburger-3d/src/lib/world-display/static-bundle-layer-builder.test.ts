@@ -204,6 +204,15 @@ describe("static bundle layer builder", () => {
 					"texture:material/08000011:render-surface/06000011:indexed-texels",
 				],
 				isTransparent: false,
+				indexedMaterial: {
+					indexFormat: "p8",
+					width: 2,
+					height: 2,
+					paletteColorCount: 256,
+					wrapS: "clamp",
+					wrapT: "clamp",
+					clipThreshold: -1,
+				},
 			},
 		]);
 		expect(layer.compactedBatches).toHaveLength(1);

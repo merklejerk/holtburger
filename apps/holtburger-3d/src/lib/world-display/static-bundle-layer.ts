@@ -137,6 +137,17 @@ export interface StaticBundleMaterialRecord {
 	familyKey: string;
 	texturePageRefKeys: readonly string[];
 	isTransparent: boolean;
+	indexedMaterial?: StaticBundleIndexedMaterialRecord;
+}
+
+export interface StaticBundleIndexedMaterialRecord {
+	indexFormat: StaticBundleIndexedTextureFormat;
+	width: number;
+	height: number;
+	paletteColorCount: number;
+	wrapS: "clamp" | "repeat";
+	wrapT: "clamp" | "repeat";
+	clipThreshold: number;
 }
 
 export interface StaticBundleRenderChunk {

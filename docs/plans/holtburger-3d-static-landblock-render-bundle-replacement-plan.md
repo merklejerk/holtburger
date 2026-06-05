@@ -1,8 +1,8 @@
 # Holtburger 3D Static Landblock Render Bundle Replacement Plan
 
 Status: Phase 1A through Phase 1J, Phase 2A, Phase 2B, Phase 3A, Phase 3B, Phase
-3C1, Phase 3C2A, Phase 3C2B1, and Phase 3C2B2 are implemented. Phase 3C2B3 indexed
-static bundle submit completion is the next implementation phase.
+3C1, Phase 3C2A, Phase 3C2B1, Phase 3C2B2, and Phase 3C2B3 are implemented. Phase
+4A detailed preset artifact contract expansion is the next implementation phase.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, preset-based landblock requests, and layer-scoped texture pages.
 
@@ -158,6 +158,11 @@ Progress:
   bundle submit still needs material descriptor metadata for index format, palette size, clip
   threshold, repeat policy, and optional indexed detail binding before the outdoor submit replacement
   can be considered family-complete.
+- 2026-06-04: Implemented Phase 3C2B3. Static bundle material records now carry worker-derived
+  indexed material descriptors, WebGL static bundle resources retain those descriptors, and resident
+  static bundle submit draws indexed-paletted P8 and 16-bit geometry through layer-owned
+  indexed-texel, palette-lookup, and optional detail pages without staged draw-unit adapters or
+  global indexed atlas generations.
 
 Validation:
 
@@ -258,6 +263,10 @@ Validation:
   passed after Phase 3C2B2.
 - `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run lint:rust` passed after
   Phase 3C2B2.
+- `npm exec vitest -- run src/lib/world-display/webgl2-world-submit.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/webgl2/resources/static-bundle-layer-resources.test.ts`
+  passed after Phase 3C2B3.
+- `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run lint:rust` passed after
+  Phase 3C2B3.
 
 Related plans:
 
@@ -2557,18 +2566,16 @@ Decisions and course corrections:
   into `Webgl2WorldDrawUnit` or route through staged compacted replacement families.
 - Suppression waits for both outdoor static layers for a landblock. A partial resident artifact set
   should not drop the still-unmigrated outdoor subset.
-- Indexed-paletted bundle resources remain uploaded and retained, but submit skips them with explicit
-  metrics until Phase 3C2B3 adds complete indexed material descriptors. The current resource
-  contract carries page format and virtual-ref data, but not yet all shader inputs needed for
-  indexed submit.
+- Phase 3C2B3 completed indexed-paletted submit. Phase 3C2B2's temporary indexed fallback metrics
+  should no longer appear for supported indexed bundle materials.
 - Static bundle submit is currently unculled. That matches the Phase 3C2B vertical slice requirement:
   static selection and picking are not required for this slice. Required culling/portal sidecars
   remain Phase 4 work.
 
 Cleanup targets:
 
-- Static bundle submit duplicates some direct-family RGBA uniform setup. Phase 3C2B3 should extract
-  a small shared texture-page uniform helper if indexed submit would otherwise duplicate more code.
+- Static bundle submit duplicates some direct-family RGBA and indexed uniform setup. Extract shared
+  texture-page/indexed uniform helpers only if the duplication grows during Phase 4 submit work.
 - `Webgl2WorldSubmitMetrics` is now broad enough that scene-domain metric merge must stay in sync
   when new submit counters are added. Consider grouping static-bundle counters if metrics continue
   expanding.
@@ -2596,33 +2603,61 @@ Exit criteria:
 
 ### Phase 3C2B3: Indexed Static Bundle Submit Completion
 
-Immediate interim phase before Phase 4A.
+Status: Implemented on 2026-06-04 as the family-completion phase for resident `outdoor` static
+bundle submit.
 
-- Extend the static bundle artifact/resource material contract with the indexed shader inputs that
-  staged direct indexed draw units currently own: index format, texture size, palette color count,
-  clip threshold, repeat policy, and optional indexed detail binding/tiling.
-- Submit resident indexed-paletted static bundle compacted/direct geometry through the existing
-  indexed P8/P16 shader programs using layer-owned indexed texel, palette lookup, and optional
-  detail pages.
-- Keep indexed static bundle submit direct from resident bundle resources. Do not adapt indexed
-  bundle geometry into staged draw units and do not reuse global indexed atlas generations.
-- Add focused submit tests for P8, 16-bit indexed, palette binding, detail binding, skipped malformed
-  indexed materials, and staged suppression with indexed-only outdoor layers.
-- Update Phase 3C2B2 fallback metrics once indexed submit no longer skips supported indexed bundle
-  materials.
+Implemented:
+
+- Extended `StaticBundleMaterialRecord` with a compact indexed material descriptor: index format,
+  texture size, palette color count, repeat policy, and clip threshold.
+- The static bundle builder now derives that descriptor from worker-local material, indexed
+  render-surface, and palette routes.
+- Static bundle WebGL material resources retain the indexed descriptor beside layer-owned texture
+  bindings.
+- Resident static bundle submit now draws indexed-paletted P8 and 16-bit compacted/direct geometry
+  through existing indexed shader programs using layer-owned indexed texel, palette lookup, and
+  optional detail pages.
+- Added focused tests for P8 submit, 16-bit indexed submit with detail, malformed indexed material
+  skip diagnostics, and builder descriptor output.
+
+Decisions and course corrections:
+
+- Indexed submit remains direct from resident static bundle resources. It does not adapt bundle
+  geometry into staged draw units and does not use global indexed atlas generations.
+- The descriptor stores only shader facts, not raw bytes or WebGL resources. Texture bytes remain in
+  virtual refs/pages, and WebGL texture objects remain resource-layer owned.
+- Indexed wrap policy currently mirrors the existing static bundle virtual ref policy: clamp for
+  worker-built indexed pages. If later material semantics prove repeat is needed for a static family,
+  update the worker descriptor and page refs together.
+- Malformed indexed bundle records skip through static bundle submit fallback metrics instead of
+  throwing during frame submit. Builder/resource validation still fails hard for internally
+  inconsistent texture refs/pages.
+
+Cleanup targets:
+
+- Static bundle submit has parallel RGBA and indexed uniform upload code. Keep it local until Phase 4
+  shows whether env-cell/interior submit needs shared helpers.
+- The indexed descriptor overlaps semantically with `Webgl2IndexedMaterialDescriptor` but omits raw
+  byte payloads and texture keys. Keep the types separate unless a shared shader-descriptor type can
+  avoid dragging staged/direct resource ownership into static bundle records.
+
+Legacy shims introduced:
+
+- No staged draw-unit adapter, global indexed atlas wrapper, render-resource worker bridge, or
+  compatibility renderer mode was added.
 
 Exit criteria:
 
 - Resident `outdoor` static bundle submit supports RGBA/detail, indexed-paletted P8, indexed-paletted
   16-bit, and optional indexed detail pages.
-- Supported indexed static bundle materials no longer appear in static bundle submit fallback samples.
+- Supported indexed static bundle materials no longer appear in static bundle submit fallback
+  samples.
 - Outdoor staged static suppression remains enabled only after complete resident outdoor bundle
   coverage for the landblock.
 - The `outdoor` preset renders resident terrain/object artifacts without the static staged path for
   all currently supported static material families.
 - Static selection and picking remain non-blocking for this vertical slice.
-- Phase 4A may start only after this family-complete outdoor submit slice passes `check`, TS lint,
-  knip, Rust lint, and focused renderer submit/resource tests.
+- `check`, TS lint, knip, Rust lint, and focused renderer submit/resource tests pass.
 
 ### Phase 4A: Detailed Preset Artifact Contract Expansion
 

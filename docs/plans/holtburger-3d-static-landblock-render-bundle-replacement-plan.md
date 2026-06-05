@@ -19,7 +19,8 @@ artifact-backed structured spatial index items are implemented. Phase 4C3D3B2 st
 spatial hints and artifact-backed static spatial index items are implemented. Phase 4C3D3B3
 selected static overlay artifact fallback is implemented. Phase 4C3D3B4 render BVH visibility
 naming cleanup is implemented. Phase 4D1 artifact-backed portal composite BVH sources are
-implemented. Phase 4D2A artifact-backed camera residency index is implemented.
+implemented. Phase 4D2A artifact-backed camera residency index and Phase 4D2B1 artifact-owned
+render-frame env-cell BVH visibility are implemented.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -319,6 +320,10 @@ Progress:
   Artifact-backed residency uses structured interior artifact render-geometry bounds plus cell BSP;
   the legacy conservative cell-structure vertex-array bounds remain available only for structured
   scene fallback cells.
+- 2026-06-05: Implemented Phase 4D2B1. Render-frame env-cell BVH visibility now iterates resident
+  detailed artifact local BVH entries with their artifact-owned structured cell render chunks before
+  consulting `StructuredInteriorSceneModel`. Prepared env-cell payload culling remains only as the
+  existing fallback for env cells not covered by resident detailed artifacts.
 
 Validation:
 
@@ -366,6 +371,9 @@ Validation:
 - `npm exec vitest -- run src/lib/world-display/world-residency-index.test.ts`, `npm run check`,
   `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and `git diff --check` passed after
   Phase 4D2A.
+- `npm exec vitest -- run src/lib/world-display/render-bvh-visibility-snapshot.test.ts src/lib/world-display/world-render-frame.test.ts`,
+  `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
+  `git diff --check` passed after Phase 4D2B1.
 - `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts`
   passed after the first Phase 1D builder slice.
 - `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts`
@@ -4098,6 +4106,55 @@ Exit criteria:
 - Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
 
 #### Phase 4D2B: Remaining Portal/Culling Consumer Cutover
+
+Status: Split during implementation. Phase 4D2B1 is implemented on 2026-06-05.
+
+#### Phase 4D2B1: Artifact-Owned Render-Frame Env-Cell BVH Visibility
+
+- Move render-frame env-cell BVH visibility iteration from `StructuredInteriorSceneModel.cells` to
+  resident detailed artifact local BVH entries when detailed artifacts are available.
+- Use the matching detailed artifact structured cell render chunk for artifact local BVH transforms.
+- Keep prepared env-cell payload visibility only as the existing absence fallback for env cells not
+  covered by resident detailed artifacts.
+
+Decisions and course corrections:
+
+- Implemented. `deriveRenderBvhVisibilitySnapshot` now queries resident
+  `detailed-landblock.spatial.envCellLocalBvhs` first, using render chunks from the same artifact's
+  `structuredInteriorCells`.
+- Implemented. The structured-scene loop now skips env cells already covered by artifact BVH
+  entries, preventing duplicate visible key accounting when the coordinator also exposes an
+  artifact-derived structured scene adapter.
+- Course correction: detailed local BVH sidecars still do not carry render chunks directly. The
+  visibility snapshot indexes detailed artifact cells by env cell ID, matching the Phase 4D1 portal
+  composite source approach instead of reintroducing a `StructuredInteriorSceneModel` dependency.
+
+Cleanup targets discovered:
+
+- `deriveRenderBvhVisibilitySnapshot` still accepts `StructuredInteriorSceneModel` only for
+  prepared env-cell fallback. Phase 4E should delete that parameter after detailed artifact coverage
+  is mandatory.
+- Terrain and outdoor static visibility in this snapshot still read prepared outdoor payload BVHs.
+  Phase 4D2B2 should decide whether those are render-critical for portal/scene-domain culling before
+  hard cutover, or simplify them away if resident terrain/static candidates already provide enough
+  submit visibility.
+- Missing artifact structured-cell entries for artifact BVHs now produce fallback reasons. If the
+  worker ever emits that inconsistent artifact shape, treat it as worker output debt rather than
+  rebuilding the cell from main-thread prepared state.
+
+Legacy shims introduced:
+
+- None. The artifact loop is the preferred path, and the prepared env-cell branch remains the
+  existing absence fallback only.
+
+Exit criteria:
+
+- Implemented. Env-cell render-frame BVH visibility can be derived from resident detailed artifacts
+  without structured scene cells.
+- Implemented. Focused tests cover artifact-owned culling with an empty structured scene route.
+- Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
+
+#### Phase 4D2B2: Remaining Portal/Culling Consumer Cutover
 
 - Move any remaining render-critical portal composite, culling, cell visibility, or portal traversal
   source facts that still read `StructuredInteriorSceneModel` or prepared env-cell payloads onto

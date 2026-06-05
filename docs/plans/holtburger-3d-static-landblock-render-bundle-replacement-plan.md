@@ -11,7 +11,8 @@ structured-interior material artifact realization is split into smaller slices; 
 material artifact contract preparation is implemented. Phase 4C3C2 textured WebGL realization is
 split; Phase 4C3C2A material-slice WebGL resource/submit is implemented and Phase 4C3C2B sampler
 policy resource control is implemented. Phase 4C3C2C artifact texture mipmap/anisotropy policy is
-implemented. Portal/spatial artifact resource handoff is next.
+implemented. Phase 4C3D portal/spatial artifact resource handoff is split into smaller slices;
+Phase 4C3D1 artifact-native transition portal candidate handoff is implemented.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -263,6 +264,12 @@ Progress:
   texel and palette lookup pages remain exact sampled, non-mipped, and do not receive anisotropy.
   Filtering policy changes still avoid rebuilding CPU artifacts, material records, and geometry
   buffers.
+- 2026-06-04: Implemented Phase 4C3D1. Transition portal candidate derivation now prefers resident
+  `detailed-landblock` artifacts for topology/env-cell portal links, aperture geometry, selected
+  interior env-cell coverage, render chunks, and portal target status. The browser render-resource
+  coordinator uses artifact-native candidates when detailed artifacts are resident and only falls
+  back to the legacy `AssetChannelState` plus `StructuredInteriorSceneModel` derivation while the
+  detailed artifact is absent.
 
 Validation:
 
@@ -283,6 +290,9 @@ Validation:
 - `npm exec eslint -- src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts src/workers/asset-worker.ts src/workers/shared/asset-prepare.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/asset-closure-loader.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/host-asset-bridge.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/transferables.ts src/workers/shared/transferables.test.ts src/workers/shared/worker-profile.ts src/lib/assets/asset-channel.test.ts`
   passed after Phase 1C.
 - `npm run check`, `npm run lint:dead`, and `npm run lint:rust` passed after Phase 1C.
+- `npm exec vitest -- run src/lib/world-display/transition-portal-work-items.test.ts`,
+  `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run lint:rust` passed after
+  Phase 4C3D1.
 - `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts`
   passed after the first Phase 1D builder slice.
 - `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts`
@@ -3532,9 +3542,80 @@ Exit criteria:
 
 ### Phase 4C3D: Portal and Spatial Artifact Resource Handoff
 
+Phase 4C3D is split because portal candidate derivation, portal mask/composite inputs, and
+render-critical spatial/culling inputs have different consumers and different cleanup blast radius.
+
+#### Phase 4C3D1: Artifact-Native Transition Portal Candidate Handoff
+
+- Derive transition portal candidates from resident `detailed-landblock` artifacts instead of
+  scanning `StructuredInteriorSceneModel` when detailed artifacts are available.
+- Join worker-emitted `portalLinks` to worker-emitted `portalApertures` and structured interior cell
+  render chunks.
+- Use the detailed artifact's selected env-cell set as already-resolved transition coverage. Do not
+  rerun main-thread closure expansion or `deriveStructuredInteriorCoverage` for artifact-backed
+  candidates.
+- Keep the old `AssetChannelState` plus `StructuredInteriorSceneModel` candidate derivation only as
+  a transitional fallback while no resident detailed artifact exists for the active landblock.
+
+Decisions and course corrections:
+
+- Implemented. `deriveTransitionPortalCandidatesFromLandblockArtifacts` pre-indexes detailed
+  artifact cell portals by env cell and portal ID, reconstructs `PortalAperture` records from
+  worker-owned aperture facts, and builds transition candidates from worker-selected env-cell
+  coverage.
+- Implemented. `BrowserRenderResourceCoordinator` now prefers artifact-native transition portal
+  candidates before calling the legacy main-thread derivation path.
+- Course correction: the fallback is still necessary until the hard cutover guarantees detailed
+  topology/env-cell artifacts are resident for every active portal consumer. It is not a target
+  compatibility mode and should be deleted in Phase 4E.
+
+Cleanup targets discovered:
+
+- `StructuredInteriorSceneModel` still feeds transition portal fallback derivation, debug overlays,
+  render chunk placement collection, and spatial item generation. Phase 4C3D2/4D should keep moving
+  render-critical consumers to artifacts before Phase 4E deletes this static hydration path.
+- Portal aperture lookup from detailed artifacts is currently built inside
+  `transition-portal-work-items.ts`. If portal masks/composites need the same aperture index, extract
+  a small artifact portal index module instead of duplicating maps.
+- `DetailedPortalLinkSidecar` and `DetailedPortalApertureSidecar` remain misleading names for active
+  worker artifact records. Rename them when portal/spatial artifact contracts are split from the
+  detailed aggregate.
+
+Legacy shims introduced:
+
+- None. The legacy candidate derivation path already existed. This phase added artifact-native
+  preference plus a null result for "no detailed artifact present" so the existing fallback remains
+  visibly transitional.
+
+Exit criteria:
+
+- Implemented. Transition portal candidates can be derived from resident detailed landblock
+  artifacts without `AssetChannelState` or `StructuredInteriorSceneModel` inputs.
+- Implemented. The coordinator prefers artifact-native transition portal candidates when resident
+  detailed artifacts exist for the active landblock.
+- Implemented. Focused tests cover artifact-backed portal derivation and the explicit null result
+  that lets the old derivation remain a temporary absence fallback.
+- Implemented. `check`, TypeScript lint, knip, and Rust lint pass.
+
+#### Phase 4C3D2: Portal Mask/Composite Artifact Inputs
+
 - Update portal/spatial resource inputs from detailed-landblock artifacts.
 - Pre-index portal apertures from detailed artifacts so transition portal candidates and portal mask
   work do not need to scan `StructuredInteriorSceneModel` cells.
+- Replace remaining render-critical portal mask/composite source facts that read
+  `StructuredInteriorSceneModel` cells with resident detailed artifact portal/aperture indexes.
+- Keep browser-mode portal traversal policy and mask pass ordering renderer-owned; only the static
+  source facts move to artifacts.
+
+Exit criteria:
+
+- Portal mask/composite source facts come from resident detailed artifacts.
+- Portal traversal policy and pass scheduling remain renderer-owned.
+- `StructuredInteriorSceneModel` is no longer needed for render-critical portal mask/composite
+  source facts.
+
+#### Phase 4C3D3: Spatial and Culling Artifact Inputs
+
 - Move render-critical spatial/culling inputs from bridge-derived structured-interior scenes to
   resident detailed artifacts.
 - Keep browser debug overlays lower priority; they may continue to consume a reduced bridge or lose
@@ -3542,8 +3623,7 @@ Exit criteria:
 
 Exit criteria:
 
-- Portal traversal/composite inputs and required spatial/culling facts come from resident detailed
-  artifacts.
+- Required spatial/culling facts come from resident detailed artifacts.
 - No render-critical portal/spatial consumer requires main-thread prepared env-cell geometry.
 - Remaining `StructuredInteriorSceneModel` usage is debug/diagnostic or transitional fallback only.
 

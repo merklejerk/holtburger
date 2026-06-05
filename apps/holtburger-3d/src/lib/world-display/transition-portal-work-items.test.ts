@@ -10,9 +10,12 @@ import {
 	classifyTransitionPortalDirection,
 	createTransitionPortalWorkItem,
 	deriveTransitionPortalCandidates,
+	deriveTransitionPortalCandidatesFromLandblockArtifacts,
 	type TransitionPortalCandidateModel,
 } from "./transition-portal-work-items";
+import type { LandblockRenderProductWorkerResult } from "./landblock-render-product";
 import { deriveStructuredCellRenderChunk } from "./render-chunks";
+import type { StaticLandblockRenderArtifactStoreSnapshot } from "./static-landblock-render-artifact-store";
 import type {
 	StructuredInteriorCell,
 	StructuredInteriorSceneModel,
@@ -104,6 +107,44 @@ describe("transition portal work items", () => {
 		});
 
 		expect(model.candidates[0]?.source).toBe("runtime");
+	});
+
+	it("derives transition portals from resident detailed landblock artifacts", () => {
+		const model = deriveTransitionPortalCandidatesFromLandblockArtifacts({
+			artifacts: createStaticLandblockArtifactSnapshot([
+				createDetailedLandblockProductArtifact(),
+			]),
+			activeLandblockIds: [0x016cffff],
+		});
+
+		expect(model?.diagnostics).toMatchObject({
+			loadedEnvCellPortalFactCount: 1,
+			topologyPortalCount: 1,
+			linkedTopologyPortalCount: 1,
+			apertureCandidateCount: 1,
+			workItemCandidateCount: 1,
+		});
+		expect(model?.candidates[0]).toMatchObject({
+			id: "outdoor-topology/00:cell-outside/01",
+			outdoorPortalId: "outdoor-topology/00",
+			entryEnvCellId: 0x016c0155,
+			targetStatus: "outside",
+			requestedInteriorEnvCellIds: [0x016c0155, 0x016c0156],
+		});
+		expect(model?.candidates[0]?.aperture.points).toEqual([
+			{ x: 0, y: 2, z: -1 },
+			{ x: 3, y: 2, z: -1 },
+			{ x: 3, y: 5, z: -1 },
+		]);
+	});
+
+	it("returns null when no resident detailed artifact can feed portal candidates", () => {
+		expect(
+			deriveTransitionPortalCandidatesFromLandblockArtifacts({
+				artifacts: createStaticLandblockArtifactSnapshot([]),
+				activeLandblockIds: [0x016cffff],
+			}),
+		).toBeNull();
 	});
 
 	it("joins outdoor topology to env-cell aperture geometry without legacy scene assets", () => {
@@ -257,6 +298,143 @@ function deriveModel(
 		structuredInteriorScene: createStructuredInteriorSceneModel(cells),
 		activeLandblockIds: [0x016cffff],
 	});
+}
+
+function createStaticLandblockArtifactSnapshot(
+	artifacts: readonly LandblockRenderProductWorkerResult[],
+): StaticLandblockRenderArtifactStoreSnapshot {
+	return {
+		artifacts,
+		desiredCount: artifacts.length,
+		residentCount: artifacts.length,
+		inFlightCount: 0,
+		staleResultCount: 0,
+		committedResultCount: artifacts.length,
+		evictedResultCount: 0,
+		errorCount: 0,
+		latestDesiredIdentityKeys: [],
+	};
+}
+
+function createDetailedLandblockProductArtifact(): LandblockRenderProductWorkerResult {
+	const landblockId = 0x016cffff;
+	const envCellId = 0x016c0155;
+	const renderChunk = deriveStructuredCellRenderChunk(envCellId);
+	return {
+		type: "landblock-render-product-built",
+		jobId: "job:016cffff:outdoor-env-cells",
+		landblockId,
+		product: "outdoor-env-cells",
+		requestId: "request",
+		buildPolicyRevision: "build:v1",
+		texturePagePolicyRevision: "pages:v1",
+		artifacts: [
+			{
+				artifactKind: "detailed-landblock",
+				key: "detailed:016cffff:outdoor-env-cells",
+				landblockId,
+				product: "outdoor-env-cells",
+				requestId: "request",
+				buildPolicyRevision: "build:v1",
+				texturePagePolicyRevision: "pages:v1",
+				selectedEnvCellIds: [envCellId, 0x016c0156],
+				structuredInteriorMaterialRecords: [],
+				structuredInteriorTexturePageRefs: [],
+				structuredInteriorTexturePages: [],
+				structuredInteriorCells: [
+					{
+						key: "structured-interior-cell:016c0155",
+						envCellId,
+						landblockId,
+						regionNumber: 1,
+						environmentId: 0x0d000001,
+						cellStructureId: 1,
+						renderChunk,
+						localPlacement: IDENTITY_PLACEMENT,
+						surfaceIds: [],
+						materialSlices: [],
+						portals: [
+							{
+								key: "env-cell-portal:016c0155:cell-outside/01",
+								envCellId,
+								portalId: "cell-outside/01",
+								sourceIndex: 0,
+								flags: 0x4,
+								polygonId: 7,
+								otherCellId: 0xffff,
+								otherPortalId: 0xffff,
+								targetEnvCellId: 0x016cffff,
+								isOutsideTransition: true,
+							},
+						],
+						portalApertureKeys: [
+							"portal-aperture:016c0155:cell-outside/01",
+						],
+						staticObjectCount: 0,
+						cellBsp: createLeafBspNode(),
+						renderGeometry: createRenderGeometry(),
+					},
+				],
+				cellStructureMetadata: [],
+				portalLinks: [
+					{
+						key: "portal-link:outdoor-topology/00:016c0155",
+						landblockId,
+						source: {
+							kind: "landblock-building",
+							instanceId: "building/0",
+							portalId: "outdoor-topology/00",
+						},
+						target: {
+							kind: "env-cell",
+							envCellId,
+							portalId: "cell-outside/01",
+						},
+						flags: 0,
+						otherCellId: envCellId,
+						otherPortalId: 0,
+						polygonId: 7,
+						sourceIndex: 0,
+					},
+				],
+				portalApertures: [
+					{
+						key: "portal-aperture:016c0155:cell-outside/01",
+						envCellId,
+						portalId: "cell-outside/01",
+						sourceIndex: 0,
+						polygonId: 7,
+						points: [
+							{ x: 0, y: 2, z: -1 },
+							{ x: 3, y: 2, z: -1 },
+							{ x: 3, y: 5, z: -1 },
+						],
+						plane: {
+							normal: { x: 0, y: 0, z: 1 },
+							constant: -1,
+							source: "derived-from-render-points",
+						},
+					},
+				],
+				visibility: {
+					objectVisibilityRecords: [],
+					cellVisibilityRecords: [],
+				},
+				spatial: {
+					envCellResidencyBvh: {
+						coordinateSpace: "landblock-topology-residency",
+						nodes: [],
+						items: [],
+					},
+					envCellLocalBvhs: [],
+				},
+			},
+		],
+		diagnostics: {
+			status: "ready",
+			messages: [],
+		},
+	};
 }
 
 function createAssetState(records: PreparedAssetRecord[]): AssetChannelState {

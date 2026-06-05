@@ -11,6 +11,13 @@ export interface CompactedGeometryBuildDrawUnit {
 	};
 }
 
+export interface CompactedGeometrySourceDrawUnit
+	extends CompactedGeometryBuildDrawUnit {
+	owningLandblockId: number;
+	staticPartCount: number;
+	staticObjectKeys: readonly string[];
+}
+
 interface CompactedGeometryMaterialSlot {
 	key: string;
 	index: number;

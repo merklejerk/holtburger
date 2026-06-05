@@ -2890,7 +2890,7 @@ function createCategoryCounts() {
 	return {
 		terrain: 0,
 		"structured-interior": 0,
-		"static-staged": 0,
+		"appearance-preview-staged": 0,
 		static: 0,
 		"portal-mask": 0,
 		"debug-overlay": 0,

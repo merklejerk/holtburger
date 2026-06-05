@@ -30,6 +30,7 @@ Phase 4E5 artifact-active structured-interior fallback cutover is implemented.
 Phase 4E6 artifact-active structured coverage cutover is implemented.
 Phase 4E7 browser coordinator contract hard cutover is implemented.
 Phase 4E8 staged structured-interior draw path removal is implemented.
+Phase 4E9 staged static renderable draw path removal is implemented.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -385,6 +386,11 @@ Progress:
   resource sync no longer accepts structured-interior scene models, and the old
   `structuredInteriorDrawUnitCount` resource-store metric was removed in favor of artifact-backed
   structured resource/submit metrics.
+- 2026-06-05: Implemented Phase 4E9. The staged static assembly path is now an
+  appearance-preview-only assembly, emits `appearance-preview` draw units with
+  `appearance-preview-staged/` IDs, ignores ordinary landblock static parts, and no longer accepts
+  resident static bundle suppression scopes. WebGL preview resources are direct-only and the legacy
+  static compaction sync receives no staged draw units from this path.
 
 Validation:
 
@@ -468,6 +474,9 @@ Validation:
 - `npm exec vitest -- run src/lib/world-display/staged-world-assembly.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2-render-metrics.test.ts src/lib/world-display/webgl2-world-submit.test.ts`,
   `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
   `git diff --check` passed after Phase 4E8.
+- `npm exec vitest -- run src/lib/world-display/staged-world-assembly.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/world-render-frame.test.ts src/lib/world-display/webgl2-render-metrics.test.ts src/lib/world-display/browser-render-resource-coordinator.test.ts`,
+  `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
+  `git diff --check` passed after Phase 4E9.
 - `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts`
   passed after the first Phase 1D builder slice.
 - `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts`
@@ -4776,9 +4785,8 @@ Decisions and course corrections:
 - Implemented. The coordinator structured-interior scene now comes from resident detailed artifacts
   or `createEmptyStructuredInteriorSceneModel()`.
 - Course correction: this phase did not remove `setStaticRenderableScene` or
-  `setStructuredInteriorScene` from renderer contracts. Those model-shaped handoffs still carry
-  preview-only static content and artifact-backed structured content until Phase 4E8 and Phase 4E9
-  delete the staged consumers.
+  `setStructuredInteriorScene` from renderer contracts. Phase 4E8 and Phase 4E9 deleted the staged
+  structured/static consumers; Phase 4E11 still owns the model-shaped renderer contract cleanup.
 - Course correction: the prepared transition portal fallback was removed from the coordinator at the
   same boundary. Transition portal candidates are now artifact-native or empty; preserving the
   prepared fallback would keep topology/env-cell prepared-state coupling alive.
@@ -4786,11 +4794,11 @@ Decisions and course corrections:
 Cleanup targets discovered:
 
 - `StaticRenderableSceneModel` now acts as a preview-only coordinator payload in browser landblock
-  rendering. Phase 4E9 should rename or split this path so staged static deletion does not confuse
-  runtime preview support with landblock static hydration.
+  rendering. Phase 4E9 narrowed the staged renderer consumer to appearance previews; Phase 4E11
+  should clean up the remaining model-shaped renderer contract naming.
 - `StructuredInteriorSceneModel` still crosses the renderer surface because artifact-backed
-  structured cells reuse that model shape. Phase 4E8 should either replace the staged structured
-  consumer with artifact resources directly or narrow this model to artifact/debug handoff only.
+  structured cells reuse that model shape. Phase 4E8 removed the staged structured consumer; Phase
+  4E11 should narrow or rename the remaining artifact/debug handoff.
 - Tests for prepared static/structured derivation still exist around the pure helper modules. Keep
   them only while those helpers have non-browser callers; delete them when knip shows no production
   usage.
@@ -4886,13 +4894,52 @@ delete the staged static renderable path instead of relying on scope suppression
 - Delete or rewrite tests that assert staged static landblock output, pending replacement behavior, or
   direct suppression.
 
+Decisions and course corrections:
+
+- Implemented. `staged-world-assembly.ts` was narrowed to an appearance-preview-only path. It now
+  exports `buildStagedAppearancePreviewSceneAssembly`,
+  `buildStagedAppearancePreviewDrawUnitAssemblies`, and
+  `StagedAppearancePreviewDrawUnitAssembly`.
+- Implemented. Preview draw units now use kind `appearance-preview` and IDs under
+  `appearance-preview-staged/`. Ordinary landblock static parts are ignored by the preview assembly,
+  so this path cannot emit landblock-derived static draw units.
+- Implemented. Scope-aware staged static suppression was deleted. Once the assembly filters to
+  preview instances, resident outdoor/env-cell bundle scopes do not need suppression or diffing.
+- Implemented. WebGL resource sync no longer passes staged draw units into static compaction sync.
+  Preview draw units remain direct WebGL draw units and are classified as non-static for compaction
+  coverage diagnostics.
+- Course correction: the legacy static compaction/atlas scheduler modules still exist, but the WebGL
+  world-resource path now passes an explicit empty compacted draw-unit list. Phase 4E10 should delete
+  the inert scheduler/payload/resource-sync surface rather than continue adapting it.
+- Course correction: public renderer diagnostic fields still include static-oriented names such as
+  `staticGroupMeshCount`. For this phase they are fed by preview counts to avoid a UI contract fanout;
+  Phase 4E11 should rename or split those diagnostics.
+
+Cleanup targets discovered:
+
+- Delete the now-inert staged static compaction sync, compacted geometry worker scheduler path,
+  texture atlas worker scheduling, and indexed atlas worker scheduling in Phase 4E10.
+- Rename WebGL store/reporting counters that still surface through static renderer-contract fields so
+  appearance preview counts and artifact static counts are distinct.
+- `browser-picker-diagnostics.ts` now uses the appearance-preview assembly. That is acceptable for
+  low-priority preview diagnostics, but landblock static picker fidelity should come from artifact
+  diagnostics if it is ever restored.
+
+Legacy shims introduced:
+
+- None. The old staged static suppression path and WebGL compaction handoff were removed. The
+  remaining compaction scheduler surface is inert debt scheduled for deletion, not a compatibility
+  mode.
+
 Exit criteria:
 
-- `staged-world-assembly.ts` cannot emit landblock-derived static draw units.
-- No render path depends on `StaticRenderableSceneModel.parts` for landblock static objects.
-- Runtime appearance previews still render through a path that is not described as landblock static
-  hydration.
-- Knip reports no staged static landblock draw helpers with live production callers.
+- Implemented. `staged-world-assembly.ts` cannot emit landblock-derived static draw units; it filters
+  to `appearance-preview/` instance IDs.
+- Implemented. Browser landblock rendering no longer depends on `StaticRenderableSceneModel.parts`
+  for landblock static objects. The remaining renderer input is preview-only.
+- Implemented. Runtime appearance previews render through `appearance-preview` draw units and
+  `appearance-preview-staged/` frame categories, not a landblock static hydration category.
+- Implemented. Knip reports no staged static landblock draw helpers with live production callers.
 
 ### Phase 4E10: Static Compaction and Atlas Worker Scheduler Deletion
 

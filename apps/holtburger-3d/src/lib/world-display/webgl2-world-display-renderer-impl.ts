@@ -91,6 +91,7 @@ import {
 import type { TransitionPortalScene } from "./transition-portal-work-items";
 import {
 	buildWorldResidencyIndex,
+	buildWorldResidencyIndexFromLandblockArtifacts,
 	createEmptyWorldResidencyIndex,
 	deriveBrowserCameraResidency,
 	describeCameraViewResidencyContext,
@@ -863,6 +864,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		setStaticLandblockRenderArtifacts(artifacts) {
 			staticLandblockRenderArtifacts = artifacts;
 			markWorldResourcesDirty();
+			syncResidencyIndex();
 		},
 		setStructuredInteriorScene(scene) {
 			structuredInteriorScene = scene;
@@ -2303,11 +2305,17 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	}
 
 	function syncResidencyIndex(): void {
-		residencyIndex = buildWorldResidencyIndex({
-			cells: structuredInteriorScene.cells,
-			renderChunkTransforms,
-			sceneContext: renderSceneContext,
-		});
+		residencyIndex =
+			buildWorldResidencyIndexFromLandblockArtifacts({
+				artifacts: staticLandblockRenderArtifacts,
+				renderChunkTransforms,
+				sceneContext: renderSceneContext,
+			}) ??
+			buildWorldResidencyIndex({
+				cells: structuredInteriorScene.cells,
+				renderChunkTransforms,
+				sceneContext: renderSceneContext,
+			});
 		updateCameraResidency(resolveCameraFrame().position);
 	}
 

@@ -91,7 +91,6 @@ import {
 	type CompactionFamilyPlan,
 	type CompactionFamilyPlanningPolicy,
 } from "./compaction/compaction-family-planner";
-import type { CompactedGeometrySourceDrawUnit } from "./compaction/compacted-geometry";
 import {
 	createEmptyTexturePageAtlasPlan,
 	createTexturePageDetailAtlasPlacementsByEntryKey,
@@ -125,14 +124,6 @@ import type {
 	Webgl2CompactedGeometryBatchResource,
 	Webgl2CompactedGeometryFamilyResource,
 } from "./webgl2/resources/compacted-geometry-resources";
-import {
-	releaseWebgl2CompactedGeometryBatchGraphLeases,
-	syncWebgl2CompactedGeometryResources,
-} from "./webgl2/resources/compacted-geometry-sync";
-import type {
-	CompactedGeometryWorkerScheduler,
-	CompactedGeometryWorkerSchedulerMetrics,
-} from "./worker-resources/compacted-geometry-worker-scheduler";
 import type {
 	IndexedResourceAtlasWorkerScheduler,
 	IndexedResourceAtlasWorkerSchedulerMetrics,
@@ -293,21 +284,11 @@ export interface Webgl2WorldResourceStore {
 	textureAtlasGenerationGraph: RendererResourceGraph | null;
 	textureAtlasGenerationGraphLease: RendererResourceGraphLease | null;
 	compactedGeometryBatches: Map<string, Webgl2CompactedGeometryBatchResource>;
-	pendingCompactedGeometryBatchKeys: Set<string>;
-	compactedGeometryBatchKeyBySchedulerKey: Map<string, string>;
-	compactedGeometryFamilyResourceKeyBySchedulerKey: Map<string, string>;
-	compactedGeometryWorkerScheduler: CompactedGeometryWorkerScheduler | null;
-	compactedGeometryWorkerMetrics: CompactedGeometryWorkerSchedulerMetrics;
 	compactedGeometryFamilyResources: Map<
 		string,
 		Webgl2CompactedGeometryFamilyResource
 	>;
 	compactedGeometryFamilyResourceCounts: Record<string, number>;
-	compactedGeometryBatchGraph: RendererResourceGraph | null;
-	compactedGeometryBatchGraphLeasesByKey: Map<
-		string,
-		RendererResourceGraphLease
-	>;
 	compactionCandidateDrawUnitCount: number;
 	compactionBypassReasonCount: number;
 	compactionBypassSamples: readonly string[];
@@ -449,16 +430,8 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		textureAtlasGenerationGraph: null,
 		textureAtlasGenerationGraphLease: null,
 		compactedGeometryBatches: new Map(),
-		pendingCompactedGeometryBatchKeys: new Set(),
-		compactedGeometryBatchKeyBySchedulerKey: new Map(),
-		compactedGeometryFamilyResourceKeyBySchedulerKey: new Map(),
-		compactedGeometryWorkerScheduler: null,
-		compactedGeometryWorkerMetrics:
-			createEmptyCompactedGeometryWorkerSchedulerMetrics(),
 		compactedGeometryFamilyResources: new Map(),
 		compactedGeometryFamilyResourceCounts: {},
-		compactedGeometryBatchGraph: null,
-		compactedGeometryBatchGraphLeasesByKey: new Map(),
 		compactionCandidateDrawUnitCount: 0,
 		compactionBypassReasonCount: 0,
 		compactionBypassSamples: [],
@@ -653,16 +626,6 @@ export function commitWebgl2IndexedResourceAtlasGeneration({
 	}
 	store.indexedResourceAtlasGeneration = generation;
 	store.pendingIndexedResourceAtlasGenerationKey = null;
-}
-
-export function markWebgl2CompactedGeometryBatchReplacementPending({
-	store,
-	batchKey,
-}: {
-	store: Webgl2WorldResourceStore;
-	batchKey: string;
-}): void {
-	store.pendingCompactedGeometryBatchKeys.add(batchKey);
 }
 
 export function syncWebgl2WorldResources({
@@ -1053,19 +1016,7 @@ export function syncWebgl2WorldResources({
 		store,
 		retainedTerrainTileIds,
 	});
-	syncWebgl2CompactedGeometryResources({
-		gl,
-		store,
-		plan: store.compactionFamilyPlan,
-		drawUnits: EMPTY_COMPACTED_GEOMETRY_DRAW_UNITS,
-		renderChunkTransforms,
-		rendererResourceGraph,
-		indexedResourceAtlasPlan: store.indexedResourceAtlasPlan,
-	});
 }
-
-const EMPTY_COMPACTED_GEOMETRY_DRAW_UNITS: readonly CompactedGeometrySourceDrawUnit[] =
-	[];
 
 export function destroyWebgl2WorldResources(
 	store: Webgl2WorldResourceStore,
@@ -1079,7 +1030,6 @@ export function destroyWebgl2WorldResources(
 		}
 	}
 	releaseWebgl2TextureAtlasGenerationGraphLease(store);
-	releaseWebgl2CompactedGeometryBatchGraphLeases(store);
 	for (const drawUnit of store.drawUnits) {
 		destroyWebgl2DrawUnit(drawUnit);
 	}
@@ -1109,10 +1059,6 @@ export function destroyWebgl2WorldResources(
 	store.textureAtlasWorkerScheduler = null;
 	store.textureAtlasWorkerMetrics =
 		createEmptyTextureAtlasWorkerSchedulerMetrics();
-	store.compactedGeometryWorkerScheduler?.dispose();
-	store.compactedGeometryWorkerScheduler = null;
-	store.compactedGeometryWorkerMetrics =
-		createEmptyCompactedGeometryWorkerSchedulerMetrics();
 	store.indexedResourceAtlasWorkerScheduler?.dispose();
 	store.indexedResourceAtlasWorkerScheduler = null;
 	store.indexedResourceAtlasWorkerMetrics =
@@ -1121,11 +1067,6 @@ export function destroyWebgl2WorldResources(
 	store.textureAtlasGenerationGraphLease = null;
 	store.indexedResourceAtlasGenerationGraph = null;
 	store.indexedResourceAtlasGenerationGraphLease = null;
-	store.compactedGeometryBatchGraph = null;
-	store.compactedGeometryBatchGraphLeasesByKey.clear();
-	store.compactedGeometryBatchKeyBySchedulerKey.clear();
-	store.compactedGeometryFamilyResourceKeyBySchedulerKey.clear();
-	store.pendingCompactedGeometryBatchKeys.clear();
 	store.boundGraph = null;
 	store.terrainTileCount = 0;
 	store.terrainDrawUnitCount = 0;
@@ -1160,7 +1101,6 @@ export function destroyWebgl2WorldResources(
 		batch.dispose();
 	}
 	store.compactedGeometryBatches.clear();
-	store.pendingCompactedGeometryBatchKeys.clear();
 	store.compactedGeometryFamilyResources.clear();
 	store.compactedGeometryFamilyResourceCounts = {};
 	store.compactionCandidateDrawUnitCount = 0;
@@ -1216,21 +1156,6 @@ export function destroyWebgl2WorldResources(
 	store.preparedTextureUploadCount = 0;
 	store.preparedTextureGeneratedByteLength = 0;
 	store.triangleCount = 0;
-}
-
-function createEmptyCompactedGeometryWorkerSchedulerMetrics(): CompactedGeometryWorkerSchedulerMetrics {
-	return {
-		activeSchedulerCount: 0,
-		submittedJobCount: 0,
-		dedupedDesiredJobCount: 0,
-		coalescedDesiredJobCount: 0,
-		staleResultCount: 0,
-		readyResultCount: 0,
-		committedResultCount: 0,
-		errorCount: 0,
-		lastStaleDiscardReason: null,
-		lastErrorMessage: null,
-	};
 }
 
 function createEmptyIndexedResourceAtlasWorkerSchedulerMetrics(): IndexedResourceAtlasWorkerSchedulerMetrics {

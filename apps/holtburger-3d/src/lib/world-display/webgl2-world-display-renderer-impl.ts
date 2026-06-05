@@ -111,7 +111,6 @@ import type {
 import { calculateStaticLandblockArtifactSceneBoundsFrame } from "./artifact-scene-bounds";
 import { profileBrowserJsScope } from "../diagnostics/browser-js-profiler";
 import { deriveWebgl2DrawUnitRuntimeDiagnostics } from "./webgl2-runtime-render-diagnostics";
-import { CompactedGeometryWorkerScheduler } from "./worker-resources/compacted-geometry-worker-scheduler";
 import { IndexedResourceAtlasWorkerScheduler } from "./worker-resources/indexed-atlas-worker-scheduler";
 import { TextureAtlasWorkerScheduler } from "./worker-resources/texture-atlas-worker-scheduler";
 
@@ -974,10 +973,6 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			}
 
 			resources = createWebgl2RenderResources(gl);
-			resources.worldStore.compactedGeometryWorkerScheduler =
-				new CompactedGeometryWorkerScheduler({
-					onReadyResult: markWorldResourcesDirty,
-				});
 			resources.worldStore.textureAtlasWorkerScheduler =
 				new TextureAtlasWorkerScheduler({
 					onReadyResult: markWorldResourcesDirty,

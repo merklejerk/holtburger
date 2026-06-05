@@ -1,10 +1,4 @@
 import {
-	buildCompactedGeometryWorkerResult,
-	collectBuildCompactedGeometryResultTransferables,
-	type BuildCompactedGeometryWorkerJob,
-	type BuildCompactedGeometryWorkerResult,
-} from "../lib/world-display/worker-resources/compacted-geometry-worker-payloads";
-import {
 	buildIndexedResourceAtlasWorkerResult,
 	collectBuildIndexedResourceAtlasResultTransferables,
 	type BuildIndexedResourceAtlasWorkerJob,
@@ -18,7 +12,6 @@ import {
 } from "../lib/world-display/worker-resources/texture-atlas-worker-payloads";
 
 export type RenderResourceWorkerJobKind =
-	| "build-compacted-geometry"
 	| "build-indexed-resource-atlas"
 	| "build-texture-atlas";
 
@@ -42,11 +35,9 @@ export interface RenderResourceWorkerJobErrorMessage {
 }
 
 export type RenderResourceWorkerJob =
-	| BuildCompactedGeometryWorkerJob
 	| BuildIndexedResourceAtlasWorkerJob
 	| BuildTextureAtlasWorkerJob;
 export type RenderResourceWorkerJobResult =
-	| BuildCompactedGeometryWorkerResult
 	| BuildIndexedResourceAtlasWorkerResult
 	| BuildTextureAtlasWorkerResult;
 export type RenderResourceWorkerRequestMessage =
@@ -102,8 +93,6 @@ export function runRenderResourceWorkerJob(
 	job: RenderResourceWorkerJob,
 ): RenderResourceWorkerJobResult {
 	switch (job.type) {
-		case "build-compacted-geometry":
-			return buildCompactedGeometryWorkerResult(job.input);
 		case "build-indexed-resource-atlas":
 			return buildIndexedResourceAtlasWorkerResult(job.input);
 		case "build-texture-atlas":
@@ -115,8 +104,6 @@ function collectRenderResourceWorkerResultTransferables(
 	result: RenderResourceWorkerJobResult,
 ): Transferable[] {
 	switch (result.type) {
-		case "build-compacted-geometry":
-			return collectBuildCompactedGeometryResultTransferables(result);
 		case "build-indexed-resource-atlas":
 			return collectBuildIndexedResourceAtlasResultTransferables(result);
 		case "build-texture-atlas":

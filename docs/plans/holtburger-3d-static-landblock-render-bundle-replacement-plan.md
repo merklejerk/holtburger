@@ -20,7 +20,8 @@ spatial hints and artifact-backed static spatial index items are implemented. Ph
 selected static overlay artifact fallback is implemented. Phase 4C3D3B4 render BVH visibility
 naming cleanup is implemented. Phase 4D1 artifact-backed portal composite BVH sources are
 implemented. Phase 4D2A artifact-backed camera residency index and Phase 4D2B1 artifact-owned
-render-frame env-cell BVH visibility are implemented.
+render-frame env-cell BVH visibility are implemented. Phase 4D2B2 scene-domain base fallback
+cleanup is implemented.
 The plan has been redirected to worker-owned raw landblock closure loading, worker-built terrain
 artifacts, additive landblock worker product requests, and static-object-bundle-owned texture pages.
 
@@ -324,6 +325,10 @@ Progress:
   detailed artifact local BVH entries with their artifact-owned structured cell render chunks before
   consulting `StructuredInteriorSceneModel`. Prepared env-cell payload culling remains only as the
   existing fallback for env cells not covered by resident detailed artifacts.
+- 2026-06-05: Implemented Phase 4D2B2. The initial WebGL scene-domain base fallback no longer
+  depends on `StructuredInteriorSceneModel.cells`. `deriveWebgl2BaseSceneDomain` now derives only
+  from `WorldRenderSceneContext`, while the actual per-frame base scene and initial portal env-cell
+  continue to come from artifact-backed camera residency.
 
 Validation:
 
@@ -374,6 +379,9 @@ Validation:
 - `npm exec vitest -- run src/lib/world-display/render-bvh-visibility-snapshot.test.ts src/lib/world-display/world-render-frame.test.ts`,
   `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
   `git diff --check` passed after Phase 4D2B1.
+- `npm exec vitest -- run src/lib/world-display/webgl2-transition-portal-work.test.ts`,
+  `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run lint:rust`, and
+  `git diff --check` passed after Phase 4D2B2.
 - `npm run test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/assets/static-bundle-layer-planner.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/asset-channel.test.ts src/workers/shared/asset-prepare.test.ts src/workers/shared/host-asset-bridge.test.ts src/workers/shared/asset-closure-loader.test.ts src/workers/shared/transferables.test.ts`
   passed after the first Phase 1D builder slice.
 - `npm exec eslint -- src/lib/world-display/static-bundle-layer-builder.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-bundle-layer.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/assets/static-bundle-layer-planner.ts src/lib/assets/static-bundle-layer-planner.test.ts`
@@ -4154,7 +4162,41 @@ Exit criteria:
 - Implemented. Focused tests cover artifact-owned culling with an empty structured scene route.
 - Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
 
-#### Phase 4D2B2: Remaining Portal/Culling Consumer Cutover
+#### Phase 4D2B2: Scene-Domain Base Fallback Cleanup
+
+- Remove `StructuredInteriorSceneModel` from the initial WebGL scene-domain base fallback helper.
+- Keep the real per-frame base scene and initial portal env-cell driven by camera residency, which
+  now prefers resident detailed artifacts.
+- Delete stale test helpers that only existed to feed structured cells into the fallback helper.
+
+Decisions and course corrections:
+
+- Implemented. `deriveWebgl2BaseSceneDomain` now accepts only `WorldRenderSceneContext` and treats
+  dungeon contexts as interior fallback contexts.
+- Implemented. `webgl2-world-display-renderer-impl.ts` no longer passes `structuredInteriorScene`
+  to the initial base-scene fallback.
+- Course correction: this fallback is intentionally coarse. It is only used before/around residency
+  updates; per-frame scene-domain submission still calls `deriveWebgl2BaseSceneDomainFromResidency`.
+
+Cleanup targets discovered:
+
+- The renderer still stores and forwards `StructuredInteriorSceneModel` for world resource sync,
+  scene bounds fallback, readiness metrics, and debug overlays. Phase 4E should collapse that
+  adapter once artifact coverage is mandatory.
+- `webgl2-transition-portal-work.ts` no longer imports `StructuredInteriorSceneModel`; keep future
+  portal work helpers policy-oriented and artifact/residency-input based.
+
+Legacy shims introduced:
+
+- None. The obsolete structured-scene parameter and test helper were removed.
+
+Exit criteria:
+
+- Implemented. Initial scene-domain base fallback does not depend on structured scene cells.
+- Implemented. Focused tests cover the context-only fallback behavior.
+- Implemented. `check`, TypeScript lint, knip, Rust lint, and `git diff --check` pass.
+
+#### Phase 4D2B3: Remaining Portal/Culling Consumer Cutover
 
 - Move any remaining render-critical portal composite, culling, cell visibility, or portal traversal
   source facts that still read `StructuredInteriorSceneModel` or prepared env-cell payloads onto

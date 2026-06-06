@@ -24,210 +24,83 @@ import {
 } from "./static-renderables";
 import type { StructuredInteriorCell } from "./structured-interior-scene";
 import type { LandblockTerrainRenderArtifact } from "./terrain-render-artifact";
-import type { LandblockRenderProductWorkerResult } from "./landblock-render-product";
+import {
+	getDetailedLandblockRenderArtifacts,
+	type LandblockRenderProductWorkerResult,
+} from "./landblock-render-product";
 import type { TerrainSceneModel } from "./terrain-scene";
 import {
+	buildTerrainTileFallbackGeometry,
 	buildTerrainTileLayerGeometry,
 	type TerrainTileLayerPlan,
 } from "./terrain-tile-plan";
 import { createEmptyTransitionPortalCandidateModel } from "./transition-portal-work-items";
 import {
+	commitWebgl2TerrainProductResources,
 	createWebgl2WorldResourceStore,
 	destroyWebgl2WorldResources,
-	syncWebgl2StaticLandblockRenderArtifactResources,
+	evictWebgl2TerrainProductResources,
 	syncWebgl2WorldResources,
+	updateWebgl2TerrainProductSamplerPolicy,
 } from "./webgl2-world-resources";
-import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
-import type { StaticObjectBundleArtifact } from "./static-bundle-layer";
+import {
+	commitWebgl2StructuredInteriorProductResources,
+	evictWebgl2StructuredInteriorProductResources,
+} from "./webgl2/resources/structured-interior-resources";
 
 describe("webgl2 world resources", () => {
-	it("syncs resident outdoor static bundle layers into WebGL resources", () => {
-		const gl = new FakeWebgl2();
-		const store = createWebgl2WorldResourceStore();
-		const firstProductSet = createStaticLandblockProductSet([
-			createStaticBundleLayer("static-layer", "revision-a"),
-		]);
-
-		syncWebgl2StaticLandblockRenderArtifactResources({
-			gl: gl.asContext(),
-			store,
-			artifacts: firstProductSet,
-		});
-
-		expect(store.staticBundleLayerResourceCount).toBe(1);
-		expect(store.staticBundleLayerCompactedBatchResourceCount).toBe(1);
-		expect(store.staticBundleLayerDirectEntryResourceCount).toBe(1);
-		expect(store.staticBundleLayerTexturePageResourceCount).toBe(1);
-		expect(gl.createdTextures).toHaveLength(1);
-
-		syncWebgl2StaticLandblockRenderArtifactResources({
-			gl: gl.asContext(),
-			store,
-			artifacts: firstProductSet,
-		});
-
-		expect(gl.createdTextures).toHaveLength(1);
-
-		syncWebgl2StaticLandblockRenderArtifactResources({
-			gl: gl.asContext(),
-			store,
-			artifacts: createStaticLandblockProductSet([
-				createStaticBundleLayer("static-layer", "revision-b"),
-			]),
-		});
-
-		expect(store.staticBundleLayerResourceCount).toBe(1);
-		expect(gl.createdTextures).toHaveLength(2);
-		expect(gl.deletedTextures).toHaveLength(1);
-
-		syncWebgl2StaticLandblockRenderArtifactResources({
-			gl: gl.asContext(),
-			store,
-			artifacts: createStaticLandblockProductSet([]),
-		});
-
-		expect(store.staticBundleLayerResourceCount).toBe(0);
-		expect(gl.deletedTextures).toHaveLength(2);
-	});
-
-	it("syncs additive outdoor and env-cell static bundle products independently", () => {
-		const gl = new FakeWebgl2();
-		const store = createWebgl2WorldResourceStore();
-		const landblockId = 0xda55ffff;
-
-		syncWebgl2StaticLandblockRenderArtifactResources({
-			gl: gl.asContext(),
-			store,
-			artifacts: createStaticLandblockProductSet([
-				createStaticLandblockProductArtifact({
-					landblockId,
-					product: "outdoor",
-					layers: [
-						createStaticBundleLayer("static-layer/buildings", "revision-a", {
-							landblockId,
-							bundleKind: "outdoor-buildings",
-						}),
-					],
-				}),
-				createStaticLandblockProductArtifact({
-					landblockId,
-					product: "outdoor-env-cells",
-					layers: [
-						createStaticBundleLayer("static-layer/env-cell", "revision-a", {
-							landblockId,
-							bundleKind: "env-cell-static",
-						}),
-					],
-				}),
-			]),
-		});
-
-		expect(store.staticBundleLayerResourceCount).toBe(2);
-		expect(
-			[...store.staticBundleLayerResources.layersByKey.keys()].sort(),
-		).toEqual([
-			"static-layer/buildings:revision-a",
-			"static-layer/env-cell:revision-a",
-		]);
-		expect(gl.createdTextures).toHaveLength(2);
-	});
-
-	it("syncs dungeon env-cell static bundle products without outdoor resources", () => {
-		const gl = new FakeWebgl2();
-		const store = createWebgl2WorldResourceStore();
-		const landblockId = 0xda55ffff;
-
-		syncWebgl2StaticLandblockRenderArtifactResources({
-			gl: gl.asContext(),
-			store,
-			artifacts: createStaticLandblockProductSet([
-				createStaticLandblockProductArtifact({
-					landblockId,
-					product: "dungeon-env-cells",
-					layers: [
-						createStaticBundleLayer("static-layer/dungeon-env", "revision-a", {
-							landblockId,
-							bundleKind: "env-cell-static",
-						}),
-					],
-				}),
-			]),
-		});
-
-		expect(store.staticBundleLayerResourceCount).toBe(1);
-		expect([...store.staticBundleLayerResources.layersByKey.keys()]).toEqual([
-			"static-layer/dungeon-env:revision-a",
-		]);
-		expect(gl.createdTextures).toHaveLength(1);
-	});
-
-	it("syncs worker detailed structured interiors as direct WebGL resources", () => {
+	it("commits and evicts detailed structured interiors by product key", () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
 		const cell = createStructuredInteriorCell();
-		const secondCell = createStructuredInteriorCell({ envCellId: 0xda550101 });
+		const product = createDetailedLandblockProductArtifact([cell]);
+		const artifact = getDetailedLandblockRenderArtifacts(product);
+		expect(artifact).not.toBeNull();
+		const productKey = {
+			landblockId: product.landblockId,
+			product: product.product,
+			buildPolicyRevision: product.buildPolicyRevision,
+			texturePagePolicyRevision: product.texturePagePolicyRevision,
+		};
 
-		syncWebgl2StaticLandblockRenderArtifactResources({
+		commitWebgl2StructuredInteriorProductResources({
 			gl: gl.asContext(),
-			store,
-			artifacts: createStaticLandblockProductSet([
-				createDetailedLandblockProductArtifact([cell, secondCell]),
-			]),
+			store: store.structuredInteriorResources,
+			productKey,
+			artifact: artifact!,
 			renderChunkTransforms: [createChunkTransform()],
 			textureFilteringMode: "linear",
 		});
-		const resource = [
-			...store.structuredInteriorResources.cellsByKey.values(),
-		][0];
 
-		expect(store.structuredInteriorResourceCount).toBe(2);
-		expect(store.structuredInteriorProductResourceCount).toBe(1);
-		expect(store.structuredInteriorTexturePageResourceCount).toBe(1);
-		expect(store.structuredInteriorMaterialRecordResourceCount).toBe(1);
-		expect(store.structuredInteriorResourceTriangleCount).toBe(2);
 		expect(store.structuredInteriorResources.productsByKey.size).toBe(1);
-		expect(store.structuredInteriorResources.cellsByKey.size).toBe(2);
-		expect(gl.createdBuffers).toHaveLength(6);
-		expect(gl.createdVertexArrays).toHaveLength(2);
+		expect(store.structuredInteriorResources.cellsByKey.size).toBe(1);
 		expect(gl.createdTextures).toHaveLength(1);
-		expect(gl.generatedMipmapCount).toBe(1);
+		expect(gl.createdBuffers).toHaveLength(3);
 
-		syncWebgl2StaticLandblockRenderArtifactResources({
+		commitWebgl2StructuredInteriorProductResources({
 			gl: gl.asContext(),
-			store,
-			artifacts: createStaticLandblockProductSet([
-				createDetailedLandblockProductArtifact([cell, secondCell]),
-			]),
+			store: store.structuredInteriorResources,
+			productKey,
+			artifact: artifact!,
 			renderChunkTransforms: [createChunkTransform()],
 			textureFilteringMode: "nearest",
 		});
 
-		expect([...store.structuredInteriorResources.cellsByKey.values()][0]).toBe(
-			resource,
-		);
-		expect(gl.createdBuffers).toHaveLength(6);
 		expect(gl.createdTextures).toHaveLength(1);
-		expect(gl.generatedMipmapCount).toBe(1);
+		expect(gl.createdBuffers).toHaveLength(3);
 		expect(gl.textureParameters).toContainEqual({
 			pname: gl.TEXTURE_MIN_FILTER,
 			param: gl.NEAREST,
 		});
 
-		syncWebgl2WorldResources({
-			gl: gl.asContext(),
-			store,
-			assetState: createAssetState(),
-			terrainScene: createTerrainScene(),
-			staticRenderableScene: createStaticRenderableScene([]),
-			transitionPortalModel: createTransitionPortalModel(),
-			renderChunkTransforms: [createChunkTransform()],
+		evictWebgl2StructuredInteriorProductResources({
+			store: store.structuredInteriorResources,
+			productKey,
 		});
 
-		expect(
-			store.drawUnits.some(
-				(drawUnit) => drawUnit.kind === "structured-interior",
-			),
-		).toBe(false);
+		expect(store.structuredInteriorResources.productsByKey.size).toBe(0);
+		expect(store.structuredInteriorResources.cellsByKey.size).toBe(0);
+		expect(gl.deletedTextures).toHaveLength(1);
 	});
 
 	it("realizes appearance preview draw units as retained WebGL2 resources", () => {
@@ -472,6 +345,151 @@ describe("webgl2 world resources", () => {
 				"terrain tile has no terrain blend page inputs",
 			),
 		).toBe(false);
+	});
+
+	it("reuses unchanged worker terrain artifact draw-slice buffers", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2WorldResourceStore();
+		const graph = new RendererResourceGraph();
+		const renderSurfaceId = 0x06000010;
+		const terrainTile = createWorkerArtifactTerrainTile({
+			pcode: encodeUniformTerrainPcode(1),
+			renderSurfaceId,
+			forceMultiSlice: true,
+		});
+		const terrainScene = createTerrainScene([terrainTile]);
+
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState(),
+			terrainScene,
+			staticRenderableScene: createStaticRenderableScene([]),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [
+				createChunkTransform({ landblockId: 0x1234ffff }),
+			],
+			rendererResourceGraph: graph,
+		});
+
+		const firstTile = store.terrainTiles[0];
+		const firstDrawSlices = [...(firstTile?.drawSlices ?? [])];
+		const createdBufferCount = gl.createdBuffers.length;
+		const createdVertexArrayCount = gl.createdVertexArrays.length;
+		expect(firstDrawSlices).toHaveLength(2);
+
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState(),
+			terrainScene,
+			staticRenderableScene: createStaticRenderableScene([]),
+			transitionPortalModel: createTransitionPortalModel(),
+			renderChunkTransforms: [
+				createChunkTransform({
+					landblockId: 0x1234ffff,
+					offset: { x: 40, y: 50, z: 60 },
+				}),
+			],
+			rendererResourceGraph: graph,
+		});
+
+		expect(store.terrainTiles[0]?.drawSlices).toEqual(firstDrawSlices);
+		expect(gl.createdBuffers).toHaveLength(createdBufferCount);
+		expect(gl.createdVertexArrays).toHaveLength(createdVertexArrayCount);
+		expect(gl.deletedBuffers).toHaveLength(0);
+		expect(gl.deletedVertexArrays).toHaveLength(0);
+		expect(store.terrainTiles[0]?.modelMatrix[12]).toBe(40);
+		expect(store.terrainTiles[0]?.drawSlices[0]?.modelMatrix[12]).toBe(40);
+	});
+
+	it("commits, refreshes, and evicts worker terrain artifacts by product key", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2WorldResourceStore();
+		const terrainTile = createWorkerArtifactTerrainTile({
+			pcode: encodeUniformTerrainPcode(1),
+			renderSurfaceId: 0x06000010,
+		});
+		const artifact = terrainTile.terrainArtifact;
+		if (!artifact) {
+			throw new Error("Worker terrain fixture must include an artifact.");
+		}
+		const productKey = {
+			landblockId: artifact.landblockId,
+			product: "outdoor" as const,
+			buildPolicyRevision: artifact.buildPolicyRevision,
+			texturePagePolicyRevision: artifact.cpuTexturePagePolicyRevision,
+		};
+
+		commitWebgl2TerrainProductResources({
+			gl: gl.asContext(),
+			store,
+			productKey,
+			artifact,
+			renderChunkTransforms: [
+				createChunkTransform({ landblockId: 0x1234ffff }),
+			],
+			textureFilteringMode: "linear",
+		});
+
+		const firstTile = store.terrainTiles[0];
+		expect(firstTile?.id).toBe("terrain-tile/terrain-artifact/12340000");
+		expect(firstTile?.texturePageBindings).toHaveLength(1);
+		expect(firstTile?.oneDrawReadiness).toMatchObject({ status: "ready" });
+		expect(store.terrainTileIdsByProductKey.size).toBe(1);
+		expect(store.terrainTexturePageCount).toBe(1);
+		expect(gl.createdBuffers).toHaveLength(4);
+		expect(gl.createdVertexArrays).toHaveLength(1);
+		expect(gl.createdTextures).toHaveLength(1);
+
+		commitWebgl2TerrainProductResources({
+			gl: gl.asContext(),
+			store,
+			productKey,
+			artifact,
+			renderChunkTransforms: [
+				createChunkTransform({
+					landblockId: 0x1234ffff,
+					offset: { x: 40, y: 50, z: 60 },
+				}),
+			],
+			textureFilteringMode: "linear",
+		});
+
+		expect(store.terrainTiles[0]).toBe(firstTile);
+		expect(store.terrainTiles[0]?.modelMatrix[12]).toBe(40);
+		expect(gl.createdBuffers).toHaveLength(4);
+		expect(gl.createdVertexArrays).toHaveLength(1);
+		expect(gl.createdTextures).toHaveLength(1);
+
+		updateWebgl2TerrainProductSamplerPolicy({
+			gl: gl.asContext(),
+			store,
+			textureFilteringMode: "nearest",
+		});
+
+		expect(gl.createdBuffers).toHaveLength(4);
+		expect(gl.createdTextures).toHaveLength(2);
+		expect(gl.deletedTextures).toHaveLength(1);
+		expect(gl.textureParameters).toContainEqual({
+			pname: gl.TEXTURE_MIN_FILTER,
+			param: gl.NEAREST,
+		});
+
+		evictWebgl2TerrainProductResources({
+			gl: gl.asContext(),
+			store,
+			productKey,
+			textureFilteringMode: "nearest",
+		});
+
+		expect(store.terrainTiles).toEqual([]);
+		expect(store.terrainTilesById.size).toBe(0);
+		expect(store.terrainTileIdsByProductKey.size).toBe(0);
+		expect(store.terrainTexturePageCount).toBe(0);
+		expect(gl.deletedBuffers).toHaveLength(4);
+		expect(gl.deletedVertexArrays).toHaveLength(1);
+		expect(gl.deletedTextures).toHaveLength(2);
 	});
 
 	it("disposes orphaned draw units and graph leases", () => {
@@ -1450,99 +1468,6 @@ function createChunkTransform({
 	};
 }
 
-function createStaticLandblockProductSet(
-	input: readonly (LandblockRenderProductWorkerResult | StaticObjectBundleArtifact)[],
-	product: LandblockRenderProductWorkerResult["product"] = "outdoor",
-): StaticLandblockRenderProductSet {
-	const artifacts = isStaticBundleLayerArray(input)
-		? [
-				createStaticLandblockProductArtifact({
-					landblockId: input[0]?.landblockId ?? 0x1234,
-					product,
-					layers: input,
-				}),
-			]
-		: input;
-	const residentCount = artifacts.length;
-	return {
-		artifacts,
-		desiredCount: residentCount,
-		residentCount,
-		inFlightCount: 0,
-		staleResultCount: 0,
-		committedResultCount: residentCount,
-		evictedResultCount: 0,
-		errorCount: 0,
-		latestDesiredIdentityKeys: [],
-	};
-}
-
-function isStaticBundleLayerArray(
-	input: readonly (LandblockRenderProductWorkerResult | StaticObjectBundleArtifact)[],
-): input is readonly StaticObjectBundleArtifact[] {
-	return input.every((item) => item.type !== "landblock-render-product-built");
-}
-
-function createStaticLandblockProductArtifact({
-	landblockId,
-	product,
-	layers,
-}: {
-	landblockId: number;
-	product: LandblockRenderProductWorkerResult["product"];
-	layers: readonly StaticObjectBundleArtifact[];
-}): LandblockRenderProductWorkerResult {
-	const artifacts: LandblockRenderProductWorkerResult["artifacts"] =
-		product === "outdoor"
-			? layers
-			: [
-					...layers,
-					{
-						artifactKind: "detailed-landblock",
-						key: `detailed:${landblockId}:${product}`,
-						landblockId,
-						product,
-						requestId: "request",
-						buildPolicyRevision: "build:v1",
-						texturePagePolicyRevision: "pages:v1",
-						selectedEnvCellIds: [],
-						structuredInteriorMaterialRecords: [],
-						structuredInteriorTexturePageRefs: [],
-						structuredInteriorTexturePages: [],
-						structuredInteriorCells: [],
-						cellStructureMetadata: [],
-						portalLinks: [],
-						portalApertures: [],
-						visibility: {
-							objectVisibilityRecords: [],
-							cellVisibilityRecords: [],
-						},
-						spatial: {
-							envCellResidencyBvh: {
-								coordinateSpace: "landblock-topology-residency",
-								nodes: [],
-								items: [],
-							},
-							envCellLocalBvhs: [],
-						},
-					},
-				];
-	return {
-		type: "landblock-render-product-built" as const,
-		jobId: `job:${landblockId}:${product}`,
-		landblockId,
-		product,
-		requestId: "request",
-		buildPolicyRevision: "build:v1",
-		texturePagePolicyRevision: "pages:v1",
-		artifacts,
-		diagnostics: {
-			status: "ready" as const,
-			messages: [],
-		},
-	};
-}
-
 function createDetailedLandblockProductArtifact(
 	input: StructuredInteriorCell | readonly StructuredInteriorCell[],
 ): LandblockRenderProductWorkerResult {
@@ -1667,131 +1592,8 @@ function createDetailedLandblockProductArtifact(
 	};
 }
 
-function createStaticBundleLayer(
-	key: string,
-	sourceRevision: string,
-	options: {
-		landblockId?: number;
-		bundleKind?: StaticObjectBundleArtifact["bundleKind"];
-		envCellId?: number;
-	} = {},
-): StaticObjectBundleArtifact {
-	const landblockId = options.landblockId ?? 0x1234;
-	const bundleKind = options.bundleKind ?? "outdoor-buildings";
-	const scope =
-		options.envCellId === undefined
-			? {
-					kind: "landblock" as const,
-					landblockId,
-					bundleKind,
-				}
-			: {
-					kind: "env-cell" as const,
-					landblockId,
-					envCellId: options.envCellId,
-					bundleKind,
-				};
-	return {
-		artifactKind: "static-object-bundle",
-		key,
-		scope,
-		landblockId,
-		bundleKind,
-		sourceRevision,
-		rootAssetIds: ["landblock/00001234/outdoor"],
-		preparedAssetIds: [],
-		renderChunks: [
-			{
-				key: "chunk",
-				landblockId,
-				bounds: null,
-			},
-		],
-		compactedBatches: [
-			{
-				key: "compacted",
-				renderChunkKey: "chunk",
-				familyKey: "rgba-texture-page",
-				materialRecordKey: "material",
-				objectKeys: ["object-a"],
-				positions: createStaticTrianglePositions(),
-				normals: createStaticTriangleNormals(),
-				uvs: createStaticTriangleUvs(),
-				indices: new Uint16Array([0, 1, 2]),
-			},
-		],
-		directEntries: [
-			{
-				key: "direct",
-				renderChunkKey: "chunk",
-				materialRecordKey: "material",
-				objectKey: "object-b",
-				positions: createStaticTrianglePositions(),
-				normals: createStaticTriangleNormals(),
-				uvs: createStaticTriangleUvs(),
-				indices: new Uint32Array([0, 1, 2]),
-				bounds: null,
-			},
-		],
-		materialRecords: [
-			{
-				key: "material",
-				familyKey: "rgba-texture-page",
-				texturePageRefKeys: ["texture-ref"],
-				isTransparent: false,
-			},
-		],
-		texturePageRefs: [
-			{
-				key: "texture-ref",
-				sourceAssetId: "prepared-texture/06000001/raw",
-				usageBucket: "base-color",
-				sampleClass: "rgba-color",
-				width: 1,
-				height: 1,
-				wrapS: "clamp",
-				wrapT: "clamp",
-				samplingDomain: "color",
-				lookup: "color-filtered",
-			},
-		],
-		texturePages: [
-			{
-				key: "texture-page",
-				scopeKey: `landblock:${landblockId}:${bundleKind}`,
-				pageKind: "single-entry",
-				usageBucket: "base-color",
-				sampleClass: "rgba-color",
-				width: 1,
-				height: 1,
-				bytes: new Uint8Array([255, 255, 255, 255]),
-				entries: [
-					{
-						virtualRefKey: "texture-ref",
-						sourceAssetId: "prepared-texture/06000001/raw",
-						rect: [0, 0, 1, 1],
-					},
-				],
-			},
-		],
-		objectRecords: [],
-		diagnostics: {
-			sourceObjectCount: 2,
-			compactedSurfaceCount: 1,
-			directSurfaceCount: 1,
-			skippedSurfaceCount: 0,
-			missingAssetIds: [],
-			skippedReasons: [],
-		},
-	};
-}
-
 function createStaticTrianglePositions(): Float32Array {
 	return new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
-}
-
-function createStaticTriangleNormals(): Float32Array {
-	return new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]);
 }
 
 function createStaticTriangleUvs(): Float32Array {
@@ -1875,9 +1677,11 @@ function createReadyTerrainTile({
 function createWorkerArtifactTerrainTile({
 	pcode,
 	renderSurfaceId,
+	forceMultiSlice = false,
 }: {
 	pcode: number;
 	renderSurfaceId: number;
+	forceMultiSlice?: boolean;
 }): TerrainSceneModel["tiles"][number] {
 	const mesh = createTerrainMeshForPcodes([pcode]);
 	const materialResources = {
@@ -1904,6 +1708,7 @@ function createWorkerArtifactTerrainTile({
 		materialResources,
 		pcode,
 		renderSurfaceId,
+		forceMultiSlice,
 	});
 	return {
 		assetId: artifact.key,
@@ -1923,11 +1728,13 @@ function createTerrainArtifactFixture({
 	materialResources,
 	pcode,
 	renderSurfaceId,
+	forceMultiSlice = false,
 }: {
 	mesh: PreparedTerrainMesh;
 	materialResources: TerrainSceneModel["tiles"][number]["materialResources"];
 	pcode: number;
 	renderSurfaceId: number;
+	forceMultiSlice?: boolean;
 }): LandblockTerrainRenderArtifact {
 	const renderSurface = createRenderSurfacePayload({
 		renderSurfaceId,
@@ -1964,6 +1771,11 @@ function createTerrainArtifactFixture({
 		mesh,
 		plan: layerPlan,
 		sourceSignature: "terrain-artifact/12340000/slice/0",
+	});
+	const secondGeometry = buildTerrainTileLayerGeometry({
+		mesh,
+		plan: layerPlan,
+		sourceSignature: "terrain-artifact/12340000/slice/1",
 	});
 	const preparedTexture = createAtlasPreparedTexturePayload(renderSurfaceId);
 	const level = preparedTexture.levels[0];
@@ -2023,15 +1835,25 @@ function createTerrainArtifactFixture({
 				},
 				geometry,
 			},
+			...(forceMultiSlice
+				? [
+						{
+							key: "terrain-artifact/12340000/slice/1",
+							slicePlan: {
+								id: "slice/1",
+								reason: "artifact fixture overflow",
+								layerPlan,
+								pcodes: [pcode],
+							},
+							geometry: secondGeometry,
+						},
+					]
+				: []),
 		],
-		debugFallbackGeometry: {
-			signature: "terrain-artifact/12340000/fallback",
-			positions: new Float32Array(),
-			uvs: null,
-			indices: new Uint16Array(),
-			vertexCount: 0,
-			triangleCount: 0,
-		},
+		debugFallbackGeometry: buildTerrainTileFallbackGeometry(
+			mesh,
+			"terrain-artifact/12340000/fallback",
+		),
 		bvh: {
 			coordinateSpace: "landblock-outdoor-terrain-local",
 			nodes: [],

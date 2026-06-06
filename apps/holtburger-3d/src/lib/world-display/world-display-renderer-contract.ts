@@ -60,9 +60,6 @@ export interface WorldDisplayRenderer {
 	): void;
 	evictStaticLandblockProduct(key: StaticLandblockProductKey): void;
 	clearStaticLandblockProducts(): void;
-	replaceStaticLandblockProducts(
-		artifacts: StaticLandblockRenderProductSet,
-	): void;
 	setStructuredInteriorScene(scene: StructuredInteriorSceneModel): void;
 	setTransitionPortalModel(model: TransitionPortalCandidateModel): void;
 	setDebugOverlayScene(scene: WorldDebugOverlayModel): void;

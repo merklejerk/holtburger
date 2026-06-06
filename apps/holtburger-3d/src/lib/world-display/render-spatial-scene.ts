@@ -43,8 +43,10 @@ import {
 } from "./render-chunks";
 import {
 	getDetailedLandblockRenderArtifacts,
+	getLandblockTerrainRenderArtifact,
 	getStaticObjectBundleArtifacts,
 	type DetailedLandblockRenderArtifacts,
+	type LandblockRenderProductWorkerResult,
 } from "./landblock-render-product";
 import {
 	formatRenderDomainKey,
@@ -69,6 +71,28 @@ export function deriveTerrainSpatialItems(
 	terrainScene: TerrainSceneModel,
 ): RenderSpatialItem[] {
 	return terrainScene.tiles.map(deriveTerrainSpatialItem);
+}
+
+export function deriveLandblockProductSpatialItems(
+	result: LandblockRenderProductWorkerResult,
+): RenderSpatialItem[] {
+	const terrainArtifact = getLandblockTerrainRenderArtifact(result);
+	const terrainItems = terrainArtifact
+		? [deriveTerrainArtifactSpatialItem(terrainArtifact)]
+		: [];
+	const staticItems = getStaticObjectBundleArtifacts(result).flatMap((bundle) =>
+		deriveStaticBundleSpatialItems(bundle),
+	);
+	const detailed = getDetailedLandblockRenderArtifacts(result);
+	const detailedItems = detailed
+		? [
+				...deriveDetailedStructuredInteriorSpatialItems(detailed),
+				...deriveDetailedPortalSpatialItems(detailed),
+			]
+		: [];
+	return [...terrainItems, ...staticItems, ...detailedItems].sort((left, right) =>
+		left.id.localeCompare(right.id),
+	);
 }
 
 export function deriveStructuredInteriorSpatialItems(
@@ -158,6 +182,29 @@ function deriveTerrainSpatialItem(tile: TerrainSceneTile): RenderSpatialItem {
 	};
 }
 
+function deriveTerrainArtifactSpatialItem(
+	artifact: NonNullable<
+		ReturnType<typeof getLandblockTerrainRenderArtifact>
+	>,
+): RenderSpatialItem {
+	const bounds = deriveTerrainMeshBounds(artifact.mesh);
+	const placement = deriveLandblockRenderChunkPlacement(artifact.landblockId);
+	return {
+		id: terrainSpatialItemId(artifact.key),
+		kind: "terrain",
+		ownerKey: TERRAIN_SPATIAL_OWNER_KEY,
+		chunkKey: placement.chunkKey,
+		broadphaseBounds: bounds,
+		pickShape: { kind: "box", bounds },
+		metadata: {
+			kind: "terrain",
+			landblockId: artifact.landblockId,
+			assetId: artifact.assetId,
+			terrainQuad: null,
+		},
+	};
+}
+
 function deriveStructuredInteriorSpatialItem(
 	cell: StructuredInteriorCell,
 ): RenderSpatialItem {
@@ -222,6 +269,76 @@ function deriveDetailedStructuredInteriorSpatialItem(
 			isFocus: selectedEnvCellIds.has(cell.envCellId),
 		},
 	};
+}
+
+function deriveDetailedStructuredInteriorSpatialItems(
+	artifact: DetailedLandblockRenderArtifacts,
+): RenderSpatialItem[] {
+	const selectedEnvCellIds = new Set(artifact.selectedEnvCellIds);
+	return artifact.structuredInteriorCells
+		.filter((cell) => selectedEnvCellIds.has(cell.envCellId))
+		.map((cell) =>
+			deriveDetailedStructuredInteriorSpatialItem(cell, selectedEnvCellIds),
+		);
+}
+
+function deriveDetailedPortalSpatialItems(
+	artifact: DetailedLandblockRenderArtifacts,
+): RenderSpatialItem[] {
+	const cellByEnvCellId = new Map(
+		artifact.structuredInteriorCells.map((cell) => [cell.envCellId, cell]),
+	);
+	const portalByKey = new Map(
+		artifact.structuredInteriorCells.flatMap((cell) =>
+			cell.portals.map((portal) => [
+				`${portal.envCellId}:${portal.portalId}:${portal.sourceIndex}`,
+				portal,
+			] as const),
+		),
+	);
+	return artifact.portalApertures.flatMap((aperture) => {
+		if (aperture.points.length < 3) {
+			return [];
+		}
+		const cell = cellByEnvCellId.get(aperture.envCellId);
+		if (!cell) {
+			return [];
+		}
+		const portal = portalByKey.get(
+			`${aperture.envCellId}:${aperture.portalId}:${aperture.sourceIndex}`,
+		);
+		const transform = buildAcPlacementMatrix(
+			cell.localPlacement,
+			{ x: 0, y: 0, z: 0 },
+			{ x: 1, y: 1, z: 1 },
+		);
+		const points = aperture.points.map((point) => transformPoint(point, transform));
+		const bounds = expandBounds(pointsToBounds(points), PORTAL_PICK_THICKNESS);
+		return [
+			{
+				id: portalSpatialItemId(
+					`product:${artifact.product}:${formatHex32(
+						artifact.landblockId,
+					)}:${aperture.portalId}:${aperture.sourceIndex}`,
+				),
+				kind: "portal",
+				ownerKey: DEBUG_OVERLAY_SPATIAL_OWNER_KEY,
+				chunkKey: cell.renderChunk.chunkKey,
+				broadphaseBounds: bounds,
+				pickShape: { kind: "polygon", points, thickness: PORTAL_PICK_THICKNESS },
+				metadata: {
+					kind: "portal",
+					portalId: aperture.portalId,
+					sourceEnvCellId: aperture.envCellId,
+					targetEnvCellId: portal?.targetEnvCellId ?? null,
+					targetStatus: portal?.targetEnvCellId === null ? "outside" : "known-unloaded",
+					polygonId: aperture.polygonId,
+					otherPortalId: portal?.otherPortalId ?? 0,
+					flags: portal?.flags ?? 0,
+				},
+			} satisfies RenderSpatialItem,
+		];
+	});
 }
 
 function deriveStaticRenderablePartSpatialItem(
@@ -416,8 +533,15 @@ function derivePortalSpatialItem(
 }
 
 function deriveTerrainTileBounds(tile: TerrainSceneTile): RenderBounds {
+	return deriveTerrainMeshBounds(tile.mesh, tile.chunkLocalOffset);
+}
+
+function deriveTerrainMeshBounds(
+	mesh: TerrainSceneTile["mesh"],
+	chunkLocalOffset: RenderVec3 = { x: 0, y: 0, z: 0 },
+): RenderBounds {
 	const localBounds = pointsToBounds(
-		tile.mesh.vertices.map((vertex) => ({
+		mesh.vertices.map((vertex) => ({
 			x: vertex.x,
 			y: vertex.z,
 			z: -vertex.y,
@@ -425,14 +549,14 @@ function deriveTerrainTileBounds(tile: TerrainSceneTile): RenderBounds {
 	);
 	return {
 		min: {
-			x: localBounds.min.x + tile.chunkLocalOffset.x,
+			x: localBounds.min.x + chunkLocalOffset.x,
 			y: localBounds.min.y,
-			z: localBounds.min.z + tile.chunkLocalOffset.z,
+			z: localBounds.min.z + chunkLocalOffset.z,
 		},
 		max: {
-			x: localBounds.max.x + tile.chunkLocalOffset.x,
+			x: localBounds.max.x + chunkLocalOffset.x,
 			y: localBounds.max.y,
-			z: localBounds.max.z + tile.chunkLocalOffset.z,
+			z: localBounds.max.z + chunkLocalOffset.z,
 		},
 	};
 }

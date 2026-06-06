@@ -7,6 +7,7 @@ import {
 	type Webgl2VertexArrayResource,
 } from "./webgl2-gl";
 import {
+	buildSceneCameraRenderRay,
 	createFallbackSceneCameraFrame,
 	type SceneBoundsFrame,
 } from "./camera";
@@ -46,9 +47,11 @@ import {
 	type Webgl2SceneDomainTargetSet,
 } from "./webgl2-scene-domain-targets";
 import {
+	commitWebgl2TerrainProductResultResources,
 	createWebgl2WorldResourceStore,
 	destroyWebgl2WorldResources,
-	syncWebgl2StaticLandblockRenderArtifactResources,
+	evictWebgl2TerrainProductResources,
+	refreshWebgl2StaticLandblockProductResourceCounters,
 	syncWebgl2WorldResources,
 	type Webgl2WorldResourceStore,
 } from "./webgl2-world-resources";
@@ -56,6 +59,8 @@ import { deriveLandblockRenderChunkPlacement } from "./render-chunks";
 import {
 	createStaticLandblockProductKeyFromResult,
 	formatStaticLandblockProductKey,
+	getDetailedLandblockRenderArtifacts,
+	getLandblockTerrainRenderArtifact,
 	getStaticObjectBundleArtifacts,
 } from "./landblock-render-product";
 import {
@@ -66,7 +71,10 @@ import type {
 	LandblockRenderProductWorkerResult,
 	StaticLandblockProductKey,
 } from "./landblock-render-product";
-import type { StaticBundleSpatialHint } from "./static-bundle-layer";
+import type {
+	StaticBundleSpatialHint,
+	StaticObjectBundleArtifact,
+} from "./static-bundle-layer";
 import type { Webgl2TerrainTileResource } from "./webgl2/resources/terrain-tile-resources";
 import type {
 	BrowserCameraResidency,
@@ -92,7 +100,11 @@ import {
 	type Webgl2TransitionPortalWorkPlan,
 	type Webgl2VisibleTransitionPortalWork,
 } from "./webgl2-transition-portal-work";
-import type { TransitionPortalScene } from "./transition-portal-work-items";
+import {
+	createEmptyTransitionPortalCandidateModel,
+	deriveTransitionPortalCandidatesFromLandblockArtifacts,
+	type TransitionPortalScene,
+} from "./transition-portal-work-items";
 import {
 	buildWorldResidencyIndex,
 	buildWorldResidencyIndexFromLandblockArtifacts,
@@ -115,6 +127,20 @@ import type {
 import { calculateStaticLandblockArtifactSceneBoundsFrame } from "./artifact-scene-bounds";
 import { profileBrowserJsScope } from "../diagnostics/browser-js-profiler";
 import { deriveWebgl2DrawUnitRuntimeDiagnostics } from "./webgl2-runtime-render-diagnostics";
+import { createStaticLandblockProductMetadataStore } from "./static-landblock-product-metadata";
+import {
+	commitWebgl2StaticBundleProductResources,
+	evictWebgl2StaticBundleProductResources,
+} from "./webgl2/resources/static-bundle-layer-resources";
+import {
+	commitWebgl2StructuredInteriorProductResources,
+	evictWebgl2StructuredInteriorProductResources,
+} from "./webgl2/resources/structured-interior-resources";
+import type { NormalizedViewportPoint } from "./model";
+import type {
+	RenderSpatialItemKind,
+	RenderSpatialPick,
+} from "./render-spatial-index";
 
 const WEBGL2_CANVAS_CLASS_NAME = "world-display__webgl2-canvas";
 const WEBGL2_ERROR_CLASS_NAME = "world-display__webgl2-error";
@@ -524,6 +550,12 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		});
 	let latestPortalWorkPlan: Webgl2TransitionPortalWorkPlan | null = null;
 	let latestSceneBounds: SceneBoundsFrame | null = null;
+	const staticProductMetadata =
+		createStaticLandblockProductMetadataStore();
+	staticProductMetadata.updateRenderChunkTransforms(renderChunkTransforms);
+	for (const artifact of staticLandblockRenderProducts.artifacts) {
+		staticProductMetadata.commitProduct(artifact);
+	}
 
 	const canvas = document.createElement("canvas");
 	canvas.className = WEBGL2_CANVAS_CLASS_NAME;
@@ -561,6 +593,10 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				staticLandblockRenderProducts,
 				result,
 			);
+			syncStaticProductTransitionPortalModel();
+			commitStaticProductRenderResources(result);
+			staticProductMetadata.commitProduct(result);
+			refreshStaticProductSceneBounds();
 			markWorldResourcesDirty();
 			syncResidencyIndex();
 		},
@@ -569,17 +605,20 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				staticLandblockRenderProducts,
 				key,
 			);
+			syncStaticProductTransitionPortalModel();
+			evictStaticProductRenderResources(key);
+			staticProductMetadata.evictProduct(key);
+			refreshStaticProductSceneBounds();
 			markWorldResourcesDirty();
 			syncResidencyIndex();
 		},
 		clearStaticLandblockProducts() {
+			clearStaticProductRenderResources(staticLandblockRenderProducts);
 			staticLandblockRenderProducts =
 				createEmptyStaticLandblockRenderProductSet();
-			markWorldResourcesDirty();
-			syncResidencyIndex();
-		},
-		replaceStaticLandblockProducts(artifacts) {
-			staticLandblockRenderProducts = artifacts;
+			syncStaticProductTransitionPortalModel();
+			staticProductMetadata.clearProducts();
+			refreshStaticProductSceneBounds();
 			markWorldResourcesDirty();
 			syncResidencyIndex();
 		},
@@ -602,6 +641,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		},
 		setRenderChunkTransforms(transforms) {
 			renderChunkTransforms = transforms;
+			staticProductMetadata.updateRenderChunkTransforms(transforms);
+			recommitStaticProductRenderResources();
 			markWorldResourcesDirty();
 			syncResidencyIndex();
 		},
@@ -632,6 +673,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				return;
 			}
 			textureFilteringMode = mode;
+			recommitStaticProductRenderResources();
 			markWorldResourcesDirty();
 		},
 		setDetailTexturesEnabled(enabled) {
@@ -639,6 +681,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				return;
 			}
 			detailTexturesEnabled = enabled;
+			recommitStaticProductRenderResources();
 			markWorldResourcesDirty();
 		},
 		setCameraFrameChangeHandler() {
@@ -652,11 +695,21 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			cameraResidencyChangeHandler = handler;
 			reportCameraResidency();
 		},
-		pickTerrainLandblockAtViewportPoint() {
-			return null;
+		pickTerrainLandblockAtViewportPoint(viewportPoint) {
+			const pick = pickStaticProductAtViewportPoint(
+				viewportPoint,
+				new Set(["terrain"]),
+			);
+			return pick?.item.metadata.kind === "terrain"
+				? pick.item.metadata.landblockId
+				: null;
 		},
-		pickAtViewportPoint() {
-			return null;
+		pickAtViewportPoint(viewportPoint, mask, ownerKeys) {
+			return pickStaticProductAtViewportPoint(
+				viewportPoint,
+				mask,
+				ownerKeys,
+			);
 		},
 		getDrawUnitRuntimeDiagnostics(drawUnitIds) {
 			if (worldResourcesDirty) {
@@ -695,6 +748,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			}
 
 			resources = createWebgl2RenderResources(gl);
+			syncStaticProductTransitionPortalModel();
+			recommitStaticProductRenderResources();
 			syncCanvasSize();
 			syncWorldResources();
 			syncResidencyIndex();
@@ -705,6 +760,155 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			console.error("[holtburger-3d][webgl2]", error);
 			showInitializationError(initializationError);
 			reportMetrics();
+		}
+	}
+
+	function commitStaticProductRenderResources(
+		result: LandblockRenderProductWorkerResult,
+	): void {
+		if (!resources) {
+			return;
+		}
+		const currentResources = resources;
+		const productKey = createStaticLandblockProductKeyFromResult(result);
+		const maxAnisotropy =
+			currentResources.materialTextureCapabilities.maxAnisotropy ?? 1;
+		commitWebgl2StaticBundleProductResources({
+			gl: currentResources.gl,
+			store: currentResources.worldStore.staticBundleLayerResources,
+			productKey,
+			layers: getStaticObjectBundleArtifacts(result).filter((bundle) =>
+				isRenderableStaticLandblockArtifactLayer(
+					result.product,
+					bundle.bundleKind,
+				),
+			),
+			textureFilteringMode,
+			maxAnisotropy,
+		});
+		const detailed = getDetailedLandblockRenderArtifacts(result);
+		if (detailed) {
+			commitWebgl2StructuredInteriorProductResources({
+				gl: currentResources.gl,
+				store: currentResources.worldStore.structuredInteriorResources,
+				productKey,
+				artifact: detailed,
+				renderChunkTransforms,
+				textureFilteringMode,
+				maxAnisotropy,
+			});
+		} else {
+			evictWebgl2StructuredInteriorProductResources({
+				store: currentResources.worldStore.structuredInteriorResources,
+				productKey,
+			});
+		}
+		if (getLandblockTerrainRenderArtifact(result)) {
+			commitWebgl2TerrainProductResultResources({
+				gl: currentResources.gl,
+				store: currentResources.worldStore,
+				result,
+				renderChunkTransforms,
+				assetState,
+				materialTextureCapabilities:
+					currentResources.materialTextureCapabilities,
+				textureFilteringMode,
+				detailTexturesEnabled,
+			});
+		} else {
+			evictWebgl2TerrainProductResources({
+				gl: currentResources.gl,
+				store: currentResources.worldStore,
+				productKey,
+				assetState,
+				materialTextureCapabilities:
+					currentResources.materialTextureCapabilities,
+				textureFilteringMode,
+				detailTexturesEnabled,
+			});
+		}
+		refreshWebgl2StaticLandblockProductResourceCounters(
+			currentResources.worldStore,
+		);
+	}
+
+	function evictStaticProductRenderResources(
+		productKey: StaticLandblockProductKey,
+	): void {
+		if (!resources) {
+			return;
+		}
+		const currentResources = resources;
+		evictWebgl2StaticBundleProductResources({
+			store: currentResources.worldStore.staticBundleLayerResources,
+			productKey,
+		});
+		evictWebgl2StructuredInteriorProductResources({
+			store: currentResources.worldStore.structuredInteriorResources,
+			productKey,
+		});
+		evictWebgl2TerrainProductResources({
+			gl: currentResources.gl,
+			store: currentResources.worldStore,
+			productKey,
+			assetState,
+			materialTextureCapabilities: currentResources.materialTextureCapabilities,
+			textureFilteringMode,
+			detailTexturesEnabled,
+		});
+		refreshWebgl2StaticLandblockProductResourceCounters(
+			currentResources.worldStore,
+		);
+	}
+
+	function clearStaticProductRenderResources(
+		products: StaticLandblockRenderProductSet,
+	): void {
+		for (const product of products.artifacts) {
+			evictStaticProductRenderResources(
+				createStaticLandblockProductKeyFromResult(product),
+			);
+		}
+	}
+
+	function recommitStaticProductRenderResources(): void {
+		syncStaticProductTransitionPortalModel();
+		for (const product of staticLandblockRenderProducts.artifacts) {
+			commitStaticProductRenderResources(product);
+		}
+	}
+
+	function syncStaticProductTransitionPortalModel(): void {
+		transitionPortalModel =
+			deriveTransitionPortalCandidatesFromLandblockArtifacts({
+				artifacts: staticLandblockRenderProducts,
+				activeLandblockIds: staticLandblockRenderProducts.artifacts.map(
+					(product) => product.landblockId,
+				),
+			}) ?? createEmptyTransitionPortalCandidateModel();
+	}
+
+	function refreshStaticProductSceneBounds(): void {
+		latestSceneBounds = calculateStaticLandblockArtifactSceneBoundsFrame({
+			artifacts: staticLandblockRenderProducts,
+			renderChunkTransforms,
+		});
+		reportMetrics();
+	}
+
+	function isRenderableStaticLandblockArtifactLayer(
+		product: LandblockRenderProductWorkerResult["product"],
+		bundleKind: StaticObjectBundleArtifact["bundleKind"],
+	): boolean {
+		switch (product) {
+			case "outdoor":
+				return (
+					bundleKind === "outdoor-buildings" ||
+					bundleKind === "outdoor-detail"
+				);
+			case "outdoor-env-cells":
+			case "dungeon-env-cells":
+				return bundleKind === "env-cell-static";
 		}
 	}
 
@@ -1897,15 +2101,6 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		worldResourcesDirty = false;
 		const currentResources = resources;
 		profileBrowserJsScope("webgl2.resource.syncWorldResources", () => {
-			syncWebgl2StaticLandblockRenderArtifactResources({
-				gl: currentResources.gl,
-				store: currentResources.worldStore,
-				artifacts: staticLandblockRenderProducts,
-				renderChunkTransforms,
-				textureFilteringMode,
-				maxAnisotropy:
-					currentResources.materialTextureCapabilities.maxAnisotropy,
-			});
 			syncWebgl2WorldResources({
 				gl: currentResources.gl,
 				store: currentResources.worldStore,
@@ -1935,6 +2130,19 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	function markWorldResourcesDirty(): void {
 		worldResourcesDirty = true;
 		scheduleFrame();
+	}
+
+	function pickStaticProductAtViewportPoint(
+		viewportPoint: NormalizedViewportPoint,
+		mask: ReadonlySet<RenderSpatialItemKind>,
+		ownerKeys?: ReadonlySet<string>,
+	): RenderSpatialPick | null {
+		const cameraFrame = resolveCameraFrame();
+		return staticProductMetadata.spatialQuery.pickRay(
+			buildSceneCameraRenderRay(cameraFrame, viewportPoint),
+			mask,
+			ownerKeys,
+		);
 	}
 
 	function syncResidencyIndex(): void {

@@ -21,8 +21,6 @@ import {
 	type BrowserRenderResourceCoordinatorInput,
 	type BrowserRenderResourceSurface,
 } from "./browser-render-resource-coordinator";
-import type { LandblockRenderProductWorkerResult } from "./landblock-render-product";
-import { createEmptyStaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
 import type { StaticRenderableSceneModel } from "./static-renderables";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 
@@ -44,8 +42,6 @@ describe("browser render resource coordinator", () => {
 					createGfxObjRecord(0x01000001),
 				]),
 				browserDestination: createOutdoorDestination(landblockId),
-				staticLandblockRenderProducts:
-					createEmptyStaticLandblockRenderProductSet(),
 			}),
 		);
 
@@ -71,8 +67,6 @@ describe("browser render resource coordinator", () => {
 					createGfxObjRecord(gfxObjId),
 				]),
 				browserDestination: createOutdoorDestination(landblockId),
-				staticLandblockRenderProducts:
-					createEmptyStaticLandblockRenderProductSet(),
 				runtimeAppearancePreviews: [
 					{
 						id: "preview",
@@ -98,7 +92,7 @@ describe("browser render resource coordinator", () => {
 		expect(surface.staticRenderableScenes.at(-1)?.parts).toHaveLength(1);
 	});
 
-	it("does not derive prepared outdoor statics once static artifact ownership is active", () => {
+	it("does not derive prepared outdoor statics", () => {
 		const landblockId = 0x02030000;
 		const surface = createCapturingSurface();
 		const coordinator = new BrowserRenderResourceCoordinator();
@@ -115,23 +109,14 @@ describe("browser render resource coordinator", () => {
 					createGfxObjRecord(0x01000001),
 				]),
 				browserDestination: createOutdoorDestination(landblockId),
-				staticLandblockRenderProducts: {
-					...createEmptyStaticLandblockRenderProductSet(),
-					desiredCount: 1,
-					inFlightCount: 1,
-					latestDesiredIdentityKeys: [
-						`${landblockId}:outdoor:request:test:build:test:texture:test`,
-					],
-				},
 			}),
 		);
 
 		expect(surface.staticRenderableScenes.at(-1)?.parts).toHaveLength(0);
 	});
 
-	it("does not derive prepared indoor statics once static artifact ownership is active", () => {
+	it("does not derive prepared indoor statics", () => {
 		const envCellId = 0x02030100;
-		const landblockId = 0x0203ffff;
 		const surface = createCapturingSurface();
 		const coordinator = new BrowserRenderResourceCoordinator();
 		coordinator.setSurface(surface);
@@ -148,23 +133,14 @@ describe("browser render resource coordinator", () => {
 					createGfxObjRecord(0x01000001),
 				]),
 				browserDestination: createInteriorDestination(envCellId),
-				staticLandblockRenderProducts: {
-					...createEmptyStaticLandblockRenderProductSet(),
-					desiredCount: 1,
-					inFlightCount: 1,
-					latestDesiredIdentityKeys: [
-						`${landblockId}:dungeon-env-cells:request:test:build:test:texture:test`,
-					],
-				},
 			}),
 		);
 
 		expect(surface.staticRenderableScenes.at(-1)?.parts).toHaveLength(0);
 	});
 
-	it("does not derive prepared structured interiors once static artifact ownership is active", () => {
+	it("does not derive prepared structured interiors", () => {
 		const envCellId = 0x02030100;
-		const landblockId = 0x0203ffff;
 		const surface = createCapturingSurface();
 		const coordinator = new BrowserRenderResourceCoordinator();
 		coordinator.setSurface(surface);
@@ -180,46 +156,10 @@ describe("browser render resource coordinator", () => {
 					}),
 				]),
 				browserDestination: createInteriorDestination(envCellId),
-				staticLandblockRenderProducts: {
-					...createEmptyStaticLandblockRenderProductSet(),
-					desiredCount: 1,
-					inFlightCount: 1,
-					latestDesiredIdentityKeys: [
-						`${landblockId}:dungeon-env-cells:request:test:build:test:texture:test`,
-					],
-				},
 			}),
 		);
 
 		expect(surface.structuredInteriorScenes.at(-1)?.cells).toHaveLength(0);
-	});
-
-	it("uses resident detailed artifact coverage without prepared topology expansion", () => {
-		const firstEnvCellId = 0x02030100;
-		const secondEnvCellId = 0x02030101;
-		const landblockId = 0x0203ffff;
-		const surface = createCapturingSurface();
-		const coordinator = new BrowserRenderResourceCoordinator();
-		coordinator.setSurface(surface);
-
-		coordinator.update(
-			createCoordinatorInput({
-				assetState: createAssetState([]),
-				browserDestination: createInteriorDestination(firstEnvCellId),
-				staticLandblockRenderProducts: createProductSet([
-					createDetailedProductResult(landblockId, [
-						firstEnvCellId,
-						secondEnvCellId,
-					]),
-				]),
-			}),
-		);
-
-		expect(
-			surface.structuredInteriorScenes
-				.at(-1)
-				?.cells.map((cell) => cell.envCellId),
-		).toEqual([firstEnvCellId, secondEnvCellId]);
 	});
 });
 
@@ -268,7 +208,7 @@ function createCoordinatorInput(
 	overrides: Partial<BrowserRenderResourceCoordinatorInput> &
 		Pick<
 			BrowserRenderResourceCoordinatorInput,
-			"assetState" | "browserDestination" | "staticLandblockRenderProducts"
+			"assetState" | "browserDestination"
 		>,
 ): BrowserRenderResourceCoordinatorInput {
 	return {
@@ -290,7 +230,6 @@ function createCoordinatorInput(
 		activeRenderAnchor: null,
 		browserCameraFrame: null,
 		runtimeAppearancePreviews: [],
-		staticLandblockRenderProducts: overrides.staticLandblockRenderProducts,
 		...overrides,
 	};
 }
@@ -301,18 +240,6 @@ function createAssetState(records: PreparedAssetRecord[]): AssetChannelState {
 		records.map((record) => [record.request.assetId, record]),
 	);
 	return state;
-}
-
-function createProductSet(
-	artifacts: readonly LandblockRenderProductWorkerResult[],
-) {
-	return {
-		...createEmptyStaticLandblockRenderProductSet(),
-		artifacts,
-		desiredCount: artifacts.length,
-		residentCount: artifacts.length,
-		committedResultCount: artifacts.length,
-	};
 }
 
 function createOutdoorDestination(
@@ -581,73 +508,6 @@ function createEnvCellRecord(options: {
 				nodes: [],
 				items: [],
 			},
-		},
-	};
-}
-
-function createDetailedProductResult(
-	landblockId: number,
-	envCellIds: readonly number[],
-): LandblockRenderProductWorkerResult {
-	return {
-		type: "landblock-render-product-built",
-		jobId: `job:${landblockId}:dungeon-env-cells`,
-		landblockId,
-		product: "dungeon-env-cells",
-		requestId: "request:test",
-		buildPolicyRevision: "build:test",
-		texturePagePolicyRevision: "texture:test",
-		artifacts: [
-			{
-				artifactKind: "detailed-landblock",
-				key: `detailed:${landblockId}:dungeon-env-cells`,
-				landblockId,
-				product: "dungeon-env-cells",
-				requestId: "request:test",
-				buildPolicyRevision: "build:test",
-				texturePagePolicyRevision: "texture:test",
-				selectedEnvCellIds: [...envCellIds],
-				structuredInteriorMaterialRecords: [],
-				structuredInteriorTexturePageRefs: [],
-				structuredInteriorTexturePages: [],
-				structuredInteriorCells: envCellIds.map((envCellId) => ({
-					key: `structured-interior-cell:${envCellId}`,
-					envCellId,
-					landblockId,
-					regionNumber: 0,
-					environmentId: 0x0d000001,
-					cellStructureId: 0x0001,
-					renderChunk: {
-						chunkKey: `structured-cell:${envCellId}`,
-						chunkLandblockId: landblockId,
-						chunkLocalOffset: { x: 0, y: 0, z: 0 },
-					},
-					localPlacement: createPlacement({ x: 0, y: 0, z: 0 }),
-					surfaceIds: [],
-					materialSlices: [],
-					portals: [],
-					portalApertureKeys: [],
-					staticObjectCount: 0,
-					cellBsp: null,
-					renderGeometry: createEmptyRenderGeometry(),
-				})),
-				cellStructureMetadata: [],
-				portalLinks: [],
-				portalApertures: [],
-				visibility: {
-					objectVisibilityRecords: [],
-					cellVisibilityRecords: [],
-				},
-				spatial: {
-					localBvhByEnvCellId: [],
-					staticSpatialItems: [],
-					structuredInteriorSpatialItems: [],
-				},
-			},
-		],
-		diagnostics: {
-			status: "ready",
-			messages: [],
 		},
 	};
 }

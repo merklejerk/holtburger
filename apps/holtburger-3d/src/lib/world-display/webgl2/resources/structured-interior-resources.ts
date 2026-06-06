@@ -1,5 +1,9 @@
 import type { DetailedLandblockRenderArtifacts } from "../../landblock-render-product";
 import {
+	formatStaticLandblockProductKey,
+	type StaticLandblockProductKey,
+} from "../../landblock-render-product";
+import {
 	buildAcPlacementMatrix,
 	createTranslationMat4,
 	multiplyMat4,
@@ -33,10 +37,12 @@ type DetailedStructuredInteriorMaterialSlice =
 
 export interface Webgl2StructuredInteriorResourceStore {
 	productsByKey: Map<string, Webgl2StructuredInteriorProductResource>;
+	productResourceKeyByProductKey: Map<string, string>;
+	cellKeysByProductKey: Map<string, readonly string[]>;
 	cellsByKey: Map<string, Webgl2StructuredInteriorCellResource>;
 }
 
-export interface Webgl2StructuredInteriorProductResource {
+interface Webgl2StructuredInteriorProductResource {
 	key: string;
 	artifactKey: string;
 	resourceSignature: string;
@@ -92,85 +98,110 @@ export interface Webgl2StructuredInteriorMaterialSliceResource {
 export function createWebgl2StructuredInteriorResourceStore(): Webgl2StructuredInteriorResourceStore {
 	return {
 		productsByKey: new Map(),
+		productResourceKeyByProductKey: new Map(),
+		cellKeysByProductKey: new Map(),
 		cellsByKey: new Map(),
 	};
 }
 
-export function syncWebgl2StructuredInteriorResources({
+export function commitWebgl2StructuredInteriorProductResources({
 	gl,
 	store,
-	artifacts,
+	productKey,
+	artifact,
 	renderChunkTransforms,
 	textureFilteringMode = "anisotropic-4x",
 	maxAnisotropy = 1,
 }: {
 	gl: WebGL2RenderingContext;
 	store: Webgl2StructuredInteriorResourceStore;
-	artifacts: readonly DetailedLandblockRenderArtifacts[];
+	productKey: StaticLandblockProductKey;
+	artifact: DetailedLandblockRenderArtifacts;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	textureFilteringMode?: TextureFilteringMode;
 	maxAnisotropy?: number;
 }): void {
+	const productIdentityKey = formatStaticLandblockProductKey(productKey);
 	const chunkOffsetByKey = new Map(
 		renderChunkTransforms.map((transform) => [
 			transform.chunkKey,
 			transform.offset,
 		]),
 	);
-	const retainedKeys = new Set<string>();
-	const retainedProductKeys = new Set<string>();
-	for (const artifact of artifacts) {
-		const productResource = createOrReuseStructuredInteriorProductResource({
-			gl,
-			store,
-			artifact,
-			textureFilteringMode,
-			maxAnisotropy,
+	const productResource = createOrReuseStructuredInteriorProductResource({
+		gl,
+		store,
+		artifact,
+		textureFilteringMode,
+		maxAnisotropy,
+	});
+	const previousCellKeys =
+		store.cellKeysByProductKey.get(productIdentityKey) ?? [];
+	const retainedCellKeys = new Set<string>();
+	for (const cell of artifact.structuredInteriorCells) {
+		const resourceKey = describeStructuredInteriorResourceKey(artifact, cell);
+		retainedCellKeys.add(resourceKey);
+		const modelMatrix = buildStructuredInteriorModelMatrix({
+			cell,
+			chunkOffsetByKey,
 		});
-		retainedProductKeys.add(productResource.key);
-		for (const cell of artifact.structuredInteriorCells) {
-			const resourceKey = describeStructuredInteriorResourceKey(artifact, cell);
-			retainedKeys.add(resourceKey);
-			const modelMatrix = buildStructuredInteriorModelMatrix({
+		const previous = store.cellsByKey.get(resourceKey);
+		if (
+			previous &&
+			previous.geometrySignature ===
+				describeStructuredInteriorGeometrySignature(artifact, cell)
+		) {
+			previous.modelMatrix = modelMatrix;
+			continue;
+		}
+		previous?.dispose();
+		store.cellsByKey.set(
+			resourceKey,
+			createWebgl2StructuredInteriorCellResource({
+				gl,
+				artifact,
 				cell,
-				chunkOffsetByKey,
-			});
-			const previous = store.cellsByKey.get(resourceKey);
-			if (
-				previous &&
-				previous.geometrySignature ===
-					describeStructuredInteriorGeometrySignature(artifact, cell)
-			) {
-				previous.modelMatrix = modelMatrix;
-				continue;
-			}
-			if (previous) {
-				previous.dispose();
-			}
-			store.cellsByKey.set(
-				resourceKey,
-				createWebgl2StructuredInteriorCellResource({
-					gl,
-					artifact,
-					cell,
-					productResource,
-					modelMatrix,
-				}),
-			);
+				productResource,
+				modelMatrix,
+			}),
+		);
+	}
+	for (const cellKey of previousCellKeys) {
+		if (!retainedCellKeys.has(cellKey)) {
+			store.cellsByKey.get(cellKey)?.dispose();
+			store.cellsByKey.delete(cellKey);
 		}
 	}
-	for (const [key, resource] of store.cellsByKey) {
-		if (!retainedKeys.has(key)) {
-			resource.dispose();
-			store.cellsByKey.delete(key);
-		}
+	store.productResourceKeyByProductKey.set(
+		productIdentityKey,
+		productResource.key,
+	);
+	store.cellKeysByProductKey.set(
+		productIdentityKey,
+		[...retainedCellKeys].sort(),
+	);
+}
+
+export function evictWebgl2StructuredInteriorProductResources({
+	store,
+	productKey,
+}: {
+	store: Webgl2StructuredInteriorResourceStore;
+	productKey: StaticLandblockProductKey;
+}): void {
+	const productIdentityKey = formatStaticLandblockProductKey(productKey);
+	for (const cellKey of store.cellKeysByProductKey.get(productIdentityKey) ?? []) {
+		store.cellsByKey.get(cellKey)?.dispose();
+		store.cellsByKey.delete(cellKey);
 	}
-	for (const [key, resource] of store.productsByKey) {
-		if (!retainedProductKeys.has(key)) {
-			resource.dispose();
-			store.productsByKey.delete(key);
-		}
+	const productResourceKey =
+		store.productResourceKeyByProductKey.get(productIdentityKey);
+	if (productResourceKey) {
+		store.productsByKey.get(productResourceKey)?.dispose();
+		store.productsByKey.delete(productResourceKey);
 	}
+	store.productResourceKeyByProductKey.delete(productIdentityKey);
+	store.cellKeysByProductKey.delete(productIdentityKey);
 }
 
 export function destroyWebgl2StructuredInteriorResources(
@@ -184,6 +215,8 @@ export function destroyWebgl2StructuredInteriorResources(
 	}
 	store.cellsByKey.clear();
 	store.productsByKey.clear();
+	store.productResourceKeyByProductKey.clear();
+	store.cellKeysByProductKey.clear();
 }
 
 function createOrReuseStructuredInteriorProductResource({

@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import type { StaticObjectBundleArtifact } from "../../static-bundle-layer";
 import {
+	commitWebgl2StaticBundleProductResources,
 	createWebgl2StaticBundleLayerResourceStore,
 	destroyWebgl2StaticBundleLayerResources,
+	evictWebgl2StaticBundleProductResources,
 	syncWebgl2StaticBundleLayerResources,
 } from "./static-bundle-layer-resources";
 
@@ -124,6 +126,58 @@ describe("static bundle layer WebGL2 resources", () => {
 				"sample=indexed-data;filter=exact;mips=off;aniso=1",
 			],
 		);
+	});
+
+	it("commits, reuses, and evicts product-owned static bundle resources", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2StaticBundleLayerResourceStore();
+		const productKey = createProductKey();
+		const layer = createLayer();
+
+		const product = commitWebgl2StaticBundleProductResources({
+			gl: gl.asContext(),
+			store,
+			productKey,
+			layers: [layer],
+			textureFilteringMode: "linear",
+		});
+
+		expect(store.productsByKey.size).toBe(1);
+		expect(product.layerKeys).toEqual(["static-layer:revision-a"]);
+		expect(store.layersByKey.size).toBe(1);
+		expect(gl.createdTextures).toHaveLength(2);
+
+		const reused = commitWebgl2StaticBundleProductResources({
+			gl: gl.asContext(),
+			store,
+			productKey,
+			layers: [layer],
+			textureFilteringMode: "nearest",
+		});
+
+		expect(reused).toBe(product);
+		expect(gl.createdTextures).toHaveLength(2);
+		expect(gl.textureParameters).toContainEqual({
+			pname: gl.TEXTURE_MIN_FILTER,
+			param: gl.NEAREST,
+		});
+
+		commitWebgl2StaticBundleProductResources({
+			gl: gl.asContext(),
+			store,
+			productKey,
+			layers: [{ ...layer, sourceRevision: "revision-b" }],
+		});
+
+		expect([...store.layersByKey.keys()]).toEqual(["static-layer:revision-b"]);
+		expect(gl.deletedTextures).toHaveLength(2);
+		expect(gl.createdTextures).toHaveLength(4);
+
+		evictWebgl2StaticBundleProductResources({ store, productKey });
+
+		expect(store.productsByKey.size).toBe(0);
+		expect(store.layersByKey.size).toBe(0);
+		expect(gl.deletedTextures).toHaveLength(4);
 	});
 
 	it("applies anisotropy to color page samplers", () => {
@@ -525,6 +579,15 @@ function createLayer(
 			skippedReasons: [],
 		},
 		...overrides,
+	};
+}
+
+function createProductKey() {
+	return {
+		landblockId: 0x1234,
+		product: "outdoor" as const,
+		buildPolicyRevision: "build:v1",
+		texturePagePolicyRevision: "texture-pages:v1",
 	};
 }
 

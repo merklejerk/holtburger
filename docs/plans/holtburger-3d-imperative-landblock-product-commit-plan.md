@@ -905,6 +905,168 @@ Progress:
 - Renamed final misleading test/debug wording discovered during purge (`compatibility output`, `stage it separately`).
 - Remaining `staged` names are runtime appearance preview specific; remaining `compacted`, `fallback`, `artifact`, `snapshot`, and `graph` uses are rendering technique, current product/resource, frame visibility, or runtime debug terminology.
 
+### Phase 16: Remove Runtime Appearance Preview Rendering
+
+Status: add-on.
+
+Deliverables:
+
+- Remove runtime appearance preview spawning, prepared-asset collection, renderer resource creation, picker diagnostics, and UI controls from browser mode.
+- Delete `runtimeAppearancePreviews` plumbing in `BrowserWorldDisplay.svelte` and `BrowserRenderResourceCoordinatorInput`.
+- Delete preview-only scene derivation such as `deriveAppearancePreviewStaticRenderableSceneModel()` if no production consumer remains.
+- Delete preview draw-unit assembly functions and tests if they become unused:
+  - `buildStagedAppearancePreviewSceneAssembly()`
+  - `buildStagedAppearancePreviewDrawUnitAssemblies()`
+  - `StagedAppearancePreviewDrawUnitAssembly`
+- Do not leave a disabled feature flag or stub UI unless there is a compile-time need during the deletion. If a temporary stub is required, it must be deleted in this phase before completion.
+
+Acceptance criteria:
+
+- No browser UI path can spawn runtime appearance previews.
+- No renderer resource path builds `appearance-preview` draw units.
+- `rg "runtimeAppearancePreviews|StagedAppearancePreview|appearance-preview-staged|appearance-preview"` under `apps/holtburger-3d/src` returns no production references, except current docs if retained.
+- Any tests that only verify preview staging or preview picker diagnostics are deleted.
+- `npm run check`, `npm run test:ts`, and `npm run lint` pass.
+
+Notes:
+
+- Runtime appearance previews are likely a future consumer of a dynamic entity pipeline, but they should not preserve the legacy staged/static renderer path while that pipeline does not exist.
+- Future dynamic entity rendering should introduce its own entity/appearance resource ownership model instead of inheriting runtime preview staging.
+
+Dry-run findings:
+
+- Start with `BrowserWorldDisplay.svelte`: delete preview state, spawn/clear actions, prepared asset ID requests, debug report preview payloads, and the preview UI rows. The current flow still calls `requestMissingAssetIds(collectRuntimeAppearancePreviewAssetIds(runtimeAppearancePreviews))`, so deleting the collection path is part of the feature removal rather than a later cleanup.
+- Delete `BrowserRuntimeAppearancePreview` and `runtimeAppearancePreviews` from `BrowserRenderResourceCoordinatorInput`; the coordinator currently derives `appearancePreviewScene` and assigns it as the only `staticRenderableScene` source.
+- Removing previews should make `deriveAppearancePreviewStaticRenderableSceneModel()`, `buildStagedAppearancePreviewSceneAssembly()`, `buildStagedAppearancePreviewDrawUnitAssemblies()`, `StagedAppearancePreviewDrawUnitAssembly`, preview picker diagnostics, and `staged-world-assembly.test.ts` candidates for deletion rather than quarantine.
+- Remove `appearance-preview` and `appearance-preview-staged` categories from frame/render metrics, submit tests, world-resource tests, picker diagnostics, and render debug report types once no production renderer path emits those draw units.
+- This phase should run before Phase 17 because `syncWebgl2WorldResources()` still builds preview assemblies today; deleting previews first narrows the later world sync purge.
+
+### Phase 17: Delete Non-Product Terrain And Broad Runtime World Sync
+
+Status: add-on.
+
+Deliverables:
+
+- Delete the non-product terrain scene resource path. Terrain rendering should come from landblock product terrain commits only.
+- Remove runtime terrain tile creation from `syncWebgl2WorldResources()` and delete any tests whose only purpose is `TerrainSceneModel` to WebGL terrain resource conversion.
+- Move any still-needed metrics refresh into explicit product/resource metric helpers rather than a broad reconciliation pass.
+- Delete `syncWebgl2WorldResources()` after runtime previews and non-product terrain are removed, or split any remaining narrow work into explicitly named non-sync helpers before deleting the broad API.
+- Remove broad retained-key cleanup sets that exist only because `syncWebgl2WorldResources()` reconciles mixed runtime state.
+
+Acceptance criteria:
+
+- `syncWebgl2WorldResources()` no longer exists.
+- WebGL terrain resources are created only through `commitWebgl2TerrainProductResources()` / result commit wrappers and evicted only through product-keyed eviction/clear paths.
+- `TerrainSceneModel` is not a renderer resource input; if it remains, it is report/UI planning data only.
+- Runtime texture-page maps that existed only for non-product terrain are deleted or renamed to product-owned terrain page storage.
+- `npm run check`, `npm run test:ts`, and `npm run lint` pass.
+
+Notes:
+
+- After Phase 16 removes runtime previews, there should be no architectural reason to keep a broad `sync*WorldResources` pattern. Product rendering should be commit/evict/update driven.
+- If a remaining concern appears during implementation, prefer deleting the consumer or extracting a tiny explicit helper over preserving `syncWebgl2WorldResources()` as a catch-all.
+
+Dry-run findings:
+
+- The non-product terrain path is the `TerrainSceneModel` asset-state path. It still feeds `BrowserRenderResourceCoordinator`, `WorldDisplay.svelte`, `world-display-renderer*` contracts, frame visibility snapshots, scene readiness, render spatial items, debug report text, and `webgl2-render-metrics.ts`.
+- WebGL runtime terrain creation is still concentrated in `syncWebgl2WorldResources()`: it creates/reuses terrain tiles from `terrainScene.tiles`, uses runtime `terrainTexturePagesByKey`, updates material/atlas metrics, and runs graph sync. Product terrain texture pages already use `productTerrainTexturePagesByKey` and should remain.
+- Delete renderer consumption first, then decide what report-only terrain facts still matter. BRC terrain cache/status/height/geometry text likely needs replacement from product metadata or renderer-owned metrics before `TerrainSceneModel` can disappear completely from browser UI.
+- If `TerrainSceneModel` survives this phase, it must not be a renderer resource input. Treat any surviving use as browser planning/reporting debt and document the exact follow-up instead of preserving renderer sync.
+- Most `webgl2-world-resources.test.ts` terrain sync tests should either become product commit tests or be deleted. Tests that exist only to prove `TerrainSceneModel` to WebGL conversion should not survive this phase.
+- Runtime `terrainTexturePagesByKey` should be deleted with the non-product terrain resource path. Keep product page storage product-keyed.
+
+### Phase 18: Delete Or Re-Introduce Renderer Resource Graph Deliberately
+
+Status: add-on.
+
+Deliverables:
+
+- Audit all `RendererResourceGraph` call sites after Phases 16 and 17.
+- If the graph becomes unused outside tests, delete it, its tests, renderer contract option plumbing, and graph lease fields on `Webgl2WorldResourceStore`.
+- If a durable non-preview consumer remains, rename/scope the graph to that consumer and document why product-key ownership is insufficient for that path.
+- Do not keep `RendererResourceGraph` solely because a future dynamic entity pipeline might need a graph.
+
+Acceptance criteria:
+
+- Static landblock product lifetime has no renderer graph dependency.
+- Either no `RendererResourceGraph` source references remain, or every remaining reference is tied to an active non-static-product consumer with a current comment/name that explains the ownership model.
+- Future dynamic entity resource lifetime is not pre-modeled by the current graph unless the dynamic pipeline exists in code.
+- `npm run check`, `npm run test:ts`, and `npm run lint` pass.
+
+Notes:
+
+- Static landblock resources are now landblock-product scoped: interest drives desired products, product keys own renderer resources, and eviction deletes those resources.
+- Dynamic entities may need entity/appearance/animation/equipment/shared-asset lifetime tracking later, but that should be designed from the dynamic pipeline's real shape rather than inherited from the preview/static bridge.
+
+Dry-run findings:
+
+- Current graph plumbing enters through browser/renderer options and terminates inside `syncWebgl2WorldResources()`. No static product commit API requires `RendererResourceGraph`.
+- After Phase 16 removes preview assemblies and Phase 17 removes non-product terrain sync, delete graph option plumbing from `BrowserWorldDisplay.svelte`, `WorldDisplay.svelte`, `world-display-renderer-contract.ts`, `world-display-renderer.ts`, and `webgl2-world-display-renderer-impl.ts`.
+- Delete graph lease/signature fields on `Webgl2WorldResourceStore`, `syncWebgl2AssemblyGraph()`, `syncWebgl2TerrainTileGraph()`, and graph-only tests if no active non-static-product consumer remains.
+- Do not keep graph leasing around merely because future dynamic entities may need resource lifetime tracking. If dynamics need a graph later, that model should be introduced from entity ownership, not inherited from preview and terrain sync.
+
+### Phase 19: Rehome Surviving Renderer Primitives
+
+Status: add-on.
+
+Deliverables:
+
+- Re-audit lower-level renderer primitives after Phases 16-18 delete runtime previews, non-product terrain sync, and any unused resource graph plumbing.
+- Delete primitives whose only remaining consumer was preview/world-sync staging.
+- Rehome surviving primitives into folders and filenames that describe their current role rather than their legacy path. Candidate moves:
+  - `staged-world-material-strategy.ts` -> material batching or render material strategy module;
+  - `staged-world-materials.ts` -> material slot planning module;
+  - `compaction/compaction-family-planner.ts` -> stay private under `compaction/` only if it remains a low-level batching implementation detail, otherwise move under a material batching namespace;
+  - `runtime-render-diagnostics.ts` / `webgl2-runtime-render-diagnostics.ts` -> draw-unit or material-batching diagnostics if that is their surviving scope;
+  - `static-material-artifacts.ts` -> product/static-bundle material facts or neutral render material inputs depending on its post-deletion consumers.
+- Rename public/debug metric fields that expose `compaction*` as if static product rendering depends on compaction staging. Prefer `runtimeMaterialBatching*`, `atlasBatching*`, or private/internal names depending on remaining consumers.
+- Keep low-level `compaction` terminology only inside the actual batching planner where it describes a rendering technique.
+
+Acceptance criteria:
+
+- No surviving production module or exported type uses `staged-world` naming unless it still represents a live staged world assembly path.
+- Surviving material/texture/page/batching primitives live near the renderer subsystem that owns them and have names matching their current responsibility.
+- Public `WorldRenderDebugMetrics` no longer presents static product readiness through `compaction*` field names.
+- Browser debug text continues to describe product resources separately from runtime material batching.
+- `npm run check`, `npm run test:ts`, and `npm run lint` pass.
+
+Dry-run findings:
+
+- `staged-world-materials.ts`, `staged-world-material-strategy.ts`, texture-page atlas planning, and `compaction/compaction-family-planner.ts` still back real renderer material batching. Do not delete the low-level batching planner just because the old staged preview path is gone.
+- Phase 16 may delete preview-specific uses of staged material assembly and the store material plan cache. Re-audit after that phase before renaming modules, because some files may become dead rather than worth neutralizing.
+- Public/debug metrics expose many `compaction*` fields through `WorldRenderDebugMetrics`, `webgl2-render-metrics.ts`, `BrowserWorldDisplay.svelte`, and runtime picker diagnostics. Those names leak internal batching mechanics into browser-facing debug language.
+- Keep `compaction` terminology only inside the actual compaction planner and private draw-unit internals where it describes the rendering technique. Rename exported/debug-facing fields toward runtime material batching or atlas batching once the surviving surface is known.
+- `texture-pages/*` already reads like a real renderer primitive namespace and should not move unless ownership changes during deletion. This phase should focus on names/locations that still imply the old staged world path.
+
+### Phase 20: Keep BrowserRenderResourceCoordinator On Watch
+
+Status: add-on watch item.
+
+Deliverables:
+
+- Re-audit `BrowserRenderResourceCoordinator` after Phases 16 and 17 remove runtime previews and broad world sync.
+- Delete responsibilities that become dead, especially preview scene derivation, preview picker diagnostic caching, and surface setters for deleted renderer inputs.
+- If the coordinator still has multiple live jobs, split only along real boundaries:
+  - browser report derivation;
+  - renderer surface application;
+  - browser spatial index/picking;
+  - debug overlay derivation.
+- Do not refactor BRC merely for tidiness if it no longer preserves legacy renderer architecture.
+
+Acceptance criteria:
+
+- BRC does not own static product application, product residency, product placement, product spatial facts, or product resource lifetime.
+- BRC has no references to deleted runtime preview or non-product terrain renderer paths.
+- Any remaining BRC responsibilities are browser-main-thread concerns and do not leak into shared crates or renderer product stores.
+- `npm run check`, `npm run test:ts`, and `npm run lint` pass.
+
+Dry-run findings:
+
+- BRC currently owns browser-main-thread glue for report derivation, render spatial index updates, surface setter signatures, terrain scene derivation, runtime preview scene derivation, empty structured/portal/debug scenes, chunk transforms, and picker diagnostics.
+- After Phase 16, remove preview derivation and preview picker diagnostics from BRC. After Phase 17, remove `setTerrainScene()` application and any terrain scene renderer input from the surface contract.
+- The surface interface should shrink with deleted renderer inputs: `setStaticRenderableScene()` is likely removable with preview deletion, `setTerrainScene()` with non-product terrain deletion, and structured/portal setters should be checked against product-owned rendering before preserving them.
+- Keep BRC only where it remains browser policy: applying live surface state, maintaining browser spatial/picking data, deriving reports, and debug overlays. Do not split it just for tidiness before the dead responsibilities are removed.
+
 ## Risks And Mitigations
 
 - Risk: product commits still transfer too much data in one message.
@@ -983,6 +1145,12 @@ Progress:
 - worker-client concurrency defaults that allow overlapping landblock builds inside one worker
 - legacy tests named around artifact snapshots where the tested behavior is product commit or product eviction
 - old diagnostic text that describes static renderables as staged, compacted, fallback, or partially hydrated
+- runtime appearance preview spawning/rendering until a real dynamic entity pipeline exists
+- `syncWebgl2WorldResources()` as a broad reconciliation API after product commits own renderer resources
+- non-product terrain WebGL resource creation from `TerrainSceneModel`
+- `RendererResourceGraph` if runtime preview deletion leaves no active lifetime consumer
+- public/debug `compaction*` metric names that describe runtime material batching rather than product readiness
+- surviving renderer primitive modules/types whose filenames or exported names still imply `staged-world`, preview, or broad runtime sync ownership
 
 ## Definition Of Done
 
@@ -998,7 +1166,9 @@ Progress:
 - Worker scheduling has deterministic single-active-build behavior and bounded stale queued work.
 - Product texture pages/material records are owned at product scope and are not multiplied per env cell.
 - Render anchor/placement changes update product placement state without rebuilding static product GPU uploads.
-- Runtime appearance preview staging remains isolated and cannot trigger static product reconciliation.
+- Runtime appearance preview rendering is removed unless/until the dynamic entity pipeline replaces it with current ownership.
+- No broad `syncWebgl2WorldResources()`-style reconciliation remains after static products, terrain, portal masks, and runtime preview deletion have explicit ownership paths.
+- Surviving lower-level renderer primitives are rehomed under current ownership names; no live production primitive keeps a legacy staged-world/preview/sync name by inertia.
 - Picker/debug/report consumers are low-fidelity product/resource observers, not architecture drivers.
 - Lint, dead-code checks, TypeScript checks, and Rust lint pass.
 
@@ -1034,3 +1204,7 @@ Progress:
 - 2026-06-05: Resource multiplication audit promoted detailed interior texture/material hoisting into Phase 3A. Other similar issues found: terrain draw-slice buffers are allocated during reuse checks, broad terrain texture-page resources still depend on full-world sync retention, and browser spatial/report updates still rebuild full-set CPU structures.
 - 2026-06-05: Reframed the plan around structural simplification as the primary fix. Future implementation phases should delete ownership layers and broad reconciliation paths before adding more scheduling, diagnostics, or compatibility behavior.
 - 2026-06-05: Phase 3B was revised after implementation reached a real blocker: product-keyed WebGL commits depend on renderer-owned placement, portal, spatial, and terrain artifact facts that were still derived by `BrowserRenderResourceCoordinator` and scene-model adapters. The revised sequence adds Phase 3B-0 as a prerequisite and splits the product store into shell, static bundle, detailed interior, terrain, and final cutover phases. This avoids a fake product store that merely wraps the old full-set sync.
+- 2026-06-05: After the Phase 15 purge, runtime appearance previews were identified as the last meaningful consumer of staged/static preview assembly and broad runtime resource sync. Decision: remove preview rendering rather than disable it, and let the future dynamic entity pipeline introduce a fresh entity/appearance ownership model when it exists.
+- 2026-06-05: Non-product terrain scene tiles are considered legacy for renderer resource creation. Terrain should reach WebGL through landblock product terrain commits only.
+- 2026-06-05: `RendererResourceGraph` should not be kept as speculative infrastructure for future dynamic entities. If preview deletion makes it unused, delete it; if a real current consumer remains, rename/scope it to that consumer.
+- 2026-06-05: Phase 19 was reframed from cosmetic metric/module renaming into a rehome pass for surviving lower-level renderer primitives. Anything still named after staged-world, preview, or broad sync ownership must either die or move under a current responsibility.

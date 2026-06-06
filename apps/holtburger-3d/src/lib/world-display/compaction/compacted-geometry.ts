@@ -1,7 +1,7 @@
 import { createTranslationMat4, type RenderMat4 } from "../render-math";
 import type { RenderIndexedGeometry } from "../indexed-render-geometry";
 
-export interface CompactedGeometryBuildDrawUnit {
+export interface CompactedGeometryBuildEntry {
 	id: string;
 	kind: "static" | "structured-interior" | "portal-mask";
 	geometry: RenderIndexedGeometry;
@@ -16,8 +16,8 @@ interface CompactedGeometryMaterialSlot {
 	index: number;
 }
 
-interface CompactedGeometryDrawUnitMaterialSlot {
-	drawUnitId: string;
+interface CompactedGeometryEntryMaterialSlot {
+	entryId: string;
 	materialSlotKey: string;
 }
 
@@ -25,7 +25,7 @@ export interface CompactedGeometryDrawSliceInput {
 	key: string;
 	renderStateKey: string;
 	materialSlotKeys: readonly string[];
-	drawUnitIds: readonly string[];
+	entryIds: readonly string[];
 }
 
 type CompactedGeometryLayout = "position-uv-material-slot";
@@ -35,15 +35,15 @@ export interface CompactedGeometryPlan<
 		CompactedGeometryDrawSliceInput,
 > {
 	key: string;
-	compactableDrawUnitIds: readonly string[];
+	compactableEntryIds: readonly string[];
 	materialSlots: readonly CompactedGeometryMaterialSlot[];
-	drawUnitMaterialSlots: readonly CompactedGeometryDrawUnitMaterialSlot[];
+	entryMaterialSlots: readonly CompactedGeometryEntryMaterialSlot[];
 	drawSlices: readonly TDrawSlice[];
 	triangleCount: number;
 }
 
 interface CompactedDrawRange {
-	drawUnitId: string;
+	entryId: string;
 	firstIndex: number;
 	indexCount: number;
 	materialSlotIndex: number;
@@ -54,7 +54,7 @@ interface CompactedGeometrySlice {
 	renderStateKey: string;
 	firstIndex: number;
 	indexCount: number;
-	drawUnitIds: readonly string[];
+	entryIds: readonly string[];
 	materialSlotKeys: readonly string[];
 }
 
@@ -82,37 +82,37 @@ export function buildCompactedGeometryBatch<
 	TDrawSlice extends CompactedGeometryDrawSliceInput,
 >({
 	plan,
-	drawUnits,
+	entries,
 	batchOrigin,
 }: {
 	plan: CompactedGeometryPlan<TDrawSlice>;
-	drawUnits: readonly CompactedGeometryBuildDrawUnit[];
+	entries: readonly CompactedGeometryBuildEntry[];
 	batchOrigin: { x: number; y: number; z: number };
 }): CompactedGeometryBatch | null {
-	if (plan.compactableDrawUnitIds.length === 0) {
+	if (plan.compactableEntryIds.length === 0) {
 		return null;
 	}
-	const drawUnitById = new Map(
-		drawUnits.map((drawUnit) => [drawUnit.id, drawUnit]),
+	const entryById = new Map(
+		entries.map((entry) => [entry.id, entry]),
 	);
 	const materialSlotByKey = new Map(
 		plan.materialSlots.map((slot) => [slot.key, slot] as const),
 	);
-	const materialSlotKeyByDrawUnitId = new Map(
-		plan.drawUnitMaterialSlots.map(
-			(record) => [record.drawUnitId, record.materialSlotKey] as const,
+	const materialSlotKeyByEntryId = new Map(
+		plan.entryMaterialSlots.map(
+			(record) => [record.entryId, record.materialSlotKey] as const,
 		),
 	);
-	const compactableDrawUnits = orderCompactedDrawUnitsBySlice({
+	const compactableEntrys = orderCompactedEntrysBySlice({
 		plan,
-		drawUnitById,
+		entryById,
 	});
-	const vertexCount = compactableDrawUnits.reduce(
-		(total, drawUnit) => total + drawUnit.geometry.vertexCount,
+	const vertexCount = compactableEntrys.reduce(
+		(total, entry) => total + entry.geometry.vertexCount,
 		0,
 	);
-	const indexCount = compactableDrawUnits.reduce(
-		(total, drawUnit) => total + drawUnit.geometry.indices.length,
+	const indexCount = compactableEntrys.reduce(
+		(total, entry) => total + entry.geometry.indices.length,
 		0,
 	);
 	const positions = new Float32Array(vertexCount * 3);
@@ -123,55 +123,55 @@ export function buildCompactedGeometryBatch<
 	const batchModelMatrix = createTranslationMat4(batchOrigin);
 	let vertexOffset = 0;
 	let indexOffset = 0;
-	for (const drawUnit of compactableDrawUnits) {
+	for (const entry of compactableEntrys) {
 		const materialSlotKey = resolveCompactedGeometryMaterialSlotKey({
-			drawUnit,
-			materialSlotKeyByDrawUnitId,
+			entry,
+			materialSlotKeyByEntryId,
 		});
 		const materialSlot = materialSlotByKey.get(materialSlotKey);
 		if (!materialSlot) {
 			throw new Error(
-				`Compacted geometry draw unit ${drawUnit.id} references missing material slot ${materialSlotKey}.`,
+				`Compacted geometry compaction entry ${entry.id} references missing material slot ${materialSlotKey}.`,
 			);
 		}
-		compactDrawUnitPositions({
+		compactEntryPositions({
 			target: positions,
 			targetVertexOffset: vertexOffset,
-			source: drawUnit.geometry.positions,
-			modelMatrix: drawUnit.modelMatrix,
+			source: entry.geometry.positions,
+			modelMatrix: entry.modelMatrix,
 			batchOrigin,
 		});
-		if (!drawUnit.geometry.uvs) {
+		if (!entry.geometry.uvs) {
 			throw new Error(
-				`Compacted geometry draw unit ${drawUnit.id} has no UV buffer.`,
+				`Compacted geometry compaction entry ${entry.id} has no UV buffer.`,
 			);
 		}
-		uvs.set(drawUnit.geometry.uvs, vertexOffset * 2);
+		uvs.set(entry.geometry.uvs, vertexOffset * 2);
 		materialSlotIndices.fill(
 			materialSlot.index,
 			vertexOffset,
-			vertexOffset + drawUnit.geometry.vertexCount,
+			vertexOffset + entry.geometry.vertexCount,
 		);
-		for (let index = 0; index < drawUnit.geometry.indices.length; index += 1) {
+		for (let index = 0; index < entry.geometry.indices.length; index += 1) {
 			indices[indexOffset + index] =
-				(drawUnit.geometry.indices[index] ?? 0) + vertexOffset;
+				(entry.geometry.indices[index] ?? 0) + vertexOffset;
 		}
 		drawRanges.push({
-			drawUnitId: drawUnit.id,
+			entryId: entry.id,
 			firstIndex: indexOffset,
-			indexCount: drawUnit.geometry.indices.length,
+			indexCount: entry.geometry.indices.length,
 			materialSlotIndex: materialSlot.index,
 		});
-		vertexOffset += drawUnit.geometry.vertexCount;
-		indexOffset += drawUnit.geometry.indices.length;
+		vertexOffset += entry.geometry.vertexCount;
+		indexOffset += entry.geometry.indices.length;
 	}
-	const rangeByDrawUnitId = new Map(
-		drawRanges.map((range) => [range.drawUnitId, range] as const),
+	const rangeByEntryId = new Map(
+		drawRanges.map((range) => [range.entryId, range] as const),
 	);
 	const drawSlices = plan.drawSlices.map((slice) =>
 		compactDrawSlice({
 			slice,
-			rangeByDrawUnitId,
+			rangeByEntryId,
 			materialSlotByKey,
 		}),
 	);
@@ -182,7 +182,7 @@ export function buildCompactedGeometryBatch<
 	return {
 		key: describeCompactedGeometryJobKey({
 			plan,
-			drawUnits: compactableDrawUnits,
+			entries: compactableEntrys,
 			batchOrigin,
 		}),
 		layout: "position-uv-material-slot",
@@ -208,7 +208,7 @@ export function buildCompactedGeometryBatch<
 	};
 }
 
-function compactDrawUnitPositions({
+function compactEntryPositions({
 	target,
 	targetVertexOffset,
 	source,
@@ -248,52 +248,52 @@ function compactDrawUnitPositions({
 	}
 }
 
-function assertCompactedGeometryDrawUnit(
-	drawUnit: CompactedGeometryBuildDrawUnit,
-): asserts drawUnit is CompactedGeometryBuildDrawUnit & {
+function assertCompactedGeometryEntry(
+	entry: CompactedGeometryBuildEntry,
+): asserts entry is CompactedGeometryBuildEntry & {
 	kind: "static" | "structured-interior";
 	geometry: { uvs: Float32Array };
 } {
-	if (drawUnit.kind !== "static" && drawUnit.kind !== "structured-interior") {
+	if (entry.kind !== "static" && entry.kind !== "structured-interior") {
 		throw new Error(
-			`Compacted geometry cannot compact ${drawUnit.kind} draw unit ${drawUnit.id}.`,
+			`Compacted geometry cannot compact ${entry.kind} compaction entry ${entry.id}.`,
 		);
 	}
-	if (!drawUnit.geometry.uvs) {
-		throw new Error(`Compacted geometry draw unit ${drawUnit.id} has no UVs.`);
+	if (!entry.geometry.uvs) {
+		throw new Error(`Compacted geometry compaction entry ${entry.id} has no UVs.`);
 	}
 }
 
 function resolveCompactedGeometryMaterialSlotKey({
-	drawUnit,
-	materialSlotKeyByDrawUnitId,
+	entry,
+	materialSlotKeyByEntryId,
 }: {
-	drawUnit: CompactedGeometryBuildDrawUnit;
-	materialSlotKeyByDrawUnitId: ReadonlyMap<string, string>;
+	entry: CompactedGeometryBuildEntry;
+	materialSlotKeyByEntryId: ReadonlyMap<string, string>;
 }): string {
-	const explicitSlotKey = materialSlotKeyByDrawUnitId.get(drawUnit.id);
+	const explicitSlotKey = materialSlotKeyByEntryId.get(entry.id);
 	if (explicitSlotKey) {
 		return explicitSlotKey;
 	}
 	throw new Error(
-		`Compacted geometry draw unit ${drawUnit.id} has no explicit material slot for ${drawUnit.material.kind} material.`,
+		`Compacted geometry compaction entry ${entry.id} has no explicit material slot for ${entry.material.kind} material.`,
 	);
 }
 
 function compactDrawSlice({
 	slice,
-	rangeByDrawUnitId,
+	rangeByEntryId,
 	materialSlotByKey,
 }: {
 	slice: CompactedGeometryDrawSliceInput;
-	rangeByDrawUnitId: ReadonlyMap<string, CompactedDrawRange>;
+	rangeByEntryId: ReadonlyMap<string, CompactedDrawRange>;
 	materialSlotByKey: ReadonlyMap<string, CompactedGeometryMaterialSlot>;
 }): CompactedGeometrySlice {
-	const ranges = slice.drawUnitIds.map((drawUnitId) => {
-		const range = rangeByDrawUnitId.get(drawUnitId);
+	const ranges = slice.entryIds.map((entryId) => {
+		const range = rangeByEntryId.get(entryId);
 		if (!range) {
 			throw new Error(
-				`Compacted geometry draw slice ${slice.key} references missing compacted draw unit ${drawUnitId}.`,
+				`Compacted geometry draw slice ${slice.key} references missing compacted compaction entry ${entryId}.`,
 			);
 		}
 		return range;
@@ -319,54 +319,54 @@ function compactDrawSlice({
 		renderStateKey: slice.renderStateKey,
 		firstIndex,
 		indexCount,
-		drawUnitIds: slice.drawUnitIds,
+		entryIds: slice.entryIds,
 		materialSlotKeys: slice.materialSlotKeys,
 	};
 }
 
-function orderCompactedDrawUnitsBySlice<
+function orderCompactedEntrysBySlice<
 	TDrawSlice extends CompactedGeometryDrawSliceInput,
 >({
 	plan,
-	drawUnitById,
+	entryById,
 }: {
 	plan: CompactedGeometryPlan<TDrawSlice>;
-	drawUnitById: ReadonlyMap<string, CompactedGeometryBuildDrawUnit>;
-}): CompactedGeometryBuildDrawUnit[] {
-	const sliceOrdinalByDrawUnitId = new Map<string, number>();
+	entryById: ReadonlyMap<string, CompactedGeometryBuildEntry>;
+}): CompactedGeometryBuildEntry[] {
+	const sliceOrdinalByEntryId = new Map<string, number>();
 	for (const [sliceOrdinal, slice] of plan.drawSlices.entries()) {
-		for (const drawUnitId of slice.drawUnitIds) {
-			const previous = sliceOrdinalByDrawUnitId.get(drawUnitId);
+		for (const entryId of slice.entryIds) {
+			const previous = sliceOrdinalByEntryId.get(entryId);
 			if (previous !== undefined) {
 				throw new Error(
-					`Compacted geometry draw unit ${drawUnitId} appears in multiple draw slices (${previous} and ${sliceOrdinal}).`,
+					`Compacted geometry compaction entry ${entryId} appears in multiple draw slices (${previous} and ${sliceOrdinal}).`,
 				);
 			}
-			sliceOrdinalByDrawUnitId.set(drawUnitId, sliceOrdinal);
+			sliceOrdinalByEntryId.set(entryId, sliceOrdinal);
 		}
 	}
-	return plan.compactableDrawUnitIds
-		.map((drawUnitId) => {
-			const drawUnit = drawUnitById.get(drawUnitId);
-			if (!drawUnit) {
+	return plan.compactableEntryIds
+		.map((entryId) => {
+			const entry = entryById.get(entryId);
+			if (!entry) {
 				throw new Error(
-					`Compacted geometry plan references missing draw unit ${drawUnitId}.`,
+					`Compacted geometry plan references missing compaction entry ${entryId}.`,
 				);
 			}
-			assertCompactedGeometryDrawUnit(drawUnit);
-			if (!sliceOrdinalByDrawUnitId.has(drawUnit.id)) {
+			assertCompactedGeometryEntry(entry);
+			if (!sliceOrdinalByEntryId.has(entry.id)) {
 				throw new Error(
-					`Compacted geometry draw unit ${drawUnit.id} has no draw slice.`,
+					`Compacted geometry compaction entry ${entry.id} has no draw slice.`,
 				);
 			}
-			return drawUnit;
+			return entry;
 		})
 		.sort((left, right) => {
-			const leftOrdinal = sliceOrdinalByDrawUnitId.get(left.id);
-			const rightOrdinal = sliceOrdinalByDrawUnitId.get(right.id);
+			const leftOrdinal = sliceOrdinalByEntryId.get(left.id);
+			const rightOrdinal = sliceOrdinalByEntryId.get(right.id);
 			if (leftOrdinal === undefined || rightOrdinal === undefined) {
 				throw new Error(
-					"Compacted geometry slice ordering lost a validated draw unit.",
+					"Compacted geometry slice ordering lost a validated compaction entry.",
 				);
 			}
 			return leftOrdinal - rightOrdinal || left.id.localeCompare(right.id);
@@ -386,7 +386,7 @@ function assertCompactedDrawSliceIsContiguous({
 	for (const range of sortedRanges) {
 		if (range.firstIndex !== expectedFirstIndex) {
 			throw new Error(
-				`Compacted geometry draw slice ${slice.key} is not contiguous at draw unit ${range.drawUnitId}.`,
+				`Compacted geometry draw slice ${slice.key} is not contiguous at compaction entry ${range.entryId}.`,
 			);
 		}
 		expectedFirstIndex += range.indexCount;
@@ -404,31 +404,31 @@ function createCompactedIndexArray(
 
 export function describeCompactedGeometryJobKey({
 	plan,
-	drawUnits,
+	entries,
 	batchOrigin,
 }: {
 	plan: CompactedGeometryPlan;
-	drawUnits: readonly CompactedGeometryBuildDrawUnit[];
+	entries: readonly CompactedGeometryBuildEntry[];
 	batchOrigin: { x: number; y: number; z: number };
 }): string {
-	const drawUnitById = new Map(
-		drawUnits.map((drawUnit) => [drawUnit.id, drawUnit]),
+	const entryById = new Map(
+		entries.map((entry) => [entry.id, entry]),
 	);
-	const compactableDrawUnits = orderCompactedDrawUnitsBySlice({
+	const compactableEntrys = orderCompactedEntrysBySlice({
 		plan,
-		drawUnitById,
+		entryById,
 	});
-	const drawUnitSignature = compactableDrawUnits
-		.map((drawUnit) =>
+	const entrySignature = compactableEntrys
+		.map((entry) =>
 			[
-				drawUnit.id,
-				drawUnit.geometry.signature,
-				`v${drawUnit.geometry.vertexCount}`,
-				`t${drawUnit.geometry.triangleCount}`,
-				`u${drawUnit.geometry.uvs ? drawUnit.geometry.uvs.length : "none"}`,
-				`i${drawUnit.geometry.indices.length}`,
+				entry.id,
+				entry.geometry.signature,
+				`v${entry.geometry.vertexCount}`,
+				`t${entry.geometry.triangleCount}`,
+				`u${entry.geometry.uvs ? entry.geometry.uvs.length : "none"}`,
+				`i${entry.geometry.indices.length}`,
 				`m${describeBatchRelativeMat4Signature(
-					drawUnit.modelMatrix,
+					entry.modelMatrix,
 					batchOrigin,
 				)}`,
 			].join(":"),
@@ -437,8 +437,8 @@ export function describeCompactedGeometryJobKey({
 	return [
 		"compacted-geometry",
 		`plan=${hashString(plan.key)}`,
-		`draws=${compactableDrawUnits.length}`,
-		`du=${hashString(drawUnitSignature)}`,
+		`draws=${compactableEntrys.length}`,
+		`du=${hashString(entrySignature)}`,
 	].join("|");
 }
 

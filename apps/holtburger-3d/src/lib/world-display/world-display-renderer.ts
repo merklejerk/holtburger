@@ -171,9 +171,6 @@ function createDeferredWorldDisplayRenderer<
 				null
 			);
 		},
-		getDrawUnitRuntimeDiagnostics(drawUnitIds) {
-			return loadedRenderer?.getDrawUnitRuntimeDiagnostics(drawUnitIds) ?? [];
-		},
 		dispose() {
 			disposed = true;
 			loadedRenderer?.dispose();

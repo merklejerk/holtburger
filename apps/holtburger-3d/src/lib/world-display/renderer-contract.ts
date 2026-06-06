@@ -104,7 +104,7 @@ interface WorldRenderDebugMetrics {
 	terrainProductResourceCount: number;
 	productTerrainTexturePageCount: number;
 	portalMaskProductResourceCount: number;
-	portalMaskProductDrawUnitCount: number;
+	transitionPortalMaskResourceCount: number;
 	staticGroupMeshCount: number;
 	visibleStaticGroupMeshCount: number;
 	staticRenderBatchCount: number;
@@ -133,8 +133,6 @@ interface WorldRenderDebugMetrics {
 	sceneDomainBaseCopyPassCount: number;
 	sceneDomainExteriorDrawCallCount: number;
 	sceneDomainInteriorDrawCallCount: number;
-	sceneDomainExteriorDrawUnitCount: number;
-	sceneDomainInteriorDrawUnitCount: number;
 	portalCompositeRectCount: number;
 	portalCompositeEstimatedPixelArea: number;
 	portalCompositeMaxDepth: number;
@@ -166,40 +164,10 @@ interface WorldRenderDebugMetrics {
 	texturePageReadyMaterialCount: number;
 	atlasCandidateEntryCount: number;
 	atlasCandidateMaterialSlotCount: number;
-	atlasCompatibleDrawUnitCount: number;
-	atlasPlacedRgbaDrawUnitCount: number;
-	detailAtlasReadyDrawUnitCount: number;
 	atlasFailureReasonCount: number;
 	atlasFailureSamples: string[];
-	materialBatchingCandidateDrawUnitCount: number;
-	materialBatchingBypassReasonCount: number;
-	materialBatchingBypassSamples: string[];
-	materialBatchingBypassBlockerSamples: string[];
-	materialBatchingBypassDetailSamples: string[];
-	materialBatchingCoverageDrawUnitCounts: Record<string, number>;
-	materialBatchingCoverageMaterialBlockerCounts: Record<string, number>;
-	materialBatchingCoverageGeometryBlockerCounts: Record<string, number>;
-	materialBatchingCoverageMaterialFamilyCounts: Record<string, number>;
-	materialBatchingCoverageMaterialAlphaPolicyCounts: Record<string, number>;
-	materialBatchingCoverageMaterialFamilyAlphaPolicyCounts: Record<string, number>;
-	materialBatchingCoverageRetainedDirectMaterialFamilyCounts: Record<string, number>;
-	materialBatchingCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts: Record<
-		string,
-		number
-	>;
-	materialBatchingCoverageVisibleRetainedDirectMaterialFamilyCounts: Record<
-		string,
-		number
-	>;
 	terrainTexturePageCount: number;
 	terrainDetailTexturePageCount: number;
-	retainedDirectOpaqueDrawUnitCount: number;
-	retainedDirectBlendedDrawUnitCount: number;
-	directTexturePageDrawCount: number;
-	directSingleEntryTexturePageDrawCount: number;
-	directPackedTexturePageDrawCount: number;
-	directPackedTexturePageEstimatedBindAvoidedCount: number;
-	directTexturePageFallbackSamples: string[];
 	visibleStaticBundleLayerCount: number;
 	staticBundleLayerSubmittedCount: number;
 	staticBundleGeometryCandidateCount: number;
@@ -216,8 +184,6 @@ interface WorldRenderDebugMetrics {
 	textureResourceCount: number;
 	indexedTextureResourceCount: number;
 	paletteResourceCount: number;
-	indexedMaterialDescriptorDrawUnitCount: number;
-	standaloneIndexedMaterialResourceDrawUnitCount: number;
 	staticGeometryGroupCount: number;
 	staticVisibleGeometryGroupCount: number;
 	structuredInteriorGeometryGroupCount: number;

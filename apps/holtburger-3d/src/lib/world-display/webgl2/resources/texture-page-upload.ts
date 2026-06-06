@@ -91,12 +91,12 @@ export interface TexturePageCpuSet {
 	detailTextures: readonly TexturePageCpuTexture[];
 	detailPlacements: readonly Webgl2TexturePagePlacementResource[];
 	preparedTextureAssetIds: readonly string[];
-	rgbaAtlasReadyDrawUnitIds: readonly string[];
+	rgbaAtlasReadyCandidateIds: readonly string[];
 }
 
 export interface TexturePageCpuSetPlan {
 	key: string;
-	rgbaAtlasReadyDrawUnitIds: readonly string[];
+	rgbaAtlasReadyCandidateIds: readonly string[];
 	detailAtlasTextures: readonly AtlasTexturePage[];
 	families: readonly TexturePageAtlasPlan["families"][number][];
 	preparedTextureAssetIds: readonly string[];
@@ -112,7 +112,7 @@ export function createTexturePageCpuSet({
 	maxAnisotropy?: number;
 }): TexturePageCpuSet | null {
 	if (
-		plan.rgbaAtlasReadyDrawUnitIds.length === 0 &&
+		plan.rgbaAtlasReadyCandidateIds.length === 0 &&
 		plan.detailAtlasTextures.length === 0
 	) {
 		return null;
@@ -192,7 +192,7 @@ export function createTexturePageCpuSet({
 		detailTextures,
 		detailPlacements,
 		preparedTextureAssetIds: plan.preparedTextureAssetIds,
-		rgbaAtlasReadyDrawUnitIds: plan.rgbaAtlasReadyDrawUnitIds,
+		rgbaAtlasReadyCandidateIds: plan.rgbaAtlasReadyCandidateIds,
 	};
 }
 

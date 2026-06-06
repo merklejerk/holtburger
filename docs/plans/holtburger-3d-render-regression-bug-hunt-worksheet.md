@@ -225,7 +225,7 @@ Recheck:
 
 ## Phase 5b: Rebase-Safe Chunk-Local Render Architecture
 
-Status: planned.
+Status: implemented; verification in progress.
 
 ### Context
 
@@ -242,13 +242,13 @@ The current code already follows this model in several places:
 - `createLinearRenderSpatialIndex()` stores chunk-local item bounds/pick shapes and keeps a mutable chunk transform table.
 - Static bundle submit now applies a per-layer chunk offset model matrix at submit time.
 
-Known remaining mixed-era paths:
+Pre-fix mixed-era paths addressed by this phase:
 
 - `setRenderChunkTransforms()` still calls `recommitStaticProductRenderResources()`, which can touch terrain, structured interior, portal-mask, texture, buffer, and VAO creation paths during rebase.
-- Terrain resources currently store `modelMatrix` derived from chunk offsets during product commit.
-- Structured interior cells currently store `modelMatrix` derived from chunk offsets during product commit.
-- Portal masks currently masquerade as generic draw units, bake chunk offsets into `modelMatrix` during product commit, and then get consumed by stencil-specific portal work.
-- Portal aperture metadata currently exists as detailed landblock sidecars, but the renderer lacks a clear distinction between all env-cell portal aperture facts and the smaller indoor/outdoor transition portal mask render set.
+- Terrain resources stored `modelMatrix` derived from chunk offsets during product commit.
+- Structured interior cells stored `modelMatrix` derived from chunk offsets during product commit.
+- Portal masks masquerade as generic draw units, bake chunk offsets into `modelMatrix` during product commit, and then get consumed by stencil-specific portal work.
+- Portal aperture metadata existed as detailed landblock sidecars, but the renderer lacked a clear distinction between all env-cell portal aperture facts and the smaller indoor/outdoor transition portal mask render set.
 - `artifact-scene-bounds.ts` unions static bundle `spatialHints` directly even though those hints are chunk-local.
 
 ### Goal
@@ -280,7 +280,7 @@ Out of scope:
 - `render-spatial-index.ts`: desired pattern for chunk-local spatial items plus transform-table updates.
 - `webgl2-world-submit.ts`: desired static bundle submit-time placement pattern.
 - `portal-apertures.ts` and `transition-portal-work-items.ts`: existing distinction between all env-cell aperture facts and the outside-transition subset used for transition portal candidates.
-- `webgl2-world-display-renderer-impl.ts`: current portal-mask stencil pass that should become a dedicated transition portal mask pipeline instead of generic draw-unit rendering.
+- `webgl2-world-display-renderer-impl.ts`: portal-mask stencil pass that needed a dedicated transition portal mask pipeline instead of generic draw-unit rendering.
 - `.git/worktrees/prefactor`: diagnostic reference only for behavior that rendered correctly before the product cutover. Do not copy the old sync/resource-graph architecture.
 
 ### Phase 5b.1: Lock The Rebase Contract
@@ -312,7 +312,7 @@ Deliverables:
   - sync residency index.
 - Leave product commit/recommit for actual product changes, asset-state changes, material/texture policy changes, and upload filter changes.
 - Stop deriving terrain tile and terrain draw-slice `modelMatrix` from chunk offsets during terrain product commit.
-- Store enough render chunk identity on terrain resources to resolve the active chunk transform at submit time, preferably `renderChunkKey` or `renderChunk` rather than the current vague `placementKey`.
+- Store enough render chunk identity on terrain resources to resolve the active chunk transform at submit time; this now uses `renderChunkKey`.
 - Update `submitWebgl2TerrainFamilyTiles()` to derive the terrain model matrix from `renderChunkTransforms` when uploading `uModelViewProjection` and `uModelMatrix`.
 - Stop baking chunk offsets into structured interior cell resources during commit.
 - Store cell-local placement and render chunk identity on `Webgl2StructuredInteriorCellResource`.
@@ -334,7 +334,7 @@ Deliverables:
 
 Acceptance criteria:
 
-- Rebase does not call `commitWebgl2StaticBundleProductResources`, `commitWebgl2TerrainProductResultResources`, `commitWebgl2StructuredInteriorProductResources`, or `commitWebgl2TransitionPortalProductMaskResources`.
+- Rebase does not call `commitWebgl2StaticBundleProductResources`, `commitWebgl2TerrainProductResultResources`, `commitWebgl2StructuredInteriorProductResources`, or transition portal mask sync/resource creation.
 - Rebase does not create, dispose, mutate, or reupload VAOs/buffers/textures/atlases/material resources.
 - Visible static bundle placement still updates because submit consumes current `renderChunkTransforms`.
 - Terrain VAO/buffer/texture resource identity remains stable across anchor rebase.
@@ -355,7 +355,7 @@ Deliverables:
 
 - Rename fields or helper parameters that imply renderer-local coordinates when they are chunk-local.
 - Prefer names like `chunkLocalBounds`, `chunkLocalModelMatrix`, `renderChunkKey`, and `renderChunk` where appropriate.
-- Rename terrain `placementKey` to `renderChunkKey` or replace it with a typed `RenderChunkPlacement`; the current name hides that it is specifically a transform-table lookup key.
+- Terrain resource placement naming now uses `renderChunkKey`, making the transform-table lookup explicit.
 - Remove portal-mask handling from generic direct/material family code once the dedicated stencil-mask resource path owns transition masks.
 - Remove dead helpers that only existed to support rebase recommit.
 
@@ -364,28 +364,40 @@ Acceptance criteria:
 - The code makes it hard to accidentally pass chunk-local bounds as renderer-local bounds.
 - No stale rebase/recommit comments or misleading names remain.
 
+### Phase 5b Implementation Notes
+
+- `setRenderChunkTransforms()` no longer triggers static product recommit. Rebase is now a transform-table update, scene-bound refresh, residency sync, and frame schedule.
+- Static bundle scene bounds now transform chunk-local `spatialHints` through the active `renderChunkTransforms` before unioning.
+- Terrain tile and terrain draw-slice resources now store `renderChunkKey` instead of baked model matrices. Terrain submit resolves the current chunk offset for `uModelViewProjection` and `uModelMatrix`.
+- Structured interior cell resources now store `renderChunkKey` plus cell-local placement. Interior submit resolves the current chunk transform at draw time instead of rebuilding VAOs or material resources on rebase.
+- Transition portal masks now use dedicated `transition-portal-mask` resources and frame draws. They are not generic `draw-unit` material-family renderables.
+- Transition portal mask geometry remains cell/local-aperture based. Portal work planning and stencil submit resolve the current model matrix from `renderChunkTransforms` plus cell-local placement.
+- Transition portal masks are treated as unique resources for a given transition portal model sync. They are cleared and recreated when the transition aperture set changes; there is no VAO reuse/keying attempt across model rebuilds. They remain stable across anchor rebase because rebase does not resync the transition portal model.
+- `WorldRenderFrame` and portal mask submit planning now resolve masks from the dedicated transition mask store instead of `drawUnitsById`.
+- Portal-mask metrics and work item naming now refer to mask resources rather than draw units.
+
 ### Dry Run Notes
 
-- Phase 5b.2 should use a dedicated transition portal mask resource path. Portal masks currently flow through generic direct draw units with baked `modelMatrix` values even though the actual portal pass is stencil-specific and color-masked; that generic draw-unit ownership should be removed.
+- Phase 5b.2 used a dedicated transition portal mask resource path. The old generic direct draw-unit ownership was removed because the actual portal pass is stencil-specific and color-masked.
 - Phase 5b.1 should include `BrowserRenderResourceCoordinator` because it already derives `renderChunkTransforms`, updates the spatial index with `replaceChunkTransforms()`, and forwards transform changes to the surface by signature.
 - `artifact-scene-bounds.ts` is the lowest-risk first code change. Terrain/env-cell bounds already use chunk transforms; static bundle `spatialHints` are still unioned as if they were renderer-local.
 - Static bundles already follow the desired submit-time placement model after the recent fix: the resource remains landblock-local, and submit applies a model matrix from `renderChunkTransforms`.
-- Terrain still bakes chunk offsets into tile and draw-slice `modelMatrix` values during commit. The migration needs stable render chunk identity on terrain resources before submit can derive model matrices from current transforms; the existing `placementKey` should be renamed because it is just a render chunk transform lookup key.
-- Structured interiors still bake chunk offsets into cell resources during commit. The migration needs cell render chunk identity and chunk-local placement/local model matrix retained on `Webgl2StructuredInteriorCellResource`.
+- Terrain previously baked chunk offsets into tile and draw-slice `modelMatrix` values during commit. The migration stored stable `renderChunkKey` identity on terrain resources so submit can derive model matrices from current transforms.
+- Structured interiors previously baked chunk offsets into cell resources during commit. The migration retained cell render chunk identity and chunk-local placement on `Webgl2StructuredInteriorCellResource`.
 - Portal aperture sidecars already carry the needed local facts after joining through detailed structured interior cells: `renderChunk`, cell `chunkLocalPlacement`, cell-local aperture points, portal ids, and outside-transition status. Keep those facts local and resolve to renderer-local only when querying or submitting transition masks.
 - Transition portal masks should be a filtered render resource over outside-transition apertures only. Regular env-cell-to-env-cell portal apertures should remain metadata for future indoor visibility/reachability, not stencil-mask submissions.
 - BVH visibility and `createLinearRenderSpatialIndex()` are the reference implementations for non-renderable spatial data: store chunk-local facts and apply `renderChunkTransforms` at query time.
-- The final removal of `recommitStaticProductRenderResources()` from `setRenderChunkTransforms()` should be gated by tests proving no terrain, structured-interior, or transition portal mask resource identity changes across an anchor rebase.
+- The final removal of `recommitStaticProductRenderResources()` from `setRenderChunkTransforms()` was gated by tests proving no terrain, structured-interior, or transition portal mask resource identity changes across an anchor rebase.
 
 ### Second Dry Run Notes
 
 - Portal aperture `points` are currently cell-local, not independently chunk-local. The correct invariant is: keep points cell-local, carry the owning `renderChunk` and cell `chunkLocalPlacement`, and resolve `chunk transform * cell placement` only at query/submit/work-planning time.
 - Do not duplicate render chunk/cell placement into every worker sidecar unless the artifact type is deliberately changed. A safer first step is a renderer-local `PortalApertureFact` derivation that joins detailed sidecars to structured interior cells and exposes the complete local fact package.
-- The dedicated transition portal mask path needs a frame-selection change, not just a resource-store change. `WorldRenderFrame` currently maps every `portal-mask` candidate to a generic `draw-unit`; it needs a dedicated `transition-portal-mask` draw kind or equivalent planner output.
-- `planWebgl2PortalMaskSubmitOrder()` currently finds masks by scanning generic draw units. That should become `planWebgl2TransitionPortalMaskSubmitOrder()` over the dedicated transition mask store.
-- `planWebgl2TransitionPortalWork()` currently consumes `Webgl2WorldDrawUnit[]` and reads `modelMatrix`. It should consume dedicated mask resources or resolved per-frame mask inputs where the model matrix is computed from current `renderChunkTransforms`.
+- The dedicated transition portal mask path needed a frame-selection change, not just a resource-store change. `WorldRenderFrame` now maps `portal-mask` candidates to a dedicated `transition-portal-mask` draw kind.
+- `planWebgl2PortalMaskSubmitOrder()` found masks by scanning generic draw units. This became `planWebgl2TransitionPortalMaskSubmitOrder()` over the dedicated transition mask store.
+- `planWebgl2TransitionPortalWork()` previously consumed `Webgl2WorldDrawUnit[]` and read `modelMatrix`. It now consumes dedicated mask resources and computes the model matrix from current `renderChunkTransforms`.
 - Existing `transitionPortalMaskBatchId(candidateId)` and candidate BVH item keys can still identify visibility batches; the bvh binding does not need generic draw-unit ownership.
-- Removing portal masks from generic draw units may also make `refreshWebgl2ProductDrawUnitResources()` dead or narrower, because its only current product-owned draw units are portal masks.
+- Removing portal masks from generic draw units made `refreshWebgl2ProductDrawUnitResources()` narrower; remaining legacy draw units should be evaluated during the later debug/legacy purge.
 
 ### Definition Of Done
 
@@ -411,6 +423,121 @@ Acceptance criteria:
   - Mitigation: add explicit multi-landblock bounds tests.
 - Risk: full recommit hides missing transform refreshes today.
   - Mitigation: remove recommit only after tests prove each consumer updates through `renderChunkTransforms`.
+
+## Phase 5c: Delete Renderer Draw-Unit Ownership And Rehome Surviving Primitives
+
+Status: completed.
+
+### Context
+
+Phase 5b moved transition portal masks out of the generic `Webgl2WorldDrawUnit` path. A follow-up sweep showed that no product commit path should be producing renderer draw units anymore, but the renderer still carries the old ownership pipeline:
+
+- `Webgl2WorldResourceStore.drawUnits` and `drawUnitsById`.
+- `WorldRenderFrame` draw kind `"draw-unit"`.
+- `planWebgl2WorldSubmitOrder(frame, drawUnitsById)` and generic draw-unit submit paths.
+- Direct draw-unit diagnostics and debug metrics.
+- Legacy names like `visibleDrawUnitCount`, `directTexturePageDrawCount`, and material batching `DrawUnit` counters.
+
+The lower-level primitives are a separate decision. Some modules still use "draw unit" as generic batching/compaction terminology rather than as renderer-owned WebGL resources. Those should be audited and either kept with clearer names or moved under their real domain.
+
+### Goal
+
+Delete the renderer-owned draw-unit pipeline so new renderable categories cannot accidentally revive it, while rehoming or renaming any still-useful lower-level batching primitives.
+
+### In Scope
+
+- Remove `Webgl2WorldDrawUnit`, `drawUnits`, and `drawUnitsById` from the WebGL resource store.
+- Remove `"draw-unit"` from `WorldRenderDraw` and delete generic draw-unit frame selection.
+- Delete generic draw-unit submission from `webgl2-world-submit.ts`.
+- Delete direct draw-unit diagnostics and UI/debug metrics that only describe the removed renderer draw-unit path.
+- Delete tests that only validate the removed renderer draw-unit path.
+- Audit lower-level compaction, texture-page, and direct-family helpers that still use `drawUnit` naming.
+- Rehome or rename surviving lower-level primitives so names describe their current role, such as:
+  - `CompactionFamilyCandidate` instead of generic "draw unit" where the primitive is material batching input.
+  - `DirectGeometrySubmission` or `MaterialSubmission` where the primitive is a shader-family submission shape.
+  - `TexturePageDescriptor`/`TexturePageResourceBinding` where the primitive is texture-page planning, not a renderable.
+- Update worksheet findings with each primitive kept, renamed, moved, or deleted.
+
+### Out Of Scope
+
+- Rewriting static bundle compacted batch generation unless a lower-level primitive cannot be understood or tested in its current home.
+- Rewriting terrain atlas planning.
+- Reintroducing staged promotion/resource-graph behavior from the pre-refactor worktree.
+- Preserving compatibility for tests that only exist to exercise removed renderer draw-unit APIs.
+
+### Ground Truth And Audit Targets
+
+- `webgl2-world-resources.ts`: remaining `Webgl2WorldDrawUnit` store state and resource disposal.
+- `world-render-frame.ts`: remaining `"draw-unit"` frame shape.
+- `webgl2-world-submit.ts`: generic draw-unit submit, sorting, direct retained passes, and related metrics.
+- `webgl2-draw-unit-render-diagnostics.ts` and `draw-unit-render-diagnostics.ts`: likely removable diagnostics.
+- `webgl2/families/direct-render-family.ts` and `webgl2/families/direct-family-adapters.ts`: delete if only renderer draw units consume them; otherwise rename around shader-family submission.
+- `compaction/compaction-family-planner.ts` and `compaction/compacted-geometry.ts`: audit whether "draw unit" means real renderer ownership or just compactable geometry/material candidates.
+- `texture-pages/texture-page-binding.ts`: keep descriptor/resource-binding types if still used by static bundles, but avoid resurrecting direct draw-unit helpers.
+
+### Deliverables
+
+- Remove renderer draw-unit state from `Webgl2WorldResourceStore`.
+- Remove generic draw-unit draw selection from `WorldRenderFrame`.
+- Remove generic draw-unit submit path and metrics from `webgl2-world-submit.ts`.
+- Remove stale Browser debug report text and metrics fields tied to draw-unit ownership.
+- Delete or rename files whose names imply the removed path, including draw-unit diagnostics if no longer needed.
+- Rename/rehome lower-level primitives where current names imply dead renderer ownership.
+- Add or update tests proving the active render paths are terrain, static bundle layers, structured interiors, transition portal masks, and debug overlays only.
+
+### Acceptance Criteria
+
+- `rg "Webgl2WorldDrawUnit|drawUnitsById|kind: \"draw-unit\"|legacy-draw-unit"` returns no production-code matches.
+- `WorldRenderFrame` has no generic draw-unit draw kind.
+- Product commit and render submit have no generic draw-unit entry point.
+- Debug reports no longer show draw-unit-specific counters for removed paths.
+- Any remaining `drawUnit` terminology is confined to lower-level compaction internals that were deliberately kept and documented, or has been renamed.
+- `npm run check`, `npm run test:ts`, and `npm run lint` pass in `apps/holtburger-3d`.
+
+### Dry Run Notes
+
+- Current `rg` audit found no active product commit producer that inserts `Webgl2WorldDrawUnit` instances into `Webgl2WorldResourceStore`; the store only initializes, clears, disposes, and submits an empty legacy collection. That makes the renderer-owned draw-unit path deletion-first work, not migration work.
+- `WorldRenderFrame` still has a generic fallback that turns any unrecognized candidate kind into `{ kind: "draw-unit" }`. Delete this fallback instead of preserving it. Future candidate kinds should fail loudly until they get an explicit frame draw kind.
+- `submitWebgl2WorldFrame` and scene-domain rendering still plan, partition, and submit visible draw units even though active products now use terrain tiles, static bundle layers, structured interior resources, and transition portal masks. Remove the draw-unit plan/partition/schedule path and make submit metrics resource-family oriented.
+- `webgl2/families/direct-render-family.ts` and `webgl2/families/direct-family-adapters.ts` are not inherently bad primitives; they are bad because their public input type is `Webgl2WorldDrawUnit`. If active paths still need their shader-family state helpers, rehome/rename them around direct resource submissions. If no active path consumes them after deletion, delete them.
+- `compaction/compaction-family-planner.ts`, `compaction/compacted-geometry.ts`, and `texture-pages/texture-page-binding.ts` still support static bundle material/texture-page planning. Do not delete them just because they say "draw unit"; rename fields and helper types toward `geometry`, `candidate`, `batchEntry`, or `materialSlot` after confirming call sites.
+- Direct draw-unit runtime diagnostics are removable with the renderer-owned draw-unit path. The renderer contract and Svelte forwarding methods should lose `getDrawUnitRuntimeDiagnostics`.
+- Tests split into two groups: delete tests that only validate generic renderer draw-unit APIs; keep and rename tests that validate compaction/texture-page planning for static bundle artifacts.
+- Start by deleting production references to `Webgl2WorldDrawUnit` and let TypeScript expose the exact dependent submit/metric/test surface.
+- Prefer deletion over adapter shims. If a lower-level helper only exists for removed renderer draw units, delete it.
+- If a compaction primitive survives, rename it around material/geometry batching input rather than render ownership.
+- Keep this phase before Phase 6 so temporary diagnostics can be purged after the renderer ownership model is clean.
+
+### Implementation Notes
+
+- Deleted the renderer-owned draw-unit resource path from the WebGL resource store, frame selection, submit planning, diagnostics, renderer contract, and Browser debug report.
+- Removed `draw-unit-render-diagnostics.ts`, `webgl2-draw-unit-render-diagnostics.ts`, `webgl2/families/direct-render-family.ts`, and `webgl2/families/direct-family-adapters.ts` because no active render path consumed them after transition portal masks moved to dedicated resources.
+- Replaced generic world submit tests with focused tests for the active resource submit planners: terrain tiles, static bundle layers, transition portal masks, and terrain one-draw readiness.
+- Updated transition portal mask resource tests so they assert the dedicated mask store directly instead of checking for an empty generic draw-unit store.
+- Removed exported compaction/texture-page primitives that were no longer public API:
+  - `CompactionMaterialBlocker`, `CompactionGeometryBlocker`, and `CompactionFamilyBypass` are now internal implementation details.
+  - The unused `TexturePageResourceBinding` interface was deleted.
+- Renamed surviving lower-level compaction and texture-page atlas APIs away from `drawUnit` terminology:
+  - Compaction family planning now uses `candidates`, `candidateId`, `candidateIds`, `compactableCandidateIds`, and `candidateMaterialSlots`.
+  - Compacted geometry building now uses `entries`, `entryId`, `entryIds`, `compactableEntryIds`, and `entryMaterialSlots`.
+  - Texture-page atlas planning now reports `rgbaAtlasReadyCandidateIds` and `detailAtlasReadyCandidateIds`.
+- `WorldRenderFrame` now fails loudly for unsupported candidate kinds instead of falling back to a generic draw-unit draw. New renderable families must add an explicit candidate/draw kind.
+
+### Lower-Level Primitive Audit
+
+- `compaction/compaction-family-planner.ts`, `compaction/compacted-geometry.ts`, `texture-pages/texture-page-atlas-planner.ts`, and texture-page upload diagnostics no longer expose `drawUnit` terminology.
+- The rename deliberately distinguishes planner candidates from compacted geometry entries:
+  - `candidate` names describe material/geometry planning inputs before compaction and atlas eligibility are resolved.
+  - `entry` names describe geometry sources already selected for compacted batch assembly.
+- No replacement type uses `renderable` because these values are not live scene resources; they are static bundle/terrain planning records.
+
+### Verification
+
+- `rg "Webgl2WorldDrawUnit|drawUnitsById|kind: \"draw-unit\"|legacy-draw-unit|getDrawUnitRuntimeDiagnostics|submitWebgl2WorldDrawUnits|planWebgl2WorldSubmitOrder|partitionWebgl2SceneDomainDrawUnits|direct-render-family|direct-family-adapters" apps/holtburger-3d/src --glob '!*.test.ts'` returns no production-code matches.
+- `rg "drawUnit|DrawUnit|draw-unit|draw unit|drawUnits" apps/holtburger-3d/src/lib/world-display apps/holtburger-3d/src/workers/static-landblock-render-worker.test.ts apps/holtburger-3d/src/workers/static-landblock-render-worker.ts` returns no source-code matches.
+- `npm run check` passes in `apps/holtburger-3d`.
+- `npm run test:ts` passes in `apps/holtburger-3d`.
+- `npm run lint` passes in `apps/holtburger-3d`.
 
 ## Phase 6: Purge Temporary Diagnostics
 

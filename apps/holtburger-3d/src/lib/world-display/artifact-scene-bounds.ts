@@ -13,6 +13,7 @@ import type { RenderChunkTransform } from "./render-anchor";
 import {
 	renderBoundsCenter,
 	renderBoundsSize,
+	translateRenderBounds,
 	unionRenderBounds,
 	type RenderBounds,
 } from "./render-spatial-math";
@@ -69,7 +70,17 @@ function collectStaticLandblockArtifactSceneBounds({
 		}
 
 		for (const bundle of getStaticObjectBundleArtifacts(result)) {
-			bounds.push(...(bundle.spatialHints ?? []).map((hint) => hint.bounds));
+			const renderChunk = deriveLandblockRenderChunkPlacement(
+				result.landblockId,
+			);
+			const transform = chunkTransformsByKey.get(renderChunk.chunkKey);
+			if (transform) {
+				bounds.push(
+					...(bundle.spatialHints ?? []).map((hint) =>
+						translateRenderBounds(hint.bounds, transform.offset),
+					),
+				);
+			}
 		}
 
 		const detailed = getDetailedLandblockRenderArtifacts(result);

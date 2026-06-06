@@ -18,10 +18,7 @@ type WorldRenderCategory =
 	| "debug-overlay";
 
 type WorldRenderCandidateKind =
-	| "terrain"
 	| "terrain-tile"
-	| "structured-interior"
-	| "static"
 	| "static-bundle-layer"
 	| "portal-mask";
 
@@ -34,11 +31,6 @@ export interface WorldRenderCandidate {
 
 type WorldRenderDraw =
 	| {
-			kind: "draw-unit";
-			drawUnitId: string;
-			category: WorldRenderCategory;
-	  }
-	| {
 			kind: "terrain-tile";
 			terrainTileId: string;
 			category: "terrain";
@@ -47,6 +39,11 @@ type WorldRenderDraw =
 			kind: "static-bundle-layer";
 			staticBundleLayerId: string;
 			category: "static";
+	  }
+	| {
+			kind: "transition-portal-mask";
+			transitionPortalMaskId: string;
+			category: "portal-mask";
 	  };
 
 interface SelectedWorldRenderDraw {
@@ -216,14 +213,11 @@ function categorizeWorldRenderCandidate(candidate: {
 	id: string;
 	kind: WorldRenderCandidateKind;
 }): WorldRenderCategory {
-	if (candidate.kind === "terrain" || candidate.kind === "terrain-tile") {
+	if (candidate.kind === "terrain-tile") {
 		return "terrain";
 	}
 	if (candidate.kind === "portal-mask") {
 		return "portal-mask";
-	}
-	if (candidate.kind === "structured-interior") {
-		return "structured-interior";
 	}
 	return "static";
 }
@@ -277,7 +271,7 @@ function selectWorldRenderCandidates(
 
 		draws.push({
 			candidateId: candidate.id,
-			draw: createWorldRenderDraw(candidate, category),
+			draw: createWorldRenderDraw(candidate),
 			category,
 		});
 		visibleDrawCountsByCategory[category] += 1;
@@ -364,10 +358,7 @@ function resolveBatchFallbackReason({
 	return null;
 }
 
-function createWorldRenderDraw(
-	candidate: WorldRenderCandidate,
-	category: WorldRenderCategory,
-): WorldRenderDraw {
+function createWorldRenderDraw(candidate: WorldRenderCandidate): WorldRenderDraw {
 	if (candidate.kind === "terrain-tile") {
 		return {
 			kind: "terrain-tile",
@@ -382,11 +373,15 @@ function createWorldRenderDraw(
 			category: "static",
 		};
 	}
-	return {
-		kind: "draw-unit",
-		drawUnitId: candidate.id,
-		category,
-	};
+	if (candidate.kind === "portal-mask") {
+		return {
+			kind: "transition-portal-mask",
+			transitionPortalMaskId: candidate.id,
+			category: "portal-mask",
+		};
+	}
+	const exhaustive: never = candidate.kind;
+	throw new Error(`Unsupported world render candidate kind ${exhaustive}.`);
 }
 
 function compareWorldRenderDraws(

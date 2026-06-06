@@ -120,7 +120,7 @@ describe("webgl2 texture page upload", () => {
 			createTexturePageCpuSet({
 				plan: {
 					...plan,
-					rgbaAtlasReadyDrawUnitIds: [],
+					rgbaAtlasReadyCandidateIds: [],
 					atlasEntryRecords: [],
 					atlasTextures: [],
 					detailAtlasEntryRecords: [],
@@ -312,8 +312,8 @@ function createPlan({
 	]);
 	return {
 		key: "texture-page-atlas/test",
-		rgbaAtlasReadyDrawUnitIds: ["draw-a"],
-		detailAtlasReadyDrawUnitIds: [],
+		rgbaAtlasReadyCandidateIds: ["draw-a"],
+		detailAtlasReadyCandidateIds: [],
 		failures: [],
 		atlasEntryRecords: [
 			{

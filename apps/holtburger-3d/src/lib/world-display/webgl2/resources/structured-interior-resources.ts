@@ -4,13 +4,8 @@ import {
 	type StaticLandblockProductKey,
 } from "../../landblock-render-product";
 import {
-	buildAcPlacementMatrix,
-	createTranslationMat4,
-	multiplyMat4,
-	type RenderMat4,
 	type RenderVec4,
 } from "../../render-math";
-import type { RenderChunkTransform } from "../../render-anchor";
 import { buildPolygonSetRenderGeometry } from "../../indexed-render-geometry";
 import type { StaticBundleTexturePage } from "../../static-bundle-layer";
 import {
@@ -58,7 +53,8 @@ export interface Webgl2StructuredInteriorCellResource {
 	landblockId: number;
 	envCellId: number;
 	geometrySignature: string;
-	modelMatrix: RenderMat4;
+	renderChunkKey: string;
+	chunkLocalPlacement: DetailedStructuredInteriorCellArtifact["localPlacement"];
 	texturePages: readonly Webgl2StaticBundleTexturePageResource[];
 	texturePagesByKey: ReadonlyMap<string, Webgl2StaticBundleTexturePageResource>;
 	materialRecords: readonly Webgl2StaticBundleMaterialResource[];
@@ -109,7 +105,6 @@ export function commitWebgl2StructuredInteriorProductResources({
 	store,
 	productKey,
 	artifact,
-	renderChunkTransforms,
 	textureFilteringMode = "anisotropic-4x",
 	maxAnisotropy = 1,
 }: {
@@ -117,17 +112,10 @@ export function commitWebgl2StructuredInteriorProductResources({
 	store: Webgl2StructuredInteriorResourceStore;
 	productKey: StaticLandblockProductKey;
 	artifact: DetailedLandblockRenderArtifacts;
-	renderChunkTransforms: readonly RenderChunkTransform[];
 	textureFilteringMode?: TextureFilteringMode;
 	maxAnisotropy?: number;
 }): void {
 	const productIdentityKey = formatStaticLandblockProductKey(productKey);
-	const chunkOffsetByKey = new Map(
-		renderChunkTransforms.map((transform) => [
-			transform.chunkKey,
-			transform.offset,
-		]),
-	);
 	const productResource = createOrReuseStructuredInteriorProductResource({
 		gl,
 		store,
@@ -141,17 +129,14 @@ export function commitWebgl2StructuredInteriorProductResources({
 	for (const cell of artifact.structuredInteriorCells) {
 		const resourceKey = describeStructuredInteriorResourceKey(artifact, cell);
 		retainedCellKeys.add(resourceKey);
-		const modelMatrix = buildStructuredInteriorModelMatrix({
-			cell,
-			chunkOffsetByKey,
-		});
 		const previous = store.cellsByKey.get(resourceKey);
 		if (
 			previous &&
 			previous.geometrySignature ===
 				describeStructuredInteriorGeometrySignature(artifact, cell)
 		) {
-			previous.modelMatrix = modelMatrix;
+			previous.renderChunkKey = cell.renderChunk.chunkKey;
+			previous.chunkLocalPlacement = cell.localPlacement;
 			continue;
 		}
 		previous?.dispose();
@@ -162,7 +147,6 @@ export function commitWebgl2StructuredInteriorProductResources({
 				artifact,
 				cell,
 				productResource,
-				modelMatrix,
 			}),
 		);
 	}
@@ -314,13 +298,11 @@ function createWebgl2StructuredInteriorCellResource({
 	artifact,
 	cell,
 	productResource,
-	modelMatrix,
 }: {
 	gl: WebGL2RenderingContext;
 	artifact: DetailedLandblockRenderArtifacts;
 	cell: DetailedStructuredInteriorCellArtifact;
 	productResource: Webgl2StructuredInteriorProductResource;
-	modelMatrix: RenderMat4;
 }): Webgl2StructuredInteriorCellResource {
 	const materialSlices = cell.materialSlices.map((slice) =>
 		createWebgl2StructuredInteriorMaterialSliceResource({ gl, slice }),
@@ -345,7 +327,8 @@ function createWebgl2StructuredInteriorCellResource({
 			artifact,
 			cell,
 		),
-		modelMatrix,
+		renderChunkKey: cell.renderChunk.chunkKey,
+		chunkLocalPlacement: cell.localPlacement,
 		texturePages: productResource.texturePages,
 		texturePagesByKey: productResource.texturePagesByKey,
 		materialRecords: productResource.materialRecords,
@@ -484,31 +467,6 @@ function createWebgl2StructuredInteriorMaterialSliceResource({
 			indexBuffer.dispose();
 		},
 	};
-}
-
-function buildStructuredInteriorModelMatrix({
-	cell,
-	chunkOffsetByKey,
-}: {
-	cell: DetailedStructuredInteriorCellArtifact;
-	chunkOffsetByKey: ReadonlyMap<string, { x: number; y: number; z: number }>;
-}): RenderMat4 {
-	const chunkOffset = chunkOffsetByKey.get(cell.renderChunk.chunkKey);
-	if (!chunkOffset) {
-		return buildAcPlacementMatrix(
-			cell.localPlacement,
-			{ x: 0, y: 0, z: 0 },
-			{ x: 1, y: 1, z: 1 },
-		);
-	}
-	return multiplyMat4(
-		createTranslationMat4(chunkOffset),
-		buildAcPlacementMatrix(
-			cell.localPlacement,
-			{ x: 0, y: 0, z: 0 },
-			{ x: 1, y: 1, z: 1 },
-		),
-	);
 }
 
 function describeStructuredInteriorResourceKey(

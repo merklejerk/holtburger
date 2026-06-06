@@ -9,74 +9,75 @@ import {
 } from "./render-math";
 import { buildPortalApertureRenderGeometry } from "./indexed-render-geometry";
 import type { RenderIndexedGeometry } from "./indexed-render-geometry";
-import type { RenderMaterialPlan } from "./render-material-plans";
 import type {
 	TransitionPortalCandidate,
 	TransitionPortalCandidateModel,
 } from "./transition-portal-work-items";
 
-export interface TransitionPortalMaskDrawUnitAssembly {
+export interface TransitionPortalMaskResourceAssembly {
 	id: string;
-	kind: "portal-mask";
+	kind: "transition-portal-mask";
 	geometry: RenderIndexedGeometry;
-	modelMatrix: RenderMat4;
-	material: RenderMaterialPlan;
-	preparedAssetIds: readonly [];
+	renderChunkKey: string;
+	chunkLocalPlacement: TransitionPortalCandidate["aperture"]["chunkLocalPlacement"];
 	bvhBinding: {
 		itemKeys: readonly RenderBvhItemKey[];
 		fallbackReason: string | null;
 	};
-	staticPartCount: 0;
-	staticObjectKeys: readonly [];
 	portalCandidate: TransitionPortalCandidate;
 }
 
-export function buildTransitionPortalMaskDrawUnitAssemblies({
-	chunkOffsetByKey,
+export function buildTransitionPortalMaskResourceAssemblies({
 	transitionPortalModel,
 }: {
-	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
 	transitionPortalModel: TransitionPortalCandidateModel;
-}): TransitionPortalMaskDrawUnitAssembly[] {
+}): TransitionPortalMaskResourceAssembly[] {
 	return transitionPortalModel.candidates.flatMap((candidate) => {
-		const chunkOffset = chunkOffsetByKey.get(candidate.renderChunk.chunkKey);
-		if (!chunkOffset || candidate.aperture.points.length < 3) {
+		if (candidate.aperture.points.length < 3) {
 			return [];
 		}
 		const bvhBinding = deriveTransitionPortalMaskBatchBvhBinding(candidate);
 		return [
 			{
 				id: `portal-mask/${candidate.id}`,
-				kind: "portal-mask",
+				kind: "transition-portal-mask",
 				geometry: buildPortalMaskGeometry(candidate),
-				modelMatrix: multiplyMat4(
-					createTranslationMat4(chunkOffset),
-					buildAcPlacementMatrix(
-						candidate.aperture.chunkLocalPlacement,
-						{ x: 0, y: 0, z: 0 },
-						{ x: 1, y: 1, z: 1 },
-					),
-				),
-				material: {
-					kind: "flat",
-					key: `portal-mask/${candidate.id}`,
-					color: new Float32Array([0, 0, 0, 0]),
-					behavior: null,
-					fallbackReason: null,
-					fallbackReasonCode: null,
-					preparedAssetIds: [],
-				},
-				preparedAssetIds: [],
+				renderChunkKey: candidate.renderChunk.chunkKey,
+				chunkLocalPlacement: candidate.aperture.chunkLocalPlacement,
 				bvhBinding: {
 					itemKeys: bvhBinding.itemKeys,
 					fallbackReason: bvhBinding.fallbackReason,
 				},
-				staticPartCount: 0,
-				staticObjectKeys: [],
 				portalCandidate: candidate,
 			},
 		];
 	});
+}
+
+export function resolveTransitionPortalMaskModelMatrix({
+	mask,
+	renderChunkTransforms,
+}: {
+	mask: Pick<
+		TransitionPortalMaskResourceAssembly,
+		"renderChunkKey" | "chunkLocalPlacement"
+	>;
+	renderChunkTransforms: readonly RenderChunkTransform[];
+}): RenderMat4 | null {
+	const chunkOffset = renderChunkTransforms.find(
+		(transform) => transform.chunkKey === mask.renderChunkKey,
+	)?.offset;
+	if (!chunkOffset) {
+		return null;
+	}
+	return multiplyMat4(
+		createTranslationMat4(chunkOffset),
+		buildAcPlacementMatrix(
+			mask.chunkLocalPlacement,
+			{ x: 0, y: 0, z: 0 },
+			{ x: 1, y: 1, z: 1 },
+		),
+	);
 }
 
 function buildPortalMaskGeometry(

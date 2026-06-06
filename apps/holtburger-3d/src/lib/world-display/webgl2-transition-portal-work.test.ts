@@ -11,10 +11,10 @@ import {
 	deriveWebgl2InitialPortalEnvCellId,
 	planWebgl2TransitionPortalWork,
 } from "./webgl2-transition-portal-work";
-import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
+import type { Webgl2TransitionPortalMaskResource } from "./webgl2-world-resources";
 
 describe("planWebgl2TransitionPortalWork", () => {
-	it("builds visible portal work only from visible portal mask draw units", () => {
+	it("builds visible portal work only from visible transition portal mask resources", () => {
 		const candidate = createCandidate({
 			id: "outdoor/1:portal/1",
 			entryEnvCellId: 0x01020100,
@@ -31,9 +31,10 @@ describe("planWebgl2TransitionPortalWork", () => {
 				],
 				diagnostics: createCandidateDiagnostics(2),
 			},
-			visiblePortalMaskDrawUnits: [
-				createPortalMaskDrawUnit("portal-mask/outdoor/1:portal/1"),
+			visibleTransitionPortalMasks: [
+				createPortalMaskResource("portal-mask/outdoor/1:portal/1"),
 			],
+			renderChunkTransforms: [createRenderChunkTransform()],
 			cameraPosition: { x: 0, y: 0, z: 5 },
 			viewProjectionMatrix: createIdentityMat4(),
 			viewport: { width: 100, height: 80 },
@@ -46,7 +47,7 @@ describe("planWebgl2TransitionPortalWork", () => {
 			"outdoor/1:portal/1",
 		]);
 		expect(plan.visibleWorkItems[0]).toMatchObject({
-			maskDrawUnitId: "portal-mask/outdoor/1:portal/1",
+			maskResourceId: "portal-mask/outdoor/1:portal/1",
 			direction: "outdoor-to-indoor",
 			entryEnvCellId: 0x01020100,
 			screenRect: { x: 0, y: 0, width: 100, height: 80 },
@@ -70,10 +71,11 @@ describe("planWebgl2TransitionPortalWork", () => {
 				],
 				diagnostics: createCandidateDiagnostics(2),
 			},
-			visiblePortalMaskDrawUnits: [
-				createPortalMaskDrawUnit("portal-mask/reachable"),
-				createPortalMaskDrawUnit("portal-mask/unreachable"),
+			visibleTransitionPortalMasks: [
+				createPortalMaskResource("portal-mask/reachable"),
+				createPortalMaskResource("portal-mask/unreachable"),
 			],
+			renderChunkTransforms: [createRenderChunkTransform()],
 			cameraPosition: { x: 0, y: 0, z: -5 },
 			viewProjectionMatrix: createIdentityMat4(),
 			viewport: { width: 100, height: 80 },
@@ -108,9 +110,10 @@ describe("planWebgl2TransitionPortalWork", () => {
 				candidates: [candidate],
 				diagnostics: createCandidateDiagnostics(1),
 			},
-			visiblePortalMaskDrawUnits: [
-				createPortalMaskDrawUnit("portal-mask/near-plane"),
+			visibleTransitionPortalMasks: [
+				createPortalMaskResource("portal-mask/near-plane"),
 			],
+			renderChunkTransforms: [createRenderChunkTransform()],
 			cameraPosition: { x: 0, y: 0, z: 5 },
 			viewProjectionMatrix: createIdentityMat4(),
 			viewport: { width: 100, height: 80 },
@@ -213,6 +216,10 @@ function createCandidate(options: {
 				worldOffset: { x: 0, y: 0, z: 0 },
 				renderOffset: { x: 0, y: 0, z: 0 },
 			},
+			chunkLocalPlacement: {
+				origin: { x: 0, y: 0, z: 0 },
+				orientation: { w: 1, x: 0, y: 0, z: 0 },
+			},
 			outsideTransition: {
 				targetLandblockId: 0x0102ffff,
 			},
@@ -232,10 +239,13 @@ function createCandidate(options: {
 	};
 }
 
-function createPortalMaskDrawUnit(id: string): Webgl2WorldDrawUnit {
+function createPortalMaskResource(
+	id: string,
+): Webgl2TransitionPortalMaskResource {
 	return {
 		id,
-		kind: "portal-mask",
+		kind: "transition-portal-mask",
+		candidateId: id.replace(/^portal-mask\//, ""),
 		geometrySignature: "portal-mask",
 		vertexArray: {
 			vertexArray: {} as WebGLVertexArrayObject,
@@ -244,51 +254,26 @@ function createPortalMaskDrawUnit(id: string): Webgl2WorldDrawUnit {
 			},
 		},
 		vertexBuffer: createEmptyBuffer(),
-		uvBuffer: null,
-		directGeometryLayout: "position",
 		indexBuffer: createEmptyBuffer(),
 		indexType: 5123,
 		vertexCount: 3,
 		triangleCount: 1,
-		color: new Float32Array([1, 1, 1, 1]),
-		materialKind: "flat",
-		materialKey: "portal-mask",
-		materialFallbackReason: null,
-		materialBehavior: null,
-		directTextureSamplingPolicy: null,
-		textureUploadSample: null,
-		texturePageReadiness: null,
-		compactionEligibility: {
-			decision: "direct-draw",
-			material: {
-				family: "flat-constant-color",
-				compatible: false,
-				blockers: ["missing-base-texture-page"],
-				alphaPolicy: "unknown",
-				texturePageReadiness: null,
-				detailAtlasEntry: null,
-			},
-			geometry: {
-				compatible: false,
-				blockers: ["non-static", "missing-landblock-origin", "missing-uv-buffer"],
-			},
+		renderChunkKey: "landblock/0102ffff",
+		chunkLocalPlacement: {
+			origin: { x: 0, y: 0, z: 0 },
+			orientation: { w: 1, x: 0, y: 0, z: 0 },
 		},
-		textureKey: null,
-		texture: null,
-		indexedMaterialDescriptor: null,
-		directIndexedMaterialResources: null,
-		detailOverlay: null,
-		terrainBlend: null,
-		texturePageBindings: [],
-		texturePageBindingFallbackSamples: [],
-		sceneDomain: null,
-		modelMatrix: new Float32Array([
-			1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1,
-		]),
 		bvhItemKeys: [],
 		bvhFallbackReason: null,
-		staticPartCount: 0,
-		staticObjectKeys: [],
+		portalCandidate: {} as Webgl2TransitionPortalMaskResource["portalCandidate"],
+	};
+}
+
+function createRenderChunkTransform() {
+	return {
+		chunkKey: "landblock/0102ffff" as const,
+		chunkLandblockId: 0x0102ffff,
+		offset: { x: 0, y: 0, z: 0 },
 	};
 }
 

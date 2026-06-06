@@ -15,7 +15,6 @@ import type {
 	WorldRenderCameraFrameChangeHandler,
 	WorldRenderMetricsChangeHandler,
 } from "./renderer-contract";
-import type { DrawUnitRuntimeDiagnostic } from "./draw-unit-render-diagnostics";
 import type { WorldRenderSceneContext } from "./render-scene-context";
 import type {
 	StaticLandblockProductKey,
@@ -75,8 +74,5 @@ export interface WorldDisplayRenderer {
 		mask: ReadonlySet<RenderSpatialItemKind>,
 		ownerKeys?: ReadonlySet<string>,
 	): RenderSpatialPick | null;
-	getDrawUnitRuntimeDiagnostics(
-		drawUnitIds: readonly string[],
-	): readonly DrawUnitRuntimeDiagnostic[];
 	dispose(): void;
 }

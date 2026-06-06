@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { envPortalBvhItemKey } from "./prepared-bvh-visibility";
 import { deriveStructuredCellRenderChunk } from "./render-chunks";
-import { buildTransitionPortalMaskDrawUnitAssemblies } from "./transition-portal-mask-draw-units";
+import {
+	buildTransitionPortalMaskResourceAssemblies,
+	resolveTransitionPortalMaskModelMatrix,
+} from "./transition-portal-mask-resources";
 import type {
 	TransitionPortalCandidate,
 	TransitionPortalCandidateModel,
@@ -13,42 +16,49 @@ const IDENTITY_PLACEMENT = {
 	orientation: { w: 1, x: 0, y: 0, z: 0 },
 };
 
-describe("transition portal mask draw units", () => {
-	it("builds portal mask draw units from transition candidate aperture facts", () => {
+describe("transition portal mask resources", () => {
+	it("builds portal mask resources from transition candidate aperture facts", () => {
 		const candidate = createTransitionPortalCandidate();
-		const drawUnits = buildTransitionPortalMaskDrawUnitAssemblies({
-			chunkOffsetByKey: new Map([
-				[candidate.renderChunk.chunkKey, { x: 10, y: 20, z: 30 }],
-			]),
+		const masks = buildTransitionPortalMaskResourceAssemblies({
 			transitionPortalModel: createTransitionPortalModel([candidate]),
 		});
 
-		expect(drawUnits).toHaveLength(1);
-		expect(drawUnits[0]).toMatchObject({
+		expect(masks).toHaveLength(1);
+		expect(masks[0]).toMatchObject({
 			id: "portal-mask/outdoor-topology/00:cell-outside/01",
-			kind: "portal-mask",
-			staticPartCount: 0,
-			staticObjectKeys: [],
-			preparedAssetIds: [],
+			kind: "transition-portal-mask",
+			renderChunkKey: candidate.renderChunk.chunkKey,
 		});
-		expect(drawUnits[0]?.geometry).toMatchObject({
+		expect(masks[0]?.geometry).toMatchObject({
 			vertexCount: 3,
 			triangleCount: 1,
 			signature:
 				"portal-mask:outdoor-topology/00:cell-outside/01:points=3",
 		});
-		expect(drawUnits[0]?.modelMatrix[12]).toBe(10);
-		expect(drawUnits[0]?.bvhBinding.itemKeys).toEqual([
+		expect(masks[0]?.bvhBinding.itemKeys).toEqual([
 			envPortalBvhItemKey(0x016c0155, "cell-outside/01"),
 		]);
+		const modelMatrix = masks[0]
+			? resolveTransitionPortalMaskModelMatrix({
+					mask: masks[0],
+					renderChunkTransforms: [
+						{
+							chunkKey: candidate.renderChunk.chunkKey,
+							chunkLandblockId: candidate.renderChunk.chunkLandblockId,
+							offset: { x: 10, y: 20, z: 30 },
+						},
+					],
+				})
+			: null;
+		expect(modelMatrix?.[12]).toBe(10);
 	});
 
-	it("skips portal masks until the render chunk offset is available", () => {
+	it("skips portal masks with too little aperture geometry", () => {
 		const candidate = createTransitionPortalCandidate();
+		candidate.aperture.points = candidate.aperture.points.slice(0, 2);
 
 		expect(
-			buildTransitionPortalMaskDrawUnitAssemblies({
-				chunkOffsetByKey: new Map(),
+			buildTransitionPortalMaskResourceAssemblies({
 				transitionPortalModel: createTransitionPortalModel([candidate]),
 			}),
 		).toEqual([]);

@@ -30,7 +30,7 @@ type CandidateOptions = Partial<CompactionFamilyCandidate> & {
 describe("compaction family planner", () => {
 	it("plans landblock-owned opaque direct-texture units into deterministic atlas slices", () => {
 		const plan = planCompactionFamilies({
-			drawUnits: [
+			candidates: [
 				createCandidate({ id: "static-b", entryKey: "entry-b" }),
 				createCandidate({
 					id: "structured-a",
@@ -49,8 +49,8 @@ describe("compaction family planner", () => {
 			},
 		});
 
-		expect(plan.compactableDrawUnitIds).toEqual(["static-b", "structured-a"]);
-		expect(plan.renderFamilies.rgbaTexturePage.compactableDrawUnitIds).toEqual([
+		expect(plan.compactableCandidateIds).toEqual(["static-b", "structured-a"]);
+		expect(plan.renderFamilies.rgbaTexturePage.compactableCandidateIds).toEqual([
 			"static-b",
 			"structured-a",
 		]);
@@ -79,7 +79,7 @@ describe("compaction family planner", () => {
 				atlasTextureIndex: 0,
 				materialTableSlotStart: 0,
 				materialTableSlotCount: 2,
-				drawUnitIds: ["static-b", "structured-a"],
+				candidateIds: ["static-b", "structured-a"],
 			},
 		]);
 		expect(plan.staticPartCount).toBe(1);
@@ -90,9 +90,9 @@ describe("compaction family planner", () => {
 		]);
 	});
 
-	it("dedupes repeated RGBA candidates for the same draw unit before creating slices", () => {
+	it("dedupes repeated RGBA candidates for the same compaction candidate before creating slices", () => {
 		const plan = planCompactionFamilies({
-			drawUnits: [
+			candidates: [
 				createCandidate({ id: "repeat-detail", entryKey: "repeat-detail" }),
 				createCandidate({ id: "repeat-detail", entryKey: "repeat-detail" }),
 			],
@@ -104,16 +104,16 @@ describe("compaction family planner", () => {
 			},
 		});
 
-		expect(plan.compactableDrawUnitIds).toEqual(["repeat-detail"]);
+		expect(plan.compactableCandidateIds).toEqual(["repeat-detail"]);
 		expect(plan.drawSlices).toHaveLength(1);
-		expect(plan.drawSlices[0]?.drawUnitIds).toEqual(["repeat-detail"]);
+		expect(plan.drawSlices[0]?.candidateIds).toEqual(["repeat-detail"]);
 		expect(plan.staticPartCount).toBe(1);
 		expect(plan.triangleCount).toBe(2);
 	});
 
-	it("dedupes repeated indexed candidates for the same draw unit before creating slices", () => {
+	it("dedupes repeated indexed candidates for the same compaction candidate before creating slices", () => {
 		const plan = planCompactionFamilies({
-			drawUnits: [
+			candidates: [
 				createCandidate({
 					id: "indexed-repeat",
 					entryKey: "indexed-repeat",
@@ -133,17 +133,17 @@ describe("compaction family planner", () => {
 			},
 		});
 
-		expect(plan.compactableDrawUnitIds).toEqual(["indexed-repeat"]);
+		expect(plan.compactableCandidateIds).toEqual(["indexed-repeat"]);
 		expect(plan.renderFamilies.indexedPaletted.drawSlices).toHaveLength(1);
 		expect(
-			plan.renderFamilies.indexedPaletted.drawSlices[0]?.drawUnitIds,
+			plan.renderFamilies.indexedPaletted.drawSlices[0]?.candidateIds,
 		).toEqual(["indexed-repeat"]);
 		expect(plan.staticPartCount).toBe(1);
 		expect(plan.triangleCount).toBe(2);
 	});
 
 	it("keeps texture atlas planning stable when compaction slot capacity changes", () => {
-		const drawUnits = [
+		const candidates = [
 			createCandidate({ id: "static-a", entryKey: "entry-a" }),
 			createCandidate({ id: "static-b", entryKey: "entry-b" }),
 		];
@@ -153,14 +153,14 @@ describe("compaction family planner", () => {
 			baseGutterPixels: 2,
 		};
 		const singleSlotPlan = planCompactionFamilies({
-			drawUnits,
+			candidates,
 			policy: {
 				...basePolicy,
 				maxMaterialSlotsPerDraw: 1,
 			},
 		});
 		const multiSlotPlan = planCompactionFamilies({
-			drawUnits,
+			candidates,
 			policy: {
 				...basePolicy,
 				maxMaterialSlotsPerDraw: 4,
@@ -178,7 +178,7 @@ describe("compaction family planner", () => {
 
 	it("keeps unsupported first-slice materials on the direct path with reasons", () => {
 		const plan = planCompactionFamilies({
-			drawUnits: [
+			candidates: [
 				createCandidate({ id: "terrain", kind: "terrain" }),
 				createCandidate({ id: "missing-landblock", owningLandblockId: null }),
 				createCandidate({
@@ -201,7 +201,7 @@ describe("compaction family planner", () => {
 			},
 		});
 
-		expect(plan.compactableDrawUnitIds).toEqual(["clip"]);
+		expect(plan.compactableCandidateIds).toEqual(["clip"]);
 		expect(plan.bypasses.map((bypass) => bypass.reason)).toEqual([
 			"non-static",
 			"missing-landblock-origin",
@@ -218,9 +218,9 @@ describe("compaction family planner", () => {
 		]);
 	});
 
-	it("keeps blended RGBA atlas-ready draw units direct while planning their texture pages", () => {
+	it("keeps blended RGBA atlas-ready compaction candidates direct while planning their texture pages", () => {
 		const plan = planCompactionFamilies({
-			drawUnits: [
+			candidates: [
 				createCandidate({
 					id: "blended-rgba",
 					entryKey: "blended-rgba",
@@ -236,8 +236,8 @@ describe("compaction family planner", () => {
 			},
 		});
 
-		expect(plan.compactableDrawUnitIds).toEqual(["opaque-rgba"]);
-		expect(plan.texturePageAtlasPlan.rgbaAtlasReadyDrawUnitIds).toEqual([
+		expect(plan.compactableCandidateIds).toEqual(["opaque-rgba"]);
+		expect(plan.texturePageAtlasPlan.rgbaAtlasReadyCandidateIds).toEqual([
 			"blended-rgba",
 			"opaque-rgba",
 		]);
@@ -248,7 +248,7 @@ describe("compaction family planner", () => {
 		).toEqual(["blended-rgba", "opaque-rgba"]);
 		expect(plan.bypasses).toMatchObject([
 			{
-				drawUnitId: "blended-rgba",
+				candidateId: "blended-rgba",
 				reason: "unsupported-transparent-blended-material",
 			},
 		]);
@@ -256,7 +256,7 @@ describe("compaction family planner", () => {
 
 	it("keeps material-only and geometry-only eligibility on the direct path", () => {
 		const plan = planCompactionFamilies({
-			drawUnits: [
+			candidates: [
 				createCandidate({ id: "material-only", owningLandblockId: null }),
 				createCandidate({ id: "geometry-only", texturePageReadiness: null }),
 				createCandidate({ id: "fully-eligible" }),
@@ -269,16 +269,16 @@ describe("compaction family planner", () => {
 			},
 		});
 
-		expect(plan.compactableDrawUnitIds).toEqual(["fully-eligible"]);
+		expect(plan.compactableCandidateIds).toEqual(["fully-eligible"]);
 		expect(plan.bypasses).toMatchObject([
 			{
-				drawUnitId: "material-only",
+				candidateId: "material-only",
 				reason: "missing-landblock-origin",
 				blockerKind: "geometry",
 				blocker: "missing-landblock-origin",
 			},
 			{
-				drawUnitId: "geometry-only",
+				candidateId: "geometry-only",
 				reason: "missing-texture-page-readiness",
 				blockerKind: "material",
 				blocker: "missing-texture-page-readiness",
@@ -289,7 +289,7 @@ describe("compaction family planner", () => {
 	it("classifies unsupported compacted texture-page behavior by blocker category", () => {
 		const baseBinding = createDirectTexturePageBinding();
 		const plan = planCompactionFamilies({
-			drawUnits: [
+			candidates: [
 				createCandidate({
 					id: "bad-usage",
 					texturePageBindings: [
@@ -336,17 +336,17 @@ describe("compaction family planner", () => {
 
 		expect(plan.bypasses).toMatchObject([
 			{
-				drawUnitId: "bad-usage",
+				candidateId: "bad-usage",
 				reason: "unsupported-compacted-material-family",
 				blocker: "unsupported-texture-page-usage:indexed-texels",
 			},
 			{
-				drawUnitId: "bad-sample-class",
+				candidateId: "bad-sample-class",
 				reason: "unsupported-compacted-material-family",
 				blocker: "unsupported-texture-page-sample-class",
 			},
 			{
-				drawUnitId: "bad-sampling",
+				candidateId: "bad-sampling",
 				reason: "unsupported-compacted-material-family",
 				blocker: "unsupported-texture-page-sampling",
 			},
@@ -428,7 +428,7 @@ describe("compaction family planner", () => {
 
 	it("plans indexed opaque material-table slots and draw slices in the indexed submit family", () => {
 		const plan = planCompactionFamilies({
-			drawUnits: [
+			candidates: [
 				createCandidate({
 					id: "indexed-a",
 					materialKey: "indexed/material-a",
@@ -452,19 +452,19 @@ describe("compaction family planner", () => {
 			},
 		});
 
-		expect(plan.compactableDrawUnitIds).toEqual(["indexed-a"]);
+		expect(plan.compactableCandidateIds).toEqual(["indexed-a"]);
 		expect(plan.indexedMaterialTableRecords).toEqual([
 			createIndexedMaterialTableRecord("a"),
 		]);
-		expect(plan.renderFamilies.rgbaTexturePage.compactableDrawUnitIds).toEqual(
+		expect(plan.renderFamilies.rgbaTexturePage.compactableCandidateIds).toEqual(
 			[],
 		);
 		expect(plan.renderFamilies.indexedPaletted).toMatchObject({
 			kind: "indexed-paletted",
-			compactableDrawUnitIds: ["indexed-a"],
+			compactableCandidateIds: ["indexed-a"],
 			materialTableRecords: [createIndexedMaterialTableRecord("a")],
-			drawUnitMaterialSlots: [
-				{ drawUnitId: "indexed-a", materialSlotKey: "indexed-table-a" },
+			candidateMaterialSlots: [
+				{ candidateId: "indexed-a", materialSlotKey: "indexed-table-a" },
 			],
 			drawSlices: [
 				{
@@ -475,7 +475,7 @@ describe("compaction family planner", () => {
 					materialTableSlotStart: 0,
 					materialTableSlotCount: 1,
 					materialSlotKeys: ["indexed-table-a"],
-					drawUnitIds: ["indexed-a"],
+					candidateIds: ["indexed-a"],
 				},
 			],
 		});
@@ -484,7 +484,7 @@ describe("compaction family planner", () => {
 		]);
 	});
 
-	it("keeps indexed detail-overlay draw units in the indexed family", () => {
+	it("keeps indexed detail-overlay compaction candidates in the indexed family", () => {
 		const detailEntry = createDetailAtlasEntry("indexed-detail");
 		const detailRecord = {
 			...createIndexedMaterialTableRecord("detail"),
@@ -492,7 +492,7 @@ describe("compaction family planner", () => {
 			detailTiling: detailEntry.tiling,
 		};
 		const plan = planCompactionFamilies({
-			drawUnits: [
+			candidates: [
 				createCandidate({
 					id: "indexed-detail",
 					entryKey: "detail",
@@ -519,7 +519,7 @@ describe("compaction family planner", () => {
 			},
 		});
 
-		expect(plan.compactableDrawUnitIds).toEqual(["indexed-detail"]);
+		expect(plan.compactableCandidateIds).toEqual(["indexed-detail"]);
 		expect(plan.bypasses).toEqual([]);
 		expect(
 			plan.texturePageAtlasPlan.detailAtlasEntryRecords.map(
@@ -531,9 +531,9 @@ describe("compaction family planner", () => {
 		]);
 	});
 
-	it("keeps detail-overlay draw units compactable when an RGBA8 detail atlas entry is available", () => {
+	it("keeps detail-overlay compaction candidates compactable when an RGBA8 detail atlas entry is available", () => {
 		const plan = planCompactionFamilies({
-			drawUnits: [
+			candidates: [
 				createCandidate({
 					id: "plain",
 					entryKey: "base-a",
@@ -553,7 +553,7 @@ describe("compaction family planner", () => {
 			},
 		});
 
-		expect(plan.compactableDrawUnitIds).toEqual(["plain", "detailed"]);
+		expect(plan.compactableCandidateIds).toEqual(["plain", "detailed"]);
 		expect(plan.bypasses).toEqual([]);
 		expect(
 			plan.texturePageAtlasPlan.detailAtlasEntryRecords.map(
@@ -577,7 +577,7 @@ describe("compaction family planner", () => {
 
 	it("keeps repeated base-color materials with detail overlays compactable for atlas diagnostics", () => {
 		const plan = planCompactionFamilies({
-			drawUnits: [
+			candidates: [
 				createCandidate({
 					id: "repeat-detail",
 					entryKey: "repeat-detail",
@@ -600,16 +600,16 @@ describe("compaction family planner", () => {
 			},
 		});
 
-		expect(plan.compactableDrawUnitIds).toEqual(["repeat-detail"]);
+		expect(plan.compactableCandidateIds).toEqual(["repeat-detail"]);
 		expect(plan.bypasses).toEqual([]);
 		expect(plan.drawSlices).toHaveLength(1);
-		expect(plan.drawSlices[0]?.drawUnitIds).toEqual(["repeat-detail"]);
+		expect(plan.drawSlices[0]?.candidateIds).toEqual(["repeat-detail"]);
 		expect(plan.drawSlices[0]?.detailAtlasTextureIndex).toBe(0);
 	});
 
 	it("splits compaction material slots when the same base material has different detail state", () => {
 		const plan = planCompactionFamilies({
-			drawUnits: [
+			candidates: [
 				createCandidate({ id: "plain", entryKey: "shared" }),
 				createCandidate({
 					id: "detailed",
@@ -630,13 +630,13 @@ describe("compaction family planner", () => {
 			"slot-shared|wrap=clamp/clamp|detail=detail-shared",
 			"slot-shared|wrap=clamp/clamp|detail=none",
 		]);
-		expect(plan.drawUnitMaterialSlots).toEqual([
+		expect(plan.candidateMaterialSlots).toEqual([
 			{
-				drawUnitId: "plain",
+				candidateId: "plain",
 				materialSlotKey: "slot-shared|wrap=clamp/clamp|detail=none",
 			},
 			{
-				drawUnitId: "detailed",
+				candidateId: "detailed",
 				materialSlotKey: "slot-shared|wrap=clamp/clamp|detail=detail-shared",
 			},
 		]);
@@ -644,7 +644,7 @@ describe("compaction family planner", () => {
 
 	it("splits compaction material slots when the same base material has different wrap policy", () => {
 		const plan = planCompactionFamilies({
-			drawUnits: [
+			candidates: [
 				createCandidate({
 					id: "clamp",
 					entryKey: "shared",
@@ -692,7 +692,7 @@ describe("compaction family planner", () => {
 
 	it("reports source texture and material table overflow before GPU resources exist", () => {
 		const plan = planCompactionFamilies({
-			drawUnits: [
+			candidates: [
 				createCandidate({
 					id: "too-big",
 					entryKey: "too-big",
@@ -710,7 +710,7 @@ describe("compaction family planner", () => {
 			},
 		});
 
-		expect(plan.compactableDrawUnitIds).toEqual(["slot-a", "slot-b"]);
+		expect(plan.compactableCandidateIds).toEqual(["slot-a", "slot-b"]);
 		expect(plan.bypasses).toEqual([]);
 		expect(plan.texturePageAtlasPlan.failures.map((failure) => failure.reason)).toEqual([
 			"source-texture-too-large",
@@ -719,7 +719,7 @@ describe("compaction family planner", () => {
 
 	it("partitions RGBA material tables instead of bypassing overflow candidates", () => {
 		const plan = planCompactionFamilies({
-			drawUnits: [
+			candidates: [
 				createCandidate({ id: "slot-a", entryKey: "slot-a" }),
 				createCandidate({ id: "slot-b", entryKey: "slot-b" }),
 			],
@@ -731,18 +731,18 @@ describe("compaction family planner", () => {
 			},
 		});
 
-		expect(plan.compactableDrawUnitIds).toEqual(["slot-a", "slot-b"]);
+		expect(plan.compactableCandidateIds).toEqual(["slot-a", "slot-b"]);
 		expect(plan.bypasses).toEqual([]);
 		expect(plan.renderFamilies.rgbaTexturePage.partitions).toMatchObject([
 			{
-				compactableDrawUnitIds: ["slot-a"],
+				compactableCandidateIds: ["slot-a"],
 				materialSlots: [{ index: 0 }],
-				drawSlices: [{ drawUnitIds: ["slot-a"], materialTableSlotCount: 1 }],
+				drawSlices: [{ candidateIds: ["slot-a"], materialTableSlotCount: 1 }],
 			},
 			{
-				compactableDrawUnitIds: ["slot-b"],
+				compactableCandidateIds: ["slot-b"],
 				materialSlots: [{ index: 0 }],
-				drawSlices: [{ drawUnitIds: ["slot-b"], materialTableSlotCount: 1 }],
+				drawSlices: [{ candidateIds: ["slot-b"], materialTableSlotCount: 1 }],
 			},
 		]);
 		expect(
@@ -754,7 +754,7 @@ describe("compaction family planner", () => {
 
 	it("partitions indexed material tables instead of bypassing overflow candidates", () => {
 		const plan = planCompactionFamilies({
-			drawUnits: [
+			candidates: [
 				createCandidate({
 					id: "indexed-a",
 					materialKind: "indexed-paletted",
@@ -774,18 +774,18 @@ describe("compaction family planner", () => {
 			},
 		});
 
-		expect(plan.compactableDrawUnitIds).toEqual(["indexed-a", "indexed-b"]);
+		expect(plan.compactableCandidateIds).toEqual(["indexed-a", "indexed-b"]);
 		expect(plan.bypasses).toEqual([]);
 		expect(plan.renderFamilies.indexedPaletted.partitions).toMatchObject([
 			{
-				compactableDrawUnitIds: ["indexed-a"],
+				compactableCandidateIds: ["indexed-a"],
 				materialTableRecords: [{ key: "indexed-table-a" }],
-				drawSlices: [{ drawUnitIds: ["indexed-a"], materialTableSlotCount: 1 }],
+				drawSlices: [{ candidateIds: ["indexed-a"], materialTableSlotCount: 1 }],
 			},
 			{
-				compactableDrawUnitIds: ["indexed-b"],
+				compactableCandidateIds: ["indexed-b"],
 				materialTableRecords: [{ key: "indexed-table-b" }],
-				drawSlices: [{ drawUnitIds: ["indexed-b"], materialTableSlotCount: 1 }],
+				drawSlices: [{ candidateIds: ["indexed-b"], materialTableSlotCount: 1 }],
 			},
 		]);
 		expect(
@@ -797,7 +797,7 @@ describe("compaction family planner", () => {
 
 	it("keeps atlas capacity overflow separate from material table partitioning", () => {
 		const plan = planCompactionFamilies({
-			drawUnits: [
+			candidates: [
 				createCandidate({
 					id: "slot-a",
 					entryKey: "slot-a",
@@ -819,19 +819,19 @@ describe("compaction family planner", () => {
 			},
 		});
 
-		expect(plan.compactableDrawUnitIds).toEqual(["slot-a"]);
+		expect(plan.compactableCandidateIds).toEqual(["slot-a"]);
 		expect(plan.bypasses).toEqual([]);
 		expect(plan.texturePageAtlasPlan.failures.map((failure) => failure.reason)).toEqual([
 			"atlas-full",
 		]);
 	});
 
-	it("retains extra terrain RGBA atlas candidates without generic draw units", () => {
+	it("retains extra terrain RGBA atlas candidates without generic compaction candidates", () => {
 		const plan = planCompactionFamilies({
-			drawUnits: [],
+			candidates: [],
 			extraRgbaAtlasCandidates: [
 				{
-					drawUnitId: "terrain-tile/a",
+					candidateId: "terrain-tile/a",
 					family: "terrain-color",
 					texturePageReadiness: createTexturePageReadiness({
 						entryKey: "terrain-page/color/06006d06/21/512/512",
@@ -871,7 +871,7 @@ describe("compaction family planner", () => {
 	it("creates an empty plan for store initialization", () => {
 		expect(createEmptyCompactionFamilyPlan()).toMatchObject({
 			key: "compaction-families/empty",
-			compactableDrawUnitIds: [],
+			compactableCandidateIds: [],
 			texturePageAtlasPlan: {
 				atlasTextures: [],
 			},
@@ -881,7 +881,7 @@ describe("compaction family planner", () => {
 
 	it("merges RGBA texture-page slices across visibility partitions", () => {
 		const plan = planCompactionFamilies({
-			drawUnits: [
+			candidates: [
 				createCandidate({
 					id: "cell-a",
 					entryKey: "shared",
@@ -901,7 +901,7 @@ describe("compaction family planner", () => {
 			},
 		});
 
-		expect(plan.drawSlices.map((slice) => slice.drawUnitIds)).toEqual([
+		expect(plan.drawSlices.map((slice) => slice.candidateIds)).toEqual([
 			["cell-a", "cell-b"],
 		]);
 	});
@@ -909,7 +909,7 @@ describe("compaction family planner", () => {
 	it("merges indexed-paletted slices across visibility partitions", () => {
 		const indexedRecord = createIndexedMaterialTableRecord("shared");
 		const plan = planCompactionFamilies({
-			drawUnits: [
+			candidates: [
 				createCandidate({
 					id: "indexed-a",
 					entryKey: "shared",
@@ -935,7 +935,7 @@ describe("compaction family planner", () => {
 
 		expect(
 			plan.renderFamilies.indexedPaletted.drawSlices.map(
-				(slice) => slice.drawUnitIds,
+				(slice) => slice.candidateIds,
 			),
 		).toEqual([["indexed-a", "indexed-b"]]);
 	});

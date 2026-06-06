@@ -44,8 +44,8 @@ describe("calculateStaticLandblockArtifactSceneBoundsFrame", () => {
 		});
 
 		expect(frame).toEqual({
-			center: { x: 0, y: 10.5, z: 14.5 },
-			size: { x: 40, y: 31, z: 33 },
+			center: { x: 5, y: 20.5, z: 29 },
+			size: { x: 30, y: 11, z: 6 },
 			minimumSpan: 180,
 		});
 	});

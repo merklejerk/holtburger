@@ -15,12 +15,12 @@ describe("planTexturePageAtlas", () => {
 		const plan = planTexturePageAtlas({
 			rgbaCandidates: [
 				createRgbaCandidate({
-					drawUnitId: "static-a",
+					candidateId: "static-a",
 					entryKey: "shared-size-static",
 					family: "static-rgba",
 				}),
 				createRgbaCandidate({
-					drawUnitId: "terrain-a",
+					candidateId: "terrain-a",
 					entryKey: "shared-size-terrain",
 					family: "terrain-color",
 				}),
@@ -29,7 +29,7 @@ describe("planTexturePageAtlas", () => {
 			policy: createPolicy(),
 		});
 
-		expect(plan.rgbaAtlasReadyDrawUnitIds).toEqual([
+		expect(plan.rgbaAtlasReadyCandidateIds).toEqual([
 			"static-a",
 			"terrain-a",
 		]);
@@ -52,12 +52,12 @@ describe("planTexturePageAtlas", () => {
 			rgbaCandidates: [],
 			detailCandidates: [
 				createDetailCandidate({
-					drawUnitId: "static-detail",
+					candidateId: "static-detail",
 					entryKey: "static-detail-entry",
 					family: "static-detail",
 				}),
 				createDetailCandidate({
-					drawUnitId: "terrain-detail",
+					candidateId: "terrain-detail",
 					entryKey: "terrain-detail-entry",
 					family: "terrain-detail",
 				}),
@@ -65,7 +65,7 @@ describe("planTexturePageAtlas", () => {
 			policy: createPolicy(),
 		});
 
-		expect(plan.detailAtlasReadyDrawUnitIds).toEqual([
+		expect(plan.detailAtlasReadyCandidateIds).toEqual([
 			"static-detail",
 			"terrain-detail",
 		]);
@@ -85,17 +85,17 @@ describe("planTexturePageAtlas", () => {
 		const plan = planTexturePageAtlas({
 			rgbaCandidates: [
 				createRgbaCandidate({
-					drawUnitId: "terrain-color",
+					candidateId: "terrain-color",
 					entryKey: "terrain-color-entry",
 					family: "terrain-color",
 				}),
 				createRgbaCandidate({
-					drawUnitId: "terrain-mask",
+					candidateId: "terrain-mask",
 					entryKey: "terrain-mask-entry",
 					family: "terrain-mask",
 				}),
 				createRgbaCandidate({
-					drawUnitId: "static",
+					candidateId: "static",
 					entryKey: "static-entry",
 					family: "static-rgba",
 				}),
@@ -127,16 +127,16 @@ describe("planTexturePageAtlas", () => {
 });
 
 function createRgbaCandidate({
-	drawUnitId,
+	candidateId,
 	entryKey,
 	family,
 }: {
-	drawUnitId: string;
+	candidateId: string;
 	entryKey: string;
 	family: TexturePageFamily;
 }): TexturePageAtlasRgbaCandidate {
 	return {
-		drawUnitId,
+		candidateId,
 		family,
 		detailAtlasEntry: null,
 		texturePageReadiness: {
@@ -168,16 +168,16 @@ function createRgbaCandidate({
 }
 
 function createDetailCandidate({
-	drawUnitId,
+	candidateId,
 	entryKey,
 	family,
 }: {
-	drawUnitId: string;
+	candidateId: string;
 	entryKey: string;
 	family: TexturePageFamily;
 }): TexturePageAtlasDetailCandidate {
 	return {
-		drawUnitId,
+		candidateId,
 		family,
 		detailAtlasEntry: {
 			key: entryKey,

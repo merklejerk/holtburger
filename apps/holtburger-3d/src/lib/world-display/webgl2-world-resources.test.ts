@@ -22,11 +22,11 @@ import {
 	type TerrainTileLayerPlan,
 } from "./terrain-tile-plan";
 import {
-	commitWebgl2TransitionPortalProductMaskResources,
+	clearWebgl2TransitionPortalMaskResources,
 	commitWebgl2TerrainProductResources,
 	createWebgl2WorldResourceStore,
-	evictWebgl2TransitionPortalProductMaskResources,
 	evictWebgl2TerrainProductResources,
+	syncWebgl2TransitionPortalMaskResources,
 	updateWebgl2TerrainProductSamplerPolicy,
 } from "./webgl2-world-resources";
 import {
@@ -54,7 +54,6 @@ describe("webgl2 world resources", () => {
 			store: store.structuredInteriorResources,
 			productKey,
 			artifact: artifact!,
-			renderChunkTransforms: [createChunkTransform()],
 			textureFilteringMode: "linear",
 		});
 
@@ -68,7 +67,6 @@ describe("webgl2 world resources", () => {
 			store: store.structuredInteriorResources,
 			productKey,
 			artifact: artifact!,
-			renderChunkTransforms: [createChunkTransform()],
 			textureFilteringMode: "nearest",
 		});
 
@@ -108,9 +106,6 @@ describe("webgl2 world resources", () => {
 			store,
 			productKey,
 			artifact,
-			renderChunkTransforms: [
-				createChunkTransform({ landblockId: 0x1234ffff }),
-			],
 			textureFilteringMode: "linear",
 		});
 
@@ -132,17 +127,11 @@ describe("webgl2 world resources", () => {
 			store,
 			productKey,
 			artifact,
-			renderChunkTransforms: [
-				createChunkTransform({
-					landblockId: 0x1234ffff,
-					offset: { x: 40, y: 50, z: 60 },
-				}),
-			],
 			textureFilteringMode: "linear",
 		});
 
 		expect(store.terrainTiles[0]).toBe(firstTile);
-		expect(store.terrainTiles[0]?.modelMatrix[12]).toBe(40);
+		expect(store.terrainTiles[0]?.renderChunkKey).toBe("landblock/1234ffff");
 		expect(gl.createdBuffers).toHaveLength(4);
 		expect(gl.createdVertexArrays).toHaveLength(1);
 		expect(gl.createdTextures).toHaveLength(1);
@@ -186,38 +175,25 @@ describe("webgl2 world resources", () => {
 		expect(gl.deletedTextures).toHaveLength(2);
 	});
 
-	it("commits and evicts portal mask draw units by product key", () => {
+	it("syncs and clears dedicated transition portal mask resources", () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
-		const productKey = {
-			landblockId: 0x1234ffff,
-			product: "outdoor-env-cells" as const,
-			buildPolicyRevision: "build:v1",
-			texturePagePolicyRevision: "pages:v1",
-		};
 
-		commitWebgl2TransitionPortalProductMaskResources({
+		syncWebgl2TransitionPortalMaskResources({
 			gl: gl.asContext(),
 			store,
-			productKey,
 			transitionPortalModel: createTransitionPortalCandidateModel(),
-			renderChunkTransforms: [createChunkTransform({ landblockId: 0x1234ffff })],
 		});
 
-		expect(store.portalMaskDrawUnitIdsByProductKey.size).toBe(1);
-		expect(store.drawUnitsById.size).toBe(1);
-		expect([...store.drawUnitsById.values()][0]?.kind).toBe("portal-mask");
+		expect(store.transitionPortalMasks).toHaveLength(1);
+		expect(store.transitionPortalMasksById.size).toBe(1);
 		expect(gl.createdBuffers).toHaveLength(2);
 		expect(gl.createdVertexArrays).toHaveLength(1);
 
-		expect(store.drawUnits).toHaveLength(1);
-		expect(store.drawUnits[0]?.kind).toBe("portal-mask");
-		expect(store.drawUnitsById.size).toBe(1);
+		clearWebgl2TransitionPortalMaskResources({ store });
 
-		evictWebgl2TransitionPortalProductMaskResources({ store, productKey });
-
-		expect(store.portalMaskDrawUnitIdsByProductKey.size).toBe(0);
-		expect(store.drawUnitsById.size).toBe(0);
+		expect(store.transitionPortalMasks).toHaveLength(0);
+		expect(store.transitionPortalMasksById.size).toBe(0);
 		expect(gl.deletedBuffers).toHaveLength(2);
 		expect(gl.deletedVertexArrays).toHaveLength(1);
 	});
@@ -536,20 +512,6 @@ function createPlacement(origin: RenderChunkTransform["offset"]) {
 	return {
 		origin,
 		orientation: { w: 1, x: 0, y: 0, z: 0 },
-	};
-}
-
-function createChunkTransform({
-	landblockId = 0x12340000,
-	offset = { x: 10, y: 20, z: 30 },
-}: {
-	landblockId?: number;
-	offset?: RenderChunkTransform["offset"];
-} = {}): RenderChunkTransform {
-	return {
-		chunkKey: `landblock/${landblockId.toString(16).padStart(8, "0")}`,
-		chunkLandblockId: landblockId,
-		offset,
 	};
 }
 

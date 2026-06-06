@@ -31,9 +31,9 @@ interface DirectRenderSurfaceTextureUploadData {
 	internalFormat: DirectRenderSurfaceUploadInternalFormat | null;
 }
 
-export type DirectRenderSurfaceUploadFormat = "rgb" | "rgba" | "red";
-export type DirectRenderSurfaceUploadDataType = "uint8" | "uint16-rgba4444";
-export type DirectRenderSurfaceUploadInternalFormat = "rgb8" | "r8";
+type DirectRenderSurfaceUploadFormat = "rgb" | "rgba" | "red";
+type DirectRenderSurfaceUploadDataType = "uint8" | "uint16-rgba4444";
+type DirectRenderSurfaceUploadInternalFormat = "rgb8" | "r8";
 
 interface CompressedRenderSurfaceTextureUploadData {
 	kind: "compressed";

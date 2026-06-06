@@ -8,11 +8,10 @@
 	import type { NormalizedViewportPoint } from "./model";
 	import type {
 		RenderSpatialIndexQuery,
-		RenderSpatialItemKind,
-		RenderSpatialPick,
-	} from "./render-spatial-index";
-	import type { DrawUnitRuntimeDiagnostic } from "./draw-unit-render-diagnostics";
-	import type { RenderChunkTransform } from "./render-anchor";
+	RenderSpatialItemKind,
+	RenderSpatialPick,
+} from "./render-spatial-index";
+import type { RenderChunkTransform } from "./render-anchor";
 	import type { SceneCameraFrame } from "./camera";
 	import type {
 		BrowserCameraResidencyChangeHandler,
@@ -220,12 +219,6 @@
 			rendererController?.pickAtViewportPoint(viewportPoint, mask, ownerKeys) ??
 			null
 		);
-	}
-
-	export function getDrawUnitRuntimeDiagnostics(
-		drawUnitIds: readonly string[],
-	): readonly DrawUnitRuntimeDiagnostic[] {
-		return rendererController?.getDrawUnitRuntimeDiagnostics(drawUnitIds) ?? [];
 	}
 
 	function commitStaticProductToSet(

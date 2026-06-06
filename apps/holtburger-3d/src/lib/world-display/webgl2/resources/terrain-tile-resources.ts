@@ -2,8 +2,8 @@ import { formatHex32 } from "../../../landblocks";
 import type { TerrainBlendTextureRef } from "../../terrain-blend-plan";
 import type { TerrainRenderTexturePageRef } from "../../terrain-render-artifact";
 import type { TerrainTileLayerPlan } from "../../terrain-tile-plan";
-import type { RenderMat4 } from "../../render-math";
 import type { RenderBvhItemKey } from "../../prepared-bvh-visibility";
+import type { RenderChunkTransform } from "../../render-anchor";
 import type { RenderIndexedGeometry } from "../../indexed-render-geometry";
 import type { TexturePageFamily } from "../../texture-pages/texture-page-atlas-planner";
 import type { TerrainSceneTile } from "../../terrain-scene";
@@ -36,7 +36,7 @@ export interface Webgl2TerrainTileResource {
 	landblockId: number;
 	regionNumber: number;
 	label: string;
-	placementKey: string;
+	renderChunkKey: RenderChunkTransform["chunkKey"];
 	geometrySignature: string;
 	vertexArray: Webgl2VertexArrayResource;
 	vertexBuffer: Webgl2BufferResource;
@@ -46,7 +46,6 @@ export interface Webgl2TerrainTileResource {
 	indexType: GLenum;
 	vertexCount: number;
 	triangleCount: number;
-	modelMatrix: RenderMat4;
 	readiness: Webgl2TerrainTileReadiness;
 	dataSource: TerrainSceneTile["dataSource"];
 	mesh: PreparedTerrainMesh;
@@ -75,7 +74,7 @@ export interface Webgl2TerrainTileDrawSliceResource {
 	indexType: GLenum;
 	vertexCount: number;
 	triangleCount: number;
-	modelMatrix: RenderMat4;
+	renderChunkKey: RenderChunkTransform["chunkKey"];
 	bvhItemKeys: RenderBvhItemKey[];
 	layerPlan: TerrainTileLayerPlan;
 	detailPlan: Webgl2TerrainTileDetailPlan | null;

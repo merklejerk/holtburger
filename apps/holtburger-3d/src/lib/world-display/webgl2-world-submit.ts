@@ -1,5 +1,7 @@
 import {
+	buildAcPlacementMatrix,
 	createTranslationMat4,
+	multiplyMat4,
 	multiplyMat4Into,
 	type RenderMat4,
 } from "./render-math";
@@ -12,23 +14,8 @@ import {
 import type { WorldRenderFrame } from "./world-render-frame";
 import type { Webgl2ProgramResource } from "./webgl2-gl";
 import type { Webgl2StateCache } from "./webgl2-state-cache";
-import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
+import type { Webgl2TransitionPortalMaskResource } from "./webgl2-world-resources";
 import type { Webgl2TerrainTileResource } from "./webgl2/resources/terrain-tile-resources";
-import {
-	createDirectFamilyUniformCache,
-	DIRECT_FAMILY_DRAW_TEXTURE_UNITS,
-	planWebgl2DirectDrawRoute,
-	prepareDirectIndexedPalettedDraw,
-	prepareDirectRgbaTexturePageDraw,
-	resetDirectFamilyUniformCache,
-	uploadDirectColorUniforms,
-	uploadDirectFamilySamplerUniforms,
-	uploadDirectIndexedPalettedUniforms,
-	uploadDirectRgbaTexturePageUniforms,
-	type DirectFamilyDrawContext,
-	type Webgl2DirectDrawPrograms,
-	type Webgl2DirectProgramKind,
-} from "./webgl2/families/direct-family-adapters";
 import {
 	submitWebgl2TerrainFamilyTiles,
 	type Webgl2TerrainFamilyWorldProgram,
@@ -99,7 +86,6 @@ export type Webgl2IndexedP16WorldProgram = Webgl2ProgramResource<
 >;
 
 export interface Webgl2WorldSubmitMetrics {
-	visibleDrawUnitCount: number;
 	visibleTerrainTileCount: number;
 	visibleTerrainOneDrawReadyTileCount: number;
 	visibleTerrainOneDrawBlockedTileCount: number;
@@ -110,28 +96,15 @@ export interface Webgl2WorldSubmitMetrics {
 	terrainOneDrawSubmittedTriangleCount: number;
 	terrainOneDrawBlockerSamples: readonly string[];
 	terrainOneDrawSubmitFallbackSamples: readonly string[];
-	portalMaskDrawUnitCount: number;
-	exteriorDomainDrawUnitCount: number;
-	interiorDomainDrawUnitCount: number;
+	portalMaskResourceCount: number;
 	submittedTerrainTileCount: number;
 	terrainSubmittedTriangleCount: number;
-	retainedDirectOpaqueDrawUnitCount: number;
-	retainedDirectBlendedDrawUnitCount: number;
 	drawCallCount: number;
 	programSwitchCount: number;
 	vertexArrayBindCount: number;
 	uniformUploadCount: number;
 	stateChangeCount: number;
 	triangleCount: number;
-	visibleDrawUnitCountsByMaterialKind: Readonly<Record<string, number>>;
-	visibleRetainedDirectDrawUnitCountsByCompactionFamily: Readonly<
-		Record<string, number>
-	>;
-	directTexturePageDrawCount: number;
-	directSingleEntryTexturePageDrawCount: number;
-	directPackedTexturePageDrawCount: number;
-	directPackedTexturePageEstimatedBindAvoidedCount: number;
-	directTexturePageFallbackSamples: readonly string[];
 	staticBundleLayerSubmittedCount: number;
 	visibleStaticBundleLayerCount: number;
 	staticBundleGeometryCandidateCount: number;
@@ -148,7 +121,6 @@ export interface Webgl2WorldSubmitMetrics {
 }
 
 const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
-	visibleDrawUnitCount: 0,
 	visibleTerrainTileCount: 0,
 	visibleTerrainOneDrawReadyTileCount: 0,
 	visibleTerrainOneDrawBlockedTileCount: 0,
@@ -159,26 +131,15 @@ const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	terrainOneDrawSubmittedTriangleCount: 0,
 	terrainOneDrawBlockerSamples: [],
 	terrainOneDrawSubmitFallbackSamples: [],
-	portalMaskDrawUnitCount: 0,
-	exteriorDomainDrawUnitCount: 0,
-	interiorDomainDrawUnitCount: 0,
+	portalMaskResourceCount: 0,
 	submittedTerrainTileCount: 0,
 	terrainSubmittedTriangleCount: 0,
-	retainedDirectOpaqueDrawUnitCount: 0,
-	retainedDirectBlendedDrawUnitCount: 0,
 	drawCallCount: 0,
 	programSwitchCount: 0,
 	vertexArrayBindCount: 0,
 	uniformUploadCount: 0,
 	stateChangeCount: 0,
 	triangleCount: 0,
-	visibleDrawUnitCountsByMaterialKind: {},
-	visibleRetainedDirectDrawUnitCountsByCompactionFamily: {},
-	directTexturePageDrawCount: 0,
-	directSingleEntryTexturePageDrawCount: 0,
-	directPackedTexturePageDrawCount: 0,
-	directPackedTexturePageEstimatedBindAvoidedCount: 0,
-	directTexturePageFallbackSamples: [],
 	staticBundleLayerSubmittedCount: 0,
 	visibleStaticBundleLayerCount: 0,
 	staticBundleGeometryCandidateCount: 0,
@@ -193,21 +154,6 @@ const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	structuredInteriorResourceSkippedGeometryCount: 0,
 	structuredInteriorResourceFallbackSamples: [],
 };
-
-interface Webgl2RetainedDirectSubmitPass {
-	kind: "retained-direct";
-	alphaPolicy: "opaque-or-cutout" | "transparent-blend";
-	drawUnits: readonly Webgl2WorldDrawUnit[];
-}
-
-type Webgl2WorldSubmitPass = Webgl2RetainedDirectSubmitPass;
-
-export interface Webgl2WorldSubmitPassSchedule {
-	passes: readonly Webgl2WorldSubmitPass[];
-	retainedDrawUnits: readonly Webgl2WorldDrawUnit[];
-	retainedDirectOpaqueDrawUnitCount: number;
-	retainedDirectBlendedDrawUnitCount: number;
-}
 
 export interface Webgl2TerrainTileSubmitReadinessPlan {
 	oneDrawTiles: readonly Webgl2TerrainTileResource[];
@@ -252,11 +198,7 @@ export function planWebgl2TerrainTileSubmitReadiness(
 }
 
 export function createEmptyWebgl2WorldSubmitMetrics(): Webgl2WorldSubmitMetrics {
-	return {
-		...EMPTY_SUBMIT_METRICS,
-		visibleDrawUnitCountsByMaterialKind: {},
-		directTexturePageFallbackSamples: [],
-	};
+	return { ...EMPTY_SUBMIT_METRICS };
 }
 
 export function submitWebgl2WorldFrame({
@@ -270,7 +212,7 @@ export function submitWebgl2WorldFrame({
 	staticBundleLayerResources = null,
 	structuredInteriorResources = null,
 	renderChunkTransforms = [],
-	drawUnitsById,
+	transitionPortalMasksById = new Map(),
 	terrainTilesById = new Map(),
 	frame,
 }: {
@@ -284,11 +226,13 @@ export function submitWebgl2WorldFrame({
 	staticBundleLayerResources?: Webgl2StaticBundleLayerResourceStore | null;
 	structuredInteriorResources?: Webgl2StructuredInteriorResourceStore | null;
 	renderChunkTransforms?: readonly RenderChunkTransform[];
-	drawUnitsById: ReadonlyMap<string, Webgl2WorldDrawUnit>;
+	transitionPortalMasksById?: ReadonlyMap<
+		string,
+		Webgl2TransitionPortalMaskResource
+	>;
 	terrainTilesById?: ReadonlyMap<string, Webgl2TerrainTileResource>;
 	frame: WorldRenderFrame;
 }): Webgl2WorldSubmitMetrics {
-	const drawUnits = planWebgl2WorldSubmitOrder(frame, drawUnitsById);
 	const terrainTiles = planWebgl2TerrainTileSubmitOrder(
 		frame,
 		terrainTilesById,
@@ -297,12 +241,11 @@ export function submitWebgl2WorldFrame({
 		frame,
 		staticBundleLayerResources,
 	);
-	const portalMaskDrawUnits = planWebgl2PortalMaskSubmitOrder(
+	const portalMasks = planWebgl2TransitionPortalMaskSubmitOrder(
 		frame,
-		drawUnitsById,
+		transitionPortalMasksById,
 	);
-	const sceneDomainDrawUnits = partitionWebgl2SceneDomainDrawUnits(drawUnits);
-	return submitWebgl2WorldDrawUnits({
+	return submitWebgl2WorldResources({
 		gl,
 		stateCache,
 		program,
@@ -315,15 +258,12 @@ export function submitWebgl2WorldFrame({
 		renderChunkTransforms,
 		viewProjectionMatrix: frame.viewProjectionMatrix,
 		cameraPosition: frame.cameraFrame.position,
-		drawUnits,
 		terrainTiles,
-		portalMaskDrawUnitCount: portalMaskDrawUnits.length,
-		exteriorDomainDrawUnitCount: sceneDomainDrawUnits.exterior.length,
-		interiorDomainDrawUnitCount: sceneDomainDrawUnits.interior.length,
+		portalMaskResourceCount: portalMasks.length,
 	});
 }
 
-export function submitWebgl2WorldDrawUnits({
+export function submitWebgl2WorldResources({
 	gl,
 	stateCache,
 	program,
@@ -336,11 +276,8 @@ export function submitWebgl2WorldDrawUnits({
 	renderChunkTransforms = [],
 	viewProjectionMatrix,
 	cameraPosition,
-	drawUnits,
 	terrainTiles = [],
-	portalMaskDrawUnitCount = 0,
-	exteriorDomainDrawUnitCount = 0,
-	interiorDomainDrawUnitCount = 0,
+	portalMaskResourceCount = 0,
 	terrainBackfaceCulling = false,
 }: {
 	gl: WebGL2RenderingContext;
@@ -355,18 +292,14 @@ export function submitWebgl2WorldDrawUnits({
 	renderChunkTransforms?: readonly RenderChunkTransform[];
 	viewProjectionMatrix: RenderMat4;
 	cameraPosition: WorldRenderFrame["cameraFrame"]["position"];
-	drawUnits: readonly Webgl2WorldDrawUnit[];
 	terrainTiles?: readonly Webgl2TerrainTileResource[];
-	portalMaskDrawUnitCount?: number;
-	exteriorDomainDrawUnitCount?: number;
-	interiorDomainDrawUnitCount?: number;
+	portalMaskResourceCount?: number;
 	terrainBackfaceCulling?: boolean;
 }): Webgl2WorldSubmitMetrics {
 	const terrainReadinessPlan =
 		planWebgl2TerrainTileSubmitReadiness(terrainTiles);
 	const metrics: Webgl2WorldSubmitMetrics = {
 		...EMPTY_SUBMIT_METRICS,
-		visibleDrawUnitCount: drawUnits.length,
 		visibleTerrainTileCount: terrainTiles.length,
 		visibleTerrainOneDrawReadyTileCount:
 			terrainReadinessPlan.oneDrawTiles.length,
@@ -377,14 +310,9 @@ export function submitWebgl2WorldDrawUnits({
 		terrainOneDrawBlockerSamples: terrainReadinessPlan.blockedTiles
 			.flatMap((entry) => entry.blockers)
 			.slice(0, 8),
-		portalMaskDrawUnitCount,
-		exteriorDomainDrawUnitCount,
-		interiorDomainDrawUnitCount,
-		visibleDrawUnitCountsByMaterialKind:
-			countDrawUnitsByMaterialKind(drawUnits),
-		visibleRetainedDirectDrawUnitCountsByCompactionFamily: {},
+		portalMaskResourceCount,
 	};
-	if (drawUnits.length === 0 && terrainTiles.length === 0) {
+	if (terrainTiles.length === 0) {
 		if (
 			staticBundleLayers.length === 0 &&
 			!structuredInteriorResources?.cellsByKey.size
@@ -392,16 +320,6 @@ export function submitWebgl2WorldDrawUnits({
 			return metrics;
 		}
 	}
-	const schedule = planWebgl2WorldSubmitPassSchedule({
-		drawUnits,
-		viewProjectionMatrix,
-	});
-	metrics.retainedDirectOpaqueDrawUnitCount =
-		schedule.retainedDirectOpaqueDrawUnitCount;
-	metrics.retainedDirectBlendedDrawUnitCount =
-		schedule.retainedDirectBlendedDrawUnitCount;
-	metrics.visibleRetainedDirectDrawUnitCountsByCompactionFamily =
-		countDrawUnitsByCompactionFamily(schedule.retainedDrawUnits);
 	metrics.stateChangeCount += stateCache.setDepthState({
 		enabled: true,
 		write: true,
@@ -430,17 +348,6 @@ export function submitWebgl2WorldDrawUnits({
 		zfail: gl.KEEP,
 		zpass: gl.KEEP,
 	});
-	submitWebgl2WorldSubmitPassSchedule({
-		gl,
-		stateCache,
-		program,
-		texturedProgram,
-		indexedP8Program,
-		indexedP16Program,
-		viewProjectionMatrix,
-		schedule,
-		metrics,
-	});
 	submitWebgl2StaticBundleLayers({
 		gl,
 		stateCache,
@@ -461,6 +368,7 @@ export function submitWebgl2WorldDrawUnits({
 		indexedP16Program,
 		viewProjectionMatrix,
 		resources: structuredInteriorResources,
+		renderChunkTransforms,
 		metrics,
 	});
 	if (
@@ -479,6 +387,7 @@ export function submitWebgl2WorldDrawUnits({
 				...terrainReadinessPlan.oneDrawSlices,
 			],
 			terrainBackfaceCulling,
+			renderChunkTransforms,
 		});
 		metrics.drawCallCount += terrainFamilyMetrics.shaderDrawCallCount;
 		metrics.triangleCount += terrainFamilyMetrics.submittedTriangleCount;
@@ -595,6 +504,7 @@ function submitWebgl2StructuredInteriorResources({
 	indexedP16Program,
 	viewProjectionMatrix,
 	resources,
+	renderChunkTransforms,
 	metrics,
 }: {
 	gl: WebGL2RenderingContext;
@@ -605,6 +515,7 @@ function submitWebgl2StructuredInteriorResources({
 	indexedP16Program: Webgl2IndexedP16WorldProgram;
 	viewProjectionMatrix: RenderMat4;
 	resources: Webgl2StructuredInteriorResourceStore | null | undefined;
+	renderChunkTransforms: readonly RenderChunkTransform[];
 	metrics: Webgl2WorldSubmitMetrics;
 }): void {
 	if (!resources) {
@@ -616,6 +527,12 @@ function submitWebgl2StructuredInteriorResources({
 	if (cells.length === 0) {
 		return;
 	}
+	const chunkOffsetByKey = new Map(
+		renderChunkTransforms.map((transform) => [
+			transform.chunkKey,
+			transform.offset,
+		]),
+	);
 	metrics.stateChangeCount += stateCache.setDepthState({
 		enabled: true,
 		write: true,
@@ -636,6 +553,13 @@ function submitWebgl2StructuredInteriorResources({
 			equationAlpha: gl.FUNC_ADD,
 		});
 		for (const cell of cells) {
+			const modelMatrix = resolveStructuredInteriorCellModelMatrix({
+				cell,
+				chunkOffsetByKey,
+			});
+			if (!modelMatrix) {
+				continue;
+			}
 			if (cell.materialSlices.length === 0) {
 				if (!transparent && cell.fallbackShell) {
 					submitWebgl2StructuredInteriorShell({
@@ -643,8 +567,8 @@ function submitWebgl2StructuredInteriorResources({
 						stateCache,
 						program,
 						viewProjectionMatrix,
-						cell,
 						shell: cell.fallbackShell,
+						modelMatrix,
 						metrics,
 					});
 				}
@@ -668,6 +592,7 @@ function submitWebgl2StructuredInteriorResources({
 					cell,
 					slice,
 					material,
+					modelMatrix,
 					metrics,
 				});
 			}
@@ -675,21 +600,42 @@ function submitWebgl2StructuredInteriorResources({
 	}
 }
 
+function resolveStructuredInteriorCellModelMatrix({
+	cell,
+	chunkOffsetByKey,
+}: {
+	cell: Webgl2StructuredInteriorCellResource;
+	chunkOffsetByKey: ReadonlyMap<string, RenderChunkTransform["offset"]>;
+}): RenderMat4 | null {
+	const chunkOffset = chunkOffsetByKey.get(cell.renderChunkKey);
+	if (!chunkOffset) {
+		return null;
+	}
+	return multiplyMat4(
+		createTranslationMat4(chunkOffset),
+		buildAcPlacementMatrix(
+			cell.chunkLocalPlacement,
+			{ x: 0, y: 0, z: 0 },
+			{ x: 1, y: 1, z: 1 },
+		),
+	);
+}
+
 function submitWebgl2StructuredInteriorShell({
 	gl,
 	stateCache,
 	program,
 	viewProjectionMatrix,
-	cell,
 	shell,
+	modelMatrix,
 	metrics,
 }: {
 	gl: WebGL2RenderingContext;
 	stateCache: Webgl2StateCache;
 	program: Webgl2FlatWorldProgram;
 	viewProjectionMatrix: RenderMat4;
-	cell: Webgl2StructuredInteriorCellResource;
 	shell: Webgl2StructuredInteriorShellResource;
+	modelMatrix: RenderMat4;
 	metrics: Webgl2WorldSubmitMetrics;
 }): void {
 	if (stateCache.useProgram(program.program)) {
@@ -706,7 +652,7 @@ function submitWebgl2StructuredInteriorShell({
 		multiplyMat4Into(
 			new Float32Array(16),
 			viewProjectionMatrix,
-			cell.modelMatrix,
+			modelMatrix,
 		),
 	);
 	gl.uniform4fv(program.uniforms.uColor, shell.color);
@@ -729,6 +675,7 @@ function submitWebgl2StructuredInteriorMaterialSlice({
 	cell,
 	slice,
 	material,
+	modelMatrix,
 	metrics,
 }: {
 	gl: WebGL2RenderingContext;
@@ -740,6 +687,7 @@ function submitWebgl2StructuredInteriorMaterialSlice({
 	cell: Webgl2StructuredInteriorCellResource;
 	slice: Webgl2StructuredInteriorMaterialSliceResource;
 	material: Webgl2StaticBundleMaterialResource;
+	modelMatrix: RenderMat4;
 	metrics: Webgl2WorldSubmitMetrics;
 }): void {
 	if (material.familyKey === "indexed-paletted") {
@@ -752,6 +700,7 @@ function submitWebgl2StructuredInteriorMaterialSlice({
 			cell,
 			slice,
 			material,
+			modelMatrix,
 			metrics,
 		});
 		return;
@@ -804,7 +753,7 @@ function submitWebgl2StructuredInteriorMaterialSlice({
 		multiplyMat4Into(
 			new Float32Array(16),
 			viewProjectionMatrix,
-			cell.modelMatrix,
+			modelMatrix,
 		),
 	);
 	gl.uniform4fv(texturedProgram.uniforms.uColor, [1, 1, 1, 1]);
@@ -839,6 +788,7 @@ function submitWebgl2IndexedStructuredInteriorMaterialSlice({
 	cell,
 	slice,
 	material,
+	modelMatrix,
 	metrics,
 }: {
 	gl: WebGL2RenderingContext;
@@ -849,6 +799,7 @@ function submitWebgl2IndexedStructuredInteriorMaterialSlice({
 	cell: Webgl2StructuredInteriorCellResource;
 	slice: Webgl2StructuredInteriorMaterialSliceResource;
 	material: Webgl2StaticBundleMaterialResource;
+	modelMatrix: RenderMat4;
 	metrics: Webgl2WorldSubmitMetrics;
 }): void {
 	const descriptor = material.indexedMaterial;
@@ -907,7 +858,7 @@ function submitWebgl2IndexedStructuredInteriorMaterialSlice({
 		multiplyMat4Into(
 			new Float32Array(16),
 			viewProjectionMatrix,
-			cell.modelMatrix,
+			modelMatrix,
 		),
 	);
 	gl.uniform4fv(program.uniforms.uColor, [1, 1, 1, 1]);
@@ -1263,84 +1214,6 @@ function appendStaticBundleSubmitFallbackSamples(
 	return [...current, ...next].slice(0, 8);
 }
 
-export function planWebgl2WorldSubmitPassSchedule({
-	drawUnits,
-	viewProjectionMatrix,
-}: {
-	drawUnits: readonly Webgl2WorldDrawUnit[];
-	viewProjectionMatrix: RenderMat4;
-}): Webgl2WorldSubmitPassSchedule {
-	const retainedDirectPasses = partitionRetainedDirectDrawUnits({
-		drawUnits,
-		viewProjectionMatrix,
-	});
-	const passes: Webgl2WorldSubmitPass[] = [];
-	if (retainedDirectPasses.opaque.length > 0) {
-		passes.push({
-			kind: "retained-direct",
-			alphaPolicy: "opaque-or-cutout",
-			drawUnits: retainedDirectPasses.opaque,
-		});
-	}
-	if (retainedDirectPasses.blended.length > 0) {
-		passes.push({
-			kind: "retained-direct",
-			alphaPolicy: "transparent-blend",
-			drawUnits: retainedDirectPasses.blended,
-		});
-	}
-	return {
-		passes,
-		retainedDrawUnits: drawUnits,
-		retainedDirectOpaqueDrawUnitCount: retainedDirectPasses.opaque.length,
-		retainedDirectBlendedDrawUnitCount: retainedDirectPasses.blended.length,
-	};
-}
-
-function submitWebgl2WorldSubmitPassSchedule({
-	gl,
-	stateCache,
-	program,
-	texturedProgram,
-	indexedP8Program,
-	indexedP16Program,
-	viewProjectionMatrix,
-	schedule,
-	metrics,
-}: {
-	gl: WebGL2RenderingContext;
-	stateCache: Webgl2StateCache;
-	program: Webgl2FlatWorldProgram;
-	texturedProgram: Webgl2TexturedWorldProgram;
-	indexedP8Program: Webgl2IndexedP8WorldProgram;
-	indexedP16Program: Webgl2IndexedP16WorldProgram;
-	viewProjectionMatrix: RenderMat4;
-	schedule: Webgl2WorldSubmitPassSchedule;
-	metrics: Webgl2WorldSubmitMetrics;
-}): void {
-	let directSubmitContext: Webgl2DirectSubmitContext | null = null;
-	for (const pass of schedule.passes) {
-		switch (pass.kind) {
-			case "retained-direct":
-				directSubmitContext ??= createWebgl2DirectSubmitContext({
-					gl,
-					stateCache,
-					viewProjectionMatrix,
-					program,
-					texturedProgram,
-					indexedP8Program,
-					indexedP16Program,
-				});
-				submitWebgl2DirectDrawUnitPass({
-					context: directSubmitContext,
-					drawUnits: pass.drawUnits,
-					metrics,
-				});
-				break;
-		}
-	}
-}
-
 function resetWorldSubmitExitRenderState({
 	gl,
 	stateCache,
@@ -1378,198 +1251,6 @@ function resetWorldSubmitExitRenderState({
 		zpass: gl.KEEP,
 	});
 	return changeCount;
-}
-
-interface Webgl2DirectSubmitContext {
-	directContext: DirectFamilyDrawContext;
-	directPrograms: Webgl2DirectDrawPrograms;
-	uniformCache: ReturnType<typeof createDirectFamilyUniformCache>;
-	previousProgramKind: Webgl2DirectProgramKind | null;
-}
-
-function createWebgl2DirectSubmitContext({
-	gl,
-	stateCache,
-	viewProjectionMatrix,
-	program,
-	texturedProgram,
-	indexedP8Program,
-	indexedP16Program,
-}: {
-	gl: WebGL2RenderingContext;
-	stateCache: Webgl2StateCache;
-	viewProjectionMatrix: RenderMat4;
-	program: Webgl2FlatWorldProgram;
-	texturedProgram: Webgl2TexturedWorldProgram;
-	indexedP8Program: Webgl2IndexedP8WorldProgram;
-	indexedP16Program: Webgl2IndexedP16WorldProgram;
-}): Webgl2DirectSubmitContext {
-	const uniformCache = createDirectFamilyUniformCache();
-	const directContext: DirectFamilyDrawContext = {
-		gl,
-		stateCache,
-		viewProjectionMatrix,
-		textureUnits: DIRECT_FAMILY_DRAW_TEXTURE_UNITS,
-	};
-	const directPrograms: Webgl2DirectDrawPrograms = {
-		flat: program,
-		rgbaTexturePage: texturedProgram,
-		indexedP8: indexedP8Program,
-		indexedP16: indexedP16Program,
-	};
-	return {
-		directContext,
-		directPrograms,
-		uniformCache,
-		previousProgramKind: null,
-	};
-}
-
-function submitWebgl2DirectDrawUnitPass({
-	context,
-	drawUnits,
-	metrics,
-}: {
-	context: Webgl2DirectSubmitContext;
-	drawUnits: readonly Webgl2WorldDrawUnit[];
-	metrics: Webgl2WorldSubmitMetrics;
-}): void {
-	const modelViewProjection = new Float32Array(16);
-	for (const drawUnit of drawUnits) {
-		const route = planWebgl2DirectDrawRoute({
-			drawUnit,
-			programs: context.directPrograms,
-		});
-		if (
-			context.directContext.stateCache.useProgram(route.activeProgram.program)
-		) {
-			metrics.programSwitchCount += 1;
-			metrics.stateChangeCount += 1;
-			resetDirectFamilyUniformCache(context.uniformCache);
-			context.previousProgramKind = route.programKind;
-			uploadDirectFamilySamplerUniforms({
-				context: context.directContext,
-				route,
-				metrics,
-			});
-		} else if (context.previousProgramKind !== route.programKind) {
-			resetDirectFamilyUniformCache(context.uniformCache);
-			context.previousProgramKind = route.programKind;
-		}
-		metrics.stateChangeCount += applyDrawUnitRenderState({
-			gl: context.directContext.gl,
-			stateCache: context.directContext.stateCache,
-			drawUnit,
-		});
-		metrics.stateChangeCount += context.directContext.stateCache.setCullState({
-			enabled: false,
-			mode: context.directContext.gl.BACK,
-		});
-		if (route.programKind === "texture") {
-			prepareDirectRgbaTexturePageDraw({
-				context: context.directContext,
-				route,
-				metrics,
-			});
-		}
-		if (
-			route.programKind === "indexed-p8" ||
-			route.programKind === "indexed-p16"
-		) {
-			prepareDirectIndexedPalettedDraw({
-				context: context.directContext,
-				route,
-				metrics,
-			});
-		}
-		if (
-			context.directContext.stateCache.bindVertexArray(
-				drawUnit.vertexArray.vertexArray,
-			)
-		) {
-			metrics.vertexArrayBindCount += 1;
-			metrics.stateChangeCount += 1;
-		}
-
-		multiplyMat4Into(
-			modelViewProjection,
-			context.directContext.viewProjectionMatrix,
-			drawUnit.modelMatrix,
-		);
-		if (
-			!context.uniformCache.modelViewProjectionValid ||
-			!arraysEqual(
-				context.uniformCache.modelViewProjection,
-				modelViewProjection,
-			)
-		) {
-			context.directContext.gl.uniformMatrix4fv(
-				route.activeProgram.uniforms.uModelViewProjection,
-				false,
-				modelViewProjection,
-			);
-			context.uniformCache.modelViewProjection.set(modelViewProjection);
-			context.uniformCache.modelViewProjectionValid = true;
-			metrics.uniformUploadCount += 1;
-		}
-		if (route.programKind === "texture") {
-			uploadDirectRgbaTexturePageUniforms({
-				context: context.directContext,
-				route,
-				uniformCache: context.uniformCache,
-				metrics,
-			});
-		} else if (
-			route.programKind === "indexed-p8" ||
-			route.programKind === "indexed-p16"
-		) {
-			uploadDirectIndexedPalettedUniforms({
-				context: context.directContext,
-				route,
-				uniformCache: context.uniformCache,
-				metrics,
-			});
-		} else {
-			uploadDirectColorUniforms({
-				context: context.directContext,
-				route,
-				uniformCache: context.uniformCache,
-				metrics,
-			});
-		}
-		context.directContext.gl.drawElements(
-			context.directContext.gl.TRIANGLES,
-			drawUnit.vertexCount,
-			drawUnit.indexType,
-			0,
-		);
-		metrics.drawCallCount += 1;
-		metrics.triangleCount += drawUnit.triangleCount;
-	}
-}
-
-export function planWebgl2WorldSubmitOrder(
-	frame: WorldRenderFrame,
-	drawUnitsById: ReadonlyMap<string, Webgl2WorldDrawUnit>,
-): Webgl2WorldDrawUnit[] {
-	const visibleDrawUnits: Webgl2WorldDrawUnit[] = [];
-	for (const pass of frame.passes) {
-		for (const draw of pass.draws) {
-			if (draw.kind !== "draw-unit") {
-				continue;
-			}
-			const drawUnit = drawUnitsById.get(draw.drawUnitId);
-			if (!drawUnit) {
-				throw new Error(
-					`World render frame referenced missing WebGL2 draw unit ${draw.drawUnitId}.`,
-				);
-			}
-			if (drawUnit.kind !== "portal-mask") {
-				visibleDrawUnits.push(drawUnit);
-			}
-		}
-	}
-	return visibleDrawUnits.sort(compareWebgl2WorldDrawUnits);
 }
 
 export function planWebgl2TerrainTileSubmitOrder(
@@ -1625,135 +1306,34 @@ export function planWebgl2StaticBundleLayerSubmitOrder(
 	);
 }
 
-export function planWebgl2PortalMaskSubmitOrder(
+export function planWebgl2TransitionPortalMaskSubmitOrder(
 	frame: WorldRenderFrame,
-	drawUnitsById: ReadonlyMap<string, Webgl2WorldDrawUnit>,
-): Webgl2WorldDrawUnit[] {
-	const maskDrawUnits: Webgl2WorldDrawUnit[] = [];
+	transitionPortalMasksById:
+		| ReadonlyMap<string, Webgl2TransitionPortalMaskResource>
+		| null
+		| undefined,
+): Webgl2TransitionPortalMaskResource[] {
+	const maskResources: Webgl2TransitionPortalMaskResource[] = [];
+	if (!transitionPortalMasksById) {
+		return maskResources;
+	}
 	for (const pass of frame.passes) {
 		for (const draw of pass.draws) {
-			if (draw.kind !== "draw-unit") {
+			if (draw.kind !== "transition-portal-mask") {
 				continue;
 			}
-			const drawUnit = drawUnitsById.get(draw.drawUnitId);
-			if (!drawUnit) {
+			const mask = transitionPortalMasksById.get(draw.transitionPortalMaskId);
+			if (!mask) {
 				throw new Error(
-					`World render frame referenced missing WebGL2 draw unit ${draw.drawUnitId}.`,
+					`World render frame referenced missing WebGL2 transition portal mask ${draw.transitionPortalMaskId}.`,
 				);
 			}
-			if (drawUnit.kind === "portal-mask") {
-				maskDrawUnits.push(drawUnit);
-			}
+			maskResources.push(mask);
 		}
 	}
-	return maskDrawUnits.sort((left, right) =>
+	return maskResources.sort((left, right) =>
 		compareStableAsciiStrings(left.id, right.id),
 	);
-}
-
-export interface Webgl2SceneDomainDrawUnits {
-	exterior: Webgl2WorldDrawUnit[];
-	interior: Webgl2WorldDrawUnit[];
-}
-
-export function partitionWebgl2SceneDomainDrawUnits(
-	drawUnits: readonly Webgl2WorldDrawUnit[],
-): Webgl2SceneDomainDrawUnits {
-	const exterior: Webgl2WorldDrawUnit[] = [];
-	const interior: Webgl2WorldDrawUnit[] = [];
-	for (const drawUnit of drawUnits) {
-		switch (drawUnit.sceneDomain) {
-			case "exterior":
-				exterior.push(drawUnit);
-				break;
-			case "interior":
-				interior.push(drawUnit);
-				break;
-			case null:
-				break;
-			default:
-				assertNeverWebgl2SceneDomain(drawUnit.sceneDomain);
-		}
-	}
-	return { exterior, interior };
-}
-
-function assertNeverWebgl2SceneDomain(domain: never): never {
-	throw new Error(`Unsupported WebGL2 scene domain ${domain}.`);
-}
-
-function compareWebgl2WorldDrawUnits(
-	left: Webgl2WorldDrawUnit,
-	right: Webgl2WorldDrawUnit,
-): number {
-	return compareStableAsciiStrings(left.submitOrderKey, right.submitOrderKey);
-}
-
-interface RetainedDirectDrawUnitPasses {
-	opaque: readonly Webgl2WorldDrawUnit[];
-	blended: readonly Webgl2WorldDrawUnit[];
-}
-
-function partitionRetainedDirectDrawUnits({
-	drawUnits,
-	viewProjectionMatrix,
-}: {
-	drawUnits: readonly Webgl2WorldDrawUnit[];
-	viewProjectionMatrix: RenderMat4;
-}): RetainedDirectDrawUnitPasses {
-	const opaque: Webgl2WorldDrawUnit[] = [];
-	const blended: Webgl2WorldDrawUnit[] = [];
-	for (const drawUnit of drawUnits) {
-		if (isBlendedDrawUnit(drawUnit)) {
-			blended.push(drawUnit);
-		} else {
-			opaque.push(drawUnit);
-		}
-	}
-	blended.sort((left, right) =>
-		compareRetainedBlendedDrawUnits(left, right, viewProjectionMatrix),
-	);
-	return { opaque, blended };
-}
-
-function isBlendedDrawUnit(drawUnit: Webgl2WorldDrawUnit): boolean {
-	return drawUnit.materialBehavior?.blend.enabled === true;
-}
-
-function compareRetainedBlendedDrawUnits(
-	left: Webgl2WorldDrawUnit,
-	right: Webgl2WorldDrawUnit,
-	viewProjectionMatrix: RenderMat4,
-): number {
-	const depthDelta =
-		calculateProjectedOriginDepth(right, viewProjectionMatrix) -
-		calculateProjectedOriginDepth(left, viewProjectionMatrix);
-	if (Number.isFinite(depthDelta) && depthDelta !== 0) {
-		return depthDelta;
-	}
-	return compareStableAsciiStrings(left.submitOrderKey, right.submitOrderKey);
-}
-
-function calculateProjectedOriginDepth(
-	drawUnit: Webgl2WorldDrawUnit,
-	viewProjectionMatrix: RenderMat4,
-): number {
-	const modelMatrix = drawUnit.modelMatrix;
-	const worldX = modelMatrix[12] ?? 0;
-	const worldY = modelMatrix[13] ?? 0;
-	const worldZ = modelMatrix[14] ?? 0;
-	const clipZ =
-		(viewProjectionMatrix[2] ?? 0) * worldX +
-		(viewProjectionMatrix[6] ?? 0) * worldY +
-		(viewProjectionMatrix[10] ?? 0) * worldZ +
-		(viewProjectionMatrix[14] ?? 0);
-	const clipW =
-		(viewProjectionMatrix[3] ?? 0) * worldX +
-		(viewProjectionMatrix[7] ?? 0) * worldY +
-		(viewProjectionMatrix[11] ?? 0) * worldZ +
-		(viewProjectionMatrix[15] ?? 1);
-	const projectedDepth = clipW === 0 ? clipZ : clipZ / clipW;
-	return Number.isFinite(projectedDepth) ? projectedDepth : 0;
 }
 
 function compareStableAsciiStrings(left: string, right: string): number {
@@ -1764,99 +1344,4 @@ function compareStableAsciiStrings(left: string, right: string): number {
 		return 1;
 	}
 	return 0;
-}
-
-function applyDrawUnitRenderState({
-	gl,
-	stateCache,
-	drawUnit,
-}: {
-	gl: WebGL2RenderingContext;
-	stateCache: Webgl2StateCache;
-	drawUnit: Webgl2WorldDrawUnit;
-}): number {
-	const behavior = drawUnit.materialBehavior;
-	const blend = behavior?.blend;
-	let changeCount = stateCache.setDepthState({
-		enabled: true,
-		write: blend?.depthWrite ?? true,
-		func: gl.LEQUAL,
-	});
-	if (blend?.enabled) {
-		changeCount += stateCache.setBlendState({
-			enabled: true,
-			srcRgb: toWebgl2BlendFactor(gl, blend.srcFactor),
-			dstRgb: toWebgl2BlendFactor(gl, blend.dstFactor),
-			srcAlpha: toWebgl2BlendFactor(gl, blend.srcFactor),
-			dstAlpha: toWebgl2BlendFactor(gl, blend.dstFactor),
-			equationRgb: gl.FUNC_ADD,
-			equationAlpha: gl.FUNC_ADD,
-		});
-		return changeCount;
-	}
-	changeCount += stateCache.setBlendState({
-		enabled: false,
-		srcRgb: gl.ONE,
-		dstRgb: gl.ZERO,
-		srcAlpha: gl.ONE,
-		dstAlpha: gl.ZERO,
-		equationRgb: gl.FUNC_ADD,
-		equationAlpha: gl.FUNC_ADD,
-	});
-	return changeCount;
-}
-
-function toWebgl2BlendFactor(
-	gl: WebGL2RenderingContext,
-	factor: string | null | undefined,
-): GLenum {
-	switch (factor) {
-		case "one":
-			return gl.ONE;
-		case "src-alpha":
-			return gl.SRC_ALPHA;
-		case "one-minus-src-alpha":
-			return gl.ONE_MINUS_SRC_ALPHA;
-		case null:
-		case undefined:
-			return gl.ONE;
-		default:
-			throw new Error(`Unsupported WebGL2 blend factor ${factor}.`);
-	}
-}
-
-function countDrawUnitsByMaterialKind(
-	drawUnits: readonly Webgl2WorldDrawUnit[],
-): Record<string, number> {
-	const counts: Record<string, number> = {};
-	for (const drawUnit of drawUnits) {
-		counts[drawUnit.materialKind] = (counts[drawUnit.materialKind] ?? 0) + 1;
-	}
-	return counts;
-}
-
-function countDrawUnitsByCompactionFamily(
-	drawUnits: readonly Webgl2WorldDrawUnit[],
-): Record<string, number> {
-	const counts: Record<string, number> = {};
-	for (const drawUnit of drawUnits) {
-		const family = drawUnit.compactionEligibility.material.family;
-		counts[family] = (counts[family] ?? 0) + 1;
-	}
-	return counts;
-}
-
-function arraysEqual(
-	left: ArrayLike<number>,
-	right: ArrayLike<number>,
-): boolean {
-	if (left.length !== right.length) {
-		return false;
-	}
-	for (let index = 0; index < left.length; index += 1) {
-		if (left[index] !== right[index]) {
-			return false;
-		}
-	}
-	return true;
 }

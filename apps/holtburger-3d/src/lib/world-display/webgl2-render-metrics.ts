@@ -91,9 +91,7 @@ export function createWebgl2RenderMetrics(
 			pixelRatio: input.pixelRatio,
 			cameraViewResidency: input.initializationError
 				? "webgl2 initialization failed"
-				: input.worldStore && input.worldStore.drawUnits.length > 0
-					? input.cameraViewResidency
-					: "webgl2 test frame",
+				: input.cameraViewResidency,
 			residencyCellCount: input.residencyCellCount,
 			residencyLandblockCount: input.residencyLandblockCount,
 			residencyAabbCandidateCount: input.residencyAabbCandidateCount,
@@ -150,7 +148,6 @@ export function createWebgl2RenderMetrics(
 						...input.worldStore.staticBundleLayerResources.productsByKey.keys(),
 						...input.worldStore.structuredInteriorResources.productsByKey.keys(),
 						...input.worldStore.terrainTileIdsByProductKey.keys(),
-						...input.worldStore.portalMaskDrawUnitIdsByProductKey.keys(),
 					]).size
 				: 0,
 			staticBundleProductResourceCount:
@@ -172,12 +169,9 @@ export function createWebgl2RenderMetrics(
 			productTerrainTexturePageCount:
 				input.worldStore?.productTerrainTexturePagesByKey.size ?? 0,
 			portalMaskProductResourceCount:
-				input.worldStore?.portalMaskDrawUnitIdsByProductKey.size ?? 0,
-			portalMaskProductDrawUnitCount: input.worldStore
-				? [
-						...input.worldStore.portalMaskDrawUnitIdsByProductKey.values(),
-					].reduce((total, drawUnitIds) => total + drawUnitIds.length, 0)
-				: 0,
+				input.worldStore?.transitionPortalMasks.length ?? 0,
+			transitionPortalMaskResourceCount:
+				input.worldStore?.transitionPortalMasks.length ?? 0,
 			staticGroupMeshCount:
 				input.worldStore?.staticBundleLayerResourceCount ?? 0,
 			visibleStaticGroupMeshCount:
@@ -207,7 +201,7 @@ export function createWebgl2RenderMetrics(
 			portalMaskRenderBatchCount:
 				input.frameMetrics?.candidateCountsByCategory["portal-mask"] ?? 0,
 			portalMaskBvhCandidateBatchCount:
-				input.submitMetrics.portalMaskDrawUnitCount,
+				input.submitMetrics.portalMaskResourceCount,
 			nonStaticBvhFallbackIncludedBatchCount:
 				(input.frameMetrics?.fallbackCountsByCategory.terrain ?? 0) +
 				(input.frameMetrics?.fallbackCountsByCategory["structured-interior"] ??
@@ -229,10 +223,6 @@ export function createWebgl2RenderMetrics(
 			sceneDomainBaseCopyPassCount: input.sceneDomainBaseCopyPassCount,
 			sceneDomainExteriorDrawCallCount: input.sceneDomainExteriorDrawCallCount,
 			sceneDomainInteriorDrawCallCount: input.sceneDomainInteriorDrawCallCount,
-			sceneDomainExteriorDrawUnitCount:
-				input.submitMetrics.exteriorDomainDrawUnitCount,
-			sceneDomainInteriorDrawUnitCount:
-				input.submitMetrics.interiorDomainDrawUnitCount,
 			portalCompositeRectCount: input.portalCompositeRectCount,
 			portalCompositeEstimatedPixelArea:
 				input.portalCompositeEstimatedPixelArea,
@@ -288,69 +278,12 @@ export function createWebgl2RenderMetrics(
 			atlasCandidateEntryCount: input.worldStore?.atlasCandidateEntryCount ?? 0,
 			atlasCandidateMaterialSlotCount:
 				input.worldStore?.atlasCandidateMaterialSlotCount ?? 0,
-			atlasCompatibleDrawUnitCount:
-				input.worldStore?.atlasCompatibleDrawUnitCount ?? 0,
-			atlasPlacedRgbaDrawUnitCount:
-				input.worldStore?.atlasPlacedRgbaDrawUnitCount ?? 0,
-			detailAtlasReadyDrawUnitCount:
-				input.worldStore?.detailAtlasReadyDrawUnitCount ?? 0,
 			atlasFailureReasonCount: input.worldStore?.atlasFailureReasonCount ?? 0,
 			atlasFailureSamples: [...(input.worldStore?.atlasFailureSamples ?? [])],
-			materialBatchingCandidateDrawUnitCount:
-				input.worldStore?.materialBatchingCandidateDrawUnitCount ?? 0,
-			materialBatchingBypassReasonCount:
-				input.worldStore?.materialBatchingBypassReasonCount ?? 0,
-			materialBatchingBypassSamples: [
-				...(input.worldStore?.materialBatchingBypassSamples ?? []),
-			],
-			materialBatchingBypassBlockerSamples: [
-				...(input.worldStore?.materialBatchingBypassBlockerSamples ?? []),
-			],
-			materialBatchingBypassDetailSamples: [
-				...(input.worldStore?.materialBatchingBypassDetailSamples ?? []),
-			],
-			materialBatchingCoverageDrawUnitCounts:
-				input.worldStore?.materialBatchingCoverageDrawUnitCounts ?? {},
-			materialBatchingCoverageMaterialBlockerCounts:
-				input.worldStore?.materialBatchingCoverageMaterialBlockerCounts ?? {},
-			materialBatchingCoverageGeometryBlockerCounts:
-				input.worldStore?.materialBatchingCoverageGeometryBlockerCounts ?? {},
-			materialBatchingCoverageMaterialFamilyCounts:
-				input.worldStore?.materialBatchingCoverageMaterialFamilyCounts ?? {},
-			materialBatchingCoverageMaterialAlphaPolicyCounts:
-				input.worldStore?.materialBatchingCoverageMaterialAlphaPolicyCounts ?? {},
-			materialBatchingCoverageMaterialFamilyAlphaPolicyCounts:
-				input.worldStore?.materialBatchingCoverageMaterialFamilyAlphaPolicyCounts ??
-				{},
-			materialBatchingCoverageRetainedDirectMaterialFamilyCounts:
-				input.worldStore
-					?.materialBatchingCoverageRetainedDirectMaterialFamilyCounts ?? {},
-			materialBatchingCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts:
-				input.worldStore
-					?.materialBatchingCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts ??
-				{},
-			materialBatchingCoverageVisibleRetainedDirectMaterialFamilyCounts:
-				input.submitMetrics
-					.visibleRetainedDirectDrawUnitCountsByCompactionFamily,
 			terrainTexturePageCount:
 				input.worldStore?.terrainTexturePageCount ?? 0,
 			terrainDetailTexturePageCount:
 				input.worldStore?.terrainDetailTexturePageCount ?? 0,
-			retainedDirectOpaqueDrawUnitCount:
-				input.submitMetrics.retainedDirectOpaqueDrawUnitCount,
-			retainedDirectBlendedDrawUnitCount:
-				input.submitMetrics.retainedDirectBlendedDrawUnitCount,
-			directTexturePageDrawCount:
-				input.submitMetrics.directTexturePageDrawCount,
-			directSingleEntryTexturePageDrawCount:
-				input.submitMetrics.directSingleEntryTexturePageDrawCount,
-			directPackedTexturePageDrawCount:
-				input.submitMetrics.directPackedTexturePageDrawCount,
-			directPackedTexturePageEstimatedBindAvoidedCount:
-				input.submitMetrics.directPackedTexturePageEstimatedBindAvoidedCount,
-			directTexturePageFallbackSamples: [
-				...input.submitMetrics.directTexturePageFallbackSamples,
-			],
 			visibleStaticBundleLayerCount:
 				input.submitMetrics.visibleStaticBundleLayerCount,
 			staticBundleLayerSubmittedCount:
@@ -374,10 +307,6 @@ export function createWebgl2RenderMetrics(
 			textureResourceCount: input.worldStore?.textureCount ?? 0,
 			indexedTextureResourceCount: input.worldStore?.indexedTextureCount ?? 0,
 			paletteResourceCount: input.worldStore?.paletteTextureCount ?? 0,
-			indexedMaterialDescriptorDrawUnitCount:
-				input.worldStore?.indexedMaterialDescriptorDrawUnitCount ?? 0,
-			standaloneIndexedMaterialResourceDrawUnitCount:
-				input.worldStore?.standaloneIndexedMaterialResourceDrawUnitCount ?? 0,
 			staticGeometryGroupCount:
 				input.worldStore?.staticBundleLayerResourceCount ?? 0,
 			staticVisibleGeometryGroupCount:
@@ -386,88 +315,14 @@ export function createWebgl2RenderMetrics(
 				input.worldStore?.structuredInteriorResourceCount ?? 0,
 			materialTypeCounts: input.worldStore
 				? {
-						"webgl2-flat-resource":
-							input.worldStore.drawUnits.length -
-							input.worldStore.directTextureDrawUnitCount,
-						"webgl2-direct-texture":
-							input.worldStore.directTextureDrawUnitCount,
 						"webgl2-atlas-eligible":
 							input.worldStore.texturePageReadyMaterialCount,
-						"webgl2-atlas-compatible-draw-units":
-							input.worldStore.atlasCompatibleDrawUnitCount,
-						"webgl2-atlas-placed-rgba-draw-units":
-							input.worldStore.atlasPlacedRgbaDrawUnitCount,
-						"webgl2-detail-atlas-ready-draw-units":
-							input.worldStore.detailAtlasReadyDrawUnitCount,
 						"webgl2-atlas-failures": input.worldStore.atlasFailureReasonCount,
-						"webgl2-static-eligibility-candidates":
-							input.worldStore.materialBatchingCandidateDrawUnitCount,
-						"webgl2-static-eligibility-bypasses":
-							input.worldStore.materialBatchingBypassReasonCount,
-						...prefixCounts(
-							"webgl2-static-eligibility-coverage-",
-							input.worldStore.materialBatchingCoverageDrawUnitCounts,
-						),
-						...prefixCounts(
-							"webgl2-static-eligibility-material-blocker-",
-							input.worldStore.materialBatchingCoverageMaterialBlockerCounts,
-						),
-						...prefixCounts(
-							"webgl2-static-eligibility-geometry-blocker-",
-							input.worldStore.materialBatchingCoverageGeometryBlockerCounts,
-						),
-						...prefixCounts(
-							"webgl2-static-eligibility-material-family-",
-							input.worldStore.materialBatchingCoverageMaterialFamilyCounts,
-						),
-						...prefixCounts(
-							"webgl2-static-eligibility-alpha-policy-",
-							input.worldStore.materialBatchingCoverageMaterialAlphaPolicyCounts,
-						),
-						...prefixCounts(
-							"webgl2-static-eligibility-family-alpha-policy-",
-							input.worldStore
-								.materialBatchingCoverageMaterialFamilyAlphaPolicyCounts,
-						),
-						...prefixCounts(
-							"webgl2-retained-direct-material-family-",
-							input.worldStore
-								.materialBatchingCoverageRetainedDirectMaterialFamilyCounts,
-						),
-						...prefixCounts(
-							"webgl2-retained-direct-material-family-alpha-policy-",
-							input.worldStore
-								.materialBatchingCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts,
-						),
-						...prefixCounts(
-							"webgl2-visible-retained-direct-material-family-",
-							input.submitMetrics
-								.visibleRetainedDirectDrawUnitCountsByCompactionFamily,
-						),
 						"webgl2-terrain-texture-pages":
 							input.worldStore.terrainTexturePageCount,
 						"webgl2-terrain-detail-texture-pages":
 							input.worldStore.terrainDetailTexturePageCount,
-						"webgl2-indexed-descriptor-draw-units":
-							input.worldStore.indexedMaterialDescriptorDrawUnitCount,
-						"webgl2-standalone-indexed-resource-draw-units":
-							input.worldStore.standaloneIndexedMaterialResourceDrawUnitCount,
-						"webgl2-retained-direct-opaque-draw-units":
-							input.submitMetrics.retainedDirectOpaqueDrawUnitCount,
-						"webgl2-retained-direct-blended-draw-units":
-							input.submitMetrics.retainedDirectBlendedDrawUnitCount,
-						"webgl2-direct-packed-texture-page-draws":
-							input.submitMetrics.directPackedTexturePageDrawCount,
-						"webgl2-direct-single-entry-texture-page-draws":
-							input.submitMetrics.directSingleEntryTexturePageDrawCount,
-						"webgl2-direct-packed-texture-page-estimated-texture-binds-avoided":
-							input.submitMetrics
-								.directPackedTexturePageEstimatedBindAvoidedCount,
 						"webgl2-detail-overlay": input.worldStore.detailTextureCount,
-						...prefixCounts(
-							"webgl2-visible-",
-							input.submitMetrics.visibleDrawUnitCountsByMaterialKind,
-						),
 						"webgl2-program-switches": input.submitMetrics.programSwitchCount,
 						"webgl2-vao-binds": input.submitMetrics.vertexArrayBindCount,
 						"webgl2-uniform-uploads": input.submitMetrics.uniformUploadCount,
@@ -480,14 +335,8 @@ export function createWebgl2RenderMetrics(
 			preparedTextureGeneratedByteLength:
 				input.worldStore?.preparedTextureGeneratedByteLength ?? 0,
 			compressedSingleLevelFallbackUploadCount: 0,
-			renderCalls:
-				input.worldStore && input.worldStore.drawUnits.length > 0
-					? input.submitMetrics.drawCallCount
-					: input.lastFrameDrawCount,
-			renderTriangles:
-				input.worldStore && input.worldStore.drawUnits.length > 0
-					? input.submitMetrics.triangleCount
-					: input.lastFrameDrawCount,
+			renderCalls: input.submitMetrics.drawCallCount || input.lastFrameDrawCount,
+			renderTriangles: input.submitMetrics.triangleCount,
 			renderLines: 0,
 			renderPoints: 0,
 		},
@@ -516,13 +365,4 @@ export function createWebgl2RenderMetrics(
 				),
 		},
 	};
-}
-
-function prefixCounts(
-	prefix: string,
-	counts: Readonly<Record<string, number>>,
-): Record<string, number> {
-	return Object.fromEntries(
-		Object.entries(counts).map(([key, value]) => [`${prefix}${key}`, value]),
-	);
 }

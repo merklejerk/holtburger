@@ -20,7 +20,7 @@ describe("buildWorldRenderFrame", () => {
 			candidates: [
 				createBatch({
 					id: "terrain/culled",
-					kind: "terrain",
+					kind: "terrain-tile",
 					itemKeys: ["terrain:landblock:0203ffff:quad:7"],
 				}),
 			],
@@ -39,18 +39,18 @@ describe("buildWorldRenderFrame", () => {
 		expect(frame.metrics.candidateBatchCount).toBe(0);
 	});
 
-	it("keeps unkeyed fallback batches visible and sorts draw categories", () => {
+	it("keeps explicit unkeyed fallback resources visible and sorts draw categories", () => {
 		const frame = buildWorldRenderFrameImpl({
 			assetState: createInitialAssetChannelState(),
 			candidates: [
 				createBatch({
-					id: "static/world|landblock/0203ffff|object-b",
-					kind: "static",
+					id: "static-bundle-layer/world|landblock/0203ffff|object-b",
+					kind: "static-bundle-layer",
 					fallbackReason: "test static fallback",
 				}),
 				createBatch({
 					id: "terrain/fallback",
-					kind: "terrain",
+					kind: "terrain-tile",
 					fallbackReason: "test terrain fallback",
 				}),
 			],
@@ -65,13 +65,14 @@ describe("buildWorldRenderFrame", () => {
 
 		expect(frame.passes[0]?.draws).toEqual([
 			{
-				kind: "draw-unit",
-				drawUnitId: "terrain/fallback",
+				kind: "terrain-tile",
+				terrainTileId: "terrain/fallback",
 				category: "terrain",
 			},
 			{
-				kind: "draw-unit",
-				drawUnitId: "static/world|landblock/0203ffff|object-b",
+				kind: "static-bundle-layer",
+				staticBundleLayerId:
+					"static-bundle-layer/world|landblock/0203ffff|object-b",
 				category: "static",
 			},
 		]);
@@ -81,7 +82,7 @@ describe("buildWorldRenderFrame", () => {
 		expect(frame.metrics.visibleDrawCountsByCategory.static).toBe(1);
 	});
 
-	it("keeps terrain tile resources visible without creating draw-unit refs", () => {
+	it("keeps terrain tile resources visible", () => {
 		const frame = buildFrameWithFallbackCandidates([
 			createBatch({
 				id: "terrain-tile/terrain/0203ffff",

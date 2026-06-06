@@ -21,14 +21,14 @@ export const TERRAIN_COLOR_ATLAS_GUTTER_PIXELS = 96;
 export const TERRAIN_MASK_ATLAS_GUTTER_PIXELS = 16;
 
 export interface TexturePageAtlasRgbaCandidate {
-	drawUnitId: string;
+	candidateId: string;
 	family?: TexturePageFamily;
 	texturePageReadiness: RenderMaterialTexturePageReadiness;
 	detailAtlasEntry: RgbaTexturePageDetailAtlasEntry | null;
 }
 
 export interface TexturePageAtlasDetailCandidate {
-	drawUnitId: string;
+	candidateId: string;
 	family?: TexturePageFamily;
 	detailAtlasEntry: RgbaTexturePageDetailAtlasEntry | null;
 }
@@ -39,15 +39,15 @@ type TexturePageAtlasFailureReason =
 	| "detail-atlas-full";
 
 interface TexturePageAtlasFailure {
-	drawUnitId: string;
+	candidateId: string;
 	reason: TexturePageAtlasFailureReason;
 	detail: string;
 }
 
 export interface TexturePageAtlasPlan {
 	key: string;
-	rgbaAtlasReadyDrawUnitIds: readonly string[];
-	detailAtlasReadyDrawUnitIds: readonly string[];
+	rgbaAtlasReadyCandidateIds: readonly string[];
+	detailAtlasReadyCandidateIds: readonly string[];
 	failures: readonly TexturePageAtlasFailure[];
 	atlasEntryRecords: readonly RgbaTexturePageAtlasEntryRecord[];
 	atlasTextures: readonly AtlasTexturePage[];
@@ -68,8 +68,8 @@ interface TexturePageFamilyPlan {
 export function createEmptyTexturePageAtlasPlan(): TexturePageAtlasPlan {
 	return {
 		key: "texture-page-atlas/empty",
-		rgbaAtlasReadyDrawUnitIds: [],
-		detailAtlasReadyDrawUnitIds: [],
+		rgbaAtlasReadyCandidateIds: [],
+		detailAtlasReadyCandidateIds: [],
 		failures: [],
 		atlasEntryRecords: [],
 		atlasTextures: [],
@@ -150,9 +150,9 @@ export function planTexturePageAtlas(options: {
 			policy: options.policy,
 			familyPlans,
 		}),
-		rgbaAtlasReadyDrawUnitIds: rgbaReady.map((candidate) => candidate.drawUnitId),
-		detailAtlasReadyDrawUnitIds: detailReady.map(
-			(candidate) => candidate.drawUnitId,
+		rgbaAtlasReadyCandidateIds: rgbaReady.map((candidate) => candidate.candidateId),
+		detailAtlasReadyCandidateIds: detailReady.map(
+			(candidate) => candidate.candidateId,
 		),
 		failures,
 		atlasEntryRecords: familyPlans.flatMap((plan) => plan.atlasEntryRecords),
@@ -221,7 +221,7 @@ function planTexturePageAtlasFamily({
 			continue;
 		}
 		failures.push({
-			drawUnitId: candidate.drawUnitId,
+			candidateId: candidate.candidateId,
 			reason:
 				overflow.reason === "source-too-large"
 					? "source-texture-too-large"
@@ -263,7 +263,7 @@ function planTexturePageAtlasFamily({
 			continue;
 		}
 		failures.push({
-			drawUnitId: candidate.drawUnitId,
+			candidateId: candidate.candidateId,
 			reason: "detail-atlas-full",
 			detail: overflow.detail,
 		});

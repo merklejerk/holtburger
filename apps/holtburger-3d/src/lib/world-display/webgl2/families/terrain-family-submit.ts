@@ -1,5 +1,10 @@
-import { multiplyMat4Into, type RenderMat4 } from "../../render-math";
+import {
+	createTranslationMat4,
+	multiplyMat4Into,
+	type RenderMat4,
+} from "../../render-math";
 import type { Vec3Dto } from "../../../host/contracts";
+import type { RenderChunkTransform } from "../../render-anchor";
 import {
 	createWebgl2Program,
 	type Webgl2ProgramResource,
@@ -113,6 +118,7 @@ export function submitWebgl2TerrainFamilyTiles({
 	cameraPosition,
 	terrainTiles,
 	terrainBackfaceCulling,
+	renderChunkTransforms,
 }: {
 	gl: WebGL2RenderingContext;
 	stateCache: Webgl2StateCache;
@@ -121,6 +127,7 @@ export function submitWebgl2TerrainFamilyTiles({
 	cameraPosition: Vec3Dto;
 	terrainTiles: readonly Webgl2TerrainFamilyDrawableResource[];
 	terrainBackfaceCulling: boolean;
+	renderChunkTransforms: readonly RenderChunkTransform[];
 }): Webgl2TerrainFamilySubmitMetrics {
 	const metrics: Webgl2TerrainFamilySubmitMetrics = {
 		shaderDrawCallCount: 0,
@@ -148,6 +155,12 @@ export function submitWebgl2TerrainFamilyTiles({
 	);
 	const modelViewProjection = new Float32Array(16);
 	const submittedDiagnostics: Record<string, unknown>[] = [];
+	const chunkOffsetByKey = new Map(
+		renderChunkTransforms.map((transform) => [
+			transform.chunkKey,
+			transform.offset,
+		]),
+	);
 	for (const tile of terrainTiles) {
 		const submitPlan = createTerrainTileFamilySubmitPlan(tile);
 		if (!submitPlan) {
@@ -157,6 +170,15 @@ export function submitWebgl2TerrainFamilyTiles({
 			].slice(0, 8);
 			continue;
 		}
+		const chunkOffset = chunkOffsetByKey.get(tile.renderChunkKey);
+		if (!chunkOffset) {
+			metrics.fallbackSamples = [
+				...metrics.fallbackSamples,
+				`terrain tile ${tile.id} render chunk ${tile.renderChunkKey} is not active`,
+			].slice(0, 8);
+			continue;
+		}
+		const modelMatrix = createTranslationMat4(chunkOffset);
 		submittedDiagnostics.push(
 			describeTerrainFamilySubmittedDrawable(tile, submitPlan),
 		);
@@ -197,13 +219,13 @@ export function submitWebgl2TerrainFamilyTiles({
 		gl.uniformMatrix4fv(
 			program.uniforms.uModelViewProjection,
 			false,
-			multiplyMat4Into(
-				modelViewProjection,
-				viewProjectionMatrix,
-				tile.modelMatrix,
-			),
-		);
-		gl.uniformMatrix4fv(program.uniforms.uModelMatrix, false, tile.modelMatrix);
+				multiplyMat4Into(
+					modelViewProjection,
+					viewProjectionMatrix,
+					modelMatrix,
+				),
+			);
+		gl.uniformMatrix4fv(program.uniforms.uModelMatrix, false, modelMatrix);
 		gl.drawElements(gl.TRIANGLES, tile.vertexCount, tile.indexType, 0);
 	}
 	logTerrainFamilySubmitDiagnostics({

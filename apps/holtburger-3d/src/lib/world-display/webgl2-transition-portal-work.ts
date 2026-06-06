@@ -16,7 +16,9 @@ import {
 } from "./transition-portal-work-items";
 import type { WorldRenderSceneContext } from "./render-scene-context";
 import type { CameraViewResidencyContext } from "./world-residency-index";
-import type { Webgl2WorldDrawUnit } from "./webgl2-world-resources";
+import type { RenderChunkTransform } from "./render-anchor";
+import { resolveTransitionPortalMaskModelMatrix } from "./transition-portal-mask-resources";
+import type { Webgl2TransitionPortalMaskResource } from "./webgl2-world-resources";
 
 type ClipPlane = "left" | "right" | "bottom" | "top" | "near" | "far";
 
@@ -31,7 +33,7 @@ const CLIP_PLANES: readonly ClipPlane[] = [
 
 export interface Webgl2VisibleTransitionPortalWork {
 	workItem: TransitionPortalWorkItem;
-	maskDrawUnitId: string;
+	maskResourceId: string;
 	direction: TransitionPortalWorkItem["direction"];
 	entryEnvCellId: number;
 	requestedInteriorEnvCellIds: readonly number[];
@@ -71,7 +73,8 @@ export function deriveWebgl2InitialPortalEnvCellId(
 
 export function planWebgl2TransitionPortalWork(options: {
 	transitionPortalModel: TransitionPortalCandidateModel;
-	visiblePortalMaskDrawUnits: readonly Webgl2WorldDrawUnit[];
+	visibleTransitionPortalMasks: readonly Webgl2TransitionPortalMaskResource[];
+	renderChunkTransforms: readonly RenderChunkTransform[];
 	cameraPosition: Vec3Dto;
 	viewProjectionMatrix: RenderMat4;
 	viewport: { width: number; height: number };
@@ -91,8 +94,8 @@ export function planWebgl2TransitionPortalWork(options: {
 			indoorToOutdoor: [],
 		};
 
-	for (const maskDrawUnit of options.visiblePortalMaskDrawUnits) {
-		const candidateId = parsePortalMaskDrawUnitCandidateId(maskDrawUnit.id);
+	for (const mask of options.visibleTransitionPortalMasks) {
+		const candidateId = parsePortalMaskResourceCandidateId(mask.id);
 		if (!candidateId) {
 			continue;
 		}
@@ -100,20 +103,24 @@ export function planWebgl2TransitionPortalWork(options: {
 		if (!candidate) {
 			continue;
 		}
+		const modelMatrix = resolveTransitionPortalMaskModelMatrix({
+			mask,
+			renderChunkTransforms: options.renderChunkTransforms,
+		});
+		if (!modelMatrix) {
+			continue;
+		}
 		const workItem = createTransitionPortalWorkItem({
 			candidate,
 			cameraPosition: options.cameraPosition,
-			worldPlane: transformPortalAperturePlane(
-				candidate,
-				maskDrawUnit.modelMatrix,
-			),
+			worldPlane: transformPortalAperturePlane(candidate, modelMatrix),
 		});
 		if (!workItem) {
 			continue;
 		}
 		const screenRect = projectPortalMaskScreenRect({
 			candidate,
-			modelMatrix: maskDrawUnit.modelMatrix,
+			modelMatrix,
 			viewProjectionMatrix: options.viewProjectionMatrix,
 			viewport: options.viewport,
 		});
@@ -122,7 +129,7 @@ export function planWebgl2TransitionPortalWork(options: {
 		}
 		const work: Webgl2VisibleTransitionPortalWork = {
 			workItem,
-			maskDrawUnitId: maskDrawUnit.id,
+			maskResourceId: mask.id,
 			direction: workItem.direction,
 			entryEnvCellId: workItem.entryEnvCellId,
 			requestedInteriorEnvCellIds: workItem.requestedInteriorEnvCellIds,
@@ -156,9 +163,11 @@ export function planWebgl2TransitionPortalWork(options: {
 	};
 }
 
-function parsePortalMaskDrawUnitCandidateId(drawUnitId: string): string | null {
+function parsePortalMaskResourceCandidateId(maskResourceId: string): string | null {
 	const prefix = "portal-mask/";
-	return drawUnitId.startsWith(prefix) ? drawUnitId.slice(prefix.length) : null;
+	return maskResourceId.startsWith(prefix)
+		? maskResourceId.slice(prefix.length)
+		: null;
 }
 
 function projectPortalMaskScreenRect(options: {

@@ -7,7 +7,7 @@ import type {
 import {
 	buildCompactedGeometryBatch,
 	describeCompactedGeometryJobKey,
-	type CompactedGeometryBuildDrawUnit,
+	type CompactedGeometryBuildEntry,
 	type CompactedGeometryPlan,
 } from "./compacted-geometry";
 
@@ -15,7 +15,7 @@ interface TestCompactedGeometryDrawSlice {
 	key: string;
 	renderStateKey: string;
 	materialSlotKeys: readonly string[];
-	drawUnitIds: readonly string[];
+	entryIds: readonly string[];
 }
 
 describe("compacted geometry builder", () => {
@@ -23,9 +23,9 @@ describe("compacted geometry builder", () => {
 		const plan = createPlan();
 		const geometry = buildCompactedGeometryBatch({
 			plan,
-			drawUnits: [
-				createDrawUnit("draw-a", "material-slot-a", 10),
-				createDrawUnit("draw-b", "material-slot-b", 20),
+			entries: [
+				createEntry("draw-a", "material-slot-a", 10),
+				createEntry("draw-b", "material-slot-b", 20),
 			],
 			batchOrigin: { x: 0, y: 0, z: 0 },
 		});
@@ -46,13 +46,13 @@ describe("compacted geometry builder", () => {
 		expect(geometry?.indices).toEqual(Uint16Array.from([0, 1, 2, 3, 4, 5]));
 		expect(geometry?.drawRanges).toEqual([
 			{
-				drawUnitId: "draw-a",
+				entryId: "draw-a",
 				firstIndex: 0,
 				indexCount: 3,
 				materialSlotIndex: 0,
 			},
 			{
-				drawUnitId: "draw-b",
+				entryId: "draw-b",
 				firstIndex: 3,
 				indexCount: 3,
 				materialSlotIndex: 1,
@@ -64,7 +64,7 @@ describe("compacted geometry builder", () => {
 				renderStateKey: "opaque",
 				firstIndex: 0,
 				indexCount: 3,
-				drawUnitIds: ["draw-a"],
+				entryIds: ["draw-a"],
 				materialSlotKeys: ["material-slot-a"],
 			},
 			{
@@ -72,7 +72,7 @@ describe("compacted geometry builder", () => {
 				renderStateKey: "opaque",
 				firstIndex: 3,
 				indexCount: 3,
-				drawUnitIds: ["draw-b"],
+				entryIds: ["draw-b"],
 				materialSlotKeys: ["material-slot-b"],
 			},
 		]);
@@ -81,19 +81,19 @@ describe("compacted geometry builder", () => {
 	it("orders compacted geometry by draw slice so each slice is contiguous", () => {
 		const plan: CompactedGeometryPlan<TestCompactedGeometryDrawSlice> = {
 			...createPlan(),
-			compactableDrawUnitIds: ["draw-b", "draw-a"],
+			compactableEntryIds: ["draw-b", "draw-a"],
 		};
 
 		const geometry = buildCompactedGeometryBatch({
 			plan,
-			drawUnits: [
-				createDrawUnit("draw-a", "material-slot-a", 10),
-				createDrawUnit("draw-b", "material-slot-b", 20),
+			entries: [
+				createEntry("draw-a", "material-slot-a", 10),
+				createEntry("draw-b", "material-slot-b", 20),
 			],
 			batchOrigin: { x: 0, y: 0, z: 0 },
 		});
 
-		expect(geometry?.drawRanges.map((range) => range.drawUnitId)).toEqual([
+		expect(geometry?.drawRanges.map((range) => range.entryId)).toEqual([
 			"draw-a",
 			"draw-b",
 		]);
@@ -102,7 +102,7 @@ describe("compacted geometry builder", () => {
 		]);
 	});
 
-	it("rejects draw units assigned to multiple compacted slices", () => {
+	it("rejects compaction entrys assigned to multiple compacted slices", () => {
 		const basePlan = createPlan();
 		const plan: CompactedGeometryPlan<TestCompactedGeometryDrawSlice> = {
 			...basePlan,
@@ -112,7 +112,7 @@ describe("compacted geometry builder", () => {
 					key: "slice-overlap",
 					renderStateKey: "opaque",
 					materialSlotKeys: ["material-slot-a"],
-					drawUnitIds: ["draw-a"],
+					entryIds: ["draw-a"],
 				},
 			],
 		};
@@ -120,9 +120,9 @@ describe("compacted geometry builder", () => {
 		expect(() =>
 			buildCompactedGeometryBatch({
 				plan,
-				drawUnits: [
-					createDrawUnit("draw-a", "material-slot-a", 10),
-					createDrawUnit("draw-b", "material-slot-b", 20),
+				entries: [
+					createEntry("draw-a", "material-slot-a", 10),
+					createEntry("draw-b", "material-slot-b", 20),
 				],
 				batchOrigin: { x: 0, y: 0, z: 0 },
 			}),
@@ -137,17 +137,17 @@ describe("compacted geometry builder", () => {
 		}
 		const plan = {
 			...basePlan,
-			compactableDrawUnitIds: ["draw-a"],
+			compactableEntryIds: ["draw-a"],
 			drawSlices: [firstSlice],
 		};
 		const first = buildCompactedGeometryBatch({
 			plan,
-			drawUnits: [createDrawUnit("draw-a", "material-slot-a", 10)],
+			entries: [createEntry("draw-a", "material-slot-a", 10)],
 			batchOrigin: { x: 10, y: 0, z: 0 },
 		});
 		const second = buildCompactedGeometryBatch({
 			plan,
-			drawUnits: [createDrawUnit("draw-a", "material-slot-a", 99)],
+			entries: [createEntry("draw-a", "material-slot-a", 99)],
 			batchOrigin: { x: 99, y: 0, z: 0 },
 		});
 
@@ -162,22 +162,22 @@ describe("compacted geometry builder", () => {
 		}
 		const plan = {
 			...basePlan,
-			compactableDrawUnitIds: ["draw-a"],
+			compactableEntryIds: ["draw-a"],
 			drawSlices: [firstSlice],
 		};
-		const drawUnit = createDrawUnit("draw-a", "material-slot-a", 10);
-		const unrelatedDrawUnit = createDrawUnit("draw-b", "material-slot-b", 500);
+		const entry = createEntry("draw-a", "material-slot-a", 10);
+		const unrelatedEntry = createEntry("draw-b", "material-slot-b", 500);
 		const batchOrigin = { x: 10, y: 0, z: 0 };
 		const geometry = buildCompactedGeometryBatch({
 			plan,
-			drawUnits: [drawUnit],
+			entries: [entry],
 			batchOrigin,
 		});
 
 		expect(
 			describeCompactedGeometryJobKey({
 				plan,
-				drawUnits: [unrelatedDrawUnit, drawUnit],
+				entries: [unrelatedEntry, entry],
 				batchOrigin,
 			}),
 		).toBe(geometry?.key);
@@ -187,17 +187,17 @@ describe("compacted geometry builder", () => {
 		const basePlan = createPlan();
 		const first = buildCompactedGeometryBatch({
 			plan: basePlan,
-			drawUnits: [
-				createDrawUnit("draw-a", "material-slot-a", 10),
-				createDrawUnit("draw-b", "material-slot-b", 20),
+			entries: [
+				createEntry("draw-a", "material-slot-a", 10),
+				createEntry("draw-b", "material-slot-b", 20),
 			],
 			batchOrigin: { x: 10, y: 0, z: 0 },
 		});
 		const second = buildCompactedGeometryBatch({
 			plan: basePlan,
-			drawUnits: [
-				createDrawUnit("draw-a", "material-slot-a", 10),
-				createDrawUnit("draw-b", "material-slot-b", 30),
+			entries: [
+				createEntry("draw-a", "material-slot-a", 10),
+				createEntry("draw-b", "material-slot-b", 30),
 			],
 			batchOrigin: { x: 10, y: 0, z: 0 },
 		});
@@ -213,21 +213,21 @@ describe("compacted geometry builder", () => {
 		}
 		const plan = {
 			...basePlan,
-			compactableDrawUnitIds: ["structured-a"],
-			drawUnitMaterialSlots: [
-				{ drawUnitId: "structured-a", materialSlotKey: "material-slot-a" },
+			compactableEntryIds: ["structured-a"],
+			entryMaterialSlots: [
+				{ entryId: "structured-a", materialSlotKey: "material-slot-a" },
 			],
 			drawSlices: [
 				{
 					...firstSlice,
-					drawUnitIds: ["structured-a"],
+					entryIds: ["structured-a"],
 				},
 			],
 		};
 		const geometry = buildCompactedGeometryBatch({
 			plan,
-			drawUnits: [
-				createDrawUnit("structured-a", "material-slot-a", 100, {
+			entries: [
+				createEntry("structured-a", "material-slot-a", 100, {
 					kind: "structured-interior",
 					owningLandblockId: 0x0203ffff,
 				}),
@@ -241,7 +241,7 @@ describe("compacted geometry builder", () => {
 		);
 		expect(geometry?.drawRanges).toMatchObject([
 			{
-				drawUnitId: "structured-a",
+				entryId: "structured-a",
 				firstIndex: 0,
 				indexCount: 3,
 				materialSlotIndex: 0,
@@ -258,24 +258,24 @@ describe("compacted geometry builder", () => {
 		}
 		const plan: CompactedGeometryPlan<TestCompactedGeometryDrawSlice> = {
 			...basePlan,
-			compactableDrawUnitIds: ["indexed-a"],
+			compactableEntryIds: ["indexed-a"],
 			materialSlots: [{ ...firstSlot, key: "indexed-slot", index: 0 }],
-			drawUnitMaterialSlots: [
-				{ drawUnitId: "indexed-a", materialSlotKey: "indexed-slot" },
+			entryMaterialSlots: [
+				{ entryId: "indexed-a", materialSlotKey: "indexed-slot" },
 			],
 			drawSlices: [
 				{
 					...firstSlice,
 					materialSlotKeys: ["indexed-slot"],
-					drawUnitIds: ["indexed-a"],
+					entryIds: ["indexed-a"],
 				},
 			],
 		};
 
 		const geometry = buildCompactedGeometryBatch({
 			plan,
-			drawUnits: [
-				createDrawUnit("indexed-a", "ignored-atlas-slot", 10, {
+			entries: [
+				createEntry("indexed-a", "ignored-atlas-slot", 10, {
 					materialKind: "indexed-paletted",
 				}),
 			],
@@ -285,7 +285,7 @@ describe("compacted geometry builder", () => {
 		expect(geometry?.materialSlotIndices).toEqual(Float32Array.from([0, 0, 0]));
 		expect(geometry?.drawRanges).toMatchObject([
 			{
-				drawUnitId: "indexed-a",
+				entryId: "indexed-a",
 				materialSlotIndex: 0,
 			},
 		]);
@@ -295,7 +295,7 @@ describe("compacted geometry builder", () => {
 function createPlan(): CompactedGeometryPlan<TestCompactedGeometryDrawSlice> {
 	return {
 		key: "plan-a",
-		compactableDrawUnitIds: ["draw-a", "draw-b"],
+		compactableEntryIds: ["draw-a", "draw-b"],
 		materialSlots: [
 			{
 				key: "material-slot-a",
@@ -306,29 +306,29 @@ function createPlan(): CompactedGeometryPlan<TestCompactedGeometryDrawSlice> {
 				index: 1,
 			},
 		],
-		drawUnitMaterialSlots: [
-			{ drawUnitId: "draw-a", materialSlotKey: "material-slot-a" },
-			{ drawUnitId: "draw-b", materialSlotKey: "material-slot-b" },
+		entryMaterialSlots: [
+			{ entryId: "draw-a", materialSlotKey: "material-slot-a" },
+			{ entryId: "draw-b", materialSlotKey: "material-slot-b" },
 		],
 		drawSlices: [
 			{
 				key: "slice-a",
 				renderStateKey: "opaque",
 				materialSlotKeys: ["material-slot-a"],
-				drawUnitIds: ["draw-a"],
+				entryIds: ["draw-a"],
 			},
 			{
 				key: "slice-b",
 				renderStateKey: "opaque",
 				materialSlotKeys: ["material-slot-b"],
-				drawUnitIds: ["draw-b"],
+				entryIds: ["draw-b"],
 			},
 		],
 		triangleCount: 2,
 	};
 }
 
-function createDrawUnit(
+function createEntry(
 	id: string,
 	materialSlotKey: string,
 	xOffset: number,
@@ -337,7 +337,7 @@ function createDrawUnit(
 		owningLandblockId?: number;
 		materialKind?: "direct-texture" | "indexed-paletted";
 	} = {},
-): CompactedGeometryBuildDrawUnit {
+): CompactedGeometryBuildEntry {
 	const kind = options.kind ?? "static";
 	const materialKind = options.materialKind ?? "direct-texture";
 	const base = {

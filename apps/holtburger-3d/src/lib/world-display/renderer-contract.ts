@@ -200,6 +200,14 @@ interface WorldRenderDebugMetrics {
 	directPackedTexturePageDrawCount: number;
 	directPackedTexturePageEstimatedBindAvoidedCount: number;
 	directTexturePageFallbackSamples: string[];
+	visibleStaticBundleLayerCount: number;
+	staticBundleLayerSubmittedCount: number;
+	staticBundleGeometryCandidateCount: number;
+	staticBundleGeometrySubmittedCount: number;
+	staticBundleDrawCallCount: number;
+	staticBundleTriangleCount: number;
+	staticBundleSkippedGeometryCount: number;
+	staticBundleSubmitFallbackSamples: string[];
 	textureVelocityPartCount: number;
 	textureVelocityRenderGroupCount: number;
 	textureVelocityMaterialCount: number;

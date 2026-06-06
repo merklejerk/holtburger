@@ -17,6 +17,7 @@ import type {
 } from "./static-bundle-layer";
 import type { AtlasLayoutPolicy } from "./texture-pages/atlas-layout-planner";
 import type { LandblockTerrainRenderArtifact } from "./terrain-render-artifact";
+import type { RenderArtifactDiagnosticFamily } from "./render-regression-diagnostics";
 
 export type LandblockRenderProduct =
 	| "outdoor"
@@ -56,6 +57,7 @@ export interface LandblockRenderProductWorkerJob {
 	buildPolicyRevision: string;
 	texturePagePolicyRevision: string;
 	buildPolicy: LandblockRenderProductBuildPolicy;
+	artifactFilter: readonly RenderArtifactDiagnosticFamily[] | null;
 }
 
 export type LandblockRenderArtifact =
@@ -260,18 +262,22 @@ interface DetailedLandblockDebugDiagnostics {
 
 export function createLandblockRenderProductWorkerJob(
 	desired: DesiredLandblockRenderProduct,
+	artifactFilter: ReadonlySet<RenderArtifactDiagnosticFamily> | null = null,
 ): LandblockRenderProductWorkerJob {
+	const artifactFilterValues = artifactFilter ? [...artifactFilter].sort() : null;
 	return {
 		type: "build-landblock-render-product",
-		jobId: formatStaticLandblockProductKey(
-			createStaticLandblockProductKey(desired),
-		),
+		jobId: [
+			formatStaticLandblockProductKey(createStaticLandblockProductKey(desired)),
+			`artifacts:${artifactFilterValues?.join(",") ?? "all"}`,
+		].join(":"),
 		landblockId: desired.landblockId,
 		product: desired.product,
 		requestId: desired.requestId,
 		buildPolicyRevision: desired.buildPolicyRevision,
 		texturePagePolicyRevision: desired.texturePagePolicyRevision,
 		buildPolicy: desired.buildPolicy,
+		artifactFilter: artifactFilterValues,
 	};
 }
 

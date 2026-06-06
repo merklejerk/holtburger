@@ -31,13 +31,14 @@ describe("static landblock render worker client", () => {
 			job: {
 				type: "build-landblock-render-product",
 				jobId:
-					"landblock-render-product:3663069183:outdoor:build:v1:texture-pages:v1",
+					"landblock-render-product:3663069183:outdoor:build:v1:texture-pages:v1:artifacts:all",
 				landblockId: 0xda55ffff,
 				product: "outdoor",
 				requestId: "request:1",
 				buildPolicyRevision: "build:v1",
 				texturePagePolicyRevision: "texture-pages:v1",
 				buildPolicy: createBuildPolicy(),
+				artifactFilter: null,
 			},
 		});
 		expect(Object.keys(extractPostedJob(worker))).not.toContain("rootAssetIds");

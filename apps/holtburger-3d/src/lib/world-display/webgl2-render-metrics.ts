@@ -351,6 +351,21 @@ export function createWebgl2RenderMetrics(
 			directTexturePageFallbackSamples: [
 				...input.submitMetrics.directTexturePageFallbackSamples,
 			],
+			visibleStaticBundleLayerCount:
+				input.submitMetrics.visibleStaticBundleLayerCount,
+			staticBundleLayerSubmittedCount:
+				input.submitMetrics.staticBundleLayerSubmittedCount,
+			staticBundleGeometryCandidateCount:
+				input.submitMetrics.staticBundleGeometryCandidateCount,
+			staticBundleGeometrySubmittedCount:
+				input.submitMetrics.staticBundleGeometrySubmittedCount,
+			staticBundleDrawCallCount: input.submitMetrics.staticBundleDrawCallCount,
+			staticBundleTriangleCount: input.submitMetrics.staticBundleTriangleCount,
+			staticBundleSkippedGeometryCount:
+				input.submitMetrics.staticBundleSkippedGeometryCount,
+			staticBundleSubmitFallbackSamples: [
+				...input.submitMetrics.staticBundleSubmitFallbackSamples,
+			],
 			textureVelocityPartCount: 0,
 			textureVelocityRenderGroupCount: 0,
 			textureVelocityMaterialCount: 0,

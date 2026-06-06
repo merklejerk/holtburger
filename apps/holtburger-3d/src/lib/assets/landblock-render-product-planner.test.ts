@@ -117,13 +117,14 @@ describe("landblock render product planner", () => {
 		expect(job).toEqual({
 			type: "build-landblock-render-product",
 			jobId:
-				"landblock-render-product:3663069183:outdoor:build:v1:texture-pages:v1",
+				"landblock-render-product:3663069183:outdoor:build:v1:texture-pages:v1:artifacts:all",
 			landblockId: 0xda55ffff,
 			product: "outdoor",
 			requestId: "request:outdoor",
 			buildPolicyRevision: "build:v1",
 			texturePagePolicyRevision: "texture-pages:v1",
 			buildPolicy: createBuildPolicy(),
+			artifactFilter: null,
 		});
 		expect(Object.keys(job)).not.toContain("rootAssetIds");
 		expect(Object.keys(job)).not.toContain("sourceRevision");

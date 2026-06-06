@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import type { WorldRenderFrame } from "./world-render-frame";
+import type { RenderChunkTransform } from "./render-anchor";
+import { parseStaticMaterialFamilyKey } from "./static-material-artifacts";
 import {
 	planWebgl2DirectDrawRoute,
 	type Webgl2DirectDrawPrograms,
 } from "./webgl2/families/direct-family-adapters";
 import {
 	partitionWebgl2SceneDomainDrawUnits,
+	planWebgl2StaticBundleLayerSubmitOrder,
 	planWebgl2WorldSubmitOrder,
 	planWebgl2PortalMaskSubmitOrder,
 	planWebgl2TerrainTileSubmitReadiness,
@@ -125,6 +128,25 @@ describe("planWebgl2WorldSubmitOrder", () => {
 				new Map(),
 			),
 		).toThrow("missing WebGL2 terrain tile missing-terrain");
+	});
+
+	it("plans visible static bundle layers without creating draw-unit refs", () => {
+		const store = createStaticBundleLayerResourceStore([
+			createStaticBundleLayerResource({ layerKey: "layer/a" }),
+		]);
+
+		expect(
+			planWebgl2StaticBundleLayerSubmitOrder(
+				createFrameWithStaticBundleLayers(["layer/a:revision/a"]),
+				store,
+			).map((layer) => layer.key),
+		).toEqual(["layer/a:revision/a"]);
+		expect(
+			planWebgl2WorldSubmitOrder(
+				createFrameWithStaticBundleLayers(["layer/a:revision/a"]),
+				new Map(),
+			),
+		).toEqual([]);
 	});
 
 	it("partitions terrain tiles by one-draw readiness and blocked diagnostics", () => {
@@ -853,7 +875,7 @@ describe("submitWebgl2WorldFrame", () => {
 				createStaticBundleLayerResource({ texture }),
 			]),
 			drawUnitsById: new Map(),
-			frame: createFrame([]),
+			frame: createFrameWithStaticBundleLayers(["layer/a:revision/a"]),
 		});
 
 		expect(metrics.visibleDrawUnitCount).toBe(0);
@@ -866,6 +888,95 @@ describe("submitWebgl2WorldFrame", () => {
 		expect(metrics.staticBundleSubmitFallbackSamples).toEqual([]);
 		expect(gl.boundTextures).toContain(texture);
 		expect(gl.uniform1iValues).toContain(1);
+	});
+
+	it("applies render chunk offsets when submitting static bundle layers", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+		const landblockId = 0xda560100;
+		const renderChunkTransforms: readonly RenderChunkTransform[] = [
+			{
+				chunkKey: "landblock/da56ffff",
+				chunkLandblockId: 0xda56ffff,
+				offset: { x: 192, y: 0, z: -384 },
+			},
+		];
+
+		submitWebgl2WorldFrame({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			staticBundleLayerResources: createStaticBundleLayerResourceStore([
+				createStaticBundleLayerResource({ landblockId }),
+			]),
+			renderChunkTransforms,
+			drawUnitsById: new Map(),
+			frame: createFrameWithStaticBundleLayers(["layer/a:revision/a"]),
+		});
+
+		expect(gl.uniformMatrix4fvValues).toHaveLength(1);
+		expect(gl.uniformMatrix4fvValues[0]?.[12]).toBe(192);
+		expect(gl.uniformMatrix4fvValues[0]?.[13]).toBe(0);
+		expect(gl.uniformMatrix4fvValues[0]?.[14]).toBe(-384);
+	});
+
+	it("submits product static textured bundle geometry from typed family keys", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+		const texture = {} as WebGLTexture;
+
+		const metrics = submitWebgl2WorldFrame({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			staticBundleLayerResources: createStaticBundleLayerResourceStore([
+				createStaticBundleLayerResource({
+					familyKey: "static:textured-opaque:alpha=opaque",
+					texture,
+				}),
+			]),
+			drawUnitsById: new Map(),
+			frame: createFrameWithStaticBundleLayers(["layer/a:revision/a"]),
+		});
+
+		expect(metrics.staticBundleGeometrySubmittedCount).toBe(1);
+		expect(metrics.staticBundleSkippedGeometryCount).toBe(0);
+		expect(metrics.staticBundleSubmitFallbackSamples).toEqual([]);
+		expect(gl.boundTextures).toContain(texture);
+	});
+
+	it("submits direct static bundle geometry from typed family keys when texture bindings exist", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+		const texture = {} as WebGLTexture;
+
+		const metrics = submitWebgl2WorldFrame({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			staticBundleLayerResources: createStaticBundleLayerResourceStore([
+				createStaticBundleLayerResource({
+					familyKey: "static:direct:alpha=transparent-blend",
+					texture,
+				}),
+			]),
+			drawUnitsById: new Map(),
+			frame: createFrameWithStaticBundleLayers(["layer/a:revision/a"]),
+		});
+
+		expect(metrics.staticBundleGeometrySubmittedCount).toBe(1);
+		expect(metrics.staticBundleSkippedGeometryCount).toBe(0);
+		expect(metrics.staticBundleSubmitFallbackSamples).toEqual([]);
+		expect(gl.boundTextures).toContain(texture);
 	});
 
 	it("submits resident env-cell static bundle geometry from topology products", () => {
@@ -887,7 +998,7 @@ describe("submitWebgl2WorldFrame", () => {
 				}),
 			]),
 			drawUnitsById: new Map(),
-			frame: createFrame([]),
+			frame: createFrameWithStaticBundleLayers(["layer/a:revision/a"]),
 		});
 
 		expect(metrics.visibleDrawUnitCount).toBe(0);
@@ -919,7 +1030,7 @@ describe("submitWebgl2WorldFrame", () => {
 				}),
 			]),
 			drawUnitsById: new Map(),
-			frame: createFrame([]),
+			frame: createFrameWithStaticBundleLayers(["layer/a:revision/a"]),
 		});
 
 		expect(metrics.staticBundleDrawCallCount).toBe(1);
@@ -930,6 +1041,39 @@ describe("submitWebgl2WorldFrame", () => {
 		expect(gl.boundTextures).toContain(paletteTexture);
 		expect(gl.uniform2fValues).toContainEqual([2, 1]);
 		expect(gl.uniform1iValues).toContain(-1);
+	});
+
+	it("submits product indexed static bundle geometry from typed family keys", () => {
+		const gl = new CapturingSubmitGl();
+		const stateCache = new Webgl2StateCache(gl);
+		const indexTexture = {} as WebGLTexture;
+		const paletteTexture = {} as WebGLTexture;
+
+		const metrics = submitWebgl2WorldFrame({
+			gl: gl.asContext(),
+			stateCache,
+			program: createFlatProgram(),
+			texturedProgram: createTexturedProgram(),
+			indexedP8Program: createIndexedP8Program(),
+			indexedP16Program: createIndexedP16Program(),
+			staticBundleLayerResources: createStaticBundleLayerResourceStore([
+				createStaticBundleLayerResource({
+					familyKey: "static:indexed-paletted:alpha=opaque",
+					indexedFormat: "p8",
+					indexTexture,
+					paletteTexture,
+				}),
+			]),
+			drawUnitsById: new Map(),
+			frame: createFrameWithStaticBundleLayers(["layer/a:revision/a"]),
+		});
+
+		expect(metrics.staticBundleDrawCallCount).toBe(1);
+		expect(metrics.staticBundleGeometrySubmittedCount).toBe(1);
+		expect(metrics.staticBundleSkippedGeometryCount).toBe(0);
+		expect(metrics.staticBundleSubmitFallbackSamples).toEqual([]);
+		expect(gl.boundTextures).toContain(indexTexture);
+		expect(gl.boundTextures).toContain(paletteTexture);
 	});
 
 	it("submits resident 16-bit indexed static bundle geometry with detail", () => {
@@ -956,7 +1100,7 @@ describe("submitWebgl2WorldFrame", () => {
 				}),
 			]),
 			drawUnitsById: new Map(),
-			frame: createFrame([]),
+			frame: createFrameWithStaticBundleLayers(["layer/a:revision/a"]),
 		});
 
 		expect(metrics.staticBundleDrawCallCount).toBe(1);
@@ -986,13 +1130,13 @@ describe("submitWebgl2WorldFrame", () => {
 				}),
 			]),
 			drawUnitsById: new Map(),
-			frame: createFrame([]),
+			frame: createFrameWithStaticBundleLayers(["layer/a:revision/a"]),
 		});
 
 		expect(metrics.staticBundleDrawCallCount).toBe(0);
 		expect(metrics.staticBundleSkippedGeometryCount).toBe(1);
 		expect(metrics.staticBundleSubmitFallbackSamples).toEqual([
-			"static bundle layer/a material material/a has incomplete indexed material bindings",
+			"incomplete static bundle indexed material bindings; layer layer/a; material material/a",
 		]);
 	});
 
@@ -1264,6 +1408,7 @@ function createIndexedStructuredInteriorCellResource(): Webgl2StructuredInterior
 function createStaticBundleLayerResource({
 	familyKey = "rgba-texture-page",
 	layerKind = "outdoor-buildings",
+	landblockId = 1,
 	texture = {} as WebGLTexture,
 	indexedFormat = "p8",
 	indexTexture = {} as WebGLTexture,
@@ -1273,6 +1418,7 @@ function createStaticBundleLayerResource({
 }: {
 	familyKey?: string;
 	layerKind?: Webgl2StaticBundleLayerResource["layerKind"];
+	landblockId?: number;
 	texture?: WebGLTexture;
 	indexedFormat?: "p8" | "index16";
 	indexTexture?: WebGLTexture;
@@ -1286,10 +1432,12 @@ function createStaticBundleLayerResource({
 	const detailTextureResource = detailTexture
 		? createTextureResource(detailTexture)
 		: null;
-	return {
+	const family = parseStaticMaterialFamilyKey(familyKey);
+	const isIndexedFamily = family?.kind === "indexed-paletted";
+		return {
 		key: "layer/a:revision/a",
 		layerKey: "layer/a",
-		landblockId: 1,
+		landblockId,
 		layerKind,
 		sourceRevision: "revision/a",
 		texturePages: [],
@@ -1300,7 +1448,7 @@ function createStaticBundleLayerResource({
 				familyKey,
 				isTransparent: false,
 				indexedMaterial:
-					familyKey === "indexed-paletted" && !omitIndexedMaterial
+					isIndexedFamily && !omitIndexedMaterial
 						? {
 								indexFormat: indexedFormat,
 								width: 2,
@@ -1312,7 +1460,7 @@ function createStaticBundleLayerResource({
 							}
 						: undefined,
 				textureBindings:
-					familyKey === "indexed-paletted"
+					isIndexedFamily
 						? [
 								{
 									virtualRefKey: "texture/index",
@@ -1508,6 +1656,42 @@ function createCameraFrame(): WorldRenderFrame["cameraFrame"] {
 		aspect: 1,
 		near: 0.1,
 		far: 100,
+	};
+}
+
+function createFrameWithStaticBundleLayers(
+	staticBundleLayerIds: readonly string[],
+): WorldRenderFrame {
+	return {
+		cameraFrame: createCameraFrame(),
+		viewProjectionMatrix: createIdentityMat4(),
+		passes: [
+			{
+				id: "world",
+				draws: staticBundleLayerIds.map((staticBundleLayerId) => ({
+					kind: "static-bundle-layer" as const,
+					staticBundleLayerId,
+					category: "static" as const,
+				})),
+			},
+		],
+		metrics: {
+			registeredBatchCount: staticBundleLayerIds.length,
+			keyedBatchCount: 0,
+			representedItemKeyCount: 0,
+			visibleItemKeyCount: 0,
+			candidateBatchCount: staticBundleLayerIds.length,
+			itemKeyMatchedBatchCount: 0,
+			unboundFallbackBatchCount: 0,
+			explicitFallbackBatchCount: 0,
+			queryFallbackBatchCount: 0,
+			fallbackReasonCount: 0,
+			fallbackReasonSamples: [],
+			candidateCountsByCategory: createCategoryCounts(),
+			visibleDrawCountsByCategory: createCategoryCounts(),
+			fallbackCountsByCategory: createCategoryCounts(),
+			representedItemKeyCountsByCategory: createCategoryCounts(),
+		},
 	};
 }
 
@@ -2112,6 +2296,7 @@ class CapturingSubmitGl implements Webgl2StateCacheGl {
 	readonly uniform4fValues: number[][] = [];
 	readonly uniform2fValues: number[][] = [];
 	readonly uniform3fValues: number[][] = [];
+	readonly uniformMatrix4fvValues: number[][] = [];
 	readonly uniform1iValues: number[] = [];
 	readonly boundTextures: WebGLTexture[] = [];
 	private currentVertexArrayLabel: string | null = null;
@@ -2187,8 +2372,13 @@ class CapturingSubmitGl implements Webgl2StateCacheGl {
 		this.calls.push("bindFramebuffer");
 	}
 
-	uniformMatrix4fv(): void {
+	uniformMatrix4fv(
+		_location: WebGLUniformLocation,
+		_transpose: boolean,
+		value: Iterable<number>,
+	): void {
 		this.calls.push("uniformMatrix4fv");
+		this.uniformMatrix4fvValues.push([...value]);
 	}
 
 	uniform4fv(_location: WebGLUniformLocation, value: Iterable<number>): void {

@@ -3,6 +3,12 @@ import {
 	multiplyMat4Into,
 	type RenderMat4,
 } from "./render-math";
+import { normalizeOutdoorLandblockId } from "../landblocks";
+import type { RenderChunkTransform } from "./render-anchor";
+import {
+	parseStaticMaterialFamilyKey,
+	type StaticMaterialFamilyDescriptor,
+} from "./static-material-artifacts";
 import type { WorldRenderFrame } from "./world-render-frame";
 import type { Webgl2ProgramResource } from "./webgl2-gl";
 import type { Webgl2StateCache } from "./webgl2-state-cache";
@@ -127,6 +133,8 @@ export interface Webgl2WorldSubmitMetrics {
 	directPackedTexturePageEstimatedBindAvoidedCount: number;
 	directTexturePageFallbackSamples: readonly string[];
 	staticBundleLayerSubmittedCount: number;
+	visibleStaticBundleLayerCount: number;
+	staticBundleGeometryCandidateCount: number;
 	staticBundleGeometrySubmittedCount: number;
 	staticBundleDrawCallCount: number;
 	staticBundleTriangleCount: number;
@@ -172,6 +180,8 @@ const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	directPackedTexturePageEstimatedBindAvoidedCount: 0,
 	directTexturePageFallbackSamples: [],
 	staticBundleLayerSubmittedCount: 0,
+	visibleStaticBundleLayerCount: 0,
+	staticBundleGeometryCandidateCount: 0,
 	staticBundleGeometrySubmittedCount: 0,
 	staticBundleDrawCallCount: 0,
 	staticBundleTriangleCount: 0,
@@ -259,6 +269,7 @@ export function submitWebgl2WorldFrame({
 	indexedP16Program,
 	staticBundleLayerResources = null,
 	structuredInteriorResources = null,
+	renderChunkTransforms = [],
 	drawUnitsById,
 	terrainTilesById = new Map(),
 	frame,
@@ -272,6 +283,7 @@ export function submitWebgl2WorldFrame({
 	indexedP16Program: Webgl2IndexedP16WorldProgram;
 	staticBundleLayerResources?: Webgl2StaticBundleLayerResourceStore | null;
 	structuredInteriorResources?: Webgl2StructuredInteriorResourceStore | null;
+	renderChunkTransforms?: readonly RenderChunkTransform[];
 	drawUnitsById: ReadonlyMap<string, Webgl2WorldDrawUnit>;
 	terrainTilesById?: ReadonlyMap<string, Webgl2TerrainTileResource>;
 	frame: WorldRenderFrame;
@@ -280,6 +292,10 @@ export function submitWebgl2WorldFrame({
 	const terrainTiles = planWebgl2TerrainTileSubmitOrder(
 		frame,
 		terrainTilesById,
+	);
+	const staticBundleLayers = planWebgl2StaticBundleLayerSubmitOrder(
+		frame,
+		staticBundleLayerResources,
 	);
 	const portalMaskDrawUnits = planWebgl2PortalMaskSubmitOrder(
 		frame,
@@ -294,8 +310,9 @@ export function submitWebgl2WorldFrame({
 		terrainFamilyProgram,
 		indexedP8Program,
 		indexedP16Program,
-		staticBundleLayerResources,
+		staticBundleLayers,
 		structuredInteriorResources,
+		renderChunkTransforms,
 		viewProjectionMatrix: frame.viewProjectionMatrix,
 		cameraPosition: frame.cameraFrame.position,
 		drawUnits,
@@ -314,8 +331,9 @@ export function submitWebgl2WorldDrawUnits({
 	terrainFamilyProgram,
 	indexedP8Program,
 	indexedP16Program,
-	staticBundleLayerResources = null,
+	staticBundleLayers = [],
 	structuredInteriorResources = null,
+	renderChunkTransforms = [],
 	viewProjectionMatrix,
 	cameraPosition,
 	drawUnits,
@@ -332,8 +350,9 @@ export function submitWebgl2WorldDrawUnits({
 	terrainFamilyProgram?: Webgl2TerrainFamilyWorldProgram;
 	indexedP8Program: Webgl2IndexedP8WorldProgram;
 	indexedP16Program: Webgl2IndexedP16WorldProgram;
-	staticBundleLayerResources?: Webgl2StaticBundleLayerResourceStore | null;
+	staticBundleLayers?: readonly Webgl2StaticBundleLayerResource[];
 	structuredInteriorResources?: Webgl2StructuredInteriorResourceStore | null;
+	renderChunkTransforms?: readonly RenderChunkTransform[];
 	viewProjectionMatrix: RenderMat4;
 	cameraPosition: WorldRenderFrame["cameraFrame"]["position"];
 	drawUnits: readonly Webgl2WorldDrawUnit[];
@@ -367,7 +386,7 @@ export function submitWebgl2WorldDrawUnits({
 	};
 	if (drawUnits.length === 0 && terrainTiles.length === 0) {
 		if (
-			!staticBundleLayerResources?.layersByKey.size &&
+			staticBundleLayers.length === 0 &&
 			!structuredInteriorResources?.cellsByKey.size
 		) {
 			return metrics;
@@ -429,7 +448,8 @@ export function submitWebgl2WorldDrawUnits({
 		indexedP8Program,
 		indexedP16Program,
 		viewProjectionMatrix,
-		staticBundleLayerResources,
+		staticBundleLayers,
+		renderChunkTransforms,
 		metrics,
 	});
 	submitWebgl2StructuredInteriorResources({
@@ -487,7 +507,8 @@ function submitWebgl2StaticBundleLayers({
 	indexedP8Program,
 	indexedP16Program,
 	viewProjectionMatrix,
-	staticBundleLayerResources,
+	staticBundleLayers,
+	renderChunkTransforms,
 	metrics,
 }: {
 	gl: WebGL2RenderingContext;
@@ -496,20 +517,34 @@ function submitWebgl2StaticBundleLayers({
 	indexedP8Program: Webgl2IndexedP8WorldProgram;
 	indexedP16Program: Webgl2IndexedP16WorldProgram;
 	viewProjectionMatrix: RenderMat4;
-	staticBundleLayerResources: Webgl2StaticBundleLayerResourceStore | null;
+	staticBundleLayers: readonly Webgl2StaticBundleLayerResource[];
+	renderChunkTransforms: readonly RenderChunkTransform[];
 	metrics: Webgl2WorldSubmitMetrics;
 }): void {
-	if (!staticBundleLayerResources) {
+	if (staticBundleLayers.length === 0) {
 		return;
 	}
-	const identityMatrix = createTranslationMat4({ x: 0, y: 0, z: 0 });
-	for (const layer of staticBundleLayerResources.layersByKey.values()) {
+	metrics.visibleStaticBundleLayerCount = staticBundleLayers.length;
+	const staticBundleLayerTransformsByLandblockId = new Map(
+		renderChunkTransforms.map((transform) => [
+			normalizeOutdoorLandblockId(transform.chunkLandblockId),
+			transform,
+		]),
+	);
+	for (const layer of staticBundleLayers) {
+		const layerTransform = staticBundleLayerTransformsByLandblockId.get(
+			normalizeOutdoorLandblockId(layer.landblockId),
+		);
+		const layerModelMatrix = createTranslationMat4(
+			layerTransform?.offset ?? { x: 0, y: 0, z: 0 },
+		);
 		const materialByKey = new Map(
 			layer.materialRecords.map((material) => [material.key, material]),
 		);
 		const geometries = [...layer.compactedBatches, ...layer.directEntries].sort(
 			(left, right) => left.key.localeCompare(right.key),
 		);
+		metrics.staticBundleGeometryCandidateCount += geometries.length;
 		let submittedLayer = false;
 		for (const transparent of [false, true]) {
 			metrics.stateChangeCount += stateCache.setBlendState({
@@ -534,7 +569,7 @@ function submitWebgl2StaticBundleLayers({
 						indexedP8Program,
 						indexedP16Program,
 						viewProjectionMatrix,
-						identityMatrix,
+						modelMatrix: layerModelMatrix,
 						layer,
 						geometry,
 						material,
@@ -939,7 +974,7 @@ function submitWebgl2StaticBundleGeometry({
 	indexedP8Program,
 	indexedP16Program,
 	viewProjectionMatrix,
-	identityMatrix,
+	modelMatrix,
 	layer,
 	geometry,
 	material,
@@ -951,33 +986,45 @@ function submitWebgl2StaticBundleGeometry({
 	indexedP8Program: Webgl2IndexedP8WorldProgram;
 	indexedP16Program: Webgl2IndexedP16WorldProgram;
 	viewProjectionMatrix: RenderMat4;
-	identityMatrix: RenderMat4;
+	modelMatrix: RenderMat4;
 	layer: Webgl2StaticBundleLayerResource;
 	geometry: Webgl2StaticBundleGeometryResource;
 	material: Webgl2StaticBundleMaterialResource;
 	metrics: Webgl2WorldSubmitMetrics;
 }): boolean {
-	if (material.familyKey === "indexed-paletted") {
+	const family = parseStaticMaterialFamilyKey(material.familyKey);
+	if (!family) {
+		metrics.staticBundleSkippedGeometryCount += 1;
+		metrics.staticBundleSubmitFallbackSamples =
+			appendStaticBundleSubmitFallbackSamples(
+				metrics.staticBundleSubmitFallbackSamples,
+				[
+					`unsupported static bundle material family ${material.familyKey}; layer ${layer.layerKey}; material ${material.key}`,
+				],
+			);
+		return false;
+	}
+	if (isStaticBundleIndexedMaterialFamily(family)) {
 		return submitWebgl2IndexedStaticBundleGeometry({
 			gl,
 			stateCache,
 			indexedP8Program,
 			indexedP16Program,
 			viewProjectionMatrix,
-			identityMatrix,
+			modelMatrix,
 			layer,
 			geometry,
 			material,
 			metrics,
 		});
 	}
-	if (material.familyKey !== "rgba-texture-page") {
+	if (!isStaticBundleTextureMaterialFamily(family)) {
 		metrics.staticBundleSkippedGeometryCount += 1;
 		metrics.staticBundleSubmitFallbackSamples =
 			appendStaticBundleSubmitFallbackSamples(
 				metrics.staticBundleSubmitFallbackSamples,
 				[
-					`static bundle ${layer.layerKey} material ${material.key} family ${material.familyKey} is not submitted by the RGBA slice`,
+					`unsupported static bundle material family ${material.familyKey}; layer ${layer.layerKey}; material ${material.key}`,
 				],
 			);
 		return false;
@@ -989,7 +1036,7 @@ function submitWebgl2StaticBundleGeometry({
 			appendStaticBundleSubmitFallbackSamples(
 				metrics.staticBundleSubmitFallbackSamples,
 				[
-					`static bundle ${layer.layerKey} material ${material.key} has no base-color texture binding`,
+					`missing static bundle base-color texture binding; layer ${layer.layerKey}; material ${material.key}; family ${material.familyKey}`,
 				],
 			);
 		return false;
@@ -1027,7 +1074,7 @@ function submitWebgl2StaticBundleGeometry({
 		multiplyMat4Into(
 			new Float32Array(16),
 			viewProjectionMatrix,
-			identityMatrix,
+			modelMatrix,
 		),
 	);
 	gl.uniform4fv(texturedProgram.uniforms.uColor, [1, 1, 1, 1]);
@@ -1058,13 +1105,31 @@ function submitWebgl2StaticBundleGeometry({
 	return true;
 }
 
+function isStaticBundleIndexedMaterialFamily(
+	family: StaticMaterialFamilyDescriptor,
+): boolean {
+	return family.kind === "indexed-paletted";
+}
+
+function isStaticBundleTextureMaterialFamily(
+	family: StaticMaterialFamilyDescriptor,
+): boolean {
+	switch (family.kind) {
+		case "texture-page":
+			return true;
+		case "indexed-paletted":
+		case "unsupported":
+			return false;
+	}
+}
+
 function submitWebgl2IndexedStaticBundleGeometry({
 	gl,
 	stateCache,
 	indexedP8Program,
 	indexedP16Program,
 	viewProjectionMatrix,
-	identityMatrix,
+	modelMatrix,
 	layer,
 	geometry,
 	material,
@@ -1075,7 +1140,7 @@ function submitWebgl2IndexedStaticBundleGeometry({
 	indexedP8Program: Webgl2IndexedP8WorldProgram;
 	indexedP16Program: Webgl2IndexedP16WorldProgram;
 	viewProjectionMatrix: RenderMat4;
-	identityMatrix: RenderMat4;
+	modelMatrix: RenderMat4;
 	layer: Webgl2StaticBundleLayerResource;
 	geometry: Webgl2StaticBundleGeometryResource;
 	material: Webgl2StaticBundleMaterialResource;
@@ -1090,7 +1155,7 @@ function submitWebgl2IndexedStaticBundleGeometry({
 			appendStaticBundleSubmitFallbackSamples(
 				metrics.staticBundleSubmitFallbackSamples,
 				[
-					`static bundle ${layer.layerKey} material ${material.key} has incomplete indexed material bindings`,
+					`incomplete static bundle indexed material bindings; layer ${layer.layerKey}; material ${material.key}`,
 				],
 			);
 		return false;
@@ -1101,7 +1166,7 @@ function submitWebgl2IndexedStaticBundleGeometry({
 			appendStaticBundleSubmitFallbackSamples(
 				metrics.staticBundleSubmitFallbackSamples,
 				[
-					`static bundle ${layer.layerKey} material ${material.key} indexed format ${index.indexedFormat ?? "missing"} does not match descriptor ${descriptor.indexFormat}`,
+					`static bundle indexed format mismatch ${index.indexedFormat ?? "missing"} vs ${descriptor.indexFormat}; layer ${layer.layerKey}; material ${material.key}`,
 				],
 			);
 		return false;
@@ -1145,7 +1210,7 @@ function submitWebgl2IndexedStaticBundleGeometry({
 		multiplyMat4Into(
 			new Float32Array(16),
 			viewProjectionMatrix,
-			identityMatrix,
+			modelMatrix,
 		),
 	);
 	gl.uniform4fv(program.uniforms.uColor, [1, 1, 1, 1]);
@@ -1283,7 +1348,8 @@ function resetWorldSubmitExitRenderState({
 	gl: WebGL2RenderingContext;
 	stateCache: Webgl2StateCache;
 }): number {
-	let changeCount = stateCache.setDepthState({
+	let changeCount = stateCache.bindVertexArray(null) ? 1 : 0;
+	changeCount += stateCache.setDepthState({
 		enabled: true,
 		write: true,
 		func: gl.LEQUAL,
@@ -1527,6 +1593,35 @@ export function planWebgl2TerrainTileSubmitOrder(
 	}
 	return visibleTerrainTiles.sort((left, right) =>
 		compareStableAsciiStrings(left.id, right.id),
+	);
+}
+
+export function planWebgl2StaticBundleLayerSubmitOrder(
+	frame: WorldRenderFrame,
+	staticBundleLayerResources: Webgl2StaticBundleLayerResourceStore | null,
+): Webgl2StaticBundleLayerResource[] {
+	const visibleLayers: Webgl2StaticBundleLayerResource[] = [];
+	if (!staticBundleLayerResources) {
+		return visibleLayers;
+	}
+	for (const pass of frame.passes) {
+		for (const draw of pass.draws) {
+			if (draw.kind !== "static-bundle-layer") {
+				continue;
+			}
+			const layer = staticBundleLayerResources.layersByKey.get(
+				draw.staticBundleLayerId,
+			);
+			if (!layer) {
+				throw new Error(
+					`World render frame referenced missing WebGL2 static bundle layer ${draw.staticBundleLayerId}.`,
+				);
+			}
+			visibleLayers.push(layer);
+		}
+	}
+	return visibleLayers.sort((left, right) =>
+		compareStableAsciiStrings(left.key, right.key),
 	);
 }
 

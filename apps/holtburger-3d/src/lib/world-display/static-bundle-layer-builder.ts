@@ -9,6 +9,7 @@ import {
 	formatLandblockTopologyAssetId,
 	normalizeOutdoorLandblockId,
 } from "../landblocks";
+import type { PlacementTransformDto, Vec3Dto } from "../host/contracts";
 import {
 	formatStaticObjectBundleScopeKey,
 	type StaticBundleCompactedBatch,
@@ -27,6 +28,12 @@ import {
 	createCompactionEligibility,
 	type CompactionEligibility,
 } from "./compaction/compaction-family-planner";
+import {
+	buildAcPlacementMatrix,
+	multiplyMat4,
+	transformPointByMat4,
+	type RenderMat4,
+} from "./render-math";
 import type { AtlasLayoutPolicy } from "./texture-pages/atlas-layout-planner";
 import { buildStaticBundleLayerTexturePages } from "./static-bundle-layer-texture-pages";
 import {
@@ -60,9 +67,14 @@ interface StaticBundleSourceObject {
 	owningEnvCellId: number | null;
 	kind: StaticBundleObjectRecord["kind"];
 	bounds: StaticBundleSpatialHint["bounds"] | null;
+	localPlacement: PlacementTransformDto;
+	sourceScale: Vec3Dto;
 	partAssetIds: readonly string[];
 	materialAssetIds: readonly string[];
 }
+
+const ZERO_VEC3: Vec3Dto = { x: 0, y: 0, z: 0 };
+const UNIT_SCALE: Vec3Dto = { x: 1, y: 1, z: 1 };
 
 interface StaticBundleBuildSurface {
 	key: string;
@@ -254,6 +266,8 @@ function collectStaticBundleSourceObjects(
 								? "generated-scenery"
 								: "scenery",
 					bounds: member.instanceBounds,
+					localPlacement: member.localPlacement,
+					sourceScale: member.sourceScale,
 					partAssetIds: collectRenderablePartAssetIds(
 						member.sourceAssetId,
 						preparedByAssetId,
@@ -285,6 +299,8 @@ function collectStaticBundleSourceObjects(
 			owningEnvCellId: envCellScope.envCellId,
 			kind: "indoor-static",
 			bounds: member.instanceBounds,
+			localPlacement: member.localPlacement,
+			sourceScale: member.sourceScale,
 			partAssetIds: collectRenderablePartAssetIds(
 				member.sourceAssetId,
 				preparedByAssetId,
@@ -343,7 +359,10 @@ function buildObjectSurfaces(
 			materialTextureRoutes,
 		});
 		const geometry = gfxObj.renderGeometry;
-		const positions = toFloat32Array(geometry.positions);
+		const positions = transformStaticBundlePositions(
+			toFloat32Array(geometry.positions),
+			createStaticBundleSourcePlacementMatrix(object),
+		);
 		const normals = toFloat32Array(geometry.normals);
 		const uvs = toFloat32Array(geometry.uvs);
 		const indices = createSequentialTriangleIndices(geometry.triangleCount);
@@ -382,6 +401,57 @@ function buildObjectSurfaces(
 			indices,
 		};
 	});
+}
+
+function createStaticBundleSourcePlacementMatrix(
+	object: StaticBundleSourceObject,
+): RenderMat4 {
+	return multiplyMat4(
+		buildAcPlacementMatrix(object.localPlacement, ZERO_VEC3, UNIT_SCALE),
+		createRenderScaleMatrix(object.sourceScale),
+	);
+}
+
+function createRenderScaleMatrix(scale: Vec3Dto): RenderMat4 {
+	return new Float32Array([
+		scale.x,
+		0,
+		0,
+		0,
+		0,
+		scale.z,
+		0,
+		0,
+		0,
+		0,
+		scale.y,
+		0,
+		0,
+		0,
+		0,
+		1,
+	]);
+}
+
+function transformStaticBundlePositions(
+	positions: Float32Array,
+	matrix: RenderMat4,
+): Float32Array {
+	const transformed = new Float32Array(positions.length);
+	for (let offset = 0; offset < positions.length; offset += 3) {
+		const point = transformPointByMat4(
+			{
+				x: positions[offset] ?? 0,
+				y: positions[offset + 1] ?? 0,
+				z: positions[offset + 2] ?? 0,
+			},
+			matrix,
+		);
+		transformed[offset] = point.x;
+		transformed[offset + 1] = point.y;
+		transformed[offset + 2] = point.z;
+	}
+	return transformed;
 }
 
 function buildMaterialRecords({

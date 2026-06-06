@@ -14,6 +14,13 @@ import type {
 	LandblockRenderProductBuildPolicy,
 	LandblockRenderProductWorkerResult,
 } from "./landblock-render-product";
+import {
+	describeDiagnosticSet,
+	logTemporaryRenderRegressionDiagnostic,
+	readTemporaryRenderRegressionDiagnostics,
+	shouldRequestRenderProduct,
+	type TemporaryRenderRegressionDiagnostics,
+} from "./render-regression-diagnostics";
 
 const STATIC_LANDBLOCK_RENDER_BUILD_POLICY_REVISION =
 	"static-landblock-render:v1";
@@ -58,6 +65,7 @@ interface StaticLandblockRenderArtifactCoordinatorOptions {
 	onProductEvicted?: (key: StaticLandblockProductKey) => void;
 	onProductsCleared?: () => void;
 	onError?: (error: Error, desired: DesiredLandblockRenderProduct) => void;
+	renderRegressionDiagnostics?: TemporaryRenderRegressionDiagnostics;
 }
 
 export class StaticLandblockRenderArtifactCoordinator {
@@ -79,6 +87,8 @@ export class StaticLandblockRenderArtifactCoordinator {
 	private readonly onError:
 		| ((error: Error, desired: DesiredLandblockRenderProduct) => void)
 		| undefined;
+	private readonly renderRegressionDiagnostics: TemporaryRenderRegressionDiagnostics;
+	private lastDiagnosticsRequestSignature: string | null = null;
 	private nextRequestSequence = 1;
 	private lastInputSignature: string | null = null;
 	private lastRequestId: string | null = null;
@@ -100,6 +110,9 @@ export class StaticLandblockRenderArtifactCoordinator {
 		this.onProductEvicted = options.onProductEvicted;
 		this.onProductsCleared = options.onProductsCleared;
 		this.onError = options.onError;
+		this.renderRegressionDiagnostics =
+			options.renderRegressionDiagnostics ??
+			readTemporaryRenderRegressionDiagnostics();
 	}
 
 	sync(input: StaticLandblockRenderArtifactCoordinatorInput): void {
@@ -107,7 +120,7 @@ export class StaticLandblockRenderArtifactCoordinator {
 			return;
 		}
 		const requestId = this.resolveRequestId(input);
-		const desiredProducts = planDesiredLandblockRenderProducts({
+		const plannedProducts = planDesiredLandblockRenderProducts({
 			browserDestination: input.browserDestination,
 			requestId,
 			buildPolicyRevision: this.buildPolicyRevision,
@@ -119,6 +132,17 @@ export class StaticLandblockRenderArtifactCoordinator {
 				detailRadius: input.detailLodRadius,
 				envCellRadius: input.envCellLodRadius,
 			},
+		});
+		const desiredProducts = plannedProducts.filter((product) =>
+			shouldRequestRenderProduct(
+				this.renderRegressionDiagnostics,
+				product.product,
+			),
+		);
+		this.reportDesiredProductDiagnostics({
+			requestId,
+			plannedProducts,
+			desiredProducts,
 		});
 
 		const evictedProductKeys = this.store.syncDesiredProducts(desiredProducts);
@@ -184,6 +208,51 @@ export class StaticLandblockRenderArtifactCoordinator {
 		this.lastRequestId = `static-landblock-render:${this.nextRequestSequence++}`;
 		return this.lastRequestId;
 	}
+
+	private reportDesiredProductDiagnostics({
+		requestId,
+		plannedProducts,
+		desiredProducts,
+	}: {
+		requestId: string;
+		plannedProducts: readonly DesiredLandblockRenderProduct[];
+		desiredProducts: readonly DesiredLandblockRenderProduct[];
+	}): void {
+		if (
+			!this.renderRegressionDiagnostics.enabled &&
+			!this.renderRegressionDiagnostics.productFilter
+		) {
+			return;
+		}
+		const signature = [
+			requestId,
+			plannedProducts
+				.map((product) => `${product.landblockId}:${product.product}`)
+				.join(","),
+			desiredProducts
+				.map((product) => `${product.landblockId}:${product.product}`)
+				.join(","),
+		].join("|");
+		if (signature === this.lastDiagnosticsRequestSignature) {
+			return;
+		}
+		this.lastDiagnosticsRequestSignature = signature;
+		logTemporaryRenderRegressionDiagnostic(
+			"desired-products",
+			{
+				requestId,
+				productFilter: describeDiagnosticSet(
+					this.renderRegressionDiagnostics.productFilter,
+				),
+				plannedCount: plannedProducts.length,
+				requestedCount: desiredProducts.length,
+				droppedCount: plannedProducts.length - desiredProducts.length,
+				plannedCounts: countDesiredProductsByProduct(plannedProducts),
+				requestedCounts: countDesiredProductsByProduct(desiredProducts),
+			},
+			this.renderRegressionDiagnostics,
+		);
+	}
 }
 
 function toError(error: unknown): Error {
@@ -202,4 +271,14 @@ function describeCoordinatorInputSignature(
 		input.detailLodRadius,
 		input.envCellLodRadius,
 	].join("|");
+}
+
+function countDesiredProductsByProduct(
+	products: readonly DesiredLandblockRenderProduct[],
+): Record<string, number> {
+	const counts: Record<string, number> = {};
+	for (const product of products) {
+		counts[product.product] = (counts[product.product] ?? 0) + 1;
+	}
+	return counts;
 }

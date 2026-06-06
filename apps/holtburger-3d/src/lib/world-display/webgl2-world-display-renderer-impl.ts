@@ -17,11 +17,13 @@ import { Webgl2StateCache } from "./webgl2-state-cache";
 import {
 	buildWorldRenderFrame,
 	type WorldRenderFrame,
+	type WorldRenderCandidate,
 	type WorldRenderFrameMetrics,
 } from "./world-render-frame";
 import {
 	createEmptyWebgl2WorldSubmitMetrics,
 	partitionWebgl2SceneDomainDrawUnits,
+	planWebgl2StaticBundleLayerSubmitOrder,
 	planWebgl2WorldSubmitOrder,
 	planWebgl2PortalMaskSubmitOrder,
 	planWebgl2TerrainTileSubmitOrder,
@@ -68,6 +70,7 @@ import {
 	createEmptyStaticLandblockRenderProductSet,
 	type StaticLandblockRenderProductSet,
 } from "./static-landblock-render-artifact-store";
+import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import type {
 	LandblockRenderProductWorkerResult,
 	StaticLandblockProductKey,
@@ -134,12 +137,22 @@ import { deriveWebgl2DrawUnitRuntimeDiagnostics } from "./webgl2-draw-unit-rende
 import { createStaticLandblockProductMetadataStore } from "./static-landblock-product-metadata";
 import {
 	commitWebgl2StaticBundleProductResources,
+	describeStaticBundleLayerResourceKey,
 	evictWebgl2StaticBundleProductResources,
+	type Webgl2StaticBundleLayerResource,
 } from "./webgl2/resources/static-bundle-layer-resources";
 import {
 	commitWebgl2StructuredInteriorProductResources,
 	evictWebgl2StructuredInteriorProductResources,
 } from "./webgl2/resources/structured-interior-resources";
+import {
+	ALL_RENDER_UPLOAD_DIAGNOSTIC_FAMILIES,
+	describeDiagnosticSet,
+	logTemporaryRenderRegressionDiagnostic,
+	readTemporaryRenderRegressionDiagnostics,
+	shouldUploadRenderFamily,
+	type RenderUploadDiagnosticFamily,
+} from "./render-regression-diagnostics";
 import type { NormalizedViewportPoint } from "./model";
 import type {
 	RenderSpatialItemKind,
@@ -514,6 +527,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	let transitionPortalMaxDepth = options.transitionPortalMaxDepth ?? 1;
 	let textureFilteringMode = options.textureFilteringMode ?? "anisotropic-4x";
 	let detailTexturesEnabled = options.detailTexturesEnabled ?? true;
+	const renderRegressionDiagnostics =
+		readTemporaryRenderRegressionDiagnostics();
 	let renderMetricsChangeHandler = options.onRenderMetricsChange;
 	let cameraResidencyChangeHandler = options.onCameraResidencyChange;
 	let disposed = false;
@@ -763,33 +778,53 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		if (!resources) {
 			return;
 		}
+		const startedAtMs = nowMs();
 		const currentResources = resources;
+		currentResources.stateCache.bindVertexArray(null);
 		const productKey = createStaticLandblockProductKeyFromResult(result);
 		const maxAnisotropy =
 			currentResources.materialTextureCapabilities.maxAnisotropy ?? 1;
-		commitWebgl2StaticBundleProductResources({
-			gl: currentResources.gl,
-			store: currentResources.worldStore.staticBundleLayerResources,
-			productKey,
-			layers: getStaticObjectBundleArtifacts(result).filter((bundle) =>
+		const enabledUploadFamilies = new Set(
+			ALL_RENDER_UPLOAD_DIAGNOSTIC_FAMILIES.filter((family) =>
+				shouldUploadRenderFamily(renderRegressionDiagnostics, family),
+			),
+		);
+		const staticBundleLayers = getStaticObjectBundleArtifacts(result).filter(
+			(bundle) =>
 				isRenderableStaticLandblockArtifactLayer(
 					result.product,
 					bundle.bundleKind,
 				),
-			),
-			textureFilteringMode,
-			maxAnisotropy,
-		});
-		const detailed = getDetailedLandblockRenderArtifacts(result);
-		if (detailed) {
-			commitWebgl2StructuredInteriorProductResources({
-				gl: currentResources.gl,
-				store: currentResources.worldStore.structuredInteriorResources,
+		);
+		if (enabledUploadFamilies.has("static-bundles")) {
+			profileBrowserJsScope("webgl2.commit.staticBundles", () => {
+				commitWebgl2StaticBundleProductResources({
+					gl: currentResources.gl,
+					store: currentResources.worldStore.staticBundleLayerResources,
+					productKey,
+					layers: staticBundleLayers,
+					textureFilteringMode,
+					maxAnisotropy,
+				});
+			});
+		} else {
+			evictWebgl2StaticBundleProductResources({
+				store: currentResources.worldStore.staticBundleLayerResources,
 				productKey,
-				artifact: detailed,
-				renderChunkTransforms,
-				textureFilteringMode,
-				maxAnisotropy,
+			});
+		}
+		const detailed = getDetailedLandblockRenderArtifacts(result);
+		if (detailed && enabledUploadFamilies.has("structured-interior")) {
+			profileBrowserJsScope("webgl2.commit.structuredInterior", () => {
+				commitWebgl2StructuredInteriorProductResources({
+					gl: currentResources.gl,
+					store: currentResources.worldStore.structuredInteriorResources,
+					productKey,
+					artifact: detailed,
+					renderChunkTransforms,
+					textureFilteringMode,
+					maxAnisotropy,
+				});
 			});
 		} else {
 			evictWebgl2StructuredInteriorProductResources({
@@ -797,17 +832,22 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				productKey,
 			});
 		}
-		if (getLandblockTerrainRenderArtifact(result)) {
-			commitWebgl2TerrainProductResultResources({
-				gl: currentResources.gl,
-				store: currentResources.worldStore,
-				result,
-				renderChunkTransforms,
-				assetState,
-				materialTextureCapabilities:
-					currentResources.materialTextureCapabilities,
-				textureFilteringMode,
-				detailTexturesEnabled,
+		if (
+			getLandblockTerrainRenderArtifact(result) &&
+			enabledUploadFamilies.has("terrain")
+		) {
+			profileBrowserJsScope("webgl2.commit.terrainProduct", () => {
+				commitWebgl2TerrainProductResultResources({
+					gl: currentResources.gl,
+					store: currentResources.worldStore,
+					result,
+					renderChunkTransforms,
+					assetState,
+					materialTextureCapabilities:
+						currentResources.materialTextureCapabilities,
+					textureFilteringMode,
+					detailTexturesEnabled,
+				});
 			});
 		} else {
 			evictWebgl2TerrainProductResources({
@@ -821,23 +861,40 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				detailTexturesEnabled,
 			});
 		}
-		commitWebgl2TransitionPortalProductMaskResources({
-			gl: currentResources.gl,
-			store: currentResources.worldStore,
-			productKey,
-			transitionPortalModel:
-				deriveTransitionPortalCandidatesFromLandblockArtifacts({
-					artifacts: createSingleProductSet(result),
-					activeLandblockIds: [result.landblockId],
-				}) ?? createEmptyTransitionPortalCandidateModel(),
-			renderChunkTransforms,
-			assetState,
-			materialTextureCapabilities: currentResources.materialTextureCapabilities,
-			textureFilteringMode,
-		});
+		if (enabledUploadFamilies.has("portal-mask")) {
+			profileBrowserJsScope("webgl2.commit.portalMask", () => {
+				commitWebgl2TransitionPortalProductMaskResources({
+					gl: currentResources.gl,
+					store: currentResources.worldStore,
+					productKey,
+					transitionPortalModel:
+						deriveTransitionPortalCandidatesFromLandblockArtifacts({
+							artifacts: createSingleProductSet(result),
+							activeLandblockIds: [result.landblockId],
+						}) ?? createEmptyTransitionPortalCandidateModel(),
+					renderChunkTransforms,
+					assetState,
+					materialTextureCapabilities:
+						currentResources.materialTextureCapabilities,
+					textureFilteringMode,
+				});
+			});
+		} else {
+			evictWebgl2TransitionPortalProductMaskResources({
+				store: currentResources.worldStore,
+				productKey,
+			});
+		}
 		refreshWebgl2StaticLandblockProductResourceCounters(
 			currentResources.worldStore,
 		);
+		reportStaticProductCommitDiagnostics({
+			result,
+			enabledUploadFamilies,
+			staticBundleLayers,
+			durationMs: nowMs() - startedAtMs,
+			store: currentResources.worldStore,
+		});
 	}
 
 	function evictStaticProductRenderResources(
@@ -977,6 +1034,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 
 		const frameCandidates = [
 			...currentResources.worldStore.drawUnits,
+			...createStaticBundleLayerRenderCandidates(staticLandblockRenderProducts),
 			...currentResources.worldStore.terrainRenderCandidates.map(
 				(candidate) => ({
 					id: candidate.id,
@@ -1048,6 +1106,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 								currentResources.worldStore.staticBundleLayerResources,
 							structuredInteriorResources:
 								currentResources.worldStore.structuredInteriorResources,
+							renderChunkTransforms,
 							drawUnitsById: currentResources.worldStore.drawUnitsById,
 							terrainTilesById: currentResources.worldStore.terrainTilesById,
 							frame,
@@ -1379,6 +1438,14 @@ export function createWebgl2WorldDisplayRendererImplementation(
 					currentResources.worldStore.terrainTilesById,
 				),
 		);
+		const visibleStaticBundleLayers = profileBrowserJsScope(
+			"webgl2.sceneDomain.planVisibleStaticBundleLayers",
+			() =>
+				planWebgl2StaticBundleLayerSubmitOrder(
+					frame,
+					currentResources.worldStore.staticBundleLayerResources,
+				),
+		);
 		const baseScene = deriveWebgl2BaseSceneDomainFromResidency(
 			latestCameraResidencyContext,
 		);
@@ -1410,6 +1477,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				renderSceneDomainTarget({
 					target: targets.exterior,
 						drawUnits: sceneDomainDrawUnits.exterior,
+						staticBundleLayers: visibleStaticBundleLayers,
 						terrainTiles: visibleTerrainTiles,
 						frame,
 						terrainBackfaceCulling: baseScene === "interior",
@@ -1421,6 +1489,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				renderSceneDomainTarget({
 					target: targets.interior,
 						drawUnits: sceneDomainDrawUnits.interior,
+						staticBundleLayers: [],
 						terrainTiles: [],
 						frame,
 						terrainBackfaceCulling: false,
@@ -1547,12 +1616,14 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	function renderSceneDomainTarget({
 			target,
 			drawUnits,
+			staticBundleLayers,
 			terrainTiles,
 			frame,
 			terrainBackfaceCulling,
 	}: {
 		target: Webgl2SceneDomainTarget;
 			drawUnits: readonly Webgl2WorldDrawUnit[];
+			staticBundleLayers: readonly Webgl2StaticBundleLayerResource[];
 			terrainTiles: readonly Webgl2TerrainTileResource[];
 			frame: ReturnType<typeof buildWorldRenderFrame>;
 			terrainBackfaceCulling: boolean;
@@ -1604,6 +1675,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			viewProjectionMatrix: frame.viewProjectionMatrix,
 			cameraPosition: frame.cameraFrame.position,
 			drawUnits,
+			staticBundleLayers,
+			renderChunkTransforms,
 			terrainTiles,
 			terrainBackfaceCulling,
 		});
@@ -2390,6 +2463,12 @@ function mergeSceneDomainSubmitMetrics({
 		staticBundleLayerSubmittedCount:
 			exteriorMetrics.staticBundleLayerSubmittedCount +
 			interiorMetrics.staticBundleLayerSubmittedCount,
+		visibleStaticBundleLayerCount:
+			exteriorMetrics.visibleStaticBundleLayerCount +
+			interiorMetrics.visibleStaticBundleLayerCount,
+		staticBundleGeometryCandidateCount:
+			exteriorMetrics.staticBundleGeometryCandidateCount +
+			interiorMetrics.staticBundleGeometryCandidateCount,
 		staticBundleGeometrySubmittedCount:
 			exteriorMetrics.staticBundleGeometrySubmittedCount +
 			interiorMetrics.staticBundleGeometrySubmittedCount,
@@ -2730,6 +2809,216 @@ function createSingleProductSet(
 		residentCount: 1,
 		committedResultCount: 1,
 	};
+}
+
+function createStaticBundleLayerRenderCandidates(
+	products: StaticLandblockRenderProductSet,
+): WorldRenderCandidate[] {
+	return products.artifacts.flatMap((result) =>
+		getStaticObjectBundleArtifacts(result).map((bundle) => {
+			const bvhItemKeys = uniqueSortedStrings(
+				bundle.objectRecords.flatMap((record) => record.visibilityKeys),
+			);
+			return {
+				id: describeStaticBundleLayerResourceKey(bundle),
+				kind: "static-bundle-layer",
+				bvhItemKeys,
+				bvhFallbackReason:
+					bvhItemKeys.length === 0
+						? `static bundle layer ${bundle.key} contains no visibility keys`
+						: null,
+			};
+		}),
+	);
+}
+
+function uniqueSortedStrings(values: readonly RenderBvhItemKey[]): RenderBvhItemKey[] {
+	return [...new Set(values)].sort((left, right) => left.localeCompare(right));
+}
+
+function reportStaticProductCommitDiagnostics({
+	result,
+	enabledUploadFamilies,
+	staticBundleLayers,
+	durationMs,
+	store,
+}: {
+	result: LandblockRenderProductWorkerResult;
+	enabledUploadFamilies: ReadonlySet<RenderUploadDiagnosticFamily>;
+	staticBundleLayers: readonly StaticObjectBundleArtifact[];
+	durationMs: number;
+	store: Webgl2WorldResourceStore;
+}): void {
+	logTemporaryRenderRegressionDiagnostic("webgl2-product-commit", {
+		landblockId: result.landblockId,
+		product: result.product,
+		requestId: result.requestId,
+		durationMs: roundMs(durationMs),
+		uploadFilter: describeDiagnosticSet(
+			readTemporaryRenderRegressionDiagnostics().uploadFilter,
+		),
+		enabledUploadFamilies: [...enabledUploadFamilies].sort(),
+		resultShape: describeLandblockProductResultShape({
+			result,
+			staticBundleLayers,
+		}),
+		resourceShape: describeWebgl2ResourceShape(store),
+	});
+}
+
+function describeLandblockProductResultShape({
+	result,
+	staticBundleLayers,
+}: {
+	result: LandblockRenderProductWorkerResult;
+	staticBundleLayers: readonly StaticObjectBundleArtifact[];
+}): Record<string, unknown> {
+	const terrain = getLandblockTerrainRenderArtifact(result);
+	const detailed = getDetailedLandblockRenderArtifacts(result);
+	return {
+		artifactCounts: countArtifactsByKind(result),
+		staticBundleLayers: staticBundleLayers.length,
+		staticBundleTexturePages: staticBundleLayers.reduce(
+			(total, layer) => total + layer.texturePages.length,
+			0,
+		),
+		staticBundleTextureBytes: staticBundleLayers.reduce(
+			(total, layer) =>
+				total +
+				layer.texturePages.reduce(
+					(layerTotal, page) => layerTotal + page.bytes.byteLength,
+					0,
+				),
+			0,
+		),
+		staticBundleCompactedBatches: staticBundleLayers.reduce(
+			(total, layer) => total + layer.compactedBatches.length,
+			0,
+		),
+		staticBundleDirectEntries: staticBundleLayers.reduce(
+			(total, layer) => total + layer.directEntries.length,
+			0,
+		),
+		terrainTextureRefs: terrain?.texturePageRefs.length ?? 0,
+		terrainTextureBytes:
+			terrain?.texturePageRefs.reduce(
+				(total, ref) => total + ref.bytes.byteLength,
+				0,
+			) ?? 0,
+		terrainDrawSlices: terrain?.drawSlices.length ?? 0,
+		terrainFallbackReasons: terrain?.diagnostics.fallbackReasons.slice(0, 8) ?? [],
+		structuredInteriorCells: detailed?.structuredInteriorCells.length ?? 0,
+		structuredInteriorMaterialSlices:
+			detailed?.structuredInteriorCells.reduce(
+				(total, cell) => total + cell.materialSlices.length,
+				0,
+			) ?? 0,
+		structuredInteriorTexturePages:
+			detailed?.structuredInteriorTexturePages.length ?? 0,
+		structuredInteriorTextureBytes:
+			detailed?.structuredInteriorTexturePages.reduce(
+				(total, page) => total + page.bytes.byteLength,
+				0,
+			) ?? 0,
+		structuredInteriorMaterialRecords:
+			detailed?.structuredInteriorMaterialRecords.length ?? 0,
+	};
+}
+
+function describeWebgl2ResourceShape(
+	store: Webgl2WorldResourceStore,
+): Record<string, unknown> {
+	return {
+		portalDrawUnits: store.drawUnits.length,
+		terrainTiles: store.terrainTileCount,
+		terrainTexturePages: store.terrainTexturePageCount,
+		terrainDetailTexturePages: store.terrainDetailTexturePageCount,
+		staticBundleProducts: store.staticBundleLayerResources.productsByKey.size,
+		staticBundleLayers: store.staticBundleLayerResourceCount,
+		staticBundleTexturePages: store.staticBundleLayerTexturePageResourceCount,
+		staticBundleTextureEstimatedBytes:
+			estimateStaticBundleTextureResourceBytes(
+				store.staticBundleLayerResources.layersByKey.values(),
+			),
+		staticBundleCompactedBatches:
+			store.staticBundleLayerCompactedBatchResourceCount,
+		staticBundleDirectEntries: store.staticBundleLayerDirectEntryResourceCount,
+		structuredInteriorProducts:
+			store.structuredInteriorResources.productsByKey.size,
+		structuredInteriorCells: store.structuredInteriorResourceCount,
+		structuredInteriorTexturePages:
+			store.structuredInteriorTexturePageResourceCount,
+		structuredInteriorMaterialRecords:
+			store.structuredInteriorMaterialRecordResourceCount,
+		structuredInteriorTriangles: store.structuredInteriorResourceTriangleCount,
+		textureCount: store.textureCount,
+		preparedTextureUploadCount: store.preparedTextureUploadCount,
+		preparedTextureGeneratedByteLength: store.preparedTextureGeneratedByteLength,
+	};
+}
+
+function estimateStaticBundleTextureResourceBytes(
+	layers: Iterable<Webgl2StaticBundleLayerResource>,
+): number {
+	let total = 0;
+	for (const layer of layers) {
+		for (const page of layer.texturePages) {
+			total += estimateStaticBundleTexturePageBytes(page);
+		}
+	}
+	return total;
+}
+
+function estimateStaticBundleTexturePageBytes(
+	page: Webgl2StaticBundleLayerResource["texturePages"][number],
+): number {
+	const baseBytes =
+		page.texture.width *
+		page.texture.height *
+		bytesPerStaticBundleTexturePixel(page);
+	return page.mipmapsGenerated ? Math.ceil(baseBytes * 4 / 3) : baseBytes;
+}
+
+function bytesPerStaticBundleTexturePixel(
+	page: Webgl2StaticBundleLayerResource["texturePages"][number],
+): number {
+	switch (page.sampleClass) {
+		case "rgba-color":
+		case "palette-data":
+			return 4;
+		case "control-data":
+			return 1;
+		case "indexed-data":
+			switch (page.indexedFormat) {
+				case "p8":
+					return 1;
+				case "index16":
+					return 2;
+				case null:
+					return 1;
+			}
+	}
+	throw new Error(
+		`Unsupported static bundle texture sample class ${page.sampleClass}.`,
+	);
+}
+
+function countArtifactsByKind(
+	result: LandblockRenderProductWorkerResult,
+): Record<string, number> {
+	const counts: Record<string, number> = {};
+	for (const artifact of result.artifacts) {
+		counts[artifact.artifactKind] = (counts[artifact.artifactKind] ?? 0) + 1;
+	}
+	return counts;
+}
+
+function nowMs(): number {
+	return globalThis.performance?.now() ?? Date.now();
+}
+
+function roundMs(value: number): number {
+	return Math.round(value * 100) / 100;
 }
 
 function evictProductFromSet(

@@ -60,18 +60,13 @@ function createDeferredWorldDisplayRenderer<
 
 	const { options } = input;
 	let assetState = options.assetState;
-	let terrainScene = options.terrainScene;
 	let staticLandblockRenderProducts = options.staticLandblockRenderProducts;
-	let staticRenderableScene = options.staticRenderableScene;
-	let structuredInteriorScene = options.structuredInteriorScene;
-	let transitionPortalModel = options.transitionPortalModel;
 	let debugOverlayScene = options.debugOverlayScene;
 	let renderSceneContext = options.renderSceneContext;
 	let renderChunkTransforms = options.renderChunkTransforms;
 	let renderSpatialQuery = options.renderSpatialQuery;
 	let selectedStaticRenderableRenderKey =
 		options.selectedStaticRenderableRenderKey;
-	const rendererResourceGraph = options.rendererResourceGraph;
 	let controlledCameraFrame = options.controlledCameraFrame;
 	let transitionPortalMaxDepth = options.transitionPortalMaxDepth;
 	let renderStyle = options.renderStyle;
@@ -93,14 +88,6 @@ function createDeferredWorldDisplayRenderer<
 			assetState = nextAssetState;
 			loadedRenderer?.setAssetState(nextAssetState);
 		},
-		setTerrainScene(scene) {
-			terrainScene = scene;
-			loadedRenderer?.setTerrainScene(scene);
-		},
-		setStaticRenderableScene(scene) {
-			staticRenderableScene = scene;
-			loadedRenderer?.setStaticRenderableScene(scene);
-		},
 		commitStaticLandblockProduct(result) {
 			staticLandblockRenderProducts = commitProductToSet(
 				staticLandblockRenderProducts,
@@ -119,14 +106,6 @@ function createDeferredWorldDisplayRenderer<
 			staticLandblockRenderProducts =
 				createEmptyStaticLandblockRenderProductSet();
 			loadedRenderer?.clearStaticLandblockProducts();
-		},
-		setStructuredInteriorScene(scene) {
-			structuredInteriorScene = scene;
-			loadedRenderer?.setStructuredInteriorScene(scene);
-		},
-		setTransitionPortalModel(model) {
-			transitionPortalModel = model;
-			loadedRenderer?.setTransitionPortalModel(model);
 		},
 		setDebugOverlayScene(scene) {
 			debugOverlayScene = scene;
@@ -218,17 +197,12 @@ function createDeferredWorldDisplayRenderer<
 	function currentOptions(): WorldDisplayRendererOptions {
 		return {
 			assetState,
-			terrainScene,
 			staticLandblockRenderProducts,
-			staticRenderableScene,
-			structuredInteriorScene,
-			transitionPortalModel,
 			debugOverlayScene,
 			renderSceneContext,
 			renderChunkTransforms,
 			renderSpatialQuery,
 			selectedStaticRenderableRenderKey,
-			rendererResourceGraph,
 			controlledCameraFrame,
 			transitionPortalMaxDepth,
 			renderStyle,

@@ -108,34 +108,6 @@ describe("asset cache policy", () => {
 		});
 	});
 
-	it("retains renderer graph reachable assets as hard roots", () => {
-		const preparedByAssetId = indexPreparedAssets([
-			createPreparedSetupModelAsset("setup-model/020000ff", [
-				"gfx-obj/020000ff",
-			]),
-			createPreparedGfxObjAsset("gfx-obj/020000ff"),
-			createPreparedGfxObjAsset("gfx-obj/expired"),
-		]);
-
-		const plan = planPreparedAssetCachePrune({
-			preparedByAssetId,
-			cacheMetadataByAssetId: createMetadata(preparedByAssetId, 0),
-			activeCoverageAssetIds: [],
-			inFlightAssetIds: [],
-			rendererRetainedAssetIds: ["setup-model/020000ff"],
-			nowMs: 10_000,
-			warmRetainMs: 1_000,
-		});
-
-		expect(plan.retainedAssetIds).toEqual([
-			"gfx-obj/020000ff",
-			"setup-model/020000ff",
-		]);
-		expect(plan.evictedAssetIds).toEqual(["gfx-obj/expired"]);
-		expect(
-			plan.cacheMetadataByAssetId["gfx-obj/020000ff"]?.lastRetainedAtMs,
-		).toBe(10_000);
-	});
 });
 
 function indexPreparedAssets(

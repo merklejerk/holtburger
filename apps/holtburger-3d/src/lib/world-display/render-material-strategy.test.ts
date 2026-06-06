@@ -11,10 +11,10 @@ import {
 	type PreparedTexturePayload,
 } from "../assets/types";
 import {
-	planStagedWorldMaterialStrategies,
-	resolveStagedWorldMaterialStrategy,
-} from "./staged-world-material-strategy";
-import { resolveStagedWorldMaterialSlotPlan } from "./staged-world-materials";
+	planRenderMaterialStrategies,
+	resolveRenderMaterialStrategy,
+} from "./render-material-strategy";
+import { resolveRenderMaterialSlotPlan } from "./render-material-plans";
 import type { ResolvedMaterialSlot } from "./material-plan";
 
 const PIXEL_FORMAT_A8R8G8B8 = 0x15;
@@ -23,8 +23,8 @@ const PIXEL_FORMAT_INDEX16 = 0x65;
 const SURFACE_TYPE_DIFFUSE = 0x20;
 const SURFACE_TYPE_ALPHA = 0x100;
 
-describe("staged world material strategy", () => {
-	it("resolves atlas-eligible compressed materials as direct staged textures", () => {
+describe("render material strategy", () => {
+	it("resolves atlas-eligible compressed materials as direct direct textures", () => {
 		const state = createAssetState([
 			createMaterialRecipeRecord({
 				surfaceId: 0x08000001,
@@ -34,7 +34,7 @@ describe("staged world material strategy", () => {
 			createAtlasPreparedTextureRecord({ renderSurfaceId: 0x06000001 }),
 		]);
 
-		const strategy = resolveStagedWorldMaterialStrategy({
+		const strategy = resolveRenderMaterialStrategy({
 			assetState: state,
 			input: createRequirement("static", 0),
 		});
@@ -64,7 +64,7 @@ describe("staged world material strategy", () => {
 			createAtlasPreparedTextureRecord({ renderSurfaceId: 0x06000001 }),
 		]);
 
-		const strategy = resolveStagedWorldMaterialStrategy({
+		const strategy = resolveRenderMaterialStrategy({
 			assetState: state,
 			input: createRequirement("static", 0, 0x08000001, "sampler=repeat"),
 		});
@@ -90,7 +90,7 @@ describe("staged world material strategy", () => {
 			createAtlasPreparedTextureRecord({ renderSurfaceId: 0x06000001 }),
 		]);
 
-		const strategy = resolveStagedWorldMaterialStrategy({
+		const strategy = resolveRenderMaterialStrategy({
 			assetState: state,
 			input: createRequirement("static", 0),
 		});
@@ -110,7 +110,7 @@ describe("staged world material strategy", () => {
 		});
 	});
 
-	it("keeps atlas candidacy out of staged fallback reasons", () => {
+	it("keeps atlas candidacy out of fallback reasons", () => {
 		const state = createAssetState([
 			createMaterialRecipeRecord({
 				surfaceId: 0x08000001,
@@ -120,7 +120,7 @@ describe("staged world material strategy", () => {
 			createAtlasPreparedTextureRecord({ renderSurfaceId: 0x06000001 }),
 		]);
 
-		const material = resolveStagedWorldMaterialSlotPlan({
+		const material = resolveRenderMaterialSlotPlan({
 			assetState: state,
 			slot: createMaterialSlot({ slotIndex: 0, surfaceId: 0x08000001 }),
 			fallbackColorKey: "test/static",
@@ -138,7 +138,7 @@ describe("staged world material strategy", () => {
 		});
 	});
 
-	it("reuses staged material plans while prepared dependencies are unchanged", () => {
+	it("reuses render material plans while prepared dependencies are unchanged", () => {
 		const materialRecord = createMaterialRecipeRecord({
 			surfaceId: 0x08000001,
 			renderSurfaceId: 0x06000001,
@@ -157,21 +157,21 @@ describe("staged world material strategy", () => {
 		const slot = createMaterialSlot({ slotIndex: 0, surfaceId: 0x08000001 });
 		const materialPlanCache = new Map();
 
-		const first = resolveStagedWorldMaterialSlotPlan({
+		const first = resolveRenderMaterialSlotPlan({
 			assetState: state,
 			slot,
 			fallbackColorKey: "test/static",
 			renderableKind: "static",
 			materialPlanCache,
 		});
-		const second = resolveStagedWorldMaterialSlotPlan({
+		const second = resolveRenderMaterialSlotPlan({
 			assetState: state,
 			slot,
 			fallbackColorKey: "test/static",
 			renderableKind: "static",
 			materialPlanCache,
 		});
-		const refreshed = resolveStagedWorldMaterialSlotPlan({
+		const refreshed = resolveRenderMaterialSlotPlan({
 			assetState: createAssetState([
 				materialRecord,
 				{ ...renderSurfaceRecord, preparedAt: "refreshed" },
@@ -195,14 +195,14 @@ describe("staged world material strategy", () => {
 		const slot = createMaterialSlot({ slotIndex: 0, surfaceId: 0x08000001 });
 		const materialPlanCache = new Map();
 
-		const unresolved = resolveStagedWorldMaterialSlotPlan({
+		const unresolved = resolveRenderMaterialSlotPlan({
 			assetState: createAssetState([materialRecord]),
 			slot,
 			fallbackColorKey: "test/static",
 			renderableKind: "static",
 			materialPlanCache,
 		});
-		const resolved = resolveStagedWorldMaterialSlotPlan({
+		const resolved = resolveRenderMaterialSlotPlan({
 			assetState: createAssetState([
 				materialRecord,
 				createRenderSurfaceRecord({ renderSurfaceId: 0x06000001 }),
@@ -221,7 +221,7 @@ describe("staged world material strategy", () => {
 		expect(resolved.kind).toBe("direct-texture");
 	});
 
-	it("uses the same staged direct policy for structured interiors", () => {
+	it("uses the same direct texture policy for structured interiors", () => {
 		const state = createAssetState([
 			createMaterialRecipeRecord({
 				surfaceId: 0x08000001,
@@ -231,7 +231,7 @@ describe("staged world material strategy", () => {
 			createAtlasPreparedTextureRecord({ renderSurfaceId: 0x06000001 }),
 		]);
 
-		const strategy = resolveStagedWorldMaterialStrategy({
+		const strategy = resolveRenderMaterialStrategy({
 			assetState: state,
 			input: createRequirement("structured-interior", 0),
 		});
@@ -261,7 +261,7 @@ describe("staged world material strategy", () => {
 			}),
 		]);
 
-		const strategy = resolveStagedWorldMaterialStrategy({
+		const strategy = resolveRenderMaterialStrategy({
 			assetState: state,
 			input: createRequirement("static", 0),
 		});
@@ -294,7 +294,7 @@ describe("staged world material strategy", () => {
 			createPaletteRecord(0x04000001, [0xff000000, 0xffffffff]),
 		]);
 
-		const strategy = resolveStagedWorldMaterialStrategy({
+		const strategy = resolveRenderMaterialStrategy({
 			assetState: state,
 			input: createRequirement("static", 0),
 		});
@@ -329,7 +329,7 @@ describe("staged world material strategy", () => {
 			createPaletteRecord(0x04000001, [0x00000000, 0xffffffff]),
 		]);
 
-		const strategy = resolveStagedWorldMaterialStrategy({
+		const strategy = resolveRenderMaterialStrategy({
 			assetState: state,
 			input: createRequirement("static", 0),
 		});
@@ -361,7 +361,7 @@ describe("staged world material strategy", () => {
 			createAtlasPreparedTextureRecord({ renderSurfaceId: 0x06000001 }),
 		]);
 
-		const plan = planStagedWorldMaterialStrategies({
+		const plan = planRenderMaterialStrategies({
 			assetState: state,
 			requirements: [
 				createRequirement("static", 0),
@@ -394,7 +394,7 @@ describe("staged world material strategy", () => {
 			createRenderSurfaceRecord({ renderSurfaceId: 0x06000001 }),
 		]);
 
-		const plan = planStagedWorldMaterialStrategies({
+		const plan = planRenderMaterialStrategies({
 			assetState: state,
 			requirements: [createRequirement("static", 0)],
 		});
@@ -430,7 +430,7 @@ describe("staged world material strategy", () => {
 			createAtlasPreparedTextureRecord({ renderSurfaceId: 0x06000002 }),
 		]);
 
-		const plan = planStagedWorldMaterialStrategies({
+		const plan = planRenderMaterialStrategies({
 			assetState: state,
 			requirements: [
 				createRequirement("static", 0, 0x08000001),
@@ -446,7 +446,7 @@ describe("staged world material strategy", () => {
 			),
 		).toEqual(["direct-texture", "direct-texture"]);
 
-		const s3tcPlan = planStagedWorldMaterialStrategies({
+		const s3tcPlan = planRenderMaterialStrategies({
 			assetState: state,
 			requirements: [
 				createRequirement("static", 0, 0x08000001),
@@ -478,7 +478,7 @@ describe("staged world material strategy", () => {
 				createAtlasPreparedTextureRecord({ renderSurfaceId }),
 			);
 		}
-		const plan = planStagedWorldMaterialStrategies({
+		const plan = planRenderMaterialStrategies({
 			assetState: createAssetState(records),
 			requirements: [0, 1, 2].map((index) =>
 				createRequirement("static", index, 0x08000010 + index),
@@ -521,7 +521,7 @@ describe("staged world material strategy", () => {
 			createAtlasPreparedTextureRecord({ renderSurfaceId: 0x06000002 }),
 		]);
 
-		const plan = planStagedWorldMaterialStrategies({
+		const plan = planRenderMaterialStrategies({
 			assetState: state,
 			requirements: [
 				createRequirement("static", 0, 0x08000001),

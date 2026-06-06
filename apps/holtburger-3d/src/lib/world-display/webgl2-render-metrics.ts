@@ -27,8 +27,8 @@ export interface Webgl2RenderMetricsInput {
 	residencyCellBspMatchCount: number;
 	residencyAabbFallbackCount: number;
 	residencySource: string;
-	renderGraphPolicy: string;
-	renderGraphBaseScene: string;
+	resourcePolicy: string;
+	baseSceneDomain: string;
 	transitionPortalMaxDepth: number;
 	cameraNear: number | null;
 	cameraFar: number | null;
@@ -100,8 +100,8 @@ export function createWebgl2RenderMetrics(
 			residencyCellBspMatchCount: input.residencyCellBspMatchCount,
 			residencyAabbFallbackCount: input.residencyAabbFallbackCount,
 			residencySource: input.residencySource,
-			renderGraphPolicy: input.renderGraphPolicy,
-			renderGraphBaseScene: input.renderGraphBaseScene,
+			resourcePolicy: input.resourcePolicy,
+			baseSceneDomain: input.baseSceneDomain,
 			transitionPortalMaxDepth: input.transitionPortalMaxDepth,
 			cameraNear: input.cameraNear,
 			cameraFar: input.cameraFar,
@@ -178,25 +178,20 @@ export function createWebgl2RenderMetrics(
 						...input.worldStore.portalMaskDrawUnitIdsByProductKey.values(),
 					].reduce((total, drawUnitIds) => total + drawUnitIds.length, 0)
 				: 0,
-			staticGroupMeshCount: input.worldStore?.appearancePreviewDrawUnitCount ?? 0,
+			staticGroupMeshCount:
+				input.worldStore?.staticBundleLayerResourceCount ?? 0,
 			visibleStaticGroupMeshCount:
-				(input.frameMetrics?.visibleDrawCountsByCategory["appearance-preview-staged"] ??
-					0) + (input.frameMetrics?.visibleDrawCountsByCategory.static ?? 0),
-			staticRenderBatchCount: input.worldStore?.appearancePreviewDrawUnitCount ?? 0,
+				input.frameMetrics?.visibleDrawCountsByCategory.static ?? 0,
+			staticRenderBatchCount:
+				input.worldStore?.staticBundleLayerResourceCount ?? 0,
 			staticBvhCandidateBatchCount:
-				(input.frameMetrics?.candidateCountsByCategory["appearance-preview-staged"] ?? 0) +
-				(input.frameMetrics?.candidateCountsByCategory.static ?? 0),
+				input.frameMetrics?.candidateCountsByCategory.static ?? 0,
 			staticBvhRepresentedInstanceKeyCount:
-				(input.frameMetrics?.representedItemKeyCountsByCategory[
-					"appearance-preview-staged"
-				] ?? 0) +
-				(input.frameMetrics?.representedItemKeyCountsByCategory.static ?? 0),
+				input.frameMetrics?.representedItemKeyCountsByCategory.static ?? 0,
 			staticBvhVisibleInstanceKeyCount:
-				(input.frameMetrics?.visibleDrawCountsByCategory["appearance-preview-staged"] ??
-					0) + (input.frameMetrics?.visibleDrawCountsByCategory.static ?? 0),
+				input.frameMetrics?.visibleDrawCountsByCategory.static ?? 0,
 			staticBvhFallbackIncludedBatchCount:
-				(input.frameMetrics?.fallbackCountsByCategory["appearance-preview-staged"] ?? 0) +
-				(input.frameMetrics?.fallbackCountsByCategory.static ?? 0),
+				input.frameMetrics?.fallbackCountsByCategory.static ?? 0,
 			terrainRenderBatchCount: input.worldStore?.terrainTileCount ?? 0,
 			terrainBvhCandidateBatchCount:
 				input.frameMetrics?.candidateCountsByCategory.terrain ?? 0,
@@ -251,14 +246,15 @@ export function createWebgl2RenderMetrics(
 			terrainBvhTotalItemCount:
 				input.frameMetrics?.candidateCountsByCategory.terrain ?? 0,
 			outdoorStaticBvhVisibleItemCount:
-				input.frameMetrics?.visibleDrawCountsByCategory["appearance-preview-staged"] ?? 0,
+				input.frameMetrics?.visibleDrawCountsByCategory.static ?? 0,
 			outdoorStaticBvhTotalItemCount:
-				input.frameMetrics?.candidateCountsByCategory["appearance-preview-staged"] ?? 0,
+				input.frameMetrics?.candidateCountsByCategory.static ?? 0,
 			envCellLocalBvhVisibleItemCount:
 				input.frameMetrics?.visibleItemKeyCount ?? 0,
 			envCellLocalBvhTotalItemCount:
 				input.frameMetrics?.representedItemKeyCount ?? 0,
-			visibleStaticInstanceKeyCount: input.worldStore?.appearancePreviewInstanceCount ?? 0,
+			visibleStaticInstanceKeyCount:
+				input.frameMetrics?.visibleDrawCountsByCategory.static ?? 0,
 			visiblePortalKeyCount: 0,
 			envCellBvhConsideredCount: 0,
 			fallbackReasonCount:
@@ -300,40 +296,40 @@ export function createWebgl2RenderMetrics(
 				input.worldStore?.detailAtlasReadyDrawUnitCount ?? 0,
 			atlasFailureReasonCount: input.worldStore?.atlasFailureReasonCount ?? 0,
 			atlasFailureSamples: [...(input.worldStore?.atlasFailureSamples ?? [])],
-			compactionCandidateDrawUnitCount:
-				input.worldStore?.compactionCandidateDrawUnitCount ?? 0,
-			compactionBypassReasonCount:
-				input.worldStore?.compactionBypassReasonCount ?? 0,
-			compactionBypassSamples: [
-				...(input.worldStore?.compactionBypassSamples ?? []),
+			materialBatchingCandidateDrawUnitCount:
+				input.worldStore?.materialBatchingCandidateDrawUnitCount ?? 0,
+			materialBatchingBypassReasonCount:
+				input.worldStore?.materialBatchingBypassReasonCount ?? 0,
+			materialBatchingBypassSamples: [
+				...(input.worldStore?.materialBatchingBypassSamples ?? []),
 			],
-			compactionBypassBlockerSamples: [
-				...(input.worldStore?.compactionBypassBlockerSamples ?? []),
+			materialBatchingBypassBlockerSamples: [
+				...(input.worldStore?.materialBatchingBypassBlockerSamples ?? []),
 			],
-			compactionBypassDetailSamples: [
-				...(input.worldStore?.compactionBypassDetailSamples ?? []),
+			materialBatchingBypassDetailSamples: [
+				...(input.worldStore?.materialBatchingBypassDetailSamples ?? []),
 			],
-			compactionCoverageDrawUnitCounts:
-				input.worldStore?.compactionCoverageDrawUnitCounts ?? {},
-			compactionCoverageMaterialBlockerCounts:
-				input.worldStore?.compactionCoverageMaterialBlockerCounts ?? {},
-			compactionCoverageGeometryBlockerCounts:
-				input.worldStore?.compactionCoverageGeometryBlockerCounts ?? {},
-			compactionCoverageMaterialFamilyCounts:
-				input.worldStore?.compactionCoverageMaterialFamilyCounts ?? {},
-			compactionCoverageMaterialAlphaPolicyCounts:
-				input.worldStore?.compactionCoverageMaterialAlphaPolicyCounts ?? {},
-			compactionCoverageMaterialFamilyAlphaPolicyCounts:
-				input.worldStore?.compactionCoverageMaterialFamilyAlphaPolicyCounts ??
+			materialBatchingCoverageDrawUnitCounts:
+				input.worldStore?.materialBatchingCoverageDrawUnitCounts ?? {},
+			materialBatchingCoverageMaterialBlockerCounts:
+				input.worldStore?.materialBatchingCoverageMaterialBlockerCounts ?? {},
+			materialBatchingCoverageGeometryBlockerCounts:
+				input.worldStore?.materialBatchingCoverageGeometryBlockerCounts ?? {},
+			materialBatchingCoverageMaterialFamilyCounts:
+				input.worldStore?.materialBatchingCoverageMaterialFamilyCounts ?? {},
+			materialBatchingCoverageMaterialAlphaPolicyCounts:
+				input.worldStore?.materialBatchingCoverageMaterialAlphaPolicyCounts ?? {},
+			materialBatchingCoverageMaterialFamilyAlphaPolicyCounts:
+				input.worldStore?.materialBatchingCoverageMaterialFamilyAlphaPolicyCounts ??
 				{},
-			compactionCoverageRetainedDirectMaterialFamilyCounts:
+			materialBatchingCoverageRetainedDirectMaterialFamilyCounts:
 				input.worldStore
-					?.compactionCoverageRetainedDirectMaterialFamilyCounts ?? {},
-			compactionCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts:
+					?.materialBatchingCoverageRetainedDirectMaterialFamilyCounts ?? {},
+			materialBatchingCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts:
 				input.worldStore
-					?.compactionCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts ??
+					?.materialBatchingCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts ??
 				{},
-			compactionCoverageVisibleRetainedDirectMaterialFamilyCounts:
+			materialBatchingCoverageVisibleRetainedDirectMaterialFamilyCounts:
 				input.submitMetrics
 					.visibleRetainedDirectDrawUnitCountsByCompactionFamily,
 			terrainTexturePageCount:
@@ -367,10 +363,10 @@ export function createWebgl2RenderMetrics(
 				input.worldStore?.indexedMaterialDescriptorDrawUnitCount ?? 0,
 			standaloneIndexedMaterialResourceDrawUnitCount:
 				input.worldStore?.standaloneIndexedMaterialResourceDrawUnitCount ?? 0,
-			staticGeometryGroupCount: input.worldStore?.appearancePreviewDrawUnitCount ?? 0,
+			staticGeometryGroupCount:
+				input.worldStore?.staticBundleLayerResourceCount ?? 0,
 			staticVisibleGeometryGroupCount:
-				(input.frameMetrics?.visibleDrawCountsByCategory["appearance-preview-staged"] ??
-					0) + (input.frameMetrics?.visibleDrawCountsByCategory.static ?? 0),
+				input.frameMetrics?.visibleDrawCountsByCategory.static ?? 0,
 			structuredInteriorGeometryGroupCount:
 				input.worldStore?.structuredInteriorResourceCount ?? 0,
 			materialTypeCounts: input.worldStore
@@ -390,43 +386,43 @@ export function createWebgl2RenderMetrics(
 							input.worldStore.detailAtlasReadyDrawUnitCount,
 						"webgl2-atlas-failures": input.worldStore.atlasFailureReasonCount,
 						"webgl2-static-eligibility-candidates":
-							input.worldStore.compactionCandidateDrawUnitCount,
+							input.worldStore.materialBatchingCandidateDrawUnitCount,
 						"webgl2-static-eligibility-bypasses":
-							input.worldStore.compactionBypassReasonCount,
+							input.worldStore.materialBatchingBypassReasonCount,
 						...prefixCounts(
 							"webgl2-static-eligibility-coverage-",
-							input.worldStore.compactionCoverageDrawUnitCounts,
+							input.worldStore.materialBatchingCoverageDrawUnitCounts,
 						),
 						...prefixCounts(
 							"webgl2-static-eligibility-material-blocker-",
-							input.worldStore.compactionCoverageMaterialBlockerCounts,
+							input.worldStore.materialBatchingCoverageMaterialBlockerCounts,
 						),
 						...prefixCounts(
 							"webgl2-static-eligibility-geometry-blocker-",
-							input.worldStore.compactionCoverageGeometryBlockerCounts,
+							input.worldStore.materialBatchingCoverageGeometryBlockerCounts,
 						),
 						...prefixCounts(
 							"webgl2-static-eligibility-material-family-",
-							input.worldStore.compactionCoverageMaterialFamilyCounts,
+							input.worldStore.materialBatchingCoverageMaterialFamilyCounts,
 						),
 						...prefixCounts(
 							"webgl2-static-eligibility-alpha-policy-",
-							input.worldStore.compactionCoverageMaterialAlphaPolicyCounts,
+							input.worldStore.materialBatchingCoverageMaterialAlphaPolicyCounts,
 						),
 						...prefixCounts(
 							"webgl2-static-eligibility-family-alpha-policy-",
 							input.worldStore
-								.compactionCoverageMaterialFamilyAlphaPolicyCounts,
+								.materialBatchingCoverageMaterialFamilyAlphaPolicyCounts,
 						),
 						...prefixCounts(
 							"webgl2-retained-direct-material-family-",
 							input.worldStore
-								.compactionCoverageRetainedDirectMaterialFamilyCounts,
+								.materialBatchingCoverageRetainedDirectMaterialFamilyCounts,
 						),
 						...prefixCounts(
 							"webgl2-retained-direct-material-family-alpha-policy-",
 							input.worldStore
-								.compactionCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts,
+								.materialBatchingCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts,
 						),
 						...prefixCounts(
 							"webgl2-visible-retained-direct-material-family-",

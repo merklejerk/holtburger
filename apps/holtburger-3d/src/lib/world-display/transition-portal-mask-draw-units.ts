@@ -9,7 +9,7 @@ import {
 } from "./render-math";
 import { buildPortalApertureRenderGeometry } from "./indexed-render-geometry";
 import type { RenderIndexedGeometry } from "./indexed-render-geometry";
-import type { StagedWorldMaterialPlan } from "./staged-world-materials";
+import type { RenderMaterialPlan } from "./render-material-plans";
 import type {
 	TransitionPortalCandidate,
 	TransitionPortalCandidateModel,
@@ -20,7 +20,7 @@ export interface TransitionPortalMaskDrawUnitAssembly {
 	kind: "portal-mask";
 	geometry: RenderIndexedGeometry;
 	modelMatrix: RenderMat4;
-	material: StagedWorldMaterialPlan;
+	material: RenderMaterialPlan;
 	preparedAssetIds: readonly [];
 	bvhBinding: {
 		itemKeys: readonly RenderBvhItemKey[];

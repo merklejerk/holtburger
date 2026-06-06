@@ -54,7 +54,6 @@ import {
 	evictWebgl2TransitionPortalProductMaskResources,
 	evictWebgl2TerrainProductResources,
 	refreshWebgl2StaticLandblockProductResourceCounters,
-	syncWebgl2WorldResources,
 	type Webgl2WorldResourceStore,
 } from "./webgl2-world-resources";
 import { deriveLandblockRenderChunkPlacement } from "./render-chunks";
@@ -118,9 +117,12 @@ import {
 	type WorldResidencyQueryDiagnostics,
 } from "./world-residency-index";
 import {
+	createEmptyStaticRenderableSceneModel,
 	isPreparedGfxObjAsset,
 	type StaticRenderablePart,
 } from "./static-renderables";
+import { createEmptyTerrainSceneModel } from "./terrain-scene";
+import { createEmptyStructuredInteriorSceneModel } from "./structured-interior-scene";
 import { buildStaticRenderablePartMatrix } from "./static-renderable-placement";
 import type {
 	WorldDisplayRenderer,
@@ -128,7 +130,7 @@ import type {
 } from "./world-display-renderer-contract";
 import { calculateStaticLandblockArtifactSceneBoundsFrame } from "./artifact-scene-bounds";
 import { profileBrowserJsScope } from "../diagnostics/browser-js-profiler";
-import { deriveWebgl2DrawUnitRuntimeDiagnostics } from "./webgl2-runtime-render-diagnostics";
+import { deriveWebgl2DrawUnitRuntimeDiagnostics } from "./webgl2-draw-unit-render-diagnostics";
 import { createStaticLandblockProductMetadataStore } from "./static-landblock-product-metadata";
 import {
 	commitWebgl2StaticBundleProductResources,
@@ -499,11 +501,11 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	options: WorldDisplayRendererOptions,
 ): WorldDisplayRenderer {
 	let assetState = options.assetState;
-	let terrainScene = options.terrainScene;
+	const emptyTerrainScene = createEmptyTerrainSceneModel();
 	let staticLandblockRenderProducts = options.staticLandblockRenderProducts;
-	let staticRenderableScene = options.staticRenderableScene;
-	let structuredInteriorScene = options.structuredInteriorScene;
-	let transitionPortalModel = options.transitionPortalModel;
+	const staticRenderableScene = createEmptyStaticRenderableSceneModel();
+	const structuredInteriorScene = createEmptyStructuredInteriorSceneModel();
+	let transitionPortalModel = createEmptyTransitionPortalCandidateModel();
 	let renderSceneContext = options.renderSceneContext;
 	let renderChunkTransforms = options.renderChunkTransforms;
 	let selectedStaticRenderableRenderKey =
@@ -517,7 +519,6 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	let disposed = false;
 	let frameHandle: number | null = null;
 	let resources: Webgl2RenderResources | null = null;
-	let worldResourcesDirty = false;
 	let initializationError: string | null = null;
 	let clearCount = 0;
 	let drawCallCount = 0;
@@ -580,15 +581,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	return {
 		setAssetState(nextAssetState) {
 			assetState = nextAssetState;
-			markWorldResourcesDirty();
-		},
-		setTerrainScene(scene) {
-			terrainScene = scene;
-			markWorldResourcesDirty();
-		},
-		setStaticRenderableScene(scene) {
-			staticRenderableScene = scene;
-			markWorldResourcesDirty();
+			recommitStaticProductRenderResources();
+			reportMetrics();
+			scheduleFrame();
 		},
 		commitStaticLandblockProduct(result) {
 			staticLandblockRenderProducts = commitProductToSet(
@@ -599,7 +594,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			commitStaticProductRenderResources(result);
 			staticProductMetadata.commitProduct(result);
 			refreshStaticProductSceneBounds();
-			markWorldResourcesDirty();
+			resources?.stateCache.invalidate();
+			scheduleFrame();
 			syncResidencyIndex();
 		},
 		evictStaticLandblockProduct(key) {
@@ -611,7 +607,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			evictStaticProductRenderResources(key);
 			staticProductMetadata.evictProduct(key);
 			refreshStaticProductSceneBounds();
-			markWorldResourcesDirty();
+			resources?.stateCache.invalidate();
+			scheduleFrame();
 			syncResidencyIndex();
 		},
 		clearStaticLandblockProducts() {
@@ -621,17 +618,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			syncStaticProductTransitionPortalModel();
 			staticProductMetadata.clearProducts();
 			refreshStaticProductSceneBounds();
-			markWorldResourcesDirty();
+			resources?.stateCache.invalidate();
+			scheduleFrame();
 			syncResidencyIndex();
-		},
-		setStructuredInteriorScene(scene) {
-			structuredInteriorScene = scene;
-			markWorldResourcesDirty();
-			syncResidencyIndex();
-		},
-		setTransitionPortalModel(model) {
-			transitionPortalModel = model;
-			markWorldResourcesDirty();
 		},
 		setDebugOverlayScene() {
 			reportMetrics();
@@ -645,7 +634,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			renderChunkTransforms = transforms;
 			staticProductMetadata.updateRenderChunkTransforms(transforms);
 			recommitStaticProductRenderResources();
-			markWorldResourcesDirty();
+			refreshStaticProductSceneBounds();
+			resources?.stateCache.invalidate();
+			scheduleFrame();
 			syncResidencyIndex();
 		},
 		setRenderSpatialQuery() {
@@ -676,7 +667,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			}
 			textureFilteringMode = mode;
 			recommitStaticProductRenderResources();
-			markWorldResourcesDirty();
+			resources?.stateCache.invalidate();
+			reportMetrics();
+			scheduleFrame();
 		},
 		setDetailTexturesEnabled(enabled) {
 			if (detailTexturesEnabled === enabled) {
@@ -684,7 +677,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			}
 			detailTexturesEnabled = enabled;
 			recommitStaticProductRenderResources();
-			markWorldResourcesDirty();
+			resources?.stateCache.invalidate();
+			reportMetrics();
+			scheduleFrame();
 		},
 		setCameraFrameChangeHandler() {
 			return;
@@ -714,9 +709,6 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			);
 		},
 		getDrawUnitRuntimeDiagnostics(drawUnitIds) {
-			if (worldResourcesDirty) {
-				syncWorldResources();
-			}
 			return resources
 				? deriveWebgl2DrawUnitRuntimeDiagnostics({
 						store: resources.worldStore,
@@ -753,7 +745,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			syncStaticProductTransitionPortalModel();
 			recommitStaticProductRenderResources();
 			syncCanvasSize();
-			syncWorldResources();
+			refreshStaticProductSceneBounds();
 			syncResidencyIndex();
 			scheduleFrame();
 		} catch (error) {
@@ -951,9 +943,6 @@ export function createWebgl2WorldDisplayRendererImplementation(
 
 		profileBrowserJsScope("webgl2.frame.syncCanvasSize", syncCanvasSize);
 		const renderStartedAt = window.performance.now();
-		if (worldResourcesDirty) {
-			syncWorldResources();
-		}
 		const { gl } = currentResources;
 		currentResources.stateCache.bindFramebuffer(null);
 		currentResources.stateCache.setViewport({
@@ -1009,7 +998,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 						staticRenderableScene,
 						staticLandblockRenderProducts,
 						structuredInteriorScene,
-						terrainScene,
+						terrainScene: emptyTerrainScene,
 					}),
 			);
 			latestFrameMetrics = frame.metrics;
@@ -2112,45 +2101,6 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		resources.stateCache.invalidate();
 	}
 
-	function syncWorldResources(): void {
-		if (!resources) {
-			latestSceneBounds = null;
-			worldResourcesDirty = false;
-			return;
-		}
-		worldResourcesDirty = false;
-		const currentResources = resources;
-		profileBrowserJsScope("webgl2.resource.syncWorldResources", () => {
-			syncWebgl2WorldResources({
-				gl: currentResources.gl,
-				store: currentResources.worldStore,
-				assetState,
-				terrainScene,
-				staticRenderableScene,
-				renderChunkTransforms,
-				rendererResourceGraph: options.rendererResourceGraph,
-				materialTextureCapabilities:
-					currentResources.materialTextureCapabilities,
-				textureFilteringMode,
-				detailTexturesEnabled,
-			});
-		});
-		latestSceneBounds = profileBrowserJsScope(
-			"webgl2.resource.calculateSceneBounds",
-			() =>
-				calculateStaticLandblockArtifactSceneBoundsFrame({
-					artifacts: staticLandblockRenderProducts,
-					renderChunkTransforms,
-				}),
-		);
-		resources.stateCache.invalidate();
-	}
-
-	function markWorldResourcesDirty(): void {
-		worldResourcesDirty = true;
-		scheduleFrame();
-	}
-
 	function pickStaticProductAtViewportPoint(
 		viewportPoint: NormalizedViewportPoint,
 		mask: ReadonlySet<RenderSpatialItemKind>,
@@ -2223,7 +2173,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		const metricsCameraFrame = resolveCameraFrame();
 		renderMetricsChangeHandler?.(
 			createWebgl2RenderMetrics({
-				terrainScene,
+				terrainScene: emptyTerrainScene,
 				staticRenderableScene,
 				structuredInteriorScene,
 				transitionPortalModel,
@@ -2243,14 +2193,14 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				residencyAabbFallbackCount:
 					latestCameraResidencyDiagnostics.aabbFallbackCount,
 				residencySource: latestCameraResidencyDiagnostics.source,
-				renderGraphPolicy: initializationError
+				resourcePolicy: initializationError
 					? "webgl2-initialization-failed"
 					: resources
 						? resources.worldStore.drawUnits.length > 0
-							? "webgl2-staged-resources"
+							? "webgl2-product-resources"
 							: "webgl2-test-frame"
 						: "webgl2-initializing",
-				renderGraphBaseScene: latestBaseSceneDomain,
+				baseSceneDomain: latestBaseSceneDomain,
 				transitionPortalMaxDepth,
 				cameraNear: metricsCameraFrame.near,
 				cameraFar: metricsCameraFrame.far,

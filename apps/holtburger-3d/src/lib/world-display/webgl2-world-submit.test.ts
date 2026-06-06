@@ -837,7 +837,7 @@ describe("submitWebgl2WorldFrame", () => {
 		expect(gl.calls).toContain("uniform2f");
 	});
 
-	it("submits resident RGBA static bundle geometry without staged draw units", () => {
+	it("submits resident RGBA static bundle geometry directly from product resources", () => {
 		const gl = new CapturingSubmitGl();
 		const stateCache = new Webgl2StateCache(gl);
 		const texture = {} as WebGLTexture;
@@ -996,7 +996,7 @@ describe("submitWebgl2WorldFrame", () => {
 		]);
 	});
 
-	it("submits resident structured interior resources without staged draw units", () => {
+	it("submits resident structured interior resources directly from product resources", () => {
 		const gl = new CapturingSubmitGl();
 		const stateCache = new Webgl2StateCache(gl);
 
@@ -2079,7 +2079,6 @@ function createCategoryCounts() {
 	return {
 		terrain: 0,
 		"structured-interior": 0,
-		"appearance-preview-staged": 0,
 		static: 0,
 		"portal-mask": 0,
 		"debug-overlay": 0,

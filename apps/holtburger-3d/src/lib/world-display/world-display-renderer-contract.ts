@@ -3,7 +3,6 @@ import type { SceneCameraFrame } from "./camera";
 import type { WorldDebugOverlayModel } from "./debug-overlays";
 import type { NormalizedViewportPoint } from "./model";
 import type { RenderChunkTransform } from "./render-anchor";
-import type { RendererResourceGraph } from "./renderer-resource-graph";
 import type {
 	RenderSpatialIndexQuery,
 	RenderSpatialItemKind,
@@ -16,31 +15,22 @@ import type {
 	WorldRenderCameraFrameChangeHandler,
 	WorldRenderMetricsChangeHandler,
 } from "./renderer-contract";
-import type { DrawUnitRuntimeDiagnostic } from "./runtime-render-diagnostics";
+import type { DrawUnitRuntimeDiagnostic } from "./draw-unit-render-diagnostics";
 import type { WorldRenderSceneContext } from "./render-scene-context";
-import type { StaticRenderableSceneModel } from "./static-renderables";
 import type {
 	StaticLandblockProductKey,
 	StaticLandblockRenderProductSet,
 } from "./static-landblock-render-artifact-store";
 import type { LandblockRenderProductWorkerResult } from "./landblock-render-product";
-import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
-import type { TerrainSceneModel } from "./terrain-scene";
-import type { TransitionPortalCandidateModel } from "./transition-portal-work-items";
 
 export interface WorldDisplayRendererOptions {
 	assetState: AssetChannelState;
-	terrainScene: TerrainSceneModel;
 	staticLandblockRenderProducts: StaticLandblockRenderProductSet;
-	staticRenderableScene: StaticRenderableSceneModel;
-	structuredInteriorScene: StructuredInteriorSceneModel;
-	transitionPortalModel: TransitionPortalCandidateModel;
 	debugOverlayScene: WorldDebugOverlayModel;
 	renderSceneContext: WorldRenderSceneContext;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	renderSpatialQuery: RenderSpatialIndexQuery | null;
 	selectedStaticRenderableRenderKey: string | null;
-	rendererResourceGraph?: RendererResourceGraph;
 	controlledCameraFrame: SceneCameraFrame | null;
 	transitionPortalMaxDepth?: number;
 	renderStyle?: WorldDisplayRenderStyle;
@@ -53,15 +43,11 @@ export interface WorldDisplayRendererOptions {
 
 export interface WorldDisplayRenderer {
 	setAssetState(assetState: AssetChannelState): void;
-	setTerrainScene(scene: TerrainSceneModel): void;
-	setStaticRenderableScene(scene: StaticRenderableSceneModel): void;
 	commitStaticLandblockProduct(
 		result: LandblockRenderProductWorkerResult,
 	): void;
 	evictStaticLandblockProduct(key: StaticLandblockProductKey): void;
 	clearStaticLandblockProducts(): void;
-	setStructuredInteriorScene(scene: StructuredInteriorSceneModel): void;
-	setTransitionPortalModel(model: TransitionPortalCandidateModel): void;
 	setDebugOverlayScene(scene: WorldDebugOverlayModel): void;
 	setRenderSceneContext(context: WorldRenderSceneContext): void;
 	setRenderChunkTransforms(transforms: readonly RenderChunkTransform[]): void;

@@ -1,14 +1,11 @@
 import type {
-	RuntimeAppearanceRequestDto,
 	AssetLookupRequestDto,
 	AssetLookupResponseDto,
 	DebugConfigDto,
-	SetupAppearancePayloadDto,
 } from "./contracts";
 import {
 	assetLookupResponseDtoSchema,
 	debugConfigDtoSchema,
-	setupAppearancePayloadDtoSchema,
 } from "./contracts";
 import {
 	decodeBinaryAssetBatchEnvelope,
@@ -216,17 +213,5 @@ function usesBinaryAssetLookup(assetId: string): boolean {
 		assetId.startsWith("prepared-texture/") ||
 		assetId.startsWith("render-surface/") ||
 		assetId.startsWith("palette/")
-	);
-}
-
-export async function resolveRuntimeAppearance(
-	request: RuntimeAppearanceRequestDto,
-): Promise<SetupAppearancePayloadDto> {
-	requireTauriRuntime();
-
-	return invokeCommand(
-		"resolve_runtime_appearance",
-		setupAppearancePayloadDtoSchema,
-		{ request },
 	);
 }

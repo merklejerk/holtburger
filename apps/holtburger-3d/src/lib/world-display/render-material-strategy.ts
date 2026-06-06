@@ -45,14 +45,14 @@ import {
 	type AtlasTexturePage,
 } from "./texture-pages/atlas-layout-planner";
 
-export type StagedWorldMaterialRenderableKind =
+export type RenderMaterialRenderableKind =
 	| "static"
 	| "structured-interior"
 	| "dynamic"
 	| "terrain"
 	| "unknown";
 
-export type StagedWorldMaterialStrategyFallbackReason =
+export type RenderMaterialStrategyFallbackReason =
 	| "missing-material-recipe"
 	| "solid-color-material"
 	| "missing-render-surface"
@@ -68,14 +68,14 @@ export type StagedWorldMaterialStrategyFallbackReason =
 	| "atlas-full"
 	| "material-table-overflow";
 
-export interface StagedWorldMaterialStrategyPolicy {
+export interface RenderMaterialStrategyPolicy {
 	maxAtlasTextureSize: number;
 	maxAtlasTextureCount: number;
 	baseGutterPixels: number;
 	maxMaterialSlotsPerDraw: number;
 }
 
-const DEFAULT_STAGED_WORLD_MATERIAL_STRATEGY_POLICY: StagedWorldMaterialStrategyPolicy =
+const DEFAULT_RENDER_MATERIAL_STRATEGY_POLICY: RenderMaterialStrategyPolicy =
 	{
 		maxAtlasTextureSize: 4096,
 		maxAtlasTextureCount: 8,
@@ -83,23 +83,23 @@ const DEFAULT_STAGED_WORLD_MATERIAL_STRATEGY_POLICY: StagedWorldMaterialStrategy
 		maxMaterialSlotsPerDraw: 128,
 	};
 
-export interface StagedWorldMaterialStrategyInput {
+export interface RenderMaterialStrategyInput {
 	slot: ResolvedMaterialSlot;
-	renderableKind: StagedWorldMaterialRenderableKind;
+	renderableKind: RenderMaterialRenderableKind;
 	appearance?: MaterialAppearanceContext | null;
 	textureVelocitySignature?: string | null;
 }
 
-type StagedWorldMaterialStrategy =
-	| StagedWorldAtlasMaterialStrategy
-	| StagedWorldDirectTextureMaterialStrategy
-	| StagedWorldIndexedPalettedMaterialStrategy
-	| StagedWorldMaterialFallbackStrategy;
+type RenderMaterialStrategy =
+	| RenderAtlasMaterialStrategy
+	| RenderDirectTextureMaterialStrategy
+	| RenderIndexedPalettedMaterialStrategy
+	| RenderMaterialFallbackStrategy;
 
-interface StagedWorldAtlasMaterialStrategy {
+interface RenderAtlasMaterialStrategy {
 	kind: "atlas";
 	slot: ResolvedMaterialSlot;
-	renderableKind: StagedWorldMaterialRenderableKind;
+	renderableKind: RenderMaterialRenderableKind;
 	materialAssetId: string;
 	materialSlotKey: string;
 	materialTableSlotIndex: number;
@@ -110,7 +110,7 @@ interface StagedWorldAtlasMaterialStrategy {
 	behavior: LegacyMaterialBehaviorDto;
 }
 
-interface StagedWorldAtlasCandidateStrategy extends StagedWorldAtlasMaterialStrategy {
+interface RenderAtlasCandidateStrategy extends RenderAtlasMaterialStrategy {
 	atlasEntry: {
 		renderSurfaceId: number;
 		preparedTextureAssetId: string;
@@ -120,24 +120,24 @@ interface StagedWorldAtlasCandidateStrategy extends StagedWorldAtlasMaterialStra
 	};
 }
 
-export interface StagedWorldMaterialTexturePageReadiness {
+export interface RenderMaterialTexturePageReadiness {
 	materialSlotKey: string;
 	atlasEntryKey: string;
 	renderStateKey: string;
 	samplingKey: string;
-	samplingPolicy: StagedWorldAtlasSamplingPolicy;
-	atlasEntry: StagedWorldAtlasCandidateStrategy["atlasEntry"];
+	samplingPolicy: RenderAtlasSamplingPolicy;
+	atlasEntry: RenderAtlasCandidateStrategy["atlasEntry"];
 }
 
-interface StagedWorldAtlasSamplingPolicy {
+interface RenderAtlasSamplingPolicy {
 	wrapS: TextureWrapMode;
 	wrapT: TextureWrapMode;
 }
 
-export interface StagedWorldDirectTextureMaterialStrategy {
+export interface RenderDirectTextureMaterialStrategy {
 	kind: "direct-texture";
 	slot: ResolvedMaterialSlot;
-	renderableKind: StagedWorldMaterialRenderableKind;
+	renderableKind: RenderMaterialRenderableKind;
 	materialAssetId: string;
 	key: string;
 	textureKey: string;
@@ -145,36 +145,36 @@ export interface StagedWorldDirectTextureMaterialStrategy {
 	renderStateKey: string;
 	samplingKey: string;
 	behavior: LegacyMaterialBehaviorDto;
-	reason: StagedWorldMaterialStrategyFallbackReason | null;
+	reason: RenderMaterialStrategyFallbackReason | null;
 	detail: string | null;
-	texturePageReadiness: StagedWorldMaterialTexturePageReadiness | null;
+	texturePageReadiness: RenderMaterialTexturePageReadiness | null;
 }
 
-export interface StagedWorldIndexedPalettedMaterialStrategy {
+export interface RenderIndexedPalettedMaterialStrategy {
 	kind: "indexed-paletted";
 	slot: ResolvedMaterialSlot;
-	renderableKind: StagedWorldMaterialRenderableKind;
+	renderableKind: RenderMaterialRenderableKind;
 	materialAssetId: string;
 	key: string;
 	indexedMaterial: ResolvedIndexedMaterialData;
 	renderStateKey: string;
 	samplingKey: string;
 	behavior: LegacyMaterialBehaviorDto;
-	reason: StagedWorldMaterialStrategyFallbackReason | null;
+	reason: RenderMaterialStrategyFallbackReason | null;
 	detail: string | null;
 }
 
-export interface StagedWorldMaterialFallbackStrategy {
+export interface RenderMaterialFallbackStrategy {
 	kind: "flat-fallback" | "unsupported";
 	slot: ResolvedMaterialSlot;
-	renderableKind: StagedWorldMaterialRenderableKind;
+	renderableKind: RenderMaterialRenderableKind;
 	materialAssetId: string;
-	reason: StagedWorldMaterialStrategyFallbackReason;
+	reason: RenderMaterialStrategyFallbackReason;
 	detail: string;
 	behavior: LegacyMaterialBehaviorDto | null;
 }
 
-interface StagedWorldAtlasEntryPlan {
+interface RenderAtlasEntryPlan {
 	key: string;
 	renderSurfaceId: number;
 	preparedTextureAssetId: string;
@@ -185,9 +185,9 @@ interface StagedWorldAtlasEntryPlan {
 	transfer: "linear";
 }
 
-type StagedWorldAtlasTexturePlan = AtlasTexturePage;
+type RenderAtlasTexturePlan = AtlasTexturePage;
 
-interface StagedWorldAtlasDrawSlicePlan {
+interface RenderAtlasDrawSlicePlan {
 	key: string;
 	atlasTextureIndex: number;
 	renderStateKey: string;
@@ -196,45 +196,45 @@ interface StagedWorldAtlasDrawSlicePlan {
 	materialSlotKeys: string[];
 }
 
-interface StagedWorldAtlasSetGenerationPlan {
+interface RenderAtlasSetGenerationPlan {
 	key: string;
 	generation: number;
-	policy: StagedWorldMaterialStrategyPolicy;
-	atlasEntries: StagedWorldAtlasEntryPlan[];
-	atlasTextures: StagedWorldAtlasTexturePlan[];
-	drawSlices: StagedWorldAtlasDrawSlicePlan[];
+	policy: RenderMaterialStrategyPolicy;
+	atlasEntries: RenderAtlasEntryPlan[];
+	atlasTextures: RenderAtlasTexturePlan[];
+	drawSlices: RenderAtlasDrawSlicePlan[];
 }
 
-export interface StagedWorldMaterialStrategyPlan {
-	atlasSet: StagedWorldAtlasSetGenerationPlan;
-	atlasLayoutDecisions: StagedWorldMaterialStrategy[];
+export interface RenderMaterialStrategyPlan {
+	atlasSet: RenderAtlasSetGenerationPlan;
+	atlasLayoutDecisions: RenderMaterialStrategy[];
 	fallbackReasonCounts: Partial<
-		Record<StagedWorldMaterialStrategyFallbackReason, number>
+		Record<RenderMaterialStrategyFallbackReason, number>
 	>;
 }
 
 interface AtlasCandidate {
-	input: StagedWorldMaterialStrategyInput;
+	input: RenderMaterialStrategyInput;
 	materialAssetId: string;
 	materialSlotKey: string;
 	atlasEntryKey: string;
 	renderStateKey: string;
 	samplingKey: string;
 	behavior: LegacyMaterialBehaviorDto;
-	entry: StagedWorldAtlasEntryPlan;
+	entry: RenderAtlasEntryPlan;
 }
 
-export function planStagedWorldMaterialStrategies(options: {
+export function planRenderMaterialStrategies(options: {
 	assetState: AssetChannelState;
-	requirements: readonly StagedWorldMaterialStrategyInput[];
-	policy?: Partial<StagedWorldMaterialStrategyPolicy>;
+	requirements: readonly RenderMaterialStrategyInput[];
+	policy?: Partial<RenderMaterialStrategyPolicy>;
 	generation?: number;
 	textureCapabilities?: MaterialTextureCapabilities;
 	textureFilteringMode?: TextureFilteringMode;
-}): StagedWorldMaterialStrategyPlan {
+}): RenderMaterialStrategyPlan {
 	const policy = normalizePolicy(options.policy);
 	const candidates: AtlasCandidate[] = [];
-	const atlasLayoutDecisions: StagedWorldMaterialStrategy[] = [];
+	const atlasLayoutDecisions: RenderMaterialStrategy[] = [];
 	for (const input of options.requirements) {
 		const candidate = evaluateAtlasCandidate({
 			assetState: options.assetState,
@@ -242,7 +242,7 @@ export function planStagedWorldMaterialStrategies(options: {
 			policy,
 			textureCapabilities:
 				options.textureCapabilities ??
-				defaultStagedWorldMaterialTextureCapabilities(),
+				defaultRenderMaterialTextureCapabilities(),
 			textureFilteringMode: options.textureFilteringMode,
 		});
 		if (candidate.kind === "candidate") {
@@ -346,14 +346,14 @@ export function planStagedWorldMaterialStrategies(options: {
 
 function evaluateAtlasCandidate(options: {
 	assetState: AssetChannelState;
-	input: StagedWorldMaterialStrategyInput;
-	policy: StagedWorldMaterialStrategyPolicy;
+	input: RenderMaterialStrategyInput;
+	policy: RenderMaterialStrategyPolicy;
 	textureCapabilities: MaterialTextureCapabilities;
 	textureFilteringMode?: TextureFilteringMode;
 }):
 	| { kind: "candidate"; candidate: AtlasCandidate }
-	| { kind: "strategy"; requirement: StagedWorldMaterialStrategy } {
-	const resolvedStrategy = resolveStagedWorldMaterialStrategy({
+	| { kind: "strategy"; requirement: RenderMaterialStrategy } {
+	const resolvedStrategy = resolveRenderMaterialStrategy({
 		assetState: options.assetState,
 		input: options.input,
 		textureCapabilities: options.textureCapabilities,
@@ -393,16 +393,16 @@ function evaluateAtlasCandidate(options: {
 	};
 }
 
-export function resolveStagedWorldMaterialStrategy(options: {
+export function resolveRenderMaterialStrategy(options: {
 	assetState: AssetChannelState;
-	input: StagedWorldMaterialStrategyInput;
+	input: RenderMaterialStrategyInput;
 	textureCapabilities?: MaterialTextureCapabilities;
 	textureFilteringMode?: TextureFilteringMode;
 	indexedMaterialDataCache?: IndexedMaterialDataCache;
 }):
-	| StagedWorldDirectTextureMaterialStrategy
-	| StagedWorldIndexedPalettedMaterialStrategy
-	| StagedWorldMaterialFallbackStrategy {
+	| RenderDirectTextureMaterialStrategy
+	| RenderIndexedPalettedMaterialStrategy
+	| RenderMaterialFallbackStrategy {
 	const materialAssetId =
 		options.input.slot.materialAssetId ||
 		formatMaterialAssetId(options.input.slot.surfaceId);
@@ -466,7 +466,7 @@ export function resolveStagedWorldMaterialStrategy(options: {
 				recipe,
 				textureCapabilities:
 					options.textureCapabilities ??
-					defaultStagedWorldMaterialTextureCapabilities(),
+					defaultRenderMaterialTextureCapabilities(),
 				textureFilteringMode: options.textureFilteringMode,
 			});
 		}
@@ -478,7 +478,7 @@ export function resolveStagedWorldMaterialStrategy(options: {
 				recipe,
 				textureCapabilities:
 					options.textureCapabilities ??
-					defaultStagedWorldMaterialTextureCapabilities(),
+					defaultRenderMaterialTextureCapabilities(),
 				indexedMaterialDataCache: options.indexedMaterialDataCache,
 			});
 		}
@@ -545,7 +545,7 @@ export function resolveStagedWorldMaterialStrategy(options: {
 		surface,
 		createDefaultMaterialTextureSamplingPolicy(
 			options.textureCapabilities ??
-				defaultStagedWorldMaterialTextureCapabilities(),
+				defaultRenderMaterialTextureCapabilities(),
 			options.textureFilteringMode,
 		),
 		options.input.slot.materialVariantSignature,
@@ -553,7 +553,7 @@ export function resolveStagedWorldMaterialStrategy(options: {
 	const atlasSamplingPolicy = {
 		wrapS: samplingPolicy.wrapS,
 		wrapT: samplingPolicy.wrapT,
-	} satisfies StagedWorldAtlasSamplingPolicy;
+	} satisfies RenderAtlasSamplingPolicy;
 	const samplingKey = describeAtlasSamplingKey(atlasSamplingPolicy);
 	const renderStateKey = describeAtlasRenderStateKey(behaviorWithAlpha);
 	const atlasEntryKey = describeAtlasEntryKey({
@@ -568,7 +568,7 @@ export function resolveStagedWorldMaterialStrategy(options: {
 		recipe,
 		textureCapabilities:
 			options.textureCapabilities ??
-			defaultStagedWorldMaterialTextureCapabilities(),
+			defaultRenderMaterialTextureCapabilities(),
 		textureFilteringMode: options.textureFilteringMode,
 		texturePageReadiness: {
 			materialSlotKey: describeMaterialSlotKey({
@@ -597,14 +597,14 @@ export function resolveStagedWorldMaterialStrategy(options: {
 
 function resolveIndexedPalettedTextureStrategy(options: {
 	assetState: AssetChannelState;
-	input: StagedWorldMaterialStrategyInput;
+	input: RenderMaterialStrategyInput;
 	materialAssetId: string;
 	recipe: PreparedMaterialRecipePayload;
 	textureCapabilities: MaterialTextureCapabilities;
 	indexedMaterialDataCache?: IndexedMaterialDataCache;
 }):
-	| StagedWorldIndexedPalettedMaterialStrategy
-	| StagedWorldMaterialFallbackStrategy {
+	| RenderIndexedPalettedMaterialStrategy
+	| RenderMaterialFallbackStrategy {
 	const resolvedSurface = resolveFirstMaterialRenderSurface({
 		recipe: options.recipe,
 		assetState: options.assetState,
@@ -695,7 +695,7 @@ function resolveIndexedPalettedTextureStrategy(options: {
 	};
 }
 
-export function defaultStagedWorldMaterialTextureCapabilities(): MaterialTextureCapabilities {
+export function defaultRenderMaterialTextureCapabilities(): MaterialTextureCapabilities {
 	return {
 		supportsS3tc: false,
 		supportsS3tcSrgb: false,
@@ -705,7 +705,7 @@ export function defaultStagedWorldMaterialTextureCapabilities(): MaterialTexture
 	};
 }
 
-function describeStagedWorldDirectTextureKey(
+function describeRenderMaterialDirectTextureKey(
 	upload: Extract<
 		RenderSurfaceTextureUploadPreparation,
 		{ status: "ready" }
@@ -729,18 +729,18 @@ function describeStagedWorldDirectTextureKey(
 function resolveDirectTextureStrategy(options: {
 	assetState: AssetChannelState;
 	behaviorReason: {
-		reason: StagedWorldMaterialStrategyFallbackReason;
+		reason: RenderMaterialStrategyFallbackReason;
 		detail: string;
 	} | null;
-	input: StagedWorldMaterialStrategyInput;
+	input: RenderMaterialStrategyInput;
 	materialAssetId: string;
 	recipe: PreparedMaterialRecipePayload;
 	textureCapabilities: MaterialTextureCapabilities;
 	textureFilteringMode?: TextureFilteringMode;
-	texturePageReadiness?: StagedWorldMaterialTexturePageReadiness | null;
+	texturePageReadiness?: RenderMaterialTexturePageReadiness | null;
 }):
-	| StagedWorldDirectTextureMaterialStrategy
-	| StagedWorldMaterialFallbackStrategy {
+	| RenderDirectTextureMaterialStrategy
+	| RenderMaterialFallbackStrategy {
 	const resolvedSurface = resolveFirstMaterialRenderSurface({
 		recipe: options.recipe,
 		assetState: options.assetState,
@@ -800,14 +800,14 @@ function resolveDirectTextureStrategy(options: {
 			behavior,
 			kind: "unsupported",
 			reason: "unsupported-render-surface-format",
-			detail: `material ${options.materialAssetId} texture ${formatHex32(directRenderSurface.renderSurfaceId)} resolved a compressed upload, which WebGL2 staged direct rendering does not support`,
+			detail: `material ${options.materialAssetId} texture ${formatHex32(directRenderSurface.renderSurfaceId)} resolved a compressed upload, which WebGL2 direct rendering does not support`,
 		});
 	}
 	const behavior = deriveLegacyMaterialBehaviorDto({
 		recipe: options.recipe,
 		hasSourceAlpha: textureUpload.upload.hasSourceAlpha,
 	});
-	const textureKey = describeStagedWorldDirectTextureKey(textureUpload.upload);
+	const textureKey = describeRenderMaterialDirectTextureKey(textureUpload.upload);
 	const renderStateKey = describeDirectRenderStateKey(behavior);
 	const samplingKey = describeDirectSamplingKey(textureUpload.upload);
 	return {
@@ -835,11 +835,11 @@ function resolveDirectTextureStrategy(options: {
 }
 
 function atlasFallbackReasonForRecipe(options: {
-	input: StagedWorldMaterialStrategyInput;
+	input: RenderMaterialStrategyInput;
 	recipe: PreparedMaterialRecipePayload;
 	behavior: LegacyMaterialBehaviorDto;
 }): {
-	reason: StagedWorldMaterialStrategyFallbackReason;
+	reason: RenderMaterialStrategyFallbackReason;
 	detail: string;
 } | null {
 	if (options.recipe.source.kind !== "texture") {
@@ -917,8 +917,8 @@ function resolvePreparedTexture(options: {
 
 function dedupeAtlasEntries(
 	candidates: readonly AtlasCandidate[],
-): StagedWorldAtlasEntryPlan[] {
-	const entriesByKey = new Map<string, StagedWorldAtlasEntryPlan>();
+): RenderAtlasEntryPlan[] {
+	const entriesByKey = new Map<string, RenderAtlasEntryPlan>();
 	for (const candidate of candidates) {
 		entriesByKey.set(candidate.entry.key, candidate.entry);
 	}
@@ -929,7 +929,7 @@ function dedupeAtlasEntries(
 
 function assignMaterialTableSlots(
 	candidates: readonly AtlasCandidate[],
-	policy: StagedWorldMaterialStrategyPolicy,
+	policy: RenderMaterialStrategyPolicy,
 ): Map<string, number> {
 	const keys = [
 		...new Set(candidates.map((candidate) => candidate.materialSlotKey)),
@@ -944,13 +944,13 @@ function assignMaterialTableSlots(
 }
 
 function createFallbackRequirement(options: {
-	input: StagedWorldMaterialStrategyInput;
+	input: RenderMaterialStrategyInput;
 	materialAssetId: string;
-	kind: StagedWorldMaterialFallbackStrategy["kind"];
-	reason: StagedWorldMaterialStrategyFallbackReason;
+	kind: RenderMaterialFallbackStrategy["kind"];
+	reason: RenderMaterialStrategyFallbackReason;
 	detail: string;
 	behavior: LegacyMaterialBehaviorDto | null;
-}): StagedWorldMaterialFallbackStrategy {
+}): RenderMaterialFallbackStrategy {
 	return {
 		kind: options.kind,
 		slot: options.input.slot,
@@ -979,7 +979,7 @@ function describeAtlasEntryKey(options: {
 }
 
 function describeAtlasSamplingKey(
-	policy: StagedWorldAtlasSamplingPolicy,
+	policy: RenderAtlasSamplingPolicy,
 ): string {
 	return [
 		`wrap=${policy.wrapS}/${policy.wrapT}`,
@@ -1082,12 +1082,12 @@ function describeMaterialSlotKey(options: {
 }
 
 function describeAtlasSetKey(options: {
-	entries: readonly StagedWorldAtlasEntryPlan[];
-	policy: StagedWorldMaterialStrategyPolicy;
+	entries: readonly RenderAtlasEntryPlan[];
+	policy: RenderMaterialStrategyPolicy;
 	materialSlots: readonly string[];
 }): string {
 	return [
-		"staged-world-atlas-set",
+		"render-material-atlas-set",
 		`size=${options.policy.maxAtlasTextureSize}`,
 		`textures=${options.policy.maxAtlasTextureCount}`,
 		`gutter=${options.policy.baseGutterPixels}`,
@@ -1097,8 +1097,8 @@ function describeAtlasSetKey(options: {
 }
 
 function sortMaterialStrategies(
-	requirements: readonly StagedWorldMaterialStrategy[],
-): StagedWorldMaterialStrategy[] {
+	requirements: readonly RenderMaterialStrategy[],
+): RenderMaterialStrategy[] {
 	return [...requirements].sort(
 		(left, right) =>
 			left.slot.slotIndex - right.slot.slotIndex ||
@@ -1111,10 +1111,10 @@ function sortMaterialStrategies(
 }
 
 function countFallbackReasons(
-	requirements: readonly StagedWorldMaterialStrategy[],
-): Partial<Record<StagedWorldMaterialStrategyFallbackReason, number>> {
+	requirements: readonly RenderMaterialStrategy[],
+): Partial<Record<RenderMaterialStrategyFallbackReason, number>> {
 	const counts: Partial<
-		Record<StagedWorldMaterialStrategyFallbackReason, number>
+		Record<RenderMaterialStrategyFallbackReason, number>
 	> = {};
 	for (const requirement of requirements) {
 		if (
@@ -1129,7 +1129,7 @@ function countFallbackReasons(
 }
 
 function describeStrategySortKey(
-	requirement: StagedWorldMaterialStrategy,
+	requirement: RenderMaterialStrategy,
 ): string {
 	switch (requirement.kind) {
 		case "atlas":
@@ -1145,8 +1145,8 @@ function describeStrategySortKey(
 }
 
 function createDrawSlicePlans(
-	requirements: readonly StagedWorldMaterialStrategy[],
-): StagedWorldAtlasDrawSlicePlan[] {
+	requirements: readonly RenderMaterialStrategy[],
+): RenderAtlasDrawSlicePlan[] {
 	const groupByKey = new Map<
 		string,
 		{
@@ -1201,22 +1201,22 @@ function createDrawSlicePlans(
 }
 
 function normalizePolicy(
-	policy: Partial<StagedWorldMaterialStrategyPolicy> | undefined,
-): StagedWorldMaterialStrategyPolicy {
+	policy: Partial<RenderMaterialStrategyPolicy> | undefined,
+): RenderMaterialStrategyPolicy {
 	const normalized = {
-		...DEFAULT_STAGED_WORLD_MATERIAL_STRATEGY_POLICY,
+		...DEFAULT_RENDER_MATERIAL_STRATEGY_POLICY,
 		...policy,
 	};
 	if (normalized.maxAtlasTextureSize <= normalized.baseGutterPixels * 2) {
 		throw new Error(
-			"Staged world atlas max texture size must exceed its gutters.",
+			"Render material atlas max texture size must exceed its gutters.",
 		);
 	}
 	if (normalized.maxAtlasTextureCount <= 0) {
-		throw new Error("Staged world atlas texture count must be positive.");
+		throw new Error("Render material atlas texture count must be positive.");
 	}
 	if (normalized.maxMaterialSlotsPerDraw <= 0) {
-		throw new Error("Staged world atlas material table size must be positive.");
+		throw new Error("Render material atlas material table size must be positive.");
 	}
 	return normalized;
 }

@@ -8,7 +8,7 @@ import type {
 	RgbaTexturePageAtlasEntryRecord,
 	RgbaTexturePageDetailAtlasEntry,
 } from "../compaction/compaction-family-planner";
-import type { StagedWorldMaterialTexturePageReadiness } from "../staged-world-material-strategy";
+import type { RenderMaterialTexturePageReadiness } from "../render-material-strategy";
 
 export type TexturePageFamily =
 	| "static-rgba"
@@ -23,7 +23,7 @@ export const TERRAIN_MASK_ATLAS_GUTTER_PIXELS = 16;
 export interface TexturePageAtlasRgbaCandidate {
 	drawUnitId: string;
 	family?: TexturePageFamily;
-	texturePageReadiness: StagedWorldMaterialTexturePageReadiness;
+	texturePageReadiness: RenderMaterialTexturePageReadiness;
 	detailAtlasEntry: RgbaTexturePageDetailAtlasEntry | null;
 }
 

@@ -43,7 +43,6 @@ export interface SceneAssetStreamingInput {
 	buildingLodRadius: number;
 	detailLodRadius: number;
 	envCellLodRadius: number;
-	appearancePreviewAssetIds: readonly string[];
 	preparedByAssetId: Record<string, PreparedAssetRecord>;
 }
 
@@ -51,7 +50,6 @@ export interface SceneAssetStreamingControllerDeps {
 	assetChannel: SceneAssetChannel;
 	getPreparedByAssetId(): Record<string, PreparedAssetRecord>;
 	getCacheMetadataByAssetId(): Record<string, PreparedAssetCacheMetadata>;
-	getRendererRetainedPreparedAssetIds?(): readonly string[];
 	markAssetsPending(requests: AssetLookupRequestDto[]): void;
 	applyPreparedAssets(assets: PreparedAssetRecord[]): void;
 	applyAssetCachePrune(prunePlan: PreparedAssetCachePrunePlan): void;
@@ -172,14 +170,6 @@ export class SceneAssetStreamingController {
 						},
 					},
 					priority,
-				).concat(
-					createAppearancePreviewRequests({
-						requestRevision: this.requestRevision,
-						assetIds: input.appearancePreviewAssetIds,
-						preparedByAssetId,
-						pendingAssetIds: [...this.inFlightAssetIds],
-						priority,
-					}),
 				),
 		);
 
@@ -280,10 +270,8 @@ export class SceneAssetStreamingController {
 					materialTexturePreparationPolicy:
 						NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY,
 				},
-			).concat(input.appearancePreviewAssetIds),
+			),
 			inFlightAssetIds: [...this.inFlightAssetIds],
-			rendererRetainedAssetIds:
-				this.deps.getRendererRetainedPreparedAssetIds?.() ?? [],
 			nowMs: this.deps.nowMs?.() ?? Date.now(),
 			warmRetainMs:
 				this.deps.warmRetainMs ?? DEFAULT_PREPARED_ASSET_WARM_RETAIN_MS,
@@ -402,27 +390,6 @@ function chunkDiagnosticString(value: string, chunkSize = 120): string[] {
 	return chunks;
 }
 
-function createAppearancePreviewRequests(options: {
-	requestRevision: number;
-	assetIds: readonly string[];
-	preparedByAssetId: Record<string, PreparedAssetRecord>;
-	pendingAssetIds: readonly string[];
-	priority: AssetPriority;
-}): AssetLookupRequestDto[] {
-	const pendingAssetIdSet = new Set(options.pendingAssetIds);
-	return [...new Set(options.assetIds)]
-		.filter(
-			(assetId) =>
-				!options.preparedByAssetId[assetId] && !pendingAssetIdSet.has(assetId),
-		)
-		.sort()
-		.map((assetId) => ({
-			requestId: `${options.priority}-${options.requestRevision}-appearance-preview-${assetId}`,
-			assetId,
-			priority: options.priority,
-		}));
-}
-
 function reportMaterialGraphRequests(options: {
 	priority: AssetPriority;
 	requestRevision: number;
@@ -504,7 +471,6 @@ function createSceneInterestSyncKey(input: SceneAssetStreamingInput): string {
 		`buildings-${input.buildingLodRadius}`,
 		`detail-${input.detailLodRadius}`,
 		`env-cells-${input.envCellLodRadius}`,
-		`appearance-preview-${[...input.appearancePreviewAssetIds].sort().join(",")}`,
 		`prepared-${preparedPlanningAssetKey}`,
 	].join(":");
 

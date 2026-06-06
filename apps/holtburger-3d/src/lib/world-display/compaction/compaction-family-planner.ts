@@ -1,6 +1,6 @@
 import type { LegacyMaterialBehaviorDto } from "../material-behavior";
 import type { RenderVec4 } from "../render-math";
-import type { StagedWorldMaterialTexturePageReadiness } from "../staged-world-material-strategy";
+import type { RenderMaterialTexturePageReadiness } from "../render-material-strategy";
 import type {
 	TexturePageDescriptor,
 	TexturePageUsageBucket,
@@ -86,7 +86,7 @@ export interface CompactionEligibility {
 		blockers: readonly CompactionMaterialBlocker[];
 		alphaPolicy: CompactionAlphaPolicy;
 		alphaTest: number;
-		texturePageReadiness: StagedWorldMaterialTexturePageReadiness | null;
+		texturePageReadiness: RenderMaterialTexturePageReadiness | null;
 		detailAtlasEntry: RgbaTexturePageDetailAtlasEntry | null;
 	};
 	geometry: {
@@ -102,7 +102,7 @@ export interface CompactionGeometryReadiness {
 }
 
 interface CompactionTexturePageReadiness {
-	base: StagedWorldMaterialTexturePageReadiness | null;
+	base: RenderMaterialTexturePageReadiness | null;
 	bindings: readonly TexturePageDescriptor[];
 }
 
@@ -155,7 +155,7 @@ interface RgbaTexturePageFamilyMaterialSlot {
 	index: number;
 	renderStateKey: string;
 	samplingKey: string;
-	samplingPolicy: StagedWorldMaterialTexturePageReadiness["samplingPolicy"];
+	samplingPolicy: RenderMaterialTexturePageReadiness["samplingPolicy"];
 	atlasEntryKey: string;
 	alphaPolicy: "opaque" | "cutout";
 	alphaTest: number;
@@ -209,7 +209,7 @@ interface RgbaTexturePageFamilyDrawSlice {
 
 export interface RgbaTexturePageAtlasEntryRecord {
 	key: string;
-	entry: StagedWorldMaterialTexturePageReadiness["atlasEntry"];
+	entry: RenderMaterialTexturePageReadiness["atlasEntry"];
 }
 
 export interface RgbaTexturePageDetailAtlasEntry {
@@ -299,7 +299,7 @@ interface IndexedPalettedRenderFamilyPartition {
 
 interface EligibleCompactionFamilyCandidate {
 	drawUnit: CompactionFamilyCandidate;
-	eligibility: StagedWorldMaterialTexturePageReadiness;
+	eligibility: RenderMaterialTexturePageReadiness;
 }
 
 interface BoundedMaterialTablePartition<TCandidate, TMaterialRecord> {

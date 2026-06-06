@@ -9,8 +9,6 @@ import {
 	type PreparedAssetRecord,
 	type PreparedLandblockOutdoorPayload,
 	type PreparedPolygonSetRenderGeometry,
-	type PreparedSetupAppearancePayload,
-	type PreparedSetupModelPayload,
 } from "../assets/types";
 import {
 	formatEnvCellAssetId,
@@ -21,11 +19,9 @@ import {
 	type BrowserRenderResourceCoordinatorInput,
 	type BrowserRenderResourceSurface,
 } from "./browser-render-resource-coordinator";
-import type { StaticRenderableSceneModel } from "./static-renderables";
-import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 
 describe("browser render resource coordinator", () => {
-	it("does not derive prepared outdoor statics without artifact ownership", () => {
+	it("does not commit prepared outdoor assets as static products", () => {
 		const landblockId = 0x02030000;
 		const surface = createCapturingSurface();
 		const coordinator = new BrowserRenderResourceCoordinator();
@@ -45,77 +41,10 @@ describe("browser render resource coordinator", () => {
 			}),
 		);
 
-		expect(surface.staticRenderableScenes.at(-1)?.parts).toHaveLength(0);
+		expect(surface.committedStaticProductCount).toBe(0);
 	});
 
-	it("preserves runtime appearance previews without landblock static derivation", () => {
-		const landblockId = 0x02030000;
-		const setupModelId = 0x02000001;
-		const gfxObjId = 0x01000001;
-		const surface = createCapturingSurface();
-		const coordinator = new BrowserRenderResourceCoordinator();
-		coordinator.setSurface(surface);
-
-		coordinator.update(
-			createCoordinatorInput({
-				assetState: createAssetState([
-					createSetupModelRecord({
-						setupModelId,
-						gfxObjId,
-						partPlacement: createPlacement({ x: 0, y: 0, z: 0 }),
-					}),
-					createGfxObjRecord(gfxObjId),
-				]),
-				browserDestination: createOutdoorDestination(landblockId),
-				runtimeAppearancePreviews: [
-					{
-						id: "preview",
-						spawnCameraFrame: {
-							position: { x: 0, y: 0, z: 0 },
-							target: { x: 1, y: 0, z: 0 },
-							up: { x: 0, y: 0, z: 1 },
-							aspect: 1,
-							fovDegrees: 70,
-							near: 0.1,
-							far: 1000,
-						},
-						setupAppearance: createSetupAppearancePayload({
-							setupModelId,
-							gfxObjId,
-						}),
-					},
-				],
-				activeRenderAnchor: { landblockId },
-			}),
-		);
-
-		expect(surface.staticRenderableScenes.at(-1)?.parts).toHaveLength(1);
-	});
-
-	it("does not derive prepared outdoor statics", () => {
-		const landblockId = 0x02030000;
-		const surface = createCapturingSurface();
-		const coordinator = new BrowserRenderResourceCoordinator();
-		coordinator.setSurface(surface);
-
-		coordinator.update(
-			createCoordinatorInput({
-				assetState: createAssetState([
-					createLandblockOutdoorRecord({
-						landblockId,
-						sourceDid: 0x01000001,
-						localPlacement: createPlacement({ x: 1, y: 2, z: 3 }),
-					}),
-					createGfxObjRecord(0x01000001),
-				]),
-				browserDestination: createOutdoorDestination(landblockId),
-			}),
-		);
-
-		expect(surface.staticRenderableScenes.at(-1)?.parts).toHaveLength(0);
-	});
-
-	it("does not derive prepared indoor statics", () => {
+	it("does not commit prepared indoor assets as static products", () => {
 		const envCellId = 0x02030100;
 		const surface = createCapturingSurface();
 		const coordinator = new BrowserRenderResourceCoordinator();
@@ -136,30 +65,7 @@ describe("browser render resource coordinator", () => {
 			}),
 		);
 
-		expect(surface.staticRenderableScenes.at(-1)?.parts).toHaveLength(0);
-	});
-
-	it("does not derive prepared structured interiors", () => {
-		const envCellId = 0x02030100;
-		const surface = createCapturingSurface();
-		const coordinator = new BrowserRenderResourceCoordinator();
-		coordinator.setSurface(surface);
-
-		coordinator.update(
-			createCoordinatorInput({
-				assetState: createAssetState([
-					createEnvCellRecord({
-						envCellId,
-						sourceDid: 0x01000001,
-						localPlacement: createPlacement({ x: 0, y: 0, z: 0 }),
-						staticPlacement: createPlacement({ x: 1, y: 2, z: 3 }),
-					}),
-				]),
-				browserDestination: createInteriorDestination(envCellId),
-			}),
-		);
-
-		expect(surface.structuredInteriorScenes.at(-1)?.cells).toHaveLength(0);
+		expect(surface.committedStaticProductCount).toBe(0);
 	});
 });
 
@@ -171,28 +77,18 @@ const PROVENANCE: PreparedAssetProvenance = {
 };
 
 function createCapturingSurface(): BrowserRenderResourceSurface & {
-	staticRenderableScenes: StaticRenderableSceneModel[];
-	structuredInteriorScenes: StructuredInteriorSceneModel[];
+	committedStaticProductCount: number;
 } {
-	const staticRenderableScenes: StaticRenderableSceneModel[] = [];
-	const structuredInteriorScenes: StructuredInteriorSceneModel[] = [];
 	return {
-		staticRenderableScenes,
-		structuredInteriorScenes,
+		committedStaticProductCount: 0,
 		setAssetState() {},
 		setRenderSceneContext() {},
 		setRenderChunkTransforms() {},
-		setTerrainScene() {},
-		commitStaticLandblockProduct() {},
+		commitStaticLandblockProduct() {
+			this.committedStaticProductCount += 1;
+		},
 		evictStaticLandblockProduct() {},
 		clearStaticLandblockProducts() {},
-		setStaticRenderableScene(scene) {
-			staticRenderableScenes.push(scene);
-		},
-		setStructuredInteriorScene(scene) {
-			structuredInteriorScenes.push(scene);
-		},
-		setTransitionPortalModel() {},
 		setDebugOverlayScene() {},
 		setRenderSpatialQuery() {},
 		setSelectedStaticRenderableRenderKey() {},
@@ -229,7 +125,6 @@ function createCoordinatorInput(
 		selectedStaticRenderableRenderKey: null,
 		activeRenderAnchor: null,
 		browserCameraFrame: null,
-		runtimeAppearancePreviews: [],
 		...overrides,
 	};
 }
@@ -366,100 +261,6 @@ function createGfxObjRecord(gfxObjId: number): PreparedAssetRecord {
 	};
 }
 
-function createSetupModelRecord(options: {
-	setupModelId: number;
-	gfxObjId: number;
-	partPlacement: PreparedSetupModelPayload["placementSets"][number]["localPlacements"][number];
-}): PreparedAssetRecord {
-	const assetId = formatSetupModelAssetId(options.setupModelId);
-	return {
-		request: { requestId: assetId, assetId, priority: "bootstrap" },
-		response: {
-			requestId: assetId,
-			assetId,
-			payloadKind: "json",
-			payload: null,
-		},
-		preparedAt: "test",
-		payload: {
-			kind: "setup-model",
-			sourceAssetKind: "setup-model",
-			residencyKind: "unknown",
-			provenance: PROVENANCE,
-			setupModelId: options.setupModelId,
-			flags: null,
-			parts: [
-				{
-					partIndex: 0,
-					gfxObjId: options.gfxObjId,
-					gfxObjAssetId: formatGfxObjAssetId(options.gfxObjId),
-					parentIndex: null,
-					scale: null,
-				},
-			],
-			holdingLocations: [],
-			connectionPoints: [],
-			placementSets: [
-				{
-					key: 0x65,
-					localPlacements: [options.partPlacement],
-					hookCount: 0,
-					textureVelocities: [],
-				},
-			],
-			collisionWitness: {
-				cylSphereCount: 0,
-				sphereCount: 0,
-			},
-			height: null,
-			radius: null,
-			stepUp: null,
-			stepDown: null,
-			sortingSphere: null,
-			selectionSphere: null,
-			lights: [],
-			defaultAnimation: null,
-			defaultScript: null,
-			defaultMotionTable: null,
-			defaultSoundTable: null,
-			defaultScriptTable: null,
-			dependencies: {
-				gfxObjAssetIds: [formatGfxObjAssetId(options.gfxObjId)],
-			},
-		},
-	};
-}
-
-function createSetupAppearancePayload(options: {
-	setupModelId: number;
-	gfxObjId: number;
-}): PreparedSetupAppearancePayload {
-	return {
-		kind: "setup-appearance",
-		sourceAssetKind: "setup-appearance",
-		residencyKind: "unknown",
-		provenance: PROVENANCE,
-		setupModelId: options.setupModelId,
-		appearanceKey: formatSetupAppearanceAssetId(options.setupModelId),
-		parts: [
-			{
-				partIndex: 0,
-				gfxObjId: options.gfxObjId,
-				gfxObjAssetId: formatGfxObjAssetId(options.gfxObjId),
-				materialSlots: [],
-			},
-		],
-		textureChanges: [],
-		animPartChanges: [],
-		paletteId: null,
-		subPalettes: [],
-		dependencies: {
-			materialAssetIds: [],
-			paletteAssetIds: [],
-		},
-	};
-}
-
 function createEnvCellRecord(options: {
 	envCellId: number;
 	sourceDid: number;
@@ -537,12 +338,4 @@ function createPlacement(origin: { x: number; y: number; z: number }) {
 
 function formatGfxObjAssetId(gfxObjId: number): string {
 	return `gfx-obj/${gfxObjId.toString(16).padStart(8, "0")}`;
-}
-
-function formatSetupModelAssetId(setupModelId: number): string {
-	return `setup-model/${setupModelId.toString(16).padStart(8, "0")}`;
-}
-
-function formatSetupAppearanceAssetId(setupModelId: number): string {
-	return `setup-appearance/${setupModelId.toString(16).padStart(8, "0")}`;
 }

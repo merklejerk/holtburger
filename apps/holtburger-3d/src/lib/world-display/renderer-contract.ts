@@ -63,8 +63,8 @@ interface WorldRenderDebugMetrics {
 	residencyCellBspMatchCount: number;
 	residencyAabbFallbackCount: number;
 	residencySource: string;
-	renderGraphPolicy: string;
-	renderGraphBaseScene: string;
+	resourcePolicy: string;
+	baseSceneDomain: string;
 	transitionPortalMaxDepth: number;
 	cameraNear: number | null;
 	cameraFar: number | null;
@@ -171,23 +171,23 @@ interface WorldRenderDebugMetrics {
 	detailAtlasReadyDrawUnitCount: number;
 	atlasFailureReasonCount: number;
 	atlasFailureSamples: string[];
-	compactionCandidateDrawUnitCount: number;
-	compactionBypassReasonCount: number;
-	compactionBypassSamples: string[];
-	compactionBypassBlockerSamples: string[];
-	compactionBypassDetailSamples: string[];
-	compactionCoverageDrawUnitCounts: Record<string, number>;
-	compactionCoverageMaterialBlockerCounts: Record<string, number>;
-	compactionCoverageGeometryBlockerCounts: Record<string, number>;
-	compactionCoverageMaterialFamilyCounts: Record<string, number>;
-	compactionCoverageMaterialAlphaPolicyCounts: Record<string, number>;
-	compactionCoverageMaterialFamilyAlphaPolicyCounts: Record<string, number>;
-	compactionCoverageRetainedDirectMaterialFamilyCounts: Record<string, number>;
-	compactionCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts: Record<
+	materialBatchingCandidateDrawUnitCount: number;
+	materialBatchingBypassReasonCount: number;
+	materialBatchingBypassSamples: string[];
+	materialBatchingBypassBlockerSamples: string[];
+	materialBatchingBypassDetailSamples: string[];
+	materialBatchingCoverageDrawUnitCounts: Record<string, number>;
+	materialBatchingCoverageMaterialBlockerCounts: Record<string, number>;
+	materialBatchingCoverageGeometryBlockerCounts: Record<string, number>;
+	materialBatchingCoverageMaterialFamilyCounts: Record<string, number>;
+	materialBatchingCoverageMaterialAlphaPolicyCounts: Record<string, number>;
+	materialBatchingCoverageMaterialFamilyAlphaPolicyCounts: Record<string, number>;
+	materialBatchingCoverageRetainedDirectMaterialFamilyCounts: Record<string, number>;
+	materialBatchingCoverageRetainedDirectMaterialFamilyAlphaPolicyCounts: Record<
 		string,
 		number
 	>;
-	compactionCoverageVisibleRetainedDirectMaterialFamilyCounts: Record<
+	materialBatchingCoverageVisibleRetainedDirectMaterialFamilyCounts: Record<
 		string,
 		number
 	>;

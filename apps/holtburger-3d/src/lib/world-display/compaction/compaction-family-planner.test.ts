@@ -8,7 +8,7 @@ import {
 	type IndexedPalettedFamilyMaterialTableRecord,
 } from "./compaction-family-planner";
 import type { LegacyMaterialBehaviorDto } from "../material-behavior";
-import type { StagedWorldMaterialTexturePageReadiness } from "../staged-world-material-strategy";
+import type { RenderMaterialTexturePageReadiness } from "../render-material-strategy";
 import type { TexturePageDescriptor } from "../texture-pages/texture-page-binding";
 
 type CandidateOptions = Partial<CompactionFamilyCandidate> & {
@@ -22,7 +22,7 @@ type CandidateOptions = Partial<CompactionFamilyCandidate> & {
 	materialBehavior?: LegacyMaterialBehaviorDto | null;
 	hasUvBuffer?: boolean;
 	hasDetailOverlay?: boolean;
-	texturePageReadiness?: StagedWorldMaterialTexturePageReadiness | null;
+	texturePageReadiness?: RenderMaterialTexturePageReadiness | null;
 	texturePageBindings?: readonly TexturePageDescriptor[];
 	indexedMaterialTableRecord?: IndexedPalettedFamilyMaterialTableRecord | null;
 };
@@ -176,7 +176,7 @@ describe("compaction family planner", () => {
 		);
 	});
 
-	it("keeps unsupported first-slice materials on the staged path with reasons", () => {
+	it("keeps unsupported first-slice materials on the direct path with reasons", () => {
 		const plan = planCompactionFamilies({
 			drawUnits: [
 				createCandidate({ id: "terrain", kind: "terrain" }),
@@ -1070,7 +1070,7 @@ function createTexturePageBindings({
 	height,
 }: {
 	materialKind: NonNullable<CandidateOptions["materialKind"]>;
-	texturePageReadiness: StagedWorldMaterialTexturePageReadiness | null;
+	texturePageReadiness: RenderMaterialTexturePageReadiness | null;
 	width: number;
 	height: number;
 }): readonly TexturePageDescriptor[] {
@@ -1197,7 +1197,7 @@ function createTexturePageReadiness(options: {
 	materialSlotKey?: string;
 	wrapS?: "clamp" | "repeat";
 	wrapT?: "clamp" | "repeat";
-}): StagedWorldMaterialTexturePageReadiness {
+}): RenderMaterialTexturePageReadiness {
 	const wrapS = options.wrapS ?? "clamp";
 	const wrapT = options.wrapT ?? "clamp";
 	return {

@@ -221,15 +221,6 @@ export function buildAcPlacementMatrix(
 	return transform;
 }
 
-export function buildDebugColor(key: string): RenderVec4 {
-	let hash = 0;
-	for (let index = 0; index < key.length; index += 1) {
-		hash = (hash * 31 + key.charCodeAt(index)) >>> 0;
-	}
-	const [red, green, blue] = hslToRgb((hash % 360) / 360, 0.54, 0.48);
-	return new Float32Array([red, green, blue, 1]);
-}
-
 function buildPerspectiveMatrix(frame: SceneCameraFrame): RenderMat4 {
 	const fovRadians = (frame.fovDegrees * Math.PI) / 180;
 	const f = 1 / Math.tan(fovRadians / 2);
@@ -372,24 +363,4 @@ function normalizeVec3(vector: Vec3Dto): Vec3Dto {
 		y: vector.y / length,
 		z: vector.z / length,
 	};
-}
-
-function hslToRgb(hue: number, saturation: number, lightness: number) {
-	const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation;
-	const huePrime = hue * 6;
-	const x = chroma * (1 - Math.abs((huePrime % 2) - 1));
-	const [red1, green1, blue1] =
-		huePrime < 1
-			? [chroma, x, 0]
-			: huePrime < 2
-				? [x, chroma, 0]
-				: huePrime < 3
-					? [0, chroma, x]
-					: huePrime < 4
-						? [0, x, chroma]
-						: huePrime < 5
-							? [x, 0, chroma]
-							: [chroma, 0, x];
-	const m = lightness - chroma / 2;
-	return [red1 + m, green1 + m, blue1 + m];
 }

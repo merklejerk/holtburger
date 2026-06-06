@@ -830,35 +830,6 @@ export type SetupAppearancePayloadDto = z.infer<
 	typeof setupAppearancePayloadDtoSchema
 >;
 
-interface RuntimeAppearanceSubPaletteDto {
-	subId: number;
-	offset: number;
-	numColors: number;
-}
-
-interface RuntimeAppearanceTextureChangeDto {
-	partIndex: number;
-	oldTexture: number;
-	newTexture: number;
-}
-
-interface RuntimeAppearanceAnimPartChangeDto {
-	partIndex: number;
-	partId: number;
-}
-
-interface RuntimeAppearanceObjDescDto {
-	paletteId: number | null;
-	subPalettes: RuntimeAppearanceSubPaletteDto[];
-	textureChanges: RuntimeAppearanceTextureChangeDto[];
-	animPartChanges: RuntimeAppearanceAnimPartChangeDto[];
-}
-
-export interface RuntimeAppearanceRequestDto {
-	setupModelId: number;
-	objDesc: RuntimeAppearanceObjDescDto | null;
-}
-
 export const surfaceTexturePayloadDtoSchema = z.object({
 	kind: z.literal("surface-texture"),
 	residencyKind: z.literal("unknown"),

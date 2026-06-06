@@ -1,4 +1,4 @@
-import type { DrawUnitRuntimeDiagnostic } from "./runtime-render-diagnostics";
+import type { DrawUnitRuntimeDiagnostic } from "./draw-unit-render-diagnostics";
 import type { CompactionFamilyPlan } from "./compaction/compaction-family-planner";
 import type {
 	Webgl2WorldDrawUnit,
@@ -37,17 +37,17 @@ function describeDrawUnitRuntimeDiagnostic(
 			materialKind: drawUnit.materialKind,
 			materialKey: drawUnit.materialKey,
 			triangleCount: drawUnit.triangleCount,
-			compactionDecision: drawUnit.compactionEligibility.decision,
-			finalCompactionPlan: describeFinalCompactionPlan(
+			materialBatchingDecision: drawUnit.compactionEligibility.decision,
+			finalMaterialBatchingPlan: describeFinalCompactionPlan(
 				store.compactionFamilyPlan,
 				drawUnit,
 			),
-			compactionMaterialFamily: drawUnit.compactionEligibility.material.family,
-			compactionAlphaPolicy:
+			materialBatchingMaterialFamily: drawUnit.compactionEligibility.material.family,
+			materialBatchingAlphaPolicy:
 				drawUnit.compactionEligibility.material.alphaPolicy,
-			compactionMaterialBlockers:
+			materialBatchingMaterialBlockers:
 				drawUnit.compactionEligibility.material.blockers,
-			compactionGeometryBlockers:
+			materialBatchingGeometryBlockers:
 				drawUnit.compactionEligibility.geometry.blockers,
 		},
 	};
@@ -56,7 +56,7 @@ function describeDrawUnitRuntimeDiagnostic(
 function describeFinalCompactionPlan(
 	plan: CompactionFamilyPlan,
 	drawUnit: Webgl2WorldDrawUnit,
-): NonNullable<DrawUnitRuntimeDiagnostic["drawUnit"]>["finalCompactionPlan"] {
+): NonNullable<DrawUnitRuntimeDiagnostic["drawUnit"]>["finalMaterialBatchingPlan"] {
 	const rgbaMaterialSlotKey =
 		plan.renderFamilies.rgbaTexturePage.drawUnitMaterialSlots.find(
 			(record) => record.drawUnitId === drawUnit.id,

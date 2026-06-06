@@ -5,7 +5,7 @@ import type {
 	CompactionMaterialBlocker,
 	CompactionMaterialFamily,
 } from "./compaction/compaction-family-planner";
-import type { StagedWorldDrawUnitAssembly } from "./staged-world-assembly";
+import type { RenderMaterialPlan } from "./render-material-plans";
 
 export interface DrawUnitRuntimeDiagnostic {
 	drawUnitId: string;
@@ -14,19 +14,19 @@ export interface DrawUnitRuntimeDiagnostic {
 }
 
 interface DrawUnitRuntimeFacts {
-	kind: StagedWorldDrawUnitAssembly["kind"] | "portal-mask";
-	materialKind: StagedWorldDrawUnitAssembly["material"]["kind"];
+	kind: "portal-mask";
+	materialKind: RenderMaterialPlan["kind"];
 	materialKey: string;
 	triangleCount: number;
-	compactionDecision: "compacted" | "direct-draw";
-	finalCompactionPlan: DrawUnitFinalCompactionPlanDiagnostic;
-	compactionMaterialFamily: CompactionMaterialFamily;
-	compactionAlphaPolicy: CompactionAlphaPolicy;
-	compactionMaterialBlockers: readonly CompactionMaterialBlocker[];
-	compactionGeometryBlockers: readonly CompactionGeometryBlocker[];
+	materialBatchingDecision: "compacted" | "direct-draw";
+	finalMaterialBatchingPlan: DrawUnitFinalMaterialBatchingPlanDiagnostic;
+	materialBatchingMaterialFamily: CompactionMaterialFamily;
+	materialBatchingAlphaPolicy: CompactionAlphaPolicy;
+	materialBatchingMaterialBlockers: readonly CompactionMaterialBlocker[];
+	materialBatchingGeometryBlockers: readonly CompactionGeometryBlocker[];
 }
 
-interface DrawUnitFinalCompactionPlanDiagnostic {
+interface DrawUnitFinalMaterialBatchingPlanDiagnostic {
 	status:
 		| "planned-rgba-texture-page"
 		| "planned-indexed-paletted"

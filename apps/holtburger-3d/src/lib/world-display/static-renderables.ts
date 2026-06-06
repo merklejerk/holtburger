@@ -13,7 +13,6 @@ import type {
 	PreparedSetupModelPayload,
 	PreparedTextureVelocity,
 } from "../assets/types";
-import type { SceneCameraFrame } from "./camera";
 import {
 	deriveTopologyEnvCellIdsForLandblocks,
 	deriveTerrainFocusLandblockId,
@@ -348,109 +347,6 @@ export function createEmptyStaticRenderableSceneModel(): StaticRenderableSceneMo
 	};
 }
 
-export function mergeStaticRenderableSceneModels(
-	base: StaticRenderableSceneModel,
-	addition: StaticRenderableSceneModel,
-): StaticRenderableSceneModel {
-	const parts = [...base.parts, ...addition.parts];
-	return {
-		focusLandblockId: base.focusLandblockId,
-		activeLandblockIds: uniqueSortedNumbers([
-			...base.activeLandblockIds,
-			...addition.activeLandblockIds,
-		]),
-		sourceInstances: [...base.sourceInstances, ...addition.sourceInstances],
-		parts,
-		partsByRenderGroupKey: groupStaticRenderablePartsByRenderGroupKey(parts),
-		missingSourceAssetIds: uniqueSortedStrings([
-			...base.missingSourceAssetIds,
-			...addition.missingSourceAssetIds,
-		]),
-		missingGfxAssetIds: uniqueSortedStrings([
-			...base.missingGfxAssetIds,
-			...addition.missingGfxAssetIds,
-		]),
-		missingSetupAppearanceAssetIds: uniqueSortedStrings([
-			...base.missingSetupAppearanceAssetIds,
-			...addition.missingSetupAppearanceAssetIds,
-		]),
-	};
-}
-
-export function deriveAppearancePreviewStaticRenderableSceneModel(options: {
-	assetState: AssetChannelState;
-	previewInstanceId: string;
-	setupAppearance: PreparedSetupAppearancePayload | null;
-	spawnCameraFrame: SceneCameraFrame | null;
-	anchorLandblockId: number | null;
-	renderAsInterior: boolean;
-}): StaticRenderableSceneModel {
-	if (
-		!options.setupAppearance ||
-		!options.spawnCameraFrame ||
-		!options.anchorLandblockId
-	) {
-		return createEmptyStaticRenderableSceneModel();
-	}
-
-	const setupModelAsset =
-		options.assetState.preparedByAssetId[
-			formatSetupModelAssetId(options.setupAppearance.setupModelId)
-		];
-	if (!isPreparedSetupModelAsset(setupModelAsset)) {
-		return {
-			...createEmptyStaticRenderableSceneModel(),
-			missingSourceAssetIds: [
-				formatSetupModelAssetId(options.setupAppearance.setupModelId),
-			],
-		};
-	}
-
-	const missingGfxAssetIds = new Set<string>();
-	const instance: StaticRenderableSourceInstance = {
-		kind: options.renderAsInterior ? "indoor-static" : "scenery",
-		instanceId: `appearance-preview/${options.previewInstanceId}`,
-		owningLandblockId: options.anchorLandblockId,
-		regionNumber: deriveRegionNumberForLandblock(
-			options.assetState,
-			options.anchorLandblockId,
-		),
-		owningEnvCellId: null,
-		sourceDid: options.setupAppearance.setupModelId,
-		sourceAssetId: formatSetupModelAssetId(
-			options.setupAppearance.setupModelId,
-		),
-		sourceIndex: 0,
-		parentPlacements: [],
-		chunkLocalInstancePlacement: {
-			origin: rendererLocalPointToAcPlacementOrigin(
-				pointInFrontOfSpawnCamera(options.spawnCameraFrame, 1),
-			),
-			orientation: { w: 1, x: 0, y: 0, z: 0 },
-		},
-		sourceScale: UNIT_SCALE,
-		numLeaves: null,
-	};
-	const parts = expandSetupAppearanceParts({
-		instance,
-		assetState: options.assetState,
-		setupModel: setupModelAsset.payload,
-		setupAppearance: options.setupAppearance,
-		missingGfxAssetIds,
-	});
-
-	return {
-		focusLandblockId: null,
-		activeLandblockIds: [options.anchorLandblockId],
-		sourceInstances: [instance],
-		parts,
-		partsByRenderGroupKey: groupStaticRenderablePartsByRenderGroupKey(parts),
-		missingSourceAssetIds: [],
-		missingGfxAssetIds: [...missingGfxAssetIds].sort(),
-		missingSetupAppearanceAssetIds: [],
-	};
-}
-
 function collectOutdoorStaticRenderableSourceInstances(
 	assetState: AssetChannelState,
 	selection: {
@@ -635,17 +531,6 @@ function staticRenderableDetailRoleKindForKind(
 	kind: StaticRenderableInstanceKind,
 ): RegionDetailRoleKind {
 	return kind === "building" ? "building" : "object";
-}
-
-function deriveRegionNumberForLandblock(
-	assetState: AssetChannelState,
-	landblockId: number,
-): number {
-	const asset =
-		assetState.preparedByAssetId[formatLandblockOutdoorAssetId(landblockId)];
-	return asset?.payload.kind === "landblock-outdoor"
-		? asset.payload.regionNumber
-		: 0;
 }
 
 function multiplyScale(left: Vec3Dto, right: Vec3Dto): Vec3Dto {
@@ -984,54 +869,6 @@ function formatHexId(value: number): string {
 	return `0x${formatHex32(value)}`;
 }
 
-function formatSetupModelAssetId(setupModelId: number): string {
-	return `setup-model/${setupModelId.toString(16).padStart(8, "0")}`;
-}
-
 function formatSetupAppearanceAssetId(setupModelId: number): string {
 	return `setup-appearance/${setupModelId.toString(16).padStart(8, "0")}`;
-}
-
-function pointInFrontOfSpawnCamera(
-	cameraFrame: SceneCameraFrame,
-	distance: number,
-): Vec3Dto {
-	const forward = normalizeVec3({
-		x: cameraFrame.target.x - cameraFrame.position.x,
-		y: cameraFrame.target.y - cameraFrame.position.y,
-		z: cameraFrame.target.z - cameraFrame.position.z,
-	});
-	return {
-		x: cameraFrame.position.x + forward.x * distance,
-		y: cameraFrame.position.y + forward.y * distance,
-		z: cameraFrame.position.z + forward.z * distance,
-	};
-}
-
-function rendererLocalPointToAcPlacementOrigin(point: Vec3Dto): Vec3Dto {
-	return {
-		x: point.x,
-		y: -point.z,
-		z: point.y,
-	};
-}
-
-function normalizeVec3(vector: Vec3Dto): Vec3Dto {
-	const length = Math.hypot(vector.x, vector.y, vector.z);
-	if (length === 0) {
-		return { x: 0, y: 0, z: -1 };
-	}
-	return {
-		x: vector.x / length,
-		y: vector.y / length,
-		z: vector.z / length,
-	};
-}
-
-function uniqueSortedStrings(values: readonly string[]): string[] {
-	return [...new Set(values)].sort();
-}
-
-function uniqueSortedNumbers(values: readonly number[]): number[] {
-	return [...new Set(values)].sort((left, right) => left - right);
 }

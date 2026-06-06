@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import type { StagedWorldDrawUnitAssembly } from "../staged-world-assembly";
 import type {
-	StagedWorldDirectTextureMaterialPlan,
-	StagedWorldIndexedPalettedMaterialPlan,
-} from "../staged-world-materials";
+	RenderDirectTextureMaterialPlan,
+	RenderIndexedPalettedMaterialPlan,
+} from "../render-material-plans";
 import {
 	buildCompactedGeometryBatch,
 	describeCompactedGeometryJobKey,
+	type CompactedGeometryBuildDrawUnit,
 	type CompactedGeometryPlan,
 } from "./compacted-geometry";
 
@@ -337,7 +337,7 @@ function createDrawUnit(
 		owningLandblockId?: number;
 		materialKind?: "direct-texture" | "indexed-paletted";
 	} = {},
-): StagedWorldDrawUnitAssembly {
+): CompactedGeometryBuildDrawUnit {
 	const kind = options.kind ?? "static";
 	const materialKind = options.materialKind ?? "direct-texture";
 	const base = {
@@ -394,13 +394,13 @@ function createDrawUnit(
 function createDirectTextureMaterial(
 	id: string,
 	materialSlotKey: string,
-): StagedWorldDirectTextureMaterialPlan {
+): RenderDirectTextureMaterialPlan {
 	return {
 		kind: "direct-texture",
 		key: `material/${id}`,
 		color: new Float32Array([1, 1, 1, 1]),
 		textureKey: `texture/${id}`,
-		textureUpload: {} as StagedWorldDirectTextureMaterialPlan["textureUpload"],
+		textureUpload: {} as RenderDirectTextureMaterialPlan["textureUpload"],
 		behavior: createOpaqueBehavior(),
 		fallbackReason: null,
 		texturePageReadiness: {
@@ -432,13 +432,13 @@ function createDirectTextureMaterial(
 
 function createIndexedMaterial(
 	id: string,
-): StagedWorldIndexedPalettedMaterialPlan {
+): RenderIndexedPalettedMaterialPlan {
 	return {
 		kind: "indexed-paletted",
 		key: `indexed/${id}`,
 		color: new Float32Array([1, 1, 1, 1]),
 		indexedMaterial:
-			{} as StagedWorldIndexedPalettedMaterialPlan["indexedMaterial"],
+			{} as RenderIndexedPalettedMaterialPlan["indexedMaterial"],
 		behavior: createOpaqueBehavior(),
 		fallbackReason: null,
 		detailOverlay: null,
@@ -446,7 +446,7 @@ function createIndexedMaterial(
 	};
 }
 
-function createOpaqueBehavior(): StagedWorldDirectTextureMaterialPlan["behavior"] {
+function createOpaqueBehavior(): RenderDirectTextureMaterialPlan["behavior"] {
 	return {
 		transparent: false,
 		opacity: 1,

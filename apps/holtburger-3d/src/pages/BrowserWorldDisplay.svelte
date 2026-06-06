@@ -8,7 +8,6 @@
 		type BrowserLocationSelection,
 	} from "../app/browser-mode";
 	import type { AssetChannelState } from "../lib/assets/types";
-	import { resolveRuntimeAppearance } from "../lib/host/tauri";
 	import {
 		buildSceneCameraRenderRay,
 		buildBrowserFreeCameraFrame,
@@ -44,11 +43,6 @@
 		formatPreparedAssetKindCounts,
 	} from "../lib/assets/asset-cache-diagnostics";
 	import { describeMaterialAssetDiagnostics } from "../lib/assets/material-diagnostics";
-	import {
-		RuntimeAppearanceCache,
-		type RuntimeAppearanceInput,
-		type RuntimeAppearanceResolvedFacts as BaseRuntimeAppearanceResolvedFacts,
-	} from "../lib/assets/runtime-appearance-cache";
 	import type {
 		RenderSpatialItemKind,
 		RenderSpatialMetadata,
@@ -65,7 +59,6 @@
 		STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY,
 		TERRAIN_SPATIAL_OWNER_KEY,
 	} from "../lib/world-display/render-spatial-scene";
-	import type { RendererResourceGraph } from "../lib/world-display/renderer-resource-graph";
 	import {
 		convertCameraFrameBetweenAnchors,
 		type RenderLandblockAnchor,
@@ -73,7 +66,6 @@
 	import {
 		BrowserRenderResourceCoordinator,
 		createEmptyBrowserRenderResourceReport,
-		type BrowserRuntimeAppearancePreview,
 		type BrowserRenderResourceCoordinatorInput,
 		type BrowserRenderResourceReport,
 	} from "../lib/world-display/browser-render-resource-coordinator";
@@ -81,13 +73,7 @@
 		StaticLandblockRenderArtifactCoordinator,
 		type StaticLandblockRenderArtifactCoordinatorInput,
 	} from "../lib/world-display/static-landblock-render-artifact-coordinator";
-	import type { BrowserStaticRenderablePickDiagnostic } from "../lib/world-display/browser-picker-diagnostics";
 	import { buildRenderDebugReport } from "../lib/world-display/diagnostics/render-debug-report";
-	import type {
-		RuntimeAppearanceRequestDto,
-		SetupAppearancePayloadDto,
-	} from "../lib/host/contracts";
-	import type { DrawUnitRuntimeDiagnostic } from "../lib/world-display/runtime-render-diagnostics";
 	import BrowserModePanel from "./BrowserModePanel.svelte";
 
 	interface BrowserPanelRow {
@@ -126,22 +112,6 @@
 		kicker: string;
 		rows: BrowserPanelRow[];
 	}
-
-	interface ResolvedRuntimeAppearanceFacts extends BaseRuntimeAppearanceResolvedFacts {
-		setupAppearance: SetupAppearancePayloadDto;
-	}
-
-	interface RuntimeAppearancePreviewInstance extends BrowserRuntimeAppearancePreview {
-		resolved: ResolvedRuntimeAppearanceFacts;
-	}
-
-	let {
-		onRuntimeAppearanceAssetIdsChange,
-		rendererResourceGraph,
-	}: {
-		onRuntimeAppearanceAssetIdsChange?: (assetIds: readonly string[]) => void;
-		rendererResourceGraph?: RendererResourceGraph;
-	} = $props();
 
 	const initialFrontendState = get(frontendState);
 	let assetState: AssetChannelState = initialFrontendState.asset;
@@ -273,18 +243,6 @@
 	let assetPipelineDebugText = $state("Waiting for asset activity.");
 	let assetCacheDebugText = $state("Waiting for asset cache activity.");
 	let assetMaterialDebugText = $state("Waiting for material asset activity.");
-	const runtimeAppearanceCache =
-		new RuntimeAppearanceCache<ResolvedRuntimeAppearanceFacts>({
-			maxEntries: 24,
-		});
-	let runtimeAppearanceInput = $state<RuntimeAppearanceInput | null>(null);
-	let runtimeAppearancePreviews = $state<RuntimeAppearancePreviewInstance[]>(
-		[],
-	);
-	let runtimeAppearanceError = $state<string | null>(null);
-	let runtimeAppearancePending = $state(false);
-	let runtimeAppearanceRequestSequence = 0;
-	let runtimeAppearancePreviewSequence = 0;
 
 	const DEBUG_SUMMARY_DEBOUNCE_MS = 500;
 	const worldDisplay = $derived(renderResourceReport.worldDisplay);
@@ -350,21 +308,21 @@
 		const texturePageBuckets = summarizeRecord(
 			debug.texturePageUsageBucketCounts,
 		);
-		const compactionMaterialFamilies = summarizeRecord(
-			debug.compactionCoverageMaterialFamilyCounts,
+		const materialBatchingMaterialFamilies = summarizeRecord(
+			debug.materialBatchingCoverageMaterialFamilyCounts,
 		);
-		const compactionRetainedFamilies = summarizeRecord(
-			debug.compactionCoverageRetainedDirectMaterialFamilyCounts,
+		const materialBatchingRetainedFamilies = summarizeRecord(
+			debug.materialBatchingCoverageRetainedDirectMaterialFamilyCounts,
 		);
-		const compactionMaterialBlockers = summarizeRecord(
-			debug.compactionCoverageMaterialBlockerCounts,
+		const materialBatchingMaterialBlockers = summarizeRecord(
+			debug.materialBatchingCoverageMaterialBlockerCounts,
 		);
-		const compactionGeometryBlockers = summarizeRecord(
-			debug.compactionCoverageGeometryBlockerCounts,
+		const materialBatchingGeometryBlockers = summarizeRecord(
+			debug.materialBatchingCoverageGeometryBlockerCounts,
 		);
 		const fallbackSamples = summarizeSamples(debug.fallbackReasonSamples);
-		const compactionBypassSamples = summarizeSamples(
-			debug.compactionBypassSamples,
+		const materialBatchingBypassSamples = summarizeSamples(
+			debug.materialBatchingBypassSamples,
 		);
 		const terrainOneDrawBlockerSamples = summarizeSamples(
 			debug.terrainOneDrawBlockerSamples,
@@ -380,7 +338,7 @@
 		const performanceText = renderMetrics?.performance
 			? `${renderMetrics.performance.fps.toFixed(1)} FPS, ${renderMetrics.performance.frameMs.toFixed(1)} ms/frame, ${renderMetrics.performance.renderMs.toFixed(1)} ms render`
 			: "waiting for performance sample";
-		return `Perf ${performanceText}. Diagnosis: ${diagnosis}. Draw pressure ${debug.renderCalls} visible draws from ${candidateBatchCount} candidate ${drawGroupTerm}; static product resources ${debug.staticLandblockProductCount} products, ${debug.staticBundleLayerResourceCount} bundle layers, ${debug.structuredInteriorCellResourceCount} interior cells, ${debug.terrainProductResourceCount} terrain products, ${debug.portalMaskProductDrawUnitCount} portal masks; retained tris ${debug.renderTriangles}. Terrain family: visible ${debug.visibleTerrainTileCount}, ready ${debug.visibleTerrainOneDrawReadyTileCount}, blocked ${debug.visibleTerrainOneDrawBlockedTileCount}, ready slices ${debug.visibleTerrainDrawSliceReadyCount}, shader draws ${debug.terrainOneDrawShaderDrawCallCount}, submitted tiles ${debug.terrainOneDrawSubmittedTileCount}, submitted slices ${debug.terrainDrawSliceSubmittedCount}, tris ${debug.terrainOneDrawSubmittedTriangleCount}, atlas refs ${debug.terrainAtlasRefCount}, atlas candidates ${debug.terrainAtlasCandidateCount}, atlas blocker tiles ${debug.terrainAtlasBlockerTileCount}${terrainOneDrawBlockerSamples ? `, blockers ${terrainOneDrawBlockerSamples}` : ""}${terrainOneDrawSubmitFallbackSamples ? `, submit fallbacks ${terrainOneDrawSubmitFallbackSamples}` : ""}. Materials ${debug.materialCount}, textures ${debug.textureResourceCount}, indexed textures ${debug.indexedTextureResourceCount}, palettes ${debug.paletteResourceCount}; texture pages ${debug.texturePageBindingCount} bindings (${texturePageBuckets}), atlas failures ${debug.atlasFailureReasonCount}${atlasFailureSamples ? ` (${atlasFailureSamples})` : ""}; direct texture-page draws ${debug.directTexturePageDrawCount} (${debug.directPackedTexturePageDrawCount} packed, ${debug.directSingleEntryTexturePageDrawCount} single-entry)${directTexturePageFallbackSamples ? `, texture-page fallbacks ${directTexturePageFallbackSamples}` : ""}. Runtime material batching: candidates ${debug.compactionCandidateDrawUnitCount}, families ${compactionMaterialFamilies}, retained direct families ${compactionRetainedFamilies}, material blockers ${compactionMaterialBlockers}, geometry blockers ${compactionGeometryBlockers}, bypasses ${debug.compactionBypassReasonCount}${compactionBypassSamples ? ` (${compactionBypassSamples})` : ""}. Render blockers ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}. Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}, transition depth ${debug.transitionPortalMaxDepth}; canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
+		return `Perf ${performanceText}. Diagnosis: ${diagnosis}. Draw pressure ${debug.renderCalls} visible draws from ${candidateBatchCount} candidate ${drawGroupTerm}; static product resources ${debug.staticLandblockProductCount} products, ${debug.staticBundleLayerResourceCount} bundle layers, ${debug.structuredInteriorCellResourceCount} interior cells, ${debug.terrainProductResourceCount} terrain products, ${debug.portalMaskProductDrawUnitCount} portal masks; retained tris ${debug.renderTriangles}. Terrain family: visible ${debug.visibleTerrainTileCount}, ready ${debug.visibleTerrainOneDrawReadyTileCount}, blocked ${debug.visibleTerrainOneDrawBlockedTileCount}, ready slices ${debug.visibleTerrainDrawSliceReadyCount}, shader draws ${debug.terrainOneDrawShaderDrawCallCount}, submitted tiles ${debug.terrainOneDrawSubmittedTileCount}, submitted slices ${debug.terrainDrawSliceSubmittedCount}, tris ${debug.terrainOneDrawSubmittedTriangleCount}, atlas refs ${debug.terrainAtlasRefCount}, atlas candidates ${debug.terrainAtlasCandidateCount}, atlas blocker tiles ${debug.terrainAtlasBlockerTileCount}${terrainOneDrawBlockerSamples ? `, blockers ${terrainOneDrawBlockerSamples}` : ""}${terrainOneDrawSubmitFallbackSamples ? `, submit fallbacks ${terrainOneDrawSubmitFallbackSamples}` : ""}. Materials ${debug.materialCount}, textures ${debug.textureResourceCount}, indexed textures ${debug.indexedTextureResourceCount}, palettes ${debug.paletteResourceCount}; texture pages ${debug.texturePageBindingCount} bindings (${texturePageBuckets}), atlas failures ${debug.atlasFailureReasonCount}${atlasFailureSamples ? ` (${atlasFailureSamples})` : ""}; direct texture-page draws ${debug.directTexturePageDrawCount} (${debug.directPackedTexturePageDrawCount} packed, ${debug.directSingleEntryTexturePageDrawCount} single-entry)${directTexturePageFallbackSamples ? `, texture-page fallbacks ${directTexturePageFallbackSamples}` : ""}. Runtime material batching: candidates ${debug.materialBatchingCandidateDrawUnitCount}, families ${materialBatchingMaterialFamilies}, retained direct families ${materialBatchingRetainedFamilies}, material blockers ${materialBatchingMaterialBlockers}, geometry blockers ${materialBatchingGeometryBlockers}, bypasses ${debug.materialBatchingBypassReasonCount}${materialBatchingBypassSamples ? ` (${materialBatchingBypassSamples})` : ""}. Render blockers ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}. Policy ${debug.resourcePolicy}, base ${debug.baseSceneDomain}, transition depth ${debug.transitionPortalMaxDepth}; canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
 	});
 	const sceneContextText = $derived(renderResourceReport.sceneContextText);
 	const cameraResidencyText = $derived.by(() => {
@@ -395,12 +353,12 @@
 	const destinationSourceText = $derived(
 		describeBrowserDestinationSource(browserDestination),
 	);
-	const renderGraphText = $derived.by(() => {
+	const resourcePolicyText = $derived.by(() => {
 		const debug = renderMetrics?.debug;
 		if (!debug) {
-			return "Waiting for render graph.";
+			return "Waiting for renderer resources.";
 		}
-		return `${debug.renderGraphBaseScene} base, transition depth ${debug.transitionPortalMaxDepth}`;
+		return `${debug.baseSceneDomain} base, transition depth ${debug.transitionPortalMaxDepth}`;
 	});
 	const landblockVisibilityText = $derived(
 		renderResourceReport.landblockVisibilityText,
@@ -437,63 +395,6 @@
 		const fallbackSamples = summarizeSamples(debug.fallbackReasonSamples);
 		return `BVH visible/candidate: terrain ${debug.terrainBvhVisibleItemCount}/${debug.terrainBvhTotalItemCount}, outdoor statics ${debug.outdoorStaticBvhVisibleItemCount}/${debug.outdoorStaticBvhTotalItemCount}, env local ${debug.envCellLocalBvhVisibleItemCount}/${debug.envCellLocalBvhTotalItemCount}. Candidate resources: static ${debug.staticBvhCandidateBatchCount}/${debug.staticRenderBatchCount}, terrain ${debug.terrainBvhCandidateBatchCount}/${debug.terrainRenderBatchCount}, interiors ${debug.structuredInteriorBvhCandidateBatchCount}/${debug.structuredInteriorRenderBatchCount}, overlays ${debug.debugOverlayBvhCandidateBatchCount}/${debug.debugOverlayRenderBatchCount}, portal masks ${debug.portalMaskBvhCandidateBatchCount}/${debug.portalMaskRenderBatchCount}. Terrain submit: visible ${debug.visibleTerrainTileCount}, ready ${debug.visibleTerrainOneDrawReadyTileCount}, blocked ${debug.visibleTerrainOneDrawBlockedTileCount}, shader draws ${debug.terrainOneDrawShaderDrawCallCount}. Keys: static ${debug.visibleStaticInstanceKeyCount}, portals ${debug.visiblePortalKeyCount}, env cells ${debug.envCellBvhConsideredCount}. Fallback resources ${debug.staticBvhFallbackIncludedBatchCount + debug.nonStaticBvhFallbackIncludedBatchCount}; fallback reasons ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}; query ${debug.queryTimeMs.toFixed(2)} ms.`;
 	});
-	const runtimeAppearanceStatusText = $derived.by(() => {
-		if (runtimeAppearancePending) {
-			return "Resolving runtime appearance.";
-		}
-		if (runtimeAppearanceError) {
-			return runtimeAppearanceError;
-		}
-		if (runtimeAppearancePreviews.length > 0) {
-			return `${runtimeAppearancePreviews.length} preview object${runtimeAppearancePreviews.length === 1 ? "" : "s"} spawned.`;
-		}
-		return "No runtime appearance is active.";
-	});
-	const latestRuntimeAppearancePreview = $derived(
-		runtimeAppearancePreviews.at(-1) ?? null,
-	);
-	const runtimeAppearanceRows = $derived<BrowserPanelRow[]>([
-		{
-			label: "Cache",
-			value: describeRuntimeAppearanceCacheDiagnostics(),
-		},
-		{
-			label: "Spawned",
-			value: `${runtimeAppearancePreviews.length}`,
-		},
-		...(latestRuntimeAppearancePreview
-			? [
-					{
-						label: "Latest",
-						value: latestRuntimeAppearancePreview.resolved.appearanceKey,
-					},
-					{
-						label: "Parts",
-						value: `${latestRuntimeAppearancePreview.resolved.selectedGfxObjAssetIds.length} selected`,
-					},
-					{
-						label: "Materials",
-						value: `${latestRuntimeAppearancePreview.resolved.materialAssetIds.length} requested`,
-					},
-					{
-						label: "Palettes",
-						value: `${latestRuntimeAppearancePreview.resolved.paletteAssetIds.length} requested`,
-					},
-					{
-						label: "Textures",
-						value:
-							latestRuntimeAppearancePreview.resolved.textureSwapSignature ??
-							"base",
-					},
-					{
-						label: "Palette view",
-						value:
-							latestRuntimeAppearancePreview.resolved.paletteViewSignature ??
-							"base",
-					},
-				]
-			: []),
-	]);
 	const cameraFrameText = $derived(
 		browserCameraFrame
 			? `${describeSceneCameraFrame(browserCameraFrame)} ${describeBrowserCameraControlMode()}`
@@ -536,7 +437,7 @@
 		{ label: "Navigation", value: navigationFocusText },
 		{ label: "Destination", value: worldDisplay.destinationFocusLabel },
 		{ label: "Camera residency", value: cameraResidencyText },
-		{ label: "Base scene", value: renderGraphText },
+		{ label: "Base scene", value: resourcePolicyText },
 		{ label: "Landblocks", value: landblockVisibilityText },
 		{
 			label: "Static products",
@@ -809,18 +710,6 @@
 			debugSummaryRows: browserPanelDebugRows,
 			debugDetailSections: browserPanelDebugDetailSections,
 			pickerSections: pickerReport.sections,
-			runtimeAppearanceStatusText,
-			runtimeAppearanceRows,
-			runtimeAppearancePayload: {
-				pending: runtimeAppearancePending,
-				error: runtimeAppearanceError,
-				input: runtimeAppearanceInput,
-				previews: runtimeAppearancePreviews.map((preview) => ({
-					id: preview.id,
-					setupModelId: preview.resolved.setupAppearance.setupModelId,
-					appearanceKey: preview.resolved.setupAppearance.appearanceKey,
-				})),
-			},
 		});
 	}
 
@@ -1008,7 +897,6 @@
 			selectedStaticRenderableRenderKey,
 			activeRenderAnchor,
 			browserCameraFrame: getEffectiveBrowserCameraFrame(),
-			runtimeAppearancePreviews,
 		});
 	}
 
@@ -1020,155 +908,6 @@
 			detailLodRadius,
 			envCellLodRadius,
 		};
-	}
-
-	function handleRuntimeAppearanceSubmit(
-		request: RuntimeAppearanceRequestDto,
-	): void {
-		const input: RuntimeAppearanceInput = {
-			setupModelId: request.setupModelId,
-			objDesc: request.objDesc,
-		};
-		runtimeAppearanceInput = input;
-		runtimeAppearancePending = true;
-		runtimeAppearanceError = null;
-		runtimeAppearanceRequestSequence += 1;
-		const requestSequence = runtimeAppearanceRequestSequence;
-
-		void runtimeAppearanceCache
-			.getOrResolve(input, async () =>
-				createRuntimeAppearanceResolvedFacts(
-					await resolveRuntimeAppearance(request),
-				),
-			)
-			.then((resolved) => {
-				if (runtimeAppearanceRequestSequence !== requestSequence) {
-					return;
-				}
-				const spawnCameraFrame = browserCameraFrame;
-				if (!spawnCameraFrame) {
-					throw new Error(
-						"Cannot spawn runtime appearance preview before the browser camera is ready.",
-					);
-				}
-				const preview = createRuntimeAppearancePreviewInstance(
-					resolved,
-					spawnCameraFrame,
-				);
-				runtimeAppearancePreviews = [...runtimeAppearancePreviews, preview];
-				runtimeAppearancePending = false;
-				onRuntimeAppearanceAssetIdsChange?.(
-					collectRuntimeAppearancePreviewAssetIds(runtimeAppearancePreviews),
-				);
-				scheduleCurrentSceneResourceUpdate();
-			})
-			.catch((error) => {
-				if (runtimeAppearanceRequestSequence !== requestSequence) {
-					return;
-				}
-				runtimeAppearancePending = false;
-				runtimeAppearanceError =
-					error instanceof Error ? error.message : String(error);
-				scheduleCurrentSceneResourceUpdate();
-			});
-	}
-
-	function clearRuntimeAppearance(): void {
-		runtimeAppearanceInput = null;
-		runtimeAppearancePreviews = [];
-		runtimeAppearancePending = false;
-		runtimeAppearanceError = null;
-		runtimeAppearanceRequestSequence += 1;
-		onRuntimeAppearanceAssetIdsChange?.([]);
-		scheduleCurrentSceneResourceUpdate();
-	}
-
-	function createRuntimeAppearancePreviewInstance(
-		resolved: ResolvedRuntimeAppearanceFacts,
-		spawnCameraFrame: SceneCameraFrame,
-	): RuntimeAppearancePreviewInstance {
-		runtimeAppearancePreviewSequence += 1;
-		return {
-			id: `${resolved.appearanceKey}/${runtimeAppearancePreviewSequence}`,
-			spawnCameraFrame,
-			setupAppearance: resolved.setupAppearance,
-			resolved,
-		};
-	}
-
-	function createRuntimeAppearanceResolvedFacts(
-		setupAppearance: SetupAppearancePayloadDto,
-	): ResolvedRuntimeAppearanceFacts {
-		const selectedGfxObjAssetIds = uniqueSortedStrings(
-			setupAppearance.parts.map((part) => part.gfxObjAssetId),
-		);
-		return {
-			setupModelId: setupAppearance.setupModelId,
-			appearanceKey: setupAppearance.appearanceKey,
-			selectedGfxObjAssetIds,
-			materialAssetIds: uniqueSortedStrings(
-				setupAppearance.dependencies.materialAssetIds,
-			),
-			paletteAssetIds: uniqueSortedStrings(
-				setupAppearance.dependencies.paletteAssetIds,
-			),
-			textureChanges: setupAppearance.textureChanges,
-			animPartChanges: setupAppearance.animPartChanges,
-			paletteId: setupAppearance.paletteId,
-			subPalettes: setupAppearance.subPalettes,
-			selectedPartsSignature:
-				selectedGfxObjAssetIds.length === 0
-					? null
-					: selectedGfxObjAssetIds.join(","),
-			textureSwapSignature:
-				setupAppearance.textureChanges.length === 0
-					? null
-					: setupAppearance.textureChanges
-							.map(
-								(change) =>
-									`${change.partIndex}:${formatHex32(change.oldTexture)}>${formatHex32(change.newTexture)}`,
-							)
-							.join(","),
-			paletteViewSignature:
-				setupAppearance.paletteId === null &&
-				setupAppearance.subPalettes.length === 0
-					? null
-					: [
-							`base=${setupAppearance.paletteId === null ? "material" : formatHex32(setupAppearance.paletteId)}`,
-							`sub=${setupAppearance.subPalettes
-								.map(
-									(subPalette) =>
-										`${formatHex32(subPalette.subId)}@${subPalette.offset}+${subPalette.numColors}`,
-								)
-								.join(",")}`,
-						].join("|"),
-			setupAppearance,
-		};
-	}
-
-	function collectRuntimeAppearancePreviewAssetIds(
-		previews: readonly RuntimeAppearancePreviewInstance[],
-	): string[] {
-		return uniqueSortedStrings(
-			previews.flatMap((preview) => {
-				const { resolved } = preview;
-				return [
-					`setup-model/${formatHex32(resolved.setupModelId).toLowerCase()}`,
-					...resolved.selectedGfxObjAssetIds,
-					...resolved.materialAssetIds,
-					...resolved.paletteAssetIds,
-				];
-			}),
-		);
-	}
-
-	function describeRuntimeAppearanceCacheDiagnostics(): string {
-		const diagnostics = runtimeAppearanceCache.diagnostics();
-		return `${diagnostics.size}/${diagnostics.maxEntries} entries; ${diagnostics.hits} hits, ${diagnostics.misses} misses, ${diagnostics.evictions} evictions.`;
-	}
-
-	function uniqueSortedStrings(values: readonly string[]): string[] {
-		return [...new Set(values)].sort();
 	}
 
 	function syncControlledCameraFrame(): void {
@@ -1545,9 +1284,6 @@
 		}
 
 		const { pick, viewportPoint } = result;
-		const staticDiagnostic = getStaticPickDiagnostic(pick.item.metadata);
-		const runtimeDiagnostics =
-			getRuntimeDiagnosticsForStaticDiagnostic(staticDiagnostic);
 		return {
 			statusText: `Picked ${describePickedMetadataTitle(pick.item.metadata)} at ${pick.distance.toFixed(2)}m.`,
 			sections: [
@@ -1568,12 +1304,6 @@
 					title: "Metadata",
 					rows: describePickedMetadataRows(pick.item.metadata),
 				},
-				...(staticDiagnostic
-					? describeStaticPickDiagnosticSections(staticDiagnostic)
-					: []),
-				...(runtimeDiagnostics.length > 0
-					? describeRuntimeDiagnosticSections(runtimeDiagnostics)
-					: []),
 			],
 		};
 	}
@@ -1676,131 +1406,9 @@
 		];
 	}
 
-	function describeStaticPickDiagnosticSections(
-		diagnostic: BrowserStaticRenderablePickDiagnostic,
-	): BrowserPanelSection[] {
-		return [
-			{
-				title: "Runtime Appearance Resources",
-				rows:
-					diagnostic.drawUnits.length === 0
-						? [
-								{
-									label: "Status",
-									value: "No runtime appearance resources matched this render key.",
-								},
-							]
-						: diagnostic.drawUnits.flatMap((drawUnit, index) => [
-								{
-									label: `Draw ${index}`,
-									value: drawUnit.drawUnitId,
-								},
-								{
-									label: `Material ${index}`,
-									value: describeStaticDiagnosticMaterial(drawUnit.material),
-								},
-								{
-									label: `UV ${index}`,
-									value: describeStaticDiagnosticUv(drawUnit.geometry.uv),
-								},
-							]),
-			},
-		];
-	}
-
-	function describeStaticDiagnosticMaterial(
-		material: BrowserStaticRenderablePickDiagnostic["drawUnits"][number]["material"],
-	): string {
-		if (material.kind === "direct-texture") {
-			return [
-				material.kind,
-				material.textureKey,
-				material.renderSurfaceId,
-				material.size,
-				`wrap=${material.wrap}`,
-				`filter=${material.filter}`,
-				`page=${material.texturePageReadiness?.atlasEntryKey ?? "none"}`,
-				`detail=${material.detailOverlay ? `${material.detailOverlay.renderSurfaceId}@${material.detailOverlay.tiling}` : "none"}`,
-			].join("; ");
-		}
-		if (material.kind === "indexed-paletted") {
-			return [
-				material.kind,
-				material.key,
-				`format=${material.indexFormat}`,
-				`size=${material.indexSize}`,
-				`paletteColors=${material.paletteColorCount}`,
-				`wrap=${material.wrap}`,
-				`detail=${material.detailOverlay ? `${material.detailOverlay.renderSurfaceId}@${material.detailOverlay.tiling}` : "none"}`,
-			].join("; ");
-		}
-		return [
-			material.kind,
-			material.key,
-			`fallback=${material.fallbackReason ?? "none"}`,
-		].join("; ");
-	}
-
-	function describeStaticDiagnosticUv(
-		uv: BrowserStaticRenderablePickDiagnostic["drawUnits"][number]["geometry"]["uv"],
-	): string {
-		if (uv.coordinateCount === 0) {
-			return "none";
-		}
-		return [
-			`count=${uv.coordinateCount}`,
-			`u=${formatNullableNumber(uv.minU)}..${formatNullableNumber(uv.maxU)}`,
-			`v=${formatNullableNumber(uv.minV)}..${formatNullableNumber(uv.maxV)}`,
-			`span=${formatNullableNumber(uv.spanU)}x${formatNullableNumber(uv.spanV)}`,
-			`outside01=${uv.outsideUnitSquare}`,
-		].join("; ");
-	}
-
-	function describeRuntimeDiagnosticSections(
-		diagnostics: readonly DrawUnitRuntimeDiagnostic[],
-	): BrowserPanelSection[] {
-		return [
-			{
-				title: "Runtime Render Paths",
-				rows: diagnostics.map((diagnostic, index) => ({
-					label: `Path ${index}`,
-					value: describeRuntimeDiagnosticSummary(diagnostic),
-				})),
-			},
-		];
-	}
-
-	function describeRuntimeDiagnosticSummary(
-		diagnostic: DrawUnitRuntimeDiagnostic,
-	): string {
-		if (!diagnostic.drawUnit) {
-			return `${diagnostic.submissionPath}; ${diagnostic.drawUnitId}`;
-		}
-		return [
-			diagnostic.submissionPath,
-			`kind=${diagnostic.drawUnit.kind}`,
-			`material=${diagnostic.drawUnit.materialKind}`,
-			`family=${diagnostic.drawUnit.compactionMaterialFamily}`,
-			`decision=${diagnostic.drawUnit.compactionDecision}`,
-			`finalPlan=${diagnostic.drawUnit.finalCompactionPlan.status}`,
-			`planSlot=${diagnostic.drawUnit.finalCompactionPlan.materialSlotKey ?? "none"}`,
-			`planBypasses=${
-				diagnostic.drawUnit.finalCompactionPlan.bypasses
-					.map((bypass) => bypass.reason)
-					.join(",") || "none"
-			}`,
-			`alpha=${diagnostic.drawUnit.compactionAlphaPolicy}`,
-			`materialBlockers=${diagnostic.drawUnit.compactionMaterialBlockers.join(",") || "none"}`,
-			`geometryBlockers=${diagnostic.drawUnit.compactionGeometryBlockers.join(",") || "none"}`,
-		].join("; ");
-	}
-
 	function buildPickerClipboardReport(
 		result: BrowserRenderablePickResult,
 	): string {
-		const staticDiagnostic = getStaticPickDiagnostic(result.pick.item.metadata);
-		const runtimeDiagnostics =
-			getRuntimeDiagnosticsForStaticDiagnostic(staticDiagnostic);
 		const report = {
 			generatedAt: new Date().toISOString(),
 			hit: {
@@ -1813,44 +1421,8 @@
 				viewport: result.viewportPoint,
 			},
 			metadata: result.pick.item.metadata,
-			staticRenderableDiagnostics: staticDiagnostic,
-			runtimeRenderDiagnostics: runtimeDiagnostics,
-			notes: staticDiagnostic
-				? [
-						runtimeDiagnostics.length === 0
-							? "Static diagnostics are renderer CPU facts. Runtime WebGL draw-unit facts were unavailable, usually because the renderer had not finished loading resources."
-							: "Static diagnostics are renderer CPU facts. Runtime render diagnostics are current WebGL2 resource-store facts for the matching draw unit ids.",
-					]
-				: [],
 		};
 		return JSON.stringify(report, null, 2);
-	}
-
-	function getRuntimeDiagnosticsForStaticDiagnostic(
-		staticDiagnostic: BrowserStaticRenderablePickDiagnostic | null,
-	): readonly DrawUnitRuntimeDiagnostic[] {
-		if (!staticDiagnostic) {
-			return [];
-		}
-		return (
-			worldDisplaySurface?.getDrawUnitRuntimeDiagnostics(
-				staticDiagnostic.drawUnits.map((drawUnit) => drawUnit.drawUnitId),
-			) ?? []
-		);
-	}
-
-	function getStaticPickDiagnostic(
-		metadata: RenderSpatialMetadata,
-	): BrowserStaticRenderablePickDiagnostic | null {
-		return metadata.kind === "static-renderable"
-			? renderResourceCoordinator.getStaticRenderablePickDiagnostic(
-					metadata.renderKey,
-				)
-			: null;
-	}
-
-	function formatNullableNumber(value: number | null): string {
-		return value === null ? "n/a" : value.toFixed(4);
 	}
 
 	function deriveDiagnosticInspector(
@@ -2353,7 +1925,6 @@
 >
 	<WorldDisplay
 		bind:this={worldDisplaySurface}
-		{rendererResourceGraph}
 		onCameraFrameChange={handleRendererCameraFrameChange}
 		onRenderMetricsChange={handleRenderMetricsChange}
 		onCameraResidencyChange={handleRendererCameraResidencyChange}

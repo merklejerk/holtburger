@@ -233,7 +233,7 @@ Progress:
 - Renamed static product residency surfaces away from `StaticLandblockRenderArtifactStoreSnapshot` to `StaticLandblockRenderProductSet`.
 - Renamed the browser UI return object away from `BrowserRenderResourceSnapshot`/`renderResourceSnapshot` to `BrowserRenderResourceReport`/`renderResourceReport`.
 - Renamed renderer replacement API from `setStaticLandblockRenderArtifacts` to `replaceStaticLandblockProducts`.
-- Left the actual renderer handoff as a full-set replacement pending the explicit commit/evict contract. This is transitional debt and must be removed in this phase, not deferred past the commit surface work.
+- Initially left the actual renderer handoff as a full-set replacement while introducing the explicit commit/evict contract; later phases removed that transitional handoff.
 - Added `StaticLandblockProductKey` helpers with stable product/policy identity and routed store artifact keys through them.
 - Changed worker product job IDs and static bundle `sourceRevision` inputs to use product/policy identity rather than request IDs.
 - Added `commitStaticLandblockProduct`, `evictStaticLandblockProduct`, and `clearStaticLandblockProducts` to the renderer contract, deferred renderer wrapper, Svelte surface, and WebGL implementation. The WebGL implementation still forwards through the transitional full-set resource dirty path until Phase 3B-5 deletes the broad sync.
@@ -269,7 +269,7 @@ Progress:
 
 ### Phase 2: Product Coordinator Cutover
 
-Status: complete with transitional report dependencies.
+Status: complete.
 
 Deliverables:
 
@@ -589,7 +589,7 @@ Progress:
 
 ### Phase 5: Broad WebGL Sync Split
 
-Status: complete for production static product rendering; residual test-only legacy helpers remain tracked in cleanup targets.
+Status: complete.
 
 Deliverables:
 
@@ -642,7 +642,7 @@ Progress:
 
 ### Phase 7: Debug, Picker, Graph, And Metrics Demotion
 
-Status: complete for static product ownership.
+Status: complete.
 
 Deliverables:
 
@@ -661,12 +661,12 @@ Progress:
 
 - Browser picking now uses renderer product metadata before the old browser spatial query path.
 - BRC no longer populates product-owned static/terrain/interior spatial items or product-derived debug overlays.
-- Static product resource lifetime no longer uses `RendererResourceGraph`; graph leases remain for runtime/non-product resource diagnostics.
+- Static product resource lifetime no longer uses `RendererResourceGraph`; later add-on purge phases deleted the remaining graph plumbing after runtime previews and broad world sync were removed.
 - Static product report text was demoted to a renderer-owned placeholder instead of BRC residency counters.
 
 ### Phase 8: Legacy Static Pipeline Deletion
 
-Status: complete for production paths; historical helper tests remain.
+Status: complete.
 
 Deliverables:
 
@@ -690,7 +690,7 @@ Progress:
 
 ### Phase 9: Cleanup And Naming Pass
 
-Status: complete for this cutover pass.
+Status: complete.
 
 Deliverables:
 
@@ -870,7 +870,7 @@ Progress:
 - Renamed neutral indexed geometry helpers from `staged-world-geometry` to `indexed-render-geometry`.
 - Renamed `StagedWorldIndexedGeometry` to `RenderIndexedGeometry`, `buildStagedPolygonSetGeometry()` to `buildPolygonSetRenderGeometry()`, and `buildStagedPortalApertureGeometry()` to `buildPortalApertureRenderGeometry()`.
 - Extracted `buildStaticRenderablePartMatrix()` to `static-renderable-placement.ts`.
-- Left `staged-world-assembly` naming only on runtime appearance preview assembly and picker-diagnostic paths.
+- Left `staged-world-assembly` naming only on runtime appearance preview assembly and picker-diagnostic paths at the time; later add-on phases deleted those paths rather than preserving them.
 
 ### Phase 15: True Purge Of Historical Product-Commit Debt
 
@@ -903,11 +903,11 @@ Progress:
 - No temporary quarantines were created during Phases 10-14.
 - Final source audit found no `replaceStaticLandblockProducts`, `syncWebgl2StaticBundleLayerResources()`, artifact-to-scene landblock adapter, static landblock snapshot/diff compatibility, or old staged geometry module references under `apps/holtburger-3d/src`.
 - Renamed final misleading test/debug wording discovered during purge (`compatibility output`, `stage it separately`).
-- Remaining `staged` names are runtime appearance preview specific; remaining `compacted`, `fallback`, `artifact`, `snapshot`, and `graph` uses are rendering technique, current product/resource, frame visibility, or runtime debug terminology.
+- Later add-on phases deleted runtime appearance previews and `RendererResourceGraph`; remaining `staged`, `compacted`, `fallback`, `artifact`, `snapshot`, and `graph` uses are rendering technique, current product/resource, frame visibility, or historical docs rather than old product commit plumbing.
 
 ### Phase 16: Remove Runtime Appearance Preview Rendering
 
-Status: add-on.
+Status: complete.
 
 Deliverables:
 
@@ -941,9 +941,17 @@ Dry-run findings:
 - Remove `appearance-preview` and `appearance-preview-staged` categories from frame/render metrics, submit tests, world-resource tests, picker diagnostics, and render debug report types once no production renderer path emits those draw units.
 - This phase should run before Phase 17 because `syncWebgl2WorldResources()` still builds preview assemblies today; deleting previews first narrows the later world sync purge.
 
+Progress:
+
+- Removed browser runtime appearance preview state, prepared asset retention hooks, debug report payloads, and coordinator inputs.
+- Deleted preview-only scene derivation, staged preview assembly, preview picker diagnostics, runtime appearance cache, and their tests.
+- Removed `appearance-preview` / `appearance-preview-staged` frame categories, render metric folding, WebGL resource counters, and graph record creation.
+- Removed orphaned helper exports left behind by the deletion (`buildDebugColor`, preview static scene merging, and preview-only staged material/readiness exports).
+- Verification: `npm run check`, `npm run test:ts`, and `npm run lint` pass from `apps/holtburger-3d`.
+
 ### Phase 17: Delete Non-Product Terrain And Broad Runtime World Sync
 
-Status: add-on.
+Status: complete.
 
 Deliverables:
 
@@ -975,9 +983,19 @@ Dry-run findings:
 - Most `webgl2-world-resources.test.ts` terrain sync tests should either become product commit tests or be deleted. Tests that exist only to prove `TerrainSceneModel` to WebGL conversion should not survive this phase.
 - Runtime `terrainTexturePagesByKey` should be deleted with the non-product terrain resource path. Keep product page storage product-keyed.
 
+Progress:
+
+- Removed `setTerrainScene()` from the browser render surface, `WorldDisplay.svelte`, deferred renderer, renderer contract, and WebGL renderer implementation.
+- Deleted `syncWebgl2WorldResources()` and the non-product `TerrainSceneModel` to WebGL terrain resource creation path.
+- Deleted runtime `terrainTexturePagesByKey`; terrain texture pages are now only stored through product-owned `productTerrainTexturePagesByKey`.
+- Moved the remaining renderer refresh behavior to explicit product commit/evict/recommit operations, scene-bounds refresh, and product-owned terrain/portal mask counter helpers.
+- Deleted WebGL tests whose only purpose was proving `TerrainSceneModel` to terrain resource conversion or broad sync cleanup, and kept product terrain and product portal mask commit/evict coverage.
+- Removed dead sync-era helpers surfaced by lint/knip, including graph signature formatting, direct indexed retained-key sync helpers, prepared-upload counting, and test asset-state fixtures.
+- Verification: `npm run check`, `npm run test:ts`, and `npm run lint` pass from `apps/holtburger-3d`.
+
 ### Phase 18: Delete Or Re-Introduce Renderer Resource Graph Deliberately
 
-Status: add-on.
+Status: complete.
 
 Deliverables:
 
@@ -1005,9 +1023,18 @@ Dry-run findings:
 - Delete graph lease/signature fields on `Webgl2WorldResourceStore`, `syncWebgl2AssemblyGraph()`, `syncWebgl2TerrainTileGraph()`, and graph-only tests if no active non-static-product consumer remains.
 - Do not keep graph leasing around merely because future dynamic entities may need resource lifetime tracking. If dynamics need a graph later, that model should be introduced from entity ownership, not inherited from preview and terrain sync.
 
+Progress:
+
+- Deleted `renderer-resource-graph.ts` and its tests after Phase 17 removed the last runtime resource sync consumer.
+- Removed graph construction from `App.svelte`, graph props from `BrowserWorldDisplay.svelte` / `WorldDisplay.svelte`, and graph options from the renderer contract and deferred renderer wrapper.
+- Removed graph lease/signature fields from `Webgl2WorldResourceStore`; product stores now own their resource lifetime directly.
+- Removed the renderer-retained prepared asset callback/cache-policy hook because no renderer graph remains to produce retained asset IDs.
+- Renamed debug metrics from `renderGraphPolicy` / `renderGraphBaseScene` to `resourcePolicy` / `baseSceneDomain`.
+- Verification: `npm run check`, `npm run test:ts`, and `npm run lint` pass from `apps/holtburger-3d`.
+
 ### Phase 19: Rehome Surviving Renderer Primitives
 
-Status: add-on.
+Status: complete.
 
 Deliverables:
 
@@ -1038,9 +1065,19 @@ Dry-run findings:
 - Keep `compaction` terminology only inside the actual compaction planner and private draw-unit internals where it describes the rendering technique. Rename exported/debug-facing fields toward runtime material batching or atlas batching once the surviving surface is known.
 - `texture-pages/*` already reads like a real renderer primitive namespace and should not move unless ownership changes during deletion. This phase should focus on names/locations that still imply the old staged world path.
 
+Progress:
+
+- Renamed `staged-world-material-strategy.ts` / `.test.ts` to `render-material-strategy.ts` / `.test.ts`.
+- Renamed `staged-world-materials.ts` to `render-material-plans.ts`.
+- Renamed surviving exported strategy/plan types and helpers from `StagedWorld*` / `staged-world-*` terminology to `RenderMaterial*`, `RenderAtlas*`, `RenderDirectTexture*`, `RenderIndexedPaletted*`, and `RenderFlat*` terminology.
+- Rehomed runtime draw-unit diagnostics from `runtime-render-diagnostics.ts` / `webgl2-runtime-render-diagnostics.ts` to `draw-unit-render-diagnostics.ts` / `webgl2-draw-unit-render-diagnostics.ts`.
+- Renamed browser/public debug fields from `compaction*` coverage/candidate/bypass names to `materialBatching*` names while keeping `compaction/` internals as the private low-level batching implementation.
+- Left `texture-pages/*`, `static-material-artifacts.ts`, and `compaction/compaction-family-planner.ts` in place because their current names describe real renderer primitives or private implementation technique rather than old staged ownership.
+- Verification: `npm run check`, `npm run test:ts`, and `npm run lint` pass from `apps/holtburger-3d`.
+
 ### Phase 20: Keep BrowserRenderResourceCoordinator On Watch
 
-Status: add-on watch item.
+Status: complete.
 
 Deliverables:
 
@@ -1066,6 +1103,15 @@ Dry-run findings:
 - After Phase 16, remove preview derivation and preview picker diagnostics from BRC. After Phase 17, remove `setTerrainScene()` application and any terrain scene renderer input from the surface contract.
 - The surface interface should shrink with deleted renderer inputs: `setStaticRenderableScene()` is likely removable with preview deletion, `setTerrainScene()` with non-product terrain deletion, and structured/portal setters should be checked against product-owned rendering before preserving them.
 - Keep BRC only where it remains browser policy: applying live surface state, maintaining browser spatial/picking data, deriving reports, and debug overlays. Do not split it just for tidiness before the dead responsibilities are removed.
+
+Progress:
+
+- Removed dead `setStaticRenderableScene()`, `setStructuredInteriorScene()`, and `setTransitionPortalModel()` methods from `BrowserRenderResourceSurface`, `WorldDisplay.svelte`, the deferred renderer, the renderer contract, and the WebGL renderer implementation.
+- Kept empty static/structured scene models local to the WebGL renderer only as fallback inputs for lower-level frame/metrics helpers that still require those shapes.
+- Let transition portal candidates remain renderer-derived from resident static products; BRC no longer applies an empty portal model.
+- Updated BRC tests to assert that prepared asset records do not cause BRC to commit static products.
+- Verified there are no production references to deleted runtime preview, non-product terrain renderer surface, resource graph, broad world sync, or BRC static picker diagnostic paths.
+- Verification: `npm run check`, `npm run test:ts`, and `npm run lint` pass from `apps/holtburger-3d`.
 
 ## Risks And Mitigations
 
@@ -1208,3 +1254,4 @@ Dry-run findings:
 - 2026-06-05: Non-product terrain scene tiles are considered legacy for renderer resource creation. Terrain should reach WebGL through landblock product terrain commits only.
 - 2026-06-05: `RendererResourceGraph` should not be kept as speculative infrastructure for future dynamic entities. If preview deletion makes it unused, delete it; if a real current consumer remains, rename/scope it to that consumer.
 - 2026-06-05: Phase 19 was reframed from cosmetic metric/module renaming into a rehome pass for surviving lower-level renderer primitives. Anything still named after staged-world, preview, or broad sync ownership must either die or move under a current responsibility.
+- 2026-06-06: Phase 16 removed runtime appearance preview rendering rather than stubbing it. This also deleted the preview-only asset-retention hook, staged preview assembly, preview picker diagnostics, and frontend runtime appearance cache.

@@ -161,37 +161,6 @@ export function describeTerrainTileGeometrySignature(
 	].join("|");
 }
 
-export function describeTerrainTileGraphSignature(
-	resource: Webgl2TerrainTileResource,
-): string {
-	return [
-		resource.id,
-		formatHex32(resource.landblockId),
-		`region:${resource.regionNumber}`,
-		resource.placementKey,
-		resource.geometrySignature,
-		resource.readiness.status,
-		resource.readiness.status === "ready"
-			? resource.readiness.terrainMaterialAssetId
-			: resource.readiness.reason,
-		`layer:${resource.layerPlan?.signature ?? "none"}`,
-		`layer-blockers:${resource.layerPlanBlockers.join(",")}`,
-		`detail:${resource.detailPlan?.atlasEntryKey ?? "none"}`,
-		`pages:${resource.texturePageBindings
-			.map((binding) => `${binding.family}:${binding.atlasEntryKey}`)
-			.join(",")}`,
-		`blockers:${resource.texturePageBlockers.join(",")}`,
-		`one-draw:${describeTerrainTileOneDrawReadiness(resource.oneDrawReadiness)}`,
-		`slices:${resource.drawSlices
-			.map(
-				(slice) =>
-					`${slice.id}:${slice.geometrySignature}:${describeTerrainTileOneDrawReadiness(slice.oneDrawReadiness)}`,
-			)
-			.join(",")}`,
-		`bvh:${resource.bvhItemKeys.join(",")}`,
-	].join("|");
-}
-
 export function describeTerrainBlendTextureAtlasEntryKey(
 	ref: TerrainBlendTextureRef,
 ): string {
@@ -404,14 +373,6 @@ function collectTerrainLayerTextureRefs(
 		),
 	);
 	return [...refsByKey.values()];
-}
-
-function describeTerrainTileOneDrawReadiness(
-	readiness: Webgl2TerrainTileOneDrawReadiness,
-): string {
-	return readiness.status === "ready"
-		? `ready:${readiness.layerEntryCount}:${readiness.texturePageBindingCount}:${readiness.colorPageBindingCount}:${readiness.maskPageBindingCount}`
-		: `blocked:${readiness.blockers.join(",")}`;
 }
 
 export function destroyWebgl2TerrainTileResource(

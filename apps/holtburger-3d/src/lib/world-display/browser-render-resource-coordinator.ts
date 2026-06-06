@@ -2,14 +2,12 @@ import type {
 	BrowserLocationSelection,
 	BrowserTextureFilteringMode,
 } from "../../app/browser-mode";
-import { browserDestinationToInteriorCellId } from "../../app/browser-mode";
 import { deriveTerrainFocusLandblockId } from "../assets/scene-asset-request-planner";
 import type { StructuredInteriorCoverage } from "../assets/structured-interior-coverage";
 import {
 	createInitialAssetChannelState,
 	type AssetChannelState,
 	type PreparedAssetRecord,
-	type PreparedSetupAppearancePayload,
 } from "../assets/types";
 import { formatHex32, formatLandblockOutdoorAssetId } from "../landblocks";
 import {
@@ -35,10 +33,6 @@ import {
 	type RenderSpatialMetadata,
 } from "./render-spatial-index";
 import {
-	deriveBrowserStaticRenderablePickDiagnostic,
-	type BrowserStaticRenderablePickDiagnostic,
-} from "./browser-picker-diagnostics";
-import {
 	DEBUG_OVERLAY_SPATIAL_OWNER_KEY,
 	STATIC_RENDERABLE_SPATIAL_OWNER_KEY,
 	STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY,
@@ -51,8 +45,6 @@ import {
 import { deriveWorldRenderSceneContext } from "./render-scene-context";
 import {
 	createEmptyStaticRenderableSceneModel,
-	deriveAppearancePreviewStaticRenderableSceneModel,
-	mergeStaticRenderableSceneModels,
 	type StaticRenderableSceneModel,
 } from "./static-renderables";
 import {
@@ -65,10 +57,6 @@ import {
 	type TerrainSceneModel,
 } from "./terrain-scene";
 import { deriveLandblockRenderChunkPlacement } from "./render-chunks";
-import {
-	createEmptyTransitionPortalCandidateModel,
-	type TransitionPortalCandidateModel,
-} from "./transition-portal-work-items";
 import { WORLD_RENDER_DOMAIN } from "./render-domains";
 import type { SceneCameraFrame } from "./camera";
 import type {
@@ -101,13 +89,6 @@ export interface BrowserRenderResourceCoordinatorInput {
 	selectedStaticRenderableRenderKey: string | null;
 	activeRenderAnchor: RenderLandblockAnchor | null;
 	browserCameraFrame: SceneCameraFrame | null;
-	runtimeAppearancePreviews: readonly BrowserRuntimeAppearancePreview[];
-}
-
-export interface BrowserRuntimeAppearancePreview {
-	id: string;
-	spawnCameraFrame: SceneCameraFrame;
-	setupAppearance: PreparedSetupAppearancePayload;
 }
 
 export interface BrowserRenderResourceReport {
@@ -135,17 +116,11 @@ export interface BrowserRenderResourceSurface {
 		context: ReturnType<typeof deriveWorldRenderSceneContext>,
 	): void;
 	setRenderChunkTransforms(transforms: readonly RenderChunkTransform[]): void;
-	setTerrainScene(scene: TerrainSceneModel): void;
 	commitStaticLandblockProduct(
 		result: LandblockRenderProductWorkerResult,
 	): void;
 	evictStaticLandblockProduct(key: StaticLandblockProductKey): void;
 	clearStaticLandblockProducts(): void;
-	setStaticRenderableScene(scene: StaticRenderableSceneModel): void;
-	setStructuredInteriorScene(scene: StructuredInteriorSceneModel): void;
-	setTransitionPortalModel(
-		model: TransitionPortalCandidateModel,
-	): void;
 	setDebugOverlayScene(scene: WorldDebugOverlayModel): void;
 	setRenderSpatialQuery(query: RenderSpatialIndexQuery | null): void;
 	setSelectedStaticRenderableRenderKey(renderKey: string | null): void;
@@ -192,20 +167,6 @@ export class BrowserRenderResourceCoordinator {
 	private readonly renderSpatialIndex = createLinearRenderSpatialIndex();
 	private surface: BrowserRenderResourceSurface | null = null;
 	private report = createEmptyBrowserRenderResourceReport();
-	private staticPickDiagnosticInput: {
-		assetState: AssetChannelState;
-		staticRenderableScene: StaticRenderableSceneModel;
-		renderChunkTransforms: readonly RenderChunkTransform[];
-		detailTexturesEnabled: boolean;
-		signature: string;
-	} | null = null;
-	private staticPickDiagnosticCache: {
-		signature: string;
-		diagnosticsByRenderKey: Map<
-			string,
-			BrowserStaticRenderablePickDiagnostic | null
-		>;
-	} | null = null;
 	private appliedSurfaceSignatures: Partial<
 		Record<BrowserRenderResourceSurfaceKey, string>
 	> = {};
@@ -217,31 +178,6 @@ export class BrowserRenderResourceCoordinator {
 
 	getReport(): BrowserRenderResourceReport {
 		return this.report;
-	}
-
-	getStaticRenderablePickDiagnostic(
-		renderKey: string,
-	): BrowserStaticRenderablePickDiagnostic | null {
-		const input = this.staticPickDiagnosticInput;
-		if (!input) {
-			return null;
-		}
-		if (this.staticPickDiagnosticCache?.signature !== input.signature) {
-			this.staticPickDiagnosticCache = {
-				signature: input.signature,
-				diagnosticsByRenderKey: new Map(),
-			};
-		}
-		if (!this.staticPickDiagnosticCache.diagnosticsByRenderKey.has(renderKey)) {
-			this.staticPickDiagnosticCache.diagnosticsByRenderKey.set(
-				renderKey,
-				deriveBrowserStaticRenderablePickDiagnostic({ ...input, renderKey }),
-			);
-		}
-		return (
-			this.staticPickDiagnosticCache.diagnosticsByRenderKey.get(renderKey) ??
-			null
-		);
 	}
 
 	updateControlledCameraFrame(frame: SceneCameraFrame | null): void {
@@ -273,24 +209,7 @@ export class BrowserRenderResourceCoordinator {
 		);
 		const linkedOutdoorEnvCellIds: number[] = [];
 		const structuredInteriorCoverage = null;
-		const appearancePreviewScene = input.runtimeAppearancePreviews.reduce(
-			(scene, preview) =>
-				mergeStaticRenderableSceneModels(
-					scene,
-					deriveAppearancePreviewStaticRenderableSceneModel({
-						assetState: input.assetState,
-						previewInstanceId: preview.id,
-						setupAppearance: preview.setupAppearance,
-						spawnCameraFrame: preview.spawnCameraFrame,
-						anchorLandblockId: input.activeRenderAnchor?.landblockId ?? null,
-						renderAsInterior:
-							browserDestinationToInteriorCellId(input.browserDestination) !==
-							null,
-					}),
-			),
-			createEmptyStaticRenderableSceneModel(),
-		);
-		const staticRenderableScene = appearancePreviewScene;
+		const staticRenderableScene = createEmptyStaticRenderableSceneModel();
 		const structuredInteriorScene = createEmptyStructuredInteriorSceneModel();
 		const selectedDiagnosticPortalId =
 			input.diagnosticSelection?.kind === "portal"
@@ -312,7 +231,6 @@ export class BrowserRenderResourceCoordinator {
 				selectedEnvCellId: selectedDiagnosticEnvCellId,
 			},
 		);
-		const transitionPortalModel = createEmptyTransitionPortalCandidateModel();
 		const activeRenderChunkPlacements = collectActiveRenderChunkPlacements(
 			terrainScene,
 			structuredInteriorScene,
@@ -367,18 +285,6 @@ export class BrowserRenderResourceCoordinator {
 			DEBUG_OVERLAY_SPATIAL_OWNER_KEY,
 			deriveDebugOverlaySpatialItems(debugOverlayScene),
 		);
-		this.staticPickDiagnosticInput = {
-			assetState: input.assetState,
-			staticRenderableScene,
-			renderChunkTransforms: activeRenderChunkTransforms,
-			detailTexturesEnabled: input.detailTexturesEnabled,
-			signature: [
-				describeAssetStateSignature(input.assetState),
-				staticRenderableSceneSignature,
-				renderChunkTransformsSignature,
-				String(input.detailTexturesEnabled),
-			].join("|"),
-		};
 		const surface = this.surface;
 		if (surface) {
 			reportTerrainMaterialDiagnostics(terrainScene);
@@ -396,24 +302,6 @@ export class BrowserRenderResourceCoordinator {
 				"render-chunk-transforms",
 				renderChunkTransformsSignature,
 				() => surface.setRenderChunkTransforms(activeRenderChunkTransforms),
-			);
-			this.applySurfaceResource("terrain-scene", terrainSceneSignature, () =>
-				surface.setTerrainScene(terrainScene),
-			);
-			this.applySurfaceResource(
-				"static-renderable-scene",
-				staticRenderableSceneSignature,
-				() => surface.setStaticRenderableScene(staticRenderableScene),
-			);
-			this.applySurfaceResource(
-				"structured-interior-scene",
-				structuredInteriorSceneSignature,
-				() => surface.setStructuredInteriorScene(structuredInteriorScene),
-			);
-			this.applySurfaceResource(
-				"transition-portal-model",
-				describeTransitionPortalModelSignature(transitionPortalModel),
-				() => surface.setTransitionPortalModel(transitionPortalModel),
 			);
 			this.applySurfaceResource(
 				"debug-overlay-scene",
@@ -500,11 +388,6 @@ type BrowserRenderResourceSurfaceKey =
 	| "asset-state"
 	| "render-scene-context"
 	| "render-chunk-transforms"
-	| "terrain-scene"
-	| "static-landblock-render-artifacts"
-	| "static-renderable-scene"
-	| "structured-interior-scene"
-	| "transition-portal-model"
 	| "debug-overlay-scene"
 	| "render-spatial-query"
 	| "selected-static-renderable"
@@ -741,20 +624,6 @@ function describeStructuredInteriorSceneSignature(
 			.join(",")}`,
 		`missingEnv=${scene.missingEnvCellAssetIds.join(",")}`,
 	].join(";");
-}
-
-function describeTransitionPortalModelSignature(
-	model: TransitionPortalCandidateModel,
-): string {
-	return [
-		...model.candidates.map(
-			(candidate) =>
-				`${candidate.id}:${candidate.stencilRef}:${candidate.targetStatus}:${candidate.entryEnvCellId}:${candidate.requestedInteriorEnvCellIds.join(",")}`,
-		),
-		`diagnostics=${Object.values(model.diagnostics).join(",")}`,
-	]
-		.sort()
-		.join("|");
 }
 
 function describeDebugOverlaySceneSignature(

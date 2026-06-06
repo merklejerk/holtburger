@@ -13,7 +13,6 @@ import type { TerrainSceneModel } from "./terrain-scene";
 type WorldRenderCategory =
 	| "terrain"
 	| "structured-interior"
-	| "appearance-preview-staged"
 	| "static"
 	| "portal-mask"
 	| "debug-overlay";
@@ -22,7 +21,6 @@ type WorldRenderCandidateKind =
 	| "terrain"
 	| "terrain-tile"
 	| "structured-interior"
-	| "appearance-preview"
 	| "static"
 	| "portal-mask";
 
@@ -212,9 +210,6 @@ function categorizeWorldRenderCandidate(candidate: {
 	id: string;
 	kind: WorldRenderCandidateKind;
 }): WorldRenderCategory {
-	if (candidate.id.startsWith("appearance-preview-staged/")) {
-		return "appearance-preview-staged";
-	}
 	if (candidate.kind === "terrain" || candidate.kind === "terrain-tile") {
 		return "terrain";
 	}
@@ -414,14 +409,12 @@ function categorySortRank(category: WorldRenderCategory): number {
 			return 0;
 		case "structured-interior":
 			return 1;
-		case "appearance-preview-staged":
-			return 2;
 		case "static":
-			return 3;
+			return 2;
 		case "portal-mask":
-			return 4;
+			return 3;
 		case "debug-overlay":
-			return 5;
+			return 4;
 	}
 }
 
@@ -429,7 +422,6 @@ function createEmptyCategoryCounts(): Record<WorldRenderCategory, number> {
 	return {
 		terrain: 0,
 		"structured-interior": 0,
-		"appearance-preview-staged": 0,
 		static: 0,
 		"portal-mask": 0,
 		"debug-overlay": 0,

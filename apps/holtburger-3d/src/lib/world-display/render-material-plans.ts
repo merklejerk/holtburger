@@ -15,46 +15,46 @@ import type {
 } from "./indexed-material-data";
 import type { ResolvedRegionDetailOverlayPlan } from "./region-detail-overlays";
 import {
-	defaultStagedWorldMaterialTextureCapabilities,
-	resolveStagedWorldMaterialStrategy,
-	type StagedWorldMaterialTexturePageReadiness,
-	type StagedWorldMaterialStrategyFallbackReason,
-	type StagedWorldMaterialRenderableKind,
-} from "./staged-world-material-strategy";
+	defaultRenderMaterialTextureCapabilities,
+	resolveRenderMaterialStrategy,
+	type RenderMaterialTexturePageReadiness,
+	type RenderMaterialStrategyFallbackReason,
+	type RenderMaterialRenderableKind,
+} from "./render-material-strategy";
 import type {
 	MaterialTextureCapabilities,
 	RenderSurfaceTextureUploadPreparation,
 } from "./render-surface-texture-data";
 import type { TextureFilteringMode } from "./texture-pages/texture-sampling-policy";
 
-export type StagedWorldMaterialPlan =
-	| StagedWorldFlatMaterialPlan
-	| StagedWorldDirectTextureMaterialPlan
-	| StagedWorldIndexedPalettedMaterialPlan;
+export type RenderMaterialPlan =
+	| RenderFlatMaterialPlan
+	| RenderDirectTextureMaterialPlan
+	| RenderIndexedPalettedMaterialPlan;
 
-interface StagedWorldMaterialPlanCacheRecord {
-	plan: StagedWorldMaterialPlan;
+interface RenderMaterialPlanCacheRecord {
+	plan: RenderMaterialPlan;
 	dependencyAssetIds: readonly string[];
 	dependencyState: string;
 }
 
-export interface StagedWorldMaterialPlanCache {
-	get(key: string): StagedWorldMaterialPlanCacheRecord | undefined;
-	set(key: string, value: StagedWorldMaterialPlanCacheRecord): void;
+export interface RenderMaterialPlanCache {
+	get(key: string): RenderMaterialPlanCacheRecord | undefined;
+	set(key: string, value: RenderMaterialPlanCacheRecord): void;
 	clear(): void;
 }
 
-interface StagedWorldFlatMaterialPlan {
+interface RenderFlatMaterialPlan {
 	kind: "flat";
 	key: string;
 	color: RenderVec4;
 	behavior: LegacyMaterialBehaviorDto | null;
 	fallbackReason: string | null;
-	fallbackReasonCode: StagedWorldMaterialStrategyFallbackReason | null;
+	fallbackReasonCode: RenderMaterialStrategyFallbackReason | null;
 	preparedAssetIds: readonly string[];
 }
 
-export interface StagedWorldDirectTextureMaterialPlan {
+export interface RenderDirectTextureMaterialPlan {
 	kind: "direct-texture";
 	key: string;
 	color: RenderVec4;
@@ -62,12 +62,12 @@ export interface StagedWorldDirectTextureMaterialPlan {
 	textureUpload: RenderSurfaceTextureUploadPreparation & { status: "ready" };
 	behavior: LegacyMaterialBehaviorDto;
 	fallbackReason: string | null;
-	texturePageReadiness: StagedWorldMaterialTexturePageReadiness | null;
+	texturePageReadiness: RenderMaterialTexturePageReadiness | null;
 	detailOverlay: ResolvedRegionDetailOverlayPlan | null;
 	preparedAssetIds: readonly string[];
 }
 
-export interface StagedWorldIndexedPalettedMaterialPlan {
+export interface RenderIndexedPalettedMaterialPlan {
 	kind: "indexed-paletted";
 	key: string;
 	color: RenderVec4;
@@ -78,19 +78,19 @@ export interface StagedWorldIndexedPalettedMaterialPlan {
 	preparedAssetIds: readonly string[];
 }
 
-export function resolveStagedWorldMaterialSlotPlan(options: {
+export function resolveRenderMaterialSlotPlan(options: {
 	assetState: AssetChannelState;
 	slot: ResolvedMaterialSlot;
 	fallbackColorKey: string;
-	renderableKind?: StagedWorldMaterialRenderableKind;
+	renderableKind?: RenderMaterialRenderableKind;
 	textureCapabilities?: MaterialTextureCapabilities;
 	textureFilteringMode?: TextureFilteringMode;
 	appearance?: MaterialAppearanceContext | null;
 	detailOverlay?: ResolvedRegionDetailOverlayPlan | null;
 	indexedMaterialDataCache?: IndexedMaterialDataCache;
-	materialPlanCache?: StagedWorldMaterialPlanCache;
-}): StagedWorldMaterialPlan {
-	const inputCacheKey = describeStagedWorldMaterialPlanCacheKey(options);
+	materialPlanCache?: RenderMaterialPlanCache;
+}): RenderMaterialPlan {
+	const inputCacheKey = describeRenderMaterialPlanCacheKey(options);
 	const cached = options.materialPlanCache?.get(inputCacheKey);
 	if (
 		cached &&
@@ -102,7 +102,7 @@ export function resolveStagedWorldMaterialSlotPlan(options: {
 	) {
 		return cached.plan;
 	}
-	const strategy = resolveStagedWorldMaterialStrategy({
+	const strategy = resolveRenderMaterialStrategy({
 		assetState: options.assetState,
 		input: {
 			slot: options.slot,
@@ -112,7 +112,7 @@ export function resolveStagedWorldMaterialSlotPlan(options: {
 		},
 		textureCapabilities:
 			options.textureCapabilities ??
-			defaultStagedWorldMaterialTextureCapabilities(),
+			defaultRenderMaterialTextureCapabilities(),
 		textureFilteringMode: options.textureFilteringMode,
 		indexedMaterialDataCache: options.indexedMaterialDataCache,
 	});
@@ -127,7 +127,7 @@ export function resolveStagedWorldMaterialSlotPlan(options: {
 	);
 	if (strategy.kind !== "direct-texture") {
 		if (strategy.kind === "indexed-paletted") {
-			return cacheStagedWorldMaterialPlan(
+			return cacheRenderMaterialPlan(
 				options.materialPlanCache,
 				inputCacheKey,
 				{
@@ -152,7 +152,7 @@ export function resolveStagedWorldMaterialSlotPlan(options: {
 				options.assetState,
 			);
 		}
-		return cacheStagedWorldMaterialPlan(
+		return cacheRenderMaterialPlan(
 			options.materialPlanCache,
 			inputCacheKey,
 			createFallbackMaterialPlan({
@@ -167,7 +167,7 @@ export function resolveStagedWorldMaterialSlotPlan(options: {
 			options.assetState,
 		);
 	}
-	return cacheStagedWorldMaterialPlan(
+	return cacheRenderMaterialPlan(
 		options.materialPlanCache,
 		inputCacheKey,
 		{
@@ -195,14 +195,14 @@ export function resolveStagedWorldMaterialSlotPlan(options: {
 	);
 }
 
-function cacheStagedWorldMaterialPlan<TPlan extends StagedWorldMaterialPlan>(
-	cache: StagedWorldMaterialPlanCache | undefined,
+function cacheRenderMaterialPlan<TPlan extends RenderMaterialPlan>(
+	cache: RenderMaterialPlanCache | undefined,
 	cacheKey: string,
 	plan: TPlan,
 	extraDependencyAssetIds: readonly string[],
 	assetState: AssetChannelState,
 ): TPlan {
-	if (!cache || isTransientStagedMaterialPlan(plan)) {
+	if (!cache || isTransientRenderMaterialPlan(plan)) {
 		return plan;
 	}
 	const dependencyAssetIds = uniqueNonEmptySortedStrings([
@@ -220,8 +220,8 @@ function cacheStagedWorldMaterialPlan<TPlan extends StagedWorldMaterialPlan>(
 	return plan;
 }
 
-export function isTransientStagedMaterialPlan(
-	material: StagedWorldMaterialPlan,
+function isTransientRenderMaterialPlan(
+	material: RenderMaterialPlan,
 ): boolean {
 	if (material.kind !== "flat" || material.fallbackReasonCode === null) {
 		return false;
@@ -242,10 +242,10 @@ const TRANSIENT_STAGED_MATERIAL_FALLBACK_REASONS: ReadonlySet<string> = new Set(
 	],
 );
 
-function describeStagedWorldMaterialPlanCacheKey(options: {
+function describeRenderMaterialPlanCacheKey(options: {
 	slot: ResolvedMaterialSlot;
 	fallbackColorKey: string;
-	renderableKind?: StagedWorldMaterialRenderableKind;
+	renderableKind?: RenderMaterialRenderableKind;
 	textureCapabilities?: MaterialTextureCapabilities;
 	textureFilteringMode?: TextureFilteringMode;
 	appearance?: MaterialAppearanceContext | null;
@@ -255,7 +255,7 @@ function describeStagedWorldMaterialPlanCacheKey(options: {
 		options.appearance ?? createBaseMaterialAppearanceContext("base");
 	const capabilities =
 		options.textureCapabilities ??
-		defaultStagedWorldMaterialTextureCapabilities();
+		defaultRenderMaterialTextureCapabilities();
 	return [
 		`renderable=${options.renderableKind ?? "unknown"}`,
 		`slot=${options.slot.slotIndex}`,
@@ -327,9 +327,9 @@ function createFallbackMaterialPlan(options: {
 	colorKey: string;
 	behavior?: LegacyMaterialBehaviorDto | null;
 	reason: string;
-	reasonCode?: StagedWorldMaterialStrategyFallbackReason | null;
+	reasonCode?: RenderMaterialStrategyFallbackReason | null;
 	preparedAssetIds?: readonly string[];
-}): StagedWorldFlatMaterialPlan {
+}): RenderFlatMaterialPlan {
 	return {
 		kind: "flat",
 		key: `flat/${options.key}`,
@@ -342,7 +342,7 @@ function createFallbackMaterialPlan(options: {
 }
 
 function collectStrategyPreparedAssetIds(
-	strategy: ReturnType<typeof resolveStagedWorldMaterialStrategy>,
+	strategy: ReturnType<typeof resolveRenderMaterialStrategy>,
 	detailOverlay: ResolvedRegionDetailOverlayPlan | null = null,
 ): readonly string[] {
 	const assetIds = new Set<string>();

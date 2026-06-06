@@ -11,8 +11,7 @@
 		RenderSpatialItemKind,
 		RenderSpatialPick,
 	} from "./render-spatial-index";
-	import type { DrawUnitRuntimeDiagnostic } from "./runtime-render-diagnostics";
-	import type { RendererResourceGraph } from "./renderer-resource-graph";
+	import type { DrawUnitRuntimeDiagnostic } from "./draw-unit-render-diagnostics";
 	import type { RenderChunkTransform } from "./render-anchor";
 	import type { SceneCameraFrame } from "./camera";
 	import type {
@@ -22,10 +21,6 @@
 		WorldRenderCameraFrameChangeHandler,
 		WorldRenderMetricsChangeHandler,
 	} from "./renderer-contract";
-	import {
-		createEmptyStaticRenderableSceneModel,
-		type StaticRenderableSceneModel,
-	} from "./static-renderables";
 	import {
 		createEmptyStaticLandblockRenderProductSet,
 		type StaticLandblockProductKey,
@@ -37,21 +32,9 @@
 		type LandblockRenderProductWorkerResult,
 	} from "./landblock-render-product";
 	import {
-		createEmptyStructuredInteriorSceneModel,
-		type StructuredInteriorSceneModel,
-	} from "./structured-interior-scene";
-	import {
-		createEmptyTerrainSceneModel,
-		type TerrainSceneModel,
-	} from "./terrain-scene";
-	import {
 		createEmptyWorldDebugOverlayModel,
 		type WorldDebugOverlayModel,
 	} from "./debug-overlays";
-	import {
-		createEmptyTransitionPortalCandidateModel,
-		type TransitionPortalCandidateModel,
-	} from "./transition-portal-work-items";
 	import type { WorldRenderSceneContext } from "./render-scene-context";
 	import {
 		createWorldDisplayRenderer,
@@ -62,24 +45,18 @@
 		onCameraFrameChange,
 		onRenderMetricsChange,
 		onCameraResidencyChange,
-		rendererResourceGraph,
 	}: {
 		onCameraFrameChange?: WorldRenderCameraFrameChangeHandler;
 		onRenderMetricsChange?: WorldRenderMetricsChangeHandler;
 		onCameraResidencyChange?: BrowserCameraResidencyChangeHandler;
-		rendererResourceGraph?: RendererResourceGraph;
 	} = $props();
 
 	let viewportHost = $state<HTMLDivElement | null>(null);
 	let rendererController = $state<WorldDisplayRenderer | null>(null);
 
 	let assetState = createInitialAssetChannelState();
-	let terrainScene = createEmptyTerrainSceneModel();
 	let staticLandblockRenderProducts =
 		createEmptyStaticLandblockRenderProductSet();
-	let staticRenderableScene = createEmptyStaticRenderableSceneModel();
-	let structuredInteriorScene = createEmptyStructuredInteriorSceneModel();
-	let transitionPortalModel = createEmptyTransitionPortalCandidateModel();
 	let debugOverlayScene = createEmptyWorldDebugOverlayModel();
 	let renderSceneContext: WorldRenderSceneContext = {
 		kind: "outdoor",
@@ -104,18 +81,13 @@
 
 			const controller = createWorldDisplayRenderer(viewportHost, {
 				assetState,
-				terrainScene,
 				staticLandblockRenderProducts,
-				staticRenderableScene,
-				structuredInteriorScene,
-				transitionPortalModel,
 				transitionPortalMaxDepth,
 				debugOverlayScene,
 				renderSceneContext,
 				renderChunkTransforms,
 				renderSpatialQuery,
 				selectedStaticRenderableRenderKey,
-				rendererResourceGraph,
 				controlledCameraFrame,
 				onCameraFrameChange,
 				onRenderMetricsChange,
@@ -137,18 +109,6 @@
 	export function setAssetState(nextAssetState: AssetChannelState): void {
 		assetState = nextAssetState;
 		rendererController?.setAssetState(assetState);
-	}
-
-	export function setTerrainScene(nextScene: TerrainSceneModel): void {
-		terrainScene = nextScene;
-		rendererController?.setTerrainScene(terrainScene);
-	}
-
-	export function setStaticRenderableScene(
-		nextScene: StaticRenderableSceneModel,
-	): void {
-		staticRenderableScene = nextScene;
-		rendererController?.setStaticRenderableScene(staticRenderableScene);
 	}
 
 	export function commitStaticLandblockProduct(
@@ -174,20 +134,6 @@
 	export function clearStaticLandblockProducts(): void {
 		staticLandblockRenderProducts = createEmptyStaticLandblockRenderProductSet();
 		rendererController?.clearStaticLandblockProducts();
-	}
-
-	export function setStructuredInteriorScene(
-		nextScene: StructuredInteriorSceneModel,
-	): void {
-		structuredInteriorScene = nextScene;
-		rendererController?.setStructuredInteriorScene(structuredInteriorScene);
-	}
-
-	export function setTransitionPortalModel(
-		nextModel: TransitionPortalCandidateModel,
-	): void {
-		transitionPortalModel = nextModel;
-		rendererController?.setTransitionPortalModel(transitionPortalModel);
 	}
 
 	export function setDebugOverlayScene(

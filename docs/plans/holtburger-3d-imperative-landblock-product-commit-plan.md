@@ -710,6 +710,159 @@ Progress:
 - Deleted the top-level full-set static product sync API and cleaned stale exports found by `knip`.
 - Updated plan cleanup targets with the remaining historical/test-only adapter and retained-key helper debt.
 
+### Phase 10: Delete Historical Full-Set Static Bundle Sync
+
+Status: add-on.
+
+Deliverables:
+
+- Rewrite or delete legacy `syncWebgl2StaticBundleLayerResources()` tests that only prove retained-key full-set reconciliation.
+- Delete `syncWebgl2StaticBundleLayerResources()` after equivalent product-keyed commit/evict tests cover bundle lifecycle, sampler updates, replacement, and eviction.
+- Ensure static bundle production rendering has no retained-key full-set resource helper.
+
+Acceptance criteria:
+
+- No production or test import of `syncWebgl2StaticBundleLayerResources()` remains.
+- `commitWebgl2StaticBundleProductResources()` and `evictWebgl2StaticBundleProductResources()` cover all retained behavior that still matters.
+- `npm run test:ts -- src/lib/world-display/webgl2/resources/static-bundle-layer-resources.test.ts`, `npm run check`, and `npm run lint:dead` pass.
+
+Dry-run findings:
+
+- Current `syncWebgl2StaticBundleLayerResources()` imports are confined to `webgl2/resources/static-bundle-layer-resources.test.ts`; production already commits static bundle resources with `commitWebgl2StaticBundleProductResources()`.
+- The existing product-owned test already covers commit, reuse, sampler update, revision replacement, and eviction at a high level.
+- The remaining retained-key tests still cover low-level texture upload validation and sampler behavior through the old full-set helper. During implementation, rewrite those cases to call `commitWebgl2StaticBundleProductResources()` with a stable product key before deleting the helper.
+- Keep `destroyWebgl2StaticBundleLayerResources()` coverage. It still owns store teardown and is not a historical full-set sync API.
+
+### Phase 11: Delete Artifact Scene Adapters
+
+Status: add-on.
+
+Deliverables:
+
+- Delete historical artifact-to-scene adapter helpers that are no longer production static rendering paths:
+  - `deriveTerrainSceneModelFromLandblockArtifacts`
+  - `deriveStructuredInteriorSceneModelFromLandblockArtifacts`
+- Remove tests that keep those helpers reachable only to document the old product-set scene adapter architecture.
+- Keep only runtime-preview or asset-state scene derivation helpers that are still production-relevant.
+- If a temporary quarantine is needed to preserve a fixture during implementation, it must be listed as a Phase 15 purge item with the exact file/symbol and removal condition.
+
+Acceptance criteria:
+
+- Static product rendering has no artifact-to-`TerrainSceneModel` or artifact-to-`StructuredInteriorSceneModel` path, including test-only imports.
+- `npm run lint:dead` does not report adapter-related dead code.
+- Runtime appearance preview and asset-state fallback tests still pass.
+
+Dry-run findings:
+
+- `deriveTerrainSceneModelFromLandblockArtifacts()` is only referenced by `terrain-scene.test.ts` and its own export; no production renderer path depends on it after the product commit cutover.
+- `deriveStructuredInteriorSceneModelFromLandblockArtifacts()` is only referenced by `structured-interior-scene.test.ts` and its own export; BRC now feeds an empty runtime structured-interior scene while product interiors commit directly to renderer resources.
+- Deleting the helpers should be straightforward, but move any behavior still worth preserving into product resource tests before removal. The old tests currently document artifact-to-scene translation, not the live product lifecycle.
+- Do not delete runtime scene derivation helpers such as `deriveTerrainSceneModel()` or appearance-preview static renderable derivation; those still feed runtime preview and debug paths.
+- Quarantine is not an acceptable final state for these adapters. If deletion needs staging, the staging must be brief and Phase 15 must remove it.
+
+### Phase 12: Product-Owned Portal Masks And Terrain Texture Pages
+
+Status: add-on.
+
+Deliverables:
+
+- Move transition portal mask resources to product-owned commit/evict APIs. The renderer may continue deriving portal candidates from resident products, but mask buffers should not be created by broad `syncWebgl2WorldResources()`.
+- Split product-owned terrain texture pages from runtime terrain texture-page resources so worker terrain products no longer share broad terrain texture-page store ownership.
+- Keep runtime terrain scene texture pages and product terrain texture pages isolated enough that runtime terrain sync cannot evict product terrain texture resources.
+
+Acceptance criteria:
+
+- Static product portal mask buffers are committed and evicted by product key.
+- Product terrain texture pages can update sampler policy without broad world sync or runtime terrain texture page cleanup.
+- `syncWebgl2WorldResources()` no longer owns worker-product portal mask buffers or worker-product terrain texture pages.
+- Terrain product and portal product tests prove unchanged recommits reuse geometry and only update placement/bindings/samplers.
+
+Dry-run findings:
+
+- Portal candidates are already renderer-derived from resident static products through `syncStaticProductTransitionPortalModel()`, but portal mask draw-unit resources are still built inside broad `syncWebgl2WorldResources()` via `buildTransitionPortalMaskDrawUnitAssemblies()`.
+- Product terrain tiles are preserved across runtime world sync with `terrainTileIdsByProductKey`, but terrain texture pages still share `store.terrainTexturePagesByKey`.
+- `collectTerrainTexturePageAtlasCandidates()`, `syncWebgl2TerrainTexturePageResources()`, and `resolveWebgl2TerrainTileTexturePageBindings()` operate over the combined `store.terrainTiles` set. The cleanup loop in `syncWebgl2TerrainTexturePageResources()` deletes any page outside the latest combined atlas plan, so product texture ownership is not isolated yet.
+- Implement this phase in two internal steps: first product-key portal mask commit/evict, then terrain texture-page ownership split. The terrain split likely needs a product-owned terrain page store or ownership metadata before the broad runtime terrain sync can be narrowed safely.
+- Add explicit tests proving runtime terrain sync cannot evict product terrain texture pages and product recommit only updates sampler/binding state when geometry and page content are unchanged.
+
+### Phase 13: Renderer-Owned Product Metrics And Debug Demotion
+
+Status: add-on.
+
+Deliverables:
+
+- Replace the BRC static product report placeholder with lightweight renderer-owned product metrics.
+- Keep BRC as a passive consumer of renderer facts; it must not regain product residency, placement, spatial, or eviction authority.
+- Narrow `RendererResourceGraph` to runtime preview/debug diagnostics or delete it if no durable non-product consumer remains.
+- Revisit `BrowserWorldDisplay.svelte` debug copy that still centers staged, compacted, fallback, or static draw-unit terminology.
+
+Acceptance criteria:
+
+- Static product report text comes from renderer-owned product/resource facts.
+- Disabling BRC report generation does not change static product rendering, picking, portal masks, or resource lifetime.
+- Static product debug text uses product/resource readiness language instead of staged/compacted/fallback architecture language.
+- `RendererResourceGraph` names and call sites no longer imply static product lifetime ownership.
+
+Dry-run findings:
+
+- BRC still returns the placeholder `Static landblock products are renderer-owned.` for `staticLandblockRenderArtifactText`; this is the main report handoff to replace.
+- Renderer metrics already read from `Webgl2WorldResourceStore`, but product-specific facts are currently folded into legacy debug counters such as static render batches, static candidates, compaction eligibility, and fallback samples.
+- `RendererResourceGraph` remains wired through `BrowserWorldDisplay.svelte`, `WorldDisplay.svelte`, `world-display-renderer-contract.ts`, and runtime resource tests. Its current hot-path value is prepared-asset retention and debug dependency leasing, not product ownership.
+- Browser debug copy still uses "draw units", "Static eligibility", "compaction", "fallbacks", and "staged static draw units". Treat this as a wording and metrics-source pass, not a renderer lifecycle change.
+- Add lightweight renderer-owned product metrics first, then update BRC/report text to consume them passively. Rename or scope `RendererResourceGraph` only after confirming whether runtime preview prepared-asset retention still needs it.
+
+### Phase 14: Staged Naming And Historical Test Cleanup
+
+Status: add-on.
+
+Deliverables:
+
+- Rename neutral helpers currently under `staged-world-*` only where they remain useful outside runtime preview staging.
+- Avoid broad naming churn; target helpers still referenced by product metadata, renderer runtime diagnostics, or non-preview resource paths.
+- Remove historical unit tests that keep legacy artifact snapshot/scene adapter APIs reachable after equivalent product commit behavior is covered.
+- Update docs to describe the imperative product commit model as the only supported static landblock renderer path.
+
+Acceptance criteria:
+
+- Remaining `staged-world-*` references are either runtime-preview-specific or intentionally neutralized/renamed.
+- No test keeps a legacy snapshot/diff API alive.
+- `npm run check`, `npm run test:ts`, `npm run lint`, and relevant Rust checks pass.
+
+Dry-run findings:
+
+- `staged-world-assembly.ts` is still production-relevant for runtime appearance previews and picker diagnostics, so broad renaming would create churn without simplifying product rendering.
+- Some helpers under `staged-world-*` are now neutral renderer building blocks outside preview staging, notably `buildStaticRenderablePartMatrix()` and `StagedWorldIndexedGeometry` usages in terrain, portal mask, structured-interior, and compaction code.
+- Start by extracting clearly neutral helpers to focused modules before considering file-wide renames. Good candidates are static renderable placement/matrix helpers and generic indexed geometry builders.
+- Keep runtime-preview names where the feature is genuinely staged appearance preview assembly. Do not rename tests just to erase the word "staged" when the behavior is still preview-specific.
+- Historical scene-adapter tests from Phase 11 and retained-key sync tests from Phase 10 are the main removal candidates once product commit coverage is in place.
+- If any historical fixture or compatibility name survives Phase 14 for sequencing reasons, it must be treated as Phase 15 purge debt, not accepted cleanup residue.
+
+### Phase 15: True Purge Of Historical Product-Commit Debt
+
+Status: add-on final purge.
+
+Deliverables:
+
+- Delete any temporary quarantines created during Phases 10-14.
+- Delete remaining legacy artifact snapshot, scene-adapter, retained-key sync, compatibility API, and misleading diagnostic surfaces that are not used by the product commit model.
+- Remove or rename tests whose only purpose is to keep historical architecture names, adapters, or compatibility seams reachable.
+- Run a targeted symbol audit for old architecture terms and either delete, rename, or document why each remaining use is still current architecture.
+
+Acceptance criteria:
+
+- No source or test references remain for deleted architecture APIs such as artifact-to-scene landblock adapters, full-set static bundle sync, `replaceStaticLandblockProducts`, or static landblock snapshot/diff compatibility paths.
+- No quarantine directory, historical compatibility fixture, or test-only adapter remains under `apps/holtburger-3d/src`.
+- Remaining uses of terms like staged, compacted, fallback, artifact, snapshot, and graph are either runtime-preview-specific, rendering-technique-specific, or current product/resource terminology. None describe old product commit plumbing.
+- `rg` audits for the deleted symbols produce no matches except in this plan or other historical docs.
+- `npm run check`, `npm run test:ts`, `npm run lint`, and relevant Rust checks pass.
+
+Dry-run findings:
+
+- Phase 10 and Phase 11 currently have concrete purge candidates with isolated call sites: `syncWebgl2StaticBundleLayerResources()` and the two artifact-to-scene adapter exports/tests.
+- Phase 12 may create short-lived bridge code while terrain texture-page ownership is split; this phase is where that bridge must be deleted after product-owned pages and portal masks are established.
+- Phase 13 may leave diagnostic wording or `RendererResourceGraph` naming in place while product metrics land. This phase must force a second audit so debug/report surfaces do not preserve old ownership concepts by inertia.
+- Phase 14 should reduce naming ambiguity before this phase starts, but Phase 15 is the hard stop: no compatibility quarantine is considered done until it is deleted or converted to current terminology.
+
 ## Risks And Mitigations
 
 - Risk: product commits still transfer too much data in one message.

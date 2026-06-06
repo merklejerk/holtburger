@@ -193,51 +193,6 @@ export function evictWebgl2StaticBundleProductResources({
 	store.productsByKey.delete(key);
 }
 
-export function syncWebgl2StaticBundleLayerResources({
-	gl,
-	store,
-	layers,
-	textureFilteringMode = "anisotropic-4x",
-	maxAnisotropy = 1,
-}: {
-	gl: WebGL2RenderingContext;
-	store: Webgl2StaticBundleLayerResourceStore;
-	layers: readonly StaticObjectBundleArtifact[];
-	textureFilteringMode?: TextureFilteringMode;
-	maxAnisotropy?: number;
-}): void {
-	const retainedResourceKeys = new Set<string>();
-	for (const layer of layers) {
-		const resourceKey = describeStaticBundleLayerResourceKey(layer);
-		retainedResourceKeys.add(resourceKey);
-		const previous = store.layersByKey.get(resourceKey);
-		if (previous) {
-			updateWebgl2StaticBundleLayerTexturePageSamplerPolicy({
-				gl,
-				layer: previous,
-				textureFilteringMode,
-				maxAnisotropy,
-			});
-		} else {
-			store.layersByKey.set(
-				resourceKey,
-				createWebgl2StaticBundleLayerResource({
-					gl,
-					layer,
-					textureFilteringMode,
-					maxAnisotropy,
-				}),
-			);
-		}
-	}
-	for (const [key, resource] of store.layersByKey) {
-		if (!retainedResourceKeys.has(key)) {
-			resource.dispose();
-			store.layersByKey.delete(key);
-		}
-	}
-}
-
 export function destroyWebgl2StaticBundleLayerResources(
 	store: Webgl2StaticBundleLayerResourceStore,
 ): void {

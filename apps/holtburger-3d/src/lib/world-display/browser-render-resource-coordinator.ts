@@ -127,7 +127,6 @@ export interface BrowserRenderResourceReport {
 	portalDiagnosticsText: string;
 	landblockVisibilityText: string;
 	cellVisibilityFallbackText: string;
-	staticLandblockRenderArtifactText: string;
 }
 
 export interface BrowserRenderResourceSurface {
@@ -186,8 +185,6 @@ export function createEmptyBrowserRenderResourceReport(): BrowserRenderResourceR
 			"Outdoor landblock selection is waiting for focus.",
 		cellVisibilityFallbackText:
 			"0 loaded env cells; renderer visibility pending.",
-		staticLandblockRenderArtifactText:
-			"Static landblock render artifacts are idle.",
 	};
 }
 
@@ -1074,8 +1071,6 @@ function deriveReport({
 					? "Outdoor landblock selection is waiting for focus."
 					: `Terrain ${terrainScene.tiles.length}/${outdoorSceneInterest.terrainLandblockIds.length}, buildings ${outdoorSceneInterest.buildingLandblockIds.length}, detail ${outdoorSceneInterest.detailLandblockIds.length}.`,
 		cellVisibilityFallbackText: `${structuredInteriorScene.cells.length} loaded env cell${structuredInteriorScene.cells.length === 1 ? "" : "s"}; renderer visibility pending.`,
-		staticLandblockRenderArtifactText:
-			"Static landblock products are renderer-owned.",
 	};
 }
 

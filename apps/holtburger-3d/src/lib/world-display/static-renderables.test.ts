@@ -15,7 +15,7 @@ import {
 	formatEnvCellAssetId,
 	formatLandblockOutdoorAssetId,
 } from "../landblocks";
-import { buildStaticRenderablePartMatrix } from "./staged-world-assembly";
+import { buildStaticRenderablePartMatrix } from "./static-renderable-placement";
 import { deriveStaticRenderableSceneModel } from "./static-renderables";
 
 describe("static renderables", () => {

@@ -6,7 +6,6 @@ import {
 	createWebgl2StaticBundleLayerResourceStore,
 	destroyWebgl2StaticBundleLayerResources,
 	evictWebgl2StaticBundleProductResources,
-	syncWebgl2StaticBundleLayerResources,
 } from "./static-bundle-layer-resources";
 
 describe("static bundle layer WebGL2 resources", () => {
@@ -15,7 +14,7 @@ describe("static bundle layer WebGL2 resources", () => {
 		const store = createWebgl2StaticBundleLayerResourceStore();
 		const layer = createLayer();
 
-		syncWebgl2StaticBundleLayerResources({
+		commitStaticBundleTestProductResources({
 			gl: gl.asContext(),
 			store,
 			layers: [layer],
@@ -59,14 +58,14 @@ describe("static bundle layer WebGL2 resources", () => {
 		const store = createWebgl2StaticBundleLayerResourceStore();
 		const layer = createLayer();
 
-		syncWebgl2StaticBundleLayerResources({
+		commitStaticBundleTestProductResources({
 			gl: gl.asContext(),
 			store,
 			layers: [layer],
 		});
 		const first = [...store.layersByKey.values()][0];
 
-		syncWebgl2StaticBundleLayerResources({
+		commitStaticBundleTestProductResources({
 			gl: gl.asContext(),
 			store,
 			layers: [layer],
@@ -75,7 +74,7 @@ describe("static bundle layer WebGL2 resources", () => {
 		expect([...store.layersByKey.values()][0]).toBe(first);
 		expect(gl.createdTextures).toHaveLength(2);
 
-		syncWebgl2StaticBundleLayerResources({
+		commitStaticBundleTestProductResources({
 			gl: gl.asContext(),
 			store,
 			layers: [{ ...layer, sourceRevision: "revision-b" }],
@@ -91,7 +90,7 @@ describe("static bundle layer WebGL2 resources", () => {
 		const store = createWebgl2StaticBundleLayerResourceStore();
 		const layer = createLayer();
 
-		syncWebgl2StaticBundleLayerResources({
+		commitStaticBundleTestProductResources({
 			gl: gl.asContext(),
 			store,
 			layers: [layer],
@@ -106,7 +105,7 @@ describe("static bundle layer WebGL2 resources", () => {
 		);
 		expect(gl.generatedMipmapCount).toBe(1);
 
-		syncWebgl2StaticBundleLayerResources({
+		commitStaticBundleTestProductResources({
 			gl: gl.asContext(),
 			store,
 			layers: [layer],
@@ -185,7 +184,7 @@ describe("static bundle layer WebGL2 resources", () => {
 		const store = createWebgl2StaticBundleLayerResourceStore();
 		const layer = createLayer();
 
-		syncWebgl2StaticBundleLayerResources({
+		commitStaticBundleTestProductResources({
 			gl: gl.asContext(),
 			store,
 			layers: [layer],
@@ -211,7 +210,7 @@ describe("static bundle layer WebGL2 resources", () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2StaticBundleLayerResourceStore();
 
-		syncWebgl2StaticBundleLayerResources({
+		commitStaticBundleTestProductResources({
 			gl: gl.asContext(),
 			store,
 			layers: [createLayer()],
@@ -267,7 +266,7 @@ describe("static bundle layer WebGL2 resources", () => {
 			],
 		});
 
-		syncWebgl2StaticBundleLayerResources({
+		commitStaticBundleTestProductResources({
 			gl: gl.asContext(),
 			store,
 			layers: [layer],
@@ -275,7 +274,7 @@ describe("static bundle layer WebGL2 resources", () => {
 		});
 		const parameterCount = gl.textureParameters.length;
 
-		syncWebgl2StaticBundleLayerResources({
+		commitStaticBundleTestProductResources({
 			gl: gl.asContext(),
 			store,
 			layers: [layer],
@@ -297,7 +296,7 @@ describe("static bundle layer WebGL2 resources", () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2StaticBundleLayerResourceStore();
 
-		syncWebgl2StaticBundleLayerResources({
+		commitStaticBundleTestProductResources({
 			gl: gl.asContext(),
 			store,
 			layers: [createLayer()],
@@ -344,7 +343,7 @@ describe("static bundle layer WebGL2 resources", () => {
 			],
 		});
 
-		syncWebgl2StaticBundleLayerResources({
+		commitStaticBundleTestProductResources({
 			gl: gl.asContext(),
 			store,
 			layers: [layer],
@@ -387,7 +386,7 @@ describe("static bundle layer WebGL2 resources", () => {
 		});
 
 		expect(() =>
-			syncWebgl2StaticBundleLayerResources({
+			commitStaticBundleTestProductResources({
 				gl: gl.asContext(),
 				store,
 				layers: [layer],
@@ -424,7 +423,7 @@ describe("static bundle layer WebGL2 resources", () => {
 		});
 
 		expect(() =>
-			syncWebgl2StaticBundleLayerResources({
+			commitStaticBundleTestProductResources({
 				gl: gl.asContext(),
 				store,
 				layers: [layer],
@@ -434,6 +433,26 @@ describe("static bundle layer WebGL2 resources", () => {
 		);
 	});
 });
+
+function commitStaticBundleTestProductResources({
+	gl,
+	store,
+	layers,
+	textureFilteringMode,
+	maxAnisotropy,
+}: Omit<
+	Parameters<typeof commitWebgl2StaticBundleProductResources>[0],
+	"productKey"
+>): void {
+	commitWebgl2StaticBundleProductResources({
+		gl,
+		store,
+		productKey: createProductKey(),
+		layers,
+		textureFilteringMode,
+		maxAnisotropy,
+	});
+}
 
 function createLayer(
 	overrides: Partial<StaticObjectBundleArtifact> = {},

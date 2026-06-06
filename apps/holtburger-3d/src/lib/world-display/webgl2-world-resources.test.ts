@@ -34,11 +34,12 @@ import {
 	buildTerrainTileLayerGeometry,
 	type TerrainTileLayerPlan,
 } from "./terrain-tile-plan";
-import { createEmptyTransitionPortalCandidateModel } from "./transition-portal-work-items";
 import {
+	commitWebgl2TransitionPortalProductMaskResources,
 	commitWebgl2TerrainProductResources,
 	createWebgl2WorldResourceStore,
 	destroyWebgl2WorldResources,
+	evictWebgl2TransitionPortalProductMaskResources,
 	evictWebgl2TerrainProductResources,
 	syncWebgl2WorldResources,
 	updateWebgl2TerrainProductSamplerPolicy,
@@ -114,9 +115,7 @@ describe("webgl2 world resources", () => {
 			store,
 			assetState: createAssetState(),
 			terrainScene: createTerrainScene(),
-			staticRenderableScene: createStaticRenderableScene([part]),
-			transitionPortalModel: createTransitionPortalModel(),
-			renderChunkTransforms: [createChunkTransform()],
+			staticRenderableScene: createStaticRenderableScene([part]),			renderChunkTransforms: [createChunkTransform()],
 			rendererResourceGraph: graph,
 		});
 
@@ -135,9 +134,7 @@ describe("webgl2 world resources", () => {
 			store,
 			assetState: createAssetState(),
 			terrainScene: createTerrainScene(),
-			staticRenderableScene: createStaticRenderableScene([part]),
-			transitionPortalModel: createTransitionPortalModel(),
-			renderChunkTransforms: [
+			staticRenderableScene: createStaticRenderableScene([part]),			renderChunkTransforms: [
 				createChunkTransform({ offset: { x: 40, y: 50, z: 60 } }),
 			],
 			rendererResourceGraph: graph,
@@ -148,7 +145,7 @@ describe("webgl2 world resources", () => {
 		expect(gl.deletedBuffers).toHaveLength(0);
 	});
 
-	it("realizes terrain tile resources without generic draw-unit compatibility output", () => {
+	it("realizes terrain tile resources without generic draw-unit output", () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2WorldResourceStore();
 		const graph = new RendererResourceGraph();
@@ -159,9 +156,7 @@ describe("webgl2 world resources", () => {
 			store,
 			assetState: createAssetState(),
 			terrainScene,
-			staticRenderableScene: createStaticRenderableScene([]),
-			transitionPortalModel: createTransitionPortalModel(),
-			renderChunkTransforms: [
+			staticRenderableScene: createStaticRenderableScene([]),			renderChunkTransforms: [
 				createChunkTransform({ landblockId: 0x1234ffff }),
 			],
 			rendererResourceGraph: graph,
@@ -219,9 +214,7 @@ describe("webgl2 world resources", () => {
 			store,
 			assetState: createAssetState(),
 			terrainScene,
-			staticRenderableScene: createStaticRenderableScene([]),
-			transitionPortalModel: createTransitionPortalModel(),
-			renderChunkTransforms: [
+			staticRenderableScene: createStaticRenderableScene([]),			renderChunkTransforms: [
 				createChunkTransform({
 					landblockId: 0x1234ffff,
 					offset: { x: 40, y: 50, z: 60 },
@@ -239,9 +232,7 @@ describe("webgl2 world resources", () => {
 			store,
 			assetState: createAssetState(),
 			terrainScene: createTerrainScene([]),
-			staticRenderableScene: createStaticRenderableScene([]),
-			transitionPortalModel: createTransitionPortalModel(),
-			renderChunkTransforms: [
+			staticRenderableScene: createStaticRenderableScene([]),			renderChunkTransforms: [
 				createChunkTransform({ landblockId: 0x1234ffff }),
 			],
 			rendererResourceGraph: graph,
@@ -271,9 +262,7 @@ describe("webgl2 world resources", () => {
 			store,
 			assetState,
 			terrainScene,
-			staticRenderableScene: createStaticRenderableScene([]),
-			transitionPortalModel: createTransitionPortalModel(),
-			renderChunkTransforms: [
+			staticRenderableScene: createStaticRenderableScene([]),			renderChunkTransforms: [
 				createChunkTransform({ landblockId: 0x1234ffff }),
 			],
 			rendererResourceGraph: graph,
@@ -316,9 +305,7 @@ describe("webgl2 world resources", () => {
 			store,
 			assetState: createAssetState(),
 			terrainScene: createTerrainScene([terrainTile]),
-			staticRenderableScene: createStaticRenderableScene([]),
-			transitionPortalModel: createTransitionPortalModel(),
-			renderChunkTransforms: [
+			staticRenderableScene: createStaticRenderableScene([]),			renderChunkTransforms: [
 				createChunkTransform({ landblockId: 0x1234ffff }),
 			],
 			rendererResourceGraph: graph,
@@ -364,9 +351,7 @@ describe("webgl2 world resources", () => {
 			store,
 			assetState: createAssetState(),
 			terrainScene,
-			staticRenderableScene: createStaticRenderableScene([]),
-			transitionPortalModel: createTransitionPortalModel(),
-			renderChunkTransforms: [
+			staticRenderableScene: createStaticRenderableScene([]),			renderChunkTransforms: [
 				createChunkTransform({ landblockId: 0x1234ffff }),
 			],
 			rendererResourceGraph: graph,
@@ -383,9 +368,7 @@ describe("webgl2 world resources", () => {
 			store,
 			assetState: createAssetState(),
 			terrainScene,
-			staticRenderableScene: createStaticRenderableScene([]),
-			transitionPortalModel: createTransitionPortalModel(),
-			renderChunkTransforms: [
+			staticRenderableScene: createStaticRenderableScene([]),			renderChunkTransforms: [
 				createChunkTransform({
 					landblockId: 0x1234ffff,
 					offset: { x: 40, y: 50, z: 60 },
@@ -438,9 +421,13 @@ describe("webgl2 world resources", () => {
 		expect(firstTile?.oneDrawReadiness).toMatchObject({ status: "ready" });
 		expect(store.terrainTileIdsByProductKey.size).toBe(1);
 		expect(store.terrainTexturePageCount).toBe(1);
+		expect(store.productTerrainTexturePagesByKey.size).toBe(1);
+		expect(store.terrainTexturePagesByKey.size).toBe(0);
 		expect(gl.createdBuffers).toHaveLength(4);
 		expect(gl.createdVertexArrays).toHaveLength(1);
 		expect(gl.createdTextures).toHaveLength(1);
+		const firstTexturePage =
+			[...store.productTerrainTexturePagesByKey.values()][0] ?? null;
 
 		commitWebgl2TerrainProductResources({
 			gl: gl.asContext(),
@@ -461,6 +448,26 @@ describe("webgl2 world resources", () => {
 		expect(gl.createdBuffers).toHaveLength(4);
 		expect(gl.createdVertexArrays).toHaveLength(1);
 		expect(gl.createdTextures).toHaveLength(1);
+
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState(),
+			terrainScene: createTerrainScene([]),
+			staticRenderableScene: createStaticRenderableScene([]),
+			renderChunkTransforms: [
+				createChunkTransform({ landblockId: 0x1234ffff }),
+			],
+		});
+
+		expect(store.terrainTiles[0]).toBe(firstTile);
+		expect(store.productTerrainTexturePagesByKey.size).toBe(1);
+		expect(store.terrainTexturePagesByKey.size).toBe(0);
+		expect(store.terrainTiles[0]?.texturePageBindings[0]?.texturePage).toBe(
+			firstTexturePage,
+		);
+		expect(gl.createdTextures).toHaveLength(1);
+		expect(gl.deletedTextures).toHaveLength(0);
 
 		updateWebgl2TerrainProductSamplerPolicy({
 			gl: gl.asContext(),
@@ -486,10 +493,56 @@ describe("webgl2 world resources", () => {
 		expect(store.terrainTiles).toEqual([]);
 		expect(store.terrainTilesById.size).toBe(0);
 		expect(store.terrainTileIdsByProductKey.size).toBe(0);
+		expect(store.productTerrainTexturePagesByKey.size).toBe(0);
 		expect(store.terrainTexturePageCount).toBe(0);
 		expect(gl.deletedBuffers).toHaveLength(4);
 		expect(gl.deletedVertexArrays).toHaveLength(1);
 		expect(gl.deletedTextures).toHaveLength(2);
+	});
+
+	it("commits and evicts portal mask draw units by product key", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2WorldResourceStore();
+		const productKey = {
+			landblockId: 0x1234ffff,
+			product: "outdoor-env-cells" as const,
+			buildPolicyRevision: "build:v1",
+			texturePagePolicyRevision: "pages:v1",
+		};
+
+		commitWebgl2TransitionPortalProductMaskResources({
+			gl: gl.asContext(),
+			store,
+			productKey,
+			transitionPortalModel: createTransitionPortalCandidateModel(),
+			renderChunkTransforms: [createChunkTransform({ landblockId: 0x1234ffff })],
+		});
+
+		expect(store.portalMaskDrawUnitIdsByProductKey.size).toBe(1);
+		expect(store.drawUnitsById.size).toBe(1);
+		expect([...store.drawUnitsById.values()][0]?.kind).toBe("portal-mask");
+		expect(gl.createdBuffers).toHaveLength(2);
+		expect(gl.createdVertexArrays).toHaveLength(1);
+
+		syncWebgl2WorldResources({
+			gl: gl.asContext(),
+			store,
+			assetState: createAssetState(),
+			terrainScene: createTerrainScene([]),
+			staticRenderableScene: createStaticRenderableScene([]),
+			renderChunkTransforms: [createChunkTransform({ landblockId: 0x1234ffff })],
+		});
+
+		expect(store.drawUnits).toHaveLength(1);
+		expect(store.drawUnits[0]?.kind).toBe("portal-mask");
+		expect(store.drawUnitsById.size).toBe(1);
+
+		evictWebgl2TransitionPortalProductMaskResources({ store, productKey });
+
+		expect(store.portalMaskDrawUnitIdsByProductKey.size).toBe(0);
+		expect(store.drawUnitsById.size).toBe(0);
+		expect(gl.deletedBuffers).toHaveLength(2);
+		expect(gl.deletedVertexArrays).toHaveLength(1);
 	});
 
 	it("disposes orphaned draw units and graph leases", () => {
@@ -502,9 +555,7 @@ describe("webgl2 world resources", () => {
 			store,
 			assetState: createAssetState(),
 			terrainScene: createTerrainScene(),
-			staticRenderableScene: createStaticRenderableScene([createStaticPart()]),
-			transitionPortalModel: createTransitionPortalModel(),
-			renderChunkTransforms: [createChunkTransform()],
+			staticRenderableScene: createStaticRenderableScene([createStaticPart()]),			renderChunkTransforms: [createChunkTransform()],
 			rendererResourceGraph: graph,
 		});
 		syncWebgl2WorldResources({
@@ -512,9 +563,7 @@ describe("webgl2 world resources", () => {
 			store,
 			assetState: createAssetState(),
 			terrainScene: createTerrainScene(),
-			staticRenderableScene: createStaticRenderableScene([]),
-			transitionPortalModel: createTransitionPortalModel(),
-			renderChunkTransforms: [createChunkTransform()],
+			staticRenderableScene: createStaticRenderableScene([]),			renderChunkTransforms: [createChunkTransform()],
 			rendererResourceGraph: graph,
 		});
 
@@ -533,9 +582,7 @@ describe("webgl2 world resources", () => {
 			store,
 			assetState: createAssetState(),
 			terrainScene: createTerrainScene(),
-			staticRenderableScene: createStaticRenderableScene([createStaticPart()]),
-			transitionPortalModel: createTransitionPortalModel(),
-			renderChunkTransforms: [createChunkTransform()],
+			staticRenderableScene: createStaticRenderableScene([createStaticPart()]),			renderChunkTransforms: [createChunkTransform()],
 		});
 		destroyWebgl2WorldResources(store);
 
@@ -557,9 +604,7 @@ describe("webgl2 world resources", () => {
 			store,
 			assetState: createAssetState(),
 			terrainScene: createTerrainScene(),
-			staticRenderableScene: createStaticRenderableScene([createStaticPart()]),
-			transitionPortalModel: createTransitionPortalModel(),
-			renderChunkTransforms: [createChunkTransform()],
+			staticRenderableScene: createStaticRenderableScene([createStaticPart()]),			renderChunkTransforms: [createChunkTransform()],
 		});
 
 		expect(gl.elementArrayBufferFor(previouslyBoundVertexArray)).toBe(
@@ -582,9 +627,7 @@ describe("webgl2 world resources", () => {
 				createStaticPart({
 					materialSlots: [createMaterialSlot(0, materialSurfaceId)],
 				}),
-			]),
-			transitionPortalModel: createTransitionPortalModel(),
-			renderChunkTransforms: [createChunkTransform()],
+			]),			renderChunkTransforms: [createChunkTransform()],
 		});
 
 		expect(store.drawUnits).toHaveLength(1);
@@ -608,9 +651,7 @@ describe("webgl2 world resources", () => {
 			store,
 			assetState: createAssetState({ materialSurfaceId, renderSurfaceId }),
 			terrainScene: createTerrainScene(),
-			staticRenderableScene: createStaticRenderableScene([]),
-			transitionPortalModel: createTransitionPortalModel(),
-			renderChunkTransforms: [createChunkTransform()],
+			staticRenderableScene: createStaticRenderableScene([]),			renderChunkTransforms: [createChunkTransform()],
 		});
 
 		expect(store.textureCount).toBe(0);
@@ -633,9 +674,7 @@ describe("webgl2 world resources", () => {
 			store,
 			assetState: createAssetState({ materialSurfaceId, renderSurfaceId }),
 			terrainScene: createTerrainScene(),
-			staticRenderableScene: scene,
-			transitionPortalModel: createTransitionPortalModel(),
-			renderChunkTransforms: [createChunkTransform()],
+			staticRenderableScene: scene,			renderChunkTransforms: [createChunkTransform()],
 			materialTextureCapabilities: {
 				supportsS3tc: false,
 				supportsS3tcSrgb: false,
@@ -663,9 +702,7 @@ describe("webgl2 world resources", () => {
 			store,
 			assetState: createAssetState({ materialSurfaceId, renderSurfaceId }),
 			terrainScene: createTerrainScene(),
-			staticRenderableScene: scene,
-			transitionPortalModel: createTransitionPortalModel(),
-			renderChunkTransforms: [createChunkTransform()],
+			staticRenderableScene: scene,			renderChunkTransforms: [createChunkTransform()],
 			materialTextureCapabilities: {
 				supportsS3tc: false,
 				supportsS3tcSrgb: false,
@@ -715,9 +752,7 @@ describe("webgl2 world resources", () => {
 					detailRoleKind: "building",
 					materialSlots: [createMaterialSlot(0, materialSurfaceId)],
 				}),
-			]),
-			transitionPortalModel: createTransitionPortalModel(),
-			renderChunkTransforms: [createChunkTransform()],
+			]),			renderChunkTransforms: [createChunkTransform()],
 		});
 
 		expect(store.drawUnits[0]?.materialKind).toBe("direct-texture");
@@ -749,9 +784,7 @@ describe("webgl2 world resources", () => {
 				createStaticPart({
 					materialSlots: [createMaterialSlot(0, materialSurfaceId)],
 				}),
-			]),
-			transitionPortalModel: createTransitionPortalModel(),
-			renderChunkTransforms: [createChunkTransform()],
+			]),			renderChunkTransforms: [createChunkTransform()],
 		});
 
 		expect(store.drawUnits[0]?.materialKind).toBe("direct-texture");
@@ -2058,6 +2091,70 @@ function createLeafBspNode(): PreparedPolygonSetBspNode {
 	};
 }
 
-function createTransitionPortalModel() {
-	return createEmptyTransitionPortalCandidateModel();
+function createTransitionPortalCandidateModel() {
+	return {
+		candidates: [
+			{
+				id: "portal/1234/0",
+				source: "browser-free-camera" as const,
+				outdoorPortalId: "building/portal/0",
+				aperture: {
+					id: "portal/0",
+					source: {
+						kind: "env-cell" as const,
+						envCellId: 0x12340001,
+						portalId: "portal/0",
+						sourceIndex: 0,
+						polygonId: 7,
+						flags: 0,
+						otherPortalId: 0,
+					},
+					renderChunk: {
+						chunkKey: "landblock/1234ffff",
+						chunkLandblockId: 0x1234ffff,
+						chunkLocalOffset: { x: 0, y: 0, z: 0 },
+					},
+					chunkLocalPlacement: {
+						origin: { x: 0, y: 0, z: 0 },
+						orientation: { w: 1, x: 0, y: 0, z: 0 },
+					},
+					points: [
+						{ x: 0, y: 0, z: 0 },
+						{ x: 1, y: 0, z: 0 },
+						{ x: 0, y: 1, z: 0 },
+					],
+					plane: {
+						normal: { x: 0, y: 0, z: 1 },
+						constant: 0,
+						source: "derived-from-render-points" as const,
+					},
+					visibleSide: "positive" as const,
+					targetEnvCellId: 0x12340002,
+					targetStatus: "loaded-visible" as const,
+					outsideTransition: true,
+				},
+				insideVisibleSide: "positive" as const,
+				outsideVisibleSide: "negative" as const,
+				renderChunk: {
+					chunkKey: "landblock/1234ffff",
+					chunkLandblockId: 0x1234ffff,
+					chunkLocalOffset: { x: 0, y: 0, z: 0 },
+				},
+				entryEnvCellId: 0x12340001,
+				requestedInteriorEnvCellIds: [0x12340001],
+				targetStatus: "loaded-visible" as const,
+				stencilRef: 1,
+			},
+		],
+		diagnostics: {
+			loadedEnvCellPortalFactCount: 1,
+			topologyPortalCount: 1,
+			linkedTopologyPortalCount: 1,
+			apertureCandidateCount: 1,
+			workItemCandidateCount: 1,
+			skippedMissingApertureCount: 0,
+			skippedMissingPolygonCount: 0,
+			truncatedInteriorGroupCount: 0,
+		},
+	};
 }

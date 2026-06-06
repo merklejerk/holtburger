@@ -712,7 +712,7 @@ Progress:
 
 ### Phase 10: Delete Historical Full-Set Static Bundle Sync
 
-Status: add-on.
+Status: complete.
 
 Deliverables:
 
@@ -733,9 +733,15 @@ Dry-run findings:
 - The remaining retained-key tests still cover low-level texture upload validation and sampler behavior through the old full-set helper. During implementation, rewrite those cases to call `commitWebgl2StaticBundleProductResources()` with a stable product key before deleting the helper.
 - Keep `destroyWebgl2StaticBundleLayerResources()` coverage. It still owns store teardown and is not a historical full-set sync API.
 
+Progress:
+
+- Repointed static bundle resource tests at `commitWebgl2StaticBundleProductResources()` through a product-keyed test helper.
+- Deleted `syncWebgl2StaticBundleLayerResources()` and verified no source/test imports remain.
+- Kept destroy coverage for store teardown.
+
 ### Phase 11: Delete Artifact Scene Adapters
 
-Status: add-on.
+Status: complete.
 
 Deliverables:
 
@@ -760,9 +766,15 @@ Dry-run findings:
 - Do not delete runtime scene derivation helpers such as `deriveTerrainSceneModel()` or appearance-preview static renderable derivation; those still feed runtime preview and debug paths.
 - Quarantine is not an acceptable final state for these adapters. If deletion needs staging, the staging must be brief and Phase 15 must remove it.
 
+Progress:
+
+- Deleted `deriveTerrainSceneModelFromLandblockArtifacts()` and removed the historical terrain scene adapter test file.
+- Deleted `deriveStructuredInteriorSceneModelFromLandblockArtifacts()` and removed the worker detailed artifact scene-adapter test case/scaffolding.
+- Kept runtime asset-state scene derivation helpers intact.
+
 ### Phase 12: Product-Owned Portal Masks And Terrain Texture Pages
 
-Status: add-on.
+Status: complete.
 
 Deliverables:
 
@@ -785,9 +797,17 @@ Dry-run findings:
 - Implement this phase in two internal steps: first product-key portal mask commit/evict, then terrain texture-page ownership split. The terrain split likely needs a product-owned terrain page store or ownership metadata before the broad runtime terrain sync can be narrowed safely.
 - Add explicit tests proving runtime terrain sync cannot evict product terrain texture pages and product recommit only updates sampler/binding state when geometry and page content are unchanged.
 
+Progress:
+
+- Added product-keyed portal mask commit/evict APIs and wired renderer product commit, evict, clear, and render-chunk recommit paths through them.
+- Removed portal mask buffer creation from broad `syncWebgl2WorldResources()`; broad sync now retains product-owned portal mask draw units by product key.
+- Split product terrain texture pages into `productTerrainTexturePagesByKey` with product-only atlas planning and binding resolution.
+- Narrowed runtime terrain texture-page sync to non-product terrain tiles so runtime cleanup cannot evict product terrain pages.
+- Added tests proving product portal masks commit/evict by key and runtime world sync does not delete product terrain texture pages.
+
 ### Phase 13: Renderer-Owned Product Metrics And Debug Demotion
 
-Status: add-on.
+Status: complete.
 
 Deliverables:
 
@@ -811,9 +831,17 @@ Dry-run findings:
 - Browser debug copy still uses "draw units", "Static eligibility", "compaction", "fallbacks", and "staged static draw units". Treat this as a wording and metrics-source pass, not a renderer lifecycle change.
 - Add lightweight renderer-owned product metrics first, then update BRC/report text to consume them passively. Rename or scope `RendererResourceGraph` only after confirming whether runtime preview prepared-asset retention still needs it.
 
+Progress:
+
+- Added renderer-owned static product/resource counters to `WorldRenderDebugMetrics`.
+- Removed BRC's `staticLandblockRenderArtifactText` placeholder instead of making BRC own product facts.
+- Updated `BrowserWorldDisplay.svelte` to display static product status from renderer metrics.
+- Demoted browser debug wording from staged/static eligibility/fallback-centered language toward product/resource/runtime-material-batching language.
+- Left `RendererResourceGraph` in place for runtime preview/debug dependency leasing; static product lifetime remains product-key owned.
+
 ### Phase 14: Staged Naming And Historical Test Cleanup
 
-Status: add-on.
+Status: complete.
 
 Deliverables:
 
@@ -837,9 +865,16 @@ Dry-run findings:
 - Historical scene-adapter tests from Phase 11 and retained-key sync tests from Phase 10 are the main removal candidates once product commit coverage is in place.
 - If any historical fixture or compatibility name survives Phase 14 for sequencing reasons, it must be treated as Phase 15 purge debt, not accepted cleanup residue.
 
+Progress:
+
+- Renamed neutral indexed geometry helpers from `staged-world-geometry` to `indexed-render-geometry`.
+- Renamed `StagedWorldIndexedGeometry` to `RenderIndexedGeometry`, `buildStagedPolygonSetGeometry()` to `buildPolygonSetRenderGeometry()`, and `buildStagedPortalApertureGeometry()` to `buildPortalApertureRenderGeometry()`.
+- Extracted `buildStaticRenderablePartMatrix()` to `static-renderable-placement.ts`.
+- Left `staged-world-assembly` naming only on runtime appearance preview assembly and picker-diagnostic paths.
+
 ### Phase 15: True Purge Of Historical Product-Commit Debt
 
-Status: add-on final purge.
+Status: complete.
 
 Deliverables:
 
@@ -862,6 +897,13 @@ Dry-run findings:
 - Phase 12 may create short-lived bridge code while terrain texture-page ownership is split; this phase is where that bridge must be deleted after product-owned pages and portal masks are established.
 - Phase 13 may leave diagnostic wording or `RendererResourceGraph` naming in place while product metrics land. This phase must force a second audit so debug/report surfaces do not preserve old ownership concepts by inertia.
 - Phase 14 should reduce naming ambiguity before this phase starts, but Phase 15 is the hard stop: no compatibility quarantine is considered done until it is deleted or converted to current terminology.
+
+Progress:
+
+- No temporary quarantines were created during Phases 10-14.
+- Final source audit found no `replaceStaticLandblockProducts`, `syncWebgl2StaticBundleLayerResources()`, artifact-to-scene landblock adapter, static landblock snapshot/diff compatibility, or old staged geometry module references under `apps/holtburger-3d/src`.
+- Renamed final misleading test/debug wording discovered during purge (`compatibility output`, `stage it separately`).
+- Remaining `staged` names are runtime appearance preview specific; remaining `compacted`, `fallback`, `artifact`, `snapshot`, and `graph` uses are rendering technique, current product/resource, frame visibility, or runtime debug terminology.
 
 ## Risks And Mitigations
 

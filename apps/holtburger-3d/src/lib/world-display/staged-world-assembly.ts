@@ -5,9 +5,9 @@ import type {
 import type { ResolvedMaterialSlot } from "./material-plan";
 import type { IndexedMaterialDataCache } from "./indexed-material-data";
 import {
-	buildStagedPolygonSetGeometry,
-	type StagedWorldIndexedGeometry,
-} from "./staged-world-geometry";
+	buildPolygonSetRenderGeometry,
+	type RenderIndexedGeometry,
+} from "./indexed-render-geometry";
 import {
 	isTransientStagedMaterialPlan,
 	resolveStagedWorldMaterialSlotPlan,
@@ -15,12 +15,11 @@ import {
 	type StagedWorldMaterialPlan,
 } from "./staged-world-materials";
 import {
-	buildAcPlacementMatrix,
 	buildDebugColor,
 	createTranslationMat4,
-	multiplyMat4,
 	type RenderMat4,
 } from "./render-math";
+import { buildStaticRenderablePartMatrix } from "./static-renderable-placement";
 import type { StaticRenderableRenderDomain } from "./render-domains";
 import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import type { RenderChunkTransform } from "./render-anchor";
@@ -41,7 +40,7 @@ import type { TerrainSceneModel } from "./terrain-scene";
 import type { TextureFilteringMode } from "./texture-pages/texture-sampling-policy";
 import { createEmptyTransitionPortalCandidateModel } from "./transition-portal-work-items";
 
-type StagedWorldDrawUnitGeometry = StagedWorldIndexedGeometry;
+type StagedWorldDrawUnitGeometry = RenderIndexedGeometry;
 interface StagedWorldDrawUnitBvhBinding {
 	itemKeys: readonly RenderBvhItemKey[];
 	fallbackReason: string | null;
@@ -542,7 +541,7 @@ function buildStagedStaticPartGeometry(
 	assetState: AssetChannelState,
 	part: StaticRenderablePart,
 	surfaceKey: StagedStaticSurfaceKey,
-): StagedWorldIndexedGeometry {
+): RenderIndexedGeometry {
 	const asset = assetState.preparedByAssetId[part.gfxObjAssetId];
 	if (
 		!asset ||
@@ -551,7 +550,7 @@ function buildStagedStaticPartGeometry(
 	) {
 		return createEmptyIndexedGeometry();
 	}
-	const geometry = buildStagedPolygonSetGeometry(asset.payload.renderGeometry, {
+	const geometry = buildPolygonSetRenderGeometry(asset.payload.renderGeometry, {
 		surfaceId: surfaceKey.geometrySurfaceId,
 		materialVariantSignature: surfaceKey.materialVariantSignature,
 		sourceSignature: `gfx-obj:${part.gfxObjAssetId}`,
@@ -590,7 +589,7 @@ function buildStagedStaticPartGeometry(
 	};
 }
 
-function createEmptyIndexedGeometry(): StagedWorldIndexedGeometry {
+function createEmptyIndexedGeometry(): RenderIndexedGeometry {
 	return {
 		signature: "empty",
 		positions: new Float32Array(),
@@ -647,71 +646,4 @@ function transformPosition(
 		matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13];
 	target[targetOffset + 2] =
 		matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14];
-}
-
-export function buildStaticRenderablePartMatrix(
-	part: StaticRenderablePart,
-): RenderMat4 {
-	let matrix = createIdentityMat4();
-	for (const parentPlacement of part.parentPlacements) {
-		matrix = multiplyMat4(
-			matrix,
-			buildAcPlacementMatrix(
-				parentPlacement,
-				{ x: 0, y: 0, z: 0 },
-				{ x: 1, y: 1, z: 1 },
-			),
-		);
-	}
-	matrix = multiplyMat4(
-		matrix,
-		buildAcPlacementMatrix(
-			part.chunkLocalInstancePlacement,
-			{ x: 0, y: 0, z: 0 },
-			{ x: 1, y: 1, z: 1 },
-		),
-	);
-	for (const partPlacement of part.partPlacements) {
-		matrix = multiplyMat4(
-			matrix,
-			buildAcPlacementMatrix(
-				partPlacement,
-				{ x: 0, y: 0, z: 0 },
-				{ x: 1, y: 1, z: 1 },
-			),
-		);
-	}
-	return multiplyMat4(
-		matrix,
-		createScaleMat4({ x: part.scale.x, y: part.scale.z, z: part.scale.y }),
-	);
-}
-
-function createIdentityMat4(): RenderMat4 {
-	return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
-}
-
-function createScaleMat4(scale: {
-	x: number;
-	y: number;
-	z: number;
-}): RenderMat4 {
-	return new Float32Array([
-		scale.x,
-		0,
-		0,
-		0,
-		0,
-		scale.y,
-		0,
-		0,
-		0,
-		0,
-		scale.z,
-		0,
-		0,
-		0,
-		0,
-		1,
-	]);
 }

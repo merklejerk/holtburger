@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
-	buildStagedPolygonSetGeometry,
-	buildStagedPortalApertureGeometry,
-} from "./staged-world-geometry";
+	buildPolygonSetRenderGeometry,
+	buildPortalApertureRenderGeometry,
+} from "./indexed-render-geometry";
 
-describe("buildStagedPolygonSetGeometry", () => {
+describe("buildPolygonSetRenderGeometry", () => {
 	it("uses render triangle first-vertex runs as indices", () => {
-		const geometry = buildStagedPolygonSetGeometry({
+		const geometry = buildPolygonSetRenderGeometry({
 			sourceId: 7,
 			vertexCount: 6,
 			triangleCount: 2,
@@ -29,9 +29,9 @@ describe("buildStagedPolygonSetGeometry", () => {
 	});
 });
 
-describe("buildStagedPortalApertureGeometry", () => {
+describe("buildPortalApertureRenderGeometry", () => {
 	it("triangulates aperture points as a fan", () => {
-		const geometry = buildStagedPortalApertureGeometry([
+		const geometry = buildPortalApertureRenderGeometry([
 			{ x: 0, y: 0, z: 0 },
 			{ x: 1, y: 0, z: 0 },
 			{ x: 1, y: 1, z: 0 },

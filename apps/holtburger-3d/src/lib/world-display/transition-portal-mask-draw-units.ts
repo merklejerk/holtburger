@@ -7,8 +7,8 @@ import {
 	multiplyMat4,
 	type RenderMat4,
 } from "./render-math";
-import { buildStagedPortalApertureGeometry } from "./staged-world-geometry";
-import type { StagedWorldIndexedGeometry } from "./staged-world-geometry";
+import { buildPortalApertureRenderGeometry } from "./indexed-render-geometry";
+import type { RenderIndexedGeometry } from "./indexed-render-geometry";
 import type { StagedWorldMaterialPlan } from "./staged-world-materials";
 import type {
 	TransitionPortalCandidate,
@@ -18,7 +18,7 @@ import type {
 export interface TransitionPortalMaskDrawUnitAssembly {
 	id: string;
 	kind: "portal-mask";
-	geometry: StagedWorldIndexedGeometry;
+	geometry: RenderIndexedGeometry;
 	modelMatrix: RenderMat4;
 	material: StagedWorldMaterialPlan;
 	preparedAssetIds: readonly [];
@@ -81,8 +81,8 @@ export function buildTransitionPortalMaskDrawUnitAssemblies({
 
 function buildPortalMaskGeometry(
 	candidate: TransitionPortalCandidate,
-): StagedWorldIndexedGeometry {
-	return buildStagedPortalApertureGeometry(
+): RenderIndexedGeometry {
+	return buildPortalApertureRenderGeometry(
 		candidate.aperture.points,
 		`portal-mask:${candidate.id}:points=${candidate.aperture.points.length}`,
 	);

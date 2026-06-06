@@ -93,6 +93,18 @@ interface WorldRenderDebugMetrics {
 	terrainAtlasRefCount: number;
 	terrainAtlasCandidateCount: number;
 	terrainAtlasBlockerTileCount: number;
+	staticLandblockProductCount: number;
+	staticBundleProductResourceCount: number;
+	staticBundleLayerResourceCount: number;
+	staticBundleLayerTexturePageResourceCount: number;
+	structuredInteriorProductResourceCount: number;
+	structuredInteriorCellResourceCount: number;
+	structuredInteriorTexturePageResourceCount: number;
+	structuredInteriorMaterialRecordResourceCount: number;
+	terrainProductResourceCount: number;
+	productTerrainTexturePageCount: number;
+	portalMaskProductResourceCount: number;
+	portalMaskProductDrawUnitCount: number;
 	staticGroupMeshCount: number;
 	visibleStaticGroupMeshCount: number;
 	staticRenderBatchCount: number;

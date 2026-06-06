@@ -34,7 +34,7 @@ import type {
 	VirtualTexturePageRef,
 } from "../lib/world-display/static-bundle-layer";
 import { createCompactionEligibility } from "../lib/world-display/compaction/compaction-family-planner";
-import { buildStagedPolygonSetGeometry } from "../lib/world-display/staged-world-geometry";
+import { buildPolygonSetRenderGeometry } from "../lib/world-display/indexed-render-geometry";
 import { buildLandblockTerrainRenderArtifact } from "../lib/world-display/terrain-render-artifact";
 import type {
 	DetailedLandblockRenderArtifacts,
@@ -765,7 +765,7 @@ function buildStructuredInteriorMaterialSlices(options: {
 			if (!materialRecord) {
 				return null;
 			}
-			const geometry = buildStagedPolygonSetGeometry(
+			const geometry = buildPolygonSetRenderGeometry(
 				options.envCell.renderGeometry,
 				{
 					surfaceId: surfaceKey.geometrySurfaceId,

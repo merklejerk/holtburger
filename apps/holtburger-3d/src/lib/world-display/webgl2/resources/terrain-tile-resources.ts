@@ -4,7 +4,7 @@ import type { TerrainRenderTexturePageRef } from "../../terrain-render-artifact"
 import type { TerrainTileLayerPlan } from "../../terrain-tile-plan";
 import type { RenderMat4 } from "../../render-math";
 import type { RenderBvhItemKey } from "../../prepared-bvh-visibility";
-import type { StagedWorldIndexedGeometry } from "../../staged-world-geometry";
+import type { RenderIndexedGeometry } from "../../indexed-render-geometry";
 import type { TexturePageFamily } from "../../texture-pages/texture-page-atlas-planner";
 import type { TerrainSceneTile } from "../../terrain-scene";
 import type { PreparedTerrainMesh } from "../../../assets/types";
@@ -149,7 +149,7 @@ export function deriveTerrainTileRenderCandidate(
 }
 
 export function describeTerrainTileGeometrySignature(
-	geometry: StagedWorldIndexedGeometry,
+	geometry: RenderIndexedGeometry,
 ): string {
 	return [
 		geometry.signature,

@@ -11,7 +11,7 @@ import {
 	type RenderVec4,
 } from "../../render-math";
 import type { RenderChunkTransform } from "../../render-anchor";
-import { buildStagedPolygonSetGeometry } from "../../staged-world-geometry";
+import { buildPolygonSetRenderGeometry } from "../../indexed-render-geometry";
 import type { StaticBundleTexturePage } from "../../static-bundle-layer";
 import {
 	createWebgl2ArrayBuffer,
@@ -389,7 +389,7 @@ function createWebgl2StructuredInteriorShellResource({
 	gl: WebGL2RenderingContext;
 	cell: DetailedStructuredInteriorCellArtifact;
 }): Webgl2StructuredInteriorShellResource {
-	const geometry = buildStagedPolygonSetGeometry(cell.renderGeometry, {
+	const geometry = buildPolygonSetRenderGeometry(cell.renderGeometry, {
 		sourceSignature: cell.key,
 	});
 	const positionBuffer = createWebgl2ArrayBuffer(gl, {

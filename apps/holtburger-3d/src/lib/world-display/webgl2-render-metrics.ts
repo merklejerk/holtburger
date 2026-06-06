@@ -145,6 +145,39 @@ export function createWebgl2RenderMetrics(
 				input.worldStore?.terrainAtlasCandidateCount ?? 0,
 			terrainAtlasBlockerTileCount:
 				input.worldStore?.terrainAtlasBlockerTileCount ?? 0,
+			staticLandblockProductCount: input.worldStore
+				? new Set([
+						...input.worldStore.staticBundleLayerResources.productsByKey.keys(),
+						...input.worldStore.structuredInteriorResources.productsByKey.keys(),
+						...input.worldStore.terrainTileIdsByProductKey.keys(),
+						...input.worldStore.portalMaskDrawUnitIdsByProductKey.keys(),
+					]).size
+				: 0,
+			staticBundleProductResourceCount:
+				input.worldStore?.staticBundleLayerResources.productsByKey.size ?? 0,
+			staticBundleLayerResourceCount:
+				input.worldStore?.staticBundleLayerResourceCount ?? 0,
+			staticBundleLayerTexturePageResourceCount:
+				input.worldStore?.staticBundleLayerTexturePageResourceCount ?? 0,
+			structuredInteriorProductResourceCount:
+				input.worldStore?.structuredInteriorProductResourceCount ?? 0,
+			structuredInteriorCellResourceCount:
+				input.worldStore?.structuredInteriorResourceCount ?? 0,
+			structuredInteriorTexturePageResourceCount:
+				input.worldStore?.structuredInteriorTexturePageResourceCount ?? 0,
+			structuredInteriorMaterialRecordResourceCount:
+				input.worldStore?.structuredInteriorMaterialRecordResourceCount ?? 0,
+			terrainProductResourceCount:
+				input.worldStore?.terrainTileIdsByProductKey.size ?? 0,
+			productTerrainTexturePageCount:
+				input.worldStore?.productTerrainTexturePagesByKey.size ?? 0,
+			portalMaskProductResourceCount:
+				input.worldStore?.portalMaskDrawUnitIdsByProductKey.size ?? 0,
+			portalMaskProductDrawUnitCount: input.worldStore
+				? [
+						...input.worldStore.portalMaskDrawUnitIdsByProductKey.values(),
+					].reduce((total, drawUnitIds) => total + drawUnitIds.length, 0)
+				: 0,
 			staticGroupMeshCount: input.worldStore?.appearancePreviewDrawUnitCount ?? 0,
 			visibleStaticGroupMeshCount:
 				(input.frameMetrics?.visibleDrawCountsByCategory["appearance-preview-staged"] ??

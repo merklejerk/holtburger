@@ -31,7 +31,11 @@
 		type StaticLandblockProductKey,
 		type StaticLandblockRenderProductSet,
 	} from "./static-landblock-render-artifact-store";
-	import type { LandblockRenderProductWorkerResult } from "./landblock-render-product";
+	import {
+		createStaticLandblockProductKeyFromResult,
+		formatStaticLandblockProductKey,
+		type LandblockRenderProductWorkerResult,
+	} from "./landblock-render-product";
 	import {
 		createEmptyStructuredInteriorSceneModel,
 		type StructuredInteriorSceneModel,
@@ -147,24 +151,23 @@
 		rendererController?.setStaticRenderableScene(staticRenderableScene);
 	}
 
-	export function replaceStaticLandblockProducts(
-		nextArtifacts: StaticLandblockRenderProductSet,
-	): void {
-		staticLandblockRenderProducts = nextArtifacts;
-		rendererController?.replaceStaticLandblockProducts(
-			staticLandblockRenderProducts,
-		);
-	}
-
 	export function commitStaticLandblockProduct(
 		result: LandblockRenderProductWorkerResult,
 	): void {
+		staticLandblockRenderProducts = commitStaticProductToSet(
+			staticLandblockRenderProducts,
+			result,
+		);
 		rendererController?.commitStaticLandblockProduct(result);
 	}
 
 	export function evictStaticLandblockProduct(
 		key: StaticLandblockProductKey,
 	): void {
+		staticLandblockRenderProducts = evictStaticProductFromSet(
+			staticLandblockRenderProducts,
+			key,
+		);
 		rendererController?.evictStaticLandblockProduct(key);
 	}
 
@@ -277,6 +280,47 @@
 		drawUnitIds: readonly string[],
 	): readonly DrawUnitRuntimeDiagnostic[] {
 		return rendererController?.getDrawUnitRuntimeDiagnostics(drawUnitIds) ?? [];
+	}
+
+	function commitStaticProductToSet(
+		productSet: StaticLandblockRenderProductSet,
+		result: LandblockRenderProductWorkerResult,
+	): StaticLandblockRenderProductSet {
+		const nextProductKey = formatStaticLandblockProductKey(
+			createStaticLandblockProductKeyFromResult(result),
+		);
+		const artifacts = [
+			...productSet.artifacts.filter(
+				(artifact) =>
+					formatStaticLandblockProductKey(
+						createStaticLandblockProductKeyFromResult(artifact),
+					) !== nextProductKey,
+			),
+			result,
+		];
+		return {
+			...productSet,
+			artifacts,
+			residentCount: artifacts.length,
+		};
+	}
+
+	function evictStaticProductFromSet(
+		productSet: StaticLandblockRenderProductSet,
+		key: StaticLandblockProductKey,
+	): StaticLandblockRenderProductSet {
+		const productKey = formatStaticLandblockProductKey(key);
+		const artifacts = productSet.artifacts.filter(
+			(artifact) =>
+				formatStaticLandblockProductKey(
+					createStaticLandblockProductKeyFromResult(artifact),
+				) !== productKey,
+		);
+		return {
+			...productSet,
+			artifacts,
+			residentCount: artifacts.length,
+		};
 	}
 </script>
 

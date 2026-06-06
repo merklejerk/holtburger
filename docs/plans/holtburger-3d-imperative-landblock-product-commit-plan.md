@@ -202,7 +202,7 @@ Progress:
 
 ### Phase 1: Product Identity And Commit Surface Contract
 
-Status: prepared.
+Status: complete.
 
 Deliverables:
 
@@ -361,7 +361,7 @@ Progress:
 
 ### Phase 3B-0: Renderer-Owned Product Placement And Spatial Facts
 
-Status: next.
+Status: complete.
 
 Why this phase exists:
 
@@ -386,7 +386,18 @@ Acceptance criteria:
 - No new product path depends on `StaticRenderableSceneModel`, `StructuredInteriorSceneModel`, or `TerrainSceneModel` for placement/spatial facts.
 - `BrowserRenderResourceCoordinator` can be disabled for static product report generation without changing committed product resources.
 
+Progress:
+
+- Added product-level spatial derivation from a single `LandblockRenderProductWorkerResult`, covering terrain artifacts, static bundle spatial hints, detailed structured cells, and low-fidelity detailed portal aperture facts.
+- Added `StaticLandblockProductMetadataStore`, keyed by `StaticLandblockProductKey`, with product commit/evict/clear, render chunk transform updates, and a renderer-owned spatial query.
+- Wired WebGL renderer product commit/evict/clear and render chunk transform updates into the metadata store.
+- Implemented renderer `pickAtViewportPoint` and `pickTerrainLandblockAtViewportPoint` against product-owned metadata.
+- Changed browser picker flow to prefer the renderer-owned product query, falling back to the transitional browser report query for runtime preview/debug overlay facts.
+- Added focused metadata-store tests proving product commit creates spatial facts and product eviction removes them.
+
 ### Phase 3B-1: Static Product Store Shell
+
+Status: complete.
 
 Deliverables:
 
@@ -404,7 +415,17 @@ Acceptance criteria:
 - Placement and sampler updates do not call product commit.
 - Product-store tests do not invoke `replaceStaticLandblockProducts`.
 
+Progress:
+
+- Added `Webgl2StaticLandblockProductStore`, keyed by `StaticLandblockProductKey`.
+- Added product-keyed commit, evict, clear, placement update, sampler policy update, product count, and owned resource count APIs.
+- Product commit computes a product-content signature that excludes request IDs.
+- Same-key, same-signature commits reuse the resident product resource; same-key changed-signature commits dispose and replace owned resources.
+- Added focused product-store lifecycle tests without invoking `replaceStaticLandblockProducts`.
+
 ### Phase 3B-2: Static Bundle Product Commit/Evict
+
+Status: complete.
 
 Deliverables:
 
@@ -420,7 +441,18 @@ Acceptance criteria:
 - Texture filtering changes update resident static bundle texture pages without rebuilding geometry.
 - Static bundle resource counters are product-derived, not global retained-set-derived.
 
+Progress:
+
+- Added product-keyed static bundle commit/evict APIs alongside the transitional retained-key sync.
+- Added a static bundle product index inside `Webgl2StaticBundleLayerResourceStore`.
+- Same-signature product commits reuse layer resources and only update sampler policy.
+- Changed-signature product commits dispose and replace only that product's layer resources.
+- Product eviction disposes only the layers registered under that product key.
+- Added direct product commit/reuse/evict tests that do not invoke full-set sync.
+
 ### Phase 3B-3: Detailed Interior Product Commit/Evict
+
+Status: complete.
 
 Deliverables:
 
@@ -436,14 +468,46 @@ Acceptance criteria:
 - Changing render anchor updates detailed cell placement state without recommit.
 - The product-store detailed path does not consume `StructuredInteriorSceneModel`.
 
-### Phase 3B-4: Terrain Product Commit/Evict
+Progress:
+
+- Added product-keyed detailed interior commit/evict APIs that reuse the Phase 3A product-scoped texture page/material hoist.
+- Detailed interior cells are now indexed by static product key for direct product eviction without scanning unrelated products.
+- Same product commits update cell placement and sampler policy while reusing uploaded product pages, material records, and cell geometry.
+- Product eviction disposes cell resources before disposing the shared product texture pages.
+- Added focused tests for direct detailed interior commit, sampler update reuse, and eviction without invoking the full-set static product sync.
+
+### Phase 3B-4A: Terrain Upload Reuse Fix And Extraction
+
+Status: complete.
+
+Deliverables:
+
+- Split terrain artifact upload planning so unchanged worker-built terrain can be detected before draw-slice buffers are created.
+- Fix the current terrain draw-slice reuse bug where draw-slice buffers are created before the previous tile reuse decision.
+- Add a direct regression test proving unchanged worker terrain artifact sync does not recreate draw-slice buffers.
+
+Acceptance criteria:
+
+- Re-syncing an unchanged worker terrain artifact does not recreate terrain geometry or draw-slice buffers.
+- The terrain artifact upload path exposes enough artifact-shaped inputs for Phase 3B-4B to commit without `TerrainSceneModel`.
+- Existing terrain scene sync behavior remains unchanged.
+
+Progress:
+
+- Split terrain draw-slice upload planning from WebGL buffer creation.
+- Fixed unchanged terrain artifact sync so reusable tiles update placement and metadata before deciding whether each draw slice needs a new upload.
+- Converted page-overflow terrain slices to the same upload-plan creation path.
+- Added a multi-slice worker terrain artifact regression proving unchanged sync reuses draw-slice buffers and vertex arrays while updating placement.
+
+### Phase 3B-4B: Terrain Product Commit/Evict
+
+Status: complete.
 
 Deliverables:
 
 - Commit `LandblockTerrainRenderArtifact` directly into terrain product resources without deriving a `TerrainSceneModel`.
 - Separate immutable terrain geometry/draw-slice uploads from placement, texture-page binding, and sampler updates.
 - Move worker-built terrain texture-page planning/binding out of broad `syncWebgl2WorldResources()`.
-- Fix the current terrain draw-slice reuse bug where draw-slice buffers are created before the previous tile reuse decision.
 - Expose terrain render candidates, scene bounds, BVH keys, and resource counters from product-owned terrain resources.
 
 Acceptance criteria:
@@ -454,7 +518,17 @@ Acceptance criteria:
 - Changing texture filtering updates terrain product texture pages/samplers without recommit.
 - Product terrain resources do not depend on broad `retainedTextureKeys` cleanup in `syncWebgl2WorldResources()`.
 
+Progress:
+
+- Added product-keyed terrain commit, product-result commit, evict, and sampler-policy refresh APIs.
+- Direct terrain commit consumes `LandblockTerrainRenderArtifact` and current render chunk transforms without deriving or accepting a `TerrainSceneModel`.
+- Terrain product resources reuse unchanged tile geometry and draw-slice buffers while updating placement.
+- Terrain artifact texture-page planning and bindings can now refresh through a terrain-specific product path instead of the broad world-resource sync.
+- Added direct terrain product tests covering commit, unchanged recommit placement updates, sampler refresh without artifact recommit, and eviction.
+
 ### Phase 3B-5: Static Product Store Cutover
+
+Status: complete.
 
 Deliverables:
 
@@ -472,7 +546,18 @@ Acceptance criteria:
 - `replaceStaticLandblockProducts` and its tests are gone.
 - Runtime appearance preview updates do not trigger static product reconciliation.
 
+Progress:
+
+- Routed WebGL renderer product commit/evict/clear through direct static bundle, detailed interior, terrain, and renderer metadata product APIs.
+- Removed `replaceStaticLandblockProducts` from the renderer contract, deferred renderer wrapper, Svelte surface, and WebGL implementation.
+- Deleted `syncWebgl2StaticLandblockRenderArtifactResources()` and its legacy full-set sync tests.
+- Static product commits now update GPU resources immediately and no longer mark broad world resources dirty.
+- Render chunk transform, texture filtering, and detail-texture changes recommit resident products through product-keyed APIs, reusing geometry while updating placement/sampler state.
+- `syncWebgl2WorldResources()` now preserves product-owned terrain tiles while syncing runtime terrain scene tiles.
+
 ### Phase 4: Browser Resource Coordinator Decomposition
+
+Status: complete.
 
 Deliverables:
 
@@ -494,7 +579,17 @@ Acceptance criteria:
 - Browser picking/debug overlays cannot force landblock products through scene-model adapters.
 - Static product report generation has no authority over product resource residency, placement, or eviction.
 
+Progress:
+
+- Removed `BrowserRenderResourceCoordinatorInput.staticLandblockRenderProducts` and the Browser page handoff of coordinator product sets into BRC.
+- BRC now derives only asset/runtime-preview terrain, static renderable, structured interior, debug overlay, and report state.
+- Product-owned terrain/static/interior spatial facts are no longer populated through BRC; renderer product metadata handles static product picking.
+- Transition portal candidate ownership moved into the WebGL renderer resident product path so BRC no longer derives portal masks from product sets.
+- Static landblock report text is now a renderer-owned placeholder instead of BRC product residency counters.
+
 ### Phase 5: Broad WebGL Sync Split
+
+Status: complete for production static product rendering; residual test-only legacy helpers remain tracked in cleanup targets.
 
 Deliverables:
 
@@ -511,7 +606,17 @@ Acceptance criteria:
 - Static product frame culling reads product-owned render candidates.
 - Static product rendering does not use fallback-resolved readiness gates intended for partially prepared main-thread scenes.
 
+Progress:
+
+- Removed static product full-set sync from WebGL dirty world-resource frames.
+- `syncWebgl2WorldResources()` now handles runtime appearance preview resources, runtime terrain-scene resources, and portal-mask resources while retaining product-owned terrain tiles.
+- Static product commits no longer reconcile bundle/detailed resources through scene-model adapters or retained-key product-set scans.
+- Deleted the detailed interior retained-key sync API and the top-level static product full-set sync API.
+- Renderer-owned transition portal model refresh keeps BRC out of product-set portal derivation while portal mask buffers remain in the non-product world sync.
+
 ### Phase 6: Result Protocol Cleanup
+
+Status: complete.
 
 Deliverables:
 
@@ -530,7 +635,14 @@ Acceptance criteria:
 
 - Chunked result delivery is not required for this phase unless a new measured failure shows the remaining product transfer is the cause.
 
+Progress:
+
+- No measured transfer failure appeared after worker serialization and direct renderer product commits.
+- Kept the result protocol product-oriented and did not introduce partial product renderer mutation.
+
 ### Phase 7: Debug, Picker, Graph, And Metrics Demotion
+
+Status: complete for static product ownership.
 
 Deliverables:
 
@@ -545,7 +657,16 @@ Acceptance criteria:
 - Static product rendering works when renderer graph diagnostics are disabled.
 - Debug text no longer implies static landblock rendering has staged and compacted runtime modes.
 
+Progress:
+
+- Browser picking now uses renderer product metadata before the old browser spatial query path.
+- BRC no longer populates product-owned static/terrain/interior spatial items or product-derived debug overlays.
+- Static product resource lifetime no longer uses `RendererResourceGraph`; graph leases remain for runtime/non-product resource diagnostics.
+- Static product report text was demoted to a renderer-owned placeholder instead of BRC residency counters.
+
 ### Phase 8: Legacy Static Pipeline Deletion
+
+Status: complete for production paths; historical helper tests remain.
 
 Deliverables:
 
@@ -560,7 +681,16 @@ Acceptance criteria:
 - Knip has no reachable legacy static addition/compaction symbols.
 - Browser mode still renders terrain, outdoor statics, detailed interiors, portals, and dungeons through worker products.
 
+Progress:
+
+- Removed BRC's main-thread static landblock product application and product-set scene derivation.
+- Static landblock WebGL resources now enter through imperative product commit/evict/clear APIs.
+- `npm run lint:dead` passes after deleting/demoting stale exports from the product cutover.
+- Historical adapter helpers such as artifact-to-scene derivation remain only where tests still document older behavior; they are no longer render-critical.
+
 ### Phase 9: Cleanup And Naming Pass
+
+Status: complete for this cutover pass.
 
 Deliverables:
 
@@ -573,6 +703,12 @@ Acceptance criteria:
 
 - No static landblock code path is documented as optional, fallback, or compatibility mode.
 - `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run lint:rust` pass for `apps/holtburger-3d`.
+
+Progress:
+
+- Removed public `replaceStaticLandblockProducts` compatibility surfaces.
+- Deleted the top-level full-set static product sync API and cleaned stale exports found by `knip`.
+- Updated plan cleanup targets with the remaining historical/test-only adapter and retained-key helper debt.
 
 ## Risks And Mitigations
 

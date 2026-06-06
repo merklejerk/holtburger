@@ -120,10 +120,6 @@ function createDeferredWorldDisplayRenderer<
 				createEmptyStaticLandblockRenderProductSet();
 			loadedRenderer?.clearStaticLandblockProducts();
 		},
-		replaceStaticLandblockProducts(artifacts) {
-			staticLandblockRenderProducts = artifacts;
-			loadedRenderer?.replaceStaticLandblockProducts(artifacts);
-		},
 		setStructuredInteriorScene(scene) {
 			structuredInteriorScene = scene;
 			loadedRenderer?.setStructuredInteriorScene(scene);

@@ -2,6 +2,7 @@ import type {
 	AssetChannelState,
 	PreparedTexturePayload,
 } from "../assets/types";
+import { createInitialAssetChannelState } from "../assets/types";
 import { profileBrowserJsScope } from "../diagnostics/browser-js-profiler";
 import { resolveNormalizedPreparedTextureAssetIds } from "../assets/material-texture-preparation-policy";
 import { formatHex32 } from "../landblocks";
@@ -51,12 +52,12 @@ import {
 	type RendererResourceGraphNode,
 } from "./renderer-resource-graph";
 import type { StaticRenderableSceneModel } from "./static-renderables";
-import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
 import {
-	getDetailedLandblockRenderArtifacts,
-	getStaticObjectBundleArtifacts,
+	formatStaticLandblockProductKey,
+	getLandblockTerrainRenderArtifact,
+	type StaticLandblockProductKey,
+	type LandblockRenderProductWorkerResult,
 } from "./landblock-render-product";
-import type { StaticObjectBundleArtifact } from "./static-bundle-layer";
 import type {
 	DirectRenderSurfaceUploadDataType,
 	DirectRenderSurfaceUploadFormat,
@@ -155,13 +156,11 @@ import {
 import {
 	createWebgl2StaticBundleLayerResourceStore,
 	destroyWebgl2StaticBundleLayerResources,
-	syncWebgl2StaticBundleLayerResources,
 	type Webgl2StaticBundleLayerResourceStore,
 } from "./webgl2/resources/static-bundle-layer-resources";
 import {
 	createWebgl2StructuredInteriorResourceStore,
 	destroyWebgl2StructuredInteriorResources,
-	syncWebgl2StructuredInteriorResources,
 	type Webgl2StructuredInteriorResourceStore,
 } from "./webgl2/resources/structured-interior-resources";
 
@@ -212,6 +211,7 @@ export interface Webgl2WorldResourceStore {
 	drawUnitsById: Map<string, Webgl2WorldDrawUnit>;
 	terrainTiles: Webgl2TerrainTileResource[];
 	terrainTilesById: Map<string, Webgl2TerrainTileResource>;
+	terrainTileIdsByProductKey: Map<string, readonly string[]>;
 	terrainRenderCandidates: Webgl2TerrainTileRenderCandidate[];
 	staticBundleLayerResources: Webgl2StaticBundleLayerResourceStore;
 	structuredInteriorResources: Webgl2StructuredInteriorResourceStore;
@@ -326,6 +326,7 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		drawUnitsById: new Map(),
 		terrainTiles: [],
 		terrainTilesById: new Map(),
+		terrainTileIdsByProductKey: new Map(),
 		terrainRenderCandidates: [],
 		staticBundleLayerResources: createWebgl2StaticBundleLayerResourceStore(),
 		structuredInteriorResources: createWebgl2StructuredInteriorResourceStore(),
@@ -401,49 +402,9 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 	};
 }
 
-export function syncWebgl2StaticLandblockRenderArtifactResources({
-	gl,
-	store,
-	artifacts,
-	renderChunkTransforms = [],
-	textureFilteringMode = "anisotropic-4x",
-	maxAnisotropy = 1,
-}: {
-	gl: WebGL2RenderingContext;
-	store: Webgl2WorldResourceStore;
-	artifacts: StaticLandblockRenderProductSet;
-	renderChunkTransforms?: readonly RenderChunkTransform[];
-	textureFilteringMode?: TextureFilteringMode;
-	maxAnisotropy?: number;
-}): void {
-	const layers = artifacts.artifacts.flatMap((artifact) =>
-		getStaticObjectBundleArtifacts(artifact).filter((bundle) =>
-			isRenderableStaticLandblockArtifactLayer(
-				artifact.product,
-				bundle.bundleKind,
-			),
-		),
-	);
-	syncWebgl2StaticBundleLayerResources({
-		gl,
-		store: store.staticBundleLayerResources,
-		layers,
-		textureFilteringMode,
-		maxAnisotropy,
-	});
-	const detailedArtifacts = artifacts.artifacts
-		.map(getDetailedLandblockRenderArtifacts)
-		.filter((artifact): artifact is NonNullable<typeof artifact> =>
-			Boolean(artifact),
-		);
-	syncWebgl2StructuredInteriorResources({
-		gl,
-		store: store.structuredInteriorResources,
-		artifacts: detailedArtifacts,
-		renderChunkTransforms,
-		textureFilteringMode,
-		maxAnisotropy,
-	});
+export function refreshWebgl2StaticLandblockProductResourceCounters(
+	store: Webgl2WorldResourceStore,
+): void {
 	const resources = [...store.staticBundleLayerResources.layersByKey.values()];
 	store.staticBundleLayerResourceCount = resources.length;
 	const structuredInteriorResources = [
@@ -484,19 +445,230 @@ export function syncWebgl2StaticLandblockRenderArtifactResources({
 	);
 }
 
-function isRenderableStaticLandblockArtifactLayer(
-	product: StaticLandblockRenderProductSet["artifacts"][number]["product"],
-	bundleKind: StaticObjectBundleArtifact["bundleKind"],
-): boolean {
-	switch (product) {
-		case "outdoor":
-			return (
-				bundleKind === "outdoor-buildings" || bundleKind === "outdoor-detail"
-			);
-		case "outdoor-env-cells":
-		case "dungeon-env-cells":
-			return bundleKind === "env-cell-static";
+export function commitWebgl2TerrainProductResources({
+	gl,
+	store,
+	productKey,
+	artifact,
+	renderChunkTransforms,
+	assetState = createInitialAssetChannelState("terrain-product"),
+	materialTextureCapabilities = defaultWebgl2MaterialTextureCapabilities(),
+	textureFilteringMode = "anisotropic-4x",
+	detailTexturesEnabled = true,
+}: {
+	gl: WebGL2RenderingContext;
+	store: Webgl2WorldResourceStore;
+	productKey: StaticLandblockProductKey;
+	artifact: LandblockTerrainRenderArtifact;
+	renderChunkTransforms: readonly RenderChunkTransform[];
+	assetState?: AssetChannelState;
+	materialTextureCapabilities?: MaterialTextureCapabilities;
+	textureFilteringMode?: TextureFilteringMode;
+	detailTexturesEnabled?: boolean;
+}): void {
+	const productIdentityKey = formatStaticLandblockProductKey(productKey);
+	const tile = createOrReuseWebgl2TerrainTileFromArtifact({
+		gl,
+		store,
+		artifact,
+		renderChunkTransforms,
+	});
+	const previousTileIds =
+		store.terrainTileIdsByProductKey.get(productIdentityKey) ?? [];
+	const retainedTileIds = new Set(tile ? [tile.id] : []);
+	for (const tileId of previousTileIds) {
+		if (!retainedTileIds.has(tileId)) {
+			destroyWebgl2TerrainTileResourceById({ store, tileId });
+		}
 	}
+	store.terrainTileIdsByProductKey.set(
+		productIdentityKey,
+		[...retainedTileIds].sort(),
+	);
+	refreshWebgl2TerrainProductDerivedState({
+		gl,
+		store,
+		assetState,
+		materialTextureCapabilities,
+		textureFilteringMode,
+		detailTexturesEnabled,
+	});
+}
+
+export function commitWebgl2TerrainProductResultResources({
+	gl,
+	store,
+	result,
+	renderChunkTransforms,
+	assetState,
+	materialTextureCapabilities,
+	textureFilteringMode,
+	detailTexturesEnabled,
+}: {
+	gl: WebGL2RenderingContext;
+	store: Webgl2WorldResourceStore;
+	result: LandblockRenderProductWorkerResult;
+	renderChunkTransforms: readonly RenderChunkTransform[];
+	assetState?: AssetChannelState;
+	materialTextureCapabilities?: MaterialTextureCapabilities;
+	textureFilteringMode?: TextureFilteringMode;
+	detailTexturesEnabled?: boolean;
+}): void {
+	const artifact = getLandblockTerrainRenderArtifact(result);
+	if (!artifact) {
+		return;
+	}
+	commitWebgl2TerrainProductResources({
+		gl,
+		store,
+		productKey: {
+			landblockId: result.landblockId,
+			product: result.product,
+			buildPolicyRevision: result.buildPolicyRevision,
+			texturePagePolicyRevision: result.texturePagePolicyRevision,
+		},
+		artifact,
+		renderChunkTransforms,
+		assetState,
+		materialTextureCapabilities,
+		textureFilteringMode,
+		detailTexturesEnabled,
+	});
+}
+
+export function evictWebgl2TerrainProductResources({
+	gl,
+	store,
+	productKey,
+	assetState = createInitialAssetChannelState("terrain-product"),
+	materialTextureCapabilities = defaultWebgl2MaterialTextureCapabilities(),
+	textureFilteringMode = "anisotropic-4x",
+	detailTexturesEnabled = true,
+}: {
+	gl: WebGL2RenderingContext;
+	store: Webgl2WorldResourceStore;
+	productKey: StaticLandblockProductKey;
+	assetState?: AssetChannelState;
+	materialTextureCapabilities?: MaterialTextureCapabilities;
+	textureFilteringMode?: TextureFilteringMode;
+	detailTexturesEnabled?: boolean;
+}): void {
+	const productIdentityKey = formatStaticLandblockProductKey(productKey);
+	for (const tileId of store.terrainTileIdsByProductKey.get(productIdentityKey) ??
+		[]) {
+		destroyWebgl2TerrainTileResourceById({ store, tileId });
+	}
+	store.terrainTileIdsByProductKey.delete(productIdentityKey);
+	refreshWebgl2TerrainProductDerivedState({
+		gl,
+		store,
+		assetState,
+		materialTextureCapabilities,
+		textureFilteringMode,
+		detailTexturesEnabled,
+	});
+}
+
+export function updateWebgl2TerrainProductSamplerPolicy({
+	gl,
+	store,
+	assetState = createInitialAssetChannelState("terrain-product"),
+	materialTextureCapabilities = defaultWebgl2MaterialTextureCapabilities(),
+	textureFilteringMode,
+	detailTexturesEnabled = true,
+}: {
+	gl: WebGL2RenderingContext;
+	store: Webgl2WorldResourceStore;
+	assetState?: AssetChannelState;
+	materialTextureCapabilities?: MaterialTextureCapabilities;
+	textureFilteringMode: TextureFilteringMode;
+	detailTexturesEnabled?: boolean;
+}): void {
+	refreshWebgl2TerrainProductDerivedState({
+		gl,
+		store,
+		assetState,
+		materialTextureCapabilities,
+		textureFilteringMode,
+		detailTexturesEnabled,
+	});
+}
+
+function refreshWebgl2TerrainProductDerivedState({
+	gl,
+	store,
+	assetState,
+	materialTextureCapabilities,
+	textureFilteringMode,
+	detailTexturesEnabled,
+}: {
+	gl: WebGL2RenderingContext;
+	store: Webgl2WorldResourceStore;
+	assetState: AssetChannelState;
+	materialTextureCapabilities: MaterialTextureCapabilities;
+	textureFilteringMode: TextureFilteringMode;
+	detailTexturesEnabled: boolean;
+}): void {
+	store.terrainTiles = [...store.terrainTilesById.values()].sort((left, right) =>
+		left.id.localeCompare(right.id),
+	);
+	store.terrainRenderCandidates = store.terrainTiles.map(
+		deriveTerrainTileRenderCandidate,
+	);
+	store.terrainTileCount = store.terrainTiles.length;
+	store.terrainDrawUnitCount = 0;
+	const terrainPageCandidates = collectTerrainTexturePageAtlasCandidates({
+		assetState,
+		terrainTiles: store.terrainTiles,
+		materialTextureCapabilities,
+		textureFilteringMode,
+		detailTexturesEnabled,
+		reportDiagnostic: (message) => {
+			store.materialFallbackReasonSamples = [
+				...store.materialFallbackReasonSamples,
+				message,
+			].slice(0, 8);
+		},
+	});
+	store.terrainAtlasRefCount = terrainPageCandidates.refCount;
+	store.terrainAtlasCandidateCount =
+		terrainPageCandidates.rgbaCandidates.length;
+	store.terrainAtlasBlockerTileCount =
+		terrainPageCandidates.blockersByTerrainTileId.size;
+	applyTerrainTexturePageBlockers({
+		terrainTiles: store.terrainTiles,
+		blockersByTerrainTileId: terrainPageCandidates.blockersByTerrainTileId,
+	});
+	store.compactionFamilyPlan = planCompactionFamilies({
+		drawUnits: store.drawUnits.map(toCompactionFamilyCandidate),
+		policy: DEFAULT_WEBGL2_COMPACTION_FAMILY_PLANNING_POLICY,
+		extraRgbaAtlasCandidates: terrainPageCandidates.rgbaCandidates,
+		extraDetailAtlasCandidates: terrainPageCandidates.detailCandidates,
+	});
+	store.texturePageAtlasPlan = store.compactionFamilyPlan.texturePageAtlasPlan;
+	syncWebgl2TerrainTexturePageResources({
+		gl,
+		store,
+		plan: store.texturePageAtlasPlan,
+		textureFilteringMode,
+		maxAnisotropy: materialTextureCapabilities.maxAnisotropy ?? 1,
+	});
+	resolveWebgl2TerrainTileTexturePageBindings({ gl, store });
+}
+
+function destroyWebgl2TerrainTileResourceById({
+	store,
+	tileId,
+}: {
+	store: Webgl2WorldResourceStore;
+	tileId: string;
+}): void {
+	const tile = store.terrainTilesById.get(tileId);
+	if (!tile) {
+		return;
+	}
+	destroyWebgl2TerrainTileResource(tile);
+	store.terrainTilesById.delete(tileId);
 }
 
 export function syncWebgl2WorldResources({
@@ -558,9 +730,18 @@ export function syncWebgl2WorldResources({
 			}),
 	);
 	const nextDrawUnits: Webgl2WorldDrawUnit[] = [];
-	const nextTerrainTiles: Webgl2TerrainTileResource[] = [];
+	const productOwnedTerrainTileIds = new Set(
+		[...store.terrainTileIdsByProductKey.values()].flatMap((tileIds) => [
+			...tileIds,
+		]),
+	);
+	const nextTerrainTiles: Webgl2TerrainTileResource[] = [
+		...productOwnedTerrainTileIds,
+	]
+		.flatMap((tileId) => store.terrainTilesById.get(tileId) ?? [])
+		.sort((left, right) => left.id.localeCompare(right.id));
 	const retainedDrawUnitIds = new Set<string>();
-	const retainedTerrainTileIds = new Set<string>();
+	const retainedTerrainTileIds = new Set(productOwnedTerrainTileIds);
 	const retainedTextureKeys = new Set<string>();
 	profileBrowserJsScope("webgl2.resource.createOrReuseTerrainTiles", () => {
 		for (const tile of terrainScene.tiles) {
@@ -866,6 +1047,7 @@ export function destroyWebgl2WorldResources(
 	store.drawUnitsById.clear();
 	store.terrainTiles = [];
 	store.terrainTilesById.clear();
+	store.terrainTileIdsByProductKey.clear();
 	store.terrainRenderCandidates = [];
 	store.staticBundleLayerResourceCount = 0;
 	store.structuredInteriorResourceCount = 0;
@@ -972,7 +1154,6 @@ function createOrReuseWebgl2TerrainTile({
 	const id = terrainTileResourceId(tile);
 	const uploadPlan = createTerrainTileUploadPlan({
 		assetState,
-		gl,
 		id,
 		modelMatrix: createTranslationMat4({
 			x: chunkOffset.x + tile.chunkLocalOffset.x,
@@ -995,9 +1176,6 @@ function createOrReuseWebgl2TerrainTile({
 		describeTerrainTileReadinessSignature(previous.readiness) ===
 			describeTerrainTileReadinessSignature(uploadPlan.readiness)
 	) {
-		for (const slice of previous.drawSlices) {
-			destroyWebgl2TerrainTileDrawSlice(slice);
-		}
 		previous.label = tile.label;
 		previous.regionNumber = tile.materialResources.regionNumber;
 		previous.placementKey = placement.chunkKey;
@@ -1007,7 +1185,13 @@ function createOrReuseWebgl2TerrainTile({
 		previous.mesh = tile.mesh;
 		previous.bvhItemKeys = [...bvhBinding.itemKeys];
 		previous.bvhFallbackReason = bvhBinding.fallbackReason;
-		previous.drawSlices = uploadPlan.drawSlices;
+		previous.drawSlices = createOrReuseWebgl2TerrainTileDrawSlices({
+			gl,
+			parentTerrainTileId: id,
+			modelMatrix: uploadPlan.modelMatrix,
+			plans: uploadPlan.drawSlicePlans,
+			previousSlices: previous.drawSlices,
+		});
 		previous.layerPlan = uploadPlan.layerPlan;
 		previous.layerPlanBlockers = uploadPlan.layerPlanBlockers;
 		previous.terrainArtifactTexturePageRefs =
@@ -1028,6 +1212,13 @@ function createOrReuseWebgl2TerrainTile({
 		id,
 		geometry: uploadPlan.geometry,
 	});
+	const drawSlices = createOrReuseWebgl2TerrainTileDrawSlices({
+		gl,
+		parentTerrainTileId: id,
+		modelMatrix: uploadPlan.modelMatrix,
+		plans: uploadPlan.drawSlicePlans,
+		previousSlices: [],
+	});
 	const resource = {
 		id,
 		assetId: tile.assetId,
@@ -1045,7 +1236,7 @@ function createOrReuseWebgl2TerrainTile({
 		mesh: tile.mesh,
 		bvhItemKeys: [...bvhBinding.itemKeys],
 		bvhFallbackReason: bvhBinding.fallbackReason,
-		drawSlices: uploadPlan.drawSlices,
+		drawSlices,
 		layerPlan: uploadPlan.layerPlan,
 		layerPlanBlockers: uploadPlan.layerPlanBlockers,
 		terrainArtifactTexturePageRefs: uploadPlan.terrainArtifactTexturePageRefs,
@@ -1061,15 +1252,133 @@ function createOrReuseWebgl2TerrainTile({
 	return resource;
 }
 
+function createOrReuseWebgl2TerrainTileFromArtifact({
+	gl,
+	store,
+	artifact,
+	renderChunkTransforms,
+}: {
+	gl: WebGL2RenderingContext;
+	store: Webgl2WorldResourceStore;
+	artifact: LandblockTerrainRenderArtifact;
+	renderChunkTransforms: readonly RenderChunkTransform[];
+}): Webgl2TerrainTileResource | null {
+	const placement = deriveLandblockRenderChunkPlacement(artifact.landblockId);
+	const chunkOffset = new Map(
+		renderChunkTransforms.map((transform) => [
+			transform.chunkKey,
+			transform.offset,
+		]),
+	).get(placement.chunkKey);
+	if (!chunkOffset) {
+		return null;
+	}
+	const id = terrainTileResourceId({ assetId: artifact.key });
+	const uploadPlan = createTerrainArtifactResourceUploadPlan({
+		id,
+		modelMatrix: createTranslationMat4(chunkOffset),
+		artifact,
+	});
+	if (uploadPlan.geometry.triangleCount === 0) {
+		return null;
+	}
+	const geometrySignature = describeTerrainTileGeometrySignature(
+		uploadPlan.geometry,
+	);
+	const previous = store.terrainTilesById.get(id);
+	if (
+		previous &&
+		previous.geometrySignature === geometrySignature &&
+		describeTerrainTileReadinessSignature(previous.readiness) ===
+			describeTerrainTileReadinessSignature(uploadPlan.readiness)
+	) {
+		previous.label = formatHex32(artifact.landblockId);
+		previous.regionNumber = artifact.regionNumber;
+		previous.placementKey = placement.chunkKey;
+		previous.modelMatrix = uploadPlan.modelMatrix;
+		previous.readiness = uploadPlan.readiness;
+		previous.dataSource = "worker-landblock-render-artifact";
+		previous.mesh = artifact.mesh;
+		previous.bvhItemKeys = [...artifact.bvhItemKeys];
+		previous.bvhFallbackReason =
+			artifact.bvhItemKeys.length === 0
+				? `terrain artifact ${artifact.key} contains no terrain quad keys`
+				: null;
+		previous.drawSlices = createOrReuseWebgl2TerrainTileDrawSlices({
+			gl,
+			parentTerrainTileId: id,
+			modelMatrix: uploadPlan.modelMatrix,
+			plans: uploadPlan.drawSlicePlans,
+			previousSlices: previous.drawSlices,
+		});
+		previous.layerPlan = uploadPlan.layerPlan;
+		previous.layerPlanBlockers = uploadPlan.layerPlanBlockers;
+		previous.terrainArtifactTexturePageRefs =
+			uploadPlan.terrainArtifactTexturePageRefs;
+		previous.detailPlan = null;
+		previous.texturePageBindings = [];
+		previous.texturePageBlockers = [];
+		previous.oneDrawReadiness = createBlockedTerrainTileOneDrawReadiness([
+			"terrain texture page bindings are unresolved",
+		]);
+		return previous;
+	}
+	if (previous) {
+		destroyWebgl2TerrainTileResource(previous);
+	}
+	const buffers = createWebgl2IndexedGeometryBuffers(gl, {
+		id,
+		geometry: uploadPlan.geometry,
+	});
+	const drawSlices = createOrReuseWebgl2TerrainTileDrawSlices({
+		gl,
+		parentTerrainTileId: id,
+		modelMatrix: uploadPlan.modelMatrix,
+		plans: uploadPlan.drawSlicePlans,
+		previousSlices: [],
+	});
+	const resource = {
+		id,
+		assetId: artifact.key,
+		landblockId: artifact.landblockId,
+		regionNumber: artifact.regionNumber,
+		label: formatHex32(artifact.landblockId),
+		placementKey: placement.chunkKey,
+		geometrySignature,
+		...buffers,
+		vertexCount: uploadPlan.geometry.indices.length,
+		triangleCount: uploadPlan.geometry.triangleCount,
+		modelMatrix: uploadPlan.modelMatrix,
+		readiness: uploadPlan.readiness,
+		dataSource: "worker-landblock-render-artifact",
+		mesh: artifact.mesh,
+		bvhItemKeys: [...artifact.bvhItemKeys],
+		bvhFallbackReason:
+			artifact.bvhItemKeys.length === 0
+				? `terrain artifact ${artifact.key} contains no terrain quad keys`
+				: null,
+		drawSlices,
+		layerPlan: uploadPlan.layerPlan,
+		layerPlanBlockers: uploadPlan.layerPlanBlockers,
+		terrainArtifactTexturePageRefs: uploadPlan.terrainArtifactTexturePageRefs,
+		detailPlan: null,
+		texturePageBindings: [],
+		texturePageBlockers: [],
+		oneDrawReadiness: createBlockedTerrainTileOneDrawReadiness([
+			"terrain texture page bindings are unresolved",
+		]),
+	} satisfies Webgl2TerrainTileResource;
+	store.terrainTilesById.set(id, resource);
+	return resource;
+}
+
 function createTerrainTileUploadPlan({
 	assetState,
-	gl,
 	id,
 	modelMatrix,
 	tile,
 }: {
 	assetState: AssetChannelState;
-	gl: WebGL2RenderingContext;
 	id: string;
 	modelMatrix: RenderMat4;
 	tile: TerrainSceneModel["tiles"][number];
@@ -1079,12 +1388,11 @@ function createTerrainTileUploadPlan({
 	geometry: StagedWorldIndexedGeometry | TerrainTileLayerGeometry;
 	layerPlan: TerrainTileLayerPlan | null;
 	layerPlanBlockers: readonly string[];
-	drawSlices: Webgl2TerrainTileDrawSliceResource[];
+	drawSlicePlans: readonly TerrainTileDrawSliceUploadPlan[];
 	terrainArtifactTexturePageRefs: readonly TerrainRenderTexturePageRef[];
 } {
 	if (tile.terrainArtifact) {
 		return createTerrainArtifactUploadPlan({
-			gl,
 			id,
 			modelMatrix,
 			tile,
@@ -1105,17 +1413,6 @@ function createTerrainTileUploadPlan({
 		layerPlan && layerPlan.blockers.length === 0
 			? buildTerrainTileLayerGeometry({ mesh: tile.mesh, plan: layerPlan })
 			: null;
-	const drawSlices = drawSlicePlans.flatMap((slicePlan) =>
-		createWebgl2TerrainTileDrawSlice({
-			gl,
-			id: `${id}/${slicePlan.id}`,
-			modelMatrix,
-			parentTerrainTileId: id,
-			reason: slicePlan.reason,
-			mesh: tile.mesh,
-			slicePlan,
-		}),
-	);
 	return {
 		readiness,
 		modelMatrix,
@@ -1126,39 +1423,68 @@ function createTerrainTileUploadPlan({
 			planSet,
 			layerPlan,
 		}),
-		drawSlices,
+		drawSlicePlans: drawSlicePlans.flatMap((slicePlan) =>
+			createTerrainDrawSliceUploadPlans({
+				id: `${id}/${slicePlan.id}`,
+				mesh: tile.mesh,
+				reason: slicePlan.reason,
+				slicePlan,
+			}),
+		),
 		terrainArtifactTexturePageRefs: [],
 	};
 }
 
 function createTerrainArtifactUploadPlan({
-	gl,
 	id,
 	modelMatrix,
 	tile,
 	artifact,
 }: {
-	gl: WebGL2RenderingContext;
 	id: string;
 	modelMatrix: RenderMat4;
 	tile: TerrainSceneModel["tiles"][number];
 	artifact: LandblockTerrainRenderArtifact;
 }): ReturnType<typeof createTerrainTileUploadPlan> {
 	const readiness = deriveWebgl2TerrainTileReadiness(tile);
+	return createTerrainArtifactResourceUploadPlan({
+		id,
+		modelMatrix,
+		artifact,
+		readiness,
+	});
+}
+
+function createTerrainArtifactResourceUploadPlan({
+	id,
+	modelMatrix,
+	artifact,
+	readiness = deriveWebgl2TerrainArtifactReadiness(artifact),
+}: {
+	id: string;
+	modelMatrix: RenderMat4;
+	artifact: LandblockTerrainRenderArtifact;
+	readiness?: Webgl2TerrainTileReadiness;
+}): {
+	readiness: Webgl2TerrainTileReadiness;
+	modelMatrix: RenderMat4;
+	geometry: StagedWorldIndexedGeometry | TerrainTileLayerGeometry;
+	layerPlan: TerrainTileLayerPlan | null;
+	layerPlanBlockers: readonly string[];
+	drawSlicePlans: readonly TerrainTileDrawSliceUploadPlan[];
+	terrainArtifactTexturePageRefs: readonly TerrainRenderTexturePageRef[];
+} {
 	const oneDrawSlice =
 		artifact.drawSlices.length === 1 &&
 		artifact.drawSlices[0]?.slicePlan.layerPlan.blockers.length === 0
 			? artifact.drawSlices[0]
 			: null;
-	const drawSlices = oneDrawSlice
+	const drawSlicePlans = oneDrawSlice
 		? []
 		: artifact.drawSlices.flatMap((slice) =>
-				createWebgl2TerrainTileDrawSliceFromArtifact({
-					gl,
+				createTerrainDrawSliceUploadPlansFromArtifact({
 					id: `${id}/${slice.slicePlan.id}`,
-					modelMatrix,
-					parentTerrainTileId: id,
-					mesh: tile.mesh,
+					mesh: artifact.mesh,
 					slice,
 				}),
 			);
@@ -1175,28 +1501,33 @@ function createTerrainArtifactUploadPlan({
 			oneDrawSlice?.slicePlan.layerPlan.blockers ??
 			artifact.layerPlan?.blockers ??
 			fallbackBlockers,
-		drawSlices,
+		drawSlicePlans,
 		terrainArtifactTexturePageRefs: artifact.texturePageRefs,
 	};
 }
 
-function createWebgl2TerrainTileDrawSlice({
-	gl,
+interface TerrainTileDrawSliceUploadPlan {
+	id: string;
+	reason: string;
+	geometrySignature: string;
+	geometry: TerrainTileLayerGeometry;
+	vertexCount: number;
+	triangleCount: number;
+	bvhItemKeys: RenderBvhItemKey[];
+	layerPlan: TerrainTileLayerPlan;
+}
+
+function createTerrainDrawSliceUploadPlans({
 	id,
-	modelMatrix,
-	parentTerrainTileId,
-	reason,
 	mesh,
+	reason,
 	slicePlan,
 }: {
-	gl: WebGL2RenderingContext;
 	id: string;
-	modelMatrix: RenderMat4;
-	parentTerrainTileId: string;
-	reason: string;
 	mesh: TerrainSceneModel["tiles"][number]["mesh"];
+	reason: string;
 	slicePlan: TerrainTileDrawSlicePlan;
-}): Webgl2TerrainTileDrawSliceResource[] {
+}): TerrainTileDrawSliceUploadPlan[] {
 	const geometry = buildTerrainTileLayerGeometry({
 		mesh,
 		plan: slicePlan.layerPlan,
@@ -1204,92 +1535,140 @@ function createWebgl2TerrainTileDrawSlice({
 	if (geometry.triangleCount === 0) {
 		return [];
 	}
-	const buffers = createWebgl2IndexedGeometryBuffers(gl, {
-		id,
-		geometry,
-	});
-	if (!buffers.uvBuffer || !buffers.layerSlotBuffer) {
-		throw new Error(
-			`Terrain draw slice ${id} was created without layer geometry buffers.`,
-		);
-	}
 	const bvhItemKeys = deriveTerrainDrawSliceBvhItemKeys({ mesh, slicePlan });
 	return [
 		{
 			id,
-			parentTerrainTileId,
 			reason,
 			geometrySignature: describeTerrainTileGeometrySignature(geometry),
-			...buffers,
-			uvBuffer: buffers.uvBuffer,
-			layerSlotBuffer: buffers.layerSlotBuffer,
+			geometry,
 			vertexCount: geometry.indices.length,
 			triangleCount: geometry.triangleCount,
-			modelMatrix,
 			bvhItemKeys,
 			layerPlan: slicePlan.layerPlan,
-			detailPlan: null,
-			texturePageBindings: [],
-			texturePageBlockers: [],
-			oneDrawReadiness: createBlockedTerrainTileOneDrawReadiness([
-				"terrain draw slice texture page bindings are unresolved",
-			]),
 		},
 	];
 }
 
-function createWebgl2TerrainTileDrawSliceFromArtifact({
-	gl,
+function createTerrainDrawSliceUploadPlansFromArtifact({
 	id,
-	modelMatrix,
-	parentTerrainTileId,
 	mesh,
 	slice,
 }: {
-	gl: WebGL2RenderingContext;
 	id: string;
-	modelMatrix: RenderMat4;
-	parentTerrainTileId: string;
 	mesh: TerrainSceneModel["tiles"][number]["mesh"];
 	slice: TerrainRenderDrawSliceArtifact;
-}): Webgl2TerrainTileDrawSliceResource[] {
+}): TerrainTileDrawSliceUploadPlan[] {
 	if (slice.geometry.triangleCount === 0) {
 		return [];
-	}
-	const buffers = createWebgl2IndexedGeometryBuffers(gl, {
-		id,
-		geometry: slice.geometry,
-	});
-	if (!buffers.uvBuffer || !buffers.layerSlotBuffer) {
-		throw new Error(
-			`Terrain artifact draw slice ${id} was created without layer geometry buffers.`,
-		);
 	}
 	return [
 		{
 			id,
-			parentTerrainTileId,
 			reason: slice.slicePlan.reason,
 			geometrySignature: describeTerrainTileGeometrySignature(slice.geometry),
-			...buffers,
-			uvBuffer: buffers.uvBuffer,
-			layerSlotBuffer: buffers.layerSlotBuffer,
+			geometry: slice.geometry,
 			vertexCount: slice.geometry.indices.length,
 			triangleCount: slice.geometry.triangleCount,
-			modelMatrix,
 			bvhItemKeys: deriveTerrainDrawSliceBvhItemKeys({
 				mesh,
 				slicePlan: slice.slicePlan,
 			}),
 			layerPlan: slice.slicePlan.layerPlan,
-			detailPlan: null,
-			texturePageBindings: [],
-			texturePageBlockers: [],
-			oneDrawReadiness: createBlockedTerrainTileOneDrawReadiness([
-				"terrain draw slice texture page bindings are unresolved",
-			]),
 		},
 	];
+}
+
+function createOrReuseWebgl2TerrainTileDrawSlices({
+	gl,
+	parentTerrainTileId,
+	modelMatrix,
+	plans,
+	previousSlices,
+}: {
+	gl: WebGL2RenderingContext;
+	parentTerrainTileId: string;
+	modelMatrix: RenderMat4;
+	plans: readonly TerrainTileDrawSliceUploadPlan[];
+	previousSlices: readonly Webgl2TerrainTileDrawSliceResource[];
+}): Webgl2TerrainTileDrawSliceResource[] {
+	const previousById = new Map(
+		previousSlices.map((slice) => [slice.id, slice] as const),
+	);
+	const retainedIds = new Set<string>();
+	const slices = plans.map((plan) => {
+		const previous = previousById.get(plan.id);
+		if (previous && previous.geometrySignature === plan.geometrySignature) {
+			retainedIds.add(previous.id);
+			previous.modelMatrix = modelMatrix;
+			previous.reason = plan.reason;
+			previous.vertexCount = plan.vertexCount;
+			previous.triangleCount = plan.triangleCount;
+			previous.bvhItemKeys = [...plan.bvhItemKeys];
+			previous.layerPlan = plan.layerPlan;
+			previous.detailPlan = null;
+			previous.texturePageBindings = [];
+			previous.texturePageBlockers = [];
+			previous.oneDrawReadiness = createBlockedTerrainTileOneDrawReadiness([
+				"terrain draw slice texture page bindings are unresolved",
+			]);
+			return previous;
+		}
+		return createWebgl2TerrainTileDrawSliceFromUploadPlan({
+			gl,
+			parentTerrainTileId,
+			modelMatrix,
+			plan,
+		});
+	});
+	for (const slice of previousSlices) {
+		if (!retainedIds.has(slice.id) && !slices.includes(slice)) {
+			destroyWebgl2TerrainTileDrawSlice(slice);
+		}
+	}
+	return slices;
+}
+
+function createWebgl2TerrainTileDrawSliceFromUploadPlan({
+	gl,
+	parentTerrainTileId,
+	modelMatrix,
+	plan,
+}: {
+	gl: WebGL2RenderingContext;
+	parentTerrainTileId: string;
+	modelMatrix: RenderMat4;
+	plan: TerrainTileDrawSliceUploadPlan;
+}): Webgl2TerrainTileDrawSliceResource {
+	const buffers = createWebgl2IndexedGeometryBuffers(gl, {
+		id: plan.id,
+		geometry: plan.geometry,
+	});
+	if (!buffers.uvBuffer || !buffers.layerSlotBuffer) {
+		throw new Error(
+			`Terrain draw slice ${plan.id} was created without layer geometry buffers.`,
+		);
+	}
+	return {
+		id: plan.id,
+		parentTerrainTileId,
+		reason: plan.reason,
+		geometrySignature: plan.geometrySignature,
+		...buffers,
+		uvBuffer: buffers.uvBuffer,
+		layerSlotBuffer: buffers.layerSlotBuffer,
+		vertexCount: plan.vertexCount,
+		triangleCount: plan.triangleCount,
+		modelMatrix,
+		bvhItemKeys: [...plan.bvhItemKeys],
+		layerPlan: plan.layerPlan,
+		detailPlan: null,
+		texturePageBindings: [],
+		texturePageBlockers: [],
+		oneDrawReadiness: createBlockedTerrainTileOneDrawReadiness([
+			"terrain draw slice texture page bindings are unresolved",
+		]),
+	};
 }
 
 function deriveTerrainDrawSliceBvhItemKeys({
@@ -1425,6 +1804,22 @@ function deriveWebgl2TerrainTileReadiness(
 		return {
 			status: "ready",
 			terrainMaterialAssetId: tile.materialResources.terrainMaterialAssetId,
+		};
+	}
+	return {
+		status: "fallback-debug",
+		reason: "terrain material resources are unresolved",
+	};
+}
+
+function deriveWebgl2TerrainArtifactReadiness(
+	artifact: LandblockTerrainRenderArtifact,
+): Webgl2TerrainTileReadiness {
+	if (artifact.materialResources.status === "ready") {
+		return {
+			status: "ready",
+			terrainMaterialAssetId:
+				artifact.materialResources.terrainMaterialAssetId,
 		};
 	}
 	return {
@@ -1995,11 +2390,8 @@ function createWebgl2TerrainTilePageOverflowDrawSlices({
 			entries: group.entries,
 			groupIndex,
 		});
-		return createWebgl2TerrainTileDrawSlice({
-			gl,
+		return createTerrainDrawSliceUploadPlans({
 			id: `${tile.id}/page-slice/${groupIndex}`,
-			modelMatrix: tile.modelMatrix,
-			parentTerrainTileId: tile.id,
 			reason: group.reason,
 			mesh: tile.mesh,
 			slicePlan: {
@@ -2008,7 +2400,14 @@ function createWebgl2TerrainTilePageOverflowDrawSlices({
 				layerPlan: sliceLayerPlan,
 				pcodes: group.entries.map((entry) => entry.pcode),
 			},
-		});
+		}).map((plan) =>
+			createWebgl2TerrainTileDrawSliceFromUploadPlan({
+				gl,
+				parentTerrainTileId: tile.id,
+				modelMatrix: tile.modelMatrix,
+				plan,
+			}),
+		);
 	});
 }
 

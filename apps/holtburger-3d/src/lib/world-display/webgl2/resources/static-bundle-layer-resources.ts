@@ -11,6 +11,10 @@ import type {
 	VirtualTexturePageUsageBucket,
 } from "../../static-bundle-layer";
 import {
+	formatStaticLandblockProductKey,
+	type StaticLandblockProductKey,
+} from "../../landblock-render-product";
+import {
 	createWebgl2ArrayBuffer,
 	createWebgl2ElementArrayBuffer,
 	createWebgl2Texture2D,
@@ -26,7 +30,14 @@ import {
 import type { TextureFilteringMode } from "../../texture-pages/texture-sampling-policy";
 
 export interface Webgl2StaticBundleLayerResourceStore {
+	productsByKey: Map<string, Webgl2StaticBundleProductResource>;
 	layersByKey: Map<string, Webgl2StaticBundleLayerResource>;
+}
+
+export interface Webgl2StaticBundleProductResource {
+	key: string;
+	signature: string;
+	layerKeys: readonly string[];
 }
 
 export interface Webgl2StaticBundleLayerResource {
@@ -107,8 +118,79 @@ type StaticBundleGeometryArtifact =
 
 export function createWebgl2StaticBundleLayerResourceStore(): Webgl2StaticBundleLayerResourceStore {
 	return {
+		productsByKey: new Map(),
 		layersByKey: new Map(),
 	};
+}
+
+export function commitWebgl2StaticBundleProductResources({
+	gl,
+	store,
+	productKey,
+	layers,
+	textureFilteringMode = "anisotropic-4x",
+	maxAnisotropy = 1,
+}: {
+	gl: WebGL2RenderingContext;
+	store: Webgl2StaticBundleLayerResourceStore;
+	productKey: StaticLandblockProductKey;
+	layers: readonly StaticObjectBundleArtifact[];
+	textureFilteringMode?: TextureFilteringMode;
+	maxAnisotropy?: number;
+}): Webgl2StaticBundleProductResource {
+	const key = formatStaticLandblockProductKey(productKey);
+	const signature = describeStaticBundleProductResourceSignature(layers);
+	const previous = store.productsByKey.get(key);
+	if (previous && previous.signature === signature) {
+		for (const layerKey of previous.layerKeys) {
+			const layer = store.layersByKey.get(layerKey);
+			if (layer) {
+				updateWebgl2StaticBundleLayerTexturePageSamplerPolicy({
+					gl,
+					layer,
+					textureFilteringMode,
+					maxAnisotropy,
+				});
+			}
+		}
+		return previous;
+	}
+	evictWebgl2StaticBundleProductResources({ store, productKey });
+	const layerKeys: string[] = [];
+	for (const layer of layers) {
+		const layerResource = createWebgl2StaticBundleLayerResource({
+			gl,
+			layer,
+			textureFilteringMode,
+			maxAnisotropy,
+		});
+		store.layersByKey.get(layerResource.key)?.dispose();
+		store.layersByKey.set(layerResource.key, layerResource);
+		layerKeys.push(layerResource.key);
+	}
+	const product = { key, signature, layerKeys };
+	store.productsByKey.set(key, product);
+	return product;
+}
+
+export function evictWebgl2StaticBundleProductResources({
+	store,
+	productKey,
+}: {
+	store: Webgl2StaticBundleLayerResourceStore;
+	productKey: StaticLandblockProductKey;
+}): void {
+	const key = formatStaticLandblockProductKey(productKey);
+	const product = store.productsByKey.get(key);
+	if (!product) {
+		return;
+	}
+	for (const layerKey of product.layerKeys) {
+		const layer = store.layersByKey.get(layerKey);
+		layer?.dispose();
+		store.layersByKey.delete(layerKey);
+	}
+	store.productsByKey.delete(key);
 }
 
 export function syncWebgl2StaticBundleLayerResources({
@@ -162,6 +244,7 @@ export function destroyWebgl2StaticBundleLayerResources(
 	for (const resource of store.layersByKey.values()) {
 		resource.dispose();
 	}
+	store.productsByKey.clear();
 	store.layersByKey.clear();
 }
 
@@ -235,6 +318,24 @@ function describeStaticBundleLayerResourceKey(
 	layer: StaticObjectBundleArtifact,
 ): string {
 	return `${layer.key}:${layer.sourceRevision}`;
+}
+
+function describeStaticBundleProductResourceSignature(
+	layers: readonly StaticObjectBundleArtifact[],
+): string {
+	return layers
+		.map((layer) =>
+			[
+				layer.key,
+				layer.sourceRevision,
+				layer.texturePages.map((page) => page.key).join(","),
+				layer.materialRecords.map((record) => record.key).join(","),
+				layer.compactedBatches.map((batch) => batch.key).join(","),
+				layer.directEntries.map((entry) => entry.key).join(","),
+			].join(":"),
+		)
+		.sort()
+		.join("|");
 }
 
 export function createWebgl2StaticBundleTexturePageResource({

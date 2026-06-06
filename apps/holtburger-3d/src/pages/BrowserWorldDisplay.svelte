@@ -724,12 +724,18 @@
 			scheduleCurrentSceneResourceUpdate();
 			return null;
 		}
-		const pick = renderResourceReport.renderSpatialQuery.pickRay(
-			buildSceneCameraRenderRay(cameraFrame, viewportPoint),
-			query.mask,
-			query.ownerKeys,
-			query.acceptItem,
-		);
+		const pick =
+			worldDisplaySurface?.pickAtViewportPoint(
+				viewportPoint,
+				query.mask,
+				query.ownerKeys,
+			) ??
+			renderResourceReport.renderSpatialQuery.pickRay(
+				buildSceneCameraRenderRay(cameraFrame, viewportPoint),
+				query.mask,
+				query.ownerKeys,
+				query.acceptItem,
+			);
 		if (!pick) {
 			pickerResult = null;
 			pickerMissText = `No pick hit at ${formatViewportPoint(viewportPoint)}.`;
@@ -998,8 +1004,6 @@
 			activeRenderAnchor,
 			browserCameraFrame: getEffectiveBrowserCameraFrame(),
 			runtimeAppearancePreviews,
-			staticLandblockRenderProducts:
-				staticLandblockRenderCoordinator.getProductSet(),
 		});
 	}
 

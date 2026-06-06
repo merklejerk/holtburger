@@ -269,7 +269,7 @@ function createWebgl2StaticBundleLayerResource({
 	};
 }
 
-function describeStaticBundleLayerResourceKey(
+export function describeStaticBundleLayerResourceKey(
 	layer: StaticObjectBundleArtifact,
 ): string {
 	return `${layer.key}:${layer.sourceRevision}`;
@@ -734,12 +734,9 @@ function createWebgl2StaticBundleGeometryResource({
 			gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer.buffer);
 			gl.enableVertexAttribArray(0);
 			gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
-			gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer.buffer);
-			gl.enableVertexAttribArray(1);
-			gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
 			gl.bindBuffer(gl.ARRAY_BUFFER, uvBuffer.buffer);
-			gl.enableVertexAttribArray(2);
-			gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 0, 0);
+			gl.enableVertexAttribArray(1);
+			gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
 			gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer.buffer);
 			gl.bindBuffer(gl.ARRAY_BUFFER, null);
 		},

@@ -22,6 +22,7 @@ type WorldRenderCandidateKind =
 	| "terrain-tile"
 	| "structured-interior"
 	| "static"
+	| "static-bundle-layer"
 	| "portal-mask";
 
 export interface WorldRenderCandidate {
@@ -41,6 +42,11 @@ type WorldRenderDraw =
 			kind: "terrain-tile";
 			terrainTileId: string;
 			category: "terrain";
+	  }
+	| {
+			kind: "static-bundle-layer";
+			staticBundleLayerId: string;
+			category: "static";
 	  };
 
 interface SelectedWorldRenderDraw {
@@ -367,6 +373,13 @@ function createWorldRenderDraw(
 			kind: "terrain-tile",
 			terrainTileId: candidate.id,
 			category: "terrain",
+		};
+	}
+	if (candidate.kind === "static-bundle-layer") {
+		return {
+			kind: "static-bundle-layer",
+			staticBundleLayerId: candidate.id,
+			category: "static",
 		};
 	}
 	return {

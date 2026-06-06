@@ -13,6 +13,12 @@ import {
 	formatLandblockOutdoorAssetId,
 } from "../landblocks";
 import type { LandblockRenderProductWorkerResult } from "./landblock-render-product";
+import type { StaticObjectBundleArtifact } from "./static-bundle-layer";
+import type { LandblockTerrainRenderArtifact } from "./terrain-render-artifact";
+import {
+	outdoorStaticBvhItemKey,
+	terrainBvhItemKey,
+} from "./prepared-bvh-visibility";
 import { deriveLandblockRenderChunkPlacement } from "./render-chunks";
 import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
 import {
@@ -157,6 +163,63 @@ describe("deriveRenderBvhVisibilityMetrics", () => {
 		expect(metrics.envCellBvhConsideredCount).toBe(1);
 		expect(metrics.fallbackReasonCount).toBe(0);
 	});
+
+	it("derives terrain BVH visibility from resident product artifacts without terrain scene tiles", () => {
+		const landblockId = 0x0203ffff;
+		const terrainRenderChunk = deriveLandblockRenderChunkPlacement(landblockId);
+
+		const metrics = deriveRenderBvhVisibilityMetrics({
+			assetState: createAssetState([]),
+			terrainScene: createTerrainScene([]),
+			staticRenderableScene: createEmptyStaticRenderableSceneModel(),
+			structuredInteriorScene: createEmptyStructuredInteriorSceneModel(),
+			staticLandblockRenderProducts: createStaticLandblockProductSet([
+				createOutdoorTerrainProductArtifact(landblockId),
+			]),
+			renderChunkTransforms: [
+				{
+					chunkKey: terrainRenderChunk.chunkKey,
+					chunkLandblockId: terrainRenderChunk.chunkLandblockId,
+					offset: { x: 0, y: 0, z: 0 },
+				},
+			],
+			frustum: zFrustum(0, 10),
+			now: steppingClock(),
+		});
+
+		expect(metrics.terrainBvhVisibleItemCount).toBe(1);
+		expect(metrics.terrainBvhTotalItemCount).toBe(2);
+		expect(metrics.fallbackReasonCount).toBe(0);
+	});
+
+	it("derives outdoor static BVH visibility from resident static bundle artifacts", () => {
+		const landblockId = 0x0203ffff;
+		const renderChunk = deriveLandblockRenderChunkPlacement(landblockId);
+
+		const metrics = deriveRenderBvhVisibilityMetrics({
+			assetState: createAssetState([createOutdoorPayload(landblockId)]),
+			terrainScene: createTerrainScene([]),
+			staticRenderableScene: createEmptyStaticRenderableSceneModel(),
+			structuredInteriorScene: createEmptyStructuredInteriorSceneModel(),
+			staticLandblockRenderProducts: createStaticLandblockProductSet([
+				createOutdoorStaticBundleProductArtifact(landblockId),
+			]),
+			renderChunkTransforms: [
+				{
+					chunkKey: renderChunk.chunkKey,
+					chunkLandblockId: renderChunk.chunkLandblockId,
+					offset: { x: 0, y: 0, z: 0 },
+				},
+			],
+			frustum: zFrustum(0, 10),
+			now: steppingClock(),
+		});
+
+		expect(metrics.outdoorStaticBvhVisibleItemCount).toBe(1);
+		expect(metrics.outdoorStaticBvhTotalItemCount).toBe(1);
+		expect(metrics.visibleStaticInstanceKeyCount).toBe(1);
+		expect(metrics.fallbackReasonCount).toBe(0);
+	});
 });
 
 function createStaticLandblockProductSet(
@@ -263,6 +326,140 @@ function createDetailedLandblockProductArtifact({
 		diagnostics: {
 			status: "ready",
 			messages: [],
+		},
+	};
+}
+
+function createOutdoorTerrainProductArtifact(
+	landblockId: number,
+): LandblockRenderProductWorkerResult {
+	return {
+		type: "landblock-render-product-built",
+		jobId: "job:terrain",
+		landblockId,
+		product: "outdoor",
+		requestId: "request:terrain",
+		buildPolicyRevision: "build:v1",
+		texturePagePolicyRevision: "pages:v1",
+		artifacts: [createTerrainArtifact(landblockId)],
+		diagnostics: {
+			status: "ready",
+			messages: [],
+		},
+	};
+}
+
+function createOutdoorStaticBundleProductArtifact(
+	landblockId: number,
+): LandblockRenderProductWorkerResult {
+	return {
+		type: "landblock-render-product-built",
+		jobId: "job:static",
+		landblockId,
+		product: "outdoor",
+		requestId: "request:static",
+		buildPolicyRevision: "build:v1",
+		texturePagePolicyRevision: "pages:v1",
+		artifacts: [createStaticBundleArtifact(landblockId)],
+		diagnostics: {
+			status: "ready",
+			messages: [],
+		},
+	};
+}
+
+function createStaticBundleArtifact(
+	landblockId: number,
+): StaticObjectBundleArtifact {
+	return {
+		artifactKind: "static-object-bundle",
+		key: `static-bundle:${landblockId}`,
+		scope: {
+			kind: "landblock",
+			landblockId,
+			bundleKind: "outdoor-buildings",
+		},
+		landblockId,
+		bundleKind: "outdoor-buildings",
+		sourceRevision: "static:test",
+		rootAssetIds: [],
+		preparedAssetIds: [],
+		renderChunks: [],
+		compactedBatches: [],
+		directEntries: [],
+		materialRecords: [],
+		texturePageRefs: [],
+		texturePages: [],
+		objectRecords: [
+			{
+				objectKey: "object:tree",
+				visibilityKeys: [outdoorStaticBvhItemKey(landblockId, "tree")],
+				sourceAssetId: "gfx-obj/01000001",
+				owningLandblockId: landblockId,
+				owningEnvCellId: null,
+				kind: "scenery",
+			},
+		],
+		diagnostics: {
+			sourceObjectCount: 1,
+			compactedSurfaceCount: 0,
+			directSurfaceCount: 0,
+			skippedSurfaceCount: 0,
+			missingAssetIds: [],
+			skippedReasons: [],
+		},
+	};
+}
+
+function createTerrainArtifact(
+	landblockId: number,
+): LandblockTerrainRenderArtifact {
+	const outdoorPayload = createOutdoorPayload(landblockId);
+	return {
+		type: "landblock-terrain-render-artifact",
+		artifactKind: "terrain",
+		key: `terrain-artifact:${landblockId}`,
+		requestId: "request:terrain",
+		landblockId,
+		regionNumber: 0,
+		assetId: formatLandblockOutdoorAssetId(landblockId),
+		artifactRevision: "terrain-artifact:test",
+		buildPolicyRevision: "build:v1",
+		cpuTexturePagePolicyRevision: "pages:v1",
+		diagnosticRootAssetIds: [],
+		diagnosticPreparedAssetIds: [],
+		mesh: terrainMesh(landblockId),
+		materialResources: createTerrainTile(landblockId).materialResources,
+		blendPlanSignature: null,
+		texturePageRefs: [],
+		layerPlan: null,
+		drawSlices: [],
+		debugFallbackGeometry: {
+			sourceId: 0,
+			vertexCount: 0,
+			triangleCount: 0,
+			positions: [],
+			normals: [],
+			uvs: [],
+			triangles: [],
+			surfaceIds: [],
+			invalidPolygons: [],
+			skippedPolygonCount: 0,
+			bounds: null,
+		},
+		bvh: outdoorPayload.terrain.terrainBvh,
+		bvhItemKeys: outdoorPayload.terrain.terrainBvh.items.map((item) =>
+			terrainBvhItemKey(landblockId, item.quadIndex),
+		),
+		diagnostics: {
+			status: "ready",
+			quadCount: 0,
+			triangleCount: 0,
+			texturePageRefCount: 0,
+			drawSliceCount: 0,
+			materialDiagnostics: [],
+			blendDiagnostics: [],
+			fallbackReasons: [],
 		},
 	};
 }

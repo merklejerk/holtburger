@@ -3228,6 +3228,8 @@ function syncWebgl2TerrainTexturePageResources({
 			width: texturePage.width,
 			height: texturePage.height,
 			placementCount: texturePage.placementCount,
+			pixelStats: texturePage.pixelStats,
+			entryDiagnostics: texturePage.entryDiagnostics,
 		});
 	}
 	for (const [key, texturePage] of texturePagesByKey) {

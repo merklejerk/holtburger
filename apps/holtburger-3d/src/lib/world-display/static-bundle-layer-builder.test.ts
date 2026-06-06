@@ -110,6 +110,9 @@ describe("static bundle layer builder", () => {
 		expect(layer.directEntries).toHaveLength(1);
 		expect(layer.directEntries[0]?.positions).toBeInstanceOf(Float32Array);
 		expect(layer.directEntries[0]?.positions.length).toBeGreaterThan(0);
+		expect(
+			Array.from(layer.directEntries[0]?.positions.slice(0, 3) ?? []),
+		).toEqual([2, 1, 1]);
 		expect(layer.directEntries[0]?.uvs.length).toBeGreaterThan(0);
 		expect(layer.directEntries[0]?.indices.length).toBeGreaterThan(0);
 		expect(
@@ -181,6 +184,36 @@ describe("static bundle layer builder", () => {
 		expect(first.texturePages.map((page) => page.key)).toEqual(
 			second.texturePages.map((page) => page.key),
 		);
+	});
+
+	it("bakes static instance placement and source scale into geometry positions", () => {
+		const landblockId = 0xda55ffff;
+		const job = createBuildJob(landblockId);
+		const preparedAssets = [
+			createOutdoorLandblock(landblockId, [
+				createOutdoorMember("placed", "gfx-obj/01000001", {
+					localPlacement: createPlacement({ x: 10, y: 20, z: 30 }),
+					sourceScale: { x: 2, y: 3, z: 4 },
+				}),
+			]),
+			createRegionRenderProfile(1),
+			createTerrainMaterial(1),
+			createGfxObj("gfx-obj/01000001", "material/08000001", 1),
+			createMaterial("material/08000001", "render-surface/06000001"),
+			createRenderSurface("render-surface/06000001"),
+			createPreparedTexture(0x06000001, "raw", [255, 0, 0, 255]),
+			createPreparedTexture(0x06000001, "detail", [255, 128, 0, 255]),
+		];
+
+		const layer = buildStaticObjectBundleArtifact({
+			job,
+			preparedAssets,
+			policy: createPolicy(),
+		});
+
+		expect(
+			Array.from(layer.compactedBatches[0]?.positions.slice(0, 3) ?? []),
+		).toEqual([12, 34, -17]);
 	});
 
 	it("builds indexed-paletted static material refs and compacted family records", () => {
@@ -476,7 +509,14 @@ function createOutdoorLandblock(
 	});
 }
 
-function createOutdoorMember(instanceId: string, sourceAssetId: string) {
+function createOutdoorMember(
+	instanceId: string,
+	sourceAssetId: string,
+	options: {
+		localPlacement?: ReturnType<typeof createPlacement>;
+		sourceScale?: { x: number; y: number; z: number };
+	} = {},
+) {
 	const x = instanceId === "compactable-0" ? 0 : instanceId === "direct-0" ? 1 : 2;
 	return {
 		kind: "explicit-object" as const,
@@ -484,8 +524,8 @@ function createOutdoorMember(instanceId: string, sourceAssetId: string) {
 		sourceDid: Number.parseInt(sourceAssetId.slice(-8), 16),
 		sourceAssetId,
 		sourceIndex: 0,
-		localPlacement: identityPlacement(),
-		sourceScale: { x: 1, y: 1, z: 1 },
+		localPlacement: options.localPlacement ?? createPlacement({ x, y: 0, z: 0 }),
+		sourceScale: options.sourceScale ?? { x: 1, y: 1, z: 1 },
 		sourceBounds: null,
 		instanceBounds: {
 			min: { x, y: 0, z: 0 },
@@ -835,9 +875,9 @@ function repeatRgba(bytes: readonly number[], pixelCount: number): Uint8Array {
 	return result;
 }
 
-function identityPlacement() {
+function createPlacement(origin: { x: number; y: number; z: number }) {
 	return {
-		origin: { x: 0, y: 0, z: 0 },
+		origin,
 		orientation: { w: 1, x: 0, y: 0, z: 0 },
 	};
 }

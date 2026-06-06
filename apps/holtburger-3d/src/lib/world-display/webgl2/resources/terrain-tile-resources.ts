@@ -15,6 +15,10 @@ import type {
 	Webgl2Texture2DResource,
 	Webgl2VertexArrayResource,
 } from "../../webgl2-gl";
+import type {
+	TexturePageEntryDiagnostic,
+	TexturePagePixelStats,
+} from "./texture-page-upload";
 
 export type Webgl2TerrainTileReadiness =
 	| {
@@ -99,6 +103,8 @@ export interface Webgl2TerrainTexturePageResource {
 	width: number;
 	height: number;
 	placementCount: number;
+	pixelStats: TexturePagePixelStats;
+	entryDiagnostics: readonly TexturePageEntryDiagnostic[];
 }
 
 export interface Webgl2TerrainTileDetailPlan {

@@ -2031,7 +2031,7 @@ Tasks:
 Progress:
 
 - Added a runtime-toggleable browser JS profiler exposed as `window.holtburgerJsProfiler` and
-  `?holtburgerJsProfile=1`, plus a Debug-tab start/flush button. Profiling no longer persists
+  `?jsProfile=1`, plus a Debug-tab start/flush button. Profiling no longer persists
   across reloads.
 - Instrumented the first M5A loading and frame scopes:
   - asset interest-key creation, coverage request planning, bootstrap/streaming batches, asset

@@ -12,6 +12,11 @@ import {
 	type Webgl2TerrainTexturePageResource,
 	type Webgl2TerrainTileTexturePageBinding,
 } from "../resources/terrain-tile-resources";
+import {
+	logTemporaryRenderRegressionDiagnostic,
+	readTemporaryRenderRegressionDiagnostics,
+} from "../../render-regression-diagnostics";
+import type { TerrainBlendTextureRef } from "../../terrain-blend-plan";
 import { applyOpaqueCompactedFamilyRenderState } from "./family-render-state";
 
 const WEBGL2_TERRAIN_FAMILY_MAX_LAYER_ENTRIES = 8;
@@ -58,6 +63,8 @@ export interface Webgl2TerrainFamilySubmitMetrics {
 type Webgl2TerrainFamilyDrawableResource =
 	| Webgl2TerrainTileResource
 	| Webgl2TerrainTileDrawSliceResource;
+
+let lastTerrainFamilySubmitDiagnosticSignature = "";
 
 export function createWebgl2TerrainFamilyWorldProgram(
 	gl: WebGL2RenderingContext,
@@ -140,6 +147,7 @@ export function submitWebgl2TerrainFamilyTiles({
 		cameraPosition.z,
 	);
 	const modelViewProjection = new Float32Array(16);
+	const submittedDiagnostics: Record<string, unknown>[] = [];
 	for (const tile of terrainTiles) {
 		const submitPlan = createTerrainTileFamilySubmitPlan(tile);
 		if (!submitPlan) {
@@ -149,6 +157,9 @@ export function submitWebgl2TerrainFamilyTiles({
 			].slice(0, 8);
 			continue;
 		}
+		submittedDiagnostics.push(
+			describeTerrainFamilySubmittedDrawable(tile, submitPlan),
+		);
 		if (
 			stateCache.bindTexture2D(0, submitPlan.colorAtlasTexture.texture.texture)
 		) {
@@ -195,6 +206,11 @@ export function submitWebgl2TerrainFamilyTiles({
 		gl.uniformMatrix4fv(program.uniforms.uModelMatrix, false, tile.modelMatrix);
 		gl.drawElements(gl.TRIANGLES, tile.vertexCount, tile.indexType, 0);
 	}
+	logTerrainFamilySubmitDiagnostics({
+		inputCount: terrainTiles.length,
+		metrics,
+		submittedDiagnostics,
+	});
 	return metrics;
 }
 
@@ -238,6 +254,173 @@ function singleTerrainTexturePage(
 		),
 	];
 	return pages.length === 1 ? (pages[0] ?? null) : null;
+}
+
+function logTerrainFamilySubmitDiagnostics({
+	inputCount,
+	metrics,
+	submittedDiagnostics,
+}: {
+	inputCount: number;
+	metrics: Webgl2TerrainFamilySubmitMetrics;
+	submittedDiagnostics: readonly Record<string, unknown>[];
+}): void {
+	const diagnostics = readTemporaryRenderRegressionDiagnostics();
+	if (!diagnostics.enabled) {
+		return;
+	}
+	const signature = JSON.stringify({
+		inputCount,
+		draws: submittedDiagnostics.map((entry) => ({
+			id: entry.id,
+			bindings: entry.bindings,
+		})),
+	});
+	if (signature === lastTerrainFamilySubmitDiagnosticSignature) {
+		return;
+	}
+	lastTerrainFamilySubmitDiagnosticSignature = signature;
+	logTemporaryRenderRegressionDiagnostic(
+		"terrain-family-submit",
+		{
+			inputCount,
+			shaderDrawCallCount: metrics.shaderDrawCallCount,
+			submittedTileCount: metrics.submittedTileCount,
+			submittedTriangleCount: metrics.submittedTriangleCount,
+			fallbackSamples: metrics.fallbackSamples,
+			submitted: submittedDiagnostics,
+		},
+		diagnostics,
+	);
+}
+
+function describeTerrainFamilySubmittedDrawable(
+	tile: Webgl2TerrainFamilyDrawableResource,
+	submitPlan: NonNullable<ReturnType<typeof createTerrainTileFamilySubmitPlan>>,
+): Record<string, unknown> {
+	return {
+		id: tile.id,
+		parentTerrainTileId:
+			"parentTerrainTileId" in tile ? tile.parentTerrainTileId : null,
+		reason: "reason" in tile ? tile.reason : "one-draw tile",
+		landblockId: "landblockId" in tile ? tile.landblockId : null,
+		triangleCount: tile.triangleCount,
+		layerEntries: describeTerrainLayerEntries(tile),
+		bindings: tile.texturePageBindings.map(describeTerrainTextureBinding),
+		submitTextures: {
+			color: describeTerrainTexturePage(submitPlan.colorAtlasTexture),
+			mask: describeTerrainTexturePage(submitPlan.maskAtlasTexture),
+			detail: submitPlan.detailAtlasTexture
+				? describeTerrainTexturePage(submitPlan.detailAtlasTexture)
+				: null,
+		},
+	};
+}
+
+function describeTerrainLayerEntries(
+	tile: Webgl2TerrainFamilyDrawableResource,
+): Record<string, unknown>[] {
+	return (
+		tile.layerPlan?.layerEntries.map((entry) => ({
+			slot: entry.slot,
+			pcode: entry.pcode,
+			colorRefCount: entry.colorRefCount,
+			maskRefCount: entry.maskRefCount,
+			base: describeTerrainTextureRef(entry.plan.base),
+			overlays: entry.plan.overlays.map((overlay) => ({
+				terrain: describeTerrainTextureRef(overlay.terrain),
+				alpha: describeTerrainTextureRef(overlay.alpha),
+				rotation: overlay.rotation,
+			})),
+			roads: entry.plan.roads.map((road) => ({
+				road: describeTerrainTextureRef(road.road),
+				alpha: describeTerrainTextureRef(road.alpha),
+				rotation: road.rotation,
+			})),
+			allRoad: entry.plan.allRoad,
+		})) ?? []
+	);
+}
+
+function describeTerrainTextureRef(
+	ref: TerrainBlendTextureRef,
+): Record<string, unknown> {
+	return {
+		role: ref.role,
+		textureAssetId: ref.textureAssetId,
+		renderSurfaceId: ref.renderSurface.renderSurfaceId,
+		formatRaw: ref.renderSurface.formatRaw,
+		size: [ref.renderSurface.width, ref.renderSurface.height],
+		wrap: ref.wrap,
+		tiling: ref.tiling,
+		atlasEntryKey: describeTerrainBlendTextureAtlasEntryKey(ref),
+	};
+}
+
+function describeTerrainTextureBinding(
+	binding: Webgl2TerrainTileTexturePageBinding,
+): Record<string, unknown> {
+	const sourceEntry =
+		binding.texturePage?.entryDiagnostics?.find(
+			(entry) => entry.atlasEntryKey === binding.atlasEntryKey,
+		) ?? null;
+	return {
+		family: binding.family,
+		atlasEntryKey: binding.atlasEntryKey,
+		textureIndex: binding.textureIndex,
+		rect: binding.rect,
+		texturePage: binding.texturePage
+			? describeTerrainTexturePage(binding.texturePage)
+			: null,
+		sourceEntry: sourceEntry
+			? {
+					renderSurfaceId: sourceEntry.renderSurfaceId,
+					preparedTextureAssetId: sourceEntry.preparedTextureAssetId ?? null,
+					sourceFormatRaw: sourceEntry.sourceFormatRaw,
+					size: [sourceEntry.width, sourceEntry.height],
+					byteLength: sourceEntry.byteLength,
+					pixelStats: describePixelStats(sourceEntry.pixelStats),
+				}
+			: null,
+	};
+}
+
+function describeTerrainTexturePage(
+	texturePage: Webgl2TerrainTexturePageResource,
+): Record<string, unknown> {
+	return {
+		key: texturePage.key,
+		family: texturePage.family,
+		textureIndex: texturePage.textureIndex,
+		size: [texturePage.width, texturePage.height],
+		placementCount: texturePage.placementCount,
+		pixelStats: describePixelStats(texturePage.pixelStats),
+	};
+}
+
+function describePixelStats(
+	stats: Webgl2TerrainTexturePageResource["pixelStats"] | undefined,
+): Record<string, unknown> | null {
+	if (!stats) {
+		return null;
+	}
+	return {
+		pixelCount: stats.pixelCount,
+		blackRgbPixelCount: stats.blackRgbPixelCount,
+		blackRgbRatio: ratio(stats.blackRgbPixelCount, stats.pixelCount),
+		transparentPixelCount: stats.transparentPixelCount,
+		transparentRatio: ratio(stats.transparentPixelCount, stats.pixelCount),
+		nonOpaquePixelCount: stats.nonOpaquePixelCount,
+		nonOpaqueRatio: ratio(stats.nonOpaquePixelCount, stats.pixelCount),
+		minRgb: stats.minRgb,
+		maxRgb: stats.maxRgb,
+		meanRgb: stats.meanRgb,
+		alphaRange: [stats.minAlpha, stats.maxAlpha],
+	};
+}
+
+function ratio(count: number, total: number): number {
+	return total === 0 ? 0 : Math.round((count / total) * 10000) / 10000;
 }
 
 function uploadTerrainLayerUniforms(

@@ -20,6 +20,11 @@ import type {
 	StaticLandblockRenderWorkerRequestMessage,
 	StaticLandblockRenderWorkerResponseMessage,
 } from "../../workers/static-landblock-render-worker";
+import {
+	logTemporaryRenderRegressionDiagnostic,
+	readTemporaryRenderRegressionDiagnostics,
+	type TemporaryRenderRegressionDiagnostics,
+} from "./render-regression-diagnostics";
 
 export interface StaticLandblockRenderWorkerLike {
 	onmessage:
@@ -44,6 +49,7 @@ export interface StaticLandblockRenderWorkerClientOptions {
 	lookupAssetsFn?: BinaryAssetLookupFn;
 	workerFactory?: () => StaticLandblockRenderWorkerLike;
 	maxConcurrentJobs?: number;
+	renderRegressionDiagnostics?: TemporaryRenderRegressionDiagnostics;
 }
 
 interface PendingLandblockRenderRequest {
@@ -52,6 +58,8 @@ interface PendingLandblockRenderRequest {
 	job: LandblockRenderProductWorkerJob;
 	artifactKey: string;
 	identityKey: string;
+	queuedAtMs: number;
+	postedAtMs: number | null;
 	resolve: (result: LandblockRenderProductWorkerResult) => void;
 	reject: (error: Error) => void;
 }
@@ -72,10 +80,14 @@ export class StaticLandblockRenderWorkerClient {
 	private disposed = false;
 	private readonly lookupAssetsFn: BinaryAssetLookupFn;
 	private readonly maxConcurrentJobs: number;
+	private readonly renderRegressionDiagnostics: TemporaryRenderRegressionDiagnostics;
 
 	constructor(options: StaticLandblockRenderWorkerClientOptions = {}) {
 		this.lookupAssetsFn = options.lookupAssetsFn ?? lookupBinaryAssetEnvelopes;
 		this.maxConcurrentJobs = options.maxConcurrentJobs ?? 1;
+		this.renderRegressionDiagnostics =
+			options.renderRegressionDiagnostics ??
+			readTemporaryRenderRegressionDiagnostics();
 		if (!Number.isInteger(this.maxConcurrentJobs) || this.maxConcurrentJobs < 1) {
 			throw new Error(
 				"Static landblock render worker client requires maxConcurrentJobs >= 1.",
@@ -110,7 +122,10 @@ export class StaticLandblockRenderWorkerClient {
 	requestProduct(
 		desired: DesiredLandblockRenderProduct,
 	): Promise<LandblockRenderProductWorkerResult> {
-		const job = createLandblockRenderProductWorkerJob(desired);
+		const job = createLandblockRenderProductWorkerJob(
+			desired,
+			this.renderRegressionDiagnostics.artifactFilter,
+		);
 		const identityKey = formatJobIdentityKey(job);
 		const existing = this.pendingRequestByIdentity.get(identityKey);
 		if (existing) {
@@ -159,6 +174,21 @@ export class StaticLandblockRenderWorkerClient {
 	): void {
 		this.throwIfDisposed();
 		this.pendingRequests.set(requestId, pending);
+		pending.postedAtMs = nowMs();
+		logTemporaryRenderRegressionDiagnostic(
+			"worker-post",
+			{
+				requestId,
+				jobId: job.jobId,
+				landblockId: job.landblockId,
+				product: job.product,
+				artifactFilter: formatArtifactFilterForLog(job.artifactFilter),
+				queuedMs: roundMs(pending.postedAtMs - pending.queuedAtMs),
+				activeRequestCount: this.pendingRequests.size,
+				queuedRequestCount: this.queuedRequests.length,
+			},
+			this.renderRegressionDiagnostics,
+		);
 		try {
 			this.worker.postMessage({
 				type: "run-landblock-render-product-job",
@@ -187,6 +217,8 @@ export class StaticLandblockRenderWorkerClient {
 				job,
 				artifactKey,
 				identityKey,
+				queuedAtMs: nowMs(),
+				postedAtMs: null,
 				resolve,
 				reject,
 			});
@@ -259,6 +291,9 @@ export class StaticLandblockRenderWorkerClient {
 		}
 		this.pendingRequests.delete(message.requestId);
 		if (message.type === "landblock-render-product-job-error") {
+			this.reportWorkerCompletion("worker-error", pending, {
+				message: message.message,
+			});
 			pending.reject(new Error(message.message));
 			this.pumpQueuedRequests();
 			return;
@@ -266,6 +301,9 @@ export class StaticLandblockRenderWorkerClient {
 		if (
 			!this.isLatestResult(pending.job, pending.identityKey, message.result)
 		) {
+			this.reportWorkerCompletion("worker-stale-result", pending, {
+				resultJobId: message.result.jobId,
+			});
 			pending.reject(
 				new Error(
 					`Ignored stale landblock render product result ${message.result.jobId}.`,
@@ -274,8 +312,43 @@ export class StaticLandblockRenderWorkerClient {
 			this.pumpQueuedRequests();
 			return;
 		}
+		this.reportWorkerCompletion("worker-complete", pending, {
+			resultJobId: message.result.jobId,
+			artifactCounts: countResultArtifacts(message.result),
+			diagnosticStatus: message.result.diagnostics.status,
+			diagnosticMessages: message.result.diagnostics.messages.slice(0, 6),
+		});
 		pending.resolve(message.result);
 		this.pumpQueuedRequests();
+	}
+
+	private reportWorkerCompletion(
+		label: string,
+		pending: PendingLandblockRenderRequest,
+		extra: Record<string, unknown>,
+	): void {
+		const completedAtMs = nowMs();
+		logTemporaryRenderRegressionDiagnostic(
+			label,
+			{
+				requestId: pending.requestId,
+				jobId: pending.job.jobId,
+				landblockId: pending.job.landblockId,
+				product: pending.job.product,
+				artifactFilter: formatArtifactFilterForLog(
+					pending.job.artifactFilter,
+				),
+				totalMs: roundMs(completedAtMs - pending.queuedAtMs),
+				workerMs:
+					pending.postedAtMs === null
+						? null
+						: roundMs(completedAtMs - pending.postedAtMs),
+				activeRequestCount: this.pendingRequests.size,
+				queuedRequestCount: this.queuedRequests.length,
+				...extra,
+			},
+			this.renderRegressionDiagnostics,
+		);
 	}
 
 	private isLatestResult(
@@ -298,9 +371,22 @@ export class StaticLandblockRenderWorkerClient {
 		message: StaticLandblockRenderWorkerHostLookupBinaryRequestMessage,
 	): Promise<void> {
 		try {
+			const startedAtMs = nowMs();
 			const envelopes = await profileBrowserJsScopeAsync(
 				"static-landblock-render-worker-client.hostLookupBinary",
 				() => this.lookupAssetsFn(message.requests),
+			);
+			logTemporaryRenderRegressionDiagnostic(
+				"worker-host-lookup",
+				{
+					requestId: message.requestId,
+					requestCount: message.requests.length,
+					durationMs: roundMs(nowMs() - startedAtMs),
+					requestSamples: message.requests
+						.map((request) => request.assetId)
+						.slice(0, 12),
+				},
+				this.renderRegressionDiagnostics,
 			);
 			const workerEnvelopes = envelopes.map((envelope) => ({
 				payload: envelope.payload,
@@ -354,6 +440,7 @@ function formatJobIdentityKey(job: LandblockRenderProductWorkerJob): string {
 		job.requestId,
 		job.buildPolicyRevision,
 		job.texturePagePolicyRevision,
+		formatArtifactFilterForLog(job.artifactFilter),
 	].join(":");
 }
 
@@ -381,4 +468,28 @@ function createWorker(): StaticLandblockRenderWorkerLike {
 
 function toError(error: unknown): Error {
 	return error instanceof Error ? error : new Error(String(error));
+}
+
+function countResultArtifacts(
+	result: LandblockRenderProductWorkerResult,
+): Record<string, number> {
+	const counts: Record<string, number> = {};
+	for (const artifact of result.artifacts) {
+		counts[artifact.artifactKind] = (counts[artifact.artifactKind] ?? 0) + 1;
+	}
+	return counts;
+}
+
+function formatArtifactFilterForLog(
+	artifactFilter: LandblockRenderProductWorkerJob["artifactFilter"],
+): string {
+	return artifactFilter ? artifactFilter.join(",") : "all";
+}
+
+function nowMs(): number {
+	return globalThis.performance?.now() ?? Date.now();
+}
+
+function roundMs(value: number): number {
+	return Math.round(value * 100) / 100;
 }

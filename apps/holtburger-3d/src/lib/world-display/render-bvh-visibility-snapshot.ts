@@ -26,6 +26,8 @@ import {
 } from "./prepared-bvh-bounds";
 import {
 	getDetailedLandblockRenderArtifacts,
+	getLandblockTerrainRenderArtifact,
+	getStaticObjectBundleArtifacts,
 	type DetailedLandblockRenderArtifacts,
 } from "./landblock-render-product";
 import type { RenderFrustum } from "./render-spatial-math";
@@ -112,8 +114,38 @@ export function deriveRenderBvhVisibilitySnapshot(options: {
 		options.staticLandblockRenderProducts,
 		fallbackReasons,
 	);
+	const queriedTerrainLandblockIds = new Set<number>();
+	const queriedOutdoorStaticLandblockIds = new Set<number>();
+
+	for (const artifact of collectTerrainArtifacts(
+		options.staticLandblockRenderProducts,
+	)) {
+		queriedTerrainLandblockIds.add(artifact.landblockId);
+		metrics.terrainBvhTotalItemCount += artifact.bvh.items.length;
+		const transform = findChunkTransform(
+			chunkTransformsByKey,
+			deriveLandblockRenderChunkPlacement(artifact.landblockId),
+			fallbackReasons,
+		);
+		if (!transform) {
+			continue;
+		}
+		mergeVisibilityResult(
+			queryTerrainBvhVisibility({
+				terrainBvh: artifact.bvh,
+				landblockId: artifact.landblockId,
+				frustum: options.frustum,
+				chunkOffset: transform.offset,
+			}),
+			visibleItemKeys,
+			fallbackReasons,
+		);
+	}
 
 	for (const tile of options.terrainScene.tiles) {
+		if (queriedTerrainLandblockIds.has(tile.landblockId)) {
+			continue;
+		}
 		const payload = findPreparedOutdoorPayload(
 			options.assetState,
 			tile.landblockId,
@@ -149,6 +181,42 @@ export function deriveRenderBvhVisibilitySnapshot(options: {
 		options.assetState,
 		options.staticRenderableScene,
 	)) {
+		queriedOutdoorStaticLandblockIds.add(payload.landblockId);
+		metrics.outdoorStaticBvhTotalItemCount +=
+			payload.outdoorBvh?.items.length ?? 0;
+		const transform = findChunkTransform(
+			chunkTransformsByKey,
+			deriveLandblockRenderChunkPlacement(payload.landblockId),
+			fallbackReasons,
+		);
+		if (!transform) {
+			continue;
+		}
+		mergeVisibilityResult(
+			queryOutdoorBvhVisibility({
+				payload,
+				frustum: options.frustum,
+				chunkOffset: transform.offset,
+			}),
+			visibleItemKeys,
+			fallbackReasons,
+		);
+	}
+
+	for (const landblockId of collectOutdoorStaticArtifactLandblockIds(
+		options.staticLandblockRenderProducts,
+	)) {
+		if (queriedOutdoorStaticLandblockIds.has(landblockId)) {
+			continue;
+		}
+		queriedOutdoorStaticLandblockIds.add(landblockId);
+		const payload = findPreparedOutdoorPayload(options.assetState, landblockId);
+		if (!payload) {
+			fallbackReasons.push(
+				`missing outdoor static payload ${formatLandblockOutdoorAssetId(landblockId)}`,
+			);
+			continue;
+		}
 		metrics.outdoorStaticBvhTotalItemCount +=
 			payload.outdoorBvh?.items.length ?? 0;
 		const transform = findChunkTransform(
@@ -265,6 +333,29 @@ export function deriveRenderBvhVisibilitySnapshot(options: {
 		visibleItemKeys,
 		fallbackReasons,
 	};
+}
+
+function collectTerrainArtifacts(
+	artifacts: StaticLandblockRenderProductSet,
+) {
+	return artifacts.artifacts
+		.map((result) => getLandblockTerrainRenderArtifact(result))
+		.filter((artifact) => artifact !== null)
+		.sort((left, right) => left.landblockId - right.landblockId);
+}
+
+function collectOutdoorStaticArtifactLandblockIds(
+	artifacts: StaticLandblockRenderProductSet,
+): number[] {
+	const landblockIds = new Set<number>();
+	for (const result of artifacts.artifacts) {
+		for (const bundle of getStaticObjectBundleArtifacts(result)) {
+			if (bundle.scope.kind === "landblock") {
+				landblockIds.add(bundle.landblockId);
+			}
+		}
+	}
+	return [...landblockIds].sort((left, right) => left - right);
 }
 
 interface DetailedArtifactEnvCellBvhEntry {

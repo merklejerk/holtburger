@@ -10,6 +10,8 @@ import type {
 } from "../assets/types";
 import {
 	createCompactionEligibility,
+	type CompactionAlphaPolicy,
+	type CompactionMaterialFamily,
 	type CompactionMaterialReadiness,
 } from "./compaction/compaction-family-planner";
 import {
@@ -65,6 +67,72 @@ const STATIC_MATERIAL_TEXTURE_USAGES: readonly MaterialTextureUsage[] = [
 	"raw",
 	"detail",
 ];
+const STATIC_MATERIAL_FAMILY_KEY_PREFIX = "static:";
+const STATIC_MATERIAL_ALPHA_POLICY_KEY = "alpha";
+const STATIC_MATERIAL_LEGACY_RGBA_TEXTURE_PAGE_FAMILY_KEY =
+	"rgba-texture-page";
+const STATIC_MATERIAL_LEGACY_INDEXED_PALETTED_FAMILY_KEY =
+	"indexed-paletted";
+
+const STATIC_MATERIAL_FAMILIES = new Set<string>([
+	"flat-constant-color",
+	"textured-opaque",
+	"transparent-blended",
+	"opacity-translucent",
+	"indexed-paletted",
+	"debug-pipeline",
+	"unknown-unsupported",
+	"direct",
+]);
+const STATIC_MATERIAL_ALPHA_POLICIES = new Set<string>([
+	"opaque",
+	"cutout",
+	"transparent-blend",
+	"opacity-translucent",
+	"unknown",
+]);
+
+type StaticMaterialFamilyKind =
+	| CompactionMaterialFamily
+	| "direct"
+	| typeof STATIC_MATERIAL_LEGACY_RGBA_TEXTURE_PAGE_FAMILY_KEY;
+type StaticMaterialSerializedFamilyKind = Exclude<
+	StaticMaterialFamilyKind,
+	typeof STATIC_MATERIAL_LEGACY_RGBA_TEXTURE_PAGE_FAMILY_KEY
+>;
+
+export type StaticMaterialFamilyDescriptor =
+	| {
+			readonly key: string;
+			readonly kind: "texture-page";
+			readonly sourceFamily:
+				| "direct"
+				| "textured-opaque"
+				| "transparent-blended"
+				| "opacity-translucent"
+				| typeof STATIC_MATERIAL_LEGACY_RGBA_TEXTURE_PAGE_FAMILY_KEY;
+			readonly alphaPolicy: CompactionAlphaPolicy | null;
+	  }
+	| {
+			readonly key: string;
+			readonly kind: "indexed-paletted";
+			readonly alphaPolicy: "opaque" | null;
+	  }
+	| {
+			readonly key: string;
+			readonly kind: "unsupported";
+			readonly sourceFamily: Exclude<
+				StaticMaterialFamilyKind,
+				| "direct"
+				| "textured-opaque"
+				| "transparent-blended"
+				| "opacity-translucent"
+				| typeof STATIC_MATERIAL_LEGACY_RGBA_TEXTURE_PAGE_FAMILY_KEY
+			>;
+			readonly alphaPolicy: CompactionAlphaPolicy | null;
+			readonly reason: string;
+	  };
+
 
 export function collectStaticMaterialTextureRoutes(
 	materialAssetIds: readonly string[],
@@ -364,7 +432,93 @@ export function formatStaticMaterialFamilyKey(
 ): string {
 	const family =
 		decision.decision === "compacted" ? decision.material.family : "direct";
-	return `static:${family}:alpha=${decision.material.alphaPolicy}`;
+	return `${STATIC_MATERIAL_FAMILY_KEY_PREFIX}${family}:${STATIC_MATERIAL_ALPHA_POLICY_KEY}=${decision.material.alphaPolicy}`;
+}
+
+export function parseStaticMaterialFamilyKey(
+	familyKey: string,
+): StaticMaterialFamilyDescriptor | null {
+	if (familyKey === STATIC_MATERIAL_LEGACY_RGBA_TEXTURE_PAGE_FAMILY_KEY) {
+		return {
+			key: familyKey,
+			kind: "texture-page",
+			sourceFamily: STATIC_MATERIAL_LEGACY_RGBA_TEXTURE_PAGE_FAMILY_KEY,
+			alphaPolicy: null,
+		};
+	}
+	if (familyKey === STATIC_MATERIAL_LEGACY_INDEXED_PALETTED_FAMILY_KEY) {
+		return {
+			key: familyKey,
+			kind: "indexed-paletted",
+			alphaPolicy: null,
+		};
+	}
+	if (!familyKey.startsWith(STATIC_MATERIAL_FAMILY_KEY_PREFIX)) {
+		return null;
+	}
+	const body = familyKey.slice(STATIC_MATERIAL_FAMILY_KEY_PREFIX.length);
+	const alphaSegment = `:${STATIC_MATERIAL_ALPHA_POLICY_KEY}=`;
+	const alphaSegmentIndex = body.lastIndexOf(alphaSegment);
+	if (alphaSegmentIndex <= 0) {
+		return null;
+	}
+	const family = body.slice(0, alphaSegmentIndex);
+	const alphaPolicy = body.slice(alphaSegmentIndex + alphaSegment.length);
+	if (
+		!STATIC_MATERIAL_FAMILIES.has(family) ||
+		!STATIC_MATERIAL_ALPHA_POLICIES.has(alphaPolicy)
+	) {
+		return null;
+	}
+	return describeStaticMaterialFamilyKey({
+		key: familyKey,
+		family: family as StaticMaterialSerializedFamilyKind,
+		alphaPolicy: alphaPolicy as CompactionAlphaPolicy,
+	});
+}
+
+function describeStaticMaterialFamilyKey(options: {
+	key: string;
+	family: StaticMaterialSerializedFamilyKind;
+	alphaPolicy: CompactionAlphaPolicy;
+}): StaticMaterialFamilyDescriptor {
+	switch (options.family) {
+		case "indexed-paletted":
+			if (options.alphaPolicy !== "opaque") {
+				return {
+					key: options.key,
+					kind: "unsupported",
+					sourceFamily: options.family,
+					alphaPolicy: options.alphaPolicy,
+					reason: `indexed static material family has unsupported alpha policy ${options.alphaPolicy}`,
+				};
+			}
+			return {
+				key: options.key,
+				kind: "indexed-paletted",
+				alphaPolicy: "opaque",
+			};
+		case "direct":
+		case "textured-opaque":
+		case "transparent-blended":
+		case "opacity-translucent":
+			return {
+				key: options.key,
+				kind: "texture-page",
+				sourceFamily: options.family,
+				alphaPolicy: options.alphaPolicy,
+			};
+		case "flat-constant-color":
+		case "debug-pipeline":
+		case "unknown-unsupported":
+			return {
+				key: options.key,
+				kind: "unsupported",
+				sourceFamily: options.family,
+				alphaPolicy: options.alphaPolicy,
+				reason: `static material family ${options.family} is not submitted by the static bundle texture-page path`,
+			};
+	}
 }
 
 function collectIndexedMaterialTextureRoutes(options: {

@@ -50,7 +50,7 @@ describe("static bundle layer WebGL2 resources", () => {
 		expect(gl.bufferUploads.map((upload) => upload.byteLength)).toEqual([
 			36, 36, 24, 6, 36, 36, 24, 12,
 		]);
-		expect(gl.enabledAttributes).toEqual([0, 1, 2, 0, 1, 2]);
+		expect(gl.enabledAttributes).toEqual([0, 1, 0, 1]);
 	});
 
 	it("reuses resident resources until the layer revision changes", () => {

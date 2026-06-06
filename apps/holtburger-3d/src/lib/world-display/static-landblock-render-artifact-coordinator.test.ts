@@ -135,6 +135,35 @@ describe("static landblock render artifact coordinator", () => {
 		});
 		coordinator.dispose();
 	});
+
+	it("can temporarily filter desired products before worker submission", () => {
+		const client = new MockLandblockProductClient();
+		const destination = parseBrowserLocationInput("da55", "manual", "outdoor");
+		expect(destination).not.toBeNull();
+		const coordinator = new StaticLandblockRenderArtifactCoordinator({
+			client,
+			renderRegressionDiagnostics: {
+				enabled: false,
+				productFilter: new Set(["outdoor-env-cells"]),
+				uploadFilter: null,
+			},
+		});
+
+		coordinator.sync({
+			browserDestination: destination,
+			terrainLodRadius: 0,
+			buildingLodRadius: 0,
+			detailLodRadius: 0,
+			envCellLodRadius: 0,
+		});
+
+		expect(client.requests).toHaveLength(1);
+		expect(client.requests[0]).toMatchObject({
+			landblockId: 0xda55ffff,
+			product: "outdoor-env-cells",
+		});
+		coordinator.dispose();
+	});
 });
 
 class MockLandblockProductClient {

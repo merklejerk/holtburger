@@ -1,3 +1,5 @@
+import { readLaunchQueryParam } from "./launch-query-params";
+
 interface BrowserJsProfilerSample {
 	count: number;
 	totalMs: number;
@@ -25,7 +27,7 @@ declare global {
 	}
 }
 
-const PROFILE_QUERY_PARAMS = ["holtburgerProfile", "holtburgerJsProfile"];
+const PROFILE_QUERY_PARAMS = ["profile", "jsProfile"];
 
 const samplesByLabel = new Map<string, BrowserJsProfilerSample>();
 const activeScopes = new Map<number, BrowserJsProfilerActiveScope>();
@@ -181,12 +183,8 @@ function installBrowserJsProfilerControl(): void {
 }
 
 function readInitialEnabledState(): boolean {
-	if (typeof window === "undefined") {
-		return false;
-	}
-	const params = new URLSearchParams(window.location.search);
 	for (const param of PROFILE_QUERY_PARAMS) {
-		const value = params.get(param);
+		const value = readLaunchQueryParam(param);
 		if (value === "1" || value === "true") {
 			return true;
 		}

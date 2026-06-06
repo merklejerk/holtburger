@@ -77,6 +77,44 @@ describe("static landblock render worker", () => {
 		).toEqual(["outdoor-buildings", "outdoor-detail"]);
 	});
 
+	it("can build outdoor terrain without static bundle artifacts", async () => {
+		const landblockId = 0xda55ffff;
+		const lookup = new Map<string, AssetLookupResponseDto>(
+			[
+				createResponse(
+					formatLandblockOutdoorAssetId(landblockId),
+					createOutdoorPayload(landblockId),
+				),
+				createResponse(
+					formatTerrainMaterialAssetId(1),
+					createTerrainMaterial(),
+				),
+			].map((response) => [response.assetId, response] as const),
+		);
+
+		const result = await runStaticLandblockRenderWorkerJob(
+			createJob("outdoor", ["terrain"]),
+			{
+				async lookupBinaryAssets(requests: readonly AssetLookupRequestDto[]) {
+					return {
+						responses: requests.map((request) => {
+							const response = lookup.get(request.assetId);
+							if (!response) {
+								throw new Error(`Missing test response ${request.assetId}.`);
+							}
+							return response;
+						}),
+					};
+				},
+			},
+		);
+
+		expect(getLandblockTerrainRenderArtifact(result)?.landblockId).toBe(
+			landblockId,
+		);
+		expect(getStaticObjectBundleArtifacts(result)).toEqual([]);
+	});
+
 	it("builds an outdoor-env-cells product without loading outdoor roots", async () => {
 		const landblockId = 0xda55ffff;
 		const lookup = new Map<string, AssetLookupResponseDto>(
@@ -339,10 +377,11 @@ describe("static landblock render worker", () => {
 
 function createJob(
 	product: LandblockRenderProductWorkerJob["product"] = "outdoor-env-cells",
+	artifactFilter: LandblockRenderProductWorkerJob["artifactFilter"] = null,
 ): LandblockRenderProductWorkerJob {
 	return {
 		type: "build-landblock-render-product",
-		jobId: `landblock-render-product:3663069183:${product}:build:v1:texture-pages:v1`,
+		jobId: `landblock-render-product:3663069183:${product}:build:v1:texture-pages:v1:artifacts:${artifactFilter?.join(",") ?? "all"}`,
 		landblockId: 0xda55ffff,
 		product,
 		requestId: "request:worker",
@@ -356,6 +395,7 @@ function createJob(
 			},
 			terrainMaxLayerEntries: 8,
 		},
+		artifactFilter,
 	};
 }
 

@@ -27,7 +27,7 @@ import {
 	type TerrainTileLayerGeometry,
 	type TerrainTileLayerPlan,
 } from "./terrain-tile-plan";
-import type { StagedWorldIndexedGeometry } from "./staged-world-geometry";
+import type { RenderIndexedGeometry } from "./indexed-render-geometry";
 
 interface TerrainRenderArtifactBuildPolicy {
 	buildPolicyRevision: string;
@@ -61,7 +61,7 @@ export interface LandblockTerrainRenderArtifact {
 	texturePageRefs: readonly TerrainRenderTexturePageRef[];
 	layerPlan: TerrainTileLayerPlan | null;
 	drawSlices: readonly TerrainRenderDrawSliceArtifact[];
-	debugFallbackGeometry: StagedWorldIndexedGeometry;
+	debugFallbackGeometry: RenderIndexedGeometry;
 	bvh: PreparedTerrainBvh;
 	bvhItemKeys: readonly RenderBvhItemKey[];
 	diagnostics: TerrainRenderArtifactDiagnostics;

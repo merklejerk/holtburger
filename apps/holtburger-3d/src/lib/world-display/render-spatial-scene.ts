@@ -26,7 +26,7 @@ import {
 	renderBoundsFromPoints,
 	transformRenderBounds,
 } from "./render-spatial-math";
-import { buildStaticRenderablePartMatrix } from "./staged-world-assembly";
+import { buildStaticRenderablePartMatrix } from "./static-renderable-placement";
 import {
 	isPreparedGfxObjAsset,
 	type StaticRenderablePart,

@@ -47,9 +47,11 @@ import {
 	type Webgl2SceneDomainTargetSet,
 } from "./webgl2-scene-domain-targets";
 import {
+	commitWebgl2TransitionPortalProductMaskResources,
 	commitWebgl2TerrainProductResultResources,
 	createWebgl2WorldResourceStore,
 	destroyWebgl2WorldResources,
+	evictWebgl2TransitionPortalProductMaskResources,
 	evictWebgl2TerrainProductResources,
 	refreshWebgl2StaticLandblockProductResourceCounters,
 	syncWebgl2WorldResources,
@@ -119,7 +121,7 @@ import {
 	isPreparedGfxObjAsset,
 	type StaticRenderablePart,
 } from "./static-renderables";
-import { buildStaticRenderablePartMatrix } from "./staged-world-assembly";
+import { buildStaticRenderablePartMatrix } from "./static-renderable-placement";
 import type {
 	WorldDisplayRenderer,
 	WorldDisplayRendererOptions,
@@ -827,6 +829,20 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				detailTexturesEnabled,
 			});
 		}
+		commitWebgl2TransitionPortalProductMaskResources({
+			gl: currentResources.gl,
+			store: currentResources.worldStore,
+			productKey,
+			transitionPortalModel:
+				deriveTransitionPortalCandidatesFromLandblockArtifacts({
+					artifacts: createSingleProductSet(result),
+					activeLandblockIds: [result.landblockId],
+				}) ?? createEmptyTransitionPortalCandidateModel(),
+			renderChunkTransforms,
+			assetState,
+			materialTextureCapabilities: currentResources.materialTextureCapabilities,
+			textureFilteringMode,
+		});
 		refreshWebgl2StaticLandblockProductResourceCounters(
 			currentResources.worldStore,
 		);
@@ -845,6 +861,10 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		});
 		evictWebgl2StructuredInteriorProductResources({
 			store: currentResources.worldStore.structuredInteriorResources,
+			productKey,
+		});
+		evictWebgl2TransitionPortalProductMaskResources({
+			store: currentResources.worldStore,
 			productKey,
 		});
 		evictWebgl2TerrainProductResources({
@@ -2107,7 +2127,6 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				assetState,
 				terrainScene,
 				staticRenderableScene,
-				transitionPortalModel,
 				renderChunkTransforms,
 				rendererResourceGraph: options.rendererResourceGraph,
 				materialTextureCapabilities:
@@ -2748,6 +2767,18 @@ function commitProductToSet(
 		artifacts: [...artifacts, result],
 		residentCount: artifacts.length + 1,
 		committedResultCount: productSet.committedResultCount + 1,
+	};
+}
+
+function createSingleProductSet(
+	result: LandblockRenderProductWorkerResult,
+): StaticLandblockRenderProductSet {
+	return {
+		...createEmptyStaticLandblockRenderProductSet(),
+		artifacts: [result],
+		desiredCount: 1,
+		residentCount: 1,
+		committedResultCount: 1,
 	};
 }
 

@@ -376,11 +376,11 @@
 			debug.directTexturePageFallbackSamples,
 		);
 		const atlasFailureSamples = summarizeSamples(debug.atlasFailureSamples);
-		const drawGroupTerm = "draw units";
+		const drawGroupTerm = "render resources";
 		const performanceText = renderMetrics?.performance
 			? `${renderMetrics.performance.fps.toFixed(1)} FPS, ${renderMetrics.performance.frameMs.toFixed(1)} ms/frame, ${renderMetrics.performance.renderMs.toFixed(1)} ms render`
 			: "waiting for performance sample";
-		return `Perf ${performanceText}. Diagnosis: ${diagnosis}. Draw pressure ${debug.renderCalls} visible draws from ${candidateBatchCount} candidate ${drawGroupTerm}; static candidates ${debug.staticBvhCandidateBatchCount}${staticCandidateRatio}; retained terrain ${debug.terrainRenderBatchCount}, static ${debug.staticRenderBatchCount}, interiors ${debug.structuredInteriorRenderBatchCount}; retained tris ${debug.renderTriangles}. Terrain family: visible ${debug.visibleTerrainTileCount}, ready ${debug.visibleTerrainOneDrawReadyTileCount}, blocked ${debug.visibleTerrainOneDrawBlockedTileCount}, ready slices ${debug.visibleTerrainDrawSliceReadyCount}, shader draws ${debug.terrainOneDrawShaderDrawCallCount}, submitted tiles ${debug.terrainOneDrawSubmittedTileCount}, submitted slices ${debug.terrainDrawSliceSubmittedCount}, tris ${debug.terrainOneDrawSubmittedTriangleCount}, atlas refs ${debug.terrainAtlasRefCount}, atlas candidates ${debug.terrainAtlasCandidateCount}, atlas blocker tiles ${debug.terrainAtlasBlockerTileCount}${terrainOneDrawBlockerSamples ? `, blockers ${terrainOneDrawBlockerSamples}` : ""}${terrainOneDrawSubmitFallbackSamples ? `, submit fallbacks ${terrainOneDrawSubmitFallbackSamples}` : ""}. Materials ${debug.materialCount}, textures ${debug.textureResourceCount}, indexed textures ${debug.indexedTextureResourceCount}, palettes ${debug.paletteResourceCount}; texture pages ${debug.texturePageBindingCount} bindings (${texturePageBuckets}), atlas failures ${debug.atlasFailureReasonCount}${atlasFailureSamples ? ` (${atlasFailureSamples})` : ""}; direct texture-page draws ${debug.directTexturePageDrawCount} (${debug.directPackedTexturePageDrawCount} packed, ${debug.directSingleEntryTexturePageDrawCount} single-entry)${directTexturePageFallbackSamples ? `, texture-page fallbacks ${directTexturePageFallbackSamples}` : ""}. Static eligibility: candidates ${debug.compactionCandidateDrawUnitCount}, families ${compactionMaterialFamilies}, retained direct families ${compactionRetainedFamilies}, material blockers ${compactionMaterialBlockers}, geometry blockers ${compactionGeometryBlockers}, bypasses ${debug.compactionBypassReasonCount}${compactionBypassSamples ? ` (${compactionBypassSamples})` : ""}. Fallbacks ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}. Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}, transition depth ${debug.transitionPortalMaxDepth}; canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
+		return `Perf ${performanceText}. Diagnosis: ${diagnosis}. Draw pressure ${debug.renderCalls} visible draws from ${candidateBatchCount} candidate ${drawGroupTerm}; static product resources ${debug.staticLandblockProductCount} products, ${debug.staticBundleLayerResourceCount} bundle layers, ${debug.structuredInteriorCellResourceCount} interior cells, ${debug.terrainProductResourceCount} terrain products, ${debug.portalMaskProductDrawUnitCount} portal masks; retained tris ${debug.renderTriangles}. Terrain family: visible ${debug.visibleTerrainTileCount}, ready ${debug.visibleTerrainOneDrawReadyTileCount}, blocked ${debug.visibleTerrainOneDrawBlockedTileCount}, ready slices ${debug.visibleTerrainDrawSliceReadyCount}, shader draws ${debug.terrainOneDrawShaderDrawCallCount}, submitted tiles ${debug.terrainOneDrawSubmittedTileCount}, submitted slices ${debug.terrainDrawSliceSubmittedCount}, tris ${debug.terrainOneDrawSubmittedTriangleCount}, atlas refs ${debug.terrainAtlasRefCount}, atlas candidates ${debug.terrainAtlasCandidateCount}, atlas blocker tiles ${debug.terrainAtlasBlockerTileCount}${terrainOneDrawBlockerSamples ? `, blockers ${terrainOneDrawBlockerSamples}` : ""}${terrainOneDrawSubmitFallbackSamples ? `, submit fallbacks ${terrainOneDrawSubmitFallbackSamples}` : ""}. Materials ${debug.materialCount}, textures ${debug.textureResourceCount}, indexed textures ${debug.indexedTextureResourceCount}, palettes ${debug.paletteResourceCount}; texture pages ${debug.texturePageBindingCount} bindings (${texturePageBuckets}), atlas failures ${debug.atlasFailureReasonCount}${atlasFailureSamples ? ` (${atlasFailureSamples})` : ""}; direct texture-page draws ${debug.directTexturePageDrawCount} (${debug.directPackedTexturePageDrawCount} packed, ${debug.directSingleEntryTexturePageDrawCount} single-entry)${directTexturePageFallbackSamples ? `, texture-page fallbacks ${directTexturePageFallbackSamples}` : ""}. Runtime material batching: candidates ${debug.compactionCandidateDrawUnitCount}, families ${compactionMaterialFamilies}, retained direct families ${compactionRetainedFamilies}, material blockers ${compactionMaterialBlockers}, geometry blockers ${compactionGeometryBlockers}, bypasses ${debug.compactionBypassReasonCount}${compactionBypassSamples ? ` (${compactionBypassSamples})` : ""}. Render blockers ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}. Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}, transition depth ${debug.transitionPortalMaxDepth}; canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
 	});
 	const sceneContextText = $derived(renderResourceReport.sceneContextText);
 	const cameraResidencyText = $derived.by(() => {
@@ -427,8 +427,7 @@
 		const performanceText = renderMetrics?.performance
 			? `${renderMetrics.performance.fps.toFixed(1)} FPS, ${renderMetrics.performance.renderMs.toFixed(1)} ms render`
 			: "waiting for perf";
-		const drawGroupTerm = "draw units";
-		return `${performanceText}; ${debug.renderCalls} visible draw${debug.renderCalls === 1 ? "" : "s"}, ${debug.renderTriangles} retained tris, ${debug.staticRenderBatchCount} static ${drawGroupTerm}, ${debug.structuredInteriorRenderBatchCount} interior ${drawGroupTerm}, ${debug.terrainRenderBatchCount} terrain tile${debug.terrainRenderBatchCount === 1 ? "" : "s"}.`;
+		return `${performanceText}; ${debug.renderCalls} visible draw${debug.renderCalls === 1 ? "" : "s"}, ${debug.renderTriangles} retained tris, static products ${debug.staticLandblockProductCount}, interiors ${debug.structuredInteriorRenderBatchCount}, terrain tiles ${debug.terrainRenderBatchCount}.`;
 	});
 	const rendererBvhSummaryText = $derived.by(() => {
 		const debug = renderMetrics?.debug;
@@ -436,8 +435,7 @@
 			return "Waiting for BVH metrics.";
 		}
 		const fallbackSamples = summarizeSamples(debug.fallbackReasonSamples);
-		const drawGroupTerm = "draw units";
-		return `BVH visible/candidate: terrain ${debug.terrainBvhVisibleItemCount}/${debug.terrainBvhTotalItemCount}, outdoor statics ${debug.outdoorStaticBvhVisibleItemCount}/${debug.outdoorStaticBvhTotalItemCount}, env local ${debug.envCellLocalBvhVisibleItemCount}/${debug.envCellLocalBvhTotalItemCount}. Candidate ${drawGroupTerm}: static ${debug.staticBvhCandidateBatchCount}/${debug.staticRenderBatchCount}, terrain ${debug.terrainBvhCandidateBatchCount}/${debug.terrainRenderBatchCount}, interiors ${debug.structuredInteriorBvhCandidateBatchCount}/${debug.structuredInteriorRenderBatchCount}, overlays ${debug.debugOverlayBvhCandidateBatchCount}/${debug.debugOverlayRenderBatchCount}, portal masks ${debug.portalMaskBvhCandidateBatchCount}/${debug.portalMaskRenderBatchCount}. Terrain submit: visible ${debug.visibleTerrainTileCount}, ready ${debug.visibleTerrainOneDrawReadyTileCount}, blocked ${debug.visibleTerrainOneDrawBlockedTileCount}, shader draws ${debug.terrainOneDrawShaderDrawCallCount}. Keys: static ${debug.visibleStaticInstanceKeyCount}, portals ${debug.visiblePortalKeyCount}, env cells ${debug.envCellBvhConsideredCount}. Fallback ${drawGroupTerm} ${debug.staticBvhFallbackIncludedBatchCount + debug.nonStaticBvhFallbackIncludedBatchCount}; fallback reasons ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}; query ${debug.queryTimeMs.toFixed(2)} ms.`;
+		return `BVH visible/candidate: terrain ${debug.terrainBvhVisibleItemCount}/${debug.terrainBvhTotalItemCount}, outdoor statics ${debug.outdoorStaticBvhVisibleItemCount}/${debug.outdoorStaticBvhTotalItemCount}, env local ${debug.envCellLocalBvhVisibleItemCount}/${debug.envCellLocalBvhTotalItemCount}. Candidate resources: static ${debug.staticBvhCandidateBatchCount}/${debug.staticRenderBatchCount}, terrain ${debug.terrainBvhCandidateBatchCount}/${debug.terrainRenderBatchCount}, interiors ${debug.structuredInteriorBvhCandidateBatchCount}/${debug.structuredInteriorRenderBatchCount}, overlays ${debug.debugOverlayBvhCandidateBatchCount}/${debug.debugOverlayRenderBatchCount}, portal masks ${debug.portalMaskBvhCandidateBatchCount}/${debug.portalMaskRenderBatchCount}. Terrain submit: visible ${debug.visibleTerrainTileCount}, ready ${debug.visibleTerrainOneDrawReadyTileCount}, blocked ${debug.visibleTerrainOneDrawBlockedTileCount}, shader draws ${debug.terrainOneDrawShaderDrawCallCount}. Keys: static ${debug.visibleStaticInstanceKeyCount}, portals ${debug.visiblePortalKeyCount}, env cells ${debug.envCellBvhConsideredCount}. Fallback resources ${debug.staticBvhFallbackIncludedBatchCount + debug.nonStaticBvhFallbackIncludedBatchCount}; fallback reasons ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}; query ${debug.queryTimeMs.toFixed(2)} ms.`;
 	});
 	const runtimeAppearanceStatusText = $derived.by(() => {
 		if (runtimeAppearancePending) {
@@ -526,6 +524,13 @@
 		};
 	});
 	const sceneStatusText = $derived(renderResourceReport.sceneStatusText);
+	const staticLandblockProductText = $derived.by(() => {
+		const debug = renderMetrics?.debug;
+		if (!debug) {
+			return "Static product resource metrics are waiting for the first rendered frame.";
+		}
+		return `${debug.staticLandblockProductCount} resident product${debug.staticLandblockProductCount === 1 ? "" : "s"}; bundles ${debug.staticBundleProductResourceCount} product${debug.staticBundleProductResourceCount === 1 ? "" : "s"}/${debug.staticBundleLayerResourceCount} layer${debug.staticBundleLayerResourceCount === 1 ? "" : "s"}/${debug.staticBundleLayerTexturePageResourceCount} page${debug.staticBundleLayerTexturePageResourceCount === 1 ? "" : "s"}, interiors ${debug.structuredInteriorProductResourceCount} product${debug.structuredInteriorProductResourceCount === 1 ? "" : "s"}/${debug.structuredInteriorCellResourceCount} cell${debug.structuredInteriorCellResourceCount === 1 ? "" : "s"}/${debug.structuredInteriorTexturePageResourceCount} page${debug.structuredInteriorTexturePageResourceCount === 1 ? "" : "s"}/${debug.structuredInteriorMaterialRecordResourceCount} material${debug.structuredInteriorMaterialRecordResourceCount === 1 ? "" : "s"}, terrain ${debug.terrainProductResourceCount} product${debug.terrainProductResourceCount === 1 ? "" : "s"}/${debug.productTerrainTexturePageCount} page${debug.productTerrainTexturePageCount === 1 ? "" : "s"}, portal masks ${debug.portalMaskProductResourceCount} product${debug.portalMaskProductResourceCount === 1 ? "" : "s"}/${debug.portalMaskProductDrawUnitCount} mask${debug.portalMaskProductDrawUnitCount === 1 ? "" : "s"}.`;
+	});
 	const browserPanelSceneRows = $derived<BrowserPanelRow[]>([
 		{ label: "Mode", value: sceneContextText },
 		{ label: "Navigation", value: navigationFocusText },
@@ -534,8 +539,8 @@
 		{ label: "Base scene", value: renderGraphText },
 		{ label: "Landblocks", value: landblockVisibilityText },
 		{
-			label: "Worker artifacts",
-			value: renderResourceReport.staticLandblockRenderArtifactText,
+			label: "Static products",
+			value: staticLandblockProductText,
 		},
 		{ label: "Cells", value: cellVisibilityText },
 		{ label: "Renderer", value: rendererSummaryText },
@@ -1676,13 +1681,13 @@
 	): BrowserPanelSection[] {
 		return [
 			{
-				title: "Static Draw Units",
+				title: "Runtime Appearance Resources",
 				rows:
 					diagnostic.drawUnits.length === 0
 						? [
 								{
 									label: "Status",
-									value: "No staged static draw units matched this render key.",
+									value: "No runtime appearance resources matched this render key.",
 								},
 							]
 						: diagnostic.drawUnits.flatMap((drawUnit, index) => [

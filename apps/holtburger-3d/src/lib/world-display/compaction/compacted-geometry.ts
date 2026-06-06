@@ -1,10 +1,10 @@
 import { createTranslationMat4, type RenderMat4 } from "../render-math";
-import type { StagedWorldIndexedGeometry } from "../staged-world-geometry";
+import type { RenderIndexedGeometry } from "../indexed-render-geometry";
 
 export interface CompactedGeometryBuildDrawUnit {
 	id: string;
 	kind: "static" | "structured-interior" | "portal-mask";
-	geometry: StagedWorldIndexedGeometry;
+	geometry: RenderIndexedGeometry;
 	modelMatrix: RenderMat4;
 	material: {
 		kind: string;

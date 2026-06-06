@@ -4,7 +4,7 @@ import type {
 } from "../assets/types";
 import type { Vec3Dto } from "../host/contracts";
 
-export interface StagedWorldIndexedGeometry {
+export interface RenderIndexedGeometry {
 	signature: string;
 	positions: Float32Array;
 	uvs: Float32Array | null;
@@ -13,14 +13,14 @@ export interface StagedWorldIndexedGeometry {
 	triangleCount: number;
 }
 
-export function buildStagedPolygonSetGeometry(
+export function buildPolygonSetRenderGeometry(
 	renderGeometry: PreparedPolygonSetRenderGeometry,
 	options: {
 		surfaceId?: number | null;
 		materialVariantSignature?: string | null;
 		sourceSignature?: string;
 	} = {},
-): StagedWorldIndexedGeometry {
+): RenderIndexedGeometry {
 	const sourcePositions = toFloat32Array(renderGeometry.positions);
 	const sourceUvs = toFloat32Array(renderGeometry.uvs);
 	const triangles = renderGeometry.triangles.filter(
@@ -53,7 +53,7 @@ export function buildStagedPolygonSetGeometry(
 	}
 
 	return {
-		signature: describeStagedPolygonSetGeometrySignature({
+		signature: describePolygonSetRenderGeometrySignature({
 			renderGeometry,
 			sourceSignature: options.sourceSignature,
 			surfaceId: options.surfaceId,
@@ -68,10 +68,10 @@ export function buildStagedPolygonSetGeometry(
 	};
 }
 
-export function buildStagedPortalApertureGeometry(
+export function buildPortalApertureRenderGeometry(
 	points: readonly Vec3Dto[],
 	sourceSignature = `portal-aperture:points=${points.length}`,
-): StagedWorldIndexedGeometry {
+): RenderIndexedGeometry {
 	const positions = new Float32Array(points.length * 3);
 	for (const [pointIndex, point] of points.entries()) {
 		writeVec3(positions, pointIndex, point);
@@ -97,7 +97,7 @@ export function buildStagedPortalApertureGeometry(
 	};
 }
 
-function describeStagedPolygonSetGeometrySignature({
+function describePolygonSetRenderGeometrySignature({
 	renderGeometry,
 	sourceSignature,
 	surfaceId,

@@ -3,7 +3,7 @@ import type {
 	TerrainBlendPlan,
 	TerrainBlendPlanSet,
 } from "./terrain-blend-plan";
-import type { StagedWorldIndexedGeometry } from "./staged-world-geometry";
+import type { RenderIndexedGeometry } from "./indexed-render-geometry";
 
 const DEFAULT_TERRAIN_TILE_LAYER_LIMIT = 8;
 
@@ -22,7 +22,7 @@ export interface TerrainTileLayerEntry {
 	maskRefCount: number;
 }
 
-export interface TerrainTileLayerGeometry extends StagedWorldIndexedGeometry {
+export interface TerrainTileLayerGeometry extends RenderIndexedGeometry {
 	uvs: Float32Array;
 	layerSlots: Float32Array;
 }
@@ -37,7 +37,7 @@ export interface TerrainTileDrawSlicePlan {
 export function buildTerrainTileFallbackGeometry(
 	mesh: PreparedTerrainMesh,
 	sourceSignature = `terrain:${mesh.landblockId}:fallback`,
-): StagedWorldIndexedGeometry {
+): RenderIndexedGeometry {
 	const positions = new Float32Array(mesh.vertices.length * 3);
 	for (const [vertexIndex, vertex] of mesh.vertices.entries()) {
 		writeVec3(positions, vertexIndex, vertex.x, vertex.z, -vertex.y);

@@ -5,19 +5,13 @@ import {
 	createInitialAssetChannelState,
 	type AssetChannelState,
 	type PreparedAssetRecord,
-	type PreparedEnvCellPayload,
 	type PreparedPolygonSetBspNode,
 } from "../assets/types";
 import {
 	formatEnvCellAssetId,
 	formatLandblockTopologyAssetId,
 } from "../landblocks";
-import type { LandblockRenderProductWorkerResult } from "./landblock-render-product";
-import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
-import {
-	deriveStructuredInteriorSceneModel,
-	deriveStructuredInteriorSceneModelFromLandblockArtifacts,
-} from "./structured-interior-scene";
+import { deriveStructuredInteriorSceneModel } from "./structured-interior-scene";
 
 describe("structured interior scene", () => {
 	it("renders focused env cells from topology membership and env-cell payloads", () => {
@@ -50,32 +44,6 @@ describe("structured interior scene", () => {
 			z: 3,
 		});
 		expect(scene.cells.slice(1).every((cell) => !cell.isFocus)).toBe(true);
-	});
-
-	it("renders structured interiors from resident worker detailed artifacts", () => {
-		const destination = parseBrowserLocationInput("016c0155");
-		const envCell = createPreparedEnvCellAsset(0x016c0155, 0x0d000001)
-			.payload as PreparedEnvCellPayload;
-		const scene = deriveStructuredInteriorSceneModelFromLandblockArtifacts(
-			createProductSet([
-				createDetailedProductResult(0x016cffff, "outdoor-env-cells", envCell),
-			]),
-			destination,
-			{ envCellIds: [0x016c0155], truncated: false },
-		);
-
-		expect(scene?.focusEnvCellId).toBe(0x016c0155);
-		expect(scene?.activeEnvCellIds).toEqual([0x016c0155]);
-		expect(scene?.cells).toHaveLength(1);
-		expect(scene?.cells[0]?.envCellId).toBe(0x016c0155);
-		expect(scene?.cells[0]?.chunkLocalPlacement.origin).toEqual({
-			x: 0x0d000001,
-			y: 0x0d000002,
-			z: 0x0d000003,
-		});
-		expect(scene?.cells[0]?.cellBsp).toBe(envCell.cellBsp);
-		expect(scene?.cells[0]?.renderGeometry).toBe(envCell.renderGeometry);
-		expect(scene?.cacheText).toContain("resident landblock detailed artifact");
 	});
 });
 
@@ -211,90 +179,5 @@ function createLeafBspNode(): PreparedPolygonSetBspNode {
 		solid: 0,
 		sphere: null,
 		polyIds: [],
-	};
-}
-
-function createProductSet(
-	artifacts: readonly LandblockRenderProductWorkerResult[],
-): StaticLandblockRenderProductSet {
-	return {
-		artifacts,
-		desiredCount: artifacts.length,
-		residentCount: artifacts.length,
-		inFlightCount: 0,
-		staleResultCount: 0,
-		committedResultCount: artifacts.length,
-		evictedResultCount: 0,
-		errorCount: 0,
-		latestDesiredIdentityKeys: [],
-	};
-}
-
-function createDetailedProductResult(
-	landblockId: number,
-	product: "outdoor-env-cells" | "dungeon-env-cells",
-	envCell: PreparedEnvCellPayload,
-): LandblockRenderProductWorkerResult {
-	return {
-		type: "landblock-render-product-built",
-		jobId: `job:${landblockId}:${product}`,
-		landblockId,
-		product,
-		requestId: "request",
-		buildPolicyRevision: "build:v1",
-		texturePagePolicyRevision: "pages:v1",
-		artifacts: [
-			{
-				artifactKind: "detailed-landblock",
-				key: `detailed:${landblockId}:${product}`,
-				landblockId,
-				product,
-				requestId: "request",
-				buildPolicyRevision: "build:v1",
-				texturePagePolicyRevision: "pages:v1",
-				selectedEnvCellIds: [envCell.envCellId],
-				structuredInteriorCells: [
-					{
-						key: `structured-interior-cell:${envCell.envCellId}`,
-						envCellId: envCell.envCellId,
-						landblockId,
-						regionNumber: envCell.regionNumber,
-						environmentId: envCell.environmentId,
-						cellStructureId: envCell.cellStructureId,
-						renderChunk: {
-							chunkKey: `structured-cell:${envCell.envCellId}`,
-							chunkLandblockId: landblockId,
-							chunkLocalOffset: { x: 0, y: 0, z: 0 },
-						},
-						localPlacement: envCell.localPlacement,
-						surfaceIds: [],
-						portals: [],
-						portalApertureKeys: [],
-						staticObjectCount: 0,
-						cellBsp: envCell.cellBsp,
-						renderGeometry: envCell.renderGeometry,
-					},
-				],
-				cellStructureMetadata: [],
-				portalLinks: [],
-				portalApertures: [],
-				visibility: {
-					objectVisibilityRecords: [],
-					cellVisibilityRecords: [],
-				},
-				spatial: {
-					envCellResidencyBvh: {
-						coordinateSpace: "landblock-topology-residency",
-						nodes: [],
-						items: [],
-					},
-					envCellLocalBvhs: [],
-				},
-			},
-		],
-		diagnostics: {
-			status: "ready",
-			messages: [],
-		},
 	};
 }

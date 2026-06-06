@@ -29,11 +29,6 @@ import {
 } from "./render-chunks";
 import { WORLD_RENDER_DOMAIN, formatRenderDomainKey } from "./render-domains";
 import { describeRegionDetailRoleSignature } from "./region-detail-overlays";
-import {
-	getDetailedLandblockRenderArtifacts,
-	type DetailedLandblockRenderArtifacts,
-} from "./landblock-render-product";
-import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
 
 export interface LinkedOutdoorInteriorSelection {
 	envCellIds: number[];
@@ -117,110 +112,6 @@ export function deriveStructuredInteriorSceneModel(
 		"Structured interior scene is dormant until the browser destination or outdoor links select env cells.",
 		"Structured interior cache is idle.",
 	);
-}
-
-export function deriveStructuredInteriorSceneModelFromLandblockArtifacts(
-	artifacts: StaticLandblockRenderProductSet,
-	browserDestination: BrowserLocationSelection | null = null,
-	structuredInteriorCoverage: StructuredInteriorCoverage | null = null,
-): StructuredInteriorSceneModel | null {
-	const focusEnvCellId = browserDestinationToInteriorCellId(browserDestination);
-	const detailedArtifacts = artifacts.artifacts
-		.map(getDetailedLandblockRenderArtifacts)
-		.filter((artifact): artifact is DetailedLandblockRenderArtifacts =>
-			Boolean(artifact),
-		);
-	if (detailedArtifacts.length === 0) {
-		return null;
-	}
-
-	const coveredEnvCellIds =
-		structuredInteriorCoverage?.envCellIds ??
-		uniqueSortedNumbers(
-			detailedArtifacts.flatMap((artifact) => artifact.selectedEnvCellIds),
-		);
-	const coveredEnvCellIdSet = new Set(coveredEnvCellIds);
-	const cells = detailedArtifacts
-		.flatMap((artifact) => artifact.structuredInteriorCells)
-		.filter((cell) => coveredEnvCellIdSet.has(cell.envCellId))
-		.map((cell): StructuredInteriorCell => {
-			const renderKey = formatRenderDomainKey(
-				WORLD_RENDER_DOMAIN.interiorCellShell,
-				`env-cell/${formatHex32(cell.envCellId)}`,
-			);
-			return {
-				renderKey,
-				envCellId: cell.envCellId,
-				regionNumber: cell.regionNumber,
-				renderChunk: cell.renderChunk,
-				environmentId: cell.environmentId,
-				cellStructureId: cell.cellStructureId,
-				isFocus: focusEnvCellId !== null && cell.envCellId === focusEnvCellId,
-				chunkLocalPlacement: cell.localPlacement,
-				surfaceIds: [...cell.surfaceIds],
-				portalCount: cell.portals.length,
-				portals: cell.portals.map((portal) => ({
-					portalId: portal.portalId,
-					sourceIndex: portal.sourceIndex,
-					flags: portal.flags,
-					polygonId: portal.polygonId,
-					otherCellId: portal.otherCellId,
-					otherPortalId: portal.otherPortalId,
-					targetEnvCellId:
-						portal.targetEnvCellId ??
-						(cell.envCellId & 0xffff0000) | portal.otherCellId,
-				})),
-				portalApertures: cell.portals.flatMap((portal) =>
-					cell.portalApertureKeys
-						.map((key) =>
-							detailedArtifacts
-								.flatMap((artifact) => artifact.portalApertures)
-								.find(
-									(aperture) =>
-										aperture.key === key &&
-										aperture.portalId === portal.portalId,
-								),
-						)
-						.filter((aperture): aperture is NonNullable<typeof aperture> =>
-							Boolean(aperture),
-						)
-						.map((aperture) => ({
-							portalId: aperture.portalId,
-							sourceIndex: aperture.sourceIndex,
-							polygonId: aperture.polygonId,
-							points: [...aperture.points],
-							plane: aperture.plane,
-						})),
-				),
-				staticObjectCount: cell.staticObjectCount,
-				cellStructure: null,
-				cellBsp: cell.cellBsp,
-				renderGeometry: cell.renderGeometry,
-				debugColorKey: `env-cell:${cell.envCellId}:${cell.environmentId}:${formatHex32(cell.cellStructureId)}`,
-				detailSignature: `worker-artifact:${cell.regionNumber}:${cell.environmentId}`,
-			};
-		})
-		.sort(compareStructuredInteriorCells);
-
-	if (cells.length === 0) {
-		return null;
-	}
-
-	const loadedEnvCellIds = new Set(cells.map((cell) => cell.envCellId));
-	const missingEnvCellAssetIds = coveredEnvCellIds
-		.filter((envCellId) => !loadedEnvCellIds.has(envCellId))
-		.map(formatEnvCellAssetId);
-
-	return {
-		focusEnvCellId,
-		activeEnvCellIds: coveredEnvCellIds,
-		cells,
-		missingEnvCellAssetIds,
-		missingInteriorGeometryAssetIds: [],
-		missingCellStructureKeys: [],
-		statusText: describeStructuredInteriorStatus(cells, focusEnvCellId),
-		cacheText: `Structured interior cache is backed by ${detailedArtifacts.length} resident landblock detailed artifact${detailedArtifacts.length === 1 ? "" : "s"}.`,
-	};
 }
 
 function deriveBrowserFocusedStructuredInteriorSceneModel(
@@ -354,10 +245,6 @@ function compareStructuredInteriorCells(
 	}
 
 	return left.envCellId - right.envCellId;
-}
-
-function uniqueSortedNumbers(values: readonly number[]): number[] {
-	return [...new Set(values)].sort((left, right) => left - right);
 }
 
 function describeStructuredInteriorStatus(

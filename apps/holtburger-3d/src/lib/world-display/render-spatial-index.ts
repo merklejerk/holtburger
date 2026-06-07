@@ -78,6 +78,17 @@ export type RenderSpatialMetadata =
 			detailRoleKind: string;
 			detailSignature: string;
 			textureVelocitySignature: string;
+			artifactCoverage?: {
+				sourcePartHintCount: number;
+				sourcePartIndices: readonly number[];
+				emittedDirectEntryCount: number;
+				emittedCompactedBatchCount: number;
+				emittedGeometryEntryCount: number;
+				emittedDirectTriangleCount: number;
+				emittedCompactedBatchTriangleCount: number;
+				materialRecordKeys: readonly string[];
+				materialFamilyKeys: readonly string[];
+			};
 	  };
 
 export interface RenderSpatialItem {

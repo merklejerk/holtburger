@@ -276,15 +276,14 @@ describe("static landblock render worker", () => {
 			key: `material:${materialAssetId}`,
 			texturePageRefKeys: expect.arrayContaining([
 				`texture:${materialAssetId}:${rawPreparedTextureAssetId}`,
-				`texture:${materialAssetId}:${detailPreparedTextureAssetId}`,
 			]),
 		});
 		expect(
 			detailedArtifacts!.structuredInteriorTexturePageRefs.map(
 				(ref) => ref.sourceAssetId,
 			),
-		).toEqual([detailPreparedTextureAssetId, rawPreparedTextureAssetId]);
-		expect(detailedArtifacts!.structuredInteriorTexturePages).toHaveLength(2);
+		).toEqual([rawPreparedTextureAssetId]);
+		expect(detailedArtifacts!.structuredInteriorTexturePages).toHaveLength(1);
 		expect(
 			detailedArtifacts!.structuredInteriorCells[0]?.materialSlices[0],
 		).toMatchObject({

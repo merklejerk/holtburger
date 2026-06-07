@@ -438,7 +438,54 @@ function deriveStaticBundleSpatialItem(
 			detailRoleKind: "artifact-static",
 			detailSignature: `artifact-static:${bundle.bundleKind}`,
 			textureVelocitySignature: "artifact-static:none",
+			artifactCoverage: deriveStaticBundleObjectCoverage(bundle, objectRecord),
 		},
+	};
+}
+
+function deriveStaticBundleObjectCoverage(
+	bundle: StaticObjectBundleArtifact,
+	objectRecord: StaticObjectBundleArtifact["objectRecords"][number],
+): NonNullable<
+	Extract<RenderSpatialItem["metadata"], { kind: "static-renderable" }>["artifactCoverage"]
+> {
+	const materialRecordsByKey = new Map(
+		bundle.materialRecords.map((record) => [record.key, record]),
+	);
+	const directEntries = bundle.directEntries.filter(
+		(entry) => entry.objectKey === objectRecord.objectKey,
+	);
+	const compactedBatches = bundle.compactedBatches.filter((batch) =>
+		batch.objectKeys.includes(objectRecord.objectKey),
+	);
+	const materialRecordKeys = uniqueSortedStrings([
+		...directEntries.map((entry) => entry.materialRecordKey),
+		...compactedBatches.map((batch) => batch.materialRecordKey),
+	]);
+	const sourcePartHints = objectRecord.partHints ?? [];
+	return {
+		sourcePartHintCount: sourcePartHints.length,
+		sourcePartIndices: [
+			...new Set(sourcePartHints.map((hint) => hint.partIndex)),
+		].sort((left, right) => left - right),
+		emittedDirectEntryCount: directEntries.length,
+		emittedCompactedBatchCount: compactedBatches.length,
+		emittedGeometryEntryCount: directEntries.length + compactedBatches.length,
+		emittedDirectTriangleCount: directEntries.reduce(
+			(total, entry) => total + entry.indices.length / 3,
+			0,
+		),
+		emittedCompactedBatchTriangleCount: compactedBatches.reduce(
+			(total, batch) => total + batch.indices.length / 3,
+			0,
+		),
+		materialRecordKeys,
+		materialFamilyKeys: uniqueSortedStrings(
+			materialRecordKeys.flatMap((key) => {
+				const record = materialRecordsByKey.get(key);
+				return record ? [record.familyKey] : [];
+			}),
+		),
 	};
 }
 
@@ -452,6 +499,10 @@ function staticBundleSpatialKind(
 		return "building";
 	}
 	return "outdoor-static";
+}
+
+function uniqueSortedStrings(values: readonly string[]): string[] {
+	return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 
 function staticRenderablePartSpatialKind(

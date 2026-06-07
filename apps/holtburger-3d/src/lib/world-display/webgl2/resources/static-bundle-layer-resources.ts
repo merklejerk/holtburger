@@ -47,6 +47,11 @@ export interface Webgl2StaticBundleLayerResource {
 	landblockId: number;
 	bundleKind: StaticObjectBundleArtifact["bundleKind"];
 	sourceRevision: string;
+	sourceObjectCount: number;
+	objectRecordCount: number;
+	spatialHintCount: number;
+	diagnosticSkippedSurfaceCount: number;
+	diagnosticSkippedReasons: readonly string[];
 	texturePages: readonly Webgl2StaticBundleTexturePageResource[];
 	texturePagesByKey: ReadonlyMap<string, Webgl2StaticBundleTexturePageResource>;
 	materialRecords: readonly Webgl2StaticBundleMaterialResource[];
@@ -76,6 +81,7 @@ interface Webgl2StaticBundleTexturePageEntryResource {
 export interface Webgl2StaticBundleMaterialResource {
 	key: string;
 	familyKey: string;
+	color: readonly [number, number, number, number];
 	isTransparent: boolean;
 	indexedMaterial?: StaticBundleIndexedMaterialRecord;
 	textureBindings: readonly Webgl2StaticBundleMaterialTextureBinding[];
@@ -250,6 +256,11 @@ function createWebgl2StaticBundleLayerResource({
 		landblockId: layer.landblockId,
 		bundleKind: layer.bundleKind,
 		sourceRevision: layer.sourceRevision,
+		sourceObjectCount: layer.diagnostics.sourceObjectCount,
+		objectRecordCount: layer.objectRecords.length,
+		spatialHintCount: layer.spatialHints?.length ?? 0,
+		diagnosticSkippedSurfaceCount: layer.diagnostics.skippedSurfaceCount,
+		diagnosticSkippedReasons: layer.diagnostics.skippedReasons,
 		texturePages,
 		texturePagesByKey,
 		materialRecords,
@@ -643,6 +654,7 @@ export function createWebgl2StaticBundleMaterialResource({
 	return {
 		key: record.key,
 		familyKey: record.familyKey,
+		color: record.color,
 		isTransparent: record.isTransparent,
 		indexedMaterial: record.indexedMaterial,
 		textureBindings: record.texturePageRefKeys.map((virtualRefKey) =>
@@ -697,8 +709,8 @@ function resolveStaticBundleMaterialTextureBinding({
 		sampleClass: page.sampleClass,
 		indexedFormat: page.indexedFormat,
 		rect: entry.rect,
-		width: ref.width,
-		height: ref.height,
+		width: page.texture.width,
+		height: page.texture.height,
 		wrapS: ref.wrapS,
 		wrapT: ref.wrapT,
 		texture: page.texture,

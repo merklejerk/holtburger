@@ -1,6 +1,9 @@
 import {
 	getPreparedAssetDependencies,
 	type PreparedAssetRecord,
+	type PreparedGfxObjPayload,
+	type PreparedSetupAppearancePayload,
+	type PreparedSetupModelPayload,
 } from "../assets/types";
 import {
 	formatEnvCellAssetId,
@@ -34,6 +37,12 @@ import {
 	transformPointByMat4,
 	type RenderMat4,
 } from "./render-math";
+import { buildPolygonSetRenderGeometry } from "./indexed-render-geometry";
+import {
+	applyRenderGeometryMaterialVariants,
+	type ResolvedMaterialSlot,
+} from "./material-plan";
+import { formatMaterialAssetId } from "./material-signatures";
 import type { AtlasLayoutPolicy } from "./texture-pages/atlas-layout-planner";
 import { buildStaticBundleLayerTexturePages } from "./static-bundle-layer-texture-pages";
 import {
@@ -42,9 +51,11 @@ import {
 	collectStaticPreparedTextureRouteAssetIds,
 	findStaticMaterialTextureRefs,
 	formatStaticMaterialFamilyKey,
+	resolveStaticMaterialColor,
 	resolveStaticIndexedMaterialRecord,
 	resolveStaticMaterialReadiness,
 	type StaticMaterialTextureRoute,
+	type StaticMaterialTextureRouteRequest,
 } from "./static-material-artifacts";
 
 interface StaticBundleLayerBuildPolicy {
@@ -69,8 +80,16 @@ interface StaticBundleSourceObject {
 	bounds: StaticBundleSpatialHint["bounds"] | null;
 	localPlacement: PlacementTransformDto;
 	sourceScale: Vec3Dto;
-	partAssetIds: readonly string[];
-	materialAssetIds: readonly string[];
+	parts: readonly StaticBundleSourcePart[];
+}
+
+interface StaticBundleSourcePart {
+	partIndex: number;
+	gfxObjId: number;
+	gfxObjAssetId: string;
+	materialSlots: readonly ResolvedMaterialSlot[];
+	partPlacements: readonly PlacementTransformDto[];
+	scale: Vec3Dto;
 }
 
 const ZERO_VEC3: Vec3Dto = { x: 0, y: 0, z: 0 };
@@ -81,10 +100,13 @@ interface StaticBundleBuildSurface {
 	object: StaticBundleSourceObject;
 	gfxObjAssetId: string;
 	materialAssetId: string;
+	materialRecordKey: string;
+	materialVariantSignature: string | null;
 	textureRefKeys: readonly string[];
 	compactable: boolean;
 	reason: string | null;
 	familyKey: string;
+	color: readonly [number, number, number, number];
 	isTransparent: boolean;
 	compactionEligibility: CompactionEligibility;
 	positions: Float32Array;
@@ -123,7 +145,7 @@ export function buildStaticObjectBundleArtifact({
 		preparedByAssetId,
 	);
 	const materialTextureRoutes = collectStaticMaterialTextureRoutes(
-		sourceObjects.flatMap((object) => object.materialAssetIds),
+		collectStaticBundleMaterialRouteRequests(sourceObjects),
 		preparedByAssetId,
 	);
 	const texturePageRefs = collectStaticMaterialTexturePageRefs(
@@ -268,11 +290,7 @@ function collectStaticBundleSourceObjects(
 					bounds: member.instanceBounds,
 					localPlacement: member.localPlacement,
 					sourceScale: member.sourceScale,
-					partAssetIds: collectRenderablePartAssetIds(
-						member.sourceAssetId,
-						preparedByAssetId,
-					),
-					materialAssetIds: collectRenderableMaterialAssetIds(
+					parts: collectStaticBundleSourceParts(
 						member.sourceAssetId,
 						preparedByAssetId,
 					),
@@ -301,11 +319,7 @@ function collectStaticBundleSourceObjects(
 			bounds: member.instanceBounds,
 			localPlacement: member.localPlacement,
 			sourceScale: member.sourceScale,
-			partAssetIds: collectRenderablePartAssetIds(
-				member.sourceAssetId,
-				preparedByAssetId,
-			),
-			materialAssetIds: collectRenderableMaterialAssetIds(
+			parts: collectStaticBundleSourceParts(
 				member.sourceAssetId,
 				preparedByAssetId,
 			),
@@ -330,85 +344,322 @@ function buildSpatialHints(
 		.sort((left, right) => left.key.localeCompare(right.key));
 }
 
+function collectStaticBundleSourceParts(
+	sourceAssetId: string,
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>,
+): StaticBundleSourcePart[] {
+	const source = getPreparedAsset(preparedByAssetId, sourceAssetId);
+	if (source.payload.kind === "gfx-obj") {
+		return [
+			createStaticBundleSourcePartFromGfxObj({
+				gfxObj: source.payload,
+				gfxObjAssetId: sourceAssetId,
+				partIndex: 0,
+				partPlacements: [],
+				scale: UNIT_SCALE,
+			}),
+		];
+	}
+	if (source.payload.kind !== "setup-model") {
+		throw new Error(`Static bundle source ${sourceAssetId} is not renderable.`);
+	}
+	const setupModel = source.payload;
+	const setupAppearance = preparedByAssetId.get(
+		formatSetupAppearanceAssetId(setupModel.setupModelId),
+	);
+	if (setupAppearance?.payload.kind === "setup-appearance") {
+		return collectSetupAppearanceBundleSourceParts({
+			setupModel,
+			setupAppearance: setupAppearance.payload,
+			preparedByAssetId,
+		});
+	}
+	return setupModel.parts.flatMap((part) => {
+		const gfxObj = preparedByAssetId.get(part.gfxObjAssetId);
+		if (gfxObj?.payload.kind !== "gfx-obj") {
+			return [];
+		}
+		return [
+			createStaticBundleSourcePartFromGfxObj({
+				gfxObj: gfxObj.payload,
+				gfxObjAssetId: part.gfxObjAssetId,
+				partIndex: part.partIndex,
+				partPlacements: deriveSetupPartDefaultPlacements(
+					setupModel,
+					part.partIndex,
+				),
+				scale: part.scale ?? UNIT_SCALE,
+			}),
+		];
+	});
+}
+
+function collectSetupAppearanceBundleSourceParts({
+	setupModel,
+	setupAppearance,
+	preparedByAssetId,
+}: {
+	setupModel: PreparedSetupModelPayload;
+	setupAppearance: PreparedSetupAppearancePayload;
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
+}): StaticBundleSourcePart[] {
+	return setupAppearance.parts.flatMap((part) => {
+		const gfxObj = preparedByAssetId.get(part.gfxObjAssetId);
+		if (gfxObj?.payload.kind !== "gfx-obj") {
+			return [];
+		}
+		const setupPart = setupModel.parts.find(
+			(candidate) => candidate.partIndex === part.partIndex,
+		);
+		return [
+			{
+				partIndex: part.partIndex,
+				gfxObjId: part.gfxObjId,
+				gfxObjAssetId: part.gfxObjAssetId,
+				materialSlots: applyRenderGeometryMaterialVariants({
+					slots: part.materialSlots,
+					renderGeometry: gfxObj.payload.renderGeometry,
+				}),
+				partPlacements: deriveSetupPartDefaultPlacements(
+					setupModel,
+					part.partIndex,
+				),
+				scale: setupPart?.scale ?? UNIT_SCALE,
+			},
+		];
+	});
+}
+
+function createStaticBundleSourcePartFromGfxObj({
+	gfxObj,
+	gfxObjAssetId,
+	partIndex,
+	partPlacements,
+	scale,
+}: {
+	gfxObj: PreparedGfxObjPayload;
+	gfxObjAssetId: string;
+	partIndex: number;
+	partPlacements: readonly PlacementTransformDto[];
+	scale: Vec3Dto;
+}): StaticBundleSourcePart {
+	return {
+		partIndex,
+		gfxObjId: gfxObj.gfxObjId,
+		gfxObjAssetId,
+		materialSlots: applyRenderGeometryMaterialVariants({
+			slots: gfxObj.surfaceIds.map((surfaceId, slotIndex) => ({
+				slotIndex,
+				surfaceId,
+				materialAssetId: formatMaterialAssetId(surfaceId),
+			})),
+			renderGeometry: gfxObj.renderGeometry,
+		}),
+		partPlacements,
+		scale,
+	};
+}
+
+function collectStaticBundleMaterialRouteRequests(
+	sourceObjects: readonly StaticBundleSourceObject[],
+): StaticMaterialTextureRouteRequest[] {
+	return sourceObjects.flatMap((object) =>
+		object.parts.flatMap((part) =>
+			part.materialSlots.map((slot) => ({
+				materialAssetId: slot.materialAssetId,
+				materialRecordKey: formatStaticBundleMaterialRecordKey(slot),
+				materialVariantSignature: slot.materialVariantSignature ?? null,
+			})),
+		),
+	);
+}
+
+function formatStaticBundleMaterialRecordKey(
+	slot: Pick<
+		ResolvedMaterialSlot,
+		"materialAssetId" | "materialVariantSignature"
+	>,
+): string {
+	return [
+		`material:${slot.materialAssetId}`,
+		`variant:${slot.materialVariantSignature ?? "base"}`,
+	].join(":");
+}
+
 function buildObjectSurfaces(
 	object: StaticBundleSourceObject,
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>,
 	texturePageRefs: readonly VirtualTexturePageRef[],
 	materialTextureRoutes: readonly StaticMaterialTextureRoute[],
 ): StaticBundleBuildSurface[] {
-	return object.partAssetIds.map((gfxObjAssetId, index) => {
+	return object.parts.flatMap((part) => {
 		const gfxObj = getPreparedPayload(
 			preparedByAssetId,
-			gfxObjAssetId,
+			part.gfxObjAssetId,
 			"gfx-obj",
 		);
-		const materialAssetId =
-			object.materialAssetIds[index] ??
-			object.materialAssetIds[0] ??
-			gfxObj.dependencies?.materialAssetIds[0] ??
-			"material:missing";
-		const textureRefKeys = findStaticMaterialTextureRefs(
-			materialAssetId,
-			texturePageRefs,
-			materialTextureRoutes,
-		).map((ref) => ref.key);
-		const materialReadiness = resolveStaticMaterialReadiness({
-			materialAssetId,
-			preparedByAssetId,
-			texturePageRefs,
-			materialTextureRoutes,
-		});
-		const geometry = gfxObj.renderGeometry;
-		const positions = transformStaticBundlePositions(
-			toFloat32Array(geometry.positions),
-			createStaticBundleSourcePlacementMatrix(object),
+		return part.materialSlots.map((slot) =>
+			buildObjectSurface({
+				object,
+				part,
+				gfxObj,
+				slot,
+				preparedByAssetId,
+				texturePageRefs,
+				materialTextureRoutes,
+			}),
 		);
-		const normals = toFloat32Array(geometry.normals);
-		const uvs = toFloat32Array(geometry.uvs);
-		const indices = createSequentialTriangleIndices(geometry.triangleCount);
-		const geometryCompatible =
-			geometry.triangleCount > 0 &&
-			positions.length >= geometry.triangleCount * 9 &&
-			uvs.length >= geometry.triangleCount * 6;
-		const compactionEligibility = createCompactionEligibility({
-			geometry: {
-				kind: "static",
-				owningLandblockId: object.owningLandblockId,
-				hasUvBuffer: geometryCompatible,
-			},
-			material: materialReadiness,
-		});
-		const compactable =
-			geometryCompatible && compactionEligibility.decision === "compacted";
-		return {
-			key: `${object.objectKey}:part:${index}:${gfxObjAssetId}`,
-			object,
-			gfxObjAssetId,
-			materialAssetId,
-			textureRefKeys,
-			compactable,
-			reason: compactable
-				? null
-				: describeStaticBundleCompactionBypass(compactionEligibility),
-			familyKey: formatStaticMaterialFamilyKey(compactionEligibility),
-			isTransparent:
-				compactionEligibility.material.alphaPolicy === "transparent-blend" ||
-				compactionEligibility.material.alphaPolicy === "opacity-translucent",
-			compactionEligibility,
-			positions,
-			normals,
-			uvs,
-			indices,
-		};
 	});
 }
 
-function createStaticBundleSourcePlacementMatrix(
+function buildObjectSurface({
+	object,
+	part,
+	gfxObj,
+	slot,
+	preparedByAssetId,
+	texturePageRefs,
+	materialTextureRoutes,
+}: {
+	object: StaticBundleSourceObject;
+	part: StaticBundleSourcePart;
+	gfxObj: PreparedGfxObjPayload;
+	slot: ResolvedMaterialSlot;
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
+	texturePageRefs: readonly VirtualTexturePageRef[];
+	materialTextureRoutes: readonly StaticMaterialTextureRoute[];
+}): StaticBundleBuildSurface {
+	const textureRefKeys = findStaticMaterialTextureRefs(
+		formatStaticBundleMaterialRecordKey(slot),
+		texturePageRefs,
+		materialTextureRoutes,
+	).map((ref) => ref.key);
+	const materialReadiness = resolveStaticMaterialReadiness({
+		materialAssetId: slot.materialAssetId,
+		materialRecordKey: formatStaticBundleMaterialRecordKey(slot),
+		materialVariantSignature: slot.materialVariantSignature ?? null,
+		preparedByAssetId,
+		texturePageRefs,
+		materialTextureRoutes,
+	});
+	const material = getPreparedPayload(
+		preparedByAssetId,
+		slot.materialAssetId,
+		"material-recipe",
+	);
+	const geometry = buildPolygonSetRenderGeometry(gfxObj.renderGeometry, {
+		surfaceId: slot.slotIndex,
+		materialVariantSignature: slot.materialVariantSignature ?? null,
+		sourceSignature: `${object.objectKey}:part:${part.partIndex}:${part.gfxObjAssetId}`,
+	});
+	const modelMatrix = createStaticBundleSourcePartMatrix(object, part);
+	const positions = transformStaticBundlePositions(
+		geometry.positions,
+		modelMatrix,
+	);
+	const normals = transformStaticBundleNormals(
+		geometry.positions,
+		geometry.normals ?? new Float32Array(),
+		modelMatrix,
+	);
+	const uvs = geometry.uvs ?? new Float32Array();
+	const geometryCompatible =
+		geometry.triangleCount > 0 &&
+		positions.length >= geometry.triangleCount * 9 &&
+		uvs.length >= geometry.triangleCount * 6;
+	const compactionEligibility = createCompactionEligibility({
+		geometry: {
+			kind: "static",
+			owningLandblockId: object.owningLandblockId,
+			hasUvBuffer: geometryCompatible,
+		},
+		material: materialReadiness,
+	});
+	const compactable =
+		geometryCompatible && compactionEligibility.decision === "compacted";
+	return {
+		key: [
+			object.objectKey,
+			`part:${part.partIndex}`,
+			part.gfxObjAssetId,
+			`slot:${slot.slotIndex}`,
+			`surface:${formatHex32(slot.surfaceId)}`,
+			`variant:${slot.materialVariantSignature ?? "base"}`,
+		].join(":"),
+		object,
+		gfxObjAssetId: part.gfxObjAssetId,
+		materialAssetId: slot.materialAssetId,
+		materialRecordKey: formatStaticBundleMaterialRecordKey(slot),
+		materialVariantSignature: slot.materialVariantSignature ?? null,
+		textureRefKeys,
+		compactable,
+		reason: compactable
+			? null
+			: describeStaticBundleCompactionBypass(compactionEligibility),
+		familyKey: formatStaticMaterialFamilyKey(compactionEligibility),
+		color: resolveStaticMaterialColor({
+			material,
+			behavior: materialReadiness.behavior,
+		}),
+		isTransparent:
+			compactionEligibility.material.alphaPolicy === "transparent-blend" ||
+			compactionEligibility.material.alphaPolicy === "opacity-translucent",
+		compactionEligibility,
+		positions,
+		normals,
+		uvs,
+		indices: geometry.indices,
+	};
+}
+
+function createStaticBundleSourcePartMatrix(
 	object: StaticBundleSourceObject,
+	part: StaticBundleSourcePart,
 ): RenderMat4 {
+	let matrix = buildAcPlacementMatrix(
+		object.localPlacement,
+		ZERO_VEC3,
+		UNIT_SCALE,
+	);
+	for (const partPlacement of part.partPlacements) {
+		matrix = multiplyMat4(
+			matrix,
+			buildAcPlacementMatrix(partPlacement, ZERO_VEC3, UNIT_SCALE),
+		);
+	}
 	return multiplyMat4(
-		buildAcPlacementMatrix(object.localPlacement, ZERO_VEC3, UNIT_SCALE),
-		createRenderScaleMatrix(object.sourceScale),
+		matrix,
+		createRenderScaleMatrix(multiplyScale(object.sourceScale, part.scale)),
+	);
+}
+
+function deriveSetupPartDefaultPlacements(
+	setupModel: PreparedSetupModelPayload,
+	partIndex: number,
+): PlacementTransformDto[] {
+	const placementSet = selectDefaultSetupPlacementSet(setupModel);
+	const placement = placementSet?.localPlacements[partIndex];
+	return placement ? [placement] : [];
+}
+
+function selectDefaultSetupPlacementSet(
+	setupModel: PreparedSetupModelPayload,
+): PreparedSetupModelPayload["placementSets"][number] | null {
+	return (
+		setupModel.placementSets.find(
+			(placementSet) => placementSet.key === 0x65,
+		) ??
+		setupModel.placementSets.find((placementSet) => placementSet.key === 0) ??
+		setupModel.placementSets.reduce<
+			PreparedSetupModelPayload["placementSets"][number] | null
+		>(
+			(selectedPlacementSet, placementSet) =>
+				selectedPlacementSet === null ||
+				placementSet.key < selectedPlacementSet.key
+					? placementSet
+					: selectedPlacementSet,
+			null,
+		)
 	);
 }
 
@@ -433,6 +684,14 @@ function createRenderScaleMatrix(scale: Vec3Dto): RenderMat4 {
 	]);
 }
 
+function multiplyScale(left: Vec3Dto, right: Vec3Dto): Vec3Dto {
+	return {
+		x: left.x * right.x,
+		y: left.y * right.y,
+		z: left.z * right.z,
+	};
+}
+
 function transformStaticBundlePositions(
 	positions: Float32Array,
 	matrix: RenderMat4,
@@ -454,6 +713,32 @@ function transformStaticBundlePositions(
 	return transformed;
 }
 
+function transformStaticBundleNormals(
+	positions: Float32Array,
+	normals: Float32Array,
+	matrix: RenderMat4,
+): Float32Array {
+	if (normals.length !== positions.length) {
+		return normals;
+	}
+	const transformed = new Float32Array(normals.length);
+	for (let offset = 0; offset < normals.length; offset += 3) {
+		const point = transformPointByMat4(
+			{
+				x: normals[offset] ?? 0,
+				y: normals[offset + 1] ?? 0,
+				z: normals[offset + 2] ?? 0,
+			},
+			matrix,
+		);
+		const origin = transformPointByMat4(ZERO_VEC3, matrix);
+		transformed[offset] = point.x - origin.x;
+		transformed[offset + 1] = point.y - origin.y;
+		transformed[offset + 2] = point.z - origin.z;
+	}
+	return transformed;
+}
+
 function buildMaterialRecords({
 	surfaces,
 	materialTextureRoutes,
@@ -465,17 +750,19 @@ function buildMaterialRecords({
 }): StaticBundleMaterialRecord[] {
 	const recordsByKey = new Map<string, StaticBundleMaterialRecord>();
 	for (const surface of surfaces) {
-		const key = `material:${surface.materialAssetId}`;
+		const key = surface.materialRecordKey;
 		if (recordsByKey.has(key)) {
 			continue;
 		}
 		recordsByKey.set(key, {
 			key,
 			familyKey: surface.familyKey,
+			color: surface.color,
 			texturePageRefKeys: surface.textureRefKeys,
 			isTransparent: surface.isTransparent,
 			indexedMaterial: resolveStaticIndexedMaterialRecord({
 				materialAssetId: surface.materialAssetId,
+				materialRecordKey: surface.materialRecordKey,
 				materialTextureRoutes,
 				preparedByAssetId,
 			}),
@@ -500,7 +787,7 @@ function buildCompactedBatches(
 				key: `${renderChunkKey}:compacted:${index}:${firstSurface.familyKey}:${firstSurface.materialAssetId}`,
 				renderChunkKey,
 				familyKey: firstSurface.familyKey,
-				materialRecordKey: `material:${firstSurface.materialAssetId}`,
+				materialRecordKey: firstSurface.materialRecordKey,
 				objectKeys: uniqueSortedStrings(
 					group.map((surface) => surface.object.objectKey),
 				),
@@ -523,7 +810,7 @@ function groupCompactedSurfacesByMaterial(
 		if (!surface.compactable) {
 			continue;
 		}
-		const key = `${surface.familyKey}|${surface.materialAssetId}`;
+		const key = `${surface.familyKey}|${surface.materialRecordKey}`;
 		const group = groupsByKey.get(key);
 		if (group) {
 			group.push(surface);
@@ -547,7 +834,7 @@ function buildDirectEntries(
 		.map((surface) => ({
 			key: `${renderChunkKey}:direct:${surface.key}`,
 			renderChunkKey,
-			materialRecordKey: `material:${surface.materialAssetId}`,
+			materialRecordKey: surface.materialRecordKey,
 			objectKey: surface.object.objectKey,
 			positions: surface.positions,
 			normals: surface.normals,
@@ -604,55 +891,6 @@ function buildDiagnostics(options: {
 	};
 }
 
-function collectRenderablePartAssetIds(
-	sourceAssetId: string,
-	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>,
-): string[] {
-	const source = getPreparedAsset(preparedByAssetId, sourceAssetId);
-	if (source.payload.kind === "gfx-obj") {
-		return [sourceAssetId];
-	}
-	if (source.payload.kind !== "setup-model") {
-		throw new Error(`Static bundle source ${sourceAssetId} is not renderable.`);
-	}
-	const appearance = preparedByAssetId.get(
-		formatSetupAppearanceAssetId(source.payload.setupModelId),
-	);
-	if (appearance?.payload.kind === "setup-appearance") {
-		return appearance.payload.parts.map((part) => part.gfxObjAssetId).sort();
-	}
-	return source.payload.parts.map((part) => part.gfxObjAssetId).sort();
-}
-
-function collectRenderableMaterialAssetIds(
-	sourceAssetId: string,
-	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>,
-): string[] {
-	const source = getPreparedAsset(preparedByAssetId, sourceAssetId);
-	if (source.payload.kind === "gfx-obj") {
-		return [...(source.payload.dependencies?.materialAssetIds ?? [])].sort();
-	}
-	if (source.payload.kind !== "setup-model") {
-		return [];
-	}
-	const appearance = preparedByAssetId.get(
-		formatSetupAppearanceAssetId(source.payload.setupModelId),
-	);
-	if (appearance?.payload.kind === "setup-appearance") {
-		return appearance.payload.parts
-			.flatMap((part) => part.materialSlots.map((slot) => slot.materialAssetId))
-			.sort();
-	}
-	return source.payload.parts
-		.flatMap((part) => {
-			const gfxObj = preparedByAssetId.get(part.gfxObjAssetId);
-			return gfxObj?.payload.kind === "gfx-obj"
-				? (gfxObj.payload.dependencies?.materialAssetIds ?? [])
-				: [];
-		})
-		.sort();
-}
-
 function collectSetupAppearanceCompanionAssetIds(
 	asset: PreparedAssetRecord,
 ): string[] {
@@ -702,24 +940,6 @@ function assertRootIncludes(
 			`Static bundle job ${job.jobId} missing required root ${assetId}.`,
 		);
 	}
-}
-
-function toFloat32Array(values: number[] | Float32Array): Float32Array {
-	return values instanceof Float32Array ? values : new Float32Array(values);
-}
-
-function createSequentialTriangleIndices(
-	triangleCount: number,
-): Uint16Array | Uint32Array {
-	const indexCount = triangleCount * 3;
-	const indices =
-		indexCount > 65535
-			? new Uint32Array(indexCount)
-			: new Uint16Array(indexCount);
-	for (let index = 0; index < indexCount; index += 1) {
-		indices[index] = index;
-	}
-	return indices;
 }
 
 function concatFloat32Arrays(arrays: readonly Float32Array[]): Float32Array {

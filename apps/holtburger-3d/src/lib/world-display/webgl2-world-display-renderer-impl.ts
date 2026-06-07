@@ -223,29 +223,35 @@ uniform vec2 uTexturePageWrapMode;
 uniform sampler2D uDetailTexture;
 uniform float uDetailTiling;
 uniform int uDetailEnabled;
+uniform vec4 uDetailAtlasRect;
+uniform vec2 uDetailAtlasSize;
+uniform vec2 uDetailTexturePageWrapMode;
 
 in vec2 vUv;
 
 out vec4 fragColor;
 
+vec2 resolveTexturePageUv(vec2 uv, vec4 rect, vec2 atlasSize, vec2 wrapMode) {
+	vec2 wrappedUv = mix(clamp(uv, 0.0, 0.999999), fract(uv), wrapMode);
+	return (rect.xy + wrappedUv * rect.zw) / atlasSize;
+}
+
 vec3 applyDetailOverlay(vec3 baseColor) {
 	if (uDetailEnabled == 0) {
 		return baseColor;
 	}
-	vec4 detailColor = texture(uDetailTexture, vUv * uDetailTiling);
+	vec4 detailColor = texture(
+		uDetailTexture,
+		resolveTexturePageUv(vUv * uDetailTiling, uDetailAtlasRect, uDetailAtlasSize, uDetailTexturePageWrapMode)
+	);
 	float sourceAlpha = clamp(detailColor.a, 0.0, 1.0);
 	return clamp(baseColor * (detailColor.rgb + (1.0 - sourceAlpha)), 0.0, 1.0);
-}
-
-vec2 resolveTexturePageUv(vec2 uv) {
-	vec2 wrappedUv = mix(clamp(uv, 0.0, 1.0), fract(uv), uTexturePageWrapMode);
-	return (uAtlasRect.xy + wrappedUv * uAtlasRect.zw) / uAtlasSize;
 }
 
 void main() {
 	vec2 baseUv = uAtlasEnabled == 0
 		? vUv
-		: resolveTexturePageUv(vUv);
+		: resolveTexturePageUv(vUv, uAtlasRect, uAtlasSize, uTexturePageWrapMode);
 	vec4 texel = texture(uTexture, baseUv);
 	vec4 color = texel * uColor;
 	if (color.a < uAlphaTest) {
@@ -271,6 +277,9 @@ uniform int uRepeatT;
 uniform sampler2D uDetailTexture;
 uniform float uDetailTiling;
 uniform int uDetailEnabled;
+uniform vec4 uDetailAtlasRect;
+uniform vec2 uDetailAtlasSize;
+uniform vec2 uDetailTexturePageWrapMode;
 
 in vec2 vUv;
 
@@ -309,7 +318,14 @@ vec3 applyDetailOverlay(vec3 baseColor) {
 	if (uDetailEnabled == 0) {
 		return baseColor;
 	}
-	vec4 detailColor = texture(uDetailTexture, vUv * uDetailTiling);
+	vec2 localUv = vUv * uDetailTiling;
+	vec2 wrappedUv = mix(
+		clamp(localUv, 0.0, 0.999999),
+		fract(localUv),
+		uDetailTexturePageWrapMode
+	);
+	vec2 detailUv = (uDetailAtlasRect.xy + wrappedUv * uDetailAtlasRect.zw) / uDetailAtlasSize;
+	vec4 detailColor = texture(uDetailTexture, detailUv);
 	float sourceAlpha = clamp(detailColor.a, 0.0, 1.0);
 	return clamp(baseColor * (detailColor.rgb + (1.0 - sourceAlpha)), 0.0, 1.0);
 }
@@ -352,6 +368,9 @@ uniform int uRepeatT;
 uniform sampler2D uDetailTexture;
 uniform float uDetailTiling;
 uniform int uDetailEnabled;
+uniform vec4 uDetailAtlasRect;
+uniform vec2 uDetailAtlasSize;
+uniform vec2 uDetailTexturePageWrapMode;
 
 in vec2 vUv;
 
@@ -390,7 +409,14 @@ vec3 applyDetailOverlay(vec3 baseColor) {
 	if (uDetailEnabled == 0) {
 		return baseColor;
 	}
-	vec4 detailColor = texture(uDetailTexture, vUv * uDetailTiling);
+	vec2 localUv = vUv * uDetailTiling;
+	vec2 wrappedUv = mix(
+		clamp(localUv, 0.0, 0.999999),
+		fract(localUv),
+		uDetailTexturePageWrapMode
+	);
+	vec2 detailUv = (uDetailAtlasRect.xy + wrappedUv * uDetailAtlasRect.zw) / uDetailAtlasSize;
+	vec4 detailColor = texture(uDetailTexture, detailUv);
 	float sourceAlpha = clamp(detailColor.a, 0.0, 1.0);
 	return clamp(baseColor * (detailColor.rgb + (1.0 - sourceAlpha)), 0.0, 1.0);
 }
@@ -976,6 +1002,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		});
 	}
 
+	const selectedOverlayModelViewProjection = new Float32Array(16);
+
 	function renderFrame(frameAt: number): void {
 		if (!resources) {
 			return;
@@ -1121,8 +1149,6 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		});
 		profileBrowserJsScope("webgl2.frame.reportMetrics", reportMetrics);
 	}
-
-	const selectedOverlayModelViewProjection = new Float32Array(16);
 
 	function renderSelectedStaticRenderableOverlay(
 		frame: WorldRenderFrame,
@@ -2419,6 +2445,44 @@ function mergeSceneDomainSubmitMetrics({
 		visibleStaticBundleLayerCount:
 			exteriorMetrics.visibleStaticBundleLayerCount +
 			interiorMetrics.visibleStaticBundleLayerCount,
+		staticBundleSelectedObjectRecordCount:
+			exteriorMetrics.staticBundleSelectedObjectRecordCount +
+			interiorMetrics.staticBundleSelectedObjectRecordCount,
+		staticBundleSelectedSpatialHintCount:
+			exteriorMetrics.staticBundleSelectedSpatialHintCount +
+			interiorMetrics.staticBundleSelectedSpatialHintCount,
+		staticBundleSelectedSourceObjectCount:
+			exteriorMetrics.staticBundleSelectedSourceObjectCount +
+			interiorMetrics.staticBundleSelectedSourceObjectCount,
+		staticBundleSelectedCompactedBatchCount:
+			exteriorMetrics.staticBundleSelectedCompactedBatchCount +
+			interiorMetrics.staticBundleSelectedCompactedBatchCount,
+		staticBundleSelectedDirectEntryCount:
+			exteriorMetrics.staticBundleSelectedDirectEntryCount +
+			interiorMetrics.staticBundleSelectedDirectEntryCount,
+		staticBundleSelectedNoGeometryLayerCount:
+			exteriorMetrics.staticBundleSelectedNoGeometryLayerCount +
+			interiorMetrics.staticBundleSelectedNoGeometryLayerCount,
+		staticBundleSelectedUnsubmittedLayerCount:
+			exteriorMetrics.staticBundleSelectedUnsubmittedLayerCount +
+			interiorMetrics.staticBundleSelectedUnsubmittedLayerCount,
+		staticBundleSelectedMissingMaterialGeometryCount:
+			exteriorMetrics.staticBundleSelectedMissingMaterialGeometryCount +
+			interiorMetrics.staticBundleSelectedMissingMaterialGeometryCount,
+		staticBundleBuilderSkippedSurfaceCount:
+			exteriorMetrics.staticBundleBuilderSkippedSurfaceCount +
+			interiorMetrics.staticBundleBuilderSkippedSurfaceCount,
+		staticBundleBuilderSkippedReasonCounts: sumNumberRecords(
+			exteriorMetrics.staticBundleBuilderSkippedReasonCounts,
+			interiorMetrics.staticBundleBuilderSkippedReasonCounts,
+		),
+		staticBundleGeometryCandidateTriangleCount:
+			exteriorMetrics.staticBundleGeometryCandidateTriangleCount +
+			interiorMetrics.staticBundleGeometryCandidateTriangleCount,
+		staticBundleSelectedLayerCoverageSamples: [
+			...exteriorMetrics.staticBundleSelectedLayerCoverageSamples,
+			...interiorMetrics.staticBundleSelectedLayerCoverageSamples,
+		].slice(0, 16),
 		staticBundleGeometryCandidateCount:
 			exteriorMetrics.staticBundleGeometryCandidateCount +
 			interiorMetrics.staticBundleGeometryCandidateCount,
@@ -2437,7 +2501,53 @@ function mergeSceneDomainSubmitMetrics({
 		staticBundleSubmitFallbackSamples: [
 			...exteriorMetrics.staticBundleSubmitFallbackSamples,
 			...interiorMetrics.staticBundleSubmitFallbackSamples,
-		].slice(0, 8),
+		].slice(0, 16),
+		staticBundleMaterialRecordCount:
+			exteriorMetrics.staticBundleMaterialRecordCount +
+			interiorMetrics.staticBundleMaterialRecordCount,
+		staticBundleMaterialFamilyCounts: sumNumberRecords(
+			exteriorMetrics.staticBundleMaterialFamilyCounts,
+			interiorMetrics.staticBundleMaterialFamilyCounts,
+		),
+		staticBundleMaterialAlphaPolicyCounts: sumNumberRecords(
+			exteriorMetrics.staticBundleMaterialAlphaPolicyCounts,
+			interiorMetrics.staticBundleMaterialAlphaPolicyCounts,
+		),
+		staticBundleMaterialBindingUsageCounts: sumNumberRecords(
+			exteriorMetrics.staticBundleMaterialBindingUsageCounts,
+			interiorMetrics.staticBundleMaterialBindingUsageCounts,
+		),
+		staticBundleMaterialBaseColorBindingCount:
+			exteriorMetrics.staticBundleMaterialBaseColorBindingCount +
+			interiorMetrics.staticBundleMaterialBaseColorBindingCount,
+		staticBundleMaterialIndexedBindingCount:
+			exteriorMetrics.staticBundleMaterialIndexedBindingCount +
+			interiorMetrics.staticBundleMaterialIndexedBindingCount,
+		staticBundleSubmittedOpaqueGeometryCount:
+			exteriorMetrics.staticBundleSubmittedOpaqueGeometryCount +
+			interiorMetrics.staticBundleSubmittedOpaqueGeometryCount,
+		staticBundleSubmittedCutoutGeometryCount:
+			exteriorMetrics.staticBundleSubmittedCutoutGeometryCount +
+			interiorMetrics.staticBundleSubmittedCutoutGeometryCount,
+		staticBundleSubmittedTransparentGeometryCount:
+			exteriorMetrics.staticBundleSubmittedTransparentGeometryCount +
+			interiorMetrics.staticBundleSubmittedTransparentGeometryCount,
+		staticBundleSkippedGeometryReasonCounts: sumNumberRecords(
+			exteriorMetrics.staticBundleSkippedGeometryReasonCounts,
+			interiorMetrics.staticBundleSkippedGeometryReasonCounts,
+		),
+		staticBundleSkippedGeometryFamilyCounts: sumNumberRecords(
+			exteriorMetrics.staticBundleSkippedGeometryFamilyCounts,
+			interiorMetrics.staticBundleSkippedGeometryFamilyCounts,
+		),
+		staticBundleSkippedGeometryAlphaPolicyCounts: sumNumberRecords(
+			exteriorMetrics.staticBundleSkippedGeometryAlphaPolicyCounts,
+			interiorMetrics.staticBundleSkippedGeometryAlphaPolicyCounts,
+		),
+		staticBundleSkippedGeometryBindingUsageCounts: sumNumberRecords(
+			exteriorMetrics.staticBundleSkippedGeometryBindingUsageCounts,
+			interiorMetrics.staticBundleSkippedGeometryBindingUsageCounts,
+		),
 		structuredInteriorResourceSubmittedCount:
 			exteriorMetrics.structuredInteriorResourceSubmittedCount +
 			interiorMetrics.structuredInteriorResourceSubmittedCount,
@@ -2455,6 +2565,20 @@ function mergeSceneDomainSubmitMetrics({
 			...interiorMetrics.structuredInteriorResourceFallbackSamples,
 		].slice(0, 8),
 	};
+}
+
+function sumNumberRecords(
+	left: Readonly<Record<string, number>>,
+	right: Readonly<Record<string, number>>,
+): Record<string, number> {
+	const result: Record<string, number> = {};
+	for (const [key, value] of Object.entries(left)) {
+		result[key] = (result[key] ?? 0) + value;
+	}
+	for (const [key, value] of Object.entries(right)) {
+		result[key] = (result[key] ?? 0) + value;
+	}
+	return result;
 }
 
 function describeWebgl2BrowserCameraResidencyKey(
@@ -2669,6 +2793,9 @@ function createTexturedWorldProgram(
 			"uDetailTexture",
 			"uDetailTiling",
 			"uDetailEnabled",
+			"uDetailAtlasRect",
+			"uDetailAtlasSize",
+			"uDetailTexturePageWrapMode",
 		],
 	});
 }
@@ -2714,6 +2841,9 @@ function createIndexedWorldProgram(
 			"uDetailTexture",
 			"uDetailTiling",
 			"uDetailEnabled",
+			"uDetailAtlasRect",
+			"uDetailAtlasSize",
+			"uDetailTexturePageWrapMode",
 		],
 	});
 }

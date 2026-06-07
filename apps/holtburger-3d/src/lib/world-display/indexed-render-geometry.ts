@@ -7,6 +7,7 @@ import type { Vec3Dto } from "../host/contracts";
 export interface RenderIndexedGeometry {
 	signature: string;
 	positions: Float32Array;
+	normals: Float32Array | null;
 	uvs: Float32Array | null;
 	indices: Uint16Array | Uint32Array;
 	vertexCount: number;
@@ -22,6 +23,7 @@ export function buildPolygonSetRenderGeometry(
 	} = {},
 ): RenderIndexedGeometry {
 	const sourcePositions = toFloat32Array(renderGeometry.positions);
+	const sourceNormals = toFloat32Array(renderGeometry.normals);
 	const sourceUvs = toFloat32Array(renderGeometry.uvs);
 	const triangles = renderGeometry.triangles.filter(
 		(triangle) =>
@@ -33,6 +35,7 @@ export function buildPolygonSetRenderGeometry(
 	);
 	const vertexCount = triangles.length * 3;
 	const positions = new Float32Array(vertexCount * 3);
+	const normals = new Float32Array(vertexCount * 3);
 	const uvs = new Float32Array(vertexCount * 2);
 	const indices = createIndexArray(vertexCount, triangles.length * 3);
 
@@ -47,6 +50,7 @@ export function buildPolygonSetRenderGeometry(
 				sourcePositions,
 				sourceVertexIndex,
 			);
+			copyVec3(normals, targetVertexIndex, sourceNormals, sourceVertexIndex);
 			copyVec2(uvs, targetVertexIndex, sourceUvs, sourceVertexIndex);
 			indices[targetVertexIndex] = targetVertexIndex;
 		}
@@ -61,6 +65,7 @@ export function buildPolygonSetRenderGeometry(
 			triangleCount: triangles.length,
 		}),
 		positions,
+		normals,
 		uvs,
 		indices,
 		vertexCount,
@@ -90,6 +95,7 @@ export function buildPortalApertureRenderGeometry(
 	return {
 		signature: sourceSignature,
 		positions,
+		normals: null,
 		uvs: null,
 		indices,
 		vertexCount: points.length,

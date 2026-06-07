@@ -288,6 +288,32 @@ export function createWebgl2RenderMetrics(
 				input.submitMetrics.visibleStaticBundleLayerCount,
 			staticBundleLayerSubmittedCount:
 				input.submitMetrics.staticBundleLayerSubmittedCount,
+			staticBundleSelectedObjectRecordCount:
+				input.submitMetrics.staticBundleSelectedObjectRecordCount,
+			staticBundleSelectedSpatialHintCount:
+				input.submitMetrics.staticBundleSelectedSpatialHintCount,
+			staticBundleSelectedSourceObjectCount:
+				input.submitMetrics.staticBundleSelectedSourceObjectCount,
+			staticBundleSelectedCompactedBatchCount:
+				input.submitMetrics.staticBundleSelectedCompactedBatchCount,
+			staticBundleSelectedDirectEntryCount:
+				input.submitMetrics.staticBundleSelectedDirectEntryCount,
+			staticBundleSelectedNoGeometryLayerCount:
+				input.submitMetrics.staticBundleSelectedNoGeometryLayerCount,
+			staticBundleSelectedUnsubmittedLayerCount:
+				input.submitMetrics.staticBundleSelectedUnsubmittedLayerCount,
+			staticBundleSelectedMissingMaterialGeometryCount:
+				input.submitMetrics.staticBundleSelectedMissingMaterialGeometryCount,
+			staticBundleBuilderSkippedSurfaceCount:
+				input.submitMetrics.staticBundleBuilderSkippedSurfaceCount,
+			staticBundleBuilderSkippedReasonCounts: {
+				...input.submitMetrics.staticBundleBuilderSkippedReasonCounts,
+			},
+			staticBundleGeometryCandidateTriangleCount:
+				input.submitMetrics.staticBundleGeometryCandidateTriangleCount,
+			staticBundleSelectedLayerCoverageSamples: [
+				...input.submitMetrics.staticBundleSelectedLayerCoverageSamples,
+			],
 			staticBundleGeometryCandidateCount:
 				input.submitMetrics.staticBundleGeometryCandidateCount,
 			staticBundleGeometrySubmittedCount:
@@ -299,6 +325,39 @@ export function createWebgl2RenderMetrics(
 			staticBundleSubmitFallbackSamples: [
 				...input.submitMetrics.staticBundleSubmitFallbackSamples,
 			],
+			staticBundleMaterialRecordCount:
+				input.submitMetrics.staticBundleMaterialRecordCount,
+			staticBundleMaterialFamilyCounts: {
+				...input.submitMetrics.staticBundleMaterialFamilyCounts,
+			},
+			staticBundleMaterialAlphaPolicyCounts: {
+				...input.submitMetrics.staticBundleMaterialAlphaPolicyCounts,
+			},
+			staticBundleMaterialBindingUsageCounts: {
+				...input.submitMetrics.staticBundleMaterialBindingUsageCounts,
+			},
+			staticBundleMaterialBaseColorBindingCount:
+				input.submitMetrics.staticBundleMaterialBaseColorBindingCount,
+			staticBundleMaterialIndexedBindingCount:
+				input.submitMetrics.staticBundleMaterialIndexedBindingCount,
+			staticBundleSubmittedOpaqueGeometryCount:
+				input.submitMetrics.staticBundleSubmittedOpaqueGeometryCount,
+			staticBundleSubmittedCutoutGeometryCount:
+				input.submitMetrics.staticBundleSubmittedCutoutGeometryCount,
+			staticBundleSubmittedTransparentGeometryCount:
+				input.submitMetrics.staticBundleSubmittedTransparentGeometryCount,
+			staticBundleSkippedGeometryReasonCounts: {
+				...input.submitMetrics.staticBundleSkippedGeometryReasonCounts,
+			},
+			staticBundleSkippedGeometryFamilyCounts: {
+				...input.submitMetrics.staticBundleSkippedGeometryFamilyCounts,
+			},
+			staticBundleSkippedGeometryAlphaPolicyCounts: {
+				...input.submitMetrics.staticBundleSkippedGeometryAlphaPolicyCounts,
+			},
+			staticBundleSkippedGeometryBindingUsageCounts: {
+				...input.submitMetrics.staticBundleSkippedGeometryBindingUsageCounts,
+			},
 			textureVelocityPartCount: 0,
 			textureVelocityRenderGroupCount: 0,
 			textureVelocityMaterialCount: 0,

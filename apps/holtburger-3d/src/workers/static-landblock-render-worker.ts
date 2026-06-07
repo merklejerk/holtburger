@@ -25,6 +25,7 @@ import {
 	collectStaticPreparedTextureRouteAssetIds,
 	findStaticMaterialTextureRefs,
 	formatStaticMaterialFamilyKey,
+	resolveStaticMaterialColor,
 	resolveStaticIndexedMaterialRecord,
 	resolveStaticMaterialReadiness,
 	type StaticMaterialTextureRoute,
@@ -744,6 +745,11 @@ function buildStructuredInteriorMaterialRecords(options: {
 			texturePageRefs: options.texturePageRefs,
 			materialTextureRoutes: options.materialTextureRoutes,
 		});
+		const material = getPreparedPayload(
+			options.preparedByAssetId,
+			materialAssetId,
+			"material-recipe",
+		);
 		const compactionEligibility = createCompactionEligibility({
 			geometry: {
 				kind: "static",
@@ -761,6 +767,10 @@ function buildStructuredInteriorMaterialRecords(options: {
 		recordsByKey.set(key, {
 			key,
 			familyKey: formatStaticMaterialFamilyKey(compactionEligibility),
+			color: resolveStaticMaterialColor({
+				material,
+				behavior: materialReadiness.behavior,
+			}),
 			texturePageRefKeys: textureRefKeys,
 			isTransparent:
 				compactionEligibility.material.alphaPolicy === "transparent-blend" ||
@@ -904,6 +914,28 @@ function createStructuredInteriorCellArtifact(
 		cellBsp: envCell.cellBsp,
 		renderGeometry: envCell.renderGeometry,
 	};
+}
+
+function getPreparedPayload<
+	TKind extends PreparedAssetRecord["payload"]["kind"],
+>(
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>,
+	assetId: string,
+	kind: TKind,
+): Extract<PreparedAssetRecord["payload"], { kind: TKind }> {
+	const asset = preparedByAssetId.get(assetId);
+	if (!asset) {
+		throw new Error(`Static render worker is missing required asset ${assetId}.`);
+	}
+	if (asset.payload.kind !== kind) {
+		throw new Error(
+			`Static render worker asset ${assetId} was ${asset.payload.kind}, expected ${kind}.`,
+		);
+	}
+	return asset.payload as Extract<
+		PreparedAssetRecord["payload"],
+		{ kind: TKind }
+	>;
 }
 
 function createStaticBundleLayerWorkerJob(

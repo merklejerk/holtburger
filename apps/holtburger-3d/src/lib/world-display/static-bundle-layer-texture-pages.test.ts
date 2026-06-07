@@ -30,8 +30,20 @@ describe("static bundle layer texture pages", () => {
 			pages.find((page) => page.pageKind === "packed-atlas")?.entries,
 		).toHaveLength(2);
 		expect(
+			pages
+				.find((page) => page.pageKind === "packed-atlas")
+				?.entries.map((entry) => entry.rect),
+		).toEqual([
+			[0, 0, 1, 1],
+			[1, 0, 1, 1],
+		]);
+		expect(
 			pages.find((page) => page.pageKind === "single-entry")?.usageBucket,
 		).toBe("detail");
+		expect(
+			pages.find((page) => page.pageKind === "single-entry")?.entries[0]
+				?.rect,
+		).toEqual([0, 0, 8, 8]);
 	});
 
 	it("describes color, detail, data, and control virtual refs for material eligibility", () => {
@@ -42,6 +54,7 @@ describe("static bundle layer texture pages", () => {
 		).toMatchObject({
 			usageBucket: "base-color",
 			sampleClass: "rgba-color",
+			rect: [0, 0, 2, 2],
 			source: "standalone-direct-texture",
 			sampling: {
 				minFilter: "linear",

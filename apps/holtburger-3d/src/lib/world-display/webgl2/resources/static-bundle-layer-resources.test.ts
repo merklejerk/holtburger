@@ -28,10 +28,12 @@ describe("static bundle layer WebGL2 resources", () => {
 				binding.virtualRefKey,
 				binding.texturePageKey,
 				binding.rect,
+				binding.width,
+				binding.height,
 			]),
 		).toEqual([
-			["base-ref", "base-page", [0, 0, 1, 1]],
-			["index-ref", "index-page", [0.25, 0, 0.75, 1]],
+			["base-ref", "base-page", [0, 0, 2, 1], 2, 1],
+			["index-ref", "index-page", [1, 0, 2, 1], 4, 1],
 		]);
 		expect(resource?.compactedBatches[0]?.indexType).toBe(gl.UNSIGNED_SHORT);
 		expect(resource?.directEntries[0]?.indexType).toBe(gl.UNSIGNED_INT);
@@ -565,7 +567,7 @@ function createLayer(
 					{
 						virtualRefKey: "base-ref",
 						sourceAssetId: "base-surface",
-						rect: [0, 0, 1, 1],
+						rect: [0, 0, 2, 1],
 					},
 				],
 			},
@@ -583,7 +585,7 @@ function createLayer(
 					{
 						virtualRefKey: "index-ref",
 						sourceAssetId: "index-surface",
-						rect: [0.25, 0, 0.75, 1],
+						rect: [1, 0, 2, 1],
 					},
 				],
 			},

@@ -92,6 +92,20 @@ describe("render spatial scene", () => {
 				detailRoleKind: "artifact-static",
 				detailSignature: "artifact-static:outdoor-detail",
 				textureVelocitySignature: "artifact-static:none",
+				artifactCoverage: {
+					sourcePartHintCount: 2,
+					sourcePartIndices: [0, 1],
+					emittedDirectEntryCount: 1,
+					emittedCompactedBatchCount: 1,
+					emittedGeometryEntryCount: 2,
+					emittedDirectTriangleCount: 2,
+					emittedCompactedBatchTriangleCount: 1,
+					materialRecordKeys: ["material:compacted", "material:direct"],
+					materialFamilyKeys: [
+						"static:flat-constant-color:alpha=opaque",
+						"static:texture-page:alpha=opaque",
+					],
+				},
 			},
 		});
 	});
@@ -242,10 +256,61 @@ function createStaticBundleProductArtifact(): LandblockRenderProductWorkerResult
 				sourceRevision: "revision:test",
 				rootAssetIds: ["landblock/016cffff/outdoor"],
 				preparedAssetIds: ["landblock/016cffff/outdoor"],
-				renderChunks: [],
-				compactedBatches: [],
-				directEntries: [],
-				materialRecords: [],
+				renderChunks: [
+					{
+						key: "render-chunk:test",
+						landblockId,
+						bounds: {
+							min: { x: 1, y: 2, z: 3 },
+							max: { x: 4, y: 5, z: 6 },
+						},
+					},
+				],
+				compactedBatches: [
+					{
+						key: "compacted:test",
+						renderChunkKey: "render-chunk:test",
+						familyKey: "static:flat-constant-color:alpha=opaque",
+						materialRecordKey: "material:compacted",
+						objectKeys: [objectKey],
+						positions: new Float32Array(),
+						normals: new Float32Array(),
+						uvs: new Float32Array(),
+						indices: new Uint16Array([0, 1, 2]),
+					},
+				],
+				directEntries: [
+					{
+						key: "direct:test",
+						renderChunkKey: "render-chunk:test",
+						materialRecordKey: "material:direct",
+						objectKey,
+						positions: new Float32Array(),
+						normals: new Float32Array(),
+						uvs: new Float32Array(),
+						indices: new Uint16Array([0, 1, 2, 0, 2, 3]),
+						bounds: {
+							min: { x: 1, y: 2, z: 3 },
+							max: { x: 4, y: 5, z: 6 },
+						},
+					},
+				],
+				materialRecords: [
+					{
+						key: "material:direct",
+						familyKey: "static:texture-page:alpha=opaque",
+						color: [1, 1, 1, 1],
+						texturePageRefKeys: [],
+						isTransparent: false,
+					},
+					{
+						key: "material:compacted",
+						familyKey: "static:flat-constant-color:alpha=opaque",
+						color: [1, 1, 1, 1],
+						texturePageRefKeys: [],
+						isTransparent: false,
+					},
+				],
 				texturePageRefs: [],
 				texturePages: [],
 				objectRecords: [
@@ -256,6 +321,18 @@ function createStaticBundleProductArtifact(): LandblockRenderProductWorkerResult
 						owningLandblockId: landblockId,
 						owningEnvCellId: null,
 						kind: "scenery",
+						partHints: [
+							{
+								renderKey: `${objectKey}:part:0`,
+								partIndex: 0,
+								gfxObjAssetId: "gfx-obj/01000001",
+							},
+							{
+								renderKey: `${objectKey}:part:1`,
+								partIndex: 1,
+								gfxObjAssetId: "gfx-obj/01000002",
+							},
+						],
 					},
 				],
 				spatialHints: [

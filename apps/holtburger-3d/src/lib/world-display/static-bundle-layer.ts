@@ -135,6 +135,7 @@ export interface StaticBundleLayerWorkerResult {
 export interface StaticBundleMaterialRecord {
 	key: string;
 	familyKey: string;
+	color: readonly [number, number, number, number];
 	texturePageRefKeys: readonly string[];
 	isTransparent: boolean;
 	indexedMaterial?: StaticBundleIndexedMaterialRecord;

@@ -106,7 +106,10 @@ describe("static bundle layer builder", () => {
 		expect(layer.compactedBatches[0]?.positions).toBeInstanceOf(Float32Array);
 		expect(
 			layer.compactedBatches.map((batch) => batch.materialRecordKey),
-		).toEqual(["material:material/08000001", "material:material/08000003"]);
+		).toEqual([
+			"material:material/08000001:variant:sampler=clamp",
+			"material:material/08000003:variant:sampler=clamp",
+		]);
 		expect(layer.directEntries).toHaveLength(1);
 		expect(layer.directEntries[0]?.positions).toBeInstanceOf(Float32Array);
 		expect(layer.directEntries[0]?.positions.length).toBeGreaterThan(0);
@@ -118,21 +121,19 @@ describe("static bundle layer builder", () => {
 		expect(
 			layer.materialRecords.map((record) => [record.key, record.familyKey]),
 		).toContainEqual([
-			"material:material/08000002",
-			"static:direct:alpha=transparent-blend",
+			"material:material/08000002:variant:sampler=clamp",
+			"static:transparent-blended:alpha=transparent-blend",
 		]);
 		expect(layer.texturePages.map((page) => page.pageKind).sort()).toEqual([
 			"packed-atlas",
-			"packed-atlas",
-			"single-entry",
 			"single-entry",
 		]);
 		expect(
 			layer.texturePages.filter((page) => page.pageKind === "packed-atlas"),
-		).toHaveLength(2);
+		).toHaveLength(1);
 		expect(
 			layer.texturePages.filter((page) => page.pageKind === "single-entry"),
-		).toHaveLength(2);
+		).toHaveLength(1);
 		expect(layer.diagnostics).toMatchObject({
 			sourceObjectCount: 3,
 			compactedSurfaceCount: 2,
@@ -184,6 +185,95 @@ describe("static bundle layer builder", () => {
 		expect(first.texturePages.map((page) => page.key)).toEqual(
 			second.texturePages.map((page) => page.key),
 		);
+	});
+
+	it("classifies direct alpha clipmaps as cutout static materials", () => {
+		const landblockId = 0xda55ffff;
+		const job = createBuildJob(landblockId);
+		const preparedAssets = [
+			createOutdoorLandblock(landblockId, [
+				createOutdoorMember("clipmap-0", "gfx-obj/01000020"),
+			]),
+			createRegionRenderProfile(1),
+			createTerrainMaterial(1),
+			createGfxObj("gfx-obj/01000020", "material/08000020", 1),
+			createMaterial("material/08000020", "render-surface/06000020", {
+				surfaceType: 0x4,
+			}),
+			createRenderSurface("render-surface/06000020"),
+			createPreparedTexture(0x06000020, "raw", [255, 255, 255, 128]),
+			createPreparedTexture(0x06000020, "detail", [255, 255, 255, 255]),
+		];
+
+		const layer = buildStaticObjectBundleArtifact({
+			job,
+			preparedAssets,
+			policy: createPolicy(),
+		});
+
+		expect(layer.materialRecords).toMatchObject([
+			{
+				key: "material:material/08000020:variant:sampler=clamp",
+				familyKey: "static:textured-opaque:alpha=cutout",
+				isTransparent: false,
+			},
+		]);
+		expect(layer.compactedBatches[0]?.familyKey).toBe(
+			"static:textured-opaque:alpha=cutout",
+		);
+		expect(layer.directEntries).toEqual([]);
+	});
+
+	it("splits gfx object geometry by surface slot material", () => {
+		const landblockId = 0xda55ffff;
+		const job = createBuildJob(landblockId);
+		const preparedAssets = [
+			createOutdoorLandblock(landblockId, [
+				createOutdoorMember("multi-surface", "gfx-obj/01000010"),
+			]),
+			createRegionRenderProfile(1),
+			createTerrainMaterial(1),
+			createMultiSurfaceGfxObj("gfx-obj/01000010", [
+				"material/08000001",
+				"material/08000002",
+			]),
+			createMaterial("material/08000001", "render-surface/06000001"),
+			createMaterial("material/08000002", "render-surface/06000002"),
+			createRenderSurface("render-surface/06000001"),
+			createRenderSurface("render-surface/06000002"),
+			createPreparedTexture(0x06000001, "raw", [255, 0, 0, 255]),
+			createPreparedTexture(0x06000001, "detail", [255, 128, 0, 255]),
+			createPreparedTexture(0x06000002, "raw", [0, 255, 0, 255]),
+			createPreparedTexture(0x06000002, "detail", [0, 128, 255, 255]),
+		];
+
+		const layer = buildStaticObjectBundleArtifact({
+			job,
+			preparedAssets,
+			policy: createPolicy(),
+		});
+
+		expect(
+			layer.compactedBatches.map((batch) => [
+				batch.materialRecordKey,
+				batch.indices.length / 3,
+			]),
+		).toEqual([
+			["material:material/08000001:variant:sampler=clamp", 1],
+			["material:material/08000002:variant:sampler=repeat", 1],
+		]);
+		expect(layer.directEntries).toEqual([]);
+		expect(layer.materialRecords.map((record) => record.key)).toEqual([
+			"material:material/08000001:variant:sampler=clamp",
+			"material:material/08000002:variant:sampler=repeat",
+		]);
+		expect(
+			layer.texturePageRefs.map((ref) => [ref.key, ref.wrapS, ref.wrapT]),
+		).toContainEqual([
+			"texture:material:material/08000002:variant:sampler=repeat:prepared-texture/06000002?usage=raw&out=rgba8&mips=none&cs=linear",
+			"repeat",
+			"repeat",
+		]);
 	});
 
 	it("bakes static instance placement and source scale into geometry positions", () => {
@@ -262,11 +352,12 @@ describe("static bundle layer builder", () => {
 		]);
 		expect(layer.materialRecords).toEqual([
 			{
-				key: "material:material/08000011",
+				key: "material:material/08000011:variant:sampler=clamp",
 				familyKey: "static:indexed-paletted:alpha=opaque",
+				color: [1, 1, 1, 1],
 				texturePageRefKeys: [
-					"texture:material/08000011:palette/04000011:palette-lookup",
-					"texture:material/08000011:render-surface/06000011:indexed-texels",
+					"texture:material:material/08000011:variant:sampler=clamp:palette/04000011:palette-lookup",
+					"texture:material:material/08000011:variant:sampler=clamp:render-surface/06000011:indexed-texels",
 				],
 				isTransparent: false,
 				indexedMaterial: {
@@ -285,6 +376,44 @@ describe("static bundle layer builder", () => {
 			"static:indexed-paletted:alpha=opaque",
 		);
 		expect(layer.directEntries).toEqual([]);
+	});
+
+	it("preserves indexed-paletted material family on direct cutout entries", () => {
+		const landblockId = 0xda55ffff;
+		const job = createBuildJob(landblockId);
+		const preparedAssets = [
+			createOutdoorLandblock(landblockId, [
+				createOutdoorMember("indexed-cutout-0", "gfx-obj/01000021"),
+			]),
+			createRegionRenderProfile(1),
+			createTerrainMaterial(1),
+			createGfxObj("gfx-obj/01000021", "material/08000021", 1),
+			createMaterial("material/08000021", "render-surface/06000021", {
+				paletteId: 0x04000021,
+				surfaceType: 0x4,
+			}),
+			createIndexedRenderSurface("render-surface/06000021", 0x04000021),
+			createPalette("palette/04000021"),
+		];
+
+		const layer = buildStaticObjectBundleArtifact({
+			job,
+			preparedAssets,
+			policy: createPolicy(),
+		});
+
+		expect(layer.materialRecords).toMatchObject([
+			{
+				key: "material:material/08000021:variant:sampler=clamp",
+				familyKey: "static:indexed-paletted:alpha=cutout",
+				isTransparent: false,
+				indexedMaterial: {
+					clipThreshold: 8,
+				},
+			},
+		]);
+		expect(layer.compactedBatches).toEqual([]);
+		expect(layer.directEntries).toHaveLength(1);
 	});
 
 	it("preserves indexed-paletted detail refs without creating a separate material family", () => {
@@ -320,7 +449,6 @@ describe("static bundle layer builder", () => {
 			layer.texturePageRefs.map((ref) => [ref.usageBucket, ref.sampleClass]),
 		).toEqual([
 			["palette-lookup", "palette-data"],
-			["detail", "rgba-color"],
 			["indexed-texels", "indexed-data"],
 		]);
 		expect(layer.materialRecords[0]?.familyKey).toBe(
@@ -541,6 +669,10 @@ function createGfxObj(
 	materialAssetId: string,
 	triangleCount: number,
 ): PreparedAssetRecord {
+	const surfaceId = Number.parseInt(
+		materialAssetId.slice("material/".length),
+		16,
+	);
 	return createRecord(assetId, {
 		kind: "gfx-obj",
 		sourceAssetKind: "gfx-obj",
@@ -548,7 +680,7 @@ function createGfxObj(
 		provenance: createProvenance("gfx-obj"),
 		gfxObjId: Number.parseInt(assetId.slice(-8), 16),
 		flags: null,
-		surfaceIds: [1],
+		surfaceIds: [surfaceId],
 		vertexArray: { vertexType: 0, vertexCount: 0, vertices: [] },
 		drawingPolygons: [],
 		drawingBsp: null,
@@ -559,6 +691,36 @@ function createGfxObj(
 			rootKind: null,
 		},
 		renderGeometry: createRenderGeometry(triangleCount),
+		sortCenter: null,
+		didDegrade: null,
+	});
+}
+
+function createMultiSurfaceGfxObj(
+	assetId: string,
+	materialAssetIds: readonly string[],
+): PreparedAssetRecord {
+	const surfaceIds = materialAssetIds.map((materialAssetId) =>
+		Number.parseInt(materialAssetId.slice("material/".length), 16),
+	);
+	return createRecord(assetId, {
+		kind: "gfx-obj",
+		sourceAssetKind: "gfx-obj",
+		residencyKind: "unknown",
+		provenance: createProvenance("gfx-obj"),
+		gfxObjId: Number.parseInt(assetId.slice(-8), 16),
+		flags: null,
+		surfaceIds,
+		vertexArray: { vertexType: 0, vertexCount: 0, vertices: [] },
+		drawingPolygons: [],
+		drawingBsp: null,
+		dependencies: { materialAssetIds: [...materialAssetIds] },
+		physicsWitness: {
+			polygonCount: materialAssetIds.length,
+			hasBsp: false,
+			rootKind: null,
+		},
+		renderGeometry: createMultiSurfaceRenderGeometry(materialAssetIds.length),
 		sortCenter: null,
 		didDegrade: null,
 	});
@@ -792,7 +954,11 @@ function createSetupAppearance(
 				gfxObjId: 0x01000001,
 				gfxObjAssetId,
 				materialSlots: [
-					{ slotIndex: 0, surfaceId: 1, materialAssetId: "material/08000001" },
+					{
+						slotIndex: 0,
+						surfaceId: 0x08000001,
+						materialAssetId: "material/08000001",
+					},
 				],
 			},
 		],
@@ -858,11 +1024,31 @@ function createRenderGeometry(triangleCount: number) {
 		uvs: new Float32Array(triangleCount * 6).fill(0.5),
 		triangles: Array.from({ length: triangleCount }, (_, index) => ({
 			polygonId: index,
-			surfaceId: 1,
+			surfaceId: 0,
 			materialVariantSignature: "sampler=clamp",
 			firstVertex: index * 3,
 		})),
-		surfaceIds: [1],
+		surfaceIds: [0],
+		bounds: null,
+	};
+}
+
+function createMultiSurfaceRenderGeometry(surfaceCount: number) {
+	return {
+		sourceId: 0,
+		vertexCount: surfaceCount * 3,
+		triangleCount: surfaceCount,
+		positions: new Float32Array(surfaceCount * 9).fill(1),
+		normals: new Float32Array(surfaceCount * 9).fill(0),
+		uvs: new Float32Array(surfaceCount * 6).fill(0.5),
+		triangles: Array.from({ length: surfaceCount }, (_, index) => ({
+			polygonId: index,
+			surfaceId: index,
+			materialVariantSignature:
+				index === 0 ? "sampler=clamp" : "sampler=repeat",
+			firstVertex: index * 3,
+		})),
+		surfaceIds: Array.from({ length: surfaceCount }, (_, index) => index),
 		bounds: null,
 	};
 }

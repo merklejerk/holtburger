@@ -2,12 +2,18 @@ import {
 	resolveNormalizedPreparedTextureAssetIds,
 	type MaterialTextureUsage,
 } from "../assets/material-texture-preparation-policy";
+import {
+	createDefaultMaterialTextureSamplingPolicy,
+	selectVariantTextureSamplingPolicy,
+	type TextureWrapMode,
+} from "./texture-pages/texture-sampling-policy";
 import type {
 	PreparedAssetRecord,
 	PreparedMaterialRecipePayload,
 	PreparedRenderSurfacePayload,
 	PreparedTexturePayload,
 } from "../assets/types";
+import { formatHex32 } from "../landblocks";
 import {
 	createCompactionEligibility,
 	type CompactionAlphaPolicy,
@@ -22,9 +28,12 @@ import {
 } from "./indexed-material-data";
 import {
 	deriveLegacyMaterialBehaviorDto,
+	DIRECT_CLIP_MAP_ALPHA_TEST,
 	isBase1ClipMapSurface,
+	type LegacyMaterialBehaviorDto,
 } from "./material-behavior";
 import { createPaletteData } from "./palette-data";
+import { hasSourceAlpha } from "./render-surface-texture-data";
 import type {
 	StaticBundleIndexedMaterialRecord,
 	VirtualTexturePageRef,
@@ -37,27 +46,51 @@ export type StaticMaterialTextureRoute =
 	| StaticMaterialIndexedTexelRoute
 	| StaticMaterialPaletteRoute;
 
+export type StaticMaterialTextureRouteRequest =
+	| string
+	| {
+			materialAssetId: string;
+			materialRecordKey?: string;
+			materialVariantSignature?: string | null;
+	  };
+
+interface NormalizedStaticMaterialTextureRouteRequest {
+	materialAssetId: string;
+	materialRecordKey: string;
+	materialVariantSignature: string | null;
+}
+
 interface StaticMaterialPreparedTextureRoute {
 	kind: "prepared-texture";
 	materialAssetId: string;
+	materialRecordKey: string;
+	materialVariantSignature: string | null;
 	preparedTextureAssetId: string;
 	renderSurfaceAssetId: string;
 	usage: MaterialTextureUsage;
+	wrapS: TextureWrapMode;
+	wrapT: TextureWrapMode;
 }
 
 interface StaticMaterialIndexedTexelRoute {
 	kind: "indexed-texels";
 	materialAssetId: string;
+	materialRecordKey: string;
+	materialVariantSignature: string | null;
 	renderSurfaceAssetId: string;
 	indexedFormat: IndexedTextureFormat;
 	bytes: Uint8Array;
 	width: number;
 	height: number;
+	wrapS: TextureWrapMode;
+	wrapT: TextureWrapMode;
 }
 
 interface StaticMaterialPaletteRoute {
 	kind: "palette-lookup";
 	materialAssetId: string;
+	materialRecordKey: string;
+	materialVariantSignature: string | null;
 	paletteAssetId: string;
 	bytes: Uint8Array;
 	colorCount: number;
@@ -65,7 +98,6 @@ interface StaticMaterialPaletteRoute {
 
 const STATIC_MATERIAL_TEXTURE_USAGES: readonly MaterialTextureUsage[] = [
 	"raw",
-	"detail",
 ];
 const STATIC_MATERIAL_FAMILY_KEY_PREFIX = "static:";
 const STATIC_MATERIAL_ALPHA_POLICY_KEY = "alpha";
@@ -82,7 +114,6 @@ const STATIC_MATERIAL_FAMILIES = new Set<string>([
 	"indexed-paletted",
 	"debug-pipeline",
 	"unknown-unsupported",
-	"direct",
 ]);
 const STATIC_MATERIAL_ALPHA_POLICIES = new Set<string>([
 	"opaque",
@@ -92,9 +123,71 @@ const STATIC_MATERIAL_ALPHA_POLICIES = new Set<string>([
 	"unknown",
 ]);
 
+function normalizeStaticMaterialTextureRouteRequests(
+	requests: readonly StaticMaterialTextureRouteRequest[],
+): NormalizedStaticMaterialTextureRouteRequest[] {
+	const requestsByKey = new Map<string, NormalizedStaticMaterialTextureRouteRequest>();
+	for (const request of requests) {
+		const normalized =
+			typeof request === "string"
+				? {
+						materialAssetId: request,
+						materialRecordKey: request,
+						materialVariantSignature: null,
+					}
+				: {
+						materialAssetId: request.materialAssetId,
+						materialRecordKey:
+							request.materialRecordKey ?? request.materialAssetId,
+						materialVariantSignature:
+							request.materialVariantSignature ?? null,
+					};
+		requestsByKey.set(
+			[
+				normalized.materialAssetId,
+				normalized.materialRecordKey,
+				normalized.materialVariantSignature ?? "base",
+			].join("|"),
+			normalized,
+		);
+	}
+	return [...requestsByKey.values()].sort((left, right) =>
+		[
+			left.materialAssetId,
+			left.materialRecordKey,
+			left.materialVariantSignature ?? "base",
+		]
+			.join("|")
+			.localeCompare(
+				[
+					right.materialAssetId,
+					right.materialRecordKey,
+					right.materialVariantSignature ?? "base",
+				].join("|"),
+			),
+	);
+}
+
+function resolveStaticMaterialRouteWrapMode({
+	renderSurface,
+	materialVariantSignature,
+}: {
+	renderSurface: PreparedRenderSurfacePayload;
+	materialVariantSignature: string | null;
+}): { wrapS: TextureWrapMode; wrapT: TextureWrapMode } {
+	const policy = selectVariantTextureSamplingPolicy(
+		renderSurface,
+		createDefaultMaterialTextureSamplingPolicy(),
+		materialVariantSignature,
+	);
+	return {
+		wrapS: policy.wrapS,
+		wrapT: policy.wrapT,
+	};
+}
+
 type StaticMaterialFamilyKind =
 	| CompactionMaterialFamily
-	| "direct"
 	| typeof STATIC_MATERIAL_LEGACY_RGBA_TEXTURE_PAGE_FAMILY_KEY;
 type StaticMaterialSerializedFamilyKind = Exclude<
 	StaticMaterialFamilyKind,
@@ -104,9 +197,14 @@ type StaticMaterialSerializedFamilyKind = Exclude<
 export type StaticMaterialFamilyDescriptor =
 	| {
 			readonly key: string;
+			readonly kind: "flat-color";
+			readonly sourceFamily: "flat-constant-color";
+			readonly alphaPolicy: CompactionAlphaPolicy | null;
+	  }
+	| {
+			readonly key: string;
 			readonly kind: "texture-page";
 			readonly sourceFamily:
-				| "direct"
 				| "textured-opaque"
 				| "transparent-blended"
 				| "opacity-translucent"
@@ -116,14 +214,13 @@ export type StaticMaterialFamilyDescriptor =
 	| {
 			readonly key: string;
 			readonly kind: "indexed-paletted";
-			readonly alphaPolicy: "opaque" | null;
+			readonly alphaPolicy: CompactionAlphaPolicy | null;
 	  }
 	| {
 			readonly key: string;
 			readonly kind: "unsupported";
 			readonly sourceFamily: Exclude<
 				StaticMaterialFamilyKind,
-				| "direct"
 				| "textured-opaque"
 				| "transparent-blended"
 				| "opacity-translucent"
@@ -135,18 +232,19 @@ export type StaticMaterialFamilyDescriptor =
 
 
 export function collectStaticMaterialTextureRoutes(
-	materialAssetIds: readonly string[],
+	requests: readonly StaticMaterialTextureRouteRequest[],
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>,
 ): StaticMaterialTextureRoute[] {
 	const routesByKey = new Map<string, StaticMaterialTextureRoute>();
-	for (const materialAssetId of uniqueSortedStrings(materialAssetIds)) {
+	for (const request of normalizeStaticMaterialTextureRouteRequests(requests)) {
+		const materialAssetId = request.materialAssetId;
 		const material = getPreparedPayload(
 			preparedByAssetId,
 			materialAssetId,
 			"material-recipe",
 		);
 		const indexedRoutes = collectIndexedMaterialTextureRoutes({
-			materialAssetId,
+			request,
 			material,
 			preparedByAssetId,
 		});
@@ -154,9 +252,7 @@ export function collectStaticMaterialTextureRoutes(
 			routesByKey.set(formatStaticMaterialTextureRouteKey(route), route);
 		}
 		const usages =
-			indexedRoutes.length > 0
-				? (["detail"] as const)
-				: STATIC_MATERIAL_TEXTURE_USAGES;
+			indexedRoutes.length > 0 ? ([] as const) : STATIC_MATERIAL_TEXTURE_USAGES;
 		for (const renderSurfaceAssetId of material.dependencies
 			.renderSurfaceAssetIds) {
 			const renderSurface = getPreparedPayload(
@@ -174,9 +270,15 @@ export function collectStaticMaterialTextureRoutes(
 					const route = {
 						kind: "prepared-texture" as const,
 						materialAssetId,
+						materialRecordKey: request.materialRecordKey,
+						materialVariantSignature: request.materialVariantSignature,
 						preparedTextureAssetId,
 						renderSurfaceAssetId,
 						usage,
+						...resolveStaticMaterialRouteWrapMode({
+							renderSurface,
+							materialVariantSignature: request.materialVariantSignature,
+						}),
 					};
 					routesByKey.set(formatStaticMaterialTextureRouteKey(route), route);
 				}
@@ -198,15 +300,15 @@ export function collectStaticMaterialTexturePageRefs(
 		.map((route): VirtualTexturePageRef => {
 			if (route.kind === "indexed-texels") {
 				return {
-					key: `texture:${route.materialAssetId}:${route.renderSurfaceAssetId}:indexed-texels`,
+					key: formatStaticMaterialTextureRefKey(route),
 					sourceAssetId: route.renderSurfaceAssetId,
 					usageBucket: "indexed-texels",
 					sampleClass: "indexed-data",
 					indexedFormat: route.indexedFormat,
 					width: route.width,
 					height: route.height,
-					wrapS: "clamp",
-					wrapT: "clamp",
+					wrapS: route.wrapS,
+					wrapT: route.wrapT,
 					samplingDomain: "data",
 					lookup: "exact",
 					bytes: route.bytes,
@@ -214,7 +316,7 @@ export function collectStaticMaterialTexturePageRefs(
 			}
 			if (route.kind === "palette-lookup") {
 				return {
-					key: `texture:${route.materialAssetId}:${route.paletteAssetId}:palette-lookup`,
+					key: formatStaticMaterialTextureRefKey(route),
 					sourceAssetId: route.paletteAssetId,
 					usageBucket: "palette-lookup",
 					sampleClass: "palette-data",
@@ -239,14 +341,14 @@ export function collectStaticMaterialTexturePageRefs(
 				);
 			}
 			return {
-				key: `texture:${route.materialAssetId}:${route.preparedTextureAssetId}`,
+				key: formatStaticMaterialTextureRefKey(route),
 				sourceAssetId: route.preparedTextureAssetId,
 				usageBucket: mapPreparedTextureUsageBucket(payload),
 				sampleClass: mapPreparedTextureSampleClass(payload),
 				width: level.width,
 				height: level.height,
-				wrapS: "clamp",
-				wrapT: "clamp",
+				wrapS: route.wrapS,
+				wrapT: route.wrapT,
 				samplingDomain: mapPreparedTextureSamplingDomain(payload),
 				lookup: mapPreparedTextureLookup(payload),
 				bytes: level.bytes,
@@ -256,15 +358,15 @@ export function collectStaticMaterialTexturePageRefs(
 }
 
 export function findStaticMaterialTextureRefs(
-	materialAssetId: string,
+	materialRecordKey: string,
 	texturePageRefs: readonly VirtualTexturePageRef[],
 	materialTextureRoutes: readonly StaticMaterialTextureRoute[],
 ): VirtualTexturePageRef[] {
 	return materialTextureRoutes
-		.filter((candidate) => candidate.materialAssetId === materialAssetId)
+		.filter((candidate) => candidate.materialRecordKey === materialRecordKey)
 		.map((route) =>
 			texturePageRefs.find(
-				(ref) => ref.sourceAssetId === routeSourceAssetId(route),
+				(ref) => ref.key === formatStaticMaterialTextureRefKey(route),
 			),
 		)
 		.filter((ref): ref is VirtualTexturePageRef => ref !== undefined)
@@ -273,6 +375,8 @@ export function findStaticMaterialTextureRefs(
 
 export function resolveStaticMaterialReadiness(options: {
 	materialAssetId: string;
+	materialRecordKey?: string;
+	materialVariantSignature?: string | null;
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
 	texturePageRefs: readonly VirtualTexturePageRef[];
 	materialTextureRoutes: readonly StaticMaterialTextureRoute[];
@@ -282,18 +386,32 @@ export function resolveStaticMaterialReadiness(options: {
 		options.materialAssetId,
 		"material-recipe",
 	);
-	const behavior = deriveLegacyMaterialBehaviorDto({ recipe: material });
 	const indexedRenderSurface = findIndexedRenderSurface(
 		material,
 		options.preparedByAssetId,
 	);
+	const directRenderSurface = indexedRenderSurface
+		? null
+		: findDirectRenderSurface(material, options.preparedByAssetId);
+	const behavior = indexedRenderSurface
+		? deriveLegacyMaterialBehaviorDto({
+				recipe: material,
+				usesIndexedClipDiscard: true,
+			})
+		: deriveLegacyMaterialBehaviorDto({
+				recipe: material,
+				hasSourceAlpha: directRenderSurface
+					? hasSourceAlpha(directRenderSurface.renderSurface.formatRaw)
+					: false,
+			});
+	const materialRecordKey = options.materialRecordKey ?? options.materialAssetId;
 	const materialRoutes = options.materialTextureRoutes.filter(
-		(route) => route.materialAssetId === options.materialAssetId,
+		(route) => route.materialRecordKey === materialRecordKey,
 	);
 	const texturePageBindings = materialRoutes
 		.map((route) => {
 			const ref = options.texturePageRefs.find(
-				(candidate) => candidate.sourceAssetId === routeSourceAssetId(route),
+				(candidate) => candidate.key === formatStaticMaterialTextureRefKey(route),
 			);
 			return ref ? createStaticBundleTexturePageDescriptor(ref) : null;
 		})
@@ -304,7 +422,7 @@ export function resolveStaticMaterialReadiness(options: {
 	);
 	const baseTexturePageRef = baseRoute
 		? (options.texturePageRefs.find(
-				(ref) => ref.sourceAssetId === baseRoute.preparedTextureAssetId,
+				(ref) => ref.key === formatStaticMaterialTextureRefKey(baseRoute),
 			) ?? null)
 		: null;
 	const baseTexture = baseRoute
@@ -321,12 +439,7 @@ export function resolveStaticMaterialReadiness(options: {
 			: material.source.kind === "texture"
 				? "direct-texture"
 				: "flat",
-		behavior: indexedRenderSurface
-			? deriveLegacyMaterialBehaviorDto({
-					recipe: material,
-					usesIndexedClipDiscard: true,
-				})
-			: behavior,
+		behavior,
 		texturePages: {
 			base:
 				baseRoute && baseTexturePageRef && baseTexture && level
@@ -357,15 +470,40 @@ export function resolveStaticMaterialReadiness(options: {
 	};
 }
 
+export function resolveStaticMaterialColor(options: {
+	material: PreparedMaterialRecipePayload;
+	behavior: LegacyMaterialBehaviorDto | null;
+}): readonly [number, number, number, number] {
+	const behaviorColor = options.behavior?.color ?? [1, 1, 1];
+	const behaviorOpacity = options.behavior?.opacity ?? 1;
+	if (options.material.source.kind === "solid-color") {
+		const source = decodeArgbColor(options.material.source.argb);
+		return [
+			source[0] * behaviorColor[0],
+			source[1] * behaviorColor[1],
+			source[2] * behaviorColor[2],
+			source[3] * behaviorOpacity,
+		];
+	}
+	return [
+		behaviorColor[0],
+		behaviorColor[1],
+		behaviorColor[2],
+		behaviorOpacity,
+	];
+}
+
 export function resolveStaticIndexedMaterialRecord(options: {
 	materialAssetId: string;
+	materialRecordKey?: string;
 	materialTextureRoutes: readonly StaticMaterialTextureRoute[];
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
 }): StaticBundleIndexedMaterialRecord | undefined {
+	const materialRecordKey = options.materialRecordKey ?? options.materialAssetId;
 	const indexRoute = options.materialTextureRoutes.find(
 		(route): route is StaticMaterialIndexedTexelRoute =>
 			route.kind === "indexed-texels" &&
-			route.materialAssetId === options.materialAssetId,
+			route.materialRecordKey === materialRecordKey,
 	);
 	if (!indexRoute) {
 		return undefined;
@@ -373,7 +511,7 @@ export function resolveStaticIndexedMaterialRecord(options: {
 	const paletteRoute = options.materialTextureRoutes.find(
 		(route): route is StaticMaterialPaletteRoute =>
 			route.kind === "palette-lookup" &&
-			route.materialAssetId === options.materialAssetId,
+			route.materialRecordKey === materialRecordKey,
 	);
 	if (!paletteRoute) {
 		throw new Error(
@@ -390,8 +528,8 @@ export function resolveStaticIndexedMaterialRecord(options: {
 		width: indexRoute.width,
 		height: indexRoute.height,
 		paletteColorCount: paletteRoute.colorCount,
-		wrapS: "clamp",
-		wrapT: "clamp",
+		wrapS: indexRoute.wrapS,
+		wrapT: indexRoute.wrapT,
 		clipThreshold: isBase1ClipMapSurface(material.surfaceType) ? 8 : -1,
 	};
 }
@@ -408,7 +546,7 @@ export function collectStaticPreparedTextureRouteAssetIds(
 		preparedByAssetId,
 	);
 	const usages = hasIndexedRenderSurface
-		? (["detail"] as const)
+		? ([] as const)
 		: STATIC_MATERIAL_TEXTURE_USAGES;
 	return asset.payload.dependencies.renderSurfaceAssetIds
 		.map((renderSurfaceAssetId) => {
@@ -430,8 +568,7 @@ export function collectStaticPreparedTextureRouteAssetIds(
 export function formatStaticMaterialFamilyKey(
 	decision: ReturnType<typeof createCompactionEligibility>,
 ): string {
-	const family =
-		decision.decision === "compacted" ? decision.material.family : "direct";
+	const family = decision.material.family;
 	return `${STATIC_MATERIAL_FAMILY_KEY_PREFIX}${family}:${STATIC_MATERIAL_ALPHA_POLICY_KEY}=${decision.material.alphaPolicy}`;
 }
 
@@ -477,6 +614,15 @@ export function parseStaticMaterialFamilyKey(
 	});
 }
 
+export function resolveStaticMaterialFamilyAlphaTest(
+	family: StaticMaterialFamilyDescriptor,
+): number {
+	if (family.kind === "texture-page" && family.alphaPolicy === "cutout") {
+		return DIRECT_CLIP_MAP_ALPHA_TEST;
+	}
+	return 0;
+}
+
 function describeStaticMaterialFamilyKey(options: {
 	key: string;
 	family: StaticMaterialSerializedFamilyKind;
@@ -484,7 +630,7 @@ function describeStaticMaterialFamilyKey(options: {
 }): StaticMaterialFamilyDescriptor {
 	switch (options.family) {
 		case "indexed-paletted":
-			if (options.alphaPolicy !== "opaque") {
+			if (options.alphaPolicy === "opacity-translucent") {
 				return {
 					key: options.key,
 					kind: "unsupported",
@@ -496,9 +642,15 @@ function describeStaticMaterialFamilyKey(options: {
 			return {
 				key: options.key,
 				kind: "indexed-paletted",
-				alphaPolicy: "opaque",
+				alphaPolicy: options.alphaPolicy,
 			};
-		case "direct":
+		case "flat-constant-color":
+			return {
+				key: options.key,
+				kind: "flat-color",
+				sourceFamily: options.family,
+				alphaPolicy: options.alphaPolicy,
+			};
 		case "textured-opaque":
 		case "transparent-blended":
 		case "opacity-translucent":
@@ -508,7 +660,6 @@ function describeStaticMaterialFamilyKey(options: {
 				sourceFamily: options.family,
 				alphaPolicy: options.alphaPolicy,
 			};
-		case "flat-constant-color":
 		case "debug-pipeline":
 		case "unknown-unsupported":
 			return {
@@ -521,8 +672,19 @@ function describeStaticMaterialFamilyKey(options: {
 	}
 }
 
+function decodeArgbColor(
+	argb: number,
+): readonly [number, number, number, number] {
+	return [
+		((argb >>> 16) & 0xff) / 255,
+		((argb >>> 8) & 0xff) / 255,
+		(argb & 0xff) / 255,
+		((argb >>> 24) & 0xff) / 255,
+	];
+}
+
 function collectIndexedMaterialTextureRoutes(options: {
-	materialAssetId: string;
+	request: NormalizedStaticMaterialTextureRouteRequest;
 	material: PreparedMaterialRecipePayload;
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
 }): StaticMaterialTextureRoute[] {
@@ -559,16 +721,24 @@ function collectIndexedMaterialTextureRoutes(options: {
 	return [
 		{
 			kind: "indexed-texels",
-			materialAssetId: options.materialAssetId,
+			materialAssetId: options.request.materialAssetId,
+			materialRecordKey: options.request.materialRecordKey,
+			materialVariantSignature: options.request.materialVariantSignature,
 			renderSurfaceAssetId: indexedRenderSurface.assetId,
 			indexedFormat: indexedTexture.format,
 			bytes: indexedTexture.sourceBytes,
 			width: indexedTexture.width,
 			height: indexedTexture.height,
+			...resolveStaticMaterialRouteWrapMode({
+				renderSurface: indexedRenderSurface.renderSurface,
+				materialVariantSignature: options.request.materialVariantSignature,
+			}),
 		},
 		{
 			kind: "palette-lookup",
-			materialAssetId: options.materialAssetId,
+			materialAssetId: options.request.materialAssetId,
+			materialRecordKey: options.request.materialRecordKey,
+			materialVariantSignature: options.request.materialVariantSignature,
 			paletteAssetId: paletteSelection.paletteAssetId,
 			bytes: paletteData.colorsRgba,
 			colorCount: paletteData.colorCount,
@@ -594,27 +764,60 @@ function findIndexedRenderSurface(
 	return null;
 }
 
+function findDirectRenderSurface(
+	material: PreparedMaterialRecipePayload,
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>,
+): { assetId: string; renderSurface: PreparedRenderSurfacePayload } | null {
+	if (material.source.kind !== "texture") {
+		return null;
+	}
+	const selectedAssetId = material.source.selectedRenderSurfaceId !== null
+		? `render-surface/${formatHex32(material.source.selectedRenderSurfaceId)}`
+		: null;
+	const candidateAssetIds = selectedAssetId
+		? [
+				selectedAssetId,
+				...material.dependencies.renderSurfaceAssetIds.filter(
+					(assetId) => assetId !== selectedAssetId,
+				),
+			]
+		: material.dependencies.renderSurfaceAssetIds;
+	for (const renderSurfaceAssetId of candidateAssetIds) {
+		const renderSurface = getPreparedPayload(
+			preparedByAssetId,
+			renderSurfaceAssetId,
+			"render-surface",
+		);
+		if (!isIndexedTextureFormat(renderSurface.formatRaw)) {
+			return { assetId: renderSurfaceAssetId, renderSurface };
+		}
+	}
+	return null;
+}
+
 function formatStaticMaterialTextureRouteKey(
 	route: StaticMaterialTextureRoute,
 ): string {
 	switch (route.kind) {
 		case "prepared-texture":
-			return `${route.materialAssetId}|prepared:${route.preparedTextureAssetId}`;
+			return `${route.materialRecordKey}|prepared:${route.preparedTextureAssetId}`;
 		case "indexed-texels":
-			return `${route.materialAssetId}|indexed:${route.renderSurfaceAssetId}`;
+			return `${route.materialRecordKey}|indexed:${route.renderSurfaceAssetId}`;
 		case "palette-lookup":
-			return `${route.materialAssetId}|palette:${route.paletteAssetId}`;
+			return `${route.materialRecordKey}|palette:${route.paletteAssetId}`;
 	}
 }
 
-function routeSourceAssetId(route: StaticMaterialTextureRoute): string {
+function formatStaticMaterialTextureRefKey(
+	route: StaticMaterialTextureRoute,
+): string {
 	switch (route.kind) {
 		case "prepared-texture":
-			return route.preparedTextureAssetId;
+			return `texture:${route.materialRecordKey}:${route.preparedTextureAssetId}`;
 		case "indexed-texels":
-			return route.renderSurfaceAssetId;
+			return `texture:${route.materialRecordKey}:${route.renderSurfaceAssetId}:indexed-texels`;
 		case "palette-lookup":
-			return route.paletteAssetId;
+			return `texture:${route.materialRecordKey}:${route.paletteAssetId}:palette-lookup`;
 	}
 }
 
@@ -687,8 +890,4 @@ function getPreparedPayload<
 		PreparedAssetRecord["payload"],
 		{ kind: TKind }
 	>;
-}
-
-function uniqueSortedStrings(values: readonly string[]): string[] {
-	return [...new Set(values)].sort();
 }

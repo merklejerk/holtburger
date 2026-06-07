@@ -69,10 +69,10 @@ export function buildStaticBundleLayerTexturePages(options: {
 					virtualRefKey: ref.key,
 					sourceAssetId: ref.sourceAssetId,
 					rect: [
-						placement.x / texturePage.width,
-						placement.y / texturePage.height,
-						(placement.x + placement.width) / texturePage.width,
-						(placement.y + placement.height) / texturePage.height,
+						placement.x,
+						placement.y,
+						placement.width,
+						placement.height,
 					],
 				})),
 			});
@@ -96,7 +96,7 @@ export function createStaticBundleTexturePageDescriptor(
 		pageKind: "single-entry",
 		usageBucket: ref.usageBucket,
 		sampleClass: ref.sampleClass,
-		rect: [0, 0, 1, 1],
+		rect: [0, 0, ref.width, ref.height],
 		width: ref.width,
 		height: ref.height,
 		wrapS: ref.wrapS,
@@ -155,7 +155,7 @@ function createSingleEntryTexturePage(
 			{
 				virtualRefKey: ref.key,
 				sourceAssetId: ref.sourceAssetId,
-				rect: [0, 0, 1, 1],
+				rect: [0, 0, ref.width, ref.height],
 			},
 		],
 	};

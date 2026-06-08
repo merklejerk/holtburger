@@ -156,6 +156,7 @@ import {
 } from "./render-regression-diagnostics";
 import {
 	calculateTexturePageCoverage,
+	RENDER_RESOURCE_INSPECTION_OWNER_KIND,
 	type RenderResourceTexturePageIdentity,
 	type RenderResourceTexturePagePreview,
 } from "./render-resource-inspection";
@@ -2553,23 +2554,34 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		store: Webgl2WorldResourceStore,
 		identity: RenderResourceTexturePageIdentity,
 	): Webgl2ResidentTexturePageResource | null {
-		if (identity.ownerKind === "static-bundle") {
+		if (
+			identity.ownerKind === RENDER_RESOURCE_INSPECTION_OWNER_KIND.staticBundle
+		) {
 			return (
 				store.staticBundleLayerResources.layersByKey
 					.get(identity.ownerKey)
 					?.texturePagesByKey.get(identity.texturePageKey) ?? null
 			);
 		}
-		if (identity.ownerKind === "structured-interior") {
+		if (
+			identity.ownerKind ===
+			RENDER_RESOURCE_INSPECTION_OWNER_KIND.structuredInterior
+		) {
 			return (
 				store.structuredInteriorResources.cellsByKey
 					.get(identity.ownerKey)
 					?.texturePagesByKey.get(identity.texturePageKey) ?? null
 			);
 		}
-		return (
-			store.productTerrainTexturePagesByKey.get(identity.texturePageKey) ??
-			null
+		if (identity.ownerKind === RENDER_RESOURCE_INSPECTION_OWNER_KIND.terrain) {
+			return (
+				store.productTerrainTexturePagesByKey.get(identity.texturePageKey) ??
+				null
+			);
+		}
+		const exhaustiveOwnerKind: never = identity.ownerKind;
+		throw new Error(
+			`Unhandled inspectable texture page owner kind: ${exhaustiveOwnerKind}`,
 		);
 	}
 

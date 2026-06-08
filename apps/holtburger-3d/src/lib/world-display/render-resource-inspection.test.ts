@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
 	formatRenderResourceInspectionKeyForDisplay,
 	inspectWebgl2WorldResources,
+	RENDER_RESOURCE_INSPECTION_OWNER_KIND,
 } from "./render-resource-inspection";
 import type { Webgl2WorldResourceStore } from "./webgl2-world-resources";
 
@@ -42,9 +43,9 @@ describe("render resource inspection", () => {
 			},
 		]);
 		expect(snapshot.texturePages.map((page) => page.ownerKind)).toEqual([
-			"static-bundle",
-			"structured-interior",
-			"terrain",
+			RENDER_RESOURCE_INSPECTION_OWNER_KIND.staticBundle,
+			RENDER_RESOURCE_INSPECTION_OWNER_KIND.structuredInterior,
+			RENDER_RESOURCE_INSPECTION_OWNER_KIND.terrain,
 		]);
 		expect(
 			snapshot.texturePages.map((page) => ({

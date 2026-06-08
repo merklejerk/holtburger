@@ -1248,7 +1248,7 @@ Verification:
 
 ## Phase 14: Type Renderer Decision Vocabulary In Slices
 
-Status: Phase 14C implemented.
+Status: Phase 14D implemented.
 
 Phase 11's remaining follow-up should target renderer decision vocabularies, not every string in the renderer. The broader cleanup is worthwhile, but it should be split by semantic layer so each cutover is reviewable and can remove old routing paths decisively. The goal is to prevent another texture-page-style drift where similar string concepts accumulate different meanings across artifact creation, resource construction, submit, picker, and inspector paths.
 
@@ -1374,6 +1374,22 @@ Phase 14C implementation notes:
 Phase 14C verification:
 
 - `npm run --prefix apps/holtburger-3d test:ts -- src/lib/world-display/world-render-frame.test.ts src/lib/world-display/webgl2-world-submit.test.ts` passed.
+- `npm run --prefix apps/holtburger-3d test:ts` passed.
+- `npm run --prefix apps/holtburger-3d lint:ts` passed.
+- `npm run --prefix apps/holtburger-3d check` passed.
+
+Phase 14D implementation notes:
+
+- Audited picker/resource-inspector DTO strings for renderer decision flow rather than broadly enuming every displayed label.
+- Left display-only fields such as material `familyKey`, `alphaPolicy`, resource labels, and serialized resource ids as strings. They are snapshot/report text, not submit or resource-routing inputs.
+- Identified texture-preview identity as a live renderer boundary: browser-mode UI sends `RenderResourceTexturePageIdentity.ownerKind` back into `webgl2-world-display-renderer-impl.ts` to select static-bundle, structured-interior, or terrain texture page lookup.
+- Added `RENDER_RESOURCE_INSPECTION_OWNER_KIND` as the typed owner-kind vocabulary for resource inspection and texture-preview lookup.
+- Updated resource snapshot construction, resource-inspection tests, and WebGL texture-preview resolution to use owner-kind constants. The preview resolver now handles all owner kinds explicitly instead of falling through to terrain for unknown values.
+- Kept this owner-kind vocabulary separate from `WEBGL2_MATERIAL_DRAW_DOMAIN` and `WorldRenderCategory`; resource-inspection owner kinds describe preview/resource ownership, not draw ordering or material submit metrics.
+
+Phase 14D verification:
+
+- `npm run --prefix apps/holtburger-3d test:ts -- src/lib/world-display/render-resource-inspection.test.ts` passed.
 - `npm run --prefix apps/holtburger-3d test:ts` passed.
 - `npm run --prefix apps/holtburger-3d lint:ts` passed.
 - `npm run --prefix apps/holtburger-3d check` passed.

@@ -16,6 +16,7 @@ import { createWebgl2RenderMetrics } from "./webgl2-render-metrics";
 import { Webgl2StateCache } from "./webgl2-state-cache";
 import {
 	buildWorldRenderFrame,
+	WORLD_RENDER_CANDIDATE_KIND,
 	type WorldRenderFrame,
 	type WorldRenderCandidate,
 	type WorldRenderFrameMetrics,
@@ -1106,14 +1107,14 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			...currentResources.worldStore.terrainRenderCandidates.map(
 				(candidate) => ({
 					id: candidate.id,
-					kind: "terrain-tile" as const,
+					kind: WORLD_RENDER_CANDIDATE_KIND.terrainTile,
 					bvhItemKeys: candidate.bvhItemKeys,
 					bvhFallbackReason: candidate.bvhFallbackReason,
 				}),
 			),
 			...currentResources.worldStore.transitionPortalMasks.map((mask) => ({
 				id: mask.id,
-				kind: "portal-mask" as const,
+				kind: WORLD_RENDER_CANDIDATE_KIND.portalMask,
 				bvhItemKeys: mask.bvhItemKeys,
 				bvhFallbackReason: mask.bvhFallbackReason,
 			})),
@@ -3129,7 +3130,7 @@ function createStaticBundleLayerRenderCandidates(
 			);
 			return {
 				id: describeStaticBundleLayerResourceKey(bundle),
-				kind: "static-bundle-layer",
+				kind: WORLD_RENDER_CANDIDATE_KIND.staticBundleLayer,
 				bvhItemKeys,
 				bvhFallbackReason:
 					bvhItemKeys.length === 0

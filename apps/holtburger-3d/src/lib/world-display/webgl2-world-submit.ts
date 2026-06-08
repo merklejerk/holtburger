@@ -11,7 +11,10 @@ import {
 	resolveStaticMaterialFamilyAlphaTest,
 	type StaticMaterialFamilyDescriptor,
 } from "./static-material-artifacts";
-import type { WorldRenderFrame } from "./world-render-frame";
+import {
+	WORLD_RENDER_DRAW_KIND,
+	type WorldRenderFrame,
+} from "./world-render-frame";
 import type { Webgl2ProgramResource } from "./webgl2-gl";
 import type { Webgl2StateCache } from "./webgl2-state-cache";
 import type { Webgl2TransitionPortalMaskResource } from "./webgl2-world-resources";
@@ -156,9 +159,13 @@ export interface Webgl2WorldSubmitMetrics {
 	structuredInteriorShellTriangleCount: number;
 }
 
+export const WEBGL2_MATERIAL_DRAW_DOMAIN = {
+	staticBundle: "static-bundle",
+	structuredInterior: "structured-interior",
+} as const;
+
 export type Webgl2MaterialDrawDomain =
-	| "static-bundle"
-	| "structured-interior";
+	(typeof WEBGL2_MATERIAL_DRAW_DOMAIN)[keyof typeof WEBGL2_MATERIAL_DRAW_DOMAIN];
 
 const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	visibleTerrainTileCount: 0,
@@ -291,8 +298,8 @@ function createEmptyMaterialDrawDomainCounts(): Record<
 	number
 > {
 	return {
-		"static-bundle": 0,
-		"structured-interior": 0,
+		[WEBGL2_MATERIAL_DRAW_DOMAIN.staticBundle]: 0,
+		[WEBGL2_MATERIAL_DRAW_DOMAIN.structuredInterior]: 0,
 	};
 }
 
@@ -942,7 +949,7 @@ function submitWebgl2StructuredInteriorMaterialSlice({
 		viewProjectionMatrix,
 		metrics,
 		surface: {
-			domain: "structured-interior",
+			domain: WEBGL2_MATERIAL_DRAW_DOMAIN.structuredInterior,
 			vertexArray: slice.vertexArray.vertexArray,
 			indexCount: slice.indexCount,
 			indexType: slice.indexType,
@@ -999,7 +1006,7 @@ function submitWebgl2StaticBundleGeometry({
 		viewProjectionMatrix,
 		metrics,
 		surface: {
-			domain: "static-bundle",
+			domain: WEBGL2_MATERIAL_DRAW_DOMAIN.staticBundle,
 			vertexArray: geometry.vertexArray.vertexArray,
 			indexCount: geometry.indexCount,
 			indexType: geometry.indexType,
@@ -1701,7 +1708,7 @@ export function planWebgl2TerrainTileSubmitOrder(
 	const visibleTerrainTiles: Webgl2TerrainTileResource[] = [];
 	for (const pass of frame.passes) {
 		for (const draw of pass.draws) {
-			if (draw.kind !== "terrain-tile") {
+			if (draw.kind !== WORLD_RENDER_DRAW_KIND.terrainTile) {
 				continue;
 			}
 			const terrainTile = terrainTilesById.get(draw.terrainTileId);
@@ -1728,7 +1735,7 @@ export function planWebgl2StaticBundleLayerSubmitOrder(
 	}
 	for (const pass of frame.passes) {
 		for (const draw of pass.draws) {
-			if (draw.kind !== "static-bundle-layer") {
+			if (draw.kind !== WORLD_RENDER_DRAW_KIND.staticBundleLayer) {
 				continue;
 			}
 			const layer = staticBundleLayerResources.layersByKey.get(
@@ -1760,7 +1767,7 @@ export function planWebgl2TransitionPortalMaskSubmitOrder(
 	}
 	for (const pass of frame.passes) {
 		for (const draw of pass.draws) {
-			if (draw.kind !== "transition-portal-mask") {
+			if (draw.kind !== WORLD_RENDER_DRAW_KIND.transitionPortalMask) {
 				continue;
 			}
 			const mask = transitionPortalMasksById.get(draw.transitionPortalMaskId);

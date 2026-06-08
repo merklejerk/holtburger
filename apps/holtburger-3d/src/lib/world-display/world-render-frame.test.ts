@@ -5,6 +5,10 @@ import type { SceneCameraFrame } from "./camera";
 import {
 	buildRenderFrustumFromProjectionMatrix,
 	buildWorldRenderFrame as buildWorldRenderFrameImpl,
+	WORLD_RENDER_CANDIDATE_KIND,
+	WORLD_RENDER_CATEGORY,
+	WORLD_RENDER_DRAW_KIND,
+	WORLD_RENDER_PASS_ID,
 	type WorldRenderCandidate,
 } from "./world-render-frame";
 import { buildSceneCameraViewProjectionMatrix } from "./render-math";
@@ -20,7 +24,7 @@ describe("buildWorldRenderFrame", () => {
 			candidates: [
 				createBatch({
 					id: "terrain/culled",
-					kind: "terrain-tile",
+					kind: WORLD_RENDER_CANDIDATE_KIND.terrainTile,
 					itemKeys: ["terrain:landblock:0203ffff:quad:7"],
 				}),
 			],
@@ -33,7 +37,7 @@ describe("buildWorldRenderFrame", () => {
 			terrainScene: createTerrainScene(),
 		});
 
-		expect(frame.passes).toEqual([{ id: "world", draws: [] }]);
+		expect(frame.passes).toEqual([{ id: WORLD_RENDER_PASS_ID.world, draws: [] }]);
 		expect(frame.metrics.registeredBatchCount).toBe(1);
 		expect(frame.metrics.keyedBatchCount).toBe(1);
 		expect(frame.metrics.candidateBatchCount).toBe(0);
@@ -45,12 +49,12 @@ describe("buildWorldRenderFrame", () => {
 			candidates: [
 				createBatch({
 					id: "static-bundle-layer/world|landblock/0203ffff|object-b",
-					kind: "static-bundle-layer",
+					kind: WORLD_RENDER_CANDIDATE_KIND.staticBundleLayer,
 					fallbackReason: "test static fallback",
 				}),
 				createBatch({
 					id: "terrain/fallback",
-					kind: "terrain-tile",
+					kind: WORLD_RENDER_CANDIDATE_KIND.terrainTile,
 					fallbackReason: "test terrain fallback",
 				}),
 			],
@@ -65,15 +69,15 @@ describe("buildWorldRenderFrame", () => {
 
 		expect(frame.passes[0]?.draws).toEqual([
 			{
-				kind: "terrain-tile",
+				kind: WORLD_RENDER_DRAW_KIND.terrainTile,
 				terrainTileId: "terrain/fallback",
-				category: "terrain",
+				category: WORLD_RENDER_CATEGORY.terrain,
 			},
 			{
-				kind: "static-bundle-layer",
+				kind: WORLD_RENDER_DRAW_KIND.staticBundleLayer,
 				staticBundleLayerId:
 					"static-bundle-layer/world|landblock/0203ffff|object-b",
-				category: "static",
+				category: WORLD_RENDER_CATEGORY.static,
 			},
 		]);
 		expect(frame.metrics.candidateBatchCount).toBe(2);
@@ -86,16 +90,16 @@ describe("buildWorldRenderFrame", () => {
 		const frame = buildFrameWithFallbackCandidates([
 			createBatch({
 				id: "terrain-tile/terrain/0203ffff",
-				kind: "terrain-tile",
+				kind: WORLD_RENDER_CANDIDATE_KIND.terrainTile,
 				fallbackReason: "test terrain tile fallback",
 			}),
 		]);
 
 		expect(frame.passes[0]?.draws).toEqual([
 			{
-				kind: "terrain-tile",
+				kind: WORLD_RENDER_DRAW_KIND.terrainTile,
 				terrainTileId: "terrain-tile/terrain/0203ffff",
-				category: "terrain",
+				category: WORLD_RENDER_CATEGORY.terrain,
 			},
 		]);
 		expect(frame.metrics.visibleDrawCountsByCategory.terrain).toBe(1);

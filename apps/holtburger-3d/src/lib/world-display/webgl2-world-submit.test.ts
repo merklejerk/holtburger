@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import type { WorldRenderFrame } from "./world-render-frame";
+import {
+	WORLD_RENDER_CATEGORY,
+	WORLD_RENDER_DRAW_KIND,
+	WORLD_RENDER_PASS_ID,
+	type WorldRenderDraw,
+	type WorldRenderFrame,
+} from "./world-render-frame";
 import {
 	planWebgl2StaticBundleLayerSubmitOrder,
 	planWebgl2TerrainTileSubmitOrder,
@@ -27,8 +33,8 @@ describe("webgl2 world submit planning", () => {
 		expect(
 			planWebgl2TerrainTileSubmitOrder(
 				createFrame([
-					{ kind: "terrain-tile", terrainTileId: "terrain-tile/b" },
-					{ kind: "terrain-tile", terrainTileId: "terrain-tile/a" },
+					createTerrainDraw("terrain-tile/b"),
+					createTerrainDraw("terrain-tile/a"),
 				]),
 				terrainTilesById,
 			).map((tile) => tile.id),
@@ -38,7 +44,7 @@ describe("webgl2 world submit planning", () => {
 	it("fails when a terrain draw references a missing terrain tile resource", () => {
 		expect(() =>
 			planWebgl2TerrainTileSubmitOrder(
-				createFrame([{ kind: "terrain-tile", terrainTileId: "missing" }]),
+				createFrame([createTerrainDraw("missing")]),
 				new Map(),
 			),
 		).toThrow("missing WebGL2 terrain tile missing");
@@ -53,8 +59,8 @@ describe("webgl2 world submit planning", () => {
 		expect(
 			planWebgl2StaticBundleLayerSubmitOrder(
 				createFrame([
-					{ kind: "static-bundle-layer", staticBundleLayerId: "layer/b" },
-					{ kind: "static-bundle-layer", staticBundleLayerId: "layer/a" },
+					createStaticBundleLayerDraw("layer/b"),
+					createStaticBundleLayerDraw("layer/a"),
 				]),
 				store,
 			).map((layer) => layer.key),
@@ -70,14 +76,8 @@ describe("webgl2 world submit planning", () => {
 		expect(
 			planWebgl2TransitionPortalMaskSubmitOrder(
 				createFrame([
-					{
-						kind: "transition-portal-mask",
-						transitionPortalMaskId: "mask/b",
-					},
-					{
-						kind: "transition-portal-mask",
-						transitionPortalMaskId: "mask/a",
-					},
+					createTransitionPortalMaskDraw("mask/b"),
+					createTransitionPortalMaskDraw("mask/a"),
 				]),
 				masksById,
 			).map((mask) => mask.id),
@@ -143,21 +143,7 @@ describe("webgl2 world submit planning", () => {
 	});
 });
 
-type TestDraw =
-	| {
-			kind: "terrain-tile";
-			terrainTileId: string;
-	  }
-	| {
-			kind: "static-bundle-layer";
-			staticBundleLayerId: string;
-	  }
-	| {
-			kind: "transition-portal-mask";
-			transitionPortalMaskId: string;
-	  };
-
-function createFrame(draws: readonly TestDraw[]): WorldRenderFrame {
+function createFrame(draws: readonly WorldRenderDraw[]): WorldRenderFrame {
 	return {
 		cameraFrame: {
 			position: { x: 0, y: 0, z: 0 },
@@ -171,29 +157,8 @@ function createFrame(draws: readonly TestDraw[]): WorldRenderFrame {
 		viewProjectionMatrix: new Float32Array(16),
 		passes: [
 			{
-				id: "world",
-				draws: draws.map((draw) => {
-					switch (draw.kind) {
-						case "terrain-tile":
-							return {
-								kind: "terrain-tile",
-								terrainTileId: draw.terrainTileId,
-								category: "terrain",
-							};
-						case "static-bundle-layer":
-							return {
-								kind: "static-bundle-layer",
-								staticBundleLayerId: draw.staticBundleLayerId,
-								category: "static",
-							};
-						case "transition-portal-mask":
-							return {
-								kind: "transition-portal-mask",
-								transitionPortalMaskId: draw.transitionPortalMaskId,
-								category: "portal-mask",
-							};
-					}
-				}),
+				id: WORLD_RENDER_PASS_ID.world,
+				draws: [...draws],
 			},
 		],
 		metrics: {
@@ -218,11 +183,37 @@ function createFrame(draws: readonly TestDraw[]): WorldRenderFrame {
 
 function createZeroCategoryCounts() {
 	return {
-		terrain: 0,
-		"structured-interior": 0,
-		static: 0,
-		"portal-mask": 0,
-		"debug-overlay": 0,
+		[WORLD_RENDER_CATEGORY.terrain]: 0,
+		[WORLD_RENDER_CATEGORY.structuredInterior]: 0,
+		[WORLD_RENDER_CATEGORY.static]: 0,
+		[WORLD_RENDER_CATEGORY.portalMask]: 0,
+		[WORLD_RENDER_CATEGORY.debugOverlay]: 0,
+	};
+}
+
+function createTerrainDraw(terrainTileId: string): WorldRenderDraw {
+	return {
+		kind: WORLD_RENDER_DRAW_KIND.terrainTile,
+		terrainTileId,
+		category: WORLD_RENDER_CATEGORY.terrain,
+	};
+}
+
+function createStaticBundleLayerDraw(staticBundleLayerId: string): WorldRenderDraw {
+	return {
+		kind: WORLD_RENDER_DRAW_KIND.staticBundleLayer,
+		staticBundleLayerId,
+		category: WORLD_RENDER_CATEGORY.static,
+	};
+}
+
+function createTransitionPortalMaskDraw(
+	transitionPortalMaskId: string,
+): WorldRenderDraw {
+	return {
+		kind: WORLD_RENDER_DRAW_KIND.transitionPortalMask,
+		transitionPortalMaskId,
+		category: WORLD_RENDER_CATEGORY.portalMask,
 	};
 }
 

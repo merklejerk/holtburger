@@ -77,6 +77,7 @@ interface StaticBundleSourceObject {
 	owningLandblockId: number;
 	owningEnvCellId: number | null;
 	kind: StaticBundleObjectRecord["kind"];
+	sourceBounds: StaticBundleSpatialHint["bounds"] | null;
 	bounds: StaticBundleSpatialHint["bounds"] | null;
 	localPlacement: PlacementTransformDto;
 	sourceScale: Vec3Dto;
@@ -181,6 +182,16 @@ export function buildStaticObjectBundleArtifact({
 			owningLandblockId: object.owningLandblockId,
 			owningEnvCellId: object.owningEnvCellId,
 			kind: object.kind,
+			sourceBounds: object.sourceBounds,
+			instanceBounds: object.bounds,
+			localPlacement: object.localPlacement,
+			sourceScale: object.sourceScale,
+			partHints: object.parts.map((part) => ({
+				renderKey: `${object.objectKey}:part:${part.partIndex}`,
+				partIndex: part.partIndex,
+				gfxObjAssetId: part.gfxObjAssetId,
+				materialSlotCount: part.materialSlots.length,
+			})),
 		}),
 	);
 	const spatialHints = buildSpatialHints(sourceObjects);
@@ -287,6 +298,7 @@ function collectStaticBundleSourceObjects(
 							: member.kind === "generated-scenery"
 								? "generated-scenery"
 								: "scenery",
+					sourceBounds: member.sourceBounds,
 					bounds: member.instanceBounds,
 					localPlacement: member.localPlacement,
 					sourceScale: member.sourceScale,
@@ -316,6 +328,7 @@ function collectStaticBundleSourceObjects(
 			owningLandblockId: normalizeOutdoorLandblockId(job.scope.landblockId),
 			owningEnvCellId: envCellScope.envCellId,
 			kind: "indoor-static",
+			sourceBounds: member.sourceBounds,
 			bounds: member.instanceBounds,
 			localPlacement: member.localPlacement,
 			sourceScale: member.sourceScale,

@@ -95,11 +95,14 @@ describe("render spatial scene", () => {
 				artifactCoverage: {
 					sourcePartHintCount: 2,
 					sourcePartIndices: [0, 1],
+					sourceMaterialSlotCount: 5,
 					emittedDirectEntryCount: 1,
 					emittedCompactedBatchCount: 1,
 					emittedGeometryEntryCount: 2,
 					emittedDirectTriangleCount: 2,
 					emittedCompactedBatchTriangleCount: 1,
+					emittedZeroTriangleEntryCount: 0,
+					zeroTriangleMaterialRecordKeys: [],
 					materialRecordKeys: ["material:compacted", "material:direct"],
 					materialFamilyKeys: [
 						"static:flat-constant-color:alpha=opaque",
@@ -326,11 +329,13 @@ function createStaticBundleProductArtifact(): LandblockRenderProductWorkerResult
 								renderKey: `${objectKey}:part:0`,
 								partIndex: 0,
 								gfxObjAssetId: "gfx-obj/01000001",
+								materialSlotCount: 2,
 							},
 							{
 								renderKey: `${objectKey}:part:1`,
 								partIndex: 1,
 								gfxObjAssetId: "gfx-obj/01000002",
+								materialSlotCount: 3,
 							},
 						],
 					},

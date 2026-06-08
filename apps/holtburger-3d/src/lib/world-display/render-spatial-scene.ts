@@ -463,22 +463,43 @@ function deriveStaticBundleObjectCoverage(
 		...compactedBatches.map((batch) => batch.materialRecordKey),
 	]);
 	const sourcePartHints = objectRecord.partHints ?? [];
+	const directTriangleCounts = directEntries.map((entry) => entry.indices.length / 3);
+	const compactedBatchTriangleCounts = compactedBatches.map(
+		(batch) => batch.indices.length / 3,
+	);
+	const zeroTriangleMaterialRecordKeys = uniqueSortedStrings([
+		...directEntries.flatMap((entry) =>
+			entry.indices.length === 0 ? [entry.materialRecordKey] : [],
+		),
+		...compactedBatches.flatMap((batch) =>
+			batch.indices.length === 0 ? [batch.materialRecordKey] : [],
+		),
+	]);
 	return {
 		sourcePartHintCount: sourcePartHints.length,
 		sourcePartIndices: [
 			...new Set(sourcePartHints.map((hint) => hint.partIndex)),
 		].sort((left, right) => left - right),
+		sourceMaterialSlotCount: sourcePartHints.reduce(
+			(total, hint) => total + (hint.materialSlotCount ?? 0),
+			0,
+		),
 		emittedDirectEntryCount: directEntries.length,
 		emittedCompactedBatchCount: compactedBatches.length,
 		emittedGeometryEntryCount: directEntries.length + compactedBatches.length,
-		emittedDirectTriangleCount: directEntries.reduce(
-			(total, entry) => total + entry.indices.length / 3,
+		emittedDirectTriangleCount: directTriangleCounts.reduce(
+			(total, count) => total + count,
 			0,
 		),
-		emittedCompactedBatchTriangleCount: compactedBatches.reduce(
-			(total, batch) => total + batch.indices.length / 3,
+		emittedCompactedBatchTriangleCount: compactedBatchTriangleCounts.reduce(
+			(total, count) => total + count,
 			0,
 		),
+		emittedZeroTriangleEntryCount: [
+			...directTriangleCounts,
+			...compactedBatchTriangleCounts,
+		].filter((count) => count === 0).length,
+		zeroTriangleMaterialRecordKeys,
 		materialRecordKeys,
 		materialFamilyKeys: uniqueSortedStrings(
 			materialRecordKeys.flatMap((key) => {

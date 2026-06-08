@@ -1404,11 +1404,17 @@
 					? [
 							{
 								label: "Artifact parts",
-								value: `${coverage.sourcePartHintCount} hint${coverage.sourcePartHintCount === 1 ? "" : "s"} (${summarizeNumberList(coverage.sourcePartIndices)})`,
+								value: `${coverage.sourcePartHintCount} hint${coverage.sourcePartHintCount === 1 ? "" : "s"} (${summarizeNumberList(coverage.sourcePartIndices)}), ${coverage.sourceMaterialSlotCount} source material slot${coverage.sourceMaterialSlotCount === 1 ? "" : "s"}`,
 							},
 							{
 								label: "Artifact geometry",
-								value: `${coverage.emittedGeometryEntryCount} entr${coverage.emittedGeometryEntryCount === 1 ? "y" : "ies"} (${coverage.emittedDirectEntryCount} direct/${coverage.emittedCompactedBatchCount} compacted); direct tris ${coverage.emittedDirectTriangleCount}, compacted batch tris ${coverage.emittedCompactedBatchTriangleCount}`,
+								value: `${coverage.emittedGeometryEntryCount} entr${coverage.emittedGeometryEntryCount === 1 ? "y" : "ies"} (${coverage.emittedDirectEntryCount} direct/${coverage.emittedCompactedBatchCount} compacted); direct tris ${coverage.emittedDirectTriangleCount}, containing batch tris ${coverage.emittedCompactedBatchTriangleCount}, zero-tri entries ${coverage.emittedZeroTriangleEntryCount}`,
+							},
+							{
+								label: "Zero-tri materials",
+								value: summarizeStringList(
+									coverage.zeroTriangleMaterialRecordKeys,
+								),
 							},
 							{
 								label: "Artifact materials",

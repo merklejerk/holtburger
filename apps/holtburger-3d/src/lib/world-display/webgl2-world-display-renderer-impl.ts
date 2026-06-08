@@ -598,6 +598,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	for (const artifact of staticLandblockRenderProducts.artifacts) {
 		staticProductMetadata.commitProduct(artifact);
 	}
+	const selectedOverlayModelViewProjection = new Float32Array(16);
 
 	const canvas = document.createElement("canvas");
 	canvas.className = WEBGL2_CANVAS_CLASS_NAME;
@@ -1001,8 +1002,6 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			renderFrame(frameAt);
 		});
 	}
-
-	const selectedOverlayModelViewProjection = new Float32Array(16);
 
 	function renderFrame(frameAt: number): void {
 		if (!resources) {

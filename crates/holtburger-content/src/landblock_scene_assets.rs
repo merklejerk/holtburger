@@ -1388,32 +1388,41 @@ fn build_outdoor_member_spatial_items(
     items
 }
 
-fn transform_render_bounds_by_ac_placement(
-    bounds: PreparedAabb,
-    placement: &Frame,
-    scale: PreparedVec3,
+fn transform_render_local_bounds_by_ac_frame_conservative(
+    render_bounds: PreparedAabb,
+    ac_frame: &Frame,
+    ac_scale: PreparedVec3,
 ) -> PreparedAabb {
-    let center = PreparedVec3 {
-        x: (bounds.min.x + bounds.max.x) * 0.5,
-        y: (bounds.min.y + bounds.max.y) * 0.5,
-        z: (bounds.min.z + bounds.max.z) * 0.5,
+    // Source render geometry is already in renderer axes ({x, z, -y}); DAT
+    // placement frames and source scale are still in AC axes.
+    let render_center = PreparedVec3 {
+        x: (render_bounds.min.x + render_bounds.max.x) * 0.5,
+        y: (render_bounds.min.y + render_bounds.max.y) * 0.5,
+        z: (render_bounds.min.z + render_bounds.max.z) * 0.5,
     };
-    let half_extent = PreparedVec3 {
-        x: (bounds.max.x - bounds.min.x).abs() * 0.5 * scale.x.abs(),
-        y: (bounds.max.y - bounds.min.y).abs() * 0.5 * scale.y.abs(),
-        z: (bounds.max.z - bounds.min.z).abs() * 0.5 * scale.z.abs(),
+    let render_half_extent = PreparedVec3 {
+        x: (render_bounds.max.x - render_bounds.min.x).abs() * 0.5,
+        y: (render_bounds.max.y - render_bounds.min.y).abs() * 0.5,
+        z: (render_bounds.max.z - render_bounds.min.z).abs() * 0.5,
     };
-    let radius = (half_extent.x * half_extent.x
-        + half_extent.y * half_extent.y
-        + half_extent.z * half_extent.z)
+    let ac_center = render_vector_to_ac_space(render_center);
+    let ac_half_extent = render_extents_to_ac_extents(render_half_extent);
+    let scaled_half_extent = PreparedVec3 {
+        x: ac_half_extent.x * ac_scale.x.abs(),
+        y: ac_half_extent.y * ac_scale.y.abs(),
+        z: ac_half_extent.z * ac_scale.z.abs(),
+    };
+    let radius = (scaled_half_extent.x * scaled_half_extent.x
+        + scaled_half_extent.y * scaled_half_extent.y
+        + scaled_half_extent.z * scaled_half_extent.z)
         .sqrt();
     let scaled_center = holtburger_common::Vector3 {
-        x: center.x * scale.x,
-        y: center.y * scale.y,
-        z: center.z * scale.z,
+        x: ac_center.x * ac_scale.x,
+        y: ac_center.y * ac_scale.y,
+        z: ac_center.z * ac_scale.z,
     };
-    let center = convert_ac_vector_to_render_space(
-        placement.origin + rotate_ac_vector(scaled_center, placement.orientation),
+    let center = ac_vector_to_render_space(
+        ac_frame.origin + rotate_ac_vector(scaled_center, ac_frame.orientation),
     );
     PreparedAabb {
         min: PreparedVec3 {
@@ -1740,13 +1749,17 @@ fn conservative_instance_bounds(
     scale: PreparedVec3,
 ) -> PreparedAabb {
     if part_placements.is_empty() {
-        return transform_render_bounds_by_ac_placement(source_bounds, placement, scale);
+        return transform_render_local_bounds_by_ac_frame_conservative(
+            source_bounds,
+            placement,
+            scale,
+        );
     }
 
     part_placements
         .iter()
         .map(|part_placement| {
-            transform_render_bounds_by_ac_placement(
+            transform_render_local_bounds_by_ac_frame_conservative(
                 source_bounds,
                 &combine_ac_frames(placement, part_placement),
                 scale,
@@ -1959,7 +1972,7 @@ fn build_portal_polygon_points(
         .vertex_ids
         .iter()
         .filter_map(|vertex_id| vertex_array.vertices.get(vertex_id))
-        .map(|vertex| convert_ac_vector_to_render_space(vertex.origin))
+        .map(|vertex| ac_vector_to_render_space(vertex.origin))
         .collect()
 }
 
@@ -1969,7 +1982,7 @@ fn derive_portal_aperture_source_plane(
 ) -> Option<PreparedPortalAperturePlane> {
     let source_plane = find_portal_plane_by_portal_reference(drawing_bsp?, portal)?;
     Some(PreparedPortalAperturePlane {
-        normal: convert_ac_vector_to_render_space(source_plane.normal),
+        normal: ac_vector_to_render_space(source_plane.normal),
         constant: -source_plane.d,
         source: PreparedPortalAperturePlaneSource::DrawingBspPortal,
     })
@@ -2303,8 +2316,8 @@ fn append_polygon_render_side_geometry(
                 .vertices
                 .get(&vertex_id)
                 .expect("missing vertices were filtered before triangulation");
-            let render_position = convert_ac_vector_to_render_space(vertex.origin);
-            let render_normal = convert_ac_vector_to_render_space(vertex.normal);
+            let render_position = ac_vector_to_render_space(vertex.origin);
+            let render_normal = ac_vector_to_render_space(vertex.normal);
             buffers
                 .positions
                 .extend([render_position.x, render_position.y, render_position.z]);
@@ -2352,11 +2365,27 @@ fn collect_drawing_bsp_node_polygon_ids(node: &BspNode, polygon_ids: &mut HashSe
     }
 }
 
-fn convert_ac_vector_to_render_space(vector: holtburger_common::Vector3) -> PreparedVec3 {
+fn ac_vector_to_render_space(vector: holtburger_common::Vector3) -> PreparedVec3 {
     PreparedVec3 {
         x: vector.x,
         y: vector.z,
         z: if vector.y == 0.0 { 0.0 } else { -vector.y },
+    }
+}
+
+fn render_vector_to_ac_space(vector: PreparedVec3) -> holtburger_common::Vector3 {
+    holtburger_common::Vector3 {
+        x: vector.x,
+        y: if vector.z == 0.0 { 0.0 } else { -vector.z },
+        z: vector.y,
+    }
+}
+
+fn render_extents_to_ac_extents(extents: PreparedVec3) -> PreparedVec3 {
+    PreparedVec3 {
+        x: extents.x,
+        y: extents.z,
+        z: extents.y,
     }
 }
 
@@ -3059,6 +3088,49 @@ mod tests {
                 x: 13.0,
                 y: 7.0,
                 z: -24.0,
+            }
+        );
+        assert_eq!(bounds.max, bounds.min);
+    }
+
+    #[test]
+    fn static_instance_bounds_convert_render_local_center_before_ac_placement() {
+        let placement = Frame {
+            origin: holtburger_common::Vector3 {
+                x: 10.0,
+                y: 20.0,
+                z: 2.0,
+            },
+            orientation: holtburger_common::Quaternion::identity(),
+        };
+        let bounds = conservative_instance_bounds(
+            &placement,
+            &[],
+            PreparedAabb {
+                min: PreparedVec3 {
+                    x: 1.0,
+                    y: 3.0,
+                    z: -4.0,
+                },
+                max: PreparedVec3 {
+                    x: 1.0,
+                    y: 3.0,
+                    z: -4.0,
+                },
+            },
+            PreparedVec3 {
+                x: 2.0,
+                y: 3.0,
+                z: 5.0,
+            },
+        );
+
+        assert_eq!(
+            bounds.min,
+            PreparedVec3 {
+                x: 12.0,
+                y: 17.0,
+                z: -32.0,
             }
         );
         assert_eq!(bounds.max, bounds.min);

@@ -1,4 +1,5 @@
 import type { PreparedFloat32Array } from "../assets/types";
+import type { PlacementTransformDto, Vec3Dto } from "../host/contracts";
 import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import type { RenderBounds } from "./render-spatial-math";
 
@@ -188,6 +189,10 @@ export interface StaticBundleObjectRecord {
 	owningLandblockId: number;
 	owningEnvCellId: number | null;
 	kind: "scenery" | "building" | "generated-scenery" | "indoor-static";
+	sourceBounds?: RenderBounds | null;
+	instanceBounds?: RenderBounds | null;
+	localPlacement?: PlacementTransformDto;
+	sourceScale?: Vec3Dto;
 	partHints?: readonly StaticBundlePartHint[];
 }
 
@@ -195,6 +200,7 @@ export interface StaticBundlePartHint {
 	renderKey: string;
 	partIndex: number;
 	gfxObjAssetId?: string;
+	materialSlotCount?: number;
 	bounds?: RenderBounds;
 }
 

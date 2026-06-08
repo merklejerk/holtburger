@@ -122,9 +122,8 @@ describe("webgl2 world resources", () => {
 		const firstTexturePage =
 			[...store.productTerrainTexturePagesByKey.values()][0] ?? null;
 		expect(firstTexturePage).toMatchObject({
-			family: "terrain-color",
+			bucket: "terrain-color",
 			textureIndex: 0,
-			usageBucket: "terrain-color",
 			sampleClass: "rgba-color",
 			pageKind: "packed-atlas",
 			indexedFormat: null,
@@ -138,7 +137,7 @@ describe("webgl2 world resources", () => {
 			],
 		});
 		expect(firstTexturePage?.entries[0]?.rect).toEqual([96, 96, 1, 1]);
-		expect(store.productTerrainTexturePagesByFamilyIndex.get("terrain-color:0"))
+		expect(store.productTerrainTexturePagesByBucketIndex.get("terrain-color:0"))
 			.toBe(firstTexturePage);
 
 		commitWebgl2TerrainProductResources({
@@ -573,7 +572,7 @@ function createDetailedLandblockProductArtifact(
 					{
 						key: "interior-texture-ref",
 						sourceAssetId: "prepared-texture/06000001/raw",
-						usageBucket: "base-color",
+						role: "base-color",
 						sampleClass: "rgba-color",
 						width: 1,
 						height: 1,
@@ -588,7 +587,7 @@ function createDetailedLandblockProductArtifact(
 						key: "interior-texture-page",
 						scopeKey: `detailed:${landblockId}:outdoor-env-cells`,
 						pageKind: "single-entry",
-						usageBucket: "base-color",
+						role: "base-color",
 						sampleClass: "rgba-color",
 						width: 1,
 						height: 1,

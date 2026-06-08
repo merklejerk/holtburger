@@ -5,7 +5,7 @@ import type { TerrainTileLayerPlan } from "../../terrain-tile-plan";
 import type { RenderBvhItemKey } from "../../prepared-bvh-visibility";
 import type { RenderChunkTransform } from "../../render-anchor";
 import type { RenderIndexedGeometry } from "../../indexed-render-geometry";
-import type { TerrainTexturePageFamily } from "../../texture-pages/texture-page-atlas-planner";
+import type { TerrainTexturePageBucket } from "../../texture-pages/texture-page-binding";
 import type { TerrainSceneTile } from "../../terrain-scene";
 import type { PreparedTerrainMesh } from "../../../assets/types";
 import type { ResolvedRegionDetailOverlayPlan } from "../../region-detail-overlays";
@@ -84,7 +84,7 @@ export interface Webgl2TerrainTileDrawSliceResource {
 }
 
 export interface Webgl2TerrainTileTexturePageBinding {
-	family: TerrainTexturePageFamily;
+	bucket: TerrainTexturePageBucket;
 	atlasEntryKey: string;
 	textureIndex: number | null;
 	rect: readonly [number, number, number, number] | null;
@@ -93,7 +93,7 @@ export interface Webgl2TerrainTileTexturePageBinding {
 
 export interface Webgl2TerrainTexturePageResource
 	extends Webgl2ResidentTexturePageResource {
-	family: Webgl2TerrainTileTexturePageBinding["family"];
+	bucket: Webgl2TerrainTileTexturePageBinding["bucket"];
 	textureIndex: number;
 	pixelStats: TexturePagePixelStats;
 	entryDiagnostics: readonly TexturePageEntryDiagnostic[];
@@ -189,13 +189,13 @@ export function deriveTerrainTileOneDrawReadiness(
 		return createBlockedTerrainTileOneDrawReadiness(blockers);
 	}
 	const colorPageBindingCount = resource.texturePageBindings.filter(
-		(binding) => binding.family === "terrain-color",
+		(binding) => binding.bucket === "terrain-color",
 	).length;
 	const maskPageBindingCount = resource.texturePageBindings.filter(
-		(binding) => binding.family === "terrain-mask",
+		(binding) => binding.bucket === "terrain-mask",
 	).length;
 	const detailPageBindingCount = resource.texturePageBindings.filter(
-		(binding) => binding.family === "terrain-detail",
+		(binding) => binding.bucket === "terrain-detail",
 	).length;
 	return {
 		status: "ready",
@@ -223,13 +223,13 @@ export function deriveTerrainDrawSliceOneDrawReadiness(
 		return createBlockedTerrainTileOneDrawReadiness(blockers);
 	}
 	const colorPageBindingCount = slice.texturePageBindings.filter(
-		(binding) => binding.family === "terrain-color",
+		(binding) => binding.bucket === "terrain-color",
 	).length;
 	const maskPageBindingCount = slice.texturePageBindings.filter(
-		(binding) => binding.family === "terrain-mask",
+		(binding) => binding.bucket === "terrain-mask",
 	).length;
 	const detailPageBindingCount = slice.texturePageBindings.filter(
-		(binding) => binding.family === "terrain-detail",
+		(binding) => binding.bucket === "terrain-detail",
 	).length;
 	return {
 		status: "ready",
@@ -289,7 +289,7 @@ function collectTerrainLayerRenderableBlockers({
 	const requiresColorPages =
 		layerPlan?.layerEntries.some((entry) => entry.colorRefCount > 0) ?? false;
 	const colorTextureIndices = collectTerrainPageTextureIndices(
-		texturePageBindings.filter((binding) => binding.family === "terrain-color"),
+		texturePageBindings.filter((binding) => binding.bucket === "terrain-color"),
 	);
 	if (requiresColorPages && colorTextureIndices.length === 0) {
 		blockers.push(
@@ -304,7 +304,7 @@ function collectTerrainLayerRenderableBlockers({
 	const requiresMaskPages =
 		layerPlan?.layerEntries.some((entry) => entry.maskRefCount > 0) ?? false;
 	const maskTextureIndices = collectTerrainPageTextureIndices(
-		texturePageBindings.filter((binding) => binding.family === "terrain-mask"),
+		texturePageBindings.filter((binding) => binding.bucket === "terrain-mask"),
 	);
 	if (requiresMaskPages && maskTextureIndices.length === 0) {
 		blockers.push(
@@ -318,19 +318,19 @@ function collectTerrainLayerRenderableBlockers({
 	}
 	for (const ref of collectTerrainLayerTextureRefs(layerPlan)) {
 		const atlasEntryKey = describeTerrainBlendTextureAtlasEntryKey(ref);
-		const expectedFamily =
+		const expectedBucket =
 			ref.role === "mask" ? "terrain-mask" : "terrain-color";
 		if (
 			!texturePageBindings.some(
 				(binding) =>
-					binding.family === expectedFamily &&
+					binding.bucket === expectedBucket &&
 					binding.atlasEntryKey === atlasEntryKey &&
 					binding.textureIndex !== null &&
 					binding.rect !== null,
 			)
 		) {
 			blockers.push(
-				`${resourceLabel} one-draw path is missing ${expectedFamily} binding ${atlasEntryKey}`,
+				`${resourceLabel} one-draw path is missing ${expectedBucket} binding ${atlasEntryKey}`,
 			);
 		}
 	}

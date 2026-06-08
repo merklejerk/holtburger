@@ -9,44 +9,21 @@ import type {
 	RgbaTexturePageDetailAtlasEntry,
 } from "../compaction/compaction-family-planner";
 import type { RenderMaterialTexturePageReadiness } from "../render-material-strategy";
-
-export type TexturePageFamily =
-	| "static-rgba"
-	| "static-detail"
-	| "terrain-color"
-	| "terrain-mask"
-	| "terrain-detail";
-
-export const TERRAIN_TEXTURE_PAGE_FAMILIES = [
-	"terrain-color",
-	"terrain-mask",
-	"terrain-detail",
-] as const;
-
-export type TerrainTexturePageFamily =
-	(typeof TERRAIN_TEXTURE_PAGE_FAMILIES)[number] & TexturePageFamily;
-
-export function isTerrainTexturePageFamily(
-	family: string,
-): family is TerrainTexturePageFamily {
-	return TERRAIN_TEXTURE_PAGE_FAMILIES.includes(
-		family as TerrainTexturePageFamily,
-	);
-}
+import type { TexturePageBucket } from "./texture-page-binding";
 
 export const TERRAIN_COLOR_ATLAS_GUTTER_PIXELS = 96;
 export const TERRAIN_MASK_ATLAS_GUTTER_PIXELS = 16;
 
 export interface TexturePageAtlasRgbaCandidate {
 	candidateId: string;
-	family?: TexturePageFamily;
+	bucket?: TexturePageBucket;
 	texturePageReadiness: RenderMaterialTexturePageReadiness;
 	detailAtlasEntry: RgbaTexturePageDetailAtlasEntry | null;
 }
 
 export interface TexturePageAtlasDetailCandidate {
 	candidateId: string;
-	family?: TexturePageFamily;
+	bucket?: TexturePageBucket;
 	detailAtlasEntry: RgbaTexturePageDetailAtlasEntry | null;
 }
 
@@ -70,12 +47,12 @@ export interface TexturePageAtlasPlan {
 	atlasTextures: readonly AtlasTexturePage[];
 	detailAtlasEntryRecords: readonly RgbaTexturePageDetailAtlasEntry[];
 	detailAtlasTextures: readonly AtlasTexturePage[];
-	families: readonly TexturePageFamilyPlan[];
+	buckets: readonly TexturePageBucketPlan[];
 	preparedTextureAssetIds: readonly string[];
 }
 
-interface TexturePageFamilyPlan {
-	family: TexturePageFamily;
+interface TexturePageBucketPlan {
+	bucket: TexturePageBucket;
 	atlasEntryRecords: readonly RgbaTexturePageAtlasEntryRecord[];
 	atlasTextures: readonly AtlasTexturePage[];
 	detailAtlasEntryRecords: readonly RgbaTexturePageDetailAtlasEntry[];
@@ -92,7 +69,7 @@ export function createEmptyTexturePageAtlasPlan(): TexturePageAtlasPlan {
 		atlasTextures: [],
 		detailAtlasEntryRecords: [],
 		detailAtlasTextures: [],
-		families: [],
+		buckets: [],
 		preparedTextureAssetIds: [],
 	};
 }
@@ -127,60 +104,60 @@ export function planTexturePageAtlas(options: {
 	policy: CompactionFamilyPlanningPolicy;
 }): TexturePageAtlasPlan {
 	const failures: TexturePageAtlasFailure[] = [];
-	const familyPlans: TexturePageFamilyPlan[] = [];
+	const bucketPlans: TexturePageBucketPlan[] = [];
 	const rgbaReady: TexturePageAtlasRgbaCandidate[] = [];
 	const detailReady: TexturePageAtlasDetailCandidate[] = [];
 	const usedAtlasEntryKeys = new Set<string>();
 	const usedDetailEntryKeys = new Set<string>();
-	const rgbaCandidatesByFamily = groupRgbaCandidatesByFamily(
+	const rgbaCandidatesByBucket = groupRgbaCandidatesByBucket(
 		options.rgbaCandidates,
 	);
-	const detailCandidatesByFamily = groupDetailCandidatesByFamily(
+	const detailCandidatesByBucket = groupDetailCandidatesByBucket(
 		options.detailCandidates,
 	);
-	const families = uniqueSortedFamilies([
-		...rgbaCandidatesByFamily.keys(),
-		...detailCandidatesByFamily.keys(),
+	const buckets = uniqueSortedBuckets([
+		...rgbaCandidatesByBucket.keys(),
+		...detailCandidatesByBucket.keys(),
 	]);
-	for (const family of families) {
-		const rgbaFamilyCandidates = rgbaCandidatesByFamily.get(family) ?? [];
-		const detailFamilyCandidates = detailCandidatesByFamily.get(family) ?? [];
-		const familyPlan = planTexturePageAtlasFamily({
-			family,
-			rgbaCandidates: rgbaFamilyCandidates,
-			detailCandidates: detailFamilyCandidates,
+	for (const bucket of buckets) {
+		const rgbaBucketCandidates = rgbaCandidatesByBucket.get(bucket) ?? [];
+		const detailBucketCandidates = detailCandidatesByBucket.get(bucket) ?? [];
+		const bucketPlan = planTexturePageAtlasBucket({
+			bucket,
+			rgbaCandidates: rgbaBucketCandidates,
+			detailCandidates: detailBucketCandidates,
 			policy: options.policy,
 			failures,
 		});
-		familyPlans.push(familyPlan.familyPlan);
-		rgbaReady.push(...familyPlan.rgbaReady);
-		detailReady.push(...familyPlan.detailReady);
-		for (const key of familyPlan.usedAtlasEntryKeys) {
+		bucketPlans.push(bucketPlan.bucketPlan);
+		rgbaReady.push(...bucketPlan.rgbaReady);
+		detailReady.push(...bucketPlan.detailReady);
+		for (const key of bucketPlan.usedAtlasEntryKeys) {
 			usedAtlasEntryKeys.add(key);
 		}
-		for (const key of familyPlan.usedDetailEntryKeys) {
+		for (const key of bucketPlan.usedDetailEntryKeys) {
 			usedDetailEntryKeys.add(key);
 		}
 	}
 	return {
 		key: describeTexturePageAtlasPlanKey({
 			policy: options.policy,
-			familyPlans,
+			bucketPlans,
 		}),
 		rgbaAtlasReadyCandidateIds: rgbaReady.map((candidate) => candidate.candidateId),
 		detailAtlasReadyCandidateIds: detailReady.map(
 			(candidate) => candidate.candidateId,
 		),
 		failures,
-		atlasEntryRecords: familyPlans.flatMap((plan) => plan.atlasEntryRecords),
-		atlasTextures: familyPlans.flatMap((plan) => plan.atlasTextures),
-		detailAtlasEntryRecords: familyPlans.flatMap(
+		atlasEntryRecords: bucketPlans.flatMap((plan) => plan.atlasEntryRecords),
+		atlasTextures: bucketPlans.flatMap((plan) => plan.atlasTextures),
+		detailAtlasEntryRecords: bucketPlans.flatMap(
 			(plan) => plan.detailAtlasEntryRecords,
 		),
-		detailAtlasTextures: familyPlans.flatMap(
+		detailAtlasTextures: bucketPlans.flatMap(
 			(plan) => plan.detailAtlasTextures,
 		),
-		families: familyPlans.filter(
+		buckets: bucketPlans.filter(
 			(plan) =>
 				plan.atlasEntryRecords.length > 0 ||
 				plan.detailAtlasEntryRecords.length > 0,
@@ -194,20 +171,20 @@ export function planTexturePageAtlas(options: {
 	};
 }
 
-function planTexturePageAtlasFamily({
-	family,
+function planTexturePageAtlasBucket({
+	bucket,
 	rgbaCandidates,
 	detailCandidates,
 	policy,
 	failures,
 }: {
-	family: TexturePageFamily;
+	bucket: TexturePageBucket;
 	rgbaCandidates: readonly TexturePageAtlasRgbaCandidate[];
 	detailCandidates: readonly TexturePageAtlasDetailCandidate[];
 	policy: CompactionFamilyPlanningPolicy;
 	failures: TexturePageAtlasFailure[];
 }): {
-	familyPlan: TexturePageFamilyPlan;
+	bucketPlan: TexturePageBucketPlan;
 	rgbaReady: TexturePageAtlasRgbaCandidate[];
 	detailReady: TexturePageAtlasDetailCandidate[];
 	usedAtlasEntryKeys: ReadonlySet<string>;
@@ -219,7 +196,7 @@ function planTexturePageAtlasFamily({
 			key: record.key,
 			width: record.entry.level.width,
 			height: record.entry.level.height,
-			gutterPixels: resolveTexturePageFamilyGutterPixels(family, policy),
+			gutterPixels: resolveTexturePageBucketGutterPixels(bucket, policy),
 		})),
 		policy: {
 			maxTextureSize: policy.maxAtlasTextureSize,
@@ -256,7 +233,7 @@ function planTexturePageAtlasFamily({
 			key: entry.key,
 			width: entry.width,
 			height: entry.height,
-			gutterPixels: resolveTexturePageFamilyGutterPixels(family, policy),
+			gutterPixels: resolveTexturePageBucketGutterPixels(bucket, policy),
 		})),
 		policy: {
 			maxTextureSize: policy.maxAtlasTextureSize,
@@ -295,8 +272,8 @@ function planTexturePageAtlasFamily({
 			.filter((key) => key.length > 0),
 	);
 	return {
-		familyPlan: {
-			family,
+		bucketPlan: {
+			bucket,
 			atlasEntryRecords: atlasEntries.filter((record) =>
 				usedAtlasEntryKeys.has(record.key),
 			),
@@ -319,14 +296,14 @@ function planTexturePageAtlasFamily({
 	};
 }
 
-function resolveTexturePageFamilyGutterPixels(
-	family: TexturePageFamily,
+function resolveTexturePageBucketGutterPixels(
+	bucket: TexturePageBucket,
 	policy: CompactionFamilyPlanningPolicy,
 ): number {
-	if (family === "terrain-color") {
+	if (bucket === "terrain-color") {
 		return Math.max(policy.baseGutterPixels, TERRAIN_COLOR_ATLAS_GUTTER_PIXELS);
 	}
-	if (family === "terrain-mask") {
+	if (bucket === "terrain-mask") {
 		return Math.max(policy.baseGutterPixels, TERRAIN_MASK_ATLAS_GUTTER_PIXELS);
 	}
 	return policy.baseGutterPixels;
@@ -370,36 +347,36 @@ function dedupeDetailAtlasEntries(
 	);
 }
 
-function groupRgbaCandidatesByFamily(
+function groupRgbaCandidatesByBucket(
 	candidates: readonly TexturePageAtlasRgbaCandidate[],
-): Map<TexturePageFamily, TexturePageAtlasRgbaCandidate[]> {
-	const groups = new Map<TexturePageFamily, TexturePageAtlasRgbaCandidate[]>();
+): Map<TexturePageBucket, TexturePageAtlasRgbaCandidate[]> {
+	const groups = new Map<TexturePageBucket, TexturePageAtlasRgbaCandidate[]>();
 	for (const candidate of candidates) {
-		const family = candidate.family ?? "static-rgba";
-		const group = groups.get(family) ?? [];
+		const bucket = candidate.bucket ?? "static-base-color";
+		const group = groups.get(bucket) ?? [];
 		group.push(candidate);
-		groups.set(family, group);
+		groups.set(bucket, group);
 	}
 	return groups;
 }
 
-function groupDetailCandidatesByFamily(
+function groupDetailCandidatesByBucket(
 	candidates: readonly TexturePageAtlasDetailCandidate[],
-): Map<TexturePageFamily, TexturePageAtlasDetailCandidate[]> {
-	const groups = new Map<TexturePageFamily, TexturePageAtlasDetailCandidate[]>();
+): Map<TexturePageBucket, TexturePageAtlasDetailCandidate[]> {
+	const groups = new Map<TexturePageBucket, TexturePageAtlasDetailCandidate[]>();
 	for (const candidate of candidates) {
-		const family = candidate.family ?? "static-detail";
-		const group = groups.get(family) ?? [];
+		const bucket = candidate.bucket ?? "static-detail";
+		const group = groups.get(bucket) ?? [];
 		group.push(candidate);
-		groups.set(family, group);
+		groups.set(bucket, group);
 	}
 	return groups;
 }
 
-function uniqueSortedFamilies(
-	families: Iterable<TexturePageFamily>,
-): TexturePageFamily[] {
-	return [...new Set(families)].sort();
+function uniqueSortedBuckets(
+	buckets: Iterable<TexturePageBucket>,
+): TexturePageBucket[] {
+	return [...new Set(buckets)].sort();
 }
 
 function filterAtlasTexturePages({
@@ -421,15 +398,15 @@ function filterAtlasTexturePages({
 
 function describeTexturePageAtlasPlanKey(options: {
 	policy: CompactionFamilyPlanningPolicy;
-	familyPlans: readonly TexturePageFamilyPlan[];
+	bucketPlans: readonly TexturePageBucketPlan[];
 }): string {
 	return [
 		"texture-page-atlas",
 		`size=${options.policy.maxAtlasTextureSize}`,
 		`textures=${options.policy.maxAtlasTextureCount}`,
 		`gutter=${options.policy.baseGutterPixels}`,
-		...options.familyPlans.flatMap((plan) => [
-			`family=${plan.family}`,
+		...options.bucketPlans.flatMap((plan) => [
+			`bucket=${plan.bucket}`,
 			...plan.atlasEntryRecords.map((record) => record.key),
 			...plan.detailAtlasEntryRecords.map((entry) => `detail=${entry.key}`),
 		]),

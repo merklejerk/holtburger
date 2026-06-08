@@ -722,7 +722,7 @@ function recordStaticBundleLayerMaterialDiagnostics(
 		for (const binding of material.textureBindings) {
 			incrementCount(
 				metrics.staticBundleMaterialBindingUsageCounts,
-				binding.usageBucket,
+				binding.role,
 			);
 		}
 		if (resolveMaterialTextureBinding(material, "base-color")) {
@@ -1446,7 +1446,7 @@ function recordWebgl2MaterialDrawResult(
 		for (const binding of result.material.textureBindings) {
 			incrementCount(
 				metrics.materialSurfaceSkippedBindingUsageCounts,
-				binding.usageBucket,
+				binding.role,
 			);
 		}
 	}
@@ -1535,11 +1535,11 @@ function isStaticBundleTextureMaterialFamily(
 
 function resolveMaterialTextureBinding(
 	material: Webgl2StaticBundleMaterialResource,
-	usageBucket: Webgl2StaticBundleMaterialTextureBinding["usageBucket"],
+	role: Webgl2StaticBundleMaterialTextureBinding["role"],
 ): Webgl2StaticBundleMaterialTextureBinding | null {
 	return (
 		material.textureBindings.find(
-			(binding) => binding.usageBucket === usageBucket,
+			(binding) => binding.role === role,
 		) ?? null
 	);
 }
@@ -1579,7 +1579,7 @@ function describeStaticBundleMaterialBindings(
 	return material.textureBindings
 		.map(
 			(binding) =>
-				`${binding.usageBucket}/${binding.sampleClass}/${binding.wrapS}:${binding.wrapT}`,
+				`${binding.role}/${binding.sampleClass}/${binding.wrapS}:${binding.wrapT}`,
 		)
 		.join(",");
 }

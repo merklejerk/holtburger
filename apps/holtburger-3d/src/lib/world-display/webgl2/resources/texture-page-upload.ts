@@ -13,31 +13,22 @@ import type {
 import type { IndexedTextureFormat } from "../../indexed-material-data";
 import type {
 	TexturePageAtlasPlan,
-	TexturePageFamily,
 } from "../../texture-pages/texture-page-atlas-planner";
 import type {
+	TexturePageBucket,
 	TexturePageKind,
 	TexturePageSampleClass,
-	TexturePageUsageBucket,
 } from "../../texture-pages/texture-page-binding";
 import type { TextureFilteringMode } from "../../texture-pages/texture-sampling-policy";
 
 const TERRAIN_COLOR_ATLAS_FILL_RGBA = [128, 128, 128, 255] as const;
-
-export type Webgl2ResidentTexturePageFamily =
-	| TexturePageFamily
-	| TexturePageUsageBucket;
-
-export type Webgl2ResidentTexturePageUsageBucket =
-	| TexturePageUsageBucket
-	| TexturePageFamily;
 
 export type Webgl2TexturePageSamplerPolicyKey = string & {
 	readonly __webgl2TexturePageSamplerPolicyKey: unique symbol;
 };
 
 interface Webgl2TexturePagePlacementResource {
-	family: TexturePageFamily;
+	bucket: TexturePageBucket;
 	atlasEntryKey: string;
 	textureIndex: number;
 	rect: readonly [number, number, number, number];
@@ -53,9 +44,8 @@ export interface Webgl2ResidentTexturePageEntryResource {
 
 export interface Webgl2ResidentTexturePageResource {
 	key: string;
-	family: Webgl2ResidentTexturePageFamily;
+	bucket: TexturePageBucket;
 	textureIndex: number;
-	usageBucket: Webgl2ResidentTexturePageUsageBucket;
 	sampleClass: TexturePageSampleClass;
 	pageKind: TexturePageKind;
 	indexedFormat?: IndexedTextureFormat | null;
@@ -77,7 +67,7 @@ export type Webgl2DetailTexturePageTextureResource =
 
 export interface TexturePageCpuTexture {
 	key: string;
-	family: TexturePageFamily;
+	bucket: TexturePageBucket;
 	textureIndex: number;
 	width: number;
 	height: number;
@@ -125,7 +115,7 @@ export interface TexturePageCpuSetPlan {
 	key: string;
 	rgbaAtlasReadyCandidateIds: readonly string[];
 	detailAtlasTextures: readonly AtlasTexturePage[];
-	families: readonly TexturePageAtlasPlan["families"][number][];
+	buckets: readonly TexturePageAtlasPlan["buckets"][number][];
 	preparedTextureAssetIds: readonly string[];
 }
 
@@ -144,25 +134,25 @@ export function createTexturePageCpuSet({
 	) {
 		return null;
 	}
-	const textures = plan.families.flatMap((familyPlan) =>
-		familyPlan.atlasTextures.map((page) => {
+	const textures = plan.buckets.flatMap((bucketPlan) =>
+		bucketPlan.atlasTextures.map((page) => {
 			const entriesByKey = new Map(
-				familyPlan.atlasEntryRecords.map(
+				bucketPlan.atlasEntryRecords.map(
 					(record) => [record.key, record] as const,
 				),
 			);
 			return createTexturePageCpuTexture({
 				pageSetKey: plan.key,
-				family: familyPlan.family,
+				bucket: bucketPlan.bucket,
 				page,
 				entriesByKey,
 			});
 		}),
 	);
-	const placements = plan.families.flatMap((familyPlan) =>
-		familyPlan.atlasTextures.flatMap((page) =>
+	const placements = plan.buckets.flatMap((bucketPlan) =>
+		bucketPlan.atlasTextures.flatMap((page) =>
 			page.placements.map((placement) => ({
-				family: familyPlan.family,
+				bucket: bucketPlan.bucket,
 				atlasEntryKey: placement.atlasEntryKey,
 				textureIndex: page.textureIndex,
 				rect: [
@@ -176,25 +166,25 @@ export function createTexturePageCpuSet({
 			})),
 		),
 	);
-	const detailTextures = plan.families.flatMap((familyPlan) =>
-		familyPlan.detailAtlasTextures.map((page) => {
+	const detailTextures = plan.buckets.flatMap((bucketPlan) =>
+		bucketPlan.detailAtlasTextures.map((page) => {
 			const detailEntriesByKey = new Map(
-				familyPlan.detailAtlasEntryRecords.map(
+				bucketPlan.detailAtlasEntryRecords.map(
 					(entry) => [entry.key, entry] as const,
 				),
 			);
 			return createDetailTexturePageCpuTexture({
 				pageSetKey: plan.key,
-				family: familyPlan.family,
+				bucket: bucketPlan.bucket,
 				page,
 				entriesByKey: detailEntriesByKey,
 			});
 		}),
 	);
-	const detailPlacements = plan.families.flatMap((familyPlan) =>
-		familyPlan.detailAtlasTextures.flatMap((page) =>
+	const detailPlacements = plan.buckets.flatMap((bucketPlan) =>
+		bucketPlan.detailAtlasTextures.flatMap((page) =>
 			page.placements.map((placement) => ({
-				family: familyPlan.family,
+				bucket: bucketPlan.bucket,
 				atlasEntryKey: placement.atlasEntryKey,
 				textureIndex: page.textureIndex,
 				rect: [
@@ -225,17 +215,17 @@ export function createTexturePageCpuSet({
 
 function createTexturePageCpuTexture({
 	pageSetKey,
-	family,
+	bucket,
 	page,
 	entriesByKey,
 }: {
 	pageSetKey: string;
-	family: TexturePageFamily;
+	bucket: TexturePageBucket;
 	page: AtlasTexturePage;
 	entriesByKey: ReadonlyMap<string, RgbaTexturePageAtlasEntryRecord>;
 }): TexturePageCpuTexture {
 	const pixels = new Uint8Array(page.width * page.height * 4);
-	if (family === "terrain-color") {
+	if (bucket === "terrain-color") {
 		fillRgbaPixels(pixels, TERRAIN_COLOR_ATLAS_FILL_RGBA);
 	}
 	const entryDiagnostics: TexturePageEntryDiagnostic[] = [];
@@ -272,15 +262,15 @@ function createTexturePageCpuTexture({
 			atlasPixels: pixels,
 			atlasWidth: page.width,
 			atlasHeight: page.height,
-			edgeMode: family === "terrain-color" ? "repeat" : "clamp",
+			edgeMode: bucket === "terrain-color" ? "repeat" : "clamp",
 			placement,
 			entry: record.entry,
 		});
 	}
-	const key = `${pageSetKey}/${family}/texture/${page.textureIndex}`;
+	const key = `${pageSetKey}/${bucket}/texture/${page.textureIndex}`;
 	return {
 		key,
-		family,
+		bucket,
 		textureIndex: page.textureIndex,
 		width: page.width,
 		height: page.height,
@@ -294,12 +284,12 @@ function createTexturePageCpuTexture({
 
 function createDetailTexturePageCpuTexture({
 	pageSetKey,
-	family,
+	bucket,
 	page,
 	entriesByKey,
 }: {
 	pageSetKey: string;
-	family: TexturePageFamily;
+	bucket: TexturePageBucket;
 	page: AtlasTexturePage;
 	entriesByKey: ReadonlyMap<string, RgbaTexturePageDetailAtlasEntry>;
 }): TexturePageCpuTexture {
@@ -336,15 +326,15 @@ function createDetailTexturePageCpuTexture({
 			atlasPixels: pixels,
 			atlasWidth: page.width,
 			atlasHeight: page.height,
-			edgeMode: family === "terrain-detail" ? "repeat" : "clamp",
+			edgeMode: bucket === "terrain-detail" ? "repeat" : "clamp",
 			placement,
 			entry,
 		});
 	}
-	const key = `${pageSetKey}/${family}/detail-texture/${page.textureIndex}`;
+	const key = `${pageSetKey}/${bucket}/detail-texture/${page.textureIndex}`;
 	return {
 		key,
-		family,
+		bucket,
 		textureIndex: page.textureIndex,
 		width: page.width,
 		height: page.height,
@@ -388,14 +378,13 @@ export function createWebgl2TexturePageTextureResourceFromCpu({
 	});
 	return {
 		key: cpuTexture.key,
-		family: cpuTexture.family,
+		bucket: cpuTexture.bucket,
 		textureIndex: cpuTexture.textureIndex,
-		usageBucket: cpuTexture.family,
 		sampleClass: "rgba-color",
 		pageKind: "packed-atlas",
 		indexedFormat: null,
 		samplerPolicyKey: describeWebgl2TexturePageSamplerPolicy({
-			family: cpuTexture.family,
+			bucket: cpuTexture.bucket,
 			textureFilteringMode,
 			maxAnisotropy,
 		}),
@@ -427,11 +416,11 @@ export function describeWebgl2TexturePageSetKey({
 }
 
 function describeWebgl2TexturePageSamplerPolicy({
-	family,
+	bucket,
 	textureFilteringMode,
 	maxAnisotropy,
 }: {
-	family: TexturePageFamily;
+	bucket: TexturePageBucket;
 	textureFilteringMode: TextureFilteringMode;
 	maxAnisotropy: number;
 }): Webgl2TexturePageSamplerPolicyKey {
@@ -440,7 +429,7 @@ function describeWebgl2TexturePageSamplerPolicy({
 			? Math.min(4, Math.max(1, Math.floor(maxAnisotropy)))
 			: 1;
 	return createWebgl2TexturePageSamplerPolicyKey(
-		`family=${family};sample=rgba-color;filter=${textureFilteringMode};mips=${textureFilteringMode === "nearest" ? "off" : "on"};aniso=${anisotropy}`,
+		`bucket=${bucket};sample=rgba-color;filter=${textureFilteringMode};mips=${textureFilteringMode === "nearest" ? "off" : "on"};aniso=${anisotropy}`,
 	);
 }
 

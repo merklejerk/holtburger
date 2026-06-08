@@ -296,7 +296,7 @@ describe("compaction family planner", () => {
 						baseBinding,
 						{
 							...baseBinding,
-							usageBucket: "indexed-texels",
+							role: "indexed-texels",
 						},
 					],
 				}),
@@ -306,7 +306,7 @@ describe("compaction family planner", () => {
 						baseBinding,
 						{
 							...baseBinding,
-							usageBucket: "detail",
+							role: "detail",
 							sampleClass: "control-data",
 						},
 					],
@@ -317,7 +317,7 @@ describe("compaction family planner", () => {
 						baseBinding,
 						{
 							...baseBinding,
-							usageBucket: "detail",
+							role: "detail",
 							sampling: {
 								...baseBinding.sampling,
 								lookup: "control-filtered",
@@ -338,7 +338,7 @@ describe("compaction family planner", () => {
 			{
 				candidateId: "bad-usage",
 				reason: "unsupported-compacted-material-family",
-				blocker: "unsupported-texture-page-usage:indexed-texels",
+				blocker: "unsupported-texture-page-role:indexed-texels",
 			},
 			{
 				candidateId: "bad-sample-class",
@@ -386,7 +386,7 @@ describe("compaction family planner", () => {
 				createIndexedPaletteTexturePageBinding(),
 				{
 					...createDirectTexturePageBinding(),
-					usageBucket: "detail",
+					role: "detail",
 					source: "detail-overlay",
 				},
 			],
@@ -402,7 +402,7 @@ describe("compaction family planner", () => {
 				createIndexedPaletteTexturePageBinding(),
 				{
 					...createDirectTexturePageBinding(),
-					usageBucket: "detail",
+					role: "detail",
 					source: "detail-overlay",
 				},
 			],
@@ -505,7 +505,7 @@ describe("compaction family planner", () => {
 						createIndexedPaletteTexturePageBinding(),
 						{
 							...createDirectTexturePageBinding(),
-							usageBucket: "detail",
+							role: "detail",
 							source: "detail-overlay",
 						},
 					],
@@ -832,7 +832,7 @@ describe("compaction family planner", () => {
 			extraRgbaAtlasCandidates: [
 				{
 					candidateId: "terrain-tile/a",
-					family: "terrain-color",
+					bucket: "terrain-color",
 					texturePageReadiness: createTexturePageReadiness({
 						entryKey: "terrain-page/color/06006d06/21/512/512",
 						width: 512,
@@ -849,9 +849,9 @@ describe("compaction family planner", () => {
 			},
 		});
 
-		expect(plan.texturePageAtlasPlan.families).toMatchObject([
+		expect(plan.texturePageAtlasPlan.buckets).toMatchObject([
 			{
-				family: "terrain-color",
+				bucket: "terrain-color",
 				atlasEntryRecords: [
 					{ key: "terrain-page/color/06006d06/21/512/512" },
 				],
@@ -1086,7 +1086,7 @@ function createTexturePageBindings({
 	return [
 		{
 			pageKind: "single-entry",
-			usageBucket: "base-color",
+			role: "base-color",
 			sampleClass: "rgba-color",
 			texture: {} as never,
 			rect: [0, 0, width, height],
@@ -1131,7 +1131,7 @@ function createIndexedTexelTexturePageBinding({
 } = {}): TexturePageDescriptor {
 	return {
 		pageKind: "single-entry",
-		usageBucket: "indexed-texels",
+		role: "indexed-texels",
 		sampleClass: "indexed-data",
 		texture: {} as never,
 		rect: [0, 0, width, height],
@@ -1155,7 +1155,7 @@ function createIndexedTexelTexturePageBinding({
 function createIndexedPaletteTexturePageBinding(): TexturePageDescriptor {
 	return {
 		pageKind: "single-entry",
-		usageBucket: "palette-lookup",
+		role: "palette-lookup",
 		sampleClass: "palette-data",
 		texture: {} as never,
 		rect: [0, 0, 256, 1],

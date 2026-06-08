@@ -264,12 +264,12 @@ function createTerrainTileFamilySubmitPlan(
 
 function singleTerrainTexturePage(
 	bindings: readonly Webgl2TerrainTileTexturePageBinding[],
-	family: Webgl2TerrainTileTexturePageBinding["family"],
+	bucket: Webgl2TerrainTileTexturePageBinding["bucket"],
 ): Webgl2TerrainTexturePageResource | null {
 	const pages = [
 		...new Set(
 			bindings.flatMap((binding) =>
-				binding.family === family && binding.texturePage
+				binding.bucket === bucket && binding.texturePage
 					? [binding.texturePage]
 					: [],
 			),
@@ -387,7 +387,7 @@ function describeTerrainTextureBinding(
 			(entry) => entry.atlasEntryKey === binding.atlasEntryKey,
 		) ?? null;
 	return {
-		family: binding.family,
+		bucket: binding.bucket,
 		atlasEntryKey: binding.atlasEntryKey,
 		textureIndex: binding.textureIndex,
 		rect: binding.rect,
@@ -412,7 +412,7 @@ function describeTerrainTexturePage(
 ): Record<string, unknown> {
 	return {
 		key: texturePage.key,
-		family: texturePage.family,
+		bucket: texturePage.bucket,
 		textureIndex: texturePage.textureIndex,
 		size: [texturePage.width, texturePage.height],
 		placementCount: texturePage.placementCount,
@@ -579,7 +579,7 @@ function uploadTerrainDetailUniforms(
 	const binding = tile.detailPlan
 		? tile.texturePageBindings.find(
 				(candidate) =>
-					candidate.family === "terrain-detail" &&
+					candidate.bucket === "terrain-detail" &&
 					candidate.atlasEntryKey === tile.detailPlan?.atlasEntryKey,
 			)
 		: null;

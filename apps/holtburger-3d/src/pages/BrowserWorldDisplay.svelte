@@ -2496,7 +2496,7 @@
 							<div>
 								<dt>Format</dt>
 								<dd>
-									{texturePreview.usageBucket}; {texturePreview.sampleClass};
+									{texturePreview.bucket}; {texturePreview.sampleClass};
 									{texturePreview.indexedFormat ?? "rgba"}
 								</dd>
 							</div>

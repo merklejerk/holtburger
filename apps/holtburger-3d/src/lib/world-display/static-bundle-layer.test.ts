@@ -18,7 +18,7 @@ import type {
 	StaticObjectBundleArtifact,
 	VirtualTexturePageRef,
 	VirtualTexturePageSampleClass,
-	VirtualTexturePageUsageBucket,
+	VirtualTexturePageEntryRole,
 } from "./static-bundle-layer";
 import { formatStaticObjectBundleScopeKey } from "./static-bundle-layer";
 
@@ -42,13 +42,13 @@ describe("static bundle layer contract", () => {
 	});
 
 	it("represents compacted, direct, texture, and optional metadata outputs", () => {
-		const usageBucket: VirtualTexturePageUsageBucket = "base-color";
+		const role: VirtualTexturePageEntryRole = "base-color";
 		const sampleClass: VirtualTexturePageSampleClass = "rgba-color";
 		const bundleKind: StaticObjectBundleKind = "outdoor-detail";
 		const texturePageRef: VirtualTexturePageRef = {
 			key: "texture:06000001",
 			sourceAssetId: "prepared-texture/06000001?usage=raw",
-			usageBucket,
+			role,
 			sampleClass,
 			width: 1,
 			height: 1,
@@ -67,8 +67,8 @@ describe("static bundle layer contract", () => {
 		const texturePage: StaticBundleTexturePage = {
 			key: "page:base-color:0",
 			scopeKey: "landblock:3663069183:outdoor-detail",
+			bucket: "static-base-color",
 			pageKind: "single-entry",
-			usageBucket,
 			sampleClass,
 			width: 1,
 			height: 1,
@@ -77,6 +77,12 @@ describe("static bundle layer contract", () => {
 				{
 					virtualRefKey: texturePageRef.key,
 					sourceAssetId: texturePageRef.sourceAssetId,
+					role,
+					sampleClass,
+					wrapS: texturePageRef.wrapS,
+					wrapT: texturePageRef.wrapT,
+					samplingDomain: texturePageRef.samplingDomain,
+					lookup: texturePageRef.lookup,
 					rect: [0, 0, 1, 1],
 				},
 			],

@@ -1058,7 +1058,7 @@
 									</button>
 								</dt>
 								<dd>
-									{page.ownerKind}; {page.usageBucket}; {page.sampleClass};
+									{page.ownerKind}; {page.bucket}; {page.sampleClass};
 									{page.width}x{page.height}; {formatResourceCount(
 										page.entryCount,
 										"entry",

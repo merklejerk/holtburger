@@ -303,7 +303,7 @@ export function collectStaticMaterialTexturePageRefs(
 				return {
 					key: formatStaticMaterialTextureRefKey(route),
 					sourceAssetId: route.renderSurfaceAssetId,
-					usageBucket: "indexed-texels",
+					role: "indexed-texels",
 					sampleClass: "indexed-data",
 					indexedFormat: route.indexedFormat,
 					width: route.width,
@@ -319,7 +319,7 @@ export function collectStaticMaterialTexturePageRefs(
 				return {
 					key: formatStaticMaterialTextureRefKey(route),
 					sourceAssetId: route.paletteAssetId,
-					usageBucket: "palette-lookup",
+					role: "palette-lookup",
 					sampleClass: "palette-data",
 					width: route.colorCount,
 					height: 1,
@@ -344,7 +344,7 @@ export function collectStaticMaterialTexturePageRefs(
 			return {
 				key: formatStaticMaterialTextureRefKey(route),
 				sourceAssetId: route.preparedTextureAssetId,
-				usageBucket: mapPreparedTextureUsageBucket(payload),
+				role: mapPreparedTextureRole(payload),
 				sampleClass: mapPreparedTextureSampleClass(payload),
 				width: level.width,
 				height: level.height,
@@ -553,12 +553,12 @@ export function collectStaticPreparedTextureRouteAssetIds(
 					surfaceTexture.payload,
 					preparedByAssetId,
 				);
-				return renderSurface
-					? resolveNormalizedPreparedTextureAssetIds({
-							renderSurface,
-							usage: "detail",
-						})
-					: [];
+					return renderSurface
+						? resolveNormalizedPreparedTextureAssetIds({
+								renderSurface,
+								usage: "detail",
+							})
+						: [];
 			}),
 		);
 	}
@@ -874,9 +874,9 @@ function formatStaticMaterialTextureRefKey(
 	}
 }
 
-function mapPreparedTextureUsageBucket(
+function mapPreparedTextureRole(
 	payload: PreparedTexturePayload,
-): VirtualTexturePageRef["usageBucket"] {
+): VirtualTexturePageRef["role"] {
 	if (payload.usage === "detail") {
 		return "detail";
 	}

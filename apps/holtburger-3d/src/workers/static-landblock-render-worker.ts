@@ -1089,7 +1089,7 @@ function resolveStructuredInteriorEnvironmentDetailTextureRef({
 			preparedTextureAssetId,
 		}),
 		sourceAssetId: preparedTextureAssetId,
-		usageBucket: "detail",
+		role: "detail",
 		sampleClass: "rgba-color",
 		width: level.width,
 		height: level.height,

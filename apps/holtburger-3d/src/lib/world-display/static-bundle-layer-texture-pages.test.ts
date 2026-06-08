@@ -38,7 +38,8 @@ describe("static bundle layer texture pages", () => {
 			[1, 0, 1, 1],
 		]);
 		expect(
-			pages.find((page) => page.pageKind === "single-entry")?.usageBucket,
+			pages.find((page) => page.pageKind === "single-entry")?.entries[0]
+				?.role,
 		).toBe("detail");
 		expect(
 			pages.find((page) => page.pageKind === "single-entry")?.entries[0]
@@ -52,7 +53,7 @@ describe("static bundle layer texture pages", () => {
 				createRef("base", "base-color", "rgba-color", 2, 2),
 			),
 		).toMatchObject({
-			usageBucket: "base-color",
+			role: "base-color",
 			sampleClass: "rgba-color",
 			rect: [0, 0, 2, 2],
 			source: "standalone-direct-texture",
@@ -107,7 +108,7 @@ describe("static bundle layer texture pages", () => {
 
 function createRef(
 	key: string,
-	usageBucket: VirtualTexturePageRef["usageBucket"],
+	role: VirtualTexturePageRef["role"],
 	sampleClass: VirtualTexturePageRef["sampleClass"],
 	width: number,
 	height: number,
@@ -117,7 +118,7 @@ function createRef(
 	return {
 		key,
 		sourceAssetId: `prepared-texture/${key}`,
-		usageBucket,
+		role,
 		sampleClass,
 		width,
 		height,

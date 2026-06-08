@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { TexturePageAtlasPlan } from "./texture-pages/texture-page-atlas-planner";
+import type { TexturePageBucket } from "./texture-pages/texture-page-binding";
 import {
 	createTexturePageCpuSet,
 	createWebgl2TexturePageTextureResourceFromCpu,
@@ -19,13 +20,13 @@ describe("webgl2 texture page upload", () => {
 		expect(pageSet?.textures).toHaveLength(1);
 		expect(pageSet?.detailTextures).toHaveLength(1);
 		expect(pageSet?.textures[0]?.key).toBe(
-			"texture-page-atlas/test/static-rgba/texture/0",
+			"texture-page-atlas/test/static-base-color/texture/0",
 		);
 		expect([...(pageSet?.textures[0]?.pixels.slice(0, 16) ?? [])]).toEqual([
 			1, 2, 3, 255, 1, 2, 3, 255, 4, 5, 6, 255, 4, 5, 6, 255,
 		]);
 		expect(pageSet?.detailTextures[0]?.key).toBe(
-			"texture-page-atlas/test/static-rgba/detail-texture/0",
+			"texture-page-atlas/test/static-base-color/detail-texture/0",
 		);
 		expect([
 			...(pageSet?.detailTextures[0]?.pixels.slice(0, 16) ?? []),
@@ -51,7 +52,7 @@ describe("webgl2 texture page upload", () => {
 		expect(resources.textures).toHaveLength(1);
 		expect(resources.detailTextures).toHaveLength(1);
 		expect(resources.textures[0]).toMatchObject({
-			usageBucket: "static-rgba",
+			bucket: "static-base-color",
 			sampleClass: "rgba-color",
 			pageKind: "packed-atlas",
 			indexedFormat: null,
@@ -66,7 +67,7 @@ describe("webgl2 texture page upload", () => {
 		});
 		expect(pageSet?.placements).toEqual([
 			{
-				family: "static-rgba",
+				bucket: "static-base-color",
 				atlasEntryKey: "entry-a",
 				textureIndex: 0,
 				rect: [1, 1, 2, 2],
@@ -83,7 +84,7 @@ describe("webgl2 texture page upload", () => {
 		]);
 		expect(pageSet?.detailPlacements).toEqual([
 			{
-				family: "static-rgba",
+				bucket: "static-base-color",
 				atlasEntryKey: "detail-a",
 				textureIndex: 0,
 				rect: [1, 1, 2, 2],
@@ -153,7 +154,7 @@ describe("webgl2 texture page upload", () => {
 					atlasTextures: [],
 					detailAtlasEntryRecords: [],
 					detailAtlasTextures: [],
-					families: [],
+					buckets: [],
 				},
 			}),
 		).toBeNull();
@@ -192,7 +193,7 @@ describe("webgl2 texture page upload", () => {
 	it("extrudes terrain color atlas gutters with repeat semantics", () => {
 		const gl = new FakeWebgl2();
 		const pageSet = createTexturePageCpuSet({
-			plan: createPlan({ family: "terrain-color" }),
+			plan: createPlan({ bucket: "terrain-color" }),
 		});
 		expect(pageSet).not.toBeNull();
 		const resources = uploadTexturePageCpuSet({
@@ -212,7 +213,7 @@ describe("webgl2 texture page upload", () => {
 	it("extrudes terrain detail atlas gutters with repeat semantics", () => {
 		const gl = new FakeWebgl2();
 		const pageSet = createTexturePageCpuSet({
-			plan: createPlan({ family: "terrain-detail" }),
+			plan: createPlan({ bucket: "terrain-detail" }),
 		});
 		expect(pageSet).not.toBeNull();
 		const resources = uploadTexturePageCpuSet({
@@ -235,7 +236,7 @@ describe("webgl2 texture page upload", () => {
 		const gl = new FakeWebgl2();
 		const pageSet = createTexturePageCpuSet({
 			plan: createPlan({
-				family: "terrain-color",
+				bucket: "terrain-color",
 				atlasTexture: {
 					width: 8,
 					height: 8,
@@ -309,7 +310,7 @@ function disposeTexturePageResources({
 }
 
 function createPlan({
-	family = "static-rgba",
+	bucket = "static-base-color",
 	atlasTexture = {
 		width: 4,
 		height: 4,
@@ -322,7 +323,7 @@ function createPlan({
 		},
 	},
 }: {
-	family?: TexturePageAtlasPlan["families"][number]["family"];
+	bucket?: TexturePageBucket;
 	atlasTexture?: {
 		width: number;
 		height: number;
@@ -410,9 +411,9 @@ function createPlan({
 				],
 			},
 		],
-		families: [
+		buckets: [
 			{
-				family,
+				bucket,
 				atlasEntryRecords: [
 					{
 						key: "entry-a",

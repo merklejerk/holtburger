@@ -1015,7 +1015,7 @@ Follow-up recommendation:
 
 ## Phase 12: Collapse Texture Page Family/Usage Into Buckets
 
-Status: planned.
+Status: implemented.
 
 Phase 11 made the existing type drift explicit but did not remove the underlying conceptual mismatch: `TexturePageUsageBucket` and `TexturePageFamily` both describe texture page partitioning. In practice, atlas entries are never mixed across `TexturePageFamily`; the family is therefore already the effective atlas bucket. The separate `usageBucket` vocabulary is still useful as source/material intent in some artifact paths, but keeping both as peer renderer concepts creates ambiguous resident resources such as `usageBucket: TexturePageUsageBucket | TexturePageFamily`.
 
@@ -1129,6 +1129,122 @@ Dry run notes:
   6. Update inspector/preview DTOs and UI labels from usage bucket to bucket.
   7. Remove Phase 11's temporary `Webgl2ResidentTexturePageUsageBucket` and `Webgl2ResidentTexturePageFamily` aliases.
   8. Run focused texture-page atlas, static bundle texture-page, upload, static bundle resources, terrain resources, resource-inspection, check, and lint tests.
+
+Implementation notes:
+
+- Added canonical bucket vocabulary in `texture-pages/texture-page-binding.ts`:
+  - `TexturePageBucket`
+  - `StaticTexturePageBucket`
+  - `TerrainTexturePageBucket`
+  - `STATIC_TEXTURE_PAGE_BUCKETS`
+  - `TERRAIN_TEXTURE_PAGE_BUCKETS`
+  - `isTerrainTexturePageBucket()`
+  - `deriveStaticTexturePageBucket()`
+- Replaced dynamic atlas planner partition terminology with buckets:
+  - `TexturePageAtlasRgbaCandidate.bucket`
+  - `TexturePageAtlasDetailCandidate.bucket`
+  - `TexturePageAtlasPlan.buckets`
+  - bucket-based grouping and terrain gutter policy
+- Replaced the old `static-rgba` dynamic atlas bucket with semantic `static-base-color`.
+- Added `bucket` to `StaticBundleTexturePage` and derive it from source `usageBucket` + `sampleClass` during static bundle texture page packing.
+- Replaced resident WebGL page `family`/overloaded `usageBucket` with `bucket: TexturePageBucket`.
+- Renamed terrain texture page lookup state from family-indexed to bucket-indexed:
+  - `productTerrainTexturePagesByBucketIndex`
+  - `describeTerrainTexturePageBucketIndexKey()`
+  - `rebuildTerrainTexturePageBucketIndex()`
+- Updated resource inspector snapshots and texture previews to display `bucket` instead of `usageBucket`.
+- Removed Phase 11's temporary resident union aliases (`Webgl2ResidentTexturePageUsageBucket` and `Webgl2ResidentTexturePageFamily`).
+
+Course corrections:
+
+- `TexturePageUsageBucket` remains intentionally alive at the source/material boundary. `TexturePageDescriptor` and static material texture refs still use values such as `base-color`, `detail`, `indexed-texels`, and `palette-lookup` because compaction eligibility and material routing ask material-intent questions, not atlas-partition questions.
+- Did not rename `CompactionMaterialFamily`, static material family parsing, shader material family descriptors, scene renderable families, or file/module names like `terrain-family-submit`. Those are separate concepts or larger lexical cleanups and renaming them here would blur the purpose of this phase.
+- Static bundle texture pages now carry both:
+  - `bucket` for renderer/resource identity and resident WebGL pages
+  - `usageBucket` for source material/ref semantics and static material binding logic
+
+Verification:
+
+- `npm run --prefix apps/holtburger-3d test:ts -- src/lib/world-display/texture-pages/texture-page-atlas-planner.test.ts src/lib/world-display/static-bundle-layer-texture-pages.test.ts src/lib/world-display/webgl2-texture-page-upload.test.ts src/lib/world-display/webgl2/resources/static-bundle-layer-resources.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/render-resource-inspection.test.ts src/lib/world-display/compaction/compaction-family-planner.test.ts`
+- `npm run --prefix apps/holtburger-3d lint:ts`
+- `npm run --prefix apps/holtburger-3d check`
+
+## Phase 13: Move Texture Usage Semantics To Page Entries
+
+Status: implemented.
+
+Phase 12 improved resident/render resource naming, but the remaining page-level `usageBucket` is still the wrong abstraction. A texture page is an atlas container. A texture page entry/rect is the object that has source/material meaning. The correct model should separate:
+
+- page-level `bucket`: atlas partition, GPU page grouping, gutter policy, and broad storage compatibility
+- entry-level role/source metadata: base color, detail, indexed texels, palette lookup, alpha/control, wrap policy, exact/data/color lookup expectations, source asset id, and rect
+
+Dry run notes:
+
+- Static bundle texture pages are the clearest proof. `StaticBundleTexturePage` still carries page-level `usageBucket`, `sampleClass`, and `indexedFormat`, while each page entry only has `virtualRefKey`, `sourceAssetId`, and `rect`.
+- Static material binding already has to look up `VirtualTexturePageRef` by entry key to recover per-ref `wrapS`/`wrapT`; it copies `usageBucket`, `sampleClass`, and `indexedFormat` from the page only because entries do not carry their own role metadata yet.
+- Static bundle packing currently groups refs by `${usageBucket}:${sampleClass}:${indexedFormat ?? "none"}`. That means page-level usage is derived from homogeneous entries, not independent page truth. The model should make that derivation explicit.
+- `TexturePageDescriptor` is also entry-like. It describes one texture binding/rect for material eligibility, not an atlas page. Its `usageBucket` should become an entry role/source role field.
+- Dynamic compaction atlas planning already works mostly at page-bucket level. It does not need page-level usage; bucket plus entry records are enough.
+- Terrain bindings are already closer to the corrected model: terrain tile texture bindings are per binding/entry-ish records with `bucket`, atlas entry key, texture index, and rect. Terrain does not need a separate page usage concept.
+
+Important constraint:
+
+- `TexturePageBucket` alone is not enough to describe every page compatibility constraint. `static-indexed-texels` still needs `indexedFormat` (`p8` vs `index16`) because those pages have different byte widths/upload formats and shader sampling expectations. The page partition key is therefore either:
+  - `bucket` plus storage subtype fields such as `indexedFormat`, or
+  - a more specific bucket split such as `static-indexed-p8-texels` and `static-indexed16-texels`.
+- Prefer the first option for now: keep `bucket` semantic and keep `indexedFormat` as explicit storage metadata.
+
+Proposed correction:
+
+- Introduce a page-entry role/source descriptor, likely:
+  - `TexturePageEntryRole`
+  - `TexturePageEntryDescriptor`
+  - or `TexturePageSourceRole` if the role is specifically source/material-facing
+- Remove page-level `usageBucket` from `StaticBundleTexturePage`.
+- Add role/source metadata to `StaticBundleTexturePageEntry` or a colocated entry descriptor:
+  - role
+  - sample class
+  - indexed format
+  - wrap policy
+  - sampling domain / lookup
+  - source asset id
+  - rect
+- Change `createWebgl2StaticBundleMaterialTextureBinding()` to read role/sample/indexed/wrap metadata from the matched page entry instead of merging page fields with a separate `VirtualTexturePageRef` lookup.
+- Change `createStaticBundleTexturePageDescriptor()` and compaction eligibility to operate on entry descriptors, not page descriptors.
+- Keep page `bucket` and page upload/storage metadata only where all entries are required to match.
+- Add hard validation that every entry in a page is compatible with the page bucket/storage metadata. Do not silently derive page semantics from the first placement.
+
+Dry-run verdict:
+
+- The model is not too naive, but only if it keeps storage compatibility separate from semantic role.
+- The naive version would be: "page has bucket, entry has role, done." That misses indexed `p8` vs `index16`, sample class, and upload byte-width constraints.
+- The robust version is: page owns bucket/storage compatibility; entry owns source/material role and rect; page construction validates all entries fit the page's bucket/storage contract.
+
+Suggested implementation order:
+
+1. Add entry role/descriptor types next to texture-page binding vocabulary.
+2. Add role/source/sample/indexed/wrap metadata to static bundle texture page entries.
+3. Stop copying page-level `usageBucket` into WebGL static material bindings; use the matched entry descriptor instead.
+4. Remove `usageBucket` from `StaticBundleTexturePage`.
+5. Replace `TexturePageDescriptor.usageBucket` with entry role naming, or rename the descriptor to make clear it is an entry/binding descriptor rather than a page descriptor.
+6. Update static bundle texture-page packing tests to prove mixed incompatible entry roles cannot share a page.
+7. Run focused static bundle texture-page, compaction, WebGL static resource, resource inspector, check, and lint tests.
+
+Implementation notes:
+
+- Renamed the material-facing `TexturePageUsageBucket` concept to `TexturePageEntryRole` and changed `TexturePageDescriptor` to expose `role` instead of `usageBucket`.
+- Removed page-level role/usage from `StaticBundleTexturePage`. Static bundle pages now own `bucket`, `sampleClass`, `indexedFormat`, dimensions, bytes, and entries.
+- Expanded `StaticBundleTexturePageEntry` with entry-owned `role`, `sampleClass`, `indexedFormat`, wrap policy, sampling domain, lookup policy, source asset id, and rect.
+- Changed static bundle packing to group pages by derived page `bucket` plus storage compatibility (`sampleClass`, `indexedFormat`) instead of grouping by material role directly.
+- Changed WebGL static bundle material binding so `createWebgl2StaticBundleMaterialResource()` no longer receives or joins against `texturePageRefByKey`; it resolves the texture page by virtual ref key, then reads role/sample/indexed/wrap metadata from the matched page entry.
+- Updated structured interior resource creation to use the same entry-owned binding path.
+- Kept `MaterialTextureUsage` and prepared-texture `usage` naming intact. That is source preparation policy, not atlas entry role.
+
+Verification:
+
+- `npm run --prefix apps/holtburger-3d test:ts -- src/lib/world-display/static-bundle-layer-texture-pages.test.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/compaction/compaction-family-planner.test.ts src/lib/world-display/webgl2/resources/static-bundle-layer-resources.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/render-resource-inspection.test.ts src/lib/world-display/static-bundle-layer.test.ts src/workers/static-landblock-render-worker.test.ts`
+- `npm run --prefix apps/holtburger-3d lint:ts`
+- `npm run --prefix apps/holtburger-3d check`
 
 ## Findings
 

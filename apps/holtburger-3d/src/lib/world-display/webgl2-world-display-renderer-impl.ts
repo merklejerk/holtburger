@@ -267,7 +267,6 @@ uniform float uAlphaTest;
 uniform sampler2D uIndexTexture;
 uniform sampler2D uPaletteTexture;
 uniform vec2 uTextureSize;
-uniform float uPaletteColorCount;
 uniform vec4 uIndexAtlasRect;
 uniform vec4 uPaletteAtlasRect;
 uniform vec2 uPaletteAtlasSize;
@@ -363,7 +362,6 @@ uniform float uAlphaTest;
 uniform sampler2D uIndexTexture;
 uniform sampler2D uPaletteTexture;
 uniform vec2 uTextureSize;
-uniform float uPaletteColorCount;
 uniform vec4 uIndexAtlasRect;
 uniform vec4 uPaletteAtlasRect;
 uniform vec2 uPaletteAtlasSize;
@@ -2830,7 +2828,6 @@ function createIndexedWorldProgram(
 			"uIndexTexture",
 			"uPaletteTexture",
 			"uTextureSize",
-			"uPaletteColorCount",
 			"uIndexAtlasRect",
 			"uPaletteAtlasRect",
 			"uPaletteAtlasSize",

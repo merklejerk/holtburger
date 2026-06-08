@@ -84,6 +84,27 @@ describe("createLinearRenderSpatialIndex", () => {
 		expect(pick?.distance).toBe(2);
 	});
 
+	it("ignores shapes containing the ray origin when picking", () => {
+		const index = createTestIndex();
+		const enclosingBounds = {
+			min: { x: -1, y: -1, z: -1 },
+			max: { x: 1, y: 1, z: 1 },
+		};
+		index.replaceOwnerItems("owner", [
+			{
+				...createTerrainItem("enclosing", "owner", -1, 1),
+				broadphaseBounds: enclosingBounds,
+				pickShape: { kind: "box", bounds: enclosingBounds },
+			},
+			createTerrainItem("intended", "owner", 2, 4),
+		]);
+
+		const pick = index.pickRay(createForwardRay(), new Set(["terrain"]));
+
+		expect(pick?.item.id).toBe("intended");
+		expect(pick?.distance).toBe(2);
+	});
+
 	it("picks sphere shapes through the public spatial index", () => {
 		const index = createTestIndex();
 		index.replaceOwnerItems("owner", [

@@ -59,6 +59,47 @@ describe("static bundle layer builder", () => {
 			"outdoor-static:landblock:da55ffff:instance:direct-0",
 			"outdoor-static:landblock:da55ffff:instance:compactable-1",
 		]);
+		expect(
+			layer.objectRecords.map((object) => ({
+				key: object.objectKey,
+				partHints: object.partHints?.map((hint) => ({
+					partIndex: hint.partIndex,
+					gfxObjAssetId: hint.gfxObjAssetId,
+					materialSlotCount: hint.materialSlotCount,
+				})),
+			})),
+		).toEqual([
+			{
+				key: "outdoor-static:da55ffff:compactable-0",
+				partHints: [
+					{
+						partIndex: 0,
+						gfxObjAssetId: "gfx-obj/01000001",
+						materialSlotCount: 1,
+					},
+				],
+			},
+			{
+				key: "outdoor-static:da55ffff:direct-0",
+				partHints: [
+					{
+						partIndex: 0,
+						gfxObjAssetId: "gfx-obj/01000002",
+						materialSlotCount: 1,
+					},
+				],
+			},
+			{
+				key: "outdoor-static:da55ffff:compactable-1",
+				partHints: [
+					{
+						partIndex: 0,
+						gfxObjAssetId: "gfx-obj/01000003",
+						materialSlotCount: 1,
+					},
+				],
+			},
+		]);
 		expect(layer.spatialHints).toEqual([
 			{
 				key: "outdoor-static:da55ffff:compactable-0",

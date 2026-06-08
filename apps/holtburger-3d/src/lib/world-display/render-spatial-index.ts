@@ -16,6 +16,8 @@ import {
 	type RenderVec3,
 } from "./render-spatial-math";
 
+const MIN_PICK_DISTANCE = 1e-4;
+
 export type {
 	RenderBounds,
 	RenderVec3,
@@ -81,11 +83,14 @@ export type RenderSpatialMetadata =
 			artifactCoverage?: {
 				sourcePartHintCount: number;
 				sourcePartIndices: readonly number[];
+				sourceMaterialSlotCount: number;
 				emittedDirectEntryCount: number;
 				emittedCompactedBatchCount: number;
 				emittedGeometryEntryCount: number;
 				emittedDirectTriangleCount: number;
 				emittedCompactedBatchTriangleCount: number;
+				emittedZeroTriangleEntryCount: number;
+				zeroTriangleMaterialRecordKeys: readonly string[];
 				materialRecordKeys: readonly string[];
 				materialFamilyKeys: readonly string[];
 			};
@@ -257,6 +262,9 @@ export function createLinearRenderSpatialIndex(): RenderSpatialIndex {
 					ray.origin,
 					renderPoint,
 				);
+				if (renderDistance <= MIN_PICK_DISTANCE) {
+					continue;
+				}
 				if (!nearestPick || renderDistance < nearestPick.distance) {
 					nearestPick = {
 						item,

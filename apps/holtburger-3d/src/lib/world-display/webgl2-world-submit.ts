@@ -1187,8 +1187,14 @@ function submitWebgl2TexturedMaterialDrawSurface({
 		base.wrapS === "repeat" ? 1 : 0,
 		base.wrapT === "repeat" ? 1 : 0,
 	);
-	gl.uniform1f(texturedProgram.uniforms.uDetailTiling, material.detailTiling);
-	gl.uniform1i(texturedProgram.uniforms.uDetailEnabled, detail ? 1 : 0);
+	gl.uniform1f(
+		texturedProgram.uniforms.uDetailTiling,
+		material.detailOverlay?.tiling ?? 1,
+	);
+	gl.uniform1i(
+		texturedProgram.uniforms.uDetailEnabled,
+		detail && material.detailOverlay ? 1 : 0,
+	);
 	uploadTexturedDetailAtlasUniforms(gl, texturedProgram, detail);
 	metrics.uniformUploadCount += 12;
 	gl.drawElements(gl.TRIANGLES, surface.indexCount, surface.indexType, 0);
@@ -1343,8 +1349,14 @@ function submitWebgl2IndexedMaterialDrawSurface({
 	);
 	gl.uniform1i(program.uniforms.uRepeatS, descriptor.wrapS === "repeat" ? 1 : 0);
 	gl.uniform1i(program.uniforms.uRepeatT, descriptor.wrapT === "repeat" ? 1 : 0);
-	gl.uniform1f(program.uniforms.uDetailTiling, material.detailTiling);
-	gl.uniform1i(program.uniforms.uDetailEnabled, detail ? 1 : 0);
+	gl.uniform1f(
+		program.uniforms.uDetailTiling,
+		material.detailOverlay?.tiling ?? 1,
+	);
+	gl.uniform1i(
+		program.uniforms.uDetailEnabled,
+		detail && material.detailOverlay ? 1 : 0,
+	);
 	uploadIndexedDetailAtlasUniforms(gl, program, detail);
 	metrics.uniformUploadCount += 15;
 	gl.drawElements(gl.TRIANGLES, surface.indexCount, surface.indexType, 0);
@@ -1547,12 +1559,12 @@ function resolveMaterialTextureBinding(
 function resolveMaterialDetailTextureBinding(
 	material: Webgl2StaticBundleMaterialResource,
 ): Webgl2StaticBundleMaterialTextureBinding | null {
-	if (!material.detailTextureRefKey) {
+	if (!material.detailOverlay) {
 		return null;
 	}
 	return (
 		material.textureBindings.find(
-			(binding) => binding.virtualRefKey === material.detailTextureRefKey,
+			(binding) => binding.virtualRefKey === material.detailOverlay?.textureRefKey,
 		) ?? null
 	);
 }

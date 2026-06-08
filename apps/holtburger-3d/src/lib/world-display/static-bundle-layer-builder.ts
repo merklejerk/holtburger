@@ -27,6 +27,7 @@ import {
 	type StaticBundleRenderChunk,
 	type StaticBundleSpatialHint,
 	type StaticLandblockBundleLayerDiagnostics,
+	type StaticMaterialDetailOverlayDescriptor,
 	type StaticObjectBundleArtifact,
 	type VirtualTexturePageRef,
 } from "./static-bundle-layer";
@@ -49,6 +50,10 @@ import {
 import { formatMaterialAssetId } from "./material-signatures";
 import type { AtlasLayoutPolicy } from "./texture-pages/atlas-layout-planner";
 import { buildStaticBundleLayerTexturePages } from "./static-bundle-layer-texture-pages";
+import {
+	resolveRegionDetailRolePolicy,
+	type RegionDetailRoleKind,
+} from "./region-detail-overlays";
 import {
 	collectStaticMaterialTexturePageRefs,
 	collectStaticMaterialTextureRoutes,
@@ -117,6 +122,7 @@ interface StaticBundleBuildSurface {
 	materialTextureRecordKey: string;
 	materialVariantSignature: string | null;
 	textureRefKeys: readonly string[];
+	detailOverlay: StaticMaterialDetailOverlayDescriptor | null;
 	detailTextureRefKey: string | null;
 	detailTiling: number;
 	compactable: boolean;
@@ -559,7 +565,7 @@ function resolveStaticBundleObjectDetailTextureRef({
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
 }): VirtualTexturePageRef | null {
 	const roleKind = staticBundleDetailRoleKindForObject(object);
-	if (!roleKind) {
+	if (!roleKind || !resolveRegionDetailRolePolicy(roleKind)) {
 		return null;
 	}
 	const role = resolveStaticBundleObjectDetailRole({
@@ -676,7 +682,7 @@ function resolveStaticBundleDetailRenderSurface({
 
 function staticBundleDetailRoleKindForObject(
 	object: StaticBundleSourceObject,
-): "building" | null {
+): RegionDetailRoleKind | null {
 	return object.kind === "building" ? "building" : null;
 }
 
@@ -686,7 +692,7 @@ function formatStaticBundleDetailTextureRefKey({
 	preparedTextureAssetId,
 }: {
 	regionNumber: number;
-	roleKind: "building";
+	roleKind: RegionDetailRoleKind;
 	preparedTextureAssetId: string;
 }): string {
 	return [
@@ -706,7 +712,15 @@ function resolveStaticBundleObjectDetail({
 	object: StaticBundleSourceObject;
 	texturePageRefs: readonly VirtualTexturePageRef[];
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
-}): { textureRefKey: string; tiling: number } | null {
+}): StaticMaterialDetailOverlayDescriptor | null {
+	const roleKind = staticBundleDetailRoleKindForObject(object);
+	if (!roleKind) {
+		return null;
+	}
+	const policy = resolveRegionDetailRolePolicy(roleKind);
+	if (!policy) {
+		return null;
+	}
 	const role = resolveStaticBundleObjectDetailRole({
 		object,
 		preparedByAssetId,
@@ -723,7 +737,12 @@ function resolveStaticBundleObjectDetail({
 	}
 	return {
 		textureRefKey: detailRef.key,
+		roleKind,
+		blendMode: policy.blendMode,
+		fadeMode: policy.fadeMode,
 		tiling: role.tiling,
+		fadeNear: role.fadeNear,
+		fadeFar: role.fadeFar,
 	};
 }
 
@@ -871,6 +890,7 @@ function buildObjectSurface({
 		materialTextureRecordKey,
 		materialVariantSignature: slot.materialVariantSignature ?? null,
 		textureRefKeys,
+		detailOverlay: detail,
 		detailTextureRefKey: detail?.textureRefKey ?? null,
 		detailTiling: detail?.tiling ?? 1,
 		compactable,
@@ -1044,6 +1064,7 @@ function buildMaterialRecords({
 			family: surface.family,
 			color: surface.color,
 			texturePageRefKeys: surface.textureRefKeys,
+			detailOverlay: surface.detailOverlay,
 			detailTextureRefKey: surface.detailTextureRefKey,
 			detailTiling: surface.detailTiling,
 			isTransparent: surface.isTransparent,

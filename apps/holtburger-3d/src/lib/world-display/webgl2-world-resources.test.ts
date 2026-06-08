@@ -571,6 +571,7 @@ function createDetailedLandblockProductArtifact(
 						}),
 						color: [1, 1, 1, 1],
 						texturePageRefKeys: ["interior-texture-ref"],
+						detailOverlay: null,
 						detailTextureRefKey: null,
 						detailTiling: 1,
 						isTransparent: false,

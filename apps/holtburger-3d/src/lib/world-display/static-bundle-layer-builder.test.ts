@@ -294,6 +294,7 @@ describe("static bundle layer builder", () => {
 		expect(
 			layer.materialRecords.map((record) => ({
 				key: record.key,
+				detailOverlay: record.detailOverlay,
 				detailTextureRefKey: record.detailTextureRefKey,
 				detailTiling: record.detailTiling,
 			})),
@@ -301,6 +302,15 @@ describe("static bundle layer builder", () => {
 			expect.arrayContaining([
 				{
 					key: `material:material/08000001:variant:sampler=clamp:detail=${detailRefKey}`,
+					detailOverlay: {
+						textureRefKey: detailRefKey,
+						roleKind: "building",
+						blendMode: "dst-color",
+						fadeMode: "constant",
+						tiling: 7,
+						fadeNear: 0,
+						fadeFar: 1,
+					},
 					detailTextureRefKey: detailRefKey,
 					detailTiling: 7,
 				},
@@ -346,9 +356,12 @@ describe("static bundle layer builder", () => {
 		expect(layer.texturePageRefs.map((ref) => ref.sourceAssetId)).not.toContain(
 			detailPreparedTextureAssetId,
 		);
-		expect(layer.materialRecords.map((record) => record.detailTextureRefKey)).toEqual([
-			null,
-		]);
+		expect(
+			layer.materialRecords.map((record) => [
+				record.detailOverlay,
+				record.detailTextureRefKey,
+			]),
+		).toEqual([[null, null]]);
 	});
 
 	it("does not apply disabled object detail roles to indoor static objects", () => {
@@ -387,9 +400,12 @@ describe("static bundle layer builder", () => {
 		expect(layer.texturePageRefs.map((ref) => ref.sourceAssetId)).not.toContain(
 			detailPreparedTextureAssetId,
 		);
-		expect(layer.materialRecords.map((record) => record.detailTextureRefKey)).toEqual([
-			null,
-		]);
+		expect(
+			layer.materialRecords.map((record) => [
+				record.detailOverlay,
+				record.detailTextureRefKey,
+			]),
+		).toEqual([[null, null]]);
 	});
 
 	it("classifies direct alpha clipmaps as cutout static materials", () => {
@@ -569,6 +585,7 @@ describe("static bundle layer builder", () => {
 					"texture:material:material/08000011:variant:sampler=clamp:palette/04000011:palette-lookup",
 					"texture:material:material/08000011:variant:sampler=clamp:render-surface/06000011:indexed-texels",
 				],
+				detailOverlay: null,
 				detailTextureRefKey: null,
 				detailTiling: 1,
 				isTransparent: false,

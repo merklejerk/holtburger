@@ -68,6 +68,7 @@ describe("static bundle layer contract", () => {
 			}),
 			color: [1, 1, 1, 1],
 			texturePageRefKeys: [texturePageRef.key],
+			detailOverlay: null,
 			detailTextureRefKey: null,
 			detailTiling: 1,
 			isTransparent: false,

@@ -38,9 +38,11 @@ import {
 import type {
 	StaticBundleLayerWorkerJob,
 	StaticBundleMaterialRecord,
+	StaticMaterialDetailOverlayDescriptor,
 	StaticObjectBundleArtifact,
 	VirtualTexturePageRef,
 } from "../lib/world-display/static-bundle-layer";
+import { resolveRegionDetailRolePolicy } from "../lib/world-display/region-detail-overlays";
 import { createCompactionEligibility } from "../lib/world-display/compaction/compaction-family-planner";
 import { buildPolygonSetRenderGeometry } from "../lib/world-display/indexed-render-geometry";
 import { buildLandblockTerrainRenderArtifact } from "../lib/world-display/terrain-render-artifact";
@@ -810,6 +812,7 @@ function buildStructuredInteriorMaterialRecords(options: {
 				behavior: materialReadiness.behavior,
 			}),
 			texturePageRefKeys: textureRefKeys,
+			detailOverlay: detail,
 			detailTextureRefKey: detail?.textureRefKey ?? null,
 			detailTiling: detail?.tiling ?? 1,
 			isTransparent:
@@ -1027,7 +1030,12 @@ function resolveStructuredInteriorEnvironmentDetail({
 	regionNumber: number;
 	texturePageRefs: readonly VirtualTexturePageRef[];
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
-}): { textureRefKey: string; tiling: number } | null {
+}): StaticMaterialDetailOverlayDescriptor | null {
+	const roleKind = "environment";
+	const policy = resolveRegionDetailRolePolicy(roleKind);
+	if (!policy) {
+		return null;
+	}
 	const role = resolveStructuredInteriorEnvironmentDetailRole({
 		regionNumber,
 		preparedByAssetId,
@@ -1044,7 +1052,12 @@ function resolveStructuredInteriorEnvironmentDetail({
 	}
 	return {
 		textureRefKey: detailRef.key,
+		roleKind,
+		blendMode: policy.blendMode,
+		fadeMode: policy.fadeMode,
 		tiling: role.tiling,
+		fadeNear: role.fadeNear,
+		fadeFar: role.fadeFar,
 	};
 }
 
@@ -1055,6 +1068,9 @@ function resolveStructuredInteriorEnvironmentDetailTextureRef({
 	regionNumber: number;
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
 }): VirtualTexturePageRef | null {
+	if (!resolveRegionDetailRolePolicy("environment")) {
+		return null;
+	}
 	const role = resolveStructuredInteriorEnvironmentDetailRole({
 		regionNumber,
 		preparedByAssetId,

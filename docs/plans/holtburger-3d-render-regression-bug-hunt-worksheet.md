@@ -868,7 +868,7 @@ Verification:
 
 ## Phase 11: Typed Renderer Vocabulary Cleanup
 
-Status: planned.
+Status: implemented.
 
 Phase 10 intentionally unified texture-page resource shape, but it also made an older pattern more visible: renderer resource code still passes raw strings for values that should be closed vocabularies. Examples include usage buckets, sample classes, page kinds, indexed formats, sampler policies, resource owner kinds, terrain texture families, material family ids, and resource bucket ids. That pattern is brittle because a typo or drifted serialized key can survive TypeScript and fail only at render time.
 
@@ -949,6 +949,35 @@ Recommended implementation order:
 6. Brand sampler policy keys with a single formatter boundary; defer structured sampler descriptors if churn spreads.
 7. Run focused texture-page upload, static bundle resource, terrain resource, resource-inspection, check, and lint tests.
 
+Implementation notes:
+
+- Exported the canonical texture-page vocabulary from `texture-pages/texture-page-binding.ts`, including page kind, sample class, wrap/filter/mip/sampling/lookup policies, binding source, and sampling policy.
+- Replaced duplicated static bundle texture-page unions with aliases/imports from the canonical texture-page vocabulary and `IndexedTextureFormat`.
+- Typed `Webgl2ResidentTexturePageResource` closed vocabulary fields:
+  - `family` is now `Webgl2ResidentTexturePageFamily`.
+  - `usageBucket` is now `Webgl2ResidentTexturePageUsageBucket`.
+  - `sampleClass` is now `TexturePageSampleClass`.
+  - `pageKind` is now `TexturePageKind`.
+  - `indexedFormat` is now `IndexedTextureFormat | null`.
+  - `samplerPolicyKey` is now a branded `Webgl2TexturePageSamplerPolicyKey`.
+- Added `createWebgl2TexturePageSamplerPolicyKey()` and routed static bundle/upload sampler policy formatting through that boundary. The key remains a string for cache/update equality and display, but arbitrary strings can no longer be assigned to resident page resources without going through the formatter.
+- Added canonical terrain texture-page vocabulary beside `TexturePageFamily`: `TERRAIN_TEXTURE_PAGE_FAMILIES`, `TerrainTexturePageFamily`, and `isTerrainTexturePageFamily()`.
+- Replaced the local terrain page family guard in `webgl2-world-resources.ts` and the inline `Extract<...>` terrain binding type with the canonical terrain family type/helper.
+- Added `RenderResourceInspectionOwnerKind` and used it across texture-page snapshot/preview identity DTOs. Material and geometry owner kinds now narrow that shared owner vocabulary to static/structured owners.
+- Resource-inspection texture page DTOs now consume the typed resident texture-page fields instead of broad strings.
+
+Course corrections:
+
+- The resident page `usageBucket` field is not strictly an artifact-level `TexturePageUsageBucket`. Upload-created atlas pages still report `static-rgba`, `static-detail`, `terrain-color`, `terrain-mask`, or `terrain-detail` in that field because Phase 10 preserved the existing inspector/resource label behavior. This phase made that overload explicit with `Webgl2ResidentTexturePageUsageBucket = TexturePageUsageBucket | TexturePageFamily` instead of pretending the field had one semantic domain.
+- A future cleanup should split resident texture-page identity into clearer fields, for example artifact `usageBucket` where available plus atlas `family`/display label, rather than continuing to overload the `usageBucket` name.
+- Material family ids and render family ids stayed out of this phase. The existing parser/descriptor path in `static-material-artifacts.ts` should be reused in a follow-up rather than replaced with a second literal union.
+
+Verification:
+
+- `npm run --prefix apps/holtburger-3d test:ts -- src/lib/world-display/webgl2-texture-page-upload.test.ts src/lib/world-display/webgl2/resources/static-bundle-layer-resources.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/render-resource-inspection.test.ts`
+- `npm run --prefix apps/holtburger-3d lint:ts`
+- `npm run --prefix apps/holtburger-3d check`
+
 Acceptance criteria:
 
 - Core texture-page resident resources no longer expose broad `string` for closed vocabulary fields.
@@ -983,6 +1012,123 @@ Follow-up recommendation:
   - detail texture roles and blending modes
   - debug/picker/report DTO enum-like strings
 - That follow-up should reuse the same pattern: canonical typed vocabulary internally, parser/formatter helpers at serialized boundaries, and no compatibility shims whose only job is to preserve loose string usage.
+
+## Phase 12: Collapse Texture Page Family/Usage Into Buckets
+
+Status: planned.
+
+Phase 11 made the existing type drift explicit but did not remove the underlying conceptual mismatch: `TexturePageUsageBucket` and `TexturePageFamily` both describe texture page partitioning. In practice, atlas entries are never mixed across `TexturePageFamily`; the family is therefore already the effective atlas bucket. The separate `usageBucket` vocabulary is still useful as source/material intent in some artifact paths, but keeping both as peer renderer concepts creates ambiguous resident resources such as `usageBucket: TexturePageUsageBucket | TexturePageFamily`.
+
+Direction:
+
+- Introduce one canonical `TexturePageBucket` concept for renderer texture-page partitioning.
+- Treat the bucket as the answer to: "Which entries can share one texture page set?"
+- Derive storage/sample behavior from the bucket plus indexed format where needed.
+- Avoid carrying both `family` and `usageBucket` through resident WebGL resources unless one is clearly serialized source metadata and the other is renderer bucket metadata.
+- Prefer semantic bucket names over storage-format names. For example, `static-base-color` is clearer than `static-rgba`; `rgba-color` remains a sample class, not a bucket.
+
+Likely bucket vocabulary:
+
+- `static-base-color`
+- `static-detail`
+- `static-indexed-texels`
+- `static-palette-lookup`
+- `static-alpha-control`
+- `terrain-color`
+- `terrain-mask`
+- `terrain-detail`
+
+Proposed work:
+
+- Add canonical bucket vocabulary near the texture-page planner/binding code:
+  - `TexturePageBucket`
+  - `TexturePageBucketDescriptor`
+  - helpers to derive sample class, page kind, sampling domain, lookup policy, gutter policy, and display label
+- Replace `TexturePageFamily` in atlas planning with `TexturePageBucket` where the value controls atlas partitioning.
+- Replace `TexturePageUsageBucket` in resident WebGL texture-page resources with `TexturePageBucket`.
+- Keep source artifact/material usage metadata only where it represents serialized input or material routing; do not pass it as the resident page partition key.
+- Rename fields where needed so the model states the semantic role:
+  - `bucket` for renderer partitioning
+  - `sampleClass` for texture storage/sample interpretation
+  - `indexedFormat` for `p8`/`index16` specifics
+- Update static bundle texture-page planning to map material texture refs into static buckets before atlas grouping.
+- Update terrain texture-page planning to use terrain buckets directly.
+- Update resource inspector and texture preview labels to show bucket and sample class separately.
+- Delete the temporary `Webgl2ResidentTexturePageUsageBucket = TexturePageUsageBucket | TexturePageFamily` union once resident pages expose a bucket.
+- Remove `TexturePageFamily` and/or narrow `TexturePageUsageBucket` if they no longer represent distinct internal renderer concepts.
+
+Acceptance criteria:
+
+- Resident WebGL texture pages expose a single `bucket: TexturePageBucket` partition key.
+- No resident resource field uses `TexturePageUsageBucket | TexturePageFamily`.
+- Atlas planning groups by `TexturePageBucket`.
+- Static and terrain texture pages remain in separate bucket groups and retain current packing/gutter behavior.
+- Indexed texture and palette pages remain distinct buckets and preserve exact/data sampling behavior.
+- Resource inspector displays bucket/sample/indexed format clearly without overloading "usage bucket".
+- Visual behavior is unchanged.
+- Focused texture-page planner/upload/static bundle/terrain/resource-inspection tests pass, plus `check` and `lint:ts`.
+
+Risks and mitigations:
+
+- Risk: static source material refs still need `base-color`, `detail`, `indexed-texels`, or `palette-lookup` language.
+  - Mitigation: keep source usage values at the material/ref boundary only, and map them to renderer buckets before atlas planning.
+- Risk: bucket rename churn breaks tests without changing behavior.
+  - Mitigation: update tests around the new bucket contract and avoid preserving old names solely for compatibility.
+- Risk: terrain bucket and static bucket logic get collapsed too far.
+  - Mitigation: bucket descriptors should preserve terrain-specific gutter and sampling behavior; collapsing vocabulary does not mean sharing every policy.
+
+Dry-run checklist:
+
+- Confirm every atlas-planner grouping site can use `TexturePageBucket`.
+- Confirm `static-rgba` maps cleanly to `static-base-color` and no other static usage currently routes through that family.
+- Confirm detail atlas planning can distinguish `static-detail` and `terrain-detail`.
+- Confirm indexed/palette static texture pages never need to share a bucket with RGBA base-color pages.
+- Confirm resource inspector snapshot/preview needs no serialized key migration beyond display labels.
+
+Dry run notes:
+
+- Dynamic atlas planning already treats `TexturePageFamily` as the atlas partition key:
+  - `TexturePageAtlasRgbaCandidate.family` defaults to `static-rgba`.
+  - `TexturePageAtlasDetailCandidate.family` defaults to `static-detail`.
+  - terrain candidates explicitly use `terrain-color`, `terrain-mask`, and `terrain-detail`.
+  - `groupRgbaCandidatesByFamily()`, `groupDetailCandidatesByFamily()`, `uniqueSortedFamilies()`, `TexturePageFamilyPlan`, and `resolveTexturePageFamilyGutterPixels()` can be mechanically renamed to bucket terminology.
+- The bucket rename should preserve current partitioning:
+  - `static-rgba` becomes `static-base-color` for the dynamic compaction atlas path.
+  - `static-detail` remains `static-detail`.
+  - `terrain-color`, `terrain-mask`, and `terrain-detail` remain as-is.
+  - terrain gutter policy moves from family-based helper to bucket-based helper with the same values.
+- Static bundle texture-page packing is already bucket-like but uses a composite key: `${usageBucket}:${sampleClass}:${indexedFormat ?? "none"}`. This means Phase 12 should not simply map `base-color` to one static bucket without considering sample class. Recommended static bundle bucket mapping:
+  - `base-color` + `rgba-color` -> `static-base-color`
+  - `detail` + `rgba-color` -> `static-detail`
+  - `indexed-texels` + `indexed-data` -> `static-indexed-texels`
+  - `palette-lookup` + `palette-data` -> `static-palette-lookup`
+  - `alpha-control` + `control-data` -> `static-alpha-control`
+- Source/static material refs still use `usageBucket` to describe material intent. Keep that vocabulary at the material/ref boundary for the first implementation cut, but add `bucket` to generated `StaticBundleTexturePage` resources so WebGL resident pages no longer need to infer `family` from `usageBucket`.
+- `TexturePageDescriptor` is used by compaction eligibility checks for material semantics (`base-color`, `detail`, `indexed-texels`, `palette-lookup`). Do not force this descriptor to become bucket-only in the first cut. Instead, either:
+  - keep `usageBucket` on `TexturePageDescriptor` as source/material intent, or
+  - add a derived `bucket` while retaining usage for eligibility logic until compaction is migrated.
+- `Webgl2ResidentTexturePageResource` should be the first decisive cutover target:
+  - replace `family` and overloaded `usageBucket` with `bucket: TexturePageBucket`
+  - keep `sampleClass`, `pageKind`, `indexedFormat`, and `samplerPolicyKey`
+  - update inspector/preview to display `bucket`, not `usageBucket`
+- Terrain lookup names should follow the model:
+  - `productTerrainTexturePagesByFamilyIndex` -> `productTerrainTexturePagesByBucketIndex`
+  - `describeTerrainTexturePageFamilyIndexKey()` -> `describeTerrainTexturePageBucketIndexKey()`
+  - `isTerrainTexturePageFamily()` -> likely `isTerrainTexturePageBucket()`, unless terrain bucket extraction remains useful.
+- Avoid a massive lexical rename of unrelated compaction "family" terminology. `CompactionMaterialFamily`, static material family parsing, and shader material families are separate concepts and should not be renamed in this phase.
+- Tests with direct expected names will need focused updates:
+  - `texture-page-atlas-planner.test.ts` should assert isolation by bucket rather than family.
+  - `webgl2-texture-page-upload.test.ts`, `webgl2-world-resources.test.ts`, and `render-resource-inspection.test.ts` should assert `bucket`.
+  - static bundle texture-page tests should assert bucket derivation for indexed texels, palette lookup, alpha-control, detail, and base color.
+- Suggested implementation order:
+  1. Add `TexturePageBucket`, static/terrain bucket subsets, and source-ref-to-bucket helper functions.
+  2. Rename dynamic atlas planner candidate/plan fields from `family` to `bucket`, preserving old behavior in one focused sweep.
+  3. Add `bucket` to `StaticBundleTexturePage` and derive it in `buildStaticBundleLayerTexturePages()`.
+  4. Replace resident WebGL page `family`/`usageBucket` with `bucket`.
+  5. Rename terrain page bucket-index maps/helpers.
+  6. Update inspector/preview DTOs and UI labels from usage bucket to bucket.
+  7. Remove Phase 11's temporary `Webgl2ResidentTexturePageUsageBucket` and `Webgl2ResidentTexturePageFamily` aliases.
+  8. Run focused texture-page atlas, static bundle texture-page, upload, static bundle resources, terrain resources, resource-inspection, check, and lint tests.
 
 ## Findings
 

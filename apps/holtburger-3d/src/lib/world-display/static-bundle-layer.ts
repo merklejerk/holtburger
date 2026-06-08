@@ -1,7 +1,16 @@
 import type { PreparedFloat32Array } from "../assets/types";
 import type { PlacementTransformDto, Vec3Dto } from "../host/contracts";
+import type { IndexedTextureFormat } from "./indexed-material-data";
 import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import type { RenderBounds } from "./render-spatial-math";
+import type {
+	TexturePageKind,
+	TexturePageLookupPolicy,
+	TexturePageSampleClass,
+	TexturePageSamplingDomain,
+	TexturePageUsageBucket,
+	TexturePageWrapMode,
+} from "./texture-pages/texture-page-binding";
 
 export type StaticObjectBundleKind =
 	| "outdoor-buildings"
@@ -36,22 +45,11 @@ interface DesiredStaticBundleLayerDiagnostics {
 	knownMissingAssetIds: readonly string[];
 }
 
-export type VirtualTexturePageUsageBucket =
-	| "base-color"
-	| "detail"
-	| "indexed-texels"
-	| "palette-lookup"
-	| "terrain"
-	| "road"
-	| "alpha-control";
+export type VirtualTexturePageUsageBucket = TexturePageUsageBucket;
 
-export type VirtualTexturePageSampleClass =
-	| "rgba-color"
-	| "indexed-data"
-	| "palette-data"
-	| "control-data";
+export type VirtualTexturePageSampleClass = TexturePageSampleClass;
 
-type StaticBundleIndexedTextureFormat = "p8" | "index16";
+export type StaticBundleIndexedTextureFormat = IndexedTextureFormat;
 
 export interface VirtualTexturePageRef {
 	key: string;
@@ -61,14 +59,14 @@ export interface VirtualTexturePageRef {
 	indexedFormat?: StaticBundleIndexedTextureFormat;
 	width: number;
 	height: number;
-	wrapS: "clamp" | "repeat";
-	wrapT: "clamp" | "repeat";
-	samplingDomain: "color" | "data" | "control";
-	lookup: "color-filtered" | "exact" | "control-filtered";
+	wrapS: TexturePageWrapMode;
+	wrapT: TexturePageWrapMode;
+	samplingDomain: TexturePageSamplingDomain;
+	lookup: TexturePageLookupPolicy;
 	bytes?: Uint8Array;
 }
 
-type StaticBundleTexturePageKind = "single-entry" | "packed-atlas";
+export type StaticBundleTexturePageKind = TexturePageKind;
 
 interface StaticBundleTexturePageEntry {
 	virtualRefKey: string;
@@ -149,8 +147,8 @@ export interface StaticBundleIndexedMaterialRecord {
 	width: number;
 	height: number;
 	paletteColorCount: number;
-	wrapS: "clamp" | "repeat";
-	wrapT: "clamp" | "repeat";
+	wrapS: TexturePageWrapMode;
+	wrapT: TexturePageWrapMode;
 	clipThreshold: number;
 }
 

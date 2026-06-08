@@ -17,6 +17,23 @@ export type TexturePageFamily =
 	| "terrain-mask"
 	| "terrain-detail";
 
+export const TERRAIN_TEXTURE_PAGE_FAMILIES = [
+	"terrain-color",
+	"terrain-mask",
+	"terrain-detail",
+] as const;
+
+export type TerrainTexturePageFamily =
+	(typeof TERRAIN_TEXTURE_PAGE_FAMILIES)[number] & TexturePageFamily;
+
+export function isTerrainTexturePageFamily(
+	family: string,
+): family is TerrainTexturePageFamily {
+	return TERRAIN_TEXTURE_PAGE_FAMILIES.includes(
+		family as TerrainTexturePageFamily,
+	);
+}
+
 export const TERRAIN_COLOR_ATLAS_GUTTER_PIXELS = 96;
 export const TERRAIN_MASK_ATLAS_GUTTER_PIXELS = 16;
 

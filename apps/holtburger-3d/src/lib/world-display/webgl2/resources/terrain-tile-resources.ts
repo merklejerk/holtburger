@@ -5,7 +5,7 @@ import type { TerrainTileLayerPlan } from "../../terrain-tile-plan";
 import type { RenderBvhItemKey } from "../../prepared-bvh-visibility";
 import type { RenderChunkTransform } from "../../render-anchor";
 import type { RenderIndexedGeometry } from "../../indexed-render-geometry";
-import type { TexturePageFamily } from "../../texture-pages/texture-page-atlas-planner";
+import type { TerrainTexturePageFamily } from "../../texture-pages/texture-page-atlas-planner";
 import type { TerrainSceneTile } from "../../terrain-scene";
 import type { PreparedTerrainMesh } from "../../../assets/types";
 import type { ResolvedRegionDetailOverlayPlan } from "../../region-detail-overlays";
@@ -84,10 +84,7 @@ export interface Webgl2TerrainTileDrawSliceResource {
 }
 
 export interface Webgl2TerrainTileTexturePageBinding {
-	family: Extract<
-		TexturePageFamily,
-		"terrain-color" | "terrain-mask" | "terrain-detail"
-	>;
+	family: TerrainTexturePageFamily;
 	atlasEntryKey: string;
 	textureIndex: number | null;
 	rect: readonly [number, number, number, number] | null;

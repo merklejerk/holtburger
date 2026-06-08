@@ -1,5 +1,24 @@
 import type { Webgl2WorldResourceStore } from "./webgl2-world-resources";
 import { formatHex32 } from "../landblocks";
+import type { IndexedTextureFormat } from "./indexed-material-data";
+import type {
+	TexturePageKind,
+	TexturePageSampleClass,
+} from "./texture-pages/texture-page-binding";
+import type {
+	Webgl2ResidentTexturePageUsageBucket,
+	Webgl2TexturePageSamplerPolicyKey,
+} from "./webgl2/resources/texture-page-upload";
+
+export type RenderResourceInspectionOwnerKind =
+	| "static-bundle"
+	| "structured-interior"
+	| "terrain";
+
+type MaterialResourceInspectionOwnerKind = Extract<
+	RenderResourceInspectionOwnerKind,
+	"static-bundle" | "structured-interior"
+>;
 
 export interface RenderResourceInspectionSnapshot {
 	readonly generatedAtMs: number;
@@ -50,23 +69,23 @@ export interface RenderResourceInspectionStructuredInteriorCell {
 
 export interface RenderResourceInspectionTexturePage {
 	readonly key: string;
-	readonly ownerKind: "static-bundle" | "structured-interior" | "terrain";
+	readonly ownerKind: RenderResourceInspectionOwnerKind;
 	readonly ownerKey: string;
-	readonly usageBucket: string;
-	readonly sampleClass: string;
-	readonly pageKind: string;
-	readonly indexedFormat: string | null;
+	readonly usageBucket: Webgl2ResidentTexturePageUsageBucket;
+	readonly sampleClass: TexturePageSampleClass;
+	readonly pageKind: TexturePageKind;
+	readonly indexedFormat: IndexedTextureFormat | null;
 	readonly width: number;
 	readonly height: number;
 	readonly entryCount: number;
 	readonly coveredPixelCount: number;
 	readonly coverageRatio: number;
-	readonly samplerPolicyKey: string;
+	readonly samplerPolicyKey: Webgl2TexturePageSamplerPolicyKey;
 	readonly mipmapsGenerated: boolean;
 }
 
 export interface RenderResourceTexturePageIdentity {
-	readonly ownerKind: "static-bundle" | "structured-interior" | "terrain";
+	readonly ownerKind: RenderResourceInspectionOwnerKind;
 	readonly ownerKey: string;
 	readonly texturePageKey: string;
 }
@@ -80,10 +99,10 @@ export interface RenderResourceTexturePreviewEntry {
 export interface RenderResourceTexturePagePreview {
 	readonly identity: RenderResourceTexturePageIdentity;
 	readonly key: string;
-	readonly usageBucket: string;
-	readonly sampleClass: string;
-	readonly pageKind: string;
-	readonly indexedFormat: string | null;
+	readonly usageBucket: Webgl2ResidentTexturePageUsageBucket;
+	readonly sampleClass: TexturePageSampleClass;
+	readonly pageKind: TexturePageKind;
+	readonly indexedFormat: IndexedTextureFormat | null;
 	readonly width: number;
 	readonly height: number;
 	readonly coveredPixelCount: number;
@@ -94,7 +113,7 @@ export interface RenderResourceTexturePagePreview {
 
 export interface RenderResourceInspectionMaterial {
 	readonly key: string;
-	readonly ownerKind: "static-bundle" | "structured-interior";
+	readonly ownerKind: MaterialResourceInspectionOwnerKind;
 	readonly ownerKey: string;
 	readonly familyKey: string;
 	readonly alphaPolicy: string | null;
@@ -117,7 +136,7 @@ type RenderResourceInspectionMaterialBase = Omit<
 
 export interface RenderResourceInspectionGeometry {
 	readonly key: string;
-	readonly ownerKind: "static-bundle" | "structured-interior";
+	readonly ownerKind: MaterialResourceInspectionOwnerKind;
 	readonly ownerKey: string;
 	readonly geometryKind: "compacted-batch" | "direct-entry" | "material-slice" | "fallback-shell";
 	readonly materialRecordKey: string | null;
@@ -363,10 +382,10 @@ function compareByKey<T extends { readonly key: string }>(left: T, right: T): nu
 
 interface InspectableTexturePageResource {
 	readonly key: string;
-	readonly usageBucket: string;
-	readonly sampleClass: string;
-	readonly pageKind: string;
-	readonly indexedFormat?: string | null;
+	readonly usageBucket: Webgl2ResidentTexturePageUsageBucket;
+	readonly sampleClass: TexturePageSampleClass;
+	readonly pageKind: TexturePageKind;
+	readonly indexedFormat?: IndexedTextureFormat | null;
 	readonly texture: {
 		readonly width: number;
 		readonly height: number;
@@ -374,7 +393,7 @@ interface InspectableTexturePageResource {
 	readonly entries: readonly {
 		readonly rect: readonly [number, number, number, number];
 	}[];
-	readonly samplerPolicyKey: string;
+	readonly samplerPolicyKey: Webgl2TexturePageSamplerPolicyKey;
 	readonly mipmapsGenerated: boolean;
 }
 

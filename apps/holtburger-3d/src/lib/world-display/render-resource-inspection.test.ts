@@ -267,6 +267,18 @@ function createMaterial({
 		isTransparent: false,
 		textureBindings: [{ virtualRefKey: "texture:base" }],
 		indexedMaterial: undefined,
+		detailOverlay:
+			detailTextureRefKey === null
+				? null
+				: {
+						textureRefKey: detailTextureRefKey,
+						roleKind: "building",
+						blendMode: "dst-color",
+						fadeMode: "constant",
+						tiling: detailTiling,
+						fadeNear: 0,
+						fadeFar: 1,
+					},
 		detailTextureRefKey,
 		detailTiling,
 	};

@@ -3,6 +3,11 @@ import type { PlacementTransformDto, Vec3Dto } from "../host/contracts";
 import type { IndexedTextureFormat } from "./indexed-material-data";
 import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import type { RenderBounds } from "./render-spatial-math";
+import type {
+	RegionDetailBlendMode,
+	RegionDetailFadeMode,
+	RegionDetailRoleKind,
+} from "./region-detail-overlays";
 import type { StaticMaterialFamilyDescriptor } from "./static-material-artifacts";
 import type {
 	TexturePageKind,
@@ -146,10 +151,21 @@ export interface StaticBundleMaterialRecord {
 	family: StaticMaterialFamilyDescriptor;
 	color: readonly [number, number, number, number];
 	texturePageRefKeys: readonly string[];
+	detailOverlay: StaticMaterialDetailOverlayDescriptor | null;
 	detailTextureRefKey: string | null;
 	detailTiling: number;
 	isTransparent: boolean;
 	indexedMaterial?: StaticBundleIndexedMaterialRecord;
+}
+
+export interface StaticMaterialDetailOverlayDescriptor {
+	textureRefKey: string;
+	roleKind: RegionDetailRoleKind;
+	blendMode: RegionDetailBlendMode;
+	fadeMode: RegionDetailFadeMode;
+	tiling: number;
+	fadeNear: number;
+	fadeFar: number;
 }
 
 export interface StaticBundleIndexedMaterialRecord {

@@ -3,6 +3,7 @@ import type {
 	StaticBundleDirectEntry,
 	StaticBundleIndexedMaterialRecord,
 	StaticBundleMaterialRecord,
+	StaticMaterialDetailOverlayDescriptor,
 	StaticBundleTexturePage,
 	StaticObjectBundleArtifact,
 	StaticObjectBundleScope,
@@ -91,6 +92,7 @@ export interface Webgl2StaticBundleMaterialResource {
 	family: StaticMaterialFamilyDescriptor;
 	color: readonly [number, number, number, number];
 	isTransparent: boolean;
+	detailOverlay: StaticMaterialDetailOverlayDescriptor | null;
 	detailTextureRefKey: string | null;
 	detailTiling: number;
 	indexedMaterial?: StaticBundleIndexedMaterialRecord;
@@ -674,6 +676,7 @@ export function createWebgl2StaticBundleMaterialResource({
 		family: record.family,
 		color: record.color,
 		isTransparent: record.isTransparent,
+		detailOverlay: record.detailOverlay,
 		detailTextureRefKey: record.detailTextureRefKey,
 		detailTiling: record.detailTiling,
 		indexedMaterial: record.indexedMaterial,

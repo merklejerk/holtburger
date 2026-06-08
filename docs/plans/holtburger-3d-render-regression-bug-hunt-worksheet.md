@@ -1248,7 +1248,7 @@ Verification:
 
 ## Phase 14: Type Renderer Decision Vocabulary In Slices
 
-Status: Phase 14A implemented.
+Status: Phase 14B implemented.
 
 Phase 11's remaining follow-up should target renderer decision vocabularies, not every string in the renderer. The broader cleanup is worthwhile, but it should be split by semantic layer so each cutover is reviewable and can remove old routing paths decisively. The goal is to prevent another texture-page-style drift where similar string concepts accumulate different meanings across artifact creation, resource construction, submit, picker, and inspector paths.
 
@@ -1342,6 +1342,21 @@ Phase 14A implementation notes:
 Phase 14A verification:
 
 - `npm run --prefix apps/holtburger-3d test:ts -- src/lib/world-display/static-material-artifacts.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/world-display/webgl2/resources/static-bundle-layer-resources.test.ts src/lib/world-display/webgl2-world-resources.test.ts` passed.
+- `npm run --prefix apps/holtburger-3d test:ts` passed.
+- `npm run --prefix apps/holtburger-3d lint:ts` passed.
+- `npm run --prefix apps/holtburger-3d check` passed.
+
+Phase 14B implementation notes:
+
+- Exported typed region detail role policy vocabulary from `region-detail-overlays.ts`: `RegionDetailBlendMode`, `RegionDetailFadeMode`, `RegionDetailRolePolicy`, and `resolveRegionDetailRolePolicy()`.
+- Added `StaticMaterialDetailOverlayDescriptor` to static bundle material records. The descriptor carries `textureRefKey`, `roleKind`, `blendMode`, `fadeMode`, `tiling`, `fadeNear`, and `fadeFar`.
+- Static object bundle and structured interior material-record builders now create detail overlays only through the typed role policy resolver. Disabled roles such as `object` stay disabled before texture refs or material records are created.
+- WebGL static material resources now retain `detailOverlay`, and submit resolves/binds/enables detail from the descriptor instead of treating `detailTextureRefKey` as the routing switch. The old `detailTextureRefKey` and `detailTiling` fields remain for artifact identity, picker reports, resource inspector display, and existing diagnostics.
+- Added focused policy coverage for role policy mapping and updated static/structured detail tests to assert descriptor role/blend/fade metadata.
+
+Phase 14B verification:
+
+- `npm run --prefix apps/holtburger-3d test:ts -- src/lib/world-display/region-detail-overlays.test.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/workers/static-landblock-render-worker.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/world-display/webgl2/resources/static-bundle-layer-resources.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/render-resource-inspection.test.ts` passed.
 - `npm run --prefix apps/holtburger-3d test:ts` passed.
 - `npm run --prefix apps/holtburger-3d lint:ts` passed.
 - `npm run --prefix apps/holtburger-3d check` passed.

@@ -12,8 +12,14 @@ export type RegionDetailRoleKind =
 	| "environment"
 	| "object";
 
-type RegionDetailBlendMode = "src-alpha" | "dst-color";
-type RegionDetailFadeMode = "distance" | "constant";
+export type RegionDetailBlendMode = "src-alpha" | "dst-color";
+export type RegionDetailFadeMode = "distance" | "constant";
+
+export interface RegionDetailRolePolicy {
+	roleKind: RegionDetailRoleKind;
+	blendMode: RegionDetailBlendMode;
+	fadeMode: RegionDetailFadeMode;
+}
 
 export interface ResolvedRegionDetailOverlayPlan {
 	regionNumber: number;
@@ -33,11 +39,10 @@ export function resolveRegionDetailOverlayPlan(options: {
 	reportDiagnostic?: (message: string) => void;
 }): ResolvedRegionDetailOverlayPlan | null {
 	const normalizedRegionNumber = Math.trunc(options.regionNumber);
-	const blendMode = regionDetailBlendModeForRole(options.roleKind);
-	if (!blendMode) {
+	const policy = resolveRegionDetailRolePolicy(options.roleKind);
+	if (!policy) {
 		return null;
 	}
-	const fadeMode = regionDetailFadeModeForRole(options.roleKind);
 	const profileAssetId = `region-render-profile/${normalizedRegionNumber}`;
 	const profileRecord = options.assetState.preparedByAssetId[profileAssetId];
 	const profile =
@@ -101,8 +106,8 @@ export function resolveRegionDetailOverlayPlan(options: {
 		profileAssetId,
 		roleKind: options.roleKind,
 		role,
-		blendMode,
-		fadeMode,
+		blendMode: policy.blendMode,
+		fadeMode: policy.fadeMode,
 		renderSurface,
 		signature: describeRegionDetailOverlaySignature(
 			normalizedRegionNumber,
@@ -128,8 +133,8 @@ export function describeRegionDetailRoleSignature(options: {
 		profile?.regionNumber === normalizedRegionNumber
 			? profile.detailRoles[options.roleKind]
 			: null;
-	const blendMode = regionDetailBlendModeForRole(options.roleKind);
-	return role && blendMode
+	const policy = resolveRegionDetailRolePolicy(options.roleKind);
+	return role && policy
 		? describeRegionDetailOverlaySignature(
 				normalizedRegionNumber,
 				options.roleKind,
@@ -199,25 +204,27 @@ function describeRegionDetailOverlaySignature(
 		role.tiling,
 		role.fadeNear,
 		role.fadeFar,
-		regionDetailBlendModeForRole(roleKind) ?? "disabled",
-		regionDetailFadeModeForRole(roleKind),
+		resolveRegionDetailRolePolicy(roleKind)?.blendMode ?? "disabled",
+		resolveRegionDetailRolePolicy(roleKind)?.fadeMode ?? "disabled",
 	].join(":");
 }
 
-function regionDetailBlendModeForRole(
+export function resolveRegionDetailRolePolicy(
 	roleKind: RegionDetailRoleKind,
-): RegionDetailBlendMode | null {
+): RegionDetailRolePolicy | null {
 	if (roleKind === "landscape") {
-		return "src-alpha";
+		return {
+			roleKind,
+			blendMode: "src-alpha",
+			fadeMode: "distance",
+		};
 	}
 	if (roleKind === "building" || roleKind === "environment") {
-		return "dst-color";
+		return {
+			roleKind,
+			blendMode: "dst-color",
+			fadeMode: "constant",
+		};
 	}
 	return null;
-}
-
-function regionDetailFadeModeForRole(
-	roleKind: RegionDetailRoleKind,
-): RegionDetailFadeMode {
-	return roleKind === "landscape" ? "distance" : "constant";
 }

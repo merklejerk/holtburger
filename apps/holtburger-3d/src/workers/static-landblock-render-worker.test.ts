@@ -279,6 +279,15 @@ describe("static landblock render worker", () => {
 			detailedArtifacts!.structuredInteriorMaterialRecords[0],
 		).toMatchObject({
 			key: `material:${materialAssetId}:variant:base:detail=${detailRefKey}`,
+			detailOverlay: {
+				textureRefKey: detailRefKey,
+				roleKind: "environment",
+				blendMode: "dst-color",
+				fadeMode: "constant",
+				tiling: 9,
+				fadeNear: 0,
+				fadeFar: 1,
+			},
 			detailTextureRefKey: detailRefKey,
 			detailTiling: 9,
 			texturePageRefKeys: expect.arrayContaining([

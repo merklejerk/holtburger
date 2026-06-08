@@ -665,15 +665,27 @@ interface StructuredInteriorMaterialContext {
 	>;
 }
 
+interface StructuredInteriorMaterialSlot {
+	slotId: number;
+	surfaceId: number;
+	materialAssetId: string;
+	materialVariantSignature: string | null;
+}
+
 function buildStructuredInteriorMaterialContext(options: {
 	job: LandblockRenderProductWorkerJob;
 	envCells: readonly PreparedEnvCellPayload[];
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
 }): StructuredInteriorMaterialContext {
+	const materialSlots = options.envCells.flatMap((envCell) =>
+		collectStructuredInteriorMaterialSlots(envCell),
+	);
 	const materialTextureRoutes = collectStaticMaterialTextureRoutes(
-		options.envCells.flatMap((envCell) =>
-			envCell.surfaces.map((surface) => surface.materialAssetId),
-		),
+		materialSlots.map((slot) => ({
+			materialAssetId: slot.materialAssetId,
+			materialRecordKey: formatStructuredInteriorMaterialRecordKey(slot),
+			materialVariantSignature: slot.materialVariantSignature,
+		})),
 		options.preparedByAssetId,
 	);
 	const texturePageRefs = collectStaticMaterialTexturePageRefs(
@@ -693,17 +705,14 @@ function buildStructuredInteriorMaterialContext(options: {
 		policy: options.job.buildPolicy.atlasLayout,
 	});
 	const materialRecords = buildStructuredInteriorMaterialRecords({
-		envCells: options.envCells,
+		materialSlots,
 		materialTextureRoutes,
 		preparedByAssetId: options.preparedByAssetId,
 		texturePageRefs,
 		landblockId: options.job.landblockId,
 	});
-	const materialRecordByAssetId = new Map(
-		materialRecords.map((record) => [
-			record.key.replace(/^material:/, ""),
-			record,
-		]),
+	const materialRecordByKey = new Map(
+		materialRecords.map((record) => [record.key, record]),
 	);
 	const slicesByEnvCellId = new Map<
 		number,
@@ -714,7 +723,7 @@ function buildStructuredInteriorMaterialContext(options: {
 			envCell.envCellId,
 			buildStructuredInteriorMaterialSlices({
 				envCell,
-				materialRecordByAssetId,
+				materialRecordByKey,
 			}),
 		);
 	}
@@ -727,27 +736,26 @@ function buildStructuredInteriorMaterialContext(options: {
 }
 
 function buildStructuredInteriorMaterialRecords(options: {
-	envCells: readonly PreparedEnvCellPayload[];
+	materialSlots: readonly StructuredInteriorMaterialSlot[];
 	materialTextureRoutes: readonly StaticMaterialTextureRoute[];
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
 	texturePageRefs: readonly VirtualTexturePageRef[];
 	landblockId: number;
 }): StaticBundleMaterialRecord[] {
 	const recordsByKey = new Map<string, StaticBundleMaterialRecord>();
-	for (const materialAssetId of uniqueSortedStrings(
-		options.envCells.flatMap((envCell) =>
-			envCell.surfaces.map((surface) => surface.materialAssetId),
-		),
-	)) {
+	for (const slot of uniqueStructuredInteriorMaterialSlots(options.materialSlots)) {
+		const key = formatStructuredInteriorMaterialRecordKey(slot);
 		const materialReadiness = resolveStaticMaterialReadiness({
-			materialAssetId,
+			materialAssetId: slot.materialAssetId,
+			materialRecordKey: key,
+			materialVariantSignature: slot.materialVariantSignature,
 			preparedByAssetId: options.preparedByAssetId,
 			texturePageRefs: options.texturePageRefs,
 			materialTextureRoutes: options.materialTextureRoutes,
 		});
 		const material = getPreparedPayload(
 			options.preparedByAssetId,
-			materialAssetId,
+			slot.materialAssetId,
 			"material-recipe",
 		);
 		const compactionEligibility = createCompactionEligibility({
@@ -759,11 +767,10 @@ function buildStructuredInteriorMaterialRecords(options: {
 			material: materialReadiness,
 		});
 		const textureRefKeys = findStaticMaterialTextureRefs(
-			materialAssetId,
+			key,
 			options.texturePageRefs,
 			options.materialTextureRoutes,
 		).map((ref) => ref.key);
-		const key = `material:${materialAssetId}`;
 		recordsByKey.set(key, {
 			key,
 			familyKey: formatStaticMaterialFamilyKey(compactionEligibility),
@@ -776,7 +783,8 @@ function buildStructuredInteriorMaterialRecords(options: {
 				compactionEligibility.material.alphaPolicy === "transparent-blend" ||
 				compactionEligibility.material.alphaPolicy === "opacity-translucent",
 			indexedMaterial: resolveStaticIndexedMaterialRecord({
-				materialAssetId,
+				materialAssetId: slot.materialAssetId,
+				materialRecordKey: key,
 				materialTextureRoutes: options.materialTextureRoutes,
 				preparedByAssetId: options.preparedByAssetId,
 			}),
@@ -789,7 +797,7 @@ function buildStructuredInteriorMaterialRecords(options: {
 
 function buildStructuredInteriorMaterialSlices(options: {
 	envCell: PreparedEnvCellPayload;
-	materialRecordByAssetId: ReadonlyMap<string, StaticBundleMaterialRecord>;
+	materialRecordByKey: ReadonlyMap<string, StaticBundleMaterialRecord>;
 }): readonly DetailedStructuredInteriorMaterialSlice[] {
 	const surfaceBySlotId = new Map(
 		options.envCell.surfaces.map((surface) => [surface.slotId, surface]),
@@ -830,9 +838,11 @@ function buildStructuredInteriorMaterialSlices(options: {
 	}
 	return [...keys.values()]
 		.map((surfaceKey): DetailedStructuredInteriorMaterialSlice | null => {
-			const materialRecord = options.materialRecordByAssetId.get(
-				surfaceKey.materialAssetId,
-			);
+			const materialRecordKey = formatStructuredInteriorMaterialRecordKey({
+				materialAssetId: surfaceKey.materialAssetId,
+				materialVariantSignature: surfaceKey.materialVariantSignature,
+			});
+			const materialRecord = options.materialRecordByKey.get(materialRecordKey);
 			if (!materialRecord) {
 				return null;
 			}
@@ -877,6 +887,77 @@ function buildStructuredInteriorMaterialSlices(options: {
 				slice !== null,
 		)
 		.sort((left, right) => left.key.localeCompare(right.key));
+}
+
+function collectStructuredInteriorMaterialSlots(
+	envCell: PreparedEnvCellPayload,
+): StructuredInteriorMaterialSlot[] {
+	const variantsBySlotId = new Map<number, Set<string | null>>();
+	for (const triangle of envCell.renderGeometry.triangles) {
+		if (triangle.surfaceId === null) {
+			continue;
+		}
+		let variants = variantsBySlotId.get(triangle.surfaceId);
+		if (!variants) {
+			variants = new Set();
+			variantsBySlotId.set(triangle.surfaceId, variants);
+		}
+		variants.add(triangle.materialVariantSignature ?? null);
+	}
+	return envCell.surfaces.flatMap((surface) => {
+		const variants = variantsBySlotId.get(surface.slotId);
+		if (!variants || variants.size === 0) {
+			return [
+				{
+					slotId: surface.slotId,
+					surfaceId: surface.surfaceId,
+					materialAssetId: surface.materialAssetId,
+					materialVariantSignature: null,
+				},
+			];
+		}
+		return [...variants]
+			.sort(compareStructuredInteriorMaterialVariantSignatures)
+			.map((materialVariantSignature) => ({
+				slotId: surface.slotId,
+				surfaceId: surface.surfaceId,
+				materialAssetId: surface.materialAssetId,
+				materialVariantSignature,
+			}));
+	});
+}
+
+function uniqueStructuredInteriorMaterialSlots(
+	slots: readonly StructuredInteriorMaterialSlot[],
+): StructuredInteriorMaterialSlot[] {
+	const byKey = new Map<string, StructuredInteriorMaterialSlot>();
+	for (const slot of slots) {
+		byKey.set(formatStructuredInteriorMaterialRecordKey(slot), slot);
+	}
+	return [...byKey.values()].sort((left, right) =>
+		formatStructuredInteriorMaterialRecordKey(left).localeCompare(
+			formatStructuredInteriorMaterialRecordKey(right),
+		),
+	);
+}
+
+function formatStructuredInteriorMaterialRecordKey(
+	slot: Pick<
+		StructuredInteriorMaterialSlot,
+		"materialAssetId" | "materialVariantSignature"
+	>,
+): string {
+	return [
+		`material:${slot.materialAssetId}`,
+		`variant:${slot.materialVariantSignature ?? "base"}`,
+	].join(":");
+}
+
+function compareStructuredInteriorMaterialVariantSignatures(
+	left: string | null,
+	right: string | null,
+): number {
+	return (left ?? "").localeCompare(right ?? "");
 }
 
 function createStructuredInteriorCellArtifact(

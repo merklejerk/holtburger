@@ -2042,11 +2042,12 @@ fn build_cell_structure_render_geometry(
     // Retail and ACViewer draw the full CellStruct polygon list for env cells.
     // The drawing BSP is still useful for culling/visibility, but it is not the
     // authoritative render polygon set for cell shell geometry.
-    build_polygon_set_render_geometry(
+    build_polygon_set_render_geometry_with_side_policy(
         cell_structure.id,
         &cell_structure.vertex_array,
         &cell_structure.polygons,
         None,
+        PolygonRenderSidePolicy::EnvCellPositiveOnly,
     )
 }
 
@@ -2055,6 +2056,22 @@ fn build_polygon_set_render_geometry(
     vertex_array: &holtburger_dat::graphics::CVertexArray,
     drawing_polygons: &std::collections::HashMap<u16, Polygon>,
     drawing_bsp: Option<&BspNode>,
+) -> PreparedPolygonSetRenderGeometry {
+    build_polygon_set_render_geometry_with_side_policy(
+        source_id,
+        vertex_array,
+        drawing_polygons,
+        drawing_bsp,
+        PolygonRenderSidePolicy::VisualSides,
+    )
+}
+
+fn build_polygon_set_render_geometry_with_side_policy(
+    source_id: u32,
+    vertex_array: &holtburger_dat::graphics::CVertexArray,
+    drawing_polygons: &std::collections::HashMap<u16, Polygon>,
+    drawing_bsp: Option<&BspNode>,
+    side_policy: PolygonRenderSidePolicy,
 ) -> PreparedPolygonSetRenderGeometry {
     let render_polygon_ids = drawing_bsp.map(collect_drawing_bsp_renderable_polygon_ids);
     let mut polygon_entries = drawing_polygons.iter().collect::<Vec<_>>();
@@ -2099,9 +2116,9 @@ fn build_polygon_set_render_geometry(
             skipped_polygon_count += 1;
             continue;
         }
-        record_polygon_side_diagnostics(*polygon_id, polygon, &mut invalid_polygons);
+        record_polygon_side_diagnostics(*polygon_id, polygon, side_policy, &mut invalid_polygons);
 
-        let render_sides = derive_polygon_render_sides(polygon);
+        let render_sides = derive_polygon_render_sides(polygon, side_policy);
         if render_sides.is_empty() {
             skipped_polygon_count += 1;
             continue;
@@ -2146,6 +2163,12 @@ fn build_polygon_set_render_geometry(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PolygonRenderSidePolicy {
+    VisualSides,
+    EnvCellPositiveOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PreparedPolygonRenderSideKind {
     Positive,
     PositiveReversed,
@@ -2182,6 +2205,7 @@ const INVALID_POLYGON_REASON_MALFORMED_NEGATIVE_UV_INDICES: &str = "malformed-ne
 fn record_polygon_side_diagnostics(
     polygon_id: u16,
     polygon: &Polygon,
+    side_policy: PolygonRenderSidePolicy,
     invalid_polygons: &mut Vec<PreparedPolygonSetInvalidPolygon>,
 ) {
     if (polygon.stippling & STIPPLING_NO_POS) == 0
@@ -2195,6 +2219,7 @@ fn record_polygon_side_diagnostics(
         });
     }
     if polygon.sides_type == CULL_MODE_CLOCKWISE
+        && side_policy == PolygonRenderSidePolicy::VisualSides
         && (polygon.stippling & STIPPLING_NO_NEG) == 0
         && polygon.neg_uv_indices.len() != polygon.vertex_ids.len()
     {
@@ -2207,7 +2232,10 @@ fn record_polygon_side_diagnostics(
     }
 }
 
-fn derive_polygon_render_sides(polygon: &Polygon) -> Vec<PreparedPolygonRenderSide<'_>> {
+fn derive_polygon_render_sides(
+    polygon: &Polygon,
+    side_policy: PolygonRenderSidePolicy,
+) -> Vec<PreparedPolygonRenderSide<'_>> {
     // Retail CPolygon::UnPack aliases CullMode.None negative side data to the
     // positive side, and D3DPolyRender::ConstructMesh expands CullMode.None and
     // CullMode.Clockwise into explicit geometry. ACE's Polygon.Unpack and
@@ -2222,6 +2250,10 @@ fn derive_polygon_render_sides(polygon: &Polygon) -> Vec<PreparedPolygonRenderSi
             winding: PreparedPolygonWinding::Source,
             normal_scale: 1.0,
         });
+    }
+
+    if side_policy == PolygonRenderSidePolicy::EnvCellPositiveOnly {
+        return sides;
     }
 
     match polygon.sides_type {
@@ -2604,12 +2636,80 @@ mod tests {
     }
 
     #[test]
+    fn cell_structure_render_geometry_uses_positive_polygon_sides_only() {
+        let vertex_array = test_vertex_array();
+        let mut polygon = test_triangle_polygon([0, 1, 2]);
+        polygon.sides_type = CULL_MODE_CLOCKWISE;
+        polygon.pos_surface = 4;
+        polygon.neg_surface = 7;
+        polygon.neg_uv_indices = vec![1, 1, 1];
+        let cell_structure = test_cell_structure(vertex_array, HashMap::from([(11, polygon)]));
+
+        let geometry = build_cell_structure_render_geometry(&cell_structure);
+
+        assert_eq!(geometry.triangle_count, 1);
+        assert_eq!(
+            geometry
+                .triangles
+                .iter()
+                .map(|triangle| (
+                    triangle.polygon_id,
+                    triangle.surface_id,
+                    triangle.material_variant_signature.as_str(),
+                    triangle.first_vertex
+                ))
+                .collect::<Vec<_>>(),
+            vec![(
+                11,
+                Some(4),
+                legacy_sampler_material_variant_signature(false),
+                0,
+            )]
+        );
+        assert_eq!(geometry.surface_ids, vec![4]);
+    }
+
+    #[test]
+    fn cell_structure_render_geometry_does_not_duplicate_cull_none_polygons() {
+        let vertex_array = test_vertex_array();
+        let mut polygon = test_triangle_polygon([0, 1, 2]);
+        polygon.sides_type = CULL_MODE_NONE;
+        polygon.pos_surface = 4;
+        let cell_structure = test_cell_structure(vertex_array, HashMap::from([(12, polygon)]));
+
+        let geometry = build_cell_structure_render_geometry(&cell_structure);
+
+        assert_eq!(geometry.triangle_count, 1);
+        assert_eq!(geometry.triangles[0].surface_id, Some(4));
+    }
+
+    #[test]
+    fn cell_structure_render_geometry_ignores_malformed_negative_uvs() {
+        let vertex_array = test_vertex_array();
+        let mut polygon = test_triangle_polygon([0, 1, 2]);
+        polygon.sides_type = CULL_MODE_CLOCKWISE;
+        polygon.pos_surface = 4;
+        polygon.neg_surface = 7;
+        polygon.neg_uv_indices = vec![1, 1];
+        let cell_structure = test_cell_structure(vertex_array, HashMap::from([(13, polygon)]));
+
+        let geometry = build_cell_structure_render_geometry(&cell_structure);
+
+        assert_eq!(geometry.triangle_count, 1);
+        assert_eq!(geometry.skipped_polygon_count, 0);
+        assert!(geometry.invalid_polygons.is_empty());
+        assert_eq!(geometry.triangles[0].surface_id, Some(4));
+    }
+
+    #[test]
     fn polygon_side_expansion_suppresses_no_pos_positive_side() {
         let mut polygon = test_triangle_polygon([0, 1, 2]);
         polygon.stippling = STIPPLING_NO_POS;
         polygon.pos_uv_indices.clear();
 
-        assert!(derive_polygon_render_sides(&polygon).is_empty());
+        assert!(
+            derive_polygon_render_sides(&polygon, PolygonRenderSidePolicy::VisualSides).is_empty()
+        );
     }
 
     #[test]
@@ -2618,7 +2718,7 @@ mod tests {
         polygon.sides_type = CULL_MODE_NONE;
         polygon.pos_surface = 4;
 
-        let sides = derive_polygon_render_sides(&polygon);
+        let sides = derive_polygon_render_sides(&polygon, PolygonRenderSidePolicy::VisualSides);
 
         assert_eq!(sides.len(), 2);
         assert_eq!(sides[0].kind, PreparedPolygonRenderSideKind::Positive);
@@ -2651,7 +2751,7 @@ mod tests {
         polygon.neg_surface = 7;
         polygon.neg_uv_indices = vec![1, 1, 1];
 
-        let sides = derive_polygon_render_sides(&polygon);
+        let sides = derive_polygon_render_sides(&polygon, PolygonRenderSidePolicy::VisualSides);
 
         assert_eq!(sides.len(), 2);
         assert_eq!(sides[0].kind, PreparedPolygonRenderSideKind::Positive);
@@ -2680,7 +2780,7 @@ mod tests {
         polygon.stippling = STIPPLING_NO_NEG;
         polygon.neg_uv_indices.clear();
 
-        let sides = derive_polygon_render_sides(&polygon);
+        let sides = derive_polygon_render_sides(&polygon, PolygonRenderSidePolicy::VisualSides);
 
         assert_eq!(sides.len(), 1);
         assert_eq!(sides[0].kind, PreparedPolygonRenderSideKind::Positive);
@@ -2691,7 +2791,7 @@ mod tests {
         let mut polygon = test_triangle_polygon([0, 1, 2]);
         polygon.sides_type = CULL_MODE_COUNTER_CLOCKWISE;
 
-        let sides = derive_polygon_render_sides(&polygon);
+        let sides = derive_polygon_render_sides(&polygon, PolygonRenderSidePolicy::VisualSides);
 
         assert_eq!(sides.len(), 1);
         assert_eq!(sides[0].kind, PreparedPolygonRenderSideKind::Positive);
@@ -2841,6 +2941,32 @@ mod tests {
             (3, test_vertex(1.0, 1.0, 0.0, 1.0, 1.0)),
         ]);
         vertex_array
+    }
+
+    fn test_cell_structure(
+        vertex_array: holtburger_dat::graphics::CVertexArray,
+        polygons: HashMap<u16, Polygon>,
+    ) -> CellStruct {
+        CellStruct {
+            id: 0x1234,
+            vertex_array,
+            polygons,
+            portals: Vec::new(),
+            cell_bsp: BspNode::Leaf(holtburger_dat::physics::BspLeaf {
+                index: 0,
+                solid: 0,
+                sphere: None,
+                poly_ids: Vec::new(),
+            }),
+            physics_polygons: HashMap::new(),
+            physics_bsp: BspNode::Leaf(holtburger_dat::physics::BspLeaf {
+                index: 0,
+                solid: 0,
+                sphere: None,
+                poly_ids: Vec::new(),
+            }),
+            drawing_bsp: None,
+        }
     }
 
     fn test_vertex(x: f32, y: f32, z: f32, u: f32, v: f32) -> holtburger_dat::graphics::SWVertex {

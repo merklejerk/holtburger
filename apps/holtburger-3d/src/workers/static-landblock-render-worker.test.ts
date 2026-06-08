@@ -273,9 +273,9 @@ describe("static landblock render worker", () => {
 		expect(
 			detailedArtifacts!.structuredInteriorMaterialRecords[0],
 		).toMatchObject({
-			key: `material:${materialAssetId}`,
+			key: `material:${materialAssetId}:variant:base`,
 			texturePageRefKeys: expect.arrayContaining([
-				`texture:${materialAssetId}:${rawPreparedTextureAssetId}`,
+				`texture:material:${materialAssetId}:variant:base:${rawPreparedTextureAssetId}`,
 			]),
 		});
 		expect(
@@ -289,8 +289,8 @@ describe("static landblock render worker", () => {
 		).toMatchObject({
 			envCellId: 0xda550100,
 			surfaceId: 0x08000001,
-			geometrySurfaceId: 1,
-			materialRecordKey: `material:${materialAssetId}`,
+			geometrySurfaceId: 0,
+			materialRecordKey: `material:${materialAssetId}:variant:base`,
 			normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
 			triangleCount: 1,
 		});
@@ -308,6 +308,111 @@ describe("static landblock render worker", () => {
 				? materialSlice.normals.buffer
 				: undefined,
 		);
+	});
+
+	it("keeps structured-interior sampler variants as distinct material records", async () => {
+		const landblockId = 0xda55ffff;
+		const materialAssetId = "material/08000001";
+		const renderSurfaceAssetId = "render-surface/06000001";
+		const rawPreparedTextureAssetId = formatPreparedTextureAssetId({
+			renderSurfaceId: 0x06000001,
+			usage: "raw",
+			outputFormat: "rgba8",
+			mipPolicy: "none",
+			colorSpace: "linear",
+		});
+		const lookup = new Map<string, AssetLookupResponseDto>(
+			[
+				createResponse(
+					formatLandblockTopologyAssetId(landblockId),
+					createTopologyPayload(landblockId),
+				),
+				createResponse(
+					formatEnvCellAssetId(0xda550100),
+					createEnvCellPayload(0xda550100, {
+						materialAssetId,
+						surfaceId: 0x08000001,
+						materialVariantSignatures: ["sampler=clamp", "sampler=repeat"],
+					}),
+				),
+				createResponse(materialAssetId, createMaterialPayload()),
+				createResponse(renderSurfaceAssetId, createRenderSurfacePayload()),
+				createResponse(
+					rawPreparedTextureAssetId,
+					createPreparedTexturePayload({
+						assetId: rawPreparedTextureAssetId,
+						usage: "raw",
+					}),
+				),
+				createResponse(
+					formatRegionRenderProfileAssetId(1),
+					createRegionRenderProfile(),
+				),
+			].map((response) => [response.assetId, response] as const),
+		);
+
+		const result = await runStaticLandblockRenderWorkerJob(createJob(), {
+			async lookupBinaryAssets(requests: readonly AssetLookupRequestDto[]) {
+				return {
+					responses: requests.map((request) => {
+						const response = lookup.get(request.assetId);
+						if (!response) {
+							throw new Error(`Missing test response ${request.assetId}.`);
+						}
+						return response;
+					}),
+				};
+			},
+		});
+
+		const detailedArtifacts = getDetailedLandblockRenderArtifacts(result);
+		expect(detailedArtifacts).not.toBeNull();
+		expect(
+			detailedArtifacts!.structuredInteriorMaterialRecords.map(
+				(record) => record.key,
+			),
+		).toEqual([
+			`material:${materialAssetId}:variant:sampler=clamp`,
+			`material:${materialAssetId}:variant:sampler=repeat`,
+		]);
+		expect(
+			detailedArtifacts!.structuredInteriorTexturePageRefs.map((ref) => ({
+				key: ref.key,
+				wrapS: ref.wrapS,
+				wrapT: ref.wrapT,
+			})),
+		).toEqual([
+			{
+				key: `texture:material:${materialAssetId}:variant:sampler=clamp:${rawPreparedTextureAssetId}`,
+				wrapS: "clamp",
+				wrapT: "clamp",
+			},
+			{
+				key: `texture:material:${materialAssetId}:variant:sampler=repeat:${rawPreparedTextureAssetId}`,
+				wrapS: "repeat",
+				wrapT: "repeat",
+			},
+		]);
+		expect(
+			detailedArtifacts!.structuredInteriorCells[0]?.materialSlices.map(
+				(slice) => ({
+					materialRecordKey: slice.materialRecordKey,
+					materialVariantSignature: slice.materialVariantSignature,
+					triangleCount: slice.triangleCount,
+				}),
+			),
+		).toEqual([
+			{
+				materialRecordKey: `material:${materialAssetId}:variant:sampler=clamp`,
+				materialVariantSignature: "sampler=clamp",
+				triangleCount: 1,
+			},
+			{
+				materialRecordKey: `material:${materialAssetId}:variant:sampler=repeat`,
+				materialVariantSignature: "sampler=repeat",
+				triangleCount: 1,
+			},
+		]);
 	});
 
 	it("builds a dungeon-env-cells product through the topology/env-cell path", async () => {
@@ -539,9 +644,24 @@ function createEnvCellPayload(
 		materialAssetId: string;
 		slotId?: number;
 		surfaceId: number;
+		materialVariantSignatures?: readonly (string | null)[];
 	},
 ): Record<string, unknown> {
-	const materialSlotId = material?.slotId ?? 1;
+	const materialSlotId = material?.slotId ?? 0;
+	const materialVariantSignatures = material?.materialVariantSignatures ?? [null];
+	const triangleCount = material ? materialVariantSignatures.length : 1;
+	const positions = new Float32Array(triangleCount * 9);
+	const normals = new Float32Array(triangleCount * 9);
+	const uvs = new Float32Array(triangleCount * 6);
+	for (let triangleIndex = 0; triangleIndex < triangleCount; triangleIndex += 1) {
+		const xOffset = triangleIndex * 2;
+		positions.set(
+			[xOffset, 0, 0, xOffset + 1, 0, 0, xOffset, 1, 0],
+			triangleIndex * 9,
+		);
+		normals.set([0, 0, 1, 0, 0, 1, 0, 0, 1], triangleIndex * 9);
+		uvs.set([0, 0, 1, 0, 0, 1], triangleIndex * 6);
+	}
 	return {
 		kind: "env-cell",
 		sourceAssetKind: "env-cell",
@@ -595,18 +715,19 @@ function createEnvCellPayload(
 		statics: [],
 		renderGeometry: {
 			sourceId: 0x02000002,
-			vertexCount: 3,
-			triangleCount: 1,
-			positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
-			normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
-			uvs: new Float32Array([0, 0, 1, 0, 0, 1]),
-			triangles: [
-				{
+			vertexCount: triangleCount * 3,
+			triangleCount,
+			positions,
+			normals,
+			uvs,
+			triangles: Array.from({ length: triangleCount }, (_, triangleIndex) => ({
 					polygonId: 7,
 					surfaceId: material ? materialSlotId : null,
-					firstVertex: 0,
-				},
-			],
+					firstVertex: triangleIndex * 3,
+					materialVariantSignature: material
+						? (materialVariantSignatures[triangleIndex] ?? null)
+						: null,
+				})),
 			surfaceIds: material ? [materialSlotId] : [],
 			invalidPolygons: [],
 			skippedPolygonCount: 0,

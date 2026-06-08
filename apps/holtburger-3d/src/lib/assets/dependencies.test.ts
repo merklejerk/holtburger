@@ -535,7 +535,7 @@ function createEnvCellPayload() {
 		localPlacement: identityPlacement(),
 		surfaces: [
 			{
-				slotId: 1,
+				slotId: 0,
 				surfaceId: 0x08000020,
 				materialAssetId: "material/08000020",
 			},

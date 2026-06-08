@@ -808,7 +808,7 @@ function createPreparedEnvCell(
 			orientation: { w: 1, x: 0, y: 0, z: 0 },
 		},
 		surfaces: materialAssetIds.map((materialAssetId, index) => ({
-			slotId: index + 1,
+			slotId: index,
 			surfaceId: Number.parseInt(materialAssetId.slice("material/".length), 16),
 			materialAssetId,
 		})),

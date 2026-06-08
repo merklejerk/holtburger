@@ -984,7 +984,7 @@ where
         "localPlacement": serialize_frame(&cell.local_placement),
         "surfaces": cell.surface_ids.iter().enumerate().map(|(index, surface_id)| {
             serde_json::json!({
-                "slotId": index + 1,
+                "slotId": index,
                 "surfaceId": surface_id,
                 "materialAssetId": format_material_asset_id(*surface_id),
             })

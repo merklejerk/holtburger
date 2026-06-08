@@ -699,6 +699,11 @@ mod tests {
                 .len(),
             0
         );
+        assert_eq!(
+            manifest["responses"][1]["payload"]["surfaces"][0]["slotId"],
+            serde_json::json!(0),
+            "env-cell surface slots must stay zero-based because CellStruct polygon PosSurface indexes the texture list"
+        );
     }
 
     #[test]

@@ -377,7 +377,7 @@ export type LandblockTopologyPayloadDto = z.infer<
 >;
 
 const envCellSurfaceSlotDtoSchema = z.object({
-	slotId: z.number().int().positive(),
+	slotId: z.number().int().nonnegative(),
 	surfaceId: z.number().int().nonnegative(),
 	materialAssetId: z.string().min(1),
 });

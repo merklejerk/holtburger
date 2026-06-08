@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { StaticObjectBundleArtifact } from "../../static-bundle-layer";
+import { createStaticMaterialFamilyDescriptor } from "../../static-material-artifacts";
 import {
 	commitWebgl2StaticBundleProductResources,
 	createWebgl2StaticBundleLayerResourceStore,
@@ -25,8 +26,8 @@ describe("static bundle layer WebGL2 resources", () => {
 		expect(resource?.texturePages).toHaveLength(2);
 		expect(resource?.materialRecords[0]?.family).toMatchObject({
 			kind: "texture-page",
-			sourceFamily: "rgba-texture-page",
-			alphaPolicy: null,
+			sourceFamily: "textured-opaque",
+			alphaPolicy: "opaque",
 		});
 		expect(
 			resource?.materialRecords[0]?.textureBindings.map((binding) => [
@@ -246,8 +247,15 @@ describe("static bundle layer WebGL2 resources", () => {
 			materialRecords: [
 				{
 					key: "material",
-					familyKey: "indexed-paletted",
+					familyKey: "static:indexed-paletted:alpha=opaque",
+					family: createStaticMaterialFamilyDescriptor({
+						family: "indexed-paletted",
+						alphaPolicy: "opaque",
+					}),
+					color: [1, 1, 1, 1],
 					texturePageRefKeys: ["index-ref"],
+					detailTextureRefKey: null,
+					detailTiling: 1,
 					isTransparent: false,
 				},
 			],
@@ -323,8 +331,15 @@ describe("static bundle layer WebGL2 resources", () => {
 			materialRecords: [
 				{
 					key: "material",
-					familyKey: "indexed-paletted",
+					familyKey: "static:indexed-paletted:alpha=opaque",
+					family: createStaticMaterialFamilyDescriptor({
+						family: "indexed-paletted",
+						alphaPolicy: "opaque",
+					}),
+					color: [1, 1, 1, 1],
 					texturePageRefKeys: ["index16-ref"],
+					detailTextureRefKey: null,
+					detailTiling: 1,
 					isTransparent: false,
 				},
 			],
@@ -488,7 +503,7 @@ function createLayer(
 			{
 				key: "compacted",
 				renderChunkKey: "chunk",
-				familyKey: "rgba-texture-page",
+				familyKey: "static:textured-opaque:alpha=opaque",
 				materialRecordKey: "material",
 				objectKeys: ["object-a", "object-b"],
 				objectTriangleCounts: { "object-a": 1, "object-b": 0 },
@@ -514,8 +529,15 @@ function createLayer(
 		materialRecords: [
 			{
 				key: "material",
-				familyKey: "rgba-texture-page",
+				familyKey: "static:textured-opaque:alpha=opaque",
+				family: createStaticMaterialFamilyDescriptor({
+					family: "textured-opaque",
+					alphaPolicy: "opaque",
+				}),
+				color: [1, 1, 1, 1],
 				texturePageRefKeys: ["base-ref", "index-ref"],
+				detailTextureRefKey: null,
+				detailTiling: 1,
 				isTransparent: false,
 			},
 		],

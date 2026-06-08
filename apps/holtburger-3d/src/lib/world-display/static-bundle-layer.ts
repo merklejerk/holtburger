@@ -3,6 +3,7 @@ import type { PlacementTransformDto, Vec3Dto } from "../host/contracts";
 import type { IndexedTextureFormat } from "./indexed-material-data";
 import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import type { RenderBounds } from "./render-spatial-math";
+import type { StaticMaterialFamilyDescriptor } from "./static-material-artifacts";
 import type {
 	TexturePageKind,
 	TexturePageLookupPolicy,
@@ -142,6 +143,7 @@ export interface StaticBundleLayerWorkerResult {
 export interface StaticBundleMaterialRecord {
 	key: string;
 	familyKey: string;
+	family: StaticMaterialFamilyDescriptor;
 	color: readonly [number, number, number, number];
 	texturePageRefKeys: readonly string[];
 	detailTextureRefKey: string | null;

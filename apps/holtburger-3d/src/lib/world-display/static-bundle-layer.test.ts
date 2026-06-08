@@ -21,6 +21,7 @@ import type {
 	VirtualTexturePageEntryRole,
 } from "./static-bundle-layer";
 import { formatStaticObjectBundleScopeKey } from "./static-bundle-layer";
+import { createStaticMaterialFamilyDescriptor } from "./static-material-artifacts";
 
 describe("static bundle layer contract", () => {
 	it("formats stable layer scope keys for landblock and env-cell layers", () => {
@@ -60,8 +61,15 @@ describe("static bundle layer contract", () => {
 		};
 		const materialRecord: StaticBundleMaterialRecord = {
 			key: "material:08000001",
-			familyKey: "rgba-texture-page",
+			familyKey: "static:textured-opaque:alpha=opaque",
+			family: createStaticMaterialFamilyDescriptor({
+				family: "textured-opaque",
+				alphaPolicy: "opaque",
+			}),
+			color: [1, 1, 1, 1],
 			texturePageRefKeys: [texturePageRef.key],
+			detailTextureRefKey: null,
+			detailTiling: 1,
 			isTransparent: false,
 		};
 		const texturePage: StaticBundleTexturePage = {

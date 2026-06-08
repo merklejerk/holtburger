@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { DIRECT_CLIP_MAP_ALPHA_TEST } from "./material-behavior";
 import {
+	createStaticMaterialFamilyDescriptor,
 	parseStaticMaterialFamilyKey,
 	resolveStaticMaterialFamilyAlphaTest,
 } from "./static-material-artifacts";
@@ -33,5 +34,24 @@ describe("static material artifacts", () => {
 		);
 		expect(resolveStaticMaterialFamilyAlphaTest(opaqueFamily!)).toBe(0);
 		expect(resolveStaticMaterialFamilyAlphaTest(indexedFamily!)).toBe(0);
+	});
+
+	it("creates family descriptors from typed compaction material inputs", () => {
+		expect(
+			createStaticMaterialFamilyDescriptor({
+				family: "textured-opaque",
+				alphaPolicy: "cutout",
+			}),
+		).toMatchObject({
+			key: "static:textured-opaque:alpha=cutout",
+			kind: "texture-page",
+			sourceFamily: "textured-opaque",
+			alphaPolicy: "cutout",
+		});
+	});
+
+	it("does not accept legacy raw family literals at the parser boundary", () => {
+		expect(parseStaticMaterialFamilyKey("rgba-texture-page")).toBeNull();
+		expect(parseStaticMaterialFamilyKey("indexed-paletted")).toBeNull();
 	});
 });

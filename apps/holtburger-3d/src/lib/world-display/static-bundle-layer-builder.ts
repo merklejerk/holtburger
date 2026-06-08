@@ -53,11 +53,13 @@ import {
 	collectStaticMaterialTexturePageRefs,
 	collectStaticMaterialTextureRoutes,
 	collectStaticPreparedTextureRouteAssetIds,
+	createStaticMaterialFamilyDescriptor,
 	findStaticMaterialTextureRefs,
 	formatStaticMaterialFamilyKey,
 	resolveStaticMaterialColor,
 	resolveStaticIndexedMaterialRecord,
 	resolveStaticMaterialReadiness,
+	type StaticMaterialFamilyDescriptor,
 	type StaticMaterialTextureRoute,
 	type StaticMaterialTextureRouteRequest,
 } from "./static-material-artifacts";
@@ -120,6 +122,7 @@ interface StaticBundleBuildSurface {
 	compactable: boolean;
 	reason: string | null;
 	familyKey: string;
+	family: StaticMaterialFamilyDescriptor;
 	color: readonly [number, number, number, number];
 	isTransparent: boolean;
 	compactionEligibility: CompactionEligibility;
@@ -875,6 +878,9 @@ function buildObjectSurface({
 			? null
 			: describeStaticBundleCompactionBypass(compactionEligibility),
 		familyKey: formatStaticMaterialFamilyKey(compactionEligibility),
+		family: createStaticMaterialFamilyDescriptor(
+			compactionEligibility.material,
+		),
 		color: resolveStaticMaterialColor({
 			material,
 			behavior: materialReadiness.behavior,
@@ -1035,6 +1041,7 @@ function buildMaterialRecords({
 		recordsByKey.set(key, {
 			key,
 			familyKey: surface.familyKey,
+			family: surface.family,
 			color: surface.color,
 			texturePageRefKeys: surface.textureRefKeys,
 			detailTextureRefKey: surface.detailTextureRefKey,

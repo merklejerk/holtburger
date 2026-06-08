@@ -102,10 +102,6 @@ const STATIC_MATERIAL_TEXTURE_USAGES: readonly MaterialTextureUsage[] = [
 ];
 const STATIC_MATERIAL_FAMILY_KEY_PREFIX = "static:";
 const STATIC_MATERIAL_ALPHA_POLICY_KEY = "alpha";
-const STATIC_MATERIAL_LEGACY_RGBA_TEXTURE_PAGE_FAMILY_KEY =
-	"rgba-texture-page";
-const STATIC_MATERIAL_LEGACY_INDEXED_PALETTED_FAMILY_KEY =
-	"indexed-paletted";
 
 const STATIC_MATERIAL_FAMILIES = new Set<string>([
 	"flat-constant-color",
@@ -188,12 +184,7 @@ function resolveStaticMaterialRouteWrapMode({
 }
 
 type StaticMaterialFamilyKind =
-	| CompactionMaterialFamily
-	| typeof STATIC_MATERIAL_LEGACY_RGBA_TEXTURE_PAGE_FAMILY_KEY;
-type StaticMaterialSerializedFamilyKind = Exclude<
-	StaticMaterialFamilyKind,
-	typeof STATIC_MATERIAL_LEGACY_RGBA_TEXTURE_PAGE_FAMILY_KEY
->;
+	CompactionMaterialFamily;
 
 export type StaticMaterialFamilyDescriptor =
 	| {
@@ -208,8 +199,7 @@ export type StaticMaterialFamilyDescriptor =
 			readonly sourceFamily:
 				| "textured-opaque"
 				| "transparent-blended"
-				| "opacity-translucent"
-				| typeof STATIC_MATERIAL_LEGACY_RGBA_TEXTURE_PAGE_FAMILY_KEY;
+				| "opacity-translucent";
 			readonly alphaPolicy: CompactionAlphaPolicy | null;
 	  }
 	| {
@@ -225,7 +215,6 @@ export type StaticMaterialFamilyDescriptor =
 				| "textured-opaque"
 				| "transparent-blended"
 				| "opacity-translucent"
-				| typeof STATIC_MATERIAL_LEGACY_RGBA_TEXTURE_PAGE_FAMILY_KEY
 			>;
 			readonly alphaPolicy: CompactionAlphaPolicy | null;
 			readonly reason: string;
@@ -621,28 +610,23 @@ function resolvePreferredStaticDetailRenderSurface(
 export function formatStaticMaterialFamilyKey(
 	decision: ReturnType<typeof createCompactionEligibility>,
 ): string {
-	const family = decision.material.family;
-	return `${STATIC_MATERIAL_FAMILY_KEY_PREFIX}${family}:${STATIC_MATERIAL_ALPHA_POLICY_KEY}=${decision.material.alphaPolicy}`;
+	return formatStaticMaterialFamilyKeyFromParts(decision.material);
+}
+
+export function createStaticMaterialFamilyDescriptor(options: {
+	family: CompactionMaterialFamily;
+	alphaPolicy: CompactionAlphaPolicy;
+}): StaticMaterialFamilyDescriptor {
+	return describeStaticMaterialFamily({
+		key: formatStaticMaterialFamilyKeyFromParts(options),
+		family: options.family,
+		alphaPolicy: options.alphaPolicy,
+	});
 }
 
 export function parseStaticMaterialFamilyKey(
 	familyKey: string,
 ): StaticMaterialFamilyDescriptor | null {
-	if (familyKey === STATIC_MATERIAL_LEGACY_RGBA_TEXTURE_PAGE_FAMILY_KEY) {
-		return {
-			key: familyKey,
-			kind: "texture-page",
-			sourceFamily: STATIC_MATERIAL_LEGACY_RGBA_TEXTURE_PAGE_FAMILY_KEY,
-			alphaPolicy: null,
-		};
-	}
-	if (familyKey === STATIC_MATERIAL_LEGACY_INDEXED_PALETTED_FAMILY_KEY) {
-		return {
-			key: familyKey,
-			kind: "indexed-paletted",
-			alphaPolicy: null,
-		};
-	}
 	if (!familyKey.startsWith(STATIC_MATERIAL_FAMILY_KEY_PREFIX)) {
 		return null;
 	}
@@ -662,7 +646,7 @@ export function parseStaticMaterialFamilyKey(
 	}
 	return describeStaticMaterialFamilyKey({
 		key: familyKey,
-		family: family as StaticMaterialSerializedFamilyKind,
+		family: family as StaticMaterialFamilyKind,
 		alphaPolicy: alphaPolicy as CompactionAlphaPolicy,
 	});
 }
@@ -678,7 +662,15 @@ export function resolveStaticMaterialFamilyAlphaTest(
 
 function describeStaticMaterialFamilyKey(options: {
 	key: string;
-	family: StaticMaterialSerializedFamilyKind;
+	family: StaticMaterialFamilyKind;
+	alphaPolicy: CompactionAlphaPolicy;
+}): StaticMaterialFamilyDescriptor {
+	return describeStaticMaterialFamily(options);
+}
+
+function describeStaticMaterialFamily(options: {
+	key: string;
+	family: StaticMaterialFamilyKind;
 	alphaPolicy: CompactionAlphaPolicy;
 }): StaticMaterialFamilyDescriptor {
 	switch (options.family) {
@@ -723,6 +715,13 @@ function describeStaticMaterialFamilyKey(options: {
 				reason: `static material family ${options.family} is not submitted by the static bundle texture-page path`,
 			};
 	}
+}
+
+function formatStaticMaterialFamilyKeyFromParts(options: {
+	family: CompactionMaterialFamily;
+	alphaPolicy: CompactionAlphaPolicy;
+}): string {
+	return `${STATIC_MATERIAL_FAMILY_KEY_PREFIX}${options.family}:${STATIC_MATERIAL_ALPHA_POLICY_KEY}=${options.alphaPolicy}`;
 }
 
 function decodeArgbColor(

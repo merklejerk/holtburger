@@ -8,14 +8,19 @@ import type {
 } from "./texture-pages/texture-page-binding";
 import type { Webgl2TexturePageSamplerPolicyKey } from "./webgl2/resources/texture-page-upload";
 
+export const RENDER_RESOURCE_INSPECTION_OWNER_KIND = {
+	staticBundle: "static-bundle",
+	structuredInterior: "structured-interior",
+	terrain: "terrain",
+} as const;
+
 export type RenderResourceInspectionOwnerKind =
-	| "static-bundle"
-	| "structured-interior"
-	| "terrain";
+	(typeof RENDER_RESOURCE_INSPECTION_OWNER_KIND)[keyof typeof RENDER_RESOURCE_INSPECTION_OWNER_KIND];
 
 type MaterialResourceInspectionOwnerKind = Extract<
 	RenderResourceInspectionOwnerKind,
-	"static-bundle" | "structured-interior"
+	| typeof RENDER_RESOURCE_INSPECTION_OWNER_KIND.staticBundle
+	| typeof RENDER_RESOURCE_INSPECTION_OWNER_KIND.structuredInterior
 >;
 
 export interface RenderResourceInspectionSnapshot {
@@ -219,7 +224,7 @@ export function inspectWebgl2WorldResources(
 		texturePages.push(
 			...layer.texturePages.map((page) =>
 				describeTexturePageResource(page, {
-					ownerKind: "static-bundle",
+					ownerKind: RENDER_RESOURCE_INSPECTION_OWNER_KIND.staticBundle,
 					ownerKey: layer.key,
 				}),
 			),
@@ -227,7 +232,7 @@ export function inspectWebgl2WorldResources(
 		materials.push(
 			...layer.materialRecords.map((material) => ({
 				key: material.key,
-				ownerKind: "static-bundle" as const,
+				ownerKind: RENDER_RESOURCE_INSPECTION_OWNER_KIND.staticBundle,
 				ownerKey: layer.key,
 				familyKey: material.familyKey,
 				alphaPolicy: material.family.alphaPolicy,
@@ -241,7 +246,7 @@ export function inspectWebgl2WorldResources(
 		geometry.push(
 			...layer.compactedBatches.map((entry) => ({
 				key: entry.key,
-				ownerKind: "static-bundle" as const,
+				ownerKind: RENDER_RESOURCE_INSPECTION_OWNER_KIND.staticBundle,
 				ownerKey: layer.key,
 				geometryKind: "compacted-batch" as const,
 				materialRecordKey: entry.materialRecordKey,
@@ -251,7 +256,7 @@ export function inspectWebgl2WorldResources(
 			})),
 			...layer.directEntries.map((entry) => ({
 				key: entry.key,
-				ownerKind: "static-bundle" as const,
+				ownerKind: RENDER_RESOURCE_INSPECTION_OWNER_KIND.staticBundle,
 				ownerKey: layer.key,
 				geometryKind: "direct-entry" as const,
 				materialRecordKey: entry.materialRecordKey,
@@ -266,7 +271,7 @@ export function inspectWebgl2WorldResources(
 		texturePages.push(
 			...cell.texturePages.map((page) =>
 				describeTexturePageResource(page, {
-					ownerKind: "structured-interior",
+					ownerKind: RENDER_RESOURCE_INSPECTION_OWNER_KIND.structuredInterior,
 					ownerKey: cell.key,
 				}),
 			),
@@ -274,7 +279,7 @@ export function inspectWebgl2WorldResources(
 		materials.push(
 			...cell.materialRecords.map((material) => ({
 				key: material.key,
-				ownerKind: "structured-interior" as const,
+				ownerKind: RENDER_RESOURCE_INSPECTION_OWNER_KIND.structuredInterior,
 				ownerKey: cell.key,
 				familyKey: material.familyKey,
 				alphaPolicy: material.family.alphaPolicy,
@@ -288,7 +293,7 @@ export function inspectWebgl2WorldResources(
 		geometry.push(
 			...cell.materialSlices.map((slice) => ({
 				key: slice.key,
-				ownerKind: "structured-interior" as const,
+				ownerKind: RENDER_RESOURCE_INSPECTION_OWNER_KIND.structuredInterior,
 				ownerKey: cell.key,
 				geometryKind: "material-slice" as const,
 				materialRecordKey: slice.materialRecordKey,
@@ -300,7 +305,7 @@ export function inspectWebgl2WorldResources(
 		if (cell.fallbackShell) {
 			geometry.push({
 				key: `${cell.key}:fallback-shell`,
-				ownerKind: "structured-interior",
+				ownerKind: RENDER_RESOURCE_INSPECTION_OWNER_KIND.structuredInterior,
 				ownerKey: cell.key,
 				geometryKind: "fallback-shell",
 				materialRecordKey: null,
@@ -314,7 +319,7 @@ export function inspectWebgl2WorldResources(
 	for (const page of store.productTerrainTexturePagesByKey.values()) {
 		texturePages.push(
 			describeTexturePageResource(page, {
-				ownerKind: "terrain",
+				ownerKind: RENDER_RESOURCE_INSPECTION_OWNER_KIND.terrain,
 				ownerKey: "terrain-texture-pages",
 			}),
 		);

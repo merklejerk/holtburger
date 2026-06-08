@@ -39,10 +39,16 @@ Temporary query params:
 - `?renderDiag=1` enables the new render regression logs.
 - `?renderProducts=outdoor` limits worker product requests to outdoor products.
 - `?renderProducts=outdoor-env-cells,dungeon-env-cells` limits worker product requests to env-cell products.
+- `?renderFamilies=terrain,static-objects,cell-structures,portal-masks` limits both worker artifact construction and WebGL uploads to those visual families.
+
+Advanced split-filter query params:
+
 - `?renderArtifacts=terrain` limits worker artifact construction inside requested products to terrain artifacts.
-- `?renderArtifacts=static-bundles` limits worker artifact construction inside requested products to static bundle artifacts.
+- `?renderArtifacts=static-objects` limits worker artifact construction inside requested products to static object bundle artifacts.
+- `?renderArtifacts=cell-structures` limits worker artifact construction inside requested products to cell-structure artifacts.
 - `?renderUploads=terrain` commits only terrain WebGL resources from completed products.
-- `?renderUploads=static-bundles,structured-interior,portal-mask` commits only those WebGL resource families.
+- `?renderUploads=static-objects,cell-structures,portal-masks` commits only those WebGL resource families.
+- `renderArtifacts` and `renderUploads` override the corresponding side of `renderFamilies` when both are present.
 
 Temporary Vite env equivalents:
 
@@ -50,8 +56,9 @@ Temporary Vite env equivalents:
 - `VITE_HOLTBURGER_QUERY_PARAMS='renderDiag=1&profile=1'`
 - `VITE_HOLTBURGER_RENDER_DIAGNOSTICS=1`
 - `VITE_HOLTBURGER_RENDER_PRODUCT_FILTER=outdoor,outdoor-env-cells,dungeon-env-cells`
-- `VITE_HOLTBURGER_RENDER_ARTIFACT_FILTER=terrain,static-bundles,detailed-landblock`
-- `VITE_HOLTBURGER_RENDER_UPLOAD_FILTER=terrain,static-bundles,structured-interior,portal-mask`
+- `VITE_HOLTBURGER_RENDER_FAMILY_FILTER=terrain,static-objects,cell-structures,portal-masks`
+- `VITE_HOLTBURGER_RENDER_ARTIFACT_FILTER=terrain,static-objects,cell-structures`
+- `VITE_HOLTBURGER_RENDER_UPLOAD_FILTER=terrain,static-objects,cell-structures,portal-masks`
 
 The defaults are unrestricted with logs disabled. Query params from `VITE_HOLTBURGER_LAUNCH_URL` and `VITE_HOLTBURGER_QUERY_PARAMS` are merged with the actual browser URL; later sources override earlier ones, so the two env vars can override the hardcoded Tauri `/browser` dev URL without changing `tauri.conf.json`.
 
@@ -130,10 +137,17 @@ Status: pending.
 
 Run from completed products while allowing all worker products, but limit uploads:
 
+- `?renderDiag=1&renderFamilies=terrain`
+- `?renderDiag=1&renderFamilies=static-objects`
+- `?renderDiag=1&renderFamilies=cell-structures`
+- `?renderDiag=1&renderFamilies=portal-masks`
+
+If that does not isolate build cost from upload cost, use the split upload-only overrides:
+
 - `?renderDiag=1&renderUploads=terrain`
-- `?renderDiag=1&renderUploads=static-bundles`
-- `?renderDiag=1&renderUploads=structured-interior`
-- `?renderDiag=1&renderUploads=portal-mask`
+- `?renderDiag=1&renderUploads=static-objects`
+- `?renderDiag=1&renderUploads=cell-structures`
+- `?renderDiag=1&renderUploads=portal-masks`
 
 Record:
 
@@ -149,15 +163,15 @@ Status: active.
 
 Run:
 
-- `?renderDiag=1&renderProducts=outdoor&renderArtifacts=terrain&renderUploads=terrain`
-- `?renderDiag=1&renderProducts=outdoor&renderArtifacts=static-bundles&renderUploads=static-bundles`
+- `?renderDiag=1&renderProducts=outdoor&renderFamilies=terrain`
+- `?renderDiag=1&renderProducts=outdoor&renderFamilies=static-objects`
 
 Record:
 
-- Worker host lookup request counts and total/worker time for terrain-only versus static-bundles-only.
+- Worker host lookup request counts and total/worker time for terrain-only versus static-objects-only.
 - `webgl2-product-commit.resourceShape.staticBundleTextureEstimatedBytes`.
 - OS VRAM after products finish loading.
-- Whether static-bundles-only still reports `Candidate resources: static 0/N`, which means uploaded static bundle resources are still not represented in static visibility.
+- Whether static-objects-only still reports `Candidate resources: static 0/N`, which means uploaded static bundle resources are still not represented in static visibility.
 
 ## Phase 5: Fix Confirmed Root Cause
 
@@ -561,13 +575,13 @@ After the renderer is healthy:
 - Added temporary `terrain-family-submit` diagnostics with submitted layer pcodes, texture refs, atlas bindings, and source/atlas pixel summaries to prove whether black output comes from source pixels, mask polarity, atlas placement, or draw-slice layer selection.
 - Browser console then exposed `glDrawElements` failures caused by stale VAO state during product streaming. Frame submit now unbinds VAOs on exit, and product commit unbinds VAO before resource mutation.
 - With full `renderProducts=outdoor`, the report showed static bundle resources resident but not visible/submitted: 25 products, 50 layers, 132 pages, `Candidate resources: static 0/50`, and `outdoor statics 0/0`. The next isolation target is static bundle build/upload cost, not terrain.
-- Added a temporary worker artifact filter (`renderArtifacts`) so `outdoor` can be measured as terrain-only or static-bundles-only before build/upload.
+- Added a temporary worker artifact filter (`renderArtifacts`) so `outdoor` can be measured as terrain-only or static-objects-only before build/upload.
 - Added static bundle WebGL estimated texture bytes to product commit diagnostics.
-- Terrain-only artifact isolation used roughly 2 GB VRAM while static-bundles-only used roughly 10 GB VRAM, so static bundle texture/resource allocation is the confirmed VRAM pressure source.
-- Both terrain-only and static-bundles-only still took a long time to load, and both reports retained the same 2010 prepared assets. That points to an overly broad shared asset closure/hydration path in addition to static bundle upload cost.
-- Root cause found for blank static-bundles-only scene: static bundle resources were uploaded into `staticBundleLayerResources`, but resident bundle artifacts were not registered as frame candidates, so the renderer skipped frame submit when terrain was filtered out. Static bundle artifacts now drive outdoor static BVH visibility and explicit `static-bundle-layer` frame candidates.
+- Terrain-only artifact isolation used roughly 2 GB VRAM while static-objects-only used roughly 10 GB VRAM, so static bundle texture/resource allocation is the confirmed VRAM pressure source.
+- Both terrain-only and static-objects-only still took a long time to load, and both reports retained the same 2010 prepared assets. That points to an overly broad shared asset closure/hydration path in addition to static bundle upload cost.
+- Root cause found for blank static-objects-only scene: static bundle resources were uploaded into `staticBundleLayerResources`, but resident bundle artifacts were not registered as frame candidates, so the renderer skipped frame submit when terrain was filtered out. Static bundle artifacts now drive outdoor static BVH visibility and explicit `static-bundle-layer` frame candidates.
 - After adding static bundle frame candidates, the report shows `Candidate resources: static 50/50` and `outdoor statics 24/50`, but still reports zero visible draws. Added static bundle submit counters to the debug report to distinguish empty selected layers, missing geometry, skipped material bindings, and successful submitted layers.
-- Root cause found for the next blank static-bundles-only stage: submit selected 25 static bundle layers and saw 2250 candidate geometry records, but skipped all of them because the submitter only recognized legacy family strings (`rgba-texture-page`, `indexed-paletted`) while the product builder emits serialized static material family keys (`static:<family>:alpha=<policy>`). Static material family parsing is now centralized, and static bundle submit routes typed `static:textured-opaque`, `static:direct`, and `static:indexed-paletted` families through the existing texture/indexed shader paths.
+- Root cause found for the next blank static-objects-only stage: submit selected 25 static bundle layers and saw 2250 candidate geometry records, but skipped all of them because the submitter only recognized legacy family strings (`rgba-texture-page`, `indexed-paletted`) while the product builder emits serialized static material family keys (`static:<family>:alpha=<policy>`). Static material family parsing is now centralized, and static bundle submit routes typed `static:textured-opaque`, `static:direct`, and `static:indexed-paletted` families through the existing texture/indexed shader paths.
 - Root cause found for static objects rendering in a pile: the static bundle builder collected per-instance `localPlacement` and `sourceScale` from prepared outdoor/env-cell members but wrote raw `gfxObj.renderGeometry.positions` into bundle geometry. Static bundle geometry positions now bake the instance placement and render-space source scale before upload.
 - Root cause found for incorrect static bundle texture coordinates: static bundle VAOs bound normals at attribute 1 and UVs at attribute 2, while the static textured/indexed shaders read UVs from attribute 1. Static bundle VAOs now bind UVs to attribute 1.
 - Root cause found for static bundles from multiple landblocks clustering in one landblock: static bundle product geometry is landblock-local, but WebGL submit discarded `renderChunkTransforms` and uploaded an identity model matrix for every layer. Static bundle submit now receives the renderer's chunk transforms and applies the layer landblock offset as the model matrix.
@@ -577,4 +591,7 @@ After the renderer is healthy:
 - Root cause found for wrong static wrapping/repeat behavior: static bundle material identity and texture refs were keyed only by material asset, so clamp/repeat variants for the same material collapsed together. Static bundle material records and texture-page refs now include the material variant, and variant-derived wrap policy flows into virtual texture refs and indexed material records.
 - Root cause found for picker console errors after selecting static renderables: the selected static overlay render path could run before its scratch `selectedOverlayModelViewProjection` binding was initialized. The scratch matrix is now initialized before any frame callback can touch the overlay path.
 - Added report-level static bundle submit/material diagnostics to avoid guessing about the remaining missing/transparent/depth issues. The debug report now includes visible-layer material family counts, alpha-policy counts, base/indexed binding counts, submitted opaque/cutout/transparent geometry counts, skip reason counts, and longer fallback samples with layer/material/geometry/object context. These diagnostics are intentionally report-only, not console logs.
+- Added `inspect_gfx_obj_render_geometry` in the debug harness for targeted raw/prepared GfxObj render geometry audits.
+- Rejected GfxObj full-polygon-list hypothesis: `.worktrees/prefactor` kept GfxObj render geometry filtered to drawing-BSP polygon ids and suppressed `NoPos` positive sides. The attempted ACViewer-style full-list/UV-zero policy made out-of-BSP `NoPos` polygons visible as static geometry; `gfx-obj/01000c87` has exactly two such polygons on surface slot 0, matching the blue portal/panel regression. GfxObj prep was restored to the pre-refactor policy.
+- Rejected separate scene-domain hypothesis: wiring `structuredInteriorResources` into the interior scene-domain target is not the root cause for the `renderFamilies=static-objects` missing wall repro and makes transition/interior content visible when it should remain masked or hidden. The behavior change was backed out.
 - Remaining suspected issues: static bundle payloads are too large, static bundle asset closure is too broad, and `setAssetState` still triggers costly static product recommits.

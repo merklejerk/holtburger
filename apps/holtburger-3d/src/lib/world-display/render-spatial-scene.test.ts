@@ -96,6 +96,11 @@ describe("render spatial scene", () => {
 					sourcePartHintCount: 2,
 					sourcePartIndices: [0, 1],
 					sourceMaterialSlotCount: 5,
+					renderMaterialSlotCount: 0,
+					sourceRenderTriangleCount: 0,
+					sourceSkippedPolygonCount: 0,
+					sourceInvalidPolygonCount: 0,
+					sourcePhysicsPolygonCount: 0,
 					emittedDirectEntryCount: 1,
 					emittedCompactedBatchCount: 1,
 					emittedGeometryEntryCount: 2,
@@ -103,6 +108,18 @@ describe("render spatial scene", () => {
 					emittedCompactedBatchTriangleCount: 1,
 					emittedZeroTriangleEntryCount: 0,
 					zeroTriangleMaterialRecordKeys: [],
+					materialTriangleCounts: [
+						{
+							materialRecordKey: "material:compacted",
+							familyKey: "static:flat-constant-color:alpha=opaque",
+							triangleCount: 1,
+						},
+						{
+							materialRecordKey: "material:direct",
+							familyKey: "static:texture-page:alpha=opaque",
+							triangleCount: 2,
+						},
+					],
 					materialRecordKeys: ["material:compacted", "material:direct"],
 					materialFamilyKeys: [
 						"static:flat-constant-color:alpha=opaque",
@@ -276,6 +293,7 @@ function createStaticBundleProductArtifact(): LandblockRenderProductWorkerResult
 						familyKey: "static:flat-constant-color:alpha=opaque",
 						materialRecordKey: "material:compacted",
 						objectKeys: [objectKey],
+						objectTriangleCounts: { [objectKey]: 1 },
 						positions: new Float32Array(),
 						normals: new Float32Array(),
 						uvs: new Float32Array(),

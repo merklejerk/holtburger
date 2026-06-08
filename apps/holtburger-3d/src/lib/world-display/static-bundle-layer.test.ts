@@ -92,6 +92,7 @@ describe("static bundle layer contract", () => {
 			familyKey: materialRecord.familyKey,
 			materialRecordKey: materialRecord.key,
 			objectKeys: ["object:0"],
+			objectTriangleCounts: { "object:0": 0 },
 			positions: new Float32Array(),
 			normals: new Float32Array(),
 			uvs: new Float32Array(),

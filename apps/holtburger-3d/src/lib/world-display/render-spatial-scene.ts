@@ -465,7 +465,9 @@ function deriveStaticBundleObjectCoverage(
 	const sourcePartHints = objectRecord.partHints ?? [];
 	const directTriangleCounts = directEntries.map((entry) => entry.indices.length / 3);
 	const compactedBatchTriangleCounts = compactedBatches.map(
-		(batch) => batch.indices.length / 3,
+		(batch) =>
+			batch.objectTriangleCounts?.[objectRecord.objectKey] ??
+			batch.indices.length / 3,
 	);
 	const zeroTriangleMaterialRecordKeys = uniqueSortedStrings([
 		...directEntries.flatMap((entry) =>
@@ -475,6 +477,12 @@ function deriveStaticBundleObjectCoverage(
 			batch.indices.length === 0 ? [batch.materialRecordKey] : [],
 		),
 	]);
+	const materialTriangleCounts = summarizeStaticBundleMaterialTriangleCounts({
+		materialRecordsByKey,
+		objectKey: objectRecord.objectKey,
+		directEntries,
+		compactedBatches,
+	});
 	return {
 		sourcePartHintCount: sourcePartHints.length,
 		sourcePartIndices: [
@@ -482,6 +490,26 @@ function deriveStaticBundleObjectCoverage(
 		].sort((left, right) => left - right),
 		sourceMaterialSlotCount: sourcePartHints.reduce(
 			(total, hint) => total + (hint.materialSlotCount ?? 0),
+			0,
+		),
+		renderMaterialSlotCount: sourcePartHints.reduce(
+			(total, hint) => total + (hint.renderMaterialSlotCount ?? 0),
+			0,
+		),
+		sourceRenderTriangleCount: sourcePartHints.reduce(
+			(total, hint) => total + (hint.sourceRenderTriangleCount ?? 0),
+			0,
+		),
+		sourceSkippedPolygonCount: sourcePartHints.reduce(
+			(total, hint) => total + (hint.sourceSkippedPolygonCount ?? 0),
+			0,
+		),
+		sourceInvalidPolygonCount: sourcePartHints.reduce(
+			(total, hint) => total + (hint.sourceInvalidPolygonCount ?? 0),
+			0,
+		),
+		sourcePhysicsPolygonCount: sourcePartHints.reduce(
+			(total, hint) => total + (hint.sourcePhysicsPolygonCount ?? 0),
 			0,
 		),
 		emittedDirectEntryCount: directEntries.length,
@@ -500,6 +528,7 @@ function deriveStaticBundleObjectCoverage(
 			...compactedBatchTriangleCounts,
 		].filter((count) => count === 0).length,
 		zeroTriangleMaterialRecordKeys,
+		materialTriangleCounts,
 		materialRecordKeys,
 		materialFamilyKeys: uniqueSortedStrings(
 			materialRecordKeys.flatMap((key) => {
@@ -508,6 +537,46 @@ function deriveStaticBundleObjectCoverage(
 			}),
 		),
 	};
+}
+
+function summarizeStaticBundleMaterialTriangleCounts({
+	materialRecordsByKey,
+	objectKey,
+	directEntries,
+	compactedBatches,
+}: {
+	materialRecordsByKey: ReadonlyMap<
+		string,
+		StaticObjectBundleArtifact["materialRecords"][number]
+	>;
+	objectKey: string;
+	directEntries: readonly StaticObjectBundleArtifact["directEntries"][number][];
+	compactedBatches: readonly StaticObjectBundleArtifact["compactedBatches"][number][];
+}): NonNullable<
+	Extract<RenderSpatialItem["metadata"], { kind: "static-renderable" }>["artifactCoverage"]
+>["materialTriangleCounts"] {
+	const countsByMaterialKey = new Map<string, number>();
+	for (const entry of directEntries) {
+		countsByMaterialKey.set(
+			entry.materialRecordKey,
+			(countsByMaterialKey.get(entry.materialRecordKey) ?? 0) +
+				entry.indices.length / 3,
+		);
+	}
+	for (const batch of compactedBatches) {
+		countsByMaterialKey.set(
+			batch.materialRecordKey,
+			(countsByMaterialKey.get(batch.materialRecordKey) ?? 0) +
+				(batch.objectTriangleCounts?.[objectKey] ?? batch.indices.length / 3),
+		);
+	}
+	return [...countsByMaterialKey.entries()]
+		.sort(([left], [right]) => left.localeCompare(right))
+		.map(([materialRecordKey, triangleCount]) => ({
+			materialRecordKey,
+			familyKey: materialRecordsByKey.get(materialRecordKey)?.familyKey ?? null,
+			triangleCount,
+		}));
 }
 
 function staticBundleSpatialKind(

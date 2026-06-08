@@ -1404,11 +1404,23 @@
 					? [
 							{
 								label: "Artifact parts",
-								value: `${coverage.sourcePartHintCount} hint${coverage.sourcePartHintCount === 1 ? "" : "s"} (${summarizeNumberList(coverage.sourcePartIndices)}), ${coverage.sourceMaterialSlotCount} source material slot${coverage.sourceMaterialSlotCount === 1 ? "" : "s"}`,
+								value: `${coverage.sourcePartHintCount} hint${coverage.sourcePartHintCount === 1 ? "" : "s"} (${summarizeNumberList(coverage.sourcePartIndices)}), material slots ${coverage.renderMaterialSlotCount}/${coverage.sourceMaterialSlotCount}`,
+							},
+							{
+								label: "Source geometry",
+								value: `${coverage.sourceRenderTriangleCount} render tris from ${coverage.sourcePhysicsPolygonCount} physics polys; skipped ${coverage.sourceSkippedPolygonCount}, invalid ${coverage.sourceInvalidPolygonCount}`,
 							},
 							{
 								label: "Artifact geometry",
 								value: `${coverage.emittedGeometryEntryCount} entr${coverage.emittedGeometryEntryCount === 1 ? "y" : "ies"} (${coverage.emittedDirectEntryCount} direct/${coverage.emittedCompactedBatchCount} compacted); direct tris ${coverage.emittedDirectTriangleCount}, containing batch tris ${coverage.emittedCompactedBatchTriangleCount}, zero-tri entries ${coverage.emittedZeroTriangleEntryCount}`,
+							},
+							{
+								label: "Material tris",
+								value: summarizeStringList(
+									coverage.materialTriangleCounts.map(
+										formatMaterialTriangleCount,
+									),
+								),
 							},
 							{
 								label: "Zero-tri materials",
@@ -1480,6 +1492,18 @@
 		}
 		const shown = values.slice(0, 4).join(" || ");
 		return values.length > 4 ? `${shown} || ... +${values.length - 4}` : shown;
+	}
+
+	function formatMaterialTriangleCount(entry: {
+		materialRecordKey: string;
+		familyKey: string | null;
+		triangleCount: number;
+	}): string {
+		const materialKey = entry.materialRecordKey.replace(
+			"material:material/",
+			"mat/",
+		);
+		return `${entry.triangleCount} ${materialKey}${entry.familyKey ? ` ${entry.familyKey}` : ""}`;
 	}
 
 	function buildPickerClipboardReport(

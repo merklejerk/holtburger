@@ -168,10 +168,7 @@ const SELECTED_STATIC_RENDERABLE_BOUNDS_COLOR = new Float32Array([
 ]);
 const BOUNDS_LINE_VERTEX_COMPONENTS = 3;
 const IDENTITY_BOUNDS_MATRIX = new Float32Array([
-	1, 0, 0, 0,
-	0, 1, 0, 0,
-	0, 0, 1, 0,
-	0, 0, 0, 1,
+	1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1,
 ]) satisfies RenderMat4;
 
 const FLAT_WORLD_VERTEX_SHADER = `#version 300 es
@@ -592,8 +589,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		});
 	let latestPortalWorkPlan: Webgl2TransitionPortalWorkPlan | null = null;
 	let latestSceneBounds: SceneBoundsFrame | null = null;
-	const staticProductMetadata =
-		createStaticLandblockProductMetadataStore();
+	const staticProductMetadata = createStaticLandblockProductMetadataStore();
 	staticProductMetadata.updateRenderChunkTransforms(renderChunkTransforms);
 	for (const artifact of staticLandblockRenderProducts.artifacts) {
 		staticProductMetadata.commitProduct(artifact);
@@ -744,11 +740,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				: null;
 		},
 		pickAtViewportPoint(viewportPoint, mask, ownerKeys) {
-			return pickStaticProductAtViewportPoint(
-				viewportPoint,
-				mask,
-				ownerKeys,
-			);
+			return pickStaticProductAtViewportPoint(viewportPoint, mask, ownerKeys);
 		},
 		dispose() {
 			disposed = true;
@@ -816,7 +808,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 					bundle.bundleKind,
 				),
 		);
-		if (enabledUploadFamilies.has("static-bundles")) {
+		if (enabledUploadFamilies.has("static-objects")) {
 			profileBrowserJsScope("webgl2.commit.staticBundles", () => {
 				commitWebgl2StaticBundleProductResources({
 					gl: currentResources.gl,
@@ -834,7 +826,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			});
 		}
 		const detailed = getDetailedLandblockRenderArtifacts(result);
-		if (detailed && enabledUploadFamilies.has("structured-interior")) {
+		if (detailed && enabledUploadFamilies.has("cell-structures")) {
 			profileBrowserJsScope("webgl2.commit.structuredInterior", () => {
 				commitWebgl2StructuredInteriorProductResources({
 					gl: currentResources.gl,
@@ -951,7 +943,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		if (!resources) {
 			return;
 		}
-		if (!shouldUploadRenderFamily(renderRegressionDiagnostics, "portal-mask")) {
+		if (
+			!shouldUploadRenderFamily(renderRegressionDiagnostics, "portal-masks")
+		) {
 			clearWebgl2TransitionPortalMaskResources({
 				store: resources.worldStore,
 			});
@@ -984,8 +978,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		switch (product) {
 			case "outdoor":
 				return (
-					bundleKind === "outdoor-buildings" ||
-					bundleKind === "outdoor-detail"
+					bundleKind === "outdoor-buildings" || bundleKind === "outdoor-detail"
 				);
 			case "outdoor-env-cells":
 			case "dungeon-env-cells":
@@ -1222,8 +1215,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			(candidate) => candidate.renderKey === selectedStaticRenderableRenderKey,
 		);
 		const overlayInput =
-			buildSelectedStaticArtifactOverlayInput(selectedStaticRenderableRenderKey) ??
-			(part ? buildSelectedStaticRenderableOverlayInput(part) : null);
+			buildSelectedStaticArtifactOverlayInput(
+				selectedStaticRenderableRenderKey,
+			) ?? (part ? buildSelectedStaticRenderableOverlayInput(part) : null);
 		if (!overlayInput) {
 			disposeSelectedStaticRenderableOverlay();
 			return null;
@@ -1315,9 +1309,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		};
 	}
 
-	function buildSelectedStaticArtifactOverlayInput(
-		renderKey: string,
-	): {
+	function buildSelectedStaticArtifactOverlayInput(renderKey: string): {
 		label: string;
 		signature: string;
 		modelMatrix: RenderMat4;
@@ -1462,12 +1454,12 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		latestBaseSceneDomain = baseScene;
 		const portalWorkPlan = profileBrowserJsScope(
 			"webgl2.sceneDomain.planTransitionPortals",
-				() =>
-					planWebgl2TransitionPortalWork({
-						transitionPortalModel,
-						visibleTransitionPortalMasks: transitionPortalMasks,
-						renderChunkTransforms,
-						cameraPosition: frameCameraPosition(),
+			() =>
+				planWebgl2TransitionPortalWork({
+					transitionPortalModel,
+					visibleTransitionPortalMasks: transitionPortalMasks,
+					renderChunkTransforms,
+					cameraPosition: frameCameraPosition(),
 					viewProjectionMatrix: frame.viewProjectionMatrix,
 					viewport: { width: canvas.width, height: canvas.height },
 					baseScene,
@@ -1483,10 +1475,10 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			() =>
 				renderSceneDomainTarget({
 					target: targets.exterior,
-						staticBundleLayers: visibleStaticBundleLayers,
-						terrainTiles: visibleTerrainTiles,
-						frame,
-						terrainBackfaceCulling: baseScene === "interior",
+					staticBundleLayers: visibleStaticBundleLayers,
+					terrainTiles: visibleTerrainTiles,
+					frame,
+					terrainBackfaceCulling: baseScene === "interior",
 				}),
 		);
 		const interiorMetrics = profileBrowserJsScope(
@@ -1494,10 +1486,10 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			() =>
 				renderSceneDomainTarget({
 					target: targets.interior,
-						staticBundleLayers: [],
-						terrainTiles: [],
-						frame,
-						terrainBackfaceCulling: false,
+					staticBundleLayers: [],
+					terrainTiles: [],
+					frame,
+					terrainBackfaceCulling: false,
 				}),
 		);
 		const baseTarget =
@@ -1509,15 +1501,15 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		const portalCompositeMetrics = profileBrowserJsScope(
 			"webgl2.sceneDomain.compositeTransitionPortals",
 			() =>
-					compositeTransitionPortals({
-						frame,
-						targets,
-						compositeTargets,
-						transitionLevels,
-						workPlan: portalWorkPlan,
-						transitionPortalMasksById:
-							currentResources.worldStore.transitionPortalMasksById,
-					}),
+				compositeTransitionPortals({
+					frame,
+					targets,
+					compositeTargets,
+					transitionLevels,
+					workPlan: portalWorkPlan,
+					transitionPortalMasksById:
+						currentResources.worldStore.transitionPortalMasksById,
+				}),
 		);
 		profileBrowserJsScope("webgl2.sceneDomain.copyFinalTarget", () =>
 			copySceneDomainTargetToDefaultFramebuffer(
@@ -1619,17 +1611,17 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	}
 
 	function renderSceneDomainTarget({
-			target,
-			staticBundleLayers,
-			terrainTiles,
-			frame,
-			terrainBackfaceCulling,
+		target,
+		staticBundleLayers,
+		terrainTiles,
+		frame,
+		terrainBackfaceCulling,
 	}: {
 		target: Webgl2SceneDomainTarget;
-			staticBundleLayers: readonly Webgl2StaticBundleLayerResource[];
-			terrainTiles: readonly Webgl2TerrainTileResource[];
-			frame: ReturnType<typeof buildWorldRenderFrame>;
-			terrainBackfaceCulling: boolean;
+		staticBundleLayers: readonly Webgl2StaticBundleLayerResource[];
+		terrainTiles: readonly Webgl2TerrainTileResource[];
+		frame: ReturnType<typeof buildWorldRenderFrame>;
+		terrainBackfaceCulling: boolean;
 	}): Webgl2WorldSubmitMetrics {
 		if (!resources) {
 			return createEmptyWebgl2WorldSubmitMetrics();
@@ -1919,13 +1911,13 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				level.compositeScene === "interior"
 					? targets.interior
 					: targets.exterior;
-				drawTransitionPortalMaskBatch({
-					frame,
-					level,
-					batch,
-					destinationTarget: nextTarget,
-					transitionPortalMasksById,
-				});
+			drawTransitionPortalMaskBatch({
+				frame,
+				level,
+				batch,
+				destinationTarget: nextTarget,
+				transitionPortalMasksById,
+			});
 			metrics.transitionApertureMaskPassCount += 1;
 			compositeTransitionPortalBatch({
 				sourceTarget,
@@ -1959,22 +1951,22 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		return { ...metrics, finalTarget: currentTarget };
 	}
 
-		function drawTransitionPortalMaskBatch({
-			frame,
-			level,
-			batch,
-			destinationTarget,
-			transitionPortalMasksById,
-		}: {
-			frame: ReturnType<typeof buildWorldRenderFrame>;
-			level: TransitionPortalRenderLevel;
-			batch: readonly Webgl2VisibleTransitionPortalWork[];
-			destinationTarget: Webgl2PortalCompositeTarget;
-			transitionPortalMasksById: ReadonlyMap<
-				string,
-				Webgl2TransitionPortalMaskResource
-			>;
-		}): void {
+	function drawTransitionPortalMaskBatch({
+		frame,
+		level,
+		batch,
+		destinationTarget,
+		transitionPortalMasksById,
+	}: {
+		frame: ReturnType<typeof buildWorldRenderFrame>;
+		level: TransitionPortalRenderLevel;
+		batch: readonly Webgl2VisibleTransitionPortalWork[];
+		destinationTarget: Webgl2PortalCompositeTarget;
+		transitionPortalMasksById: ReadonlyMap<
+			string,
+			Webgl2TransitionPortalMaskResource
+		>;
+	}): void {
 		if (!resources) {
 			return;
 		}
@@ -2045,12 +2037,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 					modelViewProjection,
 				);
 				stateCache.bindVertexArray(mask.vertexArray.vertexArray);
-				gl.drawElements(
-					gl.TRIANGLES,
-					mask.vertexCount,
-					mask.indexType,
-					0,
-				);
+				gl.drawElements(gl.TRIANGLES, mask.vertexCount, mask.indexType, 0);
 			}
 		} finally {
 			gl.colorMask(true, true, true, true);
@@ -2900,7 +2887,9 @@ function createStaticBundleLayerRenderCandidates(
 	);
 }
 
-function uniqueSortedStrings(values: readonly RenderBvhItemKey[]): RenderBvhItemKey[] {
+function uniqueSortedStrings(
+	values: readonly RenderBvhItemKey[],
+): RenderBvhItemKey[] {
 	return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 
@@ -2974,7 +2963,8 @@ function describeLandblockProductResultShape({
 				0,
 			) ?? 0,
 		terrainDrawSlices: terrain?.drawSlices.length ?? 0,
-		terrainFallbackReasons: terrain?.diagnostics.fallbackReasons.slice(0, 8) ?? [],
+		terrainFallbackReasons:
+			terrain?.diagnostics.fallbackReasons.slice(0, 8) ?? [],
 		structuredInteriorCells: detailed?.structuredInteriorCells.length ?? 0,
 		structuredInteriorMaterialSlices:
 			detailed?.structuredInteriorCells.reduce(
@@ -3003,10 +2993,9 @@ function describeWebgl2ResourceShape(
 		staticBundleProducts: store.staticBundleLayerResources.productsByKey.size,
 		staticBundleLayers: store.staticBundleLayerResourceCount,
 		staticBundleTexturePages: store.staticBundleLayerTexturePageResourceCount,
-		staticBundleTextureEstimatedBytes:
-			estimateStaticBundleTextureResourceBytes(
-				store.staticBundleLayerResources.layersByKey.values(),
-			),
+		staticBundleTextureEstimatedBytes: estimateStaticBundleTextureResourceBytes(
+			store.staticBundleLayerResources.layersByKey.values(),
+		),
 		staticBundleCompactedBatches:
 			store.staticBundleLayerCompactedBatchResourceCount,
 		staticBundleDirectEntries: store.staticBundleLayerDirectEntryResourceCount,
@@ -3020,7 +3009,8 @@ function describeWebgl2ResourceShape(
 		structuredInteriorTriangles: store.structuredInteriorResourceTriangleCount,
 		textureCount: store.textureCount,
 		preparedTextureUploadCount: store.preparedTextureUploadCount,
-		preparedTextureGeneratedByteLength: store.preparedTextureGeneratedByteLength,
+		preparedTextureGeneratedByteLength:
+			store.preparedTextureGeneratedByteLength,
 	};
 }
 
@@ -3043,7 +3033,7 @@ function estimateStaticBundleTexturePageBytes(
 		page.texture.width *
 		page.texture.height *
 		bytesPerStaticBundleTexturePixel(page);
-	return page.mipmapsGenerated ? Math.ceil(baseBytes * 4 / 3) : baseBytes;
+	return page.mipmapsGenerated ? Math.ceil((baseBytes * 4) / 3) : baseBytes;
 }
 
 function bytesPerStaticBundleTexturePixel(

@@ -3,18 +3,21 @@ import type { LandblockRenderProduct } from "./landblock-render-product";
 
 export type RenderUploadDiagnosticFamily =
 	| "terrain"
-	| "static-bundles"
-	| "structured-interior"
-	| "portal-mask";
+	| "static-objects"
+	| "cell-structures"
+	| "portal-masks";
+
+export type RenderFamilyDiagnosticFamily = RenderUploadDiagnosticFamily;
 
 export type RenderArtifactDiagnosticFamily =
 	| "terrain"
-	| "static-bundles"
-	| "detailed-landblock";
+	| "static-objects"
+	| "cell-structures";
 
 export interface TemporaryRenderRegressionDiagnostics {
 	enabled: boolean;
 	productFilter: ReadonlySet<LandblockRenderProduct> | null;
+	familyFilter: ReadonlySet<RenderFamilyDiagnosticFamily> | null;
 	uploadFilter: ReadonlySet<RenderUploadDiagnosticFamily> | null;
 	artifactFilter: ReadonlySet<RenderArtifactDiagnosticFamily> | null;
 }
@@ -27,15 +30,15 @@ const PRODUCT_VALUES = [
 
 const UPLOAD_FAMILY_VALUES = [
 	"terrain",
-	"static-bundles",
-	"structured-interior",
-	"portal-mask",
+	"static-objects",
+	"cell-structures",
+	"portal-masks",
 ] as const satisfies readonly RenderUploadDiagnosticFamily[];
 
 const ARTIFACT_FAMILY_VALUES = [
 	"terrain",
-	"static-bundles",
-	"detailed-landblock",
+	"static-objects",
+	"cell-structures",
 ] as const satisfies readonly RenderArtifactDiagnosticFamily[];
 
 export const ALL_RENDER_UPLOAD_DIAGNOSTIC_FAMILIES: readonly RenderUploadDiagnosticFamily[] =
@@ -47,6 +50,23 @@ export function readTemporaryRenderRegressionDiagnostics(): TemporaryRenderRegre
 	if (cachedDiagnostics) {
 		return cachedDiagnostics;
 	}
+	const familyFilter = readEnumSet<RenderFamilyDiagnosticFamily>(
+		"renderFamilies",
+		"VITE_HOLTBURGER_RENDER_FAMILY_FILTER",
+		UPLOAD_FAMILY_VALUES,
+	);
+	const uploadFilter =
+		readEnumSet<RenderUploadDiagnosticFamily>(
+			"renderUploads",
+			"VITE_HOLTBURGER_RENDER_UPLOAD_FILTER",
+			UPLOAD_FAMILY_VALUES,
+		) ?? familyFilter;
+	const artifactFilter =
+		readEnumSet<RenderArtifactDiagnosticFamily>(
+			"renderArtifacts",
+			"VITE_HOLTBURGER_RENDER_ARTIFACT_FILTER",
+			ARTIFACT_FAMILY_VALUES,
+		) ?? deriveArtifactFilterFromFamilyFilter(familyFilter);
 	cachedDiagnostics = {
 		enabled: readBooleanFlag(
 			"renderDiag",
@@ -57,26 +77,21 @@ export function readTemporaryRenderRegressionDiagnostics(): TemporaryRenderRegre
 			"VITE_HOLTBURGER_RENDER_PRODUCT_FILTER",
 			PRODUCT_VALUES,
 		),
-		uploadFilter: readEnumSet<RenderUploadDiagnosticFamily>(
-			"renderUploads",
-			"VITE_HOLTBURGER_RENDER_UPLOAD_FILTER",
-			UPLOAD_FAMILY_VALUES,
-		),
-		artifactFilter: readEnumSet<RenderArtifactDiagnosticFamily>(
-			"renderArtifacts",
-			"VITE_HOLTBURGER_RENDER_ARTIFACT_FILTER",
-			ARTIFACT_FAMILY_VALUES,
-		),
+		familyFilter,
+		uploadFilter,
+		artifactFilter,
 	};
 	if (
 		cachedDiagnostics.enabled ||
 		cachedDiagnostics.productFilter ||
+		cachedDiagnostics.familyFilter ||
 		cachedDiagnostics.uploadFilter ||
 		cachedDiagnostics.artifactFilter
 	) {
 		console.info("[holtburger-3d][render-regression][config]", {
 			enabled: cachedDiagnostics.enabled,
 			productFilter: describeDiagnosticSet(cachedDiagnostics.productFilter),
+			familyFilter: describeDiagnosticSet(cachedDiagnostics.familyFilter),
 			uploadFilter: describeDiagnosticSet(cachedDiagnostics.uploadFilter),
 			artifactFilter: describeDiagnosticSet(cachedDiagnostics.artifactFilter),
 		});
@@ -150,6 +165,23 @@ function readEnumSet<T extends string>(
 		);
 	}
 	return new Set(values as T[]);
+}
+
+function deriveArtifactFilterFromFamilyFilter(
+	familyFilter: ReadonlySet<RenderFamilyDiagnosticFamily> | null,
+): ReadonlySet<RenderArtifactDiagnosticFamily> | null {
+	if (!familyFilter) {
+		return null;
+	}
+	const artifactFamilies = new Set<RenderArtifactDiagnosticFamily>();
+	for (const family of familyFilter) {
+		if (family === "portal-masks") {
+			artifactFamilies.add("cell-structures");
+			continue;
+		}
+		artifactFamilies.add(family);
+	}
+	return artifactFamilies;
 }
 
 function readQueryParam(name: string): string | null {

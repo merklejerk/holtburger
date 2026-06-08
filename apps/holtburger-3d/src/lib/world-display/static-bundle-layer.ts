@@ -164,6 +164,7 @@ export interface StaticBundleCompactedBatch {
 	familyKey: string;
 	materialRecordKey: string;
 	objectKeys: readonly string[];
+	objectTriangleCounts: Readonly<Record<string, number>>;
 	positions: PreparedFloat32Array;
 	normals: PreparedFloat32Array;
 	uvs: PreparedFloat32Array;
@@ -201,6 +202,11 @@ export interface StaticBundlePartHint {
 	partIndex: number;
 	gfxObjAssetId?: string;
 	materialSlotCount?: number;
+	renderMaterialSlotCount?: number;
+	sourceRenderTriangleCount?: number;
+	sourceSkippedPolygonCount?: number;
+	sourceInvalidPolygonCount?: number;
+	sourcePhysicsPolygonCount?: number;
 	bounds?: RenderBounds;
 }
 

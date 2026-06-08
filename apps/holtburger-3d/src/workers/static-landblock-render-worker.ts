@@ -1,14 +1,18 @@
 import {
 	formatAtlasReadyPreparedTextureAssetId,
 	createInitialAssetChannelState,
+	type PreparedRegionDetailRole,
+	type PreparedRenderSurfacePayload,
 	type AssetChannelState,
 	type PreparedAssetRecord,
 } from "../lib/assets/types";
+import { resolveNormalizedPreparedTextureAssetIds } from "../lib/assets/material-texture-preparation-policy";
 import {
 	formatEnvCellAssetId,
 	formatHex32,
 	formatLandblockOutdoorAssetId,
 	formatLandblockTopologyAssetId,
+	formatRegionRenderProfileAssetId,
 	formatTerrainMaterialAssetId,
 } from "../lib/landblocks";
 import type { AssetLookupRequestDto } from "../lib/host/contracts";
@@ -666,6 +670,7 @@ interface StructuredInteriorMaterialContext {
 }
 
 interface StructuredInteriorMaterialSlot {
+	regionNumber: number;
 	slotId: number;
 	surfaceId: number;
 	materialAssetId: string;
@@ -683,15 +688,23 @@ function buildStructuredInteriorMaterialContext(options: {
 	const materialTextureRoutes = collectStaticMaterialTextureRoutes(
 		materialSlots.map((slot) => ({
 			materialAssetId: slot.materialAssetId,
-			materialRecordKey: formatStructuredInteriorMaterialRecordKey(slot),
+			materialRecordKey: formatStructuredInteriorMaterialTextureRecordKey(slot),
 			materialVariantSignature: slot.materialVariantSignature,
 		})),
 		options.preparedByAssetId,
 	);
-	const texturePageRefs = collectStaticMaterialTexturePageRefs(
+	const materialTexturePageRefs = collectStaticMaterialTexturePageRefs(
 		materialTextureRoutes,
 		options.preparedByAssetId,
 	);
+	const detailTexturePageRefs = collectStructuredInteriorDetailTexturePageRefs({
+		envCells: options.envCells,
+		preparedByAssetId: options.preparedByAssetId,
+	});
+	const texturePageRefs = uniqueTexturePageRefs([
+		...materialTexturePageRefs,
+		...detailTexturePageRefs,
+	]);
 	const scopeKey = [
 		"structured-interior",
 		formatHex32(options.job.landblockId),
@@ -724,6 +737,8 @@ function buildStructuredInteriorMaterialContext(options: {
 			buildStructuredInteriorMaterialSlices({
 				envCell,
 				materialRecordByKey,
+				texturePageRefs,
+				preparedByAssetId: options.preparedByAssetId,
 			}),
 		);
 	}
@@ -744,10 +759,20 @@ function buildStructuredInteriorMaterialRecords(options: {
 }): StaticBundleMaterialRecord[] {
 	const recordsByKey = new Map<string, StaticBundleMaterialRecord>();
 	for (const slot of uniqueStructuredInteriorMaterialSlots(options.materialSlots)) {
-		const key = formatStructuredInteriorMaterialRecordKey(slot);
+		const detail = resolveStructuredInteriorEnvironmentDetail({
+			regionNumber: slot.regionNumber,
+			texturePageRefs: options.texturePageRefs,
+			preparedByAssetId: options.preparedByAssetId,
+		});
+		const materialTextureRecordKey =
+			formatStructuredInteriorMaterialTextureRecordKey(slot);
+		const key = formatStructuredInteriorMaterialRecordKey({
+			slot,
+			detailTextureRefKey: detail?.textureRefKey ?? null,
+		});
 		const materialReadiness = resolveStaticMaterialReadiness({
 			materialAssetId: slot.materialAssetId,
-			materialRecordKey: key,
+			materialRecordKey: materialTextureRecordKey,
 			materialVariantSignature: slot.materialVariantSignature,
 			preparedByAssetId: options.preparedByAssetId,
 			texturePageRefs: options.texturePageRefs,
@@ -767,10 +792,12 @@ function buildStructuredInteriorMaterialRecords(options: {
 			material: materialReadiness,
 		});
 		const textureRefKeys = findStaticMaterialTextureRefs(
-			key,
+			materialTextureRecordKey,
 			options.texturePageRefs,
 			options.materialTextureRoutes,
-		).map((ref) => ref.key);
+		)
+			.map((ref) => ref.key)
+			.concat(detail?.textureRefKey ?? []);
 		recordsByKey.set(key, {
 			key,
 			familyKey: formatStaticMaterialFamilyKey(compactionEligibility),
@@ -779,12 +806,14 @@ function buildStructuredInteriorMaterialRecords(options: {
 				behavior: materialReadiness.behavior,
 			}),
 			texturePageRefKeys: textureRefKeys,
+			detailTextureRefKey: detail?.textureRefKey ?? null,
+			detailTiling: detail?.tiling ?? 1,
 			isTransparent:
 				compactionEligibility.material.alphaPolicy === "transparent-blend" ||
 				compactionEligibility.material.alphaPolicy === "opacity-translucent",
 			indexedMaterial: resolveStaticIndexedMaterialRecord({
 				materialAssetId: slot.materialAssetId,
-				materialRecordKey: key,
+				materialRecordKey: materialTextureRecordKey,
 				materialTextureRoutes: options.materialTextureRoutes,
 				preparedByAssetId: options.preparedByAssetId,
 			}),
@@ -798,6 +827,8 @@ function buildStructuredInteriorMaterialRecords(options: {
 function buildStructuredInteriorMaterialSlices(options: {
 	envCell: PreparedEnvCellPayload;
 	materialRecordByKey: ReadonlyMap<string, StaticBundleMaterialRecord>;
+	texturePageRefs: readonly VirtualTexturePageRef[];
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
 }): readonly DetailedStructuredInteriorMaterialSlice[] {
 	const surfaceBySlotId = new Map(
 		options.envCell.surfaces.map((surface) => [surface.slotId, surface]),
@@ -838,9 +869,17 @@ function buildStructuredInteriorMaterialSlices(options: {
 	}
 	return [...keys.values()]
 		.map((surfaceKey): DetailedStructuredInteriorMaterialSlice | null => {
+			const detail = resolveStructuredInteriorEnvironmentDetail({
+				regionNumber: options.envCell.regionNumber,
+				texturePageRefs: options.texturePageRefs,
+				preparedByAssetId: options.preparedByAssetId,
+			});
 			const materialRecordKey = formatStructuredInteriorMaterialRecordKey({
-				materialAssetId: surfaceKey.materialAssetId,
-				materialVariantSignature: surfaceKey.materialVariantSignature,
+				slot: {
+					materialAssetId: surfaceKey.materialAssetId,
+					materialVariantSignature: surfaceKey.materialVariantSignature,
+				},
+				detailTextureRefKey: detail?.textureRefKey ?? null,
 			});
 			const materialRecord = options.materialRecordByKey.get(materialRecordKey);
 			if (!materialRecord) {
@@ -909,6 +948,7 @@ function collectStructuredInteriorMaterialSlots(
 		if (!variants || variants.size === 0) {
 			return [
 				{
+					regionNumber: envCell.regionNumber,
 					slotId: surface.slotId,
 					surfaceId: surface.surfaceId,
 					materialAssetId: surface.materialAssetId,
@@ -919,6 +959,7 @@ function collectStructuredInteriorMaterialSlots(
 		return [...variants]
 			.sort(compareStructuredInteriorMaterialVariantSignatures)
 			.map((materialVariantSignature) => ({
+				regionNumber: envCell.regionNumber,
 				slotId: surface.slotId,
 				surfaceId: surface.surfaceId,
 				materialAssetId: surface.materialAssetId,
@@ -932,16 +973,209 @@ function uniqueStructuredInteriorMaterialSlots(
 ): StructuredInteriorMaterialSlot[] {
 	const byKey = new Map<string, StructuredInteriorMaterialSlot>();
 	for (const slot of slots) {
-		byKey.set(formatStructuredInteriorMaterialRecordKey(slot), slot);
+		byKey.set(
+			[
+				slot.regionNumber,
+				formatStructuredInteriorMaterialTextureRecordKey(slot),
+			].join(":"),
+			slot,
+		);
 	}
 	return [...byKey.values()].sort((left, right) =>
-		formatStructuredInteriorMaterialRecordKey(left).localeCompare(
-			formatStructuredInteriorMaterialRecordKey(right),
-		),
+		[
+			left.regionNumber,
+			formatStructuredInteriorMaterialTextureRecordKey(left),
+		]
+			.join(":")
+			.localeCompare(
+				[
+					right.regionNumber,
+					formatStructuredInteriorMaterialTextureRecordKey(right),
+				].join(":"),
+			),
 	);
 }
 
-function formatStructuredInteriorMaterialRecordKey(
+function collectStructuredInteriorDetailTexturePageRefs({
+	envCells,
+	preparedByAssetId,
+}: {
+	envCells: readonly PreparedEnvCellPayload[];
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
+}): VirtualTexturePageRef[] {
+	return uniqueTexturePageRefs(
+		envCells
+			.map((envCell) =>
+				resolveStructuredInteriorEnvironmentDetailTextureRef({
+					regionNumber: envCell.regionNumber,
+					preparedByAssetId,
+				}),
+			)
+			.filter((ref): ref is VirtualTexturePageRef => ref !== null),
+	);
+}
+
+function resolveStructuredInteriorEnvironmentDetail({
+	regionNumber,
+	texturePageRefs,
+	preparedByAssetId,
+}: {
+	regionNumber: number;
+	texturePageRefs: readonly VirtualTexturePageRef[];
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
+}): { textureRefKey: string; tiling: number } | null {
+	const role = resolveStructuredInteriorEnvironmentDetailRole({
+		regionNumber,
+		preparedByAssetId,
+	});
+	if (!role || role.tiling <= 0) {
+		return null;
+	}
+	const detailRef = resolveStructuredInteriorEnvironmentDetailTextureRef({
+		regionNumber,
+		preparedByAssetId,
+	});
+	if (!detailRef || !texturePageRefs.some((ref) => ref.key === detailRef.key)) {
+		return null;
+	}
+	return {
+		textureRefKey: detailRef.key,
+		tiling: role.tiling,
+	};
+}
+
+function resolveStructuredInteriorEnvironmentDetailTextureRef({
+	regionNumber,
+	preparedByAssetId,
+}: {
+	regionNumber: number;
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
+}): VirtualTexturePageRef | null {
+	const role = resolveStructuredInteriorEnvironmentDetailRole({
+		regionNumber,
+		preparedByAssetId,
+	});
+	if (!role || role.tiling <= 0) {
+		return null;
+	}
+	const renderSurface = resolveStructuredInteriorDetailRenderSurface({
+		role,
+		preparedByAssetId,
+	});
+	if (!renderSurface) {
+		return null;
+	}
+	const preparedTextureAssetId = resolveNormalizedPreparedTextureAssetIds({
+		renderSurface,
+		usage: "detail",
+	})[0];
+	if (!preparedTextureAssetId) {
+		return null;
+	}
+	const preparedTexture = getPreparedPayload(
+		preparedByAssetId,
+		preparedTextureAssetId,
+		"prepared-texture",
+	);
+	const level = preparedTexture.levels[0];
+	if (!level) {
+		throw new Error(
+			`Structured interior detail texture ${preparedTextureAssetId} has no mip level 0.`,
+		);
+	}
+	return {
+		key: formatStructuredInteriorDetailTextureRefKey({
+			regionNumber,
+			preparedTextureAssetId,
+		}),
+		sourceAssetId: preparedTextureAssetId,
+		usageBucket: "detail",
+		sampleClass: "rgba-color",
+		width: level.width,
+		height: level.height,
+		wrapS: "repeat",
+		wrapT: "repeat",
+		samplingDomain: "color",
+		lookup: "color-filtered",
+		bytes: level.bytes,
+	};
+}
+
+function resolveStructuredInteriorEnvironmentDetailRole({
+	regionNumber,
+	preparedByAssetId,
+}: {
+	regionNumber: number;
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
+}): PreparedRegionDetailRole | null {
+	const profile = preparedByAssetId.get(formatRegionRenderProfileAssetId(regionNumber));
+	if (profile?.payload.kind !== "region-render-profile") {
+		return null;
+	}
+	if (profile.payload.regionNumber !== regionNumber) {
+		return null;
+	}
+	return profile.payload.detailRoles.environment;
+}
+
+function resolveStructuredInteriorDetailRenderSurface({
+	role,
+	preparedByAssetId,
+}: {
+	role: PreparedRegionDetailRole;
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
+}): PreparedRenderSurfacePayload | null {
+	const surfaceTexture = preparedByAssetId.get(role.textureAssetId);
+	if (surfaceTexture?.payload.kind !== "surface-texture") {
+		return null;
+	}
+	const preferredRenderSurfaceIds =
+		surfaceTexture.payload.renderSurfaceIds.length <= 1
+			? [
+					...surfaceTexture.payload.renderSurfaceIds,
+					...(surfaceTexture.payload.selectedRenderSurfaceId === null
+						? []
+						: [surfaceTexture.payload.selectedRenderSurfaceId]),
+				]
+			: [
+					surfaceTexture.payload.renderSurfaceIds[1],
+					...surfaceTexture.payload.renderSurfaceIds.slice(2),
+					surfaceTexture.payload.renderSurfaceIds[0],
+					...(surfaceTexture.payload.selectedRenderSurfaceId === null
+						? []
+						: [surfaceTexture.payload.selectedRenderSurfaceId]),
+				];
+	for (const renderSurfaceId of preferredRenderSurfaceIds) {
+		if (renderSurfaceId === undefined) {
+			continue;
+		}
+		const renderSurface = preparedByAssetId.get(
+			`render-surface/${formatHex32(renderSurfaceId)}`,
+		);
+		if (renderSurface?.payload.kind === "render-surface") {
+			return renderSurface.payload;
+		}
+	}
+	return null;
+}
+
+function formatStructuredInteriorDetailTextureRefKey({
+	regionNumber,
+	preparedTextureAssetId,
+}: {
+	regionNumber: number;
+	preparedTextureAssetId: string;
+}): string {
+	return [
+		"texture",
+		"region-detail",
+		regionNumber,
+		"environment",
+		preparedTextureAssetId,
+	].join(":");
+}
+
+function formatStructuredInteriorMaterialTextureRecordKey(
 	slot: Pick<
 		StructuredInteriorMaterialSlot,
 		"materialAssetId" | "materialVariantSignature"
@@ -951,6 +1185,19 @@ function formatStructuredInteriorMaterialRecordKey(
 		`material:${slot.materialAssetId}`,
 		`variant:${slot.materialVariantSignature ?? "base"}`,
 	].join(":");
+}
+
+function formatStructuredInteriorMaterialRecordKey(options: {
+	slot: Pick<
+		StructuredInteriorMaterialSlot,
+		"materialAssetId" | "materialVariantSignature"
+	>;
+	detailTextureRefKey: string | null;
+}): string {
+	const base = formatStructuredInteriorMaterialTextureRecordKey(options.slot);
+	return options.detailTextureRefKey
+		? `${base}:detail=${options.detailTextureRefKey}`
+		: base;
 }
 
 function compareStructuredInteriorMaterialVariantSignatures(
@@ -1101,6 +1348,14 @@ function getResponse(
 
 function uniqueSortedStrings(values: readonly string[]): string[] {
 	return [...new Set(values)].sort();
+}
+
+function uniqueTexturePageRefs(
+	refs: readonly VirtualTexturePageRef[],
+): VirtualTexturePageRef[] {
+	return [
+		...new Map(refs.map((ref) => [ref.key, ref] as const)).values(),
+	].sort((left, right) => left.key.localeCompare(right.key));
 }
 
 function formatAssetIdSample(assetIds: readonly string[]): string {

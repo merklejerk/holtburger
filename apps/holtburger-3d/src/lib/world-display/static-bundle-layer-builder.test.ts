@@ -6,7 +6,9 @@ import type {
 } from "../assets/types";
 import { formatPreparedTextureAssetId } from "../assets/types";
 import {
+	formatEnvCellAssetId,
 	formatLandblockOutdoorAssetId,
+	formatLandblockTopologyAssetId,
 	formatRegionRenderProfileAssetId,
 	formatTerrainMaterialAssetId,
 } from "../landblocks";
@@ -228,6 +230,168 @@ describe("static bundle layer builder", () => {
 		);
 	});
 
+	it("emits region detail overlay refs and material tiling for outdoor building materials", () => {
+		const landblockId = 0xda55ffff;
+		const detailPreparedTextureAssetId = formatPreparedTextureAssetId({
+			renderSurfaceId: 0x06000013,
+			usage: "detail",
+			outputFormat: "rgba8",
+			mipPolicy: "none",
+			colorSpace: "linear",
+		});
+		const layer = buildStaticObjectBundleArtifact({
+			job: createBuildJob(landblockId, "outdoor-buildings"),
+			preparedAssets: [
+				createOutdoorLandblock(landblockId, [
+					{
+						...createOutdoorMember("building-0", "gfx-obj/01000001"),
+						kind: "building",
+					},
+				]),
+				createRegionRenderProfileWithBuildingDetail(1, {
+					textureAssetId: "surface-texture/05000013",
+					renderSurfaceId: 0x06000013,
+					tiling: 7,
+				}),
+				createTerrainMaterial(1),
+				createGfxObj("gfx-obj/01000001", "material/08000001", 1),
+				createGfxObj("gfx-obj/01000002", "material/08000002", 1),
+				createGfxObj("gfx-obj/01000003", "material/08000003", 2),
+				createMaterial("material/08000001", "render-surface/06000001"),
+				createMaterial("material/08000002", "render-surface/06000002", {
+					surfaceType: 0x10,
+				}),
+				createMaterial("material/08000003", "render-surface/06000003"),
+				createRenderSurface("render-surface/06000001"),
+				createRenderSurface("render-surface/06000002"),
+				createRenderSurface("render-surface/06000003"),
+				createRenderSurface("render-surface/06000013"),
+				createSurfaceTexture("surface-texture/05000013", 0x06000013),
+				createPreparedTexture(0x06000001, "raw", [255, 0, 0, 255]),
+				createPreparedTexture(0x06000002, "raw", [0, 255, 0, 255], 8),
+				createPreparedTexture(0x06000003, "raw", [64, 64, 255, 255]),
+				createPreparedTexture(0x06000013, "detail", [255, 128, 64, 255]),
+			],
+			policy: createPolicy(),
+		});
+
+		const detailRefKey = `texture:region-detail:1:building:${detailPreparedTextureAssetId}`;
+		expect(
+			layer.texturePageRefs.map((ref) => [
+				ref.key,
+				ref.usageBucket,
+				ref.sourceAssetId,
+				ref.wrapS,
+				ref.wrapT,
+			]),
+		).toContainEqual([
+			detailRefKey,
+			"detail",
+			detailPreparedTextureAssetId,
+			"repeat",
+			"repeat",
+		]);
+		expect(
+			layer.materialRecords.map((record) => ({
+				key: record.key,
+				detailTextureRefKey: record.detailTextureRefKey,
+				detailTiling: record.detailTiling,
+			})),
+		).toEqual(
+			expect.arrayContaining([
+				{
+					key: `material:material/08000001:variant:sampler=clamp:detail=${detailRefKey}`,
+					detailTextureRefKey: detailRefKey,
+					detailTiling: 7,
+				},
+			]),
+		);
+		expect(layer.compactedBatches[0]?.materialRecordKey).toContain(
+			`:detail=${detailRefKey}`,
+		);
+	});
+
+	it("does not apply disabled object detail roles to ordinary outdoor static objects", () => {
+		const landblockId = 0xda55ffff;
+		const detailPreparedTextureAssetId = formatPreparedTextureAssetId({
+			renderSurfaceId: 0x06000013,
+			usage: "detail",
+			outputFormat: "rgba8",
+			mipPolicy: "none",
+			colorSpace: "linear",
+		});
+		const layer = buildStaticObjectBundleArtifact({
+			job: createBuildJob(landblockId),
+			preparedAssets: [
+				createOutdoorLandblock(landblockId, [
+					createOutdoorMember("object-0", "gfx-obj/01000001"),
+				]),
+				createRegionRenderProfileWithObjectDetail(1, {
+					textureAssetId: "surface-texture/05000013",
+					renderSurfaceId: 0x06000013,
+					tiling: 7,
+				}),
+				createTerrainMaterial(1),
+				createGfxObj("gfx-obj/01000001", "material/08000001", 1),
+				createMaterial("material/08000001", "render-surface/06000001"),
+				createRenderSurface("render-surface/06000001"),
+				createRenderSurface("render-surface/06000013"),
+				createSurfaceTexture("surface-texture/05000013", 0x06000013),
+				createPreparedTexture(0x06000001, "raw", [255, 0, 0, 255]),
+				createPreparedTexture(0x06000013, "detail", [255, 128, 64, 255]),
+			],
+			policy: createPolicy(),
+		});
+
+		expect(layer.texturePageRefs.map((ref) => ref.sourceAssetId)).not.toContain(
+			detailPreparedTextureAssetId,
+		);
+		expect(layer.materialRecords.map((record) => record.detailTextureRefKey)).toEqual([
+			null,
+		]);
+	});
+
+	it("does not apply disabled object detail roles to indoor static objects", () => {
+		const landblockId = 0xda55ffff;
+		const envCellId = 0xda550100;
+		const detailPreparedTextureAssetId = formatPreparedTextureAssetId({
+			renderSurfaceId: 0x06000013,
+			usage: "detail",
+			outputFormat: "rgba8",
+			mipPolicy: "none",
+			colorSpace: "linear",
+		});
+		const layer = buildStaticObjectBundleArtifact({
+			job: createEnvCellBuildJob(landblockId, envCellId),
+			preparedAssets: [
+				createLandblockTopology(landblockId, envCellId),
+				createEnvCell(envCellId, [
+					createIndoorStaticMember("indoor-static-0", "gfx-obj/01000001"),
+				]),
+				createRegionRenderProfileWithObjectDetail(1, {
+					textureAssetId: "surface-texture/05000013",
+					renderSurfaceId: 0x06000013,
+					tiling: 7,
+				}),
+				createGfxObj("gfx-obj/01000001", "material/08000001", 1),
+				createMaterial("material/08000001", "render-surface/06000001"),
+				createRenderSurface("render-surface/06000001"),
+				createRenderSurface("render-surface/06000013"),
+				createSurfaceTexture("surface-texture/05000013", 0x06000013),
+				createPreparedTexture(0x06000001, "raw", [255, 0, 0, 255]),
+				createPreparedTexture(0x06000013, "detail", [255, 128, 64, 255]),
+			],
+			policy: createPolicy(),
+		});
+
+		expect(layer.texturePageRefs.map((ref) => ref.sourceAssetId)).not.toContain(
+			detailPreparedTextureAssetId,
+		);
+		expect(layer.materialRecords.map((record) => record.detailTextureRefKey)).toEqual([
+			null,
+		]);
+	});
+
 	it("classifies direct alpha clipmaps as cutout static materials", () => {
 		const landblockId = 0xda55ffff;
 		const job = createBuildJob(landblockId);
@@ -400,6 +564,8 @@ describe("static bundle layer builder", () => {
 					"texture:material:material/08000011:variant:sampler=clamp:palette/04000011:palette-lookup",
 					"texture:material:material/08000011:variant:sampler=clamp:render-surface/06000011:indexed-texels",
 				],
+				detailTextureRefKey: null,
+				detailTiling: 1,
 				isTransparent: false,
 				indexedMaterial: {
 					indexFormat: "p8",
@@ -581,18 +747,69 @@ describe("static bundle layer builder", () => {
 			),
 		).toContain("setup-appearance/02000001");
 	});
+
+	it("collects region detail prepared textures for worker closures", () => {
+		const regionProfile = createRegionRenderProfileWithObjectDetail(1, {
+			textureAssetId: "surface-texture/05000013",
+			renderSurfaceId: 0x06000013,
+			tiling: 7,
+		});
+		const preparedByAssetId = new Map(
+			[
+				regionProfile,
+				createSurfaceTexture("surface-texture/05000013", 0x06000013),
+				createRenderSurface("render-surface/06000013"),
+				createPreparedTexture(0x06000013, "detail", [255, 128, 64, 255]),
+			].map((asset) => [asset.request.assetId, asset] as const),
+		);
+
+		expect(
+			collectWorkerPreparedDependencyIds(
+				[formatRegionRenderProfileAssetId(1)],
+				preparedByAssetId,
+			),
+		).toContain(
+			"prepared-texture/06000013?usage=detail&out=rgba8&mips=none&cs=linear",
+		);
+	});
 });
 
-function createBuildJob(landblockId: number): StaticBundleLayerWorkerJob {
+function createBuildJob(
+	landblockId: number,
+	bundleKind: "outdoor-buildings" | "outdoor-detail" = "outdoor-detail",
+): StaticBundleLayerWorkerJob {
 	return {
 		type: "build-static-bundle-layer",
-		jobId: "job:outdoor-detail",
+		jobId: `job:${bundleKind}`,
 		scope: {
 			kind: "landblock",
 			landblockId,
-			bundleKind: "outdoor-detail",
+			bundleKind,
 		},
 		rootAssetIds: [formatLandblockOutdoorAssetId(landblockId)],
+		sourceRevision: "revision:roots",
+		buildPolicyRevision: "build:v1",
+		cpuTexturePagePolicyRevision: "texture-pages:v1",
+	};
+}
+
+function createEnvCellBuildJob(
+	landblockId: number,
+	envCellId: number,
+): StaticBundleLayerWorkerJob {
+	return {
+		type: "build-static-bundle-layer",
+		jobId: "job:env-cell-static",
+		scope: {
+			kind: "env-cell",
+			landblockId,
+			envCellId,
+			bundleKind: "env-cell-static",
+		},
+		rootAssetIds: [
+			formatLandblockTopologyAssetId(landblockId),
+			formatEnvCellAssetId(envCellId),
+		],
 		sourceRevision: "revision:roots",
 		buildPolicyRevision: "build:v1",
 		cpuTexturePagePolicyRevision: "texture-pages:v1",
@@ -702,6 +919,81 @@ function createOutdoorMember(
 		},
 		building: null,
 		generated: null,
+	};
+}
+
+function createLandblockTopology(
+	landblockId: number,
+	envCellId: number,
+): PreparedAssetRecord {
+	return createRecord(formatLandblockTopologyAssetId(landblockId), {
+		kind: "landblock-topology",
+		sourceAssetKind: "landblock-topology",
+		residencyKind: "outdoor-landblock",
+		provenance: createProvenance("landblock-topology"),
+		landblockId,
+		envCells: [
+			{
+				envCellId,
+				assetId: formatEnvCellAssetId(envCellId),
+			},
+		],
+	});
+}
+
+function createEnvCell(
+	envCellId: number,
+	statics: readonly ReturnType<typeof createIndoorStaticMember>[],
+): PreparedAssetRecord {
+	return createRecord(formatEnvCellAssetId(envCellId), {
+		kind: "env-cell",
+		sourceAssetKind: "env-cell",
+		residencyKind: "interior-cell",
+		provenance: createProvenance("env-cell"),
+		envCellId,
+		regionId: 0x13000000,
+		regionNumber: 1,
+		environmentId: 0x01000001,
+		cellStructureId: 0x02000002,
+		localPlacement: createPlacement({ x: 0, y: 0, z: 0 }),
+		surfaces: [],
+		portals: [],
+		visibleEnvCellIds: [],
+		portalApertures: [],
+		statics,
+		renderGeometry: createEmptyPolygonSetRenderGeometry(),
+		cellBsp: {
+			kind: "leaf",
+			index: 0,
+			solid: 0,
+			sphere: null,
+			polyIds: [],
+		},
+		localBvh: {
+			coordinateSpace: "env-cell-local",
+			nodes: [],
+			items: [],
+		},
+		dependencies: {
+			renderableSourceAssetIds: statics.map((member) => member.sourceAssetId),
+			materialAssetIds: [],
+		},
+	});
+}
+
+function createIndoorStaticMember(instanceId: string, sourceAssetId: string) {
+	return {
+		instanceId,
+		sourceDid: Number.parseInt(sourceAssetId.slice(-8), 16),
+		sourceAssetId,
+		sourceIndex: 0,
+		localPlacement: createPlacement({ x: 0, y: 0, z: 0 }),
+		sourceScale: { x: 1, y: 1, z: 1 },
+		sourceBounds: null,
+		instanceBounds: {
+			min: { x: 0, y: 0, z: 0 },
+			max: { x: 1, y: 1, z: 1 },
+		},
 	};
 }
 
@@ -831,6 +1123,31 @@ function createRenderSurface(assetId: string): PreparedAssetRecord {
 		sourceBytes: new Uint8Array([255, 255, 255, 255]),
 		defaultPaletteId: null,
 		dependencies: { paletteAssetIds: [] },
+	});
+}
+
+function createSurfaceTexture(
+	assetId: string,
+	renderSurfaceId: number,
+): PreparedAssetRecord {
+	return createRecord(assetId, {
+		kind: "surface-texture",
+		sourceAssetKind: "surface-texture",
+		residencyKind: "unknown",
+		provenance: createProvenance("surface-texture"),
+		surfaceTextureId: Number.parseInt(
+			assetId.slice("surface-texture/".length),
+			16,
+		),
+		textureType: 0,
+		unknown: 0,
+		selectedRenderSurfaceId: renderSurfaceId,
+		renderSurfaceIds: [renderSurfaceId],
+		dependencies: {
+			renderSurfaceAssetIds: [
+				`render-surface/${renderSurfaceId.toString(16).padStart(8, "0")}`,
+			],
+		},
 	});
 }
 
@@ -1035,6 +1352,88 @@ function createRegionRenderProfile(regionNumber: number): PreparedAssetRecord {
 	});
 }
 
+function createRegionRenderProfileWithObjectDetail(
+	regionNumber: number,
+	detail: {
+		textureAssetId: string;
+		renderSurfaceId: number;
+		tiling: number;
+	},
+): PreparedAssetRecord {
+	return createRecord(formatRegionRenderProfileAssetId(regionNumber), {
+		kind: "region-render-profile",
+		sourceAssetKind: "region-render-profile",
+		residencyKind: "unknown",
+		provenance: createProvenance("region-render-profile"),
+		regionNumber,
+		detailRoles: {
+			landscape: null,
+			building: null,
+			environment: null,
+			object: {
+				role: "object",
+				sourceTerrainDescIndex: 0,
+				textureAssetId: detail.textureAssetId,
+				textureDid: Number.parseInt(
+					detail.textureAssetId.slice("surface-texture/".length),
+					16,
+				),
+				tiling: detail.tiling,
+				fadeNear: 0,
+				fadeFar: 1,
+			},
+		},
+		dependencies: {
+			surfaceTextureAssetIds: [detail.textureAssetId],
+			renderSurfaceAssetIds: [
+				`render-surface/${detail.renderSurfaceId.toString(16).padStart(8, "0")}`,
+			],
+			paletteAssetIds: [],
+		},
+	});
+}
+
+function createRegionRenderProfileWithBuildingDetail(
+	regionNumber: number,
+	detail: {
+		textureAssetId: string;
+		renderSurfaceId: number;
+		tiling: number;
+	},
+): PreparedAssetRecord {
+	return createRecord(formatRegionRenderProfileAssetId(regionNumber), {
+		kind: "region-render-profile",
+		sourceAssetKind: "region-render-profile",
+		residencyKind: "unknown",
+		provenance: createProvenance("region-render-profile"),
+		regionNumber,
+		detailRoles: {
+			landscape: null,
+			building: {
+				role: "building",
+				sourceTerrainDescIndex: 0,
+				textureAssetId: detail.textureAssetId,
+				textureDid: Number.parseInt(
+					detail.textureAssetId.slice("surface-texture/".length),
+					16,
+				),
+				tiling: detail.tiling,
+				fadeNear: 0,
+				fadeFar: 1,
+			},
+			environment: null,
+			object: null,
+		},
+		dependencies: {
+			surfaceTextureAssetIds: [detail.textureAssetId],
+			renderSurfaceAssetIds: [
+				`render-surface/${detail.renderSurfaceId.toString(16).padStart(8, "0")}`,
+			],
+			paletteAssetIds: [],
+		},
+	});
+}
+
 function createTerrainMaterial(regionNumber: number): PreparedAssetRecord {
 	return createRecord(formatTerrainMaterialAssetId(regionNumber), {
 		kind: "terrain-material",
@@ -1070,6 +1469,22 @@ function createRenderGeometry(triangleCount: number) {
 			firstVertex: index * 3,
 		})),
 		surfaceIds: [0],
+		bounds: null,
+	};
+}
+
+function createEmptyPolygonSetRenderGeometry() {
+	return {
+		sourceId: 0,
+		vertexCount: 0,
+		triangleCount: 0,
+		positions: new Float32Array(),
+		normals: new Float32Array(),
+		uvs: new Float32Array(),
+		triangles: [],
+		surfaceIds: [],
+		invalidPolygons: [],
+		skippedPolygonCount: 0,
 		bounds: null,
 	};
 }

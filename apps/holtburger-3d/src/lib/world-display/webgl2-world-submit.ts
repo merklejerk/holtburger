@@ -1141,7 +1141,7 @@ function submitWebgl2TexturedMaterialDrawSurface({
 			detail: "missing base-color texture binding",
 		});
 	}
-	const detail = resolveMaterialTextureBinding(material, "detail");
+	const detail = resolveMaterialDetailTextureBinding(material);
 	if (stateCache.useProgram(texturedProgram.program)) {
 		metrics.programSwitchCount += 1;
 		metrics.stateChangeCount += 1;
@@ -1187,7 +1187,7 @@ function submitWebgl2TexturedMaterialDrawSurface({
 		base.wrapS === "repeat" ? 1 : 0,
 		base.wrapT === "repeat" ? 1 : 0,
 	);
-	gl.uniform1f(texturedProgram.uniforms.uDetailTiling, 1);
+	gl.uniform1f(texturedProgram.uniforms.uDetailTiling, material.detailTiling);
 	gl.uniform1i(texturedProgram.uniforms.uDetailEnabled, detail ? 1 : 0);
 	uploadTexturedDetailAtlasUniforms(gl, texturedProgram, detail);
 	metrics.uniformUploadCount += 12;
@@ -1278,7 +1278,7 @@ function submitWebgl2IndexedMaterialDrawSurface({
 			detail: `indexed format mismatch ${index.indexedFormat ?? "missing"} vs ${descriptor.indexFormat}`,
 		});
 	}
-	const detail = resolveMaterialTextureBinding(material, "detail");
+	const detail = resolveMaterialDetailTextureBinding(material);
 	const program =
 		descriptor.indexFormat === "p8" ? indexedP8Program : indexedP16Program;
 	if (stateCache.useProgram(program.program)) {
@@ -1343,7 +1343,7 @@ function submitWebgl2IndexedMaterialDrawSurface({
 	);
 	gl.uniform1i(program.uniforms.uRepeatS, descriptor.wrapS === "repeat" ? 1 : 0);
 	gl.uniform1i(program.uniforms.uRepeatT, descriptor.wrapT === "repeat" ? 1 : 0);
-	gl.uniform1f(program.uniforms.uDetailTiling, 1);
+	gl.uniform1f(program.uniforms.uDetailTiling, material.detailTiling);
 	gl.uniform1i(program.uniforms.uDetailEnabled, detail ? 1 : 0);
 	uploadIndexedDetailAtlasUniforms(gl, program, detail);
 	metrics.uniformUploadCount += 15;
@@ -1540,6 +1540,19 @@ function resolveMaterialTextureBinding(
 	return (
 		material.textureBindings.find(
 			(binding) => binding.usageBucket === usageBucket,
+		) ?? null
+	);
+}
+
+function resolveMaterialDetailTextureBinding(
+	material: Webgl2StaticBundleMaterialResource,
+): Webgl2StaticBundleMaterialTextureBinding | null {
+	if (!material.detailTextureRefKey) {
+		return null;
+	}
+	return (
+		material.textureBindings.find(
+			(binding) => binding.virtualRefKey === material.detailTextureRefKey,
 		) ?? null
 	);
 }

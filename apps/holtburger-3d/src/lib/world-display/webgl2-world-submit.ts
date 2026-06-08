@@ -65,6 +65,9 @@ export type Webgl2IndexedP8WorldProgram = Webgl2ProgramResource<
 	| "uPaletteTexture"
 	| "uTextureSize"
 	| "uPaletteColorCount"
+	| "uIndexAtlasRect"
+	| "uPaletteAtlasRect"
+	| "uPaletteAtlasSize"
 	| "uClipThreshold"
 	| "uRepeatS"
 	| "uRepeatT"
@@ -84,6 +87,9 @@ export type Webgl2IndexedP16WorldProgram = Webgl2ProgramResource<
 	| "uPaletteTexture"
 	| "uTextureSize"
 	| "uPaletteColorCount"
+	| "uIndexAtlasRect"
+	| "uPaletteAtlasRect"
+	| "uPaletteAtlasSize"
 	| "uClipThreshold"
 	| "uRepeatS"
 	| "uRepeatT"
@@ -1093,7 +1099,29 @@ function submitWebgl2IndexedStructuredInteriorMaterialSlice({
 		program.uniforms.uPaletteColorCount,
 		descriptor.paletteColorCount,
 	);
-	gl.uniform1i(program.uniforms.uClipThreshold, descriptor.clipThreshold);
+	gl.uniform4f(
+		program.uniforms.uIndexAtlasRect,
+		index.rect[0],
+		index.rect[1],
+		index.rect[2],
+		index.rect[3],
+	);
+	gl.uniform4f(
+		program.uniforms.uPaletteAtlasRect,
+		palette.rect[0],
+		palette.rect[1],
+		palette.rect[2],
+		palette.rect[3],
+	);
+	gl.uniform2f(
+		program.uniforms.uPaletteAtlasSize,
+		palette.width,
+		palette.height,
+	);
+	gl.uniform1i(
+		program.uniforms.uClipThreshold,
+		descriptor.clipThreshold,
+	);
 	gl.uniform1i(
 		program.uniforms.uRepeatS,
 		descriptor.wrapS === "repeat" ? 1 : 0,
@@ -1105,7 +1133,7 @@ function submitWebgl2IndexedStructuredInteriorMaterialSlice({
 	gl.uniform1f(program.uniforms.uDetailTiling, 1);
 	gl.uniform1i(program.uniforms.uDetailEnabled, detail ? 1 : 0);
 	uploadIndexedDetailAtlasUniforms(gl, program, detail);
-	metrics.uniformUploadCount += 13;
+	metrics.uniformUploadCount += 16;
 	gl.drawElements(gl.TRIANGLES, slice.indexCount, slice.indexType, 0);
 	recordStructuredInteriorMaterialSliceSubmitted(metrics, slice);
 }
@@ -1483,7 +1511,29 @@ function submitWebgl2IndexedStaticBundleGeometry({
 		program.uniforms.uPaletteColorCount,
 		descriptor.paletteColorCount,
 	);
-	gl.uniform1i(program.uniforms.uClipThreshold, descriptor.clipThreshold);
+	gl.uniform4f(
+		program.uniforms.uIndexAtlasRect,
+		index.rect[0],
+		index.rect[1],
+		index.rect[2],
+		index.rect[3],
+	);
+	gl.uniform4f(
+		program.uniforms.uPaletteAtlasRect,
+		palette.rect[0],
+		palette.rect[1],
+		palette.rect[2],
+		palette.rect[3],
+	);
+	gl.uniform2f(
+		program.uniforms.uPaletteAtlasSize,
+		palette.width,
+		palette.height,
+	);
+	gl.uniform1i(
+		program.uniforms.uClipThreshold,
+		descriptor.clipThreshold,
+	);
 	gl.uniform1i(
 		program.uniforms.uRepeatS,
 		descriptor.wrapS === "repeat" ? 1 : 0,
@@ -1495,7 +1545,7 @@ function submitWebgl2IndexedStaticBundleGeometry({
 	gl.uniform1f(program.uniforms.uDetailTiling, 1);
 	gl.uniform1i(program.uniforms.uDetailEnabled, detail ? 1 : 0);
 	uploadIndexedDetailAtlasUniforms(gl, program, detail);
-	metrics.uniformUploadCount += 13;
+	metrics.uniformUploadCount += 16;
 	gl.drawElements(gl.TRIANGLES, geometry.indexCount, geometry.indexType, 0);
 	const family = parseStaticMaterialFamilyKey(material.familyKey);
 	if (family) {

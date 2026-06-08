@@ -268,6 +268,9 @@ uniform sampler2D uIndexTexture;
 uniform sampler2D uPaletteTexture;
 uniform vec2 uTextureSize;
 uniform float uPaletteColorCount;
+uniform vec4 uIndexAtlasRect;
+uniform vec4 uPaletteAtlasRect;
+uniform vec2 uPaletteAtlasSize;
 uniform int uClipThreshold;
 uniform int uRepeatS;
 uniform int uRepeatT;
@@ -302,12 +305,14 @@ vec4 paletteColor(float index) {
 	if (uClipThreshold >= 0 && index < float(uClipThreshold)) {
 		return vec4(0.0);
 	}
-	float paletteU = (index + 0.5) / uPaletteColorCount;
-	return texture(uPaletteTexture, vec2(paletteU, 0.5));
+	vec2 paletteUv =
+		(uPaletteAtlasRect.xy + vec2(index + 0.5, 0.5)) / uPaletteAtlasSize;
+	return texture(uPaletteTexture, paletteUv);
 }
 
 float paletteIndexAt(ivec2 coord) {
-	vec4 packed = texelFetch(uIndexTexture, coord, 0) * 255.0;
+	ivec2 atlasCoord = ivec2(floor(uIndexAtlasRect.xy + vec2(0.5))) + coord;
+	vec4 packed = texelFetch(uIndexTexture, atlasCoord, 0) * 255.0;
 	return floor(packed.r + 0.5);
 }
 
@@ -359,6 +364,9 @@ uniform sampler2D uIndexTexture;
 uniform sampler2D uPaletteTexture;
 uniform vec2 uTextureSize;
 uniform float uPaletteColorCount;
+uniform vec4 uIndexAtlasRect;
+uniform vec4 uPaletteAtlasRect;
+uniform vec2 uPaletteAtlasSize;
 uniform int uClipThreshold;
 uniform int uRepeatS;
 uniform int uRepeatT;
@@ -393,12 +401,14 @@ vec4 paletteColor(float index) {
 	if (uClipThreshold >= 0 && index < float(uClipThreshold)) {
 		return vec4(0.0);
 	}
-	float paletteU = (index + 0.5) / uPaletteColorCount;
-	return texture(uPaletteTexture, vec2(paletteU, 0.5));
+	vec2 paletteUv =
+		(uPaletteAtlasRect.xy + vec2(index + 0.5, 0.5)) / uPaletteAtlasSize;
+	return texture(uPaletteTexture, paletteUv);
 }
 
 float paletteIndexAt(ivec2 coord) {
-	vec4 packed = texelFetch(uIndexTexture, coord, 0) * 255.0;
+	ivec2 atlasCoord = ivec2(floor(uIndexAtlasRect.xy + vec2(0.5))) + coord;
+	vec4 packed = texelFetch(uIndexTexture, atlasCoord, 0) * 255.0;
 	return floor(packed.r + 0.5) + floor(packed.g + 0.5) * 256.0;
 }
 
@@ -2821,6 +2831,9 @@ function createIndexedWorldProgram(
 			"uPaletteTexture",
 			"uTextureSize",
 			"uPaletteColorCount",
+			"uIndexAtlasRect",
+			"uPaletteAtlasRect",
+			"uPaletteAtlasSize",
 			"uClipThreshold",
 			"uRepeatS",
 			"uRepeatT",

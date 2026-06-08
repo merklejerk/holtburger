@@ -164,6 +164,10 @@ export interface Webgl2WorldResourceStore {
 		string,
 		Webgl2TerrainTexturePageResource
 	>;
+	productTerrainTexturePagesByFamilyIndex: Map<
+		string,
+		Webgl2TerrainTexturePageResource
+	>;
 	terrainTexturePageCount: number;
 	terrainDetailTexturePageCount: number;
 	textureCount: number;
@@ -214,6 +218,7 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		atlasFailureSamples: [],
 		texturePageAtlasPlan: createEmptyTexturePageAtlasPlan(),
 		productTerrainTexturePagesByKey: new Map(),
+		productTerrainTexturePagesByFamilyIndex: new Map(),
 		terrainTexturePageCount: 0,
 		terrainDetailTexturePageCount: 0,
 		textureCount: 0,
@@ -514,6 +519,7 @@ function refreshWebgl2TerrainProductDerivedState({
 	syncWebgl2TerrainTexturePageResources({
 		gl,
 		texturePagesByKey: store.productTerrainTexturePagesByKey,
+		texturePagesByFamilyIndex: store.productTerrainTexturePagesByFamilyIndex,
 		plan: productTerrainTexturePageAtlasPlan,
 		textureFilteringMode,
 		maxAnisotropy: materialTextureCapabilities.maxAnisotropy ?? 1,
@@ -523,7 +529,7 @@ function refreshWebgl2TerrainProductDerivedState({
 		store,
 		terrainTiles: productTerrainTiles,
 		plan: productTerrainTexturePageAtlasPlan,
-		texturePagesByKey: store.productTerrainTexturePagesByKey,
+		texturePagesByFamilyIndex: store.productTerrainTexturePagesByFamilyIndex,
 	});
 	refreshWebgl2TerrainTexturePageCounters(store);
 }
@@ -671,6 +677,7 @@ export function destroyWebgl2WorldResources(
 		terrainTexturePage.texture.dispose();
 	}
 	store.productTerrainTexturePagesByKey.clear();
+	store.productTerrainTexturePagesByFamilyIndex.clear();
 	store.terrainTexturePageCount = 0;
 	store.terrainDetailTexturePageCount = 0;
 	for (const texture of store.texturesByKey.values()) {
@@ -1546,13 +1553,16 @@ function resolveWebgl2TerrainTileTexturePageBindings({
 	store,
 	terrainTiles,
 	plan,
-	texturePagesByKey,
+	texturePagesByFamilyIndex,
 }: {
 	gl: WebGL2RenderingContext;
 	store: Webgl2WorldResourceStore;
 	terrainTiles: readonly Webgl2TerrainTileResource[];
 	plan: TexturePageAtlasPlan;
-	texturePagesByKey: ReadonlyMap<string, Webgl2TerrainTexturePageResource>;
+	texturePagesByFamilyIndex: ReadonlyMap<
+		string,
+		Webgl2TerrainTexturePageResource
+	>;
 }): void {
 	const placementsByEntryKey = createTexturePageAtlasPlacementsByEntryKey(
 		plan,
@@ -1574,7 +1584,7 @@ function resolveWebgl2TerrainTileTexturePageBindings({
 			}
 			const family = ref.role === "mask" ? "terrain-mask" : "terrain-color";
 			const texturePage = resolveTerrainTexturePageResource({
-				texturePagesByKey,
+				texturePagesByFamilyIndex,
 				family,
 				textureIndex: placement.textureIndex,
 			});
@@ -1597,7 +1607,7 @@ function resolveWebgl2TerrainTileTexturePageBindings({
 				detailPlacementsByEntryKey.get(tile.detailPlan.atlasEntryKey) ?? null;
 			if (placement) {
 				const texturePage = resolveTerrainTexturePageResource({
-					texturePagesByKey,
+					texturePagesByFamilyIndex,
 					family: "terrain-detail",
 					textureIndex: placement.textureIndex,
 				});
@@ -1639,21 +1649,50 @@ function resolveWebgl2TerrainTileTexturePageBindings({
 }
 
 function resolveTerrainTexturePageResource({
-	texturePagesByKey,
+	texturePagesByFamilyIndex,
 	family,
 	textureIndex,
 }: {
-	texturePagesByKey: ReadonlyMap<string, Webgl2TerrainTexturePageResource>;
+	texturePagesByFamilyIndex: ReadonlyMap<
+		string,
+		Webgl2TerrainTexturePageResource
+	>;
 	family: Webgl2TerrainTexturePageResource["family"];
 	textureIndex: number;
 }): Webgl2TerrainTexturePageResource | null {
-	return (
-		[...texturePagesByKey.values()].find(
-			(texturePage) =>
-				texturePage.family === family &&
-				texturePage.textureIndex === textureIndex,
-		) ?? null
-	);
+	return texturePagesByFamilyIndex.get(describeTerrainTexturePageFamilyIndexKey({
+		family,
+		textureIndex,
+	})) ?? null;
+}
+
+function rebuildTerrainTexturePageFamilyIndex({
+	texturePagesByKey,
+	texturePagesByFamilyIndex,
+}: {
+	texturePagesByKey: ReadonlyMap<string, Webgl2TerrainTexturePageResource>;
+	texturePagesByFamilyIndex: Map<string, Webgl2TerrainTexturePageResource>;
+}): void {
+	texturePagesByFamilyIndex.clear();
+	for (const page of texturePagesByKey.values()) {
+		texturePagesByFamilyIndex.set(
+			describeTerrainTexturePageFamilyIndexKey({
+				family: page.family,
+				textureIndex: page.textureIndex,
+			}),
+			page,
+		);
+	}
+}
+
+function describeTerrainTexturePageFamilyIndexKey({
+	family,
+	textureIndex,
+}: {
+	family: Webgl2TerrainTexturePageResource["family"];
+	textureIndex: number;
+}): string {
+	return `${family}:${textureIndex}`;
 }
 
 function createWebgl2TerrainTilePageOverflowDrawSlices({
@@ -1937,12 +1976,14 @@ function createTransitionPortalMaskGeometrySignature(
 function syncWebgl2TerrainTexturePageResources({
 	gl,
 	texturePagesByKey,
+	texturePagesByFamilyIndex,
 	plan,
 	textureFilteringMode,
 	maxAnisotropy,
 }: {
 	gl: WebGL2RenderingContext;
 	texturePagesByKey: Map<string, Webgl2TerrainTexturePageResource>;
+	texturePagesByFamilyIndex: Map<string, Webgl2TerrainTexturePageResource>;
 	plan: TexturePageAtlasPlan;
 	textureFilteringMode: TextureFilteringMode;
 	maxAnisotropy: number;
@@ -1954,6 +1995,7 @@ function syncWebgl2TerrainTexturePageResources({
 	});
 	if (!terrainPlan) {
 		clearWebgl2TerrainTexturePageResources(texturePagesByKey);
+		texturePagesByFamilyIndex.clear();
 		return;
 	}
 	const retainedKeys = new Set<string>();
@@ -1965,23 +2007,15 @@ function syncWebgl2TerrainTexturePageResources({
 		if (texturePagesByKey.has(cpuTexture.key)) {
 			continue;
 		}
-		const texturePage = createWebgl2TexturePageTextureResourceFromCpu({
-			gl,
-			cpuTexture,
-			textureFilteringMode,
-			maxAnisotropy,
-		});
-		texturePagesByKey.set(cpuTexture.key, {
-			key: texturePage.key,
-			family: texturePage.family as Webgl2TerrainTexturePageResource["family"],
-			textureIndex: texturePage.textureIndex,
-			texture: texturePage.texture,
-			width: texturePage.width,
-			height: texturePage.height,
-			placementCount: texturePage.placementCount,
-			pixelStats: texturePage.pixelStats,
-			entryDiagnostics: texturePage.entryDiagnostics,
-		});
+		const texturePage = createWebgl2TerrainTexturePageResource(
+			createWebgl2TexturePageTextureResourceFromCpu({
+				gl,
+				cpuTexture,
+				textureFilteringMode,
+				maxAnisotropy,
+			}),
+		);
+		texturePagesByKey.set(cpuTexture.key, texturePage);
 	}
 	for (const [key, texturePage] of texturePagesByKey) {
 		if (!retainedKeys.has(key)) {
@@ -1989,6 +2023,41 @@ function syncWebgl2TerrainTexturePageResources({
 			texturePagesByKey.delete(key);
 		}
 	}
+	rebuildTerrainTexturePageFamilyIndex({
+		texturePagesByKey,
+		texturePagesByFamilyIndex,
+	});
+}
+
+function createWebgl2TerrainTexturePageResource(
+	texturePage: ReturnType<typeof createWebgl2TexturePageTextureResourceFromCpu>,
+): Webgl2TerrainTexturePageResource {
+	if (!isTerrainTexturePageFamily(texturePage.family)) {
+		throw new Error(
+			`Terrain texture page ${texturePage.key} has non-terrain family ${texturePage.family}.`,
+		);
+	}
+	if (!texturePage.pixelStats || !texturePage.entryDiagnostics) {
+		throw new Error(
+			`Terrain texture page ${texturePage.key} is missing required texture-page diagnostics.`,
+		);
+	}
+	return {
+		...texturePage,
+		family: texturePage.family,
+		pixelStats: texturePage.pixelStats,
+		entryDiagnostics: texturePage.entryDiagnostics,
+	};
+}
+
+function isTerrainTexturePageFamily(
+	family: string,
+): family is Webgl2TerrainTexturePageResource["family"] {
+	return (
+		family === "terrain-color" ||
+		family === "terrain-mask" ||
+		family === "terrain-detail"
+	);
 }
 
 function createTerrainTexturePageGenerationPlan({

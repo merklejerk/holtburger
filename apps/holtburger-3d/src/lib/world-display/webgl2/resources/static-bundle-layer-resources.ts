@@ -32,6 +32,10 @@ import {
 	parseStaticMaterialFamilyKey,
 	type StaticMaterialFamilyDescriptor,
 } from "../../static-material-artifacts";
+import type {
+	Webgl2ResidentTexturePageEntryResource,
+	Webgl2ResidentTexturePageResource,
+} from "./texture-page-upload";
 
 export interface Webgl2StaticBundleLayerResourceStore {
 	productsByKey: Map<string, Webgl2StaticBundleProductResource>;
@@ -64,22 +68,18 @@ export interface Webgl2StaticBundleLayerResource {
 	dispose(): void;
 }
 
-export interface Webgl2StaticBundleTexturePageResource {
-	key: string;
+export interface Webgl2StaticBundleTexturePageResource
+	extends Webgl2ResidentTexturePageResource {
 	usageBucket: VirtualTexturePageUsageBucket;
 	sampleClass: VirtualTexturePageSampleClass;
 	pageKind: StaticBundleTexturePage["pageKind"];
 	indexedFormat: StaticBundleTexturePage["indexedFormat"];
-	samplerPolicyKey: string;
-	mipmapsGenerated: boolean;
-	texture: Webgl2Texture2DResource;
 	entries: readonly Webgl2StaticBundleTexturePageEntryResource[];
 }
 
-interface Webgl2StaticBundleTexturePageEntryResource {
-	virtualRefKey: string;
+interface Webgl2StaticBundleTexturePageEntryResource
+	extends Webgl2ResidentTexturePageEntryResource {
 	sourceAssetId: string;
-	rect: readonly [number, number, number, number];
 }
 
 export interface Webgl2StaticBundleMaterialResource {
@@ -337,6 +337,8 @@ export function createWebgl2StaticBundleTexturePageResource({
 	});
 	return {
 		key: page.key,
+		family: page.usageBucket,
+		textureIndex: 0,
 		usageBucket: page.usageBucket,
 		sampleClass: page.sampleClass,
 		pageKind: page.pageKind,
@@ -352,6 +354,9 @@ export function createWebgl2StaticBundleTexturePageResource({
 			upload,
 			sampler,
 		}),
+		width: page.width,
+		height: page.height,
+		placementCount: page.entries.length,
 		entries: page.entries.map((entry) => ({
 			virtualRefKey: entry.virtualRefKey,
 			sourceAssetId: entry.sourceAssetId,

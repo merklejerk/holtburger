@@ -23,6 +23,11 @@ describe("static bundle layer WebGL2 resources", () => {
 		const resource = [...store.layersByKey.values()][0];
 		expect(resource?.key).toBe("static-layer:revision-a");
 		expect(resource?.texturePages).toHaveLength(2);
+		expect(resource?.materialRecords[0]?.family).toMatchObject({
+			kind: "texture-page",
+			sourceFamily: "rgba-texture-page",
+			alphaPolicy: null,
+		});
 		expect(
 			resource?.materialRecords[0]?.textureBindings.map((binding) => [
 				binding.virtualRefKey,
@@ -52,7 +57,7 @@ describe("static bundle layer WebGL2 resources", () => {
 		expect(gl.bufferUploads.map((upload) => upload.byteLength)).toEqual([
 			36, 36, 24, 6, 36, 36, 24, 12,
 		]);
-		expect(gl.enabledAttributes).toEqual([0, 1, 0, 1]);
+		expect(gl.enabledAttributes).toEqual([0, 1, 2, 0, 1, 2]);
 	});
 
 	it("reuses resident resources until the layer revision changes", () => {

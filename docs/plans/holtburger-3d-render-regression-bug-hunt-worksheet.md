@@ -564,6 +564,179 @@ After the renderer is healthy:
 - Keep only durable tests that prove the corrected behavior.
 - Update this worksheet with the final root cause and deleted diagnostics.
 
+## Phase 7: Typed Material Families And Shared Submit
+
+Status: implemented, with follow-up cleanup noted.
+
+The static-bundle and structured-interior regressions exposed a deeper renderer design problem: serialized material family strings leak into WebGL submit code, and each renderable category owns bespoke material-family routing. Static bundle submit had been updated to parse typed `static:<family>:alpha=<policy>` keys, while structured interior submit still checked legacy raw strings (`rgba-texture-page`, `indexed-paletted`). TypeScript did not catch the drift because material records expose `familyKey: string`.
+
+Goals:
+
+- Replace renderer-internal `familyKey: string` routing with a typed static material family descriptor or discriminated union.
+- Keep serialized family strings only at artifact/worker transfer boundaries, and parse them immediately when constructing renderer resources.
+- Remove direct raw-string family comparisons from submit paths.
+- Collapse flat/textured/indexed material draw logic into shared WebGL material submit helpers.
+- Keep category-specific code responsible only for geometry/resource adaptation, placement, metrics ownership, and diagnostics.
+
+Proposed work:
+
+- Keep `StaticBundleMaterialRecord.familyKey` as the serialized artifact/worker-transfer value and diagnostic display value. Do not start by changing the DTO shape.
+- Introduce parsed renderer resource data on `Webgl2StaticBundleMaterialResource`, e.g. `family: StaticMaterialFamilyDescriptor`, while retaining `familyKey` for diagnostics.
+- Update `createWebgl2StaticBundleMaterialResource()` to parse once. Fail hard for unparseable family strings, but allow parsed `kind: "unsupported"` descriptors to exist so submit can skip them with typed diagnostics.
+- Replace all submit-time `parseStaticMaterialFamilyKey(material.familyKey)` calls with `material.family`.
+- After Phase 8 settles the material geometry attribute layout, build a common material draw adapter for flat, texture-page, and indexed-paletted shader submission. Inputs should be category-neutral: VAO, index count/type, triangle count, material resource, model matrix, and callbacks/labels for metrics and skip diagnostics.
+- Route both static bundle geometry and structured interior material slices through the shared adapter. Keep static/structured domain resources separate; adapt each resource into a shared `Webgl2MaterialDrawSurface` shape for submission.
+- Delete category-specific helpers that only duplicate material routing, including current structured/static flat/textured/indexed submit variants if they become simple wrappers.
+- Add focused tests proving typed family routing works for both static bundle geometry and structured interior slices with `static:textured-opaque:alpha=opaque`, `static:indexed-paletted:alpha=opaque`, and flat-color families.
+- Remove or quarantine legacy family literal support (`rgba-texture-page`, `indexed-paletted`) once all current artifact builders and tests produce typed family descriptors. If legacy support must remain for fixture compatibility, confine it to one parser with explicit tests and no direct call-site string comparisons.
+
+Acceptance criteria:
+
+- No WebGL submit path compares material family raw strings directly.
+- `Webgl2StaticBundleMaterialResource` no longer exposes an unparsed `familyKey: string` as the primary routing value; any retained `familyKey` is diagnostic/source text only.
+- Static bundle and structured interior material submission share the same flat/textured/indexed routing implementation.
+- Existing picker/debug reports can still display the serialized family key for diagnostics, but renderer behavior is driven by typed data.
+- `npm run check`, `npm run lint:ts`, and focused world-display/worker tests pass.
+
+Implementation notes:
+
+- Added `family: StaticMaterialFamilyDescriptor` to `Webgl2StaticBundleMaterialResource` and parse serialized `familyKey` once in `createWebgl2StaticBundleMaterialResource()`. Unparseable family keys now fail at resource construction; parsed `kind: "unsupported"` descriptors remain available for typed skip diagnostics.
+- Replaced WebGL submit-time `parseStaticMaterialFamilyKey(material.familyKey)` calls with `material.family`.
+- Added a shared `submitWebgl2StaticMaterialByFamily()` router used by both static bundle geometry and structured interior material slices. Static/structured submit still own their geometry adapters, metrics, skip messages, and uniform upload bodies.
+- Retained serialized `familyKey` only for diagnostics and picker/report text.
+- Follow-up cleanup: collapse the duplicated flat/textured/indexed uniform upload bodies into category-neutral draw helpers once we are ready to touch submit metrics more aggressively. The regression-causing drift point, raw string family routing, is removed.
+
+## Phase 8: Geometry Attribute Preservation Audit
+
+Status: implemented.
+
+The structured-interior investigation exposed another mismatch: source/prepared polygon-set geometry carries normals, but structured material slices currently preserve only positions, UVs, and indices. Static bundle geometry preserves normals and uploads a normal buffer, but the current static material VAO/shaders do not bind/use that buffer. The renderer should make an explicit decision instead of accidentally dropping attributes in one path and carrying unused buffers in another.
+
+Goals:
+
+- Audit every geometry path that consumes `PreparedPolygonSetRenderGeometry` or `RenderIndexedGeometry` and record which attributes are preserved, uploaded, and bound.
+- Preserve normals for structured interior material slices when source/prepared geometry provides them.
+- Use consistent vertex attribute layout conventions across static bundle and structured interior material VAOs.
+- Avoid pretending generated/debug geometry has source normals when it does not.
+- Decide whether unused normal buffers should be bound now for future lighting parity, retained but unbound with clear documentation, or omitted until a shader consumes them.
+
+Initial findings to confirm:
+
+- DAT `SWVertex` records include `normal: Vector3`, and `PreparedPolygonSetRenderGeometry` includes render-space `normals`.
+- Static bundle build carries normals through `buildPolygonSetRenderGeometry()`, transforms them, stores them on bundle geometry, and uploads a `normalBuffer`.
+- Static bundle VAOs currently bind positions at attribute 0 and UVs at attribute 1; normals are uploaded but not bound.
+- Structured interior material slices currently drop `geometry.normals` when creating `DetailedStructuredInteriorMaterialSlice`.
+- Terrain helper geometry and transition portal mask geometry use generated `RenderIndexedGeometry` with `normals: null`; those should remain separate unless a real normal source exists.
+
+Proposed work:
+
+- Add `normals` to `DetailedStructuredInteriorMaterialSlice` and `Webgl2StructuredInteriorMaterialSliceResource`.
+- Update `buildStructuredInteriorMaterialSlices()` to copy `geometry.normals`.
+- Upload a structured slice normal buffer when normals are present.
+- Establish a shared material-geometry VAO attribute convention, likely:
+  - attribute 0: position
+  - attribute 1: UV
+  - attribute 2: normal
+- Bind source-backed normal buffers now at attribute 2 for static bundle and structured material VAOs, even though current shaders ignore the attribute. WebGL2 allows VAOs to provide attributes that the active shader does not consume; the renderer should verify our wrappers tolerate this.
+- Preserve/upload normal buffers for source-backed polygon-set geometry now, so future lighting shaders can consume attribute 2 without another resource layout migration.
+- Use the final attribute convention as an input to Phase 7's shared material draw adapter so the adapter does not bake in an incomplete geometry contract.
+- Add tests that structured interior slices preserve normals and that static/structured resource creation does not silently drop provided normal arrays.
+
+Acceptance criteria:
+
+- Every geometry resource path documents whether normals are source-backed, generated, omitted, uploaded, and/or bound.
+- Structured interior material slices no longer drop source normals.
+- Static bundle and structured interior material VAOs use consistent attribute locations for source-backed material geometry: position at 0, UV at 1, normal at 2.
+- No new shader compile/link warnings or missing-attribute failures.
+- `npm run check`, `npm run lint:ts`, and focused worker/resource tests pass.
+
+Implementation notes:
+
+- Added `normals` to `DetailedStructuredInteriorMaterialSlice` and copied `geometry.normals` from `buildStructuredInteriorMaterialSlices()`.
+- Added `normalBuffer` to `Webgl2StructuredInteriorMaterialSliceResource`; structured material VAOs now bind position at attribute 0, UV at attribute 1, and normal at attribute 2.
+- Static bundle material VAOs now bind the already-uploaded `normalBuffer` at attribute 2, matching structured material geometry.
+- Terrain/debug/fallback geometry remains separate; no generated normals were invented for paths that do not have source-backed normals.
+- Added focused tests for parsed material family resources, static normal attribute binding, structured slice normal preservation, and structured normal buffer transferability.
+
+## Phase 9: Isomorphic Material Draw Submit
+
+Status: implemented.
+
+This phase closes the Phase 7 follow-up. Phase 7 removed the regression-causing raw string family routing drift, but static bundle geometry and structured interior material slices still have separate flat/textured/indexed draw bodies. That remaining duplication is mostly preserved by domain-specific metrics and skip diagnostics, not by fundamentally different material draw requirements.
+
+Goals:
+
+- Collapse static bundle and structured interior material draw submission into shared flat, texture-page, and indexed-paletted helpers.
+- Treat static/structured differences as adapters around a shared `Webgl2MaterialDrawSurface`, not separate renderer families.
+- Keep useful domain-specific selection/build diagnostics, but stop letting draw-time counter prefixes dictate submit architecture.
+- Drop low-signal duplicate draw counters where a unified counter or domain-keyed map is clearer.
+- Preserve high-signal skip diagnostics by passing domain labels/context callbacks into the shared submit helpers.
+
+Proposed work:
+
+- Define a category-neutral material draw surface shape with VAO, index type/count, triangle count, material resource, model matrix, color policy, depth/cull policy, and a diagnostic label.
+- Move common flat, texture-page, and indexed-paletted WebGL uniform/texture/state upload logic behind shared helpers.
+- Adapt static bundle geometry and structured interior material slices into the shared surface shape at their domain boundaries.
+- Replace duplicate submitted/skipped bookkeeping with shared draw-submit recording:
+  - Keep global `drawCallCount`, `triangleCount`, `programSwitchCount`, `stateChangeCount`, `uniformUploadCount`, and `vertexArrayBindCount`.
+  - Replace duplicate static/structured material draw counters with either a domain-keyed map or a small `materialDrawsByDomain`/`materialTrianglesByDomain` structure if the debug UI still needs the split.
+  - Keep static bundle layer selection/build counters because they diagnose bundle construction and visibility selection, not material draw submission.
+  - Keep structured shell fallback counters separate from material-slice draws because fallback shell rendering is not the same renderer path.
+- Preserve alpha-policy submitted counts if still useful, but make them material-domain generic rather than `staticBundleSubmitted*GeometryCount`.
+- Preserve skip reason/family/binding diagnostics where useful, but drive them from the shared material submit result plus domain-provided context strings.
+- Delete static/structured flat/textured/indexed helpers once they are simple wrappers around the shared submit helpers.
+
+Acceptance criteria:
+
+- There is one implementation each for flat material draw, texture-page material draw, and indexed-paletted material draw.
+- Static bundle geometry and structured interior material slices both submit through those shared implementations.
+- Metrics do not require separate draw implementations. Any retained domain split is expressed as data, not duplicated code.
+- Low-signal duplicate counters are removed or unified; high-signal diagnostics still explain skipped material surfaces with domain context.
+- `npm run check`, `npm run lint:ts`, and focused world-display submit/resource tests pass.
+
+Dry-run notes:
+
+- The shared `submitWebgl2StaticMaterialByFamily()` router already proves the material family decision can be common. The remaining duplication is in the flat/textured/indexed draw bodies, not in routing.
+- A shared surface adapter is enough for both domains:
+  - static bundle geometry can adapt `geometry.vertexArray`, `geometry.indexCount`, `geometry.indexType`, `geometry.triangleCount`, `modelMatrix`, and static diagnostic labels.
+  - structured material slices can adapt `slice.vertexArray`, `slice.indexCount`, `slice.indexType`, `slice.triangleCount`, `modelMatrix`, and cell/slice diagnostic labels.
+- The actual draw-body differences are policy inputs, not separate implementations:
+  - static material draws currently set cull state disabled; structured material-slice draws currently do not set cull state explicitly. Phase 9 should choose an explicit cull policy per surface/domain and pass it into the shared helper.
+  - static textured/indexed draws upload `material.color`; structured textured/indexed draws upload `[1, 1, 1, 1]`. Phase 9 should make this a `colorMultiplier` or `materialColorPolicy` input instead of baking it into separate submit functions.
+  - static draw helpers return `boolean` for submitted/skipped; structured helpers return `void`. The shared helper should return a typed result such as `{ status: "submitted" } | { status: "skipped"; reasonCode; detail }`, and domain callers can record context.
+  - static skip paths record reason/family/alpha/binding counts; structured skip paths currently only increment a count and append a sample. The shared helper can produce one skip result, while domain-specific metric adapters decide which counters are worth retaining.
+- Metrics blast radius is real but manageable:
+  - `Webgl2WorldSubmitMetrics`, `renderer-contract.ts`, `webgl2-render-metrics.ts`, `webgl2-world-display-renderer-impl.ts`, and `BrowserWorldDisplay.svelte` currently expose static-specific material draw counters directly.
+  - Keep static bundle layer/build/selection counters (`staticBundleSelected*`, builder skipped counts, candidate layer/geometry counts) because those diagnose bundle construction and visibility, not material draw submission.
+  - Replace draw-submit counters like `staticBundleDrawCallCount`, `staticBundleTriangleCount`, `structuredInteriorResourceDrawCallCount`, and `structuredInteriorResourceTriangleCount` with domain-keyed material draw counters if the UI still needs the split.
+  - Replace `staticBundleSubmittedOpaque/Cutout/TransparentGeometryCount` with material-domain generic alpha policy submitted counts if still useful.
+  - Either generalize `staticBundleSkippedGeometry*` to material-surface skip diagnostics by domain, or drop the low-signal parts and keep bounded samples with reason/material/family/bindings/surface context.
+- Recommended execution order:
+  1. Introduce `Webgl2MaterialDrawSurface`, `Webgl2MaterialDrawPolicies`, and `Webgl2MaterialDrawDiagnostics` types inside `webgl2-world-submit.ts`.
+  2. Extract shared flat draw helper and route static + structured flat through it.
+  3. Extract shared texture-page draw helper, including atlas/detail uniforms and alpha-test handling.
+  4. Extract shared indexed-paletted draw helper, including P8/P16 program selection and atlas/detail uniforms.
+  5. Replace submitted/skipped metric mutation in draw helpers with typed draw results.
+  6. Update metric aggregation/debug DTO/UI fields in one decisive pass; do not retain compatibility aliases unless a test proves a real consumer needs them.
+  7. Delete old static/structured draw helpers once they become wrappers.
+
+Implementation notes:
+
+- Added a shared `Webgl2MaterialDrawSurface` adapter shape and typed `Webgl2MaterialDrawResult` in `webgl2-world-submit.ts`.
+- Static bundle geometry and structured interior material slices now adapt into the same material draw surface contract. The only remaining domain-specific submit functions are adapters that provide surface geometry, model matrix, color policy, cull/depth policy, and diagnostic context.
+- Replaced duplicate static/structured flat, texture-page, and indexed-paletted submit bodies with one shared implementation for each material family.
+- Made cull state explicit for both static and structured material surfaces. Static already disabled culling; structured material slices now also submit with explicit cull-disabled policy instead of inheriting prior device state.
+- Preserved the structured textured/indexed white color behavior as a surface color policy (`white-for-textured-and-indexed`) rather than a separate submit path.
+- Replaced static/structured draw-submit counters with generic `materialSurface*` metrics:
+  - submitted/skipped counts by domain
+  - draw calls and triangles by domain
+  - submitted alpha-policy counts
+  - skipped reason/family/alpha/binding counts
+  - bounded material-surface fallback samples with domain-specific context
+- Kept static bundle layer/build/selection diagnostics separate because those diagnose bundle visibility and construction, not material draw submission.
+- Kept structured shell counters separate from material-surface submission because fallback shell rendering is not a material-slice draw path.
+- Updated renderer debug DTO aggregation and browser debug text to report generic material-surface diagnostics instead of static-only draw-submit fields.
+
 ## Findings
 
 - Phase 1 diagnostics are installed and verified.
@@ -598,4 +771,8 @@ After the renderer is healthy:
 - Temporary static material family debug-color probes separated family shader/sampling failures from geometry, visibility, winding, and depth failures. The indexed-paletted debug-color run made the missing building sections visible as cyan, proving the remaining sampled holes were inside the indexed material shader/binding path.
 - Temporary indexed shader probes then rejected clip-threshold discard and confirmed indexed geometry, UVs, index texture upload, and index sampling were alive: disabling indexed clip did not restore the missing panels, while raw-index false-color output rendered them.
 - Root cause candidate for invisible indexed panels: the indexed shader treated both indexed texels and palette lookup as whole-texture resources, but static bundle texture pages can pack `indexed-texels` and especially 1-row `palette-lookup` entries into atlases. Sampling the middle of the palette atlas can hit transparent padding. Indexed submit now uploads index/palette atlas rects, and the indexed P8/P16 shaders sample through those rects.
+- New structured-cell symptom: picked env-cell `0xda550177` rendered as the flat light-blue structured fallback color. The old worksheet already called out flat/untextured env-cell structure as a structured-interior material/slice/upload failure mode. Added picker metadata coverage for structured cells so each click reports product, landblock, env/cell-structure ids, source surfaces, render/slice triangle counts, fallback-shell expectation, material record/family counts, texture-page counts, missing material slices, and per-slice material/family triangle counts.
+- Root cause found for flat blue structured env-cell shells: the picker report for `0xda5501e9` showed `renderTriangleCount: 4`, `sourceSurfaceCount: 5`, but `materialSliceCount: 0` and `fallbackShellExpected: true`. Rust prep exports polygon side surfaces as DAT surface slot ids (`pos_surface`/`neg_surface`), while env-cell payload `surfaces` entries carry both `slotId` and material DID `surfaceId`. The structured-interior worker incorrectly keyed surfaces by material DID, so real geometry surface ids never matched and no material slices were emitted. The worker now resolves slices by `slotId`; the regression test fixture now keeps slot id and material DID distinct.
+- Related structured-interior submit fix: material-slice VAOs bound UVs at attribute location 2 while the shared textured/indexed world shaders read UVs from location 1. Static bundles had the same class of UV attribute regression earlier. Structured material-slice VAOs now bind UVs at attribute 1.
+- Root cause found for the next invisible structured-cell stage: after the slot-id fix, picker coverage for `0xda5501e9` showed `materialSliceCount: 1`, `materialSliceTriangleCount: 2`, and family `static:textured-opaque:alpha=opaque`, but the structured-interior submit path still accepted only legacy family literals (`rgba-texture-page`, `indexed-paletted`). Structured material slices now use the same typed static material family parser/routing as static bundles, including texture-page, indexed-paletted, and flat-color families with the shared alpha-test policy.
 - Remaining suspected issues: static bundle payloads are too large, static bundle asset closure is too broad, and `setAssetState` still triggers costly static product recommits.

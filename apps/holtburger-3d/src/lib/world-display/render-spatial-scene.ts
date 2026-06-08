@@ -116,10 +116,16 @@ export function deriveStructuredInteriorSpatialItemsFromLandblockArtifacts(
 		detailedArtifacts.flatMap((artifact) => artifact.selectedEnvCellIds),
 	);
 	return detailedArtifacts
-		.flatMap((artifact) => artifact.structuredInteriorCells)
-		.filter((cell) => selectedEnvCellIds.has(cell.envCellId))
-		.map((cell) =>
-			deriveDetailedStructuredInteriorSpatialItem(cell, selectedEnvCellIds),
+		.flatMap((artifact) =>
+			artifact.structuredInteriorCells
+				.filter((cell) => selectedEnvCellIds.has(cell.envCellId))
+				.map((cell) =>
+					deriveDetailedStructuredInteriorSpatialItem(
+						artifact,
+						cell,
+						selectedEnvCellIds,
+					),
+				),
 		)
 		.sort((left, right) => left.id.localeCompare(right.id));
 }
@@ -237,6 +243,7 @@ function deriveStructuredInteriorSpatialItem(
 }
 
 function deriveDetailedStructuredInteriorSpatialItem(
+	artifact: DetailedLandblockRenderArtifacts,
 	cell: DetailedLandblockRenderArtifacts["structuredInteriorCells"][number],
 	selectedEnvCellIds: ReadonlySet<number>,
 ): RenderSpatialItem {
@@ -267,6 +274,7 @@ function deriveDetailedStructuredInteriorSpatialItem(
 			envCellId: cell.envCellId,
 			renderKey,
 			isFocus: selectedEnvCellIds.has(cell.envCellId),
+			artifactCoverage: deriveStructuredInteriorCellCoverage(artifact, cell),
 		},
 	};
 }
@@ -278,8 +286,71 @@ function deriveDetailedStructuredInteriorSpatialItems(
 	return artifact.structuredInteriorCells
 		.filter((cell) => selectedEnvCellIds.has(cell.envCellId))
 		.map((cell) =>
-			deriveDetailedStructuredInteriorSpatialItem(cell, selectedEnvCellIds),
+			deriveDetailedStructuredInteriorSpatialItem(
+				artifact,
+				cell,
+				selectedEnvCellIds,
+			),
 		);
+}
+
+function deriveStructuredInteriorCellCoverage(
+	artifact: DetailedLandblockRenderArtifacts,
+	cell: DetailedLandblockRenderArtifacts["structuredInteriorCells"][number],
+): NonNullable<
+	Extract<RenderSpatialItem["metadata"], { kind: "structured-cell" }>["artifactCoverage"]
+> {
+	const materialRecordsByKey = new Map(
+		artifact.structuredInteriorMaterialRecords.map((record) => [
+			record.key,
+			record,
+		]),
+	);
+	const materialTriangleCounts = cell.materialSlices.map((slice) => ({
+		materialRecordKey: slice.materialRecordKey,
+		familyKey:
+			materialRecordsByKey.get(slice.materialRecordKey)?.familyKey ?? null,
+		surfaceId: slice.surfaceId,
+		geometrySurfaceId: slice.geometrySurfaceId,
+		materialVariantSignature: slice.materialVariantSignature,
+		triangleCount: slice.triangleCount,
+	}));
+	return {
+		product: artifact.product,
+		landblockId: artifact.landblockId,
+		environmentId: cell.environmentId,
+		cellStructureId: cell.cellStructureId,
+		staticObjectCount: cell.staticObjectCount,
+		portalCount: cell.portals.length,
+		portalApertureCount: cell.portalApertureKeys.length,
+		sourceSurfaceCount: cell.surfaceIds.length,
+		sourceSurfaceIds: cell.surfaceIds,
+		renderVertexCount: cell.renderGeometry.vertexCount,
+		renderTriangleCount: cell.renderGeometry.triangleCount,
+		skippedPolygonCount: cell.renderGeometry.skippedPolygonCount ?? 0,
+		invalidPolygonCount: cell.renderGeometry.invalidPolygons?.length ?? 0,
+		materialSliceCount: cell.materialSlices.length,
+		materialSliceTriangleCount: cell.materialSlices.reduce(
+			(total, slice) => total + slice.triangleCount,
+			0,
+		),
+		fallbackShellExpected: cell.materialSlices.length === 0,
+		materialRecordCount: artifact.structuredInteriorMaterialRecords.length,
+		texturePageRefCount: artifact.structuredInteriorTexturePageRefs.length,
+		texturePageCount: artifact.structuredInteriorTexturePages.length,
+		missingMaterialSliceCount: materialTriangleCounts.filter(
+			(entry) => entry.familyKey === null,
+		).length,
+		materialRecordKeys: artifact.structuredInteriorMaterialRecords.map(
+			(record) => record.key,
+		),
+		materialFamilyKeys: uniqueSortedStrings(
+			artifact.structuredInteriorMaterialRecords.map(
+				(record) => record.familyKey,
+			),
+		),
+		materialTriangleCounts,
+	};
 }
 
 function deriveDetailedPortalSpatialItems(

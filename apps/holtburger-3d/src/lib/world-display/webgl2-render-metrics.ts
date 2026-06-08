@@ -190,7 +190,9 @@ export function createWebgl2RenderMetrics(
 			terrainBvhCandidateBatchCount:
 				input.frameMetrics?.candidateCountsByCategory.terrain ?? 0,
 			structuredInteriorRenderBatchCount:
-				input.submitMetrics.structuredInteriorResourceSubmittedCount,
+				input.submitMetrics.materialSurfaceSubmittedCountsByDomain[
+					"structured-interior"
+				] + input.submitMetrics.structuredInteriorShellSubmittedCount,
 			structuredInteriorBvhCandidateBatchCount:
 				input.frameMetrics?.candidateCountsByCategory["structured-interior"] ??
 				0,
@@ -230,7 +232,9 @@ export function createWebgl2RenderMetrics(
 			structuredInteriorMeshCount:
 				input.worldStore?.structuredInteriorResourceCount ?? 0,
 			visibleStructuredInteriorMeshCount:
-				input.submitMetrics.structuredInteriorResourceSubmittedCount,
+				input.submitMetrics.materialSurfaceSubmittedCountsByDomain[
+					"structured-interior"
+				] + input.submitMetrics.structuredInteriorShellSubmittedCount,
 			terrainBvhVisibleItemCount:
 				input.frameMetrics?.visibleDrawCountsByCategory.terrain ?? 0,
 			terrainBvhTotalItemCount:
@@ -316,15 +320,6 @@ export function createWebgl2RenderMetrics(
 			],
 			staticBundleGeometryCandidateCount:
 				input.submitMetrics.staticBundleGeometryCandidateCount,
-			staticBundleGeometrySubmittedCount:
-				input.submitMetrics.staticBundleGeometrySubmittedCount,
-			staticBundleDrawCallCount: input.submitMetrics.staticBundleDrawCallCount,
-			staticBundleTriangleCount: input.submitMetrics.staticBundleTriangleCount,
-			staticBundleSkippedGeometryCount:
-				input.submitMetrics.staticBundleSkippedGeometryCount,
-			staticBundleSubmitFallbackSamples: [
-				...input.submitMetrics.staticBundleSubmitFallbackSamples,
-			],
 			staticBundleMaterialRecordCount:
 				input.submitMetrics.staticBundleMaterialRecordCount,
 			staticBundleMaterialFamilyCounts: {
@@ -340,24 +335,39 @@ export function createWebgl2RenderMetrics(
 				input.submitMetrics.staticBundleMaterialBaseColorBindingCount,
 			staticBundleMaterialIndexedBindingCount:
 				input.submitMetrics.staticBundleMaterialIndexedBindingCount,
-			staticBundleSubmittedOpaqueGeometryCount:
-				input.submitMetrics.staticBundleSubmittedOpaqueGeometryCount,
-			staticBundleSubmittedCutoutGeometryCount:
-				input.submitMetrics.staticBundleSubmittedCutoutGeometryCount,
-			staticBundleSubmittedTransparentGeometryCount:
-				input.submitMetrics.staticBundleSubmittedTransparentGeometryCount,
-			staticBundleSkippedGeometryReasonCounts: {
-				...input.submitMetrics.staticBundleSkippedGeometryReasonCounts,
+			materialSurfaceSubmittedCount:
+				input.submitMetrics.materialSurfaceSubmittedCount,
+			materialSurfaceSubmittedCountsByDomain: {
+				...input.submitMetrics.materialSurfaceSubmittedCountsByDomain,
 			},
-			staticBundleSkippedGeometryFamilyCounts: {
-				...input.submitMetrics.staticBundleSkippedGeometryFamilyCounts,
+			materialSurfaceDrawCallCountsByDomain: {
+				...input.submitMetrics.materialSurfaceDrawCallCountsByDomain,
 			},
-			staticBundleSkippedGeometryAlphaPolicyCounts: {
-				...input.submitMetrics.staticBundleSkippedGeometryAlphaPolicyCounts,
+			materialSurfaceTriangleCountsByDomain: {
+				...input.submitMetrics.materialSurfaceTriangleCountsByDomain,
 			},
-			staticBundleSkippedGeometryBindingUsageCounts: {
-				...input.submitMetrics.staticBundleSkippedGeometryBindingUsageCounts,
+			materialSurfaceSkippedCount: input.submitMetrics.materialSurfaceSkippedCount,
+			materialSurfaceSkippedCountsByDomain: {
+				...input.submitMetrics.materialSurfaceSkippedCountsByDomain,
 			},
+			materialSurfaceSubmittedAlphaPolicyCounts: {
+				...input.submitMetrics.materialSurfaceSubmittedAlphaPolicyCounts,
+			},
+			materialSurfaceSkippedReasonCounts: {
+				...input.submitMetrics.materialSurfaceSkippedReasonCounts,
+			},
+			materialSurfaceSkippedFamilyCounts: {
+				...input.submitMetrics.materialSurfaceSkippedFamilyCounts,
+			},
+			materialSurfaceSkippedAlphaPolicyCounts: {
+				...input.submitMetrics.materialSurfaceSkippedAlphaPolicyCounts,
+			},
+			materialSurfaceSkippedBindingUsageCounts: {
+				...input.submitMetrics.materialSurfaceSkippedBindingUsageCounts,
+			},
+			materialSurfaceSubmitFallbackSamples: [
+				...input.submitMetrics.materialSurfaceSubmitFallbackSamples,
+			],
 			textureVelocityPartCount: 0,
 			textureVelocityRenderGroupCount: 0,
 			textureVelocityMaterialCount: 0,

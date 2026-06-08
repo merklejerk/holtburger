@@ -28,6 +28,10 @@ import {
 	type Webgl2VertexArrayResource,
 } from "../../webgl2-gl";
 import type { TextureFilteringMode } from "../../texture-pages/texture-sampling-policy";
+import {
+	parseStaticMaterialFamilyKey,
+	type StaticMaterialFamilyDescriptor,
+} from "../../static-material-artifacts";
 
 export interface Webgl2StaticBundleLayerResourceStore {
 	productsByKey: Map<string, Webgl2StaticBundleProductResource>;
@@ -81,6 +85,7 @@ interface Webgl2StaticBundleTexturePageEntryResource {
 export interface Webgl2StaticBundleMaterialResource {
 	key: string;
 	familyKey: string;
+	family: StaticMaterialFamilyDescriptor;
 	color: readonly [number, number, number, number];
 	isTransparent: boolean;
 	indexedMaterial?: StaticBundleIndexedMaterialRecord;
@@ -651,9 +656,16 @@ export function createWebgl2StaticBundleMaterialResource({
 		Webgl2StaticBundleTexturePageResource
 	>;
 }): Webgl2StaticBundleMaterialResource {
+	const family = parseStaticMaterialFamilyKey(record.familyKey);
+	if (!family) {
+		throw new Error(
+			`Static bundle material ${record.key} has unparseable family key ${record.familyKey}.`,
+		);
+	}
 	return {
 		key: record.key,
 		familyKey: record.familyKey,
+		family,
 		color: record.color,
 		isTransparent: record.isTransparent,
 		indexedMaterial: record.indexedMaterial,
@@ -749,6 +761,9 @@ function createWebgl2StaticBundleGeometryResource({
 			gl.bindBuffer(gl.ARRAY_BUFFER, uvBuffer.buffer);
 			gl.enableVertexAttribArray(1);
 			gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
+			gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer.buffer);
+			gl.enableVertexAttribArray(2);
+			gl.vertexAttribPointer(2, 3, gl.FLOAT, false, 0, 0);
 			gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer.buffer);
 			gl.bindBuffer(gl.ARRAY_BUFFER, null);
 		},

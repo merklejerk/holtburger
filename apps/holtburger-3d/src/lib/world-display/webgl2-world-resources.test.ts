@@ -60,7 +60,7 @@ describe("webgl2 world resources", () => {
 		expect(store.structuredInteriorResources.productsByKey.size).toBe(1);
 		expect(store.structuredInteriorResources.cellsByKey.size).toBe(1);
 		expect(gl.createdTextures).toHaveLength(1);
-		expect(gl.createdBuffers).toHaveLength(3);
+		expect(gl.createdBuffers).toHaveLength(4);
 
 		commitWebgl2StructuredInteriorProductResources({
 			gl: gl.asContext(),
@@ -71,7 +71,7 @@ describe("webgl2 world resources", () => {
 		});
 
 		expect(gl.createdTextures).toHaveLength(1);
-		expect(gl.createdBuffers).toHaveLength(3);
+		expect(gl.createdBuffers).toHaveLength(4);
 		expect(gl.textureParameters).toContainEqual({
 			pname: gl.TEXTURE_MIN_FILTER,
 			param: gl.NEAREST,
@@ -610,6 +610,7 @@ function createDetailedLandblockProductArtifact(
 								materialVariantSignature: null,
 								positions: createStaticTrianglePositions(),
 								uvs: createStaticTriangleUvs(),
+								normals: createStaticTriangleNormals(),
 								indices: new Uint16Array([0, 1, 2]),
 								triangleCount: 1,
 							},
@@ -645,6 +646,10 @@ function createStaticTrianglePositions(): Float32Array {
 
 function createStaticTriangleUvs(): Float32Array {
 	return new Float32Array([0, 0, 1, 0, 0, 1]);
+}
+
+function createStaticTriangleNormals(): Float32Array {
+	return new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]);
 }
 
 function createWorkerTerrainArtifact({

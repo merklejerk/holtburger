@@ -1248,7 +1248,7 @@ Verification:
 
 ## Phase 14: Type Renderer Decision Vocabulary In Slices
 
-Status: Phase 14B implemented.
+Status: Phase 14C implemented.
 
 Phase 11's remaining follow-up should target renderer decision vocabularies, not every string in the renderer. The broader cleanup is worthwhile, but it should be split by semantic layer so each cutover is reviewable and can remove old routing paths decisively. The goal is to prevent another texture-page-style drift where similar string concepts accumulate different meanings across artifact creation, resource construction, submit, picker, and inspector paths.
 
@@ -1357,6 +1357,23 @@ Phase 14B implementation notes:
 Phase 14B verification:
 
 - `npm run --prefix apps/holtburger-3d test:ts -- src/lib/world-display/region-detail-overlays.test.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/workers/static-landblock-render-worker.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/world-display/webgl2/resources/static-bundle-layer-resources.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/render-resource-inspection.test.ts` passed.
+- `npm run --prefix apps/holtburger-3d test:ts` passed.
+- `npm run --prefix apps/holtburger-3d lint:ts` passed.
+- `npm run --prefix apps/holtburger-3d check` passed.
+
+Phase 14C implementation notes:
+
+- Exported typed world-frame vocabulary from `world-render-frame.ts`: `WORLD_RENDER_CATEGORY`, `WORLD_RENDER_CANDIDATE_KIND`, `WORLD_RENDER_DRAW_KIND`, `WORLD_RENDER_PASS_ID`, and the associated exported draw/pass/category/candidate types.
+- Replaced world-frame candidate-category routing with a typed `Record<WorldRenderCandidateKind, WorldRenderCategory>` map instead of ad hoc string checks.
+- Updated world-frame draw construction and category sort/count initialization to use the exported constants.
+- Updated WebGL submit planning to branch on `WORLD_RENDER_DRAW_KIND` constants rather than raw draw-kind strings.
+- Added `WEBGL2_MATERIAL_DRAW_DOMAIN` for WebGL material submit metrics. This remains separate from `WorldRenderCategory` because it distinguishes static-bundle material draws from structured-interior material draws, while frame categories describe higher-level visibility/draw ordering.
+- Updated the main WebGL renderer frame-candidate producer and render-frame/submit tests to consume the exported vocabulary rather than redefining local unions.
+- Left `render-domains.ts` alone: `exterior-static`, `interior-cell-shell`, `interior-static`, and portal/debug render domains are scene/resource identity concepts, not the same as world-frame draw kinds or WebGL material submit domains.
+
+Phase 14C verification:
+
+- `npm run --prefix apps/holtburger-3d test:ts -- src/lib/world-display/world-render-frame.test.ts src/lib/world-display/webgl2-world-submit.test.ts` passed.
 - `npm run --prefix apps/holtburger-3d test:ts` passed.
 - `npm run --prefix apps/holtburger-3d lint:ts` passed.
 - `npm run --prefix apps/holtburger-3d check` passed.

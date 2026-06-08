@@ -10,17 +10,41 @@ import type { StaticLandblockRenderProductSet } from "./static-landblock-render-
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
 
-type WorldRenderCategory =
-	| "terrain"
-	| "structured-interior"
-	| "static"
-	| "portal-mask"
-	| "debug-overlay";
+export const WORLD_RENDER_CATEGORY = {
+	terrain: "terrain",
+	structuredInterior: "structured-interior",
+	static: "static",
+	portalMask: "portal-mask",
+	debugOverlay: "debug-overlay",
+} as const;
 
-type WorldRenderCandidateKind =
-	| "terrain-tile"
-	| "static-bundle-layer"
-	| "portal-mask";
+export type WorldRenderCategory =
+	(typeof WORLD_RENDER_CATEGORY)[keyof typeof WORLD_RENDER_CATEGORY];
+
+export const WORLD_RENDER_CANDIDATE_KIND = {
+	terrainTile: "terrain-tile",
+	staticBundleLayer: "static-bundle-layer",
+	portalMask: "portal-mask",
+} as const;
+
+export type WorldRenderCandidateKind =
+	(typeof WORLD_RENDER_CANDIDATE_KIND)[keyof typeof WORLD_RENDER_CANDIDATE_KIND];
+
+export const WORLD_RENDER_DRAW_KIND = {
+	terrainTile: "terrain-tile",
+	staticBundleLayer: "static-bundle-layer",
+	transitionPortalMask: "transition-portal-mask",
+} as const;
+
+export type WorldRenderDrawKind =
+	(typeof WORLD_RENDER_DRAW_KIND)[keyof typeof WORLD_RENDER_DRAW_KIND];
+
+export const WORLD_RENDER_PASS_ID = {
+	world: "world",
+} as const;
+
+export type WorldRenderPassId =
+	(typeof WORLD_RENDER_PASS_ID)[keyof typeof WORLD_RENDER_PASS_ID];
 
 export interface WorldRenderCandidate {
 	id: string;
@@ -29,21 +53,21 @@ export interface WorldRenderCandidate {
 	bvhFallbackReason: string | null;
 }
 
-type WorldRenderDraw =
+export type WorldRenderDraw =
 	| {
-			kind: "terrain-tile";
+			kind: typeof WORLD_RENDER_DRAW_KIND.terrainTile;
 			terrainTileId: string;
-			category: "terrain";
+			category: typeof WORLD_RENDER_CATEGORY.terrain;
 	  }
 	| {
-			kind: "static-bundle-layer";
+			kind: typeof WORLD_RENDER_DRAW_KIND.staticBundleLayer;
 			staticBundleLayerId: string;
-			category: "static";
+			category: typeof WORLD_RENDER_CATEGORY.static;
 	  }
 	| {
-			kind: "transition-portal-mask";
+			kind: typeof WORLD_RENDER_DRAW_KIND.transitionPortalMask;
 			transitionPortalMaskId: string;
-			category: "portal-mask";
+			category: typeof WORLD_RENDER_CATEGORY.portalMask;
 	  };
 
 interface SelectedWorldRenderDraw {
@@ -52,8 +76,8 @@ interface SelectedWorldRenderDraw {
 	category: WorldRenderCategory;
 }
 
-interface WorldRenderPass {
-	id: "world";
+export interface WorldRenderPass {
+	id: WorldRenderPassId;
 	draws: WorldRenderDraw[];
 }
 
@@ -92,6 +116,14 @@ interface WorldRenderCandidateSelection {
 }
 
 const FALLBACK_REASON_SAMPLE_LIMIT = 8;
+
+const WORLD_RENDER_CATEGORY_BY_CANDIDATE_KIND: Readonly<
+	Record<WorldRenderCandidateKind, WorldRenderCategory>
+> = {
+	[WORLD_RENDER_CANDIDATE_KIND.terrainTile]: WORLD_RENDER_CATEGORY.terrain,
+	[WORLD_RENDER_CANDIDATE_KIND.staticBundleLayer]: WORLD_RENDER_CATEGORY.static,
+	[WORLD_RENDER_CANDIDATE_KIND.portalMask]: WORLD_RENDER_CATEGORY.portalMask,
+};
 
 export function buildWorldRenderFrame({
 	assetState,
@@ -132,7 +164,12 @@ export function buildWorldRenderFrame({
 	return {
 		cameraFrame,
 		viewProjectionMatrix,
-		passes: [{ id: "world", draws: selection.draws.map((draw) => draw.draw) }],
+		passes: [
+			{
+				id: WORLD_RENDER_PASS_ID.world,
+				draws: selection.draws.map((draw) => draw.draw),
+			},
+		],
 		metrics: selection.metrics,
 	};
 }
@@ -213,13 +250,7 @@ function categorizeWorldRenderCandidate(candidate: {
 	id: string;
 	kind: WorldRenderCandidateKind;
 }): WorldRenderCategory {
-	if (candidate.kind === "terrain-tile") {
-		return "terrain";
-	}
-	if (candidate.kind === "portal-mask") {
-		return "portal-mask";
-	}
-	return "static";
+	return WORLD_RENDER_CATEGORY_BY_CANDIDATE_KIND[candidate.kind];
 }
 
 function selectWorldRenderCandidates(
@@ -359,25 +390,25 @@ function resolveBatchFallbackReason({
 }
 
 function createWorldRenderDraw(candidate: WorldRenderCandidate): WorldRenderDraw {
-	if (candidate.kind === "terrain-tile") {
+	if (candidate.kind === WORLD_RENDER_CANDIDATE_KIND.terrainTile) {
 		return {
-			kind: "terrain-tile",
+			kind: WORLD_RENDER_DRAW_KIND.terrainTile,
 			terrainTileId: candidate.id,
-			category: "terrain",
+			category: WORLD_RENDER_CATEGORY.terrain,
 		};
 	}
-	if (candidate.kind === "static-bundle-layer") {
+	if (candidate.kind === WORLD_RENDER_CANDIDATE_KIND.staticBundleLayer) {
 		return {
-			kind: "static-bundle-layer",
+			kind: WORLD_RENDER_DRAW_KIND.staticBundleLayer,
 			staticBundleLayerId: candidate.id,
-			category: "static",
+			category: WORLD_RENDER_CATEGORY.static,
 		};
 	}
-	if (candidate.kind === "portal-mask") {
+	if (candidate.kind === WORLD_RENDER_CANDIDATE_KIND.portalMask) {
 		return {
-			kind: "transition-portal-mask",
+			kind: WORLD_RENDER_DRAW_KIND.transitionPortalMask,
 			transitionPortalMaskId: candidate.id,
-			category: "portal-mask",
+			category: WORLD_RENDER_CATEGORY.portalMask,
 		};
 	}
 	const exhaustive: never = candidate.kind;
@@ -413,25 +444,25 @@ function compareCategory(
 
 function categorySortRank(category: WorldRenderCategory): number {
 	switch (category) {
-		case "terrain":
+		case WORLD_RENDER_CATEGORY.terrain:
 			return 0;
-		case "structured-interior":
+		case WORLD_RENDER_CATEGORY.structuredInterior:
 			return 1;
-		case "static":
+		case WORLD_RENDER_CATEGORY.static:
 			return 2;
-		case "portal-mask":
+		case WORLD_RENDER_CATEGORY.portalMask:
 			return 3;
-		case "debug-overlay":
+		case WORLD_RENDER_CATEGORY.debugOverlay:
 			return 4;
 	}
 }
 
 function createEmptyCategoryCounts(): Record<WorldRenderCategory, number> {
 	return {
-		terrain: 0,
-		"structured-interior": 0,
-		static: 0,
-		"portal-mask": 0,
-		"debug-overlay": 0,
+		[WORLD_RENDER_CATEGORY.terrain]: 0,
+		[WORLD_RENDER_CATEGORY.structuredInterior]: 0,
+		[WORLD_RENDER_CATEGORY.static]: 0,
+		[WORLD_RENDER_CATEGORY.portalMask]: 0,
+		[WORLD_RENDER_CATEGORY.debugOverlay]: 0,
 	};
 }

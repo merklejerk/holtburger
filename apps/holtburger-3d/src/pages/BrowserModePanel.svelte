@@ -18,8 +18,27 @@
 	import { browserJsProfiler } from "../lib/diagnostics/browser-js-profiler";
 	import { formatHex32, normalizeOutdoorLandblockId } from "../lib/landblocks";
 	import { countOutdoorSceneLodTiles } from "../lib/world-display/outdoor-scene-interest";
+	import {
+		formatRenderResourceInspectionKeyForDisplay,
+		type RenderResourceInspectionSnapshot,
+		type RenderResourceTexturePageIdentity,
+	} from "../lib/world-display/render-resource-inspection";
 
-	type BrowserPanelTabId = "navigate" | "lod" | "scene" | "picker" | "debug";
+	type BrowserPanelTabId =
+		| "navigate"
+		| "lod"
+		| "scene"
+		| "resources"
+		| "picker"
+		| "debug";
+	type BrowserPanelTabIconId =
+		| "navigate"
+		| "settings"
+		| "scene"
+		| "picker"
+		| "resources"
+		| "debug";
+	type ResourceSortDirection = "asc" | "desc";
 	type BrowserPickerFamily =
 		| "static"
 		| "structured"
@@ -51,6 +70,20 @@
 		cellId: number | null;
 	}
 
+	const browserPanelTabs = [
+		{ id: "navigate", icon: "navigate", label: "Navigate" },
+		{ id: "lod", icon: "settings", label: "Settings" },
+		{ id: "scene", icon: "scene", label: "Scene" },
+		{ id: "picker", icon: "picker", label: "Picker" },
+		{ id: "resources", icon: "resources", label: "Resources" },
+		{ id: "debug", icon: "debug", label: "Debug" },
+	] satisfies readonly {
+		id: BrowserPanelTabId;
+		icon: BrowserPanelTabIconId;
+		label: string;
+	}[];
+	const MAX_VISIBLE_RESOURCE_ROWS = 100;
+
 	let {
 		sceneStatusText,
 		sceneSummaryRows,
@@ -60,6 +93,9 @@
 		pickerOptions,
 		pickerReport,
 		pickerArmed,
+		resourceInspection,
+		onGenerateResourceSnapshot,
+		onPreviewTexturePage,
 		onPickerOptionsChange,
 		onTogglePickerMode,
 	}: {
@@ -71,6 +107,9 @@
 		pickerOptions: BrowserPickerOptions;
 		pickerReport: BrowserPickerReport;
 		pickerArmed: boolean;
+		resourceInspection: RenderResourceInspectionSnapshot;
+		onGenerateResourceSnapshot: () => void;
+		onPreviewTexturePage: (identity: RenderResourceTexturePageIdentity) => void;
 		onPickerOptionsChange: (options: BrowserPickerOptions) => void;
 		onTogglePickerMode: () => void;
 	} = $props();
@@ -78,6 +117,13 @@
 	let activeTab = $state<BrowserPanelTabId>("navigate");
 	let isCollapsed = $state(false);
 	let isJsProfilerRunning = $state(browserJsProfiler.isEnabled());
+	let texturePageFilter = $state("");
+	let materialFilter = $state("");
+	let textureSortDirection = $state<ResourceSortDirection>("desc");
+	let materialSortDirection = $state<ResourceSortDirection>("desc");
+	let geometryFilter = $state("");
+	let staticBundleLayerFilter = $state("");
+	let structuredInteriorCellFilter = $state("");
 	const focusedCellReference = $derived.by<FocusedCellReference>(() => {
 		const destination = $frontendState.browserMode.destination;
 		if (destination?.kind === "interior-cell") {
@@ -100,6 +146,48 @@
 	});
 	const draftIsLandblockPrefix = $derived(
 		isLandblockPrefixInput($frontendState.browserMode.draftInput),
+	);
+	const filteredTexturePages = $derived(
+		filterResourcesByKey(resourceInspection.texturePages, texturePageFilter),
+	);
+	const sortedTexturePages = $derived(
+		sortTextureResources(filteredTexturePages, textureSortDirection),
+	);
+	const visibleTexturePages = $derived(
+		sortedTexturePages.slice(0, MAX_VISIBLE_RESOURCE_ROWS),
+	);
+	const filteredMaterials = $derived(
+		filterResourcesByKey(resourceInspection.materials, materialFilter),
+	);
+	const sortedMaterials = $derived(
+		sortMaterialResources(filteredMaterials, materialSortDirection),
+	);
+	const visibleMaterials = $derived(
+		sortedMaterials.slice(0, MAX_VISIBLE_RESOURCE_ROWS),
+	);
+	const filteredGeometry = $derived(
+		filterResourcesByKey(resourceInspection.geometry, geometryFilter),
+	);
+	const visibleGeometry = $derived(
+		filteredGeometry.slice(0, MAX_VISIBLE_RESOURCE_ROWS),
+	);
+	const filteredStaticBundleLayers = $derived(
+		filterResourcesByKey(
+			resourceInspection.staticBundleLayers,
+			staticBundleLayerFilter,
+		),
+	);
+	const visibleStaticBundleLayers = $derived(
+		filteredStaticBundleLayers.slice(0, MAX_VISIBLE_RESOURCE_ROWS),
+	);
+	const filteredStructuredInteriorCells = $derived(
+		filterResourcesByKey(
+			resourceInspection.structuredInteriorCells,
+			structuredInteriorCellFilter,
+		),
+	);
+	const visibleStructuredInteriorCells = $derived(
+		filteredStructuredInteriorCells.slice(0, MAX_VISIBLE_RESOURCE_ROWS),
 	);
 
 	function selectTab(tabId: BrowserPanelTabId): void {
@@ -233,6 +321,147 @@
 	function formatOptionalHex32(value: number | null): string {
 		return value === null ? "unavailable" : `0x${formatHex32(value)}`;
 	}
+
+	function formatResourceCount(value: number, singular: string): string {
+		return `${value} ${formatCountedNoun(value, singular)}`;
+	}
+
+	function formatResourceRatio(numerator: number, denominator: number): string {
+		return `${numerator}/${denominator}`;
+	}
+
+	function formatResourcePercent(value: number): string {
+		return `${(value * 100).toFixed(1)}%`;
+	}
+
+	function formatCountedNoun(value: number, singular: string): string {
+		if (value === 1) {
+			return singular;
+		}
+		if (singular.endsWith("y")) {
+			return `${singular.slice(0, -1)}ies`;
+		}
+		return `${singular}s`;
+	}
+
+	function formatVisibleResourceCount(
+		visibleCount: number,
+		matchedCount: number,
+		totalCount: number,
+	): string {
+		if (matchedCount === totalCount) {
+			return visibleCount === totalCount
+				? `${totalCount}`
+				: `${visibleCount}/${totalCount}`;
+		}
+
+		return visibleCount === matchedCount
+			? `${matchedCount}/${totalCount}`
+			: `${visibleCount}/${matchedCount}/${totalCount}`;
+	}
+
+	function formatResourceSnapshotTime(generatedAtMs: number): string {
+		if (generatedAtMs <= 0) {
+			return "No snapshot generated.";
+		}
+		return new Date(generatedAtMs).toLocaleTimeString();
+	}
+
+	function truncateResourceKey(value: string): string {
+		const displayValue = formatRenderResourceInspectionKeyForDisplay(value);
+		const maxLength = 72;
+		return displayValue.length <= maxLength
+			? displayValue
+			: `${displayValue.slice(0, maxLength - 1)}…`;
+	}
+
+	function filterResourcesByKey<T extends { key: string }>(
+		resources: readonly T[],
+		filterText: string,
+	): T[] {
+		const needle = filterText.trim().toLowerCase();
+		if (needle.length === 0) {
+			return [...resources];
+		}
+
+		return resources.filter((resource) => {
+			const displayKey = formatRenderResourceInspectionKeyForDisplay(
+				resource.key,
+			).toLowerCase();
+			return resource.key.toLowerCase().includes(needle) ||
+				displayKey.includes(needle);
+		});
+	}
+
+	function sortTextureResources(
+		resources: readonly RenderResourceInspectionSnapshot["texturePages"][number][],
+		direction: ResourceSortDirection,
+	): RenderResourceInspectionSnapshot["texturePages"][number][] {
+		return [...resources].sort((left, right) =>
+			applySortDirection(
+				compareNumbers(left.width * left.height, right.width * right.height) ||
+					compareNumbers(left.entryCount, right.entryCount) ||
+					left.key.localeCompare(right.key),
+				direction,
+			),
+		);
+	}
+
+	function sortMaterialResources(
+		resources: readonly RenderResourceInspectionSnapshot["materials"][number][],
+		direction: ResourceSortDirection,
+	): RenderResourceInspectionSnapshot["materials"][number][] {
+		return [...resources].sort((left, right) =>
+			applySortDirection(
+				compareNumbers(
+					left.geometryReferenceCount,
+					right.geometryReferenceCount,
+				) ||
+					compareNumbers(
+						left.referencedTriangleCount,
+						right.referencedTriangleCount,
+					) ||
+					compareNumbers(left.referencedIndexCount, right.referencedIndexCount) ||
+					left.key.localeCompare(right.key),
+				direction,
+			),
+		);
+	}
+
+	function compareNumbers(left: number, right: number): number {
+		return right - left;
+	}
+
+	function applySortDirection(
+		descendingComparison: number,
+		direction: ResourceSortDirection,
+	): number {
+		return direction === "desc" ? descendingComparison : -descendingComparison;
+	}
+
+	function toggleTextureSortDirection(): void {
+		textureSortDirection = invertSortDirection(textureSortDirection);
+	}
+
+	function toggleMaterialSortDirection(): void {
+		materialSortDirection = invertSortDirection(materialSortDirection);
+	}
+
+	function invertSortDirection(
+		direction: ResourceSortDirection,
+	): ResourceSortDirection {
+		return direction === "desc" ? "asc" : "desc";
+	}
+
+	function previewTexturePage(
+		page: RenderResourceInspectionSnapshot["texturePages"][number],
+	): void {
+		onPreviewTexturePage({
+			ownerKind: page.ownerKind,
+			ownerKey: page.ownerKey,
+			texturePageKey: page.key,
+		});
+	}
 </script>
 
 <section class:collapsed={isCollapsed} class="browser-panel" data-browser-panel>
@@ -243,51 +472,64 @@
 				role="tablist"
 				aria-label="Browser panel"
 			>
-				<button
-					type="button"
-					class:active={activeTab === "navigate"}
-					role="tab"
-					aria-selected={activeTab === "navigate"}
-					onclick={() => selectTab("navigate")}
-				>
-					Navigate
-				</button>
-				<button
-					type="button"
-					class:active={activeTab === "lod"}
-					role="tab"
-					aria-selected={activeTab === "lod"}
-					onclick={() => selectTab("lod")}
-				>
-					Settings
-				</button>
-				<button
-					type="button"
-					class:active={activeTab === "scene"}
-					role="tab"
-					aria-selected={activeTab === "scene"}
-					onclick={() => selectTab("scene")}
-				>
-					Scene
-				</button>
-				<button
-					type="button"
-					class:active={activeTab === "picker"}
-					role="tab"
-					aria-selected={activeTab === "picker"}
-					onclick={() => selectTab("picker")}
-				>
-					Picker
-				</button>
-				<button
-					type="button"
-					class:active={activeTab === "debug"}
-					role="tab"
-					aria-selected={activeTab === "debug"}
-					onclick={() => selectTab("debug")}
-				>
-					Debug
-				</button>
+				{#each browserPanelTabs as tab}
+					<button
+						type="button"
+						class:active={activeTab === tab.id}
+						role="tab"
+						aria-label={tab.label}
+						aria-selected={activeTab === tab.id}
+						title={tab.label}
+						onclick={() => selectTab(tab.id)}
+					>
+						<span class="browser-panel__tab-icon" aria-hidden="true">
+							{#if tab.icon === "navigate"}
+								<svg viewBox="0 0 24 24">
+									<path d="M12 3L19 21L12 17L5 21L12 3Z" />
+								</svg>
+							{:else if tab.icon === "settings"}
+								<svg viewBox="0 0 24 24">
+									<path d="M4 7H14" />
+									<path d="M18 7H20" />
+									<path d="M4 17H6" />
+									<path d="M10 17H20" />
+									<circle cx="16" cy="7" r="2" />
+									<circle cx="8" cy="17" r="2" />
+								</svg>
+							{:else if tab.icon === "scene"}
+								<svg viewBox="0 0 24 24">
+									<path d="M12 3L21 8L12 13L3 8L12 3Z" />
+									<path d="M21 12L12 17L3 12" />
+									<path d="M21 16L12 21L3 16" />
+								</svg>
+							{:else if tab.icon === "picker"}
+								<svg viewBox="0 0 24 24">
+									<circle cx="12" cy="12" r="5" />
+									<path d="M12 3V7" />
+									<path d="M12 17V21" />
+									<path d="M3 12H7" />
+									<path d="M17 12H21" />
+								</svg>
+							{:else if tab.icon === "resources"}
+								<svg viewBox="0 0 24 24">
+									<ellipse cx="12" cy="6" rx="7" ry="3" />
+									<path d="M5 6V12C5 13.7 8.1 15 12 15C15.9 15 19 13.7 19 12V6" />
+									<path d="M5 12V18C5 19.7 8.1 21 12 21C15.9 21 19 19.7 19 18V12" />
+								</svg>
+							{:else}
+								<svg viewBox="0 0 24 24">
+									<path d="M8 8H16V18H8V8Z" />
+									<path d="M9 4L11 8" />
+									<path d="M15 4L13 8" />
+									<path d="M4 12H8" />
+									<path d="M16 12H20" />
+									<path d="M4 16H8" />
+									<path d="M16 16H20" />
+								</svg>
+							{/if}
+						</span>
+					</button>
+				{/each}
 			</div>
 		{/if}
 
@@ -686,6 +928,363 @@
 					</div>
 				{/each}
 			</dl>
+		</div>
+	{:else if !isCollapsed && activeTab === "resources"}
+		<div class="browser-panel__body" role="tabpanel">
+			<p class="browser-panel__status">
+				{resourceInspection.generatedAtMs > 0
+					? `Snapshot generated at ${formatResourceSnapshotTime(resourceInspection.generatedAtMs)}.`
+					: "Generate a point-in-time view of resident renderer resources from the WebGL2 resource stores."}
+			</p>
+			<div class="browser-panel__debug-actions">
+				<button type="button" onclick={onGenerateResourceSnapshot}>
+					Generate Snapshot
+				</button>
+			</div>
+			<dl class="data-list compact-data-list browser-panel__summary-list">
+				<div>
+					<dt>Snapshot</dt>
+					<dd>{formatResourceSnapshotTime(resourceInspection.generatedAtMs)}</dd>
+				</div>
+				<div>
+					<dt>Layers</dt>
+					<dd>
+						{formatResourceCount(
+							resourceInspection.summary.staticBundleLayerCount,
+							"static bundle",
+						)}
+					</dd>
+				</div>
+				<div>
+					<dt>Cells</dt>
+					<dd>
+						{formatResourceCount(
+							resourceInspection.summary.structuredInteriorCellCount,
+							"structured cell",
+						)}
+					</dd>
+				</div>
+				<div>
+					<dt>Textures</dt>
+					<dd>
+						{formatResourceCount(
+							resourceInspection.summary.texturePageCount,
+							"texture",
+						)}
+						({formatResourceCount(
+							resourceInspection.summary.texturePageEntryCount,
+							"entry",
+						)})
+					</dd>
+				</div>
+				<div>
+					<dt>Materials</dt>
+					<dd>
+						{formatResourceCount(
+							resourceInspection.summary.materialCount,
+							"record",
+						)}
+					</dd>
+				</div>
+				<div>
+					<dt>Geometry</dt>
+					<dd>
+						{formatResourceCount(
+							resourceInspection.summary.geometryResourceCount,
+							"resource",
+						)}
+						({resourceInspection.summary.triangleCount} tris)
+					</dd>
+				</div>
+			</dl>
+
+			<details class="browser-panel__details" open>
+				<summary>Textures</summary>
+				<div class="browser-panel__resource-controls">
+					<label class="browser-panel__resource-filter">
+						<span>
+							Filter ID ({formatVisibleResourceCount(
+								visibleTexturePages.length,
+								filteredTexturePages.length,
+								resourceInspection.texturePages.length,
+							)})
+						</span>
+						<input
+							type="search"
+							bind:value={texturePageFilter}
+							placeholder="texture id substring"
+							spellcheck="false"
+						/>
+					</label>
+					<button
+						type="button"
+						class="browser-panel__resource-sort"
+						aria-label={`Sort textures ${textureSortDirection === "desc" ? "ascending" : "descending"}`}
+						title={`Sort by size and entries ${textureSortDirection === "desc" ? "ascending" : "descending"}`}
+						onclick={toggleTextureSortDirection}
+					>
+						<span aria-hidden="true">
+							{#if textureSortDirection === "desc"}
+								<svg viewBox="0 0 24 24">
+									<path d="M12 5V19" />
+									<path d="M6 13L12 19L18 13" />
+								</svg>
+							{:else}
+								<svg viewBox="0 0 24 24">
+									<path d="M12 19V5" />
+									<path d="M6 11L12 5L18 11" />
+								</svg>
+							{/if}
+						</span>
+					</button>
+				</div>
+				{#if filteredTexturePages.length > visibleTexturePages.length}
+					<p class="browser-panel__resource-limit">
+						Showing first {MAX_VISIBLE_RESOURCE_ROWS} matches. Narrow the filter
+						to inspect more specific rows.
+					</p>
+				{/if}
+				<div class="browser-panel__resource-scroll">
+					<dl class="data-list compact-data-list browser-panel__resource-list">
+						{#each visibleTexturePages as page}
+							<div>
+								<dt title={page.key}>
+									<button
+										type="button"
+										class="browser-panel__resource-link"
+										onclick={() => previewTexturePage(page)}
+									>
+										{truncateResourceKey(page.key)}
+									</button>
+								</dt>
+								<dd>
+									{page.ownerKind}; {page.usageBucket}; {page.sampleClass};
+									{page.width}x{page.height}; {formatResourceCount(
+										page.entryCount,
+										"entry",
+									)}; coverage {formatResourcePercent(page.coverageRatio)}
+								</dd>
+							</div>
+						{:else}
+							<div>
+								<dt>Textures</dt>
+								<dd>No matching resident textures.</dd>
+							</div>
+						{/each}
+					</dl>
+				</div>
+			</details>
+
+			<details class="browser-panel__details" open>
+				<summary>Materials</summary>
+				<div class="browser-panel__resource-controls">
+					<label class="browser-panel__resource-filter">
+						<span>
+							Filter ID ({formatVisibleResourceCount(
+								visibleMaterials.length,
+								filteredMaterials.length,
+								resourceInspection.materials.length,
+							)})
+						</span>
+						<input
+							type="search"
+							bind:value={materialFilter}
+							placeholder="material id substring"
+							spellcheck="false"
+						/>
+					</label>
+					<button
+						type="button"
+						class="browser-panel__resource-sort"
+						aria-label={`Sort materials ${materialSortDirection === "desc" ? "ascending" : "descending"}`}
+						title={`Sort by usage ${materialSortDirection === "desc" ? "ascending" : "descending"}`}
+						onclick={toggleMaterialSortDirection}
+					>
+						<span aria-hidden="true">
+							{#if materialSortDirection === "desc"}
+								<svg viewBox="0 0 24 24">
+									<path d="M12 5V19" />
+									<path d="M6 13L12 19L18 13" />
+								</svg>
+							{:else}
+								<svg viewBox="0 0 24 24">
+									<path d="M12 19V5" />
+									<path d="M6 11L12 5L18 11" />
+								</svg>
+							{/if}
+						</span>
+					</button>
+				</div>
+				{#if filteredMaterials.length > visibleMaterials.length}
+					<p class="browser-panel__resource-limit">
+						Showing first {MAX_VISIBLE_RESOURCE_ROWS} matches. Narrow the filter
+						to inspect more specific rows.
+					</p>
+				{/if}
+				<div class="browser-panel__resource-scroll">
+					<dl class="data-list compact-data-list browser-panel__resource-list">
+						{#each visibleMaterials as material}
+							<div>
+								<dt title={material.key}>{truncateResourceKey(material.key)}</dt>
+								<dd>
+									{material.ownerKind}; {material.familyKey};
+									{material.alphaPolicy ?? "alpha n/a"}; bindings {material.textureBindingCount};
+									refs {material.geometryReferenceCount}; indices {material.referencedIndexCount};
+									tris {material.referencedTriangleCount};
+									{material.indexed ? "indexed" : "direct"};
+									detail {material.detailTextureRefKey
+										? material.detailTiling
+										: "none"}
+								</dd>
+							</div>
+						{:else}
+							<div>
+								<dt>Materials</dt>
+								<dd>No matching resident material records.</dd>
+							</div>
+						{/each}
+					</dl>
+				</div>
+			</details>
+
+			<details class="browser-panel__details">
+				<summary>Geometry</summary>
+				<label class="browser-panel__resource-filter">
+					<span>
+						Filter ID ({formatVisibleResourceCount(
+							visibleGeometry.length,
+							filteredGeometry.length,
+							resourceInspection.geometry.length,
+						)})
+					</span>
+					<input
+						type="search"
+						bind:value={geometryFilter}
+						placeholder="geometry id substring"
+						spellcheck="false"
+					/>
+				</label>
+				{#if filteredGeometry.length > visibleGeometry.length}
+					<p class="browser-panel__resource-limit">
+						Showing first {MAX_VISIBLE_RESOURCE_ROWS} matches. Narrow the filter
+						to inspect more specific rows.
+					</p>
+				{/if}
+				<div class="browser-panel__resource-scroll">
+					<dl class="data-list compact-data-list browser-panel__resource-list">
+						{#each visibleGeometry as geometry}
+							<div>
+								<dt title={geometry.key}>{truncateResourceKey(geometry.key)}</dt>
+								<dd>
+									{geometry.ownerKind}; {geometry.geometryKind};
+									{geometry.triangleCount} tris; indices {geometry.indexCount};
+									material {geometry.materialRecordKey
+										? truncateResourceKey(geometry.materialRecordKey)
+										: "none"}
+								</dd>
+							</div>
+						{:else}
+							<div>
+								<dt>Geometry</dt>
+								<dd>No matching resident geometry resources.</dd>
+							</div>
+						{/each}
+					</dl>
+				</div>
+			</details>
+
+			<details class="browser-panel__details">
+				<summary>Static Bundle Layers</summary>
+				<label class="browser-panel__resource-filter">
+					<span>
+						Filter ID ({formatVisibleResourceCount(
+							visibleStaticBundleLayers.length,
+							filteredStaticBundleLayers.length,
+							resourceInspection.staticBundleLayers.length,
+						)})
+					</span>
+					<input
+						type="search"
+						bind:value={staticBundleLayerFilter}
+						placeholder="static bundle id substring"
+						spellcheck="false"
+					/>
+				</label>
+				{#if filteredStaticBundleLayers.length > visibleStaticBundleLayers.length}
+					<p class="browser-panel__resource-limit">
+						Showing first {MAX_VISIBLE_RESOURCE_ROWS} matches. Narrow the filter
+						to inspect more specific rows.
+					</p>
+				{/if}
+				<div class="browser-panel__resource-scroll">
+					<dl class="data-list compact-data-list browser-panel__resource-list">
+						{#each visibleStaticBundleLayers as layer}
+							<div>
+								<dt title={layer.key}>{truncateResourceKey(layer.key)}</dt>
+								<dd>
+									0x{formatHex32(layer.landblockId)} {layer.bundleKind};
+									objects {formatResourceRatio(
+										layer.objectRecordCount,
+										layer.sourceObjectCount,
+									)};
+									materials {layer.materialCount}; pages {layer.texturePageCount};
+									{layer.triangleCount} tris
+								</dd>
+							</div>
+						{:else}
+							<div>
+								<dt>Layers</dt>
+								<dd>No matching resident static bundle layers.</dd>
+							</div>
+						{/each}
+					</dl>
+				</div>
+			</details>
+
+			<details class="browser-panel__details">
+				<summary>Structured Interior Cells</summary>
+				<label class="browser-panel__resource-filter">
+					<span>
+						Filter ID ({formatVisibleResourceCount(
+							visibleStructuredInteriorCells.length,
+							filteredStructuredInteriorCells.length,
+							resourceInspection.structuredInteriorCells.length,
+						)})
+					</span>
+					<input
+						type="search"
+						bind:value={structuredInteriorCellFilter}
+						placeholder="structured cell id substring"
+						spellcheck="false"
+					/>
+				</label>
+				{#if filteredStructuredInteriorCells.length > visibleStructuredInteriorCells.length}
+					<p class="browser-panel__resource-limit">
+						Showing first {MAX_VISIBLE_RESOURCE_ROWS} matches. Narrow the filter
+						to inspect more specific rows.
+					</p>
+				{/if}
+				<div class="browser-panel__resource-scroll">
+					<dl class="data-list compact-data-list browser-panel__resource-list">
+						{#each visibleStructuredInteriorCells as cell}
+							<div>
+								<dt title={cell.key}>{truncateResourceKey(cell.key)}</dt>
+								<dd>
+									cell 0x{formatHex32(cell.envCellId)}; slices
+									{cell.materialSliceCount}; materials {cell.materialCount}; pages
+									{cell.texturePageCount}; {cell.triangleCount} tris;
+									{cell.hasFallbackShell ? "fallback shell" : "material slices"}
+								</dd>
+							</div>
+						{:else}
+							<div>
+								<dt>Cells</dt>
+								<dd>No matching resident structured interior cells.</dd>
+							</div>
+						{/each}
+					</dl>
+				</div>
+			</details>
 		</div>
 	{:else if !isCollapsed && activeTab === "picker"}
 		<div class="browser-panel__body" role="tabpanel">

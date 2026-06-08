@@ -36,6 +36,13 @@
 		BrowserCameraResidency,
 		WorldRenderMetrics,
 	} from "../lib/world-display/renderer-contract";
+	import {
+		createEmptyRenderResourceInspectionSnapshot,
+		formatRenderResourceInspectionKeyForDisplay,
+		type RenderResourceInspectionSnapshot,
+		type RenderResourceTexturePageIdentity,
+		type RenderResourceTexturePagePreview,
+	} from "../lib/world-display/render-resource-inspection";
 	import { isPreparedGfxObjAsset } from "../lib/world-display/static-renderables";
 	import { formatHex32 } from "../lib/landblocks";
 	import {
@@ -190,6 +197,20 @@
 		createEmptyBrowserRenderResourceReport(),
 	);
 	let renderMetrics = $state<WorldRenderMetrics | null>(null);
+	let resourceInspection = $state<RenderResourceInspectionSnapshot>(
+		createEmptyRenderResourceInspectionSnapshot(),
+	);
+	let texturePreview = $state<RenderResourceTexturePagePreview | null>(null);
+	let texturePreviewError = $state<string | null>(null);
+	let texturePreviewCanvas = $state<HTMLCanvasElement | null>(null);
+	let texturePreviewStage = $state<HTMLDivElement | null>(null);
+	let texturePreviewZoom = $state(1);
+	let texturePreviewShowAtlasBounds = $state(true);
+	let texturePreviewDrag = $state<{
+		pointerId: number;
+		lastX: number;
+		lastY: number;
+	} | null>(null);
 	let rendererCameraResidency = $state<BrowserCameraResidency | null>(null);
 	let debugReportText = $state<string | null>(null);
 	let debugReportCopied = $state(false);
@@ -244,7 +265,35 @@
 	let assetCacheDebugText = $state("Waiting for asset cache activity.");
 	let assetMaterialDebugText = $state("Waiting for material asset activity.");
 
+	$effect(() => {
+		if (!texturePreview || !texturePreviewCanvas) {
+			return;
+		}
+		texturePreviewCanvas.width = texturePreview.width;
+		texturePreviewCanvas.height = texturePreview.height;
+		const context = texturePreviewCanvas.getContext("2d");
+		if (!context) {
+			return;
+		}
+		context.putImageData(
+			new ImageData(
+				texturePreview.pixels,
+				texturePreview.width,
+				texturePreview.height,
+			),
+			0,
+			0,
+		);
+		if (texturePreviewShowAtlasBounds) {
+			drawTexturePreviewEntryBounds(context, texturePreview.entries);
+		}
+	});
+
 	const DEBUG_SUMMARY_DEBOUNCE_MS = 500;
+	const MIN_TEXTURE_PREVIEW_ZOOM = 0.05;
+	const MAX_TEXTURE_PREVIEW_ZOOM = 32;
+	const TEXTURE_PREVIEW_ZOOM_STEP = 1.25;
+	const TEXTURE_PREVIEW_WHEEL_ZOOM_STEP = 1.08;
 	const worldDisplay = $derived(renderResourceReport.worldDisplay);
 	const sceneGeometryText = $derived(renderResourceReport.sceneGeometryText);
 	const terrainHeightText = $derived(renderResourceReport.terrainHeightText);
@@ -800,6 +849,217 @@
 			);
 			syncControlledCameraFrame();
 		}
+	}
+
+	function handleGenerateResourceSnapshot(): void {
+		resourceInspection =
+			worldDisplaySurface?.inspectResources() ??
+			createEmptyRenderResourceInspectionSnapshot();
+	}
+
+	function handlePreviewTexturePage(
+		identity: RenderResourceTexturePageIdentity,
+	): void {
+		texturePreviewError = null;
+		texturePreviewDrag = null;
+		try {
+			const preview = worldDisplaySurface?.previewTexturePage(identity) ?? null;
+			if (!preview) {
+				texturePreview = null;
+				texturePreviewError = "Texture page is no longer resident.";
+				return;
+			}
+			texturePreview = preview;
+			texturePreviewZoom = 1;
+			void fitTexturePreviewToStage();
+		} catch (error) {
+			texturePreview = null;
+			texturePreviewError =
+				error instanceof Error ? error.message : String(error);
+		}
+	}
+
+	function closeTexturePreview(): void {
+		texturePreview = null;
+		texturePreviewError = null;
+		texturePreviewDrag = null;
+	}
+
+	async function fitTexturePreviewToStage(): Promise<void> {
+		await tick();
+		if (!texturePreview || !texturePreviewStage) {
+			return;
+		}
+
+		const stage = texturePreviewStage;
+		const fitZoom = clampTexturePreviewZoom(
+			Math.min(
+				stage.clientWidth / Math.max(texturePreview.width, 1),
+				stage.clientHeight / Math.max(texturePreview.height, 1),
+				1,
+			),
+		);
+		texturePreviewZoom = fitZoom;
+		await tick();
+		centerTexturePreviewStage();
+	}
+
+	function resetTexturePreviewZoom(): void {
+		setTexturePreviewZoom(1, texturePreviewStageCenter());
+	}
+
+	function zoomTexturePreviewIn(): void {
+		setTexturePreviewZoom(
+			texturePreviewZoom * TEXTURE_PREVIEW_ZOOM_STEP,
+			texturePreviewStageCenter(),
+		);
+	}
+
+	function zoomTexturePreviewOut(): void {
+		setTexturePreviewZoom(
+			texturePreviewZoom / TEXTURE_PREVIEW_ZOOM_STEP,
+			texturePreviewStageCenter(),
+		);
+	}
+
+	function toggleTexturePreviewAtlasBounds(): void {
+		texturePreviewShowAtlasBounds = !texturePreviewShowAtlasBounds;
+	}
+
+	function handleTexturePreviewWheel(event: WheelEvent): void {
+		if (!texturePreviewStage) {
+			return;
+		}
+
+		const zoomMultiplier =
+			event.deltaY < 0
+				? TEXTURE_PREVIEW_WHEEL_ZOOM_STEP
+				: 1 / TEXTURE_PREVIEW_WHEEL_ZOOM_STEP;
+		const stageRect = texturePreviewStage.getBoundingClientRect();
+		setTexturePreviewZoom(texturePreviewZoom * zoomMultiplier, {
+			x: event.clientX - stageRect.left,
+			y: event.clientY - stageRect.top,
+		});
+		event.preventDefault();
+	}
+
+	function handleTexturePreviewPointerDown(event: PointerEvent): void {
+		if (event.button !== 0 || !texturePreviewStage) {
+			return;
+		}
+
+		texturePreviewStage.setPointerCapture(event.pointerId);
+		texturePreviewDrag = {
+			pointerId: event.pointerId,
+			lastX: event.clientX,
+			lastY: event.clientY,
+		};
+		event.preventDefault();
+	}
+
+	function handleTexturePreviewPointerMove(event: PointerEvent): void {
+		if (!texturePreviewStage || texturePreviewDrag?.pointerId !== event.pointerId) {
+			return;
+		}
+
+		const deltaX = event.clientX - texturePreviewDrag.lastX;
+		const deltaY = event.clientY - texturePreviewDrag.lastY;
+		texturePreviewStage.scrollLeft -= deltaX;
+		texturePreviewStage.scrollTop -= deltaY;
+		texturePreviewDrag = {
+			pointerId: event.pointerId,
+			lastX: event.clientX,
+			lastY: event.clientY,
+		};
+		event.preventDefault();
+	}
+
+	function handleTexturePreviewPointerUp(event: PointerEvent): void {
+		if (!texturePreviewStage || texturePreviewDrag?.pointerId !== event.pointerId) {
+			return;
+		}
+
+		if (texturePreviewStage.hasPointerCapture(event.pointerId)) {
+			texturePreviewStage.releasePointerCapture(event.pointerId);
+		}
+		texturePreviewDrag = null;
+		event.preventDefault();
+	}
+
+	function setTexturePreviewZoom(
+		nextZoom: number,
+		anchor: { x: number; y: number } | null,
+	): void {
+		const stage = texturePreviewStage;
+		const previousZoom = texturePreviewZoom;
+		const clampedZoom = clampTexturePreviewZoom(nextZoom);
+		if (!stage || !anchor || clampedZoom === previousZoom) {
+			texturePreviewZoom = clampedZoom;
+			return;
+		}
+
+		const contentAnchorX = (stage.scrollLeft + anchor.x) / previousZoom;
+		const contentAnchorY = (stage.scrollTop + anchor.y) / previousZoom;
+		texturePreviewZoom = clampedZoom;
+		void tick().then(() => {
+			stage.scrollLeft = contentAnchorX * clampedZoom - anchor.x;
+			stage.scrollTop = contentAnchorY * clampedZoom - anchor.y;
+		});
+	}
+
+	function texturePreviewStageCenter(): { x: number; y: number } | null {
+		if (!texturePreviewStage) {
+			return null;
+		}
+		return {
+			x: texturePreviewStage.clientWidth / 2,
+			y: texturePreviewStage.clientHeight / 2,
+		};
+	}
+
+	function centerTexturePreviewStage(): void {
+		if (!texturePreviewStage) {
+			return;
+		}
+		texturePreviewStage.scrollLeft =
+			(texturePreviewStage.scrollWidth - texturePreviewStage.clientWidth) / 2;
+		texturePreviewStage.scrollTop =
+			(texturePreviewStage.scrollHeight - texturePreviewStage.clientHeight) / 2;
+	}
+
+	function clampTexturePreviewZoom(value: number): number {
+		return Math.min(
+			MAX_TEXTURE_PREVIEW_ZOOM,
+			Math.max(MIN_TEXTURE_PREVIEW_ZOOM, value),
+		);
+	}
+
+	function formatTexturePreviewZoom(value: number): string {
+		return `${Math.round(value * 100)}%`;
+	}
+
+	function formatPercent(value: number): string {
+		return `${(value * 100).toFixed(1)}%`;
+	}
+
+	function drawTexturePreviewEntryBounds(
+		context: CanvasRenderingContext2D,
+		entries: readonly RenderResourceTexturePagePreview["entries"][number][],
+	): void {
+		context.save();
+		context.lineWidth = 1;
+		context.strokeStyle = "rgba(0, 255, 255, 0.95)";
+		context.setLineDash([4, 3]);
+		for (const entry of entries) {
+			const [x, y, width, height] = entry.rect;
+			context.strokeRect(
+				x + 0.5,
+				y + 0.5,
+				Math.max(0, width - 1),
+				Math.max(0, height - 1),
+			);
+		}
+		context.restore();
 	}
 
 	function handleRendererCameraFrameChange(
@@ -2115,6 +2375,9 @@
 			{pickerOptions}
 			{pickerReport}
 			{pickerArmed}
+			{resourceInspection}
+			onGenerateResourceSnapshot={handleGenerateResourceSnapshot}
+			onPreviewTexturePage={handlePreviewTexturePage}
 			onPickerOptionsChange={handlePickerOptionsChange}
 			onTogglePickerMode={handleTogglePickerMode}
 		/>
@@ -2141,6 +2404,134 @@
 					<span>{debugReportCopied ? "Copied." : "Ready to copy."}</span>
 					<button type="button" onclick={copyDebugReport}>Copy</button>
 				</div>
+			</div>
+		</div>
+	{/if}
+
+	{#if texturePreview !== null || texturePreviewError !== null}
+		<div class="browser-world-display__modal-backdrop" data-browser-panel>
+			<div
+				class="browser-world-display__texture-preview-modal"
+				role="dialog"
+				aria-modal="true"
+				aria-labelledby="texture-preview-title"
+			>
+				<div class="browser-world-display__debug-report-header">
+					<div>
+						<p>Texture page preview</p>
+						<h2 id="texture-preview-title">
+							{texturePreview
+								? formatRenderResourceInspectionKeyForDisplay(texturePreview.key)
+								: "Preview unavailable"}
+						</h2>
+					</div>
+					<button type="button" onclick={closeTexturePreview}>Close</button>
+				</div>
+				{#if texturePreviewError}
+					<p class="browser-panel__status">{texturePreviewError}</p>
+				{:else if texturePreview}
+					<div class="browser-world-display__texture-preview-toolbar">
+						<button type="button" onclick={() => void fitTexturePreviewToStage()}>
+							Fit
+						</button>
+						<button type="button" onclick={resetTexturePreviewZoom}>100%</button>
+						<button
+							type="button"
+							aria-label="Zoom out"
+							title="Zoom out"
+							onclick={zoomTexturePreviewOut}
+						>
+							-
+						</button>
+						<span>{formatTexturePreviewZoom(texturePreviewZoom)}</span>
+						<button
+							type="button"
+							aria-label="Zoom in"
+							title="Zoom in"
+							onclick={zoomTexturePreviewIn}
+						>
+							+
+						</button>
+						<button
+							type="button"
+							class:active={texturePreviewShowAtlasBounds}
+							aria-pressed={texturePreviewShowAtlasBounds}
+							title="Toggle atlas rect bounds"
+							onclick={toggleTexturePreviewAtlasBounds}
+						>
+							Rects
+						</button>
+					</div>
+					<div
+						bind:this={texturePreviewStage}
+						class:dragging={texturePreviewDrag !== null}
+						class="browser-world-display__texture-preview-stage"
+						role="region"
+						aria-label="Texture preview pan and zoom viewport"
+						onpointerdown={handleTexturePreviewPointerDown}
+						onpointermove={handleTexturePreviewPointerMove}
+						onpointerup={handleTexturePreviewPointerUp}
+						onpointercancel={handleTexturePreviewPointerUp}
+						onwheel={handleTexturePreviewWheel}
+					>
+						<div class="browser-world-display__texture-preview-surface">
+							<div
+								class="browser-world-display__texture-preview-content"
+								style:width={`${texturePreview.width * texturePreviewZoom}px`}
+								style:height={`${texturePreview.height * texturePreviewZoom}px`}
+							>
+								<canvas
+									bind:this={texturePreviewCanvas}
+									aria-label="Texture page preview"
+								></canvas>
+								<span
+									class="browser-world-display__texture-preview-bounds"
+									aria-hidden="true"
+								></span>
+							</div>
+						</div>
+					</div>
+					<div class="browser-world-display__texture-preview-metadata">
+						<dl class="browser-world-display__texture-preview-stats">
+							<div>
+								<dt>Format</dt>
+								<dd>
+									{texturePreview.usageBucket}; {texturePreview.sampleClass};
+									{texturePreview.indexedFormat ?? "rgba"}
+								</dd>
+							</div>
+							<div>
+								<dt>Size</dt>
+								<dd>{texturePreview.width}x{texturePreview.height}</dd>
+							</div>
+							<div>
+								<dt>Entries</dt>
+								<dd>{texturePreview.entries.length}</dd>
+							</div>
+							<div>
+								<dt>Efficiency</dt>
+								<dd>{formatPercent(texturePreview.coverageRatio)}</dd>
+							</div>
+						</dl>
+						<details class="browser-panel__details">
+							<summary>Atlas Entries</summary>
+							<dl class="data-list compact-data-list browser-panel__resource-list">
+								{#each texturePreview.entries as entry}
+									<div>
+										<dt title={entry.virtualRefKey}>
+											{formatRenderResourceInspectionKeyForDisplay(
+												entry.virtualRefKey,
+											)}
+										</dt>
+										<dd>
+											{entry.sourceAssetId}; rect [{entry.rect.join(", ")}]
+										</dd>
+									</div>
+								{/each}
+							</dl>
+						</details>
+					</div>
+				{/if}
 			</div>
 		</div>
 	{/if}

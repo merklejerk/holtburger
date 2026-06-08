@@ -8,10 +8,10 @@
 	import type { NormalizedViewportPoint } from "./model";
 	import type {
 		RenderSpatialIndexQuery,
-	RenderSpatialItemKind,
-	RenderSpatialPick,
-} from "./render-spatial-index";
-import type { RenderChunkTransform } from "./render-anchor";
+		RenderSpatialItemKind,
+		RenderSpatialPick,
+	} from "./render-spatial-index";
+	import type { RenderChunkTransform } from "./render-anchor";
 	import type { SceneCameraFrame } from "./camera";
 	import type {
 		BrowserCameraResidencyChangeHandler,
@@ -20,6 +20,12 @@ import type { RenderChunkTransform } from "./render-anchor";
 		WorldRenderCameraFrameChangeHandler,
 		WorldRenderMetricsChangeHandler,
 	} from "./renderer-contract";
+	import {
+		createEmptyRenderResourceInspectionSnapshot,
+		type RenderResourceInspectionSnapshot,
+		type RenderResourceTexturePageIdentity,
+		type RenderResourceTexturePagePreview,
+	} from "./render-resource-inspection";
 	import {
 		createEmptyStaticLandblockRenderProductSet,
 		type StaticLandblockProductKey,
@@ -219,6 +225,19 @@ import type { RenderChunkTransform } from "./render-anchor";
 			rendererController?.pickAtViewportPoint(viewportPoint, mask, ownerKeys) ??
 			null
 		);
+	}
+
+	export function inspectResources(): RenderResourceInspectionSnapshot {
+		return (
+			rendererController?.inspectResources() ??
+			createEmptyRenderResourceInspectionSnapshot()
+		);
+	}
+
+	export function previewTexturePage(
+		identity: RenderResourceTexturePageIdentity,
+	): RenderResourceTexturePagePreview | null {
+		return rendererController?.previewTexturePage(identity) ?? null;
 	}
 
 	function commitStaticProductToSet(

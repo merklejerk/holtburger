@@ -7,6 +7,10 @@ import {
 	type StaticLandblockProductKey,
 	type StaticLandblockRenderProductSet,
 } from "./static-landblock-render-artifact-store";
+import {
+	createEmptyRenderResourceInspectionSnapshot,
+	type RenderResourceTexturePageIdentity,
+} from "./render-resource-inspection";
 import type { LandblockRenderProductWorkerResult } from "./landblock-render-product";
 import {
 	createStaticLandblockProductKeyFromResult,
@@ -158,6 +162,15 @@ function createDeferredWorldDisplayRenderer<
 		setCameraResidencyChangeHandler(handler) {
 			onCameraResidencyChange = handler;
 			loadedRenderer?.setCameraResidencyChangeHandler(handler);
+		},
+		inspectResources() {
+			return (
+				loadedRenderer?.inspectResources() ??
+				createEmptyRenderResourceInspectionSnapshot()
+			);
+		},
+		previewTexturePage(identity: RenderResourceTexturePageIdentity) {
+			return loadedRenderer?.previewTexturePage(identity) ?? null;
 		},
 		pickTerrainLandblockAtViewportPoint(viewportPoint) {
 			return (

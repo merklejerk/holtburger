@@ -2568,7 +2568,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			RENDER_RESOURCE_INSPECTION_OWNER_KIND.structuredInterior
 		) {
 			return (
-				store.structuredInteriorResources.cellsByKey
+				store.structuredInteriorResources.productsByKey
 					.get(identity.ownerKey)
 					?.texturePagesByKey.get(identity.texturePageKey) ?? null
 			);

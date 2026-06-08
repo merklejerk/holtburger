@@ -15,11 +15,11 @@ describe("render resource inspection", () => {
 
 		expect(snapshot.summary).toEqual({
 			staticBundleLayerCount: 1,
-			structuredInteriorCellCount: 1,
+			structuredInteriorCellCount: 2,
 			texturePageCount: 3,
 			materialCount: 2,
-			geometryResourceCount: 3,
-			triangleCount: 12,
+			geometryResourceCount: 4,
+			triangleCount: 15,
 			texturePageEntryCount: 4,
 		});
 		expect(snapshot.staticBundleLayers).toMatchObject([
@@ -40,6 +40,13 @@ describe("render resource inspection", () => {
 				materialSliceCount: 1,
 				hasFallbackShell: true,
 				triangleCount: 7,
+			},
+			{
+				key: "cell:b",
+				envCellId: 0xda5501ea,
+				materialSliceCount: 1,
+				hasFallbackShell: false,
+				triangleCount: 3,
 			},
 		]);
 		expect(snapshot.texturePages.map((page) => page.ownerKind)).toEqual([
@@ -89,14 +96,15 @@ describe("render resource inspection", () => {
 			{
 				key: "material:structured",
 				detailTiling: 0,
-				geometryReferenceCount: 1,
-				referencedIndexCount: 6,
-				referencedTriangleCount: 2,
+				geometryReferenceCount: 2,
+				referencedIndexCount: 15,
+				referencedTriangleCount: 5,
 			},
 		]);
 		expect(snapshot.geometry.map((geometry) => geometry.geometryKind)).toEqual([
 			"fallback-shell",
 			"compacted-batch",
+			"material-slice",
 			"material-slice",
 		]);
 	});
@@ -157,6 +165,7 @@ function createInspectableWorldStore(): Webgl2WorldResourceStore {
 		detailTextureRefKey: null,
 		detailTiling: 0,
 	});
+	const structuredProductKey = "structured-product:a";
 
 	return {
 		staticBundleLayerResources: {
@@ -188,6 +197,22 @@ function createInspectableWorldStore(): Webgl2WorldResourceStore {
 			]),
 		},
 		structuredInteriorResources: {
+			productsByKey: new Map([
+				[
+					structuredProductKey,
+					{
+						key: structuredProductKey,
+						artifactKey: "artifact:a",
+						texturePages: [structuredPage],
+						texturePagesByKey: new Map([["page:structured", structuredPage]]),
+						materialRecords: [structuredMaterial],
+					},
+				],
+			]),
+			productResourceKeyByProductKey: new Map([
+				["product:a", structuredProductKey],
+			]),
+			cellKeysByProductKey: new Map([["product:a", ["cell:a", "cell:b"]]]),
 			cellsByKey: new Map([
 				[
 					"cell:a",
@@ -211,6 +236,27 @@ function createInspectableWorldStore(): Webgl2WorldResourceStore {
 						materialRecords: [structuredMaterial],
 						texturePages: [structuredPage],
 						triangleCount: 7,
+					},
+				],
+				[
+					"cell:b",
+					{
+						key: "cell:b",
+						artifactKey: "artifact:a",
+						landblockId: 0xda55ffff,
+						envCellId: 0xda5501ea,
+						materialSlices: [
+							{
+								key: "slice:b",
+								materialRecordKey: "material:structured",
+								indexCount: 9,
+								triangleCount: 3,
+							},
+						],
+						fallbackShell: null,
+						materialRecords: [structuredMaterial],
+						texturePages: [structuredPage],
+						triangleCount: 3,
 					},
 				],
 			]),

@@ -84,6 +84,11 @@ export type RenderSpatialMetadata =
 				sourcePartHintCount: number;
 				sourcePartIndices: readonly number[];
 				sourceMaterialSlotCount: number;
+				renderMaterialSlotCount: number;
+				sourceRenderTriangleCount: number;
+				sourceSkippedPolygonCount: number;
+				sourceInvalidPolygonCount: number;
+				sourcePhysicsPolygonCount: number;
 				emittedDirectEntryCount: number;
 				emittedCompactedBatchCount: number;
 				emittedGeometryEntryCount: number;
@@ -91,6 +96,11 @@ export type RenderSpatialMetadata =
 				emittedCompactedBatchTriangleCount: number;
 				emittedZeroTriangleEntryCount: number;
 				zeroTriangleMaterialRecordKeys: readonly string[];
+				materialTriangleCounts: readonly {
+					materialRecordKey: string;
+					familyKey: string | null;
+					triangleCount: number;
+				}[];
 				materialRecordKeys: readonly string[];
 				materialFamilyKeys: readonly string[];
 			};

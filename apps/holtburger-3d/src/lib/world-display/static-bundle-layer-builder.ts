@@ -89,6 +89,11 @@ interface StaticBundleSourcePart {
 	gfxObjId: number;
 	gfxObjAssetId: string;
 	materialSlots: readonly ResolvedMaterialSlot[];
+	sourceMaterialSlotCount: number;
+	sourceRenderTriangleCount: number;
+	sourceSkippedPolygonCount: number;
+	sourceInvalidPolygonCount: number;
+	sourcePhysicsPolygonCount: number;
 	partPlacements: readonly PlacementTransformDto[];
 	scale: Vec3Dto;
 }
@@ -190,7 +195,12 @@ export function buildStaticObjectBundleArtifact({
 				renderKey: `${object.objectKey}:part:${part.partIndex}`,
 				partIndex: part.partIndex,
 				gfxObjAssetId: part.gfxObjAssetId,
-				materialSlotCount: part.materialSlots.length,
+				materialSlotCount: part.sourceMaterialSlotCount,
+				renderMaterialSlotCount: part.materialSlots.length,
+				sourceRenderTriangleCount: part.sourceRenderTriangleCount,
+				sourceSkippedPolygonCount: part.sourceSkippedPolygonCount,
+				sourceInvalidPolygonCount: part.sourceInvalidPolygonCount,
+				sourcePhysicsPolygonCount: part.sourcePhysicsPolygonCount,
 			})),
 		}),
 	);
@@ -433,6 +443,14 @@ function collectSetupAppearanceBundleSourceParts({
 					slots: part.materialSlots,
 					renderGeometry: gfxObj.payload.renderGeometry,
 				}),
+				sourceMaterialSlotCount: part.materialSlots.length,
+				sourceRenderTriangleCount: gfxObj.payload.renderGeometry.triangleCount,
+				sourceSkippedPolygonCount:
+					gfxObj.payload.renderGeometry.skippedPolygonCount ?? 0,
+				sourceInvalidPolygonCount:
+					gfxObj.payload.renderGeometry.invalidPolygons?.length ?? 0,
+				sourcePhysicsPolygonCount:
+					gfxObj.payload.physicsWitness.polygonCount,
 				partPlacements: deriveSetupPartDefaultPlacements(
 					setupModel,
 					part.partIndex,
@@ -468,6 +486,12 @@ function createStaticBundleSourcePartFromGfxObj({
 			})),
 			renderGeometry: gfxObj.renderGeometry,
 		}),
+		sourceMaterialSlotCount: gfxObj.surfaceIds.length,
+		sourceRenderTriangleCount: gfxObj.renderGeometry.triangleCount,
+		sourceSkippedPolygonCount: gfxObj.renderGeometry.skippedPolygonCount ?? 0,
+		sourceInvalidPolygonCount:
+			gfxObj.renderGeometry.invalidPolygons?.length ?? 0,
+		sourcePhysicsPolygonCount: gfxObj.physicsWitness.polygonCount,
 		partPlacements,
 		scale,
 	};
@@ -804,6 +828,7 @@ function buildCompactedBatches(
 				objectKeys: uniqueSortedStrings(
 					group.map((surface) => surface.object.objectKey),
 				),
+				objectTriangleCounts: countSurfaceTrianglesByObject(group),
 				positions: concatFloat32Arrays(
 					group.map((surface) => surface.positions),
 				),
@@ -813,6 +838,24 @@ function buildCompactedBatches(
 			};
 		})
 		.sort((left, right) => left.key.localeCompare(right.key));
+}
+
+function countSurfaceTrianglesByObject(
+	surfaces: readonly StaticBundleBuildSurface[],
+): Readonly<Record<string, number>> {
+	const countsByObjectKey = new Map<string, number>();
+	for (const surface of surfaces) {
+		countsByObjectKey.set(
+			surface.object.objectKey,
+			(countsByObjectKey.get(surface.object.objectKey) ?? 0) +
+				surface.indices.length / 3,
+		);
+	}
+	return Object.fromEntries(
+		[...countsByObjectKey.entries()].sort(([left], [right]) =>
+			left.localeCompare(right),
+		),
+	);
 }
 
 function groupCompactedSurfacesByMaterial(

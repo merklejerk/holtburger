@@ -486,6 +486,7 @@ function createLayer(
 				familyKey: "rgba-texture-page",
 				materialRecordKey: "material",
 				objectKeys: ["object-a", "object-b"],
+				objectTriangleCounts: { "object-a": 1, "object-b": 0 },
 				positions: createPositions(),
 				normals: createNormals(),
 				uvs: createUvs(),

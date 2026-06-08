@@ -168,7 +168,7 @@ export async function runStaticLandblockRenderWorkerJob(
 	if (
 		(job.product === "outdoor-env-cells" ||
 			job.product === "dungeon-env-cells") &&
-		shouldBuildArtifact(job, "detailed-landblock")
+		shouldBuildArtifact(job, "cell-structures")
 	) {
 		artifacts.push(
 			buildDetailedLandblockRenderArtifacts({
@@ -374,7 +374,7 @@ function shouldLoadOutdoorRootOnly(
 	return (
 		job.product === "outdoor" &&
 		shouldBuildArtifact(job, "terrain") &&
-		!shouldBuildArtifact(job, "static-bundles")
+		!shouldBuildArtifact(job, "static-objects")
 	);
 }
 
@@ -477,7 +477,7 @@ function buildProductStaticBundleLayers(
 	job: LandblockRenderProductWorkerJob,
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>,
 ): StaticObjectBundleArtifact[] {
-	if (!shouldBuildArtifact(job, "static-bundles")) {
+	if (!shouldBuildArtifact(job, "static-objects")) {
 		return [];
 	}
 	if (job.product === "outdoor") {

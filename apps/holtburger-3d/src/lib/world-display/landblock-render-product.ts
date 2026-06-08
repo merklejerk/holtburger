@@ -265,11 +265,17 @@ export function createLandblockRenderProductWorkerJob(
 	artifactFilter: ReadonlySet<RenderArtifactDiagnosticFamily> | null = null,
 ): LandblockRenderProductWorkerJob {
 	const artifactFilterValues = artifactFilter ? [...artifactFilter].sort() : null;
+	const artifactFilterLabel =
+		artifactFilterValues === null
+			? "all"
+			: artifactFilterValues.length > 0
+				? artifactFilterValues.join(",")
+				: "none";
 	return {
 		type: "build-landblock-render-product",
 		jobId: [
 			formatStaticLandblockProductKey(createStaticLandblockProductKey(desired)),
-			`artifacts:${artifactFilterValues?.join(",") ?? "all"}`,
+			`artifacts:${artifactFilterLabel}`,
 		].join(":"),
 		landblockId: desired.landblockId,
 		product: desired.product,

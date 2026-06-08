@@ -64,7 +64,6 @@ export type Webgl2IndexedP8WorldProgram = Webgl2ProgramResource<
 	| "uIndexTexture"
 	| "uPaletteTexture"
 	| "uTextureSize"
-	| "uPaletteColorCount"
 	| "uIndexAtlasRect"
 	| "uPaletteAtlasRect"
 	| "uPaletteAtlasSize"
@@ -86,7 +85,6 @@ export type Webgl2IndexedP16WorldProgram = Webgl2ProgramResource<
 	| "uIndexTexture"
 	| "uPaletteTexture"
 	| "uTextureSize"
-	| "uPaletteColorCount"
 	| "uIndexAtlasRect"
 	| "uPaletteAtlasRect"
 	| "uPaletteAtlasSize"
@@ -1095,10 +1093,6 @@ function submitWebgl2IndexedStructuredInteriorMaterialSlice({
 		descriptor.width,
 		descriptor.height,
 	);
-	gl.uniform1f(
-		program.uniforms.uPaletteColorCount,
-		descriptor.paletteColorCount,
-	);
 	gl.uniform4f(
 		program.uniforms.uIndexAtlasRect,
 		index.rect[0],
@@ -1133,7 +1127,7 @@ function submitWebgl2IndexedStructuredInteriorMaterialSlice({
 	gl.uniform1f(program.uniforms.uDetailTiling, 1);
 	gl.uniform1i(program.uniforms.uDetailEnabled, detail ? 1 : 0);
 	uploadIndexedDetailAtlasUniforms(gl, program, detail);
-	metrics.uniformUploadCount += 16;
+	metrics.uniformUploadCount += 15;
 	gl.drawElements(gl.TRIANGLES, slice.indexCount, slice.indexType, 0);
 	recordStructuredInteriorMaterialSliceSubmitted(metrics, slice);
 }
@@ -1507,10 +1501,6 @@ function submitWebgl2IndexedStaticBundleGeometry({
 		descriptor.width,
 		descriptor.height,
 	);
-	gl.uniform1f(
-		program.uniforms.uPaletteColorCount,
-		descriptor.paletteColorCount,
-	);
 	gl.uniform4f(
 		program.uniforms.uIndexAtlasRect,
 		index.rect[0],
@@ -1545,7 +1535,7 @@ function submitWebgl2IndexedStaticBundleGeometry({
 	gl.uniform1f(program.uniforms.uDetailTiling, 1);
 	gl.uniform1i(program.uniforms.uDetailEnabled, detail ? 1 : 0);
 	uploadIndexedDetailAtlasUniforms(gl, program, detail);
-	metrics.uniformUploadCount += 16;
+	metrics.uniformUploadCount += 15;
 	gl.drawElements(gl.TRIANGLES, geometry.indexCount, geometry.indexType, 0);
 	const family = parseStaticMaterialFamilyKey(material.familyKey);
 	if (family) {

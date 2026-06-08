@@ -6,7 +6,10 @@ import {
 	planAtlasLayout,
 	type AtlasLayoutPolicy,
 } from "./texture-pages/atlas-layout-planner";
-import type { TexturePageDescriptor } from "./texture-pages/texture-page-binding";
+import {
+	deriveStaticTexturePageBucket,
+	type TexturePageDescriptor,
+} from "./texture-pages/texture-page-binding";
 
 export function buildStaticBundleLayerTexturePages(options: {
 	scopeKey: string;
@@ -45,17 +48,19 @@ export function buildStaticBundleLayerTexturePages(options: {
 					return { placement, ref };
 				})
 				.sort((left, right) => left.ref.key.localeCompare(right.ref.key));
-			const usageBucket = placements[0]?.ref.usageBucket;
 			const sampleClass = placements[0]?.ref.sampleClass;
 			const indexedFormat = placements[0]?.ref.indexedFormat;
-			if (!usageBucket || !sampleClass) {
+			if (!sampleClass) {
 				continue;
 			}
+			const pageBucket = resolveStaticTexturePageBucketForRefs(
+				placements.map(({ ref }) => ref),
+			);
 			pages.push({
-				key: `${options.scopeKey}:page:${usageBucket}:${texturePage.textureIndex}`,
+				key: `${options.scopeKey}:page:${pageBucket}:${texturePage.textureIndex}`,
 				scopeKey: options.scopeKey,
+				bucket: pageBucket,
 				pageKind: "packed-atlas",
-				usageBucket,
 				sampleClass,
 				indexedFormat,
 				width: texturePage.width,
@@ -68,6 +73,13 @@ export function buildStaticBundleLayerTexturePages(options: {
 				entries: placements.map(({ placement, ref }) => ({
 					virtualRefKey: ref.key,
 					sourceAssetId: ref.sourceAssetId,
+					role: ref.role,
+					sampleClass: ref.sampleClass,
+					indexedFormat: ref.indexedFormat,
+					wrapS: ref.wrapS,
+					wrapT: ref.wrapT,
+					samplingDomain: ref.samplingDomain,
+					lookup: ref.lookup,
 					rect: [
 						placement.x,
 						placement.y,
@@ -94,7 +106,7 @@ export function createStaticBundleTexturePageDescriptor(
 ): TexturePageDescriptor {
 	return {
 		pageKind: "single-entry",
-		usageBucket: ref.usageBucket,
+		role: ref.role,
 		sampleClass: ref.sampleClass,
 		rect: [0, 0, ref.width, ref.height],
 		width: ref.width,
@@ -111,7 +123,7 @@ export function createStaticBundleTexturePageDescriptor(
 			lookup: ref.lookup,
 		},
 		source:
-			ref.usageBucket === "detail"
+			ref.role === "detail"
 				? "detail-overlay"
 				: "standalone-direct-texture",
 	};
@@ -122,10 +134,14 @@ function groupTextureRefsByBucket(
 ): Map<string, VirtualTexturePageRef[]> {
 	const refsByBucket = new Map<string, VirtualTexturePageRef[]>();
 	for (const ref of refs) {
-		const key = `${ref.usageBucket}:${ref.sampleClass}:${ref.indexedFormat ?? "none"}`;
-		const bucket = refsByBucket.get(key);
-		if (bucket) {
-			bucket.push(ref);
+		const pageBucket = deriveStaticTexturePageBucket({
+			role: ref.role,
+			sampleClass: ref.sampleClass,
+		});
+		const key = `${pageBucket}:${ref.sampleClass}:${ref.indexedFormat ?? "none"}`;
+		const bucketRefs = refsByBucket.get(key);
+		if (bucketRefs) {
+			bucketRefs.push(ref);
 		} else {
 			refsByBucket.set(key, [ref]);
 		}
@@ -140,8 +156,11 @@ function createSingleEntryTexturePage(
 	return {
 		key: `${scopeKey}:page:single:${ref.key}`,
 		scopeKey,
+		bucket: deriveStaticTexturePageBucket({
+			role: ref.role,
+			sampleClass: ref.sampleClass,
+		}),
 		pageKind: "single-entry",
-		usageBucket: ref.usageBucket,
 		sampleClass: ref.sampleClass,
 		indexedFormat: ref.indexedFormat,
 		width: ref.width,
@@ -155,10 +174,38 @@ function createSingleEntryTexturePage(
 			{
 				virtualRefKey: ref.key,
 				sourceAssetId: ref.sourceAssetId,
+				role: ref.role,
+				sampleClass: ref.sampleClass,
+				indexedFormat: ref.indexedFormat,
+				wrapS: ref.wrapS,
+				wrapT: ref.wrapT,
+				samplingDomain: ref.samplingDomain,
+				lookup: ref.lookup,
 				rect: [0, 0, ref.width, ref.height],
 			},
 		],
 	};
+}
+
+function resolveStaticTexturePageBucketForRefs(
+	refs: readonly VirtualTexturePageRef[],
+): StaticBundleTexturePage["bucket"] {
+	const buckets = new Set(
+		refs.map((ref) =>
+			deriveStaticTexturePageBucket({
+				role: ref.role,
+				sampleClass: ref.sampleClass,
+			}),
+		),
+	);
+	if (buckets.size !== 1) {
+		throw new Error("Texture page atlas cannot mix static page buckets.");
+	}
+	const bucket = [...buckets][0];
+	if (!bucket) {
+		throw new Error("Texture page atlas has no static page bucket.");
+	}
+	return bucket;
 }
 
 function packAtlasBytes(

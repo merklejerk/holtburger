@@ -2424,7 +2424,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		return {
 			identity,
 			key: page.key,
-			usageBucket: page.usageBucket,
+			bucket: page.bucket,
 			sampleClass: page.sampleClass,
 			pageKind: page.pageKind,
 			indexedFormat: page.indexedFormat ?? null,

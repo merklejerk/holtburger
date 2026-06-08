@@ -265,16 +265,12 @@ function createWebgl2StructuredInteriorProductResource({
 	const texturePagesByKey = new Map(
 		texturePages.map((page) => [page.key, page]),
 	);
-	const texturePageRefByKey = new Map(
-		artifact.structuredInteriorTexturePageRefs.map((ref) => [ref.key, ref]),
-	);
 	const texturePageByVirtualRefKey =
 		createStaticBundleTexturePageByVirtualRefKey(texturePages);
 	const materialRecords = artifact.structuredInteriorMaterialRecords.map(
 		(record) =>
 			createWebgl2StaticBundleMaterialResource({
 				record,
-				texturePageRefByKey,
 				texturePageByVirtualRefKey,
 			}),
 	);

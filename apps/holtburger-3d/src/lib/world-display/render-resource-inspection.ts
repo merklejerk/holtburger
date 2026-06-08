@@ -2,13 +2,11 @@ import type { Webgl2WorldResourceStore } from "./webgl2-world-resources";
 import { formatHex32 } from "../landblocks";
 import type { IndexedTextureFormat } from "./indexed-material-data";
 import type {
+	TexturePageBucket,
 	TexturePageKind,
 	TexturePageSampleClass,
 } from "./texture-pages/texture-page-binding";
-import type {
-	Webgl2ResidentTexturePageUsageBucket,
-	Webgl2TexturePageSamplerPolicyKey,
-} from "./webgl2/resources/texture-page-upload";
+import type { Webgl2TexturePageSamplerPolicyKey } from "./webgl2/resources/texture-page-upload";
 
 export type RenderResourceInspectionOwnerKind =
 	| "static-bundle"
@@ -71,7 +69,7 @@ export interface RenderResourceInspectionTexturePage {
 	readonly key: string;
 	readonly ownerKind: RenderResourceInspectionOwnerKind;
 	readonly ownerKey: string;
-	readonly usageBucket: Webgl2ResidentTexturePageUsageBucket;
+	readonly bucket: TexturePageBucket;
 	readonly sampleClass: TexturePageSampleClass;
 	readonly pageKind: TexturePageKind;
 	readonly indexedFormat: IndexedTextureFormat | null;
@@ -99,7 +97,7 @@ export interface RenderResourceTexturePreviewEntry {
 export interface RenderResourceTexturePagePreview {
 	readonly identity: RenderResourceTexturePageIdentity;
 	readonly key: string;
-	readonly usageBucket: Webgl2ResidentTexturePageUsageBucket;
+	readonly bucket: TexturePageBucket;
 	readonly sampleClass: TexturePageSampleClass;
 	readonly pageKind: TexturePageKind;
 	readonly indexedFormat: IndexedTextureFormat | null;
@@ -382,7 +380,7 @@ function compareByKey<T extends { readonly key: string }>(left: T, right: T): nu
 
 interface InspectableTexturePageResource {
 	readonly key: string;
-	readonly usageBucket: Webgl2ResidentTexturePageUsageBucket;
+	readonly bucket: TexturePageBucket;
 	readonly sampleClass: TexturePageSampleClass;
 	readonly pageKind: TexturePageKind;
 	readonly indexedFormat?: IndexedTextureFormat | null;
@@ -410,7 +408,7 @@ function describeTexturePageResource(
 		key: page.key,
 		ownerKind: owner.ownerKind,
 		ownerKey: owner.ownerKey,
-		usageBucket: page.usageBucket,
+		bucket: page.bucket,
 		sampleClass: page.sampleClass,
 		pageKind: page.pageKind,
 		indexedFormat: page.indexedFormat ?? null,

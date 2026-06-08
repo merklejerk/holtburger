@@ -231,7 +231,7 @@ function createTexturePage({
 }): unknown {
 	return {
 		key,
-		usageBucket: "base-color",
+		role: "base-color",
 		sampleClass: "rgba-color",
 		pageKind: "packed-atlas",
 		indexedFormat: null,

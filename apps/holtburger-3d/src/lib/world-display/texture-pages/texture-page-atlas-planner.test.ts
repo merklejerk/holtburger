@@ -4,25 +4,25 @@ import {
 	planTexturePageAtlas,
 	TERRAIN_COLOR_ATLAS_GUTTER_PIXELS,
 	TERRAIN_MASK_ATLAS_GUTTER_PIXELS,
-	type TexturePageFamily,
 	type TexturePageAtlasRgbaCandidate,
 	type TexturePageAtlasDetailCandidate,
 } from "./texture-page-atlas-planner";
+import type { TexturePageBucket } from "./texture-page-binding";
 import type { CompactionFamilyPlanningPolicy } from "../compaction/compaction-family-planner";
 
 describe("planTexturePageAtlas", () => {
-	it("keeps rgba atlas pages isolated by texture page family", () => {
+	it("keeps rgba atlas pages isolated by texture page bucket", () => {
 		const plan = planTexturePageAtlas({
 			rgbaCandidates: [
 				createRgbaCandidate({
 					candidateId: "static-a",
 					entryKey: "shared-size-static",
-					family: "static-rgba",
+					bucket: "static-base-color",
 				}),
 				createRgbaCandidate({
 					candidateId: "terrain-a",
 					entryKey: "shared-size-terrain",
-					family: "terrain-color",
+					bucket: "terrain-color",
 				}),
 			],
 			detailCandidates: [],
@@ -33,12 +33,12 @@ describe("planTexturePageAtlas", () => {
 			"static-a",
 			"terrain-a",
 		]);
-		expect(plan.families.map((family) => family.family)).toEqual([
-			"static-rgba",
+		expect(plan.buckets.map((bucket) => bucket.bucket)).toEqual([
+			"static-base-color",
 			"terrain-color",
 		]);
-		expect(plan.families[0]?.atlasTextures).toHaveLength(1);
-		expect(plan.families[1]?.atlasTextures).toHaveLength(1);
+		expect(plan.buckets[0]?.atlasTextures).toHaveLength(1);
+		expect(plan.buckets[1]?.atlasTextures).toHaveLength(1);
 		expect(plan.atlasTextures).toHaveLength(2);
 		expect(
 			plan.atlasTextures.map((texture) =>
@@ -47,19 +47,19 @@ describe("planTexturePageAtlas", () => {
 		).toEqual([["shared-size-static"], ["shared-size-terrain"]]);
 	});
 
-	it("keeps detail atlas pages isolated by texture page family", () => {
+	it("keeps detail atlas pages isolated by texture page bucket", () => {
 		const plan = planTexturePageAtlas({
 			rgbaCandidates: [],
 			detailCandidates: [
 				createDetailCandidate({
 					candidateId: "static-detail",
 					entryKey: "static-detail-entry",
-					family: "static-detail",
+					bucket: "static-detail",
 				}),
 				createDetailCandidate({
 					candidateId: "terrain-detail",
 					entryKey: "terrain-detail-entry",
-					family: "terrain-detail",
+					bucket: "terrain-detail",
 				}),
 			],
 			policy: createPolicy(),
@@ -69,7 +69,7 @@ describe("planTexturePageAtlas", () => {
 			"static-detail",
 			"terrain-detail",
 		]);
-		expect(plan.families.map((family) => family.family)).toEqual([
+		expect(plan.buckets.map((bucket) => bucket.bucket)).toEqual([
 			"static-detail",
 			"terrain-detail",
 		]);
@@ -81,23 +81,23 @@ describe("planTexturePageAtlas", () => {
 		).toEqual([["static-detail-entry"], ["terrain-detail-entry"]]);
 	});
 
-	it("uses wider gutters for mipmapped terrain atlas families", () => {
+	it("uses wider gutters for mipmapped terrain atlas buckets", () => {
 		const plan = planTexturePageAtlas({
 			rgbaCandidates: [
 				createRgbaCandidate({
 					candidateId: "terrain-color",
 					entryKey: "terrain-color-entry",
-					family: "terrain-color",
+					bucket: "terrain-color",
 				}),
 				createRgbaCandidate({
 					candidateId: "terrain-mask",
 					entryKey: "terrain-mask-entry",
-					family: "terrain-mask",
+					bucket: "terrain-mask",
 				}),
 				createRgbaCandidate({
 					candidateId: "static",
 					entryKey: "static-entry",
-					family: "static-rgba",
+					bucket: "static-base-color",
 				}),
 			],
 			detailCandidates: [],
@@ -105,10 +105,10 @@ describe("planTexturePageAtlas", () => {
 		});
 
 		const placements = new Map(
-			plan.families.flatMap((family) =>
-				family.atlasTextures.flatMap((texture) =>
+			plan.buckets.flatMap((bucket) =>
+				bucket.atlasTextures.flatMap((texture) =>
 					texture.placements.map(
-						(placement) => [family.family, placement.gutterPixels] as const,
+						(placement) => [bucket.bucket, placement.gutterPixels] as const,
 					),
 				),
 			),
@@ -122,22 +122,22 @@ describe("planTexturePageAtlas", () => {
 		expect(placements.get("terrain-mask")).toBe(
 			TERRAIN_MASK_ATLAS_GUTTER_PIXELS,
 		);
-		expect(placements.get("static-rgba")).toBe(0);
+		expect(placements.get("static-base-color")).toBe(0);
 	});
 });
 
 function createRgbaCandidate({
 	candidateId,
 	entryKey,
-	family,
+	bucket,
 }: {
 	candidateId: string;
 	entryKey: string;
-	family: TexturePageFamily;
+	bucket: TexturePageBucket;
 }): TexturePageAtlasRgbaCandidate {
 	return {
 		candidateId,
-		family,
+		bucket,
 		detailAtlasEntry: null,
 		texturePageReadiness: {
 			atlasEntryKey: entryKey,
@@ -170,15 +170,15 @@ function createRgbaCandidate({
 function createDetailCandidate({
 	candidateId,
 	entryKey,
-	family,
+	bucket,
 }: {
 	candidateId: string;
 	entryKey: string;
-	family: TexturePageFamily;
+	bucket: TexturePageBucket;
 }): TexturePageAtlasDetailCandidate {
 	return {
 		candidateId,
-		family,
+		bucket,
 		detailAtlasEntry: {
 			key: entryKey,
 			renderSurfaceId: 2,

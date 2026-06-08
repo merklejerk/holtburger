@@ -8,7 +8,8 @@ import type {
 	TexturePageLookupPolicy,
 	TexturePageSampleClass,
 	TexturePageSamplingDomain,
-	TexturePageUsageBucket,
+	StaticTexturePageBucket,
+	TexturePageEntryRole,
 	TexturePageWrapMode,
 } from "./texture-pages/texture-page-binding";
 
@@ -45,7 +46,7 @@ interface DesiredStaticBundleLayerDiagnostics {
 	knownMissingAssetIds: readonly string[];
 }
 
-export type VirtualTexturePageUsageBucket = TexturePageUsageBucket;
+export type VirtualTexturePageEntryRole = TexturePageEntryRole;
 
 export type VirtualTexturePageSampleClass = TexturePageSampleClass;
 
@@ -54,7 +55,7 @@ export type StaticBundleIndexedTextureFormat = IndexedTextureFormat;
 export interface VirtualTexturePageRef {
 	key: string;
 	sourceAssetId: string;
-	usageBucket: VirtualTexturePageUsageBucket;
+	role: VirtualTexturePageEntryRole;
 	sampleClass: VirtualTexturePageSampleClass;
 	indexedFormat?: StaticBundleIndexedTextureFormat;
 	width: number;
@@ -71,14 +72,21 @@ export type StaticBundleTexturePageKind = TexturePageKind;
 interface StaticBundleTexturePageEntry {
 	virtualRefKey: string;
 	sourceAssetId: string;
+	role: VirtualTexturePageEntryRole;
+	sampleClass: VirtualTexturePageSampleClass;
+	indexedFormat?: StaticBundleIndexedTextureFormat;
+	wrapS: TexturePageWrapMode;
+	wrapT: TexturePageWrapMode;
+	samplingDomain: TexturePageSamplingDomain;
+	lookup: TexturePageLookupPolicy;
 	rect: readonly [number, number, number, number];
 }
 
 export interface StaticBundleTexturePage {
 	key: string;
 	scopeKey: string;
+	bucket: StaticTexturePageBucket;
 	pageKind: StaticBundleTexturePageKind;
-	usageBucket: VirtualTexturePageUsageBucket;
 	sampleClass: VirtualTexturePageSampleClass;
 	indexedFormat?: StaticBundleIndexedTextureFormat;
 	width: number;

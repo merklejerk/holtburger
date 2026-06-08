@@ -279,7 +279,7 @@ describe("static bundle layer builder", () => {
 		expect(
 			layer.texturePageRefs.map((ref) => [
 				ref.key,
-				ref.usageBucket,
+				ref.role,
 				ref.sourceAssetId,
 				ref.wrapS,
 				ref.wrapT,
@@ -536,7 +536,7 @@ describe("static bundle layer builder", () => {
 
 		expect(
 			layer.texturePageRefs.map((ref) => [
-				ref.usageBucket,
+				ref.role,
 				ref.sampleClass,
 				ref.samplingDomain,
 				ref.lookup,
@@ -547,13 +547,13 @@ describe("static bundle layer builder", () => {
 		]);
 		expect(
 			layer.texturePages.map((page) => [
-				page.usageBucket,
+				page.bucket,
 				page.sampleClass,
 				page.bytes.byteLength,
 			]),
 		).toEqual([
-			["palette-lookup", "palette-data", 1024],
-			["indexed-texels", "indexed-data", 4],
+			["static-palette-lookup", "palette-data", 1024],
+			["static-indexed-texels", "indexed-data", 4],
 		]);
 		expect(layer.materialRecords).toEqual([
 			{
@@ -653,7 +653,7 @@ describe("static bundle layer builder", () => {
 		});
 
 		expect(
-			layer.texturePageRefs.map((ref) => [ref.usageBucket, ref.sampleClass]),
+			layer.texturePageRefs.map((ref) => [ref.role, ref.sampleClass]),
 		).toEqual([
 			["palette-lookup", "palette-data"],
 			["indexed-texels", "indexed-data"],
@@ -691,7 +691,7 @@ describe("static bundle layer builder", () => {
 		});
 
 		expect(
-			layer.texturePageRefs.find((ref) => ref.usageBucket === "indexed-texels"),
+			layer.texturePageRefs.find((ref) => ref.role === "indexed-texels"),
 		).toMatchObject({
 			sampleClass: "indexed-data",
 			indexedFormat: "index16",
@@ -699,7 +699,9 @@ describe("static bundle layer builder", () => {
 			height: 2,
 		});
 		expect(
-			layer.texturePages.find((page) => page.usageBucket === "indexed-texels"),
+			layer.texturePages.find((page) =>
+				page.entries.some((entry) => entry.role === "indexed-texels"),
+			),
 		).toMatchObject({
 			sampleClass: "indexed-data",
 			indexedFormat: "index16",

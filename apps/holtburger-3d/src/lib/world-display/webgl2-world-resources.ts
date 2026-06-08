@@ -53,11 +53,11 @@ import {
 	createEmptyTexturePageAtlasPlan,
 	createTexturePageDetailAtlasPlacementsByEntryKey,
 	createTexturePageAtlasPlacementsByEntryKey,
-	isTerrainTexturePageFamily,
 	type TexturePageAtlasDetailCandidate,
 	type TexturePageAtlasRgbaCandidate,
 	type TexturePageAtlasPlan,
 } from "./texture-pages/texture-page-atlas-planner";
+import { isTerrainTexturePageBucket } from "./texture-pages/texture-page-binding";
 import {
 	createTexturePageCpuSet,
 	createWebgl2TexturePageTextureResourceFromCpu,
@@ -165,7 +165,7 @@ export interface Webgl2WorldResourceStore {
 		string,
 		Webgl2TerrainTexturePageResource
 	>;
-	productTerrainTexturePagesByFamilyIndex: Map<
+	productTerrainTexturePagesByBucketIndex: Map<
 		string,
 		Webgl2TerrainTexturePageResource
 	>;
@@ -219,7 +219,7 @@ export function createWebgl2WorldResourceStore(): Webgl2WorldResourceStore {
 		atlasFailureSamples: [],
 		texturePageAtlasPlan: createEmptyTexturePageAtlasPlan(),
 		productTerrainTexturePagesByKey: new Map(),
-		productTerrainTexturePagesByFamilyIndex: new Map(),
+		productTerrainTexturePagesByBucketIndex: new Map(),
 		terrainTexturePageCount: 0,
 		terrainDetailTexturePageCount: 0,
 		textureCount: 0,
@@ -520,7 +520,7 @@ function refreshWebgl2TerrainProductDerivedState({
 	syncWebgl2TerrainTexturePageResources({
 		gl,
 		texturePagesByKey: store.productTerrainTexturePagesByKey,
-		texturePagesByFamilyIndex: store.productTerrainTexturePagesByFamilyIndex,
+		texturePagesByBucketIndex: store.productTerrainTexturePagesByBucketIndex,
 		plan: productTerrainTexturePageAtlasPlan,
 		textureFilteringMode,
 		maxAnisotropy: materialTextureCapabilities.maxAnisotropy ?? 1,
@@ -530,7 +530,7 @@ function refreshWebgl2TerrainProductDerivedState({
 		store,
 		terrainTiles: productTerrainTiles,
 		plan: productTerrainTexturePageAtlasPlan,
-		texturePagesByFamilyIndex: store.productTerrainTexturePagesByFamilyIndex,
+		texturePagesByBucketIndex: store.productTerrainTexturePagesByBucketIndex,
 	});
 	refreshWebgl2TerrainTexturePageCounters(store);
 }
@@ -630,7 +630,7 @@ function refreshWebgl2TerrainTexturePageCounters(
 	const texturePages = [...store.productTerrainTexturePagesByKey.values()];
 	store.terrainTexturePageCount = texturePages.length;
 	store.terrainDetailTexturePageCount = texturePages.filter(
-		(texturePage) => texturePage.family === "terrain-detail",
+		(texturePage) => texturePage.bucket === "terrain-detail",
 	).length;
 }
 
@@ -678,7 +678,7 @@ export function destroyWebgl2WorldResources(
 		terrainTexturePage.texture.dispose();
 	}
 	store.productTerrainTexturePagesByKey.clear();
-	store.productTerrainTexturePagesByFamilyIndex.clear();
+	store.productTerrainTexturePagesByBucketIndex.clear();
 	store.terrainTexturePageCount = 0;
 	store.terrainDetailTexturePageCount = 0;
 	for (const texture of store.texturesByKey.values()) {
@@ -1180,7 +1180,7 @@ function collectTerrainTexturePageAtlasCandidates({
 			}
 			rgbaCandidates.push({
 				candidateId: tile.id,
-				family: ref.role === "mask" ? "terrain-mask" : "terrain-color",
+				bucket: ref.role === "mask" ? "terrain-mask" : "terrain-color",
 				texturePageReadiness: readiness,
 				detailAtlasEntry: null,
 			});
@@ -1248,7 +1248,7 @@ function resolveTerrainTileDetailPlan({
 		candidate: upload
 			? {
 					candidateId: tile.id,
-					family: "terrain-detail",
+					bucket: "terrain-detail",
 					detailAtlasEntry: {
 						key: atlasEntryKey,
 						renderSurfaceId: overlay.renderSurface.renderSurfaceId,
@@ -1554,13 +1554,13 @@ function resolveWebgl2TerrainTileTexturePageBindings({
 	store,
 	terrainTiles,
 	plan,
-	texturePagesByFamilyIndex,
+	texturePagesByBucketIndex,
 }: {
 	gl: WebGL2RenderingContext;
 	store: Webgl2WorldResourceStore;
 	terrainTiles: readonly Webgl2TerrainTileResource[];
 	plan: TexturePageAtlasPlan;
-	texturePagesByFamilyIndex: ReadonlyMap<
+	texturePagesByBucketIndex: ReadonlyMap<
 		string,
 		Webgl2TerrainTexturePageResource
 	>;
@@ -1583,10 +1583,10 @@ function resolveWebgl2TerrainTileTexturePageBindings({
 				);
 				continue;
 			}
-			const family = ref.role === "mask" ? "terrain-mask" : "terrain-color";
+			const bucket = ref.role === "mask" ? "terrain-mask" : "terrain-color";
 			const texturePage = resolveTerrainTexturePageResource({
-				texturePagesByFamilyIndex,
-				family,
+				texturePagesByBucketIndex,
+				bucket,
 				textureIndex: placement.textureIndex,
 			});
 			if (!texturePage) {
@@ -1596,7 +1596,7 @@ function resolveWebgl2TerrainTileTexturePageBindings({
 				continue;
 			}
 			bindings.push({
-				family,
+				bucket,
 				atlasEntryKey,
 				textureIndex: placement.textureIndex,
 				rect: [placement.x, placement.y, placement.width, placement.height],
@@ -1608,13 +1608,13 @@ function resolveWebgl2TerrainTileTexturePageBindings({
 				detailPlacementsByEntryKey.get(tile.detailPlan.atlasEntryKey) ?? null;
 			if (placement) {
 				const texturePage = resolveTerrainTexturePageResource({
-					texturePagesByFamilyIndex,
-					family: "terrain-detail",
+					texturePagesByBucketIndex,
+					bucket: "terrain-detail",
 					textureIndex: placement.textureIndex,
 				});
 				if (texturePage) {
 					bindings.push({
-						family: "terrain-detail",
+						bucket: "terrain-detail",
 						atlasEntryKey: tile.detailPlan.atlasEntryKey,
 						textureIndex: placement.textureIndex,
 						rect: [placement.x, placement.y, placement.width, placement.height],
@@ -1650,35 +1650,35 @@ function resolveWebgl2TerrainTileTexturePageBindings({
 }
 
 function resolveTerrainTexturePageResource({
-	texturePagesByFamilyIndex,
-	family,
+	texturePagesByBucketIndex,
+	bucket,
 	textureIndex,
 }: {
-	texturePagesByFamilyIndex: ReadonlyMap<
+	texturePagesByBucketIndex: ReadonlyMap<
 		string,
 		Webgl2TerrainTexturePageResource
 	>;
-	family: Webgl2TerrainTexturePageResource["family"];
+	bucket: Webgl2TerrainTexturePageResource["bucket"];
 	textureIndex: number;
 }): Webgl2TerrainTexturePageResource | null {
-	return texturePagesByFamilyIndex.get(describeTerrainTexturePageFamilyIndexKey({
-		family,
+	return texturePagesByBucketIndex.get(describeTerrainTexturePageBucketIndexKey({
+		bucket,
 		textureIndex,
 	})) ?? null;
 }
 
-function rebuildTerrainTexturePageFamilyIndex({
+function rebuildTerrainTexturePageBucketIndex({
 	texturePagesByKey,
-	texturePagesByFamilyIndex,
+	texturePagesByBucketIndex,
 }: {
 	texturePagesByKey: ReadonlyMap<string, Webgl2TerrainTexturePageResource>;
-	texturePagesByFamilyIndex: Map<string, Webgl2TerrainTexturePageResource>;
+	texturePagesByBucketIndex: Map<string, Webgl2TerrainTexturePageResource>;
 }): void {
-	texturePagesByFamilyIndex.clear();
+	texturePagesByBucketIndex.clear();
 	for (const page of texturePagesByKey.values()) {
-		texturePagesByFamilyIndex.set(
-			describeTerrainTexturePageFamilyIndexKey({
-				family: page.family,
+		texturePagesByBucketIndex.set(
+			describeTerrainTexturePageBucketIndexKey({
+				bucket: page.bucket,
 				textureIndex: page.textureIndex,
 			}),
 			page,
@@ -1686,14 +1686,14 @@ function rebuildTerrainTexturePageFamilyIndex({
 	}
 }
 
-function describeTerrainTexturePageFamilyIndexKey({
-	family,
+function describeTerrainTexturePageBucketIndexKey({
+	bucket,
 	textureIndex,
 }: {
-	family: Webgl2TerrainTexturePageResource["family"];
+	bucket: Webgl2TerrainTexturePageResource["bucket"];
 	textureIndex: number;
 }): string {
-	return `${family}:${textureIndex}`;
+	return `${bucket}:${textureIndex}`;
 }
 
 function createWebgl2TerrainTilePageOverflowDrawSlices({
@@ -1924,12 +1924,12 @@ function dedupeTerrainTexturePageBindings(
 	const bindingByKey = new Map(
 		bindings.map(
 			(binding) =>
-				[`${binding.family}/${binding.atlasEntryKey}`, binding] as const,
+				[`${binding.bucket}/${binding.atlasEntryKey}`, binding] as const,
 		),
 	);
 	return [...bindingByKey.values()].sort((left, right) =>
-		`${left.family}/${left.atlasEntryKey}`.localeCompare(
-			`${right.family}/${right.atlasEntryKey}`,
+		`${left.bucket}/${left.atlasEntryKey}`.localeCompare(
+			`${right.bucket}/${right.atlasEntryKey}`,
 		),
 	);
 }
@@ -1977,14 +1977,14 @@ function createTransitionPortalMaskGeometrySignature(
 function syncWebgl2TerrainTexturePageResources({
 	gl,
 	texturePagesByKey,
-	texturePagesByFamilyIndex,
+	texturePagesByBucketIndex,
 	plan,
 	textureFilteringMode,
 	maxAnisotropy,
 }: {
 	gl: WebGL2RenderingContext;
 	texturePagesByKey: Map<string, Webgl2TerrainTexturePageResource>;
-	texturePagesByFamilyIndex: Map<string, Webgl2TerrainTexturePageResource>;
+	texturePagesByBucketIndex: Map<string, Webgl2TerrainTexturePageResource>;
 	plan: TexturePageAtlasPlan;
 	textureFilteringMode: TextureFilteringMode;
 	maxAnisotropy: number;
@@ -1996,7 +1996,7 @@ function syncWebgl2TerrainTexturePageResources({
 	});
 	if (!terrainPlan) {
 		clearWebgl2TerrainTexturePageResources(texturePagesByKey);
-		texturePagesByFamilyIndex.clear();
+		texturePagesByBucketIndex.clear();
 		return;
 	}
 	const retainedKeys = new Set<string>();
@@ -2024,18 +2024,18 @@ function syncWebgl2TerrainTexturePageResources({
 			texturePagesByKey.delete(key);
 		}
 	}
-	rebuildTerrainTexturePageFamilyIndex({
+	rebuildTerrainTexturePageBucketIndex({
 		texturePagesByKey,
-		texturePagesByFamilyIndex,
+		texturePagesByBucketIndex,
 	});
 }
 
 function createWebgl2TerrainTexturePageResource(
 	texturePage: ReturnType<typeof createWebgl2TexturePageTextureResourceFromCpu>,
 ): Webgl2TerrainTexturePageResource {
-	if (!isTerrainTexturePageFamily(texturePage.family)) {
+	if (!isTerrainTexturePageBucket(texturePage.bucket)) {
 		throw new Error(
-			`Terrain texture page ${texturePage.key} has non-terrain family ${texturePage.family}.`,
+			`Terrain texture page ${texturePage.key} has non-terrain bucket ${texturePage.bucket}.`,
 		);
 	}
 	if (!texturePage.pixelStats || !texturePage.entryDiagnostics) {
@@ -2045,7 +2045,7 @@ function createWebgl2TerrainTexturePageResource(
 	}
 	return {
 		...texturePage,
-		family: texturePage.family,
+		bucket: texturePage.bucket,
 		pixelStats: texturePage.pixelStats,
 		entryDiagnostics: texturePage.entryDiagnostics,
 	};
@@ -2060,13 +2060,13 @@ function createTerrainTexturePageGenerationPlan({
 	textureFilteringMode: TextureFilteringMode;
 	maxAnisotropy: number;
 }): { cpuSet: TexturePageCpuSet } | null {
-	const terrainFamilies = plan.families
-		.map((familyPlan) => ({
-			...familyPlan,
-			atlasEntryRecords: familyPlan.atlasEntryRecords.filter((record) =>
+	const terrainBuckets = plan.buckets
+		.map((bucketPlan) => ({
+			...bucketPlan,
+			atlasEntryRecords: bucketPlan.atlasEntryRecords.filter((record) =>
 				record.key.startsWith("terrain-page/"),
 			),
-			atlasTextures: familyPlan.atlasTextures
+			atlasTextures: bucketPlan.atlasTextures
 				.map((page) => ({
 					...page,
 					placements: page.placements.filter((placement) =>
@@ -2075,20 +2075,20 @@ function createTerrainTexturePageGenerationPlan({
 				}))
 				.filter((page) => page.placements.length > 0),
 			detailAtlasTextures:
-				familyPlan.family === "terrain-detail"
-					? familyPlan.detailAtlasTextures
+				bucketPlan.bucket === "terrain-detail"
+					? bucketPlan.detailAtlasTextures
 					: [],
 			detailAtlasEntryRecords:
-				familyPlan.family === "terrain-detail"
-					? familyPlan.detailAtlasEntryRecords
+				bucketPlan.bucket === "terrain-detail"
+					? bucketPlan.detailAtlasEntryRecords
 					: [],
 		}))
 		.filter(
-			(familyPlan) =>
-				familyPlan.atlasTextures.length > 0 ||
-				familyPlan.detailAtlasTextures.length > 0,
+			(bucketPlan) =>
+				bucketPlan.atlasTextures.length > 0 ||
+				bucketPlan.detailAtlasTextures.length > 0,
 		);
-	if (terrainFamilies.length === 0) {
+	if (terrainBuckets.length === 0) {
 		return null;
 	}
 	const cpuSet = profileBrowserJsScope(
@@ -2102,10 +2102,10 @@ function createTerrainTexturePageGenerationPlan({
 						maxAnisotropy,
 					}),
 					rgbaAtlasReadyCandidateIds: ["terrain-texture-pages"],
-					detailAtlasTextures: terrainFamilies.flatMap(
-						(familyPlan) => familyPlan.detailAtlasTextures,
+					detailAtlasTextures: terrainBuckets.flatMap(
+						(bucketPlan) => bucketPlan.detailAtlasTextures,
 					),
-					families: terrainFamilies,
+					buckets: terrainBuckets,
 					preparedTextureAssetIds: [],
 				},
 				textureFilteringMode,
@@ -2114,7 +2114,7 @@ function createTerrainTexturePageGenerationPlan({
 	);
 	if (!cpuSet) {
 		throw new Error(
-			`Terrain texture page build ${plan.key} produced no CPU page set for terrain page families.`,
+			`Terrain texture page build ${plan.key} produced no CPU page set for terrain page buckets.`,
 		);
 	}
 	return { cpuSet };

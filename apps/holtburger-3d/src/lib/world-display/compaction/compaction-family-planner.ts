@@ -3,7 +3,7 @@ import type { RenderVec4 } from "../render-math";
 import type { RenderMaterialTexturePageReadiness } from "../render-material-strategy";
 import type {
 	TexturePageDescriptor,
-	TexturePageUsageBucket,
+	TexturePageEntryRole,
 } from "../texture-pages/texture-page-binding";
 import {
 	createEmptyTexturePageAtlasPlan,
@@ -69,7 +69,7 @@ type CompactionMaterialBlocker =
 	| "detail-overlay"
 	| "missing-detail-atlas-entry"
 	| "unsupported-material-state"
-	| `unsupported-texture-page-usage:${TexturePageUsageBucket}`
+	| `unsupported-texture-page-role:${TexturePageEntryRole}`
 	| "unsupported-texture-page-sample-class"
 	| "unsupported-texture-page-sampling";
 
@@ -1059,7 +1059,7 @@ function createMaterialCompactionBypass(
 			blockerKind: "material",
 			blocker,
 			detail:
-				"texture-page bindings include a usage bucket that is not supported by the compacted shader family",
+				"texture-page bindings include a entry role that is not supported by the compacted shader family",
 		};
 	}
 	switch (blocker) {
@@ -1251,7 +1251,7 @@ function hasCompatibleCompactedBaseTexturePage(
 ): boolean {
 	return texturePageBindings.some(
 		(binding) =>
-			binding.usageBucket === "base-color" &&
+			binding.role === "base-color" &&
 			binding.sampleClass === "rgba-color" &&
 			binding.sampling.samplingDomain === "color" &&
 			binding.sampling.lookup === "color-filtered",
@@ -1263,7 +1263,7 @@ function hasIndexedTexelTexturePage(
 ): boolean {
 	return texturePageBindings.some(
 		(binding) =>
-			binding.usageBucket === "indexed-texels" &&
+			binding.role === "indexed-texels" &&
 			binding.sampleClass === "indexed-data" &&
 			hasExactDataTexturePageSampling(binding),
 	);
@@ -1274,7 +1274,7 @@ function hasIndexedPaletteTexturePage(
 ): boolean {
 	return texturePageBindings.some(
 		(binding) =>
-			binding.usageBucket === "palette-lookup" &&
+			binding.role === "palette-lookup" &&
 			binding.sampleClass === "palette-data" &&
 			hasExactDataTexturePageSampling(binding),
 	);
@@ -1295,9 +1295,9 @@ function classifyUnsupportedIndexedTexturePageBlockers(
 	detailOverlay: CompactionDetailOverlayReadiness,
 ): CompactionMaterialBlocker[] {
 	const texturePageBlockers = texturePageBindings
-		.filter((binding) => binding.usageBucket !== "detail")
+		.filter((binding) => binding.role !== "detail")
 		.map((binding) => {
-			switch (binding.usageBucket) {
+			switch (binding.role) {
 				case "indexed-texels":
 					if (binding.sampleClass !== "indexed-data") {
 						return "unsupported-texture-page-sample-class";
@@ -1314,7 +1314,7 @@ function classifyUnsupportedIndexedTexturePageBlockers(
 						: "unsupported-texture-page-sampling";
 				default:
 					return formatUnsupportedTexturePageUsageBlocker(
-						binding.usageBucket,
+						binding.role,
 					);
 			}
 		});
@@ -1331,7 +1331,7 @@ function classifyUnsupportedCompactedTexturePageBlockers(
 ): CompactionMaterialBlocker[] {
 	return collectUniqueMaterialBlockers(
 		texturePageBindings.map((binding) => {
-			switch (binding.usageBucket) {
+			switch (binding.role) {
 				case "base-color":
 				case "detail":
 					if (binding.sampleClass !== "rgba-color") {
@@ -1342,7 +1342,7 @@ function classifyUnsupportedCompactedTexturePageBlockers(
 						: "unsupported-texture-page-sampling";
 				default:
 					return formatUnsupportedTexturePageUsageBlocker(
-						binding.usageBucket,
+						binding.role,
 					);
 			}
 		}),
@@ -1350,15 +1350,15 @@ function classifyUnsupportedCompactedTexturePageBlockers(
 }
 
 function formatUnsupportedTexturePageUsageBlocker(
-	usageBucket: TexturePageUsageBucket,
+	role: TexturePageEntryRole,
 ): CompactionMaterialBlocker {
-	return `unsupported-texture-page-usage:${usageBucket}`;
+	return `unsupported-texture-page-role:${role}`;
 }
 
 function isUnsupportedTexturePageUsageBlocker(
 	blocker: CompactionMaterialBlocker,
 ): boolean {
-	return blocker.startsWith("unsupported-texture-page-usage:");
+	return blocker.startsWith("unsupported-texture-page-role:");
 }
 
 function hasColorFilteredTexturePageSampling(binding: TexturePageDescriptor): boolean {

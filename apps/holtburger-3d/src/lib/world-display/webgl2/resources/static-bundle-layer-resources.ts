@@ -35,7 +35,9 @@ import {
 import type {
 	Webgl2ResidentTexturePageEntryResource,
 	Webgl2ResidentTexturePageResource,
+	Webgl2TexturePageSamplerPolicyKey,
 } from "./texture-page-upload";
+import { createWebgl2TexturePageSamplerPolicyKey } from "./texture-page-upload";
 
 export interface Webgl2StaticBundleLayerResourceStore {
 	productsByKey: Map<string, Webgl2StaticBundleProductResource>;
@@ -568,7 +570,7 @@ function describeStaticBundleTexturePageSamplerPolicy({
 	page: Pick<StaticBundleTexturePage, "sampleClass">;
 	textureFilteringMode: TextureFilteringMode;
 	maxAnisotropy: number;
-}): string {
+}): Webgl2TexturePageSamplerPolicyKey {
 	return describeArtifactTexturePageSamplerPolicy({
 		sampleClass: page.sampleClass,
 		textureFilteringMode,
@@ -584,7 +586,7 @@ function describeStaticBundleTexturePageResourceSamplerPolicy({
 	page: Pick<Webgl2StaticBundleTexturePageResource, "sampleClass">;
 	textureFilteringMode: TextureFilteringMode;
 	maxAnisotropy: number;
-}): string {
+}): Webgl2TexturePageSamplerPolicyKey {
 	return describeArtifactTexturePageSamplerPolicy({
 		sampleClass: page.sampleClass,
 		textureFilteringMode,
@@ -600,16 +602,20 @@ function describeArtifactTexturePageSamplerPolicy({
 	sampleClass: VirtualTexturePageSampleClass;
 	textureFilteringMode: TextureFilteringMode;
 	maxAnisotropy: number;
-}): string {
+}): Webgl2TexturePageSamplerPolicyKey {
 	if (isExactSampleClass(sampleClass)) {
-		return `sample=${sampleClass};filter=exact;mips=off;aniso=1`;
+		return createWebgl2TexturePageSamplerPolicyKey(
+			`sample=${sampleClass};filter=exact;mips=off;aniso=1`,
+		);
 	}
 	const generateMipmaps = textureFilteringMode !== "nearest";
 	const anisotropy = selectArtifactTexturePageAnisotropy({
 		textureFilteringMode,
 		maxAnisotropy,
 	});
-	return `sample=${sampleClass};filter=${textureFilteringMode};mips=${generateMipmaps ? "on" : "off"};aniso=${anisotropy}`;
+	return createWebgl2TexturePageSamplerPolicyKey(
+		`sample=${sampleClass};filter=${textureFilteringMode};mips=${generateMipmaps ? "on" : "off"};aniso=${anisotropy}`,
+	);
 }
 
 function shouldGenerateStaticBundleTexturePageMipmaps({

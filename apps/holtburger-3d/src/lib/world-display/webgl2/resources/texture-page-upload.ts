@@ -10,11 +10,31 @@ import type {
 	AtlasTexturePage,
 	AtlasTexturePlacement,
 } from "../../texture-pages/atlas-layout-planner";
-import type { TexturePageAtlasPlan } from "../../texture-pages/texture-page-atlas-planner";
-import type { TexturePageFamily } from "../../texture-pages/texture-page-atlas-planner";
+import type { IndexedTextureFormat } from "../../indexed-material-data";
+import type {
+	TexturePageAtlasPlan,
+	TexturePageFamily,
+} from "../../texture-pages/texture-page-atlas-planner";
+import type {
+	TexturePageKind,
+	TexturePageSampleClass,
+	TexturePageUsageBucket,
+} from "../../texture-pages/texture-page-binding";
 import type { TextureFilteringMode } from "../../texture-pages/texture-sampling-policy";
 
 const TERRAIN_COLOR_ATLAS_FILL_RGBA = [128, 128, 128, 255] as const;
+
+export type Webgl2ResidentTexturePageFamily =
+	| TexturePageFamily
+	| TexturePageUsageBucket;
+
+export type Webgl2ResidentTexturePageUsageBucket =
+	| TexturePageUsageBucket
+	| TexturePageFamily;
+
+export type Webgl2TexturePageSamplerPolicyKey = string & {
+	readonly __webgl2TexturePageSamplerPolicyKey: unique symbol;
+};
 
 interface Webgl2TexturePagePlacementResource {
 	family: TexturePageFamily;
@@ -33,13 +53,13 @@ export interface Webgl2ResidentTexturePageEntryResource {
 
 export interface Webgl2ResidentTexturePageResource {
 	key: string;
-	family: string;
+	family: Webgl2ResidentTexturePageFamily;
 	textureIndex: number;
-	usageBucket: string;
-	sampleClass: string;
-	pageKind: string;
-	indexedFormat?: string | null;
-	samplerPolicyKey: string;
+	usageBucket: Webgl2ResidentTexturePageUsageBucket;
+	sampleClass: TexturePageSampleClass;
+	pageKind: TexturePageKind;
+	indexedFormat?: IndexedTextureFormat | null;
+	samplerPolicyKey: Webgl2TexturePageSamplerPolicyKey;
 	mipmapsGenerated: boolean;
 	texture: Webgl2Texture2DResource;
 	width: number;
@@ -414,12 +434,20 @@ function describeWebgl2TexturePageSamplerPolicy({
 	family: TexturePageFamily;
 	textureFilteringMode: TextureFilteringMode;
 	maxAnisotropy: number;
-}): string {
+}): Webgl2TexturePageSamplerPolicyKey {
 	const anisotropy =
 		textureFilteringMode === "anisotropic-4x"
 			? Math.min(4, Math.max(1, Math.floor(maxAnisotropy)))
 			: 1;
-	return `family=${family};sample=rgba-color;filter=${textureFilteringMode};mips=${textureFilteringMode === "nearest" ? "off" : "on"};aniso=${anisotropy}`;
+	return createWebgl2TexturePageSamplerPolicyKey(
+		`family=${family};sample=rgba-color;filter=${textureFilteringMode};mips=${textureFilteringMode === "nearest" ? "off" : "on"};aniso=${anisotropy}`,
+	);
+}
+
+export function createWebgl2TexturePageSamplerPolicyKey(
+	value: string,
+): Webgl2TexturePageSamplerPolicyKey {
+	return value as Webgl2TexturePageSamplerPolicyKey;
 }
 
 function createWebgl2TextureAtlasSampler({

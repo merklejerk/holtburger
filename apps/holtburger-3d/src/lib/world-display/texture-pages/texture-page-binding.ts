@@ -1,4 +1,4 @@
-type TexturePageKind = "single-entry" | "packed-atlas";
+export type TexturePageKind = "single-entry" | "packed-atlas";
 export type TexturePageUsageBucket =
 	| "base-color"
 	| "detail"
@@ -7,18 +7,21 @@ export type TexturePageUsageBucket =
 	| "terrain"
 	| "road"
 	| "alpha-control";
-type TexturePageSampleClass =
+export type TexturePageSampleClass =
 	| "rgba-color"
 	| "indexed-data"
 	| "palette-data"
 	| "control-data";
-type TexturePageWrapMode = "clamp" | "repeat";
-type TexturePageFilterPolicy = "linear" | "nearest" | "material-policy";
-type TexturePageMipPolicy = "generated" | "none" | "material-policy";
-type TexturePageSamplingDomain = "color" | "data" | "control";
-type TexturePageLookupPolicy = "color-filtered" | "exact" | "control-filtered";
+export type TexturePageWrapMode = "clamp" | "repeat";
+export type TexturePageFilterPolicy = "linear" | "nearest" | "material-policy";
+export type TexturePageMipPolicy = "generated" | "none" | "material-policy";
+export type TexturePageSamplingDomain = "color" | "data" | "control";
+export type TexturePageLookupPolicy =
+	| "color-filtered"
+	| "exact"
+	| "control-filtered";
 
-interface TexturePageSamplingPolicy {
+export interface TexturePageSamplingPolicy {
 	wrapS: TexturePageWrapMode;
 	wrapT: TexturePageWrapMode;
 	minFilter: TexturePageFilterPolicy;
@@ -28,7 +31,7 @@ interface TexturePageSamplingPolicy {
 	lookup: TexturePageLookupPolicy;
 }
 
-type TexturePageBindingSource =
+export type TexturePageBindingSource =
 	| "standalone-direct-texture"
 	| "shared-packed-page"
 	| "detail-overlay"

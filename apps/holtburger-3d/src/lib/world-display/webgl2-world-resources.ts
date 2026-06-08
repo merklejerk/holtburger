@@ -53,6 +53,7 @@ import {
 	createEmptyTexturePageAtlasPlan,
 	createTexturePageDetailAtlasPlacementsByEntryKey,
 	createTexturePageAtlasPlacementsByEntryKey,
+	isTerrainTexturePageFamily,
 	type TexturePageAtlasDetailCandidate,
 	type TexturePageAtlasRgbaCandidate,
 	type TexturePageAtlasPlan,
@@ -2048,16 +2049,6 @@ function createWebgl2TerrainTexturePageResource(
 		pixelStats: texturePage.pixelStats,
 		entryDiagnostics: texturePage.entryDiagnostics,
 	};
-}
-
-function isTerrainTexturePageFamily(
-	family: string,
-): family is Webgl2TerrainTexturePageResource["family"] {
-	return (
-		family === "terrain-color" ||
-		family === "terrain-mask" ||
-		family === "terrain-detail"
-	);
 }
 
 function createTerrainTexturePageGenerationPlan({

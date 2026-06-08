@@ -219,6 +219,8 @@ export function inspectWebgl2WorldResources(
 	const texturePages: RenderResourceInspectionTexturePage[] = [];
 	const materials: RenderResourceInspectionMaterialBase[] = [];
 	const geometry: RenderResourceInspectionGeometry[] = [];
+	const structuredMaterialOwnerKeyByCellKey =
+		buildStructuredInteriorMaterialOwnerKeyByCellKey(store);
 
 	for (const layer of store.staticBundleLayerResources.layersByKey.values()) {
 		texturePages.push(
@@ -267,20 +269,20 @@ export function inspectWebgl2WorldResources(
 		);
 	}
 
-	for (const cell of store.structuredInteriorResources.cellsByKey.values()) {
+	for (const product of store.structuredInteriorResources.productsByKey.values()) {
 		texturePages.push(
-			...cell.texturePages.map((page) =>
+			...product.texturePages.map((page) =>
 				describeTexturePageResource(page, {
 					ownerKind: RENDER_RESOURCE_INSPECTION_OWNER_KIND.structuredInterior,
-					ownerKey: cell.key,
+					ownerKey: product.key,
 				}),
 			),
 		);
 		materials.push(
-			...cell.materialRecords.map((material) => ({
+			...product.materialRecords.map((material) => ({
 				key: material.key,
 				ownerKind: RENDER_RESOURCE_INSPECTION_OWNER_KIND.structuredInterior,
-				ownerKey: cell.key,
+				ownerKey: product.key,
 				familyKey: material.familyKey,
 				alphaPolicy: material.family.alphaPolicy,
 				isTransparent: material.isTransparent,
@@ -290,6 +292,9 @@ export function inspectWebgl2WorldResources(
 				detailTiling: material.detailTiling,
 			})),
 		);
+	}
+
+	for (const cell of store.structuredInteriorResources.cellsByKey.values()) {
 		geometry.push(
 			...cell.materialSlices.map((slice) => ({
 				key: slice.key,
@@ -327,10 +332,15 @@ export function inspectWebgl2WorldResources(
 
 	texturePages.sort(compareByKey);
 	geometry.sort(compareByKey);
-	const materialUsageByKey = buildMaterialUsageByKey(geometry);
+	const materialUsageByKey = buildMaterialUsageByIdentity(
+		geometry,
+		structuredMaterialOwnerKeyByCellKey,
+	);
 	const materialsWithUsage = materials
 		.map((material) => {
-			const usage = materialUsageByKey.get(material.key);
+			const usage = materialUsageByKey.get(
+				describeMaterialInspectionIdentity(material),
+			);
 			return {
 				...material,
 				geometryReferenceCount: usage?.geometryReferenceCount ?? 0,
@@ -528,8 +538,31 @@ interface MaterialUsageCounts {
 	referencedTriangleCount: number;
 }
 
-function buildMaterialUsageByKey(
+function buildStructuredInteriorMaterialOwnerKeyByCellKey(
+	store: Webgl2WorldResourceStore,
+): ReadonlyMap<string, string> {
+	const materialOwnerKeyByCellKey = new Map<string, string>();
+	for (const [
+		productKey,
+		cellKeys,
+	] of store.structuredInteriorResources.cellKeysByProductKey) {
+		const productResourceKey =
+			store.structuredInteriorResources.productResourceKeyByProductKey.get(
+				productKey,
+			);
+		if (!productResourceKey) {
+			continue;
+		}
+		for (const cellKey of cellKeys) {
+			materialOwnerKeyByCellKey.set(cellKey, productResourceKey);
+		}
+	}
+	return materialOwnerKeyByCellKey;
+}
+
+function buildMaterialUsageByIdentity(
 	geometry: readonly RenderResourceInspectionGeometry[],
+	structuredMaterialOwnerKeyByCellKey: ReadonlyMap<string, string>,
 ): Map<string, MaterialUsageCounts> {
 	const usageByKey = new Map<string, MaterialUsageCounts>();
 	for (const resource of geometry) {
@@ -537,7 +570,19 @@ function buildMaterialUsageByKey(
 			continue;
 		}
 
-		const usage = usageByKey.get(resource.materialRecordKey) ?? {
+		const materialOwnerKey = resolveGeometryMaterialOwnerKey(
+			resource,
+			structuredMaterialOwnerKeyByCellKey,
+		);
+		if (materialOwnerKey === null) {
+			continue;
+		}
+		const materialIdentity = describeMaterialInspectionIdentity({
+			ownerKind: resource.ownerKind,
+			ownerKey: materialOwnerKey,
+			key: resource.materialRecordKey,
+		});
+		const usage = usageByKey.get(materialIdentity) ?? {
 			geometryReferenceCount: 0,
 			referencedIndexCount: 0,
 			referencedTriangleCount: 0,
@@ -545,8 +590,37 @@ function buildMaterialUsageByKey(
 		usage.geometryReferenceCount += 1;
 		usage.referencedIndexCount += resource.indexCount;
 		usage.referencedTriangleCount += resource.triangleCount;
-		usageByKey.set(resource.materialRecordKey, usage);
+		usageByKey.set(materialIdentity, usage);
 	}
 
 	return usageByKey;
+}
+
+function resolveGeometryMaterialOwnerKey(
+	resource: RenderResourceInspectionGeometry,
+	structuredMaterialOwnerKeyByCellKey: ReadonlyMap<string, string>,
+): string | null {
+	if (resource.ownerKind === RENDER_RESOURCE_INSPECTION_OWNER_KIND.staticBundle) {
+		return resource.ownerKey;
+	}
+	if (
+		resource.ownerKind === RENDER_RESOURCE_INSPECTION_OWNER_KIND.structuredInterior
+	) {
+		return structuredMaterialOwnerKeyByCellKey.get(resource.ownerKey) ?? null;
+	}
+	const exhaustiveOwnerKind: never = resource.ownerKind;
+	throw new Error(
+		`Unhandled material geometry owner kind: ${exhaustiveOwnerKind}`,
+	);
+}
+
+function describeMaterialInspectionIdentity({
+	ownerKind,
+	ownerKey,
+	key,
+}: Pick<
+	RenderResourceInspectionMaterialBase,
+	"ownerKind" | "ownerKey" | "key"
+>): string {
+	return `${ownerKind}\u0000${ownerKey}\u0000${key}`;
 }

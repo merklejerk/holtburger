@@ -1058,7 +1058,8 @@
 									</button>
 								</dt>
 								<dd>
-									{page.ownerKind}; {page.bucket}; {page.sampleClass};
+									{page.ownerKind}; owner {truncateResourceKey(page.ownerKey)};
+									{page.bucket}; {page.sampleClass};
 									{page.width}x{page.height}; {formatResourceCount(
 										page.entryCount,
 										"entry",
@@ -1127,7 +1128,9 @@
 							<div>
 								<dt title={material.key}>{truncateResourceKey(material.key)}</dt>
 								<dd>
-									{material.ownerKind}; {material.familyKey};
+									{material.ownerKind}; owner {truncateResourceKey(
+										material.ownerKey,
+									)}; {material.familyKey};
 									{material.alphaPolicy ?? "alpha n/a"}; bindings {material.textureBindingCount};
 									refs {material.geometryReferenceCount}; indices {material.referencedIndexCount};
 									tris {material.referencedTriangleCount};
@@ -1176,7 +1179,9 @@
 							<div>
 								<dt title={geometry.key}>{truncateResourceKey(geometry.key)}</dt>
 								<dd>
-									{geometry.ownerKind}; {geometry.geometryKind};
+									{geometry.ownerKind}; owner {truncateResourceKey(
+										geometry.ownerKey,
+									)}; {geometry.geometryKind};
 									{geometry.triangleCount} tris; indices {geometry.indexCount};
 									material {geometry.materialRecordKey
 										? truncateResourceKey(geometry.materialRecordKey)

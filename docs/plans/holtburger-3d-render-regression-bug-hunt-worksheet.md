@@ -1248,7 +1248,7 @@ Verification:
 
 ## Phase 14: Type Renderer Decision Vocabulary In Slices
 
-Status: dry-run complete.
+Status: Phase 14A implemented.
 
 Phase 11's remaining follow-up should target renderer decision vocabularies, not every string in the renderer. The broader cleanup is worthwhile, but it should be split by semantic layer so each cutover is reviewable and can remove old routing paths decisively. The goal is to prevent another texture-page-style drift where similar string concepts accumulate different meanings across artifact creation, resource construction, submit, picker, and inspector paths.
 
@@ -1330,6 +1330,21 @@ Phase 14A implementation order:
 5. Update tests and fixtures that still use legacy `rgba-texture-page` / raw `indexed-paletted` family keys to current `static:<family>:alpha=<policy>` records with descriptors.
 6. Remove legacy literal acceptance from `parseStaticMaterialFamilyKey()` unless a current producer is proven to require it.
 7. Run focused static material artifact, static bundle builder, static bundle resource, structured worker, resource inspector, submit, check, lint, and full app TS tests.
+
+Phase 14A implementation notes:
+
+- Added `family: StaticMaterialFamilyDescriptor` to `StaticBundleMaterialRecord` and populated it at material-record creation time for both static object bundles and structured interior material records.
+- Added `createStaticMaterialFamilyDescriptor()` so builders can create the renderer decision descriptor directly from typed `CompactionMaterialFamily` + `CompactionAlphaPolicy` inputs instead of formatting a `familyKey` and reparsing it.
+- Changed WebGL static bundle material resource creation to consume `record.family` directly. `familyKey` remains present for serialized identity, grouping keys, diagnostics, picker reports, and resource inspector display, but it is no longer the normal resource-routing source.
+- Removed legacy raw material-family literal acceptance from `parseStaticMaterialFamilyKey()`. The parser now accepts only the current `static:<family>:alpha=<policy>` serialized boundary format.
+- Updated tests and fixtures that still used legacy `rgba-texture-page` or raw `indexed-paletted` material family keys. The remaining `rgba-texture-page-*` strings are compaction partition/draw-slice labels, not material-family routing values.
+
+Phase 14A verification:
+
+- `npm run --prefix apps/holtburger-3d test:ts -- src/lib/world-display/static-material-artifacts.test.ts src/lib/world-display/static-bundle-layer.test.ts src/lib/world-display/webgl2/resources/static-bundle-layer-resources.test.ts src/lib/world-display/webgl2-world-resources.test.ts` passed.
+- `npm run --prefix apps/holtburger-3d test:ts` passed.
+- `npm run --prefix apps/holtburger-3d lint:ts` passed.
+- `npm run --prefix apps/holtburger-3d check` passed.
 
 Acceptance criteria:
 

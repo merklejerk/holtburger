@@ -27,10 +27,7 @@ import {
 	type Webgl2VertexArrayResource,
 } from "../../webgl2-gl";
 import type { TextureFilteringMode } from "../../texture-pages/texture-sampling-policy";
-import {
-	parseStaticMaterialFamilyKey,
-	type StaticMaterialFamilyDescriptor,
-} from "../../static-material-artifacts";
+import type { StaticMaterialFamilyDescriptor } from "../../static-material-artifacts";
 import type {
 	Webgl2ResidentTexturePageEntryResource,
 	Webgl2ResidentTexturePageResource,
@@ -671,16 +668,10 @@ export function createWebgl2StaticBundleMaterialResource({
 		Webgl2StaticBundleTexturePageResource
 	>;
 }): Webgl2StaticBundleMaterialResource {
-	const family = parseStaticMaterialFamilyKey(record.familyKey);
-	if (!family) {
-		throw new Error(
-			`Static bundle material ${record.key} has unparseable family key ${record.familyKey}.`,
-		);
-	}
 	return {
 		key: record.key,
 		familyKey: record.familyKey,
-		family,
+		family: record.family,
 		color: record.color,
 		isTransparent: record.isTransparent,
 		detailTextureRefKey: record.detailTextureRefKey,

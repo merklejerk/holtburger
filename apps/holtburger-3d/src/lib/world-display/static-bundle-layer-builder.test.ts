@@ -559,6 +559,11 @@ describe("static bundle layer builder", () => {
 			{
 				key: "material:material/08000011:variant:sampler=clamp",
 				familyKey: "static:indexed-paletted:alpha=opaque",
+				family: {
+					key: "static:indexed-paletted:alpha=opaque",
+					kind: "indexed-paletted",
+					alphaPolicy: "opaque",
+				},
 				color: [1, 1, 1, 1],
 				texturePageRefKeys: [
 					"texture:material:material/08000011:variant:sampler=clamp:palette/04000011:palette-lookup",

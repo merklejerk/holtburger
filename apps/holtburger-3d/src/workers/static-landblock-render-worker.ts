@@ -26,6 +26,7 @@ import { buildStaticBundleLayerTexturePages } from "../lib/world-display/static-
 import {
 	collectStaticMaterialTexturePageRefs,
 	collectStaticMaterialTextureRoutes,
+	createStaticMaterialFamilyDescriptor,
 	collectStaticPreparedTextureRouteAssetIds,
 	findStaticMaterialTextureRefs,
 	formatStaticMaterialFamilyKey,
@@ -801,6 +802,9 @@ function buildStructuredInteriorMaterialRecords(options: {
 		recordsByKey.set(key, {
 			key,
 			familyKey: formatStaticMaterialFamilyKey(compactionEligibility),
+			family: createStaticMaterialFamilyDescriptor(
+				compactionEligibility.material,
+			),
 			color: resolveStaticMaterialColor({
 				material,
 				behavior: materialReadiness.behavior,

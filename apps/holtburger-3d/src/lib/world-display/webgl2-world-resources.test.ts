@@ -10,6 +10,7 @@ import {
 } from "../assets/types";
 import type { ResolvedMaterialSlot } from "./material-plan";
 import type { RenderChunkTransform } from "./render-anchor";
+import { createStaticMaterialFamilyDescriptor } from "./static-material-artifacts";
 import type { StructuredInteriorCell } from "./structured-interior-scene";
 import type { LandblockTerrainRenderArtifact } from "./terrain-render-artifact";
 import {
@@ -563,8 +564,15 @@ function createDetailedLandblockProductArtifact(
 				structuredInteriorMaterialRecords: [
 					{
 						key: "interior-material",
-						familyKey: "rgba-texture-page",
+						familyKey: "static:textured-opaque:alpha=opaque",
+						family: createStaticMaterialFamilyDescriptor({
+							family: "textured-opaque",
+							alphaPolicy: "opaque",
+						}),
+						color: [1, 1, 1, 1],
 						texturePageRefKeys: ["interior-texture-ref"],
+						detailTextureRefKey: null,
+						detailTiling: 1,
 						isTransparent: false,
 					},
 				],

@@ -737,6 +737,117 @@ Implementation notes:
 - Kept structured shell counters separate from material-surface submission because fallback shell rendering is not a material-slice draw path.
 - Updated renderer debug DTO aggregation and browser debug text to report generic material-surface diagnostics instead of static-only draw-submit fields.
 
+## Phase 10: Isomorphic Texture Page Resources With Terrain Bucket Isolation
+
+Status: planned.
+
+The browser resource inspector exposed a structural asymmetry: static bundle and structured interior resident texture resources carry one texture-page shape with entries, rects, sample class, page kind, atlas metrics, and preview metadata, while terrain atlas resources use a terrain-only `Webgl2TerrainTexturePageResource` wrapper. Terrain already uses the shared atlas planner and CPU texture-page upload path, but then stores the GPU result in a smaller terrain-specific resident shape. That makes inspection, preview, atlas metrics, and future texture-page cleanup non-isomorphic.
+
+Direction:
+
+- This should be a real pipeline cleanup, not an adapter shim around the inspector.
+- Terrain textures should remain in their own texture-page bucket for now. Terrain color/mask/detail atlases have different visual semantics and submit expectations, and mixing them into static/structured page collections would blur useful ownership boundaries too early.
+- The shared shape should preserve behavior and visual parity first. Diagnostics-only fields are disposable if they impede a cleaner model.
+
+Goals:
+
+- Make terrain texture page artifacts and resident WebGL resources use the same core texture-page shape as static bundle and structured interior pages.
+- Keep terrain pages in a separate terrain-owned bucket/collection until a later phase proves a unified collection is worth the churn.
+- Preserve terrain visual behavior:
+  - terrain color, mask, and detail atlas isolation
+  - terrain color atlas fill behavior
+  - terrain family gutter and edge-mode rules
+  - repeat/clamp sampling behavior
+  - terrain one-draw shader bindings
+  - terrain draw-slice fallback behavior
+  - terrain detail overlay behavior
+- Preserve terrain readiness/blocker behavior for missing atlas placements/pages.
+- Make resource inspector and texture preview work for terrain pages without terrain-special UI code.
+
+Proposed work:
+
+- Define a shared resident texture-page resource contract that can represent static, structured, and terrain atlas pages:
+  - stable key
+  - owner/bucket/domain
+  - family or usage bucket
+  - texture/page index where applicable
+  - dimensions
+  - WebGL texture resource
+  - entries/placements with pixel rects
+  - sample class / indexed format / page kind where applicable
+  - sampler policy and mipmap state
+  - optional pixel/entry diagnostics only if they remain useful after the cleanup
+- Change terrain texture-page CPU/product output to retain the same entry/placement metadata as the shared page contract instead of collapsing to `placementCount` plus terrain-only diagnostics.
+- Replace `Webgl2TerrainTexturePageResource` with the shared resident texture-page type, scoped to a terrain texture-page bucket such as `terrainTexturePagesByKey`.
+- Keep terrain binding types domain-specific, but make them reference the shared page resource:
+  - `family: terrain-color | terrain-mask | terrain-detail`
+  - `atlasEntryKey`
+  - `textureIndex`
+  - `rect`
+  - `texturePage`
+- Update terrain lookup helpers to resolve shared terrain-bucket pages by `(family, textureIndex)` or an equivalent deterministic key.
+- Update terrain submit paths to consume the shared page resource without changing shader semantics.
+- Extend `RenderResourceInspectionSnapshot` to include terrain texture pages and terrain geometry/resources using the same inspector DTOs where possible.
+- Extend `previewTexturePage()` resolution to terrain-owned pages without duplicating preview/readback logic.
+- Delete or demote diagnostics-only terrain page fields that do not affect rendering behavior or inspector clarity.
+
+Dry run notes:
+
+- The main type split is currently:
+  - `Webgl2StaticBundleTexturePageResource` in `webgl2/resources/static-bundle-layer-resources.ts`
+  - `Webgl2TerrainTexturePageResource` in `webgl2/resources/terrain-tile-resources.ts`
+  - `Webgl2TexturePageTextureResource` / `Webgl2DetailTexturePageTextureResource` in `webgl2/resources/texture-page-upload.ts`
+- Static bundle and structured interior already share the static-bundle page type. Terrain uses the shared atlas planner and CPU upload path, but `syncWebgl2TerrainTexturePageResources()` rewraps the uploaded resource into a smaller terrain-only object and drops entry/placement rects.
+- The first implementation cut should preserve entries on the shared CPU/uploaded page resource, then make terrain store that shared resident page resource in its own terrain bucket. Do not start by changing terrain submit shader semantics.
+- `TexturePageCpuTexture` currently has `placementCount`, `pixelStats`, and `entryDiagnostics`, but no compact `entries` array. Add a stable `entries` shape derived from the existing placements:
+  - `virtualRefKey` or `atlasEntryKey`
+  - `sourceAssetId` when known
+  - `rect`
+- `Webgl2TexturePageTextureResource` should carry the same `entries`, `usageBucket`, `sampleClass`, `pageKind`, `indexedFormat`, `samplerPolicyKey`, and `mipmapsGenerated` fields needed by `render-resource-inspection.ts`. For terrain pages, use terrain-specific values such as:
+  - `usageBucket: "terrain-color" | "terrain-mask" | "terrain-detail"` or an explicit owner/family field if overloading `usageBucket` is misleading
+  - `sampleClass: "rgba-color"` for color/detail and a control/data class for masks if the preview mode needs it
+  - `pageKind: "packed-atlas"`
+  - `indexedFormat: null`
+- Keep `productTerrainTexturePagesByKey` as the isolated terrain bucket, but change its value type to the shared resident texture-page resource.
+- Add a deterministic terrain lookup helper or secondary map keyed by `(family, textureIndex)`. The current `resolveTerrainTexturePageResource()` scans `texturePagesByKey.values()`, which is acceptable at today's scale but gets less defensible once the terrain bucket becomes the long-lived owner of shared page resources.
+- `Webgl2TerrainTileTexturePageBinding` can remain terrain-specific. Only its `texturePage` field should change to the shared resident page type.
+- `terrain-family-submit.ts` only needs field-level compatibility for `texture`, `width`, `height`, `family`, and `textureIndex`. Any debug-only use of `placementCount`, `pixelStats`, or `entryDiagnostics` should be deleted or deliberately moved behind the resource inspector snapshot if still useful.
+- `render-resource-inspection.ts` already has an internal `InspectableTexturePageResource` shape. After the resident type is shared, this should become either the exported shared resource-facing shape or consume that exported shape directly instead of preserving a parallel inspector-only contract.
+- `webgl2-world-display-renderer-impl.ts` preview code is currently typed to `Webgl2StaticBundleTexturePageResource`. Generalize the readback helpers to the shared resident page type, then extend `resolveInspectableTexturePageResource()` with a terrain branch.
+- Expected focused tests:
+  - `webgl2-texture-page-upload.test.ts` for preserved entries and mip/sampler metadata
+  - `webgl2-world-resources.test.ts` for terrain bucket counts, family/index lookup, and blocker behavior
+  - `render-resource-inspection.test.ts` for terrain pages appearing in snapshots with coverage
+  - existing terrain submit tests to guard no shader-path behavior changed
+
+Acceptance criteria:
+
+- Terrain pages are represented by the shared resident texture-page resource type while remaining in a terrain-specific bucket.
+- Terrain rendering is visually unchanged for color, mask, road/overlay, detail, one-draw, and fallback draw-slice cases.
+- Static bundle, structured interior, and terrain texture pages can all be inspected and previewed through the same browser resource inspector code path.
+- Terrain texture page lookup/readiness remains deterministic and reports missing placement/page blockers at least as clearly as before.
+- No adapter-only shim remains whose sole purpose is to reshape terrain pages for the inspector.
+- `npm run check`, `npm run lint:ts`, focused terrain resource tests, and focused texture-page/resource-inspection tests pass.
+
+Risks and mitigations:
+
+- Risk: terrain color/mask/detail sampling semantics regress while resource shapes are unified.
+  - Mitigation: keep terrain submit and binding semantics domain-specific; only unify page residency/upload/inspection shape.
+- Risk: terrain page family/index lookup gets slower or less clear.
+  - Mitigation: keep a terrain bucket indexed by deterministic family/index helper maps even if the stored values are shared page resources.
+- Risk: diagnostics loss hides real terrain atlas regressions.
+  - Mitigation: preserve behavior-affecting blockers/readiness and keep compact inspector-visible page/entry metadata; drop only low-signal diagnostic payloads after parity tests pass.
+- Risk: worker/product shape changes create broad churn.
+  - Mitigation: cut over decisively in terrain page creation and update call sites, rather than maintaining long-term adapter compatibility.
+
+Definition of done:
+
+- `Webgl2TerrainTexturePageResource` is removed or reduced to a type alias of the shared resident texture-page resource.
+- Terrain texture pages appear in the browser resource inspector Textures section with owner/bucket metadata that clearly identifies them as terrain pages.
+- Terrain texture preview works through the same modal/readback path as static/structured pages.
+- Terrain rendering parity is manually checked against representative outdoor scenes before closing the phase.
+- Any retained terrain-specific texture-page fields have a documented rendering or readiness purpose.
+
 ## Findings
 
 - Phase 1 diagnostics are installed and verified.
@@ -788,4 +899,5 @@ Implementation notes:
 - Follow-up root cause for the noisy `Static bundle closure is missing required asset` worker errors after restoring detail overlays: region render profiles were already in the static asset graph, but the companion prepared-texture discovery only derived prepared texture asset ids from material recipes. Region detail roles reference surface textures/render surfaces directly, so their `usage=detail` prepared textures were not loaded before static bundle construction. Static prepared texture route discovery now derives detail prepared-texture ids from region render profile detail roles, and the static bundle builder skips invalid/nonpositive detail tiling before creating detail refs.
 - Follow-up root cause for detail overlays appearing on outdoor/static objects but not cell structures: structured-interior material records explicitly set `detailTextureRefKey: null` and never synthesized the region `environment` detail role. Prefactor's structured-interior draw units used the same detail-overlay-capable material paths as statics. Structured-interior products now add `environment` detail texture refs per env-cell region, include the exact detail ref and tiling on material records, and key material slices against the region-specific detail record so mixed-region products cannot share the wrong overlay.
 - Follow-up root cause for excessive detail on ordinary outdoor and indoor static objects: product-mode detail synthesis bypassed prefactor's `regionDetailBlendModeForRole()` gate and treated the disabled `object` role as renderable. Static bundle detail synthesis now mirrors prefactor's effective behavior: outdoor buildings use the `building` role, structured cell surfaces use `environment`, and ordinary outdoor/indoor static objects receive no region detail overlay.
+- Added the first browser-mode Resource inspector slice with an explicit anti-jank boundary: WebGL2 resource stores project into a plain `RenderResourceInspectionSnapshot` only when the user clicks `Generate Snapshot`, and `BrowserModePanel` renders that snapshot in a Resources tab. The inspector is read-only, separate from frame metrics, and does not change draw submit, picker payloads, shader state, or resource creation. Texture page rows now open an on-demand preview modal through a renderer `previewTexturePage()` request; the preview uses a temporary WebGL framebuffer/readback path and entry metadata from the resident page resource instead of retaining duplicate atlas bytes or leaking WebGL handles into Svelte.
 - Remaining suspected issues: static bundle payloads are too large, static bundle asset closure is too broad, and `setAssetState` still triggers costly static product recommits.

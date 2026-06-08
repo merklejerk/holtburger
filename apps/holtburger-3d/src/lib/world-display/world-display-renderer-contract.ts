@@ -15,6 +15,11 @@ import type {
 	WorldRenderCameraFrameChangeHandler,
 	WorldRenderMetricsChangeHandler,
 } from "./renderer-contract";
+import type {
+	RenderResourceInspectionSnapshot,
+	RenderResourceTexturePageIdentity,
+	RenderResourceTexturePagePreview,
+} from "./render-resource-inspection";
 import type { WorldRenderSceneContext } from "./render-scene-context";
 import type {
 	StaticLandblockProductKey,
@@ -66,6 +71,10 @@ export interface WorldDisplayRenderer {
 	setCameraResidencyChangeHandler(
 		handler: BrowserCameraResidencyChangeHandler | undefined,
 	): void;
+	inspectResources(): RenderResourceInspectionSnapshot;
+	previewTexturePage(
+		identity: RenderResourceTexturePageIdentity,
+	): RenderResourceTexturePagePreview | null;
 	pickTerrainLandblockAtViewportPoint(
 		viewportPoint: NormalizedViewportPoint,
 	): number | null;

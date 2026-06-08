@@ -69,6 +69,7 @@ import {
 	createEmptyStaticLandblockRenderProductSet,
 	type StaticLandblockRenderProductSet,
 } from "./static-landblock-render-artifact-store";
+import { inspectWebgl2WorldResources } from "./render-resource-inspection";
 import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import type {
 	LandblockRenderProductWorkerResult,
@@ -137,6 +138,7 @@ import {
 	commitWebgl2StaticBundleProductResources,
 	describeStaticBundleLayerResourceKey,
 	evictWebgl2StaticBundleProductResources,
+	type Webgl2StaticBundleTexturePageResource,
 	type Webgl2StaticBundleLayerResource,
 } from "./webgl2/resources/static-bundle-layer-resources";
 import {
@@ -151,6 +153,11 @@ import {
 	shouldUploadRenderFamily,
 	type RenderUploadDiagnosticFamily,
 } from "./render-regression-diagnostics";
+import {
+	calculateTexturePageCoverage,
+	type RenderResourceTexturePageIdentity,
+	type RenderResourceTexturePagePreview,
+} from "./render-resource-inspection";
 import type { NormalizedViewportPoint } from "./model";
 import type {
 	RenderSpatialItemKind,
@@ -483,6 +490,44 @@ void main() {
 }
 `;
 
+const TEXTURE_PAGE_PREVIEW_VERTEX_SHADER = `#version 300 es
+out vec2 vUv;
+
+void main() {
+	vec2 position = gl_VertexID == 0
+		? vec2(-1.0, -1.0)
+		: gl_VertexID == 1
+			? vec2(3.0, -1.0)
+			: vec2(-1.0, 3.0);
+	vUv = position * 0.5 + 0.5;
+	gl_Position = vec4(position, 0.0, 1.0);
+}
+`;
+
+const TEXTURE_PAGE_PREVIEW_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+
+uniform sampler2D uTexture;
+uniform int uPreviewMode;
+
+in vec2 vUv;
+
+out vec4 fragColor;
+
+void main() {
+	vec4 value = texture(uTexture, vUv);
+	if (uPreviewMode == 1) {
+		fragColor = vec4(value.rrr, 1.0);
+		return;
+	}
+	if (uPreviewMode == 2) {
+		fragColor = vec4(value.rg, 0.0, 1.0);
+		return;
+	}
+	fragColor = value;
+}
+`;
+
 interface Webgl2ColorDepthTarget {
 	readonly width: number;
 	readonly height: number;
@@ -506,6 +551,11 @@ interface Webgl2RenderResources {
 		"uColorTexture" | "uDepthTexture"
 	>;
 	sceneDomainCopyVertexArray: Webgl2VertexArrayResource;
+	texturePagePreviewProgram: Webgl2ProgramResource<
+		never,
+		"uTexture" | "uPreviewMode"
+	>;
+	texturePagePreviewVertexArray: Webgl2VertexArrayResource;
 	sceneDomainTargets: Webgl2SceneDomainTargetSet | null;
 	portalCompositeTargets: Webgl2PortalCompositeTargetSet | null;
 	selectedStaticRenderableOverlay: Webgl2StaticRenderableSelectionOverlay | null;
@@ -737,6 +787,12 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		setCameraResidencyChangeHandler(handler) {
 			cameraResidencyChangeHandler = handler;
 			reportCameraResidency();
+		},
+		inspectResources() {
+			return inspectWebgl2WorldResources(resources?.worldStore ?? null);
+		},
+		previewTexturePage(identity) {
+			return previewWebgl2TexturePage(identity);
 		},
 		pickTerrainLandblockAtViewportPoint(viewportPoint) {
 			const pick = pickStaticProductAtViewportPoint(
@@ -2174,6 +2230,8 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		resources.sceneDomainTargets?.dispose();
 		resources.portalCompositeTargets?.dispose();
 		resources.selectedStaticRenderableOverlay?.dispose();
+		resources.texturePagePreviewProgram.dispose();
+		resources.texturePagePreviewVertexArray.dispose();
 		destroyWebgl2WorldResources(resources.worldStore);
 		resources = null;
 	}
@@ -2342,6 +2400,169 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				detailTexturesEnabled,
 				sceneBounds: latestSceneBounds,
 			}),
+		);
+	}
+
+	function previewWebgl2TexturePage(
+		identity: RenderResourceTexturePageIdentity,
+	): RenderResourceTexturePagePreview | null {
+		if (!resources) {
+			return null;
+		}
+		const page = resolveInspectableTexturePageResource(
+			resources.worldStore,
+			identity,
+		);
+		if (!page) {
+			return null;
+		}
+		const coverage = calculateTexturePageCoverage({
+			width: page.texture.width,
+			height: page.texture.height,
+			rects: page.entries.map((entry) => entry.rect),
+		});
+		return {
+			identity,
+			key: page.key,
+			usageBucket: page.usageBucket,
+			sampleClass: page.sampleClass,
+			pageKind: page.pageKind,
+			indexedFormat: page.indexedFormat ?? null,
+			width: page.texture.width,
+			height: page.texture.height,
+			coveredPixelCount: coverage.coveredPixelCount,
+			coverageRatio: coverage.coverageRatio,
+			pixels: readTexturePagePreviewPixels(resources, page),
+			entries: page.entries.map((entry) => ({
+				virtualRefKey: entry.virtualRefKey,
+				sourceAssetId: entry.sourceAssetId,
+				rect: entry.rect,
+			})),
+		};
+	}
+
+	function readTexturePagePreviewPixels(
+		currentResources: Webgl2RenderResources,
+		page: Webgl2StaticBundleTexturePageResource,
+	): Uint8ClampedArray<ArrayBuffer> {
+		const { gl, stateCache } = currentResources;
+		const previousViewport = gl.getParameter(gl.VIEWPORT) as Int32Array;
+		const framebuffer = gl.createFramebuffer();
+		const colorTexture = gl.createTexture();
+		if (!framebuffer || !colorTexture) {
+			if (framebuffer) {
+				gl.deleteFramebuffer(framebuffer);
+			}
+			if (colorTexture) {
+				gl.deleteTexture(colorTexture);
+			}
+			throw new Error(`Failed to create texture preview target for ${page.key}.`);
+		}
+
+		try {
+			stateCache.bindVertexArray(null);
+			gl.bindTexture(gl.TEXTURE_2D, colorTexture);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+			gl.texStorage2D(
+				gl.TEXTURE_2D,
+				1,
+				gl.RGBA8,
+				page.texture.width,
+				page.texture.height,
+			);
+			gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+			gl.framebufferTexture2D(
+				gl.FRAMEBUFFER,
+				gl.COLOR_ATTACHMENT0,
+				gl.TEXTURE_2D,
+				colorTexture,
+				0,
+			);
+			const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+			if (status !== gl.FRAMEBUFFER_COMPLETE) {
+				throw new Error(
+					`Texture preview framebuffer for ${page.key} is incomplete: 0x${status.toString(16)}.`,
+				);
+			}
+
+			gl.viewport(0, 0, page.texture.width, page.texture.height);
+			gl.disable(gl.BLEND);
+			gl.disable(gl.CULL_FACE);
+			gl.disable(gl.DEPTH_TEST);
+			gl.disable(gl.SCISSOR_TEST);
+			gl.disable(gl.STENCIL_TEST);
+			stateCache.useProgram(currentResources.texturePagePreviewProgram.program);
+			stateCache.bindVertexArray(
+				currentResources.texturePagePreviewVertexArray.vertexArray,
+			);
+			gl.activeTexture(gl.TEXTURE0);
+			gl.bindTexture(gl.TEXTURE_2D, page.texture.texture);
+			gl.uniform1i(
+				currentResources.texturePagePreviewProgram.uniforms.uTexture,
+				0,
+			);
+			gl.uniform1i(
+				currentResources.texturePagePreviewProgram.uniforms.uPreviewMode,
+				resolveTexturePagePreviewMode(page),
+			);
+			gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+			const pixels = new Uint8Array(page.texture.width * page.texture.height * 4);
+			gl.readPixels(
+				0,
+				0,
+				page.texture.width,
+				page.texture.height,
+				gl.RGBA,
+				gl.UNSIGNED_BYTE,
+				pixels,
+			);
+			return new Uint8ClampedArray(pixels);
+		} finally {
+			gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+			gl.bindTexture(gl.TEXTURE_2D, null);
+			gl.viewport(
+				previousViewport[0] ?? 0,
+				previousViewport[1] ?? 0,
+				previousViewport[2] ?? canvas.width,
+				previousViewport[3] ?? canvas.height,
+			);
+			gl.deleteTexture(colorTexture);
+			gl.deleteFramebuffer(framebuffer);
+			stateCache.invalidate();
+		}
+	}
+
+	function resolveTexturePagePreviewMode(
+		page: Webgl2StaticBundleTexturePageResource,
+	): number {
+		if (page.sampleClass === "control-data" || page.indexedFormat === "p8") {
+			return 1;
+		}
+		if (page.indexedFormat === "index16") {
+			return 2;
+		}
+		return 0;
+	}
+
+	function resolveInspectableTexturePageResource(
+		store: Webgl2WorldResourceStore,
+		identity: RenderResourceTexturePageIdentity,
+	): Webgl2StaticBundleTexturePageResource | null {
+		if (identity.ownerKind === "static-bundle") {
+			return (
+				store.staticBundleLayerResources.layersByKey
+					.get(identity.ownerKey)
+					?.texturePagesByKey.get(identity.texturePageKey) ?? null
+			);
+		}
+		return (
+			store.structuredInteriorResources.cellsByKey
+				.get(identity.ownerKey)
+				?.texturePagesByKey.get(identity.texturePageKey) ?? null
 		);
 	}
 
@@ -2683,6 +2904,13 @@ function createWebgl2RenderResources(
 				return;
 			},
 		}),
+		texturePagePreviewProgram: createTexturePagePreviewProgram(gl),
+		texturePagePreviewVertexArray: createWebgl2VertexArray(gl, {
+			label: "webgl2 texture-page preview vertex array",
+			configure() {
+				return;
+			},
+		}),
 		sceneDomainTargets: null,
 		portalCompositeTargets: null,
 		selectedStaticRenderableOverlay: null,
@@ -2850,6 +3078,17 @@ function createSceneDomainCopyProgram(
 		vertexSource: SCENE_DOMAIN_COPY_VERTEX_SHADER,
 		fragmentSource: SCENE_DOMAIN_COPY_FRAGMENT_SHADER,
 		uniforms: ["uColorTexture", "uDepthTexture"],
+	});
+}
+
+function createTexturePagePreviewProgram(
+	gl: WebGL2RenderingContext,
+): Webgl2ProgramResource<never, "uTexture" | "uPreviewMode"> {
+	return createWebgl2Program(gl, {
+		label: "webgl2 texture-page preview",
+		vertexSource: TEXTURE_PAGE_PREVIEW_VERTEX_SHADER,
+		fragmentSource: TEXTURE_PAGE_PREVIEW_FRAGMENT_SHADER,
+		uniforms: ["uTexture", "uPreviewMode"],
 	});
 }
 

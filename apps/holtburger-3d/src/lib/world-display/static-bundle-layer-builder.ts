@@ -2,6 +2,8 @@ import {
 	getPreparedAssetDependencies,
 	type PreparedAssetRecord,
 	type PreparedGfxObjPayload,
+	type PreparedRegionDetailRole,
+	type PreparedRenderSurfacePayload,
 	type PreparedSetupAppearancePayload,
 	type PreparedSetupModelPayload,
 } from "../assets/types";
@@ -10,9 +12,11 @@ import {
 	formatHex32,
 	formatLandblockOutdoorAssetId,
 	formatLandblockTopologyAssetId,
+	formatRegionRenderProfileAssetId,
 	normalizeOutdoorLandblockId,
 } from "../landblocks";
 import type { PlacementTransformDto, Vec3Dto } from "../host/contracts";
+import { resolveNormalizedPreparedTextureAssetIds } from "../assets/material-texture-preparation-policy";
 import {
 	formatStaticObjectBundleScopeKey,
 	type StaticBundleCompactedBatch,
@@ -76,6 +80,7 @@ interface StaticBundleSourceObject {
 	sourceAssetId: string;
 	owningLandblockId: number;
 	owningEnvCellId: number | null;
+	regionNumber: number;
 	kind: StaticBundleObjectRecord["kind"];
 	sourceBounds: StaticBundleSpatialHint["bounds"] | null;
 	bounds: StaticBundleSpatialHint["bounds"] | null;
@@ -107,8 +112,11 @@ interface StaticBundleBuildSurface {
 	gfxObjAssetId: string;
 	materialAssetId: string;
 	materialRecordKey: string;
+	materialTextureRecordKey: string;
 	materialVariantSignature: string | null;
 	textureRefKeys: readonly string[];
+	detailTextureRefKey: string | null;
+	detailTiling: number;
 	compactable: boolean;
 	reason: string | null;
 	familyKey: string;
@@ -154,10 +162,18 @@ export function buildStaticObjectBundleArtifact({
 		collectStaticBundleMaterialRouteRequests(sourceObjects),
 		preparedByAssetId,
 	);
-	const texturePageRefs = collectStaticMaterialTexturePageRefs(
+	const materialTexturePageRefs = collectStaticMaterialTexturePageRefs(
 		materialTextureRoutes,
 		preparedByAssetId,
 	);
+	const detailTexturePageRefs = collectStaticBundleDetailTexturePageRefs({
+		sourceObjects,
+		preparedByAssetId,
+	});
+	const texturePageRefs = uniqueTexturePageRefs([
+		...materialTexturePageRefs,
+		...detailTexturePageRefs,
+	]);
 	const texturePages = buildStaticBundleLayerTexturePages({
 		scopeKey: formatStaticObjectBundleScopeKey(job.scope),
 		texturePageRefs,
@@ -302,6 +318,7 @@ function collectStaticBundleSourceObjects(
 					sourceAssetId: member.sourceAssetId,
 					owningLandblockId: normalizeOutdoorLandblockId(outdoor.landblockId),
 					owningEnvCellId: null,
+					regionNumber: outdoor.regionNumber,
 					kind:
 						member.kind === "building"
 							? "building"
@@ -337,6 +354,7 @@ function collectStaticBundleSourceObjects(
 			sourceAssetId: member.sourceAssetId,
 			owningLandblockId: normalizeOutdoorLandblockId(job.scope.landblockId),
 			owningEnvCellId: envCellScope.envCellId,
+			regionNumber: envCell.regionNumber,
 			kind: "indoor-static",
 			sourceBounds: member.sourceBounds,
 			bounds: member.instanceBounds,
@@ -504,14 +522,209 @@ function collectStaticBundleMaterialRouteRequests(
 		object.parts.flatMap((part) =>
 			part.materialSlots.map((slot) => ({
 				materialAssetId: slot.materialAssetId,
-				materialRecordKey: formatStaticBundleMaterialRecordKey(slot),
+				materialRecordKey: formatStaticBundleMaterialTextureRecordKey(slot),
 				materialVariantSignature: slot.materialVariantSignature ?? null,
 			})),
 		),
 	);
 }
 
-function formatStaticBundleMaterialRecordKey(
+function collectStaticBundleDetailTexturePageRefs({
+	sourceObjects,
+	preparedByAssetId,
+}: {
+	sourceObjects: readonly StaticBundleSourceObject[];
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
+}): VirtualTexturePageRef[] {
+	return uniqueTexturePageRefs(
+		sourceObjects
+			.map((object) =>
+				resolveStaticBundleObjectDetailTextureRef({
+					object,
+					preparedByAssetId,
+				}),
+			)
+			.filter((ref): ref is VirtualTexturePageRef => ref !== null),
+	);
+}
+
+function resolveStaticBundleObjectDetailTextureRef({
+	object,
+	preparedByAssetId,
+}: {
+	object: StaticBundleSourceObject;
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
+}): VirtualTexturePageRef | null {
+	const roleKind = staticBundleDetailRoleKindForObject(object);
+	if (!roleKind) {
+		return null;
+	}
+	const role = resolveStaticBundleObjectDetailRole({
+		object,
+		preparedByAssetId,
+	});
+	if (!role || role.tiling <= 0) {
+		return null;
+	}
+	const renderSurface = resolveStaticBundleDetailRenderSurface({
+		role,
+		preparedByAssetId,
+	});
+	if (!renderSurface) {
+		return null;
+	}
+	const preparedTextureAssetId = resolveNormalizedPreparedTextureAssetIds({
+		renderSurface,
+		usage: "detail",
+	})[0];
+	if (!preparedTextureAssetId) {
+		return null;
+	}
+	const preparedTexture = getPreparedPayload(
+		preparedByAssetId,
+		preparedTextureAssetId,
+		"prepared-texture",
+	);
+	const level = preparedTexture.levels[0];
+	if (!level) {
+		throw new Error(
+			`Static bundle detail texture ${preparedTextureAssetId} has no mip level 0.`,
+		);
+	}
+	return {
+		key: formatStaticBundleDetailTextureRefKey({
+			regionNumber: object.regionNumber,
+			roleKind,
+			preparedTextureAssetId,
+		}),
+		sourceAssetId: preparedTextureAssetId,
+		usageBucket: "detail",
+		sampleClass: "rgba-color",
+		width: level.width,
+		height: level.height,
+		wrapS: "repeat",
+		wrapT: "repeat",
+		samplingDomain: "color",
+		lookup: "color-filtered",
+		bytes: level.bytes,
+	};
+}
+
+function resolveStaticBundleObjectDetailRole({
+	object,
+	preparedByAssetId,
+}: {
+	object: StaticBundleSourceObject;
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
+}): PreparedRegionDetailRole | null {
+	const profile = preparedByAssetId.get(
+		formatRegionRenderProfileAssetId(object.regionNumber),
+	);
+	if (profile?.payload.kind !== "region-render-profile") {
+		return null;
+	}
+	if (profile.payload.regionNumber !== object.regionNumber) {
+		return null;
+	}
+	const roleKind = staticBundleDetailRoleKindForObject(object);
+	return roleKind ? profile.payload.detailRoles[roleKind] : null;
+}
+
+function resolveStaticBundleDetailRenderSurface({
+	role,
+	preparedByAssetId,
+}: {
+	role: PreparedRegionDetailRole;
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
+}): PreparedRenderSurfacePayload | null {
+	const surfaceTexture = preparedByAssetId.get(role.textureAssetId);
+	if (surfaceTexture?.payload.kind !== "surface-texture") {
+		return null;
+	}
+	const preferredRenderSurfaceIds =
+		surfaceTexture.payload.renderSurfaceIds.length <= 1
+			? [
+					...surfaceTexture.payload.renderSurfaceIds,
+					...(surfaceTexture.payload.selectedRenderSurfaceId === null
+						? []
+						: [surfaceTexture.payload.selectedRenderSurfaceId]),
+				]
+			: [
+					surfaceTexture.payload.renderSurfaceIds[1],
+					...surfaceTexture.payload.renderSurfaceIds.slice(2),
+					surfaceTexture.payload.renderSurfaceIds[0],
+					...(surfaceTexture.payload.selectedRenderSurfaceId === null
+						? []
+						: [surfaceTexture.payload.selectedRenderSurfaceId]),
+				];
+	for (const renderSurfaceId of preferredRenderSurfaceIds) {
+		if (renderSurfaceId === undefined) {
+			continue;
+		}
+		const renderSurface = preparedByAssetId.get(
+			`render-surface/${formatHex32(renderSurfaceId)}`,
+		);
+		if (renderSurface?.payload.kind === "render-surface") {
+			return renderSurface.payload;
+		}
+	}
+	return null;
+}
+
+function staticBundleDetailRoleKindForObject(
+	object: StaticBundleSourceObject,
+): "building" | null {
+	return object.kind === "building" ? "building" : null;
+}
+
+function formatStaticBundleDetailTextureRefKey({
+	regionNumber,
+	roleKind,
+	preparedTextureAssetId,
+}: {
+	regionNumber: number;
+	roleKind: "building";
+	preparedTextureAssetId: string;
+}): string {
+	return [
+		"texture",
+		"region-detail",
+		regionNumber,
+		roleKind,
+		preparedTextureAssetId,
+	].join(":");
+}
+
+function resolveStaticBundleObjectDetail({
+	object,
+	texturePageRefs,
+	preparedByAssetId,
+}: {
+	object: StaticBundleSourceObject;
+	texturePageRefs: readonly VirtualTexturePageRef[];
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
+}): { textureRefKey: string; tiling: number } | null {
+	const role = resolveStaticBundleObjectDetailRole({
+		object,
+		preparedByAssetId,
+	});
+	if (!role || role.tiling <= 0) {
+		return null;
+	}
+	const detailRef = resolveStaticBundleObjectDetailTextureRef({
+		object,
+		preparedByAssetId,
+	});
+	if (!detailRef || !texturePageRefs.some((ref) => ref.key === detailRef.key)) {
+		return null;
+	}
+	return {
+		textureRefKey: detailRef.key,
+		tiling: role.tiling,
+	};
+}
+
+function formatStaticBundleMaterialTextureRecordKey(
 	slot: Pick<
 		ResolvedMaterialSlot,
 		"materialAssetId" | "materialVariantSignature"
@@ -521,6 +734,19 @@ function formatStaticBundleMaterialRecordKey(
 		`material:${slot.materialAssetId}`,
 		`variant:${slot.materialVariantSignature ?? "base"}`,
 	].join(":");
+}
+
+function formatStaticBundleMaterialRecordKey(options: {
+	slot: Pick<
+		ResolvedMaterialSlot,
+		"materialAssetId" | "materialVariantSignature"
+	>;
+	detailTextureRefKey: string | null;
+}): string {
+	const base = formatStaticBundleMaterialTextureRecordKey(options.slot);
+	return options.detailTextureRefKey
+		? `${base}:detail=${options.detailTextureRefKey}`
+		: base;
 }
 
 function buildObjectSurfaces(
@@ -566,14 +792,26 @@ function buildObjectSurface({
 	texturePageRefs: readonly VirtualTexturePageRef[];
 	materialTextureRoutes: readonly StaticMaterialTextureRoute[];
 }): StaticBundleBuildSurface {
+	const detail = resolveStaticBundleObjectDetail({
+		object,
+		texturePageRefs,
+		preparedByAssetId,
+	});
+	const materialTextureRecordKey = formatStaticBundleMaterialTextureRecordKey(slot);
+	const materialRecordKey = formatStaticBundleMaterialRecordKey({
+		slot,
+		detailTextureRefKey: detail?.textureRefKey ?? null,
+	});
 	const textureRefKeys = findStaticMaterialTextureRefs(
-		formatStaticBundleMaterialRecordKey(slot),
+		materialTextureRecordKey,
 		texturePageRefs,
 		materialTextureRoutes,
-	).map((ref) => ref.key);
+	)
+		.map((ref) => ref.key)
+		.concat(detail?.textureRefKey ?? []);
 	const materialReadiness = resolveStaticMaterialReadiness({
 		materialAssetId: slot.materialAssetId,
-		materialRecordKey: formatStaticBundleMaterialRecordKey(slot),
+		materialRecordKey: materialTextureRecordKey,
 		materialVariantSignature: slot.materialVariantSignature ?? null,
 		preparedByAssetId,
 		texturePageRefs,
@@ -626,9 +864,12 @@ function buildObjectSurface({
 		object,
 		gfxObjAssetId: part.gfxObjAssetId,
 		materialAssetId: slot.materialAssetId,
-		materialRecordKey: formatStaticBundleMaterialRecordKey(slot),
+		materialRecordKey,
+		materialTextureRecordKey,
 		materialVariantSignature: slot.materialVariantSignature ?? null,
 		textureRefKeys,
+		detailTextureRefKey: detail?.textureRefKey ?? null,
+		detailTiling: detail?.tiling ?? 1,
 		compactable,
 		reason: compactable
 			? null
@@ -796,10 +1037,12 @@ function buildMaterialRecords({
 			familyKey: surface.familyKey,
 			color: surface.color,
 			texturePageRefKeys: surface.textureRefKeys,
+			detailTextureRefKey: surface.detailTextureRefKey,
+			detailTiling: surface.detailTiling,
 			isTransparent: surface.isTransparent,
 			indexedMaterial: resolveStaticIndexedMaterialRecord({
 				materialAssetId: surface.materialAssetId,
-				materialRecordKey: surface.materialRecordKey,
+				materialRecordKey: surface.materialTextureRecordKey,
 				materialTextureRoutes,
 				preparedByAssetId,
 			}),
@@ -1043,4 +1286,12 @@ function formatSetupAppearanceAssetId(setupModelId: number): string {
 
 function uniqueSortedStrings(values: readonly string[]): string[] {
 	return [...new Set(values)].sort();
+}
+
+function uniqueTexturePageRefs(
+	refs: readonly VirtualTexturePageRef[],
+): VirtualTexturePageRef[] {
+	return [
+		...new Map(refs.map((ref) => [ref.key, ref] as const)).values(),
+	].sort((left, right) => left.key.localeCompare(right.key));
 }

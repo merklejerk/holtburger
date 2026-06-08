@@ -138,6 +138,8 @@ export interface StaticBundleMaterialRecord {
 	familyKey: string;
 	color: readonly [number, number, number, number];
 	texturePageRefKeys: readonly string[];
+	detailTextureRefKey: string | null;
+	detailTiling: number;
 	isTransparent: boolean;
 	indexedMaterial?: StaticBundleIndexedMaterialRecord;
 }

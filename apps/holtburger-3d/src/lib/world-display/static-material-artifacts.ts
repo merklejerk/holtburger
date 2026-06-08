@@ -11,6 +11,7 @@ import type {
 	PreparedAssetRecord,
 	PreparedMaterialRecipePayload,
 	PreparedRenderSurfacePayload,
+	PreparedSurfaceTexturePayload,
 	PreparedTexturePayload,
 } from "../assets/types";
 import { formatHex32 } from "../landblocks";
@@ -538,6 +539,30 @@ export function collectStaticPreparedTextureRouteAssetIds(
 	asset: PreparedAssetRecord,
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>,
 ): string[] {
+	if (asset.payload.kind === "region-render-profile") {
+		return uniqueSortedStrings(
+			Object.values(asset.payload.detailRoles).flatMap((role) => {
+				if (!role || role.tiling <= 0) {
+					return [];
+				}
+				const surfaceTexture = preparedByAssetId.get(role.textureAssetId);
+				if (surfaceTexture?.payload.kind !== "surface-texture") {
+					return [];
+				}
+				const renderSurface = resolvePreferredStaticDetailRenderSurface(
+					surfaceTexture.payload,
+					preparedByAssetId,
+				);
+				return renderSurface
+					? resolveNormalizedPreparedTextureAssetIds({
+							renderSurface,
+							usage: "detail",
+						})
+					: [];
+			}),
+		);
+	}
+
 	if (asset.payload.kind !== "material-recipe") {
 		return [];
 	}
@@ -563,6 +588,34 @@ export function collectStaticPreparedTextureRouteAssetIds(
 			);
 		})
 		.flat();
+}
+
+function resolvePreferredStaticDetailRenderSurface(
+	surfaceTexture: PreparedSurfaceTexturePayload,
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>,
+): PreparedRenderSurfacePayload | null {
+	const sourceIds = surfaceTexture.renderSurfaceIds;
+	const fallbackIds =
+		surfaceTexture.selectedRenderSurfaceId === null
+			? []
+			: [surfaceTexture.selectedRenderSurfaceId];
+	const preferredRenderSurfaceIds =
+		sourceIds.length <= 1
+			? [...sourceIds, ...fallbackIds]
+			: [sourceIds[1], ...sourceIds.slice(2), sourceIds[0], ...fallbackIds];
+
+	for (const renderSurfaceId of preferredRenderSurfaceIds) {
+		if (renderSurfaceId === undefined) {
+			continue;
+		}
+		const renderSurface = preparedByAssetId.get(
+			`render-surface/${formatHex32(renderSurfaceId)}`,
+		);
+		if (renderSurface?.payload.kind === "render-surface") {
+			return renderSurface.payload;
+		}
+	}
+	return null;
 }
 
 export function formatStaticMaterialFamilyKey(
@@ -890,4 +943,8 @@ function getPreparedPayload<
 		PreparedAssetRecord["payload"],
 		{ kind: TKind }
 	>;
+}
+
+function uniqueSortedStrings(values: readonly string[]): string[] {
+	return [...new Set(values)].sort();
 }

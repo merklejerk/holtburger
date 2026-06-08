@@ -217,6 +217,7 @@ describe("static landblock render worker", () => {
 			mipPolicy: "none",
 			colorSpace: "linear",
 		});
+		const detailRefKey = `texture:region-detail:1:environment:${detailPreparedTextureAssetId}`;
 		const lookup = new Map<string, AssetLookupResponseDto>(
 			[
 				createResponse(
@@ -248,7 +249,11 @@ describe("static landblock render worker", () => {
 				),
 				createResponse(
 					formatRegionRenderProfileAssetId(1),
-					createRegionRenderProfile(),
+					createRegionRenderProfileWithEnvironmentDetail(),
+				),
+				createResponse(
+					"surface-texture/05000013",
+					createSurfaceTexturePayload(),
 				),
 			].map((response) => [response.assetId, response] as const),
 		);
@@ -273,24 +278,27 @@ describe("static landblock render worker", () => {
 		expect(
 			detailedArtifacts!.structuredInteriorMaterialRecords[0],
 		).toMatchObject({
-			key: `material:${materialAssetId}:variant:base`,
+			key: `material:${materialAssetId}:variant:base:detail=${detailRefKey}`,
+			detailTextureRefKey: detailRefKey,
+			detailTiling: 9,
 			texturePageRefKeys: expect.arrayContaining([
 				`texture:material:${materialAssetId}:variant:base:${rawPreparedTextureAssetId}`,
+				detailRefKey,
 			]),
 		});
 		expect(
 			detailedArtifacts!.structuredInteriorTexturePageRefs.map(
 				(ref) => ref.sourceAssetId,
 			),
-		).toEqual([rawPreparedTextureAssetId]);
-		expect(detailedArtifacts!.structuredInteriorTexturePages).toHaveLength(1);
+		).toEqual([rawPreparedTextureAssetId, detailPreparedTextureAssetId]);
+		expect(detailedArtifacts!.structuredInteriorTexturePages).toHaveLength(2);
 		expect(
 			detailedArtifacts!.structuredInteriorCells[0]?.materialSlices[0],
 		).toMatchObject({
 			envCellId: 0xda550100,
 			surfaceId: 0x08000001,
 			geometrySurfaceId: 0,
-			materialRecordKey: `material:${materialAssetId}:variant:base`,
+			materialRecordKey: `material:${materialAssetId}:variant:base:detail=${detailRefKey}`,
 			normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
 			triangleCount: 1,
 		});
@@ -806,6 +814,23 @@ function createRenderSurfacePayload(): Record<string, unknown> {
 	};
 }
 
+function createSurfaceTexturePayload(): Record<string, unknown> {
+	return {
+		kind: "surface-texture",
+		sourceAssetKind: "surface-texture",
+		residencyKind: "unknown",
+		provenance: createProvenance("surface-texture"),
+		surfaceTextureId: 0x05000013,
+		textureType: 0,
+		unknown: 0,
+		selectedRenderSurfaceId: 0x06000001,
+		renderSurfaceIds: [0x06000001],
+		dependencies: {
+			renderSurfaceAssetIds: ["render-surface/06000001"],
+		},
+	};
+}
+
 function createPreparedTexturePayload(options: {
 	assetId: string;
 	usage: "raw" | "detail";
@@ -913,6 +938,35 @@ function createRegionRenderProfile(): Record<string, unknown> {
 		dependencies: {
 			surfaceTextureAssetIds: [],
 			renderSurfaceAssetIds: [],
+			paletteAssetIds: [],
+		},
+	};
+}
+
+function createRegionRenderProfileWithEnvironmentDetail(): Record<string, unknown> {
+	return {
+		kind: "region-render-profile",
+		sourceAssetKind: "region-render-profile",
+		residencyKind: "unknown",
+		provenance: createProvenance("region-render-profile"),
+		regionNumber: 1,
+		detailRoles: {
+			landscape: null,
+			building: null,
+			environment: {
+				role: "environment",
+				sourceTerrainDescIndex: 0,
+				textureAssetId: "surface-texture/05000013",
+				textureDid: 0x05000013,
+				tiling: 9,
+				fadeNear: 0,
+				fadeFar: 1,
+			},
+			object: null,
+		},
+		dependencies: {
+			surfaceTextureAssetIds: ["surface-texture/05000013"],
+			renderSurfaceAssetIds: ["render-surface/06000001"],
 			paletteAssetIds: [],
 		},
 	};

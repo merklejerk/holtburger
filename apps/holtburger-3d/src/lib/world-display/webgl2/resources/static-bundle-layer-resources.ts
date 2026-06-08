@@ -88,6 +88,8 @@ export interface Webgl2StaticBundleMaterialResource {
 	family: StaticMaterialFamilyDescriptor;
 	color: readonly [number, number, number, number];
 	isTransparent: boolean;
+	detailTextureRefKey: string | null;
+	detailTiling: number;
 	indexedMaterial?: StaticBundleIndexedMaterialRecord;
 	textureBindings: readonly Webgl2StaticBundleMaterialTextureBinding[];
 }
@@ -668,6 +670,8 @@ export function createWebgl2StaticBundleMaterialResource({
 		family,
 		color: record.color,
 		isTransparent: record.isTransparent,
+		detailTextureRefKey: record.detailTextureRefKey,
+		detailTiling: record.detailTiling,
 		indexedMaterial: record.indexedMaterial,
 		textureBindings: record.texturePageRefKeys.map((virtualRefKey) =>
 			resolveStaticBundleMaterialTextureBinding({

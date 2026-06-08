@@ -1246,6 +1246,107 @@ Verification:
 - `npm run --prefix apps/holtburger-3d lint:ts`
 - `npm run --prefix apps/holtburger-3d check`
 
+## Phase 14: Type Renderer Decision Vocabulary In Slices
+
+Status: dry-run complete.
+
+Phase 11's remaining follow-up should target renderer decision vocabularies, not every string in the renderer. The broader cleanup is worthwhile, but it should be split by semantic layer so each cutover is reviewable and can remove old routing paths decisively. The goal is to prevent another texture-page-style drift where similar string concepts accumulate different meanings across artifact creation, resource construction, submit, picker, and inspector paths.
+
+Design rule:
+
+- Prefer structured descriptors throughout renderer-owned lifecycles.
+- Parse strings only at serialized, temporary migration, copied-debug, or external boundaries.
+- Format descriptors back to strings only for stable ids, artifact keys, diagnostics, picker reports, snapshots, logs, and tests that prove boundary compatibility.
+- Do not replace loose strings with repeated runtime parsing. That would keep the same stringly data path and add ceremony without improving correctness.
+- Temporary migration boundaries are not permanent compatibility paths. Once current artifact/resource creation has a typed descriptor available, renderer submit/resource code should consume the descriptor directly and the old string-routing path should be removed.
+
+In scope:
+
+- Material family descriptors and alpha policy values where they select static bundle, structured-interior, flat, textured, indexed, cutout, transparent, or unsupported submit paths.
+- Render/draw domain ids where they choose queues, pipelines, resource buckets, or submit branches.
+- Detail texture roles, blend modes, fade modes, and tiling policy where they affect whether detail passes are synthesized or submitted.
+- Parser/formatter helpers at serialized key boundaries when an existing artifact key or report string must enter typed renderer code.
+
+Out of scope:
+
+- Asset ids such as `material/08000725`, `prepared-texture/...`, `gfx-obj/...`, and generated product/resource keys.
+- Material record keys and texture page keys that are intentionally serialized identities.
+- Inspector-only display labels that do not feed renderer decisions.
+- Broad DTO enum cleanup unless the DTO value is consumed by renderer logic.
+- Compatibility shims whose only purpose is preserving stale loose string call sites.
+- Permanent legacy render paths or duplicate routing branches retained only to keep old string fields alive.
+
+Subphases:
+
+- **Phase 14A: Static Material Family Lifecycle**
+  - Carry `StaticMaterialFamilyDescriptor` from artifact/material-record creation into WebGL resources.
+  - Stop formatting `familyKey` and reparsing it as the normal renderer path.
+  - Keep `familyKey` only as serialized/source identity and diagnostic display text.
+  - Remove legacy family literal parser branches once fixtures/current producers are updated.
+- **Phase 14B: Detail Overlay Vocabulary**
+  - Promote/export detail role, blend mode, fade mode, and gating policy types where renderer-owned resources need them.
+  - Keep `.worktrees/prefactor` behavior as the parity reference: only render roles whose blend mode is enabled.
+  - Avoid treating detail keys/signatures as routing values once a structured overlay plan exists.
+- **Phase 14C: Render/Submit Domain Vocabulary**
+  - Audit draw categories, world render domains, WebGL scene domains, resource owner domains, and submit domains.
+  - Collapse only vocabularies that are truly the same concept; keep separate named types where semantics differ.
+  - Keep batching/identity keys such as `renderStateKey`, `samplingKey`, material record keys, texture page keys, and atlas entry keys as strings unless behavior is inferred from their text.
+- **Phase 14D: Resource/Inspector DTO Boundary Audit**
+  - Ensure inspector, picker, report, and resource snapshot DTOs display strings but do not become renderer decision inputs.
+  - Type in-process DTO fields only when they feed renderer behavior or resource routing.
+  - Leave observational/display-only fields as strings.
+
+Dry-run notes:
+
+- The highest-value target is narrower than the initial scope: static material family/alpha vocabulary. `Webgl2StaticBundleMaterialResource` already has `family: StaticMaterialFamilyDescriptor`, and `webgl2-world-submit.ts` routes via `material.family`, not direct `familyKey` string comparisons. That is good, but the descriptor is still created by parsing `familyKey` during WebGL resource construction.
+- Current artifact builders already know the source family and alpha policy before formatting `familyKey`. `static-bundle-layer-builder.ts` and `static-landblock-render-worker.ts` both derive `compactionEligibility.material.family` and `compactionEligibility.material.alphaPolicy`, then format them into `familyKey`. That means the next cleanup can carry a structured material-family descriptor through `StaticBundleMaterialRecord` instead of formatting and reparsing inside the renderer.
+- `StaticBundleMaterialRecord.familyKey` should remain as serialized/source identity for diagnostics, picker reports, resource inspector display, stable keys, and existing artifact text. It should not be the routing source once a descriptor is available on the record/resource.
+- `StaticBundleCompactedBatch.familyKey` and `StaticBundleDirectEntry.materialRecordKey` can remain serialized/grouping keys in the first cut. Geometry submit already resolves material resources by material record key, and pipeline routing happens through the material resource descriptor.
+- `parseStaticMaterialFamilyKey()` still accepts legacy family literals (`rgba-texture-page`, `indexed-paletted`). Current builders emit `static:<family>:alpha=<policy>` keys, so the remaining legacy support appears to be test fixtures and temporary migration residue, not a required runtime path. The implementation should update those fixtures and remove legacy parser branches unless a concrete current artifact producer still emits them.
+- `CompactionMaterialFamily` and `CompactionAlphaPolicy` are already typed. The likely clean shape is to introduce or extract a small material-family module that owns:
+  - `StaticMaterialFamilyDescriptor`
+  - `formatStaticMaterialFamilyKey()`
+  - `createStaticMaterialFamilyDescriptor()` from typed family/alpha inputs
+  - `parseStaticMaterialFamilyKey()` only for boundary ingestion/tests
+  - `resolveStaticMaterialFamilyAlphaTest()`
+  This avoids making unrelated texture-route code in `static-material-artifacts.ts` the long-term home for renderer family vocabulary.
+- Detail role/blend/fade vocabulary is already typed in `region-detail-overlays.ts` (`RegionDetailRoleKind`, `RegionDetailBlendMode`, `RegionDetailFadeMode`) and returns a structured `ResolvedRegionDetailOverlayPlan`. It is not the first Phase 14 implementation target. A later slice can export the currently local blend/fade types if submit/resource code starts needing them directly.
+- Render domains are also already partially typed (`WORLD_RENDER_DOMAIN`, `WorldRenderDomain`, `Webgl2SceneDomain`, frame candidate/draw unions). They should stay out of the first implementation cut unless a concrete loose-string routing bug appears.
+- `renderStateKey`, `samplingKey`, material record keys, texture page keys, and atlas entry keys are batching/identity keys, not closed renderer vocabularies. They should remain strings unless a later bug shows behavior being inferred from their text.
+
+Dry-run verdict:
+
+- The broader Phase 14 direction is worthwhile, but it should be implemented as subphases rather than a single mega-refactor.
+- The first implementation cut should be Phase 14A: "static material family descriptor carried through artifact/resource lifecycle."
+- The decisive cutover is: builders create structured family descriptors from typed compaction results; WebGL resources consume those descriptors directly; parser use is limited to serialized boundary tests or any verified external artifact ingestion path; legacy literal parser branches are removed with fixture updates.
+- Do not start by changing render domains, detail roles, or resource inspector display DTOs. They remain valid follow-up subphases, but 14A is the highest-signal first slice.
+
+Phase 14A implementation order:
+
+1. Extract or colocate static material family vocabulary in a focused module if doing so avoids importing all of `static-material-artifacts.ts` from artifact/resource layers.
+2. Add `family: StaticMaterialFamilyDescriptor` to `StaticBundleMaterialRecord` while retaining `familyKey` as serialized/diagnostic identity.
+3. Build the descriptor directly from `CompactionMaterialFamily` + `CompactionAlphaPolicy` at static bundle and structured-interior material record creation time.
+4. Change `createWebgl2StaticBundleMaterialResource()` to consume `record.family` directly and stop parsing `record.familyKey`.
+5. Update tests and fixtures that still use legacy `rgba-texture-page` / raw `indexed-paletted` family keys to current `static:<family>:alpha=<policy>` records with descriptors.
+6. Remove legacy literal acceptance from `parseStaticMaterialFamilyKey()` unless a current producer is proven to require it.
+7. Run focused static material artifact, static bundle builder, static bundle resource, structured worker, resource inspector, submit, check, lint, and full app TS tests.
+
+Acceptance criteria:
+
+- Pipeline-affecting material/render/detail vocabulary is structured before submit code consumes it.
+- Serialized keys can still be emitted and parsed at boundaries, but renderer-owned paths do not repeatedly parse their own strings.
+- Existing visual behavior is unchanged.
+- `npm run --prefix apps/holtburger-3d test:ts`, `npm run --prefix apps/holtburger-3d lint:ts`, and `npm run --prefix apps/holtburger-3d check` pass.
+
+Risk and mitigation:
+
+- Risk: this becomes an "enum everything" cleanup and adds churn without reducing renderer risk.
+  - Mitigation: only type closed values that choose behavior; leave open-ended identity/display strings alone.
+- Risk: descriptor/key duality creates two sources of truth.
+  - Mitigation: descriptors are primary inside renderer-owned lifecycles; formatted keys are boundary artifacts only.
+- Risk: parsing remains scattered.
+  - Mitigation: add or reuse one parser/formatter per vocabulary and make resource construction fail hard for unparseable serialized values.
+
 ## Findings
 
 - Phase 1 diagnostics are installed and verified.

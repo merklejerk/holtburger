@@ -8,7 +8,6 @@ import {
 import { formatHex32, normalizeOutdoorLandblockId } from "../landblocks";
 import type { RenderChunkTransform } from "./render-anchor";
 import {
-	parseStaticMaterialFamilyKey,
 	resolveStaticMaterialFamilyAlphaTest,
 	type StaticMaterialFamilyDescriptor,
 } from "./static-material-artifacts";
@@ -134,30 +133,32 @@ export interface Webgl2WorldSubmitMetrics {
 	staticBundleGeometryCandidateTriangleCount: number;
 	staticBundleSelectedLayerCoverageSamples: readonly string[];
 	staticBundleGeometryCandidateCount: number;
-	staticBundleGeometrySubmittedCount: number;
-	staticBundleDrawCallCount: number;
-	staticBundleTriangleCount: number;
-	staticBundleSkippedGeometryCount: number;
-	staticBundleSubmitFallbackSamples: readonly string[];
 	staticBundleMaterialRecordCount: number;
 	staticBundleMaterialFamilyCounts: Record<string, number>;
 	staticBundleMaterialAlphaPolicyCounts: Record<string, number>;
 	staticBundleMaterialBindingUsageCounts: Record<string, number>;
 	staticBundleMaterialBaseColorBindingCount: number;
 	staticBundleMaterialIndexedBindingCount: number;
-	staticBundleSubmittedOpaqueGeometryCount: number;
-	staticBundleSubmittedCutoutGeometryCount: number;
-	staticBundleSubmittedTransparentGeometryCount: number;
-	staticBundleSkippedGeometryReasonCounts: Record<string, number>;
-	staticBundleSkippedGeometryFamilyCounts: Record<string, number>;
-	staticBundleSkippedGeometryAlphaPolicyCounts: Record<string, number>;
-	staticBundleSkippedGeometryBindingUsageCounts: Record<string, number>;
-	structuredInteriorResourceSubmittedCount: number;
-	structuredInteriorResourceDrawCallCount: number;
-	structuredInteriorResourceTriangleCount: number;
-	structuredInteriorResourceSkippedGeometryCount: number;
-	structuredInteriorResourceFallbackSamples: readonly string[];
+	materialSurfaceSubmittedCount: number;
+	materialSurfaceSubmittedCountsByDomain: Record<Webgl2MaterialDrawDomain, number>;
+	materialSurfaceDrawCallCountsByDomain: Record<Webgl2MaterialDrawDomain, number>;
+	materialSurfaceTriangleCountsByDomain: Record<Webgl2MaterialDrawDomain, number>;
+	materialSurfaceSkippedCount: number;
+	materialSurfaceSkippedCountsByDomain: Record<Webgl2MaterialDrawDomain, number>;
+	materialSurfaceSubmittedAlphaPolicyCounts: Record<string, number>;
+	materialSurfaceSkippedReasonCounts: Record<string, number>;
+	materialSurfaceSkippedFamilyCounts: Record<string, number>;
+	materialSurfaceSkippedAlphaPolicyCounts: Record<string, number>;
+	materialSurfaceSkippedBindingUsageCounts: Record<string, number>;
+	materialSurfaceSubmitFallbackSamples: readonly string[];
+	structuredInteriorShellSubmittedCount: number;
+	structuredInteriorShellDrawCallCount: number;
+	structuredInteriorShellTriangleCount: number;
 }
+
+export type Webgl2MaterialDrawDomain =
+	| "static-bundle"
+	| "structured-interior";
 
 const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	visibleTerrainTileCount: 0,
@@ -194,29 +195,27 @@ const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {
 	staticBundleGeometryCandidateTriangleCount: 0,
 	staticBundleSelectedLayerCoverageSamples: [],
 	staticBundleGeometryCandidateCount: 0,
-	staticBundleGeometrySubmittedCount: 0,
-	staticBundleDrawCallCount: 0,
-	staticBundleTriangleCount: 0,
-	staticBundleSkippedGeometryCount: 0,
-	staticBundleSubmitFallbackSamples: [],
 	staticBundleMaterialRecordCount: 0,
 	staticBundleMaterialFamilyCounts: {},
 	staticBundleMaterialAlphaPolicyCounts: {},
 	staticBundleMaterialBindingUsageCounts: {},
 	staticBundleMaterialBaseColorBindingCount: 0,
 	staticBundleMaterialIndexedBindingCount: 0,
-	staticBundleSubmittedOpaqueGeometryCount: 0,
-	staticBundleSubmittedCutoutGeometryCount: 0,
-	staticBundleSubmittedTransparentGeometryCount: 0,
-	staticBundleSkippedGeometryReasonCounts: {},
-	staticBundleSkippedGeometryFamilyCounts: {},
-	staticBundleSkippedGeometryAlphaPolicyCounts: {},
-	staticBundleSkippedGeometryBindingUsageCounts: {},
-	structuredInteriorResourceSubmittedCount: 0,
-	structuredInteriorResourceDrawCallCount: 0,
-	structuredInteriorResourceTriangleCount: 0,
-	structuredInteriorResourceSkippedGeometryCount: 0,
-	structuredInteriorResourceFallbackSamples: [],
+	materialSurfaceSubmittedCount: 0,
+	materialSurfaceSubmittedCountsByDomain: createEmptyMaterialDrawDomainCounts(),
+	materialSurfaceDrawCallCountsByDomain: createEmptyMaterialDrawDomainCounts(),
+	materialSurfaceTriangleCountsByDomain: createEmptyMaterialDrawDomainCounts(),
+	materialSurfaceSkippedCount: 0,
+	materialSurfaceSkippedCountsByDomain: createEmptyMaterialDrawDomainCounts(),
+	materialSurfaceSubmittedAlphaPolicyCounts: {},
+	materialSurfaceSkippedReasonCounts: {},
+	materialSurfaceSkippedFamilyCounts: {},
+	materialSurfaceSkippedAlphaPolicyCounts: {},
+	materialSurfaceSkippedBindingUsageCounts: {},
+	materialSurfaceSubmitFallbackSamples: [],
+	structuredInteriorShellSubmittedCount: 0,
+	structuredInteriorShellDrawCallCount: 0,
+	structuredInteriorShellTriangleCount: 0,
 };
 
 export interface Webgl2TerrainTileSubmitReadinessPlan {
@@ -266,17 +265,34 @@ export function createEmptyWebgl2WorldSubmitMetrics(): Webgl2WorldSubmitMetrics 
 		...EMPTY_SUBMIT_METRICS,
 		terrainOneDrawBlockerSamples: [],
 		terrainOneDrawSubmitFallbackSamples: [],
-		staticBundleSubmitFallbackSamples: [],
 		staticBundleSelectedLayerCoverageSamples: [],
 		staticBundleBuilderSkippedReasonCounts: {},
 		staticBundleMaterialFamilyCounts: {},
 		staticBundleMaterialAlphaPolicyCounts: {},
 		staticBundleMaterialBindingUsageCounts: {},
-		staticBundleSkippedGeometryReasonCounts: {},
-		staticBundleSkippedGeometryFamilyCounts: {},
-		staticBundleSkippedGeometryAlphaPolicyCounts: {},
-		staticBundleSkippedGeometryBindingUsageCounts: {},
-		structuredInteriorResourceFallbackSamples: [],
+		materialSurfaceSubmittedCountsByDomain:
+			createEmptyMaterialDrawDomainCounts(),
+		materialSurfaceDrawCallCountsByDomain:
+			createEmptyMaterialDrawDomainCounts(),
+		materialSurfaceTriangleCountsByDomain:
+			createEmptyMaterialDrawDomainCounts(),
+		materialSurfaceSkippedCountsByDomain: createEmptyMaterialDrawDomainCounts(),
+		materialSurfaceSubmittedAlphaPolicyCounts: {},
+		materialSurfaceSkippedReasonCounts: {},
+		materialSurfaceSkippedFamilyCounts: {},
+		materialSurfaceSkippedAlphaPolicyCounts: {},
+		materialSurfaceSkippedBindingUsageCounts: {},
+		materialSurfaceSubmitFallbackSamples: [],
+	};
+}
+
+function createEmptyMaterialDrawDomainCounts(): Record<
+	Webgl2MaterialDrawDomain,
+	number
+> {
+	return {
+		"static-bundle": 0,
+		"structured-interior": 0,
 	};
 }
 
@@ -695,14 +711,13 @@ function recordStaticBundleLayerMaterialDiagnostics(
 ): void {
 	metrics.staticBundleMaterialRecordCount += layer.materialRecords.length;
 	for (const material of layer.materialRecords) {
-		const family = parseStaticMaterialFamilyKey(material.familyKey);
 		incrementCount(
 			metrics.staticBundleMaterialFamilyCounts,
-			family?.kind ?? "unparsed",
+			material.family.kind,
 		);
 		incrementCount(
 			metrics.staticBundleMaterialAlphaPolicyCounts,
-			family?.alphaPolicy ?? "none",
+			material.family.alphaPolicy ?? "none",
 		);
 		for (const binding of material.textureBindings) {
 			incrementCount(
@@ -809,6 +824,7 @@ function submitWebgl2StructuredInteriorResources({
 				submitWebgl2StructuredInteriorMaterialSlice({
 					gl,
 					stateCache,
+					program,
 					texturedProgram,
 					indexedP8Program,
 					indexedP16Program,
@@ -884,14 +900,15 @@ function submitWebgl2StructuredInteriorShell({
 	gl.drawElements(gl.TRIANGLES, shell.indexCount, shell.indexType, 0);
 	metrics.drawCallCount += 1;
 	metrics.triangleCount += shell.triangleCount;
-	metrics.structuredInteriorResourceSubmittedCount += 1;
-	metrics.structuredInteriorResourceDrawCallCount += 1;
-	metrics.structuredInteriorResourceTriangleCount += shell.triangleCount;
+	metrics.structuredInteriorShellSubmittedCount += 1;
+	metrics.structuredInteriorShellDrawCallCount += 1;
+	metrics.structuredInteriorShellTriangleCount += shell.triangleCount;
 }
 
 function submitWebgl2StructuredInteriorMaterialSlice({
 	gl,
 	stateCache,
+	program,
 	texturedProgram,
 	indexedP8Program,
 	indexedP16Program,
@@ -904,6 +921,7 @@ function submitWebgl2StructuredInteriorMaterialSlice({
 }: {
 	gl: WebGL2RenderingContext;
 	stateCache: Webgl2StateCache;
+	program: Webgl2FlatWorldProgram;
 	texturedProgram: Webgl2TexturedWorldProgram;
 	indexedP8Program: Webgl2IndexedP8WorldProgram;
 	indexedP16Program: Webgl2IndexedP16WorldProgram;
@@ -914,252 +932,34 @@ function submitWebgl2StructuredInteriorMaterialSlice({
 	modelMatrix: RenderMat4;
 	metrics: Webgl2WorldSubmitMetrics;
 }): void {
-	if (material.familyKey === "indexed-paletted") {
-		submitWebgl2IndexedStructuredInteriorMaterialSlice({
-			gl,
-			stateCache,
-			indexedP8Program,
-			indexedP16Program,
-			viewProjectionMatrix,
-			cell,
-			slice,
+	const result = submitWebgl2MaterialDrawSurface({
+		gl,
+		stateCache,
+		program,
+		texturedProgram,
+		indexedP8Program,
+		indexedP16Program,
+		viewProjectionMatrix,
+		metrics,
+		surface: {
+			domain: "structured-interior",
+			vertexArray: slice.vertexArray.vertexArray,
+			indexCount: slice.indexCount,
+			indexType: slice.indexType,
+			triangleCount: slice.triangleCount,
+			modelMatrix,
 			material,
-			modelMatrix,
-			metrics,
-		});
-		return;
-	}
-	if (material.familyKey !== "rgba-texture-page") {
-		skipStructuredInteriorMaterialSlice({
-			metrics,
-			cell,
-			slice,
-			reason: `structured interior cell ${cell.envCellId} material ${material.key} family ${material.familyKey} is unsupported`,
-		});
-		return;
-	}
-	const base = resolveMaterialTextureBinding(material, "base-color");
-	if (!base) {
-		skipStructuredInteriorMaterialSlice({
-			metrics,
-			cell,
-			slice,
-			reason: `structured interior cell ${cell.envCellId} material ${material.key} has no base-color texture binding`,
-		});
-		return;
-	}
-	const detail = resolveMaterialTextureBinding(material, "detail");
-	if (stateCache.useProgram(texturedProgram.program)) {
-		metrics.programSwitchCount += 1;
-		metrics.stateChangeCount += 1;
-		gl.uniform1i(texturedProgram.uniforms.uTexture, 0);
-		gl.uniform1i(texturedProgram.uniforms.uDetailTexture, 1);
-		metrics.uniformUploadCount += 2;
-	}
-	metrics.stateChangeCount += stateCache.setDepthState({
-		enabled: true,
-		write: !material.isTransparent,
-		func: gl.LEQUAL,
+			colorPolicy: "white-for-textured-and-indexed",
+			depthWrite: !material.isTransparent,
+			cull: { enabled: false, mode: gl.BACK },
+			diagnosticParts: [
+				`cell ${cell.envCellId}`,
+				`slice ${slice.key}`,
+				`artifact ${cell.artifactKey}`,
+			],
+		},
 	});
-	if (stateCache.bindTexture2D(0, base.texture.texture)) {
-		metrics.stateChangeCount += 1;
-	}
-	if (detail && stateCache.bindTexture2D(1, detail.texture.texture)) {
-		metrics.stateChangeCount += 1;
-	}
-	if (stateCache.bindVertexArray(slice.vertexArray.vertexArray)) {
-		metrics.vertexArrayBindCount += 1;
-		metrics.stateChangeCount += 1;
-	}
-	gl.uniformMatrix4fv(
-		texturedProgram.uniforms.uModelViewProjection,
-		false,
-		multiplyMat4Into(
-			new Float32Array(16),
-			viewProjectionMatrix,
-			modelMatrix,
-		),
-	);
-	gl.uniform4fv(texturedProgram.uniforms.uColor, [1, 1, 1, 1]);
-	gl.uniform1f(texturedProgram.uniforms.uAlphaTest, 0);
-	gl.uniform1i(texturedProgram.uniforms.uAtlasEnabled, 1);
-	gl.uniform4f(
-		texturedProgram.uniforms.uAtlasRect,
-		base.rect[0],
-		base.rect[1],
-		base.rect[2],
-		base.rect[3],
-	);
-	gl.uniform2f(texturedProgram.uniforms.uAtlasSize, base.width, base.height);
-	gl.uniform2f(
-		texturedProgram.uniforms.uTexturePageWrapMode,
-		base.wrapS === "repeat" ? 1 : 0,
-		base.wrapT === "repeat" ? 1 : 0,
-	);
-	gl.uniform1f(texturedProgram.uniforms.uDetailTiling, 1);
-	gl.uniform1i(texturedProgram.uniforms.uDetailEnabled, detail ? 1 : 0);
-	uploadTexturedDetailAtlasUniforms(gl, texturedProgram, detail);
-	metrics.uniformUploadCount += 12;
-	gl.drawElements(gl.TRIANGLES, slice.indexCount, slice.indexType, 0);
-	recordStructuredInteriorMaterialSliceSubmitted(metrics, slice);
-}
-
-function submitWebgl2IndexedStructuredInteriorMaterialSlice({
-	gl,
-	stateCache,
-	indexedP8Program,
-	indexedP16Program,
-	viewProjectionMatrix,
-	cell,
-	slice,
-	material,
-	modelMatrix,
-	metrics,
-}: {
-	gl: WebGL2RenderingContext;
-	stateCache: Webgl2StateCache;
-	indexedP8Program: Webgl2IndexedP8WorldProgram;
-	indexedP16Program: Webgl2IndexedP16WorldProgram;
-	viewProjectionMatrix: RenderMat4;
-	cell: Webgl2StructuredInteriorCellResource;
-	slice: Webgl2StructuredInteriorMaterialSliceResource;
-	material: Webgl2StaticBundleMaterialResource;
-	modelMatrix: RenderMat4;
-	metrics: Webgl2WorldSubmitMetrics;
-}): void {
-	const descriptor = material.indexedMaterial;
-	const index = resolveMaterialTextureBinding(material, "indexed-texels");
-	const palette = resolveMaterialTextureBinding(material, "palette-lookup");
-	if (!descriptor || !index || !palette) {
-		skipStructuredInteriorMaterialSlice({
-			metrics,
-			cell,
-			slice,
-			reason: `structured interior cell ${cell.envCellId} material ${material.key} has incomplete indexed material bindings`,
-		});
-		return;
-	}
-	if (index.indexedFormat !== descriptor.indexFormat) {
-		skipStructuredInteriorMaterialSlice({
-			metrics,
-			cell,
-			slice,
-			reason: `structured interior cell ${cell.envCellId} material ${material.key} indexed format ${index.indexedFormat ?? "missing"} does not match descriptor ${descriptor.indexFormat}`,
-		});
-		return;
-	}
-	const detail = resolveMaterialTextureBinding(material, "detail");
-	const program =
-		descriptor.indexFormat === "p8" ? indexedP8Program : indexedP16Program;
-	if (stateCache.useProgram(program.program)) {
-		metrics.programSwitchCount += 1;
-		metrics.stateChangeCount += 1;
-		gl.uniform1i(program.uniforms.uIndexTexture, 0);
-		gl.uniform1i(program.uniforms.uPaletteTexture, 1);
-		gl.uniform1i(program.uniforms.uDetailTexture, 2);
-		metrics.uniformUploadCount += 3;
-	}
-	metrics.stateChangeCount += stateCache.setDepthState({
-		enabled: true,
-		write: !material.isTransparent,
-		func: gl.LEQUAL,
-	});
-	if (stateCache.bindTexture2D(0, index.texture.texture)) {
-		metrics.stateChangeCount += 1;
-	}
-	if (stateCache.bindTexture2D(1, palette.texture.texture)) {
-		metrics.stateChangeCount += 1;
-	}
-	if (detail && stateCache.bindTexture2D(2, detail.texture.texture)) {
-		metrics.stateChangeCount += 1;
-	}
-	if (stateCache.bindVertexArray(slice.vertexArray.vertexArray)) {
-		metrics.vertexArrayBindCount += 1;
-		metrics.stateChangeCount += 1;
-	}
-	gl.uniformMatrix4fv(
-		program.uniforms.uModelViewProjection,
-		false,
-		multiplyMat4Into(
-			new Float32Array(16),
-			viewProjectionMatrix,
-			modelMatrix,
-		),
-	);
-	gl.uniform4fv(program.uniforms.uColor, [1, 1, 1, 1]);
-	gl.uniform1f(program.uniforms.uAlphaTest, 0);
-	gl.uniform2f(
-		program.uniforms.uTextureSize,
-		descriptor.width,
-		descriptor.height,
-	);
-	gl.uniform4f(
-		program.uniforms.uIndexAtlasRect,
-		index.rect[0],
-		index.rect[1],
-		index.rect[2],
-		index.rect[3],
-	);
-	gl.uniform4f(
-		program.uniforms.uPaletteAtlasRect,
-		palette.rect[0],
-		palette.rect[1],
-		palette.rect[2],
-		palette.rect[3],
-	);
-	gl.uniform2f(
-		program.uniforms.uPaletteAtlasSize,
-		palette.width,
-		palette.height,
-	);
-	gl.uniform1i(
-		program.uniforms.uClipThreshold,
-		descriptor.clipThreshold,
-	);
-	gl.uniform1i(
-		program.uniforms.uRepeatS,
-		descriptor.wrapS === "repeat" ? 1 : 0,
-	);
-	gl.uniform1i(
-		program.uniforms.uRepeatT,
-		descriptor.wrapT === "repeat" ? 1 : 0,
-	);
-	gl.uniform1f(program.uniforms.uDetailTiling, 1);
-	gl.uniform1i(program.uniforms.uDetailEnabled, detail ? 1 : 0);
-	uploadIndexedDetailAtlasUniforms(gl, program, detail);
-	metrics.uniformUploadCount += 15;
-	gl.drawElements(gl.TRIANGLES, slice.indexCount, slice.indexType, 0);
-	recordStructuredInteriorMaterialSliceSubmitted(metrics, slice);
-}
-
-function recordStructuredInteriorMaterialSliceSubmitted(
-	metrics: Webgl2WorldSubmitMetrics,
-	slice: Webgl2StructuredInteriorMaterialSliceResource,
-): void {
-	metrics.drawCallCount += 1;
-	metrics.triangleCount += slice.triangleCount;
-	metrics.structuredInteriorResourceSubmittedCount += 1;
-	metrics.structuredInteriorResourceDrawCallCount += 1;
-	metrics.structuredInteriorResourceTriangleCount += slice.triangleCount;
-}
-
-function skipStructuredInteriorMaterialSlice({
-	metrics,
-	cell,
-	slice,
-	reason,
-}: {
-	metrics: Webgl2WorldSubmitMetrics;
-	cell: Webgl2StructuredInteriorCellResource;
-	slice: Webgl2StructuredInteriorMaterialSliceResource;
-	reason: string;
-}): void {
-	metrics.structuredInteriorResourceSkippedGeometryCount += 1;
-	metrics.structuredInteriorResourceFallbackSamples =
-		appendStaticBundleSubmitFallbackSamples(
-			metrics.structuredInteriorResourceFallbackSamples,
-			[`${reason} for slice ${slice.key} in artifact ${cell.artifactKey}`],
-		);
+	recordWebgl2MaterialDrawResult(metrics, result);
 }
 
 function submitWebgl2StaticBundleGeometry({
@@ -1189,66 +989,157 @@ function submitWebgl2StaticBundleGeometry({
 	material: Webgl2StaticBundleMaterialResource;
 	metrics: Webgl2WorldSubmitMetrics;
 }): boolean {
-	const family = parseStaticMaterialFamilyKey(material.familyKey);
-	if (!family) {
-		skipStaticBundleGeometry({
-			metrics,
-			layer,
-			geometry,
-			material,
-			reasonCode: "unparsed-material-family",
-			detail: `unsupported static bundle material family ${material.familyKey}`,
-		});
-		return false;
-	}
-	if (isStaticBundleIndexedMaterialFamily(family)) {
-		return submitWebgl2IndexedStaticBundleGeometry({
-			gl,
-			stateCache,
-			indexedP8Program,
-			indexedP16Program,
-			viewProjectionMatrix,
+	const result = submitWebgl2MaterialDrawSurface({
+		gl,
+		stateCache,
+		program,
+		texturedProgram,
+		indexedP8Program,
+		indexedP16Program,
+		viewProjectionMatrix,
+		metrics,
+		surface: {
+			domain: "static-bundle",
+			vertexArray: geometry.vertexArray.vertexArray,
+			indexCount: geometry.indexCount,
+			indexType: geometry.indexType,
+			triangleCount: geometry.triangleCount,
 			modelMatrix,
-			layer,
-			geometry,
 			material,
-			metrics,
-		});
-	}
-	if (isStaticBundleFlatMaterialFamily(family)) {
-		return submitWebgl2FlatStaticBundleGeometry({
-			gl,
-			stateCache,
-			program,
-			viewProjectionMatrix,
-			modelMatrix,
-			geometry,
-			material,
-			metrics,
-		});
-	}
-	if (!isStaticBundleTextureMaterialFamily(family)) {
-		skipStaticBundleGeometry({
-			metrics,
-			layer,
-			geometry,
-			material,
-			reasonCode: "unsupported-material-family",
-			detail: `unsupported static bundle material family ${material.familyKey}`,
-		});
-		return false;
-	}
+			colorPolicy: "material",
+			depthWrite: !material.isTransparent,
+			cull: { enabled: false, mode: gl.BACK },
+			diagnosticParts: [
+				`layer ${layer.layerKey}`,
+				`geometry ${geometry.key}`,
+				`objects ${geometry.objectKeys.slice(0, 3).join(",") || "none"}`,
+			],
+		},
+	});
+	recordWebgl2MaterialDrawResult(metrics, result);
+	return result.status === "submitted";
+}
+
+interface Webgl2MaterialDrawSurface {
+	domain: Webgl2MaterialDrawDomain;
+	vertexArray: WebGLVertexArrayObject;
+	indexCount: number;
+	indexType: GLenum;
+	triangleCount: number;
+	modelMatrix: RenderMat4;
+	material: Webgl2StaticBundleMaterialResource;
+	colorPolicy: "material" | "white-for-textured-and-indexed";
+	depthWrite: boolean;
+	cull: { enabled: boolean; mode: GLenum };
+	diagnosticParts: readonly string[];
+}
+
+type Webgl2MaterialDrawResult =
+	| {
+			status: "submitted";
+			domain: Webgl2MaterialDrawDomain;
+			triangleCount: number;
+			family: StaticMaterialFamilyDescriptor;
+	  }
+	| {
+			status: "skipped";
+			domain: Webgl2MaterialDrawDomain;
+			material: Webgl2StaticBundleMaterialResource;
+			reasonCode: string;
+			detail: string;
+			diagnosticParts: readonly string[];
+	  };
+
+function submitWebgl2MaterialDrawSurface({
+	gl,
+	stateCache,
+	program,
+	texturedProgram,
+	indexedP8Program,
+	indexedP16Program,
+	viewProjectionMatrix,
+	surface,
+	metrics,
+}: {
+	gl: WebGL2RenderingContext;
+	stateCache: Webgl2StateCache;
+	program: Webgl2FlatWorldProgram;
+	texturedProgram: Webgl2TexturedWorldProgram;
+	indexedP8Program: Webgl2IndexedP8WorldProgram;
+	indexedP16Program: Webgl2IndexedP16WorldProgram;
+	viewProjectionMatrix: RenderMat4;
+	surface: Webgl2MaterialDrawSurface;
+	metrics: Webgl2WorldSubmitMetrics;
+}): Webgl2MaterialDrawResult {
+	return submitWebgl2StaticMaterialByFamily({
+		material: surface.material,
+		submitIndexed() {
+			return submitWebgl2IndexedMaterialDrawSurface({
+				gl,
+				stateCache,
+				indexedP8Program,
+				indexedP16Program,
+				viewProjectionMatrix,
+				surface,
+				metrics,
+			});
+		},
+		submitFlat() {
+			return submitWebgl2FlatMaterialDrawSurface({
+				gl,
+				stateCache,
+				program,
+				viewProjectionMatrix,
+				surface,
+				metrics,
+			});
+		},
+		submitTexture(family) {
+			return submitWebgl2TexturedMaterialDrawSurface({
+				gl,
+				stateCache,
+				texturedProgram,
+				viewProjectionMatrix,
+				surface,
+				metrics,
+				family,
+			});
+		},
+		skipUnsupported() {
+			return createSkippedMaterialDrawResult({
+				surface,
+				reasonCode: "unsupported-material-family",
+				detail: `unsupported material family ${surface.material.familyKey}`,
+			});
+		},
+	});
+}
+
+function submitWebgl2TexturedMaterialDrawSurface({
+	gl,
+	stateCache,
+	texturedProgram,
+	viewProjectionMatrix,
+	surface,
+	metrics,
+	family,
+}: {
+	gl: WebGL2RenderingContext;
+	stateCache: Webgl2StateCache;
+	texturedProgram: Webgl2TexturedWorldProgram;
+	viewProjectionMatrix: RenderMat4;
+	surface: Webgl2MaterialDrawSurface;
+	metrics: Webgl2WorldSubmitMetrics;
+	family: StaticMaterialFamilyDescriptor;
+}): Webgl2MaterialDrawResult {
+	const material = surface.material;
 	const base = resolveMaterialTextureBinding(material, "base-color");
 	if (!base) {
-		skipStaticBundleGeometry({
-			metrics,
-			layer,
-			geometry,
-			material,
+		return createSkippedMaterialDrawResult({
+			surface,
 			reasonCode: "missing-base-color-binding",
-			detail: "missing static bundle base-color texture binding",
+			detail: "missing base-color texture binding",
 		});
-		return false;
 	}
 	const detail = resolveMaterialTextureBinding(material, "detail");
 	if (stateCache.useProgram(texturedProgram.program)) {
@@ -1258,23 +1149,11 @@ function submitWebgl2StaticBundleGeometry({
 		gl.uniform1i(texturedProgram.uniforms.uDetailTexture, 1);
 		metrics.uniformUploadCount += 2;
 	}
-	metrics.stateChangeCount += stateCache.setDepthState({
-		enabled: true,
-		write: !material.isTransparent,
-		func: gl.LEQUAL,
-	});
-	metrics.stateChangeCount += stateCache.setCullState({
-		enabled: false,
-		mode: gl.BACK,
-	});
+	applyWebgl2MaterialSurfaceState({ gl, stateCache, surface, metrics });
 	if (stateCache.bindTexture2D(0, base.texture.texture)) {
 		metrics.stateChangeCount += 1;
 	}
 	if (detail && stateCache.bindTexture2D(1, detail.texture.texture)) {
-		metrics.stateChangeCount += 1;
-	}
-	if (stateCache.bindVertexArray(geometry.vertexArray.vertexArray)) {
-		metrics.vertexArrayBindCount += 1;
 		metrics.stateChangeCount += 1;
 	}
 	gl.uniformMatrix4fv(
@@ -1283,10 +1162,13 @@ function submitWebgl2StaticBundleGeometry({
 		multiplyMat4Into(
 			new Float32Array(16),
 			viewProjectionMatrix,
-			modelMatrix,
+			surface.modelMatrix,
 		),
 	);
-	gl.uniform4fv(texturedProgram.uniforms.uColor, material.color);
+	gl.uniform4fv(
+		texturedProgram.uniforms.uColor,
+		resolveMaterialDrawColor(surface, family),
+	);
 	gl.uniform1f(
 		texturedProgram.uniforms.uAlphaTest,
 		resolveStaticMaterialFamilyAlphaTest(family),
@@ -1309,111 +1191,65 @@ function submitWebgl2StaticBundleGeometry({
 	gl.uniform1i(texturedProgram.uniforms.uDetailEnabled, detail ? 1 : 0);
 	uploadTexturedDetailAtlasUniforms(gl, texturedProgram, detail);
 	metrics.uniformUploadCount += 12;
-	gl.drawElements(gl.TRIANGLES, geometry.indexCount, geometry.indexType, 0);
-	recordSubmittedStaticBundleGeometry(metrics, family);
-	metrics.drawCallCount += 1;
-	metrics.triangleCount += geometry.triangleCount;
-	metrics.staticBundleDrawCallCount += 1;
-	metrics.staticBundleGeometrySubmittedCount += 1;
-	metrics.staticBundleTriangleCount += geometry.triangleCount;
-	return true;
+	gl.drawElements(gl.TRIANGLES, surface.indexCount, surface.indexType, 0);
+	return {
+		status: "submitted",
+		domain: surface.domain,
+		triangleCount: surface.triangleCount,
+		family,
+	};
 }
 
-function isStaticBundleIndexedMaterialFamily(
-	family: StaticMaterialFamilyDescriptor,
-): boolean {
-	return family.kind === "indexed-paletted";
-}
-
-function isStaticBundleFlatMaterialFamily(
-	family: StaticMaterialFamilyDescriptor,
-): boolean {
-	return family.kind === "flat-color";
-}
-
-function isStaticBundleTextureMaterialFamily(
-	family: StaticMaterialFamilyDescriptor,
-): boolean {
-	switch (family.kind) {
-		case "texture-page":
-			return true;
-		case "flat-color":
-		case "indexed-paletted":
-		case "unsupported":
-			return false;
-	}
-}
-
-function submitWebgl2FlatStaticBundleGeometry({
+function submitWebgl2FlatMaterialDrawSurface({
 	gl,
 	stateCache,
 	program,
 	viewProjectionMatrix,
-	modelMatrix,
-	geometry,
-	material,
+	surface,
 	metrics,
 }: {
 	gl: WebGL2RenderingContext;
 	stateCache: Webgl2StateCache;
 	program: Webgl2FlatWorldProgram;
 	viewProjectionMatrix: RenderMat4;
-	modelMatrix: RenderMat4;
-	geometry: Webgl2StaticBundleGeometryResource;
-	material: Webgl2StaticBundleMaterialResource;
+	surface: Webgl2MaterialDrawSurface;
 	metrics: Webgl2WorldSubmitMetrics;
-}): boolean {
+}): Webgl2MaterialDrawResult {
 	if (stateCache.useProgram(program.program)) {
 		metrics.programSwitchCount += 1;
 		metrics.stateChangeCount += 1;
 	}
-	metrics.stateChangeCount += stateCache.setDepthState({
-		enabled: true,
-		write: !material.isTransparent,
-		func: gl.LEQUAL,
-	});
-	metrics.stateChangeCount += stateCache.setCullState({
-		enabled: false,
-		mode: gl.BACK,
-	});
-	if (stateCache.bindVertexArray(geometry.vertexArray.vertexArray)) {
-		metrics.vertexArrayBindCount += 1;
-		metrics.stateChangeCount += 1;
-	}
+	applyWebgl2MaterialSurfaceState({ gl, stateCache, surface, metrics });
 	gl.uniformMatrix4fv(
 		program.uniforms.uModelViewProjection,
 		false,
 		multiplyMat4Into(
 			new Float32Array(16),
 			viewProjectionMatrix,
-			modelMatrix,
+			surface.modelMatrix,
 		),
 	);
-	gl.uniform4fv(program.uniforms.uColor, material.color);
+	gl.uniform4fv(
+		program.uniforms.uColor,
+		resolveMaterialDrawColor(surface, surface.material.family),
+	);
 	metrics.uniformUploadCount += 2;
-	gl.drawElements(gl.TRIANGLES, geometry.indexCount, geometry.indexType, 0);
-	const family = parseStaticMaterialFamilyKey(material.familyKey);
-	if (family) {
-		recordSubmittedStaticBundleGeometry(metrics, family);
-	}
-	metrics.drawCallCount += 1;
-	metrics.triangleCount += geometry.triangleCount;
-	metrics.staticBundleDrawCallCount += 1;
-	metrics.staticBundleGeometrySubmittedCount += 1;
-	metrics.staticBundleTriangleCount += geometry.triangleCount;
-	return true;
+	gl.drawElements(gl.TRIANGLES, surface.indexCount, surface.indexType, 0);
+	return {
+		status: "submitted",
+		domain: surface.domain,
+		triangleCount: surface.triangleCount,
+		family: surface.material.family,
+	};
 }
 
-function submitWebgl2IndexedStaticBundleGeometry({
+function submitWebgl2IndexedMaterialDrawSurface({
 	gl,
 	stateCache,
 	indexedP8Program,
 	indexedP16Program,
 	viewProjectionMatrix,
-	modelMatrix,
-	layer,
-	geometry,
-	material,
+	surface,
 	metrics,
 }: {
 	gl: WebGL2RenderingContext;
@@ -1421,36 +1257,26 @@ function submitWebgl2IndexedStaticBundleGeometry({
 	indexedP8Program: Webgl2IndexedP8WorldProgram;
 	indexedP16Program: Webgl2IndexedP16WorldProgram;
 	viewProjectionMatrix: RenderMat4;
-	modelMatrix: RenderMat4;
-	layer: Webgl2StaticBundleLayerResource;
-	geometry: Webgl2StaticBundleGeometryResource;
-	material: Webgl2StaticBundleMaterialResource;
+	surface: Webgl2MaterialDrawSurface;
 	metrics: Webgl2WorldSubmitMetrics;
-}): boolean {
+}): Webgl2MaterialDrawResult {
+	const material = surface.material;
 	const descriptor = material.indexedMaterial;
 	const index = resolveMaterialTextureBinding(material, "indexed-texels");
 	const palette = resolveMaterialTextureBinding(material, "palette-lookup");
 	if (!descriptor || !index || !palette) {
-		skipStaticBundleGeometry({
-			metrics,
-			layer,
-			geometry,
-			material,
+		return createSkippedMaterialDrawResult({
+			surface,
 			reasonCode: "incomplete-indexed-bindings",
-			detail: "incomplete static bundle indexed material bindings",
+			detail: "incomplete indexed material bindings",
 		});
-		return false;
 	}
 	if (index.indexedFormat !== descriptor.indexFormat) {
-		skipStaticBundleGeometry({
-			metrics,
-			layer,
-			geometry,
-			material,
+		return createSkippedMaterialDrawResult({
+			surface,
 			reasonCode: "indexed-format-mismatch",
-			detail: `static bundle indexed format mismatch ${index.indexedFormat ?? "missing"} vs ${descriptor.indexFormat}`,
+			detail: `indexed format mismatch ${index.indexedFormat ?? "missing"} vs ${descriptor.indexFormat}`,
 		});
-		return false;
 	}
 	const detail = resolveMaterialTextureBinding(material, "detail");
 	const program =
@@ -1463,15 +1289,7 @@ function submitWebgl2IndexedStaticBundleGeometry({
 		gl.uniform1i(program.uniforms.uDetailTexture, 2);
 		metrics.uniformUploadCount += 3;
 	}
-	metrics.stateChangeCount += stateCache.setDepthState({
-		enabled: true,
-		write: !material.isTransparent,
-		func: gl.LEQUAL,
-	});
-	metrics.stateChangeCount += stateCache.setCullState({
-		enabled: false,
-		mode: gl.BACK,
-	});
+	applyWebgl2MaterialSurfaceState({ gl, stateCache, surface, metrics });
 	if (stateCache.bindTexture2D(0, index.texture.texture)) {
 		metrics.stateChangeCount += 1;
 	}
@@ -1481,20 +1299,19 @@ function submitWebgl2IndexedStaticBundleGeometry({
 	if (detail && stateCache.bindTexture2D(2, detail.texture.texture)) {
 		metrics.stateChangeCount += 1;
 	}
-	if (stateCache.bindVertexArray(geometry.vertexArray.vertexArray)) {
-		metrics.vertexArrayBindCount += 1;
-		metrics.stateChangeCount += 1;
-	}
 	gl.uniformMatrix4fv(
 		program.uniforms.uModelViewProjection,
 		false,
 		multiplyMat4Into(
 			new Float32Array(16),
 			viewProjectionMatrix,
-			modelMatrix,
+			surface.modelMatrix,
 		),
 	);
-	gl.uniform4fv(program.uniforms.uColor, material.color);
+	gl.uniform4fv(
+		program.uniforms.uColor,
+		resolveMaterialDrawColor(surface, material.family),
+	);
 	gl.uniform1f(program.uniforms.uAlphaTest, 0);
 	gl.uniform2f(
 		program.uniforms.uTextureSize,
@@ -1524,29 +1341,196 @@ function submitWebgl2IndexedStaticBundleGeometry({
 		program.uniforms.uClipThreshold,
 		descriptor.clipThreshold,
 	);
-	gl.uniform1i(
-		program.uniforms.uRepeatS,
-		descriptor.wrapS === "repeat" ? 1 : 0,
-	);
-	gl.uniform1i(
-		program.uniforms.uRepeatT,
-		descriptor.wrapT === "repeat" ? 1 : 0,
-	);
+	gl.uniform1i(program.uniforms.uRepeatS, descriptor.wrapS === "repeat" ? 1 : 0);
+	gl.uniform1i(program.uniforms.uRepeatT, descriptor.wrapT === "repeat" ? 1 : 0);
 	gl.uniform1f(program.uniforms.uDetailTiling, 1);
 	gl.uniform1i(program.uniforms.uDetailEnabled, detail ? 1 : 0);
 	uploadIndexedDetailAtlasUniforms(gl, program, detail);
 	metrics.uniformUploadCount += 15;
-	gl.drawElements(gl.TRIANGLES, geometry.indexCount, geometry.indexType, 0);
-	const family = parseStaticMaterialFamilyKey(material.familyKey);
-	if (family) {
-		recordSubmittedStaticBundleGeometry(metrics, family);
+	gl.drawElements(gl.TRIANGLES, surface.indexCount, surface.indexType, 0);
+	return {
+		status: "submitted",
+		domain: surface.domain,
+		triangleCount: surface.triangleCount,
+		family: material.family,
+	};
+}
+
+function applyWebgl2MaterialSurfaceState({
+	gl,
+	stateCache,
+	surface,
+	metrics,
+}: {
+	gl: WebGL2RenderingContext;
+	stateCache: Webgl2StateCache;
+	surface: Webgl2MaterialDrawSurface;
+	metrics: Webgl2WorldSubmitMetrics;
+}): void {
+	metrics.stateChangeCount += stateCache.setDepthState({
+		enabled: true,
+		write: surface.depthWrite,
+		func: gl.LEQUAL,
+	});
+	metrics.stateChangeCount += stateCache.setCullState(surface.cull);
+	if (stateCache.bindVertexArray(surface.vertexArray)) {
+		metrics.vertexArrayBindCount += 1;
+		metrics.stateChangeCount += 1;
 	}
-	metrics.drawCallCount += 1;
-	metrics.triangleCount += geometry.triangleCount;
-	metrics.staticBundleDrawCallCount += 1;
-	metrics.staticBundleGeometrySubmittedCount += 1;
-	metrics.staticBundleTriangleCount += geometry.triangleCount;
-	return true;
+}
+
+function createSkippedMaterialDrawResult({
+	surface,
+	reasonCode,
+	detail,
+}: {
+	surface: Webgl2MaterialDrawSurface;
+	reasonCode: string;
+	detail: string;
+}): Webgl2MaterialDrawResult {
+	return {
+		status: "skipped",
+		domain: surface.domain,
+		material: surface.material,
+		reasonCode,
+		detail,
+		diagnosticParts: surface.diagnosticParts,
+	};
+}
+
+function resolveMaterialDrawColor(
+	surface: Webgl2MaterialDrawSurface,
+	family: StaticMaterialFamilyDescriptor,
+): readonly [number, number, number, number] {
+	if (
+		surface.colorPolicy === "white-for-textured-and-indexed" &&
+		(family.kind === "texture-page" || family.kind === "indexed-paletted")
+	) {
+		return [1, 1, 1, 1];
+	}
+	return surface.material.color;
+}
+
+function recordWebgl2MaterialDrawResult(
+	metrics: Webgl2WorldSubmitMetrics,
+	result: Webgl2MaterialDrawResult,
+): void {
+	if (result.status === "submitted") {
+		metrics.drawCallCount += 1;
+		metrics.triangleCount += result.triangleCount;
+		metrics.materialSurfaceSubmittedCount += 1;
+		metrics.materialSurfaceSubmittedCountsByDomain[result.domain] += 1;
+		metrics.materialSurfaceDrawCallCountsByDomain[result.domain] += 1;
+		metrics.materialSurfaceTriangleCountsByDomain[result.domain] +=
+			result.triangleCount;
+		incrementCount(
+			metrics.materialSurfaceSubmittedAlphaPolicyCounts,
+			describeSubmittedMaterialAlphaPolicy(result.family),
+		);
+		return;
+	}
+	metrics.materialSurfaceSkippedCount += 1;
+	metrics.materialSurfaceSkippedCountsByDomain[result.domain] += 1;
+	incrementCount(metrics.materialSurfaceSkippedReasonCounts, result.reasonCode);
+	incrementCount(
+		metrics.materialSurfaceSkippedFamilyCounts,
+		describeStaticBundleFamilySource(result.material.family),
+	);
+	incrementCount(
+		metrics.materialSurfaceSkippedAlphaPolicyCounts,
+		result.material.family.alphaPolicy ?? "none",
+	);
+	if (result.material.textureBindings.length === 0) {
+		incrementCount(metrics.materialSurfaceSkippedBindingUsageCounts, "none");
+	} else {
+		for (const binding of result.material.textureBindings) {
+			incrementCount(
+				metrics.materialSurfaceSkippedBindingUsageCounts,
+				binding.usageBucket,
+			);
+		}
+	}
+	metrics.materialSurfaceSubmitFallbackSamples =
+		appendStaticBundleSubmitFallbackSamples(
+			metrics.materialSurfaceSubmitFallbackSamples,
+			[
+				[
+					result.reasonCode,
+					result.detail,
+					`domain ${result.domain}`,
+					`material ${result.material.key}`,
+					`family ${result.material.familyKey}`,
+					`bindings ${describeStaticBundleMaterialBindings(result.material)}`,
+					...result.diagnosticParts,
+				].join("; "),
+			],
+		);
+}
+
+function describeSubmittedMaterialAlphaPolicy(
+	family: StaticMaterialFamilyDescriptor,
+): string {
+	if (family.alphaPolicy === "cutout") {
+		return "cutout";
+	}
+	if (
+		family.alphaPolicy === "transparent-blend" ||
+		family.alphaPolicy === "opacity-translucent"
+	) {
+		return "transparent";
+	}
+	return "opaque";
+}
+
+function submitWebgl2StaticMaterialByFamily<TResult>({
+	material,
+	submitIndexed,
+	submitFlat,
+	submitTexture,
+	skipUnsupported,
+}: {
+	material: Webgl2StaticBundleMaterialResource;
+	submitIndexed(): TResult;
+	submitFlat(): TResult;
+	submitTexture(family: StaticMaterialFamilyDescriptor): TResult;
+	skipUnsupported(family: StaticMaterialFamilyDescriptor): TResult;
+}): TResult {
+	const family = material.family;
+	if (isStaticBundleIndexedMaterialFamily(family)) {
+		return submitIndexed();
+	}
+	if (isStaticBundleFlatMaterialFamily(family)) {
+		return submitFlat();
+	}
+	if (isStaticBundleTextureMaterialFamily(family)) {
+		return submitTexture(family);
+	}
+	return skipUnsupported(family);
+}
+
+function isStaticBundleIndexedMaterialFamily(
+	family: StaticMaterialFamilyDescriptor,
+): boolean {
+	return family.kind === "indexed-paletted";
+}
+
+function isStaticBundleFlatMaterialFamily(
+	family: StaticMaterialFamilyDescriptor,
+): boolean {
+	return family.kind === "flat-color";
+}
+
+function isStaticBundleTextureMaterialFamily(
+	family: StaticMaterialFamilyDescriptor,
+): boolean {
+	switch (family.kind) {
+		case "texture-page":
+			return true;
+		case "flat-color":
+		case "indexed-paletted":
+		case "unsupported":
+			return false;
+	}
 }
 
 function resolveMaterialTextureBinding(
@@ -1567,85 +1551,10 @@ function appendStaticBundleSubmitFallbackSamples(
 	return [...current, ...next].slice(0, 16);
 }
 
-function skipStaticBundleGeometry({
-	metrics,
-	layer,
-	geometry,
-	material,
-	reasonCode,
-	detail,
-}: {
-	metrics: Webgl2WorldSubmitMetrics;
-	layer: Webgl2StaticBundleLayerResource;
-	geometry: Webgl2StaticBundleGeometryResource;
-	material: Webgl2StaticBundleMaterialResource;
-	reasonCode: string;
-	detail: string;
-}): void {
-	metrics.staticBundleSkippedGeometryCount += 1;
-	incrementCount(metrics.staticBundleSkippedGeometryReasonCounts, reasonCode);
-	const family = parseStaticMaterialFamilyKey(material.familyKey);
-	incrementCount(
-		metrics.staticBundleSkippedGeometryFamilyCounts,
-		describeStaticBundleFamilySource(family),
-	);
-	incrementCount(
-		metrics.staticBundleSkippedGeometryAlphaPolicyCounts,
-		family?.alphaPolicy ?? "none",
-	);
-	if (material.textureBindings.length === 0) {
-		incrementCount(metrics.staticBundleSkippedGeometryBindingUsageCounts, "none");
-	} else {
-		for (const binding of material.textureBindings) {
-			incrementCount(
-				metrics.staticBundleSkippedGeometryBindingUsageCounts,
-				binding.usageBucket,
-			);
-		}
-	}
-	metrics.staticBundleSubmitFallbackSamples =
-		appendStaticBundleSubmitFallbackSamples(
-			metrics.staticBundleSubmitFallbackSamples,
-			[
-				[
-					reasonCode,
-					detail,
-					`layer ${layer.layerKey}`,
-					`material ${material.key}`,
-					`family ${material.familyKey}`,
-					`bindings ${describeStaticBundleMaterialBindings(material)}`,
-					`geometry ${geometry.key}`,
-					`objects ${geometry.objectKeys.slice(0, 3).join(",") || "none"}`,
-				].join("; "),
-			],
-		);
-}
-
 function describeStaticBundleFamilySource(
-	family: StaticMaterialFamilyDescriptor | null,
-): string {
-	if (!family) {
-		return "unparsed";
-	}
-	return "sourceFamily" in family ? family.sourceFamily : family.kind;
-}
-
-function recordSubmittedStaticBundleGeometry(
-	metrics: Webgl2WorldSubmitMetrics,
 	family: StaticMaterialFamilyDescriptor,
-): void {
-	if (family.alphaPolicy === "cutout") {
-		metrics.staticBundleSubmittedCutoutGeometryCount += 1;
-		return;
-	}
-	if (
-		family.alphaPolicy === "transparent-blend" ||
-		family.alphaPolicy === "opacity-translucent"
-	) {
-		metrics.staticBundleSubmittedTransparentGeometryCount += 1;
-		return;
-	}
-	metrics.staticBundleSubmittedOpaqueGeometryCount += 1;
+): string {
+	return "sourceFamily" in family ? family.sourceFamily : family.kind;
 }
 
 function describeStaticBundleMaterialBindings(

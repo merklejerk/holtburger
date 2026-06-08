@@ -83,6 +83,7 @@ export interface Webgl2StructuredInteriorMaterialSliceResource {
 	materialVariantSignature: string | null;
 	vertexArray: Webgl2VertexArrayResource;
 	positionBuffer: Webgl2BufferResource;
+	normalBuffer: Webgl2BufferResource;
 	uvBuffer: Webgl2BufferResource;
 	indexBuffer: Webgl2BufferResource;
 	indexType: GLenum;
@@ -427,6 +428,10 @@ function createWebgl2StructuredInteriorMaterialSliceResource({
 		label: `${slice.key}/uvs`,
 		data: toFloat32Array(slice.uvs),
 	});
+	const normalBuffer = createWebgl2ArrayBuffer(gl, {
+		label: `${slice.key}/normals`,
+		data: toFloat32Array(slice.normals),
+	});
 	const indexBuffer = createWebgl2ElementArrayBuffer(gl, {
 		label: `${slice.key}/indices`,
 		data: slice.indices,
@@ -438,8 +443,11 @@ function createWebgl2StructuredInteriorMaterialSliceResource({
 			gl.enableVertexAttribArray(0);
 			gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
 			gl.bindBuffer(gl.ARRAY_BUFFER, uvBuffer.buffer);
+			gl.enableVertexAttribArray(1);
+			gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
+			gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer.buffer);
 			gl.enableVertexAttribArray(2);
-			gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 0, 0);
+			gl.vertexAttribPointer(2, 3, gl.FLOAT, false, 0, 0);
 			gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer.buffer);
 			gl.bindBuffer(gl.ARRAY_BUFFER, null);
 		},
@@ -452,6 +460,7 @@ function createWebgl2StructuredInteriorMaterialSliceResource({
 		materialVariantSignature: slice.materialVariantSignature,
 		vertexArray,
 		positionBuffer,
+		normalBuffer,
 		uvBuffer,
 		indexBuffer,
 		indexType:
@@ -463,6 +472,7 @@ function createWebgl2StructuredInteriorMaterialSliceResource({
 		dispose() {
 			vertexArray.dispose();
 			positionBuffer.dispose();
+			normalBuffer.dispose();
 			uvBuffer.dispose();
 			indexBuffer.dispose();
 		},

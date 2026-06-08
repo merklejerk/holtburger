@@ -289,17 +289,23 @@ describe("static landblock render worker", () => {
 		).toMatchObject({
 			envCellId: 0xda550100,
 			surfaceId: 0x08000001,
-			geometrySurfaceId: 0x08000001,
+			geometrySurfaceId: 1,
 			materialRecordKey: `material:${materialAssetId}`,
+			normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
 			triangleCount: 1,
 		});
-		expect(
-			collectStaticLandblockRenderWorkerResultTransferables(result),
-		).toContain(
-			detailedArtifacts!.structuredInteriorCells[0]?.materialSlices[0]
-				?.positions instanceof Float32Array
-				? detailedArtifacts!.structuredInteriorCells[0].materialSlices[0]
-						.positions.buffer
+		const materialSlice =
+			detailedArtifacts!.structuredInteriorCells[0]?.materialSlices[0];
+		const transferables =
+			collectStaticLandblockRenderWorkerResultTransferables(result);
+		expect(transferables).toContain(
+			materialSlice?.positions instanceof Float32Array
+				? materialSlice.positions.buffer
+				: undefined,
+		);
+		expect(transferables).toContain(
+			materialSlice?.normals instanceof Float32Array
+				? materialSlice.normals.buffer
 				: undefined,
 		);
 	});
@@ -529,8 +535,13 @@ function createTopologyPayload(
 
 function createEnvCellPayload(
 	envCellId: number,
-	material?: { materialAssetId: string; surfaceId: number },
+	material?: {
+		materialAssetId: string;
+		slotId?: number;
+		surfaceId: number;
+	},
 ): Record<string, unknown> {
+	const materialSlotId = material?.slotId ?? 1;
 	return {
 		kind: "env-cell",
 		sourceAssetKind: "env-cell",
@@ -545,7 +556,7 @@ function createEnvCellPayload(
 		surfaces: material
 			? [
 					{
-						slotId: material.surfaceId,
+						slotId: materialSlotId,
 						surfaceId: material.surfaceId,
 						materialAssetId: material.materialAssetId,
 					},
@@ -592,11 +603,11 @@ function createEnvCellPayload(
 			triangles: [
 				{
 					polygonId: 7,
-					surfaceId: material?.surfaceId ?? null,
+					surfaceId: material ? materialSlotId : null,
 					firstVertex: 0,
 				},
 			],
-			surfaceIds: material ? [material.surfaceId] : [],
+			surfaceIds: material ? [materialSlotId] : [],
 			invalidPolygons: [],
 			skippedPolygonCount: 0,
 			bounds: createBounds(),

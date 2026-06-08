@@ -315,8 +315,8 @@
 		const terrainOneDrawSubmitFallbackSamples = summarizeSamples(
 			debug.terrainOneDrawSubmitFallbackSamples,
 		);
-		const staticBundleSubmitFallbackSamples = summarizeSamples(
-			debug.staticBundleSubmitFallbackSamples,
+		const materialSurfaceSubmitFallbackSamples = summarizeSamples(
+			debug.materialSurfaceSubmitFallbackSamples,
 		);
 		const staticBundleLayerCoverageSamples = summarizeSamples(
 			debug.staticBundleSelectedLayerCoverageSamples,
@@ -330,24 +330,36 @@
 		const staticBundleBindingUsages = summarizeRecord(
 			debug.staticBundleMaterialBindingUsageCounts,
 		);
-		const staticBundleSkipReasons = summarizeRecord(
-			debug.staticBundleSkippedGeometryReasonCounts,
+		const materialSurfaceSkipReasons = summarizeRecord(
+			debug.materialSurfaceSkippedReasonCounts,
 		);
-		const staticBundleSkippedFamilies = summarizeRecord(
-			debug.staticBundleSkippedGeometryFamilyCounts,
+		const materialSurfaceSkippedFamilies = summarizeRecord(
+			debug.materialSurfaceSkippedFamilyCounts,
 		);
-		const staticBundleSkippedAlphaPolicies = summarizeRecord(
-			debug.staticBundleSkippedGeometryAlphaPolicyCounts,
+		const materialSurfaceSkippedAlphaPolicies = summarizeRecord(
+			debug.materialSurfaceSkippedAlphaPolicyCounts,
 		);
-		const staticBundleSkippedBindingUsages = summarizeRecord(
-			debug.staticBundleSkippedGeometryBindingUsageCounts,
+		const materialSurfaceSkippedBindingUsages = summarizeRecord(
+			debug.materialSurfaceSkippedBindingUsageCounts,
+		);
+		const materialSurfaceSubmittedByDomain = summarizeRecord(
+			debug.materialSurfaceSubmittedCountsByDomain,
+		);
+		const materialSurfaceDrawsByDomain = summarizeRecord(
+			debug.materialSurfaceDrawCallCountsByDomain,
+		);
+		const materialSurfaceTrianglesByDomain = summarizeRecord(
+			debug.materialSurfaceTriangleCountsByDomain,
+		);
+		const materialSurfaceSkippedByDomain = summarizeRecord(
+			debug.materialSurfaceSkippedCountsByDomain,
 		);
 		const atlasFailureSamples = summarizeSamples(debug.atlasFailureSamples);
 		const drawGroupTerm = "render resources";
 		const performanceText = renderMetrics?.performance
 			? `${renderMetrics.performance.fps.toFixed(1)} FPS, ${renderMetrics.performance.frameMs.toFixed(1)} ms/frame, ${renderMetrics.performance.renderMs.toFixed(1)} ms render`
 			: "waiting for performance sample";
-		return `Perf ${performanceText}. Diagnosis: ${diagnosis}. Draw pressure ${debug.renderCalls} visible draws from ${candidateBatchCount} candidate ${drawGroupTerm}; static product resources ${debug.staticLandblockProductCount} products, ${debug.staticBundleLayerResourceCount} bundle layers, ${debug.structuredInteriorCellResourceCount} interior cells, ${debug.terrainProductResourceCount} terrain products, ${debug.transitionPortalMaskResourceCount} portal masks; retained tris ${debug.renderTriangles}. Static bundle submit: selected ${debug.visibleStaticBundleLayerCount}, submitted layers ${debug.staticBundleLayerSubmittedCount}, candidate geometry ${debug.staticBundleGeometryCandidateCount}, submitted geometry ${debug.staticBundleGeometrySubmittedCount}, draws ${debug.staticBundleDrawCallCount}, skipped ${debug.staticBundleSkippedGeometryCount} (${staticBundleSkipReasons}; families ${staticBundleSkippedFamilies}; alpha ${staticBundleSkippedAlphaPolicies}; bindings ${staticBundleSkippedBindingUsages}), tris ${debug.staticBundleTriangleCount}${staticBundleSubmitFallbackSamples ? `, fallbacks ${staticBundleSubmitFallbackSamples}` : ""}. Static bundle layers: objects ${debug.staticBundleSelectedObjectRecordCount}/${debug.staticBundleSelectedSourceObjectCount}, hints ${debug.staticBundleSelectedSpatialHintCount}, geometry ${debug.staticBundleSelectedCompactedBatchCount} compacted/${debug.staticBundleSelectedDirectEntryCount} direct, candidate tris ${debug.staticBundleGeometryCandidateTriangleCount}, empty layers ${debug.staticBundleSelectedNoGeometryLayerCount}, unsubmitted layers ${debug.staticBundleSelectedUnsubmittedLayerCount}, missing-material geometry ${debug.staticBundleSelectedMissingMaterialGeometryCount}${staticBundleLayerCoverageSamples ? `, samples ${staticBundleLayerCoverageSamples}` : ""}. Static bundle materials: records ${debug.staticBundleMaterialRecordCount}, families ${staticBundleMaterialFamilies}, alpha ${staticBundleAlphaPolicies}, bindings ${debug.staticBundleMaterialBaseColorBindingCount} base/${debug.staticBundleMaterialIndexedBindingCount} indexed (${staticBundleBindingUsages}), submitted opaque/cutout/transparent ${debug.staticBundleSubmittedOpaqueGeometryCount}/${debug.staticBundleSubmittedCutoutGeometryCount}/${debug.staticBundleSubmittedTransparentGeometryCount}. Terrain family: visible ${debug.visibleTerrainTileCount}, ready ${debug.visibleTerrainOneDrawReadyTileCount}, blocked ${debug.visibleTerrainOneDrawBlockedTileCount}, ready slices ${debug.visibleTerrainDrawSliceReadyCount}, shader draws ${debug.terrainOneDrawShaderDrawCallCount}, submitted tiles ${debug.terrainOneDrawSubmittedTileCount}, submitted slices ${debug.terrainDrawSliceSubmittedCount}, tris ${debug.terrainOneDrawSubmittedTriangleCount}, atlas refs ${debug.terrainAtlasRefCount}, atlas candidates ${debug.terrainAtlasCandidateCount}, atlas blocker tiles ${debug.terrainAtlasBlockerTileCount}${terrainOneDrawBlockerSamples ? `, blockers ${terrainOneDrawBlockerSamples}` : ""}${terrainOneDrawSubmitFallbackSamples ? `, submit fallbacks ${terrainOneDrawSubmitFallbackSamples}` : ""}. Materials ${debug.materialCount}, textures ${debug.textureResourceCount}, indexed textures ${debug.indexedTextureResourceCount}, palettes ${debug.paletteResourceCount}; texture pages ${debug.texturePageBindingCount} bindings (${texturePageBuckets}), atlas failures ${debug.atlasFailureReasonCount}${atlasFailureSamples ? ` (${atlasFailureSamples})` : ""}. Render blockers ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}. Policy ${debug.resourcePolicy}, base ${debug.baseSceneDomain}, transition depth ${debug.transitionPortalMaxDepth}; canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
+		return `Perf ${performanceText}. Diagnosis: ${diagnosis}. Draw pressure ${debug.renderCalls} visible draws from ${candidateBatchCount} candidate ${drawGroupTerm}; static product resources ${debug.staticLandblockProductCount} products, ${debug.staticBundleLayerResourceCount} bundle layers, ${debug.structuredInteriorCellResourceCount} interior cells, ${debug.terrainProductResourceCount} terrain products, ${debug.transitionPortalMaskResourceCount} portal masks; retained tris ${debug.renderTriangles}. Material surfaces: submitted ${debug.materialSurfaceSubmittedCount} (${materialSurfaceSubmittedByDomain}), draws ${materialSurfaceDrawsByDomain}, tris ${materialSurfaceTrianglesByDomain}, skipped ${debug.materialSurfaceSkippedCount} (${materialSurfaceSkippedByDomain}; reasons ${materialSurfaceSkipReasons}; families ${materialSurfaceSkippedFamilies}; alpha ${materialSurfaceSkippedAlphaPolicies}; bindings ${materialSurfaceSkippedBindingUsages})${materialSurfaceSubmitFallbackSamples ? `, fallbacks ${materialSurfaceSubmitFallbackSamples}` : ""}. Static bundle layers: selected ${debug.visibleStaticBundleLayerCount}, submitted layers ${debug.staticBundleLayerSubmittedCount}, objects ${debug.staticBundleSelectedObjectRecordCount}/${debug.staticBundleSelectedSourceObjectCount}, hints ${debug.staticBundleSelectedSpatialHintCount}, geometry ${debug.staticBundleSelectedCompactedBatchCount} compacted/${debug.staticBundleSelectedDirectEntryCount} direct, candidate ${debug.staticBundleGeometryCandidateCount} entries/${debug.staticBundleGeometryCandidateTriangleCount} tris, empty layers ${debug.staticBundleSelectedNoGeometryLayerCount}, unsubmitted layers ${debug.staticBundleSelectedUnsubmittedLayerCount}, missing-material geometry ${debug.staticBundleSelectedMissingMaterialGeometryCount}${staticBundleLayerCoverageSamples ? `, samples ${staticBundleLayerCoverageSamples}` : ""}. Static bundle materials: records ${debug.staticBundleMaterialRecordCount}, families ${staticBundleMaterialFamilies}, alpha ${staticBundleAlphaPolicies}, bindings ${debug.staticBundleMaterialBaseColorBindingCount} base/${debug.staticBundleMaterialIndexedBindingCount} indexed (${staticBundleBindingUsages}), submitted alpha ${summarizeRecord(debug.materialSurfaceSubmittedAlphaPolicyCounts)}. Terrain family: visible ${debug.visibleTerrainTileCount}, ready ${debug.visibleTerrainOneDrawReadyTileCount}, blocked ${debug.visibleTerrainOneDrawBlockedTileCount}, ready slices ${debug.visibleTerrainDrawSliceReadyCount}, shader draws ${debug.terrainOneDrawShaderDrawCallCount}, submitted tiles ${debug.terrainOneDrawSubmittedTileCount}, submitted slices ${debug.terrainDrawSliceSubmittedCount}, tris ${debug.terrainOneDrawSubmittedTriangleCount}, atlas refs ${debug.terrainAtlasRefCount}, atlas candidates ${debug.terrainAtlasCandidateCount}, atlas blocker tiles ${debug.terrainAtlasBlockerTileCount}${terrainOneDrawBlockerSamples ? `, blockers ${terrainOneDrawBlockerSamples}` : ""}${terrainOneDrawSubmitFallbackSamples ? `, submit fallbacks ${terrainOneDrawSubmitFallbackSamples}` : ""}. Materials ${debug.materialCount}, textures ${debug.textureResourceCount}, indexed textures ${debug.indexedTextureResourceCount}, palettes ${debug.paletteResourceCount}; texture pages ${debug.texturePageBindingCount} bindings (${texturePageBuckets}), atlas failures ${debug.atlasFailureReasonCount}${atlasFailureSamples ? ` (${atlasFailureSamples})` : ""}. Render blockers ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}. Policy ${debug.resourcePolicy}, base ${debug.baseSceneDomain}, transition depth ${debug.transitionPortalMaxDepth}; canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
 	});
 	const sceneContextText = $derived(renderResourceReport.sceneContextText);
 	const cameraResidencyText = $derived.by(() => {
@@ -410,9 +422,9 @@
 			return "Waiting for static material metrics.";
 		}
 		const fallbackSamples = summarizeSamples(
-			debug.staticBundleSubmitFallbackSamples,
+			debug.materialSurfaceSubmitFallbackSamples,
 		);
-		return `Records ${debug.staticBundleMaterialRecordCount}; families ${summarizeRecord(debug.staticBundleMaterialFamilyCounts)}; alpha policies ${summarizeRecord(debug.staticBundleMaterialAlphaPolicyCounts)}; bindings ${debug.staticBundleMaterialBaseColorBindingCount} base-color, ${debug.staticBundleMaterialIndexedBindingCount} indexed, usages ${summarizeRecord(debug.staticBundleMaterialBindingUsageCounts)}; submitted opaque/cutout/transparent ${debug.staticBundleSubmittedOpaqueGeometryCount}/${debug.staticBundleSubmittedCutoutGeometryCount}/${debug.staticBundleSubmittedTransparentGeometryCount}; skipped ${debug.staticBundleSkippedGeometryCount}, reasons ${summarizeRecord(debug.staticBundleSkippedGeometryReasonCounts)}, families ${summarizeRecord(debug.staticBundleSkippedGeometryFamilyCounts)}, alpha ${summarizeRecord(debug.staticBundleSkippedGeometryAlphaPolicyCounts)}, bindings ${summarizeRecord(debug.staticBundleSkippedGeometryBindingUsageCounts)}${fallbackSamples ? `; samples ${fallbackSamples}` : ""}.`;
+		return `Records ${debug.staticBundleMaterialRecordCount}; families ${summarizeRecord(debug.staticBundleMaterialFamilyCounts)}; alpha policies ${summarizeRecord(debug.staticBundleMaterialAlphaPolicyCounts)}; bindings ${debug.staticBundleMaterialBaseColorBindingCount} base-color, ${debug.staticBundleMaterialIndexedBindingCount} indexed, usages ${summarizeRecord(debug.staticBundleMaterialBindingUsageCounts)}; submitted material surfaces ${debug.materialSurfaceSubmittedCount}, domains ${summarizeRecord(debug.materialSurfaceSubmittedCountsByDomain)}, alpha ${summarizeRecord(debug.materialSurfaceSubmittedAlphaPolicyCounts)}; skipped ${debug.materialSurfaceSkippedCount}, domains ${summarizeRecord(debug.materialSurfaceSkippedCountsByDomain)}, reasons ${summarizeRecord(debug.materialSurfaceSkippedReasonCounts)}, families ${summarizeRecord(debug.materialSurfaceSkippedFamilyCounts)}, alpha ${summarizeRecord(debug.materialSurfaceSkippedAlphaPolicyCounts)}, bindings ${summarizeRecord(debug.materialSurfaceSkippedBindingUsageCounts)}${fallbackSamples ? `; samples ${fallbackSamples}` : ""}.`;
 	});
 	const staticBundleLayerCoverageDiagnosticsText = $derived.by(() => {
 		const debug = renderMetrics?.debug;
@@ -422,7 +434,7 @@
 		const samples = summarizeSamples(
 			debug.staticBundleSelectedLayerCoverageSamples,
 		);
-		return `Selected ${debug.visibleStaticBundleLayerCount}, submitted ${debug.staticBundleLayerSubmittedCount}, unsubmitted ${debug.staticBundleSelectedUnsubmittedLayerCount}; objects ${debug.staticBundleSelectedObjectRecordCount}/${debug.staticBundleSelectedSourceObjectCount}, spatial hints ${debug.staticBundleSelectedSpatialHintCount}; geometry ${debug.staticBundleSelectedCompactedBatchCount} compacted batches/${debug.staticBundleSelectedDirectEntryCount} direct entries, candidate ${debug.staticBundleGeometryCandidateCount} entries/${debug.staticBundleGeometryCandidateTriangleCount} tris, submitted ${debug.staticBundleGeometrySubmittedCount} entries/${debug.staticBundleTriangleCount} tris; empty layers ${debug.staticBundleSelectedNoGeometryLayerCount}, missing-material geometry ${debug.staticBundleSelectedMissingMaterialGeometryCount}, builder-skipped surfaces ${debug.staticBundleBuilderSkippedSurfaceCount} (${summarizeRecord(debug.staticBundleBuilderSkippedReasonCounts)})${samples ? `; samples ${samples}` : ""}.`;
+		return `Selected ${debug.visibleStaticBundleLayerCount}, submitted ${debug.staticBundleLayerSubmittedCount}, unsubmitted ${debug.staticBundleSelectedUnsubmittedLayerCount}; objects ${debug.staticBundleSelectedObjectRecordCount}/${debug.staticBundleSelectedSourceObjectCount}, spatial hints ${debug.staticBundleSelectedSpatialHintCount}; geometry ${debug.staticBundleSelectedCompactedBatchCount} compacted batches/${debug.staticBundleSelectedDirectEntryCount} direct entries, candidate ${debug.staticBundleGeometryCandidateCount} entries/${debug.staticBundleGeometryCandidateTriangleCount} tris, material submitted ${debug.materialSurfaceSubmittedCountsByDomain["static-bundle"] ?? 0} entries/${debug.materialSurfaceTriangleCountsByDomain["static-bundle"] ?? 0} tris; empty layers ${debug.staticBundleSelectedNoGeometryLayerCount}, missing-material geometry ${debug.staticBundleSelectedMissingMaterialGeometryCount}, builder-skipped surfaces ${debug.staticBundleBuilderSkippedSurfaceCount} (${summarizeRecord(debug.staticBundleBuilderSkippedReasonCounts)})${samples ? `; samples ${samples}` : ""}.`;
 	});
 	const cameraFrameText = $derived(
 		browserCameraFrame
@@ -1437,10 +1449,56 @@
 			];
 		}
 		if (metadata.kind === "structured-cell") {
+			const coverage = metadata.artifactCoverage;
 			return [
 				{ label: "Env cell", value: `0x${formatHex32(metadata.envCellId)}` },
 				{ label: "Render key", value: metadata.renderKey },
 				{ label: "Role", value: metadata.isFocus ? "Focus" : "Visible" },
+				...(coverage
+					? [
+							{ label: "Product", value: coverage.product },
+							{
+								label: "Landblock",
+								value: `0x${formatHex32(coverage.landblockId)}`,
+							},
+							{
+								label: "Structure",
+								value: `env 0x${formatHex32(coverage.environmentId)}, cell-struct 0x${formatHex32(coverage.cellStructureId)}`,
+							},
+							{
+								label: "Source surfaces",
+								value: `${coverage.sourceSurfaceCount}; ${summarizeNumberList(coverage.sourceSurfaceIds)}`,
+							},
+							{
+								label: "Source geometry",
+								value: `${coverage.renderTriangleCount} render tris, ${coverage.renderVertexCount} verts; skipped ${coverage.skippedPolygonCount}, invalid ${coverage.invalidPolygonCount}`,
+							},
+							{
+								label: "Material slices",
+								value: `${coverage.materialSliceCount} slice${coverage.materialSliceCount === 1 ? "" : "s"}, ${coverage.materialSliceTriangleCount} tris; fallback shell ${coverage.fallbackShellExpected ? "yes" : "no"}, missing materials ${coverage.missingMaterialSliceCount}`,
+							},
+							{
+								label: "Material tris",
+								value: summarizeStringList(
+									coverage.materialTriangleCounts.map(
+										formatStructuredMaterialTriangleCount,
+									),
+								),
+							},
+							{
+								label: "Material records",
+								value: `${coverage.materialRecordCount} record${coverage.materialRecordCount === 1 ? "" : "s"}; families ${summarizeStringList(coverage.materialFamilyKeys)}`,
+							},
+							{
+								label: "Texture pages",
+								value: `${coverage.texturePageRefCount} ref${coverage.texturePageRefCount === 1 ? "" : "s"}, ${coverage.texturePageCount} page${coverage.texturePageCount === 1 ? "" : "s"}`,
+							},
+							{
+								label: "Static contents",
+								value: `${coverage.staticObjectCount} static object${coverage.staticObjectCount === 1 ? "" : "s"}, ${coverage.portalCount} portal${coverage.portalCount === 1 ? "" : "s"}, ${coverage.portalApertureCount} aperture${coverage.portalApertureCount === 1 ? "" : "s"}`,
+							},
+						]
+					: []),
 			];
 		}
 		if (metadata.kind === "portal") {
@@ -1504,6 +1562,21 @@
 			"mat/",
 		);
 		return `${entry.triangleCount} ${materialKey}${entry.familyKey ? ` ${entry.familyKey}` : ""}`;
+	}
+
+	function formatStructuredMaterialTriangleCount(entry: {
+		materialRecordKey: string;
+		familyKey: string | null;
+		surfaceId: number;
+		geometrySurfaceId: number;
+		materialVariantSignature: string | null;
+		triangleCount: number;
+	}): string {
+		const materialKey = entry.materialRecordKey.replace(
+			"material:material/",
+			"mat/",
+		);
+		return `${entry.triangleCount} ${materialKey}${entry.familyKey ? ` ${entry.familyKey}` : ""} surface 0x${formatHex32(entry.surfaceId)}/geom ${entry.geometrySurfaceId} variant ${entry.materialVariantSignature ?? "base"}`;
 	}
 
 	function buildPickerClipboardReport(

@@ -176,6 +176,7 @@ interface DetailedStructuredInteriorMaterialSlice {
 	materialVariantSignature: string | null;
 	positions: PreparedFloat32Array;
 	uvs: PreparedFloat32Array;
+	normals: PreparedFloat32Array;
 	indices: Uint16Array | Uint32Array;
 	triangleCount: number;
 }

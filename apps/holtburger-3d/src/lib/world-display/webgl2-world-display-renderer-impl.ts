@@ -2480,22 +2480,6 @@ function mergeSceneDomainSubmitMetrics({
 		staticBundleGeometryCandidateCount:
 			exteriorMetrics.staticBundleGeometryCandidateCount +
 			interiorMetrics.staticBundleGeometryCandidateCount,
-		staticBundleGeometrySubmittedCount:
-			exteriorMetrics.staticBundleGeometrySubmittedCount +
-			interiorMetrics.staticBundleGeometrySubmittedCount,
-		staticBundleDrawCallCount:
-			exteriorMetrics.staticBundleDrawCallCount +
-			interiorMetrics.staticBundleDrawCallCount,
-		staticBundleTriangleCount:
-			exteriorMetrics.staticBundleTriangleCount +
-			interiorMetrics.staticBundleTriangleCount,
-		staticBundleSkippedGeometryCount:
-			exteriorMetrics.staticBundleSkippedGeometryCount +
-			interiorMetrics.staticBundleSkippedGeometryCount,
-		staticBundleSubmitFallbackSamples: [
-			...exteriorMetrics.staticBundleSubmitFallbackSamples,
-			...interiorMetrics.staticBundleSubmitFallbackSamples,
-		].slice(0, 16),
 		staticBundleMaterialRecordCount:
 			exteriorMetrics.staticBundleMaterialRecordCount +
 			interiorMetrics.staticBundleMaterialRecordCount,
@@ -2517,47 +2501,61 @@ function mergeSceneDomainSubmitMetrics({
 		staticBundleMaterialIndexedBindingCount:
 			exteriorMetrics.staticBundleMaterialIndexedBindingCount +
 			interiorMetrics.staticBundleMaterialIndexedBindingCount,
-		staticBundleSubmittedOpaqueGeometryCount:
-			exteriorMetrics.staticBundleSubmittedOpaqueGeometryCount +
-			interiorMetrics.staticBundleSubmittedOpaqueGeometryCount,
-		staticBundleSubmittedCutoutGeometryCount:
-			exteriorMetrics.staticBundleSubmittedCutoutGeometryCount +
-			interiorMetrics.staticBundleSubmittedCutoutGeometryCount,
-		staticBundleSubmittedTransparentGeometryCount:
-			exteriorMetrics.staticBundleSubmittedTransparentGeometryCount +
-			interiorMetrics.staticBundleSubmittedTransparentGeometryCount,
-		staticBundleSkippedGeometryReasonCounts: sumNumberRecords(
-			exteriorMetrics.staticBundleSkippedGeometryReasonCounts,
-			interiorMetrics.staticBundleSkippedGeometryReasonCounts,
+		materialSurfaceSubmittedCount:
+			exteriorMetrics.materialSurfaceSubmittedCount +
+			interiorMetrics.materialSurfaceSubmittedCount,
+		materialSurfaceSubmittedCountsByDomain: sumNumberRecords(
+			exteriorMetrics.materialSurfaceSubmittedCountsByDomain,
+			interiorMetrics.materialSurfaceSubmittedCountsByDomain,
 		),
-		staticBundleSkippedGeometryFamilyCounts: sumNumberRecords(
-			exteriorMetrics.staticBundleSkippedGeometryFamilyCounts,
-			interiorMetrics.staticBundleSkippedGeometryFamilyCounts,
+		materialSurfaceDrawCallCountsByDomain: sumNumberRecords(
+			exteriorMetrics.materialSurfaceDrawCallCountsByDomain,
+			interiorMetrics.materialSurfaceDrawCallCountsByDomain,
 		),
-		staticBundleSkippedGeometryAlphaPolicyCounts: sumNumberRecords(
-			exteriorMetrics.staticBundleSkippedGeometryAlphaPolicyCounts,
-			interiorMetrics.staticBundleSkippedGeometryAlphaPolicyCounts,
+		materialSurfaceTriangleCountsByDomain: sumNumberRecords(
+			exteriorMetrics.materialSurfaceTriangleCountsByDomain,
+			interiorMetrics.materialSurfaceTriangleCountsByDomain,
 		),
-		staticBundleSkippedGeometryBindingUsageCounts: sumNumberRecords(
-			exteriorMetrics.staticBundleSkippedGeometryBindingUsageCounts,
-			interiorMetrics.staticBundleSkippedGeometryBindingUsageCounts,
+		materialSurfaceSkippedCount:
+			exteriorMetrics.materialSurfaceSkippedCount +
+			interiorMetrics.materialSurfaceSkippedCount,
+		materialSurfaceSkippedCountsByDomain: sumNumberRecords(
+			exteriorMetrics.materialSurfaceSkippedCountsByDomain,
+			interiorMetrics.materialSurfaceSkippedCountsByDomain,
 		),
-		structuredInteriorResourceSubmittedCount:
-			exteriorMetrics.structuredInteriorResourceSubmittedCount +
-			interiorMetrics.structuredInteriorResourceSubmittedCount,
-		structuredInteriorResourceDrawCallCount:
-			exteriorMetrics.structuredInteriorResourceDrawCallCount +
-			interiorMetrics.structuredInteriorResourceDrawCallCount,
-		structuredInteriorResourceTriangleCount:
-			exteriorMetrics.structuredInteriorResourceTriangleCount +
-			interiorMetrics.structuredInteriorResourceTriangleCount,
-		structuredInteriorResourceSkippedGeometryCount:
-			exteriorMetrics.structuredInteriorResourceSkippedGeometryCount +
-			interiorMetrics.structuredInteriorResourceSkippedGeometryCount,
-		structuredInteriorResourceFallbackSamples: [
-			...exteriorMetrics.structuredInteriorResourceFallbackSamples,
-			...interiorMetrics.structuredInteriorResourceFallbackSamples,
-		].slice(0, 8),
+		materialSurfaceSubmittedAlphaPolicyCounts: sumNumberRecords(
+			exteriorMetrics.materialSurfaceSubmittedAlphaPolicyCounts,
+			interiorMetrics.materialSurfaceSubmittedAlphaPolicyCounts,
+		),
+		materialSurfaceSkippedReasonCounts: sumNumberRecords(
+			exteriorMetrics.materialSurfaceSkippedReasonCounts,
+			interiorMetrics.materialSurfaceSkippedReasonCounts,
+		),
+		materialSurfaceSkippedFamilyCounts: sumNumberRecords(
+			exteriorMetrics.materialSurfaceSkippedFamilyCounts,
+			interiorMetrics.materialSurfaceSkippedFamilyCounts,
+		),
+		materialSurfaceSkippedAlphaPolicyCounts: sumNumberRecords(
+			exteriorMetrics.materialSurfaceSkippedAlphaPolicyCounts,
+			interiorMetrics.materialSurfaceSkippedAlphaPolicyCounts,
+		),
+		materialSurfaceSkippedBindingUsageCounts: sumNumberRecords(
+			exteriorMetrics.materialSurfaceSkippedBindingUsageCounts,
+			interiorMetrics.materialSurfaceSkippedBindingUsageCounts,
+		),
+		materialSurfaceSubmitFallbackSamples: [
+			...exteriorMetrics.materialSurfaceSubmitFallbackSamples,
+			...interiorMetrics.materialSurfaceSubmitFallbackSamples,
+		].slice(0, 16),
+		structuredInteriorShellSubmittedCount:
+			exteriorMetrics.structuredInteriorShellSubmittedCount +
+			interiorMetrics.structuredInteriorShellSubmittedCount,
+		structuredInteriorShellDrawCallCount:
+			exteriorMetrics.structuredInteriorShellDrawCallCount +
+			interiorMetrics.structuredInteriorShellDrawCallCount,
+		structuredInteriorShellTriangleCount:
+			exteriorMetrics.structuredInteriorShellTriangleCount +
+			interiorMetrics.structuredInteriorShellTriangleCount,
 	};
 }
 

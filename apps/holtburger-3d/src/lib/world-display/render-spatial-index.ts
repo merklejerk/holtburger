@@ -48,6 +48,38 @@ export type RenderSpatialMetadata =
 			envCellId: number;
 			renderKey: string;
 			isFocus: boolean;
+			artifactCoverage?: {
+				product: string;
+				landblockId: number;
+				environmentId: number;
+				cellStructureId: number;
+				staticObjectCount: number;
+				portalCount: number;
+				portalApertureCount: number;
+				sourceSurfaceCount: number;
+				sourceSurfaceIds: readonly number[];
+				renderVertexCount: number;
+				renderTriangleCount: number;
+				skippedPolygonCount: number;
+				invalidPolygonCount: number;
+				materialSliceCount: number;
+				materialSliceTriangleCount: number;
+				fallbackShellExpected: boolean;
+				materialRecordCount: number;
+				texturePageRefCount: number;
+				texturePageCount: number;
+				missingMaterialSliceCount: number;
+				materialRecordKeys: readonly string[];
+				materialFamilyKeys: readonly string[];
+				materialTriangleCounts: readonly {
+					materialRecordKey: string;
+					familyKey: string | null;
+					surfaceId: number;
+					geometrySurfaceId: number;
+					materialVariantSignature: string | null;
+					triangleCount: number;
+				}[];
+			};
 	  }
 	| {
 			kind: "portal";

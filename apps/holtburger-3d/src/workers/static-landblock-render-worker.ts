@@ -791,8 +791,8 @@ function buildStructuredInteriorMaterialSlices(options: {
 	envCell: PreparedEnvCellPayload;
 	materialRecordByAssetId: ReadonlyMap<string, StaticBundleMaterialRecord>;
 }): readonly DetailedStructuredInteriorMaterialSlice[] {
-	const surfaceById = new Map(
-		options.envCell.surfaces.map((surface) => [surface.surfaceId, surface]),
+	const surfaceBySlotId = new Map(
+		options.envCell.surfaces.map((surface) => [surface.slotId, surface]),
 	);
 	const keys = new Map<
 		string,
@@ -808,7 +808,7 @@ function buildStructuredInteriorMaterialSlices(options: {
 		if (triangle.surfaceId === null) {
 			continue;
 		}
-		const surface = surfaceById.get(triangle.surfaceId);
+		const surface = surfaceBySlotId.get(triangle.surfaceId);
 		if (!surface) {
 			continue;
 		}
@@ -867,6 +867,7 @@ function buildStructuredInteriorMaterialSlices(options: {
 				materialVariantSignature: surfaceKey.materialVariantSignature,
 				positions: geometry.positions,
 				uvs: geometry.uvs ?? new Float32Array(),
+				normals: geometry.normals ?? new Float32Array(),
 				indices: geometry.indices,
 				triangleCount: geometry.triangleCount,
 			};

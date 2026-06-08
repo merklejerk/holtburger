@@ -121,6 +121,25 @@ describe("webgl2 world resources", () => {
 		expect(gl.createdTextures).toHaveLength(1);
 		const firstTexturePage =
 			[...store.productTerrainTexturePagesByKey.values()][0] ?? null;
+		expect(firstTexturePage).toMatchObject({
+			family: "terrain-color",
+			textureIndex: 0,
+			usageBucket: "terrain-color",
+			sampleClass: "rgba-color",
+			pageKind: "packed-atlas",
+			indexedFormat: null,
+			mipmapsGenerated: true,
+			entries: [
+				{
+					virtualRefKey: "terrain-page/color/06000010/21/1/1",
+					sourceAssetId:
+						"terrain-artifact-texture/terrain-artifact/12340000/terrain-page:color:surface-texture/05000010:100663312:21",
+				},
+			],
+		});
+		expect(firstTexturePage?.entries[0]?.rect).toEqual([96, 96, 1, 1]);
+		expect(store.productTerrainTexturePagesByFamilyIndex.get("terrain-color:0"))
+			.toBe(firstTexturePage);
 
 		commitWebgl2TerrainProductResources({
 			gl: gl.asContext(),

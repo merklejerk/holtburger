@@ -739,7 +739,7 @@ Implementation notes:
 
 ## Phase 10: Isomorphic Texture Page Resources With Terrain Bucket Isolation
 
-Status: planned.
+Status: implemented.
 
 The browser resource inspector exposed a structural asymmetry: static bundle and structured interior resident texture resources carry one texture-page shape with entries, rects, sample class, page kind, atlas metrics, and preview metadata, while terrain atlas resources use a terrain-only `Webgl2TerrainTexturePageResource` wrapper. Terrain already uses the shared atlas planner and CPU texture-page upload path, but then stores the GPU result in a smaller terrain-specific resident shape. That makes inspection, preview, atlas metrics, and future texture-page cleanup non-isomorphic.
 
@@ -842,11 +842,147 @@ Risks and mitigations:
 
 Definition of done:
 
-- `Webgl2TerrainTexturePageResource` is removed or reduced to a type alias of the shared resident texture-page resource.
+- `Webgl2TerrainTexturePageResource` is removed, aliased, or reduced to a narrow terrain-specific extension of the shared resident texture-page resource.
 - Terrain texture pages appear in the browser resource inspector Textures section with owner/bucket metadata that clearly identifies them as terrain pages.
 - Terrain texture preview works through the same modal/readback path as static/structured pages.
 - Terrain rendering parity is manually checked against representative outdoor scenes before closing the phase.
 - Any retained terrain-specific texture-page fields have a documented rendering or readiness purpose.
+
+Implementation notes:
+
+- Added `Webgl2ResidentTexturePageResource` and `Webgl2ResidentTexturePageEntryResource` in `webgl2/resources/texture-page-upload.ts`.
+- `TexturePageCpuTexture` and uploaded WebGL texture-page resources now preserve compact `entries` with atlas entry/source ids and pixel rects instead of exposing only `placementCount`.
+- Static bundle texture pages now extend the shared resident page resource shape while preserving their existing static material binding behavior.
+- Terrain texture pages now extend the shared resident page resource shape and remain isolated in `productTerrainTexturePagesByKey`.
+- Terrain page creation validates that uploaded pages carry terrain-only families and required stats before they enter the terrain bucket.
+- Added `productTerrainTexturePagesByFamilyIndex` so terrain tile bindings resolve by `(family, textureIndex)` without scanning the terrain bucket.
+- Resource inspection now includes terrain-owned texture pages with `ownerKind: "terrain"`.
+- Texture preview readback now accepts the shared resident texture-page resource and resolves terrain pages through the terrain bucket.
+- Retained terrain `pixelStats` and `entryDiagnostics` on the shared resource because `terrain-family-submit` diagnostics still consume them. They are no longer a reason for a separate terrain page wrapper.
+
+Verification:
+
+- `npm run --prefix apps/holtburger-3d test:ts -- src/lib/world-display/webgl2-texture-page-upload.test.ts src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/render-resource-inspection.test.ts`
+- `npm run --prefix apps/holtburger-3d lint:ts`
+- `npm run --prefix apps/holtburger-3d check`
+
+## Phase 11: Typed Renderer Vocabulary Cleanup
+
+Status: planned.
+
+Phase 10 intentionally unified texture-page resource shape, but it also made an older pattern more visible: renderer resource code still passes raw strings for values that should be closed vocabularies. Examples include usage buckets, sample classes, page kinds, indexed formats, sampler policies, resource owner kinds, terrain texture families, material family ids, and resource bucket ids. That pattern is brittle because a typo or drifted serialized key can survive TypeScript and fail only at render time.
+
+Direction:
+
+- Treat string ids as serialized boundary data, not as the internal renderer model.
+- Prefer exported string-union types, typed descriptors, and parse/format helpers over ad-hoc string literals at call sites.
+- Keep canonical vocabulary close to the renderer/resource model that owns it.
+- Do not create a compatibility shim layer whose only job is to preserve old loose strings.
+- Do not over-engineer this into global renderer ontology. Start with texture-page/resource-inspector vocabulary, then expand to material family/resource owner vocabulary where the pattern is already causing drift.
+
+Scope:
+
+- In scope:
+  - `TexturePageUsageBucket`
+  - `TexturePageSampleClass`
+  - `TexturePageKind`
+  - indexed texture format values
+  - texture/resource owner kinds such as `static-bundle`, `structured-interior`, and `terrain`
+  - terrain texture page families such as `terrain-color`, `terrain-mask`, and `terrain-detail`
+  - sampler policy representation where a structured descriptor can replace opaque policy strings in internal resources
+  - material/static family ids if the cleanup can reuse existing parser/descriptor types without broad churn
+- Out of scope for this phase:
+  - changing serialized artifact keys solely for aesthetics
+  - changing shader behavior
+  - collapsing terrain/static/structured resource buckets
+  - designing around backwards compatibility with stale diagnostics
+
+Proposed work:
+
+- Inventory current raw-string renderer vocabularies in resource types, submit paths, inspector DTOs, and texture page upload code.
+- Move or add canonical type exports near their owners:
+  - texture page vocabulary in `texture-pages/texture-page-binding.ts` or the WebGL texture-page resource module, depending on whether the values are artifact-level or resident-resource-level
+  - resource owner vocabulary in `render-resource-inspection.ts` or a colocated resource-inspection vocabulary module
+  - terrain texture page family vocabulary in terrain texture/resource code
+- Replace broad `string` fields in internal resource contracts with typed unions or descriptors where values are closed.
+- For opaque sampler policy strings, either:
+  - replace internal resource fields with a structured sampler policy descriptor and format only for display/debug, or
+  - introduce a branded `SamplerPolicyKey` with a single formatter if changing call sites is too large for this phase.
+- Add parser/assertion helpers for serialized boundary strings that must enter typed renderer paths.
+- Update inspector and preview DTOs to consume typed values internally and stringify only at display boundaries.
+- Remove redundant local string unions once canonical exported types exist.
+- Add focused tests for parse/format helpers and representative resource projection paths.
+
+Dry run notes:
+
+- Existing typed vocabulary already exists but is fragmented:
+  - `texture-pages/texture-page-binding.ts` defines `TexturePageUsageBucket`, plus non-exported `TexturePageKind`, `TexturePageSampleClass`, wrap/filter/mip/sampling/lookup policy unions, and `TexturePageDescriptor`.
+  - `static-bundle-layer.ts` duplicates texture page usage/sample/page-kind/indexed-format unions as `VirtualTexturePageUsageBucket`, `VirtualTexturePageSampleClass`, `StaticBundleTexturePageKind`, and `StaticBundleIndexedTextureFormat`.
+  - `indexed-material-data.ts` already exports `IndexedTextureFormat`.
+  - `texture-pages/texture-page-atlas-planner.ts` already exports `TexturePageFamily`, including terrain families.
+  - `webgl2-world-submit.ts` already has `Webgl2MaterialDrawDomain`.
+  - `render-material-strategy.ts`, `world-render-frame.ts`, `render-spatial-index.ts`, and browser picker code all have adjacent but not identical renderable/category/owner vocabularies.
+- First implementation cut should not invent a new vocabulary module. Export the existing texture-page unions from `texture-page-binding.ts`, import `IndexedTextureFormat` from `indexed-material-data.ts`, and make `static-bundle-layer.ts` reuse those types.
+- `Webgl2ResidentTexturePageResource` is the highest-value target from Phase 10:
+  - replace `family: string` with `TexturePageFamily | VirtualTexturePageUsageBucket` only if both domains must remain in one field; otherwise split into a typed `family` and/or `usageBucket` without overloading meaning
+  - replace `usageBucket: string` with `TexturePageUsageBucket | TerrainTexturePageFamily` or a clearer resident-resource union
+  - replace `sampleClass: string` with `TexturePageSampleClass`
+  - replace `pageKind: string` with `TexturePageKind`
+  - replace `indexedFormat?: string | null` with `IndexedTextureFormat | null | undefined`
+- Be careful with terrain pages: Phase 10 currently stores terrain page families in both `family` and `usageBucket` (`terrain-color`, `terrain-mask`, `terrain-detail`). Those are not members of the existing `TexturePageUsageBucket`. A clean implementation should either:
+  - add a resident texture-page usage/family distinction so terrain does not pretend a family is a usage bucket, or
+  - define a deliberate `ResidentTexturePageUsage` union that includes terrain families and document why it differs from artifact-level `TexturePageUsageBucket`.
+- `RenderResourceInspectionTexturePage`, `RenderResourceTexturePageIdentity`, and `RenderResourceTexturePagePreview` should consume the same typed page fields, but the browser UI can still render them as strings. The DTO is still in-process browser data, not a serialized external contract.
+- Resource-inspection owner kind should become a named exported type, probably `RenderResourceInspectionOwnerKind`, before trying to unify it with frame categories or material draw domains. Those vocabularies overlap but are not identical.
+- Terrain-family validation should move out of `webgl2-world-resources.ts` as a reusable `isTerrainTexturePageFamily()` helper near `TexturePageFamily` or terrain resource types. Repeated direct comparisons in terrain submit/resources can then use the helper without widening the scope.
+- Sampler policy should be a branded key in this phase, not a structured descriptor yet. The existing sampler policy strings are generated in static and upload resources and are used for cache/update equality. A structured descriptor can be a later phase if branded keys reveal real pain.
+- Material/static family ids should remain a follow-up unless a direct import path becomes trivial. `static-material-artifacts.ts` already has parser/descriptor logic, so the right future move is to consume those descriptors consistently, not create another family-id union.
+- Do not chase every literal in tests first. Type the source/resource contracts and update tests only where TypeScript or focused assertions require it.
+
+Recommended implementation order:
+
+1. Export canonical texture-page vocabulary from `texture-page-binding.ts` and reuse `IndexedTextureFormat`.
+2. Replace duplicated static bundle texture-page unions with aliases/imports from canonical vocabulary.
+3. Type `Webgl2ResidentTexturePageResource` and adjust static/terrain extensions.
+4. Introduce `RenderResourceInspectionOwnerKind` and use it across inspection/preview identity DTOs.
+5. Move terrain family guard to a canonical helper and reuse it in terrain page creation and submit/resource filters where practical.
+6. Brand sampler policy keys with a single formatter boundary; defer structured sampler descriptors if churn spreads.
+7. Run focused texture-page upload, static bundle resource, terrain resource, resource-inspection, check, and lint tests.
+
+Acceptance criteria:
+
+- Core texture-page resident resources no longer expose broad `string` for closed vocabulary fields.
+- Resource-inspection owner kinds are a shared typed vocabulary instead of duplicated inline string unions.
+- Terrain texture family checks use a canonical helper/type instead of repeating string comparisons.
+- Sampler policy is either structured or intentionally branded/formatted from one function.
+- Existing visual behavior is unchanged.
+- `npm run --prefix apps/holtburger-3d check`, `npm run --prefix apps/holtburger-3d lint:ts`, and focused resource/texture tests pass.
+
+Risks and mitigations:
+
+- Risk: type cleanup churns many files without improving behavior.
+  - Mitigation: start at texture-page/resource-inspector resources and only expand when it removes duplicated string vocabularies.
+- Risk: serialized artifact keys get conflated with typed renderer vocabulary.
+  - Mitigation: keep parse/format helpers at boundaries and avoid changing persisted/generated key text unless required for correctness.
+- Risk: sampler policy cleanup becomes too broad.
+  - Mitigation: accept a branded key first if a structured sampler descriptor would force unrelated renderer changes.
+
+Definition of done:
+
+- The common renderer resource vocabularies named in scope have canonical exported types or descriptors.
+- Newly typed fields are used by the Phase 10 shared resident texture-page model and resource inspector.
+- Any remaining raw string fields are documented as serialized ids, display labels, or open-ended external keys.
+- Focused tests prove representative typed parse/format/projection paths.
+
+Follow-up recommendation:
+
+- If this phase reduces drift without broad churn, add a follow-up cleanup phase for the next vocabulary layer:
+  - material family ids and alpha policies
+  - render family ids
+  - resource bucket/domain ids
+  - detail texture roles and blending modes
+  - debug/picker/report DTO enum-like strings
+- That follow-up should reuse the same pattern: canonical typed vocabulary internally, parser/formatter helpers at serialized boundaries, and no compatibility shims whose only job is to preserve loose string usage.
 
 ## Findings
 

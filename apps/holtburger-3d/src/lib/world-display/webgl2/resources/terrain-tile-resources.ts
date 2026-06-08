@@ -12,12 +12,12 @@ import type { ResolvedRegionDetailOverlayPlan } from "../../region-detail-overla
 import type { Webgl2SceneDomain } from "../../webgl2-scene-domain-targets";
 import type {
 	Webgl2BufferResource,
-	Webgl2Texture2DResource,
 	Webgl2VertexArrayResource,
 } from "../../webgl2-gl";
 import type {
 	TexturePageEntryDiagnostic,
 	TexturePagePixelStats,
+	Webgl2ResidentTexturePageResource,
 } from "./texture-page-upload";
 
 export type Webgl2TerrainTileReadiness =
@@ -94,14 +94,10 @@ export interface Webgl2TerrainTileTexturePageBinding {
 	texturePage?: Webgl2TerrainTexturePageResource | null;
 }
 
-export interface Webgl2TerrainTexturePageResource {
-	key: string;
+export interface Webgl2TerrainTexturePageResource
+	extends Webgl2ResidentTexturePageResource {
 	family: Webgl2TerrainTileTexturePageBinding["family"];
 	textureIndex: number;
-	texture: Webgl2Texture2DResource;
-	width: number;
-	height: number;
-	placementCount: number;
 	pixelStats: TexturePagePixelStats;
 	entryDiagnostics: readonly TexturePageEntryDiagnostic[];
 }

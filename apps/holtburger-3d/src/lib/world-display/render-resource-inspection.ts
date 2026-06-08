@@ -50,7 +50,7 @@ export interface RenderResourceInspectionStructuredInteriorCell {
 
 export interface RenderResourceInspectionTexturePage {
 	readonly key: string;
-	readonly ownerKind: "static-bundle" | "structured-interior";
+	readonly ownerKind: "static-bundle" | "structured-interior" | "terrain";
 	readonly ownerKey: string;
 	readonly usageBucket: string;
 	readonly sampleClass: string;
@@ -66,7 +66,7 @@ export interface RenderResourceInspectionTexturePage {
 }
 
 export interface RenderResourceTexturePageIdentity {
-	readonly ownerKind: "static-bundle" | "structured-interior";
+	readonly ownerKind: "static-bundle" | "structured-interior" | "terrain";
 	readonly ownerKey: string;
 	readonly texturePageKey: string;
 }
@@ -292,6 +292,15 @@ export function inspectWebgl2WorldResources(
 				triangleCount: cell.fallbackShell.triangleCount,
 			});
 		}
+	}
+
+	for (const page of store.productTerrainTexturePagesByKey.values()) {
+		texturePages.push(
+			describeTexturePageResource(page, {
+				ownerKind: "terrain",
+				ownerKey: "terrain-texture-pages",
+			}),
+		);
 	}
 
 	texturePages.sort(compareByKey);

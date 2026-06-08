@@ -50,6 +50,20 @@ describe("webgl2 texture page upload", () => {
 		);
 		expect(resources.textures).toHaveLength(1);
 		expect(resources.detailTextures).toHaveLength(1);
+		expect(resources.textures[0]).toMatchObject({
+			usageBucket: "static-rgba",
+			sampleClass: "rgba-color",
+			pageKind: "packed-atlas",
+			indexedFormat: null,
+			mipmapsGenerated: true,
+			entries: [
+				{
+					virtualRefKey: "entry-a",
+					sourceAssetId: "prepared-texture/entry-a",
+					rect: [1, 1, 2, 2],
+				},
+			],
+		});
 		expect(pageSet?.placements).toEqual([
 			{
 				family: "static-rgba",
@@ -60,6 +74,13 @@ describe("webgl2 texture page upload", () => {
 				height: 4,
 			},
 		]);
+		expect(pageSet?.textures[0]?.entries).toEqual([
+			{
+				virtualRefKey: "entry-a",
+				sourceAssetId: "prepared-texture/entry-a",
+				rect: [1, 1, 2, 2],
+			},
+		]);
 		expect(pageSet?.detailPlacements).toEqual([
 			{
 				family: "static-rgba",
@@ -68,6 +89,13 @@ describe("webgl2 texture page upload", () => {
 				rect: [1, 1, 2, 2],
 				width: 4,
 				height: 4,
+			},
+		]);
+		expect(pageSet?.detailTextures[0]?.entries).toEqual([
+			{
+				virtualRefKey: "detail-a",
+				sourceAssetId: "detail-a",
+				rect: [1, 1, 2, 2],
 			},
 		]);
 		expect(gl.textureUploads).toHaveLength(2);

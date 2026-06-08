@@ -15,11 +15,11 @@ describe("render resource inspection", () => {
 		expect(snapshot.summary).toEqual({
 			staticBundleLayerCount: 1,
 			structuredInteriorCellCount: 1,
-			texturePageCount: 2,
+			texturePageCount: 3,
 			materialCount: 2,
 			geometryResourceCount: 3,
 			triangleCount: 12,
-			texturePageEntryCount: 3,
+			texturePageEntryCount: 4,
 		});
 		expect(snapshot.staticBundleLayers).toMatchObject([
 			{
@@ -44,6 +44,7 @@ describe("render resource inspection", () => {
 		expect(snapshot.texturePages.map((page) => page.ownerKind)).toEqual([
 			"static-bundle",
 			"structured-interior",
+			"terrain",
 		]);
 		expect(
 			snapshot.texturePages.map((page) => ({
@@ -60,6 +61,11 @@ describe("render resource inspection", () => {
 			{
 				key: "page:structured",
 				coveredPixelCount: 32_768,
+				coverageRatio: 1,
+			},
+			{
+				key: "page:terrain",
+				coveredPixelCount: 4_096,
 				coverageRatio: 1,
 			},
 		]);
@@ -134,6 +140,12 @@ function createInspectableWorldStore(): Webgl2WorldResourceStore {
 		height: 256,
 		rects: [[0, 0, 128, 256]],
 	});
+	const terrainPage = createTexturePage({
+		key: "page:terrain",
+		width: 64,
+		height: 64,
+		rects: [[0, 0, 64, 64]],
+	});
 	const staticMaterial = createMaterial({
 		key: "material:static",
 		detailTextureRefKey: "texture:detail",
@@ -202,6 +214,7 @@ function createInspectableWorldStore(): Webgl2WorldResourceStore {
 				],
 			]),
 		},
+		productTerrainTexturePagesByKey: new Map([["page:terrain", terrainPage]]),
 	} as unknown as Webgl2WorldResourceStore;
 }
 

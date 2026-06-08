@@ -138,9 +138,9 @@ import {
 	commitWebgl2StaticBundleProductResources,
 	describeStaticBundleLayerResourceKey,
 	evictWebgl2StaticBundleProductResources,
-	type Webgl2StaticBundleTexturePageResource,
 	type Webgl2StaticBundleLayerResource,
 } from "./webgl2/resources/static-bundle-layer-resources";
+import type { Webgl2ResidentTexturePageResource } from "./webgl2/resources/texture-page-upload";
 import {
 	commitWebgl2StructuredInteriorProductResources,
 	evictWebgl2StructuredInteriorProductResources,
@@ -2443,7 +2443,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 
 	function readTexturePagePreviewPixels(
 		currentResources: Webgl2RenderResources,
-		page: Webgl2StaticBundleTexturePageResource,
+		page: Webgl2ResidentTexturePageResource,
 	): Uint8ClampedArray<ArrayBuffer> {
 		const { gl, stateCache } = currentResources;
 		const previousViewport = gl.getParameter(gl.VIEWPORT) as Int32Array;
@@ -2537,7 +2537,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	}
 
 	function resolveTexturePagePreviewMode(
-		page: Webgl2StaticBundleTexturePageResource,
+		page: Webgl2ResidentTexturePageResource,
 	): number {
 		if (page.sampleClass === "control-data" || page.indexedFormat === "p8") {
 			return 1;
@@ -2551,7 +2551,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	function resolveInspectableTexturePageResource(
 		store: Webgl2WorldResourceStore,
 		identity: RenderResourceTexturePageIdentity,
-	): Webgl2StaticBundleTexturePageResource | null {
+	): Webgl2ResidentTexturePageResource | null {
 		if (identity.ownerKind === "static-bundle") {
 			return (
 				store.staticBundleLayerResources.layersByKey
@@ -2559,10 +2559,16 @@ export function createWebgl2WorldDisplayRendererImplementation(
 					?.texturePagesByKey.get(identity.texturePageKey) ?? null
 			);
 		}
+		if (identity.ownerKind === "structured-interior") {
+			return (
+				store.structuredInteriorResources.cellsByKey
+					.get(identity.ownerKey)
+					?.texturePagesByKey.get(identity.texturePageKey) ?? null
+			);
+		}
 		return (
-			store.structuredInteriorResources.cellsByKey
-				.get(identity.ownerKey)
-				?.texturePagesByKey.get(identity.texturePageKey) ?? null
+			store.productTerrainTexturePagesByKey.get(identity.texturePageKey) ??
+			null
 		);
 	}
 

@@ -25,29 +25,35 @@ interface Webgl2TexturePagePlacementResource {
 	height: number;
 }
 
-export interface Webgl2TexturePageTextureResource {
-	key: string;
-	family: TexturePageFamily;
-	textureIndex: number;
-	texture: Webgl2Texture2DResource;
-	width: number;
-	height: number;
-	placementCount: number;
-	pixelStats: TexturePagePixelStats;
-	entryDiagnostics: readonly TexturePageEntryDiagnostic[];
+export interface Webgl2ResidentTexturePageEntryResource {
+	virtualRefKey: string;
+	sourceAssetId: string;
+	rect: readonly [number, number, number, number];
 }
 
-export interface Webgl2DetailTexturePageTextureResource {
+export interface Webgl2ResidentTexturePageResource {
 	key: string;
-	family: TexturePageFamily;
+	family: string;
 	textureIndex: number;
+	usageBucket: string;
+	sampleClass: string;
+	pageKind: string;
+	indexedFormat?: string | null;
+	samplerPolicyKey: string;
+	mipmapsGenerated: boolean;
 	texture: Webgl2Texture2DResource;
 	width: number;
 	height: number;
 	placementCount: number;
-	pixelStats: TexturePagePixelStats;
-	entryDiagnostics: readonly TexturePageEntryDiagnostic[];
+	entries: readonly Webgl2ResidentTexturePageEntryResource[];
+	pixelStats?: TexturePagePixelStats;
+	entryDiagnostics?: readonly TexturePageEntryDiagnostic[];
 }
+
+export type Webgl2TexturePageTextureResource = Webgl2ResidentTexturePageResource;
+
+export type Webgl2DetailTexturePageTextureResource =
+	Webgl2ResidentTexturePageResource;
 
 export interface TexturePageCpuTexture {
 	key: string;
@@ -57,6 +63,7 @@ export interface TexturePageCpuTexture {
 	height: number;
 	placementCount: number;
 	pixels: Uint8Array;
+	entries: readonly Webgl2ResidentTexturePageEntryResource[];
 	pixelStats: TexturePagePixelStats;
 	entryDiagnostics: readonly TexturePageEntryDiagnostic[];
 }
@@ -212,6 +219,7 @@ function createTexturePageCpuTexture({
 		fillRgbaPixels(pixels, TERRAIN_COLOR_ATLAS_FILL_RGBA);
 	}
 	const entryDiagnostics: TexturePageEntryDiagnostic[] = [];
+	const entries: Webgl2ResidentTexturePageEntryResource[] = [];
 	for (const placement of page.placements) {
 		const record = entriesByKey.get(placement.atlasEntryKey);
 		if (!record) {
@@ -219,6 +227,17 @@ function createTexturePageCpuTexture({
 				`Texture page set ${pageSetKey} references missing entry ${placement.atlasEntryKey}.`,
 			);
 		}
+		entries.push({
+			virtualRefKey: placement.atlasEntryKey,
+			sourceAssetId:
+				record.entry.preparedTextureAssetId ?? placement.atlasEntryKey,
+			rect: [
+				placement.x,
+				placement.y,
+				placement.width,
+				placement.height,
+			],
+		});
 		entryDiagnostics.push({
 			atlasEntryKey: placement.atlasEntryKey,
 			renderSurfaceId: record.entry.renderSurfaceId,
@@ -247,6 +266,7 @@ function createTexturePageCpuTexture({
 		height: page.height,
 		placementCount: page.placements.length,
 		pixels,
+		entries,
 		pixelStats: summarizeRgbaPixels(pixels),
 		entryDiagnostics,
 	};
@@ -265,6 +285,7 @@ function createDetailTexturePageCpuTexture({
 }): TexturePageCpuTexture {
 	const pixels = new Uint8Array(page.width * page.height * 4);
 	const entryDiagnostics: TexturePageEntryDiagnostic[] = [];
+	const entries: Webgl2ResidentTexturePageEntryResource[] = [];
 	for (const placement of page.placements) {
 		const entry = entriesByKey.get(placement.atlasEntryKey);
 		if (!entry) {
@@ -272,6 +293,16 @@ function createDetailTexturePageCpuTexture({
 				`Detail texture page set ${pageSetKey} references missing entry ${placement.atlasEntryKey}.`,
 			);
 		}
+		entries.push({
+			virtualRefKey: placement.atlasEntryKey,
+			sourceAssetId: placement.atlasEntryKey,
+			rect: [
+				placement.x,
+				placement.y,
+				placement.width,
+				placement.height,
+			],
+		});
 		entryDiagnostics.push({
 			atlasEntryKey: placement.atlasEntryKey,
 			renderSurfaceId: entry.renderSurfaceId,
@@ -299,6 +330,7 @@ function createDetailTexturePageCpuTexture({
 		height: page.height,
 		placementCount: page.placements.length,
 		pixels,
+		entries,
 		pixelStats: summarizeRgbaPixels(pixels),
 		entryDiagnostics,
 	};
@@ -338,10 +370,21 @@ export function createWebgl2TexturePageTextureResourceFromCpu({
 		key: cpuTexture.key,
 		family: cpuTexture.family,
 		textureIndex: cpuTexture.textureIndex,
+		usageBucket: cpuTexture.family,
+		sampleClass: "rgba-color",
+		pageKind: "packed-atlas",
+		indexedFormat: null,
+		samplerPolicyKey: describeWebgl2TexturePageSamplerPolicy({
+			family: cpuTexture.family,
+			textureFilteringMode,
+			maxAnisotropy,
+		}),
+		mipmapsGenerated: textureFilteringMode !== "nearest",
 		texture,
 		width: cpuTexture.width,
 		height: cpuTexture.height,
 		placementCount: cpuTexture.placementCount,
+		entries: cpuTexture.entries,
 		pixelStats: cpuTexture.pixelStats,
 		entryDiagnostics: cpuTexture.entryDiagnostics,
 	};
@@ -361,6 +404,22 @@ export function describeWebgl2TexturePageSetKey({
 			? Math.min(4, Math.max(1, Math.floor(maxAnisotropy)))
 			: 1;
 	return `${planKey};filter=${textureFilteringMode};aniso=${anisotropy}`;
+}
+
+function describeWebgl2TexturePageSamplerPolicy({
+	family,
+	textureFilteringMode,
+	maxAnisotropy,
+}: {
+	family: TexturePageFamily;
+	textureFilteringMode: TextureFilteringMode;
+	maxAnisotropy: number;
+}): string {
+	const anisotropy =
+		textureFilteringMode === "anisotropic-4x"
+			? Math.min(4, Math.max(1, Math.floor(maxAnisotropy)))
+			: 1;
+	return `family=${family};sample=rgba-color;filter=${textureFilteringMode};mips=${textureFilteringMode === "nearest" ? "off" : "on"};aniso=${anisotropy}`;
 }
 
 function createWebgl2TextureAtlasSampler({

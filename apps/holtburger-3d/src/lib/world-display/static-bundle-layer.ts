@@ -76,13 +76,13 @@ export interface VirtualTexturePageRef {
 export type StaticBundleTexturePageKind = TexturePageKind;
 
 interface StaticBundleTexturePageEntry {
+	sourcePlacementKey: string;
 	virtualRefKey: string;
+	virtualRefKeys: readonly string[];
 	sourceAssetId: string;
 	role: VirtualTexturePageEntryRole;
 	sampleClass: VirtualTexturePageSampleClass;
 	indexedFormat?: StaticBundleIndexedTextureFormat;
-	wrapS: TexturePageWrapMode;
-	wrapT: TexturePageWrapMode;
 	samplingDomain: TexturePageSamplingDomain;
 	lookup: TexturePageLookupPolicy;
 	rect: readonly [number, number, number, number];

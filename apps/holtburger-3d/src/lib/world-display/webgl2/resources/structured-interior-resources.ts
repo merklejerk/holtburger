@@ -16,6 +16,7 @@ import {
 	type Webgl2VertexArrayResource,
 } from "../../webgl2-gl";
 import {
+	createStaticBundleTextureRefByKey,
 	createStaticBundleTexturePageByVirtualRefKey,
 	createWebgl2StaticBundleMaterialResource,
 	createWebgl2StaticBundleTexturePageResource,
@@ -267,10 +268,14 @@ function createWebgl2StructuredInteriorProductResource({
 	);
 	const texturePageByVirtualRefKey =
 		createStaticBundleTexturePageByVirtualRefKey(texturePages);
+	const textureRefByVirtualRefKey = createStaticBundleTextureRefByKey(
+		artifact.structuredInteriorTexturePageRefs,
+	);
 	const materialRecords = artifact.structuredInteriorMaterialRecords.map(
 		(record) =>
 			createWebgl2StaticBundleMaterialResource({
 				record,
+				textureRefByVirtualRefKey,
 				texturePageByVirtualRefKey,
 			}),
 	);

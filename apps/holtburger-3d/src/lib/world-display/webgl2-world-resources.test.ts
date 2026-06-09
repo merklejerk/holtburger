@@ -603,8 +603,14 @@ function createDetailedLandblockProductArtifact(
 						bytes: new Uint8Array([255, 255, 255, 255]),
 						entries: [
 							{
+								sourcePlacementKey: "source-placement:interior-texture",
 								virtualRefKey: "interior-texture-ref",
+								virtualRefKeys: ["interior-texture-ref"],
 								sourceAssetId: "prepared-texture/06000001/raw",
+								role: "base-color",
+								sampleClass: "rgba-color",
+								samplingDomain: "color",
+								lookup: "color-filtered",
 								rect: [0, 0, 1, 1],
 							},
 						],

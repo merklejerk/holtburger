@@ -57,22 +57,30 @@ describe("render resource inspection", () => {
 		expect(
 			snapshot.texturePages.map((page) => ({
 				key: page.key,
+				entryCount: page.entryCount,
+				virtualAliasCount: page.virtualAliasCount,
 				coveredPixelCount: page.coveredPixelCount,
 				coverageRatio: page.coverageRatio,
 			})),
 		).toEqual([
 			{
 				key: "page:static",
+				entryCount: 2,
+				virtualAliasCount: 3,
 				coveredPixelCount: 49_152,
 				coverageRatio: 0.75,
 			},
 			{
 				key: "page:structured",
+				entryCount: 1,
+				virtualAliasCount: 1,
 				coveredPixelCount: 32_768,
 				coverageRatio: 1,
 			},
 			{
 				key: "page:terrain",
+				entryCount: 1,
+				virtualAliasCount: 1,
 				coveredPixelCount: 4_096,
 				coverageRatio: 1,
 			},
@@ -286,7 +294,12 @@ function createTexturePage({
 		mipmapsGenerated: false,
 		texture: { width, height },
 		entries: rects.map((rect, index) => ({
+			sourcePlacementKey: `${key}:source:${index}`,
 			virtualRefKey: `${key}:entry:${index}`,
+			virtualRefKeys:
+				key === "page:static" && index === 0
+					? [`${key}:entry:${index}`, `${key}:entry:${index}:alias`]
+					: [`${key}:entry:${index}`],
 			sourceAssetId: `prepared-texture/${index}`,
 			rect,
 		})),

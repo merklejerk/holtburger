@@ -1063,7 +1063,9 @@
 									{page.width}x{page.height}; {formatResourceCount(
 										page.entryCount,
 										"entry",
-									)}; coverage {formatResourcePercent(page.coverageRatio)}
+									)}; aliases {page.virtualAliasCount}; coverage {formatResourcePercent(
+										page.coverageRatio,
+									)}
 								</dd>
 							</div>
 						{:else}

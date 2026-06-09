@@ -37,7 +37,9 @@ interface Webgl2TexturePagePlacementResource {
 }
 
 export interface Webgl2ResidentTexturePageEntryResource {
+	sourcePlacementKey: string;
 	virtualRefKey: string;
+	virtualRefKeys: readonly string[];
 	sourceAssetId: string;
 	rect: readonly [number, number, number, number];
 }
@@ -238,7 +240,9 @@ function createTexturePageCpuTexture({
 			);
 		}
 		entries.push({
+			sourcePlacementKey: placement.atlasEntryKey,
 			virtualRefKey: placement.atlasEntryKey,
+			virtualRefKeys: [placement.atlasEntryKey],
 			sourceAssetId:
 				record.entry.preparedTextureAssetId ?? placement.atlasEntryKey,
 			rect: [
@@ -304,7 +308,9 @@ function createDetailTexturePageCpuTexture({
 			);
 		}
 		entries.push({
+			sourcePlacementKey: placement.atlasEntryKey,
 			virtualRefKey: placement.atlasEntryKey,
+			virtualRefKeys: [placement.atlasEntryKey],
 			sourceAssetId: placement.atlasEntryKey,
 			rect: [
 				placement.x,

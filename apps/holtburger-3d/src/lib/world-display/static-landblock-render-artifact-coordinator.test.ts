@@ -58,15 +58,15 @@ describe("static landblock render artifact coordinator", () => {
 		coordinator.dispose();
 	});
 
-	it("emits product eviction callbacks when desired targets leave residency", async () => {
+	it("emits product clear callbacks when scene interest becomes empty", async () => {
 		const client = new MockLandblockProductClient();
-		const evictedKeys: string[] = [];
+		let clearedCount = 0;
 		const destination = parseBrowserLocationInput("da55", "manual", "outdoor");
 		expect(destination).not.toBeNull();
 		const coordinator = new StaticLandblockRenderArtifactCoordinator({
 			client,
-			onProductEvicted: (key) => {
-				evictedKeys.push(`${key.landblockId}:${key.product}`);
+			onProductsCleared: () => {
+				clearedCount += 1;
 			},
 		});
 
@@ -89,11 +89,7 @@ describe("static landblock render artifact coordinator", () => {
 			envCellLodRadius: -1,
 		});
 
-		expect(evictedKeys).toEqual([
-			"3663069183:outdoor-terrain",
-			"3663069183:outdoor-buildings",
-			"3663069183:outdoor-detail",
-		]);
+		expect(clearedCount).toBe(1);
 		coordinator.dispose();
 	});
 

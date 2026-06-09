@@ -2702,7 +2702,7 @@ Verification results:
 
 ## Phase 22: Lift Scene Resource Runtime Out Of Browser Display
 
-Status: planned.
+Status: in progress.
 
 Goal:
 
@@ -2727,7 +2727,7 @@ Out of scope:
 
 ### Phase 22A: Add Evented Landblock Product Source
 
-Status: planned.
+Status: complete.
 
 Deliverables:
 
@@ -2745,6 +2745,20 @@ Acceptance criteria:
 - A product source can replay or expose the current product set to a late subscriber/constructor-time consumer.
 - Product commit/evict/clear events are emitted exactly once per store transition.
 - No product-source type imports from `BrowserWorldDisplay.svelte`, Svelte stores, or browser-mode UI modules.
+
+Progress:
+
+- Added `MutableStaticLandblockProductSource` as a renderer-facing, non-Svelte product source around `StaticLandblockRenderArtifactStore`.
+- Routed `StaticLandblockRenderArtifactCoordinator` store writes through the product source while preserving its existing callback surface as a temporary Phase 22 bridge.
+- Added focused tests for product commit, stale-result suppression, targeted eviction, explicit clear, late product-set reads, and subscription cleanup.
+
+Verification:
+
+- `npm run --prefix apps/holtburger-3d test:ts -- src/lib/world-display/static-landblock-product-source.test.ts src/lib/world-display/static-landblock-render-artifact-store.test.ts src/lib/world-display/static-landblock-render-artifact-coordinator.test.ts` passed: 3 files, 12 tests.
+- `npm run --prefix apps/holtburger-3d test:ts` passed: 96 files, 523 tests.
+- `npm run --prefix apps/holtburger-3d lint:ts` passed.
+- `npm run --prefix apps/holtburger-3d check` passed with 0 errors and 0 warnings.
+- `rg "static-landblock-product-source|MutableStaticLandblockProductSource|StaticLandblockProductSource" apps/holtburger-3d/src` shows the product source is only used by the coordinator and tests; no Svelte or browser-display import exists.
 
 ### Phase 22B: Define Neutral Scene Interest And Runtime Boundaries
 
@@ -2877,7 +2891,7 @@ Cleanup ledger:
 | active | Phase 21D | Lower-level WebGL resource builders still consume a renderer-owned legacy `AssetChannelState` snapshot because terrain/material/readiness APIs have not all moved to `PreparedAssetResolver` inputs. This snapshot is not Svelte-owned and is not a public renderer contract, but it still copies the resolver into record-shaped state when prepared-record events flush. | `webgl2-world-display-renderer-impl.ts`, `webgl2-world-resources.ts`, `world-render-frame.ts`, `terrain-blend-plan.ts`, `render-material-strategy.ts`, `static-renderables.ts`, `structured-interior-scene.ts`, `transition-portal-work-items.ts` | Migrate lower-level resource/readiness builders to accept resolver/read-model inputs directly, then delete `createAssetChannelStateSnapshotFromResolver()` or restrict it to explicit diagnostics/planning paths. | `rg "createAssetChannelStateSnapshotFromResolver|AssetChannelState" apps/holtburger-3d/src/lib/world-display` only shows explicit presentation/report paths or deleted compatibility tests. |
 | removed | Phase 21F/21G | Incremental prune duty cycle emitted bounded eviction batches, but the batch planner still consumed record-shaped prepared/cache snapshots from `SceneAssetStreamingController` instead of iterating the resolver/store directly. | `scene-asset-streaming-controller.ts`, `asset-cache-policy.ts`, `App.svelte` (`getPreparedByAssetId`, `getCacheMetadataByAssetId`) | Phase 21G moved prune ticks to `PreparedAssetResolver.scanPreparedAssets(...)` plus `planPreparedAssetCachePruneBatchFromResolver(...)`; `App.svelte` no longer builds legacy snapshots for runtime sync/prune. | `rg "getPreparedByAssetId|getCacheMetadataByAssetId|createPreparedAssetLegacySnapshotFromResolver" apps/holtburger-3d/src/App.svelte apps/holtburger-3d/src/lib/assets` shows no runtime sync/prune usage; focused tests cover resolver-native scan and prune batch planning. |
 | removed | Phase 21A | Whole-cache asset-state signatures, now instrumented so Phase 21C can verify removal. | `browser-render-resource-coordinator.ts` (`describeAssetStateSignature`), `prepared-asset-hot-path-diagnostics.ts` (`recordPreparedAssetSignatureDiagnostics`) | Resolver revisions replaced sorted/joined asset-id signatures. | `rg "describeAssetStateSignature|recordPreparedAssetSignatureDiagnostics|asset-state signature|preparedByAssetId.*sort\\(\\).*join" apps/holtburger-3d/src` returned no matches. |
-| planned | Phase 22A/22C | Temporary dual path where product-source events and browser-display product forwarding both exist during `WorldDisplay` constructor-source cutover. | TBD | Product-source events are the only path from landblock product runtime to `WorldDisplay` / renderer. | `rg "worldDisplaySurface\\?\\.(commitStaticLandblockProduct|evictStaticLandblockProduct|clearStaticLandblockProducts)" apps/holtburger-3d/src` has no matches. |
+| active | Phase 22A/22C | Temporary dual path where product-source events and browser-display product forwarding both exist during `WorldDisplay` constructor-source cutover. Phase 22A routes coordinator writes through `MutableStaticLandblockProductSource`, but `BrowserWorldDisplay.svelte` still forwards coordinator callbacks to `WorldDisplay`. | `static-landblock-product-source.ts`, `static-landblock-render-artifact-coordinator.ts`, `BrowserWorldDisplay.svelte`, `WorldDisplay.svelte`, `world-display-renderer.ts` | Product-source events are the only path from landblock product runtime to `WorldDisplay` / renderer. | `rg "worldDisplaySurface\\?\\.(commitStaticLandblockProduct|evictStaticLandblockProduct|clearStaticLandblockProducts)" apps/holtburger-3d/src` has no matches. |
 | planned | Phase 22D | Runtime ownership bridge while `StaticLandblockRenderArtifactCoordinator` is moved out of `BrowserWorldDisplay.svelte`. | TBD | Neutral `LandblockProductRuntime` or `SceneResourceRuntime` owns coordinator/store/worker lifecycle. | `rg "new StaticLandblockRenderArtifactCoordinator" apps/holtburger-3d/src/pages/BrowserWorldDisplay.svelte` has no matches. |
 | planned | Phase 22B/22E | Temporary shared scene-resource update function that can trigger product sync from presentation-only changes. | `BrowserWorldDisplay.svelte` / runtime successors | Scene-interest sync and presentation-only updates are separate call paths, with runtime sync consuming a neutral scene-interest DTO. | Tests or grep prove picker/camera/debug handlers do not call product runtime sync. |
 

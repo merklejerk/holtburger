@@ -236,8 +236,10 @@
 	let pointerInputEventCount = $state(0);
 	let keyboardInputEventCount = $state(0);
 	let suppressNextBrowserClick = false;
-	let renderResourceUpdateTimer: ReturnType<typeof setTimeout> | null = null;
-	let pendingRenderResourceInput: BrowserRenderResourceCoordinatorInput | null =
+	let renderPresentationResourceUpdateTimer: ReturnType<
+		typeof setTimeout
+	> | null = null;
+	let pendingRenderPresentationResourceInput: BrowserRenderResourceCoordinatorInput | null =
 		null;
 	let cameraMovementFrameId: number | null = null;
 	let lastCameraMovementFrameAt: number | null = null;
@@ -530,7 +532,7 @@
 		void tick().then(() => {
 			sampleAssetDiagnosticsNow();
 			renderResourceCoordinator.setSurface(worldDisplaySurface);
-			scheduleCurrentSceneResourceUpdate();
+			scheduleCurrentRenderPresentationResourceUpdate();
 		});
 
 		return () => {
@@ -715,12 +717,12 @@
 		pickerArmed = false;
 		if (!pick) {
 			pickerClipboardText = "No picker report copied.";
-			scheduleCurrentSceneResourceUpdate();
+			scheduleCurrentRenderPresentationResourceUpdate();
 			return;
 		}
 		pickerResult = { pick, viewportPoint };
 		pickerMissText = "";
-		scheduleCurrentSceneResourceUpdate();
+		scheduleCurrentRenderPresentationResourceUpdate();
 		void copyPickerReport({ pick, viewportPoint });
 	}
 
@@ -743,14 +745,14 @@
 		if (!cameraFrame) {
 			pickerResult = null;
 			pickerMissText = "Camera frame is not ready.";
-			scheduleCurrentSceneResourceUpdate();
+			scheduleCurrentRenderPresentationResourceUpdate();
 			return null;
 		}
 		const query = buildPickerQuery(pickerOptions);
 		if (query.mask.size === 0) {
 			pickerResult = null;
 			pickerMissText = "No pickable renderable families are enabled.";
-			scheduleCurrentSceneResourceUpdate();
+			scheduleCurrentRenderPresentationResourceUpdate();
 			return null;
 		}
 		const pick =
@@ -768,7 +770,7 @@
 		if (!pick) {
 			pickerResult = null;
 			pickerMissText = `No pick hit at ${formatViewportPoint(viewportPoint)}.`;
-			scheduleCurrentSceneResourceUpdate();
+			scheduleCurrentRenderPresentationResourceUpdate();
 			return null;
 		}
 		return pick;
@@ -1235,7 +1237,7 @@
 		resetManualInteriorCameraIfNeeded(browserDestinationIdentity);
 		applyFollowResidencyDestination();
 		markAssetDiagnosticsDirty();
-		scheduleCurrentSceneResourceUpdate();
+		scheduleCurrentRenderPresentationResourceUpdate();
 	}
 
 	function commitRenderAnchorForDestination(
@@ -1313,8 +1315,8 @@
 		);
 	}
 
-	function scheduleCurrentSceneResourceUpdate(): void {
-		scheduleSceneResourceUpdate({
+	function scheduleCurrentRenderPresentationResourceUpdate(): void {
+		scheduleRenderPresentationResourceUpdate({
 			assetPresentationState: assetState,
 			preparedAssetResolver,
 			browserDestination,
@@ -1384,18 +1386,18 @@
 		assetCacheDebugText = describeAssetCacheDebugState();
 	}
 
-	function scheduleSceneResourceUpdate(
+	function scheduleRenderPresentationResourceUpdate(
 		input: BrowserRenderResourceCoordinatorInput,
 	): void {
-		pendingRenderResourceInput = input;
-		if (renderResourceUpdateTimer) {
+		pendingRenderPresentationResourceInput = input;
+		if (renderPresentationResourceUpdateTimer) {
 			return;
 		}
 
-		renderResourceUpdateTimer = setTimeout(() => {
-			renderResourceUpdateTimer = null;
-			const nextInput = pendingRenderResourceInput;
-			pendingRenderResourceInput = null;
+		renderPresentationResourceUpdateTimer = setTimeout(() => {
+			renderPresentationResourceUpdateTimer = null;
+			const nextInput = pendingRenderPresentationResourceInput;
+			pendingRenderPresentationResourceInput = null;
 			if (nextInput) {
 				renderResourceReport = renderResourceCoordinator.update(nextInput);
 			}
@@ -1657,12 +1659,12 @@
 				: null;
 			if (!diagnosticPick) {
 				diagnosticSelection = null;
-				scheduleCurrentSceneResourceUpdate();
+				scheduleCurrentRenderPresentationResourceUpdate();
 				return;
 			}
 
 			diagnosticSelection = diagnosticPick.item.metadata;
-			scheduleCurrentSceneResourceUpdate();
+			scheduleCurrentRenderPresentationResourceUpdate();
 			event.preventDefault();
 			event.stopPropagation();
 			return;
@@ -1692,7 +1694,7 @@
 
 	function closeDiagnosticInspector(): void {
 		diagnosticSelection = null;
-		scheduleCurrentSceneResourceUpdate();
+		scheduleCurrentRenderPresentationResourceUpdate();
 	}
 
 	function derivePickerReport(
@@ -2456,9 +2458,9 @@
 	onDestroy(() => {
 		assetDiagnosticsSampler?.dispose();
 		assetDiagnosticsSampler = null;
-		if (renderResourceUpdateTimer) {
-			clearTimeout(renderResourceUpdateTimer);
-			renderResourceUpdateTimer = null;
+		if (renderPresentationResourceUpdateTimer) {
+			clearTimeout(renderPresentationResourceUpdateTimer);
+			renderPresentationResourceUpdateTimer = null;
 		}
 		stopCameraMovement();
 	});

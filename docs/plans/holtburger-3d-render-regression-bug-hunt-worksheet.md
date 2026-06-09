@@ -2636,7 +2636,7 @@ Runtime validation note:
 
 ### Phase 21G: Make Asset Runtime Resolver-Native
 
-Status: in progress.
+Status: complete.
 
 Goal:
 
@@ -2702,7 +2702,7 @@ Verification results:
 
 ## Phase 22: Lift Scene Resource Runtime Out Of Browser Display
 
-Status: in progress.
+Status: complete.
 
 Goal:
 
@@ -2872,7 +2872,7 @@ Verification:
 
 ### Phase 22E: Split Mode Controllers From Resource Runtime
 
-Status: planned.
+Status: complete.
 
 Deliverables:
 
@@ -2892,17 +2892,28 @@ Acceptance criteria:
 - Picker/camera/debug-panel changes do not call landblock product runtime sync unless scene interest actually changed.
 - `BrowserWorldDisplay.svelte` owns browser presentation and scene-interest declaration only; it does not own prepared asset stores, product stores, asset workers, or landblock product workers.
 
+Progress:
+
+- Added `BrowserSceneResourceController` as the browser-mode adapter that observes frontend state, derives neutral `SceneResourceInterest`, and syncs the runtime only when the scene-interest key changes.
+- Moved App-level browser scene-interest subscription/keying out of `App.svelte`; `App.svelte` now constructs the app/client resource services and delegates browser-mode interest production to the browser controller.
+- Renamed `BrowserWorldDisplay.svelte`'s local render-resource scheduling from scene-resource wording to render-presentation-resource wording, making picker/camera/debug/panel updates visibly separate from asset/product runtime sync.
+- Added focused controller tests proving camera near-plane changes, portal overlay visibility, and asset-state updates do not resync the runtime, while LoD/destination changes do.
+- Verified there are no remaining `BrowserWorldDisplay.svelte` product-worker ownership, product-forwarding, or runtime `syncSceneInterest(...)` paths.
+
 Verification:
 
-- Add focused tests for runtime lifecycle, scene-interest sync, product event delivery, and cleanup/disposal.
-- Add regressions proving product events reach `WorldDisplay` without `BrowserWorldDisplay.svelte` forwarding methods.
-- Run full TypeScript verification after moving ownership:
-  - `npm run --prefix apps/holtburger-3d test:ts`
-  - `npm run --prefix apps/holtburger-3d lint:ts`
-  - `npm run --prefix apps/holtburger-3d check`
-- Runtime browser report should preserve the Phase 20/21 product-domain counts and avoid reintroducing asset-cache Svelte churn.
+- `npm run --prefix apps/holtburger-3d test:ts -- src/app/browser-scene-resource-controller.test.ts src/lib/scene-runtime/scene-resource-runtime.test.ts src/lib/world-display/static-landblock-product-source.test.ts` passed: 3 files, 9 tests.
+- `npm run --prefix apps/holtburger-3d test:ts` passed: 100 files, 530 tests.
+- `npm run --prefix apps/holtburger-3d lint:ts` passed.
+- `npm run --prefix apps/holtburger-3d check` passed with 0 errors and 0 warnings.
+- `rg "scheduleCurrentSceneResourceUpdate|scheduleSceneResourceUpdate|pendingRenderResourceInput|renderResourceUpdateTimer|syncSceneInterest\\(" apps/holtburger-3d/src/pages/BrowserWorldDisplay.svelte apps/holtburger-3d/src/App.svelte apps/holtburger-3d/src/app apps/holtburger-3d/src/lib/scene-runtime` shows runtime sync only in `browser-scene-resource-controller.ts` and neutral runtime/tests; `BrowserWorldDisplay.svelte` has no scene-resource runtime sync path.
+- `rg "new StaticLandblockRenderArtifactCoordinator|staticLandblockRenderCoordinator|worldDisplaySurface\\?\\.(commitStaticLandblockProduct|evictStaticLandblockProduct|clearStaticLandblockProducts)" apps/holtburger-3d/src/pages/BrowserWorldDisplay.svelte apps/holtburger-3d/src/App.svelte apps/holtburger-3d/src/lib/world-display` shows coordinator construction in `App.svelte` only and no browser-display product forwarding.
+
+Course corrections:
+
 - Dry-run course correction: execute Phase 22 in dependency order: product-source events first, neutral scene-interest/runtime boundaries second, constructor-time `WorldDisplay` product source third, coordinator ownership move fourth, scene-interest/presentation split fifth, imperative forwarding removal last.
 - Any temporary dual path, product forwarding bridge, runtime composition shim, or delayed deletion introduced during Phase 22 must be registered in the Phase 23 cleanup worksheet before the phase is marked complete.
+- Phase 22E did not introduce new shims. The remaining active Phase 23 debt is pre-existing resolver/planner compatibility and the neutral asset-coverage planner migration.
 
 ## Phase 23: Cleanup Worksheet For Transitional Shims And Legacy Ownership Paths
 

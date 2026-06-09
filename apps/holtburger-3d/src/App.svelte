@@ -1,13 +1,11 @@
 <script lang="ts">
 	import { onMount } from "svelte";
 	import { get } from "svelte/store";
-	import type { BrowserModeState } from "./app/browser-mode";
-	import { createSceneResourceInterestFromBrowserMode } from "./app/browser-scene-resource-interest";
+	import { createBrowserSceneResourceController } from "./app/browser-scene-resource-controller";
 	import { frontendState } from "./app/frontend-state";
 	import { AssetChannelController } from "./lib/assets/asset-channel";
 	import { PreparedAssetStore } from "./lib/assets/prepared-asset-store";
 	import { SceneAssetStreamingController } from "./lib/assets/scene-asset-streaming-controller";
-	import { describeSceneResourceInterestKey } from "./lib/scene-runtime/scene-resource-interest";
 	import {
 		createSceneResourceRuntime,
 		type SceneResourceRuntime,
@@ -66,16 +64,14 @@
 		});
 		sceneResourceRuntime = runtime;
 
-		let lastSceneInterestKey: string | null = null;
-		const unsubscribeFrontendState = frontendState.subscribe((state) => {
-			latestFrontendState = state;
-			const sceneInterestKey = createBrowserSceneInterestKey(state.browserMode);
-			if (sceneInterestKey === lastSceneInterestKey) {
-				return;
-			}
-			lastSceneInterestKey = sceneInterestKey;
-			syncSceneResourceRuntime(runtime);
-		});
+		const browserSceneResourceController =
+			createBrowserSceneResourceController({
+				frontendState,
+				runtime,
+				onFrontendState: (state) => {
+					latestFrontendState = state;
+				},
+			});
 
 		void (async () => {
 			try {
@@ -89,28 +85,12 @@
 		})();
 
 		return () => {
-			unsubscribeFrontendState();
+			browserSceneResourceController.dispose();
 			runtime.dispose();
 			sceneResourceRuntime = null;
 			assetChannel.dispose();
 		};
 	});
-
-	function syncSceneResourceRuntime(
-		runtime: SceneResourceRuntime,
-	): void {
-		runtime.syncSceneInterest(
-			createSceneResourceInterestFromBrowserMode(
-				latestFrontendState.browserMode,
-			),
-		);
-	}
-
-	function createBrowserSceneInterestKey(browserMode: BrowserModeState): string {
-		return describeSceneResourceInterestKey(
-			createSceneResourceInterestFromBrowserMode(browserMode),
-		);
-	}
 
 	function debugLog(label: string, detail: unknown): void {
 		if (!verboseDiagnostics) {

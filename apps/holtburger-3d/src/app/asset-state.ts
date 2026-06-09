@@ -4,7 +4,6 @@ import {
 	type AssetChannelState,
 	type PreparedAssetRecord,
 } from "../lib/assets/types";
-import type { PreparedAssetCachePrunePlan } from "../lib/assets/asset-cache-policy";
 import type { AssetLookupRequestDto } from "../lib/host/contracts";
 
 const MAX_ASSET_ACTIVITY = 8;
@@ -72,16 +71,6 @@ export function applyPreparedAssets(
 				timestamp: asset.preparedAt,
 			})),
 		),
-	};
-}
-
-export function applyAssetCachePrune(
-	assetState: AssetChannelState,
-	prunePlan: PreparedAssetCachePrunePlan,
-): AssetChannelState {
-	return {
-		...assetState,
-		cacheDiagnostics: prunePlan.diagnostics,
 	};
 }
 

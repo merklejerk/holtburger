@@ -1,10 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseBrowserLocationInput } from "../../app/browser-mode";
 import type { AssetLookupRequestDto } from "../host/contracts";
 import type { PreparedAssetCacheMetadata, PreparedAssetRecord } from "./types";
 import { SceneAssetStreamingController } from "./scene-asset-streaming-controller";
 
 describe("scene asset streaming controller", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
 	it("runs another planning pass when direct static assets add material dependencies", async () => {
 		const destination = parseBrowserLocationInput("016c0155");
 		expect(destination).not.toBeNull();
@@ -63,7 +67,7 @@ describe("scene asset streaming controller", () => {
 				}
 				syncLatestInput();
 			},
-			applyAssetCachePrune: () => {},
+			applyAssetCachePruneBatch: () => {},
 			applyAssetError: (request, message) => {
 				throw new Error(`${request.assetId}: ${message}`);
 			},
@@ -90,6 +94,77 @@ describe("scene asset streaming controller", () => {
 		expect(requestedAssetIds).toContain("env-cell/016c0155");
 		expect(requestedAssetIds).toContain("gfx-obj/02000001");
 		expect(requestedAssetIds).toContain("material/0800006c");
+	});
+
+	it("runs warm cache pruning on an independent bounded timer", async () => {
+		vi.useFakeTimers();
+		const preparedByAssetId: Record<string, PreparedAssetRecord> = {
+			"gfx-obj/expired-a": createPreparedGfxObj("gfx-obj/expired-a", []),
+			"gfx-obj/expired-b": createPreparedGfxObj("gfx-obj/expired-b", []),
+			"gfx-obj/expired-c": createPreparedGfxObj("gfx-obj/expired-c", []),
+		};
+		const cacheMetadataByAssetId: Record<string, PreparedAssetCacheMetadata> = {
+			"gfx-obj/expired-a": { lastPreparedAtMs: 0, lastRetainedAtMs: 0 },
+			"gfx-obj/expired-b": { lastPreparedAtMs: 0, lastRetainedAtMs: 0 },
+			"gfx-obj/expired-c": { lastPreparedAtMs: 0, lastRetainedAtMs: 0 },
+		};
+		const prunePlans: string[][] = [];
+		const controller = new SceneAssetStreamingController({
+			assetChannel: {
+				async prepareAsset(request) {
+					throw new Error(`Unexpected direct request ${request.assetId}.`);
+				},
+				async prepareAssetGraph(rootRequest) {
+					throw new Error(`Unexpected graph request ${rootRequest.assetId}.`);
+				},
+			},
+			getPreparedByAssetId: () => preparedByAssetId,
+			getCacheMetadataByAssetId: () => cacheMetadataByAssetId,
+			markAssetsPending: () => {},
+			applyPreparedAssets: () => {},
+			applyAssetCachePruneBatch: (prunePlan) => {
+				prunePlans.push(prunePlan.evictedAssetIds);
+				for (const assetId of prunePlan.evictedAssetIds) {
+					delete preparedByAssetId[assetId];
+					delete cacheMetadataByAssetId[assetId];
+				}
+				for (const [assetId, metadata] of Object.entries(
+					prunePlan.retainedMetadataByAssetId,
+				)) {
+					cacheMetadataByAssetId[assetId] = metadata;
+				}
+			},
+			applyAssetError: (request, message) => {
+				throw new Error(`${request.assetId}: ${message}`);
+			},
+			debugLog: () => {},
+			nowMs: () => 10_000,
+			warmRetainMs: 1_000,
+			pruneIntervalMs: 1_000,
+			pruneEvaluationBatchSize: 3,
+			pruneEvictionBatchSize: 2,
+		});
+
+		controller.syncSceneInterest({
+			browserDestination: null,
+			terrainLodRadius: 0,
+			buildingLodRadius: 0,
+			detailLodRadius: 0,
+			envCellLodRadius: 0,
+			preparedByAssetId: { ...preparedByAssetId },
+		});
+		await Promise.resolve();
+
+		expect(prunePlans).toEqual([]);
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(prunePlans).toEqual([
+			["gfx-obj/expired-a", "gfx-obj/expired-b"],
+		]);
+		expect(Object.keys(preparedByAssetId).sort()).toEqual([
+			"gfx-obj/expired-c",
+		]);
+
+		controller.dispose();
 	});
 
 });

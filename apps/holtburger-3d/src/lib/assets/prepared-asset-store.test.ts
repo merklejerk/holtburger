@@ -106,6 +106,71 @@ describe("PreparedAssetStore", () => {
 		});
 	});
 
+	it("applies prune batches without requiring a full retained cache plan", () => {
+		const store = new PreparedAssetStore();
+		const events: PreparedAssetChangeEvent[] = [];
+		store.resolver.subscribe((event) => events.push(event));
+		store.applyPreparedAssets(
+			[
+				createPreparedTerrainAsset(
+					"terrain-a",
+					"landblock/0102ffff/outdoor",
+				),
+				createPreparedTerrainAsset(
+					"terrain-b",
+					"landblock/0103ffff/outdoor",
+				),
+				createPreparedTerrainAsset(
+					"terrain-c",
+					"landblock/0104ffff/outdoor",
+				),
+			],
+			1_000,
+		);
+
+		store.applyPruneBatch({
+			retainedAssetIds: ["landblock/0102ffff/outdoor"],
+			evictedAssetIds: [
+				"landblock/0103ffff/outdoor",
+				"landblock/0104ffff/outdoor",
+			],
+			retainedMetadataByAssetId: {
+				"landblock/0102ffff/outdoor": {
+					lastPreparedAtMs: 1_000,
+					lastRetainedAtMs: 2_000,
+				},
+			},
+			nextCursorAssetId: null,
+			evaluatedAssetCount: 3,
+			nextWarmPruneAtMs: null,
+		});
+
+		expect(store.resolver.has("landblock/0102ffff/outdoor")).toBe(true);
+		expect(store.resolver.has("landblock/0103ffff/outdoor")).toBe(false);
+		expect(store.resolver.has("landblock/0104ffff/outdoor")).toBe(false);
+		expect(
+			store.resolver.getCacheMetadata("landblock/0102ffff/outdoor"),
+		).toEqual({
+			lastPreparedAtMs: 1_000,
+			lastRetainedAtMs: 2_000,
+		});
+		expect(events.at(-1)).toEqual({
+			type: "prepared-assets-evicted",
+			assets: [
+				{
+					assetId: "landblock/0103ffff/outdoor",
+					kind: "landblock-outdoor",
+				},
+				{
+					assetId: "landblock/0104ffff/outdoor",
+					kind: "landblock-outdoor",
+				},
+			],
+			preparedRevision: 2,
+			cacheMetadataRevision: 2,
+		});
+	});
+
 	it("creates explicit legacy snapshots for record-shaped migration callers", () => {
 		const store = new PreparedAssetStore();
 		const terrain = createPreparedTerrainAsset(

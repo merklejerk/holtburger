@@ -2596,7 +2596,7 @@ Verification:
 
 ### Phase 21F: Reintroduce Independent Pruning Safely
 
-Status: planned.
+Status: complete with record-shaped prune snapshot debt tracked in Phase 23.
 
 Deliverables:
 
@@ -2611,14 +2611,28 @@ Acceptance criteria:
 - Pruning unused warm assets does not trigger whole-cache Svelte updates or whole-scene renderer recommits.
 - Browser runtime profile shows bounded prune work per tick.
 
+Implementation notes:
+
+- Replaced sync-loop prune calls in `SceneAssetStreamingController` with an independent timer-driven prune duty cycle. Scene interest updates schedule the duty cycle, but prune work no longer runs inline after every bootstrap/streaming planning pass or empty request batch.
+- Added `planPreparedAssetCachePruneBatch()` with explicit `maxEvaluatedAssetCount`, `maxEvictedAssetCount`, and cursor inputs. The old full-cache `planPreparedAssetCachePrune()` remains for reference/tests, but streaming no longer calls it.
+- Added `PreparedAssetStore.applyPruneBatch()`, which updates retained metadata for the evaluated batch and emits bounded `prepared-assets-evicted` events containing only the actually evicted descriptors.
+- Removed the runtime frontend-store prune reducer path. Prune results now apply to the prepared asset service/resolver, while Svelte diagnostics observe resolver events through the Phase 21E cadence sampler.
+- Prune hot-path diagnostics now record per-tick evaluated/evicted/retained counts from the batch instead of reporting a full-cache sweep as one sample.
+- Course correction: the prune batch planner still receives record-shaped prepared/cache snapshots from the streaming controller. That keeps the phase scoped, but it is active Phase 23 debt because a fully bounded implementation should iterate the `PreparedAssetStore`/resolver directly without snapshotting all keys.
+
 Verification:
 
-- Add focused tests for the prepared asset service, revision/invalidation policy, coordinator asset-sync decisions, and renderer recommit targeting.
-- Add regressions proving cache metadata-only updates do not call renderer `setAssetState()` or request frames.
-- Add regressions proving diagnostics sampling can run on cadence/on demand without being triggered by every prepared asset mutation.
-- Add runtime debug evidence showing prune count/duration, renderer asset-sync count, recommit count, and no periodic 120-second freeze.
-- Dry-run course correction: execute Phase 21 in dependency order: store/resolver first, streaming callbacks second, diagnostics sampling third, coordinator/report migration fourth, renderer constructor/subscription fifth, independent prune last.
-- Any transitional adapter, compatibility path, legacy test fixture, or deferred deletion introduced during Phase 21 must be registered in the Phase 23 cleanup worksheet before the phase is marked complete.
+- `npm run --prefix apps/holtburger-3d test:ts -- src/lib/assets/asset-cache-policy.test.ts src/lib/assets/prepared-asset-store.test.ts src/lib/assets/scene-asset-streaming-controller.test.ts src/app/asset-state.test.ts`
+- `npm run --prefix apps/holtburger-3d test:ts -- src/lib/world-display/browser-render-resource-coordinator.test.ts src/lib/assets/asset-cache-policy.test.ts src/lib/assets/prepared-asset-store.test.ts src/lib/assets/scene-asset-streaming-controller.test.ts`
+- `npm run --prefix apps/holtburger-3d test:ts`
+- `npm run --prefix apps/holtburger-3d lint:ts`
+- `npm run --prefix apps/holtburger-3d check`
+- `rg -n "applyAssetCachePrune\\(|applyAssetCachePruneToState|DEBUG_SUMMARY|debugSummaryTimer|setAssetState" apps/holtburger-3d/src/App.svelte apps/holtburger-3d/src/app apps/holtburger-3d/src/lib apps/holtburger-3d/src/pages` returned no matches.
+
+Runtime validation note:
+
+- Manual browser confirmation should watch `assetCacheDebugText` / hot-path diagnostics for per-tick prune durations and confirm there is no 120-second full-app freeze. The code path now records bounded `evaluatedAssetCount` / `evictedAssetCount` per prune tick, but runtime profiling still needs a real browser session.
+- Transitional record-shaped prune snapshot debt is registered in Phase 23.
 
 ## Phase 22: Lift Scene Resource Runtime Out Of Browser Display
 
@@ -2765,6 +2779,7 @@ Cleanup ledger:
 | removed | Phase 21B | Svelte still mirrors full `AssetChannelState.preparedByAssetId` / `cacheMetadataByAssetId` for browser report/render compatibility. | `frontend-state.ts`, `asset-state.ts`, `BrowserWorldDisplay.svelte` | Phase 21C demoted `frontendState.asset` to compact presentation state and moved report/material diagnostics to resolver/read-model pulls. | `rg "assetState\\.preparedByAssetId|assetState\\.cacheMetadataByAssetId|frontendState\\..*preparedByAssetId|frontendState\\..*cacheMetadataByAssetId" apps/holtburger-3d/src/app apps/holtburger-3d/src/pages/BrowserWorldDisplay.svelte apps/holtburger-3d/src/lib/world-display/browser-render-resource-coordinator.ts` returned no matches. |
 | removed | Phase 21D | Temporary renderer/coordinator compatibility path around revision-gated `setAssetState(assetState)` snapshots. It no longer uses Svelte-owned cache state or whole-cache signatures, but previously still snapshotted the resolver into the old renderer API when prepared-record revision changed. | `WorldDisplay.svelte`, `world-display-renderer-contract.ts`, `world-display-renderer.ts`, `webgl2-world-display-renderer-impl.ts`, `browser-render-resource-coordinator.ts` | `WorldDisplay` and renderer subscribe to resolver events directly and flush dirty assets/products without full-cache `AssetChannelState` pushes. | `rg "setAssetState" apps/holtburger-3d/src/lib apps/holtburger-3d/src/pages apps/holtburger-3d/src/App.svelte` has no runtime matches outside docs. |
 | active | Phase 21D | Lower-level WebGL resource builders still consume a renderer-owned legacy `AssetChannelState` snapshot because terrain/material/readiness APIs have not all moved to `PreparedAssetResolver` inputs. This snapshot is not Svelte-owned and is not a public renderer contract, but it still copies the resolver into record-shaped state when prepared-record events flush. | `webgl2-world-display-renderer-impl.ts`, `webgl2-world-resources.ts`, `world-render-frame.ts`, `terrain-blend-plan.ts`, `render-material-strategy.ts`, `static-renderables.ts`, `structured-interior-scene.ts`, `transition-portal-work-items.ts` | Migrate lower-level resource/readiness builders to accept resolver/read-model inputs directly, then delete `createAssetChannelStateSnapshotFromResolver()` or restrict it to explicit diagnostics/planning paths. | `rg "createAssetChannelStateSnapshotFromResolver|AssetChannelState" apps/holtburger-3d/src/lib/world-display` only shows explicit presentation/report paths or deleted compatibility tests. |
+| active | Phase 21F | Incremental prune duty cycle emits bounded eviction batches, but the batch planner still consumes record-shaped prepared/cache snapshots from `SceneAssetStreamingController` instead of iterating the resolver/store directly. | `scene-asset-streaming-controller.ts`, `asset-cache-policy.ts`, `App.svelte` (`getPreparedByAssetId`, `getCacheMetadataByAssetId`) | Move scene request planning and prune planning to resolver/read-model inputs, then make prune ticks advance over store-owned entries without creating full record snapshots. | Add a regression proving prune ticks do not call `createPreparedAssetLegacySnapshotFromResolver()` / `Object.keys(preparedByAssetId)` on the full cache. |
 | removed | Phase 21A | Whole-cache asset-state signatures, now instrumented so Phase 21C can verify removal. | `browser-render-resource-coordinator.ts` (`describeAssetStateSignature`), `prepared-asset-hot-path-diagnostics.ts` (`recordPreparedAssetSignatureDiagnostics`) | Resolver revisions replaced sorted/joined asset-id signatures. | `rg "describeAssetStateSignature|recordPreparedAssetSignatureDiagnostics|asset-state signature|preparedByAssetId.*sort\\(\\).*join" apps/holtburger-3d/src` returned no matches. |
 | planned | Phase 22 | Temporary dual path where product-store events and browser-display product forwarding both exist. | TBD | Product events are the only path from landblock product runtime to `WorldDisplay` / renderer. | `rg "commitStaticLandblockProduct|evictStaticLandblockProduct|clearStaticLandblockProducts"` has no browser-display forwarding matches. |
 | planned | Phase 22 | Runtime ownership bridge while `StaticLandblockRenderArtifactCoordinator` is moved out of `BrowserWorldDisplay.svelte`. | TBD | Neutral runtime owns coordinator/store/worker lifecycle. | `rg "new StaticLandblockRenderArtifactCoordinator" apps/holtburger-3d/src/pages/BrowserWorldDisplay.svelte` has no matches. |

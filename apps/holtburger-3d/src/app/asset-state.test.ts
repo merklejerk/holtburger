@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-	applyAssetCachePrune,
 	applyPreparedAssets,
 	createAssetState,
 	markAssetsPending,
@@ -66,63 +65,4 @@ describe("asset state reducer", () => {
 		]);
 	});
 
-	it("applies cache prune diagnostics without owning retained payload references", () => {
-		const state = applyPreparedAssets(
-			createAssetState(),
-			[
-				createPreparedTerrainAsset(
-					"bootstrap-terrain-a",
-					"landblock/0102ffff/outdoor",
-				),
-				createPreparedTerrainAsset(
-					"bootstrap-terrain-b",
-					"landblock/0103ffff/outdoor",
-				),
-			],
-		);
-
-		const prunedState = applyAssetCachePrune(state, {
-			retainedAssetIds: ["landblock/0102ffff/outdoor"],
-			evictedAssetIds: ["landblock/0103ffff/outdoor"],
-			cacheMetadataByAssetId: {
-				"landblock/0102ffff/outdoor": {
-					lastPreparedAtMs: 1_000,
-					lastRetainedAtMs: 2_000,
-				},
-			},
-			diagnostics: {
-				prepared: {
-					total: 2,
-					byKind: {
-						"landblock-outdoor": 2,
-					},
-				},
-				retained: {
-					total: 1,
-					byKind: {
-						"landblock-outdoor": 1,
-					},
-				},
-				evicted: {
-					total: 1,
-					byKind: {
-						"landblock-outdoor": 1,
-					},
-				},
-			},
-		});
-
-		expect(prunedState.preparedByAssetId).toEqual({});
-		expect(prunedState.cacheMetadataByAssetId).toEqual({});
-		expect(prunedState.preparedByPriority.bootstrap).toBeNull();
-		expect(prunedState.preparedAsset).toBeNull();
-		expect(prunedState.lastResponse?.assetId).toBe(
-			"landblock/0103ffff/outdoor",
-		);
-		expect(prunedState.cacheDiagnostics?.evicted.total).toBe(1);
-		expect(prunedState.history.map((entry) => entry.assetId)).toEqual([
-			"landblock/0102ffff/outdoor",
-			"landblock/0103ffff/outdoor",
-		]);
-	});
 });

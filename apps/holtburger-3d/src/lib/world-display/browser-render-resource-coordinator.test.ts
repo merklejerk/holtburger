@@ -72,7 +72,7 @@ describe("browser render resource coordinator", () => {
 		expect(surface.committedStaticProductCount).toBe(0);
 	});
 
-	it("does not push renderer asset state for cache metadata-only resolver changes", () => {
+	it("does not push render resources for cache metadata-only resolver changes", () => {
 		const landblockId = 0x02030000;
 		const surface = createCapturingSurface();
 		const coordinator = new BrowserRenderResourceCoordinator();
@@ -96,7 +96,7 @@ describe("browser render resource coordinator", () => {
 			}),
 		);
 
-		expect(surface.setAssetStateCount).toBe(0);
+		expect(surface.committedStaticProductCount).toBe(0);
 
 		store.applyPrunePlan({
 			retainedAssetIds: [formatLandblockOutdoorAssetId(landblockId)],
@@ -124,7 +124,7 @@ describe("browser render resource coordinator", () => {
 			}),
 		);
 
-		expect(surface.setAssetStateCount).toBe(0);
+		expect(surface.committedStaticProductCount).toBe(0);
 	});
 });
 
@@ -137,11 +137,9 @@ const PROVENANCE: PreparedAssetProvenance = {
 
 function createCapturingSurface(): BrowserRenderResourceSurface & {
 	committedStaticProductCount: number;
-	setAssetStateCount: number;
 } {
 	return {
 		committedStaticProductCount: 0,
-		setAssetStateCount: 0,
 		setRenderSceneContext() {},
 		setRenderChunkTransforms() {},
 		commitStaticLandblockProduct() {

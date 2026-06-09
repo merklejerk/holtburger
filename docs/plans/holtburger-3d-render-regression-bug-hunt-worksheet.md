@@ -2632,7 +2632,56 @@ Verification:
 Runtime validation note:
 
 - Manual browser confirmation should watch `assetCacheDebugText` / hot-path diagnostics for per-tick prune durations and confirm there is no 120-second full-app freeze. The code path now records bounded `evaluatedAssetCount` / `evictedAssetCount` per prune tick, but runtime profiling still needs a real browser session.
-- Transitional record-shaped prune snapshot debt is registered in Phase 23.
+- Transitional record-shaped prune snapshot debt is promoted to Phase 21G so Phase 22 does not bake legacy cache snapshots into the new runtime boundary.
+
+### Phase 21G: Make Asset Runtime Resolver-Native
+
+Status: planned.
+
+Goal:
+
+- Remove the remaining record-shaped prepared-cache dependencies from the asset runtime before lifting broader scene-resource ownership in Phase 22.
+
+Context:
+
+- Phase 21B moved authoritative prepared asset ownership into `PreparedAssetStore`, and Phase 21D made the renderer subscribe to `PreparedAssetResolver` directly.
+- Phase 21F made pruning independently scheduled and bounded, but `SceneAssetStreamingController` still asks its caller for `Record<string, PreparedAssetRecord>` / cache metadata snapshots.
+- `App.svelte` still builds full legacy snapshots with `createPreparedAssetLegacySnapshotFromResolver(...)` for scene interest sync, request planning, and prune planning.
+- If Phase 22 creates `ClientAssetRuntime` / `SceneResourceRuntime` on top of these snapshot APIs, the new runtime boundary will inherit the old cache shape. That would be clean-looking technical debt, which is worse because it wears a suit.
+
+Deliverables:
+
+- Extend `PreparedAssetResolver` / `PreparedAssetStore` with explicit read APIs needed by request planning and prune planning:
+  - direct prepared asset lookup,
+  - cache metadata lookup,
+  - bounded iteration or cursor-based scan for prune candidates,
+  - count/diagnostic access only where it is cadence/on-demand safe.
+- Refactor `SceneAssetStreamingController` dependencies away from `getPreparedByAssetId()` and `getCacheMetadataByAssetId()` record snapshots.
+- Refactor scene asset request planning and static bundle layer planning call sites touched by the controller to use resolver/read-model inputs where practical. If a planner still needs a snapshot temporarily, name it as an explicit off-frame planning snapshot and register it in Phase 23.
+- Refactor prune planning so the duty cycle advances over store/resolver-owned entries without constructing a full prepared/cache record snapshot per tick.
+- Remove `App.svelte` calls to `createPreparedAssetLegacySnapshotFromResolver(...)` for runtime sync/prune paths.
+- Keep `frontendState.applyPreparedAssets(...)` only for compact presentation/error/pending state. Do not restore full prepared cache ownership to Svelte.
+
+Acceptance criteria:
+
+- `SceneAssetStreamingController` no longer has dependency fields named `getPreparedByAssetId` or `getCacheMetadataByAssetId`.
+- `App.svelte` does not call `createPreparedAssetLegacySnapshotFromResolver(...)` for runtime scene sync or pruning.
+- Prune ticks do not call `Object.keys(preparedByAssetId)` or construct full cache snapshots to choose a bounded eviction batch.
+- Request planning still avoids duplicate requests for already-prepared or pending assets.
+- Asset/runtime tests prove resolver-native request planning and bounded prune iteration.
+- Any remaining record-shaped prepared asset snapshot helper is either outside runtime hot paths or tracked in Phase 23 with an owner and deletion condition.
+
+Verification:
+
+- Add or update focused tests for `PreparedAssetStore` / `PreparedAssetResolver` native lookup and bounded iteration.
+- Add or update `SceneAssetStreamingController` tests proving request sync and prune ticks work without record snapshot dependencies.
+- Run:
+  - `npm run --prefix apps/holtburger-3d test:ts -- src/lib/assets/prepared-asset-store.test.ts src/lib/assets/scene-asset-streaming-controller.test.ts src/lib/assets/asset-cache-policy.test.ts`
+  - `npm run --prefix apps/holtburger-3d test:ts`
+  - `npm run --prefix apps/holtburger-3d lint:ts`
+  - `npm run --prefix apps/holtburger-3d check`
+- Grep verification:
+  - `rg "getPreparedByAssetId|getCacheMetadataByAssetId|createPreparedAssetLegacySnapshotFromResolver" apps/holtburger-3d/src/App.svelte apps/holtburger-3d/src/lib/assets`
 
 ## Phase 22: Lift Scene Resource Runtime Out Of Browser Display
 
@@ -2647,7 +2696,8 @@ Context:
 - Today the raw asset worker pipeline is owned from `App.svelte`: `AssetChannelController` and `SceneAssetStreamingController` are instantiated there and write through `frontendState`.
 - Today the landblock product worker pipeline is owned from `BrowserWorldDisplay.svelte`: it instantiates `StaticLandblockRenderArtifactCoordinator`, receives product commits/evictions, and forwards them to `WorldDisplay`.
 - That means asset preparation and landblock product preparation are sibling pipelines with different owners and a Svelte component acting as product-pipeline lifecycle owner.
-- Phase 21 should create the prepared asset resolver/event seam first. Phase 22 should then relocate the broader scene-resource ownership without preserving browser-display middleman behavior.
+- Phase 21 created the prepared asset resolver/event seam and removed the public renderer `setAssetState()` bridge. Phase 22 should use the same event/source pattern for landblock products rather than reintroducing browser-display middleman behavior.
+- Phase 21G should remove the asset-runtime record-shaped snapshot dependency before Phase 22 starts. Phase 22 may still encounter lower-level renderer compatibility snapshots, but it must not introduce new runtime services that depend on Svelte-owned or full-record prepared cache mirrors.
 - Runtime service names must avoid browser-only concepts. Browser mode and normal game client mode will have different scene-interest producers, but they will both need prepared assets, landblock products, cache retention, and renderer-facing resource events.
 
 Out of scope:
@@ -2656,46 +2706,52 @@ Out of scope:
 - Moving browser-specific controls, panels, inspector UI, camera gestures, or debug presentation out of `apps/holtburger-3d`.
 - Replacing the landblock render worker implementation itself. This phase moves ownership and event wiring, not the worker's artifact construction algorithm.
 - Reintroducing Svelte as the owner of prepared assets or product artifacts under a different name.
+- Migrating every lower-level renderer helper off `AssetChannelState`; that is Phase 23 cleanup unless a helper is directly needed for the product-source cutover.
 
-### Phase 22A: Define Neutral Runtime Boundaries
+### Phase 22A: Add Evented Landblock Product Source
 
 Status: planned.
 
 Deliverables:
 
+- Add a renderer-facing `StaticLandblockProductSource` / `LandblockProductSource` abstraction with:
+  - current product-set read access for initial hydration,
+  - bounded commit/evict/clear events,
+  - subscription cleanup,
+  - no Svelte dependency.
+- Extend or wrap `StaticLandblockRenderArtifactStore` so product changes are observable before ownership moves out of `BrowserWorldDisplay.svelte`.
+- Keep product events payload-shaped, not whole-app-state-shaped. Product commits may carry a single `LandblockRenderProductWorkerResult`; evictions carry `StaticLandblockProductKey`; clears are explicit.
+- Add focused product-source tests before moving coordinator ownership.
+
+Acceptance criteria:
+
+- A product source can replay or expose the current product set to a late subscriber/constructor-time consumer.
+- Product commit/evict/clear events are emitted exactly once per store transition.
+- No product-source type imports from `BrowserWorldDisplay.svelte`, Svelte stores, or browser-mode UI modules.
+
+### Phase 22B: Define Neutral Scene Interest And Runtime Boundaries
+
+Status: planned.
+
+Deliverables:
+
+- Define a mode-neutral scene-interest DTO consumed by asset and product runtimes. Browser mode can populate it from destination plus LoD radii today; normal client mode can populate it from future client/server world state later.
 - Define runtime/service boundaries with client-neutral names. Candidate split:
-  - `PreparedAssetRuntime` or `ClientAssetRuntime` for asset channel, prepared asset store, streaming, retention, and diagnostics snapshots.
-  - `LandblockProductRuntime` for desired product planning, worker client, product store, and product events.
+  - `ClientAssetRuntime` for asset channel, prepared asset store, streaming, retention, and diagnostics snapshots.
+  - `LandblockProductRuntime` for desired product planning, worker client, product source/store, in-flight state, product diagnostics, and product events.
   - optional `SceneResourceRuntime` composition that owns both when a mode wants one lifecycle object.
 - Keep browser-mode policies outside these services. A browser controller can declare scene interest; the runtime should not own browser UI workflow.
 - Define lifecycle APIs for `syncSceneInterest()`, `dispose()`, diagnostics sampling, and event subscriptions.
+- Prefer a small app-local composition module over making `App.svelte` a behavior-heavy orchestration object.
 
 Acceptance criteria:
 
 - The new runtime boundary can be instantiated by browser mode today and plausibly by normal client mode later.
 - No new runtime service name includes `Browser` unless it is truly browser-mode-only.
 - `App.svelte` or a small composition module owns service construction/disposal, but does not grow behavior-heavy orchestration code.
+- Scene-interest shape has no dependency on Svelte stores, browser panels, camera widgets, picker state, or debug presentation.
 
-### Phase 22B: Move Landblock Product Ownership Out Of Browser Display
-
-Status: planned.
-
-Deliverables:
-
-- Add product-store events before moving ownership, so the migration can prove event delivery while `BrowserWorldDisplay.svelte` still owns the coordinator.
-- Move `StaticLandblockRenderArtifactCoordinator` ownership out of `BrowserWorldDisplay.svelte`.
-- Let the landblock product runtime own the coordinator, worker client, product store, in-flight state, product diagnostics, and product events.
-- Convert product commit/evict/clear notifications into product-store events that `WorldDisplay` can subscribe to directly or receive through a required constructor-time product source.
-- Keep heavy product commits queued for renderer-controlled sync points where needed.
-
-Acceptance criteria:
-
-- `BrowserWorldDisplay.svelte` no longer instantiates `StaticLandblockRenderArtifactCoordinator`.
-- `BrowserWorldDisplay.svelte` no longer forwards worker completion into `worldDisplaySurface.commitStaticLandblockProduct(...)`.
-- Landblock product commits/evictions still reach the renderer, but through a stable product source/event subscription rather than browser-display imperative forwarding.
-- Product event tests pass both before and after moving coordinator ownership.
-
-### Phase 22C: Pass Runtime Sources Into World Display At Construction
+### Phase 22C: Pass Product Source Into World Display At Construction
 
 Status: planned.
 
@@ -2703,30 +2759,52 @@ Deliverables:
 
 - Require `WorldDisplay` / renderer construction to receive:
   - `PreparedAssetResolver`
-  - landblock product source/store or product event stream
+  - landblock product source/event stream
   - any other renderer-required runtime source that is not browser presentation state
-- Remove repeated full-state `setAssetState()` wiring once Phase 21 resolver events replace it.
+- Make `WorldDisplay` subscribe once to the product source at construction, seed initial static products from the source, and unsubscribe on dispose.
+- Queue product source events and flush them at renderer-controlled sync points rather than mutating expensive GPU resources from browser-display callbacks.
+- Delete or deprecate the `WorldDisplay`/renderer imperative product-forwarding surface (`commitStaticLandblockProduct`, `evictStaticLandblockProduct`, `clearStaticLandblockProducts`) once product-source delivery is live.
 - Keep browser presentation inputs as explicit display props or commands: camera, render style, debug toggles, picker state, and selected renderable.
 
 Acceptance criteria:
 
 - Renderer dependencies needed for resource lookup are constructor-time required dependencies.
+- Product events reach renderer/resource dirty queues without `BrowserWorldDisplay.svelte` forwarding methods.
 - Browser presentation changes remain separate from asset/product runtime changes.
 - `WorldDisplay` owns derived GPU resources and dirty queues, not authoritative prepared asset or product stores.
+- `rg "commitStaticLandblockProduct|evictStaticLandblockProduct|clearStaticLandblockProducts" apps/holtburger-3d/src/pages apps/holtburger-3d/src/lib/world-display` shows no browser-display forwarding path after the cutover, aside from intentional product-source internals/tests.
 
-### Phase 22D: Split Mode Controllers From Resource Runtime
+### Phase 22D: Move Landblock Product Runtime Ownership Out Of Browser Display
+
+Status: planned.
+
+Deliverables:
+
+- Move `StaticLandblockRenderArtifactCoordinator` ownership out of `BrowserWorldDisplay.svelte` into `LandblockProductRuntime` or the `SceneResourceRuntime` composition.
+- Let the landblock product runtime own the coordinator, worker client, product source/store, in-flight state, product diagnostics, and product events.
+- Feed runtime scene-interest updates from browser-mode code without letting browser presentation state enter the runtime.
+- Keep heavy product commits queued for renderer-controlled sync points where needed.
+
+Acceptance criteria:
+
+- `BrowserWorldDisplay.svelte` no longer instantiates `StaticLandblockRenderArtifactCoordinator`.
+- `BrowserWorldDisplay.svelte` no longer forwards worker completion into `worldDisplaySurface.commitStaticLandblockProduct(...)`.
+- Landblock product commits/evictions still reach the renderer, but through the stable product source/event subscription.
+- Product event tests pass both before and after moving coordinator ownership.
+
+### Phase 22E: Split Mode Controllers From Resource Runtime
 
 Status: planned.
 
 Deliverables:
 
 - Keep browser-mode scene-interest production in browser-mode code: destination, LoD radii, debug artifact filters, and browser camera policies.
-- Add a mode-neutral scene-interest DTO/event shape that browser mode can emit today and normal client mode can emit later.
 - Ensure the runtime consumes scene interest without knowing whether it came from browser navigation or future client/server world state.
 - Split `BrowserWorldDisplay.svelte`'s current `scheduleCurrentSceneResourceUpdate()` responsibilities into:
   - scene-interest sync for asset/product runtime work
   - presentation-only render-resource updates for picker, camera, debug overlay, panel state, and selected renderable state
 - Ensure presentation-only changes cannot resync the landblock product worker pipeline.
+- Delete temporary product forwarding bridges, dual paths, or runtime composition shims introduced earlier in Phase 22. Any delayed deletion must be registered in Phase 23 before Phase 22 is marked complete.
 
 Acceptance criteria:
 
@@ -2734,6 +2812,7 @@ Acceptance criteria:
 - The runtime API has no dependency on Svelte stores or browser-only UI state.
 - Future client mode can reuse the resource runtime without adopting browser panels or browser navigation policy.
 - Picker/camera/debug-panel changes do not call landblock product runtime sync unless scene interest actually changed.
+- `BrowserWorldDisplay.svelte` owns browser presentation and scene-interest declaration only; it does not own prepared asset stores, product stores, asset workers, or landblock product workers.
 
 Verification:
 
@@ -2744,7 +2823,7 @@ Verification:
   - `npm run --prefix apps/holtburger-3d lint:ts`
   - `npm run --prefix apps/holtburger-3d check`
 - Runtime browser report should preserve the Phase 20/21 product-domain counts and avoid reintroducing asset-cache Svelte churn.
-- Dry-run course correction: execute Phase 22 in dependency order: product-store events first, neutral runtime wrapper second, constructor-time `WorldDisplay` product source third, coordinator ownership move fourth, scene-interest/presentation split fifth, imperative forwarding removal last.
+- Dry-run course correction: execute Phase 22 in dependency order: product-source events first, neutral scene-interest/runtime boundaries second, constructor-time `WorldDisplay` product source third, coordinator ownership move fourth, scene-interest/presentation split fifth, imperative forwarding removal last.
 - Any temporary dual path, product forwarding bridge, runtime composition shim, or delayed deletion introduced during Phase 22 must be registered in the Phase 23 cleanup worksheet before the phase is marked complete.
 
 ## Phase 23: Cleanup Worksheet For Transitional Shims And Legacy Ownership Paths
@@ -2759,7 +2838,7 @@ Context:
 
 - Phase 21 may temporarily expose immutable read-model snapshots so existing off-frame planners can migrate away from `Record<string, PreparedAssetRecord>` inputs safely.
 - Phase 21 may briefly carry renderer or coordinator compatibility seams while `setAssetState()` and full-cache signatures are removed.
-- Phase 22 may briefly carry product event subscriptions alongside existing browser-display forwarding while ownership moves out of `BrowserWorldDisplay.svelte`.
+- Phase 22 may briefly carry product-source event subscriptions alongside existing browser-display forwarding while `WorldDisplay` and runtime ownership cut over. Any such dual path must be short-lived and explicitly tracked.
 - These shims are useful only as migration scaffolding. They must not become the new architecture by inertia.
 - This phase is a living worksheet. Phases 21 and 22 must add rows here as soon as they introduce transitional debt, including owner, deletion condition, and verification.
 
@@ -2775,15 +2854,15 @@ Cleanup ledger:
 
 | Status | Introduced By | Debt / Shim | Location | Removal Condition | Verification |
 | --- | --- | --- | --- | --- | --- |
-| active | Phase 21C | Transitional resolver snapshot/read-model adapters for off-frame planners, streaming dependencies, and renderer compatibility callers that still require `Record<string, PreparedAssetRecord>` or `AssetChannelState` inputs. | `prepared-asset-store.ts` (`createLegacySnapshot()`, `createLegacyAssetStateSnapshot()`, `createPreparedAssetLegacySnapshotFromResolver()`, `createAssetChannelStateSnapshotFromResolver()`, `createPreparedAssetResolverFromRecordSnapshot()`), `App.svelte`, `terrain-render-artifact.ts`, `material-diagnostics.ts` | All render hot paths use `PreparedAssetResolver`; remaining snapshot use is either deleted or promoted as explicit off-frame planning/debug API. | `rg "createLegacySnapshot|createLegacyAssetStateSnapshot|createPreparedAssetLegacySnapshotFromResolver|createAssetChannelStateSnapshotFromResolver|createPreparedAssetResolverFromRecordSnapshot" apps/holtburger-3d/src` shows no renderer hot-path use outside tracked compatibility boundaries. |
+| active | Phase 21C/21G | Transitional resolver snapshot/read-model adapters for off-frame planners, streaming dependencies, and renderer compatibility callers that still require `Record<string, PreparedAssetRecord>` or `AssetChannelState` inputs. Phase 21G owns deleting runtime sync/prune uses before Phase 22; Phase 23 owns any remaining renderer/off-frame planner compatibility. | `prepared-asset-store.ts` (`createLegacySnapshot()`, `createLegacyAssetStateSnapshot()`, `createPreparedAssetLegacySnapshotFromResolver()`, `createAssetChannelStateSnapshotFromResolver()`, `createPreparedAssetResolverFromRecordSnapshot()`), `App.svelte`, `terrain-render-artifact.ts`, `material-diagnostics.ts` | Asset runtime paths use `PreparedAssetResolver` / store-native reads; remaining snapshot use is either deleted or promoted as explicit off-frame planning/debug API. | `rg "createPreparedAssetLegacySnapshotFromResolver" apps/holtburger-3d/src/App.svelte apps/holtburger-3d/src/lib/assets` returns no runtime sync/prune use; broader helper grep only shows tracked compatibility boundaries. |
 | removed | Phase 21B | Svelte still mirrors full `AssetChannelState.preparedByAssetId` / `cacheMetadataByAssetId` for browser report/render compatibility. | `frontend-state.ts`, `asset-state.ts`, `BrowserWorldDisplay.svelte` | Phase 21C demoted `frontendState.asset` to compact presentation state and moved report/material diagnostics to resolver/read-model pulls. | `rg "assetState\\.preparedByAssetId|assetState\\.cacheMetadataByAssetId|frontendState\\..*preparedByAssetId|frontendState\\..*cacheMetadataByAssetId" apps/holtburger-3d/src/app apps/holtburger-3d/src/pages/BrowserWorldDisplay.svelte apps/holtburger-3d/src/lib/world-display/browser-render-resource-coordinator.ts` returned no matches. |
 | removed | Phase 21D | Temporary renderer/coordinator compatibility path around revision-gated `setAssetState(assetState)` snapshots. It no longer uses Svelte-owned cache state or whole-cache signatures, but previously still snapshotted the resolver into the old renderer API when prepared-record revision changed. | `WorldDisplay.svelte`, `world-display-renderer-contract.ts`, `world-display-renderer.ts`, `webgl2-world-display-renderer-impl.ts`, `browser-render-resource-coordinator.ts` | `WorldDisplay` and renderer subscribe to resolver events directly and flush dirty assets/products without full-cache `AssetChannelState` pushes. | `rg "setAssetState" apps/holtburger-3d/src/lib apps/holtburger-3d/src/pages apps/holtburger-3d/src/App.svelte` has no runtime matches outside docs. |
 | active | Phase 21D | Lower-level WebGL resource builders still consume a renderer-owned legacy `AssetChannelState` snapshot because terrain/material/readiness APIs have not all moved to `PreparedAssetResolver` inputs. This snapshot is not Svelte-owned and is not a public renderer contract, but it still copies the resolver into record-shaped state when prepared-record events flush. | `webgl2-world-display-renderer-impl.ts`, `webgl2-world-resources.ts`, `world-render-frame.ts`, `terrain-blend-plan.ts`, `render-material-strategy.ts`, `static-renderables.ts`, `structured-interior-scene.ts`, `transition-portal-work-items.ts` | Migrate lower-level resource/readiness builders to accept resolver/read-model inputs directly, then delete `createAssetChannelStateSnapshotFromResolver()` or restrict it to explicit diagnostics/planning paths. | `rg "createAssetChannelStateSnapshotFromResolver|AssetChannelState" apps/holtburger-3d/src/lib/world-display` only shows explicit presentation/report paths or deleted compatibility tests. |
-| active | Phase 21F | Incremental prune duty cycle emits bounded eviction batches, but the batch planner still consumes record-shaped prepared/cache snapshots from `SceneAssetStreamingController` instead of iterating the resolver/store directly. | `scene-asset-streaming-controller.ts`, `asset-cache-policy.ts`, `App.svelte` (`getPreparedByAssetId`, `getCacheMetadataByAssetId`) | Move scene request planning and prune planning to resolver/read-model inputs, then make prune ticks advance over store-owned entries without creating full record snapshots. | Add a regression proving prune ticks do not call `createPreparedAssetLegacySnapshotFromResolver()` / `Object.keys(preparedByAssetId)` on the full cache. |
+| active | Phase 21F/21G | Incremental prune duty cycle emits bounded eviction batches, but the batch planner still consumes record-shaped prepared/cache snapshots from `SceneAssetStreamingController` instead of iterating the resolver/store directly. Phase 21G promotes this from cleanup debt to pre-Phase-22 implementation work. | `scene-asset-streaming-controller.ts`, `asset-cache-policy.ts`, `App.svelte` (`getPreparedByAssetId`, `getCacheMetadataByAssetId`) | Move scene request planning and prune planning to resolver/read-model inputs, then make prune ticks advance over store-owned entries without creating full record snapshots. | Add a regression proving prune ticks do not call `createPreparedAssetLegacySnapshotFromResolver()` / `Object.keys(preparedByAssetId)` on the full cache. |
 | removed | Phase 21A | Whole-cache asset-state signatures, now instrumented so Phase 21C can verify removal. | `browser-render-resource-coordinator.ts` (`describeAssetStateSignature`), `prepared-asset-hot-path-diagnostics.ts` (`recordPreparedAssetSignatureDiagnostics`) | Resolver revisions replaced sorted/joined asset-id signatures. | `rg "describeAssetStateSignature|recordPreparedAssetSignatureDiagnostics|asset-state signature|preparedByAssetId.*sort\\(\\).*join" apps/holtburger-3d/src` returned no matches. |
-| planned | Phase 22 | Temporary dual path where product-store events and browser-display product forwarding both exist. | TBD | Product events are the only path from landblock product runtime to `WorldDisplay` / renderer. | `rg "commitStaticLandblockProduct|evictStaticLandblockProduct|clearStaticLandblockProducts"` has no browser-display forwarding matches. |
-| planned | Phase 22 | Runtime ownership bridge while `StaticLandblockRenderArtifactCoordinator` is moved out of `BrowserWorldDisplay.svelte`. | TBD | Neutral runtime owns coordinator/store/worker lifecycle. | `rg "new StaticLandblockRenderArtifactCoordinator" apps/holtburger-3d/src/pages/BrowserWorldDisplay.svelte` has no matches. |
-| planned | Phase 22 | Temporary shared scene-resource update function that can trigger product sync from presentation-only changes. | `BrowserWorldDisplay.svelte` / successors | Scene-interest sync and presentation-only updates are separate call paths. | Tests or grep prove picker/camera/debug handlers do not call product runtime sync. |
+| planned | Phase 22A/22C | Temporary dual path where product-source events and browser-display product forwarding both exist during `WorldDisplay` constructor-source cutover. | TBD | Product-source events are the only path from landblock product runtime to `WorldDisplay` / renderer. | `rg "worldDisplaySurface\\?\\.(commitStaticLandblockProduct|evictStaticLandblockProduct|clearStaticLandblockProducts)" apps/holtburger-3d/src` has no matches. |
+| planned | Phase 22D | Runtime ownership bridge while `StaticLandblockRenderArtifactCoordinator` is moved out of `BrowserWorldDisplay.svelte`. | TBD | Neutral `LandblockProductRuntime` or `SceneResourceRuntime` owns coordinator/store/worker lifecycle. | `rg "new StaticLandblockRenderArtifactCoordinator" apps/holtburger-3d/src/pages/BrowserWorldDisplay.svelte` has no matches. |
+| planned | Phase 22B/22E | Temporary shared scene-resource update function that can trigger product sync from presentation-only changes. | `BrowserWorldDisplay.svelte` / runtime successors | Scene-interest sync and presentation-only updates are separate call paths, with runtime sync consuming a neutral scene-interest DTO. | Tests or grep prove picker/camera/debug handlers do not call product runtime sync. |
 
 Deliverables:
 

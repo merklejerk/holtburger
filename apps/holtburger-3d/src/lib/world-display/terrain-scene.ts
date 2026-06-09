@@ -1,7 +1,7 @@
 import type { BrowserLocationSelection } from "../../app/browser-mode";
 import { isIndoorBrowserDestination } from "../../app/browser-mode";
+import type { PreparedAssetResolver } from "../assets/prepared-asset-store";
 import type {
-	AssetChannelState,
 	PreparedAssetRecord,
 	PreparedTerrainMesh,
 } from "../assets/types";
@@ -56,7 +56,7 @@ export function createEmptyTerrainSceneModel(): TerrainSceneModel {
 }
 
 export function deriveTerrainSceneModel(
-	assetState: AssetChannelState,
+	preparedAssetResolver: PreparedAssetResolver,
 	browserDestination: BrowserLocationSelection | null = null,
 	terrainLodRadius = 1,
 	terrainLandblockIds: readonly number[] | null = null,
@@ -66,7 +66,7 @@ export function deriveTerrainSceneModel(
 			focusLandblockId: null,
 			statusText:
 				"Waiting for a browser destination before terrain scene selection can start.",
-			cacheText: `Terrain cache is idle with ${Object.keys(assetState.preparedByAssetId).length} prepared records.`,
+			cacheText: `Terrain cache is idle with ${preparedAssetResolver.getPreparedCount()} prepared records.`,
 			dataSourceText: "No terrain provenance available yet.",
 			tiles: [],
 		};
@@ -77,7 +77,7 @@ export function deriveTerrainSceneModel(
 			focusLandblockId: null,
 			statusText:
 				"Browser mode is focused on an indoor env cell, so outdoor terrain rendering is dormant.",
-			cacheText: `Outdoor terrain cache is holding ${countPreparedTerrainAssets(assetState.preparedByAssetId)} landblocks while indoor browser focus is active.`,
+			cacheText: `Outdoor terrain cache is holding ${countPreparedTerrainAssets(preparedAssetResolver)} landblocks while indoor browser focus is active.`,
 			dataSourceText: describeTerrainDataSources([]),
 			tiles: [],
 		};
@@ -89,7 +89,7 @@ export function deriveTerrainSceneModel(
 			buildOutdoorCoverageLandblockIds(focusLandblockId, terrainLodRadius),
 	);
 	const focusCoords = getOutdoorLandblockCoords(focusLandblockId);
-	const tiles = Object.values(assetState.preparedByAssetId)
+	const tiles = [...preparedAssetResolver.values()]
 		.flatMap((asset) => {
 			const terrainMesh = getTerrainMeshFromPreparedAsset(asset);
 			return terrainMesh && asset.payload.kind === "landblock-outdoor"
@@ -107,7 +107,7 @@ export function deriveTerrainSceneModel(
 				chunkLocalOffset: { x: 0, y: 0, z: 0 },
 				mesh: terrainMesh,
 				materialResources: buildTerrainMaterialResourcePlan({
-					assetState,
+					preparedAssetResolver,
 					regionNumber: payload.regionNumber,
 					quads: terrainMesh.quads,
 				}),
@@ -140,7 +140,7 @@ export function deriveTerrainSceneModel(
 		statusText: focusTile
 			? `Renderer has ${tiles.length} cached outdoor landblock${tiles.length === 1 ? "" : "s"} ready around focus ${focusTile.label}.`
 			: `Renderer is waiting for the focus landblock ${formatLandblockLabel(focusLandblockId)} while ${tiles.length} neighbor tile${tiles.length === 1 ? " is" : "s are"} cached.`,
-		cacheText: `Terrain cache contains ${countPreparedTerrainAssets(assetState.preparedByAssetId)} prepared landblock payload${countPreparedTerrainAssets(assetState.preparedByAssetId) === 1 ? "" : "s"}; ${materialText}`,
+		cacheText: `Terrain cache contains ${countPreparedTerrainAssets(preparedAssetResolver)} prepared landblock payload${countPreparedTerrainAssets(preparedAssetResolver) === 1 ? "" : "s"}; ${materialText}`,
 		dataSourceText,
 		tiles,
 	};
@@ -172,9 +172,9 @@ function compareLandblockGridPosition(
 }
 
 function countPreparedTerrainAssets(
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssetResolver: PreparedAssetResolver,
 ): number {
-	return Object.values(preparedByAssetId).filter((asset) =>
+	return [...preparedAssetResolver.values()].filter((asset) =>
 		getTerrainMeshFromPreparedAsset(asset),
 	).length;
 }

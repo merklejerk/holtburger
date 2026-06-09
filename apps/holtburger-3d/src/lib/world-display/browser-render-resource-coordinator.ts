@@ -3,13 +3,16 @@ import type {
 	BrowserTextureFilteringMode,
 } from "../../app/browser-mode";
 import { deriveTerrainFocusLandblockId } from "../assets/scene-asset-request-planner";
+import {
+	countPreparedAssetsByKindFromResolver,
+	createAssetChannelStateSnapshotFromResolver,
+	type PreparedAssetResolver,
+} from "../assets/prepared-asset-store";
 import type { StructuredInteriorCoverage } from "../assets/structured-interior-coverage";
 import {
 	createInitialAssetChannelState,
 	type AssetChannelState,
-	type PreparedAssetRecord,
 } from "../assets/types";
-import { recordPreparedAssetSignatureDiagnostics } from "../assets/prepared-asset-hot-path-diagnostics";
 import { formatHex32, formatLandblockOutdoorAssetId } from "../landblocks";
 import {
 	deriveBrowserWorldDisplayModel,
@@ -73,7 +76,8 @@ const TERRAIN_MATERIAL_DIAGNOSTIC_LOG_PREFIX =
 const TERRAIN_MATERIAL_DIAGNOSTIC_SAMPLE_LIMIT = 12;
 
 export interface BrowserRenderResourceCoordinatorInput {
-	assetState: AssetChannelState;
+	assetPresentationState: AssetChannelState;
+	preparedAssetResolver: PreparedAssetResolver;
 	browserDestination: BrowserLocationSelection | null;
 	terrainLodRadius: number;
 	buildingLodRadius: number;
@@ -136,6 +140,7 @@ export function createEmptyBrowserRenderResourceReport(): BrowserRenderResourceR
 	return {
 		worldDisplay: deriveBrowserWorldDisplayModel({
 			assetState: createInitialAssetChannelState(),
+			preparedAssetResolver: createEmptyPreparedAssetResolver(),
 			browserDestination: null,
 			terrainLodRadius: 0,
 			buildingLodRadius: 0,
@@ -161,6 +166,23 @@ export function createEmptyBrowserRenderResourceReport(): BrowserRenderResourceR
 			"Outdoor landblock selection is waiting for focus.",
 		cellVisibilityFallbackText:
 			"0 loaded env cells; renderer visibility pending.",
+	};
+}
+
+function createEmptyPreparedAssetResolver(): PreparedAssetResolver {
+	return {
+		get: () => null,
+		has: () => false,
+		entries: function* () {},
+		values: function* () {},
+		keys: function* () {},
+		getCacheMetadata: () => null,
+		cacheMetadataEntries: function* () {},
+		getCacheDiagnostics: () => null,
+		getPreparedRevision: () => 0,
+		getCacheMetadataRevision: () => 0,
+		getPreparedCount: () => 0,
+		subscribe: () => () => {},
 	};
 }
 
@@ -203,7 +225,7 @@ export class BrowserRenderResourceCoordinator {
 						envCellRadius: input.envCellLodRadius,
 					});
 		const terrainScene = deriveTerrainSceneModel(
-			input.assetState,
+			input.preparedAssetResolver,
 			input.browserDestination,
 			input.terrainLodRadius,
 			outdoorSceneInterest?.terrainLandblockIds ?? null,
@@ -246,18 +268,7 @@ export class BrowserRenderResourceCoordinator {
 			activeRenderAnchor: input.activeRenderAnchor,
 			browserDestination: input.browserDestination,
 		});
-		const surfaceAssetState = input.assetState;
-		const surfaceAssetStateSignatureResult =
-			describeAssetStateSignature(surfaceAssetState);
-		recordPreparedAssetSignatureDiagnostics({
-			source: "browser-render-resource-coordinator",
-			changed:
-				this.appliedSurfaceSignatures["asset-state"] !==
-				surfaceAssetStateSignatureResult.signature,
-			preparedAssetCount: surfaceAssetStateSignatureResult.preparedAssetCount,
-			cacheMetadataCount: surfaceAssetStateSignatureResult.cacheMetadataCount,
-			completedAtMs: Date.now(),
-		});
+		const preparedRevision = input.preparedAssetResolver.getPreparedRevision();
 		const terrainSceneSignature = describeTerrainSceneSignature(terrainScene);
 		const staticRenderableSceneSignature =
 			describeStaticRenderableSceneSignature(staticRenderableScene);
@@ -289,7 +300,10 @@ export class BrowserRenderResourceCoordinator {
 		);
 		this.renderSpatialIndex.replaceOwnerItems(
 			STATIC_RENDERABLE_SPATIAL_OWNER_KEY,
-			deriveStaticRenderableSpatialItems(input.assetState, staticRenderableScene),
+			deriveStaticRenderableSpatialItems(
+				input.preparedAssetResolver,
+				staticRenderableScene,
+			),
 		);
 		this.renderSpatialIndex.replaceOwnerItems(
 			DEBUG_OVERLAY_SPATIAL_OWNER_KEY,
@@ -300,8 +314,14 @@ export class BrowserRenderResourceCoordinator {
 			reportTerrainMaterialDiagnostics(terrainScene);
 			this.applySurfaceResource(
 				"asset-state",
-				surfaceAssetStateSignatureResult.signature,
-				() => surface.setAssetState(surfaceAssetState),
+				`prepared:${preparedRevision}`,
+				() =>
+					surface.setAssetState(
+						createAssetChannelStateSnapshotFromResolver(
+							input.assetPresentationState,
+							input.preparedAssetResolver,
+						),
+					),
 			);
 			this.applySurfaceResource(
 				"render-scene-context",
@@ -326,7 +346,6 @@ export class BrowserRenderResourceCoordinator {
 					structuredInteriorSceneSignature,
 					debugOverlaySceneSignature,
 					renderChunkTransformsSignature,
-					assetState: input.assetState,
 				}),
 				() => surface.setRenderSpatialQuery(this.renderSpatialIndex),
 			);
@@ -406,29 +425,6 @@ type BrowserRenderResourceSurfaceKey =
 	| "render-style"
 	| "texture-filtering-mode"
 	| "detail-textures-enabled";
-
-interface AssetStateSignatureResult {
-	signature: string;
-	preparedAssetCount: number;
-	cacheMetadataCount: number;
-}
-
-function describeAssetStateSignature(
-	state: AssetChannelState,
-): AssetStateSignatureResult {
-	const preparedAssetIds = Object.keys(state.preparedByAssetId).sort();
-	const cacheMetadataAssetIds = Object.keys(state.cacheMetadataByAssetId).sort();
-	return {
-		signature: [
-			state.channel,
-			state.status,
-			preparedAssetIds.join(","),
-			cacheMetadataAssetIds.join(","),
-		].join(";"),
-		preparedAssetCount: preparedAssetIds.length,
-		cacheMetadataCount: cacheMetadataAssetIds.length,
-	};
-}
 
 function describeRenderSceneContextSignature(
 	context: ReturnType<typeof deriveWorldRenderSceneContext>,
@@ -668,14 +664,12 @@ function describeRenderSpatialIndexSignature({
 	structuredInteriorSceneSignature,
 	debugOverlaySceneSignature,
 	renderChunkTransformsSignature,
-	assetState,
 }: {
 	terrainSceneSignature: string;
 	staticRenderableSceneSignature: string;
 	structuredInteriorSceneSignature: string;
 	debugOverlaySceneSignature: string;
 	renderChunkTransformsSignature: string;
-	assetState: AssetChannelState;
 }): string {
 	return [
 		terrainSceneSignature,
@@ -683,12 +677,6 @@ function describeRenderSpatialIndexSignature({
 		structuredInteriorSceneSignature,
 		debugOverlaySceneSignature,
 		renderChunkTransformsSignature,
-		Object.keys(assetState.preparedByAssetId)
-			.filter((assetId) =>
-				/^landblock\/[0-9a-fA-F]{8}\/(?:outdoor|topology)$/.test(assetId),
-			)
-			.sort()
-			.join(","),
 	].join(";");
 }
 
@@ -784,23 +772,24 @@ function reportPreparedOutdoorAssetsNotRendered({
 		formatLandblockOutdoorAssetId,
 	);
 	const preparedOutdoorAssetIds = expectedOutdoorAssetIds.filter(
-		(assetId) => input.assetState.preparedByAssetId[assetId],
+		(assetId) => input.preparedAssetResolver.has(assetId),
 	);
 	if (preparedOutdoorAssetIds.length === 0) {
 		lastPreparedOutdoorAssetsNotRenderedSignature = null;
 		return;
 	}
 
-	const recentRelevantActivity = input.assetState.history.filter((entry) =>
-		expectedOutdoorAssetIds.includes(entry.assetId),
+	const recentRelevantActivity = input.assetPresentationState.history.filter(
+		(entry) => expectedOutdoorAssetIds.includes(entry.assetId),
 	);
 	const signature = JSON.stringify({
 		destination: input.browserDestination.label,
 		expectedOutdoorAssetIds,
 		preparedOutdoorAssetIds,
 		recentRelevantActivity,
-		activeRequestAssetId: input.assetState.activeRequest?.assetId ?? null,
-		errorMessage: input.assetState.errorMessage,
+		activeRequestAssetId:
+			input.assetPresentationState.activeRequest?.assetId ?? null,
+		errorMessage: input.assetPresentationState.errorMessage,
 	});
 
 	if (signature === lastPreparedOutdoorAssetsNotRenderedSignature) {
@@ -818,17 +807,17 @@ function reportPreparedOutdoorAssetsNotRendered({
 			expectedOutdoorAssetIds,
 			preparedOutdoorAssetIds,
 			missingOutdoorAssetIds: expectedOutdoorAssetIds.filter(
-				(assetId) => !input.assetState.preparedByAssetId[assetId],
+				(assetId) => !input.preparedAssetResolver.has(assetId),
 			),
-			preparedAssetCounts: countPreparedAssetsByKind(
-				input.assetState.preparedByAssetId,
+			preparedAssetCounts: countPreparedAssetsByKindFromResolver(
+				input.preparedAssetResolver,
 			),
 			recentRelevantActivity,
-			recentAssetActivity: input.assetState.history,
-			activeRequest: input.assetState.activeRequest,
-			assetStatus: input.assetState.status,
-			assetErrorMessage: input.assetState.errorMessage,
-			cacheDiagnostics: input.assetState.cacheDiagnostics,
+			recentAssetActivity: input.assetPresentationState.history,
+			activeRequest: input.assetPresentationState.activeRequest,
+			assetStatus: input.assetPresentationState.status,
+			assetErrorMessage: input.assetPresentationState.errorMessage,
+			cacheDiagnostics: input.preparedAssetResolver.getCacheDiagnostics(),
 			renderInputCounts: {
 				terrainTiles: terrainScene.tiles.length,
 				staticSourceInstances: staticRenderableScene.sourceInstances.length,
@@ -843,18 +832,6 @@ function reportPreparedOutdoorAssetsNotRendered({
 				activeRenderChunks: activeRenderChunkTransforms.length,
 			},
 		},
-	);
-}
-
-function countPreparedAssetsByKind(
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
-): Record<string, number> {
-	const counts: Record<string, number> = {};
-	for (const asset of Object.values(preparedByAssetId)) {
-		counts[asset.payload.kind] = (counts[asset.payload.kind] ?? 0) + 1;
-	}
-	return Object.fromEntries(
-		Object.entries(counts).sort(([left], [right]) => left.localeCompare(right)),
 	);
 }
 
@@ -905,7 +882,8 @@ function deriveReport({
 
 	return {
 		worldDisplay: deriveBrowserWorldDisplayModel({
-			assetState: input.assetState,
+			assetState: input.assetPresentationState,
+			preparedAssetResolver: input.preparedAssetResolver,
 			browserDestination: input.browserDestination,
 			terrainLodRadius: input.terrainLodRadius,
 			buildingLodRadius: input.buildingLodRadius,

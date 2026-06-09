@@ -3,7 +3,10 @@
 	import { get } from "svelte/store";
 	import { frontendState } from "./app/frontend-state";
 	import { AssetChannelController } from "./lib/assets/asset-channel";
-	import { PreparedAssetStore } from "./lib/assets/prepared-asset-store";
+	import {
+		createPreparedAssetLegacySnapshotFromResolver,
+		PreparedAssetStore,
+	} from "./lib/assets/prepared-asset-store";
 	import { SceneAssetStreamingController } from "./lib/assets/scene-asset-streaming-controller";
 	import "./lib/diagnostics/browser-js-profiler";
 	import { readDebugConfig } from "./lib/host/tauri";
@@ -25,9 +28,13 @@
 		const sceneStreamer = new SceneAssetStreamingController({
 			assetChannel,
 			getPreparedByAssetId: () =>
-				preparedAssetStore.createLegacySnapshot().preparedByAssetId,
+				createPreparedAssetLegacySnapshotFromResolver(
+					preparedAssetStore.resolver,
+				).preparedByAssetId,
 			getCacheMetadataByAssetId: () =>
-				preparedAssetStore.createLegacySnapshot().cacheMetadataByAssetId,
+				createPreparedAssetLegacySnapshotFromResolver(
+					preparedAssetStore.resolver,
+				).cacheMetadataByAssetId,
 			markAssetsPending: (requests) =>
 				frontendState.markAssetsPending(requests),
 			applyPreparedAssets: (assets) => {
@@ -79,7 +86,9 @@
 			detailLodRadius: latestFrontendState.browserMode.detailLodRadius,
 			envCellLodRadius: latestFrontendState.browserMode.envCellLodRadius,
 			preparedByAssetId:
-				preparedAssetStore.createLegacySnapshot().preparedByAssetId,
+				createPreparedAssetLegacySnapshotFromResolver(
+					preparedAssetStore.resolver,
+				).preparedByAssetId,
 		});
 	}
 

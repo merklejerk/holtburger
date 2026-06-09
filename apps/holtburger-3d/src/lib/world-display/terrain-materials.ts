@@ -1,5 +1,5 @@
+import type { PreparedAssetResolver } from "../assets/prepared-asset-store";
 import type {
-	AssetChannelState,
 	PreparedRenderSurfacePayload,
 	PreparedTerrainMaterialTablePayload,
 	PreparedTerrainQuad,
@@ -38,7 +38,7 @@ export interface TerrainMaterialResourcePlan {
 }
 
 export interface BuildTerrainMaterialResourcePlanOptions {
-	assetState: AssetChannelState;
+	preparedAssetResolver: PreparedAssetResolver;
 	regionNumber: number;
 	quads: readonly PreparedTerrainQuad[];
 }
@@ -50,7 +50,7 @@ export function buildTerrainMaterialResourcePlan(
 		options.regionNumber,
 	);
 	const table = getPreparedTerrainMaterialTable(
-		options.assetState,
+		options.preparedAssetResolver,
 		terrainMaterialAssetId,
 	);
 	const pcodeSummary = summarizeTerrainPcodes(options.quads);
@@ -84,11 +84,11 @@ export function buildTerrainMaterialResourcePlan(
 		pcodeSummary.referencedTerrainCodes,
 	);
 	const surfaceTextureReadiness = summarizeSurfaceTextureReadiness(
-		options.assetState,
+		options.preparedAssetResolver,
 		collectTerrainBlendSurfaceTextureAssetIds(table),
 	);
 	const unsupportedRenderSurfaceAssetIds = findUnsupportedRenderSurfaceAssetIds(
-		options.assetState,
+		options.preparedAssetResolver,
 		surfaceTextureReadiness.readyRenderSurfaceAssetIds,
 	);
 	const diagnostics = buildDiagnostics({
@@ -177,10 +177,10 @@ function summarizeTerrainPcodes(
 }
 
 function getPreparedTerrainMaterialTable(
-	assetState: AssetChannelState,
+	preparedAssetResolver: PreparedAssetResolver,
 	assetId: string,
 ): PreparedTerrainMaterialTablePayload | null {
-	const record = assetState.preparedByAssetId[assetId];
+	const record = preparedAssetResolver.get(assetId);
 	return record?.payload.kind === "terrain-material" ? record.payload : null;
 }
 
@@ -203,7 +203,7 @@ interface SurfaceTextureReadinessSummary {
 }
 
 function summarizeSurfaceTextureReadiness(
-	assetState: AssetChannelState,
+	preparedAssetResolver: PreparedAssetResolver,
 	surfaceTextureAssetIds: readonly string[],
 ): SurfaceTextureReadinessSummary {
 	const missingSurfaceTextureAssetIds: string[] = [];
@@ -211,7 +211,7 @@ function summarizeSurfaceTextureReadiness(
 	const readyRenderSurfaceAssetIds: string[] = [];
 
 	for (const assetId of surfaceTextureAssetIds) {
-		const record = assetState.preparedByAssetId[assetId];
+		const record = preparedAssetResolver.get(assetId);
 		if (record?.payload.kind !== "surface-texture") {
 			missingSurfaceTextureAssetIds.push(assetId);
 			continue;
@@ -224,8 +224,7 @@ function summarizeSurfaceTextureReadiness(
 		const renderSurfaceAssetId = formatRenderSurfaceAssetId(
 			selectedRenderSurfaceId,
 		);
-		const renderSurfaceRecord =
-			assetState.preparedByAssetId[renderSurfaceAssetId];
+		const renderSurfaceRecord = preparedAssetResolver.get(renderSurfaceAssetId);
 		if (renderSurfaceRecord?.payload.kind !== "render-surface") {
 			missingRenderSurfaceAssetIds.push(renderSurfaceAssetId);
 			continue;
@@ -243,12 +242,12 @@ function summarizeSurfaceTextureReadiness(
 }
 
 function findUnsupportedRenderSurfaceAssetIds(
-	assetState: AssetChannelState,
+	preparedAssetResolver: PreparedAssetResolver,
 	renderSurfaceAssetIds: readonly string[],
 ): string[] {
 	return renderSurfaceAssetIds
 		.filter((assetId) => {
-			const record = assetState.preparedByAssetId[assetId];
+			const record = preparedAssetResolver.get(assetId);
 			if (record?.payload.kind !== "render-surface") {
 				return true;
 			}

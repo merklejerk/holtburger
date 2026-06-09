@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { parseBrowserLocationInput } from "../../app/browser-mode";
+import { createPreparedAssetResolverFromRecordSnapshot } from "../assets/prepared-asset-store";
 import { createInitialAssetChannelState } from "../assets/types";
 import { deriveBrowserWorldDisplayModel } from "./model";
 
@@ -9,6 +10,9 @@ describe("browser world display model", () => {
 		const destination = parseBrowserLocationInput("da55", "manual", "outdoor");
 		const model = deriveBrowserWorldDisplayModel({
 			assetState: createInitialAssetChannelState(),
+			preparedAssetResolver: createPreparedAssetResolverFromRecordSnapshot({
+				preparedByAssetId: {},
+			}),
 			browserDestination: destination,
 			terrainLodRadius: 1,
 			buildingLodRadius: 0,
@@ -26,6 +30,9 @@ describe("browser world display model", () => {
 		const destination = parseBrowserLocationInput("016c0155");
 		const model = deriveBrowserWorldDisplayModel({
 			assetState: createInitialAssetChannelState(),
+			preparedAssetResolver: createPreparedAssetResolverFromRecordSnapshot({
+				preparedByAssetId: {},
+			}),
 			browserDestination: destination,
 			terrainLodRadius: 1,
 			buildingLodRadius: 0,

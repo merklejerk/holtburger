@@ -20,7 +20,9 @@ import type { LandblockTerrainRenderArtifact } from "./terrain-render-artifact";
 import type { RenderArtifactDiagnosticFamily } from "./render-regression-diagnostics";
 
 export type LandblockRenderProduct =
-	| "outdoor"
+	| "outdoor-terrain"
+	| "outdoor-buildings"
+	| "outdoor-detail"
 	| "outdoor-env-cells"
 	| "dungeon-env-cells";
 
@@ -372,11 +374,15 @@ function compareProductOrder(
 
 function productRank(product: LandblockRenderProduct): number {
 	switch (product) {
-		case "outdoor":
+		case "outdoor-terrain":
 			return 0;
-		case "outdoor-env-cells":
+		case "outdoor-buildings":
 			return 1;
-		case "dungeon-env-cells":
+		case "outdoor-detail":
 			return 2;
+		case "outdoor-env-cells":
+			return 3;
+		case "dungeon-env-cells":
+			return 4;
 	}
 }

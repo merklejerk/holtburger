@@ -23,7 +23,9 @@ export interface TemporaryRenderRegressionDiagnostics {
 }
 
 const PRODUCT_VALUES = [
-	"outdoor",
+	"outdoor-terrain",
+	"outdoor-buildings",
+	"outdoor-detail",
 	"outdoor-env-cells",
 	"dungeon-env-cells",
 ] as const satisfies readonly LandblockRenderProduct[];

@@ -2056,6 +2056,175 @@ Notes:
 
 - Browser debug-report validation for `0xda55ffff` is still pending manual runtime inspection. The code path now expresses the required terrain co-location constraint structurally, but the worksheet should keep that runtime report as the final visual confirmation target.
 
+## Phase 19: Split Outdoor Render Products By LoD Domain
+
+Status: completed.
+
+Goal:
+
+- Make terrain, outdoor building, and outdoor detail render products respect their independent browser LoD radii instead of overbuilding static artifacts for every terrain landblock.
+
+Context:
+
+- The underlying prepared asset route is intentionally coarse: `landblock/<id>/outdoor` contains terrain plus outdoor static members. Splitting render products will not reduce that host asset fetch by itself.
+- The expensive derived work is still product-domain-specific. The worker can build terrain geometry/materials, building static bundles, and detail static bundles independently from the same prepared outdoor payload.
+- The current `product: "outdoor"` request is overloaded. The planner emits it for terrain, building, and detail interest, coalesces duplicate targets, and the worker interprets it as "terrain plus outdoor-buildings plus outdoor-detail."
+- With defaults (`terrain=2`, `building=1`, `detail=1`, `envCell=1`), the intended coverage is 25 terrain landblocks, 9 building landblocks, 9 detail landblocks, and 9 env-cell landblocks. Today the 25 terrain products can still allocate building/detail bundle artifacts.
+- `outdoor-env-cells` and `dungeon-env-cells` already model a separate product domain and should remain separate.
+
+Out of scope:
+
+- Adding finer host/DAT asset routes such as `landblock/<id>/buildings` or `landblock/<id>/detail`.
+- Changing the default browser LoD radii.
+- Treating renderer-side distance culling as the primary fix. It may be useful as a defensive invariant, but it does not avoid worker CPU, atlas packing, texture upload, material record, or geometry buffer cost.
+- Changing terrain shader sampler limits or atlas cohort behavior from Phase 18.
+
+### Phase 19A: Replace The Overloaded Outdoor Product Type
+
+Status: completed.
+
+Deliverables:
+
+- Replace the broad `LandblockRenderProduct` value `"outdoor"` with explicit outdoor product domains:
+  - `"outdoor-terrain"`
+  - `"outdoor-buildings"`
+  - `"outdoor-detail"`
+  - keep `"outdoor-env-cells"` and `"dungeon-env-cells"`
+- Update `DesiredLandblockRenderProduct`, `LandblockRenderProductWorkerJob`, `LandblockRenderProductWorkerResult`, product keys, product metadata, diagnostic product filters, and formatting helpers to use the split domains.
+- Remove or decisively cut over any tests that still rely on `"outdoor"` meaning multiple artifact families.
+
+Acceptance criteria:
+
+- Product keys are unique by landblock and product domain.
+- No outdoor browser product request or worker job uses `product: "outdoor"`.
+- Existing diagnostic filters and resource inspector labels remain understandable with the new product names.
+
+Progress:
+
+- Replaced the broad `"outdoor"` render-product domain with `"outdoor-terrain"`, `"outdoor-buildings"`, and `"outdoor-detail"` while leaving source routes/classifications such as `landblock/<id>/outdoor` unchanged.
+- Updated product ordering, worker job keys, diagnostic product filters, and stale test fixtures to use split product domains.
+
+### Phase 19B: Plan Products From Independent LoD Domains
+
+Status: completed.
+
+Deliverables:
+
+- Update `planDesiredLandblockRenderProducts()` so each normalized interest set maps to the matching product domain:
+  - `terrainLandblockIds` -> `"outdoor-terrain"`
+  - `buildingLandblockIds` -> `"outdoor-buildings"`
+  - `detailLandblockIds` -> `"outdoor-detail"`
+  - `envCellLandblockIds` -> `"outdoor-env-cells"`
+- Preserve priority assignment by focus landblock and preserve deterministic product ordering.
+- Keep scene asset route planning unchanged except where tests need updated product-domain expectations; `landblock/<id>/outdoor` remains the source asset for terrain/building/detail products.
+
+Acceptance criteria:
+
+- With default outdoor radii around one focus landblock, the product planner emits 25 terrain products, 9 building products, 9 detail products, and 9 outdoor-env-cell products.
+- With radius `0`, the planner emits one product for each enabled domain because radius `0` means focus landblock, not disabled.
+- Product coalescing no longer merges terrain/building/detail intent into one target.
+
+Progress:
+
+- Updated `planDesiredLandblockRenderProducts()` to emit terrain, building, detail, and env-cell render products from their independent interest sets.
+- Added planner coverage for the default `25/9/9/9` product-domain split and radius-`0` focus-landblock behavior.
+
+### Phase 19C: Build Only The Requested Artifact Domain In The Worker
+
+Status: completed.
+
+Deliverables:
+
+- Update the static landblock render worker so:
+  - `"outdoor-terrain"` builds only `LandblockTerrainRenderArtifact`
+  - `"outdoor-buildings"` builds only the `outdoor-buildings` static bundle
+  - `"outdoor-detail"` builds only the `outdoor-detail` static bundle
+  - `"outdoor-env-cells"` and `"dungeon-env-cells"` keep building detailed env-cell artifacts
+- Keep the render-used material/texture closure from Phase 16 scoped to the requested static bundle domain.
+- Preserve the existing source-asset closure rules: all split products may read from the same prepared `landblock/<id>/outdoor` payload, but they must not emit unrelated artifacts.
+- Update worker tests to assert negative cases explicitly: terrain products contain no static bundles, building products contain no detail bundle or terrain artifact, and detail products contain no building bundle or terrain artifact.
+
+Acceptance criteria:
+
+- A terrain-only landblock product performs no static bundle texture-page planning or static material record creation.
+- A building-only product does not allocate outdoor detail overlays or detail bundle resources.
+- A detail-only product does not allocate outdoor building resources.
+- Existing terrain atlas cohort planning still receives all resident terrain tiles from `"outdoor-terrain"` products.
+
+Progress:
+
+- Updated worker root loading so split outdoor products read `landblock/<id>/outdoor` without expanding the full outdoor response dependency closure up front.
+- Added domain-aware worker predicates: `"outdoor-terrain"` builds terrain only, `"outdoor-buildings"` builds the building bundle only, and `"outdoor-detail"` builds the detail bundle only.
+- Narrowed static-bundle prepared dependency collection to the requested bundle domain so landblock static bundles no longer require terrain-material dependencies just because the outdoor root asset can provide terrain.
+- Focused worker/builder/planner/coordinator verification passed for the split-domain behavior.
+
+### Phase 19D: Commit, Evict, And Report Split Product Domains Correctly
+
+Status: completed.
+
+Deliverables:
+
+- Update WebGL commit/eviction paths so terrain resources are committed only from `"outdoor-terrain"` products and static bundle resources are committed only from `"outdoor-buildings"` / `"outdoor-detail"` products.
+- Update `isRenderableStaticLandblockArtifactLayer()` and related frame-candidate/resource-inspector paths to expect split product domains instead of the old `"outdoor"` bundle catch-all.
+- Preserve separate eviction by product key so removing building/detail radius no longer evicts terrain for the same landblock, and removing terrain radius no longer leaves stale terrain pages behind.
+- Update debug report/resource summaries to make the product-domain split visible enough to catch future regressions. Counts should distinguish terrain products, static bundle products/layers, and env-cell products.
+
+Acceptance criteria:
+
+- Default browser coverage reports building/detail bundle resources for the 9 intended landblocks, not all 25 terrain landblocks.
+- Terrain products can remain resident for 25 landblocks while building/detail products are resident for only 9 landblocks.
+- Static bundle BVH candidates come only from resident building/detail product domains.
+- Product eviction tests prove removing one domain for a landblock does not accidentally evict unrelated domains for that same landblock.
+
+Progress:
+
+- Updated the WebGL static bundle renderability guard so `"outdoor-buildings"` can only submit building bundles, `"outdoor-detail"` can only submit detail bundles, and `"outdoor-terrain"` cannot submit static bundles.
+- Preserved product-key-scoped commit and eviction; terrain, building, detail, and env-cell products for the same landblock now remain independently resident/evictable.
+- Added debug metric domain counts for total static landblock products, terrain products, static bundle products, and structured-interior products.
+- Updated browser debug report text to show resident product-domain counts, so default outdoor coverage can be checked directly from a generated report.
+- Focused resource/render verification passed for split-domain commit, eviction, resource storage, visibility, spatial, and scene-bounds paths.
+
+### Phase 19E: Verification And Cleanup
+
+Status: completed.
+
+Deliverables:
+
+- Remove obsolete `"outdoor"` product tests, labels, helper branches, and diagnostics once the split domains are wired through.
+- Run focused planner, worker, store, WebGL resource, and submit tests.
+- Run full TypeScript verification.
+- Capture a browser debug report around `0xda55ffff` with default radii and compare product/resource counts against intended LoD coverage.
+
+Acceptance criteria:
+
+- Focused verification passes for:
+  - `apps/holtburger-3d/src/lib/assets/landblock-render-product-planner.test.ts`
+  - `apps/holtburger-3d/src/workers/static-landblock-render-worker.test.ts`
+  - `apps/holtburger-3d/src/lib/world-display/static-landblock-render-artifact-coordinator.test.ts`
+  - `apps/holtburger-3d/src/lib/world-display/static-landblock-render-artifact-store.test.ts`
+  - `apps/holtburger-3d/src/lib/world-display/webgl2-world-resources.test.ts`
+- Full verification passes:
+  - `npm run --prefix apps/holtburger-3d test:ts`
+  - `npm run --prefix apps/holtburger-3d lint:ts`
+  - `npm run --prefix apps/holtburger-3d check`
+- Runtime report evidence shows default LoD coverage no longer derives building/detail resources for terrain-only landblocks.
+
+Progress:
+
+- Focused verification passed:
+  - `npm run --prefix apps/holtburger-3d test:ts -- src/lib/assets/landblock-render-product-planner.test.ts src/workers/static-landblock-render-worker.test.ts src/lib/world-display/static-bundle-layer-builder.test.ts src/lib/world-display/static-landblock-render-artifact-coordinator.test.ts src/lib/world-display/static-landblock-render-artifact-store.test.ts src/lib/world-display/static-landblock-render-worker-client.test.ts`
+  - `npm run --prefix apps/holtburger-3d test:ts -- src/lib/world-display/webgl2-world-resources.test.ts src/lib/world-display/webgl2/resources/static-landblock-product-store.test.ts src/lib/world-display/webgl2/resources/static-bundle-layer-resources.test.ts src/lib/world-display/render-bvh-visibility-snapshot.test.ts src/lib/world-display/render-spatial-scene.test.ts src/lib/world-display/artifact-scene-bounds.test.ts src/lib/world-display/static-landblock-product-metadata.test.ts`
+- Full verification passed:
+  - `npm run --prefix apps/holtburger-3d test:ts` (92 files, 509 tests)
+  - `npm run --prefix apps/holtburger-3d lint:ts`
+  - `npm run --prefix apps/holtburger-3d check`
+
+Notes:
+
+- Browser runtime report validation for the default `0xda55ffff` outdoor scene is still pending manual inspection. The report now exposes resident product-domain counts directly, so the expected default signal is `outdoor-terrain 25`, `outdoor-buildings 9`, `outdoor-detail 9`, and `outdoor-env-cells 9` once all products are resident.
+- First runtime report after Phase 19 exposed a resource-bookkeeping correction: terrain products no longer emitted static bundle artifacts, but WebGL static-bundle commit still retained empty product records for terrain product keys. Static-bundle resource commit now treats an empty layer list as eviction, and product-domain metric summaries now de-dupe product keys across resource stores.
+- Second runtime report confirmed the empty terrain static-bundle rows were gone, but exposed a metrics-only key-shape bug: structured interior resources store resident resources by detailed resource key while also keeping canonical product identity keys in `productResourceKeyByProductKey`. Product-domain metrics now use the canonical structured product keys, so total resident product counts and domain summaries should agree.
+
 ## Findings
 
 - Phase 1 diagnostics are installed and verified.
@@ -2119,4 +2288,5 @@ Notes:
 - Phase 17 course correction: terrain atlas buckets cannot optimize page bytes independently from texture count because the one-draw terrain submit path is limited to one color atlas texture and one mask atlas texture per tile. The planner now supports an explicit page-selection objective; terrain color/mask buckets prefer fewer textures, while static atlases retain memory-minimizing adaptive packing.
 - Planned Phase 18 structural fix: terrain atlas packing should be usage-cohort-aware instead of globally texture-count-biased. Terrain refs sampled together by one terrain tile/draw slice need to be co-located on one page per bucket; independent terrain cohorts can still use adaptive memory-efficient pages.
 - Phase 18 implementation completed: terrain atlas planning now derives `terrain-color` and `terrain-mask` usage cohorts from resident tile/draw-slice layer plans and passes those constraints into a generic cohort-aware atlas planner. The Phase 17 global terrain `minimize-textures` workaround was removed; terrain buckets now use memory-minimizing adaptive packing constrained by actual draw-unit co-usage.
+- Planned Phase 19 structural fix: the prepared `landblock/<id>/outdoor` asset route is coarse, but the worker render product should not be. The overloaded `"outdoor"` product currently lets terrain-radius requests build building/detail static bundles outside their intended LoD domains; split outdoor render products will keep source asset loading unchanged while removing unnecessary derived CPU/GPU work.
 - Remaining suspected issues: static bundle payloads are too large, static bundle asset closure is too broad, and `setAssetState` still triggers costly static product recommits.

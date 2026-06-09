@@ -179,7 +179,7 @@ export function buildStaticObjectBundleArtifact({
 		preparedByAssetId,
 	);
 	const workerPreparedAssetIds = collectWorkerPreparedDependencyIds(
-		job.rootAssetIds,
+		job,
 		preparedByAssetId,
 	);
 	const candidateSurfaces = sourceObjects.flatMap((object) =>
@@ -277,11 +277,11 @@ export function buildStaticObjectBundleArtifact({
 }
 
 export function collectWorkerPreparedDependencyIds(
-	rootAssetIds: readonly string[],
+	job: StaticBundleLayerWorkerJob,
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>,
 ): string[] {
 	const visitedAssetIds = new Set<string>();
-	const queue = [...rootAssetIds].sort();
+	const queue = [...job.rootAssetIds].sort();
 	while (queue.length > 0) {
 		const assetId = queue.shift();
 		if (!assetId) {
@@ -297,7 +297,10 @@ export function collectWorkerPreparedDependencyIds(
 				`Static bundle closure is missing required asset ${assetId}.`,
 			);
 		}
-		for (const dependency of getPreparedAssetDependencies(asset)) {
+		for (const dependency of getStaticBundlePreparedAssetDependencies(
+			job,
+			asset,
+		)) {
 			if (!visitedAssetIds.has(dependency.assetId)) {
 				queue.push(dependency.assetId);
 			}
@@ -320,6 +323,29 @@ export function collectWorkerPreparedDependencyIds(
 		queue.sort();
 	}
 	return [...visitedAssetIds].sort();
+}
+
+function getStaticBundlePreparedAssetDependencies(
+	job: StaticBundleLayerWorkerJob,
+	asset: PreparedAssetRecord,
+): { assetId: string }[] {
+	if (
+		job.scope.kind === "landblock" &&
+		asset.payload.kind === "landblock-outdoor"
+	) {
+		return uniqueSortedStrings([
+			formatRegionRenderProfileAssetId(asset.payload.regionNumber),
+			...asset.payload.statics
+				.filter((member) =>
+					job.scope.bundleKind === "outdoor-buildings"
+						? member.kind === "building"
+						: member.kind !== "building",
+				)
+				.map((member) => member.sourceAssetId),
+			...asset.payload.dependencies.materialAssetIds,
+		]).map((assetId) => ({ assetId }));
+	}
+	return getPreparedAssetDependencies(asset);
 }
 
 function collectStaticBundleSourceObjects(

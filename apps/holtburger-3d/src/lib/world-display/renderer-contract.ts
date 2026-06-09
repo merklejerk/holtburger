@@ -94,14 +94,18 @@ interface WorldRenderDebugMetrics {
 	terrainAtlasCandidateCount: number;
 	terrainAtlasBlockerTileCount: number;
 	staticLandblockProductCount: number;
+	staticLandblockProductDomainCounts: Record<string, number>;
 	staticBundleProductResourceCount: number;
+	staticBundleProductDomainCounts: Record<string, number>;
 	staticBundleLayerResourceCount: number;
 	staticBundleLayerTexturePageResourceCount: number;
 	structuredInteriorProductResourceCount: number;
+	structuredInteriorProductDomainCounts: Record<string, number>;
 	structuredInteriorCellResourceCount: number;
 	structuredInteriorTexturePageResourceCount: number;
 	structuredInteriorMaterialRecordResourceCount: number;
 	terrainProductResourceCount: number;
+	terrainProductDomainCounts: Record<string, number>;
 	productTerrainTexturePageCount: number;
 	portalMaskProductResourceCount: number;
 	transitionPortalMaskResourceCount: number;

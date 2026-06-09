@@ -97,7 +97,7 @@ describe("webgl2 world resources", () => {
 		});
 		const productKey = {
 			landblockId: artifact.landblockId,
-			product: "outdoor" as const,
+			product: "outdoor-terrain" as const,
 			buildPolicyRevision: artifact.buildPolicyRevision,
 			texturePagePolicyRevision: artifact.cpuTexturePagePolicyRevision,
 		};

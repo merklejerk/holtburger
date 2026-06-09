@@ -31,9 +31,9 @@ describe("static landblock render worker client", () => {
 			job: {
 				type: "build-landblock-render-product",
 				jobId:
-					"landblock-render-product:3663069183:outdoor:build:v1:texture-pages:v1:artifacts:all",
+					"landblock-render-product:3663069183:outdoor-terrain:build:v1:texture-pages:v1:artifacts:all",
 				landblockId: 0xda55ffff,
-				product: "outdoor",
+				product: "outdoor-terrain",
 				requestId: "request:1",
 				buildPolicyRevision: "build:v1",
 				texturePagePolicyRevision: "texture-pages:v1",
@@ -368,7 +368,7 @@ function createDesiredProduct(
 ): DesiredLandblockRenderProduct {
 	return {
 		landblockId: 0xda55ffff,
-		product: "outdoor",
+		product: "outdoor-terrain",
 		priority: "resident-now",
 		requestId,
 		buildPolicyRevision: "build:v1",
@@ -395,9 +395,9 @@ function createResult(
 function createResultBase(requestId: string) {
 	return {
 		type: "landblock-render-product-built" as const,
-		jobId: `landblock-render-product:3663069183:outdoor:${requestId}`,
+		jobId: `landblock-render-product:3663069183:outdoor-terrain:${requestId}`,
 		landblockId: 0xda55ffff,
-		product: "outdoor" as const,
+		product: "outdoor-terrain" as const,
 		requestId,
 		buildPolicyRevision: "build:v1",
 		texturePagePolicyRevision: "texture-pages:v1",

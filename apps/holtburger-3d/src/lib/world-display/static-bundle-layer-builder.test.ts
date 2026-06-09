@@ -869,7 +869,7 @@ describe("static bundle layer builder", () => {
 
 		expect(
 			collectWorkerPreparedDependencyIds(
-				["setup-model/02000001"],
+				createWorkerClosureJob(["setup-model/02000001"]),
 				preparedByAssetId,
 			),
 		).toContain("setup-appearance/02000001");
@@ -892,7 +892,7 @@ describe("static bundle layer builder", () => {
 
 		expect(
 			collectWorkerPreparedDependencyIds(
-				[formatRegionRenderProfileAssetId(1)],
+				createWorkerClosureJob([formatRegionRenderProfileAssetId(1)]),
 				preparedByAssetId,
 			),
 		).toContain(
@@ -938,6 +938,24 @@ function createEnvCellBuildJob(
 			formatEnvCellAssetId(envCellId),
 		],
 		sourceRevision: "revision:roots",
+		buildPolicyRevision: "build:v1",
+		cpuTexturePagePolicyRevision: "texture-pages:v1",
+	};
+}
+
+function createWorkerClosureJob(
+	rootAssetIds: readonly string[],
+): StaticBundleLayerWorkerJob {
+	return {
+		type: "build-static-bundle-layer",
+		jobId: "job:worker-closure",
+		scope: {
+			kind: "landblock",
+			landblockId: 0xda55ffff,
+			bundleKind: "outdoor-detail",
+		},
+		rootAssetIds,
+		sourceRevision: "revision:worker-closure",
 		buildPolicyRevision: "build:v1",
 		cpuTexturePagePolicyRevision: "texture-pages:v1",
 	};

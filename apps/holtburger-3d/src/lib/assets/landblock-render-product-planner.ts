@@ -71,7 +71,7 @@ export function planDesiredLandblockRenderProducts(
 				input,
 				interest.focusLandblockId,
 				landblockId,
-				"outdoor",
+				"outdoor-terrain",
 			),
 		),
 		...interest.buildingLandblockIds.map((landblockId) =>
@@ -79,7 +79,7 @@ export function planDesiredLandblockRenderProducts(
 				input,
 				interest.focusLandblockId,
 				landblockId,
-				"outdoor",
+				"outdoor-buildings",
 			),
 		),
 		...interest.detailLandblockIds.map((landblockId) =>
@@ -87,7 +87,7 @@ export function planDesiredLandblockRenderProducts(
 				input,
 				interest.focusLandblockId,
 				landblockId,
-				"outdoor",
+				"outdoor-detail",
 			),
 		),
 		...envCellLandblockIds.map((landblockId) =>

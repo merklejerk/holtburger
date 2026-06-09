@@ -24,7 +24,7 @@ import {
 } from "./static-landblock-render-worker";
 
 describe("static landblock render worker", () => {
-	it("builds an outdoor product with terrain and exterior layers", async () => {
+	it("builds an outdoor-terrain product without exterior static bundles", async () => {
 		const landblockId = 0xda55ffff;
 		const lookup = new Map<string, AssetLookupResponseDto>(
 			[
@@ -45,7 +45,7 @@ describe("static landblock render worker", () => {
 		const requestedAssetIds: string[] = [];
 
 		const result = await runStaticLandblockRenderWorkerJob(
-			createJob("outdoor"),
+			createJob("outdoor-terrain"),
 			{
 				async lookupBinaryAssets(requests: readonly AssetLookupRequestDto[]) {
 					requestedAssetIds.push(...requests.map((request) => request.assetId));
@@ -68,16 +68,14 @@ describe("static landblock render worker", () => {
 		expect(requestedAssetIds).not.toContain(
 			formatLandblockTopologyAssetId(landblockId),
 		);
-		expect(result.product).toBe("outdoor");
+		expect(result.product).toBe("outdoor-terrain");
 		expect(getLandblockTerrainRenderArtifact(result)?.landblockId).toBe(
 			landblockId,
 		);
-		expect(
-			getStaticObjectBundleArtifacts(result).map((layer) => layer.bundleKind),
-		).toEqual(["outdoor-buildings", "outdoor-detail"]);
+		expect(getStaticObjectBundleArtifacts(result)).toEqual([]);
 	});
 
-	it("can build outdoor terrain without static bundle artifacts", async () => {
+	it("builds an outdoor-buildings product without terrain or detail artifacts", async () => {
 		const landblockId = 0xda55ffff;
 		const lookup = new Map<string, AssetLookupResponseDto>(
 			[
@@ -85,15 +83,12 @@ describe("static landblock render worker", () => {
 					formatLandblockOutdoorAssetId(landblockId),
 					createOutdoorPayload(landblockId),
 				),
-				createResponse(
-					formatTerrainMaterialAssetId(1),
-					createTerrainMaterial(),
-				),
+				createResponse(formatRegionRenderProfileAssetId(1), createRegionRenderProfile()),
 			].map((response) => [response.assetId, response] as const),
 		);
 
 		const result = await runStaticLandblockRenderWorkerJob(
-			createJob("outdoor", ["terrain"]),
+			createJob("outdoor-buildings"),
 			{
 				async lookupBinaryAssets(requests: readonly AssetLookupRequestDto[]) {
 					return {
@@ -109,10 +104,47 @@ describe("static landblock render worker", () => {
 			},
 		);
 
-		expect(getLandblockTerrainRenderArtifact(result)?.landblockId).toBe(
-			landblockId,
+		expect(result.product).toBe("outdoor-buildings");
+		expect(getLandblockTerrainRenderArtifact(result)).toBeNull();
+		expect(
+			getStaticObjectBundleArtifacts(result).map((layer) => layer.bundleKind),
+		).toEqual(["outdoor-buildings"]);
+	});
+
+	it("builds an outdoor-detail product without terrain or building artifacts", async () => {
+		const landblockId = 0xda55ffff;
+		const lookup = new Map<string, AssetLookupResponseDto>(
+			[
+				createResponse(
+					formatLandblockOutdoorAssetId(landblockId),
+					createOutdoorPayload(landblockId),
+				),
+				createResponse(formatRegionRenderProfileAssetId(1), createRegionRenderProfile()),
+			].map((response) => [response.assetId, response] as const),
 		);
-		expect(getStaticObjectBundleArtifacts(result)).toEqual([]);
+
+		const result = await runStaticLandblockRenderWorkerJob(
+			createJob("outdoor-detail"),
+			{
+				async lookupBinaryAssets(requests: readonly AssetLookupRequestDto[]) {
+					return {
+						responses: requests.map((request) => {
+							const response = lookup.get(request.assetId);
+							if (!response) {
+								throw new Error(`Missing test response ${request.assetId}.`);
+							}
+							return response;
+						}),
+					};
+				},
+			},
+		);
+
+		expect(result.product).toBe("outdoor-detail");
+		expect(getLandblockTerrainRenderArtifact(result)).toBeNull();
+		expect(
+			getStaticObjectBundleArtifacts(result).map((layer) => layer.bundleKind),
+		).toEqual(["outdoor-detail"]);
 	});
 
 	it("builds an outdoor-env-cells product without loading outdoor roots", async () => {
@@ -488,7 +520,7 @@ describe("static landblock render worker", () => {
 
 		await expect(
 			runStaticLandblockRenderWorkerJob(
-				createJob("outdoor"),
+				createJob("outdoor-terrain"),
 				{
 					async lookupBinaryAssets() {
 						lookupCount += 1;

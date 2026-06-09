@@ -9,7 +9,7 @@ import {
 import { planDesiredLandblockRenderProducts } from "./landblock-render-product-planner";
 
 describe("landblock render product planner", () => {
-	it("plans additive outdoor and env-cell products by route boundary", () => {
+	it("plans split outdoor products by independent LoD domain", () => {
 		const destination = parseBrowserLocationInput("da55", "manual", "outdoor");
 		expect(destination).not.toBeNull();
 
@@ -27,34 +27,86 @@ describe("landblock render product planner", () => {
 			},
 		});
 
-		expect(products).toHaveLength(10);
-		expect(products[0]).toEqual({
-			landblockId: 0xda55ffff,
-			product: "outdoor",
-			priority: "resident-now",
-			requestId: "request:1",
-			buildPolicyRevision: "build:v1",
-			texturePagePolicyRevision: "texture-pages:v1",
-			buildPolicy: createBuildPolicy(),
-		});
-		expect(products[1]).toEqual({
-			landblockId: 0xda55ffff,
-			product: "outdoor-env-cells",
-			priority: "resident-now",
-			requestId: "request:1",
-			buildPolicyRevision: "build:v1",
-			texturePagePolicyRevision: "texture-pages:v1",
-			buildPolicy: createBuildPolicy(),
-		});
+		expect(products).toHaveLength(28);
+		expect(products.slice(0, 4)).toEqual([
+			{
+				landblockId: 0xda55ffff,
+				product: "outdoor-terrain",
+				priority: "resident-now",
+				requestId: "request:1",
+				buildPolicyRevision: "build:v1",
+				texturePagePolicyRevision: "texture-pages:v1",
+				buildPolicy: createBuildPolicy(),
+			},
+			{
+				landblockId: 0xda55ffff,
+				product: "outdoor-buildings",
+				priority: "resident-now",
+				requestId: "request:1",
+				buildPolicyRevision: "build:v1",
+				texturePagePolicyRevision: "texture-pages:v1",
+				buildPolicy: createBuildPolicy(),
+			},
+			{
+				landblockId: 0xda55ffff,
+				product: "outdoor-detail",
+				priority: "resident-now",
+				requestId: "request:1",
+				buildPolicyRevision: "build:v1",
+				texturePagePolicyRevision: "texture-pages:v1",
+				buildPolicy: createBuildPolicy(),
+			},
+			{
+				landblockId: 0xda55ffff,
+				product: "outdoor-env-cells",
+				priority: "resident-now",
+				requestId: "request:1",
+				buildPolicyRevision: "build:v1",
+				texturePagePolicyRevision: "texture-pages:v1",
+				buildPolicy: createBuildPolicy(),
+			},
+		]);
 		expect(
 			products.filter((product) => product.product === "outdoor-env-cells"),
 		).toHaveLength(1);
 		expect(
-			products.filter((product) => product.product === "outdoor"),
+			products.filter((product) => product.product === "outdoor-terrain"),
+		).toHaveLength(9);
+		expect(
+			products.filter((product) => product.product === "outdoor-buildings"),
+		).toHaveLength(9);
+		expect(
+			products.filter((product) => product.product === "outdoor-detail"),
 		).toHaveLength(9);
 		expect(new Set(products.map((product) => product.landblockId)).size).toBe(
 			9,
 		);
+	});
+
+	it("keeps default outdoor coverage split by terrain, static, and env-cell radii", () => {
+		const destination = parseBrowserLocationInput("da55", "manual", "outdoor");
+		expect(destination).not.toBeNull();
+
+		const products = planDesiredLandblockRenderProducts({
+			browserDestination: destination,
+			requestId: "request:default",
+			buildPolicyRevision: "build:v1",
+			texturePagePolicyRevision: "texture-pages:v1",
+			buildPolicy: createBuildPolicy(),
+		});
+
+		expect(
+			products.filter((product) => product.product === "outdoor-terrain"),
+		).toHaveLength(25);
+		expect(
+			products.filter((product) => product.product === "outdoor-buildings"),
+		).toHaveLength(9);
+		expect(
+			products.filter((product) => product.product === "outdoor-detail"),
+		).toHaveLength(9);
+		expect(
+			products.filter((product) => product.product === "outdoor-env-cells"),
+		).toHaveLength(9);
 	});
 
 	it("does not require topology, env-cell roots, or source revisions to schedule topology products", () => {
@@ -78,7 +130,25 @@ describe("landblock render product planner", () => {
 		expect(products).toEqual([
 			{
 				landblockId: 0xda55ffff,
-				product: "outdoor",
+				product: "outdoor-terrain",
+				priority: "resident-now",
+				requestId: "request:detail",
+				buildPolicyRevision: "build:v2",
+				texturePagePolicyRevision: "texture-pages:v2",
+				buildPolicy: createBuildPolicy(),
+			},
+			{
+				landblockId: 0xda55ffff,
+				product: "outdoor-buildings",
+				priority: "resident-now",
+				requestId: "request:detail",
+				buildPolicyRevision: "build:v2",
+				texturePagePolicyRevision: "texture-pages:v2",
+				buildPolicy: createBuildPolicy(),
+			},
+			{
+				landblockId: 0xda55ffff,
+				product: "outdoor-detail",
 				priority: "resident-now",
 				requestId: "request:detail",
 				buildPolicyRevision: "build:v2",
@@ -104,7 +174,7 @@ describe("landblock render product planner", () => {
 	it("creates worker jobs from product identity without legacy layer scheduling fields", () => {
 		const desired: DesiredLandblockRenderProduct = {
 			landblockId: 0xda55ffff,
-			product: "outdoor",
+			product: "outdoor-terrain",
 			priority: "resident-now",
 			requestId: "request:outdoor",
 			buildPolicyRevision: "build:v1",
@@ -117,9 +187,9 @@ describe("landblock render product planner", () => {
 		expect(job).toEqual({
 			type: "build-landblock-render-product",
 			jobId:
-				"landblock-render-product:3663069183:outdoor:build:v1:texture-pages:v1:artifacts:all",
+				"landblock-render-product:3663069183:outdoor-terrain:build:v1:texture-pages:v1:artifacts:all",
 			landblockId: 0xda55ffff,
-			product: "outdoor",
+			product: "outdoor-terrain",
 			requestId: "request:outdoor",
 			buildPolicyRevision: "build:v1",
 			texturePagePolicyRevision: "texture-pages:v1",
@@ -135,7 +205,7 @@ describe("landblock render product planner", () => {
 			type: "landblock-render-product-built",
 			jobId: "job:outdoor",
 			landblockId: 0xda55ffff,
-			product: "outdoor",
+			product: "outdoor-terrain",
 			requestId: "request:outdoor",
 			buildPolicyRevision: "build:v1",
 			texturePagePolicyRevision: "texture-pages:v1",
@@ -153,7 +223,7 @@ describe("landblock render product planner", () => {
 		expect(Object.keys(result)).not.toContain("staticBundleLayers");
 	});
 
-	it("does not invent a summary product for distant terrain-only interest", () => {
+	it("keeps focus-landblock outdoor domains split instead of inventing a summary product", () => {
 		const destination = parseBrowserLocationInput("da55", "manual", "outdoor");
 		expect(destination).not.toBeNull();
 
@@ -171,7 +241,11 @@ describe("landblock render product planner", () => {
 			},
 		});
 
-		expect(products.map((product) => product.product)).toEqual(["outdoor"]);
+		expect(products.map((product) => product.product)).toEqual([
+			"outdoor-terrain",
+			"outdoor-buildings",
+			"outdoor-detail",
+		]);
 	});
 
 	it("plans dungeon env-cell products while focused indoors", () => {

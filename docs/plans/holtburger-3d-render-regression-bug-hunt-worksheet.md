@@ -2560,7 +2560,7 @@ Verification:
 
 ### Phase 21E: Decouple Diagnostics Sampling From Svelte Reactivity
 
-Status: planned.
+Status: complete.
 
 Deliverables:
 
@@ -2578,6 +2578,21 @@ Acceptance criteria:
 - Resource inspector/debug report snapshots can lag briefly and eventually converge.
 - No renderer hot-path dependency is introduced by diagnostic sampling.
 - Browser panel asset/cache/material text can update eventually without subscribing expensive summary generation to every prepared-asset mutation.
+
+Implementation notes:
+
+- Added a small `createCadencedDirtySampler()` diagnostics utility. Asset/frontend events only call `markDirty()`; the expensive sample callback runs on a fixed cadence or when explicitly requested.
+- Replaced `BrowserWorldDisplay.svelte`'s debounced asset diagnostic summary path with cadence-based sampling. `applyFrontendState()` and prepared-asset resolver events now mark diagnostics dirty without building asset summaries, material diagnostics, cache diagnostics, sorted landblock route lists, or gfx invalid-polygon samples synchronously.
+- Debug report generation calls `sampleAssetDiagnosticsNow()` before building the report, so reports remain request-accurate while side-panel asset/cache/material text may lag by the sampling cadence.
+- The sampler is component-local presentation plumbing only. It does not request renderer frames and does not feed renderer resource invalidation.
+
+Verification:
+
+- `npm run --prefix apps/holtburger-3d test:ts -- src/lib/diagnostics/cadenced-dirty-sampler.test.ts src/lib/assets/prepared-asset-store.test.ts src/lib/world-display/browser-render-resource-coordinator.test.ts`
+- `npm run --prefix apps/holtburger-3d test:ts`
+- `npm run --prefix apps/holtburger-3d lint:ts`
+- `npm run --prefix apps/holtburger-3d check`
+- `rg -n "DEBUG_SUMMARY|debugSummaryTimer|scheduleAssetDebugSummaryUpdate|sampleAssetDiagnosticsIfDirty|countPreparedAssetsByKindFromResolver\\(preparedAssetResolver\\)" apps/holtburger-3d/src/pages/BrowserWorldDisplay.svelte` now shows only the cadence/on-demand diagnostic describe functions for prepared-count work.
 
 ### Phase 21F: Reintroduce Independent Pruning Safely
 

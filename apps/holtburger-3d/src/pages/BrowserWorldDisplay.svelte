@@ -52,6 +52,10 @@
 	import { formatPreparedAssetKindCounts } from "../lib/assets/asset-cache-diagnostics";
 	import { getPreparedAssetHotPathDiagnosticsSnapshot } from "../lib/assets/prepared-asset-hot-path-diagnostics";
 	import { describeMaterialAssetDiagnostics } from "../lib/assets/material-diagnostics";
+	import {
+		createCadencedDirtySampler,
+		type CadencedDirtySampler,
+	} from "../lib/diagnostics/cadenced-dirty-sampler";
 	import type {
 		RenderSpatialItemKind,
 		RenderSpatialMetadata,
@@ -269,7 +273,7 @@
 	const pressedCameraControlKeys = new Set<string>();
 	let lastAppliedFollowResidencyKey: string | null = null;
 	let lastManualFitDestinationIdentity: string | null = null;
-	let debugSummaryTimer: ReturnType<typeof setTimeout> | null = null;
+	let assetDiagnosticsSampler: CadencedDirtySampler | null = null;
 	let assetSummaryText = $state("Waiting for asset activity.");
 	let assetDebugText = $state("Waiting for asset activity.");
 	let assetPipelineDebugText = $state("Waiting for asset activity.");
@@ -309,7 +313,7 @@
 		}
 	});
 
-	const DEBUG_SUMMARY_DEBOUNCE_MS = 500;
+	const ASSET_DIAGNOSTICS_SAMPLE_MS = 1_000;
 	const MIN_TEXTURE_PREVIEW_ZOOM = 0.05;
 	const MAX_TEXTURE_PREVIEW_ZOOM = 32;
 	const TEXTURE_PREVIEW_ZOOM_STEP = 1.25;
@@ -542,13 +546,23 @@
 	onMount(() => {
 		const unsubscribeFrontendState =
 			frontendState.subscribe(applyFrontendState);
+		const unsubscribePreparedAssets = preparedAssetResolver.subscribe(() => {
+			markAssetDiagnosticsDirty();
+		});
+		assetDiagnosticsSampler = createCadencedDirtySampler({
+			intervalMs: ASSET_DIAGNOSTICS_SAMPLE_MS,
+			sample: sampleAssetDiagnostics,
+		});
+		assetDiagnosticsSampler.start();
 		void tick().then(() => {
+			sampleAssetDiagnosticsNow();
 			renderResourceCoordinator.setSurface(worldDisplaySurface);
 			scheduleCurrentSceneResourceUpdate();
 		});
 
 		return () => {
 			unsubscribeFrontendState();
+			unsubscribePreparedAssets();
 			renderResourceCoordinator.setSurface(null);
 		};
 	});
@@ -838,6 +852,7 @@
 	}
 
 	function buildCurrentFrameDebugReport(): string {
+		sampleAssetDiagnosticsNow();
 		return buildRenderDebugReport({
 			generatedAtIso: new Date().toISOString(),
 			destinationFocusLabel: worldDisplay.destinationFocusLabel,
@@ -1246,7 +1261,7 @@
 		commitRenderAnchorForDestination(browserDestination);
 		resetManualInteriorCameraIfNeeded(browserDestinationIdentity);
 		applyFollowResidencyDestination();
-		scheduleAssetDebugSummaryUpdate();
+		markAssetDiagnosticsDirty();
 		scheduleCurrentSceneResourceUpdate();
 	}
 
@@ -1379,29 +1394,34 @@
 		};
 	}
 
-	function scheduleAssetDebugSummaryUpdate(): void {
-		if (debugSummaryTimer) {
-			clearTimeout(debugSummaryTimer);
-		}
+	function markAssetDiagnosticsDirty(): void {
+		assetDiagnosticsSampler?.markDirty();
+	}
 
-		debugSummaryTimer = setTimeout(() => {
-			assetSummaryText = describeAssetSummaryState();
-			assetDebugText = describeAssetDebugState();
-			assetPipelineDebugText = describeAssetPipelineDebugState();
-			assetMaterialDebugText = describeMaterialAssetDiagnostics({
-				assetPresentationState: assetState,
-				preparedAssetResolver,
-				browserDestination,
-				options: {
-					terrainRadius: terrainLodRadius,
-					buildingRadius: buildingLodRadius,
-					detailRadius: detailLodRadius,
-					envCellRadius: envCellLodRadius,
-				},
-			});
-			assetCacheDebugText = describeAssetCacheDebugState();
-			debugSummaryTimer = null;
-		}, DEBUG_SUMMARY_DEBOUNCE_MS);
+	function sampleAssetDiagnosticsNow(): void {
+		if (assetDiagnosticsSampler) {
+			assetDiagnosticsSampler.sampleNow();
+			return;
+		}
+		sampleAssetDiagnostics();
+	}
+
+	function sampleAssetDiagnostics(): void {
+		assetSummaryText = describeAssetSummaryState();
+		assetDebugText = describeAssetDebugState();
+		assetPipelineDebugText = describeAssetPipelineDebugState();
+		assetMaterialDebugText = describeMaterialAssetDiagnostics({
+			assetPresentationState: assetState,
+			preparedAssetResolver,
+			browserDestination,
+			options: {
+				terrainRadius: terrainLodRadius,
+				buildingRadius: buildingLodRadius,
+				detailRadius: detailLodRadius,
+				envCellRadius: envCellLodRadius,
+			},
+		});
+		assetCacheDebugText = describeAssetCacheDebugState();
 	}
 
 	function scheduleSceneResourceUpdate(
@@ -2475,10 +2495,8 @@
 
 	onDestroy(() => {
 		staticLandblockRenderCoordinator.dispose();
-		if (debugSummaryTimer) {
-			clearTimeout(debugSummaryTimer);
-			debugSummaryTimer = null;
-		}
+		assetDiagnosticsSampler?.dispose();
+		assetDiagnosticsSampler = null;
 		if (renderResourceUpdateTimer) {
 			clearTimeout(renderResourceUpdateTimer);
 			renderResourceUpdateTimer = null;

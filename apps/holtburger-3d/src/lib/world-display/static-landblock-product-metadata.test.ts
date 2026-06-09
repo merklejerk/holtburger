@@ -56,9 +56,9 @@ function createTerrainProductResult(): LandblockRenderProductWorkerResult {
 	return {
 		type: "landblock-render-product-built",
 		jobId:
-			"landblock-render-product:3663069183:outdoor:build:v1:texture-pages:v1",
+			"landblock-render-product:3663069183:outdoor-terrain:build:v1:texture-pages:v1",
 		landblockId,
-		product: "outdoor",
+		product: "outdoor-terrain",
 		requestId: "request:test",
 		buildPolicyRevision: "build:v1",
 		texturePagePolicyRevision: "texture-pages:v1",

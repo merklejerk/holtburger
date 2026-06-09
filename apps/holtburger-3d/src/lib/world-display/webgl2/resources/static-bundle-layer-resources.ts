@@ -156,8 +156,12 @@ export function commitWebgl2StaticBundleProductResources({
 	layers: readonly StaticObjectBundleArtifact[];
 	textureFilteringMode?: TextureFilteringMode;
 	maxAnisotropy?: number;
-}): Webgl2StaticBundleProductResource {
+}): Webgl2StaticBundleProductResource | null {
 	const key = formatStaticLandblockProductKey(productKey);
+	if (layers.length === 0) {
+		evictWebgl2StaticBundleProductResources({ store, productKey });
+		return null;
+	}
 	const signature = describeStaticBundleProductResourceSignature(layers);
 	const previous = store.productsByKey.get(key);
 	if (previous && previous.signature === signature) {

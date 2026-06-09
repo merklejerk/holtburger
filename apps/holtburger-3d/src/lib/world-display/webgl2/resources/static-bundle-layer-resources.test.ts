@@ -187,6 +187,31 @@ describe("static bundle layer WebGL2 resources", () => {
 		expect(gl.deletedTextures).toHaveLength(4);
 	});
 
+	it("evicts instead of retaining an empty static bundle product", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2StaticBundleLayerResourceStore();
+		const productKey = createProductKey();
+		const layer = createLayer();
+
+		commitWebgl2StaticBundleProductResources({
+			gl: gl.asContext(),
+			store,
+			productKey,
+			layers: [layer],
+		});
+		const emptyProduct = commitWebgl2StaticBundleProductResources({
+			gl: gl.asContext(),
+			store,
+			productKey,
+			layers: [],
+		});
+
+		expect(emptyProduct).toBeNull();
+		expect(store.productsByKey.size).toBe(0);
+		expect(store.layersByKey.size).toBe(0);
+		expect(gl.deletedTextures).toHaveLength(2);
+	});
+
 	it("applies anisotropy to color page samplers", () => {
 		const gl = new FakeWebgl2();
 		const store = createWebgl2StaticBundleLayerResourceStore();
@@ -860,11 +885,11 @@ function createLayer(
 }
 
 function createProductKey() {
-	return {
-		landblockId: 0x1234,
-		product: "outdoor" as const,
-		buildPolicyRevision: "build:v1",
-		texturePagePolicyRevision: "texture-pages:v1",
+		return {
+			landblockId: 0x1234,
+			product: "outdoor-buildings" as const,
+			buildPolicyRevision: "build:v1",
+			texturePagePolicyRevision: "texture-pages:v1",
 	};
 }
 

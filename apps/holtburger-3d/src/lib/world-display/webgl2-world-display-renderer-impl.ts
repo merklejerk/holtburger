@@ -1042,10 +1042,12 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		bundleKind: StaticObjectBundleArtifact["bundleKind"],
 	): boolean {
 		switch (product) {
-			case "outdoor":
-				return (
-					bundleKind === "outdoor-buildings" || bundleKind === "outdoor-detail"
-				);
+			case "outdoor-terrain":
+				return false;
+			case "outdoor-buildings":
+				return bundleKind === "outdoor-buildings";
+			case "outdoor-detail":
+				return bundleKind === "outdoor-detail";
 			case "outdoor-env-cells":
 			case "dungeon-env-cells":
 				return bundleKind === "env-cell-static";

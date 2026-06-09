@@ -162,7 +162,7 @@ export async function runStaticLandblockRenderWorkerJob(
 	throwIfWorkerJobCanceled(options);
 	const assetState = createWorkerAssetState(preparedByAssetId);
 	const terrainArtifact =
-		job.product === "outdoor" && shouldBuildArtifact(job, "terrain")
+		shouldBuildTerrainArtifact(job)
 			? buildOutdoorTerrainArtifact(job, preparedByAssetId, assetState)
 			: null;
 	const staticObjectBundles = buildProductStaticBundleLayers(job, preparedByAssetId);
@@ -216,15 +216,13 @@ async function loadProductRoots(options: {
 		import("../lib/host/contracts").AssetLookupResponseDto
 	>;
 }): Promise<void> {
-	if (options.job.product === "outdoor") {
+	if (isOutdoorSourceProduct(options.job.product)) {
 		await loadClosureRoots({
 			rootAssetIds: [formatLandblockOutdoorAssetId(options.job.landblockId)],
 			job: options.job,
 			lookup: options.lookup,
 			responseByAssetId: options.responseByAssetId,
-			shouldExpandResponse: shouldLoadOutdoorRootOnly(options.job)
-				? () => false
-				: undefined,
+			shouldExpandResponse: () => false,
 		});
 		return;
 	}
@@ -336,7 +334,11 @@ async function loadPreparedCompanionClosure(options: {
 	while (true) {
 		const companionAssetIds = uniqueSortedStrings([
 			...collectTerrainCompanionAssetIds(options.preparedByAssetId).filter(
-				() => shouldBuildArtifact(options.job, "terrain"),
+				() => shouldBuildTerrainArtifact(options.job),
+			),
+			...collectOutdoorStaticCompanionAssetIds(
+				options.job,
+				options.preparedByAssetId,
 			),
 			...collectSetupAppearanceCompanionAssetIds(options.preparedByAssetId),
 			...collectStaticPreparedTextureAssetIds(options.preparedByAssetId),
@@ -375,13 +377,30 @@ async function loadPreparedCompanionClosure(options: {
 	}
 }
 
-function shouldLoadOutdoorRootOnly(
+function isOutdoorSourceProduct(
+	product: LandblockRenderProductWorkerJob["product"],
+): boolean {
+	return (
+		product === "outdoor-terrain" ||
+		product === "outdoor-buildings" ||
+		product === "outdoor-detail"
+	);
+}
+
+function shouldBuildTerrainArtifact(
 	job: LandblockRenderProductWorkerJob,
 ): boolean {
 	return (
-		job.product === "outdoor" &&
-		shouldBuildArtifact(job, "terrain") &&
-		!shouldBuildArtifact(job, "static-objects")
+		job.product === "outdoor-terrain" && shouldBuildArtifact(job, "terrain")
+	);
+}
+
+function shouldBuildOutdoorStaticObjects(
+	job: LandblockRenderProductWorkerJob,
+): boolean {
+	return (
+		(job.product === "outdoor-buildings" || job.product === "outdoor-detail") &&
+		shouldBuildArtifact(job, "static-objects")
 	);
 }
 
@@ -414,6 +433,24 @@ function collectTerrainCompanionAssetIds(
 			(assetId): assetId is string => assetId !== null,
 		),
 	]);
+}
+
+function collectOutdoorStaticCompanionAssetIds(
+	job: LandblockRenderProductWorkerJob,
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>,
+): string[] {
+	if (!shouldBuildOutdoorStaticObjects(job)) {
+		return [];
+	}
+	return [...preparedByAssetId.values()].flatMap((asset) =>
+		asset.payload.kind === "landblock-outdoor"
+			? [
+					formatRegionRenderProfileAssetId(asset.payload.regionNumber),
+					...asset.payload.dependencies.renderableSourceAssetIds,
+					...asset.payload.dependencies.materialAssetIds,
+				]
+			: [],
+	);
 }
 
 function collectSetupAppearanceCompanionAssetIds(
@@ -487,11 +524,14 @@ function buildProductStaticBundleLayers(
 	if (!shouldBuildArtifact(job, "static-objects")) {
 		return [];
 	}
-	if (job.product === "outdoor") {
-		return [
-			buildStaticObjectBundle(job, preparedByAssetId, "outdoor-buildings"),
-			buildStaticObjectBundle(job, preparedByAssetId, "outdoor-detail"),
-		];
+	if (job.product === "outdoor-terrain") {
+		return [];
+	}
+	if (job.product === "outdoor-buildings") {
+		return [buildStaticObjectBundle(job, preparedByAssetId, "outdoor-buildings")];
+	}
+	if (job.product === "outdoor-detail") {
+		return [buildStaticObjectBundle(job, preparedByAssetId, "outdoor-detail")];
 	}
 
 	const topology = preparedByAssetId.get(

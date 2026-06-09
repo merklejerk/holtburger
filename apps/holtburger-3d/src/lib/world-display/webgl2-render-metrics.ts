@@ -144,20 +144,29 @@ export function createWebgl2RenderMetrics(
 			terrainAtlasBlockerTileCount:
 				input.worldStore?.terrainAtlasBlockerTileCount ?? 0,
 			staticLandblockProductCount: input.worldStore
-				? new Set([
-						...input.worldStore.staticBundleLayerResources.productsByKey.keys(),
-						...input.worldStore.structuredInteriorResources.productsByKey.keys(),
-						...input.worldStore.terrainTileIdsByProductKey.keys(),
-					]).size
+				? new Set(collectStaticLandblockProductIdentityKeys(input.worldStore))
+						.size
 				: 0,
+			staticLandblockProductDomainCounts: input.worldStore
+				? countProductDomains(
+						collectStaticLandblockProductIdentityKeys(input.worldStore),
+					)
+				: {},
 			staticBundleProductResourceCount:
 				input.worldStore?.staticBundleLayerResources.productsByKey.size ?? 0,
+			staticBundleProductDomainCounts: countProductDomains(
+				input.worldStore?.staticBundleLayerResources.productsByKey.keys() ?? [],
+			),
 			staticBundleLayerResourceCount:
 				input.worldStore?.staticBundleLayerResourceCount ?? 0,
 			staticBundleLayerTexturePageResourceCount:
 				input.worldStore?.staticBundleLayerTexturePageResourceCount ?? 0,
 			structuredInteriorProductResourceCount:
 				input.worldStore?.structuredInteriorProductResourceCount ?? 0,
+			structuredInteriorProductDomainCounts: countProductDomains(
+				input.worldStore?.structuredInteriorResources.productResourceKeyByProductKey.keys() ??
+					[],
+			),
 			structuredInteriorCellResourceCount:
 				input.worldStore?.structuredInteriorResourceCount ?? 0,
 			structuredInteriorTexturePageResourceCount:
@@ -166,6 +175,9 @@ export function createWebgl2RenderMetrics(
 				input.worldStore?.structuredInteriorMaterialRecordResourceCount ?? 0,
 			terrainProductResourceCount:
 				input.worldStore?.terrainTileIdsByProductKey.size ?? 0,
+			terrainProductDomainCounts: countProductDomains(
+				input.worldStore?.terrainTileIdsByProductKey.keys() ?? [],
+			),
 			productTerrainTexturePageCount:
 				input.worldStore?.productTerrainTexturePagesByKey.size ?? 0,
 			portalMaskProductResourceCount:
@@ -434,4 +446,23 @@ export function createWebgl2RenderMetrics(
 				),
 		},
 	};
+}
+
+function collectStaticLandblockProductIdentityKeys(
+	worldStore: Webgl2WorldResourceStore,
+): string[] {
+	return [
+		...worldStore.staticBundleLayerResources.productsByKey.keys(),
+		...worldStore.structuredInteriorResources.productResourceKeyByProductKey.keys(),
+		...worldStore.terrainTileIdsByProductKey.keys(),
+	];
+}
+
+function countProductDomains(productKeys: Iterable<string>): Record<string, number> {
+	const counts: Record<string, number> = {};
+	for (const key of new Set(productKeys)) {
+		const product = key.split(":")[2] ?? "unknown";
+		counts[product] = (counts[product] ?? 0) + 1;
+	}
+	return counts;
 }

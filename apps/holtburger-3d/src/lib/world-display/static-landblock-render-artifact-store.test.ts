@@ -43,7 +43,7 @@ describe("static landblock render artifact store", () => {
 function createDesired(requestId: string): DesiredLandblockRenderProduct {
 	return {
 		landblockId: 0xda55ffff,
-		product: "outdoor",
+		product: "outdoor-terrain",
 		priority: "resident-now",
 		requestId,
 		buildPolicyRevision: "build:v1",
@@ -64,7 +64,7 @@ function createResult(requestId: string) {
 		type: "landblock-render-product-built" as const,
 		jobId: `job:${requestId}`,
 		landblockId: 0xda55ffff,
-		product: "outdoor" as const,
+		product: "outdoor-terrain" as const,
 		requestId,
 		buildPolicyRevision: "build:v1",
 		texturePagePolicyRevision: "texture-pages:v1",

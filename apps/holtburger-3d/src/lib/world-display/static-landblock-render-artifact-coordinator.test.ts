@@ -30,23 +30,31 @@ describe("static landblock render artifact coordinator", () => {
 			envCellLodRadius: -1,
 		});
 
-		expect(client.requests).toHaveLength(1);
+		expect(client.requests.map((request) => request.product)).toEqual([
+			"outdoor-terrain",
+			"outdoor-buildings",
+			"outdoor-detail",
+		]);
 		expect(client.requests[0]).toMatchObject({
 			landblockId: 0xda55ffff,
-			product: "outdoor",
+			product: "outdoor-terrain",
 			buildPolicyRevision: "static-landblock-render:v1",
 			texturePagePolicyRevision: "static-landblock-texture-pages:v1",
 		});
-		client.resolveNext(createResult(client.requests[0]!));
+		for (const request of client.requests) {
+			client.resolveNext(createResult(request));
+		}
 		await Promise.resolve();
 
 		expect(coordinator.getProductSet()).toMatchObject({
-			desiredCount: 1,
-			residentCount: 1,
-			committedResultCount: 1,
+			desiredCount: 3,
+			residentCount: 3,
+			committedResultCount: 3,
 		});
-		expect(committedRequestIds).toEqual([client.requests[0]!.requestId]);
-		expect(productSets).toEqual([1]);
+		expect(committedRequestIds).toEqual(
+			client.requests.map((request) => request.requestId),
+		);
+		expect(productSets).toEqual([1, 2, 3]);
 		coordinator.dispose();
 	});
 
@@ -69,7 +77,9 @@ describe("static landblock render artifact coordinator", () => {
 			detailLodRadius: -1,
 			envCellLodRadius: -1,
 		});
-		client.resolveNext(createResult(client.requests[0]!));
+		for (const request of client.requests) {
+			client.resolveNext(createResult(request));
+		}
 		await Promise.resolve();
 		coordinator.sync({
 			browserDestination: null,
@@ -79,7 +89,11 @@ describe("static landblock render artifact coordinator", () => {
 			envCellLodRadius: -1,
 		});
 
-		expect(evictedKeys).toEqual(["3663069183:outdoor"]);
+		expect(evictedKeys).toEqual([
+			"3663069183:outdoor-terrain",
+			"3663069183:outdoor-buildings",
+			"3663069183:outdoor-detail",
+		]);
 		coordinator.dispose();
 	});
 
@@ -100,11 +114,13 @@ describe("static landblock render artifact coordinator", () => {
 
 		coordinator.sync(input);
 		const firstRequestId = client.requests[0]?.requestId;
-		client.resolveNext(createResult(client.requests[0]!));
+		for (const request of client.requests) {
+			client.resolveNext(createResult(request));
+		}
 		await Promise.resolve();
 		coordinator.sync(input);
 
-		expect(client.requests).toHaveLength(1);
+		expect(client.requests).toHaveLength(3);
 		expect(firstRequestId).toBe("static-landblock-render:1");
 		coordinator.dispose();
 	});

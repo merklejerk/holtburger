@@ -258,7 +258,7 @@ function createStaticBundleProductArtifact(): LandblockRenderProductWorkerResult
 		type: "landblock-render-product-built",
 		jobId: "job:static:test",
 		landblockId,
-		product: "outdoor",
+		product: "outdoor-detail",
 		requestId: "request:static:test",
 		buildPolicyRevision: "build:v1",
 		texturePagePolicyRevision: "pages:v1",

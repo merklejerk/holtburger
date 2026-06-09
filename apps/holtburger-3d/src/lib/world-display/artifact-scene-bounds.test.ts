@@ -80,7 +80,7 @@ function createOutdoorProduct({
 		type: "landblock-render-product-built",
 		jobId: "job:outdoor",
 		landblockId,
-		product: "outdoor",
+		product: "outdoor-terrain",
 		requestId: "request:outdoor",
 		buildPolicyRevision: "build:v1",
 		texturePagePolicyRevision: "pages:v1",

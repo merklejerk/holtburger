@@ -8,7 +8,7 @@ import {
 	type SceneResourceInterest,
 	type SceneResourceLocation,
 } from "../lib/scene-runtime/scene-resource-interest";
-import { formatHex32, normalizeOutdoorLandblockId } from "../lib/landblocks";
+import { normalizeOutdoorLandblockId } from "../lib/landblocks";
 
 export function createSceneResourceInterestFromBrowserMode(
 	browserMode: BrowserModeState,
@@ -40,35 +40,6 @@ export function createSceneResourceInterestFromBrowserDestination(input: {
 			envCells: input.envCellLodRadius,
 		},
 	});
-}
-
-export function createBrowserDestinationFromSceneResourceInterest(
-	interest: SceneResourceInterest,
-): BrowserLocationSelection | null {
-	const location = interest.location;
-	if (!location) {
-		return null;
-	}
-	if (location.kind === "interior-cell") {
-		return {
-			kind: "interior-cell",
-			label: `Env cell ${formatHex32(location.envCellId)}`,
-			source: "manual",
-			envCellId: location.envCellId,
-			landblockId: location.landblockId,
-		};
-	}
-	return {
-		kind: "outdoor-location",
-		label: `Landblock ${formatHex32(location.landblockId)}`,
-		source: "manual",
-		northSouth: 0,
-		northSouthHemisphere: "N",
-		eastWest: 0,
-		eastWestHemisphere: "E",
-		elevation: 0,
-		landblockId: location.landblockId,
-	};
 }
 
 function createSceneResourceLocationFromBrowserDestination(

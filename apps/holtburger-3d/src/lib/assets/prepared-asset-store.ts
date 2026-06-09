@@ -13,13 +13,13 @@ import type {
 export type PreparedAssetChangeEvent =
 	| {
 			type: "prepared-assets-updated";
-			assetIds: readonly string[];
+			assets: readonly PreparedAssetChangeDescriptor[];
 			preparedRevision: number;
 			cacheMetadataRevision: number;
 	  }
 	| {
 			type: "prepared-assets-evicted";
-			assetIds: readonly string[];
+			assets: readonly PreparedAssetChangeDescriptor[];
 			preparedRevision: number;
 			cacheMetadataRevision: number;
 	  }
@@ -27,6 +27,11 @@ export type PreparedAssetChangeEvent =
 			type: "cache-metadata-updated";
 			cacheMetadataRevision: number;
 	  };
+
+export interface PreparedAssetChangeDescriptor {
+	assetId: string;
+	kind: PreparedAssetRecord["payload"]["kind"];
+}
 
 export interface PreparedAssetResolver {
 	get(assetId: string): PreparedAssetRecord | null;
@@ -109,7 +114,10 @@ export class PreparedAssetStore {
 		this.cacheMetadataRevision += 1;
 		this.emit({
 			type: "prepared-assets-updated",
-			assetIds: assets.map((asset) => asset.request.assetId),
+			assets: assets.map((asset) => ({
+				assetId: asset.request.assetId,
+				kind: asset.payload.kind,
+			})),
 			preparedRevision: this.preparedRevision,
 			cacheMetadataRevision: this.cacheMetadataRevision,
 		});
@@ -118,10 +126,18 @@ export class PreparedAssetStore {
 	applyPrunePlan(prunePlan: PreparedAssetCachePrunePlan): void {
 		const retainedAssetIds = new Set(prunePlan.retainedAssetIds);
 		let evictedAnyAsset = false;
+		const evictedAssets: PreparedAssetChangeDescriptor[] = [];
 
 		for (const assetId of [...this.preparedByAssetId.keys()]) {
 			if (retainedAssetIds.has(assetId)) {
 				continue;
+			}
+			const asset = this.preparedByAssetId.get(assetId);
+			if (asset) {
+				evictedAssets.push({
+					assetId,
+					kind: asset.payload.kind,
+				});
 			}
 			this.preparedByAssetId.delete(assetId);
 			evictedAnyAsset = true;
@@ -140,7 +156,7 @@ export class PreparedAssetStore {
 			this.preparedRevision += 1;
 			this.emit({
 				type: "prepared-assets-evicted",
-				assetIds: prunePlan.evictedAssetIds,
+				assets: evictedAssets,
 				preparedRevision: this.preparedRevision,
 				cacheMetadataRevision: this.cacheMetadataRevision,
 			});

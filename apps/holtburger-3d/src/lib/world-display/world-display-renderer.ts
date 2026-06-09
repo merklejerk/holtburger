@@ -63,7 +63,6 @@ function createDeferredWorldDisplayRenderer<
 	let disposed = false;
 
 	const { options } = input;
-	let assetState = options.assetState;
 	const { preparedAssetResolver } = options;
 	let staticLandblockRenderProducts = options.staticLandblockRenderProducts;
 	let debugOverlayScene = options.debugOverlayScene;
@@ -89,10 +88,6 @@ function createDeferredWorldDisplayRenderer<
 		});
 
 	return {
-		setAssetState(nextAssetState) {
-			assetState = nextAssetState;
-			loadedRenderer?.setAssetState(nextAssetState);
-		},
 		commitStaticLandblockProduct(result) {
 			staticLandblockRenderProducts = commitProductToSet(
 				staticLandblockRenderProducts,
@@ -207,7 +202,6 @@ function createDeferredWorldDisplayRenderer<
 
 	function currentOptions(): WorldDisplayRendererOptions {
 		return {
-			assetState,
 			preparedAssetResolver,
 			staticLandblockRenderProducts,
 			debugOverlayScene,

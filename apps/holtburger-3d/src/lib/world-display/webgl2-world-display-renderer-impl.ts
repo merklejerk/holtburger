@@ -55,6 +55,7 @@ import {
 	evictWebgl2TerrainProductResources,
 	refreshWebgl2StaticLandblockProductResourceCounters,
 	syncWebgl2TransitionPortalMaskResources,
+	updateWebgl2TerrainProductSamplerPolicy,
 	type Webgl2TransitionPortalMaskResource,
 	type Webgl2WorldResourceStore,
 } from "./webgl2-world-resources";
@@ -135,6 +136,11 @@ import type {
 import { calculateStaticLandblockArtifactSceneBoundsFrame } from "./artifact-scene-bounds";
 import { profileBrowserJsScope } from "../diagnostics/browser-js-profiler";
 import { recordPreparedAssetRendererSyncDiagnostics } from "../assets/prepared-asset-hot-path-diagnostics";
+import {
+	createAssetChannelStateSnapshotFromResolver,
+	type PreparedAssetChangeDescriptor,
+	type PreparedAssetChangeEvent,
+} from "../assets/prepared-asset-store";
 import { createStaticLandblockProductMetadataStore } from "./static-landblock-product-metadata";
 import {
 	commitWebgl2StaticBundleProductResources,
@@ -162,6 +168,9 @@ import {
 	type RenderResourceTexturePagePreview,
 } from "./render-resource-inspection";
 import type { NormalizedViewportPoint } from "./model";
+import {
+	createInitialAssetChannelState,
+} from "../assets/types";
 import type {
 	RenderSpatialItemKind,
 	RenderSpatialPick,
@@ -591,6 +600,21 @@ interface Webgl2SceneDomainFrameMetrics {
 	portalCompositeMaxDepth: number;
 }
 
+interface PendingPreparedAssetChangeQueue {
+	assetIds: Set<string>;
+	assetsById: Map<string, PreparedAssetChangeDescriptor>;
+	latestPreparedRevision: number;
+}
+
+interface StaticProductDependencyIndex {
+	commitProduct(result: LandblockRenderProductWorkerResult): void;
+	evictProduct(key: StaticLandblockProductKey): void;
+	clearProducts(): void;
+	findDependentProductKeys(
+		assets: readonly PreparedAssetChangeDescriptor[],
+	): string[];
+}
+
 export function createWebgl2WorldDisplayRendererImplementation(
 	host: HTMLDivElement,
 	options: WorldDisplayRendererOptions,
@@ -599,7 +623,11 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		throw new Error("WorldDisplay renderer requires a prepared asset resolver.");
 	}
 
-	let assetState = options.assetState;
+	const preparedAssetResolver = options.preparedAssetResolver;
+	let assetState = createAssetChannelStateSnapshotFromResolver(
+		createInitialAssetChannelState("webgl2-renderer"),
+		preparedAssetResolver,
+	);
 	const emptyTerrainScene = createEmptyTerrainSceneModel();
 	let staticLandblockRenderProducts = options.staticLandblockRenderProducts;
 	const staticRenderableScene = createEmptyStaticRenderableSceneModel();
@@ -655,11 +683,19 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	let latestPortalWorkPlan: Webgl2TransitionPortalWorkPlan | null = null;
 	let latestSceneBounds: SceneBoundsFrame | null = null;
 	const staticProductMetadata = createStaticLandblockProductMetadataStore();
+	const staticProductDependencies = createStaticProductDependencyIndex();
 	staticProductMetadata.updateRenderChunkTransforms(renderChunkTransforms);
 	for (const artifact of staticLandblockRenderProducts.artifacts) {
 		staticProductMetadata.commitProduct(artifact);
+		staticProductDependencies.commitProduct(artifact);
 	}
 	const selectedOverlayModelViewProjection = new Float32Array(16);
+	const pendingAssetChanges = createPendingPreparedAssetChangeQueue();
+	const unsubscribeFromPreparedAssets = preparedAssetResolver.subscribe(
+		(event) => {
+			queuePreparedAssetChange(event);
+		},
+	);
 
 	const canvas = document.createElement("canvas");
 	canvas.className = WEBGL2_CANVAS_CLASS_NAME;
@@ -680,24 +716,12 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	reportMetrics();
 
 	return {
-		setAssetState(nextAssetState) {
-			assetState = nextAssetState;
-			const recommittedProductCount = staticLandblockRenderProducts.artifacts.length;
-			recommitStaticProductRenderResources();
-			recordPreparedAssetRendererSyncDiagnostics({
-				source: "webgl2-world-display-renderer.setAssetState",
-				recommittedProductCount,
-				scheduledFrame: true,
-				completedAtMs: Date.now(),
-			});
-			reportMetrics();
-			scheduleFrame();
-		},
 		commitStaticLandblockProduct(result) {
 			staticLandblockRenderProducts = commitProductToSet(
 				staticLandblockRenderProducts,
 				result,
 			);
+			staticProductDependencies.commitProduct(result);
 			syncStaticProductTransitionPortalModel();
 			syncTransitionPortalMaskResources();
 			commitStaticProductRenderResources(result);
@@ -712,6 +736,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				staticLandblockRenderProducts,
 				key,
 			);
+			staticProductDependencies.evictProduct(key);
 			syncStaticProductTransitionPortalModel();
 			syncTransitionPortalMaskResources();
 			evictStaticProductRenderResources(key);
@@ -725,6 +750,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			clearStaticProductRenderResources(staticLandblockRenderProducts);
 			staticLandblockRenderProducts =
 				createEmptyStaticLandblockRenderProductSet();
+			staticProductDependencies.clearProducts();
 			syncStaticProductTransitionPortalModel();
 			syncTransitionPortalMaskResources();
 			staticProductMetadata.clearProducts();
@@ -826,6 +852,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				cancelAnimationFrame(frameHandle);
 				frameHandle = null;
 			}
+			unsubscribeFromPreparedAssets();
 			resizeObserver.disconnect();
 			destroyResources();
 			canvas.remove();
@@ -860,6 +887,81 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			showInitializationError(initializationError);
 			reportMetrics();
 		}
+	}
+
+	function queuePreparedAssetChange(event: PreparedAssetChangeEvent): void {
+		if (event.type === "cache-metadata-updated") {
+			return;
+		}
+		for (const asset of event.assets) {
+			pendingAssetChanges.assetIds.add(asset.assetId);
+			pendingAssetChanges.assetsById.set(asset.assetId, asset);
+		}
+		pendingAssetChanges.latestPreparedRevision = event.preparedRevision;
+	}
+
+	function flushPreparedAssetChanges(): void {
+		if (pendingAssetChanges.assetIds.size === 0) {
+			return;
+		}
+		const changedAssets = [...pendingAssetChanges.assetsById.values()];
+		pendingAssetChanges.assetIds.clear();
+		pendingAssetChanges.assetsById.clear();
+		pendingAssetChanges.latestPreparedRevision =
+			preparedAssetResolver.getPreparedRevision();
+		assetState = createAssetChannelStateSnapshotFromResolver(
+			assetState,
+			preparedAssetResolver,
+		);
+		const dirtyProductKeys =
+			staticProductDependencies.findDependentProductKeys(changedAssets);
+		const shouldRefreshTerrainResources =
+			dirtyProductKeys.some(isTerrainProductKey) ||
+			shouldAssetChangesRefreshTerrainResources(changedAssets);
+		const productsByKey = new Map(
+			staticLandblockRenderProducts.artifacts.map((product) => [
+				formatStaticLandblockProductKey(
+					createStaticLandblockProductKeyFromResult(product),
+				),
+				product,
+			]),
+		);
+		let recommittedProductCount = 0;
+		for (const productKey of dirtyProductKeys) {
+			const product = productsByKey.get(productKey);
+			if (!product) {
+				continue;
+			}
+			commitStaticProductRenderResources(product);
+			recommittedProductCount += 1;
+		}
+		if (shouldRefreshTerrainResources && recommittedProductCount === 0) {
+			refreshTerrainProductDerivedResources();
+		}
+		if (recommittedProductCount > 0 || shouldRefreshTerrainResources) {
+			resources?.stateCache.invalidate();
+			reportMetrics();
+		}
+		recordPreparedAssetRendererSyncDiagnostics({
+			source: "webgl2-world-display-renderer.resolver-events",
+			recommittedProductCount,
+			scheduledFrame: false,
+			completedAtMs: Date.now(),
+		});
+	}
+
+	function refreshTerrainProductDerivedResources(): void {
+		if (!resources) {
+			return;
+		}
+		updateWebgl2TerrainProductSamplerPolicy({
+			gl: resources.gl,
+			store: resources.worldStore,
+			assetState,
+			materialTextureCapabilities: resources.materialTextureCapabilities,
+			textureFilteringMode,
+			detailTexturesEnabled,
+		});
 	}
 
 	function commitStaticProductRenderResources(
@@ -1083,6 +1185,10 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		const currentResources = resources;
 		scheduleFrame();
 
+		profileBrowserJsScope(
+			"webgl2.frame.flushPreparedAssetChanges",
+			flushPreparedAssetChanges,
+		);
 		profileBrowserJsScope("webgl2.frame.syncCanvasSize", syncCanvasSize);
 		const renderStartedAt = window.performance.now();
 		const { gl } = currentResources;
@@ -3125,6 +3231,149 @@ function createTexturePagePreviewProgram(
 		fragmentSource: TEXTURE_PAGE_PREVIEW_FRAGMENT_SHADER,
 		uniforms: ["uTexture", "uPreviewMode"],
 	});
+}
+
+function createPendingPreparedAssetChangeQueue(): PendingPreparedAssetChangeQueue {
+	return {
+		assetIds: new Set(),
+		assetsById: new Map(),
+		latestPreparedRevision: 0,
+	};
+}
+
+function createStaticProductDependencyIndex(): StaticProductDependencyIndex {
+	const productDependenciesByKey = new Map<string, Set<string>>();
+	const productKeysByAssetId = new Map<string, Set<string>>();
+
+	return {
+		commitProduct(result) {
+			const productKey = formatStaticLandblockProductKey(
+				createStaticLandblockProductKeyFromResult(result),
+			);
+			removeProduct(productKey);
+			const dependencies = collectLandblockRenderProductPreparedAssetIds(result);
+			productDependenciesByKey.set(productKey, dependencies);
+			for (const assetId of dependencies) {
+				const productKeys = productKeysByAssetId.get(assetId) ?? new Set();
+				productKeys.add(productKey);
+				productKeysByAssetId.set(assetId, productKeys);
+			}
+		},
+		evictProduct(key) {
+			removeProduct(formatStaticLandblockProductKey(key));
+		},
+		clearProducts() {
+			productDependenciesByKey.clear();
+			productKeysByAssetId.clear();
+		},
+		findDependentProductKeys(assets) {
+			const productKeys = new Set<string>();
+			for (const asset of assets) {
+				for (const productKey of productKeysByAssetId.get(asset.assetId) ?? []) {
+					productKeys.add(productKey);
+				}
+			}
+			return [...productKeys].sort((left, right) => left.localeCompare(right));
+		},
+	};
+
+	function removeProduct(productKey: string): void {
+		const dependencies = productDependenciesByKey.get(productKey);
+		if (!dependencies) {
+			return;
+		}
+		for (const assetId of dependencies) {
+			const productKeys = productKeysByAssetId.get(assetId);
+			if (!productKeys) {
+				continue;
+			}
+			productKeys.delete(productKey);
+			if (productKeys.size === 0) {
+				productKeysByAssetId.delete(assetId);
+			}
+		}
+		productDependenciesByKey.delete(productKey);
+	}
+}
+
+function collectLandblockRenderProductPreparedAssetIds(
+	result: LandblockRenderProductWorkerResult,
+): Set<string> {
+	const assetIds = new Set<string>();
+	addAssetIds(assetIds, [result.requestId]);
+	const terrain = getLandblockTerrainRenderArtifact(result);
+	if (terrain) {
+		addAssetIds(assetIds, [
+			terrain.assetId,
+			...terrain.diagnosticRootAssetIds,
+			...terrain.diagnosticPreparedAssetIds,
+			...terrain.texturePageRefs.map((ref) => ref.sourceAssetId),
+		]);
+	}
+	for (const bundle of getStaticObjectBundleArtifacts(result)) {
+		addAssetIds(assetIds, [
+			...bundle.rootAssetIds,
+			...bundle.preparedAssetIds,
+			...bundle.objectRecords.map((object) => object.sourceAssetId),
+			...bundle.objectRecords.flatMap((object) =>
+				(object.partHints ?? []).flatMap((part) => part.gfxObjAssetId ?? []),
+			),
+			...bundle.texturePageRefs.map((ref) => ref.sourceAssetId),
+			...bundle.texturePages.flatMap((page) =>
+				page.entries.map((entry) => entry.sourceAssetId),
+			),
+		]);
+	}
+	const detailed = getDetailedLandblockRenderArtifacts(result);
+	if (detailed) {
+		addAssetIds(assetIds, [
+			...detailed.structuredInteriorTexturePageRefs.map(
+				(ref) => ref.sourceAssetId,
+			),
+			...detailed.structuredInteriorTexturePages.flatMap((page) =>
+				page.entries.map((entry) => entry.sourceAssetId),
+			),
+		]);
+	}
+	return assetIds;
+}
+
+function addAssetIds(target: Set<string>, assetIds: readonly string[]): void {
+	for (const assetId of assetIds) {
+		if (assetId.length > 0) {
+			target.add(assetId);
+		}
+	}
+}
+
+function shouldAssetChangesRefreshTerrainResources(
+	assets: readonly PreparedAssetChangeDescriptor[],
+): boolean {
+	return assets.some((asset) => {
+		switch (asset.kind) {
+			case "landblock-outdoor":
+			case "terrain-material":
+			case "region-render-profile":
+				return true;
+			case "env-cell":
+			case "gfx-obj":
+			case "setup-model":
+			case "material-recipe":
+			case "setup-appearance":
+			case "landblock-topology":
+			case "surface-texture":
+			case "render-surface":
+			case "prepared-texture":
+			case "palette":
+			case "visual-asset-stub":
+			case "unknown":
+				return false;
+		}
+	});
+}
+
+function isTerrainProductKey(productKey: string): boolean {
+	return productKey.includes(":outdoor-terrain:");
 }
 
 function commitProductToSet(

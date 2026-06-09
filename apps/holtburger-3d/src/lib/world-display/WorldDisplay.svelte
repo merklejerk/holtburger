@@ -1,10 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from "svelte";
 
-	import {
-		createInitialAssetChannelState,
-		type AssetChannelState,
-	} from "../assets/types";
 	import type { PreparedAssetResolver } from "../assets/prepared-asset-store";
 	import type { NormalizedViewportPoint } from "./model";
 	import type {
@@ -62,7 +58,6 @@
 	let viewportHost = $state<HTMLDivElement | null>(null);
 	let rendererController = $state<WorldDisplayRenderer | null>(null);
 
-	let assetState = createInitialAssetChannelState();
 	let staticLandblockRenderProducts =
 		createEmptyStaticLandblockRenderProductSet();
 	let debugOverlayScene = createEmptyWorldDebugOverlayModel();
@@ -88,7 +83,6 @@
 			}
 
 			const controller = createWorldDisplayRenderer(viewportHost, {
-				assetState,
 				preparedAssetResolver,
 				staticLandblockRenderProducts,
 				transitionPortalMaxDepth,
@@ -114,11 +108,6 @@
 			rendererController = null;
 		};
 	});
-
-	export function setAssetState(nextAssetState: AssetChannelState): void {
-		assetState = nextAssetState;
-		rendererController?.setAssetState(assetState);
-	}
 
 	export function commitStaticLandblockProduct(
 		result: LandblockRenderProductWorkerResult,

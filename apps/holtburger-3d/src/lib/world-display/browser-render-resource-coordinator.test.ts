@@ -45,7 +45,7 @@ describe("browser render resource coordinator", () => {
 			}),
 		);
 
-		expect(surface.committedStaticProductCount).toBe(0);
+		expect(surface.renderSceneContextCount).toBeGreaterThan(0);
 	});
 
 	it("does not commit prepared indoor assets as static products", () => {
@@ -69,7 +69,7 @@ describe("browser render resource coordinator", () => {
 			}),
 		);
 
-		expect(surface.committedStaticProductCount).toBe(0);
+		expect(surface.renderSceneContextCount).toBeGreaterThan(0);
 	});
 
 	it("does not push render resources for cache metadata-only resolver changes", () => {
@@ -96,7 +96,7 @@ describe("browser render resource coordinator", () => {
 			}),
 		);
 
-		expect(surface.committedStaticProductCount).toBe(0);
+		expect(surface.renderSceneContextCount).toBeGreaterThan(0);
 
 		store.applyPruneBatch({
 			retainedAssetIds: [formatLandblockOutdoorAssetId(landblockId)],
@@ -119,7 +119,7 @@ describe("browser render resource coordinator", () => {
 			}),
 		);
 
-		expect(surface.committedStaticProductCount).toBe(0);
+		expect(surface.renderSceneContextCount).toBeGreaterThan(0);
 	});
 });
 
@@ -131,17 +131,14 @@ const PROVENANCE: PreparedAssetProvenance = {
 };
 
 function createCapturingSurface(): BrowserRenderResourceSurface & {
-	committedStaticProductCount: number;
+	renderSceneContextCount: number;
 } {
 	return {
-		committedStaticProductCount: 0,
-		setRenderSceneContext() {},
-		setRenderChunkTransforms() {},
-		commitStaticLandblockProduct() {
-			this.committedStaticProductCount += 1;
+		renderSceneContextCount: 0,
+		setRenderSceneContext() {
+			this.renderSceneContextCount += 1;
 		},
-		evictStaticLandblockProduct() {},
-		clearStaticLandblockProducts() {},
+		setRenderChunkTransforms() {},
 		setDebugOverlayScene() {},
 		setRenderSpatialQuery() {},
 		setSelectedStaticRenderableRenderKey() {},

@@ -153,6 +153,9 @@ export class StaticLandblockRenderArtifactCoordinator
 				this.onProductEvicted?.(key);
 			}
 		}
+		if (evictedProductKeys.length > 0) {
+			this.onStoreChanged?.(this.productSource.getProductSet());
+		}
 		for (const desired of desiredProducts) {
 			if (this.productSource.hasCurrentArtifact(desired)) {
 				continue;

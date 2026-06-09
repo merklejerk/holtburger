@@ -716,48 +716,56 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	reportMetrics();
 
 	return {
-		commitStaticLandblockProduct(result) {
-			staticLandblockRenderProducts = commitProductToSet(
-				staticLandblockRenderProducts,
-				result,
-			);
-			staticProductDependencies.commitProduct(result);
-			syncStaticProductTransitionPortalModel();
-			syncTransitionPortalMaskResources();
-			commitStaticProductRenderResources(result);
-			staticProductMetadata.commitProduct(result);
-			refreshStaticProductSceneBounds();
-			resources?.stateCache.invalidate();
-			scheduleFrame();
-			syncResidencyIndex();
-		},
-		evictStaticLandblockProduct(key) {
-			staticLandblockRenderProducts = evictProductFromSet(
-				staticLandblockRenderProducts,
-				key,
-			);
-			staticProductDependencies.evictProduct(key);
-			syncStaticProductTransitionPortalModel();
-			syncTransitionPortalMaskResources();
-			evictStaticProductRenderResources(key);
-			staticProductMetadata.evictProduct(key);
-			refreshStaticProductSceneBounds();
-			resources?.stateCache.invalidate();
-			scheduleFrame();
-			syncResidencyIndex();
-		},
-		clearStaticLandblockProducts() {
-			clearStaticProductRenderResources(staticLandblockRenderProducts);
-			staticLandblockRenderProducts =
-				createEmptyStaticLandblockRenderProductSet();
-			staticProductDependencies.clearProducts();
-			syncStaticProductTransitionPortalModel();
-			syncTransitionPortalMaskResources();
-			staticProductMetadata.clearProducts();
-			refreshStaticProductSceneBounds();
-			resources?.stateCache.invalidate();
-			scheduleFrame();
-			syncResidencyIndex();
+		applyStaticLandblockProductEvent(event) {
+			switch (event.type) {
+				case "product-committed": {
+					const { result } = event;
+					staticLandblockRenderProducts = commitProductToSet(
+						staticLandblockRenderProducts,
+						result,
+					);
+					staticProductDependencies.commitProduct(result);
+					syncStaticProductTransitionPortalModel();
+					syncTransitionPortalMaskResources();
+					commitStaticProductRenderResources(result);
+					staticProductMetadata.commitProduct(result);
+					refreshStaticProductSceneBounds();
+					resources?.stateCache.invalidate();
+					scheduleFrame();
+					syncResidencyIndex();
+					return;
+				}
+				case "product-evicted": {
+					const { key } = event;
+					staticLandblockRenderProducts = evictProductFromSet(
+						staticLandblockRenderProducts,
+						key,
+					);
+					staticProductDependencies.evictProduct(key);
+					syncStaticProductTransitionPortalModel();
+					syncTransitionPortalMaskResources();
+					evictStaticProductRenderResources(key);
+					staticProductMetadata.evictProduct(key);
+					refreshStaticProductSceneBounds();
+					resources?.stateCache.invalidate();
+					scheduleFrame();
+					syncResidencyIndex();
+					return;
+				}
+				case "products-cleared":
+					clearStaticProductRenderResources(staticLandblockRenderProducts);
+					staticLandblockRenderProducts =
+						createEmptyStaticLandblockRenderProductSet();
+					staticProductDependencies.clearProducts();
+					syncStaticProductTransitionPortalModel();
+					syncTransitionPortalMaskResources();
+					staticProductMetadata.clearProducts();
+					refreshStaticProductSceneBounds();
+					resources?.stateCache.invalidate();
+					scheduleFrame();
+					syncResidencyIndex();
+					return;
+			}
 		},
 		setDebugOverlayScene() {
 			reportMetrics();

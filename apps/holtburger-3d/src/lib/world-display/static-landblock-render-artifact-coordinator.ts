@@ -4,10 +4,10 @@ import {
 } from "../../app/browser-mode";
 import { planDesiredLandblockRenderProducts } from "../assets/landblock-render-product-planner";
 import {
-	StaticLandblockRenderArtifactStore,
 	type StaticLandblockProductKey,
 	type StaticLandblockRenderProductSet,
 } from "./static-landblock-render-artifact-store";
+import { MutableStaticLandblockProductSource } from "./static-landblock-product-source";
 import { StaticLandblockRenderWorkerClient } from "./static-landblock-render-worker-client";
 import type {
 	DesiredLandblockRenderProduct,
@@ -54,7 +54,7 @@ interface StaticLandblockRenderProductClient {
 
 interface StaticLandblockRenderArtifactCoordinatorOptions {
 	client?: StaticLandblockRenderProductClient;
-	store?: StaticLandblockRenderArtifactStore;
+	productSource?: MutableStaticLandblockProductSource;
 	buildPolicy?: LandblockRenderProductBuildPolicy;
 	buildPolicyRevision?: string;
 	texturePagePolicyRevision?: string;
@@ -70,7 +70,7 @@ interface StaticLandblockRenderArtifactCoordinatorOptions {
 
 export class StaticLandblockRenderArtifactCoordinator {
 	private readonly client: StaticLandblockRenderProductClient;
-	private readonly store: StaticLandblockRenderArtifactStore;
+	private readonly productSource: MutableStaticLandblockProductSource;
 	private readonly buildPolicy: LandblockRenderProductBuildPolicy;
 	private readonly buildPolicyRevision: string;
 	private readonly texturePagePolicyRevision: string;
@@ -96,7 +96,8 @@ export class StaticLandblockRenderArtifactCoordinator {
 
 	constructor(options: StaticLandblockRenderArtifactCoordinatorOptions = {}) {
 		this.client = options.client ?? new StaticLandblockRenderWorkerClient();
-		this.store = options.store ?? new StaticLandblockRenderArtifactStore();
+		this.productSource =
+			options.productSource ?? new MutableStaticLandblockProductSource();
 		this.buildPolicy =
 			options.buildPolicy ?? DEFAULT_STATIC_LANDBLOCK_RENDER_BUILD_POLICY;
 		this.buildPolicyRevision =
@@ -145,12 +146,11 @@ export class StaticLandblockRenderArtifactCoordinator {
 			desiredProducts,
 		});
 
-		const evictedProductKeys = this.store.syncDesiredProducts(desiredProducts);
-		if (
-			desiredProducts.length === 0 &&
-			evictedProductKeys.length > 0 &&
-			this.onProductsCleared
-		) {
+		const evictedProductKeys =
+			desiredProducts.length === 0
+				? this.productSource.clearProducts()
+				: this.productSource.syncDesiredProducts(desiredProducts);
+		if (desiredProducts.length === 0 && evictedProductKeys.length > 0) {
 			this.onProductsCleared?.();
 		} else {
 			for (const key of evictedProductKeys) {
@@ -158,10 +158,10 @@ export class StaticLandblockRenderArtifactCoordinator {
 			}
 		}
 		for (const desired of desiredProducts) {
-			if (this.store.hasCurrentArtifact(desired)) {
+			if (this.productSource.hasCurrentArtifact(desired)) {
 				continue;
 			}
-			if (!this.store.markInFlight(desired)) {
+			if (!this.productSource.markInFlight(desired)) {
 				continue;
 			}
 			void this.client
@@ -170,23 +170,23 @@ export class StaticLandblockRenderArtifactCoordinator {
 					if (this.disposed) {
 						return;
 					}
-					const committed = this.store.commitResult(result);
+					const committed = this.productSource.commitResult(result);
 					if (committed) {
 						this.onProductCommitted?.(result);
-						this.onStoreChanged?.(this.store.productSet());
+						this.onStoreChanged?.(this.productSource.getProductSet());
 					}
 				})
 				.catch((error) => {
 					const normalized = toError(error);
-					this.store.markError(desired);
+					this.productSource.markError(desired);
 					this.onError?.(normalized, desired);
-					this.onStoreChanged?.(this.store.productSet());
+					this.onStoreChanged?.(this.productSource.getProductSet());
 				});
 		}
 	}
 
 	getProductSet(): StaticLandblockRenderProductSet {
-		return this.store.productSet();
+		return this.productSource.getProductSet();
 	}
 
 	dispose(): void {

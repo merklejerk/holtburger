@@ -98,22 +98,17 @@ describe("browser render resource coordinator", () => {
 
 		expect(surface.committedStaticProductCount).toBe(0);
 
-		store.applyPrunePlan({
+		store.applyPruneBatch({
 			retainedAssetIds: [formatLandblockOutdoorAssetId(landblockId)],
 			evictedAssetIds: [],
-			cacheMetadataByAssetId: {
+			retainedMetadataByAssetId: {
 				[formatLandblockOutdoorAssetId(landblockId)]: {
 					lastPreparedAtMs: 1_000,
 					lastRetainedAtMs: 2_000,
 				},
 			},
-			diagnostics: {
-				prepared: { total: 1, byKind: { "landblock-outdoor": 1 } },
-				hardRetained: { total: 1, byKind: { "landblock-outdoor": 1 } },
-				warmRetained: { total: 0, byKind: {} },
-				retained: { total: 1, byKind: { "landblock-outdoor": 1 } },
-				evicted: { total: 0, byKind: {} },
-			},
+			nextCursorAssetId: null,
+			evaluatedAssetCount: 1,
 			nextWarmPruneAtMs: null,
 		});
 

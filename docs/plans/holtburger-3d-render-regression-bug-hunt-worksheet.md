@@ -2596,7 +2596,7 @@ Verification:
 
 ### Phase 21F: Reintroduce Independent Pruning Safely
 
-Status: complete with record-shaped prune snapshot debt tracked in Phase 23.
+Status: complete.
 
 Deliverables:
 
@@ -2614,11 +2614,11 @@ Acceptance criteria:
 Implementation notes:
 
 - Replaced sync-loop prune calls in `SceneAssetStreamingController` with an independent timer-driven prune duty cycle. Scene interest updates schedule the duty cycle, but prune work no longer runs inline after every bootstrap/streaming planning pass or empty request batch.
-- Added `planPreparedAssetCachePruneBatch()` with explicit `maxEvaluatedAssetCount`, `maxEvictedAssetCount`, and cursor inputs. The old full-cache `planPreparedAssetCachePrune()` remains for reference/tests, but streaming no longer calls it.
+- Added `planPreparedAssetCachePruneBatch()` with explicit `maxEvaluatedAssetCount`, `maxEvictedAssetCount`, and cursor inputs.
 - Added `PreparedAssetStore.applyPruneBatch()`, which updates retained metadata for the evaluated batch and emits bounded `prepared-assets-evicted` events containing only the actually evicted descriptors.
 - Removed the runtime frontend-store prune reducer path. Prune results now apply to the prepared asset service/resolver, while Svelte diagnostics observe resolver events through the Phase 21E cadence sampler.
 - Prune hot-path diagnostics now record per-tick evaluated/evicted/retained counts from the batch instead of reporting a full-cache sweep as one sample.
-- Course correction: the prune batch planner still receives record-shaped prepared/cache snapshots from the streaming controller. That keeps the phase scoped, but it is active Phase 23 debt because a fully bounded implementation should iterate the `PreparedAssetStore`/resolver directly without snapshotting all keys.
+- Course correction: Phase 21G moved runtime pruning to resolver-native candidate scans and removed the old full-cache `planPreparedAssetCachePrune()` / `PreparedAssetStore.applyPrunePlan()` path rather than keeping it around for reference/tests.
 
 Verification:
 

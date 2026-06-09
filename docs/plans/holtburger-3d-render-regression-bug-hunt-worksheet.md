@@ -2947,7 +2947,7 @@ Cleanup ledger:
 | removed | Phase 22B / Phase 23A | Asset coverage request planning previously consumed browser-shaped destinations behind `createBrowserDestinationFromSceneResourceInterest(...)` while `SceneAssetStreamingController` accepted neutral `SceneResourceInterest`. Phase 23A migrated coverage request planning, coverage retention ids, and material mismatch diagnostics to neutral `SceneResourceInterest` inputs; browser-mode wrappers now live only at the app/browser adapter boundary. | `scene-asset-streaming-controller.ts`, `scene-asset-request-planner.ts`, `browser-scene-resource-interest.ts` | `createSceneCoverageRequests()`, `deriveSceneCoverageAssetIds()`, and material visibility helpers accept `SceneResourceInterest` or a neutral planner input directly. | `rg "createBrowserDestinationFromSceneResourceInterest" apps/holtburger-3d/src/lib/assets apps/holtburger-3d/src/lib/scene-runtime apps/holtburger-3d/src/app` returned no matches. |
 | removed | Phase 21B | Svelte still mirrors full `AssetChannelState.preparedByAssetId` / `cacheMetadataByAssetId` for browser report/render compatibility. | `frontend-state.ts`, `asset-state.ts`, `BrowserWorldDisplay.svelte` | Phase 21C demoted `frontendState.asset` to compact presentation state and moved report/material diagnostics to resolver/read-model pulls. | `rg "assetState\\.preparedByAssetId|assetState\\.cacheMetadataByAssetId|frontendState\\..*preparedByAssetId|frontendState\\..*cacheMetadataByAssetId" apps/holtburger-3d/src/app apps/holtburger-3d/src/pages/BrowserWorldDisplay.svelte apps/holtburger-3d/src/lib/world-display/browser-render-resource-coordinator.ts` returned no matches. |
 | removed | Phase 21D | Temporary renderer/coordinator compatibility path around revision-gated `setAssetState(assetState)` snapshots. It no longer uses Svelte-owned cache state or whole-cache signatures, but previously still snapshotted the resolver into the old renderer API when prepared-record revision changed. | `WorldDisplay.svelte`, `world-display-renderer-contract.ts`, `world-display-renderer.ts`, `webgl2-world-display-renderer-impl.ts`, `browser-render-resource-coordinator.ts` | `WorldDisplay` and renderer subscribe to resolver events directly and flush dirty assets/products without full-cache `AssetChannelState` pushes. | `rg "setAssetState" apps/holtburger-3d/src/lib apps/holtburger-3d/src/pages apps/holtburger-3d/src/App.svelte` has no runtime matches outside docs. |
-| active | Phase 21D | Lower-level WebGL resource builders still consume a renderer-owned legacy `AssetChannelState` snapshot because terrain/material/readiness APIs have not all moved to `PreparedAssetResolver` inputs. This snapshot is not Svelte-owned and is not a public renderer contract, but it still copies the resolver into record-shaped state when prepared-record events flush. | `webgl2-world-display-renderer-impl.ts`, `webgl2-world-resources.ts`, `world-render-frame.ts`, `terrain-blend-plan.ts`, `render-material-strategy.ts`, `static-renderables.ts`, `structured-interior-scene.ts`, `transition-portal-work-items.ts` | Migrate lower-level resource/readiness builders to accept resolver/read-model inputs directly, then delete `createAssetChannelStateSnapshotFromResolver()` or restrict it to explicit diagnostics/planning paths. | `rg "createAssetChannelStateSnapshotFromResolver|AssetChannelState" apps/holtburger-3d/src/lib/world-display` only shows explicit presentation/report paths or deleted compatibility tests. |
+| active | Phase 21D / owned by Phase 23B | Lower-level WebGL resource builders still consume a renderer-owned legacy `AssetChannelState` snapshot because terrain/material/readiness APIs have not all moved to `PreparedAssetResolver` inputs. This snapshot is not Svelte-owned and is not a public renderer contract, but it still copies the resolver into record-shaped state when prepared-record events flush. | `webgl2-world-display-renderer-impl.ts`, `webgl2-world-resources.ts`, `world-render-frame.ts`, `terrain-blend-plan.ts`, `render-material-strategy.ts`, `static-renderables.ts`, `structured-interior-scene.ts`, `transition-portal-work-items.ts` | Migrate lower-level resource/readiness builders to accept resolver/read-model inputs directly, then delete `createAssetChannelStateSnapshotFromResolver()` or restrict it to explicit diagnostics/planning paths. | `rg "createAssetChannelStateSnapshotFromResolver|AssetChannelState" apps/holtburger-3d/src/lib/world-display` only shows explicit presentation/report paths or deleted compatibility tests. |
 | removed | Phase 21F/21G | Incremental prune duty cycle emitted bounded eviction batches, but the batch planner still consumed record-shaped prepared/cache snapshots from `SceneAssetStreamingController` instead of iterating the resolver/store directly. | `scene-asset-streaming-controller.ts`, `asset-cache-policy.ts`, `App.svelte` (`getPreparedByAssetId`, `getCacheMetadataByAssetId`) | Phase 21G moved prune ticks to `PreparedAssetResolver.scanPreparedAssets(...)` plus `planPreparedAssetCachePruneBatchFromResolver(...)`; `App.svelte` no longer builds legacy snapshots for runtime sync/prune. | `rg "getPreparedByAssetId|getCacheMetadataByAssetId|createPreparedAssetLegacySnapshotFromResolver" apps/holtburger-3d/src/App.svelte apps/holtburger-3d/src/lib/assets` shows no runtime sync/prune usage; focused tests cover resolver-native scan and prune batch planning. |
 | removed | Phase 21A | Whole-cache asset-state signatures, now instrumented so Phase 21C can verify removal. | `browser-render-resource-coordinator.ts` (`describeAssetStateSignature`), `prepared-asset-hot-path-diagnostics.ts` (`recordPreparedAssetSignatureDiagnostics`) | Resolver revisions replaced sorted/joined asset-id signatures. | `rg "describeAssetStateSignature|recordPreparedAssetSignatureDiagnostics|asset-state signature|preparedByAssetId.*sort\\(\\).*join" apps/holtburger-3d/src` returned no matches. |
 | removed | Phase 22A/22C | Temporary dual path where product-source events and browser-display product forwarding both existed during `WorldDisplay` constructor-source cutover. Phase 22C made `WorldDisplay` subscribe to `StaticLandblockProductSource` and deleted browser-display product forwarding. | `static-landblock-product-source.ts`, `static-landblock-render-artifact-coordinator.ts`, `BrowserWorldDisplay.svelte`, `WorldDisplay.svelte`, `world-display-renderer.ts` | Product-source events are the only path from landblock product runtime to `WorldDisplay` / renderer. | `rg "worldDisplaySurface\\?\\.(commitStaticLandblockProduct|evictStaticLandblockProduct|clearStaticLandblockProducts)" apps/holtburger-3d/src` has no matches. |
@@ -2987,6 +2987,79 @@ Verification notes:
 - `npm run --prefix apps/holtburger-3d check` passed with zero errors/warnings.
 - Bridge grep returned no matches:
   - `rg "createBrowserDestinationFromSceneResourceInterest" apps/holtburger-3d/src/lib/assets apps/holtburger-3d/src/lib/scene-runtime apps/holtburger-3d/src/app`
+
+### Phase 23B: Remove Renderer AssetChannelState Compatibility Snapshot
+
+Status: pending.
+
+Goal:
+
+- Finish the Phase 21D cutover by removing the renderer-owned `AssetChannelState` compatibility snapshot from lower-level WebGL resource/readiness paths.
+
+Context:
+
+- Phase 21D removed the public renderer `setAssetState(...)` contract and stopped pushing Svelte-owned full cache state into renderer hot paths.
+- The WebGL renderer still creates a local `AssetChannelState` snapshot from `PreparedAssetResolver` when prepared-record events flush, then passes that legacy shape through lower-level builders.
+- This is better than Svelte owning the cache, but still structurally wrong: resource/readiness helpers should read prepared assets through resolver/read-model inputs, not record-shaped `AssetChannelState`.
+- Current grep shows active source debt in `webgl2-world-display-renderer-impl.ts`, `webgl2-world-resources.ts`, `world-render-frame.ts`, `terrain-blend-plan.ts`, `render-material-strategy.ts`, `static-renderables.ts`, `structured-interior-scene.ts`, `transition-portal-work-items.ts`, `terrain-render-artifact.ts`, plus diagnostic/presentation compatibility in `material-diagnostics.ts`.
+
+Deliverables:
+
+1. Introduce a small renderer asset read model, likely based on `PreparedAssetResolver`, for lower-level world-display helpers.
+   - It must provide direct `get(assetId)`/`has(assetId)` semantics and bounded iteration only where an existing helper genuinely scans prepared records.
+   - It must not expose Svelte state, mutable `preparedByAssetId`, or `cacheMetadataByAssetId`.
+2. Migrate terrain helpers first.
+   - `terrain-render-artifact.ts`
+   - `terrain-blend-plan.ts`
+   - terrain-related sections of `webgl2-world-resources.ts`
+   - terrain readiness tests
+3. Migrate material/static helpers next.
+   - `render-material-strategy.ts`
+   - `render-material-plans.ts`
+   - `material-texture-resolution.ts`
+   - `region-detail-overlays.ts`
+   - `static-renderable-readiness.ts`
+   - `static-renderables.ts`
+4. Migrate structured interior and portal helpers.
+   - `structured-interior-scene.ts`
+   - `transition-portal-work-items.ts`
+   - `scene-renderable-readiness.ts`
+   - `world-render-frame.ts`
+   - `render-bvh-visibility-snapshot.ts`
+5. Remove renderer snapshot creation.
+   - Delete `createAssetChannelStateSnapshotFromResolver(...)` usage from `webgl2-world-display-renderer-impl.ts`.
+   - Delete `assetState` compatibility plumbing in `webgl2-world-resources.ts` once all helper inputs use the read model.
+6. Triage remaining `AssetChannelState` source references.
+   - Keep compact presentation/report inputs only where they are genuinely diagnostic or UI state.
+   - Move `material-diagnostics.ts` to resolver/read-model inputs if it still consumes full prepared records for material visibility.
+   - Delete compatibility tests that build `AssetChannelState` solely to exercise renderer resource helpers; replace them with resolver/read-model fixtures.
+7. Update the cleanup ledger row from `active` to `removed` only after the source grep proves runtime renderer paths no longer depend on `AssetChannelState`.
+
+Acceptance criteria:
+
+- `webgl2-world-display-renderer-impl.ts` no longer imports or calls `createAssetChannelStateSnapshotFromResolver(...)`.
+- `rg "createAssetChannelStateSnapshotFromResolver" apps/holtburger-3d/src/lib/world-display apps/holtburger-3d/src/lib/assets` returns no renderer/runtime matches.
+- `rg "AssetChannelState" apps/holtburger-3d/src/lib/world-display` returns no production renderer/resource helper matches, except explicitly justified presentation/report paths if any remain.
+- Renderer resource lookup depends on `PreparedAssetResolver` or the new read model, not record-shaped full cache snapshots.
+- Existing scene reports preserve material/terrain/static/interior readiness behavior.
+
+Verification:
+
+- Focused tests for migrated helper clusters:
+  - terrain artifact/blend/resource tests
+  - material/static readiness and render strategy tests
+  - structured interior, transition portal, render-frame, and BVH visibility tests
+- Full verification:
+  - `npm run --prefix apps/holtburger-3d test:ts`
+  - `npm run --prefix apps/holtburger-3d lint:ts`
+  - `npm run --prefix apps/holtburger-3d check`
+- Final grep proof recorded in this worksheet and the cleanup ledger.
+
+Course-correction guardrails:
+
+- Do not replace `AssetChannelState` with a differently named object that still snapshots every prepared asset for renderer hot paths. That would be fake cleanup.
+- Do not make the read model optional in renderer helper inputs for backwards compatibility. Update call sites and tests.
+- If a helper truly needs a full immutable snapshot for off-frame diagnostics, name that API as a diagnostic/planning snapshot and keep it out of render-frame/resource rebuild paths.
 
 Deliverables:
 

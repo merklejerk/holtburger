@@ -7,6 +7,7 @@
 		describeBrowserDestinationIdentity,
 		type BrowserLocationSelection,
 	} from "../app/browser-mode";
+	import { createSceneResourceInterestFromBrowserDestination } from "../app/browser-scene-resource-interest";
 	import type { AssetChannelState } from "../lib/assets/types";
 	import {
 		countPreparedAssetsByKindFromResolver,
@@ -84,8 +85,8 @@
 	} from "../lib/world-display/browser-render-resource-coordinator";
 	import {
 		StaticLandblockRenderArtifactCoordinator,
-		type StaticLandblockRenderArtifactCoordinatorInput,
 	} from "../lib/world-display/static-landblock-render-artifact-coordinator";
+	import type { SceneResourceInterest } from "../lib/scene-runtime/scene-resource-interest";
 	import { buildRenderDebugReport } from "../lib/world-display/diagnostics/render-debug-report";
 	import BrowserModePanel from "./BrowserModePanel.svelte";
 
@@ -1342,8 +1343,8 @@
 
 	function scheduleCurrentSceneResourceUpdate(): void {
 		const staticLandblockRenderInput =
-			createStaticLandblockRenderCoordinatorInput();
-		staticLandblockRenderCoordinator.sync(staticLandblockRenderInput);
+			createCurrentSceneResourceInterest();
+		staticLandblockRenderCoordinator.syncSceneInterest(staticLandblockRenderInput);
 		scheduleSceneResourceUpdate({
 			assetPresentationState: assetState,
 			preparedAssetResolver,
@@ -1366,14 +1367,14 @@
 		});
 	}
 
-	function createStaticLandblockRenderCoordinatorInput(): StaticLandblockRenderArtifactCoordinatorInput {
-		return {
-			browserDestination,
+	function createCurrentSceneResourceInterest(): SceneResourceInterest {
+		return createSceneResourceInterestFromBrowserDestination({
+			destination: browserDestination,
 			terrainLodRadius,
 			buildingLodRadius,
 			detailLodRadius,
 			envCellLodRadius,
-		};
+		});
 	}
 
 	function syncControlledCameraFrame(): void {

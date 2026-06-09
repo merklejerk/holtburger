@@ -1,9 +1,4 @@
-import {
-	browserLocationToLandblockId,
-	isIndoorBrowserDestination,
-	type BrowserLocationSelection,
-} from "../../app/browser-mode";
-import { normalizeOutdoorLandblockId } from "../landblocks";
+import type { SceneResourceInterest } from "../scene-runtime/scene-resource-interest";
 import { deriveOutdoorSceneInterest } from "../world-display/outdoor-scene-interest";
 import {
 	compareDesiredLandblockRenderProducts,
@@ -14,15 +9,8 @@ import {
 } from "../world-display/landblock-render-product";
 import type { OutdoorSceneRequestOptions } from "./scene-asset-request-planner";
 
-const DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS: OutdoorSceneRequestOptions = {
-	terrainRadius: 2,
-	buildingRadius: 1,
-	detailRadius: 1,
-	envCellRadius: 1,
-};
-
 export interface LandblockRenderProductPlanningInput {
-	browserDestination: BrowserLocationSelection | null;
+	sceneInterest: SceneResourceInterest;
 	requestId: string;
 	buildPolicyRevision: string;
 	texturePagePolicyRevision: string;
@@ -33,30 +21,27 @@ export interface LandblockRenderProductPlanningInput {
 export function planDesiredLandblockRenderProducts(
 	input: LandblockRenderProductPlanningInput,
 ): DesiredLandblockRenderProduct[] {
-	if (!input.browserDestination) {
+	const location = input.sceneInterest.location;
+	if (!location) {
 		return [];
 	}
-	if (isIndoorBrowserDestination(input.browserDestination)) {
-		const landblockId = normalizeOutdoorLandblockId(
-			input.browserDestination.landblockId,
-		);
+	if (location.kind === "interior-cell") {
 		return [
 			createDesiredProduct(
 				input,
-				landblockId,
-				landblockId,
+				location.landblockId,
+				location.landblockId,
 				"dungeon-env-cells",
 			),
 		];
 	}
-	const options = input.options ?? DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS;
+	const options =
+		input.options ?? createOptionsFromSceneInterest(input.sceneInterest);
 	const envCellRadius =
 		options.envCellRadius ?? options.detailRadius ?? options.terrainRadius;
 
 	const interest = deriveOutdoorSceneInterest({
-		focusLandblockId: normalizeOutdoorLandblockId(
-			browserLocationToLandblockId(input.browserDestination),
-		),
+		focusLandblockId: location.landblockId,
 		terrainRadius: options.terrainRadius,
 		buildingRadius: options.buildingRadius,
 		detailRadius: options.detailRadius,
@@ -99,6 +84,17 @@ export function planDesiredLandblockRenderProducts(
 			),
 		),
 	]).sort(compareDesiredLandblockRenderProducts);
+}
+
+function createOptionsFromSceneInterest(
+	sceneInterest: SceneResourceInterest,
+): OutdoorSceneRequestOptions {
+	return {
+		terrainRadius: sceneInterest.lod.terrain,
+		buildingRadius: sceneInterest.lod.buildings,
+		detailRadius: sceneInterest.lod.detail,
+		envCellRadius: sceneInterest.lod.envCells,
+	};
 }
 
 function createDesiredProduct(

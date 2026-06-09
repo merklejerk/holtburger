@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { parseBrowserLocationInput } from "../../app/browser-mode";
+import {
+	parseBrowserLocationInput,
+	type BrowserLocationSelection,
+} from "../../app/browser-mode";
+import { createSceneResourceInterestFromBrowserDestination } from "../../app/browser-scene-resource-interest";
 import type { AssetLookupRequestDto } from "../host/contracts";
 import { PreparedAssetStore } from "./prepared-asset-store";
 import { SceneAssetStreamingController } from "./scene-asset-streaming-controller";
@@ -71,13 +75,14 @@ describe("scene asset streaming controller", () => {
 		});
 
 		const syncLatestInput = (): void => {
-			controller.syncSceneInterest({
-				browserDestination: destination,
-				terrainLodRadius: 1,
-				buildingLodRadius: 1,
-				detailLodRadius: 1,
-				envCellLodRadius: 1,
-			});
+			controller.syncSceneInterest(
+				createStreamingSceneInterest(destination, {
+					terrain: 1,
+					buildings: 1,
+					detail: 1,
+					envCells: 1,
+				}),
+			);
 		};
 
 		syncLatestInput();
@@ -131,13 +136,14 @@ describe("scene asset streaming controller", () => {
 			pruneEvictionBatchSize: 2,
 		});
 
-		controller.syncSceneInterest({
-			browserDestination: null,
-			terrainLodRadius: 0,
-			buildingLodRadius: 0,
-			detailLodRadius: 0,
-			envCellLodRadius: 0,
-		});
+		controller.syncSceneInterest(
+			createStreamingSceneInterest(null, {
+				terrain: 0,
+				buildings: 0,
+				detail: 0,
+				envCells: 0,
+			}),
+		);
 		await Promise.resolve();
 
 		expect(prunePlans).toEqual([]);
@@ -193,6 +199,24 @@ function createPreparedTopology(
 			omissions: [],
 			errors: [],
 		},
+	});
+}
+
+function createStreamingSceneInterest(
+	destination: BrowserLocationSelection | null,
+	lod: {
+		terrain: number;
+		buildings: number;
+		detail: number;
+		envCells: number;
+	},
+) {
+	return createSceneResourceInterestFromBrowserDestination({
+		destination,
+		terrainLodRadius: lod.terrain,
+		buildingLodRadius: lod.buildings,
+		detailLodRadius: lod.detail,
+		envCellLodRadius: lod.envCells,
 	});
 }
 

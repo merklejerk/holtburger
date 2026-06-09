@@ -2762,7 +2762,7 @@ Verification:
 
 ### Phase 22B: Define Neutral Scene Interest And Runtime Boundaries
 
-Status: planned.
+Status: complete.
 
 Deliverables:
 
@@ -2781,6 +2781,23 @@ Acceptance criteria:
 - No new runtime service name includes `Browser` unless it is truly browser-mode-only.
 - `App.svelte` or a small composition module owns service construction/disposal, but does not grow behavior-heavy orchestration code.
 - Scene-interest shape has no dependency on Svelte stores, browser panels, camera widgets, picker state, or debug presentation.
+
+Progress:
+
+- Added a neutral `SceneResourceInterest` DTO with normalized scene locations, LoD radii, and stable interest keys.
+- Added browser-mode adapter helpers that translate browser destination/LoD state into neutral scene interest while keeping browser policy outside runtime services.
+- Added neutral runtime contracts for `ClientAssetRuntime`, `LandblockProductRuntime`, and `SceneResourceRuntime`.
+- Migrated `SceneAssetStreamingController` to implement `ClientAssetRuntime` and accept `SceneResourceInterest` directly.
+- Migrated `StaticLandblockRenderArtifactCoordinator` to implement `LandblockProductRuntime`, expose its product source, and accept `SceneResourceInterest` through `syncSceneInterest()`.
+- Migrated landblock product planning from `BrowserLocationSelection` to `SceneResourceInterest`; lower-level asset coverage planning still uses a named browser adapter bridge and is tracked in Phase 23.
+
+Verification:
+
+- `npm run --prefix apps/holtburger-3d test:ts -- src/app/browser-scene-resource-interest.test.ts src/lib/scene-runtime/scene-resource-interest.test.ts src/lib/assets/landblock-render-product-planner.test.ts src/lib/world-display/static-landblock-render-artifact-coordinator.test.ts src/lib/assets/scene-asset-streaming-controller.test.ts` passed: 5 files, 17 tests.
+- `npm run --prefix apps/holtburger-3d test:ts` passed: 98 files, 526 tests.
+- `npm run --prefix apps/holtburger-3d lint:ts` passed.
+- `npm run --prefix apps/holtburger-3d check` passed with 0 errors and 0 warnings.
+- `rg "Browser|Svelte|browserDestination|BrowserLocationSelection" apps/holtburger-3d/src/lib/scene-runtime apps/holtburger-3d/src/lib/assets/landblock-render-product-planner.ts apps/holtburger-3d/src/lib/world-display/static-landblock-render-artifact-coordinator.ts` returned no matches.
 
 ### Phase 22C: Pass Product Source Into World Display At Construction
 
@@ -2886,6 +2903,7 @@ Cleanup ledger:
 | Status | Introduced By | Debt / Shim | Location | Removal Condition | Verification |
 | --- | --- | --- | --- | --- | --- |
 | active | Phase 21C/21G | Transitional resolver snapshot/read-model adapters for off-frame planners, diagnostics, and renderer compatibility callers that still require `Record<string, PreparedAssetRecord>` or `AssetChannelState` inputs. Phase 21G deleted runtime sync/prune uses before Phase 22; Phase 23 owns remaining renderer/off-frame planner/diagnostic compatibility. | `prepared-asset-store.ts` (`createLegacySnapshot()`, `createLegacyAssetStateSnapshot()`, `createPreparedAssetLegacySnapshotFromResolver()`, `createAssetChannelStateSnapshotFromResolver()`, `createPreparedAssetResolverFromRecordSnapshot()`), `scene-asset-streaming-controller.ts` (`createOffFrameRequestPlanningSnapshot()`), `terrain-render-artifact.ts`, `material-diagnostics.ts` | Asset runtime paths use `PreparedAssetResolver` / store-native reads; remaining snapshot use is either deleted or promoted as explicit off-frame planning/debug API. | `rg "createPreparedAssetLegacySnapshotFromResolver" apps/holtburger-3d/src/App.svelte apps/holtburger-3d/src/lib/assets` returns no runtime sync/prune use; broader helper grep only shows tracked compatibility boundaries. |
+| active | Phase 22B | Asset coverage request planning still consumes browser-shaped destinations behind `createBrowserDestinationFromSceneResourceInterest(...)` while `SceneAssetStreamingController` accepts neutral `SceneResourceInterest`. This is isolated adapter debt, not a runtime ownership dependency, but it should be removed when the asset coverage planner is migrated to neutral scene locations. | `scene-asset-streaming-controller.ts`, `scene-asset-request-planner.ts`, `browser-scene-resource-interest.ts` | `createSceneCoverageRequests()`, `deriveSceneCoverageAssetIds()`, and material visibility helpers accept `SceneResourceInterest` or a neutral planner input directly. | `rg "createBrowserDestinationFromSceneResourceInterest" apps/holtburger-3d/src/lib/assets apps/holtburger-3d/src/lib/scene-runtime` returns no runtime-planner bridge use. |
 | removed | Phase 21B | Svelte still mirrors full `AssetChannelState.preparedByAssetId` / `cacheMetadataByAssetId` for browser report/render compatibility. | `frontend-state.ts`, `asset-state.ts`, `BrowserWorldDisplay.svelte` | Phase 21C demoted `frontendState.asset` to compact presentation state and moved report/material diagnostics to resolver/read-model pulls. | `rg "assetState\\.preparedByAssetId|assetState\\.cacheMetadataByAssetId|frontendState\\..*preparedByAssetId|frontendState\\..*cacheMetadataByAssetId" apps/holtburger-3d/src/app apps/holtburger-3d/src/pages/BrowserWorldDisplay.svelte apps/holtburger-3d/src/lib/world-display/browser-render-resource-coordinator.ts` returned no matches. |
 | removed | Phase 21D | Temporary renderer/coordinator compatibility path around revision-gated `setAssetState(assetState)` snapshots. It no longer uses Svelte-owned cache state or whole-cache signatures, but previously still snapshotted the resolver into the old renderer API when prepared-record revision changed. | `WorldDisplay.svelte`, `world-display-renderer-contract.ts`, `world-display-renderer.ts`, `webgl2-world-display-renderer-impl.ts`, `browser-render-resource-coordinator.ts` | `WorldDisplay` and renderer subscribe to resolver events directly and flush dirty assets/products without full-cache `AssetChannelState` pushes. | `rg "setAssetState" apps/holtburger-3d/src/lib apps/holtburger-3d/src/pages apps/holtburger-3d/src/App.svelte` has no runtime matches outside docs. |
 | active | Phase 21D | Lower-level WebGL resource builders still consume a renderer-owned legacy `AssetChannelState` snapshot because terrain/material/readiness APIs have not all moved to `PreparedAssetResolver` inputs. This snapshot is not Svelte-owned and is not a public renderer contract, but it still copies the resolver into record-shaped state when prepared-record events flush. | `webgl2-world-display-renderer-impl.ts`, `webgl2-world-resources.ts`, `world-render-frame.ts`, `terrain-blend-plan.ts`, `render-material-strategy.ts`, `static-renderables.ts`, `structured-interior-scene.ts`, `transition-portal-work-items.ts` | Migrate lower-level resource/readiness builders to accept resolver/read-model inputs directly, then delete `createAssetChannelStateSnapshotFromResolver()` or restrict it to explicit diagnostics/planning paths. | `rg "createAssetChannelStateSnapshotFromResolver|AssetChannelState" apps/holtburger-3d/src/lib/world-display` only shows explicit presentation/report paths or deleted compatibility tests. |

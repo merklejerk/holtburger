@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { parseBrowserLocationInput } from "../../app/browser-mode";
+import {
+	parseBrowserLocationInput,
+	type BrowserLocationSelection,
+} from "../../app/browser-mode";
+import { createSceneResourceInterestFromBrowserDestination } from "../../app/browser-scene-resource-interest";
 import {
 	createLandblockRenderProductWorkerJob,
 	type DesiredLandblockRenderProduct,
@@ -14,7 +18,7 @@ describe("landblock render product planner", () => {
 		expect(destination).not.toBeNull();
 
 		const products = planDesiredLandblockRenderProducts({
-			browserDestination: destination,
+			sceneInterest: createProductSceneInterest(destination),
 			requestId: "request:1",
 			buildPolicyRevision: "build:v1",
 			texturePagePolicyRevision: "texture-pages:v1",
@@ -88,7 +92,7 @@ describe("landblock render product planner", () => {
 		expect(destination).not.toBeNull();
 
 		const products = planDesiredLandblockRenderProducts({
-			browserDestination: destination,
+			sceneInterest: createProductSceneInterest(destination),
 			requestId: "request:default",
 			buildPolicyRevision: "build:v1",
 			texturePagePolicyRevision: "texture-pages:v1",
@@ -114,7 +118,7 @@ describe("landblock render product planner", () => {
 		expect(destination).not.toBeNull();
 
 		const products = planDesiredLandblockRenderProducts({
-			browserDestination: destination,
+			sceneInterest: createProductSceneInterest(destination),
 			requestId: "request:detail",
 			buildPolicyRevision: "build:v2",
 			texturePagePolicyRevision: "texture-pages:v2",
@@ -228,7 +232,7 @@ describe("landblock render product planner", () => {
 		expect(destination).not.toBeNull();
 
 		const products = planDesiredLandblockRenderProducts({
-			browserDestination: destination,
+			sceneInterest: createProductSceneInterest(destination),
 			requestId: "request:terrain",
 			buildPolicyRevision: "build:v1",
 			texturePagePolicyRevision: "texture-pages:v1",
@@ -258,7 +262,7 @@ describe("landblock render product planner", () => {
 
 		expect(
 			planDesiredLandblockRenderProducts({
-				browserDestination: destination,
+				sceneInterest: createProductSceneInterest(destination),
 				requestId: "request:indoor",
 				buildPolicyRevision: "build:v1",
 				texturePagePolicyRevision: "texture-pages:v1",
@@ -287,4 +291,14 @@ function createBuildPolicy() {
 		},
 		terrainMaxLayerEntries: 8,
 	};
+}
+
+function createProductSceneInterest(destination: BrowserLocationSelection) {
+	return createSceneResourceInterestFromBrowserDestination({
+		destination,
+		terrainLodRadius: 2,
+		buildingLodRadius: 1,
+		detailLodRadius: 1,
+		envCellLodRadius: 1,
+	});
 }

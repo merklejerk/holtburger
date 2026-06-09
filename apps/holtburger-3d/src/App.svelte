@@ -41,9 +41,8 @@
 				preparedAssetStore.applyPreparedAssets(assets);
 				frontendState.applyPreparedAssets(assets);
 			},
-			applyAssetCachePrune: (prunePlan) => {
-				preparedAssetStore.applyPrunePlan(prunePlan);
-				frontendState.applyAssetCachePrune(prunePlan);
+			applyAssetCachePruneBatch: (prunePlan) => {
+				preparedAssetStore.applyPruneBatch(prunePlan);
 			},
 			applyAssetError: (request, message) =>
 				frontendState.applyAssetError(request, message),

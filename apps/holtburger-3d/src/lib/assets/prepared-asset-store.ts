@@ -2,7 +2,10 @@ import {
 	countPreparedAssetRecordsByKind,
 	countPreparedAssetsByKind,
 } from "./asset-cache-diagnostics";
-import type { PreparedAssetCachePrunePlan } from "./asset-cache-policy";
+import type {
+	PreparedAssetCachePruneBatchPlan,
+	PreparedAssetCachePrunePlan,
+} from "./asset-cache-policy";
 import type {
 	AssetChannelState,
 	PreparedAssetCacheDiagnostics,
@@ -153,6 +156,59 @@ export class PreparedAssetStore {
 		this.cacheMetadataRevision += 1;
 
 		if (evictedAnyAsset) {
+			this.preparedRevision += 1;
+			this.emit({
+				type: "prepared-assets-evicted",
+				assets: evictedAssets,
+				preparedRevision: this.preparedRevision,
+				cacheMetadataRevision: this.cacheMetadataRevision,
+			});
+			return;
+		}
+
+		this.emit({
+			type: "cache-metadata-updated",
+			cacheMetadataRevision: this.cacheMetadataRevision,
+		});
+	}
+
+	applyPruneBatch(prunePlan: PreparedAssetCachePruneBatchPlan): void {
+		let metadataChanged = false;
+		for (const [assetId, metadata] of Object.entries(
+			prunePlan.retainedMetadataByAssetId,
+		)) {
+			const previous = this.cacheMetadataByAssetId.get(assetId);
+			if (
+				previous?.lastPreparedAtMs === metadata.lastPreparedAtMs &&
+				previous.lastRetainedAtMs === metadata.lastRetainedAtMs
+			) {
+				continue;
+			}
+			this.cacheMetadataByAssetId.set(assetId, metadata);
+			metadataChanged = true;
+		}
+
+		const evictedAssets: PreparedAssetChangeDescriptor[] = [];
+		for (const assetId of prunePlan.evictedAssetIds) {
+			const asset = this.preparedByAssetId.get(assetId);
+			if (!asset) {
+				continue;
+			}
+			evictedAssets.push({
+				assetId,
+				kind: asset.payload.kind,
+			});
+			this.preparedByAssetId.delete(assetId);
+			this.cacheMetadataByAssetId.delete(assetId);
+			metadataChanged = true;
+		}
+
+		if (!metadataChanged) {
+			return;
+		}
+
+		this.cacheMetadataRevision += 1;
+		if (evictedAssets.length > 0) {
 			this.preparedRevision += 1;
 			this.emit({
 				type: "prepared-assets-evicted",

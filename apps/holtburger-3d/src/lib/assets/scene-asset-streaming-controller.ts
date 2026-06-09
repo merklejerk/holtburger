@@ -16,9 +16,12 @@ import {
 } from "./asset-hydration-policy";
 import type { AssetGraphPreparationResult } from "./asset-graph-scheduler";
 import {
+	DEFAULT_PREPARED_ASSET_PRUNE_EVALUATION_BATCH_SIZE,
+	DEFAULT_PREPARED_ASSET_PRUNE_EVICTION_BATCH_SIZE,
+	DEFAULT_PREPARED_ASSET_PRUNE_INTERVAL_MS,
 	DEFAULT_PREPARED_ASSET_WARM_RETAIN_MS,
-	planPreparedAssetCachePrune,
-	type PreparedAssetCachePrunePlan,
+	planPreparedAssetCachePruneBatch,
+	type PreparedAssetCachePruneBatchPlan,
 } from "./asset-cache-policy";
 import { recordPreparedAssetPruneDiagnostics } from "./prepared-asset-hot-path-diagnostics";
 import {
@@ -53,11 +56,16 @@ export interface SceneAssetStreamingControllerDeps {
 	getCacheMetadataByAssetId(): Record<string, PreparedAssetCacheMetadata>;
 	markAssetsPending(requests: AssetLookupRequestDto[]): void;
 	applyPreparedAssets(assets: PreparedAssetRecord[]): void;
-	applyAssetCachePrune(prunePlan: PreparedAssetCachePrunePlan): void;
+	applyAssetCachePruneBatch(prunePlan: PreparedAssetCachePruneBatchPlan): void;
 	applyAssetError(request: AssetLookupRequestDto, message: string): void;
 	debugLog(label: string, detail: unknown): void;
 	nowMs?(): number;
 	warmRetainMs?: number;
+	pruneIntervalMs?: number;
+	pruneEvaluationBatchSize?: number;
+	pruneEvictionBatchSize?: number;
+	setTimeoutFn?: typeof setTimeout;
+	clearTimeoutFn?: typeof clearTimeout;
 }
 
 export class SceneAssetStreamingController {
@@ -67,6 +75,8 @@ export class SceneAssetStreamingController {
 	private requestRevision = 0;
 	private running = false;
 	private disposed = false;
+	private pruneTimer: ReturnType<typeof setTimeout> | null = null;
+	private pruneCursorAssetId: string | null = null;
 
 	constructor(private readonly deps: SceneAssetStreamingControllerDeps) {}
 
@@ -76,6 +86,7 @@ export class SceneAssetStreamingController {
 		}
 
 		this.latestInput = input;
+		this.schedulePreparedCachePrune();
 		if (this.running) {
 			return;
 		}
@@ -88,6 +99,7 @@ export class SceneAssetStreamingController {
 		this.disposed = true;
 		this.latestInput = null;
 		this.inFlightAssetIds.clear();
+		this.clearPreparedCachePruneTimer();
 	}
 
 	private async runSyncLoop(): Promise<void> {
@@ -124,9 +136,6 @@ export class SceneAssetStreamingController {
 					"asset-stream.syncPriority.streaming",
 					() => this.syncPriority(input, "streaming"),
 				);
-				profileBrowserJsScope("asset-stream.prunePreparedCache", () => {
-					this.prunePreparedCache(input);
-				});
 
 				if (this.latestInput === input) {
 					break;
@@ -209,9 +218,6 @@ export class SceneAssetStreamingController {
 		});
 
 		if (requests.length === 0) {
-			profileBrowserJsScope("asset-stream.prunePreparedCache", () => {
-				this.prunePreparedCache(input);
-			});
 			return;
 		}
 
@@ -230,24 +236,55 @@ export class SceneAssetStreamingController {
 					requests.map((request) => this.prepareAndApplyRequest(request)),
 				),
 		);
-		profileBrowserJsScope("asset-stream.prunePreparedCache", () => {
-			this.prunePreparedCache(input);
-		});
+		this.schedulePreparedCachePrune();
 	}
 
-	private prunePreparedCache(input: SceneAssetStreamingInput): void {
+	private schedulePreparedCachePrune(): void {
+		if (this.disposed || this.pruneTimer !== null) {
+			return;
+		}
+		const setTimeoutFn = this.deps.setTimeoutFn ?? setTimeout;
+		this.pruneTimer = setTimeoutFn(
+			() => this.runPreparedCachePruneTick(),
+			this.deps.pruneIntervalMs ?? DEFAULT_PREPARED_ASSET_PRUNE_INTERVAL_MS,
+		);
+	}
+
+	private clearPreparedCachePruneTimer(): void {
+		if (this.pruneTimer === null) {
+			return;
+		}
+		const clearTimeoutFn = this.deps.clearTimeoutFn ?? clearTimeout;
+		clearTimeoutFn(this.pruneTimer);
+		this.pruneTimer = null;
+	}
+
+	private runPreparedCachePruneTick(): void {
+		this.pruneTimer = null;
+		const input = this.latestInput;
+		if (this.disposed || !input) {
+			return;
+		}
+		profileBrowserJsScope("asset-stream.prunePreparedCacheBatch", () => {
+			this.prunePreparedCacheBatch(input);
+		});
+		this.schedulePreparedCachePrune();
+	}
+
+	private prunePreparedCacheBatch(input: SceneAssetStreamingInput): void {
 		if (this.disposed) {
 			return;
 		}
 
 		const startedAtMs = performance.now();
 		const preparedByAssetId = this.deps.getPreparedByAssetId();
-		const prunePlan = this.planPreparedCachePrune(input, preparedByAssetId);
+		const prunePlan = this.planPreparedCachePruneBatch(input, preparedByAssetId);
+		this.pruneCursorAssetId = prunePlan.nextCursorAssetId;
 		const completedAtMs = this.deps.nowMs?.() ?? Date.now();
 		recordPreparedAssetPruneDiagnostics({
 			source: "scene-asset-streaming-controller",
 			durationMs: performance.now() - startedAtMs,
-			evaluatedAssetCount: Object.keys(preparedByAssetId).length,
+			evaluatedAssetCount: prunePlan.evaluatedAssetCount,
 			evictedAssetCount: prunePlan.evictedAssetIds.length,
 			retainedAssetCount: prunePlan.retainedAssetIds.length,
 			completedAtMs,
@@ -256,18 +293,20 @@ export class SceneAssetStreamingController {
 		this.deps.debugLog("asset-cache-prune", {
 			retainedAssetCount: prunePlan.retainedAssetIds.length,
 			evictedAssetCount: prunePlan.evictedAssetIds.length,
-			diagnostics: prunePlan.diagnostics,
+			evaluatedAssetCount: prunePlan.evaluatedAssetCount,
+			nextCursorAssetId: prunePlan.nextCursorAssetId,
+			nextWarmPruneAtMs: prunePlan.nextWarmPruneAtMs,
 		});
-		profileBrowserJsScope("asset-stream.applyAssetCachePrune", () => {
-			this.deps.applyAssetCachePrune(prunePlan);
+		profileBrowserJsScope("asset-stream.applyAssetCachePruneBatch", () => {
+			this.deps.applyAssetCachePruneBatch(prunePlan);
 		});
 	}
 
-	private planPreparedCachePrune(
+	private planPreparedCachePruneBatch(
 		input: SceneAssetStreamingInput,
 		preparedByAssetId: Record<string, PreparedAssetRecord>,
-	): PreparedAssetCachePrunePlan {
-		return planPreparedAssetCachePrune({
+	): PreparedAssetCachePruneBatchPlan {
+		return planPreparedAssetCachePruneBatch({
 			preparedByAssetId,
 			cacheMetadataByAssetId: this.deps.getCacheMetadataByAssetId(),
 			activeCoverageAssetIds: deriveSceneCoverageAssetIds(
@@ -286,6 +325,13 @@ export class SceneAssetStreamingController {
 			nowMs: this.deps.nowMs?.() ?? Date.now(),
 			warmRetainMs:
 				this.deps.warmRetainMs ?? DEFAULT_PREPARED_ASSET_WARM_RETAIN_MS,
+			cursorAssetId: this.pruneCursorAssetId,
+			maxEvaluatedAssetCount:
+				this.deps.pruneEvaluationBatchSize ??
+				DEFAULT_PREPARED_ASSET_PRUNE_EVALUATION_BATCH_SIZE,
+			maxEvictedAssetCount:
+				this.deps.pruneEvictionBatchSize ??
+				DEFAULT_PREPARED_ASSET_PRUNE_EVICTION_BATCH_SIZE,
 		});
 	}
 

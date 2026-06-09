@@ -489,6 +489,8 @@ function refreshWebgl2TerrainProductDerivedState({
 		deriveTerrainTileRenderCandidate,
 	);
 	store.terrainTileCount = store.terrainTiles.length;
+	store.materialFallbackReasonCount = 0;
+	store.materialFallbackReasonSamples = [];
 	const productTerrainTiles = selectProductOwnedTerrainTiles(store);
 	const terrainPageCandidates = collectTerrainTexturePageAtlasCandidates({
 		assetState,
@@ -497,10 +499,7 @@ function refreshWebgl2TerrainProductDerivedState({
 		textureFilteringMode,
 		detailTexturesEnabled,
 		reportDiagnostic: (message) => {
-			store.materialFallbackReasonSamples = [
-				...store.materialFallbackReasonSamples,
-				message,
-			].slice(0, 8);
+			recordMaterialFallbackReason(store, message);
 		},
 	});
 	store.terrainAtlasRefCount = terrainPageCandidates.refCount;
@@ -535,6 +534,17 @@ function refreshWebgl2TerrainProductDerivedState({
 		texturePagesByBucketIndex: store.productTerrainTexturePagesByBucketIndex,
 	});
 	refreshWebgl2TerrainTexturePageCounters(store);
+}
+
+function recordMaterialFallbackReason(
+	store: Webgl2WorldResourceStore,
+	message: string,
+): void {
+	store.materialFallbackReasonCount += 1;
+	store.materialFallbackReasonSamples = [
+		...store.materialFallbackReasonSamples,
+		message,
+	].slice(0, 8);
 }
 
 function destroyWebgl2TerrainTileResourceById({
@@ -1719,16 +1729,16 @@ function resolveWebgl2TerrainTileTexturePageBindings({
 						texturePage,
 					});
 				} else {
-					store.materialFallbackReasonSamples = [
-						...store.materialFallbackReasonSamples,
+					recordMaterialFallbackReason(
+						store,
 						`missing terrain detail texture page ${placement.textureIndex} for ${tile.detailPlan.atlasEntryKey}`,
-					].slice(0, 8);
+					);
 				}
 			} else {
-				store.materialFallbackReasonSamples = [
-					...store.materialFallbackReasonSamples,
+				recordMaterialFallbackReason(
+					store,
 					`missing terrain detail atlas placement ${tile.detailPlan.atlasEntryKey}`,
-				].slice(0, 8);
+				);
 			}
 		}
 		tile.texturePageBindings = dedupeTerrainTexturePageBindings(bindings);

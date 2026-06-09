@@ -831,6 +831,8 @@ export interface PreparedAssetKindCounts {
 
 export interface PreparedAssetCacheDiagnostics {
 	prepared: PreparedAssetKindCounts;
+	hardRetained: PreparedAssetKindCounts;
+	warmRetained: PreparedAssetKindCounts;
 	retained: PreparedAssetKindCounts;
 	evicted: PreparedAssetKindCounts;
 }

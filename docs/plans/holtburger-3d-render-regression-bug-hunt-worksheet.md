@@ -2225,6 +2225,118 @@ Notes:
 - First runtime report after Phase 19 exposed a resource-bookkeeping correction: terrain products no longer emitted static bundle artifacts, but WebGL static-bundle commit still retained empty product records for terrain product keys. Static-bundle resource commit now treats an empty layer list as eviction, and product-domain metric summaries now de-dupe product keys across resource stores.
 - Second runtime report confirmed the empty terrain static-bundle rows were gone, but exposed a metrics-only key-shape bug: structured interior resources store resident resources by detailed resource key while also keeping canonical product identity keys in `productResourceKeyByProductKey`. Product-domain metrics now use the canonical structured product keys, so total resident product counts and domain summaries should agree.
 
+## Phase 20: Derive Prepared Asset Dependencies From Structured Facts
+
+Status: planned.
+
+Goal:
+
+- Remove redundant flattened dependency summaries from prepared outdoor/env-cell payloads and derive dependency roots from the structured facts already present on those payloads.
+
+Context:
+
+- Phase 19 split outdoor render products by LoD/product domain, but `StaticLandblockRenderWorker` still uses `landblock-outdoor.dependencies.renderableSourceAssetIds` when collecting static companion roots.
+- The Tauri serializer currently derives `landblock-outdoor.dependencies.renderableSourceAssetIds` from `outdoor.statics[].sourceAssetId` and `env-cell.dependencies.renderableSourceAssetIds` from `envCell.statics[].sourceAssetId`.
+- These fields are convenience summaries, not authoritative DAT facts. They duplicate data already present in `statics[]`, and they are too broad for domain-scoped products such as `"outdoor-buildings"`.
+- `env-cell.dependencies.materialAssetIds` is similarly derivable from `envCell.surfaces[].materialAssetId`.
+
+Out of scope:
+
+- Changing host asset routes such as `landblock/<id>/outdoor`, `landblock/<id>/topology`, or `env-cell/<id>`.
+- Changing prepared static member classification rules.
+- Changing material graph semantics, render-surface preparation, texture-page planning, or WebGL upload behavior.
+- Adding new kinded dependency lists to Rust payloads. The point is to remove duplicated summaries, not add richer duplicate summaries.
+
+### Phase 20A: Centralize Structured Dependency Derivation
+
+Status: planned.
+
+Deliverables:
+
+- Add typed helper functions in the TypeScript asset layer to derive dependency roots from prepared payload facts while the old dependency summary fields still exist:
+  - landblock outdoor renderable source ids from `payload.statics[].sourceAssetId`
+  - landblock outdoor source ids filtered by product domain / bundle kind
+  - env-cell renderable source ids from `payload.statics[].sourceAssetId`
+  - env-cell material ids from `payload.surfaces[].materialAssetId`
+- Prefer these helpers in existing prepared-record dependency paths instead of reimplementing similar logic. `getPreparedAssetDependencies()` already derives outdoor/env-cell prepared dependencies from structured facts; extract or align with that behavior rather than rewriting it wholesale.
+- Migrate `getAssetResponseDependencies()` for raw host responses and render-product worker companion loading to the helpers before deleting the payload fields.
+- Keep helper naming explicit enough to distinguish generic closure derivation from domain-scoped render-product derivation.
+
+Acceptance criteria:
+
+- Generic raw-response dependency expansion for `landblock-outdoor` and `env-cell` no longer reads flattened `dependencies.renderableSourceAssetIds`.
+- Domain-scoped outdoor static companion loading uses the same structured member predicate as artifact construction.
+- Tests cover building-only companion derivation excluding non-building statics and detail-only derivation excluding building statics.
+- All tests still pass while the old payload fields remain present, proving consumer migration is complete before contract removal.
+
+### Phase 20B: Remove Redundant Payload Dependency Fields
+
+Status: planned.
+
+Deliverables:
+
+- Update host contracts and prepared asset TypeScript types to remove:
+  - `PreparedLandblockOutdoorPayload.dependencies.renderableSourceAssetIds`
+  - `PreparedLandblockOutdoorPayload.dependencies.materialAssetIds` if it remains empty/redundant
+  - `PreparedEnvCellPayload.dependencies.renderableSourceAssetIds`
+  - `PreparedEnvCellPayload.dependencies.materialAssetIds`
+- Update Tauri JSON serialization to stop emitting redundant dependency summaries for landblock outdoor and env-cell payloads.
+- Delete now-unused dependency-summary serializer helpers such as `serialize_landblock_outdoor_dependencies()` and `serialize_env_cell_dependencies()` once their call sites are gone.
+- Update tests/fixtures to express source/material facts through `statics[]` and `surfaces[]` only.
+
+Acceptance criteria:
+
+- No checked-in TypeScript fixture is required to populate redundant outdoor/env-cell dependency summary fields.
+- The host contract validates outdoor/env-cell payloads from structured facts without dependency summary objects.
+- Rust serialization no longer computes broad static source dependency lists for outdoor/env-cell payloads.
+- `rg "dependencies.renderableSourceAssetIds|renderableSourceAssetIds"` only finds dependency fields for asset kinds that still genuinely need flattened summaries, such as setup/model/material graph payloads.
+
+### Phase 20C: Update Asset Request Planning And Worker Closure
+
+Status: planned.
+
+Deliverables:
+
+- Remove or narrow `scene-asset-request-planner.ts`'s generic `collectPreparedDependencyAssetIds(..., "renderableSourceAssetIds")` usage for outdoor/env-cell assets. Outdoor selection is already mostly structured via `collectSelectedOutdoorSourceAssetIds()`; env-cell static/material request paths should move to structured helpers over `statics[]` and `surfaces[]`.
+- Update `static-landblock-render-worker.ts` so:
+  - `"outdoor-buildings"` companion loading roots only building `sourceAssetId`s
+  - `"outdoor-detail"` companion loading roots only non-building `sourceAssetId`s
+  - terrain products load no static renderable companions
+  - env-cell products derive static companions from each env-cell's `statics[]`
+- Keep region render profile loading explicit where needed instead of hiding it behind static source dependencies.
+- Treat any remaining `payload.dependencies` use in scene planning as a cue to prove that the payload kind still lacks structured dependency facts.
+
+Acceptance criteria:
+
+- Runtime prepared-asset count should drop for building-only/detail-only worker jobs when the excluded domain has unique source assets.
+- Default outdoor report remains `52` resident products with `25/9/9/9` product-domain split.
+- Static bundle product/layer counts remain unchanged for the same visible scene, proving the cleanup changed loading breadth rather than render output.
+- `outdoor-buildings` worker tests observe no lookup request for a fixture-only non-building source asset, and `outdoor-detail` worker tests observe no lookup request for a fixture-only building source asset.
+
+### Phase 20D: Verification And Runtime Evidence
+
+Status: planned.
+
+Deliverables:
+
+- Add focused tests for:
+  - dependency derivation helpers
+  - generic asset dependency expansion
+  - scene asset request planning
+  - static landblock render worker companion loading
+- Include contract/prepare tests proving outdoor/env-cell payloads without dependency summary objects validate and prepare successfully.
+- Run full TypeScript verification.
+- Capture a runtime debug report around `0xda55ffff` and compare prepared/retained asset counts against the Phase 19 baseline.
+
+Acceptance criteria:
+
+- Focused tests prove dependency derivation comes from `statics[]` / `surfaces[]`, not flattened dependency summaries.
+- Full verification passes:
+  - `npm run --prefix apps/holtburger-3d test:ts`
+  - `npm run --prefix apps/holtburger-3d lint:ts`
+  - `npm run --prefix apps/holtburger-3d check`
+- Runtime evidence shows no regression in rendered product/resource counts and ideally lower worker-prepared dependency breadth for domain-scoped static products.
+
 ## Findings
 
 - Phase 1 diagnostics are installed and verified.
@@ -2289,4 +2401,5 @@ Notes:
 - Planned Phase 18 structural fix: terrain atlas packing should be usage-cohort-aware instead of globally texture-count-biased. Terrain refs sampled together by one terrain tile/draw slice need to be co-located on one page per bucket; independent terrain cohorts can still use adaptive memory-efficient pages.
 - Phase 18 implementation completed: terrain atlas planning now derives `terrain-color` and `terrain-mask` usage cohorts from resident tile/draw-slice layer plans and passes those constraints into a generic cohort-aware atlas planner. The Phase 17 global terrain `minimize-textures` workaround was removed; terrain buckets now use memory-minimizing adaptive packing constrained by actual draw-unit co-usage.
 - Planned Phase 19 structural fix: the prepared `landblock/<id>/outdoor` asset route is coarse, but the worker render product should not be. The overloaded `"outdoor"` product currently lets terrain-radius requests build building/detail static bundles outside their intended LoD domains; split outdoor render products will keep source asset loading unchanged while removing unnecessary derived CPU/GPU work.
+- Planned Phase 20 structural cleanup: outdoor/env-cell prepared payloads should carry structured facts, not duplicated flattened dependency summaries. Dependency expansion and render-product companion loading should derive source/material roots from `statics[]` and `surfaces[]`, enabling domain-scoped worker loading without adding kinded dependency summary fields.
 - Remaining suspected issues: static bundle payloads are too large, static bundle asset closure is too broad, and `setAssetState` still triggers costly static product recommits.

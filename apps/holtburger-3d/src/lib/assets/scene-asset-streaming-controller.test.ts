@@ -203,10 +203,6 @@ function createPreparedEnvCellWithStaticGfx(
 			nodes: [],
 			items: [],
 		},
-		dependencies: {
-			renderableSourceAssetIds: [gfxObjAssetId],
-			materialAssetIds: [],
-		},
 	});
 }
 

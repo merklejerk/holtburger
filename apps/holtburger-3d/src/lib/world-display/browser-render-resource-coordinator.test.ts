@@ -218,10 +218,6 @@ function createLandblockOutdoorRecord(options: {
 				},
 			],
 			outdoorBvh: null,
-			dependencies: {
-				renderableSourceAssetIds: [formatGfxObjAssetId(options.sourceDid)],
-				materialAssetIds: [],
-			},
 			diagnostics: {
 				sourceRecords: [],
 				omissions: [],

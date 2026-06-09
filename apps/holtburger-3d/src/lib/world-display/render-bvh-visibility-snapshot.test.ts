@@ -648,10 +648,6 @@ function createOutdoorPayload(
 			nodes: [node(bounds(-1, 1, -1, 1, 2, 4), null, null, [0])],
 			items: [{ kind: "static", instanceId: "tree" }],
 		},
-		dependencies: {
-			renderableSourceAssetIds: [],
-			materialAssetIds: [],
-		},
 		diagnostics: emptyDiagnostics(),
 	};
 }
@@ -692,10 +688,6 @@ function createEnvCellPayload(envCellId: number): PreparedEnvCellPayload {
 				{ kind: "static", instanceId: "chair" },
 				{ kind: "portal", portalId: "portal/0" },
 			],
-		},
-		dependencies: {
-			renderableSourceAssetIds: [],
-			materialAssetIds: [],
 		},
 		diagnostics: emptyDiagnostics(),
 	};

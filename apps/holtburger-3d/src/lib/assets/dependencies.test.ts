@@ -441,10 +441,6 @@ function createLandblockOutdoorPayload(
 		terrain: terrainPayload.terrain,
 		statics,
 		outdoorBvh: null,
-		dependencies: {
-			renderableSourceAssetIds: statics.map((member) => member.sourceAssetId),
-			materialAssetIds: [],
-		},
 		diagnostics: emptyLandblockDiagnostics(),
 		provenance,
 	};
@@ -567,10 +563,6 @@ function createEnvCellPayload() {
 			coordinateSpace: "env-cell-local" as const,
 			nodes: [],
 			items: [],
-		},
-		dependencies: {
-			renderableSourceAssetIds: ["setup-model/02000020"],
-			materialAssetIds: ["material/08000020"],
 		},
 		provenance,
 	};

@@ -17,6 +17,11 @@ import {
 	formatRegionRenderProfileAssetId,
 	formatTerrainMaterialAssetId,
 } from "../landblocks";
+import {
+	collectEnvCellMaterialAssetIds,
+	collectEnvCellRenderableSourceAssetIds,
+	collectLandblockOutdoorRenderableSourceAssetIds,
+} from "./structured-asset-dependencies";
 
 export interface AssetDependencyRef {
 	assetId: string;
@@ -32,8 +37,9 @@ export function getAssetResponseDependencies(
 		return uniqueSortedAssetIds([
 			formatTerrainMaterialAssetId(landblockOutdoor.data.regionNumber),
 			formatRegionRenderProfileAssetId(landblockOutdoor.data.regionNumber),
-			...landblockOutdoor.data.dependencies.renderableSourceAssetIds,
-			...landblockOutdoor.data.dependencies.materialAssetIds,
+			...collectLandblockOutdoorRenderableSourceAssetIds(
+				landblockOutdoor.data,
+			),
 		]);
 	}
 
@@ -50,8 +56,8 @@ export function getAssetResponseDependencies(
 	if (envCell.success) {
 		return uniqueSortedAssetIds([
 			formatRegionRenderProfileAssetId(envCell.data.regionNumber),
-			...envCell.data.dependencies.materialAssetIds,
-			...envCell.data.dependencies.renderableSourceAssetIds,
+			...collectEnvCellMaterialAssetIds(envCell.data),
+			...collectEnvCellRenderableSourceAssetIds(envCell.data),
 		]);
 	}
 

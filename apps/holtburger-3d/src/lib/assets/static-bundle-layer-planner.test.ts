@@ -359,10 +359,6 @@ function createPreparedOutdoorLandblock(options: {
 			},
 			statics: options.statics,
 			outdoorBvh: null,
-			dependencies: {
-				renderableSourceAssetIds: [],
-				materialAssetIds: [],
-			},
 			diagnostics: { sourceRecords: [], errors: [], omissions: [] },
 		},
 	);
@@ -471,10 +467,6 @@ function createPreparedEnvCell(
 			coordinateSpace: "env-cell-local",
 			nodes: [],
 			items: [],
-		},
-		dependencies: {
-			renderableSourceAssetIds: [...sourceAssetIds],
-			materialAssetIds: [...materialAssetIds],
 		},
 	});
 }

@@ -20,6 +20,10 @@ import {
 	type MaterialTexturePreparationPolicy,
 } from "./material-texture-preparation-policy";
 import {
+	collectEnvCellMaterialAssetIds,
+	collectEnvCellRenderableSourceAssetIds,
+} from "./structured-asset-dependencies";
+import {
 	deriveBrowserFocusedStructuredInteriorMembershipPolicy,
 	deriveStructuredInteriorCoverage,
 } from "./structured-interior-coverage";
@@ -31,7 +35,6 @@ import {
 } from "../world-display/outdoor-scene-interest";
 
 type PreparedAssetDependencyKey =
-	| "renderableSourceAssetIds"
 	| "gfxObjAssetIds"
 	| "materialAssetIds";
 
@@ -478,10 +481,9 @@ function createStaticRenderableAssetRequests(
 		preparedByAssetId,
 		outdoorSourceAssetIds,
 	);
-	const envCellStaticSourceAssetIds = collectPreparedDependencyAssetIds(
+	const envCellStaticSourceAssetIds = collectEnvCellStaticSourceAssetIds(
 		preparedByAssetId,
 		linkedInteriorCoverage.envCellIds.map(formatEnvCellAssetId),
-		"renderableSourceAssetIds",
 	);
 	const envCellStaticDependencies = collectStaticRenderableDependencyAssetIds(
 		preparedByAssetId,
@@ -596,10 +598,9 @@ function createIndoorStaticRenderableAssetRequests(
 		activeEnvCellIds,
 		"indoor-region-render-profile",
 	);
-	const envCellStaticSourceAssetIds = collectPreparedDependencyAssetIds(
+	const envCellStaticSourceAssetIds = collectEnvCellStaticSourceAssetIds(
 		preparedByAssetId,
 		activeEnvCellIds.map(formatEnvCellAssetId),
-		"renderableSourceAssetIds",
 	);
 	const staticDependencies = collectStaticRenderableDependencyAssetIds(
 		preparedByAssetId,
@@ -655,10 +656,9 @@ function collectIndoorVisibleMaterialAssetIds(
 		),
 		preparedByAssetId,
 	).envCellIds;
-	const envCellStaticSourceAssetIds = collectPreparedDependencyAssetIds(
+	const envCellStaticSourceAssetIds = collectEnvCellStaticSourceAssetIds(
 		preparedByAssetId,
 		activeEnvCellIds.map(formatEnvCellAssetId),
-		"renderableSourceAssetIds",
 	);
 	const staticDependencies = collectStaticRenderableDependencyAssetIds(
 		preparedByAssetId,
@@ -705,10 +705,9 @@ function collectOutdoorVisibleMaterialAssetIds(
 		preparedByAssetId,
 		outdoorSourceAssetIds,
 	);
-	const envCellStaticSourceAssetIds = collectPreparedDependencyAssetIds(
+	const envCellStaticSourceAssetIds = collectEnvCellStaticSourceAssetIds(
 		preparedByAssetId,
 		linkedInteriorCoverage.envCellIds.map(formatEnvCellAssetId),
-		"renderableSourceAssetIds",
 	);
 	const envCellStaticDependencies = collectStaticRenderableDependencyAssetIds(
 		preparedByAssetId,
@@ -916,10 +915,9 @@ function collectStaticRenderableMaterialAssetIds(
 			assetIds,
 			"materialAssetIds",
 		),
-		...collectPreparedDependencyAssetIds(
+		...collectEnvCellMaterialDependencyAssetIds(
 			preparedByAssetId,
 			[...envCellIds].map(formatEnvCellAssetId),
-			"materialAssetIds",
 		),
 	]);
 }
@@ -1101,6 +1099,34 @@ function collectPreparedDependencyAssetIds(
 			}
 			const dependencyAssetIds = dependencies[dependencyKey];
 			return Array.isArray(dependencyAssetIds) ? dependencyAssetIds : [];
+		}),
+	);
+}
+
+function collectEnvCellStaticSourceAssetIds(
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	assetIds: readonly string[],
+): string[] {
+	return uniqueSortedAssetIds(
+		assetIds.flatMap((assetId) => {
+			const payload = preparedByAssetId[assetId]?.payload;
+			return payload?.kind === "env-cell"
+				? collectEnvCellRenderableSourceAssetIds(payload)
+				: [];
+		}),
+	);
+}
+
+function collectEnvCellMaterialDependencyAssetIds(
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	assetIds: readonly string[],
+): string[] {
+	return uniqueSortedAssetIds(
+		assetIds.flatMap((assetId) => {
+			const payload = preparedByAssetId[assetId]?.payload;
+			return payload?.kind === "env-cell"
+				? collectEnvCellMaterialAssetIds(payload)
+				: [];
 		}),
 	);
 }

@@ -16,6 +16,7 @@ import {
 	createStaticLandblockProductKeyFromResult,
 	formatStaticLandblockProductKey,
 } from "./landblock-render-product";
+import type { StaticLandblockProductSourceEvent } from "./static-landblock-product-source";
 
 export type {
 	WorldDisplayRenderer,
@@ -88,24 +89,12 @@ function createDeferredWorldDisplayRenderer<
 		});
 
 	return {
-		commitStaticLandblockProduct(result) {
-			staticLandblockRenderProducts = commitProductToSet(
+		applyStaticLandblockProductEvent(event) {
+			staticLandblockRenderProducts = applyProductSourceEventToSet(
 				staticLandblockRenderProducts,
-				result,
+				event,
 			);
-			loadedRenderer?.commitStaticLandblockProduct(result);
-		},
-		evictStaticLandblockProduct(key) {
-			staticLandblockRenderProducts = evictProductFromSet(
-				staticLandblockRenderProducts,
-				key,
-			);
-			loadedRenderer?.evictStaticLandblockProduct(key);
-		},
-		clearStaticLandblockProducts() {
-			staticLandblockRenderProducts =
-				createEmptyStaticLandblockRenderProductSet();
-			loadedRenderer?.clearStaticLandblockProducts();
+			loadedRenderer?.applyStaticLandblockProductEvent(event);
 		},
 		setDebugOverlayScene(scene) {
 			debugOverlayScene = scene;
@@ -240,6 +229,20 @@ function commitProductToSet(
 		residentCount: artifacts.length + 1,
 		committedResultCount: productSet.committedResultCount + 1,
 	};
+}
+
+function applyProductSourceEventToSet(
+	productSet: StaticLandblockRenderProductSet,
+	event: StaticLandblockProductSourceEvent,
+): StaticLandblockRenderProductSet {
+	switch (event.type) {
+		case "product-committed":
+			return commitProductToSet(productSet, event.result);
+		case "product-evicted":
+			return evictProductFromSet(productSet, event.key);
+		case "products-cleared":
+			return createEmptyStaticLandblockRenderProductSet();
+	}
 }
 
 function evictProductFromSet(

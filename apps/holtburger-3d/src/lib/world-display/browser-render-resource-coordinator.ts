@@ -62,10 +62,6 @@ import {
 import { deriveLandblockRenderChunkPlacement } from "./render-chunks";
 import { WORLD_RENDER_DOMAIN } from "./render-domains";
 import type { SceneCameraFrame } from "./camera";
-import type {
-	LandblockRenderProductWorkerResult,
-	StaticLandblockProductKey,
-} from "./landblock-render-product";
 import type { WorldDisplayRenderStyle } from "./renderer-contract";
 
 let lastPreparedOutdoorAssetsNotRenderedSignature: string | null = null;
@@ -119,11 +115,6 @@ export interface BrowserRenderResourceSurface {
 		context: ReturnType<typeof deriveWorldRenderSceneContext>,
 	): void;
 	setRenderChunkTransforms(transforms: readonly RenderChunkTransform[]): void;
-	commitStaticLandblockProduct(
-		result: LandblockRenderProductWorkerResult,
-	): void;
-	evictStaticLandblockProduct(key: StaticLandblockProductKey): void;
-	clearStaticLandblockProducts(): void;
 	setDebugOverlayScene(scene: WorldDebugOverlayModel): void;
 	setRenderSpatialQuery(query: RenderSpatialIndexQuery | null): void;
 	setSelectedStaticRenderableRenderKey(renderKey: string | null): void;

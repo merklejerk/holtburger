@@ -28,6 +28,10 @@
 		type StaticLandblockProductKey,
 		type StaticLandblockRenderProductSet,
 	} from "./static-landblock-render-artifact-store";
+	import type {
+		StaticLandblockProductSource,
+		StaticLandblockProductSourceEvent,
+	} from "./static-landblock-product-source";
 	import {
 		createStaticLandblockProductKeyFromResult,
 		formatStaticLandblockProductKey,
@@ -45,11 +49,13 @@
 
 	let {
 		preparedAssetResolver,
+		staticLandblockProductSource,
 		onCameraFrameChange,
 		onRenderMetricsChange,
 		onCameraResidencyChange,
 	}: {
 		preparedAssetResolver: PreparedAssetResolver;
+		staticLandblockProductSource: StaticLandblockProductSource;
 		onCameraFrameChange?: WorldRenderCameraFrameChangeHandler;
 		onRenderMetricsChange?: WorldRenderMetricsChangeHandler;
 		onCameraResidencyChange?: BrowserCameraResidencyChangeHandler;
@@ -76,6 +82,16 @@
 
 	onMount(() => {
 		let disposed = false;
+		staticLandblockRenderProducts = staticLandblockProductSource.getProductSet();
+		const productSubscription = staticLandblockProductSource.subscribe(
+			(event) => {
+				staticLandblockRenderProducts = applyProductSourceEventToSet(
+					staticLandblockRenderProducts,
+					event,
+				);
+				rendererController?.applyStaticLandblockProductEvent(event);
+			},
+		);
 
 		void tick().then(() => {
 			if (disposed || !viewportHost) {
@@ -104,35 +120,11 @@
 
 		return () => {
 			disposed = true;
+			productSubscription.unsubscribe();
 			rendererController?.dispose();
 			rendererController = null;
 		};
 	});
-
-	export function commitStaticLandblockProduct(
-		result: LandblockRenderProductWorkerResult,
-	): void {
-		staticLandblockRenderProducts = commitStaticProductToSet(
-			staticLandblockRenderProducts,
-			result,
-		);
-		rendererController?.commitStaticLandblockProduct(result);
-	}
-
-	export function evictStaticLandblockProduct(
-		key: StaticLandblockProductKey,
-	): void {
-		staticLandblockRenderProducts = evictStaticProductFromSet(
-			staticLandblockRenderProducts,
-			key,
-		);
-		rendererController?.evictStaticLandblockProduct(key);
-	}
-
-	export function clearStaticLandblockProducts(): void {
-		staticLandblockRenderProducts = createEmptyStaticLandblockRenderProductSet();
-		rendererController?.clearStaticLandblockProducts();
-	}
 
 	export function setDebugOverlayScene(
 		nextScene: WorldDebugOverlayModel,
@@ -254,6 +246,20 @@
 			artifacts,
 			residentCount: artifacts.length,
 		};
+	}
+
+	function applyProductSourceEventToSet(
+		productSet: StaticLandblockRenderProductSet,
+		event: StaticLandblockProductSourceEvent,
+	): StaticLandblockRenderProductSet {
+		switch (event.type) {
+			case "product-committed":
+				return commitStaticProductToSet(productSet, event.result);
+			case "product-evicted":
+				return evictStaticProductFromSet(productSet, event.key);
+			case "products-cleared":
+				return createEmptyStaticLandblockRenderProductSet();
+		}
 	}
 
 	function evictStaticProductFromSet(

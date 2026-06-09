@@ -22,10 +22,9 @@ import type {
 } from "./render-resource-inspection";
 import type { WorldRenderSceneContext } from "./render-scene-context";
 import type {
-	StaticLandblockProductKey,
 	StaticLandblockRenderProductSet,
 } from "./static-landblock-render-artifact-store";
-import type { LandblockRenderProductWorkerResult } from "./landblock-render-product";
+import type { StaticLandblockProductSourceEvent } from "./static-landblock-product-source";
 
 export interface WorldDisplayRendererOptions {
 	preparedAssetResolver: PreparedAssetResolver;
@@ -46,11 +45,9 @@ export interface WorldDisplayRendererOptions {
 }
 
 export interface WorldDisplayRenderer {
-	commitStaticLandblockProduct(
-		result: LandblockRenderProductWorkerResult,
+	applyStaticLandblockProductEvent(
+		event: StaticLandblockProductSourceEvent,
 	): void;
-	evictStaticLandblockProduct(key: StaticLandblockProductKey): void;
-	clearStaticLandblockProducts(): void;
 	setDebugOverlayScene(scene: WorldDebugOverlayModel): void;
 	setRenderSceneContext(context: WorldRenderSceneContext): void;
 	setRenderChunkTransforms(transforms: readonly RenderChunkTransform[]): void;

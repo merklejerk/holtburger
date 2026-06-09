@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-	createBrowserDestinationFromSceneResourceInterest,
 	createSceneResourceInterestFromBrowserDestination,
 	createSceneResourceInterestFromBrowserMode,
 } from "./browser-scene-resource-interest";
@@ -41,27 +40,26 @@ describe("browser scene resource interest adapter", () => {
 		);
 	});
 
-	it("adapts neutral scene interest back to browser destination shape for legacy planners", () => {
+	it("keeps the browser adapter one-way from browser state into neutral scene interest", () => {
 		const destination = parseBrowserLocationInput(
 			"da550155",
 			"manual",
 			"dungeon",
 		);
 		expect(destination).not.toBeNull();
-		const interest = createSceneResourceInterestFromBrowserDestination({
-			destination,
-			terrainLodRadius: 0,
-			buildingLodRadius: 0,
-			detailLodRadius: 0,
-			envCellLodRadius: 0,
-		});
 
-		expect(createBrowserDestinationFromSceneResourceInterest(interest)).toEqual({
-			kind: "interior-cell",
-			label: "Env cell da550155",
-			source: "manual",
-			envCellId: 0xda550155,
-			landblockId: 0xda55ffff,
-		});
+		expect(
+			describeSceneResourceInterestKey(
+				createSceneResourceInterestFromBrowserDestination({
+					destination,
+					terrainLodRadius: 0,
+					buildingLodRadius: 0,
+					detailLodRadius: 0,
+					envCellLodRadius: 0,
+				}),
+			),
+		).toBe(
+			"interior:0xda550155:terrain-0:buildings-0:detail-0:env-cells-0",
+		);
 	});
 });

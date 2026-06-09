@@ -10,9 +10,9 @@ import {
 	formatLandblockTopologyAssetId,
 } from "../landblocks";
 import {
-	createSceneCoverageRequests,
+	createBrowserSceneCoverageRequests as createSceneCoverageRequests,
 	deriveAllVisibleMaterialAssetIdsForBrowserDestination,
-	deriveSceneCoverageAssetIds,
+	deriveBrowserSceneCoverageAssetIds as deriveSceneCoverageAssetIds,
 } from "./scene-asset-request-planner";
 import { NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY } from "./material-texture-preparation-policy";
 import type { PreparedAssetRecord } from "./types";

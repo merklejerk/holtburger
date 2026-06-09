@@ -1,10 +1,3 @@
-import {
-	createBrowserDestinationFromSceneResourceInterest,
-} from "../../app/browser-scene-resource-interest";
-import {
-	describeBrowserDestinationIdentity,
-	type BrowserLocationSelection,
-} from "../../app/browser-mode";
 import type { AssetLookupRequestDto, AssetPriority } from "../host/contracts";
 import {
 	profileBrowserJsScope,
@@ -34,7 +27,7 @@ import type { ClientAssetRuntime } from "../scene-runtime/scene-resource-runtime
 import {
 	createSceneCoverageRequests,
 	deriveSceneCoverageAssetIds,
-	deriveVisibleMaterialAssetIdsForBrowserDestination,
+	deriveVisibleMaterialAssetIdsForSceneInterest,
 	type OutdoorSceneRequestOptions,
 } from "./scene-asset-request-planner";
 import { NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY } from "./material-texture-preparation-policy";
@@ -167,20 +160,10 @@ export class SceneAssetStreamingController implements ClientAssetRuntime {
 			this.deps.preparedAssetResolver,
 		);
 		const preparedByAssetId = planningSnapshot.preparedByAssetId;
-		const browserDestination =
-			createBrowserDestinationFromSceneResourceInterest(sceneInterest);
-		const sceneOptions = {
-			terrainRadius: sceneInterest.lod.terrain,
-			buildingRadius: sceneInterest.lod.buildings,
-			detailRadius: sceneInterest.lod.detail,
-			envCellRadius: sceneInterest.lod.envCells,
-			materialTexturePreparationPolicy:
-				NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY,
-		};
 		this.latestActiveCoverageAssetIds = deriveSceneCoverageAssetIds(
-			browserDestination,
+			sceneInterest,
 			preparedByAssetId,
-			sceneOptions,
+			NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY,
 		);
 		const requests = profileBrowserJsScope(
 			`asset-stream.planRequests.${priority}`,
@@ -188,10 +171,11 @@ export class SceneAssetStreamingController implements ClientAssetRuntime {
 				createSceneCoverageRequests(
 					{
 						requestRevision: this.requestRevision,
-						browserDestination,
+						sceneInterest,
 						preparedByAssetId,
 						pendingAssetIds: [...this.inFlightAssetIds],
-						options: sceneOptions,
+						materialTexturePreparationPolicy:
+							NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY,
 					},
 					priority,
 				),
@@ -200,7 +184,6 @@ export class SceneAssetStreamingController implements ClientAssetRuntime {
 		this.deps.debugLog("scene-coverage", {
 			priority,
 			requestRevision: this.requestRevision,
-			destination: describeBrowserDestinationIdentity(browserDestination),
 			sceneInterest: describeSceneResourceInterestKey(sceneInterest),
 			preparedCount: Object.keys(preparedByAssetId).length,
 			inFlightAssetIds: [...this.inFlightAssetIds],
@@ -216,16 +199,12 @@ export class SceneAssetStreamingController implements ClientAssetRuntime {
 		reportMaterialPlannerMismatch({
 			priority,
 			requestRevision: this.requestRevision,
-			browserDestination,
+			sceneInterest,
 			preparedByAssetId,
 			pendingAssetIds: [...this.inFlightAssetIds],
 			requests,
-			options: {
-				terrainRadius: sceneInterest.lod.terrain,
-				buildingRadius: sceneInterest.lod.buildings,
-				detailRadius: sceneInterest.lod.detail,
-				envCellRadius: sceneInterest.lod.envCells,
-			},
+			materialTexturePreparationPolicy:
+				NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY,
 		});
 
 		if (requests.length === 0) {
@@ -492,11 +471,11 @@ function reportMaterialGraphRequests(options: {
 function reportMaterialPlannerMismatch(options: {
 	priority: AssetPriority;
 	requestRevision: number;
-	browserDestination: BrowserLocationSelection | null;
+	sceneInterest: SceneResourceInterest;
 	preparedByAssetId: Record<string, PreparedAssetRecord>;
 	pendingAssetIds: string[];
 	requests: readonly AssetLookupRequestDto[];
-	options: OutdoorSceneRequestOptions;
+	materialTexturePreparationPolicy: OutdoorSceneRequestOptions["materialTexturePreparationPolicy"];
 }): void {
 	const materialRequests = options.requests.filter((request) =>
 		request.assetId.startsWith("material/"),
@@ -506,11 +485,12 @@ function reportMaterialPlannerMismatch(options: {
 	}
 
 	const visibleMaterialAssetIds =
-		deriveVisibleMaterialAssetIdsForBrowserDestination({
-			browserDestination: options.browserDestination,
+		deriveVisibleMaterialAssetIdsForSceneInterest({
+			sceneInterest: options.sceneInterest,
 			preparedByAssetId: options.preparedByAssetId,
 			pendingAssetIds: options.pendingAssetIds,
-			options: options.options,
+			materialTexturePreparationPolicy:
+				options.materialTexturePreparationPolicy,
 		});
 	if (visibleMaterialAssetIds.length === 0) {
 		return;

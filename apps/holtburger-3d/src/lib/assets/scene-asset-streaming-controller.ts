@@ -1,4 +1,7 @@
 import {
+	createBrowserDestinationFromSceneResourceInterest,
+} from "../../app/browser-scene-resource-interest";
+import {
 	describeBrowserDestinationIdentity,
 	type BrowserLocationSelection,
 } from "../../app/browser-mode";
@@ -24,6 +27,11 @@ import {
 import { recordPreparedAssetPruneDiagnostics } from "./prepared-asset-hot-path-diagnostics";
 import type { PreparedAssetResolver } from "./prepared-asset-store";
 import {
+	describeSceneResourceInterestKey,
+	type SceneResourceInterest,
+} from "../scene-runtime/scene-resource-interest";
+import type { ClientAssetRuntime } from "../scene-runtime/scene-resource-runtime";
+import {
 	createSceneCoverageRequests,
 	deriveSceneCoverageAssetIds,
 	deriveVisibleMaterialAssetIdsForBrowserDestination,
@@ -38,14 +46,6 @@ interface SceneAssetChannel {
 		rootRequest: AssetLookupRequestDto,
 		preparedByAssetId?: Record<string, PreparedAssetRecord>,
 	): Promise<AssetGraphPreparationResult>;
-}
-
-export interface SceneAssetStreamingInput {
-	browserDestination: BrowserLocationSelection | null;
-	terrainLodRadius: number;
-	buildingLodRadius: number;
-	detailLodRadius: number;
-	envCellLodRadius: number;
 }
 
 export interface SceneAssetStreamingControllerDeps {
@@ -65,9 +65,9 @@ export interface SceneAssetStreamingControllerDeps {
 	clearTimeoutFn?: typeof clearTimeout;
 }
 
-export class SceneAssetStreamingController {
+export class SceneAssetStreamingController implements ClientAssetRuntime {
 	private readonly inFlightAssetIds = new Set<string>();
-	private latestInput: SceneAssetStreamingInput | null = null;
+	private latestInput: SceneResourceInterest | null = null;
 	private lastSyncedKey: string | null = null;
 	private requestRevision = 0;
 	private running = false;
@@ -78,12 +78,16 @@ export class SceneAssetStreamingController {
 
 	constructor(private readonly deps: SceneAssetStreamingControllerDeps) {}
 
-	syncSceneInterest(input: SceneAssetStreamingInput): void {
+	get preparedAssetResolver(): PreparedAssetResolver {
+		return this.deps.preparedAssetResolver;
+	}
+
+	syncSceneInterest(sceneInterest: SceneResourceInterest): void {
 		if (this.disposed) {
 			return;
 		}
 
-		this.latestInput = input;
+		this.latestInput = sceneInterest;
 		this.schedulePreparedCachePrune();
 		if (this.running) {
 			return;
@@ -120,13 +124,7 @@ export class SceneAssetStreamingController {
 				this.requestRevision += 1;
 				this.deps.debugLog("coverage-key", {
 					coverageKey: syncKey,
-					destination: describeBrowserDestinationIdentity(
-						input.browserDestination,
-					),
-					terrainLodRadius: input.terrainLodRadius,
-					buildingLodRadius: input.buildingLodRadius,
-					detailLodRadius: input.detailLodRadius,
-					envCellLodRadius: input.envCellLodRadius,
+					sceneInterest: describeSceneResourceInterestKey(input),
 					requestRevision: this.requestRevision,
 				});
 
@@ -158,7 +156,7 @@ export class SceneAssetStreamingController {
 	}
 
 	private async syncPriority(
-		input: SceneAssetStreamingInput,
+		sceneInterest: SceneResourceInterest,
 		priority: AssetPriority,
 	): Promise<void> {
 		if (this.disposed) {
@@ -169,16 +167,18 @@ export class SceneAssetStreamingController {
 			this.deps.preparedAssetResolver,
 		);
 		const preparedByAssetId = planningSnapshot.preparedByAssetId;
+		const browserDestination =
+			createBrowserDestinationFromSceneResourceInterest(sceneInterest);
 		const sceneOptions = {
-			terrainRadius: input.terrainLodRadius,
-			buildingRadius: input.buildingLodRadius,
-			detailRadius: input.detailLodRadius,
-			envCellRadius: input.envCellLodRadius,
+			terrainRadius: sceneInterest.lod.terrain,
+			buildingRadius: sceneInterest.lod.buildings,
+			detailRadius: sceneInterest.lod.detail,
+			envCellRadius: sceneInterest.lod.envCells,
 			materialTexturePreparationPolicy:
 				NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY,
 		};
 		this.latestActiveCoverageAssetIds = deriveSceneCoverageAssetIds(
-			input.browserDestination,
+			browserDestination,
 			preparedByAssetId,
 			sceneOptions,
 		);
@@ -188,7 +188,7 @@ export class SceneAssetStreamingController {
 				createSceneCoverageRequests(
 					{
 						requestRevision: this.requestRevision,
-						browserDestination: input.browserDestination,
+						browserDestination,
 						preparedByAssetId,
 						pendingAssetIds: [...this.inFlightAssetIds],
 						options: sceneOptions,
@@ -200,11 +200,8 @@ export class SceneAssetStreamingController {
 		this.deps.debugLog("scene-coverage", {
 			priority,
 			requestRevision: this.requestRevision,
-			destination: describeBrowserDestinationIdentity(input.browserDestination),
-			terrainLodRadius: input.terrainLodRadius,
-			buildingLodRadius: input.buildingLodRadius,
-			detailLodRadius: input.detailLodRadius,
-			envCellLodRadius: input.envCellLodRadius,
+			destination: describeBrowserDestinationIdentity(browserDestination),
+			sceneInterest: describeSceneResourceInterestKey(sceneInterest),
 			preparedCount: Object.keys(preparedByAssetId).length,
 			inFlightAssetIds: [...this.inFlightAssetIds],
 			requestAssetIds: requests.map((request) => request.assetId),
@@ -219,15 +216,15 @@ export class SceneAssetStreamingController {
 		reportMaterialPlannerMismatch({
 			priority,
 			requestRevision: this.requestRevision,
-			browserDestination: input.browserDestination,
+			browserDestination,
 			preparedByAssetId,
 			pendingAssetIds: [...this.inFlightAssetIds],
 			requests,
 			options: {
-				terrainRadius: input.terrainLodRadius,
-				buildingRadius: input.buildingLodRadius,
-				detailRadius: input.detailLodRadius,
-				envCellRadius: input.envCellLodRadius,
+				terrainRadius: sceneInterest.lod.terrain,
+				buildingRadius: sceneInterest.lod.buildings,
+				detailRadius: sceneInterest.lod.detail,
+				envCellRadius: sceneInterest.lod.envCells,
 			},
 		});
 
@@ -495,7 +492,7 @@ function reportMaterialGraphRequests(options: {
 function reportMaterialPlannerMismatch(options: {
 	priority: AssetPriority;
 	requestRevision: number;
-	browserDestination: SceneAssetStreamingInput["browserDestination"];
+	browserDestination: BrowserLocationSelection | null;
 	preparedByAssetId: Record<string, PreparedAssetRecord>;
 	pendingAssetIds: string[];
 	requests: readonly AssetLookupRequestDto[];
@@ -532,20 +529,11 @@ function reportMaterialPlannerMismatch(options: {
 }
 
 function createSceneInterestSyncKey(
-	input: SceneAssetStreamingInput,
+	sceneInterest: SceneResourceInterest,
 	preparedRevision: number,
 ): string {
-	const destination = input.browserDestination;
-	const interestKey = [
-		`terrain-${input.terrainLodRadius}`,
-		`buildings-${input.buildingLodRadius}`,
-		`detail-${input.detailLodRadius}`,
-		`env-cells-${input.envCellLodRadius}`,
+	return [
+		describeSceneResourceInterestKey(sceneInterest),
 		`prepared-revision-${preparedRevision}`,
 	].join(":");
-
-	const destinationIdentity = describeBrowserDestinationIdentity(destination);
-	return destinationIdentity
-		? `${destinationIdentity}:${interestKey}`
-		: `none:${interestKey}`;
 }

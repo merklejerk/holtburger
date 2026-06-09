@@ -1,13 +1,15 @@
-import {
-	describeBrowserDestinationIdentity,
-	type BrowserLocationSelection,
-} from "../../app/browser-mode";
 import { planDesiredLandblockRenderProducts } from "../assets/landblock-render-product-planner";
+import {
+	describeSceneResourceInterestKey,
+	type SceneResourceInterest,
+} from "../scene-runtime/scene-resource-interest";
+import type { LandblockProductRuntime } from "../scene-runtime/scene-resource-runtime";
 import {
 	type StaticLandblockProductKey,
 	type StaticLandblockRenderProductSet,
 } from "./static-landblock-render-artifact-store";
 import { MutableStaticLandblockProductSource } from "./static-landblock-product-source";
+import type { StaticLandblockProductSourceListener } from "./static-landblock-product-source";
 import { StaticLandblockRenderWorkerClient } from "./static-landblock-render-worker-client";
 import type {
 	DesiredLandblockRenderProduct,
@@ -37,14 +39,6 @@ const DEFAULT_STATIC_LANDBLOCK_RENDER_BUILD_POLICY: LandblockRenderProductBuildP
 		terrainMaxLayerEntries: 8,
 	};
 
-export interface StaticLandblockRenderArtifactCoordinatorInput {
-	browserDestination: BrowserLocationSelection | null;
-	terrainLodRadius: number;
-	buildingLodRadius: number;
-	detailLodRadius: number;
-	envCellLodRadius: number;
-}
-
 interface StaticLandblockRenderProductClient {
 	requestProduct(
 		desired: DesiredLandblockRenderProduct,
@@ -68,9 +62,11 @@ interface StaticLandblockRenderArtifactCoordinatorOptions {
 	renderRegressionDiagnostics?: TemporaryRenderRegressionDiagnostics;
 }
 
-export class StaticLandblockRenderArtifactCoordinator {
+export class StaticLandblockRenderArtifactCoordinator
+	implements LandblockProductRuntime
+{
 	private readonly client: StaticLandblockRenderProductClient;
-	private readonly productSource: MutableStaticLandblockProductSource;
+	readonly productSource: MutableStaticLandblockProductSource;
 	private readonly buildPolicy: LandblockRenderProductBuildPolicy;
 	private readonly buildPolicyRevision: string;
 	private readonly texturePagePolicyRevision: string;
@@ -116,22 +112,22 @@ export class StaticLandblockRenderArtifactCoordinator {
 			readTemporaryRenderRegressionDiagnostics();
 	}
 
-	sync(input: StaticLandblockRenderArtifactCoordinatorInput): void {
+	syncSceneInterest(sceneInterest: SceneResourceInterest): void {
 		if (this.disposed) {
 			return;
 		}
-		const requestId = this.resolveRequestId(input);
+		const requestId = this.resolveRequestId(sceneInterest);
 		const plannedProducts = planDesiredLandblockRenderProducts({
-			browserDestination: input.browserDestination,
+			sceneInterest,
 			requestId,
 			buildPolicyRevision: this.buildPolicyRevision,
 			texturePagePolicyRevision: this.texturePagePolicyRevision,
 			buildPolicy: this.buildPolicy,
 			options: {
-				terrainRadius: input.terrainLodRadius,
-				buildingRadius: input.buildingLodRadius,
-				detailRadius: input.detailLodRadius,
-				envCellRadius: input.envCellLodRadius,
+				terrainRadius: sceneInterest.lod.terrain,
+				buildingRadius: sceneInterest.lod.buildings,
+				detailRadius: sceneInterest.lod.detail,
+				envCellRadius: sceneInterest.lod.envCells,
 			},
 		});
 		const desiredProducts = plannedProducts.filter((product) =>
@@ -185,6 +181,10 @@ export class StaticLandblockRenderArtifactCoordinator {
 		}
 	}
 
+	subscribeProductEvents(listener: StaticLandblockProductSourceListener) {
+		return this.productSource.subscribe(listener);
+	}
+
 	getProductSet(): StaticLandblockRenderProductSet {
 		return this.productSource.getProductSet();
 	}
@@ -198,9 +198,9 @@ export class StaticLandblockRenderArtifactCoordinator {
 	}
 
 	private resolveRequestId(
-		input: StaticLandblockRenderArtifactCoordinatorInput,
+		sceneInterest: SceneResourceInterest,
 	): string {
-		const signature = describeCoordinatorInputSignature(input);
+		const signature = describeSceneResourceInterestKey(sceneInterest);
 		if (this.lastInputSignature === signature && this.lastRequestId !== null) {
 			return this.lastRequestId;
 		}
@@ -257,20 +257,6 @@ export class StaticLandblockRenderArtifactCoordinator {
 
 function toError(error: unknown): Error {
 	return error instanceof Error ? error : new Error(String(error));
-}
-
-function describeCoordinatorInputSignature(
-	input: StaticLandblockRenderArtifactCoordinatorInput,
-): string {
-	const destinationKey =
-		describeBrowserDestinationIdentity(input.browserDestination) ?? "none";
-	return [
-		destinationKey,
-		input.terrainLodRadius,
-		input.buildingLodRadius,
-		input.detailLodRadius,
-		input.envCellLodRadius,
-	].join("|");
 }
 
 function countDesiredProductsByProduct(

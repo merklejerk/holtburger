@@ -1,14 +1,13 @@
 <script lang="ts">
 	import { onMount } from "svelte";
 	import { get } from "svelte/store";
-	import {
-		describeBrowserDestinationIdentity,
-		type BrowserModeState,
-	} from "./app/browser-mode";
+	import type { BrowserModeState } from "./app/browser-mode";
+	import { createSceneResourceInterestFromBrowserMode } from "./app/browser-scene-resource-interest";
 	import { frontendState } from "./app/frontend-state";
 	import { AssetChannelController } from "./lib/assets/asset-channel";
 	import { PreparedAssetStore } from "./lib/assets/prepared-asset-store";
 	import { SceneAssetStreamingController } from "./lib/assets/scene-asset-streaming-controller";
+	import { describeSceneResourceInterestKey } from "./lib/scene-runtime/scene-resource-interest";
 	import "./lib/diagnostics/browser-js-profiler";
 	import { readDebugConfig } from "./lib/host/tauri";
 	import BrowserWorldDisplay from "./pages/BrowserWorldDisplay.svelte";
@@ -78,25 +77,17 @@
 	function syncSceneStreamer(
 		sceneStreamer: SceneAssetStreamingController,
 	): void {
-		sceneStreamer.syncSceneInterest({
-			browserDestination: latestFrontendState.browserMode.destination,
-			terrainLodRadius: latestFrontendState.browserMode.terrainLodRadius,
-			buildingLodRadius: latestFrontendState.browserMode.buildingLodRadius,
-			detailLodRadius: latestFrontendState.browserMode.detailLodRadius,
-			envCellLodRadius: latestFrontendState.browserMode.envCellLodRadius,
-		});
+		sceneStreamer.syncSceneInterest(
+			createSceneResourceInterestFromBrowserMode(
+				latestFrontendState.browserMode,
+			),
+		);
 	}
 
 	function createBrowserSceneInterestKey(browserMode: BrowserModeState): string {
-		const destinationIdentity =
-			describeBrowserDestinationIdentity(browserMode.destination) ?? "none";
-		return [
-			destinationIdentity,
-			`terrain-${browserMode.terrainLodRadius}`,
-			`buildings-${browserMode.buildingLodRadius}`,
-			`detail-${browserMode.detailLodRadius}`,
-			`env-cells-${browserMode.envCellLodRadius}`,
-		].join(":");
+		return describeSceneResourceInterestKey(
+			createSceneResourceInterestFromBrowserMode(browserMode),
+		);
 	}
 
 	function debugLog(label: string, detail: unknown): void {

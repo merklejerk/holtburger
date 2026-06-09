@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { parseBrowserLocationInput } from "../../app/browser-mode";
+import {
+	parseBrowserLocationInput,
+	type BrowserLocationSelection,
+} from "../../app/browser-mode";
+import { createSceneResourceInterestFromBrowserDestination } from "../../app/browser-scene-resource-interest";
 import type {
 	DesiredLandblockRenderProduct,
 	LandblockRenderProductWorkerResult,
@@ -22,13 +26,14 @@ describe("static landblock render artifact coordinator", () => {
 			onStoreChanged: (productSet) => productSets.push(productSet.residentCount),
 		});
 
-		coordinator.sync({
-			browserDestination: destination,
-			terrainLodRadius: 0,
-			buildingLodRadius: -1,
-			detailLodRadius: -1,
-			envCellLodRadius: -1,
-		});
+		coordinator.syncSceneInterest(
+			createProductSceneInterest(destination, {
+				terrain: 0,
+				buildings: -1,
+				detail: -1,
+				envCells: -1,
+			}),
+		);
 
 		expect(client.requests.map((request) => request.product)).toEqual([
 			"outdoor-terrain",
@@ -70,24 +75,26 @@ describe("static landblock render artifact coordinator", () => {
 			},
 		});
 
-		coordinator.sync({
-			browserDestination: destination,
-			terrainLodRadius: 0,
-			buildingLodRadius: -1,
-			detailLodRadius: -1,
-			envCellLodRadius: -1,
-		});
+		coordinator.syncSceneInterest(
+			createProductSceneInterest(destination, {
+				terrain: 0,
+				buildings: -1,
+				detail: -1,
+				envCells: -1,
+			}),
+		);
 		for (const request of client.requests) {
 			client.resolveNext(createResult(request));
 		}
 		await Promise.resolve();
-		coordinator.sync({
-			browserDestination: null,
-			terrainLodRadius: 0,
-			buildingLodRadius: -1,
-			detailLodRadius: -1,
-			envCellLodRadius: -1,
-		});
+		coordinator.syncSceneInterest(
+			createProductSceneInterest(null, {
+				terrain: 0,
+				buildings: -1,
+				detail: -1,
+				envCells: -1,
+			}),
+		);
 
 		expect(clearedCount).toBe(1);
 		coordinator.dispose();
@@ -100,21 +107,20 @@ describe("static landblock render artifact coordinator", () => {
 		const coordinator = new StaticLandblockRenderArtifactCoordinator({
 			client,
 		});
-		const input = {
-			browserDestination: destination,
-			terrainLodRadius: 0,
-			buildingLodRadius: -1,
-			detailLodRadius: -1,
-			envCellLodRadius: -1,
-		};
+		const sceneInterest = createProductSceneInterest(destination, {
+			terrain: 0,
+			buildings: -1,
+			detail: -1,
+			envCells: -1,
+		});
 
-		coordinator.sync(input);
+		coordinator.syncSceneInterest(sceneInterest);
 		const firstRequestId = client.requests[0]?.requestId;
 		for (const request of client.requests) {
 			client.resolveNext(createResult(request));
 		}
 		await Promise.resolve();
-		coordinator.sync(input);
+		coordinator.syncSceneInterest(sceneInterest);
 
 		expect(client.requests).toHaveLength(3);
 		expect(firstRequestId).toBe("static-landblock-render:1");
@@ -129,13 +135,14 @@ describe("static landblock render artifact coordinator", () => {
 			client,
 		});
 
-		coordinator.sync({
-			browserDestination: destination,
-			terrainLodRadius: 0,
-			buildingLodRadius: 0,
-			detailLodRadius: 0,
-			envCellLodRadius: 0,
-		});
+		coordinator.syncSceneInterest(
+			createProductSceneInterest(destination, {
+				terrain: 0,
+				buildings: 0,
+				detail: 0,
+				envCells: 0,
+			}),
+		);
 
 		expect(client.requests).toHaveLength(1);
 		expect(client.requests[0]).toMatchObject({
@@ -161,13 +168,14 @@ describe("static landblock render artifact coordinator", () => {
 			},
 		});
 
-		coordinator.sync({
-			browserDestination: destination,
-			terrainLodRadius: 0,
-			buildingLodRadius: 0,
-			detailLodRadius: 0,
-			envCellLodRadius: 0,
-		});
+		coordinator.syncSceneInterest(
+			createProductSceneInterest(destination, {
+				terrain: 0,
+				buildings: 0,
+				detail: 0,
+				envCells: 0,
+			}),
+		);
 
 		expect(client.requests).toHaveLength(1);
 		expect(client.requests[0]).toMatchObject({
@@ -228,4 +236,22 @@ function createResult(
 			messages: [],
 		},
 	};
+}
+
+function createProductSceneInterest(
+	destination: BrowserLocationSelection | null,
+	lod: {
+		terrain: number;
+		buildings: number;
+		detail: number;
+		envCells: number;
+	},
+) {
+	return createSceneResourceInterestFromBrowserDestination({
+		destination,
+		terrainLodRadius: lod.terrain,
+		buildingLodRadius: lod.buildings,
+		detailLodRadius: lod.detail,
+		envCellLodRadius: lod.envCells,
+	});
 }

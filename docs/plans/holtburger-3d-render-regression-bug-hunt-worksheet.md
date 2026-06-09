@@ -1703,6 +1703,173 @@ Verification notes:
 - `lint:ts` and `check` passed with zero reported errors or warnings.
 - Live browser atlas reinspection was not run in this headless implementation pass. The artifact-level regression proves `material/0800094d`-style declared-but-unused slots no longer allocate texture refs or atlas entries after a fresh worker build.
 
+## Phase 17: Deterministic Adaptive MaxRects Atlas Packing
+
+Status: planned.
+
+Goal:
+
+- Replace the current deterministic row/shelf atlas packer with an offline deterministic adaptive MaxRects planner that improves atlas space efficiency and avoids allocating every packed page at the maximum texture size.
+
+Context:
+
+- Resource-inspector texture previews show large unused atlas bands when mixed-size entries share a row, especially detail/outdoor atlas pages that combine tall sprite-like placements with smaller textures.
+- Resource-inspector texture rows also show pages with tiny entry sets allocated as `4096x4096`, causing terrible coverage metrics and real VRAM waste. A `4096x4096` RGBA8 page costs roughly 64 MiB before mipmaps and roughly 85 MiB with mipmaps.
+- `planAtlasLayout()` currently dedupes by entry key, sorts lexicographically by key, places padded entries left-to-right in rows, and creates every packed page at `policy.maxTextureSize`. It never reuses holes below taller entries and treats the maximum size as the actual allocation size instead of a cap.
+- Static landblock atlases are not built incrementally per texture. The landblock worker builds immutable product artifacts, and texture pages are packed from the full product/layer entry set before commit. LB loading is incremental at the product level, so a stronger offline planner does not force per-texture repacking during normal loading.
+- The planner API is already the right boundary: callers pass `AtlasLayoutEntry[]` plus `AtlasLayoutPolicy` and receive `AtlasTexturePage[]`, placements, and overflow metadata.
+
+Out of scope:
+
+- Rotation. Rotation can improve packing but would require orientation-aware upload, preview, material binding, and shader/UV handling.
+- A global cross-landblock streaming atlas allocator.
+- Incremental atlas mutation, background compaction, or preserving placement stability across changed entry sets.
+- Changing page bucket compatibility, source-placement aliasing, or texture-page resource ownership.
+- Adding non-power-of-two page tiers in the first cut. WebGL2 supports mipmapped NPOT textures, but power-of-two tiers keep sizing, mip chains, and debugging boring while we fix the obvious waste.
+
+### Phase 17A: Lock Current Planner Contract And Offline Assumptions
+
+Status: planned.
+
+Deliverables:
+
+- Document `planAtlasLayout()` as an offline deterministic planner for a complete entry set.
+- Keep `AtlasLayoutPolicy`, `AtlasLayoutEntry`, `AtlasTexturePlacement`, `AtlasTexturePage`, and overflow result shapes stable unless implementation proves a small internal helper type is needed.
+- Document that `policy.maxTextureSize` is a capacity cap, not the default page allocation size.
+- Keep `AtlasLayoutPlan.entries` as the validated/deduped key-sorted entry list for diagnostics and compatibility. Size/area sorting should be an internal packing order, not the returned entry order.
+- Add tests that prove result determinism is independent of input order while allowing placement order to change from the old shelf layout.
+- Add focused tests showing both current waste modes:
+  - a tall entry plus smaller entries should pack into reused free space rather than forcing an entire row-height band
+  - a tiny entry set should allocate the smallest viable page tier instead of `maxTextureSize`
+
+Acceptance criteria:
+
+- Existing call sites in static bundle, structured interior, terrain/product atlas planning, and dynamic compaction still call the same public planner.
+- Tests assert deterministic output using stable sort tie-breaks, not old lexicographic placement order.
+- No upload/resource/preview code changes are required for this phase.
+
+### Phase 17B: Add Adaptive Page Size Selection
+
+Status: planned.
+
+Deliverables:
+
+- Add deterministic candidate page-size tiers derived from `policy.maxTextureSize`.
+- Use power-of-two page widths/heights in the first cut, bounded by the largest padded entry and the maximum policy size. If a future policy uses a non-power-of-two cap, include the exact cap as the final fallback tier rather than making representable entries impossible.
+- For the first cut, choose one shared page-size tier for the whole bucket/layout rather than independently sizing each page. This keeps page selection deterministic and avoids a per-page sizing policy before the main waste is fixed.
+- For each candidate page-size tier, run the deterministic packer against the full entry set with `policy.maxTextureCount`.
+- Prefer candidates that pack all non-oversized entries. If no candidate can pack everything within `policy.maxTextureCount`, choose the candidate with the fewest `atlas-full` overflows, then apply the same deterministic allocation tie-breaks.
+- Choose the selected candidate by minimizing total allocated pixels after packing, not just per-page area. Use deterministic tie-breaks:
+  - smaller `pageWidth * pageHeight * texturePageCount`
+  - then fewer `atlas-full` overflows
+  - then fewer texture pages
+  - then smaller per-page pixel area
+  - then smaller max dimension
+  - then smaller height
+  - then smaller width
+- Allow rectangular atlas pages such as `1024x512` when they fit better than square pages.
+- Use total padded source area and largest padded entry dimensions only as lower-bound filters for impossible candidates; do not derive the final page dimensions from area alone.
+- Do not pack into `policy.maxTextureSize` and crop to occupied bounds. The selected candidate dimensions should constrain placement during packing so the layout is valid for the actual allocation size.
+- Keep `source-too-large` based on the maximum cap and per-entry padded size.
+
+Acceptance criteria:
+
+- A small packed page reports actual dimensions below `policy.maxTextureSize` when entries fit smaller tiers.
+- Every page in a single returned layout uses the same selected dimensions in the first implementation cut.
+- A page requiring `4096x4096` can still allocate that size when justified by entry dimensions/count.
+- Coverage metrics use actual allocated page dimensions and no longer punish small entry sets with maximum-size pages.
+- No atlas page exceeds `policy.maxTextureSize` in either dimension.
+
+### Phase 17C: Implement Non-Rotating MaxRects Best-Short-Side-Fit
+
+Status: planned.
+
+Deliverables:
+
+- Replace the row cursor implementation inside `planAtlasLayout()` with a deterministic MaxRects allocator.
+- Convert each entry to padded dimensions before scoring; placements still expose unpadded `x`, `y`, `width`, `height`, and `gutterPixels`.
+- Sort entries by padded area descending, max side descending, min side descending, then key ascending.
+- For each entry/page-size candidate, scan existing pages in texture-index order and choose the free rect with:
+  - smallest short-side leftover
+  - then smallest long-side leftover
+  - then lowest `y`
+  - then lowest `x`
+- Split intersecting free rects around the placed padded rect and prune contained free rects.
+- Allocate a new page only when no existing page can fit the entry.
+- Re-run page-size candidate packing only inside the planner's offline worker-side layout step; do not mutate resident atlas pages incrementally.
+
+Acceptance criteria:
+
+- Oversized entries still report `source-too-large` before page allocation.
+- Entries that do not fit within `maxTextureCount` still report `atlas-full`.
+- Page indices are deterministic and stable for the same entry set/policy.
+- No placement overlaps when padded gutters are considered.
+- Packed page dimensions reflect the selected adaptive tier, not the policy cap unless the cap tier is actually needed.
+
+### Phase 17D: Cross-Caller Regression Tests
+
+Status: planned.
+
+Deliverables:
+
+- Expand `atlas-layout-planner.test.ts` with MaxRects-specific coverage:
+  - input-order determinism
+  - returned `plan.entries` remains key-sorted while internal packing order is size/fit driven
+  - hole reuse after tall placements
+  - adaptive page sizing below `maxTextureSize`
+  - rectangular page tier selection
+  - multiple pages and overflow
+  - per-entry gutter overrides
+  - duplicate/conflicting entry validation
+  - padded-rect non-overlap invariant
+- Run focused tests for static bundle texture pages and texture-page atlas planning to catch assumptions about lexicographic placement.
+- Include a texture-page atlas regression for terrain buckets with large gutters (`terrain-color` and `terrain-mask`) so adaptive sizing cannot choose a page smaller than the gutter-padded source.
+- Update any tests that asserted exact shelf coordinates when they only needed deterministic/no-overlap behavior.
+
+Acceptance criteria:
+
+- `npm run --prefix apps/holtburger-3d test:ts -- src/lib/world-display/atlas-layout-planner.test.ts` passes.
+- `npm run --prefix apps/holtburger-3d test:ts -- src/lib/world-display/static-bundle-layer-texture-pages.test.ts src/lib/world-display/texture-pages/texture-page-atlas-planner.test.ts` passes.
+- Tests do not preserve old shelf layout as a compatibility requirement.
+
+### Phase 17E: Atlas Efficiency Diagnostics And Inspector Validation
+
+Status: planned.
+
+Deliverables:
+
+- Use existing texture-page preview/resource inspector metadata to compare placement count, alias count, page dimensions, estimated bytes, page count, and coverage before/after on representative outdoor building/detail products.
+- If needed, add a planner-local test helper for coverage/used-area ratio, but do not add debug logging for this alone.
+- Verify no new overflows appear in the representative product sets.
+
+Acceptance criteria:
+
+- Mixed-size detail/outdoor atlas pages show reduced empty row-band waste in preview.
+- Tiny-entry packed atlas pages no longer allocate `4096x4096` unless the entries actually require that tier.
+- Estimated texture bytes decrease for representative static/detail pages with low coverage.
+- Page count and overflow count are no worse for representative products.
+- Coverage is calculated from source placements, not alias count.
+
+### Phase 17F: Verification And Cleanup
+
+Status: planned.
+
+Deliverables:
+
+- Run the full TypeScript test suite.
+- Run `lint:ts` and `check`.
+- Remove any temporary helpers or assertions that only existed to compare against shelf packing.
+- Record implementation notes, measured preview observations, and any remaining packing inefficiencies in this worksheet.
+
+Acceptance criteria:
+
+- Full verification passes:
+  - `npm run --prefix apps/holtburger-3d test:ts`
+  - `npm run --prefix apps/holtburger-3d lint:ts`
+  - `npm run --prefix apps/holtburger-3d check`
+- The final planner remains deterministic, adaptive-size, no-rotation, and offline per product/layer entry set.
+- Texture upload, material binding, preview selection, and resource inspector behavior remain contract-compatible.
+
 ### Risks And Mitigations
 
 - Risk: source aliasing merges refs that look identical but require different shader lookup semantics.
@@ -1719,6 +1886,18 @@ Verification notes:
   - Mitigation: derive detail refs from objects represented in the render-used surface set.
 - Risk: diagnostics lose visibility into unused material declarations after dead resources are removed.
   - Mitigation: report skipped/zero-triangle surfaces as diagnostics if needed instead of keeping allocated material/texture records.
+- Risk: MaxRects tie-breaks introduce nondeterministic page layouts.
+  - Mitigation: sort entries and score candidates with explicit stable tie-breaks ending in entry key/page/index order.
+- Risk: MaxRects improves local packing but increases planning CPU enough to show up during product streaming.
+  - Mitigation: keep planning offline inside worker product builds, avoid incremental repacks, and measure focused planner/product tests before considering global atlas architecture.
+- Risk: adaptive page-size search multiplies packing attempts.
+  - Mitigation: use a small power-of-two candidate tier set, short-circuit impossible tiers by total padded area/largest padded entry, and keep the work inside worker product builds.
+- Risk: choosing rectangular/smaller pages changes assumptions in upload or preview code.
+  - Mitigation: the texture-page contract already carries per-page `width` and `height`; focused resource/upload/preview tests must prove callers consume actual dimensions.
+- Risk: future rotation support leaks into shader/upload contracts.
+  - Mitigation: explicitly keep Phase 17 non-rotating and require a separate plan before adding rotated placements.
+- Risk: tests accidentally lock the old shelf coordinate layout.
+  - Mitigation: update tests toward deterministic invariants, no-overlap, overflow behavior, and coverage improvement rather than row-cursor coordinates except where exact coordinates prove a contract.
 
 ## Findings
 
@@ -1778,4 +1957,5 @@ Verification notes:
 - Phase 15 implementation completed: static and structured-interior texture pages now pack by source placement identity and expose virtual aliases. Material bindings resolve through alias membership while keeping wrap mode on the requesting virtual ref, and inspector previews now report source placement count separately from alias count.
 - Follow-up outdoor building atlas investigation: the impostor-looking `prepared-texture/06004527` placement came through `material/0800094d`, and the resource inspector showed that material as `refs 1; indices 0; tris 0`. This proves the current static bundle worker can allocate material/texture resources from declared source material slots that do not contribute rendered geometry. Phase 16 will move static bundle resource closure to render-used geometry surfaces.
 - Phase 16 implementation completed: static bundle worker artifacts now discover geometry candidates before material/texture planning, derive material routes/detail refs/texture pages from render-used surfaces only, and report skipped empty/incomplete candidate surfaces diagnostically. Regression coverage proves a declared-but-unused `material/0800094d` slot no longer creates material records, texture refs, or atlas entries, and zero-render buildings no longer allocate building detail overlays.
+- Current atlas packing is deterministic but space-inefficient in two ways: `planAtlasLayout()` is a row/shelf packer sorted by key, and it allocates every packed page at `policy.maxTextureSize` instead of the smallest viable page tier. Mixed tall/small entries waste row-height bands, while tiny entry sets can still allocate `4096x4096` pages. Phase 17 will replace this with a deterministic offline adaptive non-rotating MaxRects planner while keeping the public planner/resource contracts intact.
 - Remaining suspected issues: static bundle payloads are too large, static bundle asset closure is too broad, and `setAssetState` still triggers costly static product recommits.

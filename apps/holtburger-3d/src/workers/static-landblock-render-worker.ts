@@ -6,6 +6,7 @@ import {
 	type AssetChannelState,
 	type PreparedAssetRecord,
 } from "../lib/assets/types";
+import { collectLandblockOutdoorRenderableSourceAssetIdsForDomain } from "../lib/assets/structured-asset-dependencies";
 import { resolveNormalizedPreparedTextureAssetIds } from "../lib/assets/material-texture-preparation-policy";
 import {
 	formatEnvCellAssetId,
@@ -446,8 +447,12 @@ function collectOutdoorStaticCompanionAssetIds(
 		asset.payload.kind === "landblock-outdoor"
 			? [
 					formatRegionRenderProfileAssetId(asset.payload.regionNumber),
-					...asset.payload.dependencies.renderableSourceAssetIds,
-					...asset.payload.dependencies.materialAssetIds,
+					...collectLandblockOutdoorRenderableSourceAssetIdsForDomain(
+						asset.payload,
+						job.product === "outdoor-buildings"
+							? "outdoor-buildings"
+							: "outdoor-detail",
+					),
 				]
 			: [],
 	);

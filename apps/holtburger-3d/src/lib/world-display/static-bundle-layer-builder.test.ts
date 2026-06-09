@@ -1028,14 +1028,6 @@ function createOutdoorLandblock(
 		},
 		statics,
 		outdoorBvh: null,
-		dependencies: {
-			renderableSourceAssetIds: [
-				"gfx-obj/01000001",
-				"gfx-obj/01000002",
-				"gfx-obj/01000003",
-			],
-			materialAssetIds: [],
-		},
 		diagnostics: { sourceRecords: [], errors: [], omissions: [] },
 	});
 }
@@ -1118,10 +1110,6 @@ function createEnvCell(
 			coordinateSpace: "env-cell-local",
 			nodes: [],
 			items: [],
-		},
-		dependencies: {
-			renderableSourceAssetIds: statics.map((member) => member.sourceAssetId),
-			materialAssetIds: [],
 		},
 	});
 }

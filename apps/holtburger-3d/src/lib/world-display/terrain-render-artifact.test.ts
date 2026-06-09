@@ -195,10 +195,6 @@ function createOutdoorPayload(
 		},
 		statics: [],
 		outdoorBvh: null,
-		dependencies: {
-			renderableSourceAssetIds: [],
-			materialAssetIds: [],
-		},
 		diagnostics: { sourceRecords: [], errors: [], omissions: [] },
 	};
 }

@@ -2227,7 +2227,7 @@ Notes:
 
 ## Phase 20: Derive Prepared Asset Dependencies From Structured Facts
 
-Status: planned.
+Status: completed.
 
 Goal:
 
@@ -2249,7 +2249,7 @@ Out of scope:
 
 ### Phase 20A: Centralize Structured Dependency Derivation
 
-Status: planned.
+Status: completed.
 
 Deliverables:
 
@@ -2271,7 +2271,7 @@ Acceptance criteria:
 
 ### Phase 20B: Remove Redundant Payload Dependency Fields
 
-Status: planned.
+Status: completed.
 
 Deliverables:
 
@@ -2291,9 +2291,17 @@ Acceptance criteria:
 - Rust serialization no longer computes broad static source dependency lists for outdoor/env-cell payloads.
 - `rg "dependencies.renderableSourceAssetIds|renderableSourceAssetIds"` only finds dependency fields for asset kinds that still genuinely need flattened summaries, such as setup/model/material graph payloads.
 
+Progress:
+
+- Added structured dependency helpers and migrated raw/prepared dependency expansion, scene request planning, worker companion loading, and static bundle dependency closure away from outdoor/env-cell flattened dependency summaries.
+- Focused migration verification passed:
+  - `npm run --prefix apps/holtburger-3d test:ts -- src/lib/assets/dependencies.test.ts src/lib/assets/scene-asset-request-planner.test.ts src/workers/static-landblock-render-worker.test.ts src/lib/world-display/static-bundle-layer-builder.test.ts`
+- Removed redundant outdoor/env-cell dependency fields from TypeScript prepared payload types, host Zod contracts, Tauri JSON serialization, and TypeScript fixtures.
+- Acceptance grep now has zero matches for `renderableSourceAssetIds` / deleted serializer helpers.
+
 ### Phase 20C: Update Asset Request Planning And Worker Closure
 
-Status: planned.
+Status: completed.
 
 Deliverables:
 
@@ -2313,9 +2321,18 @@ Acceptance criteria:
 - Static bundle product/layer counts remain unchanged for the same visible scene, proving the cleanup changed loading breadth rather than render output.
 - `outdoor-buildings` worker tests observe no lookup request for a fixture-only non-building source asset, and `outdoor-detail` worker tests observe no lookup request for a fixture-only building source asset.
 
+Progress:
+
+- Scene request planning now derives env-cell static sources from `env-cell.statics[]` and env-cell material roots from `env-cell.surfaces[]`.
+- Static landblock render worker companion loading now derives outdoor static roots from `landblock-outdoor.statics[]` with product-domain filtering.
+- Static bundle layer closure now uses the same product-domain helper instead of reading outdoor dependency summaries.
+- Focused worker regression tests now assert `outdoor-buildings` does not request fixture-only detail sources and `outdoor-detail` does not request fixture-only building sources.
+- Focused verification passed:
+  - `npm run --prefix apps/holtburger-3d test:ts -- src/lib/assets/dependencies.test.ts src/lib/assets/scene-asset-request-planner.test.ts src/workers/static-landblock-render-worker.test.ts src/lib/world-display/static-bundle-layer-builder.test.ts`
+
 ### Phase 20D: Verification And Runtime Evidence
 
-Status: planned.
+Status: completed.
 
 Deliverables:
 
@@ -2336,6 +2353,19 @@ Acceptance criteria:
   - `npm run --prefix apps/holtburger-3d lint:ts`
   - `npm run --prefix apps/holtburger-3d check`
 - Runtime evidence shows no regression in rendered product/resource counts and ideally lower worker-prepared dependency breadth for domain-scoped static products.
+
+Progress:
+
+- Added focused structured dependency helper tests for outdoor all/building/detail filtering and env-cell source/material derivation.
+- Focused Phase 20 verification passed:
+  - `npm run --prefix apps/holtburger-3d test:ts -- src/lib/assets/structured-asset-dependencies.test.ts src/lib/assets/dependencies.test.ts src/lib/assets/scene-asset-request-planner.test.ts src/workers/static-landblock-render-worker.test.ts src/lib/world-display/static-bundle-layer-builder.test.ts`
+- Full verification passed:
+  - `npm run --prefix apps/holtburger-3d test:ts` (93 files, 512 tests)
+  - `npm run --prefix apps/holtburger-3d lint:ts`
+  - `npm run --prefix apps/holtburger-3d check`
+  - `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml` (27 tests)
+- Final grep verification found zero remaining matches for `renderableSourceAssetIds`, `serialize_landblock_outdoor_dependencies`, or `serialize_env_cell_dependencies`.
+- Browser runtime report comparison is still pending manual capture. The expected runtime-visible shape from Phase 19 should remain stable: `52` resident products with `25/9/9/9` outdoor-terrain/outdoor-buildings/outdoor-detail/outdoor-env-cells split, with lower worker companion breadth for building/detail jobs that exclude opposite-domain unique static sources.
 
 ## Findings
 

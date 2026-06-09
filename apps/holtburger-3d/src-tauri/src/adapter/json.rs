@@ -722,7 +722,6 @@ pub fn serialize_landblock_outdoor_payload_with_terrain(
         "terrain": terrain,
         "statics": outdoor.statics.iter().map(serialize_landblock_outdoor_static_member).collect::<Vec<_>>(),
         "outdoorBvh": serialize_landblock_outdoor_bvh(outdoor),
-        "dependencies": serialize_landblock_outdoor_dependencies(outdoor),
         "diagnostics": serialize_prepared_content_diagnostics(&outdoor.diagnostics),
         "provenance": {
             "source": "repo-local-hba",
@@ -730,23 +729,6 @@ pub fn serialize_landblock_outdoor_payload_with_terrain(
             "errorCode": outdoor.diagnostics.errors.first().map(|error| error.error_code),
             "detail": outdoor.diagnostics.errors.first().map(|error| error.detail.clone())
         }
-    })
-}
-
-pub fn serialize_landblock_outdoor_dependencies(
-    outdoor: &LandblockOutdoorAsset,
-) -> serde_json::Value {
-    let mut renderable_source_asset_ids = outdoor
-        .statics
-        .iter()
-        .map(|member| member.instance.source_asset_id.clone())
-        .collect::<Vec<_>>();
-    renderable_source_asset_ids.sort();
-    renderable_source_asset_ids.dedup();
-
-    serde_json::json!({
-        "renderableSourceAssetIds": renderable_source_asset_ids,
-        "materialAssetIds": Vec::<String>::new(),
     })
 }
 
@@ -1018,38 +1000,12 @@ where
         "renderGeometry": render_geometry,
         "cellBsp": serialize_bsp_node(&cell.cell_bsp),
         "localBvh": serialize_env_cell_local_bvh(cell, &static_meshes),
-        "dependencies": serialize_env_cell_dependencies(asset),
         "provenance": {
             "source": "repo-local-hba",
             "sourceAssetKind": "env-cell",
             "errorCode": asset.diagnostics.errors.first().map(|error| error.error_code),
             "detail": asset.diagnostics.errors.first().map(|error| error.detail.clone())
         }
-    })
-}
-
-pub fn serialize_env_cell_dependencies(asset: &EnvCellAsset) -> serde_json::Value {
-    let mut renderable_source_asset_ids = asset
-        .env_cell
-        .static_objects
-        .iter()
-        .map(|static_object| static_object.source_asset_id.clone())
-        .collect::<Vec<_>>();
-    renderable_source_asset_ids.sort();
-    renderable_source_asset_ids.dedup();
-
-    let mut material_asset_ids = asset
-        .prepared_cell
-        .surface_ids
-        .iter()
-        .map(|surface_id| format_material_asset_id(*surface_id))
-        .collect::<Vec<_>>();
-    material_asset_ids.sort();
-    material_asset_ids.dedup();
-
-    serde_json::json!({
-        "renderableSourceAssetIds": renderable_source_asset_ids,
-        "materialAssetIds": material_asset_ids,
     })
 }
 

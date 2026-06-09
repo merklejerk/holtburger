@@ -7,6 +7,7 @@ import {
 	type PreparedSetupAppearancePayload,
 	type PreparedSetupModelPayload,
 } from "../assets/types";
+import { collectLandblockOutdoorRenderableSourceAssetIdsForDomain } from "../assets/structured-asset-dependencies";
 import {
 	formatEnvCellAssetId,
 	formatHex32,
@@ -335,14 +336,10 @@ function getStaticBundlePreparedAssetDependencies(
 	) {
 		return uniqueSortedStrings([
 			formatRegionRenderProfileAssetId(asset.payload.regionNumber),
-			...asset.payload.statics
-				.filter((member) =>
-					job.scope.bundleKind === "outdoor-buildings"
-						? member.kind === "building"
-						: member.kind !== "building",
-				)
-				.map((member) => member.sourceAssetId),
-			...asset.payload.dependencies.materialAssetIds,
+			...collectLandblockOutdoorRenderableSourceAssetIdsForDomain(
+				asset.payload,
+				job.scope.bundleKind,
+			),
 		]).map((assetId) => ({ assetId }));
 	}
 	return getPreparedAssetDependencies(asset);

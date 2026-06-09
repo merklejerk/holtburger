@@ -77,20 +77,36 @@ describe("static landblock render worker", () => {
 
 	it("builds an outdoor-buildings product without terrain or detail artifacts", async () => {
 		const landblockId = 0xda55ffff;
+		const buildingSourceAssetId = "gfx-obj/01000010";
+		const detailSourceAssetId = "gfx-obj/01000020";
 		const lookup = new Map<string, AssetLookupResponseDto>(
 			[
 				createResponse(
 					formatLandblockOutdoorAssetId(landblockId),
-					createOutdoorPayload(landblockId),
+					createOutdoorPayload(landblockId, [
+						createOutdoorStaticMember({
+							kind: "building",
+							sourceAssetId: buildingSourceAssetId,
+							sourceDid: 0x01000010,
+						}),
+						createOutdoorStaticMember({
+							kind: "generated-scenery",
+							sourceAssetId: detailSourceAssetId,
+							sourceDid: 0x01000020,
+						}),
+					]),
 				),
 				createResponse(formatRegionRenderProfileAssetId(1), createRegionRenderProfile()),
+				createResponse(buildingSourceAssetId, createGfxObjPayload(0x01000010)),
 			].map((response) => [response.assetId, response] as const),
 		);
+		const requestedAssetIds: string[] = [];
 
 		const result = await runStaticLandblockRenderWorkerJob(
 			createJob("outdoor-buildings"),
 			{
 				async lookupBinaryAssets(requests: readonly AssetLookupRequestDto[]) {
+					requestedAssetIds.push(...requests.map((request) => request.assetId));
 					return {
 						responses: requests.map((request) => {
 							const response = lookup.get(request.assetId);
@@ -105,6 +121,8 @@ describe("static landblock render worker", () => {
 		);
 
 		expect(result.product).toBe("outdoor-buildings");
+		expect(requestedAssetIds).toContain(buildingSourceAssetId);
+		expect(requestedAssetIds).not.toContain(detailSourceAssetId);
 		expect(getLandblockTerrainRenderArtifact(result)).toBeNull();
 		expect(
 			getStaticObjectBundleArtifacts(result).map((layer) => layer.bundleKind),
@@ -113,20 +131,36 @@ describe("static landblock render worker", () => {
 
 	it("builds an outdoor-detail product without terrain or building artifacts", async () => {
 		const landblockId = 0xda55ffff;
+		const buildingSourceAssetId = "gfx-obj/01000010";
+		const detailSourceAssetId = "gfx-obj/01000020";
 		const lookup = new Map<string, AssetLookupResponseDto>(
 			[
 				createResponse(
 					formatLandblockOutdoorAssetId(landblockId),
-					createOutdoorPayload(landblockId),
+					createOutdoorPayload(landblockId, [
+						createOutdoorStaticMember({
+							kind: "building",
+							sourceAssetId: buildingSourceAssetId,
+							sourceDid: 0x01000010,
+						}),
+						createOutdoorStaticMember({
+							kind: "generated-scenery",
+							sourceAssetId: detailSourceAssetId,
+							sourceDid: 0x01000020,
+						}),
+					]),
 				),
 				createResponse(formatRegionRenderProfileAssetId(1), createRegionRenderProfile()),
+				createResponse(detailSourceAssetId, createGfxObjPayload(0x01000020)),
 			].map((response) => [response.assetId, response] as const),
 		);
+		const requestedAssetIds: string[] = [];
 
 		const result = await runStaticLandblockRenderWorkerJob(
 			createJob("outdoor-detail"),
 			{
 				async lookupBinaryAssets(requests: readonly AssetLookupRequestDto[]) {
+					requestedAssetIds.push(...requests.map((request) => request.assetId));
 					return {
 						responses: requests.map((request) => {
 							const response = lookup.get(request.assetId);
@@ -141,6 +175,8 @@ describe("static landblock render worker", () => {
 		);
 
 		expect(result.product).toBe("outdoor-detail");
+		expect(requestedAssetIds).not.toContain(buildingSourceAssetId);
+		expect(requestedAssetIds).toContain(detailSourceAssetId);
 		expect(getLandblockTerrainRenderArtifact(result)).toBeNull();
 		expect(
 			getStaticObjectBundleArtifacts(result).map((layer) => layer.bundleKind),
@@ -570,7 +606,10 @@ function createResponse(
 	};
 }
 
-function createOutdoorPayload(landblockId: number): Record<string, unknown> {
+function createOutdoorPayload(
+	landblockId: number,
+	statics: Record<string, unknown>[] = [],
+): Record<string, unknown> {
 	const bounds = {
 		min: { x: 0, y: 0, z: 0 },
 		max: { x: 16, y: 16, z: 0 },
@@ -636,13 +675,43 @@ function createOutdoorPayload(landblockId: number): Record<string, unknown> {
 			maxHeight: 0,
 			bounds,
 		},
-		statics: [],
+		statics,
 		outdoorBvh: null,
-		dependencies: {
-			renderableSourceAssetIds: [],
-			materialAssetIds: [],
-		},
 		diagnostics: { sourceRecords: [], errors: [], omissions: [] },
+	};
+}
+
+function createOutdoorStaticMember(options: {
+	kind: "explicit-object" | "building" | "generated-scenery";
+	sourceAssetId: string;
+	sourceDid: number;
+}): Record<string, unknown> {
+	const bounds = createBounds();
+	return {
+		kind: options.kind,
+		instanceId: `static/${options.sourceAssetId}`,
+		sourceDid: options.sourceDid,
+		sourceAssetId: options.sourceAssetId,
+		sourceIndex: 0,
+		localPlacement: createPlacement(),
+		sourceScale: { x: 1, y: 1, z: 1 },
+		sourceBounds: bounds,
+		instanceBounds: bounds,
+		building:
+			options.kind === "building"
+				? {
+						numLeaves: 0,
+						portals: [],
+					}
+				: null,
+		generated:
+			options.kind === "generated-scenery"
+				? {
+						terrainIndex: 0,
+						sceneId: 0,
+						sceneTemplateIndex: 0,
+					}
+				: null,
 	};
 }
 
@@ -801,10 +870,47 @@ function createEnvCellPayload(
 				{ kind: "portal", portalId: "portal/0" },
 			],
 		},
-		dependencies: {
-			renderableSourceAssetIds: [],
-			materialAssetIds: material ? [material.materialAssetId] : [],
+	};
+}
+
+function createGfxObjPayload(gfxObjId: number): Record<string, unknown> {
+	return {
+		kind: "gfx-obj",
+		sourceAssetKind: "gfx-obj",
+		residencyKind: "unknown",
+		provenance: createProvenance("gfx-obj"),
+		gfxObjId,
+		flags: null,
+		surfaceIds: [],
+		vertexArray: {
+			vertexType: null,
+			vertexCount: 0,
+			vertices: [],
 		},
+		drawingPolygons: [],
+		drawingBsp: null,
+		dependencies: {
+			materialAssetIds: [],
+		},
+		physicsWitness: {
+			polygonCount: 0,
+			hasBsp: false,
+		},
+		renderGeometry: {
+			sourceId: gfxObjId,
+			vertexCount: 0,
+			triangleCount: 0,
+			positions: [],
+			normals: [],
+			uvs: [],
+			triangles: [],
+			surfaceIds: [],
+			invalidPolygons: [],
+			skippedPolygonCount: 0,
+			bounds: null,
+		},
+		sortCenter: null,
+		didDegrade: null,
 	};
 }
 

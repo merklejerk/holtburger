@@ -352,10 +352,6 @@ function createOutdoorPayload(options: {
 		},
 		statics: [],
 		outdoorBvh: options.outdoorBvh,
-		dependencies: {
-			renderableSourceAssetIds: [],
-			materialAssetIds: [],
-		},
 		diagnostics: emptyDiagnostics(),
 	};
 }
@@ -411,10 +407,6 @@ function createEnvCellPayload(options: {
 		},
 		cellBsp: null,
 		localBvh: options.localBvh,
-		dependencies: {
-			renderableSourceAssetIds: [],
-			materialAssetIds: [],
-		},
 		diagnostics: emptyDiagnostics(),
 	};
 }

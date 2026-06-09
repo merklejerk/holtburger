@@ -12,6 +12,11 @@ import {
 	formatRegionRenderProfileAssetId,
 	formatTerrainMaterialAssetId,
 } from "../landblocks";
+import {
+	collectEnvCellMaterialAssetIds,
+	collectEnvCellRenderableSourceAssetIds,
+	collectLandblockOutdoorRenderableSourceAssetIds,
+} from "./structured-asset-dependencies";
 
 type AssetPreparationStatus = "idle" | "pending" | "ready" | "error";
 
@@ -173,11 +178,6 @@ interface PreparedLandblockOutdoorStaticMember {
 	generated: PreparedLandblockGeneratedSceneryFacts | null;
 }
 
-interface PreparedLandblockOutdoorDependencies {
-	renderableSourceAssetIds: string[];
-	materialAssetIds: string[];
-}
-
 export interface PreparedLandblockOutdoorPayload extends PreparedAssetPayloadBase {
 	kind: "landblock-outdoor";
 	sourceAssetKind: "landblock-outdoor";
@@ -189,7 +189,6 @@ export interface PreparedLandblockOutdoorPayload extends PreparedAssetPayloadBas
 	terrain: PreparedOutdoorTerrain;
 	statics: PreparedLandblockOutdoorStaticMember[];
 	outdoorBvh: PreparedOutdoorBvh | null;
-	dependencies: PreparedLandblockOutdoorDependencies;
 	diagnostics: PreparedContentSourceDiagnostics;
 }
 
@@ -462,11 +461,6 @@ interface PreparedEnvCellBvh {
 	items: PreparedEnvCellBvhItem[];
 }
 
-interface PreparedEnvCellDependencies {
-	renderableSourceAssetIds: string[];
-	materialAssetIds: string[];
-}
-
 export interface PreparedEnvCellPayload extends PreparedAssetPayloadBase {
 	kind: "env-cell";
 	sourceAssetKind: "env-cell";
@@ -485,7 +479,6 @@ export interface PreparedEnvCellPayload extends PreparedAssetPayloadBase {
 	renderGeometry: PreparedPolygonSetRenderGeometry;
 	cellBsp: PreparedPolygonSetBspNode;
 	localBvh: PreparedEnvCellBvh;
-	dependencies: PreparedEnvCellDependencies;
 }
 
 export interface PreparedGfxObjPayload extends PreparedAssetPayloadBase {
@@ -881,7 +874,7 @@ export function getPreparedAssetDependencies(
 		return uniqueSortedAssetIds([
 			formatTerrainMaterialAssetId(asset.payload.regionNumber),
 			formatRegionRenderProfileAssetId(asset.payload.regionNumber),
-			...asset.payload.statics.map((member) => member.sourceAssetId),
+			...collectLandblockOutdoorRenderableSourceAssetIds(asset.payload),
 		]);
 	}
 
@@ -894,8 +887,8 @@ export function getPreparedAssetDependencies(
 	if (asset.payload.kind === "env-cell") {
 		return uniqueSortedAssetIds([
 			formatRegionRenderProfileAssetId(asset.payload.regionNumber),
-			...asset.payload.surfaces.map((surface) => surface.materialAssetId),
-			...asset.payload.statics.map((member) => member.sourceAssetId),
+			...collectEnvCellMaterialAssetIds(asset.payload),
+			...collectEnvCellRenderableSourceAssetIds(asset.payload),
 		]);
 	}
 

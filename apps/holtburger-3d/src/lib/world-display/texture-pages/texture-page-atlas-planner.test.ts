@@ -124,16 +124,91 @@ describe("planTexturePageAtlas", () => {
 		);
 		expect(placements.get("static-base-color")).toBe(0);
 	});
+
+	it("sizes terrain atlas pages to include large gutter padding", () => {
+		const plan = planTexturePageAtlas({
+			rgbaCandidates: [
+				createRgbaCandidate({
+					candidateId: "terrain-color",
+					entryKey: "terrain-color-entry",
+					bucket: "terrain-color",
+				}),
+				createRgbaCandidate({
+					candidateId: "terrain-mask",
+					entryKey: "terrain-mask-entry",
+					bucket: "terrain-mask",
+				}),
+			],
+			detailCandidates: [],
+			policy: createPolicy(),
+		});
+
+		const pagesByBucket = new Map(
+			plan.buckets.map((bucket) => [bucket.bucket, bucket.atlasTextures] as const),
+		);
+
+		expect(pagesByBucket.get("terrain-color")?.[0]).toMatchObject({
+			width: 256,
+			height: 256,
+		});
+		expect(pagesByBucket.get("terrain-mask")?.[0]).toMatchObject({
+			width: 64,
+			height: 64,
+		});
+	});
+
+	it("prefers fewer terrain atlas textures over smaller terrain page allocation", () => {
+		const plan = planTexturePageAtlas({
+			rgbaCandidates: [
+				createRgbaCandidate({
+					candidateId: "wide",
+					entryKey: "terrain-wide",
+					bucket: "terrain-color",
+					width: 300,
+					height: 8,
+				}),
+				createRgbaCandidate({
+					candidateId: "small",
+					entryKey: "terrain-small",
+					bucket: "terrain-color",
+					width: 8,
+					height: 8,
+				}),
+			],
+			detailCandidates: [],
+			policy: {
+				...createPolicy(),
+				baseGutterPixels: 0,
+				maxAtlasTextureSize: 512,
+			},
+		});
+
+		const terrainColorPages = plan.buckets.find(
+			(bucket) => bucket.bucket === "terrain-color",
+		)?.atlasTextures;
+
+		expect(terrainColorPages).toHaveLength(1);
+		expect(terrainColorPages?.[0]).toMatchObject({ width: 512, height: 512 });
+		expect(
+			terrainColorPages?.[0]?.placements
+				.map((placement) => placement.atlasEntryKey)
+				.sort(),
+		).toEqual(["terrain-small", "terrain-wide"]);
+	});
 });
 
 function createRgbaCandidate({
 	candidateId,
 	entryKey,
 	bucket,
+	width = 16,
+	height = 16,
 }: {
 	candidateId: string;
 	entryKey: string;
 	bucket: TexturePageBucket;
+	width?: number;
+	height?: number;
 }): TexturePageAtlasRgbaCandidate {
 	return {
 		candidateId,
@@ -155,9 +230,9 @@ function createRgbaCandidate({
 				preparedTextureAssetId: `prepared/${entryKey}`,
 				level: {
 					level: 0,
-					width: 16,
-					height: 16,
-					bytes: new Uint8Array(16 * 16 * 4),
+					width,
+					height,
+					bytes: new Uint8Array(width * height * 4),
 					format: "rgba8",
 				},
 				sourceHash: `hash/${entryKey}`,

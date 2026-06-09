@@ -11,8 +11,6 @@ import {
 import {
 	classifyAssetRequestProfileKind,
 	classifyAssetHydration,
-	isDirectSceneRootAssetId,
-	isStaticRenderableAssetId,
 } from "./asset-hydration-policy";
 import type { AssetGraphPreparationResult } from "./asset-graph-scheduler";
 import {
@@ -20,10 +18,11 @@ import {
 	DEFAULT_PREPARED_ASSET_PRUNE_EVICTION_BATCH_SIZE,
 	DEFAULT_PREPARED_ASSET_PRUNE_INTERVAL_MS,
 	DEFAULT_PREPARED_ASSET_WARM_RETAIN_MS,
-	planPreparedAssetCachePruneBatch,
+	planPreparedAssetCachePruneBatchFromResolver,
 	type PreparedAssetCachePruneBatchPlan,
 } from "./asset-cache-policy";
 import { recordPreparedAssetPruneDiagnostics } from "./prepared-asset-hot-path-diagnostics";
+import type { PreparedAssetResolver } from "./prepared-asset-store";
 import {
 	createSceneCoverageRequests,
 	deriveSceneCoverageAssetIds,
@@ -31,7 +30,7 @@ import {
 	type OutdoorSceneRequestOptions,
 } from "./scene-asset-request-planner";
 import { NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY } from "./material-texture-preparation-policy";
-import type { PreparedAssetCacheMetadata, PreparedAssetRecord } from "./types";
+import type { PreparedAssetRecord } from "./types";
 
 interface SceneAssetChannel {
 	prepareAsset(request: AssetLookupRequestDto): Promise<PreparedAssetRecord>;
@@ -47,13 +46,11 @@ export interface SceneAssetStreamingInput {
 	buildingLodRadius: number;
 	detailLodRadius: number;
 	envCellLodRadius: number;
-	preparedByAssetId: Record<string, PreparedAssetRecord>;
 }
 
 export interface SceneAssetStreamingControllerDeps {
 	assetChannel: SceneAssetChannel;
-	getPreparedByAssetId(): Record<string, PreparedAssetRecord>;
-	getCacheMetadataByAssetId(): Record<string, PreparedAssetCacheMetadata>;
+	preparedAssetResolver: PreparedAssetResolver;
 	markAssetsPending(requests: AssetLookupRequestDto[]): void;
 	applyPreparedAssets(assets: PreparedAssetRecord[]): void;
 	applyAssetCachePruneBatch(prunePlan: PreparedAssetCachePruneBatchPlan): void;
@@ -77,6 +74,7 @@ export class SceneAssetStreamingController {
 	private disposed = false;
 	private pruneTimer: ReturnType<typeof setTimeout> | null = null;
 	private pruneCursorAssetId: string | null = null;
+	private latestActiveCoverageAssetIds: readonly string[] = [];
 
 	constructor(private readonly deps: SceneAssetStreamingControllerDeps) {}
 
@@ -108,7 +106,11 @@ export class SceneAssetStreamingController {
 				const input = this.latestInput;
 				const syncKey = profileBrowserJsScope(
 					"asset-stream.createSceneInterestSyncKey",
-					() => createSceneInterestSyncKey(input),
+					() =>
+						createSceneInterestSyncKey(
+							input,
+							this.deps.preparedAssetResolver.getPreparedRevision(),
+						),
 				);
 				if (syncKey === this.lastSyncedKey) {
 					break;
@@ -144,7 +146,10 @@ export class SceneAssetStreamingController {
 		} finally {
 			this.running = false;
 			if (!this.disposed && this.latestInput) {
-				const syncKey = createSceneInterestSyncKey(this.latestInput);
+				const syncKey = createSceneInterestSyncKey(
+					this.latestInput,
+					this.deps.preparedAssetResolver.getPreparedRevision(),
+				);
 				if (syncKey !== this.lastSyncedKey) {
 					this.syncSceneInterest(this.latestInput);
 				}
@@ -160,7 +165,23 @@ export class SceneAssetStreamingController {
 			return;
 		}
 
-		const preparedByAssetId = this.deps.getPreparedByAssetId();
+		const planningSnapshot = createOffFrameRequestPlanningSnapshot(
+			this.deps.preparedAssetResolver,
+		);
+		const preparedByAssetId = planningSnapshot.preparedByAssetId;
+		const sceneOptions = {
+			terrainRadius: input.terrainLodRadius,
+			buildingRadius: input.buildingLodRadius,
+			detailRadius: input.detailLodRadius,
+			envCellRadius: input.envCellLodRadius,
+			materialTexturePreparationPolicy:
+				NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY,
+		};
+		this.latestActiveCoverageAssetIds = deriveSceneCoverageAssetIds(
+			input.browserDestination,
+			preparedByAssetId,
+			sceneOptions,
+		);
 		const requests = profileBrowserJsScope(
 			`asset-stream.planRequests.${priority}`,
 			() =>
@@ -170,14 +191,7 @@ export class SceneAssetStreamingController {
 						browserDestination: input.browserDestination,
 						preparedByAssetId,
 						pendingAssetIds: [...this.inFlightAssetIds],
-						options: {
-							terrainRadius: input.terrainLodRadius,
-							buildingRadius: input.buildingLodRadius,
-							detailRadius: input.detailLodRadius,
-							envCellRadius: input.envCellLodRadius,
-							materialTexturePreparationPolicy:
-								NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY,
-						},
+						options: sceneOptions,
 					},
 					priority,
 				),
@@ -266,19 +280,18 @@ export class SceneAssetStreamingController {
 			return;
 		}
 		profileBrowserJsScope("asset-stream.prunePreparedCacheBatch", () => {
-			this.prunePreparedCacheBatch(input);
+			this.prunePreparedCacheBatch();
 		});
 		this.schedulePreparedCachePrune();
 	}
 
-	private prunePreparedCacheBatch(input: SceneAssetStreamingInput): void {
+	private prunePreparedCacheBatch(): void {
 		if (this.disposed) {
 			return;
 		}
 
 		const startedAtMs = performance.now();
-		const preparedByAssetId = this.deps.getPreparedByAssetId();
-		const prunePlan = this.planPreparedCachePruneBatch(input, preparedByAssetId);
+		const prunePlan = this.planPreparedCachePruneBatch();
 		this.pruneCursorAssetId = prunePlan.nextCursorAssetId;
 		const completedAtMs = this.deps.nowMs?.() ?? Date.now();
 		recordPreparedAssetPruneDiagnostics({
@@ -302,33 +315,25 @@ export class SceneAssetStreamingController {
 		});
 	}
 
-	private planPreparedCachePruneBatch(
-		input: SceneAssetStreamingInput,
-		preparedByAssetId: Record<string, PreparedAssetRecord>,
-	): PreparedAssetCachePruneBatchPlan {
-		return planPreparedAssetCachePruneBatch({
-			preparedByAssetId,
-			cacheMetadataByAssetId: this.deps.getCacheMetadataByAssetId(),
-			activeCoverageAssetIds: deriveSceneCoverageAssetIds(
-				input.browserDestination,
-				preparedByAssetId,
-				{
-					terrainRadius: input.terrainLodRadius,
-					buildingRadius: input.buildingLodRadius,
-					detailRadius: input.detailLodRadius,
-					envCellRadius: input.envCellLodRadius,
-					materialTexturePreparationPolicy:
-						NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY,
-				},
-			),
+	private planPreparedCachePruneBatch(): PreparedAssetCachePruneBatchPlan {
+		const maxEvaluatedAssetCount =
+			this.deps.pruneEvaluationBatchSize ??
+			DEFAULT_PREPARED_ASSET_PRUNE_EVALUATION_BATCH_SIZE;
+		const preparedAssetScan =
+			this.deps.preparedAssetResolver.scanPreparedAssets({
+				cursorAssetId: this.pruneCursorAssetId,
+				limit: maxEvaluatedAssetCount,
+			});
+		return planPreparedAssetCachePruneBatchFromResolver({
+			preparedAssets: this.deps.preparedAssetResolver,
+			candidateEntries: preparedAssetScan.entries,
+			nextCandidateCursorAssetId: preparedAssetScan.nextCursorAssetId,
+			activeCoverageAssetIds: this.latestActiveCoverageAssetIds,
 			inFlightAssetIds: [...this.inFlightAssetIds],
 			nowMs: this.deps.nowMs?.() ?? Date.now(),
 			warmRetainMs:
 				this.deps.warmRetainMs ?? DEFAULT_PREPARED_ASSET_WARM_RETAIN_MS,
-			cursorAssetId: this.pruneCursorAssetId,
-			maxEvaluatedAssetCount:
-				this.deps.pruneEvaluationBatchSize ??
-				DEFAULT_PREPARED_ASSET_PRUNE_EVALUATION_BATCH_SIZE,
+			maxEvaluatedAssetCount,
 			maxEvictedAssetCount:
 				this.deps.pruneEvictionBatchSize ??
 				DEFAULT_PREPARED_ASSET_PRUNE_EVICTION_BATCH_SIZE,
@@ -351,7 +356,9 @@ export class SceneAssetStreamingController {
 							: (
 									await this.deps.assetChannel.prepareAssetGraph(
 										request,
-										this.deps.getPreparedByAssetId(),
+										createOffFrameRequestPlanningSnapshot(
+											this.deps.preparedAssetResolver,
+										).preparedByAssetId,
 									)
 								).preparedAssets;
 					recordPreparedAssetOutputShape(hydrationKind, assets);
@@ -374,7 +381,9 @@ export class SceneAssetStreamingController {
 				message,
 				messageChunks: chunkDiagnosticString(message),
 				preparedAssetCounts: countPreparedAssetsByKind(
-					this.deps.getPreparedByAssetId(),
+					createOffFrameRequestPlanningSnapshot(
+						this.deps.preparedAssetResolver,
+					).preparedByAssetId,
 				),
 				inFlightAssetIds: [...this.inFlightAssetIds],
 			};
@@ -437,6 +446,14 @@ function countPreparedAssetsByKind(
 		counts[asset.payload.kind] = (counts[asset.payload.kind] ?? 0) + 1;
 	}
 	return counts;
+}
+
+function createOffFrameRequestPlanningSnapshot(
+	resolver: PreparedAssetResolver,
+): { preparedByAssetId: Record<string, PreparedAssetRecord> } {
+	return {
+		preparedByAssetId: Object.fromEntries(resolver.entries()),
+	};
 }
 
 function chunkDiagnosticString(value: string, chunkSize = 120): string[] {
@@ -514,21 +531,17 @@ function reportMaterialPlannerMismatch(options: {
 	});
 }
 
-function createSceneInterestSyncKey(input: SceneAssetStreamingInput): string {
-	const preparedPlanningAssetKey = Object.keys(input.preparedByAssetId)
-		.filter(
-			(assetId) =>
-				isDirectSceneRootAssetId(assetId) || isStaticRenderableAssetId(assetId),
-		)
-		.sort()
-		.join(",");
+function createSceneInterestSyncKey(
+	input: SceneAssetStreamingInput,
+	preparedRevision: number,
+): string {
 	const destination = input.browserDestination;
 	const interestKey = [
 		`terrain-${input.terrainLodRadius}`,
 		`buildings-${input.buildingLodRadius}`,
 		`detail-${input.detailLodRadius}`,
 		`env-cells-${input.envCellLodRadius}`,
-		`prepared-${preparedPlanningAssetKey}`,
+		`prepared-revision-${preparedRevision}`,
 	].join(":");
 
 	const destinationIdentity = describeBrowserDestinationIdentity(destination);

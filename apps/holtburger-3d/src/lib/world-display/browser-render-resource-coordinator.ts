@@ -180,6 +180,11 @@ function createEmptyPreparedAssetResolver(): PreparedAssetResolver {
 		getPreparedRevision: () => 0,
 		getCacheMetadataRevision: () => 0,
 		getPreparedCount: () => 0,
+		scanPreparedAssets: () => ({
+			entries: [],
+			nextCursorAssetId: null,
+			preparedCount: 0,
+		}),
 		subscribe: () => () => {},
 	};
 }

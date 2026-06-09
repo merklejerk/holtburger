@@ -50,7 +50,27 @@ export interface PreparedAssetResolver {
 	getPreparedRevision(): number;
 	getCacheMetadataRevision(): number;
 	getPreparedCount(): number;
+	scanPreparedAssets(
+		options: PreparedAssetScanOptions,
+	): PreparedAssetScanPage;
 	subscribe(listener: PreparedAssetChangeListener): () => void;
+}
+
+export interface PreparedAssetScanOptions {
+	cursorAssetId: string | null;
+	limit: number;
+}
+
+export interface PreparedAssetScanEntry {
+	assetId: string;
+	asset: PreparedAssetRecord;
+	cacheMetadata: PreparedAssetCacheMetadata | null;
+}
+
+export interface PreparedAssetScanPage {
+	entries: readonly PreparedAssetScanEntry[];
+	nextCursorAssetId: string | null;
+	preparedCount: number;
 }
 
 export interface PreparedAssetPresentationSnapshot {
@@ -94,6 +114,7 @@ export class PreparedAssetStore {
 		getPreparedRevision: () => this.preparedRevision,
 		getCacheMetadataRevision: () => this.cacheMetadataRevision,
 		getPreparedCount: () => this.preparedByAssetId.size,
+		scanPreparedAssets: (options) => this.scanPreparedAssets(options),
 		subscribe: (listener) => this.subscribe(listener),
 	};
 
@@ -256,6 +277,45 @@ export class PreparedAssetStore {
 		};
 	}
 
+	private scanPreparedAssets(
+		options: PreparedAssetScanOptions,
+	): PreparedAssetScanPage {
+		const limit = Math.max(1, Math.trunc(options.limit));
+		const entries: PreparedAssetScanEntry[] = [];
+		let foundCursor = options.cursorAssetId === null;
+		let nextCursorAssetId: string | null = null;
+
+		for (const [assetId, asset] of this.preparedByAssetId.entries()) {
+			if (!foundCursor) {
+				foundCursor = assetId === options.cursorAssetId;
+				if (!foundCursor) {
+					continue;
+				}
+			}
+
+			if (entries.length >= limit) {
+				nextCursorAssetId = assetId;
+				break;
+			}
+
+			entries.push({
+				assetId,
+				asset,
+				cacheMetadata: this.cacheMetadataByAssetId.get(assetId) ?? null,
+			});
+		}
+
+		if (!foundCursor && options.cursorAssetId !== null) {
+			return this.scanPreparedAssets({ cursorAssetId: null, limit });
+		}
+
+		return {
+			entries,
+			nextCursorAssetId,
+			preparedCount: this.preparedByAssetId.size,
+		};
+	}
+
 	private subscribe(listener: PreparedAssetChangeListener): () => void {
 		this.listeners.add(listener);
 		return () => {
@@ -327,6 +387,30 @@ export function createPreparedAssetResolverFromRecordSnapshot(options: {
 		getPreparedRevision: () => preparedRevision,
 		getCacheMetadataRevision: () => cacheMetadataRevision,
 		getPreparedCount: () => Object.keys(preparedByAssetId).length,
+		scanPreparedAssets: ({ cursorAssetId, limit }) => {
+			const entries = Object.entries(preparedByAssetId);
+			const startIndex =
+				cursorAssetId === null
+					? 0
+					: Math.max(
+							0,
+							entries.findIndex(([assetId]) => assetId === cursorAssetId),
+						);
+			const boundedLimit = Math.max(1, Math.trunc(limit));
+			const pageEntries = entries
+				.slice(startIndex, startIndex + boundedLimit)
+				.map(([assetId, asset]) => ({
+					assetId,
+					asset,
+					cacheMetadata: cacheMetadataByAssetId[assetId] ?? null,
+				}));
+			return {
+				entries: pageEntries,
+				nextCursorAssetId:
+					entries[startIndex + pageEntries.length]?.[0] ?? null,
+				preparedCount: entries.length,
+			};
+		},
 		subscribe: () => () => {},
 	};
 }

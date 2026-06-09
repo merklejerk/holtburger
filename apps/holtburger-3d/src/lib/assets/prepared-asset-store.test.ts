@@ -171,6 +171,51 @@ describe("PreparedAssetStore", () => {
 		});
 	});
 
+	it("scans prepared assets in bounded resolver-native pages", () => {
+		const store = new PreparedAssetStore();
+		store.applyPreparedAssets(
+			[
+				createPreparedTerrainAsset(
+					"terrain-a",
+					"landblock/0102ffff/outdoor",
+				),
+				createPreparedTerrainAsset(
+					"terrain-b",
+					"landblock/0103ffff/outdoor",
+				),
+				createPreparedTerrainAsset(
+					"terrain-c",
+					"landblock/0104ffff/outdoor",
+				),
+			],
+			1_000,
+		);
+
+		const firstPage = store.resolver.scanPreparedAssets({
+			cursorAssetId: null,
+			limit: 2,
+		});
+		expect(firstPage.entries.map((entry) => entry.assetId)).toEqual([
+			"landblock/0102ffff/outdoor",
+			"landblock/0103ffff/outdoor",
+		]);
+		expect(firstPage.nextCursorAssetId).toBe("landblock/0104ffff/outdoor");
+		expect(firstPage.preparedCount).toBe(3);
+		expect(firstPage.entries[0]?.cacheMetadata).toEqual({
+			lastPreparedAtMs: 1_000,
+			lastRetainedAtMs: 1_000,
+		});
+
+		const secondPage = store.resolver.scanPreparedAssets({
+			cursorAssetId: firstPage.nextCursorAssetId,
+			limit: 2,
+		});
+		expect(secondPage.entries.map((entry) => entry.assetId)).toEqual([
+			"landblock/0104ffff/outdoor",
+		]);
+		expect(secondPage.nextCursorAssetId).toBeNull();
+	});
+
 	it("creates explicit legacy snapshots for record-shaped migration callers", () => {
 		const store = new PreparedAssetStore();
 		const terrain = createPreparedTerrainAsset(

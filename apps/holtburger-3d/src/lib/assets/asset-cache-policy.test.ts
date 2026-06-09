@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
 	planPreparedAssetCachePrune,
 	planPreparedAssetCachePruneBatch,
+	planPreparedAssetCachePruneBatchFromResolver,
 } from "./asset-cache-policy";
+import { createPreparedAssetResolverFromRecordSnapshot } from "./prepared-asset-store";
 import type {
 	PreparedAssetPayload,
 	PreparedAssetRecord,
@@ -152,6 +154,53 @@ describe("asset cache policy", () => {
 			plan.retainedMetadataByAssetId["landblock/0102ffff/outdoor"]
 				?.lastRetainedAtMs,
 		).toBe(10_000);
+	});
+
+	it("plans bounded prune batches from resolver scan entries", () => {
+		const preparedByAssetId = indexPreparedAssets([
+			createPreparedLandblockOutdoorAsset("landblock/0102ffff/outdoor", [
+				"setup-model/02000001",
+			]),
+			createPreparedSetupModelAsset("setup-model/02000001", [
+				"gfx-obj/01000001",
+			]),
+			createPreparedGfxObjAsset("gfx-obj/01000001"),
+			createPreparedGfxObjAsset("gfx-obj/expired-a"),
+			createPreparedGfxObjAsset("gfx-obj/expired-b"),
+			createPreparedGfxObjAsset("gfx-obj/expired-c"),
+		]);
+		const resolver = createPreparedAssetResolverFromRecordSnapshot({
+			preparedByAssetId,
+			cacheMetadataByAssetId: createMetadata(preparedByAssetId, 0),
+		});
+		const scanPage = resolver.scanPreparedAssets({
+			cursorAssetId: null,
+			limit: 5,
+		});
+
+		const plan = planPreparedAssetCachePruneBatchFromResolver({
+			preparedAssets: resolver,
+			candidateEntries: scanPage.entries,
+			nextCandidateCursorAssetId: scanPage.nextCursorAssetId,
+			activeCoverageAssetIds: ["landblock/0102ffff/outdoor"],
+			inFlightAssetIds: [],
+			nowMs: 10_000,
+			warmRetainMs: 1_000,
+			maxEvaluatedAssetCount: 5,
+			maxEvictedAssetCount: 2,
+		});
+
+		expect(plan.evaluatedAssetCount).toBe(5);
+		expect(plan.evictedAssetIds).toEqual([
+			"gfx-obj/expired-a",
+			"gfx-obj/expired-b",
+		]);
+		expect(plan.retainedAssetIds).toEqual([
+			"landblock/0102ffff/outdoor",
+			"setup-model/02000001",
+			"gfx-obj/01000001",
+		]);
+		expect(plan.nextCursorAssetId).toBe("gfx-obj/expired-c");
 	});
 
 });

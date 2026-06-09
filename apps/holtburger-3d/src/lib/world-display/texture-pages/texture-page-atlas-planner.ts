@@ -1,5 +1,6 @@
 import {
 	planAtlasLayout,
+	type AtlasLayoutPageSelection,
 	type AtlasTexturePage,
 	type AtlasTexturePlacement,
 } from "./atlas-layout-planner";
@@ -202,6 +203,7 @@ function planTexturePageAtlasBucket({
 			maxTextureSize: policy.maxAtlasTextureSize,
 			maxTextureCount: policy.maxAtlasTextureCount,
 			gutterPixels: policy.baseGutterPixels,
+			pageSelection: resolveTexturePageBucketAtlasPageSelection(bucket),
 		},
 	});
 	const basePlaced = rgbaCandidates.filter((candidate) =>
@@ -239,6 +241,7 @@ function planTexturePageAtlasBucket({
 			maxTextureSize: policy.maxAtlasTextureSize,
 			maxTextureCount: policy.maxAtlasTextureCount,
 			gutterPixels: policy.baseGutterPixels,
+			pageSelection: resolveTexturePageBucketAtlasPageSelection(bucket),
 		},
 	});
 	const rgbaReady = basePlaced.filter((candidate) =>
@@ -307,6 +310,14 @@ function resolveTexturePageBucketGutterPixels(
 		return Math.max(policy.baseGutterPixels, TERRAIN_MASK_ATLAS_GUTTER_PIXELS);
 	}
 	return policy.baseGutterPixels;
+}
+
+function resolveTexturePageBucketAtlasPageSelection(
+	bucket: TexturePageBucket,
+): AtlasLayoutPageSelection {
+	return bucket === "terrain-color" || bucket === "terrain-mask"
+		? "minimize-textures"
+		: "minimize-memory";
 }
 
 function isDetailAtlasReady(

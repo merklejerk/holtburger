@@ -11,6 +11,10 @@ import {
 	type PreparedPolygonSetRenderGeometry,
 } from "../assets/types";
 import {
+	PreparedAssetStore,
+	createPreparedAssetResolverFromRecordSnapshot,
+} from "../assets/prepared-asset-store";
+import {
 	formatEnvCellAssetId,
 	formatLandblockOutdoorAssetId,
 } from "../landblocks";
@@ -29,14 +33,14 @@ describe("browser render resource coordinator", () => {
 
 		coordinator.update(
 			createCoordinatorInput({
-				assetState: createAssetState([
+				records: [
 					createLandblockOutdoorRecord({
 						landblockId,
 						sourceDid: 0x01000001,
 						localPlacement: createPlacement({ x: 1, y: 2, z: 3 }),
 					}),
 					createGfxObjRecord(0x01000001),
-				]),
+				],
 				browserDestination: createOutdoorDestination(landblockId),
 			}),
 		);
@@ -52,7 +56,7 @@ describe("browser render resource coordinator", () => {
 
 		coordinator.update(
 			createCoordinatorInput({
-				assetState: createAssetState([
+				records: [
 					createEnvCellRecord({
 						envCellId,
 						sourceDid: 0x01000001,
@@ -60,12 +64,67 @@ describe("browser render resource coordinator", () => {
 						staticPlacement: createPlacement({ x: 1, y: 2, z: 3 }),
 					}),
 					createGfxObjRecord(0x01000001),
-				]),
+				],
 				browserDestination: createInteriorDestination(envCellId),
 			}),
 		);
 
 		expect(surface.committedStaticProductCount).toBe(0);
+	});
+
+	it("does not push renderer asset state for cache metadata-only resolver changes", () => {
+		const landblockId = 0x02030000;
+		const surface = createCapturingSurface();
+		const coordinator = new BrowserRenderResourceCoordinator();
+		const store = new PreparedAssetStore();
+		coordinator.setSurface(surface);
+		store.applyPreparedAssets(
+			[
+				createLandblockOutdoorRecord({
+					landblockId,
+					sourceDid: 0x01000001,
+					localPlacement: createPlacement({ x: 0, y: 0, z: 0 }),
+				}),
+			],
+			1_000,
+		);
+
+		coordinator.update(
+			createCoordinatorInput({
+				preparedAssetResolver: store.resolver,
+				browserDestination: createOutdoorDestination(landblockId),
+			}),
+		);
+
+		expect(surface.setAssetStateCount).toBe(1);
+
+		store.applyPrunePlan({
+			retainedAssetIds: [formatLandblockOutdoorAssetId(landblockId)],
+			evictedAssetIds: [],
+			cacheMetadataByAssetId: {
+				[formatLandblockOutdoorAssetId(landblockId)]: {
+					lastPreparedAtMs: 1_000,
+					lastRetainedAtMs: 2_000,
+				},
+			},
+			diagnostics: {
+				prepared: { total: 1, byKind: { "landblock-outdoor": 1 } },
+				hardRetained: { total: 1, byKind: { "landblock-outdoor": 1 } },
+				warmRetained: { total: 0, byKind: {} },
+				retained: { total: 1, byKind: { "landblock-outdoor": 1 } },
+				evicted: { total: 0, byKind: {} },
+			},
+			nextWarmPruneAtMs: null,
+		});
+
+		coordinator.update(
+			createCoordinatorInput({
+				preparedAssetResolver: store.resolver,
+				browserDestination: createOutdoorDestination(landblockId),
+			}),
+		);
+
+		expect(surface.setAssetStateCount).toBe(1);
 	});
 });
 
@@ -78,10 +137,14 @@ const PROVENANCE: PreparedAssetProvenance = {
 
 function createCapturingSurface(): BrowserRenderResourceSurface & {
 	committedStaticProductCount: number;
+	setAssetStateCount: number;
 } {
 	return {
 		committedStaticProductCount: 0,
-		setAssetState() {},
+		setAssetStateCount: 0,
+		setAssetState() {
+			this.setAssetStateCount += 1;
+		},
 		setRenderSceneContext() {},
 		setRenderChunkTransforms() {},
 		commitStaticLandblockProduct() {
@@ -102,13 +165,17 @@ function createCapturingSurface(): BrowserRenderResourceSurface & {
 
 function createCoordinatorInput(
 	overrides: Partial<BrowserRenderResourceCoordinatorInput> &
-		Pick<
-			BrowserRenderResourceCoordinatorInput,
-			"assetState" | "browserDestination"
-		>,
+		Pick<BrowserRenderResourceCoordinatorInput, "browserDestination"> & {
+			records?: PreparedAssetRecord[];
+		},
 ): BrowserRenderResourceCoordinatorInput {
+	const assetPresentationState = createInitialAssetChannelState();
+	const preparedAssetResolver =
+		overrides.preparedAssetResolver ??
+		createResolver(overrides.records ?? []);
 	return {
-		assetState: overrides.assetState,
+		assetPresentationState,
+		preparedAssetResolver,
 		browserDestination: overrides.browserDestination,
 		terrainLodRadius: 0,
 		buildingLodRadius: 0,
@@ -135,6 +202,13 @@ function createAssetState(records: PreparedAssetRecord[]): AssetChannelState {
 		records.map((record) => [record.request.assetId, record]),
 	);
 	return state;
+}
+
+function createResolver(records: PreparedAssetRecord[]) {
+	const state = createAssetState(records);
+	return createPreparedAssetResolverFromRecordSnapshot({
+		preparedByAssetId: state.preparedByAssetId,
+	});
 }
 
 function createOutdoorDestination(

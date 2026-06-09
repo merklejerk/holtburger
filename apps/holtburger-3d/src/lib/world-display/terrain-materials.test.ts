@@ -7,12 +7,13 @@ import {
 	type PreparedAssetRecord,
 	type PreparedTerrainQuad,
 } from "../assets/types";
+import { createPreparedAssetResolverFromRecordSnapshot } from "../assets/prepared-asset-store";
 import { buildTerrainMaterialResourcePlan } from "./terrain-materials";
 
 describe("buildTerrainMaterialResourcePlan", () => {
 	it("reports a missing terrain material table without hiding referenced pcodes", () => {
 		const plan = buildTerrainMaterialResourcePlan({
-			assetState: createInitialAssetChannelState(),
+			preparedAssetResolver: createResolver(createInitialAssetChannelState()),
 			regionNumber: 1,
 			quads: [
 				createTerrainQuad({ pcode: 1234, cornerTerrainCodes: [1, 2, 3, 4] }),
@@ -43,7 +44,7 @@ describe("buildTerrainMaterialResourcePlan", () => {
 		]);
 
 		const plan = buildTerrainMaterialResourcePlan({
-			assetState: state,
+			preparedAssetResolver: createResolver(state),
 			regionNumber: 1,
 			quads: [
 				createTerrainQuad({ pcode: 55, cornerTerrainCodes: [1, 1, 1, 1] }),
@@ -74,7 +75,7 @@ describe("buildTerrainMaterialResourcePlan", () => {
 		]);
 
 		const plan = buildTerrainMaterialResourcePlan({
-			assetState: state,
+			preparedAssetResolver: createResolver(state),
 			regionNumber: 1,
 			quads: [
 				createTerrainQuad({ pcode: 55, cornerTerrainCodes: [1, 2, 1, 2] }),
@@ -112,7 +113,7 @@ describe("buildTerrainMaterialResourcePlan", () => {
 		]);
 
 		const plan = buildTerrainMaterialResourcePlan({
-			assetState: state,
+			preparedAssetResolver: createResolver(state),
 			regionNumber: 1,
 			quads: [
 				createTerrainQuad({ pcode: 55, cornerTerrainCodes: [1, 1, 1, 1] }),
@@ -123,6 +124,14 @@ describe("buildTerrainMaterialResourcePlan", () => {
 		expect(plan.unsupportedRenderSurfaceAssetIds).toEqual([]);
 	});
 });
+
+function createResolver(assetState: AssetChannelState) {
+	return createPreparedAssetResolverFromRecordSnapshot({
+		preparedByAssetId: assetState.preparedByAssetId,
+		cacheMetadataByAssetId: assetState.cacheMetadataByAssetId,
+		cacheDiagnostics: assetState.cacheDiagnostics,
+	});
+}
 
 function indexByAssetId(
 	records: readonly PreparedAssetRecord[],

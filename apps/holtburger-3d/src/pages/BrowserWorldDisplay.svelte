@@ -8,7 +8,10 @@
 		type BrowserLocationSelection,
 	} from "../app/browser-mode";
 	import type { AssetChannelState } from "../lib/assets/types";
-	import type { PreparedAssetResolver } from "../lib/assets/prepared-asset-store";
+	import {
+		countPreparedAssetsByKindFromResolver,
+		type PreparedAssetResolver,
+	} from "../lib/assets/prepared-asset-store";
 	import {
 		buildSceneCameraRenderRay,
 		buildBrowserFreeCameraFrame,
@@ -46,10 +49,7 @@
 	} from "../lib/world-display/render-resource-inspection";
 	import { isPreparedGfxObjAsset } from "../lib/world-display/static-renderables";
 	import { formatHex32 } from "../lib/landblocks";
-	import {
-		countPreparedAssetsByKind,
-		formatPreparedAssetKindCounts,
-	} from "../lib/assets/asset-cache-diagnostics";
+	import { formatPreparedAssetKindCounts } from "../lib/assets/asset-cache-diagnostics";
 	import { getPreparedAssetHotPathDiagnosticsSnapshot } from "../lib/assets/prepared-asset-hot-path-diagnostics";
 	import { describeMaterialAssetDiagnostics } from "../lib/assets/material-diagnostics";
 	import type {
@@ -1330,7 +1330,8 @@
 			createStaticLandblockRenderCoordinatorInput();
 		staticLandblockRenderCoordinator.sync(staticLandblockRenderInput);
 		scheduleSceneResourceUpdate({
-			assetState,
+			assetPresentationState: assetState,
+			preparedAssetResolver,
 			browserDestination,
 			terrainLodRadius,
 			buildingLodRadius,
@@ -1388,7 +1389,8 @@
 			assetDebugText = describeAssetDebugState();
 			assetPipelineDebugText = describeAssetPipelineDebugState();
 			assetMaterialDebugText = describeMaterialAssetDiagnostics({
-				assetState,
+				assetPresentationState: assetState,
+				preparedAssetResolver,
 				browserDestination,
 				options: {
 					terrainRadius: terrainLodRadius,
@@ -2389,9 +2391,8 @@
 			return `error preparing ${assetState.activeRequest?.assetId ?? "asset"}`;
 		}
 
-		const preparedCounts = countPreparedAssetsByKind(
-			assetState.preparedByAssetId,
-		);
+		const preparedCounts =
+			countPreparedAssetsByKindFromResolver(preparedAssetResolver);
 		return `${assetState.status}; ${preparedCounts.total} prepared asset${preparedCounts.total === 1 ? "" : "s"}.`;
 	}
 
@@ -2400,9 +2401,8 @@
 			return `Error while preparing ${assetState.activeRequest?.assetId ?? "asset"}: ${assetState.errorMessage}`;
 		}
 
-		const preparedCounts = countPreparedAssetsByKind(
-			assetState.preparedByAssetId,
-		);
+		const preparedCounts =
+			countPreparedAssetsByKindFromResolver(preparedAssetResolver);
 		const activeAssetId = assetState.activeRequest?.assetId ?? "none";
 		const recentActivity = assetState.history.at(-1);
 		const recentText = recentActivity
@@ -2418,7 +2418,7 @@
 	}
 
 	function describeAssetPipelineDebugState(): string {
-		const preparedLandblockRouteIds = Object.keys(assetState.preparedByAssetId)
+		const preparedLandblockRouteIds = [...preparedAssetResolver.keys()]
 			.filter((assetId) =>
 				/^landblock\/[0-9a-fA-F]{8}\/(?:outdoor|topology)$/.test(assetId),
 			)
@@ -2432,27 +2432,22 @@
 	function describeAssetCacheDebugState(): string {
 		const hotPathDiagnostics = getPreparedAssetHotPathDiagnosticsSnapshot();
 		const latestPrune = hotPathDiagnostics.latestPrune;
-		const latestSignatureCheck =
-			hotPathDiagnostics.latestAssetStateSignatureCheck;
 		const pruneText = latestPrune
 			? `prunes ${hotPathDiagnostics.pruneCallCount}, latest ${latestPrune.durationMs.toFixed(1)} ms over ${latestPrune.evaluatedAssetCount} asset${latestPrune.evaluatedAssetCount === 1 ? "" : "s"}, evicted ${latestPrune.evictedAssetCount}`
 			: `prunes ${hotPathDiagnostics.pruneCallCount}, no prune sample`;
-		const signatureText = latestSignatureCheck
-			? `asset-state signature checks ${hotPathDiagnostics.assetStateSignatureCheckCount}, latest ${latestSignatureCheck.changed ? "changed" : "unchanged"} over ${latestSignatureCheck.preparedAssetCount} prepared/${latestSignatureCheck.cacheMetadataCount} metadata`
-			: `asset-state signature checks ${hotPathDiagnostics.assetStateSignatureCheckCount}, no signature sample`;
-		const cacheDiagnostics = assetState.cacheDiagnostics;
+		const resolverRevisionText = `resolver revisions prepared ${preparedAssetResolver.getPreparedRevision()}, cache metadata ${preparedAssetResolver.getCacheMetadataRevision()}, prepared ${preparedAssetResolver.getPreparedCount()}`;
+		const cacheDiagnostics = preparedAssetResolver.getCacheDiagnostics();
 		if (!cacheDiagnostics) {
-			const preparedCounts = countPreparedAssetsByKind(
-				assetState.preparedByAssetId,
-			);
-			return `Prepared ${preparedCounts.total} (${formatPreparedAssetKindCounts(preparedCounts)}); waiting for first prune sample; ${pruneText}; ${signatureText}.`;
+			const preparedCounts =
+				countPreparedAssetsByKindFromResolver(preparedAssetResolver);
+			return `Prepared ${preparedCounts.total} (${formatPreparedAssetKindCounts(preparedCounts)}); waiting for first prune sample; ${pruneText}; ${resolverRevisionText}.`;
 		}
 
-		return `Prepared ${cacheDiagnostics.prepared.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.prepared)}); retained ${cacheDiagnostics.retained.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.retained)}); hard ${cacheDiagnostics.hardRetained.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.hardRetained)}); warm ${cacheDiagnostics.warmRetained.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.warmRetained)}); evicted ${cacheDiagnostics.evicted.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.evicted)}); ${pruneText}; ${signatureText}.`;
+		return `Prepared ${cacheDiagnostics.prepared.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.prepared)}); retained ${cacheDiagnostics.retained.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.retained)}); hard ${cacheDiagnostics.hardRetained.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.hardRetained)}); warm ${cacheDiagnostics.warmRetained.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.warmRetained)}); evicted ${cacheDiagnostics.evicted.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.evicted)}); ${pruneText}; ${resolverRevisionText}.`;
 	}
 
 	function describeGfxObjRenderDiagnostics(): string | null {
-		const affectedAssets = Object.values(assetState.preparedByAssetId)
+		const affectedAssets = [...preparedAssetResolver.values()]
 			.filter(isPreparedGfxObjAsset)
 			.map((asset) => ({
 				assetId: asset.request.assetId,

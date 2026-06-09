@@ -5,8 +5,13 @@ import {
 	selectIndexedPalette,
 	type IndexedTextureFormat,
 } from "../world-display/indexed-material-data";
-import type { PreparedMaterialRecipePayload } from "./types";
-import type { AssetChannelState, PreparedAssetRecord } from "./types";
+import type { PreparedAssetResolver } from "./prepared-asset-store";
+import { createPreparedAssetLegacySnapshotFromResolver } from "./prepared-asset-store";
+import type {
+	AssetChannelState,
+	PreparedAssetRecord,
+	PreparedMaterialRecipePayload,
+} from "./types";
 import {
 	deriveAllVisibleMaterialAssetIdsForBrowserDestination,
 	deriveVisibleMaterialAssetIdsForBrowserDestination,
@@ -14,7 +19,8 @@ import {
 } from "./scene-asset-request-planner";
 
 interface MaterialDiagnosticInput {
-	assetState: AssetChannelState;
+	assetPresentationState: AssetChannelState;
+	preparedAssetResolver: PreparedAssetResolver;
 	browserDestination: BrowserLocationSelection | null;
 	options: OutdoorSceneRequestOptions;
 }
@@ -49,25 +55,32 @@ const MATERIAL_PIPELINE_ASSET_PREFIXES = [
 const SAMPLE_LIMIT = 4;
 
 export function describeMaterialAssetDiagnostics({
-	assetState,
+	assetPresentationState,
+	preparedAssetResolver,
 	browserDestination,
 	options,
 }: MaterialDiagnosticInput): string {
-	const pendingAssetIds = derivePendingMaterialPipelineAssetIds(assetState);
+	const preparedByAssetId = createPreparedAssetLegacySnapshotFromResolver(
+		preparedAssetResolver,
+	).preparedByAssetId;
+	const pendingAssetIds = derivePendingMaterialPipelineAssetIds(
+		assetPresentationState,
+		preparedAssetResolver,
+	);
 	const visibleMaterialAssetIds =
 		deriveAllVisibleMaterialAssetIdsForBrowserDestination({
 			browserDestination,
-			preparedByAssetId: assetState.preparedByAssetId,
+			preparedByAssetId,
 			options,
 		});
 	const missingVisibleMaterialAssetIds =
 		deriveVisibleMaterialAssetIdsForBrowserDestination({
 			browserDestination,
-			preparedByAssetId: assetState.preparedByAssetId,
+			preparedByAssetId,
 			pendingAssetIds,
 			options,
 		});
-	const preparedAssets = Object.values(assetState.preparedByAssetId);
+	const preparedAssets = [...preparedAssetResolver.values()];
 	const materialRecipes = preparedAssets
 		.map((asset) =>
 			asset.payload.kind === "material-recipe" ? asset.payload : null,
@@ -84,11 +97,11 @@ export function describeMaterialAssetDiagnostics({
 	).length;
 	const missingDependencies = summarizeMissingMaterialDependencies(
 		materialRecipes,
-		assetState.preparedByAssetId,
+		preparedByAssetId,
 	);
 	const indexedSummary = summarizeIndexedMaterialDiagnostics(
 		materialRecipes,
-		assetState.preparedByAssetId,
+		preparedByAssetId,
 		browserDestination === null ? null : visibleMaterialAssetIds,
 	);
 
@@ -267,6 +280,7 @@ function formatHex32(value: number): string {
 
 function derivePendingMaterialPipelineAssetIds(
 	assetState: AssetChannelState,
+	preparedAssetResolver: PreparedAssetResolver,
 ): string[] {
 	const pendingAssetIds = new Set<string>();
 	if (assetState.activeRequest) {
@@ -282,7 +296,7 @@ function derivePendingMaterialPipelineAssetIds(
 		.filter(
 			(assetId) =>
 				isMaterialPipelineAssetId(assetId) &&
-				assetState.preparedByAssetId[assetId] === undefined,
+				!preparedAssetResolver.has(assetId),
 		)
 		.sort();
 }

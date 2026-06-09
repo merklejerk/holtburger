@@ -35,7 +35,7 @@ describe("asset state reducer", () => {
 		]);
 	});
 
-	it("indexes prepared assets by priority and asset id", () => {
+	it("records prepared status without owning prepared payload indexes", () => {
 		const state = applyPreparedAssets(
 			createAssetState(),
 			[
@@ -48,29 +48,25 @@ describe("asset state reducer", () => {
 					"landblock/0103ffff/outdoor",
 				),
 			],
-			1_777,
 		);
 
 		expect(state.status).toBe("ready");
 		expect(state.activeRequest?.assetId).toBe("landblock/0103ffff/outdoor");
-		expect(state.preparedByPriority.bootstrap?.request.assetId).toBe(
-			"landblock/0103ffff/outdoor",
-		);
-		expect(state.preparedByAssetId["landblock/0102ffff/outdoor"]).toBeDefined();
-		expect(state.preparedByAssetId["landblock/0103ffff/outdoor"]).toBeDefined();
-		expect(state.cacheMetadataByAssetId).toEqual({
-			"landblock/0102ffff/outdoor": {
-				lastPreparedAtMs: 1_777,
-				lastRetainedAtMs: 1_777,
-			},
-			"landblock/0103ffff/outdoor": {
-				lastPreparedAtMs: 1_777,
-				lastRetainedAtMs: 1_777,
-			},
+		expect(state.preparedAsset).toBeNull();
+		expect(state.preparedByPriority).toEqual({
+			bootstrap: null,
+			streaming: null,
+			prefetch: null,
 		});
+		expect(state.preparedByAssetId).toEqual({});
+		expect(state.cacheMetadataByAssetId).toEqual({});
+		expect(state.history.map((entry) => entry.status)).toEqual([
+			"prepared",
+			"prepared",
+		]);
 	});
 
-	it("prunes evicted prepared payload references without making history a retention root", () => {
+	it("applies cache prune diagnostics without owning retained payload references", () => {
 		const state = applyPreparedAssets(
 			createAssetState(),
 			[
@@ -83,7 +79,6 @@ describe("asset state reducer", () => {
 					"landblock/0103ffff/outdoor",
 				),
 			],
-			1_000,
 		);
 
 		const prunedState = applyAssetCachePrune(state, {
@@ -117,18 +112,13 @@ describe("asset state reducer", () => {
 			},
 		});
 
-		expect(Object.keys(prunedState.preparedByAssetId)).toEqual([
-			"landblock/0102ffff/outdoor",
-		]);
-		expect(prunedState.cacheMetadataByAssetId).toEqual({
-			"landblock/0102ffff/outdoor": {
-				lastPreparedAtMs: 1_000,
-				lastRetainedAtMs: 2_000,
-			},
-		});
+		expect(prunedState.preparedByAssetId).toEqual({});
+		expect(prunedState.cacheMetadataByAssetId).toEqual({});
 		expect(prunedState.preparedByPriority.bootstrap).toBeNull();
 		expect(prunedState.preparedAsset).toBeNull();
-		expect(prunedState.lastResponse).toBeNull();
+		expect(prunedState.lastResponse?.assetId).toBe(
+			"landblock/0103ffff/outdoor",
+		);
 		expect(prunedState.cacheDiagnostics?.evicted.total).toBe(1);
 		expect(prunedState.history.map((entry) => entry.assetId)).toEqual([
 			"landblock/0102ffff/outdoor",

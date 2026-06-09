@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
 	createInitialAssetChannelState,
+	type AssetChannelState,
 	type PreparedAssetRecord,
 } from "./types";
+import { createPreparedAssetResolverFromRecordSnapshot } from "./prepared-asset-store";
 import { describeMaterialAssetDiagnostics } from "./material-diagnostics";
 
 describe("material diagnostics", () => {
@@ -22,7 +24,8 @@ describe("material diagnostics", () => {
 		};
 
 		const diagnostics = describeMaterialAssetDiagnostics({
-			assetState: state,
+			assetPresentationState: state,
+			preparedAssetResolver: createResolver(state),
 			browserDestination: null,
 			options: {
 				terrainRadius: 0,
@@ -61,7 +64,8 @@ describe("material diagnostics", () => {
 		];
 
 		const diagnostics = describeMaterialAssetDiagnostics({
-			assetState: state,
+			assetPresentationState: state,
+			preparedAssetResolver: createResolver(state),
 			browserDestination: null,
 			options: {
 				terrainRadius: 0,
@@ -162,7 +166,8 @@ describe("material diagnostics", () => {
 		};
 
 		const diagnostics = describeMaterialAssetDiagnostics({
-			assetState: state,
+			assetPresentationState: state,
+			preparedAssetResolver: createResolver(state),
 			browserDestination: null,
 			options: {
 				terrainRadius: 0,
@@ -181,6 +186,14 @@ describe("material diagnostics", () => {
 		expect(diagnostics).toContain("range errors 0");
 	});
 });
+
+function createResolver(assetState: AssetChannelState) {
+	return createPreparedAssetResolverFromRecordSnapshot({
+		preparedByAssetId: assetState.preparedByAssetId,
+		cacheMetadataByAssetId: assetState.cacheMetadataByAssetId,
+		cacheDiagnostics: assetState.cacheDiagnostics,
+	});
+}
 
 function createMaterialRecipeRecord(
 	assetId: string,

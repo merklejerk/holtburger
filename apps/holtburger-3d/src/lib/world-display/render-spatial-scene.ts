@@ -1,4 +1,4 @@
-import type { AssetChannelState } from "../assets/types";
+import type { PreparedAssetResolver } from "../assets/prepared-asset-store";
 import type { Vec3Dto } from "../host/contracts";
 import { formatHex32 } from "../landblocks";
 import type {
@@ -131,11 +131,11 @@ export function deriveStructuredInteriorSpatialItemsFromLandblockArtifacts(
 }
 
 export function deriveStaticRenderableSpatialItems(
-	assetState: AssetChannelState,
+	preparedAssetResolver: PreparedAssetResolver,
 	staticRenderableScene: StaticRenderableSceneModel,
 ): RenderSpatialItem[] {
 	return staticRenderableScene.parts.flatMap((part) =>
-		deriveStaticRenderablePartSpatialItem(assetState, part),
+		deriveStaticRenderablePartSpatialItem(preparedAssetResolver, part),
 	);
 }
 
@@ -413,10 +413,10 @@ function deriveDetailedPortalSpatialItems(
 }
 
 function deriveStaticRenderablePartSpatialItem(
-	assetState: AssetChannelState,
+	preparedAssetResolver: PreparedAssetResolver,
 	part: StaticRenderablePart,
 ): RenderSpatialItem[] {
-	const asset = assetState.preparedByAssetId[part.gfxObjAssetId];
+	const asset = preparedAssetResolver.get(part.gfxObjAssetId) ?? undefined;
 	if (!isPreparedGfxObjAsset(asset) || !asset.payload.renderGeometry.bounds) {
 		return [];
 	}

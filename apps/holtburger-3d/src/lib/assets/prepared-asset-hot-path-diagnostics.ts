@@ -14,21 +14,11 @@ export interface PreparedAssetRendererSyncDiagnosticsSample {
 	completedAtMs: number;
 }
 
-export interface PreparedAssetSignatureDiagnosticsSample {
-	source: string;
-	changed: boolean;
-	preparedAssetCount: number;
-	cacheMetadataCount: number;
-	completedAtMs: number;
-}
-
 export interface PreparedAssetHotPathDiagnosticsSnapshot {
 	pruneCallCount: number;
 	latestPrune: PreparedAssetPruneDiagnosticsSample | null;
 	rendererAssetSyncCallCount: number;
 	latestRendererAssetSync: PreparedAssetRendererSyncDiagnosticsSample | null;
-	assetStateSignatureCheckCount: number;
-	latestAssetStateSignatureCheck: PreparedAssetSignatureDiagnosticsSample | null;
 }
 
 interface PreparedAssetHotPathDiagnosticsState {
@@ -36,8 +26,6 @@ interface PreparedAssetHotPathDiagnosticsState {
 	latestPrune: PreparedAssetPruneDiagnosticsSample | null;
 	rendererAssetSyncCallCount: number;
 	latestRendererAssetSync: PreparedAssetRendererSyncDiagnosticsSample | null;
-	assetStateSignatureCheckCount: number;
-	latestAssetStateSignatureCheck: PreparedAssetSignatureDiagnosticsSample | null;
 }
 
 const state: PreparedAssetHotPathDiagnosticsState = {
@@ -45,8 +33,6 @@ const state: PreparedAssetHotPathDiagnosticsState = {
 	latestPrune: null,
 	rendererAssetSyncCallCount: 0,
 	latestRendererAssetSync: null,
-	assetStateSignatureCheckCount: 0,
-	latestAssetStateSignatureCheck: null,
 };
 
 export function recordPreparedAssetPruneDiagnostics(
@@ -63,13 +49,6 @@ export function recordPreparedAssetRendererSyncDiagnostics(
 	state.latestRendererAssetSync = sample;
 }
 
-export function recordPreparedAssetSignatureDiagnostics(
-	sample: PreparedAssetSignatureDiagnosticsSample,
-): void {
-	state.assetStateSignatureCheckCount += 1;
-	state.latestAssetStateSignatureCheck = sample;
-}
-
 export function getPreparedAssetHotPathDiagnosticsSnapshot(): PreparedAssetHotPathDiagnosticsSnapshot {
 	return {
 		pruneCallCount: state.pruneCallCount,
@@ -77,10 +56,6 @@ export function getPreparedAssetHotPathDiagnosticsSnapshot(): PreparedAssetHotPa
 		rendererAssetSyncCallCount: state.rendererAssetSyncCallCount,
 		latestRendererAssetSync: state.latestRendererAssetSync
 			? { ...state.latestRendererAssetSync }
-			: null,
-		assetStateSignatureCheckCount: state.assetStateSignatureCheckCount,
-		latestAssetStateSignatureCheck: state.latestAssetStateSignatureCheck
-			? { ...state.latestAssetStateSignatureCheck }
 			: null,
 	};
 }

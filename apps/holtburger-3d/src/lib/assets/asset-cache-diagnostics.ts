@@ -7,10 +7,16 @@ import type {
 export function countPreparedAssetsByKind(
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
 ): PreparedAssetKindCounts {
+	return countPreparedAssetRecordsByKind(Object.values(preparedByAssetId));
+}
+
+export function countPreparedAssetRecordsByKind(
+	assets: Iterable<PreparedAssetRecord>,
+): PreparedAssetKindCounts {
 	const byKind: Partial<Record<PreparedAssetKind, number>> = {};
 	let total = 0;
 
-	for (const asset of Object.values(preparedByAssetId)) {
+	for (const asset of assets) {
 		total += 1;
 		byKind[asset.payload.kind] = (byKind[asset.payload.kind] ?? 0) + 1;
 	}

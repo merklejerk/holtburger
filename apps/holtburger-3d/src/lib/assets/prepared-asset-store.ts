@@ -1,4 +1,7 @@
-import { countPreparedAssetsByKind } from "./asset-cache-diagnostics";
+import {
+	countPreparedAssetRecordsByKind,
+	countPreparedAssetsByKind,
+} from "./asset-cache-diagnostics";
 import type { PreparedAssetCachePrunePlan } from "./asset-cache-policy";
 import type {
 	AssetChannelState,
@@ -32,6 +35,9 @@ export interface PreparedAssetResolver {
 	values(): IterableIterator<PreparedAssetRecord>;
 	keys(): IterableIterator<string>;
 	getCacheMetadata(assetId: string): PreparedAssetCacheMetadata | null;
+	cacheMetadataEntries(): IterableIterator<
+		[string, PreparedAssetCacheMetadata]
+	>;
 	getCacheDiagnostics(): PreparedAssetCacheDiagnostics | null;
 	getPreparedRevision(): number;
 	getCacheMetadataRevision(): number;
@@ -75,6 +81,7 @@ export class PreparedAssetStore {
 		keys: () => this.preparedByAssetId.keys(),
 		getCacheMetadata: (assetId) =>
 			this.cacheMetadataByAssetId.get(assetId) ?? null,
+		cacheMetadataEntries: () => this.cacheMetadataByAssetId.entries(),
 		getCacheDiagnostics: () => this.cacheDiagnostics,
 		getPreparedRevision: () => this.preparedRevision,
 		getCacheMetadataRevision: () => this.cacheMetadataRevision,
@@ -150,8 +157,8 @@ export class PreparedAssetStore {
 		return {
 			preparedRevision: this.preparedRevision,
 			cacheMetadataRevision: this.cacheMetadataRevision,
-			preparedCounts: countPreparedAssetsByKind(
-				this.createLegacySnapshot().preparedByAssetId,
+			preparedCounts: countPreparedAssetRecordsByKind(
+				this.preparedByAssetId.values(),
 			),
 			cacheDiagnostics: this.cacheDiagnostics,
 		};
@@ -189,4 +196,71 @@ export class PreparedAssetStore {
 			listener(event);
 		}
 	}
+}
+
+export function createPreparedAssetLegacySnapshotFromResolver(
+	resolver: PreparedAssetResolver,
+): PreparedAssetLegacySnapshot {
+	return {
+		preparedByAssetId: Object.fromEntries(resolver.entries()),
+		cacheMetadataByAssetId: Object.fromEntries(resolver.cacheMetadataEntries()),
+		cacheDiagnostics: resolver.getCacheDiagnostics(),
+	};
+}
+
+export function createAssetChannelStateSnapshotFromResolver(
+	baseState: AssetChannelState,
+	resolver: PreparedAssetResolver,
+): AssetChannelState {
+	const legacySnapshot = createPreparedAssetLegacySnapshotFromResolver(resolver);
+	return {
+		...baseState,
+		preparedByAssetId: legacySnapshot.preparedByAssetId,
+		cacheMetadataByAssetId: legacySnapshot.cacheMetadataByAssetId,
+		cacheDiagnostics: legacySnapshot.cacheDiagnostics,
+	};
+}
+
+export function createPreparedAssetResolverFromRecordSnapshot(options: {
+	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>;
+	cacheMetadataByAssetId?: Readonly<
+		Record<string, PreparedAssetCacheMetadata>
+	>;
+	cacheDiagnostics?: PreparedAssetCacheDiagnostics | null;
+	preparedRevision?: number;
+	cacheMetadataRevision?: number;
+}): PreparedAssetResolver {
+	const preparedByAssetId = options.preparedByAssetId;
+	const cacheMetadataByAssetId = options.cacheMetadataByAssetId ?? {};
+	const cacheDiagnostics = options.cacheDiagnostics ?? null;
+	const preparedRevision = options.preparedRevision ?? 0;
+	const cacheMetadataRevision = options.cacheMetadataRevision ?? 0;
+	return {
+		get: (assetId) => preparedByAssetId[assetId] ?? null,
+		has: (assetId) => preparedByAssetId[assetId] !== undefined,
+		entries: function* () {
+			yield* Object.entries(preparedByAssetId);
+		},
+		values: function* () {
+			yield* Object.values(preparedByAssetId);
+		},
+		keys: function* () {
+			yield* Object.keys(preparedByAssetId);
+		},
+		getCacheMetadata: (assetId) => cacheMetadataByAssetId[assetId] ?? null,
+		cacheMetadataEntries: function* () {
+			yield* Object.entries(cacheMetadataByAssetId);
+		},
+		getCacheDiagnostics: () => cacheDiagnostics,
+		getPreparedRevision: () => preparedRevision,
+		getCacheMetadataRevision: () => cacheMetadataRevision,
+		getPreparedCount: () => Object.keys(preparedByAssetId).length,
+		subscribe: () => () => {},
+	};
+}
+
+export function countPreparedAssetsByKindFromResolver(
+	resolver: PreparedAssetResolver,
+): ReturnType<typeof countPreparedAssetsByKind> {
+	return countPreparedAssetRecordsByKind(resolver.values());
 }

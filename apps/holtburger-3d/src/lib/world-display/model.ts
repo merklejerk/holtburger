@@ -9,11 +9,11 @@ import {
 	formatLandblockLabel,
 	formatLandblockOutdoorAssetId,
 } from "../landblocks";
+import type { PreparedAssetResolver } from "../assets/prepared-asset-store";
 import type {
 	AssetChannelState,
 	PreparedLandblockOutdoorPayload,
 } from "../assets/types";
-import { describePreparedAssetPayload } from "../assets/types";
 
 export interface NormalizedViewportPoint {
 	normalizedX: number;
@@ -77,6 +77,7 @@ export interface BrowserWorldDisplayModel {
 
 interface BrowserWorldDisplayModelInput {
 	assetState: AssetChannelState;
+	preparedAssetResolver: PreparedAssetResolver;
 	browserDestination: BrowserLocationSelection | null;
 	terrainLodRadius: number;
 	buildingLodRadius: number;
@@ -85,6 +86,7 @@ interface BrowserWorldDisplayModelInput {
 
 export function deriveBrowserWorldDisplayModel({
 	assetState,
+	preparedAssetResolver,
 	browserDestination,
 	terrainLodRadius,
 	buildingLodRadius,
@@ -106,7 +108,7 @@ export function deriveBrowserWorldDisplayModel({
 	}
 
 	const sceneContext = deriveSceneContext(
-		assetState,
+		preparedAssetResolver,
 		browserDestination,
 		terrainLodRadius,
 		buildingLodRadius,
@@ -149,7 +151,7 @@ function createPendingSceneContext(
 }
 
 function deriveSceneContext(
-	assetState: AssetChannelState,
+	preparedAssetResolver: PreparedAssetResolver,
 	browserDestination: BrowserLocationSelection,
 	terrainLodRadius: number,
 	buildingLodRadius: number,
@@ -161,7 +163,7 @@ function deriveSceneContext(
 		return deriveIndoorSceneContext(
 			browserFocusEnvCellId,
 			browserDestination.label,
-			assetState,
+			preparedAssetResolver,
 		);
 	}
 
@@ -189,7 +191,7 @@ function deriveSceneContext(
 			(landblock) => landblock.landblockId,
 		),
 	);
-	const preparedOutdoorLandblocks = Object.values(assetState.preparedByAssetId)
+	const preparedOutdoorLandblocks = [...preparedAssetResolver.values()]
 		.map((asset) => asset.payload)
 		.filter(
 			(payload): payload is PreparedLandblockOutdoorPayload =>
@@ -249,14 +251,12 @@ function deriveSceneContext(
 function deriveIndoorSceneContext(
 	focusEnvCellId: number | null,
 	destinationLabel: string | null,
-	assetState: AssetChannelState,
+	preparedAssetResolver: PreparedAssetResolver,
 ): BrowserWorldDisplaySceneContext {
 	const focusEnvCellLabel = focusEnvCellId
 		? formatEnvCellLabel(focusEnvCellId)
 		: "Unknown env cell";
-	const preparedIndoorCellCount = Object.values(
-		assetState.preparedByAssetId,
-	).reduce(
+	const preparedIndoorCellCount = [...preparedAssetResolver.values()].reduce(
 		(total, asset) => (asset.payload.kind === "env-cell" ? total + 1 : total),
 		0,
 	);
@@ -334,8 +334,8 @@ function describeAssetState(assetState: AssetChannelState): string {
 		return `Asset worker is preparing ${assetState.activeRequest?.assetId ?? "the next request"} on the ${assetState.channel} channel.`;
 	}
 
-	if (assetState.preparedAsset) {
-		return `Prepared ${assetState.preparedAsset.request.assetId} as ${describePreparedAssetPayload(assetState.preparedAsset.payload)} for ${assetState.preparedAsset.payload.residencyKind}. Channel: ${assetState.channel}.`;
+	if (assetState.status === "ready" && assetState.lastResponse) {
+		return `Prepared latest asset ${assetState.lastResponse.assetId}. Channel: ${assetState.channel}.`;
 	}
 
 	return "Asset worker ingress is waiting for the next demand-driven asset response.";

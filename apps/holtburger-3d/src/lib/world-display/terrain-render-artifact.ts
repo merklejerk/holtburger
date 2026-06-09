@@ -6,6 +6,7 @@ import {
 	type PreparedTerrainBvh,
 	type PreparedTerrainMesh,
 } from "../assets/types";
+import { createPreparedAssetResolverFromRecordSnapshot } from "../assets/prepared-asset-store";
 import { formatLandblockOutdoorAssetId } from "../landblocks";
 import {
 	terrainBvhItemKey,
@@ -107,7 +108,11 @@ export function buildLandblockTerrainRenderArtifact({
 }: BuildTerrainRenderArtifactOptions): LandblockTerrainRenderArtifact {
 	const mesh = createPreparedTerrainMeshFromOutdoorPayload(outdoor);
 	const materialResources = buildTerrainMaterialResourcePlan({
-		assetState,
+		preparedAssetResolver: createPreparedAssetResolverFromRecordSnapshot({
+			preparedByAssetId: assetState.preparedByAssetId,
+			cacheMetadataByAssetId: assetState.cacheMetadataByAssetId,
+			cacheDiagnostics: assetState.cacheDiagnostics,
+		}),
 		regionNumber: outdoor.regionNumber,
 		quads: mesh.quads,
 	});

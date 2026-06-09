@@ -3,6 +3,7 @@
 	import { get } from "svelte/store";
 	import { frontendState } from "./app/frontend-state";
 	import { AssetChannelController } from "./lib/assets/asset-channel";
+	import { PreparedAssetStore } from "./lib/assets/prepared-asset-store";
 	import { SceneAssetStreamingController } from "./lib/assets/scene-asset-streaming-controller";
 	import "./lib/diagnostics/browser-js-profiler";
 	import { readDebugConfig } from "./lib/host/tauri";
@@ -15,6 +16,7 @@
 	let startupError = $state<string | null>(null);
 	let verboseDiagnostics = false;
 	let currentSceneStreamer: SceneAssetStreamingController | null = null;
+	const preparedAssetStore = new PreparedAssetStore();
 	let latestFrontendState = $state(get(frontendState));
 
 	onMount(() => {
@@ -22,15 +24,20 @@
 		const assetChannel = new AssetChannelController();
 		const sceneStreamer = new SceneAssetStreamingController({
 			assetChannel,
-			getPreparedByAssetId: () => get(frontendState).asset.preparedByAssetId,
+			getPreparedByAssetId: () =>
+				preparedAssetStore.createLegacySnapshot().preparedByAssetId,
 			getCacheMetadataByAssetId: () =>
-				get(frontendState).asset.cacheMetadataByAssetId,
+				preparedAssetStore.createLegacySnapshot().cacheMetadataByAssetId,
 			markAssetsPending: (requests) =>
 				frontendState.markAssetsPending(requests),
-			applyPreparedAssets: (assets) =>
-				frontendState.applyPreparedAssets(assets),
-			applyAssetCachePrune: (prunePlan) =>
-				frontendState.applyAssetCachePrune(prunePlan),
+			applyPreparedAssets: (assets) => {
+				preparedAssetStore.applyPreparedAssets(assets);
+				frontendState.applyPreparedAssets(assets);
+			},
+			applyAssetCachePrune: (prunePlan) => {
+				preparedAssetStore.applyPrunePlan(prunePlan);
+				frontendState.applyAssetCachePrune(prunePlan);
+			},
 			applyAssetError: (request, message) =>
 				frontendState.applyAssetError(request, message),
 			debugLog,
@@ -71,7 +78,8 @@
 			buildingLodRadius: latestFrontendState.browserMode.buildingLodRadius,
 			detailLodRadius: latestFrontendState.browserMode.detailLodRadius,
 			envCellLodRadius: latestFrontendState.browserMode.envCellLodRadius,
-			preparedByAssetId: latestFrontendState.asset.preparedByAssetId,
+			preparedByAssetId:
+				preparedAssetStore.createLegacySnapshot().preparedByAssetId,
 		});
 	}
 
@@ -110,6 +118,6 @@
 			<pre>{tauriLaunchCommand}</pre>
 		</section>
 	{:else}
-		<BrowserWorldDisplay />
+		<BrowserWorldDisplay preparedAssetResolver={preparedAssetStore.resolver} />
 	{/if}
 </main>

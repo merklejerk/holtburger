@@ -5,6 +5,7 @@
 		createInitialAssetChannelState,
 		type AssetChannelState,
 	} from "../assets/types";
+	import type { PreparedAssetResolver } from "../assets/prepared-asset-store";
 	import type { NormalizedViewportPoint } from "./model";
 	import type {
 		RenderSpatialIndexQuery,
@@ -47,10 +48,12 @@
 	} from "./world-display-renderer";
 
 	let {
+		preparedAssetResolver,
 		onCameraFrameChange,
 		onRenderMetricsChange,
 		onCameraResidencyChange,
 	}: {
+		preparedAssetResolver: PreparedAssetResolver;
 		onCameraFrameChange?: WorldRenderCameraFrameChangeHandler;
 		onRenderMetricsChange?: WorldRenderMetricsChangeHandler;
 		onCameraResidencyChange?: BrowserCameraResidencyChangeHandler;
@@ -86,6 +89,7 @@
 
 			const controller = createWorldDisplayRenderer(viewportHost, {
 				assetState,
+				preparedAssetResolver,
 				staticLandblockRenderProducts,
 				transitionPortalMaxDepth,
 				debugOverlayScene,

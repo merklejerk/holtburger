@@ -134,6 +134,7 @@ import type {
 } from "./world-display-renderer-contract";
 import { calculateStaticLandblockArtifactSceneBoundsFrame } from "./artifact-scene-bounds";
 import { profileBrowserJsScope } from "../diagnostics/browser-js-profiler";
+import { recordPreparedAssetRendererSyncDiagnostics } from "../assets/prepared-asset-hot-path-diagnostics";
 import { createStaticLandblockProductMetadataStore } from "./static-landblock-product-metadata";
 import {
 	commitWebgl2StaticBundleProductResources,
@@ -594,6 +595,10 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	host: HTMLDivElement,
 	options: WorldDisplayRendererOptions,
 ): WorldDisplayRenderer {
+	if (!options.preparedAssetResolver) {
+		throw new Error("WorldDisplay renderer requires a prepared asset resolver.");
+	}
+
 	let assetState = options.assetState;
 	const emptyTerrainScene = createEmptyTerrainSceneModel();
 	let staticLandblockRenderProducts = options.staticLandblockRenderProducts;
@@ -677,7 +682,14 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	return {
 		setAssetState(nextAssetState) {
 			assetState = nextAssetState;
+			const recommittedProductCount = staticLandblockRenderProducts.artifacts.length;
 			recommitStaticProductRenderResources();
+			recordPreparedAssetRendererSyncDiagnostics({
+				source: "webgl2-world-display-renderer.setAssetState",
+				recommittedProductCount,
+				scheduledFrame: true,
+				completedAtMs: Date.now(),
+			});
 			reportMetrics();
 			scheduleFrame();
 		},

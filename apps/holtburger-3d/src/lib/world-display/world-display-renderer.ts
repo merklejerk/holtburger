@@ -64,6 +64,7 @@ function createDeferredWorldDisplayRenderer<
 
 	const { options } = input;
 	let assetState = options.assetState;
+	const { preparedAssetResolver } = options;
 	let staticLandblockRenderProducts = options.staticLandblockRenderProducts;
 	let debugOverlayScene = options.debugOverlayScene;
 	let renderSceneContext = options.renderSceneContext;
@@ -207,6 +208,7 @@ function createDeferredWorldDisplayRenderer<
 	function currentOptions(): WorldDisplayRendererOptions {
 		return {
 			assetState,
+			preparedAssetResolver,
 			staticLandblockRenderProducts,
 			debugOverlayScene,
 			renderSceneContext,

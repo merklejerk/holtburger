@@ -9,6 +9,7 @@ import {
 	type AssetChannelState,
 	type PreparedAssetRecord,
 } from "../assets/types";
+import { recordPreparedAssetSignatureDiagnostics } from "../assets/prepared-asset-hot-path-diagnostics";
 import { formatHex32, formatLandblockOutdoorAssetId } from "../landblocks";
 import {
 	deriveBrowserWorldDisplayModel,
@@ -246,8 +247,17 @@ export class BrowserRenderResourceCoordinator {
 			browserDestination: input.browserDestination,
 		});
 		const surfaceAssetState = input.assetState;
-		const surfaceAssetStateSignature =
+		const surfaceAssetStateSignatureResult =
 			describeAssetStateSignature(surfaceAssetState);
+		recordPreparedAssetSignatureDiagnostics({
+			source: "browser-render-resource-coordinator",
+			changed:
+				this.appliedSurfaceSignatures["asset-state"] !==
+				surfaceAssetStateSignatureResult.signature,
+			preparedAssetCount: surfaceAssetStateSignatureResult.preparedAssetCount,
+			cacheMetadataCount: surfaceAssetStateSignatureResult.cacheMetadataCount,
+			completedAtMs: Date.now(),
+		});
 		const terrainSceneSignature = describeTerrainSceneSignature(terrainScene);
 		const staticRenderableSceneSignature =
 			describeStaticRenderableSceneSignature(staticRenderableScene);
@@ -290,7 +300,7 @@ export class BrowserRenderResourceCoordinator {
 			reportTerrainMaterialDiagnostics(terrainScene);
 			this.applySurfaceResource(
 				"asset-state",
-				surfaceAssetStateSignature,
+				surfaceAssetStateSignatureResult.signature,
 				() => surface.setAssetState(surfaceAssetState),
 			);
 			this.applySurfaceResource(
@@ -397,13 +407,27 @@ type BrowserRenderResourceSurfaceKey =
 	| "texture-filtering-mode"
 	| "detail-textures-enabled";
 
-function describeAssetStateSignature(state: AssetChannelState): string {
-	return [
-		state.channel,
-		state.status,
-		Object.keys(state.preparedByAssetId).sort().join(","),
-		Object.keys(state.cacheMetadataByAssetId).sort().join(","),
-	].join(";");
+interface AssetStateSignatureResult {
+	signature: string;
+	preparedAssetCount: number;
+	cacheMetadataCount: number;
+}
+
+function describeAssetStateSignature(
+	state: AssetChannelState,
+): AssetStateSignatureResult {
+	const preparedAssetIds = Object.keys(state.preparedByAssetId).sort();
+	const cacheMetadataAssetIds = Object.keys(state.cacheMetadataByAssetId).sort();
+	return {
+		signature: [
+			state.channel,
+			state.status,
+			preparedAssetIds.join(","),
+			cacheMetadataAssetIds.join(","),
+		].join(";"),
+		preparedAssetCount: preparedAssetIds.length,
+		cacheMetadataCount: cacheMetadataAssetIds.length,
+	};
 }
 
 function describeRenderSceneContextSignature(

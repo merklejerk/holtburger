@@ -1569,6 +1569,109 @@ Verification notes:
 - `lint:ts` and `check` passed with zero reported errors.
 - Structured-interior resource construction was updated during verification because it shares the static bundle material binding/resource model.
 
+## Phase 16: Static Bundle Render-Used Resource Closure
+
+Status: planned.
+
+Goal:
+
+- Make worker-built static bundle resources follow actual rendered geometry, not declared-but-unused material slots.
+
+Context:
+
+- Browser resource-inspector evidence showed outdoor building material `material/0800094d` with `refs 1; indices 0; tris 0`.
+- The selected atlas placement looked like an impostor sprite in an outdoor building atlas.
+- The current landblock worker artifact build collects static material texture routes from every source part material slot before it builds/filter geometry surfaces. That means a material slot with zero render triangles can still allocate material records, virtual texture refs, atlas placements, and GPU texture memory.
+- This happens in the landblock worker artifact path before commit. The WebGL commit path uploads the already-built artifact and is not the source of this inclusion decision.
+
+### Phase 16A: Split Static Bundle Surface Discovery From Resource Finalization
+
+Status: planned.
+
+Deliverables:
+
+- Split `buildObjectSurface()` into a geometry-first candidate pass and a resource-finalization pass.
+- Introduce a geometry candidate shape that carries object/part/slot/material identity plus transformed positions, normals, UVs, indices, and triangle count, but no material readiness, texture refs, texture pages, detail overlay, or compaction result.
+- Build candidate surfaces before collecting material texture routes.
+- Filter out surfaces that cannot contribute render geometry before material/texture resource planning.
+
+Acceptance criteria:
+
+- Zero-triangle material slots are excluded before texture route collection.
+- Candidate surface construction remains deterministic and keeps existing static placement/scale behavior.
+- Direct-renderable but noncompactable surfaces are retained; the filter must not require compaction eligibility.
+
+### Phase 16B: Derive Material And Texture Closure From Render-Used Surfaces
+
+Status: planned.
+
+Deliverables:
+
+- Replace source-object/material-slot route collection with route requests derived from render-used geometry surfaces.
+- Collect static bundle detail texture refs only from objects that have at least one render-used surface.
+- Build static bundle texture pages from the render-used material/detail refs only.
+- Finalize render-used geometry candidates into full `StaticBundleBuildSurface` records after texture pages/refs are available.
+
+Acceptance criteria:
+
+- A declared material slot with zero triangles does not create a material texture route, virtual texture ref, texture page entry, or material record.
+- Building detail overlays are allocated only for buildings that contribute render-used geometry.
+- Existing non-empty outdoor building material/detail behavior is preserved.
+
+### Phase 16C: Keep Material Records And Geometry In The Same Usage Domain
+
+Status: planned.
+
+Deliverables:
+
+- Build material records from finalized render-used surfaces only.
+- Build compacted batches and direct entries from the same finalized surface list.
+- Ensure diagnostics count skipped/zero surfaces explicitly if useful, rather than representing them as allocated material/resource records.
+- Keep `textureRefKeys`, `detailTextureRefKey`, material readiness, family descriptors, transparency, and compaction eligibility derived from the same render-used closure.
+
+Acceptance criteria:
+
+- Resource inspector material rows no longer show zero-triangle static bundle materials solely because they appeared in a source material table.
+- Material usage counts, geometry records, and texture bindings describe the same allocation/render domain.
+- Static bundle diagnostics remain useful without requiring dead WebGL resources.
+
+### Phase 16D: Tests And Regression Coverage
+
+Status: planned.
+
+Deliverables:
+
+- Add a static bundle builder regression where one source material slot has triangles and another declared material slot has zero triangles.
+- Assert the zero-triangle material creates no material record, no texture-page ref, and no atlas entry.
+- Add or adjust a regression proving building detail overlay refs are not created for zero-render building objects.
+- Preserve existing tests proving non-empty outdoor building surfaces still receive region detail overlays.
+
+Acceptance criteria:
+
+- `npm run --prefix apps/holtburger-3d test:ts -- src/lib/world-display/static-bundle-layer-builder.test.ts` passes.
+- Any changed resource-inspection expectations are updated to reflect render-used material closure rather than source-declared material closure.
+
+### Phase 16E: Verification And Inspector Follow-Up
+
+Status: planned.
+
+Deliverables:
+
+- Run focused static bundle builder tests.
+- Run relevant resource-inspection/static resource tests if material/texture counts change.
+- Run full TypeScript tests, `lint:ts`, and `check`.
+- Reinspect an outdoor building atlas and verify impostor-looking zero-triangle material placements are absent.
+- Decide whether to add derived texture-entry usage counts to the inspector as a follow-up. This is optional and should be derived from texture entry aliases -> material bindings -> geometry usage, not baked into atlas allocation.
+
+Acceptance criteria:
+
+- `material/0800094d`-style zero-triangle material refs do not allocate atlas entries after a fresh worker artifact build.
+- Full verification passes:
+  - `npm run --prefix apps/holtburger-3d test:ts`
+  - `npm run --prefix apps/holtburger-3d lint:ts`
+  - `npm run --prefix apps/holtburger-3d check`
+- This worksheet records implementation notes, visual/resource-count observations, and any remaining closure/VRAM suspects.
+
 ### Risks And Mitigations
 
 - Risk: source aliasing merges refs that look identical but require different shader lookup semantics.
@@ -1579,6 +1682,12 @@ Verification notes:
   - Mitigation: allow single-alias entries to satisfy the shared contract; keep terrain ownership buckets and submit lookup behavior isolated.
 - Risk: inspector coverage becomes misleading if aliases are counted as separate rectangles.
   - Mitigation: coverage and preview rect calculations operate on source placements; alias counts are diagnostic metadata only.
+- Risk: render-used filtering accidentally drops noncompactable but direct-renderable geometry.
+  - Mitigation: filter by geometry viability and triangle/index/UV presence, not compaction eligibility.
+- Risk: detail overlay allocation becomes object-level stale if derived from source objects instead of rendered surfaces.
+  - Mitigation: derive detail refs from objects represented in the render-used surface set.
+- Risk: diagnostics lose visibility into unused material declarations after dead resources are removed.
+  - Mitigation: report skipped/zero-triangle surfaces as diagnostics if needed instead of keeping allocated material/texture records.
 
 ## Findings
 
@@ -1636,4 +1745,5 @@ Verification notes:
 - Fixed the Resource inspector allocation-domain mismatch: structured-interior texture and material rows now come from `structuredInteriorResources.productsByKey`, while structured cells remain cell/geometry rows with reference counts. Material usage accounting now keys by owner kind, allocation-owner key, and material key instead of material key alone, so same-named material records from different owners do not merge usage counts. Texture/material/geometry rows now display their owner key in the panel, making the allocation domain visible without exposing opaque WebGL handles.
 - Follow-up atlas duplication dry-run: static bundle texture page layout currently keys placements by `VirtualTexturePageRef.key`, which is material-facing and includes material record/sampler variant identity. That can pack identical prepared texture pixels multiple times in the same atlas. The planned structural fix is Phase 15: source-placement entries with virtual ref aliases, so material bindings remain variant-specific while pixel atlas placements dedupe by source identity.
 - Phase 15 implementation completed: static and structured-interior texture pages now pack by source placement identity and expose virtual aliases. Material bindings resolve through alias membership while keeping wrap mode on the requesting virtual ref, and inspector previews now report source placement count separately from alias count.
+- Follow-up outdoor building atlas investigation: the impostor-looking `prepared-texture/06004527` placement came through `material/0800094d`, and the resource inspector showed that material as `refs 1; indices 0; tris 0`. This proves the current static bundle worker can allocate material/texture resources from declared source material slots that do not contribute rendered geometry. Phase 16 will move static bundle resource closure to render-used geometry surfaces.
 - Remaining suspected issues: static bundle payloads are too large, static bundle asset closure is too broad, and `setAssetState` still triggers costly static product recommits.

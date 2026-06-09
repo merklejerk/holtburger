@@ -321,6 +321,56 @@ describe("static bundle layer builder", () => {
 		);
 	});
 
+	it("does not allocate building detail overlays for building objects with no render triangles", () => {
+		const landblockId = 0xda55ffff;
+		const detailPreparedTextureAssetId = formatPreparedTextureAssetId({
+			renderSurfaceId: 0x06000013,
+			usage: "detail",
+			outputFormat: "rgba8",
+			mipPolicy: "none",
+			colorSpace: "linear",
+		});
+		const layer = buildStaticObjectBundleArtifact({
+			job: createBuildJob(landblockId, "outdoor-buildings"),
+			preparedAssets: [
+				createOutdoorLandblock(landblockId, [
+					{
+						...createOutdoorMember("building-0", "gfx-obj/01000031"),
+						kind: "building",
+					},
+				]),
+				createRegionRenderProfileWithBuildingDetail(1, {
+					textureAssetId: "surface-texture/05000013",
+					renderSurfaceId: 0x06000013,
+					tiling: 7,
+				}),
+				createTerrainMaterial(1),
+				createGfxObj("gfx-obj/01000031", "material/08000031", 0),
+				createMaterial("material/08000031", "render-surface/06000031"),
+				createRenderSurface("render-surface/06000013"),
+				createRenderSurface("render-surface/06000031"),
+				createSurfaceTexture("surface-texture/05000013", 0x06000013),
+				createPreparedTexture(0x06000013, "detail", [255, 128, 64, 255]),
+				createPreparedTexture(0x06000031, "raw", [255, 0, 255, 255]),
+			],
+			policy: createPolicy(),
+		});
+
+		expect(layer.materialRecords).toEqual([]);
+		expect(layer.compactedBatches).toEqual([]);
+		expect(layer.directEntries).toEqual([]);
+		expect(layer.texturePageRefs.map((ref) => ref.sourceAssetId)).not.toContain(
+			detailPreparedTextureAssetId,
+		);
+		expect(layer.texturePages).toEqual([]);
+		expect(layer.diagnostics).toMatchObject({
+			compactedSurfaceCount: 0,
+			directSurfaceCount: 0,
+			skippedSurfaceCount: 1,
+			skippedReasons: ["geometry:empty-or-incomplete"],
+		});
+	});
+
 	it("does not apply disabled object detail roles to ordinary outdoor static objects", () => {
 		const landblockId = 0xda55ffff;
 		const detailPreparedTextureAssetId = formatPreparedTextureAssetId({
@@ -495,6 +545,59 @@ describe("static bundle layer builder", () => {
 			"repeat",
 			"repeat",
 		]);
+	});
+
+	it("does not allocate material or texture resources for declared slots with no render triangles", () => {
+		const landblockId = 0xda55ffff;
+		const unusedPreparedTextureAssetId = formatPreparedTextureAssetId({
+			renderSurfaceId: 0x06004527,
+			usage: "raw",
+			outputFormat: "rgba8",
+			mipPolicy: "none",
+			colorSpace: "linear",
+		});
+		const layer = buildStaticObjectBundleArtifact({
+			job: createBuildJob(landblockId, "outdoor-buildings"),
+			preparedAssets: [
+				createOutdoorLandblock(landblockId, [
+					{
+						...createOutdoorMember("building-0", "gfx-obj/01000030"),
+						kind: "building",
+					},
+				]),
+				createRegionRenderProfile(1),
+				createTerrainMaterial(1),
+				createGfxObjWithUnusedMaterialSlot("gfx-obj/01000030", [
+					"material/08000001",
+					"material/0800094d",
+				]),
+				createMaterial("material/08000001", "render-surface/06000001"),
+				createMaterial("material/0800094d", "render-surface/06004527"),
+				createRenderSurface("render-surface/06000001"),
+				createRenderSurface("render-surface/06004527"),
+				createPreparedTexture(0x06000001, "raw", [255, 0, 0, 255]),
+				createPreparedTexture(0x06004527, "raw", [0, 255, 255, 255]),
+			],
+			policy: createPolicy(),
+		});
+
+		expect(layer.materialRecords.map((record) => record.key)).toEqual([
+			"material:material/08000001:variant:sampler=clamp",
+		]);
+		expect(layer.texturePageRefs.map((ref) => ref.sourceAssetId)).not.toContain(
+			unusedPreparedTextureAssetId,
+		);
+		expect(
+			layer.texturePages.flatMap((page) =>
+				page.entries.map((entry) => entry.sourceAssetId),
+			),
+		).not.toContain(unusedPreparedTextureAssetId);
+		expect(layer.diagnostics).toMatchObject({
+			compactedSurfaceCount: 1,
+			directSurfaceCount: 0,
+			skippedSurfaceCount: 1,
+			skippedReasons: ["geometry:empty-or-incomplete"],
+		});
 	});
 
 	it("bakes static instance placement and source scale into geometry positions", () => {
@@ -1078,6 +1181,36 @@ function createMultiSurfaceGfxObj(
 			rootKind: null,
 		},
 		renderGeometry: createMultiSurfaceRenderGeometry(materialAssetIds.length),
+		sortCenter: null,
+		didDegrade: null,
+	});
+}
+
+function createGfxObjWithUnusedMaterialSlot(
+	assetId: string,
+	materialAssetIds: readonly [string, string],
+): PreparedAssetRecord {
+	const surfaceIds = materialAssetIds.map((materialAssetId) =>
+		Number.parseInt(materialAssetId.slice("material/".length), 16),
+	);
+	return createRecord(assetId, {
+		kind: "gfx-obj",
+		sourceAssetKind: "gfx-obj",
+		residencyKind: "unknown",
+		provenance: createProvenance("gfx-obj"),
+		gfxObjId: Number.parseInt(assetId.slice(-8), 16),
+		flags: null,
+		surfaceIds,
+		vertexArray: { vertexType: 0, vertexCount: 0, vertices: [] },
+		drawingPolygons: [],
+		drawingBsp: null,
+		dependencies: { materialAssetIds: [...materialAssetIds] },
+		physicsWitness: {
+			polygonCount: 1,
+			hasBsp: false,
+			rootKind: null,
+		},
+		renderGeometry: createRenderGeometry(1),
 		sortCenter: null,
 		didDegrade: null,
 	});

@@ -138,6 +138,21 @@ interface StaticBundleBuildSurface {
 	indices: Uint16Array | Uint32Array;
 }
 
+interface StaticBundleGeometrySurface {
+	key: string;
+	object: StaticBundleSourceObject;
+	gfxObjAssetId: string;
+	slot: ResolvedMaterialSlot;
+	materialAssetId: string;
+	materialTextureRecordKey: string;
+	materialVariantSignature: string | null;
+	positions: Float32Array;
+	normals: Float32Array;
+	uvs: Float32Array;
+	indices: Uint16Array | Uint32Array;
+	triangleCount: number;
+}
+
 export function buildStaticObjectBundleArtifact({
 	job,
 	preparedAssets,
@@ -167,8 +182,12 @@ export function buildStaticObjectBundleArtifact({
 		job.rootAssetIds,
 		preparedByAssetId,
 	);
+	const candidateSurfaces = sourceObjects.flatMap((object) =>
+		buildObjectGeometrySurfaces(object, preparedByAssetId),
+	);
+	const renderSurfaces = candidateSurfaces.filter(isRenderUsedGeometrySurface);
 	const materialTextureRoutes = collectStaticMaterialTextureRoutes(
-		collectStaticBundleMaterialRouteRequests(sourceObjects),
+		collectStaticBundleMaterialRouteRequests(renderSurfaces),
 		preparedByAssetId,
 	);
 	const materialTexturePageRefs = collectStaticMaterialTexturePageRefs(
@@ -176,7 +195,7 @@ export function buildStaticObjectBundleArtifact({
 		preparedByAssetId,
 	);
 	const detailTexturePageRefs = collectStaticBundleDetailTexturePageRefs({
-		sourceObjects,
+		sourceObjects: collectRenderedSourceObjects(renderSurfaces),
 		preparedByAssetId,
 	});
 	const texturePageRefs = uniqueTexturePageRefs([
@@ -188,13 +207,13 @@ export function buildStaticObjectBundleArtifact({
 		texturePageRefs,
 		policy: policy.atlasLayout,
 	});
-	const surfaces = sourceObjects.flatMap((object) =>
-		buildObjectSurfaces(
-			object,
+	const surfaces = renderSurfaces.map((surface) =>
+		finalizeObjectSurface({
+			surface,
 			preparedByAssetId,
 			texturePageRefs,
 			materialTextureRoutes,
-		),
+		}),
 	);
 	const renderChunk = createRenderChunk(job);
 	const materialRecords = buildMaterialRecords({
@@ -232,6 +251,7 @@ export function buildStaticObjectBundleArtifact({
 	const spatialHints = buildSpatialHints(sourceObjects);
 	const diagnostics = buildDiagnostics({
 		sourceObjectCount: sourceObjects.length,
+		candidateSurfaceCount: candidateSurfaces.length,
 		surfaces,
 	});
 
@@ -525,16 +545,24 @@ function createStaticBundleSourcePartFromGfxObj({
 }
 
 function collectStaticBundleMaterialRouteRequests(
-	sourceObjects: readonly StaticBundleSourceObject[],
+	surfaces: readonly StaticBundleGeometrySurface[],
 ): StaticMaterialTextureRouteRequest[] {
-	return sourceObjects.flatMap((object) =>
-		object.parts.flatMap((part) =>
-			part.materialSlots.map((slot) => ({
-				materialAssetId: slot.materialAssetId,
-				materialRecordKey: formatStaticBundleMaterialTextureRecordKey(slot),
-				materialVariantSignature: slot.materialVariantSignature ?? null,
-			})),
-		),
+	return surfaces.map((surface) => ({
+		materialAssetId: surface.materialAssetId,
+		materialRecordKey: surface.materialTextureRecordKey,
+		materialVariantSignature: surface.materialVariantSignature,
+	}));
+}
+
+function collectRenderedSourceObjects(
+	surfaces: readonly StaticBundleGeometrySurface[],
+): StaticBundleSourceObject[] {
+	const objectsByKey = new Map<string, StaticBundleSourceObject>();
+	for (const surface of surfaces) {
+		objectsByKey.set(surface.object.objectKey, surface.object);
+	}
+	return [...objectsByKey.values()].sort((left, right) =>
+		left.objectKey.localeCompare(right.objectKey),
 	);
 }
 
@@ -771,12 +799,10 @@ function formatStaticBundleMaterialRecordKey(options: {
 		: base;
 }
 
-function buildObjectSurfaces(
+function buildObjectGeometrySurfaces(
 	object: StaticBundleSourceObject,
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>,
-	texturePageRefs: readonly VirtualTexturePageRef[],
-	materialTextureRoutes: readonly StaticMaterialTextureRoute[],
-): StaticBundleBuildSurface[] {
+): StaticBundleGeometrySurface[] {
 	return object.parts.flatMap((part) => {
 		const gfxObj = getPreparedPayload(
 			preparedByAssetId,
@@ -784,66 +810,28 @@ function buildObjectSurfaces(
 			"gfx-obj",
 		);
 		return part.materialSlots.map((slot) =>
-			buildObjectSurface({
+			buildObjectGeometrySurface({
 				object,
 				part,
 				gfxObj,
 				slot,
-				preparedByAssetId,
-				texturePageRefs,
-				materialTextureRoutes,
 			}),
 		);
 	});
 }
 
-function buildObjectSurface({
+function buildObjectGeometrySurface({
 	object,
 	part,
 	gfxObj,
 	slot,
-	preparedByAssetId,
-	texturePageRefs,
-	materialTextureRoutes,
 }: {
 	object: StaticBundleSourceObject;
 	part: StaticBundleSourcePart;
 	gfxObj: PreparedGfxObjPayload;
 	slot: ResolvedMaterialSlot;
-	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
-	texturePageRefs: readonly VirtualTexturePageRef[];
-	materialTextureRoutes: readonly StaticMaterialTextureRoute[];
-}): StaticBundleBuildSurface {
-	const detail = resolveStaticBundleObjectDetail({
-		object,
-		texturePageRefs,
-		preparedByAssetId,
-	});
+}): StaticBundleGeometrySurface {
 	const materialTextureRecordKey = formatStaticBundleMaterialTextureRecordKey(slot);
-	const materialRecordKey = formatStaticBundleMaterialRecordKey({
-		slot,
-		detailTextureRefKey: detail?.textureRefKey ?? null,
-	});
-	const textureRefKeys = findStaticMaterialTextureRefs(
-		materialTextureRecordKey,
-		texturePageRefs,
-		materialTextureRoutes,
-	)
-		.map((ref) => ref.key)
-		.concat(detail?.textureRefKey ?? []);
-	const materialReadiness = resolveStaticMaterialReadiness({
-		materialAssetId: slot.materialAssetId,
-		materialRecordKey: materialTextureRecordKey,
-		materialVariantSignature: slot.materialVariantSignature ?? null,
-		preparedByAssetId,
-		texturePageRefs,
-		materialTextureRoutes,
-	});
-	const material = getPreparedPayload(
-		preparedByAssetId,
-		slot.materialAssetId,
-		"material-recipe",
-	);
 	const geometry = buildPolygonSetRenderGeometry(gfxObj.renderGeometry, {
 		surfaceId: slot.slotIndex,
 		materialVariantSignature: slot.materialVariantSignature ?? null,
@@ -860,20 +848,6 @@ function buildObjectSurface({
 		modelMatrix,
 	);
 	const uvs = geometry.uvs ?? new Float32Array();
-	const geometryCompatible =
-		geometry.triangleCount > 0 &&
-		positions.length >= geometry.triangleCount * 9 &&
-		uvs.length >= geometry.triangleCount * 6;
-	const compactionEligibility = createCompactionEligibility({
-		geometry: {
-			kind: "static",
-			owningLandblockId: object.owningLandblockId,
-			hasUvBuffer: geometryCompatible,
-		},
-		material: materialReadiness,
-	});
-	const compactable =
-		geometryCompatible && compactionEligibility.decision === "compacted";
 	return {
 		key: [
 			object.objectKey,
@@ -885,10 +859,86 @@ function buildObjectSurface({
 		].join(":"),
 		object,
 		gfxObjAssetId: part.gfxObjAssetId,
+		slot,
 		materialAssetId: slot.materialAssetId,
-		materialRecordKey,
 		materialTextureRecordKey,
 		materialVariantSignature: slot.materialVariantSignature ?? null,
+		positions,
+		normals,
+		uvs,
+		indices: geometry.indices,
+		triangleCount: geometry.triangleCount,
+	};
+}
+
+function isRenderUsedGeometrySurface(
+	surface: StaticBundleGeometrySurface,
+): boolean {
+	return (
+		surface.triangleCount > 0 &&
+		surface.indices.length >= surface.triangleCount * 3 &&
+		surface.positions.length >= surface.triangleCount * 9 &&
+		surface.uvs.length >= surface.triangleCount * 6
+	);
+}
+
+function finalizeObjectSurface({
+	surface,
+	preparedByAssetId,
+	texturePageRefs,
+	materialTextureRoutes,
+}: {
+	surface: StaticBundleGeometrySurface;
+	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
+	texturePageRefs: readonly VirtualTexturePageRef[];
+	materialTextureRoutes: readonly StaticMaterialTextureRoute[];
+}): StaticBundleBuildSurface {
+	const detail = resolveStaticBundleObjectDetail({
+		object: surface.object,
+		texturePageRefs,
+		preparedByAssetId,
+	});
+	const materialRecordKey = formatStaticBundleMaterialRecordKey({
+		slot: surface.slot,
+		detailTextureRefKey: detail?.textureRefKey ?? null,
+	});
+	const textureRefKeys = findStaticMaterialTextureRefs(
+		surface.materialTextureRecordKey,
+		texturePageRefs,
+		materialTextureRoutes,
+	)
+		.map((ref) => ref.key)
+		.concat(detail?.textureRefKey ?? []);
+	const materialReadiness = resolveStaticMaterialReadiness({
+		materialAssetId: surface.materialAssetId,
+		materialRecordKey: surface.materialTextureRecordKey,
+		materialVariantSignature: surface.materialVariantSignature,
+		preparedByAssetId,
+		texturePageRefs,
+		materialTextureRoutes,
+	});
+	const material = getPreparedPayload(
+		preparedByAssetId,
+		surface.materialAssetId,
+		"material-recipe",
+	);
+	const compactionEligibility = createCompactionEligibility({
+		geometry: {
+			kind: "static",
+			owningLandblockId: surface.object.owningLandblockId,
+			hasUvBuffer: true,
+		},
+		material: materialReadiness,
+	});
+	const compactable = compactionEligibility.decision === "compacted";
+	return {
+		key: surface.key,
+		object: surface.object,
+		gfxObjAssetId: surface.gfxObjAssetId,
+		materialAssetId: surface.materialAssetId,
+		materialRecordKey,
+		materialTextureRecordKey: surface.materialTextureRecordKey,
+		materialVariantSignature: surface.materialVariantSignature,
 		textureRefKeys,
 		detailOverlay: detail,
 		detailTextureRefKey: detail?.textureRefKey ?? null,
@@ -909,10 +959,10 @@ function buildObjectSurface({
 			compactionEligibility.material.alphaPolicy === "transparent-blend" ||
 			compactionEligibility.material.alphaPolicy === "opacity-translucent",
 		compactionEligibility,
-		positions,
-		normals,
-		uvs,
-		indices: geometry.indices,
+		positions: surface.positions,
+		normals: surface.normals,
+		uvs: surface.uvs,
+		indices: surface.indices,
 	};
 }
 
@@ -1198,8 +1248,11 @@ function createRenderChunk(
 
 function buildDiagnostics(options: {
 	sourceObjectCount: number;
+	candidateSurfaceCount: number;
 	surfaces: readonly StaticBundleBuildSurface[];
 }): StaticLandblockBundleLayerDiagnostics {
+	const skippedSurfaceCount =
+		options.candidateSurfaceCount - options.surfaces.length;
 	return {
 		sourceObjectCount: options.sourceObjectCount,
 		compactedSurfaceCount: options.surfaces.filter(
@@ -1208,12 +1261,15 @@ function buildDiagnostics(options: {
 		directSurfaceCount: options.surfaces.filter(
 			(surface) => !surface.compactable,
 		).length,
-		skippedSurfaceCount: 0,
+		skippedSurfaceCount,
 		missingAssetIds: [],
 		skippedReasons: uniqueSortedStrings(
-			options.surfaces.flatMap((surface) =>
-				surface.reason ? [surface.reason] : [],
-			),
+			[
+				...(skippedSurfaceCount > 0 ? ["geometry:empty-or-incomplete"] : []),
+				...options.surfaces.flatMap((surface) =>
+					surface.reason ? [surface.reason] : [],
+				),
+			],
 		),
 	};
 }

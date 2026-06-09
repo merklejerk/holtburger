@@ -7,7 +7,6 @@
 		describeBrowserDestinationIdentity,
 		type BrowserLocationSelection,
 	} from "../app/browser-mode";
-	import { createSceneResourceInterestFromBrowserDestination } from "../app/browser-scene-resource-interest";
 	import type { AssetChannelState } from "../lib/assets/types";
 	import {
 		countPreparedAssetsByKindFromResolver,
@@ -83,10 +82,7 @@
 		type BrowserRenderResourceCoordinatorInput,
 		type BrowserRenderResourceReport,
 	} from "../lib/world-display/browser-render-resource-coordinator";
-	import {
-		StaticLandblockRenderArtifactCoordinator,
-	} from "../lib/world-display/static-landblock-render-artifact-coordinator";
-	import type { SceneResourceInterest } from "../lib/scene-runtime/scene-resource-interest";
+	import type { StaticLandblockProductSource } from "../lib/world-display/static-landblock-product-source";
 	import { buildRenderDebugReport } from "../lib/world-display/diagnostics/render-debug-report";
 	import BrowserModePanel from "./BrowserModePanel.svelte";
 
@@ -97,8 +93,10 @@
 
 	let {
 		preparedAssetResolver,
+		staticLandblockProductSource,
 	}: {
 		preparedAssetResolver: PreparedAssetResolver;
+		staticLandblockProductSource: StaticLandblockProductSource;
 	} = $props();
 
 	interface BrowserPanelSection {
@@ -180,20 +178,6 @@
 	let rootElement = $state<HTMLDivElement | null>(null);
 	let worldDisplaySurface = $state<WorldDisplay | null>(null);
 	const renderResourceCoordinator = new BrowserRenderResourceCoordinator();
-	const staticLandblockRenderCoordinator =
-		new StaticLandblockRenderArtifactCoordinator({
-			onStoreChanged: () => {
-				scheduleCurrentSceneResourceUpdate();
-			},
-			onError: (error, desired) => {
-				console.error("[holtburger-3d][static-landblock-render-worker]", {
-					landblockId: desired.landblockId,
-					product: desired.product,
-					requestId: desired.requestId,
-					message: error.message,
-				});
-			},
-		});
 	let renderResourceReport = $state<BrowserRenderResourceReport>(
 		createEmptyBrowserRenderResourceReport(),
 	);
@@ -1330,9 +1314,6 @@
 	}
 
 	function scheduleCurrentSceneResourceUpdate(): void {
-		const staticLandblockRenderInput =
-			createCurrentSceneResourceInterest();
-		staticLandblockRenderCoordinator.syncSceneInterest(staticLandblockRenderInput);
 		scheduleSceneResourceUpdate({
 			assetPresentationState: assetState,
 			preparedAssetResolver,
@@ -1352,16 +1333,6 @@
 			selectedStaticRenderableRenderKey,
 			activeRenderAnchor,
 			browserCameraFrame: getEffectiveBrowserCameraFrame(),
-		});
-	}
-
-	function createCurrentSceneResourceInterest(): SceneResourceInterest {
-		return createSceneResourceInterestFromBrowserDestination({
-			destination: browserDestination,
-			terrainLodRadius,
-			buildingLodRadius,
-			detailLodRadius,
-			envCellLodRadius,
 		});
 	}
 
@@ -2483,7 +2454,6 @@
 	}
 
 	onDestroy(() => {
-		staticLandblockRenderCoordinator.dispose();
 		assetDiagnosticsSampler?.dispose();
 		assetDiagnosticsSampler = null;
 		if (renderResourceUpdateTimer) {
@@ -2509,10 +2479,10 @@
 	oncontextmenucapture={handleBrowserContextMenuCapture}
 	onclickcapture={handleBrowserClickCapture}
 >
-	<WorldDisplay
-		bind:this={worldDisplaySurface}
-		{preparedAssetResolver}
-		staticLandblockProductSource={staticLandblockRenderCoordinator.productSource}
+		<WorldDisplay
+			bind:this={worldDisplaySurface}
+			{preparedAssetResolver}
+			{staticLandblockProductSource}
 		onCameraFrameChange={handleRendererCameraFrameChange}
 		onRenderMetricsChange={handleRenderMetricsChange}
 		onCameraResidencyChange={handleRendererCameraResidencyChange}

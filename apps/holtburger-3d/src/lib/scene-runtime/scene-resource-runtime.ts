@@ -27,3 +27,30 @@ export interface LandblockProductRuntime {
 	): StaticLandblockProductSourceSubscription;
 	dispose(): void;
 }
+
+export function createSceneResourceRuntime(input: {
+	assets: ClientAssetRuntime;
+	landblockProducts: LandblockProductRuntime;
+}): SceneResourceRuntime {
+	const { assets, landblockProducts } = input;
+	let disposed = false;
+	return {
+		assets,
+		landblockProducts,
+		syncSceneInterest(sceneInterest) {
+			if (disposed) {
+				return;
+			}
+			assets.syncSceneInterest(sceneInterest);
+			landblockProducts.syncSceneInterest(sceneInterest);
+		},
+		dispose() {
+			if (disposed) {
+				return;
+			}
+			disposed = true;
+			landblockProducts.dispose();
+			assets.dispose();
+		},
+	};
+}

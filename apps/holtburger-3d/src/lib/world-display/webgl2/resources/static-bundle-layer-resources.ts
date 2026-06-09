@@ -7,6 +7,7 @@ import type {
 	StaticBundleTexturePage,
 	StaticObjectBundleArtifact,
 	StaticObjectBundleScope,
+	VirtualTexturePageRef,
 	VirtualTexturePageSampleClass,
 	VirtualTexturePageEntryRole,
 } from "../../static-bundle-layer";
@@ -82,8 +83,8 @@ interface Webgl2StaticBundleTexturePageEntryResource
 	role: VirtualTexturePageEntryRole;
 	sampleClass: VirtualTexturePageSampleClass;
 	indexedFormat: StaticBundleTexturePage["indexedFormat"];
-	wrapS: "clamp" | "repeat";
-	wrapT: "clamp" | "repeat";
+	samplingDomain: VirtualTexturePageRef["samplingDomain"];
+	lookup: VirtualTexturePageRef["lookup"];
 }
 
 export interface Webgl2StaticBundleMaterialResource {
@@ -243,11 +244,15 @@ function createWebgl2StaticBundleLayerResource({
 	const texturePagesByKey = new Map(
 		texturePages.map((page) => [page.key, page]),
 	);
+	const textureRefByVirtualRefKey = createStaticBundleTextureRefByKey(
+		layer.texturePageRefs,
+	);
 	const texturePageByVirtualRefKey =
 		createStaticBundleTexturePageByVirtualRefKey(texturePages);
 	const materialRecords = layer.materialRecords.map((record) =>
 		createWebgl2StaticBundleMaterialResource({
 			record,
+			textureRefByVirtualRefKey,
 			texturePageByVirtualRefKey,
 		}),
 	);
@@ -358,13 +363,15 @@ export function createWebgl2StaticBundleTexturePageResource({
 		height: page.height,
 		placementCount: page.entries.length,
 		entries: page.entries.map((entry) => ({
+			sourcePlacementKey: entry.sourcePlacementKey,
 			virtualRefKey: entry.virtualRefKey,
+			virtualRefKeys: entry.virtualRefKeys,
 			sourceAssetId: entry.sourceAssetId,
 			role: entry.role,
 			sampleClass: entry.sampleClass,
 			indexedFormat: entry.indexedFormat,
-			wrapS: entry.wrapS,
-			wrapT: entry.wrapT,
+			samplingDomain: entry.samplingDomain,
+			lookup: entry.lookup,
 			rect: entry.rect,
 		})),
 	};
@@ -654,17 +661,39 @@ export function createStaticBundleTexturePageByVirtualRefKey(
 	>();
 	for (const page of texturePages) {
 		for (const entry of page.entries) {
-			pagesByVirtualRefKey.set(entry.virtualRefKey, page);
+			for (const virtualRefKey of entry.virtualRefKeys) {
+				if (pagesByVirtualRefKey.has(virtualRefKey)) {
+					throw new Error(
+						`Static bundle texture page alias ${virtualRefKey} is exposed by multiple page entries.`,
+					);
+				}
+				pagesByVirtualRefKey.set(virtualRefKey, page);
+			}
 		}
 	}
 	return pagesByVirtualRefKey;
 }
 
+export function createStaticBundleTextureRefByKey(
+	refs: readonly VirtualTexturePageRef[],
+): Map<string, VirtualTexturePageRef> {
+	const refsByKey = new Map<string, VirtualTexturePageRef>();
+	for (const ref of refs) {
+		if (refsByKey.has(ref.key)) {
+			throw new Error(`Static bundle texture ref ${ref.key} is duplicated.`);
+		}
+		refsByKey.set(ref.key, ref);
+	}
+	return refsByKey;
+}
+
 export function createWebgl2StaticBundleMaterialResource({
 	record,
+	textureRefByVirtualRefKey,
 	texturePageByVirtualRefKey,
 }: {
 	record: StaticBundleMaterialRecord;
+	textureRefByVirtualRefKey: ReadonlyMap<string, VirtualTexturePageRef>;
 	texturePageByVirtualRefKey: ReadonlyMap<
 		string,
 		Webgl2StaticBundleTexturePageResource
@@ -684,6 +713,7 @@ export function createWebgl2StaticBundleMaterialResource({
 			resolveStaticBundleMaterialTextureBinding({
 				materialRecordKey: record.key,
 				virtualRefKey,
+				textureRefByVirtualRefKey,
 				texturePageByVirtualRefKey,
 			}),
 		),
@@ -693,15 +723,23 @@ export function createWebgl2StaticBundleMaterialResource({
 function resolveStaticBundleMaterialTextureBinding({
 	materialRecordKey,
 	virtualRefKey,
+	textureRefByVirtualRefKey,
 	texturePageByVirtualRefKey,
 }: {
 	materialRecordKey: string;
 	virtualRefKey: string;
+	textureRefByVirtualRefKey: ReadonlyMap<string, VirtualTexturePageRef>;
 	texturePageByVirtualRefKey: ReadonlyMap<
 		string,
 		Webgl2StaticBundleTexturePageResource
 	>;
 }): Webgl2StaticBundleMaterialTextureBinding {
+	const textureRef = textureRefByVirtualRefKey.get(virtualRefKey);
+	if (!textureRef) {
+		throw new Error(
+			`Static bundle material ${materialRecordKey} references missing texture ref ${virtualRefKey}.`,
+		);
+	}
 	const page = texturePageByVirtualRefKey.get(virtualRefKey);
 	if (!page) {
 		throw new Error(
@@ -709,26 +747,59 @@ function resolveStaticBundleMaterialTextureBinding({
 		);
 	}
 	const entry = page.entries.find(
-		(candidate) => candidate.virtualRefKey === virtualRefKey,
+		(candidate) => candidate.virtualRefKeys.includes(virtualRefKey),
 	);
 	if (!entry) {
 		throw new Error(
 			`Static bundle texture page ${page.key} does not expose entry ${virtualRefKey}.`,
 		);
 	}
+	validateStaticBundleTextureBindingAlias({
+		materialRecordKey,
+		virtualRefKey,
+		textureRef,
+		entry,
+	});
 	return {
 		virtualRefKey,
 		texturePageKey: page.key,
-		role: entry.role,
-		sampleClass: entry.sampleClass,
-		indexedFormat: entry.indexedFormat,
+		role: textureRef.role,
+		sampleClass: textureRef.sampleClass,
+		indexedFormat: textureRef.indexedFormat,
 		rect: entry.rect,
 		width: page.texture.width,
 		height: page.texture.height,
-		wrapS: entry.wrapS,
-		wrapT: entry.wrapT,
+		wrapS: textureRef.wrapS,
+		wrapT: textureRef.wrapT,
 		texture: page.texture,
 	};
+}
+
+function validateStaticBundleTextureBindingAlias({
+	materialRecordKey,
+	virtualRefKey,
+	textureRef,
+	entry,
+}: {
+	materialRecordKey: string;
+	virtualRefKey: string;
+	textureRef: VirtualTexturePageRef;
+	entry: Webgl2StaticBundleTexturePageEntryResource;
+}): void {
+	if (
+		textureRef.sourceAssetId !== entry.sourceAssetId ||
+		textureRef.role !== entry.role ||
+		textureRef.sampleClass !== entry.sampleClass ||
+		textureRef.indexedFormat !== entry.indexedFormat ||
+		textureRef.width !== entry.rect[2] ||
+		textureRef.height !== entry.rect[3] ||
+		textureRef.samplingDomain !== entry.samplingDomain ||
+		textureRef.lookup !== entry.lookup
+	) {
+		throw new Error(
+			`Static bundle material ${materialRecordKey} texture ref ${virtualRefKey} is incompatible with source placement ${entry.sourcePlacementKey}.`,
+		);
+	}
 }
 
 function createWebgl2StaticBundleGeometryResource({

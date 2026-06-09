@@ -260,6 +260,21 @@ describe("static bundle layer WebGL2 resources", () => {
 					isTransparent: false,
 				},
 			],
+			texturePageRefs: [
+				{
+					key: "index-ref",
+					sourceAssetId: "surface",
+					role: "indexed-texels",
+					sampleClass: "indexed-data",
+					indexedFormat: "p8",
+					width: 4,
+					height: 1,
+					wrapS: "clamp",
+					wrapT: "clamp",
+					samplingDomain: "data",
+					lookup: "exact",
+				},
+			],
 			texturePages: [
 				{
 					key: "index-page",
@@ -273,9 +288,16 @@ describe("static bundle layer WebGL2 resources", () => {
 					bytes: new Uint8Array([0, 1, 2, 3]),
 					entries: [
 						{
+							sourcePlacementKey: "source-placement:index",
 							virtualRefKey: "index-ref",
+							virtualRefKeys: ["index-ref"],
 							sourceAssetId: "surface",
-							rect: [0, 0, 1, 1],
+							role: "indexed-texels",
+							sampleClass: "indexed-data",
+							indexedFormat: "p8",
+							samplingDomain: "data",
+							lookup: "exact",
+							rect: [0, 0, 4, 1],
 						},
 					],
 				},
@@ -306,6 +328,166 @@ describe("static bundle layer WebGL2 resources", () => {
 			pname: gl.TEXTURE_MAG_FILTER,
 			param: gl.NEAREST,
 		});
+	});
+
+	it("resolves clamp and repeat virtual aliases to one source placement binding", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2StaticBundleLayerResourceStore();
+		const layer = createLayer({
+			materialRecords: [
+				createTextureMaterialRecord({
+					key: "material:clamp",
+					texturePageRefKeys: ["base-ref:clamp"],
+				}),
+				createTextureMaterialRecord({
+					key: "material:repeat",
+					texturePageRefKeys: ["base-ref:repeat"],
+				}),
+			],
+			texturePageRefs: [
+				{
+					key: "base-ref:clamp",
+					sourceAssetId: "base-surface",
+					role: "base-color",
+					sampleClass: "rgba-color",
+					width: 2,
+					height: 1,
+					wrapS: "clamp",
+					wrapT: "clamp",
+					samplingDomain: "color",
+					lookup: "color-filtered",
+				},
+				{
+					key: "base-ref:repeat",
+					sourceAssetId: "base-surface",
+					role: "base-color",
+					sampleClass: "rgba-color",
+					width: 2,
+					height: 1,
+					wrapS: "repeat",
+					wrapT: "repeat",
+					samplingDomain: "color",
+					lookup: "color-filtered",
+				},
+			],
+			texturePages: [
+				{
+					key: "base-page",
+					scopeKey: "scope",
+					pageKind: "packed-atlas",
+					bucket: "static-base-color",
+					sampleClass: "rgba-color",
+					width: 2,
+					height: 1,
+					bytes: new Uint8Array(8),
+					entries: [
+						{
+							sourcePlacementKey: "source-placement:base",
+							virtualRefKey: "base-ref:clamp",
+							virtualRefKeys: ["base-ref:clamp", "base-ref:repeat"],
+							sourceAssetId: "base-surface",
+							role: "base-color",
+							sampleClass: "rgba-color",
+							samplingDomain: "color",
+							lookup: "color-filtered",
+							rect: [0, 0, 2, 1],
+						},
+					],
+				},
+			],
+		});
+
+		commitStaticBundleTestProductResources({
+			gl: gl.asContext(),
+			store,
+			layers: [layer],
+		});
+
+		const resource = [...store.layersByKey.values()][0];
+		expect(resource?.texturePages[0]?.entries[0]?.virtualRefKeys).toEqual([
+			"base-ref:clamp",
+			"base-ref:repeat",
+		]);
+		expect(
+			resource?.materialRecords.map((record) => record.textureBindings[0]),
+		).toEqual([
+			expect.objectContaining({
+				virtualRefKey: "base-ref:clamp",
+				texturePageKey: "base-page",
+				rect: [0, 0, 2, 1],
+				wrapS: "clamp",
+				wrapT: "clamp",
+			}),
+			expect.objectContaining({
+				virtualRefKey: "base-ref:repeat",
+				texturePageKey: "base-page",
+				rect: [0, 0, 2, 1],
+				wrapS: "repeat",
+				wrapT: "repeat",
+			}),
+		]);
+	});
+
+	it("rejects aliases whose requesting ref is incompatible with the source placement", () => {
+		const gl = new FakeWebgl2();
+		const store = createWebgl2StaticBundleLayerResourceStore();
+		const layer = createLayer({
+			materialRecords: [
+				createTextureMaterialRecord({
+					key: "material",
+					texturePageRefKeys: ["base-ref"],
+				}),
+			],
+			texturePageRefs: [
+				{
+					key: "base-ref",
+					sourceAssetId: "other-surface",
+					role: "base-color",
+					sampleClass: "rgba-color",
+					width: 2,
+					height: 1,
+					wrapS: "clamp",
+					wrapT: "clamp",
+					samplingDomain: "color",
+					lookup: "color-filtered",
+				},
+			],
+			texturePages: [
+				{
+					key: "base-page",
+					scopeKey: "scope",
+					pageKind: "packed-atlas",
+					bucket: "static-base-color",
+					sampleClass: "rgba-color",
+					width: 2,
+					height: 1,
+					bytes: new Uint8Array(8),
+					entries: [
+						{
+							sourcePlacementKey: "source-placement:base",
+							virtualRefKey: "base-ref",
+							virtualRefKeys: ["base-ref"],
+							sourceAssetId: "base-surface",
+							role: "base-color",
+							sampleClass: "rgba-color",
+							samplingDomain: "color",
+							lookup: "color-filtered",
+							rect: [0, 0, 2, 1],
+						},
+					],
+				},
+			],
+		});
+
+		expect(() =>
+			commitStaticBundleTestProductResources({
+				gl: gl.asContext(),
+				store,
+				layers: [layer],
+			}),
+		).toThrow(
+			"Static bundle material material texture ref base-ref is incompatible with source placement source-placement:base.",
+		);
 	});
 
 	it("releases all resident layer resources on destroy", () => {
@@ -358,9 +540,16 @@ describe("static bundle layer WebGL2 resources", () => {
 					bytes: new Uint8Array([0, 0, 1, 0, 0, 1, 1, 1]),
 					entries: [
 						{
+							sourcePlacementKey: "source-placement:index16",
 							virtualRefKey: "index16-ref",
+							virtualRefKeys: ["index16-ref"],
 							sourceAssetId: "surface",
-							rect: [0, 0, 1, 1],
+							role: "indexed-texels",
+							sampleClass: "indexed-data",
+							indexedFormat: "index16",
+							samplingDomain: "data",
+							lookup: "exact",
+							rect: [0, 0, 2, 2],
 						},
 					],
 				},
@@ -478,6 +667,29 @@ function commitStaticBundleTestProductResources({
 	});
 }
 
+function createTextureMaterialRecord({
+	key,
+	texturePageRefKeys,
+}: {
+	key: string;
+	texturePageRefKeys: readonly string[];
+}): StaticObjectBundleArtifact["materialRecords"][number] {
+	return {
+		key,
+		familyKey: "static:textured-opaque:alpha=opaque",
+		family: createStaticMaterialFamilyDescriptor({
+			family: "textured-opaque",
+			alphaPolicy: "opaque",
+		}),
+		color: [1, 1, 1, 1],
+		texturePageRefKeys,
+		detailOverlay: null,
+		detailTextureRefKey: null,
+		detailTiling: 1,
+		isTransparent: false,
+	};
+}
+
 function createLayer(
 	overrides: Partial<StaticObjectBundleArtifact> = {},
 ): StaticObjectBundleArtifact {
@@ -563,7 +775,7 @@ function createLayer(
 				role: "indexed-texels",
 				sampleClass: "indexed-data",
 				indexedFormat: "p8",
-				width: 4,
+				width: 2,
 				height: 1,
 				wrapS: "clamp",
 				wrapT: "clamp",
@@ -596,8 +808,14 @@ function createLayer(
 				bytes: new Uint8Array(8),
 				entries: [
 					{
+						sourcePlacementKey: "source-placement:base",
 						virtualRefKey: "base-ref",
+						virtualRefKeys: ["base-ref"],
 						sourceAssetId: "base-surface",
+						role: "base-color",
+						sampleClass: "rgba-color",
+						samplingDomain: "color",
+						lookup: "color-filtered",
 						rect: [0, 0, 2, 1],
 					},
 				],
@@ -614,8 +832,15 @@ function createLayer(
 				bytes: new Uint8Array(4),
 				entries: [
 					{
+						sourcePlacementKey: "source-placement:index",
 						virtualRefKey: "index-ref",
+						virtualRefKeys: ["index-ref"],
 						sourceAssetId: "index-surface",
+						role: "indexed-texels",
+						sampleClass: "indexed-data",
+						indexedFormat: "p8",
+						samplingDomain: "data",
+						lookup: "exact",
 						rect: [1, 0, 2, 1],
 					},
 				],

@@ -81,6 +81,7 @@ export interface RenderResourceInspectionTexturePage {
 	readonly width: number;
 	readonly height: number;
 	readonly entryCount: number;
+	readonly virtualAliasCount: number;
 	readonly coveredPixelCount: number;
 	readonly coverageRatio: number;
 	readonly samplerPolicyKey: Webgl2TexturePageSamplerPolicyKey;
@@ -94,7 +95,9 @@ export interface RenderResourceTexturePageIdentity {
 }
 
 export interface RenderResourceTexturePreviewEntry {
+	readonly sourcePlacementKey: string;
 	readonly virtualRefKey: string;
+	readonly virtualRefKeys: readonly string[];
 	readonly sourceAssetId: string;
 	readonly rect: readonly [number, number, number, number];
 }
@@ -404,6 +407,7 @@ interface InspectableTexturePageResource {
 		readonly height: number;
 	};
 	readonly entries: readonly {
+		readonly virtualRefKeys?: readonly string[];
 		readonly rect: readonly [number, number, number, number];
 	}[];
 	readonly samplerPolicyKey: Webgl2TexturePageSamplerPolicyKey;
@@ -430,11 +434,21 @@ function describeTexturePageResource(
 		width: page.texture.width,
 		height: page.texture.height,
 		entryCount: page.entries.length,
+		virtualAliasCount: calculateTexturePageVirtualAliasCount(page.entries),
 		coveredPixelCount: coverage.coveredPixelCount,
 		coverageRatio: coverage.coverageRatio,
 		samplerPolicyKey: page.samplerPolicyKey,
 		mipmapsGenerated: page.mipmapsGenerated,
 	};
+}
+
+function calculateTexturePageVirtualAliasCount(
+	entries: readonly { readonly virtualRefKeys?: readonly string[] }[],
+): number {
+	return entries.reduce(
+		(count, entry) => count + (entry.virtualRefKeys?.length ?? 1),
+		0,
+	);
 }
 
 export function calculateTexturePageCoverage({

@@ -4,6 +4,7 @@ import type { VirtualTexturePageRef } from "./static-bundle-layer";
 import {
 	buildStaticBundleLayerTexturePages,
 	createStaticBundleTexturePageDescriptor,
+	describeStaticBundleSourceTexturePagePlacementKey,
 } from "./static-bundle-layer-texture-pages";
 
 describe("static bundle layer texture pages", () => {
@@ -99,10 +100,147 @@ describe("static bundle layer texture pages", () => {
 					"control-filtered",
 				),
 			).sampling,
-		).toMatchObject({
+			).toMatchObject({
 			samplingDomain: "control",
 			lookup: "control-filtered",
 		});
+	});
+
+	it("packs same-source material refs once and preserves virtual aliases", () => {
+		const sourceAssetId = "prepared-texture/060003a1";
+		const pages = buildStaticBundleLayerTexturePages({
+			scopeKey: "landblock:da55ffff:outdoor-buildings",
+			texturePageRefs: [
+				createRef("texture:material:a:prepared-texture/060003a1", "base-color", "rgba-color", 2, 2, "color", "color-filtered", {
+					sourceAssetId,
+					bytes: new Uint8Array(16).fill(7),
+				}),
+				createRef("texture:material:b:prepared-texture/060003a1", "base-color", "rgba-color", 2, 2, "color", "color-filtered", {
+					sourceAssetId,
+					bytes: new Uint8Array(16).fill(7),
+				}),
+			],
+			policy: {
+				maxTextureSize: 8,
+				maxTextureCount: 1,
+				gutterPixels: 0,
+			},
+		});
+
+		expect(pages).toHaveLength(1);
+		expect(pages[0]?.entries).toHaveLength(1);
+		expect(pages[0]?.entries[0]?.virtualRefKeys).toEqual([
+			"texture:material:a:prepared-texture/060003a1",
+			"texture:material:b:prepared-texture/060003a1",
+		]);
+		expect(pages[0]?.entries[0]?.sourcePlacementKey).toBe(
+			describeStaticBundleSourceTexturePagePlacementKey(
+				createRef("canonical", "base-color", "rgba-color", 2, 2, "color", "color-filtered", {
+					sourceAssetId,
+					bytes: new Uint8Array(16).fill(7),
+				}),
+			),
+		);
+	});
+
+	it("aliases clamp and repeat refs for the same source placement", () => {
+		const sourceAssetId = "prepared-texture/060003a1";
+		const pages = buildStaticBundleLayerTexturePages({
+			scopeKey: "landblock:da55ffff:outdoor-buildings",
+			texturePageRefs: [
+				createRef("texture:material:a:variant:sampler=clamp", "base-color", "rgba-color", 2, 2, "color", "color-filtered", {
+					sourceAssetId,
+					wrapS: "clamp",
+					wrapT: "clamp",
+				}),
+				createRef("texture:material:a:variant:sampler=repeat", "base-color", "rgba-color", 2, 2, "color", "color-filtered", {
+					sourceAssetId,
+					wrapS: "repeat",
+					wrapT: "repeat",
+				}),
+			],
+			policy: {
+				maxTextureSize: 8,
+				maxTextureCount: 1,
+				gutterPixels: 0,
+			},
+		});
+
+		expect(pages).toHaveLength(1);
+		expect(pages[0]?.entries).toHaveLength(1);
+		expect(pages[0]?.entries[0]?.virtualRefKeys).toEqual([
+			"texture:material:a:variant:sampler=clamp",
+			"texture:material:a:variant:sampler=repeat",
+		]);
+	});
+
+	it("keeps different lookup and sample domains in separate placements", () => {
+		const sourceAssetId = "prepared-texture/060003a1";
+		const pages = buildStaticBundleLayerTexturePages({
+			scopeKey: "landblock:da55ffff:outdoor-buildings",
+			texturePageRefs: [
+				createRef("color", "base-color", "rgba-color", 1, 1, "color", "color-filtered", {
+					sourceAssetId,
+				}),
+				createRef("data", "base-color", "rgba-color", 1, 1, "data", "exact", {
+					sourceAssetId,
+				}),
+			],
+			policy: {
+				maxTextureSize: 8,
+				maxTextureCount: 1,
+				gutterPixels: 0,
+			},
+		});
+
+		expect(pages).toHaveLength(1);
+		expect(pages[0]?.entries).toHaveLength(2);
+		expect(pages[0]?.entries.map((entry) => entry.virtualRefKey)).toEqual([
+			"color",
+			"data",
+		]);
+	});
+
+	it("aliases indexed refs only when format and payload identity match", () => {
+		const sourceAssetId = "prepared-texture/060003a1";
+		const pages = buildStaticBundleLayerTexturePages({
+			scopeKey: "landblock:da55ffff:outdoor-detail",
+			texturePageRefs: [
+				createRef("p8-a", "indexed-texels", "indexed-data", 2, 1, "data", "exact", {
+					sourceAssetId,
+					indexedFormat: "p8",
+					bytes: new Uint8Array([1, 2]),
+				}),
+				createRef("p8-b", "indexed-texels", "indexed-data", 2, 1, "data", "exact", {
+					sourceAssetId,
+					indexedFormat: "p8",
+					bytes: new Uint8Array([1, 2]),
+				}),
+				createRef("p8-c", "indexed-texels", "indexed-data", 2, 1, "data", "exact", {
+					sourceAssetId,
+					indexedFormat: "p8",
+					bytes: new Uint8Array([2, 1]),
+				}),
+				createRef("index16", "indexed-texels", "indexed-data", 2, 1, "data", "exact", {
+					sourceAssetId,
+					indexedFormat: "index16",
+					bytes: new Uint8Array([1, 0, 2, 0]),
+				}),
+			],
+			policy: {
+				maxTextureSize: 8,
+				maxTextureCount: 1,
+				gutterPixels: 0,
+			},
+		});
+
+		expect(pages).toHaveLength(2);
+		const p8Page = pages.find((page) => page.indexedFormat === "p8");
+		expect(p8Page?.entries).toHaveLength(2);
+		expect(
+			p8Page?.entries.find((entry) => entry.virtualRefKeys.includes("p8-a"))
+				?.virtualRefKeys,
+		).toEqual(["p8-a", "p8-b"]);
 	});
 });
 
@@ -114,18 +252,26 @@ function createRef(
 	height: number,
 	samplingDomain: VirtualTexturePageRef["samplingDomain"] = "color",
 	lookup: VirtualTexturePageRef["lookup"] = "color-filtered",
+	options: {
+		sourceAssetId?: string;
+		wrapS?: VirtualTexturePageRef["wrapS"];
+		wrapT?: VirtualTexturePageRef["wrapT"];
+		indexedFormat?: VirtualTexturePageRef["indexedFormat"];
+		bytes?: Uint8Array;
+	} = {},
 ): VirtualTexturePageRef {
 	return {
 		key,
-		sourceAssetId: `prepared-texture/${key}`,
+		sourceAssetId: options.sourceAssetId ?? `prepared-texture/${key}`,
 		role,
 		sampleClass,
+		indexedFormat: options.indexedFormat,
 		width,
 		height,
-		wrapS: "clamp",
-		wrapT: "clamp",
+		wrapS: options.wrapS ?? "clamp",
+		wrapT: options.wrapT ?? "clamp",
 		samplingDomain,
 		lookup,
-		bytes: new Uint8Array(width * height * 4).fill(255),
+		bytes: options.bytes ?? new Uint8Array(width * height * 4).fill(255),
 	};
 }

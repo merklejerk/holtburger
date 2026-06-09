@@ -59,7 +59,9 @@ describe("webgl2 texture page upload", () => {
 			mipmapsGenerated: true,
 			entries: [
 				{
+					sourcePlacementKey: "entry-a",
 					virtualRefKey: "entry-a",
+					virtualRefKeys: ["entry-a"],
 					sourceAssetId: "prepared-texture/entry-a",
 					rect: [1, 1, 2, 2],
 				},
@@ -77,7 +79,9 @@ describe("webgl2 texture page upload", () => {
 		]);
 		expect(pageSet?.textures[0]?.entries).toEqual([
 			{
+				sourcePlacementKey: "entry-a",
 				virtualRefKey: "entry-a",
+				virtualRefKeys: ["entry-a"],
 				sourceAssetId: "prepared-texture/entry-a",
 				rect: [1, 1, 2, 2],
 			},
@@ -94,7 +98,9 @@ describe("webgl2 texture page upload", () => {
 		]);
 		expect(pageSet?.detailTextures[0]?.entries).toEqual([
 			{
+				sourcePlacementKey: "detail-a",
 				virtualRefKey: "detail-a",
+				virtualRefKeys: ["detail-a"],
 				sourceAssetId: "detail-a",
 				rect: [1, 1, 2, 2],
 			},

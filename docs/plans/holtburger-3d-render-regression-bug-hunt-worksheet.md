@@ -1445,6 +1445,8 @@ Out of scope:
 
 ### Phase 15A: Define Source Placement Identity
 
+Status: completed.
+
 Deliverables:
 
 - Add a source-placement identity helper for `VirtualTexturePageRef`.
@@ -1465,7 +1467,14 @@ Acceptance criteria:
 - Same prepared texture referenced by clamp and repeat variants resolves to one source placement candidate.
 - Different sample class, role, indexed format, sampling domain, lookup, size, or source payload stays separate.
 
+Implementation notes:
+
+- Added `describeStaticBundleSourceTexturePagePlacementKey()` in the static bundle texture page builder. The key includes source asset, role, sample class, indexed format, size, sampling domain, lookup policy, and explicit byte identity when CPU bytes are present.
+- Wrap mode remains excluded from source placement identity because it is binding-local submit state.
+
 ### Phase 15B: Pack Source Placements, Preserve Virtual Aliases
+
+Status: completed.
 
 Deliverables:
 
@@ -1481,7 +1490,14 @@ Acceptance criteria:
 - Existing atlas overflow behavior is unchanged except aliases are preserved.
 - Packed atlas bytes are copied once per source placement.
 
+Implementation notes:
+
+- `buildStaticBundleLayerTexturePages()` now groups virtual refs by source placement before atlas layout. Packed and single-entry pages store one source placement entry with `virtualRefKeys`.
+- `virtualRefKey` is retained as a canonical display key only; atlas placement identity is `sourcePlacementKey`.
+
 ### Phase 15C: Resolve Material Bindings Through Aliases
+
+Status: completed.
 
 Deliverables:
 
@@ -1496,7 +1512,14 @@ Acceptance criteria:
 - Detail overlays resolve by their exact `detailTextureRefKey` even when their source placement is shared.
 - Static and structured-interior resource construction tests cover alias lookup failures and success cases.
 
+Implementation notes:
+
+- Static bundle WebGL resources now index every virtual alias to its owning page and resolve bindings by alias membership.
+- Binding-local metadata comes from the requesting `VirtualTexturePageRef`, while page rect/source placement metadata is validated against the resident entry.
+
 ### Phase 15D: Generalize Resident Entry Metadata At Contact Points
+
+Status: completed.
 
 Deliverables:
 
@@ -1511,7 +1534,14 @@ Acceptance criteria:
 - Terrain texture previews and existing terrain submit bindings continue to work.
 - No UI behavior depends on opaque WebGL handles.
 
+Implementation notes:
+
+- Shared resident texture page entries now expose `sourcePlacementKey`, canonical `virtualRefKey`, and `virtualRefKeys`; terrain/detail page uploads use single-alias entries.
+- Resource inspection reports `entryCount` as source placement count and `virtualAliasCount` separately. Texture previews show placement versus alias count.
+
 ### Phase 15E: Verification And Cleanup
+
+Status: completed.
 
 Deliverables:
 
@@ -1531,6 +1561,13 @@ Acceptance criteria:
 - `npm run --prefix apps/holtburger-3d test:ts` passes.
 - `npm run --prefix apps/holtburger-3d lint:ts` passes.
 - `npm run --prefix apps/holtburger-3d check` passes.
+
+Verification notes:
+
+- Targeted tests passed for static texture page packing, static bundle WebGL resources, and render resource inspection.
+- Full TypeScript test suite passed: 92 files, 490 tests.
+- `lint:ts` and `check` passed with zero reported errors.
+- Structured-interior resource construction was updated during verification because it shares the static bundle material binding/resource model.
 
 ### Risks And Mitigations
 
@@ -1598,4 +1635,5 @@ Acceptance criteria:
 - Resource inspector duplicate-row investigation: structured-interior texture pages and material records are product-level WebGL resources, but each `Webgl2StructuredInteriorCellResource` stores references to the shared product arrays for lookup convenience. The inspector currently flattens `cell.texturePages` and `cell.materialRecords`, so it repeats the same resident page/material once per cell. Those repeated structured-interior rows are snapshot/view duplication, not unique `gl.createTexture()` allocations. Static bundle layers are different: each layer resource creates its own texture pages during commit, so repeated-looking static rows can represent real layer-local allocations and still need separate size/closure analysis.
 - Fixed the Resource inspector allocation-domain mismatch: structured-interior texture and material rows now come from `structuredInteriorResources.productsByKey`, while structured cells remain cell/geometry rows with reference counts. Material usage accounting now keys by owner kind, allocation-owner key, and material key instead of material key alone, so same-named material records from different owners do not merge usage counts. Texture/material/geometry rows now display their owner key in the panel, making the allocation domain visible without exposing opaque WebGL handles.
 - Follow-up atlas duplication dry-run: static bundle texture page layout currently keys placements by `VirtualTexturePageRef.key`, which is material-facing and includes material record/sampler variant identity. That can pack identical prepared texture pixels multiple times in the same atlas. The planned structural fix is Phase 15: source-placement entries with virtual ref aliases, so material bindings remain variant-specific while pixel atlas placements dedupe by source identity.
+- Phase 15 implementation completed: static and structured-interior texture pages now pack by source placement identity and expose virtual aliases. Material bindings resolve through alias membership while keeping wrap mode on the requesting virtual ref, and inspector previews now report source placement count separately from alias count.
 - Remaining suspected issues: static bundle payloads are too large, static bundle asset closure is too broad, and `setAssetState` still triggers costly static product recommits.

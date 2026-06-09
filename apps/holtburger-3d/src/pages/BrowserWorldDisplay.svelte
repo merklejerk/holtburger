@@ -2506,7 +2506,13 @@
 							</div>
 							<div>
 								<dt>Entries</dt>
-								<dd>{texturePreview.entries.length}</dd>
+								<dd>
+									{texturePreview.entries.length} placements;
+									{texturePreview.entries.reduce(
+										(count, entry) => count + entry.virtualRefKeys.length,
+										0,
+									)} aliases
+								</dd>
 							</div>
 							<div>
 								<dt>Efficiency</dt>
@@ -2524,7 +2530,8 @@
 											)}
 										</dt>
 										<dd>
-											{entry.sourceAssetId}; rect [{entry.rect.join(", ")}]
+											{entry.sourceAssetId}; aliases {entry.virtualRefKeys.length};
+											rect [{entry.rect.join(", ")}]
 										</dd>
 									</div>
 								{/each}

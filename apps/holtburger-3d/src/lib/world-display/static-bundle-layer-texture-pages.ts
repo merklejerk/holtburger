@@ -11,6 +11,19 @@ import {
 	type TexturePageDescriptor,
 } from "./texture-pages/texture-page-binding";
 
+interface StaticBundleSourceTexturePagePlacement {
+	key: string;
+	sourceAssetId: string;
+	role: VirtualTexturePageRef["role"];
+	sampleClass: VirtualTexturePageRef["sampleClass"];
+	indexedFormat: VirtualTexturePageRef["indexedFormat"];
+	width: number;
+	height: number;
+	samplingDomain: VirtualTexturePageRef["samplingDomain"];
+	lookup: VirtualTexturePageRef["lookup"];
+	refs: readonly VirtualTexturePageRef[];
+}
+
 export function buildStaticBundleLayerTexturePages(options: {
 	scopeKey: string;
 	texturePageRefs: readonly VirtualTexturePageRef[];
@@ -19,42 +32,47 @@ export function buildStaticBundleLayerTexturePages(options: {
 	const refsByBucket = groupTextureRefsByBucket(options.texturePageRefs);
 	const pages: StaticBundleTexturePage[] = [];
 	for (const refs of refsByBucket.values()) {
-		if (refs.length === 1) {
-			const ref = refs[0];
-			if (ref) {
-				pages.push(createSingleEntryTexturePage(options.scopeKey, ref));
+		const sourcePlacements = groupTextureRefsBySourcePlacement(refs);
+		if (sourcePlacements.length === 1) {
+			const sourcePlacement = sourcePlacements[0];
+			if (sourcePlacement) {
+				pages.push(
+					createSingleEntryTexturePage(options.scopeKey, sourcePlacement),
+				);
 			}
 			continue;
 		}
 		const layout = planAtlasLayout({
-			entries: refs.map((ref) => ({
-				key: ref.key,
-				width: ref.width,
-				height: ref.height,
+			entries: sourcePlacements.map((sourcePlacement) => ({
+				key: sourcePlacement.key,
+				width: sourcePlacement.width,
+				height: sourcePlacement.height,
 			})),
 			policy: options.policy,
 		});
 		for (const texturePage of layout.texturePages) {
 			const placements = texturePage.placements
 				.map((placement) => {
-					const ref = refs.find(
+					const sourcePlacement = sourcePlacements.find(
 						(candidate) => candidate.key === placement.atlasEntryKey,
 					);
-					if (!ref) {
+					if (!sourcePlacement) {
 						throw new Error(
-							`Texture page placement references missing ref ${placement.atlasEntryKey}.`,
+							`Texture page placement references missing source placement ${placement.atlasEntryKey}.`,
 						);
 					}
-					return { placement, ref };
+					return { placement, sourcePlacement };
 				})
-				.sort((left, right) => left.ref.key.localeCompare(right.ref.key));
-			const sampleClass = placements[0]?.ref.sampleClass;
-			const indexedFormat = placements[0]?.ref.indexedFormat;
+				.sort((left, right) =>
+					left.sourcePlacement.key.localeCompare(right.sourcePlacement.key),
+				);
+			const sampleClass = placements[0]?.sourcePlacement.sampleClass;
+			const indexedFormat = placements[0]?.sourcePlacement.indexedFormat;
 			if (!sampleClass) {
 				continue;
 			}
 			const pageBucket = resolveStaticTexturePageBucketForRefs(
-				placements.map(({ ref }) => ref),
+				placements.map(({ sourcePlacement }) => sourcePlacement.refs[0]),
 			);
 			pages.push({
 				key: `${options.scopeKey}:page:${pageBucket}:${texturePage.textureIndex}`,
@@ -70,16 +88,16 @@ export function buildStaticBundleLayerTexturePages(options: {
 					texturePage.height,
 					placements,
 				),
-				entries: placements.map(({ placement, ref }) => ({
-					virtualRefKey: ref.key,
-					sourceAssetId: ref.sourceAssetId,
-					role: ref.role,
-					sampleClass: ref.sampleClass,
-					indexedFormat: ref.indexedFormat,
-					wrapS: ref.wrapS,
-					wrapT: ref.wrapT,
-					samplingDomain: ref.samplingDomain,
-					lookup: ref.lookup,
+				entries: placements.map(({ placement, sourcePlacement }) => ({
+					sourcePlacementKey: sourcePlacement.key,
+					virtualRefKey: sourcePlacement.refs[0]?.key ?? sourcePlacement.key,
+					virtualRefKeys: sourcePlacement.refs.map((ref) => ref.key),
+					sourceAssetId: sourcePlacement.sourceAssetId,
+					role: sourcePlacement.role,
+					sampleClass: sourcePlacement.sampleClass,
+					indexedFormat: sourcePlacement.indexedFormat,
+					samplingDomain: sourcePlacement.samplingDomain,
+					lookup: sourcePlacement.lookup,
 					rect: [
 						placement.x,
 						placement.y,
@@ -90,15 +108,32 @@ export function buildStaticBundleLayerTexturePages(options: {
 			});
 		}
 		for (const overflow of layout.overflows) {
-			const ref = refs.find(
+			const sourcePlacement = sourcePlacements.find(
 				(candidate) => candidate.key === overflow.atlasEntryKey,
 			);
-			if (ref) {
-				pages.push(createSingleEntryTexturePage(options.scopeKey, ref));
+			if (sourcePlacement) {
+				pages.push(
+					createSingleEntryTexturePage(options.scopeKey, sourcePlacement),
+				);
 			}
 		}
 	}
 	return pages.sort((left, right) => left.key.localeCompare(right.key));
+}
+
+export function describeStaticBundleSourceTexturePagePlacementKey(
+	ref: VirtualTexturePageRef,
+): string {
+	return [
+		`source:${ref.sourceAssetId}`,
+		`role:${ref.role}`,
+		`sample:${ref.sampleClass}`,
+		`indexed:${ref.indexedFormat ?? "none"}`,
+		`size:${ref.width}x${ref.height}`,
+		`domain:${ref.samplingDomain}`,
+		`lookup:${ref.lookup}`,
+		`bytes:${describeTextureRefByteIdentity(ref)}`,
+	].join(";");
 }
 
 export function createStaticBundleTexturePageDescriptor(
@@ -149,12 +184,87 @@ function groupTextureRefsByBucket(
 	return refsByBucket;
 }
 
+function groupTextureRefsBySourcePlacement(
+	refs: readonly VirtualTexturePageRef[],
+): StaticBundleSourceTexturePagePlacement[] {
+	const refsBySourcePlacement = new Map<string, VirtualTexturePageRef[]>();
+	for (const ref of refs) {
+		const sourcePlacementKey =
+			describeStaticBundleSourceTexturePagePlacementKey(ref);
+		const sourceRefs = refsBySourcePlacement.get(sourcePlacementKey);
+		if (sourceRefs) {
+			sourceRefs.push(ref);
+		} else {
+			refsBySourcePlacement.set(sourcePlacementKey, [ref]);
+		}
+	}
+	return [...refsBySourcePlacement.entries()]
+		.map(([key, sourceRefs]) => createSourcePlacement(key, sourceRefs))
+		.sort((left, right) => left.key.localeCompare(right.key));
+}
+
+function createSourcePlacement(
+	key: string,
+	refs: readonly VirtualTexturePageRef[],
+): StaticBundleSourceTexturePagePlacement {
+	const [firstRef] = refs;
+	if (!firstRef) {
+		throw new Error(`Texture page source placement ${key} has no refs.`);
+	}
+	validateSourcePlacementRefs(key, refs);
+	return {
+		key,
+		sourceAssetId: firstRef.sourceAssetId,
+		role: firstRef.role,
+		sampleClass: firstRef.sampleClass,
+		indexedFormat: firstRef.indexedFormat,
+		width: firstRef.width,
+		height: firstRef.height,
+		samplingDomain: firstRef.samplingDomain,
+		lookup: firstRef.lookup,
+		refs: [...refs].sort((left, right) => left.key.localeCompare(right.key)),
+	};
+}
+
+function validateSourcePlacementRefs(
+	sourcePlacementKey: string,
+	refs: readonly VirtualTexturePageRef[],
+): void {
+	const [firstRef] = refs;
+	if (!firstRef) {
+		throw new Error(`Texture page source placement ${sourcePlacementKey} has no refs.`);
+	}
+	for (const ref of refs) {
+		if (
+			ref.sourceAssetId !== firstRef.sourceAssetId ||
+			ref.role !== firstRef.role ||
+			ref.sampleClass !== firstRef.sampleClass ||
+			ref.indexedFormat !== firstRef.indexedFormat ||
+			ref.width !== firstRef.width ||
+			ref.height !== firstRef.height ||
+			ref.samplingDomain !== firstRef.samplingDomain ||
+			ref.lookup !== firstRef.lookup ||
+			describeTextureRefByteIdentity(ref) !== describeTextureRefByteIdentity(firstRef)
+		) {
+			throw new Error(
+				`Texture page source placement ${sourcePlacementKey} contains incompatible refs.`,
+			);
+		}
+	}
+}
+
 function createSingleEntryTexturePage(
 	scopeKey: string,
-	ref: VirtualTexturePageRef,
+	sourcePlacement: StaticBundleSourceTexturePagePlacement,
 ): StaticBundleTexturePage {
+	const ref = sourcePlacement.refs[0];
+	if (!ref) {
+		throw new Error(
+			`Texture page source placement ${sourcePlacement.key} has no canonical ref.`,
+		);
+	}
 	return {
-		key: `${scopeKey}:page:single:${ref.key}`,
+		key: `${scopeKey}:page:single:${sourcePlacement.key}`,
 		scopeKey,
 		bucket: deriveStaticTexturePageBucket({
 			role: ref.role,
@@ -172,13 +282,13 @@ function createSingleEntryTexturePage(
 				),
 		entries: [
 			{
+				sourcePlacementKey: sourcePlacement.key,
 				virtualRefKey: ref.key,
+				virtualRefKeys: sourcePlacement.refs.map((alias) => alias.key),
 				sourceAssetId: ref.sourceAssetId,
 				role: ref.role,
 				sampleClass: ref.sampleClass,
 				indexedFormat: ref.indexedFormat,
-				wrapS: ref.wrapS,
-				wrapT: ref.wrapT,
 				samplingDomain: ref.samplingDomain,
 				lookup: ref.lookup,
 				rect: [0, 0, ref.width, ref.height],
@@ -213,14 +323,20 @@ function packAtlasBytes(
 	height: number,
 	placements: readonly {
 		placement: { x: number; y: number; width: number; height: number };
-		ref: VirtualTexturePageRef;
+		sourcePlacement: StaticBundleSourceTexturePagePlacement;
 	}[],
 ): Uint8Array {
 	const bytesPerPixel = resolveTextureRefBytesPerPixel(
-		placements.map(({ ref }) => ref),
+		placements.flatMap(({ sourcePlacement }) => sourcePlacement.refs),
 	);
 	const bytes = new Uint8Array(width * height * bytesPerPixel);
-	for (const { placement, ref } of placements) {
+	for (const { placement, sourcePlacement } of placements) {
+		const ref = sourcePlacement.refs[0];
+		if (!ref) {
+			throw new Error(
+				`Texture page source placement ${sourcePlacement.key} has no canonical ref.`,
+			);
+		}
 		if (!ref.bytes) {
 			continue;
 		}
@@ -238,6 +354,22 @@ function packAtlasBytes(
 		}
 	}
 	return bytes;
+}
+
+function describeTextureRefByteIdentity(ref: VirtualTexturePageRef): string {
+	if (!ref.bytes) {
+		return "none";
+	}
+	return `${ref.bytes.byteLength}:${hashBytesFNV1a(ref.bytes).toString(16)}`;
+}
+
+function hashBytesFNV1a(bytes: Uint8Array): number {
+	let hash = 0x811c9dc5;
+	for (const byte of bytes) {
+		hash ^= byte;
+		hash = Math.imul(hash, 0x01000193);
+	}
+	return hash >>> 0;
 }
 
 function resolveTextureRefBytesPerPixel(

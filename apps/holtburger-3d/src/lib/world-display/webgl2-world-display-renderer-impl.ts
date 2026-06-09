@@ -2436,7 +2436,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			coverageRatio: coverage.coverageRatio,
 			pixels: readTexturePagePreviewPixels(resources, page),
 			entries: page.entries.map((entry) => ({
+				sourcePlacementKey: entry.sourcePlacementKey,
 				virtualRefKey: entry.virtualRefKey,
+				virtualRefKeys: entry.virtualRefKeys,
 				sourceAssetId: entry.sourceAssetId,
 				rect: entry.rect,
 			})),

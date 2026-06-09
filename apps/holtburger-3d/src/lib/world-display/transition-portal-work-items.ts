@@ -1,5 +1,7 @@
-import { deriveStructuredInteriorCoverage } from "../assets/structured-interior-coverage";
-import type { AssetChannelState } from "../assets/types";
+import {
+	deriveStructuredInteriorCoverage,
+	deriveStructuredInteriorCoverageFromLookup,
+} from "../assets/structured-interior-coverage";
 import type { Vec3Dto } from "../host/contracts";
 import { normalizeOutdoorLandblockId } from "../landblocks";
 import {
@@ -18,6 +20,7 @@ import {
 import type { RenderChunkPlacement } from "./render-chunks";
 import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
+import type { RendererAssetReadModel } from "./renderer-asset-read-model";
 
 type TransitionPortalSource = "browser-free-camera" | "walkabout" | "runtime";
 
@@ -77,7 +80,7 @@ export interface TransitionPortalCandidateModel {
 }
 
 export interface TransitionPortalCandidateInput {
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	structuredInteriorScene: StructuredInteriorSceneModel;
 	activeLandblockIds: readonly number[];
 	source?: TransitionPortalSource;
@@ -100,7 +103,7 @@ export function createEmptyTransitionPortalCandidateModel(): TransitionPortalCan
 }
 
 export function deriveTransitionPortalCandidates({
-	assetState,
+	assetReadModel,
 	structuredInteriorScene,
 	activeLandblockIds,
 	source = "browser-free-camera",
@@ -132,7 +135,7 @@ export function deriveTransitionPortalCandidates({
 	let nextStencilRef = 1;
 
 	for (const portal of collectActiveOutdoorBuildingPortals(
-		assetState,
+		assetReadModel,
 		activeLandblockIdSet,
 	)) {
 		diagnostics.topologyPortalCount += 1;
@@ -151,7 +154,7 @@ export function deriveTransitionPortalCandidates({
 					portal,
 					stencilRef: nextStencilRef,
 					source,
-					assetState,
+					assetReadModel,
 					coverageBySeedKey,
 				});
 				if (candidate.kind === "skip") {
@@ -265,10 +268,10 @@ export function deriveTransitionPortalCandidatesFromLandblockArtifacts({
 }
 
 function collectActiveOutdoorBuildingPortals(
-	assetState: AssetChannelState,
+	assetReadModel: RendererAssetReadModel,
 	activeLandblockIds: ReadonlySet<number>,
 ): OutdoorBuildingPortalLink[] {
-	return Object.values(assetState.preparedByAssetId).flatMap((asset) => {
+	return [...assetReadModel.values()].flatMap((asset) => {
 		if (
 			asset.payload.kind !== "landblock-outdoor" ||
 			!activeLandblockIds.has(
@@ -510,14 +513,14 @@ function createTransitionPortalCandidate({
 	portal,
 	stencilRef,
 	source,
-	assetState,
+	assetReadModel,
 	coverageBySeedKey,
 }: {
 	aperture: PortalAperture;
 	portal: OutdoorBuildingPortalLink;
 	stencilRef: number;
 	source: TransitionPortalSource;
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	coverageBySeedKey: Map<
 		string,
 		ReturnType<typeof deriveStructuredInteriorCoverage>
@@ -546,12 +549,12 @@ function createTransitionPortalCandidate({
 	const seedKey = seedEnvCellIds.join(",");
 	let coverage = coverageBySeedKey.get(seedKey);
 	if (!coverage) {
-		coverage = deriveStructuredInteriorCoverage(
+		coverage = deriveStructuredInteriorCoverageFromLookup(
 			{
 				kind: "landblock-closure",
 				seedEnvCellIds,
 			},
-			assetState.preparedByAssetId,
+			assetReadModel,
 		);
 		coverageBySeedKey.set(seedKey, coverage);
 	}

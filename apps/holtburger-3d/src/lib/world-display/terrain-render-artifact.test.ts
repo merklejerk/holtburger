@@ -1,14 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
-	createInitialAssetChannelState,
 	formatAtlasReadyPreparedTextureAssetId,
-	type AssetChannelState,
 	type PreparedAssetPayload,
 	type PreparedAssetRecord,
 	type PreparedLandblockOutdoorPayload,
 } from "../assets/types";
 import { formatLandblockOutdoorAssetId } from "../landblocks";
+import { createTestPreparedAssetResolver } from "../../../test-support/prepared-asset-resolver";
 import { buildLandblockTerrainRenderArtifact } from "./terrain-render-artifact";
 
 describe("terrain render artifact", () => {
@@ -16,7 +15,7 @@ describe("terrain render artifact", () => {
 		const landblockId = 0xda55ffff;
 		const outdoor = createOutdoorPayload(landblockId);
 		const artifact = buildLandblockTerrainRenderArtifact({
-			assetState: createAssetState([
+			assetReadModel: createAssetReadModel([
 				createRecord(formatLandblockOutdoorAssetId(landblockId), outdoor),
 				createRecord("terrain-material/1", createTerrainMaterialPayload()),
 				createRecord(
@@ -71,7 +70,7 @@ describe("terrain render artifact", () => {
 		const landblockId = 0xda55ffff;
 		const outdoor = createOutdoorPayload(landblockId);
 		const artifact = buildLandblockTerrainRenderArtifact({
-			assetState: createAssetState([
+			assetReadModel: createAssetReadModel([
 				createRecord(formatLandblockOutdoorAssetId(landblockId), outdoor),
 			]),
 			outdoor,
@@ -100,12 +99,8 @@ function createPolicy() {
 	};
 }
 
-function createAssetState(records: PreparedAssetRecord[]): AssetChannelState {
-	const state = createInitialAssetChannelState();
-	state.preparedByAssetId = Object.fromEntries(
-		records.map((record) => [record.request.assetId, record]),
-	);
-	return state;
+function createAssetReadModel(records: PreparedAssetRecord[]) {
+	return createTestPreparedAssetResolver(records);
 }
 
 function createRecord(

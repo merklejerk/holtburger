@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { createInitialAssetChannelState } from "../assets/types";
 import type { SceneCameraFrame } from "./camera";
+import { createTestPreparedAssetResolver } from "../../../test-support/prepared-asset-resolver";
 import {
 	buildRenderFrustumFromProjectionMatrix,
 	buildWorldRenderFrame as buildWorldRenderFrameImpl,
@@ -20,7 +20,7 @@ import { createEmptyStructuredInteriorSceneModel } from "./structured-interior-s
 describe("buildWorldRenderFrame", () => {
 	it("culls keyed batches when no render BVH item is visible", () => {
 		const frame = buildWorldRenderFrameImpl({
-			assetState: createInitialAssetChannelState(),
+			assetReadModel: emptyAssetReadModel(),
 			candidates: [
 				createBatch({
 					id: "terrain/culled",
@@ -45,7 +45,7 @@ describe("buildWorldRenderFrame", () => {
 
 	it("keeps explicit unkeyed fallback resources visible and sorts draw categories", () => {
 		const frame = buildWorldRenderFrameImpl({
-			assetState: createInitialAssetChannelState(),
+			assetReadModel: emptyAssetReadModel(),
 			candidates: [
 				createBatch({
 					id: "static-bundle-layer/world|landblock/0203ffff|object-b",
@@ -148,7 +148,7 @@ function buildFrameWithFallbackCandidates(
 
 function buildTestWorldRenderFrame(candidates: readonly WorldRenderCandidate[]) {
 	return buildWorldRenderFrameImpl({
-		assetState: createInitialAssetChannelState(),
+		assetReadModel: emptyAssetReadModel(),
 		candidates,
 		cameraFrame: createCameraFrame(),
 		renderChunkTransforms: [],
@@ -158,6 +158,10 @@ function buildTestWorldRenderFrame(candidates: readonly WorldRenderCandidate[]) 
 		structuredInteriorScene: createEmptyStructuredInteriorSceneModel(),
 		terrainScene: createTerrainScene(),
 	});
+}
+
+function emptyAssetReadModel() {
+	return createTestPreparedAssetResolver([]);
 }
 
 function createTerrainScene(): TerrainSceneModel {

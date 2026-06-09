@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { createTestPreparedAssetResolver } from "../../../test-support/prepared-asset-resolver";
 import { parseBrowserLocationInput } from "../../app/browser-mode";
 import {
 	formatEnvCellAssetId,
@@ -16,7 +17,7 @@ describe("static bundle layer planner", () => {
 		const destination = parseBrowserLocationInput("da55", "manual", "outdoor");
 		expect(destination).not.toBeNull();
 
-		const preparedByAssetId = indexPreparedAssets([
+		const preparedAssets = createTestPreparedAssetResolver([
 			createPreparedOutdoorLandblock({
 				landblockId: 0xda55ffff,
 				regionNumber: 1,
@@ -49,7 +50,7 @@ describe("static bundle layer planner", () => {
 
 		const layers = planDesiredStaticBundleLayers({
 			browserDestination: destination,
-			preparedByAssetId,
+			preparedAssets,
 			options: {
 				terrainRadius: 0,
 				buildingRadius: 0,
@@ -99,7 +100,7 @@ describe("static bundle layer planner", () => {
 
 		const layers = planDesiredStaticBundleLayers({
 			browserDestination: destination,
-			preparedByAssetId: {},
+			preparedAssets: createTestPreparedAssetResolver(),
 			options: {
 				terrainRadius: 0,
 				buildingRadius: 0,
@@ -124,7 +125,7 @@ describe("static bundle layer planner", () => {
 		const destination = parseBrowserLocationInput("da55", "manual", "outdoor");
 		expect(destination).not.toBeNull();
 
-		const preparedByAssetId = indexPreparedAssets([
+		const preparedAssets = createTestPreparedAssetResolver([
 			createPreparedTopology(0xda55ffff, [0xda550155]),
 			createPreparedEnvCell(
 				0xda550155,
@@ -141,7 +142,7 @@ describe("static bundle layer planner", () => {
 
 		const layers = planDesiredStaticBundleLayers({
 			browserDestination: destination,
-			preparedByAssetId,
+			preparedAssets,
 			options: {
 				terrainRadius: 0,
 				buildingRadius: -1,
@@ -198,7 +199,7 @@ describe("static bundle layer planner", () => {
 
 		const first = planDesiredStaticBundleLayers({
 			browserDestination: destination,
-			preparedByAssetId: indexPreparedAssets(assets),
+			preparedAssets: createTestPreparedAssetResolver(assets),
 			options: {
 				terrainRadius: 0,
 				buildingRadius: -1,
@@ -208,7 +209,7 @@ describe("static bundle layer planner", () => {
 		});
 		const second = planDesiredStaticBundleLayers({
 			browserDestination: destination,
-			preparedByAssetId: indexPreparedAssets([...assets].reverse()),
+			preparedAssets: createTestPreparedAssetResolver([...assets].reverse()),
 			options: {
 				terrainRadius: 0,
 				buildingRadius: -1,
@@ -241,7 +242,7 @@ describe("static bundle layer planner", () => {
 
 		const withoutClosure = planDesiredStaticBundleLayers({
 			browserDestination: destination,
-			preparedByAssetId: indexPreparedAssets([root]),
+			preparedAssets: createTestPreparedAssetResolver([root]),
 			options: {
 				terrainRadius: 0,
 				buildingRadius: -1,
@@ -251,7 +252,7 @@ describe("static bundle layer planner", () => {
 		});
 		const withClosure = planDesiredStaticBundleLayers({
 			browserDestination: destination,
-			preparedByAssetId: indexPreparedAssets([
+			preparedAssets: createTestPreparedAssetResolver([
 				root,
 				createPreparedGfxObj("gfx-obj/01000020", ["material/08000020"]),
 				createPreparedMaterialRecipe("material/08000020", [
@@ -291,14 +292,6 @@ describe("static bundle layer planner", () => {
 		);
 	});
 });
-
-function indexPreparedAssets(
-	assets: readonly PreparedAssetRecord[],
-): Record<string, PreparedAssetRecord> {
-	return Object.fromEntries(
-		assets.map((asset) => [asset.request.assetId, asset]),
-	);
-}
 
 function createPreparedRecord(
 	assetId: string,

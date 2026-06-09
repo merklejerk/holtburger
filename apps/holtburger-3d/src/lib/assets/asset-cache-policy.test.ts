@@ -4,7 +4,7 @@ import {
 	planPreparedAssetCachePruneBatch,
 	planPreparedAssetCachePruneBatchFromResolver,
 } from "./asset-cache-policy";
-import { createPreparedAssetResolverFromRecordSnapshot } from "./prepared-asset-store";
+import { PreparedAssetStore } from "./prepared-asset-store";
 import type {
 	PreparedAssetPayload,
 	PreparedAssetRecord,
@@ -58,7 +58,7 @@ describe("asset cache policy", () => {
 	});
 
 	it("plans bounded prune batches from resolver scan entries", () => {
-		const preparedByAssetId = indexPreparedAssets([
+		const preparedAssets = [
 			createPreparedLandblockOutdoorAsset("landblock/0102ffff/outdoor", [
 				"setup-model/02000001",
 			]),
@@ -69,11 +69,10 @@ describe("asset cache policy", () => {
 			createPreparedGfxObjAsset("gfx-obj/expired-a"),
 			createPreparedGfxObjAsset("gfx-obj/expired-b"),
 			createPreparedGfxObjAsset("gfx-obj/expired-c"),
-		]);
-		const resolver = createPreparedAssetResolverFromRecordSnapshot({
-			preparedByAssetId,
-			cacheMetadataByAssetId: createMetadata(preparedByAssetId, 0),
-		});
+		];
+		const store = new PreparedAssetStore();
+		store.applyPreparedAssets(preparedAssets, 0);
+		const resolver = store.resolver;
 		const scanPage = resolver.scanPreparedAssets({
 			cursorAssetId: null,
 			limit: 5,

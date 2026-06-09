@@ -10,9 +10,22 @@ export interface StructuredInteriorCoverage {
 	truncated: boolean;
 }
 
+export interface StructuredInteriorCoverageAssetLookup {
+	get(assetId: string): PreparedAssetRecord | null;
+}
+
 export function deriveStructuredInteriorCoverage(
 	policy: StructuredInteriorMembershipPolicy,
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
+): StructuredInteriorCoverage {
+	return deriveStructuredInteriorCoverageFromLookup(policy, {
+		get: (assetId) => preparedByAssetId[assetId] ?? null,
+	});
+}
+
+export function deriveStructuredInteriorCoverageFromLookup(
+	policy: StructuredInteriorMembershipPolicy,
+	assets: StructuredInteriorCoverageAssetLookup,
 ): StructuredInteriorCoverage {
 	if (policy.kind === "direct") {
 		return {
@@ -23,7 +36,7 @@ export function deriveStructuredInteriorCoverage(
 
 	return deriveLandblockClosureCoverage(
 		policy.seedEnvCellIds,
-		preparedByAssetId,
+		assets,
 	);
 }
 
@@ -38,14 +51,15 @@ export function deriveBrowserFocusedStructuredInteriorMembershipPolicy(
 
 function deriveLandblockClosureCoverage(
 	seedEnvCellIds: number[],
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	assets: StructuredInteriorCoverageAssetLookup,
 ): StructuredInteriorCoverage {
 	const envCellIds = new Set<number>();
 	for (const seedEnvCellId of uniqueSorted(seedEnvCellIds)) {
 		envCellIds.add(seedEnvCellId);
 
-		const topologyAsset =
-			preparedByAssetId[formatLandblockTopologyAssetId(seedEnvCellId)];
+		const topologyAsset = assets.get(
+			formatLandblockTopologyAssetId(seedEnvCellId),
+		);
 		if (topologyAsset?.payload.kind === "landblock-topology") {
 			for (const cell of topologyAsset.payload.envCells) {
 				envCellIds.add(cell.envCellId);

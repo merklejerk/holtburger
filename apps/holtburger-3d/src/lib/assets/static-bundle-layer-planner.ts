@@ -11,7 +11,6 @@ import {
 	formatRegionRenderProfileAssetId,
 	normalizeOutdoorLandblockId,
 } from "../landblocks";
-import type { PreparedAssetRecord } from "./types";
 import { getPreparedAssetDependencies } from "./types";
 import {
 	deriveOutdoorSceneInterest,
@@ -26,10 +25,11 @@ import {
 } from "../world-display/static-bundle-layer";
 import {
 	deriveBrowserFocusedStructuredInteriorMembershipPolicy,
-	deriveStructuredInteriorCoverage,
+	deriveStructuredInteriorCoverageFromLookup,
 } from "./structured-interior-coverage";
 import type { OutdoorSceneRequestOptions } from "./scene-asset-request-planner";
-import { deriveTopologyEnvCellIdsForLandblocks } from "./scene-asset-request-planner";
+import { deriveTopologyEnvCellIdsForLandblocksFromAssets } from "./scene-asset-request-planner";
+import type { PreparedAssetResolver } from "./prepared-asset-store";
 
 const STATIC_BUNDLE_LAYER_REVISION_PREFIX = "static-bundle-layer:v1";
 const DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS: OutdoorSceneRequestOptions = {
@@ -41,31 +41,31 @@ const DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS: OutdoorSceneRequestOptions = {
 
 export interface StaticBundleLayerPlanningInput {
 	browserDestination: BrowserLocationSelection | null;
-	preparedByAssetId: Record<string, PreparedAssetRecord>;
+	preparedAssets: PreparedAssetResolver;
 	options?: OutdoorSceneRequestOptions;
 }
 
 export function planDesiredStaticBundleLayers(
 	input: StaticBundleLayerPlanningInput,
 ): DesiredStaticBundleLayer[] {
-	const { browserDestination, preparedByAssetId } = input;
+	const { browserDestination, preparedAssets } = input;
 	if (!browserDestination) {
 		return [];
 	}
 
 	if (isIndoorBrowserDestination(browserDestination)) {
-		return planIndoorStaticBundleLayers(browserDestination, preparedByAssetId);
+		return planIndoorStaticBundleLayers(browserDestination, preparedAssets);
 	}
 
 	const interest = deriveOutdoorInterestForBrowserDestination(
 		browserDestination,
 		input.options ?? DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS,
 	);
-	return planOutdoorStaticBundleLayers(preparedByAssetId, interest);
+	return planOutdoorStaticBundleLayers(preparedAssets, interest);
 }
 
 function planOutdoorStaticBundleLayers(
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	interest: NormalizedOutdoorSceneInterest,
 ): DesiredStaticBundleLayer[] {
 	const layers: DesiredStaticBundleLayer[] = [];
@@ -80,11 +80,11 @@ function planOutdoorStaticBundleLayers(
 				priority: priorityForLandblock(interest.focusLandblockId, landblockId),
 				rootAssetIds: collectOutdoorLayerRootAssetIds(landblockId),
 				knownClosureAssetIds: collectOutdoorLayerClosureAssetIds(
-					preparedByAssetId,
+					preparedAssets,
 					landblockId,
 					"outdoor-buildings",
 				),
-				preparedByAssetId,
+				preparedAssets,
 			}),
 		);
 	}
@@ -100,26 +100,26 @@ function planOutdoorStaticBundleLayers(
 				priority: priorityForLandblock(interest.focusLandblockId, landblockId),
 				rootAssetIds: collectOutdoorLayerRootAssetIds(landblockId),
 				knownClosureAssetIds: collectOutdoorLayerClosureAssetIds(
-					preparedByAssetId,
+					preparedAssets,
 					landblockId,
 					"outdoor-detail",
 				),
-				preparedByAssetId,
+				preparedAssets,
 			}),
 		);
 	}
 
-	const envCellIds = deriveStructuredInteriorCoverage(
-		{
-			kind: "landblock-closure",
-			seedEnvCellIds: [
-				...deriveTopologyEnvCellIdsForLandblocks(
-					preparedByAssetId,
-					new Set(interest.envCellLandblockIds),
+	const envCellIds = deriveStructuredInteriorCoverageFromLookup(
+			{
+				kind: "landblock-closure",
+				seedEnvCellIds: [
+					...deriveTopologyEnvCellIdsForLandblocksFromAssets(
+						[...preparedAssets.values()],
+						new Set(interest.envCellLandblockIds),
 				),
 			],
 		},
-		preparedByAssetId,
+		preparedAssets,
 	).envCellIds;
 	for (const envCellId of envCellIds) {
 		const landblockId = normalizeOutdoorLandblockId(envCellId);
@@ -134,11 +134,11 @@ function planOutdoorStaticBundleLayers(
 				priority: priorityForLandblock(interest.focusLandblockId, landblockId),
 				rootAssetIds: collectEnvCellLayerRootAssetIds(landblockId, envCellId),
 				knownClosureAssetIds: collectEnvCellLayerClosureAssetIds(
-					preparedByAssetId,
+					preparedAssets,
 					landblockId,
 					envCellId,
 				),
-				preparedByAssetId,
+				preparedAssets,
 			}),
 		);
 	}
@@ -148,13 +148,13 @@ function planOutdoorStaticBundleLayers(
 
 function planIndoorStaticBundleLayers(
 	browserDestination: BrowserInteriorCellSelection,
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 ): DesiredStaticBundleLayer[] {
-	const envCellIds = deriveStructuredInteriorCoverage(
+	const envCellIds = deriveStructuredInteriorCoverageFromLookup(
 		deriveBrowserFocusedStructuredInteriorMembershipPolicy(
 			browserDestination.envCellId,
 		),
-		preparedByAssetId,
+		preparedAssets,
 	).envCellIds;
 	return envCellIds
 		.map((envCellId) =>
@@ -175,13 +175,13 @@ function planIndoorStaticBundleLayers(
 					envCellId,
 				),
 				knownClosureAssetIds: collectEnvCellLayerClosureAssetIds(
-					preparedByAssetId,
+					preparedAssets,
 					normalizeOutdoorLandblockId(
 						browserLocationToLandblockId(browserDestination),
 					),
 					envCellId,
 				),
-				preparedByAssetId,
+				preparedAssets,
 			}),
 		)
 		.sort(compareDesiredStaticBundleLayers);
@@ -192,14 +192,14 @@ function createDesiredLayer(options: {
 	priority: StaticBundleLayerPriority;
 	rootAssetIds: readonly string[];
 	knownClosureAssetIds: readonly string[];
-	preparedByAssetId: Record<string, PreparedAssetRecord>;
+	preparedAssets: PreparedAssetResolver;
 }): DesiredStaticBundleLayer {
 	const rootAssetIds = uniqueSortedAssetIds(options.rootAssetIds);
 	const knownClosureAssetIds = uniqueSortedAssetIds(
 		options.knownClosureAssetIds,
 	);
 	const knownMissingAssetIds = knownClosureAssetIds.filter(
-		(assetId) => !options.preparedByAssetId[assetId],
+		(assetId) => !options.preparedAssets.has(assetId),
 	);
 	return {
 		scope: options.scope,
@@ -208,7 +208,7 @@ function createDesiredLayer(options: {
 		sourceRevision: deriveStaticBundleLayerSourceRevision({
 			scope: options.scope,
 			rootAssetIds,
-			preparedByAssetId: options.preparedByAssetId,
+			preparedAssets: options.preparedAssets,
 		}),
 		diagnostics: {
 			knownClosureAssetIds,
@@ -232,12 +232,12 @@ function collectEnvCellLayerRootAssetIds(
 }
 
 function collectOutdoorLayerClosureAssetIds(
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	landblockId: number,
 	bundleKind: "outdoor-buildings" | "outdoor-detail",
 ): string[] {
 	const outdoorAssetId = formatLandblockOutdoorAssetId(landblockId);
-	const outdoorPayload = preparedByAssetId[outdoorAssetId]?.payload;
+	const outdoorPayload = preparedAssets.get(outdoorAssetId)?.payload;
 	if (outdoorPayload?.kind !== "landblock-outdoor") {
 		return [outdoorAssetId];
 	}
@@ -251,7 +251,7 @@ function collectOutdoorLayerClosureAssetIds(
 		.map((member) => member.sourceAssetId);
 
 	return collectTransitiveStaticClosureAssetIds(
-		preparedByAssetId,
+		preparedAssets,
 		[
 			outdoorAssetId,
 			formatRegionRenderProfileAssetId(outdoorPayload.regionNumber),
@@ -262,12 +262,12 @@ function collectOutdoorLayerClosureAssetIds(
 }
 
 function collectEnvCellLayerClosureAssetIds(
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	landblockId: number,
 	envCellId: number,
 ): string[] {
 	const envCellAssetId = formatEnvCellAssetId(envCellId);
-	const envCellPayload = preparedByAssetId[envCellAssetId]?.payload;
+	const envCellPayload = preparedAssets.get(envCellAssetId)?.payload;
 	const seeds = [
 		formatLandblockTopologyAssetId(landblockId),
 		envCellAssetId,
@@ -275,13 +275,13 @@ function collectEnvCellLayerClosureAssetIds(
 			? [formatRegionRenderProfileAssetId(envCellPayload.regionNumber)]
 			: []),
 	];
-	return collectTransitiveStaticClosureAssetIds(preparedByAssetId, seeds, [
+	return collectTransitiveStaticClosureAssetIds(preparedAssets, seeds, [
 		formatLandblockTopologyAssetId(landblockId),
 	]);
 }
 
 function collectTransitiveStaticClosureAssetIds(
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	seedAssetIds: readonly string[],
 	nonTransitiveSeedAssetIds: readonly string[] = [],
 ): string[] {
@@ -290,7 +290,7 @@ function collectTransitiveStaticClosureAssetIds(
 	const queue = [...seedAssetIds];
 	for (let index = 0; index < queue.length; index += 1) {
 		const assetId = queue[index];
-		const asset = preparedByAssetId[assetId];
+		const asset = preparedAssets.get(assetId);
 		if (!asset) {
 			continue;
 		}
@@ -325,10 +325,10 @@ function collectSetupAppearanceAssetIds(assetId: string): string[] {
 function deriveStaticBundleLayerSourceRevision(options: {
 	scope: StaticObjectBundleScope;
 	rootAssetIds: readonly string[];
-	preparedByAssetId: Record<string, PreparedAssetRecord>;
+	preparedAssets: PreparedAssetResolver;
 }): string {
 	const parts = options.rootAssetIds.map((assetId) => {
-		const asset = options.preparedByAssetId[assetId];
+		const asset = options.preparedAssets.get(assetId);
 		return asset
 			? `${assetId}@${asset.payload.kind}@${asset.preparedAt}`
 			: `${assetId}@missing`;

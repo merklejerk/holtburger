@@ -1,4 +1,3 @@
-import type { AssetChannelState } from "../assets/types";
 import type { SceneCameraFrame } from "./camera";
 import { buildSceneCameraViewProjectionMatrix, type RenderMat4 } from "./render-math";
 import { deriveRenderBvhVisibilitySnapshot } from "./render-bvh-visibility-snapshot";
@@ -9,6 +8,7 @@ import type { StaticRenderableSceneModel } from "./static-renderables";
 import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
+import type { RendererAssetReadModel } from "./renderer-asset-read-model";
 
 export const WORLD_RENDER_CATEGORY = {
 	terrain: "terrain",
@@ -126,7 +126,7 @@ const WORLD_RENDER_CATEGORY_BY_CANDIDATE_KIND: Readonly<
 };
 
 export function buildWorldRenderFrame({
-	assetState,
+	assetReadModel,
 	candidates,
 	cameraFrame,
 	renderChunkTransforms,
@@ -135,7 +135,7 @@ export function buildWorldRenderFrame({
 	structuredInteriorScene,
 	terrainScene,
 }: {
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	candidates: readonly WorldRenderCandidate[];
 	cameraFrame: SceneCameraFrame;
 	renderChunkTransforms: readonly RenderChunkTransform[];
@@ -146,7 +146,7 @@ export function buildWorldRenderFrame({
 }): WorldRenderFrame {
 	const viewProjectionMatrix = buildSceneCameraViewProjectionMatrix(cameraFrame);
 	const visibilitySnapshot = deriveRenderBvhVisibilitySnapshot({
-		assetState,
+		assetReadModel,
 		terrainScene,
 		staticRenderableScene,
 		structuredInteriorScene,

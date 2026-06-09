@@ -1,10 +1,10 @@
 import type {
-	AssetChannelState,
 	PreparedRegionDetailRole,
 	PreparedRenderSurfacePayload,
 	PreparedSurfaceTexturePayload,
 } from "../assets/types";
 import { formatHex32 } from "../landblocks";
+import type { RendererAssetReadModel } from "./renderer-asset-read-model";
 
 export type RegionDetailRoleKind =
 	| "landscape"
@@ -33,7 +33,7 @@ export interface ResolvedRegionDetailOverlayPlan {
 }
 
 export function resolveRegionDetailOverlayPlan(options: {
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	regionNumber: number;
 	roleKind: RegionDetailRoleKind;
 	reportDiagnostic?: (message: string) => void;
@@ -44,7 +44,7 @@ export function resolveRegionDetailOverlayPlan(options: {
 		return null;
 	}
 	const profileAssetId = `region-render-profile/${normalizedRegionNumber}`;
-	const profileRecord = options.assetState.preparedByAssetId[profileAssetId];
+	const profileRecord = options.assetReadModel.get(profileAssetId);
 	const profile =
 		profileRecord?.payload.kind === "region-render-profile"
 			? profileRecord.payload
@@ -82,7 +82,7 @@ export function resolveRegionDetailOverlayPlan(options: {
 		return null;
 	}
 	const surfaceTexture = getSurfaceTexture(
-		options.assetState,
+		options.assetReadModel,
 		role.textureAssetId,
 	);
 	if (!surfaceTexture) {
@@ -92,7 +92,7 @@ export function resolveRegionDetailOverlayPlan(options: {
 		return null;
 	}
 	const renderSurface = getSelectedRenderSurface({
-		assetState: options.assetState,
+		assetReadModel: options.assetReadModel,
 		surfaceTexture,
 	});
 	if (!renderSurface) {
@@ -118,13 +118,13 @@ export function resolveRegionDetailOverlayPlan(options: {
 }
 
 export function describeRegionDetailRoleSignature(options: {
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	regionNumber: number;
 	roleKind: RegionDetailRoleKind;
 }): string {
 	const normalizedRegionNumber = Math.trunc(options.regionNumber);
 	const profileAssetId = `region-render-profile/${normalizedRegionNumber}`;
-	const profileRecord = options.assetState.preparedByAssetId[profileAssetId];
+	const profileRecord = options.assetReadModel.get(profileAssetId);
 	const profile =
 		profileRecord?.payload.kind === "region-render-profile"
 			? profileRecord.payload
@@ -144,24 +144,24 @@ export function describeRegionDetailRoleSignature(options: {
 }
 
 function getSurfaceTexture(
-	assetState: AssetChannelState,
+	assetReadModel: RendererAssetReadModel,
 	assetId: string,
 ): PreparedSurfaceTexturePayload | null {
-	const record = assetState.preparedByAssetId[assetId];
+	const record = assetReadModel.get(assetId);
 	return record?.payload.kind === "surface-texture" ? record.payload : null;
 }
 
 function getSelectedRenderSurface({
-	assetState,
+	assetReadModel,
 	surfaceTexture,
 }: {
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	surfaceTexture: PreparedSurfaceTexturePayload;
 }): PreparedRenderSurfacePayload | null {
 	const renderSurfaceIds = preferredDetailRenderSurfaceIds(surfaceTexture);
 	for (const renderSurfaceId of renderSurfaceIds) {
 		const assetId = `render-surface/${formatHex32(renderSurfaceId)}`;
-		const record = assetState.preparedByAssetId[assetId];
+		const record = assetReadModel.get(assetId);
 		if (record?.payload.kind === "render-surface") {
 			return record.payload;
 		}

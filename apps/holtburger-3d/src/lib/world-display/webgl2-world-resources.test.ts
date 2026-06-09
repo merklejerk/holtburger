@@ -13,6 +13,7 @@ import type { RenderChunkTransform } from "./render-anchor";
 import { createStaticMaterialFamilyDescriptor } from "./static-material-artifacts";
 import type { StructuredInteriorCell } from "./structured-interior-scene";
 import type { LandblockTerrainRenderArtifact } from "./terrain-render-artifact";
+import { createTestPreparedAssetResolver } from "../../../test-support/prepared-asset-resolver";
 import {
 	getDetailedLandblockRenderArtifacts,
 	type LandblockRenderProductWorkerResult,
@@ -107,6 +108,7 @@ describe("webgl2 world resources", () => {
 			store,
 			productKey,
 			artifact,
+			assetReadModel: emptyAssetReadModel(),
 			textureFilteringMode: "linear",
 		});
 
@@ -146,6 +148,7 @@ describe("webgl2 world resources", () => {
 			store,
 			productKey,
 			artifact,
+			assetReadModel: emptyAssetReadModel(),
 			textureFilteringMode: "linear",
 		});
 
@@ -166,6 +169,7 @@ describe("webgl2 world resources", () => {
 		updateWebgl2TerrainProductSamplerPolicy({
 			gl: gl.asContext(),
 			store,
+			assetReadModel: emptyAssetReadModel(),
 			textureFilteringMode: "nearest",
 		});
 
@@ -181,6 +185,7 @@ describe("webgl2 world resources", () => {
 			gl: gl.asContext(),
 			store,
 			productKey,
+			assetReadModel: emptyAssetReadModel(),
 			textureFilteringMode: "nearest",
 		});
 
@@ -217,6 +222,10 @@ describe("webgl2 world resources", () => {
 		expect(gl.deletedVertexArrays).toHaveLength(1);
 	});
 });
+
+function emptyAssetReadModel() {
+	return createTestPreparedAssetResolver([]);
+}
 
 class FakeWebgl2 {
 	readonly ARRAY_BUFFER = 1;

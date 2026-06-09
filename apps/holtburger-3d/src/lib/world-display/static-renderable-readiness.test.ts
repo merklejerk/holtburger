@@ -1,13 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
-	createInitialAssetChannelState,
-	type AssetChannelState,
 	type PreparedAssetRecord,
 	type PreparedMaterialRecipePayload,
 } from "../assets/types";
 import { createBaseMaterialAppearanceContext } from "./material-appearance";
 import { WORLD_RENDER_DOMAIN } from "./render-domains";
+import { createTestPreparedAssetResolver } from "../../../test-support/prepared-asset-resolver";
 import {
 	deriveStaticRenderableReadinessModel,
 	type StaticRenderableReadinessStatus,
@@ -21,7 +20,7 @@ describe("deriveStaticRenderableReadinessModel", () => {
 	it("commits resolved static renderable parts", () => {
 		const part = createStaticPart();
 		const readiness = deriveStaticRenderableReadinessModel({
-			assetState: createAssetState([createGfxObjRecord()]),
+			assetReadModel: createAssetState([createGfxObjRecord()]),
 			scene: createStaticRenderableScene([part]),
 		});
 
@@ -38,7 +37,7 @@ describe("deriveStaticRenderableReadinessModel", () => {
 	it("keeps unresolved geometry pending and out of committed output", () => {
 		const part = createStaticPart();
 		const readiness = deriveStaticRenderableReadinessModel({
-			assetState: createAssetState(),
+			assetReadModel: createAssetState(),
 			scene: createStaticRenderableScene([part], {
 				missingGfxAssetIds: [part.gfxObjAssetId],
 			}),
@@ -64,7 +63,7 @@ describe("deriveStaticRenderableReadinessModel", () => {
 			],
 		});
 		const readiness = deriveStaticRenderableReadinessModel({
-			assetState: createAssetState([createGfxObjRecord()]),
+			assetReadModel: createAssetState([createGfxObjRecord()]),
 			scene: createStaticRenderableScene([part]),
 		});
 
@@ -87,7 +86,7 @@ describe("deriveStaticRenderableReadinessModel", () => {
 			],
 		});
 		const readiness = deriveStaticRenderableReadinessModel({
-			assetState: createAssetState([createGfxObjRecord()]),
+			assetReadModel: createAssetState([createGfxObjRecord()]),
 			commitPolicy: "allow-fallback",
 			scene: createStaticRenderableScene([part]),
 		});
@@ -109,7 +108,7 @@ describe("deriveStaticRenderableReadinessModel", () => {
 			],
 		});
 		const readiness = deriveStaticRenderableReadinessModel({
-			assetState: createAssetState([
+			assetReadModel: createAssetState([
 				createGfxObjRecord(),
 				createMaterialRecipeRecord({
 					materialAssetId: "material/08000001",
@@ -139,7 +138,7 @@ describe("deriveStaticRenderableReadinessModel", () => {
 			renderKey: "static/object-a/part-1",
 		});
 		const readiness = deriveStaticRenderableReadinessModel({
-			assetState: createAssetState([createGfxObjRecord()]),
+			assetReadModel: createAssetState([createGfxObjRecord()]),
 			scene: createStaticRenderableScene([readyPart, pendingPart]),
 		});
 
@@ -164,7 +163,7 @@ describe("deriveStaticRenderableReadinessModel", () => {
 			renderKey: "static/object-a/part-1",
 		});
 		const readiness = deriveStaticRenderableReadinessModel({
-			assetState: createAssetState([
+			assetReadModel: createAssetState([
 				createGfxObjRecord(),
 				createGfxObjRecord({ assetId: "gfx-obj/01000002" }),
 			]),
@@ -177,7 +176,7 @@ describe("deriveStaticRenderableReadinessModel", () => {
 	it("excludes failed empty geometry from committed output", () => {
 		const part = createStaticPart();
 		const readiness = deriveStaticRenderableReadinessModel({
-			assetState: createAssetState([
+			assetReadModel: createAssetState([
 				createGfxObjRecord({ vertexCount: 0, triangleCount: 0 }),
 			]),
 			scene: createStaticRenderableScene([part]),
@@ -194,11 +193,11 @@ describe("deriveStaticRenderableReadinessModel", () => {
 		const part = createStaticPart();
 		const scene = createStaticRenderableScene([part]);
 		const first = deriveStaticRenderableReadinessModel({
-			assetState: createAssetState([createGfxObjRecord()]),
+			assetReadModel: createAssetState([createGfxObjRecord()]),
 			scene,
 		});
 		const second = deriveStaticRenderableReadinessModel({
-			assetState: createAssetState([
+			assetReadModel: createAssetState([
 				createGfxObjRecord(),
 				createMaterialRecipeRecord({ materialAssetId: "material/unrelated" }),
 			]),
@@ -274,12 +273,8 @@ function createStaticPart(
 	};
 }
 
-function createAssetState(records: PreparedAssetRecord[] = []): AssetChannelState {
-	const state = createInitialAssetChannelState();
-	state.preparedByAssetId = Object.fromEntries(
-		records.map((record) => [record.request.assetId, record]),
-	);
-	return state;
+function createAssetState(records: PreparedAssetRecord[] = []) {
+	return createTestPreparedAssetResolver(records);
 }
 
 function createGfxObjRecord({

@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
-	createInitialAssetChannelState,
-	type AssetChannelState,
 	type PreparedAssetRecord,
 	type PreparedPolygonSetBspNode,
 } from "../assets/types";
+import { createTestPreparedAssetResolver } from "../../../test-support/prepared-asset-resolver";
+import type { RendererAssetReadModel } from "./renderer-asset-read-model";
 import {
 	classifyTransitionPortalDirection,
 	createTransitionPortalWorkItem,
@@ -98,7 +98,7 @@ describe("transition portal work items", () => {
 			}),
 		]);
 		const model = deriveTransitionPortalCandidates({
-			assetState,
+			assetReadModel: assetState,
 			structuredInteriorScene: createStructuredInteriorSceneModel([
 				createStructuredInteriorCell(0x016c0155),
 			]),
@@ -290,11 +290,11 @@ describe("transition portal work items", () => {
 });
 
 function deriveModel(
-	assetState: AssetChannelState,
+	assetReadModel: RendererAssetReadModel,
 	cells: StructuredInteriorCell[],
 ): TransitionPortalCandidateModel {
 	return deriveTransitionPortalCandidates({
-		assetState,
+		assetReadModel,
 		structuredInteriorScene: createStructuredInteriorSceneModel(cells),
 		activeLandblockIds: [0x016cffff],
 	});
@@ -437,12 +437,8 @@ function createDetailedLandblockProductArtifact(): LandblockRenderProductWorkerR
 	};
 }
 
-function createAssetState(records: PreparedAssetRecord[]): AssetChannelState {
-	const state = createInitialAssetChannelState();
-	state.preparedByAssetId = Object.fromEntries(
-		records.map((record) => [record.request.assetId, record]),
-	);
-	return state;
+function createAssetState(records: PreparedAssetRecord[]) {
+	return createTestPreparedAssetResolver(records);
 }
 
 function createLandblockOutdoorAsset(options: {

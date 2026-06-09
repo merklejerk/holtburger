@@ -45,10 +45,6 @@ describe("scene asset streaming controller", () => {
 					return {
 						rootAsset,
 						preparedAssets: [rootAsset],
-						preparedByAssetId: {
-							...Object.fromEntries(preparedAssetStore.resolver.entries()),
-							[rootAsset.request.assetId]: rootAsset,
-						},
 						dependencyStatus: {
 							status: "ready",
 							dependencyAssetIds: [],

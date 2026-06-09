@@ -2,10 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
 	createInitialAssetChannelState,
-	type AssetChannelState,
 	type PreparedAssetRecord,
 } from "./types";
-import { createPreparedAssetResolverFromRecordSnapshot } from "./prepared-asset-store";
+import { createTestPreparedAssetResolver } from "../../../test-support/prepared-asset-resolver";
 import { describeMaterialAssetDiagnostics } from "./material-diagnostics";
 
 describe("material diagnostics", () => {
@@ -16,16 +15,14 @@ describe("material diagnostics", () => {
 			paletteAssetIds: ["palette/04000001"],
 		});
 		const state = createInitialAssetChannelState();
-		state.preparedByAssetId = {
-			[material.request.assetId]: material,
-			"surface-texture/05000001": createSurfaceTextureRecord(
-				"surface-texture/05000001",
-			),
-		};
+		const records = [
+			material,
+			createSurfaceTextureRecord("surface-texture/05000001"),
+		];
 
 		const diagnostics = describeMaterialAssetDiagnostics({
 			assetPresentationState: state,
-			preparedAssetResolver: createResolver(state),
+			preparedAssetResolver: createTestPreparedAssetResolver(records),
 			browserDestination: null,
 			options: {
 				terrainRadius: 0,
@@ -65,7 +62,7 @@ describe("material diagnostics", () => {
 
 		const diagnostics = describeMaterialAssetDiagnostics({
 			assetPresentationState: state,
-			preparedAssetResolver: createResolver(state),
+			preparedAssetResolver: createTestPreparedAssetResolver(),
 			browserDestination: null,
 			options: {
 				terrainRadius: 0,
@@ -120,54 +117,42 @@ describe("material diagnostics", () => {
 			},
 		);
 		const state = createInitialAssetChannelState();
-		state.preparedByAssetId = {
-			[indexedRecipe.request.assetId]: indexedRecipe,
-			[emptyPaletteRecipe.request.assetId]: emptyPaletteRecipe,
-			[defaultPaletteRecipe.request.assetId]: defaultPaletteRecipe,
-			"render-surface/06000003": createRenderSurfaceRecord(
-				"render-surface/06000003",
-				{
-					formatRaw: 0x29,
-					format: "P8",
-					sourceBytes: new Uint8Array([0, 1]),
-					defaultPaletteId: null,
-				},
-			),
-			"render-surface/06000004": createRenderSurfaceRecord(
-				"render-surface/06000004",
-				{
-					formatRaw: 0x65,
-					format: "Index16",
-					sourceBytes: new Uint8Array([0x00, 0x00, 0x03, 0x00]),
-					defaultPaletteId: null,
-				},
-			),
-			"render-surface/06000005": createRenderSurfaceRecord(
-				"render-surface/06000005",
-				{
-					formatRaw: 0x29,
-					format: "P8",
-					sourceBytes: new Uint8Array([0]),
-					defaultPaletteId: null,
-				},
-			),
-			"render-surface/06000006": createRenderSurfaceRecord(
-				"render-surface/06000006",
-				{
-					formatRaw: 0x65,
-					format: "Index16",
-					sourceBytes: new Uint8Array([0x01, 0x00]),
-					defaultPaletteId: 0x04000006,
-				},
-			),
-			"palette/04000003": createPaletteRecord("palette/04000003", 2),
-			"palette/04000004": createPaletteRecord("palette/04000004", 0),
-			"palette/04000006": createPaletteRecord("palette/04000006", 2),
-		};
+		const records = [
+			indexedRecipe,
+			emptyPaletteRecipe,
+			defaultPaletteRecipe,
+			createRenderSurfaceRecord("render-surface/06000003", {
+				formatRaw: 0x29,
+				format: "P8",
+				sourceBytes: new Uint8Array([0, 1]),
+				defaultPaletteId: null,
+			}),
+			createRenderSurfaceRecord("render-surface/06000004", {
+				formatRaw: 0x65,
+				format: "Index16",
+				sourceBytes: new Uint8Array([0x00, 0x00, 0x03, 0x00]),
+				defaultPaletteId: null,
+			}),
+			createRenderSurfaceRecord("render-surface/06000005", {
+				formatRaw: 0x29,
+				format: "P8",
+				sourceBytes: new Uint8Array([0]),
+				defaultPaletteId: null,
+			}),
+			createRenderSurfaceRecord("render-surface/06000006", {
+				formatRaw: 0x65,
+				format: "Index16",
+				sourceBytes: new Uint8Array([0x01, 0x00]),
+				defaultPaletteId: 0x04000006,
+			}),
+			createPaletteRecord("palette/04000003", 2),
+			createPaletteRecord("palette/04000004", 0),
+			createPaletteRecord("palette/04000006", 2),
+		];
 
 		const diagnostics = describeMaterialAssetDiagnostics({
 			assetPresentationState: state,
-			preparedAssetResolver: createResolver(state),
+			preparedAssetResolver: createTestPreparedAssetResolver(records),
 			browserDestination: null,
 			options: {
 				terrainRadius: 0,
@@ -186,14 +171,6 @@ describe("material diagnostics", () => {
 		expect(diagnostics).toContain("range errors 0");
 	});
 });
-
-function createResolver(assetState: AssetChannelState) {
-	return createPreparedAssetResolverFromRecordSnapshot({
-		preparedByAssetId: assetState.preparedByAssetId,
-		cacheMetadataByAssetId: assetState.cacheMetadataByAssetId,
-		cacheDiagnostics: assetState.cacheDiagnostics,
-	});
-}
 
 function createMaterialRecipeRecord(
 	assetId: string,

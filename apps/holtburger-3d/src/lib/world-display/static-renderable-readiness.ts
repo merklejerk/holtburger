@@ -1,5 +1,4 @@
 import type {
-	AssetChannelState,
 	PreparedAssetRecord,
 	PreparedMaterialRecipePayload,
 } from "../assets/types";
@@ -7,6 +6,7 @@ import type {
 	StaticRenderablePart,
 	StaticRenderableSceneModel,
 } from "./static-renderables";
+import type { RendererAssetReadModel } from "./renderer-asset-read-model";
 
 export type StaticRenderableReadinessStatus =
 	| "pending"
@@ -54,18 +54,18 @@ export interface StaticRenderableReadinessModel {
 const READINESS_REASON_SAMPLE_LIMIT = 12;
 
 export function deriveStaticRenderableReadinessModel({
-	assetState,
+	assetReadModel,
 	commitPolicy = "resolved-only",
 	scene,
 }: {
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	commitPolicy?: StaticRenderableReadinessCommitPolicy;
 	scene: StaticRenderableSceneModel;
 }): StaticRenderableReadinessModel {
 	const records: StaticRenderableReadinessRecord[] = [
 		...deriveMissingDependencyRecords(scene),
 		...scene.parts.map((part) =>
-			derivePartReadinessRecord(assetState, commitPolicy, part),
+			derivePartReadinessRecord(assetReadModel, commitPolicy, part),
 		),
 	];
 	const committedObjectKeys = deriveCommittedObjectKeys(scene.parts, records);
@@ -167,11 +167,11 @@ function deriveMissingDependencyRecords(
 }
 
 function derivePartReadinessRecord(
-	assetState: AssetChannelState,
+	assetReadModel: RendererAssetReadModel,
 	commitPolicy: StaticRenderableReadinessCommitPolicy,
 	part: StaticRenderablePart,
 ): StaticRenderableReadinessRecord {
-	const gfxAsset = assetState.preparedByAssetId[part.gfxObjAssetId];
+	const gfxAsset = assetReadModel.get(part.gfxObjAssetId);
 	if (!isPreparedGfxGeometryAsset(gfxAsset)) {
 		return createPartRecord({
 			status: "pending",
@@ -197,7 +197,7 @@ function derivePartReadinessRecord(
 		});
 	}
 
-	const materialFallbackReason = findMaterialFallbackReason(assetState, part);
+	const materialFallbackReason = findMaterialFallbackReason(assetReadModel, part);
 	if (materialFallbackReason) {
 		return createPartRecord({
 			status: "fallback-resolved",
@@ -220,7 +220,7 @@ function derivePartReadinessRecord(
 }
 
 function findMaterialFallbackReason(
-	assetState: AssetChannelState,
+	assetReadModel: RendererAssetReadModel,
 	part: StaticRenderablePart,
 ):
 	| {
@@ -230,7 +230,7 @@ function findMaterialFallbackReason(
 	  }
 	| null {
 	for (const slot of part.materialSlots) {
-		const materialAsset = assetState.preparedByAssetId[slot.materialAssetId];
+		const materialAsset = assetReadModel.get(slot.materialAssetId);
 		if (!isPreparedMaterialRecipeAsset(materialAsset)) {
 			return {
 				dependencyClass: "material-plan",
@@ -243,7 +243,7 @@ function findMaterialFallbackReason(
 			...materialAsset.payload.dependencies.surfaceTextureAssetIds,
 			...materialAsset.payload.dependencies.renderSurfaceAssetIds,
 			...materialAsset.payload.dependencies.paletteAssetIds,
-		].find((assetId) => !assetState.preparedByAssetId[assetId]);
+		].find((assetId) => !assetReadModel.has(assetId));
 		if (missingTextureAssetId) {
 			return {
 				dependencyClass: "surface-texture",
@@ -362,7 +362,7 @@ function deriveReadinessMetrics(
 }
 
 function isPreparedGfxGeometryAsset(
-	asset: PreparedAssetRecord | undefined,
+	asset: PreparedAssetRecord | null | undefined,
 ): asset is PreparedAssetRecord & {
 	payload: { kind: "gfx-obj"; renderGeometry: { vertexCount: number; triangleCount: number } };
 } {
@@ -370,7 +370,7 @@ function isPreparedGfxGeometryAsset(
 }
 
 function isPreparedMaterialRecipeAsset(
-	asset: PreparedAssetRecord | undefined,
+	asset: PreparedAssetRecord | null | undefined,
 ): asset is PreparedAssetRecord & { payload: PreparedMaterialRecipePayload } {
 	return asset?.payload.kind === "material-recipe";
 }

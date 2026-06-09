@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
-	createInitialAssetChannelState,
-	type AssetChannelState,
+	type PreparedAssetRecord,
 	type PreparedPolygonSetRenderGeometry,
 	type PreparedTerrainMesh,
 } from "../assets/types";
+import { createTestPreparedAssetResolver } from "../../../test-support/prepared-asset-resolver";
 import { deriveSceneRenderableReadinessModel } from "./scene-renderable-readiness";
 import type { StaticRenderableSceneModel } from "./static-renderables";
 import type {
@@ -24,7 +24,7 @@ describe("deriveSceneRenderableReadinessModel", () => {
 			materialStatus: "missing-table",
 		});
 		const readiness = deriveSceneRenderableReadinessModel({
-			assetState: createInitialAssetChannelState(),
+			assetReadModel: emptyAssetReadModel(),
 			terrainScene: createTerrainScene([tile]),
 			structuredInteriorScene: createStructuredInteriorScene(),
 			staticRenderableScene: createStaticRenderableScene(),
@@ -43,7 +43,7 @@ describe("deriveSceneRenderableReadinessModel", () => {
 			materialStatus: "missing-table",
 		});
 		const readiness = deriveSceneRenderableReadinessModel({
-			assetState: createInitialAssetChannelState(),
+			assetReadModel: emptyAssetReadModel(),
 			commitPolicy: "allow-fallback",
 			terrainScene: createTerrainScene([tile]),
 			structuredInteriorScene: createStructuredInteriorScene(),
@@ -57,7 +57,7 @@ describe("deriveSceneRenderableReadinessModel", () => {
 
 	it("excludes terrain tiles with empty geometry", () => {
 		const readiness = deriveSceneRenderableReadinessModel({
-			assetState: createInitialAssetChannelState(),
+			assetReadModel: emptyAssetReadModel(),
 			terrainScene: createTerrainScene([
 				createTerrainTile({ mesh: createTerrainMesh({ triangleCount: 0 }) }),
 			]),
@@ -73,7 +73,7 @@ describe("deriveSceneRenderableReadinessModel", () => {
 	it("commits structured interior cells with geometry and records missing cell metadata", () => {
 		const cell = createStructuredInteriorCell();
 		const readiness = deriveSceneRenderableReadinessModel({
-			assetState: createInitialAssetChannelState(),
+			assetReadModel: emptyAssetReadModel(),
 			terrainScene: createTerrainScene(),
 			structuredInteriorScene: createStructuredInteriorScene({
 				cells: [cell],
@@ -92,7 +92,7 @@ describe("deriveSceneRenderableReadinessModel", () => {
 
 	it("excludes structured interior cells with empty geometry", () => {
 		const readiness = deriveSceneRenderableReadinessModel({
-			assetState: createInitialAssetChannelState(),
+			assetReadModel: emptyAssetReadModel(),
 			terrainScene: createTerrainScene(),
 			structuredInteriorScene: createStructuredInteriorScene({
 				cells: [
@@ -111,7 +111,7 @@ describe("deriveSceneRenderableReadinessModel", () => {
 
 	it("keeps portal no-render decisions explicit without committing fake candidates", () => {
 		const readiness = deriveSceneRenderableReadinessModel({
-			assetState: createInitialAssetChannelState(),
+			assetReadModel: emptyAssetReadModel(),
 			terrainScene: createTerrainScene(),
 			structuredInteriorScene: createStructuredInteriorScene(),
 			staticRenderableScene: createStaticRenderableScene(),
@@ -130,7 +130,7 @@ describe("deriveSceneRenderableReadinessModel", () => {
 		const validCandidate = createPortalCandidate("portal/valid", 3);
 		const invalidCandidate = createPortalCandidate("portal/invalid", 2);
 		const readiness = deriveSceneRenderableReadinessModel({
-			assetState: createInitialAssetChannelState(),
+			assetReadModel: emptyAssetReadModel(),
 			terrainScene: createTerrainScene(),
 			structuredInteriorScene: createStructuredInteriorScene(),
 			staticRenderableScene: createStaticRenderableScene(),
@@ -148,20 +148,41 @@ describe("deriveSceneRenderableReadinessModel", () => {
 	it("keeps committed output stable when unrelated assets hydrate", () => {
 		const tile = createTerrainTile();
 		const first = deriveSceneRenderableReadinessModel({
-			assetState: createInitialAssetChannelState(),
+			assetReadModel: emptyAssetReadModel(),
 			terrainScene: createTerrainScene([tile]),
 			structuredInteriorScene: createStructuredInteriorScene(),
 			staticRenderableScene: createStaticRenderableScene(),
 			transitionPortalModel: createTransitionPortalModel(),
 		});
-		const secondAssetState: AssetChannelState =
-			createInitialAssetChannelState();
-		secondAssetState.preparedByAssetId["unrelated/asset"] = {
-			request: { assetId: "unrelated/asset" },
-			payload: { kind: "unknown" },
-		} as AssetChannelState["preparedAsset"];
+		const secondAssetReadModel = createTestPreparedAssetResolver([
+			{
+				request: {
+					requestId: "unrelated/asset",
+					assetId: "unrelated/asset",
+					priority: "streaming",
+				},
+				response: {
+					requestId: "unrelated/asset",
+					assetId: "unrelated/asset",
+					payloadKind: "json",
+					payload: { kind: "unknown" },
+				},
+				payload: {
+					kind: "unknown",
+					sourceAssetKind: "unknown",
+					residencyKind: "unknown",
+					provenance: {
+						source: "inline",
+						sourceAssetKind: null,
+						errorCode: null,
+						detail: null,
+					},
+				},
+				preparedAt: "2026-06-09T00:00:00.000Z",
+			} satisfies PreparedAssetRecord,
+		]);
 		const second = deriveSceneRenderableReadinessModel({
-			assetState: secondAssetState,
+			assetReadModel: secondAssetReadModel,
 			terrainScene: createTerrainScene([tile]),
 			structuredInteriorScene: createStructuredInteriorScene(),
 			staticRenderableScene: createStaticRenderableScene(),
@@ -172,6 +193,10 @@ describe("deriveSceneRenderableReadinessModel", () => {
 		expect(second.metrics.committedTerrainTileCount).toBe(1);
 	});
 });
+
+function emptyAssetReadModel() {
+	return createTestPreparedAssetResolver([]);
+}
 
 function statusKey(record: {
 	status: string;

@@ -1,8 +1,4 @@
-import type {
-	AssetChannelState,
-	PreparedTexturePayload,
-} from "../assets/types";
-import { createInitialAssetChannelState } from "../assets/types";
+import type { PreparedTexturePayload } from "../assets/types";
 import { profileBrowserJsScope } from "../diagnostics/browser-js-profiler";
 import { resolveNormalizedPreparedTextureAssetIds } from "../assets/material-texture-preparation-policy";
 import { formatHex32 } from "../landblocks";
@@ -68,6 +64,7 @@ import {
 import {
 	type TerrainBlendTextureRef,
 } from "./terrain-blend-plan";
+import type { RendererAssetReadModel } from "./renderer-asset-read-model";
 import type {
 	LandblockTerrainRenderArtifact,
 	TerrainRenderDrawSliceArtifact,
@@ -283,7 +280,7 @@ export function commitWebgl2TerrainProductResources({
 	store,
 	productKey,
 	artifact,
-	assetState = createInitialAssetChannelState("terrain-product"),
+	assetReadModel,
 	materialTextureCapabilities = defaultWebgl2MaterialTextureCapabilities(),
 	textureFilteringMode = "anisotropic-4x",
 	detailTexturesEnabled = true,
@@ -292,7 +289,7 @@ export function commitWebgl2TerrainProductResources({
 	store: Webgl2WorldResourceStore;
 	productKey: StaticLandblockProductKey;
 	artifact: LandblockTerrainRenderArtifact;
-	assetState?: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	materialTextureCapabilities?: MaterialTextureCapabilities;
 	textureFilteringMode?: TextureFilteringMode;
 	detailTexturesEnabled?: boolean;
@@ -318,7 +315,7 @@ export function commitWebgl2TerrainProductResources({
 	refreshWebgl2TerrainProductDerivedState({
 		gl,
 		store,
-		assetState,
+		assetReadModel,
 		materialTextureCapabilities,
 		textureFilteringMode,
 		detailTexturesEnabled,
@@ -329,7 +326,7 @@ export function commitWebgl2TerrainProductResultResources({
 	gl,
 	store,
 	result,
-	assetState,
+	assetReadModel,
 	materialTextureCapabilities,
 	textureFilteringMode,
 	detailTexturesEnabled,
@@ -337,7 +334,7 @@ export function commitWebgl2TerrainProductResultResources({
 	gl: WebGL2RenderingContext;
 	store: Webgl2WorldResourceStore;
 	result: LandblockRenderProductWorkerResult;
-	assetState?: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	materialTextureCapabilities?: MaterialTextureCapabilities;
 	textureFilteringMode?: TextureFilteringMode;
 	detailTexturesEnabled?: boolean;
@@ -356,7 +353,7 @@ export function commitWebgl2TerrainProductResultResources({
 			texturePagePolicyRevision: result.texturePagePolicyRevision,
 		},
 		artifact,
-		assetState,
+		assetReadModel,
 		materialTextureCapabilities,
 		textureFilteringMode,
 		detailTexturesEnabled,
@@ -367,7 +364,7 @@ export function evictWebgl2TerrainProductResources({
 	gl,
 	store,
 	productKey,
-	assetState = createInitialAssetChannelState("terrain-product"),
+	assetReadModel,
 	materialTextureCapabilities = defaultWebgl2MaterialTextureCapabilities(),
 	textureFilteringMode = "anisotropic-4x",
 	detailTexturesEnabled = true,
@@ -375,7 +372,7 @@ export function evictWebgl2TerrainProductResources({
 	gl: WebGL2RenderingContext;
 	store: Webgl2WorldResourceStore;
 	productKey: StaticLandblockProductKey;
-	assetState?: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	materialTextureCapabilities?: MaterialTextureCapabilities;
 	textureFilteringMode?: TextureFilteringMode;
 	detailTexturesEnabled?: boolean;
@@ -389,7 +386,7 @@ export function evictWebgl2TerrainProductResources({
 	refreshWebgl2TerrainProductDerivedState({
 		gl,
 		store,
-		assetState,
+		assetReadModel,
 		materialTextureCapabilities,
 		textureFilteringMode,
 		detailTexturesEnabled,
@@ -399,14 +396,14 @@ export function evictWebgl2TerrainProductResources({
 export function updateWebgl2TerrainProductSamplerPolicy({
 	gl,
 	store,
-	assetState = createInitialAssetChannelState("terrain-product"),
+	assetReadModel,
 	materialTextureCapabilities = defaultWebgl2MaterialTextureCapabilities(),
 	textureFilteringMode,
 	detailTexturesEnabled = true,
 }: {
 	gl: WebGL2RenderingContext;
 	store: Webgl2WorldResourceStore;
-	assetState?: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	materialTextureCapabilities?: MaterialTextureCapabilities;
 	textureFilteringMode: TextureFilteringMode;
 	detailTexturesEnabled?: boolean;
@@ -414,7 +411,7 @@ export function updateWebgl2TerrainProductSamplerPolicy({
 	refreshWebgl2TerrainProductDerivedState({
 		gl,
 		store,
-		assetState,
+		assetReadModel,
 		materialTextureCapabilities,
 		textureFilteringMode,
 		detailTexturesEnabled,
@@ -470,14 +467,14 @@ function refreshWebgl2TransitionPortalMaskResources(
 function refreshWebgl2TerrainProductDerivedState({
 	gl,
 	store,
-	assetState,
+	assetReadModel,
 	materialTextureCapabilities,
 	textureFilteringMode,
 	detailTexturesEnabled,
 }: {
 	gl: WebGL2RenderingContext;
 	store: Webgl2WorldResourceStore;
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	materialTextureCapabilities: MaterialTextureCapabilities;
 	textureFilteringMode: TextureFilteringMode;
 	detailTexturesEnabled: boolean;
@@ -493,7 +490,7 @@ function refreshWebgl2TerrainProductDerivedState({
 	store.materialFallbackReasonSamples = [];
 	const productTerrainTiles = selectProductOwnedTerrainTiles(store);
 	const terrainPageCandidates = collectTerrainTexturePageAtlasCandidates({
-		assetState,
+		assetReadModel,
 		terrainTiles: productTerrainTiles,
 		materialTextureCapabilities,
 		textureFilteringMode,
@@ -1146,14 +1143,14 @@ function describeTerrainTileReadinessSignature(
 }
 
 function collectTerrainTexturePageAtlasCandidates({
-	assetState,
+	assetReadModel,
 	terrainTiles,
 	materialTextureCapabilities,
 	textureFilteringMode,
 	detailTexturesEnabled,
 	reportDiagnostic,
 }: {
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	terrainTiles: readonly Webgl2TerrainTileResource[];
 	materialTextureCapabilities: MaterialTextureCapabilities;
 	textureFilteringMode: TextureFilteringMode;
@@ -1185,7 +1182,7 @@ function collectTerrainTexturePageAtlasCandidates({
 		}
 		for (const ref of refs) {
 			const readiness = createTerrainTexturePageReadiness({
-				assetState,
+				assetReadModel,
 				ref,
 				tile,
 				blockersByTerrainTileId,
@@ -1205,7 +1202,7 @@ function collectTerrainTexturePageAtlasCandidates({
 			tile.terrainArtifactTexturePageRefs.length === 0
 		) {
 			const detailPlan = resolveTerrainTileDetailPlan({
-				assetState,
+				assetReadModel,
 				tile,
 				materialTextureCapabilities,
 				textureFilteringMode,
@@ -1227,13 +1224,13 @@ function collectTerrainTexturePageAtlasCandidates({
 }
 
 function resolveTerrainTileDetailPlan({
-	assetState,
+	assetReadModel,
 	tile,
 	materialTextureCapabilities,
 	textureFilteringMode,
 	reportDiagnostic,
 }: {
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	tile: Webgl2TerrainTileResource;
 	materialTextureCapabilities: MaterialTextureCapabilities;
 	textureFilteringMode: TextureFilteringMode;
@@ -1243,7 +1240,7 @@ function resolveTerrainTileDetailPlan({
 	candidate: TexturePageAtlasDetailCandidate | null;
 } | null {
 	const overlay = resolveRegionDetailOverlayPlan({
-		assetState,
+		assetReadModel,
 		regionNumber: tile.regionNumber,
 		roleKind: "landscape",
 		reportDiagnostic,
@@ -1252,7 +1249,7 @@ function resolveTerrainTileDetailPlan({
 		return null;
 	}
 	const upload = prepareTerrainDetailTextureUpload({
-		assetState,
+		assetReadModel,
 		overlay,
 		materialTextureCapabilities,
 		textureFilteringMode,
@@ -1282,13 +1279,13 @@ function resolveTerrainTileDetailPlan({
 }
 
 function prepareTerrainDetailTextureUpload({
-	assetState,
+	assetReadModel,
 	overlay,
 	materialTextureCapabilities,
 	textureFilteringMode,
 	reportDiagnostic,
 }: {
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	overlay: ResolvedRegionDetailOverlayPlan;
 	materialTextureCapabilities: MaterialTextureCapabilities;
 	textureFilteringMode: TextureFilteringMode;
@@ -1324,7 +1321,7 @@ function prepareTerrainDetailTextureUpload({
 		samplingPolicy,
 		materialTextureCapabilities,
 		resolvePreparedTextureForRenderSurface(
-			assetState,
+			assetReadModel,
 			overlay.renderSurface,
 			"detail",
 		),
@@ -1487,12 +1484,12 @@ function collectTerrainLayerPlanTextureRefsByRole(
 }
 
 function createTerrainTexturePageReadiness({
-	assetState,
+	assetReadModel,
 	ref,
 	tile,
 	blockersByTerrainTileId,
 }: {
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	ref: TerrainBlendTextureRef;
 	tile: Webgl2TerrainTileResource;
 	blockersByTerrainTileId: Map<string, string[]>;
@@ -1514,7 +1511,7 @@ function createTerrainTexturePageReadiness({
 	}
 
 	const preparedTexture = resolvePreparedTextureForRenderSurface(
-		assetState,
+		assetReadModel,
 		ref.renderSurface,
 		"raw",
 	);
@@ -2043,7 +2040,7 @@ function dedupeTerrainTexturePageBindings(
 }
 
 function resolvePreparedTextureForRenderSurface(
-	assetState: AssetChannelState,
+	assetReadModel: RendererAssetReadModel,
 	renderSurface: TerrainBlendTextureRef["renderSurface"],
 	usage: "raw" | "detail" = "raw",
 ): PreparedTexturePayload | null {
@@ -2051,7 +2048,7 @@ function resolvePreparedTextureForRenderSurface(
 		renderSurface,
 		usage,
 	})) {
-		const asset = assetState.preparedByAssetId[assetId];
+		const asset = assetReadModel.get(assetId);
 		if (asset?.payload.kind === "prepared-texture") {
 			return asset.payload;
 		}

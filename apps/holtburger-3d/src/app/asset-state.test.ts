@@ -57,8 +57,6 @@ describe("asset state reducer", () => {
 			streaming: null,
 			prefetch: null,
 		});
-		expect(state.preparedByAssetId).toEqual({});
-		expect(state.cacheMetadataByAssetId).toEqual({});
 		expect(state.history.map((entry) => entry.status)).toEqual([
 			"prepared",
 			"prepared",

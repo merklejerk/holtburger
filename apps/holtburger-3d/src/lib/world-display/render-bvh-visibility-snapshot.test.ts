@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import type {
-	AssetChannelState,
 	PreparedAssetPayload,
 	PreparedAssetRecord,
 	PreparedEnvCellPayload,
 	PreparedLandblockOutdoorPayload,
 	PreparedTerrainMesh,
 } from "../assets/types";
+import { createTestPreparedAssetResolver } from "../../../test-support/prepared-asset-resolver";
 import {
 	formatEnvCellAssetId,
 	formatLandblockOutdoorAssetId,
@@ -40,7 +40,7 @@ describe("deriveRenderBvhVisibilityMetrics", () => {
 		const envRenderChunk = deriveLandblockRenderChunkPlacement(envCellId);
 
 		const metrics = deriveRenderBvhVisibilityMetrics({
-			assetState: createAssetState([outdoorPayload, envCellPayload]),
+			assetReadModel: createAssetState([outdoorPayload, envCellPayload]),
 			terrainScene: createTerrainScene([createTerrainTile(landblockId)]),
 			staticRenderableScene: createStaticRenderableScene(landblockId),
 			structuredInteriorScene: createStructuredInteriorScene(envCellId),
@@ -79,7 +79,7 @@ describe("deriveRenderBvhVisibilityMetrics", () => {
 		const outdoorPayload = createOutdoorPayload(landblockId);
 
 		const metrics = deriveRenderBvhVisibilityMetrics({
-			assetState: createAssetState([outdoorPayload]),
+			assetReadModel: createAssetState([outdoorPayload]),
 			terrainScene: createTerrainScene([createTerrainTile(0x0204ffff)]),
 			staticRenderableScene: createStaticRenderableScene(landblockId),
 			structuredInteriorScene: createEmptyStructuredInteriorSceneModel(),
@@ -101,7 +101,7 @@ describe("deriveRenderBvhVisibilityMetrics", () => {
 		const envRenderChunk = deriveLandblockRenderChunkPlacement(envCellId);
 
 		const metrics = deriveRenderBvhVisibilityMetrics({
-			assetState: createAssetState([]),
+			assetReadModel: createAssetState([]),
 			terrainScene: createTerrainScene([]),
 			staticRenderableScene: createEmptyStaticRenderableSceneModel(),
 			structuredInteriorScene: createStructuredInteriorScene(envCellId),
@@ -135,7 +135,7 @@ describe("deriveRenderBvhVisibilityMetrics", () => {
 		const envRenderChunk = deriveLandblockRenderChunkPlacement(envCellId);
 
 		const metrics = deriveRenderBvhVisibilityMetrics({
-			assetState: createAssetState([]),
+			assetReadModel: createAssetState([]),
 			terrainScene: createTerrainScene([]),
 			staticRenderableScene: createEmptyStaticRenderableSceneModel(),
 			structuredInteriorScene: createEmptyStructuredInteriorSceneModel(),
@@ -169,7 +169,7 @@ describe("deriveRenderBvhVisibilityMetrics", () => {
 		const terrainRenderChunk = deriveLandblockRenderChunkPlacement(landblockId);
 
 		const metrics = deriveRenderBvhVisibilityMetrics({
-			assetState: createAssetState([]),
+			assetReadModel: createAssetState([]),
 			terrainScene: createTerrainScene([]),
 			staticRenderableScene: createEmptyStaticRenderableSceneModel(),
 			structuredInteriorScene: createEmptyStructuredInteriorSceneModel(),
@@ -197,7 +197,7 @@ describe("deriveRenderBvhVisibilityMetrics", () => {
 		const renderChunk = deriveLandblockRenderChunkPlacement(landblockId);
 
 		const metrics = deriveRenderBvhVisibilityMetrics({
-			assetState: createAssetState([createOutdoorPayload(landblockId)]),
+			assetReadModel: createAssetState([createOutdoorPayload(landblockId)]),
 			terrainScene: createTerrainScene([]),
 			staticRenderableScene: createEmptyStaticRenderableSceneModel(),
 			structuredInteriorScene: createEmptyStructuredInteriorSceneModel(),
@@ -464,18 +464,8 @@ function createTerrainArtifact(
 	};
 }
 
-function createAssetState(payloads: PreparedAssetPayload[]): AssetChannelState {
-	return {
-		preparedByAssetId: Object.fromEntries(
-			payloads.map((payload) => [assetIdForPayload(payload), record(payload)]),
-		),
-		pendingByRequestId: {},
-		diagnostics: {
-			prepared: { total: payloads.length, byKind: {} },
-			retained: { total: payloads.length, byKind: {} },
-			evicted: { total: 0, byKind: {} },
-		},
-	};
+function createAssetState(payloads: PreparedAssetPayload[]) {
+	return createTestPreparedAssetResolver(payloads.map(record));
 }
 
 function record(payload: PreparedAssetPayload): PreparedAssetRecord {

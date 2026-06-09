@@ -2,8 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import type { BrowserLocationSelection } from "../../app/browser-mode";
 import {
-	createInitialAssetChannelState,
-	type AssetChannelState,
 	type PreparedAssetProvenance,
 	type PreparedAssetRecord,
 	type PreparedEnvCellPayload,
@@ -11,6 +9,7 @@ import {
 	type PreparedPolygonSetRenderGeometry,
 	type PreparedSetupModelPayload,
 } from "../assets/types";
+import { createTestPreparedAssetResolver } from "../../../test-support/prepared-asset-resolver";
 import {
 	formatEnvCellAssetId,
 	formatLandblockOutdoorAssetId,
@@ -310,12 +309,8 @@ const PROVENANCE: PreparedAssetProvenance = {
 	detail: null,
 };
 
-function createAssetState(records: PreparedAssetRecord[]): AssetChannelState {
-	const state = createInitialAssetChannelState();
-	state.preparedByAssetId = Object.fromEntries(
-		records.map((record) => [record.request.assetId, record]),
-	);
-	return state;
+function createAssetState(records: PreparedAssetRecord[]) {
+	return createTestPreparedAssetResolver(records);
 }
 
 function createInteriorDestination(

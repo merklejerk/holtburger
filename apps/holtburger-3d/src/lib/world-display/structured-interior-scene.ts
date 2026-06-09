@@ -3,9 +3,7 @@ import {
 	type BrowserLocationSelection,
 } from "../../app/browser-mode";
 import type {
-	AssetChannelState,
 	PreparedInteriorCellStructure,
-	PreparedAssetRecord,
 	PreparedEnvCellPayload,
 	PreparedIndoorCellPortal,
 	PreparedPolygonSetBspNode,
@@ -14,7 +12,7 @@ import type {
 } from "../assets/types";
 import {
 	deriveBrowserFocusedStructuredInteriorMembershipPolicy,
-	deriveStructuredInteriorCoverage,
+	deriveStructuredInteriorCoverageFromLookup,
 	type StructuredInteriorCoverage,
 } from "../assets/structured-interior-coverage";
 import type { PlacementTransformDto } from "../host/contracts";
@@ -29,6 +27,7 @@ import {
 } from "./render-chunks";
 import { WORLD_RENDER_DOMAIN, formatRenderDomainKey } from "./render-domains";
 import { describeRegionDetailRoleSignature } from "./region-detail-overlays";
+import type { RendererAssetReadModel } from "./renderer-asset-read-model";
 
 export interface LinkedOutdoorInteriorSelection {
 	envCellIds: number[];
@@ -76,7 +75,7 @@ export function createEmptyStructuredInteriorSceneModel(): StructuredInteriorSce
 }
 
 export function deriveStructuredInteriorSceneModel(
-	assetState: AssetChannelState,
+	assetReadModel: RendererAssetReadModel,
 	browserDestination: BrowserLocationSelection | null = null,
 	linkedOutdoorInteriors: LinkedOutdoorInteriorSelection | null = null,
 	structuredInteriorCoverage: StructuredInteriorCoverage | null = null,
@@ -86,7 +85,7 @@ export function deriveStructuredInteriorSceneModel(
 	if (browserFocusEnvCellId !== null) {
 		return deriveBrowserFocusedStructuredInteriorSceneModel(
 			browserFocusEnvCellId,
-			assetState,
+			assetReadModel,
 			structuredInteriorCoverage,
 		);
 	}
@@ -95,14 +94,14 @@ export function deriveStructuredInteriorSceneModel(
 		return deriveStructuredInteriorSceneForEnvCells(
 			null,
 			structuredInteriorCoverage?.envCellIds ??
-				deriveStructuredInteriorCoverage(
+				deriveStructuredInteriorCoverageFromLookup(
 					{
 						kind: "landblock-closure",
 						seedEnvCellIds: linkedOutdoorInteriors.envCellIds,
 					},
-					assetState.preparedByAssetId,
+					assetReadModel,
 				).envCellIds,
-			assetState,
+			assetReadModel,
 		);
 	}
 
@@ -116,36 +115,33 @@ export function deriveStructuredInteriorSceneModel(
 
 function deriveBrowserFocusedStructuredInteriorSceneModel(
 	focusEnvCellId: number,
-	assetState: AssetChannelState,
+	assetReadModel: RendererAssetReadModel,
 	structuredInteriorCoverage: StructuredInteriorCoverage | null,
 ): StructuredInteriorSceneModel {
 	const activeEnvCellIds =
 		structuredInteriorCoverage?.envCellIds ??
-		deriveBrowserFocusedEnvCellIdsFromTopology(focusEnvCellId, assetState) ??
-		deriveStructuredInteriorCoverage(
+		deriveBrowserFocusedEnvCellIdsFromTopology(focusEnvCellId, assetReadModel) ??
+		deriveStructuredInteriorCoverageFromLookup(
 			deriveBrowserFocusedStructuredInteriorMembershipPolicy(focusEnvCellId),
-			assetState.preparedByAssetId,
+			assetReadModel,
 		).envCellIds;
 
 	return deriveStructuredInteriorSceneForEnvCells(
 		focusEnvCellId,
 		activeEnvCellIds,
-		assetState,
+		assetReadModel,
 	);
 }
 
 function deriveStructuredInteriorSceneForEnvCells(
 	focusEnvCellId: number | null,
 	activeEnvCellIds: number[],
-	assetState: AssetChannelState,
+	assetReadModel: RendererAssetReadModel,
 ): StructuredInteriorSceneModel {
 	const cells: StructuredInteriorCell[] = [];
 
 	for (const envCellId of activeEnvCellIds) {
-		const envCell = findPreparedEnvCell(
-			assetState.preparedByAssetId,
-			envCellId,
-		);
+		const envCell = findPreparedEnvCell(assetReadModel, envCellId);
 		if (envCell) {
 			const renderChunk = deriveStructuredCellRenderChunk(envCellId);
 			cells.push({
@@ -180,7 +176,7 @@ function deriveStructuredInteriorSceneForEnvCells(
 				renderGeometry: envCell.renderGeometry,
 				debugColorKey: `env-cell:${envCellId}:${envCell.environmentId}:${formatHex32(envCell.cellStructureId)}`,
 				detailSignature: describeRegionDetailRoleSignature({
-					assetState,
+					assetReadModel,
 					regionNumber: envCell.regionNumber,
 					roleKind: "environment",
 				}),
@@ -197,19 +193,18 @@ function deriveStructuredInteriorSceneForEnvCells(
 		missingInteriorGeometryAssetIds: [],
 		missingCellStructureKeys: [],
 		statusText: describeStructuredInteriorStatus(cells, focusEnvCellId),
-		cacheText: describePreparedIndoorCache(assetState),
+		cacheText: describePreparedIndoorCache(assetReadModel),
 	};
 }
 
 function deriveBrowserFocusedEnvCellIdsFromTopology(
 	focusEnvCellId: number,
-	assetState: AssetChannelState,
+	assetReadModel: RendererAssetReadModel,
 ): number[] | null {
 	const focusLandblockPrefix = focusEnvCellId & 0xffff0000;
-	const focusLandblockAsset =
-		assetState.preparedByAssetId[
-			formatLandblockTopologyAssetId(focusEnvCellId)
-		];
+	const focusLandblockAsset = assetReadModel.get(
+		formatLandblockTopologyAssetId(focusEnvCellId),
+	);
 	const envCellIds =
 		focusLandblockAsset?.payload.kind === "landblock-topology"
 			? focusLandblockAsset.payload.envCells
@@ -225,10 +220,10 @@ function deriveBrowserFocusedEnvCellIdsFromTopology(
 }
 
 function findPreparedEnvCell(
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	assetReadModel: RendererAssetReadModel,
 	envCellId: number,
 ): PreparedEnvCellPayload | null {
-	const asset = preparedByAssetId[formatEnvCellAssetId(envCellId)];
+	const asset = assetReadModel.get(formatEnvCellAssetId(envCellId));
 	if (asset?.payload.kind !== "env-cell") {
 		return null;
 	}
@@ -267,10 +262,12 @@ function describeStructuredInteriorStatus(
 	return `Renderer has ${cells.length} structured interior cell${cells.length === 1 ? "" : "s"} ready around focus ${focusLabel}.`;
 }
 
-function describePreparedIndoorCache(assetState: AssetChannelState): string {
-	const preparedEnvCellCount = Object.values(
-		assetState.preparedByAssetId,
-	).filter((asset) => asset.payload.kind === "env-cell").length;
+function describePreparedIndoorCache(
+	assetReadModel: RendererAssetReadModel,
+): string {
+	const preparedEnvCellCount = [...assetReadModel.values()].filter(
+		(asset) => asset.payload.kind === "env-cell",
+	).length;
 
 	return `Structured interior cache contains ${preparedEnvCellCount} prepared env-cell asset${preparedEnvCellCount === 1 ? "" : "s"}.`;
 }

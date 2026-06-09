@@ -1,9 +1,9 @@
 import type {
-	AssetChannelState,
 	PreparedMaterialRecipePayload,
 	PreparedRenderSurfacePayload,
 } from "../assets/types";
 import { formatHex32 } from "../landblocks";
+import type { RendererAssetReadModel } from "./renderer-asset-read-model";
 
 export interface ResolvedMaterialRenderSurface {
 	assetId: string;
@@ -12,7 +12,7 @@ export interface ResolvedMaterialRenderSurface {
 
 export function resolveFirstMaterialRenderSurface(options: {
 	recipe: PreparedMaterialRecipePayload;
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 }): ResolvedMaterialRenderSurface | null {
 	const assetIds =
 		options.recipe.source.kind === "texture"
@@ -24,7 +24,7 @@ export function resolveFirstMaterialRenderSurface(options: {
 	const asset =
 		assetId === undefined
 			? null
-			: options.assetState.preparedByAssetId[assetId];
+			: options.assetReadModel.get(assetId);
 	return asset?.payload.kind === "render-surface"
 		? { assetId, renderSurface: asset.payload }
 		: null;

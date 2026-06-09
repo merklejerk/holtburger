@@ -1,20 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import {
-	createInitialAssetChannelState,
-	type AssetChannelState,
 	type PreparedAssetPayload,
 	type PreparedAssetRecord,
 	type PreparedTerrainQuad,
 } from "../assets/types";
-import { createPreparedAssetResolverFromRecordSnapshot } from "../assets/prepared-asset-store";
+import { createTestPreparedAssetResolver } from "../../../test-support/prepared-asset-resolver";
 import { buildTerrainMaterialResourcePlan } from "./terrain-materials";
 
 describe("buildTerrainMaterialResourcePlan", () => {
-	it("reports a missing terrain material table without hiding referenced pcodes", () => {
-		const plan = buildTerrainMaterialResourcePlan({
-			preparedAssetResolver: createResolver(createInitialAssetChannelState()),
-			regionNumber: 1,
+		it("reports a missing terrain material table without hiding referenced pcodes", () => {
+			const plan = buildTerrainMaterialResourcePlan({
+				preparedAssetResolver: createTestPreparedAssetResolver(),
+				regionNumber: 1,
 			quads: [
 				createTerrainQuad({ pcode: 1234, cornerTerrainCodes: [1, 2, 3, 4] }),
 			],
@@ -29,22 +27,21 @@ describe("buildTerrainMaterialResourcePlan", () => {
 		);
 	});
 
-	it("summarizes ready terrain table and selected render-surface dependencies", () => {
-		const state = createInitialAssetChannelState();
-		state.preparedByAssetId = indexByAssetId([
-			createRecord("terrain-material/1", createTerrainMaterialPayload()),
-			createRecord(
-				"surface-texture/05000010",
+		it("summarizes ready terrain table and selected render-surface dependencies", () => {
+			const records = [
+				createRecord("terrain-material/1", createTerrainMaterialPayload()),
+				createRecord(
+					"surface-texture/05000010",
 				createSurfaceTexturePayload(0x06000010),
 			),
-			createRecord(
-				"render-surface/06000010",
-				createRenderSurfacePayload(0x06000010, 0x14),
-			),
-		]);
+				createRecord(
+					"render-surface/06000010",
+					createRenderSurfacePayload(0x06000010, 0x14),
+				),
+			];
 
-		const plan = buildTerrainMaterialResourcePlan({
-			preparedAssetResolver: createResolver(state),
+			const plan = buildTerrainMaterialResourcePlan({
+				preparedAssetResolver: createTestPreparedAssetResolver(records),
 			regionNumber: 1,
 			quads: [
 				createTerrainQuad({ pcode: 55, cornerTerrainCodes: [1, 1, 1, 1] }),
@@ -60,22 +57,21 @@ describe("buildTerrainMaterialResourcePlan", () => {
 		expect(plan.unsupportedRenderSurfaceAssetIds).toEqual([]);
 	});
 
-	it("separates missing source textures from unsupported selected render surfaces", () => {
-		const state = createInitialAssetChannelState();
-		state.preparedByAssetId = indexByAssetId([
-			createRecord("terrain-material/1", createTerrainMaterialPayload()),
-			createRecord(
-				"surface-texture/05000010",
+		it("separates missing source textures from unsupported selected render surfaces", () => {
+			const records = [
+				createRecord("terrain-material/1", createTerrainMaterialPayload()),
+				createRecord(
+					"surface-texture/05000010",
 				createSurfaceTexturePayload(0x06000010),
 			),
-			createRecord(
-				"render-surface/06000010",
-				createRenderSurfacePayload(0x06000010, 0xffff),
-			),
-		]);
+				createRecord(
+					"render-surface/06000010",
+					createRenderSurfacePayload(0x06000010, 0xffff),
+				),
+			];
 
-		const plan = buildTerrainMaterialResourcePlan({
-			preparedAssetResolver: createResolver(state),
+			const plan = buildTerrainMaterialResourcePlan({
+				preparedAssetResolver: createTestPreparedAssetResolver(records),
 			regionNumber: 1,
 			quads: [
 				createTerrainQuad({ pcode: 55, cornerTerrainCodes: [1, 2, 1, 2] }),
@@ -89,11 +85,10 @@ describe("buildTerrainMaterialResourcePlan", () => {
 		]);
 	});
 
-	it("does not include region-profile detail textures in base terrain readiness", () => {
-		const state = createInitialAssetChannelState();
-		state.preparedByAssetId = indexByAssetId([
-			createRecord("terrain-material/1", createTerrainMaterialPayload()),
-			createRecord("region-render-profile/1", createRegionRenderProfilePayload()),
+		it("does not include region-profile detail textures in base terrain readiness", () => {
+			const records = [
+				createRecord("terrain-material/1", createTerrainMaterialPayload()),
+				createRecord("region-render-profile/1", createRegionRenderProfilePayload()),
 			createRecord(
 				"surface-texture/05000010",
 				createSurfaceTexturePayload(0x06000010),
@@ -106,14 +101,14 @@ describe("buildTerrainMaterialResourcePlan", () => {
 				"surface-texture/05000020",
 				createSurfaceTexturePayload(0x06000020),
 			),
-			createRecord(
-				"render-surface/06000020",
-				createRenderSurfacePayload(0x06000020, 0xffff),
-			),
-		]);
+				createRecord(
+					"render-surface/06000020",
+					createRenderSurfacePayload(0x06000020, 0xffff),
+				),
+			];
 
-		const plan = buildTerrainMaterialResourcePlan({
-			preparedAssetResolver: createResolver(state),
+			const plan = buildTerrainMaterialResourcePlan({
+				preparedAssetResolver: createTestPreparedAssetResolver(records),
 			regionNumber: 1,
 			quads: [
 				createTerrainQuad({ pcode: 55, cornerTerrainCodes: [1, 1, 1, 1] }),
@@ -123,23 +118,7 @@ describe("buildTerrainMaterialResourcePlan", () => {
 		expect(plan.status).toBe("ready");
 		expect(plan.unsupportedRenderSurfaceAssetIds).toEqual([]);
 	});
-});
-
-function createResolver(assetState: AssetChannelState) {
-	return createPreparedAssetResolverFromRecordSnapshot({
-		preparedByAssetId: assetState.preparedByAssetId,
-		cacheMetadataByAssetId: assetState.cacheMetadataByAssetId,
-		cacheDiagnostics: assetState.cacheDiagnostics,
 	});
-}
-
-function indexByAssetId(
-	records: readonly PreparedAssetRecord[],
-): AssetChannelState["preparedByAssetId"] {
-	return Object.fromEntries(
-		records.map((record) => [record.request.assetId, record]),
-	);
-}
 
 function createRecord(
 	assetId: string,

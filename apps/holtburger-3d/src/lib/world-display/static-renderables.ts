@@ -4,7 +4,6 @@ import {
 	isIndoorBrowserDestination,
 } from "../../app/browser-mode";
 import type {
-	AssetChannelState,
 	PreparedEnvCellPayload,
 	PreparedAssetRecord,
 	PreparedGfxObjPayload,
@@ -14,11 +13,11 @@ import type {
 	PreparedTextureVelocity,
 } from "../assets/types";
 import {
-	deriveTopologyEnvCellIdsForLandblocks,
+	deriveTopologyEnvCellIdsForLandblocksFromAssets,
 	deriveTerrainFocusLandblockId,
 } from "../assets/scene-asset-request-planner";
 import {
-	deriveStructuredInteriorCoverage,
+	deriveStructuredInteriorCoverageFromLookup,
 	type StructuredInteriorCoverage,
 } from "../assets/structured-interior-coverage";
 import type { PlacementTransformDto, Vec3Dto } from "../host/contracts";
@@ -60,6 +59,7 @@ import {
 	normalizeTextureVelocity,
 	type TextureVelocityRenderState,
 } from "./texture-velocity";
+import type { RendererAssetReadModel } from "./renderer-asset-read-model";
 
 type StaticRenderableInstanceKind =
 	| "indoor-static"
@@ -130,7 +130,7 @@ export interface OutdoorStaticRenderableSelection {
 }
 
 export function deriveStaticRenderableSceneModel(
-	assetState: AssetChannelState,
+	assetReadModel: RendererAssetReadModel,
 	browserDestination: BrowserLocationSelection | null = null,
 	detailLodRadius = 1,
 	structuredInteriorCoverage: StructuredInteriorCoverage | null = null,
@@ -142,7 +142,7 @@ export function deriveStaticRenderableSceneModel(
 
 	if (isIndoorBrowserDestination(browserDestination)) {
 		return deriveIndoorStaticRenderableSceneModel(
-			assetState,
+			assetReadModel,
 			browserDestination,
 			structuredInteriorCoverage,
 		);
@@ -169,21 +169,21 @@ export function deriveStaticRenderableSceneModel(
 	);
 	const activeInteriorEnvCellIds = new Set(
 		structuredInteriorCoverage?.envCellIds ??
-			deriveStructuredInteriorCoverage(
+			deriveStructuredInteriorCoverageFromLookup(
 				{
 					kind: "landblock-closure",
 					seedEnvCellIds: [
-						...deriveTopologyEnvCellIdsForLandblocks(
-							assetState.preparedByAssetId,
+						...deriveTopologyEnvCellIdsForLandblocksFromAssets(
+							assetReadModel.values(),
 							envCellLandblockSet,
 						),
 					],
 				},
-				assetState.preparedByAssetId,
+				assetReadModel,
 			).envCellIds,
 	);
 	const sourceInstances = collectOutdoorStaticRenderableSourceInstances(
-		assetState,
+		assetReadModel,
 		{
 			buildingLandblockIds: buildingLandblockSet,
 			detailLandblockIds: detailLandblockSet,
@@ -191,7 +191,7 @@ export function deriveStaticRenderableSceneModel(
 	)
 		.concat(
 			collectEnvCellStaticRenderableSourceInstances(
-				assetState,
+				assetReadModel,
 				activeInteriorEnvCellIds,
 			),
 		)
@@ -202,7 +202,7 @@ export function deriveStaticRenderableSceneModel(
 	const missingSetupAppearanceAssetIds = new Set<string>();
 	const parts: StaticRenderablePart[] = [
 		...collectOutdoorStaticRenderableParts(
-			assetState,
+			assetReadModel,
 			{
 				buildingLandblockIds: buildingLandblockSet,
 				detailLandblockIds: detailLandblockSet,
@@ -212,7 +212,7 @@ export function deriveStaticRenderableSceneModel(
 			missingSetupAppearanceAssetIds,
 		),
 		...collectEnvCellStaticRenderableParts(
-			assetState,
+			assetReadModel,
 			activeInteriorEnvCellIds,
 			missingSourceAssetIds,
 			missingGfxAssetIds,
@@ -233,24 +233,24 @@ export function deriveStaticRenderableSceneModel(
 }
 
 function deriveIndoorStaticRenderableSceneModel(
-	assetState: AssetChannelState,
+	assetReadModel: RendererAssetReadModel,
 	browserDestination: BrowserLocationSelection | null,
 	structuredInteriorCoverage: StructuredInteriorCoverage | null,
 ): StaticRenderableSceneModel {
 	const activeEnvCellIds = deriveActiveInteriorCellIds(
-		assetState,
+		assetReadModel,
 		browserDestination,
 		structuredInteriorCoverage,
 	);
 	const sourceInstances = collectEnvCellStaticRenderableSourceInstances(
-		assetState,
+		assetReadModel,
 		activeEnvCellIds,
 	).sort(compareSourceInstances);
 	const missingSourceAssetIds = new Set<string>();
 	const missingGfxAssetIds = new Set<string>();
 	const missingSetupAppearanceAssetIds = new Set<string>();
 	const parts: StaticRenderablePart[] = collectEnvCellStaticRenderableParts(
-		assetState,
+		assetReadModel,
 		activeEnvCellIds,
 		missingSourceAssetIds,
 		missingGfxAssetIds,
@@ -305,31 +305,31 @@ function groupStaticRenderablePartsByRenderGroupKey(
 }
 
 export function isPreparedGfxObjAsset(
-	asset: PreparedAssetRecord | undefined,
+	asset: PreparedAssetRecord | null | undefined,
 ): asset is PreparedAssetRecord & { payload: PreparedGfxObjPayload } {
 	return asset?.payload.kind === "gfx-obj";
 }
 
 function isPreparedSetupModelAsset(
-	asset: PreparedAssetRecord | undefined,
+	asset: PreparedAssetRecord | null | undefined,
 ): asset is PreparedAssetRecord & { payload: PreparedSetupModelPayload } {
 	return asset?.payload.kind === "setup-model";
 }
 
 function isPreparedSetupAppearanceAsset(
-	asset: PreparedAssetRecord | undefined,
+	asset: PreparedAssetRecord | null | undefined,
 ): asset is PreparedAssetRecord & { payload: PreparedSetupAppearancePayload } {
 	return asset?.payload.kind === "setup-appearance";
 }
 
 function isPreparedLandblockOutdoorAsset(
-	asset: PreparedAssetRecord | undefined,
+	asset: PreparedAssetRecord | null | undefined,
 ): asset is PreparedAssetRecord & { payload: PreparedLandblockOutdoorPayload } {
 	return asset?.payload.kind === "landblock-outdoor";
 }
 
 function isPreparedEnvCellAsset(
-	asset: PreparedAssetRecord | undefined,
+	asset: PreparedAssetRecord | null | undefined,
 ): asset is PreparedAssetRecord & { payload: PreparedEnvCellPayload } {
 	return asset?.payload.kind === "env-cell";
 }
@@ -348,7 +348,7 @@ export function createEmptyStaticRenderableSceneModel(): StaticRenderableSceneMo
 }
 
 function collectOutdoorStaticRenderableSourceInstances(
-	assetState: AssetChannelState,
+	assetReadModel: RendererAssetReadModel,
 	selection: {
 		buildingLandblockIds: ReadonlySet<number>;
 		detailLandblockIds: ReadonlySet<number>;
@@ -359,8 +359,7 @@ function collectOutdoorStaticRenderableSourceInstances(
 		...selection.detailLandblockIds,
 	]);
 	return [...landblockIds].flatMap((landblockId) => {
-		const asset =
-			assetState.preparedByAssetId[formatLandblockOutdoorAssetId(landblockId)];
+		const asset = assetReadModel.get(formatLandblockOutdoorAssetId(landblockId));
 		if (!isPreparedLandblockOutdoorAsset(asset)) {
 			return [];
 		}
@@ -373,11 +372,11 @@ function collectOutdoorStaticRenderableSourceInstances(
 }
 
 function collectEnvCellStaticRenderableSourceInstances(
-	assetState: AssetChannelState,
+	assetReadModel: RendererAssetReadModel,
 	activeEnvCellIds: ReadonlySet<number>,
 ): StaticRenderableSourceInstance[] {
 	return [...activeEnvCellIds].flatMap((envCellId) => {
-		const asset = assetState.preparedByAssetId[formatEnvCellAssetId(envCellId)];
+		const asset = assetReadModel.get(formatEnvCellAssetId(envCellId));
 		if (!isPreparedEnvCellAsset(asset)) {
 			return [];
 		}
@@ -468,7 +467,7 @@ function createStaticRenderablePart(
 		partPlacements: PlacementTransformDto[];
 		scale: Vec3Dto;
 		textureVelocity?: TextureVelocityRenderState | null;
-		assetState: AssetChannelState;
+		assetReadModel: RendererAssetReadModel;
 	},
 ): StaticRenderablePart {
 	const debugColorKey = `${instance.sourceAssetId}:${formatHexId(part.gfxObjId)}:${part.partIndex}`;
@@ -483,7 +482,7 @@ function createStaticRenderablePart(
 		describeTextureVelocitySignature(textureVelocity);
 	const detailRoleKind = staticRenderableDetailRoleKindForKind(instance.kind);
 	const detailSignature = describeRegionDetailRoleSignature({
-		assetState: part.assetState,
+		assetReadModel: part.assetReadModel,
 		regionNumber: instance.regionNumber,
 		roleKind: detailRoleKind,
 	});
@@ -542,7 +541,7 @@ function multiplyScale(left: Vec3Dto, right: Vec3Dto): Vec3Dto {
 }
 
 function deriveActiveInteriorCellIds(
-	assetState: AssetChannelState,
+	assetReadModel: RendererAssetReadModel,
 	browserDestination: BrowserLocationSelection | null,
 	structuredInteriorCoverage: StructuredInteriorCoverage | null,
 ): Set<number> {
@@ -554,12 +553,12 @@ function deriveActiveInteriorCellIds(
 		browserDestinationToInteriorCellId(browserDestination);
 	if (browserFocusEnvCellId !== null) {
 		return new Set(
-			deriveStructuredInteriorCoverage(
+			deriveStructuredInteriorCoverageFromLookup(
 				{
 					kind: "landblock-closure",
 					seedEnvCellIds: [browserFocusEnvCellId],
 				},
-				assetState.preparedByAssetId,
+				assetReadModel,
 			).envCellIds,
 		);
 	}
@@ -568,7 +567,7 @@ function deriveActiveInteriorCellIds(
 }
 
 function collectOutdoorStaticRenderableParts(
-	assetState: AssetChannelState,
+	assetReadModel: RendererAssetReadModel,
 	selection: {
 		buildingLandblockIds: ReadonlySet<number>;
 		detailLandblockIds: ReadonlySet<number>;
@@ -578,12 +577,12 @@ function collectOutdoorStaticRenderableParts(
 	missingSetupAppearanceAssetIds: Set<string>,
 ): StaticRenderablePart[] {
 	return collectOutdoorStaticRenderableSourceInstances(
-		assetState,
+		assetReadModel,
 		selection,
 	).flatMap((instance) =>
 		expandStaticRenderableSourceInstanceParts(
 			instance,
-			assetState,
+			assetReadModel,
 			missingSourceAssetIds,
 			missingGfxAssetIds,
 			missingSetupAppearanceAssetIds,
@@ -592,19 +591,19 @@ function collectOutdoorStaticRenderableParts(
 }
 
 function collectEnvCellStaticRenderableParts(
-	assetState: AssetChannelState,
+	assetReadModel: RendererAssetReadModel,
 	activeEnvCellIds: ReadonlySet<number>,
 	missingSourceAssetIds: Set<string>,
 	missingGfxAssetIds: Set<string>,
 	missingSetupAppearanceAssetIds: Set<string>,
 ): StaticRenderablePart[] {
 	return collectEnvCellStaticRenderableSourceInstances(
-		assetState,
+		assetReadModel,
 		activeEnvCellIds,
 	).flatMap((instance) =>
 		expandStaticRenderableSourceInstanceParts(
 			instance,
-			assetState,
+			assetReadModel,
 			missingSourceAssetIds,
 			missingGfxAssetIds,
 			missingSetupAppearanceAssetIds,
@@ -614,12 +613,12 @@ function collectEnvCellStaticRenderableParts(
 
 function expandStaticRenderableSourceInstanceParts(
 	instance: StaticRenderableSourceInstance,
-	assetState: AssetChannelState,
+	assetReadModel: RendererAssetReadModel,
 	missingSourceAssetIds: Set<string>,
 	missingGfxAssetIds: Set<string>,
 	missingSetupAppearanceAssetIds: Set<string>,
 ): StaticRenderablePart[] {
-	const sourceAsset = assetState.preparedByAssetId[instance.sourceAssetId];
+	const sourceAsset = assetReadModel.get(instance.sourceAssetId);
 	if (!sourceAsset) {
 		missingSourceAssetIds.add(instance.sourceAssetId);
 		return [];
@@ -635,20 +634,20 @@ function expandStaticRenderableSourceInstanceParts(
 				materialSlots: resolveGfxObjMaterialSlots(sourceAsset.payload),
 				partPlacements: [],
 				scale: UNIT_SCALE,
-				assetState,
+				assetReadModel,
 			}),
 		];
 	}
 
 	if (isPreparedSetupModelAsset(sourceAsset)) {
 		const setupAppearance = findPreparedSetupAppearance(
-			assetState,
+			assetReadModel,
 			sourceAsset.payload,
 		);
 		if (setupAppearance) {
 			return expandSetupAppearanceParts({
 				instance,
-				assetState,
+				assetReadModel,
 				setupModel: sourceAsset.payload,
 				setupAppearance,
 				missingGfxAssetIds,
@@ -659,7 +658,7 @@ function expandStaticRenderableSourceInstanceParts(
 		);
 		return sourceAsset.payload.parts.flatMap((part) => {
 			if (
-				!isPreparedGfxObjAsset(assetState.preparedByAssetId[part.gfxObjAssetId])
+				!isPreparedGfxObjAsset(assetReadModel.get(part.gfxObjAssetId))
 			) {
 				missingGfxAssetIds.add(part.gfxObjAssetId);
 				return [];
@@ -672,7 +671,7 @@ function expandStaticRenderableSourceInstanceParts(
 					gfxObjAssetId: part.gfxObjAssetId,
 					materialAppearanceContext:
 						createBaseMaterialAppearanceContext("setup-base"),
-					materialSlots: resolveSetupPartMaterialSlots(assetState, part),
+					materialSlots: resolveSetupPartMaterialSlots(assetReadModel, part),
 					partPlacements: deriveSetupPartDefaultPlacements(
 						sourceAsset.payload,
 						part.partIndex,
@@ -682,7 +681,7 @@ function expandStaticRenderableSourceInstanceParts(
 						sourceAsset.payload,
 						part.partIndex,
 					),
-					assetState,
+					assetReadModel,
 				}),
 			];
 		});
@@ -693,13 +692,12 @@ function expandStaticRenderableSourceInstanceParts(
 }
 
 function findPreparedSetupAppearance(
-	assetState: AssetChannelState,
+	assetReadModel: RendererAssetReadModel,
 	setupModel: PreparedSetupModelPayload,
 ): PreparedSetupAppearancePayload | null {
-	const asset =
-		assetState.preparedByAssetId[
-			formatSetupAppearanceAssetId(setupModel.setupModelId)
-		];
+	const asset = assetReadModel.get(
+		formatSetupAppearanceAssetId(setupModel.setupModelId),
+	);
 	if (
 		!isPreparedSetupAppearanceAsset(asset) ||
 		asset.payload.setupModelId !== setupModel.setupModelId
@@ -711,7 +709,7 @@ function findPreparedSetupAppearance(
 
 function expandSetupAppearanceParts(options: {
 	instance: StaticRenderableSourceInstance;
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	setupModel: PreparedSetupModelPayload;
 	setupAppearance: PreparedSetupAppearancePayload;
 	missingGfxAssetIds: Set<string>;
@@ -721,9 +719,7 @@ function expandSetupAppearanceParts(options: {
 	);
 	return options.setupAppearance.parts.flatMap((part) => {
 		if (
-			!isPreparedGfxObjAsset(
-				options.assetState.preparedByAssetId[part.gfxObjAssetId],
-			)
+			!isPreparedGfxObjAsset(options.assetReadModel.get(part.gfxObjAssetId))
 		) {
 			options.missingGfxAssetIds.add(part.gfxObjAssetId);
 			return [];
@@ -739,7 +735,7 @@ function expandSetupAppearanceParts(options: {
 				gfxObjAssetId: part.gfxObjAssetId,
 				materialAppearanceContext: appearanceContext,
 				materialSlots: resolveSetupAppearancePartMaterialSlots(
-					options.assetState,
+					options.assetReadModel,
 					part,
 				),
 				partPlacements: deriveSetupPartDefaultPlacements(
@@ -751,7 +747,7 @@ function expandSetupAppearanceParts(options: {
 					options.setupModel,
 					part.partIndex,
 				),
-				assetState: options.assetState,
+				assetReadModel: options.assetReadModel,
 			}),
 		];
 	});
@@ -781,10 +777,10 @@ function deriveSetupPartTextureVelocity(
 }
 
 function resolveSetupAppearancePartMaterialSlots(
-	assetState: AssetChannelState,
+	assetReadModel: RendererAssetReadModel,
 	part: PreparedSetupAppearancePayload["parts"][number],
 ): ResolvedMaterialSlot[] {
-	const gfxObjAsset = assetState.preparedByAssetId[part.gfxObjAssetId];
+	const gfxObjAsset = assetReadModel.get(part.gfxObjAssetId);
 	return isPreparedGfxObjAsset(gfxObjAsset)
 		? applyRenderGeometryMaterialVariants({
 				slots: part.materialSlots,
@@ -837,10 +833,10 @@ function resolveGfxObjMaterialSlots(
 }
 
 function resolveSetupPartMaterialSlots(
-	assetState: AssetChannelState,
+	assetReadModel: RendererAssetReadModel,
 	part: PreparedSetupModelPayload["parts"][number],
 ): ResolvedMaterialSlot[] {
-	const gfxObjAsset = assetState.preparedByAssetId[part.gfxObjAssetId];
+	const gfxObjAsset = assetReadModel.get(part.gfxObjAssetId);
 	return isPreparedGfxObjAsset(gfxObjAsset)
 		? resolveGfxObjMaterialSlots(gfxObjAsset.payload)
 		: [];

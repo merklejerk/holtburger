@@ -4,7 +4,6 @@ import {
 } from "./asset-cache-diagnostics";
 import type { PreparedAssetCachePruneBatchPlan } from "./asset-cache-policy";
 import type {
-	AssetChannelState,
 	PreparedAssetCacheDiagnostics,
 	PreparedAssetCacheMetadata,
 	PreparedAssetRecord,
@@ -74,12 +73,6 @@ export interface PreparedAssetPresentationSnapshot {
 	preparedRevision: number;
 	cacheMetadataRevision: number;
 	preparedCounts: ReturnType<typeof countPreparedAssetsByKind>;
-	cacheDiagnostics: PreparedAssetCacheDiagnostics | null;
-}
-
-export interface PreparedAssetLegacySnapshot {
-	preparedByAssetId: Record<string, PreparedAssetRecord>;
-	cacheMetadataByAssetId: Record<string, PreparedAssetCacheMetadata>;
 	cacheDiagnostics: PreparedAssetCacheDiagnostics | null;
 }
 
@@ -208,26 +201,6 @@ export class PreparedAssetStore {
 		};
 	}
 
-	createLegacySnapshot(): PreparedAssetLegacySnapshot {
-		return {
-			preparedByAssetId: Object.fromEntries(this.preparedByAssetId),
-			cacheMetadataByAssetId: Object.fromEntries(this.cacheMetadataByAssetId),
-			cacheDiagnostics: this.cacheDiagnostics,
-		};
-	}
-
-	createLegacyAssetStateSnapshot(
-		baseState: AssetChannelState,
-	): AssetChannelState {
-		const legacySnapshot = this.createLegacySnapshot();
-		return {
-			...baseState,
-			preparedByAssetId: legacySnapshot.preparedByAssetId,
-			cacheMetadataByAssetId: legacySnapshot.cacheMetadataByAssetId,
-			cacheDiagnostics: legacySnapshot.cacheDiagnostics,
-		};
-	}
-
 	private scanPreparedAssets(
 		options: PreparedAssetScanOptions,
 	): PreparedAssetScanPage {
@@ -279,91 +252,6 @@ export class PreparedAssetStore {
 			listener(event);
 		}
 	}
-}
-
-export function createPreparedAssetLegacySnapshotFromResolver(
-	resolver: PreparedAssetResolver,
-): PreparedAssetLegacySnapshot {
-	return {
-		preparedByAssetId: Object.fromEntries(resolver.entries()),
-		cacheMetadataByAssetId: Object.fromEntries(resolver.cacheMetadataEntries()),
-		cacheDiagnostics: resolver.getCacheDiagnostics(),
-	};
-}
-
-export function createAssetChannelStateSnapshotFromResolver(
-	baseState: AssetChannelState,
-	resolver: PreparedAssetResolver,
-): AssetChannelState {
-	const legacySnapshot = createPreparedAssetLegacySnapshotFromResolver(resolver);
-	return {
-		...baseState,
-		preparedByAssetId: legacySnapshot.preparedByAssetId,
-		cacheMetadataByAssetId: legacySnapshot.cacheMetadataByAssetId,
-		cacheDiagnostics: legacySnapshot.cacheDiagnostics,
-	};
-}
-
-export function createPreparedAssetResolverFromRecordSnapshot(options: {
-	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>;
-	cacheMetadataByAssetId?: Readonly<
-		Record<string, PreparedAssetCacheMetadata>
-	>;
-	cacheDiagnostics?: PreparedAssetCacheDiagnostics | null;
-	preparedRevision?: number;
-	cacheMetadataRevision?: number;
-}): PreparedAssetResolver {
-	const preparedByAssetId = options.preparedByAssetId;
-	const cacheMetadataByAssetId = options.cacheMetadataByAssetId ?? {};
-	const cacheDiagnostics = options.cacheDiagnostics ?? null;
-	const preparedRevision = options.preparedRevision ?? 0;
-	const cacheMetadataRevision = options.cacheMetadataRevision ?? 0;
-	return {
-		get: (assetId) => preparedByAssetId[assetId] ?? null,
-		has: (assetId) => preparedByAssetId[assetId] !== undefined,
-		entries: function* () {
-			yield* Object.entries(preparedByAssetId);
-		},
-		values: function* () {
-			yield* Object.values(preparedByAssetId);
-		},
-		keys: function* () {
-			yield* Object.keys(preparedByAssetId);
-		},
-		getCacheMetadata: (assetId) => cacheMetadataByAssetId[assetId] ?? null,
-		cacheMetadataEntries: function* () {
-			yield* Object.entries(cacheMetadataByAssetId);
-		},
-		getCacheDiagnostics: () => cacheDiagnostics,
-		getPreparedRevision: () => preparedRevision,
-		getCacheMetadataRevision: () => cacheMetadataRevision,
-		getPreparedCount: () => Object.keys(preparedByAssetId).length,
-		scanPreparedAssets: ({ cursorAssetId, limit }) => {
-			const entries = Object.entries(preparedByAssetId);
-			const startIndex =
-				cursorAssetId === null
-					? 0
-					: Math.max(
-							0,
-							entries.findIndex(([assetId]) => assetId === cursorAssetId),
-						);
-			const boundedLimit = Math.max(1, Math.trunc(limit));
-			const pageEntries = entries
-				.slice(startIndex, startIndex + boundedLimit)
-				.map(([assetId, asset]) => ({
-					assetId,
-					asset,
-					cacheMetadata: cacheMetadataByAssetId[assetId] ?? null,
-				}));
-			return {
-				entries: pageEntries,
-				nextCursorAssetId:
-					entries[startIndex + pageEntries.length]?.[0] ?? null,
-				preparedCount: entries.length,
-			};
-		},
-		subscribe: () => () => {},
-	};
 }
 
 export function countPreparedAssetsByKindFromResolver(

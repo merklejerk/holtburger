@@ -1,12 +1,10 @@
 import {
 	formatAtlasReadyPreparedTextureAssetId,
-	type AssetChannelState,
 	type PreparedLandblockOutdoorPayload,
 	type PreparedTexturePayload,
 	type PreparedTerrainBvh,
 	type PreparedTerrainMesh,
 } from "../assets/types";
-import { createPreparedAssetResolverFromRecordSnapshot } from "../assets/prepared-asset-store";
 import { formatLandblockOutdoorAssetId } from "../landblocks";
 import {
 	terrainBvhItemKey,
@@ -29,6 +27,7 @@ import {
 	type TerrainTileLayerPlan,
 } from "./terrain-tile-plan";
 import type { RenderIndexedGeometry } from "./indexed-render-geometry";
+import type { RendererAssetReadModel } from "./renderer-asset-read-model";
 
 interface TerrainRenderArtifactBuildPolicy {
 	buildPolicyRevision: string;
@@ -37,7 +36,7 @@ interface TerrainRenderArtifactBuildPolicy {
 }
 
 export interface BuildTerrainRenderArtifactOptions {
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	outdoor: PreparedLandblockOutdoorPayload;
 	policy: TerrainRenderArtifactBuildPolicy;
 	requestId: string;
@@ -101,18 +100,14 @@ interface TerrainRenderArtifactDiagnostics {
 }
 
 export function buildLandblockTerrainRenderArtifact({
-	assetState,
+	assetReadModel,
 	outdoor,
 	policy,
 	requestId,
 }: BuildTerrainRenderArtifactOptions): LandblockTerrainRenderArtifact {
 	const mesh = createPreparedTerrainMeshFromOutdoorPayload(outdoor);
 	const materialResources = buildTerrainMaterialResourcePlan({
-		preparedAssetResolver: createPreparedAssetResolverFromRecordSnapshot({
-			preparedByAssetId: assetState.preparedByAssetId,
-			cacheMetadataByAssetId: assetState.cacheMetadataByAssetId,
-			cacheDiagnostics: assetState.cacheDiagnostics,
-		}),
+		preparedAssetResolver: assetReadModel,
 		regionNumber: outdoor.regionNumber,
 		quads: mesh.quads,
 	});
@@ -120,7 +115,7 @@ export function buildLandblockTerrainRenderArtifact({
 		(left, right) => left - right,
 	);
 	const blendPlanSet = buildTerrainBlendPlanSet({
-		assetState,
+		assetReadModel,
 		regionNumber: outdoor.regionNumber,
 		pcodes,
 	});
@@ -141,7 +136,7 @@ export function buildLandblockTerrainRenderArtifact({
 	);
 	const texturePageRefs = blendPlanSet
 		? collectTerrainRenderTexturePageRefs({
-				assetState,
+				assetReadModel,
 				plans: blendPlanSet.plans,
 			})
 		: [];
@@ -239,10 +234,10 @@ export function createPreparedTerrainMeshFromOutdoorPayload(
 }
 
 function collectTerrainRenderTexturePageRefs({
-	assetState,
+	assetReadModel,
 	plans,
 }: {
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	plans: readonly TerrainBlendPlan[];
 }): TerrainRenderTexturePageRef[] {
 	const refsByKey = new Map<string, TerrainRenderTexturePageRef>();
@@ -260,7 +255,7 @@ function collectTerrainRenderTexturePageRefs({
 				ref.renderSurface.formatRaw,
 			].join(":");
 			const preparedTexture = resolveTerrainAtlasPreparedTexture({
-				assetState,
+				assetReadModel,
 				renderSurfaceId: ref.renderSurface.renderSurfaceId,
 			});
 			const level = preparedTexture?.levels[0] ?? null;
@@ -292,17 +287,17 @@ function collectTerrainRenderTexturePageRefs({
 }
 
 function resolveTerrainAtlasPreparedTexture({
-	assetState,
+	assetReadModel,
 	renderSurfaceId,
 }: {
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	renderSurfaceId: number;
 }): PreparedTexturePayload | null {
 	const assetId = formatAtlasReadyPreparedTextureAssetId({
 		renderSurfaceId,
 		usage: "raw",
 	});
-	const asset = assetState.preparedByAssetId[assetId];
+	const asset = assetReadModel.get(assetId);
 	return asset?.payload.kind === "prepared-texture" ? asset.payload : null;
 }
 

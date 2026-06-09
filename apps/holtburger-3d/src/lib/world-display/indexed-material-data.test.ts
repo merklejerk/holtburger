@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import type {
-	AssetChannelState,
 	PreparedAssetPayload,
 	PreparedAssetRecord,
 	PreparedMaterialRecipePayload,
@@ -17,6 +16,7 @@ import {
 	selectIndexedPalette,
 } from "./indexed-material-data";
 import type { MaterialAppearanceContext } from "./material-appearance";
+import { createTestPreparedAssetResolver } from "../../../test-support/prepared-asset-resolver";
 import { describeDerivedPaletteDataKey } from "./palette-data";
 import { createDefaultMaterialTextureSamplingPolicy } from "./texture-pages/texture-sampling-policy";
 
@@ -158,7 +158,7 @@ describe("indexed material data", () => {
 		});
 
 		const material = resolveIndexedMaterialData({
-			assetState,
+			assetReadModel: assetState,
 			slot: {
 				slotIndex: 0,
 				surfaceId: 0x08000001,
@@ -225,14 +225,14 @@ describe("indexed material data", () => {
 		const cache = new Map();
 
 		const first = resolveIndexedMaterialData({
-			assetState,
+			assetReadModel: assetState,
 			slot,
 			appearance,
 			samplingPolicy,
 			cache,
 		});
 		const second = resolveIndexedMaterialData({
-			assetState,
+			assetReadModel: assetState,
 			slot,
 			appearance,
 			samplingPolicy,
@@ -248,7 +248,7 @@ describe("indexed material data", () => {
 		const diagnostics: string[] = [];
 		const materialAssetId = "material/08000001";
 		const material = resolveIndexedMaterialData({
-			assetState: createAssetState({
+			assetReadModel: createAssetState({
 				[materialAssetId]: createPreparedAsset(
 					materialAssetId,
 					createTextureMaterialRecipe({
@@ -334,24 +334,10 @@ describe("indexed material data", () => {
 
 function createAssetState(
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
-): AssetChannelState {
-	return {
-		channel: "test",
-		status: "ready",
-		activeRequest: null,
-		preparedAsset: null,
-		preparedByPriority: {
-			bootstrap: null,
-			streaming: null,
-			prefetch: null,
-		},
-		preparedByAssetId,
-		cacheMetadataByAssetId: {},
-		cacheDiagnostics: null,
-		lastResponse: null,
-		errorMessage: null,
-		history: [],
-	};
+) {
+	return createTestPreparedAssetResolver(
+		Object.values(preparedByAssetId),
+	);
 }
 
 function createAppearance(options: {

@@ -6,7 +6,6 @@ import {
 	type IndexedTextureFormat,
 } from "../world-display/indexed-material-data";
 import type { PreparedAssetResolver } from "./prepared-asset-store";
-import { createPreparedAssetLegacySnapshotFromResolver } from "./prepared-asset-store";
 import type {
 	AssetChannelState,
 	PreparedAssetRecord,
@@ -60,9 +59,6 @@ export function describeMaterialAssetDiagnostics({
 	browserDestination,
 	options,
 }: MaterialDiagnosticInput): string {
-	const preparedByAssetId = createPreparedAssetLegacySnapshotFromResolver(
-		preparedAssetResolver,
-	).preparedByAssetId;
 	const pendingAssetIds = derivePendingMaterialPipelineAssetIds(
 		assetPresentationState,
 		preparedAssetResolver,
@@ -70,13 +66,13 @@ export function describeMaterialAssetDiagnostics({
 	const visibleMaterialAssetIds =
 		deriveAllVisibleMaterialAssetIdsForBrowserDestination({
 			browserDestination,
-			preparedByAssetId,
+			preparedAssets: preparedAssetResolver,
 			options,
 		});
 	const missingVisibleMaterialAssetIds =
 		deriveVisibleMaterialAssetIdsForBrowserDestination({
 			browserDestination,
-			preparedByAssetId,
+			preparedAssets: preparedAssetResolver,
 			pendingAssetIds,
 			options,
 		});
@@ -97,11 +93,11 @@ export function describeMaterialAssetDiagnostics({
 	).length;
 	const missingDependencies = summarizeMissingMaterialDependencies(
 		materialRecipes,
-		preparedByAssetId,
+		preparedAssetResolver,
 	);
 	const indexedSummary = summarizeIndexedMaterialDiagnostics(
 		materialRecipes,
-		preparedByAssetId,
+		preparedAssetResolver,
 		browserDestination === null ? null : visibleMaterialAssetIds,
 	);
 
@@ -118,7 +114,7 @@ export function describeMaterialAssetDiagnostics({
 
 function summarizeMissingMaterialDependencies(
 	recipes: readonly PreparedMaterialRecipePayload[],
-	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>,
+	preparedAssetResolver: PreparedAssetResolver,
 ): MissingMaterialDependencySummary {
 	const surfaceTextureAssetIds = new Set<string>();
 	const renderSurfaceAssetIds = new Set<string>();
@@ -126,17 +122,17 @@ function summarizeMissingMaterialDependencies(
 
 	for (const recipe of recipes) {
 		for (const assetId of recipe.dependencies.surfaceTextureAssetIds) {
-			if (preparedByAssetId[assetId]?.payload.kind !== "surface-texture") {
+			if (preparedAssetResolver.get(assetId)?.payload.kind !== "surface-texture") {
 				surfaceTextureAssetIds.add(assetId);
 			}
 		}
 		for (const assetId of recipe.dependencies.renderSurfaceAssetIds) {
-			if (preparedByAssetId[assetId]?.payload.kind !== "render-surface") {
+			if (preparedAssetResolver.get(assetId)?.payload.kind !== "render-surface") {
 				renderSurfaceAssetIds.add(assetId);
 			}
 		}
 		for (const assetId of recipe.dependencies.paletteAssetIds) {
-			if (preparedByAssetId[assetId]?.payload.kind !== "palette") {
+			if (preparedAssetResolver.get(assetId)?.payload.kind !== "palette") {
 				paletteAssetIds.add(assetId);
 			}
 		}
@@ -151,7 +147,7 @@ function summarizeMissingMaterialDependencies(
 
 function summarizeIndexedMaterialDiagnostics(
 	recipes: readonly PreparedMaterialRecipePayload[],
-	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>,
+	preparedAssetResolver: PreparedAssetResolver,
 	visibleMaterialAssetIds: readonly string[] | null,
 ): IndexedMaterialDiagnosticSummary {
 	const visibleMaterialAssetIdSet =
@@ -182,10 +178,12 @@ function summarizeIndexedMaterialDiagnostics(
 		) {
 			continue;
 		}
-		for (const renderSurfaceAssetId of textureCandidateRenderSurfaceAssetIds(
-			recipe,
-		)) {
-			const renderSurfaceAsset = preparedByAssetId[renderSurfaceAssetId];
+			for (const renderSurfaceAssetId of textureCandidateRenderSurfaceAssetIds(
+				recipe,
+			)) {
+				const renderSurfaceAsset = preparedAssetResolver.get(
+					renderSurfaceAssetId,
+				);
 			if (renderSurfaceAsset?.payload.kind !== "render-surface") {
 				continue;
 			}
@@ -209,7 +207,9 @@ function summarizeIndexedMaterialDiagnostics(
 				paletteSelectionCounts.renderSurfaceDefault += 1;
 			}
 
-			const paletteAsset = preparedByAssetId[paletteSelection.paletteAssetId];
+				const paletteAsset = preparedAssetResolver.get(
+					paletteSelection.paletteAssetId,
+				);
 			if (paletteAsset?.payload.kind !== "palette") {
 				missingPaletteAssetIds.add(paletteSelection.paletteAssetId);
 				continue;

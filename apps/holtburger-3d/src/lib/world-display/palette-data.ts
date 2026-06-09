@@ -36,6 +36,10 @@ export type PaletteDataDiagnosticHandler = (
 	diagnostic: PaletteDataDiagnostic,
 ) => void;
 
+export interface PaletteAssetLookup {
+	get(assetId: string): PreparedAssetRecord | null;
+}
+
 export function createPaletteData(options: {
 	paletteAssetId: string;
 	palette: PreparedPalettePayload;
@@ -59,13 +63,17 @@ export function createDerivedPaletteData(options: {
 	basePaletteAssetId: string;
 	basePalette: PreparedPalettePayload;
 	paletteView: MaterialAppearancePaletteView;
-	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>;
+	preparedByAssetId?: Readonly<Record<string, PreparedAssetRecord>>;
+	assetLookup?: PaletteAssetLookup;
 	reportDiagnostic: PaletteDataDiagnosticHandler;
 }): DerivedPaletteData | null {
+	const assetLookup =
+		options.assetLookup ??
+		createPaletteAssetLookupFromRecord(options.preparedByAssetId ?? {});
 	const colorsArgb = new Uint32Array(options.basePalette.colorsArgb);
 	for (const subPalette of options.paletteView.subPalettes) {
 		const subPaletteAssetId = formatPaletteAssetId(subPalette.subId);
-		const subPaletteAsset = options.preparedByAssetId[subPaletteAssetId];
+		const subPaletteAsset = assetLookup.get(subPaletteAssetId);
 		if (subPaletteAsset?.payload.kind !== "palette") {
 			options.reportDiagnostic({
 				key: `derived-palette-subpalette-unprepared:${options.basePaletteAssetId}:${subPaletteAssetId}`,
@@ -130,11 +138,11 @@ export function createDerivedPaletteData(options: {
 		key: describeDerivedPaletteDataKey({
 			basePaletteAssetId: options.basePaletteAssetId,
 			basePaletteAsset: findRequiredPreparedAsset(
-				options.preparedByAssetId,
+				assetLookup,
 				options.basePaletteAssetId,
 			),
 			paletteView: options.paletteView,
-			preparedByAssetId: options.preparedByAssetId,
+			assetLookup,
 		}),
 	};
 }
@@ -143,8 +151,12 @@ export function describeDerivedPaletteDataKey(options: {
 	basePaletteAssetId: string;
 	basePaletteAsset: PreparedAssetRecord | undefined;
 	paletteView: MaterialAppearancePaletteView;
-	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>;
+	preparedByAssetId?: Readonly<Record<string, PreparedAssetRecord>>;
+	assetLookup?: PaletteAssetLookup;
 }): string {
+	const assetLookup =
+		options.assetLookup ??
+		createPaletteAssetLookupFromRecord(options.preparedByAssetId ?? {});
 	return [
 		describePaletteAssetPreparedState(
 			options.basePaletteAssetId,
@@ -158,7 +170,8 @@ export function describeDerivedPaletteDataKey(options: {
 				subPalette.numColors,
 				describePaletteAssetPreparedState(
 					formatPaletteAssetId(subPalette.subId),
-					options.preparedByAssetId[formatPaletteAssetId(subPalette.subId)],
+					assetLookup.get(formatPaletteAssetId(subPalette.subId)) ??
+						undefined,
 				),
 			].join(":"),
 		),
@@ -222,8 +235,16 @@ function describePaletteAssetPreparedState(
 }
 
 function findRequiredPreparedAsset(
-	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>,
+	assetLookup: PaletteAssetLookup,
 	assetId: string,
 ): PreparedAssetRecord | undefined {
-	return preparedByAssetId[assetId];
+	return assetLookup.get(assetId) ?? undefined;
+}
+
+function createPaletteAssetLookupFromRecord(
+	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>,
+): PaletteAssetLookup {
+	return {
+		get: (assetId) => preparedByAssetId[assetId] ?? null,
+	};
 }

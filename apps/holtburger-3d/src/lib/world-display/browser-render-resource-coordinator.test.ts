@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import type { BrowserLocationSelection } from "../../app/browser-mode";
 import {
 	createInitialAssetChannelState,
-	type AssetChannelState,
 	type PreparedEnvCellPayload,
 	type PreparedAssetProvenance,
 	type PreparedAssetRecord,
@@ -12,7 +11,6 @@ import {
 } from "../assets/types";
 import {
 	PreparedAssetStore,
-	createPreparedAssetResolverFromRecordSnapshot,
 } from "../assets/prepared-asset-store";
 import {
 	formatEnvCellAssetId,
@@ -183,19 +181,10 @@ function createCoordinatorInput(
 	};
 }
 
-function createAssetState(records: PreparedAssetRecord[]): AssetChannelState {
-	const state = createInitialAssetChannelState();
-	state.preparedByAssetId = Object.fromEntries(
-		records.map((record) => [record.request.assetId, record]),
-	);
-	return state;
-}
-
 function createResolver(records: PreparedAssetRecord[]) {
-	const state = createAssetState(records);
-	return createPreparedAssetResolverFromRecordSnapshot({
-		preparedByAssetId: state.preparedByAssetId,
-	});
+	const store = new PreparedAssetStore();
+	store.applyPreparedAssets(records);
+	return store.resolver;
 }
 
 function createOutdoorDestination(

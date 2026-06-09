@@ -1,7 +1,7 @@
 import type { AssetLookupRequestDto } from "../host/contracts";
 import type { AssetPreparationGateway } from "./asset-channel";
+import type { PreparedAssetResolver } from "./prepared-asset-store";
 import {
-	derivePreparedAssetDependencyStatus,
 	getPreparedAssetDependencies,
 	type PreparedAssetDependencyStatus,
 	type PreparedAssetRecord,
@@ -10,7 +10,6 @@ import {
 export interface AssetGraphPreparationResult {
 	rootAsset: PreparedAssetRecord;
 	preparedAssets: PreparedAssetRecord[];
-	preparedByAssetId: Record<string, PreparedAssetRecord>;
 	dependencyStatus: PreparedAssetDependencyStatus;
 }
 
@@ -19,9 +18,9 @@ export class AssetGraphScheduler {
 
 	async prepareAssetGraph(
 		rootRequest: AssetLookupRequestDto,
-		preparedByAssetId: Record<string, PreparedAssetRecord> = {},
+		preparedAssetResolver?: PreparedAssetResolver,
 	): Promise<AssetGraphPreparationResult> {
-		const graph = new GraphTraversalState(rootRequest, preparedByAssetId);
+		const graph = new GraphTraversalState(rootRequest, preparedAssetResolver);
 		const activeLookupTasks = new Set<Promise<void>>();
 
 		const scheduleLookupBatch = (
@@ -78,21 +77,17 @@ class GraphTraversalState {
 	private readonly readyQueue: AssetLookupRequestDto[];
 	private readonly scheduledAssetIds: Set<string>;
 	private readonly failedAssetIds = new Map<string, Error>();
-	private readonly preparedByAssetId: Record<string, PreparedAssetRecord>;
+	private readonly preparedByAssetId = new Map<string, PreparedAssetRecord>();
 	private readonly returnOrderByAssetId = new Map<string, number>();
 	private rootAsset: PreparedAssetRecord | null;
 
 	constructor(
 		private readonly rootRequest: AssetLookupRequestDto,
-		initialPreparedByAssetId: Record<string, PreparedAssetRecord>,
+		private readonly preparedAssetResolver?: PreparedAssetResolver,
 	) {
-		this.preparedByAssetId = { ...initialPreparedByAssetId };
-		this.rootAsset = this.preparedByAssetId[rootRequest.assetId] ?? null;
+		this.rootAsset = this.getPreparedAsset(rootRequest.assetId);
 		this.readyQueue = this.rootAsset ? [] : [rootRequest];
-		this.scheduledAssetIds = new Set<string>([
-			rootRequest.assetId,
-			...Object.keys(this.preparedByAssetId),
-		]);
+		this.scheduledAssetIds = new Set<string>([rootRequest.assetId]);
 
 		if (this.rootAsset) {
 			this.enqueueDependencies(
@@ -119,12 +114,12 @@ class GraphTraversalState {
 
 	enqueueDependencies(dependencyAssetIds: string[]): void {
 		for (const dependencyAssetId of dependencyAssetIds) {
-			if (
-				this.scheduledAssetIds.has(dependencyAssetId) ||
-				this.preparedByAssetId[dependencyAssetId]
-			) {
-				continue;
-			}
+				if (
+					this.scheduledAssetIds.has(dependencyAssetId) ||
+					this.hasPreparedAsset(dependencyAssetId)
+				) {
+					continue;
+				}
 
 			this.scheduledAssetIds.add(dependencyAssetId);
 			this.returnOrderByAssetId.set(
@@ -138,7 +133,7 @@ class GraphTraversalState {
 	}
 
 	addPreparedAsset(asset: PreparedAssetRecord): void {
-		this.preparedByAssetId[asset.request.assetId] = asset;
+		this.preparedByAssetId.set(asset.request.assetId, asset);
 		if (asset.request.assetId === this.rootRequest.assetId) {
 			this.rootAsset = asset;
 		}
@@ -164,17 +159,58 @@ class GraphTraversalState {
 
 		const preparedAssets = [...this.returnOrderByAssetId.entries()]
 			.sort(([, leftOrder], [, rightOrder]) => leftOrder - rightOrder)
-			.map(([assetId]) => this.preparedByAssetId[assetId])
+			.map(([assetId]) => this.preparedByAssetId.get(assetId))
 			.filter((asset): asset is PreparedAssetRecord => asset !== undefined);
 
 		return {
 			rootAsset: this.rootAsset,
 			preparedAssets,
-			preparedByAssetId: this.preparedByAssetId,
-			dependencyStatus: derivePreparedAssetDependencyStatus(
-				this.rootAsset,
-				this.preparedByAssetId,
-			),
+			dependencyStatus: this.deriveDependencyStatus(this.rootAsset),
+		};
+	}
+
+	private getPreparedAsset(assetId: string): PreparedAssetRecord | null {
+		return (
+			this.preparedByAssetId.get(assetId) ??
+			this.preparedAssetResolver?.get(assetId) ??
+			null
+		);
+	}
+
+	private hasPreparedAsset(assetId: string): boolean {
+		return (
+			this.preparedByAssetId.has(assetId) ||
+			this.preparedAssetResolver?.has(assetId) === true
+		);
+	}
+
+	private deriveDependencyStatus(
+		asset: PreparedAssetRecord,
+	): PreparedAssetDependencyStatus {
+		const dependencyAssetIds = getPreparedAssetDependencies(asset).map(
+			(dependency) => dependency.assetId,
+		);
+		const readyAssetIds = dependencyAssetIds.filter((assetId) =>
+			this.hasPreparedAsset(assetId),
+		);
+		const missingAssetIds = dependencyAssetIds.filter(
+			(assetId) => !this.hasPreparedAsset(assetId),
+		);
+		if (missingAssetIds.length === 0) {
+			return {
+				status: "ready",
+				dependencyAssetIds,
+				readyAssetIds,
+				missingAssetIds: [],
+				pendingAssetIds: [],
+			};
+		}
+		return {
+			status: readyAssetIds.length > 0 ? "partial-ready" : "awaiting-dependency",
+			dependencyAssetIds,
+			readyAssetIds,
+			missingAssetIds,
+			pendingAssetIds: [],
 		};
 	}
 }

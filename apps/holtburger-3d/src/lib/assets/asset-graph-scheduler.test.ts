@@ -55,7 +55,7 @@ describe("asset graph scheduler", () => {
 			["synthetic/root"],
 			["synthetic/leaf-a", "synthetic/leaf-b"],
 		]);
-		expect(Object.keys(result.preparedByAssetId).sort()).toEqual([
+		expect(result.preparedAssets.map((asset) => asset.request.assetId).sort()).toEqual([
 			"synthetic/leaf-a",
 			"synthetic/leaf-b",
 			"synthetic/root",

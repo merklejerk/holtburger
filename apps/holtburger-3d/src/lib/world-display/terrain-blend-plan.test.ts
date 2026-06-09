@@ -1,16 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
-	createInitialAssetChannelState,
-	type AssetChannelState,
 	type PreparedAssetPayload,
 	type PreparedAssetRecord,
 } from "../assets/types";
+import { createTestPreparedAssetResolver } from "../../../test-support/prepared-asset-resolver";
 import { buildTerrainBlendPlanSet } from "./terrain-blend-plan";
 
 describe("buildTerrainBlendPlanSet", () => {
 	it("creates renderer-neutral terrain blend plans for base and overlay pcodes", () => {
-		const state = createAssetState([
+		const assetReadModel = createAssetReadModel([
 			createRecord("terrain-material/1", createTerrainMaterialPayload(true)),
 			createRecord(
 				"surface-texture/05000010",
@@ -39,7 +38,7 @@ describe("buildTerrainBlendPlanSet", () => {
 		]);
 
 		const planSet = buildTerrainBlendPlanSet({
-			assetState: state,
+			assetReadModel,
 			regionNumber: 1,
 			pcodes: [terrainPcode([0, 0, 0, 0], [1, 1, 1, 2])],
 		});
@@ -60,7 +59,7 @@ describe("buildTerrainBlendPlanSet", () => {
 	});
 
 	it("uses the selected render surface fallback list for terrain textures", () => {
-		const state = createAssetState([
+		const assetReadModel = createAssetReadModel([
 			createRecord("terrain-material/1", createTerrainMaterialPayload(false)),
 			createRecord(
 				"surface-texture/05000010",
@@ -73,7 +72,7 @@ describe("buildTerrainBlendPlanSet", () => {
 		]);
 
 		const planSet = buildTerrainBlendPlanSet({
-			assetState: state,
+			assetReadModel,
 			regionNumber: 1,
 			pcodes: [terrainPcode([0, 0, 0, 0], [1, 1, 1, 1])],
 		});
@@ -83,7 +82,7 @@ describe("buildTerrainBlendPlanSet", () => {
 	});
 
 	it("resolves all-road pcodes to road terrain without overlay masks", () => {
-		const state = createAssetState([
+		const assetReadModel = createAssetReadModel([
 			createRecord(
 				"terrain-material/1",
 				createTerrainMaterialPayload(true, {
@@ -101,7 +100,7 @@ describe("buildTerrainBlendPlanSet", () => {
 		]);
 
 		const planSet = buildTerrainBlendPlanSet({
-			assetState: state,
+			assetReadModel,
 			regionNumber: 1,
 			pcodes: [terrainPcode([1, 1, 1, 1], [1, 2, 1, 2])],
 		});
@@ -115,7 +114,7 @@ describe("buildTerrainBlendPlanSet", () => {
 	});
 
 	it("reports missing selected terrain render surfaces", () => {
-		const state = createAssetState([
+		const assetReadModel = createAssetReadModel([
 			createRecord("terrain-material/1", createTerrainMaterialPayload(false)),
 			createRecord(
 				"surface-texture/05000010",
@@ -124,7 +123,7 @@ describe("buildTerrainBlendPlanSet", () => {
 		]);
 
 		const planSet = buildTerrainBlendPlanSet({
-			assetState: state,
+			assetReadModel,
 			regionNumber: 1,
 			pcodes: [terrainPcode([0, 0, 0, 0], [1, 1, 1, 1])],
 		});
@@ -133,12 +132,8 @@ describe("buildTerrainBlendPlanSet", () => {
 	});
 });
 
-function createAssetState(records: PreparedAssetRecord[]): AssetChannelState {
-	const state = createInitialAssetChannelState();
-	state.preparedByAssetId = Object.fromEntries(
-		records.map((record) => [record.request.assetId, record]),
-	);
-	return state;
+function createAssetReadModel(records: PreparedAssetRecord[]) {
+	return createTestPreparedAssetResolver(records);
 }
 
 function createRecord(

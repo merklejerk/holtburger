@@ -1069,9 +1069,6 @@ export interface AssetChannelState {
 		AssetLookupRequestDto["priority"],
 		PreparedAssetRecord | null
 	>;
-	preparedByAssetId: Record<string, PreparedAssetRecord>;
-	cacheMetadataByAssetId: Record<string, PreparedAssetCacheMetadata>;
-	cacheDiagnostics: PreparedAssetCacheDiagnostics | null;
 	lastResponse: AssetLookupResponseDto | null;
 	errorMessage: string | null;
 	history: AssetActivityRecord[];
@@ -1090,9 +1087,6 @@ export function createInitialAssetChannelState(
 			streaming: null,
 			prefetch: null,
 		},
-		preparedByAssetId: {},
-		cacheMetadataByAssetId: {},
-		cacheDiagnostics: null,
 		lastResponse: null,
 		errorMessage: null,
 		history: [],

@@ -1,4 +1,3 @@
-import type { AssetChannelState } from "../assets/types";
 import { resolveNormalizedPreparedTextureAssetIds } from "../assets/material-texture-preparation-policy";
 import { formatHex32 } from "../landblocks";
 import type { LegacyMaterialBehaviorDto } from "./material-behavior";
@@ -26,6 +25,7 @@ import type {
 	RenderSurfaceTextureUploadPreparation,
 } from "./render-surface-texture-data";
 import type { TextureFilteringMode } from "./texture-pages/texture-sampling-policy";
+import type { RendererAssetReadModel } from "./renderer-asset-read-model";
 
 export type RenderMaterialPlan =
 	| RenderFlatMaterialPlan
@@ -79,7 +79,7 @@ export interface RenderIndexedPalettedMaterialPlan {
 }
 
 export function resolveRenderMaterialSlotPlan(options: {
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	slot: ResolvedMaterialSlot;
 	fallbackColorKey: string;
 	renderableKind?: RenderMaterialRenderableKind;
@@ -96,14 +96,14 @@ export function resolveRenderMaterialSlotPlan(options: {
 		cached &&
 		cached.dependencyState ===
 			describeMaterialPlanDependencyState(
-				options.assetState,
+				options.assetReadModel,
 				cached.dependencyAssetIds,
 			)
 	) {
 		return cached.plan;
 	}
 	const strategy = resolveRenderMaterialStrategy({
-		assetState: options.assetState,
+		assetReadModel: options.assetReadModel,
 		input: {
 			slot: options.slot,
 			renderableKind: options.renderableKind ?? "unknown",
@@ -149,7 +149,7 @@ export function resolveRenderMaterialSlotPlan(options: {
 					),
 				},
 				materialAssetIds,
-				options.assetState,
+				options.assetReadModel,
 			);
 		}
 		return cacheRenderMaterialPlan(
@@ -164,7 +164,7 @@ export function resolveRenderMaterialSlotPlan(options: {
 				preparedAssetIds: collectStrategyPreparedAssetIds(strategy),
 			}),
 			materialAssetIds,
-			options.assetState,
+			options.assetReadModel,
 		);
 	}
 	return cacheRenderMaterialPlan(
@@ -191,7 +191,7 @@ export function resolveRenderMaterialSlotPlan(options: {
 			),
 		},
 		materialAssetIds,
-		options.assetState,
+		options.assetReadModel,
 	);
 }
 
@@ -200,7 +200,7 @@ function cacheRenderMaterialPlan<TPlan extends RenderMaterialPlan>(
 	cacheKey: string,
 	plan: TPlan,
 	extraDependencyAssetIds: readonly string[],
-	assetState: AssetChannelState,
+	assetReadModel: RendererAssetReadModel,
 ): TPlan {
 	if (!cache || isTransientRenderMaterialPlan(plan)) {
 		return plan;
@@ -213,7 +213,7 @@ function cacheRenderMaterialPlan<TPlan extends RenderMaterialPlan>(
 		plan,
 		dependencyAssetIds,
 		dependencyState: describeMaterialPlanDependencyState(
-			assetState,
+			assetReadModel,
 			dependencyAssetIds,
 		),
 	});
@@ -303,12 +303,12 @@ function uniqueNonEmptySortedStrings(values: readonly string[]): string[] {
 }
 
 function describeMaterialPlanDependencyState(
-	assetState: AssetChannelState,
+	assetReadModel: RendererAssetReadModel,
 	assetIds: readonly string[],
 ): string {
 	return assetIds
 		.map((assetId) => {
-			const asset = assetState.preparedByAssetId[assetId];
+			const asset = assetReadModel.get(assetId);
 			if (!asset) {
 				return `${assetId}:missing`;
 			}

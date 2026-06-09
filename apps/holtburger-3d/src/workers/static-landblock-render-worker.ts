@@ -1,10 +1,9 @@
 import {
 	formatAtlasReadyPreparedTextureAssetId,
-	createInitialAssetChannelState,
 	type PreparedRegionDetailRole,
 	type PreparedRenderSurfacePayload,
-	type AssetChannelState,
 	type PreparedAssetRecord,
+	type PreparedAssetCacheMetadata,
 } from "../lib/assets/types";
 import { collectLandblockOutdoorRenderableSourceAssetIdsForDomain } from "../lib/assets/structured-asset-dependencies";
 import { resolveNormalizedPreparedTextureAssetIds } from "../lib/assets/material-texture-preparation-policy";
@@ -47,6 +46,7 @@ import { resolveRegionDetailRolePolicy } from "../lib/world-display/region-detai
 import { createCompactionEligibility } from "../lib/world-display/compaction/compaction-family-planner";
 import { buildPolygonSetRenderGeometry } from "../lib/world-display/indexed-render-geometry";
 import { buildLandblockTerrainRenderArtifact } from "../lib/world-display/terrain-render-artifact";
+import type { RendererAssetReadModel } from "../lib/world-display/renderer-asset-read-model";
 import type {
 	DetailedLandblockRenderArtifacts,
 	LandblockRenderArtifact,
@@ -161,10 +161,9 @@ export async function runStaticLandblockRenderWorkerJob(
 	});
 
 	throwIfWorkerJobCanceled(options);
-	const assetState = createWorkerAssetState(preparedByAssetId);
 	const terrainArtifact =
 		shouldBuildTerrainArtifact(job)
-			? buildOutdoorTerrainArtifact(job, preparedByAssetId, assetState)
+			? buildOutdoorTerrainArtifact(job, preparedByAssetId)
 			: null;
 	const staticObjectBundles = buildProductStaticBundleLayers(job, preparedByAssetId);
 	const artifacts: LandblockRenderArtifact[] = [
@@ -501,7 +500,6 @@ function buildStaticObjectBundle(
 function buildOutdoorTerrainArtifact(
 	job: LandblockRenderProductWorkerJob,
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>,
-	assetState: AssetChannelState,
 ) {
 	const outdoorAssetId = formatLandblockOutdoorAssetId(job.landblockId);
 	const outdoor = preparedByAssetId.get(outdoorAssetId);
@@ -511,7 +509,7 @@ function buildOutdoorTerrainArtifact(
 		);
 	}
 	return buildLandblockTerrainRenderArtifact({
-		assetState,
+		assetReadModel: createWorkerAssetReadModel(preparedByAssetId),
 		outdoor: outdoor.payload,
 		policy: {
 			buildPolicyRevision: job.buildPolicyRevision,
@@ -1376,14 +1374,53 @@ function requiredEnvCellId(envCellScope?: { envCellId: number }): number {
 	return envCellScope.envCellId;
 }
 
-function createWorkerAssetState(
+function createWorkerAssetReadModel(
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>,
-): AssetChannelState {
-	const state = createInitialAssetChannelState(
-		"static-landblock-render-worker",
-	);
-	state.preparedByAssetId = Object.fromEntries(preparedByAssetId);
-	return state;
+): RendererAssetReadModel {
+	return {
+		get: (assetId) => preparedByAssetId.get(assetId) ?? null,
+		has: (assetId) => preparedByAssetId.has(assetId),
+		entries: () => preparedByAssetId.entries(),
+		values: () => preparedByAssetId.values(),
+		keys: () => preparedByAssetId.keys(),
+		getCacheMetadata: () => null,
+		cacheMetadataEntries: createEmptyCacheMetadataIterator,
+		getCacheDiagnostics: () => null,
+		getPreparedRevision: () => 0,
+		getCacheMetadataRevision: () => 0,
+		getPreparedCount: () => preparedByAssetId.size,
+		scanPreparedAssets: ({ cursorAssetId, limit }) => {
+			const entries = [...preparedByAssetId.entries()];
+			const startIndex =
+				cursorAssetId === null
+					? 0
+					: Math.max(
+							0,
+							entries.findIndex(([assetId]) => assetId === cursorAssetId),
+						);
+			const boundedLimit = Math.max(1, Math.trunc(limit));
+			const pageEntries = entries
+				.slice(startIndex, startIndex + boundedLimit)
+				.map(([assetId, asset]) => ({
+					assetId,
+					asset,
+					cacheMetadata: null,
+				}));
+			return {
+				entries: pageEntries,
+				nextCursorAssetId:
+					entries[startIndex + pageEntries.length]?.[0] ?? null,
+				preparedCount: entries.length,
+			};
+		},
+		subscribe: () => () => {},
+	};
+}
+
+function createEmptyCacheMetadataIterator(): IterableIterator<
+	[string, PreparedAssetCacheMetadata]
+> {
+	return [][Symbol.iterator]();
 }
 
 function createAssetRequest(

@@ -2,8 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import { parseBrowserLocationInput } from "../../app/browser-mode";
 import {
-	createInitialAssetChannelState,
-	type AssetChannelState,
 	type PreparedAssetRecord,
 	type PreparedPolygonSetBspNode,
 } from "../assets/types";
@@ -11,6 +9,7 @@ import {
 	formatEnvCellAssetId,
 	formatLandblockTopologyAssetId,
 } from "../landblocks";
+import { createTestPreparedAssetResolver } from "../../../test-support/prepared-asset-resolver";
 import { deriveStructuredInteriorSceneModel } from "./structured-interior-scene";
 
 describe("structured interior scene", () => {
@@ -49,14 +48,8 @@ describe("structured interior scene", () => {
 
 function createAssetStateWithRecords(
 	...records: PreparedAssetRecord[]
-): AssetChannelState {
-	const state = createInitialAssetChannelState();
-	return {
-		...state,
-		preparedByAssetId: Object.fromEntries(
-			records.map((record) => [record.request.assetId, record]),
-		),
-	};
+) {
+	return createTestPreparedAssetResolver(records);
 }
 
 function createPreparedLandblockTopologyAsset(

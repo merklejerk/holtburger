@@ -1,5 +1,4 @@
 import type {
-	AssetChannelState,
 	PreparedMaterialRecipePayload,
 	PreparedRenderSurfacePayload,
 	PreparedTexturePayload,
@@ -44,6 +43,7 @@ import {
 	planAtlasLayout,
 	type AtlasTexturePage,
 } from "./texture-pages/atlas-layout-planner";
+import type { RendererAssetReadModel } from "./renderer-asset-read-model";
 
 export type RenderMaterialRenderableKind =
 	| "static"
@@ -225,7 +225,7 @@ interface AtlasCandidate {
 }
 
 export function planRenderMaterialStrategies(options: {
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	requirements: readonly RenderMaterialStrategyInput[];
 	policy?: Partial<RenderMaterialStrategyPolicy>;
 	generation?: number;
@@ -237,7 +237,7 @@ export function planRenderMaterialStrategies(options: {
 	const atlasLayoutDecisions: RenderMaterialStrategy[] = [];
 	for (const input of options.requirements) {
 		const candidate = evaluateAtlasCandidate({
-			assetState: options.assetState,
+			assetReadModel: options.assetReadModel,
 			input,
 			policy,
 			textureCapabilities:
@@ -345,7 +345,7 @@ export function planRenderMaterialStrategies(options: {
 }
 
 function evaluateAtlasCandidate(options: {
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	input: RenderMaterialStrategyInput;
 	policy: RenderMaterialStrategyPolicy;
 	textureCapabilities: MaterialTextureCapabilities;
@@ -354,7 +354,7 @@ function evaluateAtlasCandidate(options: {
 	| { kind: "candidate"; candidate: AtlasCandidate }
 	| { kind: "strategy"; requirement: RenderMaterialStrategy } {
 	const resolvedStrategy = resolveRenderMaterialStrategy({
-		assetState: options.assetState,
+		assetReadModel: options.assetReadModel,
 		input: options.input,
 		textureCapabilities: options.textureCapabilities,
 		textureFilteringMode: options.textureFilteringMode,
@@ -394,7 +394,7 @@ function evaluateAtlasCandidate(options: {
 }
 
 export function resolveRenderMaterialStrategy(options: {
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	input: RenderMaterialStrategyInput;
 	textureCapabilities?: MaterialTextureCapabilities;
 	textureFilteringMode?: TextureFilteringMode;
@@ -406,7 +406,7 @@ export function resolveRenderMaterialStrategy(options: {
 	const materialAssetId =
 		options.input.slot.materialAssetId ||
 		formatMaterialAssetId(options.input.slot.surfaceId);
-	const recipeAsset = options.assetState.preparedByAssetId[materialAssetId];
+	const recipeAsset = options.assetReadModel.get(materialAssetId);
 	if (recipeAsset?.payload.kind !== "material-recipe") {
 		return createFallbackRequirement({
 			input: options.input,
@@ -442,7 +442,7 @@ export function resolveRenderMaterialStrategy(options: {
 
 	const resolvedSurface = resolveFirstMaterialRenderSurface({
 		recipe,
-		assetState: options.assetState,
+		assetReadModel: options.assetReadModel,
 	});
 	if (!resolvedSurface) {
 		return createFallbackRequirement({
@@ -459,7 +459,7 @@ export function resolveRenderMaterialStrategy(options: {
 	if (!isSupportedCompressedFormat(surface.formatRaw)) {
 		if (isSupportedDirectColorFormat(surface.formatRaw)) {
 			return resolveDirectTextureStrategy({
-				assetState: options.assetState,
+				assetReadModel: options.assetReadModel,
 				behaviorReason: blendedTransparencyReason,
 				input: options.input,
 				materialAssetId,
@@ -472,7 +472,7 @@ export function resolveRenderMaterialStrategy(options: {
 		}
 		if (isIndexedTextureFormat(surface.formatRaw)) {
 			return resolveIndexedPalettedTextureStrategy({
-				assetState: options.assetState,
+				assetReadModel: options.assetReadModel,
 				input: options.input,
 				materialAssetId,
 				recipe,
@@ -500,7 +500,7 @@ export function resolveRenderMaterialStrategy(options: {
 		usage: "raw",
 	});
 	const preparedTextureAsset =
-		options.assetState.preparedByAssetId[preparedTextureAssetId];
+		options.assetReadModel.get(preparedTextureAssetId);
 	if (preparedTextureAsset?.payload.kind !== "prepared-texture") {
 		return createFallbackRequirement({
 			input: options.input,
@@ -561,7 +561,7 @@ export function resolveRenderMaterialStrategy(options: {
 		preparedTexture,
 	});
 	return resolveDirectTextureStrategy({
-		assetState: options.assetState,
+		assetReadModel: options.assetReadModel,
 		behaviorReason: blendedTransparencyReason,
 		input: options.input,
 		materialAssetId,
@@ -596,7 +596,7 @@ export function resolveRenderMaterialStrategy(options: {
 }
 
 function resolveIndexedPalettedTextureStrategy(options: {
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	input: RenderMaterialStrategyInput;
 	materialAssetId: string;
 	recipe: PreparedMaterialRecipePayload;
@@ -607,7 +607,7 @@ function resolveIndexedPalettedTextureStrategy(options: {
 	| RenderMaterialFallbackStrategy {
 	const resolvedSurface = resolveFirstMaterialRenderSurface({
 		recipe: options.recipe,
-		assetState: options.assetState,
+		assetReadModel: options.assetReadModel,
 	});
 	if (!resolvedSurface) {
 		return createFallbackRequirement({
@@ -631,7 +631,7 @@ function resolveIndexedPalettedTextureStrategy(options: {
 	let resolveError: unknown = null;
 	try {
 		indexedMaterial = resolveIndexedMaterialData({
-			assetState: options.assetState,
+			assetReadModel: options.assetReadModel,
 			slot: options.input.slot,
 			appearance:
 				options.input.appearance ?? createBaseMaterialAppearanceContext("base"),
@@ -727,7 +727,7 @@ function describeRenderMaterialDirectTextureKey(
 }
 
 function resolveDirectTextureStrategy(options: {
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	behaviorReason: {
 		reason: RenderMaterialStrategyFallbackReason;
 		detail: string;
@@ -743,7 +743,7 @@ function resolveDirectTextureStrategy(options: {
 	| RenderMaterialFallbackStrategy {
 	const resolvedSurface = resolveFirstMaterialRenderSurface({
 		recipe: options.recipe,
-		assetState: options.assetState,
+		assetReadModel: options.assetReadModel,
 	});
 	if (!resolvedSurface) {
 		return createFallbackRequirement({
@@ -769,7 +769,7 @@ function resolveDirectTextureStrategy(options: {
 		samplingPolicy,
 		options.textureCapabilities,
 		resolvePreparedTexture({
-			assetState: options.assetState,
+			assetReadModel: options.assetReadModel,
 			renderSurface: directRenderSurface,
 		}),
 	);
@@ -900,14 +900,14 @@ function validateAtlasPreparedTexture(
 }
 
 function resolvePreparedTexture(options: {
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	renderSurface: PreparedRenderSurfacePayload;
 }): PreparedTexturePayload | null {
 	for (const assetId of resolveNormalizedPreparedTextureAssetIds({
 		renderSurface: options.renderSurface,
 		usage: "raw",
 	})) {
-		const asset = options.assetState.preparedByAssetId[assetId];
+		const asset = options.assetReadModel.get(assetId);
 		if (asset?.payload.kind === "prepared-texture") {
 			return asset.payload;
 		}

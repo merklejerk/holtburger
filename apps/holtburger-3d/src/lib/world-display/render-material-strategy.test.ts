@@ -1,15 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
-	createInitialAssetChannelState,
 	formatAtlasReadyPreparedTextureAssetId,
-	type AssetChannelState,
 	type PreparedAssetRecord,
 	type PreparedMaterialRecipePayload,
 	type PreparedPalettePayload,
 	type PreparedRenderSurfacePayload,
 	type PreparedTexturePayload,
 } from "../assets/types";
+import { createTestPreparedAssetResolver } from "../../../test-support/prepared-asset-resolver";
 import {
 	planRenderMaterialStrategies,
 	resolveRenderMaterialStrategy,
@@ -35,7 +34,7 @@ describe("render material strategy", () => {
 		]);
 
 		const strategy = resolveRenderMaterialStrategy({
-			assetState: state,
+			assetReadModel: state,
 			input: createRequirement("static", 0),
 		});
 
@@ -65,7 +64,7 @@ describe("render material strategy", () => {
 		]);
 
 		const strategy = resolveRenderMaterialStrategy({
-			assetState: state,
+			assetReadModel: state,
 			input: createRequirement("static", 0, 0x08000001, "sampler=repeat"),
 		});
 
@@ -91,7 +90,7 @@ describe("render material strategy", () => {
 		]);
 
 		const strategy = resolveRenderMaterialStrategy({
-			assetState: state,
+			assetReadModel: state,
 			input: createRequirement("static", 0),
 		});
 
@@ -121,7 +120,7 @@ describe("render material strategy", () => {
 		]);
 
 		const material = resolveRenderMaterialSlotPlan({
-			assetState: state,
+			assetReadModel: state,
 			slot: createMaterialSlot({ slotIndex: 0, surfaceId: 0x08000001 }),
 			fallbackColorKey: "test/static",
 			renderableKind: "static",
@@ -158,21 +157,21 @@ describe("render material strategy", () => {
 		const materialPlanCache = new Map();
 
 		const first = resolveRenderMaterialSlotPlan({
-			assetState: state,
+			assetReadModel: state,
 			slot,
 			fallbackColorKey: "test/static",
 			renderableKind: "static",
 			materialPlanCache,
 		});
 		const second = resolveRenderMaterialSlotPlan({
-			assetState: state,
+			assetReadModel: state,
 			slot,
 			fallbackColorKey: "test/static",
 			renderableKind: "static",
 			materialPlanCache,
 		});
 		const refreshed = resolveRenderMaterialSlotPlan({
-			assetState: createAssetState([
+			assetReadModel: createAssetState([
 				materialRecord,
 				{ ...renderSurfaceRecord, preparedAt: "refreshed" },
 				preparedTextureRecord,
@@ -196,14 +195,14 @@ describe("render material strategy", () => {
 		const materialPlanCache = new Map();
 
 		const unresolved = resolveRenderMaterialSlotPlan({
-			assetState: createAssetState([materialRecord]),
+			assetReadModel: createAssetState([materialRecord]),
 			slot,
 			fallbackColorKey: "test/static",
 			renderableKind: "static",
 			materialPlanCache,
 		});
 		const resolved = resolveRenderMaterialSlotPlan({
-			assetState: createAssetState([
+			assetReadModel: createAssetState([
 				materialRecord,
 				createRenderSurfaceRecord({ renderSurfaceId: 0x06000001 }),
 				createAtlasPreparedTextureRecord({ renderSurfaceId: 0x06000001 }),
@@ -232,7 +231,7 @@ describe("render material strategy", () => {
 		]);
 
 		const strategy = resolveRenderMaterialStrategy({
-			assetState: state,
+			assetReadModel: state,
 			input: createRequirement("structured-interior", 0),
 		});
 
@@ -262,7 +261,7 @@ describe("render material strategy", () => {
 		]);
 
 		const strategy = resolveRenderMaterialStrategy({
-			assetState: state,
+			assetReadModel: state,
 			input: createRequirement("static", 0),
 		});
 
@@ -295,7 +294,7 @@ describe("render material strategy", () => {
 		]);
 
 		const strategy = resolveRenderMaterialStrategy({
-			assetState: state,
+			assetReadModel: state,
 			input: createRequirement("static", 0),
 		});
 
@@ -330,7 +329,7 @@ describe("render material strategy", () => {
 		]);
 
 		const strategy = resolveRenderMaterialStrategy({
-			assetState: state,
+			assetReadModel: state,
 			input: createRequirement("static", 0),
 		});
 
@@ -362,7 +361,7 @@ describe("render material strategy", () => {
 		]);
 
 		const plan = planRenderMaterialStrategies({
-			assetState: state,
+			assetReadModel: state,
 			requirements: [
 				createRequirement("static", 0),
 				createRequirement("structured-interior", 1),
@@ -395,7 +394,7 @@ describe("render material strategy", () => {
 		]);
 
 		const plan = planRenderMaterialStrategies({
-			assetState: state,
+			assetReadModel: state,
 			requirements: [createRequirement("static", 0)],
 		});
 
@@ -431,7 +430,7 @@ describe("render material strategy", () => {
 		]);
 
 		const plan = planRenderMaterialStrategies({
-			assetState: state,
+			assetReadModel: state,
 			requirements: [
 				createRequirement("static", 0, 0x08000001),
 				createRequirement("static", 1, 0x08000002),
@@ -447,7 +446,7 @@ describe("render material strategy", () => {
 		).toEqual(["direct-texture", "direct-texture"]);
 
 		const s3tcPlan = planRenderMaterialStrategies({
-			assetState: state,
+			assetReadModel: state,
 			requirements: [
 				createRequirement("static", 0, 0x08000001),
 				createRequirement("static", 1, 0x08000002),
@@ -479,7 +478,7 @@ describe("render material strategy", () => {
 			);
 		}
 		const plan = planRenderMaterialStrategies({
-			assetState: createAssetState(records),
+			assetReadModel: createAssetState(records),
 			requirements: [0, 1, 2].map((index) =>
 				createRequirement("static", index, 0x08000010 + index),
 			),
@@ -522,7 +521,7 @@ describe("render material strategy", () => {
 		]);
 
 		const plan = planRenderMaterialStrategies({
-			assetState: state,
+			assetReadModel: state,
 			requirements: [
 				createRequirement("static", 0, 0x08000001),
 				createRequirement("static", 1, 0x08000002),
@@ -565,12 +564,8 @@ function createMaterialSlot(options: {
 	};
 }
 
-function createAssetState(records: PreparedAssetRecord[]): AssetChannelState {
-	const state = createInitialAssetChannelState();
-	state.preparedByAssetId = Object.fromEntries(
-		records.map((record) => [record.request.assetId, record]),
-	);
-	return state;
+function createAssetState(records: PreparedAssetRecord[]) {
+	return createTestPreparedAssetResolver(records);
 }
 
 function createMaterialRecipeRecord(options: {

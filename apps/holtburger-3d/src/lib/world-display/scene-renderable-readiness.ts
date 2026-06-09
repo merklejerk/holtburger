@@ -1,4 +1,3 @@
-import type { AssetChannelState } from "../assets/types";
 import {
 	deriveStaticRenderableReadinessModel,
 	type StaticRenderableReadinessCommitPolicy,
@@ -14,6 +13,7 @@ import type {
 	TransitionPortalCandidate,
 	TransitionPortalCandidateModel,
 } from "./transition-portal-work-items";
+import type { RendererAssetReadModel } from "./renderer-asset-read-model";
 
 type SceneRenderableFamily =
 	| "terrain"
@@ -69,14 +69,14 @@ export interface SceneRenderableReadinessModel {
 const READINESS_REASON_SAMPLE_LIMIT = 16;
 
 export function deriveSceneRenderableReadinessModel({
-	assetState,
+	assetReadModel,
 	commitPolicy = "resolved-only",
 	terrainScene,
 	structuredInteriorScene,
 	staticRenderableScene,
 	transitionPortalModel,
 }: {
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	commitPolicy?: SceneRenderableReadinessCommitPolicy;
 	terrainScene: TerrainSceneModel;
 	structuredInteriorScene: StructuredInteriorSceneModel;
@@ -100,7 +100,7 @@ export function deriveSceneRenderableReadinessModel({
 		committedItems(structuredInteriorRecords),
 	);
 	const staticReadiness = deriveStaticRenderableReadinessModel({
-		assetState,
+		assetReadModel,
 		commitPolicy,
 		scene: staticRenderableScene,
 	});

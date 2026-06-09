@@ -1,5 +1,4 @@
 import type {
-	AssetChannelState,
 	PreparedRenderSurfacePayload,
 	PreparedSurfaceTexturePayload,
 	PreparedTerrainMaterialTablePayload,
@@ -7,6 +6,7 @@ import type {
 	PreparedTerrainRoadAlphaMapEntry,
 } from "../assets/types";
 import { formatHex32 } from "../landblocks";
+import type { RendererAssetReadModel } from "./renderer-asset-read-model";
 
 export interface TerrainBlendPlanSet {
 	plans: TerrainBlendPlan[];
@@ -68,12 +68,12 @@ const ROAD_CORNER_MASKS = [0x0c00_0000, 0x0300_0000, 0x00c0_0000, 0x0030_0000];
 const ROAD_TYPE_TERRAIN_CODE = 3;
 
 export function buildTerrainBlendPlanSet(options: {
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	regionNumber: number;
 	pcodes: readonly number[];
 }): TerrainBlendPlanSet | null {
 	const tableAssetId = `terrain-material/${Math.trunc(options.regionNumber)}`;
-	const tableRecord = options.assetState.preparedByAssetId[tableAssetId];
+	const tableRecord = options.assetReadModel.get(tableAssetId);
 	if (tableRecord?.payload.kind !== "terrain-material") {
 		return null;
 	}
@@ -98,7 +98,7 @@ export function buildTerrainBlendPlanSet(options: {
 			continue;
 		}
 		const plan = resolveTerrainBlendPlanTextures({
-			assetState: options.assetState,
+			assetReadModel: options.assetReadModel,
 			plan: planShape,
 			diagnostics,
 		});
@@ -180,12 +180,12 @@ function buildTerrainBlendPlanShape(options: {
 }
 
 function resolveTerrainBlendPlanTextures(options: {
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	plan: TerrainBlendPlanShape;
 	diagnostics: string[];
 }): TerrainBlendPlan | null {
 	const base = resolveTerrainTexture({
-		assetState: options.assetState,
+		assetReadModel: options.assetReadModel,
 		textureAssetId: options.plan.base.textureAssetId,
 		tiling: normalizeTiling(options.plan.base.tiling),
 		wrap: "repeat",
@@ -197,7 +197,7 @@ function resolveTerrainBlendPlanTextures(options: {
 	}
 	const overlays = options.plan.overlays.flatMap((overlay) => {
 		const terrain = resolveTerrainTexture({
-			assetState: options.assetState,
+			assetReadModel: options.assetReadModel,
 			textureAssetId: overlay.terrain.textureAssetId,
 			tiling: normalizeTiling(overlay.terrain.tiling),
 			wrap: "repeat",
@@ -205,7 +205,7 @@ function resolveTerrainBlendPlanTextures(options: {
 			diagnostics: options.diagnostics,
 		});
 		const alpha = resolveTerrainTexture({
-			assetState: options.assetState,
+			assetReadModel: options.assetReadModel,
 			textureAssetId: overlay.alpha.alphaTextureAssetId,
 			tiling: 1,
 			wrap: "clamp",
@@ -219,7 +219,7 @@ function resolveTerrainBlendPlanTextures(options: {
 	const roadTextureAssetId = options.plan.roads[0]?.road.roadTextureAssetId ?? null;
 	const road = roadTextureAssetId
 		? resolveTerrainTexture({
-				assetState: options.assetState,
+				assetReadModel: options.assetReadModel,
 				textureAssetId: roadTextureAssetId,
 				tiling: options.plan.roads[0]?.tiling ?? 1,
 				wrap: "repeat",
@@ -232,7 +232,7 @@ function resolveTerrainBlendPlanTextures(options: {
 			return [];
 		}
 		const alpha = resolveTerrainTexture({
-			assetState: options.assetState,
+			assetReadModel: options.assetReadModel,
 			textureAssetId: roadPlan.road.alphaTextureAssetId,
 			tiling: 1,
 			wrap: "clamp",
@@ -251,7 +251,7 @@ function resolveTerrainBlendPlanTextures(options: {
 }
 
 function resolveTerrainTexture(options: {
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	textureAssetId: string;
 	tiling: number;
 	wrap: TerrainBlendTextureRef["wrap"];
@@ -259,7 +259,7 @@ function resolveTerrainTexture(options: {
 	diagnostics: string[];
 }): TerrainBlendTextureRef | null {
 	const surfaceTexture = getSurfaceTexture(
-		options.assetState,
+		options.assetReadModel,
 		options.textureAssetId,
 	);
 	if (!surfaceTexture) {
@@ -269,7 +269,7 @@ function resolveTerrainTexture(options: {
 		return null;
 	}
 	const renderSurface = getSelectedRenderSurface(
-		options.assetState,
+		options.assetReadModel,
 		surfaceTexture,
 	);
 	if (!renderSurface) {
@@ -288,21 +288,21 @@ function resolveTerrainTexture(options: {
 }
 
 function getSurfaceTexture(
-	assetState: AssetChannelState,
+	assetReadModel: RendererAssetReadModel,
 	assetId: string,
 ): PreparedSurfaceTexturePayload | null {
-	const record = assetState.preparedByAssetId[assetId];
+	const record = assetReadModel.get(assetId);
 	return record?.payload.kind === "surface-texture" ? record.payload : null;
 }
 
 function getSelectedRenderSurface(
-	assetState: AssetChannelState,
+	assetReadModel: RendererAssetReadModel,
 	surfaceTexture: PreparedSurfaceTexturePayload,
 ): PreparedRenderSurfacePayload | null {
 	const renderSurfaceIds = preferredRenderSurfaceIds(surfaceTexture);
 	for (const renderSurfaceId of renderSurfaceIds) {
 		const assetId = `render-surface/${formatHex32(renderSurfaceId)}`;
-		const record = assetState.preparedByAssetId[assetId];
+		const record = assetReadModel.get(assetId);
 		if (record?.payload.kind === "render-surface") {
 			return record.payload;
 		}

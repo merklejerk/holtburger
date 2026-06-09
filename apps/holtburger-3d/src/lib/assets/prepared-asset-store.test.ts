@@ -162,37 +162,4 @@ describe("PreparedAssetStore", () => {
 		expect(secondPage.nextCursorAssetId).toBeNull();
 	});
 
-	it("creates explicit legacy snapshots for record-shaped migration callers", () => {
-		const store = new PreparedAssetStore();
-		const terrain = createPreparedTerrainAsset(
-			"terrain-a",
-			"landblock/0102ffff/outdoor",
-		);
-		store.applyPreparedAssets([terrain], 1_000);
-
-		const snapshot = store.createLegacySnapshot();
-		expect(snapshot.preparedByAssetId).toEqual({
-			"landblock/0102ffff/outdoor": terrain,
-		});
-		expect(snapshot.cacheMetadataByAssetId).toEqual({
-			"landblock/0102ffff/outdoor": {
-				lastPreparedAtMs: 1_000,
-				lastRetainedAtMs: 1_000,
-			},
-		});
-
-		store.applyPreparedAssets(
-			[
-				createPreparedTerrainAsset(
-					"terrain-b",
-					"landblock/0103ffff/outdoor",
-				),
-			],
-			2_000,
-		);
-
-		expect(snapshot.preparedByAssetId).not.toHaveProperty(
-			"landblock/0103ffff/outdoor",
-		);
-	});
 });

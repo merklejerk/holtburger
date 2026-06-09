@@ -1,5 +1,4 @@
 import type {
-	AssetChannelState,
 	PreparedEnvCellPayload,
 	PreparedLandblockOutdoorPayload,
 } from "../assets/types";
@@ -35,6 +34,7 @@ import type { StaticLandblockRenderProductSet } from "./static-landblock-render-
 import type { StaticRenderableSceneModel } from "./static-renderables";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
+import type { RendererAssetReadModel } from "./renderer-asset-read-model";
 
 const FALLBACK_REASON_SAMPLE_LIMIT = 8;
 
@@ -77,7 +77,7 @@ function createEmptyRenderBvhVisibilityMetrics(): RenderBvhVisibilityMetrics {
 }
 
 export function deriveRenderBvhVisibilityMetrics(options: {
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	terrainScene: TerrainSceneModel;
 	staticRenderableScene: StaticRenderableSceneModel;
 	structuredInteriorScene: StructuredInteriorSceneModel;
@@ -90,7 +90,7 @@ export function deriveRenderBvhVisibilityMetrics(options: {
 }
 
 export function deriveRenderBvhVisibilitySnapshot(options: {
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	terrainScene: TerrainSceneModel;
 	staticRenderableScene: StaticRenderableSceneModel;
 	structuredInteriorScene: StructuredInteriorSceneModel;
@@ -147,7 +147,7 @@ export function deriveRenderBvhVisibilitySnapshot(options: {
 			continue;
 		}
 		const payload = findPreparedOutdoorPayload(
-			options.assetState,
+			options.assetReadModel,
 			tile.landblockId,
 		);
 		if (!payload) {
@@ -178,7 +178,7 @@ export function deriveRenderBvhVisibilitySnapshot(options: {
 	}
 
 	for (const payload of findActiveOutdoorPayloads(
-		options.assetState,
+		options.assetReadModel,
 		options.staticRenderableScene,
 	)) {
 		queriedOutdoorStaticLandblockIds.add(payload.landblockId);
@@ -210,7 +210,10 @@ export function deriveRenderBvhVisibilitySnapshot(options: {
 			continue;
 		}
 		queriedOutdoorStaticLandblockIds.add(landblockId);
-		const payload = findPreparedOutdoorPayload(options.assetState, landblockId);
+		const payload = findPreparedOutdoorPayload(
+			options.assetReadModel,
+			landblockId,
+		);
 		if (!payload) {
 			fallbackReasons.push(
 				`missing outdoor static payload ${formatLandblockOutdoorAssetId(landblockId)}`,
@@ -281,7 +284,7 @@ export function deriveRenderBvhVisibilitySnapshot(options: {
 		}
 
 		const payload = findPreparedEnvCellPayload(
-			options.assetState,
+			options.assetReadModel,
 			cell.envCellId,
 		);
 		if (!payload) {
@@ -397,7 +400,7 @@ function collectDetailedArtifactEnvCellBvhEntriesById(
 }
 
 function findActiveOutdoorPayloads(
-	assetState: AssetChannelState,
+	assetReadModel: RendererAssetReadModel,
 	staticRenderableScene: StaticRenderableSceneModel,
 ): PreparedLandblockOutdoorPayload[] {
 	const landblockIds = new Set(
@@ -406,7 +409,9 @@ function findActiveOutdoorPayloads(
 			.map((instance) => instance.owningLandblockId),
 	);
 	return [...landblockIds]
-		.map((landblockId) => findPreparedOutdoorPayload(assetState, landblockId))
+		.map((landblockId) =>
+			findPreparedOutdoorPayload(assetReadModel, landblockId),
+		)
 		.filter(
 			(payload): payload is PreparedLandblockOutdoorPayload => payload !== null,
 		)
@@ -414,19 +419,18 @@ function findActiveOutdoorPayloads(
 }
 
 function findPreparedOutdoorPayload(
-	assetState: AssetChannelState,
+	assetReadModel: RendererAssetReadModel,
 	landblockId: number,
 ): PreparedLandblockOutdoorPayload | null {
-	const asset =
-		assetState.preparedByAssetId[formatLandblockOutdoorAssetId(landblockId)];
+	const asset = assetReadModel.get(formatLandblockOutdoorAssetId(landblockId));
 	return asset?.payload.kind === "landblock-outdoor" ? asset.payload : null;
 }
 
 function findPreparedEnvCellPayload(
-	assetState: AssetChannelState,
+	assetReadModel: RendererAssetReadModel,
 	envCellId: number,
 ): PreparedEnvCellPayload | null {
-	const asset = assetState.preparedByAssetId[formatEnvCellAssetId(envCellId)];
+	const asset = assetReadModel.get(formatEnvCellAssetId(envCellId));
 	return asset?.payload.kind === "env-cell" &&
 		asset.payload.envCellId === envCellId
 		? asset.payload

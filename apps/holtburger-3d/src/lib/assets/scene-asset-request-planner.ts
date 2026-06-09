@@ -29,8 +29,9 @@ import {
 } from "./structured-asset-dependencies";
 import {
 	deriveBrowserFocusedStructuredInteriorMembershipPolicy,
-	deriveStructuredInteriorCoverage,
+	deriveStructuredInteriorCoverageFromLookup,
 } from "./structured-interior-coverage";
+import type { PreparedAssetResolver } from "./prepared-asset-store";
 import {
 	deriveOutdoorSceneInterest,
 	unionOutdoorSceneLandblockIds,
@@ -62,7 +63,7 @@ export interface OutdoorSceneRequestOptions {
 export interface SceneCoverageRequestInput {
 	requestRevision: number;
 	sceneInterest: SceneResourceInterest;
-	preparedByAssetId: Record<string, PreparedAssetRecord>;
+	preparedAssets: PreparedAssetResolver;
 	pendingAssetIds?: string[];
 	materialTexturePreparationPolicy?: MaterialTexturePreparationPolicy;
 }
@@ -70,7 +71,7 @@ export interface SceneCoverageRequestInput {
 export interface BrowserSceneRequestInput {
 	requestRevision: number;
 	browserDestination: BrowserLocationSelection | null;
-	preparedByAssetId: Record<string, PreparedAssetRecord>;
+	preparedAssets: PreparedAssetResolver;
 	pendingAssetIds?: string[];
 	options?: OutdoorSceneRequestOptions;
 }
@@ -93,7 +94,7 @@ export function createBrowserSceneCoverageRequests(
 				browserDestination: input.browserDestination,
 				options: input.options,
 			}),
-			preparedByAssetId: input.preparedByAssetId,
+			preparedAssets: input.preparedAssets,
 			pendingAssetIds: input.pendingAssetIds,
 			materialTexturePreparationPolicy:
 				input.options?.materialTexturePreparationPolicy,
@@ -109,7 +110,7 @@ export function createSceneCoverageRequests(
 	const {
 		requestRevision,
 		sceneInterest,
-		preparedByAssetId,
+		preparedAssets,
 		pendingAssetIds = [],
 		materialTexturePreparationPolicy =
 			DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS.materialTexturePreparationPolicy,
@@ -129,7 +130,7 @@ export function createSceneCoverageRequests(
 				requestRevision,
 				sceneLocation,
 				priority,
-				preparedByAssetId,
+				preparedAssets,
 				pendingAssetIds,
 				[sceneLocation.landblockId],
 			),
@@ -137,7 +138,7 @@ export function createSceneCoverageRequests(
 				requestRevision,
 				sceneLocation,
 				priority,
-				preparedByAssetId,
+				preparedAssets,
 				pendingAssetIds,
 				options,
 			),
@@ -145,7 +146,7 @@ export function createSceneCoverageRequests(
 				requestRevision,
 				sceneLocation,
 				priority,
-				preparedByAssetId,
+				preparedAssets,
 				pendingAssetIds,
 				options,
 			),
@@ -159,7 +160,7 @@ export function createSceneCoverageRequests(
 			requestRevision,
 			sceneLocation,
 			priority,
-			preparedByAssetId,
+			preparedAssets,
 			pendingAssetIds,
 			interest,
 		),
@@ -167,7 +168,7 @@ export function createSceneCoverageRequests(
 			requestRevision,
 			sceneLocation,
 			priority,
-			preparedByAssetId,
+			preparedAssets,
 			pendingAssetIds,
 			options,
 			interest,
@@ -176,7 +177,7 @@ export function createSceneCoverageRequests(
 			requestRevision,
 			sceneLocation,
 			priority,
-			preparedByAssetId,
+			preparedAssets,
 			pendingAssetIds,
 			options,
 			interest,
@@ -186,7 +187,7 @@ export function createSceneCoverageRequests(
 
 export function deriveBrowserSceneCoverageAssetIds(
 	browserDestination: BrowserLocationSelection | null,
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	options: OutdoorSceneRequestOptions = DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS,
 ): string[] {
 	return deriveSceneCoverageAssetIds(
@@ -194,14 +195,14 @@ export function deriveBrowserSceneCoverageAssetIds(
 			browserDestination,
 			options,
 		}),
-		preparedByAssetId,
+		preparedAssets,
 		options.materialTexturePreparationPolicy,
 	);
 }
 
 export function deriveSceneCoverageAssetIds(
 	sceneInterest: SceneResourceInterest,
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	materialTexturePreparationPolicy?: MaterialTexturePreparationPolicy,
 ): string[] {
 	const sceneLocation = sceneInterest.location;
@@ -219,7 +220,7 @@ export function deriveSceneCoverageAssetIds(
 				formatLandblockTopologyAssetId(sceneLocation.landblockId),
 				...collectVisiblePreparedTextureAssetIds({
 					sceneLocation,
-					preparedByAssetId,
+					preparedAssets,
 					options,
 					interest: null,
 				}),
@@ -239,7 +240,7 @@ export function deriveSceneCoverageAssetIds(
 			...interest.envCellLandblockIds.map(formatLandblockTopologyAssetId),
 			...collectVisiblePreparedTextureAssetIds({
 				sceneLocation,
-				preparedByAssetId,
+				preparedAssets,
 				options,
 				interest,
 			}),
@@ -249,21 +250,21 @@ export function deriveSceneCoverageAssetIds(
 
 export function deriveVisibleMaterialAssetIdsForSceneInterest(input: {
 	sceneInterest: SceneResourceInterest;
-	preparedByAssetId: Record<string, PreparedAssetRecord>;
+	preparedAssets: PreparedAssetResolver;
 	pendingAssetIds?: string[];
 	materialTexturePreparationPolicy?: MaterialTexturePreparationPolicy;
 }): string[] {
-	const { preparedByAssetId, pendingAssetIds = [] } = input;
+	const { preparedAssets, pendingAssetIds = [] } = input;
 	const materialAssetIds = deriveAllVisibleMaterialAssetIdsForSceneInterest(input);
 	const pendingAssetIdSet = new Set(pendingAssetIds);
 	return materialAssetIds.filter(
-		(assetId) => !preparedByAssetId[assetId] && !pendingAssetIdSet.has(assetId),
+		(assetId) => !preparedAssets.has(assetId) && !pendingAssetIdSet.has(assetId),
 	);
 }
 
 export function deriveVisibleMaterialAssetIdsForBrowserDestination(input: {
 	browserDestination: BrowserLocationSelection | null;
-	preparedByAssetId: Record<string, PreparedAssetRecord>;
+	preparedAssets: PreparedAssetResolver;
 	pendingAssetIds?: string[];
 	options?: OutdoorSceneRequestOptions;
 }): string[] {
@@ -272,7 +273,7 @@ export function deriveVisibleMaterialAssetIdsForBrowserDestination(input: {
 			browserDestination: input.browserDestination,
 			options: input.options,
 		}),
-		preparedByAssetId: input.preparedByAssetId,
+		preparedAssets: input.preparedAssets,
 		pendingAssetIds: input.pendingAssetIds,
 		materialTexturePreparationPolicy:
 			input.options?.materialTexturePreparationPolicy,
@@ -281,12 +282,12 @@ export function deriveVisibleMaterialAssetIdsForBrowserDestination(input: {
 
 export function deriveAllVisibleMaterialAssetIdsForSceneInterest(input: {
 	sceneInterest: SceneResourceInterest;
-	preparedByAssetId: Record<string, PreparedAssetRecord>;
+	preparedAssets: PreparedAssetResolver;
 	materialTexturePreparationPolicy?: MaterialTexturePreparationPolicy;
 }): string[] {
 	const {
 		sceneInterest,
-		preparedByAssetId,
+		preparedAssets,
 	} = input;
 	const sceneLocation = sceneInterest.location;
 	const options = createOutdoorSceneRequestOptionsFromInterest(
@@ -298,17 +299,17 @@ export function deriveAllVisibleMaterialAssetIdsForSceneInterest(input: {
 	}
 
 	return sceneLocation.kind === "interior-cell"
-		? collectIndoorVisibleMaterialAssetIds(sceneLocation, preparedByAssetId)
+		? collectIndoorVisibleMaterialAssetIds(sceneLocation, preparedAssets)
 		: collectOutdoorVisibleMaterialAssetIds(
 				sceneLocation,
-				preparedByAssetId,
+				preparedAssets,
 				options,
 			);
 }
 
 export function deriveAllVisibleMaterialAssetIdsForBrowserDestination(input: {
 	browserDestination: BrowserLocationSelection | null;
-	preparedByAssetId: Record<string, PreparedAssetRecord>;
+	preparedAssets: PreparedAssetResolver;
 	options?: OutdoorSceneRequestOptions;
 }): string[] {
 	return deriveAllVisibleMaterialAssetIdsForSceneInterest({
@@ -316,7 +317,7 @@ export function deriveAllVisibleMaterialAssetIdsForBrowserDestination(input: {
 			browserDestination: input.browserDestination,
 			options: input.options,
 		}),
-		preparedByAssetId: input.preparedByAssetId,
+		preparedAssets: input.preparedAssets,
 		materialTexturePreparationPolicy:
 			input.options?.materialTexturePreparationPolicy,
 	});
@@ -326,7 +327,7 @@ function createOutdoorCoverageRequestsForInterest(
 	requestRevision: number,
 	sceneLocation: SceneResourceLocation,
 	priority: AssetPriority,
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	pendingAssetIds: string[],
 	interest: NormalizedOutdoorSceneInterest,
 ): AssetLookupRequestDto[] {
@@ -339,7 +340,7 @@ function createOutdoorCoverageRequestsForInterest(
 			requestRevision,
 			sceneLocation,
 			priority,
-			preparedByAssetId,
+			preparedAssets,
 			pendingAssetIds,
 			prioritizeOutdoorLandblockIds(
 				priority,
@@ -351,7 +352,7 @@ function createOutdoorCoverageRequestsForInterest(
 			requestRevision,
 			sceneLocation,
 			priority,
-			preparedByAssetId,
+			preparedAssets,
 			pendingAssetIds,
 			outdoorLandblockIds,
 		),
@@ -359,7 +360,7 @@ function createOutdoorCoverageRequestsForInterest(
 			requestRevision,
 			sceneLocation,
 			priority,
-			preparedByAssetId,
+			preparedAssets,
 			pendingAssetIds,
 			outdoorLandblockIds,
 		),
@@ -369,7 +370,7 @@ function createOutdoorCoverageRequestsForInterest(
 					requestRevision,
 					sceneLocation,
 					priority,
-					preparedByAssetId,
+					preparedAssets,
 					pendingAssetIds,
 					interest.envCellLandblockIds,
 				)),
@@ -380,7 +381,7 @@ function createLandblockOutdoorCoverageRequests(
 	requestRevision: number,
 	sceneLocation: SceneResourceLocation,
 	priority: AssetPriority,
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	pendingAssetIds: string[],
 	landblockIds: readonly number[],
 ): AssetLookupRequestDto[] {
@@ -389,7 +390,7 @@ function createLandblockOutdoorCoverageRequests(
 		requestRevision,
 		priority,
 		`${describeRequiredSceneLocationIdentity(sceneLocation)}-outdoor`,
-		preparedByAssetId,
+		preparedAssets,
 		pendingAssetIds,
 	);
 }
@@ -398,16 +399,16 @@ function createTerrainMaterialRequests(
 	requestRevision: number,
 	sceneLocation: SceneResourceLocation,
 	priority: AssetPriority,
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	pendingAssetIds: string[],
 	landblockIds: readonly number[],
 ): AssetLookupRequestDto[] {
 	return createUnpreparedRequests(
-		collectTerrainMaterialAssetIds(preparedByAssetId, landblockIds),
+		collectTerrainMaterialAssetIds(preparedAssets, landblockIds),
 		requestRevision,
 		priority,
 		`${describeRequiredSceneLocationIdentity(sceneLocation)}-terrain-material`,
-		preparedByAssetId,
+		preparedAssets,
 		pendingAssetIds,
 	);
 }
@@ -416,16 +417,16 @@ function createOutdoorRegionRenderProfileRequests(
 	requestRevision: number,
 	sceneLocation: SceneResourceLocation,
 	priority: AssetPriority,
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	pendingAssetIds: string[],
 	landblockIds: readonly number[],
 ): AssetLookupRequestDto[] {
 	return createUnpreparedRequests(
-		collectOutdoorRegionRenderProfileAssetIds(preparedByAssetId, landblockIds),
+		collectOutdoorRegionRenderProfileAssetIds(preparedAssets, landblockIds),
 		requestRevision,
 		priority,
 		`${describeRequiredSceneLocationIdentity(sceneLocation)}-region-render-profile`,
-		preparedByAssetId,
+		preparedAssets,
 		pendingAssetIds,
 	);
 }
@@ -434,7 +435,7 @@ function createLandblockTopologyCoverageRequests(
 	requestRevision: number,
 	sceneLocation: SceneResourceLocation,
 	priority: AssetPriority,
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	pendingAssetIds: string[],
 	landblockIds: readonly number[],
 ): AssetLookupRequestDto[] {
@@ -443,7 +444,7 @@ function createLandblockTopologyCoverageRequests(
 		requestRevision,
 		priority,
 		`${describeRequiredSceneLocationIdentity(sceneLocation)}-topology`,
-		preparedByAssetId,
+		preparedAssets,
 		pendingAssetIds,
 	);
 }
@@ -452,7 +453,7 @@ function createVisiblePreparedTextureRequests(
 	requestRevision: number,
 	sceneLocation: SceneResourceLocation,
 	priority: AssetPriority,
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	pendingAssetIds: string[],
 	options: OutdoorSceneRequestOptions,
 	interest: NormalizedOutdoorSceneInterest | null = null,
@@ -460,14 +461,14 @@ function createVisiblePreparedTextureRequests(
 	return createUnpreparedRequests(
 		collectVisiblePreparedTextureAssetIds({
 			sceneLocation,
-			preparedByAssetId,
+			preparedAssets,
 			options,
 			interest,
 		}),
 		requestRevision,
 		priority,
 		`${describeRequiredSceneLocationIdentity(sceneLocation)}-prepared-texture`,
-		preparedByAssetId,
+		preparedAssets,
 		pendingAssetIds,
 	);
 }
@@ -502,7 +503,7 @@ function createStaticRenderableAssetRequests(
 	requestRevision: number,
 	sceneLocation: SceneResourceLocation | null,
 	priority: AssetPriority,
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	pendingAssetIds: string[] = [],
 	options: OutdoorSceneRequestOptions = DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS,
 	interest: NormalizedOutdoorSceneInterest | null = null,
@@ -516,7 +517,7 @@ function createStaticRenderableAssetRequests(
 			requestRevision,
 			sceneLocation,
 			priority,
-			preparedByAssetId,
+			preparedAssets,
 			pendingAssetIds,
 		);
 	}
@@ -528,15 +529,15 @@ function createStaticRenderableAssetRequests(
 	const detailLandblockIds = new Set(outdoorInterest.detailLandblockIds);
 	const envCellLandblockIds = new Set(outdoorInterest.envCellLandblockIds);
 	const linkedInteriorCellIds = deriveTopologyEnvCellIdsForLandblocks(
-		preparedByAssetId,
+		preparedAssets,
 		envCellLandblockIds,
 	);
-	const linkedInteriorCoverage = deriveStructuredInteriorCoverage(
+	const linkedInteriorCoverage = deriveStructuredInteriorCoverageFromLookup(
 		{
 			kind: "landblock-closure",
 			seedEnvCellIds: [...linkedInteriorCellIds],
 		},
-		preparedByAssetId,
+		preparedAssets,
 	);
 	const pendingAssetIdSet = new Set(pendingAssetIds);
 	const envCellAssetRequests = createUnpreparedRequests(
@@ -544,39 +545,39 @@ function createStaticRenderableAssetRequests(
 		requestRevision,
 		priority,
 		`${describeRequiredSceneLocationIdentity(sceneLocation)}-env-cell`,
-		preparedByAssetId,
+		preparedAssets,
 		pendingAssetIds,
 	);
 	const envCellProfileRequests = createEnvCellRegionRenderProfileRequests(
 		requestRevision,
 		sceneLocation,
 		priority,
-		preparedByAssetId,
+		preparedAssets,
 		pendingAssetIds,
 		linkedInteriorCoverage.envCellIds,
 		"env-cell-region-render-profile",
 	);
 	const outdoorSourceAssetIds = collectSelectedOutdoorSourceAssetIds(
-		preparedByAssetId,
+		preparedAssets,
 		{
 			buildingLandblockIds,
 			detailLandblockIds,
 		},
 	);
 	const outdoorStaticDependencies = collectStaticRenderableDependencyAssetIds(
-		preparedByAssetId,
+		preparedAssets,
 		outdoorSourceAssetIds,
 	);
 	const envCellStaticSourceAssetIds = collectEnvCellStaticSourceAssetIds(
-		preparedByAssetId,
+		preparedAssets,
 		linkedInteriorCoverage.envCellIds.map(formatEnvCellAssetId),
 	);
 	const envCellStaticDependencies = collectStaticRenderableDependencyAssetIds(
-		preparedByAssetId,
+		preparedAssets,
 		envCellStaticSourceAssetIds,
 	);
 	const materialAssetIds = collectStaticRenderableMaterialAssetIds(
-		preparedByAssetId,
+		preparedAssets,
 		[
 			...outdoorStaticDependencies.materialInputAssetIds,
 			...envCellStaticDependencies.materialInputAssetIds,
@@ -595,7 +596,7 @@ function createStaticRenderableAssetRequests(
 		requestRevision,
 		priority,
 		`${describeRequiredSceneLocationIdentity(sceneLocation)}-static-material`,
-		preparedByAssetId,
+		preparedAssets,
 		pendingAssetIds,
 	);
 
@@ -606,7 +607,7 @@ function createStaticRenderableAssetRequests(
 			.filter(
 				(assetId) =>
 					isStaticRenderableOrSetupAppearanceAssetId(assetId) &&
-					!preparedByAssetId[assetId] &&
+					!preparedAssets.has(assetId) &&
 					!pendingAssetIdSet.has(assetId),
 			)
 			.map((assetId) => ({
@@ -621,11 +622,21 @@ function createStaticRenderableAssetRequests(
 }
 
 export function deriveTopologyEnvCellIdsForLandblocks(
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
+	activeLandblockIds: ReadonlySet<number>,
+): Set<number> {
+	return deriveTopologyEnvCellIdsForLandblocksFromAssets(
+		[...preparedAssets.values()],
+		activeLandblockIds,
+	);
+}
+
+export function deriveTopologyEnvCellIdsForLandblocksFromAssets(
+	preparedAssets: Iterable<PreparedAssetRecord>,
 	activeLandblockIds: ReadonlySet<number>,
 ): Set<number> {
 	const linkedEnvCellIds = new Set<number>();
-	for (const asset of Object.values(preparedByAssetId)) {
+	for (const asset of preparedAssets) {
 		if (asset.payload.kind === "landblock-topology") {
 			if (
 				!activeLandblockIds.has(
@@ -654,17 +665,17 @@ function createIndoorStaticRenderableAssetRequests(
 	requestRevision: number,
 	sceneLocation: SceneResourceLocation,
 	priority: AssetPriority,
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	pendingAssetIds: string[],
 ): AssetLookupRequestDto[] {
 	if (sceneLocation.kind !== "interior-cell") {
 		return [];
 	}
-	const activeEnvCellIds = deriveStructuredInteriorCoverage(
+	const activeEnvCellIds = deriveStructuredInteriorCoverageFromLookup(
 		deriveBrowserFocusedStructuredInteriorMembershipPolicy(
 			sceneLocation.envCellId,
 		),
-		preparedByAssetId,
+		preparedAssets,
 	).envCellIds;
 	const pendingAssetIdSet = new Set(pendingAssetIds);
 	const envCellAssetRequests = createUnpreparedRequests(
@@ -672,28 +683,28 @@ function createIndoorStaticRenderableAssetRequests(
 		requestRevision,
 		priority,
 		`${describeRequiredSceneLocationIdentity(sceneLocation)}-env-cell`,
-		preparedByAssetId,
+		preparedAssets,
 		pendingAssetIds,
 	);
 	const envCellProfileRequests = createEnvCellRegionRenderProfileRequests(
 		requestRevision,
 		sceneLocation,
 		priority,
-		preparedByAssetId,
+		preparedAssets,
 		pendingAssetIds,
 		activeEnvCellIds,
 		"indoor-region-render-profile",
 	);
 	const envCellStaticSourceAssetIds = collectEnvCellStaticSourceAssetIds(
-		preparedByAssetId,
+		preparedAssets,
 		activeEnvCellIds.map(formatEnvCellAssetId),
 	);
 	const staticDependencies = collectStaticRenderableDependencyAssetIds(
-		preparedByAssetId,
+		preparedAssets,
 		envCellStaticSourceAssetIds,
 	);
 	const materialAssetIds = collectStaticRenderableMaterialAssetIds(
-		preparedByAssetId,
+		preparedAssets,
 		staticDependencies.materialInputAssetIds,
 		new Set(activeEnvCellIds),
 	);
@@ -704,7 +715,7 @@ function createIndoorStaticRenderableAssetRequests(
 		requestRevision,
 		priority,
 		`${describeRequiredSceneLocationIdentity(sceneLocation)}-indoor-static-material`,
-		preparedByAssetId,
+		preparedAssets,
 		pendingAssetIds,
 	);
 
@@ -715,7 +726,7 @@ function createIndoorStaticRenderableAssetRequests(
 			.filter(
 				(assetId) =>
 					isStaticRenderableOrSetupAppearanceAssetId(assetId) &&
-					!preparedByAssetId[assetId] &&
+					!preparedAssets.has(assetId) &&
 					!pendingAssetIdSet.has(assetId),
 			)
 			.map((assetId) => ({
@@ -731,27 +742,27 @@ function createIndoorStaticRenderableAssetRequests(
 
 function collectIndoorVisibleMaterialAssetIds(
 	sceneLocation: SceneResourceLocation,
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 ): string[] {
 	if (sceneLocation.kind !== "interior-cell") {
 		return [];
 	}
-	const activeEnvCellIds = deriveStructuredInteriorCoverage(
+	const activeEnvCellIds = deriveStructuredInteriorCoverageFromLookup(
 		deriveBrowserFocusedStructuredInteriorMembershipPolicy(
 			sceneLocation.envCellId,
 		),
-		preparedByAssetId,
+		preparedAssets,
 	).envCellIds;
 	const envCellStaticSourceAssetIds = collectEnvCellStaticSourceAssetIds(
-		preparedByAssetId,
+		preparedAssets,
 		activeEnvCellIds.map(formatEnvCellAssetId),
 	);
 	const staticDependencies = collectStaticRenderableDependencyAssetIds(
-		preparedByAssetId,
+		preparedAssets,
 		envCellStaticSourceAssetIds,
 	);
 	return collectStaticRenderableMaterialAssetIds(
-		preparedByAssetId,
+		preparedAssets,
 		staticDependencies.materialInputAssetIds,
 		new Set(activeEnvCellIds),
 	);
@@ -759,7 +770,7 @@ function collectIndoorVisibleMaterialAssetIds(
 
 function collectOutdoorVisibleMaterialAssetIds(
 	sceneLocation: SceneResourceLocation,
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	options: OutdoorSceneRequestOptions,
 ): string[] {
 	const outdoorInterest = deriveOutdoorInterestForSceneLocation(
@@ -770,37 +781,37 @@ function collectOutdoorVisibleMaterialAssetIds(
 	const detailLandblockIds = new Set(outdoorInterest.detailLandblockIds);
 	const envCellLandblockIds = new Set(outdoorInterest.envCellLandblockIds);
 	const linkedInteriorCellIds = deriveTopologyEnvCellIdsForLandblocks(
-		preparedByAssetId,
+		preparedAssets,
 		envCellLandblockIds,
 	);
-	const linkedInteriorCoverage = deriveStructuredInteriorCoverage(
+	const linkedInteriorCoverage = deriveStructuredInteriorCoverageFromLookup(
 		{
 			kind: "landblock-closure",
 			seedEnvCellIds: [...linkedInteriorCellIds],
 		},
-		preparedByAssetId,
+		preparedAssets,
 	);
 	const outdoorSourceAssetIds = collectSelectedOutdoorSourceAssetIds(
-		preparedByAssetId,
+		preparedAssets,
 		{
 			buildingLandblockIds,
 			detailLandblockIds,
 		},
 	);
 	const outdoorStaticDependencies = collectStaticRenderableDependencyAssetIds(
-		preparedByAssetId,
+		preparedAssets,
 		outdoorSourceAssetIds,
 	);
 	const envCellStaticSourceAssetIds = collectEnvCellStaticSourceAssetIds(
-		preparedByAssetId,
+		preparedAssets,
 		linkedInteriorCoverage.envCellIds.map(formatEnvCellAssetId),
 	);
 	const envCellStaticDependencies = collectStaticRenderableDependencyAssetIds(
-		preparedByAssetId,
+		preparedAssets,
 		envCellStaticSourceAssetIds,
 	);
 	return collectStaticRenderableMaterialAssetIds(
-		preparedByAssetId,
+		preparedAssets,
 		[
 			...outdoorStaticDependencies.materialInputAssetIds,
 			...envCellStaticDependencies.materialInputAssetIds,
@@ -811,14 +822,14 @@ function collectOutdoorVisibleMaterialAssetIds(
 
 function collectVisiblePreparedTextureAssetIds(options: {
 	sceneLocation: SceneResourceLocation;
-	preparedByAssetId: Record<string, PreparedAssetRecord>;
+	preparedAssets: PreparedAssetResolver;
 	options: OutdoorSceneRequestOptions;
 	interest: NormalizedOutdoorSceneInterest | null;
 }): string[] {
 	const renderSurfaceAssetIds = collectVisibleRenderSurfaceAssetIds(options);
 	return uniqueSortedAssetIds(
 		renderSurfaceAssetIds.flatMap((assetId) => {
-			const asset = options.preparedByAssetId[assetId];
+			const asset = options.preparedAssets.get(assetId);
 			if (asset?.payload.kind !== "render-surface") {
 				return [];
 			}
@@ -841,33 +852,33 @@ function collectVisiblePreparedTextureAssetIds(options: {
 
 function collectVisibleRenderSurfaceAssetIds(options: {
 	sceneLocation: SceneResourceLocation;
-	preparedByAssetId: Record<string, PreparedAssetRecord>;
+	preparedAssets: PreparedAssetResolver;
 	options: OutdoorSceneRequestOptions;
 	interest: NormalizedOutdoorSceneInterest | null;
 }): string[] {
 	const materialAssetIds = options.sceneLocation.kind === "interior-cell"
 		? collectIndoorVisibleMaterialAssetIds(
 				options.sceneLocation,
-				options.preparedByAssetId,
+				options.preparedAssets,
 			)
 		: collectOutdoorVisibleMaterialAssetIds(
 				options.sceneLocation,
-				options.preparedByAssetId,
+				options.preparedAssets,
 				options.options,
 			);
 	const tableAssetIds = options.sceneLocation.kind === "interior-cell"
 		? collectIndoorVisibleRegionRenderProfileAssetIds(
 				options.sceneLocation,
-				options.preparedByAssetId,
+				options.preparedAssets,
 			)
 		: collectOutdoorVisibleRenderResourceTableAssetIds(
 				options.sceneLocation,
-				options.preparedByAssetId,
+				options.preparedAssets,
 				options.options,
 				options.interest,
 			);
 	return uniqueSortedAssetIds(
-		collectRenderSurfaceAssetIdsFromAssets(options.preparedByAssetId, [
+		collectRenderSurfaceAssetIdsFromAssets(options.preparedAssets, [
 			...materialAssetIds,
 			...tableAssetIds,
 		]),
@@ -876,26 +887,26 @@ function collectVisibleRenderSurfaceAssetIds(options: {
 
 function collectIndoorVisibleRegionRenderProfileAssetIds(
 	sceneLocation: SceneResourceLocation,
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 ): string[] {
 	if (sceneLocation.kind !== "interior-cell") {
 		return [];
 	}
-	const activeEnvCellIds = deriveStructuredInteriorCoverage(
+	const activeEnvCellIds = deriveStructuredInteriorCoverageFromLookup(
 		deriveBrowserFocusedStructuredInteriorMembershipPolicy(
 			sceneLocation.envCellId,
 		),
-		preparedByAssetId,
+		preparedAssets,
 	).envCellIds;
 	return collectEnvCellRegionRenderProfileAssetIds(
-		preparedByAssetId,
+		preparedAssets,
 		activeEnvCellIds,
 	);
 }
 
 function collectOutdoorVisibleRenderResourceTableAssetIds(
 	sceneLocation: SceneResourceLocation,
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	options: OutdoorSceneRequestOptions,
 	interest: NormalizedOutdoorSceneInterest | null,
 ): string[] {
@@ -908,26 +919,26 @@ function collectOutdoorVisibleRenderResourceTableAssetIds(
 	);
 	const envCellIds = [
 		...deriveTopologyEnvCellIdsForLandblocks(
-			preparedByAssetId,
+			preparedAssets,
 			new Set(outdoorInterest.envCellLandblockIds),
 		),
 	];
 	return uniqueSortedAssetIds([
-		...collectTerrainMaterialAssetIds(preparedByAssetId, outdoorLandblockIds),
+		...collectTerrainMaterialAssetIds(preparedAssets, outdoorLandblockIds),
 		...collectOutdoorRegionRenderProfileAssetIds(
-			preparedByAssetId,
+			preparedAssets,
 			outdoorLandblockIds,
 		),
-		...collectEnvCellRegionRenderProfileAssetIds(preparedByAssetId, envCellIds),
+		...collectEnvCellRegionRenderProfileAssetIds(preparedAssets, envCellIds),
 	]);
 }
 
 function collectRenderSurfaceAssetIdsFromAssets(
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	assetIds: readonly string[],
 ): string[] {
 	const directRenderSurfaceAssetIds = assetIds.flatMap((assetId) => {
-			const payload = preparedByAssetId[assetId]?.payload;
+			const payload = preparedAssets.get(assetId)?.payload;
 			if (
 				payload?.kind !== "material-recipe" &&
 				payload?.kind !== "terrain-material" &&
@@ -938,7 +949,7 @@ function collectRenderSurfaceAssetIdsFromAssets(
 			return payload.dependencies.renderSurfaceAssetIds;
 		});
 	const surfaceTextureAssetIds = assetIds.flatMap((assetId) => {
-		const payload = preparedByAssetId[assetId]?.payload;
+		const payload = preparedAssets.get(assetId)?.payload;
 		if (
 			payload?.kind !== "material-recipe" &&
 			payload?.kind !== "terrain-material" &&
@@ -950,7 +961,7 @@ function collectRenderSurfaceAssetIdsFromAssets(
 	});
 	const surfaceTextureRenderSurfaceAssetIds = surfaceTextureAssetIds.flatMap(
 		(assetId) => {
-			const payload = preparedByAssetId[assetId]?.payload;
+			const payload = preparedAssets.get(assetId)?.payload;
 			return payload?.kind === "surface-texture"
 				? payload.dependencies.renderSurfaceAssetIds
 				: [];
@@ -963,16 +974,16 @@ function collectRenderSurfaceAssetIdsFromAssets(
 }
 
 function collectStaticRenderableDependencyAssetIds(
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	sourceAssetIds: readonly string[],
 ): StaticRenderableDependencyAssetIds {
 	const setupModelFallbackPartGfxAssetIds =
-		collectSetupModelFallbackPartGfxAssetIds(preparedByAssetId, sourceAssetIds);
+		collectSetupModelFallbackPartGfxAssetIds(preparedAssets, sourceAssetIds);
 	const setupAppearanceAssetIds = uniqueSortedAssetIds([
 		...collectSetupAppearanceAssetIds(sourceAssetIds),
 	]);
 	const setupAppearancePartGfxAssetIds = collectSetupAppearancePartGfxAssetIds(
-		preparedByAssetId,
+		preparedAssets,
 		setupAppearanceAssetIds,
 	);
 	const geometryAssetIds = uniqueSortedAssetIds([
@@ -989,18 +1000,18 @@ function collectStaticRenderableDependencyAssetIds(
 }
 
 function collectStaticRenderableMaterialAssetIds(
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	assetIds: readonly string[],
 	envCellIds: ReadonlySet<number>,
 ): string[] {
 	return uniqueSortedAssetIds([
 		...collectPreparedDependencyAssetIds(
-			preparedByAssetId,
+			preparedAssets,
 			assetIds,
 			"materialAssetIds",
 		),
 		...collectEnvCellMaterialDependencyAssetIds(
-			preparedByAssetId,
+			preparedAssets,
 			[...envCellIds].map(formatEnvCellAssetId),
 		),
 	]);
@@ -1016,12 +1027,12 @@ function collectSetupAppearanceAssetIds(assetIds: readonly string[]): string[] {
 }
 
 function collectSetupAppearancePartGfxAssetIds(
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	setupAppearanceAssetIds: readonly string[],
 ): string[] {
 	return uniqueSortedAssetIds(
 		setupAppearanceAssetIds.flatMap((assetId) => {
-			const payload = preparedByAssetId[assetId]?.payload;
+			const payload = preparedAssets.get(assetId)?.payload;
 			return payload?.kind === "setup-appearance"
 				? payload.parts.map((part) => part.gfxObjAssetId)
 				: [];
@@ -1030,7 +1041,7 @@ function collectSetupAppearancePartGfxAssetIds(
 }
 
 function collectSetupModelFallbackPartGfxAssetIds(
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	sourceAssetIds: readonly string[],
 ): string[] {
 	return uniqueSortedAssetIds(
@@ -1043,13 +1054,13 @@ function collectSetupModelFallbackPartGfxAssetIds(
 			])[0];
 			if (
 				setupAppearanceAssetId &&
-				preparedByAssetId[setupAppearanceAssetId]?.payload.kind ===
+				preparedAssets.get(setupAppearanceAssetId)?.payload.kind ===
 					"setup-appearance"
 			) {
 				return [];
 			}
 			const dependencies = getPreparedAssetDependencies(
-				preparedByAssetId[assetId],
+				preparedAssets.get(assetId),
 			);
 			const dependencyAssetIds = dependencies?.gfxObjAssetIds;
 			return Array.isArray(dependencyAssetIds) ? dependencyAssetIds : [];
@@ -1058,14 +1069,14 @@ function collectSetupModelFallbackPartGfxAssetIds(
 }
 
 function collectSelectedOutdoorSourceAssetIds(
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	selection: {
 		buildingLandblockIds: ReadonlySet<number>;
 		detailLandblockIds: ReadonlySet<number>;
 	},
 ): string[] {
 	return uniqueSortedAssetIds(
-		Object.values(preparedByAssetId).flatMap((asset) => {
+		[...preparedAssets.values()].flatMap((asset) => {
 			if (asset.payload.kind !== "landblock-outdoor") {
 				return [];
 			}
@@ -1084,14 +1095,14 @@ function collectSelectedOutdoorSourceAssetIds(
 }
 
 function collectTerrainMaterialAssetIds(
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	landblockIds: readonly number[],
 ): string[] {
 	const activeLandblockIds = new Set(
 		landblockIds.map(normalizeOutdoorLandblockId),
 	);
 	return uniqueSortedAssetIds(
-		Object.values(preparedByAssetId).flatMap((asset) => {
+		[...preparedAssets.values()].flatMap((asset) => {
 			if (asset.payload.kind !== "landblock-outdoor") {
 				return [];
 			}
@@ -1108,14 +1119,14 @@ function collectTerrainMaterialAssetIds(
 }
 
 function collectOutdoorRegionRenderProfileAssetIds(
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	landblockIds: readonly number[],
 ): string[] {
 	const activeLandblockIds = new Set(
 		landblockIds.map(normalizeOutdoorLandblockId),
 	);
 	return uniqueSortedAssetIds(
-		Object.values(preparedByAssetId).flatMap((asset) => {
+		[...preparedAssets.values()].flatMap((asset) => {
 			if (asset.payload.kind !== "landblock-outdoor") {
 				return [];
 			}
@@ -1135,28 +1146,28 @@ function createEnvCellRegionRenderProfileRequests(
 	requestRevision: number,
 	sceneLocation: SceneResourceLocation,
 	priority: AssetPriority,
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	pendingAssetIds: string[],
 	envCellIds: readonly number[],
 	label: string,
 ): AssetLookupRequestDto[] {
 	return createUnpreparedRequests(
-		collectEnvCellRegionRenderProfileAssetIds(preparedByAssetId, envCellIds),
+		collectEnvCellRegionRenderProfileAssetIds(preparedAssets, envCellIds),
 		requestRevision,
 		priority,
 		`${describeRequiredSceneLocationIdentity(sceneLocation)}-${label}`,
-		preparedByAssetId,
+		preparedAssets,
 		pendingAssetIds,
 	);
 }
 
 function collectEnvCellRegionRenderProfileAssetIds(
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	envCellIds: readonly number[],
 ): string[] {
 	const activeEnvCellIds = new Set(envCellIds);
 	return uniqueSortedAssetIds(
-		Object.values(preparedByAssetId).flatMap((asset) => {
+		[...preparedAssets.values()].flatMap((asset) => {
 			if (asset.payload.kind !== "env-cell") {
 				return [];
 			}
@@ -1169,14 +1180,14 @@ function collectEnvCellRegionRenderProfileAssetIds(
 }
 
 function collectPreparedDependencyAssetIds(
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	assetIds: readonly string[],
 	dependencyKey: PreparedAssetDependencyKey,
 ): string[] {
 	return uniqueSortedAssetIds(
 		assetIds.flatMap((assetId) => {
 			const dependencies = getPreparedAssetDependencies(
-				preparedByAssetId[assetId],
+				preparedAssets.get(assetId),
 			);
 			if (!dependencies || !(dependencyKey in dependencies)) {
 				return [];
@@ -1188,12 +1199,12 @@ function collectPreparedDependencyAssetIds(
 }
 
 function collectEnvCellStaticSourceAssetIds(
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	assetIds: readonly string[],
 ): string[] {
 	return uniqueSortedAssetIds(
 		assetIds.flatMap((assetId) => {
-			const payload = preparedByAssetId[assetId]?.payload;
+			const payload = preparedAssets.get(assetId)?.payload;
 			return payload?.kind === "env-cell"
 				? collectEnvCellRenderableSourceAssetIds(payload)
 				: [];
@@ -1202,12 +1213,12 @@ function collectEnvCellStaticSourceAssetIds(
 }
 
 function collectEnvCellMaterialDependencyAssetIds(
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	assetIds: readonly string[],
 ): string[] {
 	return uniqueSortedAssetIds(
 		assetIds.flatMap((assetId) => {
-			const payload = preparedByAssetId[assetId]?.payload;
+			const payload = preparedAssets.get(assetId)?.payload;
 			return payload?.kind === "env-cell"
 				? collectEnvCellMaterialAssetIds(payload)
 				: [];
@@ -1216,7 +1227,7 @@ function collectEnvCellMaterialDependencyAssetIds(
 }
 
 function getPreparedAssetDependencies(
-	asset: PreparedAssetRecord | undefined,
+	asset: PreparedAssetRecord | null | undefined,
 ): PreparedAssetDependencyMap | null {
 	const payload = asset?.payload;
 	if (!payload || !("dependencies" in payload)) {
@@ -1312,14 +1323,14 @@ function createUnpreparedRequests(
 	requestRevision: number,
 	priority: AssetPriority,
 	requestScope: string,
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	preparedAssets: PreparedAssetResolver,
 	pendingAssetIds: string[],
 ): AssetLookupRequestDto[] {
 	const pendingAssetIdSet = new Set(pendingAssetIds);
 	return assetIds
 		.filter(
 			(assetId) =>
-				!preparedByAssetId[assetId] && !pendingAssetIdSet.has(assetId),
+				!preparedAssets.has(assetId) && !pendingAssetIdSet.has(assetId),
 		)
 		.map((assetId) => ({
 			requestId: `${priority}-${requestRevision}-${requestScope}-${assetId}`,

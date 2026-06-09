@@ -137,7 +137,6 @@ import { calculateStaticLandblockArtifactSceneBoundsFrame } from "./artifact-sce
 import { profileBrowserJsScope } from "../diagnostics/browser-js-profiler";
 import { recordPreparedAssetRendererSyncDiagnostics } from "../assets/prepared-asset-hot-path-diagnostics";
 import {
-	createAssetChannelStateSnapshotFromResolver,
 	type PreparedAssetChangeDescriptor,
 	type PreparedAssetChangeEvent,
 } from "../assets/prepared-asset-store";
@@ -168,13 +167,11 @@ import {
 	type RenderResourceTexturePagePreview,
 } from "./render-resource-inspection";
 import type { NormalizedViewportPoint } from "./model";
-import {
-	createInitialAssetChannelState,
-} from "../assets/types";
 import type {
 	RenderSpatialItemKind,
 	RenderSpatialPick,
 } from "./render-spatial-index";
+import { createRendererAssetReadModel } from "./renderer-asset-read-model";
 
 const WEBGL2_CANVAS_CLASS_NAME = "world-display__webgl2-canvas";
 const WEBGL2_ERROR_CLASS_NAME = "world-display__webgl2-error";
@@ -624,10 +621,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	}
 
 	const preparedAssetResolver = options.preparedAssetResolver;
-	let assetState = createAssetChannelStateSnapshotFromResolver(
-		createInitialAssetChannelState("webgl2-renderer"),
-		preparedAssetResolver,
-	);
+	const assetReadModel = createRendererAssetReadModel(preparedAssetResolver);
 	const emptyTerrainScene = createEmptyTerrainSceneModel();
 	let staticLandblockRenderProducts = options.staticLandblockRenderProducts;
 	const staticRenderableScene = createEmptyStaticRenderableSceneModel();
@@ -917,10 +911,6 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		pendingAssetChanges.assetsById.clear();
 		pendingAssetChanges.latestPreparedRevision =
 			preparedAssetResolver.getPreparedRevision();
-		assetState = createAssetChannelStateSnapshotFromResolver(
-			assetState,
-			preparedAssetResolver,
-		);
 		const dirtyProductKeys =
 			staticProductDependencies.findDependentProductKeys(changedAssets);
 		const shouldRefreshTerrainResources =
@@ -965,7 +955,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		updateWebgl2TerrainProductSamplerPolicy({
 			gl: resources.gl,
 			store: resources.worldStore,
-			assetState,
+			assetReadModel,
 			materialTextureCapabilities: resources.materialTextureCapabilities,
 			textureFilteringMode,
 			detailTexturesEnabled,
@@ -1040,7 +1030,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 					gl: currentResources.gl,
 					store: currentResources.worldStore,
 					result,
-					assetState,
+					assetReadModel,
 					materialTextureCapabilities:
 						currentResources.materialTextureCapabilities,
 					textureFilteringMode,
@@ -1052,7 +1042,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				gl: currentResources.gl,
 				store: currentResources.worldStore,
 				productKey,
-				assetState,
+				assetReadModel,
 				materialTextureCapabilities:
 					currentResources.materialTextureCapabilities,
 				textureFilteringMode,
@@ -1090,7 +1080,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			gl: currentResources.gl,
 			store: currentResources.worldStore,
 			productKey,
-			assetState,
+			assetReadModel,
 			materialTextureCapabilities: currentResources.materialTextureCapabilities,
 			textureFilteringMode,
 			detailTexturesEnabled,
@@ -1253,7 +1243,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 				"webgl2.frame.buildWorldRenderFrame",
 				() =>
 					buildWorldRenderFrame({
-						assetState,
+						assetReadModel,
 						candidates: frameCandidates,
 						cameraFrame,
 						renderChunkTransforms,
@@ -1473,7 +1463,7 @@ export function createWebgl2WorldDisplayRendererImplementation(
 		modelMatrix: RenderMat4;
 		positions: Float32Array;
 	} | null {
-		const asset = assetState.preparedByAssetId[part.gfxObjAssetId];
+		const asset = assetReadModel.get(part.gfxObjAssetId);
 		if (!isPreparedGfxObjAsset(asset) || !asset.payload.renderGeometry.bounds) {
 			return null;
 		}

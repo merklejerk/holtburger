@@ -1,5 +1,4 @@
 import type {
-	AssetChannelState,
 	PreparedAssetRecord,
 	PreparedMaterialRecipePayload,
 	PreparedRenderSurfacePayload,
@@ -15,6 +14,7 @@ import {
 } from "./material-appearance";
 import type { ResolvedMaterialSlot } from "./material-plan";
 import { resolveFirstMaterialRenderSurface } from "./material-texture-resolution";
+import type { RendererAssetReadModel } from "./renderer-asset-read-model";
 import {
 	createDerivedPaletteData,
 	createPaletteData,
@@ -200,15 +200,14 @@ export function selectIndexedPalette(options: {
 }
 
 export function resolveIndexedMaterialData(options: {
-	assetState: AssetChannelState;
+	assetReadModel: RendererAssetReadModel;
 	slot: ResolvedMaterialSlot;
 	appearance: MaterialAppearanceContext;
 	samplingPolicy: TextureSamplingPolicy;
 	cache?: IndexedMaterialDataCache;
 	reportDiagnostic?: IndexedMaterialDataDiagnosticHandler;
 }): ResolvedIndexedMaterialData | null {
-	const recipeAsset =
-		options.assetState.preparedByAssetId[options.slot.materialAssetId];
+	const recipeAsset = options.assetReadModel.get(options.slot.materialAssetId);
 	if (recipeAsset?.payload.kind !== "material-recipe") {
 		options.reportDiagnostic?.({
 			key: `indexed-material-missing-recipe:${options.slot.materialAssetId}`,
@@ -223,7 +222,7 @@ export function resolveIndexedMaterialData(options: {
 	const recipe = recipeAsset.payload;
 	const resolvedSurface = resolveFirstMaterialRenderSurface({
 		recipe,
-		assetState: options.assetState,
+		assetReadModel: options.assetReadModel,
 	});
 	if (!resolvedSurface) {
 		options.reportDiagnostic?.({
@@ -260,8 +259,9 @@ export function resolveIndexedMaterialData(options: {
 		return null;
 	}
 
-	const paletteAsset =
-		options.assetState.preparedByAssetId[paletteSelection.paletteAssetId];
+	const paletteAsset = options.assetReadModel.get(
+		paletteSelection.paletteAssetId,
+	);
 	if (paletteAsset?.payload.kind !== "palette") {
 		options.reportDiagnostic?.({
 			key: `indexed-material-palette-unprepared:${options.slot.materialAssetId}:${resolvedSurface.assetId}:${paletteSelection.paletteAssetId}`,
@@ -280,7 +280,7 @@ export function resolveIndexedMaterialData(options: {
 		basePaletteAssetId: paletteSelection.paletteAssetId,
 		basePaletteAsset: paletteAsset,
 		appearance: options.appearance,
-		preparedByAssetId: options.assetState.preparedByAssetId,
+		assetReadModel: options.assetReadModel,
 		reportDiagnostic: (diagnostic) => options.reportDiagnostic?.(diagnostic),
 	});
 	if (!palette) {
@@ -290,8 +290,8 @@ export function resolveIndexedMaterialData(options: {
 		materialAssetId: options.slot.materialAssetId,
 		materialAsset: recipeAsset,
 		renderSurfaceAssetId: resolvedSurface.assetId,
-		renderSurfaceAsset:
-			options.assetState.preparedByAssetId[resolvedSurface.assetId],
+		renderSurfaceAsset: options.assetReadModel.get(resolvedSurface.assetId) ??
+			undefined,
 		palette,
 		paletteAsset,
 		appearance: options.appearance,
@@ -438,7 +438,7 @@ function resolvePaletteData(options: {
 	basePaletteAssetId: string;
 	basePaletteAsset: PreparedAssetRecord;
 	appearance: MaterialAppearanceContext;
-	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>;
+	assetReadModel: RendererAssetReadModel;
 	reportDiagnostic: PaletteDataDiagnosticHandler;
 }): PaletteData | DerivedPaletteData | null {
 	if (options.basePaletteAsset.payload.kind !== "palette") {
@@ -456,7 +456,7 @@ function resolvePaletteData(options: {
 		basePaletteAssetId: options.basePaletteAssetId,
 		basePalette: options.basePaletteAsset.payload,
 		paletteView: options.appearance.paletteView,
-		preparedByAssetId: options.preparedByAssetId,
+		assetLookup: options.assetReadModel,
 		reportDiagnostic: options.reportDiagnostic,
 	});
 }

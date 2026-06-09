@@ -12,6 +12,7 @@ import {
 	AssetGraphScheduler,
 	type AssetGraphPreparationResult,
 } from "./asset-graph-scheduler";
+import type { PreparedAssetResolver } from "./prepared-asset-store";
 import { classifyAssetRequestProfileKind } from "./asset-hydration-policy";
 import type { PreparedAssetRecord } from "./types";
 import type {
@@ -171,11 +172,11 @@ export class AssetChannelController {
 
 	async prepareAssetGraph(
 		rootRequest: AssetLookupRequestDto,
-		preparedByAssetId: Record<string, PreparedAssetRecord> = {},
+		preparedAssetResolver?: PreparedAssetResolver,
 	): Promise<AssetGraphPreparationResult> {
 		return new AssetGraphScheduler(this).prepareAssetGraph(
 			rootRequest,
-			preparedByAssetId,
+			preparedAssetResolver,
 		);
 	}
 

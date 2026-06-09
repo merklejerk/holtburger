@@ -1,12 +1,13 @@
 <script lang="ts">
 	import { onMount } from "svelte";
 	import { get } from "svelte/store";
+	import {
+		describeBrowserDestinationIdentity,
+		type BrowserModeState,
+	} from "./app/browser-mode";
 	import { frontendState } from "./app/frontend-state";
 	import { AssetChannelController } from "./lib/assets/asset-channel";
-	import {
-		createPreparedAssetLegacySnapshotFromResolver,
-		PreparedAssetStore,
-	} from "./lib/assets/prepared-asset-store";
+	import { PreparedAssetStore } from "./lib/assets/prepared-asset-store";
 	import { SceneAssetStreamingController } from "./lib/assets/scene-asset-streaming-controller";
 	import "./lib/diagnostics/browser-js-profiler";
 	import { readDebugConfig } from "./lib/host/tauri";
@@ -27,14 +28,7 @@
 		const assetChannel = new AssetChannelController();
 		const sceneStreamer = new SceneAssetStreamingController({
 			assetChannel,
-			getPreparedByAssetId: () =>
-				createPreparedAssetLegacySnapshotFromResolver(
-					preparedAssetStore.resolver,
-				).preparedByAssetId,
-			getCacheMetadataByAssetId: () =>
-				createPreparedAssetLegacySnapshotFromResolver(
-					preparedAssetStore.resolver,
-				).cacheMetadataByAssetId,
+			preparedAssetResolver: preparedAssetStore.resolver,
 			markAssetsPending: (requests) =>
 				frontendState.markAssetsPending(requests),
 			applyPreparedAssets: (assets) => {
@@ -50,8 +44,14 @@
 		});
 		currentSceneStreamer = sceneStreamer;
 
+		let lastSceneInterestKey: string | null = null;
 		const unsubscribeFrontendState = frontendState.subscribe((state) => {
 			latestFrontendState = state;
+			const sceneInterestKey = createBrowserSceneInterestKey(state.browserMode);
+			if (sceneInterestKey === lastSceneInterestKey) {
+				return;
+			}
+			lastSceneInterestKey = sceneInterestKey;
 			syncSceneStreamer(sceneStreamer);
 		});
 
@@ -84,11 +84,19 @@
 			buildingLodRadius: latestFrontendState.browserMode.buildingLodRadius,
 			detailLodRadius: latestFrontendState.browserMode.detailLodRadius,
 			envCellLodRadius: latestFrontendState.browserMode.envCellLodRadius,
-			preparedByAssetId:
-				createPreparedAssetLegacySnapshotFromResolver(
-					preparedAssetStore.resolver,
-				).preparedByAssetId,
 		});
+	}
+
+	function createBrowserSceneInterestKey(browserMode: BrowserModeState): string {
+		const destinationIdentity =
+			describeBrowserDestinationIdentity(browserMode.destination) ?? "none";
+		return [
+			destinationIdentity,
+			`terrain-${browserMode.terrainLodRadius}`,
+			`buildings-${browserMode.buildingLodRadius}`,
+			`detail-${browserMode.detailLodRadius}`,
+			`env-cells-${browserMode.envCellLodRadius}`,
+		].join(":");
 	}
 
 	function debugLog(label: string, detail: unknown): void {

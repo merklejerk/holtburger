@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseBrowserLocationInput } from "../../app/browser-mode";
 import type { AssetLookupRequestDto } from "../host/contracts";
-import type { PreparedAssetCacheMetadata, PreparedAssetRecord } from "./types";
+import { PreparedAssetStore } from "./prepared-asset-store";
 import { SceneAssetStreamingController } from "./scene-asset-streaming-controller";
+import type { PreparedAssetRecord } from "./types";
 
 describe("scene asset streaming controller", () => {
 	afterEach(() => {
@@ -13,9 +14,7 @@ describe("scene asset streaming controller", () => {
 		const destination = parseBrowserLocationInput("016c0155");
 		expect(destination).not.toBeNull();
 
-		const preparedByAssetId: Record<string, PreparedAssetRecord> = {};
-		const cacheMetadataByAssetId: Record<string, PreparedAssetCacheMetadata> =
-			{};
+		const preparedAssetStore = new PreparedAssetStore();
 		const requestedAssetIds: string[] = [];
 		const controller = new SceneAssetStreamingController({
 			assetChannel: {
@@ -43,7 +42,7 @@ describe("scene asset streaming controller", () => {
 						rootAsset,
 						preparedAssets: [rootAsset],
 						preparedByAssetId: {
-							...preparedByAssetId,
+							...Object.fromEntries(preparedAssetStore.resolver.entries()),
 							[rootAsset.request.assetId]: rootAsset,
 						},
 						dependencyStatus: {
@@ -56,16 +55,12 @@ describe("scene asset streaming controller", () => {
 					};
 				},
 			},
-			getPreparedByAssetId: () => preparedByAssetId,
-			getCacheMetadataByAssetId: () => cacheMetadataByAssetId,
+			preparedAssetResolver: preparedAssetStore.resolver,
 			markAssetsPending: (requests) => {
 				requestedAssetIds.push(...requests.map((request) => request.assetId));
 			},
 			applyPreparedAssets: (assets) => {
-				for (const asset of assets) {
-					preparedByAssetId[asset.request.assetId] = asset;
-				}
-				syncLatestInput();
+				preparedAssetStore.applyPreparedAssets(assets);
 			},
 			applyAssetCachePruneBatch: () => {},
 			applyAssetError: (request, message) => {
@@ -82,12 +77,13 @@ describe("scene asset streaming controller", () => {
 				buildingLodRadius: 1,
 				detailLodRadius: 1,
 				envCellLodRadius: 1,
-				preparedByAssetId: { ...preparedByAssetId },
 			});
 		};
 
 		syncLatestInput();
-		await waitFor(() => preparedByAssetId["material/0800006c"] !== undefined);
+		await waitFor(() =>
+			preparedAssetStore.resolver.has("material/0800006c"),
+		);
 		controller.dispose();
 
 		expect(requestedAssetIds).toContain("landblock/016cffff/topology");
@@ -98,16 +94,15 @@ describe("scene asset streaming controller", () => {
 
 	it("runs warm cache pruning on an independent bounded timer", async () => {
 		vi.useFakeTimers();
-		const preparedByAssetId: Record<string, PreparedAssetRecord> = {
-			"gfx-obj/expired-a": createPreparedGfxObj("gfx-obj/expired-a", []),
-			"gfx-obj/expired-b": createPreparedGfxObj("gfx-obj/expired-b", []),
-			"gfx-obj/expired-c": createPreparedGfxObj("gfx-obj/expired-c", []),
-		};
-		const cacheMetadataByAssetId: Record<string, PreparedAssetCacheMetadata> = {
-			"gfx-obj/expired-a": { lastPreparedAtMs: 0, lastRetainedAtMs: 0 },
-			"gfx-obj/expired-b": { lastPreparedAtMs: 0, lastRetainedAtMs: 0 },
-			"gfx-obj/expired-c": { lastPreparedAtMs: 0, lastRetainedAtMs: 0 },
-		};
+		const preparedAssetStore = new PreparedAssetStore();
+		preparedAssetStore.applyPreparedAssets(
+			[
+				createPreparedGfxObj("gfx-obj/expired-a", []),
+				createPreparedGfxObj("gfx-obj/expired-b", []),
+				createPreparedGfxObj("gfx-obj/expired-c", []),
+			],
+			0,
+		);
 		const prunePlans: string[][] = [];
 		const controller = new SceneAssetStreamingController({
 			assetChannel: {
@@ -118,21 +113,12 @@ describe("scene asset streaming controller", () => {
 					throw new Error(`Unexpected graph request ${rootRequest.assetId}.`);
 				},
 			},
-			getPreparedByAssetId: () => preparedByAssetId,
-			getCacheMetadataByAssetId: () => cacheMetadataByAssetId,
+			preparedAssetResolver: preparedAssetStore.resolver,
 			markAssetsPending: () => {},
 			applyPreparedAssets: () => {},
 			applyAssetCachePruneBatch: (prunePlan) => {
 				prunePlans.push(prunePlan.evictedAssetIds);
-				for (const assetId of prunePlan.evictedAssetIds) {
-					delete preparedByAssetId[assetId];
-					delete cacheMetadataByAssetId[assetId];
-				}
-				for (const [assetId, metadata] of Object.entries(
-					prunePlan.retainedMetadataByAssetId,
-				)) {
-					cacheMetadataByAssetId[assetId] = metadata;
-				}
+				preparedAssetStore.applyPruneBatch(prunePlan);
 			},
 			applyAssetError: (request, message) => {
 				throw new Error(`${request.assetId}: ${message}`);
@@ -151,7 +137,6 @@ describe("scene asset streaming controller", () => {
 			buildingLodRadius: 0,
 			detailLodRadius: 0,
 			envCellLodRadius: 0,
-			preparedByAssetId: { ...preparedByAssetId },
 		});
 		await Promise.resolve();
 
@@ -160,13 +145,11 @@ describe("scene asset streaming controller", () => {
 		expect(prunePlans).toEqual([
 			["gfx-obj/expired-a", "gfx-obj/expired-b"],
 		]);
-		expect(Object.keys(preparedByAssetId).sort()).toEqual([
-			"gfx-obj/expired-c",
-		]);
+		expect(preparedAssetStore.resolver.has("gfx-obj/expired-c")).toBe(true);
+		expect(preparedAssetStore.resolver.getPreparedCount()).toBe(1);
 
 		controller.dispose();
 	});
-
 });
 
 function createPreparedTopology(

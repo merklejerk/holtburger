@@ -1,4 +1,8 @@
 import { countPreparedAssetsByKind } from "./asset-cache-diagnostics";
+import type {
+	PreparedAssetResolver,
+	PreparedAssetScanEntry,
+} from "./prepared-asset-store";
 import {
 	getPreparedAssetDependencies,
 	type PreparedAssetCacheMetadata,
@@ -40,6 +44,18 @@ export interface PreparedAssetCachePruneBatchInput {
 	maxEvictedAssetCount: number;
 }
 
+export interface PreparedAssetCachePruneResolverBatchInput {
+	preparedAssets: PreparedAssetResolver;
+	candidateEntries: readonly PreparedAssetScanEntry[];
+	nextCandidateCursorAssetId: string | null;
+	activeCoverageAssetIds: readonly string[];
+	inFlightAssetIds: readonly string[];
+	nowMs: number;
+	warmRetainMs: number;
+	maxEvaluatedAssetCount: number;
+	maxEvictedAssetCount: number;
+}
+
 export interface PreparedAssetCachePruneBatchPlan {
 	retainedAssetIds: string[];
 	evictedAssetIds: string[];
@@ -47,6 +63,12 @@ export interface PreparedAssetCachePruneBatchPlan {
 	nextCursorAssetId: string | null;
 	evaluatedAssetCount: number;
 	nextWarmPruneAtMs: number | null;
+}
+
+interface HardRetainedAssetLookupInput {
+	activeCoverageAssetIds: readonly string[];
+	inFlightAssetIds: readonly string[];
+	getPreparedAsset(assetId: string): PreparedAssetRecord | null;
 }
 
 export function planPreparedAssetCachePrune(
@@ -119,6 +141,81 @@ export function planPreparedAssetCachePrune(
 				filterPreparedAssets(input.preparedByAssetId, new Set(evictedAssetIds)),
 			),
 		},
+		nextWarmPruneAtMs,
+	};
+}
+
+export function planPreparedAssetCachePruneBatchFromResolver(
+	input: PreparedAssetCachePruneResolverBatchInput,
+): PreparedAssetCachePruneBatchPlan {
+	const hardRetainedAssetIds = deriveHardRetainedAssetIdsFromLookup({
+		activeCoverageAssetIds: input.activeCoverageAssetIds,
+		inFlightAssetIds: input.inFlightAssetIds,
+		getPreparedAsset: (assetId) => input.preparedAssets.get(assetId),
+	});
+	const hardRetainedAssetIdSet = new Set(hardRetainedAssetIds);
+	const retainedAssetIds: string[] = [];
+	const evictedAssetIds: string[] = [];
+	const retainedMetadataByAssetId: Record<string, PreparedAssetCacheMetadata> =
+		{};
+	let evaluatedAssetCount = 0;
+	let nextWarmPruneAtMs: number | null = null;
+	let nextCursorAssetId = input.nextCandidateCursorAssetId;
+	const maxEvaluatedAssetCount = Math.max(
+		1,
+		Math.trunc(input.maxEvaluatedAssetCount),
+	);
+	const maxEvictedAssetCount = Math.max(
+		1,
+		Math.trunc(input.maxEvictedAssetCount),
+	);
+
+	for (const [index, candidate] of input.candidateEntries.entries()) {
+		if (evaluatedAssetCount >= maxEvaluatedAssetCount) {
+			nextCursorAssetId = candidate.assetId;
+			break;
+		}
+
+		evaluatedAssetCount += 1;
+		const { assetId, cacheMetadata } = candidate;
+		if (hardRetainedAssetIdSet.has(assetId)) {
+			retainedAssetIds.push(assetId);
+			retainedMetadataByAssetId[assetId] = {
+				lastPreparedAtMs: cacheMetadata?.lastPreparedAtMs ?? input.nowMs,
+				lastRetainedAtMs: input.nowMs,
+			};
+			continue;
+		}
+
+		if (
+			cacheMetadata &&
+			input.nowMs - cacheMetadata.lastRetainedAtMs <= input.warmRetainMs
+		) {
+			retainedAssetIds.push(assetId);
+			retainedMetadataByAssetId[assetId] = cacheMetadata;
+			const expiresAtMs = cacheMetadata.lastRetainedAtMs + input.warmRetainMs;
+			nextWarmPruneAtMs =
+				nextWarmPruneAtMs === null
+					? expiresAtMs
+					: Math.min(nextWarmPruneAtMs, expiresAtMs);
+			continue;
+		}
+
+		evictedAssetIds.push(assetId);
+		if (evictedAssetIds.length >= maxEvictedAssetCount) {
+			nextCursorAssetId =
+				input.candidateEntries[index + 1]?.assetId ??
+				input.nextCandidateCursorAssetId;
+			break;
+		}
+	}
+
+	return {
+		retainedAssetIds,
+		evictedAssetIds,
+		retainedMetadataByAssetId,
+		nextCursorAssetId,
+		evaluatedAssetCount,
 		nextWarmPruneAtMs,
 	};
 }
@@ -208,6 +305,16 @@ export function planPreparedAssetCachePruneBatch(
 function deriveHardRetainedAssetIds(
 	input: PreparedAssetCachePolicyInput,
 ): string[] {
+	return deriveHardRetainedAssetIdsFromLookup({
+		activeCoverageAssetIds: input.activeCoverageAssetIds,
+		inFlightAssetIds: input.inFlightAssetIds,
+		getPreparedAsset: (assetId) => input.preparedByAssetId[assetId] ?? null,
+	});
+}
+
+function deriveHardRetainedAssetIdsFromLookup(
+	input: HardRetainedAssetLookupInput,
+): string[] {
 	const retainedAssetIds = new Set<string>([
 		...input.activeCoverageAssetIds,
 		...input.inFlightAssetIds,
@@ -220,7 +327,7 @@ function deriveHardRetainedAssetIds(
 			continue;
 		}
 
-		const asset = input.preparedByAssetId[assetId];
+		const asset = input.getPreparedAsset(assetId);
 		if (!asset) {
 			continue;
 		}

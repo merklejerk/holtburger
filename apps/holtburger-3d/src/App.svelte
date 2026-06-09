@@ -8,8 +8,13 @@
 	import { PreparedAssetStore } from "./lib/assets/prepared-asset-store";
 	import { SceneAssetStreamingController } from "./lib/assets/scene-asset-streaming-controller";
 	import { describeSceneResourceInterestKey } from "./lib/scene-runtime/scene-resource-interest";
+	import {
+		createSceneResourceRuntime,
+		type SceneResourceRuntime,
+	} from "./lib/scene-runtime/scene-resource-runtime";
 	import "./lib/diagnostics/browser-js-profiler";
 	import { readDebugConfig } from "./lib/host/tauri";
+	import { StaticLandblockRenderArtifactCoordinator } from "./lib/world-display/static-landblock-render-artifact-coordinator";
 	import BrowserWorldDisplay from "./pages/BrowserWorldDisplay.svelte";
 
 	const tauriLaunchCommand = "npm run tauri:dev";
@@ -18,12 +23,15 @@
 	const isBrowserRoute = currentRoute === "/" || currentRoute === "/browser";
 	let startupError = $state<string | null>(null);
 	let verboseDiagnostics = false;
-	let currentSceneStreamer: SceneAssetStreamingController | null = null;
+	let sceneResourceRuntime = $state<SceneResourceRuntime | null>(null);
 	const preparedAssetStore = new PreparedAssetStore();
 	let latestFrontendState = $state(get(frontendState));
 
 	onMount(() => {
-		let dispose = () => {};
+		if (!isBrowserRoute) {
+			return;
+		}
+
 		const assetChannel = new AssetChannelController();
 		const sceneStreamer = new SceneAssetStreamingController({
 			assetChannel,
@@ -41,7 +49,22 @@
 				frontendState.applyAssetError(request, message),
 			debugLog,
 		});
-		currentSceneStreamer = sceneStreamer;
+		const landblockProductRuntime =
+			new StaticLandblockRenderArtifactCoordinator({
+				onError: (error, desired) => {
+					console.error("[holtburger-3d][static-landblock-render-worker]", {
+						landblockId: desired.landblockId,
+						product: desired.product,
+						requestId: desired.requestId,
+						message: error.message,
+					});
+				},
+			});
+		const runtime = createSceneResourceRuntime({
+			assets: sceneStreamer,
+			landblockProducts: landblockProductRuntime,
+		});
+		sceneResourceRuntime = runtime;
 
 		let lastSceneInterestKey: string | null = null;
 		const unsubscribeFrontendState = frontendState.subscribe((state) => {
@@ -51,7 +74,7 @@
 				return;
 			}
 			lastSceneInterestKey = sceneInterestKey;
-			syncSceneStreamer(sceneStreamer);
+			syncSceneResourceRuntime(runtime);
 		});
 
 		void (async () => {
@@ -67,17 +90,16 @@
 
 		return () => {
 			unsubscribeFrontendState();
-			dispose();
-			sceneStreamer.dispose();
-			currentSceneStreamer = null;
+			runtime.dispose();
+			sceneResourceRuntime = null;
 			assetChannel.dispose();
 		};
 	});
 
-	function syncSceneStreamer(
-		sceneStreamer: SceneAssetStreamingController,
+	function syncSceneResourceRuntime(
+		runtime: SceneResourceRuntime,
 	): void {
-		sceneStreamer.syncSceneInterest(
+		runtime.syncSceneInterest(
 			createSceneResourceInterestFromBrowserMode(
 				latestFrontendState.browserMode,
 			),
@@ -124,7 +146,15 @@
 			</p>
 			<pre>{tauriLaunchCommand}</pre>
 		</section>
+	{:else if !sceneResourceRuntime}
+		<section class="viewer-unavailable">
+			<p class="kicker">Scene Runtime</p>
+			<h1>Preparing scene resources.</h1>
+		</section>
 	{:else}
-		<BrowserWorldDisplay preparedAssetResolver={preparedAssetStore.resolver} />
+		<BrowserWorldDisplay
+			preparedAssetResolver={preparedAssetStore.resolver}
+			staticLandblockProductSource={sceneResourceRuntime.landblockProducts.productSource}
+		/>
 	{/if}
 </main>
